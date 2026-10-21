@@ -138,7 +138,7 @@ void Bf3LevelSession::shutdown() {
 	if (WorkerThreadPool::get_singleton() != nullptr) {
 		upload_.wait_tasks();
 	}
-	m2a_shutdown();
+	game_shutdown();
 	if (client_ != nullptr) {
 		client_->stop();
 	}
@@ -202,7 +202,7 @@ void Bf3LevelSession::parse_args() {
 	nav_overlay_ = bots_ > 0 && has_user_arg("nav-overlay");
 	const std::string shot_delay = user_arg_value("shot-delay");
 	shot_delay_ = shot_delay.empty() ? 0.0 : std::clamp(std::atof(shot_delay.c_str()), 0.0, 600.0);
-	m2a_parse_args();
+	game_parse_args();
 }
 
 void Bf3LevelSession::_ready() {
@@ -227,10 +227,10 @@ void Bf3LevelSession::_ready() {
 		install_before_ = install_.snapshot();
 	}
 	guard_ = install_.write_guard();
-	UtilityFunctions::print(to_godot("[m1] engine " + engine_summary()));
-	UtilityFunctions::print(to_godot("[m1] install " + install_.describe()));
+	UtilityFunctions::print(to_godot("[level] engine " + engine_summary()));
+	UtilityFunctions::print(to_godot("[level] install " + install_.describe()));
 	const std::u8string root8 = cache_root_.u8string();
-	UtilityFunctions::print(to_godot(std::string("[m1] ") + level_ + " " + mode_ + (scene_ ? ", scene on" : ", scene off (headless skip, docs 11.1)") +
+	UtilityFunctions::print(to_godot(std::string("[level] ") + level_ + " " + mode_ + (scene_ ? ", scene on" : ", scene off (headless skip, docs 11.1)") +
 			", netsim " + netsim_ + ", walkers " + std::to_string(walkers_) + ", cache " + (no_cache_ ? std::string("off") : std::string(root8.begin(), root8.end()))));
 
 	motor_tuning_source_ = "res://config/motor_tuning.cfg";
@@ -239,9 +239,9 @@ void Bf3LevelSession::_ready() {
 	} else {
 		motor_tuning_source_ = "(missing: built-in defaults)";
 	}
-	UtilityFunctions::print(to_godot("[m1] motor tuning " + motor_tuning_source_));
+	UtilityFunctions::print(to_godot("[level] motor tuning " + motor_tuning_source_));
 	if (bots_ > 0) {
-		UtilityFunctions::print(to_godot("[s1] bots " + std::to_string(bots_) + (nav_overlay_ ? ", nav overlay on (F7)" : "")));
+		UtilityFunctions::print(to_godot("[bots] bots " + std::to_string(bots_) + (nav_overlay_ ? ", nav overlay on (F7)" : "")));
 	}
 
 	mapper_.install_actions();
@@ -265,12 +265,12 @@ void Bf3LevelSession::_ready() {
 		std::vector<ShotRunner::SpawnShot> spawn_shots;
 		std::string error;
 		if (!ShotRunner::parse(user_arg_value("shots"), user_arg_value("shot-spawns"), free_shots, spawn_shots, error)) {
-			UtilityFunctions::push_error(to_godot("[m1] " + error));
+			UtilityFunctions::push_error(to_godot("[level] " + error));
 			failed_ = true;
 		}
 		std::vector<ShotRunner::TeleportShot> teleport_shots;
 		if (!ShotRunner::parse_teleports(user_arg_value("shot-teleports"), teleport_shots, error)) {
-			UtilityFunctions::push_error(to_godot("[m1] " + error));
+			UtilityFunctions::push_error(to_godot("[level] " + error));
 			failed_ = true;
 		}
 		shots_ = std::make_unique<ShotRunner>(*this, std::move(free_shots), std::move(spawn_shots), user_arg_value("shot-dir"));
@@ -391,16 +391,16 @@ void Bf3LevelSession::run_loader() {
 		shared_options.tuning = *tuning;
 	}
 
-	std::optional<lvl::LevelCombatTiles> s1_combat;
+	std::optional<lvl::LevelCombatTiles> combat_tiles;
 	if (bots_ > 0) {
 		bf3::core::Result<lvl::LevelCombatTiles> combat = lvl::level_combat_tiles(*install, level_, sim::NavParams().region_margin);
 		if (!combat) {
 			fail("combat areas: " + combat.error().message);
 			return;
 		}
-		s1_combat = std::move(*combat);
+		combat_tiles = std::move(*combat);
 	}
-	m2a_load_options(shared_options);
+	game_load_options(shared_options);
 	bf3::core::Result<std::shared_ptr<const host::SharedLevel>> shared = host::load_shared_level(*db, shared_options, &progress_);
 	if (!shared) {
 		fail(shared.error().message);
@@ -420,7 +420,7 @@ void Bf3LevelSession::run_loader() {
 		host::BotLoadOptions bot_options;
 		bot_options.cache = cache.get();
 		bot_options.threads = scene_ ? std::min(8u, half) : 0;
-		bot_options.combat = &*s1_combat;
+		bot_options.combat = &*combat_tiles;
 		bot_options.seed = seed_;
 		bot_options.synthetic_spawns = bots_;
 		const uint64_t t0 = now_us();
@@ -432,7 +432,7 @@ void Bf3LevelSession::run_loader() {
 		bot_level_ = *bots;
 		const sim::NavStats &ns = bot_level_->nav->stats();
 		char line[512];
-		std::snprintf(line, sizeof(line), "[s1] bot level %.2f s: nav %zu polys (%s), main component %u, %zu goals, spawns %u of %u in main%s",
+		std::snprintf(line, sizeof(line), "[bots] bot level %.2f s: nav %zu polys (%s), main component %u, %zu goals, spawns %u of %u in main%s",
 				double(now_us() - t0) / 1e6, ns.polys, ns.world_hit ? "cache hit" : "baked", bot_level_->main_component, bot_level_->objectives.size(),
 				bot_level_->spawns.in_main, bot_level_->spawns.level_points, bot_level_->spawns.synthetic > 0 ? " (synthetic spawns)" : "");
 		bots_line_ = line;
@@ -442,8 +442,8 @@ void Bf3LevelSession::run_loader() {
 		}
 	}
 
-	if (std::string m2a_error; !m2a_load_assets(*db, cache.get(), scene_ ? std::min(8u, half) : 0u, &m2a_error)) {
-		fail(m2a_error);
+	if (std::string game_error; !game_load_assets(*db, cache.get(), scene_ ? std::min(8u, half) : 0u, &game_error)) {
+		fail(game_error);
 		return;
 	}
 
@@ -482,7 +482,7 @@ host::ClientSessionConfig Bf3LevelSession::client_config(const std::string &p_ne
 	}
 	cc.netsim.seed = p_seed * 7919u + 1u;
 	cc.request_dev_commands = true;
-	m2a_client_config(cc);
+	game_client_config(cc);
 	cc.debug_hash_compare = m1_check_;
 	return cc;
 }
@@ -508,7 +508,7 @@ bool Bf3LevelSession::start_session(std::string *r_error) {
 		game->bots = fill;
 		game->max_slots = uint32_t(bf3::net::kMaxSlots);
 	}
-	m2a_server_config(*game);
+	game_server_config(*game);
 	host::ServerConfig sc;
 	sc.tick_hz = int(sim::kSimHz);
 	sc.game = game;
@@ -605,27 +605,27 @@ void Bf3LevelSession::on_plan_ready() {
 	upload_.begin(plan, get_world_3d()->get_scenario(), &progress_, options);
 	if (plan->look == render::SceneLook::L1) {
 		look_.build(this, plan);
-		UtilityFunctions::print(to_godot("[m1] " + look_.describe()));
+		UtilityFunctions::print(to_godot("[level] " + look_.describe()));
 	} else {
 		build_environment(plan->environment);
 	}
 	char line[512];
 	std::snprintf(line, sizeof(line),
-			"[m1] scene plan: %zu requests, %zu meshes, %zu instances, %zu materials, %zu textures, %zu terrains, %zu failures (census %.3f s, plan %.3f s); "
+			"[level] scene plan: %zu requests, %zu meshes, %zu instances, %zu materials, %zu textures, %zu terrains, %zu failures (census %.3f s, plan %.3f s); "
 			"environment from data %d",
 			plan->requests.size(), plan->meshes.size(), plan->instances.size(), plan->materials.size(), plan->textures.size(), plan->terrains.size(),
 			plan->failures.size(), timings_.seconds_census, timings_.seconds_plan, int(plan->environment.from_data));
 	UtilityFunctions::print(line);
 	const render::SceneEnvironment &env = plan->environment;
 	std::snprintf(line, sizeof(line),
-			"[m1] environment: sun dir (%.3f %.3f %.3f) colour (%.3f %.3f %.3f) energy %.2f; sky (%.3f %.3f %.3f) ground (%.3f %.3f %.3f) ambient %.2f; fog "
+			"[level] environment: sun dir (%.3f %.3f %.3f) colour (%.3f %.3f %.3f) energy %.2f; sky (%.3f %.3f %.3f) ground (%.3f %.3f %.3f) ambient %.2f; fog "
 			"%.0f..%.0f m (%.3f %.3f %.3f)",
 			env.sun_direction[0], env.sun_direction[1], env.sun_direction[2], env.sun_color[0], env.sun_color[1], env.sun_color[2], env.sun_energy, env.sky_color[0],
 			env.sky_color[1], env.sky_color[2], env.ground_color[0], env.ground_color[1], env.ground_color[2], env.ambient_energy, env.fog_start, env.fog_end,
 			env.fog_color[0], env.fog_color[1], env.fog_color[2]);
 	UtilityFunctions::print(line);
 	for (const auto &[item, error] : plan->failures) {
-		UtilityFunctions::print(to_godot("[m1] plan failure: " + item + ": " + error));
+		UtilityFunctions::print(to_godot("[level] plan failure: " + item + ": " + error));
 	}
 }
 
@@ -769,7 +769,7 @@ void Bf3LevelSession::try_done() {
 		return;
 	}
 	const host::PresentationFrame &f = *frame_;
-	const bool spawned = (f.valid && f.stats.spawned && f.own_curr.life > 0 && mapper_.adopted_life() == f.own_curr.life) || m2b_join_ready();
+	const bool spawned = (f.valid && f.stats.spawned && f.own_curr.life > 0 && mapper_.adopted_life() == f.own_curr.life) || tdm_join_ready();
 	if (spawned && progress_.end_us[size_t(host::LoadStage::Spawn)].load(std::memory_order_relaxed) == 0) {
 		progress_.advance(host::LoadStage::Spawn);
 		progress_.end(host::LoadStage::Spawn);
@@ -800,14 +800,14 @@ void Bf3LevelSession::try_done() {
 	};
 	char line[1024];
 	std::snprintf(line, sizeof(line),
-			"[m1] done: process start -> first controllable frame %.3f s, _ready -> done %.3f s (process start -> _ready %.3f s); stages mount %.3f, db %.3f, "
+			"[level] done: process start -> first controllable frame %.3f s, _ready -> done %.3f s (process start -> _ready %.3f s); stages mount %.3f, db %.3f, "
 			"meshes %.3f, textures %.3f, shapes %.3f, upload %.3f, connect %.3f, spawn %.3f s; cache %s; peak working set %.1f MiB",
 			timings_.done_from_process_s, timings_.done_from_ready_s, timings_.process_start_to_ready_s, stage_s(host::LoadStage::Mount),
 			stage_s(host::LoadStage::Database), stage_s(host::LoadStage::Meshes), stage_s(host::LoadStage::Textures), stage_s(host::LoadStage::Shapes),
 			stage_s(host::LoadStage::Upload), stage_s(host::LoadStage::Connect), stage_s(host::LoadStage::Spawn),
 			cache_warmth_name(host::CacheWarmth(progress_.warmth.load())), mib(peak_working_set_bytes()));
 	UtilityFunctions::print(line);
-	UtilityFunctions::print(to_godot("[m1] " + cache_summary()));
+	UtilityFunctions::print(to_godot("[level] " + cache_summary()));
 	if (!bots_line_.empty()) {
 		UtilityFunctions::print(to_godot(bots_line_));
 	}
@@ -829,7 +829,6 @@ void Bf3LevelSession::_unhandled_input(const Ref<InputEvent> &p_event) {
 		return;
 	}
 	mapper_.handle_event(p_event);
-	m2a_input(p_event);
 
 	if (const InputEventKey *k = Object::cast_to<InputEventKey>(p_event.ptr())) {
 		if (k->is_pressed() && !k->is_echo() && k->get_keycode() == KEY_F7 && nav_draw_.uploaded()) {
@@ -860,8 +859,8 @@ void Bf3LevelSession::_process(double p_delta) {
 			std::lock_guard lock(loader_mutex_);
 			error = load_error_;
 		}
-		UtilityFunctions::push_error(to_godot("[m1] load failed: " + error));
-		UtilityFunctions::print(to_godot("[m1] load failed: " + error));
+		UtilityFunctions::push_error(to_godot("[level] load failed: " + error));
+		UtilityFunctions::print(to_godot("[level] load failed: " + error));
 		if (m1_check_ || !load_check_.empty() || quit_after_ > 0.0) {
 			finish(1);
 			return;
@@ -882,9 +881,9 @@ void Bf3LevelSession::_process(double p_delta) {
 		client_->read_presentation(*frame_);
 		mapper_.adopt(*frame_);
 		mapper_.poll_devices();
-		mapper_.m2a_frame(*frame_, now_ns);
+		mapper_.weapon_frame(*frame_, now_ns);
 		client_->set_input(mapper_.sample());
-		m2a_presented(p_delta, now_ns);
+		game_presented(p_delta, now_ns);
 	}
 	try_done();
 	if (!done_) {
@@ -924,9 +923,9 @@ void Bf3LevelSession::_process(double p_delta) {
 	}
 	draw_others(now_ns);
 	update_hud(p_delta);
-	s1_upload_overlay();
-	s1_report_others(now_ns);
-	if (m2a_frame(p_delta, now_ns)) {
+	upload_nav_overlay();
+	report_bots(now_ns);
+	if (game_frame(p_delta, now_ns)) {
 		return;
 	}
 
@@ -966,7 +965,7 @@ void Bf3LevelSession::_process(double p_delta) {
 bool Bf3LevelSession::save_screenshot(const std::string &p_path) {
 	const std::filesystem::path target = utf8_path(p_path);
 	if (!guard_.allows_write(target)) {
-		UtilityFunctions::push_error(to_godot("[m1] screenshot refused (" + std::string(bf3::core::PathGuard::verdict_name(guard_.check_write_target(target))) +
+		UtilityFunctions::push_error(to_godot("[level] screenshot refused (" + std::string(bf3::core::PathGuard::verdict_name(guard_.check_write_target(target))) +
 				"): " + p_path));
 		return false;
 	}
@@ -979,7 +978,7 @@ bool Bf3LevelSession::save_screenshot(const std::string &p_path) {
 	}
 	Ref<Image> img = get_viewport()->get_texture()->get_image();
 	if (img.is_null() || img->save_png(to_godot(p_path)) != OK) {
-		UtilityFunctions::push_error(to_godot("[m1] screenshot failed: " + p_path));
+		UtilityFunctions::push_error(to_godot("[level] screenshot failed: " + p_path));
 		return false;
 	}
 	return true;
@@ -992,12 +991,12 @@ void Bf3LevelSession::finish(int p_code) {
 	quitting_ = true;
 	if (install_before_.valid) {
 		const bf3::core::SnapshotDiff d = bf3::core::diff_snapshots(install_before_, install_.snapshot());
-		UtilityFunctions::print(to_godot(std::string("[m1] install unchanged: ") + (d.clean() ? "yes" : "NO: " + d.summary())));
+		UtilityFunctions::print(to_godot(std::string("[level] install unchanged: ") + (d.clean() ? "yes" : "NO: " + d.summary())));
 		if (!d.clean()) {
 			p_code = 1;
 		}
 	}
-	UtilityFunctions::print(to_godot("[m1] peak working set " + std::to_string(int(mib(peak_working_set_bytes()) + 0.5)) + " MiB, exit " + std::to_string(p_code)));
+	UtilityFunctions::print(to_godot("[level] peak working set " + std::to_string(int(mib(peak_working_set_bytes()) + 0.5)) + " MiB, exit " + std::to_string(p_code)));
 	shutdown();
 	get_tree()->quit(p_code);
 }
@@ -1006,24 +1005,24 @@ void Bf3LevelSession::finish(int p_code) {
 
 namespace bf3::godot_side {
 
-void Bf3LevelSession::s1_upload_overlay() {
+void Bf3LevelSession::upload_nav_overlay() {
 	if (!scene_ || nav_draw_.uploaded() || !nav_ready_.load(std::memory_order_acquire)) {
 		return;
 	}
 	if (nav_draw_.upload(nav_arrays_, get_world_3d()->get_scenario(), true)) {
 		char line[256];
-		std::snprintf(line, sizeof(line), "[s1] nav overlay: %zu main-component triangles, %zu other, %zu drop links", nav_arrays_.triangles_main,
+		std::snprintf(line, sizeof(line), "[bots] nav overlay: %zu main-component triangles, %zu other, %zu drop links", nav_arrays_.triangles_main,
 				nav_arrays_.triangles_other, nav_arrays_.links);
 		UtilityFunctions::print(line);
 	}
 	nav_arrays_ = NavOverlayArrays();
 }
 
-void Bf3LevelSession::s1_report_others(uint64_t p_now_ns) {
-	if (bots_ == 0 || s1_reported_ || since_done_ < std::max(shot_delay_, 10.0) || !frame_->valid) {
+void Bf3LevelSession::report_bots(uint64_t p_now_ns) {
+	if (bots_ == 0 || bots_reported_ || since_done_ < std::max(shot_delay_, 10.0) || !frame_->valid) {
 		return;
 	}
-	s1_reported_ = true;
+	bots_reported_ = true;
 	std::array<host::PresentedSoldier, bf3::net::kMaxSlots> out{};
 	const size_t n = host::present_others(*frame_, p_now_ns, out, nullptr);
 	float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f };
@@ -1036,7 +1035,7 @@ void Bf3LevelSession::s1_report_others(uint64_t p_now_ns) {
 		moving += std::hypot(out[i].velocity[0], out[i].velocity[2]) > 0.5f ? 1 : 0;
 	}
 	char line[768];
-	int w = std::snprintf(line, sizeof(line), "[s1] %.1f s after done: %zu others presented, %zu moving (> 0.5 m/s), feet within (%.0f %.0f %.0f)..(%.0f %.0f %.0f);",
+	int w = std::snprintf(line, sizeof(line), "[bots] %.1f s after done: %zu others presented, %zu moving (> 0.5 m/s), feet within (%.0f %.0f %.0f)..(%.0f %.0f %.0f);",
 			since_done_, n, moving, lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
 	for (size_t i = 0; i < std::min<size_t>(n, 8) && w > 0 && size_t(w) < sizeof(line); ++i) {
 		w += std::snprintf(line + w, sizeof(line) - size_t(w), " (%.1f %.1f %.1f)", out[i].position[0], out[i].position[1], out[i].position[2]);

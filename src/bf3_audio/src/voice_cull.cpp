@@ -173,12 +173,12 @@ void cull_voices(std::span<const CullVoice> p_voices, const ScopeTable *p_scopes
 
 	const auto weight = [&](size_t k) { return uint64_t(std::clamp<uint32_t>(p_voices[k].voices, 1, kMaxCullVoices)); };
 	uint64_t total = 0;
-	uint64_t pt1_margin = 0;
+	uint64_t margin = 0;
 	for (size_t i = 0; i < n; ++i) {
 		total += c.kept(i) ? weight(i) : 0;
-		pt1_margin = std::max<uint64_t>(pt1_margin, c.kept(i) ? std::min<uint32_t>(p_voices[i].resume_margin, kMaxCullVoices) : 0u);
+		margin = std::max<uint64_t>(margin, c.kept(i) ? std::min<uint32_t>(p_voices[i].resume_margin, kMaxCullVoices) : 0u);
 	}
-	if (total + pt1_margin > p_max_voices) {
+	if (total + margin > p_max_voices) {
 		const auto score = [&](size_t k) {
 			const float s = (p_voices[k].loudness_db + (std::isfinite(p_voices[k].hold_db) ? p_voices[k].hold_db : 0.0f)) * p_voices[k].priority;
 			return std::isfinite(s) ? s : -std::numeric_limits<float>::max();

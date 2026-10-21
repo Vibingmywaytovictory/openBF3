@@ -497,7 +497,7 @@ void Gunplay::step_soldier(uint8_t p_slot, const sim::Command &p_command, const 
 		++m.stats.slot_field_clamped;
 	}
 	const sw::WeaponContext ctx = sw::make_weapon_context(m.shared->motor, p_before, p_after, p_command);
-	sw::step_weapons_m2a(*m.table, s.weapons, p_command, ctx, m.match_seed, s.spawn_tick, s.out);
+	sw::step_weapons_with_rules(*m.table, s.weapons, p_command, ctx, m.match_seed, s.spawn_tick, s.out);
 	s.out_tick = p_command.tick;
 	if ((s.out.events & sw::weapon_events::kSwitchRefused) != 0) {
 		++m.stats.slot_select_empty;

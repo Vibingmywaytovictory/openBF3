@@ -9,9 +9,9 @@
 #include "death_camera.h"
 #include "game_crowd.h"
 #include "hud_tdm.h"
-#include "level_session_m2b.h"
+#include "level_session_tdm.h"
 #include "m2b_check.h"
-#include "m2b_game.h"
+#include "tdm_flow.h"
 
 #include "test_support.h"
 
@@ -73,7 +73,7 @@ static_assert(std::is_trivially_copyable_v<gs::TdmHudRecords>);
 static_assert(std::is_trivially_copyable_v<gs::DeathCameraParams> && std::is_trivially_copyable_v<gs::DeathCameraStart> &&
 		std::is_trivially_copyable_v<gs::DeathCameraView> && std::is_trivially_copyable_v<gs::DeathCameraStats>);
 static_assert(std::is_trivially_copyable_v<anim::CrowdSoldierInput>);
-static_assert(std::is_trivially_copyable_v<gs::M2bFrame>);
+static_assert(std::is_trivially_copyable_v<gs::TdmFrame>);
 static_assert(!std::is_copy_constructible_v<gs::Bf3TdmHud> && !std::is_copy_constructible_v<gs::M2bCheck>);
 static_assert(std::is_same_v<decltype(&gs::Bf3GameCrowd::set_corpse_seconds), void (gs::Bf3GameCrowd::*)(float)>);
 static_assert(std::is_same_v<decltype(&host::fill_hud_tdm),
@@ -87,7 +87,7 @@ static_assert(host::kHudSpawnSlots[2] == host::kKitGadgetSlot && host::kHudSpawn
 		host::kHudSpawnSlots[1] == host::kKitSlots[1] && host::kHudSpawnSlots[3] == host::kKitSlots[2] && host::kHudSpawnSlots[4] == host::kKitSlots[3]);
 static_assert(anim::kCrowdDeathHideSeconds == 3.0f);
 static_assert(anim::kCrowdCorpseSeconds == 15.0f && anim::kCrowdReviveBlendSeconds == 0.5f);
-static_assert(gs::kM2bPlayableDefaultBots == 31 && gs::kM2bSpawnRequestRetryTicks == 30);
+static_assert(gs::kTdmDefaultBots == 31 && gs::kSpawnRequestRetryTicks == 30);
 static_assert(uint8_t(gs::M2bCase::Play) == 0 && gs::kM2bCaseCount == 1);
 static_assert(gs::m2b_case_name(gs::M2bCase::Play) == "play" && gs::m2b_case_name(gs::M2bCase(7)) == "?");
 static_assert(gs::m2b_case_from_name("play") == gs::M2bCase::Play && !gs::m2b_case_from_name("Play").has_value());
@@ -123,7 +123,7 @@ TEST_SUITE("m2b-contract2") {
 		CHECK(!m.pre_round.input_restricted);
 
 		const host::HudFeedInput in{};
-		CHECK(!in.m2b);
+		CHECK(!in.tdm);
 		CHECK(!in.match_valid);
 		CHECK(in.players.empty());
 		CHECK(in.own_slot == 0xFF);
@@ -161,18 +161,18 @@ TEST_SUITE("m2b-contract2") {
 		CHECK(r.missing_strings == 0);
 		CHECK(!r.spawn_screen_visible);
 
-		const gs::M2bOptions o{};
+		const gs::TdmOptions o{};
 		CHECK(o.deploy_screen);
 		CHECK(o.kill_limit == 0);
 		CHECK(o.preround_s < 0.0f);
 		CHECK(o.bots == 31);
-		const gs::M2bGame g{};
+		const gs::TdmState g{};
 		CHECK(!g.enabled);
 		CHECK(!g.checks());
 		CHECK(g.tdm_hud == nullptr);
 		CHECK(g.death_camera == nullptr);
 		CHECK(g.check == nullptr);
-		CHECK(g.frame.m2a == nullptr);
+		CHECK(g.frame.game == nullptr);
 		CHECK(g.frame.match == nullptr);
 		const gs::M2bCheckOptions co{};
 		CHECK(co.play_seconds == 90.0);
@@ -206,7 +206,7 @@ TEST_SUITE("m2b-contract2") {
 			rows[1].kills = 1;
 			rows[1].score = 100;
 			host::HudFeedInput in{};
-			in.m2b = true;
+			in.tdm = true;
 			in.alive = false;
 			in.match_valid = true;
 			in.match.phase = net::MatchPhase::InRound;
@@ -272,7 +272,7 @@ TEST_SUITE("m2b-contract2") {
 			CHECK(!m.end_of_round.local_won);
 			CHECK(!m.spawn_screen.visible);
 
-			in.m2b = false;
+			in.tdm = false;
 			host::fill_hud_tdm(in, {}, st, state, m);
 			CHECK(!m.end_of_round.visible);
 			CHECK(!m.spawn_screen.visible);

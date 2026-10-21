@@ -14,7 +14,7 @@
 namespace bf3::godot_side {
 
 class Bf3LevelSession;
-struct M2aGame;
+struct GameState;
 
 enum class M2aCase : uint8_t { Range = 0, Reload = 1, Kits = 2, Hud = 3, Ads = 4, Audio = 5, Fx = 6, Play = 7, Firefight = 8 };
 inline constexpr uint32_t kM2aCaseCount = 9;
@@ -106,7 +106,7 @@ struct M2aCheckOptions {
 
 class M2aCheck {
 public:
-	M2aCheck(Bf3LevelSession &r_session, M2aGame &r_game, std::vector<M2aCase> p_cases, const M2aCheckOptions &p_options);
+	M2aCheck(Bf3LevelSession &r_session, GameState &r_game, std::vector<M2aCase> p_cases, const M2aCheckOptions &p_options);
 	~M2aCheck();
 	M2aCheck(const M2aCheck &) = delete;
 	M2aCheck &operator=(const M2aCheck &) = delete;

@@ -30,16 +30,16 @@ struct MixerConfig {
 	uint32_t max_voices = 128;
 	std::shared_ptr<const core::audio::ScopeTable> scopes;
 
-	uint32_t pt1_cut_fade_frames = 512;
+	uint32_t cut_fade_frames = 512;
 
-	float pt1_cap_hold_db = 3.0f;
-	uint32_t pt1_voice_hold_blocks = 47;
+	float cap_hold_db = 3.0f;
+	uint32_t voice_hold_blocks = 47;
 
-	uint32_t pt1_resume_margin = 8;
+	uint32_t resume_margin = 8;
 
-	float pt1_limit_ceiling = 0.966f;
-	uint32_t pt1_limit_attack_frames = 48;
-	float pt1_limit_release_ms = 80.0f;
+	float limit_ceiling = 0.966f;
+	uint32_t limit_attack_frames = 48;
+	float limit_release_ms = 80.0f;
 };
 
 using InstanceHandle = uint32_t;
@@ -114,9 +114,9 @@ public:
 
 enum class MixerCutKind : uint8_t { Drop = 0, Pend, Kill, Finish, Start, Resume, Suspend, Unsuspend, Fade, CallGap, LateBlock, Count };
 inline constexpr size_t kMixerCutKinds = size_t(MixerCutKind::Count);
-inline constexpr float kPt1AudibleStep = 1.0e-3f;
-inline constexpr float kPt1LoudStep = 1.0e-2f;
-inline constexpr double kPt1LateCallMs = 25.0;
+inline constexpr float kAudibleStep = 1.0e-3f;
+inline constexpr float kLoudStep = 1.0e-2f;
+inline constexpr double kLateCallMs = 25.0;
 struct MixerCutEvent {
 	uint64_t frame = 0;
 	InstanceHandle handle = kNoInstance;
@@ -142,7 +142,7 @@ struct MixerCutStats {
 	std::atomic<uint64_t> limit_edge_steps{ 0 };
 	std::atomic<float> limit_min_gain{ 1.0f };
 };
-inline constexpr std::array<double, 7> kPt1GapEdgesMs = { 5.0, 10.0, 15.0, 20.0, 30.0, 50.0, 100.0 };
+inline constexpr std::array<double, 7> kGapEdgesMs = { 5.0, 10.0, 15.0, 20.0, 30.0, 50.0, 100.0 };
 const char *mixer_cut_kind_name(MixerCutKind p_kind);
 
 class MixerCore {
@@ -161,9 +161,9 @@ public:
 	uint32_t mix(float *r_interleaved_stereo, uint32_t p_frames);
 	void set_tap(MixTap *p_tap);
 
-	const MixerCutStats &pt1_cut_stats() const;
-	void pt1_record_cuts(bool p_on);
-	size_t pt1_poll_cuts(std::span<MixerCutEvent> r_out);
+	const MixerCutStats &cut_stats() const;
+	void record_cuts(bool p_on);
+	size_t poll_cuts(std::span<MixerCutEvent> r_out);
 
 	MixerCore(const MixerCore &) = delete;
 	MixerCore &operator=(const MixerCore &) = delete;

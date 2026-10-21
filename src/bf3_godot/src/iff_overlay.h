@@ -72,7 +72,7 @@ private:
 	float canvas_scale_ = 1.0f;
 };
 
-struct Pt1IffStats {
+struct IffOverlayStats {
 	uint64_t frames = 0;
 	uint64_t friendly_icons = 0;
 	uint64_t friendly_names = 0;
@@ -82,21 +82,21 @@ struct Pt1IffStats {
 	uint64_t minimap_friendly = 0;
 	uint64_t minimap_enemy = 0;
 	uint64_t minimap_hidden_enemies = 0;
-	uint64_t m1_rule_enemy_icons = 0;
+	uint64_t all_others_as_enemies = 0;
 	uint64_t unknown_team = 0;
 	uint64_t frame_ns = 0;
 	uint64_t frame_max_ns = 0;
 };
 
-class Pt1Iff {
+class IffOverlay {
 public:
-	Pt1Iff(Bf3LevelSession *p_session, godot::CanvasLayer *p_layer, godot::Ref<godot::ImageTexture> p_atlas, const core::ui::HudIconAtlas *p_icons);
-	~Pt1Iff();
-	Pt1Iff(const Pt1Iff &) = delete;
-	Pt1Iff &operator=(const Pt1Iff &) = delete;
+	IffOverlay(Bf3LevelSession *p_session, godot::CanvasLayer *p_layer, godot::Ref<godot::ImageTexture> p_atlas, const core::ui::HudIconAtlas *p_icons);
+	~IffOverlay();
+	IffOverlay(const IffOverlay &) = delete;
+	IffOverlay &operator=(const IffOverlay &) = delete;
 
 	void frame(const godot::Camera3D *p_camera, bool p_first_person, std::vector<MinimapIconDraw> &r_icons);
-	const Pt1IffStats &stats() const { return stats_; }
+	const IffOverlayStats &stats() const { return stats_; }
 
 private:
 	struct Loaded;
@@ -117,7 +117,7 @@ private:
 	core::ui::NametagStyle style_;
 	core::ui::SpottingRules spotting_;
 	IffReveal reveal_;
-	Pt1IffStats stats_;
+	IffOverlayStats stats_;
 	bool font_set_ = false;
 	double summary_at_s_ = -1.0;
 

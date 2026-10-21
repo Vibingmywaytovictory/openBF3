@@ -528,7 +528,7 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 	row("e19.zoom_refused", all.refused_frames > 0 && all.refused_bad == 0,
 			fmt("%llu frames with zoom held while deploying or sprinting: ADS presented in %llu (presentation rule anim::ads_allowed, §16 Q21)",
 					(unsigned long long)all.refused_frames, (unsigned long long)all.refused_bad));
-	print(fmt("[vm] info e19.zoom_refused.sim: %s (the sim set kZoomWasDown in %llu of those frames; step_weapons_m2a is the stub until sv lands the rule)",
+	print(fmt("[vm] info e19.zoom_refused.sim: %s (the sim set kZoomWasDown in %llu of those frames; step_weapons_with_rules is the stub until sv lands the rule)",
 			all.sim_flag_frames > 0 ? "PENDING (sv)" : "the sim refuses too", (unsigned long long)all.sim_flag_frames));
 	row("e5.clip_start", all.reloads > 0 && all.clip_start_bad == 0,
 			fmt("%u reloads: the reload clip on screen at most %.4f s after kReloadStarted (<= 1 display frame)", all.reloads, all.worst_clip_start_s));

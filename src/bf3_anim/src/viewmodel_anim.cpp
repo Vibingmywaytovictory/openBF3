@@ -403,14 +403,14 @@ struct Action {
 
 }
 
-struct VmPt1Loco;
-struct VmPt1LocoDeleter {
-	void operator()(VmPt1Loco *p_loco) const;
+struct VmDeltaLoco;
+struct VmDeltaLocoDeleter {
+	void operator()(VmDeltaLoco *p_loco) const;
 };
 
-bool vm_pt1_apply(VmPt1Loco &r_loco, const ViewmodelFrameInput &p_input, float p_sprint_w, float p_ads, float p_dt, float p_blend_seconds, LocalPose &r_pose,
+bool vm_loco_apply(VmDeltaLoco &r_loco, const ViewmodelFrameInput &p_input, float p_sprint_w, float p_ads, float p_dt, float p_blend_seconds, LocalPose &r_pose,
 		ViewmodelOutput &r_out);
-void vm_pt1_reset(VmPt1Loco &r_loco);
+void vm_loco_reset(VmDeltaLoco &r_loco);
 
 struct ViewmodelAnimator::Impl {
 	const Skeleton &rig;
@@ -434,7 +434,7 @@ struct ViewmodelAnimator::Impl {
 
 	SpringState sway_x, sway_y, bob_amp, kick_back, kick_pitch, cam_pitch, cam_yaw;
 	float sway_tx = 0, sway_ty = 0, bob_target = 0;
-	std::unique_ptr<VmPt1Loco, VmPt1LocoDeleter> pt1;
+	std::unique_ptr<VmDeltaLoco, VmDeltaLocoDeleter> delta_loco;
 
 	Impl(const Skeleton &p_rig, std::span<const VmClipRef, kVmClips> p_clips, const ViewmodelTuning &p_tuning) :
 			rig(p_rig), tuning(p_tuning) {
@@ -744,7 +744,7 @@ struct ViewmodelAnimator::Impl {
 			pitch -= 10.0f * kDegToRad * s;
 		}
 
-		const bool pt1_deltas = pt1 && vm_pt1_apply(*pt1, p_input, sprint_w, ads, dt, tuning.sprint_blend_seconds, r_pose, r_out);
+		const bool loco_applied = delta_loco && vm_loco_apply(*delta_loco, p_input, sprint_w, ads, dt, tuning.sprint_blend_seconds, r_pose, r_out);
 
 		const float speed = std::max(0.0f, finite_or(p_input.speed, 0.0f));
 		sway_tx = std::clamp(finite_or(p_input.view_yaw_rate, 0.0f) * tuning.sway_scale, -tuning.sway_max, tuning.sway_max);
@@ -752,7 +752,7 @@ struct ViewmodelAnimator::Impl {
 		step_spring(tuning.sway, sway_tx, dt, sway_x);
 		step_spring(tuning.sway, sway_ty, dt, sway_y);
 		const float move = p_input.grounded ? std::min(speed / 4.0f, 1.5f) : 0.0f;
-		bob_target = pt1_deltas ? 0.0f : tuning.bob_amplitude * move * (1.0f + (tuning.bob_ads_scale - 1.0f) * ads);
+		bob_target = loco_applied ? 0.0f : tuning.bob_amplitude * move * (1.0f + (tuning.bob_ads_scale - 1.0f) * ads);
 		step_spring(tuning.bob, bob_target, dt, bob_amp);
 		bob_phase += 2.0 * kPi * double(tuning.bob_frequency) * double(std::max(move, 0.0f)) * double(dt);
 		bob_phase = std::fmod(bob_phase, 2.0 * kPi);
@@ -804,8 +804,8 @@ struct ViewmodelAnimator::Impl {
 		shots = 0;
 		sway_x = sway_y = bob_amp = kick_back = kick_pitch = cam_pitch = cam_yaw = SpringState{};
 		sway_tx = sway_ty = bob_target = 0;
-		if (pt1) {
-			vm_pt1_reset(*pt1);
+		if (delta_loco) {
+			vm_loco_reset(*delta_loco);
 		}
 	}
 };
@@ -835,7 +835,7 @@ std::array<SpringState, 7> ViewmodelAnimator::springs() const {
 
 namespace bf3::anim {
 
-struct VmPt1Loco {
+struct VmDeltaLoco {
 	const Skeleton *rig = nullptr;
 	VmLocomotion loco;
 	BoneMask run_mask, sprint_mask;
@@ -846,13 +846,13 @@ struct VmPt1Loco {
 	core::ant::ClipPose scratch;
 };
 
-void VmPt1LocoDeleter::operator()(VmPt1Loco *p_loco) const {
+void VmDeltaLocoDeleter::operator()(VmDeltaLoco *p_loco) const {
 	delete p_loco;
 }
 
 namespace {
 
-bool vm_pt1_usable(const Skeleton &p_rig, VmDeltaClip &r_d, BoneMask &r_mask) {
+bool vm_loco_usable(const Skeleton &p_rig, VmDeltaClip &r_d, BoneMask &r_mask) {
 	const VmClipRef &c = r_d.clip;
 	if (c.clip == nullptr || c.tracks == nullptr || !c.clip->consistent() || c.tracks->end_frame == 0) {
 		return false;
@@ -872,7 +872,7 @@ bool vm_pt1_usable(const Skeleton &p_rig, VmDeltaClip &r_d, BoneMask &r_mask) {
 	return r_mask.size() == p_rig.size();
 }
 
-float vm_pt1_advance(float p_frame, float p_frames, const VmDeltaClip &p_d) {
+float vm_loco_advance(float p_frame, float p_frames, const VmDeltaClip &p_d) {
 	const float len = p_d.end_frame - p_d.start_frame;
 	if (!(len > 0.0f) || !std::isfinite(p_frames)) {
 		return p_d.start_frame;
@@ -887,7 +887,7 @@ float vm_pt1_advance(float p_frame, float p_frames, const VmDeltaClip &p_d) {
 
 }
 
-bool vm_pt1_apply(VmPt1Loco &r_loco, const ViewmodelFrameInput &p_input, float p_sprint_w, float p_ads, float p_dt, float p_blend_seconds, LocalPose &r_pose,
+bool vm_loco_apply(VmDeltaLoco &r_loco, const ViewmodelFrameInput &p_input, float p_sprint_w, float p_ads, float p_dt, float p_blend_seconds, LocalPose &r_pose,
 		ViewmodelOutput &r_out) {
 	if (!r_loco.run_ok && !r_loco.sprint_ok) {
 		return false;
@@ -902,11 +902,11 @@ bool vm_pt1_apply(VmPt1Loco &r_loco, const ViewmodelFrameInput &p_input, float p
 	const float spr_w = r_loco.sprint_ok ? sprint_w : 0.0f;
 	if (r_loco.run_ok) {
 		const float fps = r_loco.loco.run.clip.tracks->fps > 0.0f ? r_loco.loco.run.clip.tracks->fps : 30.0f;
-		r_loco.run_frame = vm_pt1_advance(r_loco.run_frame, p_dt * fps * speed / kVmRunSpeedUnit, r_loco.loco.run);
+		r_loco.run_frame = vm_loco_advance(r_loco.run_frame, p_dt * fps * speed / kVmRunSpeedUnit, r_loco.loco.run);
 	}
 	if (r_loco.sprint_ok) {
 		const float fps = r_loco.loco.sprint.clip.tracks->fps > 0.0f ? r_loco.loco.sprint.clip.tracks->fps : 30.0f;
-		r_loco.sprint_frame = vm_pt1_advance(r_loco.sprint_frame, sprint_w > 0.0f ? p_dt * fps : 0.0f, r_loco.loco.sprint);
+		r_loco.sprint_frame = vm_loco_advance(r_loco.sprint_frame, sprint_w > 0.0f ? p_dt * fps : 0.0f, r_loco.loco.sprint);
 	}
 	auto add = [&](const VmDeltaClip &p_d, float p_frame, const BoneMask &p_mask, float p_w) {
 		if (!(p_w > 0.0f)) {
@@ -921,14 +921,14 @@ bool vm_pt1_apply(VmPt1Loco &r_loco, const ViewmodelFrameInput &p_input, float p
 	};
 	add(r_loco.loco.run, r_loco.run_frame, r_loco.run_mask, run_w);
 	add(r_loco.loco.sprint, r_loco.sprint_frame, r_loco.sprint_mask, spr_w);
-	r_out.pt1_run_weight = run_w;
-	r_out.pt1_sprint_weight = spr_w;
-	r_out.pt1_run_frame = r_loco.run_frame;
-	r_out.pt1_sprint_frame = r_loco.sprint_frame;
+	r_out.loco_run_weight = run_w;
+	r_out.loco_sprint_weight = spr_w;
+	r_out.loco_run_frame = r_loco.run_frame;
+	r_out.loco_sprint_frame = r_loco.sprint_frame;
 	return true;
 }
 
-void vm_pt1_reset(VmPt1Loco &r_loco) {
+void vm_loco_reset(VmDeltaLoco &r_loco) {
 	r_loco.run_frame = r_loco.loco.run.start_frame;
 	r_loco.sprint_frame = r_loco.loco.sprint.start_frame;
 	r_loco.move_w = 0.0f;
@@ -936,13 +936,13 @@ void vm_pt1_reset(VmPt1Loco &r_loco) {
 
 void ViewmodelAnimator::set_locomotion(const VmLocomotion &p_locomotion) {
 	Impl &m = *impl_;
-	std::unique_ptr<VmPt1Loco, VmPt1LocoDeleter> l(new VmPt1Loco());
+	std::unique_ptr<VmDeltaLoco, VmDeltaLocoDeleter> l(new VmDeltaLoco());
 	l->rig = &m.rig;
 	l->loco = p_locomotion;
-	l->run_ok = vm_pt1_usable(m.rig, l->loco.run, l->run_mask);
-	l->sprint_ok = vm_pt1_usable(m.rig, l->loco.sprint, l->sprint_mask);
-	vm_pt1_reset(*l);
-	m.pt1 = l->run_ok || l->sprint_ok ? std::move(l) : nullptr;
+	l->run_ok = vm_loco_usable(m.rig, l->loco.run, l->run_mask);
+	l->sprint_ok = vm_loco_usable(m.rig, l->loco.sprint, l->sprint_mask);
+	vm_loco_reset(*l);
+	m.delta_loco = l->run_ok || l->sprint_ok ? std::move(l) : nullptr;
 }
 
 }

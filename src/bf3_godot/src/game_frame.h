@@ -18,7 +18,7 @@ class Cache;
 
 namespace bf3::godot_side {
 
-struct M2aLoadInputs {
+struct GameLoadInputs {
 	const host::LevelDatabase *db = nullptr;
 	std::shared_ptr<const host::SharedLevel> shared;
 	core::Cache *cache = nullptr;
@@ -28,7 +28,7 @@ struct M2aLoadInputs {
 	uint8_t own_team = 1;
 };
 
-struct M2aFrame {
+struct GameFrame {
 	const host::PresentationFrame *frame = nullptr;
 	host::PresentClock clock;
 	uint64_t now_ns = 0;

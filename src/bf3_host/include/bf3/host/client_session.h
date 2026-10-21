@@ -154,7 +154,7 @@ struct ClientStats {
 	uint64_t match_states = 0;
 	uint64_t player_lists = 0;
 	uint64_t revives = 0;
-	uint64_t bad_m2b_datagrams = 0;
+	uint64_t bad_tdm_datagrams = 0;
 	uint64_t restricted_commands = 0;
 	uint64_t unspawned_ticks = 0;
 	uint64_t spawn_requests = 0;

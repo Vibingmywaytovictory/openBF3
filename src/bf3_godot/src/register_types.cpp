@@ -7,7 +7,7 @@
 #include "level_session.h"
 #include "minimap_control.h"
 #include "minimap_hud.h"
-#include "s3_crowd.h"
+#include "crowd_scene.h"
 #include "weapon_inspector.h"
 #include "world_icons.h"
 
@@ -65,17 +65,17 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 
 	GDREGISTER_CLASS(bf3::godot_side::Bf3FxRenderer);
 
-	void openbf3_register_m2a_hud();
-	openbf3_register_m2a_hud();
+	void openbf3_register_hud();
+	openbf3_register_hud();
 
 	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioStream);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioPlayback);
 
-	void openbf3_register_m2b_ui();
-	openbf3_register_m2b_ui();
+	void openbf3_register_tdm_hud();
+	openbf3_register_tdm_hud();
 
-	void openbf3_register_pt1_iff();
-	openbf3_register_pt1_iff();
+	void openbf3_register_iff_overlay();
+	openbf3_register_iff_overlay();
 
 #if OPENBF3_BUILD_CHECKS
 	GDREGISTER_CLASS(bf3::godot_side::Bf3ViewmodelDemo);

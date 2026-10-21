@@ -621,12 +621,12 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 
 		std::string mesh = spec.mesh;
 		std::string package = spec.ant_package;
-		std::optional<int64_t> pt1_ant_ref;
+		std::optional<int64_t> locomotion_ant_ref;
 		if (const core::EbxPartition *bp = lib.partition_by_name(def->blueprint)) {
 			if (const std::optional<core::EbxInstance> swd = lib.follow(bp->primary().data(), "Object")) {
 				uint32_t clamped = 0;
 				if (const std::optional<core::EbxValue> id = swd->get_path("WeaponStates[0].Weapon.AssetId")) {
-					pt1_ant_ref = id->as_i64();
+					locomotion_ant_ref = id->as_i64();
 				}
 				read_default_attachments(lib, *swd, set->rig, spec.unlock, item.attachments, set->notes);
 				item.zoom_render_fov_data = sane(number(swd->get("ZoomRenderFov")), 0.0f, 0.0f, 170.0f, clamped);
@@ -728,8 +728,8 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 				}
 			}
 		}
-		if (pt1_ant_ref && *pt1_ant_ref >= 0 && *pt1_ant_ref <= int64_t(UINT32_MAX)) {
-			load_viewmodel_locomotion(ant, set->rig, uint32_t(*pt1_ant_ref), item, set->notes);
+		if (locomotion_ant_ref && *locomotion_ant_ref >= 0 && *locomotion_ant_ref <= int64_t(UINT32_MAX)) {
+			load_viewmodel_locomotion(ant, set->rig, uint32_t(*locomotion_ant_ref), item, set->notes);
 		} else {
 			set->notes.push_back(spec.unlock + " 1p locomotion: no WeaponStates[0].Weapon.AssetId (the procedural bob)");
 		}
@@ -884,7 +884,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 					continue;
 				}
 				set->notes.push_back(item.unlock + ": dog-tag surface " + std::to_string(sf.subset) + " (" + sf.material_name + ", " + diffuse +
-						") hidden (stand-in: no dog-tag customization or chain physics in M2a)");
+						") hidden (stand-in: no dog-tag customization or chain physics)");
 				item.weapon.prepared.vertices -= std::min(item.weapon.prepared.vertices, sf.vertex_count());
 				item.weapon.prepared.triangles -= std::min(item.weapon.prepared.triangles, sf.indices.size() / 3);
 				surfaces.erase(surfaces.begin() + std::ptrdiff_t(i));
@@ -1301,7 +1301,7 @@ namespace bf3::render {
 
 namespace {
 
-std::string pt1_route_path(const anim::AntClipRoute &p_route) {
+std::string route_path(const anim::AntClipRoute &p_route) {
 	std::string out;
 	for (const std::string &h : p_route.path) {
 		out += (out.empty() ? "" : " -> ") + h;
@@ -1309,14 +1309,14 @@ std::string pt1_route_path(const anim::AntClipRoute &p_route) {
 	return out;
 }
 
-void pt1_load_delta(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, std::string_view p_chooser, const anim::ChooserIndices &p_indices,
+void load_delta_clip(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, std::string_view p_chooser, const anim::ChooserIndices &p_indices,
 		const std::string &p_where, ViewmodelClip &r_clip, float &r_start, float &r_end, std::string &r_path, std::vector<std::string> &r_notes) {
 	core::Result<anim::AntClipRoute> route = anim::route_ant_controller(p_library, "IndexChooserControllerAsset", p_chooser, p_indices);
 	if (!route) {
 		r_notes.push_back(p_where + " " + std::string(p_chooser) + ": " + route.error().message + " (no delta)");
 		return;
 	}
-	r_path = pt1_route_path(*route);
+	r_path = route_path(*route);
 	const core::ant::AntPackage *sp = p_library.static_package();
 	const core::ant::AntPackage *pkg = route->controller_package != nullptr ? route->controller_package : sp;
 	core::ant::GdStruct c = pkg != nullptr ? pkg->find(route->anim_index) : core::ant::GdStruct{};
@@ -1354,7 +1354,7 @@ void pt1_load_delta(const core::ant::AntLibrary &p_library, const anim::Skeleton
 	r_notes.push_back(p_where + " " + std::string(p_chooser) + line);
 }
 
-anim::VmDeltaClip pt1_delta_ref(const ViewmodelClip &p_clip, float p_start, float p_end) {
+anim::VmDeltaClip delta_ref(const ViewmodelClip &p_clip, float p_start, float p_end) {
 	anim::VmDeltaClip d;
 	if (p_clip.source == Source::Clip) {
 		d.clip.clip = &p_clip.clip.clip;
@@ -1380,20 +1380,20 @@ void load_viewmodel_locomotion(const core::ant::AntLibrary &p_library, const ani
 	l->weapon_type = *type;
 	anim::ChooserIndices idx;
 	idx.weapon_type = *type;
-	pt1_load_delta(p_library, p_rig, kVmRunDeltaChooser, idx, where, l->run, l->run_start_frame, l->run_end_frame, l->run_path, r_notes);
-	pt1_load_delta(p_library, p_rig, kVmSprintDeltaChooser, idx, where, l->sprint, l->sprint_start_frame, l->sprint_end_frame, l->sprint_path, r_notes);
+	load_delta_clip(p_library, p_rig, kVmRunDeltaChooser, idx, where, l->run, l->run_start_frame, l->run_end_frame, l->run_path, r_notes);
+	load_delta_clip(p_library, p_rig, kVmSprintDeltaChooser, idx, where, l->sprint, l->sprint_start_frame, l->sprint_end_frame, l->sprint_path, r_notes);
 	if (l->run.source != Source::Clip && l->sprint.source != Source::Clip) {
 		r_notes.push_back(where + ": weapon type " + std::to_string(*type) + ", no delta (the procedural bob)");
 		return;
 	}
-	r_item.pt1_locomotion = std::move(l);
+	r_item.locomotion = std::move(l);
 }
 
 anim::VmLocomotion viewmodel_locomotion(const ViewmodelItem &p_item) {
 	anim::VmLocomotion out;
-	if (const ViewmodelLocomotionClips *l = p_item.pt1_locomotion.get()) {
-		out.run = pt1_delta_ref(l->run, l->run_start_frame, l->run_end_frame);
-		out.sprint = pt1_delta_ref(l->sprint, l->sprint_start_frame, l->sprint_end_frame);
+	if (const ViewmodelLocomotionClips *l = p_item.locomotion.get()) {
+		out.run = delta_ref(l->run, l->run_start_frame, l->run_end_frame);
+		out.sprint = delta_ref(l->sprint, l->sprint_start_frame, l->sprint_end_frame);
 	}
 	return out;
 }

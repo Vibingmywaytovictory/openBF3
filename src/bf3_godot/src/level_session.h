@@ -30,6 +30,7 @@
 #include <vector>
 
 namespace godot {
+class Camera3D;
 class CapsuleMesh;
 class DirectionalLight3D;
 class Label;
@@ -113,8 +114,8 @@ public:
 	uint64_t others_extrapolated() const { return others_extrapolated_; }
 	void reset_others_counts() { others_presented_ = others_extrapolated_ = 0; }
 
-	const bf3::sim::CollisionWorld *pt1_iff_world() const;
-	Bf3UiAssets *pt1_iff_ui_assets() const;
+	const bf3::sim::CollisionWorld *collision_world() const;
+	Bf3UiAssets *ui_assets() const;
 
 	bool restart_client(const std::string &p_netsim, uint64_t p_seed, std::string *r_error);
 
@@ -215,8 +216,8 @@ private:
 	std::unique_ptr<ShotRunner> shots_;
 #endif
 
-	void s1_upload_overlay();
-	void s1_report_others(uint64_t p_now_ns);
+	void upload_nav_overlay();
+	void report_bots(uint64_t p_now_ns);
 	uint32_t bots_ = 0;
 	bool nav_overlay_ = false;
 	double shot_delay_ = 0.0;
@@ -225,24 +226,29 @@ private:
 	std::atomic<bool> nav_ready_{ false };
 	NavOverlay nav_draw_;
 	std::string bots_line_;
-	bool s1_reported_ = false;
+	bool bots_reported_ = false;
 
-	struct M2aSession;
-	struct M2aSessionDeleter {
-		void operator()(M2aSession *p_session) const;
+	struct Game;
+	struct GameDeleter {
+		void operator()(Game *p_game) const;
 	};
-	void m2a_parse_args();
-	void m2a_load_options(bf3::host::SharedLoadOptions &r_options);
+	void game_parse_args();
+	void game_load_options(bf3::host::SharedLoadOptions &r_options);
+	bool game_load_assets(const bf3::host::LevelDatabase &p_db, bf3::core::Cache *p_cache, unsigned p_threads, std::string *r_error);
+	void game_server_config(bf3::host::GameServerConfig &r_game);
+	void game_client_config(bf3::host::ClientSessionConfig &r_config) const;
+	void game_presented(double p_delta, uint64_t p_now_ns);
+	bool game_frame(double p_delta, uint64_t p_now_ns);
+	void game_shutdown();
 
-	bool m2a_load_assets(const bf3::host::LevelDatabase &p_db, bf3::core::Cache *p_cache, unsigned p_threads, std::string *r_error);
-	void m2a_server_config(bf3::host::GameServerConfig &r_game);
-	void m2a_client_config(bf3::host::ClientSessionConfig &r_config) const;
-	void m2a_presented(double p_delta, uint64_t p_now_ns);
-	bool m2a_frame(double p_delta, uint64_t p_now_ns);
-	void m2a_input(const godot::Ref<godot::InputEvent> &p_event);
-	void m2a_shutdown();
-	bool m2b_join_ready() const;
-	std::unique_ptr<M2aSession, M2aSessionDeleter> m2a_;
+	void tdm_parse_args(std::string &r_error);
+	void tdm_load_options(bf3::host::SharedLoadOptions &r_options);
+	void tdm_server_config(bf3::host::GameServerConfig &r_config);
+	void tdm_presented(uint64_t p_now_ns);
+	bool tdm_frame(uint64_t p_now_ns, double p_delta, godot::Camera3D *p_camera, bool p_free_camera);
+	void tdm_shutdown();
+	bool tdm_join_ready() const;
+	std::unique_ptr<Game, GameDeleter> game_;
 };
 
 }

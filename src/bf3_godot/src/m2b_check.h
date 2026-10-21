@@ -16,8 +16,8 @@
 namespace bf3::godot_side {
 
 class Bf3LevelSession;
-struct M2aGame;
-struct M2bGame;
+struct GameState;
+struct TdmState;
 
 enum class M2bCase : uint8_t { Play = 0 };
 inline constexpr uint32_t kM2bCaseCount = 1;
@@ -81,7 +81,7 @@ struct M2bCheckOptions {
 
 class M2bCheck {
 public:
-	M2bCheck(Bf3LevelSession &r_session, M2aGame &r_game, M2bGame &r_m2b, std::vector<M2bCase> p_cases, const M2bCheckOptions &p_options);
+	M2bCheck(Bf3LevelSession &r_session, GameState &r_game, TdmState &r_m2b, std::vector<M2bCase> p_cases, const M2bCheckOptions &p_options);
 	~M2bCheck();
 	M2bCheck(const M2bCheck &) = delete;
 	M2bCheck &operator=(const M2bCheck &) = delete;

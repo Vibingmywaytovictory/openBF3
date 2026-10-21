@@ -5,7 +5,7 @@
 #include "input_mapper.h"
 #include "level_session.h"
 #include "minimap_control.h"
-#include "pt1_iff.h"
+#include "iff_overlay.h"
 #include "world_icons.h"
 
 #if OPENBF3_BUILD_CHECKS
@@ -118,7 +118,7 @@ void Bf3MinimapHud::_bind_methods() {
 void Bf3MinimapHud::_notification(int p_what) {
 	if (p_what == NOTIFICATION_PREDELETE) {
 		stop_.store(true);
-		pt1_iff_.reset();
+		iff_.reset();
 		if (loader_.joinable()) {
 			loader_.join();
 		}
@@ -445,7 +445,7 @@ void Bf3MinimapHud::update_view() {
 	std::vector<MinimapIconDraw> objectives;
 	objectives.reserve(a->level.objectives.size());
 	for (const ui::MinimapObjective &o : a->level.objectives) {
-		const ui::HudIconChoice c = ui::objective_icon(o.kind == ui::ObjectiveKind::Hq, o.initial_owner, kM1LocalTeam);
+		const ui::HudIconChoice c = ui::objective_icon(o.kind == ui::ObjectiveKind::Hq, o.initial_owner, kNoMatchLocalTeam);
 		MinimapIconDraw ic;
 		ic.icon = a->atlas.find(c.icon);
 		ic.state = c.state;
@@ -459,17 +459,17 @@ void Bf3MinimapHud::update_view() {
 	std::vector<MinimapIconDraw> all = objectives;
 	const bf3::host::PresentationFrame &f = session_->frame();
 
-	if (pt1_iff_ == nullptr && f.match_valid) {
-		pt1_iff_ = std::make_unique<Pt1Iff>(session_, this, atlas_, &a->atlas);
+	if (iff_ == nullptr && f.match_valid) {
+		iff_ = std::make_unique<IffOverlay>(session_, this, atlas_, &a->atlas);
 	}
-	if (pt1_iff_ != nullptr) {
-		const bool pt1_fp = !session_->cameras().free();
-		pt1_iff_->frame(pt1_fp ? session_->cameras().first_person() : nullptr, pt1_fp, all);
+	if (iff_ != nullptr) {
+		const bool first_person = !session_->cameras().free();
+		iff_->frame(first_person ? session_->cameras().first_person() : nullptr, first_person, all);
 	}
-	if (pt1_iff_ == nullptr && f.valid && f.other_count > 0) {
+	if (iff_ == nullptr && f.valid && f.other_count > 0) {
 		std::array<bf3::host::PresentedSoldier, bf3::net::kMaxSlots> out{};
 		const size_t n = bf3::host::present_others(f, bf3::net::monotonic_ns(), out);
-		const ui::HudIconChoice c = ui::soldier_icon(false, 2, kM1LocalTeam);
+		const ui::HudIconChoice c = ui::soldier_icon(false, 2, kNoMatchLocalTeam);
 		for (size_t i = 0; i < n; ++i) {
 			MinimapIconDraw ic;
 			ic.icon = a->atlas.find(c.icon);

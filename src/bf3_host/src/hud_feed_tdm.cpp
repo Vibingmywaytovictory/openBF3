@@ -74,7 +74,7 @@ void push_kill(ui::HudKillFeed &r_feed, uint32_t &r_serial, const ui::HudKill &p
 	r_feed.newest_serial = r_serial;
 }
 
-void hide_m2b(ui::HudModel &r_model) {
+void hide_tdm(ui::HudModel &r_model) {
 	r_model.kill_card.visible = false;
 	r_model.kill_card.seconds_left = 0.0f;
 	r_model.end_of_round.visible = false;
@@ -87,8 +87,8 @@ void hide_m2b(ui::HudModel &r_model) {
 void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_drained, const HudStatic &p_static, HudTdmFeedState &r_state,
 		ui::HudModel &r_model) {
 	++r_state.frames;
-	if (!p_input.m2b) {
-		hide_m2b(r_model);
+	if (!p_input.tdm) {
+		hide_tdm(r_model);
 		return;
 	}
 

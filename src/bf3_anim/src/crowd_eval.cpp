@@ -86,12 +86,12 @@ struct CrowdEvaluator::Impl {
 	void publish(double p_blocked);
 	void prepare_job();
 
-	struct M2a;
-	struct M2aDeleter {
-		void operator()(M2a *p_m2a) const;
+	struct Combat;
+	struct CombatDeleter {
+		void operator()(Combat *p_combat) const;
 	};
-	std::unique_ptr<M2a, M2aDeleter> m2a;
-	void evaluate_m2a(uint32_t p_i);
+	std::unique_ptr<Combat, CombatDeleter> combat;
+	void evaluate_combat(uint32_t p_i);
 };
 
 void CrowdEvaluator::Impl::prepare_job() {
@@ -103,8 +103,8 @@ void CrowdEvaluator::Impl::prepare_job() {
 }
 
 void CrowdEvaluator::Impl::evaluate(uint32_t p_i) {
-	if (m2a) {
-		evaluate_m2a(p_i);
+	if (combat) {
+		evaluate_combat(p_i);
 		return;
 	}
 	Soldier &s = soldiers[p_i];
@@ -431,19 +431,19 @@ bool finite_xform(const Xform &p_x) {
 
 }
 
-struct CrowdPt1Run;
-struct CrowdPt1RunDeleter {
-	void operator()(CrowdPt1Run *p_run) const;
+struct CrowdMoveRun;
+struct CrowdMoveRunDeleter {
+	void operator()(CrowdMoveRun *p_run) const;
 };
-struct CrowdPt1Stats {
+struct CrowdMoveStats {
 	uint32_t sampled = 0, moving = 0;
 	bool idle_mix = false;
 };
-std::unique_ptr<CrowdPt1Run, CrowdPt1RunDeleter> crowd_pt1_make(const CrowdMoveGroupSet &p_set, const Skeleton &p_rig, uint32_t p_soldiers);
-bool crowd_pt1_pose(CrowdPt1Run &r_run, uint32_t p_i, size_t p_stance, const CrowdSoldierInput &p_input, float p_step, const LocalPose &p_idle,
-		const Skeleton &p_rig, float &r_phase, core::ant::ClipPose &r_scratch, LocalPose &r_out, CrowdPt1Stats &r_stats);
+std::unique_ptr<CrowdMoveRun, CrowdMoveRunDeleter> crowd_move_make(const CrowdMoveGroupSet &p_set, const Skeleton &p_rig, uint32_t p_soldiers);
+bool crowd_move_pose(CrowdMoveRun &r_run, uint32_t p_i, size_t p_stance, const CrowdSoldierInput &p_input, float p_step, const LocalPose &p_idle,
+		const Skeleton &p_rig, float &r_phase, core::ant::ClipPose &r_scratch, LocalPose &r_out, CrowdMoveStats &r_stats);
 
-struct CrowdEvaluator::Impl::M2a {
+struct CrowdEvaluator::Impl::Combat {
 	struct Weapon {
 		const SkinBinds *binds = nullptr;
 		const CrowdClipData *reload = nullptr;
@@ -508,11 +508,11 @@ struct CrowdEvaluator::Impl::M2a {
 	float corpse_seconds = kCrowdDeathHideSeconds;
 	LocalPose identity;
 	std::vector<Soldier> soldiers;
-	std::unique_ptr<CrowdPt1Run, CrowdPt1RunDeleter> pt1;
+	std::unique_ptr<CrowdMoveRun, CrowdMoveRunDeleter> move_run;
 };
 
-void CrowdEvaluator::Impl::M2aDeleter::operator()(M2a *p_m2a) const {
-	delete p_m2a;
+void CrowdEvaluator::Impl::CombatDeleter::operator()(Combat *p_combat) const {
+	delete p_combat;
 }
 
 core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdClipSet &p_clips, const CrowdStanceSet &p_stance, std::span<const CrowdTeam> p_teams,
@@ -559,7 +559,7 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 		}
 		return core::Status::success();
 	};
-	std::vector<Impl::M2a::Team> m2a_teams(p_teams.size());
+	std::vector<Impl::Combat::Team> combat_teams(p_teams.size());
 	for (size_t t = 0; t < p_teams.size(); ++t) {
 		const CrowdTeam &in = p_teams[t];
 		const std::string where = "crowd team " + std::to_string(t);
@@ -595,7 +595,7 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 			if (core::Status st = check_binds(cw.binds, ww); !st.ok()) {
 				return st.error();
 			}
-			Impl::M2a::Weapon mw;
+			Impl::Combat::Weapon mw;
 			mw.binds = cw.binds;
 			mw.reload = cw.reload;
 			mw.reload_rate = std::isfinite(cw.reload_rate) && cw.reload_rate > 0.0f ? cw.reload_rate : 1.0f;
@@ -621,7 +621,7 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 			mw.muzzle_joint = cw.muzzle_joint;
 			mw.muzzle_offset = cw.muzzle_offset;
 			max_weapon_binds = std::max(max_weapon_binds, uint32_t(cw.binds->size()));
-			m2a_teams[t].weapons.push_back(std::move(mw));
+			combat_teams[t].weapons.push_back(std::move(mw));
 			any_weapons = true;
 		}
 	}
@@ -663,8 +663,8 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 		return e;
 	}
 
-	std::unique_ptr<Impl::M2a, Impl::M2aDeleter> x(new Impl::M2a());
-	x->teams = std::move(m2a_teams);
+	std::unique_ptr<Impl::Combat, Impl::CombatDeleter> x(new Impl::Combat());
+	x->teams = std::move(combat_teams);
 	x->death = p_stance.death;
 	if (!std::isfinite(p_stance.corpse_seconds) || p_stance.corpse_seconds < 0.0f || p_stance.corpse_seconds > kCrowdMaxCorpseSeconds) {
 		return core::make_error("crowd: corpse_seconds " + std::to_string(p_stance.corpse_seconds) + " outside [0, 3600]");
@@ -673,7 +673,7 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 	x->identity = identity_pose(rig);
 	core::ant::ClipPose scratch;
 	{
-		Impl::M2a::Stance &stand = x->stances[0];
+		Impl::Combat::Stance &stand = x->stances[0];
 		stand.idle = &m.idle;
 		stand.aim_up = &m.aim_up;
 		stand.aim_down = &m.aim_down;
@@ -688,7 +688,7 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 		}
 	}
 	for (size_t st = 1; st < 3; ++st) {
-		Impl::M2a::Stance &d = x->stances[st];
+		Impl::Combat::Stance &d = x->stances[st];
 		d = x->stances[0];
 		d.idle = &m.idle;
 		d.idle_fallback = true;
@@ -705,7 +705,7 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 		static constexpr ServerPoseClip kUp[3] = { ServerPoseClip::StandAimUp, ServerPoseClip::CrouchAimUp, ServerPoseClip::ProneAimUp };
 		static constexpr ServerPoseClip kDown[3] = { ServerPoseClip::StandAimDown, ServerPoseClip::CrouchAimDown, ServerPoseClip::ProneAimDown };
 		for (size_t st = 1; st < 3; ++st) {
-			Impl::M2a::Stance &d = x->stances[st];
+			Impl::Combat::Stance &d = x->stances[st];
 			if (sp.present[size_t(kIdle[st])]) {
 				const CrowdClipData &c = sp.get(kIdle[st]);
 				if (sample_pose(rig, c.clip, c.tracks, 0.0f, d.idle_own, scratch)) {
@@ -740,7 +740,7 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 			{ CrowdMoveClip::Count, CrowdMoveClip::CrawlFwd, CrowdMoveClip::CrawlBwd, CrowdMoveClip::CrawlLeft, CrowdMoveClip::CrawlRight },
 		};
 		for (size_t ms = 0; ms < kCrowdMoveStances; ++ms) {
-			Impl::M2a::Stance &d = x->stances[ms + 1];
+			Impl::Combat::Stance &d = x->stances[ms + 1];
 			if (!mv.moves_ok[ms]) {
 				continue;
 			}
@@ -763,7 +763,7 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 	}
 
 	for (size_t st = 0; st < 3; ++st) {
-		Impl::M2a::Stance &d = x->stances[st];
+		Impl::Combat::Stance &d = x->stances[st];
 		if (st == 0) {
 			continue;
 		}
@@ -774,10 +774,10 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 		}
 	}
 	if (p_stance.move_groups != nullptr) {
-		x->pt1 = crowd_pt1_make(*p_stance.move_groups, rig, p_soldiers);
+		x->move_run = crowd_move_make(*p_stance.move_groups, rig, p_soldiers);
 	}
 	x->soldiers.resize(p_soldiers);
-	for (Impl::M2a::Soldier &xs : x->soldiers) {
+	for (Impl::Combat::Soldier &xs : x->soldiers) {
 		for (int k = 0; k < 2; ++k) {
 			xs.weapon_palette[size_t(k)].assign(max_weapon_binds, Mat34{});
 		}
@@ -785,14 +785,14 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 		xs.extra2 = rest_pose(rig);
 		xs.alive = rest_pose(rig);
 	}
-	m.m2a = std::move(x);
+	m.combat = std::move(x);
 	return e;
 }
 
-void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
+void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 	Soldier &s = soldiers[p_i];
-	M2a &x = *m2a;
-	M2a::Soldier &xs = x.soldiers[p_i];
+	Combat &x = *combat;
+	Combat::Soldier &xs = x.soldiers[p_i];
 	s.skipped_lod = s.hidden = s.two_cycle = s.idle_mix = s.reloading = s.aiming = false;
 	s.loco_clips = 0;
 	xs.transition = xs.moving = xs.firing = xs.dying = xs.wrote_weapon = xs.wrote_muzzle = false;
@@ -862,11 +862,11 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 	s.ever = true;
 	const uint32_t team_index = std::min<uint32_t>(s.input.team, uint32_t(teams.size() - 1));
 	const Team &team = teams[team_index];
-	const M2a::Team &xteam = x.teams[team_index];
+	const Combat::Team &xteam = x.teams[team_index];
 	const Skeleton &rig = clips->rig;
 
 	uint8_t widx = kNoCrowdWeapon;
-	const M2a::Weapon *weapon = nullptr;
+	const Combat::Weapon *weapon = nullptr;
 	if (!xteam.weapons.empty()) {
 		widx = s.input.weapon;
 		if (widx >= xteam.weapons.size()) {
@@ -903,12 +903,12 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 	const bool in_transition = from != to;
 	const uint8_t stance = in_transition ? from : to;
 	xs.stance = to;
-	const M2a::Stance &aim_stance = x.stances[stance];
+	const Combat::Stance &aim_stance = x.stances[stance];
 
-	auto loco_blend = [&](const M2a::Stance &p_st, LocalPose &r_out) {
-		if (x.pt1) {
-			CrowdPt1Stats ps;
-			if (crowd_pt1_pose(*x.pt1, p_i, size_t(&p_st - x.stances.data()), s.input, step, *p_st.idle, rig, s.phase, s.scratch, r_out, ps)) {
+	auto loco_blend = [&](const Combat::Stance &p_st, LocalPose &r_out) {
+		if (x.move_run) {
+			CrowdMoveStats ps;
+			if (crowd_move_pose(*x.move_run, p_i, size_t(&p_st - x.stances.data()), s.input, step, *p_st.idle, rig, s.phase, s.scratch, r_out, ps)) {
 				s.loco_clips = uint8_t(std::min<uint32_t>(ps.sampled, 255));
 				s.two_cycle = ps.moving >= 2;
 				s.idle_mix = ps.idle_mix;
@@ -976,7 +976,7 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 			}
 			return;
 		}
-		const M2a::Stance &st = x.stances[to];
+		const Combat::Stance &st = x.stances[to];
 		loco_blend(st, r_out);
 
 		if (to != 0 && (st.idle_fallback || (st.moves_fallback && xs.moving))) {
@@ -985,7 +985,7 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 	};
 	if (xs.dead) {
 		xs.dying = true;
-		const M2a::Stance &ds = x.stances[xs.death_stance];
+		const Combat::Stance &ds = x.stances[xs.death_stance];
 		if (x.death == CrowdDeathStyle::Clip && ds.death != nullptr) {
 			const float frame = std::min(float(dead_age) * ds.death->tracks.fps, float(ds.death->tracks.end_frame));
 			sample_pose(rig, ds.death->clip, ds.death->tracks, frame, s.pose, s.scratch);
@@ -1105,11 +1105,11 @@ void CrowdEvaluator::Impl::evaluate_m2a(uint32_t p_i) {
 
 bool CrowdEvaluator::muzzle_model(uint32_t p_i, Xform &r_model) const {
 	const Impl &m = *impl_;
-	if (!m.m2a || !drawn(p_i)) {
+	if (!m.combat || !drawn(p_i)) {
 		return false;
 	}
 	const Impl::Soldier &s = m.soldiers[p_i];
-	const Impl::M2a::Soldier &xs = m.m2a->soldiers[p_i];
+	const Impl::Combat::Soldier &xs = m.combat->soldiers[p_i];
 	if (!xs.muzzle_ok[s.front]) {
 		return false;
 	}
@@ -1119,10 +1119,10 @@ bool CrowdEvaluator::muzzle_model(uint32_t p_i, Xform &r_model) const {
 
 uint8_t CrowdEvaluator::weapon_of(uint32_t p_i) const {
 	const Impl &m = *impl_;
-	if (!m.m2a || !drawn(p_i)) {
+	if (!m.combat || !drawn(p_i)) {
 		return kNoCrowdWeapon;
 	}
-	return m.m2a->soldiers[p_i].weapon[m.soldiers[p_i].front];
+	return m.combat->soldiers[p_i].weapon[m.soldiers[p_i].front];
 }
 
 std::span<const Mat34> CrowdEvaluator::weapon_palette(uint32_t p_i) const {
@@ -1130,7 +1130,7 @@ std::span<const Mat34> CrowdEvaluator::weapon_palette(uint32_t p_i) const {
 		return {};
 	}
 	const Impl &m = *impl_;
-	const Impl::M2a::Soldier &xs = m.m2a->soldiers[p_i];
+	const Impl::Combat::Soldier &xs = m.combat->soldiers[p_i];
 	const uint8_t f = m.soldiers[p_i].front;
 	return std::span<const Mat34>(xs.weapon_palette[f].data(), std::min<size_t>(xs.weapon_palette[f].size(), xs.weapon_binds[f]));
 }
@@ -1144,18 +1144,18 @@ bool CrowdEvaluator::drawn(uint32_t p_i) const {
 	if (!s.ever || (s.input.flags & crowd_flags::kHidden) != 0) {
 		return false;
 	}
-	return !m.m2a || !m.m2a->soldiers[p_i].hidden;
+	return !m.combat || !m.combat->soldiers[p_i].hidden;
 }
 
-CrowdM2aStats CrowdEvaluator::m2a_stats() const {
-	CrowdM2aStats r;
+CrowdCombatStats CrowdEvaluator::combat_stats() const {
+	CrowdCombatStats r;
 	const Impl &m = *impl_;
-	if (!m.m2a) {
+	if (!m.combat) {
 		return r;
 	}
 	for (size_t i = 0; i < m.soldiers.size(); ++i) {
 		const Impl::Soldier &s = m.soldiers[i];
-		const Impl::M2a::Soldier &xs = m.m2a->soldiers[i];
+		const Impl::Combat::Soldier &xs = m.combat->soldiers[i];
 		r.stance_fallbacks += xs.fallbacks;
 		r.bad_weapon += xs.bad_weapon;
 		r.bad_stance += xs.bad_stance;
@@ -1189,7 +1189,7 @@ CrowdM2aStats CrowdEvaluator::m2a_stats() const {
 
 namespace bf3::anim {
 
-struct CrowdPt1Run {
+struct CrowdMoveRun {
 	struct Soldier {
 		float sprint_w = 0.0f;
 		float move_w = 0.0f;
@@ -1201,15 +1201,15 @@ struct CrowdPt1Run {
 	std::vector<Soldier> soldiers;
 };
 
-void CrowdPt1RunDeleter::operator()(CrowdPt1Run *p_run) const {
+void CrowdMoveRunDeleter::operator()(CrowdMoveRun *p_run) const {
 	delete p_run;
 }
 
-std::unique_ptr<CrowdPt1Run, CrowdPt1RunDeleter> crowd_pt1_make(const CrowdMoveGroupSet &p_set, const Skeleton &p_rig, uint32_t p_soldiers) {
-	std::unique_ptr<CrowdPt1Run, CrowdPt1RunDeleter> run(new CrowdPt1Run());
+std::unique_ptr<CrowdMoveRun, CrowdMoveRunDeleter> crowd_move_make(const CrowdMoveGroupSet &p_set, const Skeleton &p_rig, uint32_t p_soldiers) {
+	std::unique_ptr<CrowdMoveRun, CrowdMoveRunDeleter> run(new CrowdMoveRun());
 	run->set = &p_set;
 	run->soldiers.resize(p_soldiers);
-	for (CrowdPt1Run::Soldier &x : run->soldiers) {
+	for (CrowdMoveRun::Soldier &x : run->soldiers) {
 		for (LocalPose &t : x.term) {
 			t = rest_pose(p_rig);
 		}
@@ -1221,7 +1221,7 @@ std::unique_ptr<CrowdPt1Run, CrowdPt1RunDeleter> crowd_pt1_make(const CrowdMoveG
 
 namespace {
 
-uint32_t pt1_group_pose(const CrowdMoveGroup &p_group, const MoveGroupWeights &p_w, float p_phase, const LocalPose &p_idle,
+uint32_t sample_group_pose(const CrowdMoveGroup &p_group, const MoveGroupWeights &p_w, float p_phase, const LocalPose &p_idle,
 		std::array<LocalPose, kMaxMoveGroupTerms> &r_term, core::ant::ClipPose &r_scratch, LocalPose &r_out) {
 	std::array<const LocalPose *, kMaxMoveGroupTerms> inputs{};
 	std::array<float, kMaxMoveGroupTerms> weights{};
@@ -1257,17 +1257,17 @@ uint32_t pt1_group_pose(const CrowdMoveGroup &p_group, const MoveGroupWeights &p
 	return n;
 }
 
-float pt1_ramp(float p_w, float p_target, float p_step, float p_seconds) {
+float ramp_weight(float p_w, float p_target, float p_step, float p_seconds) {
 	const float d = p_seconds > 0.0f ? p_step / p_seconds : 1.0f;
 	return p_w < p_target ? std::min(p_target, p_w + d) : std::max(p_target, p_w - d);
 }
 
 }
 
-bool crowd_pt1_pose(CrowdPt1Run &r_run, uint32_t p_i, size_t p_stance, const CrowdSoldierInput &p_input, float p_step, const LocalPose &p_idle,
-		const Skeleton &p_rig, float &r_phase, core::ant::ClipPose &r_scratch, LocalPose &r_out, CrowdPt1Stats &r_stats) {
+bool crowd_move_pose(CrowdMoveRun &r_run, uint32_t p_i, size_t p_stance, const CrowdSoldierInput &p_input, float p_step, const LocalPose &p_idle,
+		const Skeleton &p_rig, float &r_phase, core::ant::ClipPose &r_scratch, LocalPose &r_out, CrowdMoveStats &r_stats) {
 	(void)p_rig;
-	r_stats = CrowdPt1Stats{};
+	r_stats = CrowdMoveStats{};
 	if (r_run.set == nullptr || p_i >= r_run.soldiers.size() || p_stance > 1) {
 		return false;
 	}
@@ -1277,7 +1277,7 @@ bool crowd_pt1_pose(CrowdPt1Run &r_run, uint32_t p_i, size_t p_stance, const Cro
 	}
 	const CrowdMoveGroup &sprint_group = r_run.set->get(CrowdMoveGroupRole::Sprint);
 	const bool can_sprint = p_stance == 0 && sprint_group.ok;
-	CrowdPt1Run::Soldier &x = r_run.soldiers[p_i];
+	CrowdMoveRun::Soldier &x = r_run.soldiers[p_i];
 	const float step = std::isfinite(p_step) ? std::clamp(p_step, 0.0f, 1.0f) : 0.0f;
 
 	const float cy = std::cos(p_input.yaw), sy = std::sin(p_input.yaw);
@@ -1297,8 +1297,8 @@ bool crowd_pt1_pose(CrowdPt1Run &r_run, uint32_t p_i, size_t p_stance, const Cro
 		x.sprint_w = sprint_target;
 		x.move_w = move_target;
 	} else {
-		x.sprint_w = pt1_ramp(x.sprint_w, sprint_target, step, kCrowdSprintBlendSeconds);
-		x.move_w = pt1_ramp(x.move_w, move_target, step, kCrowdMoveBlendSeconds);
+		x.sprint_w = ramp_weight(x.sprint_w, sprint_target, step, kCrowdSprintBlendSeconds);
+		x.move_w = ramp_weight(x.move_w, move_target, step, kCrowdMoveBlendSeconds);
 	}
 	if (!can_sprint) {
 		x.sprint_w = 0.0f;
@@ -1324,13 +1324,13 @@ bool crowd_pt1_pose(CrowdPt1Run &r_run, uint32_t p_i, size_t p_stance, const Cro
 	}
 	uint32_t sampled = 0, moving = 0;
 	if (sw >= 1.0f) {
-		sampled += pt1_group_pose(sprint_group, ws, r_phase, p_idle, x.term, r_scratch, x.group_a);
+		sampled += sample_group_pose(sprint_group, ws, r_phase, p_idle, x.term, r_scratch, x.group_a);
 		moving += ws.moving;
 	} else {
-		sampled += pt1_group_pose(main, wa, r_phase, p_idle, x.term, r_scratch, x.group_a);
+		sampled += sample_group_pose(main, wa, r_phase, p_idle, x.term, r_scratch, x.group_a);
 		moving += wa.moving;
 		if (sw > 0.0f) {
-			sampled += pt1_group_pose(sprint_group, ws, r_phase, p_idle, x.term, r_scratch, x.group_b);
+			sampled += sample_group_pose(sprint_group, ws, r_phase, p_idle, x.term, r_scratch, x.group_b);
 			moving += ws.moving;
 			blend_poses(x.group_a, x.group_b, sw, x.group_a);
 		}

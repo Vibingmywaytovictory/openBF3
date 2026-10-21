@@ -1146,7 +1146,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 			ctx.yaw = c.yaw;
 			ctx.pitch = c.pitch;
 			sw::WeaponTickOutput out;
-			sw::step_weapons_m2a(*t.table, w, c, ctx, 1, 100, out);
+			sw::step_weapons_with_rules(*t.table, w, c, ctx, 1, 100, out);
 			states.push_back(w);
 		}
 		auto view = [&](sim::Tick p_tick) { return net::weapons_wire_view(states[p_tick - 100], p_tick); };

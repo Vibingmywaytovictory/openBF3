@@ -12,7 +12,7 @@ if(DEFINED BUILD_DIR AND NOT BUILD_DIR STREQUAL "")
 endif()
 separate_arguments(extra NATIVE_COMMAND "${ARGS}")
 godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 540
-    ARGS --path "${PROJECT_DIR}" res://scenes/m2b_metro.tscn -- "--m2b-check=play" "--m2b-shots=${shots}" ${cache_args} ${extra})
+    ARGS --path "${PROJECT_DIR}" res://scenes/metro_tdm.tscn -- "--m2b-check=play" "--m2b-shots=${shots}" ${cache_args} ${extra})
 string(REGEX MATCHALL "[^\n]*ERROR[^\n]*" error_lines "${out}\n${err}")
 list(LENGTH error_lines error_count)
 message("ERROR lines in the log: ${error_count}")

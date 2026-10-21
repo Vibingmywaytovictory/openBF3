@@ -20,7 +20,7 @@
 #include "game_crowd.h"
 #include "game_fx.h"
 #include "m2a_check.h"
-#include "m2a_game.h"
+#include "game_frame.h"
 
 #include "gunplay_fixture.h"
 #include "test_support.h"
@@ -198,10 +198,10 @@ TEST_SUITE("m2a-contract3") {
 		CHECK(fc.tier == fx::kTierHigh);
 		CHECK(fc.own_slot == 0xFF);
 		CHECK((fc.impacts && fc.decals && fc.tracers && fc.shells));
-		const gs::M2aLoadInputs li;
+		const gs::GameLoadInputs li;
 		CHECK(li.db == nullptr);
 		CHECK(li.own_team == 1);
-		const gs::M2aFrame mf;
+		const gs::GameFrame mf;
 		CHECK(mf.events.empty());
 		CHECK(mf.muzzles.empty());
 		CHECK(mf.own_slot == 0xFF);

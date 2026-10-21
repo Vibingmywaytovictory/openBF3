@@ -52,8 +52,8 @@ target_sources(bf3_godot PRIVATE
 target_link_libraries(bf3_godot PRIVATE psapi)
 
 target_sources(bf3_godot PRIVATE
-    src/s3_crowd.cpp
-    src/s3_crowd.h
+    src/crowd_scene.cpp
+    src/crowd_scene.h
     src/skin_upload.cpp
     src/skin_upload.h
 )
@@ -107,13 +107,13 @@ target_sources(bf3_godot PRIVATE
 target_link_libraries(bf3_godot PRIVATE bf3_audio bf3_client_audio)
 
 target_sources(bf3_godot PRIVATE
-    src/m2a_game.h
+    src/game_frame.h
     src/game_audio.h
     src/game_fx.h
     src/game_crowd.h
     src/m2a_check.h
-    src/level_session_m2a.h
-    src/level_session_m2a.cpp
+    src/level_session_game.h
+    src/level_session_game.cpp
     src/viewmodel_muzzle.h
     src/viewmodel_muzzle.cpp
 )
@@ -133,16 +133,13 @@ target_sources(bf3_godot PRIVATE
     src/fx_decals.h
 )
 
-target_compile_definitions(bf3_godot PRIVATE OPENBF3_M2A_HAVE_FX=1 OPENBF3_M2A_HAVE_AUDIO=1 OPENBF3_M2A_HAVE_CROWD=1 OPENBF3_M2A_HAVE_BT=1)
-
 target_sources(bf3_godot PRIVATE
     src/hud_tdm.h
     src/death_camera.h
-    src/m2b_game.h
+    src/tdm_flow.h
     src/m2b_check.h
-    src/level_session_m2b.h
+    src/level_session_tdm.h
 )
-target_compile_definitions(bf3_godot PRIVATE OPENBF3_M2B_HAVE_UI=1 OPENBF3_M2B_HAVE_CAM=1)
 
 target_sources(bf3_godot PRIVATE
     src/death_camera.cpp
@@ -167,13 +164,13 @@ target_sources(bf3_godot PRIVATE
 )
 
 target_sources(bf3_godot PRIVATE
-    src/level_session_m2b.cpp
-    src/m2b_game.cpp
+    src/level_session_tdm.cpp
+    src/tdm_flow.cpp
 )
 
 target_sources(bf3_godot PRIVATE
-    src/pt1_iff.h
-    src/pt1_iff.cpp
+    src/iff_overlay.h
+    src/iff_overlay.cpp
     src/iff_frame.h
     src/iff_frame.cpp
 )
@@ -203,6 +200,8 @@ if(OPENBF3_BUILD_CHECKS)
         src/m2a_viewmodel_demo.cpp
         src/m2a_viewmodel_demo.h
         src/m2b_check.cpp
+        src/m2b_check_rows.cpp
+        src/m2b_check_rows.h
         src/m9_reload_check.cpp
         src/m9_reload_check.h
         src/minimap_check.cpp

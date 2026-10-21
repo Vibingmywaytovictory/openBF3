@@ -1,6 +1,6 @@
-#include "level_session_m2b.h"
+#include "level_session_tdm.h"
 
-#include "level_session_m2a.h"
+#include "level_session_game.h"
 
 #include "bf3_localisation.h"
 #include "fp_camera.h"
@@ -30,16 +30,6 @@
 #include <cstdio>
 #include <filesystem>
 
-#ifndef OPENBF3_M2B_HAVE_UI
-#define OPENBF3_M2B_HAVE_UI 0
-#endif
-#ifndef OPENBF3_M2B_HAVE_CAM
-#define OPENBF3_M2B_HAVE_CAM 0
-#endif
-#ifndef OPENBF3_M2A_HAVE_CROWD
-#define OPENBF3_M2A_HAVE_CROWD 0
-#endif
-
 namespace bf3::godot_side {
 
 using namespace godot;
@@ -49,20 +39,7 @@ namespace sim = bf3::sim;
 
 namespace {
 
-template <typename T>
-void delete_m2b_part(T *p_part) {
-	delete p_part;
-}
-
-std::filesystem::path m2b_utf8_path(const std::string &p_text) {
-	return std::filesystem::path(std::u8string(p_text.begin(), p_text.end()));
-}
-
-const char *m2b_team_name(uint8_t p_team) {
-	return p_team == 1 ? "US" : (p_team == 2 ? "RU" : "?");
-}
-
-const char *m2b_phase_text(net::MatchPhase p_phase) {
+const char *phase_name(net::MatchPhase p_phase) {
 	switch (p_phase) {
 		case net::MatchPhase::Loading:
 			return "loading";
@@ -76,13 +53,38 @@ const char *m2b_phase_text(net::MatchPhase p_phase) {
 	return "?";
 }
 
-std::string m2b_config_path(const char *p_res) {
+std::string config_path(const char *p_res) {
 	const std::string path = to_std(ProjectSettings::get_singleton()->globalize_path(p_res));
 	std::error_code ec;
-	return std::filesystem::exists(m2b_utf8_path(path), ec) ? path : std::string();
+	return std::filesystem::exists(utf8_path(path), ec) ? path : std::string();
 }
 
-bool m2b_presented_position(const host::PresentationFrame &p_frame, uint64_t p_now_ns, uint8_t p_slot, sim::Vec3 &r_position) {
+void print_match(const net::MatchState &p_match) {
+	char line[192];
+	std::snprintf(line, sizeof(line), "[tdm] match: %s, US %d - RU %d of %d%s", phase_name(p_match.phase), p_match.kills[0], p_match.kills[1], p_match.kill_limit,
+			p_match.winner == 1 ? ", US wins" : (p_match.winner == 2 ? ", RU wins" : ""));
+	UtilityFunctions::print(line);
+}
+
+TdmArgText tdm_arg_text() {
+	TdmArgText a;
+	a.has_kill_limit = has_user_arg("kill-limit");
+	a.kill_limit = user_arg_value("kill-limit");
+	a.has_preround = has_user_arg("preround");
+	a.preround = user_arg_value("preround");
+	a.has_bots = has_user_arg("bots");
+	a.bots = user_arg_value("bots");
+	a.has_deploy_screen = has_user_arg("deploy-screen");
+	a.deploy_screen = user_arg_value("deploy-screen");
+	return a;
+}
+
+std::string limits_text(const TdmOptions &p_options) {
+	return "kill limit " + (p_options.kill_limit > 0 ? std::to_string(p_options.kill_limit) : std::string("data (100)")) + ", pre-round " +
+			(p_options.preround_s >= 0.0f ? std::to_string(p_options.preround_s) + " s" : std::string("data (10 s)"));
+}
+
+bool presented_position(const host::PresentationFrame &p_frame, uint64_t p_now_ns, uint8_t p_slot, sim::Vec3 &r_position) {
 	if (!p_frame.valid || p_slot == 0xFF) {
 		return false;
 	}
@@ -97,7 +99,7 @@ bool m2b_presented_position(const host::PresentationFrame &p_frame, uint64_t p_n
 	return false;
 }
 
-const net::PlayerRow *m2b_row_of(const host::PresentationFrame &p_frame, uint8_t p_slot) {
+const net::PlayerRow *player_row_of(const host::PresentationFrame &p_frame, uint8_t p_slot) {
 	const size_t n = std::min<size_t>(p_frame.player_count, p_frame.players.size());
 	for (size_t i = 0; i < n; ++i) {
 		if (p_frame.players[i].slot == p_slot) {
@@ -107,27 +109,14 @@ const net::PlayerRow *m2b_row_of(const host::PresentationFrame &p_frame, uint8_t
 	return nullptr;
 }
 
-Label *m2b_make_label(int p_size) {
-	Label *l = memnew(Label);
-	l->add_theme_color_override("font_color", Color(1, 1, 1));
-	l->add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9f));
-	l->add_theme_constant_override("shadow_offset_x", 1);
-	l->add_theme_constant_override("shadow_offset_y", 1);
-	l->add_theme_font_size_override("font_size", p_size);
-	l->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
-	l->set_vertical_alignment(VERTICAL_ALIGNMENT_CENTER);
-	l->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
-	return l;
-}
-
-void m2b_free_label(Label *&r_label) {
+void free_label(Label *&r_label) {
 	if (r_label != nullptr) {
 		r_label->queue_free();
 		r_label = nullptr;
 	}
 }
 
-Transform3D m2b_camera_transform(const fx::Transform &p_t) {
+Transform3D camera_transform(const fx::Transform &p_t) {
 	Basis b;
 	b.set_column(0, -Vector3(p_t.right.x, p_t.right.y, p_t.right.z));
 	b.set_column(1, Vector3(p_t.up.x, p_t.up.y, p_t.up.z));
@@ -135,7 +124,7 @@ Transform3D m2b_camera_transform(const fx::Transform &p_t) {
 	return Transform3D(b, Vector3(p_t.trans.x, p_t.trans.y, p_t.trans.z));
 }
 
-void m2b_keep_view(M2bGame &r_m, const Transform3D &p_t) {
+void keep_view(TdmState &r_m, const Transform3D &p_t) {
 	for (int c = 0; c < 3; ++c) {
 		const Vector3 col = p_t.basis.get_column(c);
 		r_m.view_basis[c * 3 + 0] = col.x;
@@ -148,7 +137,7 @@ void m2b_keep_view(M2bGame &r_m, const Transform3D &p_t) {
 	r_m.view_valid = true;
 }
 
-Transform3D m2b_kept_view(const M2bGame &p_m) {
+Transform3D kept_view(const TdmState &p_m) {
 	Basis b;
 	for (int c = 0; c < 3; ++c) {
 		b.set_column(c, Vector3(p_m.view_basis[c * 3 + 0], p_m.view_basis[c * 3 + 1], p_m.view_basis[c * 3 + 2]));
@@ -156,209 +145,166 @@ Transform3D m2b_kept_view(const M2bGame &p_m) {
 	return Transform3D(b, Vector3(p_m.view_origin[0], p_m.view_origin[1], p_m.view_origin[2]));
 }
 
-void m2b_build(M2aGame &r_game, M2bGame &r_m, bool p_headless) {
+void build_tdm_ui(GameState &r_game, TdmState &r_m, bool p_headless) {
 	r_m.built = true;
 	r_m.windowed = !p_headless;
 
-	m2b_free_label(r_game.score_label);
-	m2b_free_label(r_game.kit_label);
+	free_label(r_game.score_label);
+	free_label(r_game.kit_label);
 	if (r_m.options.deploy_screen) {
-		m2b_free_label(r_game.death_label);
+		free_label(r_game.death_label);
 	}
-#if OPENBF3_M2B_HAVE_UI
 	if (r_m.windowed && r_game.layer != nullptr) {
-		r_m.tdm_hud = std::unique_ptr<Bf3TdmHud, void (*)(Bf3TdmHud *)>(new Bf3TdmHud(), &delete_m2b_part<Bf3TdmHud>);
+		r_m.tdm_hud = std::unique_ptr<Bf3TdmHud, void (*)(Bf3TdmHud *)>(new Bf3TdmHud(), &delete_part<Bf3TdmHud>);
 		std::string error;
 		Bf3Localisation *loc = r_game.localisation != nullptr ? r_game.localisation : Bf3Localisation::current();
 		Bf3UiAssets *assets = r_game.ui_assets != nullptr ? r_game.ui_assets : Bf3UiAssets::current();
 		if (!r_m.tdm_hud->build(r_game.layer, loc, assets, &error)) {
-			UtilityFunctions::print(to_godot("[m2b] ERROR TDM HUD build: " + error));
+			UtilityFunctions::print(to_godot("[tdm] ERROR TDM HUD build: " + error));
 			r_m.tdm_hud.reset();
 			++r_m.ui_build_failures;
 		}
 	}
-#else
-	UtilityFunctions::print("[m2b] TDM HUD skipped: waiting for ui (a status label stands in for the spawn screen)");
-#endif
-#if !OPENBF3_M2B_HAVE_UI
-	if (r_game.layer != nullptr) {
-		r_m.status_label = m2b_make_label(22);
-		r_m.status_label->set_name("M2bStatus");
-		r_game.layer->add_child(r_m.status_label);
-	}
-#endif
-#if OPENBF3_M2B_HAVE_CAM
-	r_m.death_camera = std::unique_ptr<Bf3DeathCamera, void (*)(Bf3DeathCamera *)>(new Bf3DeathCamera(), &delete_m2b_part<Bf3DeathCamera>);
-#if OPENBF3_M2A_HAVE_CROWD
-
+	r_m.death_camera = std::unique_ptr<Bf3DeathCamera, void (*)(Bf3DeathCamera *)>(new Bf3DeathCamera(), &delete_part<Bf3DeathCamera>);
 	if (r_game.crowd != nullptr && !r_game.crowd->built()) {
 		r_game.crowd->set_corpse_seconds(r_m.corpse_seconds > 0.0f ? r_m.corpse_seconds : bf3::anim::kCrowdCorpseSeconds);
 	}
-#endif
-#else
-	UtilityFunctions::print("[m2b] death view skipped: waiting for cam (the camera stays on the corpse)");
-#endif
-}
-
-void m2b_status_text(const M2bGame &p_m, const host::PresentationFrame &p_frame, bool p_alive, Viewport *p_viewport) {
-	if (p_m.status_label == nullptr) {
-		return;
-	}
-	const Vector2 vp = p_viewport != nullptr ? p_viewport->get_visible_rect().size : Vector2(1280, 720);
-	std::string text;
-	char line[256];
-	if (p_frame.match_valid) {
-		const net::MatchState &ms = p_frame.match;
-		std::snprintf(line, sizeof(line), "%s   US %d : RU %d of %d", m2b_phase_text(ms.phase), ms.kills[0], ms.kills[1], ms.kill_limit);
-		text = line;
-		if (ms.phase == net::MatchPhase::PreRound && ms.countdown_end_tick > p_frame.newest_tick) {
-			std::snprintf(line, sizeof(line), "   round starts in %.0f s", double(ms.countdown_end_tick - p_frame.newest_tick) / double(sim::kSimHz));
-			text += line;
-		}
-		if (ms.phase == net::MatchPhase::RoundOver) {
-			text += ms.winner == 1 ? "\nUS WINS" : (ms.winner == 2 ? "\nRU WINS" : "\nDRAW");
-		}
-	} else {
-		text = "waiting for the match";
-	}
-	if (p_m.spawn_screen) {
-		std::snprintf(line, sizeof(line), "\n\nSPAWN   kit: %s (1-4)   team %s", host::kit_role_name(host::KitRole(std::min<uint8_t>(p_m.spawn_kit, host::kKitCount - 1))),
-				m2b_team_name(p_m.own_team));
-		text += line;
-		if (p_m.can_deploy) {
-			text += p_m.deploy.armed ? "\ndeploying..." : "\nENTER: deploy";
-		} else if (p_frame.own_respawn_tick > p_frame.newest_tick) {
-			std::snprintf(line, sizeof(line), "\ndeploy in %.1f s", double(p_frame.own_respawn_tick - p_frame.newest_tick) / double(sim::kSimHz));
-			text += line;
-		}
-		if (p_frame.own_revive_until > p_frame.newest_tick && p_m.spawned_this_round) {
-			text += "   revive possible";
-		}
-	} else if (!p_alive && p_m.own_death_s >= 0.0 && p_m.own_killer != 0xFF) {
-		std::snprintf(line, sizeof(line), "\n\nKILLED BY slot %u (%s)", unsigned(p_m.own_killer), p_m.own_killer == p_m.own_slot ? "self" : "enemy");
-		text += line;
-	}
-	p_m.status_label->set_text(to_godot(text));
-	p_m.status_label->set_position(Vector2(0, vp.y * 0.12f));
-	p_m.status_label->set_size(Vector2(vp.x, vp.y * 0.5f));
 }
 
 }
 
-void m2b_gx_args(M2aGame &r_game, bool p_scene_m2b, InputMapper &r_mapper, uint32_t &r_bots, double &r_quit_after, std::string &r_error) {
+void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
+	GameState &g = *game_;
+	const bool scene_tdm = has_meta("openbf3_tdm") && bool(get_meta("openbf3_tdm"));
 	const bool check = has_check_arg("m2b-check");
-	if (!p_scene_m2b && !check) {
+	const bool preview = !scene_tdm && !check && has_user_arg("tdm");
+	g.tdm_preview = TdmPreview();
+	if (!scene_tdm && !check && !preview) {
 		return;
 	}
-	r_game.m2b = std::unique_ptr<M2bGame, void (*)(M2bGame *)>(new M2bGame(), &delete_m2b_part<M2bGame>);
-	M2bGame &m = *r_game.m2b;
-	m.enabled = true;
-	m.playable = !check;
+	TdmArgText a = tdm_arg_text();
 	std::string error;
-	if (check) {
-		bf3::core::Result<std::vector<M2bCase>> cases = parse_m2b_cases(user_arg_value("m2b-check"));
-		if (!cases) {
-			error = cases.error().message;
-		} else {
-			m.cases = std::move(*cases);
+	if (preview) {
+		a.has_bots = false;
+		a.has_deploy_screen = false;
+		TdmPreview &p = g.tdm_preview;
+		p.on = true;
+		p.options.deploy_screen = false;
+		if (const bf3::core::Status s = parse_tdm_options(a, p.options); !s.ok()) {
+			error = s.error().message;
 		}
-	}
-	M2bArgText a;
-	a.has_kill_limit = has_user_arg("kill-limit");
-	a.kill_limit = user_arg_value("kill-limit");
-	a.has_preround = has_user_arg("preround");
-	a.preround = user_arg_value("preround");
-	a.has_bots = has_user_arg("bots");
-	a.bots = user_arg_value("bots");
-	a.has_deploy_screen = has_user_arg("deploy-screen");
-	a.deploy_screen = user_arg_value("deploy-screen");
-	if (const bf3::core::Status s = parse_m2b_options(a, m.options); !s.ok() && error.empty()) {
-		error = s.error().message;
-	}
-	r_bots = m.options.bots;
-	m.options.tdm_tuning_cfg = m2b_config_path("res://config/tdm_tuning.cfg");
-	m.options.bot_tuning_cfg = m2b_config_path("res://config/bot_tuning.cfg");
-	m.check_options.shots_dir = m2b_utf8_path(user_arg_value("m2b-shots"));
-	if (has_user_arg("m2b-play-seconds")) {
-		const double s = std::atof(user_arg_value("m2b-play-seconds").c_str());
-		if (!(s >= 5.0 && s <= 3600.0)) {
-			error = error.empty() ? "--m2b-play-seconds=" + user_arg_value("m2b-play-seconds") + ": not 5..3600" : error;
+		p.options.bot_tuning_cfg = config_path("res://config/bot_tuning.cfg");
+		UtilityFunctions::print(to_godot("[tdm] --tdm preview: TDM rules on (no deploy screen, KitSelect kit), TDM bots, " + limits_text(p.options) + ", tuning " +
+				(p.options.bot_tuning_cfg.empty() ? std::string("built-in defaults") : p.options.bot_tuning_cfg)));
+	} else {
+		g.tdm = std::unique_ptr<TdmState, void (*)(TdmState *)>(new TdmState(), &delete_part<TdmState>);
+		TdmState &m = *g.tdm;
+		m.enabled = true;
+		m.playable = !check;
+		if (check) {
+			bf3::core::Result<std::vector<M2bCase>> cases = parse_m2b_cases(user_arg_value("m2b-check"));
+			if (!cases) {
+				error = cases.error().message;
+			} else {
+				m.cases = std::move(*cases);
+			}
 		}
-		m.check_options.play_seconds = std::clamp(std::isfinite(s) ? s : 90.0, 5.0, 3600.0);
+		if (const bf3::core::Status s = parse_tdm_options(a, m.options); !s.ok() && error.empty()) {
+			error = s.error().message;
+		}
+		bots_ = m.options.bots;
+		m.options.tdm_tuning_cfg = config_path("res://config/tdm_tuning.cfg");
+		m.options.bot_tuning_cfg = config_path("res://config/bot_tuning.cfg");
+		m.check_options.shots_dir = utf8_path(user_arg_value("m2b-shots"));
+		if (has_user_arg("m2b-play-seconds")) {
+			const double s = std::atof(user_arg_value("m2b-play-seconds").c_str());
+			if (!(s >= 5.0 && s <= 3600.0)) {
+				error = error.empty() ? "--m2b-play-seconds=" + user_arg_value("m2b-play-seconds") + ": not 5..3600" : error;
+			}
+			m.check_options.play_seconds = std::clamp(std::isfinite(s) ? s : 90.0, 5.0, 3600.0);
+		}
+		m.check_options.case_timeout_s = std::max(m.check_options.case_timeout_s, m.check_options.play_seconds + 90.0);
+		if (m.checks() && quit_after_ <= 0.0) {
+			quit_after_ = 1.0e9;
+		}
+		mapper_.enable_tdm(true);
+		UtilityFunctions::print(to_godot(std::string("[tdm] ") + (m.playable ? "playable scene" : "check run") + ": TDM rules on, " +
+				(m.options.deploy_screen ? "spawn screen (Enter deploys, 1-4 kit, 3 defibrillator, Tab scoreboard)" : "no spawn screen (automatic respawn, K kit)") +
+				", " + std::to_string(m.options.bots) + " TDM bots, " + limits_text(m.options) + ", tuning " +
+				(m.options.tdm_tuning_cfg.empty() ? "built-in" : "config/tdm_tuning.cfg") + " / " +
+				(m.options.bot_tuning_cfg.empty() ? "built-in" : "config/bot_tuning.cfg") + (m.checks() ? ", case play" : "")));
 	}
-	m.check_options.case_timeout_s = std::max(m.check_options.case_timeout_s, m.check_options.play_seconds + 90.0);
-	if (m.checks() && r_quit_after <= 0.0) {
-		r_quit_after = 1.0e9;
-	}
-	r_mapper.m2b_enable(true);
-	char line[512];
-	std::snprintf(line, sizeof(line), "[m2b] %s: TDM rules on, %s, %u TDM bots, kill limit %s, pre-round %s, tuning %s / %s%s", m.playable ? "playable scene" : "check run",
-			m.options.deploy_screen ? "spawn screen (Enter deploys, 1-4 kit, 3 defibrillator, Tab scoreboard)" : "no spawn screen (automatic respawn, K kit)",
-			m.options.bots, m.options.kill_limit > 0 ? std::to_string(m.options.kill_limit).c_str() : "data (100)",
-			m.options.preround_s >= 0.0f ? (std::to_string(m.options.preround_s) + " s").c_str() : "data (10 s)",
-			m.options.tdm_tuning_cfg.empty() ? "built-in" : "config/tdm_tuning.cfg", m.options.bot_tuning_cfg.empty() ? "built-in" : "config/bot_tuning.cfg",
-			m.checks() ? ", case play" : "");
-	UtilityFunctions::print(line);
 	if (!error.empty()) {
-		UtilityFunctions::print(to_godot("[m2b] bad arguments: " + error));
+		UtilityFunctions::print(to_godot("[tdm] bad arguments: " + error));
 		if (r_error.empty()) {
 			r_error = error;
 		}
 	}
 }
 
-void m2b_gx_load(const M2aGame &p_game, host::SharedLoadOptions &r_options) {
-	if (!p_game.m2b) {
-		return;
+void Bf3LevelSession::tdm_load_options(host::SharedLoadOptions &r_options) {
+	const GameState &g = *game_;
+	if (g.tdm_preview.on) {
+		r_options.tdm = true;
 	}
-	r_options.tdm = true;
-	r_options.tdm_tuning_cfg = p_game.m2b->options.tdm_tuning_cfg;
+	if (g.tdm) {
+		r_options.tdm = true;
+		r_options.tdm_tuning_cfg = g.tdm->options.tdm_tuning_cfg;
+	}
 }
 
-void m2b_gx_server(M2aGame &r_game, host::GameServerConfig &r_config, uint32_t p_bots) {
-	if (!r_game.m2b) {
+void Bf3LevelSession::tdm_server_config(host::GameServerConfig &r_config) {
+	GameState &g = *game_;
+	const TdmOptions *options = g.tdm ? &g.tdm->options : (g.tdm_preview.on ? &g.tdm_preview.options : nullptr);
+	if (options == nullptr) {
 		return;
 	}
-	M2bGame &m = *r_game.m2b;
 	r_config.rules.mode = host::MatchRulesConfig::Mode::Tdm;
-	r_config.rules.deploy_screen = m.options.deploy_screen;
+	r_config.rules.deploy_screen = options->deploy_screen;
 	r_config.rules.revive = true;
-	r_config.rules.kill_limit_override = m.options.kill_limit;
-	r_config.rules.preround_override_s = m.options.preround_s;
+	r_config.rules.kill_limit_override = options->kill_limit;
+	r_config.rules.preround_override_s = options->preround_s;
 	r_config.rules.max_players = 32;
 	r_config.firefight = nullptr;
-	r_game.firefight_stats = nullptr;
-	r_game.firefight_bots = 0;
 	r_config.tdm_bots = nullptr;
-	if (p_bots > 0) {
+	if (bots_ > 0) {
 		auto bots = std::make_shared<host::TdmBotConfig>();
-		bots->count = std::min<uint32_t>(p_bots, kM2bMaxBots);
-		bots->tuning_cfg = m.options.bot_tuning_cfg;
+		bots->count = std::min<uint32_t>(bots_, kTdmMaxBots);
+		bots->tuning_cfg = options->bot_tuning_cfg;
 		r_config.tdm_bots = bots;
 	}
-
-	if (r_game.world == nullptr && r_config.level != nullptr && r_config.level->static_world != nullptr) {
+	if (!g.tdm) {
+		g.part_notes.push_back("[tdm] --tdm preview: " + std::to_string(r_config.tdm_bots != nullptr ? r_config.tdm_bots->count : 0u) +
+				" TDM bots, teams by AutoTeam, the round flow from the Metro TDM logic graph");
+		return;
+	}
+	TdmState &m = *g.tdm;
+	g.firefight_stats = nullptr;
+	g.firefight_bots = 0;
+	if (g.world == nullptr && r_config.level != nullptr && r_config.level->static_world != nullptr) {
 		bf3::core::Result<std::unique_ptr<sim::CollisionWorld>> world = sim::CollisionWorld::create(r_config.level->static_world);
 		if (world) {
-			r_game.world = std::move(*world);
+			g.world = std::move(*world);
 		}
 	}
 	if (r_config.level != nullptr && r_config.level->gunplay != nullptr && r_config.level->gunplay->soldier.time_for_corpse > 0.0f) {
 		m.corpse_seconds = r_config.level->gunplay->soldier.time_for_corpse;
 	}
-	if (r_game.part_notes.size() < 64) {
-		r_game.part_notes.push_back("[m2b] " + std::to_string(r_config.tdm_bots != nullptr ? r_config.tdm_bots->count : 0u) +
-				" TDM bots (bb), teams by AutoTeam, the round from the Metro TDM logic graph (ru), " +
+	if (g.part_notes.size() < 64) {
+		g.part_notes.push_back("[tdm] " + std::to_string(r_config.tdm_bots != nullptr ? r_config.tdm_bots->count : 0u) +
+				" TDM bots, teams by AutoTeam, the round from the Metro TDM logic graph, " +
 				(m.options.deploy_screen ? "the spawn screen" : "automatic respawn") + ", max slots " + std::to_string(r_config.max_slots));
 	}
 }
 
-void m2b_gx_presented(M2aGame &r_game, host::ClientSession &r_client, const host::PresentationFrame &p_frame, InputMapper &r_mapper, uint64_t p_now_ns) {
-	if (!r_game.m2b) {
+void Bf3LevelSession::tdm_presented(uint64_t p_now_ns) {
+	GameState &r_game = *game_;
+	if (!r_game.tdm) {
 		return;
 	}
-	M2bGame &m = *r_game.m2b;
-	const host::PresentationFrame &f = p_frame;
+	TdmState &m = *r_game.tdm;
+	const host::PresentationFrame &f = *frame_;
+	InputMapper &r_mapper = mapper_;
 	const double now_s = double(p_now_ns) * 1e-9;
 
 	m.own_slot = f.stats.connected || f.match_valid ? f.stats.slot : uint8_t(0xFF);
@@ -369,7 +315,7 @@ void m2b_gx_presented(M2aGame &r_game, host::ClientSession &r_client, const host
 			r_game.slot_team[row.slot] = row.team;
 		}
 	}
-	const net::PlayerRow *own_row = m.own_slot != 0xFF ? m2b_row_of(f, m.own_slot) : nullptr;
+	const net::PlayerRow *own_row = m.own_slot != 0xFF ? player_row_of(f, m.own_slot) : nullptr;
 	m.own_team = f.own_team == 1 || f.own_team == 2 ? f.own_team : (own_row != nullptr && (own_row->team == 1 || own_row->team == 2) ? own_row->team : uint8_t(0));
 	if (!r_game.spawned && m.own_team != 0) {
 		r_game.own_team = m.own_team;
@@ -385,7 +331,7 @@ void m2b_gx_presented(M2aGame &r_game, host::ClientSession &r_client, const host
 				m.own_killer = e.slot == e.aux ? uint8_t(0xFF) : e.slot;
 				m.kill_card_source = host::HudKillCardSource();
 				sim::Vec3 killer{};
-				if (m.own_killer != 0xFF && m2b_presented_position(f, p_now_ns, m.own_killer, killer)) {
+				if (m.own_killer != 0xFF && presented_position(f, p_now_ns, m.own_killer, killer)) {
 					const sim::Vec3 &me = f.own_curr.position;
 					m.kill_card_source.killer_seen = true;
 					m.kill_card_source.distance_m = std::sqrt((killer[0] - me[0]) * (killer[0] - me[0]) + (killer[1] - me[1]) * (killer[1] - me[1]) +
@@ -410,7 +356,7 @@ void m2b_gx_presented(M2aGame &r_game, host::ClientSession &r_client, const host
 			m.kit_check_kit = m.deploy.kit;
 			m.kit_check_until_s = now_s + 1.0;
 		}
-		m2b_deploy_spawned(m.deploy);
+		tdm_deploy_spawned(m.deploy);
 		m.own_death_s = -1.0;
 		m.view_valid = false;
 		m.death_view_pending = false;
@@ -422,7 +368,7 @@ void m2b_gx_presented(M2aGame &r_game, host::ClientSession &r_client, const host
 			m.kit_check_kit = 0xFF;
 		} else if (now_s >= m.kit_check_until_s) {
 			++m.deploy_kit_mismatch;
-			UtilityFunctions::print(to_godot(std::string("[m2b] deployed kit ") + host::kit_role_name(host::KitRole(std::min<uint8_t>(f.own_kit, 3))) + ", requested " +
+			UtilityFunctions::print(to_godot(std::string("[tdm] deployed kit ") + host::kit_role_name(host::KitRole(std::min<uint8_t>(f.own_kit, 3))) + ", requested " +
 					host::kit_role_name(host::KitRole(std::min<uint8_t>(m.kit_check_kit, 3)))));
 			m.kit_check_kit = 0xFF;
 		}
@@ -434,10 +380,7 @@ void m2b_gx_presented(M2aGame &r_game, host::ClientSession &r_client, const host
 			m.own_death_s = -1.0;
 		}
 		if (f.match.phase != m.last_phase) {
-			char line[160];
-			std::snprintf(line, sizeof(line), "[m2b] match: %s, US %d - RU %d of %d%s", m2b_phase_text(f.match.phase), f.match.kills[0], f.match.kills[1], f.match.kill_limit,
-					f.match.winner == 1 ? ", US wins" : (f.match.winner == 2 ? ", RU wins" : ""));
-			UtilityFunctions::print(line);
+			print_match(f.match);
 		}
 		m.last_phase = f.match.phase;
 		m.round_end = f.match.phase == net::MatchPhase::RoundOver;
@@ -445,29 +388,29 @@ void m2b_gx_presented(M2aGame &r_game, host::ClientSession &r_client, const host
 	if (!m.options.deploy_screen) {
 		m.spawn_screen = false;
 		m.can_deploy = false;
-		r_mapper.m2b_set_spawn_screen(false);
+		r_mapper.set_spawn_screen(false);
 		return;
 	}
 
-	M2bScreenInput si;
+	TdmScreenInput si;
 	si.match_valid = f.match_valid;
 	si.phase = f.match.phase;
 	si.own_alive = r_game.alive;
 	si.own_unspawned = f.own_unspawned;
 	si.kill_card_up = m.own_death_s >= 0.0 && now_s - m.own_death_s < host::kKillCardSeconds;
-	m.spawn_screen = m2b_spawn_screen_up(si);
-	r_mapper.m2b_set_spawn_screen(m.spawn_screen);
-	m.can_deploy = m2b_can_deploy(f.match_valid, f.match, f.newest_tick, f.own_respawn_tick);
-	if (const int k = r_mapper.m2b_take_kit(); k >= 0 && k < int(host::kKitCount)) {
+	m.spawn_screen = tdm_spawn_screen_up(si);
+	r_mapper.set_spawn_screen(m.spawn_screen);
+	m.can_deploy = tdm_can_deploy(f.match_valid, f.match, f.newest_tick, f.own_respawn_tick);
+	if (const int k = r_mapper.take_kit(); k >= 0 && k < int(host::kKitCount)) {
 		m.spawn_kit = uint8_t(k);
 	}
-	if (const uint32_t k = r_mapper.m2a_take_kit_presses(); k > 0) {
+	if (const uint32_t k = r_mapper.take_kit_presses(); k > 0) {
 		m.spawn_kit = uint8_t((m.spawn_kit + k) % host::kKitCount);
 	}
-	if (r_mapper.m2a_take_team_presses() > 0) {
-		UtilityFunctions::print("[m2b] T: the teams are AutoTeam's in TDM");
+	if (r_mapper.take_team_presses() > 0) {
+		UtilityFunctions::print("[tdm] T: the teams are AutoTeam's in TDM");
 	}
-	if (r_mapper.m2b_take_deploy_presses() > 0 || m.deploy_click) {
+	if (r_mapper.take_deploy_presses() > 0 || m.deploy_click) {
 		if (m.spawn_screen && m.can_deploy) {
 			m.deploy.armed = true;
 		}
@@ -476,34 +419,41 @@ void m2b_gx_presented(M2aGame &r_game, host::ClientSession &r_client, const host
 	if (m.deploy.armed) {
 		m.deploy.kit = m.spawn_kit;
 	}
-	if (m2b_deploy_step(m.deploy, m.spawn_screen, m.can_deploy, f.newest_tick)) {
-		r_client.send_spawn_request(m.deploy.kit);
+	if (tdm_deploy_step(m.deploy, m.spawn_screen, m.can_deploy, f.newest_tick)) {
+		client_->send_spawn_request(m.deploy.kit);
 		++m.spawn_requests_sent;
 		m.last_request_tick = f.newest_tick;
 		if (m.deploy.resends == 0) {
-			UtilityFunctions::print(to_godot(std::string("[m2b] deploy: ") + host::kit_role_name(host::KitRole(m.deploy.kit)) + " (server tick " +
+			UtilityFunctions::print(to_godot(std::string("[tdm] deploy: ") + host::kit_role_name(host::KitRole(m.deploy.kit)) + " (server tick " +
 					std::to_string(f.newest_tick) + ")"));
 		}
 	}
 }
 
-bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::PresentationFrame &p_frame,
-		uint64_t p_now_ns, [[maybe_unused]] double p_delta, Camera3D *p_camera, bool p_free_camera, bool p_headless) {
-	if (!r_game.m2b) {
+bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_delta, Camera3D *p_camera, bool p_free_camera) {
+	GameState &r_game = *game_;
+	const host::PresentationFrame &f = *frame_;
+	if (TdmPreview &p = r_game.tdm_preview; p.on && f.match_valid) {
+		const net::MatchState &l = p.last;
+		if (!p.have_match || f.match.phase != l.phase || f.match.kills != l.kills || f.match.kill_limit != l.kill_limit || f.match.winner != l.winner) {
+			p.have_match = true;
+			p.last = f.match;
+			print_match(f.match);
+		}
+	}
+	if (!r_game.tdm) {
 		return false;
 	}
-	M2bGame &m = *r_game.m2b;
-	const host::PresentationFrame &f = p_frame;
+	TdmState &m = *r_game.tdm;
 	const double now_s = double(p_now_ns) * 1e-9;
 	using bf3::core::ms_since;
 	if (!m.built) {
-		m2b_build(r_game, m, p_headless);
+		build_tdm_ui(r_game, m, headless_);
 	}
-	InputMapper &mapper = r_session.mapper();
-	m.scoreboard_held = m2b_scoreboard_shown(mapper.m2b_scoreboard_held(), f.match_valid, f.match.phase);
+	InputMapper &mapper = mapper_;
+	m.scoreboard_held = tdm_scoreboard_shown(mapper.scoreboard_held(), f.match_valid, f.match.phase);
 
 	auto t0 = std::chrono::steady_clock::now();
-#if OPENBF3_M2B_HAVE_UI
 	{
 		host::HudFeedInput in;
 		in.weapon = r_game.weapon;
@@ -511,7 +461,7 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 		in.health = f.own_curr.health;
 		in.pose = f.own_curr.pose;
 		in.now_s = now_s;
-		in.m2b = true;
+		in.tdm = true;
 		in.match_valid = f.match_valid;
 		in.match = f.match;
 		in.players = std::span<const net::PlayerRow>(f.players.data(), std::min<size_t>(f.player_count, f.players.size()));
@@ -540,13 +490,11 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 			}
 		}
 	}
-#endif
 	m.kill_card_source = host::HudKillCardSource();
 	m.ms_tdm_hud = ms_since(t0);
 
 	t0 = std::chrono::steady_clock::now();
 	const bool dead = !r_game.alive && m.spawned_this_round;
-#if OPENBF3_M2B_HAVE_CAM
 	if (m.death_camera != nullptr) {
 		if (m.death_view_end) {
 			m.death_camera->end();
@@ -557,7 +505,7 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 			const sim::Vec3 &p = f.own_curr.position;
 			st.corpse = fx::Vec3{ p[0] + f.visual_offset[0], p[1] + f.visual_offset[1], p[2] + f.visual_offset[2] };
 			st.yaw_rad = sim::yaw_radians(f.own_curr.yaw);
-			const Vector3 eye = r_session.cameras().last_eye();
+			const Vector3 eye = cameras_.last_eye();
 			st.eye = fx::Vec3{ eye.x, eye.y, eye.z };
 			st.killer_slot = m.own_killer == m.own_slot ? uint8_t(0xFF) : m.own_killer;
 			st.killer_camera = !f.match_valid || f.match.killer_camera;
@@ -566,26 +514,25 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 		if (m.death_camera->active()) {
 			sim::Vec3 k{};
 			fx::Vec3 killer{};
-			const bool seen = m2b_presented_position(f, p_now_ns, m.own_killer, k);
+			const bool seen = presented_position(f, p_now_ns, m.own_killer, k);
 			if (seen) {
 				killer = k;
 			}
 			const DeathCameraView v = m.death_camera->step(now_s, seen ? &killer : nullptr, r_game.world.get());
 			if (v.active && p_camera != nullptr) {
-				const Transform3D t = m2b_camera_transform(v.camera);
-				m2b_keep_view(m, t);
+				const Transform3D t = camera_transform(v.camera);
+				keep_view(m, t);
 			}
 		}
 	}
-#endif
 	m.death_view_pending = false;
 	m.death_view_end = false;
 	if (p_camera != nullptr && !p_free_camera) {
 		if (dead && m.view_valid) {
-			p_camera->set_global_transform(m2b_kept_view(m));
+			p_camera->set_global_transform(kept_view(m));
 		} else if (!m.spawned_this_round && !f.valid && !m.join_view_placed) {
 
-			const std::shared_ptr<const host::SharedLevel> shared = r_session.shared_level();
+			const std::shared_ptr<const host::SharedLevel> shared = shared_level();
 			if (shared != nullptr && !shared->spawns.empty()) {
 				const sim::SpawnPoint &sp = shared->spawns.front();
 				const float yaw = sim::yaw_radians(sp.yaw);
@@ -601,12 +548,10 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 	m.ms_death_camera = ms_since(t0);
 
 	bool wants_mouse = m.spawn_screen;
-#if OPENBF3_M2B_HAVE_UI
 	if (m.tdm_hud != nullptr && m.tdm_hud->built()) {
 		wants_mouse = wants_mouse || m.tdm_hud->wants_mouse();
 	}
-#endif
-	if (!p_headless && !mapper.scripted()) {
+	if (!headless_ && !mapper.scripted()) {
 		if (wants_mouse && !m.mouse_released) {
 			mapper.set_capture(false);
 			m.mouse_released = true;
@@ -617,9 +562,7 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 			}
 		}
 	}
-	m2b_status_text(m, f, r_game.alive, r_session.get_viewport());
-
-	m.frame.m2a = nullptr;
+	m.frame.game = nullptr;
 	m.frame.match_valid = f.match_valid;
 	m.frame.match = f.match_valid ? &f.match : nullptr;
 	m.frame.players = std::span<const net::PlayerRow>(f.players.data(), std::min<size_t>(f.player_count, f.players.size()));
@@ -632,13 +575,13 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 
 #if OPENBF3_BUILD_CHECKS
 	if (m.checks() && m.check == nullptr && !m.finished && (r_game.hud == nullptr || r_game.hud->is_loaded())) {
-		m.check = std::unique_ptr<M2bCheck, void (*)(M2bCheck *)>(new M2bCheck(r_session, r_game, m, m.cases, m.check_options), &delete_m2b_part<M2bCheck>);
+		m.check = std::unique_ptr<M2bCheck, void (*)(M2bCheck *)>(new M2bCheck(*this, r_game, m, m.cases, m.check_options), &delete_part<M2bCheck>);
 	}
 	if (m.check != nullptr && !m.finished) {
 		if (m.check->frame(p_now_ns, p_delta)) {
 			m.finished = true;
 			UtilityFunctions::print(to_godot(m.check->report()));
-			r_session.finish(m.check->exit_code());
+			finish(m.check->exit_code());
 			return true;
 		}
 	}
@@ -646,22 +589,20 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 	return false;
 }
 
-void m2b_gx_shutdown(M2aGame &r_game) {
-	if (!r_game.m2b) {
+void Bf3LevelSession::tdm_shutdown() {
+	if (!game_->tdm) {
 		return;
 	}
-	M2bGame &m = *r_game.m2b;
+	TdmState &m = *game_->tdm;
 	m.check.reset();
-#if OPENBF3_M2B_HAVE_UI
 	if (m.tdm_hud != nullptr) {
 		m.tdm_hud->shutdown();
 	}
-#endif
 	m.death_camera.reset();
 }
 
-bool Bf3LevelSession::m2b_join_ready() const {
-	if (!m2a_ || !m2a_->m2b || !m2a_->m2b->enabled || !m2a_->m2b->options.deploy_screen || frame_ == nullptr) {
+bool Bf3LevelSession::tdm_join_ready() const {
+	if (!game_ || !game_->tdm || !game_->tdm->enabled || !game_->tdm->options.deploy_screen || frame_ == nullptr) {
 		return false;
 	}
 

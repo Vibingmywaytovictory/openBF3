@@ -40,7 +40,7 @@ constexpr size_t kMaxNotesErrors = 8;
 using bf3::core::fmt;
 using bf3::core::seconds_since;
 
-bool stopping(const M2aLoadInputs &p_in) {
+bool stopping(const GameLoadInputs &p_in) {
 	return p_in.stop != nullptr && p_in.stop->load(std::memory_order_relaxed);
 }
 
@@ -158,7 +158,7 @@ Bf3GameFx::~Bf3GameFx() {
 	shutdown();
 }
 
-core::Status Bf3GameFx::load(const M2aLoadInputs &p_in) {
+core::Status Bf3GameFx::load(const GameLoadInputs &p_in) {
 	Impl &m = *impl_;
 	const auto t0 = std::chrono::steady_clock::now();
 	if (m.loaded) {
@@ -362,7 +362,7 @@ bool Bf3GameFx::built() const {
 	return impl_->built;
 }
 
-void Bf3GameFx::step(const M2aFrame &p_frame) {
+void Bf3GameFx::step(const GameFrame &p_frame) {
 	Impl &m = *impl_;
 	if (!m.built) {
 		return;

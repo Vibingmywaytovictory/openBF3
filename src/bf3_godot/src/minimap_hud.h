@@ -23,9 +23,9 @@ class Bf3LevelSession;
 class Bf3MinimapControl;
 class Bf3WorldIcons;
 class MinimapCheck;
-class Pt1Iff;
+class IffOverlay;
 
-inline constexpr int32_t kM1LocalTeam = 1;
+inline constexpr int32_t kNoMatchLocalTeam = 1;
 
 struct MinimapAssets {
 	bf3::core::ui::MinimapLevel level;
@@ -122,7 +122,7 @@ private:
 #if OPENBF3_BUILD_CHECKS
 	std::unique_ptr<MinimapCheck> check_runner_;
 #endif
-	std::unique_ptr<Pt1Iff> pt1_iff_;
+	std::unique_ptr<IffOverlay> iff_;
 };
 
 }

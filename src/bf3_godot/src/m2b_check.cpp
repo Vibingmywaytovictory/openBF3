@@ -1,7 +1,8 @@
 #include "m2b_check.h"
+#include "m2b_check_rows.h"
 
-#include "level_session_m2a.h"
-#include "level_session_m2b.h"
+#include "level_session_game.h"
+#include "level_session_tdm.h"
 
 #include "godot_util.h"
 #include "hud_controls.h"
@@ -15,13 +16,6 @@
 
 #include <algorithm>
 #include <cmath>
-
-#ifndef OPENBF3_M2B_HAVE_UI
-#define OPENBF3_M2B_HAVE_UI 0
-#endif
-#ifndef OPENBF3_M2B_HAVE_CAM
-#define OPENBF3_M2B_HAVE_CAM 0
-#endif
 
 namespace bf3::godot_side {
 
@@ -51,8 +45,8 @@ constexpr double kM2bHardEndAfterS = 45.0;
 
 struct M2bCheck::State {
 	Bf3LevelSession &s;
-	M2aGame &g;
-	M2bGame &m;
+	GameState &g;
+	TdmState &m;
 	std::vector<M2bCase> cases;
 	M2bCheckOptions options;
 	std::vector<M2bCaseResult> results;
@@ -89,7 +83,7 @@ struct M2bCheck::State {
 	bool model_spawn_visible = false;
 	uint32_t shots_saved = 0;
 
-	State(Bf3LevelSession &r_s, M2aGame &r_g, M2bGame &r_m) :
+	State(Bf3LevelSession &r_s, GameState &r_g, TdmState &r_m) :
 			s(r_s), g(r_g), m(r_m) {}
 
 	const host::PresentationFrame &f() const { return s.frame(); }
@@ -178,7 +172,7 @@ struct M2bCheck::State {
 			note(fmt("life %u at %.1f s: %s, kit %u, team %u", lives_seen, p_t, revived ? "revived" : "deployed",
 					unsigned(fr.own_kit), unsigned(m.own_team)));
 			mp.release_all();
-			mp.m2b_script_hold(InputMapper::M2bAction::Scoreboard, false);
+			mp.script_hold(InputMapper::TdmAction::Scoreboard, false);
 			next_tab = p_t + 2.0;
 		}
 		was_alive = g.alive;
@@ -192,7 +186,7 @@ struct M2bCheck::State {
 			death_by_soldier = m.own_killer != 0xFF;
 			killcard_checked = false;
 			mp.release_all();
-			mp.m2b_script_hold(InputMapper::M2bAction::Scoreboard, false);
+			mp.script_hold(InputMapper::TdmAction::Scoreboard, false);
 			tab_until = -1.0;
 			note(fmt("own death %u at %.1f s (killer %s)", deaths_seen, p_t,
 					death_by_soldier ? std::to_string(m.own_killer).c_str() : "none"));
@@ -214,28 +208,28 @@ struct M2bCheck::State {
 			const bool join_wait = lives_seen == 0 && !join_shot && tally.windowed;
 			if (!kit_pressed && p_t - screen_up_t >= kM2bChooseDelayS && !join_wait) {
 				const uint8_t kit = uint8_t(deploy_index % 4);
-				mp.m2b_script_press(InputMapper::M2bAction(uint8_t(InputMapper::M2bAction::Kit1) + kit));
+				mp.script_press(InputMapper::TdmAction(uint8_t(InputMapper::TdmAction::Kit1) + kit));
 				kit_pressed = true;
 			}
 			if (kit_pressed && !deploy_pressed && m.can_deploy && p_t - screen_up_t >= 2.0 * kM2bChooseDelayS) {
-				mp.m2b_script_press(InputMapper::M2bAction::Deploy);
+				mp.script_press(InputMapper::TdmAction::Deploy);
 				deploy_pressed = true;
 				++deploy_index;
 			}
 		}
 
 		if (round_over && tab_until >= 0.0) {
-			mp.m2b_script_hold(InputMapper::M2bAction::Scoreboard, false);
+			mp.script_hold(InputMapper::TdmAction::Scoreboard, false);
 			tab_until = -1.0;
 		}
 
 		if (g.alive && !round_over) {
 			if (tab_until < 0.0 && p_t >= next_tab) {
 				tab_until = p_t + kM2bTabHoldS;
-				mp.m2b_script_hold(InputMapper::M2bAction::Scoreboard, true);
+				mp.script_hold(InputMapper::TdmAction::Scoreboard, true);
 			}
 			if (tab_until >= 0.0 && p_t >= tab_until) {
-				mp.m2b_script_hold(InputMapper::M2bAction::Scoreboard, false);
+				mp.script_hold(InputMapper::TdmAction::Scoreboard, false);
 				tab_until = -1.0;
 				next_tab = p_t + kM2bTabEveryS;
 			}
@@ -309,7 +303,6 @@ struct M2bCheck::State {
 	}
 
 	void sample_scoreboard() {
-#if OPENBF3_M2B_HAVE_UI
 		const host::PresentationFrame &fr = f();
 		if (!fr.match_valid || !m.scoreboard_held) {
 			return;
@@ -330,7 +323,6 @@ struct M2bCheck::State {
 			note(fmt("scoreboard %s: %d : %d, MatchState %d : %d", shown ? "shown" : "NOT shown", k1, k2,
 					fr.match.kills[0], fr.match.kills[1]));
 		}
-#endif
 	}
 
 	void ui_tally(double p_now_s, double p_t) {
@@ -338,7 +330,6 @@ struct M2bCheck::State {
 
 		if (death_pending && !killcard_checked && p_t - death_t >= 0.2) {
 			killcard_checked = true;
-#if OPENBF3_M2B_HAVE_UI
 			if (death_by_soldier) {
 				const core::ui::HudKillCard &kc = g.hud_model.kill_card;
 				bool ok = kc.visible && kc.killer != core::ui::kHudNoPlayer && !kc.suicide && kc.item_id != 0;
@@ -353,12 +344,10 @@ struct M2bCheck::State {
 							unsigned(kc.item_id)));
 				}
 			}
-#endif
 			if (!killcard_shot) {
 				killcard_shot = save_shot("gx_m2b_killcard") || !tally.windowed;
 			}
 		}
-#if OPENBF3_M2B_HAVE_UI
 		const bool visible = g.hud_model.spawn_screen.visible;
 		if (visible && !model_spawn_visible) {
 			++tally.spawn_screen_model_shown;
@@ -367,13 +356,12 @@ struct M2bCheck::State {
 		if (round_over_t >= 0.0 && g.hud_model.end_of_round.visible) {
 			tally.round_end_shown = true;
 		}
-#endif
 	}
 
 	void finish_play(double p_t) {
 		resolve_death(false, p_t);
 		mapper().release_all();
-		mapper().m2b_script_hold(InputMapper::M2bAction::Scoreboard, false);
+		mapper().script_hold(InputMapper::TdmAction::Scoreboard, false);
 		tally.seconds = p_t;
 		tally.own_deaths = m.own_deaths;
 		tally.deploys = m.deploys;
@@ -381,7 +369,6 @@ struct M2bCheck::State {
 		tally.spawn_requests = m.deploy.requests;
 		tally.spawn_request_resends = m.deploy.resends;
 		tally.deaths_received = m.deaths_received;
-#if OPENBF3_M2B_HAVE_UI
 		tally.feed_lines = m.tdm_state.deaths_fed;
 		if (m.tdm_hud != nullptr && m.tdm_hud->built() && tally.windowed) {
 			const TdmHudRecords r = m.tdm_hud->records();
@@ -392,14 +379,11 @@ struct M2bCheck::State {
 		} else if (tally.windowed) {
 			tally.missing_lookups = 1;
 		}
-#endif
-#if OPENBF3_M2B_HAVE_CAM
 		if (m.death_camera != nullptr) {
 			tally.death_views = m.death_camera->stats().views;
 			tally.death_view_bad_inputs = m.death_camera->stats().bad_inputs;
 		}
-#endif
-		play_rows = m2b_play_rows(tally, OPENBF3_M2B_HAVE_UI != 0, OPENBF3_M2B_HAVE_CAM != 0);
+		play_rows = m2b_play_rows(tally, true, true);
 		M2bCaseResult r;
 		r.which = M2bCase::Play;
 		std::string skipped;
@@ -433,7 +417,7 @@ struct M2bCheck::State {
 	}
 };
 
-M2bCheck::M2bCheck(Bf3LevelSession &r_session, M2aGame &r_game, M2bGame &r_m2b, std::vector<M2bCase> p_cases, const M2bCheckOptions &p_options) :
+M2bCheck::M2bCheck(Bf3LevelSession &r_session, GameState &r_game, TdmState &r_m2b, std::vector<M2bCase> p_cases, const M2bCheckOptions &p_options) :
 		state_(std::make_unique<State>(r_session, r_game, r_m2b)) {
 	state_->cases = std::move(p_cases);
 	state_->options = p_options;
@@ -441,9 +425,8 @@ M2bCheck::M2bCheck(Bf3LevelSession &r_session, M2aGame &r_game, M2bGame &r_m2b, 
 	r_session.mapper().set_scripted(true);
 	r_session.mapper().release_all();
 	UtilityFunctions::print(to_godot(
-			fmt("[m2b] check: %zu case(s), play %.0f s (timeout %.0f s), %s, ui %s, cam %s", state_->cases.size(),
-					p_options.play_seconds, p_options.case_timeout_s, r_m2b.windowed ? "windowed" : "headless",
-					OPENBF3_M2B_HAVE_UI ? "built" : "waiting", OPENBF3_M2B_HAVE_CAM ? "built" : "waiting")));
+			fmt("[m2b] check: %zu case(s), play %.0f s (timeout %.0f s), %s", state_->cases.size(),
+					p_options.play_seconds, p_options.case_timeout_s, r_m2b.windowed ? "windowed" : "headless")));
 }
 
 M2bCheck::~M2bCheck() = default;

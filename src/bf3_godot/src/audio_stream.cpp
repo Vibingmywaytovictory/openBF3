@@ -15,18 +15,18 @@
 namespace bf3::godot_side {
 
 namespace {
-std::atomic<int> g_pt1_priority{ kPt1NoPriority };
-std::atomic<int> g_pt1_request{ kPt1NoPriority };
-std::atomic<int> g_pt1_set{ kPt1NoPriority };
-void pt1_note_audio_thread() {
+std::atomic<int> g_thread_priority{ kNoThreadPriority };
+std::atomic<int> g_priority_request{ kNoThreadPriority };
+std::atomic<int> g_priority_set{ kNoThreadPriority };
+void note_audio_thread() {
 #if defined(_WIN32)
-	if (g_pt1_priority.load(std::memory_order_relaxed) == kPt1NoPriority) {
-		g_pt1_priority.store(GetThreadPriority(GetCurrentThread()), std::memory_order_relaxed);
+	if (g_thread_priority.load(std::memory_order_relaxed) == kNoThreadPriority) {
+		g_thread_priority.store(GetThreadPriority(GetCurrentThread()), std::memory_order_relaxed);
 	}
-	const int want = g_pt1_request.exchange(kPt1NoPriority, std::memory_order_relaxed);
-	if (want != kPt1NoPriority) {
+	const int want = g_priority_request.exchange(kNoThreadPriority, std::memory_order_relaxed);
+	if (want != kNoThreadPriority) {
 		const bool ok = SetThreadPriority(GetCurrentThread(), want) != 0;
-		g_pt1_set.store(ok ? GetThreadPriority(GetCurrentThread()) : kPt1NoPriority, std::memory_order_relaxed);
+		g_priority_set.store(ok ? GetThreadPriority(GetCurrentThread()) : kNoThreadPriority, std::memory_order_relaxed);
 	}
 #endif
 }
@@ -51,7 +51,7 @@ int32_t Bf3AudioPlayback::_mix(godot::AudioFrame *p_buffer, float, int32_t p_fra
 	}
 
 	float *out = reinterpret_cast<float *>(p_buffer);
-	pt1_note_audio_thread();
+	note_audio_thread();
 	if (mixer_ == nullptr || !playing_.load(std::memory_order_acquire)) {
 		std::memset(out, 0, size_t(p_frames) * 2 * sizeof(float));
 		return p_frames;
@@ -67,18 +67,18 @@ godot::Ref<godot::AudioStreamPlayback> Bf3AudioStream::_instantiate_playback() c
 	return playback;
 }
 
-int pt1_audio_thread_priority() {
-	return g_pt1_priority.load(std::memory_order_relaxed);
+int audio_thread_priority() {
+	return g_thread_priority.load(std::memory_order_relaxed);
 }
 
-void pt1_request_audio_thread_priority(int p_priority) {
+void request_audio_thread_priority(int p_priority) {
 
 	const bool valid = p_priority == -15 || p_priority == 15 || (p_priority >= -2 && p_priority <= 2);
-	g_pt1_request.store(valid ? p_priority : kPt1NoPriority, std::memory_order_relaxed);
+	g_priority_request.store(valid ? p_priority : kNoThreadPriority, std::memory_order_relaxed);
 }
 
-int pt1_audio_thread_priority_set() {
-	return g_pt1_set.load(std::memory_order_relaxed);
+int audio_thread_priority_set() {
+	return g_priority_set.load(std::memory_order_relaxed);
 }
 
 }

@@ -471,7 +471,7 @@ struct ClientSession::Impl {
 				core::Result<net::Spawned> s = net::decode_spawned(p_d.bytes);
 				if (s && pending_spawned.size() < 16) {
 					cl_spawned(*s);
-					m2b_spawned(*s);
+					tdm_spawned(*s);
 					if (s->state.tick > anchor_tick) {
 						anchor_tick = s->state.tick;
 						anchor_ns = p_now;
@@ -539,7 +539,7 @@ struct ClientSession::Impl {
 				connected = false;
 				return;
 			default:
-				if (m2b_datagram(*type, p_d)) {
+				if (tdm_datagram(*type, p_d)) {
 					return;
 				}
 				cl_datagram(*type, p_d, p_now);
@@ -752,7 +752,7 @@ struct ClientSession::Impl {
 		const sim::Tick c = next_tick;
 		const sim::PredictionEntry *made = nullptr;
 		sim::Command cmd;
-		if (have_own && c > 0 && !m2b_unspawned(c)) {
+		if (have_own && c > 0 && !tdm_unspawned(c)) {
 
 			if (ring->find(c - 1u) == nullptr) {
 				const sim::PredictionEntry *b = ring->newest_at_or_below(c - 1u);
@@ -770,7 +770,7 @@ struct ClientSession::Impl {
 			const sim::PredictionEntry *base = ring->find(c - 1u);
 			cmd = sample_command(c);
 			cl_command_made(cmd, p_now);
-			m2b_command(cmd);
+			tdm_command(cmd);
 			if (base == nullptr || cmd.tick != base->state.tick + 1u) {
 				++stats.step_precondition_failures;
 				assert(false && "ClientSession: prediction base missing");
@@ -875,7 +875,7 @@ struct ClientSession::Impl {
 		}
 		f.other_count = n;
 		cl_publish_end(f, p_now);
-		m2b_publish(f);
+		tdm_publish(f);
 		stats.connected = connected;
 		stats.client_tick = next_tick;
 		stats.target_buffer_ticks = target;
@@ -970,7 +970,7 @@ struct ClientSession::Impl {
 					submit(net::kChannelReliable, net::encode_kit_select(k), now);
 				}
 			}
-			m2b_send(now);
+			tdm_send(now);
 			release_out(now);
 			if (clock_running && connected) {
 				const double clock = clock_ticks(now);
@@ -992,28 +992,28 @@ struct ClientSession::Impl {
 		}
 	}
 
-	bool m2b_match_valid = false;
-	net::MatchState m2b_match;
-	PlayerTable m2b_players;
-	bool m2b_death_valid = false;
-	uint32_t m2b_death_life = 0;
-	sim::Tick m2b_respawn_tick = 0;
-	sim::Tick m2b_revive_until = 0;
-	bool m2b_unspawned_now = false;
-	std::array<uint32_t, 8> m2b_revived_lives{};
-	OwnShotIds m2b_shot_ids;
-	PresentationEvents m2b_own_events;
-	std::deque<uint8_t> m2b_spawn_out;
-	bool m2b_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d);
-	void m2b_spawned(const net::Spawned &p_spawned);
-	void m2b_combat(const net::CombatEvents &p_events);
-	bool m2b_rules(const net::MatchInfo &p_match);
-	void m2b_command(sim::Command &r_command);
-	bool m2b_unspawned(sim::Tick p_tick);
-	void m2b_push(PresentEvent &r_event);
-	void m2b_drain_own();
-	void m2b_send(uint64_t p_now);
-	void m2b_publish(PresentationFrame &r_frame);
+	bool tdm_match_valid = false;
+	net::MatchState tdm_match;
+	PlayerTable tdm_players;
+	bool tdm_death_valid = false;
+	uint32_t tdm_death_life = 0;
+	sim::Tick tdm_respawn_tick = 0;
+	sim::Tick tdm_revive_until = 0;
+	bool tdm_unspawned_now = false;
+	std::array<uint32_t, 8> tdm_revived_lives{};
+	OwnShotIds tdm_shot_ids;
+	PresentationEvents tdm_own_events;
+	std::deque<uint8_t> tdm_spawn_out;
+	bool tdm_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d);
+	void tdm_spawned(const net::Spawned &p_spawned);
+	void tdm_combat(const net::CombatEvents &p_events);
+	bool tdm_rules(const net::MatchInfo &p_match);
+	void tdm_command(sim::Command &r_command);
+	bool tdm_unspawned(sim::Tick p_tick);
+	void tdm_push(PresentEvent &r_event);
+	void tdm_drain_own();
+	void tdm_send(uint64_t p_now);
+	void tdm_publish(PresentationFrame &r_frame);
 };
 
 ClientSession::ClientSession() :
@@ -1472,7 +1472,7 @@ void ClientSession::Impl::ClEmit::emitted(const sim::Command &p_command, const s
 
 void ClientSession::Impl::cl_push(const PresentEvent &p_event) {
 	PresentEvent e = p_event;
-	m2b_push(e);
+	tdm_push(e);
 	if (!cl_events.push(e)) {
 		++stats.events_overflow;
 	}
@@ -1498,7 +1498,7 @@ void ClientSession::Impl::cl_refuse(const char *p_reason) {
 
 bool ClientSession::Impl::cl_match_info(const net::MatchInfo &p_match, uint64_t p_now) {
 	stats.slot = p_match.slot;
-	if (!m2b_rules(p_match)) {
+	if (!tdm_rules(p_match)) {
 		return false;
 	}
 	if (p_match.weapon_hash != 0) {
@@ -1746,7 +1746,7 @@ void ClientSession::Impl::cl_datagram(net::MessageType p_type, const net::NetSim
 				cl_push(ev);
 				++stats.combat_detonations;
 			}
-			m2b_combat(*e);
+			tdm_combat(*e);
 			return;
 		}
 		default:
@@ -1933,8 +1933,8 @@ void ClientSession::Impl::cl_predict_weapons(const sim::Command &p_command, cons
 		cl_lane->put(cl_lane->step(from, p_command, p_before, p_after));
 	}
 	if (cl_projectiles != nullptr) {
-		cl_projectiles->step_own(p_command.tick, *world, cl_records, m2b_own_events);
-		m2b_drain_own();
+		cl_projectiles->step_own(p_command.tick, *world, cl_records, tdm_own_events);
+		tdm_drain_own();
 	}
 }
 
@@ -2159,26 +2159,26 @@ const char *rules_refusal(const net::MatchInfo &p_match, bool p_has_logic, uint6
 	return nullptr;
 }
 
-bool ClientSession::Impl::m2b_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d) {
+bool ClientSession::Impl::tdm_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d) {
 	switch (p_type) {
 		case net::MessageType::MatchState: {
 			core::Result<net::MatchState> m = net::decode_match_state(p_d.bytes);
 			if (!m) {
-				++stats.bad_m2b_datagrams;
+				++stats.bad_tdm_datagrams;
 				return true;
 			}
-			m2b_match = *m;
-			m2b_match_valid = true;
+			tdm_match = *m;
+			tdm_match_valid = true;
 			++stats.match_states;
 			return true;
 		}
 		case net::MessageType::PlayerList: {
 			core::Result<net::PlayerList> l = net::decode_player_list(p_d.bytes);
 			if (!l) {
-				++stats.bad_m2b_datagrams;
+				++stats.bad_tdm_datagrams;
 				return true;
 			}
-			apply_player_list(m2b_players, *l);
+			apply_player_list(tdm_players, *l);
 			++stats.player_lists;
 			return true;
 		}
@@ -2187,8 +2187,8 @@ bool ClientSession::Impl::m2b_datagram(net::MessageType p_type, const net::NetSi
 	}
 }
 
-void ClientSession::Impl::m2b_spawned(const net::Spawned &p_spawned) {
-	uint32_t &life = m2b_revived_lives[p_spawned.state.life % m2b_revived_lives.size()];
+void ClientSession::Impl::tdm_spawned(const net::Spawned &p_spawned) {
+	uint32_t &life = tdm_revived_lives[p_spawned.state.life % tdm_revived_lives.size()];
 	if (p_spawned.revived) {
 		life = p_spawned.state.life;
 	} else if (life == p_spawned.state.life) {
@@ -2196,14 +2196,14 @@ void ClientSession::Impl::m2b_spawned(const net::Spawned &p_spawned) {
 	}
 }
 
-void ClientSession::Impl::m2b_combat(const net::CombatEvents &p_events) {
+void ClientSession::Impl::tdm_combat(const net::CombatEvents &p_events) {
 	for (const net::DeathEvent &d : p_events.deaths) {
 		if (d.victim == slot && have_own) {
 
-			m2b_death_valid = true;
-			m2b_death_life = own_life;
-			m2b_respawn_tick = d.respawn_tick;
-			m2b_revive_until = d.revive_until;
+			tdm_death_valid = true;
+			tdm_death_life = own_life;
+			tdm_respawn_tick = d.respawn_tick;
+			tdm_revive_until = d.revive_until;
 		}
 	}
 	for (const net::ReviveEvent &v : p_events.revives) {
@@ -2224,7 +2224,7 @@ void ClientSession::Impl::m2b_combat(const net::CombatEvents &p_events) {
 	}
 }
 
-bool ClientSession::Impl::m2b_rules(const net::MatchInfo &p_match) {
+bool ClientSession::Impl::tdm_rules(const net::MatchInfo &p_match) {
 	const char *refusal = rules_refusal(p_match, level->logic != nullptr, level->logic_digest);
 	if (refusal == nullptr) {
 		return true;
@@ -2234,48 +2234,48 @@ bool ClientSession::Impl::m2b_rules(const net::MatchInfo &p_match) {
 	return false;
 }
 
-void ClientSession::Impl::m2b_command(sim::Command &r_command) {
-	if (!m2b_match_valid) {
+void ClientSession::Impl::tdm_command(sim::Command &r_command) {
+	if (!tdm_match_valid) {
 		return;
 	}
-	const sim::Command r = net::restrict_command(r_command, m2b_match.restrict_until_tick, m2b_match.restrict_mask);
+	const sim::Command r = net::restrict_command(r_command, tdm_match.restrict_until_tick, tdm_match.restrict_mask);
 	if (r.move_forward != r_command.move_forward || r.move_right != r_command.move_right || r.buttons != r_command.buttons) {
 		++stats.restricted_commands;
 	}
 	r_command = r;
 }
 
-bool ClientSession::Impl::m2b_unspawned(sim::Tick p_tick) {
-	m2b_unspawned_now = have_own && own_unspawned_at(m2b_match_valid, m2b_match, spawn_state.tick, p_tick);
-	if (m2b_unspawned_now) {
+bool ClientSession::Impl::tdm_unspawned(sim::Tick p_tick) {
+	tdm_unspawned_now = have_own && own_unspawned_at(tdm_match_valid, tdm_match, spawn_state.tick, p_tick);
+	if (tdm_unspawned_now) {
 		++stats.unspawned_ticks;
 	}
-	return m2b_unspawned_now;
+	return tdm_unspawned_now;
 }
 
-void ClientSession::Impl::m2b_push(PresentEvent &r_event) {
-	present_own_shot_id(m2b_shot_ids, slot, r_event);
+void ClientSession::Impl::tdm_push(PresentEvent &r_event) {
+	present_own_shot_id(tdm_shot_ids, slot, r_event);
 	if (r_event.kind == PresentKind::Spawn && r_event.slot == slot && r_event.id != 0 &&
-			m2b_revived_lives[r_event.id % m2b_revived_lives.size()] == r_event.id) {
+			tdm_revived_lives[r_event.id % tdm_revived_lives.size()] == r_event.id) {
 		r_event.flags |= present_flags::kRevived;
 	}
 }
 
-void ClientSession::Impl::m2b_drain_own() {
+void ClientSession::Impl::tdm_drain_own() {
 	std::array<PresentEvent, 64> batch;
 	size_t got = 0;
-	while ((got = m2b_own_events.drain(batch)) > 0) {
+	while ((got = tdm_own_events.drain(batch)) > 0) {
 		for (size_t k = 0; k < got; ++k) {
 			cl_push(batch[k]);
 		}
 	}
 }
 
-void ClientSession::Impl::m2b_send(uint64_t p_now) {
+void ClientSession::Impl::tdm_send(uint64_t p_now) {
 	std::deque<uint8_t> kits;
 	{
 		std::lock_guard lock(debug_mutex);
-		kits.swap(m2b_spawn_out);
+		kits.swap(tdm_spawn_out);
 	}
 	for (const uint8_t kit : kits) {
 		submit(net::kChannelReliable, net::encode_spawn_request({ kit, 0 }), p_now);
@@ -2283,24 +2283,24 @@ void ClientSession::Impl::m2b_send(uint64_t p_now) {
 	}
 }
 
-void ClientSession::Impl::m2b_publish(PresentationFrame &r_frame) {
-	r_frame.match_valid = m2b_match_valid;
-	r_frame.match = m2b_match;
-	r_frame.player_count = player_rows(m2b_players, r_frame.players);
+void ClientSession::Impl::tdm_publish(PresentationFrame &r_frame) {
+	r_frame.match_valid = tdm_match_valid;
+	r_frame.match = tdm_match;
+	r_frame.player_count = player_rows(tdm_players, r_frame.players);
 
-	const bool dead_life = m2b_death_valid && have_own && own_life == m2b_death_life;
-	r_frame.own_respawn_tick = dead_life ? m2b_respawn_tick : 0u;
-	r_frame.own_revive_until = dead_life ? m2b_revive_until : 0u;
-	r_frame.own_unspawned = m2b_unspawned_now;
-	stats.own_shot_id_resets = m2b_shot_ids.resets();
+	const bool dead_life = tdm_death_valid && have_own && own_life == tdm_death_life;
+	r_frame.own_respawn_tick = dead_life ? tdm_respawn_tick : 0u;
+	r_frame.own_revive_until = dead_life ? tdm_revive_until : 0u;
+	r_frame.own_unspawned = tdm_unspawned_now;
+	stats.own_shot_id_resets = tdm_shot_ids.resets();
 }
 
 void ClientSession::send_spawn_request(uint8_t p_kit) {
 	std::lock_guard lock(impl_->debug_mutex);
-	if (impl_->m2b_spawn_out.size() >= 16) {
-		impl_->m2b_spawn_out.pop_front();
+	if (impl_->tdm_spawn_out.size() >= 16) {
+		impl_->tdm_spawn_out.pop_front();
 	}
-	impl_->m2b_spawn_out.push_back(p_kit);
+	impl_->tdm_spawn_out.push_back(p_kit);
 }
 
 }

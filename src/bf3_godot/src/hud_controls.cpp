@@ -702,7 +702,7 @@ void Bf3HudHealth::draw_widget() {
 
 }
 
-void openbf3_register_m2a_hud() {
+void openbf3_register_hud() {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3HudWidget);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3HudAmmo);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3HudCrosshair);

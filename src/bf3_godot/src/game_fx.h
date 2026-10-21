@@ -1,6 +1,6 @@
 #pragma once
 
-#include "m2a_game.h"
+#include "game_frame.h"
 
 #include "bf3/core/result.h"
 #include "bf3/fx/simulator.h"
@@ -49,13 +49,13 @@ public:
 	Bf3GameFx(const Bf3GameFx &) = delete;
 	Bf3GameFx &operator=(const Bf3GameFx &) = delete;
 
-	core::Status load(const M2aLoadInputs &p_in);
+	core::Status load(const GameLoadInputs &p_in);
 	bool loaded() const;
 
 	std::vector<std::string> impact_sound_names() const;
 	bool build(godot::Node3D *p_parent, std::string *r_error);
 	bool built() const;
-	void step(const M2aFrame &p_frame);
+	void step(const GameFrame &p_frame);
 
 	std::span<const fx::ImpactSoundCue> sound_cues() const;
 

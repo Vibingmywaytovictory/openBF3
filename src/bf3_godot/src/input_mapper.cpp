@@ -101,10 +101,10 @@ void InputMapper::handle_event(const Ref<InputEvent> &p_event) {
 	if (scripted_ || p_event.is_null()) {
 		return;
 	}
-	if (m2b_handle_event(p_event)) {
+	if (tdm_handle_event(p_event)) {
 		return;
 	}
-	if (m2a_handle_event(p_event)) {
+	if (weapon_handle_event(p_event)) {
 		return;
 	}
 	if (const InputEventMouseMotion *mm = Object::cast_to<InputEventMouseMotion>(p_event.ptr())) {
@@ -234,7 +234,7 @@ bf3::host::InputSample InputMapper::sample() const {
 		s.move_right = float(int(held(InputAction::Right)) - int(held(InputAction::Left)));
 		s.held_buttons = held(InputAction::Sprint) ? sim::buttons::kSprint : 0u;
 	}
-	m2a_sample(s);
+	weapon_sample(s);
 	return s;
 }
 
@@ -254,43 +254,43 @@ namespace bf3::godot_side {
 
 namespace {
 
-struct M2aActionKey {
-	InputMapper::M2aAction action;
+struct WeaponActionKey {
+	InputMapper::WeaponAction action;
 	const char *name;
 	Key key;
 	MouseButton button;
 };
 
-constexpr M2aActionKey kM2aActions[] = {
-	{ InputMapper::M2aAction::Fire, "bf3_fire", KEY_NONE, MOUSE_BUTTON_LEFT },
-	{ InputMapper::M2aAction::Ads, "bf3_ads", KEY_NONE, MOUSE_BUTTON_RIGHT },
-	{ InputMapper::M2aAction::Reload, "bf3_reload", KEY_R, MOUSE_BUTTON_NONE },
-	{ InputMapper::M2aAction::Primary, "bf3_primary", KEY_1, MOUSE_BUTTON_NONE },
-	{ InputMapper::M2aAction::Sidearm, "bf3_sidearm", KEY_2, MOUSE_BUTTON_NONE },
-	{ InputMapper::M2aAction::Grenade, "bf3_grenade", KEY_G, MOUSE_BUTTON_NONE },
-	{ InputMapper::M2aAction::Knife, "bf3_knife", KEY_F, MOUSE_BUTTON_NONE },
-	{ InputMapper::M2aAction::FireMode, "bf3_fire_mode", KEY_B, MOUSE_BUTTON_NONE },
-	{ InputMapper::M2aAction::Kit, "bf3_kit", KEY_K, MOUSE_BUTTON_NONE },
-	{ InputMapper::M2aAction::Team, "bf3_team", KEY_T, MOUSE_BUTTON_NONE },
+constexpr WeaponActionKey kWeaponActions[] = {
+	{ InputMapper::WeaponAction::Fire, "bf3_fire", KEY_NONE, MOUSE_BUTTON_LEFT },
+	{ InputMapper::WeaponAction::Ads, "bf3_ads", KEY_NONE, MOUSE_BUTTON_RIGHT },
+	{ InputMapper::WeaponAction::Reload, "bf3_reload", KEY_R, MOUSE_BUTTON_NONE },
+	{ InputMapper::WeaponAction::Primary, "bf3_primary", KEY_1, MOUSE_BUTTON_NONE },
+	{ InputMapper::WeaponAction::Sidearm, "bf3_sidearm", KEY_2, MOUSE_BUTTON_NONE },
+	{ InputMapper::WeaponAction::Grenade, "bf3_grenade", KEY_G, MOUSE_BUTTON_NONE },
+	{ InputMapper::WeaponAction::Knife, "bf3_knife", KEY_F, MOUSE_BUTTON_NONE },
+	{ InputMapper::WeaponAction::FireMode, "bf3_fire_mode", KEY_B, MOUSE_BUTTON_NONE },
+	{ InputMapper::WeaponAction::Kit, "bf3_kit", KEY_K, MOUSE_BUTTON_NONE },
+	{ InputMapper::WeaponAction::Team, "bf3_team", KEY_T, MOUSE_BUTTON_NONE },
 };
-static_assert(sizeof(kM2aActions) / sizeof(kM2aActions[0]) == InputMapper::kM2aActionCount);
+static_assert(sizeof(kWeaponActions) / sizeof(kWeaponActions[0]) == InputMapper::kWeaponActionCount);
 
-constexpr uint8_t kM2aWheelSlots[] = { 0, 1, 2, 6, 7 };
+constexpr uint8_t kWheelSlots[] = { 0, 1, 2, 6, 7 };
 
 }
 
-const char *InputMapper::m2a_action_name(M2aAction p_action) {
+const char *InputMapper::weapon_action_name(WeaponAction p_action) {
 	const size_t i = size_t(p_action);
-	return i < kM2aActionCount ? kM2aActions[i].name : "bf3_unknown";
+	return i < kWeaponActionCount ? kWeaponActions[i].name : "bf3_unknown";
 }
 
-void InputMapper::m2a_enable(bool p_on) {
-	m2a_.enabled = p_on;
-	if (!p_on || m2a_.installed) {
+void InputMapper::enable_weapons(bool p_on) {
+	weapon_.enabled = p_on;
+	if (!p_on || weapon_.installed) {
 		return;
 	}
 	InputMap *map = InputMap::get_singleton();
-	for (const M2aActionKey &a : kM2aActions) {
+	for (const WeaponActionKey &a : kWeaponActions) {
 		if (map->has_action(a.name)) {
 			continue;
 		}
@@ -307,55 +307,55 @@ void InputMapper::m2a_enable(bool p_on) {
 			map->action_add_event(a.name, mb);
 		}
 	}
-	m2a_.installed = true;
+	weapon_.installed = true;
 }
 
-void InputMapper::m2a_set_weapons_allowed(bool p_allowed) {
-	if (m2a_.allowed && !p_allowed) {
-		m2a_.held.fill(false);
-		m2a_.reload_until_ns = 0;
+void InputMapper::set_weapons_allowed(bool p_allowed) {
+	if (weapon_.allowed && !p_allowed) {
+		weapon_.held.fill(false);
+		weapon_.reload_until_ns = 0;
 	}
-	m2a_.allowed = p_allowed;
+	weapon_.allowed = p_allowed;
 }
 
-void InputMapper::m2a_set_slots(uint8_t p_active, uint8_t p_pending, uint16_t p_filled) {
-	m2a_.active = p_active;
-	m2a_.pending = p_pending;
-	m2a_.filled = p_filled;
+void InputMapper::set_weapon_slots(uint8_t p_active, uint8_t p_pending, uint16_t p_filled) {
+	weapon_.active = p_active;
+	weapon_.pending = p_pending;
+	weapon_.filled = p_filled;
 
-	if (m2a_.wanted != 0xFF && (m2a_.wanted == p_active || m2a_.wanted == p_pending || (p_filled & (1u << m2a_.wanted)) == 0)) {
-		m2a_.wanted = 0xFF;
-	}
-}
-
-void InputMapper::m2a_select(uint8_t p_slot) {
-	if (p_slot < sim::weapons::kMaxWeaponSlots && (m2a_.filled == 0 || (m2a_.filled & (1u << p_slot)) != 0)) {
-		m2a_.wanted = p_slot;
+	if (weapon_.wanted != 0xFF && (weapon_.wanted == p_active || weapon_.wanted == p_pending || (p_filled & (1u << weapon_.wanted)) == 0)) {
+		weapon_.wanted = 0xFF;
 	}
 }
 
-void InputMapper::m2a_cycle(int p_direction) {
-	constexpr int n = int(sizeof(kM2aWheelSlots));
-	const uint8_t from = m2a_.wanted != 0xFF ? m2a_.wanted : (m2a_.pending != 0xFF ? m2a_.pending : m2a_.active);
+void InputMapper::select_weapon(uint8_t p_slot) {
+	if (p_slot < sim::weapons::kMaxWeaponSlots && (weapon_.filled == 0 || (weapon_.filled & (1u << p_slot)) != 0)) {
+		weapon_.wanted = p_slot;
+	}
+}
+
+void InputMapper::cycle_weapon(int p_direction) {
+	constexpr int n = int(sizeof(kWheelSlots));
+	const uint8_t from = weapon_.wanted != 0xFF ? weapon_.wanted : (weapon_.pending != 0xFF ? weapon_.pending : weapon_.active);
 	int at = 0;
 	for (int i = 0; i < n; ++i) {
-		if (kM2aWheelSlots[i] == from) {
+		if (kWheelSlots[i] == from) {
 			at = i;
 		}
 	}
 	for (int step = 1; step <= n; ++step) {
-		const uint8_t s = kM2aWheelSlots[size_t(((at + p_direction * step) % n + n) % n)];
-		if ((m2a_.filled & (1u << s)) != 0) {
+		const uint8_t s = kWheelSlots[size_t(((at + p_direction * step) % n + n) % n)];
+		if ((weapon_.filled & (1u << s)) != 0) {
 			if (s != from) {
-				m2a_.wanted = s;
+				weapon_.wanted = s;
 			}
 			return;
 		}
 	}
 }
 
-bool InputMapper::m2a_handle_event(const Ref<InputEvent> &p_event) {
-	if (!m2a_.enabled) {
+bool InputMapper::weapon_handle_event(const Ref<InputEvent> &p_event) {
+	if (!weapon_.enabled) {
 		return false;
 	}
 	if (const InputEventMouseButton *mb = Object::cast_to<InputEventMouseButton>(p_event.ptr())) {
@@ -363,146 +363,146 @@ bool InputMapper::m2a_handle_event(const Ref<InputEvent> &p_event) {
 			if (mb->is_pressed() && mb->get_button_index() == MOUSE_BUTTON_LEFT) {
 
 				set_capture(true);
-				m2a_.swallow_fire = true;
-				++m2a_.swallowed_clicks;
+				weapon_.swallow_fire = true;
+				++weapon_.swallowed_clicks;
 			}
 			return true;
 		}
 		if (!mb->is_pressed() || free_camera_) {
 			return false;
 		}
-		if (mb->get_button_index() == MOUSE_BUTTON_LEFT && m2a_.allowed && !m2a_.swallow_fire) {
-			++m2a_.fire_presses;
-		} else if (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP && m2a_.allowed) {
-			m2a_cycle(-1);
-		} else if (mb->get_button_index() == MOUSE_BUTTON_WHEEL_DOWN && m2a_.allowed) {
-			m2a_cycle(1);
+		if (mb->get_button_index() == MOUSE_BUTTON_LEFT && weapon_.allowed && !weapon_.swallow_fire) {
+			++weapon_.fire_presses;
+		} else if (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP && weapon_.allowed) {
+			cycle_weapon(-1);
+		} else if (mb->get_button_index() == MOUSE_BUTTON_WHEEL_DOWN && weapon_.allowed) {
+			cycle_weapon(1);
 		}
 		return false;
 	}
 	if (const InputEventKey *key = Object::cast_to<InputEventKey>(p_event.ptr())) {
 		if (key->is_pressed() && !key->is_echo() && key->get_keycode() == KEY_ESCAPE) {
 
-			m2a_.held.fill(false);
-			m2a_.reload_until_ns = 0;
+			weapon_.held.fill(false);
+			weapon_.reload_until_ns = 0;
 			return false;
 		}
 	}
 	if (!captured_) {
 		return false;
 	}
-	for (const M2aActionKey &a : kM2aActions) {
+	for (const WeaponActionKey &a : kWeaponActions) {
 		if (a.key == KEY_NONE || !p_event->is_action_pressed(a.name, false, false)) {
 			continue;
 		}
-		m2a_script_press(a.action);
+		script_press(a.action);
 	}
 	return false;
 }
 
-void InputMapper::m2a_script_hold(M2aAction p_action, bool p_held) {
-	if (size_t(p_action) < kM2aActionCount) {
-		m2a_.held[size_t(p_action)] = p_held;
+void InputMapper::script_hold(WeaponAction p_action, bool p_held) {
+	if (size_t(p_action) < kWeaponActionCount) {
+		weapon_.held[size_t(p_action)] = p_held;
 	}
 }
 
-void InputMapper::m2a_script_press(M2aAction p_action) {
+void InputMapper::script_press(WeaponAction p_action) {
 	switch (p_action) {
-		case M2aAction::Fire:
-			if (m2a_.allowed && !free_camera_) {
-				++m2a_.fire_presses;
+		case WeaponAction::Fire:
+			if (weapon_.allowed && !free_camera_) {
+				++weapon_.fire_presses;
 			}
 			break;
-		case M2aAction::Reload:
-			if (m2a_.allowed && !free_camera_) {
-				m2a_.reload_until_ns = (m2a_.now_ns != 0 ? m2a_.now_ns : 1) + kM2aReloadHoldNs;
+		case WeaponAction::Reload:
+			if (weapon_.allowed && !free_camera_) {
+				weapon_.reload_until_ns = (weapon_.now_ns != 0 ? weapon_.now_ns : 1) + kReloadHoldNs;
 			}
 			break;
-		case M2aAction::Primary:
-			m2a_select(0);
+		case WeaponAction::Primary:
+			select_weapon(0);
 			break;
-		case M2aAction::Sidearm:
-			m2a_select(1);
+		case WeaponAction::Sidearm:
+			select_weapon(1);
 			break;
-		case M2aAction::Grenade:
-			m2a_select(6);
+		case WeaponAction::Grenade:
+			select_weapon(6);
 			break;
-		case M2aAction::Knife:
-			m2a_select(7);
+		case WeaponAction::Knife:
+			select_weapon(7);
 			break;
-		case M2aAction::FireMode:
-			if (m2a_.allowed && !free_camera_) {
-				m2a_.mode_counter = uint8_t((m2a_.mode_counter + 1u) & 3u);
+		case WeaponAction::FireMode:
+			if (weapon_.allowed && !free_camera_) {
+				weapon_.mode_counter = uint8_t((weapon_.mode_counter + 1u) & 3u);
 			}
 			break;
-		case M2aAction::Kit:
-			++m2a_.kit_presses;
+		case WeaponAction::Kit:
+			++weapon_.kit_presses;
 			break;
-		case M2aAction::Team:
-			++m2a_.team_presses;
+		case WeaponAction::Team:
+			++weapon_.team_presses;
 			break;
 		default:
 			break;
 	}
 }
 
-void InputMapper::m2a_script_select(uint8_t p_slot) {
+void InputMapper::script_select(uint8_t p_slot) {
 	if (p_slot == 0xFF) {
-		m2a_.wanted = 0xFF;
+		weapon_.wanted = 0xFF;
 	} else {
-		m2a_select(p_slot);
+		select_weapon(p_slot);
 	}
 }
 
-uint32_t InputMapper::m2a_take_kit_presses() {
-	const uint32_t n = m2a_.kit_presses;
-	m2a_.kit_presses = 0;
+uint32_t InputMapper::take_kit_presses() {
+	const uint32_t n = weapon_.kit_presses;
+	weapon_.kit_presses = 0;
 	return n;
 }
 
-uint32_t InputMapper::m2a_take_team_presses() {
-	const uint32_t n = m2a_.team_presses;
-	m2a_.team_presses = 0;
+uint32_t InputMapper::take_team_presses() {
+	const uint32_t n = weapon_.team_presses;
+	weapon_.team_presses = 0;
 	return n;
 }
 
-void InputMapper::m2a_frame(const bf3::host::PresentationFrame &p_frame, uint64_t p_now_ns) {
-	if (!m2a_.enabled) {
+void InputMapper::weapon_frame(const bf3::host::PresentationFrame &p_frame, uint64_t p_now_ns) {
+	if (!weapon_.enabled) {
 		return;
 	}
-	m2a_.frame = &p_frame;
-	m2a_.now_ns = p_now_ns;
-	if (life_ != m2a_.life) {
+	weapon_.frame = &p_frame;
+	weapon_.now_ns = p_now_ns;
+	if (life_ != weapon_.life) {
 
-		m2a_.life = life_;
-		m2a_.wanted = 0xFF;
+		weapon_.life = life_;
+		weapon_.wanted = 0xFF;
 	}
 	if (scripted_) {
 		return;
 	}
 	if (!captured_) {
-		m2a_.held.fill(false);
+		weapon_.held.fill(false);
 		return;
 	}
 	Input *in = Input::get_singleton();
-	for (const M2aActionKey &a : kM2aActions) {
-		m2a_.held[size_t(a.action)] = in->is_action_pressed(a.name);
+	for (const WeaponActionKey &a : kWeaponActions) {
+		weapon_.held[size_t(a.action)] = in->is_action_pressed(a.name);
 	}
-	if (m2a_.swallow_fire) {
-		if (m2a_.held[size_t(M2aAction::Fire)]) {
-			m2a_.held[size_t(M2aAction::Fire)] = false;
+	if (weapon_.swallow_fire) {
+		if (weapon_.held[size_t(WeaponAction::Fire)]) {
+			weapon_.held[size_t(WeaponAction::Fire)] = false;
 		} else {
-			m2a_.swallow_fire = false;
+			weapon_.swallow_fire = false;
 		}
 	}
 }
 
-void InputMapper::m2a_sample(bf3::host::InputSample &r_sample) const {
-	if (!m2a_.enabled) {
+void InputMapper::weapon_sample(bf3::host::InputSample &r_sample) const {
+	if (!weapon_.enabled) {
 		return;
 	}
-	if (m2a_.frame != nullptr) {
-		bf3::host::set_view_sample(r_sample, *m2a_.frame, m2a_.now_ns);
+	if (weapon_.frame != nullptr) {
+		bf3::host::set_view_sample(r_sample, *weapon_.frame, weapon_.now_ns);
 	}
 	if (!scripted_ && !captured_ && DisplayServer::get_singleton()->get_name() != String("headless")) {
 
@@ -511,16 +511,16 @@ void InputMapper::m2a_sample(bf3::host::InputSample &r_sample) const {
 		r_sample.held_buttons = 0;
 		return;
 	}
-	r_sample.fire_presses = m2a_.fire_presses;
-	if (!m2a_.allowed || free_camera_) {
+	r_sample.fire_presses = weapon_.fire_presses;
+	if (!weapon_.allowed || free_camera_) {
 		return;
 	}
 	sim::weapons::WeaponInput w;
-	w.fire = m2a_.held[size_t(M2aAction::Fire)];
-	w.zoom = m2a_.held[size_t(M2aAction::Ads)];
-	w.reload = m2a_.held[size_t(M2aAction::Reload)] || (m2a_.reload_until_ns != 0 && m2a_.now_ns < m2a_.reload_until_ns);
-	w.fire_mode_counter = m2a_.mode_counter;
-	w.select_slot = m2a_.wanted;
+	w.fire = weapon_.held[size_t(WeaponAction::Fire)];
+	w.zoom = weapon_.held[size_t(WeaponAction::Ads)];
+	w.reload = weapon_.held[size_t(WeaponAction::Reload)] || (weapon_.reload_until_ns != 0 && weapon_.now_ns < weapon_.reload_until_ns);
+	w.fire_mode_counter = weapon_.mode_counter;
+	w.select_slot = weapon_.wanted;
 	r_sample.held_buttons = sim::weapons::with_weapon_input(r_sample.held_buttons, w);
 }
 
@@ -530,38 +530,38 @@ namespace bf3::godot_side {
 
 namespace {
 
-struct M2bActionKey {
-	InputMapper::M2bAction action;
+struct TdmActionKey {
+	InputMapper::TdmAction action;
 	const char *name;
 	Key key;
 	Key key2;
 };
 
-constexpr M2bActionKey kM2bActions[] = {
-	{ InputMapper::M2bAction::Gadget, "bf3_gadget", KEY_3, KEY_NONE },
-	{ InputMapper::M2bAction::Scoreboard, "bf3_scoreboard", KEY_TAB, KEY_NONE },
-	{ InputMapper::M2bAction::Deploy, "bf3_deploy", KEY_ENTER, KEY_KP_ENTER },
-	{ InputMapper::M2bAction::Kit1, "bf3_kit_1", KEY_1, KEY_NONE },
-	{ InputMapper::M2bAction::Kit2, "bf3_kit_2", KEY_2, KEY_NONE },
-	{ InputMapper::M2bAction::Kit3, "bf3_kit_3", KEY_3, KEY_NONE },
-	{ InputMapper::M2bAction::Kit4, "bf3_kit_4", KEY_4, KEY_NONE },
+constexpr TdmActionKey kTdmActions[] = {
+	{ InputMapper::TdmAction::Gadget, "bf3_gadget", KEY_3, KEY_NONE },
+	{ InputMapper::TdmAction::Scoreboard, "bf3_scoreboard", KEY_TAB, KEY_NONE },
+	{ InputMapper::TdmAction::Deploy, "bf3_deploy", KEY_ENTER, KEY_KP_ENTER },
+	{ InputMapper::TdmAction::Kit1, "bf3_kit_1", KEY_1, KEY_NONE },
+	{ InputMapper::TdmAction::Kit2, "bf3_kit_2", KEY_2, KEY_NONE },
+	{ InputMapper::TdmAction::Kit3, "bf3_kit_3", KEY_3, KEY_NONE },
+	{ InputMapper::TdmAction::Kit4, "bf3_kit_4", KEY_4, KEY_NONE },
 };
-static_assert(sizeof(kM2bActions) / sizeof(kM2bActions[0]) == InputMapper::kM2bActionCount);
+static_assert(sizeof(kTdmActions) / sizeof(kTdmActions[0]) == InputMapper::kTdmActionCount);
 
 }
 
-const char *InputMapper::m2b_action_name(M2bAction p_action) {
+const char *InputMapper::tdm_action_name(TdmAction p_action) {
 	const size_t i = size_t(p_action);
-	return i < kM2bActionCount ? kM2bActions[i].name : "bf3_unknown";
+	return i < kTdmActionCount ? kTdmActions[i].name : "bf3_unknown";
 }
 
-void InputMapper::m2b_enable(bool p_on) {
-	m2b_.enabled = p_on;
-	if (!p_on || m2b_.installed) {
+void InputMapper::enable_tdm(bool p_on) {
+	tdm_.enabled = p_on;
+	if (!p_on || tdm_.installed) {
 		return;
 	}
 	InputMap *map = InputMap::get_singleton();
-	for (const M2bActionKey &a : kM2bActions) {
+	for (const TdmActionKey &a : kTdmActions) {
 		if (map->has_action(a.name)) {
 			continue;
 		}
@@ -576,61 +576,61 @@ void InputMapper::m2b_enable(bool p_on) {
 			map->action_add_event(a.name, key);
 		}
 	}
-	m2b_.installed = true;
+	tdm_.installed = true;
 }
 
-void InputMapper::m2b_set_spawn_screen(bool p_up) {
-	if (p_up && !m2b_.spawn_screen) {
-		m2b_.kit = -1;
-		m2b_.deploy_presses = 0;
+void InputMapper::set_spawn_screen(bool p_up) {
+	if (p_up && !tdm_.spawn_screen) {
+		tdm_.kit = -1;
+		tdm_.deploy_presses = 0;
 	}
-	m2b_.spawn_screen = p_up;
+	tdm_.spawn_screen = p_up;
 }
 
-bool InputMapper::m2b_scoreboard_held() const {
-	if (!m2b_.enabled) {
+bool InputMapper::scoreboard_held() const {
+	if (!tdm_.enabled) {
 		return false;
 	}
 	if (scripted_) {
-		return m2b_.scoreboard_scripted;
+		return tdm_.scoreboard_scripted;
 	}
-	return Input::get_singleton()->is_action_pressed(kM2bActions[size_t(M2bAction::Scoreboard)].name);
+	return Input::get_singleton()->is_action_pressed(kTdmActions[size_t(TdmAction::Scoreboard)].name);
 }
 
-int InputMapper::m2b_take_kit() {
-	const int k = m2b_.kit;
-	m2b_.kit = -1;
+int InputMapper::take_kit() {
+	const int k = tdm_.kit;
+	tdm_.kit = -1;
 	return k;
 }
 
-uint32_t InputMapper::m2b_take_deploy_presses() {
-	const uint32_t n = m2b_.deploy_presses;
-	m2b_.deploy_presses = 0;
+uint32_t InputMapper::take_deploy_presses() {
+	const uint32_t n = tdm_.deploy_presses;
+	tdm_.deploy_presses = 0;
 	return n;
 }
 
-void InputMapper::m2b_script_press(M2bAction p_action) {
+void InputMapper::script_press(TdmAction p_action) {
 	switch (p_action) {
-		case M2bAction::Gadget:
-			if (!m2b_.spawn_screen) {
-				m2a_select(2);
+		case TdmAction::Gadget:
+			if (!tdm_.spawn_screen) {
+				select_weapon(2);
 			} else {
-				m2b_.kit = 2;
+				tdm_.kit = 2;
 			}
 			break;
-		case M2bAction::Deploy:
-			if (m2b_.spawn_screen) {
-				++m2b_.deploy_presses;
+		case TdmAction::Deploy:
+			if (tdm_.spawn_screen) {
+				++tdm_.deploy_presses;
 			}
 			break;
-		case M2bAction::Kit1:
-		case M2bAction::Kit2:
-		case M2bAction::Kit3:
-		case M2bAction::Kit4:
-			if (m2b_.spawn_screen) {
-				m2b_.kit = int(p_action) - int(M2bAction::Kit1);
-			} else if (p_action == M2bAction::Kit3) {
-				m2a_select(2);
+		case TdmAction::Kit1:
+		case TdmAction::Kit2:
+		case TdmAction::Kit3:
+		case TdmAction::Kit4:
+			if (tdm_.spawn_screen) {
+				tdm_.kit = int(p_action) - int(TdmAction::Kit1);
+			} else if (p_action == TdmAction::Kit3) {
+				select_weapon(2);
 			}
 			break;
 		default:
@@ -638,37 +638,37 @@ void InputMapper::m2b_script_press(M2bAction p_action) {
 	}
 }
 
-void InputMapper::m2b_script_hold(M2bAction p_action, bool p_held) {
-	if (p_action == M2bAction::Scoreboard) {
-		m2b_.scoreboard_scripted = p_held;
+void InputMapper::script_hold(TdmAction p_action, bool p_held) {
+	if (p_action == TdmAction::Scoreboard) {
+		tdm_.scoreboard_scripted = p_held;
 	}
 }
 
-bool InputMapper::m2b_handle_event(const Ref<InputEvent> &p_event) {
-	if (!m2b_.enabled) {
+bool InputMapper::tdm_handle_event(const Ref<InputEvent> &p_event) {
+	if (!tdm_.enabled) {
 		return false;
 	}
-	if (m2b_.spawn_screen) {
+	if (tdm_.spawn_screen) {
 		if (const InputEventMouseButton *mb = Object::cast_to<InputEventMouseButton>(p_event.ptr())) {
 
 			if (mb->is_pressed()) {
-				++m2b_.consumed_clicks;
+				++tdm_.consumed_clicks;
 			}
 			return true;
 		}
 		if (Object::cast_to<InputEventMouseMotion>(p_event.ptr()) != nullptr) {
 			return true;
 		}
-		for (const M2bAction a : { M2bAction::Kit1, M2bAction::Kit2, M2bAction::Kit3, M2bAction::Kit4, M2bAction::Deploy }) {
-			if (p_event->is_action_pressed(m2b_action_name(a), false, false)) {
-				m2b_script_press(a);
+		for (const TdmAction a : { TdmAction::Kit1, TdmAction::Kit2, TdmAction::Kit3, TdmAction::Kit4, TdmAction::Deploy }) {
+			if (p_event->is_action_pressed(tdm_action_name(a), false, false)) {
+				script_press(a);
 				return true;
 			}
 		}
 		return false;
 	}
-	if (captured_ && p_event->is_action_pressed(m2b_action_name(M2bAction::Gadget), false, false)) {
-		m2b_script_press(M2bAction::Gadget);
+	if (captured_ && p_event->is_action_pressed(tdm_action_name(TdmAction::Gadget), false, false)) {
+		script_press(TdmAction::Gadget);
 	}
 	return false;
 }

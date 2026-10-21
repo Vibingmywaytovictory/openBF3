@@ -145,7 +145,7 @@ void Bf3TpCrowdCheck::start_loader() {
 			}
 		}
 		shared_ = shared;
-		M2aLoadInputs in;
+		GameLoadInputs in;
 		in.db = db_.get();
 		in.shared = shared_;
 		in.cache = cache_.get();
@@ -406,7 +406,7 @@ void Bf3TpCrowdCheck::_process(double p_delta) {
 	std::vector<host::PresentedOtherWeapon> weapons;
 	std::vector<host::PresentEvent> events;
 	scripted_frame(t_, others, weapons, events);
-	M2aFrame f;
+	GameFrame f;
 	f.clock.render_valid = true;
 	f.clock.render = sim_time(t_);
 	f.clock.predicted_valid = true;

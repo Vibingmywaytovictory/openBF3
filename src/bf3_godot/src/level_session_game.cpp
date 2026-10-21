@@ -1,5 +1,5 @@
-#include "level_session_m2a.h"
-#include "level_session_m2b.h"
+#include "level_session_game.h"
+#include "level_session_tdm.h"
 
 #include "bf3_localisation.h"
 #include "game_audio.h"
@@ -41,16 +41,6 @@
 #include <cstdlib>
 #include <filesystem>
 
-#ifndef OPENBF3_M2A_HAVE_FX
-#define OPENBF3_M2A_HAVE_FX 0
-#endif
-#ifndef OPENBF3_M2A_HAVE_AUDIO
-#define OPENBF3_M2A_HAVE_AUDIO 0
-#endif
-#ifndef OPENBF3_M2A_HAVE_CROWD
-#define OPENBF3_M2A_HAVE_CROWD 0
-#endif
-
 namespace bf3::godot_side {
 
 using namespace godot;
@@ -58,11 +48,6 @@ namespace host = bf3::host;
 namespace render = bf3::render;
 namespace sim = bf3::sim;
 namespace sw = bf3::sim::weapons;
-
-void m2b_bb_tdm_args(bool p_tdm, const std::string &p_kill_limit, const std::string &p_preround);
-void m2b_bb_tdm_load(host::SharedLoadOptions &r_options);
-void m2b_bb_tdm_server(host::GameServerConfig &r_game, uint32_t p_bots, std::vector<std::string> &r_notes);
-void m2b_bb_tdm_frame(const host::PresentationFrame &p_frame);
 
 namespace {
 
@@ -74,10 +59,6 @@ constexpr size_t kMaxPredictedKept = 1u << 16;
 
 double steady_s() {
 	return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-}
-
-std::filesystem::path utf8_path(const std::string &p_text) {
-	return std::filesystem::path(std::u8string(p_text.begin(), p_text.end()));
 }
 
 using bf3::core::to_lower_ascii;
@@ -106,32 +87,11 @@ Ref<StandardMaterial3D> tint_material(const Color &p_color) {
 	return m;
 }
 
-template <typename T>
-void delete_part(T *p_part) {
-	delete p_part;
-}
-
-#if OPENBF3_M2A_HAVE_FX || OPENBF3_M2A_HAVE_AUDIO || OPENBF3_M2A_HAVE_CROWD
-fx::Vec3 m2a_fv(const Vector3 &p_v) {
+fx::Vec3 to_fx(const Vector3 &p_v) {
 	return fx::Vec3{ p_v.x, p_v.y, p_v.z };
 }
 
-fx::Transform m2a_frame_y(const Vector3 &p_origin, const Vector3 &p_axis, const Vector3 &p_forward_hint) {
-	const Vector3 u = p_axis.normalized();
-	Vector3 f = p_forward_hint - u * p_forward_hint.dot(u);
-	if (f.length() < 1e-4f) {
-		f = Vector3(1, 0, 0) - u * u.x;
-	}
-	f = f.normalized();
-	fx::Transform t;
-	t.right = m2a_fv(u.cross(f).normalized());
-	t.up = m2a_fv(u);
-	t.forward = m2a_fv(f);
-	t.trans = m2a_fv(p_origin);
-	return t;
-}
-
-fx::Transform m2a_frame_of(const Vector3 &p_origin, const Vector3 &p_forward, const Vector3 &p_up_hint) {
+fx::Transform fx_frame_of(const Vector3 &p_origin, const Vector3 &p_forward, const Vector3 &p_up_hint) {
 	const Vector3 f = p_forward.normalized();
 	Vector3 r = p_up_hint.cross(f);
 	if (r.length() < 1e-4f) {
@@ -139,17 +99,16 @@ fx::Transform m2a_frame_of(const Vector3 &p_origin, const Vector3 &p_forward, co
 	}
 	r = r.normalized();
 	fx::Transform t;
-	t.right = m2a_fv(r);
-	t.up = m2a_fv(f.cross(r).normalized());
-	t.forward = m2a_fv(f);
-	t.trans = m2a_fv(p_origin);
+	t.right = to_fx(r);
+	t.up = to_fx(f.cross(r).normalized());
+	t.forward = to_fx(f);
+	t.trans = to_fx(p_origin);
 	return t;
 }
-#endif
 
 }
 
-void M2aServerRecorder::weapon_tick(uint8_t p_slot, const sim::Command &p_command, const sw::SoldierWeaponsState &p_after, const sw::WeaponTickOutput &p_out) {
+void ServerShotRecorder::weapon_tick(uint8_t p_slot, const sim::Command &p_command, const sw::SoldierWeaponsState &p_after, const sw::WeaponTickOutput &p_out) {
 	(void)p_after;
 	if (int(p_slot) != slot_.load(std::memory_order_acquire) || (p_out.shot_count == 0 && p_out.timed_count == 0)) {
 		return;
@@ -171,7 +130,7 @@ void M2aServerRecorder::weapon_tick(uint8_t p_slot, const sim::Command &p_comman
 	}
 }
 
-void M2aServerRecorder::damage(uint32_t p_tick, const sw::DamageEvent &p_event, bool p_applied, float p_health_after) {
+void ServerShotRecorder::damage(uint32_t p_tick, const sw::DamageEvent &p_event, bool p_applied, float p_health_after) {
 	std::lock_guard lock(mutex_);
 	if (damage_.size() >= kMaxRecords) {
 		dropped_.fetch_add(1, std::memory_order_relaxed);
@@ -180,7 +139,7 @@ void M2aServerRecorder::damage(uint32_t p_tick, const sw::DamageEvent &p_event, 
 	damage_.push_back({ p_tick, p_event, p_applied, p_health_after });
 }
 
-void M2aServerRecorder::projectiles(uint32_t p_tick, const sw::ProjectileStepOutput &p_out, std::span<const sw::Projectile> p_live) {
+void ServerShotRecorder::projectiles(uint32_t p_tick, const sw::ProjectileStepOutput &p_out, std::span<const sw::Projectile> p_live) {
 	(void)p_live;
 	const int slot = slot_.load(std::memory_order_acquire);
 	if (p_out.detonations.empty() || slot < 0) {
@@ -199,13 +158,13 @@ void M2aServerRecorder::projectiles(uint32_t p_tick, const sw::ProjectileStepOut
 	}
 }
 
-void M2aServerRecorder::take_detonations(std::vector<Detonation> &r_detonations) {
+void ServerShotRecorder::take_detonations(std::vector<Detonation> &r_detonations) {
 	std::lock_guard lock(mutex_);
 	r_detonations.insert(r_detonations.end(), detonations_.begin(), detonations_.end());
 	detonations_.clear();
 }
 
-void M2aServerRecorder::take(std::vector<Shot> &r_shots, std::vector<Timed> &r_timed, std::vector<Damage> &r_damage) {
+void ServerShotRecorder::take(std::vector<Shot> &r_shots, std::vector<Timed> &r_timed, std::vector<Damage> &r_damage) {
 	std::lock_guard lock(mutex_);
 	r_shots.insert(r_shots.end(), shots_.begin(), shots_.end());
 	r_timed.insert(r_timed.end(), timed_.begin(), timed_.end());
@@ -215,11 +174,11 @@ void M2aServerRecorder::take(std::vector<Shot> &r_shots, std::vector<Timed> &r_t
 	damage_.clear();
 }
 
-bool M2aGame::wants_case(M2aCase p_case) const {
+bool GameState::wants_case(M2aCase p_case) const {
 	return std::find(cases.begin(), cases.end(), p_case) != cases.end();
 }
 
-int M2aGame::item_of(uint8_t p_team, uint16_t p_def) const {
+int GameState::item_of(uint8_t p_team, uint16_t p_def) const {
 	if (p_team < 1 || p_team > 2) {
 		return -1;
 	}
@@ -227,20 +186,20 @@ int M2aGame::item_of(uint8_t p_team, uint16_t p_def) const {
 	return it != def_items[size_t(p_team - 1)].end() ? it->second : -1;
 }
 
-void Bf3LevelSession::M2aSessionDeleter::operator()(M2aSession *p_session) const {
+void Bf3LevelSession::GameDeleter::operator()(Game *p_session) const {
 	delete p_session;
 }
 
-void Bf3LevelSession::m2a_parse_args() {
-	const bool scene_m2a = has_meta("openbf3_m2a") && bool(get_meta("openbf3_m2a"));
+void Bf3LevelSession::game_parse_args() {
+	const bool scene_game = has_meta("openbf3_game") && bool(get_meta("openbf3_game"));
 	const bool check_case = has_check_arg("m2a-check");
 	const bool check_firefight = has_check_arg("m2a-firefight");
 	const bool check = check_case || check_firefight;
-	if (!scene_m2a && !check) {
+	if (!scene_game && !check) {
 		return;
 	}
-	m2a_.reset(new M2aSession());
-	M2aSession &g = *m2a_;
+	game_.reset(new Game());
+	Game &g = *game_;
 	g.enabled = true;
 	g.playable = !check;
 	std::string error;
@@ -293,13 +252,12 @@ void Bf3LevelSession::m2a_parse_args() {
 	if (firefight_case && bots_ > kFirefightBots) {
 		bots_ = kFirefightBots;
 	} else if (!firefight_case && bots_ > kMaxPlayableBots) {
-		UtilityFunctions::print(to_godot("[m2a] --bots=" + std::to_string(bots_) + " lowered to " + std::to_string(kMaxPlayableBots) +
-				" (the player must stay inside sv's lag-compensation slots, m2a-w3.md §4)"));
+		UtilityFunctions::print(to_godot("[game] --bots=" + std::to_string(bots_) + " lowered to " + std::to_string(kMaxPlayableBots) +
+				" (the player must stay inside the lag-compensation slots)"));
 		bots_ = kMaxPlayableBots;
 	}
 	nav_overlay_ = bots_ > 0 && has_user_arg("nav-overlay");
-	m2b_bb_tdm_args(has_user_arg("tdm"), user_arg_value("kill-limit"), user_arg_value("preround"));
-	m2b_gx_args(g, has_meta("openbf3_m2b") && bool(get_meta("openbf3_m2b")), mapper_, bots_, quit_after_, error);
+	tdm_parse_args(error);
 	if (!has_user_arg("walkers")) {
 		walkers_ = 0;
 	}
@@ -307,7 +265,7 @@ void Bf3LevelSession::m2a_parse_args() {
 
 		quit_after_ = 1.0e9;
 	}
-	mapper_.m2a_enable(true);
+	mapper_.enable_weapons(true);
 
 	g.vm_tuning_source = "res://config/viewmodel_tuning.cfg";
 	if (FileAccess::file_exists(to_godot(g.vm_tuning_source))) {
@@ -325,12 +283,12 @@ void Bf3LevelSession::m2a_parse_args() {
 	if (windowed) {
 		if (Bf3Localisation::current() == nullptr) {
 			g.localisation = memnew(Bf3Localisation);
-			g.localisation->set_name("M2aLocalisation");
+			g.localisation->set_name("GameLocalisation");
 			add_child(g.localisation);
 		}
 		if (Bf3UiAssets::current() == nullptr) {
 			g.ui_assets = memnew(Bf3UiAssets);
-			g.ui_assets->set_name("M2aUiAssets");
+			g.ui_assets->set_name("GameUiAssets");
 			g.ui_assets->set_atlas_movies(Bf3Hud::required_atlas_movies());
 			add_child(g.ui_assets);
 		}
@@ -340,31 +298,29 @@ void Bf3LevelSession::m2a_parse_args() {
 		cases_text += (cases_text.empty() ? "" : ",") + std::string(m2a_case_name(c));
 	}
 	char line[512];
-	std::snprintf(line, sizeof(line), "[m2a] %s: kit %s, team %s, respawn %.1f s, bots %u, walkers %u%s%s", g.playable ? "playable scene" : "check run",
+	std::snprintf(line, sizeof(line), "[game] %s: kit %s, team %s, respawn %.1f s, bots %u, walkers %u%s%s", g.playable ? "playable scene" : "check run",
 			host::kit_role_name(host::KitRole(g.kit)), team_name(g.team), g.respawn_s, bots_, walkers_, cases_text.empty() ? "" : ", cases ",
 			cases_text.c_str());
 	UtilityFunctions::print(line);
 	if (!error.empty()) {
-		UtilityFunctions::print(to_godot("[m2a] bad arguments: " + error));
+		UtilityFunctions::print(to_godot("[game] bad arguments: " + error));
 		std::lock_guard lock(loader_mutex_);
 		load_error_ = error;
 		load_failed_.store(true, std::memory_order_release);
 	}
 }
 
-void Bf3LevelSession::m2a_load_options(host::SharedLoadOptions &r_options) {
-	if (!m2a_) {
+void Bf3LevelSession::game_load_options(host::SharedLoadOptions &r_options) {
+	if (!game_) {
 		return;
 	}
 	r_options.gunplay = true;
-	m2b_bb_tdm_load(r_options);
-	m2b_gx_load(*m2a_, r_options);
+	tdm_load_options(r_options);
 	if (!scene_) {
 		return;
 	}
 
-	M2aSession *g = m2a_.get();
-#if OPENBF3_M2A_HAVE_CROWD
+	Game *g = game_.get();
 
 	g->crowd = std::unique_ptr<Bf3GameCrowd, void (*)(Bf3GameCrowd *)>(new Bf3GameCrowd(), &delete_part<Bf3GameCrowd>);
 	g->crowd_loader = std::thread([this, g]() {
@@ -382,7 +338,6 @@ void Bf3LevelSession::m2a_load_options(host::SharedLoadOptions &r_options) {
 		cache.reset();
 		g->crowd_body_seconds = steady_s() - t0;
 	});
-#endif
 	g->vm_loader = std::thread([this, g]() {
 		const double t0 = steady_s();
 		std::shared_ptr<bf3::core::Cache> cache;
@@ -413,7 +368,7 @@ void Bf3LevelSession::m2a_load_options(host::SharedLoadOptions &r_options) {
 			return;
 		}
 		g->vm_kits = std::move(*kits);
-		if (g->m2b) {
+		if (g->tdm) {
 			render::add_assault_gadget(g->vm_kits, host::kTdmAssaultGadget);
 		}
 		for (const int team : { 1, 2 }) {
@@ -436,22 +391,22 @@ void Bf3LevelSession::m2a_load_options(host::SharedLoadOptions &r_options) {
 	});
 }
 
-bool Bf3LevelSession::m2a_load_assets(const host::LevelDatabase &p_db, bf3::core::Cache *p_cache, unsigned p_threads, std::string *r_error) {
-	if (!m2a_) {
+bool Bf3LevelSession::game_load_assets(const host::LevelDatabase &p_db, bf3::core::Cache *p_cache, unsigned p_threads, std::string *r_error) {
+	if (!game_) {
 		return true;
 	}
-	M2aSession &g = *m2a_;
+	Game &g = *game_;
 	if (g.vm_loader.joinable()) {
 		g.vm_loader.join();
 	}
 	const std::shared_ptr<const host::SharedLevel> shared = shared_level();
 	if (shared == nullptr || shared->gunplay == nullptr) {
-		*r_error = "M2a: the level loaded without gunplay tables";
+		*r_error = "the level loaded without gunplay tables";
 		return false;
 	}
 	bf3::core::Result<std::shared_ptr<const host::ClientGunplayInputs>> inputs = host::make_client_gunplay_inputs(*shared);
 	if (!inputs) {
-		*r_error = "M2a: " + inputs.error().message;
+		*r_error = inputs.error().message;
 		return false;
 	}
 	g.gunplay = *inputs;
@@ -467,10 +422,10 @@ bool Bf3LevelSession::m2a_load_assets(const host::LevelDatabase &p_db, bf3::core
 		if (world) {
 			g.world = std::move(*world);
 		}
-		g.recorder = std::make_shared<M2aServerRecorder>();
+		g.recorder = std::make_shared<ServerShotRecorder>();
 	}
 
-	M2aLoadInputs li;
+	GameLoadInputs li;
 	li.db = &p_db;
 	li.shared = shared;
 	li.cache = p_cache;
@@ -485,23 +440,20 @@ bool Bf3LevelSession::m2a_load_assets(const host::LevelDatabase &p_db, bf3::core
 				g.part_notes.push_back(p_line);
 			}
 		};
-#if OPENBF3_M2A_HAVE_FX
 		{
 			const double t0 = steady_s();
 			g.fx = std::unique_ptr<Bf3GameFx, void (*)(Bf3GameFx *)>(new Bf3GameFx(), &delete_part<Bf3GameFx>);
 			if (const bf3::core::Status s = g.fx->load(li); !s.ok()) {
-				note("[m2a] ERROR fx load: " + s.error().message);
+				note("[game] ERROR fx load: " + s.error().message);
 				g.fx.reset();
 			} else {
 				const GameFxStats fs = g.fx->stats();
 				char line[256];
-				std::snprintf(line, sizeof(line), "[m2a] fx loaded in %.2f s: %u blueprints preloaded, %u failures, %u decal templates", steady_s() - t0, fs.preloaded,
+				std::snprintf(line, sizeof(line), "[game] fx loaded in %.2f s: %u blueprints preloaded, %u failures, %u decal templates", steady_s() - t0, fs.preloaded,
 						fs.preload_failures, fs.decal_templates);
 				note(line);
 			}
 		}
-#endif
-#if OPENBF3_M2A_HAVE_AUDIO
 		{
 			const double t0 = steady_s();
 			g.audio = std::unique_ptr<Bf3GameAudio, void (*)(Bf3GameAudio *)>(new Bf3GameAudio(), &delete_part<Bf3GameAudio>);
@@ -513,18 +465,16 @@ bool Bf3LevelSession::m2a_load_assets(const host::LevelDatabase &p_db, bf3::core
 			}
 			const std::vector<std::string> names = g.fx != nullptr ? g.fx->impact_sound_names() : std::vector<std::string>();
 			if (const bf3::core::Status s = g.audio->load(li, names); !s.ok()) {
-				note("[m2a] ERROR audio load: " + s.error().message);
+				note("[game] ERROR audio load: " + s.error().message);
 				g.audio.reset();
 			} else {
 				const GameAudioStats as = g.audio->stats();
 				char line[256];
-				std::snprintf(line, sizeof(line), "[m2a] audio loaded in %.2f s: %u programs, %u failures, %zu impact sounds", steady_s() - t0, as.programs, as.program_failures,
+				std::snprintf(line, sizeof(line), "[game] audio loaded in %.2f s: %u programs, %u failures, %zu impact sounds", steady_s() - t0, as.programs, as.program_failures,
 						names.size());
 				note(line);
 			}
 		}
-#endif
-#if OPENBF3_M2A_HAVE_CROWD
 		{
 			const double t0 = steady_s();
 
@@ -536,28 +486,27 @@ bool Bf3LevelSession::m2a_load_assets(const host::LevelDatabase &p_db, bf3::core
 				g.crowd = std::unique_ptr<Bf3GameCrowd, void (*)(Bf3GameCrowd *)>(new Bf3GameCrowd(), &delete_part<Bf3GameCrowd>);
 			}
 			if (!g.crowd_body_error.empty()) {
-				note("[m2a] ERROR crowd load: " + g.crowd_body_error);
+				note("[game] ERROR crowd load: " + g.crowd_body_error);
 				g.crowd.reset();
 			} else if (const bf3::core::Status s = g.crowd->load(li); !s.ok()) {
-				note("[m2a] ERROR crowd load: " + s.error().message);
+				note("[game] ERROR crowd load: " + s.error().message);
 				g.crowd.reset();
 			} else {
 				char line[192];
-				std::snprintf(line, sizeof(line), "[m2a] crowd loaded in %.2f s after the SharedLevel (waited %.2f s for its body thread, %.2f s there)", steady_s() - t0,
+				std::snprintf(line, sizeof(line), "[game] crowd loaded in %.2f s after the SharedLevel (waited %.2f s for its body thread, %.2f s there)", steady_s() - t0,
 						t_join - t0, g.crowd_body_seconds);
 				note(line);
 			}
 		}
-#endif
 	}
 	return true;
 }
 
-void Bf3LevelSession::m2a_server_config(host::GameServerConfig &r_game) {
-	if (!m2a_) {
+void Bf3LevelSession::game_server_config(host::GameServerConfig &r_game) {
+	if (!game_) {
 		return;
 	}
-	M2aSession &g = *m2a_;
+	Game &g = *game_;
 	r_game.respawn_ticks = uint32_t(std::clamp(std::lround(g.respawn_s * double(sim::kSimHz)), 1L, 120L * long(sim::kSimHz)));
 	r_game.gunplay.player_kit = g.kit;
 	r_game.gunplay.player_team = g.team;
@@ -585,30 +534,29 @@ void Bf3LevelSession::m2a_server_config(host::GameServerConfig &r_game) {
 		g.firefight_bots = bots_;
 		r_game.max_slots = std::max<uint32_t>(64u, bots_ + 1u + r_game.walkers + r_game.gunplay.target_bots);
 		char line[256];
-		std::snprintf(line, sizeof(line), "[m2a] firefight bots: %u (%s), max slots %u", bots_, g.firefight_pairs ? "pairs" : "free", r_game.max_slots);
+		std::snprintf(line, sizeof(line), "[game] firefight bots: %u (%s), max slots %u", bots_, g.firefight_pairs ? "pairs" : "free", r_game.max_slots);
 		g.part_notes.push_back(line);
 	}
-	m2b_bb_tdm_server(r_game, bots_, g.part_notes);
-	m2b_gx_server(g, r_game, bots_);
+	tdm_server_config(r_game);
 }
 
-void Bf3LevelSession::m2a_client_config(host::ClientSessionConfig &r_config) const {
-	if (!m2a_) {
+void Bf3LevelSession::game_client_config(host::ClientSessionConfig &r_config) const {
+	if (!game_) {
 		return;
 	}
-	const M2aSession &g = *m2a_;
+	const Game &g = *game_;
 	r_config.gunplay = g.gunplay;
 	r_config.send_kit_select = true;
 	r_config.kit_select = bf3::net::KitSelect{ g.kit, g.team };
 	r_config.record_predicted = g.record_predicted;
 }
 
-void Bf3LevelSession::m2a_presented(double p_delta, uint64_t p_now_ns) {
+void Bf3LevelSession::game_presented(double p_delta, uint64_t p_now_ns) {
 	(void)p_delta;
-	if (!m2a_ || client_ == nullptr) {
+	if (!game_ || client_ == nullptr) {
 		return;
 	}
-	M2aSession &g = *m2a_;
+	Game &g = *game_;
 
 	g.events.clear();
 	{
@@ -728,15 +676,15 @@ void Bf3LevelSession::m2a_presented(double p_delta, uint64_t p_now_ns) {
 			}
 		}
 	}
-	mapper_.m2a_set_slots(g.weapon.valid ? g.weapon.active_slot : uint8_t(0), g.weapon.valid ? g.weapon.pending_slot : uint8_t(0xFF), filled);
-	mapper_.m2a_set_weapons_allowed(done_ && g.alive && g.weapon.valid);
-	m2b_gx_presented(g, *client_, f, mapper_, p_now_ns);
+	mapper_.set_weapon_slots(g.weapon.valid ? g.weapon.active_slot : uint8_t(0), g.weapon.valid ? g.weapon.pending_slot : uint8_t(0xFF), filled);
+	mapper_.set_weapons_allowed(done_ && g.alive && g.weapon.valid);
+	tdm_presented(p_now_ns);
 
-	if (const uint32_t k = mapper_.m2a_take_kit_presses(); k > 0) {
+	if (const uint32_t k = mapper_.take_kit_presses(); k > 0) {
 		g.next_kit = uint8_t((g.next_kit + k) % host::kKitCount);
 		g.kit_pending = true;
 	}
-	if (const uint32_t t = mapper_.m2a_take_team_presses(); t > 0) {
+	if (const uint32_t t = mapper_.take_team_presses(); t > 0) {
 		if (t % 2 == 1) {
 			g.next_team = g.next_team == 1 ? 2 : 1;
 		}
@@ -746,15 +694,15 @@ void Bf3LevelSession::m2a_presented(double p_delta, uint64_t p_now_ns) {
 		client_->send_kit_select(bf3::net::KitSelect{ g.next_kit, g.next_team });
 		g.kit_pending = false;
 		++g.kit_selects_sent;
-		UtilityFunctions::print(to_godot(std::string("[m2a] next spawn: ") + host::kit_role_name(host::KitRole(g.next_kit)) + " " + team_name(g.next_team)));
+		UtilityFunctions::print(to_godot(std::string("[game] next spawn: ") + host::kit_role_name(host::KitRole(g.next_kit)) + " " + team_name(g.next_team)));
 	}
 }
 
 namespace {
 
-void m2a_build_ui(Node *p_parent, M2aGame &r_game, bool p_windowed) {
+void build_game_ui(Node *p_parent, GameState &r_game, bool p_windowed) {
 	r_game.layer = memnew(CanvasLayer);
-	r_game.layer->set_name("M2aUi");
+	r_game.layer->set_name("GameUi");
 	p_parent->add_child(r_game.layer);
 	if (p_windowed) {
 		r_game.hud = memnew(Bf3Hud);
@@ -778,7 +726,7 @@ void m2a_build_ui(Node *p_parent, M2aGame &r_game, bool p_windowed) {
 	r_game.built = true;
 }
 
-void m2a_map_items(M2aGame &r_game) {
+void map_viewmodel_items(GameState &r_game) {
 	if (r_game.gunplay == nullptr) {
 		return;
 	}
@@ -806,44 +754,43 @@ void m2a_map_items(M2aGame &r_game) {
 	}
 }
 
-void m2a_step_parts(Node3D &r_parent, M2aGame &r_game, const host::PresentationFrame &p_frame, uint64_t p_now_ns, double p_delta, Camera3D *p_camera,
+void step_game_parts(Node3D &r_parent, GameState &r_game, const host::PresentationFrame &p_frame, uint64_t p_now_ns, double p_delta, Camera3D *p_camera,
 		Bf3Viewmodel *p_own_vm, bool p_free_camera, const std::array<host::PresentedOtherWeapon, bf3::net::kMaxSlots> &p_others, size_t p_other_count) {
 	r_game.ms_crowd = r_game.ms_fx = r_game.ms_audio = 0;
-#if OPENBF3_M2A_HAVE_FX || OPENBF3_M2A_HAVE_AUDIO || OPENBF3_M2A_HAVE_CROWD
 	std::string error;
 	if (r_game.fx != nullptr && r_game.fx->loaded() && !r_game.fx->built()) {
 		if (!r_game.fx->build(&r_parent, &error)) {
-			UtilityFunctions::print(to_godot("[m2a] ERROR fx build: " + error));
+			UtilityFunctions::print(to_godot("[game] ERROR fx build: " + error));
 			r_game.fx.reset();
 		} else {
 			const GameFxStats fs = r_game.fx->stats();
-			UtilityFunctions::print(to_godot("[m2a] fx built: atlas " + std::to_string(fs.atlas_entries) + " entries, " + std::to_string(fs.atlas_fallbacks) +
+			UtilityFunctions::print(to_godot("[game] fx built: atlas " + std::to_string(fs.atlas_entries) + " entries, " + std::to_string(fs.atlas_fallbacks) +
 					" fallbacks, " + std::to_string(fs.decal_textures) + " decal textures"));
 			for (const std::string &n : r_game.fx->notes()) {
-				UtilityFunctions::print(to_godot("[m2a] fx: " + n));
+				UtilityFunctions::print(to_godot("[game] fx: " + n));
 			}
 		}
 	}
 	if (r_game.audio != nullptr && r_game.audio->loaded() && !r_game.audio->built()) {
 		if (!r_game.audio->build(&r_parent, &error)) {
-			UtilityFunctions::print(to_godot("[m2a] ERROR audio build: " + error));
+			UtilityFunctions::print(to_godot("[game] ERROR audio build: " + error));
 			r_game.audio.reset();
 		} else {
 			for (const std::string &n : r_game.audio->load_report()) {
-				UtilityFunctions::print(to_godot("[m2a] audio: " + n));
+				UtilityFunctions::print(to_godot("[game] audio: " + n));
 			}
 		}
 	}
 	if (r_game.crowd != nullptr && r_game.crowd->loaded() && !r_game.crowd->built()) {
 		if (!r_game.crowd->build(&r_parent, &error)) {
-			UtilityFunctions::print(to_godot("[m2a] ERROR crowd build: " + error));
+			UtilityFunctions::print(to_godot("[game] ERROR crowd build: " + error));
 			r_game.crowd.reset();
 		} else {
-			UtilityFunctions::print(to_godot("[m2a] crowd built: " + std::to_string(r_game.crowd->stats().lanes) + " pose lanes"));
+			UtilityFunctions::print(to_godot("[game] crowd built: " + std::to_string(r_game.crowd->stats().lanes) + " pose lanes"));
 		}
 	}
 	r_game.crowd_built = r_game.crowd != nullptr && r_game.crowd->built();
-	M2aFrame mf;
+	GameFrame mf;
 	mf.frame = &p_frame;
 	mf.clock = host::present_clock(p_frame, p_now_ns);
 	mf.now_ns = p_now_ns;
@@ -863,16 +810,16 @@ void m2a_step_parts(Node3D &r_parent, M2aGame &r_game, const host::PresentationF
 		active = vp->get_camera_3d() != nullptr ? vp->get_camera_3d() : p_camera;
 	}
 	if (r_game.listener_override) {
-		mf.camera = m2a_frame_of(r_game.listener_position, r_game.listener_forward, Vector3(0, 1, 0));
+		mf.camera = fx_frame_of(r_game.listener_position, r_game.listener_forward, Vector3(0, 1, 0));
 		mf.free_camera = true;
 		r_game.camera_valid = false;
 	} else if (active != nullptr) {
 		const Transform3D t = active->get_global_transform();
-		mf.camera = m2a_frame_of(t.origin, -t.basis.get_column(2), t.basis.get_column(1));
+		mf.camera = fx_frame_of(t.origin, -t.basis.get_column(2), t.basis.get_column(1));
 		const double dt = std::clamp(p_delta, 1e-4, 0.25);
 		if (r_game.camera_valid) {
 			const Vector3 v = (t.origin - r_game.camera_prev) / float(dt);
-			mf.camera_velocity = v.length() < 200.0f ? m2a_fv(v) : fx::Vec3{};
+			mf.camera_velocity = v.length() < 200.0f ? to_fx(v) : fx::Vec3{};
 		}
 		r_game.camera_prev = t.origin;
 		r_game.camera_valid = true;
@@ -940,33 +887,28 @@ void m2a_step_parts(Node3D &r_parent, M2aGame &r_game, const host::PresentationF
 		r_game.audio->step(mf, cues, effect_sounds);
 	}
 	r_game.ms_audio = ms_since(t0);
-#else
-	(void)r_parent, (void)r_game, (void)p_frame, (void)p_now_ns, (void)p_delta, (void)p_camera, (void)p_own_vm, (void)p_free_camera, (void)p_others,
-			(void)p_other_count;
-#endif
 }
 
 }
 
-bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
-	if (!m2a_) {
+bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
+	if (!game_) {
 		return false;
 	}
-	M2aSession &g = *m2a_;
+	Game &g = *game_;
 	++g.frames;
 	const auto frame_t0 = std::chrono::steady_clock::now();
 	using bf3::core::ms_since;
 	const host::PresentationFrame &f = *frame_;
-	m2b_bb_tdm_frame(f);
 	if (!g.built) {
 		for (const std::string &n : g.part_notes) {
 			UtilityFunctions::print(to_godot(n));
 		}
 		g.part_notes.clear();
-		m2a_build_ui(this, g, !headless_);
+		build_game_ui(this, g, !headless_);
 		g.base_sensitivity = mapper_.mouse_sensitivity;
 		if (!g.hud_static_error.empty()) {
-			UtilityFunctions::print(to_godot("[m2a] HUD feed without weapon rows: " + g.hud_static_error));
+			UtilityFunctions::print(to_godot("[game] HUD feed without weapon rows: " + g.hud_static_error));
 		}
 	}
 
@@ -976,15 +918,15 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 			g.vm_loader.join();
 		}
 		if (!g.vm_error.empty()) {
-			UtilityFunctions::print(to_godot("[m2a] no viewmodel: " + g.vm_error));
+			UtilityFunctions::print(to_godot("[game] no viewmodel: " + g.vm_error));
 		} else {
-			m2a_map_items(g);
+			map_viewmodel_items(g);
 			for (size_t t = 0; t < 2; ++t) {
 				Bf3Viewmodel *vm = memnew(Bf3Viewmodel);
 				vm->set_name(t == 0 ? "ViewmodelUS" : "ViewmodelRU");
 				add_child(vm);
 				if (!vm->build(*g.vm_sets[t], g.vm_tuning)) {
-					UtilityFunctions::print(to_godot(std::string("[m2a] viewmodel ") + (t == 0 ? "US" : "RU") + ": the set has no items or no CameraJoint"));
+					UtilityFunctions::print(to_godot(std::string("[game] viewmodel ") + (t == 0 ? "US" : "RU") + ": the set has no items or no CameraJoint"));
 					vm->queue_free();
 					continue;
 				}
@@ -992,7 +934,7 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 				g.vm[t] = vm;
 			}
 			char line[256];
-			std::snprintf(line, sizeof(line), "[m2a] viewmodel sets in %.2f s: US %zu items, RU %zu items; %zu + %zu defs mapped to items (tuning %s)", g.vm_seconds,
+			std::snprintf(line, sizeof(line), "[game] viewmodel sets in %.2f s: US %zu items, RU %zu items; %zu + %zu defs mapped to items (tuning %s)", g.vm_seconds,
 					g.vm_sets[0]->items.size(), g.vm_sets[1]->items.size(), g.def_items[0].size(), g.def_items[1].size(), g.vm_tuning_source.c_str());
 			UtilityFunctions::print(line);
 		}
@@ -1003,7 +945,7 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 		if (rs_info != nullptr) {
 			const double to_mib = 1.0 / (1024.0 * 1024.0);
 			char line[256];
-			std::snprintf(line, sizeof(line), "[m2a] video memory at frame %llu after Done: used %.1f MiB (textures %.1f MiB, buffers %.1f MiB)",
+			std::snprintf(line, sizeof(line), "[game] video memory at frame %llu after Done: used %.1f MiB (textures %.1f MiB, buffers %.1f MiB)",
 					static_cast<unsigned long long>(g.frames), double(rs_info->get_rendering_info(RenderingServer::RENDERING_INFO_VIDEO_MEM_USED)) * to_mib,
 					double(rs_info->get_rendering_info(RenderingServer::RENDERING_INFO_TEXTURE_MEM_USED)) * to_mib,
 					double(rs_info->get_rendering_info(RenderingServer::RENDERING_INFO_BUFFER_MEM_USED)) * to_mib);
@@ -1013,7 +955,7 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 	if (g.hud != nullptr && g.hud->is_loaded() && !g.hud_names_applied) {
 		g.hud_names_applied = true;
 		const size_t filled = g.hud->item_index() != nullptr ? host::apply_item_names(g.hud_static, *g.hud->item_index()) : 0;
-		UtilityFunctions::print(to_godot("[m2a] HUD loaded" + (g.hud->load_error().empty() ? std::string() : " (" + g.hud->load_error() + ")") + ": " +
+		UtilityFunctions::print(to_godot("[game] HUD loaded" + (g.hud->load_error().empty() ? std::string() : " (" + g.hud->load_error() + ")") + ": " +
 				std::to_string(g.hud_static.rows.size()) + " weapon rows, " + std::to_string(filled) + " names from the item index, " +
 				std::to_string(g.hud->icon_count()) + " icons"));
 	}
@@ -1083,7 +1025,7 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 		g.hud->set_visible(!free_camera);
 	}
 	g.ms_hud = ms_since(part_t0);
-	if (m2b_gx_frame(*this, g, f, p_now_ns, p_delta, camera, free_camera, headless_)) {
+	if (tdm_frame(p_now_ns, p_delta, camera, free_camera)) {
 		return true;
 	}
 
@@ -1109,7 +1051,7 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 			}
 		}
 	}
-	m2a_step_parts(*this, g, f, p_now_ns, p_delta, camera, own_vm, free_camera, others, n_others);
+	step_game_parts(*this, g, f, p_now_ns, p_delta, camera, own_vm, free_camera, others, n_others);
 	g.ms_total = ms_since(frame_t0);
 
 	if (hud_ != nullptr && done_ && hud_timer_ == 0.0 && g.firefight_bots > 0) {
@@ -1171,15 +1113,11 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 	return g.checks();
 }
 
-void Bf3LevelSession::m2a_input(const Ref<InputEvent> &p_event) {
-	(void)p_event;
-}
-
-void Bf3LevelSession::m2a_shutdown() {
-	if (!m2a_) {
+void Bf3LevelSession::game_shutdown() {
+	if (!game_) {
 		return;
 	}
-	M2aSession &g = *m2a_;
+	Game &g = *game_;
 	if (g.vm_loader.joinable()) {
 		g.vm_loader.join();
 	}
@@ -1189,132 +1127,27 @@ void Bf3LevelSession::m2a_shutdown() {
 #if OPENBF3_BUILD_CHECKS
 	g.check.reset();
 #endif
-	m2b_gx_shutdown(g);
-#if OPENBF3_M2A_HAVE_CROWD
+	tdm_shutdown();
 	if (g.crowd != nullptr) {
 		g.crowd->shutdown();
 	}
-#endif
-#if OPENBF3_M2A_HAVE_FX
 	if (g.fx != nullptr) {
 		g.fx->shutdown();
 	}
-#endif
-#if OPENBF3_M2A_HAVE_AUDIO
 	if (g.audio != nullptr) {
 		g.audio->shutdown();
 	}
-#endif
 	if (g.recorder != nullptr) {
 		g.recorder->watch_slot(-1);
 	}
 }
 
+const sim::CollisionWorld *Bf3LevelSession::collision_world() const {
+	return game_ ? game_->world.get() : nullptr;
 }
 
-#include "bf3/host/tdm_brain.h"
-
-#include <godot_cpp/classes/project_settings.hpp>
-
-#include <atomic>
-#include <memory>
-#include <string>
-
-namespace bf3::godot_side {
-
-namespace {
-
-struct M2bTdmPreview {
-	bool on = false;
-	int kill_limit = 0;
-	float preround_s = -1.0f;
-	std::string tuning_cfg;
-	bool have_match = false;
-	bf3::net::MatchState last;
-};
-M2bTdmPreview s_m2b_tdm;
-
-const char *m2b_phase_name(bf3::net::MatchPhase p_phase) {
-	switch (p_phase) {
-		case bf3::net::MatchPhase::Loading:
-			return "loading";
-		case bf3::net::MatchPhase::PreRound:
-			return "pre-round";
-		case bf3::net::MatchPhase::InRound:
-			return "in round";
-		case bf3::net::MatchPhase::RoundOver:
-			return "round over";
-	}
-	return "?";
-}
-
-}
-
-void m2b_bb_tdm_args(bool p_tdm, const std::string &p_kill_limit, const std::string &p_preround) {
-	s_m2b_tdm = M2bTdmPreview();
-	if (!p_tdm) {
-		return;
-	}
-	s_m2b_tdm.on = true;
-	if (!p_kill_limit.empty()) {
-		s_m2b_tdm.kill_limit = std::clamp(std::atoi(p_kill_limit.c_str()), 0, 100000);
-	}
-	if (!p_preround.empty()) {
-		const double s = std::atof(p_preround.c_str());
-		s_m2b_tdm.preround_s = std::isfinite(s) ? float(std::clamp(s, 0.0, 600.0)) : -1.0f;
-	}
-	const std::string cfg = to_std(ProjectSettings::get_singleton()->globalize_path("res://config/bot_tuning.cfg"));
-	s_m2b_tdm.tuning_cfg = std::filesystem::exists(utf8_path(cfg)) ? cfg : std::string();
-	char line[320];
-	std::snprintf(line, sizeof(line), "[m2b] --tdm preview: TDM rules on (no deploy screen, KitSelect kit), TDM bots, kill limit %s, pre-round %s, tuning %s",
-			s_m2b_tdm.kill_limit > 0 ? std::to_string(s_m2b_tdm.kill_limit).c_str() : "data (100)",
-			s_m2b_tdm.preround_s >= 0.0f ? (std::to_string(s_m2b_tdm.preround_s) + " s").c_str() : "data (10 s)",
-			s_m2b_tdm.tuning_cfg.empty() ? "built-in defaults" : s_m2b_tdm.tuning_cfg.c_str());
-	UtilityFunctions::print(line);
-}
-
-void m2b_bb_tdm_load(host::SharedLoadOptions &r_options) {
-	if (s_m2b_tdm.on) {
-		r_options.tdm = true;
-	}
-}
-
-void m2b_bb_tdm_server(host::GameServerConfig &r_game, uint32_t p_bots, std::vector<std::string> &r_notes) {
-	if (!s_m2b_tdm.on) {
-		return;
-	}
-	r_game.rules.mode = host::MatchRulesConfig::Mode::Tdm;
-	r_game.rules.deploy_screen = false;
-	r_game.rules.revive = true;
-	r_game.rules.kill_limit_override = s_m2b_tdm.kill_limit;
-	r_game.rules.preround_override_s = s_m2b_tdm.preround_s;
-	r_game.rules.max_players = 32;
-	r_game.firefight = nullptr;
-	if (p_bots > 0) {
-		auto bots = std::make_shared<host::TdmBotConfig>();
-		bots->count = std::min<uint32_t>(p_bots, 31u);
-		bots->tuning_cfg = s_m2b_tdm.tuning_cfg;
-		r_game.tdm_bots = bots;
-	}
-	r_notes.push_back("[m2b] --tdm preview: " + std::to_string(r_game.tdm_bots != nullptr ? r_game.tdm_bots->count : 0u) +
-			" TDM bots, teams by AutoTeam, the round flow from the Metro TDM logic graph");
-}
-
-void m2b_bb_tdm_frame(const host::PresentationFrame &p_frame) {
-	if (!s_m2b_tdm.on || !p_frame.match_valid) {
-		return;
-	}
-	const bf3::net::MatchState &m = p_frame.match;
-	const bf3::net::MatchState &l = s_m2b_tdm.last;
-	if (s_m2b_tdm.have_match && m.phase == l.phase && m.kills == l.kills && m.kill_limit == l.kill_limit && m.winner == l.winner) {
-		return;
-	}
-	s_m2b_tdm.have_match = true;
-	s_m2b_tdm.last = m;
-	char line[192];
-	std::snprintf(line, sizeof(line), "[m2b] match: %s, US %d - RU %d of %d%s", m2b_phase_name(m.phase), m.kills[0], m.kills[1], m.kill_limit,
-			m.winner == 1 ? ", US wins" : (m.winner == 2 ? ", RU wins" : ""));
-	UtilityFunctions::print(line);
+Bf3UiAssets *Bf3LevelSession::ui_assets() const {
+	return game_ ? game_->ui_assets : nullptr;
 }
 
 }

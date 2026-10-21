@@ -1,9 +1,9 @@
 [gd_scene format=3]
 
-[node name="M2bMetro" type="Node3D"]
+[node name="MetroTdm" type="Node3D"]
 
 [node name="Session" type="Bf3LevelSession" parent="."]
-metadata/openbf3_m2a = true
-metadata/openbf3_m2b = true
+metadata/openbf3_game = true
+metadata/openbf3_tdm = true
 
 [node name="MinimapHud" type="Bf3MinimapHud" parent="."]

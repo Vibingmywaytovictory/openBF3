@@ -67,7 +67,7 @@ private:
 	std::array<TdmPlacement, kTdmPlacements.size()> placements_ = kTdmPlacements;
 	std::unordered_map<uint32_t, std::string> names_;
 	std::unordered_set<uint32_t> missing_items_;
-	uint64_t m2a_hud_ = 0;
+	uint64_t weapon_hud_id_ = 0;
 	uint32_t hud_search_countdown_ = 0;
 };
 

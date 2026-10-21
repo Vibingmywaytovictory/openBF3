@@ -393,7 +393,7 @@ TEST_SUITE("pt1-run-unit") {
 			want = o.joints[0].q;
 		}
 		CHECK(quat_angle_deg(q, want) < 0.05);
-		CHECK(ev.m2a_stats().stand == 1);
+		CHECK(ev.combat_stats().stand == 1);
 
 		in.velocity = Vec3{ 0, 0, 6.5f };
 		in.sprinting = true;
@@ -415,13 +415,13 @@ TEST_SUITE("pt1-run-unit") {
 		step(kCrowdMoveBlendSeconds + 1e-3);
 		q = step(1.0 / 60.0);
 		CHECK(quat_angle_deg(q, axis_angle(0, 1, 0, 5)) < 0.05);
-		CHECK_FALSE(ev.m2a_stats().moving_crouch);
+		CHECK_FALSE(ev.combat_stats().moving_crouch);
 
 		in.pose = in.target_pose = 1;
 		in.velocity = Vec3{ 0, 0, 2.0f };
 		q = step(1.0 / 60.0);
 		CHECK(quat_angle_deg(q, s.sneak_q) < 0.05);
-		CHECK(ev.m2a_stats().moving_crouch == 1);
+		CHECK(ev.combat_stats().moving_crouch == 1);
 
 		in.sprinting = true;
 		q = step(1.0 / 60.0);
@@ -865,14 +865,14 @@ TEST_SUITE("pt1-run") {
 			for (const std::string &n : notes) {
 				MESSAGE(n);
 			}
-			REQUIRE(item.pt1_locomotion != nullptr);
-			if (!item.pt1_locomotion) {
+			REQUIRE(item.locomotion != nullptr);
+			if (!item.locomotion) {
 				continue;
 			}
-			CHECK(item.pt1_locomotion->weapon_type == w.type);
-			MESSAGE((std::string(w.weapon) + " run: " + item.pt1_locomotion->run_path));
-			MESSAGE((std::string(w.weapon) + " sprint: " + item.pt1_locomotion->sprint_path));
-			loaded.push_back(item.pt1_locomotion);
+			CHECK(item.locomotion->weapon_type == w.type);
+			MESSAGE((std::string(w.weapon) + " run: " + item.locomotion->run_path));
+			MESSAGE((std::string(w.weapon) + " sprint: " + item.locomotion->sprint_path));
+			loaded.push_back(item.locomotion);
 		}
 		REQUIRE(!loaded.empty());
 		if (loaded.empty()) {
@@ -931,7 +931,7 @@ TEST_SUITE("pt1-run") {
 				if (pass == 1) {
 					a.set_locomotion(bf3::render::viewmodel_locomotion([&] {
 						bf3::render::ViewmodelItem it;
-						it.pt1_locomotion = loaded[0];
+						it.locomotion = loaded[0];
 						return it;
 					}()));
 				}
@@ -953,7 +953,7 @@ TEST_SUITE("pt1-run") {
 					} else {
 						model_pose(*rig, pose, model);
 						after.push_back(xform_mul(xform_inverse(model[size_t(cam)]), model[size_t(wep)]).t);
-						CHECK(out.pt1_run_weight + out.pt1_sprint_weight == doctest::Approx(1.0f));
+						CHECK(out.loco_run_weight + out.loco_sprint_weight == doctest::Approx(1.0f));
 					}
 				}
 			}
@@ -1067,55 +1067,55 @@ TEST_SUITE("pt1-run-unit") {
 		in.speed = kVmRunSpeedUnit;
 
 		VmRun r = vm_steps(a, in, 30);
-		CHECK(r.out.pt1_run_frame == doctest::Approx(29.0f).epsilon(0.002));
-		CHECK(r.out.pt1_run_weight == doctest::Approx(1.0f));
-		CHECK(r.out.pt1_sprint_weight == 0.0f);
+		CHECK(r.out.loco_run_frame == doctest::Approx(29.0f).epsilon(0.002));
+		CHECK(r.out.loco_run_weight == doctest::Approx(1.0f));
+		CHECK(r.out.loco_sprint_weight == 0.0f);
 		CHECK(y_deg(r.pose.joints[2].q) == doctest::Approx(14.5f).epsilon(0.01));
 		CHECK(std::fabs(r.out.weapon_offset.t.x) < 1e-6f);
 		CHECK(std::fabs(r.out.weapon_offset.t.y) < 1e-6f);
 
 		in.speed = 2.0f * kVmRunSpeedUnit;
 		r = vm_steps(a, in, 30);
-		CHECK(r.out.pt1_run_frame == doctest::Approx(29.0f).epsilon(0.002));
+		CHECK(r.out.loco_run_frame == doctest::Approx(29.0f).epsilon(0.002));
 
 		in.speed = 4.0f;
-		const float f0 = r.out.pt1_run_frame;
+		const float f0 = r.out.loco_run_frame;
 		r = vm_steps(a, in, 6);
-		CHECK(r.out.pt1_run_frame - f0 == doctest::Approx(0.1f * 30.0f * 4.0f / kVmRunSpeedUnit).epsilon(0.002));
+		CHECK(r.out.loco_run_frame - f0 == doctest::Approx(0.1f * 30.0f * 4.0f / kVmRunSpeedUnit).epsilon(0.002));
 
 		in.ads = 1.0f;
 		r = vm_steps(a, in, 1);
-		CHECK(r.out.pt1_run_weight == 0.0f);
+		CHECK(r.out.loco_run_weight == 0.0f);
 		in.ads = 0.0f;
 
 		in.sprinting = true;
 		in.speed = 6.5f;
 		r = vm_steps(a, in, 6);
-		CHECK(r.out.pt1_sprint_weight == doctest::Approx(0.5f).epsilon(0.01));
-		CHECK(r.out.pt1_run_weight == doctest::Approx(0.5f).epsilon(0.01));
-		const float s0 = r.out.pt1_sprint_frame;
+		CHECK(r.out.loco_sprint_weight == doctest::Approx(0.5f).epsilon(0.01));
+		CHECK(r.out.loco_run_weight == doctest::Approx(0.5f).epsilon(0.01));
+		const float s0 = r.out.loco_sprint_frame;
 		r = vm_steps(a, in, 18);
-		CHECK(r.out.pt1_sprint_weight == doctest::Approx(1.0f));
-		CHECK(r.out.pt1_run_weight == 0.0f);
-		CHECK(r.out.pt1_sprint_frame - s0 == doctest::Approx(9.0f).epsilon(0.002));
-		CHECK(y_deg(r.pose.joints[2].q) == doctest::Approx(-r.out.pt1_sprint_frame).epsilon(0.01));
+		CHECK(r.out.loco_sprint_weight == doctest::Approx(1.0f));
+		CHECK(r.out.loco_run_weight == 0.0f);
+		CHECK(r.out.loco_sprint_frame - s0 == doctest::Approx(9.0f).epsilon(0.002));
+		CHECK(y_deg(r.pose.joints[2].q) == doctest::Approx(-r.out.loco_sprint_frame).epsilon(0.01));
 
 		in.sprinting = false;
 		in.speed = 0.05f;
 		r = vm_steps(a, in, 13);
-		CHECK(r.out.pt1_run_weight == 0.0f);
-		CHECK(r.out.pt1_sprint_weight == 0.0f);
+		CHECK(r.out.loco_run_weight == 0.0f);
+		CHECK(r.out.loco_sprint_weight == 0.0f);
 		CHECK(y_deg(r.pose.joints[2].q) == doctest::Approx(0.0f));
 		in.speed = 4.0f;
 		in.grounded = false;
 		r = vm_steps(a, in, 12);
-		CHECK(r.out.pt1_run_weight == 0.0f);
+		CHECK(r.out.loco_run_weight == 0.0f);
 
 		a.reset();
 		in.grounded = true;
 		in.time_s = 0;
 		r = vm_steps(a, in, 1);
-		CHECK(r.out.pt1_run_frame == doctest::Approx(14.0f + 30.0f * 4.0f / kVmRunSpeedUnit / 60.0f).epsilon(0.002));
+		CHECK(r.out.loco_run_frame == doctest::Approx(14.0f + 30.0f * 4.0f / kVmRunSpeedUnit / 60.0f).epsilon(0.002));
 	}
 
 	TEST_CASE("1p deltas: without them the procedural bob; hostile input") {
@@ -1126,7 +1126,7 @@ TEST_SUITE("pt1-run-unit") {
 			ViewmodelFrameInput in;
 			in.speed = 4.0f;
 			const VmRun r = vm_steps(a, in, 40);
-			CHECK(r.out.pt1_run_weight == 0.0f);
+			CHECK(r.out.loco_run_weight == 0.0f);
 			CHECK(std::fabs(r.out.weapon_offset.t.x) + std::fabs(r.out.weapon_offset.t.y) > 1e-4f);
 		}
 		{
@@ -1143,7 +1143,7 @@ TEST_SUITE("pt1-run-unit") {
 			ViewmodelFrameInput in;
 			in.speed = 4.0f;
 			const VmRun r = vm_steps(a, in, 40);
-			CHECK(r.out.pt1_run_weight == 0.0f);
+			CHECK(r.out.loco_run_weight == 0.0f);
 			CHECK(std::fabs(r.out.weapon_offset.t.x) + std::fabs(r.out.weapon_offset.t.y) > 1e-4f);
 		}
 		{
@@ -1157,17 +1157,17 @@ TEST_SUITE("pt1-run-unit") {
 			ViewmodelFrameInput in;
 			in.speed = std::numeric_limits<float>::quiet_NaN();
 			VmRun r = vm_steps(a, in, 5);
-			CHECK(std::isfinite(r.out.pt1_run_frame));
+			CHECK(std::isfinite(r.out.loco_run_frame));
 			in.speed = 1.0e30f;
 			r = vm_steps(a, in, 5);
-			CHECK(std::isfinite(r.out.pt1_run_frame));
-			CHECK(r.out.pt1_run_frame >= 0.0f);
-			CHECK(r.out.pt1_run_frame < 60.0f);
+			CHECK(std::isfinite(r.out.loco_run_frame));
+			CHECK(r.out.loco_run_frame >= 0.0f);
+			CHECK(r.out.loco_run_frame < 60.0f);
 			in.sprinting = true;
 			in.speed = 6.5f;
 			r = vm_steps(a, in, 30);
-			CHECK(r.out.pt1_sprint_frame >= 0.0f);
-			CHECK(r.out.pt1_sprint_frame < 40.0f);
+			CHECK(r.out.loco_sprint_frame >= 0.0f);
+			CHECK(r.out.loco_sprint_frame < 40.0f);
 			for (const Xform &x : r.pose.joints) {
 				CHECK(std::isfinite(x.q.w));
 				CHECK(std::isfinite(x.t.z));

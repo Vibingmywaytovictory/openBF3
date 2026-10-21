@@ -117,7 +117,7 @@ struct StageCoverage {
 };
 StageCoverage stage_coverage(const CrowdStageSpec &p_spec, const std::array<LocoClipInfo, kLocoClips> &p_clips, const LocoParams &p_params, double p_step);
 
-namespace s3_gate {
+namespace crowd_gate {
 constexpr uint32_t kSoldiers = 64;
 constexpr uint32_t kInView = 64;
 constexpr uint32_t kWidth = 2560;

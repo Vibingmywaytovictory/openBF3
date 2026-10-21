@@ -1,4 +1,4 @@
-#include "s3_crowd.h"
+#include "crowd_scene.h"
 
 #include "godot_cache.h"
 #include "godot_util.h"
@@ -43,7 +43,7 @@ namespace bf3::godot_side {
 
 using namespace godot;
 namespace anim = bf3::anim;
-namespace gate = bf3::anim::s3_gate;
+namespace gate = bf3::anim::crowd_gate;
 
 namespace {
 
@@ -53,7 +53,7 @@ constexpr int kShotSettleFrames = 4;
 constexpr uint64_t kMinShotBytes = 100 * 1024;
 
 void log(const std::string &p_line) {
-	UtilityFunctions::print(to_godot("[s3] " + p_line));
+	UtilityFunctions::print(to_godot("[crowd] " + p_line));
 }
 
 std::filesystem::path utf8_path(const std::string &p_text) {
@@ -147,7 +147,7 @@ void Bf3Crowd::_ready() {
 	parse_args();
 	session_ = Object::cast_to<Bf3LevelSession>(get_node_or_null(NodePath("../Session")));
 	if (session_ == nullptr) {
-		UtilityFunctions::push_error("[s3] Bf3Crowd needs a sibling Bf3LevelSession named Session");
+		UtilityFunctions::push_error("[crowd] Bf3Crowd needs a sibling Bf3LevelSession named Session");
 		return;
 	}
 	team_of_.resize(stage_.soldiers());
@@ -478,7 +478,7 @@ void Bf3Crowd::_process(double p_delta) {
 		loader_.join();
 		if (!loaded_) {
 			log("load failed: " + load_error_);
-			UtilityFunctions::push_error(to_godot("[s3] load failed: " + load_error_));
+			UtilityFunctions::push_error(to_godot("[crowd] load failed: " + load_error_));
 			finish(1);
 			return;
 		}

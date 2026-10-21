@@ -140,14 +140,14 @@ struct Bf3GameCrowd::Impl {
 	};
 	std::array<std::array<CamCorpse, 2>, kSlotsPerTeam> cam_corpses{};
 	float corpse_seconds = anim::kCrowdDeathHideSeconds;
-	bool cam_m2b = false;
+	bool corpses_kept = false;
 	uint64_t cam_counts[5] = {};
-	bool cam_event(const host::PresentEvent &p_e, const M2aFrame &p_frame);
+	bool cam_event(const host::PresentEvent &p_e, const GameFrame &p_frame);
 	void cam_new_life(uint32_t p_slot, Slot &r_s);
 	void cam_draw_corpses(double p_dt, const anim::Vec3 &p_camera);
 	void cam_log() const;
-	std::array<uint8_t, kCrowdSoldiers> pt1_kit_of{};
-	static uint8_t pt1_row_kit(const host::PresentationFrame *p_frame, uint8_t p_slot, uint8_t p_fallback);
+	std::array<uint8_t, kCrowdSoldiers> kit_of{};
+	static uint8_t row_kit(const host::PresentationFrame *p_frame, uint8_t p_slot, uint8_t p_fallback);
 	struct Pending {
 		host::PresentKind kind;
 		host::PresentTimeline timeline;
@@ -166,8 +166,8 @@ struct Bf3GameCrowd::Impl {
 	bool shut_down = false;
 
 	void apply(const Pending &p_e);
-	void build_inputs(const M2aFrame &p_frame);
-	void draw_weapons(const M2aFrame &p_frame);
+	void build_inputs(const GameFrame &p_frame);
+	void draw_weapons(const GameFrame &p_frame);
 	void clear_draw();
 };
 
@@ -195,7 +195,7 @@ void Bf3GameCrowd::Impl::apply(const Pending &p_e) {
 	}
 }
 
-void Bf3GameCrowd::Impl::build_inputs(const M2aFrame &p_frame) {
+void Bf3GameCrowd::Impl::build_inputs(const GameFrame &p_frame) {
 
 	for (const host::PresentEvent &e : p_frame.events) {
 		if (cam_event(e, p_frame)) {
@@ -286,7 +286,7 @@ void Bf3GameCrowd::Impl::build_inputs(const M2aFrame &p_frame) {
 		in.fire_seq = s.fire_seq;
 		s.input = in;
 		if ((o.flags & sim::soldier_flags::kAlive) != 0 && !s.dead) {
-			s.kit = pt1_row_kit(p_frame.frame, o.slot, s.kit);
+			s.kit = row_kit(p_frame.frame, o.slot, s.kit);
 		}
 	}
 
@@ -300,7 +300,7 @@ void Bf3GameCrowd::Impl::build_inputs(const M2aFrame &p_frame) {
 		if (!s.known) {
 			continue;
 		}
-		if (cam_m2b && slot >= kCamLaneOffset) {
+		if (corpses_kept && slot >= kCamLaneOffset) {
 			++cam_counts[2];
 			continue;
 		}
@@ -321,7 +321,7 @@ void Bf3GameCrowd::Impl::build_inputs(const M2aFrame &p_frame) {
 		}
 		inputs[index] = in;
 		if (!s.dead) {
-			pt1_kit_of[index] = s.kit;
+			kit_of[index] = s.kit;
 		}
 		const anim::Xform root{ yaw_quat(in.yaw), in.position };
 		root_x[index] = root;
@@ -330,7 +330,7 @@ void Bf3GameCrowd::Impl::build_inputs(const M2aFrame &p_frame) {
 	cam_draw_corpses(dt, cam);
 }
 
-void Bf3GameCrowd::Impl::draw_weapons(const M2aFrame &p_frame) {
+void Bf3GameCrowd::Impl::draw_weapons(const GameFrame &p_frame) {
 	(void)p_frame;
 	RenderingServer *rs = RenderingServer::get_singleton();
 	muzzles.clear();
@@ -343,7 +343,7 @@ void Bf3GameCrowd::Impl::draw_weapons(const M2aFrame &p_frame) {
 			uploader->set_soldier_visible(i, drawn);
 		}
 		if (draw && drawn) {
-			uploader->set_soldier_kit(i, pt1_kit_of[i]);
+			uploader->set_soldier_kit(i, kit_of[i]);
 		}
 		soldier_visible[i] = drawn;
 		WeaponDraw &d = weapon_draws[i];
@@ -522,7 +522,7 @@ core::Status Bf3GameCrowd::load_body(const core::InstallReader &p_reader, core::
 	return core::Status::success();
 }
 
-core::Status Bf3GameCrowd::load(const M2aLoadInputs &p_in) {
+core::Status Bf3GameCrowd::load(const GameLoadInputs &p_in) {
 	Impl &m = *impl_;
 	if (m.loaded.load(std::memory_order_acquire)) {
 		return core::make_error("crowd: already loaded");
@@ -622,7 +622,7 @@ bool Bf3GameCrowd::build(Node3D *p_parent, std::string *r_error) {
 	stance.pose = m.have_pose ? &m.pose : nullptr;
 	stance.moves = m.have_moves ? &m.moves : nullptr;
 	stance.move_groups = m.have_move_groups ? &m.move_groups : nullptr;
-	if (has_user_arg("pt1-off")) {
+	if (has_user_arg("no-locomotion")) {
 		stance.move_groups = nullptr;
 	}
 	stance.corpse_seconds = m.corpse_seconds;
@@ -717,7 +717,7 @@ bool Bf3GameCrowd::build(Node3D *p_parent, std::string *r_error) {
 			kSlotsPerTeam, lanes, m.weapon_meshes[0].size(), m.weapon_meshes[1].size(), m.have_pose ? "yes" : "no", m.have_moves ? "yes" : "no");
 	log(line);
 	if (m.uploader) {
-		log("PT1 iff kits: " + std::to_string(m.uploader->kit_meshes()) + " distinct (team, kit) meshes");
+		log("iff kits: " + std::to_string(m.uploader->kit_meshes()) + " distinct (team, kit) meshes");
 	}
 	m.built = true;
 	return true;
@@ -727,7 +727,7 @@ bool Bf3GameCrowd::built() const {
 	return impl_->built;
 }
 
-void Bf3GameCrowd::step(const M2aFrame &p_frame) {
+void Bf3GameCrowd::step(const GameFrame &p_frame) {
 	Impl &m = *impl_;
 	if (!m.built || m.shut_down) {
 		return;
@@ -792,17 +792,17 @@ void Bf3GameCrowd::set_corpse_seconds(float p_seconds) {
 		p_seconds = anim::kCrowdCorpseSeconds;
 	}
 	m.corpse_seconds = p_seconds;
-	m.cam_m2b = true;
+	m.corpses_kept = true;
 }
 
-bool Bf3GameCrowd::Impl::cam_event(const host::PresentEvent &p_e, const M2aFrame &p_frame) {
+bool Bf3GameCrowd::Impl::cam_event(const host::PresentEvent &p_e, const GameFrame &p_frame) {
 	if (p_e.kind == host::PresentKind::Revive) {
 		if (p_e.aux < kSlotsPerTeam && p_e.aux != p_frame.own_slot) {
 			slots[p_e.aux].revive_wait = 0.0;
 		}
 		return true;
 	}
-	if (!cam_m2b || p_frame.own_slot >= kCamLaneOffset) {
+	if (!corpses_kept || p_frame.own_slot >= kCamLaneOffset) {
 		return false;
 	}
 	const uint8_t own = p_frame.own_slot;
@@ -841,8 +841,8 @@ bool Bf3GameCrowd::Impl::cam_event(const host::PresentEvent &p_e, const M2aFrame
 		c.input.weapon = idx >= 0 ? uint8_t(idx) : uint8_t(0);
 	}
 	c.index = uint32_t(team) * kSlotsPerTeam + own;
-	if (c.index < pt1_kit_of.size()) {
-		pt1_kit_of[c.index] = f->own_kit < 4 ? f->own_kit : uint8_t(0);
+	if (c.index < kit_of.size()) {
+		kit_of[c.index] = f->own_kit < 4 ? f->own_kit : uint8_t(0);
 	}
 	c.seconds = 0.0;
 	c.active = true;
@@ -862,7 +862,7 @@ void Bf3GameCrowd::Impl::cam_new_life(uint32_t p_slot, Slot &r_s) {
 		return;
 	}
 	r_s.revived = false;
-	if (!cam_m2b || p_slot >= kCamLaneOffset) {
+	if (!corpses_kept || p_slot >= kCamLaneOffset) {
 		return;
 	}
 	const bool corpse = r_s.dead && r_s.dead_seconds < double(corpse_seconds + kCorpseExtraSeconds);
@@ -898,7 +898,7 @@ void Bf3GameCrowd::Impl::cam_draw_corpses(double p_dt, const anim::Vec3 &p_camer
 			}
 		}
 	}
-	if (!cam_m2b) {
+	if (!corpses_kept) {
 		return;
 	}
 	for (uint32_t slot = 0; slot < kCamLaneOffset; ++slot) {
@@ -922,15 +922,15 @@ void Bf3GameCrowd::Impl::cam_draw_corpses(double p_dt, const anim::Vec3 &p_camer
 }
 
 void Bf3GameCrowd::Impl::cam_log() const {
-	if (!cam_m2b) {
+	if (!corpses_kept) {
 		return;
 	}
 	char line[320];
 	std::snprintf(line, sizeof(line),
-			"M2b corpses (%.1f s): %llu kept on the second lane, %llu cut short, %llu own corpses, %llu slot-frames >= 64 skipped, %llu revives without a new life; "
+			"corpses (%.1f s): %llu kept on the second lane, %llu cut short, %llu own corpses, %llu slot-frames >= 64 skipped, %llu revives without a new life; "
 			"evaluator revives %llu",
 			double(corpse_seconds), (unsigned long long)cam_counts[0], (unsigned long long)cam_counts[1], (unsigned long long)cam_counts[4],
-			(unsigned long long)cam_counts[2], (unsigned long long)cam_counts[3], (unsigned long long)(eval ? eval->m2a_stats().revives : 0));
+			(unsigned long long)cam_counts[2], (unsigned long long)cam_counts[3], (unsigned long long)(eval ? eval->combat_stats().revives : 0));
 	log(line);
 }
 
@@ -938,7 +938,7 @@ void Bf3GameCrowd::Impl::cam_log() const {
 
 namespace bf3::godot_side {
 
-uint8_t Bf3GameCrowd::Impl::pt1_row_kit(const host::PresentationFrame *p_frame, uint8_t p_slot, uint8_t p_fallback) {
+uint8_t Bf3GameCrowd::Impl::row_kit(const host::PresentationFrame *p_frame, uint8_t p_slot, uint8_t p_fallback) {
 	if (p_frame == nullptr) {
 		return p_fallback;
 	}

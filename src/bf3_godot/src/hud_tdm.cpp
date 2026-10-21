@@ -50,7 +50,7 @@ void TdmHudContext::resolve(Node *p_tree_node) {
 	if (!assets_done_) {
 		resolve_assets();
 	}
-	if (m2a_hud_ == 0 && p_tree_node != nullptr && p_tree_node->is_inside_tree()) {
+	if (weapon_hud_id_ == 0 && p_tree_node != nullptr && p_tree_node->is_inside_tree()) {
 		if (hud_search_countdown_ > 0) {
 			--hud_search_countdown_;
 		} else {
@@ -60,7 +60,7 @@ void TdmHudContext::resolve(Node *p_tree_node) {
 				const TypedArray<Node> found = root->find_children("*", "Bf3Hud", true, false);
 				if (!found.is_empty()) {
 					if (Node *n = Object::cast_to<Node>(found[0])) {
-						m2a_hud_ = n->get_instance_id();
+						weapon_hud_id_ = n->get_instance_id();
 					}
 				}
 			}
@@ -192,10 +192,10 @@ Ref<Texture2D> TdmHudContext::weapon_icon(uint32_t p_item_id) {
 	if (p_item_id == 0) {
 		return Ref<Texture2D>();
 	}
-	Bf3Hud *hud = m2a_hud_ != 0 ? Object::cast_to<Bf3Hud>(ObjectDB::get_instance(m2a_hud_)) : nullptr;
+	Bf3Hud *hud = weapon_hud_id_ != 0 ? Object::cast_to<Bf3Hud>(ObjectDB::get_instance(weapon_hud_id_)) : nullptr;
 	if (hud == nullptr || !hud->is_loaded()) {
-		if (m2a_hud_ != 0 && hud == nullptr) {
-			m2a_hud_ = 0;
+		if (weapon_hud_id_ != 0 && hud == nullptr) {
+			weapon_hud_id_ = 0;
 		}
 		return Ref<Texture2D>();
 	}
@@ -432,7 +432,7 @@ void Bf3TdmHud::shutdown() {
 
 }
 
-void openbf3_register_m2b_ui() {
+void openbf3_register_tdm_hud() {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmScreen);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmKillFeed);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmScoreboard);

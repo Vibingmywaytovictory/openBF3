@@ -220,17 +220,17 @@ struct PatchInstance::State {
 	bool voice_quiet(const core::audio::SoundVoice &p_voice, uint16_t p_from, const float *p_left, const float *p_right, uint32_t p_frames) const;
 	void quiet_plugin(detail::PluginState &r_ps, float p_rate, float p_window_db, float p_hdr_window_db);
 
-	float pt1_edge[2] = { 0.0f, 0.0f };
-	float pt1_head[2] = { 0.0f, 0.0f };
-	uint64_t pt1_abrupt = 0;
-	float pt1_abrupt_max = 0.0f;
+	float edge[2] = { 0.0f, 0.0f };
+	float head[2] = { 0.0f, 0.0f };
+	uint64_t abrupt = 0;
+	float abrupt_max = 0.0f;
 
-	float pt1_fade = 1.0f;
-	float pt1_fade_step = 0.0f;
-	float pt1_fade_target = 1.0f;
-	uint32_t pt1_fade_left = 0;
-	float pt1_fade_at(uint32_t p_i) const {
-		return p_i < pt1_fade_left ? pt1_fade + pt1_fade_step * float(p_i + 1) : pt1_fade_target;
+	float cut_fade = 1.0f;
+	float cut_fade_step = 0.0f;
+	float cut_fade_target = 1.0f;
+	uint32_t cut_fade_left = 0;
+	float cut_fade_at(uint32_t p_i) const {
+		return p_i < cut_fade_left ? cut_fade + cut_fade_step * float(p_i + 1) : cut_fade_target;
 	}
 
 	float *voice(uint16_t p_voice, uint32_t p_channel) { return voice_buffers.data() + (size_t(p_voice) * 2 + p_channel) * detail::kMaxSubBlock; }

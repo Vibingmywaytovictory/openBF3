@@ -7,7 +7,7 @@
 #include "game_fx.h"
 #include "godot_util.h"
 #include "hud_controls.h"
-#include "level_session_m2a.h"
+#include "level_session_game.h"
 #include "viewmodel.h"
 
 #include "bf3/audio/audio_config.h"
@@ -46,16 +46,6 @@
 #include <map>
 #include <set>
 #include <tuple>
-
-#ifndef OPENBF3_M2A_HAVE_FX
-#define OPENBF3_M2A_HAVE_FX 0
-#endif
-#ifndef OPENBF3_M2A_HAVE_AUDIO
-#define OPENBF3_M2A_HAVE_AUDIO 0
-#endif
-#ifndef OPENBF3_M2A_HAVE_BT
-#define OPENBF3_M2A_HAVE_BT 0
-#endif
 
 namespace bf3::godot_side {
 
@@ -122,7 +112,7 @@ bool env_is_one(const char *p_name) {
 }
 
 using bf3::core::nearest_rank;
-using Action = InputMapper::M2aAction;
+using Action = InputMapper::WeaponAction;
 
 using bf3::core::fmt;
 using bf3::core::to_lower_ascii;
@@ -140,10 +130,10 @@ float vdist(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 
 struct M2aCheck::State {
 	using StepFn = std::function<bool(State &, double, bool)>;
-	State(Bf3LevelSession &r_session, M2aGame &r_game) :
+	State(Bf3LevelSession &r_session, GameState &r_game) :
 			s(r_session), g(r_game) {}
 	Bf3LevelSession &s;
-	M2aGame &g;
+	GameState &g;
 	std::vector<M2aCase> cases;
 	M2aCheckOptions options;
 	std::vector<M2aCaseResult> results;
@@ -426,20 +416,20 @@ struct M2aCheck::State {
 		const sw::SimTime to = sw::tick_start(f().tick > 15 ? f().tick - 15 : 0);
 		auto in = [&](sw::SimTime p_t) { return p_t >= window_from && p_t < to; };
 		std::vector<const host::PredictedShot *> pred;
-		std::vector<const M2aServerRecorder::Shot *> serv;
+		std::vector<const ServerShotRecorder::Shot *> serv;
 		for (const host::PredictedShot &p : g.predicted_shots) {
 			if (in(p.shot.time)) {
 				pred.push_back(&p);
 			}
 		}
-		for (const M2aServerRecorder::Shot &q : g.server_shots) {
+		for (const ServerShotRecorder::Shot &q : g.server_shots) {
 			if (in(q.shot.time)) {
 				serv.push_back(&q);
 			}
 		}
 		size_t shots_equal = 0;
 		for (const host::PredictedShot *p : pred) {
-			for (const M2aServerRecorder::Shot *q : serv) {
+			for (const ServerShotRecorder::Shot *q : serv) {
 				if (q->shot.shot_index != p->shot.shot_index) {
 					continue;
 				}
@@ -461,7 +451,7 @@ struct M2aCheck::State {
 				pt.push_back({ p.event.time, uint32_t(p.event.event), uint32_t(p.event.weapon_slot) });
 			}
 		}
-		for (const M2aServerRecorder::Timed &q : g.server_timed) {
+		for (const ServerShotRecorder::Timed &q : g.server_timed) {
 			if (in(q.event.time)) {
 				st_.push_back({ q.event.time, uint32_t(q.event.event), uint32_t(q.event.weapon_slot) });
 			}
@@ -475,8 +465,8 @@ struct M2aCheck::State {
 				ok);
 	}
 	void release_weapon_input() {
-		for (size_t a = 0; a < InputMapper::kM2aActionCount; ++a) {
-			mapper().m2a_script_hold(Action(a), false);
+		for (size_t a = 0; a < InputMapper::kWeaponActionCount; ++a) {
+			mapper().script_hold(Action(a), false);
 		}
 	}
 	bool save_shot(const std::string &p_name) {
@@ -643,7 +633,7 @@ struct M2aCheck::State {
 	void select_slot(uint8_t p_slot, double p_timeout = 6.0) {
 		add(fmt("select slot %u", unsigned(p_slot)), p_timeout, [p_slot](State &st, double, bool p_first) {
 			if (p_first) {
-				st.mapper().m2a_script_select(p_slot);
+				st.mapper().script_select(p_slot);
 			}
 			return st.ready() && st.g.weapon.active_slot == p_slot;
 		});
@@ -652,7 +642,7 @@ struct M2aCheck::State {
 	void full_magazine() {
 		add("full magazine", 12.0, [](State &st, double, bool p_first) {
 			if (p_first && st.g.weapon.valid && st.g.weapon.magazine < st.g.weapon.magazine_capacity) {
-				st.mapper().m2a_script_press(Action::Reload);
+				st.mapper().script_press(Action::Reload);
 			}
 			return st.ready() && st.g.weapon.magazine == st.g.weapon.magazine_capacity;
 		});
@@ -775,7 +765,7 @@ void M2aCheck::State::build_case(M2aCase p_case) {
 	current.outcome = M2aOutcome::Pass;
 	release_weapon_input();
 	mapper().release_all();
-	mapper().m2a_script_select(0xFF);
+	mapper().script_select(0xFF);
 	switch (p_case) {
 		case M2aCase::Range:
 			build_range();
@@ -798,29 +788,14 @@ void M2aCheck::State::build_case(M2aCase p_case) {
 			build_play();
 			break;
 		case M2aCase::Audio:
-			if (!OPENBF3_M2A_HAVE_AUDIO) {
-				current.outcome = M2aOutcome::Skip;
-				current.reason = "waiting for au3";
-				break;
-			}
 			case_timeout = std::max(case_timeout, 300.0);
 			build_audio();
 			break;
 		case M2aCase::Fx:
-			if (!OPENBF3_M2A_HAVE_FX) {
-				current.outcome = M2aOutcome::Skip;
-				current.reason = "waiting for fx3";
-				break;
-			}
 			case_timeout = std::max(case_timeout, 420.0);
 			build_fx();
 			break;
 		case M2aCase::Firefight: {
-			if (!OPENBF3_M2A_HAVE_BT) {
-				current.outcome = M2aOutcome::Skip;
-				current.reason = "waiting for bt";
-				break;
-			}
 
 			DisplayServer *ds = DisplayServer::get_singleton();
 			const int32_t primary = ds->get_primary_screen();
@@ -866,14 +841,14 @@ void M2aCheck::State::build_range() {
 		if (p_first) {
 			st.mark();
 			st.t_mark = 0;
-			st.mapper().m2a_script_hold(Action::Fire, true);
+			st.mapper().script_hold(Action::Fire, true);
 			return false;
 		}
 		if (st.g.weapon.valid && st.g.weapon.magazine == 0 && st.t_mark == 0) {
 			st.t_mark = p_t;
 		}
 		if (st.t_mark > 0 && p_t > st.t_mark + 0.1) {
-			st.mapper().m2a_script_hold(Action::Fire, false);
+			st.mapper().script_hold(Action::Fire, false);
 			return true;
 		}
 		return false;
@@ -881,7 +856,7 @@ void M2aCheck::State::build_range() {
 	wait(0.8);
 	add("E1 rows", 1.0, [](State &st, double, bool) {
 		const std::vector<host::PredictedShot> pred(st.g.predicted_shots.begin() + std::ptrdiff_t(st.mark_predicted), st.g.predicted_shots.end());
-		const std::vector<M2aServerRecorder::Shot> serv(st.g.server_shots.begin() + std::ptrdiff_t(st.mark_server), st.g.server_shots.end());
+		const std::vector<ServerShotRecorder::Shot> serv(st.g.server_shots.begin() + std::ptrdiff_t(st.mark_server), st.g.server_shots.end());
 		const sw::WeaponSimDef *d = pred.empty() ? nullptr : st.def(pred.front().shot.def);
 		const int32_t capacity = d != nullptr ? d->magazine_capacity : 0;
 		st.row("e1.predicted_shots", double(pred.size()), fmt("== magazine capacity %d", capacity), capacity > 0 && int32_t(pred.size()) == capacity);
@@ -889,7 +864,7 @@ void M2aCheck::State::build_range() {
 		size_t equal = 0;
 		double worst = 0;
 		for (const host::PredictedShot &p : pred) {
-			for (const M2aServerRecorder::Shot &q : serv) {
+			for (const ServerShotRecorder::Shot &q : serv) {
 				if (q.shot.shot_index != p.shot.shot_index) {
 					continue;
 				}
@@ -951,7 +926,7 @@ void M2aCheck::State::build_range() {
 			st.t_mark = 0;
 		}
 		if (st.taps < 5 && p_t >= st.t_mark) {
-			st.mapper().m2a_script_press(Action::Fire);
+			st.mapper().script_press(Action::Fire);
 			++st.taps;
 			st.t_mark = p_t + 0.45;
 		}
@@ -968,10 +943,10 @@ void M2aCheck::State::build_range() {
 	add("M9 held", 3.0, [](State &st, double p_t, bool p_first) {
 		if (p_first) {
 			st.mark();
-			st.mapper().m2a_script_hold(Action::Fire, true);
+			st.mapper().script_hold(Action::Fire, true);
 		}
 		if (p_t >= 0.6) {
-			st.mapper().m2a_script_hold(Action::Fire, false);
+			st.mapper().script_hold(Action::Fire, false);
 		}
 		return p_t >= 1.2;
 	});
@@ -1013,7 +988,7 @@ void M2aCheck::State::build_range() {
 			st.t_mark = 0;
 		}
 		if (st.taps < 5 && p_t >= st.t_mark) {
-			st.mapper().m2a_script_press(Action::Fire);
+			st.mapper().script_press(Action::Fire);
 			++st.taps;
 			st.t_mark = p_t + 0.5;
 		}
@@ -1029,10 +1004,10 @@ void M2aCheck::State::build_range() {
 	add("MK11 held", 3.0, [](State &st, double p_t, bool p_first) {
 		if (p_first) {
 			st.mark();
-			st.mapper().m2a_script_hold(Action::Fire, true);
+			st.mapper().script_hold(Action::Fire, true);
 		}
 		if (p_t >= 0.6) {
-			st.mapper().m2a_script_hold(Action::Fire, false);
+			st.mapper().script_hold(Action::Fire, false);
 		}
 		return p_t >= 1.2;
 	});
@@ -1092,7 +1067,7 @@ void M2aCheck::State::kill_row(const char *p_name, sw::HitZone p_zone, float p_d
 		bool killed = false;
 		double first = -1;
 		for (size_t i = st.mark_damage; i < st.g.server_damage.size(); ++i) {
-			const M2aServerRecorder::Damage &d = st.g.server_damage[i];
+			const ServerShotRecorder::Damage &d = st.g.server_damage[i];
 			if (d.event.attacker_slot == st.g.own_slot && d.event.target == 0 && d.applied) {
 				++hits;
 				first = first < 0 ? double(d.event.amount) : first;
@@ -1112,7 +1087,7 @@ void M2aCheck::State::kill_row(const char *p_name, sw::HitZone p_zone, float p_d
 			const double drop = d != nullptr ? 0.5 * std::fabs(double(d->projectile.gravity)) * flight * flight : 0.0;
 			st.aim_at(st.eye(), { st.point[0], float(double(st.point[1]) + drop), st.point[2] });
 			if (p_t >= st.t_mark + 0.1) {
-				st.mapper().m2a_script_press(Action::Fire);
+				st.mapper().script_press(Action::Fire);
 				++st.shots_fired;
 				st.t_mark = p_t + 0.4;
 			}
@@ -1180,7 +1155,7 @@ void M2aCheck::State::build_reload() {
 			st.t_mark = 0;
 		}
 		if (st.taps < 3 && p_t >= st.t_mark && st.ready()) {
-			st.mapper().m2a_script_press(Action::Fire);
+			st.mapper().script_press(Action::Fire);
 			++st.taps;
 			st.t_mark = p_t + 0.15;
 		}
@@ -1190,14 +1165,14 @@ void M2aCheck::State::build_reload() {
 		if (p_first) {
 			st.mark();
 			st.counter = uint32_t(st.g.weapon.magazine);
-			st.mapper().m2a_script_press(Action::Reload);
+			st.mapper().script_press(Action::Reload);
 			st.t_mark = 0;
 		}
 		if (st.t_mark == 0 && st.g.weapon.phase == sw::WeaponPhase::Reloading) {
 			st.t_mark = p_t;
 		}
 		if (st.t_mark > 0 && p_t >= st.t_mark + 0.25) {
-			st.mapper().m2a_script_select(1);
+			st.mapper().script_select(1);
 			return true;
 		}
 		return false;
@@ -1234,19 +1209,19 @@ void M2aCheck::State::reload_cycle(uint8_t p_slot, const std::string &p_weapon) 
 			const bool automatic = d != nullptr && d->modes[std::min<size_t>(st.g.weapon.mode, 3)].logic == core::gameplay::FireLogic::Automatic;
 			if (empty) {
 				if (st.g.weapon.valid && st.g.weapon.magazine == 0) {
-					st.mapper().m2a_script_hold(Action::Fire, false);
+					st.mapper().script_hold(Action::Fire, false);
 					return true;
 				}
 				if (automatic) {
-					st.mapper().m2a_script_hold(Action::Fire, true);
+					st.mapper().script_hold(Action::Fire, true);
 				} else if (st.ready() && p_t >= st.t_mark) {
-					st.mapper().m2a_script_press(Action::Fire);
+					st.mapper().script_press(Action::Fire);
 					st.t_mark = p_t + 0.05;
 				}
 				return false;
 			}
 			if (st.taps < 5 && p_t >= st.t_mark && st.ready()) {
-				st.mapper().m2a_script_press(Action::Fire);
+				st.mapper().script_press(Action::Fire);
 				++st.taps;
 				st.t_mark = p_t + 0.2;
 			}
@@ -1260,7 +1235,7 @@ void M2aCheck::State::reload_cycle(uint8_t p_slot, const std::string &p_weapon) 
 				st.samples.clear();
 				st.counter = 0;
 				st.reload_frames = 0;
-				st.mapper().m2a_script_press(Action::Reload);
+				st.mapper().script_press(Action::Reload);
 			}
 			st.sample(p_t);
 			const bool reloading = st.g.weapon.valid && st.g.weapon.phase == sw::WeaponPhase::Reloading;
@@ -1268,11 +1243,11 @@ void M2aCheck::State::reload_cycle(uint8_t p_slot, const std::string &p_weapon) 
 
 			if (automatic && st.counter == 0 && reloading && st.g.weapon.phase_end_s > 0 &&
 					st.g.weapon.time_s > 0.5 * (st.g.weapon.phase_start_s + st.g.weapon.phase_end_s)) {
-				st.mapper().m2a_script_hold(Action::Fire, true);
+				st.mapper().script_hold(Action::Fire, true);
 				st.counter = 1;
 			}
 			if (st.counter == 1 && st.g.predicted_shots.size() > st.mark_predicted) {
-				st.mapper().m2a_script_hold(Action::Fire, false);
+				st.mapper().script_hold(Action::Fire, false);
 				st.counter = 2;
 			}
 			if (!(p_t > 0.5 && st.reload_frames > 0 && st.ready() && (!automatic || st.counter == 2))) {
@@ -1458,7 +1433,7 @@ void M2aCheck::State::kit_deploy(const std::string &p_tag, uint8_t p_team, uint8
 		if (p_first) {
 			st.mark();
 			const Action key = p_slot == 1 ? Action::Sidearm : (p_slot == 6 ? Action::Grenade : (p_slot == 7 ? Action::Knife : Action::Primary));
-			st.mapper().m2a_script_press(key);
+			st.mapper().script_press(key);
 		}
 		return st.ready() && st.g.weapon.active_slot == p_slot;
 	});
@@ -1519,7 +1494,7 @@ void M2aCheck::State::kit_gaps(const std::string &p_tag, uint8_t p_slot) {
 			if (has_auto && !automatic) {
 				if (p_t - st.t_mark > 0.3) {
 					st.t_mark = p_t;
-					st.mapper().m2a_script_press(Action::FireMode);
+					st.mapper().script_press(Action::FireMode);
 				}
 				return false;
 			}
@@ -1533,15 +1508,15 @@ void M2aCheck::State::kit_gaps(const std::string &p_tag, uint8_t p_slot) {
 		const size_t shots = st.g.predicted_shots.size() - st.mark_predicted;
 		if (st.counter == 1) {
 			if (shots >= 6 || st.g.weapon.magazine == 0) {
-				st.mapper().m2a_script_hold(Action::Fire, false);
+				st.mapper().script_hold(Action::Fire, false);
 				st.counter = 2;
 				st.t_mark = p_t;
 				return false;
 			}
 			if (automatic) {
-				st.mapper().m2a_script_hold(Action::Fire, true);
+				st.mapper().script_hold(Action::Fire, true);
 			} else if (p_t - st.t_mark >= 2.0 / double(sim::kSimHz) - 1e-4) {
-				st.mapper().m2a_script_press(Action::Fire);
+				st.mapper().script_press(Action::Fire);
 				st.t_mark = p_t;
 			}
 			return false;
@@ -1586,7 +1561,7 @@ void M2aCheck::State::kit_fire_reload(const std::string &p_tag, uint8_t p_slot) 
 	add(tag + " fire", 4.0, [](State &st, double p_t, bool p_first) {
 		if (p_first) {
 			st.mark();
-			st.mapper().m2a_script_press(Action::Fire);
+			st.mapper().script_press(Action::Fire);
 		}
 		return p_t > 0.4 && st.ready();
 	});
@@ -1605,7 +1580,7 @@ void M2aCheck::State::kit_fire_reload(const std::string &p_tag, uint8_t p_slot) 
 	});
 	add(tag + " reload", 8.0, [](State &st, double p_t, bool p_first) {
 		if (p_first) {
-			st.mapper().m2a_script_press(Action::Reload);
+			st.mapper().script_press(Action::Reload);
 		}
 		return p_t > 0.5 && st.ready() && st.g.weapon.magazine >= st.g.weapon.magazine_capacity;
 	});
@@ -1642,7 +1617,7 @@ void M2aCheck::State::kit_knife(const std::string &p_tag) {
 			}
 		}
 		if (p_t >= 0.2 && p_t - st.dt < 0.2) {
-			st.mapper().m2a_script_press(Action::Fire);
+			st.mapper().script_press(Action::Fire);
 		}
 		return p_t >= 1.5 && st.ready();
 	});
@@ -1650,7 +1625,7 @@ void M2aCheck::State::kit_knife(const std::string &p_tag) {
 
 		uint32_t hits = 0, applied = 0;
 		for (size_t i = st.mark_damage; i < st.g.server_damage.size(); ++i) {
-			const M2aServerRecorder::Damage &d = st.g.server_damage[i];
+			const ServerShotRecorder::Damage &d = st.g.server_damage[i];
 			if (d.event.attacker_slot == st.g.own_slot && d.event.target == 0) {
 				++hits;
 				applied += d.applied ? 1 : 0;
@@ -1676,10 +1651,10 @@ void M2aCheck::State::kit_m67(const std::string &p_tag) {
 			st.counter = uint32_t(st.g.server_detonations.size());
 			st.detonation_time = -1;
 			st.mapper().script_view(st.mapper().view().yaw, float(25.0 * kPi / 180.0));
-			st.mapper().m2a_script_hold(Action::Fire, true);
+			st.mapper().script_hold(Action::Fire, true);
 		}
 		if (p_t >= 0.5) {
-			st.mapper().m2a_script_hold(Action::Fire, false);
+			st.mapper().script_hold(Action::Fire, false);
 		}
 		for (const host::PresentEvent &e : st.g.events) {
 			if (e.kind == host::PresentKind::Detonation && e.slot == st.g.own_slot && st.detonation_time < 0) {
@@ -1806,13 +1781,13 @@ void M2aCheck::State::build_hud() {
 		InputMapper &mp = st.mapper();
 		const int phase = int(p_t * 4.0);
 		if (phase < 8 && phase % 2 == 0 && std::fmod(p_t, 0.5) < st.dt + 1e-6) {
-			mp.m2a_script_press(Action::Fire);
+			mp.script_press(Action::Fire);
 		} else if (phase == 9 && std::fmod(p_t, 0.25) < st.dt + 1e-6) {
-			mp.m2a_script_press(Action::Reload);
+			mp.script_press(Action::Reload);
 		}
-		mp.m2a_script_hold(Action::Ads, p_t >= 4.0 && p_t < 5.0);
+		mp.script_hold(Action::Ads, p_t >= 4.0 && p_t < 5.0);
 		if (p_t >= 5.2 && p_t < 5.2 + st.dt + 1e-6) {
-			mp.m2a_script_select(1);
+			mp.script_select(1);
 		}
 		return p_t >= 7.0;
 	});
@@ -1864,7 +1839,7 @@ void M2aCheck::State::build_ads() {
 		add("ads " + tag, 3.0, [in](State &st, double p_t, bool p_first) {
 			if (p_first) {
 				st.samples.clear();
-				st.mapper().m2a_script_hold(Action::Ads, in);
+				st.mapper().script_hold(Action::Ads, in);
 			}
 			st.sample(p_t);
 			return p_t >= 1.0;
@@ -1920,8 +1895,8 @@ void M2aCheck::State::build_ads() {
 			st.t_mark = 0;
 			st.samples.clear();
 		}
-		st.mapper().m2a_script_hold(Action::Ads, p_t >= 1.2);
-		st.mapper().m2a_script_hold(Action::Fire, (p_t >= 0.2 && p_t < 0.8) || (p_t >= 1.6 && p_t < 2.2));
+		st.mapper().script_hold(Action::Ads, p_t >= 1.2);
+		st.mapper().script_hold(Action::Fire, (p_t >= 0.2 && p_t < 0.8) || (p_t >= 1.6 && p_t < 2.2));
 		Camera3D *cam = st.s.cameras().first_person();
 		const Bf3Viewmodel *vm = st.g.own_viewmodel();
 		if (cam != nullptr && vm != nullptr && st.g.weapon.valid && vm->is_visible()) {
@@ -1944,7 +1919,7 @@ void M2aCheck::State::build_ads() {
 	});
 
 	add("ads: springs", 4.0, [](State &st, double p_t, bool) {
-		st.mapper().m2a_script_hold(Action::Ads, false);
+		st.mapper().script_hold(Action::Ads, false);
 		st.sample(2.2 + p_t);
 		return p_t >= 3.0;
 	});
@@ -1984,12 +1959,12 @@ void M2aCheck::State::build_ads() {
 	add("ads while deploying", 4.0, [](State &st, double p_t, bool p_first) {
 		if (p_first) {
 			st.samples.clear();
-			st.mapper().m2a_script_select(1);
-			st.mapper().m2a_script_hold(Action::Ads, true);
+			st.mapper().script_select(1);
+			st.mapper().script_hold(Action::Ads, true);
 		}
 		st.sample(p_t);
 		if (p_t >= 2.5) {
-			st.mapper().m2a_script_hold(Action::Ads, false);
+			st.mapper().script_hold(Action::Ads, false);
 			return true;
 		}
 		return false;
@@ -2028,13 +2003,13 @@ void M2aCheck::State::build_ads() {
 			st.mapper().script_hold(InputAction::Sprint, true);
 		}
 		if (p_t >= 1.0) {
-			st.mapper().m2a_script_hold(Action::Ads, true);
+			st.mapper().script_hold(Action::Ads, true);
 			st.fov_samples.push_back({ p_t, cam != nullptr ? float(cam->get_fov()) : 0.0f });
 			const bool sprinting = (st.f().own_curr.flags & sim::soldier_flags::kSprinting) != 0;
 			st.counter += sprinting ? 1u : 0u;
 		}
 		if (p_t >= 1.8) {
-			st.mapper().m2a_script_hold(Action::Ads, false);
+			st.mapper().script_hold(Action::Ads, false);
 			st.mapper().script_hold(InputAction::Forward, false);
 			st.mapper().script_hold(InputAction::Sprint, false);
 			return true;
@@ -2148,8 +2123,8 @@ void M2aCheck::State::build_play() {
 			st.aim_at(eye, { o.position[0], o.position[1] + std::max(0.5f, o.eye_height - 0.35f), o.position[2] });
 			mp.script_hold(InputAction::Forward, false);
 			mp.script_hold(InputAction::Sprint, false);
-			mp.m2a_script_hold(Action::Fire, std::fmod(cyc, 0.7) < 0.4);
-			mp.m2a_script_hold(Action::Ads, int(p_t / 8.0) % 2 == 1);
+			mp.script_hold(Action::Fire, std::fmod(cyc, 0.7) < 0.4);
+			mp.script_hold(Action::Ads, int(p_t / 8.0) % 2 == 1);
 
 			bool seen = st.g.world == nullptr;
 			const sim::Vec3 aim = { o.position[0], o.position[1] + std::max(0.5f, o.eye_height - 0.35f), o.position[2] };
@@ -2196,8 +2171,8 @@ void M2aCheck::State::build_play() {
 				}
 			}
 		} else {
-			mp.m2a_script_hold(Action::Fire, false);
-			mp.m2a_script_hold(Action::Ads, false);
+			mp.script_hold(Action::Fire, false);
+			mp.script_hold(Action::Ads, false);
 			const float yaw = float(std::fmod(p_t * 0.35, 2.0 * kPi));
 			mp.script_view(yaw, float(0.08 * std::sin(p_t * 0.7)));
 		}
@@ -2206,35 +2181,35 @@ void M2aCheck::State::build_play() {
 			st.play_shot_taken[0] = st.save_shot("gx_hip");
 		}
 		if (seg >= 20.0 && seg < 20.0 + st.dt) {
-			mp.m2a_script_press(Action::Reload);
+			mp.script_press(Action::Reload);
 		}
 		if (!st.play_shot_taken[2] && seg >= 20.5 && seg < 22.0 && st.g.weapon.phase == sw::WeaponPhase::Reloading) {
 			st.play_shot_taken[2] = st.save_shot("gx_reload");
 		}
 		const double cyc40 = std::fmod(p_t, 40.0);
 		if (cyc40 >= 10.0 && cyc40 < 10.0 + st.dt) {
-			mp.m2a_script_select(1);
+			mp.script_select(1);
 		} else if (cyc40 >= 14.0 && cyc40 < 14.0 + st.dt) {
-			mp.m2a_script_select(0);
+			mp.script_select(0);
 		}
 		const double cyc60 = std::fmod(p_t, 60.0);
 		if (cyc60 >= 33.0 && cyc60 < 33.0 + st.dt) {
-			mp.m2a_script_select(6);
+			mp.script_select(6);
 		} else if (cyc60 >= 35.0 && cyc60 < 35.4 && st.g.weapon.active_slot == 6) {
-			mp.m2a_script_hold(Action::Fire, true);
+			mp.script_hold(Action::Fire, true);
 		} else if (cyc60 >= 35.4 && cyc60 < 35.4 + st.dt) {
-			mp.m2a_script_hold(Action::Fire, false);
+			mp.script_hold(Action::Fire, false);
 		} else if (cyc60 >= 38.0 && cyc60 < 38.0 + st.dt) {
-			mp.m2a_script_select(7);
+			mp.script_select(7);
 		} else if (cyc60 >= 39.0 && cyc60 < 39.0 + st.dt) {
-			mp.m2a_script_press(Action::Fire);
+			mp.script_press(Action::Fire);
 		} else if (cyc60 >= 40.0 && cyc60 < 40.0 + st.dt) {
-			mp.m2a_script_select(0);
+			mp.script_select(0);
 		}
 
 		if (p_t >= 120.0 && p_t < 120.0 + st.dt) {
-			mp.m2a_script_press(Action::Kit);
-			mp.m2a_script_press(Action::Team);
+			mp.script_press(Action::Kit);
+			mp.script_press(Action::Team);
 		}
 
 		if (p_t - st.play_last_fall >= 70.0 && p_t >= 50.0 && p_t < T - 40.0) {
@@ -2262,9 +2237,9 @@ void M2aCheck::State::build_play() {
 		st.row("play.events_overflow", double(cs.events_overflow), "== 0 (E14's gate)", cs.events_overflow == 0);
 		st.row("play.bad_gunplay_events", double(cs.bad_gunplay_events), "== 0", cs.bad_gunplay_events == 0);
 		st.row("play.events_drained", double(st.g.events_drained), "> 0 events flowed", st.g.events_drained > 0);
-		st.row("play.remote_shots", double(st.g.remote_shots_seen), "> 0 RemoteShot events (bt's bots fire)", !OPENBF3_M2A_HAVE_BT || st.g.remote_shots_seen > 0);
+		st.row("play.remote_shots", double(st.g.remote_shots_seen), "> 0 RemoteShot events (bt's bots fire)", st.g.remote_shots_seen > 0);
 		st.row("play.killed_by_enemy", double(st.g.deaths_by_enemy), "own deaths by another soldier (>= 1 with bt's bots: they fight back)",
-				!OPENBF3_M2A_HAVE_BT || st.g.deaths_by_enemy >= 1);
+				st.g.deaths_by_enemy >= 1);
 		st.row("play.firefight_bots", double(st.g.firefight_bots), "bt's firefight bots in the match (reported)", true);
 		const bool crowd_ok = st.g.crowd != nullptr && st.g.crowd_built;
 		st.row("play.crowd_built", crowd_ok ? 1.0 : 0.0, "tp's 3p soldiers drawn (Bf3GameCrowd built; the capsules hidden)", crowd_ok);
@@ -2337,7 +2312,7 @@ void M2aCheck::State::build_audio() {
 	add("audio: probe round", 4.0, [](State &st, double p_t, bool p_first) {
 		if (p_first) {
 			st.aorigin_valid = false;
-			st.mapper().m2a_script_press(Action::Fire);
+			st.mapper().script_press(Action::Fire);
 		}
 		for (const host::PresentEvent &e : st.g.events) {
 			if (e.kind == host::PresentKind::OwnShot && !st.aorigin_valid) {
@@ -2388,7 +2363,7 @@ void M2aCheck::State::build_audio() {
 				st.aburst_shots += e.kind == host::PresentKind::OwnShot ? 1u : 0u;
 			}
 			if (st.aburst_shots >= sc.rounds || !st.g.alive) {
-				st.mapper().m2a_script_hold(Action::Fire, false);
+				st.mapper().script_hold(Action::Fire, false);
 				st.aburst_firing = false;
 			}
 		}
@@ -2401,7 +2376,7 @@ void M2aCheck::State::build_audio() {
 			const int32_t need = next.audition ? 0 : int32_t(next.bursts * sc.rounds);
 			if (st.g.weapon.valid && st.g.weapon.magazine < need) {
 				if (st.ready()) {
-					st.mapper().m2a_script_press(Action::Reload);
+					st.mapper().script_press(Action::Reload);
 				}
 				return false;
 			}
@@ -2435,14 +2410,14 @@ void M2aCheck::State::build_audio() {
 		if (st.abursts_left > 0 && !st.aburst_firing && p_t >= st.anext_burst && st.ready()) {
 			st.aburst_shots = 0;
 			st.aburst_firing = true;
-			st.mapper().m2a_script_hold(Action::Fire, true);
+			st.mapper().script_hold(Action::Fire, true);
 			--st.abursts_left;
 			st.anext_burst = std::max(st.anext_burst + sc.burst_period_s, p_t + 0.5);
 		}
 		return false;
 	});
 	add("audio: rows", 2.0, [](State &st, double, bool) {
-		st.mapper().m2a_script_hold(Action::Fire, false);
+		st.mapper().script_hold(Action::Fire, false);
 		st.g.audio->set_check(nullptr);
 		st.g.listener_override = false;
 		const GameAudioStats as = st.g.audio->stats();
@@ -2720,7 +2695,7 @@ void M2aCheck::State::build_fx() {
 		}
 		add(fmt("fx: segment %zu fire", k), 200.0, [k](State &st, double, bool p_first) {
 			if (p_first) {
-				st.mapper().m2a_script_hold(Action::Fire, true);
+				st.mapper().script_hold(Action::Fire, true);
 				st.fx_next_note = st.case_t + 10.0;
 				st.fx_phase = 0;
 			}
@@ -2738,12 +2713,12 @@ void M2aCheck::State::build_fx() {
 				st.fx_oil_particles = n;
 			}
 			if (!st.fx_surfaces[k].found || st.fx_seg_shots >= (st.fx_surfaces[k].material == kFxWater ? kFxWaterShots : kFxShots / 2)) {
-				st.mapper().m2a_script_hold(Action::Fire, false);
+				st.mapper().script_hold(Action::Fire, false);
 				return st.fx_oil_particles >= 0 || !st.fx_oil_started || k > 0;
 			}
 			const sw::WeaponSimDef *d = st.def(st.g.weapon.def);
 			if (st.fx_phase == 0 && st.g.weapon.valid && st.g.weapon.magazine == 0 && st.g.weapon.reserve == 0) {
-				st.mapper().m2a_script_hold(Action::Fire, false);
+				st.mapper().script_hold(Action::Fire, false);
 				st.fx_phase = 3;
 				st.fx_dry_t = st.case_t;
 				return false;
@@ -2773,25 +2748,25 @@ void M2aCheck::State::build_fx() {
 			if (st.fx_phase == 2) {
 				st.aim_at(st.eye(), st.fx_surfaces[k].point);
 				if (st.g.weapon.active_slot != 0) {
-					st.mapper().m2a_script_select(0);
+					st.mapper().script_select(0);
 					return false;
 				}
 				if (d != nullptr && d->modes[std::min<size_t>(st.g.weapon.mode, 3)].logic != core::gameplay::FireLogic::Automatic) {
 					if (st.case_t - st.fx_mode_t > 0.3) {
 						st.fx_mode_t = st.case_t;
-						st.mapper().m2a_script_press(Action::FireMode);
+						st.mapper().script_press(Action::FireMode);
 					}
 					return false;
 				}
 				if (!st.ready()) {
 					return false;
 				}
-				st.mapper().m2a_script_hold(Action::Fire, true);
+				st.mapper().script_hold(Action::Fire, true);
 				st.fx_phase = 0;
 			}
 
 			if (st.g.weapon.valid && st.g.weapon.magazine == 0 && st.ready()) {
-				st.mapper().m2a_script_press(Action::Reload);
+				st.mapper().script_press(Action::Reload);
 			}
 			st.aim_at(st.eye(), st.fx_surfaces[k].point);
 			return false;
@@ -2822,7 +2797,7 @@ void M2aCheck::State::build_fx() {
 			st.aim_at(st.eye(), st.point);
 		}
 		if (st.taps < 3 && p_t >= st.t_mark && st.ready()) {
-			st.mapper().m2a_script_press(Action::Fire);
+			st.mapper().script_press(Action::Fire);
 			++st.taps;
 			st.t_mark = p_t + 0.4;
 		}
@@ -3013,7 +2988,7 @@ void M2aCheck::State::automatic_mode() {
 		}
 		if (p_t - st.t_mark > 0.3 || st.t_mark > p_t) {
 			st.t_mark = p_t;
-			st.mapper().m2a_script_press(Action::FireMode);
+			st.mapper().script_press(Action::FireMode);
 		}
 		return false;
 	});
@@ -3046,7 +3021,7 @@ void M2aCheck::State::finish_case() {
 	running = false;
 }
 
-M2aCheck::M2aCheck(Bf3LevelSession &r_session, M2aGame &r_game, std::vector<M2aCase> p_cases, const M2aCheckOptions &p_options) :
+M2aCheck::M2aCheck(Bf3LevelSession &r_session, GameState &r_game, std::vector<M2aCase> p_cases, const M2aCheckOptions &p_options) :
 		state_(std::make_unique<State>(r_session, r_game)) {
 	state_->cases = std::move(p_cases);
 	state_->options = p_options;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "m2a_game.h"
+#include "game_frame.h"
 
 #include "bf3/audio/audio_config.h"
 #include "bf3/audio/game_audio_check.h"
@@ -48,7 +48,7 @@ public:
 	Bf3GameAudio(const Bf3GameAudio &) = delete;
 	Bf3GameAudio &operator=(const Bf3GameAudio &) = delete;
 
-	core::Status load(const M2aLoadInputs &p_in, std::span<const std::string> p_impact_sounds);
+	core::Status load(const GameLoadInputs &p_in, std::span<const std::string> p_impact_sounds);
 
 	void set_load_options(const audio::GameAudioLoadOptions &p_options);
 	bool loaded() const;
@@ -56,9 +56,9 @@ public:
 	bool build(godot::Node *p_parent, std::string *r_error);
 	bool built() const;
 
-	void step(const M2aFrame &p_frame, std::span<const fx::ImpactSoundCue> p_impact_cues);
+	void step(const GameFrame &p_frame, std::span<const fx::ImpactSoundCue> p_impact_cues);
 
-	void step(const M2aFrame &p_frame, std::span<const fx::ImpactSoundCue> p_impact_cues, std::span<const audio::EffectSoundRequest> p_effect_sounds);
+	void step(const GameFrame &p_frame, std::span<const fx::ImpactSoundCue> p_impact_cues, std::span<const audio::EffectSoundRequest> p_effect_sounds);
 
 	bool audition(std::string_view p_patch, const fx::Vec3 &p_position, std::string *r_error);
 

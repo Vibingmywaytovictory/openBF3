@@ -102,7 +102,7 @@ struct CrowdFrameStats {
 };
 
 struct CrowdStanceSet;
-struct CrowdM2aStats;
+struct CrowdCombatStats;
 
 class CrowdEvaluator {
 public:
@@ -141,7 +141,7 @@ public:
 
 	bool drawn(uint32_t p_i) const;
 
-	CrowdM2aStats m2a_stats() const;
+	CrowdCombatStats combat_stats() const;
 
 private:
 	CrowdEvaluator();
@@ -188,7 +188,7 @@ struct CrowdStanceSet {
 	const CrowdMoveGroupSet *move_groups = nullptr;
 };
 
-struct CrowdM2aStats {
+struct CrowdCombatStats {
 
 	uint32_t stand = 0, crouch = 0, prone = 0;
 	uint32_t transitions = 0;

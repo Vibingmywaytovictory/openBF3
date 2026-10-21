@@ -46,10 +46,10 @@ private:
 	std::shared_ptr<bf3::audio::MixerCore> mixer_;
 };
 
-inline constexpr int kPt1NoPriority = -1000;
-int pt1_audio_thread_priority();
+inline constexpr int kNoThreadPriority = -1000;
+int audio_thread_priority();
 
-void pt1_request_audio_thread_priority(int p_priority);
-int pt1_audio_thread_priority_set();
+void request_audio_thread_priority(int p_priority);
+int audio_thread_priority_set();
 
 }

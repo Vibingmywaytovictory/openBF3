@@ -321,7 +321,7 @@ void MinimapCheck::evaluate_icons(const ViewFrames &p_frames, std::string &r_det
 	std::string problems;
 	for (size_t i = 0; i < a->level.objectives.size(); ++i) {
 		const ui::MinimapObjective &o = a->level.objectives[i];
-		const ui::HudIconChoice choice = ui::objective_icon(o.kind == ui::ObjectiveKind::Hq, o.initial_owner, kM1LocalTeam);
+		const ui::HudIconChoice choice = ui::objective_icon(o.kind == ui::ObjectiveKind::Hq, o.initial_owner, kNoMatchLocalTeam);
 		bool ok = true;
 		if (i >= drawn.size() || drawn[i].icon == nullptr || drawn[i].icon->type != choice.icon || drawn[i].state != choice.state) {
 			ok = false;

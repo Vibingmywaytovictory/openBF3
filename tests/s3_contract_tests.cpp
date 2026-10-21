@@ -28,15 +28,15 @@ static_assert(anim::kStagePhases == 10);
 static_assert(uint8_t(anim::LocoClip::Idle) == 0 && uint8_t(anim::CrowdClip::Idle) == 0);
 static_assert(anim::TemporalLodTable::kTiers == 6);
 static_assert(anim::kMaxPaletteBinds >= 113);
-static_assert(anim::s3_gate::kSoldiers == 64 && anim::s3_gate::kSoldiers <= anim::kMaxCrowdSoldiers);
-static_assert(anim::CrowdStageSpec{}.soldiers() == anim::s3_gate::kSoldiers);
-static_assert(anim::s3_gate::kWidth == 2560 && anim::s3_gate::kHeight == 1440);
-static_assert(anim::s3_gate::kMainThreadMs == 2.0 && anim::s3_gate::kFrameMs == 16.7 && anim::s3_gate::kMinSeconds >= 30.0);
+static_assert(anim::crowd_gate::kSoldiers == 64 && anim::crowd_gate::kSoldiers <= anim::kMaxCrowdSoldiers);
+static_assert(anim::CrowdStageSpec{}.soldiers() == anim::crowd_gate::kSoldiers);
+static_assert(anim::crowd_gate::kWidth == 2560 && anim::crowd_gate::kHeight == 1440);
+static_assert(anim::crowd_gate::kMainThreadMs == 2.0 && anim::crowd_gate::kFrameMs == 16.7 && anim::crowd_gate::kMinSeconds >= 30.0);
 static_assert((anim::crowd_flags::kReloadStart & anim::crowd_flags::kHidden) == 0);
-static_assert(anim::s3_gate::kInView == anim::s3_gate::kSoldiers);
-static_assert(anim::s3_gate::kR2Windows % 2 == 0 &&
-		(anim::s3_gate::kR2Windows / 2) * (anim::s3_gate::kWindowSeconds - anim::s3_gate::kWindowSettleSeconds) >= anim::s3_gate::kMinSeconds);
-static_assert(anim::s3_gate::kBenchWindows % 2 == 0);
+static_assert(anim::crowd_gate::kInView == anim::crowd_gate::kSoldiers);
+static_assert(anim::crowd_gate::kR2Windows % 2 == 0 &&
+		(anim::crowd_gate::kR2Windows / 2) * (anim::crowd_gate::kWindowSeconds - anim::crowd_gate::kWindowSettleSeconds) >= anim::crowd_gate::kMinSeconds);
+static_assert(anim::crowd_gate::kBenchWindows % 2 == 0);
 static_assert(anim::kLodRowDistance.size() == anim::CrowdStageSpec{}.rows);
 
 TEST_CASE("s3 contract: temporal LOD defaults are the retail GameAnimationSettings values") {
@@ -118,7 +118,7 @@ TEST_CASE("s3 contract: the fixed stage frames all 64 soldiers at 16:9") {
 	CHECK(cam.position.z == doctest::Approx(spec.origin.z).epsilon(1e-5));
 	const float margin = anim::stage_frustum_margin(spec, cam, 16.0f / 9.0f);
 	MESSAGE("stage frustum margin at 16:9: " << margin);
-	CHECK(margin >= anim::s3_gate::kMinFrustumMargin);
+	CHECK(margin >= anim::crowd_gate::kMinFrustumMargin);
 
 	anim::CrowdStageSpec old = spec;
 	old.camera_back = 3.0f;

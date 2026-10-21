@@ -1,9 +1,8 @@
-#include "pt1_iff.h"
+#include "iff_overlay.h"
 
 #include "godot_util.h"
 #include "input_mapper.h"
 #include "level_session.h"
-#include "level_session_m2a.h"
 #include "ui_assets.h"
 
 #include "bf3/core/ebx_db.h"
@@ -173,7 +172,7 @@ void Bf3Nametags::_draw() {
 	}
 }
 
-struct Pt1Iff::Loaded {
+struct IffOverlay::Loaded {
 	ui::NametagStyle style;
 	ui::SpottingRules spotting;
 	std::array<std::string, 4> kit_icons;
@@ -181,7 +180,7 @@ struct Pt1Iff::Loaded {
 	double seconds = 0.0;
 };
 
-struct Pt1Iff::Shots {
+struct IffOverlay::Shots {
 	std::string dir;
 	int phase = 0;
 	double alive_since = -1.0;
@@ -202,7 +201,7 @@ struct Pt1Iff::Shots {
 	int saved = 0;
 };
 
-Pt1Iff::Pt1Iff(Bf3LevelSession *p_session, CanvasLayer *p_layer, Ref<ImageTexture> p_atlas, const ui::HudIconAtlas *p_icons) :
+IffOverlay::IffOverlay(Bf3LevelSession *p_session, CanvasLayer *p_layer, Ref<ImageTexture> p_atlas, const ui::HudIconAtlas *p_icons) :
 		session_(p_session), atlas_(p_atlas), icons_(p_icons) {
 	tags_ = memnew(Bf3Nametags);
 	tags_->set_name("Nametags");
@@ -230,7 +229,7 @@ Pt1Iff::Pt1Iff(Bf3LevelSession *p_session, CanvasLayer *p_layer, Ref<ImageTextur
 	loader_ = std::thread([this]() { run_loader(); });
 }
 
-Pt1Iff::~Pt1Iff() {
+IffOverlay::~IffOverlay() {
 	stop_.store(true);
 	if (loader_.joinable()) {
 		loader_.join();
@@ -240,7 +239,7 @@ Pt1Iff::~Pt1Iff() {
 	}
 }
 
-void Pt1Iff::run_loader() {
+void IffOverlay::run_loader() {
 	const auto t0 = std::chrono::steady_clock::now();
 	auto out = std::make_shared<Loaded>();
 	std::string notes;
@@ -301,21 +300,21 @@ void Pt1Iff::run_loader() {
 	published_.store(true, std::memory_order_release);
 }
 
-void Pt1Iff::log_summary() {
+void IffOverlay::log_summary() {
 	const double n = double(std::max<uint64_t>(1, stats_.frames));
 	char line[768];
 	std::snprintf(line, sizeof(line),
-			"[pt1-iff] %llu frames: minimap per frame %.1f friendly + %.1f revealed enemies (%.1f enemies hidden; the M1 loop drew %.1f others as "
+			"[iff] %llu frames: minimap per frame %.1f friendly + %.1f revealed enemies (%.1f enemies hidden; the team-less fallback draws %.1f others as "
 			"enemies); nametags per frame %.1f friendly icons, %.2f friendly names, %.3f enemy names; LOS rays %llu (%llu blocked); "
 			"%llu soldier-frames without a team; style %s, reveal %.2f s; main thread %.1f us per frame (max %.1f us)",
 			(unsigned long long)stats_.frames, double(stats_.minimap_friendly) / n, double(stats_.minimap_enemy) / n, double(stats_.minimap_hidden_enemies) / n,
-			double(stats_.m1_rule_enemy_icons) / n, double(stats_.friendly_icons) / n, double(stats_.friendly_names) / n, double(stats_.enemy_names) / n,
+			double(stats_.all_others_as_enemies) / n, double(stats_.friendly_icons) / n, double(stats_.friendly_names) / n, double(stats_.enemy_names) / n,
 			(unsigned long long)stats_.los_rays, (unsigned long long)stats_.los_blocked, (unsigned long long)stats_.unknown_team,
 			style_.from_data ? "from data" : "defaults", double(spotting_.fire_reveal_seconds()), double(stats_.frame_ns) / n * 1e-3, double(stats_.frame_max_ns) * 1e-3);
 	UtilityFunctions::print(line);
 }
 
-void Pt1Iff::frame(const Camera3D *p_camera, bool p_first_person, std::vector<MinimapIconDraw> &r_icons) {
+void IffOverlay::frame(const Camera3D *p_camera, bool p_first_person, std::vector<MinimapIconDraw> &r_icons) {
 	if (session_ == nullptr || tags_ == nullptr) {
 		return;
 	}
@@ -332,7 +331,7 @@ void Pt1Iff::frame(const Camera3D *p_camera, bool p_first_person, std::vector<Mi
 			tags_->set_style(style_, l->kit_icons);
 			char line[512];
 			std::snprintf(line, sizeof(line),
-					"[pt1-iff] nametags %s (FriendlyTint %.2f %.2f %.2f, EnemyTint %.2f %.2f %.2f, ShowLabelRange %.0f m, look-at %.0f..%.0f within %.0f m, "
+					"[iff] nametags %s (FriendlyTint %.2f %.2f %.2f, EnemyTint %.2f %.2f %.2f, ShowLabelRange %.0f m, look-at %.0f..%.0f within %.0f m, "
 					"VerticalOffset %.2f m, %u clamped), spotting %s (fire reveal %.2f s), kit icons %s %s %s %s, %.2f s;%s",
 					style_.from_data ? "from data" : "retail defaults", double(style_.friendly_tint[0]), double(style_.friendly_tint[1]), double(style_.friendly_tint[2]),
 					double(style_.enemy_tint[0]), double(style_.enemy_tint[1]), double(style_.enemy_tint[2]), double(style_.show_label_range),
@@ -343,7 +342,7 @@ void Pt1Iff::frame(const Camera3D *p_camera, bool p_first_person, std::vector<Mi
 		}
 	}
 	if (!font_set_) {
-		if (Bf3UiAssets *assets = session_->pt1_iff_ui_assets()) {
+		if (Bf3UiAssets *assets = session_->ui_assets()) {
 			const Ref<Font> f = assets->get_font(String("$Menu_medium"));
 			if (f.is_valid()) {
 				tags_->set_font(f);
@@ -362,7 +361,7 @@ void Pt1Iff::frame(const Camera3D *p_camera, bool p_first_person, std::vector<Mi
 	viewer.team = own_team_of(f);
 	reveal_.update(all, now_s, spotting_.fire_reveal_seconds());
 	++stats_.frames;
-	stats_.m1_rule_enemy_icons += n;
+	stats_.all_others_as_enemies += n;
 	for (const IffSoldier &s : all) {
 		stats_.unknown_team += s.team == 0 ? 1u : 0u;
 	}
@@ -395,7 +394,7 @@ void Pt1Iff::frame(const Camera3D *p_camera, bool p_first_person, std::vector<Mi
 		const float canvas_scale = vis.size.y / ui::kNametagStageHeight;
 		const Vector2 centre = vis.position + vis.size * 0.5f;
 		const Vector3 eye = p_camera->get_global_transform().origin;
-		const sim::CollisionWorld *world = session_->pt1_iff_world();
+		const sim::CollisionWorld *world = session_->collision_world();
 		uint32_t rays = 0;
 		for (const IffSoldier &s : all) {
 			ui::NametagSubject sub;
@@ -473,27 +472,27 @@ void Pt1Iff::frame(const Camera3D *p_camera, bool p_first_person, std::vector<Mi
 		const bool alive = f.valid && (f.own_curr.flags & sim::soldier_flags::kAlive) != 0;
 		if (live_start_s_ < 0.0 && alive && applied_) {
 			live_start_s_ = now_s;
-			stats_ = Pt1IffStats{};
+			stats_ = IffOverlayStats{};
 			reveal_peak_ = 0;
 		}
 		reveal_peak_ = std::max<uint32_t>(reveal_peak_, counts.enemy);
 		if (live_start_s_ >= 0.0 && now_s - live_start_s_ >= live_seconds_) {
 			live_seconds_ = 0.0;
 			log_summary();
-			UtilityFunctions::print(to_godot("[pt1-iff] live: " + std::to_string(stats_.frames) + " frames, at most " + std::to_string(reveal_peak_) +
+			UtilityFunctions::print(to_godot("[iff] live: " + std::to_string(stats_.frames) + " frames, at most " + std::to_string(reveal_peak_) +
 					" enemies revealed at once, " + std::to_string(reveal_.reveals()) + " reveals started"));
 			int code = 0;
 			if (!live_dir_.empty()) {
 				const std::string path = live_dir_ + "/iff_live_end.png";
 				code = session_->save_screenshot(path) ? 0 : 1;
-				UtilityFunctions::print(to_godot("[pt1-iff] live screenshot -> " + path));
+				UtilityFunctions::print(to_godot("[iff] live screenshot -> " + path));
 			}
 			session_->finish(code);
 		}
 	}
 }
 
-void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
+void IffOverlay::step_shots(const Camera3D *p_camera, double p_now_s) {
 	Shots &sh = *shots_;
 	if (sh.phase == 2) {
 		return;
@@ -503,7 +502,7 @@ void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
 		sh.first_s = p_now_s;
 	}
 	if (p_now_s - sh.first_s > kShotsTimeoutSeconds) {
-		UtilityFunctions::print(to_godot("[pt1-iff] shots: timed out after " + std::to_string(int(kShotsTimeoutSeconds)) + " s in phase " + std::to_string(sh.phase) +
+		UtilityFunctions::print(to_godot("[iff] shots: timed out after " + std::to_string(int(kShotsTimeoutSeconds)) + " s in phase " + std::to_string(sh.phase) +
 				" (view " + std::to_string(sh.at) + " of " + std::to_string(sh.views.size()) + ")"));
 		sh.phase = 2;
 		session_->mapper().set_scripted(false);
@@ -516,7 +515,7 @@ void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
 	std::array<IffSoldier, net::kMaxSlots> soldiers{};
 	const size_t n = iff_soldiers(f, now_ns, soldiers);
 	const uint8_t own_team = own_team_of(f);
-	const sim::CollisionWorld *world = session_->pt1_iff_world();
+	const sim::CollisionWorld *world = session_->collision_world();
 	if (sh.phase == 0) {
 		if (!alive || !applied_ || own_team == 0 || world == nullptr) {
 			sh.alive_since = -1.0;
@@ -556,7 +555,7 @@ void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
 				sh.views.push_back(v);
 			}
 		}
-		UtilityFunctions::print(to_godot("[pt1-iff] shots: own team " + std::to_string(own_team) + ", teammate slot " +
+		UtilityFunctions::print(to_godot("[iff] shots: own team " + std::to_string(own_team) + ", teammate slot " +
 				std::to_string(soldiers[size_t(best[0])].slot) + ", enemy slot " + std::to_string(soldiers[size_t(best[1])].slot) + ", " +
 				std::to_string(sh.views.size()) + " views -> " + sh.dir));
 		std::error_code ec;
@@ -598,11 +597,11 @@ void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
 			}
 			const std::string path = sh.dir + "/iff_atlas_frames.png";
 			sheet->save_png(to_godot(path));
-			UtilityFunctions::print(to_godot("[pt1-iff] atlas frames (rows Player, KitAssault, KitEngineer, KitSupport, KitRecon, LocalPlayer; columns the "
+			UtilityFunctions::print(to_godot("[iff] atlas frames (rows Player, KitAssault, KitEngineer, KitSupport, KitRecon, LocalPlayer; columns the "
 											 "data's state order) -> " + path));
 		}
 		log_summary();
-		UtilityFunctions::print(to_godot("[pt1-iff] shots done: " + std::to_string(sh.saved) + " saved, " + std::to_string(sh.failures) + " failed"));
+		UtilityFunctions::print(to_godot("[iff] shots done: " + std::to_string(sh.saved) + " saved, " + std::to_string(sh.failures) + " failed"));
 		sh.phase = 2;
 		session_->mapper().set_scripted(false);
 		session_->finish(sh.failures == 0 && sh.saved > 0 ? 0 : 1);
@@ -677,7 +676,7 @@ void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
 			}
 		}
 		if (!found) {
-			UtilityFunctions::print(to_godot("[pt1-iff] view " + std::to_string(sh.at) + ": no clear spot " + std::to_string(int(v.metres)) + " m from any of " +
+			UtilityFunctions::print(to_godot("[iff] view " + std::to_string(sh.at) + ": no clear spot " + std::to_string(int(v.metres)) + " m from any of " +
 					std::to_string(tried) + " soldiers of team " + std::to_string(want_team) + " (" + std::to_string(tally.no_ground) + " candidates without ground, " +
 					std::to_string(tally.blocked) + " blocked, " + std::to_string(tally.no_sight) + " without sight): skipped"));
 			++sh.failures;
@@ -704,7 +703,7 @@ void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
 		}
 	}
 	if (target == nullptr) {
-		UtilityFunctions::print(to_godot("[pt1-iff] view " + std::to_string(sh.at) + ": slot " + std::to_string(v.slot) + " no longer presented alive"));
+		UtilityFunctions::print(to_godot("[iff] view " + std::to_string(sh.at) + ": slot " + std::to_string(v.slot) + " no longer presented alive"));
 		++sh.failures;
 		++sh.at;
 		sh.step = 0;
@@ -741,7 +740,7 @@ void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
 	}
 	const Vector3 eye = p_camera != nullptr ? p_camera->get_global_transform().origin : Vector3();
 	char line[400];
-	std::snprintf(line, sizeof(line), "[pt1-iff] %s: slot %u at %.1f m (eye to anchor): %s%s%s; minimap counts this run so far: %.1f friendly / %.2f enemy per frame -> %s",
+	std::snprintf(line, sizeof(line), "[iff] %s: slot %u at %.1f m (eye to anchor): %s%s%s; minimap counts this run so far: %.1f friendly / %.2f enemy per frame -> %s",
 			name, unsigned(v.slot), double(eye.distance_to(vec(target->feet) + Vector3(0, target->eye_height + style_.vertical_offset, 0))),
 			drawn == nullptr ? "no tag" : (drawn->icon ? "icon" : "no icon"), drawn != nullptr && drawn->name ? ", name " : "",
 			drawn != nullptr && drawn->name ? to_std(drawn->text).c_str() : "", double(stats_.minimap_friendly) / double(std::max<uint64_t>(1, stats_.frames)),
@@ -752,16 +751,8 @@ void Pt1Iff::step_shots(const Camera3D *p_camera, double p_now_s) {
 	sh.t0 = p_now_s;
 }
 
-const sim::CollisionWorld *Bf3LevelSession::pt1_iff_world() const {
-	return m2a_ ? m2a_->world.get() : nullptr;
 }
 
-Bf3UiAssets *Bf3LevelSession::pt1_iff_ui_assets() const {
-	return m2a_ ? m2a_->ui_assets : nullptr;
-}
-
-}
-
-void openbf3_register_pt1_iff() {
+void openbf3_register_iff_overlay() {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3Nametags);
 }

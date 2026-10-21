@@ -70,16 +70,16 @@ struct InstanceSlot {
 	bool pending = false;
 	uint64_t start_frame = 0;
 	uint16_t scope = core::audio::kNoScope;
-	bool pt1_rendered = false;
-	bool pt1_suspended = false;
-	uint64_t pt1_abrupt_seen = 0;
-	uint8_t pt1_fade_mode = 0;
-	MixerCutKind pt1_fade_kind = MixerCutKind::Drop;
-	uint32_t pt1_voices_held = 0;
-	uint32_t pt1_hold_left = 0;
+	bool has_rendered = false;
+	bool suspended_seen = false;
+	uint64_t abrupt_seen = 0;
+	uint8_t fade_mode = 0;
+	MixerCutKind fade_kind = MixerCutKind::Drop;
+	uint32_t voices_held = 0;
+	uint32_t hold_left = 0;
 };
-constexpr uint8_t kPt1Release = 1;
-constexpr uint8_t kPt1Park = 2;
+constexpr uint8_t kFadeRelease = 1;
+constexpr uint8_t kFadePark = 2;
 
 void atomic_max(std::atomic<uint64_t> &r_value, uint64_t p_candidate) {
 	uint64_t cur = r_value.load(std::memory_order_relaxed);
@@ -127,13 +127,13 @@ struct MixerCore::Impl {
 	SpscRing<MixerCutEvent> cut_ring{ 4096 };
 	std::atomic<bool> cut_record{ false };
 	uint64_t block_first = 0;
-	void pt1_cut(MixerCutKind p_kind, const InstanceSlot &p_slot, float p_step);
-	void pt1_event(MixerCutKind p_kind, InstanceHandle p_handle, float p_step, const PatchInstance *p_instance);
+	void note_cut(MixerCutKind p_kind, const InstanceSlot &p_slot, float p_step);
+	void note_event(MixerCutKind p_kind, InstanceHandle p_handle, float p_step, const PatchInstance *p_instance);
 
-	bool pt1_begin_fade(InstanceSlot &r_slot, uint8_t p_mode, MixerCutKind p_kind);
-	float pt1_limit_gain = 1.0f;
-	std::array<float, kBlockFrames> pt1_limit_g{};
-	void pt1_limit();
+	bool begin_fade(InstanceSlot &r_slot, uint8_t p_mode, MixerCutKind p_kind);
+	float limit_gain = 1.0f;
+	std::array<float, kBlockFrames> limit_g{};
+	void apply_limiter();
 
 	explicit Impl(const MixerConfig &p_config) :
 			config(p_config), commands(p_config.command_capacity), returns(std::max<uint32_t>(p_config.max_instances, 1) * 2),
@@ -340,13 +340,13 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 				break;
 			case MixerCommandType::Kill:
 				if (InstanceSlot *s = find_slot(m.instances, cmd.handle)) {
-					if (s->pt1_fade_mode != 0 || m.pt1_begin_fade(*s, kPt1Release, MixerCutKind::Kill)) {
-						s->pt1_fade_mode = kPt1Release;
-						s->pt1_fade_kind = MixerCutKind::Kill;
+					if (s->fade_mode != 0 || m.begin_fade(*s, kFadeRelease, MixerCutKind::Kill)) {
+						s->fade_mode = kFadeRelease;
+						s->fade_kind = MixerCutKind::Kill;
 						break;
 					}
-					if (s->pt1_rendered) {
-						m.pt1_cut(MixerCutKind::Kill, *s, s->instance->pt1_edge().edge);
+					if (s->has_rendered) {
+						m.note_cut(MixerCutKind::Kill, *s, s->instance->edge().edge);
 					}
 					m.give_back(s->instance);
 					s->instance = nullptr;
@@ -406,21 +406,21 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 			continue;
 		}
 		if (s.pending) {
-			s.pt1_rendered = false;
+			s.has_rendered = false;
 			continue;
 		}
 		const PatchInstanceStats before = s.instance->stats();
 		s.instance->process_block(m.buses);
 		const PatchInstanceStats &after = s.instance->stats();
 		{
-			const InstanceEdge e = s.instance->pt1_edge();
-			if (!s.pt1_rendered) {
-				m.pt1_cut(s.start_frame + kBlockFrames > first ? MixerCutKind::Start : MixerCutKind::Resume, s, e.head);
-				s.pt1_rendered = true;
+			const InstanceEdge e = s.instance->edge();
+			if (!s.has_rendered) {
+				m.note_cut(s.start_frame + kBlockFrames > first ? MixerCutKind::Start : MixerCutKind::Resume, s, e.head);
+				s.has_rendered = true;
 			}
-			if (e.abrupt_gain != s.pt1_abrupt_seen) {
-				m.cut_stats.abrupt_gain.fetch_add(e.abrupt_gain - s.pt1_abrupt_seen, std::memory_order_relaxed);
-				s.pt1_abrupt_seen = e.abrupt_gain;
+			if (e.abrupt_gain != s.abrupt_seen) {
+				m.cut_stats.abrupt_gain.fetch_add(e.abrupt_gain - s.abrupt_seen, std::memory_order_relaxed);
+				s.abrupt_seen = e.abrupt_gain;
 				if (e.abrupt_gain_max > m.cut_stats.abrupt_gain_max.load(std::memory_order_relaxed)) {
 					m.cut_stats.abrupt_gain_max.store(e.abrupt_gain_max, std::memory_order_relaxed);
 				}
@@ -429,12 +429,12 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 		stats.starved_voices.fetch_add(after.starved_slots - before.starved_slots, std::memory_order_relaxed);
 		stats.decode_errors.fetch_add(after.decode_errors - before.decode_errors, std::memory_order_relaxed);
 		stats.deferred_events.fetch_add(after.deferred_events - before.deferred_events, std::memory_order_relaxed);
-		if (s.pt1_fade_mode != 0 && s.instance->pt1_fade_done()) {
-			m.pt1_cut(s.pt1_fade_kind, s, s.instance->pt1_edge().edge);
-			if (s.pt1_fade_mode == kPt1Park) {
+		if (s.fade_mode != 0 && s.instance->fade_done()) {
+			m.note_cut(s.fade_kind, s, s.instance->edge().edge);
+			if (s.fade_mode == kFadePark) {
 				s.pending = true;
-				s.pt1_rendered = false;
-				s.pt1_fade_mode = 0;
+				s.has_rendered = false;
+				s.fade_mode = 0;
 				++active;
 				continue;
 			}
@@ -445,7 +445,7 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 		const bool done = s.instance->finished() && (s.stop_requested || s.instance->stats().sampler_triggers > 0);
 		const PatchHaptics h = s.instance->haptics();
 		const bool haptic = h.shake_pitch != 0.0f || h.shake_roll != 0.0f || h.shake_yaw != 0.0f || h.rumble_low != 0.0f || h.rumble_high != 0.0f;
-		if ((done || haptic) && s.pt1_fade_mode != kPt1Release) {
+		if ((done || haptic) && s.fade_mode != kFadeRelease) {
 			MixerFeedback fb;
 			fb.handle = s.handle;
 			fb.frame = first;
@@ -456,7 +456,7 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 			}
 		}
 		if (done) {
-			m.pt1_cut(MixerCutKind::Finish, s, s.instance->pt1_edge().edge);
+			m.note_cut(MixerCutKind::Finish, s, s.instance->edge().edge);
 			m.give_back(s.instance);
 			s.instance = nullptr;
 			s.handle = kNoInstance;
@@ -478,7 +478,7 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 		m.block[size_t(i) * 2] = l * m.output_gain;
 		m.block[size_t(i) * 2 + 1] = r * m.output_gain;
 	}
-	m.pt1_limit();
+	m.apply_limiter();
 	if (m.tap != nullptr) {
 		m.tap->on_block(m.block.data(), kBlockFrames, first);
 	}
@@ -490,7 +490,7 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 	const uint64_t budget_ns = uint64_t(kBlockFrames) * 1000000000ull / std::max<uint32_t>(m.config.mix_rate, 1);
 	if (ns > budget_ns) {
 		stats.late_blocks.fetch_add(1, std::memory_order_relaxed);
-		m.pt1_event(MixerCutKind::LateBlock, kNoInstance, float(double(ns) / 1e6), nullptr);
+		m.note_event(MixerCutKind::LateBlock, kNoInstance, float(double(ns) / 1e6), nullptr);
 	}
 	record_mix_ns(stats, ns, budget_ns);
 }
@@ -505,17 +505,17 @@ uint32_t MixerCore::mix(float *r_interleaved_stereo, uint32_t p_frames) {
 	if (m.have_last_call) {
 		atomic_max(stats_.max_call_gap_ns, uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(now - m.last_call).count()));
 		const double gap_ms = std::chrono::duration<double, std::milli>(now - m.last_call).count();
-		size_t gb = kPt1GapEdgesMs.size();
-		for (size_t i = 0; i < kPt1GapEdgesMs.size(); ++i) {
-			if (gap_ms < kPt1GapEdgesMs[i]) {
+		size_t gb = kGapEdgesMs.size();
+		for (size_t i = 0; i < kGapEdgesMs.size(); ++i) {
+			if (gap_ms < kGapEdgesMs[i]) {
 				gb = i;
 				break;
 			}
 		}
 		m.cut_stats.gap_hist[gb].fetch_add(1, std::memory_order_relaxed);
-		if (gap_ms > kPt1LateCallMs) {
+		if (gap_ms > kLateCallMs) {
 			m.block_first = m.rendered.load(std::memory_order_relaxed);
-			m.pt1_event(MixerCutKind::CallGap, kNoInstance, float(gap_ms), nullptr);
+			m.note_event(MixerCutKind::CallGap, kNoInstance, float(gap_ms), nullptr);
 		}
 	}
 	m.cut_stats.calls.fetch_add(1, std::memory_order_relaxed);
@@ -560,9 +560,9 @@ void MixerCore::Impl::a3_block(MixerStats &stats, uint64_t p_first) {
 	}
 	const bool hdr_on = config.hdr.has_value();
 	const auto drop = [&](InstanceSlot &r_slot) {
-		const bool pt1_fades = pt1_begin_fade(r_slot, kPt1Release, MixerCutKind::Drop);
-		if (r_slot.pt1_rendered && !pt1_fades) {
-			pt1_cut(MixerCutKind::Drop, r_slot, r_slot.instance->pt1_edge().edge);
+		const bool fades = begin_fade(r_slot, kFadeRelease, MixerCutKind::Drop);
+		if (r_slot.has_rendered && !fades) {
+			note_cut(MixerCutKind::Drop, r_slot, r_slot.instance->edge().edge);
 		}
 		MixerFeedback fb;
 		fb.handle = r_slot.handle;
@@ -571,21 +571,21 @@ void MixerCore::Impl::a3_block(MixerStats &stats, uint64_t p_first) {
 		if (!feedback.push(fb)) {
 			stats.feedback_drops.fetch_add(1, std::memory_order_relaxed);
 		}
-		if (pt1_fades) {
+		if (fades) {
 			return;
 		}
 		give_back(r_slot.instance);
 		r_slot = InstanceSlot{};
 	};
 	size_t n = 0;
-	uint32_t pt1_reserved = 0;
+	uint32_t reserved = 0;
 	for (size_t i = 0; i < instances.size(); ++i) {
 		InstanceSlot &s = instances[i];
 		if (s.instance == nullptr) {
 			continue;
 		}
-		if (s.pt1_fade_mode != 0) {
-			pt1_reserved += std::max<uint32_t>(s.instance->cull_info().voices, 1);
+		if (s.fade_mode != 0) {
+			reserved += std::max<uint32_t>(s.instance->cull_info().voices, 1);
 			continue;
 		}
 		if (s.pending && s.stop_requested) {
@@ -609,33 +609,33 @@ void MixerCore::Impl::a3_block(MixerStats &stats, uint64_t p_first) {
 		v.hdr = hdr_on && info.hdr;
 		v.voices = std::max<uint32_t>(info.voices, 1);
 		if (!s.pending) {
-			if (v.voices >= s.pt1_voices_held || s.pt1_hold_left == 0) {
-				s.pt1_hold_left = v.voices >= s.pt1_voices_held ? config.pt1_voice_hold_blocks : 0u;
-				s.pt1_voices_held = v.voices;
+			if (v.voices >= s.voices_held || s.hold_left == 0) {
+				s.hold_left = v.voices >= s.voices_held ? config.voice_hold_blocks : 0u;
+				s.voices_held = v.voices;
 			} else {
-				--s.pt1_hold_left;
+				--s.hold_left;
 			}
 		}
-		v.voices = std::max(v.voices, s.pt1_voices_held);
-		v.hold_db = !s.starting && !s.pending && s.pt1_rendered ? config.pt1_cap_hold_db : 0.0f;
-		v.resume_margin = s.pending ? std::min(config.pt1_resume_margin, config.max_voices / 16) : 0u;
+		v.voices = std::max(v.voices, s.voices_held);
+		v.hold_db = !s.starting && !s.pending && s.has_rendered ? config.cap_hold_db : 0.0f;
+		v.resume_margin = s.pending ? std::min(config.resume_margin, config.max_voices / 16) : 0u;
 		cull_slots[n] = uint32_t(i);
 		++n;
 	}
 	CullCounts counts;
 	const float precull = hdr_on ? window.precull_db() : -std::numeric_limits<float>::infinity();
-	const uint32_t pt1_cap = config.max_voices > pt1_reserved ? config.max_voices - pt1_reserved : 0u;
-	audio::cull_voices(std::span<const CullVoice>(cull_voices.data(), n), config.scopes.get(), precull, pt1_cap, p_first, config.mix_rate,
+	const uint32_t voice_cap = config.max_voices > reserved ? config.max_voices - reserved : 0u;
+	audio::cull_voices(std::span<const CullVoice>(cull_voices.data(), n), config.scopes.get(), precull, voice_cap, p_first, config.mix_rate,
 			std::span<CullVerdict>(cull_verdicts.data(), n), counts);
 	float loudest = -std::numeric_limits<float>::infinity();
-	uint32_t live = pt1_reserved;
+	uint32_t live = reserved;
 	for (size_t k = 0; k < n; ++k) {
 		InstanceSlot &s = instances[cull_slots[k]];
 		switch (cull_verdicts[k]) {
 			case CullVerdict::Keep:
-				if (s.pending && config.pt1_cut_fade_frames > 0) {
-					s.instance->pt1_set_fade(0.0f);
-					s.instance->pt1_fade_to(1.0f, config.pt1_cut_fade_frames);
+				if (s.pending && config.cut_fade_frames > 0) {
+					s.instance->set_fade(0.0f);
+					s.instance->fade_to(1.0f, config.cut_fade_frames);
 				}
 				s.pending = false;
 				s.starting = false;
@@ -645,11 +645,11 @@ void MixerCore::Impl::a3_block(MixerStats &stats, uint64_t p_first) {
 				}
 				break;
 			case CullVerdict::Pending:
-				if (!s.pending && pt1_begin_fade(s, kPt1Park, MixerCutKind::Pend)) {
+				if (!s.pending && begin_fade(s, kFadePark, MixerCutKind::Pend)) {
 					break;
 				}
-				if (!s.pending && s.pt1_rendered) {
-					pt1_cut(MixerCutKind::Pend, s, s.instance->pt1_edge().edge);
+				if (!s.pending && s.has_rendered) {
+					note_cut(MixerCutKind::Pend, s, s.instance->edge().edge);
 				}
 				s.pending = true;
 				break;
@@ -675,11 +675,11 @@ void MixerCore::Impl::a3_block(MixerStats &stats, uint64_t p_first) {
 			w.alone_top_db = std::max(h.window_min_top_db, cull_voices[k].loudness_db);
 			w.suspended = w.active && window.suspended(cull_voices[k].loudness_db);
 			suspended += w.suspended ? 1 : 0;
-			if (w.suspended != s.pt1_suspended) {
-				if (s.pt1_rendered) {
-					pt1_cut(w.suspended ? MixerCutKind::Suspend : MixerCutKind::Unsuspend, s, s.instance->pt1_edge().edge);
+			if (w.suspended != s.suspended_seen) {
+				if (s.has_rendered) {
+					note_cut(w.suspended ? MixerCutKind::Suspend : MixerCutKind::Unsuspend, s, s.instance->edge().edge);
 				}
-				s.pt1_suspended = w.suspended;
+				s.suspended_seen = w.suspended;
 			}
 			s.instance->set_hdr_window(w);
 		}
@@ -763,19 +763,19 @@ std::string format_mixer_profile(const MixerProfile &p_profile) {
 	return line;
 }
 
-void MixerCore::Impl::pt1_cut(MixerCutKind p_kind, const InstanceSlot &p_slot, float p_step) {
-	pt1_event(p_kind, p_slot.handle, p_step, p_slot.instance);
+void MixerCore::Impl::note_cut(MixerCutKind p_kind, const InstanceSlot &p_slot, float p_step) {
+	note_event(p_kind, p_slot.handle, p_step, p_slot.instance);
 }
 
-void MixerCore::Impl::pt1_event(MixerCutKind p_kind, InstanceHandle p_handle, float p_step, const PatchInstance *p_instance) {
+void MixerCore::Impl::note_event(MixerCutKind p_kind, InstanceHandle p_handle, float p_step, const PatchInstance *p_instance) {
 	const size_t k = std::min(size_t(p_kind), kMixerCutKinds - 1);
 	const float step = std::isfinite(p_step) ? std::fabs(p_step) : 0.0f;
 	cut_stats.events[k].fetch_add(1, std::memory_order_relaxed);
 	if (p_kind != MixerCutKind::CallGap && p_kind != MixerCutKind::LateBlock) {
-		if (step > kPt1AudibleStep) {
+		if (step > kAudibleStep) {
 			cut_stats.audible[k].fetch_add(1, std::memory_order_relaxed);
 		}
-		if (step > kPt1LoudStep) {
+		if (step > kLoudStep) {
 			cut_stats.loud[k].fetch_add(1, std::memory_order_relaxed);
 		}
 	}
@@ -804,26 +804,26 @@ void MixerCore::Impl::pt1_event(MixerCutKind p_kind, InstanceHandle p_handle, fl
 	}
 }
 
-bool MixerCore::Impl::pt1_begin_fade(InstanceSlot &r_slot, uint8_t p_mode, MixerCutKind p_kind) {
-	if (config.pt1_cut_fade_frames == 0 || !r_slot.pt1_rendered || r_slot.instance == nullptr || r_slot.pt1_fade_mode != 0) {
+bool MixerCore::Impl::begin_fade(InstanceSlot &r_slot, uint8_t p_mode, MixerCutKind p_kind) {
+	if (config.cut_fade_frames == 0 || !r_slot.has_rendered || r_slot.instance == nullptr || r_slot.fade_mode != 0) {
 		return false;
 	}
-	pt1_cut(MixerCutKind::Fade, r_slot, r_slot.instance->pt1_edge().edge);
-	r_slot.instance->pt1_fade_to(0.0f, config.pt1_cut_fade_frames);
-	r_slot.pt1_fade_mode = p_mode;
-	r_slot.pt1_fade_kind = p_kind;
+	note_cut(MixerCutKind::Fade, r_slot, r_slot.instance->edge().edge);
+	r_slot.instance->fade_to(0.0f, config.cut_fade_frames);
+	r_slot.fade_mode = p_mode;
+	r_slot.fade_kind = p_kind;
 	return true;
 }
 
-const MixerCutStats &MixerCore::pt1_cut_stats() const {
+const MixerCutStats &MixerCore::cut_stats() const {
 	return impl_->cut_stats;
 }
 
-void MixerCore::pt1_record_cuts(bool p_on) {
+void MixerCore::record_cuts(bool p_on) {
 	impl_->cut_record.store(p_on, std::memory_order_relaxed);
 }
 
-size_t MixerCore::pt1_poll_cuts(std::span<MixerCutEvent> r_out) {
+size_t MixerCore::poll_cuts(std::span<MixerCutEvent> r_out) {
 	size_t n = 0;
 	while (n < r_out.size() && impl_->cut_ring.pop(r_out[n])) {
 		++n;
@@ -831,9 +831,9 @@ size_t MixerCore::pt1_poll_cuts(std::span<MixerCutEvent> r_out) {
 	return n;
 }
 
-void MixerCore::Impl::pt1_limit() {
+void MixerCore::Impl::apply_limiter() {
 	float *x = block.data();
-	const float c = config.pt1_limit_ceiling;
+	const float c = config.limit_ceiling;
 	const bool on = std::isfinite(c) && c > 0.0f;
 	uint64_t over_in = 0;
 	bool any = false;
@@ -841,40 +841,40 @@ void MixerCore::Impl::pt1_limit() {
 		const float p = std::max(std::fabs(x[size_t(i) * 2]), std::fabs(x[size_t(i) * 2 + 1]));
 		over_in += p > 1.0f ? 1u : 0u;
 		any = any || (on && p > c);
-		pt1_limit_g[i] = on && p > c ? c / p : 1.0f;
+		limit_g[i] = on && p > c ? c / p : 1.0f;
 	}
 	if (over_in > 0) {
 		cut_stats.overs_in.fetch_add(over_in, std::memory_order_relaxed);
 	}
-	if (!on || (!any && pt1_limit_gain >= 1.0f)) {
+	if (!on || (!any && limit_gain >= 1.0f)) {
 		if (!on) {
 			cut_stats.overs_out.fetch_add(over_in, std::memory_order_relaxed);
 		}
 		return;
 	}
-	const float attack = 1.0f / float(std::clamp<uint32_t>(config.pt1_limit_attack_frames, 1, kBlockFrames));
-	const double release_frames = std::clamp(std::isfinite(config.pt1_limit_release_ms) ? double(config.pt1_limit_release_ms) : 80.0, 1.0, 10000.0) *
+	const float attack = 1.0f / float(std::clamp<uint32_t>(config.limit_attack_frames, 1, kBlockFrames));
+	const double release_frames = std::clamp(std::isfinite(config.limit_release_ms) ? double(config.limit_release_ms) : 80.0, 1.0, 10000.0) *
 			double(config.mix_rate) / 1000.0;
 	const float k = float(1.0 - std::exp(-1.0 / release_frames));
 
 	for (uint32_t i = kBlockFrames - 1; i-- > 0;) {
-		pt1_limit_g[i] = std::min(pt1_limit_g[i], pt1_limit_g[i + 1] + attack);
+		limit_g[i] = std::min(limit_g[i], limit_g[i + 1] + attack);
 	}
 
-	float h = pt1_limit_gain, lowest = 1.0f;
+	float h = limit_gain, lowest = 1.0f;
 	uint64_t over_out = 0;
-	if (pt1_limit_g[0] < h - attack) {
+	if (limit_g[0] < h - attack) {
 		cut_stats.limit_edge_steps.fetch_add(1, std::memory_order_relaxed);
 	}
 	for (uint32_t i = 0; i < kBlockFrames; ++i) {
-		h = std::min(pt1_limit_g[i], h + (1.0f - h) * k);
+		h = std::min(limit_g[i], h + (1.0f - h) * k);
 		h = h > 1.0f - 1.0e-6f ? 1.0f : h;
 		lowest = std::min(lowest, h);
 		x[size_t(i) * 2] *= h;
 		x[size_t(i) * 2 + 1] *= h;
 		over_out += std::max(std::fabs(x[size_t(i) * 2]), std::fabs(x[size_t(i) * 2 + 1])) > 1.0f ? 1u : 0u;
 	}
-	pt1_limit_gain = h;
+	limit_gain = h;
 	if (lowest < 0.98855f) {
 		cut_stats.limit_blocks.fetch_add(1, std::memory_order_relaxed);
 	}
@@ -914,7 +914,7 @@ std::string format_mixer_cuts(const MixerCutStats &p_stats) {
 	}
 	const size_t g = size_t(MixerCutKind::CallGap);
 	const size_t lb = size_t(MixerCutKind::LateBlock);
-	std::snprintf(part, sizeof(part), "; late calls (> %.0f ms) %llu, max %.1f ms; late blocks %llu, max %.1f ms; event drops %llu", kPt1LateCallMs,
+	std::snprintf(part, sizeof(part), "; late calls (> %.0f ms) %llu, max %.1f ms; late blocks %llu, max %.1f ms; event drops %llu", kLateCallMs,
 			(unsigned long long)p_stats.events[g].load(), double(p_stats.step_max[g].load()), (unsigned long long)p_stats.events[lb].load(),
 			double(p_stats.step_max[lb].load()), (unsigned long long)p_stats.event_drops.load());
 	out += part;

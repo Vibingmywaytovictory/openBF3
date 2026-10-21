@@ -154,12 +154,12 @@ public:
 	void set_hdr_window(const HdrVoiceWindow &p_window);
 	VoiceCullInfo cull_info() const;
 
-	InstanceEdge pt1_edge() const;
+	InstanceEdge edge() const;
 
-	void pt1_fade_to(float p_target, uint32_t p_frames);
-	void pt1_set_fade(float p_level);
-	bool pt1_fade_done() const;
-	float pt1_fade_level() const;
+	void fade_to(float p_target, uint32_t p_frames);
+	void set_fade(float p_level);
+	bool fade_done() const;
+	float fade_level() const;
 
 	void set_loudness_outputs(std::span<const uint16_t> p_outputs);
 

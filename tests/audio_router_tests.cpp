@@ -1998,18 +1998,18 @@ TEST_SUITE("audio-game") {
 			mc.max_voices = ba::kGameMixerVoices;
 			ba::apply_mixer_a3(a3, mc);
 			if (const std::string fade = env_value("OPENBF3_PT1_CUT_FADE"); !fade.empty()) {
-				mc.pt1_cut_fade_frames = uint32_t(std::clamp(std::atoi(fade.c_str()), 0, 4800));
+				mc.cut_fade_frames = uint32_t(std::clamp(std::atoi(fade.c_str()), 0, 4800));
 			}
 			if (env_value("OPENBF3_PT1_CAP_HOLD") == "0") {
-				mc.pt1_cap_hold_db = 0.0f;
-				mc.pt1_voice_hold_blocks = 0;
-				mc.pt1_resume_margin = 0;
+				mc.cap_hold_db = 0.0f;
+				mc.voice_hold_blocks = 0;
+				mc.resume_margin = 0;
 			}
 			if (env_value("OPENBF3_PT1_LIMIT") == "0") {
-				mc.pt1_limit_ceiling = 0.0f;
+				mc.limit_ceiling = 0.0f;
 			}
 			if (const std::string m = env_value("OPENBF3_PT1_RESUME_MARGIN"); !m.empty()) {
-				mc.pt1_resume_margin = uint32_t(std::clamp(std::atoi(m.c_str()), 0, 128));
+				mc.resume_margin = uint32_t(std::clamp(std::atoi(m.c_str()), 0, 128));
 			}
 			rig.mixer = std::make_unique<ba::MixerCore>(mc);
 			rig.mixer->set_tap(&tap);
@@ -2060,11 +2060,11 @@ TEST_SUITE("audio-game") {
 			t += double(rounds) * 4.5 + 30.0 + 90.0 * unit(rng);
 		}
 
-		rig.mixer->pt1_record_cuts(true);
+		rig.mixer->record_cuts(true);
 		std::vector<ba::MixerCutEvent> pt1_cuts;
-		const auto pt1_drain = [&] {
+		const auto drain_cuts = [&] {
 			std::array<ba::MixerCutEvent, 512> batch;
-			for (size_t n = rig.mixer->pt1_poll_cuts(batch); n > 0; n = rig.mixer->pt1_poll_cuts(batch)) {
+			for (size_t n = rig.mixer->poll_cuts(batch); n > 0; n = rig.mixer->poll_cuts(batch)) {
 				pt1_cuts.insert(pt1_cuts.end(), batch.begin(), batch.begin() + std::ptrdiff_t(n));
 			}
 		};
@@ -2119,7 +2119,7 @@ TEST_SUITE("audio-game") {
 				impacts.push_back(r);
 			}
 			rig.frame(*net.frame, now_ns, events, 0, impacts);
-			pt1_drain();
+			drain_cuts();
 			net.trim(shooters);
 		}
 
@@ -2131,7 +2131,7 @@ TEST_SUITE("audio-game") {
 			net.publish(t, now_ns, shooters);
 			net.frame->own_weapons_curr.timers[0].flags = 0;
 			rig.frame(*net.frame, now_ns, events, 0);
-			pt1_drain();
+			drain_cuts();
 		}
 		const double wall_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 		const ba::MixerStats &ms = rig.mixer->stats();
@@ -2154,7 +2154,7 @@ TEST_SUITE("audio-game") {
 				unsigned(rig.pool->peak()), (unsigned long long)rig.pool->stolen(), (unsigned long long)rig.pool->failed(), (unsigned long long)is.impacts,
 				(unsigned long long)is.unknown_patches, (unsigned long long)reloads, rms_db, double(tap.peak), (unsigned long long)tap.non_finite);
 		MESSAGE(line);
-		MESSAGE(ba::format_mixer_cuts(rig.mixer->pt1_cut_stats()));
+		MESSAGE(ba::format_mixer_cuts(rig.mixer->cut_stats()));
 
 		std::map<ba::InstanceHandle, std::vector<std::pair<uint64_t, bool>>> pt1_per;
 		for (const ba::MixerCutEvent &e : pt1_cuts) {
@@ -2182,7 +2182,7 @@ TEST_SUITE("audio-game") {
 							<< " parked for < 0.25 s, " << pt1_flaps << " re-parks within 1 s on " << pt1_flapping << " loops");
 		if (env_value("OPENBF3_PT1_CUT_FADE").empty() && env_value("OPENBF3_PT1_CAP_HOLD").empty() && env_value("OPENBF3_PT1_RESUME_MARGIN").empty() &&
 				env_value("OPENBF3_PT1_LIMIT").empty()) {
-			const ba::MixerCutStats &cs = rig.mixer->pt1_cut_stats();
+			const ba::MixerCutStats &cs = rig.mixer->cut_stats();
 			for (const ba::MixerCutKind k : { ba::MixerCutKind::Drop, ba::MixerCutKind::Pend, ba::MixerCutKind::Kill, ba::MixerCutKind::Finish, ba::MixerCutKind::Resume }) {
 				INFO(ba::mixer_cut_kind_name(k));
 				CHECK(cs.audible[size_t(k)].load() == 0);

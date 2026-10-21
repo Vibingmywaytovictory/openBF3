@@ -153,7 +153,7 @@ struct ViewmodelItem {
 	std::vector<ViewmodelAttachment> attachments;
 	std::vector<ViewmodelSlotLook> weapon_looks;
 	uint32_t hidden_surfaces = 0;
-	std::shared_ptr<const ViewmodelLocomotionClips> pt1_locomotion;
+	std::shared_ptr<const ViewmodelLocomotionClips> locomotion;
 };
 
 std::array<anim::VmClipRef, anim::kVmClips> viewmodel_clip_refs(const ViewmodelItem &p_item);

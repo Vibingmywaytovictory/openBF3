@@ -135,8 +135,8 @@ These are structural, known, and listed so nobody mistakes them for design inten
 * `bf3_host` holds both the server and the client. A `bf3_client` split would make the dependency picture honest.
 * Gate code still sits in three libraries: `bf3_audio` (`audio_check`, `game_audio_check`, which `game_audio` and
   `bf3_client_audio` call), `bf3_fx` (`fx_harness`) and `bf3_host` (`rest_check`).
-* Milestone names (M1, M2a, M2b, S0, PT1) survive in file names, class names and thousands of comment tags; the
-  dev log is where that history belongs.
+* Milestone names (M1, M2a, M2b, S0, S3, PT1) remain in the gated checks, demos and selftest (`m1_check`,
+  `m2a_check`, `m2b_check`, their scenes, user args and ctest rows), the test files, `HudWave` and `--look=m1`.
 * A bounds-checked byte reader and the small vector operators (`add`, `dot`, `cross`, `rotate`) are still defined
   per translation unit instead of once in `bf3_core`.
 * `bf3_core` is several libraries in one directory (containers, assets, gameplay tables, level, UI).

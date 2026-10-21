@@ -441,9 +441,9 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 	for (uint32_t t = 0; t < st.tap_count; ++t) {
 		std::fill_n(st.tap_buffers[t].data(), p_frames, 0.0f);
 	}
-	st.pt1_edge[0] = st.pt1_edge[1] = 0.0f;
+	st.edge[0] = st.edge[1] = 0.0f;
 	if (p_offset == 0) {
-		st.pt1_head[0] = st.pt1_head[1] = 0.0f;
+		st.head[0] = st.head[1] = 0.0f;
 	}
 	const float window_db = p.loudness_db - st.tuning.window_top_db - st.tuning.window_headroom_db + st.tuning.master_gain_db;
 
@@ -587,23 +587,23 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 							touch(c.voice);
 							dst = st.voice(c.voice, uint32_t(chn)) + p_offset;
 						}
-						const bool pt1_faded = c.to_bus && (st.pt1_fade_left > 0 || st.pt1_fade != 1.0f);
-						if (dst != nullptr && !pt1_faded) {
+						const bool faded = c.to_bus && (st.cut_fade_left > 0 || st.cut_fade != 1.0f);
+						if (dst != nullptr && !faded) {
 							add_scaled(dst, ch[chn], p_frames, ps.gain_prev, target);
 						}
-						if (dst != nullptr && pt1_faded) {
+						if (dst != nullptr && faded) {
 							const float step = (target - ps.gain_prev) / float(p_frames);
 							float g = ps.gain_prev;
 							for (uint32_t i = 0; i < p_frames; ++i) {
 								g += step;
-								dst[i] += ch[chn][i] * g * st.pt1_fade_at(i);
+								dst[i] += ch[chn][i] * g * st.cut_fade_at(i);
 							}
 						}
 						if (dst != nullptr && c.to_bus) {
-							const float g0 = (ps.gain_prev + (target - ps.gain_prev) / float(p_frames)) * st.pt1_fade_at(0);
-							st.pt1_edge[chn] += ch[chn][p_frames - 1] * target * st.pt1_fade_at(p_frames - 1);
+							const float g0 = (ps.gain_prev + (target - ps.gain_prev) / float(p_frames)) * st.cut_fade_at(0);
+							st.edge[chn] += ch[chn][p_frames - 1] * target * st.cut_fade_at(p_frames - 1);
 							if (p_offset == 0) {
-								st.pt1_head[chn] += ch[chn][0] * g0;
+								st.head[chn] += ch[chn][0] * g0;
 							}
 							const float hi = std::max(ps.gain_prev, target), lo = std::min(ps.gain_prev, target);
 							if (p_frames < 64 && hi > 0.0f && lo < hi * 0.70794578f) {
@@ -613,8 +613,8 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 								}
 								const float jump = peak * (hi - lo) / float(p_frames);
 								if (jump > 1.0e-3f) {
-									++st.pt1_abrupt;
-									st.pt1_abrupt_max = std::max(st.pt1_abrupt_max, jump);
+									++st.abrupt;
+									st.abrupt_max = std::max(st.abrupt_max, jump);
 								}
 							}
 						}
@@ -631,14 +631,14 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 	for (uint32_t t = 0; t < st.tap_count; ++t) {
 		st.taps[t]->on_voices(st.tap_buffers[t].data(), p_frames, p_frame);
 	}
-	if (st.pt1_fade_left > 0) {
-		if (st.pt1_fade_left <= p_frames) {
-			st.pt1_fade = st.pt1_fade_target;
-			st.pt1_fade_left = 0;
-			st.pt1_fade_step = 0.0f;
+	if (st.cut_fade_left > 0) {
+		if (st.cut_fade_left <= p_frames) {
+			st.cut_fade = st.cut_fade_target;
+			st.cut_fade_left = 0;
+			st.cut_fade_step = 0.0f;
 		} else {
-			st.pt1_fade += st.pt1_fade_step * float(p_frames);
-			st.pt1_fade_left -= p_frames;
+			st.cut_fade += st.cut_fade_step * float(p_frames);
+			st.cut_fade_left -= p_frames;
 		}
 	}
 }
@@ -982,44 +982,44 @@ void PatchInstance::State::quiet_plugin(PluginState &r_ps, float p_rate, float p
 	}
 }
 
-InstanceEdge PatchInstance::pt1_edge() const {
+InstanceEdge PatchInstance::edge() const {
 	const State &st = *state_;
 	InstanceEdge e;
-	e.edge = std::max(std::fabs(st.pt1_edge[0]), std::fabs(st.pt1_edge[1]));
-	e.head = std::max(std::fabs(st.pt1_head[0]), std::fabs(st.pt1_head[1]));
-	e.abrupt_gain = st.pt1_abrupt;
-	e.abrupt_gain_max = st.pt1_abrupt_max;
+	e.edge = std::max(std::fabs(st.edge[0]), std::fabs(st.edge[1]));
+	e.head = std::max(std::fabs(st.head[0]), std::fabs(st.head[1]));
+	e.abrupt_gain = st.abrupt;
+	e.abrupt_gain_max = st.abrupt_max;
 	return e;
 }
 
-void PatchInstance::pt1_fade_to(float p_target, uint32_t p_frames) {
+void PatchInstance::fade_to(float p_target, uint32_t p_frames) {
 	State &st = *state_;
 	const float target = std::isfinite(p_target) ? std::clamp(p_target, 0.0f, 1.0f) : 0.0f;
-	st.pt1_fade_target = target;
+	st.cut_fade_target = target;
 	if (p_frames == 0) {
-		st.pt1_fade = target;
-		st.pt1_fade_left = 0;
-		st.pt1_fade_step = 0.0f;
+		st.cut_fade = target;
+		st.cut_fade_left = 0;
+		st.cut_fade_step = 0.0f;
 		return;
 	}
-	st.pt1_fade_left = p_frames;
-	st.pt1_fade_step = (target - st.pt1_fade) / float(p_frames);
+	st.cut_fade_left = p_frames;
+	st.cut_fade_step = (target - st.cut_fade) / float(p_frames);
 }
 
-void PatchInstance::pt1_set_fade(float p_level) {
+void PatchInstance::set_fade(float p_level) {
 	State &st = *state_;
-	st.pt1_fade = std::isfinite(p_level) ? std::clamp(p_level, 0.0f, 1.0f) : 0.0f;
-	st.pt1_fade_target = st.pt1_fade;
-	st.pt1_fade_left = 0;
-	st.pt1_fade_step = 0.0f;
+	st.cut_fade = std::isfinite(p_level) ? std::clamp(p_level, 0.0f, 1.0f) : 0.0f;
+	st.cut_fade_target = st.cut_fade;
+	st.cut_fade_left = 0;
+	st.cut_fade_step = 0.0f;
 }
 
-bool PatchInstance::pt1_fade_done() const {
-	return state_->pt1_fade_left == 0;
+bool PatchInstance::fade_done() const {
+	return state_->cut_fade_left == 0;
 }
 
-float PatchInstance::pt1_fade_level() const {
-	return state_->pt1_fade;
+float PatchInstance::fade_level() const {
+	return state_->cut_fade;
 }
 
 namespace {

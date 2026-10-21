@@ -19,7 +19,7 @@ if(CASES MATCHES "play")
 endif()
 separate_arguments(extra NATIVE_COMMAND "${ARGS}")
 godot_run(SKIP_WITHOUT_INSTALL TIMEOUT ${timeout}
-    ARGS --path "${PROJECT_DIR}" res://scenes/m2a_metro.tscn -- "--m2a-check=${CASES}" "--m2a-shots=${shots}" ${cache_args} ${extra})
+    ARGS --path "${PROJECT_DIR}" res://scenes/metro_firefight.tscn -- "--m2a-check=${CASES}" "--m2a-shots=${shots}" ${cache_args} ${extra})
 string(REGEX MATCHALL "[^\n]*ERROR[^\n]*" error_lines "${out}\n${err}")
 list(LENGTH error_lines error_count)
 message("ERROR lines in the log: ${error_count}")

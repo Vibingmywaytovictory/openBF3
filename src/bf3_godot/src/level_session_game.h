@@ -2,7 +2,8 @@
 
 #include "level_session.h"
 #include "m2a_check.h"
-#include "m2a_game.h"
+#include "game_frame.h"
+#include "tdm_flow.h"
 
 #include "bf3/anim/viewmodel_anim.h"
 #include "bf3/core/ui/hud_model.h"
@@ -17,6 +18,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -42,7 +44,16 @@ class Bf3GameAudio;
 class Bf3GameFx;
 class Bf3GameCrowd;
 
-class M2aServerRecorder : public bf3::host::GunplayObserver {
+template <typename T>
+void delete_part(T *p_part) {
+	delete p_part;
+}
+
+inline std::filesystem::path utf8_path(const std::string &p_text) {
+	return std::filesystem::path(std::u8string(p_text.begin(), p_text.end()));
+}
+
+class ServerShotRecorder : public bf3::host::GunplayObserver {
 public:
 	static constexpr size_t kMaxRecords = 1u << 16;
 	struct Shot {
@@ -84,9 +95,9 @@ private:
 	std::vector<Detonation> detonations_;
 };
 
-struct M2bGame;
+struct TdmState;
 
-struct M2aGame {
+struct GameState {
 
 	bool enabled = false;
 	bool playable = false;
@@ -111,7 +122,7 @@ struct M2aGame {
 
 	std::array<std::unordered_map<uint16_t, int>, 2> def_items;
 	std::unique_ptr<bf3::sim::CollisionWorld> world;
-	std::shared_ptr<M2aServerRecorder> recorder;
+	std::shared_ptr<ServerShotRecorder> recorder;
 
 	bool built = false;
 	Bf3Localisation *localisation = nullptr;
@@ -162,10 +173,10 @@ struct M2aGame {
 	bool record_predicted = false;
 	std::vector<bf3::host::PredictedShot> predicted_shots;
 	std::vector<bf3::host::PredictedTimed> predicted_timed;
-	std::vector<M2aServerRecorder::Shot> server_shots;
-	std::vector<M2aServerRecorder::Timed> server_timed;
-	std::vector<M2aServerRecorder::Damage> server_damage;
-	std::vector<M2aServerRecorder::Detonation> server_detonations;
+	std::vector<ServerShotRecorder::Shot> server_shots;
+	std::vector<ServerShotRecorder::Timed> server_timed;
+	std::vector<ServerShotRecorder::Damage> server_damage;
+	std::vector<ServerShotRecorder::Detonation> server_detonations;
 	uint64_t events_drained = 0;
 	uint64_t frames = 0;
 
@@ -195,10 +206,11 @@ struct M2aGame {
 
 	int item_of(uint8_t p_team, uint16_t p_def) const;
 
-	std::unique_ptr<M2bGame, void (*)(M2bGame *)> m2b{ nullptr, nullptr };
+	std::unique_ptr<TdmState, void (*)(TdmState *)> tdm{ nullptr, nullptr };
+	TdmPreview tdm_preview;
 };
 
-struct Bf3LevelSession::M2aSession : M2aGame {
+struct Bf3LevelSession::Game : GameState {
 
 	std::thread vm_loader;
 	std::atomic<bool> vm_done{ false };

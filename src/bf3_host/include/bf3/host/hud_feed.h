@@ -75,7 +75,7 @@ struct HudFeedInput {
 	sim::Pose pose = sim::Pose::Stand;
 	double now_s = 0;
 
-	bool m2b = false;
+	bool tdm = false;
 	bool match_valid = false;
 	net::MatchState match;
 	std::span<const net::PlayerRow> players;

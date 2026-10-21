@@ -575,9 +575,9 @@ TEST_SUITE("anim-s3-unit") {
 		clips[size_t(LocoClip::Right)] = LocoClipInfo{ 0.533f, 3.2f, Vec3{ -1, 0, 0 } };
 		const StageCoverage cov = stage_coverage(spec, clips, LocoParams{}, 0.05);
 		MESSAGE("stage coverage: two-cycle " << cov.two_cycle_fraction << ", idle mix " << cov.idle_mix_fraction << ", clips/soldier " << cov.mean_loco_clips);
-		CHECK(cov.two_cycle_fraction > s3_gate::kMinTwoCycleFraction);
-		CHECK(cov.idle_mix_fraction > s3_gate::kMinIdleMixFraction);
-		CHECK(cov.mean_loco_clips > s3_gate::kMinMeanLocoClips);
+		CHECK(cov.two_cycle_fraction > crowd_gate::kMinTwoCycleFraction);
+		CHECK(cov.idle_mix_fraction > crowd_gate::kMinIdleMixFraction);
+		CHECK(cov.mean_loco_clips > crowd_gate::kMinMeanLocoClips);
 
 		CHECK(stage_coverage(spec, clips, LocoParams{}, 0.0).mean_loco_clips == 0.0);
 		CHECK(stage_coverage(spec, clips, LocoParams{}, std::numeric_limits<double>::quiet_NaN()).mean_loco_clips == 0.0);
@@ -1047,7 +1047,7 @@ TEST_SUITE("anim-s3-unit") {
 			MESSAGE("R5 one weapon per team, LOD " << std::string(lod ? "on" : "off") << ": " << compared << " soldier-frames bit-equal to S3, " << changed << " changed, "
 												   << reloading << " reloading");
 			CHECK(reloading > 0);
-			CHECK((*r5)->m2a_stats().bad_weapon == 0);
+			CHECK((*r5)->combat_stats().bad_weapon == 0);
 		}
 	}
 
@@ -1093,8 +1093,8 @@ TEST_SUITE("anim-s3-unit") {
 		CHECK(ev.weapon_palette(1).size() == 2);
 		CHECK(ev.weapon_palette(2).size() == 2);
 		CHECK(ev.weapon_palette(3).size() == 4);
-		CHECK(ev.m2a_stats().bad_weapon == 1);
-		CHECK(ev.m2a_stats().weapon_palettes == 5);
+		CHECK(ev.combat_stats().bad_weapon == 1);
+		CHECK(ev.combat_stats().weapon_palettes == 5);
 
 		{
 			std::vector<Mat34> expect;
@@ -1114,7 +1114,7 @@ TEST_SUITE("anim-s3-unit") {
 		Xform mz;
 		CHECK(ev.muzzle_model(0, mz));
 		CHECK(!ev.muzzle_model(1, mz));
-		CHECK(ev.m2a_stats().muzzles == 3);
+		CHECK(ev.combat_stats().muzzles == 3);
 
 		in[0].flags = crowd_flags::kReloadStart;
 		in[1].flags = crowd_flags::kReloadStart;
@@ -1133,7 +1133,7 @@ TEST_SUITE("anim-s3-unit") {
 		ev.set_inputs(in, 1.0 / 60.0);
 		ev.evaluate_all_here();
 		CHECK(ev.stats().reloading == 1);
-		CHECK(ev.m2a_stats().reloads_cancelled == 1);
+		CHECK(ev.combat_stats().reloads_cancelled == 1);
 		CHECK(ev.weapon_of(4) == 1);
 		CHECK(ev.weapon_palette(4).size() == 2);
 
@@ -1193,8 +1193,8 @@ TEST_SUITE("anim-s3-unit") {
 					CHECK(palettes_equal((*s3)->palette(i), (*m)->palette(i)));
 				}
 			}
-			CHECK((*m)->m2a_stats().stand == spec.soldiers());
-			CHECK((*m)->m2a_stats().stance_fallbacks == 0);
+			CHECK((*m)->combat_stats().stand == spec.soldiers());
+			CHECK((*m)->combat_stats().stance_fallbacks == 0);
 		}
 		auto e = CrowdEvaluator::make(w.c.set, st.set, w.teams_two, 8, config);
 		REQUIRE(e.ok());
@@ -1222,7 +1222,7 @@ TEST_SUITE("anim-s3-unit") {
 		CHECK(hips_y(ev, 2) == doctest::Approx(0.2f).epsilon(1e-4));
 		CHECK(hips_y(ev, 3) == doctest::Approx(0.8f).epsilon(1e-3));
 		CHECK(hips_y(ev, 4) == doctest::Approx(0.5f).epsilon(1e-3));
-		CrowdM2aStats ms = ev.m2a_stats();
+		CrowdCombatStats ms = ev.combat_stats();
 		CHECK(ms.transitions == 3);
 		CHECK(ms.crouch == 2);
 		CHECK(ms.prone == 2);
@@ -1243,13 +1243,13 @@ TEST_SUITE("anim-s3-unit") {
 
 		ev.set_inputs(in, dt);
 		ev.evaluate_all_here();
-		CHECK(ev.m2a_stats().firing == 0);
+		CHECK(ev.combat_stats().firing == 0);
 		const Quat arm_rest = ev.model(0)[2].q;
 		in[0].fire_seq = 8;
 		in[1].fire_seq = 1;
 		ev.set_inputs(in, dt);
 		ev.evaluate_all_here();
-		CHECK(ev.m2a_stats().firing == 2);
+		CHECK(ev.combat_stats().firing == 2);
 		const float kick_deg = quat_angle_deg(arm_rest, ev.model(0)[2].q);
 		CHECK(kick_deg > 0.5f);
 		CHECK(kick_deg < 2.0f);
@@ -1257,13 +1257,13 @@ TEST_SUITE("anim-s3-unit") {
 			ev.set_inputs(in, dt);
 			ev.evaluate_all_here();
 		}
-		CHECK(ev.m2a_stats().firing == 1);
+		CHECK(ev.combat_stats().firing == 1);
 		CHECK(same_quat(arm_rest, ev.model(0)[2].q));
 		for (int f = 0; f < 40; ++f) {
 			ev.set_inputs(in, dt);
 			ev.evaluate_all_here();
 		}
-		CHECK(ev.m2a_stats().firing == 0);
+		CHECK(ev.combat_stats().firing == 0);
 
 		{
 			auto f = CrowdEvaluator::make(w.c.set, st.set, w.teams_one, 1, config);
@@ -1273,15 +1273,15 @@ TEST_SUITE("anim-s3-unit") {
 			for (int k = 0; k < 3; ++k) {
 				(*f)->set_inputs(one, dt);
 				(*f)->evaluate_all_here();
-				CHECK((*f)->m2a_stats().firing == 0);
+				CHECK((*f)->combat_stats().firing == 0);
 			}
 		}
 
 		in[0].dead = true;
 		ev.set_inputs(in, dt);
 		ev.evaluate_all_here();
-		CHECK(ev.m2a_stats().deaths == 1);
-		CHECK(ev.m2a_stats().dying == 1);
+		CHECK(ev.combat_stats().deaths == 1);
+		CHECK(ev.combat_stats().dying == 1);
 		for (int f = 0; f < 15; ++f) {
 			ev.set_inputs(in, dt);
 			ev.evaluate_all_here();
@@ -1303,7 +1303,7 @@ TEST_SUITE("anim-s3-unit") {
 		CHECK(ev.weapon_of(0) == kNoCrowdWeapon);
 		Xform mz;
 		CHECK(!ev.muzzle_model(0, mz));
-		CHECK(ev.m2a_stats().death_hidden == 1);
+		CHECK(ev.combat_stats().death_hidden == 1);
 		in[0].dead = false;
 		ev.set_inputs(in, dt);
 		ev.evaluate_all_here();
@@ -1506,7 +1506,7 @@ TEST_SUITE("anim-s3") {
 					p_each(p_q[base + i], (*ev)->model(uint32_t(i)));
 				}
 			}
-			fallbacks = (*ev)->m2a_stats().stance_fallbacks;
+			fallbacks = (*ev)->combat_stats().stance_fallbacks;
 		};
 		std::vector<tp_ref::RefCapsule> rc;
 
@@ -1574,7 +1574,7 @@ TEST_SUITE("anim-s3") {
 			TpDev dev;
 			r->place((*mv)->model(0), rc);
 			tp_accumulate(dev, tp_posed(t, s, s, 0.0, 0.0), rc);
-			const CrowdM2aStats ms = (*mv)->m2a_stats();
+			const CrowdCombatStats ms = (*mv)->combat_stats();
 			const bool moving = (s == 1 ? ms.moving_crouch : ms.moving_prone) == 1;
 			std::printf("anim.s3 E18 (b) capsules %s moving %.1f m/s vs the steady row (reported): head %.3f cm chest %.3f cm body %.3f cm legs %.3f cm; cycles: %s\n",
 					kStanceName[s], double(in[0].velocity.z), dev.head, dev.chest, dev.body, dev.legs,
@@ -1617,37 +1617,37 @@ TEST_SUITE("anim-s3-unit") {
 		for (uint32_t i = 0; i < 3; ++i) {
 			CHECK(ev.drawn(i));
 		}
-		CHECK(ev.m2a_stats().death_hidden == 0);
-		CHECK(ev.m2a_stats().dying == 3);
+		CHECK(ev.combat_stats().death_hidden == 0);
+		CHECK(ev.combat_stats().dying == 3);
 
 		in[0].dead = false;
 		in[0].revived = true;
 		in[1].dead = false;
 		run(in, 1);
-		CHECK(ev.m2a_stats().revives == 1);
+		CHECK(ev.combat_stats().revives == 1);
 		CHECK(hips_y(ev, 0) == doctest::Approx(0.2f).epsilon(1e-4));
 		CHECK(hips_y(ev, 1) == doctest::Approx(1.0f).epsilon(1e-4));
 		CHECK(ev.drawn(0));
 		run(in, 15);
 		CHECK(hips_y(ev, 0) == doctest::Approx(0.6f).epsilon(1e-3));
-		CHECK(ev.m2a_stats().dying == 1);
+		CHECK(ev.combat_stats().dying == 1);
 		run(in, 16);
 		CHECK(hips_y(ev, 0) == doctest::Approx(1.0f).epsilon(1e-4));
 		run(in, 30);
-		CHECK(ev.m2a_stats().revives == 1);
+		CHECK(ev.combat_stats().revives == 1);
 
 		run(in, 538);
 		CHECK(ev.drawn(2));
 		run(in, 3);
 		CHECK(!ev.drawn(2));
-		CHECK(ev.m2a_stats().death_hidden == 1);
+		CHECK(ev.combat_stats().death_hidden == 1);
 
 		in[0].dead = true;
 		run(in, 60);
 		CHECK(hips_y(ev, 0) == doctest::Approx(0.2f).epsilon(1e-4));
 		in[0].dead = false;
 		run(in, 1);
-		CHECK(ev.m2a_stats().revives == 2);
+		CHECK(ev.combat_stats().revives == 2);
 		CHECK(hips_y(ev, 0) < 0.25f);
 
 		{
@@ -1673,7 +1673,7 @@ TEST_SUITE("anim-s3-unit") {
 			}
 			CHECK(rising == 60);
 			CHECK(live < 30);
-			CHECK((*d)->m2a_stats().revives == 1);
+			CHECK((*d)->combat_stats().revives == 1);
 		}
 
 		{

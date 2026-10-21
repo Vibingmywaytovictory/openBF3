@@ -1019,11 +1019,11 @@ ba::MixerConfig cut_config(uint32_t p_fade, uint32_t p_voices, bool p_hold = tru
 	ba::MixerConfig c;
 	c.max_voices = p_voices;
 	c.max_instances = 8;
-	c.pt1_cut_fade_frames = p_fade;
+	c.cut_fade_frames = p_fade;
 	if (!p_hold) {
-		c.pt1_cap_hold_db = 0.0f;
-		c.pt1_voice_hold_blocks = 0;
-		c.pt1_resume_margin = 0;
+		c.cap_hold_db = 0.0f;
+		c.voice_hold_blocks = 0;
+		c.resume_margin = 0;
 	}
 	return c;
 }
@@ -1041,7 +1041,7 @@ TEST_SUITE("audio-cuts") {
 			rig.kill(h);
 			rig.step(3);
 			const double ratio = max_step(rig.rec.left) / peak;
-			const ba::MixerCutStats &cs = rig.mixer->pt1_cut_stats();
+			const ba::MixerCutStats &cs = rig.mixer->cut_stats();
 			const size_t kill = size_t(ba::MixerCutKind::Kill), fd = size_t(ba::MixerCutKind::Fade);
 			MESSAGE("fade " << fade << ": peak " << peak << ", largest step / peak " << ratio << " (tone " << kToneSlope << "), kill step "
 							<< cs.step_max[kill].load());
@@ -1077,7 +1077,7 @@ TEST_SUITE("audio-cuts") {
 			const double pa2 = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
 			CHECK(pa2 == doctest::Approx(pa).epsilon(0.02));
 			const double ratio = max_step(rig.rec.left) / (pa + pb);
-			const ba::MixerCutStats &cs = rig.mixer->pt1_cut_stats();
+			const ba::MixerCutStats &cs = rig.mixer->cut_stats();
 			MESSAGE("fade " << fade << ": peaks " << pa << " / " << pb << ", largest step / (sum of peaks) " << ratio << ", pend "
 							<< cs.events[size_t(ba::MixerCutKind::Pend)].load() << " (max step " << cs.step_max[size_t(ba::MixerCutKind::Pend)].load()
 							<< "), resume max step " << cs.step_max[size_t(ba::MixerCutKind::Resume)].load());
@@ -1106,7 +1106,7 @@ TEST_SUITE("audio-cuts") {
 			rig.step(3);
 			const double pb = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
 			const double ratio = max_step(rig.rec.left) / (pa + pb);
-			const ba::MixerCutStats &cs = rig.mixer->pt1_cut_stats();
+			const ba::MixerCutStats &cs = rig.mixer->cut_stats();
 			MESSAGE("fade " << fade << ": largest step / (sum of peaks) " << ratio << ", drop max step " << cs.step_max[size_t(ba::MixerCutKind::Drop)].load());
 			CHECK(cs.events[size_t(ba::MixerCutKind::Drop)].load() == 1);
 			CHECK(rig.mixer->stats().live_voices_max.load() <= 1);
@@ -1119,7 +1119,7 @@ TEST_SUITE("audio-cuts") {
 		}
 	}
 
-	TEST_CASE("PT1 snd: the cap's hold keeps a sounding loop against a newcomer less than pt1_cap_hold_db louder") {
+	TEST_CASE("PT1 snd: the cap's hold keeps a sounding loop against a newcomer less than cap_hold_db louder") {
 
 		for (const bool hold : { false, true }) {
 			Rig rig(cut_config(512, 1, hold));
@@ -1129,7 +1129,7 @@ TEST_SUITE("audio-cuts") {
 			rig.start(Source{ 91.0f, false, true, 2, 1.0f }, 1.0f);
 			rig.step(4);
 			const double p1 = peak_of(rig.rec.left, rig.frames() - ba::kBlockFrames, rig.frames());
-			const ba::MixerCutStats &cs = rig.mixer->pt1_cut_stats();
+			const ba::MixerCutStats &cs = rig.mixer->cut_stats();
 			const uint64_t parks = cs.events[size_t(ba::MixerCutKind::Pend)].load();
 			MESSAGE("hold " << hold << ": A " << pa << ", after B started " << p1 << ", parks " << parks);
 			CHECK(rig.mixer->stats().live_voices_max.load() <= 1);
@@ -1176,13 +1176,13 @@ TEST_SUITE("audio-cuts") {
 		for (const float ceiling : { 0.0f, 0.966f }) {
 			ba::MixerConfig c = cut_config(512, 128);
 			c.output_gain_db = 45.0f;
-			c.pt1_limit_ceiling = ceiling;
+			c.limit_ceiling = ceiling;
 			Rig rig(c);
 			const ba::InstanceHandle h = rig.start(Source{ 90.0f, false, true, 1 });
 			rig.step(8);
 			const double peak = peak_of(rig.rec.left, 0, rig.frames());
 			const double step = max_step(rig.rec.left);
-			const ba::MixerCutStats &cs = rig.mixer->pt1_cut_stats();
+			const ba::MixerCutStats &cs = rig.mixer->cut_stats();
 			MESSAGE("ceiling " << ceiling << ": peak " << peak << ", largest step " << step << ", over 0 dBFS " << cs.overs_in.load() << " / "
 								<< cs.overs_out.load() << ", " << ba::format_mixer_cuts(cs).substr(ba::format_mixer_cuts(cs).find("; limiter")));
 			CHECK(cs.overs_in.load() > 0);
@@ -1205,25 +1205,25 @@ TEST_SUITE("audio-cuts") {
 		std::vector<float> on, off;
 		for (const float ceiling : { 0.0f, 0.966f }) {
 			ba::MixerConfig c = cut_config(512, 128);
-			c.pt1_limit_ceiling = ceiling;
+			c.limit_ceiling = ceiling;
 			Rig rig(c);
 			rig.start(Source{ 90.0f, false, true, 1 });
 			rig.step(6);
 			(ceiling == 0.0f ? off : on) = rig.rec.left;
-			CHECK(rig.mixer->pt1_cut_stats().limit_blocks.load() == 0);
+			CHECK(rig.mixer->cut_stats().limit_blocks.load() == 0);
 		}
 		CHECK(on == off);
 
 		ba::MixerConfig c = cut_config(512, 128);
 		c.output_gain_db = 45.0f;
-		c.pt1_limit_ceiling = std::numeric_limits<float>::quiet_NaN();
-		c.pt1_limit_attack_frames = 0;
-		c.pt1_limit_release_ms = -1.0f;
+		c.limit_ceiling = std::numeric_limits<float>::quiet_NaN();
+		c.limit_attack_frames = 0;
+		c.limit_release_ms = -1.0f;
 		Rig rig(c);
 		rig.start(Source{ 90.0f, false, true, 1 });
 		rig.step(4);
-		CHECK(rig.mixer->pt1_cut_stats().limit_blocks.load() == 0);
-		c.pt1_limit_ceiling = 0.5f;
+		CHECK(rig.mixer->cut_stats().limit_blocks.load() == 0);
+		c.limit_ceiling = 0.5f;
 		Rig rig2(c);
 		rig2.start(Source{ 90.0f, false, true, 1 });
 		rig2.step(4);
@@ -1232,21 +1232,21 @@ TEST_SUITE("audio-cuts") {
 
 	TEST_CASE("PT1 snd: the cut readout, the event ring and hostile fades") {
 		Rig rig(cut_config(512, 128));
-		rig.mixer->pt1_record_cuts(true);
+		rig.mixer->record_cuts(true);
 		const ba::InstanceHandle h = rig.start(Source{ 90.0f, false, true, 1 });
 		rig.step(2);
 		rig.kill(h);
 		rig.kill(h);
 		rig.step(2);
 		std::array<ba::MixerCutEvent, 16> ev{};
-		const size_t n = rig.mixer->pt1_poll_cuts(ev);
+		const size_t n = rig.mixer->poll_cuts(ev);
 		REQUIRE(n == 3);
 		CHECK(ev[0].kind == ba::MixerCutKind::Start);
 		CHECK(ev[1].kind == ba::MixerCutKind::Fade);
 		CHECK(ev[2].kind == ba::MixerCutKind::Kill);
 		CHECK(ev[2].frame == ev[1].frame);
 		CHECK(std::string(ev[1].program) == "a3_source");
-		const std::string line = ba::format_mixer_cuts(rig.mixer->pt1_cut_stats());
+		const std::string line = ba::format_mixer_cuts(rig.mixer->cut_stats());
 		MESSAGE(line);
 		CHECK(line.find("kill 1/0/0/") != std::string::npos);
 		CHECK(line.find("fade 1/1/1/") != std::string::npos);
@@ -1254,12 +1254,12 @@ TEST_SUITE("audio-cuts") {
 		Result<std::unique_ptr<ba::PatchInstance>> inst =
 				ba::PatchInstance::create(source_program(rig.wave, Source{}), rig.wave.bank, ba::AudioTuning{}, 7, ba::kMixRate);
 		REQUIRE(inst.ok());
-		(*inst)->pt1_fade_to(std::numeric_limits<float>::quiet_NaN(), 10);
-		CHECK_FALSE((*inst)->pt1_fade_done());
-		(*inst)->pt1_fade_to(5.0f, 0);
-		CHECK((*inst)->pt1_fade_done());
-		CHECK((*inst)->pt1_fade_level() == 1.0f);
-		(*inst)->pt1_set_fade(-3.0f);
-		CHECK((*inst)->pt1_fade_level() == 0.0f);
+		(*inst)->fade_to(std::numeric_limits<float>::quiet_NaN(), 10);
+		CHECK_FALSE((*inst)->fade_done());
+		(*inst)->fade_to(5.0f, 0);
+		CHECK((*inst)->fade_done());
+		CHECK((*inst)->fade_level() == 1.0f);
+		(*inst)->set_fade(-3.0f);
+		CHECK((*inst)->fade_level() == 0.0f);
 	}
 }

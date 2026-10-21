@@ -256,7 +256,7 @@ void Bf3Viewmodel::select_item(int p_index) {
 	arms_->set_skin(n.skin);
 	arms_->set_visible(true);
 	animator_ = std::make_unique<bf3::anim::ViewmodelAnimator>(set_->rig, n.refs, tuning_);
-	if (!has_user_arg("pt1-off")) {
+	if (!has_user_arg("no-locomotion")) {
 		animator_->set_locomotion(bf3::render::viewmodel_locomotion(set_->items[size_t(item_)]));
 	}
 	ads_params_ = bf3::render::viewmodel_ads_params(set_->items[size_t(item_)], tuning_);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "m2a_game.h"
+#include "game_frame.h"
 
 #include "bf3/anim/crowd_eval.h"
 #include "bf3/core/install_reader.h"
@@ -38,7 +38,7 @@ public:
 	Bf3GameCrowd(const Bf3GameCrowd &) = delete;
 	Bf3GameCrowd &operator=(const Bf3GameCrowd &) = delete;
 
-	core::Status load(const M2aLoadInputs &p_in);
+	core::Status load(const GameLoadInputs &p_in);
 
 	core::Status load_body(const core::InstallReader &p_reader, core::Cache *p_cache, const std::atomic<bool> *p_stop);
 	bool loaded() const;
@@ -46,7 +46,7 @@ public:
 	void set_corpse_seconds(float p_seconds);
 	bool build(godot::Node3D *p_parent, std::string *r_error);
 	bool built() const;
-	void step(const M2aFrame &p_frame);
+	void step(const GameFrame &p_frame);
 
 	std::span<const fx::MuzzleSample> muzzles() const;
 	GameCrowdStats stats() const;

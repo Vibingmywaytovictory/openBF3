@@ -125,7 +125,7 @@ core::Result<uint32_t> weapon_ant_ref(const core::EbxLibrary &p_library, const s
 	return uint32_t(*v);
 }
 
-void pt1_join_kit_parts(const core::EbxLibrary &p_library, const SoldierTeamSpec &p_spec, SoldierTeam &r_team, std::vector<std::string> &r_notes);
+void join_kit_parts(const core::EbxLibrary &p_library, const SoldierTeamSpec &p_spec, SoldierTeam &r_team, std::vector<std::string> &r_notes);
 
 }
 
@@ -249,7 +249,7 @@ core::Result<std::unique_ptr<SoldierAssets>> load_soldier_assets(const core::Ins
 			return parts.error();
 		}
 		team.parts = std::move(*parts);
-		pt1_join_kit_parts(lib, ts, team, a->notes);
+		join_kit_parts(lib, ts, team, a->notes);
 		SoldierPart weapon;
 		weapon.mesh = ts.weapon_mesh;
 		weapon.weapon = true;
@@ -530,7 +530,7 @@ PinchReport measure_pinch(const SoldierTeam &p_team, const anim::Skeleton &p_rig
 namespace bf3::render {
 namespace {
 
-int pt1_kit_role(std::string_view p_kit) {
+int kit_role(std::string_view p_kit) {
 	const std::string k = core::to_lower_ascii(p_kit);
 	const char *words[4] = { "assault", "engineer", "support", "recon" };
 	const size_t slash = k.find_last_of('/');
@@ -543,7 +543,7 @@ int pt1_kit_role(std::string_view p_kit) {
 	return -1;
 }
 
-void pt1_join_kit_parts(const core::EbxLibrary &p_library, const SoldierTeamSpec &p_spec, SoldierTeam &r_team, std::vector<std::string> &r_notes) {
+void join_kit_parts(const core::EbxLibrary &p_library, const SoldierTeamSpec &p_spec, SoldierTeam &r_team, std::vector<std::string> &r_notes) {
 	if (p_spec.team_data.empty()) {
 		return;
 	}
@@ -559,7 +559,7 @@ void pt1_join_kit_parts(const core::EbxLibrary &p_library, const SoldierTeamSpec
 		return;
 	}
 	for (const std::string &kit : td->kits) {
-		const int role = pt1_kit_role(kit);
+		const int role = kit_role(kit);
 		if (role < 0 || !r_team.kit_appearances[size_t(role)].empty()) {
 			r_notes.push_back("kits: " + kit + ": no role or a second kit of its role (skipped)");
 			continue;

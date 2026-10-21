@@ -106,7 +106,7 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 	std::vector<net::PlayerRow> rows{ player(1, 2, "Bot RU 1", 300, 3), player(2, 1, "Bot US 1", 200, 2), player(3, 1, "Me", 0, 0, false),
 		player(4, 2, "Bot RU 2", 100, 1), player(6, 2, "Bot RU 3", 300, 3), player(9, 1, "Bot US 2", 500, 5) };
 	host::HudFeedInput in;
-	in.m2b = true;
+	in.tdm = true;
 	in.match_valid = true;
 	in.match.phase = net::MatchPhase::PreRound;
 	in.match.kill_limit = 100;
@@ -331,7 +331,7 @@ TEST_CASE("players by slot and the sorted team lists") {
 	rows[1].ping_ms = 35;
 	rows[1].alive = false;
 	host::HudFeedInput in;
-	in.m2b = true;
+	in.tdm = true;
 	in.match_valid = true;
 	in.match.phase = net::MatchPhase::InRound;
 	in.match.kills = { 10, 20 };
@@ -394,7 +394,7 @@ TEST_CASE("players by slot and the sorted team lists") {
 TEST_CASE("the kill-feed ring keeps the newest 8; unknown defs are counted") {
 	const host::HudStatic st = make_static();
 	host::HudFeedInput in;
-	in.m2b = true;
+	in.tdm = true;
 	in.match_valid = true;
 	in.match.phase = net::MatchPhase::InRound;
 	in.own_slot = 0;
@@ -441,7 +441,7 @@ TEST_CASE("the kit bar: the own team's loadouts in slots 0, 1, 2, 6, 7") {
 	}
 	kits.loadouts[1][3].defs[1] = 6;
 	host::HudFeedInput in;
-	in.m2b = true;
+	in.tdm = true;
 	in.match_valid = true;
 	in.match.phase = net::MatchPhase::InRound;
 	in.own_slot = 1;
@@ -470,7 +470,7 @@ TEST_CASE("hostile inputs are skipped or clamped and counted") {
 	long_name.name_bytes = 250;
 	rows.push_back(long_name);
 	host::HudFeedInput in;
-	in.m2b = true;
+	in.tdm = true;
 	in.match_valid = true;
 	in.match.phase = net::MatchPhase(7);
 	in.match.winner = 9;

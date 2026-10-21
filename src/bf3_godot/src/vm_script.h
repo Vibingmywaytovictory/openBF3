@@ -53,7 +53,7 @@ void events_between(const KitRun &p_run, double p_from, double p_to, std::vector
 
 }
 
-namespace bf3::godot_side::m2a_fake {
+namespace bf3::godot_side::scripted {
 
 bf3::host::PresentedWeapon present_weapon(const sim::weapons::SoldierWeaponsState &p_prev, const sim::weapons::SoldierWeaponsState &p_curr, double p_fraction,
 		double p_time_s, const sim::weapons::WeaponTable &p_table);

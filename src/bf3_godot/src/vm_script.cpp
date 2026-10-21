@@ -52,7 +52,7 @@ struct Driver {
 		ctx.sprinting = p_sprint;
 		ctx.sway.move = p_sprint ? sw::SwayMove::Sprinting : (p_speed > 0.5f ? sw::SwayMove::Moving : sw::SwayMove::Base);
 		ctx.sway.zoom = p_in.zoom ? sw::Zoom::Zoom : sw::Zoom::NoZoom;
-		sw::step_weapons_m2a(table, st, c, ctx, kMatchSeed, run.spawn, out);
+		sw::step_weapons_with_rules(table, st, c, ctx, kMatchSeed, run.spawn, out);
 		run.states.push_back(st);
 		run.sprinting.push_back(p_sprint ? 1 : 0);
 		run.zoom_held.push_back(p_in.zoom ? 1 : 0);
@@ -289,7 +289,7 @@ View view_at(const KitRun &p_run, const sw::WeaponTable &p_table, double p_t) {
 	const size_t i = size_t(std::floor(rel));
 	const size_t j = std::min(i + 1, p_run.states.size() - 1);
 	const double f = rel - double(i);
-	v.weapon = m2a_fake::present_weapon(p_run.states[i], p_run.states[j], f, p_t, p_table);
+	v.weapon = scripted::present_weapon(p_run.states[i], p_run.states[j], f, p_t, p_table);
 	v.sprinting = p_run.sprinting[j] != 0;
 	v.zoom_held = p_run.zoom_held[j] != 0;
 	v.speed = p_run.speed[j];
@@ -331,7 +331,7 @@ void events_between(const KitRun &p_run, double p_from, double p_to, std::vector
 
 }
 
-namespace m2a_fake {
+namespace scripted {
 
 bf3::host::PresentedWeapon present_weapon(const sw::SoldierWeaponsState &p_prev, const sw::SoldierWeaponsState &p_curr, double p_fraction, double p_time_s,
 		const sw::WeaponTable &p_table) {

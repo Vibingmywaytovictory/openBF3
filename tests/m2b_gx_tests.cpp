@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
-#include "m2b_game.h"
+#include "m2b_check_rows.h"
+#include "tdm_flow.h"
 
 #include "bf3/fx/effect_library.h"
 #include "bf3/fx/simulator.h"
@@ -18,8 +19,8 @@ using namespace bf3::godot_side;
 
 namespace {
 
-M2bArgText args_with(const char *p_kill, const char *p_pre, const char *p_bots, const char *p_deploy) {
-	M2bArgText a;
+TdmArgText args_with(const char *p_kill, const char *p_pre, const char *p_bots, const char *p_deploy) {
+	TdmArgText a;
 	if (p_kill != nullptr) {
 		a.has_kill_limit = true;
 		a.kill_limit = p_kill;
@@ -72,32 +73,32 @@ M2bPlayTally good_tally() {
 TEST_SUITE("m2b-gx") {
 
 TEST_CASE("m2b.gx.unit options: defaults, play.cmd's args, hostile values") {
-	M2bOptions o;
-	CHECK(parse_m2b_options(M2bArgText{}, o).ok());
+	TdmOptions o;
+	CHECK(parse_tdm_options(TdmArgText{}, o).ok());
 	CHECK(o.deploy_screen);
 	CHECK(o.kill_limit == 0);
 	CHECK(o.preround_s < 0.0f);
-	CHECK(o.bots == kM2bPlayableDefaultBots);
+	CHECK(o.bots == kTdmDefaultBots);
 
-	M2bOptions p;
-	CHECK(parse_m2b_options(args_with("15", "0", "31", "1"), p).ok());
+	TdmOptions p;
+	CHECK(parse_tdm_options(args_with("15", "0", "31", "1"), p).ok());
 	CHECK(p.kill_limit == 15);
 	CHECK(p.preround_s == 0.0f);
 	CHECK(p.bots == 31);
 	CHECK(p.deploy_screen);
-	M2bOptions q;
-	CHECK(parse_m2b_options(args_with(nullptr, "2.5", "0", "0"), q).ok());
+	TdmOptions q;
+	CHECK(parse_tdm_options(args_with(nullptr, "2.5", "0", "0"), q).ok());
 	CHECK(q.preround_s == doctest::Approx(2.5));
 	CHECK(q.bots == 0);
 	CHECK(!q.deploy_screen);
-	M2bOptions e;
-	CHECK(parse_m2b_options(args_with(nullptr, nullptr, nullptr, ""), e).ok());
+	TdmOptions e;
+	CHECK(parse_tdm_options(args_with(nullptr, nullptr, nullptr, ""), e).ok());
 	CHECK(e.deploy_screen);
 
 	const std::array<const char *, 9> bad_ints{ "", "x", "5x", " 5", "-1", "100001", "99999999999999999999", "1e3", "0x10" };
 	for (const char *v : bad_ints) {
-		M2bOptions r;
-		const core::Status s = parse_m2b_options(args_with(v, nullptr, nullptr, nullptr), r);
+		TdmOptions r;
+		const core::Status s = parse_tdm_options(args_with(v, nullptr, nullptr, nullptr), r);
 		CHECK_MESSAGE(!s.ok(), v);
 		if (!s.ok()) {
 			CHECK(s.error().message.find("--kill-limit") != std::string::npos);
@@ -106,69 +107,69 @@ TEST_CASE("m2b.gx.unit options: defaults, play.cmd's args, hostile values") {
 	}
 	const std::array<const char *, 7> bad_bots{ "32", "-3", "abc", "", "31.0", "4294967296", "1 " };
 	for (const char *v : bad_bots) {
-		M2bOptions r;
-		CHECK_MESSAGE(!parse_m2b_options(args_with(nullptr, nullptr, v, nullptr), r).ok(), v);
-		CHECK(r.bots == kM2bPlayableDefaultBots);
+		TdmOptions r;
+		CHECK_MESSAGE(!parse_tdm_options(args_with(nullptr, nullptr, v, nullptr), r).ok(), v);
+		CHECK(r.bots == kTdmDefaultBots);
 	}
 	const std::array<const char *, 7> bad_seconds{ "nan", "inf", "-0.5", "601", "", "1e2", "2s" };
 	for (const char *v : bad_seconds) {
-		M2bOptions r;
-		CHECK_MESSAGE(!parse_m2b_options(args_with(nullptr, v, nullptr, nullptr), r).ok(), v);
+		TdmOptions r;
+		CHECK_MESSAGE(!parse_tdm_options(args_with(nullptr, v, nullptr, nullptr), r).ok(), v);
 		CHECK(r.preround_s < 0.0f);
 	}
-	M2bOptions d;
-	CHECK(!parse_m2b_options(args_with(nullptr, nullptr, nullptr, "yes"), d).ok());
+	TdmOptions d;
+	CHECK(!parse_tdm_options(args_with(nullptr, nullptr, nullptr, "yes"), d).ok());
 	CHECK(d.deploy_screen);
 
-	M2bOptions m;
-	const core::Status s = parse_m2b_options(args_with("abc", "3", "zz", nullptr), m);
+	TdmOptions m;
+	const core::Status s = parse_tdm_options(args_with("abc", "3", "zz", nullptr), m);
 	REQUIRE(!s.ok());
 	CHECK(s.error().message.find("--kill-limit") != std::string::npos);
 	CHECK(m.preround_s == 3.0f);
 
-	M2bOptions l;
-	CHECK(!parse_m2b_options(args_with(std::string(4096, '9').c_str(), nullptr, nullptr, nullptr), l).ok());
+	TdmOptions l;
+	CHECK(!parse_tdm_options(args_with(std::string(4096, '9').c_str(), nullptr, nullptr, nullptr), l).ok());
 }
 
 TEST_CASE("m2b.gx.unit the spawn screen and Deploy") {
-	M2bScreenInput in;
-	CHECK(!m2b_spawn_screen_up(in));
+	TdmScreenInput in;
+	CHECK(!tdm_spawn_screen_up(in));
 	in.match_valid = true;
 	in.phase = net::MatchPhase::Loading;
-	CHECK(!m2b_spawn_screen_up(in));
+	CHECK(!tdm_spawn_screen_up(in));
 	in.phase = net::MatchPhase::PreRound;
-	CHECK(m2b_spawn_screen_up(in));
+	CHECK(tdm_spawn_screen_up(in));
 	in.phase = net::MatchPhase::InRound;
-	CHECK(m2b_spawn_screen_up(in));
+	CHECK(tdm_spawn_screen_up(in));
 	in.kill_card_up = true;
-	CHECK(!m2b_spawn_screen_up(in));
+	CHECK(!tdm_spawn_screen_up(in));
 	in.kill_card_up = false;
 	in.own_alive = true;
-	CHECK(!m2b_spawn_screen_up(in));
+	CHECK(!tdm_spawn_screen_up(in));
 	in.own_unspawned = true;
-	CHECK(m2b_spawn_screen_up(in));
+	CHECK(tdm_spawn_screen_up(in));
 	in.phase = net::MatchPhase::RoundOver;
-	CHECK(!m2b_spawn_screen_up(in));
+	CHECK(!tdm_spawn_screen_up(in));
 
 	net::MatchState ms;
 	ms.phase = net::MatchPhase::InRound;
-	CHECK(!m2b_can_deploy(false, ms, 100, 0));
-	CHECK(m2b_can_deploy(true, ms, 100, 0));
-	CHECK(!m2b_can_deploy(true, ms, 100, 101));
-	CHECK(m2b_can_deploy(true, ms, 101, 101));
+	CHECK(!tdm_can_deploy(false, ms, 100, 0));
+	CHECK(tdm_can_deploy(true, ms, 100, 0));
+	CHECK(!tdm_can_deploy(true, ms, 100, 101));
+	CHECK(tdm_can_deploy(true, ms, 101, 101));
 	ms.phase = net::MatchPhase::PreRound;
-	CHECK(m2b_can_deploy(true, ms, 5, 0));
+	CHECK(tdm_can_deploy(true, ms, 5, 0));
 	ms.phase = net::MatchPhase::RoundOver;
-	CHECK(!m2b_can_deploy(true, ms, 1000, 0));
+	CHECK(!tdm_can_deploy(true, ms, 1000, 0));
 	ms.phase = net::MatchPhase::Loading;
-	CHECK(!m2b_can_deploy(true, ms, 1000, 0));
+	CHECK(!tdm_can_deploy(true, ms, 1000, 0));
 }
 
 TEST_CASE("m2b.gx.unit the scoreboard at RoundOver and the play script's helpers") {
-	CHECK(m2b_scoreboard_shown(true, true, net::MatchPhase::InRound));
-	CHECK(!m2b_scoreboard_shown(false, true, net::MatchPhase::InRound));
-	CHECK(!m2b_scoreboard_shown(true, true, net::MatchPhase::RoundOver));
-	CHECK(m2b_scoreboard_shown(true, false, net::MatchPhase::RoundOver));
+	CHECK(tdm_scoreboard_shown(true, true, net::MatchPhase::InRound));
+	CHECK(!tdm_scoreboard_shown(false, true, net::MatchPhase::InRound));
+	CHECK(!tdm_scoreboard_shown(true, true, net::MatchPhase::RoundOver));
+	CHECK(tdm_scoreboard_shown(true, false, net::MatchPhase::RoundOver));
 
 	CHECK(m2b_death_had_screen_time(10.0, 18.0, -1.0, 8.0));
 	CHECK(!m2b_death_had_screen_time(10.0, 17.9, -1.0, 8.0));
@@ -193,27 +194,27 @@ TEST_CASE("m2b.gx.unit the scoreboard at RoundOver and the play script's helpers
 }
 
 TEST_CASE("m2b.gx.unit the SpawnRequest and its resend") {
-	M2bDeploy d;
-	CHECK(!m2b_deploy_step(d, true, true, 10));
+	TdmDeploy d;
+	CHECK(!tdm_deploy_step(d, true, true, 10));
 	d.armed = true;
 	d.kit = 2;
-	CHECK(!m2b_deploy_step(d, false, true, 10));
-	CHECK(!m2b_deploy_step(d, true, false, 10));
-	CHECK(m2b_deploy_step(d, true, true, 10));
+	CHECK(!tdm_deploy_step(d, false, true, 10));
+	CHECK(!tdm_deploy_step(d, true, false, 10));
+	CHECK(tdm_deploy_step(d, true, true, 10));
 	CHECK(d.requests == 1);
-	for (sim::Tick t = 11; t < 10 + kM2bSpawnRequestRetryTicks; ++t) {
-		CHECK(!m2b_deploy_step(d, true, true, t));
+	for (sim::Tick t = 11; t < 10 + kSpawnRequestRetryTicks; ++t) {
+		CHECK(!tdm_deploy_step(d, true, true, t));
 	}
-	CHECK(m2b_deploy_step(d, true, true, 10 + kM2bSpawnRequestRetryTicks));
+	CHECK(tdm_deploy_step(d, true, true, 10 + kSpawnRequestRetryTicks));
 	CHECK(d.requests == 2);
 	CHECK(d.resends == 1);
 
-	CHECK(m2b_deploy_step(d, true, true, 3));
+	CHECK(tdm_deploy_step(d, true, true, 3));
 	CHECK(d.resends == 2);
-	m2b_deploy_spawned(d);
+	tdm_deploy_spawned(d);
 	CHECK(!d.armed);
 	CHECK(!d.sent);
-	CHECK(!m2b_deploy_step(d, true, true, 500));
+	CHECK(!tdm_deploy_step(d, true, true, 500));
 	CHECK(d.requests == 3);
 }
 

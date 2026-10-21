@@ -338,7 +338,7 @@ std::vector<RuleTick> rules_run(const sw::WeaponTable &p_table, sim::Tick p_spaw
 		ctx.sprinting = p_sprinting(t);
 		ctx.sway.move = ctx.sprinting ? sw::SwayMove::Sprinting : sw::SwayMove::Base;
 		ctx.sway.zoom = in.zoom ? sw::Zoom::Zoom : sw::Zoom::NoZoom;
-		sw::step_weapons_m2a(p_table, st, c, ctx, kMatchSeed, p_spawn_tick, wout);
+		sw::step_weapons_with_rules(p_table, st, c, ctx, kMatchSeed, p_spawn_tick, wout);
 		const sw::WeaponSlotState &s = st.current();
 		out.push_back({ t, wout.events, s.flags, s.mode, s.spread, s.phase });
 	}
@@ -595,7 +595,7 @@ TEST_SUITE("m2a-contract") {
 		}
 	}
 
-	TEST_CASE("m2a.contract: step_weapons_m2a rows (§5.2): zoom refused while deploying and sprinting; the fire-mode counter at spawn") {
+	TEST_CASE("m2a.contract: step_weapons_with_rules rows (§5.2): zoom refused while deploying and sprinting; the fire-mode counter at spawn") {
 		const std::shared_ptr<const sw::WeaponTable> table = tw::synthetic_table();
 		const sim::Tick spawn = 100;
 		auto never = [](sim::Tick) { return false; };
@@ -665,7 +665,7 @@ TEST_SUITE("m2a-contract") {
 			CHECK_MESSAGE(row2, "zoom held while sprinting");
 			CHECK_MESSAGE(row3, "the fire-mode counter at spawn");
 		} else {
-			pending("sv", "the three step_weapons_m2a rows", "weapon_rules.cpp is a forwarding stub until sv lands the two rules; the runs above report the stub");
+			pending("sv", "the three step_weapons_with_rules rows", "weapon_rules.cpp is a forwarding stub until sv lands the two rules; the runs above report the stub");
 		}
 	}
 

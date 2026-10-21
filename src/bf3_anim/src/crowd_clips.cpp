@@ -552,7 +552,7 @@ namespace bf3::anim {
 
 namespace {
 
-float pt1_wrap_pi(float p_a) {
+float wrap_pi(float p_a) {
 	constexpr float kPi = 3.14159265358979f;
 	if (!std::isfinite(p_a) || std::fabs(p_a) > 1.0e4f) {
 		return 0.0f;
@@ -648,7 +648,7 @@ core::Result<CrowdMoveGroupSet> load_crowd_move_groups(const CrowdClipSet &p_set
 				++measured;
 				const float h = std::atan2(rd.x, rd.z);
 				for (int s = 0; s < 2; ++s) {
-					const float off = std::fabs(pt1_wrap_pi(d.x - (s == 0 ? 1.0f : -1.0f) * h));
+					const float off = std::fabs(wrap_pi(d.x - (s == 0 ? 1.0f : -1.0f) * h));
 					err[s] += off;
 					worst[s] = std::max(worst[s], off);
 				}

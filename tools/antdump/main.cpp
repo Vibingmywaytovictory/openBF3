@@ -20,7 +20,7 @@ using namespace bf3::tools::antdump;
 
 namespace {
 
-GdStruct pt1_find_clip(const AntLibrary &p_library, const AntPackage &p_package, const std::string &p_name);
+GdStruct find_package_clip(const AntLibrary &p_library, const AntPackage &p_package, const std::string &p_name);
 
 int usage() {
 	std::fprintf(stderr,
@@ -217,7 +217,7 @@ int cmd_clip(const Args &p_args) {
 	if (!p) {
 		return 1;
 	}
-	const GdStruct clip = pt1_find_clip(s.library, *p, p_args.pos[1]);
+	const GdStruct clip = find_package_clip(s.library, *p, p_args.pos[1]);
 	if (!clip.valid()) {
 		std::fprintf(stderr, "antdump: no clip named \"%s\" in %s\n", p_args.pos[1].c_str(), p_args.pos[0].c_str());
 		return 1;
@@ -402,7 +402,7 @@ int cmd_sample(const Args &p_args) {
 	}
 	std::unique_ptr<AntPackage> holder;
 	const AntPackage *p = get_package(s, p_args.pos[0], holder);
-	const GdStruct clip = p ? pt1_find_clip(s.library, *p, p_args.pos[1]) : GdStruct();
+	const GdStruct clip = p ? find_package_clip(s.library, *p, p_args.pos[1]) : GdStruct();
 	DecodedClip d;
 	ClipBinding b;
 	if (!clip.valid() || !decode_clip(clip, d).ok() || !s.library.bind(*p, clip, b).ok()) {
@@ -489,7 +489,7 @@ int cmd_rigmap(const Args &p_args) {
 	}
 	std::unique_ptr<AntPackage> holder;
 	const AntPackage *p = get_package(s, p_args.pos[0], holder);
-	const GdStruct clip = p ? pt1_find_clip(s.library, *p, p_args.pos[1]) : GdStruct();
+	const GdStruct clip = p ? find_package_clip(s.library, *p, p_args.pos[1]) : GdStruct();
 	DecodedClip d;
 	ClipBinding b;
 	ClipHeader h;
@@ -638,7 +638,7 @@ int cmd_parity(const Args &p_args) {
 	return r.ok() ? 0 : 1;
 }
 
-namespace pt1_objects {
+namespace gd_objects {
 
 std::string guid_label(const AntLibrary &p_library, const AntPackage &p_from, const GdGuid &p_guid) {
 	if (p_guid.is_null()) {
@@ -802,7 +802,7 @@ int cmd_objects(const Args &p_args) {
 	long shown = 0;
 	for (size_t i = 0; i < p->object_count() && shown < limit; ++i) {
 		const GdStruct o = p->object(i);
-		if (!o.valid() || (type != "-" && !pt1_objects::is_type(o, type))) {
+		if (!o.valid() || (type != "-" && !gd_objects::is_type(o, type))) {
 			continue;
 		}
 		if (name != "-" && std::string(o.name()).find(name) == std::string::npos) {
@@ -810,13 +810,13 @@ int cmd_objects(const Args &p_args) {
 		}
 		++shown;
 		std::printf("== %s '%s' guid 0x%x\n", std::string(o.type_name()).c_str(), std::string(o.name()).c_str(), o.guid().index());
-		pt1_objects::dump_struct(s.library, *p, o, 0, depth, "  ");
+		gd_objects::dump_struct(s.library, *p, o, 0, depth, "  ");
 	}
 	std::fprintf(stderr, "antdump: %ld objects shown\n", shown);
 	return 0;
 }
 
-GdStruct pt1_find_clip(const AntLibrary &p_library, const AntPackage &p_package, const std::string &p_name) {
+GdStruct find_package_clip(const AntLibrary &p_library, const AntPackage &p_package, const std::string &p_name) {
 	static constexpr std::string_view kPrefix = "controller:";
 	if (p_name.rfind(kPrefix, 0) != 0) {
 		return AntLibrary::find_clip(p_package, p_name);

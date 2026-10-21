@@ -204,7 +204,7 @@ SimRun run_sim(const sw::WeaponTable &p_table, const std::string &p_variant, uin
 		ctx.sway.move = ctx.sprinting ? sw::SwayMove::Sprinting : sw::SwayMove::Base;
 		ctx.sway.zoom = in.zoom ? sw::Zoom::Zoom : sw::Zoom::NoZoom;
 		if (p_m2a_rules) {
-			sw::step_weapons_m2a(p_table, st, command(t, in), ctx, kSeed, run.spawn, out);
+			sw::step_weapons_with_rules(p_table, st, command(t, in), ctx, kSeed, run.spawn, out);
 		} else {
 			sw::step_soldier_weapons(p_table, st, command(t, in), ctx, kSeed, out);
 		}
@@ -724,14 +724,14 @@ TEST_SUITE("anim-viewmodel-unit") {
 			CHECK(refused_ok);
 			CHECK(aimed_between);
 			CHECK(aimed_after);
-			const char *what = m2a_rules ? "step_weapons_m2a" : "step_soldier_weapons";
+			const char *what = m2a_rules ? "step_weapons_with_rules" : "step_soldier_weapons";
 			std::printf("anim.viewmodel: E19 zoom refused (presentation) with %s: %s; the sim's own flag %s\n", what, refused_ok ? "PASS" : "FAIL",
 					sim_refuses ? "clear on refused ticks" : "set on refused ticks");
 			if (m2a_rules) {
 				if (sim_refuses) {
-					std::printf("anim.viewmodel: step_weapons_m2a refuses zoom while deploying and sprinting (sv's rule has landed)\n");
+					std::printf("anim.viewmodel: step_weapons_with_rules refuses zoom while deploying and sprinting (sv's rule has landed)\n");
 				} else {
-					std::printf("anim.viewmodel: PENDING (sv): step_weapons_m2a still sets kZoomWasDown on refused ticks (weapon_rules.cpp is the W2.0 "
+					std::printf("anim.viewmodel: PENDING (sv): step_weapons_with_rules still sets kZoomWasDown on refused ticks (weapon_rules.cpp is the W2.0 "
 								"forwarding stub); the presentation refuses it meanwhile\n");
 				}
 			}

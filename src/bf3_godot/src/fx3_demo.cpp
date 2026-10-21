@@ -257,7 +257,7 @@ void Bf3Fx3Demo::start_loader() {
 			shared->gunplay = out->gunplay;
 			hk::LevelDatabase db;
 			db.install = out->install;
-			M2aLoadInputs in;
+			GameLoadInputs in;
 			in.db = &db;
 			in.shared = shared;
 			in.cache = out->cache.get();
@@ -638,7 +638,7 @@ bool Bf3Fx3Demo::flash_present() const {
 
 void Bf3Fx3Demo::step_fx(double p_dt) {
 	const Transform3D t = camera_->get_global_transform();
-	M2aFrame f;
+	GameFrame f;
 	const int64_t now = int64_t(t_ * double(bf3::sim::weapons::kTimeUnitsPerSecond));
 	for (hk::PresentEvent &e : events_) {
 		e.time = now;

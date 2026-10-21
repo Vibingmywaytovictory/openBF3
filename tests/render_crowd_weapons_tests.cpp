@@ -204,7 +204,7 @@ TEST_SUITE("render-crowd-weapons") {
 				CHECK((*ev)->muzzle_model(k, mz) == ((*set)->teams[t][i].muzzle_joint >= 0));
 			}
 		}
-		const anim::CrowdM2aStats ms = (*ev)->m2a_stats();
+		const anim::CrowdCombatStats ms = (*ev)->combat_stats();
 		std::printf("render.crowd_weapons evaluator: %u soldiers, %u weapon palettes, %u muzzles, %u reloading; load: soldier assets %.2f s, gunplay %.2f s, "
 					"weapons %.2f s (branch, unlocked, shared machine: indicative only)\n",
 				n, ms.weapon_palettes, ms.muzzles, (*ev)->stats().reloading, s_assets, s_gunplay, s_weapons);
