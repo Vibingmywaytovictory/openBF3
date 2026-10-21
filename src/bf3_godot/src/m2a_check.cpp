@@ -20,9 +20,9 @@
 #include "bf3/net/protocol.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/weapons/hit_target.h"
-#include "bf3/sim/weapons/shooting_range.h"
 #include "bf3/sim/weapons/sim_time.h"
 #include "bf3/sim/weapons/weapon_sim.h"
+#include "bf3/sim_harness/shooting_range.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/display_server.hpp>

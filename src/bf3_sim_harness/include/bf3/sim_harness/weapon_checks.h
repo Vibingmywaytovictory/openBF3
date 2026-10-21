@@ -1,7 +1,7 @@
 #pragma once
 
-#include "bf3/sim/weapons/shooting_range.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"
+#include "bf3/sim_harness/shooting_range.h"
 
 #include <memory>
 #include <span>

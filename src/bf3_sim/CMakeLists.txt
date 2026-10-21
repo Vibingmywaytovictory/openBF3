@@ -43,10 +43,8 @@ target_sources(bf3_sim PRIVATE
     src/logic/logic_runtime.cpp
     src/logic/logic_ghost.cpp
     src/logic/logic_native.cpp
-    src/logic/logic_harness.cpp
     include/bf3/sim/logic/logic_runtime.h
     include/bf3/sim/logic/logic_native.h
-    include/bf3/sim/logic/logic_harness.h
 )
 
 target_sources(bf3_sim PRIVATE
@@ -71,16 +69,12 @@ target_sources(bf3_sim PRIVATE
     include/bf3/sim/vehicle_ghost.h
     include/bf3/sim/vehicle_model.h
     include/bf3/sim/vehicle_world.h
-    include/bf3/sim/vehicle_course.h
-    include/bf3/sim/vehicle_replay.h
     src/vehicle_types.cpp
     src/vehicle_ghost.cpp
     src/vehicle_tuning.cpp
     src/vehicle_model.cpp
     src/vehicle_world_internal.h
     src/vehicle_world.cpp
-    src/vehicle_course.cpp
-    src/vehicle_replay.cpp
 )
 
 target_sources(bf3_sim PRIVATE
@@ -95,7 +89,7 @@ target_sources(bf3_sim PRIVATE
     include/bf3/sim/weapons/weapon_sim.h
     include/bf3/sim/weapons/damage.h
     include/bf3/sim/weapons/ballistics.h
-    include/bf3/sim/weapons/shooting_range.h
+    include/bf3/sim/weapons/range_lane.h
 )
 target_sources(bf3_sim PRIVATE
     src/weapons/weapons_internal.h
@@ -106,9 +100,7 @@ target_sources(bf3_sim PRIVATE
     src/weapons/hit_target.cpp
     src/weapons/damage.cpp
     src/weapons/ballistics.cpp
-    src/weapons/shooting_range.cpp
-    include/bf3/sim/weapons/weapon_checks.h
-    src/weapons/weapon_checks.cpp
+    src/weapons/range_lane.cpp
     include/bf3/sim/weapons/weapon_install.h
     src/weapons/weapon_install.cpp
 )

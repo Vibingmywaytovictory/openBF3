@@ -209,9 +209,11 @@ private:
 	uint64_t others_presented_ = 0;
 	uint64_t others_extrapolated_ = 0;
 	SessionTimings timings_;
+#if OPENBF3_BUILD_CHECKS
 	std::unique_ptr<M1Check> check_;
 	std::unique_ptr<M1LoadCheck> load_check_runner_;
 	std::unique_ptr<ShotRunner> shots_;
+#endif
 
 	void s1_upload_overlay();
 	void s1_report_others(uint64_t p_now_ns);

@@ -2,7 +2,10 @@
 
 #include "godot_cache.h"
 #include "godot_util.h"
+
+#if OPENBF3_BUILD_CHECKS
 #include "m1_check.h"
+#endif
 
 #include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/install.h"
@@ -180,8 +183,8 @@ void Bf3LevelSession::parse_args() {
 		const std::string root = user_arg_value("bf3-cache");
 		cache_root_ = root.empty() ? default_cache_root() : utf8_path(root);
 	}
-	m1_check_ = has_user_arg("m1-check");
-	if (has_user_arg("m1-load-check")) {
+	m1_check_ = has_check_arg("m1-check");
+	if (has_check_arg("m1-load-check")) {
 		load_check_ = user_arg_value("m1-load-check");
 		if (load_check_.empty()) {
 			load_check_ = "cold";
@@ -257,6 +260,7 @@ void Bf3LevelSession::_ready() {
 	if (m1_check_) {
 		Engine::get_singleton()->set_max_fps(144);
 	}
+#if OPENBF3_BUILD_CHECKS
 	{
 		std::vector<ShotRunner::FreeShot> free_shots;
 		std::vector<ShotRunner::SpawnShot> spawn_shots;
@@ -277,6 +281,11 @@ void Bf3LevelSession::_ready() {
 		const long measure = std::clamp(std::atol(user_arg_value("shot-measure").c_str()), 0L, 100000L);
 		shots_->set_timing(settle, uint32_t(measure));
 	}
+#else
+	for (const char *shot_arg : { "shots", "shot-spawns", "shot-teleports" }) {
+		has_check_arg(shot_arg);
+	}
+#endif
 	if (!install_.is_mounted()) {
 		std::lock_guard lock(loader_mutex_);
 		load_error_ = "no usable install: " + install_.describe();
@@ -803,6 +812,7 @@ void Bf3LevelSession::try_done() {
 	if (!bots_line_.empty()) {
 		UtilityFunctions::print(to_godot(bots_line_));
 	}
+#if OPENBF3_BUILD_CHECKS
 	if (m1_check_) {
 		uint32_t courses = 6;
 		if (has_user_arg("m1-courses")) {
@@ -812,6 +822,7 @@ void Bf3LevelSession::try_done() {
 	} else if (!load_check_.empty()) {
 		load_check_runner_ = std::make_unique<M1LoadCheck>(*this, load_check_ == "warm", shots_.get());
 	}
+#endif
 }
 
 void Bf3LevelSession::_unhandled_input(const Ref<InputEvent> &p_event) {
@@ -920,6 +931,9 @@ void Bf3LevelSession::_process(double p_delta) {
 		return;
 	}
 
+	bool shots_done = true;
+	size_t shots_failed = 0;
+#if OPENBF3_BUILD_CHECKS
 	if (check_ != nullptr) {
 		if (check_->frame(now_ns)) {
 			finish(check_->exit_code());
@@ -936,16 +950,17 @@ void Bf3LevelSession::_process(double p_delta) {
 	if (shot_delay_ > 0.0 && since_done_ < shot_delay_ && shots_ != nullptr && !shots_->empty()) {
 		return;
 	}
-	bool shots_done = true;
 	if (shots_ != nullptr && !shots_->empty()) {
 		shots_done = shots_->frame(now_ns);
+		shots_failed = shots_->failed();
 		if (shots_done && quit_after_ <= 0.0) {
-			finish(shots_->failed() == 0 && !failed_ ? 0 : 1);
+			finish(shots_failed == 0 && !failed_ ? 0 : 1);
 			return;
 		}
 	}
+#endif
 	if (quit_after_ > 0.0 && since_done_ >= quit_after_ && shots_done) {
-		finish(failed_ || (shots_ != nullptr && shots_->failed() > 0) ? 1 : 0);
+		finish(failed_ || shots_failed > 0 ? 1 : 0);
 	}
 }
 

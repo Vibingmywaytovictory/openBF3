@@ -1,4 +1,4 @@
-#include "bf3/sim/logic/logic_harness.h"
+#include "bf3/sim_harness/logic_harness.h"
 
 #include "bf3/core/gameplay/logic_types.h"
 

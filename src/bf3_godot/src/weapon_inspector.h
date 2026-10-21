@@ -1,7 +1,5 @@
 #pragma once
 
-#include "m0_inspector_check.h"
-
 #include "bf3/core/gameplay/weapon_catalog.h"
 
 #include <godot_cpp/classes/canvas_layer.hpp>
@@ -83,7 +81,9 @@ private:
 	void show_entry(int p_index);
 	void on_item_selected(int64_t p_index);
 	void print_inspect_and_quit();
+#if OPENBF3_BUILD_CHECKS
 	void run_check_and_quit();
+#endif
 	void quit(int p_code);
 	void join_job();
 	Bf3Localisation *localisation();

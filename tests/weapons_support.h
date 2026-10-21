@@ -4,10 +4,10 @@
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/ballistics.h"
-#include "bf3/sim/weapons/shooting_range.h"
 #include "bf3/sim/weapons/surface_materials.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"
+#include "bf3/sim_harness/shooting_range.h"
 
 #include <doctest/doctest.h>
 

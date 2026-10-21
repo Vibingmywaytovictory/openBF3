@@ -236,7 +236,9 @@ void Bf3LevelSession::M2aSessionDeleter::operator()(M2aSession *p_session) const
 
 void Bf3LevelSession::m2a_parse_args() {
 	const bool scene_m2a = has_meta("openbf3_m2a") && bool(get_meta("openbf3_m2a"));
-	const bool check = has_user_arg("m2a-check") || has_user_arg("m2a-firefight");
+	const bool check_case = has_check_arg("m2a-check");
+	const bool check_firefight = has_check_arg("m2a-firefight");
+	const bool check = check_case || check_firefight;
 	if (!scene_m2a && !check) {
 		return;
 	}
@@ -245,7 +247,7 @@ void Bf3LevelSession::m2a_parse_args() {
 	g.enabled = true;
 	g.playable = !check;
 	std::string error;
-	if (has_user_arg("m2a-check")) {
+	if (check_case) {
 		bf3::core::Result<std::vector<M2aCase>> cases = parse_m2a_cases(user_arg_value("m2a-check"));
 		if (!cases) {
 			error = cases.error().message;
@@ -253,7 +255,7 @@ void Bf3LevelSession::m2a_parse_args() {
 			g.cases = std::move(*cases);
 		}
 	}
-	if (has_user_arg("m2a-firefight") && !g.wants_case(M2aCase::Firefight)) {
+	if (check_firefight && !g.wants_case(M2aCase::Firefight)) {
 		g.cases.push_back(M2aCase::Firefight);
 	}
 	if (has_user_arg("kit")) {
@@ -1160,6 +1162,7 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 		}
 	}
 
+#if OPENBF3_BUILD_CHECKS
 	if (g.checks() && g.check == nullptr && !g.finished && (g.vm_built || !scene_) && (g.hud == nullptr || g.hud->is_loaded())) {
 		g.check = std::make_unique<M2aCheck>(*this, g, g.cases, g.check_options);
 	}
@@ -1171,6 +1174,7 @@ bool Bf3LevelSession::m2a_frame(double p_delta, uint64_t p_now_ns) {
 		}
 		return true;
 	}
+#endif
 	return g.checks();
 }
 
@@ -1189,7 +1193,9 @@ void Bf3LevelSession::m2a_shutdown() {
 	if (g.crowd_loader.joinable()) {
 		g.crowd_loader.join();
 	}
+#if OPENBF3_BUILD_CHECKS
 	g.check.reset();
+#endif
 	m2b_gx_shutdown(g);
 #if OPENBF3_M2A_HAVE_CROWD
 	if (g.crowd != nullptr) {

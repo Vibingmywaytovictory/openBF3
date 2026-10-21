@@ -4,12 +4,12 @@
 #include "bf3/core/level/vehicle_spawns.h"
 #include "bf3/net/bit_stream.h"
 #include "bf3/sim/static_world.h"
-#include "bf3/sim/vehicle_course.h"
 #include "bf3/sim/vehicle_ghost.h"
 #include "bf3/sim/vehicle_model.h"
-#include "bf3/sim/vehicle_replay.h"
 #include "bf3/sim/vehicle_types.h"
 #include "bf3/sim/vehicle_world.h"
+#include "bf3/sim_harness/vehicle_course.h"
+#include "bf3/sim_harness/vehicle_replay.h"
 
 #include <cmath>
 #include <cstdint>

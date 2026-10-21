@@ -1,4 +1,4 @@
-#include "bf3/sim/vehicle_replay.h"
+#include "bf3/sim_harness/vehicle_replay.h"
 
 #include <algorithm>
 #include <chrono>

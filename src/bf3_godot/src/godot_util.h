@@ -13,6 +13,10 @@ std::string user_arg_value(const char *p_name);
 
 bool has_user_arg(const char *p_name);
 
+inline constexpr bool kBuildChecks = OPENBF3_BUILD_CHECKS != 0;
+
+bool has_check_arg(const char *p_name);
+
 std::string engine_summary();
 
 }

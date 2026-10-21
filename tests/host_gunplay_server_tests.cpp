@@ -2,8 +2,8 @@
 
 #include "gunplay_fixture.h"
 
-#include "bf3/sim/weapons/shooting_range.h"
 #include "bf3/sim/weapons/spread_recoil.h"
+#include "bf3/sim_harness/shooting_range.h"
 
 #include <algorithm>
 #include <array>

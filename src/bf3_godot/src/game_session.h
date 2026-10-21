@@ -71,7 +71,9 @@ private:
 	bf3::core::InstallSnapshot install_before_;
 	std::unique_ptr<bf3::host::ServerHost> server_;
 	std::unique_ptr<bf3::host::LoopbackClient> client_;
+#if OPENBF3_BUILD_CHECKS
 	std::unique_ptr<S0SelfTest> selftest_;
+#endif
 
 	godot::CanvasLayer *overlay_layer_ = nullptr;
 	godot::Label *overlay_ = nullptr;

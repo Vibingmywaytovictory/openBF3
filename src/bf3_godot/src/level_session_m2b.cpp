@@ -245,7 +245,7 @@ void m2b_status_text(const M2bGame &p_m, const host::PresentationFrame &p_frame,
 }
 
 void m2b_gx_args(M2aGame &r_game, bool p_scene_m2b, InputMapper &r_mapper, uint32_t &r_bots, double &r_quit_after, std::string &r_error) {
-	const bool check = has_user_arg("m2b-check");
+	const bool check = has_check_arg("m2b-check");
 	if (!p_scene_m2b && !check) {
 		return;
 	}
@@ -486,8 +486,8 @@ void m2b_gx_presented(M2aGame &r_game, host::ClientSession &r_client, const host
 	}
 }
 
-bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::PresentationFrame &p_frame, uint64_t p_now_ns, double p_delta, Camera3D *p_camera,
-		bool p_free_camera, bool p_headless) {
+bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::PresentationFrame &p_frame,
+		uint64_t p_now_ns, [[maybe_unused]] double p_delta, Camera3D *p_camera, bool p_free_camera, bool p_headless) {
 	if (!r_game.m2b) {
 		return false;
 	}
@@ -631,6 +631,7 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 	m.frame.spawn_screen = m.spawn_screen;
 	m.frame.death_view = m.view_valid && dead;
 
+#if OPENBF3_BUILD_CHECKS
 	if (m.checks() && m.check == nullptr && !m.finished && (r_game.hud == nullptr || r_game.hud->is_loaded())) {
 		m.check = std::unique_ptr<M2bCheck, void (*)(M2bCheck *)>(new M2bCheck(r_session, r_game, m, m.cases, m.check_options), &delete_m2b_part<M2bCheck>);
 	}
@@ -642,6 +643,7 @@ bool m2b_gx_frame(Bf3LevelSession &r_session, M2aGame &r_game, const host::Prese
 			return true;
 		}
 	}
+#endif
 	return false;
 }
 

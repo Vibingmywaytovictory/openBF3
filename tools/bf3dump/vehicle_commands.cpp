@@ -8,11 +8,11 @@
 #include "bf3/core/level/world.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
-#include "bf3/sim/vehicle_course.h"
 #include "bf3/sim/vehicle_ghost.h"
 #include "bf3/sim/vehicle_model.h"
-#include "bf3/sim/vehicle_replay.h"
 #include "bf3/sim/vehicle_world.h"
+#include "bf3/sim_harness/vehicle_course.h"
+#include "bf3/sim_harness/vehicle_replay.h"
 
 #include <array>
 #include <charconv>

@@ -1,10 +1,10 @@
-#include "bf3/sim/weapons/weapon_checks.h"
+#include "bf3/sim_harness/weapon_checks.h"
 
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/damage.h"
-#include "weapons_internal.h"
+#include "weapons/weapons_internal.h"
 
 #include <algorithm>
 #include <cinttypes>

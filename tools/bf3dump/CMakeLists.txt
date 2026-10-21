@@ -8,7 +8,7 @@ target_sources(bf3dump PRIVATE level_commands.cpp level_commands.h)
 target_sources(bf3dump PRIVATE collision_commands.cpp collision_commands.h)
 target_sources(bf3dump PRIVATE prepare_commands.cpp prepare_commands.h)
 target_link_libraries(bf3dump PRIVATE bf3_render psapi)
-target_link_libraries(bf3dump PRIVATE bf3_sim)
+target_link_libraries(bf3dump PRIVATE bf3_sim bf3_sim_harness)
 target_sources(bf3dump PRIVATE shapes_commands.cpp shapes_commands.h) # M1 T1: `shapes`, `prepare --shapes`
 target_sources(bf3dump PRIVATE spawns_commands.cpp spawns_commands.h)
 target_sources(bf3dump PRIVATE logic_commands.cpp logic_commands.h)

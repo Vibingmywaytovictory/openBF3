@@ -23,8 +23,8 @@
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/posed_target.h"
-#include "bf3/sim/weapons/shooting_range.h"
 #include "bf3/sim/weapons/weapon_install.h"
+#include "bf3/sim_harness/shooting_range.h"
 
 #include <algorithm>
 #include <array>

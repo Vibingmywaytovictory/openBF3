@@ -63,6 +63,7 @@ a `timing` row, split first so its socket-free cases stay on branches (`host.ses
 
 ## 3. Godot rows
 
+* Godot rows exist only when `OPENBF3_BUILD_CHECKS` is ON (the `dev` preset): they drive the checks it compiles in.
 * Every `godot.*` row is registered through `openbf3_godot_row(HEADLESS|WINDOW)`. Anything else, or a windowed row
   without the label `window`, is a configure error.
 * Headless rows find the Godot console executable at configure time (`OPENBF3_GODOT_EXE`, next to the checkout) and

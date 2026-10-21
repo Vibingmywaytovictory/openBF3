@@ -8,8 +8,8 @@
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/thread_pool.h"
-#include "bf3/sim/logic/logic_harness.h"
 #include "bf3/sim/logic/logic_runtime.h"
+#include "bf3/sim_harness/logic_harness.h"
 #include "test_support.h"
 
 #include <algorithm>

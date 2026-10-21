@@ -2,7 +2,7 @@
 
 #include "bf3/sim/weapons/damage.h"
 #include "bf3/sim/weapons/hit_target.h"
-#include "bf3/sim/weapons/shooting_range.h"
+#include "bf3/sim_harness/shooting_range.h"
 
 #include <doctest/doctest.h>
 

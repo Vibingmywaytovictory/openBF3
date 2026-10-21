@@ -4,30 +4,20 @@ add_library(bf3_godot SHARED
     src/game_session.h
     src/dedicated_main_loop.cpp
     src/dedicated_main_loop.h
-    src/s0_selftest.cpp
-    src/s0_selftest.h
     src/godot_util.cpp
     src/godot_util.h
     src/render_bridge.cpp
     src/render_bridge.h
-    src/viewmodel_demo.cpp
-    src/viewmodel_demo.h
-    src/m9_reload_check.cpp
-    src/m9_reload_check.h
 )
 target_sources(bf3_godot PRIVATE
     src/bf3_localisation.cpp
     src/bf3_localisation.h
     src/weapon_inspector.cpp
     src/weapon_inspector.h
-    src/m0_inspector_check.cpp
-    src/m0_inspector_check.h
 )
 target_sources(bf3_godot PRIVATE
     src/collision_overlay.cpp
     src/collision_overlay.h
-    src/collision_check.cpp
-    src/collision_check.h
 )
 target_sources(bf3_godot PRIVATE
     src/godot_cache.cpp
@@ -58,8 +48,6 @@ target_sources(bf3_godot PRIVATE
     src/input_mapper.h
     src/loading_screen.cpp
     src/loading_screen.h
-    src/m1_check.cpp
-    src/m1_check.h
 )
 target_link_libraries(bf3_godot PRIVATE psapi)
 
@@ -83,8 +71,6 @@ target_sources(bf3_godot PRIVATE
 target_sources(bf3_godot PRIVATE
     src/ui_assets.cpp
     src/ui_assets.h
-    src/ui_font_check.cpp
-    src/ui_font_check.h
 )
 
 target_sources(bf3_godot PRIVATE
@@ -94,8 +80,6 @@ target_sources(bf3_godot PRIVATE
     src/minimap_control.h
     src/world_icons.cpp
     src/world_icons.h
-    src/minimap_check.cpp
-    src/minimap_check.h
 )
 
 target_sources(bf3_godot PRIVATE
@@ -103,33 +87,22 @@ target_sources(bf3_godot PRIVATE
     src/viewmodel.h
     src/vm_script.cpp
     src/vm_script.h
-    src/m2a_viewmodel_demo.cpp
-    src/m2a_viewmodel_demo.h
-    src/m2a_viewmodel_check.cpp
 )
 
 target_sources(bf3_godot PRIVATE
     src/fx_renderer.cpp
     src/fx_renderer.h
-    src/fx_demo.cpp
-    src/fx_demo.h
-    src/fx_ref.cpp
-    src/fx_ref.h
 )
 target_link_libraries(bf3_godot PRIVATE bf3_fx)
 
 target_sources(bf3_godot PRIVATE
     src/hud_controls.cpp
     src/hud_controls.h
-    src/hud_check.cpp
-    src/hud_check.h
 )
 
 target_sources(bf3_godot PRIVATE
     src/audio_stream.cpp
     src/audio_stream.h
-    src/audio_demo.cpp
-    src/audio_demo.h
 )
 target_link_libraries(bf3_godot PRIVATE bf3_audio bf3_client_audio)
 
@@ -143,14 +116,11 @@ target_sources(bf3_godot PRIVATE
     src/level_session_m2a.cpp
     src/viewmodel_muzzle.h
     src/viewmodel_muzzle.cpp
-    src/m2a_w3_headers.cpp
 )
 
 target_sources(bf3_godot PRIVATE
     src/game_crowd.cpp
     src/game_crowd_items.h
-    src/tp_crowd_check.cpp
-    src/tp_crowd_check.h
 )
 
 target_sources(bf3_godot PRIVATE
@@ -161,13 +131,8 @@ target_sources(bf3_godot PRIVATE
     src/game_fx.cpp
     src/fx_decals.cpp
     src/fx_decals.h
-    src/fx3_demo.cpp
-    src/fx3_demo.h
 )
 
-target_sources(bf3_godot PRIVATE
-    src/m2a_check.cpp
-)
 target_compile_definitions(bf3_godot PRIVATE OPENBF3_M2A_HAVE_FX=1 OPENBF3_M2A_HAVE_AUDIO=1 OPENBF3_M2A_HAVE_CROWD=1 OPENBF3_M2A_HAVE_BT=1)
 
 target_sources(bf3_godot PRIVATE
@@ -176,7 +141,6 @@ target_sources(bf3_godot PRIVATE
     src/m2b_game.h
     src/m2b_check.h
     src/level_session_m2b.h
-    src/m2b_w2_headers.cpp
 )
 target_compile_definitions(bf3_godot PRIVATE OPENBF3_M2B_HAVE_UI=1 OPENBF3_M2B_HAVE_CAM=1)
 
@@ -200,13 +164,10 @@ target_sources(bf3_godot PRIVATE
     src/pre_round.cpp
     src/round_end.h
     src/round_end.cpp
-    src/hud_tdm_demo.h
-    src/hud_tdm_demo.cpp
 )
 
 target_sources(bf3_godot PRIVATE
     src/level_session_m2b.cpp
-    src/m2b_check.cpp
     src/m2b_game.cpp
 )
 
@@ -216,3 +177,45 @@ target_sources(bf3_godot PRIVATE
     src/iff_frame.h
     src/iff_frame.cpp
 )
+
+if(OPENBF3_BUILD_CHECKS)
+    target_sources(bf3_godot PRIVATE
+        src/audio_demo.cpp
+        src/audio_demo.h
+        src/collision_check.cpp
+        src/collision_check.h
+        src/fx3_demo.cpp
+        src/fx3_demo.h
+        src/fx_demo.cpp
+        src/fx_demo.h
+        src/fx_ref.cpp
+        src/fx_ref.h
+        src/hud_check.cpp
+        src/hud_check.h
+        src/hud_tdm_demo.cpp
+        src/hud_tdm_demo.h
+        src/m0_inspector_check.cpp
+        src/m0_inspector_check.h
+        src/m1_check.cpp
+        src/m1_check.h
+        src/m2a_check.cpp
+        src/m2a_viewmodel_check.cpp
+        src/m2a_viewmodel_demo.cpp
+        src/m2a_viewmodel_demo.h
+        src/m2b_check.cpp
+        src/m9_reload_check.cpp
+        src/m9_reload_check.h
+        src/minimap_check.cpp
+        src/minimap_check.h
+        src/s0_selftest.cpp
+        src/s0_selftest.h
+        src/tp_crowd_check.cpp
+        src/tp_crowd_check.h
+        src/ui_font_check.cpp
+        src/ui_font_check.h
+        src/viewmodel_demo.cpp
+        src/viewmodel_demo.h
+    )
+    target_link_libraries(bf3_godot PRIVATE bf3_sim_harness)
+endif()
+target_compile_definitions(bf3_godot PRIVATE OPENBF3_BUILD_CHECKS=$<BOOL:${OPENBF3_BUILD_CHECKS}>)

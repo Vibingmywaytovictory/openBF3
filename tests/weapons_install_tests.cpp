@@ -2,7 +2,7 @@
 
 #include "bf3/core/gameplay/weapon_blob.h"
 #include "bf3/sim/weapons/damage.h"
-#include "bf3/sim/weapons/weapon_checks.h"
+#include "bf3/sim_harness/weapon_install_checks.h"
 
 #include <doctest/doctest.h>
 

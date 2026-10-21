@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 namespace bf3::godot_side {
 
@@ -40,6 +41,17 @@ bool has_user_arg(const char *p_name) {
 		}
 	}
 	return false;
+}
+
+bool has_check_arg(const char *p_name) {
+	if (!has_user_arg(p_name)) {
+		return false;
+	}
+	if (!kBuildChecks) {
+		const std::string why = ": this build has no checks (OPENBF3_BUILD_CHECKS=OFF); ignored";
+		UtilityFunctions::push_error(to_godot(std::string("--") + p_name + why));
+	}
+	return kBuildChecks;
 }
 
 std::string engine_summary() {

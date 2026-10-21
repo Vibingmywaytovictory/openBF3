@@ -18,6 +18,7 @@
 #include "bf3/sim/nav.h"
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/static_world.h"
+#include "bf3/sim_harness/nav_input_check.h"
 #include "test_support.h"
 
 #include <process.h>

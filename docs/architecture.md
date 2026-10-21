@@ -33,6 +33,8 @@ bf3_core                       install, containers, EBX, cache, res/ant/audio as
 bf3_sim      -> Jolt, Recast, Detour (hidden behind *_internal.h; no engine type in a public header)
   ^                            collision and physics worlds, soldier motor, prediction, weapons, vehicles,
   |                            navigation, bot perception and walking, level logic runtime
+  |  bf3_sim_harness           gate code over bf3_sim (logic harness, vehicle courses and replays, shooting range,
+  |                            weapon checks and W4 tables, nav input check); tests, tools and the checks link it
   |  bf3_present               presentation PODs: PresentEvent and its ring, PresentClock, presented soldiers and
   |    ^                       weapons, effect seeds
   |    |
@@ -46,7 +48,7 @@ bf3_host     -> anim, present  server: ServerHost thread, GameServer (socket-fre
 bf3_client_audio -> audio      GameAudioDriver (presentation frame to router), kit audio sources, game audio loading
   ^
 bf3_godot (shared library)     the GDExtension: sessions, bridges to RenderingServer and AudioStream, HUD controls,
-                               viewmodel, plus the headless checks and demos
+                               viewmodel; the headless checks and demos only with OPENBF3_BUILD_CHECKS
 ```
 
 Tools: `tools/bf3dump` (install inspector, cache preparer, many `*_commands.cpp`), `tools/antdump`,
@@ -102,6 +104,9 @@ read through `godot_util.h`'s `user_arg_value`. Tuning lives in `bf3-opensource/
 with ranges checked at load (`motor_tuning.cpp`, `vehicle_tuning.cpp`, `mechanics_tuning.cpp`, `tdm_rules.cpp`,
 `tdm_brain.cpp`, `netsim.cpp` each carry a parser today).
 
+`OPENBF3_BUILD_CHECKS` (ON in the `dev` preset, OFF in `release`) compiles the `*_check`, `*_demo`, `s0_selftest` and
+`fx_ref` sources into `bf3_godot` and registers their classes; without it a check switch is reported and ignored.
+
 ## Where things live
 
 | you are looking for | start at |
@@ -124,8 +129,8 @@ with ranges checked at load (`motor_tuning.cpp`, `vehicle_tuning.cpp`, `mechanic
 These are structural, known, and listed so nobody mistakes them for design intent.
 
 * `bf3_host` holds both the server and the client. A `bf3_client` split would make the dependency picture honest.
-* `bf3_godot` and `bf3_sim` compile their check, demo and harness code into the shipped extension; it should sit
-  behind a build option.
+* Gate code still sits in three libraries: `bf3_audio` (`audio_check`, `game_audio_check`, which `game_audio` and
+  `bf3_client_audio` call), `bf3_fx` (`fx_harness`) and `bf3_host` (`rest_check`).
 * Milestone names (M1, M2a, M2b, S0, PT1) survive in file names, class names and thousands of comment tags; the
   dev log is where that history belongs.
 * The same small helpers (`fmt`, `seconds_since`, `finite3`, `trim`, `lower`, a key=value parser, a bounds-checked

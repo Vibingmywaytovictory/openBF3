@@ -222,21 +222,6 @@ core::CacheKeyInputs nav_tile_key_inputs(const core::Sha256Digest &p_input, cons
 core::CacheKeyInputs nav_world_key_inputs(const core::Sha256Digest &p_source_digest, std::string_view p_level, std::string_view p_mode,
 		const NavLoadOptions &p_options);
 
-struct NavInputCheck {
-	size_t nav_triangles = 0;
-	size_t world_triangles = 0;
-	size_t matched = 0;
-	size_t nav_only = 0;
-	size_t nav_only_degenerate = 0;
-	size_t world_only = 0;
-	float max_corner_error = 0.0f;
-
-	size_t terrain_matched = 0;
-	float terrain_tolerance = 0.0f;
-};
-core::Result<NavInputCheck> nav_check_input_against_world(const StaticWorldShapes &p_world, const NavTileInput &p_input, const NavParams &p_params,
-		uint32_t p_layer_mask = query_mask::kMovement, float p_tolerance = 0.001f);
-
 struct NavComponents {
 	std::vector<uint32_t> component;
 	std::vector<uint32_t> polys;

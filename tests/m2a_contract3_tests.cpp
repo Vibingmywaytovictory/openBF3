@@ -16,6 +16,9 @@
 #include "bf3/net/protocol.h"
 #include "bf3/render/crowd_weapons.h"
 #include "bf3/sim/weapons/weapon_rng.h"
+#include "game_audio.h"
+#include "game_crowd.h"
+#include "game_fx.h"
 #include "m2a_check.h"
 #include "m2a_game.h"
 
@@ -64,6 +67,13 @@ static_assert(std::is_base_of_v<audio::MixTap, audio::GameAudioCheck>);
 static_assert(std::is_base_of_v<audio::WeaponAudioObserver, audio::GameAudioCheck>);
 
 static_assert(uint8_t(host::FirefightMode::Pairs) == 0 && uint8_t(host::FirefightMode::Free) == 1);
+
+static_assert(!std::is_copy_constructible_v<gs::Bf3GameAudio>);
+static_assert(!std::is_copy_constructible_v<gs::Bf3GameFx>);
+static_assert(!std::is_copy_constructible_v<gs::Bf3GameCrowd>);
+static_assert(std::is_trivially_copyable_v<gs::GameCrowdStats>);
+static_assert(std::is_trivially_copyable_v<gs::GameFxStats>);
+static_assert(std::is_trivially_copyable_v<gs::GameAudioStats>);
 static_assert(uint8_t(audio::WeaponAudioForm::None) == 0 && uint8_t(audio::WeaponAudioForm::Driver) == 1 &&
 		uint8_t(audio::WeaponAudioForm::OneShot) == 2);
 static_assert(uint8_t(fx::TriggerPurpose::Muzzle) == 0 && uint8_t(fx::TriggerPurpose::Shell) == 1 && uint8_t(fx::TriggerPurpose::Tracer) == 2 &&

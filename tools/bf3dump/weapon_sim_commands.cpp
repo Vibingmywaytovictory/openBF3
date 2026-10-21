@@ -10,9 +10,9 @@
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/damage.h"
-#include "bf3/sim/weapons/shooting_range.h"
-#include "bf3/sim/weapons/weapon_checks.h"
 #include "bf3/sim/weapons/weapon_install.h"
+#include "bf3/sim_harness/shooting_range.h"
+#include "bf3/sim_harness/weapon_install_checks.h"
 
 #include <algorithm>
 #include <charconv>

@@ -1,7 +1,10 @@
 #include "game_session.h"
 
 #include "godot_util.h"
+
+#if OPENBF3_BUILD_CHECKS
 #include "s0_selftest.h"
+#endif
 
 #include <godot_cpp/classes/box_mesh.hpp>
 #include <godot_cpp/classes/canvas_layer.hpp>
@@ -83,10 +86,12 @@ void GameSession::_ready() {
 	}
 	build_server_body_nodes();
 	build_overlay();
-	if (has_user_arg("s0-selftest")) {
+	if (has_check_arg("s0-selftest")) {
+#if OPENBF3_BUILD_CHECKS
 		const std::string secs = user_arg_value("selftest-seconds");
 		selftest_ = std::make_unique<S0SelfTest>(*this, secs.empty() ? 5.0 : std::atof(secs.c_str()));
 		selftest_->begin();
+#endif
 	}
 	set_process(true);
 	set_physics_process(true);
@@ -229,9 +234,11 @@ void GameSession::update_overlay() {
 void GameSession::_physics_process(double p_delta) {
 	(void)p_delta;
 	physics_frames_++;
+#if OPENBF3_BUILD_CHECKS
 	if (selftest_) {
 		selftest_->physics_tick();
 	}
+#endif
 }
 
 void GameSession::_process(double p_delta) {
@@ -246,6 +253,7 @@ void GameSession::_process(double p_delta) {
 		overlay_timer_ = 0.0;
 		update_overlay();
 	}
+#if OPENBF3_BUILD_CHECKS
 	if (selftest_ && selftest_->process(p_delta)) {
 		quitting_ = true;
 		const int code = selftest_->exit_code();
@@ -253,6 +261,7 @@ void GameSession::_process(double p_delta) {
 		get_tree()->quit(code);
 		return;
 	}
+#endif
 	if (quit_after_ > 0.0 && !mid_screenshot_done_ && !screenshot_path_.empty() && elapsed_ >= 0.5 * quit_after_) {
 
 		mid_screenshot_done_ = true;

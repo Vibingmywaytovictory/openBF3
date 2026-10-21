@@ -6,7 +6,7 @@
 #include "bf3/sim/nav.h"
 #include "bf3/sim/nav_query.h"
 #include "bf3/sim/soldier_motor.h"
-#include "bf3/sim/weapons/shooting_range.h"
+#include "bf3/sim/weapons/range_lane.h"
 #include "bf3/sim/weapons/weapon_input.h"
 #include "bf3/sim/weapons/weapon_rng.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"

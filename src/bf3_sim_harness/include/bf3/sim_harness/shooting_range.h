@@ -8,6 +8,7 @@
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/hit_target.h"
+#include "bf3/sim/weapons/range_lane.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"
 
@@ -18,17 +19,6 @@
 #include <vector>
 
 namespace bf3::sim::weapons {
-
-struct RangeLane {
-	Vec3 feet{};
-	Vec3 eye{};
-	uint16_t yaw = 0;
-	float length = 0;
-	uint32_t spawn_index = 0;
-};
-
-std::optional<RangeLane> find_range_lane(const CollisionWorld &p_world, std::span<const SpawnPoint> p_spawns, float p_eye_height,
-		float p_min_length, uint32_t p_headings = 64);
 
 std::vector<StaticTriangle> range_wall_triangles(std::span<const float> p_wall_distances, float p_eye_height, float p_extent = 3'500.0f,
 		float p_depth = 150.0f, float p_wall_half_width = 20.0f, uint32_t p_material_value = 0);

@@ -6,6 +6,7 @@
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/nav.h"
 #include "bf3/sim/static_world.h"
+#include "bf3/sim_harness/nav_input_check.h"
 
 #include <cstdint>
 #include <string_view>

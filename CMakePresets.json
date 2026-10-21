@@ -17,7 +17,7 @@
       "name": "dev",
       "inherits": "base",
       "displayName": "dev: optimised, godot-cpp template_debug (day-to-day)",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "GODOTCPP_TARGET": "template_debug" }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "GODOTCPP_TARGET": "template_debug", "OPENBF3_BUILD_CHECKS": "ON" }
     },
     {
       "name": "debug",
@@ -29,7 +29,7 @@
       "name": "release",
       "inherits": "base",
       "displayName": "release: optimised, godot-cpp template_release (shipping)",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "GODOTCPP_TARGET": "template_release" }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "GODOTCPP_TARGET": "template_release", "OPENBF3_BUILD_CHECKS": "OFF" }
     },
     {
       "name": "asan",

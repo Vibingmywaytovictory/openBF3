@@ -5,7 +5,7 @@
 #include "bf3/core/gameplay/logic_world.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/path_guard.h"
-#include "bf3/sim/logic/logic_harness.h"
+#include "bf3/sim_harness/logic_harness.h"
 
 #include <algorithm>
 #include <charconv>

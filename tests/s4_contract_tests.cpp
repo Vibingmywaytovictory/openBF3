@@ -3,9 +3,9 @@
 #include "bf3/core/ebx.h"
 #include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/gameplay/logic_types.h"
-#include "bf3/sim/logic/logic_harness.h"
 #include "bf3/sim/logic/logic_native.h"
 #include "bf3/sim/logic/logic_runtime.h"
+#include "bf3/sim_harness/logic_harness.h"
 
 #include <cstddef>
 #include <cstdint>

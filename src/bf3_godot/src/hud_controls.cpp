@@ -702,8 +702,6 @@ void Bf3HudHealth::draw_widget() {
 
 }
 
-#include "hud_check.h"
-
 void openbf3_register_m2a_hud() {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3HudWidget);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3HudAmmo);
@@ -712,5 +710,4 @@ void openbf3_register_m2a_hud() {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3HudWeaponName);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3HudHealth);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3Hud);
-	GDREGISTER_CLASS(bf3::godot_side::Bf3HudCheck);
 }

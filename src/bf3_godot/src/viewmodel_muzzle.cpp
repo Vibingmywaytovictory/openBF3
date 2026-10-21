@@ -12,6 +12,8 @@ namespace bf3::godot_side {
 
 using namespace godot;
 
+static_assert(uint8_t(ViewmodelMuzzleSource::WeaponRoot) == 1 && uint8_t(ViewmodelMuzzleSource::CameraStandIn) == 2);
+
 ViewmodelMuzzle viewmodel_muzzle_transform(const Bf3Viewmodel &p_viewmodel) {
 	return viewmodel_muzzle_transform(p_viewmodel, Transform3D());
 }

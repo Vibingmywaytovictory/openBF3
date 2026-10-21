@@ -3,6 +3,10 @@
 #include "bf3_localisation.h"
 #include "godot_util.h"
 
+#if OPENBF3_BUILD_CHECKS
+#include "m0_inspector_check.h"
+#endif
+
 #include "bf3/core/gameplay/weapon_format.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/thread_pool.h"
@@ -97,7 +101,7 @@ void Bf3WeaponInspector::_ready() {
 	}
 	inspect_partition_ = user_arg_value("inspect-weapon");
 	inspect_unlocks_ = user_arg_values("unlock");
-	if (has_user_arg("m0-inspector-check")) {
+	if (has_check_arg("m0-inspector-check")) {
 		mode_ = Mode::Check;
 	} else if (!inspect_partition_.empty()) {
 		mode_ = Mode::InspectWeapon;
@@ -331,9 +335,12 @@ void Bf3WeaponInspector::on_job_done() {
 	status_ = to_godot(line);
 	if (mode_ == Mode::InspectWeapon) {
 		print_inspect_and_quit();
-	} else if (mode_ == Mode::Check) {
+	}
+#if OPENBF3_BUILD_CHECKS
+	if (mode_ == Mode::Check) {
 		run_check_and_quit();
 	}
+#endif
 }
 
 void Bf3WeaponInspector::populate_list() {
@@ -405,6 +412,7 @@ void Bf3WeaponInspector::print_inspect_and_quit() {
 	quit(0);
 }
 
+#if OPENBF3_BUILD_CHECKS
 void Bf3WeaponInspector::run_check_and_quit() {
 	const Entry &a3 = result_.entries[0];
 	const Entry &a4 = result_.entries[1];
@@ -458,6 +466,7 @@ void Bf3WeaponInspector::run_check_and_quit() {
 			std::to_string(rows.size()) + ")"));
 	quit(ok ? 0 : 1);
 }
+#endif
 
 void Bf3WeaponInspector::_input(const Ref<InputEvent> &p_event) {
 	const Ref<InputEventKey> key = p_event;

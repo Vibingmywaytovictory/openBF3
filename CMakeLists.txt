@@ -7,6 +7,7 @@ endif()
 
 option(OPENBF3_BUILD_GODOT "Build the GDExtension (src/bf3_godot, needs godot-cpp)" ON)
 option(OPENBF3_BUILD_TESTS "Build the doctest executables (tests/)" ON)
+option(OPENBF3_BUILD_CHECKS "Compile the headless checks, demos and self-tests into the GDExtension" ON)
 set(OPENBF3_ENGINE_API "${CMAKE_SOURCE_DIR}/engine-api/4.8.dev7.c971f93e7" CACHE PATH
     "Folder with extension_api.json + gdextension_interface.json dumped from the exact Godot build")
 set(OPENBF3_GODOT_PROJECT "${CMAKE_SOURCE_DIR}/bf3-opensource" CACHE PATH
@@ -102,6 +103,7 @@ add_subdirectory(src/bf3_core)
 add_subdirectory(src/bf3_anim) # skeletons, poses, skinning binds over bf3_core's Ant/EBX/res readers
 add_subdirectory(src/bf3_render) # Godot-free mesh/texture/material preparation for the Godot bridge
 add_subdirectory(src/bf3_sim)
+add_subdirectory(src/bf3_sim_harness)
 add_subdirectory(src/bf3_present)
 add_subdirectory(src/bf3_net)
 add_subdirectory(src/bf3_host)

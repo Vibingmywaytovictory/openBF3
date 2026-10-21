@@ -1,6 +1,5 @@
 #include "bf3_localisation.h"
 
-#include "audio_demo.h"
 #include "audio_stream.h"
 #include "collision_overlay.h"
 #include "dedicated_main_loop.h"
@@ -9,19 +8,25 @@
 #include "minimap_control.h"
 #include "minimap_hud.h"
 #include "s3_crowd.h"
-#include "viewmodel_demo.h"
 #include "weapon_inspector.h"
 #include "world_icons.h"
 
 #include "ui_assets.h"
-#include "ui_font_check.h"
 
-#include "m2a_viewmodel_demo.h"
 #include "viewmodel.h"
 
+#include "fx_renderer.h"
+
+#if OPENBF3_BUILD_CHECKS
+#include "audio_demo.h"
 #include "fx_demo.h"
 #include "fx_ref.h"
-#include "fx_renderer.h"
+#include "hud_check.h"
+#include "hud_tdm_demo.h"
+#include "m2a_viewmodel_demo.h"
+#include "ui_font_check.h"
+#include "viewmodel_demo.h"
+#endif
 
 #include "bf3/host/client_session.h"
 #include "bf3/host/loopback_client.h"
@@ -41,7 +46,6 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	}
 	GDREGISTER_CLASS(bf3::godot_side::GameSession);
 	GDREGISTER_CLASS(bf3::godot_side::DedicatedMainLoop);
-	GDREGISTER_CLASS(bf3::godot_side::Bf3ViewmodelDemo);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3Translation);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3Localisation);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3WeaponInspector);
@@ -52,37 +56,43 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3Crowd);
 
 	GDREGISTER_CLASS(bf3::godot_side::Bf3UiAssets);
-	GDREGISTER_CLASS(bf3::godot_side::Bf3UiFontCheck);
 
 	GDREGISTER_CLASS(bf3::godot_side::Bf3MinimapControl);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3WorldIcons);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3MinimapHud);
 
 	GDREGISTER_CLASS(bf3::godot_side::Bf3Viewmodel);
-	GDREGISTER_CLASS(bf3::godot_side::Bf3M2aViewmodelDemo);
 
 	GDREGISTER_CLASS(bf3::godot_side::Bf3FxRenderer);
-	GDREGISTER_CLASS(bf3::godot_side::Bf3FxDemo);
-	GDREGISTER_CLASS(bf3::godot_side::Bf3FxRef);
 
 	void openbf3_register_m2a_hud();
 	openbf3_register_m2a_hud();
 
 	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioStream);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioPlayback);
-	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioDemo);
-
-	void openbf3_register_m2a_tp();
-	openbf3_register_m2a_tp();
-
-	void openbf3_register_m2a_fx3();
-	openbf3_register_m2a_fx3();
 
 	void openbf3_register_m2b_ui();
 	openbf3_register_m2b_ui();
 
 	void openbf3_register_pt1_iff();
 	openbf3_register_pt1_iff();
+
+#if OPENBF3_BUILD_CHECKS
+	GDREGISTER_CLASS(bf3::godot_side::Bf3ViewmodelDemo);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3UiFontCheck);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3M2aViewmodelDemo);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3FxDemo);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3FxRef);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3HudCheck);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioDemo);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmHudDemo);
+
+	void openbf3_register_m2a_tp();
+	openbf3_register_m2a_tp();
+
+	void openbf3_register_m2a_fx3();
+	openbf3_register_m2a_fx3();
+#endif
 }
 
 static void uninitialize_openbf3(ModuleInitializationLevel p_level) {

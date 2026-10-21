@@ -119,7 +119,9 @@ private:
 	Bf3MinimapControl *control_ = nullptr;
 	Bf3WorldIcons *icons_ = nullptr;
 	bf3::core::ui::MinimapView view_;
+#if OPENBF3_BUILD_CHECKS
 	std::unique_ptr<MinimapCheck> check_runner_;
+#endif
 	std::unique_ptr<Pt1Iff> pt1_iff_;
 };
 

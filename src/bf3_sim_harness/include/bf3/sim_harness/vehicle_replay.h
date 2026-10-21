@@ -3,10 +3,10 @@
 #include "bf3/core/result.h"
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/static_world.h"
-#include "bf3/sim/vehicle_course.h"
 #include "bf3/sim/vehicle_ghost.h"
 #include "bf3/sim/vehicle_model.h"
 #include "bf3/sim/vehicle_types.h"
+#include "bf3/sim_harness/vehicle_course.h"
 
 #include <array>
 #include <cstddef>

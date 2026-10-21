@@ -1,7 +1,10 @@
 #include "collision_overlay.h"
 
-#include "collision_check.h"
 #include "godot_util.h"
+
+#if OPENBF3_BUILD_CHECKS
+#include "collision_check.h"
+#endif
 
 #include "bf3/core/install.h"
 
@@ -250,7 +253,7 @@ void Bf3CollisionOverlay::_ready() {
 	if (!user_arg_value("mode").empty()) {
 		mode_ = user_arg_value("mode");
 	}
-	check_mode_ = has_user_arg("collision-check");
+	check_mode_ = has_check_arg("collision-check");
 	screenshot_path_ = user_arg_value("screenshot");
 	const std::string quit_after = user_arg_value("quit-after");
 	quit_after_ = quit_after.empty() ? 0.0 : std::atof(quit_after.c_str());
@@ -690,9 +693,11 @@ void Bf3CollisionOverlay::_process(double p_delta) {
 	}
 	update_window();
 	if (check_mode_) {
+#if OPENBF3_BUILD_CHECKS
 		if (window_ready()) {
 			finish(run_collision_check(*this));
 		}
+#endif
 		return;
 	}
 

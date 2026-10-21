@@ -5,11 +5,11 @@
 #include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/damage.h"
 #include "bf3/sim/weapons/hit_target.h"
-#include "bf3/sim/weapons/shooting_range.h"
 #include "bf3/sim/weapons/spread_recoil.h"
-#include "bf3/sim/weapons/weapon_checks.h"
 #include "bf3/sim/weapons/weapon_rng.h"
 #include "bf3/sim/weapons/weapon_sim.h"
+#include "bf3/sim_harness/shooting_range.h"
+#include "bf3/sim_harness/weapon_checks.h"
 
 #include <doctest/doctest.h>
 

@@ -4,10 +4,13 @@
 #include "godot_util.h"
 #include "input_mapper.h"
 #include "level_session.h"
-#include "minimap_check.h"
 #include "minimap_control.h"
 #include "pt1_iff.h"
 #include "world_icons.h"
+
+#if OPENBF3_BUILD_CHECKS
+#include "minimap_check.h"
+#endif
 
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/install.h"
@@ -160,8 +163,8 @@ void Bf3MinimapHud::parse_args() {
 		size_px_ = std::clamp(std::atoi(size.c_str()), 64, 2048);
 	}
 	north_up_ = has_user_arg("minimap-north-up");
-	check_ = has_user_arg("minimap-check");
-	shots_dir_ = user_arg_value("minimap-shots");
+	check_ = has_check_arg("minimap-check");
+	shots_dir_ = has_check_arg("minimap-shots") ? user_arg_value("minimap-shots") : std::string();
 }
 
 bool Bf3MinimapHud::inert_args() const {
@@ -487,7 +490,7 @@ void Bf3MinimapHud::update_view() {
 	icons_->update(cam, std::move(objectives));
 }
 
-void Bf3MinimapHud::_process(double p_delta) {
+void Bf3MinimapHud::_process([[maybe_unused]] double p_delta) {
 	if (!enabled_ || session_ == nullptr) {
 		return;
 	}
@@ -507,21 +510,28 @@ void Bf3MinimapHud::_process(double p_delta) {
 			build_attempted_ = true;
 			build_godot_side();
 			if (!drawn_) {
+#if OPENBF3_BUILD_CHECKS
 				if (check_) {
 
 					check_runner_ = std::make_unique<MinimapCheck>(*this, shots_dir_, true);
 				} else {
 					enabled_ = false;
 				}
+#else
+				enabled_ = false;
+#endif
 			}
 		}
+#if OPENBF3_BUILD_CHECKS
 		if (check_runner_ != nullptr && check_runner_->step(p_delta)) {
 			session_->finish(check_runner_->exit_code());
 			check_runner_.reset();
 		}
+#endif
 		return;
 	}
 	update_view();
+#if OPENBF3_BUILD_CHECKS
 	if (check_runner_ == nullptr && (check_ || !shots_dir_.empty())) {
 		check_runner_ = std::make_unique<MinimapCheck>(*this, shots_dir_, check_);
 	}
@@ -531,6 +541,7 @@ void Bf3MinimapHud::_process(double p_delta) {
 		session_->finish(code);
 		enabled_ = false;
 	}
+#endif
 }
 
 }

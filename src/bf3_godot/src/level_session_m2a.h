@@ -208,7 +208,9 @@ struct Bf3LevelSession::M2aSession : M2aGame {
 	std::thread crowd_loader;
 	std::string crowd_body_error;
 	double crowd_body_seconds = 0;
+#if OPENBF3_BUILD_CHECKS
 	std::unique_ptr<M2aCheck> check;
+#endif
 	bool finished = false;
 };
 

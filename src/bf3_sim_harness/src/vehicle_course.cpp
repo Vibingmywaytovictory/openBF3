@@ -1,4 +1,4 @@
-#include "bf3/sim/vehicle_course.h"
+#include "bf3/sim_harness/vehicle_course.h"
 
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/sim/collision_world.h"

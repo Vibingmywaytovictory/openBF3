@@ -1,7 +1,7 @@
-#include "bf3/sim/weapons/shooting_range.h"
+#include "bf3/sim_harness/shooting_range.h"
 
 #include "bf3/sim/weapons/surface_materials.h"
-#include "weapons_internal.h"
+#include "weapons/weapons_internal.h"
 
 #include <algorithm>
 #include <chrono>
@@ -13,45 +13,6 @@ namespace bf3::sim::weapons {
 namespace {
 
 using namespace detail;
-
-constexpr float kLaneMaxLength = 500.0f;
-constexpr float kLaneLowRay = 0.3f;
-constexpr float kLaneFloorTolerance = 0.5f;
-
-DVec3 heading(uint16_t p_yaw) {
-	double s, c;
-	poly_sincos(double(yaw_radians(p_yaw)), s, c);
-	return { s, 0, c };
-}
-
-Vec3 floor_under(const CollisionWorld &p_world, const Vec3 &p_point, float p_up, float p_down, bool &r_found) {
-	StaticHit h;
-	r_found = p_world.ground_below({ p_point[0], p_point[1] + p_up, p_point[2] }, p_up + p_down, query_mask::kMovement, &h);
-	return r_found ? h.position : p_point;
-}
-
-float clear_length(const CollisionWorld &p_world, const Vec3 &p_from, const DVec3 &p_dir, float p_max) {
-	StaticHit h;
-	const Vec3 delta = to_f(scale(p_dir, double(p_max)));
-	return p_world.ray(p_from, delta, query_mask::kProjectile, &h) ? h.fraction * p_max : p_max;
-}
-
-float lane_length(const CollisionWorld &p_world, const Vec3 &p_feet, uint16_t p_yaw, float p_eye_height) {
-	const DVec3 dir = heading(p_yaw);
-	const float eye = clear_length(p_world, { p_feet[0], p_feet[1] + p_eye_height, p_feet[2] }, dir, kLaneMaxLength);
-	const float low = clear_length(p_world, { p_feet[0], p_feet[1] + kLaneLowRay, p_feet[2] }, dir, kLaneMaxLength);
-	const float len = std::min(eye, low);
-	if (len <= 1.0f) {
-		return 0.0f;
-	}
-	const Vec3 far = to_f(add(to_d(p_feet), scale(dir, double(len - 1.0f))));
-	bool found = false;
-	const Vec3 floor = floor_under(p_world, far, 1.0f, 2.0f, found);
-	if (!found || std::fabs(floor[1] - p_feet[1]) > kLaneFloorTolerance) {
-		return 0.0f;
-	}
-	return len;
-}
 
 void add_quad(std::vector<StaticTriangle> &r_out, const Vec3 &p_a, const Vec3 &p_b, const Vec3 &p_c, const Vec3 &p_d, uint32_t p_material) {
 	StaticTriangle t;
@@ -128,33 +89,6 @@ WeaponInput script_input(const WeaponTable &p_table, const RangeScenario &p_scen
 
 }
 
-std::optional<RangeLane> find_range_lane(const CollisionWorld &p_world, std::span<const SpawnPoint> p_spawns, float p_eye_height, float p_min_length,
-		uint32_t p_headings) {
-	std::optional<RangeLane> best;
-	const uint32_t headings = std::clamp<uint32_t>(p_headings, 1, 4096);
-	for (size_t i = 0; i < p_spawns.size(); ++i) {
-		bool found = false;
-		const Vec3 feet = floor_under(p_world, p_spawns[i].position, 1.0f, 2.0f, found);
-		if (!found) {
-			continue;
-		}
-		for (uint32_t k = 0; k < headings; ++k) {
-			const uint16_t yaw = uint16_t((uint64_t(k) * 65536u) / headings);
-			const float len = lane_length(p_world, feet, yaw, p_eye_height);
-			if (len >= p_min_length && (!best || len > best->length)) {
-				RangeLane l;
-				l.feet = feet;
-				l.eye = { feet[0], feet[1] + p_eye_height, feet[2] };
-				l.yaw = yaw;
-				l.length = len;
-				l.spawn_index = p_spawns[i].index;
-				best = l;
-			}
-		}
-	}
-	return best;
-}
-
 std::vector<StaticTriangle> range_wall_triangles(std::span<const float> p_wall_distances, float p_eye_height, float p_extent, float p_depth,
 		float p_wall_half_width, uint32_t p_material_value) {
 	std::vector<StaticTriangle> out;
@@ -197,7 +131,7 @@ core::Result<RangeResult> run_range(const WeaponTable &p_table, const CollisionW
 	}
 	RangeResult result;
 	result.lane = p_lane;
-	const DVec3 dir = heading(p_lane.yaw);
+	const DVec3 dir = range_heading(p_lane.yaw);
 	const float shooter_eye = pose_def(p_soldier, p_scenario.shooter_pose)->eye_height;
 	const Vec3 eye{ p_lane.feet[0], p_lane.feet[1] + shooter_eye, p_lane.feet[2] };
 
@@ -211,8 +145,8 @@ core::Result<RangeResult> run_range(const WeaponTable &p_table, const CollisionW
 		}
 		Vec3 feet = to_f(add(to_d(p_lane.feet), scale(dir, double(spec.distance))));
 		bool found = false;
-		const Vec3 floor = floor_under(p_world, feet, 1.0f, 1.0f, found);
-		if (found && std::fabs(floor[1] - p_lane.feet[1]) <= kLaneFloorTolerance) {
+		const Vec3 floor = range_floor_under(p_world, feet, 1.0f, 1.0f, found);
+		if (found && std::fabs(floor[1] - p_lane.feet[1]) <= kRangeLaneFloorTolerance) {
 			feet = floor;
 		}
 		core::Result<HitTarget> t = standin_target(p_soldier, p_capsules, *p_table.materials, spec.pose, feet, uint16_t(p_lane.yaw + 32768u),
@@ -373,7 +307,7 @@ core::Result<RangePerfResult> run_range_perf(const WeaponTable &p_table, const C
 		Shooter &s = shooters[i];
 		const std::optional<RangeLane> lane = find_range_lane(p_world, p_spawns.subspan(i, 1), p_eye_height, 0.0f, 64);
 		bool found = false;
-		const Vec3 feet = lane ? lane->feet : floor_under(p_world, p_spawns[i].position, 1.0f, 2.0f, found);
+		const Vec3 feet = lane ? lane->feet : range_floor_under(p_world, p_spawns[i].position, 1.0f, 2.0f, found);
 		s.yaw = lane ? lane->yaw : p_spawns[i].yaw;
 		lane_sum += lane ? double(lane->length) : 0.0;
 		s.ctx.eye_start = { feet[0], feet[1] + p_eye_height, feet[2] };

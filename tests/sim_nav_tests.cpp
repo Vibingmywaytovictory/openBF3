@@ -8,6 +8,7 @@
 #include "bf3/sim/nav.h"
 #include "bf3/sim/nav_query.h"
 #include "bf3/sim/static_world.h"
+#include "bf3/sim_harness/nav_input_check.h"
 
 #include <DetourNavMesh.h>
 
