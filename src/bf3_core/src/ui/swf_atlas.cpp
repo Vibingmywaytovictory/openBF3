@@ -161,17 +161,12 @@ private:
 
 	Status append_character(uint16_t p_id, const SwfMatrix &p_m, uint32_t p_depth, std::vector<SwfAtlasPiece> &r_out) {
 		if (const SwfShape *shape = m_.find_shape(p_id)) {
-			for (const SwfBitmapFill &f : shape->bitmap_fills) {
-				const SwfSubImage *sub = m_.find_sub_image(f.bitmap_id);
+			for (const SwfFillStyle &f : shape->fills) {
+				const SwfSubImage *sub = f.kind == SwfFillKind::Bitmap ? m_.find_sub_image(f.bitmap_id) : nullptr;
 				if (sub == nullptr) {
 					continue;
 				}
-				SwfMatrix fill = f.matrix;
-				fill.a /= 20.0f;
-				fill.b /= 20.0f;
-				fill.c /= 20.0f;
-				fill.d /= 20.0f;
-				BF3_TRY(push(r_out, piece_of(*sub, swf_concat(p_m, fill))));
+				BF3_TRY(push(r_out, piece_of(*sub, swf_concat(p_m, f.texel_to_shape()))));
 			}
 			return Status::success();
 		}

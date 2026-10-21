@@ -238,21 +238,106 @@ struct SwfSubImage {
 	uint16_t height() const { return uint16_t(y2 - y1); }
 };
 
-struct SwfBitmapFill {
+inline constexpr float kSwfFlattenTolerance = 0.025f;
+inline constexpr uint32_t kSwfCurveMaxSegments = 256;
+inline constexpr uint32_t kSwfShapeMaxPoints = 1u << 18;
+inline constexpr uint32_t kSwfShapeMaxSlabs = 1u << 16;
+
+enum class SwfFillKind : uint8_t {
+	Solid,
+	LinearGradient,
+	RadialGradient,
+	FocalGradient,
+	Bitmap,
+};
+const char *swf_fill_kind_name(SwfFillKind p_kind);
+
+struct SwfGradientStop {
+	uint8_t ratio = 0;
+	SwfColor color;
+	bool operator==(const SwfGradientStop &) const = default;
+};
+
+struct SwfFillStyle {
+	static constexpr uint8_t kRepeatingBitmap = 0x40;
+	static constexpr uint8_t kClippedBitmap = 0x41;
+	static constexpr uint8_t kRepeatingBitmapNoSmoothing = 0x42;
+	static constexpr uint8_t kClippedBitmapNoSmoothing = 0x43;
+
+	uint8_t type = 0;
+	SwfFillKind kind = SwfFillKind::Solid;
+	SwfColor color;
 	uint16_t bitmap_id = 0;
-	uint8_t fill_type = 0x41;
 	SwfMatrix matrix;
+	uint8_t spread = 0;
+	uint8_t interpolation = 0;
+	float focal = 0.0f;
+	std::vector<SwfGradientStop> stops;
+
+	bool repeating() const { return type == kRepeatingBitmap || type == kRepeatingBitmapNoSmoothing; }
+	bool clipped() const { return type == kClippedBitmap || type == kClippedBitmapNoSmoothing; }
+	bool smoothed() const { return type == kRepeatingBitmap || type == kClippedBitmap; }
+	SwfMatrix texel_to_shape() const;
+};
+
+struct SwfLineStyle {
+	float width = 0.0f;
+	SwfColor color;
+	uint8_t start_cap = 0;
+	uint8_t end_cap = 0;
+	uint8_t join = 0;
+	float miter_limit = 0.0f;
+	bool no_hscale = false;
+	bool no_vscale = false;
+	bool pixel_hinting = false;
+	bool no_close = false;
+	bool has_fill = false;
+	SwfFillStyle fill;
+};
+
+struct SwfPoint {
+	float x = 0.0f;
+	float y = 0.0f;
+	bool operator==(const SwfPoint &) const = default;
+};
+
+struct SwfFillMesh {
+	uint32_t fill = 0;
+	std::vector<SwfPoint> outline;
+	std::vector<uint32_t> contour_ends;
+	uint32_t open_contours = 0;
+	std::vector<SwfPoint> vertices;
+	std::vector<uint32_t> indices;
+
+	double outline_area() const;
+	double triangle_area() const;
+};
+
+struct SwfStroke {
+	uint32_t line = 0;
+	std::vector<SwfPoint> points;
+	std::vector<uint32_t> path_ends;
+	std::vector<bool> closed;
 };
 
 struct SwfShape {
+	static constexpr uint8_t kNonScalingStrokes = 0x02;
+	static constexpr uint8_t kScalingStrokes = 0x01;
+	static constexpr uint8_t kFillWindingRule = 0x04;
+
 	uint16_t id = 0;
 	uint8_t version = 1;
 	SwfRect bounds;
-	std::vector<SwfBitmapFill> bitmap_fills;
-	uint32_t solid_fills = 0;
-	uint32_t gradient_fills = 0;
-	uint32_t line_styles = 0;
+	SwfRect edge_bounds;
+	uint8_t shape4_flags = 0;
+	std::vector<SwfFillStyle> fills;
+	std::vector<SwfLineStyle> lines;
 	uint32_t edges = 0;
+	uint32_t style_tables = 0;
+	std::vector<SwfFillMesh> meshes;
+	std::vector<SwfStroke> strokes;
+
+	const SwfFillMesh *mesh_of(uint32_t p_fill) const;
 };
 
 struct SwfEditText {

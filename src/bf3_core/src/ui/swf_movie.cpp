@@ -2,6 +2,7 @@
 
 #include "swf_bits.h"
 #include "swf_font_detail.h"
+#include "swf_shape_detail.h"
 
 #include <libdeflate.h>
 
@@ -386,153 +387,28 @@ private:
 		}
 	}
 
-	Status fill_styles(SwfReader &r, int p_version, SwfShape &r_shape) {
-		size_t n = r.u8();
-		if (n == 0xff && p_version >= 2) {
-			n = r.u16();
-		}
-		if (r.failed() || n * 3 > r.left()) {
-			r.fail();
-			return Status::success();
-		}
-		BF3_TRY(charge(n, r.abs_pos()));
-		for (size_t i = 0; i < n && !r.failed(); ++i) {
-			fill_style(r, p_version, r_shape);
-		}
-		return Status::success();
-	}
-	void fill_style(SwfReader &r, int p_version, SwfShape &r_shape) {
-		const uint8_t type = r.u8();
-		if (type == 0x00) {
-			r.skip(p_version >= 3 ? 4 : 3);
-			r_shape.solid_fills++;
-		} else if (type == 0x10 || type == 0x12 || type == 0x13) {
-			(void)r.matrix();
-			const uint8_t g = r.u8();
-			r.skip(size_t(g & 0x0f) * (p_version >= 3 ? 5 : 4));
-			if (type == 0x13) {
-				r.skip(2);
-			}
-			r_shape.gradient_fills++;
-		} else if (type >= 0x40 && type <= 0x43) {
-			SwfBitmapFill b;
-			b.fill_type = type;
-			b.bitmap_id = r.u16();
-			b.matrix = r.matrix();
-			if (!r.failed()) {
-				r_shape.bitmap_fills.push_back(b);
-			}
-		} else {
-			r.fail();
-		}
-	}
-	Status line_styles(SwfReader &r, int p_version, SwfShape &r_shape) {
-		size_t n = r.u8();
-		if (n == 0xff) {
-			n = r.u16();
-		}
-		if (r.failed() || n * 5 > r.left()) {
-			r.fail();
-			return Status::success();
-		}
-		BF3_TRY(charge(n, r.abs_pos()));
-		r_shape.line_styles += uint32_t(n);
-		for (size_t i = 0; i < n && !r.failed(); ++i) {
-			r.skip(2);
-			if (p_version == 4) {
-				r.ub(2);
-				const uint32_t join = r.ub(2);
-				const uint32_t has_fill = r.ub(1);
-				r.ub(11);
-				if (join == 2) {
-					r.skip(2);
-				}
-				if (has_fill != 0) {
-					fill_style(r, p_version, r_shape);
-				} else {
-					r.skip(4);
-				}
-			} else {
-				r.skip(p_version >= 3 ? 4 : 3);
-			}
-		}
-		return Status::success();
-	}
-
 	Status shape(SwfReader &r, int p_version) {
 		SwfShape s;
-		s.version = uint8_t(p_version);
-		s.id = r.u16();
-		s.bounds = r.rect();
-		if (p_version == 4) {
-			(void)r.rect();
-			r.skip(1);
+		Status st = detail::read_shape(r, p_version, budget_, s);
+		if (!st) {
+			return tag_fail(shape_tag(p_version), r.abs_pos(), st.error().message);
 		}
-		BF3_TRY(fill_styles(r, p_version, s));
-		BF3_TRY(line_styles(r, p_version, s));
-		uint8_t nb = r.u8();
-		unsigned fill_bits = nb >> 4;
-		unsigned line_bits = nb & 0x0f;
-		while (!r.failed()) {
-			BF3_TRY(charge(1, r.abs_pos()));
-			if (r.ub(1) == 0) {
-				const uint32_t flags = r.ub(5);
-				if (flags == 0) {
-					break;
-				}
-				if ((flags & 0x01) != 0) {
-					const unsigned n = r.ub(5);
-					r.sb(n);
-					r.sb(n);
-				}
-				if ((flags & 0x02) != 0) {
-					r.ub(fill_bits);
-				}
-				if ((flags & 0x04) != 0) {
-					r.ub(fill_bits);
-				}
-				if ((flags & 0x08) != 0) {
-					r.ub(line_bits);
-				}
-				if ((flags & 0x10) != 0) {
-					if (p_version < 2) {
-						r.fail();
-						break;
-					}
-					BF3_TRY(fill_styles(r, p_version, s));
-					BF3_TRY(line_styles(r, p_version, s));
-					nb = r.u8();
-					fill_bits = nb >> 4;
-					line_bits = nb & 0x0f;
-				}
-			} else {
-				const bool straight = r.ub(1) != 0;
-				const unsigned n = r.ub(4) + 2;
-				if (straight) {
-					if (r.ub(1) != 0) {
-						r.sb(n);
-						r.sb(n);
-					} else {
-						r.ub(1);
-						r.sb(n);
-					}
-				} else {
-					r.sb(n);
-					r.sb(n);
-					r.sb(n);
-					r.sb(n);
-				}
-				s.edges++;
-			}
-		}
-		r.align();
 		if (!r.failed() && r.pos() != r.size()) {
-			return tag_fail(swf_tag::kDefineShape, r.abs_pos(), "shape " + std::to_string(s.id) + " ends " + std::to_string(r.size() - r.pos()) + " bytes before its tag");
+			return tag_fail(shape_tag(p_version), r.abs_pos(), "shape " + std::to_string(s.id) + " ends " + std::to_string(r.size() - r.pos()) + " bytes before its tag");
 		}
 		if (!r.failed()) {
 			m_.shapes.push_back(std::move(s));
 		}
 		return Status::success();
+	}
+
+	static uint16_t shape_tag(int p_version) {
+		switch (p_version) {
+			case 1: return swf_tag::kDefineShape;
+			case 2: return swf_tag::kDefineShape2;
+			case 3: return swf_tag::kDefineShape3;
+			default: return swf_tag::kDefineShape4;
+		}
 	}
 
 	Status edit_text(SwfReader &r) {
@@ -754,7 +630,16 @@ private:
 			}
 		}
 		for (const SwfShape &s : m_.shapes) {
-			b += vec_bytes(s.bitmap_fills);
+			b += vec_bytes(s.fills) + vec_bytes(s.lines) + vec_bytes(s.meshes) + vec_bytes(s.strokes);
+			for (const SwfFillStyle &f : s.fills) {
+				b += vec_bytes(f.stops);
+			}
+			for (const SwfFillMesh &mesh : s.meshes) {
+				b += vec_bytes(mesh.outline) + vec_bytes(mesh.contour_ends) + vec_bytes(mesh.vertices) + vec_bytes(mesh.indices);
+			}
+			for (const SwfStroke &stroke : s.strokes) {
+				b += vec_bytes(stroke.points) + vec_bytes(stroke.path_ends) + stroke.closed.capacity() / 8;
+			}
 		}
 		for (const SwfEditText &t : m_.edit_texts) {
 			b += str_bytes(t.font_class) + str_bytes(t.variable) + str_bytes(t.initial_text);

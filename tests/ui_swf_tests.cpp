@@ -14,6 +14,7 @@
 #include "test_support.h"
 #include "ui_swf_writer.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <functional>
@@ -326,24 +327,34 @@ TEST_SUITE("ui-swf-unit") {
 			REQUIRE(s20 != nullptr);
 			CHECK(s20->version == 1);
 			CHECK((s20->bounds == SwfRect{ 0, 16, 0, 16 }));
-			REQUIRE(s20->bitmap_fills.size() == 1);
-			CHECK(s20->bitmap_fills[0].bitmap_id == 10);
-			CHECK(s20->bitmap_fills[0].fill_type == 0x41);
-			CHECK(near(s20->bitmap_fills[0].matrix.a, 20.0f));
-			CHECK(s20->solid_fills == 1);
-			CHECK(s20->line_styles == 1);
+			REQUIRE(s20->fills.size() == 2);
+			CHECK(s20->fills[0].kind == SwfFillKind::Solid);
+			CHECK((s20->fills[0].color == SwfColor{ 1, 2, 3, 255 }));
+			CHECK(s20->fills[1].kind == SwfFillKind::Bitmap);
+			CHECK(s20->fills[1].bitmap_id == 10);
+			CHECK(s20->fills[1].type == SwfFillStyle::kClippedBitmap);
+			CHECK(s20->fills[1].clipped());
+			CHECK(s20->fills[1].smoothed());
+			CHECK(near(s20->fills[1].matrix.a, 20.0f));
+			CHECK(near(s20->fills[1].texel_to_shape().a, 1.0f));
+			REQUIRE(s20->lines.size() == 1);
+			CHECK(s20->lines[0].width == 1.0f);
 			CHECK(s20->edges == 4);
 			const SwfShape *s21 = m.find_shape(21);
 			REQUIRE(s21 != nullptr);
 			CHECK(s21->version == 2);
-			REQUIRE(s21->bitmap_fills.size() == 2);
-			CHECK(s21->bitmap_fills[1].bitmap_id == 12);
-			CHECK(s21->bitmap_fills[1].fill_type == 0x43);
+			REQUIRE(s21->fills.size() == 3);
+			CHECK(s21->style_tables == 2);
+			CHECK(s21->fills[2].bitmap_id == 12);
+			CHECK(s21->fills[2].type == SwfFillStyle::kClippedBitmapNoSmoothing);
+			CHECK_FALSE(s21->fills[2].smoothed());
 			CHECK(s21->edges == 4);
 			CHECK(m.find_shape(22)->version == 3);
-			CHECK(m.find_shape(22)->bitmap_fills.empty());
+			REQUIRE(m.find_shape(22)->fills.size() == 1);
+			CHECK(m.find_shape(22)->fills[0].kind == SwfFillKind::Solid);
 			CHECK(m.find_shape(23)->version == 4);
-			CHECK(m.find_shape(23)->bitmap_fills.size() == 1);
+			CHECK(m.find_shape(23)->fills.size() == 2);
+			CHECK(std::count_if(m.find_shape(23)->fills.begin(), m.find_shape(23)->fills.end(), [](const SwfFillStyle &f) { return f.kind == SwfFillKind::Bitmap; }) == 1);
 
 			REQUIRE(m.edit_texts.size() == 2);
 			const SwfEditText *t30 = m.find_edit_text(30);
@@ -1367,6 +1378,13 @@ TEST_SUITE("ui-swf-fuzz") {
 					continue;
 				}
 				++parsed;
+				for (const SwfShape &shape : m->shapes) {
+					for (const SwfFillMesh &mesh : shape.meshes) {
+						CHECK(mesh.fill < shape.fills.size());
+						CHECK(mesh.indices.size() % 3 == 0);
+						CHECK(std::all_of(mesh.indices.begin(), mesh.indices.end(), [&](uint32_t v) { return v < mesh.vertices.size(); }));
+					}
+				}
 				WorkBudget ab(kSwfAtlasBudgetUnits);
 				(void)build_atlas_map(*m, name, ab);
 				for (const SwfFontInfo &f : m->fonts) {

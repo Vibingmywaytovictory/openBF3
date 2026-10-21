@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -595,6 +596,179 @@ struct Contour {
 	std::vector<Seg> segs;
 };
 using Glyph = std::vector<Contour>;
+
+struct ShapeFill {
+	uint8_t type = 0x00;
+	uint8_t r = 0, g = 0, b = 0, a = 255;
+	uint16_t bitmap = 0;
+	Mat m{ 20, 0, 0, 20, 0, 0 };
+	std::vector<std::pair<uint8_t, std::array<uint8_t, 4>>> stops;
+	int16_t focal = 0;
+};
+
+struct ShapeLine {
+	uint16_t width = 20;
+	uint8_t r = 0, g = 0, b = 0, a = 255;
+	uint8_t start_cap = 0, join = 0, end_cap = 0;
+	uint16_t miter = 0;
+	bool no_hscale = false, no_vscale = false, pixel_hinting = false, no_close = false;
+	std::optional<ShapeFill> fill;
+};
+
+struct ShapePath {
+	int32_t x0 = 0, y0 = 0;
+	uint32_t fill0 = 0, fill1 = 0, line = 0;
+	std::vector<Seg> segs;
+};
+
+inline int ubits(uint32_t p_v) {
+	int n = 0;
+	while (n < 32 && (uint64_t(1) << n) <= p_v) {
+		++n;
+	}
+	return n;
+}
+
+inline void shape_fill_style(Writer &w, int p_version, const ShapeFill &f) {
+	w.u8(f.type);
+	if (f.type == 0x00) {
+		w.u8(f.r);
+		w.u8(f.g);
+		w.u8(f.b);
+		if (p_version >= 3) {
+			w.u8(f.a);
+		}
+	} else if (f.type == 0x10 || f.type == 0x12 || f.type == 0x13) {
+		w.raw(matrix(f.m));
+		w.u8(uint32_t(f.stops.size()) & 0x0f);
+		for (const auto &[ratio, c] : f.stops) {
+			w.u8(ratio);
+			w.u8(c[0]);
+			w.u8(c[1]);
+			w.u8(c[2]);
+			if (p_version >= 3) {
+				w.u8(c[3]);
+			}
+		}
+		if (f.type == 0x13) {
+			w.s16(f.focal);
+		}
+	} else {
+		w.u16(f.bitmap);
+		w.raw(matrix(f.m));
+	}
+}
+
+inline Bytes define_shape_paths(int p_version, uint16_t p_id, float p_w, float p_h, const std::vector<ShapeFill> &p_fills,
+		const std::vector<ShapeLine> &p_lines, const std::vector<ShapePath> &p_paths) {
+	static const uint16_t codes[] = { 0, 2, 22, 32, 83 };
+	Writer w;
+	w.u16(p_id);
+	w.raw(rect(0, p_w, 0, p_h));
+	if (p_version == 4) {
+		w.raw(rect(0, p_w, 0, p_h));
+		w.u8(0);
+	}
+	w.u8(uint32_t(p_fills.size()));
+	for (const ShapeFill &f : p_fills) {
+		shape_fill_style(w, p_version, f);
+	}
+	w.u8(uint32_t(p_lines.size()));
+	for (const ShapeLine &l : p_lines) {
+		w.u16(l.width);
+		if (p_version == 4) {
+			BitWriter fb;
+			fb.ub(l.start_cap, 2);
+			fb.ub(l.join, 2);
+			fb.ub(l.fill ? 1 : 0, 1);
+			fb.ub(l.no_hscale ? 1 : 0, 1);
+			fb.ub(l.no_vscale ? 1 : 0, 1);
+			fb.ub(l.pixel_hinting ? 1 : 0, 1);
+			fb.ub(0, 5);
+			fb.ub(l.no_close ? 1 : 0, 1);
+			fb.ub(l.end_cap, 2);
+			w.bits(fb);
+			if (l.join == 2) {
+				w.u16(l.miter);
+			}
+			if (l.fill) {
+				shape_fill_style(w, p_version, *l.fill);
+			} else {
+				w.u8(l.r);
+				w.u8(l.g);
+				w.u8(l.b);
+				w.u8(l.a);
+			}
+		} else {
+			w.u8(l.r);
+			w.u8(l.g);
+			w.u8(l.b);
+			if (p_version >= 3) {
+				w.u8(l.a);
+			}
+		}
+	}
+	const int fill_bits = std::max(1, ubits(uint32_t(p_fills.size())));
+	const int line_bits = ubits(uint32_t(p_lines.size()));
+	w.u8(uint32_t((fill_bits << 4) | line_bits));
+	BitWriter r;
+	for (const ShapePath &path : p_paths) {
+		r.ub(0, 1);
+		r.ub(0x01 | 0x02 | 0x04 | (line_bits > 0 ? 0x08 : 0), 5);
+		const int n = sbits_max({ path.x0, path.y0 });
+		r.ub(uint32_t(n), 5);
+		r.sb(path.x0, n);
+		r.sb(path.y0, n);
+		r.ub(path.fill0, fill_bits);
+		r.ub(path.fill1, fill_bits);
+		if (line_bits > 0) {
+			r.ub(path.line, line_bits);
+		}
+		int32_t x = path.x0;
+		int32_t y = path.y0;
+		for (const Seg &s : path.segs) {
+			if (s.curve) {
+				const int32_t cdx = s.cx - x, cdy = s.cy - y, adx = s.x - s.cx, ady = s.y - s.cy;
+				const int nb = std::max(2, sbits_max({ cdx, cdy, adx, ady }));
+				r.ub(1, 1);
+				r.ub(0, 1);
+				r.ub(uint32_t(nb - 2), 4);
+				r.sb(cdx, nb);
+				r.sb(cdy, nb);
+				r.sb(adx, nb);
+				r.sb(ady, nb);
+			} else {
+				const int32_t dx = s.x - x, dy = s.y - y;
+				const int nb = std::max(2, sbits_max({ dx, dy }));
+				r.ub(1, 1);
+				r.ub(1, 1);
+				r.ub(uint32_t(nb - 2), 4);
+				if (dx != 0 && dy != 0) {
+					r.ub(1, 1);
+					r.sb(dx, nb);
+					r.sb(dy, nb);
+				} else if (dx == 0) {
+					r.ub(0, 1);
+					r.ub(1, 1);
+					r.sb(dy, nb);
+				} else {
+					r.ub(0, 1);
+					r.ub(0, 1);
+					r.sb(dx, nb);
+				}
+			}
+			x = s.x;
+			y = s.y;
+		}
+	}
+	r.ub(0, 1);
+	r.ub(0, 5);
+	w.bits(r);
+	Bytes t;
+	tag(t, codes[p_version], w.b, true);
+	return t;
+}
+
 
 inline Bytes glyph_shape(const Glyph &p_glyph) {
 	BitWriter r;

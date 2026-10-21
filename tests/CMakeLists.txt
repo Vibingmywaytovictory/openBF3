@@ -394,7 +394,7 @@ openbf3_test(test_ui1_contract test_main.cpp ui1_contract_tests.cpp test_support
 target_link_libraries(test_ui1_contract PRIVATE bf3_core)
 add_test(NAME ui1.contract COMMAND test_ui1_contract --test-suite=ui1-contract)
 set_tests_properties(ui1.contract PROPERTIES TIMEOUT 120)
-openbf3_test(test_ui1 test_main.cpp ui_swf_tests.cpp ui_font_tests.cpp ui_swf_writer.h test_support.h)
+openbf3_test(test_ui1 test_main.cpp ui_swf_tests.cpp ui_swf_geometry_tests.cpp ui_font_tests.cpp ui_swf_writer.h test_support.h)
 target_link_libraries(test_ui1 PRIVATE bf3_core)
 add_test(NAME core.ui.swf.unit COMMAND test_ui1 --test-suite=ui-swf-unit)
 add_test(NAME core.ui.font.unit COMMAND test_ui1 --test-suite=ui-font-unit)
