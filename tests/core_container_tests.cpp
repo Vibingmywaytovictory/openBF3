@@ -19,21 +19,8 @@ using namespace bf3::core;
 
 namespace {
 
-struct Mounted {
-	InstallReader reader;
-	std::shared_ptr<Install> install;
-};
-
-bool open_or_skip(Mounted &r_m) {
-	if (!r_m.reader.locate({})) {
-		bf3::test::skip_install_case(r_m.reader.describe().c_str());
-		return false;
-	}
-	Result<std::shared_ptr<Install>> install = Install::open(r_m.reader);
-	REQUIRE_MESSAGE(install.ok(), (install.ok() ? std::string() : install.error().message));
-	r_m.install = *install;
-	return true;
-}
+using bf3::test::Mounted;
+using bf3::test::open_or_skip;
 
 bool listed(const std::string &p_superbundle) {
 	const std::string l = to_lower_ascii(p_superbundle);

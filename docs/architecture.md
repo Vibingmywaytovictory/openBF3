@@ -55,15 +55,16 @@ Tools: `tools/bf3dump` (install inspector, cache preparer, many `*_commands.cpp`
 `tools/resdump`. Shared helpers live once in `bf3_core`: `bf3/core/math.h` (`Vec3`, which every module's `Vec3` is,
 and `Transform`, which `res::Transform`, `fx::Transform` and `DriveTransform` are; `LevelTransform` adds a scale) and
 `bf3/core/util/` (`fmt`, `seconds_since`, `finite`, ASCII text, `splitmix64`, percentiles, the key=value grammar).
-Tests: `tests/` builds one doctest executable per area; `tests/CMakeLists.txt` registers the ctest rows and
-`tests/godot_*.cmake` run the Godot project headless or windowed ([testing.md](testing.md)).
+Tests: one doctest executable per area in `tests/` (the install fixture `Mounted`/`open_or_skip` and `wait_until` in
+`test_support.h`); `tests/CMakeLists.txt` registers the rows; `tests/godot_*.cmake` run Godot headless or windowed
+through `godot_common.cmake` (the window probe, `godot_run`, `godot_require_pass`; [testing.md](testing.md)).
 
 ## Threads
 
 | thread | owner | runs | talks to the others through |
 |---|---|---|---|
 | Godot main | Godot | scene tree, `_process`, all Godot API calls, HUD, the presentation of the client state | reads `PresentationFrame` copies; posts commands |
-| server | `ServerHost` | `GameServer::tick` at 60 Hz: jitter buffers, bot brains, motor steps, rules, snapshots | datagrams in and out via the ENet host; stats copied under a mutex |
+| server | `ServerHost` | `GameServer::tick` at 60 Hz, paced by a `TickClock` (steady; stepped in tests): jitter buffers, bot brains, motor steps, rules, snapshots | datagrams in and out via the ENet host; stats copied under a mutex |
 | client network | `ClientSession` | receive, clock slew, prediction, interpolation, gunplay client side | `PresentationFrame` (trivially copyable, memcpy'd), `PresentationEvents` SPSC ring |
 | audio | Godot's audio driver via `Bf3AudioStream::_mix` | `MixerCore::mix`: never allocates, locks or waits | three SPSC rings (commands, returns, feedback) |
 | loaders and `WorkerThreadPool` | level session, cache | level decode and upload preparation, cache conversions | `std::atomic<bool>` done flags with acquire/release; results joined on the main thread |

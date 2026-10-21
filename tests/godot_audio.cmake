@@ -4,35 +4,11 @@ include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)
 if(NOT SHOTS)
     message(FATAL_ERROR "godot_audio: -DSHOTS=<dir> is required")
 endif()
-execute_process(
-    COMMAND "${godot}" --path "${PROJECT_DIR}" --quit
-    TIMEOUT 60
-    RESULT_VARIABLE probe_rc
-    OUTPUT_VARIABLE probe_out
-    ERROR_VARIABLE probe_err)
-if(NOT probe_rc STREQUAL "0")
-    message("${probe_out}")
-    message("${probe_err}")
-    message("SKIPPED: no window or rendering device (probe exit '${probe_rc}')")
-    cmake_language(EXIT 77)
-endif()
 file(MAKE_DIRECTORY "${SHOTS}")
 set(wav "${SHOTS}/godot_m16.wav")
 file(REMOVE "${wav}" "${SHOTS}/godot_m16_core.wav" "${SHOTS}/godot_m16_noise.wav")
-execute_process(
-    COMMAND "${godot}" --path "${PROJECT_DIR}" res://scenes/audio_m16.tscn -- --audio-check "--audio-record=${wav}" --quit-after=90
-    TIMEOUT 180
-    RESULT_VARIABLE rc
-    OUTPUT_VARIABLE out
-    ERROR_VARIABLE err)
-message("${out}")
-if(NOT err STREQUAL "")
-    message("${err}")
-endif()
-if(out MATCHES "no usable install" OR err MATCHES "no usable install")
-    message("SKIPPED: no BF3 install found")
-    cmake_language(EXIT 77)
-endif()
+godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 180
+    ARGS --path "${PROJECT_DIR}" res://scenes/audio_m16.tscn -- --audio-check "--audio-record=${wav}" --quit-after=90)
 set(failed FALSE)
 if(NOT rc STREQUAL "0" OR NOT out MATCHES "AUDIO CHECK: PASS")
     message("godot.audio: the check failed (exit ${rc})")

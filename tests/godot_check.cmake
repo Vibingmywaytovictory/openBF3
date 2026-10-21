@@ -5,18 +5,5 @@ if(NOT DEFINED TIMEOUT)
     set(TIMEOUT 240)
 endif()
 
-execute_process(
-    COMMAND "${godot}" --headless ${godot_log_args} --path "${PROJECT_DIR}" -- ${USER_ARGS}
-    RESULT_VARIABLE code
-    OUTPUT_VARIABLE out
-    ERROR_VARIABLE err
-    TIMEOUT ${TIMEOUT})
-message("${out}")
-if(NOT "${err}" STREQUAL "")
-    message("${err}")
-endif()
-string(FIND "${out}" "${PASS_LINE}" at)
-if(NOT code EQUAL 0 OR at EQUAL -1)
-    message("FAILED: exit '${code}', '${PASS_LINE}' ${at}")
-    cmake_language(EXIT 1)
-endif()
+godot_run(TIMEOUT ${TIMEOUT} ARGS --headless ${godot_log_args} --path "${PROJECT_DIR}" -- ${USER_ARGS})
+godot_require_pass("${PASS_LINE}")

@@ -1,14 +1,12 @@
 #include "bf3/host/server_host.h"
 
 #include "instance_registry.h"
-#include "tick_timer.h"
 
 #include "bf3/net/enet_host.h"
 #include "bf3/net/loopback_ping.h"
 #include "bf3/net/protocol.h"
 
 #include <algorithm>
-#include <chrono>
 
 namespace bf3::host {
 
@@ -27,10 +25,6 @@ void registry_add(ServerHost *p_host) {
 
 void registry_remove(ServerHost *p_host) {
 	g_registry.remove(p_host);
-}
-
-int64_t now_ns() {
-	return static_cast<int64_t>(net::monotonic_ns());
 }
 
 }
@@ -52,6 +46,10 @@ bool ServerHost::start(const ServerConfig &p_config, std::string *r_error) {
 	}
 	config_ = p_config;
 	config_.tick_hz = std::clamp(config_.tick_hz, 1, 1000);
+	if (!config_.clock) {
+		config_.clock = make_steady_tick_clock();
+	}
+	clock_.store(config_.clock, std::memory_order_release);
 
 	if (config_.game) {
 		config_.tick_hz = int(sim::kSimHz);
@@ -90,7 +88,7 @@ bool ServerHost::start(const ServerConfig &p_config, std::string *r_error) {
 		}
 		stop_requested_.store(false, std::memory_order_release);
 		running_.store(true, std::memory_order_release);
-		start_ns_ = now_ns();
+		start_ns_ = config_.clock->now_ns();
 		thread_ = std::thread([this] { run(); });
 		registry_add(this);
 		return true;
@@ -131,7 +129,7 @@ bool ServerHost::start(const ServerConfig &p_config, std::string *r_error) {
 	}
 	stop_requested_.store(false, std::memory_order_release);
 	running_.store(true, std::memory_order_release);
-	start_ns_ = now_ns();
+	start_ns_ = config_.clock->now_ns();
 	thread_ = std::thread([this] { run(); });
 	registry_add(this);
 	return true;
@@ -180,8 +178,9 @@ ServerStats ServerHost::stats() const {
 	s.peers = peers_.load(std::memory_order_relaxed);
 	s.pings_echoed = pings_echoed_.load(std::memory_order_relaxed);
 	s.step_errors = step_errors_.load(std::memory_order_relaxed);
+	const std::shared_ptr<TickClock> clock = clock_.load(std::memory_order_acquire);
 	const int64_t start = start_ns_.load(std::memory_order_relaxed);
-	const double secs = static_cast<double>(now_ns() - start) / 1e9;
+	const double secs = clock ? static_cast<double>(clock->now_ns() - start) / 1e9 : 0.0;
 	s.measured_hz = (s.running && secs > 0.0) ? static_cast<double>(s.ticks) / secs : 0.0;
 	return s;
 }
@@ -197,18 +196,17 @@ GameServerStats ServerHost::game_stats() const {
 }
 
 void ServerHost::run() {
-	using clock = std::chrono::steady_clock;
-	const auto period = std::chrono::nanoseconds(1'000'000'000LL / config_.tick_hz);
-	detail::TickTimer timer;
+	TickClock &tick_clock = *config_.clock;
+	const int64_t period_ns = 1'000'000'000LL / config_.tick_hz;
 	std::vector<uint32_t> window(600, 0);
 	std::vector<uint32_t> sorted;
 	size_t window_fill = 0;
 	uint32_t max_us = 0;
 	std::vector<sim::BodyTransform> scratch;
-	auto next = clock::now();
+	int64_t next = tick_clock.now_ns();
 
 	while (!stop_requested_.load(std::memory_order_acquire)) {
-		const auto tick_start = clock::now();
+		const int64_t tick_start = tick_clock.now_ns();
 
 		if (game_) {
 			if (net_ && net_->host) {
@@ -227,11 +225,10 @@ void ServerHost::run() {
 					step_errors_.fetch_add(1, std::memory_order_relaxed);
 				}
 			}
-			const auto step_start = clock::now();
+			const int64_t step_start = tick_clock.now_ns();
 			std::vector<OutDatagram> out;
 			game_->tick(out);
-			const uint32_t step_us =
-					static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::microseconds>(clock::now() - step_start).count());
+			const uint32_t step_us = static_cast<uint32_t>((tick_clock.now_ns() - step_start) / 1000);
 			if (net_ && net_->host) {
 				for (const OutDatagram &d : out) {
 					const net::Host::SendMode mode = d.reliable ? net::Host::SendMode::Reliable
@@ -261,16 +258,15 @@ void ServerHost::run() {
 			last_step_us_.store(step_us, std::memory_order_relaxed);
 			max_step_us_.store(max_us, std::memory_order_relaxed);
 			last_tick_us_.store(
-					static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::microseconds>(clock::now() - tick_start).count()),
-					std::memory_order_relaxed);
+					static_cast<uint32_t>((tick_clock.now_ns() - tick_start) / 1000), std::memory_order_relaxed);
 			ticks_.fetch_add(1, std::memory_order_release);
-			next += period;
-			const auto now = clock::now();
-			if (now > next + 5 * period) {
+			next += period_ns;
+			const int64_t now = tick_clock.now_ns();
+			if (now > next + 5 * period_ns) {
 				overruns_.fetch_add(1, std::memory_order_relaxed);
 				next = now;
 			}
-			timer.sleep_until(next);
+			tick_clock.sleep_until_ns(next);
 			continue;
 		}
 
@@ -286,12 +282,11 @@ void ServerHost::run() {
 			peers_.store(static_cast<uint32_t>(net_->host->connected_peers()), std::memory_order_relaxed);
 		}
 
-		const auto step_start = clock::now();
+		const int64_t step_start = tick_clock.now_ns();
 		if (!world_->step()) {
 			step_errors_.fetch_add(1, std::memory_order_relaxed);
 		}
-		const uint32_t step_us =
-				static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::microseconds>(clock::now() - step_start).count());
+		const uint32_t step_us = static_cast<uint32_t>((tick_clock.now_ns() - step_start) / 1000);
 
 		state_hash_.store(world_->state_hash(), std::memory_order_relaxed);
 		active_bodies_.store(world_->active_body_count(), std::memory_order_relaxed);
@@ -314,17 +309,16 @@ void ServerHost::run() {
 		last_step_us_.store(step_us, std::memory_order_relaxed);
 		max_step_us_.store(max_us, std::memory_order_relaxed);
 		last_tick_us_.store(
-				static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::microseconds>(clock::now() - tick_start).count()),
-				std::memory_order_relaxed);
+				static_cast<uint32_t>((tick_clock.now_ns() - tick_start) / 1000), std::memory_order_relaxed);
 		ticks_.fetch_add(1, std::memory_order_release);
 
-		next += period;
-		const auto now = clock::now();
-		if (now > next + 5 * period) {
+		next += period_ns;
+		const int64_t now = tick_clock.now_ns();
+		if (now > next + 5 * period_ns) {
 			overruns_.fetch_add(1, std::memory_order_relaxed);
 			next = now;
 		}
-		timer.sleep_until(next);
+		tick_clock.sleep_until_ns(next);
 	}
 }
 

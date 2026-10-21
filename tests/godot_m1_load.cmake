@@ -5,18 +5,6 @@ if(NOT DEFINED SCENE OR SCENE STREQUAL "")
     set(SCENE "res://scenes/m1_metro.tscn")
 endif()
 separate_arguments(user_args NATIVE_COMMAND "${USER_ARGS}")
-execute_process(
-    COMMAND "${godot}" --path "${PROJECT_DIR}" --quit
-    TIMEOUT 60
-    RESULT_VARIABLE probe_rc
-    OUTPUT_VARIABLE probe_out
-    ERROR_VARIABLE probe_err)
-if(NOT probe_rc STREQUAL "0")
-    message("${probe_out}")
-    message("${probe_err}")
-    message("SKIPPED: no window or rendering device (probe exit '${probe_rc}')")
-    cmake_language(EXIT 77)
-endif()
 string(RANDOM LENGTH 8 ALPHABET 0123456789abcdef tag)
 set(root "${BUILD_DIR}/scratch/godot-m1-load-${tag}")
 file(MAKE_DIRECTORY "${BUILD_DIR}/scratch")
@@ -30,25 +18,11 @@ file(MAKE_DIRECTORY "${shots}")
 message("shots directory: ${shots}")
 set(failed FALSE)
 foreach(pass cold warm)
-    execute_process(
-        COMMAND "${godot}" --path "${PROJECT_DIR}" "${SCENE}" -- "--m1-load-check=${pass}" "--bf3-cache=${root}"
-            --shot-spawns=0,13,26,39,52,65,78,91 "--shot-dir=${shots}/${pass}" ${user_args}
-        TIMEOUT 140
-        RESULT_VARIABLE rc
-        OUTPUT_VARIABLE out
-        ERROR_VARIABLE err)
-    message("---- ${pass} ----")
-    message("${out}")
-    if(NOT err STREQUAL "")
-        message("${err}")
-    endif()
-    if(out MATCHES "no usable install" OR err MATCHES "no usable install")
-        file(REMOVE_RECURSE "${root}")
-        message("SKIPPED: no BF3 install found")
-        cmake_language(EXIT 77)
-    endif()
+    godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 140 HEADER ${pass} REMOVE_ON_SKIP "${root}"
+        ARGS --path "${PROJECT_DIR}" "${SCENE}" -- "--m1-load-check=${pass}" "--bf3-cache=${root}"
+            --shot-spawns=0,13,26,39,52,65,78,91 "--shot-dir=${shots}/${pass}" ${user_args})
     if(NOT rc STREQUAL "0" OR NOT out MATCHES "M1 LOAD CHECK: PASS")
-        message("godot.m1_load ${pass} run failed (exit ${rc})")
+        message("${ROW} ${pass} run failed (exit ${rc})")
         set(failed TRUE)
     endif()
 endforeach()
@@ -60,5 +34,5 @@ else()
     message("shots: ${shots}/cold, ${shots}/warm")
 endif()
 if(failed)
-    message(FATAL_ERROR "godot.m1_load failed")
+    message(FATAL_ERROR "${ROW} failed")
 endif()

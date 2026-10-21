@@ -34,22 +34,9 @@ uint32_t bits(float p_value) {
 	return b;
 }
 
-std::shared_ptr<Install> open_or_skip() {
-	static InstallReader reader;
-	static std::shared_ptr<Install> install;
-	static bool tried = false;
-	if (!tried) {
-		tried = true;
-		if (reader.locate({})) {
-			Result<std::shared_ptr<Install>> opened = Install::open(reader);
-			REQUIRE_MESSAGE(opened.ok(), (opened.ok() ? std::string() : opened.error().message));
-			install = *opened;
-		}
-	}
-	if (!install) {
-		bf3::test::skip_install_case(reader.describe().c_str());
-	}
-	return install;
+std::shared_ptr<Install> shared_install_or_skip() {
+	const bf3::test::Mounted *m = bf3::test::shared_mount_or_skip();
+	return m != nullptr ? m->install : nullptr;
 }
 
 struct Traversed {
@@ -1229,7 +1216,7 @@ TEST_SUITE("level_unit") {
 
 TEST_SUITE("level") {
 	TEST_CASE("level: Metro TeamDeathMatch0 (handoff §9)") {
-		const std::shared_ptr<Install> install = open_or_skip();
+		const std::shared_ptr<Install> install = shared_install_or_skip();
 		if (!install) {
 			return;
 		}
@@ -1293,7 +1280,7 @@ TEST_SUITE("level") {
 	}
 
 	TEST_CASE("level: Grand Bazaar ConquestLarge0 (handoff §9)") {
-		const std::shared_ptr<Install> install = open_or_skip();
+		const std::shared_ptr<Install> install = shared_install_or_skip();
 		if (!install) {
 			return;
 		}
@@ -1327,7 +1314,7 @@ TEST_SUITE("level") {
 	}
 
 	TEST_CASE("level: Caspian Border ConquestSmall0") {
-		const std::shared_ptr<Install> install = open_or_skip();
+		const std::shared_ptr<Install> install = shared_install_or_skip();
 		if (!install) {
 			return;
 		}
@@ -1350,7 +1337,7 @@ TEST_SUITE("level") {
 
 	TEST_CASE("level: mutated level partitions fail or traverse, never crash") {
 
-		const std::shared_ptr<Install> install = open_or_skip();
+		const std::shared_ptr<Install> install = shared_install_or_skip();
 		if (!install) {
 			return;
 		}
@@ -1422,7 +1409,7 @@ TEST_SUITE("level") {
 	}
 
 	TEST_CASE("level: Metro ConquestSmall0 composites (sections/03 \"Metro 702\")") {
-		const std::shared_ptr<Install> install = open_or_skip();
+		const std::shared_ptr<Install> install = shared_install_or_skip();
 		if (!install) {
 			return;
 		}
@@ -1432,7 +1419,7 @@ TEST_SUITE("level") {
 
 	TEST_CASE("level: self-listing WorldPart fails on the step budget, never hangs") {
 
-		const std::shared_ptr<Install> install = open_or_skip();
+		const std::shared_ptr<Install> install = shared_install_or_skip();
 		if (!install) {
 			return;
 		}
@@ -1468,7 +1455,7 @@ TEST_SUITE("level") {
 
 	TEST_CASE("level: static model group members cost steps, placed or not") {
 
-		const std::shared_ptr<Install> install = open_or_skip();
+		const std::shared_ptr<Install> install = shared_install_or_skip();
 		if (!install) {
 			return;
 		}
@@ -1499,7 +1486,7 @@ TEST_SUITE("level") {
 
 	TEST_CASE("level: hostile partition graphs end on the work budget, never hang") {
 
-		const std::shared_ptr<Install> install = open_or_skip();
+		const std::shared_ptr<Install> install = shared_install_or_skip();
 		if (!install) {
 			return;
 		}
@@ -1683,7 +1670,7 @@ TEST_SUITE("level") {
 
 	TEST_CASE("level: deep and wide type layouts cost what shallow ones do") {
 
-		const std::shared_ptr<Install> install = open_or_skip();
+		const std::shared_ptr<Install> install = shared_install_or_skip();
 		if (!install) {
 			return;
 		}
@@ -1737,7 +1724,7 @@ TEST_SUITE("level") {
 	}
 
 	TEST_CASE("level: modes and unknown levels") {
-		const std::shared_ptr<Install> install = open_or_skip();
+		const std::shared_ptr<Install> install = shared_install_or_skip();
 		if (!install) {
 			return;
 		}

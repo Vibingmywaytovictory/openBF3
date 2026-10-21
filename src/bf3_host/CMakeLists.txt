@@ -3,6 +3,8 @@ add_library(bf3_host STATIC
     src/loopback_client.cpp
     src/tick_timer.cpp
     src/tick_timer.h
+    src/steady_tick_clock.cpp
+    include/bf3/host/tick_clock.h
     include/bf3/host/server_host.h
     include/bf3/host/loopback_client.h
 )

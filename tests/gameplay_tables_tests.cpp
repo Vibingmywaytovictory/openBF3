@@ -32,21 +32,8 @@ using doctest::Approx;
 
 namespace {
 
-struct Mounted {
-	InstallReader reader;
-	std::shared_ptr<Install> install;
-};
-
-bool open_or_skip(Mounted &r_m) {
-	if (!r_m.reader.locate({})) {
-		bf3::test::skip_install_case(r_m.reader.describe().c_str());
-		return false;
-	}
-	Result<std::shared_ptr<Install>> install = Install::open(r_m.reader);
-	REQUIRE_MESSAGE(install.ok(), (install.ok() ? std::string() : install.error().message));
-	r_m.install = *install;
-	return true;
-}
+using bf3::test::Mounted;
+using bf3::test::open_or_skip;
 
 std::unique_ptr<EbxLibrary> open_level(const Mounted &p_m, const char *p_level_id) {
 	const std::optional<Level> level = p_m.install->level(p_level_id);

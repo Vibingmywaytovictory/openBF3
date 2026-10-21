@@ -9,6 +9,7 @@
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/spawn.h"
 #include "bf3/sim/static_world.h"
+#include "test_support.h"
 
 #include <algorithm>
 #include <atomic>
@@ -61,16 +62,7 @@ bool wait_for(const std::atomic<bool> &p_flag, std::chrono::milliseconds p_timeo
 	return true;
 }
 
-bool wait_until(const std::function<bool()> &p_done, std::chrono::milliseconds p_timeout) {
-	const auto end = std::chrono::steady_clock::now() + p_timeout;
-	while (!p_done()) {
-		if (std::chrono::steady_clock::now() > end) {
-			return false;
-		}
-		std::this_thread::yield();
-	}
-	return true;
-}
+using bf3::test::wait_until;
 
 size_t churn(int p_owners, int p_iterations, const std::function<void(int, int)> &p_round, const std::function<size_t()> &p_stop_all,
 		size_t *r_stop_all_calls) {

@@ -70,6 +70,9 @@ a `timing` row, split first so its socket-free cases stay on branches (`host.ses
   run on every branch; `OPENBF3_GODOT` overrides it.
 * Windowed rows run only with `OPENBF3_GODOT_WINDOWED=1` and exit 77 while `OPENBF3_USER_ACTIVE_FLAG` names a file
   that exists.
+* A `godot_*.cmake` script includes `godot_common.cmake` (the executable, those skips and the window probe), runs Godot
+  through `godot_run` (`SKIP_WITHOUT_INSTALL` only where the check needs the install) and gates the pass line with
+  `godot_require_pass`.
 * The project is set up by the `godot.project_setup` fixture, which writes `.godot/extension_list.cfg` and never runs
   `--import` (the first `--import` of a never-opened project exits 0xC0000005, README "Run").
 

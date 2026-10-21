@@ -92,14 +92,11 @@ size_t walk(const EbxPartition &p_partition) {
 
 TEST_SUITE("fuzz") {
 	TEST_CASE("fuzz: mutated ebx partitions, stored payloads and toc/manifest bytes") {
-		InstallReader reader;
-		if (!reader.locate({})) {
-			bf3::test::skip_install_case(reader.describe().c_str());
+		bf3::test::Mounted m;
+		if (!bf3::test::open_or_skip(m)) {
 			return;
 		}
-		Result<std::shared_ptr<Install>> opened = Install::open(reader);
-		REQUIRE_MESSAGE(opened.ok(), (opened.ok() ? std::string() : opened.error().message));
-		const std::shared_ptr<const Install> install = *opened;
+		const std::shared_ptr<const Install> install = m.install;
 		Result<LevelMount> mount = install->mount_superbundle("Win32/Levels/MP_Subway/MP_Subway");
 		REQUIRE_MESSAGE(mount.ok(), (mount.ok() ? std::string() : mount.error().message));
 		REQUIRE(mount->load_all_bundles().ok());

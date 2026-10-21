@@ -1,10 +1,5 @@
-set(RT_ROWS host.server host.session.gate host.session.stress host.session.unit godot.m1.e2_gate godot.m1.e2_stress
+set(RT_ROWS host.session.gate host.session.stress host.session.unit godot.m1.e2_gate godot.m1.e2_stress
 	godot.s0_selftest)
-
-set(RT_host.server_FAIL "ERROR: ")
-set(RT_host.server_SUMMARY "\\[doctest\\] test cases:")
-set(RT_host.server_RETRY "CHECK\\( s\\.(ticks (>=|<=) 1[13]0|measured_hz == )")
-set(RT_host.server_NO_RETRY "")
 
 set(_rt_session_retry "CHECK(_MESSAGE)?\\( (c\\.ok|\\(t == 2 \\|\\| t == 3\\)|run\\.target_changes <= 2|rtt (>=|<=) nominal|rtt_sum / double\\(rtt_n\\) <= |s\\.target_buffer_ticks == 2|double\\(run\\.interp\\.extrapolated\\) < |double\\(zero_ns - reconcile_ns\\) / 1e6 <= 400|interp\\.(presented > 500|compared > 300))")
 foreach(_rt_row host.session.gate host.session.stress)

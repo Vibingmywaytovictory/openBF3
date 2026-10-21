@@ -19,10 +19,61 @@ endif()
 if(NOT EXISTS "${PROJECT_DIR}/.godot/extension_list.cfg")
 	file(WRITE "${PROJECT_DIR}/.godot/extension_list.cfg" "res://openbf3.gdextension\n")
 endif()
+if(GODOT_WINDOWED)
+	execute_process(
+		COMMAND "${godot}" --path "${PROJECT_DIR}" --quit
+		TIMEOUT 60
+		RESULT_VARIABLE probe_rc
+		OUTPUT_VARIABLE probe_out
+		ERROR_VARIABLE probe_err)
+	if(NOT probe_rc STREQUAL "0")
+		message("${probe_out}")
+		message("${probe_err}")
+		message("SKIPPED: no window or rendering device (probe exit '${probe_rc}')")
+		cmake_language(EXIT 77)
+	endif()
+endif()
 set(godot_cache_root "")
+set(godot_cache_args "")
 set(godot_log_args "")
 if(NOT GODOT_WINDOWED AND DEFINED BUILD_DIR AND NOT BUILD_DIR STREQUAL "" AND DEFINED ROW AND NOT ROW STREQUAL "")
 	set(godot_cache_root "${BUILD_DIR}/godot-cache/${ROW}")
+	set(godot_cache_args "--bf3-cache=${godot_cache_root}")
 	file(MAKE_DIRECTORY "${godot_cache_root}" "${BUILD_DIR}/godot-logs")
 	set(godot_log_args --log-file "${BUILD_DIR}/godot-logs/${ROW}.log")
 endif()
+
+function(godot_run)
+	cmake_parse_arguments(PARSE_ARGV 0 R "QUIET;SKIP_WITHOUT_INSTALL" "TIMEOUT;HEADER" "ARGS;REMOVE_ON_SKIP")
+	execute_process(
+		COMMAND "${godot}" ${R_ARGS}
+		TIMEOUT ${R_TIMEOUT}
+		RESULT_VARIABLE run_rc
+		OUTPUT_VARIABLE run_out
+		ERROR_VARIABLE run_err)
+	if(NOT R_QUIET)
+		if(DEFINED R_HEADER)
+			message("---- ${R_HEADER} ----")
+		endif()
+		message("${run_out}")
+		if(NOT run_err STREQUAL "")
+			message("${run_err}")
+		endif()
+	endif()
+	if(R_SKIP_WITHOUT_INSTALL AND (run_out MATCHES "no usable install" OR run_err MATCHES "no usable install"))
+		if(R_REMOVE_ON_SKIP)
+			file(REMOVE_RECURSE ${R_REMOVE_ON_SKIP})
+		endif()
+		message("SKIPPED: no BF3 install found")
+		cmake_language(EXIT 77)
+	endif()
+	set(rc "${run_rc}" PARENT_SCOPE)
+	set(out "${run_out}" PARENT_SCOPE)
+	set(err "${run_err}" PARENT_SCOPE)
+endfunction()
+
+function(godot_require_pass p_pass_regex)
+	if(NOT rc STREQUAL "0" OR NOT out MATCHES "${p_pass_regex}")
+		message(FATAL_ERROR "${ROW} failed (exit ${rc})${ARGN}")
+	endif()
+endfunction()

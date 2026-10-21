@@ -1,36 +1,9 @@
 cmake_minimum_required(VERSION 3.29)
 set(GODOT_WINDOWED TRUE)
 include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)
-execute_process(
-    COMMAND "${godot}" --path "${PROJECT_DIR}" --quit
-    TIMEOUT 60
-    RESULT_VARIABLE probe_rc
-    OUTPUT_VARIABLE probe_out
-    ERROR_VARIABLE probe_err)
-if(NOT probe_rc STREQUAL "0")
-    message("${probe_out}")
-    message("${probe_err}")
-    message("SKIPPED: no window or rendering device (probe exit '${probe_rc}')")
-    cmake_language(EXIT 77)
-endif()
 set(args --minimap-check --minimap-mode=ConquestSmall0)
 if(NOT "$ENV{OPENBF3_UI2_SHOTS}" STREQUAL "")
     list(APPEND args "--minimap-shots=$ENV{OPENBF3_UI2_SHOTS}")
 endif()
-execute_process(
-    COMMAND "${godot}" --path "${PROJECT_DIR}" res://scenes/m1_metro.tscn -- ${args}
-    TIMEOUT 240
-    RESULT_VARIABLE rc
-    OUTPUT_VARIABLE out
-    ERROR_VARIABLE err)
-message("${out}")
-if(NOT err STREQUAL "")
-    message("${err}")
-endif()
-if(out MATCHES "no usable install" OR err MATCHES "no usable install")
-    message("SKIPPED: no BF3 install found")
-    cmake_language(EXIT 77)
-endif()
-if(NOT rc STREQUAL "0" OR NOT out MATCHES "UI2 MINIMAP CHECK: PASS")
-    message(FATAL_ERROR "godot.ui2 failed (exit ${rc})")
-endif()
+godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 240 ARGS --path "${PROJECT_DIR}" res://scenes/m1_metro.tscn -- ${args})
+godot_require_pass("UI2 MINIMAP CHECK: PASS")

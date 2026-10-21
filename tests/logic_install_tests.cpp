@@ -31,30 +31,7 @@ namespace {
 
 using bf3::core::seconds_since;
 
-struct Mounted {
-	InstallReader reader;
-	std::shared_ptr<Install> install;
-	InstallSnapshot before;
-};
-
-Mounted *mounted() {
-	static Mounted m;
-	static bool tried = false;
-	if (!tried) {
-		tried = true;
-		if (m.reader.locate({})) {
-			m.before = m.reader.snapshot();
-			Result<std::shared_ptr<Install>> opened = Install::open(m.reader);
-			REQUIRE_MESSAGE(opened.ok(), (opened.ok() ? std::string() : opened.error().message));
-			m.install = *opened;
-		}
-	}
-	if (!m.install) {
-		bf3::test::skip_install_case(m.reader.describe().c_str());
-		return nullptr;
-	}
-	return &m;
-}
+using bf3::test::Mounted;
 
 constexpr unsigned kCensusLanes = 6;
 
@@ -90,7 +67,7 @@ struct Metro {
 Metro *metro() {
 	static std::unique_ptr<Metro> m;
 	static bool tried = false;
-	Mounted *mount = mounted();
+	Mounted *mount = bf3::test::shared_mount_or_skip();
 	if (mount == nullptr) {
 		return nullptr;
 	}
@@ -131,7 +108,7 @@ std::optional<std::string> line_value(const std::string &p_text, const std::stri
 
 TEST_SUITE("logic-metro") {
 	TEST_CASE("logic.metro G1: MP_Subway RushLarge0 instantiates its full graph headless") {
-		Mounted *mount = mounted();
+		Mounted *mount = bf3::test::shared_mount_or_skip();
 		Metro *m = metro();
 		if (m == nullptr || mount == nullptr) {
 			return;
@@ -323,7 +300,7 @@ TEST_SUITE("logic-metro") {
 	}
 
 	TEST_CASE("logic.metro: install unchanged (layout.toc, cas.cat, the .sb / .toc files)") {
-		Mounted *mount = mounted();
+		Mounted *mount = bf3::test::shared_mount_or_skip();
 		if (mount == nullptr) {
 			return;
 		}
@@ -335,7 +312,7 @@ TEST_SUITE("logic-metro") {
 
 TEST_SUITE("logic-types") {
 	TEST_CASE("logic.types G5: 0 unknown and 0 unimplemented connected types on every MP mode of Metro and Caspian") {
-		Mounted *mount = mounted();
+		Mounted *mount = bf3::test::shared_mount_or_skip();
 		if (mount == nullptr) {
 			return;
 		}
@@ -398,7 +375,7 @@ TEST_SUITE("logic-types") {
 
 TEST_SUITE("logic-caspian") {
 	TEST_CASE("logic.caspian G6: Caspian ConquestLarge0 spawner and vehicle Enabled timeline under forced captures") {
-		Mounted *mount = mounted();
+		Mounted *mount = bf3::test::shared_mount_or_skip();
 		if (mount == nullptr) {
 			return;
 		}
@@ -417,7 +394,7 @@ TEST_SUITE("logic-caspian") {
 
 TEST_SUITE("logic-perf") {
 	TEST_CASE("logic.perf G7: interpreter cost per tick (wall clock; noisy on a shared machine)") {
-		Mounted *mount = mounted();
+		Mounted *mount = bf3::test::shared_mount_or_skip();
 		if (mount == nullptr) {
 			return;
 		}
@@ -472,7 +449,7 @@ TEST_SUITE("logic-perf") {
 
 TEST_SUITE("logic-census") {
 	TEST_CASE("logic.census I1: every level x mode (info)") {
-		Mounted *mount = mounted();
+		Mounted *mount = bf3::test::shared_mount_or_skip();
 		if (mount == nullptr) {
 			return;
 		}

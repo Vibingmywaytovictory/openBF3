@@ -208,15 +208,8 @@ TEST_SUITE("collision_unit") {
 
 namespace {
 
-std::shared_ptr<Install> open_or_skip(InstallReader &r_reader) {
-	if (!r_reader.locate({})) {
-		bf3::test::skip_install_case(r_reader.describe().c_str());
-		return nullptr;
-	}
-	Result<std::shared_ptr<Install>> opened = Install::open(r_reader);
-	REQUIRE_MESSAGE(opened.ok(), (opened.ok() ? std::string() : opened.error().message));
-	return *opened;
-}
+using bf3::test::Mounted;
+using bf3::test::open_or_skip;
 
 struct Expected {
 	const char *level;
@@ -306,38 +299,35 @@ void check_level(const std::shared_ptr<Install> &p_install, const Expected &p_e)
 TEST_SUITE("collision") {
 
 	TEST_CASE("collision: MP_Subway TeamDeathMatch0 matches the IW4L oracle") {
-		InstallReader reader;
-		const std::shared_ptr<Install> install = open_or_skip(reader);
-		if (!install) {
+		Mounted m;
+		if (!open_or_skip(m)) {
 			return;
 		}
-		const InstallSnapshot before = reader.snapshot();
-		check_level(install, { "MP_Subway", "TeamDeathMatch0", 2122, 1136699, 196608, "308b8f1a3750c835", 163840, 72733, 34, 181, "082eac1e5df0ae1c",
-									 { 991559, 142908, 2232 } });
-		const SnapshotDiff diff = diff_snapshots(before, reader.snapshot());
+		check_level(m.install,
+				{ "MP_Subway", "TeamDeathMatch0", 2122, 1136699, 196608, "308b8f1a3750c835", 163840, 72733, 34, 181,
+						"082eac1e5df0ae1c", { 991559, 142908, 2232 } });
+		const SnapshotDiff diff = diff_snapshots(m.before, m.reader.snapshot());
 		CHECK_MESSAGE(diff.clean(), diff.summary());
 	}
 
 	TEST_CASE("collision: XP3_Alborz ConquestLarge0 matches the IW4L oracle") {
-		InstallReader reader;
-		const std::shared_ptr<Install> install = open_or_skip(reader);
-		if (!install) {
+		Mounted m;
+		if (!open_or_skip(m)) {
 			return;
 		}
-		const InstallSnapshot before = reader.snapshot();
-		check_level(install, { "XP3_Alborz", "ConquestLarge0", 519, 36215517, 33554432, "f49b8d4219d957cf", 0, 56015, 0, 16384, "78096d54cf5022f0",
-									 { 36106064, 109453, 0 } });
-		const SnapshotDiff diff = diff_snapshots(before, reader.snapshot());
+		check_level(m.install,
+				{ "XP3_Alborz", "ConquestLarge0", 519, 36215517, 33554432, "f49b8d4219d957cf", 0, 56015, 0, 16384,
+						"78096d54cf5022f0", { 36106064, 109453, 0 } });
+		const SnapshotDiff diff = diff_snapshots(m.before, m.reader.snapshot());
 		CHECK_MESSAGE(diff.clean(), diff.summary());
 	}
 
 	TEST_CASE("collision: mutated Havok res of Metro's static model groups never crash the soup") {
-		InstallReader reader;
-		const std::shared_ptr<Install> install = open_or_skip(reader);
-		if (!install) {
+		Mounted mounted;
+		if (!open_or_skip(mounted)) {
 			return;
 		}
-		Result<LevelCollision> c = load_level_collision(install, "MP_Subway", "TeamDeathMatch0");
+		Result<LevelCollision> c = load_level_collision(mounted.install, "MP_Subway", "TeamDeathMatch0");
 		REQUIRE(c.ok());
 
 		struct Mutant {

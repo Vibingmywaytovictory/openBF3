@@ -109,19 +109,16 @@ TEST_SUITE("inspect-unit") {
 
 TEST_SUITE("inspect") {
 	TEST_CASE("WeaponCatalog over MP_Subway: M16A3 and M16A4 burst with their localised names") {
-		InstallReader reader;
-		if (!reader.locate({})) {
-			bf3::test::skip_install_case(reader.describe().c_str());
+		bf3::test::Mounted m;
+		if (!bf3::test::open_or_skip(m)) {
 			return;
 		}
-		Result<std::shared_ptr<Install>> install = Install::open(reader);
-		REQUIRE_MESSAGE(install.ok(), (install.ok() ? std::string() : install.error().message));
-		Result<ui::TextDatabase> text = ui::open_text_database(*install);
+		Result<ui::TextDatabase> text = ui::open_text_database(m.install);
 		REQUIRE_MESSAGE(text.ok(), (text.ok() ? std::string() : text.error().message));
 
 		WeaponCatalog::Options options;
 		options.text = std::make_shared<const ui::TextDatabase>(std::move(*text));
-		Result<WeaponCatalog> catalog = WeaponCatalog::open(*install, options);
+		Result<WeaponCatalog> catalog = WeaponCatalog::open(m.install, options);
 		REQUIRE_MESSAGE(catalog.ok(), (catalog.ok() ? std::string() : catalog.error().message));
 		const WeaponCatalog &c = *catalog;
 		CHECK(c.report().grid_error.empty());
@@ -162,7 +159,7 @@ TEST_SUITE("inspect") {
 		CHECK(errors == 0);
 		CHECK_FALSE(c.resolve("weapons/nope/u_nope").ok());
 
-		Result<WeaponSources> sources = open_weapon_sources(*install);
+		Result<WeaponSources> sources = open_weapon_sources(m.install);
 		REQUIRE(sources.ok());
 		CHECK(sources->ui != nullptr);
 		CHECK(sources->level_partition == "levels/mp_subway/mp_subway");

@@ -26,21 +26,8 @@ bool near(double p_a, double p_b, double p_eps = 1e-4) {
 	return std::fabs(p_a - p_b) <= p_eps;
 }
 
-struct Mounted {
-	InstallReader reader;
-	std::shared_ptr<Install> install;
-};
-
-bool open_or_skip(Mounted &r_m) {
-	if (!r_m.reader.locate({})) {
-		bf3::test::skip_install_case(r_m.reader.describe().c_str());
-		return false;
-	}
-	Result<std::shared_ptr<Install>> install = Install::open(r_m.reader);
-	REQUIRE_MESSAGE(install.ok(), (install.ok() ? std::string() : install.error().message));
-	r_m.install = *install;
-	return true;
-}
+using bf3::test::Mounted;
+using bf3::test::open_or_skip;
 
 std::unique_ptr<EbxLibrary> open_library(const Mounted &p_m, const std::string &p_spec) {
 	Result<std::unique_ptr<EbxLibrary>> lib = EbxLibrary::open(p_m.install, expand_superbundles(*p_m.install, p_spec));

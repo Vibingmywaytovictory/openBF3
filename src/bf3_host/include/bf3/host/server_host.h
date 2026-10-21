@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/host/game_server.h"
+#include "bf3/host/tick_clock.h"
 #include "bf3/sim/physics_world.h"
 
 #include <atomic>
@@ -24,6 +25,7 @@ struct ServerConfig {
 	sim::WorldConfig world;
 
 	std::shared_ptr<const GameServerConfig> game;
+	std::shared_ptr<TickClock> clock;
 };
 
 struct ServerStats {
@@ -69,6 +71,7 @@ private:
 	void run();
 
 	ServerConfig config_;
+	std::atomic<std::shared_ptr<TickClock>> clock_;
 	std::thread thread_;
 	std::mutex lifecycle_mutex_;
 	std::atomic<bool> stop_requested_{ false };

@@ -8,21 +8,7 @@ if(DEFINED PHASE AND NOT PHASE STREQUAL "")
     set(phase_args "--m1-phase=${PHASE}")
 endif()
 file(REMOVE_RECURSE "${root}")
-execute_process(
-    COMMAND "${godot}" --headless ${godot_log_args} --path "${PROJECT_DIR}" res://scenes/m1_metro.tscn -- --m1-check "--bf3-cache=${root}" ${phase_args}
-    TIMEOUT 580
-    RESULT_VARIABLE rc
-    OUTPUT_VARIABLE out
-    ERROR_VARIABLE err)
+godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 580 REMOVE_ON_SKIP "${root}"
+    ARGS --headless ${godot_log_args} --path "${PROJECT_DIR}" res://scenes/m1_metro.tscn -- --m1-check "--bf3-cache=${root}" ${phase_args})
 file(REMOVE_RECURSE "${root}")
-message("${out}")
-if(NOT err STREQUAL "")
-    message("${err}")
-endif()
-if(out MATCHES "no usable install" OR err MATCHES "no usable install")
-    message("SKIPPED: no BF3 install found")
-    cmake_language(EXIT 77)
-endif()
-if(NOT rc STREQUAL "0" OR NOT out MATCHES "M1 CHECK: PASS")
-    message(FATAL_ERROR "${ROW} failed (exit ${rc})")
-endif()
+godot_require_pass("M1 CHECK: PASS")

@@ -1,18 +1,6 @@
 cmake_minimum_required(VERSION 3.29)
 set(GODOT_WINDOWED TRUE)
 include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)
-execute_process(
-    COMMAND "${godot}" --path "${PROJECT_DIR}" --quit
-    TIMEOUT 60
-    RESULT_VARIABLE probe_rc
-    OUTPUT_VARIABLE probe_out
-    ERROR_VARIABLE probe_err)
-if(NOT probe_rc STREQUAL "0")
-    message("${probe_out}")
-    message("${probe_err}")
-    message("SKIPPED: no window or rendering device (probe exit '${probe_rc}')")
-    cmake_language(EXIT 77)
-endif()
 set(shots "$ENV{OPENBF3_GX_SHOTS}")
 if(shots STREQUAL "")
     set(shots "${BUILD_DIR}/shots/gx")
@@ -23,29 +11,15 @@ if(DEFINED BUILD_DIR AND NOT BUILD_DIR STREQUAL "")
     set(cache_args "--bf3-cache=${BUILD_DIR}/godot-cache/godot.m2b")
 endif()
 separate_arguments(extra NATIVE_COMMAND "${ARGS}")
-execute_process(
-    COMMAND "${godot}" --path "${PROJECT_DIR}" res://scenes/m2b_metro.tscn -- "--m2b-check=play" "--m2b-shots=${shots}" ${cache_args} ${extra}
-    TIMEOUT 540
-    RESULT_VARIABLE rc
-    OUTPUT_VARIABLE out
-    ERROR_VARIABLE err)
-message("${out}")
-if(NOT err STREQUAL "")
-    message("${err}")
-endif()
-if(out MATCHES "no usable install" OR err MATCHES "no usable install")
-    message("SKIPPED: no BF3 install found")
-    cmake_language(EXIT 77)
-endif()
+godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 540
+    ARGS --path "${PROJECT_DIR}" res://scenes/m2b_metro.tscn -- "--m2b-check=play" "--m2b-shots=${shots}" ${cache_args} ${extra})
 string(REGEX MATCHALL "[^\n]*ERROR[^\n]*" error_lines "${out}\n${err}")
 list(LENGTH error_lines error_count)
 message("ERROR lines in the log: ${error_count}")
 if(error_count GREATER 0)
     message(FATAL_ERROR "${ROW}: ${error_count} ERROR line(s) in the log")
 endif()
-if(NOT rc STREQUAL "0" OR NOT out MATCHES "M2B CHECK: PASS")
-    message(FATAL_ERROR "${ROW} failed (exit ${rc})")
-endif()
+godot_require_pass("M2B CHECK: PASS")
 string(REGEX MATCHALL "SKIP [^\n]*waiting for [^\n]*" waiting "${out}")
 list(LENGTH waiting waiting_count)
 if(waiting_count GREATER 0)
