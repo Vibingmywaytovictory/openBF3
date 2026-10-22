@@ -170,50 +170,9 @@ void fragment() {
 }
 )";
 
-struct Aff {
-	double a = 1.0;
-	double b = 0.0;
-	double c = 0.0;
-	double d = 1.0;
-	double tx = 0.0;
-	double ty = 0.0;
-};
+constexpr ui::SwfAffine kSingularAffine{ 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
 
-Aff aff_of(const ui::SwfMatrix &p_m) {
-	return { p_m.a, p_m.b, p_m.c, p_m.d, p_m.tx, p_m.ty };
-}
-
-Aff mul(const Aff &p_l, const Aff &p_r) {
-	Aff m;
-	m.a = p_l.a * p_r.a + p_l.c * p_r.b;
-	m.b = p_l.b * p_r.a + p_l.d * p_r.b;
-	m.c = p_l.a * p_r.c + p_l.c * p_r.d;
-	m.d = p_l.b * p_r.c + p_l.d * p_r.d;
-	m.tx = p_l.a * p_r.tx + p_l.c * p_r.ty + p_l.tx;
-	m.ty = p_l.b * p_r.tx + p_l.d * p_r.ty + p_l.ty;
-	return m;
-}
-
-Aff inverse(const Aff &p_m) {
-	const double det = p_m.a * p_m.d - p_m.b * p_m.c;
-	if (std::abs(det) < 1e-12) {
-		return Aff{ 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
-	}
-	Aff r;
-	r.a = p_m.d / det;
-	r.b = -p_m.b / det;
-	r.c = -p_m.c / det;
-	r.d = p_m.a / det;
-	r.tx = -(r.a * p_m.tx + r.c * p_m.ty);
-	r.ty = -(r.b * p_m.tx + r.d * p_m.ty);
-	return r;
-}
-
-ui::SwfPoint apply(const Aff &p_m, double p_x, double p_y) {
-	return { float(p_m.a * p_x + p_m.c * p_y + p_m.tx), float(p_m.b * p_x + p_m.d * p_y + p_m.ty) };
-}
-
-Transform2D xform_of(const Aff &p_m) {
+Transform2D xform_of(const ui::SwfAffine &p_m) {
 	return Transform2D(real_t(p_m.a), real_t(p_m.b), real_t(p_m.c), real_t(p_m.d), real_t(p_m.tx), real_t(p_m.ty));
 }
 
@@ -239,7 +198,7 @@ Hom hmul(const Hom &p_l, const Hom &p_r) {
 	return h;
 }
 
-Hom hom_of(const Aff &p_m) {
+Hom hom_of(const ui::SwfAffine &p_m) {
 	Hom h;
 	h.identity = false;
 	h.m = { p_m.a, p_m.c, p_m.tx, p_m.b, p_m.d, p_m.ty, 0.0, 0.0, 1.0 };
@@ -260,10 +219,10 @@ ui::SwfPoint happly(const Hom &p_h, double p_x, double p_y) {
 Hom tilt_homography(const SwfTilt &p_tilt, double p_px, double p_py, const ui::SwfRect &p_stage) {
 	const double cx = (p_stage.x_min + p_stage.x_max) * 0.5;
 	const double cy = (p_stage.y_min + p_stage.y_max) * 0.5;
-	const double fov = std::clamp(double(p_tilt.perspective_fov), 1.0, 179.0) * kPi / 180.0;
+	const double fov = std::clamp(double(p_tilt.perspective_fov), 1.0, 179.0) * bf3::core::kDegToRad;
 	const double f = (p_stage.height() * 0.5) / std::tan(fov * 0.5);
-	const double ax = double(p_tilt.x_rotation) * kPi / 180.0;
-	const double ay = double(p_tilt.y_rotation) * kPi / 180.0;
+	const double ax = double(p_tilt.x_rotation) * bf3::core::kDegToRad;
+	const double ay = double(p_tilt.y_rotation) * bf3::core::kDegToRad;
 	const double sx = std::sin(ax);
 	const double cxr = std::cos(ax);
 	const double sy = std::sin(ay);
@@ -325,13 +284,13 @@ Vector4 vec4_of(const Color &p_c) {
 	return Vector4(p_c.r, p_c.g, p_c.b, p_c.a);
 }
 
-Bounds project_rect(const ui::SwfRect &p_r, const Aff &p_m, const Hom &p_h) {
+Bounds project_rect(const ui::SwfRect &p_r, const ui::SwfAffine &p_m, const Hom &p_h) {
 	Bounds b;
 	const double xs[2] = { p_r.x_min, p_r.x_max };
 	const double ys[2] = { p_r.y_min, p_r.y_max };
 	for (double x : xs) {
 		for (double y : ys) {
-			const ui::SwfPoint q = apply(p_m, x, y);
+			const ui::SwfPoint q = ui::swf_apply(p_m, x, y);
 			const ui::SwfPoint s = happly(p_h, q.x, q.y);
 			b.add(s.x, s.y);
 		}
@@ -909,7 +868,7 @@ struct Bf3SwfView::Impl {
 	Vector2i target_size{ 1280, 720 };
 	RenderingServer::ViewportMSAA msaa = RenderingServer::VIEWPORT_MSAA_4X;
 	SwfStageFit fit;
-	Aff stage_to_window;
+	ui::SwfAffine stage_to_window;
 	bool filters_enabled = true;
 	std::string isolated;
 	ui::SwfNodeId isolated_id = ui::kSwfNoNode;
@@ -1057,13 +1016,13 @@ struct Bf3SwfView::Impl {
 		fit.scale_y = ky;
 		fit.offset_x = (tw - w * kx) * 0.5 - double(st.x_min) * kx;
 		fit.offset_y = (th - h * ky) * 0.5 - double(st.y_min) * ky;
-		stage_to_window = Aff{ kx, 0.0, 0.0, ky, fit.offset_x, fit.offset_y };
+		stage_to_window = ui::SwfAffine{ kx, 0.0, 0.0, ky, fit.offset_x, fit.offset_y };
 	}
 
 	Hom window_tilt(ui::SwfNodeId p_id, const SwfTilt &p_tilt) const {
 		const ui::SwfSceneNode *n = node(p_id);
 		const Hom stage = tilt_homography(p_tilt, n->world.tx, n->world.ty, scene->stage());
-		return hmul(hmul(hom_of(stage_to_window), stage), hom_of(inverse(stage_to_window)));
+		return hmul(hmul(hom_of(stage_to_window), stage), hom_of(ui::swf_inverse(stage_to_window).value_or(kSingularAffine)));
 	}
 
 	Hom tilt_chain(ui::SwfNodeId p_from, ui::SwfNodeId p_floor) const {
@@ -1212,17 +1171,17 @@ struct Bf3SwfView::Impl {
 		for (const ui::SwfNodeId c : sprite->children) {
 			const ui::SwfSceneNode *k = node(c);
 			if (k != nullptr && k->shape != nullptr) {
-				const Bounds kb = project_rect(k->shape->bounds, aff_of(k->matrix), Hom{});
+				const Bounds kb = project_rect(k->shape->bounds, ui::swf_affine(k->matrix), Hom{});
 				sb.add(kb);
 			}
 		}
 		if (sb.empty()) {
 			return g;
 		}
-		const Aff w = mul(stage_to_window, aff_of(sprite->world));
+		const ui::SwfAffine w = ui::swf_concat(stage_to_window, ui::swf_affine(sprite->world));
 		g.sx = std::sqrt(w.a * w.a + w.b * w.b);
 		g.sy = std::sqrt(w.c * w.c + w.d * w.d);
-		const Aff win = mul(stage_to_window, aff_of(ui::SwfMatrix{}));
+		const ui::SwfAffine win = ui::swf_concat(stage_to_window, ui::swf_affine(ui::SwfMatrix{}));
 		g.sx /= std::sqrt(win.a * win.a + win.b * win.b);
 		g.sy /= std::sqrt(win.c * win.c + win.d * win.d);
 		if (!(g.sx > 1e-6) || !(g.sy > 1e-6)) {
@@ -1241,7 +1200,7 @@ struct Bf3SwfView::Impl {
 	}
 
 	double screen_scale(const ui::SwfSceneNode &p_node) const {
-		const Aff w = mul(stage_to_window, aff_of(p_node.world));
+		const ui::SwfAffine w = ui::swf_concat(stage_to_window, ui::swf_affine(p_node.world));
 		return std::sqrt(std::abs(w.a * w.d - w.b * w.c));
 	}
 
@@ -1251,8 +1210,8 @@ struct Bf3SwfView::Impl {
 		r_rec.grid = grid.active;
 		r_rec.built_scale_x = grid.sx;
 		r_rec.built_scale_y = grid.sy;
-		const Aff to_sprite = grid.active ? aff_of(p_node.matrix) : Aff{};
-		auto pos = [&](ui::SwfPoint p) { return grid.active ? apply(to_sprite, p.x, p.y) : p; };
+		const ui::SwfAffine to_sprite = grid.active ? ui::swf_affine(p_node.matrix) : ui::SwfAffine{};
+		auto pos = [&](ui::SwfPoint p) { return grid.active ? ui::swf_apply(to_sprite, p.x, p.y) : p; };
 		size_t count = 0;
 		Geometry solid;
 		const float no_rect[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -1297,14 +1256,14 @@ struct Bf3SwfView::Impl {
 				continue;
 			}
 			flush_solid();
-			const Aff texel = inverse(aff_of(fill.texel_to_shape()));
+			const ui::SwfAffine texel = ui::swf_inverse(ui::swf_affine(fill.texel_to_shape())).value_or(kSingularAffine);
 			Geometry geo;
 			for (size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
 				Vert v[3];
 				for (int k = 0; k < 3; ++k) {
 					const ui::SwfPoint sp = mesh.vertices[mesh.indices[i + size_t(k)]];
 					v[k].p = pos(sp);
-					v[k].uv = apply(texel, sp.x, sp.y);
+					v[k].uv = ui::swf_apply(texel, sp.x, sp.y);
 					v[k].color = Color(1.0f, 1.0f, 1.0f, 1.0f);
 				}
 				geo.add_warped(v[0], v[1], v[2], grid);
@@ -1858,7 +1817,7 @@ struct Bf3SwfView::Impl {
 		t.canvas = &r_canvas;
 		r_canvas.targets.push_back(p_id);
 		Bounds local;
-		const Aff to_local = inverse(aff_of(n.world));
+		const ui::SwfAffine to_local = ui::swf_inverse(ui::swf_affine(n.world)).value_or(kSingularAffine);
 		std::vector<ui::SwfNodeId> stack(n.children.begin(), n.children.end());
 		while (!stack.empty()) {
 			const ui::SwfNodeId id = stack.back();
@@ -1870,7 +1829,7 @@ struct Bf3SwfView::Impl {
 			NodeRec &rec = recs[id];
 			rec.seen = true;
 			build(id, rec);
-			const Aff m = mul(to_local, aff_of(k->world));
+			const ui::SwfAffine m = ui::swf_concat(to_local, ui::swf_affine(k->world));
 			for (const Piece &p : rec.pieces) {
 				if (p.has_bounds) {
 					local.add(project_rect(p.bounds, m, Hom{}));
@@ -1883,7 +1842,7 @@ struct Bf3SwfView::Impl {
 			local.add(1.0, 1.0);
 		}
 		t.local = ui::SwfRect{ float(local.x0), float(local.x1), float(local.y0), float(local.y1) };
-		const Aff w = mul(stage_to_window, aff_of(n.world));
+		const ui::SwfAffine w = ui::swf_concat(stage_to_window, ui::swf_affine(n.world));
 		const double sx = std::sqrt(w.a * w.a + w.b * w.b);
 		const double sy = std::sqrt(w.c * w.c + w.d * w.d);
 		const Vector2i size(std::clamp(int32_t(std::ceil(t.local.width() * sx)), 1, kMaxLayerSide), std::clamp(int32_t(std::ceil(t.local.height() * sy)), 1, kMaxLayerSide));
@@ -2136,7 +2095,7 @@ struct Bf3SwfView::Impl {
 			}
 			Canvas &c = *rec.canvas;
 			const ui::SwfSceneNode *frame = rec.grid ? node(n->parent) : n;
-			const Transform2D xf = xform_of(mul(stage_to_window, aff_of(frame->world)));
+			const Transform2D xf = xform_of(ui::swf_concat(stage_to_window, ui::swf_affine(frame->world)));
 			const std::array<Vector3, 3> h = rows(tilt_chain(p_id, c.tilt_floor));
 			Color cmul(0.0f, 0.0f, 0.0f, 0.0f);
 			Color cadd(1.0f, 1.0f, 1.0f, 1.0f);
@@ -2171,7 +2130,7 @@ struct Bf3SwfView::Impl {
 			Target &t = tt->second;
 			const Hom h = tilt_chain(p_id, t.canvas->tilt_floor);
 			const ui::SwfColorXform cx = relative_color(p_id, t.canvas->color_floor);
-			if (apply_quad(t.quad, t.quad_applied, xform_of(mul(stage_to_window, aff_of(n->world))), h, cx, 0, n->world_visible)) {
+			if (apply_quad(t.quad, t.quad_applied, xform_of(ui::swf_concat(stage_to_window, ui::swf_affine(n->world))), h, cx, 0, n->world_visible)) {
 				mark(t.canvas);
 			}
 		}
@@ -2189,7 +2148,7 @@ struct Bf3SwfView::Impl {
 			return b;
 		}
 		const ui::SwfSceneNode *frame = rec.grid ? node(n->parent) : n;
-		const Aff m = mul(stage_to_window, aff_of(frame->world));
+		const ui::SwfAffine m = ui::swf_concat(stage_to_window, ui::swf_affine(frame->world));
 		const Hom h = tilt_chain(p_id, p_c.tilt_floor);
 		for (const Piece &p : rec.pieces) {
 			if (p.has_bounds) {
@@ -2216,13 +2175,13 @@ struct Bf3SwfView::Impl {
 				}
 				const ui::SwfRect r{ float(k->origin.x), float(k->origin.x + k->extent.x), float(k->origin.y), float(k->origin.y + k->extent.y) };
 				const Hom h = k->kind == CanvasKind::Filter ? tilt_chain(k->owner, c.tilt_floor) : Hom{};
-				b.add(project_rect(r, Aff{}, h));
+				b.add(project_rect(r, ui::SwfAffine{}, h));
 			}
 			for (const ui::SwfNodeId tid : c.targets) {
 				const auto tt = targets.find(tid);
 				const ui::SwfSceneNode *n = node(tid);
 				if (tt != targets.end() && n != nullptr && n->world_visible) {
-					b.add(project_rect(tt->second.local, mul(stage_to_window, aff_of(n->world)), tilt_chain(tid, c.tilt_floor)));
+					b.add(project_rect(tt->second.local, ui::swf_concat(stage_to_window, ui::swf_affine(n->world)), tilt_chain(tid, c.tilt_floor)));
 				}
 			}
 			if (c.kind == CanvasKind::Mask) {

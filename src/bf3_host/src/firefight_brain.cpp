@@ -61,8 +61,6 @@ constexpr float kRangeLaneMinMetres = 20.0f;
 constexpr float kSharedLaneOffset = 1.2f;
 constexpr uint32_t kSharedLaneTries = 6;
 
-constexpr float kDeg = sim::kPi / 180.0f;
-
 uint64_t mix(uint64_t p_x) {
 	return sw::splitmix64(p_x);
 }
@@ -256,7 +254,7 @@ core::Result<std::vector<FirefightLane>> firefight_layout(const sim::CollisionWo
 	if (!std::isfinite(o[0]) || !std::isfinite(o[1]) || !std::isfinite(o[2]) || !std::isfinite(p_config.observer.yaw)) {
 		return core::make_error("firefight layout: non-finite observer pose");
 	}
-	const float fan = std::clamp(p_config.lane_fan_deg, 0.0f, 180.0f) * kDeg;
+	const float fan = std::clamp(p_config.lane_fan_deg, 0.0f, 180.0f) * core::kDegToRadF;
 	const float lane_min = std::max(p_config.lane_min_m, 1.0f);
 	const float lane_max = std::max(p_config.lane_max_m, lane_min);
 	const float pair_min = std::max(p_config.pair_min_m, 1.0f);
@@ -591,7 +589,7 @@ struct FirefightBrain::Impl {
 			const float on = float(p_tick - target_since) * sim::kTickSeconds;
 			const float decay = std::max(cfg.aim_sigma_decay_s, 1e-3f);
 			const float share = std::clamp(1.0f - on / decay, 0.0f, 1.0f);
-			const float sigma = (cfg.aim_sigma_end_deg + (cfg.aim_sigma_start_deg - cfg.aim_sigma_end_deg) * share) * kDeg;
+			const float sigma = (cfg.aim_sigma_end_deg + (cfg.aim_sigma_start_deg - cfg.aim_sigma_end_deg) * share) * core::kDegToRadF;
 			if (p_tick >= err_next) {
 				err_yaw = gauss(rng) * sigma;
 				err_pitch = gauss(rng) * sigma * kErrorPitchShare;
@@ -651,16 +649,16 @@ struct FirefightBrain::Impl {
 			}
 		}
 
-		const float yaw_step = kTurnRateDegS * kDeg * sim::kTickSeconds;
-		const float pitch_step = kPitchTurnRateDegS * kDeg * sim::kTickSeconds;
+		const float yaw_step = kTurnRateDegS * core::kDegToRadF * sim::kTickSeconds;
+		const float pitch_step = kPitchTurnRateDegS * core::kDegToRadF * sim::kTickSeconds;
 		view_yaw = wrap(view_yaw + std::clamp(wrap(want_yaw - view_yaw), -yaw_step, yaw_step));
-		want_pitch = std::clamp(want_pitch, -kMaxPitchDeg * kDeg, kMaxPitchDeg * kDeg);
+		want_pitch = std::clamp(want_pitch, -kMaxPitchDeg * core::kDegToRadF, kMaxPitchDeg * core::kDegToRadF);
 		view_pitch += std::clamp(want_pitch - view_pitch, -pitch_step, pitch_step);
-		const bool aligned = have_aim && std::fabs(wrap(want_yaw - view_yaw)) <= kFireConeDeg * kDeg && std::fabs(want_pitch - view_pitch) <= kFireConeDeg * kDeg;
+		const bool aligned = have_aim && std::fabs(wrap(want_yaw - view_yaw)) <= kFireConeDeg * core::kDegToRadF && std::fabs(want_pitch - view_pitch) <= kFireConeDeg * core::kDegToRadF;
 		if (sprint) {
 
 			const float len = std::sqrt(move_dx * move_dx + move_dz * move_dz);
-			sprint = len > 0.5f && std::fabs(wrap(yaw_of(move_dx, move_dz) - view_yaw)) <= kSprintConeDeg * kDeg;
+			sprint = len > 0.5f && std::fabs(wrap(yaw_of(move_dx, move_dz) - view_yaw)) <= kSprintConeDeg * core::kDegToRadF;
 		}
 
 		sw::WeaponInput in;

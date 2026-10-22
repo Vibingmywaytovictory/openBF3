@@ -99,25 +99,6 @@ Color look_colour(const std::array<float, 3> &p_rgb255, float p_alpha) {
 	return Color(p_rgb255[0] / 255.0f, p_rgb255[1] / 255.0f, p_rgb255[2] / 255.0f, p_alpha);
 }
 
-ui::SwfMatrix invert(const ui::SwfMatrix &p_m) {
-	const float det = p_m.a * p_m.d - p_m.b * p_m.c;
-	ui::SwfMatrix r;
-	if (std::fabs(det) < 1e-12f) {
-		return r;
-	}
-	r.a = p_m.d / det;
-	r.b = -p_m.b / det;
-	r.c = -p_m.c / det;
-	r.d = p_m.a / det;
-	r.tx = -(r.a * p_m.tx + r.c * p_m.ty);
-	r.ty = -(r.b * p_m.tx + r.d * p_m.ty);
-	return r;
-}
-
-Vector2 apply(const ui::SwfMatrix &p_m, float p_x, float p_y) {
-	return Vector2(p_m.a * p_x + p_m.c * p_y + p_m.tx, p_m.b * p_x + p_m.d * p_y + p_m.ty);
-}
-
 std::vector<uint8_t> image_bytes(Ref<Image> p_image, int32_t &r_w, int32_t &r_h) {
 	r_w = r_h = 0;
 	if (p_image.is_null() || p_image->is_empty()) {
@@ -659,7 +640,7 @@ void Bf3NativeHud::paint_minimap(const SwfEngineTarget &p_target, const ui::SwfS
 		minimap_parent_ = p_target.canvas_item;
 	}
 	const ui::SwfRect &b = p_target.local_bounds;
-	ui::SwfMatrix to_map;
+	ui::SwfAffine to_map;
 	const ui::SwfScene *scene = &p_scene;
 	const ui::SwfSceneNode *map = scene->node(p_target.node);
 	const ui::SwfSceneNode *owner = map != nullptr ? scene->node(map->parent) : nullptr;
@@ -667,10 +648,14 @@ void Bf3NativeHud::paint_minimap(const SwfEngineTarget &p_target, const ui::SwfS
 		owner = scene->node(owner->parent);
 	}
 	if (map != nullptr && owner != nullptr) {
-		to_map = ui::swf_concat(invert(map->world), owner->world);
+		const ui::SwfAffine owner_world = ui::swf_affine(owner->world);
+		const std::optional<ui::SwfAffine> map_inverse = ui::swf_inverse(ui::swf_affine(map->world));
+		to_map = map_inverse ? ui::swf_concat(*map_inverse, owner_world) : owner_world;
 	}
-	const Vector2 q0 = apply(to_map, 0.0f, 0.0f);
-	const Vector2 q1 = apply(to_map, ui::kMinimapSquareLocal, ui::kMinimapSquareLocal);
+	const ui::SwfPoint p0 = ui::swf_apply(to_map, 0.0, 0.0);
+	const ui::SwfPoint p1 = ui::swf_apply(to_map, ui::kMinimapSquareLocal, ui::kMinimapSquareLocal);
+	const Vector2 q0(p0.x, p0.y);
+	const Vector2 q1(p1.x, p1.y);
 	const Vector2 sq0(std::min(q0.x, q1.x), std::min(q0.y, q1.y));
 	const Vector2 sq1(std::max(q0.x, q1.x), std::max(q0.y, q1.y));
 	const Vector2 centre = (sq0 + sq1) * 0.5f;

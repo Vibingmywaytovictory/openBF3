@@ -130,7 +130,7 @@ Vec4 eval_one(const EmitterDef &p_e, const EvaluatorDef &p_ev, uint32_t p_slot, 
 			if (axis.x == 0 && axis.y == 0 && axis.z == 0) {
 				axis = { 0, 1, 0 };
 			}
-			const float angle = clampf(p_ev.rotate_vector.angle_degrees, 0.0f, 180.0f) * (kPi / 180.0f);
+			const float angle = clampf(p_ev.rotate_vector.angle_degrees, 0.0f, 180.0f) * core::kDegToRadF;
 			const float cos_theta = 1.0f - draw(p_seed, p_serial, p_slot, 0) * (1.0f - std::cos(angle));
 			const float sin_theta = std::sqrt(std::fmax(0.0f, 1.0f - cos_theta * cos_theta));
 			const float phi = p_ev.rotate_vector.rotate_within_plane ? 0.0f : 2.0f * kPi * draw(p_seed, p_serial, p_slot, 1);

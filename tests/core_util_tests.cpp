@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "bf3/core/math.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/finite.h"
 #include "bf3/core/util/format.h"
@@ -61,6 +62,14 @@ std::string fault_of(std::string_view p_text, const KeyValueGrammar<Sample> &p_g
 }
 
 TEST_SUITE("core-util-unit") {
+	TEST_CASE("core.util: one degrees-to-radians constant in double and float") {
+		CHECK(kDegToRad * 180.0 == doctest::Approx(3.14159265358979323846).epsilon(1e-15));
+		CHECK(kDegToRad == 3.14159265358979323846 / 180.0);
+		CHECK(kDegToRadF == 0.0174532925f);
+		CHECK(kDegToRadF == 0.017453292519943295f);
+		CHECK(double(kDegToRadF) == doctest::Approx(kDegToRad).epsilon(1e-7));
+	}
+
 	TEST_CASE("core.util: fmt is never truncated") {
 		CHECK(fmt("%d-%s", 7, "x") == "7-x");
 		const std::string wide(3000, 'a');

@@ -372,7 +372,7 @@ core::Result<StaticWorldShapes::Impl::Terrain> cook_static_terrain(const StaticT
 		return core::make_error(where + ": " + std::to_string(triangles.size()) + " patch triangles for " + std::to_string(marked.size()) + " marked samples");
 	}
 	info.patch_triangles = uint32_t(triangles.size());
-	const float cos_threshold = std::cos(p_options.active_edge_degrees * (3.14159265358979323846f / 180.0f));
+	const float cos_threshold = std::cos(p_options.active_edge_degrees * core::kDegToRadF);
 	if (!triangles.empty()) {
 		JPH::MeshShapeSettings settings(std::move(vertices), std::move(triangles));
 		settings.SetEmbedded();

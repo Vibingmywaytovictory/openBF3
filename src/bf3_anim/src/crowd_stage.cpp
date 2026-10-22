@@ -9,7 +9,6 @@ namespace {
 
 constexpr double kOffsetSeconds = 0.731;
 constexpr float kFacingStepDeg = 37.0f;
-constexpr float kDeg = 0.0174532925f;
 constexpr float kPi = 3.14159265f;
 
 struct Target {
@@ -20,7 +19,7 @@ struct Target {
 
 Vec3 dir_local(float p_deg, float p_speed) {
 
-	return Vec3{ std::sin(p_deg * kDeg) * p_speed, 0.0f, std::cos(p_deg * kDeg) * p_speed };
+	return Vec3{ std::sin(p_deg * core::kDegToRadF) * p_speed, 0.0f, std::cos(p_deg * core::kDegToRadF) * p_speed };
 }
 
 Target target_of(const CrowdStageSpec &p_spec, StagePhase p_phase, float p_u) {
@@ -46,7 +45,7 @@ Target target_of(const CrowdStageSpec &p_spec, StagePhase p_phase, float p_u) {
 			break;
 		case StagePhase::RunCircle: {
 
-			t.facing_turn = p_spec.circle_turn_deg_s * kDeg * p_u;
+			t.facing_turn = p_spec.circle_turn_deg_s * core::kDegToRadF * p_u;
 			t.local = dir_local(-p_spec.circle_turn_deg_s * p_u, p_spec.circle_speed);
 			break;
 		}
@@ -54,11 +53,11 @@ Target target_of(const CrowdStageSpec &p_spec, StagePhase p_phase, float p_u) {
 			t.local = dir_local(-45.0f, p_spec.circle_speed);
 			break;
 		case StagePhase::AimUp:
-			t.pitch = p_spec.aim_pitch_deg * kDeg;
+			t.pitch = p_spec.aim_pitch_deg * core::kDegToRadF;
 			break;
 		case StagePhase::AimDown:
 			t.local = dir_local(135.0f, p_spec.circle_speed);
-			t.pitch = -p_spec.aim_pitch_deg * kDeg;
+			t.pitch = -p_spec.aim_pitch_deg * core::kDegToRadF;
 			break;
 		case StagePhase::Count:
 			break;
@@ -124,7 +123,7 @@ CrowdSoldierInput stage_input(const CrowdStageSpec &p_spec, uint32_t p_i, double
 	in.position = stage_cell(p_spec, p_i);
 	const Schedule s = schedule_of(p_spec, p_i, p_t);
 	const Target t = ramped(p_spec, s);
-	const float base_yaw = p_spec.heading + kPi + float(p_i) * kFacingStepDeg * kDeg;
+	const float base_yaw = p_spec.heading + kPi + float(p_i) * kFacingStepDeg * core::kDegToRadF;
 	in.yaw = std::remainder(base_yaw + t.facing_turn, 2.0f * kPi);
 
 	const float cy = std::cos(in.yaw), sy = std::sin(in.yaw);

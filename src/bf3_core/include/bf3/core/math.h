@@ -4,9 +4,13 @@
 #include <compare>
 #include <cstddef>
 #include <iterator>
+#include <numbers>
 #include <type_traits>
 
 namespace bf3::core {
+
+inline constexpr double kDegToRad = std::numbers::pi / 180.0;
+inline constexpr float kDegToRadF = float(kDegToRad);
 
 template <class V, class F> struct ComponentIterator {
 	using iterator_category = std::forward_iterator_tag;

@@ -266,7 +266,7 @@ core::Result<StaticWorldShapes::Impl::Tile> cook_static_tile(StaticTileInput p_i
 	tile.tags = std::move(p_input.tags);
 
 	const JPH::Vec3 origin = static_tile_origin(tile.info.x, tile.info.z);
-	const float cos_threshold = std::cos(p_options.active_edge_degrees * (3.14159265358979323846f / 180.0f));
+	const float cos_threshold = std::cos(p_options.active_edge_degrees * core::kDegToRadF);
 	for (size_t layer = 0; layer < kStaticLayerCount; ++layer) {
 		if (layer == size_t(StaticLayer::Raycast) && !p_options.include_raycast) {
 			continue;

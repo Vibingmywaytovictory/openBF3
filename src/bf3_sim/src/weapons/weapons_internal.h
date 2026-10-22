@@ -47,7 +47,6 @@ private:
 };
 
 inline constexpr double kPiD = 3.14159265358979323846;
-inline constexpr double kDegToRad = kPiD / 180.0;
 
 inline DVec3 to_d(const Vec3 &p_v) {
 	return { double(p_v[0]), double(p_v[1]), double(p_v[2]) };

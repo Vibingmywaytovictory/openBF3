@@ -1,3 +1,4 @@
+#include "bf3/core/math.h"
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/util/text.h"
@@ -1045,7 +1046,6 @@ double hud_crosshair_dispersion(float p_spread_deg, float p_vertical_fov_deg, fl
 	if (!(p_spread_deg > 0.0f) || !(p_vertical_fov_deg > 0.0f) || !(p_vertical_fov_deg < 180.0f) || !(p_stage_height > 0.0f)) {
 		return 0.0;
 	}
-	constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
 	const double gap = double(p_stage_height) / 2.0 * std::tan(double(p_spread_deg) * kDegToRad) / std::tan(double(p_vertical_fov_deg) * kDegToRad / 2.0);
 	return gap / 100.0;
 }

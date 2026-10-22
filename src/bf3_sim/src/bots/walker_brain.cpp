@@ -414,7 +414,7 @@ WalkerBrain::WalkerBrain(uint32_t p_slot, uint64_t p_seed, const WalkerParams &p
 	m.period = std::max<uint32_t>(1, uint32_t(std::lround(float(kSimHz) / hz)));
 	m.phase = p_slot % m.period;
 	m.stuck_ticks = std::max<uint32_t>(m.period, seconds_to_ticks(std::max(p_params.stuck_seconds, 0.1f)));
-	m.turn_per_tick = std::max(p_params.yaw_rate_deg_s, 1.0f) * (kPi / 180.0f) * kTickSeconds;
+	m.turn_per_tick = std::max(p_params.yaw_rate_deg_s, 1.0f) * core::kDegToRadF * kTickSeconds;
 }
 
 WalkerBrain::~WalkerBrain() = default;

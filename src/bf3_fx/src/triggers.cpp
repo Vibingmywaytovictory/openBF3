@@ -69,7 +69,7 @@ Vec3 spread_direction(const Vec3 &p_axis, float p_degrees, uint64_t p_seed) {
 	if (!(p_degrees > 0.0f)) {
 		return p_axis;
 	}
-	const float max_rad = std::min(p_degrees, 180.0f) * (kPi / 180.0f);
+	const float max_rad = std::min(p_degrees, 180.0f) * core::kDegToRadF;
 	const float u = fx_unit(trigger_seed(p_seed, TriggerPurpose::ImpactSpread, 0));
 	const float v = fx_unit(trigger_seed(p_seed, TriggerPurpose::ImpactSpread, 1));
 	const float cos_t = 1.0f - u * (1.0f - std::cos(max_rad));
@@ -282,7 +282,6 @@ Transform fire_effect_offset(const Vec3 &p_offset, const Vec3 &p_rotation_degree
 			(p_rotation_degrees.x == 0 && p_rotation_degrees.y == 0 && p_rotation_degrees.z == 0)) {
 		return t;
 	}
-	const float d2r = kPi / 180.0f;
 	auto rot = [](Vec3 v, int axis, float a) {
 		const float c = std::cos(a), s = std::sin(a);
 		if (axis == 0) {
@@ -294,7 +293,7 @@ Transform fire_effect_offset(const Vec3 &p_offset, const Vec3 &p_rotation_degree
 		return Vec3{ c * v.x - s * v.y, s * v.x + c * v.y, v.z };
 	};
 	for (Vec3 *v : { &t.right, &t.up, &t.forward }) {
-		*v = rot(rot(rot(*v, 0, p_rotation_degrees.x * d2r), 1, p_rotation_degrees.y * d2r), 2, p_rotation_degrees.z * d2r);
+		*v = rot(rot(rot(*v, 0, p_rotation_degrees.x * core::kDegToRadF), 1, p_rotation_degrees.y * core::kDegToRadF), 2, p_rotation_degrees.z * core::kDegToRadF);
 	}
 	return t;
 }
@@ -459,7 +458,7 @@ DecalPlacement decal_placement(const DecalTemplate &p_template, uint64_t p_seed)
 	d.size = p_template.size + fx_unit(splitmix64(p_seed ^ 0x51ull)) * p_template.random_size;
 	const float deg =
 			p_template.rotation + (2.0f * fx_unit(splitmix64(p_seed ^ 0x52ull)) - 1.0f) * p_template.random_rotation;
-	d.rotation = deg * (kPi / 180.0f);
+	d.rotation = deg * core::kDegToRadF;
 	return d;
 }
 

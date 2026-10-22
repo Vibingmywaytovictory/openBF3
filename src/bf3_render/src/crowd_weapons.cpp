@@ -5,6 +5,7 @@
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/weapon_resolver.h"
 #include "bf3/core/ids.h"
+#include "bf3/core/math.h"
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/thread_pool.h"
 #include "bf3/render/mesh_cache.h"
@@ -23,7 +24,6 @@ using Clock = std::chrono::steady_clock;
 
 constexpr float kReloadRateMin = 0.5f;
 constexpr float kReloadRateMax = 2.0f;
-constexpr float kDegToRad = 0.0174532925f;
 
 anim::Quat axis_quat(float p_x, float p_y, float p_z, float p_rad) {
 	const float s = std::sin(0.5f * p_rad);
@@ -272,9 +272,9 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 			const anim::Xform inv_bind = anim::xform_inverse(xform_of(p_assets.weapon_skeleton.model_pose[size_t(w_root)]));
 			const anim::Vec3 r = entry->rotation_deg;
 
-			const anim::Quat q = anim::quat_mul(anim::quat_mul(axis_quat(0, 1, 0, r.y * kDegToRad), axis_quat(1, 0, 0, r.x * kDegToRad)),
-					axis_quat(0, 0, 1, r.z * kDegToRad));
-			const anim::Xform in_mesh{ anim::quat_mul(q, axis_quat(1, 0, 0, 90.0f * kDegToRad)), entry->offset };
+			const anim::Quat q = anim::quat_mul(anim::quat_mul(axis_quat(0, 1, 0, r.y * core::kDegToRadF), axis_quat(1, 0, 0, r.x * core::kDegToRadF)),
+					axis_quat(0, 0, 1, r.z * core::kDegToRadF));
+			const anim::Xform in_mesh{ anim::quat_mul(q, axis_quat(1, 0, 0, 90.0f * core::kDegToRadF)), entry->offset };
 			r_part.muzzle_joint = rig_root;
 			r_part.muzzle_offset = anim::xform_mul(inv_bind, in_mesh);
 			char line[256];

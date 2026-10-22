@@ -91,10 +91,6 @@ constexpr int kAliveEnd = 88;
 constexpr int kOwnHitFrames[] = { 12, 44, 76 };
 constexpr int kOtherHitFrames[] = { 26, 50 };
 
-double deg_to_rad(double p_deg) {
-	return p_deg * 3.14159265358979323846 / 180.0;
-}
-
 bool ink(const Color &p_c, float p_contrast = 0.25f) {
 	return std::max({ std::fabs(p_c.r - kBackground.r), std::fabs(p_c.g - kBackground.g), std::fabs(p_c.b - kBackground.b) }) > p_contrast;
 }
@@ -526,7 +522,7 @@ void Bf3HudCheck::verify_frame(const Frame &p_frame) {
 	bool cross_ok = r.crosshair_widget == alive;
 	if (cross_ok && alive) {
 		if (!p_frame.zoomed) {
-			const double want = std::round(0.5 * double(r.stage_height) * std::tan(deg_to_rad(p_frame.spread)) / std::tan(deg_to_rad(0.5 * p_frame.vfov)));
+			const double want = std::round(0.5 * double(r.stage_height) * std::tan(double(p_frame.spread) * bf3::core::kDegToRad) / std::tan(0.5 * double(p_frame.vfov) * bf3::core::kDegToRad));
 			const double err = std::fabs(double(r.crosshair_arm) - want);
 			++t.gap_frames;
 			t.max_gap_err = std::max(t.max_gap_err, err);

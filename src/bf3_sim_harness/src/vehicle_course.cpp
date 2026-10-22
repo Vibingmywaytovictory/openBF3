@@ -22,8 +22,6 @@ namespace bf3::sim {
 
 namespace {
 
-constexpr float kPi = 3.14159265358979323846f;
-constexpr float kDegrees = kPi / 180.0f;
 constexpr float kPlaceLift = 0.05f;
 
 Vec3 add(const Vec3 &p_a, const Vec3 &p_b) {
@@ -271,8 +269,8 @@ struct Leg {
 bool check_leg(Sampler &r_s, int32_t p_i, int32_t p_j, const Dir &p_d, float p_length, float p_max_degrees, bool p_width, Leg &r_leg) {
 	const float step = dir_step(p_d, r_s.grid());
 	const int32_t n = int32_t(std::ceil(p_length / step));
-	const float min_up = std::cos(p_max_degrees * kDegrees);
-	const float max_step = step * std::tan(p_max_degrees * kDegrees) + 0.15f;
+	const float min_up = std::cos(p_max_degrees * core::kDegToRadF);
+	const float max_step = step * std::tan(p_max_degrees * core::kDegToRadF) + 0.15f;
 	float prev_y = 0, prev2_y = 0, crest = 0;
 	for (int32_t k = 0; k <= n; ++k) {
 		const int32_t ci = p_i + k * p_d.di, cj = p_j + k * p_d.dj;
@@ -312,7 +310,7 @@ bool check_turnaround(Sampler &r_s, int32_t p_i, int32_t p_j, const Dir &p_d, fl
 	const float ci = float(p_i) + dv[0] * p_radius / r_s.grid();
 	const float cj = float(p_j) + dv[2] * p_radius / r_s.grid();
 	const int32_t r = int32_t(std::ceil(p_radius / r_s.grid()));
-	const float min_up = std::cos(p_max_degrees * kDegrees);
+	const float min_up = std::cos(p_max_degrees * core::kDegToRadF);
 	const int32_t i0 = int32_t(std::lround(ci)), j0 = int32_t(std::lround(cj));
 	for (int32_t di = -r; di <= r; ++di) {
 		for (int32_t dj = -r; dj <= r; ++dj) {
@@ -453,7 +451,7 @@ core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_co
 					}
 					case VehicleCourseKind::Circle: {
 
-						const float min_up = std::cos(p_search.max_flat_degrees * kDegrees);
+						const float min_up = std::cos(p_search.max_flat_degrees * core::kDegToRadF);
 						if (c->normal[1] < min_up) {
 							break;
 						}
@@ -473,7 +471,7 @@ core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_co
 								}
 							}
 						}
-						if (!ok || hi - lo > 2.0f * 25.0f * std::tan(p_search.max_flat_degrees * kDegrees)) {
+						if (!ok || hi - lo > 2.0f * 25.0f * std::tan(p_search.max_flat_degrees * core::kDegToRadF)) {
 							break;
 						}
 						course.a = cell_point(s, ci, cj, c->y);
@@ -485,7 +483,7 @@ core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_co
 					}
 					case VehicleCourseKind::Collision: {
 
-						const float min_up = std::cos(6.0f * kDegrees);
+						const float min_up = std::cos(6.0f * core::kDegToRadF);
 						if (c->normal[1] < min_up || !s.clear(ci, cj)) {
 							break;
 						}
@@ -551,13 +549,13 @@ core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_co
 					case VehicleCourseKind::SlopeIdle: {
 
 						const float ny = c->normal[1];
-						if (ny > std::cos(8.0f * kDegrees) || ny < std::cos(20.0f * kDegrees)) {
+						if (ny > std::cos(8.0f * core::kDegToRadF) || ny < std::cos(20.0f * core::kDegToRadF)) {
 							break;
 						}
 						bool ok = true;
 						for (const Dir &d : { Dir{ 1, 0 }, Dir{ -1, 0 }, Dir{ 0, 1 }, Dir{ 0, -1 } }) {
 							const Cell *n = s.ground(ci + d.di, cj + d.dj);
-							if (n == nullptr || !n->hit || dot(n->normal, c->normal) < std::cos(5.0f * kDegrees)) {
+							if (n == nullptr || !n->hit || dot(n->normal, c->normal) < std::cos(5.0f * core::kDegToRadF)) {
 								ok = false;
 								break;
 							}
@@ -581,7 +579,7 @@ core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_co
 						course.a = p;
 						course.b = add(p, mul(uphill, 10.0f));
 						course.start = place_on(p, c->normal, uphill);
-						course.slope_degrees = std::acos(std::min(1.0f, ny)) / kDegrees;
+						course.slope_degrees = std::acos(std::min(1.0f, ny)) / core::kDegToRadF;
 						course.found = true;
 						course.seed = seed;
 						break;

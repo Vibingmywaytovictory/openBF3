@@ -68,7 +68,7 @@ inline StageCamera stage_camera(const CrowdStageSpec &p_spec) {
 }
 
 inline float stage_frustum_margin(const CrowdStageSpec &p_spec, const StageCamera &p_camera, float p_aspect) {
-	const float tv = std::tan(p_camera.fov_y_deg * 0.5f * 0.0174532925f);
+	const float tv = std::tan(p_camera.fov_y_deg * 0.5f * core::kDegToRadF);
 	const float th = tv * p_aspect;
 	Vec3 f{ p_camera.target.x - p_camera.position.x, p_camera.target.y - p_camera.position.y, p_camera.target.z - p_camera.position.z };
 	const float fl = std::sqrt(f.x * f.x + f.y * f.y + f.z * f.z);

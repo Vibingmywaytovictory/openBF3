@@ -1,6 +1,7 @@
 #include "bf3/anim/viewmodel_anim.h"
 
 #include "bf3/anim/layers.h"
+#include "bf3/core/math.h"
 #include "bf3/core/util/text.h"
 
 #include <algorithm>
@@ -14,7 +15,6 @@ namespace bf3::anim {
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
-constexpr float kDegToRad = float(kPi / 180.0);
 constexpr float kMaxFrameSeconds = 0.25f;
 
 float clamp01(float p_w) {
@@ -380,11 +380,10 @@ AdsFrame AdsCamera::step(const AdsParams &p_params, bool p_zoomed, float p_dt) {
 
 ViewAngles camera_view_angles(double p_view_yaw, double p_view_pitch, float p_recoil_pitch_deg, float p_recoil_yaw_deg, float p_kick_pitch_deg,
 		float p_kick_yaw_deg) {
-	constexpr double kDeg = kPi / 180.0;
-	constexpr double kPitchLimit = 89.99 * kDeg;
+	constexpr double kPitchLimit = 89.99 * core::kDegToRad;
 	ViewAngles a;
-	a.yaw = p_view_yaw + (double(p_recoil_yaw_deg) + double(p_kick_yaw_deg)) * kDeg;
-	a.pitch = std::clamp(p_view_pitch + (double(p_recoil_pitch_deg) + double(p_kick_pitch_deg)) * kDeg, -kPitchLimit, kPitchLimit);
+	a.yaw = p_view_yaw + (double(p_recoil_yaw_deg) + double(p_kick_yaw_deg)) * core::kDegToRad;
+	a.pitch = std::clamp(p_view_pitch + (double(p_recoil_pitch_deg) + double(p_kick_pitch_deg)) * core::kDegToRad, -kPitchLimit, kPitchLimit);
 	return a;
 }
 
@@ -567,7 +566,7 @@ struct ViewmodelAnimator::Impl {
 			case VmClip::Deploy: {
 				const float k = 1.0f - smoothstep01(u);
 				r_dy -= tuning.deploy_drop * k * p_w;
-				r_pitch -= 35.0f * kDegToRad * k * p_w;
+				r_pitch -= 35.0f * core::kDegToRadF * k * p_w;
 				break;
 			}
 			case VmClip::Reload:
@@ -575,13 +574,13 @@ struct ViewmodelAnimator::Impl {
 			case VmClip::Bolt: {
 				const float h = hump(u);
 				r_dy -= tuning.reload_drop * h * p_w;
-				r_roll += 25.0f * kDegToRad * h * p_w;
-				r_pitch += 10.0f * kDegToRad * h * p_w;
+				r_roll += 25.0f * core::kDegToRadF * h * p_w;
+				r_pitch += 10.0f * core::kDegToRadF * h * p_w;
 				break;
 			}
 			case VmClip::Throw: {
 				const float h = hump(u);
-				r_pitch += 40.0f * kDegToRad * h * p_w;
+				r_pitch += 40.0f * core::kDegToRadF * h * p_w;
 				r_dz -= 0.10f * h * p_w;
 				r_dy += 0.05f * h * p_w;
 				break;
@@ -589,7 +588,7 @@ struct ViewmodelAnimator::Impl {
 			case VmClip::Knife: {
 				const float h = hump(u);
 				r_dz -= 0.18f * h * p_w;
-				r_pitch -= 10.0f * kDegToRad * h * p_w;
+				r_pitch -= 10.0f * core::kDegToRadF * h * p_w;
 				break;
 			}
 			default:
@@ -740,8 +739,8 @@ struct ViewmodelAnimator::Impl {
 		if (!sprint_clip && sprint_w > 0.0f) {
 			const float s = smoothstep01(sprint_w);
 			dy -= 0.05f * s;
-			yaw += 25.0f * kDegToRad * s;
-			pitch -= 10.0f * kDegToRad * s;
+			yaw += 25.0f * core::kDegToRadF * s;
+			pitch -= 10.0f * core::kDegToRadF * s;
 		}
 
 		const bool loco_applied = delta_loco && vm_loco_apply(*delta_loco, p_input, sprint_w, ads, dt, tuning.sprint_blend_seconds, r_pose, r_out);
@@ -765,7 +764,7 @@ struct ViewmodelAnimator::Impl {
 		const float by = bob_amp.x * 0.5f * float(std::sin(2.0 * bob_phase));
 		Xform off;
 		off.t = Vec3{ sway_x.x + bx, sway_y.x + by + dy, kick_back.x + dz };
-		off.q = camera_rotation(pitch + kick_pitch.x * kDegToRad, yaw, roll);
+		off.q = camera_rotation(pitch + kick_pitch.x * core::kDegToRadF, yaw, roll);
 		r_out.weapon_offset = off;
 		r_out.camera_recoil_pitch_deg = cam_pitch.x;
 		r_out.camera_recoil_yaw_deg = cam_yaw.x;

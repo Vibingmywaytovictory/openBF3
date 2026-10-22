@@ -101,7 +101,7 @@ Vec3 sample_cone(const Vec3 &p_aim, float p_spread_degrees, float p_u_radius, fl
 		return to_f(aim);
 	}
 	const double u = std::clamp(double(p_u_radius), 0.0, 1.0);
-	const double radius = double(p_spread_degrees) * kDegToRad * (p_disc == DiscDistribution::UniformArea ? std::sqrt(u) : u);
+	const double radius = double(p_spread_degrees) * core::kDegToRad * (p_disc == DiscDistribution::UniformArea ? std::sqrt(u) : u);
 	double sr, cr, sa, ca;
 	poly_sincos(radius, sr, cr);
 	poly_sincos(2.0 * kPiD * double(p_u_angle), sa, ca);
@@ -141,9 +141,9 @@ RecoilOffset recover_recoil_tick(const RecoilOffset &p_offset, const WeaponSimDe
 
 Vec3 aim_direction(uint16_t p_yaw, int16_t p_pitch, const RecoilOffset &p_offset) {
 	using namespace detail;
-	const double yaw = double(yaw_radians(p_yaw)) + double(p_offset.yaw) * kDegToRad;
-	constexpr double kMaxPitch = 89.99 * kDegToRad;
-	const double pitch = std::clamp(double(pitch_radians(p_pitch)) + double(p_offset.pitch) * kDegToRad, -kMaxPitch, kMaxPitch);
+	const double yaw = double(yaw_radians(p_yaw)) + double(p_offset.yaw) * core::kDegToRad;
+	constexpr double kMaxPitch = 89.99 * core::kDegToRad;
+	const double pitch = std::clamp(double(pitch_radians(p_pitch)) + double(p_offset.pitch) * core::kDegToRad, -kMaxPitch, kMaxPitch);
 	double sy, cy, sp, cp;
 	poly_sincos(yaw, sy, cy);
 	poly_sincos(pitch, sp, cp);

@@ -4,6 +4,7 @@
 #include "native_hud.h"
 #include "swf_view.h"
 
+#include "bf3/core/math.h"
 #include "bf3/core/ui/hud_widgets.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/level_load.h"
@@ -61,7 +62,6 @@ constexpr float kScanBelowSpawns = 5.0f;
 constexpr float kScanStep = 0.05f;
 constexpr uint32_t kScanMaxFloors = 64;
 constexpr float kFloorNormalY = 0.7f;
-constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
 
 std::string xyz(const sim::Vec3 &p_v) {
 	return "(" + std::to_string(p_v[0]) + ", " + std::to_string(p_v[1]) + ", " + std::to_string(p_v[2]) + ")";
@@ -116,8 +116,8 @@ ui::HudModel native_hud_moment_model(const NativeHudMoment &p_moment, const ui::
 	w.firing_mode_types = (1u << 0) | (1u << 2);
 	w.active_weapon_crosshair = 1;
 	w.zoomed = !p_moment.crosshair;
-	const double half = double(p_vfov_deg) * kDegToRad / 2.0;
-	w.dispersion = p_stage_height > 0.0f && p_vfov_deg > 0.0f ? float(std::atan(double(p_moment.dispersion_px) * std::tan(half) / (double(p_stage_height) / 2.0)) / kDegToRad) : 0.0f;
+	const double half = double(p_vfov_deg) * bf3::core::kDegToRad / 2.0;
+	w.dispersion = p_stage_height > 0.0f && p_vfov_deg > 0.0f ? float(std::atan(double(p_moment.dispersion_px) * std::tan(half) / (double(p_stage_height) / 2.0)) / bf3::core::kDegToRad) : 0.0f;
 	w.absolute_dispersion = w.dispersion;
 	m.team.friendly_team = 1;
 	m.team.enemy_team1 = 2;
@@ -136,7 +136,7 @@ ui::HudModel native_hud_moment_model(const NativeHudMoment &p_moment, const ui::
 }
 
 float native_hud_moment_view_yaw(const NativeHudMoment &p_moment) {
-	return float(double(p_moment.compass_frame) * kDegToRad);
+	return float(double(p_moment.compass_frame) * bf3::core::kDegToRad);
 }
 
 NativeHudMinimapPose native_hud_moment_pose(const NativeHudMoment &p_moment) {

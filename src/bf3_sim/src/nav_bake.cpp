@@ -246,7 +246,7 @@ core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavPa
 	}
 
 	std::vector<unsigned char> areas(ntris, RC_NULL_AREA);
-	const float cos_slope = std::cos(p_params.max_slope_degrees * (3.14159265358979323846f / 180.0f));
+	const float cos_slope = std::cos(p_params.max_slope_degrees * core::kDegToRadF);
 	for (size_t t = 0; t < ntris; ++t) {
 		const float *a = v + t * 9;
 		const float e0[3] = { a[3] - a[0], a[4] - a[1], a[5] - a[2] };

@@ -54,7 +54,6 @@ constexpr double kEdge = 2.0;
 constexpr double kScaleEdge = 3.0;
 constexpr double kTiltMeanDiff = 0.04;
 constexpr int32_t kColorLevels = 2;
-constexpr double kPi = 3.14159265358979323846;
 constexpr std::array<std::pair<int, const char *>, 3> kTargets{ { { 1, "instance1.HudBackgroundWidget_01.Background.renderHolder" },
 		{ 1, "instance1.Minimap_01.map" }, { 0, "instance1.Health_01.Health.healthHolder.EKGRenderTarget" } } };
 constexpr std::array<const char *, 3> kTargetRenderers{ "t2;iBgDraw", "t2;iUIMinimapRender", "t2;iUISoldierCompRender" };
@@ -267,9 +266,9 @@ Expect expect_of(const ui::SwfScene &p_scene, const ui::SwfFontSet *p_fonts, ui:
 std::array<double, 9> independent_tilt(double p_px, double p_py, const ui::SwfRect &p_stage, const SwfStageFit &p_fit) {
 	const double cx = (p_stage.x_min + p_stage.x_max) / 2.0;
 	const double cy = (p_stage.y_min + p_stage.y_max) / 2.0;
-	const double f = (p_stage.height() / 2.0) / std::tan(double(kAs2Perspective) / 2.0 * kPi / 180.0);
-	const double ax = double(kAs2TiltX) * kPi / 180.0;
-	const double ay = double(kAs2TiltY) * kPi / 180.0;
+	const double f = (p_stage.height() / 2.0) / std::tan(double(kAs2Perspective) / 2.0 * bf3::core::kDegToRad);
+	const double ax = double(kAs2TiltX) * bf3::core::kDegToRad;
+	const double ay = double(kAs2TiltY) * bf3::core::kDegToRad;
 	auto project = [&](double p_x, double p_y) {
 		const double u = p_x - p_px;
 		const double v = p_y - p_py;

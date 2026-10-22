@@ -101,8 +101,6 @@ constexpr float kIslandProgressMetres = 0.5f;
 constexpr float kIslandRings[] = { 2.0f, 4.0f, 6.0f, 9.0f, 12.0f, 16.0f, 24.0f, 32.0f };
 constexpr size_t kMaxBrainSlots = 256;
 
-constexpr float kDeg = sim::kPi / 180.0f;
-
 uint64_t mix(uint64_t p_x) {
 	return sw::splitmix64(p_x);
 }
@@ -680,7 +678,7 @@ struct TdmBrain::Impl {
 		}
 		const sim::Vec3 dir = view_dir(sim::yaw_radians(p_other.yaw), sim::pitch_radians(p_other.pitch));
 		const float cosang = ((to[0] - from[0]) * dir[0] + (to[1] - from[1]) * dir[1] + (to[2] - from[2]) * dir[2]) / d;
-		return cosang >= std::cos(std::clamp(cfg().aims_at_me_deg, 0.0f, 90.0f) * kDeg);
+		return cosang >= std::cos(std::clamp(cfg().aims_at_me_deg, 0.0f, 90.0f) * core::kDegToRadF);
 	}
 
 	void check_shots(sim::Tick p_tick, const sim::SoldierState &p_self) {
@@ -1021,7 +1019,7 @@ struct TdmBrain::Impl {
 				look_yaw = view_yaw;
 				look_until = std::max(look_until, p_tick + kLookMinTicks);
 			} else if (p_tick >= look_until) {
-				const float turn = uniform(rng, kLookMinDeg, kLookMaxDeg) * kDeg;
+				const float turn = uniform(rng, kLookMinDeg, kLookMaxDeg) * core::kDegToRadF;
 				look_yaw = wrap(view_yaw + (unit(rng) < 0.5f ? -turn : turn));
 				look_until = p_tick + uniform_u(rng, kLookMinTicks, kLookMaxTicks);
 			}
@@ -1054,7 +1052,7 @@ struct TdmBrain::Impl {
 					const float crossing = std::sqrt(vx * vx + vy * vy + vz * vz);
 					const float own = std::sqrt(p_state.velocity[0] * p_state.velocity[0] + p_state.velocity[2] * p_state.velocity[2]);
 					const float on = float(p_tick - target_since) * sim::kTickSeconds;
-					const float sigma = sim::bots::aim_error(c.aim, skill, on, own > 0.5f, std::isfinite(crossing) ? crossing : 0.0f) * kDeg;
+					const float sigma = sim::bots::aim_error(c.aim, skill, on, own > 0.5f, std::isfinite(crossing) ? crossing : 0.0f) * core::kDegToRadF;
 					if (p_tick >= err_next) {
 						err_yaw = gauss(rng) * sigma;
 						err_pitch = gauss(rng) * sigma * kErrorPitchShare;
@@ -1067,7 +1065,7 @@ struct TdmBrain::Impl {
 					const float hd = horizontal(p_state.position, ts.position);
 					if (hd <= c.knife_within_m && slot_def(kSlotKnife) != nullptr) {
 						const float behind = std::fabs(wrap(yaw_of(p_state.position[0] - ts.position[0], p_state.position[2] - ts.position[2]) - sim::yaw_radians(ts.yaw)));
-						if (behind >= kKnifeBehindDeg * kDeg && knife_until <= p_tick) {
+						if (behind >= kKnifeBehindDeg * core::kDegToRadF && knife_until <= p_tick) {
 							knife_until = p_tick + kKnifeTicks;
 							sh.count(&TdmBotStats::knife_attacks, uint64_t(1));
 						}
@@ -1179,20 +1177,20 @@ struct TdmBrain::Impl {
 			sprint = false;
 		}
 
-		const float yaw_step = kTurnRateDegS * kDeg * sim::kTickSeconds;
-		const float pitch_step = kPitchTurnRateDegS * kDeg * sim::kTickSeconds;
+		const float yaw_step = kTurnRateDegS * core::kDegToRadF * sim::kTickSeconds;
+		const float pitch_step = kPitchTurnRateDegS * core::kDegToRadF * sim::kTickSeconds;
 		view_yaw = wrap(view_yaw + std::clamp(wrap(want_yaw - view_yaw), -yaw_step, yaw_step));
-		want_pitch = std::clamp(want_pitch, -kMaxPitchDeg * kDeg, kMaxPitchDeg * kDeg);
+		want_pitch = std::clamp(want_pitch, -kMaxPitchDeg * core::kDegToRadF, kMaxPitchDeg * core::kDegToRadF);
 		view_pitch += std::clamp(want_pitch - view_pitch, -pitch_step, pitch_step);
 		if (!std::isfinite(view_yaw) || !std::isfinite(view_pitch)) {
 			view_yaw = sim::yaw_radians(p_state.yaw);
 			view_pitch = 0.0f;
 		}
-		const float cone = (trigger == Trigger::Defib ? kDefibConeDeg : kFireConeDeg) * kDeg;
+		const float cone = (trigger == Trigger::Defib ? kDefibConeDeg : kFireConeDeg) * core::kDegToRadF;
 		const bool aligned = have_aim && std::fabs(wrap(want_yaw - view_yaw)) <= cone && std::fabs(want_pitch - view_pitch) <= cone;
 		if (sprint) {
 			const float len = std::sqrt(move_dx * move_dx + move_dz * move_dz);
-			sprint = !have_aim && len > 0.5f && std::fabs(wrap(yaw_of(move_dx, move_dz) - view_yaw)) <= kSprintConeDeg * kDeg;
+			sprint = !have_aim && len > 0.5f && std::fabs(wrap(yaw_of(move_dx, move_dz) - view_yaw)) <= kSprintConeDeg * core::kDegToRadF;
 		}
 
 		sw::WeaponInput in;
@@ -1313,14 +1311,14 @@ struct TdmBrain::Impl {
 				in.zoom = zoom && gun && in_hand && !busy;
 
 				if (gun) {
-					comp_yaw = skill * ss.recoil.yaw * kDeg;
-					comp_pitch = skill * ss.recoil.pitch * kDeg;
+					comp_yaw = skill * ss.recoil.yaw * core::kDegToRadF;
+					comp_pitch = skill * ss.recoil.pitch * core::kDegToRadF;
 				}
 			}
 		}
 
 		cmd.yaw = sim::quantize_yaw(wrap(view_yaw - comp_yaw));
-		cmd.pitch = sim::quantize_pitch(std::clamp(view_pitch - comp_pitch, -kMaxPitchDeg * kDeg, kMaxPitchDeg * kDeg));
+		cmd.pitch = sim::quantize_pitch(std::clamp(view_pitch - comp_pitch, -kMaxPitchDeg * core::kDegToRadF, kMaxPitchDeg * core::kDegToRadF));
 		cmd.pose = pose;
 		const float sy = std::sin(view_yaw), cy = std::cos(view_yaw);
 		const float fwd = move_dx * sy + move_dz * cy;
@@ -1445,7 +1443,7 @@ struct TdmBrain::Impl {
 		const float gr = std::max(-d->projectile.gravity, 0.1f);
 		const float s = std::clamp(gr * h / (v * v), 0.0f, 1.0f);
 		r_yaw = yaw_of(dx, dz);
-		r_pitch = std::clamp(0.5f * std::asin(s), 10.0f * kDeg, 45.0f * kDeg);
+		r_pitch = std::clamp(0.5f * std::asin(s), 10.0f * core::kDegToRadF, 45.0f * core::kDegToRadF);
 		r_aim = true;
 		r_slot = kSlotGrenade;
 		r_trigger = Trigger::Grenade;

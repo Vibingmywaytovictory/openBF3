@@ -590,6 +590,46 @@ TEST_SUITE("ui-swf-unit") {
 		CHECK(map->find("nothing") == nullptr);
 	}
 
+	TEST_CASE("swf: affine concat, inverse and point transform") {
+		const SwfMatrix rot_scale{ 0.8f, 0.6f, -1.2f, 1.6f, 238.0f, -15.5f };
+		const SwfAffine m = swf_affine(rot_scale);
+		CHECK(m.a == doctest::Approx(0.8));
+		CHECK(m.ty == doctest::Approx(-15.5));
+		const SwfPoint p = swf_apply(m, 10.0, 20.0);
+		CHECK(p.x == doctest::Approx(0.8 * 10.0 - 1.2 * 20.0 + 238.0));
+		CHECK(p.y == doctest::Approx(0.6 * 10.0 + 1.6 * 20.0 - 15.5));
+
+		const std::optional<SwfAffine> inv = swf_inverse(m);
+		REQUIRE(inv.has_value());
+		const SwfPoint back = swf_apply(*inv, p.x, p.y);
+		CHECK(back.x == doctest::Approx(10.0).epsilon(1e-6));
+		CHECK(back.y == doctest::Approx(20.0).epsilon(1e-6));
+		for (const SwfAffine &id : { swf_concat(m, *inv), swf_concat(*inv, m) }) {
+			CHECK(id.a == doctest::Approx(1.0));
+			CHECK(id.b == doctest::Approx(0.0));
+			CHECK(id.c == doctest::Approx(0.0));
+			CHECK(id.d == doctest::Approx(1.0));
+			CHECK(id.tx == doctest::Approx(0.0));
+			CHECK(id.ty == doctest::Approx(0.0));
+		}
+
+		const SwfMatrix child{ 1.5f, 0.0f, 0.25f, 0.5f, -3.0f, 486.95f };
+		const SwfMatrix fm = swf_concat(rot_scale, child);
+		const SwfAffine dm = swf_concat(m, swf_affine(child));
+		CHECK(dm.a == doctest::Approx(fm.a));
+		CHECK(dm.b == doctest::Approx(fm.b));
+		CHECK(dm.c == doctest::Approx(fm.c));
+		CHECK(dm.d == doctest::Approx(fm.d));
+		CHECK(dm.tx == doctest::Approx(fm.tx));
+		CHECK(dm.ty == doctest::Approx(fm.ty));
+
+		CHECK_FALSE(swf_inverse(SwfAffine{ 0.0, 0.0, 0.0, 0.0, 5.0, 6.0 }).has_value());
+		CHECK_FALSE(swf_inverse(SwfAffine{ 1.0, 2.0, 2.0, 4.0, 0.0, 0.0 }).has_value());
+		CHECK(swf_inverse(SwfAffine{}) == SwfAffine{});
+		static_assert(swf_apply(SwfAffine{ 2.0, 0.0, 0.0, 3.0, 1.0, 1.0 }, 1.0, 1.0) == SwfPoint{ 3.0f, 4.0f });
+		static_assert(!swf_inverse(SwfAffine{ 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 }).has_value());
+	}
+
 	TEST_CASE("swf: library helpers and the in-memory library") {
 		CHECK(swf_movie_name_for_url("Ammo.swf") == "ui/assets/ammo");
 		CHECK(swf_movie_name_for_url("HudTextures.swf") == "ui/assets/hudtextures");

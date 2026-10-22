@@ -505,7 +505,7 @@ struct M2aCheck::State {
 			bool bad = r.crosshair_widget != e->widget;
 			std::string why = bad ? "widget" : "";
 			if (!bad && r.crosshair_widget) {
-				const double want = std::round(0.5 * double(r.stage_height) * std::tan(e->spread * kPi / 180.0) / std::tan(0.5 * e->vfov * kPi / 180.0));
+				const double want = std::round(0.5 * double(r.stage_height) * std::tan(e->spread * bf3::core::kDegToRad) / std::tan(0.5 * e->vfov * bf3::core::kDegToRad));
 				const double err = std::fabs(double(r.crosshair_arm) - want);
 				if (!e->zoomed) {
 					gap_err_max = std::max(gap_err_max, err);
@@ -1664,7 +1664,7 @@ void M2aCheck::State::kit_m67(const std::string &p_tag) {
 			st.mark();
 			st.counter = uint32_t(st.g.server_detonations.size());
 			st.detonation_time = -1;
-			st.mapper().script_view(st.mapper().view().yaw, float(25.0 * kPi / 180.0));
+			st.mapper().script_view(st.mapper().view().yaw, float(25.0 * bf3::core::kDegToRad));
 			st.mapper().script_hold(Action::Fire, true);
 		}
 		if (p_t >= 0.5) {
@@ -1916,11 +1916,10 @@ void M2aCheck::State::build_ads() {
 			double yaw = 0, pitch = 0;
 			camera_view_angles_of(cam, yaw, pitch);
 			const ViewAngles &v = st.mapper().view();
-			constexpr double kDeg = kPi / 180.0;
 			double dy = yaw - double(v.yaw);
 			dy = std::remainder(dy, 2.0 * kPi);
-			const double rp = (pitch - double(v.pitch)) / kDeg - double(vm->output().camera_recoil_pitch_deg);
-			const double ry = dy / kDeg - double(vm->output().camera_recoil_yaw_deg);
+			const double rp = (pitch - double(v.pitch)) / bf3::core::kDegToRad - double(vm->output().camera_recoil_pitch_deg);
+			const double ry = dy / bf3::core::kDegToRad - double(vm->output().camera_recoil_yaw_deg);
 			const double err = std::max(std::fabs(rp - double(st.g.weapon.recoil.pitch)), std::fabs(ry - double(st.g.weapon.recoil.yaw)));
 			++st.frames_checked;
 			st.first_damage = std::max(st.first_damage, err);
@@ -2318,7 +2317,7 @@ void M2aCheck::State::build_audio() {
 	full_magazine();
 	add("audio: aim up", 1.0, [](State &st, double p_t, bool p_first) {
 		if (p_first) {
-			st.mapper().script_view(st.mapper().view().yaw, float(kAudioPitchDeg * kPi / 180.0));
+			st.mapper().script_view(st.mapper().view().yaw, float(kAudioPitchDeg * bf3::core::kDegToRad));
 		}
 		return p_t >= 0.5;
 	});
@@ -2637,7 +2636,7 @@ void M2aCheck::State::build_fx() {
 				const sim::Vec3 eye = { feet[0], feet[1] + eye_h, feet[2] };
 				for (int h = 0; h < 72 && !surface.found; ++h) {
 					for (const float pitch_deg : { -12.0f, -6.0f, -2.0f, 3.0f, 8.0f }) {
-						const double yaw = double(h) * 5.0 * kPi / 180.0, pitch = double(pitch_deg) * kPi / 180.0;
+						const double yaw = double(h) * 5.0 * bf3::core::kDegToRad, pitch = double(pitch_deg) * bf3::core::kDegToRad;
 						const sim::Vec3 dir = { float(std::sin(yaw) * std::cos(pitch)), float(std::sin(pitch)), float(std::cos(yaw) * std::cos(pitch)) };
 						sim::StaticHit hit;
 						if (!st.g.world->ray(eye, { dir[0] * 30.0f, dir[1] * 30.0f, dir[2] * 30.0f }, sim::query_mask::kMovement, &hit)) {

@@ -14,7 +14,6 @@ namespace bf3::sim::bots {
 
 namespace {
 
-constexpr float kDeg = kPi / 180.0f;
 constexpr float kMovingSpeed = 0.5f;
 constexpr size_t kMaxSlots = 256;
 
@@ -145,8 +144,8 @@ uint32_t Perception::update(const PerceptionInput &p_in) {
 	const bool eye_ok = finite(p_in.eye);
 	const float view_yaw = yaw_radians(p_in.yaw);
 	const float view_pitch = pitch_radians(p_in.pitch);
-	const float half_h = std::clamp(params_.fov_h_deg, 0.0f, 360.0f) * 0.5f * kDeg;
-	const float half_v = std::clamp(params_.fov_v_deg, 0.0f, 180.0f) * 0.5f * kDeg;
+	const float half_h = std::clamp(params_.fov_h_deg, 0.0f, 360.0f) * 0.5f * core::kDegToRadF;
+	const float half_v = std::clamp(params_.fov_v_deg, 0.0f, 180.0f) * 0.5f * core::kDegToRadF;
 	for (size_t s = 0; s < n && eye_ok; ++s) {
 		if (!is_enemy(s) || !is_alive(s) || !finite(p_in.states[s].position)) {
 			continue;

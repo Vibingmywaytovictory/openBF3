@@ -1,5 +1,6 @@
 #include "bf3/anim/crowd_eval.h"
 
+#include "bf3/core/math.h"
 #include "bf3/core/util/finite.h"
 #include "bf3/core/worker_group.h"
 
@@ -18,7 +19,6 @@ namespace {
 using Clock = std::chrono::steady_clock;
 
 constexpr float kReloadRampSeconds = 0.15f;
-constexpr float kDegToRad = 0.0174532925f;
 
 using bf3::core::finite;
 
@@ -223,7 +223,7 @@ void CrowdEvaluator::Impl::evaluate(uint32_t p_i) {
 	const bool up = pitch > 0.0f;
 	const float full_deg = up ? config.aim_up_full_pitch_deg : config.aim_down_full_pitch_deg;
 	if (pitch != 0.0f && full_deg > 0.0f) {
-		const float aw = std::min(1.0f, std::fabs(pitch) / (full_deg * kDegToRad));
+		const float aw = std::min(1.0f, std::fabs(pitch) / (full_deg * core::kDegToRadF));
 		const BoneMask *mask = up ? aim_up_mask : aim_down_mask;
 		if (mask != nullptr && aw > 0.0f) {
 			apply_additive(s.pose, up ? aim_up : aim_down, *mask, aw, config.aim_order);
@@ -1063,7 +1063,7 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 				}
 			}
 		} else if (fire_age < double(kCrowdFireKickSeconds)) {
-			kick = kCrowdFireKickDeg * kDegToRad * (1.0f - float(fire_age) / kCrowdFireKickSeconds);
+			kick = kCrowdFireKickDeg * core::kDegToRadF * (1.0f - float(fire_age) / kCrowdFireKickSeconds);
 			xs.firing = true;
 		}
 	}
@@ -1073,7 +1073,7 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 		const bool up = pitch > 0.0f;
 		const float full_deg = up ? aim_stance.up_full_deg : aim_stance.down_full_deg;
 		if (pitch != 0.0f && full_deg > 0.0f) {
-			const float aw = std::min(1.0f, std::fabs(pitch) / (full_deg * kDegToRad));
+			const float aw = std::min(1.0f, std::fabs(pitch) / (full_deg * core::kDegToRadF));
 			const BoneMask *mask = up ? aim_stance.up_mask : aim_stance.down_mask;
 			if (mask != nullptr && aw > 0.0f) {
 				apply_additive(s.pose, up ? *aim_stance.aim_up : *aim_stance.aim_down, *mask, aw, config.aim_order);

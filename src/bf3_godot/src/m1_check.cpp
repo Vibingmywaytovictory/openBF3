@@ -533,7 +533,6 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 
 		const size_t index = next_ - spawn_.size();
 		const TeleportShot &shot = teleport_[index];
-		const float rad = 3.14159265358979323846f / 180.0f;
 		switch (state_) {
 			case 0: {
 				host::ClientSession *client = session_.client();
@@ -547,12 +546,12 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 				mapper.release_all();
 				mapper.set_free_camera(false);
 				session_.cameras().set_free(false);
-				mapper.script_view(shot.at[3] * rad, 0.0f);
+				mapper.script_view(shot.at[3] * bf3::core::kDegToRadF, 0.0f);
 				net::DebugRequest q;
 				q.kind = net::DebugKind::Teleport;
 				q.id = ++request_id_;
 				q.position = { shot.at[0], shot.at[1], shot.at[2] };
-				q.yaw = sim::quantize_yaw(shot.at[3] * rad);
+				q.yaw = sim::quantize_yaw(shot.at[3] * bf3::core::kDegToRadF);
 				client->send_debug(q);
 				state_ = 1;
 				state_ns_ = p_now_ns;
@@ -588,13 +587,12 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 		}
 	}
 	const FreeShot &shot = free_[next_ - spawn_.size() - teleport_.size()];
-	const float deg = 3.14159265358979323846f / 180.0f;
 	if (state_ == 0) {
 		mapper.set_scripted(true);
 		mapper.release_all();
 		mapper.set_free_camera(true);
 		session_.cameras().set_free(true);
-		mapper.script_view(shot.view[3] * deg, shot.view[4] * deg);
+		mapper.script_view(shot.view[3] * bf3::core::kDegToRadF, shot.view[4] * bf3::core::kDegToRadF);
 		session_.cameras().place_free(Vector3(shot.view[0], shot.view[1], shot.view[2]), mapper.free_view().yaw, mapper.free_view().pitch);
 		frames_ = 0;
 		state_ = 1;

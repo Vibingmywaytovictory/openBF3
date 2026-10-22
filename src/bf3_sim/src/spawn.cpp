@@ -20,7 +20,7 @@ namespace {
 
 constexpr float kLiftStep = 0.1f;
 
-const float kLevelCos = std::cos(2.0f * kPi / 180.0f);
+const float kLevelCos = std::cos(2.0f * core::kDegToRadF);
 
 using bf3::core::finite;
 

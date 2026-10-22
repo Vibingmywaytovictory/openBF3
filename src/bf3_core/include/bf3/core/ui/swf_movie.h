@@ -410,6 +410,52 @@ struct SwfPoint {
 	bool operator==(const SwfPoint &) const = default;
 };
 
+struct SwfAffine {
+	double a = 1.0;
+	double b = 0.0;
+	double c = 0.0;
+	double d = 1.0;
+	double tx = 0.0;
+	double ty = 0.0;
+	bool operator==(const SwfAffine &) const = default;
+};
+
+constexpr SwfAffine swf_affine(const SwfMatrix &p_m) {
+	return { p_m.a, p_m.b, p_m.c, p_m.d, p_m.tx, p_m.ty };
+}
+
+constexpr SwfAffine swf_concat(const SwfAffine &p_parent, const SwfAffine &p_child) {
+	SwfAffine m;
+	m.a = p_parent.a * p_child.a + p_parent.c * p_child.b;
+	m.b = p_parent.b * p_child.a + p_parent.d * p_child.b;
+	m.c = p_parent.a * p_child.c + p_parent.c * p_child.d;
+	m.d = p_parent.b * p_child.c + p_parent.d * p_child.d;
+	m.tx = p_parent.a * p_child.tx + p_parent.c * p_child.ty + p_parent.tx;
+	m.ty = p_parent.b * p_child.tx + p_parent.d * p_child.ty + p_parent.ty;
+	return m;
+}
+
+inline constexpr double kSwfSingularDeterminant = 1e-12;
+
+constexpr std::optional<SwfAffine> swf_inverse(const SwfAffine &p_m) {
+	const double det = p_m.a * p_m.d - p_m.b * p_m.c;
+	if (det < kSwfSingularDeterminant && det > -kSwfSingularDeterminant) {
+		return std::nullopt;
+	}
+	SwfAffine r;
+	r.a = p_m.d / det;
+	r.b = -p_m.b / det;
+	r.c = -p_m.c / det;
+	r.d = p_m.a / det;
+	r.tx = -(r.a * p_m.tx + r.c * p_m.ty);
+	r.ty = -(r.b * p_m.tx + r.d * p_m.ty);
+	return r;
+}
+
+constexpr SwfPoint swf_apply(const SwfAffine &p_m, double p_x, double p_y) {
+	return { float(p_m.a * p_x + p_m.c * p_y + p_m.tx), float(p_m.b * p_x + p_m.d * p_y + p_m.ty) };
+}
+
 struct SwfFillMesh {
 	uint32_t fill = 0;
 	std::vector<SwfPoint> outline;

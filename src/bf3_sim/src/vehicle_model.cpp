@@ -14,8 +14,6 @@ namespace bf3::sim {
 
 namespace {
 
-constexpr float kDegreesToRadians = 0.017453292519943295769f;
-
 using bf3::core::finite;
 
 class Digest {
@@ -149,7 +147,7 @@ float sensitivity_at(const VehicleModel &p_model, float p_kmh) {
 
 float vehicle_max_steer_angle(const VehicleModel &p_model, float p_speed) {
 	const float kmh = std::fabs(p_speed) * 3.6f;
-	const float lock = p_model.tuning.steer_max_degrees * kDegreesToRadians;
+	const float lock = p_model.tuning.steer_max_degrees * core::kDegToRadF;
 	if (p_model.steer_model == SteerAngleModel::SensitivityRadians) {
 		return p_model.steer_points > 0 ? sensitivity_at(p_model, kmh) : lock;
 	}
@@ -489,7 +487,7 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 	m->stand_still_speed = p_tuning.stand_still_speed;
 	m->reverse_switch_speed = p_tuning.reverse_switch_speed;
 	m->tester = p_tuning.tester;
-	m->max_pitch_roll_angle = p_tuning.max_pitch_roll_degrees * kDegreesToRadians;
+	m->max_pitch_roll_angle = p_tuning.max_pitch_roll_degrees * core::kDegToRadF;
 	m->model_digest = digest_of(*m);
 	return std::shared_ptr<const VehicleModel>(std::move(m));
 }

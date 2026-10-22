@@ -831,7 +831,7 @@ bool Bf3Crowd::shot_frame() {
 				in[i].flags = anim::crowd_flags::kReloadStart;
 			}
 			if (shot.pose == 3) {
-				in[i].pitch = stage_.aim_pitch_deg * 0.0174532925f;
+				in[i].pitch = stage_.aim_pitch_deg * bf3::core::kDegToRadF;
 			}
 			roots_[i] = Transform3D(Basis(Vector3(0, 1, 0), heading), gv(feet_[i]));
 		}

@@ -410,11 +410,10 @@ std::vector<Vec3> capsule_points(const Vec3 &p_a, const Vec3 &p_b, float p_radiu
 	Vec3 u, v;
 	basis(axis, u, v);
 	std::vector<Vec3> points;
-	constexpr float kRadsPerDeg = 3.14159265358979323846f / 180.0f;
 	const std::pair<Vec3, float> ends[2] = { { p_a, -1.0f }, { p_b, 1.0f } };
 	for (const auto &[end, outward] : ends) {
 		for (float latitude : { 0.0f, 30.0f, 60.0f }) {
-			const float rad = latitude * kRadsPerDeg;
+			const float rad = latitude * kDegToRadF;
 			const float s = scalar_sin(rad);
 			const float c = scalar_cos(rad);
 			const Vec3 center = vec::add(end, vec::scale(axis, outward * p_radius * s));

@@ -1,5 +1,7 @@
 #include "bf3/fx/render_prep.h"
 
+#include "bf3/core/math.h"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -13,8 +15,6 @@
 namespace bf3::fx {
 
 namespace {
-
-constexpr float kDegToRad = 0.017453292519943295f;
 
 inline Vec3 sub(const Vec3 &a, const Vec3 &b) {
 	return Vec3{ a.x - b.x, a.y - b.y, a.z - b.z };
@@ -335,7 +335,7 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 							case FxShaderClass::Mesh:
 							default: {
 
-								const float yx = p.axis.y * kDegToRad, xx = p.axis.x * kDegToRad, zx = p.axis.z * kDegToRad;
+								const float yx = p.axis.y * core::kDegToRadF, xx = p.axis.x * core::kDegToRadF, zx = p.axis.z * core::kDegToRadF;
 								const float cy = std::cos(yx), sy = std::sin(yx), cx = std::cos(xx), sx = std::sin(xx), cz = std::cos(zx), sz = std::sin(zx);
 
 								const Vec3 c0{ cy * cz + sy * sx * sz, cx * sz, -sy * cz + cy * sx * sz };
