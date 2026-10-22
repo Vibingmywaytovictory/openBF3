@@ -36,8 +36,14 @@ public:
 	virtual std::string tilt_mode() const = 0;
 };
 
-inline constexpr std::array<float, 3> kBgDrawRgb255{ 3.7f, 123.2f, 213.8f };
-inline constexpr float kBgDrawAlpha = 0.1706f;
+struct HudBgDrawLook {
+	std::array<float, 3> premul_rgb255{ 0.91f, 31.7f, 54.12f };
+	float coverage = 0.1458f;
+	float coverage_edge_of_ramp = 0.25f;
+	float coverage_ramp_px = 4.0f;
+};
+
+inline constexpr HudBgDrawLook kHudBgDrawLook{};
 
 struct HudEkgLook {
 	float rect_x0 = 1056.0f;
@@ -69,8 +75,8 @@ int32_t hud_compass_frame(float p_heading_deg);
 
 double hud_crosshair_dispersion(float p_spread_deg, float p_vertical_fov_deg, float p_stage_height);
 
-double hud_bg_fade_fraction_x();
-double hud_bg_fade_fraction_y();
+double hud_bg_light_ramp_fraction_x();
+double hud_bg_light_ramp_fraction_y();
 
 float hud_ekg_beat_px(const HudEkgLook &p_look, float p_distance_px);
 float hud_ekg_offset_px(const HudEkgLook &p_look, double p_clock_seconds, float p_screen_x);

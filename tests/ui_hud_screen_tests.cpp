@@ -214,10 +214,16 @@ TEST_SUITE("ui-hud-screen-unit") {
 	}
 
 	TEST_CASE("hud screen unit: engine-drawn parts measured from the 18.57 footage") {
-		CHECK(hud_bg_fade_fraction_x() == doctest::Approx(1.0 / 42.0));
-		CHECK(hud_bg_fade_fraction_y() == doctest::Approx(1.0 / 10.5));
-		CHECK(kBgDrawRgb255 == std::array<float, 3>{ 3.7f, 123.2f, 213.8f });
-		CHECK(kBgDrawAlpha == 0.1706f);
+		CHECK(hud_bg_light_ramp_fraction_x() == doctest::Approx(1.0 / 21.0));
+		CHECK(hud_bg_light_ramp_fraction_y() == doctest::Approx(1.0 / 5.25));
+		const HudBgDrawLook &bg = kHudBgDrawLook;
+		const std::array<float, 3> observed_ammo_offset{ 0.91f, 31.7f, 54.12f };
+		const std::array<float, 3> observed_ammo_gain{ 0.8424f, 0.8527f, 0.8676f };
+		CHECK(bg.premul_rgb255 == observed_ammo_offset);
+		CHECK(1.0f - bg.coverage == doctest::Approx((observed_ammo_gain[0] + observed_ammo_gain[1] + observed_ammo_gain[2]) / 3.0f).epsilon(0.001));
+		CHECK(bg.premul_rgb255[2] / 255.0f > bg.coverage);
+		CHECK(bg.coverage_edge_of_ramp == 0.25f);
+		CHECK(bg.coverage_ramp_px == 4.0f);
 		const HudEkgLook &k = kHudEkgLook;
 		CHECK(k.rect_x0 == 1056.0f);
 		CHECK(k.rect_y0 == 566.0f);
@@ -246,7 +252,7 @@ TEST_SUITE("ui-hud-screen-unit") {
 		CHECK(kMinimapMetresPerLocalUnit == 1.375f);
 		CHECK(kMinimapHatchTileLocal == 10.6f);
 		CHECK(kMinimapSquareLocal == 170.0f);
-		row("engine_parts", "iBgDraw rgb (3.7,123.2,213.8) a 0.1706 fade 1/42 x 1/10.5; EKG 78.7 px/s, 1.04 s, peak 9 px, undershoot 3 px; minimap 1.375 m/unit");
+		row("engine_parts", "iBgDraw over W: ammo 0.854*W+(0.9,31.7,54.1) from 3552 frames, glow ramp 1/21 x 1/5.25 of renderHolder, cover edge at 1/4 ramp over 4 px; EKG 78.7 px/s, 1.04 s, peak 9 px, undershoot 3 px; minimap 1.375 m/unit");
 	}
 }
 

@@ -95,8 +95,34 @@ constexpr std::string_view kBgRenderer = ui::kBgDrawRenderer;
 constexpr std::string_view kEkgRenderer = ui::kSoldierRenderer;
 constexpr const char *kMinimapClip = "Minimap_01";
 
-Color look_colour(const std::array<float, 3> &p_rgb255, float p_alpha) {
-	return Color(p_rgb255[0] / 255.0f, p_rgb255[1] / 255.0f, p_rgb255[2] / 255.0f, p_alpha);
+constexpr std::string_view kBgDrawShader = R"(shader_type canvas_item;
+render_mode blend_premul_alpha;
+)";
+
+struct BgAxis {
+	std::array<float, 8> at{};
+	std::array<float, 8> glow{};
+	std::array<float, 8> cover{};
+};
+
+BgAxis bg_axis(float p_min, float p_max, float p_ramp_fraction, const ui::HudBgDrawLook &p_look, float p_local_per_px) {
+	const float ramp = std::min(p_ramp_fraction * (p_max - p_min), (p_max - p_min) / 2.0f);
+	const float edge = ramp * p_look.coverage_edge_of_ramp;
+	const float half = std::min(p_look.coverage_ramp_px * p_local_per_px / 2.0f, edge);
+	const std::array<float, 4> inward{ 0.0f, edge - half, edge + half, ramp };
+	BgAxis a;
+	for (size_t i = 0; i < 4; ++i) {
+		a.at[i] = p_min + inward[i];
+		a.at[7 - i] = p_max - inward[i];
+	}
+	const auto glow = [&](float p_d) { return ramp > 0.0f ? std::clamp(p_d / ramp, 0.0f, 1.0f) : 1.0f; };
+	const auto cover = [&](float p_d) { return half > 0.0f ? std::clamp((p_d - (edge - half)) / (2.0f * half), 0.0f, 1.0f) : (p_d >= edge ? 1.0f : 0.0f); };
+	for (size_t i = 0; i < 8; ++i) {
+		const float d = std::min(a.at[i] - p_min, p_max - a.at[i]);
+		a.glow[i] = glow(d);
+		a.cover[i] = cover(d);
+	}
+	return a;
 }
 
 std::vector<uint8_t> image_bytes(Ref<Image> p_image, int32_t &r_w, int32_t &r_h) {
@@ -552,10 +578,10 @@ void Bf3NativeHud::paint(size_t p_index) {
 		}
 		if (t.renderer == kBgRenderer) {
 			const auto it = painted_bounds_.find(t.path);
-			if (it != painted_bounds_.end() && it->second == t.local_bounds) {
+			if (it != painted_bounds_.end() && it->second.first == t.local_bounds && it->second.second == t.size) {
 				continue;
 			}
-			painted_bounds_[t.path] = t.local_bounds;
+			painted_bounds_[t.path] = { t.local_bounds, t.size };
 			paint_bg(t);
 			note_status(v->redraw_engine_target(t.path), t.path);
 		} else if (t.renderer == kEkgRenderer) {
@@ -577,22 +603,33 @@ void Bf3NativeHud::paint(size_t p_index) {
 
 void Bf3NativeHud::paint_bg(const SwfEngineTarget &p_target) {
 	RenderingServer *rs = RenderingServer::get_singleton();
+	if (bg_material_.is_null()) {
+		Ref<Shader> shader;
+		shader.instantiate();
+		shader->set_code(String::utf8(kBgDrawShader.data(), int64_t(kBgDrawShader.size())));
+		bg_material_.instantiate();
+		bg_material_->set_shader(shader);
+	}
 	rs->canvas_item_clear(p_target.canvas_item);
+	rs->canvas_item_set_material(p_target.canvas_item, bg_material_->get_rid());
+	const ui::HudBgDrawLook &k = ui::kHudBgDrawLook;
 	const ui::SwfRect &b = p_target.local_bounds;
-	const float fx = float(ui::hud_bg_fade_fraction_x()) * b.width();
-	const float fy = float(ui::hud_bg_fade_fraction_y()) * b.height();
-	const std::array<float, 4> xs{ b.x_min, b.x_min + fx, b.x_max - fx, b.x_max };
-	const std::array<float, 4> ys{ b.y_min, b.y_min + fy, b.y_max - fy, b.y_max };
-	const Color inner = look_colour(ui::kBgDrawRgb255, ui::kBgDrawAlpha);
-	const Color edge = look_colour(ui::kBgDrawRgb255, 0.0f);
-	const auto colour_at = [&](int p_ix, int p_iy) { return (p_ix == 0 || p_ix == 3 || p_iy == 0 || p_iy == 3) ? edge : inner; };
-	for (int iy = 0; iy < 3; ++iy) {
-		for (int ix = 0; ix < 3; ++ix) {
+	const BgAxis ax = bg_axis(b.x_min, b.x_max, float(ui::hud_bg_light_ramp_fraction_x()), k, b.width() / float(std::max(1, p_target.size.x)));
+	const BgAxis ay = bg_axis(b.y_min, b.y_max, float(ui::hud_bg_light_ramp_fraction_y()), k, b.height() / float(std::max(1, p_target.size.y)));
+	const auto colour_at = [&](size_t p_ix, size_t p_iy) {
+		const float glow = ax.glow[p_ix] * ay.glow[p_iy];
+		return Color(k.premul_rgb255[0] / 255.0f * glow, k.premul_rgb255[1] / 255.0f * glow, k.premul_rgb255[2] / 255.0f * glow, k.coverage * ax.cover[p_ix] * ay.cover[p_iy]);
+	};
+	for (size_t iy = 0; iy + 1 < ay.at.size(); ++iy) {
+		for (size_t ix = 0; ix + 1 < ax.at.size(); ++ix) {
+			if (!(ax.at[ix + 1] > ax.at[ix]) || !(ay.at[iy + 1] > ay.at[iy])) {
+				continue;
+			}
 			PackedVector2Array pts;
 			PackedColorArray cols;
-			const int corner[4][2] = { { ix, iy }, { ix + 1, iy }, { ix + 1, iy + 1 }, { ix, iy + 1 } };
+			const size_t corner[4][2] = { { ix, iy }, { ix + 1, iy }, { ix + 1, iy + 1 }, { ix, iy + 1 } };
 			for (const auto &c : corner) {
-				pts.push_back(Vector2(xs[size_t(c[0])], ys[size_t(c[1])]));
+				pts.push_back(Vector2(ax.at[c[0]], ay.at[c[1]]));
 				cols.push_back(colour_at(c[0], c[1]));
 			}
 			rs->canvas_item_add_polygon(p_target.canvas_item, pts, cols);

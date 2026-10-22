@@ -81,6 +81,7 @@ void vertex() {
 void fragment() {
 	vec2 t = uvw.xy / uvw.z;
 	vec4 c = tint;
+	vec4 hi = vec4(1.0);
 	bool raw = false;
 	if (mode == 1) {
 		vec2 s = uv_rect.zw;
@@ -100,12 +101,13 @@ void fragment() {
 			c = vec4(p.rgb * cx_mul.rgb * cx_mul.a, 0.0);
 		} else {
 			c = vec4(p.rgb / p.a, p.a);
+			hi.rgb = max(vec3(1.0), c.rgb);
 		}
 	}
 	if (raw) {
 		COLOR = c;
 	} else {
-		c = clamp(c * cx_mul + cx_add, 0.0, 1.0);
+		c = clamp(c * cx_mul + cx_add, vec4(0.0), hi);
 		COLOR = vec4(c.rgb * c.a, (flags & 2) != 0 ? 0.0 : c.a);
 	}
 }

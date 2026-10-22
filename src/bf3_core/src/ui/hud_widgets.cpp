@@ -1050,14 +1050,14 @@ double hud_crosshair_dispersion(float p_spread_deg, float p_vertical_fov_deg, fl
 	return gap / 100.0;
 }
 
-double hud_bg_fade_fraction_x() {
+double hud_bg_light_ramp_fraction_x() {
 	const double fade = 1.0 / kHorizontalFadePercentage;
-	return fade / 2.0 / (1.0 + fade);
+	return fade / (1.0 + fade);
 }
 
-double hud_bg_fade_fraction_y() {
+double hud_bg_light_ramp_fraction_y() {
 	const double fade = 1.0 / kVerticalFadePercentage;
-	return fade / 2.0 / (1.0 + fade);
+	return fade / (1.0 + fade);
 }
 
 float hud_ekg_beat_px(const HudEkgLook &p_look, float p_distance_px) {

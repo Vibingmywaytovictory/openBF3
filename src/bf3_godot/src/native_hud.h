@@ -129,11 +129,12 @@ private:
 	double vfov_deg_ = 0.0;
 	NativeHudMinimapPose pose_;
 	double ekg_clock_ = 0.0;
-	std::map<std::string, bf3::core::ui::SwfRect, std::less<>> painted_bounds_;
+	std::map<std::string, std::pair<bf3::core::ui::SwfRect, godot::Vector2i>, std::less<>> painted_bounds_;
 	NativeHudPaintStats paint_;
 
 	Bf3MinimapHud *minimap_source_ = nullptr;
 	godot::Ref<godot::ShaderMaterial> minimap_material_;
+	godot::Ref<godot::ShaderMaterial> bg_material_;
 	godot::Ref<godot::ImageTexture> minimap_mask_;
 	godot::Ref<godot::ImageTexture> minimap_hatch_;
 	godot::RID minimap_map_item_;
