@@ -2,6 +2,7 @@
 
 #include "level_session.h"
 #include "m2a_check.h"
+#include "native_hud_moments.h"
 #include "game_frame.h"
 #include "tdm_flow.h"
 
@@ -225,6 +226,7 @@ struct Bf3LevelSession::Game : GameState {
 	double crowd_body_seconds = 0;
 #if OPENBF3_BUILD_CHECKS
 	std::unique_ptr<M2aCheck> check;
+	std::unique_ptr<NativeHudMomentRun> hud_moments;
 #endif
 	bool finished = false;
 };

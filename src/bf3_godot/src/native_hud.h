@@ -75,6 +75,8 @@ public:
 	void set_vfov_deg(double p_deg);
 	void set_minimap_pose(const NativeHudMinimapPose &p_pose);
 	void set_manual(bool p_manual);
+	void set_fixture(const bf3::core::ui::HudModel &p_model, const NativeHudMinimapPose &p_pose);
+	bool fixture() const { return fixture_; }
 	void step(double p_seconds);
 
 	bool is_ready() const { return built_; }
@@ -109,6 +111,7 @@ private:
 
 	std::string level_ = "MP_Subway";
 	bool manual_ = false;
+	bool fixture_ = false;
 	bool started_ = false;
 	bool built_ = false;
 	bool failed_ = false;

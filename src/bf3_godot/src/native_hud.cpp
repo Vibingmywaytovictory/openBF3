@@ -187,7 +187,9 @@ void Bf3NativeHud::set_level(const std::string &p_level) {
 }
 
 void Bf3NativeHud::set_model(const ui::HudModel &p_model) {
-	model_ = p_model;
+	if (!fixture_) {
+		model_ = p_model;
+	}
 }
 
 void Bf3NativeHud::set_vfov_deg(double p_deg) {
@@ -195,6 +197,14 @@ void Bf3NativeHud::set_vfov_deg(double p_deg) {
 }
 
 void Bf3NativeHud::set_minimap_pose(const NativeHudMinimapPose &p_pose) {
+	if (!fixture_) {
+		pose_ = p_pose;
+	}
+}
+
+void Bf3NativeHud::set_fixture(const ui::HudModel &p_model, const NativeHudMinimapPose &p_pose) {
+	fixture_ = true;
+	model_ = p_model;
 	pose_ = p_pose;
 }
 

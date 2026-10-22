@@ -245,6 +245,11 @@ void Bf3LevelSession::game_parse_args() {
 	g.next_team = g.team;
 	g.record_predicted = g.wants_case(M2aCase::Range) || g.wants_case(M2aCase::Reload) || g.wants_case(M2aCase::Kits);
 	g.check_options.shots_dir = utf8_path(user_arg_value("m2a-shots"));
+#if OPENBF3_BUILD_CHECKS
+	if (has_check_arg("native-hud-moments")) {
+		g.hud_moments = std::make_unique<NativeHudMomentRun>(user_arg_value("native-hud-moments"), user_arg_value("native-hud-ids"));
+	}
+#endif
 	if (has_user_arg("m2a-play-seconds")) {
 		g.check_options.play_seconds = std::clamp(std::atof(user_arg_value("m2a-play-seconds").c_str()), 5.0, 3600.0);
 	}
@@ -1038,8 +1043,18 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		pose.yaw = view.yaw;
 		pose.valid = true;
 		g.native_hud->set_minimap_pose(pose);
-		g.native_hud->set_visible(!free_camera && g.alive);
+		if (!g.native_hud->fixture()) {
+			g.native_hud->set_visible(!free_camera && g.alive);
+		}
 	}
+#if OPENBF3_BUILD_CHECKS
+	if (g.hud_moments != nullptr && g.native_hud != nullptr && !g.finished && g.hud_moments->step(*this, *g.native_hud, p_delta)) {
+		g.finished = true;
+		UtilityFunctions::print(to_godot(std::string("NATIVE HUD MOMENTS: ") + (g.hud_moments->exit_code() == 0 ? "PASS" : "FAIL")));
+		finish(g.hud_moments->exit_code());
+		return true;
+	}
+#endif
 	g.ms_hud = ms_since(part_t0);
 	if (tdm_frame(p_now_ns, p_delta, camera, free_camera)) {
 		return true;
