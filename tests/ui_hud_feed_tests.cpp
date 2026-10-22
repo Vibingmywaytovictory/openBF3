@@ -27,6 +27,7 @@ namespace gp = bf3::core::gameplay;
 namespace sw = bf3::sim::weapons;
 namespace host = bf3::host;
 namespace tw = bf3::test::weapons;
+namespace net = bf3::net;
 
 namespace {
 
@@ -180,12 +181,13 @@ TEST_CASE("static rows from the table and its defs") {
 	CHECK(m16.weapon_class == 1);
 	CHECK(st.rows[def_of(k, "weapons/an94/u_an94")].mode_kinds[0] == host::HudFireMode::Burst);
 	CHECK(st.rows[def_of(k, "weapons/remington870/u_870")].crosshair == host::HudCrosshairKind::Shotgun);
-	CHECK(st.rows[def_of(k, "weapons/remington870/u_870")].mode_kinds[0] == host::HudFireMode::Single);
+	CHECK(st.rows[def_of(k, "weapons/remington870/u_870")].mode_kinds[0] == host::HudFireMode::SingleBolt);
 	CHECK(st.rows[def_of(k, "weapons/m9/u_m9")].crosshair == host::HudCrosshairKind::Pistol);
 	CHECK(st.rows[def_of(k, "weapons/rpg7/u_rpg7")].crosshair == host::HudCrosshairKind::Launcher);
 	const host::HudStaticRow &m67 = st.rows[def_of(k, "weapons/m67/u_m67")];
 	CHECK(m67.crosshair == host::HudCrosshairKind::Grenade);
-	CHECK(m67.fire_modes == 0);
+	CHECK(m67.mode_kinds[0] == host::HudFireMode::HoldAndRelease);
+	CHECK(m67.fire_modes == (1u << 4));
 	CHECK(m67.name_sid_hash == 0);
 	const host::HudStaticRow &knife = st.rows[def_of(k, "weapons/knife/u_knife")];
 	CHECK(knife.crosshair == host::HudCrosshairKind::Knife);
@@ -376,6 +378,44 @@ TEST_CASE("hostile feed inputs are clamped") {
 	CHECK_FALSE(model.weapon.show_crosshair);
 	CHECK(model.weapon.active_weapon_name == 0);
 	row("feed.hostile", true, "NaN spread / health, negative ammo, a mode index 200 and a def outside the table: clamped or cleared");
+}
+
+TEST_CASE("compass heading from the view yaw and the grenade count from the wcHgr slot") {
+	constexpr float kPi = 3.14159265358979323846f;
+	CHECK(host::hud_compass_heading_deg(0.0f) == 0.0f);
+	CHECK(host::hud_compass_heading_deg(kPi / 2.0f) == doctest::Approx(90.0f));
+	CHECK(host::hud_compass_heading_deg(-kPi / 2.0f) == doctest::Approx(270.0f));
+	CHECK(host::hud_compass_heading_deg(295.0f * kPi / 180.0f + 4.0f * kPi) == doctest::Approx(295.0f).epsilon(1e-4));
+	CHECK(host::hud_compass_heading_deg(std::nanf("")) == 0.0f);
+	const SyntheticKit k = synthetic_kit();
+	const host::HudStatic st = synthetic_static(k);
+	net::WeaponsWire wire;
+	wire.slots[0].def = def_of(k, "weapons/m16a4/u_m16a4");
+	wire.slots[0].magazine = 30;
+	wire.slots[0].reserve = 120;
+	CHECK(host::hud_grenade_count(wire, st) == 0);
+	wire.slots[3].def = def_of(k, "weapons/m67/u_m67");
+	wire.slots[3].magazine = 1;
+	wire.slots[3].reserve = 1;
+	CHECK(host::hud_grenade_count(wire, st) == 2);
+	wire.slots[3].reserve = -4;
+	CHECK(host::hud_grenade_count(wire, st) == 1);
+	host::HudFeedState state;
+	ui::HudModel model;
+	host::HudFeedInput in;
+	in.alive = true;
+	in.health = 100.0f;
+	in.view_yaw_rad = 212.0f * kPi / 180.0f;
+	in.weapon.valid = true;
+	in.weapon.def = wire.slots[0].def;
+	in.weapons = &wire;
+	host::fill_hud(in, {}, st, state, model);
+	CHECK(model.weapon.secondary_weapon_ammo == 1);
+	CHECK(model.soldier.compass_angle == doctest::Approx(212.0f).epsilon(1e-4));
+	in.alive = false;
+	host::fill_hud(in, {}, st, state, model);
+	CHECK(model.weapon.secondary_weapon_ammo == 0);
+	row("feed.compass_grenades", true, "yaw 212 deg -> heading 212; wcHgr slot 1 + 1 -> 2 grenades, cleared when dead");
 }
 
 TEST_CASE("crosshair gap = (h/2) tan(spread) / tan(vfov/2)") {

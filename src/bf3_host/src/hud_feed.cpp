@@ -62,6 +62,7 @@ void clear_weapon(ui::HudWeapon &r_w) {
 	r_w.active_weapon_show_ammo = false;
 	r_w.show_crosshair = false;
 	r_w.can_fire = false;
+	r_w.secondary_weapon_ammo = 0;
 }
 
 const ui::SwfLayoutNode *child_named(const ui::SwfLayoutNode &p_node, std::string_view p_name, gp::WorkBudget &r_budget) {
@@ -156,12 +157,17 @@ HudWidgetSlot widget_slot(const ui::SwfLayoutNode *p_node, std::string_view p_in
 HudFireMode hud_fire_mode(gp::FireLogic p_logic) {
 	switch (p_logic) {
 		case gp::FireLogic::Single:
-		case gp::FireLogic::SingleWithBoltAction:
 			return HudFireMode::Single;
-		case gp::FireLogic::Burst:
-			return HudFireMode::Burst;
+		case gp::FireLogic::SingleWithBoltAction:
+			return HudFireMode::SingleBolt;
 		case gp::FireLogic::Automatic:
 			return HudFireMode::Auto;
+		case gp::FireLogic::Burst:
+			return HudFireMode::Burst;
+		case gp::FireLogic::HoldAndRelease:
+			return HudFireMode::HoldAndRelease;
+		case gp::FireLogic::Detonated:
+			return HudFireMode::Detonated;
 		default:
 			return HudFireMode::None;
 	}
@@ -276,6 +282,7 @@ void fill_hud(const HudFeedInput &p_input, std::span<const PresentEvent> p_drain
 		w.firing_mode_types = row->fire_modes;
 		w.can_fire = pw.phase == sw::WeaponPhase::Ready;
 		w.show_crosshair = !pw.zoomed && row->crosshair != HudCrosshairKind::None;
+		w.secondary_weapon_ammo = p_input.weapons != nullptr ? hud_grenade_count(*p_input.weapons, p_static) : 0;
 	}
 	const bool hit = p_input.now_s < r_state.hit_indicator_until_s;
 	w.show_hitindicator = hit;
@@ -287,6 +294,7 @@ void fill_hud(const HudFeedInput &p_input, std::span<const PresentEvent> p_drain
 	s.pose = int32_t(p_input.pose);
 	s.first_person = p_input.alive;
 	s.show_hud_ammo = w.active_weapon_show_ammo;
+	s.compass_angle = p_input.alive ? hud_compass_heading_deg(p_input.view_yaw_rad) : 0.0f;
 	++r_model.serial;
 }
 
@@ -316,6 +324,25 @@ double crosshair_gap_px(double p_height, double p_spread_deg, double p_vfov_deg)
 	const double spread = std::min(p_spread_deg, kMaxGapSpreadDeg) * kPi / 180.0;
 	const double half_fov = p_vfov_deg * 0.5 * kPi / 180.0;
 	return p_height * 0.5 * std::tan(spread) / std::tan(half_fov);
+}
+
+float hud_compass_heading_deg(float p_view_yaw_rad) {
+	if (!std::isfinite(p_view_yaw_rad)) {
+		return 0.0f;
+	}
+	const double deg = std::fmod(double(p_view_yaw_rad) * 180.0 / kPi, 360.0);
+	return float(deg < 0.0 ? deg + 360.0 : deg);
+}
+
+int32_t hud_grenade_count(const net::WeaponsWire &p_weapons, const HudStatic &p_static) {
+	const int32_t grenade_class = hud_weapon_class("wcHgr");
+	for (const net::WeaponSlotWire &slot : p_weapons.slots) {
+		const HudStaticRow *row = p_static.row(slot.def);
+		if (row != nullptr && row->weapon_class == grenade_class) {
+			return std::max(slot.magazine, 0) + std::max(slot.reserve, 0);
+		}
+	}
+	return 0;
 }
 
 core::Result<HudScreenLayout> make_hud_screen_layout(const ui::SwfLayoutNode &p_root, gp::WorkBudget &r_budget) {

@@ -8,6 +8,7 @@
 #include "bf3/host/presentation_events.h"
 #include "bf3/host/presentation_weapon.h"
 #include "bf3/net/protocol.h"
+#include "bf3/net/weapons_wire.h"
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"
 
@@ -28,7 +29,7 @@ inline constexpr float kCriticalAmmoFraction = 0.25f;
 
 enum class HudCrosshairKind : uint8_t { None = 0, Rifle = 1, Pistol = 2, Shotgun = 3, Launcher = 4, Grenade = 5, Knife = 6 };
 
-enum class HudFireMode : int8_t { None = -1, Single = 0, Burst = 1, Auto = 2 };
+enum class HudFireMode : int8_t { None = -1, Single = 0, SingleBolt = 1, Auto = 2, Burst = 3, HoldAndRelease = 4, Detonated = 5 };
 HudFireMode hud_fire_mode(core::gameplay::FireLogic p_logic);
 
 inline constexpr std::array<std::string_view, 16> kHudWeaponClassNames{ "wc556x45mmNATO", "wc545x45mmWP", "wc762x51mmNATO", "wc762x54mmR",
@@ -70,8 +71,10 @@ struct HudKillCardSource {
 
 struct HudFeedInput {
 	PresentedWeapon weapon;
+	const net::WeaponsWire *weapons = nullptr;
 	bool alive = false;
 	float health = 0;
+	float view_yaw_rad = 0;
 	sim::Pose pose = sim::Pose::Stand;
 	double now_s = 0;
 
@@ -122,6 +125,10 @@ struct HudPoint {
 HudPoint hud_stage_to_window(core::ui::HudAnchor p_anchor, float p_stage_x, float p_stage_y, float p_width, float p_height);
 
 double crosshair_gap_px(double p_height, double p_spread_deg, double p_vfov_deg);
+
+float hud_compass_heading_deg(float p_view_yaw_rad);
+
+int32_t hud_grenade_count(const net::WeaponsWire &p_weapons, const HudStatic &p_static);
 
 struct HudTextSlot {
 	bool found = false;
