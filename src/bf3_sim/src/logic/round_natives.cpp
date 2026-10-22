@@ -514,7 +514,8 @@ core::Status RoundNatives::tick_round(Tick p_tick, LogicRuntime &r_runtime) {
 		return core::Status::success();
 	}
 	const uint32_t players = s.player_count();
-	if (!s.counting && players >= uint32_t(s.params.round_min_players)) {
+	const int32_t min_players = s.config.min_players_override >= 0 ? s.config.min_players_override : s.params.round_min_players;
+	if (!s.counting && players >= uint32_t(std::clamp(min_players, 0, 256))) {
 		const float seconds = s.config.preround_override_s >= 0.0f && std::isfinite(s.config.preround_override_s) ? s.config.preround_override_s
 																												 : s.params.round_restart_countdown_s;
 		s.counting = true;

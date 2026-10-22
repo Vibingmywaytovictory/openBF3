@@ -5,6 +5,7 @@
 
 #include "bf3/host/kits.h"
 #include "bf3/sim/collision_world.h"
+#include "bf3/sim/logic/round_natives.h"
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/weapons/weapon_input.h"
 #include "bf3/sim/weapons/weapon_rng.h"
@@ -152,7 +153,7 @@ host::MatchRulesConfig tdm_rules_config(bool p_deploy) {
 	return c;
 }
 
-std::unique_ptr<Match> start_match(const tdm::TdmLevel &p_level, bool p_deploy, uint64_t p_seed = 7, int p_kill_limit = 0) {
+std::unique_ptr<Match> start_match(const tdm::TdmLevel &p_level, bool p_deploy, uint64_t p_seed = 7, int p_kill_limit = 0, int p_min_players = -1) {
 	auto m = std::make_unique<Match>();
 	m->level = p_level.shared;
 	host::GameServerConfig cfg;
@@ -164,6 +165,7 @@ std::unique_ptr<Match> start_match(const tdm::TdmLevel &p_level, bool p_deploy, 
 	cfg.gunplay.player_kit = 0;
 	cfg.rules = tdm_rules_config(p_deploy);
 	cfg.rules.kill_limit_override = p_kill_limit;
+	cfg.rules.min_players_override = p_min_players;
 	const core::Status st = m->server.init(cfg);
 	REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
 	REQUIRE(m->server.rules() != nullptr);
@@ -1066,6 +1068,27 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(victim_p.spawned.back().kit == 1);
 		CHECK_FALSE(victim_p.spawned.back().revived);
 		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+
+	TEST_CASE("round start: the data's RoundMinPlayerCount holds one peer in the pre-round; the min-players override starts it") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		REQUIRE(level->shared->logic_natives != nullptr);
+		const int32_t data_min = level->shared->logic_natives->round_min_players;
+		std::printf("round start: RoundMinPlayerCount %d\n", int(data_min));
+		CHECK(data_min == 4);
+
+		std::unique_ptr<Match> held = start_match(*level, false);
+		held->join("alone");
+		CHECK_FALSE(wait_in_round(*held));
+		CHECK(held->rules().phase() == net::MatchPhase::PreRound);
+
+		std::unique_ptr<Match> started = start_match(*level, false, 7, 0, 1);
+		started->join("alone");
+		CHECK(wait_in_round(*started));
+		CHECK(started->rules().phase() == net::MatchPhase::InRound);
 	}
 
 	TEST_CASE("hostile: SpawnRequest refusals and v3 datagrams") {

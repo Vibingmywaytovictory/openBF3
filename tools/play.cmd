@@ -21,7 +21,7 @@ echo Usage: tools\play.cmd [user args]
 echo The TDM scene ^(default^): a Metro TDM round, you and 31 bots ^(16 v 16^), teams by the game.
 echo   Spawn screen: 1-4 pick the kit ^(assault, engineer, support, recon^) or click it, Enter or Deploy spawns.
 echo   In game: Tab scoreboard, 3 the gadget ^(assault: the defibrillator^), the weapon keys otherwise.
-echo   --bots=0..31 ^(default 31^) --kill-limit=N ^(data: 100^) --preround=S ^(data: 10^) --deploy-screen=0 ^(automatic respawn^)
+echo   --bots=0..31 ^(default 31^) --kill-limit=N ^(data: 100^) --preround=S ^(data: 10^) --min-players=N ^(data: 4^) --deploy-screen=0 ^(automatic respawn^)
 echo   --firefight   the firefight scene instead: --kit=0..3 --team=1^|2 --bots=N ^(default 24^) --respawn=S
 echo   --tdm   TDM rules on the firefight scene without the spawn screen; the bots are the TDM bots
 echo           ^(config\bot_tuning.cfg^), at most 31; try: tools\play.cmd --tdm --bots=31

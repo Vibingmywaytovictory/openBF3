@@ -51,6 +51,14 @@ core::Status parse_tdm_options(const TdmArgText &p_args, TdmOptions &r_options) 
 			r_options.preround_s = float(v);
 		}
 	}
+	if (p_args.has_min_players) {
+		long long v = 0;
+		if (!parse_int(p_args.min_players, v) || v < 0 || v > kTdmMaxMinPlayers) {
+			bad("--min-players=" + p_args.min_players + ": not 0.." + std::to_string(kTdmMaxMinPlayers) + " players");
+		} else {
+			r_options.min_players = int(v);
+		}
+	}
 	if (p_args.has_bots) {
 		long long v = 0;
 		if (!parse_int(p_args.bots, v) || v < 0 || v > kTdmMaxBots) {

@@ -20,6 +20,7 @@ struct TdmOptions {
 	bool deploy_screen = true;
 	int kill_limit = 0;
 	float preround_s = -1.0f;
+	int min_players = -1;
 	uint32_t bots = kTdmDefaultBots;
 	std::string tdm_tuning_cfg;
 	std::string bot_tuning_cfg;
@@ -48,10 +49,11 @@ struct TdmFrame {
 inline constexpr uint32_t kTdmMaxBots = 31;
 inline constexpr float kTdmMaxPreroundSeconds = 600.0f;
 inline constexpr int kTdmMaxKillLimit = 100000;
+inline constexpr int kTdmMaxMinPlayers = 32;
 
 struct TdmArgText {
-	bool has_kill_limit = false, has_preround = false, has_bots = false, has_deploy_screen = false;
-	std::string kill_limit, preround, bots, deploy_screen;
+	bool has_kill_limit = false, has_preround = false, has_bots = false, has_deploy_screen = false, has_min_players = false;
+	std::string kill_limit, preround, bots, deploy_screen, min_players;
 };
 
 core::Status parse_tdm_options(const TdmArgText &p_args, TdmOptions &r_options);

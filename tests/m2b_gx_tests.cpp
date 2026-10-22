@@ -78,6 +78,7 @@ TEST_CASE("m2b.gx.unit options: defaults, play.cmd's args, hostile values") {
 	CHECK(o.deploy_screen);
 	CHECK(o.kill_limit == 0);
 	CHECK(o.preround_s < 0.0f);
+	CHECK(o.min_players < 0);
 	CHECK(o.bots == kTdmDefaultBots);
 
 	TdmOptions p;
@@ -116,6 +117,25 @@ TEST_CASE("m2b.gx.unit options: defaults, play.cmd's args, hostile values") {
 		TdmOptions r;
 		CHECK_MESSAGE(!parse_tdm_options(args_with(nullptr, v, nullptr, nullptr), r).ok(), v);
 		CHECK(r.preround_s < 0.0f);
+	}
+	TdmArgText one;
+	one.has_min_players = true;
+	one.min_players = "1";
+	TdmOptions mp;
+	CHECK(parse_tdm_options(one, mp).ok());
+	CHECK(mp.min_players == 1);
+	const std::array<const char *, 6> bad_min_players{ "33", "-1", "", "1.0", "x", " 1" };
+	for (const char *v : bad_min_players) {
+		TdmArgText a;
+		a.has_min_players = true;
+		a.min_players = v;
+		TdmOptions r;
+		const core::Status st = parse_tdm_options(a, r);
+		CHECK_MESSAGE(!st.ok(), v);
+		if (!st.ok()) {
+			CHECK(st.error().message.find("--min-players") != std::string::npos);
+		}
+		CHECK(r.min_players < 0);
 	}
 	TdmOptions d;
 	CHECK(!parse_tdm_options(args_with(nullptr, nullptr, nullptr, "yes"), d).ok());

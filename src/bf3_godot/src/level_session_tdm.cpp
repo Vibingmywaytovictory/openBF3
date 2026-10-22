@@ -73,6 +73,8 @@ TdmArgText tdm_arg_text() {
 	a.kill_limit = user_arg_value("kill-limit");
 	a.has_preround = has_user_arg("preround");
 	a.preround = user_arg_value("preround");
+	a.has_min_players = has_user_arg("min-players");
+	a.min_players = user_arg_value("min-players");
 	a.has_bots = has_user_arg("bots");
 	a.bots = user_arg_value("bots");
 	a.has_deploy_screen = has_user_arg("deploy-screen");
@@ -82,7 +84,8 @@ TdmArgText tdm_arg_text() {
 
 std::string limits_text(const TdmOptions &p_options) {
 	return "kill limit " + (p_options.kill_limit > 0 ? std::to_string(p_options.kill_limit) : std::string("data (100)")) + ", pre-round " +
-			(p_options.preround_s >= 0.0f ? std::to_string(p_options.preround_s) + " s" : std::string("data (10 s)"));
+			(p_options.preround_s >= 0.0f ? std::to_string(p_options.preround_s) + " s" : std::string("data (10 s)")) + ", min players " +
+			(p_options.min_players >= 0 ? std::to_string(p_options.min_players) : std::string("data"));
 }
 
 bool presented_position(const host::PresentationFrame &p_frame, uint64_t p_now_ns, uint8_t p_slot, sim::Vec3 &r_position) {
@@ -265,6 +268,7 @@ void Bf3LevelSession::tdm_server_config(host::GameServerConfig &r_config) {
 	r_config.rules.revive = true;
 	r_config.rules.kill_limit_override = options->kill_limit;
 	r_config.rules.preround_override_s = options->preround_s;
+	r_config.rules.min_players_override = options->min_players;
 	r_config.rules.max_players = 32;
 	r_config.firefight = nullptr;
 	r_config.tdm_bots = nullptr;

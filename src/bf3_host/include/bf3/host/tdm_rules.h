@@ -79,6 +79,7 @@ struct MatchRulesConfig {
 	bool revive = true;
 	int kill_limit_override = 0;
 	float preround_override_s = -1.0f;
+	int min_players_override = -1;
 	uint8_t max_players = 32;
 };
 

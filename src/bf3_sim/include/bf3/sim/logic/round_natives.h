@@ -46,6 +46,7 @@ struct RoundNativeConfig {
 	uint8_t max_players = 32;
 	int kill_limit_override = 0;
 	float preround_override_s = -1.0f;
+	int32_t min_players_override = -1;
 
 	std::shared_ptr<const RoundNativeParams> params;
 	float team_kill_weight = 0.0f;

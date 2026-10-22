@@ -143,6 +143,7 @@ TEST_SUITE("m2b-contract") {
 		CHECK(rules.revive);
 		CHECK(rules.kill_limit_override == 0);
 		CHECK(rules.preround_override_s == doctest::Approx(-1.0f));
+		CHECK(rules.min_players_override == -1);
 		CHECK(rules.max_players == 32);
 		const host::GameServerConfig server;
 		CHECK(server.rules.mode == host::MatchRulesConfig::Mode::None);
@@ -194,6 +195,7 @@ TEST_SUITE("m2b-contract") {
 		CHECK(natives.max_players == 32);
 		CHECK(natives.kill_limit_override == 0);
 		CHECK(natives.preround_override_s == doctest::Approx(-1.0f));
+		CHECK(natives.min_players_override == -1);
 		const sim::SpawnQuery query;
 		CHECK(query.protection_radius == doctest::Approx(10.0f));
 		CHECK(query.friendly_block_radius == doctest::Approx(30.0f));

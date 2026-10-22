@@ -478,6 +478,7 @@ core::Result<std::unique_ptr<TdmRules>> TdmRules::create(const SharedLevel &p_le
 	m.native_config.max_players = p_config.max_players;
 	m.native_config.kill_limit_override = p_config.kill_limit_override;
 	m.native_config.preround_override_s = p_config.preround_override_s;
+	m.native_config.min_players_override = p_config.min_players_override;
 	m.native_config.params = p_level.logic_natives;
 	m.native_config.team_kill_weight = m.tuning->team_kill_weight;
 	m.native_config.rotate_teams = m.tuning->rotate_teams;
