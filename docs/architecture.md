@@ -158,6 +158,8 @@ These are structural, known, and listed so nobody mistakes them for design inten
   executed outside the HUD controllers. `Bf3SwfView` draws no gradients, static text, Bevel or ColorMatrix filters,
   or blend modes other than normal, layer and add. The HUD does not sway with camera motion, the minimap zoom is a
   fixed 1.375 m per local unit, and the KillFeed, SquadList, ScorePopup and KillLog widgets are not driven.
+* Nametags are `Bf3Nametags` (`src/bf3_godot/src/iff_overlay.cpp`), a hand-built Godot control; the next widget stage
+  replaces it with the native Icon3D nametags (`Widget.Icon3D.*`, driven by `Data.UINametagComp`).
 * The container, EBX, payload, resource, level-soup and lag-compensation readers were written as ports of the
   earlier Rust experiment (IW4L) rather than from the format facts alone. The rule now forbids that
   (CLAUDE.md "No code from other projects"); those units are to be re-derived from `research/` and the install
