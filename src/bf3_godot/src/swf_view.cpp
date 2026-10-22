@@ -1388,7 +1388,8 @@ struct Bf3SwfView::Impl {
 		trim(r_rec, 1);
 		const ui::SwfFontSet *fonts = assets != nullptr ? assets->swf_fonts() : nullptr;
 		Geometry geo;
-		float rect[4] = { p_node.edit_text->bounds.x_min, p_node.edit_text->bounds.y_min, p_node.edit_text->bounds.x_max, p_node.edit_text->bounds.y_max };
+		const ui::SwfRect field = ui::swf_node_text_bounds(p_node);
+		float rect[4] = { field.x_min, field.y_min, field.x_max, field.y_max };
 		const float inv[2] = { 1.0f, 1.0f };
 		if (fonts == nullptr) {
 			r_rec.counts.missing_fonts++;

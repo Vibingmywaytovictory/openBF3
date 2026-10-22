@@ -620,6 +620,19 @@ TEST_SUITE("ui-swf-unit") {
 		CHECK(label->text_options.auto_size == SwfTextAutoSize::Right);
 		REQUIRE(s.set_text("holder.row0.label", "<font face=\"$Synth\">A</font>", true).ok());
 		CHECK_FALSE(s.set_text("holder.row0", "x").ok());
+		CHECK(swf_node_text_bounds(*label) == label->edit_text->bounds);
+		const uint32_t text_rev = label->text_revision;
+		const SwfRect wide{ label->edit_text->bounds.x_min, label->edit_text->bounds.x_max + 40.0f, label->edit_text->bounds.y_min,
+			label->edit_text->bounds.y_max };
+		REQUIRE(s.set_text_bounds("holder.row0.label", wide).ok());
+		CHECK(swf_node_text_bounds(*label) == wide);
+		CHECK(label->edit_text->bounds != wide);
+		CHECK(label->text_revision == text_rev + 1);
+		REQUIRE(s.set_text_bounds("holder.row0.label", wide).ok());
+		CHECK(label->text_revision == text_rev + 1);
+		CHECK_FALSE(s.set_text_bounds("holder.row0", wide).ok());
+		CHECK_FALSE(s.set_text_bounds("holder.row0.label", SwfRect{ 1.0f, 0.0f, 0.0f, 1.0f }).ok());
+		CHECK_FALSE(s.set_text_bounds("holder.row0.label", SwfRect{ 0.0f, std::nanf(""), 0.0f, 1.0f }).ok());
 		ch = s.take_changes();
 		CHECK(change_of(ch, *row) == swf_change::kCreated);
 		CHECK((change_of(ch, s.find("holder")) & swf_change::kChildren) != 0);

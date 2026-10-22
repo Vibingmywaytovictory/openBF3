@@ -102,6 +102,7 @@ struct SwfSceneNode {
 	std::string text;
 	bool html = false;
 	SwfTextOptions text_options;
+	std::optional<SwfRect> text_bounds;
 
 	std::vector<SwfNodeId> children;
 
@@ -186,6 +187,7 @@ public:
 	Status set_color(std::string_view p_path, const SwfColorXform &p_color);
 	Status set_text(std::string_view p_path, std::string_view p_text, bool p_html = false);
 	Status set_text_options(std::string_view p_path, const SwfTextOptions &p_options);
+	Status set_text_bounds(std::string_view p_path, const SwfRect &p_bounds);
 
 	std::vector<SwfSceneChange> take_changes();
 
@@ -195,6 +197,8 @@ private:
 	struct Impl;
 	std::unique_ptr<Impl> impl_;
 };
+
+SwfRect swf_node_text_bounds(const SwfSceneNode &p_node);
 
 Result<SwfRichText> swf_node_rich_text(const SwfSceneNode &p_node, WorkBudget &r_budget);
 

@@ -257,6 +257,7 @@ struct SwfScene::Impl {
 		r_n.text.clear();
 		r_n.html = false;
 		r_n.text_options = SwfTextOptions{};
+		r_n.text_bounds.reset();
 		r_n.frame = 0;
 		r_n.playing = false;
 		if (!r_n.unresolved.empty()) {
@@ -1050,6 +1051,29 @@ Status SwfScene::set_text_options(std::string_view p_path, const SwfTextOptions 
 	return Status::success();
 }
 
+Status SwfScene::set_text_bounds(std::string_view p_path, const SwfRect &p_bounds) {
+	for (const float v : { p_bounds.x_min, p_bounds.x_max, p_bounds.y_min, p_bounds.y_max }) {
+		if (!std::isfinite(v)) {
+			return make_error("swf scene " + impl_->movie_name + ": text bounds are not finite");
+		}
+	}
+	if (p_bounds.x_max < p_bounds.x_min || p_bounds.y_max < p_bounds.y_min) {
+		return make_error("swf scene " + impl_->movie_name + ": text bounds of negative size");
+	}
+	Result<SwfSceneNode *> n = impl_->at(p_path);
+	if (!n) {
+		return n.error();
+	}
+	if ((*n)->kind != SwfNodeKind::EditText) {
+		return make_error("swf scene " + impl_->movie_name + ": " + std::string(p_path) + " is not a text field");
+	}
+	if (swf_node_text_bounds(**n) != p_bounds) {
+		(*n)->text_bounds = p_bounds;
+		(*n)->text_revision++;
+	}
+	return Status::success();
+}
+
 std::vector<SwfSceneChange> SwfScene::take_changes() {
 	return impl_->changes();
 }
@@ -1059,6 +1083,13 @@ std::optional<SwfBitmapRef> SwfScene::bitmap(const SwfSceneNode &p_node, uint16_
 		return std::nullopt;
 	}
 	return p_node.movie->resolve_bitmap(p_node.movie_name, p_bitmap_id);
+}
+
+SwfRect swf_node_text_bounds(const SwfSceneNode &p_node) {
+	if (p_node.text_bounds) {
+		return *p_node.text_bounds;
+	}
+	return p_node.edit_text != nullptr ? p_node.edit_text->bounds : SwfRect{};
 }
 
 Result<SwfRichText> swf_node_rich_text(const SwfSceneNode &p_node, WorkBudget &r_budget) {
@@ -1076,6 +1107,11 @@ Result<SwfTextLayout> swf_layout_node_text(const SwfFontSet &p_fonts, const SwfS
 	Result<SwfRichText> rich = swf_node_rich_text(p_node, r_budget);
 	if (!rich) {
 		return error_at("swf scene " + p_node.path, rich.error());
+	}
+	if (p_node.text_bounds) {
+		SwfEditText field = *p_node.edit_text;
+		field.bounds = *p_node.text_bounds;
+		return swf_layout_text(p_fonts, field, *rich, p_node.text_options, r_budget);
 	}
 	return swf_layout_text(p_fonts, *p_node.edit_text, *rich, p_node.text_options, r_budget);
 }
