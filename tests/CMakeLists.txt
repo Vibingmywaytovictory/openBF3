@@ -407,6 +407,20 @@ set_tests_properties(core.ui.swf.unit core.ui.font.unit core.ui.swf core.ui.swf.
 if(OPENBF3_ASAN)
     set_tests_properties(core.ui.swf.unit core.ui.swf.fuzz PROPERTIES TIMEOUT 1800)
 endif()
+openbf3_test(test_ui_hud_screen test_main.cpp ui_hud_screen_tests.cpp test_support.h)
+target_link_libraries(test_ui_hud_screen PRIVATE bf3_core)
+add_test(NAME ui.hud.screen.unit COMMAND test_ui_hud_screen --test-suite=ui-hud-screen-unit)
+set(_openbf3_hud_screen_install "*hud*screen:*install*unchanged*")
+foreach(_w IN ITEMS assets:*screen*assets* ticket_counter:*TicketCounter* ammo:*Ammo health:*Health compass:*Compass
+        background:*HudBackgroundWidget* minimap:*Minimap crosshair:*Crosshair hidden:*Hitindicator*)
+    string(REPLACE ":" ";" _p "${_w}")
+    list(GET _p 0 _name)
+    list(GET _p 1 _case)
+    openbf3_case_row(NAME ui.hud.screen.${_name} EXE test_ui_hud_screen SUITE ui-hud-screen GROUP ui-hud-screen COUNT 2
+        CASES "${_case}" INSTALL_CASE ${_openbf3_hud_screen_install})
+endforeach()
+openbf3_split_cover(NAME ui.hud.screen.split_cover EXE test_ui_hud_screen SUITE ui-hud-screen GROUP ui-hud-screen
+    INSTALL_CASE ${_openbf3_hud_screen_install})
 add_test(NAME core.ui.as2.unit COMMAND test_ui1 --test-suite=ui-avm1-unit)
 add_test(NAME core.ui.as2 COMMAND test_ui1 --test-suite=ui-avm1)
 set_tests_properties(core.ui.as2 PROPERTIES SKIP_RETURN_CODE 77)
