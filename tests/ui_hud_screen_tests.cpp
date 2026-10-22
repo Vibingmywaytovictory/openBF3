@@ -13,6 +13,7 @@
 #include "test_support.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -210,6 +211,42 @@ TEST_SUITE("ui-hud-screen-unit") {
 		CHECK(kAs2FiringModes[2] == "auto");
 		CHECK(kAs2FiringModes[3] == "burst");
 		CHECK(kAs2FiringModes[1] == "single");
+	}
+
+	TEST_CASE("hud screen unit: engine-drawn parts measured from the 18.57 footage") {
+		CHECK(hud_bg_fade_fraction_x() == doctest::Approx(1.0 / 42.0));
+		CHECK(hud_bg_fade_fraction_y() == doctest::Approx(1.0 / 10.5));
+		CHECK(kBgDrawRgb255 == std::array<float, 3>{ 3.7f, 123.2f, 213.8f });
+		CHECK(kBgDrawAlpha == 0.1706f);
+		const HudEkgLook &k = kHudEkgLook;
+		CHECK(k.rect_x0 == 1056.0f);
+		CHECK(k.rect_y0 == 566.0f);
+		CHECK(k.rect_x1 == 1166.0f);
+		CHECK(k.rect_y1 == 592.0f);
+		CHECK(k.scroll_px_per_second == 78.7f);
+		CHECK(k.period_seconds == 1.04f);
+		CHECK(k.baseline_y == 578.0f);
+		CHECK(k.peak_px == 9.0f);
+		CHECK(k.undershoot_px == 3.0f);
+		CHECK(k.rgb == std::array<uint8_t, 3>{ 201, 221, 232 });
+		CHECK(hud_ekg_beat_px(k, 0.0f) == 0.0f);
+		CHECK(hud_ekg_beat_px(k, 5.0f) == doctest::Approx(9.0f));
+		CHECK(hud_ekg_beat_px(k, 10.0f) == doctest::Approx(-3.0f));
+		CHECK(hud_ekg_beat_px(k, 18.0f) == 0.0f);
+		CHECK(hud_ekg_beat_px(k, 40.0f) == 0.0f);
+		CHECK(hud_ekg_beat_px(k, -1.0f) == 0.0f);
+		const double t_peak = 5.0 / 78.7;
+		CHECK(hud_ekg_offset_px(k, t_peak, k.rect_x1) == doctest::Approx(9.0f).epsilon(1e-3));
+		CHECK(hud_ekg_offset_px(k, t_peak + 1.0, k.rect_x1 - 78.7f) == doctest::Approx(9.0f).epsilon(1e-3));
+		CHECK(hud_ekg_offset_px(k, t_peak + 1.04, k.rect_x1) == doctest::Approx(9.0f).epsilon(1e-3));
+		CHECK(hud_ekg_offset_px(k, std::nan(""), 1100.0f) == 0.0f);
+		CHECK(hud_ekg_alpha(k, 1050.0f) == 0.0f);
+		CHECK(hud_ekg_alpha(k, 1102.5f) == doctest::Approx(0.5f));
+		CHECK(hud_ekg_alpha(k, 1160.0f) == 1.0f);
+		CHECK(kMinimapMetresPerLocalUnit == 1.375f);
+		CHECK(kMinimapHatchTileLocal == 10.6f);
+		CHECK(kMinimapSquareLocal == 170.0f);
+		row("engine_parts", "iBgDraw rgb (3.7,123.2,213.8) a 0.1706 fade 1/42 x 1/10.5; EKG 78.7 px/s, 1.04 s, peak 9 px, undershoot 3 px; minimap 1.375 m/unit");
 	}
 }
 

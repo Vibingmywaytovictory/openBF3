@@ -36,8 +36,44 @@ public:
 	virtual std::string tilt_mode() const = 0;
 };
 
+inline constexpr std::array<float, 3> kBgDrawRgb255{ 3.7f, 123.2f, 213.8f };
+inline constexpr float kBgDrawAlpha = 0.1706f;
+
+struct HudEkgLook {
+	float rect_x0 = 1056.0f;
+	float rect_y0 = 566.0f;
+	float rect_x1 = 1166.0f;
+	float rect_y1 = 592.0f;
+	float scroll_px_per_second = 78.7f;
+	float period_seconds = 1.04f;
+	float baseline_y = 578.0f;
+	float rise_px = 5.0f;
+	float peak_px = 9.0f;
+	float fall_px = 5.0f;
+	float undershoot_px = 3.0f;
+	float recover_px = 8.0f;
+	float line_px = 2.0f;
+	std::array<uint8_t, 3> rgb{ 201, 221, 232 };
+	float fade_start_x = 1055.0f;
+	float fade_full_x = 1150.0f;
+};
+
+inline constexpr HudEkgLook kHudEkgLook{};
+
+inline constexpr float kMinimapMetresPerLocalUnit = 1.375f;
+inline constexpr float kMinimapHatchTileLocal = 10.6f;
+inline constexpr float kMinimapSquareLocal = 170.0f;
+inline constexpr std::string_view kMinimapMaskTexture = "ui/hud/minimap/minimapmask";
+
 int32_t hud_compass_frame(float p_heading_deg);
 
 double hud_crosshair_dispersion(float p_spread_deg, float p_vertical_fov_deg, float p_stage_height);
+
+double hud_bg_fade_fraction_x();
+double hud_bg_fade_fraction_y();
+
+float hud_ekg_beat_px(const HudEkgLook &p_look, float p_distance_px);
+float hud_ekg_offset_px(const HudEkgLook &p_look, double p_clock_seconds, float p_screen_x);
+float hud_ekg_alpha(const HudEkgLook &p_look, float p_screen_x);
 
 }

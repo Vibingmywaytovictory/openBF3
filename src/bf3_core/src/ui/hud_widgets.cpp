@@ -1050,6 +1050,54 @@ double hud_crosshair_dispersion(float p_spread_deg, float p_vertical_fov_deg, fl
 	return gap / 100.0;
 }
 
+double hud_bg_fade_fraction_x() {
+	const double fade = 1.0 / kHorizontalFadePercentage;
+	return fade / 2.0 / (1.0 + fade);
+}
+
+double hud_bg_fade_fraction_y() {
+	const double fade = 1.0 / kVerticalFadePercentage;
+	return fade / 2.0 / (1.0 + fade);
+}
+
+float hud_ekg_beat_px(const HudEkgLook &p_look, float p_distance_px) {
+	const float d = p_distance_px;
+	if (!(d >= 0.0f)) {
+		return 0.0f;
+	}
+	if (d < p_look.rise_px) {
+		return p_look.peak_px * d / p_look.rise_px;
+	}
+	const float after_rise = d - p_look.rise_px;
+	if (after_rise < p_look.fall_px) {
+		return p_look.peak_px - (p_look.peak_px + p_look.undershoot_px) * after_rise / p_look.fall_px;
+	}
+	const float after_fall = after_rise - p_look.fall_px;
+	if (after_fall < p_look.recover_px) {
+		return -p_look.undershoot_px + p_look.undershoot_px * after_fall / p_look.recover_px;
+	}
+	return 0.0f;
+}
+
+float hud_ekg_offset_px(const HudEkgLook &p_look, double p_clock_seconds, float p_screen_x) {
+	if (!std::isfinite(p_clock_seconds) || !std::isfinite(p_screen_x) || !(p_look.scroll_px_per_second > 0.0f) || !(p_look.period_seconds > 0.0f)) {
+		return 0.0f;
+	}
+	const double emitted = p_clock_seconds - double(p_look.rect_x1 - p_screen_x) / double(p_look.scroll_px_per_second);
+	double phase = std::fmod(emitted, double(p_look.period_seconds));
+	if (phase < 0.0) {
+		phase += double(p_look.period_seconds);
+	}
+	return hud_ekg_beat_px(p_look, float(phase * double(p_look.scroll_px_per_second)));
+}
+
+float hud_ekg_alpha(const HudEkgLook &p_look, float p_screen_x) {
+	if (!std::isfinite(p_screen_x) || !(p_look.fade_full_x > p_look.fade_start_x)) {
+		return 0.0f;
+	}
+	return std::clamp((p_screen_x - p_look.fade_start_x) / (p_look.fade_full_x - p_look.fade_start_x), 0.0f, 1.0f);
+}
+
 bool hud_widget_class_known(std::string_view p_class) {
 	return make_hud_widget_controller(p_class) != nullptr;
 }
