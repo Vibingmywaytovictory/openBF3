@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <numbers>
 
 namespace bf3::godot_side {
 
@@ -32,14 +33,14 @@ namespace ui = bf3::core::ui;
 namespace {
 
 constexpr std::array<NativeHudMoment, 16> kMoments{ {
-		{ "m01", 20, 100, 1, 100, 0, 4, 295, 44.125f, true, -140.0f, -455.0f, 1.470f },
+		{ "m01", 20, 100, 1, 100, 0, 4, 295, 44.125f, true, -140.0f, -455.0f, 1.470f, true },
 		{ "m02", 25, 217, 1, 100, 9, 12, 212, 95.250f, true, -208.0f, -508.0f, 1.370f },
 		{ "m03", 31, 124, 1, 100, 50, 61, 270, 95.250f, true, -251.0f, -500.0f, 1.380f },
 		{ "m04", 31, 217, 1, 100, 73, 83, 49, 99.250f, true, -217.0f, -557.0f, 1.310f },
 		{ "m05", 30, 217, 1, 100, 74, 83, 82, 97.250f, true, -217.0f, -557.0f, 1.325f },
-		{ "m06", 6, 217, 1, 94, 79, 85, 68, 115.375f, true, -129.0f, -535.0f, 1.405f },
+		{ "m06", 6, 217, 1, 94, 79, 85, 68, 115.375f, true, -129.0f, -535.0f, 1.405f, true },
 		{ "m07", 31, 192, 1, 94, 79, 85, 289, 96.125f, true, -112.0f, -543.0f, 1.230f },
-		{ "m08", 21, 192, 1, 94, 79, 87, 286, 72.250f, false, -232.0f, -554.0f, 1.370f },
+		{ "m08", 21, 192, 1, 94, 79, 87, 286, 72.250f, false, -232.0f, -554.0f, 1.370f, true },
 		{ "m09", 31, 168, 1, 100, 81, 88, 285, 115.250f, true, -222.0f, -558.0f, 1.310f },
 		{ "m10", 31, 168, 1, 74, 85, 89, 87, 99.250f, true, -207.0f, -548.0f, 1.375f },
 		{ "m11", 0, 0, 0, 87, 85, 89, 69, 4.250f, false, -207.0f, -549.0f, 1.390f },
@@ -62,6 +63,14 @@ constexpr float kScanBelowSpawns = 5.0f;
 constexpr float kScanStep = 0.05f;
 constexpr uint32_t kScanMaxFloors = 64;
 constexpr float kFloorNormalY = 0.7f;
+constexpr float kNearStep = 0.5f;
+constexpr float kNearRadius = 8.0f;
+constexpr float kNearRadiusAmbiguous = 64.0f;
+
+struct MomentFloor {
+	sim::Vec3 at{};
+	bool clear = false;
+};
 
 std::string xyz(const sim::Vec3 &p_v) {
 	return "(" + std::to_string(p_v[0]) + ", " + std::to_string(p_v[1]) + ", " + std::to_string(p_v[2]) + ")";
@@ -149,8 +158,9 @@ NativeHudMinimapPose native_hud_moment_pose(const NativeHudMoment &p_moment) {
 	return p;
 }
 
-std::optional<sim::Vec3> native_hud_moment_feet(const sim::CollisionWorld &p_world, const sim::MotorParams &p_motor, std::span<const sim::SpawnPoint> p_spawns, float p_x,
-		float p_z) {
+namespace {
+
+std::optional<MomentFloor> moment_floor(const sim::CollisionWorld &p_world, const sim::MotorParams &p_motor, std::span<const sim::SpawnPoint> p_spawns, float p_x, float p_z) {
 	const sim::SpawnPoint *nearest = nullptr;
 	float best = 0.0f;
 	float low = std::numeric_limits<float>::infinity();
@@ -195,7 +205,40 @@ std::optional<sim::Vec3> native_hud_moment_feet(const sim::CollisionWorld &p_wor
 			any_floor = hit.position;
 		}
 	}
-	return clear_floor ? clear_floor : any_floor;
+	if (clear_floor) {
+		return MomentFloor{ *clear_floor, true };
+	}
+	if (any_floor) {
+		return MomentFloor{ *any_floor, false };
+	}
+	return std::nullopt;
+}
+
+}
+
+std::optional<sim::Vec3> native_hud_moment_feet(const sim::CollisionWorld &p_world, const sim::MotorParams &p_motor, std::span<const sim::SpawnPoint> p_spawns, float p_x,
+		float p_z) {
+	const std::optional<MomentFloor> f = moment_floor(p_world, p_motor, p_spawns, p_x, p_z);
+	return f ? std::optional<sim::Vec3>(f->at) : std::nullopt;
+}
+
+std::optional<sim::Vec3> native_hud_moment_floor_near(const sim::CollisionWorld &p_world, const sim::MotorParams &p_motor, std::span<const sim::SpawnPoint> p_spawns,
+		float p_x, float p_z, float p_radius) {
+	std::optional<sim::Vec3> fallback;
+	for (float r = 0.0f; r <= p_radius + 1e-3f; r += kNearStep) {
+		const int32_t around = r > 0.0f ? std::max(8, int32_t(std::ceil(2.0f * float(std::numbers::pi) * r / kNearStep))) : 1;
+		for (int32_t i = 0; i < around; ++i) {
+			const float a = 2.0f * float(std::numbers::pi) * float(i) / float(around);
+			const std::optional<MomentFloor> f = moment_floor(p_world, p_motor, p_spawns, p_x + r * std::cos(a), p_z + r * std::sin(a));
+			if (f && f->clear) {
+				return f->at;
+			}
+			if (f && !fallback) {
+				fallback = f->at;
+			}
+		}
+	}
+	return fallback;
 }
 
 NativeHudMomentRun::NativeHudMomentRun(std::string p_out_dir, std::string_view p_ids) : out_dir_(std::move(p_out_dir)) {
@@ -220,6 +263,21 @@ NativeHudMomentRun::NativeHudMomentRun(std::string p_out_dir, std::string_view p
 void NativeHudMomentRun::row(const std::string &p_name, bool p_pass, const std::string &p_detail) {
 	failures_ += p_pass ? 0 : 1;
 	UtilityFunctions::print(String::utf8(("NATIVE HUD ROW " + p_name + " " + (p_pass ? "PASS" : "FAIL") + " " + p_detail).c_str()));
+}
+
+void NativeHudMomentRun::hold(Bf3LevelSession &r_session, const NativeHudMoment &p_moment) {
+	host::ClientSession *client = r_session.client();
+	if (client == nullptr) {
+		return;
+	}
+	const float yaw = native_hud_moment_view_yaw(p_moment);
+	r_session.mapper().script_view(yaw, 0.0f);
+	net::DebugRequest q;
+	q.kind = net::DebugKind::Teleport;
+	q.id = ++request_id_;
+	q.position = feet_;
+	q.yaw = sim::quantize_yaw(yaw);
+	client->send_debug(q);
 }
 
 void NativeHudMomentRun::check(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, const NativeHudMoment &p_moment) {
@@ -289,7 +347,10 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 			const sim::CollisionWorld *world = r_session.collision_world();
 			const std::shared_ptr<const host::SharedLevel> level = r_session.shared_level();
 			const std::optional<sim::Vec3> feet =
-					world != nullptr && level != nullptr ? native_hud_moment_feet(*world, level->motor, level->spawns, m.world_x, m.world_z) : std::nullopt;
+					world != nullptr && level != nullptr ? native_hud_moment_floor_near(*world, level->motor, level->spawns, m.world_x, m.world_z, m.pose_ambiguous ? kNearRadiusAmbiguous : kNearRadius) : std::nullopt;
+			if (m.pose_ambiguous) {
+				UtilityFunctions::print(String::utf8((std::string("NATIVE HUD FLAG ") + m.id + " the reference marks this minimap pose ambiguous").c_str()));
+			}
 			if (client == nullptr) {
 				row(std::string(m.id) + ".place", false, "no client");
 				phase_ = Phase::Done;
@@ -302,14 +363,11 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 				return false;
 			}
 			feet_ = *feet;
-			const float yaw = native_hud_moment_view_yaw(m);
-			r_session.mapper().script_view(yaw, 0.0f);
-			net::DebugRequest q;
-			q.kind = net::DebugKind::Teleport;
-			q.id = ++request_id_;
-			q.position = feet_;
-			q.yaw = sim::quantize_yaw(yaw);
-			client->send_debug(q);
+			const float off = std::hypot(feet_[0] - m.world_x, feet_[2] - m.world_z);
+			if (off > kArriveXz) {
+				UtilityFunctions::print(String::utf8((std::string("NATIVE HUD FLAG ") + m.id + " no clear standing floor at the reference xz; the nearest is " + std::to_string(off) + " m away at " + xyz(feet_)).c_str()));
+			}
+			hold(r_session, m);
 			arriving_ = 0.0;
 			phase_ = Phase::Arrive;
 			return false;
@@ -317,6 +375,7 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 		case Phase::Arrive: {
 			const NativeHudMoment &m = *moments_[index_];
 			arriving_ += p_delta;
+			hold(r_session, m);
 			const sim::Vec3 &at = r_session.frame().own_curr.position;
 			if (!at_feet(at, feet_)) {
 				if (arriving_ > kArriveTimeout) {
@@ -344,6 +403,7 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 			return false;
 		}
 		case Phase::Render:
+			hold(r_session, *moments_[index_]);
 			r_hud.set_visible(true);
 			if (++frames_ < kRenderFrames) {
 				return false;

@@ -37,6 +37,7 @@ struct NativeHudMoment {
 	float world_x = 0.0f;
 	float world_z = 0.0f;
 	float minimap_metres_per_unit = 0.0f;
+	bool pose_ambiguous = false;
 };
 
 std::span<const NativeHudMoment> native_hud_moments();
@@ -46,6 +47,8 @@ NativeHudMinimapPose native_hud_moment_pose(const NativeHudMoment &p_moment);
 float native_hud_moment_view_yaw(const NativeHudMoment &p_moment);
 std::optional<bf3::sim::Vec3> native_hud_moment_feet(const bf3::sim::CollisionWorld &p_world, const bf3::sim::MotorParams &p_motor, std::span<const bf3::sim::SpawnPoint> p_spawns,
 		float p_x, float p_z);
+std::optional<bf3::sim::Vec3> native_hud_moment_floor_near(const bf3::sim::CollisionWorld &p_world, const bf3::sim::MotorParams &p_motor,
+		std::span<const bf3::sim::SpawnPoint> p_spawns, float p_x, float p_z, float p_radius);
 
 class NativeHudMomentRun {
 public:
@@ -56,6 +59,7 @@ public:
 
 private:
 	enum class Phase : uint8_t { WaitAlive, Place, Arrive, Settle, Render, Capture, Done };
+	void hold(Bf3LevelSession &r_session, const NativeHudMoment &p_moment);
 	void check(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, const NativeHudMoment &p_moment);
 	void row(const std::string &p_name, bool p_pass, const std::string &p_detail);
 
