@@ -505,8 +505,8 @@ TEST_SUITE("ui-hud-screen") {
 		CHECK(s.renderer(w) == "t2");
 		const float left = s.at(w).matrix.tx + render.x();
 		const float right = left + render.width();
-		CHECK(left == doctest::Approx(42.5f).epsilon(0.01));
-		CHECK(right - s.at(w).matrix.tx == doctest::Approx(183.5f).epsilon(0.01));
+		CHECK(left == doctest::Approx(42.75f).epsilon(0.01));
+		CHECK(right - s.at(w).matrix.tx == doctest::Approx(173.75f).epsilon(0.01));
 		Screen mp = initialized(*r, kHudMpScreenPartition, moment_m02());
 		const auto *ammo_bg = dynamic_cast<HudBackgroundWidgetApi *>(mp.hud->controller("instance1.Ammo_01.Ammo.bgAmmo"));
 		REQUIRE(ammo_bg != nullptr);

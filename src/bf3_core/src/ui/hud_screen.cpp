@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
 
 namespace bf3::core::ui {
 
@@ -419,6 +420,7 @@ void HudScreen::discover(SwfNodeId p_root) {
 		return;
 	}
 	std::vector<SwfNodeId> order;
+	std::unordered_map<SwfNodeId, size_t> entered{ { p_root, 0 } };
 	std::vector<std::pair<SwfNodeId, size_t>> stack{ { p_root, 0 } };
 	while (!stack.empty()) {
 		auto &[id, next] = stack.back();
@@ -429,9 +431,10 @@ void HudScreen::discover(SwfNodeId p_root) {
 			continue;
 		}
 		const SwfNodeId c = cur->children[next++];
+		entered.emplace(c, entered.size());
 		stack.emplace_back(c, 0);
 	}
-	std::vector<HudWidgetState *> made;
+	std::vector<std::pair<size_t, HudWidgetState *>> made;
 	for (const SwfNodeId id : order) {
 		const SwfSceneNode *node = scene_->node(id);
 		if (node == nullptr || node->kind != SwfNodeKind::Sprite || widget(node->path) != nullptr) {
@@ -459,13 +462,15 @@ void HudScreen::discover(SwfNodeId p_root) {
 		}
 		original_positions_[st->path] = { node->matrix.tx, node->matrix.ty };
 		stats_.controllers++;
-		made.push_back(st.get());
+		made.emplace_back(entered.at(id), st.get());
 		widgets_.push_back(std::move(st));
 	}
-	for (HudWidgetState *w : made) {
+	std::vector<std::pair<size_t, HudWidgetState *>> parents_first = made;
+	std::sort(parents_first.begin(), parents_first.end(), [](const auto &p_a, const auto &p_b) { return p_a.first < p_b.first; });
+	for (const auto &[entry, w] : parents_first) {
 		w->controller->construct(*w->host);
 	}
-	for (HudWidgetState *w : made) {
+	for (const auto &[entry, w] : made) {
 		if (const SwfSceneNode *node = scene_->find_node(w->path)) {
 			original_positions_[w->path] = { node->matrix.tx, node->matrix.ty };
 		}
