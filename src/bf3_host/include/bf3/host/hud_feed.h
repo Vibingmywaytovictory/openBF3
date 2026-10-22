@@ -108,12 +108,6 @@ void fill_hud(const HudFeedInput &p_input, std::span<const PresentEvent> p_drain
 
 inline constexpr float kHudStageWidth = 1280.0f;
 inline constexpr float kHudStageHeight = 720.0f;
-inline constexpr std::string_view kHudScreenMovie = "ui/assets/hudmpscreen";
-inline constexpr std::string_view kHitIndicatorMovie = "ui/assets/hitindicator";
-
-inline constexpr std::array<std::string_view, 3> kHitIndicatorRegions{ "#4/level1", "#4/level2", "#4/level3" };
-inline constexpr std::string_view kHudNumberFont = "$HUD_medium";
-inline constexpr std::string_view kHudTextFont = "$Menu_medium";
 
 float hud_scale(float p_width, float p_height);
 
@@ -124,57 +118,9 @@ struct HudPoint {
 
 HudPoint hud_stage_to_window(core::ui::HudAnchor p_anchor, float p_stage_x, float p_stage_y, float p_width, float p_height);
 
-double crosshair_gap_px(double p_height, double p_spread_deg, double p_vfov_deg);
-
 float hud_compass_heading_deg(float p_view_yaw_rad);
 
 int32_t hud_grenade_count(const net::WeaponsWire &p_weapons, const HudStatic &p_static);
-
-struct HudTextSlot {
-	bool found = false;
-	std::string path;
-	float x = 0;
-	float y = 0;
-	float scale_x = 1;
-	float scale_y = 1;
-	core::ui::SwfRect bounds;
-	float size = 0;
-	uint8_t align = 0;
-	std::string font;
-	core::ui::SwfColor color;
-	std::string initial_text;
-};
-
-struct HudWidgetSlot {
-	bool found = false;
-	std::string instance;
-	float x = 0;
-	float y = 0;
-	core::ui::HudAnchor anchor = core::ui::HudAnchor::Centre;
-};
-
-struct HudScreenLayout {
-	HudWidgetSlot ammo;
-	HudWidgetSlot health;
-	HudWidgetSlot hit_indicator;
-	HudTextSlot ammo_clip;
-	HudTextSlot ammo_reserve;
-	HudTextSlot ammo_slash;
-	HudTextSlot health_value;
-	HudTextSlot health_percent;
-	std::vector<std::string> missing;
-	size_t nodes = 0;
-};
-
-core::Result<HudScreenLayout> make_hud_screen_layout(const core::ui::SwfLayoutNode &p_root, core::gameplay::WorkBudget &r_budget);
-
-struct HudTextAnchor {
-	float x = 0;
-	float baseline = 0;
-	uint8_t align = 0;
-	float size = 0;
-};
-HudTextAnchor hud_text_anchor(const HudTextSlot &p_slot, float p_ascent_per_px);
 
 }
 

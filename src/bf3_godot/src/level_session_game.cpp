@@ -8,7 +8,8 @@
 #include "game_fx.h"
 #include "godot_cache.h"
 #include "godot_util.h"
-#include "hud_controls.h"
+#include "hud_items.h"
+#include "native_hud.h"
 #include "ui_assets.h"
 #include "viewmodel.h"
 #include "viewmodel_muzzle.h"
@@ -186,6 +187,10 @@ int GameState::item_of(uint8_t p_team, uint16_t p_def) const {
 	return it != def_items[size_t(p_team - 1)].end() ? it->second : -1;
 }
 
+bool GameState::hud_ready() const {
+	return (hud_items == nullptr || hud_items->is_loaded()) && (native_hud == nullptr || native_hud->is_ready());
+}
+
 void Bf3LevelSession::GameDeleter::operator()(Game *p_session) const {
 	delete p_session;
 }
@@ -289,7 +294,6 @@ void Bf3LevelSession::game_parse_args() {
 		if (Bf3UiAssets::current() == nullptr) {
 			g.ui_assets = memnew(Bf3UiAssets);
 			g.ui_assets->set_name("GameUiAssets");
-			g.ui_assets->set_atlas_movies(Bf3Hud::required_atlas_movies());
 			add_child(g.ui_assets);
 		}
 	}
@@ -705,9 +709,12 @@ void build_game_ui(Node *p_parent, GameState &r_game, bool p_windowed) {
 	r_game.layer->set_name("GameUi");
 	p_parent->add_child(r_game.layer);
 	if (p_windowed) {
-		r_game.hud = memnew(Bf3Hud);
-		r_game.hud->set_name("Bf3Hud");
-		r_game.layer->add_child(r_game.hud);
+		r_game.native_hud = memnew(Bf3NativeHud);
+		r_game.native_hud->set_name("NativeHud");
+		r_game.layer->add_child(r_game.native_hud);
+		r_game.hud_items = memnew(Bf3HudItems);
+		r_game.hud_items->set_name("HudItems");
+		r_game.layer->add_child(r_game.hud_items);
 	}
 	r_game.score_label = make_label(16, HORIZONTAL_ALIGNMENT_RIGHT);
 	r_game.score_label->set_name("Score");
@@ -952,12 +959,12 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			UtilityFunctions::print(line);
 		}
 	}
-	if (g.hud != nullptr && g.hud->is_loaded() && !g.hud_names_applied) {
+	if (g.hud_items != nullptr && g.hud_items->is_loaded() && !g.hud_names_applied) {
 		g.hud_names_applied = true;
-		const size_t filled = g.hud->item_index() != nullptr ? host::apply_item_names(g.hud_static, *g.hud->item_index()) : 0;
-		UtilityFunctions::print(to_godot("[game] HUD loaded" + (g.hud->load_error().empty() ? std::string() : " (" + g.hud->load_error() + ")") + ": " +
+		const size_t filled = g.hud_items->item_index() != nullptr ? host::apply_item_names(g.hud_static, *g.hud_items->item_index()) : 0;
+		UtilityFunctions::print(to_godot("[game] HUD items loaded" + (g.hud_items->load_error().empty() ? std::string() : " (" + g.hud_items->load_error() + ")") + ": " +
 				std::to_string(g.hud_static.rows.size()) + " weapon rows, " + std::to_string(filled) + " names from the item index, " +
-				std::to_string(g.hud->icon_count()) + " icons"));
+				std::to_string(g.hud_items->icon_count()) + " icons"));
 	}
 	const bool free_camera = mapper_.free_camera();
 
@@ -1010,19 +1017,28 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 	g.ms_vm = ms_since(part_t0);
 	part_t0 = std::chrono::steady_clock::now();
 
-	if (g.hud != nullptr) {
+	if (g.native_hud != nullptr) {
 		host::HudFeedInput in;
 		in.weapon = g.weapon;
+		in.weapons = &f.own_weapons_curr;
 		in.alive = g.alive;
 		in.health = f.own_curr.health;
+		in.view_yaw_rad = view.yaw;
 		in.pose = f.own_curr.pose;
 		in.now_s = double(p_now_ns) * 1e-9;
 		host::fill_hud(in, g.events, g.hud_static, g.hud_state, g.hud_model);
-		g.hud->set_model(g.hud_model);
+		g.native_hud->set_model(g.hud_model);
 		if (camera != nullptr) {
-			g.hud->set_vfov_deg(camera->get_fov());
+			g.native_hud->set_vfov_deg(camera->get_fov());
 		}
-		g.hud->set_visible(!free_camera);
+		const Vector3 eye = cameras_.last_eye();
+		NativeHudMinimapPose pose;
+		pose.x = eye.x;
+		pose.z = eye.z;
+		pose.yaw = view.yaw;
+		pose.valid = true;
+		g.native_hud->set_minimap_pose(pose);
+		g.native_hud->set_visible(!free_camera && g.alive);
 	}
 	g.ms_hud = ms_since(part_t0);
 	if (tdm_frame(p_now_ns, p_delta, camera, free_camera)) {
@@ -1098,7 +1114,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 	}
 
 #if OPENBF3_BUILD_CHECKS
-	if (g.checks() && g.check == nullptr && !g.finished && (g.vm_built || !scene_) && (g.hud == nullptr || g.hud->is_loaded())) {
+	if (g.checks() && g.check == nullptr && !g.finished && (g.vm_built || !scene_) && g.hud_ready()) {
 		g.check = std::make_unique<M2aCheck>(*this, g, g.cases, g.check_options);
 	}
 	if (g.check != nullptr && !g.finished) {

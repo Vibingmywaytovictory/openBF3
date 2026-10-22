@@ -98,8 +98,10 @@ target_sources(bf3_godot PRIVATE
 target_link_libraries(bf3_godot PRIVATE bf3_fx)
 
 target_sources(bf3_godot PRIVATE
-    src/hud_controls.cpp
-    src/hud_controls.h
+    src/hud_items.cpp
+    src/hud_items.h
+    src/native_hud.cpp
+    src/native_hud.h
 )
 
 target_sources(bf3_godot PRIVATE

@@ -8,8 +8,6 @@
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/ui/hud_icons.h"
-#include "bf3/core/ui/swf_layout.h"
-#include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/text_db.h"
 #include "bf3/core/util/format.h"
 #include "bf3/host/hud_feed.h"
@@ -112,49 +110,6 @@ host::PresentEvent hit_event(uint8_t p_flags, int64_t p_time) {
 	e.time = p_time;
 	e.value = 25.0f;
 	return e;
-}
-
-ui::SwfLayoutNode text_node(const char *p_instance, float p_x, float p_y, float p_size, uint8_t p_align, const char *p_initial,
-		ui::SwfRect p_bounds) {
-	ui::SwfLayoutNode n;
-	n.instance = p_instance;
-	n.kind = ui::SwfLayoutKind::EditText;
-	n.stage.tx = p_x;
-	n.stage.ty = p_y;
-	n.text.font = "$HUD_medium";
-	n.text.size = p_size;
-	n.text.align = p_align;
-	n.text.initial_text = p_initial;
-	n.text.bounds = p_bounds;
-	n.text.color = { 255, 255, 255, 255 };
-	return n;
-}
-
-ui::SwfLayoutNode sprite(const char *p_instance, float p_x, float p_y, std::vector<ui::SwfLayoutNode> p_children = {}) {
-	ui::SwfLayoutNode n;
-	n.instance = p_instance;
-	n.kind = ui::SwfLayoutKind::Sprite;
-	n.stage.tx = p_x;
-	n.stage.ty = p_y;
-	n.children = std::move(p_children);
-	return n;
-}
-
-ui::SwfLayoutNode synthetic_screen() {
-	ui::SwfLayoutNode clip_txt = text_node("txtDisplay", 1094, 625, 43, 1, "000", { -2, 102, -2, 48 });
-	ui::SwfLayoutNode res_txt = text_node("txtDisplay", 1199, 648, 21, 1, "000", { -2, 60, -2, 26 });
-	ui::SwfLayoutNode slash = text_node("", 1194, 649, 18, 0, "/", { -2, 12, -2, 22 });
-	ui::SwfLayoutNode ammo = sprite("Ammo_01", 1194, 669,
-			{ sprite("Ammo", 1194, 669,
-					{ sprite("", 1112, 647, { slash }), sprite("clip", 1196, 623, { sprite("cltxt", 1196, 623, { clip_txt }) }),
-							sprite("amholder", 1197, 646, { sprite("amtxt", 1248, 646, { res_txt }) }) }) });
-	ui::SwfLayoutNode hp_txt = text_node("txtDisplay", 1200.65f, 588, 21, 1, "100", { -2, 52, -2, 26 });
-	ui::SwfLayoutNode pct = text_node("", 1253.66f, 593, 16, 0, "%", { -2, 14, -2, 20 });
-	ui::SwfLayoutNode health = sprite("Health_01", 1193, 605, { sprite("Health", 1193, 605, { sprite("healthHolder", 1107, 583, { sprite("amtxt", 1198, 586, { pct, hp_txt }) }) }) });
-	ui::SwfLayoutNode hit = sprite("Hitindicator_01", 640, 360, { sprite("hitindicator", 640, 360) });
-	ui::SwfLayoutNode root = sprite("", 0, 0, { sprite("instance1", 0, 0, { sprite("LatencyIndicator_01", 1274, 3), hit, ammo, health }) });
-	root.symbol = "_root";
-	return root;
 }
 
 }
@@ -418,28 +373,6 @@ TEST_CASE("compass heading from the view yaw and the grenade count from the wcHg
 	row("feed.compass_grenades", true, "yaw 212 deg -> heading 212; wcHgr slot 1 + 1 -> 2 grenades, cleared when dead");
 }
 
-TEST_CASE("crosshair gap = (h/2) tan(spread) / tan(vfov/2)") {
-	constexpr double kPi = 3.14159265358979323846;
-	const double g = host::crosshair_gap_px(1080, 1.0, 55.0);
-	CHECK(g == doctest::Approx(540.0 * std::tan(kPi / 180.0) / std::tan(27.5 * kPi / 180.0)).epsilon(1e-12));
-	CHECK(g == doctest::Approx(18.1067).epsilon(1e-4));
-
-	CHECK(host::crosshair_gap_px(1440, 1.0, 55.0) == doctest::Approx(g * 1440.0 / 1080.0));
-	CHECK(host::crosshair_gap_px(1080, 1.0, 75.0) < g);
-	CHECK(host::crosshair_gap_px(1080, 2.0, 55.0) > g);
-	CHECK(host::crosshair_gap_px(720, 0.0, 55.0) == 0.0);
-
-	CHECK(host::crosshair_gap_px(720, 27.5, 55.0) == doctest::Approx(360.0));
-
-	CHECK(host::crosshair_gap_px(0, 1, 55) == 0.0);
-	CHECK(host::crosshair_gap_px(720, -1, 55) == 0.0);
-	CHECK(host::crosshair_gap_px(720, std::nan(""), 55) == 0.0);
-	CHECK(host::crosshair_gap_px(720, 1, 0) == 0.0);
-	CHECK(host::crosshair_gap_px(720, 1, 180) == 0.0);
-	CHECK(std::isfinite(host::crosshair_gap_px(720, 1e9, 55)));
-	row("crosshair.gap", true, fmt("h 1080, spread 1 deg, vfov 55: %.4f px; scaling and refusals", g));
-}
-
 TEST_CASE("stage to window: min(w/1280, h/720) around the widget's anchor") {
 	using ui::HudAnchor;
 
@@ -467,84 +400,6 @@ TEST_CASE("stage to window: min(w/1280, h/720) around the widget's anchor") {
 	CHECK(tl.y == doctest::Approx(6.0f));
 	CHECK(host::hud_scale(0, 720) == 0.0f);
 	row("layout.scale", true, "16:9 at 1280x720 / 1920x1080 / 2560x1440 = stage x scale for every anchor; 4:3 and 21:9 keep the anchor offsets");
-}
-
-TEST_CASE("screen layout: the hudmpscreen slots of a synthetic tree") {
-	const ui::SwfLayoutNode root = synthetic_screen();
-	gp::WorkBudget budget;
-	bf3::core::Result<host::HudScreenLayout> l = host::make_hud_screen_layout(root, budget);
-	REQUIRE_MESSAGE(l.ok(), (l.ok() ? std::string() : l.error().message));
-	CHECK(l->missing.empty());
-	CHECK(l->ammo.found);
-	CHECK(l->ammo.x == 1194.0f);
-	CHECK(l->ammo.y == 669.0f);
-	CHECK(l->ammo.anchor == ui::HudAnchor::BottomRight);
-	CHECK(l->hit_indicator.anchor == ui::HudAnchor::Centre);
-	CHECK(l->health.anchor == ui::HudAnchor::BottomRight);
-	CHECK(l->ammo_clip.found);
-	CHECK(l->ammo_clip.size == 43.0f);
-	CHECK(l->ammo_clip.align == 1);
-	CHECK(l->ammo_clip.font == "$HUD_medium");
-	CHECK(l->ammo_clip.path == "Ammo_01/Ammo/clip/cltxt/txtDisplay");
-	CHECK(l->ammo_reserve.size == 21.0f);
-	CHECK(l->ammo_reserve.x == 1199.0f);
-	CHECK(l->ammo_slash.found);
-	CHECK(l->ammo_slash.initial_text == "/");
-	CHECK(l->health_value.found);
-	CHECK(l->health_percent.initial_text == "%");
-	CHECK(l->nodes > 0);
-
-	const host::HudTextAnchor a = host::hud_text_anchor(l->ammo_clip, 0.8f);
-	CHECK(a.x == doctest::Approx(1094.0f + 100.0f));
-	CHECK(a.baseline == doctest::Approx(625.0f + 0.0f + 0.8f * 43.0f));
-	CHECK(a.size == 43.0f);
-	host::HudTextSlot left = l->ammo_slash;
-	const host::HudTextAnchor b = host::hud_text_anchor(left, 1.0f);
-	CHECK(b.x == doctest::Approx(1194.0f + 0.0f));
-	left.align = 2;
-	CHECK(host::hud_text_anchor(left, 1.0f).x == doctest::Approx(1194.0f + 5.0f));
-
-	ui::SwfLayoutNode partial = root;
-	partial.children[0].children.erase(partial.children[0].children.begin() + 3);
-	gp::WorkBudget b2;
-	bf3::core::Result<host::HudScreenLayout> p = host::make_hud_screen_layout(partial, b2);
-	REQUIRE(p.ok());
-	CHECK_FALSE(p->health.found);
-	CHECK(std::find(p->missing.begin(), p->missing.end(), "Health_01") != p->missing.end());
-	CHECK(p->ammo_clip.found);
-	ui::SwfLayoutNode empty;
-	gp::WorkBudget b3;
-	CHECK_FALSE(host::make_hud_screen_layout(empty, b3).ok());
-	row("layout.slots", l->missing.empty(), std::to_string(l->nodes) + " nodes; Ammo_01 (1194, 669) bottom right, clip 43 px right-aligned");
-}
-
-TEST_CASE("screen layout: hostile trees fail with an error") {
-
-	ui::SwfLayoutNode root = synthetic_screen();
-	ui::SwfLayoutNode &ammo = root.children[0].children[2];
-	ammo.children[0].children.erase(ammo.children[0].children.begin());
-	ui::SwfLayoutNode chain = sprite("deep", 0, 0);
-	for (int i = 0; i < 200; ++i) {
-		ui::SwfLayoutNode parent = sprite("deep", 0, 0);
-		parent.children.push_back(std::move(chain));
-		chain = std::move(parent);
-	}
-	ammo.children.push_back(std::move(chain));
-	gp::WorkBudget budget;
-	bf3::core::Result<host::HudScreenLayout> l = host::make_hud_screen_layout(root, budget);
-	CHECK_FALSE(l.ok());
-
-	ui::SwfLayoutNode wide = synthetic_screen();
-	for (int i = 0; i < 5000; ++i) {
-		wide.children[0].children.insert(wide.children[0].children.begin(), sprite("filler", 0, 0));
-	}
-	gp::WorkBudget small(1000);
-	bf3::core::Result<host::HudScreenLayout> w = host::make_hud_screen_layout(wide, small);
-	CHECK_FALSE(w.ok());
-	gp::WorkBudget enough;
-	CHECK(host::make_hud_screen_layout(wide, enough).ok());
-	row("layout.hostile", !l.ok() && !w.ok(), std::string("depth 200 chain: ") + (l.ok() ? "accepted" : l.error().message) + "; 5000 siblings on 1000 units: " +
-			(w.ok() ? "accepted" : w.error().message));
 }
 
 }
@@ -657,49 +512,6 @@ TEST_CASE("the 12 kit items: names, icons, static rows") {
 	row("kit.icons", icons == std::size(kKitItems), std::to_string(icons) + "/12 _small icons decode");
 	CHECK(names == 12);
 	CHECK(icons == 12);
-}
-
-TEST_CASE("the hudmpscreen slots") {
-	HudInstall *hi = hud_install();
-	if (hi == nullptr) {
-		return;
-	}
-	bf3::core::Result<ui::SwfLibrary> lib = ui::SwfLibrary::open(hi->install);
-	REQUIRE_MESSAGE(lib.ok(), (lib.ok() ? std::string() : lib.error().message));
-	bf3::core::level::WorkBudget budget(ui::kSwfLayoutBudgetUnits);
-	bf3::core::Result<ui::SwfLayoutNode> tree = ui::read_layout(*lib, host::kHudScreenMovie, {}, budget);
-	REQUIRE_MESSAGE(tree.ok(), (tree.ok() ? std::string() : tree.error().message));
-	gp::WorkBudget lb;
-	bf3::core::Result<host::HudScreenLayout> l = host::make_hud_screen_layout(*tree, lb);
-	REQUIRE_MESSAGE(l.ok(), (l.ok() ? std::string() : l.error().message));
-	std::string missing;
-	for (const std::string &m : l->missing) {
-		missing += " " + m;
-	}
-	CHECK_MESSAGE(l->missing.empty(), missing);
-	CHECK(l->ammo.x == doctest::Approx(1194.0f));
-	CHECK(l->ammo.y == doctest::Approx(669.0f));
-	CHECK(l->health.x == doctest::Approx(1193.0f));
-	CHECK(l->health.y == doctest::Approx(605.0f));
-	CHECK(l->hit_indicator.x == doctest::Approx(640.0f));
-	CHECK(l->hit_indicator.y == doctest::Approx(360.0f));
-	CHECK(l->ammo.anchor == ui::HudAnchor::BottomRight);
-	CHECK(l->ammo_clip.font == host::kHudNumberFont);
-	CHECK(l->ammo_clip.size == 43.0f);
-	CHECK(l->ammo_clip.align == 1);
-	CHECK(l->ammo_reserve.size == 21.0f);
-	CHECK(l->health_value.size == 21.0f);
-	const auto slot = [](const host::HudTextSlot &p_s) {
-		return p_s.path + fmt(" at (%.2f, %.2f) %.0f px", p_s.x, p_s.y, p_s.size) + " " + p_s.font + " align " + std::to_string(p_s.align) +
-				fmt(" bounds x %.2f..%.2f", p_s.bounds.x_min, p_s.bounds.x_max) + fmt(" y %.2f..%.2f", p_s.bounds.y_min, p_s.bounds.y_max);
-	};
-	row("screen.ammo", l->ammo.found, fmt("Ammo_01 (%.2f, %.2f) anchor ", l->ammo.x, l->ammo.y) + ui::hud_anchor_name(l->ammo.anchor));
-	row("screen.clip", l->ammo_clip.found, slot(l->ammo_clip));
-	row("screen.reserve", l->ammo_reserve.found, slot(l->ammo_reserve));
-	row("screen.slash", l->ammo_slash.found, slot(l->ammo_slash));
-	row("screen.health", l->health_value.found, slot(l->health_value));
-	row("screen.percent", l->health_percent.found, slot(l->health_percent));
-	row("screen.nodes", l->missing.empty(), std::to_string(l->nodes) + " nodes visited, " + std::to_string(l->missing.size()) + " missing" + missing);
 }
 
 TEST_CASE("install.unchanged") {

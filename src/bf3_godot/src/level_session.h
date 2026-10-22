@@ -91,6 +91,7 @@ public:
 
 	bool done() const { return done_; }
 	bool scene_enabled() const { return scene_; }
+	bool game_session() const { return game_ != nullptr; }
 	bool failed() const { return failed_; }
 	const std::string &level_id() const { return level_; }
 	const std::string &mode_id() const { return mode_; }

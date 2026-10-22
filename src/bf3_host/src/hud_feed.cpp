@@ -16,8 +16,6 @@ namespace sw = bf3::sim::weapons;
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
-constexpr double kMaxGapSpreadDeg = 89.0;
-constexpr size_t kMaxLayoutDepth = size_t(ui::kSwfLayoutMaxDepth) * 4;
 
 HudCrosshairKind crosshair_kind(const gp::WeaponDef &p_def, const sw::WeaponSimDef &p_sim) {
 	if (p_def.weapon_class == "wcKnife") {
@@ -63,93 +61,6 @@ void clear_weapon(ui::HudWeapon &r_w) {
 	r_w.show_crosshair = false;
 	r_w.can_fire = false;
 	r_w.secondary_weapon_ammo = 0;
-}
-
-const ui::SwfLayoutNode *child_named(const ui::SwfLayoutNode &p_node, std::string_view p_name, gp::WorkBudget &r_budget) {
-	for (const ui::SwfLayoutNode &c : p_node.children) {
-		if (!r_budget.charge(1)) {
-			return nullptr;
-		}
-		if (c.instance == p_name) {
-			return &c;
-		}
-	}
-	return nullptr;
-}
-
-const ui::SwfLayoutNode *find_path(const ui::SwfLayoutNode &p_node, std::span<const std::string_view> p_path, gp::WorkBudget &r_budget) {
-	const ui::SwfLayoutNode *n = &p_node;
-	for (const std::string_view name : p_path) {
-		n = child_named(*n, name, r_budget);
-		if (n == nullptr) {
-			return nullptr;
-		}
-	}
-	return n;
-}
-
-const ui::SwfLayoutNode *find_text(const ui::SwfLayoutNode &p_node, std::string_view p_text, gp::WorkBudget &r_budget, bool &r_too_deep) {
-	std::vector<std::pair<const ui::SwfLayoutNode *, size_t>> stack;
-	stack.emplace_back(&p_node, 0);
-	while (!stack.empty()) {
-		if (!r_budget.charge(1)) {
-			return nullptr;
-		}
-		const auto [n, depth] = stack.back();
-		stack.pop_back();
-		if (n->kind == ui::SwfLayoutKind::EditText && n->text.initial_text == p_text) {
-			return n;
-		}
-		if (n->children.empty()) {
-			continue;
-		}
-		if (depth + 1 > kMaxLayoutDepth) {
-			r_too_deep = true;
-			return nullptr;
-		}
-		for (size_t i = n->children.size(); i-- > 0;) {
-			stack.emplace_back(&n->children[i], depth + 1);
-		}
-	}
-	return nullptr;
-}
-
-float axis_length(float p_a, float p_b) {
-	const float l = std::sqrt(p_a * p_a + p_b * p_b);
-	return std::isfinite(l) ? l : 0.0f;
-}
-
-HudTextSlot text_slot(const ui::SwfLayoutNode *p_node, std::string p_path) {
-	HudTextSlot s;
-	s.path = std::move(p_path);
-	if (p_node == nullptr || p_node->kind != ui::SwfLayoutKind::EditText) {
-		return s;
-	}
-	s.found = true;
-	s.x = p_node->stage.tx;
-	s.y = p_node->stage.ty;
-	s.scale_x = axis_length(p_node->stage.a, p_node->stage.b);
-	s.scale_y = axis_length(p_node->stage.c, p_node->stage.d);
-	s.bounds = p_node->text.bounds;
-	s.size = p_node->text.size;
-	s.align = p_node->text.align;
-	s.font = p_node->text.font;
-	s.color = p_node->text.color;
-	s.initial_text = p_node->text.initial_text;
-	return s;
-}
-
-HudWidgetSlot widget_slot(const ui::SwfLayoutNode *p_node, std::string_view p_instance) {
-	HudWidgetSlot w;
-	w.instance = std::string(p_instance);
-	if (p_node == nullptr) {
-		return w;
-	}
-	w.found = true;
-	w.x = p_node->stage.tx;
-	w.y = p_node->stage.ty;
-	w.anchor = ui::hud_anchor_for(w.x, w.y, ui::SwfRect{ 0.0f, kHudStageWidth, 0.0f, kHudStageHeight });
-	return w;
 }
 
 }
@@ -316,16 +227,6 @@ HudPoint hud_stage_to_window(ui::HudAnchor p_anchor, float p_stage_x, float p_st
 	return p;
 }
 
-double crosshair_gap_px(double p_height, double p_spread_deg, double p_vfov_deg) {
-	if (!(p_height > 0.0) || !std::isfinite(p_height) || !(p_spread_deg >= 0.0) || !std::isfinite(p_spread_deg) || !(p_vfov_deg > 0.0) ||
-			!(p_vfov_deg < 180.0)) {
-		return 0.0;
-	}
-	const double spread = std::min(p_spread_deg, kMaxGapSpreadDeg) * kPi / 180.0;
-	const double half_fov = p_vfov_deg * 0.5 * kPi / 180.0;
-	return p_height * 0.5 * std::tan(spread) / std::tan(half_fov);
-}
-
 float hud_compass_heading_deg(float p_view_yaw_rad) {
 	if (!std::isfinite(p_view_yaw_rad)) {
 		return 0.0f;
@@ -345,82 +246,5 @@ int32_t hud_grenade_count(const net::WeaponsWire &p_weapons, const HudStatic &p_
 	return 0;
 }
 
-core::Result<HudScreenLayout> make_hud_screen_layout(const ui::SwfLayoutNode &p_root, gp::WorkBudget &r_budget) {
-	HudScreenLayout out;
-	const size_t used_before = r_budget.used();
-	const ui::SwfLayoutNode *screen = child_named(p_root, "instance1", r_budget);
-	BF3_TRY(r_budget.status());
-	if (screen == nullptr) {
-		return core::make_error("hud layout: the screen tree has no instance1");
-	}
-	bool too_deep = false;
-	const auto widget = [&](std::string_view p_instance) {
-		const ui::SwfLayoutNode *n = child_named(*screen, p_instance, r_budget);
-		if (n == nullptr) {
-			out.missing.push_back(std::string(p_instance));
-		}
-		return std::pair<const ui::SwfLayoutNode *, HudWidgetSlot>(n, widget_slot(n, p_instance));
-	};
-	const auto path_text = [&](const ui::SwfLayoutNode *p_widget, std::string_view p_instance, std::initializer_list<std::string_view> p_path) {
-		std::string name(p_instance);
-		for (const std::string_view part : p_path) {
-			name += "/" + std::string(part);
-		}
-		const ui::SwfLayoutNode *n = p_widget != nullptr ? find_path(*p_widget, std::span<const std::string_view>(p_path.begin(), p_path.size()), r_budget) : nullptr;
-		HudTextSlot s = text_slot(n, name);
-		if (!s.found) {
-			out.missing.push_back(name);
-		}
-		return s;
-	};
-	const auto initial_text = [&](const ui::SwfLayoutNode *p_node, std::string_view p_where, std::string_view p_text) {
-		const std::string name = std::string(p_where) + "/\"" + std::string(p_text) + "\"";
-		const ui::SwfLayoutNode *n = p_node != nullptr ? find_text(*p_node, p_text, r_budget, too_deep) : nullptr;
-		HudTextSlot s = text_slot(n, name);
-		if (!s.found) {
-			out.missing.push_back(name);
-		}
-		return s;
-	};
-
-	auto [ammo, ammo_slot] = widget("Ammo_01");
-	auto [health, health_slot] = widget("Health_01");
-	auto [hit, hit_slot] = widget("Hitindicator_01");
-	(void)hit;
-	out.ammo = ammo_slot;
-	out.health = health_slot;
-	out.hit_indicator = hit_slot;
-	out.ammo_clip = path_text(ammo, "Ammo_01", { "Ammo", "clip", "cltxt", "txtDisplay" });
-	out.ammo_reserve = path_text(ammo, "Ammo_01", { "Ammo", "amholder", "amtxt", "txtDisplay" });
-	out.ammo_slash = initial_text(ammo, "Ammo_01", "/");
-	out.health_value = path_text(health, "Health_01", { "Health", "healthHolder", "amtxt", "txtDisplay" });
-	out.health_percent = initial_text(health, "Health_01", "%");
-	BF3_TRY(r_budget.status());
-	if (too_deep) {
-		return core::make_error("hud layout: the screen tree nests deeper than " + std::to_string(kMaxLayoutDepth));
-	}
-	out.nodes = r_budget.used() - used_before;
-	return out;
-}
-
-HudTextAnchor hud_text_anchor(const HudTextSlot &p_slot, float p_ascent_per_px) {
-
-	constexpr float kGutter = 2.0f;
-	HudTextAnchor a;
-	a.align = p_slot.align;
-	a.size = p_slot.size * p_slot.scale_y;
-	const float left = p_slot.bounds.x_min + kGutter;
-	const float right = p_slot.bounds.x_max - kGutter;
-	float fx = left;
-	if (p_slot.align == 1) {
-		fx = right;
-	} else if (p_slot.align == 2) {
-		fx = 0.5f * (left + right);
-	}
-	a.x = p_slot.x + fx * p_slot.scale_x;
-	const float ascent = std::isfinite(p_ascent_per_px) ? p_ascent_per_px : 0.0f;
-	a.baseline = p_slot.y + (p_slot.bounds.y_min + kGutter) * p_slot.scale_y + ascent * a.size;
-	return a;
-}
 
 }

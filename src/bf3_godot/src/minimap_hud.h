@@ -4,6 +4,8 @@
 #include "bf3/core/ui/hud_icons.h"
 #include "bf3/core/ui/minimap.h"
 
+#include "minimap_control.h"
+
 #include <godot_cpp/classes/canvas_layer.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/input_event.hpp>
@@ -42,12 +44,16 @@ struct MinimapAssets {
 	float marker_alpha_dy = 0.0f;
 	std::string error;
 	std::string steps;
+	std::string mask_note;
+	std::string hatch_note;
 };
 
 struct MinimapPixels {
 	bf3::core::ui::MinimapImages images;
 	std::vector<bf3::core::ui::L8Image> satellite_mips;
 	bf3::core::ui::Rgba8Image atlas_image;
+	bf3::core::ui::L8Image mask;
+	bf3::core::ui::L8Image hatch;
 };
 
 class Bf3MinimapHud : public godot::CanvasLayer {
@@ -70,6 +76,14 @@ public:
 	Bf3MinimapControl *control() const { return control_; }
 	Bf3WorldIcons *world_icons() const { return icons_; }
 	Bf3LevelSession *session() const { return session_; }
+	godot::Ref<godot::ImageTexture> satellite_texture() const { return satellite_; }
+	godot::Ref<godot::ImageTexture> combat_area_texture() const { return combat_area_; }
+	godot::Ref<godot::ImageTexture> detail_texture() const { return detail_; }
+	godot::Ref<godot::ImageTexture> icon_texture() const { return atlas_; }
+	godot::Ref<godot::ImageTexture> mask_texture() const { return mask_; }
+	godot::Ref<godot::ImageTexture> hatch_texture() const { return hatch_; }
+	bool has_detail() const { return has_detail_; }
+	const std::vector<MinimapIconDraw> &icon_draws() const { return icon_draws_; }
 	void set_north_up(bool p_on);
 
 	void set_center_override(float p_x, float p_z);
@@ -116,6 +130,10 @@ private:
 	godot::Ref<godot::ImageTexture> combat_area_;
 	godot::Ref<godot::ImageTexture> detail_;
 	godot::Ref<godot::ImageTexture> atlas_;
+	godot::Ref<godot::ImageTexture> mask_;
+	godot::Ref<godot::ImageTexture> hatch_;
+	bool has_detail_ = false;
+	std::vector<MinimapIconDraw> icon_draws_;
 	Bf3MinimapControl *control_ = nullptr;
 	Bf3WorldIcons *icons_ = nullptr;
 	bf3::core::ui::MinimapView view_;

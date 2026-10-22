@@ -677,7 +677,7 @@ void Bf3LevelSession::build_environment(const render::SceneEnvironment &p_env) {
 }
 
 void Bf3LevelSession::build_hud() {
-	if (headless_ || !hud_enabled_) {
+	if (headless_ || !hud_enabled_ || game_session()) {
 		return;
 	}
 	CanvasLayer *layer = memnew(CanvasLayer);

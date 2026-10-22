@@ -6,7 +6,8 @@
 #include "game_crowd.h"
 #include "game_fx.h"
 #include "godot_util.h"
-#include "hud_controls.h"
+#include "hud_items.h"
+#include "native_hud.h"
 #include "level_session_game.h"
 #include "viewmodel.h"
 
@@ -271,13 +272,14 @@ struct M2aCheck::State {
 
 	struct HudExpect {
 		uint64_t serial = 0;
-		int32_t magazine = 0, reserve = 0;
-		double spread = 0, vfov = 0;
-		bool crosshair = false, ammo = false;
+		int32_t magazine = 0;
+		double spread = 0, vfov = 0, zoom_age = 0;
+		bool widget = false, zoomed = false, ammo = false;
 	};
 	std::deque<HudExpect> hud_expect;
-	uint64_t gap_frames = 0, gap_bad = 0, ammo_frames = 0, ammo_place_bad = 0, ammo_font_bad = 0, hud_stale = 0;
-	double gap_err_max = 0, ammo_x_min = 1e9, ammo_x_max = -1e9;
+	uint64_t gap_frames = 0, gap_bad = 0, fade_frames = 0, ammo_frames = 0, ammo_bad = 0, hud_stale = 0;
+	double gap_err_max = 0, hud_zoom_t = 0;
+	bool hud_zoomed = false;
 	std::string hud_first_bad;
 
 	uint64_t water_tags = 0, water_tag_tiles = 0, tags_searched = 0, water_rays = 0;
@@ -484,14 +486,12 @@ struct M2aCheck::State {
 	}
 
 	void hud_draw_account(double p_t) {
-		Bf3Hud *hud = g.hud;
+		Bf3NativeHud *hud = g.native_hud;
 		Camera3D *cam = s.cameras().first_person();
-		if (hud == nullptr || !hud->is_loaded() || hud->crosshair_widget() == nullptr || hud->ammo_widget() == nullptr || cam == nullptr) {
+		if (hud == nullptr || !hud->is_ready() || hud->has_failed() || cam == nullptr) {
 			return;
 		}
-		const Vector2 size = hud->get_size();
-		const HudDrawRecord &c = hud->crosshair_widget()->record();
-		const HudDrawRecord &a = hud->ammo_widget()->record();
+		const NativeHudReadout r = hud->readout();
 		const auto find = [&](uint64_t p_serial) -> const HudExpect * {
 			for (const HudExpect &e : hud_expect) {
 				if (e.serial == p_serial) {
@@ -500,39 +500,53 @@ struct M2aCheck::State {
 			}
 			return nullptr;
 		};
-		if (const HudExpect *e = find(c.serial)) {
+		if (const HudExpect *e = find(r.serial)) {
 			++gap_frames;
-			bool bad = c.visible != e->crosshair;
-			if (!bad && c.visible) {
-				const double want = 0.5 * double(size.y) * std::tan(e->spread * kPi / 180.0) / std::tan(0.5 * e->vfov * kPi / 180.0);
-				const double err = std::fabs(c.gap_px - want);
-				gap_err_max = std::max(gap_err_max, err);
-				bad = err > 0.5;
+			bool bad = r.crosshair_widget != e->widget;
+			std::string why = bad ? "widget" : "";
+			if (!bad && r.crosshair_widget) {
+				const double want = std::round(0.5 * double(r.stage_height) * std::tan(e->spread * kPi / 180.0) / std::tan(0.5 * e->vfov * kPi / 180.0));
+				const double err = std::fabs(double(r.crosshair_arm) - want);
+				if (!e->zoomed) {
+					gap_err_max = std::max(gap_err_max, err);
+					bad = err > 0.5;
+					why = bad ? fmt("arm %.2f, want %.0f", r.crosshair_arm, want) : "";
+				}
+				const bool settled = e->zoom_age > 0.2 + 2.0 * dt;
+				if (settled) {
+					++fade_frames;
+					const float alpha_want = e->zoomed ? 0.0f : 1.0f;
+					if (std::fabs(r.crosshair_alpha - alpha_want) > 1e-3f) {
+						bad = true;
+						why = fmt("alpha %.3f, want %.0f", r.crosshair_alpha, alpha_want);
+					}
+				}
 			}
 			gap_bad += bad ? 1 : 0;
 			if (bad && hud_first_bad.empty()) {
-				hud_first_bad = fmt("%.2f s: crosshair %s, gap %.3f px, spread %.3f, vfov %.2f, want %s", p_t, c.visible ? "shown" : "hidden", c.gap_px, e->spread, e->vfov,
-						e->crosshair ? "shown" : "hidden");
+				hud_first_bad = fmt("%.2f s: crosshair %s (%s), spread %.3f, vfov %.2f, stage h %.1f, want %s%s", p_t, r.crosshair_widget ? "shown" : "hidden", why.c_str(), e->spread,
+						e->vfov, r.stage_height, e->widget ? "shown" : "hidden", e->zoomed ? " zoomed" : "");
 			}
-		} else if (c.draws > 0) {
+			if (r.ammo_visible && e->ammo) {
+				++ammo_frames;
+				ammo_bad += r.clip_text != std::to_string(e->magazine) ? 1 : 0;
+			}
+		} else {
 			++hud_stale;
 		}
-		if (const HudExpect *e = find(a.serial); e != nullptr && a.visible && e->ammo) {
-			++ammo_frames;
-			const double sc = double(host::hud_scale(size.x, size.y));
-			const double stage_x = 1280.0 + (double(a.at_a.x) - double(size.x)) / std::max(1e-9, sc);
-			ammo_x_min = std::min(ammo_x_min, stage_x);
-			ammo_x_max = std::max(ammo_x_max, stage_x);
-			ammo_place_bad += std::fabs(stage_x - 1194.0) > 2.0 || a.text_a != std::to_string(e->magazine) ? 1 : 0;
-			ammo_font_bad += a.font.rfind(std::string(host::kHudNumberFont) + "=", 0) != 0 || a.font.find("=system") != std::string::npos ? 1 : 0;
+		const bool zoomed = g.hud_model.weapon.zoomed;
+		if (zoomed != hud_zoomed) {
+			hud_zoomed = zoomed;
+			hud_zoom_t = p_t;
 		}
 		HudExpect x;
 		x.serial = g.hud_model.serial;
 		x.magazine = g.hud_model.weapon.active_weapon_ammo;
-		x.reserve = g.hud_model.weapon.active_weapon_ammo_in_bag;
 		x.spread = g.weapon.valid ? std::max(0.0, double(g.weapon.spread_deg)) : 0.0;
 		x.vfov = double(cam->get_fov());
-		x.crosshair = g.hud_model.weapon.show_crosshair && !g.weapon.zoomed;
+		x.widget = g.hud_model.soldier.is_alive && g.hud_model.weapon.active_weapon_crosshair != 0;
+		x.zoomed = zoomed;
+		x.zoom_age = p_t - hud_zoom_t;
 		x.ammo = g.hud_model.weapon.active_weapon_show_ammo;
 		hud_expect.push_back(x);
 		while (hud_expect.size() > 8) {
@@ -1704,7 +1718,7 @@ void M2aCheck::State::kit_m67(const std::string &p_tag) {
 void M2aCheck::State::build_hud() {
 	select_slot(0);
 	add("hud: names and icons", 1.0, [](State &st, double, bool) {
-		Bf3Hud *hud = st.g.hud;
+		Bf3HudItems *hud = st.g.hud_items;
 		uint32_t items = 0, names = 0, icons = 0;
 		std::string missing;
 		std::vector<uint16_t> seen;
@@ -1739,10 +1753,10 @@ void M2aCheck::State::build_hud() {
 	add("hud: frames", 10.0, [](State &st, double p_t, bool p_first) {
 		if (p_first) {
 			st.hud_expect.clear();
-			st.gap_frames = st.gap_bad = st.ammo_frames = st.ammo_place_bad = st.ammo_font_bad = st.hud_stale = 0;
+			st.gap_frames = st.gap_bad = st.fade_frames = st.ammo_frames = st.ammo_bad = st.hud_stale = 0;
 			st.gap_err_max = 0;
-			st.ammo_x_min = 1e9;
-			st.ammo_x_max = -1e9;
+			st.hud_zoomed = false;
+			st.hud_zoom_t = p_t;
 			st.hud_first_bad.clear();
 		}
 		st.hud_draw_account(p_t);
@@ -1794,19 +1808,18 @@ void M2aCheck::State::build_hud() {
 	add("hud rows", 1.0, [](State &st, double, bool) {
 		st.row("e10.frames", double(st.frames_checked), ">= 240 frames with a weapon compared", st.frames_checked >= 240);
 		st.row("e10.crosshair_gap", st.gap_err_max,
-				fmt("the drawn gap == (h/2) tan(presented spread) / tan(camera vfov / 2) +- 0.5 px, hidden in ADS (%" PRIu64 " frames, %" PRIu64 " bad%s)", st.gap_frames,
-						st.gap_bad, st.hud_first_bad.empty() ? "" : (", first: " + st.hud_first_bad).c_str()),
-				st.gap_frames >= 120 && st.gap_bad == 0);
-		st.row("e10.ammo_slot", st.ammo_x_max,
-				fmt("the magazine drawn in $HUD_medium with its right end at Ammo_01 x 1194 +- 2 stage px (x %.2f..%.2f; %" PRIu64 " frames, %" PRIu64 " misplaced, %" PRIu64
-					" wrong font)",
-						st.ammo_x_min, st.ammo_x_max, st.ammo_frames, st.ammo_place_bad, st.ammo_font_bad),
-				st.ammo_frames >= 120 && st.ammo_place_bad == 0 && st.ammo_font_bad == 0);
-		st.row("e10.draws_matched", double(st.hud_stale), "frames whose widget record named no recent model serial (<= 10, a redraw that lagged)", st.hud_stale <= 10);
+				fmt("crosshairdefault's arms at round((h/2) tan(presented spread) / tan(camera vfov / 2)) stage px +- 0.5, faded to alpha 0 in ADS and 1 at the hip "
+					"after the 0.2 s / 0.1 s HideOnZoom tweens (%" PRIu64 " frames, %" PRIu64 " settled fades, %" PRIu64 " bad%s)",
+						st.gap_frames, st.fade_frames, st.gap_bad, st.hud_first_bad.empty() ? "" : (", first: " + st.hud_first_bad).c_str()),
+				st.gap_frames >= 120 && st.fade_frames >= 60 && st.gap_bad == 0);
+		st.row("e10.ammo_text", double(st.ammo_bad),
+				fmt("hudmpscreen Ammo_01 clip text == the presented magazine (%" PRIu64 " frames, %" PRIu64 " wrong)", st.ammo_frames, st.ammo_bad),
+				st.ammo_frames >= 120 && st.ammo_bad == 0);
+		st.row("e10.draws_matched", double(st.hud_stale), "frames whose native HUD step named no recent model serial (<= 10, a step that lagged)", st.hud_stale <= 10);
 		st.row("e10.model_mismatches", double(st.mismatches), "the HUD model equals the presented weapon every frame" + (st.first_mismatch.empty() ? std::string() : " (first: " + st.first_mismatch + ")"),
 				st.mismatches == 0);
-		const bool loaded = st.g.hud != nullptr && st.g.hud->is_loaded() && st.g.hud->has_layout();
-		st.row("e10.hud_loaded", loaded ? 1.0 : 0.0, "Bf3Hud loaded its hudmpscreen layout", loaded);
+		const bool loaded = st.g.native_hud != nullptr && st.g.native_hud->is_ready() && !st.g.native_hud->has_failed();
+		st.row("e10.hud_loaded", loaded ? 1.0 : 0.0, "the native HUD built hudmpscreen, hudtdmscreen and crosshairdefault", loaded);
 		return true;
 	});
 	select_slot(0);
@@ -2233,7 +2246,8 @@ void M2aCheck::State::build_play() {
 		st.row("play.team_switch", st.play_team_switched ? 1.0 : 0.0, "K / T at 120 s: the next life spawned on the other team", st.play_team_switched);
 		st.row("play.viewmodel_built", st.g.vm[0] != nullptr && st.g.vm[1] != nullptr ? 1.0 : 0.0, "both team viewmodels built", st.g.vm[0] != nullptr && st.g.vm[1] != nullptr);
 		st.row("play.vm_unmapped_frames", double(st.g.vm_unmapped), "every presented def had a viewmodel item", st.g.vm_unmapped == 0);
-		st.row("play.hud_loaded", st.g.hud != nullptr && st.g.hud->is_loaded() ? 1.0 : 0.0, "Bf3Hud loaded", st.g.hud != nullptr && st.g.hud->is_loaded());
+		const bool hud_loaded = st.g.native_hud != nullptr && st.g.native_hud->is_ready() && !st.g.native_hud->has_failed();
+		st.row("play.hud_loaded", hud_loaded ? 1.0 : 0.0, "the native HUD built", hud_loaded);
 		st.row("play.events_overflow", double(cs.events_overflow), "== 0 (E14's gate)", cs.events_overflow == 0);
 		st.row("play.bad_gunplay_events", double(cs.bad_gunplay_events), "== 0", cs.bad_gunplay_events == 0);
 		st.row("play.events_drained", double(st.g.events_drained), "> 0 events flowed", st.g.events_drained > 0);

@@ -2,7 +2,8 @@
 
 #include "bf3_localisation.h"
 #include "godot_util.h"
-#include "hud_controls.h"
+#include "hud_items.h"
+#include "native_hud.h"
 #include "ui_assets.h"
 
 #include "bf3/core/install_snapshot.h"
@@ -77,8 +78,10 @@ constexpr int kSettleFrames = 4;
 constexpr int kHoldFrames = 2;
 constexpr double kGapTolerancePx = 0.5;
 constexpr double kEdgeTolerancePx = 1.0;
-constexpr float kAmmoStageX = 1194.0f;
+constexpr double kZoomOutSeconds = 0.2;
+constexpr double kZoomInSeconds = 0.1;
 const Color kBackground(0.10f, 0.12f, 0.14f, 1.0f);
+constexpr float kOutlineContrast = 0.04f;
 
 constexpr int kDeployEnd = 8;
 constexpr int kFireEnd = 40;
@@ -92,12 +95,8 @@ double deg_to_rad(double p_deg) {
 	return p_deg * 3.14159265358979323846 / 180.0;
 }
 
-double luminance(const Color &p_c) {
-	return 0.2126 * p_c.r + 0.7152 * p_c.g + 0.0722 * p_c.b;
-}
-
-bool ink(const Color &p_c) {
-	return std::max({ std::fabs(p_c.r - kBackground.r), std::fabs(p_c.g - kBackground.g), std::fabs(p_c.b - kBackground.b) }) > 0.25f;
+bool ink(const Color &p_c, float p_contrast = 0.25f) {
+	return std::max({ std::fabs(p_c.r - kBackground.r), std::fabs(p_c.g - kBackground.g), std::fabs(p_c.b - kBackground.b) }) > p_contrast;
 }
 
 }
@@ -135,36 +134,30 @@ struct Bf3HudCheck::Frame {
 	bool own_hit = false;
 	bool other_hit = false;
 	bool zoomed = false;
+	double zoom_age = 0;
+	int64_t hit_age = 0;
 	std::string label;
 };
 
 struct Bf3HudCheck::Tally {
 	size_t frames = 0;
 	size_t stale = 0;
+	size_t ammo_frames = 0;
 	size_t ammo_bad = 0;
-	size_t ammo_font_bad = 0;
-	size_t ammo_size_bad = 0;
-	size_t ammo_place_bad = 0;
-	double ammo_stage_x_min = 1e9;
-	double ammo_stage_x_max = -1e9;
 	size_t crosshair_bad = 0;
 	size_t gap_frames = 0;
 	double max_gap_err = 0;
 	size_t ads_frames = 0;
 	size_t ads_hidden = 0;
+	size_t hip_settled = 0;
+	size_t hip_opaque = 0;
 	size_t hit_bad = 0;
 	size_t hit_frames = 0;
 	size_t own_hits = 0;
 	size_t other_hits = 0;
 	size_t rising = 0;
 	size_t latency_bad = 0;
-	size_t hit_art_missing = 0;
 	bool prev_hit = false;
-	size_t name_bad = 0;
-	size_t icon_bad = 0;
-	std::set<size_t> names_ok;
-	std::set<size_t> icons_ok;
-	std::set<size_t> names_seen;
 	size_t health_bad = 0;
 	size_t shots = 0;
 	size_t shots_saved = 0;
@@ -200,9 +193,6 @@ void Bf3HudCheck::_ready() {
 	}
 	check_ = has_user_arg("hud-check");
 	shot_dir_ = user_arg_value("hud-shots");
-	if (Bf3UiAssets *assets = Bf3UiAssets::current()) {
-		assets->set_atlas_movies(Bf3Hud::required_atlas_movies());
-	}
 	Window *w = get_window();
 	w->set_content_scale_mode(Window::CONTENT_SCALE_MODE_DISABLED);
 	w->set_size(Vector2i(1280, 720));
@@ -222,9 +212,13 @@ void Bf3HudCheck::_ready() {
 	background_->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
 	background_->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 	viewport_->add_child(background_);
-	hud_ = memnew(Bf3Hud);
-	hud_->set_name("Hud");
+	hud_ = memnew(Bf3NativeHud);
+	hud_->set_name("NativeHud");
+	hud_->set_manual(true);
 	viewport_->add_child(hud_);
+	items_ = memnew(Bf3HudItems);
+	items_->set_name("HudItems");
+	add_child(items_);
 	view_ = memnew(TextureRect);
 	view_->set_texture(viewport_->get_texture());
 	view_->set_expand_mode(TextureRect::EXPAND_IGNORE_SIZE);
@@ -381,10 +375,12 @@ void Bf3HudCheck::build_script() {
 				fr.spread = spread;
 				fr.health = fr.input.health;
 				fr.zoomed = alive && zoomed;
+				fr.zoom_age = zoomed ? double(f - kFireEnd) / kModelHz : f >= kAdsEnd ? double(f - kAdsEnd) / kModelHz : 1.0;
 				fr.ammo_visible = alive && row.show_ammo;
 				fr.crosshair_visible = alive && !zoomed;
 
 				fr.hit_visible = double(int64_t(n) - last_own_hit) < host::kHitIndicatorSeconds * kModelHz;
+				fr.hit_age = int64_t(n) - last_own_hit;
 				fr.name_visible = alive;
 				fr.health_visible = alive;
 				const std::string size = std::to_string(kResolutions[r].w) + "x" + std::to_string(kResolutions[r].h);
@@ -393,7 +389,7 @@ void Bf3HudCheck::build_script() {
 						fr.label = size + "_hit";
 					} else if (f == 30) {
 						fr.label = size + "_hip";
-					} else if (f == 48) {
+					} else if (f == kAdsEnd - 1) {
 						fr.label = size + "_ads";
 					} else if (f == 64) {
 						fr.label = size + "_reload";
@@ -429,30 +425,40 @@ void Bf3HudCheck::_process(double p_delta) {
 			start_work();
 			return;
 		}
-		if (!work_done_.load(std::memory_order_acquire) || !hud_->is_loaded()) {
+		if (!work_done_.load(std::memory_order_acquire) || !hud_->is_ready() || !items_->is_loaded()) {
 			return;
 		}
 		worker_.join();
 		const double ready_s = double(Time::get_singleton()->get_ticks_usec()) * 1e-6 - started_s_;
-		add_row("load.hud", hud_->has_layout() && hud_->item_index() != nullptr,
-				fmt("hudmpscreen layout %s (%zu nodes, %zu missing), %zu item ids with an icon, %zu icons failed, ready after %.2f s", hud_->has_layout() ? "read" : "MISSING",
-						hud_->layout().nodes, hud_->layout().missing.size(), hud_->icon_count(), hud_->icons_failed(), ready_s));
-		add_row("load.fonts", hud_->number_font_name().find("=system") == std::string::npos && hud_->text_font_name().find("=system") == std::string::npos,
-				hud_->number_font_name() + ", " + hud_->text_font_name());
-		add_row("load.hit_art", !hud_->hit_pieces(host::kHitIndicatorLevel).empty(),
-				fmt("%zu atlas pieces for %s %s", hud_->hit_pieces(host::kHitIndicatorLevel).size(), std::string(host::kHitIndicatorMovie).c_str(),
-						std::string(host::kHitIndicatorRegions[0]).c_str()));
+		add_row("load.hud", !hud_->has_failed() && items_->item_index() != nullptr,
+				fmt("native HUD %s, %zu item ids with an icon, %zu icons failed, ready after %.2f s", hud_->has_failed() ? ("FAILED: " + hud_->error()).c_str() : "built",
+						items_->icon_count(), items_->icons_failed(), ready_s));
 		if (!work_->error.empty()) {
 			add_row("load.static", false, work_->error);
 			finish();
 			return;
 		}
 		size_t filled = 0;
-		if (hud_->item_index() != nullptr) {
-			filled = host::apply_item_names(work_->hud_static, *hud_->item_index());
+		if (items_->item_index() != nullptr) {
+			filled = host::apply_item_names(work_->hud_static, *items_->item_index());
 		}
 		add_row("load.static", work_->hud_static.rows.size() == kItems && filled == 1,
 				fmt("%zu HudStatic rows from the install's 12 kit items in %.2f s; apply_item_names filled %zu (the M67)", work_->hud_static.rows.size(), work_->seconds, filled));
+		size_t names = 0;
+		size_t icons = 0;
+		std::string missing;
+		for (size_t i = 0; i < kItems && i < work_->hud_static.rows.size(); ++i) {
+			const host::HudStaticRow &row = work_->hud_static.rows[i];
+			const bool named = items_->localised(row.name_sid_hash) == kKitItems[i].name;
+			const bool icon = items_->icon(row.item_id).is_valid();
+			names += named ? 1 : 0;
+			icons += icon ? 1 : 0;
+			if (!named || !icon) {
+				missing += std::string(" ") + kKitItems[i].label + (named ? "" : "(name)") + (icon ? "" : "(icon)");
+			}
+		}
+		add_row("load.names", names == kItems, fmt("%zu/%zu kit items' localised names%s", names, kItems, missing.c_str()));
+		add_row("load.icons", icons == kItems, fmt("%zu/%zu _small icons decode", icons, kItems));
 		build_script();
 		state_ = 1;
 		return;
@@ -492,6 +498,7 @@ void Bf3HudCheck::_process(double p_delta) {
 	hud_->set_vfov_deg(fr.vfov);
 	host::fill_hud(fr.input, fr.events, work_->hud_static, work_->feed, work_->model);
 	hud_->set_model(work_->model);
+	hud_->step(1.0 / kModelHz);
 	fr.serial = work_->model.serial;
 	++next_;
 	pending_verify_ = true;
@@ -500,113 +507,70 @@ void Bf3HudCheck::_process(double p_delta) {
 void Bf3HudCheck::verify_frame(const Frame &p_frame) {
 	Tally &t = tallies_[p_frame.res];
 	++t.frames;
-	const float w = float(kResolutions[p_frame.res].w);
-	const float h = float(kResolutions[p_frame.res].h);
-	const float s = host::hud_scale(w, h);
 	const std::string where = fmt("%dx%d item %zu frame %d: ", kResolutions[p_frame.res].w, kResolutions[p_frame.res].h, p_frame.item, p_frame.f);
-	const HudDrawRecord &a = hud_->ammo_widget()->record();
-	const HudDrawRecord &c = hud_->crosshair_widget()->record();
-	const HudDrawRecord &hi = hud_->hit_widget()->record();
-	const HudDrawRecord &nm = hud_->name_widget()->record();
-	const HudDrawRecord &he = hud_->health_widget()->record();
-	for (const HudDrawRecord *r : { &a, &c, &hi, &nm, &he }) {
-		if (r->serial != p_frame.serial) {
-			++t.stale;
-			t.note(where + fmt("a widget drew serial %llu, want %llu", (unsigned long long)r->serial, (unsigned long long)p_frame.serial));
-			break;
+	const NativeHudReadout r = hud_->readout();
+	if (r.serial != p_frame.serial) {
+		++t.stale;
+		t.note(where + fmt("the HUD stepped serial %llu, want %llu", (unsigned long long)r.serial, (unsigned long long)p_frame.serial));
+	}
+	const bool alive = p_frame.health_visible;
+
+	if (p_frame.ammo_visible) {
+		++t.ammo_frames;
+		if (!r.ammo_visible || r.clip_text != std::to_string(p_frame.magazine) || r.reserve_text != std::to_string(p_frame.reserve)) {
+			++t.ammo_bad;
+			t.note(where + "ammo '" + r.clip_text + " / " + r.reserve_text + (r.ammo_visible ? "'" : "' hidden") + fmt(", want %d / %d", p_frame.magazine, p_frame.reserve));
 		}
 	}
 
-	bool ammo_ok = a.visible == p_frame.ammo_visible;
-	if (ammo_ok && a.visible) {
-		ammo_ok = a.text_a == std::to_string(p_frame.magazine) && a.text_b == std::to_string(p_frame.reserve);
-		if (a.font.rfind(std::string(host::kHudNumberFont) + "=", 0) != 0 || a.font.find("=system") != std::string::npos) {
-			++t.ammo_font_bad;
-		}
-		const host::HudTextSlot &clip = hud_->slot_clip();
-		const host::HudTextSlot &res = hud_->slot_reserve();
-		if (a.size_a != std::max(1, int32_t(std::lround(clip.size * clip.scale_y * s))) || a.size_b != std::max(1, int32_t(std::lround(res.size * res.scale_y * s)))) {
-			++t.ammo_size_bad;
-		}
-
-		const double stage_x = 1280.0 + (double(a.at_a.x) - double(w)) / double(s);
-		t.ammo_stage_x_min = std::min(t.ammo_stage_x_min, stage_x);
-		t.ammo_stage_x_max = std::max(t.ammo_stage_x_max, stage_x);
-		if (std::fabs(stage_x - kAmmoStageX) > 2.0) {
-			++t.ammo_place_bad;
-		}
-	}
-	if (!ammo_ok) {
-		++t.ammo_bad;
-		t.note(where + "ammo drew '" + a.text_a + " / " + a.text_b + (a.visible ? "'" : "' hidden") + fmt(", want %d / %d", p_frame.magazine, p_frame.reserve) +
-				(p_frame.ammo_visible ? "" : " hidden"));
-	}
-
-	bool cross_ok = c.visible == p_frame.crosshair_visible;
-	if (p_frame.zoomed) {
-		++t.ads_frames;
-		t.ads_hidden += c.visible ? 0 : 1;
-	}
-	if (cross_ok && c.visible) {
-		const double want = 0.5 * double(h) * std::tan(deg_to_rad(p_frame.spread)) / std::tan(deg_to_rad(0.5 * p_frame.vfov));
-		const double err = std::fabs(c.gap_px - want);
-		++t.gap_frames;
-		t.max_gap_err = std::max(t.max_gap_err, err);
-		if (err > kGapTolerancePx || std::fabs(c.centre.x - 0.5f * w) > 0.01f || std::fabs(c.centre.y - 0.5f * h) > 0.01f) {
-			cross_ok = false;
+	bool cross_ok = r.crosshair_widget == alive;
+	if (cross_ok && alive) {
+		if (!p_frame.zoomed) {
+			const double want = std::round(0.5 * double(r.stage_height) * std::tan(deg_to_rad(p_frame.spread)) / std::tan(deg_to_rad(0.5 * p_frame.vfov)));
+			const double err = std::fabs(double(r.crosshair_arm) - want);
+			++t.gap_frames;
+			t.max_gap_err = std::max(t.max_gap_err, err);
+			cross_ok = err <= kGapTolerancePx;
+			if (p_frame.zoom_age > kZoomInSeconds + 1.0 / kModelHz) {
+				++t.hip_settled;
+				const bool opaque = std::fabs(r.crosshair_alpha - 1.0f) <= 1e-3f;
+				t.hip_opaque += opaque ? 1 : 0;
+				cross_ok = cross_ok && opaque;
+			}
+		} else if (p_frame.zoom_age > kZoomOutSeconds + 1.0 / kModelHz) {
+			++t.ads_frames;
+			t.ads_hidden += r.crosshair_alpha <= 1e-3f ? 1 : 0;
+			cross_ok = r.crosshair_alpha <= 1e-3f;
 		}
 	}
 	if (!cross_ok) {
 		++t.crosshair_bad;
-		t.note(where + fmt("crosshair %s gap %.3f (want %s, spread %.3f vfov %.1f)", c.visible ? "shown" : "hidden", c.gap_px, p_frame.crosshair_visible ? "shown" : "hidden",
-							   p_frame.spread, p_frame.vfov));
+		t.note(where + fmt("crosshair %s arm %.2f alpha %.3f (want %s, spread %.3f vfov %.1f stage h %.1f%s)", r.crosshair_widget ? "shown" : "hidden", r.crosshair_arm,
+							   r.crosshair_alpha, alive ? "shown" : "hidden", p_frame.spread, p_frame.vfov, r.stage_height, p_frame.zoomed ? " zoomed" : ""));
 	}
 
-	if (hi.visible != p_frame.hit_visible) {
+	if (r.hit_shown != p_frame.hit_visible) {
 		++t.hit_bad;
-		t.note(where + std::string("hit indicator ") + (hi.visible ? "shown" : "hidden") + (p_frame.hit_visible ? ", want shown" : ", want hidden"));
+		t.note(where + std::string("hit indicator ") + (r.hit_shown ? "shown" : "hidden") + (p_frame.hit_visible ? ", want shown" : ", want hidden"));
 	}
-	if (hi.visible) {
+	if (r.hit_shown) {
 		++t.hit_frames;
-		t.hit_art_missing += hi.art ? 0 : 1;
 		if (!t.prev_hit) {
 			++t.rising;
 		}
 	}
-	t.prev_hit = hi.visible;
+	t.prev_hit = r.hit_shown;
 	if (p_frame.own_hit) {
 		++t.own_hits;
-		if (!hi.visible) {
+		if (!r.hit_shown) {
 			++t.latency_bad;
 		}
 	}
 	t.other_hits += p_frame.other_hit ? 1 : 0;
 
-	if (p_frame.name_visible) {
-		t.names_seen.insert(p_frame.item);
-		const bool name_ok = nm.visible && nm.text_a == kKitItems[p_frame.item].name;
-		const bool icon_ok = nm.visible && nm.art && nm.icon_item == work_->hud_static.rows[p_frame.item].item_id && nm.icon_item != 0;
-		if (name_ok) {
-			t.names_ok.insert(p_frame.item);
-		} else {
-			++t.name_bad;
-			t.note(where + "name '" + nm.text_a + "', want '" + kKitItems[p_frame.item].name + "'");
-		}
-		if (icon_ok) {
-			t.icons_ok.insert(p_frame.item);
-		} else {
-			++t.icon_bad;
-			t.note(where + fmt("icon of item %u not drawn", work_->hud_static.rows[p_frame.item].item_id));
-		}
-	} else if (nm.visible) {
-		++t.name_bad;
-		t.note(where + "name shown while dead");
-	}
-
-	const bool health_ok = he.visible == p_frame.health_visible && (!he.visible || he.text_a == std::to_string(std::lround(p_frame.health)));
-	if (!health_ok) {
+	if (alive && r.health_text != std::to_string(std::lround(p_frame.health))) {
 		++t.health_bad;
-		t.note(where + "health '" + he.text_a + "'" + (he.visible ? "" : " hidden"));
+		t.note(where + "health '" + r.health_text + "'" + fmt(", want %ld", std::lround(p_frame.health)));
 	}
 }
 
@@ -626,54 +590,56 @@ void Bf3HudCheck::check_shot(const Frame &p_frame) {
 	const float cx = 0.5f * float(w);
 	const float cy = 0.5f * float(h);
 	const auto at = [&](int x, int y) { return img->get_pixel(std::clamp(x, 0, w - 1), std::clamp(y, 0, h - 1)); };
-	const HudDrawRecord &c = hud_->crosshair_widget()->record();
-	const HudDrawRecord &a = hud_->ammo_widget()->record();
-	const HudDrawRecord &nm = hud_->name_widget()->record();
-	const int row = int(std::floor(cy));
+	const NativeHudReadout r = hud_->readout();
 	const int reach = int(std::ceil(160.0f * s));
+	const bool alive = p_frame.health_visible;
 
-	if (p_frame.crosshair_visible && c.visible && work_->hud_static.rows[p_frame.item].crosshair != host::HudCrosshairKind::Knife) {
+	const std::optional<ui::SwfRect> arm = hud_->window_bounds(2, "instance1.Crosshair_01.crosshair.right");
+	const std::optional<ui::SwfRect> all = hud_->window_bounds(2, "instance1.Crosshair_01.crosshair");
+	const bool right_outermost = !arm || !all || arm->x_max + 0.5f >= all->x_max;
+	if (alive && !p_frame.zoomed && r.crosshair_widget && r.crosshair_alpha > 0.999f && right_outermost) {
 		++t.pixel_checks;
-		int first = -1;
-		for (int x = int(std::floor(cx)) + 1; x < int(cx) + reach; ++x) {
-			if (luminance(at(x, row)) > 0.5) {
-				first = x;
-				break;
+		int outer = -1;
+		if (arm) {
+			const int row = int(std::floor(0.5f * (arm->y_min + arm->y_max)));
+			for (int x = int(cx) + reach; x > int(cx); --x) {
+				if (ink(at(x, row), kOutlineContrast)) {
+					outer = x;
+					break;
+				}
 			}
 		}
-
-		const double edge = first < 0 ? 1e9 : double(first) + 0.5 - (double(cx) + c.gap_px);
-		const double err = std::fabs(edge) <= 0.5 ? 0.0 : std::fabs(edge) - 0.5;
+		const double want = arm ? double(arm->x_max) : 1e9;
+		const double off = outer < 0 ? 1e9 : std::fabs(double(outer) + 0.5 - want);
 		++t.edge_checks;
-		t.max_edge_err = std::max(t.max_edge_err, first < 0 ? 1e9 : std::fabs(double(first) + 0.5 - (double(cx) + c.gap_px)));
-		if (first < 0 || err > kEdgeTolerancePx) {
+		t.max_edge_err = std::max(t.max_edge_err, off);
+		if (outer < 0 || off > kEdgeTolerancePx + 0.5) {
 			++t.pixel_bad;
-			t.note(p_frame.label + fmt(": crosshair inner edge at x %d, want %.2f", first, double(cx) + c.gap_px));
+			t.note(p_frame.label + fmt(": crosshair right arm outer edge at x %d, want %.2f (the right arm's drawn geometry)", outer, want));
 		}
 	}
 	if (p_frame.zoomed) {
 		++t.pixel_checks;
 		size_t lit = 0;
-		for (int x = int(cx) - reach / 2; x < int(cx) + reach / 2; ++x) {
-			lit += luminance(at(x, row)) > 0.5 ? 1 : 0;
-			lit += luminance(at(int(cx), row + (x - int(cx)))) > 0.5 ? 1 : 0;
+		for (int d = -reach / 2; d < reach / 2; ++d) {
+			if (std::abs(d) < int(4.0f * s) + 2) {
+				continue;
+			}
+			lit += ink(at(int(cx) + d, int(cy))) ? 1 : 0;
+			lit += ink(at(int(cx), int(cy) + d)) ? 1 : 0;
 		}
 		if (lit != 0) {
 			++t.pixel_bad;
 			t.note(p_frame.label + fmt(": %zu crosshair pixels in ADS", lit));
 		}
 	}
-
 	{
 		++t.pixel_checks;
+		const std::optional<ui::SwfRect> hb = hud_->window_bounds(0, "instance1.Hitindicator_01.hitindicator");
 		size_t inked = 0;
-		const int half = int(std::ceil(13.0f * s));
-		const int off = int(std::lround(18.0f * s));
-		for (int q = 0; q < 4; ++q) {
-			const int qx = int(cx) + ((q & 1) != 0 ? off : -off);
-			const int qy = int(cy) + ((q & 2) != 0 ? off : -off);
-			for (int y = qy - half; y <= qy + half; ++y) {
-				for (int x = qx - half; x <= qx + half; ++x) {
+		if (hb) {
+			for (int y = int(std::floor(hb->y_min)); y < int(std::ceil(hb->y_max)); ++y) {
+				for (int x = int(std::floor(hb->x_min)); x < int(std::ceil(hb->x_max)); ++x) {
 					if (std::abs(x - int(cx)) < int(4.0f * s) + 2 || std::abs(y - int(cy)) < int(4.0f * s) + 2) {
 						continue;
 					}
@@ -681,36 +647,26 @@ void Bf3HudCheck::check_shot(const Frame &p_frame) {
 				}
 			}
 		}
-		if ((inked > 0) != p_frame.hit_visible) {
+		const bool fresh = p_frame.hit_visible && p_frame.hit_age <= 1;
+		if ((!p_frame.hit_visible && inked > 0) || (fresh && inked == 0)) {
 			++t.pixel_bad;
-			t.note(p_frame.label + fmt(": %zu hit indicator pixels, want %s", inked, p_frame.hit_visible ? "some" : "none"));
+			t.note(p_frame.label + fmt(": %zu hit indicator pixels inside its shape bounds, want %s", inked, fresh ? "some" : "none"));
 		}
 	}
-
-	if (p_frame.ammo_visible && a.visible) {
+	if (p_frame.ammo_visible && r.ammo_visible) {
 		++t.pixel_checks;
+		const std::optional<ui::SwfRect> cb = hud_->window_bounds(0, "instance1.Ammo_01.Ammo.clip.cltxt.txtDisplay");
 		size_t inked = 0;
-		for (int y = int(a.at_a.y) - int(0.7f * float(a.size_a)); y < int(a.at_a.y); ++y) {
-			for (int x = int(a.at_a.x) - int(1.2f * float(a.size_a)); x < int(a.at_a.x); ++x) {
-				inked += ink(at(x, y)) ? 1 : 0;
+		if (cb) {
+			for (int y = int(std::floor(cb->y_min)); y < int(std::ceil(cb->y_max)); ++y) {
+				for (int x = int(std::floor(cb->x_min)); x < int(std::ceil(cb->x_max)); ++x) {
+					inked += ink(at(x, y)) ? 1 : 0;
+				}
 			}
 		}
 		if (inked == 0) {
 			++t.pixel_bad;
-			t.note(p_frame.label + ": no ammo digit pixels");
-		}
-	}
-	if (p_frame.name_visible && nm.visible && nm.art) {
-		++t.pixel_checks;
-		size_t inked = 0;
-		for (int y = int(nm.icon_at.y); y < int(nm.icon_at.y + nm.icon_size.y); ++y) {
-			for (int x = int(nm.icon_at.x); x < int(nm.icon_at.x + nm.icon_size.x); ++x) {
-				inked += ink(at(x, y)) ? 1 : 0;
-			}
-		}
-		if (inked == 0) {
-			++t.pixel_bad;
-			t.note(p_frame.label + ": no icon pixels");
+			t.note(p_frame.label + ": no ammo digit pixels inside the clip text field");
 		}
 	}
 	if (shot_dir_.empty()) {
@@ -743,24 +699,22 @@ void Bf3HudCheck::finish() {
 		const std::string p = fmt("e10.%dx%d.", kResolutions[r].w, kResolutions[r].h);
 		const std::string err = t.errors.empty() ? std::string() : "; first: " + t.errors.front();
 		add_row(p + "frames", t.frames == kItems * kItemFrames && t.stale == 0,
-				fmt("%zu frames verified (want %zu), %zu with a widget not drawing the frame's model", t.frames, kItems * kItemFrames, t.stale));
-		add_row(p + "ammo", t.ammo_bad == 0 && t.ammo_font_bad == 0 && t.ammo_size_bad == 0 && t.ammo_place_bad == 0,
-				fmt("%zu text mismatches, %zu font, %zu size, %zu placement; clip right end at stage x %.2f..%.2f (Ammo_01 %.0f +- 2)", t.ammo_bad, t.ammo_font_bad,
-						t.ammo_size_bad, t.ammo_place_bad, t.ammo_stage_x_min, t.ammo_stage_x_max, double(kAmmoStageX)) +
-						err);
-		add_row(p + "crosshair", t.crosshair_bad == 0 && t.ads_hidden == t.ads_frames && t.max_gap_err <= kGapTolerancePx,
-				fmt("%zu mismatches; gap max |err| %.4f px over %zu frames (<= %.1f); hidden on %zu/%zu ADS frames", t.crosshair_bad, t.max_gap_err, t.gap_frames,
-						kGapTolerancePx, t.ads_hidden, t.ads_frames));
-		add_row(p + "hit", t.hit_bad == 0 && t.latency_bad == 0 && t.rising == t.own_hits && t.hit_art_missing == 0,
+				fmt("%zu frames verified (want %zu), %zu where the native HUD had not stepped the frame's model", t.frames, kItems * kItemFrames, t.stale));
+		add_row(p + "ammo", t.ammo_bad == 0 && t.ammo_frames > 0,
+				fmt("hudmpscreen Ammo_01 clip / reserve text == magazine / reserve on %zu frames, %zu mismatches", t.ammo_frames, t.ammo_bad) + (t.ammo_bad ? err : std::string()));
+		add_row(p + "crosshair", t.crosshair_bad == 0 && t.max_gap_err <= kGapTolerancePx && t.ads_frames > 0 && t.ads_hidden == t.ads_frames && t.hip_opaque == t.hip_settled,
+				fmt("%zu mismatches; arms at round((h/2) tan(spread) / tan(vfov/2)) stage px, max |err| %.4f over %zu frames (<= %.1f); alpha 0 on %zu/%zu settled ADS "
+					"frames, 1 on %zu/%zu settled hip frames",
+						t.crosshair_bad, t.max_gap_err, t.gap_frames, kGapTolerancePx, t.ads_hidden, t.ads_frames, t.hip_opaque, t.hip_settled) +
+						(t.crosshair_bad ? err : std::string()));
+		add_row(p + "hit", t.hit_bad == 0 && t.latency_bad == 0 && t.rising == t.own_hits,
 				fmt("%zu mismatches; %zu own hits -> %zu indicators (rising edges), %zu shown late, %zu other hits not shown; %zu frames shown (%.2f per hit at %.0f Hz, "
-					"%.1f s); %zu frames without the atlas art",
+					"%.1f s)",
 						t.hit_bad, t.own_hits, t.rising, t.latency_bad, t.other_hits, t.hit_frames, t.own_hits ? double(t.hit_frames) / double(t.own_hits) : 0.0, kModelHz,
-						host::kHitIndicatorSeconds, t.hit_art_missing));
-		add_row(p + "name", t.names_ok.size() == kItems && t.name_bad == 0, fmt("%zu/%zu kit items' localised names, %zu mismatching frames", t.names_ok.size(), kItems, t.name_bad));
-		add_row(p + "icon", t.icons_ok.size() == kItems && t.icon_bad == 0, fmt("%zu/%zu _small icons drawn, %zu frames without", t.icons_ok.size(), kItems, t.icon_bad));
+						host::kHitIndicatorSeconds));
 		add_row(p + "health", t.health_bad == 0, fmt("%zu mismatches", t.health_bad));
 		add_row(p + "pixels", t.pixel_bad == 0 && t.pixel_checks > 0,
-				fmt("%zu/%zu pixel checks on %zu shot frames; crosshair inner edge max |off| %.2f px over %zu (<= %.1f + half a pixel)", t.pixel_checks - t.pixel_bad,
+				fmt("%zu/%zu pixel checks on %zu shot frames; crosshair arm outer edge max |off| %.2f px over %zu (<= %.1f + half a pixel)", t.pixel_checks - t.pixel_bad,
 						t.pixel_checks, t.shots, t.max_edge_err, t.edge_checks, kEdgeTolerancePx) +
 						(t.pixel_bad ? err : std::string()));
 		if (!shot_dir_.empty()) {

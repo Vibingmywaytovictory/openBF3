@@ -15,8 +15,6 @@ inline constexpr float kKillFeedIconWidth = 64.0f;
 inline constexpr float kKillFeedIconHeight = 16.0f;
 inline constexpr float kKillFeedGap = 6.0f;
 inline constexpr double kKillFeedFadeSeconds = 0.5;
-inline constexpr float kKillCounterTop = 22.0f;
-inline constexpr float kKillCounterSize = 20.0f;
 
 class Bf3TdmKillFeed : public Bf3TdmScreen {
 	GDCLASS(Bf3TdmKillFeed, Bf3TdmScreen)
@@ -29,7 +27,6 @@ protected:
 	static void _bind_methods() {}
 
 private:
-	void draw_counter();
 	struct Seen {
 		uint32_t serial = 0;
 		double first_s = 0;

@@ -14,6 +14,7 @@
 
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/install.h"
+#include "bf3/core/res/res_loader.h"
 #include "bf3/core/superbundle_mount.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/net/loopback_ping.h"
@@ -94,6 +95,40 @@ Ref<ImageTexture> r8_texture(const ui::L8Image &p_image, uint8_t p_fill) {
 
 Color vec4_colour(const std::array<float, 4> &p_v) {
 	return Color(p_v[0], p_v[1], p_v[2], p_v[3]);
+}
+
+core::Result<ui::L8Image> load_value_texture(const core::LevelMount &p_mount, const std::string &p_name, std::string &r_note) {
+	core::Result<core::res::LoadedTexture> t = core::res::load_texture(p_mount, p_name);
+	if (!t) {
+		return t.error();
+	}
+	std::vector<core::res::MipSlice> mips;
+	const core::res::ResError e = t->mips(mips);
+	if (!e.ok() || mips.empty()) {
+		return core::make_error(p_name + ": no mip" + (e.ok() ? std::string() : ": " + e.message()));
+	}
+	std::vector<std::array<float, 4>> texels;
+	if (!mips.front().texels(t->texture.format, texels) || texels.size() != size_t(mips.front().width) * mips.front().height) {
+		return core::make_error(p_name + ": texture format " + std::to_string(int(t->texture.format)) + " not decoded");
+	}
+	bool alpha = false;
+	for (const std::array<float, 4> &x : texels) {
+		if (x[3] < 0.999f) {
+			alpha = true;
+			break;
+		}
+	}
+	ui::L8Image out;
+	out.width = mips.front().width;
+	out.height = mips.front().height;
+	out.texels.resize(texels.size());
+	for (size_t i = 0; i < texels.size(); ++i) {
+		const float v = alpha ? texels[i][3] : (texels[i][0] + texels[i][1] + texels[i][2]) / 3.0f;
+		out.texels[i] = uint8_t(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f));
+	}
+	r_note = p_name + " " + std::to_string(out.width) + "x" + std::to_string(out.height) + " format " + std::to_string(int(t->texture.format)) +
+			(alpha ? " alpha" : " luminance");
+	return out;
 }
 
 }
@@ -315,6 +350,23 @@ void Bf3MinimapHud::run_loader() {
 			}
 		}
 	}
+	const auto value_texture = [&](const std::string &p_name, ui::L8Image &r_image, std::string &r_note) {
+		if (p_name.empty()) {
+			r_note = "no texture named";
+			return;
+		}
+		const std::array<const core::LevelMount *, 2> mounts{ &*mount, &(*ui_lib)->mount(0) };
+		for (const core::LevelMount *m : mounts) {
+			core::Result<ui::L8Image> img = load_value_texture(*m, p_name, r_note);
+			if (img) {
+				r_image = std::move(*img);
+				return;
+			}
+			r_note = img.error().message;
+		}
+	};
+	value_texture(level->data.fade_texture, pixels->mask, out->mask_note);
+	value_texture(level->data.combat_area_multiply_texture, pixels->hatch, out->hatch_note);
 	pixels->atlas_image = std::move(*atlas_img);
 	out->atlas = std::move(*atlas);
 	out->level = std::move(*level);
@@ -342,7 +394,8 @@ void Bf3MinimapHud::build_godot_side() {
 		return;
 	}
 	UtilityFunctions::print(to_godot("[ui2] minimap " + a->level.data.level_id + " " + a->level.mode + ": " + std::to_string(a->level.objectives.size()) +
-			" objectives, " + std::to_string(a->level.combat_areas.size()) + " combat areas; loader " + std::to_string(a->seconds) + " s (" + a->steps + ")"));
+			" objectives, " + std::to_string(a->level.combat_areas.size()) + " combat areas; loader " + std::to_string(a->seconds) + " s (" + a->steps +
+			"); mask " + a->mask_note + "; hatch " + a->hatch_note));
 
 	if (px->satellite_mips.empty()) {
 		UtilityFunctions::push_error("[ui2] minimap not drawn: empty satellite");
@@ -370,6 +423,9 @@ void Bf3MinimapHud::build_godot_side() {
 	combat_area_ = r8_texture(px->images.combat_areas.empty() ? ui::L8Image{} : px->images.combat_areas.front(), 0);
 	const bool has_detail = !px->images.detail.empty();
 	detail_ = r8_texture(px->images.detail, 255);
+	has_detail_ = has_detail;
+	mask_ = px->mask.empty() ? Ref<ImageTexture>() : r8_texture(px->mask, 255);
+	hatch_ = px->hatch.empty() ? Ref<ImageTexture>() : r8_texture(px->hatch, 255);
 	Ref<Image> atlas_img = Image::create_from_data(int32_t(px->atlas_image.width), int32_t(px->atlas_image.height), false, Image::FORMAT_RGBA8,
 			to_bytes(px->atlas_image.rgba.data(), px->atlas_image.rgba.size()));
 	if (atlas_img.is_null()) {
@@ -400,47 +456,51 @@ void Bf3MinimapHud::build_godot_side() {
 	icons_->set_name("WorldIcons");
 	add_child(icons_);
 	icons_->setup(atlas_, &a->atlas, WorldIconStyle{});
-	control_ = memnew(Bf3MinimapControl);
-	control_->set_name("Minimap");
-	add_child(control_);
-	control_->setup(d, satellite_, material, atlas_, &a->atlas);
+	if (!session_->game_session()) {
+		control_ = memnew(Bf3MinimapControl);
+		control_->set_name("Minimap");
+		add_child(control_);
+		control_->setup(d, satellite_, material, atlas_, &a->atlas);
+	}
 	drawn_ = true;
 	layout_controls();
 	update_view();
 }
 
 void Bf3MinimapHud::layout_controls() {
-	if (control_ == nullptr) {
-		return;
-	}
 	const Rect2 vis = get_viewport()->get_visible_rect();
-	const float scale = std::max(1e-3f, std::fabs(get_viewport()->get_final_transform().get_scale().y));
-	const float side = size_px_ > 0 ? float(size_px_) / scale : kDefaultSidePer1080 / 1080.0f * vis.size.y;
-
-	control_->set_position(Vector2(std::round(vis.position.x + kMarginUnits), std::round(vis.position.y + vis.size.y - side - kMarginUnits)));
-	control_->set_size(Vector2(side, side));
-	icons_->set_position(vis.position);
-	icons_->set_size(vis.size);
+	if (control_ != nullptr) {
+		const float scale = std::max(1e-3f, std::fabs(get_viewport()->get_final_transform().get_scale().y));
+		const float side = size_px_ > 0 ? float(size_px_) / scale : kDefaultSidePer1080 / 1080.0f * vis.size.y;
+		control_->set_position(Vector2(std::round(vis.position.x + kMarginUnits), std::round(vis.position.y + vis.size.y - side - kMarginUnits)));
+		control_->set_size(Vector2(side, side));
+	}
+	if (icons_ != nullptr) {
+		icons_->set_position(vis.position);
+		icons_->set_size(vis.size);
+	}
 }
 
 void Bf3MinimapHud::update_view() {
-	if (!drawn_ || control_ == nullptr || session_ == nullptr) {
+	if (!drawn_ || session_ == nullptr) {
 		return;
 	}
 	std::shared_ptr<const MinimapAssets> a = assets();
 	layout_controls();
-	const Vector2 size = control_->get_size();
-	const Vector3 eye = session_->cameras().last_eye();
-	ui::MinimapView v;
-	v.center_x = size.x * 0.5f;
-	v.center_y = size.y * 0.5f;
-	v.pixels_per_metre = std::min(size.x, size.y) / (2.0f * kRangeMetres);
-	v.player_x = center_override_ ? center_override_x_ : eye.x;
-	v.player_z = center_override_ ? center_override_z_ : eye.z;
-	v.heading = session_->mapper().view().yaw;
-	v.rotate = !north_up_;
-	view_ = v;
-	control_->set_view(v);
+	if (control_ != nullptr) {
+		const Vector2 size = control_->get_size();
+		const Vector3 eye = session_->cameras().last_eye();
+		ui::MinimapView v;
+		v.center_x = size.x * 0.5f;
+		v.center_y = size.y * 0.5f;
+		v.pixels_per_metre = std::min(size.x, size.y) / (2.0f * kRangeMetres);
+		v.player_x = center_override_ ? center_override_x_ : eye.x;
+		v.player_z = center_override_ ? center_override_z_ : eye.z;
+		v.heading = session_->mapper().view().yaw;
+		v.rotate = !north_up_;
+		view_ = v;
+		control_->set_view(v);
+	}
 
 	std::vector<MinimapIconDraw> objectives;
 	objectives.reserve(a->level.objectives.size());
@@ -482,9 +542,12 @@ void Bf3MinimapHud::update_view() {
 			all.push_back(ic);
 		}
 	}
-	control_->set_icons(std::move(all));
+	icon_draws_ = all;
 	const bool fp = !session_->cameras().free();
-	control_->set_visible(fp);
+	if (control_ != nullptr) {
+		control_->set_icons(std::move(all));
+		control_->set_visible(fp);
+	}
 	const Camera3D *cam = fp ? session_->cameras().first_person() : session_->cameras().free_camera();
 	icons_->update(cam, std::move(objectives));
 }

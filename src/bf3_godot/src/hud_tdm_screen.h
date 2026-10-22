@@ -21,7 +21,6 @@
 
 namespace bf3::godot_side {
 
-class Bf3Hud;
 
 inline const godot::Color kTdmTextColour(0.92f, 0.95f, 0.95f, 1.0f);
 inline const godot::Color kTdmDimColour(0.62f, 0.68f, 0.70f, 1.0f);

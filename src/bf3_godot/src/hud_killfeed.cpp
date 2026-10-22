@@ -23,7 +23,7 @@ void draw_headshot(CanvasItem &p_item, Vector2 p_c, float p_size, const Color &p
 
 void Bf3TdmKillFeed::update_screen() {
 	const ui::HudModel &m = ctx_->model;
-	const bool any = m.messages.kill_message.newest_serial != 0 || m.kill_counter.team1_max_kills > 0;
+	const bool any = m.messages.kill_message.newest_serial != 0;
 	if (!any) {
 		ctx_->records.kill_feed_lines = 0;
 	}
@@ -34,7 +34,6 @@ void Bf3TdmKillFeed::draw_screen() {
 	TdmHudContext &c = *ctx_;
 	const ui::HudModel &m = c.model;
 	TdmHudRecords &rec = c.records;
-	draw_counter();
 	const ui::HudKillFeed &feed = m.messages.kill_message;
 	const double now = TdmHudContext::now_s();
 	const float s = tdm_scale(*this);
@@ -110,33 +109,6 @@ void Bf3TdmKillFeed::draw_screen() {
 		++drawn;
 	}
 	rec.kill_feed_lines = drawn;
-}
-
-void Bf3TdmKillFeed::draw_counter() {
-	TdmHudContext &c = *ctx_;
-	const ui::HudModel &m = c.model;
-	const ui::HudKillCounter &kc = m.kill_counter;
-	if (kc.team1_max_kills <= 0 || m.end_of_round.visible || m.spawn_screen.visible || m.team.scoreboard_enabled) {
-		return;
-	}
-	const float s = tdm_scale(*this);
-	const Ref<Font> num = c.font(TdmFont::Number);
-	const Ref<Font> txt = c.font(TdmFont::Text);
-	const int32_t big = tdm_px(kKillCounterSize, s);
-	const int32_t small = tdm_px(kKillCounterSize * 0.6f, s);
-	const Vector2 at = tdm_at(*this, ui::HudAnchor::Top, 640.0f, kKillCounterTop + kKillCounterSize);
-	const bool us = kc.player_team != 2;
-	const std::string mine = std::to_string(kc.player_team_kills);
-	const std::string theirs = std::to_string(kc.enemy_team_kills);
-	const std::string limit = std::to_string(kc.team1_max_kills);
-	const float half = 60.0f * s;
-	tdm_draw_panel(*this, Rect2(at.x - 1.9f * half, at.y - 1.05f * float(big), 3.8f * half, 1.45f * float(big)), kTdmPanelColour, kTdmLineColour,
-			std::max(1.0f, s));
-	tdm_draw_text(*this, txt, Vector2(at.x - 1.75f * half, at.y), c.text(us ? TdmText::TeamUs : TdmText::TeamRu), small, kTdmFriendlyColour, 0);
-	tdm_draw_text(*this, num, Vector2(at.x - 0.35f * half, at.y), mine, big, kTdmFriendlyColour, 1);
-	tdm_draw_text(*this, num, Vector2(at.x, at.y - 0.1f * float(big)), limit, small, kTdmDimColour, 2);
-	tdm_draw_text(*this, num, Vector2(at.x + 0.35f * half, at.y), theirs, big, kTdmEnemyColour, 0);
-	tdm_draw_text(*this, txt, Vector2(at.x + 1.75f * half, at.y), c.text(us ? TdmText::TeamRu : TdmText::TeamUs), small, kTdmEnemyColour, 1);
 }
 
 }

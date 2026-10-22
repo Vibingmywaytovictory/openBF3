@@ -1,6 +1,6 @@
 #include "hud_tdm.h"
 
-#include "hud_controls.h"
+#include "hud_items.h"
 #include "hud_tdm_screen.h"
 #include "hud_killfeed.h"
 #include "hud_scoreboard.h"
@@ -57,7 +57,7 @@ void TdmHudContext::resolve(Node *p_tree_node) {
 			hud_search_countdown_ = kHudSearchFrames;
 			Window *root = p_tree_node->get_tree() != nullptr ? p_tree_node->get_tree()->get_root() : nullptr;
 			if (root != nullptr) {
-				const TypedArray<Node> found = root->find_children("*", "Bf3Hud", true, false);
+				const TypedArray<Node> found = root->find_children("*", "Bf3HudItems", true, false);
 				if (!found.is_empty()) {
 					if (Node *n = Object::cast_to<Node>(found[0])) {
 						weapon_hud_id_ = n->get_instance_id();
@@ -192,7 +192,7 @@ Ref<Texture2D> TdmHudContext::weapon_icon(uint32_t p_item_id) {
 	if (p_item_id == 0) {
 		return Ref<Texture2D>();
 	}
-	Bf3Hud *hud = weapon_hud_id_ != 0 ? Object::cast_to<Bf3Hud>(ObjectDB::get_instance(weapon_hud_id_)) : nullptr;
+	Bf3HudItems *hud = weapon_hud_id_ != 0 ? Object::cast_to<Bf3HudItems>(ObjectDB::get_instance(weapon_hud_id_)) : nullptr;
 	if (hud == nullptr || !hud->is_loaded()) {
 		if (weapon_hud_id_ != 0 && hud == nullptr) {
 			weapon_hud_id_ = 0;

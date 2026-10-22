@@ -905,6 +905,7 @@ struct Bf3SwfView::Impl {
 	bool playing = true;
 	SwfScaleMode scale_mode = SwfScaleMode::ShowAll;
 	bool explicit_size = false;
+	Rect2 present_rect{ 0.0f, 0.0f, 1280.0f, 720.0f };
 	Vector2i target_size{ 1280, 720 };
 	RenderingServer::ViewportMSAA msaa = RenderingServer::VIEWPORT_MSAA_4X;
 	SwfStageFit fit;
@@ -2346,7 +2347,8 @@ struct Bf3SwfView::Impl {
 			return;
 		}
 		rs->canvas_item_set_transform(present_item, owner->get_global_transform_with_canvas().affine_inverse());
-		rs->canvas_item_add_texture_rect(present_item, Rect2(0.0f, 0.0f, real_t(target_size.x), real_t(target_size.y)), it->second.content.texture);
+		const Rect2 at = explicit_size ? Rect2(0.0f, 0.0f, real_t(target_size.x), real_t(target_size.y)) : present_rect;
+		rs->canvas_item_add_texture_rect(present_item, at, it->second.content.texture);
 	}
 
 	void sync() {
@@ -2355,8 +2357,14 @@ struct Bf3SwfView::Impl {
 		}
 		const auto t0 = std::chrono::steady_clock::now();
 		if (!explicit_size && owner->is_inside_tree() && owner->get_viewport() != nullptr) {
-			const Vector2 vs = owner->get_viewport()->get_visible_rect().size;
-			const Vector2i s(std::max(1, int32_t(std::lround(vs.x))), std::max(1, int32_t(std::lround(vs.y))));
+			Viewport *vp = owner->get_viewport();
+			const Rect2 vis = vp->get_visible_rect();
+			const Vector2 k = vp->get_final_transform().get_scale();
+			const Vector2i s(std::max(1, int32_t(std::lround(vis.size.x * std::fabs(k.x)))), std::max(1, int32_t(std::lround(vis.size.y * std::fabs(k.y)))));
+			if (vis != present_rect) {
+				present_rect = vis;
+				structure_dirty = true;
+			}
 			if (s != target_size) {
 				target_size = s;
 				structure_dirty = true;

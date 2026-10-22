@@ -5,7 +5,7 @@
 #include "level_session_tdm.h"
 
 #include "godot_util.h"
-#include "hud_controls.h"
+#include "hud_items.h"
 #include "input_mapper.h"
 
 #include "bf3/core/util/format.h"

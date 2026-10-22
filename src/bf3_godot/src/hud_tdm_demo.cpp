@@ -2,7 +2,7 @@
 
 #include "bf3_localisation.h"
 #include "godot_util.h"
-#include "hud_controls.h"
+#include "hud_items.h"
 #include "ui_assets.h"
 
 #include "bf3/core/ui/hud_icons.h"
@@ -71,9 +71,6 @@ void Bf3TdmHudDemo::_ready() {
 		return;
 	}
 	shot_dir_ = user_arg_value("tdm-shots");
-	if (Bf3UiAssets *assets = Bf3UiAssets::current()) {
-		assets->set_atlas_movies(Bf3Hud::required_atlas_movies());
-	}
 	Window *w = get_window();
 	w->set_content_scale_mode(Window::CONTENT_SCALE_MODE_DISABLED);
 	w->set_size(Vector2i(1280, 720));
@@ -83,9 +80,8 @@ void Bf3TdmHudDemo::_ready() {
 	back->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
 	back->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 	add_child(back);
-	Bf3Hud *m2a = memnew(Bf3Hud);
-	m2a->set_name("M2aHud");
-	m2a->set_visible(false);
+	Bf3HudItems *m2a = memnew(Bf3HudItems);
+	m2a->set_name("HudItems");
 	add_child(m2a);
 	hud_ = std::make_unique<Bf3TdmHud>();
 	std::string error;
@@ -105,7 +101,7 @@ void Bf3TdmHudDemo::_exit_tree() {
 }
 
 void Bf3TdmHudDemo::pick_items() {
-	Bf3Hud *m2a = Object::cast_to<Bf3Hud>(get_node_or_null("M2aHud"));
+	Bf3HudItems *m2a = Object::cast_to<Bf3HudItems>(get_node_or_null("HudItems"));
 	const ui::ItemIconIndex *index = m2a != nullptr ? m2a->item_index() : nullptr;
 	if (index == nullptr) {
 		return;
@@ -255,12 +251,12 @@ void Bf3TdmHudDemo::_process(double p_delta) {
 	if (stage_ < 0) {
 		Bf3Localisation *loc = Bf3Localisation::current();
 		Bf3UiAssets *assets = Bf3UiAssets::current();
-		Bf3Hud *m2a = Object::cast_to<Bf3Hud>(get_node_or_null("M2aHud"));
+		Bf3HudItems *m2a = Object::cast_to<Bf3HudItems>(get_node_or_null("HudItems"));
 		const bool ready = loc != nullptr && (loc->is_loaded() || loc->has_failed()) && assets != nullptr && (assets->is_loaded() || assets->has_failed()) &&
 				m2a != nullptr && m2a->is_loaded();
 		if (!ready) {
 			if (now_s() - started_s_ > kTdmDemoLoadSeconds) {
-				row("load", false, "the localisation, UI assets or M2a HUD did not load within " + std::to_string(int(kTdmDemoLoadSeconds)) + " s");
+				row("load", false, "the localisation, UI assets or HUD item icons did not load within " + std::to_string(int(kTdmDemoLoadSeconds)) + " s");
 				finish();
 			}
 			return;

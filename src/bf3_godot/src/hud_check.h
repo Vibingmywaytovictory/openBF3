@@ -14,7 +14,8 @@
 
 namespace bf3::godot_side {
 
-class Bf3Hud;
+class Bf3NativeHud;
+class Bf3HudItems;
 
 class Bf3HudCheck : public godot::Node {
 	GDCLASS(Bf3HudCheck, godot::Node)
@@ -47,7 +48,8 @@ private:
 	godot::SubViewport *viewport_ = nullptr;
 	godot::ColorRect *background_ = nullptr;
 	godot::TextureRect *view_ = nullptr;
-	Bf3Hud *hud_ = nullptr;
+	Bf3NativeHud *hud_ = nullptr;
+	Bf3HudItems *items_ = nullptr;
 	std::unique_ptr<Work> work_;
 	std::thread worker_;
 	std::atomic<bool> work_done_{ false };

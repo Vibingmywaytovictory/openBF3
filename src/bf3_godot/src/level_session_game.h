@@ -36,7 +36,8 @@ class StandardMaterial3D;
 
 namespace bf3::godot_side {
 
-class Bf3Hud;
+class Bf3HudItems;
+class Bf3NativeHud;
 class Bf3Localisation;
 class Bf3UiAssets;
 class Bf3Viewmodel;
@@ -107,6 +108,7 @@ struct GameState {
 	std::vector<M2aCase> cases;
 	M2aCheckOptions check_options;
 	bool checks() const { return !cases.empty(); }
+	bool hud_ready() const;
 	bool wants_case(M2aCase p_case) const;
 
 	std::shared_ptr<const bf3::host::ClientGunplayInputs> gunplay;
@@ -127,7 +129,8 @@ struct GameState {
 	bool built = false;
 	Bf3Localisation *localisation = nullptr;
 	Bf3UiAssets *ui_assets = nullptr;
-	Bf3Hud *hud = nullptr;
+	Bf3HudItems *hud_items = nullptr;
+	Bf3NativeHud *native_hud = nullptr;
 	bool hud_names_applied = false;
 	std::array<Bf3Viewmodel *, 2> vm{ nullptr, nullptr };
 	godot::CanvasLayer *layer = nullptr;

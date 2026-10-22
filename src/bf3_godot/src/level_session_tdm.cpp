@@ -6,8 +6,9 @@
 #include "fp_camera.h"
 #include "game_crowd.h"
 #include "godot_util.h"
-#include "hud_controls.h"
+#include "hud_items.h"
 #include "input_mapper.h"
+#include "native_hud.h"
 #include "ui_assets.h"
 
 #include "bf3/core/util/elapsed.h"
@@ -480,6 +481,9 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		if (!m.options.deploy_screen) {
 			r_game.hud_model.spawn_screen.visible = false;
 		}
+		if (r_game.native_hud != nullptr) {
+			r_game.native_hud->set_model(r_game.hud_model);
+		}
 		if (m.tdm_hud != nullptr && m.tdm_hud->built()) {
 			m.tdm_hud->set_model(r_game.hud_model);
 			if (const int k = m.tdm_hud->take_kit_click(); k >= 0 && k < int(host::kKitCount)) {
@@ -574,7 +578,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 	m.frame.death_view = m.view_valid && dead;
 
 #if OPENBF3_BUILD_CHECKS
-	if (m.checks() && m.check == nullptr && !m.finished && (r_game.hud == nullptr || r_game.hud->is_loaded())) {
+	if (m.checks() && m.check == nullptr && !m.finished && r_game.hud_ready()) {
 		m.check = std::unique_ptr<M2bCheck, void (*)(M2bCheck *)>(new M2bCheck(*this, r_game, m, m.cases, m.check_options), &delete_part<M2bCheck>);
 	}
 	if (m.check != nullptr && !m.finished) {

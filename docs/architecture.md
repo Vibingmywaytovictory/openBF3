@@ -130,6 +130,7 @@ tables over one grammar (`bf3/core/util/key_values.h`, byte and line caps on eve
 | a HUD movie's live display tree | `src/bf3_core/src/ui/swf_scene.cpp` (placements across imports, frame stepping, frame-script stop/play/goto, attachMovie, change lists; script overrides outlive seeks; ids are slot plus generation), `swf_actions.cpp` |
 | SWF text layout | `src/bf3_core/src/ui/swf_text.cpp` (HTML subset, DefineFont3 advances and kerning, 2 px gutter, autoSize, GFx shrink/fit) |
 | a HUD movie on screen | `src/bf3_godot/src/swf_view.cpp` (`Bf3SwfView`: a `SwfScene` as RenderingServer canvas items fed by its change list; filters, clip-depth masks and blend layers are offscreen viewports; `_xrotation`/`_yrotation` tilt is a homography; engine-drawn targets by renderer string) |
+| the in-round HUD | `src/bf3_godot/src/native_hud.cpp` (`Bf3NativeHud`: hudmpscreen, hudtdmscreen and crosshairdefault as three `Bf3SwfView`s at window size, stepped by `HudScreen` from `HudModel`; paints the engine-drawn iBgDraw, EKG and minimap targets), `src/bf3_core/src/ui/hud_screen.cpp`, `hud_widgets.cpp` (one controller per AS2 class) |
 | a ctest row | `tests/CMakeLists.txt`, the matching `tests/*_tests.cpp` or `tests/godot_*.cmake` |
 
 ## Known debts
@@ -146,15 +147,17 @@ These are structural, known, and listed so nobody mistakes them for design inten
   translation unit instead of once in `bf3_core`.
 * `bf3_core` is several libraries in one directory (containers, assets, gameplay tables, level, UI).
 * The build is Windows and MSVC only by policy; Win32 use is confined to about twenty files.
-* The HUD screens (`src/bf3_godot/src/hud_*.cpp`, `spawn_screen.cpp`, `round_end.cpp`, `kill_card.cpp`) are
-  hand-built Godot controls that only borrow the retail fonts and atlas regions. The rule is the retail SWF movies
+* The kill feed, scoreboard, spawn, pre-round, round-end and kill-card screens (`src/bf3_godot/src/hud_killfeed.cpp`,
+  `hud_scoreboard.cpp`, `spawn_screen.cpp`, `pre_round.cpp`, `round_end.cpp`, `kill_card.cpp`) are hand-built Godot
+  controls that only borrow the retail fonts and atlas regions; the in-round HUD is the retail movies (`Bf3NativeHud`). The rule is the retail SWF movies
   rendered as they are (CLAUDE.md "Native Battlefield 3 UI only"); the SWF decoders in `bf3_core/ui/` give symbol
   tables, atlases, fonts, triangulated shapes, a live display tree (`SwfScene`), text layout and the AVM1 bytecode
   (`avm1.h`: every DoAction, DoInitAction and clip-action body, and the classes and `Object.registerClass` calls found
   in it; `bf3dump swf as2`), so the renderer and the screen logic are open. The scene runs only the frame scripts'
   unconditional stop/play/goto; the movies' AS2 classes, `onClipEvent` handlers and conditional frame code are not
-  executed. `Bf3SwfView` draws a scene but is not in the play scene yet, and draws no gradients, static text, Bevel or
-  ColorMatrix filters, or blend modes other than normal, layer and add.
+  executed outside the HUD controllers. `Bf3SwfView` draws no gradients, static text, Bevel or ColorMatrix filters,
+  or blend modes other than normal, layer and add. The HUD does not sway with camera motion, the minimap zoom is a
+  fixed 1.375 m per local unit, and the KillFeed, SquadList, ScorePopup and KillLog widgets are not driven.
 * The container, EBX, payload, resource, level-soup and lag-compensation readers were written as ports of the
   earlier Rust experiment (IW4L) rather than from the format facts alone. The rule now forbids that
   (CLAUDE.md "No code from other projects"); those units are to be re-derived from `research/` and the install
