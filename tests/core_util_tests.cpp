@@ -15,6 +15,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 using namespace bf3::core;
@@ -74,6 +75,25 @@ TEST_SUITE("core-util-unit") {
 		CHECK(s >= 0.05);
 		CHECK(ms >= 50.0);
 		CHECK(ms >= s * 1000.0);
+	}
+
+	TEST_CASE("core.util: thread_cpu_seconds counts this thread's work, not its sleep") {
+		const double before_sleep = thread_cpu_seconds();
+		const auto slept_from = std::chrono::steady_clock::now();
+		std::this_thread::sleep_for(std::chrono::milliseconds(200));
+		CHECK(seconds_since(slept_from) >= 0.2);
+		CHECK(thread_cpu_seconds() - before_sleep < 0.05);
+
+		const double before_work = thread_cpu_seconds();
+		const auto worked_from = std::chrono::steady_clock::now();
+		uint64_t state = 1;
+		while (thread_cpu_seconds() - before_work < 0.1 && seconds_since(worked_from) < 10.0) {
+			for (int i = 0; i < 100000; ++i) {
+				state = splitmix64(state);
+			}
+		}
+		CHECK(state != 0);
+		CHECK(thread_cpu_seconds() - before_work >= 0.1);
 	}
 
 	TEST_CASE("core.util: finite over scalars, spans and xyz types") {

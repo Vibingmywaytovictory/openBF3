@@ -4,6 +4,7 @@
 #include "bf3/core/ui/swf_geometry.h"
 #include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/swf_movie.h"
+#include "bf3/core/util/elapsed.h"
 #include "test_support.h"
 #include "ui_swf_writer.h"
 
@@ -363,13 +364,13 @@ TEST_SUITE("ui-swf-unit") {
 			bends.push_back(curve(i * 40 + 20, (i % 2 == 0) ? 30000 : -30000, i * 40 + 40, 0));
 		}
 		bends.push_back(to(0, 0));
-		const auto t0 = std::chrono::steady_clock::now();
+		const double cpu0 = thread_cpu_seconds();
 		Result<SwfMovie> many = SwfMovie::parse(movie(cat({ define_shape_paths(3, 32, 1, 1, { solid(1, 1, 1) }, {}, { path(0, 0, 0, 1, 0, bends) }),
 				show_frame(), end_tag() })));
-		const double s = seconds_since_start(t0);
+		const double s = thread_cpu_seconds() - cpu0;
 		REQUIRE_FALSE(many.ok());
 		CHECK(many.error().message.find("flattened points") != std::string::npos);
-		MESSAGE("1,100 maximal curves: " << s << " s");
+		MESSAGE("1,100 maximal curves: " << s << " s thread CPU");
 		if (!kAsan) {
 			CHECK(s < 1.0);
 		}

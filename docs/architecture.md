@@ -141,8 +141,9 @@ These are structural, known, and listed so nobody mistakes them for design inten
   `bf3_client_audio` call), `bf3_fx` (`fx_harness`) and `bf3_host` (`rest_check`).
 * Milestone names (M1, M2a, M2b, S0, S3, PT1) remain in the gated checks, demos and selftest (`m1_check`,
   `m2a_check`, `m2b_check`, their scenes, user args and ctest rows), the test files, `HudWave` and `--look=m1`.
-* A bounds-checked byte reader and the small vector operators (`add`, `dot`, `cross`, `rotate`) are still defined
-  per translation unit instead of once in `bf3_core`.
+* A bounds-checked byte reader, the small vector operators (`add`, `dot`, `cross`, `rotate`) and two
+  copies of `thread_cpu_seconds` (`scale_bench.cpp`, `bf3dump/audio_commands.cpp`) are still defined per
+  translation unit instead of once in `bf3_core`.
 * `bf3_core` is several libraries in one directory (containers, assets, gameplay tables, level, UI).
 * The build is Windows and MSVC only by policy; Win32 use is confined to about twenty files.
 * The HUD screens (`src/bf3_godot/src/hud_*.cpp`, `spawn_screen.cpp`, `round_end.cpp`, `kill_card.cpp`) are

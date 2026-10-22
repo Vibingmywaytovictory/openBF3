@@ -42,6 +42,7 @@ add_library(bf3_core STATIC
 )
 target_sources(bf3_core PRIVATE
     src/math.cpp
+    src/util/elapsed_win32.cpp
     src/util/format.cpp
     src/util/key_values.cpp
     src/util/text.cpp

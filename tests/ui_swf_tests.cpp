@@ -12,6 +12,7 @@
 #include "bf3/core/ui/swf_movie.h"
 #include "bf3/core/ui/swf_scene.h"
 #include "bf3/core/ui/ui_fonts.h"
+#include "bf3/core/util/elapsed.h"
 #include "test_support.h"
 #include "ui_swf_writer.h"
 
@@ -34,15 +35,15 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-double seconds_of(const std::function<void()> &p_fn) {
-	const auto t0 = Clock::now();
+double thread_cpu_seconds_of(const std::function<void()> &p_fn) {
+	const double t0 = thread_cpu_seconds();
 	p_fn();
-	return std::chrono::duration<double>(Clock::now() - t0).count();
+	return thread_cpu_seconds() - t0;
 }
 
 void hostile(const char *p_name, const std::function<void()> &p_fn) {
-	const double s = seconds_of(p_fn);
-	MESSAGE(std::string(p_name) << ": " << s << " s" << std::string(kAsan ? " (asan, reported)" : ""));
+	const double s = thread_cpu_seconds_of(p_fn);
+	MESSAGE(std::string(p_name) << ": " << s << " s thread CPU" << std::string(kAsan ? " (asan, reported)" : ""));
 	if (!kAsan) {
 		CHECK_MESSAGE(s < 1.0, p_name);
 	}
