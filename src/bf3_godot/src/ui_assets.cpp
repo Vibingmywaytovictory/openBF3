@@ -74,6 +74,41 @@ Dictionary layout_dict(const ui::SwfLayoutNode &p_node) {
 	return d;
 }
 
+struct MovieAtlases {
+	std::optional<ui::SwfAtlasMap> map;
+	std::map<uint16_t, bf3::render::PreparedTexture> prepared;
+};
+
+MovieAtlases prepare_movie_atlases(const ui::SwfLibrary &p_movies, const std::string &p_movie, std::vector<std::string> &r_warnings) {
+	MovieAtlases out;
+	bf3::core::Result<std::shared_ptr<const ui::SwfMovie>> movie = p_movies.load(p_movie);
+	if (!movie) {
+		r_warnings.push_back(p_movie + ": " + movie.error().message);
+		return out;
+	}
+	bf3::core::level::WorkBudget budget(ui::kSwfAtlasBudgetUnits);
+	bf3::core::Result<ui::SwfAtlasMap> map = ui::build_atlas_map(**movie, p_movie, budget);
+	if (!map) {
+		r_warnings.push_back(p_movie + ": " + map.error().message);
+		return out;
+	}
+	for (const ui::SwfExternalImage &im : (*movie)->external_images) {
+		bf3::core::Result<bf3::core::res::LoadedTexture> tex = p_movies.load_atlas_texture(p_movie, im);
+		if (!tex) {
+			r_warnings.push_back(p_movie + " " + im.file_name + ": " + tex.error().message);
+			continue;
+		}
+		bf3::core::Result<bf3::render::PreparedTexture> prep = bf3::render::prepare_texture(*tex, bf3::render::TextureRole::Color);
+		if (!prep) {
+			r_warnings.push_back(p_movie + " " + im.file_name + ": " + prep.error().message);
+			continue;
+		}
+		out.prepared[im.image_id] = std::move(*prep);
+	}
+	out.map = std::move(*map);
+	return out;
+}
+
 }
 
 struct Bf3UiAssets::Loaded {
@@ -83,6 +118,7 @@ struct Bf3UiAssets::Loaded {
 	std::optional<ui::SwfLibrary> movies;
 	std::unique_ptr<bf3::core::EbxLibrary> ui_ebx;
 	std::optional<ui::UiFontLibrary> fonts;
+	std::optional<ui::SwfFontSet> swf_fonts;
 	std::map<std::string, ui::SwfAtlasMap> atlas_maps;
 	std::map<std::string, std::map<uint16_t, bf3::render::PreparedTexture>> prepared;
 	std::map<std::string, std::vector<ui::HudPlacement>> hud;
@@ -228,33 +264,21 @@ void Bf3UiAssets::_process(double p_delta) {
 						out->error = "fonts: " + fonts.error().message;
 					} else {
 						out->fonts.emplace(std::move(*fonts));
+						bf3::core::level::WorkBudget font_budget(ui::kUiFontConvertBudgetUnits);
+						bf3::core::Result<ui::SwfFontSet> set = ui::SwfFontSet::load(*out->movies, out->fonts->mapping(), font_budget);
+						if (!set) {
+							out->warnings.push_back("DefineFont3 font set: " + set.error().message);
+						} else {
+							out->swf_fonts.emplace(std::move(*set));
+						}
 					}
 					for (const std::string &m : atlas_movies) {
-						bf3::core::Result<std::shared_ptr<const ui::SwfMovie>> movie = out->movies->load(m);
-						if (!movie) {
-							out->warnings.push_back(m + ": " + movie.error().message);
+						MovieAtlases a = prepare_movie_atlases(*out->movies, m, out->warnings);
+						if (!a.map) {
 							continue;
 						}
-						bf3::core::level::WorkBudget budget(ui::kSwfAtlasBudgetUnits);
-						bf3::core::Result<ui::SwfAtlasMap> map = ui::build_atlas_map(**movie, m, budget);
-						if (!map) {
-							out->warnings.push_back(m + ": " + map.error().message);
-							continue;
-						}
-						for (const ui::SwfExternalImage &im : (*movie)->external_images) {
-							bf3::core::Result<bf3::core::res::LoadedTexture> tex = out->movies->load_atlas_texture(m, im);
-							if (!tex) {
-								out->warnings.push_back(m + " " + im.file_name + ": " + tex.error().message);
-								continue;
-							}
-							bf3::core::Result<bf3::render::PreparedTexture> prep = bf3::render::prepare_texture(*tex, bf3::render::TextureRole::Color);
-							if (!prep) {
-								out->warnings.push_back(m + " " + im.file_name + ": " + prep.error().message);
-								continue;
-							}
-							out->prepared[m][im.image_id] = std::move(*prep);
-						}
-						out->atlas_maps[m] = std::move(*map);
+						out->prepared[m] = std::move(a.prepared);
+						out->atlas_maps[m] = std::move(*a.map);
 					}
 					for (const std::string_view screen : ui::hud_screen_movies()) {
 						const std::string key = "ui/assets/" + std::string(screen);
@@ -343,6 +367,36 @@ String Bf3UiAssets::get_error() const {
 
 const ui::UiFontLibrary *Bf3UiAssets::fonts() const {
 	return is_loaded() && loaded_->fonts ? &*loaded_->fonts : nullptr;
+}
+
+const ui::SwfFontSet *Bf3UiAssets::swf_fonts() const {
+	return is_loaded() && loaded_->swf_fonts ? &*loaded_->swf_fonts : nullptr;
+}
+
+bool Bf3UiAssets::ensure_atlas_movie(const std::string &p_movie) {
+	if (!is_loaded() || !loaded_->movies) {
+		return false;
+	}
+	const std::string key = movie_key(p_movie);
+	if (loaded_->atlas_maps.count(key) != 0) {
+		return true;
+	}
+	std::vector<std::string> warnings;
+	MovieAtlases a = prepare_movie_atlases(*loaded_->movies, key, warnings);
+	for (const std::string &w : warnings) {
+		UtilityFunctions::push_warning(to_godot("[ui1] " + w));
+	}
+	if (!a.map) {
+		return false;
+	}
+	for (auto &[id, prep] : a.prepared) {
+		Ref<ImageTexture> t = make_texture(prep);
+		if (t.is_valid()) {
+			loaded_->atlases[key][id] = t;
+		}
+	}
+	loaded_->atlas_maps[key] = std::move(*a.map);
+	return true;
 }
 
 const ui::SwfAtlasMap *Bf3UiAssets::atlas_map(const std::string &p_movie) const {

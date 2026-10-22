@@ -71,6 +71,8 @@ target_sources(bf3_godot PRIVATE
 target_sources(bf3_godot PRIVATE
     src/ui_assets.cpp
     src/ui_assets.h
+    src/swf_view.cpp
+    src/swf_view.h
 )
 
 target_sources(bf3_godot PRIVATE
@@ -208,6 +210,8 @@ if(OPENBF3_BUILD_CHECKS)
         src/minimap_check.h
         src/s0_selftest.cpp
         src/s0_selftest.h
+        src/swf_view_check.cpp
+        src/swf_view_check.h
         src/tp_crowd_check.cpp
         src/tp_crowd_check.h
         src/ui_font_check.cpp

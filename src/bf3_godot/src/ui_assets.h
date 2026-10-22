@@ -4,6 +4,7 @@
 #include "bf3/core/ui/swf_atlas.h"
 #include "bf3/core/ui/swf_layout.h"
 #include "bf3/core/ui/swf_library.h"
+#include "bf3/core/ui/swf_text.h"
 #include "bf3/core/ui/ui_fonts.h"
 #include "bf3/render/texture_prep.h"
 
@@ -55,11 +56,13 @@ public:
 	godot::Dictionary get_layout(const godot::String &p_movie) const;
 
 	const bf3::core::ui::UiFontLibrary *fonts() const;
+	const bf3::core::ui::SwfFontSet *swf_fonts() const;
 	const bf3::core::ui::SwfAtlasMap *atlas_map(const std::string &p_movie) const;
 
 	const bf3::core::ui::SwfLibrary *movies() const;
 	const std::vector<bf3::core::ui::HudPlacement> *hud_placements(const std::string &p_movie) const;
 	godot::Ref<godot::Texture2D> atlas_texture(const std::string &p_movie, uint16_t p_image_id) const;
+	bool ensure_atlas_movie(const std::string &p_movie);
 	double load_seconds() const;
 
 protected:

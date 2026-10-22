@@ -129,6 +129,7 @@ tables over one grammar (`bf3/core/util/key_values.h`, byte and line caps on eve
 | a SWF shape's triangles | `src/bf3_core/src/ui/swf_shape.cpp` (edges to fill0/fill1 contours, curves flattened to 1/40 px), `swf_geometry.cpp` (nonzero sweep) |
 | a HUD movie's live display tree | `src/bf3_core/src/ui/swf_scene.cpp` (placements across imports, frame stepping, frame-script stop/play/goto, attachMovie, change lists; script overrides outlive seeks; ids are slot plus generation), `swf_actions.cpp` |
 | SWF text layout | `src/bf3_core/src/ui/swf_text.cpp` (HTML subset, DefineFont3 advances and kerning, 2 px gutter, autoSize, GFx shrink/fit) |
+| a HUD movie on screen | `src/bf3_godot/src/swf_view.cpp` (`Bf3SwfView`: a `SwfScene` as RenderingServer canvas items fed by its change list; filters, clip-depth masks and blend layers are offscreen viewports; `_xrotation`/`_yrotation` tilt is a homography; engine-drawn targets by renderer string) |
 | a ctest row | `tests/CMakeLists.txt`, the matching `tests/*_tests.cpp` or `tests/godot_*.cmake` |
 
 ## Known debts
@@ -151,7 +152,8 @@ These are structural, known, and listed so nobody mistakes them for design inten
   (`avm1.h`: every DoAction, DoInitAction and clip-action body, and the classes and `Object.registerClass` calls found
   in it; `bf3dump swf as2`), so the renderer and the screen logic are open. The scene runs only the frame scripts'
   unconditional stop/play/goto; the movies' AS2 classes, `onClipEvent` handlers and conditional frame code are not
-  executed.
+  executed. `Bf3SwfView` draws a scene but is not in the play scene yet, and draws no gradients, static text, Bevel or
+  ColorMatrix filters, or blend modes other than normal, layer and add.
 * The container, EBX, payload, resource, level-soup and lag-compensation readers were written as ports of the
   earlier Rust experiment (IW4L) rather than from the format facts alone. The rule now forbids that
   (CLAUDE.md "No code from other projects"); those units are to be re-derived from `research/` and the install

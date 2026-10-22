@@ -11,6 +11,7 @@
 #include "weapon_inspector.h"
 #include "world_icons.h"
 
+#include "swf_view.h"
 #include "ui_assets.h"
 
 #include "viewmodel.h"
@@ -24,6 +25,7 @@
 #include "hud_check.h"
 #include "hud_tdm_demo.h"
 #include "m2a_viewmodel_demo.h"
+#include "swf_view_check.h"
 #include "ui_font_check.h"
 #include "viewmodel_demo.h"
 #endif
@@ -56,6 +58,7 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3Crowd);
 
 	GDREGISTER_CLASS(bf3::godot_side::Bf3UiAssets);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3SwfView);
 
 	GDREGISTER_CLASS(bf3::godot_side::Bf3MinimapControl);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3WorldIcons);
@@ -80,6 +83,7 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 #if OPENBF3_BUILD_CHECKS
 	GDREGISTER_CLASS(bf3::godot_side::Bf3ViewmodelDemo);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3UiFontCheck);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3SwfViewCheck);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3M2aViewmodelDemo);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3FxDemo);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3FxRef);

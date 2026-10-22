@@ -415,6 +415,8 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_godot_row(godot.ui_fonts godot_ui_fonts.cmake HEADLESS TIMEOUT 360)
     openbf3_godot_row(godot.ui_fonts_shots godot_ui_fonts_shots.cmake WINDOW TIMEOUT 360)
     set_tests_properties(godot.ui_fonts_shots PROPERTIES RUN_SERIAL TRUE)
+    openbf3_godot_row(godot.swf_view godot_swf_view.cmake WINDOW TIMEOUT 120)
+    set_tests_properties(godot.swf_view PROPERTIES RUN_SERIAL TRUE)
 endif()
 
 openbf3_test(test_ui2_contract test_main.cpp ui2_contract_tests.cpp)
