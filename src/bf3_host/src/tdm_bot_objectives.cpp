@@ -17,6 +17,9 @@ constexpr float kPathFactor = 1.3f;
 constexpr uint32_t kReviveTimeoutTicks = 900;
 constexpr uint32_t kGrenadeLostMinTicks = 30, kGrenadeLostMaxTicks = 240;
 constexpr uint32_t kGrenadeSwitchTicks = 120, kGrenadeAfterTicks = 45, kGrenadeHoldExtraTicks = 4;
+constexpr float kRetreatMetres = 14.0f;
+constexpr uint32_t kRetreatMaxTicks = 360;
+constexpr uint32_t kRetreatClearTicks = 60;
 
 }
 
@@ -140,6 +143,44 @@ void BotGrenade::step(const BotArms &p_arms, sim::Tick p_tick, const sim::Vec3 &
 	} else if (phase_ == 3 && p_tick - phase_tick_ >= kGrenadeAfterTicks) {
 		phase_ = 0;
 	}
+}
+
+bool BotRetreat::recovered(const TdmBotConfig &p_config, bool p_waiting, sim::Tick p_tick, float p_health) const {
+	return p_health >= p_config.regen_until_hp || (p_waiting && p_tick - regen_since_ > sim::seconds_to_ticks(p_config.regen_wait_s));
+}
+
+bool BotRetreat::cleared(sim::Tick p_tick) const {
+	return p_tick - clear_since_ >= kRetreatClearTicks;
+}
+
+bool BotRetreat::running(sim::Tick p_tick) const {
+	return p_tick - since_ < kRetreatMaxTicks;
+}
+
+bool BotRetreat::start(TdmShared &r_shared, BotNavigation &r_navigation, sim::Tick p_tick, const sim::SoldierState &p_self, const sim::Vec3 &p_threat,
+		uint64_t &r_rng) {
+	if (!finite(p_threat)) {
+		return false;
+	}
+	float dx = p_self.position[0] - p_threat[0], dz = p_self.position[2] - p_threat[2];
+	const float l = std::sqrt(dx * dx + dz * dz);
+	if (!(l > 0.1f)) {
+		const float a = unit(r_rng) * sim::kTwoPi;
+		dx = std::sin(a);
+		dz = std::cos(a);
+	} else {
+		dx /= l;
+		dz /= l;
+	}
+	const sim::Vec3 away = add(p_self.position, dx * kRetreatMetres, 0.0f, dz * kRetreatMetres);
+	if (!r_navigation.set_goal(r_shared, p_tick, away, 2.0f, true)) {
+		return false;
+	}
+	threat_ = p_threat;
+	since_ = p_tick;
+	clear_since_ = p_tick;
+	r_shared.count(&TdmBotStats::retreats, uint64_t(1));
+	return true;
 }
 
 }

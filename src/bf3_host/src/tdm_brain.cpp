@@ -50,9 +50,6 @@ constexpr float kMaxPitchDeg = 80.0f;
 constexpr float kFireConeDeg = 4.0f;
 
 constexpr float kSprintConeDeg = 20.0f;
-constexpr float kRetreatMetres = 14.0f;
-constexpr uint32_t kRetreatMaxTicks = 360;
-constexpr uint32_t kRetreatClearTicks = 60;
 constexpr float kReviveDirectMetres = 2.5f;
 constexpr float kReviveStandMetres = 0.8f;
 constexpr float kReviveCrouchMetres = 2.0f;
@@ -120,8 +117,7 @@ struct TdmBrain::Impl {
 
 	BotLook look;
 
-	sim::Tick retreat_since = 0, regen_since = 0, clear_since = 0;
-	sim::Vec3 threat{};
+	BotRetreat retreat;
 
 	BotRevive medic;
 
@@ -150,7 +146,7 @@ struct TdmBrain::Impl {
 		weapons.new_life(p_tick);
 		strafe.stop();
 		look.new_life();
-		retreat_since = regen_since = clear_since = 0;
+		retreat.new_life();
 		medic.new_life();
 		grenade.new_life();
 		knife_until = 0;
@@ -240,7 +236,7 @@ struct TdmBrain::Impl {
 		const DownedSoldier *revive = medic.update(sh, navigation, check);
 
 		if (activity == TdmBotActivity::Retreat || activity == TdmBotActivity::RegenWait) {
-			if (p_state.health >= c.regen_until_hp || (activity == TdmBotActivity::RegenWait && p_tick - regen_since > sim::seconds_to_ticks(c.regen_wait_s))) {
+			if (retreat.recovered(c, activity == TdmBotActivity::RegenWait, p_tick, p_state.health)) {
 				activity = TdmBotActivity::Roam;
 			}
 		}
@@ -249,15 +245,15 @@ struct TdmBrain::Impl {
 			act = TdmBotActivity::Revive;
 		} else if (grenade.active()) {
 			act = TdmBotActivity::Grenade;
-		} else if (activity == TdmBotActivity::Retreat && !visible && p_tick - clear_since >= kRetreatClearTicks) {
+		} else if (activity == TdmBotActivity::Retreat && !visible && retreat.cleared(p_tick)) {
 			act = TdmBotActivity::RegenWait;
-			regen_since = p_tick;
-		} else if (activity == TdmBotActivity::Retreat && p_tick - retreat_since < kRetreatMaxTicks && low) {
+			retreat.begin_wait(p_tick);
+		} else if (activity == TdmBotActivity::Retreat && retreat.running(p_tick) && low) {
 			act = TdmBotActivity::Retreat;
 		} else if (activity == TdmBotActivity::RegenWait && !visible && !shot_recent) {
 			act = TdmBotActivity::RegenWait;
 		} else if (low && (visible || shot_recent) && sh.nav != nullptr && activity != TdmBotActivity::Retreat && activity != TdmBotActivity::RegenWait &&
-				start_retreat(p_tick, p_state, visible ? states[size_t(target)].position : awareness.shot_from())) {
+				retreat.start(sh, navigation, p_tick, p_state, visible ? states[size_t(target)].position : awareness.shot_from(), rng)) {
 			act = TdmBotActivity::Retreat;
 		} else if (visible) {
 			act = TdmBotActivity::Fight;
@@ -269,7 +265,7 @@ struct TdmBrain::Impl {
 			act = p_tick >= hunt_block_until && known_enemy(p_tick, p_state) >= 0 ? TdmBotActivity::Hunt : TdmBotActivity::Roam;
 		}
 		if (act == TdmBotActivity::Retreat && visible) {
-			clear_since = p_tick;
+			retreat.seen(p_tick);
 		}
 		if (act == TdmBotActivity::Hunt && activity != TdmBotActivity::Hunt) {
 			hunt_since = p_tick;
@@ -401,7 +397,7 @@ struct TdmBrain::Impl {
 				break;
 			case TdmBotActivity::RegenWait:
 				pose = sim::Pose::Crouch;
-				want_yaw = yaw_of(threat[0] - p_state.position[0], threat[2] - p_state.position[2]);
+				want_yaw = yaw_of(retreat.threat()[0] - p_state.position[0], retreat.threat()[2] - p_state.position[2]);
 				break;
 			case TdmBotActivity::Grenade:
 				grenade.step(arms, p_tick, eye, want_slot, trigger, want_yaw, want_pitch, have_aim);
@@ -516,31 +512,6 @@ struct TdmBrain::Impl {
 			}
 		}
 		return pick;
-	}
-
-	bool start_retreat(sim::Tick p_tick, const sim::SoldierState &p_self, const sim::Vec3 &p_threat) {
-		if (!finite(p_threat)) {
-			return false;
-		}
-		float dx = p_self.position[0] - p_threat[0], dz = p_self.position[2] - p_threat[2];
-		const float l = std::sqrt(dx * dx + dz * dz);
-		if (!(l > 0.1f)) {
-			const float a = unit(rng) * sim::kTwoPi;
-			dx = std::sin(a);
-			dz = std::cos(a);
-		} else {
-			dx /= l;
-			dz /= l;
-		}
-		const sim::Vec3 away = add(p_self.position, dx * kRetreatMetres, 0.0f, dz * kRetreatMetres);
-		if (!navigation.set_goal(*shared, p_tick, away, 2.0f, true)) {
-			return false;
-		}
-		threat = p_threat;
-		retreat_since = p_tick;
-		clear_since = p_tick;
-		shared->count(&TdmBotStats::retreats, uint64_t(1));
-		return true;
 	}
 };
 

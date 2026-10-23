@@ -57,4 +57,21 @@ private:
 	sim::Vec3 at_{};
 };
 
+class BotRetreat {
+public:
+	void new_life() { since_ = regen_since_ = clear_since_ = 0; }
+	bool recovered(const TdmBotConfig &p_config, bool p_waiting, sim::Tick p_tick, float p_health) const;
+	bool cleared(sim::Tick p_tick) const;
+	bool running(sim::Tick p_tick) const;
+	void begin_wait(sim::Tick p_tick) { regen_since_ = p_tick; }
+	void seen(sim::Tick p_tick) { clear_since_ = p_tick; }
+	const sim::Vec3 &threat() const { return threat_; }
+
+	bool start(TdmShared &r_shared, BotNavigation &r_navigation, sim::Tick p_tick, const sim::SoldierState &p_self, const sim::Vec3 &p_threat, uint64_t &r_rng);
+
+private:
+	sim::Tick since_ = 0, regen_since_ = 0, clear_since_ = 0;
+	sim::Vec3 threat_{};
+};
+
 }
