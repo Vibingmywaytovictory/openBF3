@@ -111,7 +111,6 @@ inline constexpr float kMinimapMetresPerLocalUnit = 1.375f;
 inline constexpr float kMinimapHatchTileLocal = 10.6f;
 inline constexpr float kMinimapSquareLocal = 170.0f;
 inline constexpr std::string_view kMinimapMaskTexture = "ui/hud/minimap/minimapmask";
-inline constexpr uint32_t kNametagUiColourSlot0 = 0xE4FF9Du;
 inline constexpr int32_t kUiHudIconSquadLeader = 7;
 inline constexpr int32_t kUiHudIconDead = 145;
 inline constexpr std::array<int32_t, 4> kUiHudIconsOnRedMarker{ 18, 35, 15, 4 };

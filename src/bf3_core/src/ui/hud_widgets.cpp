@@ -2029,11 +2029,15 @@ public:
 		}
 		r_host.renderer(r_host.self(), "t2");
 		r_host.self().set_visible(false);
+		const std::optional<uint32_t> slot0 = nametag_colour_slot0_as_authored_txt(r_host);
+		if (!slot0) {
+			return;
+		}
 		for (int32_t i = 0; i < kRows; ++i) {
 			const As2Clip r = row(r_host, i);
-			r.child("label").child("txt").set_text_color(kNametagUiColourSlot0);
+			r.child("label").child("txt").set_text_color(*slot0);
 			for (const char *icon : { "kit", "leader", "voip", "booster" }) {
-				r.child(icon).set_rgb(kNametagUiColourSlot0);
+				r.child(icon).set_rgb(*slot0);
 			}
 		}
 	}
@@ -2129,6 +2133,10 @@ private:
 	static constexpr int32_t kRows = 4;
 
 	static As2Clip row(HudWidgetHost &r_host, int32_t p_index) { return r_host.clip("squadMember" + std::to_string(p_index)); }
+
+	static std::optional<uint32_t> nametag_colour_slot0_as_authored_txt(HudWidgetHost &r_host) {
+		return row(r_host, 0).child("label").child("txt").text_color();
+	}
 };
 
 double as2_number(const As2Value &p_v) {

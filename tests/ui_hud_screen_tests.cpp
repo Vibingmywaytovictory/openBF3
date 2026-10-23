@@ -1049,16 +1049,25 @@ TEST_SUITE("ui-hud-screen") {
 		for (int i = 0; i < 4; ++i) {
 			CHECK_FALSE(s.at(sl + ".squadMember" + std::to_string(i)).visible);
 		}
-		const SwfColorXform tint{ { 0.0f, 0.0f, 0.0f, 1.0f }, { 228.0f, 255.0f, 157.0f, 0.0f } };
-		const float measured[3] = { 0.894f, 1.0f, 0.616f };
-		for (int c = 0; c < 3; ++c) {
-			CHECK(tint.add[size_t(c)] / 255.0f == doctest::Approx(measured[c]).epsilon(0.002));
+		const SwfSceneNode &authored_txt = probe.at(sl + ".squadMember0.label.txt");
+		REQUIRE(authored_txt.edit_text != nullptr);
+		REQUIRE(authored_txt.movie != nullptr);
+		const SwfColor authored = swf_edit_text_format(*authored_txt.movie, *authored_txt.edit_text).color;
+		CHECK(authored == SwfColor{ 0xE4, 0xFF, 0x9D, 0xFF });
+		const SwfSceneNode &authored_bg = probe.at(sl + ".squadMember0.label.txtBg");
+		REQUIRE(authored_bg.edit_text != nullptr);
+		CHECK(swf_edit_text_format(*authored_bg.movie, *authored_bg.edit_text).color == SwfColor{ 0x00, 0x66, 0x00, 0xFF });
+		CHECK(s.clip(sl + ".squadMember3.label.txtBg").text_color() == std::optional<uint32_t>(0x006600u));
+		const SwfColorXform tint{ { 0.0f, 0.0f, 0.0f, 1.0f }, { float(authored.r), float(authored.g), float(authored.b), 0.0f } };
+		for (int i = 0; i < 4; ++i) {
+			const std::string rp = sl + ".squadMember" + std::to_string(i);
+			for (const char *icon : { "kit", "leader", "voip", "booster" }) {
+				CHECK_MESSAGE(s.at(rp + "." + icon).color == tint, (rp + "." + icon));
+			}
+			const SwfSceneNode &txt = s.at(rp + ".label.txt");
+			CHECK(swf_edit_text_format(*txt.movie, *txt.edit_text).color == authored);
+			CHECK(s.clip(rp + ".label.txt").text_color() == std::optional<uint32_t>((uint32_t(authored.r) << 16) | (uint32_t(authored.g) << 8) | authored.b));
 		}
-		for (const char *icon : { "kit", "leader", "voip", "booster" }) {
-			CHECK_MESSAGE(s.at(sl + ".squadMember3." + icon).color == tint, icon);
-		}
-		REQUIRE(s.at(sl + ".squadMember3.label.txt").text_color.has_value());
-		CHECK(*s.at(sl + ".squadMember3.label.txt").text_color == SwfColor{ 228, 255, 157, 255 });
 		m.squad.local_squad_members.count = 4;
 		s.hud->refresh(m);
 		for (int i = 0; i < 4; ++i) {
@@ -1119,7 +1128,9 @@ TEST_SUITE("ui-hud-screen") {
 			CHECK_FALSE(s.at(sl + ".squadMember" + std::to_string(i)).visible);
 		}
 		CHECK(s.hud->stats().as2.failed_ops == 0);
-		row("squad_list", "HudPlayer::booster_icon 140 -> booster frame 140; kit icons " + std::to_string(kit_icons[0]) + "/" + std::to_string(kit_icons[1]) + " (UIHudIcon enum = 1-based label frame), tint e4ff9d, rows 4 at label x 50/28 without boosters, 70/48 with");
+		char authored_hex[8] = {};
+		std::snprintf(authored_hex, sizeof(authored_hex), "%02x%02x%02x", authored.r, authored.g, authored.b);
+		row("squad_list", "HudPlayer::booster_icon 140 -> booster frame 140; kit icons " + std::to_string(kit_icons[0]) + "/" + std::to_string(kit_icons[1]) + " (UIHudIcon enum = 1-based label frame), icons tinted with the authored txt colour " + authored_hex + " (txtBg 006600 untinted), rows 4 at label x 50/28 without boosters, 70/48 with");
 	}
 
 	TEST_CASE("hud screen: Icon3D managers and tags") {

@@ -63,6 +63,7 @@ public:
 
 	std::string text() const;
 	void set_text(std::string_view p_text) const;
+	std::optional<uint32_t> text_color() const;
 	void set_text_color(uint32_t p_rgb) const;
 	void set_auto_size(bool p_on) const;
 	void set_auto_size(SwfTextAutoSize p_mode) const;

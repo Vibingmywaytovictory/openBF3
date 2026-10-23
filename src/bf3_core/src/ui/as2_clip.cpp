@@ -425,6 +425,15 @@ void As2Clip::set_text(std::string_view p_text) const {
 	note(scene_->set_text(path_, p_text, false));
 }
 
+std::optional<uint32_t> As2Clip::text_color() const {
+	const SwfSceneNode *n = node();
+	if (n == nullptr || n->kind != SwfNodeKind::EditText || n->edit_text == nullptr || !n->movie) {
+		return std::nullopt;
+	}
+	const SwfColor c = n->text_color ? *n->text_color : swf_edit_text_format(*n->movie, *n->edit_text).color;
+	return (uint32_t(c.r) << 16) | (uint32_t(c.g) << 8) | uint32_t(c.b);
+}
+
 void As2Clip::set_text_color(uint32_t p_rgb) const {
 	const SwfSceneNode *n = mut();
 	if (n == nullptr || n->kind != SwfNodeKind::EditText) {
