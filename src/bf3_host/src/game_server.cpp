@@ -747,7 +747,7 @@ struct GameServer::Impl {
 	}
 
 	struct Sv;
-	std::unique_ptr<Sv, void (*)(Sv *)> sv{ nullptr, nullptr };
+	std::unique_ptr<Sv> sv;
 	core::Status sv_init();
 	void sv_ack(Slot &r_slot, const net::CommandPacket &p_packet);
 	void sv_buffered(Slot &r_slot, const sim::Command &p_command);
@@ -785,11 +785,6 @@ struct GameServer::Impl {
 	void sv_send_rules(sim::Tick p_tick);
 	void sv_spawn_request(int p_slot, std::span<const uint8_t> p_datagram);
 };
-
-GameServer::GameServer() :
-		impl_(std::make_unique<Impl>()) {}
-
-GameServer::~GameServer() = default;
 
 core::Status GameServer::init(const GameServerConfig &p_config) {
 	Impl &m = *impl_;
@@ -1136,14 +1131,19 @@ struct GameServer::Impl::Sv {
 	uint64_t main_mask = 0;
 	std::vector<net::RemoteShot> remote;
 
-	std::unique_ptr<TdmRules, void (*)(TdmRules *)> rules{ nullptr, nullptr };
+	std::unique_ptr<TdmRules> rules;
 	std::vector<RulesOrder> orders;
 	sim::Tick player_list_tick = 0;
 	bool player_list_sent = false;
 };
 
+GameServer::GameServer() :
+		impl_(std::make_unique<Impl>()) {}
+
+GameServer::~GameServer() = default;
+
 core::Status GameServer::Impl::sv_init() {
-	sv = std::unique_ptr<Sv, void (*)(Sv *)>(new Sv(), [](Sv *p) { delete p; });
+	sv = std::make_unique<Sv>();
 	Sv &v = *sv;
 	v.sink.m = this;
 	v.view.m = this;
@@ -1182,7 +1182,7 @@ core::Status GameServer::Impl::sv_init() {
 		if (!rules) {
 			return core::error_at("GameServer", rules.error());
 		}
-		v.rules = std::unique_ptr<TdmRules, void (*)(TdmRules *)>(rules->release(), [](TdmRules *p) { delete p; });
+		v.rules = std::move(*rules);
 	}
 	for (uint32_t i = 0; i < g.target_bots; ++i) {
 		auto source = std::make_unique<TargetBotSource>(TargetBotConfig{});
