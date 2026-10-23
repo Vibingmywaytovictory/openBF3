@@ -48,9 +48,6 @@ constexpr float kMaxPitchDeg = 80.0f;
 constexpr float kFireConeDeg = 4.0f;
 constexpr uint32_t kModeDelayTicks = 3;
 constexpr uint32_t kModeWaitTicks = 10;
-constexpr float kStrafeAxis = 0.8f;
-constexpr uint32_t kStrafeMinTicks = 60, kStrafeMaxTicks = 150;
-constexpr uint32_t kStrafeGroundTicks = 6;
 
 constexpr uint32_t kLookMinTicks = 90, kLookMaxTicks = 180;
 constexpr float kLookMinDeg = 60.0f, kLookMaxDeg = 150.0f;
@@ -138,11 +135,7 @@ struct TdmBrain::Impl {
 	bool reload_held = false;
 	bool sidearm = false;
 
-	bool strafing = false;
-	float strafe_dir = 1.0f, strafe_half = 1.0f;
-	sim::Vec3 strafe_anchor{};
-	float strafe_ax = 1.0f, strafe_az = 0.0f;
-	sim::Tick strafe_until = 0;
+	BotStrafe strafe;
 
 	float look_yaw = 0.0f;
 	sim::Tick look_until = 0;
@@ -185,7 +178,7 @@ struct TdmBrain::Impl {
 		mode_wait = 0;
 		reload_held = false;
 		sidearm = false;
-		strafing = false;
+		strafe.stop();
 		look_until = 0;
 		retreat_since = regen_since = clear_since = 0;
 		revive_slot = -1;
@@ -193,34 +186,6 @@ struct TdmBrain::Impl {
 		knife_until = 0;
 		navigation.new_life();
 		activity = TdmBotActivity::Roam;
-	}
-
-	void strafe(sim::Tick p_tick, const sim::CollisionWorld &p_world, const sim::SoldierState &p_self, float &r_dx, float &r_dz) {
-		const TdmBotConfig &c = cfg();
-		if (!strafing) {
-			strafing = true;
-			strafe_anchor = p_self.position;
-			strafe_ax = -std::cos(view_yaw);
-			strafe_az = std::sin(view_yaw);
-			strafe_dir = unit(rng) < 0.5f ? -1.0f : 1.0f;
-			strafe_half = 0.5f * uniform(rng, std::max(c.strafe_min_m, 0.5f), std::max(c.strafe_max_m, std::max(c.strafe_min_m, 0.5f)));
-			strafe_until = p_tick + uniform_u(rng, kStrafeMinTicks, kStrafeMaxTicks);
-		} else if (p_tick >= strafe_until) {
-			strafe_dir = -strafe_dir;
-			strafe_until = p_tick + uniform_u(rng, kStrafeMinTicks, kStrafeMaxTicks);
-		}
-		const sim::Vec3 off = sub(p_self.position, strafe_anchor);
-		const float along = off[0] * strafe_ax + off[2] * strafe_az;
-		if (along * strafe_dir > strafe_half) {
-			strafe_dir = -strafe_dir;
-		} else if ((p_tick + slot) % kStrafeGroundTicks == 0) {
-			const sim::Vec3 ahead = add(p_self.position, strafe_dir * strafe_ax * 0.8f, 0.5f, strafe_dir * strafe_az * 0.8f);
-			if (!p_world.ground_below(ahead, 1.2f, sim::query_mask::kMovement, nullptr)) {
-				strafe_dir = -strafe_dir;
-			}
-		}
-		r_dx = strafe_dir * strafe_ax * kStrafeAxis;
-		r_dz = strafe_dir * strafe_az * kStrafeAxis;
 	}
 
 	void set_activity(sim::Tick p_tick, TdmBotActivity p_activity) {
@@ -444,7 +409,7 @@ struct TdmBrain::Impl {
 			return false;
 		};
 		if (act != TdmBotActivity::Fight) {
-			strafing = false;
+			strafe.stop();
 		}
 		switch (act) {
 			case TdmBotActivity::Fight: {
@@ -491,15 +456,15 @@ struct TdmBrain::Impl {
 					zoom = target_distance > kZoomBeyondMetres && trigger == Trigger::Aimed;
 
 					if (target_distance < c.engage_strafe_m) {
-						strafe(p_tick, world, p_state, move_dx, move_dz);
+						strafe.step(c, slot, p_tick, world, p_state, view_yaw, rng, move_dx, move_dz);
 					} else if (target_distance > c.crouch_beyond_m && skill > 0.5f && p_tick - targeting.target_since() < kHoldTicks) {
-						strafing = false;
+						strafe.stop();
 						pose = sim::Pose::Crouch;
 					} else if (navigation.set_goal(sh, p_tick, ts.position, kHuntArriveMetres, false) && do_walk()) {
-						strafing = false;
+						strafe.stop();
 						pose = sim::Pose::Stand;
 					} else {
-						strafe(p_tick, world, p_state, move_dx, move_dz);
+						strafe.step(c, slot, p_tick, world, p_state, view_yaw, rng, move_dx, move_dz);
 					}
 				} else {
 

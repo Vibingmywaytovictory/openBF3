@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/sim/bots/walker_brain.h"
+#include "bf3/sim/collision_world.h"
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/soldier_state.h"
 #include "tdm_bot_shared.h"
@@ -43,6 +44,20 @@ private:
 	sim::Vec3 exit_at_{};
 	sim::Vec3 exit_from_{};
 	sim::Tick exit_progress_tick_ = 0;
+};
+
+class BotStrafe {
+public:
+	void stop() { strafing_ = false; }
+	void step(const TdmBotConfig &p_config, uint8_t p_slot, sim::Tick p_tick, const sim::CollisionWorld &p_world, const sim::SoldierState &p_self, float p_view_yaw,
+			uint64_t &r_rng, float &r_dx, float &r_dz);
+
+private:
+	bool strafing_ = false;
+	float dir_ = 1.0f, half_ = 1.0f;
+	sim::Vec3 anchor_{};
+	float ax_ = 1.0f, az_ = 0.0f;
+	sim::Tick until_ = 0;
 };
 
 }

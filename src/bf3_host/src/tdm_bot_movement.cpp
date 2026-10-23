@@ -24,6 +24,10 @@ constexpr uint32_t kIslandJumpTicks = 45;
 constexpr float kIslandProgressMetres = 0.5f;
 constexpr float kIslandRings[] = { 2.0f, 4.0f, 6.0f, 9.0f, 12.0f, 16.0f, 24.0f, 32.0f };
 
+constexpr float kStrafeAxis = 0.8f;
+constexpr uint32_t kStrafeMinTicks = 60, kStrafeMaxTicks = 150;
+constexpr uint32_t kStrafeGroundTicks = 6;
+
 }
 
 void BotNavigation::set_slot(uint8_t p_slot, uint64_t p_seed) {
@@ -223,6 +227,35 @@ std::optional<sim::Vec3> BotNavigation::heat_goal(TdmShared &r_shared, sim::Tick
 		}
 	}
 	return std::nullopt;
+}
+
+void BotStrafe::step(const TdmBotConfig &p_config, uint8_t p_slot, sim::Tick p_tick, const sim::CollisionWorld &p_world, const sim::SoldierState &p_self,
+		float p_view_yaw, uint64_t &r_rng, float &r_dx, float &r_dz) {
+	const TdmBotConfig &c = p_config;
+	if (!strafing_) {
+		strafing_ = true;
+		anchor_ = p_self.position;
+		ax_ = -std::cos(p_view_yaw);
+		az_ = std::sin(p_view_yaw);
+		dir_ = unit(r_rng) < 0.5f ? -1.0f : 1.0f;
+		half_ = 0.5f * uniform(r_rng, std::max(c.strafe_min_m, 0.5f), std::max(c.strafe_max_m, std::max(c.strafe_min_m, 0.5f)));
+		until_ = p_tick + uniform_u(r_rng, kStrafeMinTicks, kStrafeMaxTicks);
+	} else if (p_tick >= until_) {
+		dir_ = -dir_;
+		until_ = p_tick + uniform_u(r_rng, kStrafeMinTicks, kStrafeMaxTicks);
+	}
+	const sim::Vec3 off = sub(p_self.position, anchor_);
+	const float along = off[0] * ax_ + off[2] * az_;
+	if (along * dir_ > half_) {
+		dir_ = -dir_;
+	} else if ((p_tick + p_slot) % kStrafeGroundTicks == 0) {
+		const sim::Vec3 ahead = add(p_self.position, dir_ * ax_ * 0.8f, 0.5f, dir_ * az_ * 0.8f);
+		if (!p_world.ground_below(ahead, 1.2f, sim::query_mask::kMovement, nullptr)) {
+			dir_ = -dir_;
+		}
+	}
+	r_dx = dir_ * ax_ * kStrafeAxis;
+	r_dz = dir_ * az_ * kStrafeAxis;
 }
 
 }
