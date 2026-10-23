@@ -154,6 +154,7 @@ struct HudSpawnPointList {
 struct HudSquadMemberList {
 	uint8_t count = 0;
 	std::array<uint8_t, kHudSquadSize> index{};
+	uint8_t leader = kHudNoPlayer;
 };
 
 struct HudSquadEntry {

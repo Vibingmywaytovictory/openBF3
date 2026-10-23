@@ -48,6 +48,7 @@ public:
 	void set_height(float p_height) const;
 	float alpha() const;
 	void set_alpha(float p_percent) const;
+	void set_rgb(uint32_t p_rgb) const;
 	bool visible() const;
 	void set_visible(bool p_visible) const;
 
@@ -62,6 +63,7 @@ public:
 
 	std::string text() const;
 	void set_text(std::string_view p_text) const;
+	void set_text_color(uint32_t p_rgb) const;
 	void set_auto_size(bool p_on) const;
 	void set_auto_size(SwfTextAutoSize p_mode) const;
 	float text_width() const;

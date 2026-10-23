@@ -317,6 +317,19 @@ void As2Clip::set_alpha(float p_percent) const {
 	note(scene_->set_alpha(path_, p_percent / 100.0f));
 }
 
+void As2Clip::set_rgb(uint32_t p_rgb) const {
+	const SwfSceneNode *n = mut();
+	if (n == nullptr) {
+		return;
+	}
+	SwfColorXform c = n->color;
+	c.mul[0] = c.mul[1] = c.mul[2] = 0.0f;
+	c.add[0] = float((p_rgb >> 16) & 0xFFu);
+	c.add[1] = float((p_rgb >> 8) & 0xFFu);
+	c.add[2] = float(p_rgb & 0xFFu);
+	note(scene_->set_color(path_, c));
+}
+
 bool As2Clip::visible() const {
 	const SwfSceneNode *n = node();
 	return n != nullptr && n->visible;
@@ -410,6 +423,14 @@ void As2Clip::set_text(std::string_view p_text) const {
 		return;
 	}
 	note(scene_->set_text(path_, p_text, false));
+}
+
+void As2Clip::set_text_color(uint32_t p_rgb) const {
+	const SwfSceneNode *n = mut();
+	if (n == nullptr || n->kind != SwfNodeKind::EditText) {
+		return;
+	}
+	note(scene_->set_text_color(path_, SwfColor{ uint8_t((p_rgb >> 16) & 0xFFu), uint8_t((p_rgb >> 8) & 0xFFu), uint8_t(p_rgb & 0xFFu), 255 }));
 }
 
 void As2Clip::set_auto_size(bool p_on) const {

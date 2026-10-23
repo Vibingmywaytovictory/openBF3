@@ -28,18 +28,18 @@ constexpr std::array<InfoField, 8> kInfoFields{ {
 		{ HudMessageSource::ServerAdminYell, "ServerAdminYellMessageInfo" },
 } };
 
-std::string player_name(const HudModel &p_model, uint8_t p_player) {
+std::string localised(const HudClientState &p_client, uint32_t p_hash) {
+	return p_hash != 0 && p_client.localise_hash ? p_client.localise_hash(p_hash) : std::string();
+}
+
+}
+
+std::string hud_player_name(const HudModel &p_model, uint8_t p_player) {
 	if (p_player >= p_model.players.size()) {
 		return {};
 	}
 	const HudPlayerName &n = p_model.players[p_player].name;
 	return std::string(n.data(), strnlen(n.data(), n.size()));
-}
-
-std::string localised(const HudClientState &p_client, uint32_t p_hash) {
-	return p_hash != 0 && p_client.localise_hash ? p_client.localise_hash(p_hash) : std::string();
-}
-
 }
 
 Result<HudMessageCompData> read_hud_message_comp(const EbxResolver &p_db) {
@@ -218,9 +218,9 @@ As2Value HudMessageComp::kill_value(const HudModel &p_model, const HudClientStat
 		const std::string weapon = localised(p_client, p_kill.weapon_name_sid_hash);
 		const std::string format = localised(p_client, kHudKillWeaponFormatHash);
 		v.set("Text", As2Value::of(weapon.empty() ? std::string() : hud_format_text(format, std::span<const std::string>(&weapon, 1))));
-		v.set("KillerName", As2Value::of(player_name(p_model, p_kill.killer)));
+		v.set("KillerName", As2Value::of(hud_player_name(p_model, p_kill.killer)));
 	}
-	v.set("VictimName", As2Value::of(player_name(p_model, p_kill.victim)));
+	v.set("VictimName", As2Value::of(hud_player_name(p_model, p_kill.victim)));
 	v.set("HeadShot", As2Value::of(p_kill.headshot));
 	if (p_local) {
 		v.set("IsLocalPlayer", As2Value::of(p_kill.victim == p_model.local_player));

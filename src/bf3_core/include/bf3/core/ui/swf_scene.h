@@ -104,6 +104,7 @@ struct SwfSceneNode {
 	bool html = false;
 	SwfTextOptions text_options;
 	std::optional<SwfRect> text_bounds;
+	std::optional<SwfColor> text_color;
 
 	std::vector<SwfNodeId> children;
 
@@ -191,6 +192,7 @@ public:
 	Status set_text(std::string_view p_path, std::string_view p_text, bool p_html = false);
 	Status set_text_options(std::string_view p_path, const SwfTextOptions &p_options);
 	Status set_text_bounds(std::string_view p_path, const SwfRect &p_bounds);
+	Status set_text_color(std::string_view p_path, SwfColor p_color);
 
 	std::vector<SwfSceneChange> take_changes();
 

@@ -1119,6 +1119,21 @@ Status SwfScene::set_text_options(std::string_view p_path, const SwfTextOptions 
 	return Status::success();
 }
 
+Status SwfScene::set_text_color(std::string_view p_path, SwfColor p_color) {
+	Result<SwfSceneNode *> n = impl_->at(p_path);
+	if (!n) {
+		return n.error();
+	}
+	if ((*n)->kind != SwfNodeKind::EditText) {
+		return make_error("swf scene " + impl_->movie_name + ": " + std::string(p_path) + " is not a text field");
+	}
+	if ((*n)->text_color != p_color) {
+		(*n)->text_color = p_color;
+		(*n)->text_revision++;
+	}
+	return Status::success();
+}
+
 Status SwfScene::set_text_bounds(std::string_view p_path, const SwfRect &p_bounds) {
 	for (const float v : { p_bounds.x_min, p_bounds.x_max, p_bounds.y_min, p_bounds.y_max }) {
 		if (!std::isfinite(v)) {
@@ -1164,7 +1179,10 @@ Result<SwfRichText> swf_node_rich_text(const SwfSceneNode &p_node, WorkBudget &r
 	if (p_node.edit_text == nullptr || !p_node.movie) {
 		return make_error("swf scene: " + p_node.path + " is not a text field");
 	}
-	const SwfTextFormat base = swf_edit_text_format(*p_node.movie, *p_node.edit_text);
+	SwfTextFormat base = swf_edit_text_format(*p_node.movie, *p_node.edit_text);
+	if (p_node.text_color) {
+		base.color = SwfColor{ p_node.text_color->r, p_node.text_color->g, p_node.text_color->b, base.color.a };
+	}
 	if (p_node.html) {
 		return swf_parse_html(p_node.text, base, r_budget);
 	}

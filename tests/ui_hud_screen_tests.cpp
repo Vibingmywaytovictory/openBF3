@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "bf3/core/ebx_db.h"
+#include "bf3/core/gameplay/kit_def.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/ui/as2_clip.h"
@@ -1003,14 +1004,116 @@ TEST_SUITE("ui-hud-screen") {
 			CHECK(api->rows() == 0);
 		}
 		Screen t = initialized(*r, kHudTdmScreenPartition, m);
-		CHECK_FALSE(t.at("instance1.SquadList_00").visible);
 		CHECK(s.at("instance1.ScoreAggregator_01").visible);
 		CHECK(s.at("instance1.ScoreAggregator_01.aggHolder").frame == s.label("instance1.ScoreAggregator_01.aggHolder", "hide"));
 		CHECK(t.at("instance1.HudMessage_00").visible);
 		REQUIRE(dynamic_cast<HudMessageApi *>(t.hud->controller("instance1.HudMessage_00")) != nullptr);
 		CHECK(dynamic_cast<HudMessageApi *>(t.hud->controller("instance1.HudMessage_00"))->rows() == 0);
 		CHECK_FALSE(t.at("instance1.MapmarkerManager_00").visible);
-		row("hidden", "hit level 1 -> frame index 1, latency hidden, 7 data-driven widgets hidden until their data, 5 HudMessage lists shown empty, ScoreAggregator on hide");
+		row("hidden", "hit level 1 -> frame index 1, latency hidden, 6 data-driven widgets hidden until their data, 5 HudMessage lists shown empty, ScoreAggregator on hide");
+	}
+
+	TEST_CASE("hud screen: SquadList") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		std::array<int32_t, 2> kit_icons{};
+		const std::array<const char *, 2> kits{ "gameplay/kits/usassault", "gameplay/kits/usengineer" };
+		Screen probe = open_screen(*r, kHudTdmScreenPartition);
+		const std::string sl = "instance1.SquadList_00";
+		for (size_t k = 0; k < kits.size(); ++k) {
+			Result<gameplay::KitDef> kit = gameplay::read_kit_def(*r->level, kits[k]);
+			REQUIRE_MESSAGE(kit.ok(), (kit.ok() ? std::string() : kit.error().message));
+			REQUIRE(kit->hud_icon.rfind("UIHudIcon_", 0) == 0);
+			kit_icons[k] = kit->hud_icon_value;
+			CHECK(uint32_t(kit_icons[k]) == probe.label(sl + ".squadMember0.kit", kit->hud_icon.substr(10)) + 1);
+		}
+		CHECK(probe.label(sl + ".squadMember0.leader", "SquadLeader") + 1 == uint32_t(kUiHudIconSquadLeader));
+		CHECK(probe.label(sl + ".squadMember0.kit", "dead") + 1 == uint32_t(kUiHudIconDead));
+		HudModel m = moment_m02();
+		const std::array<const char *, 4> names{ "WWWWWWWW", "MMMMM", "HHHHHHHHHH", "NNN" };
+		for (uint8_t i = 0; i < 4; ++i) {
+			HudPlayer &p = m.players[i];
+			std::snprintf(p.name.data(), p.name.size(), "%s", names[i]);
+			p.team = 1;
+			p.squad = 1;
+			p.alive = i != 2;
+			p.kit_icon = int16_t(kit_icons[i == 1 ? 1 : 0]);
+		}
+		m.squad.local_squad_members.count = 1;
+		m.squad.local_squad_members.index = { 0, 1, 2, 3 };
+		m.squad.local_squad_members.leader = 0;
+		Screen s = initialized(*r, kHudTdmScreenPartition, m);
+		CHECK(s.at(sl).visible);
+		CHECK(s.renderer(sl) == "t2");
+		for (int i = 0; i < 4; ++i) {
+			CHECK_FALSE(s.at(sl + ".squadMember" + std::to_string(i)).visible);
+		}
+		const SwfColorXform tint{ { 0.0f, 0.0f, 0.0f, 1.0f }, { 228.0f, 255.0f, 157.0f, 0.0f } };
+		const float measured[3] = { 0.894f, 1.0f, 0.616f };
+		for (int c = 0; c < 3; ++c) {
+			CHECK(tint.add[size_t(c)] / 255.0f == doctest::Approx(measured[c]).epsilon(0.002));
+		}
+		for (const char *icon : { "kit", "leader", "voip", "booster" }) {
+			CHECK_MESSAGE(s.at(sl + ".squadMember3." + icon).color == tint, icon);
+		}
+		REQUIRE(s.at(sl + ".squadMember3.label.txt").text_color.has_value());
+		CHECK(*s.at(sl + ".squadMember3.label.txt").text_color == SwfColor{ 228, 255, 157, 255 });
+		m.squad.local_squad_members.count = 4;
+		s.hud->refresh(m);
+		for (int i = 0; i < 4; ++i) {
+			const std::string rp = sl + ".squadMember" + std::to_string(i);
+			const As2Clip rw = s.clip(rp);
+			CHECK(s.at(rp).visible);
+			CHECK(s.at(rp + ".label.txt").text == names[size_t(i)]);
+			CHECK(s.at(rp + ".label.txtBg").text == names[size_t(i)]);
+			CHECK(rw.alpha() == doctest::Approx(i == 2 ? 50.0f : 100.0f));
+			const char *kit_label = i == 2 ? "dead" : i == 1 ? "KitEngineer" : "KitAssault";
+			CHECK(s.at(rp + ".kit").frame == s.label(rp + ".kit", kit_label));
+			CHECK(s.at(rp + ".leader").visible == (i == 0));
+			CHECK(rw.child("label").x() == doctest::Approx(i == 0 ? 50.0f : 28.0f));
+			if (i == 0) {
+				CHECK(rw.child("leader").x() == doctest::Approx(40.0f));
+				CHECK(s.at(rp + ".leader").frame == s.label(rp + ".leader", "SquadLeader"));
+			}
+			CHECK(rw.child("voip").x() == doctest::Approx(rw.child("label").x() + rw.child("label").child("txt").text_width() + 15.0f));
+		}
+		CHECK(s.clip(sl + ".squadMember0.label.txt").text_width() > s.clip(sl + ".squadMember3.label.txt").text_width());
+		HudWidgetController *ctl = s.hud->controller(sl);
+		REQUIRE(ctl != nullptr);
+		HudWidgetHost host(*s.hud, sl, "Widget.Hud.SquadList");
+		As2Value list = As2Value::array();
+		const std::array<int32_t, 4> boosters{ 140, 0, 145, 144 };
+		for (int i = 0; i < 4; ++i) {
+			As2Value v = As2Value::object();
+			v.set("Label", As2Value::of(names[size_t(i)]));
+			v.set("Dead", As2Value::of(false));
+			v.set("Kit", As2Value::of(kit_icons[0]));
+			v.set("SquadLeader", As2Value::of(i == 1));
+			v.set("Voip", As2Value::of(int32_t(1)));
+			v.set("BoosterIcon", As2Value::of(boosters[size_t(i)]));
+			list.push(std::move(v));
+		}
+		ctl->update(host, "SquadList", list);
+		for (int i = 0; i < 4; ++i) {
+			const std::string rp = sl + ".squadMember" + std::to_string(i);
+			const As2Clip rw = s.clip(rp);
+			CHECK(rw.child("label").x() == doctest::Approx(i == 1 ? 70.0f : 48.0f));
+			CHECK(s.at(rp + ".booster").visible);
+			CHECK(s.at(rp + ".booster").frame == uint32_t(std::max(boosters[size_t(i)], 1) - 1));
+			CHECK(rw.child("voip").x() == doctest::Approx(rw.child("label").x() + rw.child("label").child("txt").text_width() + 15.0f));
+		}
+		CHECK(s.clip(sl + ".squadMember1.leader").x() == doctest::Approx(60.0f));
+		CHECK(s.at(sl + ".squadMember3.booster").frame == s.label(sl + ".squadMember3.booster", "grenadeBoost"));
+		As2Value one = As2Value::array();
+		one.push(list.at(0));
+		ctl->update(host, "SquadList", one);
+		for (int i = 0; i < 4; ++i) {
+			CHECK_FALSE(s.at(sl + ".squadMember" + std::to_string(i)).visible);
+		}
+		CHECK(s.hud->stats().as2.failed_ops == 0);
+		row("squad_list", "kit icons " + std::to_string(kit_icons[0]) + "/" + std::to_string(kit_icons[1]) + " (UIHudIcon enum = 1-based label frame), tint e4ff9d, rows 4 at label x 50/28 without boosters, 70/48 with");
 	}
 
 	TEST_CASE("hud screen: KillFeed") {

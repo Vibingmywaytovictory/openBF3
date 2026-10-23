@@ -87,6 +87,8 @@ std::string hud_format_text(std::string_view p_format, std::span<const std::stri
 
 int32_t hud_relation(const HudModel &p_model, uint8_t p_player);
 
+std::string hud_player_name(const HudModel &p_model, uint8_t p_player);
+
 class HudDamageIndicatorComp {
 public:
 	HudDamageIndicatorComp() = default;
