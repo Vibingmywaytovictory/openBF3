@@ -20,6 +20,8 @@ constexpr uint32_t kGrenadeSwitchTicks = 120, kGrenadeAfterTicks = 45, kGrenadeH
 constexpr float kRetreatMetres = 14.0f;
 constexpr uint32_t kRetreatMaxTicks = 360;
 constexpr uint32_t kRetreatClearTicks = 60;
+constexpr uint32_t kHuntGiveUpTicks = 1200;
+constexpr uint32_t kHuntBlockTicks = 600;
 
 }
 
@@ -181,6 +183,46 @@ bool BotRetreat::start(TdmShared &r_shared, BotNavigation &r_navigation, sim::Ti
 	clear_since_ = p_tick;
 	r_shared.count(&TdmBotStats::retreats, uint64_t(1));
 	return true;
+}
+
+int BotHunt::known_enemy(const sim::bots::Perception &p_perception, const sim::SoldierState &p_self) const {
+	float best = 1e30f;
+	int pick = -1;
+	for (const sim::bots::PerceivedEnemy &e : p_perception.enemies()) {
+		if (!(e.detected || e.heard) || e.last_seen < searched_ || !finite(e.last_position)) {
+			continue;
+		}
+		const float d = horizontal(p_self.position, e.last_position);
+		if (d < best) {
+			best = d;
+			pick = int(e.slot);
+		}
+	}
+	return pick;
+}
+
+bool BotHunt::wanted(sim::Tick p_tick, const sim::bots::Perception &p_perception, const sim::SoldierState &p_self) const {
+	return p_tick >= block_until_ && known_enemy(p_perception, p_self) >= 0;
+}
+
+void BotHunt::step(TdmShared &r_shared, BotNavigation &r_navigation, const sim::bots::Perception &p_perception, sim::Tick p_tick, const sim::SoldierState &p_self) {
+	if (p_tick - since_ > kHuntGiveUpTicks) {
+		searched_ = p_tick;
+		block_until_ = p_tick + kHuntBlockTicks;
+		r_navigation.clear_goal();
+		r_shared.count(&TdmBotStats::hunts_given_up, uint64_t(1));
+	}
+	const int k = known_enemy(p_perception, p_self);
+	if (k >= 0) {
+		const sim::bots::PerceivedEnemy *e = p_perception.find(uint8_t(k));
+		if (e != nullptr) {
+			if (horizontal(p_self.position, e->last_position) <= kHuntArriveMetres) {
+				searched_ = p_tick;
+			} else {
+				r_navigation.set_goal(r_shared, p_tick, e->last_position, kHuntArriveMetres, false);
+			}
+		}
+	}
 }
 
 }

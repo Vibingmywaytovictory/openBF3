@@ -74,4 +74,18 @@ private:
 	sim::Vec3 threat_{};
 };
 
+class BotHunt {
+public:
+	void new_life() { searched_ = since_ = block_until_ = 0; }
+	bool wanted(sim::Tick p_tick, const sim::bots::Perception &p_perception, const sim::SoldierState &p_self) const;
+	void begin(sim::Tick p_tick) { since_ = p_tick; }
+	void step(TdmShared &r_shared, BotNavigation &r_navigation, const sim::bots::Perception &p_perception, sim::Tick p_tick, const sim::SoldierState &p_self);
+
+private:
+	int known_enemy(const sim::bots::Perception &p_perception, const sim::SoldierState &p_self) const;
+
+	sim::Tick searched_ = 0;
+	sim::Tick since_ = 0, block_until_ = 0;
+};
+
 }

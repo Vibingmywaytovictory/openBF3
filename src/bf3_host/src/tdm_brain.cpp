@@ -62,8 +62,6 @@ constexpr uint32_t kKnifeTicks = 45;
 constexpr float kHeadAimDrop = 0.1f;
 constexpr float kZoomBeyondMetres = 6.0f;
 constexpr uint32_t kHoldTicks = 240;
-constexpr uint32_t kHuntGiveUpTicks = 1200;
-constexpr uint32_t kHuntBlockTicks = 600;
 
 }
 
@@ -108,8 +106,7 @@ struct TdmBrain::Impl {
 	TdmBotActivity activity = TdmBotActivity::Dead;
 
 	BotTargeting targeting;
-	sim::Tick searched_tick = 0;
-	sim::Tick hunt_since = 0, hunt_block_until = 0;
+	BotHunt hunt;
 
 	BotWeapons weapons;
 
@@ -141,8 +138,7 @@ struct TdmBrain::Impl {
 		view_pitch = 0.0f;
 		awareness.new_life(p_tick, p_state);
 		targeting.new_life();
-		searched_tick = 0;
-		hunt_since = hunt_block_until = 0;
+		hunt.new_life();
 		weapons.new_life(p_tick);
 		strafe.stop();
 		look.new_life();
@@ -262,13 +258,13 @@ struct TdmBrain::Impl {
 		} else if (targeting.blind_until() > p_tick) {
 			act = TdmBotActivity::Fight;
 		} else {
-			act = p_tick >= hunt_block_until && known_enemy(p_tick, p_state) >= 0 ? TdmBotActivity::Hunt : TdmBotActivity::Roam;
+			act = hunt.wanted(p_tick, awareness.perception(), p_state) ? TdmBotActivity::Hunt : TdmBotActivity::Roam;
 		}
 		if (act == TdmBotActivity::Retreat && visible) {
 			retreat.seen(p_tick);
 		}
 		if (act == TdmBotActivity::Hunt && activity != TdmBotActivity::Hunt) {
-			hunt_since = p_tick;
+			hunt.begin(p_tick);
 		}
 		set_activity(p_tick, act);
 
@@ -403,24 +399,7 @@ struct TdmBrain::Impl {
 				grenade.step(arms, p_tick, eye, want_slot, trigger, want_yaw, want_pitch, have_aim);
 				break;
 			case TdmBotActivity::Hunt: {
-				if (p_tick - hunt_since > kHuntGiveUpTicks) {
-
-					searched_tick = p_tick;
-					hunt_block_until = p_tick + kHuntBlockTicks;
-					navigation.clear_goal();
-					sh.count(&TdmBotStats::hunts_given_up, uint64_t(1));
-				}
-				const int k = known_enemy(p_tick, p_state);
-				if (k >= 0) {
-					const sim::bots::PerceivedEnemy *e = awareness.perception().find(uint8_t(k));
-					if (e != nullptr) {
-						if (horizontal(p_state.position, e->last_position) <= kHuntArriveMetres) {
-							searched_tick = p_tick;
-						} else {
-							navigation.set_goal(sh, p_tick, e->last_position, kHuntArriveMetres, false);
-						}
-					}
-				}
+				hunt.step(sh, navigation, awareness.perception(), p_tick, p_state);
 				do_walk();
 				want_yaw = walk_yaw;
 				sprint = walk_sprint;
@@ -495,23 +474,6 @@ struct TdmBrain::Impl {
 		b = sw::with_weapon_input(b, in);
 		cmd.buttons = b;
 		return cmd;
-	}
-
-	int known_enemy(sim::Tick p_tick, const sim::SoldierState &p_self) const {
-		(void)p_tick;
-		float best = 1e30f;
-		int pick = -1;
-		for (const sim::bots::PerceivedEnemy &e : awareness.perception().enemies()) {
-			if (!(e.detected || e.heard) || e.last_seen < searched_tick || !finite(e.last_position)) {
-				continue;
-			}
-			const float d = horizontal(p_self.position, e.last_position);
-			if (d < best) {
-				best = d;
-				pick = int(e.slot);
-			}
-		}
-		return pick;
 	}
 };
 
