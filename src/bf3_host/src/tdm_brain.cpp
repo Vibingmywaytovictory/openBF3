@@ -17,6 +17,7 @@
 #include "bf3/sim/weapons/weapon_sim_def.h"
 #include "tdm_bot_awareness.h"
 #include "tdm_bot_common.h"
+#include "tdm_bot_movement.h"
 #include "tdm_bot_shared.h"
 #include "tdm_bot_targeting.h"
 
@@ -55,12 +56,6 @@ constexpr uint32_t kLookMinTicks = 90, kLookMaxTicks = 180;
 constexpr float kLookMinDeg = 60.0f, kLookMaxDeg = 150.0f;
 constexpr float kSprintConeDeg = 20.0f;
 constexpr float kSingleShotBeyondMetres = 60.0f;
-constexpr uint32_t kGoalResetTicks = 90;
-constexpr float kGoalMoveMetres = 8.0f;
-constexpr float kHuntArriveMetres = 3.0f;
-constexpr uint32_t kRoamGoalTicks = 600;
-constexpr float kHeatMin = 0.2f;
-constexpr float kHeatRadiusMetres = 160.0f;
 constexpr float kRetreatMetres = 14.0f;
 constexpr uint32_t kRetreatMaxTicks = 360;
 constexpr uint32_t kRetreatClearTicks = 60;
@@ -87,11 +82,6 @@ constexpr uint32_t kHoldTicks = 240;
 constexpr float kBurstPauseMinS = 0.15f, kBurstPauseMaxS = 0.35f;
 constexpr uint32_t kHuntGiveUpTicks = 1200;
 constexpr uint32_t kHuntBlockTicks = 600;
-
-constexpr uint32_t kIslandCheckTicks = 30;
-constexpr uint32_t kIslandJumpTicks = 45;
-constexpr float kIslandProgressMetres = 0.5f;
-constexpr float kIslandRings[] = { 2.0f, 4.0f, 6.0f, 9.0f, 12.0f, 16.0f, 24.0f, 32.0f };
 
 }
 
@@ -126,13 +116,7 @@ struct TdmBrain::Impl {
 	uint64_t seed = 0;
 	uint64_t rng = 0;
 	BotAwareness awareness;
-	std::optional<sim::bots::WalkerBrain> walker;
-	std::vector<sim::bots::BotGoal> goals;
-	uint32_t walker_resets = 0;
-	bool have_goal = false;
-	sim::Vec3 goal_pos{};
-	sim::Tick goal_tick = 0;
-	sim::Tick roam_tick = 0;
+	BotNavigation navigation;
 
 	uint32_t life = UINT32_MAX;
 	sim::Tick life_tick = 0;
@@ -144,11 +128,6 @@ struct TdmBrain::Impl {
 	BotTargeting targeting;
 	sim::Tick searched_tick = 0;
 	sim::Tick hunt_since = 0, hunt_block_until = 0;
-
-	bool off_main = false;
-	sim::Vec3 exit_at{};
-	sim::Vec3 exit_from{};
-	sim::Tick exit_progress_tick = 0;
 
 	bool bursting = false;
 	uint32_t burst_rounds = 0, burst_start = 0;
@@ -200,8 +179,6 @@ struct TdmBrain::Impl {
 		targeting.new_life();
 		searched_tick = 0;
 		hunt_since = hunt_block_until = 0;
-		off_main = false;
-		exit_progress_tick = 0;
 		bursting = false;
 		pause_until = next_tap = p_tick;
 		tapped = false;
@@ -214,143 +191,8 @@ struct TdmBrain::Impl {
 		revive_slot = -1;
 		grenade_phase = 0;
 		knife_until = 0;
-		have_goal = false;
-		goals.clear();
-		roam_tick = 0;
+		navigation.new_life();
 		activity = TdmBotActivity::Roam;
-	}
-
-	bool set_goal(sim::Tick p_tick, const sim::Vec3 &p_at, float p_arrive, bool p_force) {
-		TdmShared &sh = *shared;
-		if (sh.nav == nullptr || !finite(p_at)) {
-			return false;
-		}
-		BotNav &nav = *sh.nav;
-		sim::NavPolyRef poly = 0;
-		sim::Vec3 at{};
-		if (!nav.query->nearest(p_at, { 3.0f, 4.0f, 3.0f }, &poly, &at) || poly == 0) {
-			return false;
-		}
-		if (sim::nav_poly_component(nav.query->world(), nav.level->components, poly) != nav.level->main_component) {
-			return false;
-		}
-		if (have_goal && walker.has_value() && horizontal(at, goal_pos) < kGoalMoveMetres) {
-			return true;
-		}
-		if (!p_force && have_goal && p_tick - goal_tick < kGoalResetTicks) {
-			return true;
-		}
-		sim::bots::BotGoal g;
-		g.kind = sim::bots::BotGoal::Kind::NavPoint;
-		g.position = at;
-		g.poly = poly;
-		g.arrive_radius = p_arrive;
-		goals.assign(1, g);
-		have_goal = true;
-		goal_pos = at;
-		goal_tick = p_tick;
-		++walker_resets;
-		walker.emplace(slot, mix(seed ^ (uint64_t(walker_resets) << 40)), sh.walker);
-		sh.count(&TdmBotStats::walker_resets, uint64_t(1));
-		return true;
-	}
-
-	void clear_goal() {
-		have_goal = false;
-		goals.clear();
-	}
-
-	void check_island(sim::Tick p_tick, const sim::SoldierState &p_state) {
-		TdmShared &sh = *shared;
-		BotNav &nav = *sh.nav;
-		sim::NavPolyRef poly = 0;
-		sim::Vec3 at{};
-		bool on_main = true;
-		if (nav.query->nearest(p_state.position, { 1.0f, 2.5f, 1.0f }, &poly, &at) && poly != 0) {
-			on_main = sim::nav_poly_component(nav.query->world(), nav.level->components, poly) == nav.level->main_component;
-		}
-		if (on_main || nav.level->spawns.points.empty()) {
-			off_main = false;
-			return;
-		}
-		if (!off_main) {
-
-			float best = 1e30f;
-			for (const float r : kIslandRings) {
-				for (int k = 0; k < 16; ++k) {
-					const float a = float(k) * (sim::kTwoPi / 16.0f);
-					for (const float dy : { 0.0f, -2.5f, -5.0f }) {
-						const sim::Vec3 probe = add(p_state.position, r * std::sin(a), dy, r * std::cos(a));
-						sim::NavPolyRef q = 0;
-						sim::Vec3 qa{};
-						if (!nav.query->nearest(probe, { 1.0f, 1.5f, 1.0f }, &q, &qa) || q == 0 ||
-								sim::nav_poly_component(nav.query->world(), nav.level->components, q) != nav.level->main_component) {
-							continue;
-						}
-						const float d = distance(qa, p_state.position);
-						if (d < best) {
-							best = d;
-							exit_at = qa;
-						}
-					}
-				}
-				if (best < 1e30f) {
-					break;
-				}
-			}
-			const bool found = best < 1e30f;
-			for (const sim::SpawnPoint &sp : nav.level->spawns.points) {
-				const float d = horizontal(sp.position, p_state.position);
-				if (!found && finite(sp.position) && d < best) {
-					best = d;
-					exit_at = sp.position;
-				}
-			}
-			exit_from = p_state.position;
-			exit_progress_tick = p_tick;
-			clear_goal();
-		}
-		off_main = true;
-	}
-
-	bool walk(sim::Tick p_tick, const sim::SoldierState &p_state, float &r_dx, float &r_dz, float &r_yaw, bool &r_sprint, sim::Pose &r_pose, bool &r_jump) {
-		r_jump = false;
-		TdmShared &sh = *shared;
-		if (sh.nav == nullptr) {
-			return false;
-		}
-		if (!walker.has_value()) {
-			walker.emplace(slot, mix(seed ^ 0x57414C4Bull), sh.walker);
-		}
-		if ((p_tick + slot) % kIslandCheckTicks == 0) {
-			check_island(p_tick, p_state);
-		}
-		if (off_main) {
-			sh.count(&TdmBotStats::off_main_ticks, uint64_t(1));
-			const float dx = exit_at[0] - p_state.position[0], dz = exit_at[2] - p_state.position[2];
-			const float l = std::sqrt(dx * dx + dz * dz);
-			r_dx = l > 0.1f ? dx / l : 0.0f;
-			r_dz = l > 0.1f ? dz / l : 0.0f;
-			r_yaw = yaw_of(dx, dz);
-			r_sprint = true;
-			r_pose = sim::Pose::Stand;
-			if (horizontal(p_state.position, exit_from) >= kIslandProgressMetres) {
-				exit_from = p_state.position;
-				exit_progress_tick = p_tick;
-			}
-			r_jump = p_tick - exit_progress_tick >= kIslandJumpTicks && (p_tick - exit_progress_tick) % kIslandJumpTicks == 0;
-			return true;
-		}
-		const sim::bots::WalkerView wv = sh.nav->view(p_tick, slot, p_state, goals, sh.eye_of(sim::Pose::Stand));
-		const sim::Command wc = walker->command(wv);
-		const float wy = sim::yaw_radians(wc.yaw);
-		const float f = sim::axis_value(wc.move_forward), r = sim::axis_value(wc.move_right);
-		r_dx = f * std::sin(wy) - r * std::cos(wy);
-		r_dz = f * std::cos(wy) + r * std::sin(wy);
-		r_yaw = wy;
-		r_sprint = (wc.buttons & sim::buttons::kSprint) != 0;
-		r_pose = wc.pose;
-		return true;
 	}
 
 	void strafe(sim::Tick p_tick, const sim::CollisionWorld &p_world, const sim::SoldierState &p_self, float &r_dx, float &r_dz) {
@@ -379,44 +221,6 @@ struct TdmBrain::Impl {
 		}
 		r_dx = strafe_dir * strafe_ax * kStrafeAxis;
 		r_dz = strafe_dir * strafe_az * kStrafeAxis;
-	}
-
-	std::optional<sim::Vec3> heat_goal(sim::Tick p_tick, const sim::Vec3 &p_at) {
-		TdmShared &sh = *shared;
-		float total = 0.0f;
-		std::array<std::pair<int, float>, 64> picks{};
-		size_t n = 0;
-		for (int c = 0; c < kHeatCells * kHeatCells; ++c) {
-			if (sh.heat[size_t(c)] < kHeatMin) {
-				continue;
-			}
-			const float h = sh.heat_at(c, p_tick);
-			if (h < kHeatMin) {
-				continue;
-			}
-			const sim::Vec3 centre = sh.heat_centre(c);
-			const float d = horizontal(centre, p_at);
-			if (d > kHeatRadiusMetres || d < kHuntArriveMetres * 3.0f) {
-				continue;
-			}
-			if (n < picks.size()) {
-				picks[n++] = { c, h };
-				total += h;
-			}
-		}
-		if (n == 0 || !(total > 0.0f)) {
-			return std::nullopt;
-		}
-		float u = unit(rng) * total;
-		for (size_t i = 0; i < n; ++i) {
-			u -= picks[i].second;
-			if (u <= 0.0f || i + 1 == n) {
-				sim::Vec3 at = sh.heat_centre(picks[i].first);
-				at[1] = p_at[1];
-				return at;
-			}
-		}
-		return std::nullopt;
 	}
 
 	void set_activity(sim::Tick p_tick, TdmBotActivity p_activity) {
@@ -519,7 +323,7 @@ struct TdmBrain::Impl {
 					sh.count(&TdmBotStats::revive_aborts, uint64_t(1));
 				}
 				revive_slot = -1;
-				clear_goal();
+				navigation.clear_goal();
 			}
 		}
 		const uint32_t idle_ticks = sim::seconds_to_ticks(std::max(c.revive_idle_s, 0.0f));
@@ -615,7 +419,7 @@ struct TdmBrain::Impl {
 		bool walk_jump = false;
 		sim::Pose walk_pose = sim::Pose::Stand;
 		const auto do_walk = [&]() {
-			if (walk(p_tick, p_state, walk_dx, walk_dz, walk_yaw, walk_sprint, walk_pose, walk_jump)) {
+			if (navigation.walk(sh, p_tick, p_state, walk_dx, walk_dz, walk_yaw, walk_sprint, walk_pose, walk_jump)) {
 				move_dx = walk_dx;
 				move_dz = walk_dz;
 				pose = walk_pose;
@@ -691,7 +495,7 @@ struct TdmBrain::Impl {
 					} else if (target_distance > c.crouch_beyond_m && skill > 0.5f && p_tick - targeting.target_since() < kHoldTicks) {
 						strafing = false;
 						pose = sim::Pose::Crouch;
-					} else if (set_goal(p_tick, ts.position, kHuntArriveMetres, false) && do_walk()) {
+					} else if (navigation.set_goal(sh, p_tick, ts.position, kHuntArriveMetres, false) && do_walk()) {
 						strafing = false;
 						pose = sim::Pose::Stand;
 					} else {
@@ -708,7 +512,7 @@ struct TdmBrain::Impl {
 				const sim::Vec3 centre = add(revive->corpse, 0.0f, kReviveCentreUp, 0.0f);
 				const float hd = horizontal(p_state.position, revive->corpse);
 				if (hd > kReviveDirectMetres) {
-					set_goal(p_tick, revive->corpse, 1.0f, true);
+					navigation.set_goal(sh, p_tick, revive->corpse, 1.0f, true);
 					do_walk();
 					want_yaw = walk_yaw;
 				} else {
@@ -743,7 +547,7 @@ struct TdmBrain::Impl {
 
 					searched_tick = p_tick;
 					hunt_block_until = p_tick + kHuntBlockTicks;
-					clear_goal();
+					navigation.clear_goal();
 					sh.count(&TdmBotStats::hunts_given_up, uint64_t(1));
 				}
 				const int k = known_enemy(p_tick, p_state);
@@ -753,7 +557,7 @@ struct TdmBrain::Impl {
 						if (horizontal(p_state.position, e->last_position) <= kHuntArriveMetres) {
 							searched_tick = p_tick;
 						} else {
-							set_goal(p_tick, e->last_position, kHuntArriveMetres, false);
+							navigation.set_goal(sh, p_tick, e->last_position, kHuntArriveMetres, false);
 						}
 					}
 				}
@@ -764,16 +568,7 @@ struct TdmBrain::Impl {
 			}
 			case TdmBotActivity::Roam:
 			default: {
-				if (!have_goal || roam_tick == 0 || p_tick - roam_tick >= kRoamGoalTicks) {
-					roam_tick = p_tick;
-					if (const std::optional<sim::Vec3> h = heat_goal(p_tick, p_state.position)) {
-						if (set_goal(p_tick, *h, kHuntArriveMetres, true)) {
-							sh.count(&TdmBotStats::heat_goals, uint64_t(1));
-						}
-					} else {
-						clear_goal();
-					}
-				}
+				navigation.pick_roam_goal(sh, p_tick, p_state.position, rng);
 				do_walk();
 				want_yaw = walk_yaw;
 				sprint = walk_sprint;
@@ -997,7 +792,7 @@ struct TdmBrain::Impl {
 			dz /= l;
 		}
 		const sim::Vec3 away = add(p_self.position, dx * kRetreatMetres, 0.0f, dz * kRetreatMetres);
-		if (!set_goal(p_tick, away, 2.0f, true)) {
+		if (!navigation.set_goal(*shared, p_tick, away, 2.0f, true)) {
 			return false;
 		}
 		threat = p_threat;
@@ -1099,7 +894,7 @@ void TdmBrain::set_slot(uint8_t p_slot) {
 	Impl &m = *impl_;
 	m.slot = p_slot;
 	m.seed = (m.shared != nullptr ? m.shared->host.match_seed : 0) ^ uint64_t(p_slot);
-	m.walker.reset();
+	m.navigation.set_slot(p_slot, m.seed);
 	m.life = UINT32_MAX;
 }
 

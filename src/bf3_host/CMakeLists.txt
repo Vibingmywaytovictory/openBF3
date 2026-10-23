@@ -105,6 +105,8 @@ target_sources(bf3_host PRIVATE
     src/tdm_bot_awareness.cpp
     src/tdm_bot_awareness.h
     src/tdm_bot_common.h
+    src/tdm_bot_movement.cpp
+    src/tdm_bot_movement.h
     src/tdm_bot_shared.cpp
     src/tdm_bot_shared.h
     src/tdm_bot_targeting.cpp
