@@ -1,16 +1,22 @@
 #include "tdm_bot_objectives.h"
 
+#include "bf3/core/math.h"
 #include "bf3/host/kits.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace bf3::host::tdm_bot {
 
 namespace {
 
+namespace sw = sim::weapons;
+
 constexpr float kRunSpeed = 4.5f;
 constexpr float kPathFactor = 1.3f;
 constexpr uint32_t kReviveTimeoutTicks = 900;
+constexpr uint32_t kGrenadeLostMinTicks = 30, kGrenadeLostMaxTicks = 240;
+constexpr uint32_t kGrenadeSwitchTicks = 120, kGrenadeAfterTicks = 45, kGrenadeHoldExtraTicks = 4;
 
 }
 
@@ -68,6 +74,72 @@ const DownedSoldier *BotRevive::update(TdmShared &r_shared, BotNavigation &r_nav
 		}
 	}
 	return slot_ >= 0 ? find(view) : nullptr;
+}
+
+bool BotGrenade::start(TdmShared &r_shared, BotTargeting &r_targeting, const sim::bots::Perception &p_perception, sim::Tick p_tick,
+		const sim::SoldierState &p_self, std::span<const sim::SoldierState> p_states, bool p_have) {
+	const TdmBotConfig &c = *r_shared.config;
+	if (!p_have || r_targeting.lost_target() < 0 || p_tick < next_ || size_t(r_targeting.lost_target()) >= p_states.size()) {
+		return false;
+	}
+	const sim::bots::PerceivedEnemy *e = p_perception.find(uint8_t(r_targeting.lost_target()));
+	if (e == nullptr || !e->ever_visible) {
+		return false;
+	}
+	const uint32_t lost = p_tick - e->last_visible;
+	if (lost < kGrenadeLostMinTicks || lost > kGrenadeLostMaxTicks) {
+		return false;
+	}
+	const float d = horizontal(p_self.position, e->last_position);
+	if (d < c.grenade_min_m || d > c.grenade_max_m) {
+		return false;
+	}
+	next_ = p_tick + sim::seconds_to_ticks(std::max(c.grenade_every_s, 1.0f));
+	phase_ = 1;
+	phase_tick_ = p_tick;
+	at_ = e->last_position;
+	r_targeting.forget_lost();
+	r_shared.count(&TdmBotStats::grenades, uint64_t(1));
+	return true;
+}
+
+void BotGrenade::step(const BotArms &p_arms, sim::Tick p_tick, const sim::Vec3 &p_eye, uint8_t &r_slot, Trigger &r_trigger, float &r_yaw, float &r_pitch,
+		bool &r_aim) {
+	const sw::SoldierWeaponsState *ws = p_arms.weapons();
+	const sw::WeaponSimDef *d = p_arms.def(kSlotGrenade);
+	if (d == nullptr) {
+		phase_ = 0;
+		return;
+	}
+
+	const float dx = at_[0] - p_eye[0], dz = at_[2] - p_eye[2];
+	const float h = std::sqrt(dx * dx + dz * dz);
+	const float v = std::max(d->projectile.muzzle_speed * std::max(d->hold_min_power, 0.1f), 1.0f);
+	const float gr = std::max(-d->projectile.gravity, 0.1f);
+	const float s = std::clamp(gr * h / (v * v), 0.0f, 1.0f);
+	r_yaw = yaw_of(dx, dz);
+	r_pitch = std::clamp(0.5f * std::asin(s), 10.0f * core::kDegToRadF, 45.0f * core::kDegToRadF);
+	r_aim = true;
+	r_slot = kSlotGrenade;
+	r_trigger = Trigger::Grenade;
+	const sw::WeaponSlotState &ss = ws->slots[kSlotGrenade];
+	const bool in_hand = ws->active == kSlotGrenade && ws->pending == 0xFF;
+	if (phase_ == 1) {
+		if (in_hand && ss.phase == sw::WeaponPhase::Ready) {
+			phase_ = 2;
+			phase_tick_ = p_tick;
+			hold_ = uint32_t(std::max<sw::SimTime>(d->hold_delay, 0) * sim::kSimHz / sw::kTimeUnitsPerSecond) + kGrenadeHoldExtraTicks;
+		} else if (p_tick - phase_tick_ > kGrenadeSwitchTicks) {
+			phase_ = 0;
+		}
+	} else if (phase_ == 2) {
+		if (p_tick - phase_tick_ >= hold_) {
+			phase_ = 3;
+			phase_tick_ = p_tick;
+		}
+	} else if (phase_ == 3 && p_tick - phase_tick_ >= kGrenadeAfterTicks) {
+		phase_ = 0;
+	}
 }
 
 }

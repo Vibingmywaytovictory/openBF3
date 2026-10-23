@@ -1,12 +1,16 @@
 #pragma once
 
 #include "bf3/host/server_view.h"
+#include "bf3/sim/bots/perception.h"
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/soldier_state.h"
 #include "tdm_bot_movement.h"
 #include "tdm_bot_shared.h"
+#include "tdm_bot_targeting.h"
+#include "tdm_bot_weapons.h"
 
 #include <cstdint>
+#include <span>
 
 namespace bf3::host::tdm_bot {
 
@@ -34,6 +38,23 @@ private:
 
 	int slot_ = -1;
 	sim::Tick since_ = 0, defib_next_ = 0;
+};
+
+class BotGrenade {
+public:
+	void new_life() { phase_ = 0; }
+	bool active() const { return phase_ != 0; }
+	bool throw_ready() const { return phase_ == 2; }
+
+	bool start(TdmShared &r_shared, BotTargeting &r_targeting, const sim::bots::Perception &p_perception, sim::Tick p_tick, const sim::SoldierState &p_self,
+			std::span<const sim::SoldierState> p_states, bool p_have);
+	void step(const BotArms &p_arms, sim::Tick p_tick, const sim::Vec3 &p_eye, uint8_t &r_slot, Trigger &r_trigger, float &r_yaw, float &r_pitch, bool &r_aim);
+
+private:
+	int phase_ = 0;
+	sim::Tick phase_tick_ = 0, next_ = 0;
+	uint32_t hold_ = 0;
+	sim::Vec3 at_{};
 };
 
 }

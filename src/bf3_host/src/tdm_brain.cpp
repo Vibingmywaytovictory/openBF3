@@ -59,8 +59,6 @@ constexpr float kReviveCrouchMetres = 2.0f;
 constexpr float kReviveCentreUp = 0.3f;
 constexpr float kDefibReach = 1.7f;
 constexpr float kDefibConeDeg = 6.0f;
-constexpr uint32_t kGrenadeLostMinTicks = 30, kGrenadeLostMaxTicks = 240;
-constexpr uint32_t kGrenadeSwitchTicks = 120, kGrenadeAfterTicks = 45, kGrenadeHoldExtraTicks = 4;
 constexpr float kKnifeBehindDeg = 100.0f;
 constexpr uint32_t kKnifeTicks = 45;
 
@@ -127,10 +125,7 @@ struct TdmBrain::Impl {
 
 	BotRevive medic;
 
-	int grenade_phase = 0;
-	sim::Tick grenade_phase_tick = 0, grenade_next = 0;
-	uint32_t grenade_hold = 0;
-	sim::Vec3 grenade_at{};
+	BotGrenade grenade;
 
 	sim::Tick knife_until = 0;
 
@@ -157,7 +152,7 @@ struct TdmBrain::Impl {
 		look.new_life();
 		retreat_since = regen_since = clear_since = 0;
 		medic.new_life();
-		grenade_phase = 0;
+		grenade.new_life();
 		knife_until = 0;
 		navigation.new_life();
 		activity = TdmBotActivity::Roam;
@@ -252,7 +247,7 @@ struct TdmBrain::Impl {
 		const bool low = p_state.health < c.retreat_below_hp;
 		if (revive != nullptr) {
 			act = TdmBotActivity::Revive;
-		} else if (grenade_phase != 0) {
+		} else if (grenade.active()) {
 			act = TdmBotActivity::Grenade;
 		} else if (activity == TdmBotActivity::Retreat && !visible && p_tick - clear_since >= kRetreatClearTicks) {
 			act = TdmBotActivity::RegenWait;
@@ -266,7 +261,7 @@ struct TdmBrain::Impl {
 			act = TdmBotActivity::Retreat;
 		} else if (visible) {
 			act = TdmBotActivity::Fight;
-		} else if (start_grenade(p_tick, p_state, states, arms.rounds(kSlotGrenade) > 0)) {
+		} else if (grenade.start(sh, targeting, awareness.perception(), p_tick, p_state, states, arms.rounds(kSlotGrenade) > 0)) {
 			act = TdmBotActivity::Grenade;
 		} else if (targeting.blind_until() > p_tick) {
 			act = TdmBotActivity::Fight;
@@ -409,7 +404,7 @@ struct TdmBrain::Impl {
 				want_yaw = yaw_of(threat[0] - p_state.position[0], threat[2] - p_state.position[2]);
 				break;
 			case TdmBotActivity::Grenade:
-				grenade_step(p_tick, eye, want_slot, trigger, want_yaw, want_pitch, have_aim);
+				grenade.step(arms, p_tick, eye, want_slot, trigger, want_yaw, want_pitch, have_aim);
 				break;
 			case TdmBotActivity::Hunt: {
 				if (p_tick - hunt_since > kHuntGiveUpTicks) {
@@ -475,7 +470,7 @@ struct TdmBrain::Impl {
 		request.sprint = sprint;
 		request.zoom = zoom;
 		request.quiet = !visible && p_tick - targeting.last_engaged() > 120u && act != TdmBotActivity::Revive;
-		request.throw_ready = grenade_phase == 2;
+		request.throw_ready = grenade.throw_ready();
 		request.react_at = targeting.react_at();
 		request.target_distance = target_distance;
 		request.target = target;
@@ -546,75 +541,6 @@ struct TdmBrain::Impl {
 		clear_since = p_tick;
 		shared->count(&TdmBotStats::retreats, uint64_t(1));
 		return true;
-	}
-
-	bool start_grenade(sim::Tick p_tick, const sim::SoldierState &p_self, std::span<const sim::SoldierState> p_states, bool p_have) {
-		const TdmBotConfig &c = cfg();
-		if (!p_have || targeting.lost_target() < 0 || p_tick < grenade_next || size_t(targeting.lost_target()) >= p_states.size()) {
-			return false;
-		}
-		const sim::bots::PerceivedEnemy *e = awareness.perception().find(uint8_t(targeting.lost_target()));
-		if (e == nullptr || !e->ever_visible) {
-			return false;
-		}
-		const uint32_t lost = p_tick - e->last_visible;
-		if (lost < kGrenadeLostMinTicks || lost > kGrenadeLostMaxTicks) {
-			return false;
-		}
-		const float d = horizontal(p_self.position, e->last_position);
-		if (d < c.grenade_min_m || d > c.grenade_max_m) {
-			return false;
-		}
-		grenade_next = p_tick + sim::seconds_to_ticks(std::max(c.grenade_every_s, 1.0f));
-		grenade_phase = 1;
-		grenade_phase_tick = p_tick;
-		grenade_at = e->last_position;
-		targeting.forget_lost();
-		shared->count(&TdmBotStats::grenades, uint64_t(1));
-		return true;
-	}
-
-	void grenade_step(sim::Tick p_tick, const sim::Vec3 &p_eye, uint8_t &r_slot, Trigger &r_trigger, float &r_yaw, float &r_pitch, bool &r_aim) {
-		TdmShared &sh = *shared;
-		const Gunplay *g = sh.host.gunplay;
-		const sw::SoldierWeaponsState *ws = g != nullptr && g->armed(slot) ? &g->weapons(slot) : nullptr;
-		const sw::WeaponSimDef *d = nullptr;
-		if (ws != nullptr && ws->slots[kSlotGrenade].def != sw::kNoWeapon && ws->slots[kSlotGrenade].def < g->table().defs.size()) {
-			d = &g->table().defs[ws->slots[kSlotGrenade].def];
-		}
-		if (d == nullptr) {
-			grenade_phase = 0;
-			return;
-		}
-
-		const float dx = grenade_at[0] - p_eye[0], dz = grenade_at[2] - p_eye[2];
-		const float h = std::sqrt(dx * dx + dz * dz);
-		const float v = std::max(d->projectile.muzzle_speed * std::max(d->hold_min_power, 0.1f), 1.0f);
-		const float gr = std::max(-d->projectile.gravity, 0.1f);
-		const float s = std::clamp(gr * h / (v * v), 0.0f, 1.0f);
-		r_yaw = yaw_of(dx, dz);
-		r_pitch = std::clamp(0.5f * std::asin(s), 10.0f * core::kDegToRadF, 45.0f * core::kDegToRadF);
-		r_aim = true;
-		r_slot = kSlotGrenade;
-		r_trigger = Trigger::Grenade;
-		const sw::WeaponSlotState &ss = ws->slots[kSlotGrenade];
-		const bool in_hand = ws->active == kSlotGrenade && ws->pending == 0xFF;
-		if (grenade_phase == 1) {
-			if (in_hand && ss.phase == sw::WeaponPhase::Ready) {
-				grenade_phase = 2;
-				grenade_phase_tick = p_tick;
-				grenade_hold = uint32_t(std::max<sw::SimTime>(d->hold_delay, 0) * sim::kSimHz / sw::kTimeUnitsPerSecond) + kGrenadeHoldExtraTicks;
-			} else if (p_tick - grenade_phase_tick > kGrenadeSwitchTicks) {
-				grenade_phase = 0;
-			}
-		} else if (grenade_phase == 2) {
-			if (p_tick - grenade_phase_tick >= grenade_hold) {
-				grenade_phase = 3;
-				grenade_phase_tick = p_tick;
-			}
-		} else if (grenade_phase == 3 && p_tick - grenade_phase_tick >= kGrenadeAfterTicks) {
-			grenade_phase = 0;
-		}
 	}
 };
 
