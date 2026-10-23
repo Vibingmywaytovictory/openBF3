@@ -67,6 +67,7 @@ struct BotFrame {
 	sim::Tick tick;
 	const sim::SoldierState &self;
 	std::span<const sim::SoldierState> states;
+	const sim::CollisionWorld &world;
 	sim::Vec3 eye;
 	const sim::bots::PerceivedEnemy *te;
 	bool visible;
@@ -74,6 +75,31 @@ struct BotFrame {
 	bool shot_recent;
 	const BotArms &arms;
 	const DownedSoldier *revive;
+};
+
+struct BotIntent {
+	float move_dx = 0.0f, move_dz = 0.0f;
+	bool sprint = false;
+	sim::Pose pose = sim::Pose::Stand;
+	float want_yaw = 0.0f, want_pitch = 0.0f;
+	bool have_aim = false;
+	bool zoom = false;
+	float target_distance = 0.0f;
+	uint8_t want_slot = kSlotPrimary;
+	Trigger trigger = Trigger::None;
+	float walk_dx = 0.0f, walk_dz = 0.0f, walk_yaw = 0.0f;
+	bool walk_sprint = false;
+	bool walk_jump = false;
+	sim::Pose walk_pose = sim::Pose::Stand;
+
+	float aim_at(const sim::Vec3 &p_eye, const sim::Vec3 &p_point) {
+		const float dx = p_point[0] - p_eye[0], dy = p_point[1] - p_eye[1], dz = p_point[2] - p_eye[2];
+		const float h = std::sqrt(dx * dx + dz * dz);
+		want_yaw = yaw_of(dx, dz);
+		want_pitch = std::atan2(dy, std::max(h, 1e-3f));
+		have_aim = true;
+		return std::sqrt(h * h + dy * dy);
+	}
 };
 
 }
@@ -213,7 +239,6 @@ struct TdmBrain::Impl {
 			return cmd;
 		}
 		const std::span<const sim::SoldierState> states = view.states();
-		const sim::CollisionWorld &world = view.world();
 		const sim::Vec3 eye = sh.eye_point(p_state);
 		awareness.check_shots(sh, slot, p_tick, p_state);
 		if (sim::bots::perception_tick(slot, p_tick, c.perception.update_ticks)) {
@@ -227,7 +252,6 @@ struct TdmBrain::Impl {
 		const int target = targeting.target();
 		const bool shot_recent = awareness.shot_recent(p_tick);
 		const BotArms arms(sh.host.gunplay, slot);
-		const sw::SoldierWeaponsState *ws = arms.weapons();
 
 		ReviveCheck check;
 		check.tick = p_tick;
@@ -242,190 +266,40 @@ struct TdmBrain::Impl {
 		check.seen = visible && te != nullptr ? &states[size_t(target)] : nullptr;
 		const DownedSoldier *revive = medic.update(sh, navigation, check);
 
-		const BotFrame frame{ p_tick, p_state, states, eye, te, visible, target, shot_recent, arms, revive };
+		const BotFrame frame{ p_tick, p_state, states, view.world(), eye, te, visible, target, shot_recent, arms, revive };
 		const TdmBotActivity act = choose_activity(frame);
 		set_activity(p_tick, act);
 
-		float move_dx = 0.0f, move_dz = 0.0f;
-		bool sprint = false;
-		sim::Pose pose = sim::Pose::Stand;
-		float want_yaw = view_yaw, want_pitch = 0.0f;
-		bool have_aim = false;
-		bool zoom = false;
-		float target_distance = 0.0f;
-		uint8_t want_slot = weapons.preferred_slot();
-		Trigger trigger = Trigger::None;
-		const auto aim_at = [&](const sim::Vec3 &p_point) {
-			const float dx = p_point[0] - eye[0], dy = p_point[1] - eye[1], dz = p_point[2] - eye[2];
-			const float h = std::sqrt(dx * dx + dz * dz);
-			want_yaw = yaw_of(dx, dz);
-			want_pitch = std::atan2(dy, std::max(h, 1e-3f));
-			have_aim = true;
-			return std::sqrt(h * h + dy * dy);
-		};
-		float walk_dx = 0.0f, walk_dz = 0.0f, walk_yaw = view_yaw;
-		bool walk_sprint = false;
-		bool walk_jump = false;
-		sim::Pose walk_pose = sim::Pose::Stand;
-		const auto do_walk = [&]() {
-			if (navigation.walk(sh, p_tick, p_state, walk_dx, walk_dz, walk_yaw, walk_sprint, walk_pose, walk_jump)) {
-				move_dx = walk_dx;
-				move_dz = walk_dz;
-				pose = walk_pose;
-				return true;
-			}
-			walk_yaw = look.look(p_tick, awareness.perception(), view_yaw, rng);
-			return false;
-		};
-		if (act != TdmBotActivity::Fight) {
-			strafe.stop();
-		}
-		switch (act) {
-			case TdmBotActivity::Fight: {
-				if (visible) {
-					const sim::SoldierState &ts = states[size_t(target)];
-					const sim::Vec3 chest = sh.chest_point(ts);
-					const sw::WeaponSimDef *d = arms.def(ws != nullptr ? ws->active : 0);
-					sim::Vec3 point = chest;
-					if (te != nullptr && !te->chest_visible) {
-						point = add(sim::bots::perception_head(c.perception, ts, sh.host.eye_heights), 0.0f, -kHeadAimDrop, 0.0f);
-					}
-					const sim::Vec3 mark = point;
-					if (d != nullptr && !d->projectile.instant_hit) {
-						point = sim::bots::lead_point(eye, mark, ts.velocity, d->projectile.muzzle_speed, d->projectile.gravity);
-					}
-					target_distance = aim_at(point);
-
-					const sim::Vec3 los = sub(chest, eye);
-					const float l = std::max(distance(eye, chest), 1e-3f);
-					const float along = (ts.velocity[0] * los[0] + ts.velocity[1] * los[1] + ts.velocity[2] * los[2]) / l;
-					const float vx = ts.velocity[0] - along * los[0] / l, vy = ts.velocity[1] - along * los[1] / l, vz = ts.velocity[2] - along * los[2] / l;
-					const float crossing = std::sqrt(vx * vx + vy * vy + vz * vz);
-					const float own = std::sqrt(p_state.velocity[0] * p_state.velocity[0] + p_state.velocity[2] * p_state.velocity[2]);
-					const float on = float(p_tick - targeting.target_since()) * sim::kTickSeconds;
-					const float sigma = sim::bots::aim_error(c.aim, skill, on, own > 0.5f, std::isfinite(crossing) ? crossing : 0.0f) * core::kDegToRadF;
-					const AimError err = targeting.aim_error(p_tick, sigma, rng);
-					want_yaw = wrap(want_yaw + err.yaw);
-					want_pitch += err.pitch;
-					trigger = Trigger::Aimed;
-
-					const float hd = horizontal(p_state.position, ts.position);
-					if (hd <= c.knife_within_m && arms.def(kSlotKnife) != nullptr) {
-						const float behind = std::fabs(wrap(yaw_of(p_state.position[0] - ts.position[0], p_state.position[2] - ts.position[2]) - sim::yaw_radians(ts.yaw)));
-						if (behind >= kKnifeBehindDeg * core::kDegToRadF && knife_until <= p_tick) {
-							knife_until = p_tick + kKnifeTicks;
-							sh.count(&TdmBotStats::knife_attacks, uint64_t(1));
-						}
-					}
-					if (knife_until > p_tick) {
-						want_slot = kSlotKnife;
-						trigger = Trigger::Knife;
-						aim_at(chest);
-					}
-					zoom = target_distance > kZoomBeyondMetres && trigger == Trigger::Aimed;
-
-					if (target_distance < c.engage_strafe_m) {
-						strafe.step(c, slot, p_tick, world, p_state, view_yaw, rng, move_dx, move_dz);
-					} else if (target_distance > c.crouch_beyond_m && skill > 0.5f && p_tick - targeting.target_since() < kHoldTicks) {
-						strafe.stop();
-						pose = sim::Pose::Crouch;
-					} else if (navigation.set_goal(sh, p_tick, ts.position, kHuntArriveMetres, false) && do_walk()) {
-						strafe.stop();
-						pose = sim::Pose::Stand;
-					} else {
-						strafe.step(c, slot, p_tick, world, p_state, view_yaw, rng, move_dx, move_dz);
-					}
-				} else {
-
-					target_distance = aim_at(targeting.blind_at());
-					trigger = Trigger::Blind;
-				}
-				break;
-			}
-			case TdmBotActivity::Revive: {
-				const sim::Vec3 centre = add(revive->corpse, 0.0f, kReviveCentreUp, 0.0f);
-				const float hd = horizontal(p_state.position, revive->corpse);
-				if (hd > kReviveDirectMetres) {
-					navigation.set_goal(sh, p_tick, revive->corpse, 1.0f, true);
-					do_walk();
-					want_yaw = walk_yaw;
-				} else {
-					if (hd > kReviveStandMetres) {
-						const float inv = 0.6f / std::max(hd, 1e-3f);
-						move_dx = (revive->corpse[0] - p_state.position[0]) * inv;
-						move_dz = (revive->corpse[2] - p_state.position[2]) * inv;
-					}
-					pose = hd < kReviveCrouchMetres ? sim::Pose::Crouch : sim::Pose::Stand;
-					want_slot = kKitGadgetSlot;
-					const float reach = aim_at(centre);
-					if (reach <= kDefibReach) {
-						trigger = Trigger::Defib;
-					}
-				}
-				break;
-			}
-			case TdmBotActivity::Retreat:
-				do_walk();
-				want_yaw = walk_yaw;
-				sprint = walk_sprint;
-				break;
-			case TdmBotActivity::RegenWait:
-				pose = sim::Pose::Crouch;
-				want_yaw = yaw_of(retreat.threat()[0] - p_state.position[0], retreat.threat()[2] - p_state.position[2]);
-				break;
-			case TdmBotActivity::Grenade:
-				grenade.step(arms, p_tick, eye, want_slot, trigger, want_yaw, want_pitch, have_aim);
-				break;
-			case TdmBotActivity::Hunt: {
-				hunt.step(sh, navigation, awareness.perception(), p_tick, p_state);
-				do_walk();
-				want_yaw = walk_yaw;
-				sprint = walk_sprint;
-				break;
-			}
-			case TdmBotActivity::Roam:
-			default: {
-				navigation.pick_roam_goal(sh, p_tick, p_state.position, rng);
-				do_walk();
-				want_yaw = walk_yaw;
-				sprint = walk_sprint;
-				break;
-			}
-		}
-
-		if (!have_aim && shot_recent && act != TdmBotActivity::Retreat && act != TdmBotActivity::Revive) {
-			want_yaw = yaw_of(awareness.shot_from()[0] - p_state.position[0], awareness.shot_from()[2] - p_state.position[2]);
-			sprint = false;
-		}
+		BotIntent intent = plan(frame, act);
 
 		const float yaw_step = kTurnRateDegS * core::kDegToRadF * sim::kTickSeconds;
 		const float pitch_step = kPitchTurnRateDegS * core::kDegToRadF * sim::kTickSeconds;
-		view_yaw = wrap(view_yaw + std::clamp(wrap(want_yaw - view_yaw), -yaw_step, yaw_step));
-		want_pitch = std::clamp(want_pitch, -kMaxPitchDeg * core::kDegToRadF, kMaxPitchDeg * core::kDegToRadF);
-		view_pitch += std::clamp(want_pitch - view_pitch, -pitch_step, pitch_step);
+		view_yaw = wrap(view_yaw + std::clamp(wrap(intent.want_yaw - view_yaw), -yaw_step, yaw_step));
+		intent.want_pitch = std::clamp(intent.want_pitch, -kMaxPitchDeg * core::kDegToRadF, kMaxPitchDeg * core::kDegToRadF);
+		view_pitch += std::clamp(intent.want_pitch - view_pitch, -pitch_step, pitch_step);
 		if (!std::isfinite(view_yaw) || !std::isfinite(view_pitch)) {
 			view_yaw = sim::yaw_radians(p_state.yaw);
 			view_pitch = 0.0f;
 		}
-		const float cone = (trigger == Trigger::Defib ? kDefibConeDeg : kFireConeDeg) * core::kDegToRadF;
-		const bool aligned = have_aim && std::fabs(wrap(want_yaw - view_yaw)) <= cone && std::fabs(want_pitch - view_pitch) <= cone;
-		if (sprint) {
-			const float len = std::sqrt(move_dx * move_dx + move_dz * move_dz);
-			sprint = !have_aim && len > 0.5f && std::fabs(wrap(yaw_of(move_dx, move_dz) - view_yaw)) <= kSprintConeDeg * core::kDegToRadF;
+		const float cone = (intent.trigger == Trigger::Defib ? kDefibConeDeg : kFireConeDeg) * core::kDegToRadF;
+		const bool aligned = intent.have_aim && std::fabs(wrap(intent.want_yaw - view_yaw)) <= cone && std::fabs(intent.want_pitch - view_pitch) <= cone;
+		if (intent.sprint) {
+			const float len = std::sqrt(intent.move_dx * intent.move_dx + intent.move_dz * intent.move_dz);
+			intent.sprint = !intent.have_aim && len > 0.5f && std::fabs(wrap(yaw_of(intent.move_dx, intent.move_dz) - view_yaw)) <= kSprintConeDeg * core::kDegToRadF;
 		}
 
 		FireRequest request;
 		request.tick = p_tick;
 		request.life_tick = life_tick;
-		request.want_slot = want_slot;
-		request.trigger = trigger;
+		request.want_slot = intent.want_slot;
+		request.trigger = intent.trigger;
 		request.aligned = aligned;
-		request.sprint = sprint;
-		request.zoom = zoom;
+		request.sprint = intent.sprint;
+		request.zoom = intent.zoom;
 		request.quiet = !visible && p_tick - targeting.last_engaged() > 120u && act != TdmBotActivity::Revive;
 		request.throw_ready = grenade.throw_ready();
 		request.react_at = targeting.react_at();
-		request.target_distance = target_distance;
+		request.target_distance = intent.target_distance;
 		request.target = target;
 		request.last_visible = te != nullptr ? te->last_visible : 0;
 		request.skill = skill;
@@ -439,14 +313,14 @@ struct TdmBrain::Impl {
 
 		cmd.yaw = sim::quantize_yaw(wrap(view_yaw - comp_yaw));
 		cmd.pitch = sim::quantize_pitch(std::clamp(view_pitch - comp_pitch, -kMaxPitchDeg * core::kDegToRadF, kMaxPitchDeg * core::kDegToRadF));
-		cmd.pose = pose;
+		cmd.pose = intent.pose;
 		const float sy = std::sin(view_yaw), cy = std::cos(view_yaw);
-		const float fwd = move_dx * sy + move_dz * cy;
-		const float rgt = -move_dx * cy + move_dz * sy;
+		const float fwd = intent.move_dx * sy + intent.move_dz * cy;
+		const float rgt = -intent.move_dx * cy + intent.move_dz * sy;
 		cmd.move_forward = sim::quantize_axis(std::clamp(std::isfinite(fwd) ? fwd : 0.0f, -1.0f, 1.0f));
 		cmd.move_right = sim::quantize_axis(std::clamp(std::isfinite(rgt) ? rgt : 0.0f, -1.0f, 1.0f));
-		uint32_t b = sprint ? sim::buttons::kSprint : 0u;
-		if (walk_jump) {
+		uint32_t b = intent.sprint ? sim::buttons::kSprint : 0u;
+		if (intent.walk_jump) {
 			b |= sim::buttons::kJump;
 		}
 		b = sw::with_weapon_input(b, in);
@@ -495,6 +369,161 @@ struct TdmBrain::Impl {
 			hunt.begin(f.tick);
 		}
 		return act;
+	}
+
+	BotIntent plan(const BotFrame &p_frame, TdmBotActivity p_activity) {
+		TdmShared &sh = *shared;
+		const BotFrame &f = p_frame;
+		BotIntent i;
+		i.want_yaw = view_yaw;
+		i.want_slot = weapons.preferred_slot();
+		i.walk_yaw = view_yaw;
+		if (p_activity != TdmBotActivity::Fight) {
+			strafe.stop();
+		}
+		switch (p_activity) {
+			case TdmBotActivity::Fight:
+				fight(f, i);
+				break;
+			case TdmBotActivity::Revive:
+				approach_revive(f, i);
+				break;
+			case TdmBotActivity::Retreat:
+				walk(f, i);
+				i.want_yaw = i.walk_yaw;
+				i.sprint = i.walk_sprint;
+				break;
+			case TdmBotActivity::RegenWait:
+				i.pose = sim::Pose::Crouch;
+				i.want_yaw = yaw_of(retreat.threat()[0] - f.self.position[0], retreat.threat()[2] - f.self.position[2]);
+				break;
+			case TdmBotActivity::Grenade:
+				grenade.step(f.arms, f.tick, f.eye, i.want_slot, i.trigger, i.want_yaw, i.want_pitch, i.have_aim);
+				break;
+			case TdmBotActivity::Hunt: {
+				hunt.step(sh, navigation, awareness.perception(), f.tick, f.self);
+				walk(f, i);
+				i.want_yaw = i.walk_yaw;
+				i.sprint = i.walk_sprint;
+				break;
+			}
+			case TdmBotActivity::Roam:
+			default: {
+				navigation.pick_roam_goal(sh, f.tick, f.self.position, rng);
+				walk(f, i);
+				i.want_yaw = i.walk_yaw;
+				i.sprint = i.walk_sprint;
+				break;
+			}
+		}
+
+		if (!i.have_aim && f.shot_recent && p_activity != TdmBotActivity::Retreat && p_activity != TdmBotActivity::Revive) {
+			i.want_yaw = yaw_of(awareness.shot_from()[0] - f.self.position[0], awareness.shot_from()[2] - f.self.position[2]);
+			i.sprint = false;
+		}
+		return i;
+	}
+
+	bool walk(const BotFrame &p_frame, BotIntent &r_intent) {
+		BotIntent &i = r_intent;
+		if (navigation.walk(*shared, p_frame.tick, p_frame.self, i.walk_dx, i.walk_dz, i.walk_yaw, i.walk_sprint, i.walk_pose, i.walk_jump)) {
+			i.move_dx = i.walk_dx;
+			i.move_dz = i.walk_dz;
+			i.pose = i.walk_pose;
+			return true;
+		}
+		i.walk_yaw = look.look(p_frame.tick, awareness.perception(), view_yaw, rng);
+		return false;
+	}
+
+	void fight(const BotFrame &p_frame, BotIntent &r_intent) {
+		TdmShared &sh = *shared;
+		const TdmBotConfig &c = cfg();
+		const BotFrame &f = p_frame;
+		BotIntent &i = r_intent;
+		if (!f.visible) {
+			i.target_distance = i.aim_at(f.eye, targeting.blind_at());
+			i.trigger = Trigger::Blind;
+			return;
+		}
+		const sim::SoldierState &ts = f.states[size_t(f.target)];
+		const sim::Vec3 chest = sh.chest_point(ts);
+		const sw::SoldierWeaponsState *ws = f.arms.weapons();
+		const sw::WeaponSimDef *d = f.arms.def(ws != nullptr ? ws->active : 0);
+		sim::Vec3 point = chest;
+		if (f.te != nullptr && !f.te->chest_visible) {
+			point = add(sim::bots::perception_head(c.perception, ts, sh.host.eye_heights), 0.0f, -kHeadAimDrop, 0.0f);
+		}
+		const sim::Vec3 mark = point;
+		if (d != nullptr && !d->projectile.instant_hit) {
+			point = sim::bots::lead_point(f.eye, mark, ts.velocity, d->projectile.muzzle_speed, d->projectile.gravity);
+		}
+		i.target_distance = i.aim_at(f.eye, point);
+
+		const sim::Vec3 los = sub(chest, f.eye);
+		const float l = std::max(distance(f.eye, chest), 1e-3f);
+		const float along = (ts.velocity[0] * los[0] + ts.velocity[1] * los[1] + ts.velocity[2] * los[2]) / l;
+		const float vx = ts.velocity[0] - along * los[0] / l, vy = ts.velocity[1] - along * los[1] / l, vz = ts.velocity[2] - along * los[2] / l;
+		const float crossing = std::sqrt(vx * vx + vy * vy + vz * vz);
+		const float own = std::sqrt(f.self.velocity[0] * f.self.velocity[0] + f.self.velocity[2] * f.self.velocity[2]);
+		const float on = float(f.tick - targeting.target_since()) * sim::kTickSeconds;
+		const float sigma = sim::bots::aim_error(c.aim, skill, on, own > 0.5f, std::isfinite(crossing) ? crossing : 0.0f) * core::kDegToRadF;
+		const AimError err = targeting.aim_error(f.tick, sigma, rng);
+		i.want_yaw = wrap(i.want_yaw + err.yaw);
+		i.want_pitch += err.pitch;
+		i.trigger = Trigger::Aimed;
+
+		const float hd = horizontal(f.self.position, ts.position);
+		if (hd <= c.knife_within_m && f.arms.def(kSlotKnife) != nullptr) {
+			const float behind = std::fabs(wrap(yaw_of(f.self.position[0] - ts.position[0], f.self.position[2] - ts.position[2]) - sim::yaw_radians(ts.yaw)));
+			if (behind >= kKnifeBehindDeg * core::kDegToRadF && knife_until <= f.tick) {
+				knife_until = f.tick + kKnifeTicks;
+				sh.count(&TdmBotStats::knife_attacks, uint64_t(1));
+			}
+		}
+		if (knife_until > f.tick) {
+			i.want_slot = kSlotKnife;
+			i.trigger = Trigger::Knife;
+			i.aim_at(f.eye, chest);
+		}
+		i.zoom = i.target_distance > kZoomBeyondMetres && i.trigger == Trigger::Aimed;
+
+		if (i.target_distance < c.engage_strafe_m) {
+			strafe.step(c, slot, f.tick, f.world, f.self, view_yaw, rng, i.move_dx, i.move_dz);
+		} else if (i.target_distance > c.crouch_beyond_m && skill > 0.5f && f.tick - targeting.target_since() < kHoldTicks) {
+			strafe.stop();
+			i.pose = sim::Pose::Crouch;
+		} else if (navigation.set_goal(sh, f.tick, ts.position, kHuntArriveMetres, false) && walk(f, i)) {
+			strafe.stop();
+			i.pose = sim::Pose::Stand;
+		} else {
+			strafe.step(c, slot, f.tick, f.world, f.self, view_yaw, rng, i.move_dx, i.move_dz);
+		}
+	}
+
+	void approach_revive(const BotFrame &p_frame, BotIntent &r_intent) {
+		const BotFrame &f = p_frame;
+		BotIntent &i = r_intent;
+		const sim::Vec3 &corpse = f.revive->corpse;
+		const sim::Vec3 centre = add(corpse, 0.0f, kReviveCentreUp, 0.0f);
+		const float hd = horizontal(f.self.position, corpse);
+		if (hd > kReviveDirectMetres) {
+			navigation.set_goal(*shared, f.tick, corpse, 1.0f, true);
+			walk(f, i);
+			i.want_yaw = i.walk_yaw;
+			return;
+		}
+		if (hd > kReviveStandMetres) {
+			const float inv = 0.6f / std::max(hd, 1e-3f);
+			i.move_dx = (corpse[0] - f.self.position[0]) * inv;
+			i.move_dz = (corpse[2] - f.self.position[2]) * inv;
+		}
+		i.pose = hd < kReviveCrouchMetres ? sim::Pose::Crouch : sim::Pose::Stand;
+		i.want_slot = kKitGadgetSlot;
+		const float reach = i.aim_at(f.eye, centre);
+		if (reach <= kDefibReach) {
+			i.trigger = Trigger::Defib;
+		}
 	}
 };
 
