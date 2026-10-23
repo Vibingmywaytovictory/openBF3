@@ -20,6 +20,7 @@
 #include "tdm_bot_movement.h"
 #include "tdm_bot_shared.h"
 #include "tdm_bot_targeting.h"
+#include "tdm_bot_weapons.h"
 
 #include <algorithm>
 #include <array>
@@ -46,11 +47,8 @@ constexpr float kTurnRateDegS = 540.0f;
 constexpr float kPitchTurnRateDegS = 360.0f;
 constexpr float kMaxPitchDeg = 80.0f;
 constexpr float kFireConeDeg = 4.0f;
-constexpr uint32_t kModeDelayTicks = 3;
-constexpr uint32_t kModeWaitTicks = 10;
 
 constexpr float kSprintConeDeg = 20.0f;
-constexpr float kSingleShotBeyondMetres = 60.0f;
 constexpr float kRetreatMetres = 14.0f;
 constexpr uint32_t kRetreatMaxTicks = 360;
 constexpr uint32_t kRetreatClearTicks = 60;
@@ -62,19 +60,15 @@ constexpr float kReviveCrouchMetres = 2.0f;
 constexpr float kReviveCentreUp = 0.3f;
 constexpr float kDefibReach = 1.7f;
 constexpr float kDefibConeDeg = 6.0f;
-constexpr uint32_t kDefibRetryTicks = 66;
 constexpr uint32_t kReviveTimeoutTicks = 900;
 constexpr uint32_t kGrenadeLostMinTicks = 30, kGrenadeLostMaxTicks = 240;
 constexpr uint32_t kGrenadeSwitchTicks = 120, kGrenadeAfterTicks = 45, kGrenadeHoldExtraTicks = 4;
 constexpr float kKnifeBehindDeg = 100.0f;
 constexpr uint32_t kKnifeTicks = 45;
-constexpr float kTacticalReload = 0.3f;
 
 constexpr float kHeadAimDrop = 0.1f;
-constexpr float kFriendlyLineMetres = 0.8f;
 constexpr float kZoomBeyondMetres = 6.0f;
 constexpr uint32_t kHoldTicks = 240;
-constexpr float kBurstPauseMinS = 0.15f, kBurstPauseMaxS = 0.35f;
 constexpr uint32_t kHuntGiveUpTicks = 1200;
 constexpr uint32_t kHuntBlockTicks = 600;
 
@@ -124,14 +118,7 @@ struct TdmBrain::Impl {
 	sim::Tick searched_tick = 0;
 	sim::Tick hunt_since = 0, hunt_block_until = 0;
 
-	bool bursting = false;
-	uint32_t burst_rounds = 0, burst_start = 0;
-	sim::Tick pause_until = 0, next_tap = 0;
-	bool tapped = false;
-	uint8_t mode_counter = 0;
-	sim::Tick mode_wait = 0;
-	bool reload_held = false;
-	bool sidearm = false;
+	BotWeapons weapons;
 
 	BotStrafe strafe;
 
@@ -151,7 +138,6 @@ struct TdmBrain::Impl {
 	sim::Tick knife_until = 0;
 
 	const TdmBotConfig &cfg() const { return *shared->config; }
-	enum class Trigger : uint8_t { None, Aimed, Blind, Defib, Grenade, Knife };
 
 	void new_life(sim::Tick p_tick, const sim::SoldierState &p_state) {
 		const TdmBotConfig &c = cfg();
@@ -169,12 +155,7 @@ struct TdmBrain::Impl {
 		targeting.new_life();
 		searched_tick = 0;
 		hunt_since = hunt_block_until = 0;
-		bursting = false;
-		pause_until = next_tap = p_tick;
-		tapped = false;
-		mode_wait = 0;
-		reload_held = false;
-		sidearm = false;
+		weapons.new_life(p_tick);
 		strafe.stop();
 		look.new_life();
 		retreat_since = regen_since = clear_since = 0;
@@ -231,7 +212,7 @@ struct TdmBrain::Impl {
 			set_activity(p_tick, TdmBotActivity::Restricted);
 			cmd.yaw = sim::quantize_yaw(view_yaw);
 			cmd.pitch = sim::quantize_pitch(view_pitch);
-			bursting = false;
+			weapons.hold_fire();
 			return cmd;
 		}
 		const std::span<const sim::SoldierState> states = view.states();
@@ -248,26 +229,8 @@ struct TdmBrain::Impl {
 		const bool visible = sighting.visible;
 		const int target = targeting.target();
 		const bool shot_recent = awareness.shot_recent(p_tick);
-		const sw::SoldierWeaponsState *ws = nullptr;
-		const sw::WeaponTable *table = nullptr;
-		if (sh.host.gunplay != nullptr && sh.host.gunplay->armed(slot)) {
-			ws = &sh.host.gunplay->weapons(slot);
-			table = &sh.host.gunplay->table();
-		}
-		const auto slot_def = [&](uint8_t p_slot) -> const sw::WeaponSimDef * {
-			if (ws == nullptr || p_slot >= sw::kMaxWeaponSlots) {
-				return nullptr;
-			}
-			const uint16_t d = ws->slots[p_slot].def;
-			return d != sw::kNoWeapon && d < table->defs.size() ? &table->defs[d] : nullptr;
-		};
-		const auto slot_rounds = [&](uint8_t p_slot) -> int32_t {
-			const sw::WeaponSimDef *d = slot_def(p_slot);
-			if (d == nullptr) {
-				return 0;
-			}
-			return d->unlimited_ammo ? 1000 : ws->slots[p_slot].magazine + ws->slots[p_slot].reserve;
-		};
+		const BotArms arms(sh.host.gunplay, slot);
+		const sw::SoldierWeaponsState *ws = arms.weapons();
 
 		TdmBotActivity act = TdmBotActivity::Roam;
 
@@ -289,7 +252,7 @@ struct TdmBrain::Impl {
 			}
 		}
 		const uint32_t idle_ticks = sim::seconds_to_ticks(std::max(c.revive_idle_s, 0.0f));
-		if (revive_slot < 0 && kit == uint8_t(KitRole::Assault) && slot_def(kKitGadgetSlot) != nullptr && p_tick - targeting.last_engaged() >= idle_ticks &&
+		if (revive_slot < 0 && kit == uint8_t(KitRole::Assault) && arms.def(kKitGadgetSlot) != nullptr && p_tick - targeting.last_engaged() >= idle_ticks &&
 				(awareness.shot_at_tick() == 0 || p_tick - awareness.shot_at_tick() >= idle_ticks) && state_health_ok(p_state)) {
 			float best = 1e30f;
 			const uint8_t team = slot < sh.teams.size() ? sh.teams[slot] : 0;
@@ -344,7 +307,7 @@ struct TdmBrain::Impl {
 			act = TdmBotActivity::Retreat;
 		} else if (visible) {
 			act = TdmBotActivity::Fight;
-		} else if (start_grenade(p_tick, p_state, states, slot_rounds(kSlotGrenade) > 0)) {
+		} else if (start_grenade(p_tick, p_state, states, arms.rounds(kSlotGrenade) > 0)) {
 			act = TdmBotActivity::Grenade;
 		} else if (targeting.blind_until() > p_tick) {
 			act = TdmBotActivity::Fight;
@@ -366,7 +329,7 @@ struct TdmBrain::Impl {
 		bool have_aim = false;
 		bool zoom = false;
 		float target_distance = 0.0f;
-		uint8_t want_slot = sidearm ? kSlotSidearm : kSlotPrimary;
+		uint8_t want_slot = weapons.preferred_slot();
 		Trigger trigger = Trigger::None;
 		const auto aim_at = [&](const sim::Vec3 &p_point) {
 			const float dx = p_point[0] - eye[0], dy = p_point[1] - eye[1], dz = p_point[2] - eye[2];
@@ -398,7 +361,7 @@ struct TdmBrain::Impl {
 				if (visible) {
 					const sim::SoldierState &ts = states[size_t(target)];
 					const sim::Vec3 chest = sh.chest_point(ts);
-					const sw::WeaponSimDef *d = slot_def(ws != nullptr ? ws->active : 0);
+					const sw::WeaponSimDef *d = arms.def(ws != nullptr ? ws->active : 0);
 					sim::Vec3 point = chest;
 					if (te != nullptr && !te->chest_visible) {
 						point = add(sim::bots::perception_head(c.perception, ts, sh.host.eye_heights), 0.0f, -kHeadAimDrop, 0.0f);
@@ -423,7 +386,7 @@ struct TdmBrain::Impl {
 					trigger = Trigger::Aimed;
 
 					const float hd = horizontal(p_state.position, ts.position);
-					if (hd <= c.knife_within_m && slot_def(kSlotKnife) != nullptr) {
+					if (hd <= c.knife_within_m && arms.def(kSlotKnife) != nullptr) {
 						const float behind = std::fabs(wrap(yaw_of(p_state.position[0] - ts.position[0], p_state.position[2] - ts.position[2]) - sim::yaw_radians(ts.yaw)));
 						if (behind >= kKnifeBehindDeg * core::kDegToRadF && knife_until <= p_tick) {
 							knife_until = p_tick + kKnifeTicks;
@@ -544,129 +507,28 @@ struct TdmBrain::Impl {
 			sprint = !have_aim && len > 0.5f && std::fabs(wrap(yaw_of(move_dx, move_dz) - view_yaw)) <= kSprintConeDeg * core::kDegToRadF;
 		}
 
-		sw::WeaponInput in;
-		in.fire_mode_counter = mode_counter;
-		float comp_yaw = 0.0f, comp_pitch = 0.0f;
-		if (ws != nullptr) {
-
-			if (!sidearm && slot_def(kSlotPrimary) != nullptr && slot_rounds(kSlotPrimary) <= 0 && slot_rounds(kSlotSidearm) > 0) {
-				sidearm = true;
-				sh.count(&TdmBotStats::sidearm_switches, uint64_t(1));
-				if (want_slot == kSlotPrimary) {
-					want_slot = kSlotSidearm;
-				}
-			}
-			if (slot_def(want_slot) == nullptr) {
-				want_slot = slot_def(kSlotPrimary) != nullptr ? kSlotPrimary : ws->active;
-				if (trigger == Trigger::Defib || trigger == Trigger::Knife || trigger == Trigger::Grenade) {
-					trigger = Trigger::None;
-				}
-			}
-			in.select_slot = want_slot;
-			const sw::WeaponSlotState &ss = ws->slots[ws->active < sw::kMaxWeaponSlots ? ws->active : 0];
-			const sw::WeaponSimDef *d = slot_def(ws->active);
-			if (d != nullptr) {
-				const uint8_t modes = std::min<uint8_t>(d->mode_count, uint8_t(d->modes.size()));
-				int auto_mode = -1;
-				for (uint8_t k = 0; k < modes; ++k) {
-					if (d->modes[k].logic == core::gameplay::FireLogic::Automatic) {
-						auto_mode = k;
-						break;
-					}
-				}
-				const sw::WeaponPhase phase = ss.phase;
-				if ((ws->active == kSlotPrimary || ws->active == kSlotSidearm) && auto_mode >= 0 && ss.mode != uint8_t(auto_mode) && phase == sw::WeaponPhase::Ready &&
-						p_tick > life_tick + kModeDelayTicks && p_tick >= mode_wait && modes > 1) {
-					const uint8_t steps = uint8_t((uint32_t(auto_mode) + modes - ss.mode) % modes);
-					if (steps > 0 && steps <= 3) {
-						mode_counter = uint8_t((mode_counter + steps) & 3u);
-						in.fire_mode_counter = mode_counter;
-						mode_wait = p_tick + kModeWaitTicks;
-					}
-				}
-				const sw::FireModeDef &fm = d->modes[ss.mode < modes ? ss.mode : 0];
-				const bool automatic = fm.logic == core::gameplay::FireLogic::Automatic;
-				const bool busy = phase == sw::WeaponPhase::Deploying || phase == sw::WeaponPhase::Reloading || phase == sw::WeaponPhase::ReloadShell ||
-						phase == sw::WeaponPhase::None;
-				const bool in_hand = ws->active == want_slot && ws->pending == 0xFF;
-				const bool reserve = ss.reserve > 0 || d->unlimited_ammo;
-				const bool gun = ws->active == kSlotPrimary || ws->active == kSlotSidearm;
-				const bool need = gun && !busy && ss.magazine <= 0 && reserve;
-				const float capacity = float(std::max(d->magazine_capacity, 1));
-				const bool quiet = !visible && p_tick - targeting.last_engaged() > 120u && act != TdmBotActivity::Revive;
-				const bool tactical = gun && quiet && !busy && reserve && float(ss.magazine) < kTacticalReload * capacity;
-				const bool reload = need || tactical;
-				if (reload && !reload_held) {
-					sh.count(&TdmBotStats::reloads, uint64_t(1));
-				}
-				reload_held = reload;
-				in.reload = reload;
-				bool fire = false;
-				if (trigger == Trigger::Grenade) {
-					fire = grenade_phase == 2 && in_hand;
-				} else if (trigger == Trigger::Defib) {
-					if (in_hand && aligned && phase == sw::WeaponPhase::Ready && p_tick >= defib_next && !tapped) {
-						fire = true;
-						tapped = true;
-						defib_next = p_tick + kDefibRetryTicks;
-						sh.count(&TdmBotStats::revive_shots, uint64_t(1));
-					} else {
-						tapped = false;
-					}
-				} else if (trigger == Trigger::Knife) {
-					if (in_hand && aligned && phase == sw::WeaponPhase::Ready && !tapped) {
-						fire = true;
-						tapped = true;
-					} else {
-						tapped = false;
-					}
-				} else if (trigger == Trigger::Aimed || trigger == Trigger::Blind) {
-					const bool ready = trigger == Trigger::Blind || p_tick >= targeting.react_at();
-					const bool want_fire = in_hand && aligned && ready && !busy && !reload && ss.magazine > 0 && !sprint &&
-							!friend_in_line(p_state, eye, target_distance);
-					const bool single = target_distance > kSingleShotBeyondMetres || trigger == Trigger::Blind;
-					if (automatic && !single) {
-						if (bursting) {
-							const uint32_t fired = ws->next_shot_index - burst_start;
-							if (fired >= burst_rounds || !want_fire) {
-								bursting = false;
-								pause_until = p_tick + sim::seconds_to_ticks(uniform(rng, kBurstPauseMinS, kBurstPauseMaxS));
-							} else {
-								fire = true;
-							}
-						} else if (want_fire && p_tick >= pause_until) {
-
-							const float share = std::clamp(target_distance / kSingleShotBeyondMetres, 0.0f, 1.0f);
-							const uint32_t lo = std::max(c.burst_min_rounds, 1u), hi = std::max(c.burst_max_rounds, lo);
-							const uint32_t top = std::max(lo, uint32_t(std::lround(float(hi) - share * float(hi - lo))));
-							burst_rounds = uniform_u(rng, lo, top);
-							burst_start = ws->next_shot_index;
-							bursting = true;
-							fire = true;
-							sh.count(&TdmBotStats::bursts, uint64_t(1));
-						}
-					} else if (tapped) {
-						tapped = false;
-					} else if (want_fire && p_tick >= next_tap) {
-						fire = true;
-						tapped = true;
-						const float rate = target_distance > kSingleShotBeyondMetres ? 1.5f : 3.0f;
-						next_tap = p_tick + std::max<uint32_t>(2u, uint32_t(std::lround(float(sim::kSimHz) / rate)));
-						sh.count(&TdmBotStats::bursts, uint64_t(1));
-					}
-					if (fire && sh.observer != nullptr) {
-						sh.observer->fired(view, p_tick, slot, trigger == Trigger::Aimed ? target : -1, te != nullptr ? te->last_visible : 0, trigger == Trigger::Blind);
-					}
-				}
-				in.fire = fire;
-				in.zoom = zoom && gun && in_hand && !busy;
-
-				if (gun) {
-					comp_yaw = skill * ss.recoil.yaw * core::kDegToRadF;
-					comp_pitch = skill * ss.recoil.pitch * core::kDegToRadF;
-				}
-			}
-		}
+		FireRequest request;
+		request.tick = p_tick;
+		request.life_tick = life_tick;
+		request.want_slot = want_slot;
+		request.trigger = trigger;
+		request.aligned = aligned;
+		request.sprint = sprint;
+		request.zoom = zoom;
+		request.quiet = !visible && p_tick - targeting.last_engaged() > 120u && act != TdmBotActivity::Revive;
+		request.throw_ready = grenade_phase == 2;
+		request.react_at = targeting.react_at();
+		request.target_distance = target_distance;
+		request.target = target;
+		request.last_visible = te != nullptr ? te->last_visible : 0;
+		request.skill = skill;
+		request.position = p_state.position;
+		request.eye = eye;
+		request.view_yaw = view_yaw;
+		request.view_pitch = view_pitch;
+		const WeaponCommand weapon = weapons.input(sh, slot, arms, request, defib_next, rng);
+		const sw::WeaponInput &in = weapon.input;
+		const float comp_yaw = weapon.comp_yaw, comp_pitch = weapon.comp_pitch;
 
 		cmd.yaw = sim::quantize_yaw(wrap(view_yaw - comp_yaw));
 		cmd.pitch = sim::quantize_pitch(std::clamp(view_pitch - comp_pitch, -kMaxPitchDeg * core::kDegToRadF, kMaxPitchDeg * core::kDegToRadF));
@@ -686,26 +548,6 @@ struct TdmBrain::Impl {
 	}
 
 	bool state_health_ok(const sim::SoldierState &p_state) const { return p_state.health >= cfg().retreat_below_hp; }
-
-	bool friend_in_line(const sim::SoldierState &p_self, const sim::Vec3 &p_eye, float p_length) const {
-		const TdmShared &sh = *shared;
-		const uint8_t team = slot < sh.teams.size() ? sh.teams[slot] : 0;
-		const std::span<const sim::SoldierState> states = sh.host.view->states();
-		const sim::Vec3 dir = view_dir(view_yaw, view_pitch);
-		const float length = std::max(p_length - 0.5f, 0.0f);
-		for (size_t s = 0; s < states.size() && s < sh.teams.size() && s < sh.alive.size(); ++s) {
-			if (s == slot || team == 0 || sh.teams[s] != team || sh.alive[s] == 0 || !finite(states[s].position)) {
-				continue;
-			}
-			if (horizontal(states[s].position, p_self.position) > length + 1.0f) {
-				continue;
-			}
-			if (ray_point_distance(p_eye, dir, length, sh.chest_point(states[s])) <= kFriendlyLineMetres) {
-				return true;
-			}
-		}
-		return false;
-	}
 
 	int known_enemy(sim::Tick p_tick, const sim::SoldierState &p_self) const {
 		(void)p_tick;
