@@ -63,6 +63,19 @@ constexpr float kHeadAimDrop = 0.1f;
 constexpr float kZoomBeyondMetres = 6.0f;
 constexpr uint32_t kHoldTicks = 240;
 
+struct BotFrame {
+	sim::Tick tick;
+	const sim::SoldierState &self;
+	std::span<const sim::SoldierState> states;
+	sim::Vec3 eye;
+	const sim::bots::PerceivedEnemy *te;
+	bool visible;
+	int target;
+	bool shot_recent;
+	const BotArms &arms;
+	const DownedSoldier *revive;
+};
+
 }
 
 const char *tdm_bot_activity_name(TdmBotActivity p_activity) {
@@ -216,8 +229,6 @@ struct TdmBrain::Impl {
 		const BotArms arms(sh.host.gunplay, slot);
 		const sw::SoldierWeaponsState *ws = arms.weapons();
 
-		TdmBotActivity act = TdmBotActivity::Roam;
-
 		ReviveCheck check;
 		check.tick = p_tick;
 		check.slot = slot;
@@ -231,41 +242,8 @@ struct TdmBrain::Impl {
 		check.seen = visible && te != nullptr ? &states[size_t(target)] : nullptr;
 		const DownedSoldier *revive = medic.update(sh, navigation, check);
 
-		if (activity == TdmBotActivity::Retreat || activity == TdmBotActivity::RegenWait) {
-			if (retreat.recovered(c, activity == TdmBotActivity::RegenWait, p_tick, p_state.health)) {
-				activity = TdmBotActivity::Roam;
-			}
-		}
-		const bool low = p_state.health < c.retreat_below_hp;
-		if (revive != nullptr) {
-			act = TdmBotActivity::Revive;
-		} else if (grenade.active()) {
-			act = TdmBotActivity::Grenade;
-		} else if (activity == TdmBotActivity::Retreat && !visible && retreat.cleared(p_tick)) {
-			act = TdmBotActivity::RegenWait;
-			retreat.begin_wait(p_tick);
-		} else if (activity == TdmBotActivity::Retreat && retreat.running(p_tick) && low) {
-			act = TdmBotActivity::Retreat;
-		} else if (activity == TdmBotActivity::RegenWait && !visible && !shot_recent) {
-			act = TdmBotActivity::RegenWait;
-		} else if (low && (visible || shot_recent) && sh.nav != nullptr && activity != TdmBotActivity::Retreat && activity != TdmBotActivity::RegenWait &&
-				retreat.start(sh, navigation, p_tick, p_state, visible ? states[size_t(target)].position : awareness.shot_from(), rng)) {
-			act = TdmBotActivity::Retreat;
-		} else if (visible) {
-			act = TdmBotActivity::Fight;
-		} else if (grenade.start(sh, targeting, awareness.perception(), p_tick, p_state, states, arms.rounds(kSlotGrenade) > 0)) {
-			act = TdmBotActivity::Grenade;
-		} else if (targeting.blind_until() > p_tick) {
-			act = TdmBotActivity::Fight;
-		} else {
-			act = hunt.wanted(p_tick, awareness.perception(), p_state) ? TdmBotActivity::Hunt : TdmBotActivity::Roam;
-		}
-		if (act == TdmBotActivity::Retreat && visible) {
-			retreat.seen(p_tick);
-		}
-		if (act == TdmBotActivity::Hunt && activity != TdmBotActivity::Hunt) {
-			hunt.begin(p_tick);
-		}
+		const BotFrame frame{ p_tick, p_state, states, eye, te, visible, target, shot_recent, arms, revive };
+		const TdmBotActivity act = choose_activity(frame);
 		set_activity(p_tick, act);
 
 		float move_dx = 0.0f, move_dz = 0.0f;
@@ -474,6 +452,49 @@ struct TdmBrain::Impl {
 		b = sw::with_weapon_input(b, in);
 		cmd.buttons = b;
 		return cmd;
+	}
+
+	TdmBotActivity choose_activity(const BotFrame &p_frame) {
+		TdmShared &sh = *shared;
+		const TdmBotConfig &c = cfg();
+		const BotFrame &f = p_frame;
+		if (activity == TdmBotActivity::Retreat || activity == TdmBotActivity::RegenWait) {
+			if (retreat.recovered(c, activity == TdmBotActivity::RegenWait, f.tick, f.self.health)) {
+				activity = TdmBotActivity::Roam;
+			}
+		}
+		const bool low = f.self.health < c.retreat_below_hp;
+		TdmBotActivity act = TdmBotActivity::Roam;
+		if (f.revive != nullptr) {
+			act = TdmBotActivity::Revive;
+		} else if (grenade.active()) {
+			act = TdmBotActivity::Grenade;
+		} else if (activity == TdmBotActivity::Retreat && !f.visible && retreat.cleared(f.tick)) {
+			act = TdmBotActivity::RegenWait;
+			retreat.begin_wait(f.tick);
+		} else if (activity == TdmBotActivity::Retreat && retreat.running(f.tick) && low) {
+			act = TdmBotActivity::Retreat;
+		} else if (activity == TdmBotActivity::RegenWait && !f.visible && !f.shot_recent) {
+			act = TdmBotActivity::RegenWait;
+		} else if (low && (f.visible || f.shot_recent) && sh.nav != nullptr && activity != TdmBotActivity::Retreat && activity != TdmBotActivity::RegenWait &&
+				retreat.start(sh, navigation, f.tick, f.self, f.visible ? f.states[size_t(f.target)].position : awareness.shot_from(), rng)) {
+			act = TdmBotActivity::Retreat;
+		} else if (f.visible) {
+			act = TdmBotActivity::Fight;
+		} else if (grenade.start(sh, targeting, awareness.perception(), f.tick, f.self, f.states, f.arms.rounds(kSlotGrenade) > 0)) {
+			act = TdmBotActivity::Grenade;
+		} else if (targeting.blind_until() > f.tick) {
+			act = TdmBotActivity::Fight;
+		} else {
+			act = hunt.wanted(f.tick, awareness.perception(), f.self) ? TdmBotActivity::Hunt : TdmBotActivity::Roam;
+		}
+		if (act == TdmBotActivity::Retreat && f.visible) {
+			retreat.seen(f.tick);
+		}
+		if (act == TdmBotActivity::Hunt && activity != TdmBotActivity::Hunt) {
+			hunt.begin(f.tick);
+		}
+		return act;
 	}
 };
 
