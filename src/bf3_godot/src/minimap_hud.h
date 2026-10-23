@@ -25,7 +25,6 @@ class Bf3LevelSession;
 class Bf3MinimapControl;
 class Bf3WorldIcons;
 class MinimapCheck;
-class IffOverlay;
 
 inline constexpr int32_t kNoMatchLocalTeam = 1;
 
@@ -140,7 +139,6 @@ private:
 #if OPENBF3_BUILD_CHECKS
 	std::unique_ptr<MinimapCheck> check_runner_;
 #endif
-	std::unique_ptr<IffOverlay> iff_;
 };
 
 }

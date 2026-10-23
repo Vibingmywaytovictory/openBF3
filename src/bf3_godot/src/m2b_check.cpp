@@ -373,6 +373,11 @@ struct M2bCheck::State {
 		tally.feed_lines = m.tdm_state.deaths_fed;
 		if (g.native_hud != nullptr && g.native_hud->is_ready() && !g.native_hud->has_failed() && tally.windowed) {
 			tally.feed_lines = g.native_hud->kill_feed_rows_added();
+			tally.tag_icons_painted = g.native_hud->paint_stats().tag_icons;
+			if (const NativeTags *tags = g.native_hud->tags()) {
+				tally.tag_frames = tags->stats().frames;
+				tally.minimap_friendly = tags->stats().minimap_friendly;
+			}
 		}
 		if (m.tdm_hud != nullptr && m.tdm_hud->built() && tally.windowed) {
 			const TdmHudRecords r = m.tdm_hud->records();

@@ -157,7 +157,7 @@ These are structural, known, and listed so nobody mistakes them for design inten
   unconditional stop/play/goto and hands every other frame script to the HUD controller that owns the clip; the movies'
   AS2 classes, `onClipEvent` handlers and conditional frame code are not executed outside the HUD controllers. `Bf3SwfView` draws no gradients, static text, Bevel or ColorMatrix filters,
   or blend modes other than normal, layer and add. The HUD does not sway with camera motion, the minimap zoom is a
-  fixed 1.375 m per local unit, the SquadList and the Reward rows (HudMessage_04, `Widget.Image.ImageManager`) are not driven, and the KillLog
+  fixed 1.375 m per local unit, the Reward rows (HudMessage_04, `Widget.Image.ImageManager`) are not driven, and the KillLog
   names are not tinted (`Util.ColorTinting` reads the engine's UI colour table, which no install data holds). The engine message
   queue (`HudMessageComp`) takes queue sizes and times from `UIMessageCompData`, but its expiry, overflow and
   RemoveFlag order and the ScoreAggregation value (a sum reset after ScoreAggregateTime) are inferred, the MessageQuery DataKey to source table is measured (the key hash is unknown), and
@@ -170,8 +170,11 @@ These are structural, known, and listed so nobody mistakes them for design inten
   The moment fixture replays only kill and headshot scores, so its ScoreAggregator total reads 210 where the footage
   reads 240, and its fading kill rows sit on the nearest timeline frame with the row still present (0.20 for 0.00 and 0.06,
   0.50 for 0.28 and 0.43 fading in).
-* Nametags are `Bf3Nametags` (`src/bf3_godot/src/iff_overlay.cpp`), a hand-built Godot control; the next widget stage
-  replaces it with the native Icon3D nametags (`Widget.Icon3D.*`, driven by `Data.UINametagComp`).
+* Nametags are engine-drawn by `Bf3NativeHud` through `NativeTags` (`native_tags.cpp`): UIHudIcon_Player by relation, the
+  squad kit icon for squad mates, names in `$Menu_medium` at the UINametagCompData sizes and tints; the name's kit icon
+  (16 units in an 18-unit column) and its black glow are not measured, and the HealthBarSize bar is not drawn (other
+  soldiers' health is not presented). Squads, leaders, voice and boosters are not modelled, so the SquadList, squad tints
+  and squad kit icons show only in the moment fixture.
 * The container, EBX, payload, resource, level-soup and lag-compensation readers were written as ports of the
   earlier Rust experiment (IW4L) rather than from the format facts alone. The rule now forbids that
   (CLAUDE.md "No code from other projects"); those units are to be re-derived from `research/` and the install

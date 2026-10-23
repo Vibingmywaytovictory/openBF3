@@ -74,6 +74,10 @@ std::vector<M2bPlayRow> m2b_play_rows(const M2bPlayTally &p_t, bool p_have_ui, b
 			fmt(">= 1 + the %g checked deaths", double(p_t.deaths_checked)),
 			p_t.spawn_screen_model_shown >= 1 + p_t.deaths_checked);
 	add(M2bTrack::Ui, "round_end_screen", p_t.round_end_shown ? 1.0 : 0.0, "the round-end screen on RoundOver", p_t.round_over_seen && p_t.round_end_shown);
+	add(M2bTrack::Ui, "nametag_icons", double(p_t.tag_icons_painted),
+			fmt(">= 1 native nametag icon painted and >= 1 teammate on the minimap (%g teammate icons over %g frames)", double(p_t.minimap_friendly),
+					double(p_t.tag_frames)),
+			p_t.tag_frames >= 1 && p_t.tag_icons_painted >= 1 && p_t.minimap_friendly >= 1, true);
 	add(M2bTrack::Ui, "missing_lookups", double(p_t.missing_lookups), "== 0 missing fonts, icons and strings", p_t.missing_lookups == 0, true);
 
 	add(M2bTrack::Cam, "death_views", double(p_t.death_views),

@@ -1,11 +1,13 @@
 #pragma once
 
+#include "native_tags.h"
 #include "swf_view.h"
 
 #include "bf3/core/ui/hud_messages.h"
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/core/ui/hud_screen.h"
 
+#include <godot_cpp/classes/font.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/node2d.hpp>
@@ -24,6 +26,7 @@
 
 namespace bf3::godot_side {
 
+class Bf3LevelSession;
 class Bf3MinimapHud;
 
 inline constexpr size_t kNativeHudViews = 4;
@@ -43,6 +46,8 @@ struct NativeHudPaintStats {
 	uint32_t ekg_traces = 0;
 	uint32_t minimap_maps = 0;
 	uint32_t minimap_icons = 0;
+	uint32_t tag_icons = 0;
+	uint32_t tag_names = 0;
 	uint32_t paints = 0;
 };
 
@@ -76,6 +81,8 @@ public:
 	void set_vfov_deg(double p_deg);
 	void set_minimap_pose(const NativeHudMinimapPose &p_pose);
 	void set_manual(bool p_manual);
+	void set_world(Bf3LevelSession *p_session, const godot::Camera3D *p_camera, bool p_show);
+	NativeTags *tags() const { return tags_.get(); }
 	void set_fixture(const bf3::core::ui::HudModel &p_model, const NativeHudMinimapPose &p_pose);
 	bool fixture() const { return fixture_; }
 	void step(double p_seconds);
@@ -112,6 +119,7 @@ private:
 	void paint_bg(const SwfEngineTarget &p_target);
 	void paint_ekg(const SwfEngineTarget &p_target);
 	void paint_minimap(const SwfEngineTarget &p_target, const bf3::core::ui::SwfScene &p_scene);
+	void paint_tags();
 	bool minimap_ready();
 
 	std::string level_ = "MP_Subway";
@@ -148,6 +156,11 @@ private:
 	godot::RID minimap_map_item_;
 	godot::RID minimap_icon_item_;
 	godot::RID minimap_parent_;
+	std::unique_ptr<NativeTags> tags_;
+	const godot::Camera3D *world_camera_ = nullptr;
+	bool world_show_ = false;
+	godot::RID tags_item_;
+	godot::Ref<godot::Font> tag_font_;
 };
 
 }

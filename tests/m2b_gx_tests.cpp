@@ -65,6 +65,9 @@ M2bPlayTally good_tally() {
 	t.spawn_screen_model_shown = 3;
 	t.round_end_shown = true;
 	t.death_views = 2;
+	t.tag_frames = 4000;
+	t.tag_icons_painted = 9000;
+	t.minimap_friendly = 40000;
 	return t;
 }
 
@@ -245,7 +248,7 @@ TEST_CASE("m2b.gx.unit the play rows: gx verdicts, ui / cam skipped until built"
 		for (const M2bPlayRow &r : rows) {
 			CHECK_MESSAGE(r.state == M2bRowState::Pass, r.name);
 		}
-		CHECK(rows.size() == 14);
+		CHECK(rows.size() == 15);
 	}
 	{
 		const std::vector<M2bPlayRow> rows = m2b_play_rows(t, false, false);
@@ -261,7 +264,7 @@ TEST_CASE("m2b.gx.unit the play rows: gx verdicts, ui / cam skipped until built"
 			}
 		}
 		CHECK(gx == 7);
-		CHECK(skipped == 7);
+		CHECK(skipped == 8);
 	}
 	{
 		M2bPlayTally h = t;
@@ -311,6 +314,12 @@ TEST_CASE("m2b.gx.unit the play rows: gx verdicts, ui / cam skipped until built"
 	x = t;
 	x.scoreboard_mismatch = 1;
 	CHECK(row_named(m2b_play_rows(x, true, true), "scoreboard_kills_mismatch")->state == M2bRowState::Fail);
+	x = t;
+	x.tag_icons_painted = 0;
+	CHECK(row_named(m2b_play_rows(x, true, true), "nametag_icons")->state == M2bRowState::Fail);
+	x = t;
+	x.minimap_friendly = 0;
+	CHECK(row_named(m2b_play_rows(x, true, true), "nametag_icons")->state == M2bRowState::Fail);
 	x = t;
 	x.death_view_bad_inputs = 1;
 	CHECK(row_named(m2b_play_rows(x, true, true), "death_views")->state == M2bRowState::Fail);

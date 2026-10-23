@@ -102,6 +102,8 @@ target_sources(bf3_godot PRIVATE
     src/hud_items.h
     src/native_hud.cpp
     src/native_hud.h
+    src/native_tags.cpp
+    src/native_tags.h
     src/native_hud_moments.h
 )
 
@@ -172,8 +174,6 @@ target_sources(bf3_godot PRIVATE
 )
 
 target_sources(bf3_godot PRIVATE
-    src/iff_overlay.h
-    src/iff_overlay.cpp
     src/iff_frame.h
     src/iff_frame.cpp
 )

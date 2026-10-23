@@ -80,9 +80,6 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	void openbf3_register_tdm_hud();
 	openbf3_register_tdm_hud();
 
-	void openbf3_register_iff_overlay();
-	openbf3_register_iff_overlay();
-
 #if OPENBF3_BUILD_CHECKS
 	GDREGISTER_CLASS(bf3::godot_side::Bf3ViewmodelDemo);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3UiFontCheck);

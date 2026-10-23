@@ -5,7 +5,6 @@
 #include "input_mapper.h"
 #include "level_session.h"
 #include "minimap_control.h"
-#include "iff_overlay.h"
 #include "world_icons.h"
 
 #if OPENBF3_BUILD_CHECKS
@@ -153,7 +152,6 @@ void Bf3MinimapHud::_bind_methods() {
 void Bf3MinimapHud::_notification(int p_what) {
 	if (p_what == NOTIFICATION_PREDELETE) {
 		stop_.store(true);
-		iff_.reset();
 		if (loader_.joinable()) {
 			loader_.join();
 		}
@@ -519,14 +517,7 @@ void Bf3MinimapHud::update_view() {
 	std::vector<MinimapIconDraw> all = objectives;
 	const bf3::host::PresentationFrame &f = session_->frame();
 
-	if (iff_ == nullptr && f.match_valid) {
-		iff_ = std::make_unique<IffOverlay>(session_, this, atlas_, &a->atlas);
-	}
-	if (iff_ != nullptr) {
-		const bool first_person = !session_->cameras().free();
-		iff_->frame(first_person ? session_->cameras().first_person() : nullptr, first_person, all);
-	}
-	if (iff_ == nullptr && f.valid && f.other_count > 0) {
+	if (!f.match_valid && f.valid && f.other_count > 0) {
 		std::array<bf3::host::PresentedSoldier, bf3::net::kMaxSlots> out{};
 		const size_t n = bf3::host::present_others(f, bf3::net::monotonic_ns(), out);
 		const ui::HudIconChoice c = ui::soldier_icon(false, 2, kNoMatchLocalTeam);

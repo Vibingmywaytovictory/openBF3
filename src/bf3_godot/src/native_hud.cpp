@@ -15,6 +15,7 @@
 #include "bf3/core/ui/text_db.h"
 #include "bf3/core/util/elapsed.h"
 
+#include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/scene_tree.hpp>
@@ -150,7 +151,7 @@ Bf3NativeHud::~Bf3NativeHud() {
 	join_loader();
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (rs != nullptr) {
-		for (RID *r : { &minimap_map_item_, &minimap_icon_item_ }) {
+		for (RID *r : { &minimap_map_item_, &minimap_icon_item_, &tags_item_ }) {
 			if (r->is_valid()) {
 				rs->free_rid(*r);
 				*r = RID();
@@ -166,6 +167,7 @@ void Bf3NativeHud::_bind_methods() {
 void Bf3NativeHud::_notification(int p_what) {
 	if (p_what == NOTIFICATION_PREDELETE) {
 		join_loader();
+		tags_.reset();
 		for (std::unique_ptr<ui::HudScreen> &s : screens_) {
 			s.reset();
 		}
@@ -217,6 +219,14 @@ void Bf3NativeHud::set_fixture(const ui::HudModel &p_model, const NativeHudMinim
 
 void Bf3NativeHud::set_manual(bool p_manual) {
 	manual_ = p_manual;
+}
+
+void Bf3NativeHud::set_world(Bf3LevelSession *p_session, const Camera3D *p_camera, bool p_show) {
+	if (tags_ == nullptr && p_session != nullptr) {
+		tags_ = std::make_unique<NativeTags>(p_session);
+	}
+	world_camera_ = p_camera;
+	world_show_ = p_show;
 }
 
 void Bf3NativeHud::start_loader() {
@@ -448,6 +458,10 @@ void Bf3NativeHud::step(double p_seconds) {
 		}
 		paint(i);
 	}
+	if (tags_ != nullptr) {
+		tags_->update(world_camera_, world_show_ && is_visible_in_tree(), get_viewport_rect().size);
+		paint_tags();
+	}
 }
 
 uint64_t Bf3NativeHud::kill_feed_rows_added() const {
@@ -600,6 +614,22 @@ void Bf3NativeHud::apply_effects(size_t p_index) {
 }
 
 namespace {
+
+ui::HudIconState relation_state(ui::TagRelation p_relation) {
+	switch (p_relation) {
+		case ui::TagRelation::Friendly:
+			return ui::HudIconState::Friendly;
+		case ui::TagRelation::Squad:
+			return ui::HudIconState::Squad;
+		case ui::TagRelation::Enemy:
+			return ui::HudIconState::Enemy;
+		case ui::TagRelation::None:
+			break;
+	}
+	return ui::HudIconState::Neutral;
+}
+
+constexpr std::string_view kPlayerIcon = ui::soldier_icon(false, 1, 1).icon;
 
 void note_status(const bf3::core::Status &p_status, const std::string &p_path) {
 	if (!p_status) {
@@ -787,9 +817,102 @@ void Bf3NativeHud::paint_minimap(const SwfEngineTarget &p_target, const ui::SwfS
 		const ui::HudIconStateFrames *st = ic.icon != nullptr ? ic.icon->state(ic.state) : nullptr;
 		draw(ic.icon, ic.state, Vector2(p.x, p.y), st != nullptr && st->should_rotate ? view.heading - ic.yaw : 0.0f);
 	}
+	if (tags_ != nullptr) {
+		const ui::HudIcon *player = a->atlas.find(kPlayerIcon);
+		for (const IffMinimapEntry &e : tags_->minimap()) {
+			const ui::ScreenPoint p = ui::minimap_project(view, e.feet[0], e.feet[2]);
+			if (!std::isfinite(p.x) || !std::isfinite(p.y) || p.x < sq0.x || p.y < sq0.y || p.x > sq1.x || p.y > sq1.y) {
+				continue;
+			}
+			const ui::HudIconState state = relation_state(e.relation);
+			const ui::HudIconStateFrames *st = player != nullptr ? player->state(state) : nullptr;
+			draw(player, state, Vector2(p.x, p.y), st != nullptr && st->should_rotate ? view.heading - e.yaw : 0.0f);
+		}
+	}
 	const ui::HudIconChoice me = ui::soldier_icon(true, 0, 0);
 	draw(a->atlas.find(me.icon), me.state, centre, ui::minimap_marker_angle(view));
 	rs->canvas_item_add_set_transform(minimap_icon_item_, Transform2D());
+}
+
+void Bf3NativeHud::paint_tags() {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (!tags_item_.is_valid()) {
+		tags_item_ = rs->canvas_item_create();
+		rs->canvas_item_set_parent(tags_item_, get_canvas_item());
+		rs->canvas_item_set_draw_index(tags_item_, -1);
+	}
+	rs->canvas_item_clear(tags_item_);
+	if (tags_ == nullptr || tags_->tags().empty() || !minimap_ready()) {
+		return;
+	}
+	std::shared_ptr<const MinimapAssets> a = minimap_source_->assets();
+	const Ref<ImageTexture> atlas = minimap_source_->icon_texture();
+	if (a == nullptr || atlas.is_null()) {
+		return;
+	}
+	if (tag_font_.is_null()) {
+		if (Bf3UiAssets *u = Bf3UiAssets::current()) {
+			tag_font_ = u->get_font(String("$Menu_medium"));
+		}
+	}
+	const ui::NametagStyle &style = tags_->style();
+	const float cs = tags_->canvas_scale();
+	const ui::HudIcon *player = a->atlas.find(kPlayerIcon);
+	const auto frame = [&](const ui::HudIcon *p_icon, ui::HudIconState p_state, Vector2 p_centre, float p_size, const Color &p_modulate) {
+		const ui::HudIconStateFrames *st = p_icon != nullptr ? p_icon->state(p_state) : nullptr;
+		if (st == nullptr && p_icon != nullptr) {
+			st = p_icon->state(ui::HudIconState::Default);
+		}
+		if (st == nullptr || st->frames.empty()) {
+			return;
+		}
+		const ui::HudIconRect r = ui::hud_icon_rect(st->frames.front(), uint32_t(atlas->get_width()), uint32_t(atlas->get_height()));
+		if (r.width <= 0 || r.height <= 0) {
+			return;
+		}
+		const float texel = std::min(1.0f, p_size / float(std::max(r.width, r.height))) * cs;
+		const float w = float(r.width) * texel;
+		const float h = float(r.height) * texel;
+		rs->canvas_item_add_texture_rect_region(tags_item_,
+				Rect2(r.flip_x ? p_centre.x + w * 0.5f : p_centre.x - w * 0.5f, r.flip_y ? p_centre.y + h * 0.5f : p_centre.y - h * 0.5f, r.flip_x ? -w : w,
+						r.flip_y ? -h : h),
+				atlas->get_rid(), Rect2(float(r.x), float(r.y), float(r.width), float(r.height)), p_modulate);
+		paint_.tag_icons++;
+	};
+	const int font_size = std::max(6, int(std::lround(style.name_font_size * cs)));
+	const int glow = std::max(1, int(std::lround(style.name_glow_size * 0.5f * cs)));
+	for (const NativeTag &t : tags_->tags()) {
+		const ui::HudIcon *kit = t.kit < tags_->kit_icons().size() && !tags_->kit_icons()[t.kit].empty() ? a->atlas.find(tags_->kit_icons()[t.kit]) : nullptr;
+		const bool squad = t.relation == ui::TagRelation::Squad;
+		const float icon_size = style.icon_size * t.scale;
+		float top = t.anchor.y;
+		if (t.icon) {
+			if (squad && kit != nullptr) {
+				frame(kit, ui::HudIconState::Squad, t.anchor, icon_size, Color(1, 1, 1, t.alpha));
+			} else {
+				frame(player, relation_state(t.relation), t.anchor, icon_size, Color(1, 1, 1, t.alpha));
+			}
+			top -= 0.5f * std::min(icon_size, 16.0f) * cs + 2.0f * cs;
+		}
+		if (!t.name || tag_font_.is_null() || t.text.is_empty()) {
+			continue;
+		}
+		const std::array<float, 4> c = ui::tag_tint(style, t.relation);
+		const Color tint(c[0], c[1], c[2], c[3] * t.alpha);
+		const Vector2 ts = tag_font_->get_string_size(t.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size);
+		const ui::HudIcon *name_kit = t.relation != ui::TagRelation::Enemy ? kit : nullptr;
+		const float kit_w = name_kit != nullptr ? 18.0f * cs : 0.0f;
+		const float x0 = t.anchor.x - (kit_w + ts.x) * 0.5f;
+		const float baseline = top - 2.0f * cs;
+		if (name_kit != nullptr) {
+			frame(name_kit, squad ? ui::HudIconState::Squad : ui::HudIconState::Default, Vector2(x0 + kit_w * 0.5f - 1.0f * cs, baseline - ts.y * 0.35f), 16.0f,
+					squad ? Color(1, 1, 1, t.alpha) : tint);
+		}
+		tag_font_->draw_string_outline(tags_item_, Vector2(x0 + kit_w, baseline), t.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, glow, Color(0, 0, 0, 0.55f * t.alpha));
+		tag_font_->draw_string(tags_item_, Vector2(x0 + kit_w, baseline), t.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, tint);
+		paint_.tag_names++;
+	}
+	paint_.paints++;
 }
 
 Ref<Image> Bf3NativeHud::capture_layer() const {
