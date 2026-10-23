@@ -5,6 +5,7 @@
 #include "bf3/host/firefight_brain.h"
 #include "bf3/host/tdm_brain.h"
 #include "bot_director.h"
+#include "server_outbox.h"
 
 #include "bf3/net/loopback_ping.h"
 #include "bf3/net/protocol.h"
@@ -64,7 +65,6 @@ private:
 constexpr uint32_t kMaxSweepTicks = 600;
 
 constexpr size_t kMaxQueuedDebug = 64;
-constexpr size_t kMaxPendingReplies = 1024;
 
 }
 
@@ -136,7 +136,7 @@ struct GameServer::Impl {
 	std::vector<Slot> slots;
 	sim::Tick tick = 0;
 	uint64_t rng = 1;
-	std::vector<OutDatagram> pending_out;
+	Outbox outbox;
 	std::deque<PendingDebug> debug_queue;
 	Sweep sweep;
 	uint64_t snapshots_sent = 0;
@@ -178,28 +178,19 @@ struct GameServer::Impl {
 		r_slot.buffer.assign(std::clamp<uint32_t>(config.jitter_buffer_ticks, 1u, 1024u) + 1u, Buffered{});
 	}
 
-	void send(uint32_t p_peer, uint8_t p_channel, std::vector<uint8_t> p_bytes) {
-		OutDatagram d;
-		d.peer = p_peer;
-		d.channel = p_channel;
-		d.reliable = p_channel != net::kChannelUnreliable;
-		d.bytes = std::move(p_bytes);
-		pending_out.push_back(std::move(d));
-	}
-
 	void report(uint32_t p_slot, uint32_t p_id, bool p_ok, std::string p_text) {
 		if (p_slot >= slots.size()) {
 			return;
 		}
 		const Slot &s = slots[p_slot];
-		if (!s.used || !s.remote || pending_out.size() >= kMaxPendingReplies) {
+		if (!s.used || !s.remote || outbox.replies_full()) {
 			return;
 		}
 		net::DebugReport r;
 		r.id = p_id;
 		r.ok = p_ok;
 		r.text = std::move(p_text);
-		send(s.peer, net::kChannelReliable, net::encode_debug_report(r));
+		outbox.send(s.peer, net::kChannelReliable, net::encode_debug_report(r));
 	}
 
 	std::vector<sim::Vec3> live_positions(size_t p_except) const {
@@ -256,7 +247,7 @@ struct GameServer::Impl {
 			m.spawn_index = points[index].index;
 			m.state = s.state;
 			sv_spawned(p_slot, m);
-			send(s.peer, net::kChannelReliable, net::encode_spawned(m));
+			outbox.send(s.peer, net::kChannelReliable, net::encode_spawned(m));
 		}
 		return true;
 	}
@@ -307,14 +298,14 @@ struct GameServer::Impl {
 		if (p_hello.protocol != net::kProtocolVersion) {
 			net::Kick k;
 			k.reason = "protocol " + std::to_string(p_hello.protocol) + " (server " + std::to_string(net::kProtocolVersion) + ")";
-			send(p_peer, net::kChannelReliable, net::encode_kick(k));
+			outbox.send(p_peer, net::kChannelReliable, net::encode_kick(k));
 			return;
 		}
 		const int at = free_slot();
 		if (at < 0) {
 			net::Kick k;
 			k.reason = "server full";
-			send(p_peer, net::kChannelReliable, net::encode_kick(k));
+			outbox.send(p_peer, net::kChannelReliable, net::encode_kick(k));
 			return;
 		}
 		Slot &s = slots[size_t(at)];
@@ -335,7 +326,7 @@ struct GameServer::Impl {
 		m.motor_hash = motor_hash;
 		sv_match_info(size_t(at), m);
 		sv_rules_match_info(m);
-		send(p_peer, net::kChannelReliable, net::encode_match_info(m));
+		outbox.send(p_peer, net::kChannelReliable, net::encode_match_info(m));
 		sv_rules_join(size_t(at));
 	}
 
@@ -521,7 +512,7 @@ struct GameServer::Impl {
 				rep.ok = ok == sweep.rows.size();
 				rep.text = "spawn sweep: " + std::to_string(ok) + " / " + std::to_string(sweep.rows.size()) + " ok";
 				rep.sweep = std::move(sweep.rows);
-				send(s.peer, net::kChannelReliable, net::encode_debug_report(rep));
+				outbox.send(s.peer, net::kChannelReliable, net::encode_debug_report(rep));
 			}
 			sweep = Sweep();
 		}
@@ -578,7 +569,7 @@ struct GameServer::Impl {
 			++snapshots_sent;
 			snapshot_bytes += bytes.size();
 			max_snapshot_bytes = std::max(max_snapshot_bytes, bytes.size());
-			send(s.peer, net::kChannelUnreliable, std::move(bytes));
+			outbox.send(s.peer, net::kChannelUnreliable, std::move(bytes));
 			sv_after_snapshot(i, snap);
 		}
 		sv_end_snapshots();
@@ -701,7 +692,7 @@ struct GameServer::Impl {
 						r.text = "trace of " + std::to_string(s.trace.size()) + " ticks from " + std::to_string(s.trace.front().tick);
 						r.trace = std::move(s.trace);
 						sv_trace_report(i, r);
-						send(s.peer, net::kChannelReliable, net::encode_debug_report(r));
+						outbox.send(s.peer, net::kChannelReliable, net::encode_debug_report(r));
 					}
 					s.trace.clear();
 					s.tracing = false;
@@ -712,10 +703,7 @@ struct GameServer::Impl {
 			send_snapshots(n, net::monotonic_ns());
 		}
 		sv_send_rules(n);
-		for (OutDatagram &d : pending_out) {
-			r_out.push_back(std::move(d));
-		}
-		pending_out.clear();
+		outbox.drain(r_out);
 		times.collision_queries = world->query_count() - queries_before;
 		times.tick_ms = ms_since(tick_start);
 	}
@@ -881,7 +869,7 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 
 				net::Kick k;
 				k.reason = "level data differs from the server's (source digest)";
-				m.send(p_peer, net::kChannelReliable, net::encode_kick(k));
+				m.outbox.send(p_peer, net::kChannelReliable, net::encode_kick(k));
 				++m.level_mismatch_kicks;
 				on_disconnect(p_peer);
 				return;
@@ -1362,7 +1350,7 @@ void GameServer::Impl::sv_apply_debug(const PendingDebug &p_debug, sim::Tick p_t
 		return;
 	}
 	const Slot &requester = slots[p_debug.slot];
-	if (!requester.used || !requester.remote || pending_out.size() >= kMaxPendingReplies) {
+	if (!requester.used || !requester.remote || outbox.replies_full()) {
 		return;
 	}
 	net::DebugReport r;
@@ -1370,7 +1358,7 @@ void GameServer::Impl::sv_apply_debug(const PendingDebug &p_debug, sim::Tick p_t
 	r.ok = true;
 	r.text = "target " + std::to_string(q.slot) + ": " + std::to_string(row->target.capsule_count) + " capsules at tick " + std::to_string(p_tick);
 	r.targets.push_back(*row);
-	send(requester.peer, net::kChannelReliable, net::encode_debug_report(r));
+	outbox.send(requester.peer, net::kChannelReliable, net::encode_debug_report(r));
 }
 
 void GameServer::Impl::sv_record_tick(sim::Tick p_tick) {
@@ -1451,7 +1439,7 @@ void GameServer::Impl::sv_after_snapshot(size_t p_slot, const net::Snapshot &p_s
 					others_mask |= uint64_t(1) << so.others[k].slot;
 				}
 			}
-			send(s.peer, net::kChannelUnreliable, std::move(bytes));
+			outbox.send(s.peer, net::kChannelUnreliable, std::move(bytes));
 		}
 	}
 
@@ -1475,12 +1463,12 @@ void GameServer::Impl::sv_after_snapshot(size_t p_slot, const net::Snapshot &p_s
 			if (dropped == 0 || part == 1 || bytes.empty()) {
 				g.count_shot_events_dropped(dropped);
 				if (!bytes.empty()) {
-					send(s.peer, net::kChannelUnreliable, std::move(bytes));
+					outbox.send(s.peer, net::kChannelUnreliable, std::move(bytes));
 				}
 				break;
 			}
 			core::Result<net::ShotEvents> first = net::decode_shot_events(bytes, v.frame);
-			send(s.peer, net::kChannelUnreliable, std::move(bytes));
+			outbox.send(s.peer, net::kChannelUnreliable, std::move(bytes));
 			if (!first) {
 				g.count_shot_events_dropped(dropped);
 				break;
@@ -1509,7 +1497,7 @@ void GameServer::Impl::sv_after_snapshot(size_t p_slot, const net::Snapshot &p_s
 		std::vector<uint8_t> bytes = net::encode_combat_events(c, v.frame, &clamped);
 		g.count_combat_clamped(clamped);
 		if (!bytes.empty()) {
-			send(s.peer, net::kChannelReliable, std::move(bytes));
+			outbox.send(s.peer, net::kChannelReliable, std::move(bytes));
 		}
 	}
 }
@@ -1721,12 +1709,12 @@ void GameServer::Impl::sv_rules_join(size_t p_slot) {
 	const uint32_t peer = slots[p_slot].peer;
 	std::vector<uint8_t> state = net::encode_match_state(sv->rules->match_state());
 	if (!state.empty()) {
-		send(peer, net::kChannelReliable, std::move(state));
+		outbox.send(peer, net::kChannelReliable, std::move(state));
 	}
 	size_t clamped = 0;
 	std::vector<uint8_t> list = net::encode_player_list(sv->rules->player_list(tick, true), &clamped);
 	if (!list.empty()) {
-		send(peer, net::kChannelReliable, std::move(list));
+		outbox.send(peer, net::kChannelReliable, std::move(list));
 	}
 }
 
@@ -1757,10 +1745,10 @@ void GameServer::Impl::sv_send_rules(sim::Tick p_tick) {
 			continue;
 		}
 		if (!state.empty()) {
-			send(s.peer, net::kChannelReliable, state);
+			outbox.send(s.peer, net::kChannelReliable, state);
 		}
 		if (!list.empty()) {
-			send(s.peer, net::kChannelReliable, list);
+			outbox.send(s.peer, net::kChannelReliable, list);
 		}
 	}
 	if (state_changed) {
@@ -1808,7 +1796,7 @@ core::Status GameServer::Impl::sv_revive(size_t p_slot, const sim::Vec3 &p_posit
 		m.state = s.state;
 		m.revived = true;
 		sv_spawned(p_slot, m);
-		send(s.peer, net::kChannelReliable, net::encode_spawned(m));
+		outbox.send(s.peer, net::kChannelReliable, net::encode_spawned(m));
 	}
 	return core::Status::success();
 }
