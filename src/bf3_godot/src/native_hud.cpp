@@ -100,27 +100,22 @@ render_mode blend_premul_alpha;
 )";
 
 struct BgAxis {
-	std::array<float, 8> at{};
-	std::array<float, 8> glow{};
-	std::array<float, 8> cover{};
+	std::array<float, 6> at{};
+	std::array<float, 6> ramp{};
 };
 
-BgAxis bg_axis(float p_min, float p_max, float p_ramp_fraction, const ui::HudBgDrawLook &p_look, float p_local_per_px) {
-	const float ramp = std::min(p_ramp_fraction * (p_max - p_min), (p_max - p_min) / 2.0f);
-	const float edge = ramp * p_look.coverage_edge_of_ramp;
-	const float half = std::min(p_look.coverage_ramp_px * p_local_per_px / 2.0f, edge);
-	const std::array<float, 4> inward{ 0.0f, edge - half, edge + half, ramp };
+BgAxis bg_axis(float p_min, float p_max, float p_fade_fraction, const ui::HudBgDrawLook &p_look) {
+	const float fade = p_fade_fraction * (p_max - p_min);
+	const float half = (p_max - p_min) / 2.0f;
+	const std::array<float, 3> inward{ 0.0f, std::min(fade * p_look.ramp_start_of_fade, half), std::min(fade * p_look.ramp_full_of_fade, half) };
 	BgAxis a;
-	for (size_t i = 0; i < 4; ++i) {
+	for (size_t i = 0; i < 3; ++i) {
 		a.at[i] = p_min + inward[i];
-		a.at[7 - i] = p_max - inward[i];
+		a.at[5 - i] = p_max - inward[i];
 	}
-	const auto glow = [&](float p_d) { return ramp > 0.0f ? std::clamp(p_d / ramp, 0.0f, 1.0f) : 1.0f; };
-	const auto cover = [&](float p_d) { return half > 0.0f ? std::clamp((p_d - (edge - half)) / (2.0f * half), 0.0f, 1.0f) : (p_d >= edge ? 1.0f : 0.0f); };
-	for (size_t i = 0; i < 8; ++i) {
+	for (size_t i = 0; i < 6; ++i) {
 		const float d = std::min(a.at[i] - p_min, p_max - a.at[i]);
-		a.glow[i] = glow(d);
-		a.cover[i] = cover(d);
+		a.ramp[i] = fade > 0.0f ? ui::hud_bg_ramp(p_look, d / fade) : 1.0f;
 	}
 	return a;
 }
@@ -614,11 +609,11 @@ void Bf3NativeHud::paint_bg(const SwfEngineTarget &p_target) {
 	rs->canvas_item_set_material(p_target.canvas_item, bg_material_->get_rid());
 	const ui::HudBgDrawLook &k = ui::kHudBgDrawLook;
 	const ui::SwfRect &b = p_target.local_bounds;
-	const BgAxis ax = bg_axis(b.x_min, b.x_max, float(ui::hud_bg_light_ramp_fraction_x()), k, b.width() / float(std::max(1, p_target.size.x)));
-	const BgAxis ay = bg_axis(b.y_min, b.y_max, float(ui::hud_bg_light_ramp_fraction_y()), k, b.height() / float(std::max(1, p_target.size.y)));
+	const BgAxis ax = bg_axis(b.x_min, b.x_max, float(ui::hud_bg_light_ramp_fraction_x()), k);
+	const BgAxis ay = bg_axis(b.y_min, b.y_max, float(ui::hud_bg_light_ramp_fraction_y()), k);
 	const auto colour_at = [&](size_t p_ix, size_t p_iy) {
-		const float glow = ax.glow[p_ix] * ay.glow[p_iy];
-		return Color(k.premul_rgb255[0] / 255.0f * glow, k.premul_rgb255[1] / 255.0f * glow, k.premul_rgb255[2] / 255.0f * glow, k.coverage * ax.cover[p_ix] * ay.cover[p_iy]);
+		const float r = ax.ramp[p_ix] * ay.ramp[p_iy];
+		return Color(k.premul_rgb255[0] / 255.0f * r, k.premul_rgb255[1] / 255.0f * r, k.premul_rgb255[2] / 255.0f * r, k.coverage * r);
 	};
 	for (size_t iy = 0; iy + 1 < ay.at.size(); ++iy) {
 		for (size_t ix = 0; ix + 1 < ax.at.size(); ++ix) {

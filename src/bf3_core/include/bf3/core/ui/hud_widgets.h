@@ -39,8 +39,8 @@ public:
 struct HudBgDrawLook {
 	std::array<float, 3> premul_rgb255{ 0.91f, 31.7f, 54.12f };
 	float coverage = 0.1458f;
-	float coverage_edge_of_ramp = 0.25f;
-	float coverage_ramp_px = 4.0f;
+	float ramp_start_of_fade = 0.36f;
+	float ramp_full_of_fade = 1.05f;
 };
 
 inline constexpr HudBgDrawLook kHudBgDrawLook{};
@@ -77,6 +77,7 @@ double hud_crosshair_dispersion(float p_spread_deg, float p_vertical_fov_deg, fl
 
 double hud_bg_light_ramp_fraction_x();
 double hud_bg_light_ramp_fraction_y();
+float hud_bg_ramp(const HudBgDrawLook &p_look, float p_inward_of_fade);
 
 float hud_ekg_beat_px(const HudEkgLook &p_look, float p_distance_px);
 float hud_ekg_offset_px(const HudEkgLook &p_look, double p_clock_seconds, float p_screen_x);
