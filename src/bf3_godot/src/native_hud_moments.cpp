@@ -3,9 +3,14 @@
 #include "level_session.h"
 #include "native_hud.h"
 #include "swf_view.h"
+#include "ui_assets.h"
 
 #include "bf3/core/math.h"
+#include "bf3/core/level/budget.h"
+#include "bf3/core/ui/hud_messages.h"
 #include "bf3/core/ui/hud_widgets.h"
+#include "bf3/core/ui/swf_scene.h"
+#include "bf3/core/ui/text_db.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/level_load.h"
 #include "bf3/net/protocol.h"
@@ -23,7 +28,11 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <memory>
 #include <numbers>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace bf3::godot_side {
 
@@ -56,6 +65,119 @@ constexpr double kSettleStep = 1.0 / 30.0;
 constexpr int32_t kRenderFrames = 3;
 constexpr double kAliveTimeout = 90.0;
 constexpr double kArriveTimeout = 10.0;
+
+struct MomentKill {
+	const char *moment = "";
+	uint8_t killer = 0;
+	uint8_t victim = 0;
+	uint32_t weapon = 0;
+	const char *weapon_text = "";
+	float killer_px = 0.0f;
+	float victim_px = 0.0f;
+	float alpha = 1.0f;
+};
+
+struct MomentPopup {
+	const char *moment = "";
+	uint8_t killer = 0;
+	uint8_t victim = 0;
+	uint32_t weapon = 0;
+	const char *weapon_text = "";
+	float killer_px = 0.0f;
+	float victim_px = 0.0f;
+	int32_t score_frame = -1;
+	int32_t aggregator_frame = -1;
+};
+
+constexpr std::array<MomentKill, 63> kMomentKills{ {
+		{ "m01", 0, 1, 0x0fd9c998u, "M40A5", 376.0f, 168.0f, 1.00f },
+		{ "m01", 0, 1, 0x7672e09eu, "XBOW", 405.0f, 149.0f, 1.00f },
+		{ "m02", 0, 1, 0x2745930bu, "MK11 MOD 0", 356.0f, 155.0f, 1.00f },
+		{ "m02", 0, 1, 0x05bca424u, "SPAS-12", 387.0f, 149.0f, 1.00f },
+		{ "m02", 1, 2, 0x0fe93389u, "MP443", 396.0f, 150.0f, 1.00f },
+		{ "m03", 2, 1, 0x27415b44u, "G36C", 402.0f, 153.0f, 0.41f },
+		{ "m03", 0, 1, 0x2744a919u, "M416", 420.0f, 139.0f, 1.00f },
+		{ "m03", 1, 0, 0x273e842du, "AN-94", 414.0f, 138.0f, 1.00f },
+		{ "m03", 1, 0, 0xa8652d39u, "SAIGA 12K", 382.0f, 139.0f, 1.00f },
+		{ "m04", 0, 1, 0x2745930bu, "MK11 MOD 0", 363.0f, 144.0f, 1.00f },
+		{ "m04", 0, 1, 0x2745930bu, "MK11 MOD 0", 368.0f, 143.0f, 1.00f },
+		{ "m04", 1, 0, 0x273e842du, "AN-94", 412.0f, 140.0f, 1.00f },
+		{ "m04", 2, 1, 0x0fc9f7ddu, "L85A2", 382.0f, 167.0f, 1.00f },
+		{ "m05", 0, 1, 0x2745930bu, "MK11 MOD 0", 364.0f, 148.0f, 1.00f },
+		{ "m05", 0, 1, 0x2745930bu, "MK11 MOD 0", 368.0f, 143.0f, 1.00f },
+		{ "m05", 1, 0, 0x273e842du, "AN-94", 412.0f, 140.0f, 1.00f },
+		{ "m05", 2, 1, 0x0fc9f7ddu, "L85A2", 382.0f, 167.0f, 1.00f },
+		{ "m06", 1, 0, 0xa8652d39u, "SAIGA 12K", 385.0f, 137.0f, 1.00f },
+		{ "m06", 1, 2, 0x8511b67eu, "SVD", 415.0f, 150.0f, 1.00f },
+		{ "m06", 0, 1, 0x2744a919u, "M416", 402.0f, 156.0f, 1.00f },
+		{ "m06", 1, 0, 0x8511b522u, "SKS", 423.0f, 143.0f, 1.00f },
+		{ "m07", 1, 2, 0x8511b67eu, "SVD", 415.0f, 150.0f, 1.00f },
+		{ "m07", 0, 1, 0x2744a919u, "M416", 402.0f, 156.0f, 1.00f },
+		{ "m07", 1, 0, 0x8511b522u, "SKS", 423.0f, 143.0f, 1.00f },
+		{ "m07", 0, 1, 0x0fd83dfau, "M16A3", 410.0f, 139.0f, 1.00f },
+		{ "m07", 1, 2, 0x8511b67eu, "SVD", 425.0f, 140.0f, 1.00f },
+		{ "m08", 1, 0, 0x8511b522u, "SKS", 423.0f, 143.0f, 1.00f },
+		{ "m08", 0, 1, 0x0fd83dfau, "M16A3", 410.0f, 139.0f, 1.00f },
+		{ "m08", 1, 2, 0x8511b67eu, "SVD", 425.0f, 140.0f, 1.00f },
+		{ "m09", 1, 2, 0x8511b67eu, "SVD", 425.0f, 140.0f, 1.00f },
+		{ "m09", 0, 1, 0x1078c98cu, "UMP-45", 354.0f, 186.0f, 1.00f },
+		{ "m09", 0, 1, 0x0fd83dfau, "M16A3", 419.0f, 131.0f, 1.00f },
+		{ "m09", 1, 0, 0xa8652d39u, "SAIGA 12K", 388.0f, 133.0f, 0.28f },
+		{ "m09", 0, 1, 0x0fd83dfau, "M16A3", 389.0f, 161.0f, 0.43f },
+		{ "m10", 1, 0, 0xa8652d39u, "SAIGA 12K", 388.0f, 133.0f, 1.00f },
+		{ "m10", 0, 1, 0x0fd83dfau, "M16A3", 389.0f, 161.0f, 1.00f },
+		{ "m10", 0, 1, 0xdfcd9e7cu, "MK3A1", 395.0f, 158.0f, 1.00f },
+		{ "m10", 1, 0, 0x273e842du, "AN-94", 398.0f, 155.0f, 1.00f },
+		{ "m11", 1, 0, 0xa8652d39u, "SAIGA 12K", 388.0f, 133.0f, 0.06f },
+		{ "m11", 0, 1, 0x0fd83dfau, "M16A3", 389.0f, 161.0f, 1.00f },
+		{ "m11", 0, 1, 0xdfcd9e7cu, "MK3A1", 395.0f, 158.0f, 1.00f },
+		{ "m11", 1, 0, 0x273e842du, "AN-94", 398.0f, 155.0f, 1.00f },
+		{ "m12", 0, 1, 0xdfcd9e7cu, "MK3A1", 395.0f, 158.0f, 1.00f },
+		{ "m12", 1, 0, 0x273e842du, "AN-94", 398.0f, 155.0f, 1.00f },
+		{ "m12", 0, 1, 0x2745930bu, "MK11 MOD 0", 356.0f, 154.0f, 1.00f },
+		{ "m12", 1, 0, 0xf0576243u, "AEK-971", 393.0f, 146.0f, 1.00f },
+		{ "m13", 0, 1, 0x0fd83dfau, "M16A3", 395.0f, 153.0f, 1.00f },
+		{ "m13", 0, 1, 0x0fdcffc0u, "M9 TACT.", 388.0f, 139.0f, 1.00f },
+		{ "m13", 0, 1, 0x8511986au, "M39 EMR", 384.0f, 144.0f, 1.00f },
+		{ "m13", 1, 0, 0x140df493u, "PP-2000", 393.0f, 140.0f, 1.00f },
+		{ "m14", 1, 0, 0xa8652d39u, "SAIGA 12K", 381.0f, 145.0f, 0.00f },
+		{ "m14", 1, 0, 0x8511b67eu, "SVD", 415.0f, 150.0f, 1.00f },
+		{ "m14", 1, 0, 0x0f0d5c75u, "AK-74M", 385.0f, 158.0f, 1.00f },
+		{ "m14", 1, 0, 0xf0c84fb0u, "AKS-74u", 397.0f, 138.0f, 1.00f },
+		{ "m14", 0, 1, 0x7672e09eu, "XBOW", 392.0f, 160.0f, 1.00f },
+		{ "m15", 1, 0, 0x8511b67eu, "SVD", 415.0f, 150.0f, 0.28f },
+		{ "m15", 1, 0, 0x0f0d5c75u, "AK-74M", 385.0f, 158.0f, 1.00f },
+		{ "m15", 1, 0, 0xf0c84fb0u, "AKS-74u", 397.0f, 138.0f, 1.00f },
+		{ "m15", 0, 1, 0x7672e09eu, "XBOW", 392.0f, 160.0f, 1.00f },
+		{ "m16", 0, 1, 0xdfcd9e7cu, "MK3A1", 395.0f, 158.0f, 1.00f },
+		{ "m16", 1, 0, 0x273e842du, "AN-94", 398.0f, 155.0f, 1.00f },
+		{ "m16", 0, 1, 0x2745930bu, "MK11 MOD 0", 356.0f, 154.0f, 1.00f },
+		{ "m16", 1, 0, 0xf0576243u, "AEK-971", 393.0f, 146.0f, 1.00f },
+} };
+
+constexpr std::array<MomentPopup, 4> kMomentPopups{ {
+		{ "m06", 2, 1, 0x0fd83dfau, "M16A3", 172.0f, 267.0f, 15, 13 },
+		{ "m07", 2, 1, 0x0fd83dfau, "M16A3", 172.0f, 267.0f, 48, 14 },
+		{ "m12", 2, 1, 0x0fd83dfau, "M16A3", 168.0f, 272.0f, 17, -1 },
+		{ "m16", 2, 1, 0x0fd83dfau, "M16A3", 168.0f, 272.0f, 14, -1 },
+} };
+
+constexpr double kFlushMarginSeconds = 1.0;
+constexpr double kKillLeadSeconds = 3.0;
+constexpr double kPreScoreLeadSeconds = 7.9;
+constexpr int32_t kLateRowFrames = 10;
+constexpr uint8_t kLocalSlot = 0;
+constexpr uint8_t kLogVictimSlot = 20;
+constexpr int8_t kOwnTeam = 1;
+constexpr int8_t kOtherTeam = 2;
+constexpr int8_t kOwnSquad = 1;
+constexpr int8_t kOtherSquad = 2;
+constexpr float kFadedAlpha = 0.5f;
+constexpr std::string_view kNameGlyphs = "WMHNEI";
+constexpr const char *kKillFeedPath = "instance1.HudMessage_02";
+constexpr const char *kKillLogPath = "instance1.HudMessage_00";
+constexpr const char *kScorePath = "instance1.HudMessage_01";
+constexpr const char *kAggregatorPath = "instance1.ScoreAggregator_01.aggHolder";
 constexpr float kArriveXz = 0.25f;
 constexpr float kArriveY = 0.5f;
 constexpr float kScanAboveSpawns = 3.0f;
@@ -102,6 +224,166 @@ const ui::SwfSceneNode *node_of(const Bf3NativeHud &p_hud, const char *p_path) {
 		}
 	}
 	return nullptr;
+}
+
+const ui::SwfScene *scene_of(const Bf3NativeHud &p_hud, const char *p_path) {
+	for (size_t i = 0; i < kNativeHudViews; ++i) {
+		const Bf3SwfView *v = p_hud.view(i);
+		if (v != nullptr && v->scene() != nullptr && v->scene()->find_node(p_path) != nullptr) {
+			return v->scene();
+		}
+	}
+	return nullptr;
+}
+
+float window_scale(const Bf3NativeHud &p_hud) {
+	const Bf3SwfView *v = p_hud.view(0);
+	if (v == nullptr || v->get_viewport() == nullptr || !(v->visible_rect().width() > 0.0f)) {
+		return 1.0f;
+	}
+	return float(v->get_viewport()->get_visible_rect().size.x) / v->visible_rect().width();
+}
+
+struct MessageRow {
+	float y = 0.0f;
+	uint32_t frame = 0;
+	std::string text;
+};
+
+std::vector<MessageRow> message_rows(const Bf3NativeHud &p_hud, const char *p_widget, const char *p_text) {
+	std::vector<MessageRow> out;
+	const std::string holder = std::string(p_widget) + ".messageHolder";
+	const ui::SwfScene *sc = scene_of(p_hud, holder.c_str());
+	const ui::SwfSceneNode *h = sc != nullptr ? sc->find_node(holder) : nullptr;
+	if (h == nullptr) {
+		return out;
+	}
+	for (const ui::SwfNodeId id : h->children) {
+		const ui::SwfSceneNode *row = sc->node(id);
+		if (row == nullptr || !row->world_visible) {
+			continue;
+		}
+		const ui::SwfSceneNode *t = sc->find_node(row->path + p_text);
+		out.push_back(MessageRow{ row->world.ty, row->frame, t != nullptr ? t->text : std::string() });
+	}
+	std::sort(out.begin(), out.end(), [](const MessageRow &p_a, const MessageRow &p_b) { return p_a.y < p_b.y; });
+	return out;
+}
+
+class NameFit {
+public:
+	std::string open() {
+		Bf3UiAssets *assets = Bf3UiAssets::current();
+		if (assets == nullptr || assets->movies() == nullptr || assets->swf_fonts() == nullptr) {
+			return "no Bf3UiAssets movies or fonts";
+		}
+		fonts_ = assets->swf_fonts();
+		bf3::core::Result<ui::SwfScene> s = ui::SwfScene::open(*assets->movies(), kProbeMovie);
+		if (!s) {
+			return std::string(kProbeMovie) + ": " + s.error().message;
+		}
+		scene_ = std::make_shared<ui::SwfScene>(std::move(*s));
+		const std::string root = scene_->node(scene_->root())->path;
+		int32_t depth = 1;
+		for (const char *linkage : { "Kill", "LocalKill", "Score" }) {
+			bf3::core::Result<ui::SwfNodeId> a = scene_->attach_movie(root, linkage, linkage, depth++);
+			if (!a) {
+				return std::string(linkage) + ": " + a.error().message;
+			}
+		}
+		prefix_ = root.empty() ? std::string() : root + ".";
+		return {};
+	}
+
+	float chain_scale(std::string_view p_field) const {
+		float s = 1.0f;
+		std::string path = prefix_;
+		size_t at = 0;
+		while (at <= p_field.size()) {
+			const size_t dot = std::min(p_field.find('.', at), p_field.size());
+			path += std::string(p_field.substr(at, dot - at));
+			if (const ui::SwfSceneNode *n = scene_->find_node(path)) {
+				s *= n->matrix.a;
+			}
+			path += ".";
+			at = dot + 1;
+		}
+		return s;
+	}
+
+	float width(std::string_view p_field, std::string_view p_text) {
+		const std::string path = prefix_ + std::string(p_field);
+		if (!scene_->set_text(path, p_text)) {
+			return 0.0f;
+		}
+		const ui::SwfSceneNode *n = scene_->find_node(path);
+		if (n == nullptr) {
+			return 0.0f;
+		}
+		bf3::core::level::WorkBudget budget(ui::kSwfTextBudgetUnits);
+		bf3::core::Result<ui::SwfTextLayout> l = ui::swf_layout_node_text(*fonts_, *n, budget);
+		return l ? l->text_width : 0.0f;
+	}
+
+	std::optional<uint32_t> label(std::string_view p_linkage, std::string_view p_label) const {
+		const ui::SwfSceneNode *n = scene_->find_node(prefix_ + std::string(p_linkage));
+		return n != nullptr && n->timeline != nullptr ? n->timeline->label_frame(p_label) : std::nullopt;
+	}
+
+	std::string fit(std::string_view p_field, float p_units) {
+		std::vector<std::pair<float, char>> glyphs;
+		for (const char c : kNameGlyphs) {
+			glyphs.emplace_back(width(p_field, std::string_view(&c, 1)), c);
+		}
+		std::sort(glyphs.begin(), glyphs.end(), [](const auto &p_a, const auto &p_b) { return p_a.first > p_b.first; });
+		std::string out;
+		for (const auto &[w, c] : glyphs) {
+			while (out.size() + 1 < ui::kHudNameBytes && width(p_field, out + c) <= p_units) {
+				out += c;
+			}
+		}
+		return out;
+	}
+
+private:
+	static constexpr const char *kProbeMovie = "ui/assets/hudmessage";
+	std::shared_ptr<ui::SwfScene> scene_;
+	const ui::SwfFontSet *fonts_ = nullptr;
+	std::string prefix_;
+};
+
+void set_name(ui::HudModel &r_m, uint8_t p_slot, int8_t p_team, int8_t p_squad, const std::string &p_name) {
+	ui::HudPlayer &p = r_m.players[p_slot];
+	p = ui::HudPlayer{};
+	p.team = p_team;
+	p.squad = p_squad;
+	p.alive = true;
+	p.local = p_slot == kLocalSlot;
+	std::copy_n(p_name.data(), std::min(p_name.size(), p.name.size() - 1), p.name.data());
+}
+
+void relation_slot(ui::HudModel &r_m, uint8_t p_slot, uint8_t p_relation, const std::string &p_name) {
+	const bool enemy = int32_t(p_relation) == ui::kHudRelationEnemy;
+	const bool squad = int32_t(p_relation) == ui::kHudRelationSquad;
+	set_name(r_m, p_slot, enemy ? kOtherTeam : kOwnTeam, squad ? kOwnSquad : (enemy ? int8_t(0) : kOtherSquad), p_name);
+}
+
+void push_kill(ui::HudKillFeed &r_f, uint8_t p_killer, uint8_t p_victim, uint32_t p_weapon) {
+	++r_f.newest_serial;
+	ui::HudKill &k = r_f.lines[r_f.newest_serial % r_f.lines.size()];
+	k = ui::HudKill{};
+	k.serial = r_f.newest_serial;
+	k.killer = p_killer;
+	k.victim = p_victim;
+	k.weapon_name_sid_hash = p_weapon;
+}
+
+void push_score(ui::HudScoreFeed &r_f, std::string_view p_sid, int32_t p_points) {
+	++r_f.newest_serial;
+	ui::HudScoreEvent &e = r_f.events[r_f.newest_serial % r_f.events.size()];
+	e.serial = r_f.newest_serial;
+	e.sid_hash = ui::text_hash(p_sid);
+	e.points = p_points;
 }
 
 }
@@ -280,6 +562,159 @@ void NativeHudMomentRun::hold(Bf3LevelSession &r_session, const NativeHudMoment 
 	client->send_debug(q);
 }
 
+void NativeHudMomentRun::settle(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, const NativeHudMoment &p_moment, ui::HudModel p_model) {
+	const std::string id = p_moment.id;
+	const NativeHudMinimapPose pose = native_hud_moment_pose(p_moment);
+	expect_kills_.clear();
+	expect_log_.clear();
+	expect_score_frame_ = -1;
+	expect_aggregator_frame_ = -1;
+	std::vector<const MomentKill *> kills;
+	for (const MomentKill &k : kMomentKills) {
+		if (id == k.moment) {
+			kills.push_back(&k);
+		}
+	}
+	const MomentPopup *pop = nullptr;
+	for (const MomentPopup &p : kMomentPopups) {
+		pop = id == p.moment ? &p : pop;
+	}
+	const ui::HudMessageComp *comp = r_hud.messages();
+	const std::shared_ptr<const host::SharedLevel> level = r_session.shared_level();
+	NameFit fit;
+	std::string error = comp == nullptr ? std::string("no HudMessageComp") : fit.open();
+	if (error.empty() && pop != nullptr && (level == nullptr || level->tdm_tuning == nullptr)) {
+		error = "no TdmTuning scores";
+	}
+	const std::optional<uint32_t> score_start = error.empty() ? fit.label("Score", "start") : std::nullopt;
+	if (error.empty() && pop != nullptr && !score_start) {
+		error = "no Score start label";
+	}
+	if (!error.empty()) {
+		row(id + ".messages", false, error);
+		r_hud.set_fixture(p_model, pose);
+		for (double t = 0.0; t < kSettleSeconds; t += kSettleStep) {
+			r_hud.step(kSettleStep);
+		}
+		return;
+	}
+	const ui::HudMessageCompData &d = comp->data();
+	const size_t queue = size_t(std::max(d.of(ui::HudMessageSource::Kill).queue_size, 0));
+	const double flush = double(d.score_aggregate_time) + kFlushMarginSeconds;
+	const double lead = pop != nullptr ? kPreScoreLeadSeconds : kKillLeadSeconds;
+	const int32_t total = int32_t(std::lround((flush + lead) / kSettleStep));
+	const auto step_before = [&](double p_seconds) { return total - int32_t(std::lround(p_seconds / kSettleStep)); };
+
+	const float sx = window_scale(r_hud);
+	const ui::SwfSceneNode *feed = node_of(r_hud, kKillFeedPath);
+	const ui::SwfSceneNode *log = node_of(r_hud, kKillLogPath);
+	const float feed_scale = (feed != nullptr ? feed->world.a : 1.0f) * sx;
+	const float log_scale = (log != nullptr ? log->world.a : 1.0f) * sx;
+	float worst = 0.0f;
+	const auto fitted = [&](std::string_view p_field, float p_scale, float p_px) {
+		const float s = p_scale * fit.chain_scale(p_field);
+		const std::string name = s > 0.0f ? fit.fit(p_field, p_px / s) : std::string();
+		worst = std::max(worst, std::fabs(fit.width(p_field, name) * s - p_px));
+		return name;
+	};
+	ui::HudModel m = p_model;
+	m.players.fill(ui::HudPlayer{});
+	m.local_player = kLocalSlot;
+	m.local_team = kOwnTeam;
+	set_name(m, kLocalSlot, kOwnTeam, kOwnSquad, pop != nullptr ? fitted("LocalKill.container.killer.txt", log_scale, pop->killer_px) : std::string());
+	for (size_t i = 0; i < kills.size(); ++i) {
+		relation_slot(m, uint8_t(1 + 2 * i), kills[i]->killer, fitted("Kill.container.killer.txt", feed_scale, kills[i]->killer_px));
+		relation_slot(m, uint8_t(2 + 2 * i), kills[i]->victim, fitted("Kill.container.victim.txt", feed_scale, kills[i]->victim_px));
+		expect_kills_.push_back(std::string("[") + kills[i]->weapon_text + "]");
+	}
+	if (pop != nullptr) {
+		relation_slot(m, kLogVictimSlot, pop->victim, fitted("LocalKill.container.victim.txt", log_scale, pop->victim_px));
+		expect_log_.push_back(std::string("[") + pop->weapon_text + "]");
+		expect_score_frame_ = pop->score_frame;
+		expect_aggregator_frame_ = pop->aggregator_frame;
+	}
+	uint32_t faded = 0;
+	for (const MomentKill *k : kills) {
+		faded += k->alpha < kFadedAlpha ? 1u : 0u;
+	}
+	const int32_t pre_score_step = pop != nullptr && pop->aggregator_frame >= 0 ? step_before(kPreScoreLeadSeconds) : -1;
+	const int32_t kill_step = step_before(kKillLeadSeconds);
+	const int32_t late_step = total - kLateRowFrames;
+	const int32_t popup_step = pop != nullptr ? total - (pop->score_frame - int32_t(*score_start)) : -1;
+	r_hud.set_fixture(m, pose);
+	for (int32_t s = 0; s < total; ++s) {
+		bool changed = false;
+		if (s == pre_score_step) {
+			push_score(m.messages.score_message, ui::kHudScoreKillSid, level->tdm_tuning->score_kill);
+			push_score(m.messages.score_message, ui::kHudScoreHeadshotSid, level->tdm_tuning->score_headshot);
+			changed = true;
+		}
+		if (s == kill_step) {
+			for (size_t i = 0; i < std::min(queue, kills.size()); ++i) {
+				push_kill(m.messages.kill_message, uint8_t(1 + 2 * i), uint8_t(2 + 2 * i), kills[i]->weapon);
+			}
+			if (pop != nullptr) {
+				push_kill(m.messages.local_kill_message, kLocalSlot, kLogVictimSlot, pop->weapon);
+			}
+			changed = true;
+		}
+		if (s == late_step && kills.size() > queue) {
+			for (size_t i = queue; i < kills.size(); ++i) {
+				push_kill(m.messages.kill_message, uint8_t(1 + 2 * i), uint8_t(2 + 2 * i), kills[i]->weapon);
+			}
+			changed = true;
+		}
+		if (s == popup_step) {
+			push_score(m.messages.score_message, ui::kHudScoreKillSid, level->tdm_tuning->score_kill);
+			changed = true;
+		}
+		if (changed) {
+			++m.serial;
+			r_hud.set_fixture(m, pose);
+		}
+		r_hud.step(kSettleStep);
+	}
+	names_detail_ = std::to_string(kills.size()) + " kill rows (" + std::to_string(faded) + " faded in the reference, drawn opaque), names within " +
+			std::to_string(worst) + " px of the reference rects";
+}
+
+void NativeHudMomentRun::check_messages(Bf3NativeHud &r_hud, const NativeHudMoment &p_moment) {
+	const std::string id = p_moment.id;
+	const auto texts = [](const std::vector<MessageRow> &p_rows) {
+		std::string s;
+		for (const MessageRow &r : p_rows) {
+			s += (s.empty() ? "" : ", ") + r.text;
+		}
+		return s;
+	};
+	const auto same = [](const std::vector<MessageRow> &p_rows, const std::vector<std::string> &p_want) {
+		if (p_rows.size() != p_want.size()) {
+			return false;
+		}
+		for (size_t i = 0; i < p_rows.size(); ++i) {
+			if (p_rows[i].text != p_want[i]) {
+				return false;
+			}
+		}
+		return true;
+	};
+	const std::vector<MessageRow> feed = message_rows(r_hud, kKillFeedPath, ".container.msg.txt");
+	row(id + ".kill_feed", same(feed, expect_kills_), "rows '" + texts(feed) + "', " + names_detail_);
+	const std::vector<MessageRow> log = message_rows(r_hud, kKillLogPath, ".container.msg.txt");
+	row(id + ".kill_log", same(log, expect_log_), "rows '" + texts(log) + "', want " + std::to_string(expect_log_.size()));
+	const std::vector<MessageRow> score = message_rows(r_hud, kScorePath, ".scoringMessage.txt");
+	const bool score_ok = expect_score_frame_ < 0 ? score.empty() : score.size() == 1 && int32_t(score[0].frame) == expect_score_frame_;
+	row(id + ".score_popup", score_ok,
+			"rows '" + texts(score) + "'" + (score.empty() ? std::string() : " at frame " + std::to_string(score.back().frame)) + ", want " +
+					(expect_score_frame_ < 0 ? std::string("none") : "frame " + std::to_string(expect_score_frame_)));
+	if (expect_aggregator_frame_ >= 0) {
+		const ui::SwfSceneNode *agg = node_of(r_hud, kAggregatorPath);
+		const char *t = text_of(r_hud, "instance1.ScoreAggregator_01.aggHolder.scoringMessage.txt");
+		UtilityFunctions::print(String::utf8((std::string("NATIVE HUD FLAG ") + id + " aggregator frame " + (agg != nullptr ? std::to_string(agg->frame) : std::string("missing")) +
+				" text '" + (t != nullptr ? t : "") + "', the reference shows frame " + std::to_string(expect_aggregator_frame_) + " text '240'").c_str()));
+	}
+}
+
 void NativeHudMomentRun::check(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, const NativeHudMoment &p_moment) {
 	const std::string id = p_moment.id;
 	const host::PresentationFrame &f = r_session.frame();
@@ -304,6 +739,7 @@ void NativeHudMomentRun::check(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, 
 	row(id + ".engine_targets", ps.bg_panels > 0 && ps.ekg_traces > 0 && ps.minimap_maps > 0,
 			"iBgDraw panels " + std::to_string(ps.bg_panels) + ", EKG traces " + std::to_string(ps.ekg_traces) + ", minimap maps " + std::to_string(ps.minimap_maps) +
 					", minimap icons " + std::to_string(ps.minimap_icons));
+	check_messages(r_hud, p_moment);
 }
 
 bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, double p_delta) {
@@ -393,10 +829,7 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 			const Bf3SwfView *v = r_hud.view(0);
 			const float stage_h = v != nullptr ? v->visible_rect().height() : 720.0f;
 			const float vfov = r_hud.client().vertical_fov_deg > 0.0f ? r_hud.client().vertical_fov_deg : 55.0f;
-			r_hud.set_fixture(native_hud_moment_model(m, r_hud.model(), vfov, stage_h), native_hud_moment_pose(m));
-			for (double t = 0.0; t < kSettleSeconds; t += kSettleStep) {
-				r_hud.step(kSettleStep);
-			}
+			settle(r_session, r_hud, m, native_hud_moment_model(m, r_hud.model(), vfov, stage_h));
 			r_hud.set_visible(true);
 			frames_ = 0;
 			phase_ = Phase::Render;

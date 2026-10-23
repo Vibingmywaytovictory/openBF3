@@ -60,7 +60,9 @@ public:
 private:
 	enum class Phase : uint8_t { WaitAlive, Place, Arrive, Settle, Render, Capture, Done };
 	void hold(Bf3LevelSession &r_session, const NativeHudMoment &p_moment);
+	void settle(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, const NativeHudMoment &p_moment, bf3::core::ui::HudModel p_model);
 	void check(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, const NativeHudMoment &p_moment);
+	void check_messages(Bf3NativeHud &r_hud, const NativeHudMoment &p_moment);
 	void row(const std::string &p_name, bool p_pass, const std::string &p_detail);
 
 	std::string out_dir_;
@@ -74,6 +76,11 @@ private:
 	uint32_t request_id_ = 0;
 	uint32_t captured_ = 0;
 	uint32_t failures_ = 0;
+	std::vector<std::string> expect_kills_;
+	std::vector<std::string> expect_log_;
+	int32_t expect_score_frame_ = -1;
+	int32_t expect_aggregator_frame_ = -1;
+	std::string names_detail_;
 };
 
 }
