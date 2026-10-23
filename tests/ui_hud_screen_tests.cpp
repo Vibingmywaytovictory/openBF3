@@ -20,7 +20,9 @@
 #include <cstdio>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace bf3::core;
@@ -291,6 +293,61 @@ const HudTween *tween_of(const Screen &p_s, std::string_view p_path, HudTweenPro
 	return nullptr;
 }
 
+float timeline_alpha(const SwfSceneNode &p_row, std::string_view p_child) {
+	REQUIRE(p_row.timeline != nullptr);
+	std::vector<std::vector<SwfDisplayEntry>> lists;
+	const uint32_t frame = p_row.frame;
+	WorkBudget b(1u << 20);
+	REQUIRE(display_lists_at(*p_row.timeline, std::span<const uint32_t>(&frame, 1), b, lists).ok());
+	for (const SwfDisplayEntry &e : lists[0]) {
+		if (e.name == p_child) {
+			return swf_color_xform(e.color).mul[3];
+		}
+	}
+	const std::string missing = std::string(p_child) + " not on the timeline at frame " + std::to_string(frame);
+	FAIL_CHECK(missing);
+	return -1.0f;
+}
+
+struct AlphaTrace {
+	std::vector<float> drawn;
+	std::vector<float> timeline;
+};
+
+void trace_alpha(const Screen &p_s, const std::string &p_row, std::string_view p_child, AlphaTrace &r_t) {
+	p_s.scene->take_changes();
+	const SwfSceneNode &row = p_s.at(p_row);
+	r_t.drawn.push_back(p_s.at(p_row + "." + std::string(p_child)).world_color.mul[3]);
+	r_t.timeline.push_back(row.color.mul[3] * timeline_alpha(row, p_child));
+}
+
+void check_trace(const AlphaTrace &p_t, std::span<const float> p_want) {
+	REQUIRE(p_t.drawn.size() == p_want.size());
+	for (size_t i = 0; i < p_want.size(); ++i) {
+		CHECK(p_t.drawn[i] == doctest::Approx(p_want[i]));
+		CHECK(p_t.timeline[i] == doctest::Approx(p_want[i]));
+	}
+}
+
+void check_trace_follows_timeline(const AlphaTrace &p_t) {
+	REQUIRE(p_t.drawn.size() == p_t.timeline.size());
+	for (size_t i = 0; i < p_t.drawn.size(); ++i) {
+		CHECK(p_t.drawn[i] == doctest::Approx(p_t.timeline[i]));
+	}
+}
+
+std::string trace_text(const AlphaTrace &p_t) {
+	std::string s;
+	char buf[16];
+	for (const float a : p_t.drawn) {
+		std::snprintf(buf, sizeof(buf), "%.3f", double(a));
+		s += (s.empty() ? "" : " ") + std::string(buf);
+	}
+	return s;
+}
+
+constexpr std::array<float, 4> kKillRowFadeIn{ 64.0f / 256.0f, 128.0f / 256.0f, 192.0f / 256.0f, 1.0f };
+constexpr std::array<float, 5> kKillRowFadeOut{ 1.0f, 205.0f / 256.0f, 154.0f / 256.0f, 102.0f / 256.0f, 51.0f / 256.0f };
 
 }
 
@@ -1029,7 +1086,13 @@ TEST_SUITE("ui-hud-screen") {
 		const SwfTimeline &row_tl = *s.at(row1).timeline;
 		const uint32_t start_label = s.label(row1, "startAnim");
 		const uint32_t out_label = s.label(row1, "outAnim");
-		const uint32_t started_after = frames_until(s, [&] { return s.at(row1).frame + 1 >= out_label || !s.at(row1).playing; }, 120);
+		AlphaTrace fade_in;
+		trace_alpha(s, row1, "container", fade_in);
+		const uint32_t started_after = frames_until(s, [&] {
+			trace_alpha(s, row1, "container", fade_in);
+			return s.at(row1).frame + 1 >= out_label || !s.at(row1).playing;
+		}, 120);
+		check_trace(fade_in, kKillRowFadeIn);
 		CHECK(started_after > 0);
 		CHECK_FALSE(s.at(row1).playing);
 		CHECK(s.at(row1).frame == start_label + started_after);
@@ -1057,8 +1120,19 @@ TEST_SUITE("ui-hud-screen") {
 		s.hud->refresh(m);
 		CHECK(s.at(row1).frame == out_label);
 		CHECK(s.at(row1).playing);
-		const uint32_t removed_after = frames_until(s, [&] { return s.scene->find_node(row1) == nullptr; }, 120);
+		AlphaTrace fade_out;
+		trace_alpha(s, row1, "container", fade_out);
+		const uint32_t removed_after = frames_until(s, [&] {
+			if (s.scene->find_node(row1) == nullptr) {
+				return true;
+			}
+			trace_alpha(s, row1, "container", fade_out);
+			return false;
+		}, 120);
 		CHECK(removed_after == row_tl.frames - 1 - out_label);
+		check_trace(fade_out, kKillRowFadeOut);
+		const double fade_out_seconds = double(removed_after) / double(s.scene->frame_rate());
+		CHECK(fade_out_seconds == doctest::Approx(5.0 / 30.0));
 		CHECK(api->rows() == 1);
 		const HudTween *t2b = tween_of(s, row2, HudTweenProperty::Y);
 		REQUIRE(t2b != nullptr);
@@ -1087,7 +1161,8 @@ TEST_SUITE("ui-hud-screen") {
 		row("kill_feed", "UIMessageCompData Kill queue 4, 5 s, short 1 s; HudMessage_02 key 224794678 rows 2; row " + weapon_text + " headshot KitRecon, " +
 						"started " + std::to_string(started_after) + " frames after startAnim " + std::to_string(start_label) + ", removed " +
 						std::to_string(removed_after) + " frames after outAnim " + std::to_string(out_label) + " of " + std::to_string(row_tl.frames) + ", height " +
-						std::to_string(h1));
+						std::to_string(h1) + "; container alpha in " + trace_text(fade_in) + ", out " + trace_text(fade_out) + " (" +
+						std::to_string(fade_out_seconds) + " s)");
 	}
 
 	TEST_CASE("hud screen: KillFeed team kill") {
@@ -1179,8 +1254,14 @@ TEST_SUITE("ui-hud-screen") {
 		CHECK(s.clip(row1).x() == doctest::Approx(-(victim.x() + victim.width()) * 0.5f));
 		CHECK(s.clip(row1).y() == 0.0f);
 		const uint32_t out_label = s.label(row1, "outAnim");
-		const uint32_t started_after = frames_until(s, [&] { return !s.at(row1).playing; }, 60);
+		AlphaTrace fade_in;
+		trace_alpha(s, row1, "container", fade_in);
+		const uint32_t started_after = frames_until(s, [&] {
+			trace_alpha(s, row1, "container", fade_in);
+			return !s.at(row1).playing;
+		}, 60);
 		CHECK(s.at(row1).frame == s.label(row1, "startAnim") + started_after);
+		check_trace(fade_in, kKillRowFadeIn);
 		const float h1 = s.clip(row1 + ".heightClip").height();
 		push_local_kill(m, 0, 3, weapon, false);
 		comp.update(m, c, 1.0);
@@ -1193,12 +1274,21 @@ TEST_SUITE("ui-hud-screen") {
 		comp.update(m, c, 5.0);
 		s.hud->refresh(m);
 		CHECK(s.at(row1).frame == out_label);
-		const uint32_t removed_after = frames_until(s, [&] { return s.scene->find_node(row1) == nullptr; }, 60);
+		AlphaTrace fade_out;
+		trace_alpha(s, row1, "container", fade_out);
+		const uint32_t removed_after = frames_until(s, [&] {
+			if (s.scene->find_node(row1) == nullptr) {
+				return true;
+			}
+			trace_alpha(s, row1, "container", fade_out);
+			return false;
+		}, 60);
 		CHECK(removed_after == s.at(log + ".messageHolder.message_2").timeline->frames - 1 - out_label);
+		check_trace(fade_out, kKillRowFadeOut);
 		CHECK(api->rows() == 1);
 		row("kill_log", "UIMessageCompData LocalKill queue 2, 5 s, short 1 s; hudtdmscreen HudMessage_00 key 1675248891 rows 2; row " + weapon_text +
 						" centred at x " + std::to_string(s.clip(log + ".messageHolder.message_2").x()) + ", removed " + std::to_string(removed_after) +
-						" frames after outAnim");
+						" frames after outAnim; container alpha in " + trace_text(fade_in) + ", out " + trace_text(fade_out));
 	}
 
 	TEST_CASE("hud screen: ScorePopup") {
@@ -1244,8 +1334,20 @@ TEST_SUITE("ui-hud-screen") {
 		CHECK(s.clip(row1).y() == 0.0f);
 		const uint32_t loop = s.label(row1, "loop");
 		const uint32_t end = s.label(row1, "end");
-		const uint32_t looped = frames_until(s, [&] { return s.at(row1).frame == loop; }, 2 * end);
-		CHECK(looped == loop - s.label(row1, "start"));
+		const uint32_t start = s.label(row1, "start");
+		AlphaTrace intro;
+		trace_alpha(s, row1, "scoringMessage", intro);
+		const uint32_t looped = frames_until(s, [&] {
+			trace_alpha(s, row1, "scoringMessage", intro);
+			return s.at(row1).frame == loop;
+		}, 2 * end);
+		CHECK(looped == loop - start);
+		check_trace_follows_timeline(intro);
+		REQUIRE(intro.drawn.size() == size_t(looped) + 1);
+		CHECK(intro.drawn[11 - start] == 0.0f);
+		CHECK(intro.drawn[12 - start] == doctest::Approx(14.0f / 256.0f));
+		CHECK(intro.drawn[15 - start] == doctest::Approx(218.0f / 256.0f));
+		CHECK(intro.drawn.back() == doctest::Approx(timeline_alpha(s.at(row1), "scoringMessage")));
 		const uint32_t back = frames_until(s, [&] { return s.at(row1).frame == loop; }, 2 * end);
 		CHECK(back == end - 1 - loop);
 		const float h1 = s.clip(row1 + ".heightClip").height();
@@ -1267,12 +1369,24 @@ TEST_SUITE("ui-hud-screen") {
 		REQUIRE(s.scene->find_node(row1) != nullptr);
 		const uint32_t left_loop = frames_until(s, [&] { return s.at(row1).frame >= end; }, 2 * end);
 		CHECK(left_loop > 0);
-		const uint32_t removed_after = frames_until(s, [&] { return s.scene->find_node(row1) == nullptr; }, 2 * end);
+		AlphaTrace outro;
+		trace_alpha(s, row1, "scoringMessage", outro);
+		const uint32_t removed_after = frames_until(s, [&] {
+			if (s.scene->find_node(row1) == nullptr) {
+				return true;
+			}
+			trace_alpha(s, row1, "scoringMessage", outro);
+			return false;
+		}, 2 * end);
 		CHECK(removed_after == s.at(row2).timeline->frames - 1 - end);
+		check_trace_follows_timeline(outro);
+		REQUIRE(outro.drawn.size() == size_t(removed_after));
+		CHECK(outro.drawn.front() > outro.drawn.back());
 		CHECK(api->rows() == 1);
 		row("score_popup", "UIMessageCompData Score queue 3, 5 s, short 5 s; HudMessage_01 key 1802462620 inverted; rows ENEMY KILLED 100, HEADSHOT 10 at x 140, "
 						"loop " + std::to_string(loop) + ".." + std::to_string(end - 1) + ", removed " + std::to_string(removed_after) + " frames after end " +
-						std::to_string(end) + ", row height " + std::to_string(h1));
+						std::to_string(end) + ", row height " + std::to_string(h1) + "; scoringMessage alpha from start " + trace_text(intro) + "; from end " +
+						trace_text(outro));
 	}
 
 	TEST_CASE("hud screen: ScoreAggregator") {

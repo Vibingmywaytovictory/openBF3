@@ -161,7 +161,10 @@ These are structural, known, and listed so nobody mistakes them for design inten
   names are not tinted (`Util.ColorTinting` reads the engine's UI colour table, which no install data holds). The engine message
   queue (`HudMessageComp`) takes queue sizes and times from `UIMessageCompData`, but its expiry, overflow and
   RemoveFlag order and the ScoreAggregation value (a sum reset after ScoreAggregateTime) are inferred, the MessageQuery DataKey to source table is measured (the key hash is unknown), and
-  without squads in the model the kill feed's squad colour marks only the local player. The damage indicator's Scale
+  without squads in the model the kill feed's squad colour marks only the local player; its UpdatesPerSecond 3 is not applied.
+  A kill row fades only by its timeline's `container` alpha (startAnim frames 1..4 in steps of 0.25, outAnim 10..14 in
+  steps of 0.2, 0.17 s at 30 fps); the footage's rows fade out over about 28 frames (0.9 s), which neither the AS2
+  nor UIMessageCompData (no fade field) explains. The damage indicator's Scale
   (the hit's damage) and Angle (clockwise from the view, checked against the sprite's rotation) are inferred, and the
   HudAlertMessage and LogMessage widgets have no source in TDM (no combat area, squads or log lines in the model).
   The moment fixture replays only kill and headshot scores, so its ScoreAggregator total reads 210 where the footage
