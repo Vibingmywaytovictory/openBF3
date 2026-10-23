@@ -271,61 +271,72 @@ struct TdmBrain::Impl {
 		set_activity(p_tick, act);
 
 		BotIntent intent = plan(frame, act);
+		const bool aligned = turn(frame, intent);
+		compose(frame, act, intent, aligned, cmd);
+		return cmd;
+	}
 
+	bool turn(const BotFrame &p_frame, BotIntent &r_intent) {
+		BotIntent &i = r_intent;
 		const float yaw_step = kTurnRateDegS * core::kDegToRadF * sim::kTickSeconds;
 		const float pitch_step = kPitchTurnRateDegS * core::kDegToRadF * sim::kTickSeconds;
-		view_yaw = wrap(view_yaw + std::clamp(wrap(intent.want_yaw - view_yaw), -yaw_step, yaw_step));
-		intent.want_pitch = std::clamp(intent.want_pitch, -kMaxPitchDeg * core::kDegToRadF, kMaxPitchDeg * core::kDegToRadF);
-		view_pitch += std::clamp(intent.want_pitch - view_pitch, -pitch_step, pitch_step);
+		view_yaw = wrap(view_yaw + std::clamp(wrap(i.want_yaw - view_yaw), -yaw_step, yaw_step));
+		i.want_pitch = std::clamp(i.want_pitch, -kMaxPitchDeg * core::kDegToRadF, kMaxPitchDeg * core::kDegToRadF);
+		view_pitch += std::clamp(i.want_pitch - view_pitch, -pitch_step, pitch_step);
 		if (!std::isfinite(view_yaw) || !std::isfinite(view_pitch)) {
-			view_yaw = sim::yaw_radians(p_state.yaw);
+			view_yaw = sim::yaw_radians(p_frame.self.yaw);
 			view_pitch = 0.0f;
 		}
-		const float cone = (intent.trigger == Trigger::Defib ? kDefibConeDeg : kFireConeDeg) * core::kDegToRadF;
-		const bool aligned = intent.have_aim && std::fabs(wrap(intent.want_yaw - view_yaw)) <= cone && std::fabs(intent.want_pitch - view_pitch) <= cone;
-		if (intent.sprint) {
-			const float len = std::sqrt(intent.move_dx * intent.move_dx + intent.move_dz * intent.move_dz);
-			intent.sprint = !intent.have_aim && len > 0.5f && std::fabs(wrap(yaw_of(intent.move_dx, intent.move_dz) - view_yaw)) <= kSprintConeDeg * core::kDegToRadF;
+		const float cone = (i.trigger == Trigger::Defib ? kDefibConeDeg : kFireConeDeg) * core::kDegToRadF;
+		const bool aligned = i.have_aim && std::fabs(wrap(i.want_yaw - view_yaw)) <= cone && std::fabs(i.want_pitch - view_pitch) <= cone;
+		if (i.sprint) {
+			const float len = std::sqrt(i.move_dx * i.move_dx + i.move_dz * i.move_dz);
+			i.sprint = !i.have_aim && len > 0.5f && std::fabs(wrap(yaw_of(i.move_dx, i.move_dz) - view_yaw)) <= kSprintConeDeg * core::kDegToRadF;
 		}
+		return aligned;
+	}
 
+	void compose(const BotFrame &p_frame, TdmBotActivity p_activity, const BotIntent &p_intent, bool p_aligned, sim::Command &r_cmd) {
+		const BotFrame &f = p_frame;
+		const BotIntent &i = p_intent;
 		FireRequest request;
-		request.tick = p_tick;
+		request.tick = f.tick;
 		request.life_tick = life_tick;
-		request.want_slot = intent.want_slot;
-		request.trigger = intent.trigger;
-		request.aligned = aligned;
-		request.sprint = intent.sprint;
-		request.zoom = intent.zoom;
-		request.quiet = !visible && p_tick - targeting.last_engaged() > 120u && act != TdmBotActivity::Revive;
+		request.want_slot = i.want_slot;
+		request.trigger = i.trigger;
+		request.aligned = p_aligned;
+		request.sprint = i.sprint;
+		request.zoom = i.zoom;
+		request.quiet = !f.visible && f.tick - targeting.last_engaged() > 120u && p_activity != TdmBotActivity::Revive;
 		request.throw_ready = grenade.throw_ready();
 		request.react_at = targeting.react_at();
-		request.target_distance = intent.target_distance;
-		request.target = target;
-		request.last_visible = te != nullptr ? te->last_visible : 0;
+		request.target_distance = i.target_distance;
+		request.target = f.target;
+		request.last_visible = f.te != nullptr ? f.te->last_visible : 0;
 		request.skill = skill;
-		request.position = p_state.position;
-		request.eye = eye;
+		request.position = f.self.position;
+		request.eye = f.eye;
 		request.view_yaw = view_yaw;
 		request.view_pitch = view_pitch;
-		const WeaponCommand weapon = weapons.input(sh, slot, arms, request, medic.defib_next(), rng);
+		const WeaponCommand weapon = weapons.input(*shared, slot, f.arms, request, medic.defib_next(), rng);
 		const sw::WeaponInput &in = weapon.input;
 		const float comp_yaw = weapon.comp_yaw, comp_pitch = weapon.comp_pitch;
 
+		sim::Command &cmd = r_cmd;
 		cmd.yaw = sim::quantize_yaw(wrap(view_yaw - comp_yaw));
 		cmd.pitch = sim::quantize_pitch(std::clamp(view_pitch - comp_pitch, -kMaxPitchDeg * core::kDegToRadF, kMaxPitchDeg * core::kDegToRadF));
-		cmd.pose = intent.pose;
+		cmd.pose = i.pose;
 		const float sy = std::sin(view_yaw), cy = std::cos(view_yaw);
-		const float fwd = intent.move_dx * sy + intent.move_dz * cy;
-		const float rgt = -intent.move_dx * cy + intent.move_dz * sy;
+		const float fwd = i.move_dx * sy + i.move_dz * cy;
+		const float rgt = -i.move_dx * cy + i.move_dz * sy;
 		cmd.move_forward = sim::quantize_axis(std::clamp(std::isfinite(fwd) ? fwd : 0.0f, -1.0f, 1.0f));
 		cmd.move_right = sim::quantize_axis(std::clamp(std::isfinite(rgt) ? rgt : 0.0f, -1.0f, 1.0f));
-		uint32_t b = intent.sprint ? sim::buttons::kSprint : 0u;
-		if (intent.walk_jump) {
+		uint32_t b = i.sprint ? sim::buttons::kSprint : 0u;
+		if (i.walk_jump) {
 			b |= sim::buttons::kJump;
 		}
 		b = sw::with_weapon_input(b, in);
 		cmd.buttons = b;
-		return cmd;
 	}
 
 	TdmBotActivity choose_activity(const BotFrame &p_frame) {
