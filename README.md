@@ -2,10 +2,19 @@
 
 openBF3 is an independent, from-scratch reimplementation of the multiplayer game of Battlefield 3: infantry, bots,
 weapons and vehicles, built on Godot 4.8 with all game code in C++ (a GDExtension, no GDScript). It ships no game
-content. At runtime it reads the data of your own retail Battlefield 3 install. The project is not affiliated with
-or endorsed by Electronic Arts or DICE. The design is in [research/PORTING-RESEARCH.md](research/PORTING-RESEARCH.md);
-this tree implements milestone steps S0 (toolchain and skeleton) and M0.1 (install mount, container readers and the EBX
-reader in C++).
+content. At runtime it reads the data of your own retail Battlefield 3 install. The design is in
+[research/PORTING-RESEARCH.md](research/PORTING-RESEARCH.md); this tree implements milestone steps S0 (toolchain and
+skeleton) and M0.1 (install mount, container readers and the EBX reader in C++).
+
+## Licence and disclaimer
+
+* openBF3 is free software under the GNU General Public License 3.0 ([LICENSE](LICENSE)).
+* It is free of charge and non-commercial: it is never sold, licensed or rented, and it has no paid features or
+  payment system of any kind.
+* openBF3 is a fan project. It is not made, endorsed, sponsored or supported by Electronic Arts or DICE, and it is
+  not affiliated with them. Battlefield and Battlefield 3 are trademarks of Electronic Arts Inc.
+* This repository contains no Battlefield game files, logos or artwork. To play, you need your own copy of
+  Battlefield 3, which openBF3 reads in place and never modifies or redistributes.
 
 ## The read-as-is rule
 

@@ -37,6 +37,11 @@ licence, and no such code is consulted while writing ours. Where a format fact i
 install with `bf3dump` and record the number in `docs/architecture.md` or a test. Third-party libraries are the
 pinned submodules under `extern/` only.
 
+One project is the exception: [OpenBF2](https://github.com/B2BF/OpenBF2), the GPL-3.0 reconstruction of the
+Battlefield 2 engine. Its bot AI (`Code/BF2/AI`) may be read, ported and adapted for openBF3's bot, squad and
+commander AI; openBF3 is licensed GPL-3.0 (`LICENSE`) so that it can be. Every file that holds ported OpenBF2 code
+is named in `docs/architecture.md` with the OpenBF2 path it came from.
+
 ## No shortcuts
 
 * A feature is done when its ctest row passes against the retail install and, for anything visible, its
