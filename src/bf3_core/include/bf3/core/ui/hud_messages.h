@@ -103,7 +103,7 @@ private:
 	void add(HudMessageSource p_source, As2Value p_value, double p_now_s);
 	void expire(HudMessageSource p_source, double p_now_s);
 	void publish(HudMessageSource p_source);
-	As2Value kill_value(const HudModel &p_model, const HudClientState &p_client, const HudKill &p_kill) const;
+	As2Value kill_value(const HudModel &p_model, const HudClientState &p_client, const HudKill &p_kill, bool p_local) const;
 
 	HudMessageCompData data_;
 	std::array<Queue, size_t(HudMessageSource::Count)> queues_{};

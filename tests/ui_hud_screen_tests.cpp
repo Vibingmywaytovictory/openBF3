@@ -218,8 +218,7 @@ HudModel kill_model() {
 	return m;
 }
 
-void push_kill(HudModel &r_m, uint8_t p_killer, uint8_t p_victim, uint32_t p_weapon, bool p_headshot, bool p_team_kill = false, bool p_suicide = false) {
-	HudKillFeed &f = r_m.messages.kill_message;
+void push_line(HudKillFeed &f, uint8_t p_killer, uint8_t p_victim, uint32_t p_weapon, bool p_headshot, bool p_team_kill, bool p_suicide) {
 	++f.newest_serial;
 	HudKill &k = f.lines[f.newest_serial % f.lines.size()];
 	k = HudKill{};
@@ -230,6 +229,14 @@ void push_kill(HudModel &r_m, uint8_t p_killer, uint8_t p_victim, uint32_t p_wea
 	k.headshot = p_headshot;
 	k.team_kill = p_team_kill;
 	k.suicide = p_suicide;
+}
+
+void push_kill(HudModel &r_m, uint8_t p_killer, uint8_t p_victim, uint32_t p_weapon, bool p_headshot, bool p_team_kill = false, bool p_suicide = false) {
+	push_line(r_m.messages.kill_message, p_killer, p_victim, p_weapon, p_headshot, p_team_kill, p_suicide);
+}
+
+void push_local_kill(HudModel &r_m, uint8_t p_killer, uint8_t p_victim, uint32_t p_weapon, bool p_headshot) {
+	push_line(r_m.messages.local_kill_message, p_killer, p_victim, p_weapon, p_headshot, false, false);
 }
 
 HudMessageCompData message_data(Retail &r_r) {
@@ -401,6 +408,28 @@ TEST_SUITE("ui-hud-screen-unit") {
 		}
 		full.update(f, c, 3.0);
 		CHECK(full.messages_added(HudMessageSource::Kill) == 7 + kHudKillFeedSize);
+		HudMessageCompData ld = d;
+		ld.info[size_t(HudMessageSource::LocalKill)] = HudMessageInfo{ 2, 5.0f, 1.0f, "LocalKill" };
+		HudMessageComp local(ld);
+		HudModel lm = kill_model();
+		push_local_kill(lm, 0, 1, 7, true);
+		local.update(lm, c, 0.0);
+		CHECK(local.list(HudMessageSource::Kill).size() == 0);
+		REQUIRE(local.list(HudMessageSource::LocalKill).size() == 1);
+		const As2Value &le = local.list(HudMessageSource::LocalKill).at(0);
+		CHECK(le.field("Type").to_string() == "LocalKill");
+		CHECK(le.field("Value").field("KillerName").to_string() == "AAAA");
+		CHECK(le.field("Value").field("Text").to_string() == "[W]");
+		CHECK_FALSE(le.field("Value").field("IsLocalPlayer").truthy());
+		CHECK_FALSE(le.field("Value").field("TeamKill").defined());
+		push_local_kill(lm, 3, 0, 7, false);
+		push_local_kill(lm, 0, 3, 7, false);
+		local.update(lm, c, 0.5);
+		REQUIRE(local.list(HudMessageSource::LocalKill).size() == 3);
+		CHECK(local.list(HudMessageSource::LocalKill).at(1).field("Value").field("IsLocalPlayer").truthy());
+		local.update(lm, c, 1.5);
+		CHECK(local.list(HudMessageSource::LocalKill).at(0).field("RemoveFlag").to_number() == 1.0);
+		CHECK(local.list(HudMessageSource::LocalKill).at(1).field("RemoveFlag").to_number() == 0.0);
 	}
 
 	TEST_CASE("hud screen unit: engine-drawn parts measured from the 18.57 footage") {
@@ -989,6 +1018,84 @@ TEST_SUITE("ui-hud-screen") {
 		}
 		CHECK(out_after == expected);
 		row("kill_feed_team_kill", "Game row message_99999 at y -240, out after " + std::to_string(out_after) + " frames");
+	}
+
+	TEST_CASE("hud screen: KillLog") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const HudMessageCompData data = message_data(*r);
+		const HudMessageInfo &info = data.of(HudMessageSource::LocalKill);
+		CHECK(info.queue_size == 2);
+		CHECK(info.normal_seconds == 5.0f);
+		CHECK(info.short_seconds == 1.0f);
+		CHECK(info.row_type == "LocalKill");
+		const TextDatabase &db = text_db(*r);
+		const uint32_t weapon = text_hash("ID_P_WNAME_M16A4");
+		const std::string weapon_text = "[" + std::string(db.find(weapon).value_or("?")) + "]";
+		HudMessageComp comp(data);
+		HudClientState c = text_client(db);
+		c.messages = &comp;
+		HudModel m = kill_model();
+		Screen s = initialized(*r, kHudTdmScreenPartition, m, c);
+		const std::string log = "instance1.HudMessage_00";
+		const HudWidgetNode *node = s.asset.find("HudMessage_00");
+		REQUIRE(node != nullptr);
+		REQUIRE(node->message_query.has_value());
+		CHECK(node->message_query->key == 1675248891);
+		CHECK(node->number_of_rows == 2);
+		const auto *api = dynamic_cast<HudMessageApi *>(s.hud->controller(log));
+		REQUIRE(api != nullptr);
+		CHECK(api->source() == HudMessageSource::LocalKill);
+		push_local_kill(m, 0, 1, weapon, true);
+		comp.update(m, c, 0.0);
+		s.hud->refresh(m);
+		REQUIRE(api->rows() == 1);
+		const std::string row1 = log + ".messageHolder.message_1";
+		const std::string c1 = row1 + ".container";
+		CHECK(s.at(row1).symbol == "LocalKill");
+		CHECK(s.at(row1).frame == s.label(row1, "startAnim"));
+		CHECK(s.at(row1).color.mul[3] == doctest::Approx(1.0f));
+		CHECK(s.at(c1 + ".killer.txt").text == "AAAA");
+		CHECK(s.at(c1 + ".killer.txtBg").text == "AAAA");
+		CHECK(s.at(c1 + ".victim.txt").text == "BBBBBB");
+		CHECK(s.at(c1 + ".msg.txt").text == weapon_text);
+		CHECK(s.at(c1 + ".msg").frame == s.label(c1 + ".msg", "neutral"));
+		CHECK(s.at(c1 + ".headShotIcon").visible);
+		CHECK(s.at(c1 + ".headShotIcon").frame == s.label(c1 + ".headShotIcon", "KitRecon"));
+		const As2Clip killer = s.clip(c1 + ".killer");
+		const As2Clip msg = s.clip(c1 + ".msg");
+		const As2Clip icon = s.clip(c1 + ".headShotIcon");
+		const As2Clip victim = s.clip(c1 + ".victim");
+		CHECK(victim.child("txt").width() == doctest::Approx(victim.child("txt").text_width() + 5.0f));
+		CHECK(msg.x() == doctest::Approx(killer.x() + killer.width() + 5.0f));
+		CHECK(icon.x() == doctest::Approx(msg.x() + msg.width() + 10.0f));
+		CHECK(icon.y() == 17.0f);
+		CHECK(victim.x() == doctest::Approx(icon.x() + 10.0f));
+		CHECK(s.clip(row1).x() == doctest::Approx(-(victim.x() + victim.width()) * 0.5f));
+		CHECK(s.clip(row1).y() == 0.0f);
+		const uint32_t out_label = s.label(row1, "outAnim");
+		const uint32_t started_after = frames_until(s, [&] { return !s.at(row1).playing; }, 60);
+		CHECK(s.at(row1).frame == s.label(row1, "startAnim") + started_after);
+		const float h1 = s.clip(row1 + ".heightClip").height();
+		push_local_kill(m, 0, 3, weapon, false);
+		comp.update(m, c, 1.0);
+		s.hud->refresh(m);
+		REQUIRE(api->rows() == 2);
+		const std::string c2 = log + ".messageHolder.message_2.container";
+		CHECK_FALSE(s.at(c2 + ".headShotIcon").visible);
+		CHECK(s.clip(c2 + ".victim").x() == doctest::Approx(s.clip(c2 + ".msg").x() + s.clip(c2 + ".msg").width() + 5.0f));
+		CHECK(s.clip(log + ".messageHolder.message_2").y() == doctest::Approx(h1));
+		comp.update(m, c, 5.0);
+		s.hud->refresh(m);
+		CHECK(s.at(row1).frame == out_label);
+		const uint32_t removed_after = frames_until(s, [&] { return s.scene->find_node(row1) == nullptr; }, 60);
+		CHECK(removed_after == s.at(log + ".messageHolder.message_2").timeline->frames - 1 - out_label);
+		CHECK(api->rows() == 1);
+		row("kill_log", "UIMessageCompData LocalKill queue 2, 5 s, short 1 s; hudtdmscreen HudMessage_00 key 1675248891 rows 2; row " + weapon_text +
+						" centred at x " + std::to_string(s.clip(log + ".messageHolder.message_2").x()) + ", removed " + std::to_string(removed_after) +
+						" frames after outAnim");
 	}
 
 	TEST_CASE("hud screen: install unchanged") {

@@ -128,7 +128,7 @@ int32_t hud_relation(const HudModel &p_model, uint8_t p_player) {
 	return p.team != 0 && p.team == p_model.local_team ? kHudRelationFriendly : kHudRelationEnemy;
 }
 
-As2Value HudMessageComp::kill_value(const HudModel &p_model, const HudClientState &p_client, const HudKill &p_kill) const {
+As2Value HudMessageComp::kill_value(const HudModel &p_model, const HudClientState &p_client, const HudKill &p_kill, bool p_local) const {
 	const bool no_killer = p_kill.suicide || p_kill.killer >= p_model.players.size();
 	As2Value v = As2Value::object();
 	v.set("KillerColor", As2Value::of(no_killer ? kHudRelationEnemy : hud_relation(p_model, p_kill.killer)));
@@ -143,7 +143,11 @@ As2Value HudMessageComp::kill_value(const HudModel &p_model, const HudClientStat
 	}
 	v.set("VictimName", As2Value::of(player_name(p_model, p_kill.victim)));
 	v.set("HeadShot", As2Value::of(p_kill.headshot));
-	v.set("TeamKill", As2Value::of(p_kill.team_kill && !no_killer && p_kill.killer == p_model.local_player));
+	if (p_local) {
+		v.set("IsLocalPlayer", As2Value::of(p_kill.victim == p_model.local_player));
+	} else {
+		v.set("TeamKill", As2Value::of(p_kill.team_kill && !no_killer && p_kill.killer == p_model.local_player));
+	}
 	return v;
 }
 
@@ -198,7 +202,7 @@ void HudMessageComp::publish(HudMessageSource p_source) {
 void HudMessageComp::update(const HudModel &p_model, const HudClientState &p_client, double p_now_s) {
 	++updates_;
 	const double now = std::isfinite(p_now_s) ? p_now_s : 0.0;
-	const auto feed = [&](HudMessageSource p_source, const HudKillFeed &p_feed) {
+	const auto feed = [&](HudMessageSource p_source, const HudKillFeed &p_feed, bool p_local) {
 		Queue &q = queues_[size_t(p_source)];
 		if (p_feed.newest_serial < q.last_serial) {
 			q.last_serial = 0;
@@ -207,15 +211,20 @@ void HudMessageComp::update(const HudModel &p_model, const HudClientState &p_cli
 		for (uint32_t s = first; s <= p_feed.newest_serial && s != 0; ++s) {
 			const HudKill &k = p_feed.lines[s % p_feed.lines.size()];
 			if (k.serial == s) {
-				add(p_source, kill_value(p_model, p_client, k), now);
+				add(p_source, kill_value(p_model, p_client, k, p_local), now);
 			}
 		}
 		q.last_serial = p_feed.newest_serial;
 	};
-	expire(HudMessageSource::Kill, now);
-	feed(HudMessageSource::Kill, p_model.messages.kill_message);
-	expire(HudMessageSource::Kill, now);
-	publish(HudMessageSource::Kill);
+	for (const HudMessageSource src : { HudMessageSource::Kill, HudMessageSource::LocalKill }) {
+		expire(src, now);
+	}
+	feed(HudMessageSource::Kill, p_model.messages.kill_message, false);
+	feed(HudMessageSource::LocalKill, p_model.messages.local_kill_message, true);
+	for (const HudMessageSource src : { HudMessageSource::Kill, HudMessageSource::LocalKill }) {
+		expire(src, now);
+		publish(src);
+	}
 }
 
 }

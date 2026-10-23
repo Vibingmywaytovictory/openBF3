@@ -1192,6 +1192,66 @@ private:
 	bool switch_message_ = false;
 };
 
+class LocalKillLogMessageClass final : public MessageBaseClass {
+public:
+	void set_data(const As2Value &p_e) override {
+		MessageBaseClass::set_data(p_e);
+		const As2Value &v = p_e.field("Value");
+		set_field("killer", v.field("KillerName"));
+		set_field("victim", v.field("VictimName"));
+		set_message(v.field("Text").to_string());
+		setup_icon(v.field("HeadShot").truthy());
+		update_text_positions();
+		start_anim();
+	}
+
+private:
+	static constexpr float kTextOffset = 5.0f;
+	static constexpr float kKillerAloneX = 100.0f;
+
+	As2Clip container() const { return host_->clip("container"); }
+
+	void set_field(std::string_view p_field, const As2Value &p_name) {
+		const As2Clip f = container().child(p_field);
+		f.set_visible(p_name.defined());
+		set_both_texts(*host_, f, p_name.to_string());
+		fit_both_texts(f, kTextOffset);
+	}
+
+	void set_message(const std::string &p_text) {
+		const As2Clip msg = container().child("msg");
+		msg.goto_and_stop("neutral");
+		set_both_texts(*host_, msg, p_text);
+		fit_both_texts(msg, kTextOffset);
+	}
+
+	void setup_icon(bool p_headshot) {
+		const As2Clip icon = container().child("headShotIcon");
+		if (p_headshot) {
+			icon.goto_and_stop("KitRecon");
+			icon.set_visible(true);
+		} else {
+			icon.set_visible(false);
+		}
+	}
+
+	void update_text_positions() {
+		const As2Clip c = container();
+		const As2Clip killer = c.child("killer");
+		const As2Clip msg = c.child("msg");
+		const As2Clip icon = c.child("headShotIcon");
+		const As2Clip victim = c.child("victim");
+		if (!victim.visible()) {
+			killer.set_x(kKillerAloneX);
+		}
+		msg.set_x(killer.x() + killer.width() + kTextOffset);
+		icon.set_x(msg.x() + msg.width() + 10.0f);
+		icon.set_y(17.0f);
+		victim.set_x(icon.visible() ? icon.x() + 10.0f : msg.x() + msg.width() + kTextOffset);
+		host_->self().set_x(-(victim.x() + victim.width()) * 0.5f);
+	}
+};
+
 class GameMessageClass final : public MessageBaseClass {
 public:
 	void construct(HudWidgetHost &r_host) override {
@@ -1618,6 +1678,9 @@ std::unique_ptr<HudWidgetController> make_hud_widget_controller(std::string_view
 	}
 	if (p_class == "Widget.Message.MessageTypes.KillLogMessage") {
 		return std::make_unique<KillLogMessageClass>();
+	}
+	if (p_class == "Widget.Message.MessageTypes.LocalKillLogMessage") {
+		return std::make_unique<LocalKillLogMessageClass>();
 	}
 	if (p_class == "Widget.Message.MessageTypes.GameMessage") {
 		return std::make_unique<GameMessageClass>();
