@@ -23,6 +23,12 @@ class Bf3LevelSession;
 class Bf3NativeHud;
 struct NativeHudMinimapPose;
 
+struct NativeHudSquadRow {
+	int16_t kit = 0;
+	int16_t booster = 0;
+	bool leader = false;
+};
+
 struct NativeHudMoment {
 	const char *id = "";
 	int32_t clip = 0;
@@ -63,6 +69,7 @@ private:
 	void settle(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, const NativeHudMoment &p_moment, bf3::core::ui::HudModel p_model);
 	void check(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, const NativeHudMoment &p_moment);
 	void check_messages(Bf3NativeHud &r_hud, const NativeHudMoment &p_moment);
+	void check_squad(Bf3NativeHud &r_hud, const NativeHudMoment &p_moment);
 	void row(const std::string &p_name, bool p_pass, const std::string &p_detail);
 
 	std::string out_dir_;
@@ -83,6 +90,8 @@ private:
 	int32_t expect_score_frame_ = -1;
 	int32_t expect_aggregator_frame_ = -1;
 	std::string names_detail_;
+	std::vector<NativeHudSquadRow> expect_squad_;
+	std::vector<std::string> expect_squad_names_;
 };
 
 }

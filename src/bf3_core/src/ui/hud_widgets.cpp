@@ -2119,7 +2119,7 @@ public:
 			m.set("Kit", As2Value::of(int32_t(p.kit_icon)));
 			m.set("SquadLeader", As2Value::of(slot == members.leader));
 			m.set("Voip", As2Value::of(int32_t(0)));
-			m.set("BoosterIcon", As2Value::of(int32_t(0)));
+			m.set("BoosterIcon", As2Value::of(int32_t(p.booster_icon)));
 			list.push(std::move(m));
 		}
 		r_out.push_back({ "SquadList", std::move(list) });

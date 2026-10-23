@@ -49,6 +49,7 @@ struct HudPlayer {
 	int16_t kit_icon = 0;
 	int32_t score = 0;
 	uint16_t ping_ms = 0;
+	int16_t booster_icon = 0;
 };
 
 struct HudPlayerList {

@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <numbers>
@@ -165,6 +166,38 @@ constexpr std::array<MomentPopup, 4> kMomentPopups{ {
 		{ "m16", 2, 1, 0x0fd83dfau, "M16A3", 168.0f, 272.0f, 14, -1 },
 } };
 
+struct MomentSquad {
+	const char *moment = "";
+	std::array<NativeHudSquadRow, ui::kHudSquadSize> rows{};
+};
+
+constexpr MomentSquad squad_of(const char *p_moment, int16_t p_leader_booster, int16_t p_kit1, int16_t p_kit2, int16_t p_booster2, int16_t p_booster3) {
+	return { p_moment, { { { 70, p_leader_booster, true }, { p_kit1, 138, false }, { p_kit2, p_booster2, false }, { 70, p_booster3, false } } } };
+}
+
+constexpr std::array<MomentSquad, 16> kMomentSquads{ {
+		squad_of("m01", 143, 70, 71, 139, 140),
+		squad_of("m02", 143, 145, 145, 139, 140),
+		squad_of("m03", 143, 70, 71, 144, 140),
+		squad_of("m04", 139, 70, 71, 139, 140),
+		squad_of("m05", 139, 70, 71, 139, 140),
+		squad_of("m06", 139, 70, 71, 139, 143),
+		squad_of("m07", 139, 70, 71, 139, 143),
+		squad_of("m08", 139, 70, 71, 139, 143),
+		squad_of("m09", 139, 70, 71, 139, 143),
+		squad_of("m10", 139, 70, 71, 139, 143),
+		squad_of("m11", 139, 70, 71, 139, 143),
+		squad_of("m12", 139, 70, 71, 139, 143),
+		squad_of("m13", 139, 70, 71, 139, 143),
+		squad_of("m14", 139, 70, 71, 139, 143),
+		squad_of("m15", 139, 70, 71, 139, 143),
+		squad_of("m16", 139, 70, 71, 139, 143),
+} };
+
+constexpr std::array<float, 2> kSquadNamePx{ 452.0f - 297.0f, 452.0f - 276.0f };
+constexpr uint8_t kSquadSlot0 = 24;
+constexpr const char *kSquadListPath = "instance1.SquadList_00";
+
 constexpr double kFlushMarginSeconds = 1.0;
 constexpr double kKillLeadSeconds = 3.0;
 constexpr double kPreScoreLeadSeconds = 7.9;
@@ -277,20 +310,20 @@ std::vector<MessageRow> message_rows(const Bf3NativeHud &p_hud, const char *p_wi
 
 class NameFit {
 public:
-	std::string open() {
+	std::string open(const char *p_movie, std::initializer_list<const char *> p_linkages) {
 		Bf3UiAssets *assets = Bf3UiAssets::current();
 		if (assets == nullptr || assets->movies() == nullptr || assets->swf_fonts() == nullptr) {
 			return "no Bf3UiAssets movies or fonts";
 		}
 		fonts_ = assets->swf_fonts();
-		bf3::core::Result<ui::SwfScene> s = ui::SwfScene::open(*assets->movies(), kProbeMovie);
+		bf3::core::Result<ui::SwfScene> s = ui::SwfScene::open(*assets->movies(), p_movie);
 		if (!s) {
-			return std::string(kProbeMovie) + ": " + s.error().message;
+			return std::string(p_movie) + ": " + s.error().message;
 		}
 		scene_ = std::make_shared<ui::SwfScene>(std::move(*s));
 		const std::string root = scene_->node(scene_->root())->path;
 		int32_t depth = 1;
-		for (const char *linkage : { "Kill", "LocalKill", "Score" }) {
+		for (const char *linkage : p_linkages) {
 			bf3::core::Result<ui::SwfNodeId> a = scene_->attach_movie(root, linkage, linkage, depth++);
 			if (!a) {
 				return std::string(linkage) + ": " + a.error().message;
@@ -369,7 +402,6 @@ public:
 	}
 
 private:
-	static constexpr const char *kProbeMovie = "ui/assets/hudmessage";
 	std::shared_ptr<ui::SwfScene> scene_;
 	const ui::SwfFontSet *fonts_ = nullptr;
 	std::string prefix_;
@@ -607,7 +639,7 @@ void NativeHudMomentRun::settle(Bf3LevelSession &r_session, Bf3NativeHud &r_hud,
 	const ui::HudMessageComp *comp = r_hud.messages();
 	const std::shared_ptr<const host::SharedLevel> level = r_session.shared_level();
 	NameFit fit;
-	std::string error = comp == nullptr ? std::string("no HudMessageComp") : fit.open();
+	std::string error = comp == nullptr ? std::string("no HudMessageComp") : fit.open("ui/assets/hudmessage", { "Kill", "LocalKill", "Score" });
 	if (error.empty() && pop != nullptr && (level == nullptr || level->tdm_tuning == nullptr)) {
 		error = "no TdmTuning scores";
 	}
@@ -636,12 +668,13 @@ void NativeHudMomentRun::settle(Bf3LevelSession &r_session, Bf3NativeHud &r_hud,
 	const float feed_scale = (feed != nullptr ? feed->world.a : 1.0f) * sx;
 	const float log_scale = (log != nullptr ? log->world.a : 1.0f) * sx;
 	float worst = 0.0f;
-	const auto fitted = [&](std::string_view p_field, float p_scale, float p_px) {
-		const float s = p_scale * fit.chain_scale(p_field);
-		const std::string name = s > 0.0f ? fit.fit(p_field, p_px / s) : std::string();
-		worst = std::max(worst, std::fabs(fit.width(p_field, name) * s - p_px));
+	const auto fitted_in = [&](NameFit &r_fit, std::string_view p_field, float p_scale, float p_px) {
+		const float s = p_scale * r_fit.chain_scale(p_field);
+		const std::string name = s > 0.0f ? r_fit.fit(p_field, p_px / s) : std::string();
+		worst = std::max(worst, std::fabs(r_fit.width(p_field, name) * s - p_px));
 		return name;
 	};
+	const auto fitted = [&](std::string_view p_field, float p_scale, float p_px) { return fitted_in(fit, p_field, p_scale, p_px); };
 	ui::HudModel m = p_model;
 	m.players.fill(ui::HudPlayer{});
 	m.local_player = kLocalSlot;
@@ -657,6 +690,40 @@ void NativeHudMomentRun::settle(Bf3LevelSession &r_session, Bf3NativeHud &r_hud,
 		expect_log_.push_back(std::string("[") + pop->weapon_text + "]");
 		expect_score_frame_ = pop->score_frame;
 		expect_aggregator_frame_ = pop->aggregator_frame;
+	}
+	expect_squad_.clear();
+	expect_squad_names_.clear();
+	const MomentSquad *squad = nullptr;
+	for (const MomentSquad &q : kMomentSquads) {
+		squad = id == q.moment ? &q : squad;
+	}
+	if (squad != nullptr) {
+		NameFit squad_fit;
+		const std::string squad_error = squad_fit.open("ui/assets/squadlist", { "SquadList" });
+		if (!squad_error.empty()) {
+			row(id + ".squad_list", false, squad_error);
+		} else {
+			const ui::SwfSceneNode *sl = node_of(r_hud, kSquadListPath);
+			const float sl_scale = (sl != nullptr ? sl->world.a : 1.0f) * sx;
+			ui::HudSquadMemberList &members = m.squad.local_squad_members;
+			members = ui::HudSquadMemberList{};
+			for (size_t i = 0; i < squad->rows.size(); ++i) {
+				const NativeHudSquadRow &q = squad->rows[i];
+				const uint8_t slot = uint8_t(kSquadSlot0 + i);
+				const std::string field = "SquadList.squadMember" + std::to_string(i) + ".label.txt";
+				const std::string name = fitted_in(squad_fit, field, sl_scale, kSquadNamePx[q.leader ? 0 : 1]);
+				set_name(m, slot, kOwnTeam, kOwnSquad, name);
+				ui::HudPlayer &p = m.players[slot];
+				p.alive = q.kit != ui::kUiHudIconDead;
+				p.kit_icon = p.alive ? q.kit : int16_t(0);
+				p.booster_icon = q.booster;
+				members.index[i] = slot;
+				members.leader = q.leader ? slot : members.leader;
+				expect_squad_.push_back(q);
+				expect_squad_names_.push_back(name);
+			}
+			members.count = uint8_t(squad->rows.size());
+		}
 	}
 	const int32_t pre_score_step = pop != nullptr && pop->aggregator_frame >= 0 ? step_before(kPreScoreLeadSeconds) : -1;
 	const int32_t kill_step = step_before(kKillLeadSeconds);
@@ -851,6 +918,32 @@ void NativeHudMomentRun::check(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, 
 			"iBgDraw panels " + std::to_string(ps.bg_panels) + ", EKG traces " + std::to_string(ps.ekg_traces) + ", minimap maps " + std::to_string(ps.minimap_maps) +
 					", minimap icons " + std::to_string(ps.minimap_icons));
 	check_messages(r_hud, p_moment);
+	check_squad(r_hud, p_moment);
+}
+
+void NativeHudMomentRun::check_squad(Bf3NativeHud &r_hud, const NativeHudMoment &p_moment) {
+	if (expect_squad_.empty()) {
+		return;
+	}
+	const std::string id = p_moment.id;
+	bool ok = true;
+	std::string detail;
+	for (size_t i = 0; i < expect_squad_.size(); ++i) {
+		const NativeHudSquadRow &q = expect_squad_[i];
+		const std::string rp = std::string(kSquadListPath) + ".squadMember" + std::to_string(i);
+		const ui::SwfSceneNode *r = node_of(r_hud, rp.c_str());
+		const ui::SwfSceneNode *kit = node_of(r_hud, (rp + ".kit").c_str());
+		const ui::SwfSceneNode *booster = node_of(r_hud, (rp + ".booster").c_str());
+		const ui::SwfSceneNode *leader = node_of(r_hud, (rp + ".leader").c_str());
+		const char *txt = text_of(r_hud, (rp + ".label.txt").c_str());
+		const bool row_ok = r != nullptr && r->world_visible && kit != nullptr && int32_t(kit->frame) + 1 == q.kit && booster != nullptr && booster->visible &&
+				int32_t(booster->frame) + 1 == q.booster && leader != nullptr && leader->visible == q.leader && txt != nullptr && expect_squad_names_[i] == txt;
+		ok = ok && row_ok;
+		detail += (i == 0 ? "" : "; ") + std::string("row ") + std::to_string(i) + " kit " + (kit != nullptr ? std::to_string(kit->frame + 1) : std::string("missing")) +
+				" booster " + (booster != nullptr ? std::to_string(booster->frame + 1) : std::string("missing")) + " leader " +
+				(leader != nullptr && leader->visible ? "shown" : "hidden") + (row_ok ? "" : " (want kit " + std::to_string(q.kit) + " booster " + std::to_string(q.booster) + ")");
+	}
+	row(id + ".squad_list", ok, detail + "; names fill the reference's masked name rects");
 }
 
 bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, double p_delta) {

@@ -1079,6 +1079,13 @@ TEST_SUITE("ui-hud-screen") {
 			CHECK(rw.child("voip").x() == doctest::Approx(rw.child("label").x() + rw.child("label").child("txt").text_width() + 15.0f));
 		}
 		CHECK(s.clip(sl + ".squadMember0.label.txt").text_width() > s.clip(sl + ".squadMember3.label.txt").text_width());
+		m.players[1].booster_icon = 140;
+		s.hud->refresh(m);
+		CHECK(s.at(sl + ".squadMember1.booster").visible);
+		CHECK(s.at(sl + ".squadMember1.booster").frame == 139);
+		CHECK(s.clip(sl + ".squadMember1.label").x() == doctest::Approx(48.0f));
+		CHECK(s.clip(sl + ".squadMember0.label").x() == doctest::Approx(70.0f));
+		m.players[1].booster_icon = 0;
 		HudWidgetController *ctl = s.hud->controller(sl);
 		REQUIRE(ctl != nullptr);
 		HudWidgetHost host(*s.hud, sl, "Widget.Hud.SquadList");
@@ -1112,7 +1119,7 @@ TEST_SUITE("ui-hud-screen") {
 			CHECK_FALSE(s.at(sl + ".squadMember" + std::to_string(i)).visible);
 		}
 		CHECK(s.hud->stats().as2.failed_ops == 0);
-		row("squad_list", "kit icons " + std::to_string(kit_icons[0]) + "/" + std::to_string(kit_icons[1]) + " (UIHudIcon enum = 1-based label frame), tint e4ff9d, rows 4 at label x 50/28 without boosters, 70/48 with");
+		row("squad_list", "HudPlayer::booster_icon 140 -> booster frame 140; kit icons " + std::to_string(kit_icons[0]) + "/" + std::to_string(kit_icons[1]) + " (UIHudIcon enum = 1-based label frame), tint e4ff9d, rows 4 at label x 50/28 without boosters, 70/48 with");
 	}
 
 	TEST_CASE("hud screen: Icon3D managers and tags") {
