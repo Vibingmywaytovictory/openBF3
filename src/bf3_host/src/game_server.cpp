@@ -6,6 +6,7 @@
 #include "bf3/host/tdm_brain.h"
 #include "bot_director.h"
 #include "server_combat.h"
+#include "server_combat_log.h"
 #include "server_commands.h"
 #include "server_match.h"
 #include "server_outbox.h"
@@ -98,6 +99,7 @@ struct GameServer::Impl {
 	CommandBuffers commands;
 	MatchControl match;
 	Combat combat;
+	CombatLog combat_log{ slots, match, combat };
 	std::deque<PendingDebug> debug_queue;
 	Sweep sweep;
 	uint64_t snapshots_sent = 0;
@@ -924,43 +926,6 @@ const sim::SoldierState *GameServer::soldier(uint32_t p_slot) const {
 namespace bf3::host {
 
 struct GameServer::Impl::Sv {
-
-	struct Sink final : CombatEventSink {
-		Impl *m = nullptr;
-		void hit(const net::HitEvent &p_event) override { m->sv->combat.hits.push_back(p_event); }
-		void death(const net::DeathEvent &p_event) override {
-
-			if (p_event.victim < m->slots.size()) {
-				ServerSlot &s = m->slots[p_event.victim];
-
-				if (s.used && !s.dummy && !s.want_spawn) {
-					const std::optional<uint32_t> at = m->match.policy().respawn_tick(p_event.victim, m->tick + 1u);
-					if (at) {
-						s.want_spawn = true;
-						s.respawn_at = *at;
-					}
-				}
-			}
-			net::DeathEvent e = p_event;
-			TdmRules *tdm = m->match.rules();
-			if (tdm != nullptr) {
-				e.respawn_tick = tdm->earliest_respawn(p_event.victim);
-				e.revive_until = tdm->revive_until(p_event.victim);
-				e.killer_health = m->combat.killer_health(p_event.killer, p_event.victim);
-			}
-			m->sv->combat.deaths.push_back(e);
-			if (tdm != nullptr) {
-				tdm->death(e);
-			}
-		}
-		void revive(const net::ReviveEvent &p_event) override {
-			m->sv->combat.revives.push_back(p_event);
-			if (m->match.rules() != nullptr) {
-				m->match.rules()->revive(p_event);
-			}
-		}
-		void detonation(const net::DetonationWire &p_event) override { m->sv->combat.detonations.push_back(p_event); }
-	};
 	struct View final : ServerView {
 		Impl *m = nullptr;
 		mutable std::vector<sim::SoldierState> cache;
@@ -1015,10 +980,8 @@ struct GameServer::Impl::Sv {
 		uint16_t yaw = 0;
 		sim::Pose pose = sim::Pose::Stand;
 	};
-	Sink sink;
 	View view;
 	std::vector<Placement> placements;
-	net::CombatEvents combat;
 	std::vector<net::OtherSoldier> overflow;
 	uint64_t main_mask = 0;
 	std::vector<net::RemoteShot> remote;
@@ -1036,7 +999,6 @@ const ServerView &GameServer::Impl::server_view() const {
 core::Status GameServer::Impl::sv_init() {
 	sv = std::make_unique<Sv>();
 	Sv &v = *sv;
-	v.sink.m = this;
 	v.view.m = this;
 	match.configure(config, slots.size());
 	combat.configure(slots.size(), *config.level->static_world);
@@ -1080,7 +1042,8 @@ void GameServer::Impl::sv_rules(sim::Tick p_tick) {
 	}
 	Sv &v = *sv;
 	if (combat.on()) {
-		combat.resolve(p_tick, slots, v.sink);
+		combat_log.open(p_tick);
+		combat.resolve(p_tick, slots, combat_log);
 		match.step(p_tick, v.view, *combat.gunplay(), combat.tick_states());
 		combat.restore(slots);
 	}
@@ -1261,23 +1224,14 @@ void GameServer::Impl::sv_after_snapshot(size_t p_slot, const net::Snapshot &p_s
 		}
 	}
 
-	if (!v.combat.hits.empty() || !v.combat.deaths.empty() || !v.combat.detonations.empty() || !v.combat.revives.empty()) {
-		net::CombatEvents c = v.combat;
-		c.server_tick = p_snapshot.server_tick;
-		size_t clamped = 0;
-		std::vector<uint8_t> bytes = net::encode_combat_events(c, combat.frame(), &clamped);
-		g.count_combat_clamped(clamped);
-		if (!bytes.empty()) {
-			outbox.send(s.peer, net::kChannelReliable, std::move(bytes));
-		}
-	}
+	combat_log.send(s.peer, p_snapshot.server_tick, g, outbox);
 }
 
 void GameServer::Impl::sv_end_snapshots() {
 	if (sv == nullptr) {
 		return;
 	}
-	sv->combat = net::CombatEvents();
+	combat_log.clear();
 	if (combat.on()) {
 		combat.gunplay()->end_snapshot_interval();
 	}
@@ -1380,7 +1334,7 @@ void GameServer::Impl::sv_orders(sim::Tick p_tick, std::span<const RulesOrder> p
 				e.reviver = o.reviver;
 				e.revived = o.slot;
 				e.tick = p_tick;
-				sv->sink.revive(e);
+				combat_log.revive(e);
 				break;
 			}
 			case RulesOrder::Kind::Unspawn:
