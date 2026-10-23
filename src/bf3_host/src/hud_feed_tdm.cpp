@@ -1,6 +1,7 @@
 #include "bf3/host/hud_feed.h"
 
 #include "bf3/host/kits.h"
+#include "bf3/core/ui/hud_messages.h"
 #include "bf3/core/ui/text_db.h"
 #include "bf3/sim/weapons/sim_time.h"
 
@@ -71,6 +72,18 @@ void push_kill(ui::HudKillFeed &r_feed, uint32_t &r_serial, const ui::HudKill &p
 	ui::HudKill line = p_line;
 	line.serial = r_serial;
 	r_feed.lines[r_serial % r_feed.lines.size()] = line;
+	r_feed.newest_serial = r_serial;
+}
+
+void push_score(ui::HudScoreFeed &r_feed, uint32_t &r_serial, std::string_view p_sid, int32_t p_points) {
+	++r_serial;
+	if (r_serial == 0) {
+		r_serial = 1;
+	}
+	ui::HudScoreEvent &e = r_feed.events[r_serial % r_feed.events.size()];
+	e.serial = r_serial;
+	e.sid_hash = ui::text_hash(p_sid);
+	e.points = p_points;
 	r_feed.newest_serial = r_serial;
 }
 
@@ -274,6 +287,12 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 		++r_state.deaths_fed;
 		if ((e.flags & present_flags::kOwnShooter) != 0 && !suicide) {
 			push_kill(msg.local_kill_message, r_state.local_kill_serial, line);
+			if (!line.team_kill) {
+				push_score(msg.score_message, r_state.score_serial, ui::kHudScoreKillSid, p_input.score_kill);
+				if (line.headshot) {
+					push_score(msg.score_message, r_state.score_serial, ui::kHudScoreHeadshotSid, p_input.score_headshot);
+				}
+			}
 		}
 		if ((e.flags & present_flags::kOwnVictim) == 0) {
 			continue;

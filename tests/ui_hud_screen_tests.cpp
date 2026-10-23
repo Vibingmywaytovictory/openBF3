@@ -235,6 +235,15 @@ void push_kill(HudModel &r_m, uint8_t p_killer, uint8_t p_victim, uint32_t p_wea
 	push_line(r_m.messages.kill_message, p_killer, p_victim, p_weapon, p_headshot, p_team_kill, p_suicide);
 }
 
+void push_score(HudModel &r_m, uint32_t p_sid_hash, int32_t p_points) {
+	HudScoreFeed &f = r_m.messages.score_message;
+	++f.newest_serial;
+	HudScoreEvent &e = f.events[f.newest_serial % f.events.size()];
+	e.serial = f.newest_serial;
+	e.sid_hash = p_sid_hash;
+	e.points = p_points;
+}
+
 void push_local_kill(HudModel &r_m, uint8_t p_killer, uint8_t p_victim, uint32_t p_weapon, bool p_headshot) {
 	push_line(r_m.messages.local_kill_message, p_killer, p_victim, p_weapon, p_headshot, false, false);
 }
@@ -430,6 +439,32 @@ TEST_SUITE("ui-hud-screen-unit") {
 		local.update(lm, c, 1.5);
 		CHECK(local.list(HudMessageSource::LocalKill).at(0).field("RemoveFlag").to_number() == 1.0);
 		CHECK(local.list(HudMessageSource::LocalKill).at(1).field("RemoveFlag").to_number() == 0.0);
+		HudMessageCompData sd = d;
+		sd.info[size_t(HudMessageSource::Score)] = HudMessageInfo{ 3, 5.0f, 5.0f, "Score" };
+		sd.score_aggregate_time = 8.0f;
+		HudMessageComp score(sd);
+		HudModel sm = kill_model();
+		score.update(sm, c, 0.0);
+		CHECK_FALSE(score.score_aggregate().defined());
+		push_score(sm, 7, 100);
+		push_score(sm, 7, 10);
+		score.update(sm, c, 0.0);
+		REQUIRE(score.list(HudMessageSource::Score).size() == 2);
+		CHECK(score.list(HudMessageSource::Score).at(0).field("Type").to_string() == "Score");
+		CHECK(score.list(HudMessageSource::Score).at(0).field("Value").field("Text").to_string() == "W");
+		CHECK(score.list(HudMessageSource::Score).at(0).field("Value").field("Score").to_number() == 100.0);
+		CHECK(score.list(HudMessageSource::Score).at(1).field("Value").field("Score").to_number() == 10.0);
+		CHECK(score.score_aggregate().to_number() == 110.0);
+		push_score(sm, 7, 100);
+		score.update(sm, c, 7.9);
+		CHECK(score.score_aggregate().to_number() == 210.0);
+		score.update(sm, c, 15.89);
+		CHECK(score.score_aggregate().to_number() == 210.0);
+		score.update(sm, c, 15.9);
+		CHECK(score.score_aggregate().to_number() == 0.0);
+		push_score(sm, 7, 100);
+		score.update(sm, c, 16.0);
+		CHECK(score.score_aggregate().to_number() == 100.0);
 	}
 
 	TEST_CASE("hud screen unit: engine-drawn parts measured from the 18.57 footage") {
@@ -833,7 +868,7 @@ TEST_SUITE("ui-hud-screen") {
 		CHECK(s.at(hi).frame == 1);
 		CHECK(s.at(hi + ".HitController").frame == 0);
 		CHECK_FALSE(s.at("instance1.LatencyIndicator_01").visible);
-		for (const char *w : { "PassangerList_01", "VehicleHealth_01", "ScoreAggregator_01", "SupportIconManager_01", "HudAlertMessage_01", "HudAlertMessage_02" }) {
+		for (const char *w : { "PassangerList_01", "VehicleHealth_01", "SupportIconManager_01", "HudAlertMessage_01", "HudAlertMessage_02" }) {
 			CHECK_MESSAGE(!s.at(std::string("instance1.") + w).visible, w);
 		}
 		for (const char *w : { "HudMessage_01", "HudMessage_02", "HudMessage_04", "HudMessage_05" }) {
@@ -846,11 +881,13 @@ TEST_SUITE("ui-hud-screen") {
 		}
 		Screen t = initialized(*r, kHudTdmScreenPartition, m);
 		CHECK_FALSE(t.at("instance1.SquadList_00").visible);
+		CHECK(s.at("instance1.ScoreAggregator_01").visible);
+		CHECK(s.at("instance1.ScoreAggregator_01.aggHolder").frame == s.label("instance1.ScoreAggregator_01.aggHolder", "hide"));
 		CHECK(t.at("instance1.HudMessage_00").visible);
 		REQUIRE(dynamic_cast<HudMessageApi *>(t.hud->controller("instance1.HudMessage_00")) != nullptr);
 		CHECK(dynamic_cast<HudMessageApi *>(t.hud->controller("instance1.HudMessage_00"))->rows() == 0);
 		CHECK_FALSE(t.at("instance1.MapmarkerManager_00").visible);
-		row("hidden", "hit level 1 -> frame index 1, latency hidden, 8 data-driven widgets hidden until their data, 5 HudMessage lists shown empty");
+		row("hidden", "hit level 1 -> frame index 1, latency hidden, 7 data-driven widgets hidden until their data, 5 HudMessage lists shown empty, ScoreAggregator on hide");
 	}
 
 	TEST_CASE("hud screen: KillFeed") {
@@ -1096,6 +1133,138 @@ TEST_SUITE("ui-hud-screen") {
 		row("kill_log", "UIMessageCompData LocalKill queue 2, 5 s, short 1 s; hudtdmscreen HudMessage_00 key 1675248891 rows 2; row " + weapon_text +
 						" centred at x " + std::to_string(s.clip(log + ".messageHolder.message_2").x()) + ", removed " + std::to_string(removed_after) +
 						" frames after outAnim");
+	}
+
+	TEST_CASE("hud screen: ScorePopup") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const HudMessageCompData data = message_data(*r);
+		const HudMessageInfo &info = data.of(HudMessageSource::Score);
+		CHECK(info.queue_size == 3);
+		CHECK(info.normal_seconds == 5.0f);
+		CHECK(info.short_seconds == 5.0f);
+		CHECK(info.row_type == "Score");
+		const TextDatabase &db = text_db(*r);
+		CHECK(db.find_sid(kHudScoreKillSid) == "ENEMY KILLED {0:s}");
+		CHECK(db.find_sid(kHudScoreHeadshotSid) == "HEADSHOT {0:s}");
+		HudMessageComp comp(data);
+		HudClientState c = text_client(db);
+		c.messages = &comp;
+		HudModel m = kill_model();
+		Screen s = initialized(*r, kHudMpScreenPartition, m, c);
+		const std::string pop = "instance1.HudMessage_01";
+		const HudWidgetNode *node = s.asset.find("HudMessage_01");
+		REQUIRE(node != nullptr);
+		REQUIRE(node->message_query.has_value());
+		CHECK(node->message_query->key == 1802462620);
+		CHECK(node->number_of_rows == 2);
+		const auto *api = dynamic_cast<HudMessageApi *>(s.hud->controller(pop));
+		REQUIRE(api != nullptr);
+		CHECK(api->source() == HudMessageSource::Score);
+		push_score(m, text_hash(kHudScoreKillSid), 100);
+		comp.update(m, c, 0.0);
+		s.hud->refresh(m);
+		REQUIRE(api->rows() == 1);
+		const std::string row1 = pop + ".messageHolder.message_1";
+		CHECK(s.at(row1).symbol == "Score");
+		CHECK(s.at(row1).matrix.tx == 140.0f);
+		CHECK(s.at(row1).frame == s.label(row1, "start"));
+		CHECK(s.at(row1).playing);
+		CHECK(s.at(row1 + ".scoringMessage.txt").text == "ENEMY KILLED 100");
+		CHECK(s.at(row1 + ".scoringMessage.txtBg").text == "ENEMY KILLED 100");
+		CHECK(s.at(row1 + ".cursor_mc").visible);
+		CHECK(s.clip(row1).y() == 0.0f);
+		const uint32_t loop = s.label(row1, "loop");
+		const uint32_t end = s.label(row1, "end");
+		const uint32_t looped = frames_until(s, [&] { return s.at(row1).frame == loop; }, 2 * end);
+		CHECK(looped == loop - s.label(row1, "start"));
+		const uint32_t back = frames_until(s, [&] { return s.at(row1).frame == loop; }, 2 * end);
+		CHECK(back == end - 1 - loop);
+		const float h1 = s.clip(row1 + ".heightClip").height();
+		push_score(m, text_hash(kHudScoreHeadshotSid), 10);
+		comp.update(m, c, 1.0);
+		s.hud->refresh(m);
+		REQUIRE(api->rows() == 2);
+		const std::string row2 = pop + ".messageHolder.message_2";
+		CHECK(s.at(row2 + ".scoringMessage.txt").text == "HEADSHOT 10");
+		CHECK(s.at(row2 + ".cursor_mc").visible);
+		CHECK_FALSE(s.at(row1 + ".cursor_mc").visible);
+		CHECK(s.clip(row2).y() == 0.0f);
+		const HudTween *t1 = tween_of(s, row1, HudTweenProperty::Y);
+		REQUIRE(t1 != nullptr);
+		CHECK(t1->seconds == 0.4);
+		CHECK(t1->to == doctest::Approx(h1));
+		comp.update(m, c, 5.0);
+		s.hud->refresh(m);
+		REQUIRE(s.scene->find_node(row1) != nullptr);
+		const uint32_t left_loop = frames_until(s, [&] { return s.at(row1).frame >= end; }, 2 * end);
+		CHECK(left_loop > 0);
+		const uint32_t removed_after = frames_until(s, [&] { return s.scene->find_node(row1) == nullptr; }, 2 * end);
+		CHECK(removed_after == s.at(row2).timeline->frames - 1 - end);
+		CHECK(api->rows() == 1);
+		row("score_popup", "UIMessageCompData Score queue 3, 5 s, short 5 s; HudMessage_01 key 1802462620 inverted; rows ENEMY KILLED 100, HEADSHOT 10 at x 140, "
+						"loop " + std::to_string(loop) + ".." + std::to_string(end - 1) + ", removed " + std::to_string(removed_after) + " frames after end " +
+						std::to_string(end) + ", row height " + std::to_string(h1));
+	}
+
+	TEST_CASE("hud screen: ScoreAggregator") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const HudMessageCompData data = message_data(*r);
+		HudMessageComp comp(data);
+		HudClientState c = text_client(text_db(*r));
+		c.messages = &comp;
+		HudModel m = kill_model();
+		Screen s = initialized(*r, kHudMpScreenPartition, m, c);
+		const std::string agg = "instance1.ScoreAggregator_01";
+		const HudWidgetNode *node = s.asset.find("ScoreAggregator_01");
+		REQUIRE(node != nullptr);
+		const HudDataSource *src = node->source("ScoreAgregateValue");
+		REQUIRE(src != nullptr);
+		CHECK(src->key == -29960869);
+		CHECK_FALSE(src->on_initialize);
+		CHECK(s.at(agg).visible);
+		const std::string holder = agg + ".aggHolder";
+		const uint32_t hide = s.label(holder, "hide");
+		const uint32_t start = s.label(holder, "start");
+		const uint32_t out = s.label(holder, "out");
+		CHECK(s.at(holder).frame == hide);
+		push_score(m, text_hash(kHudScoreKillSid), 100);
+		comp.update(m, c, 0.0);
+		s.hud->refresh(m);
+		CHECK(s.at(holder + ".scoringMessage.txt").text == "100");
+		CHECK(s.at(holder + ".scoringMessage.txtBg").text == "100");
+		CHECK(s.at(holder).frame == hide);
+		push_score(m, text_hash(kHudScoreKillSid), 100);
+		push_score(m, text_hash(kHudScoreHeadshotSid), 10);
+		comp.update(m, c, 2.0);
+		s.hud->refresh(m);
+		CHECK(s.at(holder + ".scoringMessage.txt").text == "210");
+		CHECK(s.at(holder).frame == start);
+		CHECK(s.at(holder).playing);
+		const uint32_t ready_after = frames_until(s, [&] { return !s.at(holder).playing; }, 60);
+		CHECK(s.at(holder).frame == out - 1);
+		push_score(m, text_hash(kHudScoreKillSid), 100);
+		comp.update(m, c, 3.0);
+		s.hud->refresh(m);
+		CHECK(s.at(holder + ".scoringMessage.txt").text == "310");
+		CHECK(s.at(holder).frame == start);
+		push_score(m, text_hash(kHudScoreKillSid), 100);
+		comp.update(m, c, 3.1);
+		s.hud->refresh(m);
+		CHECK(s.at(holder + ".scoringMessage.txt").text == "410");
+		CHECK(s.at(holder).frame == start);
+		comp.update(m, c, 3.1 + double(data.score_aggregate_time));
+		s.hud->refresh(m);
+		CHECK(s.at(holder).frame == out);
+		CHECK(s.at(holder + ".scoringMessage.txt").text == "410");
+		row("score_aggregator", "ScoreAgregateValue key -29960869 not on initialize; first score only sets the text, the next plays start " + std::to_string(start) +
+						", ready again " + std::to_string(ready_after) + " frames later, 0 after " + std::to_string(data.score_aggregate_time) + " s plays out " +
+						std::to_string(out));
 	}
 
 	TEST_CASE("hud screen: install unchanged") {

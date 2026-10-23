@@ -18,6 +18,8 @@ inline constexpr std::string_view kUiMessageCompPartition = "ui/uicomponents/uim
 inline constexpr uint32_t kHudKillWeaponFormatHash = 0x52ddee25u;
 inline constexpr std::string_view kHudKillWeaponFormat = "[{0:~}]";
 inline constexpr std::string_view kHudKillsIsNoSid = "ID_H_MSG_KILLS_ISNO";
+inline constexpr std::string_view kHudScoreKillSid = "ID_SCORE_KILL";
+inline constexpr std::string_view kHudScoreHeadshotSid = "ID_SCORE_HEADSHOT";
 inline constexpr int32_t kHudRelationFriendly = 0;
 inline constexpr int32_t kHudRelationEnemy = 1;
 inline constexpr int32_t kHudRelationSquad = 2;
@@ -82,6 +84,7 @@ public:
 	void update(const HudModel &p_model, const HudClientState &p_client, double p_now_s);
 
 	const As2Value &list(HudMessageSource p_source) const { return queues_[size_t(p_source)].list; }
+	const As2Value &score_aggregate() const { return aggregate_; }
 	uint64_t messages_added(HudMessageSource p_source) const { return queues_[size_t(p_source)].added; }
 	const HudMessageCompData &data() const { return data_; }
 
@@ -109,6 +112,10 @@ private:
 	std::array<Queue, size_t(HudMessageSource::Count)> queues_{};
 	uint64_t updates_ = 0;
 	double next_id_ = 0.0;
+	uint32_t score_serial_ = 0;
+	int32_t aggregate_sum_ = 0;
+	double aggregate_until_s_ = 0.0;
+	As2Value aggregate_;
 };
 
 }

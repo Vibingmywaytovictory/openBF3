@@ -93,6 +93,8 @@ struct HudFeedInput {
 	bool scoreboard_held = false;
 	const KitTable *kits = nullptr;
 	HudKillCardSource kill_card_source;
+	int32_t score_kill = 0;
+	int32_t score_headshot = 0;
 };
 
 struct HudFeedState {
@@ -133,6 +135,7 @@ inline constexpr std::array<uint8_t, core::ui::kHudSpawnKitItems> kHudSpawnSlots
 struct HudTdmFeedState {
 	uint32_t kill_serial = 0;
 	uint32_t local_kill_serial = 0;
+	uint32_t score_serial = 0;
 	uint32_t kill_card_serial = 0;
 	double kill_card_until_s = 0;
 	sim::Tick own_death_respawn_tick = 0;

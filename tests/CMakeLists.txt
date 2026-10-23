@@ -413,7 +413,8 @@ add_test(NAME ui.hud.screen.unit COMMAND test_ui_hud_screen --test-suite=ui-hud-
 set(_openbf3_hud_screen_install "*hud*screen:*install*unchanged*")
 foreach(_w IN ITEMS assets:*screen*assets* ticket_counter:*TicketCounter* ammo:*Ammo health:*Health compass:*Compass
         background:*HudBackgroundWidget* minimap:*Minimap crosshair:*Crosshair hidden:*Hitindicator* kill_feed:*KillFeed
-        kill_feed_team_kill:*KillFeed*team*kill* kill_log:*KillLog)
+        kill_feed_team_kill:*KillFeed*team*kill* kill_log:*KillLog
+        score_popup:*ScorePopup score_aggregator:*ScoreAggregator)
     string(REPLACE ":" ";" _p "${_w}")
     list(GET _p 0 _name)
     list(GET _p 1 _case)

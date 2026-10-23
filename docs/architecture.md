@@ -157,10 +157,10 @@ These are structural, known, and listed so nobody mistakes them for design inten
   unconditional stop/play/goto and hands every other frame script to the HUD controller that owns the clip; the movies'
   AS2 classes, `onClipEvent` handlers and conditional frame code are not executed outside the HUD controllers. `Bf3SwfView` draws no gradients, static text, Bevel or ColorMatrix filters,
   or blend modes other than normal, layer and add. The HUD does not sway with camera motion, the minimap zoom is a
-  fixed 1.375 m per local unit, the SquadList and ScorePopup widgets are not driven, and the KillLog
+  fixed 1.375 m per local unit, the SquadList and the Reward rows (HudMessage_04, `Widget.Image.ImageManager`) are not driven, and the KillLog
   names are not tinted (`Util.ColorTinting` reads the engine's UI colour table, which no install data holds). The engine message
   queue (`HudMessageComp`) takes queue sizes and times from `UIMessageCompData`, but its expiry, overflow and
-  RemoveFlag order are inferred, the MessageQuery DataKey to source table is measured (the key hash is unknown), and
+  RemoveFlag order and the ScoreAggregation value (a sum reset after ScoreAggregateTime) are inferred, the MessageQuery DataKey to source table is measured (the key hash is unknown), and
   without squads in the model the kill feed's squad colour marks only the local player.
 * Nametags are `Bf3Nametags` (`src/bf3_godot/src/iff_overlay.cpp`), a hand-built Godot control; the next widget stage
   replaces it with the native Icon3D nametags (`Widget.Icon3D.*`, driven by `Data.UINametagComp`).

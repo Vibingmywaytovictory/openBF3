@@ -216,12 +216,39 @@ void HudMessageComp::update(const HudModel &p_model, const HudClientState &p_cli
 		}
 		q.last_serial = p_feed.newest_serial;
 	};
-	for (const HudMessageSource src : { HudMessageSource::Kill, HudMessageSource::LocalKill }) {
+	constexpr std::array<HudMessageSource, 3> kQueues{ HudMessageSource::Kill, HudMessageSource::LocalKill, HudMessageSource::Score };
+	for (const HudMessageSource src : kQueues) {
 		expire(src, now);
 	}
 	feed(HudMessageSource::Kill, p_model.messages.kill_message, false);
 	feed(HudMessageSource::LocalKill, p_model.messages.local_kill_message, true);
-	for (const HudMessageSource src : { HudMessageSource::Kill, HudMessageSource::LocalKill }) {
+	const HudScoreFeed &scores = p_model.messages.score_message;
+	if (scores.newest_serial < score_serial_) {
+		score_serial_ = 0;
+	}
+	const uint32_t first = std::max(score_serial_ + 1, scores.newest_serial >= scores.events.size() ? scores.newest_serial - uint32_t(scores.events.size()) + 1 : 1u);
+	for (uint32_t s = first; s <= scores.newest_serial && s != 0; ++s) {
+		const HudScoreEvent &e = scores.events[s % scores.events.size()];
+		if (e.serial != s) {
+			continue;
+		}
+		As2Value v = As2Value::object();
+		v.set("Text", As2Value::of(localised(p_client, e.sid_hash)));
+		v.set("Score", As2Value::of(e.points));
+		add(HudMessageSource::Score, std::move(v), now);
+		if (now >= aggregate_until_s_) {
+			aggregate_sum_ = 0;
+		}
+		aggregate_sum_ += e.points;
+		aggregate_until_s_ = now + double(data_.score_aggregate_time);
+		aggregate_ = As2Value::of(aggregate_sum_);
+	}
+	score_serial_ = scores.newest_serial;
+	if (aggregate_.defined() && aggregate_sum_ != 0 && now >= aggregate_until_s_) {
+		aggregate_sum_ = 0;
+		aggregate_ = As2Value::of(0);
+	}
+	for (const HudMessageSource src : kQueues) {
 		expire(src, now);
 		publish(src);
 	}

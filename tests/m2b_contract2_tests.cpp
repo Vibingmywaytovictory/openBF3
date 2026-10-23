@@ -39,8 +39,8 @@ void pending(const char *p_key, const char *p_row, const char *p_reason) {
 	MESSAGE(text);
 }
 
-constexpr size_t kM2aHudModelSize = 8928;
-constexpr size_t kM2bHudModelSize = 9088;
+constexpr size_t kM2aHudModelSize = 9016;
+constexpr size_t kM2bHudModelSize = 9176;
 
 static_assert(sizeof(ui::HudKillCard) == 32);
 static_assert(offsetof(ui::HudKillCard, killer) == 5 && offsetof(ui::HudKillCard, item_id) == 12 &&
@@ -55,7 +55,7 @@ static_assert(sizeof(ui::HudPreRound) == 12);
 static_assert(offsetof(ui::HudPreRound, seconds_left) == 4 && offsetof(ui::HudPreRound, input_restricted) == 8);
 
 static_assert(offsetof(ui::HudModel, kill_card) == offsetof(ui::HudModel, team) + sizeof(ui::HudTeam));
-static_assert(offsetof(ui::HudModel, kill_card) == 8924 && (offsetof(ui::HudModel, kill_card) + 7) / 8 * 8 == kM2aHudModelSize);
+static_assert(offsetof(ui::HudModel, kill_card) == 9012 && (offsetof(ui::HudModel, kill_card) + 7) / 8 * 8 == kM2aHudModelSize);
 static_assert(offsetof(ui::HudModel, end_of_round) == offsetof(ui::HudModel, kill_card) + sizeof(ui::HudKillCard));
 static_assert(offsetof(ui::HudModel, spawn_screen) == offsetof(ui::HudModel, end_of_round) + sizeof(ui::HudEndOfRound));
 static_assert(offsetof(ui::HudModel, pre_round) == offsetof(ui::HudModel, spawn_screen) + sizeof(ui::HudSpawnScreen));

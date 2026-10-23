@@ -425,6 +425,35 @@ TEST_CASE("the kill-feed ring keeps the newest 8; unknown defs are counted") {
 	CHECK(!m.kill_card.visible);
 }
 
+TEST_CASE("own kills raise the scoring table's kill and headshot score messages") {
+	const host::HudStatic st = make_static();
+	std::vector<net::PlayerRow> rows{ player(1, 2, "Bot RU 1", 300, 3), player(2, 1, "Bot US 1", 200, 2), player(3, 1, "Me", 0, 0, false) };
+	host::HudFeedInput in;
+	in.tdm = true;
+	in.match_valid = true;
+	in.match.phase = net::MatchPhase::InRound;
+	in.players = rows;
+	in.own_slot = 3;
+	in.own_team = 1;
+	in.alive = true;
+	in.score_kill = 100;
+	in.score_headshot = 10;
+	host::HudTdmFeedState state;
+	ui::HudModel m;
+	const std::array<host::PresentEvent, 4> events{ death(3, 1, 0, host::present_flags::kOwnShooter), death(3, 1, 0, host::present_flags::kOwnShooter | host::present_flags::kHeadshot),
+		death(3, 2, 0, host::present_flags::kOwnShooter), death(2, 1, 0) };
+	host::fill_hud_tdm(in, events, st, state, m);
+	const ui::HudScoreFeed &f = m.messages.score_message;
+	REQUIRE(f.newest_serial == 3);
+	CHECK(f.events[1].sid_hash == ui::text_hash("ID_SCORE_KILL"));
+	CHECK(f.events[1].points == 100);
+	CHECK(f.events[2].sid_hash == ui::text_hash("ID_SCORE_KILL"));
+	CHECK(f.events[3].sid_hash == ui::text_hash("ID_SCORE_HEADSHOT"));
+	CHECK(f.events[3].points == 10);
+	CHECK(m.messages.local_kill_message.newest_serial == 3);
+	CHECK(m.messages.local_kill_message.lines[3].team_kill);
+}
+
 TEST_CASE("the kit bar: the own team's loadouts in slots 0, 1, 2, 6, 7") {
 	const host::HudStatic st = make_static();
 	host::KitTable kits;

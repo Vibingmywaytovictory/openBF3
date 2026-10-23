@@ -1252,6 +1252,68 @@ private:
 	}
 };
 
+class ScoreMessageClass final : public MessageBaseClass {
+public:
+	void construct(HudWidgetHost &r_host) override {
+		MessageBaseClass::construct(r_host);
+		play_out_after_loop_ = false;
+		r_host.self().set_x(kScoreX);
+		r_host.self().stop();
+	}
+
+	void frame_script(HudWidgetHost &r_host, const HudFrameScript &p_fs) override {
+		if (p_fs.path != r_host.path()) {
+			return;
+		}
+		if (p_fs.calls("playOutAnimAfterLoop")) {
+			if (!play_out_after_loop_) {
+				r_host.self().goto_and_play("loop");
+			}
+			return;
+		}
+		if (p_fs.calls("outAnimComplete")) {
+			if (owner_ != nullptr) {
+				owner_->removed_row(id());
+			}
+			return;
+		}
+		MessageBaseClass::frame_script(r_host, p_fs);
+	}
+
+	void set_data(const As2Value &p_e) override {
+		MessageBaseClass::set_data(p_e);
+		const As2Value &v = p_e.field("Value");
+		const std::array<std::string, 1> args{ v.field("Score").to_string() };
+		const std::string text = hud_format_text(host_->translate(v.field("Text").to_string()), args);
+		const As2Clip m = host_->clip("scoringMessage");
+		m.child("txt").set_text(text);
+		m.child("txtBg").set_text(text);
+		start_anim();
+	}
+
+	void start_anim() override {
+		host_->self().set_alpha(100.0f);
+		host_->self().goto_and_play("start");
+	}
+
+	void refresh(const As2Value &p_e) override {
+		MessageBaseClass::refresh(p_e);
+		host_->clip("cursor_mc").set_visible(p_e.field("TotalMessages") == p_e.field("Index"));
+	}
+
+	void out_anim() override {
+		play_out_after_loop_ = true;
+		if (owner_ != nullptr) {
+			owner_->remove_row(id());
+			owner_->move_row(id());
+		}
+	}
+
+private:
+	static constexpr float kScoreX = 140.0f;
+	bool play_out_after_loop_ = false;
+};
+
 class GameMessageClass final : public MessageBaseClass {
 public:
 	void construct(HudWidgetHost &r_host) override {
@@ -1528,6 +1590,66 @@ private:
 	double team_kill_left_ = 0.0;
 };
 
+class ScoreAggregatorClass final : public HudWidgetController {
+public:
+	void attach_node(HudWidgetHost &, const HudWidgetNode &p_node) override {
+		if (const HudDataSource *src = p_node.source(kValue)) {
+			on_initialize_ = src->on_initialize;
+		}
+	}
+
+	void construct(HudWidgetHost &) override {
+		ready_ = true;
+		prev_value_ = -1.0;
+	}
+
+	void on_clip_load(HudWidgetHost &r_host) override { r_host.self().set_visible(false); }
+
+	void initialize(HudWidgetHost &r_host, const HudWidgetInit &p_init) override {
+		setup_refresh_data(*this, r_host, p_init.data);
+		r_host.self().set_visible(true);
+	}
+
+	void frame_script(HudWidgetHost &r_host, const HudFrameScript &p_fs) override {
+		if (p_fs.path == r_host.path() + ".aggHolder" && p_fs.calls("ready")) {
+			ready_ = true;
+		}
+	}
+
+	void update(HudWidgetHost &r_host, std::string_view p_key, const As2Value &p_value) override {
+		if (p_key != kValue || !p_value.defined()) {
+			return;
+		}
+		const As2Clip holder = r_host.clip("aggHolder");
+		const double v = p_value.to_number();
+		if (v == 0.0) {
+			holder.goto_and_play("out");
+			prev_value_ = 0.0;
+			return;
+		}
+		if (ready_ && prev_value_ > 0.0) {
+			ready_ = false;
+			holder.goto_and_play("start");
+		}
+		prev_value_ = v;
+		const std::string text = p_value.to_string();
+		r_host.clip("aggHolder.scoringMessage.txt").set_text(text);
+		r_host.clip("aggHolder.scoringMessage.txtBg").set_text(text);
+	}
+
+	void bind(const HudModel &, const HudClientState &p_client, HudData &r_out) const override {
+		if (p_client.messages != nullptr) {
+			r_out.push_back({ std::string(kValue), p_client.messages->score_aggregate(), on_initialize_ });
+		}
+	}
+
+private:
+	static constexpr std::string_view kValue = "ScoreAgregateValue";
+	bool on_initialize_ = true;
+	bool ready_ = true;
+	double prev_value_ = -1.0;
+};
+
 class HiddenUntilDataClass final : public HudWidgetController {
 public:
 	struct Spec {
@@ -1682,6 +1804,9 @@ std::unique_ptr<HudWidgetController> make_hud_widget_controller(std::string_view
 	if (p_class == "Widget.Message.MessageTypes.LocalKillLogMessage") {
 		return std::make_unique<LocalKillLogMessageClass>();
 	}
+	if (p_class == "Widget.Message.MessageTypes.ScoreMessage") {
+		return std::make_unique<ScoreMessageClass>();
+	}
 	if (p_class == "Widget.Message.MessageTypes.GameMessage") {
 		return std::make_unique<GameMessageClass>();
 	}
@@ -1692,7 +1817,7 @@ std::unique_ptr<HudWidgetController> make_hud_widget_controller(std::string_view
 		return std::make_unique<HiddenUntilDataClass>(Spec{ {}, true, true });
 	}
 	if (p_class == "Widget.Message.ScoreAggregator") {
-		return std::make_unique<HiddenUntilDataClass>(Spec{ {}, false, false });
+		return std::make_unique<ScoreAggregatorClass>();
 	}
 	if (p_class == "Widget.Icon3D.TeamSupport.SupportIconManager") {
 		return std::make_unique<HiddenUntilDataClass>(Spec{ { "TeamSupportIcon" }, false, false });

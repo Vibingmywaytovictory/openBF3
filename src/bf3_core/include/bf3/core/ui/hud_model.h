@@ -119,6 +119,13 @@ struct HudScoreEvent {
 	int32_t points = 0;
 };
 
+inline constexpr size_t kHudScoreFeedSize = 8;
+
+struct HudScoreFeed {
+	uint32_t newest_serial = 0;
+	std::array<HudScoreEvent, kHudScoreFeedSize> events{};
+};
+
 enum class HudSpawnKind : uint8_t {
 	Hq,
 	Flag,
@@ -286,7 +293,7 @@ struct HudMessages {
 	HudTextMessage out_of_bounds_message{};
 	HudScoreEvent kill_score_message{};
 	HudKillFeed local_kill_message{};
-	HudScoreEvent score_message{};
+	HudScoreFeed score_message{};
 	int32_t score_aggregation = 0;
 	HudTextMessage server_admin_yell_message{};
 	HudTextMessage gun_master_message{};
