@@ -40,7 +40,7 @@ void pending(const char *p_key, const char *p_row, const char *p_reason) {
 }
 
 constexpr size_t kM2aHudModelSize = 9016;
-constexpr size_t kM2bHudModelSize = 9176;
+constexpr size_t kM2bHudModelSize = 9312;
 
 static_assert(sizeof(ui::HudKillCard) == 32);
 static_assert(offsetof(ui::HudKillCard, killer) == 5 && offsetof(ui::HudKillCard, item_id) == 12 &&
@@ -59,6 +59,8 @@ static_assert(offsetof(ui::HudModel, kill_card) == 9012 && (offsetof(ui::HudMode
 static_assert(offsetof(ui::HudModel, end_of_round) == offsetof(ui::HudModel, kill_card) + sizeof(ui::HudKillCard));
 static_assert(offsetof(ui::HudModel, spawn_screen) == offsetof(ui::HudModel, end_of_round) + sizeof(ui::HudEndOfRound));
 static_assert(offsetof(ui::HudModel, pre_round) == offsetof(ui::HudModel, spawn_screen) + sizeof(ui::HudSpawnScreen));
+static_assert(offsetof(ui::HudModel, damage) == offsetof(ui::HudModel, pre_round) + sizeof(ui::HudPreRound));
+static_assert(sizeof(ui::HudDamageHit) == 16 && sizeof(ui::HudDamageFeed) == 4 + 16 * ui::kHudDamageFeedSize);
 static_assert(sizeof(ui::HudModel) == kM2bHudModelSize && alignof(ui::HudModel) == 8);
 static_assert(std::is_trivially_copyable_v<ui::HudModel>);
 static_assert(std::is_trivially_copyable_v<ui::HudKillCard> && std::is_trivially_copyable_v<ui::HudEndOfRound> &&

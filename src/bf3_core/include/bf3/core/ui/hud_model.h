@@ -396,6 +396,20 @@ struct HudPreRound {
 	bool input_restricted = false;
 };
 
+inline constexpr size_t kHudDamageFeedSize = 8;
+
+struct HudDamageHit {
+	uint32_t serial = 0;
+	uint8_t shooter = kHudNoPlayer;
+	float bearing_deg = 0.0f;
+	float damage = 0.0f;
+};
+
+struct HudDamageFeed {
+	uint32_t newest_serial = 0;
+	std::array<HudDamageHit, kHudDamageFeedSize> hits{};
+};
+
 struct HudModel {
 	uint32_t version = kHudModelVersion;
 	uint64_t serial = 0;
@@ -420,6 +434,7 @@ struct HudModel {
 	HudEndOfRound end_of_round;
 	HudSpawnScreen spawn_screen;
 	HudPreRound pre_round;
+	HudDamageFeed damage;
 };
 static_assert(std::is_trivially_copyable_v<HudModel>);
 

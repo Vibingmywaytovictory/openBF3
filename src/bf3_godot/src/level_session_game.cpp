@@ -1031,6 +1031,11 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		in.view_yaw_rad = view.yaw;
 		in.pose = f.own_curr.pose;
 		in.now_s = double(p_now_ns) * 1e-9;
+		in.damage_own_slot = g.own_slot;
+		in.own_position = f.own_curr.position;
+		std::array<host::PresentedSoldier, bf3::net::kMaxSlots> hud_others{};
+		const size_t hud_other_count = f.valid ? host::present_others(f, p_now_ns, hud_others) : 0;
+		in.others = std::span<const host::PresentedSoldier>(hud_others.data(), hud_other_count);
 		host::fill_hud(in, g.events, g.hud_static, g.hud_state, g.hud_model);
 		g.native_hud->set_model(g.hud_model);
 		if (camera != nullptr) {

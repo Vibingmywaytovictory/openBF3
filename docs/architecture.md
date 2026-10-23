@@ -161,7 +161,9 @@ These are structural, known, and listed so nobody mistakes them for design inten
   names are not tinted (`Util.ColorTinting` reads the engine's UI colour table, which no install data holds). The engine message
   queue (`HudMessageComp`) takes queue sizes and times from `UIMessageCompData`, but its expiry, overflow and
   RemoveFlag order and the ScoreAggregation value (a sum reset after ScoreAggregateTime) are inferred, the MessageQuery DataKey to source table is measured (the key hash is unknown), and
-  without squads in the model the kill feed's squad colour marks only the local player.
+  without squads in the model the kill feed's squad colour marks only the local player. The damage indicator's Scale
+  (the hit's damage) and Angle (clockwise from the view, checked against the sprite's rotation) are inferred, and the
+  HudAlertMessage and LogMessage widgets have no source in TDM (no combat area, squads or log lines in the model).
 * Nametags are `Bf3Nametags` (`src/bf3_godot/src/iff_overlay.cpp`), a hand-built Godot control; the next widget stage
   replaces it with the native Icon3D nametags (`Widget.Icon3D.*`, driven by `Data.UINametagComp`).
 * The container, EBX, payload, resource, level-soup and lag-compensation readers were written as ports of the

@@ -11,10 +11,13 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace bf3::core::ui {
 
 inline constexpr std::string_view kUiMessageCompPartition = "ui/uicomponents/uimessagecomp";
+inline constexpr std::string_view kUiDamageIndicatorCompPartition = "ui/uicomponents/uidamageindicatorcomp";
+inline constexpr size_t kHudDamageIndicators = 3;
 inline constexpr uint32_t kHudKillWeaponFormatHash = 0x52ddee25u;
 inline constexpr std::string_view kHudKillWeaponFormat = "[{0:~}]";
 inline constexpr std::string_view kHudKillsIsNoSid = "ID_H_MSG_KILLS_ISNO";
@@ -54,6 +57,15 @@ struct HudMessageCompData {
 
 Result<HudMessageCompData> read_hud_message_comp(const EbxResolver &p_db);
 
+struct HudDamageIndicatorCompData {
+	float max_update_time = 0.0f;
+	int32_t updates_per_second = 0;
+};
+
+Result<HudDamageIndicatorCompData> read_hud_damage_indicator_comp(const EbxResolver &p_db);
+
+int32_t hud_damage_angle_frame(float p_view_heading_deg, float p_bearing_deg);
+
 struct HudMessageKey {
 	int32_t data_key = 0;
 	HudMessageSource source = HudMessageSource::None;
@@ -74,6 +86,33 @@ HudMessageSource hud_message_source(int32_t p_data_key);
 std::string hud_format_text(std::string_view p_format, std::span<const std::string> p_args);
 
 int32_t hud_relation(const HudModel &p_model, uint8_t p_player);
+
+class HudDamageIndicatorComp {
+public:
+	HudDamageIndicatorComp() = default;
+	explicit HudDamageIndicatorComp(HudDamageIndicatorCompData p_data) :
+			data_(p_data) {}
+
+	void update(const HudModel &p_model, double p_now_s);
+	const As2Value &indicators() const { return list_; }
+	uint64_t hits_seen() const { return hits_seen_; }
+
+private:
+	struct Source {
+		uint8_t shooter = kHudNoPlayer;
+		float bearing_deg = 0.0f;
+		float damage = 0.0f;
+		double last_hit_s = 0.0;
+		bool fresh = false;
+	};
+
+	HudDamageIndicatorCompData data_;
+	std::vector<Source> sources_;
+	uint32_t last_serial_ = 0;
+	double next_update_s_ = 0.0;
+	uint64_t hits_seen_ = 0;
+	As2Value list_ = As2Value::array();
+};
 
 class HudMessageComp {
 public:

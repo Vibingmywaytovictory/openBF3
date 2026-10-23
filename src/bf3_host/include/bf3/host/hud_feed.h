@@ -9,6 +9,7 @@
 #include "bf3/host/presentation_weapon.h"
 #include "bf3/net/protocol.h"
 #include "bf3/net/weapons_wire.h"
+#include "bf3/present/presented.h"
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"
 
@@ -77,6 +78,9 @@ struct HudFeedInput {
 	float view_yaw_rad = 0;
 	sim::Pose pose = sim::Pose::Stand;
 	double now_s = 0;
+	uint8_t damage_own_slot = 0xFF;
+	sim::Vec3 own_position{};
+	std::span<const present::PresentedSoldier> others;
 
 	bool tdm = false;
 	bool match_valid = false;
@@ -100,6 +104,8 @@ struct HudFeedInput {
 struct HudFeedState {
 	double hit_indicator_until_s = 0;
 	uint64_t hits_shown = 0;
+	uint64_t damage_shown = 0;
+	uint64_t damage_unplaced = 0;
 
 	uint64_t hits_ignored = 0;
 	uint64_t frames = 0;
@@ -121,6 +127,8 @@ struct HudPoint {
 HudPoint hud_stage_to_window(core::ui::HudAnchor p_anchor, float p_stage_x, float p_stage_y, float p_width, float p_height);
 
 float hud_compass_heading_deg(float p_view_yaw_rad);
+
+float hud_bearing_deg(const sim::Vec3 &p_from, const sim::Vec3 &p_to);
 
 int32_t hud_grenade_count(const net::WeaponsWire &p_weapons, const HudStatic &p_static);
 

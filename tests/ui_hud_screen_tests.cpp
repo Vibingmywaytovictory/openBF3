@@ -248,6 +248,22 @@ void push_local_kill(HudModel &r_m, uint8_t p_killer, uint8_t p_victim, uint32_t
 	push_line(r_m.messages.local_kill_message, p_killer, p_victim, p_weapon, p_headshot, false, false);
 }
 
+void push_damage(HudModel &r_m, uint8_t p_shooter, float p_bearing_deg, float p_damage) {
+	HudDamageFeed &f = r_m.damage;
+	++f.newest_serial;
+	HudDamageHit &h = f.hits[f.newest_serial % f.hits.size()];
+	h.serial = f.newest_serial;
+	h.shooter = p_shooter;
+	h.bearing_deg = p_bearing_deg;
+	h.damage = p_damage;
+}
+
+void drive(Screen &r_s, std::string_view p_path, std::string_view p_key, const As2Value &p_value) {
+	const HudWidgetState *w = r_s.hud->widget(p_path);
+	REQUIRE_MESSAGE(w != nullptr, std::string(p_path));
+	w->controller->update(*w->host, p_key, p_value);
+}
+
 HudMessageCompData message_data(Retail &r_r) {
 	Result<HudMessageCompData> d = read_hud_message_comp(*r_r.level);
 	REQUIRE_MESSAGE(d.ok(), (d.ok() ? std::string() : d.error().message));
@@ -465,6 +481,56 @@ TEST_SUITE("ui-hud-screen-unit") {
 		push_score(sm, 7, 100);
 		score.update(sm, c, 16.0);
 		CHECK(score.score_aggregate().to_number() == 100.0);
+	}
+
+	TEST_CASE("hud screen unit: damage indicator angle frames, sources, expiry and the 30 Hz update") {
+		CHECK(hud_damage_angle_frame(0.0f, 0.0f) == 1);
+		CHECK(hud_damage_angle_frame(0.0f, 270.0f) == 91);
+		CHECK(hud_damage_angle_frame(0.0f, 90.0f) == 271);
+		CHECK(hud_damage_angle_frame(90.0f, 90.0f) == 1);
+		CHECK(hud_damage_angle_frame(10.0f, 190.0f) == 181);
+		CHECK(hud_damage_angle_frame(359.6f, 0.0f) == 1);
+		CHECK(hud_damage_angle_frame(std::nanf(""), 0.0f) == 1);
+		HudDamageIndicatorComp comp(HudDamageIndicatorCompData{ 5.0f, 30 });
+		HudModel m{};
+		m.soldier.compass_angle = 0.0f;
+		comp.update(m, 0.0);
+		CHECK(comp.indicators().size() == 0);
+		push_damage(m, 4, 270.0f, 30.0f);
+		comp.update(m, 0.1);
+		REQUIRE(comp.indicators().size() == 1);
+		CHECK(comp.indicators().at(0).field("Angle").to_number() == 91.0);
+		CHECK(comp.indicators().at(0).field("Scale").to_number() == 30.0);
+		CHECK(comp.indicators().at(0).field("New").truthy());
+		comp.update(m, 0.11);
+		CHECK(comp.indicators().at(0).field("New").truthy());
+		comp.update(m, 0.2);
+		CHECK_FALSE(comp.indicators().at(0).field("New").truthy());
+		m.soldier.compass_angle = 90.0f;
+		comp.update(m, 0.3);
+		CHECK(comp.indicators().at(0).field("Angle").to_number() == 181.0);
+		push_damage(m, 5, 90.0f, 140.0f);
+		push_damage(m, 6, 180.0f, 10.0f);
+		push_damage(m, 7, 0.0f, 10.0f);
+		comp.update(m, 1.0);
+		REQUIRE(comp.indicators().size() == kHudDamageIndicators);
+		CHECK(comp.indicators().at(0).field("Scale").to_number() == 100.0);
+		push_damage(m, 4, 0.0f, 20.0f);
+		comp.update(m, 2.0);
+		CHECK(comp.indicators().at(0).field("Angle").to_number() == 91.0);
+		CHECK(comp.indicators().at(0).field("New").truthy());
+		CHECK(comp.hits_seen() == 5);
+		comp.update(m, 6.0);
+		REQUIRE(comp.indicators().size() == 1);
+		CHECK(comp.indicators().at(0).field("Scale").to_number() == 20.0);
+		comp.update(m, 7.0);
+		CHECK(comp.indicators().size() == 0);
+		for (int i = 0; i < int(kHudDamageFeedSize) + 3; ++i) {
+			push_damage(m, uint8_t(10 + i), 0.0f, 1.0f);
+		}
+		comp.update(m, 8.0);
+		CHECK(comp.hits_seen() == 5 + kHudDamageFeedSize);
+		CHECK(comp.indicators().size() == kHudDamageIndicators);
 	}
 
 	TEST_CASE("hud screen unit: engine-drawn parts measured from the 18.57 footage") {
@@ -1265,6 +1331,151 @@ TEST_SUITE("ui-hud-screen") {
 		row("score_aggregator", "ScoreAgregateValue key -29960869 not on initialize; first score only sets the text, the next plays start " + std::to_string(start) +
 						", ready again " + std::to_string(ready_after) + " frames later, 0 after " + std::to_string(data.score_aggregate_time) + " s plays out " +
 						std::to_string(out));
+	}
+
+	TEST_CASE("hud screen: DamageIndicator") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		Result<HudDamageIndicatorCompData> data = read_hud_damage_indicator_comp(*r->level);
+		REQUIRE_MESSAGE(data.ok(), (data.ok() ? std::string() : data.error().message));
+		CHECK(data->max_update_time == 5.0f);
+		CHECK(data->updates_per_second == 30);
+		HudDamageIndicatorComp comp(*data);
+		HudClientState c = test_client();
+		c.damage = &comp;
+		HudModel m = moment_m02();
+		m.soldier.compass_angle = 0.0f;
+		Screen s = initialized(*r, kHudSharedScreenPartition, m, c);
+		const HudWidgetNode *node = s.asset.find("DamageIndicator_01");
+		REQUIRE(node != nullptr);
+		const HudDataSource *src = node->source("Indicator");
+		REQUIRE(src != nullptr);
+		CHECK(src->key == -1063919953);
+		const std::string di = "instance1.DamageIndicator_01";
+		CHECK(s.at(di).visible);
+		const std::string ind = di + ".indicator0";
+		REQUIRE(s.at(ind).timeline != nullptr);
+		CHECK(s.at(ind).timeline->frames == 361);
+		const std::string arrow = ind + ".arrow";
+		const uint32_t full_hit = 2 - 1;
+		const uint32_t minor_hit = 31 - 1;
+		const uint32_t idle = s.at(arrow).frame;
+		push_damage(m, 4, 270.0f, 60.0f);
+		comp.update(m, 0.0);
+		s.hud->refresh(m);
+		CHECK(s.at(ind).frame == 90);
+		CHECK_FALSE(s.at(ind).playing);
+		CHECK(s.at(arrow).frame == full_hit);
+		CHECK(s.at(arrow).playing);
+		const SwfMatrix right = s.at(arrow).matrix;
+		s.clip(ind).goto_and_stop(1);
+		const SwfMatrix up = s.at(ind + ".arrow").matrix;
+		s.clip(ind).goto_and_stop(91);
+		CHECK(up.b == doctest::Approx(0.0f).epsilon(0.01));
+		CHECK(up.a > 0.99f);
+		CHECK(up.ty == doctest::Approx(-100.0f));
+		CHECK(right.b > 0.99f);
+		CHECK(right.tx == doctest::Approx(99.95f));
+		CHECK(right.a == doctest::Approx(0.0f).scale(1.0f).epsilon(0.02));
+		push_damage(m, 5, 180.0f, 20.0f);
+		comp.update(m, 0.5);
+		s.hud->refresh(m);
+		const std::string ind1 = di + ".indicator1";
+		CHECK(s.at(ind).frame == 180);
+		CHECK(s.at(ind1).frame == 90);
+		CHECK(s.at(ind + ".arrow").frame == minor_hit);
+		row("damage_indicator", "UIDamageIndicatorCompData MaxUpdateTime " + std::to_string(data->max_update_time) + " s, " + std::to_string(data->updates_per_second) +
+						" Hz; key -1063919953 on hudscreen DamageIndicator_01; bearing 270 at heading 0 -> frame 91 (arrow matrix b " + std::to_string(right.b) +
+						", clockwise), Scale 60 -> fullHit, 20 -> minorHit, idle arrow frame " + std::to_string(idle));
+	}
+
+	TEST_CASE("hud screen: HudAlertMessage") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const TextDatabase &db = text_db(*r);
+		HudModel m = moment_m02();
+		Screen s = initialized(*r, kHudMpScreenPartition, m, text_client(db));
+		const std::string al = "instance1.HudAlertMessage_01";
+		CHECK_FALSE(s.at(al).visible);
+		drive(s, al, "WarningVisibility", As2Value::of(true));
+		const std::string warn = al + ".warning";
+		CHECK(s.at(al).visible);
+		CHECK(s.at(warn).visible);
+		CHECK(s.at(warn).frame == s.label(warn, "in"));
+		const std::string title = std::string(db.find_sid("ID_H_ALERT_COMBAT_AREA_WARNING").value_or(""));
+		CHECK_FALSE(title.empty());
+		CHECK(s.at(warn + ".content.title").text == title);
+		CHECK(s.at(warn + ".content.description").text == std::string(db.find_sid("ID_H_ALERT_COMBAT_AREA_WARNING_DESCRIPTION").value_or("")));
+		const uint32_t loop = s.label(warn, "loop");
+		const uint32_t shown_after = frames_until(s, [&] { return s.at(warn).frame == loop; }, 200);
+		CHECK(shown_after > 0);
+		drive(s, al, "Timer", As2Value::of("00:07"));
+		CHECK(s.at(warn + ".content.timer").text == "00:07");
+		drive(s, al, "WarningVisibility", As2Value::of(false));
+		CHECK(s.at(warn).frame == s.label(warn, "out"));
+		const uint32_t hidden_after = frames_until(s, [&] { return !s.at(al).visible; }, 200);
+		CHECK(hidden_after > 0);
+		CHECK_FALSE(s.at(warn).visible);
+		const std::string info_widget = "instance1.HudAlertMessage_02";
+		drive(s, info_widget, "SquadLeaderVisibility", As2Value::of(true));
+		const std::string info = info_widget + ".information";
+		CHECK(s.at(info_widget).visible);
+		CHECK(s.at(info).visible);
+		CHECK(s.at(info + ".content.title").text == std::string(db.find_sid("ID_H_ALERT_SQUAD_LEADER_PROMOTION").value_or("")));
+		CHECK_FALSE(s.at(info + ".bg").visible);
+		const double fps = double(s.scene->frame_rate());
+		const uint32_t info_out = frames_until(s, [&] { return s.at(info).frame == s.label(info, "out"); }, uint32_t(fps * 6.0));
+		CHECK(double(info_out) / fps == doctest::Approx(5.0).epsilon(0.05));
+		row("hud_alert", "WarningVisibility shows warning with the ID_H_ALERT_COMBAT_AREA_WARNING texts, loop after " + std::to_string(shown_after) +
+						" frames, hidden " + std::to_string(hidden_after) + " frames after out; SquadLeaderVisibility information out after " +
+						std::to_string(info_out) + " frames");
+	}
+
+	TEST_CASE("hud screen: the hudscreen panels") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudDamageIndicatorComp comp(HudDamageIndicatorCompData{ 5.0f, 30 });
+		HudClientState c = test_client();
+		c.damage = &comp;
+		HudModel m = moment_m02();
+		Screen s = initialized(*r, kHudSharedScreenPartition, m, c);
+		CHECK(s.asset.movie == "ui/assets/hudscreen");
+		CHECK(s.hud->stats().unknown_classes == 0);
+		for (const std::string &u : s.hud->stats().unknown_class_paths) {
+			CHECK_MESSAGE(false, u);
+		}
+		const std::string log = "instance1.LogMessage_01";
+		const std::string tip = "instance1.TooltipMessage_01";
+		const std::string obj = "instance1.ObjectiveMessage_01";
+		CHECK(s.has_tilt(log, -5.0f, -15.0f));
+		CHECK(s.has_tilt(tip, -5.0f, 15.0f));
+		CHECK(s.has_tilt(obj, 5.0f, -15.0f));
+		CHECK(s.renderer(log) == "t2");
+		CHECK(s.renderer(tip) == "t2");
+		CHECK(s.renderer(obj) == "t2");
+		CHECK_FALSE(s.at(log).visible);
+		CHECK_FALSE(s.at(tip).visible);
+		CHECK(s.at(obj).visible);
+		CHECK_FALSE(s.at(log + ".container.bg").visible);
+		CHECK_FALSE(s.at(tip + ".container.bg").visible);
+		CHECK_FALSE(s.at(obj + ".header.bg").visible);
+		CHECK(s.scene->find_node(log + ".container.bg.Background.bgHolder") == nullptr);
+		CHECK(s.scene->find_node("instance1.AlertManager_01.Alert") == nullptr);
+		for (int i = 1; i <= 4; ++i) {
+			CHECK_FALSE(s.at(tip + ".container.textTop.textClip.t" + std::to_string(i)).visible);
+			CHECK_FALSE(s.at(tip + ".container.textBottom.textClip.t" + std::to_string(i)).visible);
+		}
+		CHECK_FALSE(s.at("instance1.AlertManager_01").visible);
+		CHECK(s.at("instance1.InteractionManager_01").visible);
+		CHECK(s.at("instance1.DamageIndicator_01").visible);
+		row("shared_screen", "hudscreen " + std::to_string(s.hud->stats().instances) + " instances, 0 unknown classes; Log/Tooltip/Objective tilts -5/-15, -5/15, "
+						"5/-15 at fov 25 on t2, Objective shown, AlertManager hidden, InteractionManager shown");
 	}
 
 	TEST_CASE("hud screen: install unchanged") {

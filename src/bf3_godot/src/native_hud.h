@@ -26,9 +26,9 @@ namespace bf3::godot_side {
 
 class Bf3MinimapHud;
 
-inline constexpr size_t kNativeHudViews = 3;
+inline constexpr size_t kNativeHudViews = 4;
 inline constexpr std::array<std::string_view, kNativeHudViews> kNativeHudPartitions{ bf3::core::ui::kHudMpScreenPartition,
-	bf3::core::ui::kHudTdmScreenPartition, bf3::core::ui::kCrosshairDefaultPartition };
+	bf3::core::ui::kHudTdmScreenPartition, bf3::core::ui::kCrosshairDefaultPartition, bf3::core::ui::kHudSharedScreenPartition };
 
 struct NativeHudMinimapPose {
 	float x = 0.0f;
@@ -95,6 +95,7 @@ public:
 	godot::Ref<godot::Image> capture_layer() const;
 	uint64_t kill_feed_rows_added() const;
 	const bf3::core::ui::HudMessageComp *messages() const { return messages_.get(); }
+	const bf3::core::ui::HudDamageIndicatorComp *damage() const { return damage_.get(); }
 
 protected:
 	static void _bind_methods();
@@ -130,6 +131,7 @@ private:
 	uint64_t stepped_serial_ = 0;
 	bf3::core::ui::HudClientState client_;
 	std::unique_ptr<bf3::core::ui::HudMessageComp> messages_;
+	std::unique_ptr<bf3::core::ui::HudDamageIndicatorComp> damage_;
 	double message_clock_ = 0.0;
 	double vfov_deg_ = 0.0;
 	NativeHudMinimapPose pose_;

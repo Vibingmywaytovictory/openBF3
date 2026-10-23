@@ -302,6 +302,64 @@ TEST_CASE("hit indicator: 0.3 s per own server hit, level 1, others ignored") {
 					std::to_string(mismatches) + " mismatches");
 }
 
+TEST_CASE("damage direction: own-victim server hits carry the bearing to the presented shooter") {
+	const SyntheticKit k = synthetic_kit();
+	const host::HudStatic st = synthetic_static(k);
+	host::HudFeedState state;
+	ui::HudModel model;
+	CHECK(host::hud_bearing_deg({ 0, 0, 0 }, { 0, 0, 5 }) == doctest::Approx(0.0f));
+	CHECK(host::hud_bearing_deg({ 0, 0, 0 }, { 5, 0, 0 }) == doctest::Approx(90.0f));
+	CHECK(host::hud_bearing_deg({ 0, 0, 0 }, { 0, 0, -5 }) == doctest::Approx(180.0f));
+	CHECK(host::hud_bearing_deg({ 0, 0, 0 }, { -5, 0, 0 }) == doctest::Approx(270.0f));
+	CHECK(host::hud_bearing_deg({ 1, 0, 1 }, { 1, 3, 1 }) == 0.0f);
+	std::array<bf3::present::PresentedSoldier, 2> others{};
+	others[0].slot = 4;
+	others[0].position = { 10.0f, 0.0f, 20.0f };
+	others[1].slot = 6;
+	others[1].position = { 0.0f, 0.0f, 10.0f };
+	host::HudFeedInput in;
+	in.alive = true;
+	in.health = 70;
+	in.damage_own_slot = 2;
+	in.own_position = { 10.0f, 0.0f, 10.0f };
+	in.others = others;
+	std::vector<host::PresentEvent> ev;
+	host::PresentEvent a = hit_event(host::present_flags::kOwnVictim, 1);
+	a.slot = 4;
+	a.value = 30.0f;
+	ev.push_back(a);
+	host::PresentEvent b = hit_event(host::present_flags::kOwnVictim, 2);
+	b.slot = 6;
+	b.value = 12.0f;
+	ev.push_back(b);
+	host::PresentEvent self = hit_event(host::present_flags::kOwnVictim | host::present_flags::kOwnShooter, 3);
+	self.slot = 2;
+	ev.push_back(self);
+	host::PresentEvent unseen = hit_event(host::present_flags::kOwnVictim, 4);
+	unseen.slot = 9;
+	ev.push_back(unseen);
+	host::PresentEvent other = hit_event(0, 5);
+	other.slot = 4;
+	ev.push_back(other);
+	host::fill_hud(in, ev, st, state, model);
+	REQUIRE(model.damage.newest_serial == 2);
+	const ui::HudDamageHit &h1 = model.damage.hits[1 % ui::kHudDamageFeedSize];
+	const ui::HudDamageHit &h2 = model.damage.hits[2 % ui::kHudDamageFeedSize];
+	CHECK(h1.serial == 1);
+	CHECK(h1.shooter == 4);
+	CHECK(h1.bearing_deg == doctest::Approx(0.0f));
+	CHECK(h1.damage == 30.0f);
+	CHECK(h2.shooter == 6);
+	CHECK(h2.bearing_deg == doctest::Approx(270.0f));
+	CHECK(h2.damage == 12.0f);
+	CHECK(state.damage_shown == 2);
+	CHECK(state.damage_unplaced == 1);
+	host::fill_hud(in, {}, st, state, model);
+	CHECK(model.damage.newest_serial == 2);
+	row("feed.damage_direction", state.damage_shown == 2 && state.damage_unplaced == 1,
+			"2 own-victim hits fed with the bearing to the presented shooter (0 and 270 deg), self damage skipped, 1 unpresented shooter counted");
+}
+
 TEST_CASE("hostile feed inputs are clamped") {
 	const SyntheticKit k = synthetic_kit();
 	const host::HudStatic st = synthetic_static(k);

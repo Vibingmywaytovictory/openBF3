@@ -73,6 +73,85 @@ Result<HudMessageCompData> read_hud_message_comp(const EbxResolver &p_db) {
 	return out;
 }
 
+Result<HudDamageIndicatorCompData> read_hud_damage_indicator_comp(const EbxResolver &p_db) {
+	const EbxPartition *part = p_db.partition_by_name(kUiDamageIndicatorCompPartition);
+	if (part == nullptr) {
+		return make_error("hud damage indicator: no partition " + std::string(kUiDamageIndicatorCompPartition));
+	}
+	const EbxInstance root = part->primary();
+	if (!root.is_a("UIDamageIndicatorCompData")) {
+		return make_error("hud damage indicator: " + std::string(kUiDamageIndicatorCompPartition) + " is a " + std::string(root.type_name()));
+	}
+	HudDamageIndicatorCompData out;
+	out.max_update_time = detail::f32_or(root.data(), "MaxUpdateTime", 0.0f);
+	const std::optional<EbxValue> ups = root.data().get("UpdatesPerSecond");
+	out.updates_per_second = ups ? ups->as_i32().value_or(0) : 0;
+	if (!(out.max_update_time > 0.0f)) {
+		return make_error("hud damage indicator: no MaxUpdateTime");
+	}
+	return out;
+}
+
+int32_t hud_damage_angle_frame(float p_view_heading_deg, float p_bearing_deg) {
+	if (!std::isfinite(p_view_heading_deg) || !std::isfinite(p_bearing_deg)) {
+		return 1;
+	}
+	const double cw = std::fmod(double(p_view_heading_deg) - double(p_bearing_deg), 360.0);
+	const int32_t deg = int32_t(std::lround(cw < 0.0 ? cw + 360.0 : cw)) % 360;
+	return deg + 1;
+}
+
+void HudDamageIndicatorComp::update(const HudModel &p_model, double p_now_s) {
+	const double now = std::isfinite(p_now_s) ? p_now_s : 0.0;
+	if (data_.updates_per_second > 0) {
+		if (now < next_update_s_ && now >= next_update_s_ - 1.0 / double(data_.updates_per_second)) {
+			return;
+		}
+		next_update_s_ = now + 1.0 / double(data_.updates_per_second);
+	}
+	for (Source &s : sources_) {
+		s.fresh = false;
+	}
+	const HudDamageFeed &f = p_model.damage;
+	if (f.newest_serial < last_serial_) {
+		last_serial_ = 0;
+	}
+	const uint32_t first = std::max(last_serial_ + 1, f.newest_serial >= f.hits.size() ? f.newest_serial - uint32_t(f.hits.size()) + 1 : 1u);
+	for (uint32_t serial = first; serial <= f.newest_serial && serial != 0; ++serial) {
+		const HudDamageHit &h = f.hits[serial % f.hits.size()];
+		if (h.serial != serial) {
+			continue;
+		}
+		++hits_seen_;
+		auto it = std::find_if(sources_.begin(), sources_.end(), [&](const Source &s) { return s.shooter == h.shooter; });
+		if (it == sources_.end()) {
+			sources_.push_back(Source{});
+			it = sources_.end() - 1;
+		}
+		it->shooter = h.shooter;
+		it->bearing_deg = h.bearing_deg;
+		it->damage = h.damage;
+		it->last_hit_s = now;
+		it->fresh = true;
+	}
+	last_serial_ = f.newest_serial;
+	sources_.erase(std::remove_if(sources_.begin(), sources_.end(), [&](const Source &s) { return now - s.last_hit_s >= double(data_.max_update_time); }),
+			sources_.end());
+	std::stable_sort(sources_.begin(), sources_.end(), [](const Source &a, const Source &b) { return a.last_hit_s > b.last_hit_s; });
+	if (sources_.size() > kHudDamageIndicators) {
+		sources_.resize(kHudDamageIndicators);
+	}
+	As2Value list = As2Value::array();
+	for (const Source &s : sources_) {
+		As2Value e = As2Value::object();
+		e.set("Angle", As2Value::of(hud_damage_angle_frame(p_model.soldier.compass_angle, s.bearing_deg)));
+		e.set("Scale", As2Value::of(double(std::clamp(s.damage, 0.0f, 100.0f))));
+		e.set("New", As2Value::of(s.fresh));
+		list.push(std::move(e));
+	}
+	list_ = std::move(list);
+}
+
 HudMessageSource hud_message_source(int32_t p_data_key) {
 	for (const HudMessageKey &k : kHudMessageKeys) {
 		if (k.data_key == p_data_key) {

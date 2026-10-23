@@ -142,12 +142,35 @@ size_t apply_item_names(HudStatic &r_static, const ui::ItemIconIndex &p_items) {
 	return filled;
 }
 
+namespace {
+
+void push_damage(const HudFeedInput &p_input, const PresentEvent &p_hit, HudFeedState &r_state, ui::HudModel &r_model) {
+	const auto it = std::find_if(p_input.others.begin(), p_input.others.end(), [&](const present::PresentedSoldier &s) { return s.slot == p_hit.slot; });
+	if (it == p_input.others.end()) {
+		++r_state.damage_unplaced;
+		return;
+	}
+	ui::HudDamageFeed &f = r_model.damage;
+	++f.newest_serial;
+	ui::HudDamageHit &h = f.hits[f.newest_serial % f.hits.size()];
+	h.serial = f.newest_serial;
+	h.shooter = p_hit.slot;
+	h.bearing_deg = hud_bearing_deg(p_input.own_position, it->position);
+	h.damage = std::isfinite(p_hit.value) ? std::max(p_hit.value, 0.0f) : 0.0f;
+	++r_state.damage_shown;
+}
+
+}
+
 void fill_hud(const HudFeedInput &p_input, std::span<const PresentEvent> p_drained, const HudStatic &p_static, HudFeedState &r_state,
 		ui::HudModel &r_model) {
 	++r_state.frames;
 	for (const PresentEvent &e : p_drained) {
 		if (e.kind != PresentKind::Hit) {
 			continue;
+		}
+		if ((e.flags & present_flags::kOwnVictim) != 0 && e.slot != p_input.damage_own_slot) {
+			push_damage(p_input, e, r_state, r_model);
 		}
 		if ((e.flags & present_flags::kOwnShooter) != 0) {
 			r_state.hit_indicator_until_s = p_input.now_s + kHitIndicatorSeconds;
@@ -233,6 +256,15 @@ float hud_compass_heading_deg(float p_view_yaw_rad) {
 	}
 	const double deg = std::fmod(double(p_view_yaw_rad) * 180.0 / kPi, 360.0);
 	return float(deg < 0.0 ? deg + 360.0 : deg);
+}
+
+float hud_bearing_deg(const sim::Vec3 &p_from, const sim::Vec3 &p_to) {
+	const double dx = double(p_to[0]) - double(p_from[0]);
+	const double dz = double(p_to[2]) - double(p_from[2]);
+	if (!std::isfinite(dx) || !std::isfinite(dz) || (dx == 0.0 && dz == 0.0)) {
+		return 0.0f;
+	}
+	return hud_compass_heading_deg(float(std::atan2(dx, dz)));
 }
 
 int32_t hud_grenade_count(const net::WeaponsWire &p_weapons, const HudStatic &p_static) {

@@ -23,6 +23,7 @@ namespace bf3::core::ui {
 inline constexpr std::string_view kHudMpScreenPartition = "ui/flow/screen/hudmpscreen";
 inline constexpr std::string_view kHudTdmScreenPartition = "ui/flow/screen/hudtdmscreen";
 inline constexpr std::string_view kCrosshairDefaultPartition = "ui/flow/screen/weapon/crosshairdefault";
+inline constexpr std::string_view kHudSharedScreenPartition = "ui/flow/screen/hudscreen";
 inline constexpr std::string_view kHudScreenInstance = "instance1";
 inline constexpr size_t kHudMaxScreenWidgets = 64;
 inline constexpr size_t kHudMaxWidgetProperties = 32;
@@ -144,10 +145,12 @@ struct HudStageRects {
 
 float hud_align_axis(HudAxisAlign p_align, float p_original, float p_visible_min, float p_visible_size, float p_original_size, float p_safe);
 
+class HudDamageIndicatorComp;
 class HudMessageComp;
 
 struct HudClientState {
 	const HudMessageComp *messages = nullptr;
+	const HudDamageIndicatorComp *damage = nullptr;
 	std::string platform = "win32";
 	std::string reload_button;
 	bool hardcore = false;

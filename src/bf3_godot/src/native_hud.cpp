@@ -139,6 +139,7 @@ std::vector<uint8_t> image_bytes(Ref<Image> p_image, int32_t &r_w, int32_t &r_h)
 struct Bf3NativeHud::Loaded {
 	std::array<std::optional<ui::HudScreenAsset>, kNativeHudViews> assets;
 	std::optional<ui::HudMessageCompData> messages;
+	std::optional<ui::HudDamageIndicatorCompData> damage;
 	std::string error;
 	double seconds = 0.0;
 };
@@ -245,6 +246,12 @@ void Bf3NativeHud::start_loader() {
 			} else {
 				out->messages = std::move(*m);
 			}
+			bf3::core::Result<ui::HudDamageIndicatorCompData> d = ui::read_hud_damage_indicator_comp(**lib);
+			if (!d) {
+				out->error += std::string(ui::kUiDamageIndicatorCompPartition) + ": " + d.error().message + "; ";
+			} else {
+				out->damage = *d;
+			}
 		}
 		out->seconds = bf3::core::seconds_since(t0);
 		loaded_ = std::move(out);
@@ -283,7 +290,9 @@ void Bf3NativeHud::build() {
 	client_.vertical_fov_deg = float(vfov_deg_);
 	messages_ = std::make_unique<ui::HudMessageComp>(*loaded_->messages);
 	client_.messages = messages_.get();
-	static const char *const kNames[kNativeHudViews] = { "HudMp", "HudTdm", "Crosshair" };
+	damage_ = std::make_unique<ui::HudDamageIndicatorComp>(*loaded_->damage);
+	client_.damage = damage_.get();
+	static const char *const kNames[kNativeHudViews] = { "HudMp", "HudTdm", "Crosshair", "HudShared" };
 	std::string summary;
 	for (size_t i = 0; i < kNativeHudViews; ++i) {
 		const ui::HudScreenAsset &asset = *loaded_->assets[i];
@@ -406,6 +415,9 @@ void Bf3NativeHud::step(double p_seconds) {
 	message_clock_ += dt;
 	if (messages_ != nullptr) {
 		messages_->update(model_, client_, message_clock_);
+	}
+	if (damage_ != nullptr) {
+		damage_->update(model_, message_clock_);
 	}
 	for (size_t i = 0; i < kNativeHudViews; ++i) {
 		Bf3SwfView *v = views_[i];
