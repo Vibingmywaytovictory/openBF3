@@ -160,13 +160,6 @@ void NativeTags::apply_loaded() {
 	UtilityFunctions::print(line);
 }
 
-void NativeTags::set_fixture(NativeTagFixture p_fixture) {
-	fixture_ = std::make_unique<NativeTagFixture>(std::move(p_fixture));
-	for (size_t i = 0; i < fixture_->soldiers.size() && i < fixture_->names.size(); ++i) {
-		fixture_->soldiers[i].name = fixture_->names[i];
-	}
-}
-
 void NativeTags::log_summary() const {
 	const double n = double(std::max<uint64_t>(1, stats_.frames));
 	char line[640];
@@ -192,18 +185,10 @@ void NativeTags::update(const Camera3D *p_camera, bool p_show, Vector2 p_viewpor
 	const uint64_t now_ns = net::monotonic_ns();
 	const double now_s = double(now_ns) * 1e-9;
 	std::array<IffSoldier, net::kMaxSlots> soldiers{};
-	size_t n = 0;
+	const host::PresentationFrame &f = session_->frame();
+	const size_t n = iff_soldiers(f, now_ns, soldiers);
 	ui::NametagViewer viewer;
-	if (fixture_ != nullptr) {
-		n = std::min(fixture_->soldiers.size(), soldiers.size());
-		std::copy_n(fixture_->soldiers.begin(), n, soldiers.begin());
-		viewer.team = fixture_->own_team;
-		viewer.squad = fixture_->own_squad;
-	} else {
-		const host::PresentationFrame &f = session_->frame();
-		n = iff_soldiers(f, now_ns, soldiers);
-		viewer.team = own_team_of(f);
-	}
+	viewer.team = own_team_of(f);
 	const std::span<const IffSoldier> all(soldiers.data(), n);
 	reveal_.update(all, now_s, spotting_.fire_reveal_seconds());
 	++stats_.frames;

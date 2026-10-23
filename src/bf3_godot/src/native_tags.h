@@ -55,13 +55,6 @@ struct NativeTagStats {
 	uint64_t frame_max_ns = 0;
 };
 
-struct NativeTagFixture {
-	std::vector<IffSoldier> soldiers;
-	std::vector<std::string> names;
-	uint8_t own_team = 0;
-	uint8_t own_squad = 0;
-};
-
 class NativeTags {
 public:
 	explicit NativeTags(Bf3LevelSession *p_session);
@@ -70,7 +63,6 @@ public:
 	NativeTags &operator=(const NativeTags &) = delete;
 
 	void update(const godot::Camera3D *p_camera, bool p_show, godot::Vector2 p_viewport_size);
-	void set_fixture(NativeTagFixture p_fixture);
 
 	bool loaded() const { return applied_; }
 	const core::ui::NametagStyle &style() const { return style_; }
@@ -98,7 +90,6 @@ private:
 	std::array<std::string, 4> kit_icons_;
 	IffReveal reveal_;
 	NativeTagStats stats_;
-	std::unique_ptr<NativeTagFixture> fixture_;
 	std::vector<NativeTag> tags_;
 	std::vector<IffMinimapEntry> minimap_;
 	float canvas_scale_ = 1.0f;
