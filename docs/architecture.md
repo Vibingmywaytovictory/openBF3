@@ -147,17 +147,20 @@ These are structural, known, and listed so nobody mistakes them for design inten
   translation unit instead of once in `bf3_core`.
 * `bf3_core` is several libraries in one directory (containers, assets, gameplay tables, level, UI).
 * The build is Windows and MSVC only by policy; Win32 use is confined to about twenty files.
-* The kill feed, scoreboard, spawn, pre-round, round-end and kill-card screens (`src/bf3_godot/src/hud_killfeed.cpp`,
-  `hud_scoreboard.cpp`, `spawn_screen.cpp`, `pre_round.cpp`, `round_end.cpp`, `kill_card.cpp`) are hand-built Godot
+* The scoreboard, spawn, pre-round, round-end and kill-card screens (`src/bf3_godot/src/hud_scoreboard.cpp`,
+  `spawn_screen.cpp`, `pre_round.cpp`, `round_end.cpp`, `kill_card.cpp`) are hand-built Godot
   controls that only borrow the retail fonts and atlas regions; the in-round HUD is the retail movies (`Bf3NativeHud`). The rule is the retail SWF movies
   rendered as they are (CLAUDE.md "Native Battlefield 3 UI only"); the SWF decoders in `bf3_core/ui/` give symbol
   tables, atlases, fonts, triangulated shapes, a live display tree (`SwfScene`), text layout and the AVM1 bytecode
   (`avm1.h`: every DoAction, DoInitAction and clip-action body, and the classes and `Object.registerClass` calls found
   in it; `bf3dump swf as2`), so the renderer and the screen logic are open. The scene runs only the frame scripts'
-  unconditional stop/play/goto; the movies' AS2 classes, `onClipEvent` handlers and conditional frame code are not
-  executed outside the HUD controllers. `Bf3SwfView` draws no gradients, static text, Bevel or ColorMatrix filters,
+  unconditional stop/play/goto and hands every other frame script to the HUD controller that owns the clip; the movies'
+  AS2 classes, `onClipEvent` handlers and conditional frame code are not executed outside the HUD controllers. `Bf3SwfView` draws no gradients, static text, Bevel or ColorMatrix filters,
   or blend modes other than normal, layer and add. The HUD does not sway with camera motion, the minimap zoom is a
-  fixed 1.375 m per local unit, and the KillFeed, SquadList, ScorePopup and KillLog widgets are not driven.
+  fixed 1.375 m per local unit, and the SquadList, ScorePopup and KillLog widgets are not driven. The engine message
+  queue (`HudMessageComp`) takes queue sizes and times from `UIMessageCompData`, but its expiry, overflow and
+  RemoveFlag order are inferred, the MessageQuery DataKey to source table is measured (the key hash is unknown), and
+  without squads in the model the kill feed's squad colour marks only the local player.
 * Nametags are `Bf3Nametags` (`src/bf3_godot/src/iff_overlay.cpp`), a hand-built Godot control; the next widget stage
   replaces it with the native Icon3D nametags (`Widget.Icon3D.*`, driven by `Data.UINametagComp`).
 * The container, EBX, payload, resource, level-soup and lag-compensation readers were written as ports of the

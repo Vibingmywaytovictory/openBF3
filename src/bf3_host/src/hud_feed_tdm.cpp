@@ -264,6 +264,7 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 		line.killer = killer;
 		line.victim = victim;
 		line.item_id = row != nullptr ? row->item_id : 0;
+		line.weapon_name_sid_hash = row != nullptr ? row->name_sid_hash : 0;
 		line.headshot = (e.flags & present_flags::kHeadshot) != 0;
 		line.suicide = suicide;
 		const int8_t kt = killer != ui::kHudNoPlayer && present[killer] ? r_model.players[killer].team : int8_t(0);

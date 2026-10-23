@@ -187,12 +187,14 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 	CHECK(hs.killer == 1);
 	CHECK(hs.victim == 2);
 	CHECK(hs.item_id == 1000);
+	CHECK(hs.weapon_name_sid_hash == 2000);
 	CHECK(hs.headshot);
 	CHECK(!hs.team_kill);
 	CHECK(m.messages.kill_message.lines[3].team_kill);
 	const ui::HudKill &fall = m.messages.kill_message.lines[4];
 	CHECK(fall.suicide);
 	CHECK(fall.item_id == 0);
+	CHECK(fall.weapon_name_sid_hash == 0);
 	CHECK(m.messages.local_kill_message.newest_serial == 0);
 	CHECK(state.unknown_defs == 0);
 

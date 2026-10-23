@@ -82,6 +82,7 @@ struct HudKill {
 	uint8_t killer = kHudNoPlayer;
 	uint8_t victim = kHudNoPlayer;
 	uint32_t item_id = 0;
+	uint32_t weapon_name_sid_hash = 0;
 	uint32_t vehicle_item_hash = 0;
 	bool headshot = false;
 	bool suicide = false;

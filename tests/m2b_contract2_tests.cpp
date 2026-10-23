@@ -39,8 +39,8 @@ void pending(const char *p_key, const char *p_row, const char *p_reason) {
 	MESSAGE(text);
 }
 
-constexpr size_t kM2aHudModelSize = 8864;
-constexpr size_t kM2bHudModelSize = 9024;
+constexpr size_t kM2aHudModelSize = 8928;
+constexpr size_t kM2bHudModelSize = 9088;
 
 static_assert(sizeof(ui::HudKillCard) == 32);
 static_assert(offsetof(ui::HudKillCard, killer) == 5 && offsetof(ui::HudKillCard, item_id) == 12 &&
@@ -55,7 +55,7 @@ static_assert(sizeof(ui::HudPreRound) == 12);
 static_assert(offsetof(ui::HudPreRound, seconds_left) == 4 && offsetof(ui::HudPreRound, input_restricted) == 8);
 
 static_assert(offsetof(ui::HudModel, kill_card) == offsetof(ui::HudModel, team) + sizeof(ui::HudTeam));
-static_assert(offsetof(ui::HudModel, kill_card) == 8860 && (offsetof(ui::HudModel, kill_card) + 7) / 8 * 8 == kM2aHudModelSize);
+static_assert(offsetof(ui::HudModel, kill_card) == 8924 && (offsetof(ui::HudModel, kill_card) + 7) / 8 * 8 == kM2aHudModelSize);
 static_assert(offsetof(ui::HudModel, end_of_round) == offsetof(ui::HudModel, kill_card) + sizeof(ui::HudKillCard));
 static_assert(offsetof(ui::HudModel, spawn_screen) == offsetof(ui::HudModel, end_of_round) + sizeof(ui::HudEndOfRound));
 static_assert(offsetof(ui::HudModel, pre_round) == offsetof(ui::HudModel, spawn_screen) + sizeof(ui::HudSpawnScreen));
@@ -81,7 +81,7 @@ static_assert(std::is_same_v<decltype(&host::fill_hud_tdm),
 static_assert(std::is_same_v<decltype(&gs::Bf3DeathCamera::step),
 		gs::DeathCameraView (gs::Bf3DeathCamera::*)(double, const fx::Vec3 *, const sim::CollisionWorld *)>);
 
-static_assert(host::kKillFeedSeconds == 5.0 && host::kKillCardSeconds == 4.0);
+static_assert(host::kKillCardSeconds == 4.0);
 static_assert(host::kHudSpawnSlots == std::array<uint8_t, 5>{ 0, 1, 2, 6, 7 });
 static_assert(host::kHudSpawnSlots[2] == host::kKitGadgetSlot && host::kHudSpawnSlots[0] == host::kKitSlots[0] &&
 		host::kHudSpawnSlots[1] == host::kKitSlots[1] && host::kHudSpawnSlots[3] == host::kKitSlots[2] && host::kHudSpawnSlots[4] == host::kKitSlots[3]);

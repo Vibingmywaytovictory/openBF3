@@ -413,22 +413,36 @@ void As2Clip::set_text(std::string_view p_text) const {
 }
 
 void As2Clip::set_auto_size(bool p_on) const {
+	set_auto_size(p_on ? SwfTextAutoSize::Left : SwfTextAutoSize::None);
+}
+
+void As2Clip::set_auto_size(SwfTextAutoSize p_mode) const {
 	const SwfSceneNode *n = mut();
 	if (n == nullptr || n->kind != SwfNodeKind::EditText) {
 		return;
 	}
 	SwfTextOptions o = n->text_options;
-	o.auto_size = p_on ? SwfTextAutoSize::Left : SwfTextAutoSize::None;
+	o.auto_size = p_mode;
 	note(scene_->set_text_options(path_, o));
 }
 
 float As2Clip::text_width() const {
+	const std::optional<SwfTextLayout> l = layout();
+	return l ? l->text_width : 0.0f;
+}
+
+float As2Clip::text_height() const {
+	const std::optional<SwfTextLayout> l = layout();
+	return l ? l->text_height : 0.0f;
+}
+
+std::optional<SwfTextLayout> As2Clip::layout() const {
 	const SwfSceneNode *n = mut();
 	if (n == nullptr || n->kind != SwfNodeKind::EditText || fonts_ == nullptr) {
 		if (stats_ != nullptr) {
 			stats_->failed_ops++;
 		}
-		return 0.0f;
+		return std::nullopt;
 	}
 	level::WorkBudget budget(kSwfTextBudgetUnits);
 	Result<SwfTextLayout> layout = swf_layout_node_text(*fonts_, *n, budget);
@@ -439,9 +453,9 @@ float As2Clip::text_width() const {
 		if (stats_ != nullptr) {
 			stats_->failed_ops++;
 		}
-		return 0.0f;
+		return std::nullopt;
 	}
-	return layout->text_width;
+	return std::move(*layout);
 }
 
 int32_t As2Clip::next_highest_depth() const {
@@ -463,6 +477,21 @@ As2Clip As2Clip::attach_movie(std::string_view p_linkage, std::string_view p_nam
 		return As2Clip();
 	}
 	Result<SwfNodeId> made = scene_->attach_movie(path_, p_linkage, p_name, p_depth);
+	if (!made) {
+		if (stats_ != nullptr) {
+			stats_->failed_ops++;
+			stats_->last_failure = made.error().message;
+		}
+		return As2Clip();
+	}
+	return child(p_name);
+}
+
+As2Clip As2Clip::create_empty_movie_clip(std::string_view p_name, int32_t p_depth) const {
+	if (mut() == nullptr) {
+		return As2Clip();
+	}
+	Result<SwfNodeId> made = scene_->create_empty_movie_clip(path_, p_name, p_depth);
 	if (!made) {
 		if (stats_ != nullptr) {
 			stats_->failed_ops++;

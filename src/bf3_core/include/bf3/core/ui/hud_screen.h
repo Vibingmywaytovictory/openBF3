@@ -41,6 +41,13 @@ struct HudWidgetProperty {
 	std::string value;
 };
 
+struct HudDataSource {
+	std::string name;
+	int32_t key = 0;
+	std::string category;
+	bool on_initialize = true;
+};
+
 struct HudWidgetNode {
 	std::string instance;
 	std::string name;
@@ -49,6 +56,11 @@ struct HudWidgetNode {
 	HudAxisAlign vertical = HudAxisAlign::Centre;
 	int32_t z_depth_level = 0;
 	std::vector<HudWidgetProperty> properties;
+	std::vector<HudDataSource> sources;
+	std::optional<HudDataSource> message_query;
+	int32_t number_of_rows = 0;
+
+	const HudDataSource *source(std::string_view p_name) const;
 };
 
 struct HudScreenAsset {
@@ -71,12 +83,16 @@ struct As2Value {
 		Number,
 		String,
 		NumberList,
+		Object,
+		List,
 	};
 	Kind kind = Kind::Undefined;
 	bool boolean = false;
 	double number = 0.0;
 	std::string text;
 	std::vector<double> list;
+	std::vector<std::string> names;
+	std::vector<As2Value> items;
 
 	static As2Value undefined() { return {}; }
 	static As2Value of(bool p_b);
@@ -85,6 +101,14 @@ struct As2Value {
 	static As2Value of(std::string p_s);
 	static As2Value of(const char *p_s) { return of(std::string(p_s)); }
 	static As2Value numbers(std::vector<double> p_list);
+	static As2Value object();
+	static As2Value array(std::vector<As2Value> p_items = {});
+
+	As2Value &set(std::string_view p_name, As2Value p_value);
+	const As2Value &field(std::string_view p_name) const;
+	As2Value &push(As2Value p_value);
+	size_t size() const { return items.size(); }
+	const As2Value &at(size_t p_index) const;
 
 	bool defined() const { return kind != Kind::Undefined; }
 	bool truthy() const;
@@ -120,7 +144,10 @@ struct HudStageRects {
 
 float hud_align_axis(HudAxisAlign p_align, float p_original, float p_visible_min, float p_visible_size, float p_original_size, float p_safe);
 
+class HudMessageComp;
+
 struct HudClientState {
+	const HudMessageComp *messages = nullptr;
 	std::string platform = "win32";
 	std::string reload_button;
 	bool hardcore = false;
@@ -152,6 +179,7 @@ struct HudRendererString {
 enum class HudTweenEase : uint8_t {
 	Linear,
 	EaseOutBack,
+	ExpoOut,
 };
 
 enum class HudTweenProperty : uint8_t {
@@ -191,6 +219,14 @@ struct HudScreenStats {
 
 class HudScreen;
 
+struct HudFrameScript {
+	std::string path;
+	uint32_t frame = 0;
+	const std::vector<std::string> *names = nullptr;
+
+	bool calls(std::string_view p_name) const;
+};
+
 class HudWidgetHost {
 public:
 	HudWidgetHost(HudScreen &r_screen, std::string p_path, std::string p_class);
@@ -207,6 +243,8 @@ public:
 	void add_tween(const As2Clip &p_clip, HudTweenProperty p_property, float p_to, double p_seconds, HudTweenEase p_ease, uint32_t p_on_complete = 0);
 	void remove_tweens(const As2Clip &p_clip);
 	As2Clip attach_movie(const As2Clip &p_parent, std::string_view p_linkage, std::string_view p_name, int32_t p_depth);
+	As2Clip create_empty_movie_clip(const As2Clip &p_parent, std::string_view p_name, int32_t p_depth);
+	void remove_movie_clip(const As2Clip &p_clip);
 	std::string translate(std::string_view p_text) const;
 	const HudClientState &client() const;
 	HudScreen &screen() { return screen_; }
@@ -223,6 +261,7 @@ class HudWidgetController {
 public:
 	virtual ~HudWidgetController() = default;
 	virtual bool screen_initialized() const { return true; }
+	virtual void attach_node(HudWidgetHost &, const HudWidgetNode &) {}
 	virtual void construct(HudWidgetHost &) {}
 	virtual void on_clip_load(HudWidgetHost &) {}
 	virtual void pre_update_screen_size(HudWidgetHost &) {}
@@ -232,6 +271,7 @@ public:
 	virtual void drive(HudWidgetHost &, const HudModel &, const HudClientState &) {}
 	virtual void advance(HudWidgetHost &, double) {}
 	virtual void tween_complete(HudWidgetHost &, uint32_t) {}
+	virtual void frame_script(HudWidgetHost &, const HudFrameScript &) {}
 	virtual void bind(const HudModel &, const HudClientState &, HudData &) const {}
 };
 
@@ -245,6 +285,7 @@ struct HudWidgetState {
 	std::string instance;
 	bool screen_widget = false;
 	bool initialized = false;
+	bool retired = false;
 	std::unique_ptr<HudWidgetController> controller;
 	std::unique_ptr<HudWidgetHost> host;
 	std::map<std::string, As2Value, std::less<>> sent;
@@ -290,6 +331,11 @@ private:
 	HudScreen() = default;
 
 	void discover(SwfNodeId p_root);
+	void retire(std::string_view p_path);
+	void sweep();
+	void on_frame_script(SwfNodeId p_node, uint32_t p_frame);
+	const std::vector<std::string> &frame_names(const SwfSceneNode &p_node, uint32_t p_frame);
+	const Avm1Movie &avm1_of(const SwfSceneNode &p_node);
 	void construct_subtree(SwfNodeId p_root);
 	void translate_texts(SwfNodeId p_root);
 	void align(HudWidgetState &r_widget, const HudWidgetNode &p_node);
@@ -299,6 +345,7 @@ private:
 
 	const SwfLibrary *library_ = nullptr;
 	std::map<std::string, std::shared_ptr<const Avm1Movie>, std::less<>> avm1_;
+	std::map<std::string, std::vector<std::string>, std::less<>> frame_names_;
 
 	SwfScene *scene_ = nullptr;
 	const SwfFontSet *fonts_ = nullptr;

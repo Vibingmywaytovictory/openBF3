@@ -4,11 +4,13 @@
 #include "bf3/core/install.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/ui/as2_clip.h"
+#include "bf3/core/ui/hud_messages.h"
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/swf_scene.h"
 #include "bf3/core/ui/swf_text.h"
+#include "bf3/core/ui/text_db.h"
 #include "bf3/core/ui/ui_fonts.h"
 #include "test_support.h"
 
@@ -16,6 +18,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -174,6 +177,89 @@ void row(const char *p_name, const std::string &p_detail) {
 	std::fflush(stdout);
 }
 
+const TextDatabase &text_db(Retail &r_r) {
+	static std::unique_ptr<TextDatabase> db;
+	if (db == nullptr) {
+		Result<TextDatabase> t = open_text_database(r_r.mount->install);
+		REQUIRE_MESSAGE(t.ok(), (t.ok() ? std::string() : t.error().message));
+		db = std::make_unique<TextDatabase>(std::move(*t));
+	}
+	return *db;
+}
+
+HudClientState text_client(const TextDatabase &p_db) {
+	HudClientState c = test_client();
+	c.localise_hash = [&p_db](uint32_t p_hash) {
+		const std::optional<std::string_view> t = p_db.find(p_hash);
+		return t ? std::string(*t) : std::string();
+	};
+	c.translate = [&p_db](std::string_view p_sid) -> std::optional<std::string> {
+		const std::optional<std::string_view> t = p_db.find_sid(p_sid);
+		return t ? std::optional<std::string>(std::string(*t)) : std::nullopt;
+	};
+	return c;
+}
+
+void set_player(HudModel &r_m, uint8_t p_player, int8_t p_team, std::string_view p_name) {
+	HudPlayer &pl = r_m.players[p_player];
+	pl.team = p_team;
+	pl.name.fill('\0');
+	std::copy_n(p_name.data(), std::min(p_name.size(), pl.name.size() - 1), pl.name.data());
+}
+
+HudModel kill_model() {
+	HudModel m = moment_m02();
+	m.local_player = 0;
+	m.local_team = 1;
+	set_player(m, 0, 1, "AAAA");
+	set_player(m, 1, 2, "BBBBBB");
+	set_player(m, 2, 1, "CC");
+	set_player(m, 3, 2, "DDD");
+	return m;
+}
+
+void push_kill(HudModel &r_m, uint8_t p_killer, uint8_t p_victim, uint32_t p_weapon, bool p_headshot, bool p_team_kill = false, bool p_suicide = false) {
+	HudKillFeed &f = r_m.messages.kill_message;
+	++f.newest_serial;
+	HudKill &k = f.lines[f.newest_serial % f.lines.size()];
+	k = HudKill{};
+	k.serial = f.newest_serial;
+	k.killer = p_killer;
+	k.victim = p_victim;
+	k.weapon_name_sid_hash = p_weapon;
+	k.headshot = p_headshot;
+	k.team_kill = p_team_kill;
+	k.suicide = p_suicide;
+}
+
+HudMessageCompData message_data(Retail &r_r) {
+	Result<HudMessageCompData> d = read_hud_message_comp(*r_r.level);
+	REQUIRE_MESSAGE(d.ok(), (d.ok() ? std::string() : d.error().message));
+	return *d;
+}
+
+uint32_t frames_until(Screen &r_s, const std::function<bool()> &p_done, uint32_t p_limit) {
+	const double dt = 1.0 / double(r_s.scene->frame_rate());
+	for (uint32_t f = 1; f <= p_limit; ++f) {
+		REQUIRE(r_s.scene->advance(1).ok());
+		r_s.hud->advance(dt);
+		if (p_done()) {
+			return f;
+		}
+	}
+	return 0;
+}
+
+const HudTween *tween_of(const Screen &p_s, std::string_view p_path, HudTweenProperty p_property) {
+	for (const HudTween &t : p_s.hud->tweens()) {
+		if (t.path == p_path && t.property == p_property) {
+			return &t;
+		}
+	}
+	return nullptr;
+}
+
+
 }
 
 TEST_SUITE("ui-hud-screen-unit") {
@@ -211,6 +297,110 @@ TEST_SUITE("ui-hud-screen-unit") {
 		CHECK(kAs2FiringModes[2] == "auto");
 		CHECK(kAs2FiringModes[3] == "burst");
 		CHECK(kAs2FiringModes[1] == "single");
+		CHECK(hud_tween_ease(HudTweenEase::ExpoOut, 0.0) == 0.0);
+		CHECK(hud_tween_ease(HudTweenEase::ExpoOut, 1.0) == 1.0);
+		CHECK(hud_tween_ease(HudTweenEase::ExpoOut, 0.5) == doctest::Approx(1.001 * (1.0 - std::pow(2.0, -5.0))));
+		As2Value o = As2Value::object();
+		o.set("Id", As2Value::of(3.0)).set("Type", As2Value::of("Kill"));
+		o.set("Id", As2Value::of(4.0));
+		CHECK(o.field("Id").to_number() == 4.0);
+		CHECK(o.names.size() == 2);
+		CHECK_FALSE(o.field("Missing").defined());
+		CHECK(o.truthy());
+		CHECK(o.to_string() == "[object Object]");
+		As2Value l = As2Value::array({ As2Value::of(1.0), As2Value::of("a") });
+		l.push(As2Value::of(true));
+		CHECK(l.size() == 3);
+		CHECK(l.to_string() == "1,a,true");
+		CHECK_FALSE(l.at(9).defined());
+		CHECK(l == As2Value::array({ As2Value::of(1.0), As2Value::of("a"), As2Value::of(true) }));
+		CHECK_FALSE(l == As2Value::array());
+		const std::array<std::string, 2> args{ "M16A4", "x" };
+		CHECK(hud_format_text("[{0:~}]", args) == "[M16A4]");
+		CHECK(hud_format_text("{1} {0}", args) == "x M16A4");
+		CHECK(hud_format_text("{2}{a}{", args) == "{a}{");
+		CHECK(hud_message_source(224794678) == HudMessageSource::Kill);
+		CHECK(hud_message_source(1675248891) == HudMessageSource::LocalKill);
+		CHECK(hud_message_source(7) == HudMessageSource::None);
+		HudModel m = kill_model();
+		m.players[2].squad = 1;
+		CHECK(hud_relation(m, 0) == kHudRelationSquad);
+		CHECK(hud_relation(m, 1) == kHudRelationEnemy);
+		CHECK(hud_relation(m, 2) == kHudRelationFriendly);
+		m.players[0].squad = 1;
+		CHECK(hud_relation(m, 2) == kHudRelationSquad);
+		CHECK(hud_relation(m, kHudNoPlayer) == kHudRelationEnemy);
+	}
+
+	TEST_CASE("hud screen unit: message queue rows, expiry, overflow and RemoveFlag") {
+		HudMessageCompData d;
+		HudMessageInfo &k = d.info[size_t(HudMessageSource::Kill)];
+		k.queue_size = 4;
+		k.normal_seconds = 5.0f;
+		k.short_seconds = 1.0f;
+		k.row_type = "Kill";
+		HudMessageComp comp(d);
+		HudClientState c;
+		c.localise_hash = [](uint32_t p_hash) { return p_hash == kHudKillWeaponFormatHash ? std::string(kHudKillWeaponFormat) : std::string("W"); };
+		HudModel m = kill_model();
+		comp.update(m, c, 0.0);
+		CHECK(comp.list(HudMessageSource::Kill).size() == 0);
+		push_kill(m, 0, 1, 7, true);
+		comp.update(m, c, 0.0);
+		const As2Value &l = comp.list(HudMessageSource::Kill);
+		REQUIRE(l.size() == 1);
+		CHECK(l.at(0).field("Id").to_number() == 1.0);
+		CHECK(l.at(0).field("Type").to_string() == "Kill");
+		CHECK(l.at(0).field("RemoveFlag").to_number() == 0.0);
+		const As2Value &v = l.at(0).field("Value");
+		CHECK(v.field("KillerColor").to_number() == kHudRelationSquad);
+		CHECK(v.field("VictimColor").to_number() == kHudRelationEnemy);
+		CHECK(v.field("Text").to_string() == "[W]");
+		CHECK(v.field("KillerName").to_string() == "AAAA");
+		CHECK(v.field("VictimName").to_string() == "BBBBBB");
+		CHECK(v.field("HeadShot").truthy());
+		CHECK_FALSE(v.field("TeamKill").truthy());
+		push_kill(m, 1, 1, 7, false, false, true);
+		comp.update(m, c, 1.0);
+		REQUIRE(comp.list(HudMessageSource::Kill).size() == 2);
+		const As2Value &sv = comp.list(HudMessageSource::Kill).at(1).field("Value");
+		CHECK(sv.field("Text").to_string() == kHudKillsIsNoSid);
+		CHECK_FALSE(sv.field("KillerName").defined());
+		CHECK(sv.field("KillerColor").to_number() == kHudRelationEnemy);
+		comp.update(m, c, 4.99);
+		CHECK(comp.list(HudMessageSource::Kill).at(0).field("RemoveFlag").to_number() == 0.0);
+		comp.update(m, c, 5.0);
+		REQUIRE(comp.list(HudMessageSource::Kill).size() == 2);
+		CHECK(comp.list(HudMessageSource::Kill).at(0).field("RemoveFlag").to_number() == 1.0);
+		comp.update(m, c, 5.1);
+		REQUIRE(comp.list(HudMessageSource::Kill).size() == 1);
+		CHECK(comp.list(HudMessageSource::Kill).at(0).field("Id").to_number() == 2.0);
+		HudMessageComp full(d);
+		HudModel f = kill_model();
+		for (int i = 0; i < 5; ++i) {
+			push_kill(f, 3, 2, 7, false);
+		}
+		full.update(f, c, 0.0);
+		CHECK(full.list(HudMessageSource::Kill).size() == 5);
+		full.update(f, c, 0.99);
+		CHECK(full.list(HudMessageSource::Kill).at(0).field("RemoveFlag").to_number() == 0.0);
+		full.update(f, c, 1.0);
+		CHECK(full.list(HudMessageSource::Kill).at(0).field("RemoveFlag").to_number() == 1.0);
+		CHECK(full.list(HudMessageSource::Kill).at(1).field("RemoveFlag").to_number() == 0.0);
+		const As2Value &fv = full.list(HudMessageSource::Kill).at(1).field("Value");
+		CHECK(fv.field("KillerColor").to_number() == kHudRelationEnemy);
+		CHECK(fv.field("VictimColor").to_number() == kHudRelationFriendly);
+		push_kill(f, 0, 2, 7, false, true);
+		full.update(f, c, 2.0);
+		CHECK(full.list(HudMessageSource::Kill).at(full.list(HudMessageSource::Kill).size() - 1).field("Value").field("TeamKill").truthy());
+		push_kill(f, 3, 2, 7, false, true);
+		full.update(f, c, 2.0);
+		CHECK_FALSE(full.list(HudMessageSource::Kill).at(full.list(HudMessageSource::Kill).size() - 1).field("Value").field("TeamKill").truthy());
+		for (int i = 0; i < 20; ++i) {
+			push_kill(f, 3, 2, 7, false);
+		}
+		full.update(f, c, 3.0);
+		CHECK(full.messages_added(HudMessageSource::Kill) == 7 + kHudKillFeedSize);
 	}
 
 	TEST_CASE("hud screen unit: engine-drawn parts measured from the 18.57 footage") {
@@ -614,16 +804,191 @@ TEST_SUITE("ui-hud-screen") {
 		CHECK(s.at(hi).frame == 1);
 		CHECK(s.at(hi + ".HitController").frame == 0);
 		CHECK_FALSE(s.at("instance1.LatencyIndicator_01").visible);
-		for (const char *w : { "HudMessage_01", "HudMessage_02", "HudMessage_04", "HudMessage_05", "PassangerList_01", "VehicleHealth_01", "ScoreAggregator_01",
-					 "SupportIconManager_01", "HudAlertMessage_01", "HudAlertMessage_02" }) {
+		for (const char *w : { "PassangerList_01", "VehicleHealth_01", "ScoreAggregator_01", "SupportIconManager_01", "HudAlertMessage_01", "HudAlertMessage_02" }) {
 			CHECK_MESSAGE(!s.at(std::string("instance1.") + w).visible, w);
 		}
-		CHECK_FALSE(s.at("instance1.HudMessage_01.posGuide").visible);
+		for (const char *w : { "HudMessage_01", "HudMessage_02", "HudMessage_04", "HudMessage_05" }) {
+			const std::string path = std::string("instance1.") + w;
+			CHECK_MESSAGE(s.at(path).visible, w);
+			CHECK_FALSE(s.at(path + ".posGuide").visible);
+			const auto *api = dynamic_cast<HudMessageApi *>(s.hud->controller(path));
+			REQUIRE(api != nullptr);
+			CHECK(api->rows() == 0);
+		}
 		Screen t = initialized(*r, kHudTdmScreenPartition, m);
 		CHECK_FALSE(t.at("instance1.SquadList_00").visible);
-		CHECK_FALSE(t.at("instance1.HudMessage_00").visible);
+		CHECK(t.at("instance1.HudMessage_00").visible);
+		REQUIRE(dynamic_cast<HudMessageApi *>(t.hud->controller("instance1.HudMessage_00")) != nullptr);
+		CHECK(dynamic_cast<HudMessageApi *>(t.hud->controller("instance1.HudMessage_00"))->rows() == 0);
 		CHECK_FALSE(t.at("instance1.MapmarkerManager_00").visible);
-		row("hidden", "hit level 1 -> frame index 1, latency hidden, 13 data-driven widgets hidden until their data");
+		row("hidden", "hit level 1 -> frame index 1, latency hidden, 8 data-driven widgets hidden until their data, 5 HudMessage lists shown empty");
+	}
+
+	TEST_CASE("hud screen: KillFeed") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const HudMessageCompData data = message_data(*r);
+		const HudMessageInfo &kill = data.of(HudMessageSource::Kill);
+		CHECK(kill.queue_size == 4);
+		CHECK(kill.normal_seconds == 5.0f);
+		CHECK(kill.short_seconds == 1.0f);
+		CHECK(kill.row_type == "Kill");
+		CHECK(data.score_aggregate_time == 8.0f);
+		const TextDatabase &db = text_db(*r);
+		CHECK(db.find(kHudKillWeaponFormatHash) == kHudKillWeaponFormat);
+		const uint32_t weapon = text_hash("ID_P_WNAME_M16A4");
+		const std::optional<std::string_view> weapon_name = db.find(weapon);
+		REQUIRE(weapon_name.has_value());
+		HudMessageComp comp(data);
+		HudClientState c = text_client(db);
+		c.messages = &comp;
+		HudModel m = kill_model();
+		comp.update(m, c, 0.0);
+		Screen s = initialized(*r, kHudMpScreenPartition, m, c);
+		const std::string feed = "instance1.HudMessage_02";
+		const HudWidgetNode *node = s.asset.find("HudMessage_02");
+		REQUIRE(node != nullptr);
+		REQUIRE(node->message_query.has_value());
+		CHECK(node->message_query->key == 224794678);
+		CHECK(node->number_of_rows == 2);
+		const auto *api = dynamic_cast<HudMessageApi *>(s.hud->controller(feed));
+		REQUIRE(api != nullptr);
+		CHECK(api->source() == HudMessageSource::Kill);
+		CHECK(api->max_row_count() == 2.0);
+		CHECK(s.at(feed).visible);
+		CHECK_FALSE(s.at(feed + ".posGuide").visible);
+		CHECK(s.at(feed + ".messageHolder").dynamic);
+		CHECK(api->rows() == 0);
+		push_kill(m, 0, 1, weapon, true);
+		comp.update(m, c, 0.0);
+		s.hud->refresh(m);
+		REQUIRE(api->rows() == 1);
+		const std::string row1 = feed + ".messageHolder.message_1";
+		const std::string c1 = row1 + ".container";
+		CHECK(s.at(row1).symbol == "Kill");
+		CHECK(s.at(row1).frame == s.label(row1, "startAnim"));
+		CHECK(s.at(row1).playing);
+		CHECK(s.at(row1).color.mul[3] == doctest::Approx(1.0f));
+		CHECK(s.at(c1 + ".killer").frame == s.label(c1 + ".killer", "squad"));
+		CHECK(s.at(c1 + ".victim").frame == s.label(c1 + ".victim", "enemy"));
+		CHECK(s.at(c1 + ".msg").frame == s.label(c1 + ".msg", "neutral"));
+		CHECK(s.at(c1 + ".killer.txt").text == "AAAA");
+		CHECK(s.at(c1 + ".killer.txtBg").text == "AAAA");
+		CHECK(s.at(c1 + ".victim.txt").text == "BBBBBB");
+		const std::string weapon_text = "[" + std::string(*weapon_name) + "]";
+		CHECK(s.at(c1 + ".msg.txt").text == weapon_text);
+		CHECK(s.at(c1 + ".headShotIcon").visible);
+		CHECK(s.at(c1 + ".headShotIcon").frame == s.label(c1 + ".headShotIcon", "KitRecon"));
+		const As2Clip killer = s.clip(c1 + ".killer");
+		const As2Clip msg = s.clip(c1 + ".msg");
+		const As2Clip icon = s.clip(c1 + ".headShotIcon");
+		const As2Clip victim = s.clip(c1 + ".victim");
+		CHECK(killer.child("txt").width() == doctest::Approx(killer.child("txt").text_width() + 5.0f));
+		CHECK(killer.child("txtBg").width() == doctest::Approx(killer.child("txt").text_width() + 5.0f));
+		CHECK(msg.x() == doctest::Approx(killer.x() + killer.width() + 5.0f));
+		CHECK(icon.x() == doctest::Approx(msg.x() + msg.width() + 10.0f));
+		CHECK(icon.y() == 17.0f);
+		CHECK(victim.x() == doctest::Approx(icon.x() + 10.0f));
+		CHECK(s.clip(row1).x() == doctest::Approx(-s.clip(row1).width()));
+		CHECK(tween_of(s, row1, HudTweenProperty::Y) == nullptr);
+		CHECK(s.clip(row1).y() == 0.0f);
+		const SwfTimeline &row_tl = *s.at(row1).timeline;
+		const uint32_t start_label = s.label(row1, "startAnim");
+		const uint32_t out_label = s.label(row1, "outAnim");
+		const uint32_t started_after = frames_until(s, [&] { return s.at(row1).frame + 1 >= out_label || !s.at(row1).playing; }, 120);
+		CHECK(started_after > 0);
+		CHECK_FALSE(s.at(row1).playing);
+		CHECK(s.at(row1).frame == start_label + started_after);
+		CHECK(s.at(row1).frame < out_label);
+		const float h1 = s.clip(row1 + ".heightClip").height();
+		push_kill(m, 3, 2, weapon, false);
+		comp.update(m, c, 1.0);
+		s.hud->refresh(m);
+		REQUIRE(api->rows() == 2);
+		const std::string row2 = feed + ".messageHolder.message_2";
+		const std::string c2 = row2 + ".container";
+		CHECK(s.at(c2 + ".killer").frame == s.label(c2 + ".killer", "enemy"));
+		CHECK(s.at(c2 + ".victim").frame == s.label(c2 + ".victim", "friendly"));
+		CHECK_FALSE(s.at(c2 + ".headShotIcon").visible);
+		const As2Clip msg2 = s.clip(c2 + ".msg");
+		CHECK(s.clip(c2 + ".victim").x() == doctest::Approx(msg2.x() + msg2.width() + 5.0f));
+		const HudTween *t1b = tween_of(s, row1, HudTweenProperty::Y);
+		REQUIRE(t1b != nullptr);
+		CHECK(t1b->seconds == 0.4);
+		CHECK(t1b->ease == HudTweenEase::ExpoOut);
+		CHECK(t1b->to == 0.0f);
+		CHECK(tween_of(s, row2, HudTweenProperty::Y) == nullptr);
+		CHECK(s.clip(row2).y() == doctest::Approx(h1));
+		comp.update(m, c, 5.0);
+		s.hud->refresh(m);
+		CHECK(s.at(row1).frame == out_label);
+		CHECK(s.at(row1).playing);
+		const uint32_t removed_after = frames_until(s, [&] { return s.scene->find_node(row1) == nullptr; }, 120);
+		CHECK(removed_after == row_tl.frames - 1 - out_label);
+		CHECK(api->rows() == 1);
+		const HudTween *t2b = tween_of(s, row2, HudTweenProperty::Y);
+		REQUIRE(t2b != nullptr);
+		CHECK(t2b->to == 0.0f);
+		for (int i = 0; i < 5; ++i) {
+			push_kill(m, 1, 2, weapon, false);
+		}
+		comp.update(m, c, 5.5);
+		s.hud->refresh(m);
+		CHECK(api->rows() == 6);
+		CHECK(api->rows_added() == 7);
+		CHECK(tween_of(s, feed + ".messageHolder.message_7", HudTweenProperty::Y) == nullptr);
+		CHECK(s.clip(feed + ".messageHolder.message_7").y() == doctest::Approx(5.0f * h1));
+		comp.update(m, c, 6.5);
+		s.hud->refresh(m);
+		CHECK(s.at(feed + ".messageHolder.message_2").frame == out_label);
+		push_kill(m, 1, 1, 0, false, false, true);
+		comp.update(m, c, 7.0);
+		s.hud->refresh(m);
+		const std::string sui = feed + ".messageHolder.message_" + std::to_string(comp.messages_added(HudMessageSource::Kill));
+		CHECK(s.at(sui + ".container.victim").frame == s.label(sui + ".container.victim", "neutral"));
+		CHECK(s.at(sui + ".container.victim.txt").text == db.find_sid(kHudKillsIsNoSid).value_or("?"));
+		CHECK(s.at(sui + ".container.msg.txt").text == "BBBBBB");
+		CHECK_FALSE(s.at(sui + ".container.killer").visible);
+		CHECK(s.clip(sui + ".container.killer").width() == 0.0f);
+		row("kill_feed", "UIMessageCompData Kill queue 4, 5 s, short 1 s; HudMessage_02 key 224794678 rows 2; row " + weapon_text + " headshot KitRecon, " +
+						"started " + std::to_string(started_after) + " frames after startAnim " + std::to_string(start_label) + ", removed " +
+						std::to_string(removed_after) + " frames after outAnim " + std::to_string(out_label) + " of " + std::to_string(row_tl.frames) + ", height " +
+						std::to_string(h1));
+	}
+
+	TEST_CASE("hud screen: KillFeed team kill") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const TextDatabase &db = text_db(*r);
+		HudMessageComp comp(message_data(*r));
+		HudClientState c = text_client(db);
+		c.messages = &comp;
+		HudModel m = kill_model();
+		Screen s = initialized(*r, kHudMpScreenPartition, m, c);
+		push_kill(m, 0, 2, text_hash("ID_P_WNAME_M16A4"), false, true);
+		comp.update(m, c, 0.0);
+		s.hud->refresh(m);
+		const std::string g = "instance1.HudMessage_02.messageHolder.message_99999";
+		CHECK(s.at(g).symbol == "Game");
+		CHECK(s.at(g).matrix.ty == -240.0f);
+		CHECK(s.at(g).frame == s.label(g, "in"));
+		CHECK(s.at(g + ".txt.txtDisplay").text == db.find_sid("ID_H_ALERT_FAILED_FRIENDLY_FIRE").value_or("?"));
+		CHECK(s.at("instance1.HudMessage_02.messageHolder.message_1.container.victim").frame ==
+				s.label("instance1.HudMessage_02.messageHolder.message_1.container.victim", "friendly"));
+		const uint32_t out_after = frames_until(s, [&] { return s.at(g).frame >= s.label(g, "out"); }, 200);
+		const double dt = 1.0 / double(s.scene->frame_rate());
+		double left = 5.0;
+		uint32_t expected = 0;
+		while (left > 0.0) {
+			left -= dt;
+			++expected;
+		}
+		CHECK(out_after == expected);
+		row("kill_feed_team_kill", "Game row message_99999 at y -240, out after " + std::to_string(out_after) + " frames");
 	}
 
 	TEST_CASE("hud screen: install unchanged") {

@@ -1,6 +1,9 @@
 #pragma once
 
+#include "bf3/core/ui/hud_messages.h"
+
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -34,6 +37,15 @@ public:
 	virtual double height_value() const = 0;
 	virtual bool hardcore() const = 0;
 	virtual std::string tilt_mode() const = 0;
+};
+
+class HudMessageApi {
+public:
+	virtual ~HudMessageApi() = default;
+	virtual uint64_t rows_added() const = 0;
+	virtual size_t rows() const = 0;
+	virtual double max_row_count() const = 0;
+	virtual HudMessageSource source() const = 0;
 };
 
 struct HudBgDrawLook {

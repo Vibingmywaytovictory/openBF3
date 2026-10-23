@@ -119,7 +119,18 @@ struct Resolved {
 	uint16_t id = 0;
 	std::string symbol;
 	std::string unresolved;
+	bool empty_clip = false;
 };
+
+const SwfTimeline &empty_clip_timeline() {
+	static const SwfTimeline t = [] {
+		SwfTimeline e;
+		e.declared_frames = 1;
+		e.frames = 1;
+		return e;
+	}();
+	return t;
+}
 
 std::string segment_of(const SwfSceneNode &p_n) {
 	return p_n.name.empty() ? "#" + std::to_string(p_n.depth) : p_n.name;
@@ -185,8 +196,23 @@ struct SwfScene::Impl {
 	SwfSceneStats stats;
 	double accumulator = 0.0;
 	std::optional<WorkBudget> budget;
+	std::function<void(SwfNodeId, uint32_t)> on_script;
+	std::vector<std::pair<SwfNodeId, uint32_t>> script_calls;
 
 	void begin() { budget.emplace(kSwfSceneBudgetUnits); }
+
+	void dispatch_scripts() {
+		while (!script_calls.empty() && on_script) {
+			std::vector<std::pair<SwfNodeId, uint32_t>> calls;
+			calls.swap(script_calls);
+			for (const auto &[id, frame] : calls) {
+				if (get(id) != nullptr) {
+					on_script(id, frame);
+				}
+			}
+		}
+		script_calls.clear();
+	}
 
 	Status charge(size_t p_units) {
 		Status st = budget->charge(p_units);
@@ -263,6 +289,12 @@ struct SwfScene::Impl {
 		if (!r_n.unresolved.empty()) {
 			r_n.kind = SwfNodeKind::Unresolved;
 			stats.unresolved++;
+			return;
+		}
+		if (p_r.empty_clip) {
+			r_n.kind = SwfNodeKind::Sprite;
+			r_n.timeline = &empty_clip_timeline();
+			r_n.playing = true;
 			return;
 		}
 		const SwfMovie &m = *r_n.movie;
@@ -612,6 +644,9 @@ struct SwfScene::Impl {
 			stats.scripts_run++;
 			if (s->other_actions != 0) {
 				stats.scripts_with_other_actions++;
+				if (on_script) {
+					script_calls.emplace_back(id, frame);
+				}
 			}
 			for (const SwfFrameOp &op : s->ops) {
 				BF3_TRY(charge(1));
@@ -849,8 +884,14 @@ Status SwfScene::advance(uint32_t p_frames) {
 	impl_->begin();
 	for (uint32_t i = 0; i < p_frames; ++i) {
 		BF3_TRY(impl_->tick());
+		impl_->dispatch_scripts();
 	}
 	return Status::success();
+}
+
+void SwfScene::set_frame_script_handler(std::function<void(SwfNodeId, uint32_t)> p_handler) {
+	impl_->on_script = std::move(p_handler);
+	impl_->script_calls.clear();
 }
 
 Status SwfScene::advance_seconds(double p_seconds) {
@@ -881,7 +922,9 @@ Status SwfScene::goto_frame(std::string_view p_path, uint32_t p_frame, bool p_pl
 	}
 	im.jump_count((*n)->id) = 0;
 	BF3_TRY(im.jump((*n)->id, p_frame, p_play));
-	return im.run_queue();
+	BF3_TRY(im.run_queue());
+	im.dispatch_scripts();
+	return Status::success();
 }
 
 Status SwfScene::goto_label(std::string_view p_path, std::string_view p_label, bool p_play) {
@@ -897,7 +940,9 @@ Status SwfScene::goto_label(std::string_view p_path, std::string_view p_label, b
 	}
 	im.jump_count((*n)->id) = 0;
 	BF3_TRY(im.jump((*n)->id, *f, p_play));
-	return im.run_queue();
+	BF3_TRY(im.run_queue());
+	im.dispatch_scripts();
+	return Status::success();
 }
 
 Status SwfScene::play(std::string_view p_path) {
@@ -951,7 +996,30 @@ Result<SwfNodeId> SwfScene::attach_movie(std::string_view p_parent_path, std::st
 	}
 	im.get(*created)->placed_character = *id;
 	BF3_TRY(im.run_queue());
+	im.dispatch_scripts();
 	return *created;
+}
+
+Result<SwfNodeId> SwfScene::create_empty_movie_clip(std::string_view p_parent_path, std::string_view p_name, int32_t p_as2_depth) {
+	Impl &im = *impl_;
+	im.begin();
+	Result<SwfSceneNode *> found = im.timeline_at(p_parent_path);
+	if (!found) {
+		return found.error();
+	}
+	SwfSceneNode &parent = **found;
+	if (p_as2_depth < -kSwfAs2DepthOffset || p_as2_depth > kSwfAs2MaxDepth) {
+		return make_error("swf scene " + im.movie_name + ": depth " + std::to_string(p_as2_depth) + " outside the AS2 range");
+	}
+	const int32_t depth = p_as2_depth + kSwfAs2DepthOffset;
+	if (const SwfNodeId other = im.child_at(parent, depth); other != kSwfNoNode) {
+		im.remove(other);
+	}
+	Resolved r;
+	r.movie = parent.movie;
+	r.movie_name = parent.movie_name;
+	r.empty_clip = true;
+	return im.create(parent, std::move(r), depth, kNoEvent, true, p_name);
 }
 
 Status SwfScene::remove_movie(std::string_view p_path) {

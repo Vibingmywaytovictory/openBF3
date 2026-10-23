@@ -49,6 +49,43 @@ As2Value value_of(const Avm1Value &p_v) {
 	}
 }
 
+HudDataSource source_of(const EbxResolver &p_db, const EbxPartition &p_part, const EbxStruct &p_info) {
+	HudDataSource out;
+	out.name = text_of(p_info.get("DataName"));
+	const std::optional<EbxValue> key = p_info.get("DataKey");
+	out.key = key ? key->as_i32().value_or(0) : 0;
+	if (const std::optional<EbxRef> c = detail::ref(p_info, "DataCategory")) {
+		out.category = detail::ref_partition(p_db, p_part, *c).value_or(std::string());
+	}
+	out.on_initialize = detail::flag_or(p_info, "UpdateOnInitialize", true);
+	return out;
+}
+
+void read_binding(const EbxResolver &p_db, const EbxPartition &p_part, const EbxInstance &p_node, HudWidgetNode &r_widget) {
+	const std::optional<EbxInstance> b = p_db.follow(p_node.data(), "DataBinding");
+	if (!b) {
+		return;
+	}
+	if (b->is_a("UIHUDMessageBinding")) {
+		if (const std::optional<EbxStruct> q = detail::sub(b->data(), "MessageQuery")) {
+			r_widget.message_query = source_of(p_db, p_part, *q);
+		}
+		const std::optional<EbxValue> rows = b->get("NumberOfRows");
+		r_widget.number_of_rows = rows ? rows->as_i32().value_or(0) : 0;
+		return;
+	}
+	const std::optional<EbxValue> list = b->get("Bindings");
+	const OptionalEbxArray arr = list ? list->as_array() : OptionalEbxArray();
+	if (!arr) {
+		return;
+	}
+	for (const EbxValue &v : *arr) {
+		if (const std::optional<EbxStruct> e = v.as_struct()) {
+			r_widget.sources.push_back(source_of(p_db, p_part, *e));
+		}
+	}
+}
+
 float tween_value(const As2Clip &p_clip, HudTweenProperty p_property) {
 	switch (p_property) {
 		case HudTweenProperty::Alpha: return p_clip.alpha();
@@ -60,6 +97,19 @@ float tween_value(const As2Clip &p_clip, HudTweenProperty p_property) {
 	return 0.0f;
 }
 
+}
+
+const HudDataSource *HudWidgetNode::source(std::string_view p_name) const {
+	for (const HudDataSource &d : sources) {
+		if (d.name == p_name) {
+			return &d;
+		}
+	}
+	return nullptr;
+}
+
+bool HudFrameScript::calls(std::string_view p_name) const {
+	return names != nullptr && std::find(names->begin(), names->end(), p_name) != names->end();
 }
 
 const HudWidgetNode *HudScreenAsset::find(std::string_view p_instance) const {
@@ -121,6 +171,7 @@ Result<HudScreenAsset> read_hud_screen_asset(const EbxResolver &p_db, std::strin
 				}
 			}
 		}
+		read_binding(p_db, *part, n, w);
 		if (w.instance.empty()) {
 			return make_error("hud screen: " + std::string(p_partition) + " has a widget node without an instance name");
 		}
@@ -157,13 +208,68 @@ As2Value As2Value::numbers(std::vector<double> p_list) {
 	return v;
 }
 
+As2Value As2Value::object() {
+	As2Value v;
+	v.kind = Kind::Object;
+	return v;
+}
+
+As2Value As2Value::array(std::vector<As2Value> p_items) {
+	As2Value v;
+	v.kind = Kind::List;
+	v.items = std::move(p_items);
+	return v;
+}
+
+As2Value &As2Value::set(std::string_view p_name, As2Value p_value) {
+	if (kind != Kind::Object) {
+		*this = object();
+	}
+	for (size_t i = 0; i < names.size(); ++i) {
+		if (names[i] == p_name) {
+			items[i] = std::move(p_value);
+			return *this;
+		}
+	}
+	names.emplace_back(p_name);
+	items.push_back(std::move(p_value));
+	return *this;
+}
+
+const As2Value &As2Value::field(std::string_view p_name) const {
+	static const As2Value kUndefined;
+	if (kind == Kind::Object) {
+		for (size_t i = 0; i < names.size(); ++i) {
+			if (names[i] == p_name) {
+				return items[i];
+			}
+		}
+	}
+	return kUndefined;
+}
+
+As2Value &As2Value::push(As2Value p_value) {
+	if (kind != Kind::List) {
+		*this = array();
+	}
+	items.push_back(std::move(p_value));
+	return *this;
+}
+
+const As2Value &As2Value::at(size_t p_index) const {
+	static const As2Value kUndefined;
+	return kind == Kind::List && p_index < items.size() ? items[p_index] : kUndefined;
+}
+
 bool As2Value::truthy() const {
 	switch (kind) {
 		case Kind::Undefined: return false;
 		case Kind::Bool: return boolean;
 		case Kind::Number: return number != 0.0 && !std::isnan(number);
 		case Kind::String: return !text.empty();
-		case Kind::NumberList: return true;
+		case Kind::NumberList:
+		case Kind::Object:
+		case Kind::List: return true;
 	}
 	return false;
 }
@@ -181,7 +287,9 @@ double As2Value::to_number() const {
 			const double d = std::strtod(text.c_str(), &end);
 			return end != nullptr && *end == '\0' ? d : std::nan("");
 		}
-		case Kind::NumberList: return std::nan("");
+		case Kind::NumberList:
+		case Kind::Object:
+		case Kind::List: return std::nan("");
 	}
 	return std::nan("");
 }
@@ -196,6 +304,14 @@ std::string As2Value::to_string() const {
 			std::string s;
 			for (size_t i = 0; i < list.size(); ++i) {
 				s += (i == 0 ? "" : ",") + as2_number_string(list[i]);
+			}
+			return s;
+		}
+		case Kind::Object: return "[object Object]";
+		case Kind::List: {
+			std::string s;
+			for (size_t i = 0; i < items.size(); ++i) {
+				s += (i == 0 ? "" : ",") + (items[i].defined() ? items[i].to_string() : std::string());
 			}
 			return s;
 		}
@@ -239,6 +355,7 @@ double hud_tween_ease(HudTweenEase p_ease, double p_t) {
 			const double u = t - 1.0;
 			return u * u * ((s + 1.0) * u + s) + 1.0;
 		}
+		case HudTweenEase::ExpoOut: return t == 1.0 ? 1.0 : 1.001 * (1.0 - std::pow(2.0, -10.0 * t));
 	}
 	return t;
 }
@@ -313,6 +430,18 @@ As2Clip HudWidgetHost::attach_movie(const As2Clip &p_parent, std::string_view p_
 	return made;
 }
 
+As2Clip HudWidgetHost::create_empty_movie_clip(const As2Clip &p_parent, std::string_view p_name, int32_t p_depth) {
+	return p_parent.create_empty_movie_clip(p_name, p_depth);
+}
+
+void HudWidgetHost::remove_movie_clip(const As2Clip &p_clip) {
+	const SwfSceneNode *n = p_clip.node();
+	if (n != nullptr && n->dynamic) {
+		screen_.retire(p_clip.path());
+	}
+	p_clip.remove_movie_clip();
+}
+
 void HudWidgetHost::remove_tweens(const As2Clip &p_clip) {
 	std::vector<HudTween> &list = screen_.tweens_;
 	list.erase(std::remove_if(list.begin(), list.end(), [&](const HudTween &t) { return t.path == p_clip.path(); }), list.end());
@@ -332,7 +461,89 @@ const HudClientState &HudWidgetHost::client() const {
 	return screen_.client();
 }
 
-HudScreen::~HudScreen() = default;
+HudScreen::~HudScreen() {
+	if (scene_ != nullptr) {
+		scene_->set_frame_script_handler({});
+	}
+}
+
+void HudScreen::retire(std::string_view p_path) {
+	const std::string prefix = std::string(p_path) + ".";
+	for (const std::unique_ptr<HudWidgetState> &w : widgets_) {
+		if (w->path == p_path || w->path.starts_with(prefix)) {
+			w->retired = true;
+			original_positions_.erase(w->path);
+		}
+	}
+	tweens_.erase(std::remove_if(tweens_.begin(), tweens_.end(), [&](const HudTween &t) { return t.path == p_path || t.path.starts_with(prefix); }),
+			tweens_.end());
+}
+
+void HudScreen::sweep() {
+	widgets_.erase(std::remove_if(widgets_.begin(), widgets_.end(), [](const std::unique_ptr<HudWidgetState> &w) { return w->retired; }), widgets_.end());
+}
+
+const Avm1Movie &HudScreen::avm1_of(const SwfSceneNode &p_node) {
+	auto it = avm1_.find(p_node.movie_name);
+	if (it == avm1_.end()) {
+		Result<Avm1Movie> read = read_avm1(*p_node.movie);
+		std::shared_ptr<const Avm1Movie> m = read ? std::make_shared<const Avm1Movie>(std::move(*read)) : std::make_shared<const Avm1Movie>();
+		it = avm1_.emplace(p_node.movie_name, std::move(m)).first;
+	}
+	return *it->second;
+}
+
+const std::vector<std::string> &HudScreen::frame_names(const SwfSceneNode &p_node, uint32_t p_frame) {
+	const uint16_t timeline = p_node.kind == SwfNodeKind::Root ? 0 : p_node.character;
+	const std::string key = p_node.movie_name + "#" + std::to_string(timeline) + "@" + std::to_string(p_frame);
+	auto it = frame_names_.find(key);
+	if (it != frame_names_.end()) {
+		return it->second;
+	}
+	std::vector<std::string> names;
+	if (p_node.movie) {
+		for (const Avm1Body &b : avm1_of(p_node).bodies) {
+			if (b.kind != Avm1BodyKind::DoAction || b.timeline != timeline || b.frame != p_frame) {
+				continue;
+			}
+			for (const Avm1Action &a : b.code.actions) {
+				if (a.op != kAvm1Push) {
+					continue;
+				}
+				for (const Avm1Value &v : a.values) {
+					const As2Value s = value_of(v);
+					if (s.kind == As2Value::Kind::String) {
+						names.push_back(s.text);
+					}
+				}
+			}
+		}
+	}
+	return frame_names_.emplace(key, std::move(names)).first->second;
+}
+
+void HudScreen::on_frame_script(SwfNodeId p_node, uint32_t p_frame) {
+	const SwfSceneNode *n = scene_->node(p_node);
+	if (n == nullptr) {
+		return;
+	}
+	HudFrameScript fs;
+	fs.path = n->path;
+	fs.frame = p_frame;
+	fs.names = &frame_names(*n, p_frame);
+	HudWidgetState *owner = nullptr;
+	for (const std::unique_ptr<HudWidgetState> &w : widgets_) {
+		if (w->retired || !(fs.path == w->path || fs.path.starts_with(w->path + "."))) {
+			continue;
+		}
+		if (owner == nullptr || w->path.size() > owner->path.size()) {
+			owner = w.get();
+		}
+	}
+	if (owner != nullptr) {
+		owner->controller->frame_script(*owner->host, fs);
+	}
+}
 
 As2Clip HudScreen::clip(std::string_view p_path) {
 	return As2Clip(scene_, std::string(p_path), &stats_.as2, fonts_);
@@ -340,7 +551,7 @@ As2Clip HudScreen::clip(std::string_view p_path) {
 
 const HudWidgetState *HudScreen::widget(std::string_view p_path) const {
 	for (const std::unique_ptr<HudWidgetState> &w : widgets_) {
-		if (w->path == p_path) {
+		if (w->path == p_path && !w->retired) {
 			return w.get();
 		}
 	}
@@ -519,6 +730,8 @@ Result<std::unique_ptr<HudScreen>> HudScreen::open(SwfScene &r_scene, const SwfL
 	if (s->scene_->find_node(kHudScreenInstance) == nullptr) {
 		return make_error("hud screen " + p_asset.name + ": movie " + r_scene.movie_name() + " has no " + std::string(kHudScreenInstance));
 	}
+	HudScreen *self = s.get();
+	r_scene.set_frame_script_handler([self](SwfNodeId p_node, uint32_t p_frame) { self->on_frame_script(p_node, p_frame); });
 	s->construct_subtree(r_scene.root());
 	return s;
 }
@@ -579,6 +792,7 @@ void HudScreen::initialize(const HudModel &p_model) {
 			continue;
 		}
 		w->screen_widget = true;
+		w->controller->attach_node(*w->host, n);
 		if (!w->controller->screen_initialized()) {
 			continue;
 		}
@@ -609,10 +823,11 @@ void HudScreen::refresh(const HudModel &p_model) {
 		initialize(p_model);
 		return;
 	}
+	sweep();
 	stats_.refreshes++;
 	for (size_t i = 0; i < widgets_.size(); ++i) {
 		HudWidgetState &w = *widgets_[i];
-		if (!w.initialized) {
+		if (!w.initialized || w.retired) {
 			continue;
 		}
 		HudData data;
@@ -648,6 +863,7 @@ void HudScreen::advance(double p_seconds) {
 	if (!std::isfinite(p_seconds) || p_seconds < 0.0) {
 		return;
 	}
+	sweep();
 	std::vector<std::pair<std::string, uint32_t>> completed;
 	for (HudTween &t : tweens_) {
 		if (!t.started) {
@@ -666,13 +882,17 @@ void HudScreen::advance(double p_seconds) {
 	}
 	tweens_.erase(std::remove_if(tweens_.begin(), tweens_.end(), [](const HudTween &t) { return t.elapsed >= t.seconds; }), tweens_.end());
 	for (const auto &[path, id] : completed) {
-		for (const std::unique_ptr<HudWidgetState> &w : widgets_) {
-			if (path == w->path || path.starts_with(w->path + ".")) {
-				w->controller->tween_complete(*w->host, id);
+		for (size_t i = 0; i < widgets_.size(); ++i) {
+			HudWidgetState &w = *widgets_[i];
+			if (!w.retired && (path == w.path || path.starts_with(w.path + "."))) {
+				w.controller->tween_complete(*w.host, id);
 			}
 		}
 	}
 	for (size_t i = 0; i < widgets_.size(); ++i) {
+		if (widgets_[i]->retired) {
+			continue;
+		}
 		if (widgets_[i]->initialized || !widgets_[i]->screen_widget) {
 			widgets_[i]->controller->advance(*widgets_[i]->host, p_seconds);
 		}

@@ -104,9 +104,8 @@ struct TdmPlacement {
 	float y = 0;
 	core::ui::HudAnchor anchor = core::ui::HudAnchor::Centre;
 };
-inline constexpr TdmPlacement kTdmKillFeedPlacement{ "ui/assets/hudmpscreen", "HudMessage_02", 1280.0f, 0.0f, core::ui::HudAnchor::TopRight };
 inline constexpr TdmPlacement kTdmKitBarPlacement{ "ui/assets/spawnscreenpc", "KitBar_01", 96.0f, 557.0f, core::ui::HudAnchor::BottomLeft };
 inline constexpr TdmPlacement kTdmSpawnCounterPlacement{ "ui/assets/spawnscreenpc", "TicketCounterSpawnScreen_01", 769.0f, 97.0f, core::ui::HudAnchor::Top };
-inline constexpr std::array<TdmPlacement, 3> kTdmPlacements{ kTdmKillFeedPlacement, kTdmKitBarPlacement, kTdmSpawnCounterPlacement };
+inline constexpr std::array<TdmPlacement, 2> kTdmPlacements{ kTdmKitBarPlacement, kTdmSpawnCounterPlacement };
 
 }

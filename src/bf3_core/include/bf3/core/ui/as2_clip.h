@@ -63,14 +63,18 @@ public:
 	std::string text() const;
 	void set_text(std::string_view p_text) const;
 	void set_auto_size(bool p_on) const;
+	void set_auto_size(SwfTextAutoSize p_mode) const;
 	float text_width() const;
+	float text_height() const;
 
 	int32_t next_highest_depth() const;
 	As2Clip attach_movie(std::string_view p_linkage, std::string_view p_name, int32_t p_depth) const;
+	As2Clip create_empty_movie_clip(std::string_view p_name, int32_t p_depth) const;
 	void remove_movie_clip() const;
 
 private:
 	SwfSceneNode *mut() const;
+	std::optional<SwfTextLayout> layout() const;
 	void note(const Status &p_status) const;
 	void miss() const;
 	void jump(int32_t p_as2_frame, bool p_play) const;

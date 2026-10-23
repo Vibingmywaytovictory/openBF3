@@ -126,7 +126,6 @@ int32_t hud_grenade_count(const net::WeaponsWire &p_weapons, const HudStatic &p_
 
 namespace bf3::host {
 
-inline constexpr double kKillFeedSeconds = 5.0;
 inline constexpr double kKillCardSeconds = 4.0;
 
 inline constexpr std::array<uint8_t, core::ui::kHudSpawnKitItems> kHudSpawnSlots{ 0, 1, 2, 6, 7 };

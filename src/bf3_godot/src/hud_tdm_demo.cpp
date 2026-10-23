@@ -308,8 +308,8 @@ void Bf3TdmHudDemo::check_stage(int p_stage) {
 			break;
 		}
 		case 2:
-			row(name, r.kill_feed_lines == 6 && r.kill_feed_lines_started == 6 && r.kill_feed_newest_serial == 6 && !r.spawn_screen_visible,
-					std::to_string(r.kill_feed_lines) + " lines drawn, " + std::to_string(r.kill_feed_lines_started) + " started");
+			row(name, !r.spawn_screen_visible && !r.kill_card_visible && r.model_serial == stage_model(2).serial,
+					"spawn screen and kill card hidden; the kill feed is the native HUD's (HudMessage_02)");
 			break;
 		case 3: {
 			const ui::HudModel m = stage_model(3);

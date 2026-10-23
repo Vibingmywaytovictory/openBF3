@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -180,6 +181,8 @@ public:
 
 	Result<SwfNodeId> attach_movie(std::string_view p_parent_path, std::string_view p_linkage, std::string_view p_name, int32_t p_as2_depth);
 	Status remove_movie(std::string_view p_path);
+	Result<SwfNodeId> create_empty_movie_clip(std::string_view p_parent_path, std::string_view p_name, int32_t p_as2_depth);
+	void set_frame_script_handler(std::function<void(SwfNodeId, uint32_t)> p_handler);
 
 	Status set_visible(std::string_view p_path, bool p_visible);
 	Status set_alpha(std::string_view p_path, float p_alpha);

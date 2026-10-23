@@ -7,6 +7,7 @@
 #include "godot_util.h"
 #include "hud_items.h"
 #include "input_mapper.h"
+#include "native_hud.h"
 
 #include "bf3/core/util/format.h"
 #include "bf3/host/hud_feed.h"
@@ -370,9 +371,11 @@ struct M2bCheck::State {
 		tally.spawn_request_resends = m.deploy.resends;
 		tally.deaths_received = m.deaths_received;
 		tally.feed_lines = m.tdm_state.deaths_fed;
+		if (g.native_hud != nullptr && g.native_hud->is_ready() && !g.native_hud->has_failed() && tally.windowed) {
+			tally.feed_lines = g.native_hud->kill_feed_rows_added();
+		}
 		if (m.tdm_hud != nullptr && m.tdm_hud->built() && tally.windowed) {
 			const TdmHudRecords r = m.tdm_hud->records();
-			tally.feed_lines = r.kill_feed_lines_started;
 			tally.spawn_screen_model_shown = uint32_t(std::min<uint64_t>(r.spawn_screen_shown, 0xFFFFFFFFu));
 			tally.round_end_shown = tally.round_end_shown && r.round_end_shown > 0;
 			tally.missing_lookups = r.missing_fonts + r.missing_icons + r.missing_strings;

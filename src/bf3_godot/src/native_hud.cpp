@@ -138,6 +138,7 @@ std::vector<uint8_t> image_bytes(Ref<Image> p_image, int32_t &r_w, int32_t &r_h)
 
 struct Bf3NativeHud::Loaded {
 	std::array<std::optional<ui::HudScreenAsset>, kNativeHudViews> assets;
+	std::optional<ui::HudMessageCompData> messages;
 	std::string error;
 	double seconds = 0.0;
 };
@@ -164,6 +165,9 @@ void Bf3NativeHud::_bind_methods() {
 void Bf3NativeHud::_notification(int p_what) {
 	if (p_what == NOTIFICATION_PREDELETE) {
 		join_loader();
+		for (std::unique_ptr<ui::HudScreen> &s : screens_) {
+			s.reset();
+		}
 	}
 }
 
@@ -235,6 +239,12 @@ void Bf3NativeHud::start_loader() {
 				}
 				out->assets[i] = std::move(*a);
 			}
+			bf3::core::Result<ui::HudMessageCompData> m = ui::read_hud_message_comp(**lib);
+			if (!m) {
+				out->error += std::string(ui::kUiMessageCompPartition) + ": " + m.error().message + "; ";
+			} else {
+				out->messages = std::move(*m);
+			}
 		}
 		out->seconds = bf3::core::seconds_since(t0);
 		loaded_ = std::move(out);
@@ -271,6 +281,8 @@ void Bf3NativeHud::build() {
 		return t ? std::optional<std::string>(std::string(*t)) : std::nullopt;
 	};
 	client_.vertical_fov_deg = float(vfov_deg_);
+	messages_ = std::make_unique<ui::HudMessageComp>(*loaded_->messages);
+	client_.messages = messages_.get();
 	static const char *const kNames[kNativeHudViews] = { "HudMp", "HudTdm", "Crosshair" };
 	std::string summary;
 	for (size_t i = 0; i < kNativeHudViews; ++i) {
@@ -391,6 +403,10 @@ void Bf3NativeHud::step(double p_seconds) {
 	}
 	const double dt = std::isfinite(p_seconds) && p_seconds > 0.0 ? p_seconds : 0.0;
 	ekg_clock_ += dt;
+	message_clock_ += dt;
+	if (messages_ != nullptr) {
+		messages_->update(model_, client_, message_clock_);
+	}
 	for (size_t i = 0; i < kNativeHudViews; ++i) {
 		Bf3SwfView *v = views_[i];
 		ui::HudScreen *s = screens_[i].get();
@@ -420,6 +436,22 @@ void Bf3NativeHud::step(double p_seconds) {
 		}
 		paint(i);
 	}
+}
+
+uint64_t Bf3NativeHud::kill_feed_rows_added() const {
+	uint64_t rows = 0;
+	for (const std::unique_ptr<ui::HudScreen> &s : screens_) {
+		if (s == nullptr) {
+			continue;
+		}
+		for (const std::unique_ptr<ui::HudWidgetState> &w : s->widgets()) {
+			const ui::HudMessageApi *api = dynamic_cast<const ui::HudMessageApi *>(w->controller.get());
+			if (api != nullptr && w->screen_widget && api->source() == ui::HudMessageSource::Kill) {
+				rows += api->rows_added();
+			}
+		}
+	}
+	return rows;
 }
 
 NativeHudReadout Bf3NativeHud::readout() const {

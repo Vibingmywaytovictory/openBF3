@@ -154,8 +154,6 @@ target_sources(bf3_godot PRIVATE
     src/hud_tdm.cpp
     src/hud_tdm_screen.h
     src/hud_tdm_text.h
-    src/hud_killfeed.h
-    src/hud_killfeed.cpp
     src/hud_scoreboard.h
     src/hud_scoreboard.cpp
     src/spawn_screen.h

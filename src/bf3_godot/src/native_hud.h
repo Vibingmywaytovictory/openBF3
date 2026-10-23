@@ -2,6 +2,7 @@
 
 #include "swf_view.h"
 
+#include "bf3/core/ui/hud_messages.h"
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/core/ui/hud_screen.h"
 
@@ -92,6 +93,8 @@ public:
 	double ekg_clock() const { return ekg_clock_; }
 	void set_ekg_clock(double p_seconds) { ekg_clock_ = p_seconds; }
 	godot::Ref<godot::Image> capture_layer() const;
+	uint64_t kill_feed_rows_added() const;
+	const bf3::core::ui::HudMessageComp *messages() const { return messages_.get(); }
 
 protected:
 	static void _bind_methods();
@@ -126,6 +129,8 @@ private:
 	bf3::core::ui::HudModel model_{};
 	uint64_t stepped_serial_ = 0;
 	bf3::core::ui::HudClientState client_;
+	std::unique_ptr<bf3::core::ui::HudMessageComp> messages_;
+	double message_clock_ = 0.0;
 	double vfov_deg_ = 0.0;
 	NativeHudMinimapPose pose_;
 	double ekg_clock_ = 0.0;

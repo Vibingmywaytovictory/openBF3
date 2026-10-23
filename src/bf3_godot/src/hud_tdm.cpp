@@ -2,7 +2,6 @@
 
 #include "hud_items.h"
 #include "hud_tdm_screen.h"
-#include "hud_killfeed.h"
 #include "hud_scoreboard.h"
 #include "kill_card.h"
 #include "pre_round.h"
@@ -312,7 +311,6 @@ struct Bf3TdmHud::Impl {
 	TdmHudContext ctx;
 	uint64_t root_id = 0;
 	Control *root = nullptr;
-	Bf3TdmKillFeed *kill_feed = nullptr;
 	Bf3TdmScoreboard *scoreboard = nullptr;
 	Bf3TdmSpawnScreen *spawn = nullptr;
 	Bf3TdmKillCard *kill_card = nullptr;
@@ -323,7 +321,7 @@ struct Bf3TdmHud::Impl {
 	template <typename F>
 	void each(F &&p_f) {
 
-		Bf3TdmScreen *screens[] = { kill_feed, pre_round, spawn, kill_card, round_end, scoreboard };
+		Bf3TdmScreen *screens[] = { pre_round, spawn, kill_card, round_end, scoreboard };
 		for (Bf3TdmScreen *s : screens) {
 			if (s != nullptr) {
 				p_f(*s);
@@ -355,13 +353,12 @@ bool Bf3TdmHud::build(Node *p_parent, Bf3Localisation *p_localisation, Bf3UiAsse
 	m.root->set_name("Bf3TdmHud");
 	m.root->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
 	m.root->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
-	m.kill_feed = memnew(Bf3TdmKillFeed);
 	m.pre_round = memnew(Bf3TdmPreRound);
 	m.spawn = memnew(Bf3TdmSpawnScreen);
 	m.kill_card = memnew(Bf3TdmKillCard);
 	m.round_end = memnew(Bf3TdmRoundEnd);
 	m.scoreboard = memnew(Bf3TdmScoreboard);
-	const char *names[] = { "KillFeed", "PreRound", "SpawnScreen", "KillCard", "RoundEnd", "Scoreboard" };
+	const char *names[] = { "PreRound", "SpawnScreen", "KillCard", "RoundEnd", "Scoreboard" };
 	size_t i = 0;
 	m.each([&](Bf3TdmScreen &s) {
 		s.set_name(names[i++]);
@@ -375,7 +372,7 @@ bool Bf3TdmHud::build(Node *p_parent, Bf3Localisation *p_localisation, Bf3UiAsse
 	m.root_id = m.root->get_instance_id();
 	m.each([&](Bf3TdmScreen &s) { s.build_screen(); });
 	m.ctx.resolve(m.root);
-	UtilityFunctions::print("Bf3TdmHud: built (kill feed, scoreboard, spawn screen, kill card, pre-round, round end)");
+	UtilityFunctions::print("Bf3TdmHud: built (scoreboard, spawn screen, kill card, pre-round, round end)");
 	return true;
 }
 
@@ -422,7 +419,6 @@ void Bf3TdmHud::shutdown() {
 	}
 	m.root = nullptr;
 	m.root_id = 0;
-	m.kill_feed = nullptr;
 	m.scoreboard = nullptr;
 	m.spawn = nullptr;
 	m.kill_card = nullptr;
@@ -434,7 +430,6 @@ void Bf3TdmHud::shutdown() {
 
 void openbf3_register_tdm_hud() {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmScreen);
-	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmKillFeed);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmScoreboard);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmSpawnScreen);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmKillCard);
