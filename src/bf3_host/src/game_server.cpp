@@ -5,6 +5,7 @@
 #include "bf3/host/firefight_brain.h"
 #include "bf3/host/tdm_brain.h"
 #include "bot_director.h"
+#include "server_combat.h"
 #include "server_commands.h"
 #include "server_match.h"
 #include "server_outbox.h"
@@ -96,6 +97,7 @@ struct GameServer::Impl {
 	Outbox outbox;
 	CommandBuffers commands;
 	MatchControl match;
+	Combat combat;
 	std::deque<PendingDebug> debug_queue;
 	Sweep sweep;
 	uint64_t snapshots_sent = 0;
@@ -170,22 +172,22 @@ struct GameServer::Impl {
 		s.spawn_index = uint32_t(index);
 		s.last = sim::hold_command(s.state);
 		s.own_events = uint16_t(s.own_events | s.state.events);
-		sv_on_spawn(p_slot, p_tick);
+		on_spawn(p_slot, p_tick);
 		if (s.remote) {
 			net::Spawned m;
 			m.slot = uint8_t(p_slot);
 			m.spawn_index = points[index].index;
 			m.state = s.state;
-			sv_spawned(p_slot, m);
+			describe_spawned(p_slot, m);
 			outbox.send(s.peer, net::kChannelReliable, net::encode_spawned(m));
 		}
 		return true;
 	}
 
 	void receive_commands(size_t p_slot, const net::CommandPacket &p_packet, uint64_t p_now_ns) {
-		sv_ack(slots[p_slot], p_packet);
+		combat.ack(p_slot, p_packet);
 		for (const sim::Command &c : commands.receive(p_slot, p_packet, p_now_ns, tick)) {
-			sv_buffered(slots[p_slot], c);
+			combat.note_command(p_slot, c);
 		}
 	}
 
@@ -222,7 +224,9 @@ struct GameServer::Impl {
 		m.phase = net::MatchPhase::InRound;
 		m.source_digest = config.level->source_digest;
 		m.motor_hash = motor_hash;
-		sv_match_info(size_t(at), m);
+		if (const std::optional<uint8_t> team = combat.client_joined(size_t(at), config.dev_commands, m)) {
+			s.team = *team;
+		}
 		match.describe(m);
 		outbox.send(p_peer, net::kChannelReliable, net::encode_match_info(m));
 		const MatchBroadcast join = match.join_messages(tick);
@@ -425,7 +429,7 @@ struct GameServer::Impl {
 	void send_snapshots(sim::Tick p_tick, uint64_t p_now_ns) {
 		const auto start = std::chrono::steady_clock::now();
 		const uint64_t snapshots_before = snapshots_sent;
-		sv_record_tick(p_tick);
+		combat.record_tick(p_tick, slots);
 		std::vector<std::pair<float, size_t>> order;
 		for (size_t i = 0; i < slots.size(); ++i) {
 			ServerSlot &s = slots[i];
@@ -454,7 +458,7 @@ struct GameServer::Impl {
 			for (const auto &[d, j] : order) {
 				snap.others.push_back(net::quantize_other(uint8_t(j), slots[j].state));
 			}
-			sv_prepare_snapshot(i, snap);
+			combat.fill_snapshot(i, snap);
 
 			size_t dropped = 0;
 			std::vector<uint8_t> bytes = net::encode_snapshot(snap, &dropped);
@@ -530,7 +534,9 @@ struct GameServer::Impl {
 			}
 			motor.step(s.state, s.last);
 			++times.motor_steps;
-			sv_step_soldier(s, sv_before, was_alive);
+			if (was_alive && !s.dummy) {
+				combat.step_soldier(slots.index_of(s), s.last, sv_before, s.state);
+			}
 			if (was_alive && !soldier_alive(s.state) && !s.dummy) {
 				const std::optional<uint32_t> respawn = match.policy().respawn_tick(uint8_t(slots.index_of(s)), n);
 				s.want_spawn = respawn.has_value();
@@ -563,7 +569,7 @@ struct GameServer::Impl {
 			s.own_events = uint16_t(s.own_events | s.state.events);
 			if (s.tracing) {
 				s.trace.push_back(s.state);
-				sv_trace_tick(i);
+				combat.trace_tick(i, s.trace.size() == 1, tick);
 				if (s.trace.size() >= s.trace_ticks) {
 					if (s.remote) {
 						net::DebugReport r;
@@ -571,7 +577,7 @@ struct GameServer::Impl {
 						r.ok = true;
 						r.text = "trace of " + std::to_string(s.trace.size()) + " ticks from " + std::to_string(s.trace.front().tick);
 						r.trace = std::move(s.trace);
-						sv_trace_report(i, r);
+						combat.take_trace(i, r);
 						outbox.send(s.peer, net::kChannelReliable, net::encode_debug_report(r));
 					}
 					s.trace.clear();
@@ -618,25 +624,12 @@ struct GameServer::Impl {
 	std::unique_ptr<Sv> sv;
 	core::Status sv_init();
 	const ServerView &server_view() const;
-	void sv_ack(ServerSlot &r_slot, const net::CommandPacket &p_packet);
-	void sv_buffered(ServerSlot &r_slot, const sim::Command &p_command);
-	void sv_step_soldier(ServerSlot &r_slot, const sim::SoldierState &p_before, bool p_was_alive);
 	void sv_rules(sim::Tick p_tick);
 	core::Status sv_place(size_t p_slot, const sim::Vec3 &p_position, uint16_t p_yaw, sim::Pose p_pose, sim::Tick p_tick);
-	void sv_on_spawn(size_t p_slot, sim::Tick p_tick);
-	void sv_spawned(size_t p_slot, net::Spawned &r_message);
 	void sv_apply_debug(const PendingDebug &p_debug, sim::Tick p_tick);
-	void sv_record_tick(sim::Tick p_tick);
-	void sv_prepare_snapshot(size_t p_slot, net::Snapshot &r_snapshot);
 	void sv_split_overflow(net::Snapshot &r_snapshot, size_t p_dropped);
 	void sv_after_snapshot(size_t p_slot, const net::Snapshot &p_snapshot);
 	void sv_end_snapshots();
-	void sv_match_info(size_t p_slot, net::MatchInfo &r_message);
-	void sv_kit_select(int p_slot, std::span<const uint8_t> p_datagram);
-	void sv_disconnect(size_t p_slot);
-	void sv_trace_tick(size_t p_slot);
-	void sv_trace_report(size_t p_slot, net::DebugReport &r_report);
-	void sv_stats(GameServerStats &r_stats) const;
 
 	core::Status sv_revive(size_t p_slot, const sim::Vec3 &p_position, uint16_t p_yaw, float p_health, sim::Tick p_tick);
 	void sv_unspawn(size_t p_slot);
@@ -658,6 +651,43 @@ struct GameServer::Impl {
 				outbox.send(s.peer, net::kChannelReliable, b.players);
 			}
 		}
+	}
+
+	void on_spawn(size_t p_slot, sim::Tick p_tick) {
+		if (p_slot >= slots.size()) {
+			return;
+		}
+		ServerSlot &s = slots[p_slot];
+		if (const std::optional<uint8_t> team = combat.take_next_team(p_slot)) {
+			s.team = *team;
+		}
+		if (TdmRules *rules = match.rules(); rules != nullptr) {
+			s.team = rules->team_of(uint8_t(p_slot));
+			if (const uint8_t k = rules->kit_of(uint8_t(p_slot)); k != kKeepKit) {
+				combat.set_kit(p_slot, k);
+			}
+			rules->on_spawned(uint8_t(p_slot), p_tick);
+		} else if (!s.remote) {
+			combat.set_kit(p_slot, uint8_t(p_slot % kKitCount));
+		}
+		if (!s.dummy) {
+			combat.arm(p_slot, uint8_t(std::clamp(s.team, 0, 255)), p_tick);
+		}
+	}
+
+	void describe_spawned(size_t p_slot, net::Spawned &r_message) const {
+		r_message.kit = combat.kit(p_slot);
+		r_message.team = uint8_t(std::clamp(slots[p_slot].team, 0, int(net::kMaxTeam)));
+	}
+
+	void receive_kit_select(int p_slot, std::span<const uint8_t> p_datagram) {
+		core::Result<net::KitSelect> k = net::decode_kit_select(p_datagram);
+		if (!k || p_slot < 0 || size_t(p_slot) >= slots.size()) {
+			++bad_datagrams;
+			combat.refuse_kit_select();
+			return;
+		}
+		combat.select_kit(size_t(p_slot), *k, config.dev_commands);
 	}
 
 	void receive_spawn_request(int p_slot, std::span<const uint8_t> p_datagram) {
@@ -732,7 +762,7 @@ void GameServer::on_disconnect(uint32_t p_peer) {
 		if (m.sweep.active && m.sweep.requester == uint32_t(at)) {
 			m.sweep.requester = UINT32_MAX;
 		}
-		m.sv_disconnect(size_t(at));
+		m.combat.client_left(size_t(at));
 		m.match.leave(size_t(at));
 		m.reset_slot(m.slots[size_t(at)]);
 	}
@@ -807,7 +837,7 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 			return;
 		}
 		case net::MessageType::KitSelect:
-			m.sv_kit_select(at, p_datagram);
+			m.receive_kit_select(at, p_datagram);
 			return;
 		case net::MessageType::SpawnRequest:
 			m.receive_spawn_request(at, p_datagram);
@@ -868,7 +898,7 @@ GameServerStats GameServer::stats() const {
 		g.clients += (s.used && s.remote) ? 1u : 0u;
 		g.soldiers += o.alive ? 1u : 0u;
 	}
-	m.sv_stats(g);
+	m.combat.stats(g);
 	return g;
 }
 
@@ -916,8 +946,7 @@ struct GameServer::Impl::Sv {
 			if (tdm != nullptr) {
 				e.respawn_tick = tdm->earliest_respawn(p_event.victim);
 				e.revive_until = tdm->revive_until(p_event.victim);
-				const bool fall = p_event.killer == p_event.victim || p_event.killer >= m->sv->tick_states.size();
-				e.killer_health = fall ? 0.0f : m->sv->tick_states[p_event.killer].health;
+				e.killer_health = m->combat.killer_health(p_event.killer, p_event.victim);
 			}
 			m->sv->combat.deaths.push_back(e);
 			if (tdm != nullptr) {
@@ -958,7 +987,7 @@ struct GameServer::Impl::Sv {
 		}
 		const sim::weapons::SoldierWeaponsState &weapons(uint8_t p_slot) const override {
 			static const sim::weapons::SoldierWeaponsState s_empty;
-			return m->sv->gunplay != nullptr ? m->sv->gunplay->weapons(p_slot) : s_empty;
+			return m->combat.on() ? m->combat.gunplay()->weapons(p_slot) : s_empty;
 		}
 		const sim::CollisionWorld &world() const override { return *m->world; }
 		sim::Tick tick() const override { return m->tick + 1u; }
@@ -977,7 +1006,7 @@ struct GameServer::Impl::Sv {
 				return ServerView::kit(p_slot);
 			}
 			const uint8_t k = m->match.rules()->kit_of(p_slot);
-			return k != kKeepKit ? k : (m->sv->gunplay != nullptr ? m->sv->gunplay->kit(p_slot) : uint8_t(0));
+			return k != kKeepKit ? k : (m->combat.on() ? m->combat.gunplay()->kit(p_slot) : uint8_t(0));
 		}
 	};
 	struct Placement {
@@ -986,25 +1015,10 @@ struct GameServer::Impl::Sv {
 		uint16_t yaw = 0;
 		sim::Pose pose = sim::Pose::Stand;
 	};
-	struct PerSlot {
-		uint8_t kit = 0;
-		uint8_t next_team = 0;
-		TargetBotSource *target = nullptr;
-		std::vector<net::TraceGunplayTick> trace;
-		uint32_t trace_dropped = 0;
-		net::OtherSoldier record;
-		bool record_valid = false;
-	};
-
-	std::unique_ptr<Gunplay> gunplay;
 	Sink sink;
 	View view;
-	net::ShotQuantization frame;
-	std::vector<PerSlot> per_slot;
 	std::vector<Placement> placements;
-	std::vector<sim::SoldierState> tick_states;
 	net::CombatEvents combat;
-	std::vector<net::OtherSoldier> records;
 	std::vector<net::OtherSoldier> overflow;
 	uint64_t main_mask = 0;
 	std::vector<net::RemoteShot> remote;
@@ -1025,8 +1039,7 @@ core::Status GameServer::Impl::sv_init() {
 	v.sink.m = this;
 	v.view.m = this;
 	match.configure(config, slots.size());
-	v.per_slot.resize(slots.size());
-	v.frame = shot_frame(*config.level->static_world);
+	combat.configure(slots.size(), *config.level->static_world);
 	const bool tdm = config.rules.mode == MatchRulesConfig::Mode::Tdm;
 	if (tdm && (config.level->logic == nullptr || config.level->gunplay == nullptr)) {
 		return core::make_error("GameServer: TDM rules need the level's logic graph and gunplay tables (SharedLoadOptions::tdm, ::gunplay)");
@@ -1044,15 +1057,9 @@ core::Status GameServer::Impl::sv_init() {
 	if (g.target_bots > slots.size()) {
 		return core::make_error("GameServer: " + std::to_string(g.target_bots) + " target bots for " + std::to_string(slots.size()) + " slots");
 	}
-	core::Result<std::unique_ptr<Gunplay>> created = Gunplay::create(*config.level, g);
-	if (!created) {
-		return core::error_at("GameServer", created.error());
-	}
-	v.gunplay = std::move(*created);
-	v.gunplay->set_world(*world);
-	v.gunplay->set_match_seed(g.match_seed != 0 ? g.match_seed : derive_match_seed(config.seed, config.level->gunplay->level_hash));
+	BF3_TRY(combat.create(*config.level, g, config.seed, *world));
 	if (tdm) {
-		BF3_TRY(match.create_rules(config, v.gunplay->match_seed()));
+		BF3_TRY(match.create_rules(config, combat.gunplay()->match_seed()));
 	}
 	for (uint32_t i = 0; i < g.target_bots; ++i) {
 		auto source = std::make_unique<TargetBotSource>(TargetBotConfig{});
@@ -1062,33 +1069,9 @@ core::Status GameServer::Impl::sv_init() {
 		if (at < 0) {
 			return core::make_error("GameServer: no slot for target bot " + std::to_string(i));
 		}
-		v.per_slot[size_t(at)].target = raw;
+		combat.set_target(size_t(at), raw);
 	}
 	return core::Status::success();
-}
-
-void GameServer::Impl::sv_ack(ServerSlot &r_slot, const net::CommandPacket &p_packet) {
-	if (sv == nullptr || sv->gunplay == nullptr) {
-		return;
-	}
-	const size_t i = slots.index_of(r_slot);
-	sv->gunplay->history().ack(uint8_t(i), p_packet.newest_snapshot, p_packet.snapshot_ack_bits, p_packet.others_ack_bits);
-}
-
-void GameServer::Impl::sv_buffered(ServerSlot &r_slot, const sim::Command &p_command) {
-	if (sv == nullptr || sv->gunplay == nullptr) {
-		return;
-	}
-	const size_t i = slots.index_of(r_slot);
-	sv->gunplay->note_command(uint8_t(i), p_command, sv->gunplay->history().ack_state(uint8_t(i)));
-}
-
-void GameServer::Impl::sv_step_soldier(ServerSlot &r_slot, const sim::SoldierState &p_before, bool p_was_alive) {
-	if (sv == nullptr || sv->gunplay == nullptr || !p_was_alive || r_slot.dummy) {
-		return;
-	}
-	const size_t i = slots.index_of(r_slot);
-	sv->gunplay->step_soldier(uint8_t(i), r_slot.last, p_before, r_slot.state);
 }
 
 void GameServer::Impl::sv_rules(sim::Tick p_tick) {
@@ -1096,22 +1079,10 @@ void GameServer::Impl::sv_rules(sim::Tick p_tick) {
 		return;
 	}
 	Sv &v = *sv;
-	if (v.gunplay != nullptr) {
-		v.tick_states.assign(slots.size(), sim::SoldierState());
-		for (size_t i = 0; i < slots.size(); ++i) {
-			if (slots[i].used && slots[i].spawned && !slots[i].dummy) {
-				v.tick_states[i] = slots[i].state;
-			}
-		}
-
-		v.gunplay->step_projectiles(p_tick, v.tick_states);
-		v.gunplay->apply_rules(p_tick, v.tick_states, v.sink);
-		match.step(p_tick, v.view, *v.gunplay, v.tick_states);
-		for (size_t i = 0; i < slots.size(); ++i) {
-			if (slots[i].used && slots[i].spawned && !slots[i].dummy) {
-				slots[i].state = v.tick_states[i];
-			}
-		}
+	if (combat.on()) {
+		combat.resolve(p_tick, slots, v.sink);
+		match.step(p_tick, v.view, *combat.gunplay(), combat.tick_states());
+		combat.restore(slots);
 	}
 
 	std::vector<Sv::Placement> placements = std::move(v.placements);
@@ -1147,50 +1118,13 @@ core::Status GameServer::Impl::sv_place(size_t p_slot, const sim::Vec3 &p_positi
 	s.spawned = true;
 	s.want_spawn = false;
 	s.last = sim::hold_command(s.state);
-	if (sv->per_slot[p_slot].target != nullptr) {
-		TargetBotConfig c;
-		c.pose = p_pose;
-		c.yaw = p_yaw;
-		sv->per_slot[p_slot].target->set(c);
-	}
+	combat.aim_target(p_slot, p_pose, p_yaw);
 	if (!was_alive) {
 		s.state.events = uint16_t(s.state.events | sim::soldier_events::kSpawned);
 		s.own_events = uint16_t(s.own_events | s.state.events);
-		sv_on_spawn(p_slot, p_tick);
+		on_spawn(p_slot, p_tick);
 	}
 	return core::Status::success();
-}
-
-void GameServer::Impl::sv_on_spawn(size_t p_slot, sim::Tick p_tick) {
-	if (sv == nullptr || p_slot >= slots.size()) {
-		return;
-	}
-	ServerSlot &s = slots[p_slot];
-	Sv::PerSlot &ps = sv->per_slot[p_slot];
-	if (ps.next_team != 0) {
-		s.team = ps.next_team;
-		ps.next_team = 0;
-	}
-	if (TdmRules *rules = match.rules(); rules != nullptr) {
-		s.team = rules->team_of(uint8_t(p_slot));
-		if (const uint8_t k = rules->kit_of(uint8_t(p_slot)); k != kKeepKit) {
-			ps.kit = k;
-		}
-		rules->on_spawned(uint8_t(p_slot), p_tick);
-	} else if (!s.remote) {
-		ps.kit = uint8_t(p_slot % kKitCount);
-	}
-	if (sv->gunplay != nullptr && !s.dummy) {
-		sv->gunplay->on_spawn(uint8_t(p_slot), ps.kit, uint8_t(std::clamp(s.team, 0, 255)), p_tick);
-	}
-}
-
-void GameServer::Impl::sv_spawned(size_t p_slot, net::Spawned &r_message) {
-	if (sv == nullptr || p_slot >= slots.size()) {
-		return;
-	}
-	r_message.kit = sv->per_slot[p_slot].kit;
-	r_message.team = uint8_t(std::clamp(slots[p_slot].team, 0, int(net::kMaxTeam)));
 }
 
 void GameServer::Impl::sv_apply_debug(const PendingDebug &p_debug, sim::Tick p_tick) {
@@ -1208,7 +1142,7 @@ void GameServer::Impl::sv_apply_debug(const PendingDebug &p_debug, sim::Tick p_t
 		return;
 	}
 
-	if (sv->gunplay == nullptr) {
+	if (!combat.on()) {
 		report(p_debug.slot, q.id, false, "target info: no gunplay on this server");
 		return;
 	}
@@ -1216,7 +1150,7 @@ void GameServer::Impl::sv_apply_debug(const PendingDebug &p_debug, sim::Tick p_t
 		report(p_debug.slot, q.id, false, "target info: no soldier in slot " + std::to_string(q.slot));
 		return;
 	}
-	const std::optional<net::TargetInfoRow> row = sv->gunplay->target_info(q.slot, slots[q.slot].state);
+	const std::optional<net::TargetInfoRow> row = combat.gunplay()->target_info(q.slot, slots[q.slot].state);
 	if (!row) {
 		report(p_debug.slot, q.id, false, "target info: slot " + std::to_string(q.slot) + " is not a live armed soldier");
 		return;
@@ -1233,43 +1167,8 @@ void GameServer::Impl::sv_apply_debug(const PendingDebug &p_debug, sim::Tick p_t
 	outbox.send(requester.peer, net::kChannelReliable, net::encode_debug_report(r));
 }
 
-void GameServer::Impl::sv_record_tick(sim::Tick p_tick) {
-	if (sv == nullptr || sv->gunplay == nullptr) {
-		return;
-	}
-	Sv &v = *sv;
-	v.records.clear();
-	for (size_t i = 0; i < slots.size(); ++i) {
-		Sv::PerSlot &ps = v.per_slot[i];
-		ps.record_valid = false;
-		const ServerSlot &s = slots[i];
-		if (s.used && s.spawned && soldier_alive(s.state)) {
-			ps.record = v.gunplay->other_record(uint8_t(i), s.state);
-			ps.record_valid = true;
-			v.records.push_back(ps.record);
-		}
-	}
-
-	v.gunplay->history().record_tick(p_tick, v.records);
-}
-
-void GameServer::Impl::sv_prepare_snapshot(size_t p_slot, net::Snapshot &r_snapshot) {
-	if (sv == nullptr || sv->gunplay == nullptr) {
-		return;
-	}
-	Sv &v = *sv;
-	if (r_snapshot.own && v.gunplay->armed(uint8_t(p_slot))) {
-		r_snapshot.own_weapons = net::weapons_wire_view(v.gunplay->weapons(uint8_t(p_slot)), r_snapshot.server_tick);
-	}
-	for (net::OtherSoldier &o : r_snapshot.others) {
-		if (o.slot < v.per_slot.size() && v.per_slot[o.slot].record_valid) {
-			o = v.per_slot[o.slot].record;
-		}
-	}
-}
-
 void GameServer::Impl::sv_split_overflow(net::Snapshot &r_snapshot, size_t p_dropped) {
-	if (sv == nullptr || sv->gunplay == nullptr) {
+	if (sv == nullptr || !combat.on()) {
 		return;
 	}
 	Sv &v = *sv;
@@ -1289,11 +1188,11 @@ void GameServer::Impl::sv_split_overflow(net::Snapshot &r_snapshot, size_t p_dro
 }
 
 void GameServer::Impl::sv_after_snapshot(size_t p_slot, const net::Snapshot &p_snapshot) {
-	if (sv == nullptr || sv->gunplay == nullptr) {
+	if (sv == nullptr || !combat.on()) {
 		return;
 	}
 	Sv &v = *sv;
-	Gunplay &g = *v.gunplay;
+	Gunplay &g = *combat.gunplay();
 	const ServerSlot &s = slots[p_slot];
 	uint64_t others_mask = 0;
 	if (!v.overflow.empty()) {
@@ -1331,7 +1230,7 @@ void GameServer::Impl::sv_after_snapshot(size_t p_slot, const net::Snapshot &p_s
 			ev.server_tick = p_snapshot.server_tick;
 			ev.shots = v.remote;
 			size_t dropped = 0;
-			std::vector<uint8_t> bytes = net::encode_shot_events(ev, v.frame, eye, &dropped);
+			std::vector<uint8_t> bytes = net::encode_shot_events(ev, combat.frame(), eye, &dropped);
 			if (dropped == 0 || part == 1 || bytes.empty()) {
 				g.count_shot_events_dropped(dropped);
 				if (!bytes.empty()) {
@@ -1339,7 +1238,7 @@ void GameServer::Impl::sv_after_snapshot(size_t p_slot, const net::Snapshot &p_s
 				}
 				break;
 			}
-			core::Result<net::ShotEvents> first = net::decode_shot_events(bytes, v.frame);
+			core::Result<net::ShotEvents> first = net::decode_shot_events(bytes, combat.frame());
 			outbox.send(s.peer, net::kChannelUnreliable, std::move(bytes));
 			if (!first) {
 				g.count_shot_events_dropped(dropped);
@@ -1366,7 +1265,7 @@ void GameServer::Impl::sv_after_snapshot(size_t p_slot, const net::Snapshot &p_s
 		net::CombatEvents c = v.combat;
 		c.server_tick = p_snapshot.server_tick;
 		size_t clamped = 0;
-		std::vector<uint8_t> bytes = net::encode_combat_events(c, v.frame, &clamped);
+		std::vector<uint8_t> bytes = net::encode_combat_events(c, combat.frame(), &clamped);
 		g.count_combat_clamped(clamped);
 		if (!bytes.empty()) {
 			outbox.send(s.peer, net::kChannelReliable, std::move(bytes));
@@ -1379,113 +1278,9 @@ void GameServer::Impl::sv_end_snapshots() {
 		return;
 	}
 	sv->combat = net::CombatEvents();
-	if (sv->gunplay != nullptr) {
-		sv->gunplay->end_snapshot_interval();
+	if (combat.on()) {
+		combat.gunplay()->end_snapshot_interval();
 	}
-}
-
-void GameServer::Impl::sv_match_info(size_t p_slot, net::MatchInfo &r_message) {
-	if (sv == nullptr || p_slot >= slots.size()) {
-		return;
-	}
-	Sv::PerSlot &ps = sv->per_slot[p_slot];
-	ps = Sv::PerSlot();
-	if (sv->gunplay == nullptr) {
-		return;
-	}
-	Gunplay &g = *sv->gunplay;
-	ps.kit = g.config().player_kit < kKitCount ? g.config().player_kit : 0;
-	if (config.dev_commands && (g.config().player_team == 1 || g.config().player_team == 2)) {
-		slots[p_slot].team = g.config().player_team;
-	}
-	g.history().client_reset(uint8_t(p_slot));
-	g.clear(uint8_t(p_slot));
-	r_message.match_seed = g.match_seed();
-	r_message.weapon_hash = g.weapon_hash();
-	r_message.weapon_flags = g.weapon_flags();
-	r_message.kit_hash = g.kit_hash();
-	r_message.max_rewind_ticks = uint8_t(std::min<uint32_t>(g.config().lag.max_rewind_ticks, 255u));
-}
-
-void GameServer::Impl::sv_kit_select(int p_slot, std::span<const uint8_t> p_datagram) {
-	core::Result<net::KitSelect> k = net::decode_kit_select(p_datagram);
-	if (!k || p_slot < 0 || sv == nullptr || size_t(p_slot) >= slots.size()) {
-		++bad_datagrams;
-		if (sv != nullptr && sv->gunplay != nullptr) {
-			sv->gunplay->count_kit_select(false, false);
-		}
-		return;
-	}
-	if (k->kit >= kKitCount || k->team > net::kMaxTeam) {
-
-		if (sv->gunplay != nullptr) {
-			sv->gunplay->count_kit_select(false, false);
-		}
-		return;
-	}
-	Sv::PerSlot &ps = sv->per_slot[size_t(p_slot)];
-	bool team_refused = false;
-	ps.kit = k->kit;
-	if (k->team != 0) {
-		if (config.dev_commands) {
-			ps.next_team = k->team;
-		} else {
-			team_refused = true;
-		}
-	}
-	if (sv->gunplay != nullptr) {
-		sv->gunplay->count_kit_select(true, team_refused);
-	}
-}
-
-void GameServer::Impl::sv_disconnect(size_t p_slot) {
-	if (sv == nullptr || p_slot >= slots.size()) {
-		return;
-	}
-	sv->per_slot[p_slot] = Sv::PerSlot();
-	if (sv->gunplay != nullptr) {
-		sv->gunplay->history().client_reset(uint8_t(p_slot));
-		sv->gunplay->clear(uint8_t(p_slot));
-	}
-}
-
-void GameServer::Impl::sv_trace_tick(size_t p_slot) {
-	if (sv == nullptr || sv->gunplay == nullptr || p_slot >= slots.size()) {
-		return;
-	}
-	Sv::PerSlot &ps = sv->per_slot[p_slot];
-	if (slots[p_slot].trace.size() == 1) {
-		ps.trace.clear();
-		ps.trace_dropped = 0;
-	}
-	uint32_t dropped = 0;
-	ps.trace.push_back(sv->gunplay->trace_tick(uint8_t(p_slot), tick, dropped));
-	ps.trace_dropped += dropped;
-	sv->gunplay->count_trace_dropped(dropped);
-}
-
-void GameServer::Impl::sv_trace_report(size_t p_slot, net::DebugReport &r_report) {
-	if (sv == nullptr || sv->gunplay == nullptr || p_slot >= slots.size()) {
-		return;
-	}
-	Sv::PerSlot &ps = sv->per_slot[p_slot];
-	r_report.trace_gunplay = std::move(ps.trace);
-	r_report.trace_dropped = ps.trace_dropped;
-	ps.trace.clear();
-	ps.trace_dropped = 0;
-}
-
-void GameServer::Impl::sv_stats(GameServerStats &r_stats) const {
-	if (sv == nullptr || sv->gunplay == nullptr) {
-		return;
-	}
-	const Gunplay &g = *sv->gunplay;
-	r_stats.gunplay_active = true;
-	r_stats.gunplay = g.stats();
-	r_stats.match_seed = g.match_seed();
-	r_stats.weapon_hash = g.weapon_hash();
-	r_stats.kit_hash = g.kit_hash();
-	r_stats.weapon_flags = g.weapon_flags();
 }
 
 core::Status GameServer::place_soldier(uint32_t p_slot, const sim::Vec3 &p_position, uint16_t p_yaw, sim::Pose p_pose) {
@@ -1516,7 +1311,7 @@ const ServerView &GameServer::view() const {
 }
 
 const Gunplay *GameServer::gunplay() const {
-	return impl_->sv != nullptr ? impl_->sv->gunplay.get() : nullptr;
+	return impl_->combat.gunplay();
 }
 
 core::Status GameServer::Impl::sv_revive(size_t p_slot, const sim::Vec3 &p_position, uint16_t p_yaw, float p_health, sim::Tick p_tick) {
@@ -1539,14 +1334,14 @@ core::Status GameServer::Impl::sv_revive(size_t p_slot, const sim::Vec3 &p_posit
 	s.respawn_at = 0;
 	s.last = sim::hold_command(s.state);
 	s.own_events = uint16_t(s.own_events | s.state.events);
-	sv_on_spawn(p_slot, p_tick);
+	on_spawn(p_slot, p_tick);
 	if (s.remote) {
 		net::Spawned m;
 		m.slot = uint8_t(p_slot);
 		m.spawn_index = 0;
 		m.state = s.state;
 		m.revived = true;
-		sv_spawned(p_slot, m);
+		describe_spawned(p_slot, m);
 		outbox.send(s.peer, net::kChannelReliable, net::encode_spawned(m));
 	}
 	return core::Status::success();
@@ -1560,9 +1355,7 @@ void GameServer::Impl::sv_unspawn(size_t p_slot) {
 	s.spawned = false;
 	s.want_spawn = false;
 	s.respawn_at = 0;
-	if (sv != nullptr && sv->gunplay != nullptr) {
-		sv->gunplay->clear(uint8_t(p_slot));
-	}
+	combat.disarm(p_slot);
 }
 
 void GameServer::Impl::sv_orders(sim::Tick p_tick, std::span<const RulesOrder> p_orders) {
