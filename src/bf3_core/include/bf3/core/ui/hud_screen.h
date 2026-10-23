@@ -46,6 +46,7 @@ struct HudDataSource {
 	std::string name;
 	int32_t key = 0;
 	std::string category;
+	std::string category_short_name;
 	bool on_initialize = true;
 };
 
@@ -59,6 +60,7 @@ struct HudWidgetNode {
 	std::vector<HudWidgetProperty> properties;
 	std::vector<HudDataSource> sources;
 	std::optional<HudDataSource> message_query;
+	std::optional<HudDataSource> widget_path_query;
 	int32_t number_of_rows = 0;
 
 	const HudDataSource *source(std::string_view p_name) const;
@@ -147,10 +149,12 @@ float hud_align_axis(HudAxisAlign p_align, float p_original, float p_visible_min
 
 class HudDamageIndicatorComp;
 class HudMessageComp;
+struct HudWorldTags;
 
 struct HudClientState {
 	const HudMessageComp *messages = nullptr;
 	const HudDamageIndicatorComp *damage = nullptr;
+	const HudWorldTags *world_tags = nullptr;
 	std::string platform = "win32";
 	std::string reload_button;
 	bool hardcore = false;
@@ -264,6 +268,7 @@ class HudWidgetController {
 public:
 	virtual ~HudWidgetController() = default;
 	virtual bool screen_initialized() const { return true; }
+	virtual bool aligns_in_safe_rect() const { return true; }
 	virtual void attach_node(HudWidgetHost &, const HudWidgetNode &) {}
 	virtual void construct(HudWidgetHost &) {}
 	virtual void on_clip_load(HudWidgetHost &) {}

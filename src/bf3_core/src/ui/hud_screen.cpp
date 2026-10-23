@@ -57,6 +57,9 @@ HudDataSource source_of(const EbxResolver &p_db, const EbxPartition &p_part, con
 	if (const std::optional<EbxRef> c = detail::ref(p_info, "DataCategory")) {
 		out.category = detail::ref_partition(p_db, p_part, *c).value_or(std::string());
 	}
+	if (const std::optional<EbxInstance> category = p_db.follow(p_info, "DataCategory")) {
+		out.category_short_name = text_of(category->get("ShortName"));
+	}
 	out.on_initialize = detail::flag_or(p_info, "UpdateOnInitialize", true);
 	return out;
 }
@@ -72,6 +75,12 @@ void read_binding(const EbxResolver &p_db, const EbxPartition &p_part, const Ebx
 		}
 		const std::optional<EbxValue> rows = b->get("NumberOfRows");
 		r_widget.number_of_rows = rows ? rows->as_i32().value_or(0) : 0;
+		return;
+	}
+	if (b->is_a("UIWidgetPathBinding")) {
+		if (const std::optional<EbxStruct> q = detail::sub(b->data(), "WidgetPathQuery")) {
+			r_widget.widget_path_query = source_of(p_db, p_part, *q);
+		}
 		return;
 	}
 	const std::optional<EbxValue> list = b->get("Bindings");
@@ -765,11 +774,12 @@ void HudScreen::align(HudWidgetState &r_widget, const HudWidgetNode &p_node) {
 	const As2Clip self = clip(r_widget.path);
 	const SwfRect &v = rects_.visible;
 	const SwfRect &o = rects_.original;
+	const bool safe = r_widget.controller->aligns_in_safe_rect();
 	if (p_node.horizontal != HudAxisAlign::Centre) {
-		self.set_x(hud_align_axis(p_node.horizontal, it->second.first, v.x_min, v.width(), o.width(), rects_.safe_x));
+		self.set_x(hud_align_axis(p_node.horizontal, it->second.first, v.x_min, v.width(), o.width(), safe ? rects_.safe_x : 0.0f));
 	}
 	if (p_node.vertical != HudAxisAlign::Centre) {
-		self.set_y(hud_align_axis(p_node.vertical, it->second.second, v.y_min, v.height(), o.height(), rects_.safe_y));
+		self.set_y(hud_align_axis(p_node.vertical, it->second.second, v.y_min, v.height(), o.height(), safe ? rects_.safe_y : 0.0f));
 	}
 	r_widget.controller->update_screen_size(*r_widget.host);
 }

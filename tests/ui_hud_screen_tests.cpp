@@ -675,12 +675,12 @@ TEST_SUITE("ui-hud-screen") {
 		}
 		CHECK(hide_on_zoom);
 		Screen s = open_screen(*r, kHudMpScreenPartition);
-		CHECK(s.hud->stats().unknown_classes == 5);
+		CHECK(s.hud->stats().unknown_classes == 4);
 		for (const std::string &u : s.hud->stats().unknown_class_paths) {
-			CHECK_MESSAGE((u.find("Widget.Image.ImageManager") != std::string::npos || u.find("SupportIconTag") != std::string::npos), u);
+			CHECK_MESSAGE(u.find("Widget.Image.ImageManager") != std::string::npos, u);
 		}
 		Screen t = open_screen(*r, kHudTdmScreenPartition);
-		CHECK(t.hud->stats().unknown_classes == 1);
+		CHECK(t.hud->stats().unknown_classes == 0);
 		CHECK(t.hud->widget("instance1.Compass_01.multiplayerCompass.bg") != nullptr);
 		row("assets", "hudmpscreen 14 widgets, hudtdmscreen 7, crosshairdefault 1; " + std::to_string(s.hud->stats().controllers) + " + " +
 						std::to_string(t.hud->stats().controllers) + " AS2 instances driven");
@@ -992,7 +992,7 @@ TEST_SUITE("ui-hud-screen") {
 		CHECK(s.at(hi).frame == 1);
 		CHECK(s.at(hi + ".HitController").frame == 0);
 		CHECK_FALSE(s.at("instance1.LatencyIndicator_01").visible);
-		for (const char *w : { "PassangerList_01", "VehicleHealth_01", "SupportIconManager_01", "HudAlertMessage_01", "HudAlertMessage_02" }) {
+		for (const char *w : { "PassangerList_01", "VehicleHealth_01", "HudAlertMessage_01", "HudAlertMessage_02" }) {
 			CHECK_MESSAGE(!s.at(std::string("instance1.") + w).visible, w);
 		}
 		for (const char *w : { "HudMessage_01", "HudMessage_02", "HudMessage_04", "HudMessage_05" }) {
@@ -1009,8 +1009,7 @@ TEST_SUITE("ui-hud-screen") {
 		CHECK(t.at("instance1.HudMessage_00").visible);
 		REQUIRE(dynamic_cast<HudMessageApi *>(t.hud->controller("instance1.HudMessage_00")) != nullptr);
 		CHECK(dynamic_cast<HudMessageApi *>(t.hud->controller("instance1.HudMessage_00"))->rows() == 0);
-		CHECK_FALSE(t.at("instance1.MapmarkerManager_00").visible);
-		row("hidden", "hit level 1 -> frame index 1, latency hidden, 6 data-driven widgets hidden until their data, 5 HudMessage lists shown empty, ScoreAggregator on hide");
+		row("hidden", "hit level 1 -> frame index 1, latency hidden, 4 data-driven widgets hidden until their data, 5 HudMessage lists shown empty, ScoreAggregator on hide");
 	}
 
 	TEST_CASE("hud screen: SquadList") {
@@ -1114,6 +1113,142 @@ TEST_SUITE("ui-hud-screen") {
 		}
 		CHECK(s.hud->stats().as2.failed_ops == 0);
 		row("squad_list", "kit icons " + std::to_string(kit_icons[0]) + "/" + std::to_string(kit_icons[1]) + " (UIHudIcon enum = 1-based label frame), tint e4ff9d, rows 4 at label x 50/28 without boosters, 70/48 with");
+	}
+
+	TEST_CASE("hud screen: Icon3D managers and tags") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudModel m = moment_m02();
+		HudWorldTags world;
+		HudClientState c = test_client();
+		c.world_tags = &world;
+		Screen t = initialized(*r, kHudTdmScreenPartition, m, c);
+		const std::string mm = "instance1.MapmarkerManager_00";
+		const HudWidgetNode *node = t.asset.find("MapmarkerManager_00");
+		REQUIRE(node != nullptr);
+		REQUIRE(node->widget_path_query.has_value());
+		CHECK(node->widget_path_query->key == 1055499673);
+		CHECK(node->widget_path_query->category == "ui/uicomponents/uimapmarkertagcomp");
+		CHECK(node->widget_path_query->category_short_name == "UIMapmarkertagComp");
+		const auto *api = dynamic_cast<HudIcon3DManagerApi *>(t.hud->controller(mm));
+		REQUIRE(api != nullptr);
+		CHECK(t.at(mm).visible);
+		CHECK_FALSE(t.at(mm + ".Marker").visible);
+		CHECK(api->published_path() == "_level0." + mm);
+		CHECK(api->published_key() == 1055499673.0);
+		CHECK(api->component_name() == "UIMapmarkertagComp");
+		CHECK(t.clip(mm).x() == doctest::Approx(0.0f));
+		CHECK(t.clip(mm).y() == doctest::Approx(0.0f));
+		HudStageRects wide;
+		wide.visible = SwfRect{ -160.0f, 1440.0f, -20.0f, 740.0f };
+		t.hud->set_stage_rects(wide);
+		CHECK(t.clip(mm).x() == doctest::Approx(-160.0f));
+		CHECK(t.clip(mm).y() == doctest::Approx(-20.0f));
+		t.hud->set_stage_rects(HudStageRects{});
+		HudWorldTag marker;
+		marker.id = 7;
+		marker.component = HudTagComponent::Mapmarker;
+		marker.x = 640.0f;
+		marker.y = 300.0f;
+		marker.data = { { "Icons", As2Value::of(int32_t(4)) }, { "Label", As2Value::of("WWWWWW") } };
+		world.tags = { marker };
+		t.hud->refresh(m);
+		REQUIRE(api->tag_paths().size() == 1);
+		const std::string tag = api->tag_paths().front();
+		CHECK(tag == mm + ".tag7");
+		CHECK(t.hud->widget(tag) != nullptr);
+		CHECK(t.hud->widget(tag)->class_name == "Widget.Icon3D.Mapmarker.Mapmarkertag");
+		CHECK(t.at(tag).visible);
+		CHECK(t.clip(tag).x() == doctest::Approx(640.0f));
+		CHECK(t.clip(tag).y() == doctest::Approx(300.0f));
+		CHECK(t.at(tag).frame == t.label(tag, "create"));
+		CHECK(t.at(tag + ".tag.icon").frame == 3);
+		CHECK(t.at(tag + ".tag.iconBg").visible);
+		CHECK(t.at(tag + ".tag.label").visible);
+		CHECK(t.at(tag + ".tag.label").frame == t.label(tag + ".tag.label", "red"));
+		CHECK(t.at(tag + ".tag.label.nameTxt").text.empty());
+		CHECK(t.at(tag + ".tag").frame == t.label(tag + ".tag", "showRed"));
+		const uint32_t complete = t.label(tag, "remove") - 1;
+		CHECK(frames_until(t, [&] { return t.at(tag).frame == complete; }, 30) > 0);
+		REQUIRE(t.scene->advance(3).ok());
+		CHECK(t.at(tag).frame == complete);
+		world.tags.front().x = 600.0f;
+		world.tags.front().data.push_back({ "IsClose", As2Value::of(false) });
+		t.hud->refresh(m);
+		CHECK(t.clip(tag).x() == doctest::Approx(600.0f));
+		CHECK(t.at(tag + ".tag").frame == t.label(tag + ".tag", "hiddenRed"));
+		CHECK(t.at(tag + ".tag.label.nameTxt").text == "WWWWWW");
+		CHECK(t.at(tag + ".tag.label.nameTxtBg").text == "WWWWWW");
+		world.tags.front().data.push_back({ "LookingAt", As2Value::of(true) });
+		t.hud->refresh(m);
+		CHECK(t.at(tag + ".tag").frame == t.label(tag + ".tag", "showRed"));
+		world.tags.front().data.push_back({ "Spotted", As2Value::of(int32_t(1)) });
+		t.hud->refresh(m);
+		CHECK(t.at(tag).frame == t.label(tag, "spotted"));
+		world.tags.clear();
+		t.hud->refresh(m);
+		CHECK(t.at(tag).frame == t.label(tag, "remove"));
+		CHECK(frames_until(t, [&] { return t.scene->find_node(tag) == nullptr; }, 30) > 0);
+		t.hud->refresh(m);
+		CHECK(api->tag_paths().empty());
+		CHECK(t.hud->widget(tag) == nullptr);
+
+		Screen s = initialized(*r, kHudMpScreenPartition, m, c);
+		const std::string sm = "instance1.SupportIconManager_01";
+		const auto *support = dynamic_cast<HudIcon3DManagerApi *>(s.hud->controller(sm));
+		REQUIRE(support != nullptr);
+		CHECK(s.at(sm).visible);
+		CHECK_FALSE(s.at(sm + ".TeamSupportIcon").visible);
+		CHECK(support->published_key() == 2138355157.0);
+		CHECK(support->component_name().empty());
+		const int32_t beacon = int32_t(s.label(sm + ".TeamSupportIcon.tag", "RadioBeacon")) + 1;
+		HudWorldTag request;
+		request.id = 3;
+		request.component = HudTagComponent::TeamSupport;
+		request.x = 500.0f;
+		request.y = 200.0f;
+		request.data = { { "Icons", As2Value::of(beacon) }, { "Team", As2Value::of(int32_t(2)) } };
+		world.tags = { request, marker };
+		s.hud->refresh(m);
+		REQUIRE(support->tag_paths().size() == 1);
+		const std::string st = support->tag_paths().front();
+		CHECK(s.hud->widget(st)->class_name == "Widget.Icon3D.TeamSupport.SupportIconTag");
+		CHECK(s.at(st).visible);
+		CHECK(s.at(st).frame == s.label(st, "create"));
+		CHECK(s.at(st + ".tag").frame == uint32_t(beacon - 1));
+		CHECK(s.at(st + ".tag.icon").frame == 1);
+		CHECK(frames_until(s, [&] { return s.at(st).frame == s.label(st, "remove") - 1; }, 30) > 0);
+
+		Screen h = initialized(*r, kHudSharedScreenPartition, m, c);
+		const std::string am = "instance1.AlertManager_01";
+		const auto *alerts = dynamic_cast<HudIcon3DManagerApi *>(h.hud->controller(am));
+		REQUIRE(alerts != nullptr);
+		CHECK(h.at(am).visible);
+		HudWorldTag alert;
+		alert.id = 9;
+		alert.component = HudTagComponent::Alert;
+		alert.x = 700.0f;
+		alert.y = 420.0f;
+		alert.data = { { "Snap", As2Value::of(false) } };
+		world.tags = { alert };
+		h.hud->refresh(m);
+		REQUIRE(alerts->tag_paths().size() == 1);
+		const std::string at = alerts->tag_paths().front();
+		CHECK(h.hud->widget(at)->class_name == "Widget.Icon3D.Alerts.Alerttag");
+		CHECK(h.at(at).visible);
+		const uint32_t grenade = h.at(at + ".grIcon").frame;
+		world.tags.front().data = { { "Snap", As2Value::of(true) } };
+		h.hud->refresh(m);
+		CHECK(h.at(at + ".grIcon").frame == h.label(at + ".grIcon", "snapped"));
+		CHECK(grenade != h.label(at + ".grIcon", "snapped"));
+		CHECK(t.hud->stats().as2.failed_ops == 0);
+		CHECK(s.hud->stats().as2.failed_ops == 0);
+		CHECK(h.hud->stats().as2.failed_ops == 0);
+		row("icon3d", "MapmarkerManager key 1055499673 UIMapmarkertagComp at the visible rect without the safe rect; Marker tag create -> stop at " +
+						std::to_string(complete) + ", red label for UIHudIcon 4 (name set by the next updateTag, the red frame has its own field), hiddenRed/showRed snapping, spotted, remove -> removed; TeamSupportIcon frame " +
+						std::to_string(beacon) + " (RadioBeacon) team 2; Alert snapped");
 	}
 
 	TEST_CASE("hud screen: KillFeed") {
@@ -1688,11 +1823,11 @@ TEST_SUITE("ui-hud-screen") {
 			CHECK_FALSE(s.at(tip + ".container.textTop.textClip.t" + std::to_string(i)).visible);
 			CHECK_FALSE(s.at(tip + ".container.textBottom.textClip.t" + std::to_string(i)).visible);
 		}
-		CHECK_FALSE(s.at("instance1.AlertManager_01").visible);
+		CHECK(s.at("instance1.AlertManager_01").visible);
 		CHECK(s.at("instance1.InteractionManager_01").visible);
 		CHECK(s.at("instance1.DamageIndicator_01").visible);
 		row("shared_screen", "hudscreen " + std::to_string(s.hud->stats().instances) + " instances, 0 unknown classes; Log/Tooltip/Objective tilts -5/-15, -5/15, "
-						"5/-15 at fov 25 on t2, Objective shown, AlertManager hidden, InteractionManager shown");
+						"5/-15 at fov 25 on t2, Objective shown, AlertManager and InteractionManager shown");
 	}
 
 	TEST_CASE("hud screen: install unchanged") {

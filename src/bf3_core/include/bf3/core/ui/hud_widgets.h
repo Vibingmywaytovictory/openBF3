@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace bf3::core::ui {
 
@@ -48,6 +49,34 @@ public:
 	virtual HudMessageSource source() const = 0;
 };
 
+enum class HudTagComponent : uint8_t {
+	TeamSupport,
+	Mapmarker,
+	Alert,
+};
+
+struct HudWorldTag {
+	uint32_t id = 0;
+	HudTagComponent component = HudTagComponent::Mapmarker;
+	float x = 0.0f;
+	float y = 0.0f;
+	HudData data;
+};
+
+struct HudWorldTags {
+	std::vector<HudWorldTag> tags;
+};
+
+class HudIcon3DManagerApi {
+public:
+	virtual ~HudIcon3DManagerApi() = default;
+	virtual HudTagComponent tag_component() const = 0;
+	virtual const std::string &published_path() const = 0;
+	virtual double published_key() const = 0;
+	virtual const std::string &component_name() const = 0;
+	virtual std::vector<std::string> tag_paths() const = 0;
+};
+
 struct HudBgDrawLook {
 	std::array<float, 3> premul_rgb255{ 0.91f, 31.7f, 54.12f };
 	float coverage = 0.1458f;
@@ -85,6 +114,8 @@ inline constexpr std::string_view kMinimapMaskTexture = "ui/hud/minimap/minimapm
 inline constexpr uint32_t kNametagUiColourSlot0 = 0xE4FF9Du;
 inline constexpr int32_t kUiHudIconSquadLeader = 7;
 inline constexpr int32_t kUiHudIconDead = 145;
+inline constexpr std::array<int32_t, 4> kUiHudIconsOnRedMarker{ 18, 35, 15, 4 };
+inline constexpr int32_t kUiSpottedInfoNone = 0;
 
 int32_t hud_compass_frame(float p_heading_deg);
 

@@ -167,6 +167,9 @@ These are structural, known, and listed so nobody mistakes them for design inten
   nor UIMessageCompData (no fade field) explains. The damage indicator's Scale
   (the hit's damage) and Angle (clockwise from the view, checked against the sprite's rotation) are inferred, and the
   HudAlertMessage and LogMessage widgets have no source in TDM (no combat area, squads or log lines in the model).
+  The Icon3D managers (SupportIconManager, MapmarkerManager, AlertManager) run their AS2 and create, update and remove
+  their tags from `HudClientState::world_tags` at stage positions; nothing in TDM fills it (no requests, markers, spotting
+  or grenade alerts in the model), and the engine component's placement (UI3dIconCompData snap, fade and scale) is not done.
   The moment fixture replays only kill and headshot scores, so its ScoreAggregator total reads 210 where the footage
   reads 240, and its fading kill rows sit on the nearest timeline frame with the row still present (0.20 for 0.00 and 0.06,
   0.50 for 0.28 and 0.43 fading in).
