@@ -29,7 +29,6 @@ struct ServerSlot {
 	uint32_t spawn_index = 0;
 	sim::SoldierState state;
 	sim::Command last;
-	uint16_t snapshot_seq = 0;
 	uint16_t own_events = 0;
 	std::unique_ptr<CommandSource> source;
 	sim::Command source_command;
