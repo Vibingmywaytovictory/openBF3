@@ -121,6 +121,7 @@ tables over one grammar (`bf3/core/util/key_values.h`, byte and line caps on eve
 | shooting, damage, hit registration | `src/bf3_sim/src/weapons/`, `src/bf3_host/src/gunplay.cpp`, `lag_comp.cpp` |
 | the wire format | `src/bf3_net/src/protocol.cpp`: one `serialize` per message, run by the writer, the reader and the `BitCounter` that sizes the layout (`bit_archive.h`) |
 | the server tick order | "Data flow" step 4 above, then `game_server.cpp` `run_tick` |
+| the server's parts | `src/bf3_host/src/game_server.cpp` runs the tick over the `server_*` parts, each owning its state: `SlotTable`, `CommandBuffers` (jitter buffers), `MatchControl` (TDM rules, respawn policy, match messages), `Combat` (gunplay and its per-slot state), `CombatLog` (the hit/death sink), `Spawner`, `SnapshotWriter`, `DevCommands` (debug requests, traces, spawn sweep), `SlotView` (the `ServerView`), `Outbox` |
 | TDM rules and the round flow | `src/bf3_host/src/tdm_rules.cpp`, the logic runtime in `src/bf3_sim/src/logic/` |
 | bots | `src/bf3_sim/src/bots/` (perception, walking), `src/bf3_host/src/tdm_brain.cpp`, `firefight_brain.cpp` |
 | what the player sees each frame | `src/bf3_godot/src/level_session*.cpp`, `render_bridge.cpp`, `viewmodel.cpp`, `hud_*.cpp` |
