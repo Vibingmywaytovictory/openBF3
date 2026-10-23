@@ -102,6 +102,8 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/tdm_rules.h
     include/bf3/host/tdm_brain.h
     src/tdm_brain.cpp
+    src/tdm_bot_awareness.cpp
+    src/tdm_bot_awareness.h
     src/tdm_bot_common.h
     src/tdm_bot_shared.cpp
     src/tdm_bot_shared.h

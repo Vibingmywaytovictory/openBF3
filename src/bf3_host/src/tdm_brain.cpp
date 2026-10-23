@@ -15,6 +15,7 @@
 #include "bf3/sim/weapons/weapon_input.h"
 #include "bf3/sim/weapons/weapon_rng.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"
+#include "tdm_bot_awareness.h"
 #include "tdm_bot_common.h"
 #include "tdm_bot_shared.h"
 
@@ -57,15 +58,12 @@ constexpr uint32_t kLookMinTicks = 90, kLookMaxTicks = 180;
 constexpr float kLookMinDeg = 60.0f, kLookMaxDeg = 150.0f;
 constexpr float kSprintConeDeg = 20.0f;
 constexpr float kSingleShotBeyondMetres = 60.0f;
-constexpr float kShotAtMetres = 1.5f;
-constexpr float kShotRayMetres = 150.0f;
 constexpr uint32_t kGoalResetTicks = 90;
 constexpr float kGoalMoveMetres = 8.0f;
 constexpr float kHuntArriveMetres = 3.0f;
 constexpr uint32_t kRoamGoalTicks = 600;
 constexpr float kHeatMin = 0.2f;
 constexpr float kHeatRadiusMetres = 160.0f;
-constexpr uint32_t kShotAtTicks = 120;
 constexpr float kRetreatMetres = 14.0f;
 constexpr uint32_t kRetreatMaxTicks = 360;
 constexpr uint32_t kRetreatClearTicks = 60;
@@ -131,7 +129,7 @@ struct TdmBrain::Impl {
 	uint8_t slot = 0xFF;
 	uint64_t seed = 0;
 	uint64_t rng = 0;
-	sim::bots::Perception perception;
+	BotAwareness awareness;
 	std::optional<sim::bots::WalkerBrain> walker;
 	std::vector<sim::bots::BotGoal> goals;
 	uint32_t walker_resets = 0;
@@ -146,12 +144,6 @@ struct TdmBrain::Impl {
 	float skill = 0.5f, skill01 = 0.5f;
 	float view_yaw = 0.0f, view_pitch = 0.0f;
 	TdmBotActivity activity = TdmBotActivity::Dead;
-	float last_health = 100.0f;
-	sim::Tick damaged_tick = 0;
-	sim::Tick shot_at_tick = 0;
-	int shot_by = -1;
-	sim::Vec3 shot_from{};
-	sim::Tick shots_checked = 0;
 
 	int target = -1;
 	sim::Tick target_since = 0, react_at = 0, last_engaged = 0;
@@ -215,11 +207,7 @@ struct TdmBrain::Impl {
 		kit = shared->host.rules ? view.kit(slot) : (shared->host.gunplay != nullptr ? shared->host.gunplay->kit(slot) : uint8_t(0));
 		view_yaw = sim::yaw_radians(p_state.yaw);
 		view_pitch = 0.0f;
-		perception.reset();
-		last_health = p_state.health;
-		damaged_tick = shot_at_tick = 0;
-		shot_by = -1;
-		shots_checked = p_tick;
+		awareness.new_life(p_tick, p_state);
 		target = -1;
 		target_since = react_at = last_engaged = 0;
 		err_yaw = err_pitch = 0.0f;
@@ -448,80 +436,6 @@ struct TdmBrain::Impl {
 		return std::nullopt;
 	}
 
-	bool aims_at_me(const sim::SoldierState &p_other, const sim::SoldierState &p_self) const {
-		const TdmShared &sh = *shared;
-		const sim::Vec3 from = sh.eye_point(p_other);
-		const sim::Vec3 to = sh.chest_point(p_self);
-		const float d = distance(from, to);
-		if (!(d > 0.1f)) {
-			return true;
-		}
-		const sim::Vec3 dir = view_dir(sim::yaw_radians(p_other.yaw), sim::pitch_radians(p_other.pitch));
-		const float cosang = ((to[0] - from[0]) * dir[0] + (to[1] - from[1]) * dir[1] + (to[2] - from[2]) * dir[2]) / d;
-		return cosang >= std::cos(std::clamp(cfg().aims_at_me_deg, 0.0f, 90.0f) * core::kDegToRadF);
-	}
-
-	void check_shots(sim::Tick p_tick, const sim::SoldierState &p_self) {
-		TdmShared &sh = *shared;
-		const sim::Vec3 chest = sh.chest_point(p_self);
-		const uint8_t team = slot < sh.teams.size() ? sh.teams[slot] : 0;
-		for (const RecentShot &r : sh.ring) {
-			if (r.tick <= shots_checked || r.shooter == slot || r.shooter >= sh.teams.size()) {
-				continue;
-			}
-			const uint8_t other = sh.teams[r.shooter];
-			if (other == 0 || other == team) {
-				continue;
-			}
-			if (ray_point_distance(r.origin, r.direction, kShotRayMetres, chest) <= kShotAtMetres) {
-				shot_at_tick = p_tick;
-				shot_by = r.shooter;
-				shot_from = r.origin;
-			}
-		}
-		shots_checked = p_tick;
-		if (p_self.health < last_health - 0.01f) {
-			damaged_tick = p_tick;
-		}
-		last_health = p_self.health;
-	}
-
-	void perceive(sim::Tick p_tick, const sim::SoldierState &p_self, std::span<const sim::SoldierState> p_states) {
-		TdmShared &sh = *shared;
-		const ServerView &view = *sh.host.view;
-		const uint64_t t0 = now_ns();
-		sim::bots::PerceptionInput in;
-		in.self = slot;
-		in.team = slot < sh.teams.size() ? sh.teams[slot] : 0;
-		in.tick = p_tick;
-		in.eye = sh.eye_point(p_self);
-		in.yaw = sim::quantize_yaw(view_yaw);
-		in.pitch = sim::quantize_pitch(view_pitch);
-		in.states = p_states;
-		in.teams = sh.teams;
-		in.alive = sh.alive;
-		in.firing = sh.firing;
-		in.shots = sh.heard;
-		in.world = &view.world();
-		in.seed = seed ^ uint64_t(life);
-		for (size_t i = 0; i < 3; ++i) {
-			in.eye_heights[i] = sh.host.eye_heights[i];
-		}
-		const uint32_t rays = perception.update(in);
-		sh.perception_ns += now_ns() - t0;
-		sh.count(&TdmBotStats::perception_updates, uint64_t(1));
-		sh.count(&TdmBotStats::rays, uint64_t(rays));
-		if (perception.heard_last() > 0) {
-			sh.count(&TdmBotStats::heard, uint64_t(perception.heard_last()));
-		}
-		for (const uint8_t s : perception.newly_detected()) {
-			sh.count(&TdmBotStats::detections, uint64_t(1));
-			if (sh.observer != nullptr) {
-				sh.observer->detected(view, p_tick, slot, s, in.eye);
-			}
-		}
-	}
-
 	bool visible_recent(const sim::bots::PerceivedEnemy *p_e, sim::Tick p_tick) const {
 		return p_e != nullptr && p_e->detected && p_e->ever_visible && p_tick - p_e->last_visible <= kVisibleFireTicks;
 	}
@@ -533,16 +447,16 @@ struct TdmBrain::Impl {
 		const uint32_t memory = sim::seconds_to_ticks(std::max(c.damage_memory_s, 0.0f));
 		int best = -1;
 		float best_score = -1.0f, cur_score = -1.0f;
-		for (const sim::bots::PerceivedEnemy &e : perception.enemies()) {
+		for (const sim::bots::PerceivedEnemy &e : awareness.perception().enemies()) {
 			if (!visible_recent(&e, p_tick) || e.slot >= p_states.size()) {
 				continue;
 			}
 			const float d = std::max(distance(eye, sh.chest_point(p_states[e.slot])), 1.0f);
 			float score = c.w_distance / d;
-			if (aims_at_me(p_states[e.slot], p_self)) {
+			if (aims_at(sh, p_states[e.slot], p_self)) {
 				score += c.w_aim;
 			}
-			if (shot_by == int(e.slot) && p_tick - shot_at_tick <= memory) {
+			if (awareness.shot_by() == int(e.slot) && p_tick - awareness.shot_at_tick() <= memory) {
 				score += c.w_damage;
 			}
 			if (int(e.slot) == target) {
@@ -626,13 +540,13 @@ struct TdmBrain::Impl {
 		const std::span<const sim::SoldierState> states = view.states();
 		const sim::CollisionWorld &world = view.world();
 		const sim::Vec3 eye = sh.eye_point(p_state);
-		check_shots(p_tick, p_state);
+		awareness.check_shots(sh, slot, p_tick, p_state);
 		if (sim::bots::perception_tick(slot, p_tick, c.perception.update_ticks)) {
-			perceive(p_tick, p_state, states);
+			awareness.perceive(sh, slot, seed ^ uint64_t(life), p_tick, p_state, states, view_yaw, view_pitch);
 			choose_target(p_tick, p_state, states);
 		}
 
-		const sim::bots::PerceivedEnemy *te = target >= 0 ? perception.find(uint8_t(target)) : nullptr;
+		const sim::bots::PerceivedEnemy *te = target >= 0 ? awareness.perception().find(uint8_t(target)) : nullptr;
 		if (target >= 0 && (te == nullptr || size_t(target) >= states.size() || !view.alive(uint8_t(target)) || p_tick - te->last_visible > kLoseTicks)) {
 			target = -1;
 			te = nullptr;
@@ -651,7 +565,7 @@ struct TdmBrain::Impl {
 				sh.count(&TdmBotStats::blind_fire, uint64_t(1));
 			}
 		}
-		const bool shot_recent = shot_at_tick != 0 && p_tick - shot_at_tick <= kShotAtTicks;
+		const bool shot_recent = awareness.shot_recent(p_tick);
 		const sw::SoldierWeaponsState *ws = nullptr;
 		const sw::WeaponTable *table = nullptr;
 		if (sh.host.gunplay != nullptr && sh.host.gunplay->armed(slot)) {
@@ -694,7 +608,7 @@ struct TdmBrain::Impl {
 		}
 		const uint32_t idle_ticks = sim::seconds_to_ticks(std::max(c.revive_idle_s, 0.0f));
 		if (revive_slot < 0 && kit == uint8_t(KitRole::Assault) && slot_def(kKitGadgetSlot) != nullptr && p_tick - last_engaged >= idle_ticks &&
-				(shot_at_tick == 0 || p_tick - shot_at_tick >= idle_ticks) && state_health_ok(p_state)) {
+				(awareness.shot_at_tick() == 0 || p_tick - awareness.shot_at_tick() >= idle_ticks) && state_health_ok(p_state)) {
 			float best = 1e30f;
 			const uint8_t team = slot < sh.teams.size() ? sh.teams[slot] : 0;
 			for (const DownedSoldier &d : view.downed()) {
@@ -744,7 +658,7 @@ struct TdmBrain::Impl {
 		} else if (activity == TdmBotActivity::RegenWait && !visible && !shot_recent) {
 			act = TdmBotActivity::RegenWait;
 		} else if (low && (visible || shot_recent) && sh.nav != nullptr && activity != TdmBotActivity::Retreat && activity != TdmBotActivity::RegenWait &&
-				start_retreat(p_tick, p_state, visible ? states[size_t(target)].position : shot_from)) {
+				start_retreat(p_tick, p_state, visible ? states[size_t(target)].position : awareness.shot_from())) {
 			act = TdmBotActivity::Retreat;
 		} else if (visible) {
 			act = TdmBotActivity::Fight;
@@ -792,7 +706,7 @@ struct TdmBrain::Impl {
 				return true;
 			}
 			bool noticing = false;
-			for (const sim::bots::PerceivedEnemy &e : perception.enemies()) {
+			for (const sim::bots::PerceivedEnemy &e : awareness.perception().enemies()) {
 				noticing = noticing || (e.visible && !e.detected);
 			}
 			if (look_until == 0) {
@@ -922,7 +836,7 @@ struct TdmBrain::Impl {
 				}
 				const int k = known_enemy(p_tick, p_state);
 				if (k >= 0) {
-					const sim::bots::PerceivedEnemy *e = perception.find(uint8_t(k));
+					const sim::bots::PerceivedEnemy *e = awareness.perception().find(uint8_t(k));
 					if (e != nullptr) {
 						if (horizontal(p_state.position, e->last_position) <= kHuntArriveMetres) {
 							searched_tick = p_tick;
@@ -956,7 +870,7 @@ struct TdmBrain::Impl {
 		}
 
 		if (!have_aim && shot_recent && act != TdmBotActivity::Retreat && act != TdmBotActivity::Revive) {
-			want_yaw = yaw_of(shot_from[0] - p_state.position[0], shot_from[2] - p_state.position[2]);
+			want_yaw = yaw_of(awareness.shot_from()[0] - p_state.position[0], awareness.shot_from()[2] - p_state.position[2]);
 			sprint = false;
 		}
 
@@ -1143,7 +1057,7 @@ struct TdmBrain::Impl {
 		(void)p_tick;
 		float best = 1e30f;
 		int pick = -1;
-		for (const sim::bots::PerceivedEnemy &e : perception.enemies()) {
+		for (const sim::bots::PerceivedEnemy &e : awareness.perception().enemies()) {
 			if (!(e.detected || e.heard) || e.last_seen < searched_tick || !finite(e.last_position)) {
 				continue;
 			}
@@ -1186,7 +1100,7 @@ struct TdmBrain::Impl {
 		if (!p_have || lost_target < 0 || p_tick < grenade_next || size_t(lost_target) >= p_states.size()) {
 			return false;
 		}
-		const sim::bots::PerceivedEnemy *e = perception.find(uint8_t(lost_target));
+		const sim::bots::PerceivedEnemy *e = awareness.perception().find(uint8_t(lost_target));
 		if (e == nullptr || !e->ever_visible) {
 			return false;
 		}
@@ -1256,7 +1170,7 @@ TdmBrain::TdmBrain(std::shared_ptr<TdmShared> p_shared, uint32_t p_index) :
 	impl_->shared = std::move(p_shared);
 	impl_->index = p_index;
 	if (impl_->shared != nullptr) {
-		impl_->perception = sim::bots::Perception(impl_->shared->config->perception);
+		impl_->awareness.configure(impl_->shared->config->perception);
 	}
 }
 
