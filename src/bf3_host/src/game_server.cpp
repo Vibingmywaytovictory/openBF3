@@ -7,6 +7,7 @@
 #include "server_combat.h"
 #include "server_combat_log.h"
 #include "server_commands.h"
+#include "server_dev.h"
 #include "server_match.h"
 #include "server_outbox.h"
 #include "server_slots.h"
@@ -23,7 +24,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
-#include <deque>
 #include <limits>
 
 namespace bf3::host {
@@ -58,31 +58,9 @@ private:
 	sim::Tick start_ = 0;
 };
 
-constexpr uint32_t kMaxSweepTicks = 600;
-
-constexpr size_t kMaxQueuedDebug = 64;
-
 }
 
 struct GameServer::Impl {
-	struct PendingDebug {
-		uint32_t slot = 0;
-		net::DebugRequest request;
-	};
-
-	struct Sweep {
-		bool active = false;
-		uint32_t requester = 0;
-		uint32_t id = 0;
-		uint32_t ticks = 60;
-		size_t next_point = 0;
-		bool batch_active = false;
-		sim::Tick batch_start = 0;
-		std::vector<sim::SettleResult> results;
-		std::vector<uint32_t> batch_points;
-		std::vector<net::SpawnSweepRow> rows;
-	};
-
 	GameServerConfig config;
 	std::unique_ptr<sim::CollisionWorld> world;
 	sim::SoldierMotor motor;
@@ -96,8 +74,7 @@ struct GameServer::Impl {
 	CombatLog combat_log{ slots, match, combat };
 	SnapshotWriter snapshots{ slots, commands, combat, combat_log, motor, outbox };
 	Spawner spawner{ slots, match, combat, combat_log, motor, outbox };
-	std::deque<PendingDebug> debug_queue;
-	Sweep sweep;
+	DevCommands dev{ slots, spawner, combat, motor, outbox, [this](size_t p_slot) { reset_slot(slots[p_slot]); } };
 	uint64_t bad_datagrams = 0;
 	uint64_t level_mismatch_kicks = 0;
 	uint64_t step_precondition_failures = 0;
@@ -112,21 +89,7 @@ struct GameServer::Impl {
 		slots.clear(i);
 		commands.reset(i);
 		snapshots.reset(i);
-	}
-
-	void report(uint32_t p_slot, uint32_t p_id, bool p_ok, std::string p_text) {
-		if (p_slot >= slots.size()) {
-			return;
-		}
-		const ServerSlot &s = slots[p_slot];
-		if (!s.used || !s.remote || outbox.replies_full()) {
-			return;
-		}
-		net::DebugReport r;
-		r.id = p_id;
-		r.ok = p_ok;
-		r.text = std::move(p_text);
-		outbox.send(s.peer, net::kChannelReliable, net::encode_debug_report(r));
+		dev.reset(i);
 	}
 
 	void receive_commands(size_t p_slot, const net::CommandPacket &p_packet, uint64_t p_now_ns) {
@@ -180,194 +143,6 @@ struct GameServer::Impl {
 		}
 		if (!join.players.empty()) {
 			outbox.send(p_peer, net::kChannelReliable, join.players);
-		}
-	}
-
-	void handle_debug(size_t p_slot, const net::DebugRequest &p_request) {
-		if (!config.dev_commands) {
-			report(uint32_t(p_slot), p_request.id, false, "dev commands are disabled on this server");
-			return;
-		}
-		ServerSlot &s = slots[p_slot];
-		switch (p_request.kind) {
-			case net::DebugKind::Trace:
-				if (p_request.ticks == 0 || p_request.ticks > net::kMaxTraceTicks) {
-					report(uint32_t(p_slot), p_request.id, false, "trace: ticks must be 1.." + std::to_string(net::kMaxTraceTicks));
-					return;
-				}
-				if (s.tracing) {
-					report(uint32_t(p_slot), p_request.id, false, "trace: one is already running");
-					return;
-				}
-				s.tracing = true;
-				s.trace_id = p_request.id;
-				s.trace_ticks = p_request.ticks;
-				s.trace.clear();
-				s.trace.reserve(p_request.ticks);
-				return;
-			case net::DebugKind::SetSeed:
-				spawner.seed(uint64_t(p_request.index) * 0x9E3779B97F4A7C15ull + 1u);
-				report(uint32_t(p_slot), p_request.id, true, "seed set");
-				return;
-			case net::DebugKind::SpawnTarget:
-			case net::DebugKind::TargetInfo:
-			case net::DebugKind::Teleport:
-			case net::DebugKind::SpawnAt:
-			case net::DebugKind::SpawnSweep:
-				if (debug_queue.size() >= kMaxQueuedDebug) {
-					report(uint32_t(p_slot), p_request.id, false, "too many queued requests");
-					return;
-				}
-				debug_queue.push_back({ uint32_t(p_slot), p_request });
-				return;
-		}
-		report(uint32_t(p_slot), p_request.id, false, "unknown debug request");
-	}
-
-	void apply_debug(sim::Tick p_tick) {
-		while (!debug_queue.empty()) {
-			const PendingDebug d = debug_queue.front();
-			debug_queue.pop_front();
-			ServerSlot &s = slots[d.slot];
-			if (!s.used) {
-				continue;
-			}
-			const net::DebugRequest &q = d.request;
-			switch (q.kind) {
-				case net::DebugKind::Teleport: {
-					if (!s.spawned) {
-						report(d.slot, q.id, false, "teleport: no soldier");
-						break;
-					}
-
-					s.state = motor.spawn_state(q.position, q.yaw, s.state.life, p_tick, false);
-					char text[128];
-					std::snprintf(text, sizeof(text), "teleported to (%.3f, %.3f, %.3f) at tick %u", double(q.position[0]), double(q.position[1]),
-							double(q.position[2]), p_tick);
-					report(d.slot, q.id, true, text);
-					break;
-				}
-				case net::DebugKind::SpawnAt:
-					if (q.index >= config.level->spawns.size()) {
-						report(d.slot, q.id, false, "spawn at: no point " + std::to_string(q.index));
-						break;
-					}
-					if (!spawner.spawn(d.slot, q.index, p_tick)) {
-						report(d.slot, q.id, false, "spawn at: the slot could not spawn at point " + std::to_string(q.index));
-						break;
-					}
-					report(d.slot, q.id, true, "spawned at point " + std::to_string(q.index) + " at tick " + std::to_string(p_tick));
-					break;
-				case net::DebugKind::SpawnSweep:
-					if (sweep.active) {
-						report(d.slot, q.id, false, "spawn sweep: one is already running");
-						break;
-					}
-					sweep = Sweep();
-					sweep.active = true;
-					sweep.requester = d.slot;
-					sweep.id = q.id;
-					sweep.ticks = std::clamp<uint32_t>(q.ticks, 1u, kMaxSweepTicks);
-					break;
-				case net::DebugKind::SpawnTarget:
-				case net::DebugKind::TargetInfo:
-					sv_apply_debug(d, p_tick);
-					break;
-				default:
-					break;
-			}
-		}
-	}
-
-	void run_sweep(sim::Tick p_tick) {
-		if (!sweep.active) {
-			return;
-		}
-		const std::vector<sim::SpawnPoint> &points = config.level->spawns;
-		if (sweep.batch_active && p_tick - sweep.batch_start >= sweep.ticks) {
-			for (size_t i = 0; i < slots.size(); ++i) {
-				ServerSlot &s = slots[i];
-				if (!s.used || !s.dummy) {
-					continue;
-				}
-				sim::SettleResult &r = sweep.results[s.sweep_entry];
-				r.state = s.state;
-				const sim::SpawnPoint &p = points[sweep.batch_points[s.sweep_entry]];
-				sim::judge_settle(motor, *world, p, sim::SettleOptions(), r);
-				net::SpawnSweepRow row;
-				row.index = p.index;
-				row.ok = r.ok;
-				row.point = p.position;
-				row.settled = r.state.position;
-				row.lift = r.lift;
-				row.shift = r.shift;
-				row.gap = r.gap;
-				row.grounded = (r.state.flags & sim::soldier_flags::kGrounded) != 0;
-				row.overlapping = r.overlapping;
-				sweep.rows.push_back(row);
-				reset_slot(s);
-			}
-			sweep.batch_active = false;
-		}
-		if (!sweep.batch_active && sweep.next_point < points.size()) {
-			sweep.results.clear();
-			sweep.batch_points.clear();
-			while (sweep.next_point < points.size()) {
-				const int at = slots.free_slot();
-				if (at < 0) {
-					break;
-				}
-				const sim::SpawnPoint &p = points[sweep.next_point];
-				sim::SettleResult r = sim::place_spawn(motor, *world, p, 1, p_tick);
-				if (!r.failure.empty()) {
-					net::SpawnSweepRow row;
-					row.index = p.index;
-					row.ok = false;
-					row.point = p.position;
-					row.settled = r.placed;
-					row.lift = r.lift;
-					row.shift = r.shift;
-					sweep.rows.push_back(row);
-					++sweep.next_point;
-					continue;
-				}
-				ServerSlot &s = slots[size_t(at)];
-				reset_slot(s);
-				s.used = true;
-				s.dummy = true;
-				s.team = 0;
-				s.spawned = true;
-				s.state = r.state;
-				s.sweep_entry = sweep.results.size();
-				sweep.results.push_back(std::move(r));
-				sweep.batch_points.push_back(uint32_t(sweep.next_point));
-				++sweep.next_point;
-			}
-			if (!sweep.results.empty()) {
-				sweep.batch_active = true;
-				sweep.batch_start = p_tick;
-			} else if (sweep.next_point < points.size()) {
-				report(sweep.requester, sweep.id, false, "spawn sweep: no free slot");
-				sweep = Sweep();
-				return;
-			}
-		}
-		if (!sweep.batch_active && sweep.next_point >= points.size()) {
-			std::sort(sweep.rows.begin(), sweep.rows.end(), [](const net::SpawnSweepRow &a, const net::SpawnSweepRow &b) { return a.index < b.index; });
-			size_t ok = 0;
-			for (const net::SpawnSweepRow &r : sweep.rows) {
-				ok += r.ok ? 1 : 0;
-			}
-			if (sweep.requester < slots.size() && slots[sweep.requester].used && slots[sweep.requester].remote) {
-				const ServerSlot &s = slots[sweep.requester];
-				net::DebugReport rep;
-				rep.id = sweep.id;
-				rep.ok = ok == sweep.rows.size();
-				rep.text = "spawn sweep: " + std::to_string(ok) + " / " + std::to_string(sweep.rows.size()) + " ok";
-				rep.sweep = std::move(sweep.rows);
-				outbox.send(s.peer, net::kChannelReliable, net::encode_debug_report(rep));
-			}
-			sweep = Sweep();
 		}
 	}
 
@@ -448,8 +223,8 @@ struct GameServer::Impl {
 				spawner.spawn(i, SIZE_MAX, n);
 			}
 		}
-		apply_debug(n);
-		run_sweep(n);
+		dev.apply_debug(n);
+		dev.run_sweep(n);
 		times.rules_ms = ms_since(rules_start);
 		times.spawns = spawner.tick_spawns();
 		tick = n;
@@ -460,23 +235,7 @@ struct GameServer::Impl {
 				continue;
 			}
 			s.own_events = uint16_t(s.own_events | s.state.events);
-			if (s.tracing) {
-				s.trace.push_back(s.state);
-				combat.trace_tick(i, s.trace.size() == 1, tick);
-				if (s.trace.size() >= s.trace_ticks) {
-					if (s.remote) {
-						net::DebugReport r;
-						r.id = s.trace_id;
-						r.ok = true;
-						r.text = "trace of " + std::to_string(s.trace.size()) + " ticks from " + std::to_string(s.trace.front().tick);
-						r.trace = std::move(s.trace);
-						combat.take_trace(i, r);
-						outbox.send(s.peer, net::kChannelReliable, net::encode_debug_report(r));
-					}
-					s.trace.clear();
-					s.tracing = false;
-				}
-			}
+			dev.trace(i, tick);
 		}
 		if (config.snapshot_divisor <= 1 || n % config.snapshot_divisor == 0) {
 			snapshots.send(n, net::monotonic_ns(), times);
@@ -518,7 +277,6 @@ struct GameServer::Impl {
 	core::Status sv_init();
 	const ServerView &server_view() const;
 	void sv_rules(sim::Tick p_tick);
-	void sv_apply_debug(const PendingDebug &p_debug, sim::Tick p_tick);
 
 	void send_rules(sim::Tick p_tick) {
 		const MatchBroadcast b = match.take_broadcast(p_tick);
@@ -580,6 +338,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	m.slots.resize(p_config.max_slots);
 	m.commands.configure(p_config.max_slots, p_config.jitter_buffer_ticks);
 	m.snapshots.configure(p_config.max_slots);
+	m.dev.configure(m.config, *m.world, p_config.max_slots);
 	for (ServerSlot &s : m.slots) {
 		m.reset_slot(s);
 	}
@@ -617,9 +376,7 @@ void GameServer::on_disconnect(uint32_t p_peer) {
 	Impl &m = *impl_;
 	const int at = m.slots.slot_of_peer(p_peer);
 	if (at >= 0) {
-		if (m.sweep.active && m.sweep.requester == uint32_t(at)) {
-			m.sweep.requester = UINT32_MAX;
-		}
+		m.dev.client_left(size_t(at));
 		m.combat.client_left(size_t(at));
 		m.match.leave(size_t(at));
 		m.reset_slot(m.slots[size_t(at)]);
@@ -691,7 +448,7 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 				++m.bad_datagrams;
 				return;
 			}
-			m.handle_debug(size_t(at), *d);
+			m.dev.handle_debug(size_t(at), *d);
 			return;
 		}
 		case net::MessageType::KitSelect:
@@ -896,46 +653,6 @@ void GameServer::Impl::sv_rules(sim::Tick p_tick) {
 	if (!orders.empty()) {
 		spawner.apply_orders(p_tick, orders);
 	}
-}
-
-void GameServer::Impl::sv_apply_debug(const PendingDebug &p_debug, sim::Tick p_tick) {
-	const net::DebugRequest &q = p_debug.request;
-	if (q.kind == net::DebugKind::SpawnTarget) {
-		const core::Status st = spawner.place(q.slot, q.position, q.yaw, q.pose, p_tick);
-		if (!st.ok()) {
-			report(p_debug.slot, q.id, false, "spawn target: " + st.error().message);
-			return;
-		}
-		char text[160];
-		std::snprintf(text, sizeof(text), "target %u placed at (%.3f, %.3f, %.3f) yaw %u pose %u at tick %u", unsigned(q.slot), double(q.position[0]),
-				double(q.position[1]), double(q.position[2]), unsigned(q.yaw), unsigned(q.pose), p_tick);
-		report(p_debug.slot, q.id, true, text);
-		return;
-	}
-
-	if (!combat.on()) {
-		report(p_debug.slot, q.id, false, "target info: no gunplay on this server");
-		return;
-	}
-	if (q.slot >= slots.size() || !slots[q.slot].used || !slots[q.slot].spawned) {
-		report(p_debug.slot, q.id, false, "target info: no soldier in slot " + std::to_string(q.slot));
-		return;
-	}
-	const std::optional<net::TargetInfoRow> row = combat.gunplay()->target_info(q.slot, slots[q.slot].state);
-	if (!row) {
-		report(p_debug.slot, q.id, false, "target info: slot " + std::to_string(q.slot) + " is not a live armed soldier");
-		return;
-	}
-	const ServerSlot &requester = slots[p_debug.slot];
-	if (!requester.used || !requester.remote || outbox.replies_full()) {
-		return;
-	}
-	net::DebugReport r;
-	r.id = q.id;
-	r.ok = true;
-	r.text = "target " + std::to_string(q.slot) + ": " + std::to_string(row->target.capsule_count) + " capsules at tick " + std::to_string(p_tick);
-	r.targets.push_back(*row);
-	outbox.send(requester.peer, net::kChannelReliable, net::encode_debug_report(r));
 }
 
 core::Status GameServer::place_soldier(uint32_t p_slot, const sim::Vec3 &p_position, uint16_t p_yaw, sim::Pose p_pose) {

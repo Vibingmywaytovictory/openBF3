@@ -32,13 +32,6 @@ struct ServerSlot {
 	uint16_t own_events = 0;
 	std::unique_ptr<CommandSource> source;
 	sim::Command source_command;
-
-	bool tracing = false;
-	uint32_t trace_id = 0;
-	uint32_t trace_ticks = 0;
-	std::vector<sim::SoldierState> trace;
-
-	size_t sweep_entry = 0;
 };
 
 class SlotTable {
