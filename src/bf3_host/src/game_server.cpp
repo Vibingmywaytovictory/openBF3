@@ -5,6 +5,7 @@
 #include "bf3/host/firefight_brain.h"
 #include "bf3/host/tdm_brain.h"
 #include "bot_director.h"
+#include "server_commands.h"
 #include "server_outbox.h"
 
 #include "bf3/net/loopback_ping.h"
@@ -69,11 +70,6 @@ constexpr size_t kMaxQueuedDebug = 64;
 }
 
 struct GameServer::Impl {
-	struct Buffered {
-		bool valid = false;
-		sim::Command command;
-	};
-
 	struct Slot {
 		bool used = false;
 		bool remote = false;
@@ -88,20 +84,10 @@ struct GameServer::Impl {
 		uint32_t spawn_index = 0;
 		sim::SoldierState state;
 		sim::Command last;
-		uint32_t applied_sequence = 0;
-		bool applied_repeated = true;
-		std::vector<Buffered> buffer;
-		bool any_command = false;
-		uint32_t highest_sequence = 0;
-		sim::Tick highest_sequence_tick = 0;
-		uint64_t highest_sequence_ns = 0;
-		uint32_t last_applied_sequence = 0;
-		uint32_t highest_late_sequence = 0;
 		uint16_t snapshot_seq = 0;
 		uint16_t own_events = 0;
 		std::unique_ptr<CommandSource> source;
 		sim::Command source_command;
-		SlotStats stats;
 
 		bool tracing = false;
 		uint32_t trace_id = 0;
@@ -137,6 +123,7 @@ struct GameServer::Impl {
 	sim::Tick tick = 0;
 	uint64_t rng = 1;
 	Outbox outbox;
+	CommandBuffers commands;
 	std::deque<PendingDebug> debug_queue;
 	Sweep sweep;
 	uint64_t snapshots_sent = 0;
@@ -175,7 +162,7 @@ struct GameServer::Impl {
 
 	void reset_slot(Slot &r_slot) {
 		r_slot = Slot();
-		r_slot.buffer.assign(std::clamp<uint32_t>(config.jitter_buffer_ticks, 1u, 1024u) + 1u, Buffered{});
+		commands.reset(size_t(&r_slot - slots.data()));
 	}
 
 	void report(uint32_t p_slot, uint32_t p_id, bool p_ok, std::string p_text) {
@@ -252,42 +239,10 @@ struct GameServer::Impl {
 		return true;
 	}
 
-	void receive_commands(Slot &r_slot, const net::CommandPacket &p_packet, uint64_t p_now_ns) {
-		sv_ack(r_slot, p_packet);
-		const uint32_t size = uint32_t(r_slot.buffer.size());
-		const uint32_t ahead = std::clamp<uint32_t>(config.jitter_buffer_ticks, 1u, 1024u);
-
-		for (size_t k = p_packet.count; k-- > 0;) {
-			sim::Command c = p_packet.commands[k];
-			c.flags = 0;
-			if (!r_slot.any_command || c.sequence > r_slot.highest_sequence) {
-				r_slot.any_command = true;
-				r_slot.highest_sequence = c.sequence;
-				r_slot.highest_sequence_tick = c.tick;
-				r_slot.highest_sequence_ns = p_now_ns;
-			}
-			if (c.tick <= tick) {
-
-				if (c.sequence > r_slot.last_applied_sequence && c.sequence > r_slot.highest_late_sequence) {
-					r_slot.highest_late_sequence = c.sequence;
-					++r_slot.stats.commands_late;
-				}
-				continue;
-			}
-			if (c.tick - tick > ahead) {
-				continue;
-			}
-			Buffered &b = r_slot.buffer[c.tick % size];
-			if (!b.valid || b.command.tick != c.tick) {
-				b.valid = true;
-				b.command = c;
-				sv_buffered(r_slot, c);
-			} else if (c.sequence > b.command.sequence) {
-
-				b.command = c;
-				++r_slot.stats.commands_replaced;
-				sv_buffered(r_slot, c);
-			}
+	void receive_commands(size_t p_slot, const net::CommandPacket &p_packet, uint64_t p_now_ns) {
+		sv_ack(slots[p_slot], p_packet);
+		for (const sim::Command &c : commands.receive(p_slot, p_packet, p_now_ns, tick)) {
+			sv_buffered(slots[p_slot], c);
 		}
 	}
 
@@ -531,15 +486,7 @@ struct GameServer::Impl {
 			net::Snapshot snap;
 			snap.seq = s.snapshot_seq++;
 			snap.server_tick = p_tick;
-			snap.applied_sequence = s.applied_sequence;
-			snap.applied_repeated = s.applied_repeated;
-			const int64_t buffer = s.any_command ? int64_t(s.highest_sequence_tick) - int64_t(p_tick) : 0;
-			snap.command_buffer_ticks = int8_t(std::clamp<int64_t>(buffer, -127, 127));
-			snap.sequence_echo = uint16_t(s.highest_sequence & 0xFFFFu);
-			if (s.any_command) {
-				const uint64_t hold = p_now_ns > s.highest_sequence_ns ? (p_now_ns - s.highest_sequence_ns) / 100000u : 0u;
-				snap.echo_hold_100us = uint16_t(std::min<uint64_t>(hold, 0xFFFFu));
-			}
+			commands.stamp(i, p_tick, p_now_ns, snap);
 			snap.own_events = s.own_events;
 			s.own_events = 0;
 			if (s.spawned) {
@@ -587,34 +534,16 @@ struct GameServer::Impl {
 		const uint64_t queries_before = world->query_count();
 		const double paths_before = bots != nullptr ? bots->paths_ms_total() : 0.0;
 
-		for (Slot &s : slots) {
+		for (size_t i = 0; i < slots.size(); ++i) {
+			Slot &s = slots[i];
 			if (!s.used || !s.remote) {
 				continue;
 			}
-			Buffered &b = s.buffer[n % s.buffer.size()];
-			const bool have = b.valid && b.command.tick == n;
-			sim::Command c;
-			if (have) {
-				c = b.command;
-			}
-			if (b.valid && b.command.tick <= n) {
-				b.valid = false;
-			}
+			const std::optional<sim::Command> taken = commands.take(i, n);
 			if (!s.spawned) {
 				continue;
 			}
-			if (have) {
-				s.last = c;
-				s.applied_sequence = c.sequence;
-				s.applied_repeated = false;
-				s.last_applied_sequence = std::max(s.last_applied_sequence, c.sequence);
-				++s.stats.commands_applied;
-			} else {
-				s.last = sim::repeated_command(s.last, n);
-				s.applied_sequence = s.last.sequence;
-				s.applied_repeated = true;
-				++s.stats.commands_repeated;
-			}
+			s.last = commands.apply(i, taken, s.last, n);
 		}
 		times.commands_ms = ms_since(tick_start);
 
@@ -632,7 +561,7 @@ struct GameServer::Impl {
 			c.tick = n;
 			c.flags = uint8_t(c.flags | sim::command_flags::kLocalSource);
 			s.last = c;
-			++s.stats.commands_applied;
+			commands.count_local(size_t(&s - slots.data()));
 		}
 		times.sources_ms = ms_since(sources_start);
 		times.paths_ms = bots != nullptr ? bots->paths_ms_total() - paths_before : 0.0;
@@ -795,6 +724,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	m.motor_hash = sim::motor_params_hash(p_config.level->motor);
 	m.rng = p_config.seed;
 	m.slots.resize(p_config.max_slots);
+	m.commands.configure(p_config.max_slots, p_config.jitter_buffer_ticks);
 	for (Impl::Slot &s : m.slots) {
 		m.reset_slot(s);
 	}
@@ -886,7 +816,7 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 				++m.bad_datagrams;
 				return;
 			}
-			m.receive_commands(m.slots[size_t(at)], *c, net::monotonic_ns());
+			m.receive_commands(size_t(at), *c, net::monotonic_ns());
 			return;
 		}
 		case net::MessageType::Loading: {
@@ -961,13 +891,12 @@ GameServerStats GameServer::stats() const {
 	for (size_t i = 0; i < m.slots.size(); ++i) {
 		const Impl::Slot &s = m.slots[i];
 		SlotStats &o = g.slots[i];
-		o = s.stats;
+		m.commands.stats(i, m.tick, o);
 		o.used = s.used;
 		o.remote = s.remote;
 		o.peer = s.peer;
 		o.life = s.state.life;
 		o.alive = s.spawned && alive(s.state);
-		o.buffer_ticks = s.any_command ? int32_t(int64_t(s.highest_sequence_tick) - int64_t(m.tick)) : 0;
 		o.state = s.state;
 		g.clients += (s.used && s.remote) ? 1u : 0u;
 		g.soldiers += o.alive ? 1u : 0u;

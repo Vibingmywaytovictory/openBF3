@@ -21,6 +21,8 @@ target_sources(bf3_host PRIVATE
 target_sources(bf3_host PRIVATE
     src/level_load.cpp
     src/game_server.cpp
+    src/server_commands.cpp
+    src/server_commands.h
     src/server_outbox.h
     src/client_session.cpp
     src/rest_check.cpp
