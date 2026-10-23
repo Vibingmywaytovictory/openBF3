@@ -18,6 +18,7 @@
 #include "tdm_bot_awareness.h"
 #include "tdm_bot_common.h"
 #include "tdm_bot_movement.h"
+#include "tdm_bot_objectives.h"
 #include "tdm_bot_shared.h"
 #include "tdm_bot_targeting.h"
 #include "tdm_bot_weapons.h"
@@ -52,15 +53,12 @@ constexpr float kSprintConeDeg = 20.0f;
 constexpr float kRetreatMetres = 14.0f;
 constexpr uint32_t kRetreatMaxTicks = 360;
 constexpr uint32_t kRetreatClearTicks = 60;
-constexpr float kRunSpeed = 4.5f;
-constexpr float kPathFactor = 1.3f;
 constexpr float kReviveDirectMetres = 2.5f;
 constexpr float kReviveStandMetres = 0.8f;
 constexpr float kReviveCrouchMetres = 2.0f;
 constexpr float kReviveCentreUp = 0.3f;
 constexpr float kDefibReach = 1.7f;
 constexpr float kDefibConeDeg = 6.0f;
-constexpr uint32_t kReviveTimeoutTicks = 900;
 constexpr uint32_t kGrenadeLostMinTicks = 30, kGrenadeLostMaxTicks = 240;
 constexpr uint32_t kGrenadeSwitchTicks = 120, kGrenadeAfterTicks = 45, kGrenadeHoldExtraTicks = 4;
 constexpr float kKnifeBehindDeg = 100.0f;
@@ -127,8 +125,7 @@ struct TdmBrain::Impl {
 	sim::Tick retreat_since = 0, regen_since = 0, clear_since = 0;
 	sim::Vec3 threat{};
 
-	int revive_slot = -1;
-	sim::Tick revive_since = 0, defib_next = 0;
+	BotRevive medic;
 
 	int grenade_phase = 0;
 	sim::Tick grenade_phase_tick = 0, grenade_next = 0;
@@ -159,7 +156,7 @@ struct TdmBrain::Impl {
 		strafe.stop();
 		look.new_life();
 		retreat_since = regen_since = clear_since = 0;
-		revive_slot = -1;
+		medic.new_life();
 		grenade_phase = 0;
 		knife_until = 0;
 		navigation.new_life();
@@ -234,56 +231,18 @@ struct TdmBrain::Impl {
 
 		TdmBotActivity act = TdmBotActivity::Roam;
 
-		if (revive_slot >= 0) {
-			const DownedSoldier *d = nullptr;
-			for (const DownedSoldier &x : view.downed()) {
-				if (x.slot == revive_slot) {
-					d = &x;
-				}
-			}
-			const bool over = d == nullptr || d->until_tick <= p_tick || p_tick - revive_since > kReviveTimeoutTicks || shot_recent ||
-					(visible && te != nullptr && distance(eye, sh.chest_point(states[size_t(target)])) < 40.0f);
-			if (over) {
-				if (d != nullptr) {
-					sh.count(&TdmBotStats::revive_aborts, uint64_t(1));
-				}
-				revive_slot = -1;
-				navigation.clear_goal();
-			}
-		}
-		const uint32_t idle_ticks = sim::seconds_to_ticks(std::max(c.revive_idle_s, 0.0f));
-		if (revive_slot < 0 && kit == uint8_t(KitRole::Assault) && arms.def(kKitGadgetSlot) != nullptr && p_tick - targeting.last_engaged() >= idle_ticks &&
-				(awareness.shot_at_tick() == 0 || p_tick - awareness.shot_at_tick() >= idle_ticks) && state_health_ok(p_state)) {
-			float best = 1e30f;
-			const uint8_t team = slot < sh.teams.size() ? sh.teams[slot] : 0;
-			for (const DownedSoldier &d : view.downed()) {
-				if (d.team != team || d.slot == slot || d.until_tick <= p_tick || !finite(d.corpse)) {
-					continue;
-				}
-				const float dist = distance(p_state.position, d.corpse);
-				const float travel = dist * kPathFactor / kRunSpeed + std::max(c.revive_margin_s, 0.0f);
-				if (dist > c.revive_radius_m || float(d.until_tick - p_tick) * sim::kTickSeconds <= travel) {
-					continue;
-				}
-				if (dist < best) {
-					best = dist;
-					revive_slot = d.slot;
-				}
-			}
-			if (revive_slot >= 0) {
-				revive_since = p_tick;
-				defib_next = p_tick;
-				sh.count(&TdmBotStats::revive_attempts, uint64_t(1));
-			}
-		}
-		const DownedSoldier *revive = nullptr;
-		if (revive_slot >= 0) {
-			for (const DownedSoldier &x : view.downed()) {
-				if (x.slot == revive_slot) {
-					revive = &x;
-				}
-			}
-		}
+		ReviveCheck check;
+		check.tick = p_tick;
+		check.slot = slot;
+		check.kit = kit;
+		check.defibrillator = arms.def(kKitGadgetSlot) != nullptr;
+		check.self = &p_state;
+		check.eye = eye;
+		check.shot_recent = shot_recent;
+		check.shot_at_tick = awareness.shot_at_tick();
+		check.last_engaged = targeting.last_engaged();
+		check.seen = visible && te != nullptr ? &states[size_t(target)] : nullptr;
+		const DownedSoldier *revive = medic.update(sh, navigation, check);
 
 		if (activity == TdmBotActivity::Retreat || activity == TdmBotActivity::RegenWait) {
 			if (p_state.health >= c.regen_until_hp || (activity == TdmBotActivity::RegenWait && p_tick - regen_since > sim::seconds_to_ticks(c.regen_wait_s))) {
@@ -526,7 +485,7 @@ struct TdmBrain::Impl {
 		request.eye = eye;
 		request.view_yaw = view_yaw;
 		request.view_pitch = view_pitch;
-		const WeaponCommand weapon = weapons.input(sh, slot, arms, request, defib_next, rng);
+		const WeaponCommand weapon = weapons.input(sh, slot, arms, request, medic.defib_next(), rng);
 		const sw::WeaponInput &in = weapon.input;
 		const float comp_yaw = weapon.comp_yaw, comp_pitch = weapon.comp_pitch;
 
@@ -546,8 +505,6 @@ struct TdmBrain::Impl {
 		cmd.buttons = b;
 		return cmd;
 	}
-
-	bool state_health_ok(const sim::SoldierState &p_state) const { return p_state.health >= cfg().retreat_below_hp; }
 
 	int known_enemy(sim::Tick p_tick, const sim::SoldierState &p_self) const {
 		(void)p_tick;
