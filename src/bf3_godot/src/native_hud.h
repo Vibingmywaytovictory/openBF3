@@ -95,6 +95,7 @@ public:
 	godot::Ref<godot::Image> capture_layer() const;
 	uint64_t kill_feed_rows_added() const;
 	const bf3::core::ui::HudMessageComp *messages() const { return messages_.get(); }
+	double message_clock() const { return message_clock_; }
 	const bf3::core::ui::HudDamageIndicatorComp *damage() const { return damage_.get(); }
 
 protected:

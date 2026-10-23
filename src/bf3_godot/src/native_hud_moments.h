@@ -77,6 +77,8 @@ private:
 	uint32_t captured_ = 0;
 	uint32_t failures_ = 0;
 	std::vector<std::string> expect_kills_;
+	std::vector<int32_t> expect_kill_frames_;
+	std::vector<float> reference_kill_alphas_;
 	std::vector<std::string> expect_log_;
 	int32_t expect_score_frame_ = -1;
 	int32_t expect_aggregator_frame_ = -1;

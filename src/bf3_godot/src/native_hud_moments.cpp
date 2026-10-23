@@ -66,6 +66,8 @@ constexpr int32_t kRenderFrames = 3;
 constexpr double kAliveTimeout = 90.0;
 constexpr double kArriveTimeout = 10.0;
 
+enum class MomentFade : uint8_t { None, In, Out };
+
 struct MomentKill {
 	const char *moment = "";
 	uint8_t killer = 0;
@@ -75,6 +77,7 @@ struct MomentKill {
 	float killer_px = 0.0f;
 	float victim_px = 0.0f;
 	float alpha = 1.0f;
+	MomentFade fade = MomentFade::None;
 };
 
 struct MomentPopup {
@@ -95,7 +98,7 @@ constexpr std::array<MomentKill, 63> kMomentKills{ {
 		{ "m02", 0, 1, 0x2745930bu, "MK11 MOD 0", 356.0f, 155.0f, 1.00f },
 		{ "m02", 0, 1, 0x05bca424u, "SPAS-12", 387.0f, 149.0f, 1.00f },
 		{ "m02", 1, 2, 0x0fe93389u, "MP443", 396.0f, 150.0f, 1.00f },
-		{ "m03", 2, 1, 0x27415b44u, "G36C", 402.0f, 153.0f, 0.41f },
+		{ "m03", 2, 1, 0x27415b44u, "G36C", 402.0f, 153.0f, 0.41f, MomentFade::Out },
 		{ "m03", 0, 1, 0x2744a919u, "M416", 420.0f, 139.0f, 1.00f },
 		{ "m03", 1, 0, 0x273e842du, "AN-94", 414.0f, 138.0f, 1.00f },
 		{ "m03", 1, 0, 0xa8652d39u, "SAIGA 12K", 382.0f, 139.0f, 1.00f },
@@ -122,13 +125,13 @@ constexpr std::array<MomentKill, 63> kMomentKills{ {
 		{ "m09", 1, 2, 0x8511b67eu, "SVD", 425.0f, 140.0f, 1.00f },
 		{ "m09", 0, 1, 0x1078c98cu, "UMP-45", 354.0f, 186.0f, 1.00f },
 		{ "m09", 0, 1, 0x0fd83dfau, "M16A3", 419.0f, 131.0f, 1.00f },
-		{ "m09", 1, 0, 0xa8652d39u, "SAIGA 12K", 388.0f, 133.0f, 0.28f },
-		{ "m09", 0, 1, 0x0fd83dfau, "M16A3", 389.0f, 161.0f, 0.43f },
+		{ "m09", 1, 0, 0xa8652d39u, "SAIGA 12K", 388.0f, 133.0f, 0.28f, MomentFade::In },
+		{ "m09", 0, 1, 0x0fd83dfau, "M16A3", 389.0f, 161.0f, 0.43f, MomentFade::In },
 		{ "m10", 1, 0, 0xa8652d39u, "SAIGA 12K", 388.0f, 133.0f, 1.00f },
 		{ "m10", 0, 1, 0x0fd83dfau, "M16A3", 389.0f, 161.0f, 1.00f },
 		{ "m10", 0, 1, 0xdfcd9e7cu, "MK3A1", 395.0f, 158.0f, 1.00f },
 		{ "m10", 1, 0, 0x273e842du, "AN-94", 398.0f, 155.0f, 1.00f },
-		{ "m11", 1, 0, 0xa8652d39u, "SAIGA 12K", 388.0f, 133.0f, 0.06f },
+		{ "m11", 1, 0, 0xa8652d39u, "SAIGA 12K", 388.0f, 133.0f, 0.06f, MomentFade::Out },
 		{ "m11", 0, 1, 0x0fd83dfau, "M16A3", 389.0f, 161.0f, 1.00f },
 		{ "m11", 0, 1, 0xdfcd9e7cu, "MK3A1", 395.0f, 158.0f, 1.00f },
 		{ "m11", 1, 0, 0x273e842du, "AN-94", 398.0f, 155.0f, 1.00f },
@@ -140,12 +143,12 @@ constexpr std::array<MomentKill, 63> kMomentKills{ {
 		{ "m13", 0, 1, 0x0fdcffc0u, "M9 TACT.", 388.0f, 139.0f, 1.00f },
 		{ "m13", 0, 1, 0x8511986au, "M39 EMR", 384.0f, 144.0f, 1.00f },
 		{ "m13", 1, 0, 0x140df493u, "PP-2000", 393.0f, 140.0f, 1.00f },
-		{ "m14", 1, 0, 0xa8652d39u, "SAIGA 12K", 381.0f, 145.0f, 0.00f },
+		{ "m14", 1, 0, 0xa8652d39u, "SAIGA 12K", 381.0f, 145.0f, 0.00f, MomentFade::Out },
 		{ "m14", 1, 0, 0x8511b67eu, "SVD", 415.0f, 150.0f, 1.00f },
 		{ "m14", 1, 0, 0x0f0d5c75u, "AK-74M", 385.0f, 158.0f, 1.00f },
 		{ "m14", 1, 0, 0xf0c84fb0u, "AKS-74u", 397.0f, 138.0f, 1.00f },
 		{ "m14", 0, 1, 0x7672e09eu, "XBOW", 392.0f, 160.0f, 1.00f },
-		{ "m15", 1, 0, 0x8511b67eu, "SVD", 415.0f, 150.0f, 0.28f },
+		{ "m15", 1, 0, 0x8511b67eu, "SVD", 415.0f, 150.0f, 0.28f, MomentFade::Out },
 		{ "m15", 1, 0, 0x0f0d5c75u, "AK-74M", 385.0f, 158.0f, 1.00f },
 		{ "m15", 1, 0, 0xf0c84fb0u, "AKS-74u", 397.0f, 138.0f, 1.00f },
 		{ "m15", 0, 1, 0x7672e09eu, "XBOW", 392.0f, 160.0f, 1.00f },
@@ -172,7 +175,6 @@ constexpr int8_t kOwnTeam = 1;
 constexpr int8_t kOtherTeam = 2;
 constexpr int8_t kOwnSquad = 1;
 constexpr int8_t kOtherSquad = 2;
-constexpr float kFadedAlpha = 0.5f;
 constexpr std::string_view kNameGlyphs = "WMHNEI";
 constexpr const char *kKillFeedPath = "instance1.HudMessage_02";
 constexpr const char *kKillLogPath = "instance1.HudMessage_00";
@@ -247,6 +249,7 @@ float window_scale(const Bf3NativeHud &p_hud) {
 struct MessageRow {
 	float y = 0.0f;
 	uint32_t frame = 0;
+	float alpha = 0.0f;
 	std::string text;
 };
 
@@ -264,7 +267,9 @@ std::vector<MessageRow> message_rows(const Bf3NativeHud &p_hud, const char *p_wi
 			continue;
 		}
 		const ui::SwfSceneNode *t = sc->find_node(row->path + p_text);
-		out.push_back(MessageRow{ row->world.ty, row->frame, t != nullptr ? t->text : std::string() });
+		const ui::SwfSceneNode *body = sc->find_node(row->path + ".container");
+		const float alpha = body != nullptr ? body->world_color.mul[3] : row->world_color.mul[3];
+		out.push_back(MessageRow{ row->world.ty, row->frame, alpha, t != nullptr ? t->text : std::string() });
 	}
 	std::sort(out.begin(), out.end(), [](const MessageRow &p_a, const MessageRow &p_b) { return p_a.y < p_b.y; });
 	return out;
@@ -328,6 +333,24 @@ public:
 	std::optional<uint32_t> label(std::string_view p_linkage, std::string_view p_label) const {
 		const ui::SwfSceneNode *n = scene_->find_node(prefix_ + std::string(p_linkage));
 		return n != nullptr && n->timeline != nullptr ? n->timeline->label_frame(p_label) : std::nullopt;
+	}
+
+	uint32_t frames(std::string_view p_linkage) const {
+		const ui::SwfSceneNode *n = scene_->find_node(prefix_ + std::string(p_linkage));
+		return n != nullptr ? n->total_frames() : 0;
+	}
+
+	std::optional<float> alpha_at(std::string_view p_linkage, std::string_view p_child, uint32_t p_frame) {
+		const std::string path = prefix_ + std::string(p_linkage);
+		if (!scene_->goto_frame(path, p_frame, false)) {
+			return std::nullopt;
+		}
+		const ui::SwfSceneNode *n = scene_->find_node(path);
+		const ui::SwfSceneNode *c = scene_->find_node(path + "." + std::string(p_child));
+		if (n == nullptr || c == nullptr || n->frame != p_frame) {
+			return std::nullopt;
+		}
+		return c->color.mul[3];
 	}
 
 	std::string fit(std::string_view p_field, float p_units) {
@@ -566,6 +589,8 @@ void NativeHudMomentRun::settle(Bf3LevelSession &r_session, Bf3NativeHud &r_hud,
 	const std::string id = p_moment.id;
 	const NativeHudMinimapPose pose = native_hud_moment_pose(p_moment);
 	expect_kills_.clear();
+	expect_kill_frames_.clear();
+	reference_kill_alphas_.clear();
 	expect_log_.clear();
 	expect_score_frame_ = -1;
 	expect_aggregator_frame_ = -1;
@@ -633,14 +658,91 @@ void NativeHudMomentRun::settle(Bf3LevelSession &r_session, Bf3NativeHud &r_hud,
 		expect_score_frame_ = pop->score_frame;
 		expect_aggregator_frame_ = pop->aggregator_frame;
 	}
-	uint32_t faded = 0;
-	for (const MomentKill *k : kills) {
-		faded += k->alpha < kFadedAlpha ? 1u : 0u;
-	}
 	const int32_t pre_score_step = pop != nullptr && pop->aggregator_frame >= 0 ? step_before(kPreScoreLeadSeconds) : -1;
 	const int32_t kill_step = step_before(kKillLeadSeconds);
 	const int32_t late_step = total - kLateRowFrames;
 	const int32_t popup_step = pop != nullptr ? total - (pop->score_frame - int32_t(*score_start)) : -1;
+	std::vector<double> clock(size_t(std::max(total, 0)));
+	double c = r_hud.message_clock();
+	for (double &t : clock) {
+		c += kSettleStep;
+		t = c;
+	}
+	const double kill_seconds = double(d.of(ui::HudMessageSource::Kill).normal_seconds);
+	const auto removal_step = [&](int32_t p_push) {
+		for (int32_t j = p_push + 1; j < total; ++j) {
+			if (clock[size_t(p_push)] + kill_seconds <= clock[size_t(j)]) {
+				return j;
+			}
+		}
+		return total;
+	};
+	const std::optional<uint32_t> in_label = fit.label("Kill", "startAnim");
+	const std::optional<uint32_t> out_label = fit.label("Kill", "outAnim");
+	const uint32_t kill_frames = fit.frames("Kill");
+	const auto nearest_frame = [&](uint32_t p_first, uint32_t p_last, float p_alpha) {
+		std::optional<uint32_t> best;
+		float best_d = std::numeric_limits<float>::infinity();
+		for (uint32_t f = p_first; f <= p_last; ++f) {
+			const std::optional<float> a = fit.alpha_at("Kill", "container", f);
+			if (a && std::fabs(*a - p_alpha) < best_d) {
+				best = f;
+				best_d = std::fabs(*a - p_alpha);
+			}
+		}
+		return best;
+	};
+	std::vector<int32_t> push_step(kills.size(), -1);
+	std::string fade_error;
+	std::optional<uint32_t> last_in;
+	for (size_t i = 0; i < kills.size(); ++i) {
+		expect_kill_frames_.push_back(-1);
+		reference_kill_alphas_.push_back(kills[i]->alpha);
+		if (kills[i]->fade == MomentFade::None) {
+			push_step[i] = i < queue ? kill_step : late_step;
+			continue;
+		}
+		if (!in_label || !out_label || kill_frames < *out_label + 2) {
+			fade_error = "no Kill startAnim / outAnim frames in the probe movie";
+			break;
+		}
+		if (kills[i]->fade == MomentFade::In) {
+			std::optional<uint32_t> f = nearest_frame(*in_label + 1, *out_label - 1, kills[i]->alpha);
+			if (f && last_in) {
+				f = std::min(*f, *last_in);
+			}
+			if (!f) {
+				fade_error = "no Kill startAnim alpha";
+				break;
+			}
+			last_in = f;
+			push_step[i] = total - int32_t(*f - *in_label);
+			expect_kill_frames_.back() = int32_t(*f);
+			continue;
+		}
+		const std::optional<uint32_t> f = nearest_frame(*out_label + 1, kill_frames - 2, kills[i]->alpha);
+		if (!f) {
+			fade_error = "no Kill outAnim alpha";
+			break;
+		}
+		const int32_t trigger = total - int32_t(*f - *out_label);
+		for (int32_t p = 0; p < total && push_step[i] < 0; ++p) {
+			push_step[i] = removal_step(p) == trigger ? p : -1;
+		}
+		if (push_step[i] < 0) {
+			fade_error = "no push step removes kill row " + std::to_string(i) + " at step " + std::to_string(trigger) + " of " + std::to_string(total);
+			break;
+		}
+		expect_kill_frames_.back() = int32_t(*f);
+	}
+	for (size_t i = 1; i < push_step.size() && fade_error.empty(); ++i) {
+		if (push_step[i] < push_step[i - 1]) {
+			fade_error = "kill row " + std::to_string(i) + " would be pushed before row " + std::to_string(i - 1);
+		}
+	}
+	if (!fade_error.empty()) {
+		row(id + ".kill_fade", false, fade_error);
+	}
 	r_hud.set_fixture(m, pose);
 	for (int32_t s = 0; s < total; ++s) {
 		bool changed = false;
@@ -649,19 +751,14 @@ void NativeHudMomentRun::settle(Bf3LevelSession &r_session, Bf3NativeHud &r_hud,
 			push_score(m.messages.score_message, ui::kHudScoreHeadshotSid, level->tdm_tuning->score_headshot);
 			changed = true;
 		}
-		if (s == kill_step) {
-			for (size_t i = 0; i < std::min(queue, kills.size()); ++i) {
+		for (size_t i = 0; i < kills.size(); ++i) {
+			if (push_step[i] == s) {
 				push_kill(m.messages.kill_message, uint8_t(1 + 2 * i), uint8_t(2 + 2 * i), kills[i]->weapon);
+				changed = true;
 			}
-			if (pop != nullptr) {
-				push_kill(m.messages.local_kill_message, kLocalSlot, kLogVictimSlot, pop->weapon);
-			}
-			changed = true;
 		}
-		if (s == late_step && kills.size() > queue) {
-			for (size_t i = queue; i < kills.size(); ++i) {
-				push_kill(m.messages.kill_message, uint8_t(1 + 2 * i), uint8_t(2 + 2 * i), kills[i]->weapon);
-			}
+		if (s == kill_step && pop != nullptr) {
+			push_kill(m.messages.local_kill_message, kLocalSlot, kLogVictimSlot, pop->weapon);
 			changed = true;
 		}
 		if (s == popup_step) {
@@ -674,7 +771,8 @@ void NativeHudMomentRun::settle(Bf3LevelSession &r_session, Bf3NativeHud &r_hud,
 		}
 		r_hud.step(kSettleStep);
 	}
-	names_detail_ = std::to_string(kills.size()) + " kill rows (" + std::to_string(faded) + " faded in the reference, drawn opaque), names within " +
+	const size_t fading = size_t(std::count_if(expect_kill_frames_.begin(), expect_kill_frames_.end(), [](int32_t p_f) { return p_f >= 0; }));
+	names_detail_ = std::to_string(kills.size()) + " kill rows (" + std::to_string(fading) + " timed into the row timeline's fade), names within " +
 			std::to_string(worst) + " px of the reference rects";
 }
 
@@ -699,7 +797,20 @@ void NativeHudMomentRun::check_messages(Bf3NativeHud &r_hud, const NativeHudMome
 		return true;
 	};
 	const std::vector<MessageRow> feed = message_rows(r_hud, kKillFeedPath, ".container.msg.txt");
-	row(id + ".kill_feed", same(feed, expect_kills_), "rows '" + texts(feed) + "', " + names_detail_);
+	bool fades_ok = true;
+	std::string fades;
+	char buf[96];
+	for (size_t i = 0; i < expect_kill_frames_.size(); ++i) {
+		if (expect_kill_frames_[i] < 0) {
+			continue;
+		}
+		const bool ok = i < feed.size() && int32_t(feed[i].frame) == expect_kill_frames_[i];
+		fades_ok = fades_ok && ok;
+		std::snprintf(buf, sizeof(buf), "; row %zu frame %d alpha %.3f (want frame %d, reference alpha %.2f)", i, i < feed.size() ? int32_t(feed[i].frame) : -1,
+				i < feed.size() ? double(feed[i].alpha) : -1.0, expect_kill_frames_[i], double(reference_kill_alphas_[i]));
+		fades += buf;
+	}
+	row(id + ".kill_feed", same(feed, expect_kills_) && fades_ok, "rows '" + texts(feed) + "', " + names_detail_ + fades);
 	const std::vector<MessageRow> log = message_rows(r_hud, kKillLogPath, ".container.msg.txt");
 	row(id + ".kill_log", same(log, expect_log_), "rows '" + texts(log) + "', want " + std::to_string(expect_log_.size()));
 	const std::vector<MessageRow> score = message_rows(r_hud, kScorePath, ".scoringMessage.txt");

@@ -168,7 +168,8 @@ These are structural, known, and listed so nobody mistakes them for design inten
   (the hit's damage) and Angle (clockwise from the view, checked against the sprite's rotation) are inferred, and the
   HudAlertMessage and LogMessage widgets have no source in TDM (no combat area, squads or log lines in the model).
   The moment fixture replays only kill and headshot scores, so its ScoreAggregator total reads 210 where the footage
-  reads 240, and its fading kill rows are drawn at full alpha.
+  reads 240, and its fading kill rows sit on the nearest timeline frame with the row still present (0.20 for 0.00 and 0.06,
+  0.50 for 0.28 and 0.43 fading in).
 * Nametags are `Bf3Nametags` (`src/bf3_godot/src/iff_overlay.cpp`), a hand-built Godot control; the next widget stage
   replaces it with the native Icon3D nametags (`Widget.Icon3D.*`, driven by `Data.UINametagComp`).
 * The container, EBX, payload, resource, level-soup and lag-compensation readers were written as ports of the
