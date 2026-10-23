@@ -8,6 +8,7 @@
 #include "server_commands.h"
 #include "server_match.h"
 #include "server_outbox.h"
+#include "server_slots.h"
 
 #include "bf3/net/loopback_ping.h"
 #include "bf3/net/protocol.h"
@@ -32,10 +33,6 @@ using bf3::core::splitmix64_next;
 float distance2(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 	const float dx = p_a[0] - p_b[0], dy = p_a[1] - p_b[1], dz = p_a[2] - p_b[2];
 	return dx * dx + dy * dy + dz * dz;
-}
-
-bool alive(const sim::SoldierState &p_state) {
-	return (p_state.flags & sim::soldier_flags::kAlive) != 0 && p_state.mode != sim::MoveMode::Dead;
 }
 
 class Walker final : public CommandSource {
@@ -71,33 +68,6 @@ constexpr size_t kMaxQueuedDebug = 64;
 }
 
 struct GameServer::Impl {
-	struct Slot {
-		bool used = false;
-		bool remote = false;
-		bool dummy = false;
-		bool bot = false;
-		uint32_t peer = 0;
-		int team = 1;
-		bool hello = false;
-		bool spawned = false;
-		bool want_spawn = false;
-		sim::Tick respawn_at = 0;
-		uint32_t spawn_index = 0;
-		sim::SoldierState state;
-		sim::Command last;
-		uint16_t snapshot_seq = 0;
-		uint16_t own_events = 0;
-		std::unique_ptr<CommandSource> source;
-		sim::Command source_command;
-
-		bool tracing = false;
-		uint32_t trace_id = 0;
-		uint32_t trace_ticks = 0;
-		std::vector<sim::SoldierState> trace;
-
-		size_t sweep_entry = 0;
-	};
-
 	struct PendingDebug {
 		uint32_t slot = 0;
 		net::DebugRequest request;
@@ -120,7 +90,7 @@ struct GameServer::Impl {
 	std::unique_ptr<sim::CollisionWorld> world;
 	sim::SoldierMotor motor;
 	uint64_t motor_hash = 0;
-	std::vector<Slot> slots;
+	SlotTable slots;
 	sim::Tick tick = 0;
 	uint64_t rng = 1;
 	Outbox outbox;
@@ -143,34 +113,17 @@ struct GameServer::Impl {
 	uint64_t motor_steps = 0;
 	uint32_t tick_spawns = 0;
 
-	int slot_of_peer(uint32_t p_peer) const {
-		for (size_t i = 0; i < slots.size(); ++i) {
-			if (slots[i].used && slots[i].remote && slots[i].peer == p_peer) {
-				return int(i);
-			}
-		}
-		return -1;
-	}
-
-	int free_slot() const {
-		for (size_t i = 0; i < slots.size(); ++i) {
-			if (!slots[i].used) {
-				return int(i);
-			}
-		}
-		return -1;
-	}
-
-	void reset_slot(Slot &r_slot) {
-		r_slot = Slot();
-		commands.reset(size_t(&r_slot - slots.data()));
+	void reset_slot(ServerSlot &r_slot) {
+		const size_t i = slots.index_of(r_slot);
+		slots.clear(i);
+		commands.reset(i);
 	}
 
 	void report(uint32_t p_slot, uint32_t p_id, bool p_ok, std::string p_text) {
 		if (p_slot >= slots.size()) {
 			return;
 		}
-		const Slot &s = slots[p_slot];
+		const ServerSlot &s = slots[p_slot];
 		if (!s.used || !s.remote || outbox.replies_full()) {
 			return;
 		}
@@ -181,19 +134,8 @@ struct GameServer::Impl {
 		outbox.send(s.peer, net::kChannelReliable, net::encode_debug_report(r));
 	}
 
-	std::vector<sim::Vec3> live_positions(size_t p_except) const {
-		std::vector<sim::Vec3> out;
-		for (size_t i = 0; i < slots.size(); ++i) {
-			const Slot &s = slots[i];
-			if (i != p_except && s.used && !s.dummy && s.spawned && alive(s.state)) {
-				out.push_back(s.state.position);
-			}
-		}
-		return out;
-	}
-
 	bool spawn(size_t p_slot, size_t p_point, sim::Tick p_tick) {
-		Slot &s = slots[p_slot];
+		ServerSlot &s = slots[p_slot];
 
 		const std::vector<sim::SpawnPoint> &points =
 				s.bot && config.bots != nullptr && config.bots->spawn_in_main && config.bots->level != nullptr ? config.bots->level->spawns.points
@@ -207,7 +149,7 @@ struct GameServer::Impl {
 			index = match.choose_spawn(p_slot, points, server_view(), p_tick);
 		}
 		if (index == SIZE_MAX) {
-			index = sim::choose_spawn(points, s.team, live_positions(p_slot), config.level->spawn_protection_radius,
+			index = sim::choose_spawn(points, s.team, slots.live_positions(p_slot), config.level->spawn_protection_radius,
 					splitmix64_next(rng));
 			if (index == SIZE_MAX) {
 				index = size_t(splitmix64_next(rng) % points.size());
@@ -248,7 +190,7 @@ struct GameServer::Impl {
 	}
 
 	void handle_hello(uint32_t p_peer, const net::Hello &p_hello) {
-		if (slot_of_peer(p_peer) >= 0) {
+		if (slots.slot_of_peer(p_peer) >= 0) {
 			return;
 		}
 		if (p_hello.protocol != net::kProtocolVersion) {
@@ -257,14 +199,14 @@ struct GameServer::Impl {
 			outbox.send(p_peer, net::kChannelReliable, net::encode_kick(k));
 			return;
 		}
-		const int at = free_slot();
+		const int at = slots.free_slot();
 		if (at < 0) {
 			net::Kick k;
 			k.reason = "server full";
 			outbox.send(p_peer, net::kChannelReliable, net::encode_kick(k));
 			return;
 		}
-		Slot &s = slots[size_t(at)];
+		ServerSlot &s = slots[size_t(at)];
 		reset_slot(s);
 		s.used = true;
 		s.remote = true;
@@ -297,7 +239,7 @@ struct GameServer::Impl {
 			report(uint32_t(p_slot), p_request.id, false, "dev commands are disabled on this server");
 			return;
 		}
-		Slot &s = slots[p_slot];
+		ServerSlot &s = slots[p_slot];
 		switch (p_request.kind) {
 			case net::DebugKind::Trace:
 				if (p_request.ticks == 0 || p_request.ticks > net::kMaxTraceTicks) {
@@ -337,7 +279,7 @@ struct GameServer::Impl {
 		while (!debug_queue.empty()) {
 			const PendingDebug d = debug_queue.front();
 			debug_queue.pop_front();
-			Slot &s = slots[d.slot];
+			ServerSlot &s = slots[d.slot];
 			if (!s.used) {
 				continue;
 			}
@@ -395,7 +337,7 @@ struct GameServer::Impl {
 		const std::vector<sim::SpawnPoint> &points = config.level->spawns;
 		if (sweep.batch_active && p_tick - sweep.batch_start >= sweep.ticks) {
 			for (size_t i = 0; i < slots.size(); ++i) {
-				Slot &s = slots[i];
+				ServerSlot &s = slots[i];
 				if (!s.used || !s.dummy) {
 					continue;
 				}
@@ -422,7 +364,7 @@ struct GameServer::Impl {
 			sweep.results.clear();
 			sweep.batch_points.clear();
 			while (sweep.next_point < points.size()) {
-				const int at = free_slot();
+				const int at = slots.free_slot();
 				if (at < 0) {
 					break;
 				}
@@ -440,7 +382,7 @@ struct GameServer::Impl {
 					++sweep.next_point;
 					continue;
 				}
-				Slot &s = slots[size_t(at)];
+				ServerSlot &s = slots[size_t(at)];
 				reset_slot(s);
 				s.used = true;
 				s.dummy = true;
@@ -468,7 +410,7 @@ struct GameServer::Impl {
 				ok += r.ok ? 1 : 0;
 			}
 			if (sweep.requester < slots.size() && slots[sweep.requester].used && slots[sweep.requester].remote) {
-				const Slot &s = slots[sweep.requester];
+				const ServerSlot &s = slots[sweep.requester];
 				net::DebugReport rep;
 				rep.id = sweep.id;
 				rep.ok = ok == sweep.rows.size();
@@ -486,7 +428,7 @@ struct GameServer::Impl {
 		sv_record_tick(p_tick);
 		std::vector<std::pair<float, size_t>> order;
 		for (size_t i = 0; i < slots.size(); ++i) {
-			Slot &s = slots[i];
+			ServerSlot &s = slots[i];
 			if (!s.used || !s.remote || !s.hello) {
 				continue;
 			}
@@ -502,8 +444,8 @@ struct GameServer::Impl {
 			order.clear();
 			const sim::Vec3 at = s.spawned ? s.state.position : sim::Vec3{};
 			for (size_t j = 0; j < slots.size(); ++j) {
-				const Slot &o = slots[j];
-				if (j != i && o.used && o.spawned && alive(o.state)) {
+				const ServerSlot &o = slots[j];
+				if (j != i && o.used && o.spawned && soldier_alive(o.state)) {
 					order.push_back({ distance2(at, o.state.position), j });
 				}
 			}
@@ -542,7 +484,7 @@ struct GameServer::Impl {
 		const double paths_before = bots != nullptr ? bots->paths_ms_total() : 0.0;
 
 		for (size_t i = 0; i < slots.size(); ++i) {
-			Slot &s = slots[i];
+			ServerSlot &s = slots[i];
 			if (!s.used || !s.remote) {
 				continue;
 			}
@@ -555,7 +497,7 @@ struct GameServer::Impl {
 		times.commands_ms = ms_since(tick_start);
 
 		const auto sources_start = std::chrono::steady_clock::now();
-		for (Slot &s : slots) {
+		for (ServerSlot &s : slots) {
 			if (!s.used || s.remote || !s.spawned) {
 				continue;
 			}
@@ -568,20 +510,20 @@ struct GameServer::Impl {
 			c.tick = n;
 			c.flags = uint8_t(c.flags | sim::command_flags::kLocalSource);
 			s.last = c;
-			commands.count_local(size_t(&s - slots.data()));
+			commands.count_local(slots.index_of(s));
 		}
 		times.sources_ms = ms_since(sources_start);
 		times.paths_ms = bots != nullptr ? bots->paths_ms_total() - paths_before : 0.0;
 
 		const auto step_start = std::chrono::steady_clock::now();
-		for (Slot &s : slots) {
+		for (ServerSlot &s : slots) {
 			if (!s.used || !s.spawned) {
 				continue;
 			}
 			if (s.last.tick != s.state.tick + 1u) {
 				++step_precondition_failures;
 			}
-			const bool was_alive = alive(s.state);
+			const bool was_alive = soldier_alive(s.state);
 			const sim::SoldierState sv_before = s.state;
 			if (!s.dummy) {
 				s.last = match.restrict(s.last);
@@ -589,8 +531,8 @@ struct GameServer::Impl {
 			motor.step(s.state, s.last);
 			++times.motor_steps;
 			sv_step_soldier(s, sv_before, was_alive);
-			if (was_alive && !alive(s.state) && !s.dummy) {
-				const std::optional<uint32_t> respawn = match.policy().respawn_tick(uint8_t(&s - slots.data()), n);
+			if (was_alive && !soldier_alive(s.state) && !s.dummy) {
+				const std::optional<uint32_t> respawn = match.policy().respawn_tick(uint8_t(slots.index_of(s)), n);
 				s.want_spawn = respawn.has_value();
 				s.respawn_at = respawn.value_or(0);
 			}
@@ -602,7 +544,7 @@ struct GameServer::Impl {
 
 		sv_rules(n);
 		for (size_t i = 0; i < slots.size(); ++i) {
-			Slot &s = slots[i];
+			ServerSlot &s = slots[i];
 			if (s.used && !s.dummy && s.want_spawn && (!s.spawned || n >= s.respawn_at)) {
 				spawn(i, SIZE_MAX, n);
 			}
@@ -614,7 +556,7 @@ struct GameServer::Impl {
 		tick = n;
 
 		for (size_t i = 0; i < slots.size(); ++i) {
-			Slot &s = slots[i];
+			ServerSlot &s = slots[i];
 			if (!s.used || !s.spawned) {
 				continue;
 			}
@@ -647,11 +589,11 @@ struct GameServer::Impl {
 	}
 
 	int add_local(std::unique_ptr<CommandSource> p_source, int p_team, bool p_bot) {
-		const int at = free_slot();
+		const int at = slots.free_slot();
 		if (at < 0 || p_source == nullptr) {
 			return -1;
 		}
-		Slot &s = slots[size_t(at)];
+		ServerSlot &s = slots[size_t(at)];
 		reset_slot(s);
 		s.used = true;
 		s.team = p_team;
@@ -676,9 +618,9 @@ struct GameServer::Impl {
 	std::unique_ptr<Sv> sv;
 	core::Status sv_init();
 	const ServerView &server_view() const;
-	void sv_ack(Slot &r_slot, const net::CommandPacket &p_packet);
-	void sv_buffered(Slot &r_slot, const sim::Command &p_command);
-	void sv_step_soldier(Slot &r_slot, const sim::SoldierState &p_before, bool p_was_alive);
+	void sv_ack(ServerSlot &r_slot, const net::CommandPacket &p_packet);
+	void sv_buffered(ServerSlot &r_slot, const sim::Command &p_command);
+	void sv_step_soldier(ServerSlot &r_slot, const sim::SoldierState &p_before, bool p_was_alive);
 	void sv_rules(sim::Tick p_tick);
 	core::Status sv_place(size_t p_slot, const sim::Vec3 &p_position, uint16_t p_yaw, sim::Pose p_pose, sim::Tick p_tick);
 	void sv_on_spawn(size_t p_slot, sim::Tick p_tick);
@@ -705,7 +647,7 @@ struct GameServer::Impl {
 		if (b.state.empty() && b.players.empty()) {
 			return;
 		}
-		for (const Slot &s : slots) {
+		for (const ServerSlot &s : slots) {
 			if (!s.used || !s.remote || !s.hello) {
 				continue;
 			}
@@ -750,7 +692,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	m.rng = p_config.seed;
 	m.slots.resize(p_config.max_slots);
 	m.commands.configure(p_config.max_slots, p_config.jitter_buffer_ticks);
-	for (Impl::Slot &s : m.slots) {
+	for (ServerSlot &s : m.slots) {
 		m.reset_slot(s);
 	}
 	BF3_TRY(m.sv_init());
@@ -785,7 +727,7 @@ void GameServer::on_connect(uint32_t) {
 
 void GameServer::on_disconnect(uint32_t p_peer) {
 	Impl &m = *impl_;
-	const int at = m.slot_of_peer(p_peer);
+	const int at = m.slots.slot_of_peer(p_peer);
 	if (at >= 0) {
 		if (m.sweep.active && m.sweep.requester == uint32_t(at)) {
 			m.sweep.requester = UINT32_MAX;
@@ -803,7 +745,7 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 		++m.bad_datagrams;
 		return;
 	}
-	const int at = m.slot_of_peer(p_peer);
+	const int at = m.slots.slot_of_peer(p_peer);
 	switch (*type) {
 		case net::MessageType::Hello: {
 			core::Result<net::Hello> h = net::decode_hello(p_datagram);
@@ -829,7 +771,7 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 				on_disconnect(p_peer);
 				return;
 			}
-			Impl::Slot &s = m.slots[size_t(at)];
+			ServerSlot &s = m.slots[size_t(at)];
 			if (!s.spawned && !m.match.waits_for_deploy(size_t(at))) {
 				s.want_spawn = true;
 			}
@@ -914,14 +856,14 @@ GameServerStats GameServer::stats() const {
 	}
 	g.slots.resize(m.slots.size());
 	for (size_t i = 0; i < m.slots.size(); ++i) {
-		const Impl::Slot &s = m.slots[i];
+		const ServerSlot &s = m.slots[i];
 		SlotStats &o = g.slots[i];
 		m.commands.stats(i, m.tick, o);
 		o.used = s.used;
 		o.remote = s.remote;
 		o.peer = s.peer;
 		o.life = s.state.life;
-		o.alive = s.spawned && alive(s.state);
+		o.alive = s.spawned && soldier_alive(s.state);
 		o.state = s.state;
 		g.clients += (s.used && s.remote) ? 1u : 0u;
 		g.soldiers += o.alive ? 1u : 0u;
@@ -959,7 +901,7 @@ struct GameServer::Impl::Sv {
 		void death(const net::DeathEvent &p_event) override {
 
 			if (p_event.victim < m->slots.size()) {
-				Slot &s = m->slots[p_event.victim];
+				ServerSlot &s = m->slots[p_event.victim];
 
 				if (s.used && !s.dummy && !s.want_spawn) {
 					const std::optional<uint32_t> at = m->match.policy().respawn_tick(p_event.victim, m->tick + 1u);
@@ -1012,7 +954,7 @@ struct GameServer::Impl::Sv {
 			return p_slot < m->slots.size() && m->slots[p_slot].used ? uint8_t(std::clamp(m->slots[p_slot].team, 0, 255)) : uint8_t(0);
 		}
 		bool alive(uint8_t p_slot) const override {
-			return p_slot < m->slots.size() && m->slots[p_slot].used && m->slots[p_slot].spawned && bf3::host::alive(m->slots[p_slot].state);
+			return p_slot < m->slots.size() && m->slots[p_slot].used && m->slots[p_slot].spawned && soldier_alive(m->slots[p_slot].state);
 		}
 		const sim::weapons::SoldierWeaponsState &weapons(uint8_t p_slot) const override {
 			static const sim::weapons::SoldierWeaponsState s_empty;
@@ -1125,27 +1067,27 @@ core::Status GameServer::Impl::sv_init() {
 	return core::Status::success();
 }
 
-void GameServer::Impl::sv_ack(Slot &r_slot, const net::CommandPacket &p_packet) {
+void GameServer::Impl::sv_ack(ServerSlot &r_slot, const net::CommandPacket &p_packet) {
 	if (sv == nullptr || sv->gunplay == nullptr) {
 		return;
 	}
-	const size_t i = size_t(&r_slot - slots.data());
+	const size_t i = slots.index_of(r_slot);
 	sv->gunplay->history().ack(uint8_t(i), p_packet.newest_snapshot, p_packet.snapshot_ack_bits, p_packet.others_ack_bits);
 }
 
-void GameServer::Impl::sv_buffered(Slot &r_slot, const sim::Command &p_command) {
+void GameServer::Impl::sv_buffered(ServerSlot &r_slot, const sim::Command &p_command) {
 	if (sv == nullptr || sv->gunplay == nullptr) {
 		return;
 	}
-	const size_t i = size_t(&r_slot - slots.data());
+	const size_t i = slots.index_of(r_slot);
 	sv->gunplay->note_command(uint8_t(i), p_command, sv->gunplay->history().ack_state(uint8_t(i)));
 }
 
-void GameServer::Impl::sv_step_soldier(Slot &r_slot, const sim::SoldierState &p_before, bool p_was_alive) {
+void GameServer::Impl::sv_step_soldier(ServerSlot &r_slot, const sim::SoldierState &p_before, bool p_was_alive) {
 	if (sv == nullptr || sv->gunplay == nullptr || !p_was_alive || r_slot.dummy) {
 		return;
 	}
-	const size_t i = size_t(&r_slot - slots.data());
+	const size_t i = slots.index_of(r_slot);
 	sv->gunplay->step_soldier(uint8_t(i), r_slot.last, p_before, r_slot.state);
 }
 
@@ -1190,14 +1132,14 @@ core::Status GameServer::Impl::sv_place(size_t p_slot, const sim::Vec3 &p_positi
 	if (p_slot >= slots.size() || !slots[p_slot].used || slots[p_slot].dummy) {
 		return core::make_error("place: no soldier slot " + std::to_string(p_slot));
 	}
-	Slot &s = slots[p_slot];
+	ServerSlot &s = slots[p_slot];
 	if (s.remote) {
 		return core::make_error("place: slot " + std::to_string(p_slot) + " is a client's");
 	}
 	if (!std::isfinite(p_position[0]) || !std::isfinite(p_position[1]) || !std::isfinite(p_position[2]) || size_t(p_pose) >= sim::kPoseCount) {
 		return core::make_error("place: bad position or pose");
 	}
-	const bool was_alive = s.spawned && alive(s.state);
+	const bool was_alive = s.spawned && soldier_alive(s.state);
 
 	s.state = motor.spawn_state(p_position, p_yaw, was_alive ? s.state.life : s.state.life + 1u, p_tick, false);
 	s.state.pose = p_pose;
@@ -1223,7 +1165,7 @@ void GameServer::Impl::sv_on_spawn(size_t p_slot, sim::Tick p_tick) {
 	if (sv == nullptr || p_slot >= slots.size()) {
 		return;
 	}
-	Slot &s = slots[p_slot];
+	ServerSlot &s = slots[p_slot];
 	Sv::PerSlot &ps = sv->per_slot[p_slot];
 	if (ps.next_team != 0) {
 		s.team = ps.next_team;
@@ -1279,7 +1221,7 @@ void GameServer::Impl::sv_apply_debug(const PendingDebug &p_debug, sim::Tick p_t
 		report(p_debug.slot, q.id, false, "target info: slot " + std::to_string(q.slot) + " is not a live armed soldier");
 		return;
 	}
-	const Slot &requester = slots[p_debug.slot];
+	const ServerSlot &requester = slots[p_debug.slot];
 	if (!requester.used || !requester.remote || outbox.replies_full()) {
 		return;
 	}
@@ -1300,8 +1242,8 @@ void GameServer::Impl::sv_record_tick(sim::Tick p_tick) {
 	for (size_t i = 0; i < slots.size(); ++i) {
 		Sv::PerSlot &ps = v.per_slot[i];
 		ps.record_valid = false;
-		const Slot &s = slots[i];
-		if (s.used && s.spawned && alive(s.state)) {
+		const ServerSlot &s = slots[i];
+		if (s.used && s.spawned && soldier_alive(s.state)) {
 			ps.record = v.gunplay->other_record(uint8_t(i), s.state);
 			ps.record_valid = true;
 			v.records.push_back(ps.record);
@@ -1352,7 +1294,7 @@ void GameServer::Impl::sv_after_snapshot(size_t p_slot, const net::Snapshot &p_s
 	}
 	Sv &v = *sv;
 	Gunplay &g = *v.gunplay;
-	const Slot &s = slots[p_slot];
+	const ServerSlot &s = slots[p_slot];
 	uint64_t others_mask = 0;
 	if (!v.overflow.empty()) {
 		net::SnapshotOthers so;
@@ -1581,8 +1523,8 @@ core::Status GameServer::Impl::sv_revive(size_t p_slot, const sim::Vec3 &p_posit
 	if (p_slot >= slots.size() || !slots[p_slot].used || slots[p_slot].dummy) {
 		return core::make_error("revive: no soldier slot " + std::to_string(p_slot));
 	}
-	Slot &s = slots[p_slot];
-	if (s.spawned && alive(s.state)) {
+	ServerSlot &s = slots[p_slot];
+	if (s.spawned && soldier_alive(s.state)) {
 		return core::make_error("revive: slot " + std::to_string(p_slot) + " is alive");
 	}
 	if (!std::isfinite(p_position[0]) || !std::isfinite(p_position[1]) || !std::isfinite(p_position[2]) || !std::isfinite(p_health) || p_health <= 0.0f) {
@@ -1614,7 +1556,7 @@ void GameServer::Impl::sv_unspawn(size_t p_slot) {
 	if (p_slot >= slots.size() || !slots[p_slot].used || slots[p_slot].dummy) {
 		return;
 	}
-	Slot &s = slots[p_slot];
+	ServerSlot &s = slots[p_slot];
 	s.spawned = false;
 	s.want_spawn = false;
 	s.respawn_at = 0;
@@ -1628,10 +1570,10 @@ void GameServer::Impl::sv_orders(sim::Tick p_tick, std::span<const RulesOrder> p
 		if (o.slot >= slots.size() || !slots[o.slot].used || slots[o.slot].dummy) {
 			continue;
 		}
-		Slot &s = slots[o.slot];
+		ServerSlot &s = slots[o.slot];
 		switch (o.kind) {
 			case RulesOrder::Kind::Spawn:
-				if (!s.spawned || !alive(s.state)) {
+				if (!s.spawned || !soldier_alive(s.state)) {
 					spawn(o.slot, SIZE_MAX, p_tick);
 				}
 				break;
