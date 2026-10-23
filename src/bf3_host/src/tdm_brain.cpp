@@ -815,6 +815,9 @@ struct TdmBrain::Impl {
 			sh.stats->last_perception_ns.store(sh.perception_ns, std::memory_order_relaxed);
 			sh.stats->last_brains_ns.store(sh.brains_ns, std::memory_order_relaxed);
 		}
+		if (sh.observer != nullptr) {
+			sh.observer->commanded(p_tick, slot, activity, c);
+		}
 		return c;
 	}
 

@@ -83,6 +83,7 @@ struct TdmRunConfig {
 	uint32_t max_ticks = 21600;
 	uint32_t after_round_ticks = 600;
 	bool hashes = true;
+	bool record_decisions = false;
 
 	bool keep_trace_records = false;
 	uint32_t stuck_window_ticks = 1200;
@@ -113,6 +114,9 @@ struct TdmRunResult {
 	std::vector<uint64_t> world_hashes;
 	uint64_t trace_hash = 0;
 	uint64_t match_bytes_hash = 0;
+	std::vector<uint64_t> decision_hashes;
+	uint64_t decision_hash = 0;
+	uint64_t decisions = 0;
 	host::RulesStats rules;
 	std::vector<double> tick_ms;
 	std::vector<double> perception_ms, brains_ms;
@@ -161,6 +165,59 @@ struct Fnv {
 	template <typename T>
 	void add(const T &p_value) {
 		bytes(&p_value, sizeof(T));
+	}
+};
+
+struct DecisionRecord final : host::TdmBotObserver {
+	std::shared_ptr<host::TdmBotObserver> inner;
+	std::vector<uint64_t> per_tick;
+	sim::Tick last_tick = 0;
+	Fnv all;
+	uint64_t count = 0;
+
+	void detected(const host::ServerView &p_view, sim::Tick p_tick, uint8_t p_bot, uint8_t p_target, const sim::Vec3 &p_eye) override {
+		if (inner != nullptr) {
+			inner->detected(p_view, p_tick, p_bot, p_target, p_eye);
+		}
+	}
+	void fired(const host::ServerView &p_view, sim::Tick p_tick, uint8_t p_bot, int p_target, sim::Tick p_last_visible, bool p_blind) override {
+		if (inner != nullptr) {
+			inner->fired(p_view, p_tick, p_bot, p_target, p_last_visible, p_blind);
+		}
+	}
+	void activity(sim::Tick p_tick, uint8_t p_bot, host::TdmBotActivity p_activity) override {
+		if (inner != nullptr) {
+			inner->activity(p_tick, p_bot, p_activity);
+		}
+	}
+	void commanded(sim::Tick p_tick, uint8_t p_bot, host::TdmBotActivity p_activity, const sim::Command &p_command) override {
+		if (inner != nullptr) {
+			inner->commanded(p_tick, p_bot, p_activity, p_command);
+		}
+		if (per_tick.empty() || p_tick != last_tick) {
+			per_tick.push_back(Fnv{}.h);
+			last_tick = p_tick;
+		}
+		Fnv tick{ per_tick.back() };
+		for (Fnv *f : { &tick, &all }) {
+			f->add(p_tick);
+			f->add(p_bot);
+			f->add(p_activity);
+			f->add(p_command.tick);
+			f->add(p_command.sequence);
+			f->add(p_command.buttons);
+			f->add(p_command.move_forward);
+			f->add(p_command.move_right);
+			f->add(p_command.yaw);
+			f->add(p_command.pitch);
+			f->add(p_command.pose);
+			f->add(p_command.flags);
+			f->add(p_command.view_back_q8);
+			f->add(p_command.view_quality);
+			f->add(p_command.view_seq8);
+		}
+		per_tick.back() = tick.h;
+		++count;
 	}
 };
 
@@ -439,12 +496,18 @@ inline core::Result<TdmRunResult> run_tdm(const TdmLevel &p_level, const TdmRunC
 		cfg.bots = fill;
 	}
 	std::shared_ptr<host::TdmBotStats> bot_stats;
+	std::shared_ptr<detail::DecisionRecord> decisions;
 	if (p_config.bots > 0) {
 		auto b = std::make_shared<host::TdmBotConfig>();
 		b->count = p_config.bots;
 		b->stats = std::make_shared<host::TdmBotStats>();
 		if (p_config.configure_bots) {
 			p_config.configure_bots(*b);
+		}
+		if (p_config.record_decisions) {
+			decisions = std::make_shared<detail::DecisionRecord>();
+			decisions->inner = b->observer;
+			b->observer = decisions;
 		}
 		bot_stats = b->stats;
 		cfg.tdm_bots = b;
@@ -607,6 +670,11 @@ inline core::Result<TdmRunResult> run_tdm(const TdmLevel &p_level, const TdmRunC
 	r.runtime_faulted = rules->faulted();
 	r.trace_hash = rules->trace().hash;
 	r.match_bytes_hash = match_bytes.h;
+	if (decisions != nullptr) {
+		r.decision_hashes = decisions->per_tick;
+		r.decision_hash = decisions->all.h;
+		r.decisions = decisions->count;
+	}
 	return r;
 }
 

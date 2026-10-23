@@ -37,6 +37,9 @@ public:
 	virtual void activity(sim::Tick p_tick, uint8_t p_bot, TdmBotActivity p_activity) {
 		(void)p_tick, (void)p_bot, (void)p_activity;
 	}
+	virtual void commanded(sim::Tick p_tick, uint8_t p_bot, TdmBotActivity p_activity, const sim::Command &p_command) {
+		(void)p_tick, (void)p_bot, (void)p_activity, (void)p_command;
+	}
 };
 
 struct TdmBotStats {

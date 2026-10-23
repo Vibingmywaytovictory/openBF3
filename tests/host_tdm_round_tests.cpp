@@ -38,6 +38,9 @@ constexpr bool kRuNtLanded = true;
 
 constexpr float kDeg = sim::kPi / 180.0f;
 
+constexpr uint64_t kReplayDecisionHash = 0x93ffe576c7006a93ull;
+constexpr uint64_t kReplayWorldHash = 0x588730c21e9cbc7eull;
+
 void pending_skip(const char *p_row) {
 	std::printf("%s: PENDING (ru, nt): needs run_tdm and the v3 codecs on the branch\n", p_row);
 	bf3::test::skip_install_case("PENDING (ru, nt)");
@@ -829,7 +832,7 @@ TEST_SUITE("host-tdm-bots") {
 }
 
 TEST_SUITE("host-tdm-replay") {
-	TEST_CASE("E6: two runs of one seed replay tick for tick; another seed differs") {
+	TEST_CASE("E6: two runs of one seed replay tick for tick, bot commands included, and match the recorded hashes; another seed differs") {
 		if constexpr (!kRuNtLanded) {
 			pending_skip("host.tdm.replay");
 		} else {
@@ -847,6 +850,7 @@ TEST_SUITE("host-tdm-replay") {
 				tt::TdmRunConfig c = base_config(seeds[i], 32, true, 20);
 				c.after_round_ticks = 600;
 				c.hashes = true;
+				c.record_decisions = true;
 				core::Result<tt::TdmRunResult> r = tt::run_tdm(*level, c);
 				if (!r) {
 					run.error = r.error().message;
@@ -880,6 +884,39 @@ TEST_SUITE("host-tdm-replay") {
 			CHECK(a.match_bytes_hash == b.match_bytes_hash);
 			CHECK(a.kills == b.kills);
 			CHECK(differ_other > 0u);
+
+			const size_t decision_ticks = std::min(a.decision_hashes.size(), b.decision_hashes.size());
+			size_t decisions_differ = 0;
+			for (size_t t = 0; t < decision_ticks; ++t) {
+				decisions_differ += a.decision_hashes[t] != b.decision_hashes[t] ? 1u : 0u;
+			}
+			size_t decisions_differ_other = 0;
+			for (size_t t = 0; t < std::min(a.decision_hashes.size(), c.decision_hashes.size()); ++t) {
+				decisions_differ_other += a.decision_hashes[t] != c.decision_hashes[t] ? 1u : 0u;
+			}
+			const auto digest = [](const std::vector<uint64_t> &p_hashes) {
+				uint64_t h = 0xcbf29ce484222325ull;
+				for (const uint64_t x : p_hashes) {
+					for (size_t i = 0; i < sizeof(x); ++i) {
+						h ^= (x >> (8 * i)) & 0xFFu;
+						h *= 0x100000001b3ull;
+					}
+				}
+				return h;
+			};
+			std::printf("host.tdm.replay: seed %llu, %u ticks, round over at %u: %llu bot commands over %zu ticks, %zu / %zu ticks differ (same seed), %zu "
+						"differ (other seed); decisions %016llx / %016llx / %016llx; world %016llx\n",
+					(unsigned long long)seeds[0], a.ticks, a.round_over_tick, (unsigned long long)a.decisions, a.decision_hashes.size(), decisions_differ,
+					decision_ticks, decisions_differ_other, (unsigned long long)a.decision_hash, (unsigned long long)b.decision_hash,
+					(unsigned long long)c.decision_hash, (unsigned long long)digest(a.world_hashes));
+			CHECK(decision_ticks > 0u);
+			CHECK(a.decision_hashes.size() == b.decision_hashes.size());
+			CHECK(decisions_differ == 0u);
+			CHECK(a.decision_hash == b.decision_hash);
+			CHECK(a.decisions == b.decisions);
+			CHECK(decisions_differ_other > 0u);
+			CHECK(a.decision_hash == kReplayDecisionHash);
+			CHECK(digest(a.world_hashes) == kReplayWorldHash);
 		}
 	}
 	TEST_CASE("host-tdm-replay: install unchanged") {
