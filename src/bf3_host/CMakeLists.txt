@@ -23,6 +23,8 @@ target_sources(bf3_host PRIVATE
     src/game_server.cpp
     src/server_commands.cpp
     src/server_commands.h
+    src/server_match.cpp
+    src/server_match.h
     src/server_outbox.h
     src/client_session.cpp
     src/rest_check.cpp
