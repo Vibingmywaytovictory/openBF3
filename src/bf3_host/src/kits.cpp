@@ -124,6 +124,7 @@ core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p
 			l.team = uint8_t(team_id);
 			l.defs.fill(sim::weapons::kNoWeapon);
 			l.active = kKitSlots[0];
+			l.hud_icon = kit->hud_icon_value;
 			for (size_t s = 0; s < kit->weapon_slots.size() && s < core::gameplay::kWeaponSlotCount; ++s) {
 				const core::gameplay::KitUnlock *u = kit->default_unlock(WeaponSlot(s));
 				const bool resolved = std::find(kKitSlots.begin(), kKitSlots.end(), uint8_t(s)) != kKitSlots.end();

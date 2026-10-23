@@ -49,6 +49,7 @@ struct KitDef {
 	std::string asset;
 	std::string label_sid;
 	std::string hud_icon;
+	int32_t hud_icon_value = 0;
 	std::vector<KitSlot> weapon_slots;
 	std::vector<KitUnlock> specializations;
 	size_t visual_unlocks = 0;

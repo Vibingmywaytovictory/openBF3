@@ -467,6 +467,7 @@ TEST_CASE("the kit bar: the own team's loadouts in slots 0, 1, 2, 6, 7") {
 			l.defs[1] = 2;
 			l.defs[6] = 3;
 			l.defs[7] = 4;
+			l.hud_icon = int32_t(70 + 2 * k + team);
 		}
 		kits.loadouts[team][0].defs[host::kKitGadgetSlot] = 5;
 	}
@@ -486,6 +487,15 @@ TEST_CASE("the kit bar: the own team's loadouts in slots 0, 1, 2, 6, 7") {
 	CHECK(m.spawn_screen.kit_items[0] == std::array<uint32_t, 5>{ 1001, 1002, 1005, 1003, 1004 });
 	CHECK(m.spawn_screen.kit_items[1] == std::array<uint32_t, 5>{ 1001, 1002, 0, 1003, 1004 });
 	CHECK(m.spawn_screen.kit_items[3] == std::array<uint32_t, 5>{ 1001, 0, 0, 1003, 1004 });
+	std::vector<net::PlayerRow> rows{ player(1, 2, "Own"), player(4, 1, "Other"), player(6, 0, "Unassigned") };
+	rows[0].kit = 3;
+	rows[1].kit = 1;
+	rows[2].kit = 2;
+	in.players = rows;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(m.players[1].kit_icon == 77);
+	CHECK(m.players[4].kit_icon == 72);
+	CHECK(m.players[6].kit_icon == 0);
 	in.own_team = 0;
 	host::fill_hud_tdm(in, {}, st, state, m);
 	CHECK(m.spawn_screen.kit_items[0][0] == 1000);

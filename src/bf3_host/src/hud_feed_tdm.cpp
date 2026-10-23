@@ -150,6 +150,9 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 			++r_state.bad_inputs;
 		} else {
 			p.kit = int8_t(row.kit);
+			if (p_input.kits != nullptr && row.team >= 1 && row.team <= kKitTeams) {
+				p.kit_icon = int16_t(std::clamp<int32_t>(p_input.kits->loadout(row.team, row.kit).hud_icon, 0, 32767));
+			}
 		}
 		p.alive = row.alive;
 		p.bot = row.bot;

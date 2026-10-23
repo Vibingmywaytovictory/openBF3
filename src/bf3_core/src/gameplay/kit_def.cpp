@@ -187,6 +187,9 @@ Result<KitDef> read_kit_def(const EbxResolver &p_db, std::string_view p_asset, c
 	BF3_TRY(budget.charge_type(kit.data()));
 	out.label_sid = text(budget, kit.data(), "LabelSid");
 	out.hud_icon = text(budget, kit.data(), "UIHudIcon");
+	if (const std::optional<EbxValue> icon = kit.data().get_path("UIHudIcon")) {
+		out.hud_icon_value = icon->enum_value().value_or(0);
+	}
 	out.progression_known = p_progression->known();
 	out.weapon_slots = read_table(budget, p_db, kit.data(), "WeaponTable", *p_progression);
 	for (KitSlot &slot : read_table(budget, p_db, kit.data(), "SpecializationTable", *p_progression)) {
