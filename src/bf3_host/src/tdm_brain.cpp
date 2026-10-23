@@ -49,8 +49,6 @@ constexpr float kFireConeDeg = 4.0f;
 constexpr uint32_t kModeDelayTicks = 3;
 constexpr uint32_t kModeWaitTicks = 10;
 
-constexpr uint32_t kLookMinTicks = 90, kLookMaxTicks = 180;
-constexpr float kLookMinDeg = 60.0f, kLookMaxDeg = 150.0f;
 constexpr float kSprintConeDeg = 20.0f;
 constexpr float kSingleShotBeyondMetres = 60.0f;
 constexpr float kRetreatMetres = 14.0f;
@@ -137,8 +135,7 @@ struct TdmBrain::Impl {
 
 	BotStrafe strafe;
 
-	float look_yaw = 0.0f;
-	sim::Tick look_until = 0;
+	BotLook look;
 
 	sim::Tick retreat_since = 0, regen_since = 0, clear_since = 0;
 	sim::Vec3 threat{};
@@ -179,7 +176,7 @@ struct TdmBrain::Impl {
 		reload_held = false;
 		sidearm = false;
 		strafe.stop();
-		look_until = 0;
+		look.new_life();
 		retreat_since = regen_since = clear_since = 0;
 		revive_slot = -1;
 		grenade_phase = 0;
@@ -390,22 +387,7 @@ struct TdmBrain::Impl {
 				pose = walk_pose;
 				return true;
 			}
-			bool noticing = false;
-			for (const sim::bots::PerceivedEnemy &e : awareness.perception().enemies()) {
-				noticing = noticing || (e.visible && !e.detected);
-			}
-			if (look_until == 0) {
-				look_yaw = view_yaw;
-				look_until = p_tick + uniform_u(rng, kLookMinTicks, kLookMaxTicks);
-			} else if (noticing) {
-				look_yaw = view_yaw;
-				look_until = std::max(look_until, p_tick + kLookMinTicks);
-			} else if (p_tick >= look_until) {
-				const float turn = uniform(rng, kLookMinDeg, kLookMaxDeg) * core::kDegToRadF;
-				look_yaw = wrap(view_yaw + (unit(rng) < 0.5f ? -turn : turn));
-				look_until = p_tick + uniform_u(rng, kLookMinTicks, kLookMaxTicks);
-			}
-			walk_yaw = look_yaw;
+			walk_yaw = look.look(p_tick, awareness.perception(), view_yaw, rng);
 			return false;
 		};
 		if (act != TdmBotActivity::Fight) {

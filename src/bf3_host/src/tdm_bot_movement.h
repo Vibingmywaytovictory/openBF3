@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/sim/bots/perception.h"
 #include "bf3/sim/bots/walker_brain.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/sim_types.h"
@@ -57,6 +58,16 @@ private:
 	float dir_ = 1.0f, half_ = 1.0f;
 	sim::Vec3 anchor_{};
 	float ax_ = 1.0f, az_ = 0.0f;
+	sim::Tick until_ = 0;
+};
+
+class BotLook {
+public:
+	void new_life() { until_ = 0; }
+	float look(sim::Tick p_tick, const sim::bots::Perception &p_perception, float p_view_yaw, uint64_t &r_rng);
+
+private:
+	float yaw_ = 0.0f;
 	sim::Tick until_ = 0;
 };
 

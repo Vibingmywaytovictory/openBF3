@@ -1,10 +1,12 @@
 #include "tdm_bot_movement.h"
 
+#include "bf3/core/math.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/nav.h"
 #include "bf3/sim/nav_query.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <utility>
@@ -27,6 +29,9 @@ constexpr float kIslandRings[] = { 2.0f, 4.0f, 6.0f, 9.0f, 12.0f, 16.0f, 24.0f, 
 constexpr float kStrafeAxis = 0.8f;
 constexpr uint32_t kStrafeMinTicks = 60, kStrafeMaxTicks = 150;
 constexpr uint32_t kStrafeGroundTicks = 6;
+
+constexpr uint32_t kLookMinTicks = 90, kLookMaxTicks = 180;
+constexpr float kLookMinDeg = 60.0f, kLookMaxDeg = 150.0f;
 
 }
 
@@ -256,6 +261,25 @@ void BotStrafe::step(const TdmBotConfig &p_config, uint8_t p_slot, sim::Tick p_t
 	}
 	r_dx = dir_ * ax_ * kStrafeAxis;
 	r_dz = dir_ * az_ * kStrafeAxis;
+}
+
+float BotLook::look(sim::Tick p_tick, const sim::bots::Perception &p_perception, float p_view_yaw, uint64_t &r_rng) {
+	bool noticing = false;
+	for (const sim::bots::PerceivedEnemy &e : p_perception.enemies()) {
+		noticing = noticing || (e.visible && !e.detected);
+	}
+	if (until_ == 0) {
+		yaw_ = p_view_yaw;
+		until_ = p_tick + uniform_u(r_rng, kLookMinTicks, kLookMaxTicks);
+	} else if (noticing) {
+		yaw_ = p_view_yaw;
+		until_ = std::max(until_, p_tick + kLookMinTicks);
+	} else if (p_tick >= until_) {
+		const float turn = uniform(r_rng, kLookMinDeg, kLookMaxDeg) * core::kDegToRadF;
+		yaw_ = wrap(p_view_yaw + (unit(r_rng) < 0.5f ? -turn : turn));
+		until_ = p_tick + uniform_u(r_rng, kLookMinTicks, kLookMaxTicks);
+	}
+	return yaw_;
 }
 
 }
