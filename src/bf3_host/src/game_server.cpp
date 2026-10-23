@@ -2,6 +2,7 @@
 
 #include "bf3/core/util/elapsed.h"
 #include "bf3/host/firefight_brain.h"
+#include "bf3/host/target_bots.h"
 #include "bf3/host/tdm_brain.h"
 #include "bot_director.h"
 #include "server_combat.h"
@@ -10,6 +11,7 @@
 #include "server_dev.h"
 #include "server_match.h"
 #include "server_outbox.h"
+#include "server_slot_view.h"
 #include "server_slots.h"
 #include "server_snapshots.h"
 #include "server_spawner.h"
@@ -24,6 +26,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <limits>
 
 namespace bf3::host {
@@ -71,6 +74,7 @@ struct GameServer::Impl {
 	CommandBuffers commands;
 	MatchControl match;
 	Combat combat;
+	SlotView view{ slots, match, combat, tick };
 	CombatLog combat_log{ slots, match, combat };
 	SnapshotWriter snapshots{ slots, commands, combat, combat_log, motor, outbox };
 	Spawner spawner{ slots, match, combat, combat_log, motor, outbox };
@@ -196,14 +200,14 @@ struct GameServer::Impl {
 				++step_precondition_failures;
 			}
 			const bool was_alive = soldier_alive(s.state);
-			const sim::SoldierState sv_before = s.state;
+			const sim::SoldierState before = s.state;
 			if (!s.dummy) {
 				s.last = match.restrict(s.last);
 			}
 			motor.step(s.state, s.last);
 			++times.motor_steps;
 			if (was_alive && !s.dummy) {
-				combat.step_soldier(slots.index_of(s), s.last, sv_before, s.state);
+				combat.step_soldier(slots.index_of(s), s.last, before, s.state);
 			}
 			if (was_alive && !soldier_alive(s.state) && !s.dummy) {
 				const std::optional<uint32_t> respawn = match.policy().respawn_tick(uint8_t(slots.index_of(s)), n);
@@ -216,7 +220,7 @@ struct GameServer::Impl {
 		motor_steps += times.motor_steps;
 		const auto rules_start = std::chrono::steady_clock::now();
 
-		sv_rules(n);
+		step_rules(n);
 		for (size_t i = 0; i < slots.size(); ++i) {
 			ServerSlot &s = slots[i];
 			if (s.used && !s.dummy && s.want_spawn && (!s.spawned || n >= s.respawn_at)) {
@@ -272,11 +276,8 @@ struct GameServer::Impl {
 		return at;
 	}
 
-	struct Sv;
-	std::unique_ptr<Sv> sv;
-	core::Status sv_init();
-	const ServerView &server_view() const;
-	void sv_rules(sim::Tick p_tick);
+	core::Status init_gameplay();
+	void step_rules(sim::Tick p_tick);
 
 	void send_rules(sim::Tick p_tick) {
 		const MatchBroadcast b = match.take_broadcast(p_tick);
@@ -342,7 +343,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	for (ServerSlot &s : m.slots) {
 		m.reset_slot(s);
 	}
-	BF3_TRY(m.sv_init());
+	BF3_TRY(m.init_gameplay());
 	for (uint32_t i = 0; i < p_config.walkers; ++i) {
 		if (add_local_soldier(std::make_unique<Walker>(i), 2) < 0) {
 			return core::make_error("GameServer: no slot for walker " + std::to_string(i));
@@ -526,80 +527,14 @@ const sim::SoldierState *GameServer::soldier(uint32_t p_slot) const {
 	return &m.slots[p_slot].state;
 }
 
-}
-
-#include "bf3/host/target_bots.h"
-
-#include <cstdlib>
-
-namespace bf3::host {
-
-struct GameServer::Impl::Sv {
-	struct View final : ServerView {
-		Impl *m = nullptr;
-		mutable std::vector<sim::SoldierState> cache;
-		mutable sim::Tick cache_tick = 0;
-		mutable bool cached = false;
-		std::span<const sim::SoldierState> states() const override {
-			if (!cached || cache_tick != m->tick) {
-				cache.assign(m->slots.size(), sim::SoldierState());
-				for (size_t i = 0; i < m->slots.size(); ++i) {
-					if (m->slots[i].used && m->slots[i].spawned) {
-						cache[i] = m->slots[i].state;
-					}
-				}
-				cache_tick = m->tick;
-				cached = true;
-			}
-			return cache;
-		}
-		uint8_t team(uint8_t p_slot) const override {
-			return p_slot < m->slots.size() && m->slots[p_slot].used ? uint8_t(std::clamp(m->slots[p_slot].team, 0, 255)) : uint8_t(0);
-		}
-		bool alive(uint8_t p_slot) const override {
-			return p_slot < m->slots.size() && m->slots[p_slot].used && m->slots[p_slot].spawned && soldier_alive(m->slots[p_slot].state);
-		}
-		const sim::weapons::SoldierWeaponsState &weapons(uint8_t p_slot) const override {
-			static const sim::weapons::SoldierWeaponsState s_empty;
-			return m->combat.on() ? m->combat.gunplay()->weapons(p_slot) : s_empty;
-		}
-		const sim::CollisionWorld &world() const override { return *m->world; }
-		sim::Tick tick() const override { return m->tick + 1u; }
-
-		std::span<const DownedSoldier> downed() const override {
-			return m->match.on() ? m->match.rules()->downed() : ServerView::downed();
-		}
-		net::MatchPhase phase() const override {
-			return m->match.on() ? m->match.rules()->phase() : ServerView::phase();
-		}
-		bool input_restricted() const override {
-			return m->match.on() ? m->match.rules()->input_restricted() : ServerView::input_restricted();
-		}
-		uint8_t kit(uint8_t p_slot) const override {
-			if (!m->match.on()) {
-				return ServerView::kit(p_slot);
-			}
-			const uint8_t k = m->match.rules()->kit_of(p_slot);
-			return k != kKeepKit ? k : (m->combat.on() ? m->combat.gunplay()->kit(p_slot) : uint8_t(0));
-		}
-	};
-	View view;
-};
-
 GameServer::GameServer() :
 		impl_(std::make_unique<Impl>()) {}
 
 GameServer::~GameServer() = default;
 
-const ServerView &GameServer::Impl::server_view() const {
-	return sv->view;
-}
-
-core::Status GameServer::Impl::sv_init() {
-	sv = std::make_unique<Sv>();
-	Sv &v = *sv;
-	v.view.m = this;
-	spawner.configure(config, *world, v.view);
+core::Status GameServer::Impl::init_gameplay() {
+	view.configure(*world);
+	spawner.configure(config, *world, view);
 	match.configure(config, slots.size());
 	combat.configure(slots.size(), *config.level->static_world);
 	const bool tdm = config.rules.mode == MatchRulesConfig::Mode::Tdm;
@@ -636,15 +571,11 @@ core::Status GameServer::Impl::sv_init() {
 	return core::Status::success();
 }
 
-void GameServer::Impl::sv_rules(sim::Tick p_tick) {
-	if (sv == nullptr) {
-		return;
-	}
-	Sv &v = *sv;
+void GameServer::Impl::step_rules(sim::Tick p_tick) {
 	if (combat.on()) {
 		combat_log.open(p_tick);
 		combat.resolve(p_tick, slots, combat_log);
-		match.step(p_tick, v.view, *combat.gunplay(), combat.tick_states());
+		match.step(p_tick, view, *combat.gunplay(), combat.tick_states());
 		combat.restore(slots);
 	}
 
@@ -660,12 +591,12 @@ core::Status GameServer::place_soldier(uint32_t p_slot, const sim::Vec3 &p_posit
 }
 
 const ServerView &GameServer::view() const {
-	if (impl_->sv == nullptr) {
+	if (!impl_->view.ready()) {
 
 		std::fprintf(stderr, "GameServer::view() called before init\n");
 		std::abort();
 	}
-	return impl_->sv->view;
+	return impl_->view;
 }
 
 const Gunplay *GameServer::gunplay() const {
@@ -675,10 +606,6 @@ const Gunplay *GameServer::gunplay() const {
 const TdmRules *GameServer::rules() const {
 	return impl_->match.rules();
 }
-
-}
-
-namespace bf3::host {
 
 int GameServer::add_local_bot(std::unique_ptr<CommandSource> p_source, int p_team) {
 	return impl_->add_local(std::move(p_source), p_team, true);

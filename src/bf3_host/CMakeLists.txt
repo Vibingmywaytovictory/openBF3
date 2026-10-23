@@ -32,6 +32,8 @@ target_sources(bf3_host PRIVATE
     src/server_match.cpp
     src/server_match.h
     src/server_outbox.h
+    src/server_slot_view.cpp
+    src/server_slot_view.h
     src/server_slots.h
     src/server_snapshots.cpp
     src/server_snapshots.h
