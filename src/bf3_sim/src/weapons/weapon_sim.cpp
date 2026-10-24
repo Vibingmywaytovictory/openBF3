@@ -102,12 +102,7 @@ bool fire_shot(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponSi
 		return false;
 	}
 	const Dispersion disp = effective_dispersion(p_d, r_io.sway);
-	const SimTime elapsed = p_time > r_s.spread_time ? p_time - r_s.spread_time : 0;
-	float spread = decay_spread(r_s.spread, disp, elapsed);
-	if (r_io.mech.min_spread_rise == MinSpreadRise::AtDecreaseRate && spread < disp.min_angle) {
-		spread = std::min(disp.min_angle, spread + disp.decrease_per_second * float(units_to_seconds(elapsed)));
-	}
-	spread = enter_spread(spread, disp, r_io.mech);
+	const float spread = spread_at(r_s.spread, r_s.spread_time, p_time, disp, r_io.mech);
 
 	const uint32_t index = r_io.st.next_shot_index++;
 	const uint64_t seed = shot_seed(r_io.match_seed, r_io.st.player_slot, index);
@@ -485,7 +480,7 @@ void step_soldier_weapons(const WeaponTable &p_table, SoldierWeaponsState &r_sta
 	}
 	Tick_ io{ p_table, p_table.mechanics, r_state, p_command, p_context, p_match_seed, r_out, tick_start(p_command.tick), tick_end(p_command.tick),
 		weapon_input(p_command), p_context.sway };
-	io.sway.suppressed = p_context.sway.suppressed || p_context.suppression >= p_table.mechanics.suppression_threshold;
+	io.sway = suppressed_sway(p_context.sway, p_context.suppression, p_table.mechanics);
 	r_state.events = 0;
 
 	bool blocked = !p_context.alive;
@@ -594,6 +589,23 @@ uint64_t soldier_weapons_hash(const SoldierWeaponsState &p_state) {
 	return h.value();
 }
 
+SwayContext weapon_sway_context(const SoldierState &p_after, const Command &p_command) {
+	SwayContext sway;
+	sway.stance = Stance(std::min<uint8_t>(uint8_t(p_after.target_pose), 2));
+	sway.zoom = (p_command.buttons & weapon_buttons::kZoom) != 0 ? Zoom::Zoom : Zoom::NoZoom;
+	const float hs2 = p_after.velocity[0] * p_after.velocity[0] + p_after.velocity[2] * p_after.velocity[2];
+	if ((p_after.flags & soldier_flags::kSprinting) != 0) {
+		sway.move = SwayMove::Sprinting;
+	} else if (p_after.mode == MoveMode::Jumping || p_after.mode == MoveMode::InAir || p_after.mode == MoveMode::Falling) {
+		sway.move = SwayMove::Jumping;
+	} else if (hs2 > 0.01f) {
+		sway.move = SwayMove::Moving;
+	} else {
+		sway.move = SwayMove::Base;
+	}
+	return sway;
+}
+
 WeaponContext make_weapon_context(const MotorParams &p_motor, const SoldierState &p_before, const SoldierState &p_after, const Command &p_command,
 		float p_suppression) {
 	WeaponContext c;
@@ -601,18 +613,7 @@ WeaponContext make_weapon_context(const MotorParams &p_motor, const SoldierState
 	c.eye_end = { p_after.position[0], p_after.position[1] + eye_height_of(p_motor, p_after), p_after.position[2] };
 	c.yaw = p_command.yaw;
 	c.pitch = p_command.pitch;
-	c.sway.stance = Stance(std::min<uint8_t>(uint8_t(p_after.target_pose), 2));
-	c.sway.zoom = (p_command.buttons & weapon_buttons::kZoom) != 0 ? Zoom::Zoom : Zoom::NoZoom;
-	const float hs2 = p_after.velocity[0] * p_after.velocity[0] + p_after.velocity[2] * p_after.velocity[2];
-	if ((p_after.flags & soldier_flags::kSprinting) != 0) {
-		c.sway.move = SwayMove::Sprinting;
-	} else if (p_after.mode == MoveMode::Jumping || p_after.mode == MoveMode::InAir || p_after.mode == MoveMode::Falling) {
-		c.sway.move = SwayMove::Jumping;
-	} else if (hs2 > 0.01f) {
-		c.sway.move = SwayMove::Moving;
-	} else {
-		c.sway.move = SwayMove::Base;
-	}
+	c.sway = weapon_sway_context(p_after, p_command);
 	c.alive = (p_after.flags & soldier_flags::kAlive) != 0 && p_after.mode != MoveMode::Dead;
 	c.sprinting = (p_after.flags & soldier_flags::kSprinting) != 0;
 	c.suppression = std::isfinite(p_suppression) ? p_suppression : 0.0f;

@@ -94,6 +94,21 @@ float spread_after_shot(float p_spread, const Dispersion &p_dispersion) {
 	return std::min(p_spread + p_dispersion.increase_per_shot, std::max(p_dispersion.max_angle, p_dispersion.min_angle));
 }
 
+float spread_at(float p_spread, SimTime p_spread_time, SimTime p_now, const Dispersion &p_dispersion, const Mechanics &p_mechanics) {
+	const SimTime elapsed = p_now > p_spread_time ? p_now - p_spread_time : 0;
+	float spread = decay_spread(p_spread, p_dispersion, elapsed);
+	if (p_mechanics.min_spread_rise == MinSpreadRise::AtDecreaseRate && spread < p_dispersion.min_angle) {
+		spread = std::min(p_dispersion.min_angle, spread + p_dispersion.decrease_per_second * float(units_to_seconds(elapsed)));
+	}
+	return enter_spread(spread, p_dispersion, p_mechanics);
+}
+
+SwayContext suppressed_sway(const SwayContext &p_sway, float p_suppression, const Mechanics &p_mechanics) {
+	SwayContext s = p_sway;
+	s.suppressed = p_sway.suppressed || p_suppression >= p_mechanics.suppression_threshold;
+	return s;
+}
+
 Vec3 sample_cone(const Vec3 &p_aim, float p_spread_degrees, float p_u_radius, float p_u_angle, DiscDistribution p_disc) {
 	using namespace detail;
 	const DVec3 aim = normalize(to_d(p_aim));

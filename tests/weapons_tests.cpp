@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <limits>
 #include <random>
@@ -700,6 +701,111 @@ TEST_SUITE("weapons-unit") {
 		CHECK(std::fabs(n[0]) < 1e-6f);
 		const Vec3 up = aim_direction(0, kPitchLimit, { 10.0f, 0.0f });
 		CHECK(up[1] == doctest::Approx(std::sin(89.99 * 3.14159265358979323846 / 180.0)).epsilon(1e-6));
+	}
+
+	TEST_CASE("sim.weapons.unit: the spread without a shot: stance, move, jump, zoom, decay, rise, and the shot evaluates the same function") {
+		const std::shared_ptr<const WeaponTable> t = synthetic_table();
+		WeaponSimDef d = t->defs[id_of(*t, kM16A3)];
+		const float hip[3][2] = { { 2.5f, 3.0f }, { 2.0f, 2.5f }, { 1.5f, 2.0f } };
+		for (size_t s = 0; s < 3; ++s) {
+			SwayState &st = d.sway[s][0];
+			st.move[size_t(SwayMove::Base)].min_angle = hip[s][0];
+			st.move[size_t(SwayMove::Moving)].min_angle = hip[s][1];
+			st.has_move[size_t(SwayMove::Moving)] = true;
+		}
+		d.sway[0][0].move[size_t(SwayMove::Jumping)].min_angle = 7.0f;
+		d.sway[0][0].has_move[size_t(SwayMove::Jumping)] = true;
+		d.sway[0][1].move[size_t(SwayMove::Base)].min_angle = 0.2f;
+		const Mechanics immediate;
+		Mechanics rise;
+		rise.min_spread_rise = MinSpreadRise::AtDecreaseRate;
+		const SimTime now = 600 * kTimeUnitsPerTick;
+
+		SoldierState still;
+		still.flags = soldier_flags::kAlive;
+		Command c;
+		c.tick = 600;
+		const auto spread_now = [&](const SoldierState &p_state, const Command &p_command, float p_stored, SimTime p_stored_time, const Mechanics &p_mech) {
+			return spread_at(p_stored, p_stored_time, now, effective_dispersion(d, weapon_sway_context(p_state, p_command)), p_mech);
+		};
+		CHECK(weapon_sway_context(still, c).move == SwayMove::Base);
+		CHECK(spread_now(still, c, 0.0f, 0, immediate) == 2.5f);
+
+		SoldierState walking = still;
+		walking.velocity = { 1.2f, 0.0f, 0.0f };
+		CHECK(weapon_sway_context(walking, c).move == SwayMove::Moving);
+		CHECK(spread_now(walking, c, 2.5f, now - kTimeUnitsPerTick, immediate) == 3.0f);
+		SoldierState creeping = still;
+		creeping.velocity = { 0.05f, 0.0f, 0.05f };
+		CHECK(weapon_sway_context(creeping, c).move == SwayMove::Base);
+
+		SoldierState airborne = still;
+		airborne.mode = MoveMode::Jumping;
+		CHECK(weapon_sway_context(airborne, c).move == SwayMove::Jumping);
+		CHECK(spread_now(airborne, c, 2.5f, now - kTimeUnitsPerTick, immediate) == 7.0f);
+		SoldierState falling = still;
+		falling.mode = MoveMode::Falling;
+		CHECK(weapon_sway_context(falling, c).move == SwayMove::Jumping);
+		SoldierState sprint = walking;
+		sprint.flags = uint16_t(soldier_flags::kAlive | soldier_flags::kSprinting);
+		CHECK(weapon_sway_context(sprint, c).move == SwayMove::Sprinting);
+
+		SoldierState crouched = still;
+		crouched.target_pose = Pose::Crouch;
+		SoldierState prone = still;
+		prone.target_pose = Pose::Prone;
+		CHECK(weapon_sway_context(crouched, c).stance == Stance::Crouch);
+		CHECK(weapon_sway_context(prone, c).stance == Stance::Prone);
+		CHECK(spread_now(crouched, c, 0.0f, 0, immediate) == 2.0f);
+		CHECK(spread_now(prone, c, 0.0f, 0, immediate) == 1.5f);
+		SoldierState crouch_walk = crouched;
+		crouch_walk.velocity = walking.velocity;
+		CHECK(spread_now(crouch_walk, c, 0.0f, 0, immediate) == 2.5f);
+		SoldierState prone_crawl = prone;
+		prone_crawl.velocity = walking.velocity;
+		CHECK(spread_now(prone_crawl, c, 0.0f, 0, immediate) == 2.0f);
+
+		Command zoom = c;
+		zoom.buttons = buttons::kZoom;
+		CHECK(weapon_sway_context(still, zoom).zoom == Zoom::Zoom);
+		CHECK(spread_now(still, zoom, 0.0f, 0, immediate) == 0.2f);
+
+		const float decrease = d.sway[0][0].move[0].decrease_per_second;
+		CHECK(decrease == 15.0f);
+		CHECK(spread_now(still, c, 6.0f, now, immediate) == 6.0f);
+		CHECK(spread_now(still, c, 6.0f, now - kTimeUnitsPerSecond / 10, immediate) == doctest::Approx(6.0f - 0.1f * decrease));
+		CHECK(spread_now(still, c, 6.0f, now - kTimeUnitsPerSecond / 5, immediate) == doctest::Approx(6.0f - 0.2f * decrease));
+		CHECK(spread_now(still, c, 6.0f, now - kTimeUnitsPerSecond, immediate) == 2.5f);
+		CHECK(spread_now(walking, c, 6.0f, now - kTimeUnitsPerSecond, immediate) == 3.0f);
+
+		CHECK(spread_now(walking, c, 2.5f, now - kTimeUnitsPerSecond / 60, rise) == doctest::Approx(2.5f + decrease / 60.0f));
+		CHECK(spread_now(walking, c, 2.5f, now - kTimeUnitsPerSecond, rise) == 3.0f);
+
+		SwayContext quiet = weapon_sway_context(still, c);
+		CHECK_FALSE(suppressed_sway(quiet, 0.29f, immediate).suppressed);
+		CHECK(suppressed_sway(quiet, 0.3f, immediate).suppressed);
+		quiet.suppressed = true;
+		CHECK(suppressed_sway(quiet, 0.0f, immediate).suppressed);
+
+		Driver drv(t, { id_of(*t, kM16A3) });
+		drv.ctx.sway = SwayContext{};
+		drv.idle_until_ready();
+		const WeaponSimDef &live = t->defs[id_of(*t, kM16A3)];
+		const Dispersion live_disp = effective_dispersion(live, drv.ctx.sway);
+		size_t checked = 0;
+		for (int i = 0; i < 120; ++i) {
+			const WeaponSlotState before = drv.st.current();
+			const size_t had = drv.shots.size();
+			drv.step(fire(i % 20 < 14, false));
+			for (size_t k = had; k < drv.shots.size(); ++k) {
+				const ShotEvent &e = drv.shots[k];
+				const float want = k == had ? spread_at(before.spread, before.spread_time, e.time, live_disp, t->mechanics)
+											: spread_at(spread_after_shot(drv.shots[k - 1].spread, live_disp), drv.shots[k - 1].time, e.time, live_disp, t->mechanics);
+				CHECK(std::memcmp(&want, &e.spread, sizeof(float)) == 0);
+				++checked;
+			}
+		}
+		CHECK(checked > 15);
 	}
 
 	TEST_CASE("sim.weapons.unit: W7 determinism: replays, a mid-burst restore, seeds, two worlds") {

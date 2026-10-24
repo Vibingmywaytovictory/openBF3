@@ -156,6 +156,8 @@ void step_soldier_weapons(const WeaponTable &p_table, SoldierWeaponsState &r_sta
 
 uint64_t soldier_weapons_hash(const SoldierWeaponsState &p_state);
 
+SwayContext weapon_sway_context(const SoldierState &p_after, const Command &p_command);
+
 WeaponContext make_weapon_context(const MotorParams &p_motor, const SoldierState &p_before, const SoldierState &p_after, const Command &p_command,
 		float p_suppression = 0.0f);
 
