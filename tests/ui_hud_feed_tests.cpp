@@ -308,9 +308,9 @@ TEST_CASE("damage direction: own-victim server hits carry the bearing to the pre
 	host::HudFeedState state;
 	ui::HudModel model;
 	CHECK(host::hud_bearing_deg({ 0, 0, 0 }, { 0, 0, 5 }) == doctest::Approx(0.0f));
-	CHECK(host::hud_bearing_deg({ 0, 0, 0 }, { 5, 0, 0 }) == doctest::Approx(90.0f));
+	CHECK(host::hud_bearing_deg({ 0, 0, 0 }, { 5, 0, 0 }) == doctest::Approx(270.0f));
 	CHECK(host::hud_bearing_deg({ 0, 0, 0 }, { 0, 0, -5 }) == doctest::Approx(180.0f));
-	CHECK(host::hud_bearing_deg({ 0, 0, 0 }, { -5, 0, 0 }) == doctest::Approx(270.0f));
+	CHECK(host::hud_bearing_deg({ 0, 0, 0 }, { -5, 0, 0 }) == doctest::Approx(90.0f));
 	CHECK(host::hud_bearing_deg({ 1, 0, 1 }, { 1, 3, 1 }) == 0.0f);
 	std::array<bf3::present::PresentedSoldier, 2> others{};
 	others[0].slot = 4;
@@ -350,14 +350,14 @@ TEST_CASE("damage direction: own-victim server hits carry the bearing to the pre
 	CHECK(h1.bearing_deg == doctest::Approx(0.0f));
 	CHECK(h1.damage == 30.0f);
 	CHECK(h2.shooter == 6);
-	CHECK(h2.bearing_deg == doctest::Approx(270.0f));
+	CHECK(h2.bearing_deg == doctest::Approx(90.0f));
 	CHECK(h2.damage == 12.0f);
 	CHECK(state.damage_shown == 2);
 	CHECK(state.damage_unplaced == 1);
 	host::fill_hud(in, {}, st, state, model);
 	CHECK(model.damage.newest_serial == 2);
 	row("feed.damage_direction", state.damage_shown == 2 && state.damage_unplaced == 1,
-			"2 own-victim hits fed with the bearing to the presented shooter (0 and 270 deg), self damage skipped, 1 unpresented shooter counted");
+			"2 own-victim hits fed with the bearing to the presented shooter (0 and 90 deg), self damage skipped, 1 unpresented shooter counted");
 }
 
 TEST_CASE("hostile feed inputs are clamped") {
@@ -396,9 +396,9 @@ TEST_CASE("hostile feed inputs are clamped") {
 TEST_CASE("compass heading from the view yaw and the grenade count from the wcHgr slot") {
 	constexpr float kPi = 3.14159265358979323846f;
 	CHECK(host::hud_compass_heading_deg(0.0f) == 0.0f);
-	CHECK(host::hud_compass_heading_deg(kPi / 2.0f) == doctest::Approx(90.0f));
-	CHECK(host::hud_compass_heading_deg(-kPi / 2.0f) == doctest::Approx(270.0f));
-	CHECK(host::hud_compass_heading_deg(295.0f * kPi / 180.0f + 4.0f * kPi) == doctest::Approx(295.0f).epsilon(1e-4));
+	CHECK(host::hud_compass_heading_deg(kPi / 2.0f) == doctest::Approx(270.0f));
+	CHECK(host::hud_compass_heading_deg(-kPi / 2.0f) == doctest::Approx(90.0f));
+	CHECK(host::hud_compass_heading_deg(-295.0f * kPi / 180.0f + 4.0f * kPi) == doctest::Approx(295.0f).epsilon(1e-4));
 	CHECK(host::hud_compass_heading_deg(std::nanf("")) == 0.0f);
 	const SyntheticKit k = synthetic_kit();
 	const host::HudStatic st = synthetic_static(k);
@@ -418,7 +418,7 @@ TEST_CASE("compass heading from the view yaw and the grenade count from the wcHg
 	host::HudFeedInput in;
 	in.alive = true;
 	in.health = 100.0f;
-	in.view_yaw_rad = 212.0f * kPi / 180.0f;
+	in.view_yaw_rad = -212.0f * kPi / 180.0f;
 	in.weapon.valid = true;
 	in.weapon.def = wire.slots[0].def;
 	in.weapons = &wire;

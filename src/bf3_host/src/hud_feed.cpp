@@ -254,7 +254,7 @@ float hud_compass_heading_deg(float p_view_yaw_rad) {
 	if (!std::isfinite(p_view_yaw_rad)) {
 		return 0.0f;
 	}
-	const double deg = std::fmod(double(p_view_yaw_rad) * 180.0 / kPi, 360.0);
+	const double deg = std::fmod(-double(p_view_yaw_rad) * 180.0 / kPi, 360.0);
 	return float(deg < 0.0 ? deg + 360.0 : deg);
 }
 

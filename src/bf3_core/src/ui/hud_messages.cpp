@@ -96,7 +96,7 @@ int32_t hud_damage_angle_frame(float p_view_heading_deg, float p_bearing_deg) {
 	if (!std::isfinite(p_view_heading_deg) || !std::isfinite(p_bearing_deg)) {
 		return 1;
 	}
-	const double cw = std::fmod(double(p_view_heading_deg) - double(p_bearing_deg), 360.0);
+	const double cw = std::fmod(double(p_bearing_deg) - double(p_view_heading_deg), 360.0);
 	const int32_t deg = int32_t(std::lround(cw < 0.0 ? cw + 360.0 : cw)) % 360;
 	return deg + 1;
 }

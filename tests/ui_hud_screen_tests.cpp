@@ -543,8 +543,8 @@ TEST_SUITE("ui-hud-screen-unit") {
 
 	TEST_CASE("hud screen unit: damage indicator angle frames, sources, expiry and the 30 Hz update") {
 		CHECK(hud_damage_angle_frame(0.0f, 0.0f) == 1);
-		CHECK(hud_damage_angle_frame(0.0f, 270.0f) == 91);
-		CHECK(hud_damage_angle_frame(0.0f, 90.0f) == 271);
+		CHECK(hud_damage_angle_frame(0.0f, 270.0f) == 271);
+		CHECK(hud_damage_angle_frame(0.0f, 90.0f) == 91);
 		CHECK(hud_damage_angle_frame(90.0f, 90.0f) == 1);
 		CHECK(hud_damage_angle_frame(10.0f, 190.0f) == 181);
 		CHECK(hud_damage_angle_frame(359.6f, 0.0f) == 1);
@@ -557,7 +557,7 @@ TEST_SUITE("ui-hud-screen-unit") {
 		push_damage(m, 4, 270.0f, 30.0f);
 		comp.update(m, 0.1);
 		REQUIRE(comp.indicators().size() == 1);
-		CHECK(comp.indicators().at(0).field("Angle").to_number() == 91.0);
+		CHECK(comp.indicators().at(0).field("Angle").to_number() == 271.0);
 		CHECK(comp.indicators().at(0).field("Scale").to_number() == 30.0);
 		CHECK(comp.indicators().at(0).field("New").truthy());
 		comp.update(m, 0.11);
@@ -575,7 +575,7 @@ TEST_SUITE("ui-hud-screen-unit") {
 		CHECK(comp.indicators().at(0).field("Scale").to_number() == 100.0);
 		push_damage(m, 4, 0.0f, 20.0f);
 		comp.update(m, 2.0);
-		CHECK(comp.indicators().at(0).field("Angle").to_number() == 91.0);
+		CHECK(comp.indicators().at(0).field("Angle").to_number() == 271.0);
 		CHECK(comp.indicators().at(0).field("New").truthy());
 		CHECK(comp.hits_seen() == 5);
 		comp.update(m, 6.0);
@@ -1778,7 +1778,7 @@ TEST_SUITE("ui-hud-screen") {
 		const uint32_t full_hit = 2 - 1;
 		const uint32_t minor_hit = 31 - 1;
 		const uint32_t idle = s.at(arrow).frame;
-		push_damage(m, 4, 270.0f, 60.0f);
+		push_damage(m, 4, 90.0f, 60.0f);
 		comp.update(m, 0.0);
 		s.hud->refresh(m);
 		CHECK(s.at(ind).frame == 90);
@@ -1803,7 +1803,7 @@ TEST_SUITE("ui-hud-screen") {
 		CHECK(s.at(ind1).frame == 90);
 		CHECK(s.at(ind + ".arrow").frame == minor_hit);
 		row("damage_indicator", "UIDamageIndicatorCompData MaxUpdateTime " + std::to_string(data->max_update_time) + " s, " + std::to_string(data->updates_per_second) +
-						" Hz; key -1063919953 on hudscreen DamageIndicator_01; bearing 270 at heading 0 -> frame 91 (arrow matrix b " + std::to_string(right.b) +
+						" Hz; key -1063919953 on hudscreen DamageIndicator_01; bearing 90 at heading 0 -> frame 91 (arrow matrix b " + std::to_string(right.b) +
 						", clockwise), Scale 60 -> fullHit, 20 -> minorHit, idle arrow frame " + std::to_string(idle));
 	}
 
