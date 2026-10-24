@@ -656,13 +656,6 @@ bool fits(const SwfTextLayout &p_l, const SwfRect &p_bounds) {
 
 }
 
-double swf_grid_fit_baseline_shift(uint8_t p_grid_fit, double p_window_y, double p_window_per_local_y) {
-	if (p_grid_fit != kSwfGridFitPixel || !std::isfinite(p_window_y) || !std::isfinite(p_window_per_local_y) || std::fabs(p_window_per_local_y) < 1e-6) {
-		return 0.0;
-	}
-	return (std::floor(p_window_y) - p_window_y) / p_window_per_local_y;
-}
-
 const char *swf_text_auto_size_name(SwfTextAutoSize p_mode) {
 	switch (p_mode) {
 		case SwfTextAutoSize::None: return "none";

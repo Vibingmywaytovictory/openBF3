@@ -292,17 +292,6 @@ SwfLibrary layout_library() {
 }
 
 TEST_SUITE("ui-swf-unit") {
-	TEST_CASE("swf: CSMTextSettings pixel grid fit moves the baseline up to the window pixel row") {
-		CHECK(swf_grid_fit_baseline_shift(kSwfGridFitPixel, 505.9, 1.0) == doctest::Approx(-0.9));
-		CHECK(swf_grid_fit_baseline_shift(kSwfGridFitPixel, 505.9, 2.0) == doctest::Approx(-0.45));
-		CHECK(swf_grid_fit_baseline_shift(kSwfGridFitPixel, 505.0, 1.0) == 0.0);
-		CHECK(swf_grid_fit_baseline_shift(kSwfGridFitPixel, -0.25, 1.0) == doctest::Approx(-0.75));
-		CHECK(swf_grid_fit_baseline_shift(kSwfGridFitSubpixel, 505.9, 1.0) == 0.0);
-		CHECK(swf_grid_fit_baseline_shift(kSwfGridFitNone, 505.9, 1.0) == 0.0);
-		CHECK(swf_grid_fit_baseline_shift(kSwfGridFitPixel, std::nan(""), 1.0) == 0.0);
-		CHECK(swf_grid_fit_baseline_shift(kSwfGridFitPixel, 505.9, 0.0) == 0.0);
-	}
-
 	TEST_CASE("swf: every tag the reader keeps (GFX and CFX)") {
 		for (const bool cfx : { false, true }) {
 			CAPTURE(cfx);

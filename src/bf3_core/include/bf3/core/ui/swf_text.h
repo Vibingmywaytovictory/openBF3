@@ -18,8 +18,6 @@ inline constexpr float kSwfTextGutter = 2.0f;
 inline constexpr uint8_t kSwfGridFitNone = 0;
 inline constexpr uint8_t kSwfGridFitPixel = 1;
 inline constexpr uint8_t kSwfGridFitSubpixel = 2;
-
-double swf_grid_fit_baseline_shift(uint8_t p_grid_fit, double p_window_y, double p_window_per_local_y);
 inline constexpr uint32_t kSwfTextMaxChars = 1u << 16;
 inline constexpr uint32_t kSwfHtmlMaxNesting = 64;
 inline constexpr uint32_t kSwfTextFitSteps = 24;
