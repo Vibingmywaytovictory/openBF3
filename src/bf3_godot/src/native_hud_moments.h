@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -99,6 +100,7 @@ private:
 	std::array<godot::Ref<godot::Image>, kNativeHudViews> colour_;
 	std::vector<NativeHudSquadRow> expect_squad_;
 	std::vector<std::string> expect_squad_names_;
+	std::map<std::string, godot::PackedByteArray, std::less<>> first_capture_;
 };
 
 }

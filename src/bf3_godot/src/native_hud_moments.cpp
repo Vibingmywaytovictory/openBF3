@@ -594,8 +594,15 @@ NativeHudMomentRun::NativeHudMomentRun(std::string p_out_dir, std::string_view p
 		at = end + 1;
 	}
 	for (const NativeHudMoment &m : kMoments) {
-		if (ids.empty() || std::find(ids.begin(), ids.end(), std::string_view(m.id)) != ids.end()) {
+		if (ids.empty()) {
 			moments_.push_back(&m);
+		}
+	}
+	for (const std::string_view id : ids) {
+		for (const NativeHudMoment &m : kMoments) {
+			if (id == m.id) {
+				moments_.push_back(&m);
+			}
 		}
 	}
 	for (const char *sub : { "captures", "layers" }) {
@@ -643,6 +650,7 @@ void NativeHudMomentRun::settle(Bf3LevelSession &r_session, Bf3NativeHud &r_hud,
 	for (const MomentPopup &p : kMomentPopups) {
 		pop = id == p.moment ? &p : pop;
 	}
+	r_hud.set_ekg_clock(0.0);
 	const ui::HudMessageComp *comp = r_hud.messages();
 	const std::shared_ptr<const host::SharedLevel> level = r_session.shared_level();
 	NameFit fit;
@@ -1121,6 +1129,19 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 			}
 			row(std::string(m.id) + ".capture", ok, detail);
 			captured_ += ok ? 1 : 0;
+			if (ok) {
+				const PackedByteArray bytes = layer->get_data() + trans->get_data();
+				const auto [first, fresh] = first_capture_.try_emplace(m.id, bytes);
+				if (!fresh) {
+					const int64_t n = std::min(first->second.size(), bytes.size());
+					int64_t differ = std::max(first->second.size(), bytes.size()) - n;
+					for (int64_t i = 0; i < n; ++i) {
+						differ += first->second[i] != bytes[i] ? 1 : 0;
+					}
+					row(std::string(m.id) + ".repeat", differ == 0,
+							std::to_string(differ) + " of " + std::to_string(bytes.size()) + " HUD layer and transmittance bytes differ from the first capture of " + m.id);
+				}
+			}
 			if (const ui::SwfScene *ls = name_scale_ > 0.0f && ok ? scene_of(r_hud, kKillLogPath) : nullptr) {
 				const float stage_px = name_scale_ * ls->stage().width();
 				row(std::string(m.id) + ".name_scale", std::fabs(stage_px - float(layer->get_width())) < 0.5f,

@@ -14,6 +14,6 @@ endif()
 message("moment captures: ${shots}")
 godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 115
     ARGS --path "${PROJECT_DIR}" --resolution 1280x720 res://scenes/metro_tdm.tscn -- --bots=0 --deploy-screen=0 --preround=0 --min-players=1
-        "--native-hud-moments=${shots}" --native-hud-ids=m02,m10,m13 ${cache_args})
+        "--native-hud-moments=${shots}" --native-hud-ids=m02,m10,m13,m02 ${cache_args})
 godot_require_pass("NATIVE HUD MOMENTS: PASS")
 godot_require_pass("\\[level\\] install unchanged: yes")
