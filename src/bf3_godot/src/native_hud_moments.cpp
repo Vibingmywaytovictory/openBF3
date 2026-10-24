@@ -499,6 +499,11 @@ std::array<float, 2> native_hud_moment_texel(const NativeHudMoment &p_moment) {
 	return p_moment.detail_ambiguous ? std::array<float, 2>{ p_moment.area_texel_x, p_moment.area_texel_y } : std::array<float, 2>{ p_moment.map_texel_x, p_moment.map_texel_y };
 }
 
+std::array<float, 2> native_hud_moment_world_xz(const NativeHudMoment &p_moment, const ui::MinimapLevel &p_map) {
+	const std::array<float, 2> texel = native_hud_moment_texel(p_moment);
+	return ui::minimap_uv_to_world(ui::minimap_mapping(p_map.data), { texel[0] / kMapRegistrationTexels, texel[1] / kMapRegistrationTexels });
+}
+
 float native_hud_moment_registered_heading_deg(const NativeHudMoment &p_moment) {
 	return 360.0f - (p_moment.detail_ambiguous ? p_moment.area_rotation_deg : p_moment.map_rotation_deg);
 }
@@ -1067,8 +1072,7 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 				phase_ = Phase::Done;
 				return true;
 			}
-			const std::array<float, 2> texel = native_hud_moment_texel(m);
-			const std::array<float, 2> at_xz = ui::minimap_uv_to_world(ui::minimap_mapping(map->data), { texel[0] / kMapRegistrationTexels, texel[1] / kMapRegistrationTexels });
+			const std::array<float, 2> at_xz = native_hud_moment_world_xz(m, *map);
 			const std::optional<sim::Vec3> feet =
 					world != nullptr && level != nullptr ? native_hud_moment_floor_near(*world, level->motor, level->spawns, at_xz[0], at_xz[1], kNearRadius) : std::nullopt;
 			if (m.detail_ambiguous) {

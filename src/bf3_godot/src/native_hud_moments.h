@@ -59,6 +59,7 @@ bf3::core::ui::HudModel native_hud_moment_model(const NativeHudMoment &p_moment,
 float native_hud_moment_heading_deg(const NativeHudMoment &p_moment);
 float native_hud_moment_view_yaw(const NativeHudMoment &p_moment);
 std::array<float, 2> native_hud_moment_texel(const NativeHudMoment &p_moment);
+std::array<float, 2> native_hud_moment_world_xz(const NativeHudMoment &p_moment, const bf3::core::ui::MinimapLevel &p_map);
 float native_hud_moment_registered_heading_deg(const NativeHudMoment &p_moment);
 NativeHudMinimapPose native_hud_moment_pose(const bf3::sim::Vec3 &p_own, float p_view_yaw);
 std::optional<bf3::sim::Vec3> native_hud_moment_feet(const bf3::sim::CollisionWorld &p_world, const bf3::sim::MotorParams &p_motor, std::span<const bf3::sim::SpawnPoint> p_spawns,

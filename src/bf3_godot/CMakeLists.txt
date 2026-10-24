@@ -184,6 +184,7 @@ if(OPENBF3_BUILD_CHECKS)
         src/audio_demo.h
         src/collision_check.cpp
         src/collision_check.h
+        src/crosshair_walk_check.cpp
         src/fx3_demo.cpp
         src/fx3_demo.h
         src/fx_demo.cpp
