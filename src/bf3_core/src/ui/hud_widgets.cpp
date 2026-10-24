@@ -2649,7 +2649,7 @@ int32_t hud_compass_frame(float p_heading_deg) {
 	if (!std::isfinite(p_heading_deg)) {
 		return 0;
 	}
-	const int32_t h = int32_t(std::lround(double(p_heading_deg)));
+	const int32_t h = int32_t(std::fmod(std::ceil(double(p_heading_deg)), 360.0));
 	return ((h % 360) + 360) % 360;
 }
 

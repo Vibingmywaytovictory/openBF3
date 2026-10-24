@@ -353,12 +353,52 @@ constexpr std::array<float, 5> kKillRowFadeOut{ 1.0f, 205.0f / 256.0f, 154.0f / 
 }
 
 TEST_SUITE("ui-hud-screen-unit") {
+	TEST_CASE("hud screen unit: the compass frame is the heading rounded up, as the footage's minimap and compass show") {
+		struct StillMoment {
+			const char *id;
+			float map_rotation_deg;
+			int32_t cps_frame;
+		};
+		constexpr std::array<StillMoment, 10> kStill{ {
+				{ "m03", 91.5f, 270 },
+				{ "m04", 312.5f, 49 },
+				{ "m05", 279.5f, 82 },
+				{ "m07", 72.25f, 289 },
+				{ "m08", 76.5f, 286 },
+				{ "m09", 77.0f, 285 },
+				{ "m10", 275.0f, 87 },
+				{ "m11", 293.0f, 69 },
+				{ "m12", 59.5f, 302 },
+				{ "m14", 168.5f, 192 },
+		} };
+		double sum = 0.0;
+		double sq = 0.0;
+		for (const StillMoment &m : kStill) {
+			const double offset = 360.0 - double(m.map_rotation_deg) - double(m.cps_frame - 1);
+			sum += offset;
+			sq += offset * offset;
+			CHECK(hud_compass_frame(float(m.cps_frame - 1) - 0.5f) == m.cps_frame - 1);
+		}
+		const double n = double(kStill.size());
+		const double mean = sum / n;
+		const double sem = std::sqrt((sq - n * mean * mean) / (n - 1.0) / n);
+		CHECK(mean == doctest::Approx(-0.625));
+		CHECK(std::fabs(mean + 0.5) < sem);
+		CHECK(std::fabs(mean) > 3.0 * sem);
+		row("compass_frame_rule", "minimap heading - compass frame over " + std::to_string(kStill.size()) + " still moments mean " + std::to_string(mean) + ", standard error " +
+				std::to_string(sem) + " (heading rounded up -0.5, rounded to nearest 0)");
+	}
+
 	TEST_CASE("hud screen unit: compass frame, crosshair dispersion, AS2 values, alignment and easing") {
 		CHECK(hud_compass_frame(0.0f) == 0);
 		CHECK(hud_compass_frame(212.0f) == 212);
 		CHECK(hud_compass_frame(359.6f) == 0);
 		CHECK(hud_compass_frame(-1.0f) == 359);
 		CHECK(hud_compass_frame(std::nanf("")) == 0);
+		CHECK(hud_compass_frame(211.5f) == 212);
+		CHECK(hud_compass_frame(211.01f) == 212);
+		CHECK(hud_compass_frame(-0.5f) == 0);
+		CHECK(hud_compass_frame(1e7f) == 280);
 		CHECK(hud_crosshair_dispersion(0.0f, 55.0f, 720.0f) == 0.0);
 		constexpr double kPi = 3.14159265358979323846;
 		CHECK(hud_crosshair_dispersion(1.0f, 55.0f, 720.0f) == doctest::Approx(360.0 * std::tan(kPi / 180.0) / std::tan(27.5 * kPi / 180.0) / 100.0));
