@@ -137,6 +137,7 @@ core::Result<TdmRunResult> run_tdm(const TdmLevel &p_level, const TdmRunConfig &
 #include "test_support.h"
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -167,6 +168,22 @@ struct Fnv {
 		bytes(&p_value, sizeof(T));
 	}
 };
+
+inline std::vector<uint8_t> echo_hold_mask() {
+	net::Snapshot s;
+	const std::vector<uint8_t> zero = net::encode_snapshot(s);
+	s.echo_hold_100us = 0xFFFFu;
+	const std::vector<uint8_t> ones = net::encode_snapshot(s);
+	REQUIRE(zero.size() == ones.size());
+	std::vector<uint8_t> mask(zero.size());
+	int bits = 0;
+	for (size_t i = 0; i < mask.size(); ++i) {
+		mask[i] = uint8_t(zero[i] ^ ones[i]);
+		bits += std::popcount(mask[i]);
+	}
+	CHECK(bits == 16);
+	return mask;
+}
 
 struct DecisionRecord final : host::TdmBotObserver {
 	std::shared_ptr<host::TdmBotObserver> inner;

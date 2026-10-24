@@ -13,7 +13,6 @@
 #include "test_support.h"
 
 #include <array>
-#include <bit>
 #include <cstdint>
 #include <cstdio>
 #include <memory>
@@ -30,24 +29,8 @@ constexpr uint64_t kTdmStateHash = 0x770658d60fd190bcull;
 constexpr uint64_t kDevStreamHash = 0x8350cdbfd5bca6c8ull;
 constexpr uint64_t kDevStateHash = 0xa30c60cf985a7a37ull;
 
-std::vector<uint8_t> echo_hold_mask() {
-	net::Snapshot s;
-	const std::vector<uint8_t> zero = net::encode_snapshot(s);
-	s.echo_hold_100us = 0xFFFFu;
-	const std::vector<uint8_t> ones = net::encode_snapshot(s);
-	REQUIRE(zero.size() == ones.size());
-	std::vector<uint8_t> mask(zero.size());
-	int bits = 0;
-	for (size_t i = 0; i < mask.size(); ++i) {
-		mask[i] = uint8_t(zero[i] ^ ones[i]);
-		bits += std::popcount(mask[i]);
-	}
-	CHECK(bits == 16);
-	return mask;
-}
-
 struct StreamRecorder {
-	std::vector<uint8_t> hold_mask = echo_hold_mask();
+	std::vector<uint8_t> hold_mask = tt::detail::echo_hold_mask();
 	tt::detail::Fnv stream;
 	tt::detail::Fnv states;
 	uint64_t datagrams = 0;
