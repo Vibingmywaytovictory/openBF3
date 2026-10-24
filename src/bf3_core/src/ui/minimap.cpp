@@ -374,7 +374,51 @@ Result<MinimapProfile> read_minimap_profile(const EbxResolver &p_db, WorkBudget 
 			return make_error(std::string(kMinimapInitGraph) + ": a profile zoom step outside the MapZoom Steps");
 		}
 	}
+	bool init_found = false;
+	for (const EbxInstance &node : graph->instances_of("DataSetNode")) {
+		BF3_TRY(r_budget.charge(1));
+		const std::optional<EbxValue> name = node.get("Name");
+		if (!name || name->as_str().value_or(std::string_view()) != kMinimapInitSmallNode) {
+			continue;
+		}
+		const std::optional<EbxValue> param = node.get("Param");
+		const std::string_view p = param ? param->as_str().value_or(std::string_view()) : std::string_view();
+		if (p != "True" && p != "False") {
+			return make_error(std::string(kMinimapInitGraph) + ": InitSmall Param is not True or False");
+		}
+		out.init_small = p == "True";
+		init_found = true;
+	}
+	if (!init_found) {
+		return make_error(std::string(kMinimapInitGraph) + ": no InitSmall DataSetNode");
+	}
+	bool max_found = false;
+	for (const EbxInstance &node : graph->instances_of("OperandLogicNode")) {
+		BF3_TRY(r_budget.charge(1));
+		const std::optional<EbxValue> name = node.get("Name");
+		if (!name || name->as_str().value_or(std::string_view()) != kMinimapMaxZoomNode) {
+			continue;
+		}
+		const std::optional<EbxValue> op = node.get("Operator");
+		const std::optional<EbxValue> literal = node.get("RightLiteralOperand");
+		if (!op || op->enum_name().value_or(std::string_view()) != kMinimapMaxZoomOperator || !literal || !std::isfinite(literal->as_f32().value_or(std::nanf("")))) {
+			return make_error(std::string(kMinimapInitGraph) + ": IsMaxZoom is not a GreaterThanOrEqual against a literal step");
+		}
+		out.max_zoom_step = *literal->as_f32();
+		max_found = true;
+	}
+	if (!max_found) {
+		return make_error(std::string(kMinimapInitGraph) + ": no IsMaxZoom OperandLogicNode");
+	}
 	return out;
+}
+
+MinimapZoom minimap_zoom(const MinimapProfile &p_profile, bool p_small) {
+	MinimapZoom z;
+	z.step = p_small ? p_profile.zoom_small_step : p_profile.zoom_large_step;
+	z.zoom = z.step >= 0 && size_t(z.step) < p_profile.zoom_steps.size() ? p_profile.zoom_steps[size_t(z.step)] : 0.0f;
+	z.player_is_center = p_small || !(float(z.step) >= p_profile.max_zoom_step);
+	return z;
 }
 
 Result<MinimapLevel> read_minimap_level(const level::LoadedLevel &p_level, const level::World &p_world) {

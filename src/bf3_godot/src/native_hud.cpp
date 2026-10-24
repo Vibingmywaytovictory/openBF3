@@ -451,6 +451,13 @@ void Bf3NativeHud::step(double p_seconds) {
 	if (damage_ != nullptr) {
 		damage_->update(model_, message_clock_);
 	}
+	bool client_changed = false;
+	if (const std::shared_ptr<const MinimapAssets> a = !minimap_profile_applied_ && minimap_ready() ? minimap_source_->assets() : nullptr) {
+		client_.minimap_small = a->level.profile.init_small;
+		client_.minimap_zoom = ui::minimap_zoom(a->level.profile, a->level.profile.init_small).zoom;
+		minimap_profile_applied_ = true;
+		client_changed = true;
+	}
 	for (size_t i = 0; i < kNativeHudViews; ++i) {
 		Bf3SwfView *v = views_[i];
 		ui::HudScreen *s = screens_[i].get();
@@ -462,7 +469,7 @@ void Bf3NativeHud::step(double p_seconds) {
 		rects.original = v->scene()->stage();
 		s->set_stage_rects(rects);
 		const float stage_h = rects.visible.height();
-		if (s->client().vertical_fov_deg != float(vfov_deg_) || s->client().stage_height != stage_h) {
+		if (client_changed || s->client().vertical_fov_deg != float(vfov_deg_) || s->client().stage_height != stage_h) {
 			client_.vertical_fov_deg = float(vfov_deg_);
 			client_.stage_height = stage_h;
 			s->set_client(client_);

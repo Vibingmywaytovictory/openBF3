@@ -146,13 +146,15 @@ TEST_SUITE("ui-minimap") {
 			const LevelMinimap m = read_level_minimap(install, *lvl);
 			const MinimapProfile &pr = m.profile;
 			const bool profile_ok = pr.texture_opacity == 0.5f && pr.zoom_small_step == 0 && pr.zoom_large_step == 2 && pr.zoom_nodes == 2 &&
-					pr.zoom_steps == std::vector<float>{ 0.0f, 0.4f, 1.2f } && pr.zoom_small() == 0.0f;
+					pr.zoom_steps == std::vector<float>{ 0.0f, 0.4f, 1.2f } && pr.zoom_small() == 0.0f && pr.init_small && pr.max_zoom_step == 2.0f &&
+					minimap_zoom(pr, true).zoom == 0.0f && minimap_zoom(pr, true).player_is_center && minimap_zoom(pr, false).zoom == 1.2f &&
+					!minimap_zoom(pr, false).player_is_center;
 			const bool ok = m.error.empty() && m.data.world_center[0] == e.cx && m.data.world_center[1] == e.cz && m.data.world_size == e.size &&
 					m.sat_w == e.side && m.sat_h == e.side && profile_ok;
 			all = all && ok;
 			detail += std::string(e.id) + " (" + fmt("%g, %g)/%g", m.data.world_center[0], m.data.world_center[1], m.data.world_size) + " satellite " +
-					std::to_string(m.sat_w) + "x" + std::to_string(m.sat_h) + fmt(" opacity %g, MapZoom steps %zu x%zu, small step %d -> zoom %g, large step %d", pr.texture_opacity,
-							pr.zoom_steps.size(), pr.zoom_nodes, pr.zoom_small_step, pr.zoom_small(), pr.zoom_large_step) +
+					std::to_string(m.sat_w) + "x" + std::to_string(m.sat_h) + fmt(" opacity %g, MapZoom steps %zu x%zu, small step %d -> zoom %g, large step %d -> zoom %g, InitSmall %d, IsMaxZoom >= %g", pr.texture_opacity,
+							pr.zoom_steps.size(), pr.zoom_nodes, pr.zoom_small_step, pr.zoom_small(), pr.zoom_large_step, minimap_zoom(pr, false).zoom, int(pr.init_small), pr.max_zoom_step) +
 					(m.error.empty() ? "" : " ERROR " + m.error) + "; ";
 		}
 		t2::row("minimap.reference", all, detail);

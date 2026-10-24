@@ -216,6 +216,9 @@ inline constexpr std::string_view kMinimapZoomSmallOption = "profile/minimapzoom
 inline constexpr std::string_view kMinimapZoomLargeOption = "profile/minimapzoomwhenmapislarge";
 inline constexpr std::string_view kMinimapInitGraph = "ui/flow/graph/ingame/playingminimapinit";
 inline constexpr std::string_view kMinimapZoomNode = "MapZoom";
+inline constexpr std::string_view kMinimapInitSmallNode = "InitSmall";
+inline constexpr std::string_view kMinimapMaxZoomNode = "IsMaxZoom";
+inline constexpr std::string_view kMinimapMaxZoomOperator = "UILogicOperator_GreaterThanOrEqual";
 inline constexpr size_t kMaxMinimapZoomSteps = 16;
 
 struct MinimapProfile {
@@ -224,9 +227,19 @@ struct MinimapProfile {
 	int32_t zoom_large_step = 0;
 	std::vector<float> zoom_steps;
 	size_t zoom_nodes = 0;
+	bool init_small = false;
+	float max_zoom_step = 0.0f;
 
 	float zoom_small() const { return zoom_small_step >= 0 && size_t(zoom_small_step) < zoom_steps.size() ? zoom_steps[size_t(zoom_small_step)] : 0.0f; }
 };
+
+struct MinimapZoom {
+	int32_t step = 0;
+	float zoom = 0.0f;
+	bool player_is_center = true;
+};
+
+MinimapZoom minimap_zoom(const MinimapProfile &p_profile, bool p_small);
 
 Result<MinimapProfile> read_minimap_profile(const EbxResolver &p_db, level::WorkBudget &r_budget);
 

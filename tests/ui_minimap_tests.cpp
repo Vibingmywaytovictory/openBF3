@@ -58,6 +58,31 @@ bool in_corner_box(float p_x, float p_z) {
 }
 
 TEST_SUITE("ui-minimap-unit") {
+	TEST_CASE("minimap_zoom: the MapZoom step of the current map size, the player centred unless the large map is at IsMaxZoom") {
+		ui::MinimapProfile p;
+		p.zoom_steps = { 0.0f, 0.4f, 1.2f };
+		p.zoom_small_step = 0;
+		p.zoom_large_step = 2;
+		p.max_zoom_step = 2.0f;
+		p.init_small = true;
+		const ui::MinimapZoom small = ui::minimap_zoom(p, true);
+		CHECK(small.step == 0);
+		CHECK(small.zoom == 0.0f);
+		CHECK(small.player_is_center);
+		const ui::MinimapZoom large = ui::minimap_zoom(p, false);
+		CHECK(large.step == 2);
+		CHECK(large.zoom == 1.2f);
+		CHECK_FALSE(large.player_is_center);
+		p.zoom_large_step = 1;
+		CHECK(ui::minimap_zoom(p, false).zoom == 0.4f);
+		CHECK(ui::minimap_zoom(p, false).player_is_center);
+		p.zoom_small_step = 2;
+		CHECK(ui::minimap_zoom(p, true).zoom == 1.2f);
+		CHECK(ui::minimap_zoom(p, true).player_is_center);
+		p.zoom_small_step = 7;
+		CHECK(ui::minimap_zoom(p, true).zoom == 0.0f);
+	}
+
 	TEST_CASE("l8_mip_chain: sizes down to 1x1 and a 2x2 box filter") {
 		ui::L8Image img = make_image(4, 2, 0);
 		img.texels = { 0, 10, 20, 30, 40, 50, 60, 70 };

@@ -983,9 +983,11 @@ void NativeHudMomentRun::check(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, 
 		const float registered = std::remainder(native_hud_moment_registered_heading_deg(p_moment) - k0, 360.0f);
 		const float shown = std::remainder(bf3::host::hud_compass_heading_deg(mp.yaw) - k0, 360.0f);
 		const bool detail_ok = p_moment.detail_ambiguous ? detail_to_area > area_texel : detail_to_area <= area_texel;
-		const float zoom = map->profile.zoom_small();
-		row(id + ".minimap", mp.valid && zoom == 0.0f && area_texel > 0.0f && state_to_area <= area_texel && detail_ok && registered >= low && registered <= high && shown >= low && shown <= high,
-				"MapZoom step " + std::to_string(map->profile.zoom_small_step) + " = " + std::to_string(zoom) + ", opacity " + std::to_string(map->profile.texture_opacity) +
+		const ui::MinimapZoom want_zoom = ui::minimap_zoom(map->profile, map->profile.init_small);
+		const float zoom = r_hud.client().minimap_zoom;
+		row(id + ".minimap", mp.valid && r_hud.client().minimap_small == map->profile.init_small && zoom == want_zoom.zoom && want_zoom.player_is_center && zoom == 0.0f && area_texel > 0.0f && state_to_area <= area_texel && detail_ok && registered >= low && registered <= high && shown >= low && shown <= high,
+				std::string(r_hud.client().minimap_small ? "small" : "large") + " map, MapZoom step " + std::to_string(want_zoom.step) + " = " + std::to_string(zoom) +
+						(want_zoom.player_is_center ? ", player centred" : ", player not centred") + ", opacity " + std::to_string(map->profile.texture_opacity) +
 						"; state texel " + std::to_string(state_to_area) + " and detail registration " + std::to_string(detail_to_area) + (p_moment.detail_ambiguous ? " (ambiguous)" : "") +
 						" texels from the combat-area registration, bound one combat-area texel " + std::to_string(area_texel) + "; registered heading " +
 						std::to_string(registered) + " and shown " + std::to_string(shown) + " deg from compass frame " + std::to_string(int32_t(k0)) + ", compass interval [" +

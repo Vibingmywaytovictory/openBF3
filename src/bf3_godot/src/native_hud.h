@@ -145,6 +145,7 @@ private:
 	bf3::core::ui::HudModel model_{};
 	uint64_t stepped_serial_ = 0;
 	bf3::core::ui::HudClientState client_;
+	bool minimap_profile_applied_ = false;
 	std::unique_ptr<bf3::core::ui::HudMessageComp> messages_;
 	std::unique_ptr<bf3::core::ui::HudDamageIndicatorComp> damage_;
 	double message_clock_ = 0.0;
