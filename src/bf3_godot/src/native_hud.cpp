@@ -347,6 +347,14 @@ std::optional<ui::MinimapLevel> Bf3NativeHud::minimap_level() {
 	return a != nullptr ? std::optional<ui::MinimapLevel>(a->level) : std::nullopt;
 }
 
+uint32_t Bf3NativeHud::minimap_combat_area_side() {
+	if (!minimap_ready()) {
+		return 0;
+	}
+	std::shared_ptr<const MinimapAssets> a = minimap_source_->assets();
+	return a != nullptr ? a->combat_area_side : 0;
+}
+
 bool Bf3NativeHud::minimap_ready() {
 	if (minimap_source_ == nullptr && is_inside_tree()) {
 		const TypedArray<Node> found = get_tree()->get_root()->find_children("*", "Bf3MinimapHud", true, false);

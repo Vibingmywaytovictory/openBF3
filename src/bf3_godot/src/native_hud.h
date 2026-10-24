@@ -99,6 +99,7 @@ public:
 	std::optional<bf3::core::ui::SwfRect> window_bounds(size_t p_view, std::string_view p_path) const;
 	double ekg_clock() const { return ekg_clock_; }
 	std::optional<bf3::core::ui::MinimapLevel> minimap_level();
+	uint32_t minimap_combat_area_side();
 	const NativeHudMinimapPose &minimap_pose() const { return pose_; }
 	void set_ekg_clock(double p_seconds) { ekg_clock_ = p_seconds; }
 	void set_additive_coverage(bool p_coverage);

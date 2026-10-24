@@ -43,19 +43,24 @@ struct NativeHudMoment {
 	int32_t compass_frame = 0;
 	float dispersion_px = 0.0f;
 	bool crosshair = false;
-	float world_x = 0.0f;
-	float world_z = 0.0f;
 	float map_texel_x = 0.0f;
 	float map_texel_y = 0.0f;
 	float map_rotation_deg = 0.0f;
-	bool pose_ambiguous = false;
+	float area_texel_x = 0.0f;
+	float area_texel_y = 0.0f;
+	float area_rotation_deg = 0.0f;
+	int32_t compass_next = 0;
+	bool detail_ambiguous = false;
 };
 
 std::span<const NativeHudMoment> native_hud_moments();
 
 bf3::core::ui::HudModel native_hud_moment_model(const NativeHudMoment &p_moment, const bf3::core::ui::HudModel &p_base, float p_vfov_deg, float p_stage_height);
-NativeHudMinimapPose native_hud_moment_pose(const NativeHudMoment &p_moment, const bf3::core::ui::MinimapMapping &p_mapping, float p_texture_side);
+float native_hud_moment_heading_deg(const NativeHudMoment &p_moment);
 float native_hud_moment_view_yaw(const NativeHudMoment &p_moment);
+std::array<float, 2> native_hud_moment_texel(const NativeHudMoment &p_moment);
+float native_hud_moment_registered_heading_deg(const NativeHudMoment &p_moment);
+NativeHudMinimapPose native_hud_moment_pose(const bf3::sim::Vec3 &p_own, float p_view_yaw);
 std::optional<bf3::sim::Vec3> native_hud_moment_feet(const bf3::sim::CollisionWorld &p_world, const bf3::sim::MotorParams &p_motor, std::span<const bf3::sim::SpawnPoint> p_spawns,
 		float p_x, float p_z);
 std::optional<bf3::sim::Vec3> native_hud_moment_floor_near(const bf3::sim::CollisionWorld &p_world, const bf3::sim::MotorParams &p_motor,

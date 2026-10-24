@@ -13,6 +13,7 @@
 #include "bf3/core/ui/swf_scene.h"
 #include "bf3/core/ui/text_db.h"
 #include "bf3/host/client_session.h"
+#include "bf3/host/hud_feed.h"
 #include "bf3/host/level_load.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/collision_world.h"
@@ -44,22 +45,22 @@ namespace ui = bf3::core::ui;
 namespace {
 
 constexpr std::array<NativeHudMoment, 16> kMoments{ {
-		{ "m01", 20, 100, 1, 100, 0, 4, 295, 44.125f, true, -140.0f, -455.0f, 678.0f, 926.0f, 66.0f, true },
-		{ "m02", 25, 217, 1, 100, 9, 12, 212, 95.250f, true, -208.0f, -508.0f, 722.0f, 857.0f, 152.0f },
-		{ "m03", 31, 124, 1, 100, 50, 61, 270, 95.250f, true, -251.0f, -500.0f, 765.0f, 851.0f, 91.5f },
-		{ "m04", 31, 217, 1, 100, 73, 83, 49, 99.250f, true, -217.0f, -557.0f, 726.0f, 910.0f, 312.5f },
-		{ "m05", 30, 217, 1, 100, 74, 83, 82, 97.250f, true, -217.0f, -557.0f, 728.0f, 909.0f, 279.5f },
-		{ "m06", 6, 217, 1, 94, 79, 85, 68, 115.375f, true, -129.0f, -535.0f, 760.0f, 920.0f, 294.0f, true },
-		{ "m07", 31, 192, 1, 94, 79, 85, 289, 96.125f, true, -112.0f, -543.0f, 792.0f, 926.0f, 69.0f },
-		{ "m08", 21, 192, 1, 94, 79, 87, 286, 72.250f, false, -232.0f, -554.0f, 752.0f, 912.0f, 76.5f, true },
-		{ "m09", 31, 168, 1, 100, 81, 88, 285, 115.250f, true, -222.0f, -558.0f, 734.0f, 914.0f, 77.0f },
-		{ "m10", 31, 168, 1, 74, 85, 89, 87, 99.250f, true, -207.0f, -548.0f, 717.0f, 897.0f, 275.0f },
-		{ "m11", 0, 0, 0, 87, 85, 89, 69, 4.250f, false, -207.0f, -549.0f, 717.0f, 898.0f, 293.0f },
-		{ "m12", 17, 217, 0, 100, 87, 89, 302, 115.250f, true, -210.0f, -543.0f, 723.0f, 896.0f, 59.5f },
-		{ "m13", 31, 217, 1, 100, 90, 93, 3, 92.000f, true, -174.0f, -516.0f, 684.0f, 868.0f, 359.5f },
-		{ "m14", 31, 217, 1, 100, 92, 98, 192, 115.250f, true, -171.0f, -533.0f, 685.0f, 882.0f, 168.5f },
-		{ "m15", 31, 217, 1, 100, 92, 99, 135, 115.250f, true, -173.0f, -542.0f, 685.0f, 889.0f, 229.5f },
-		{ "m16", 17, 199, 0, 100, 87, 89, 80, 97.250f, true, -212.0f, -548.0f, 724.0f, 898.0f, 286.0f },
+		{ "m01", 20, 100, 1, 100, 0, 4, 295, 44.125f, true, 678.0f, 926.0f, 66.0f, 679.0f, 926.0f, 66.0f, 296 },
+		{ "m02", 25, 217, 1, 100, 9, 12, 212, 95.250f, true, 722.0f, 857.0f, 152.0f, 722.0f, 857.0f, 152.5f, 210 },
+		{ "m03", 31, 124, 1, 100, 50, 61, 270, 95.250f, true, 765.0f, 851.0f, 91.5f, 764.0f, 851.0f, 90.75f, 270 },
+		{ "m04", 31, 217, 1, 100, 73, 83, 49, 99.250f, true, 726.0f, 910.0f, 312.5f, 727.0f, 909.0f, 313.5f, 49 },
+		{ "m05", 30, 217, 1, 100, 74, 83, 82, 97.250f, true, 728.0f, 909.0f, 279.5f, 728.0f, 908.0f, 279.75f, 82 },
+		{ "m06", 6, 217, 1, 94, 79, 85, 68, 115.375f, true, 760.0f, 920.0f, 294.0f, 760.0f, 919.0f, 294.75f, 59 },
+		{ "m07", 31, 192, 1, 94, 79, 85, 289, 96.125f, true, 792.0f, 926.0f, 69.0f, 758.0f, 912.0f, 72.25f, 289, true },
+		{ "m08", 21, 192, 1, 94, 79, 87, 286, 72.250f, false, 752.0f, 912.0f, 76.5f, 752.0f, 912.0f, 76.0f, 286 },
+		{ "m09", 31, 168, 1, 100, 81, 88, 285, 115.250f, true, 734.0f, 914.0f, 77.0f, 736.0f, 914.0f, 78.0f, 285 },
+		{ "m10", 31, 168, 1, 74, 85, 89, 87, 99.250f, true, 717.0f, 897.0f, 275.0f, 718.0f, 898.0f, 274.75f, 87 },
+		{ "m11", 0, 0, 0, 87, 85, 89, 69, 4.250f, false, 717.0f, 898.0f, 293.0f, 719.0f, 897.0f, 293.25f, 69 },
+		{ "m12", 17, 217, 0, 100, 87, 89, 302, 115.250f, true, 723.0f, 896.0f, 59.5f, 723.0f, 895.0f, 59.5f, 302 },
+		{ "m13", 31, 217, 1, 100, 90, 93, 3, 92.000f, true, 684.0f, 868.0f, 359.5f, 684.0f, 868.0f, 0.0f, 2 },
+		{ "m14", 31, 217, 1, 100, 92, 98, 192, 115.250f, true, 685.0f, 882.0f, 168.5f, 685.0f, 882.0f, 169.0f, 192 },
+		{ "m15", 31, 217, 1, 100, 92, 99, 135, 115.250f, true, 685.0f, 889.0f, 229.5f, 686.0f, 890.0f, 229.75f, 129 },
+		{ "m16", 17, 199, 0, 100, 87, 89, 80, 97.250f, true, 724.0f, 898.0f, 286.0f, 724.0f, 899.0f, 286.0f, 75 },
 } };
 
 constexpr double kSettleSeconds = 3.0;
@@ -68,6 +69,7 @@ constexpr int32_t kRenderFrames = 3;
 constexpr double kAliveTimeout = 90.0;
 constexpr double kArriveTimeout = 10.0;
 constexpr float kMapRegistrationTexels = 1024.0f;
+constexpr float kRegistrationRotationStep = 0.5f;
 
 enum class MomentFade : uint8_t { None, In, Out };
 
@@ -226,7 +228,6 @@ constexpr uint32_t kScanMaxFloors = 64;
 constexpr float kFloorNormalY = 0.7f;
 constexpr float kNearStep = 0.5f;
 constexpr float kNearRadius = 8.0f;
-constexpr float kNearRadiusAmbiguous = 64.0f;
 
 struct MomentFloor {
 	sim::Vec3 at{};
@@ -457,7 +458,7 @@ ui::HudModel native_hud_moment_model(const NativeHudMoment &p_moment, const ui::
 	ui::HudModel m = p_base;
 	m.soldier.is_alive = true;
 	m.soldier.health = float(p_moment.health);
-	m.soldier.compass_angle = float(p_moment.compass_frame);
+	m.soldier.compass_angle = bf3::host::hud_compass_heading_deg(native_hud_moment_view_yaw(p_moment));
 	ui::HudWeapon &w = m.weapon;
 	w.active_weapon_ammo = p_moment.clip;
 	w.active_weapon_ammo_in_bag = p_moment.reserve;
@@ -487,16 +488,27 @@ ui::HudModel native_hud_moment_model(const NativeHudMoment &p_moment, const ui::
 	return m;
 }
 
-float native_hud_moment_view_yaw(const NativeHudMoment &p_moment) {
-	return float(double(p_moment.compass_frame) * bf3::core::kDegToRad);
+float native_hud_moment_heading_deg(const NativeHudMoment &p_moment) {
+	return float(p_moment.compass_frame - 1) - 0.5f;
 }
 
-NativeHudMinimapPose native_hud_moment_pose(const NativeHudMoment &p_moment, const ui::MinimapMapping &p_mapping, float p_texture_side) {
+float native_hud_moment_view_yaw(const NativeHudMoment &p_moment) {
+	return float(-double(native_hud_moment_heading_deg(p_moment)) * bf3::core::kDegToRad);
+}
+
+std::array<float, 2> native_hud_moment_texel(const NativeHudMoment &p_moment) {
+	return p_moment.detail_ambiguous ? std::array<float, 2>{ p_moment.area_texel_x, p_moment.area_texel_y } : std::array<float, 2>{ p_moment.map_texel_x, p_moment.map_texel_y };
+}
+
+float native_hud_moment_registered_heading_deg(const NativeHudMoment &p_moment) {
+	return 360.0f - (p_moment.detail_ambiguous ? p_moment.area_rotation_deg : p_moment.map_rotation_deg);
+}
+
+NativeHudMinimapPose native_hud_moment_pose(const sim::Vec3 &p_own, float p_view_yaw) {
 	NativeHudMinimapPose p;
-	const std::array<float, 2> w = ui::minimap_uv_to_world(p_mapping, { p_moment.map_texel_x / p_texture_side, p_moment.map_texel_y / p_texture_side });
-	p.x = w[0];
-	p.z = w[1];
-	p.yaw = float((360.0 - double(p_moment.map_rotation_deg)) * bf3::core::kDegToRad);
+	p.x = p_own[0];
+	p.z = p_own[2];
+	p.yaw = p_view_yaw;
 	p.valid = true;
 	return p;
 }
@@ -632,8 +644,7 @@ void NativeHudMomentRun::hold(Bf3LevelSession &r_session, const NativeHudMoment 
 
 void NativeHudMomentRun::settle(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, const NativeHudMoment &p_moment, ui::HudModel p_model) {
 	const std::string id = p_moment.id;
-	const std::optional<ui::MinimapLevel> map = r_hud.minimap_level();
-	const NativeHudMinimapPose pose = map ? native_hud_moment_pose(p_moment, ui::minimap_mapping(map->data), kMapRegistrationTexels) : NativeHudMinimapPose{};
+	const NativeHudMinimapPose pose = native_hud_moment_pose(feet_, native_hud_moment_view_yaw(p_moment));
 	expect_kills_.clear();
 	expect_kill_frames_.clear();
 	reference_kill_alphas_.clear();
@@ -939,8 +950,18 @@ void NativeHudMomentRun::check(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, 
 	text_is("grenades", "instance1.Ammo_01.Ammo.grtxt.txtDisplay", std::to_string(p_moment.grenades));
 	text_is("health", "instance1.Health_01.Health.healthHolder.amtxt.txtDisplay", std::to_string(p_moment.health));
 	const ui::SwfSceneNode *cps = node_of(r_hud, "instance1.Compass_01.multiplayerCompass.cps");
-	row(id + ".compass", cps != nullptr && int32_t(cps->frame) == p_moment.compass_frame,
-			"cps frame " + (cps != nullptr ? std::to_string(cps->frame) : std::string("missing")) + ", want " + std::to_string(p_moment.compass_frame));
+	row(id + ".compass", cps != nullptr && int32_t(cps->frame) == p_moment.compass_frame - 1,
+			"cps frame " + (cps != nullptr ? std::to_string(cps->frame) : std::string("missing")) + ", want the reference's gotoAndStop " + std::to_string(p_moment.compass_frame) + " - 1");
+	const NativeHudMinimapPose &mp = r_hud.minimap_pose();
+	const float view_yaw = native_hud_moment_view_yaw(p_moment);
+	const float own_offset = std::hypot(mp.x - feet_[0], mp.z - feet_[2]);
+	const float yaw_offset = std::fabs(std::remainder(mp.yaw - view_yaw, float(2.0 * std::numbers::pi)));
+	const int32_t state_frame = ui::hud_compass_frame(bf3::host::hud_compass_heading_deg(mp.yaw));
+	row(id + ".state", mp.valid && own_offset == 0.0f && at_feet(f.own_curr.position, feet_) && yaw_offset < 1e-5f && f.own_curr.yaw == sim::quantize_yaw(mp.yaw) && cps != nullptr &&
+					int32_t(cps->frame) == state_frame,
+			"minimap pose " + std::to_string(own_offset) + " m from the state feet, own soldier at " + xyz(f.own_curr.position) + ", yaw offset " + std::to_string(yaw_offset) + " rad, own yaw " + std::to_string(f.own_curr.yaw) +
+					" want " + std::to_string(sim::quantize_yaw(mp.yaw)) + ", cps frame " + (cps != nullptr ? std::to_string(cps->frame) : std::string("missing")) +
+					" want " + std::to_string(state_frame) + " from the minimap yaw");
 	const NativeHudPaintStats &ps = r_hud.paint_stats();
 	row(id + ".engine_targets", ps.bg_panels > 0 && ps.ekg_traces > 0 && ps.minimap_maps > 0,
 			"iBgDraw panels " + std::to_string(ps.bg_panels) + ", EKG traces " + std::to_string(ps.ekg_traces) + ", minimap maps " + std::to_string(ps.minimap_maps) +
@@ -949,15 +970,26 @@ void NativeHudMomentRun::check(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, 
 	if (!map) {
 		row(id + ".minimap", false, "no minimap level");
 	} else {
-		const NativeHudMinimapPose &mp = r_hud.minimap_pose();
 		const ui::MinimapUv uv = ui::world_to_minimap_uv(ui::minimap_mapping(map->data), mp.x, mp.z);
-		const float texel_error = std::max(std::fabs(uv.u * kMapRegistrationTexels - p_moment.map_texel_x), std::fabs(uv.v * kMapRegistrationTexels - p_moment.map_texel_y));
-		const float rotation_error = std::fabs(std::remainder(360.0f - float(double(mp.yaw) / bf3::core::kDegToRad) - p_moment.map_rotation_deg, 360.0f));
+		const uint32_t area_side = r_hud.minimap_combat_area_side();
+		const float area_texel = area_side > 0 ? kMapRegistrationTexels / float(area_side) : 0.0f;
+		const auto apart = [](float p_ax, float p_ay, float p_bx, float p_by) { return std::max(std::fabs(p_ax - p_bx), std::fabs(p_ay - p_by)); };
+		const float state_to_area = apart(uv.u * kMapRegistrationTexels, uv.v * kMapRegistrationTexels, p_moment.area_texel_x, p_moment.area_texel_y);
+		const float detail_to_area = apart(p_moment.map_texel_x, p_moment.map_texel_y, p_moment.area_texel_x, p_moment.area_texel_y);
+		const float k0 = float(p_moment.compass_frame - 1);
+		const float turn = std::remainder(float(p_moment.compass_next - p_moment.compass_frame), 360.0f);
+		const float low = std::min(0.0f, turn) - 1.0f - kRegistrationRotationStep;
+		const float high = std::max(0.0f, turn) + kRegistrationRotationStep;
+		const float registered = std::remainder(native_hud_moment_registered_heading_deg(p_moment) - k0, 360.0f);
+		const float shown = std::remainder(bf3::host::hud_compass_heading_deg(mp.yaw) - k0, 360.0f);
+		const bool detail_ok = p_moment.detail_ambiguous ? detail_to_area > area_texel : detail_to_area <= area_texel;
 		const float zoom = map->profile.zoom_small();
-		row(id + ".minimap", mp.valid && zoom == 0.0f && texel_error < 0.01f && rotation_error < 0.01f,
-				"MapZoom step " + std::to_string(map->profile.zoom_small_step) + " = " + std::to_string(zoom) + " (m/unit measured at zoom 0), opacity " +
-						std::to_string(map->profile.texture_opacity) + ", registration texel error " + std::to_string(texel_error) + ", rotation error " +
-						std::to_string(rotation_error));
+		row(id + ".minimap", mp.valid && zoom == 0.0f && area_texel > 0.0f && state_to_area <= area_texel && detail_ok && registered >= low && registered <= high && shown >= low && shown <= high,
+				"MapZoom step " + std::to_string(map->profile.zoom_small_step) + " = " + std::to_string(zoom) + ", opacity " + std::to_string(map->profile.texture_opacity) +
+						"; state texel " + std::to_string(state_to_area) + " and detail registration " + std::to_string(detail_to_area) + (p_moment.detail_ambiguous ? " (ambiguous)" : "") +
+						" texels from the combat-area registration, bound one combat-area texel " + std::to_string(area_texel) + "; registered heading " +
+						std::to_string(registered) + " and shown " + std::to_string(shown) + " deg from compass frame " + std::to_string(int32_t(k0)) + ", compass interval [" +
+						std::to_string(low) + ", " + std::to_string(high) + "]");
 	}
 	check_messages(r_hud, p_moment);
 	check_squad(r_hud, p_moment);
@@ -1028,10 +1060,18 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 			host::ClientSession *client = r_session.client();
 			const sim::CollisionWorld *world = r_session.collision_world();
 			const std::shared_ptr<const host::SharedLevel> level = r_session.shared_level();
+			const std::optional<ui::MinimapLevel> map = r_hud.minimap_level();
+			if (!map) {
+				row(std::string(m.id) + ".place", false, "no minimap level to place the registration texel");
+				phase_ = Phase::Done;
+				return true;
+			}
+			const std::array<float, 2> texel = native_hud_moment_texel(m);
+			const std::array<float, 2> at_xz = ui::minimap_uv_to_world(ui::minimap_mapping(map->data), { texel[0] / kMapRegistrationTexels, texel[1] / kMapRegistrationTexels });
 			const std::optional<sim::Vec3> feet =
-					world != nullptr && level != nullptr ? native_hud_moment_floor_near(*world, level->motor, level->spawns, m.world_x, m.world_z, m.pose_ambiguous ? kNearRadiusAmbiguous : kNearRadius) : std::nullopt;
-			if (m.pose_ambiguous) {
-				UtilityFunctions::print(String::utf8((std::string("NATIVE HUD FLAG ") + m.id + " the reference marks this minimap pose ambiguous").c_str()));
+					world != nullptr && level != nullptr ? native_hud_moment_floor_near(*world, level->motor, level->spawns, at_xz[0], at_xz[1], kNearRadius) : std::nullopt;
+			if (m.detail_ambiguous) {
+				UtilityFunctions::print(String::utf8((std::string("NATIVE HUD FLAG ") + m.id + " the detail registration disagrees with the combat-area registration; the state uses the combat-area one").c_str()));
 			}
 			if (client == nullptr) {
 				row(std::string(m.id) + ".place", false, "no client");
@@ -1039,13 +1079,13 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 				return true;
 			}
 			if (!feet) {
-				row(std::string(m.id) + ".place", false, "no floor under (" + std::to_string(m.world_x) + ", " + std::to_string(m.world_z) + ")");
+				row(std::string(m.id) + ".place", false, "no floor under (" + std::to_string(at_xz[0]) + ", " + std::to_string(at_xz[1]) + ")");
 				feet_ = r_session.frame().own_curr.position;
 				phase_ = Phase::Settle;
 				return false;
 			}
 			feet_ = *feet;
-			const float off = std::hypot(feet_[0] - m.world_x, feet_[2] - m.world_z);
+			const float off = std::hypot(feet_[0] - at_xz[0], feet_[2] - at_xz[1]);
 			if (off > kArriveXz) {
 				UtilityFunctions::print(String::utf8((std::string("NATIVE HUD FLAG ") + m.id + " no clear standing floor at the reference xz; the nearest is " + std::to_string(off) + " m away at " + xyz(feet_)).c_str()));
 			}
