@@ -17,10 +17,9 @@ constexpr uint32_t kShotAtTicks = 120;
 
 }
 
-void BotAwareness::new_life(sim::Tick p_tick, const sim::SoldierState &p_state) {
+void BotAwareness::new_life(sim::Tick p_tick) {
 	perception_.reset();
-	last_health_ = p_state.health;
-	damaged_tick_ = shot_at_tick_ = 0;
+	shot_at_tick_ = 0;
 	shot_by_ = -1;
 	shots_checked_ = p_tick;
 }
@@ -48,10 +47,6 @@ void BotAwareness::check_shots(const TdmShared &p_shared, uint8_t p_slot, sim::T
 		}
 	}
 	shots_checked_ = p_tick;
-	if (p_self.health < last_health_ - 0.01f) {
-		damaged_tick_ = p_tick;
-	}
-	last_health_ = p_self.health;
 }
 
 void BotAwareness::perceive(TdmShared &r_shared, uint8_t p_slot, uint64_t p_seed, sim::Tick p_tick, const sim::SoldierState &p_self,

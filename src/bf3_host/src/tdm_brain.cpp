@@ -175,7 +175,7 @@ struct TdmBrain::Impl {
 		kit = shared->host.rules ? view.kit(slot) : (shared->host.gunplay != nullptr ? shared->host.gunplay->kit(slot) : uint8_t(0));
 		view_yaw = sim::yaw_radians(p_state.yaw);
 		view_pitch = 0.0f;
-		awareness.new_life(p_tick, p_state);
+		awareness.new_life(p_tick);
 		targeting.new_life();
 		hunt.new_life();
 		weapons.new_life(p_tick);

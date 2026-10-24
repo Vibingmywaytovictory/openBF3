@@ -13,7 +13,7 @@ namespace bf3::host::tdm_bot {
 class BotAwareness {
 public:
 	void configure(const sim::bots::PerceptionParams &p_params) { perception_ = sim::bots::Perception(p_params); }
-	void new_life(sim::Tick p_tick, const sim::SoldierState &p_state);
+	void new_life(sim::Tick p_tick);
 
 	void check_shots(const TdmShared &p_shared, uint8_t p_slot, sim::Tick p_tick, const sim::SoldierState &p_self);
 	void perceive(TdmShared &r_shared, uint8_t p_slot, uint64_t p_seed, sim::Tick p_tick, const sim::SoldierState &p_self,
@@ -27,8 +27,6 @@ public:
 
 private:
 	sim::bots::Perception perception_;
-	float last_health_ = 100.0f;
-	sim::Tick damaged_tick_ = 0;
 	sim::Tick shot_at_tick_ = 0;
 	int shot_by_ = -1;
 	sim::Vec3 shot_from_{};
