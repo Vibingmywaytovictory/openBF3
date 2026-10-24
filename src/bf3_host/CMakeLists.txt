@@ -41,6 +41,10 @@ target_sources(bf3_host PRIVATE
     src/server_spawner.cpp
     src/server_spawner.h
     src/client_session.cpp
+    src/client_loop.cpp
+    src/client_loop.h
+    src/client_ticks.h
+    src/client_transport.h
     src/rest_check.cpp
     include/bf3/host/rest_check.h
 )
