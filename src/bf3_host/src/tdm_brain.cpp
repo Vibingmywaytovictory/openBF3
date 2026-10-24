@@ -73,7 +73,7 @@ struct BotFrame {
 	bool visible;
 	int target;
 	bool shot_recent;
-	const BotArms &arms;
+	BotArms arms;
 	const DownedSoldier *revive;
 };
 
@@ -218,7 +218,6 @@ struct TdmBrain::Impl {
 
 	sim::Command run(sim::Tick p_tick, const sim::SoldierState &p_state) {
 		TdmShared &sh = *shared;
-		const TdmBotConfig &c = cfg();
 		sim::Command cmd = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
 		cmd.flags = 0;
 		if (slot == 0xFF || !is_alive(p_state)) {
@@ -238,17 +237,22 @@ struct TdmBrain::Impl {
 			weapons.hold_fire();
 			return cmd;
 		}
-		const std::span<const sim::SoldierState> states = view.states();
-		const sim::Vec3 eye = sh.eye_point(p_state);
-		awareness.check_shots(sh, slot, p_tick, p_state);
-		if (sim::bots::perception_tick(slot, p_tick, c.perception.update_ticks)) {
-			awareness.perceive(sh, slot, seed ^ uint64_t(life), p_tick, p_state, states, view_yaw, view_pitch);
-			targeting.choose(sh, awareness, p_tick, p_state, states, skill01, rng);
-		}
+		const BotFrame frame = sense(p_tick, p_state, view);
+		const TdmBotActivity act = choose_activity(frame);
+		set_activity(p_tick, act);
 
-		const Sighting sighting = targeting.track(sh, awareness.perception(), p_tick, states, rng);
-		const sim::bots::PerceivedEnemy *te = sighting.enemy;
-		const bool visible = sighting.visible;
+		BotIntent intent = plan(frame, act);
+		const bool aligned = turn(frame, intent);
+		compose(frame, act, intent, aligned, cmd);
+		return cmd;
+	}
+
+	BotFrame sense(sim::Tick p_tick, const sim::SoldierState &p_state, const ServerView &p_view) {
+		TdmShared &sh = *shared;
+		const std::span<const sim::SoldierState> states = p_view.states();
+		const sim::Vec3 eye = sh.eye_point(p_state);
+		const bool perceived = awareness.sense(sh, slot, seed ^ uint64_t(life), p_tick, p_state, states, view_yaw, view_pitch);
+		const Sighting sighting = targeting.sense(sh, awareness, perceived, p_tick, p_state, states, skill01, rng);
 		const int target = targeting.target();
 		const bool shot_recent = awareness.shot_recent(p_tick);
 		const BotArms arms(sh.host.gunplay, slot);
@@ -263,17 +267,10 @@ struct TdmBrain::Impl {
 		check.shot_recent = shot_recent;
 		check.shot_at_tick = awareness.shot_at_tick();
 		check.last_engaged = targeting.last_engaged();
-		check.seen = visible && te != nullptr ? &states[size_t(target)] : nullptr;
+		check.seen = sighting.visible && sighting.enemy != nullptr ? &states[size_t(target)] : nullptr;
 		const DownedSoldier *revive = medic.update(sh, navigation, check);
 
-		const BotFrame frame{ p_tick, p_state, states, view.world(), eye, te, visible, target, shot_recent, arms, revive };
-		const TdmBotActivity act = choose_activity(frame);
-		set_activity(p_tick, act);
-
-		BotIntent intent = plan(frame, act);
-		const bool aligned = turn(frame, intent);
-		compose(frame, act, intent, aligned, cmd);
-		return cmd;
+		return BotFrame{ p_tick, p_state, states, p_view.world(), eye, sighting.enemy, sighting.visible, target, shot_recent, arms, revive };
 	}
 
 	bool turn(const BotFrame &p_frame, BotIntent &r_intent) {

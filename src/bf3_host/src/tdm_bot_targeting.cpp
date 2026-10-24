@@ -30,6 +30,14 @@ void BotTargeting::new_life() {
 	blind_until_ = 0;
 }
 
+Sighting BotTargeting::sense(TdmShared &r_shared, const BotAwareness &p_awareness, bool p_perceived, sim::Tick p_tick, const sim::SoldierState &p_self,
+		std::span<const sim::SoldierState> p_states, float p_skill01, uint64_t &r_rng) {
+	if (p_perceived) {
+		choose(r_shared, p_awareness, p_tick, p_self, p_states, p_skill01, r_rng);
+	}
+	return track(r_shared, p_awareness.perception(), p_tick, p_states, r_rng);
+}
+
 void BotTargeting::choose(TdmShared &r_shared, const BotAwareness &p_awareness, sim::Tick p_tick, const sim::SoldierState &p_self,
 		std::span<const sim::SoldierState> p_states, float p_skill01, uint64_t &r_rng) {
 	TdmShared &sh = r_shared;
