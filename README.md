@@ -115,7 +115,9 @@ Every target uses the static CRT (`/MT`, or `/MTd` in `debug`) and builds with C
 `core.formats` and `tools.numtext` need no data. The install tests report *Skipped* when no install is found;
 `core.cache_data` is skipped when `OPENBF3_CACHE_TESTDATA` is unset and `core.res` when `OPENBF3_RES_DATA` does not
 point at an exported resource sample (see "Resource decoders"; `core.res.install` covers the same decoders straight
-from the install). With an install `core.install` also reads every bundle manifest of the 53 non-chunk superbundles
+from the install). `tools.export.cache`, `tools.export.res` and `tools.export.ant` (install) write small or whole
+samples with `bf3dump export` into the build's scratch directory and run those rows, `core.ant` and `resdump` /
+`antdump parity` on them. With an install `core.install` also reads every bundle manifest of the 53 non-chunk superbundles
 and checks SHA1s through the CAS, binary, delta and tail-only paths, and parses every EBX partition of `@all-mp`
 (50,486) with spot checks of known field values. `core.fuzz` (also skipped without an install) feeds seeded mutations
 of real partitions, stored payloads and a `.toc` (in memory only) through every parser; run it under `ctest --preset
@@ -192,6 +194,9 @@ out of the repo.
 | `dump <sb> <out_dir> <depth> <follow> <root>...` | one JSON per root: the root partition and the breadth-first closure of referenced partitions whose name contains one of the comma-separated `<follow>` substrings (`*` = all, `-` = none) up to `<depth>`; `fx/` and `sound/` are followed only with `*`; mesh, texture, shader and sound asset partitions are listed but not expanded |
 | `ebxload <sb> [--walk]` | parses every partition on all cores and reports counts, failures, bytes and timing; `--walk` also decodes every value |
 | `numcheck` | self-check of the JSON number text rules (no install needed) |
+| `export cache <sb> <out_dir> <max_mb>` | the `core.cache_data` sample: the superbundle's res, then its non-tail chunks, in name order up to `<max_mb>` MiB of stored bytes, as `stored/<sha1>.bin` (the CAS bytes, checked against the manifest SHA-1), `payload/<sha1>.bin` (decoded, res without its meta) and `index.tsv` (`kind name sha1 stored_size decoded_size res_type res_meta`) |
+| `export res <sb> <tag> <data_dir> [<res>...]` | the `core.res` / `resdump` sample: every MeshSet, DxTexture and Havok res (`decodable_res_names`, or the named res) as `<tag>/res/<n>.bin` (`BF3R`, version 1, type, 16-byte meta, the texture chunk's `logicalOffset` view, name, payload), `<tag>/index.tsv` (`file name type`) and every chunk they name, whole, as `chunks/<id>.chunk` |
+| `export ant <out_dir>` | the `AntExportDirSource` directory (`tools/antdump/README.md`): `res.tsv`, `packages.tsv`, `res/` and `chunk/`, from `AntInstallSource` |
 
 For the EBX commands `<sb>` is a superbundle name, a comma-separated list (the first superbundle that holds a
 partition wins) or `@all-mp` (every MP/XP level superbundle plus Globals, Weapons, UI and default_settings_Win32).
@@ -273,8 +278,8 @@ opens a root at a time; a second `open` gets `Busy`.
 Tests: `core.cache` (scratch trees in `%TEMP%`; a temp directory plays the protected install) and `core.cache_data`.
 `core.cache_data` reads real payloads from `OPENBF3_CACHE_TESTDATA`, checks BCrypt SHA-1 against the manifest SHA-1
 of every stored payload, and round-trips the decoded payloads. It reports *Skipped* without the variable. That data is
-exported from your own install by the research `ebx-dump` tool (`export <superbundle> <out_dir> <max_mb>`, an
-addition in a scratch copy) and never enters the repo.
+exported from your own install by `bf3dump export cache <superbundle> <out_dir> <max_mb>` and never enters the repo;
+`tools.export.cache` exports 16 MiB of MP_Subway into the build's scratch directory and runs `core.cache_data` on it.
 
 ## Preparing the cache
 
@@ -445,39 +450,38 @@ parity summaries below are unchanged. `core.res.unit` builds hostile packfiles i
 two-list cycle, a 1,000-deep MOPP chain, a 16-wide 12-deep DAG of lists, a 1,024-point convex leaf listed 4,096
 times): each fails with its error in well under a second.
 
-**Parity.** `research/probes/tools/res-oracle` (Rust, path-depends on IW4L `resource_bf3` and the `ebx-dump` install
-readers) exports a sample from your install and prints a canonical summary per resource (counts, declarations,
-FNV-1a hashes of every decoded position/normal/tangent/UV/colour/part/bone/index array, mip bytes, texels, the full
-Havok shape tree, tessellated triangles and convex pieces). `tools/resdump` prints the same summary through the C++
-decoders, either over an export or straight from the install (`--install <superbundle> <tag>...`, through
-`res_loader.h`, in the export's order). The exported bytes stay outside the repo (they are BF3 data):
+**Parity.** `bf3dump export res` writes a sample from your install, and `tools/resdump` prints a canonical summary per
+resource through the C++ decoders (counts, declarations, FNV-1a hashes of every decoded position/normal/tangent/UV/
+colour/part/bone/index array, mip bytes, texels, the full Havok shape tree, tessellated triangles and convex pieces),
+either over an export or straight from the install (`--install <superbundle> <tag>...`, through `res_loader.h`, in the
+export's order). The exported bytes stay outside the repo (they are BF3 data):
 
 ```bat
-set CARGO_TARGET_DIR=<scratch>\target
-cargo build --release --manifest-path research\probes\tools\res-oracle\Cargo.toml
-res-oracle export Win32/Levels/MP_Subway/MP_Subway subway <data>
-res-oracle export Win32/Levels/XP2_Skybar/XP2_Skybar skybar <data>
-res-oracle summary <data> subway skybar > rust.txt   &  b\dev\tools\resdump\resdump.exe <data> subway skybar > cpp.txt
-res-oracle trunc   <data> subway skybar > rust_t.txt &  b\dev\tools\resdump\resdump.exe --trunc <data> subway skybar > cpp_t.txt
+b\dev\tools\bf3dump\bf3dump.exe export res Win32/Levels/MP_Subway/MP_Subway subway <data>
+b\dev\tools\bf3dump\bf3dump.exe export res Win32/Levels/XP2_Skybar/XP2_Skybar skybar <data>
+b\dev\tools\resdump\resdump.exe <data> subway skybar > export.txt
+b\dev\tools\resdump\resdump.exe --install Win32/Levels/MP_Subway/MP_Subway subway Win32/Levels/XP2_Skybar/XP2_Skybar skybar > inst.txt
+b\dev\tools\resdump\resdump.exe --trunc <data> subway skybar > export_t.txt
+b\dev\tools\resdump\resdump.exe --trunc --install Win32/Levels/MP_Subway/MP_Subway subway Win32/Levels/XP2_Skybar/XP2_Skybar skybar > inst_t.txt
 set OPENBF3_RES_DATA=<data>& ctest --preset dev -R core.res
-rem no export needed: the same two summaries from the install
-resdump.exe --install Win32/Levels/MP_Subway/MP_Subway subway Win32/Levels/XP2_Skybar/XP2_Skybar skybar > inst.txt
-resdump.exe --trunc --install Win32/Levels/MP_Subway/MP_Subway subway Win32/Levels/XP2_Skybar/XP2_Skybar skybar > inst_t.txt
 ```
 
-Result on 2026-10-14: every MeshSet, DxTexture and Havok res of MP_Subway (1,341 / 1,717 / 730 + 9 destruction) and
-of the patched expansion level XP2_Skybar (824 / 1,138 / 253 + 23), 2.46 GB of chunks: the 109,001-line summaries are
-byte-identical, and so are the 46,534 lines of the damaged-input run (payloads cut at 1/4, 1/2, 3/4, len-1;
-geometry and texture chunks cut short; a view at a logicalOffset between mips). Floats are bit-identical because the
-port keeps IW4L's operation order and float literals and the hull keeps Rust's tie-breaks. Decoded: 13,966 subsets,
-9.96 M triangles, 29,180 mip images, 1,522 Havok roots. `core.res` also runs 8,256 randomly damaged decodes. Timing
-(16 threads shared with other builds, so noisy; resdump `--time`, chunk files read before the clock): MeshSet parse +
-decode of all subsets 0.87-1.0 s for 2,165 res; DxTexture parse + mip split 0.01 s for 2,855; Havok parse + shape
-tree + all triangles (hulls included) 0.97-1.15 s for 1,015. Whole summary pass (decode + hashing): C++ 10.4-14.8 s
-over two runs, Rust 15.5 s (warm cache). Install mode (2026-10-14, after the hostile-input bounds above): both
-`resdump --install` outputs are byte-identical to the oracle's summary and damaged-input run of the export (109,001 and
-46,534 lines, SHA-256 `42ffd1a3...` and `f04df8c4...`), and to a fresh oracle build's; the summary pass reads the 2.46 GB
-of chunks from the install in 16 s, the damaged-input pass takes 6 s.
+`tools.export.res` exports the six res the `core.res` anchor and hostile-subpart cases read and runs those cases and
+`resdump` on them.
+Every MeshSet, DxTexture and Havok res of MP_Subway (1,341 / 1,717 / 730 + 9 destruction) and of the patched expansion
+level XP2_Skybar (824 / 1,138 / 253 + 23), 2.46 GB of chunks: the 109,001-line summaries and the 46,534 lines of the
+damaged-input run (payloads cut at 1/4, 1/2, 3/4, len-1; geometry and texture chunks cut short; a view at a
+logicalOffset between mips) are the same over the export and from the install (2026-10-25: SHA-256 `42ffd1a3...` and
+`f04df8c4...`, the hashes of the 2026-10-14 summaries). On 2026-10-14 those summaries were checked once, byte for byte,
+against a research probe since removed that ran IW4L's decoders; floats were bit-identical because the port keeps IW4L's operation order and float literals and
+the hull keeps its tie-breaks. Decoded: 13,966 subsets, 9.96 M triangles, 29,180 mip images, 1,522 Havok roots.
+`core.res` also runs 8,256 randomly damaged decodes. Timing (16 threads shared with other builds, so noisy; resdump
+`--time`, chunk files read before the clock): MeshSet parse + decode of all subsets 0.87-1.0 s for 2,165 res; DxTexture
+parse + mip split 0.01 s for 2,855; Havok parse + shape tree + all triangles (hulls included) 0.97-1.15 s for 1,015.
+Whole summary pass (decode + hashing): 10.4-14.8 s over two runs (warm cache, 2026-10-14). From the install the summary
+pass reads the 2.46 GB of chunks in 16 s, the damaged-input pass takes 6 s. On 2026-10-25 (shared machine, other builds
+running) the two `bf3dump export res` calls took 9.5 s and 5.0 s (3.52 GB written), the summary pass 18.4 s over the
+export and 28.9 s from the install.
 
 **Skinned meshes (for the M9 integration).** Measured on all 561 skinned MeshSets (1,679 LODs) of the sample:
 

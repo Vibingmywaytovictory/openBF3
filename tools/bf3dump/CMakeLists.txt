@@ -30,3 +30,5 @@ target_sources(bf3dump PRIVATE audio_commands.cpp audio_commands.h audio_patch_c
 target_link_libraries(bf3dump PRIVATE bf3_audio)
 
 target_sources(bf3dump PRIVATE firefight_commands.cpp firefight_commands.h)
+
+target_sources(bf3dump PRIVATE export_commands.cpp export_commands.h)

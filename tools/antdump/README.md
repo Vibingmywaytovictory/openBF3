@@ -14,7 +14,7 @@ Every command takes `<input>`:
   partitions (about 1 s); payloads are read on demand.
 * `<export_dir>` reads a directory of exported payloads through `AntExportDirSource` (`ant_export_source.h`, a
   tool-side source; `bf3_core` opens files only through `InstallReader`/`ReadOnlyFile`). It holds BF3 data, so it
-  lives outside the repo. It is kept as the parity oracle for the install source.
+  lives outside the repo.
 
 ```
 res.tsv        name, file, size, res_meta, superbundle, bundle      one row per AssetBank res (397)
@@ -22,10 +22,12 @@ packages.tsv   partition, type, superbundle, bundle, chunk_file, fields   one ro
 res/*.bin      res payloads          chunk/<guid>.bin   decompressed chunks (88 Chunk packages)
 ```
 
-The export directory was produced with the research `ebx-dump` probe (`research/probes/tools/ebx-dump`) extended by an
-`antexport <out_dir>` command (about 382 MB, 4.6 s).
+`bf3dump export ant <out_dir>` writes it from `AntInstallSource`: every bank's res payload, every Chunk package's
+chunk, and both tables in the install source's order (382 MB, 2.4-3.9 s). `tools.export.ant` writes one into the build's
+scratch directory and runs `core.ant` and `antdump parity` on it. Before that command the directory came from a research
+probe, since removed, whose selection the rules below reproduce and against which the parity below was measured.
 
-### Selection rules (the export's, reproduced by `AntInstallSource`)
+### Selection rules (the probe export's, reproduced by `AntInstallSource`)
 
 1. Superbundles in layout order, skipping chunk superbundles (name contains `chunks`) and `Win32/Loc/*`.
 2. Per superbundle, every bundle manifest in bundle order. An AssetBank res (type `0x51A3C853`) or an EBX partition
@@ -42,8 +44,8 @@ The export directory was produced with the research `ebx-dump` probe (`research/
 6. Banks without an `AntPackageAsset` (the 163 animation-set banks) are listed by `all_banks()` with
    `is_asset_package = false`.
 
-One difference, documented rather than emulated: the export took a res only after its payload read succeeded (a
-failed read let a later superbundle supply it); `AntInstallSource` takes the first superbundle that *lists* it and
+One difference, documented rather than emulated: the probe export took a res only after its payload read succeeded
+(a failed read let a later superbundle supply it); `AntInstallSource` takes the first superbundle that *lists* it and
 reports a read failure from `read()`. On the retail install no read fails (parity below).
 
 ## Commands
@@ -68,7 +70,7 @@ The clip JSON has `source`, `fps`, `fpsScale`, `numTicks`, `endFrame`, `keyTimes
 `tracks` (one per joint channel, values per key) like the probe's files, plus `floatTracks` for named float DOFs.
 A command exits 77 when its input does not exist (no install found / no `res.tsv`), like `bf3dump`.
 
-## Parity: install = export = probe (2026-10-14, patch v7 + Xpack1-5)
+## Parity: install = probe export = probe (2026-10-14, patch v7 + Xpack1-5)
 
 | check | result |
 |---|---|

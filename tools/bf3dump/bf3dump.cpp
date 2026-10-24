@@ -42,6 +42,8 @@
 
 #include "firefight_commands.h"
 
+#include "export_commands.h"
+
 #include <fcntl.h>
 #include <io.h>
 #include <windows.h>
@@ -469,6 +471,7 @@ void usage() {
 	std::fprintf(stderr, "%s", bf3dump::lagcomp_usage());
 	std::fprintf(stderr, "%s", bf3dump::vm_usage());
 	std::fprintf(stderr, "%s", bf3dump::firefight_usage());
+	std::fprintf(stderr, "%s", bf3dump::export_usage());
 }
 
 }
@@ -642,6 +645,10 @@ int wmain(int argc, wchar_t **argv) {
 
 	if (cmd == "firefight") {
 		return bf3dump::cmd_firefight(ctx.reader, ctx.install, rest);
+	}
+
+	if (cmd == "export") {
+		return bf3dump::cmd_export(ctx.reader, ctx.install, rest);
 	}
 	usage();
 	return 2;
