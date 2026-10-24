@@ -496,6 +496,8 @@ struct Bf3SwfViewCheck::State {
 	Tally color;
 	uint32_t color_solid = 0;
 	uint32_t color_add_only = 0;
+	uint32_t additive_light = 0;
+	uint32_t additive_bare = 0;
 	Img tilt_base;
 	std::vector<std::pair<int, std::string>> perf_fields;
 	std::vector<double> perf_ms;
@@ -888,6 +890,42 @@ void Bf3SwfViewCheck::_process(double p_delta) {
 									  (s.color.detail.empty() ? "" : "; " + s.color.detail);
 							  s.add("colour transform add: drawn fills = swf_apply of the world colour transform", s.color);
 						  } });
+
+		{
+			const ui::SwfScene &sc = *s.small_view(0)->scene();
+			std::string add_path;
+			for (const ui::SwfNodeId id : sc.draw_order()) {
+				const ui::SwfSceneNode &n = *sc.node(id);
+				if (add_path.empty() && n.blend_mode == ui::swf_blend::kAdd && n.world_visible && alpha_visible(n) && !under_mask(sc, n)) {
+					add_path = n.path;
+				}
+			}
+			const auto light_without_alpha = [](const Img &p_img, uint32_t &r_light) {
+				uint32_t bare = 0;
+				r_light = 0;
+				for (size_t i = 0; i + 3 < p_img.px.size(); i += 4) {
+					const int32_t rgb = std::max({ p_img.px[i], p_img.px[i + 1], p_img.px[i + 2] });
+					r_light += rgb > kColorLevels ? 1 : 0;
+					bare += rgb > int32_t(p_img.px[i + 3]) + kColorLevels ? 1 : 0;
+				}
+				return bare;
+			};
+			s.jobs.push_back({ [isolate, add_path]() { isolate(0, add_path); },
+					[&s, add_path, light_without_alpha]() {
+						uint32_t light = 0;
+						s.additive_bare = light_without_alpha(img_of(s.small_view(0)->capture_hud()), light);
+						s.additive_light = light;
+						s.small_view(0)->set_additive_coverage(true);
+					} });
+			s.jobs.push_back({ []() {}, [&s, add_path, light_without_alpha]() {
+								  uint32_t light = 0;
+								  const uint32_t bare = light_without_alpha(img_of(s.small_view(0)->capture_hud()), light);
+								  s.small_view(0)->set_additive_coverage(false);
+								  s.add("add blend coverage: the layer pass carries the additive light in alpha", !add_path.empty() && s.additive_bare > 0 && bare == 0 && light > 0,
+										  fmt("%s: %u lit px; drawn %u lit px without alpha, coverage pass %u lit px, %u without alpha", add_path.c_str(), s.additive_light,
+												  s.additive_bare, light, bare));
+							  } });
+		}
 
 		for (int m = 0; m < 2; ++m) {
 			const ui::SwfScene &sc = *s.small_view(m)->scene();

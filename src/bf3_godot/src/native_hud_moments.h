@@ -1,5 +1,7 @@
 #pragma once
 
+#include "native_hud.h"
+
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/spawn.h"
@@ -64,7 +66,7 @@ public:
 	int exit_code() const { return failures_ == 0 && captured_ > 0 ? 0 : 1; }
 
 private:
-	enum class Phase : uint8_t { WaitAlive, Place, Arrive, Settle, Render, Capture, Done };
+	enum class Phase : uint8_t { WaitAlive, Place, Arrive, Settle, Render, Capture, Coverage, Done };
 	void hold(Bf3LevelSession &r_session, const NativeHudMoment &p_moment);
 	void settle(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, const NativeHudMoment &p_moment, bf3::core::ui::HudModel p_model);
 	void check(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, const NativeHudMoment &p_moment);
@@ -90,6 +92,8 @@ private:
 	int32_t expect_score_frame_ = -1;
 	int32_t expect_aggregator_frame_ = -1;
 	std::string names_detail_;
+	godot::Ref<godot::Image> composite_;
+	std::array<godot::Ref<godot::Image>, kNativeHudViews> colour_;
 	std::vector<NativeHudSquadRow> expect_squad_;
 	std::vector<std::string> expect_squad_names_;
 };

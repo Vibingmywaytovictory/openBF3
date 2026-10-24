@@ -915,46 +915,62 @@ void Bf3NativeHud::paint_tags() {
 	paint_.paints++;
 }
 
-Ref<Image> Bf3NativeHud::capture_layer() const {
-	int32_t w = 0, h = 0;
-	std::vector<uint8_t> acc;
+void Bf3NativeHud::set_additive_coverage(bool p_coverage) {
+	for (Bf3SwfView *v : views_) {
+		if (v != nullptr) {
+			v->set_additive_coverage(p_coverage);
+		}
+	}
+}
+
+std::array<Ref<Image>, kNativeHudViews> Bf3NativeHud::capture_views() const {
+	std::array<Ref<Image>, kNativeHudViews> out;
 	for (size_t i = 0; i < kNativeHudViews; ++i) {
-		if (views_[i] == nullptr) {
+		out[i] = views_[i] != nullptr ? views_[i]->capture_hud() : Ref<Image>();
+	}
+	return out;
+}
+
+Ref<Image> Bf3NativeHud::capture_layer(const std::array<Ref<Image>, kNativeHudViews> &p_colour, const std::array<Ref<Image>, kNativeHudViews> &p_coverage) {
+	int32_t w = 0, h = 0;
+	std::vector<double> acc;
+	for (size_t i = 0; i < kNativeHudViews; ++i) {
+		int32_t vw = 0, vh = 0, cw = 0, ch = 0;
+		const std::vector<uint8_t> top = image_bytes(p_colour[i], vw, vh);
+		const std::vector<uint8_t> cov = image_bytes(p_coverage[i], cw, ch);
+		if (top.empty() && cov.empty()) {
 			continue;
 		}
-		int32_t vw = 0, vh = 0;
-		const std::vector<uint8_t> top = image_bytes(views_[i]->capture_hud(), vw, vh);
-		if (top.empty()) {
-			continue;
+		if (top.empty() || cov.empty() || cw != vw || ch != vh || (!acc.empty() && (vw != w || vh != h))) {
+			return Ref<Image>();
 		}
 		if (acc.empty()) {
-			acc = top;
 			w = vw;
 			h = vh;
-			continue;
-		}
-		if (vw != w || vh != h) {
-			return Ref<Image>();
+			acc.assign(top.size(), 0.0);
 		}
 		for (size_t p = 0; p + 3 < acc.size(); p += 4) {
 			const double ta = double(top[p + 3]) / 255.0;
-			for (size_t c = 0; c < 4; ++c) {
-				acc[p + c] = uint8_t(std::clamp(std::lround(double(top[p + c]) + double(acc[p + c]) * (1.0 - ta)), 0L, 255L));
+			const double ca = double(cov[p + 3]) / 255.0;
+			for (size_t c = 0; c < 3; ++c) {
+				acc[p + c] = double(top[p + c]) + acc[p + c] * (1.0 - ta);
 			}
+			acc[p + 3] = double(cov[p + 3]) + acc[p + 3] * (1.0 - ca);
 		}
 	}
 	if (acc.empty()) {
 		return Ref<Image>();
 	}
-	for (size_t p = 0; p + 3 < acc.size(); p += 4) {
-		const uint8_t a = acc[p + 3];
-		for (size_t c = 0; c < 3; ++c) {
-			acc[p + c] = a == 0 ? 0 : uint8_t(std::clamp(std::lround(double(acc[p + c]) * 255.0 / double(a)), 0L, 255L));
-		}
-	}
 	PackedByteArray bytes;
 	bytes.resize(int64_t(acc.size()));
-	std::copy(acc.begin(), acc.end(), bytes.ptrw());
+	uint8_t *out = bytes.ptrw();
+	for (size_t p = 0; p + 3 < acc.size(); p += 4) {
+		const long a = std::clamp(std::lround(acc[p + 3]), 0L, 255L);
+		for (size_t c = 0; c < 3; ++c) {
+			out[p + c] = a == 0 ? 0 : uint8_t(std::clamp(std::lround(acc[p + c] * 255.0 / double(a)), 0L, 255L));
+		}
+		out[p + 3] = uint8_t(a);
+	}
 	return Image::create_from_data(w, h, false, Image::FORMAT_RGBA8, bytes);
 }
 

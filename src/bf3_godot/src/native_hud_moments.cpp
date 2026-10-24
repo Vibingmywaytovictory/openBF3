@@ -1048,9 +1048,26 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 			phase_ = Phase::Capture;
 			return false;
 		case Phase::Capture: {
+			composite_ = r_hud.get_viewport() != nullptr ? r_hud.get_viewport()->get_texture()->get_image() : Ref<Image>();
+			colour_ = r_hud.capture_views();
+			r_hud.set_additive_coverage(true);
+			hold(r_session, *moments_[index_]);
+			frames_ = 0;
+			phase_ = Phase::Coverage;
+			return false;
+		}
+		case Phase::Coverage: {
 			const NativeHudMoment &m = *moments_[index_];
-			Ref<Image> composite = r_hud.get_viewport() != nullptr ? r_hud.get_viewport()->get_texture()->get_image() : Ref<Image>();
-			Ref<Image> layer = r_hud.capture_layer();
+			hold(r_session, m);
+			if (++frames_ < kRenderFrames) {
+				return false;
+			}
+			const std::array<Ref<Image>, kNativeHudViews> coverage = r_hud.capture_views();
+			r_hud.set_additive_coverage(false);
+			Ref<Image> composite = composite_;
+			Ref<Image> layer = Bf3NativeHud::capture_layer(colour_, coverage);
+			composite_ = Ref<Image>();
+			colour_ = {};
 			bool ok = composite.is_valid() && layer.is_valid();
 			std::string detail;
 			if (ok) {

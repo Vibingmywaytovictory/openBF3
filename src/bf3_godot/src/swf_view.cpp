@@ -58,6 +58,7 @@ constexpr int32_t kFlagAdditive = 2;
 const char *kItemShader = R"(shader_type canvas_item;
 render_mode skip_vertex_transform, blend_premul_alpha;
 uniform sampler2D mask_tex : hint_default_white, filter_nearest;
+uniform int coverage = 0;
 instance uniform vec3 h0 = vec3(1.0, 0.0, 0.0);
 instance uniform vec3 h1 = vec3(0.0, 1.0, 0.0);
 instance uniform vec3 h2 = vec3(0.0, 0.0, 1.0);
@@ -108,7 +109,7 @@ void fragment() {
 		COLOR = c;
 	} else {
 		c = clamp(c * cx_mul + cx_add, vec4(0.0), hi);
-		COLOR = vec4(c.rgb * c.a, (flags & 2) != 0 ? 0.0 : c.a);
+		COLOR = vec4(c.rgb * c.a, (flags & 2) != 0 && coverage == 0 ? 0.0 : c.a);
 	}
 }
 )";
@@ -2619,6 +2620,16 @@ void Bf3SwfView::clear_isolation() {
 void Bf3SwfView::set_filters_enabled(bool p_enabled) {
 	impl_->filters_enabled = p_enabled;
 	impl_->structure_dirty = true;
+}
+
+void Bf3SwfView::set_additive_coverage(bool p_coverage) {
+	impl_->rs->material_set_param(impl_->item_material, "coverage", p_coverage ? 1 : 0);
+	for (auto &[k, c] : impl_->canvases) {
+		c.render_dirty = true;
+	}
+	for (auto &[id, t] : impl_->targets) {
+		t.redraw = true;
+	}
 }
 
 void Bf3SwfView::sync() {

@@ -99,7 +99,10 @@ public:
 	std::optional<bf3::core::ui::SwfRect> window_bounds(size_t p_view, std::string_view p_path) const;
 	double ekg_clock() const { return ekg_clock_; }
 	void set_ekg_clock(double p_seconds) { ekg_clock_ = p_seconds; }
-	godot::Ref<godot::Image> capture_layer() const;
+	void set_additive_coverage(bool p_coverage);
+	std::array<godot::Ref<godot::Image>, kNativeHudViews> capture_views() const;
+	static godot::Ref<godot::Image> capture_layer(const std::array<godot::Ref<godot::Image>, kNativeHudViews> &p_colour,
+			const std::array<godot::Ref<godot::Image>, kNativeHudViews> &p_coverage);
 	uint64_t kill_feed_rows_added() const;
 	const bf3::core::ui::HudMessageComp *messages() const { return messages_.get(); }
 	double message_clock() const { return message_clock_; }

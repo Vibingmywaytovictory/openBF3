@@ -129,6 +129,7 @@ public:
 	bf3::core::Status set_isolated(std::string_view p_path);
 	void clear_isolation();
 	void set_filters_enabled(bool p_enabled);
+	void set_additive_coverage(bool p_coverage);
 
 	void sync();
 	godot::RID hud_texture() const;
