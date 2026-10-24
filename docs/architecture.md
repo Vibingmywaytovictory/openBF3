@@ -189,6 +189,5 @@ These are structural, known, and listed so nobody mistakes them for design inten
   slot 0 as the squadlist txt field's authored colour (e4ff9d; only the icons' setRGB changes the look) and leaves out
   tint2Texts' shadow and glow filters, whose colours are not in the install.
 * The container, EBX, payload, resource, level-soup and lag-compensation readers were written as ports of the
-  earlier Rust experiment (IW4L) rather than from the format facts alone. The rule now forbids that
-  (CLAUDE.md "No code from other projects"); those units are to be re-derived from `research/` and the install
-  measurements, with the existing install tests as the gate that nothing changes.
+  earlier Rust experiment (IW4L); on 2026-10-24 the owner decided to keep them as they are, not re-derive them, and the
+  install tests hold their numbers. No Rust is left in the tree.
