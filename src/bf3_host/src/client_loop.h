@@ -4,6 +4,7 @@
 #include "bf3/host/client_session.h"
 #include "client_clock.h"
 #include "client_events.h"
+#include "client_gunplay.h"
 #include "client_link.h"
 #include "client_match.h"
 #include "client_tracks.h"
@@ -90,105 +91,19 @@ private:
 	RemoteTracks tracks{ config };
 	uint64_t last_tick_ns = 0;
 
-	struct ClSeq {
-		bool valid = false;
-		uint16_t seq = 0;
-		uint32_t tick = 0;
-		bool main = false;
-		bool others = false;
-		std::vector<net::OtherSoldier> main_records, others_records;
-		std::array<uint8_t, net::kMaxSlots> main_at{}, others_at{};
-		std::array<uint64_t, 2> main_slots{}, others_slots{};
-	};
-	struct ClRecords final : ReceivedRecordSource {
-		static constexpr size_t kSeqs = 64;
-		std::array<ClSeq, kSeqs> ring;
-		const ClSeq *find(uint16_t p_seq) const {
-			const ClSeq &e = ring[p_seq % kSeqs];
-			return e.valid && e.seq == p_seq ? &e : nullptr;
-		}
-		void add(uint16_t p_seq, uint32_t p_tick, bool p_main, std::span<const net::OtherSoldier> p_records);
-		bool arrived(uint16_t p_seq, bool p_main) const {
-			const ClSeq *e = find(p_seq);
-			return e != nullptr && (p_main ? e->main : e->others);
-		}
-
-		uint32_t mask(uint16_t p_newest, bool p_main) const;
-		size_t candidates(const ShotView &p_view, uint8_t p_target, std::span<net::TimedOther> r_out) const override;
-		bool view_tick(uint16_t p_seq, uint32_t &r_tick) const override;
-		void slots_in(const ShotView &p_view, std::array<uint64_t, 2> &r_slots) const override;
-	};
-	struct ClEmit final : sim::WeaponEmitSink {
-		ClientLoop *m = nullptr;
-		void emitted(const sim::Command &p_command, const sim::weapons::WeaponTickOutput &p_output, const sim::WeaponPredictionEntry &p_after) override;
-	};
-
-	struct ClCommandView {
-		bool valid = false;
-		sim::Tick tick = 0;
-		uint32_t sequence = 0;
-		ShotView view;
-	};
-	struct ClLife {
-		bool valid = false;
-		uint32_t life = 0;
-		uint8_t kit = 0;
-		uint8_t team = 0;
-	};
-	static constexpr size_t kClCommandViews = 256;
-	static constexpr size_t kClLogLimit = size_t(1) << 20;
-
-	bool cl_gunplay = false;
-	std::shared_ptr<const sim::weapons::WeaponTable> cl_table;
-	std::unique_ptr<sim::WeaponLane> cl_lane;
-	std::unique_ptr<ClientProjectiles> cl_projectiles;
-	ClRecords cl_records;
-	ClEmit cl_emit;
-	uint64_t cl_match_seed = 0;
-	net::ShotQuantization cl_frame;
-	std::array<ClLife, 8> cl_lives{};
-	uint8_t cl_kit = 0;
-	uint8_t cl_team = 0;
-	bool cl_wire_valid = false;
-	net::WeaponsWire cl_wire;
-	sim::Tick cl_wire_tick = 0;
-	sim::Tick cl_newest_tick = 0;
-	std::array<ClCommandView, kClCommandViews> cl_views{};
-	bool cl_fire_seen = false;
-	uint32_t cl_last_fire_presses = 0;
-	bool cl_fired = false;
-	uint16_t cl_fired_view_seq = 0;
-	uint64_t cl_fired_ns = 0;
 	ClientEvents feed{ slot };
 	ClientMatch match{ feed, slot };
-	uint64_t cl_bad_events = 0;
-	std::mutex cl_log_mutex;
-	std::vector<PredictedShot> cl_shot_log;
-	std::vector<PredictedTimed> cl_timed_log;
-	std::vector<OwnTestSample> cl_sample_log;
-	std::vector<OwnTestSample> cl_sample_scratch;
+	ClientGunplay gunplay{ config, feed, slot, now_ns };
 
-	bool cl_match_info(const net::MatchInfo &p_match, uint64_t p_now);
-	void cl_refuse(const char *p_reason);
-	bool cl_def_ok(uint32_t p_def) const;
-	void cl_spawned(const net::Spawned &p_spawned);
-	void cl_snapshot(const net::Snapshot &p_snapshot, uint64_t p_now);
-	void cl_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d, uint64_t p_now);
-	void cl_note_arrival(uint16_t p_seq, uint64_t p_now);
-	bool cl_wire_at(sim::Tick p_tick) const { return cl_gunplay && cl_wire_valid && cl_wire_tick == p_tick; }
-	bool cl_put_wire(const sim::SoldierState &p_s, sim::Tick p_spawn_tick);
-	void cl_weapons_spawn(const sim::SoldierState &p_s);
-	void cl_weapons_ring_miss(const sim::SoldierState &p_s);
-	void cl_weapons_reconcile(const sim::SoldierState &p_s);
-	void cl_after_match(const sim::SoldierState &p_s);
-	void cl_command_made(sim::Command &r_command, uint64_t p_now);
-	void cl_predict_weapons(const sim::Command &p_command, const sim::SoldierState &p_before, const sim::SoldierState &p_after);
-	uint32_t cl_others_ack_bits() const;
-	void cl_publish_end(PresentationFrame &r_frame, uint64_t p_now);
+	void refuse(const char *p_reason);
+	bool accept_match(const net::MatchInfo &p_match, uint64_t p_now);
+	void gunplay_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d, uint64_t p_now);
+	void after_match(const sim::SoldierState &p_s);
 
 	void handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_now);
 	void run_catch_up(const sim::SoldierState &p_base);
 	void authoritative(const sim::SoldierState &p_s, uint64_t p_now);
+	InputSample latest_input() const;
 	sim::Command sample_command(sim::Tick p_tick);
 	void client_tick(uint64_t p_now);
 	void publish(uint64_t p_now, const sim::PredictionEntry *p_made, const sim::Command &p_cmd);
