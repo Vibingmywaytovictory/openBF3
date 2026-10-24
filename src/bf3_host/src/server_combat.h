@@ -10,6 +10,7 @@
 #include "bf3/sim/command.h"
 #include "bf3/sim/soldier_state.h"
 #include "server_slots.h"
+#include "server_soldiers.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -34,9 +35,8 @@ public:
 	void note_command(size_t p_slot, const sim::Command &p_command);
 	void step_soldier(size_t p_slot, const sim::Command &p_command, const sim::SoldierState &p_before, const sim::SoldierState &p_after);
 
-	void resolve(sim::Tick p_tick, const SlotTable &p_slots, CombatEventSink &r_sink);
+	void resolve(sim::Tick p_tick, const SlotTable &p_slots, const Soldiers &p_soldiers, CombatEventSink &r_sink);
 	std::span<sim::SoldierState> tick_states() { return tick_states_; }
-	void restore(SlotTable &r_slots) const;
 	float killer_health(uint8_t p_killer, uint8_t p_victim) const;
 
 	uint8_t kit(size_t p_slot) const { return per_slot_[p_slot].kit; }
@@ -52,7 +52,7 @@ public:
 	void select_kit(size_t p_slot, const net::KitSelect &p_select, bool p_dev_commands);
 	void refuse_kit_select();
 
-	void record_tick(sim::Tick p_tick, const SlotTable &p_slots);
+	void record_tick(sim::Tick p_tick, const SlotTable &p_slots, const Soldiers &p_soldiers);
 	void fill_snapshot(size_t p_slot, net::Snapshot &r_snapshot) const;
 
 	void trace_tick(size_t p_slot, bool p_first, sim::Tick p_tick);

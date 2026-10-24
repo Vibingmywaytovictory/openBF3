@@ -6,7 +6,7 @@
 #include "server_combat.h"
 #include "server_match.h"
 #include "server_outbox.h"
-#include "server_slots.h"
+#include "server_spawner.h"
 
 #include <cstdint>
 
@@ -14,8 +14,8 @@ namespace bf3::host {
 
 class CombatLog final : public CombatEventSink {
 public:
-	CombatLog(SlotTable &r_slots, MatchControl &r_match, const Combat &p_combat) :
-			slots_(r_slots), match_(r_match), combat_(p_combat) {}
+	CombatLog(Spawner &r_spawner, MatchControl &r_match, const Combat &p_combat) :
+			spawner_(r_spawner), match_(r_match), combat_(p_combat) {}
 
 	void open(sim::Tick p_tick) { tick_ = p_tick; }
 
@@ -28,7 +28,7 @@ public:
 	void clear() { events_ = net::CombatEvents(); }
 
 private:
-	SlotTable &slots_;
+	Spawner &spawner_;
 	MatchControl &match_;
 	const Combat &combat_;
 	sim::Tick tick_ = 0;

@@ -35,6 +35,7 @@ target_sources(bf3_host PRIVATE
     src/server_slot_view.cpp
     src/server_slot_view.h
     src/server_slots.h
+    src/server_soldiers.h
     src/server_snapshots.cpp
     src/server_snapshots.h
     src/server_spawner.cpp

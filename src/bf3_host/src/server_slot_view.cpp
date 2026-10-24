@@ -10,8 +10,8 @@ std::span<const sim::SoldierState> SlotView::states() const {
 	if (!cached_ || cache_tick_ != tick_) {
 		cache_.assign(slots_.size(), sim::SoldierState());
 		for (size_t i = 0; i < slots_.size(); ++i) {
-			if (slots_[i].used && slots_[i].spawned) {
-				cache_[i] = slots_[i].state;
+			if (slots_[i].used && soldiers_[i].spawned) {
+				cache_[i] = soldiers_[i].state;
 			}
 		}
 		cache_tick_ = tick_;
@@ -25,7 +25,7 @@ uint8_t SlotView::team(uint8_t p_slot) const {
 }
 
 bool SlotView::alive(uint8_t p_slot) const {
-	return p_slot < slots_.size() && slots_[p_slot].used && slots_[p_slot].spawned && soldier_alive(slots_[p_slot].state);
+	return p_slot < slots_.size() && slots_[p_slot].used && soldiers_.alive(p_slot);
 }
 
 const sim::weapons::SoldierWeaponsState &SlotView::weapons(uint8_t p_slot) const {

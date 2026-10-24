@@ -9,6 +9,7 @@
 #include "server_combat.h"
 #include "server_outbox.h"
 #include "server_slots.h"
+#include "server_soldiers.h"
 #include "server_spawner.h"
 
 #include <cstddef>
@@ -23,9 +24,9 @@ namespace bf3::host {
 
 class DevCommands {
 public:
-	DevCommands(SlotTable &r_slots, Spawner &r_spawner, Combat &r_combat, const sim::SoldierMotor &p_motor, Outbox &r_outbox,
+	DevCommands(SlotTable &r_slots, Soldiers &r_soldiers, Spawner &r_spawner, Combat &r_combat, const sim::SoldierMotor &p_motor, Outbox &r_outbox,
 			std::function<void(size_t)> p_reset_slot) :
-			slots_(r_slots), spawner_(r_spawner), combat_(r_combat), motor_(p_motor), outbox_(r_outbox), reset_slot_(std::move(p_reset_slot)) {}
+			slots_(r_slots), soldiers_(r_soldiers), spawner_(r_spawner), combat_(r_combat), motor_(p_motor), outbox_(r_outbox), reset_slot_(std::move(p_reset_slot)) {}
 
 	void configure(const GameServerConfig &p_config, const sim::CollisionWorld &p_world, size_t p_slots);
 	void reset(size_t p_slot) { per_slot_[p_slot] = PerSlot(); }
@@ -67,6 +68,7 @@ private:
 	void apply_target(const PendingDebug &p_debug, sim::Tick p_tick);
 
 	SlotTable &slots_;
+	Soldiers &soldiers_;
 	Spawner &spawner_;
 	Combat &combat_;
 	const sim::SoldierMotor &motor_;

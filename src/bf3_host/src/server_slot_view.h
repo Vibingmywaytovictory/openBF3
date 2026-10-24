@@ -7,6 +7,7 @@
 #include "server_combat.h"
 #include "server_match.h"
 #include "server_slots.h"
+#include "server_soldiers.h"
 
 #include <cstdint>
 #include <span>
@@ -16,8 +17,8 @@ namespace bf3::host {
 
 class SlotView final : public ServerView {
 public:
-	SlotView(const SlotTable &p_slots, const MatchControl &p_match, const Combat &p_combat, const sim::Tick &p_tick) :
-			slots_(p_slots), match_(p_match), combat_(p_combat), tick_(p_tick) {}
+	SlotView(const SlotTable &p_slots, const Soldiers &p_soldiers, const MatchControl &p_match, const Combat &p_combat, const sim::Tick &p_tick) :
+			slots_(p_slots), soldiers_(p_soldiers), match_(p_match), combat_(p_combat), tick_(p_tick) {}
 
 	void configure(const sim::CollisionWorld &p_world) { world_ = &p_world; }
 	bool ready() const { return world_ != nullptr; }
@@ -36,6 +37,7 @@ public:
 
 private:
 	const SlotTable &slots_;
+	const Soldiers &soldiers_;
 	const MatchControl &match_;
 	const Combat &combat_;
 	const sim::Tick &tick_;

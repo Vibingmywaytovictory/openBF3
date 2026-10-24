@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace bf3::host {
@@ -15,42 +16,61 @@ inline bool soldier_alive(const sim::SoldierState &p_state) {
 	return (p_state.flags & sim::soldier_flags::kAlive) != 0 && p_state.mode != sim::MoveMode::Dead;
 }
 
-struct ServerSlot {
+struct Seat {
 	bool used = false;
 	bool remote = false;
 	bool dummy = false;
 	bool bot = false;
 	uint32_t peer = 0;
 	int team = 1;
-	bool hello = false;
-	bool spawned = false;
-	bool want_spawn = false;
-	sim::Tick respawn_at = 0;
-	uint32_t spawn_index = 0;
-	sim::SoldierState state;
-	sim::Command last;
-	uint16_t own_events = 0;
-	std::unique_ptr<CommandSource> source;
-	sim::Command source_command;
 };
 
 class SlotTable {
 public:
-	void resize(size_t p_count) { slots_.resize(p_count); }
-	size_t size() const { return slots_.size(); }
-	ServerSlot &operator[](size_t p_slot) { return slots_[p_slot]; }
-	const ServerSlot &operator[](size_t p_slot) const { return slots_[p_slot]; }
-	std::vector<ServerSlot>::iterator begin() { return slots_.begin(); }
-	std::vector<ServerSlot>::iterator end() { return slots_.end(); }
-	std::vector<ServerSlot>::const_iterator begin() const { return slots_.begin(); }
-	std::vector<ServerSlot>::const_iterator end() const { return slots_.end(); }
+	void resize(size_t p_count) {
+		seats_.resize(p_count);
+		sources_.resize(p_count);
+	}
+	size_t size() const { return seats_.size(); }
+	const Seat &operator[](size_t p_slot) const { return seats_[p_slot]; }
 
-	size_t index_of(const ServerSlot &p_slot) const { return size_t(&p_slot - slots_.data()); }
-	void clear(size_t p_slot) { slots_[p_slot] = ServerSlot(); }
+	void admit_client(size_t p_slot, uint32_t p_peer, int p_team) {
+		Seat &s = seats_[p_slot];
+		s.used = true;
+		s.remote = true;
+		s.peer = p_peer;
+		s.team = p_team;
+	}
+
+	void admit_local(size_t p_slot, std::unique_ptr<CommandSource> p_source, int p_team, bool p_bot) {
+		Seat &s = seats_[p_slot];
+		s.used = true;
+		s.team = p_team;
+		s.bot = p_bot;
+		sources_[p_slot] = std::move(p_source);
+	}
+
+	void admit_dummy(size_t p_slot) {
+		Seat &s = seats_[p_slot];
+		s.used = true;
+		s.dummy = true;
+		s.team = 0;
+	}
+
+	void assign_team(size_t p_slot, int p_team) { seats_[p_slot].team = p_team; }
+
+	void clear(size_t p_slot) {
+		seats_[p_slot] = Seat();
+		sources_[p_slot].reset();
+	}
+
+	sim::Command source_command(size_t p_slot, sim::Tick p_tick, const sim::SoldierState &p_state) {
+		return sources_[p_slot] != nullptr ? sources_[p_slot]->command(p_tick, p_state) : sim::Command();
+	}
 
 	int slot_of_peer(uint32_t p_peer) const {
-		for (size_t i = 0; i < slots_.size(); ++i) {
-			if (slots_[i].used && slots_[i].remote && slots_[i].peer == p_peer) {
+		for (size_t i = 0; i < seats_.size(); ++i) {
+			if (seats_[i].used && seats_[i].remote && seats_[i].peer == p_peer) {
 				return int(i);
 			}
 		}
@@ -58,27 +78,17 @@ public:
 	}
 
 	int free_slot() const {
-		for (size_t i = 0; i < slots_.size(); ++i) {
-			if (!slots_[i].used) {
+		for (size_t i = 0; i < seats_.size(); ++i) {
+			if (!seats_[i].used) {
 				return int(i);
 			}
 		}
 		return -1;
 	}
 
-	std::vector<sim::Vec3> live_positions(size_t p_except) const {
-		std::vector<sim::Vec3> out;
-		for (size_t i = 0; i < slots_.size(); ++i) {
-			const ServerSlot &s = slots_[i];
-			if (i != p_except && s.used && !s.dummy && s.spawned && soldier_alive(s.state)) {
-				out.push_back(s.state.position);
-			}
-		}
-		return out;
-	}
-
 private:
-	std::vector<ServerSlot> slots_;
+	std::vector<Seat> seats_;
+	std::vector<std::unique_ptr<CommandSource>> sources_;
 };
 
 }

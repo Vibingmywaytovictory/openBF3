@@ -44,23 +44,15 @@ void Combat::step_soldier(size_t p_slot, const sim::Command &p_command, const si
 	gunplay_->step_soldier(uint8_t(p_slot), p_command, p_before, p_after);
 }
 
-void Combat::resolve(sim::Tick p_tick, const SlotTable &p_slots, CombatEventSink &r_sink) {
+void Combat::resolve(sim::Tick p_tick, const SlotTable &p_slots, const Soldiers &p_soldiers, CombatEventSink &r_sink) {
 	tick_states_.assign(p_slots.size(), sim::SoldierState());
 	for (size_t i = 0; i < p_slots.size(); ++i) {
-		if (p_slots[i].used && p_slots[i].spawned && !p_slots[i].dummy) {
-			tick_states_[i] = p_slots[i].state;
+		if (p_slots[i].used && p_soldiers[i].spawned && !p_slots[i].dummy) {
+			tick_states_[i] = p_soldiers[i].state;
 		}
 	}
 	gunplay_->step_projectiles(p_tick, tick_states_);
 	gunplay_->apply_rules(p_tick, tick_states_, r_sink);
-}
-
-void Combat::restore(SlotTable &r_slots) const {
-	for (size_t i = 0; i < r_slots.size(); ++i) {
-		if (r_slots[i].used && r_slots[i].spawned && !r_slots[i].dummy) {
-			r_slots[i].state = tick_states_[i];
-		}
-	}
 }
 
 float Combat::killer_health(uint8_t p_killer, uint8_t p_victim) const {
@@ -155,7 +147,7 @@ void Combat::refuse_kit_select() {
 	}
 }
 
-void Combat::record_tick(sim::Tick p_tick, const SlotTable &p_slots) {
+void Combat::record_tick(sim::Tick p_tick, const SlotTable &p_slots, const Soldiers &p_soldiers) {
 	if (gunplay_ == nullptr) {
 		return;
 	}
@@ -163,9 +155,8 @@ void Combat::record_tick(sim::Tick p_tick, const SlotTable &p_slots) {
 	for (size_t i = 0; i < p_slots.size(); ++i) {
 		PerSlot &ps = per_slot_[i];
 		ps.record_valid = false;
-		const ServerSlot &s = p_slots[i];
-		if (s.used && s.spawned && soldier_alive(s.state)) {
-			ps.record = gunplay_->other_record(uint8_t(i), s.state);
+		if (p_slots[i].used && p_soldiers.alive(i)) {
+			ps.record = gunplay_->other_record(uint8_t(i), p_soldiers[i].state);
 			ps.record_valid = true;
 			records_.push_back(ps.record);
 		}

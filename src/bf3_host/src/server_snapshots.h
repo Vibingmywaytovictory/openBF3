@@ -8,6 +8,7 @@
 #include "server_commands.h"
 #include "server_outbox.h"
 #include "server_slots.h"
+#include "server_soldiers.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -17,8 +18,9 @@ namespace bf3::host {
 
 class SnapshotWriter {
 public:
-	SnapshotWriter(SlotTable &r_slots, CommandBuffers &r_commands, Combat &r_combat, CombatLog &r_log, const sim::SoldierMotor &p_motor, Outbox &r_outbox) :
-			slots_(r_slots), commands_(r_commands), combat_(r_combat), log_(r_log), motor_(p_motor), outbox_(r_outbox) {}
+	SnapshotWriter(const SlotTable &p_slots, Soldiers &r_soldiers, CommandBuffers &r_commands, Combat &r_combat, CombatLog &r_log, const sim::SoldierMotor &p_motor,
+			Outbox &r_outbox) :
+			slots_(p_slots), soldiers_(r_soldiers), commands_(r_commands), combat_(r_combat), log_(r_log), motor_(p_motor), outbox_(r_outbox) {}
 
 	void configure(size_t p_slots) { seq_.assign(p_slots, 0); }
 	void reset(size_t p_slot) { seq_[p_slot] = 0; }
@@ -29,9 +31,10 @@ public:
 private:
 	void split_overflow(net::Snapshot &r_snapshot, size_t p_dropped);
 	void send_extras(size_t p_slot, const net::Snapshot &p_snapshot);
-	void send_shots(const ServerSlot &p_slot, const net::Snapshot &p_snapshot, Gunplay &r_gunplay);
+	void send_shots(size_t p_slot, const net::Snapshot &p_snapshot, Gunplay &r_gunplay);
 
-	SlotTable &slots_;
+	const SlotTable &slots_;
+	Soldiers &soldiers_;
 	CommandBuffers &commands_;
 	Combat &combat_;
 	CombatLog &log_;

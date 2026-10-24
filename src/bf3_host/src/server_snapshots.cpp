@@ -21,34 +21,33 @@ float distance2(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 void SnapshotWriter::send(sim::Tick p_tick, uint64_t p_now_ns, GameServerTickTimes &r_times) {
 	const auto start = std::chrono::steady_clock::now();
 	const uint64_t sent_before = sent_;
-	combat_.record_tick(p_tick, slots_);
+	combat_.record_tick(p_tick, slots_, soldiers_);
 	std::vector<std::pair<float, size_t>> order;
 	for (size_t i = 0; i < slots_.size(); ++i) {
-		ServerSlot &s = slots_[i];
-		if (!s.used || !s.remote || !s.hello) {
+		const Seat &s = slots_[i];
+		if (!s.used || !s.remote) {
 			continue;
 		}
 		net::Snapshot snap;
 		snap.seq = seq_[i]++;
 		snap.server_tick = p_tick;
 		commands_.stamp(i, p_tick, p_now_ns, snap);
-		snap.own_events = s.own_events;
-		s.own_events = 0;
-		if (s.spawned) {
-			snap.own = s.state;
+		snap.own_events = soldiers_.take_events(i);
+		const Soldier &own = soldiers_[i];
+		if (own.spawned) {
+			snap.own = own.state;
 		}
 		order.clear();
-		const sim::Vec3 at = s.spawned ? s.state.position : sim::Vec3{};
+		const sim::Vec3 at = own.spawned ? own.state.position : sim::Vec3{};
 		for (size_t j = 0; j < slots_.size(); ++j) {
-			const ServerSlot &o = slots_[j];
-			if (j != i && o.used && o.spawned && soldier_alive(o.state)) {
-				order.push_back({ distance2(at, o.state.position), j });
+			if (j != i && slots_[j].used && soldiers_.alive(j)) {
+				order.push_back({ distance2(at, soldiers_[j].state.position), j });
 			}
 		}
 		std::sort(order.begin(), order.end());
 		snap.others.reserve(order.size());
 		for (const auto &[d, j] : order) {
-			snap.others.push_back(net::quantize_other(uint8_t(j), slots_[j].state));
+			snap.others.push_back(net::quantize_other(uint8_t(j), soldiers_[j].state));
 		}
 		combat_.fill_snapshot(i, snap);
 
@@ -96,7 +95,7 @@ void SnapshotWriter::send_extras(size_t p_slot, const net::Snapshot &p_snapshot)
 		return;
 	}
 	Gunplay &g = *combat_.gunplay();
-	const ServerSlot &s = slots_[p_slot];
+	const Seat &s = slots_[p_slot];
 	uint64_t others_mask = 0;
 	if (!overflow_.empty()) {
 		net::SnapshotOthers so;
@@ -126,15 +125,17 @@ void SnapshotWriter::send_extras(size_t p_slot, const net::Snapshot &p_snapshot)
 		}
 	}
 	if (!remote_.empty()) {
-		send_shots(s, p_snapshot, g);
+		send_shots(p_slot, p_snapshot, g);
 	}
 
 	log_.send(s.peer, p_snapshot.server_tick, g, outbox_);
 }
 
-void SnapshotWriter::send_shots(const ServerSlot &p_slot, const net::Snapshot &p_snapshot, Gunplay &r_gunplay) {
-	sim::Vec3 eye = p_slot.state.position;
-	eye[1] += p_slot.spawned ? motor_.eye_height(p_slot.state) : 0.0f;
+void SnapshotWriter::send_shots(size_t p_slot, const net::Snapshot &p_snapshot, Gunplay &r_gunplay) {
+	const Soldier &own = soldiers_[p_slot];
+	const uint32_t peer = slots_[p_slot].peer;
+	sim::Vec3 eye = own.state.position;
+	eye[1] += own.spawned ? motor_.eye_height(own.state) : 0.0f;
 	for (int part = 0; part < 2; ++part) {
 		net::ShotEvents ev;
 		ev.server_tick = p_snapshot.server_tick;
@@ -144,12 +145,12 @@ void SnapshotWriter::send_shots(const ServerSlot &p_slot, const net::Snapshot &p
 		if (dropped == 0 || part == 1 || bytes.empty()) {
 			r_gunplay.count_shot_events_dropped(dropped);
 			if (!bytes.empty()) {
-				outbox_.send(p_slot.peer, net::kChannelUnreliable, std::move(bytes));
+				outbox_.send(peer, net::kChannelUnreliable, std::move(bytes));
 			}
 			break;
 		}
 		core::Result<net::ShotEvents> first = net::decode_shot_events(bytes, combat_.frame());
-		outbox_.send(p_slot.peer, net::kChannelUnreliable, std::move(bytes));
+		outbox_.send(peer, net::kChannelUnreliable, std::move(bytes));
 		if (!first) {
 			r_gunplay.count_shot_events_dropped(dropped);
 			break;

@@ -1,6 +1,5 @@
 #include "server_combat_log.h"
 
-#include <optional>
 #include <utility>
 #include <vector>
 
@@ -11,16 +10,7 @@ void CombatLog::hit(const net::HitEvent &p_event) {
 }
 
 void CombatLog::death(const net::DeathEvent &p_event) {
-	if (p_event.victim < slots_.size()) {
-		ServerSlot &s = slots_[p_event.victim];
-		if (s.used && !s.dummy && !s.want_spawn) {
-			const std::optional<uint32_t> at = match_.policy().respawn_tick(p_event.victim, tick_);
-			if (at) {
-				s.want_spawn = true;
-				s.respawn_at = *at;
-			}
-		}
-	}
+	spawner_.killed(p_event.victim, tick_);
 	net::DeathEvent e = p_event;
 	TdmRules *tdm = match_.rules();
 	if (tdm != nullptr) {

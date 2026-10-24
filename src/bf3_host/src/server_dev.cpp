@@ -32,7 +32,7 @@ void DevCommands::report(uint32_t p_slot, uint32_t p_id, bool p_ok, std::string 
 	if (p_slot >= slots_.size()) {
 		return;
 	}
-	const ServerSlot &s = slots_[p_slot];
+	const Seat &s = slots_[p_slot];
 	if (!s.used || !s.remote || outbox_.replies_full()) {
 		return;
 	}
@@ -88,19 +88,18 @@ void DevCommands::apply_debug(sim::Tick p_tick) {
 	while (!queue_.empty()) {
 		const PendingDebug d = queue_.front();
 		queue_.pop_front();
-		ServerSlot &s = slots_[d.slot];
-		if (!s.used) {
+		if (!slots_[d.slot].used) {
 			continue;
 		}
 		const net::DebugRequest &q = d.request;
 		switch (q.kind) {
 			case net::DebugKind::Teleport: {
-				if (!s.spawned) {
+				if (!soldiers_[d.slot].spawned) {
 					report(d.slot, q.id, false, "teleport: no soldier");
 					break;
 				}
 
-				s.state = motor_.spawn_state(q.position, q.yaw, s.state.life, p_tick, false);
+				soldiers_.teleport(d.slot, motor_.spawn_state(q.position, q.yaw, soldiers_[d.slot].state.life, p_tick, false));
 				char text[128];
 				std::snprintf(text, sizeof(text), "teleported to (%.3f, %.3f, %.3f) at tick %u", double(q.position[0]), double(q.position[1]),
 						double(q.position[2]), p_tick);
@@ -158,16 +157,16 @@ void DevCommands::apply_target(const PendingDebug &p_debug, sim::Tick p_tick) {
 		report(p_debug.slot, q.id, false, "target info: no gunplay on this server");
 		return;
 	}
-	if (q.slot >= slots_.size() || !slots_[q.slot].used || !slots_[q.slot].spawned) {
+	if (q.slot >= slots_.size() || !slots_[q.slot].used || !soldiers_[q.slot].spawned) {
 		report(p_debug.slot, q.id, false, "target info: no soldier in slot " + std::to_string(q.slot));
 		return;
 	}
-	const std::optional<net::TargetInfoRow> row = combat_.gunplay()->target_info(q.slot, slots_[q.slot].state);
+	const std::optional<net::TargetInfoRow> row = combat_.gunplay()->target_info(q.slot, soldiers_[q.slot].state);
 	if (!row) {
 		report(p_debug.slot, q.id, false, "target info: slot " + std::to_string(q.slot) + " is not a live armed soldier");
 		return;
 	}
-	const ServerSlot &requester = slots_[p_debug.slot];
+	const Seat &requester = slots_[p_debug.slot];
 	if (!requester.used || !requester.remote || outbox_.replies_full()) {
 		return;
 	}
@@ -186,12 +185,11 @@ void DevCommands::run_sweep(sim::Tick p_tick) {
 	const std::vector<sim::SpawnPoint> &points = config_->level->spawns;
 	if (sweep_.batch_active && p_tick - sweep_.batch_start >= sweep_.ticks) {
 		for (size_t i = 0; i < slots_.size(); ++i) {
-			ServerSlot &s = slots_[i];
-			if (!s.used || !s.dummy) {
+			if (!slots_[i].used || !slots_[i].dummy) {
 				continue;
 			}
 			sim::SettleResult &r = sweep_.results[per_slot_[i].sweep_entry];
-			r.state = s.state;
+			r.state = soldiers_[i].state;
 			const sim::SpawnPoint &p = points[sweep_.batch_points[per_slot_[i].sweep_entry]];
 			sim::judge_settle(motor_, *world_, p, sim::SettleOptions(), r);
 			net::SpawnSweepRow row;
@@ -231,13 +229,9 @@ void DevCommands::run_sweep(sim::Tick p_tick) {
 				++sweep_.next_point;
 				continue;
 			}
-			ServerSlot &s = slots_[size_t(at)];
 			reset_slot_(size_t(at));
-			s.used = true;
-			s.dummy = true;
-			s.team = 0;
-			s.spawned = true;
-			s.state = r.state;
+			slots_.admit_dummy(size_t(at));
+			soldiers_.enter_probe(size_t(at), r.state);
 			per_slot_[size_t(at)].sweep_entry = sweep_.results.size();
 			sweep_.results.push_back(std::move(r));
 			sweep_.batch_points.push_back(uint32_t(sweep_.next_point));
@@ -259,7 +253,7 @@ void DevCommands::run_sweep(sim::Tick p_tick) {
 			ok += r.ok ? 1 : 0;
 		}
 		if (sweep_.requester < slots_.size() && slots_[sweep_.requester].used && slots_[sweep_.requester].remote) {
-			const ServerSlot &s = slots_[sweep_.requester];
+			const Seat &s = slots_[sweep_.requester];
 			net::DebugReport rep;
 			rep.id = sweep_.id;
 			rep.ok = ok == sweep_.rows.size();
@@ -276,8 +270,8 @@ void DevCommands::trace(size_t p_slot, sim::Tick p_tick) {
 	if (!t.tracing) {
 		return;
 	}
-	const ServerSlot &s = slots_[p_slot];
-	t.trace.push_back(s.state);
+	const Seat &s = slots_[p_slot];
+	t.trace.push_back(soldiers_[p_slot].state);
 	combat_.trace_tick(p_slot, t.trace.size() == 1, p_tick);
 	if (t.trace.size() >= t.trace_ticks) {
 		if (s.remote) {
