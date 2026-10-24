@@ -3,6 +3,7 @@
 #include "gunplay_fixture.h"
 #include "tdm_fixture.h"
 
+#include "bf3/core/gameplay/mode_def.h"
 #include "bf3/host/kits.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/logic/round_natives.h"
@@ -1068,6 +1069,22 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(victim_p.spawned.back().kit == 1);
 		CHECK_FALSE(victim_p.spawned.back().revived);
 		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+
+	TEST_CASE("scoring: the install's scoring table rides on the shared level; the TDM scores come from it") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		REQUIRE(level->shared->scoring != nullptr);
+		REQUIRE(level->shared->tdm_tuning != nullptr);
+		const core::gameplay::ScoringTable &scoring = *level->shared->scoring;
+		CHECK(scoring.score("ID_SCORE_KILL") == std::optional<double>(100.0));
+		CHECK(scoring.score("ID_SCORE_HEADSHOT") == std::optional<double>(10.0));
+		CHECK(scoring.score("ID_SCORE_AVENGER") == std::optional<double>(10.0));
+		CHECK(scoring.score("ID_SCORE_SAVIOUR") == std::optional<double>(20.0));
+		CHECK(level->shared->tdm_tuning->score_kill == 100);
+		CHECK(level->shared->tdm_tuning->score_headshot == 10);
 	}
 
 	TEST_CASE("round start: the data's RoundMinPlayerCount holds one peer in the pre-round; the min-players override starts it") {

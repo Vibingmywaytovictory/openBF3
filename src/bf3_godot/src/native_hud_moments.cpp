@@ -5,6 +5,7 @@
 #include "swf_view.h"
 #include "ui_assets.h"
 
+#include "bf3/core/gameplay/mode_def.h"
 #include "bf3/core/math.h"
 #include "bf3/core/level/budget.h"
 #include "bf3/core/ui/hud_messages.h"
@@ -213,6 +214,8 @@ constexpr const char *kKillFeedPath = "instance1.HudMessage_02";
 constexpr const char *kKillLogPath = "instance1.HudMessage_00";
 constexpr const char *kScorePath = "instance1.HudMessage_01";
 constexpr const char *kAggregatorPath = "instance1.ScoreAggregator_01.aggHolder";
+constexpr std::array<std::string_view, 2> kPreScoreMinorSids{ "ID_SCORE_AVENGER", "ID_SCORE_SAVIOUR" };
+constexpr std::string_view kFootageAggregate = "240";
 constexpr float kArriveXz = 0.25f;
 constexpr float kArriveY = 0.5f;
 constexpr float kScanAboveSpawns = 3.0f;
@@ -645,6 +648,14 @@ void NativeHudMomentRun::settle(Bf3LevelSession &r_session, Bf3NativeHud &r_hud,
 	if (error.empty() && pop != nullptr && (level == nullptr || level->tdm_tuning == nullptr)) {
 		error = "no TdmTuning scores";
 	}
+	std::vector<std::pair<std::string_view, int32_t>> pre_minor;
+	for (const std::string_view sid : kPreScoreMinorSids) {
+		const std::optional<double> v = error.empty() && pop != nullptr && level->scoring != nullptr ? level->scoring->score(sid) : std::nullopt;
+		if (error.empty() && pop != nullptr && !v) {
+			error = "no " + std::string(sid) + " row in the install scoring table";
+		}
+		pre_minor.emplace_back(sid, v ? int32_t(std::lround(*v)) : 0);
+	}
 	const std::optional<uint32_t> score_start = error.empty() ? fit.label("Score", "start") : std::nullopt;
 	if (error.empty() && pop != nullptr && !score_start) {
 		error = "no Score start label";
@@ -817,6 +828,9 @@ void NativeHudMomentRun::settle(Bf3LevelSession &r_session, Bf3NativeHud &r_hud,
 		bool changed = false;
 		if (s == pre_score_step) {
 			push_score(m.messages.score_message, ui::kHudScoreKillSid, level->tdm_tuning->score_kill);
+			for (const auto &[sid, points] : pre_minor) {
+				push_score(m.messages.score_message, sid, points);
+			}
 			push_score(m.messages.score_message, ui::kHudScoreHeadshotSid, level->tdm_tuning->score_headshot);
 			changed = true;
 		}
@@ -890,8 +904,10 @@ void NativeHudMomentRun::check_messages(Bf3NativeHud &r_hud, const NativeHudMome
 	if (expect_aggregator_frame_ >= 0) {
 		const ui::SwfSceneNode *agg = node_of(r_hud, kAggregatorPath);
 		const char *t = text_of(r_hud, "instance1.ScoreAggregator_01.aggHolder.scoringMessage.txt");
-		UtilityFunctions::print(String::utf8((std::string("NATIVE HUD FLAG ") + id + " aggregator frame " + (agg != nullptr ? std::to_string(agg->frame) : std::string("missing")) +
-				" text '" + (t != nullptr ? t : "") + "', the reference shows frame " + std::to_string(expect_aggregator_frame_) + " text '240'").c_str()));
+		const std::string text = t != nullptr ? t : "";
+		row(id + ".aggregator", text == kFootageAggregate,
+				"text '" + text + "', the footage shows '" + std::string(kFootageAggregate) + "'; frame " + (agg != nullptr ? std::to_string(agg->frame) : std::string("missing")) +
+						", the reference state frame " + std::to_string(expect_aggregator_frame_));
 	}
 }
 

@@ -171,9 +171,8 @@ These are structural, known, and listed so nobody mistakes them for design inten
   The Icon3D managers (SupportIconManager, MapmarkerManager, AlertManager) run their AS2 and create, update and remove
   their tags from `HudClientState::world_tags` at stage positions; nothing in TDM fills it (no requests, markers, spotting
   or grenade alerts in the model), and the engine component's placement (UI3dIconCompData snap, fade and scale) is not done.
-  The moment fixture replays only kill and headshot scores, so its ScoreAggregator total reads 210 where the footage
-  reads 240, and its fading kill rows sit on the nearest timeline frame with the row still present (0.20 for 0.00 and 0.06,
-  0.50 for 0.28 and 0.43 fading in).
+  The moment fixture's fading kill rows sit on the nearest timeline frame with the row still present (0.20 for 0.00 and
+  0.06, 0.50 for 0.28 and 0.43 fading in).
 * Nametags are engine-drawn by `Bf3NativeHud` through `NativeTags` (`native_tags.cpp`): UIHudIcon_Player by relation, the
   squad kit icon for squad mates, names in `$Menu_medium` at the UINametagCompData sizes and tints; the name's kit icon
   (16 units in an 18-unit column) and its black glow are not measured, and the HealthBarSize bar is not drawn (other
