@@ -136,8 +136,9 @@ TEST_SUITE("ui-minimap") {
 			const char *id;
 			float cx, cz, size;
 			uint32_t side;
+			float wrap;
 		};
-		const Expect expects[] = { { "MP_Subway", 0.0f, -162.0f, 1024.0f, 2048 }, { "MP_007", 0.0f, 0.0f, 2048.0f, 2048 }, { "MP_001", 0.0f, 0.0f, 512.0f, 2048 } };
+		const Expect expects[] = { { "MP_Subway", 0.0f, -162.0f, 1024.0f, 2048, 70.0f }, { "MP_007", 0.0f, 0.0f, 2048.0f, 2048, 70.0f }, { "MP_001", 0.0f, 0.0f, 512.0f, 2048, 70.0f } };
 		bool all = true;
 		std::string detail;
 		for (const Expect &e : expects) {
@@ -150,11 +151,12 @@ TEST_SUITE("ui-minimap") {
 					minimap_zoom(pr, true).zoom == 0.0f && minimap_zoom(pr, true).player_is_center && minimap_zoom(pr, false).zoom == 1.2f &&
 					!minimap_zoom(pr, false).player_is_center;
 			const bool ok = m.error.empty() && m.data.world_center[0] == e.cx && m.data.world_center[1] == e.cz && m.data.world_size == e.size &&
-					m.sat_w == e.side && m.sat_h == e.side && profile_ok;
+					m.sat_w == e.side && m.sat_h == e.side && profile_ok && m.data.combat_area_multiply_wrap[0] == e.wrap && m.data.combat_area_multiply_wrap[1] == e.wrap;
 			all = all && ok;
 			detail += std::string(e.id) + " (" + fmt("%g, %g)/%g", m.data.world_center[0], m.data.world_center[1], m.data.world_size) + " satellite " +
 					std::to_string(m.sat_w) + "x" + std::to_string(m.sat_h) + fmt(" opacity %g, MapZoom steps %zu x%zu, small step %d -> zoom %g, large step %d -> zoom %g, InitSmall %d, IsMaxZoom >= %g", pr.texture_opacity,
 							pr.zoom_steps.size(), pr.zoom_nodes, pr.zoom_small_step, pr.zoom_small(), pr.zoom_large_step, minimap_zoom(pr, false).zoom, int(pr.init_small), pr.max_zoom_step) +
+					fmt(", CombatAreaMultiplyWrapAmount %g x %g", m.data.combat_area_multiply_wrap[0], m.data.combat_area_multiply_wrap[1]) +
 					(m.error.empty() ? "" : " ERROR " + m.error) + "; ";
 		}
 		t2::row("minimap.reference", all, detail);

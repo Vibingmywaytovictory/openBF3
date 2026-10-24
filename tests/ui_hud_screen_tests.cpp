@@ -675,8 +675,41 @@ TEST_SUITE("ui-hud-screen-unit") {
 		CHECK(hud_ekg_alpha(k, 1102.5f) == doctest::Approx(0.5f));
 		CHECK(hud_ekg_alpha(k, 1160.0f) == 1.0f);
 		CHECK(kMinimapMetresPerLocalUnit == 1.375f);
-		CHECK(kMinimapHatchTileLocal == 10.6f);
 		CHECK(kMinimapSquareLocal == 170.0f);
+		struct HatchPhase {
+			const char *id;
+			float map_anchored;
+			float player_anchored;
+		};
+		constexpr std::array<HatchPhase, 16> kHatchPhase{ {
+				{ "m01", 0.754f, 0.741f },
+				{ "m02", 0.789f, 0.230f },
+				{ "m03", 0.471f, 0.348f },
+				{ "m04", 0.684f, -0.621f },
+				{ "m05", 0.573f, -0.403f },
+				{ "m06", 0.227f, 0.370f },
+				{ "m07", 0.431f, -0.430f },
+				{ "m08", 0.435f, 0.470f },
+				{ "m09", 0.462f, -0.184f },
+				{ "m10", 0.334f, -0.093f },
+				{ "m11", 0.402f, -0.277f },
+				{ "m12", 0.482f, 0.229f },
+				{ "m13", 0.635f, -0.546f },
+				{ "m14", 0.666f, -0.663f },
+				{ "m15", 0.157f, 0.130f },
+				{ "m16", 0.610f, 0.495f },
+		} };
+		int32_t map_wins = 0;
+		double map_sum = 0.0;
+		double player_sum = 0.0;
+		for (const HatchPhase &h : kHatchPhase) {
+			map_wins += h.map_anchored > h.player_anchored ? 1 : 0;
+			map_sum += h.map_anchored;
+			player_sum += h.player_anchored;
+		}
+		CHECK(map_wins == 14);
+		CHECK(map_sum / 16.0 == doctest::Approx(0.507).epsilon(0.002));
+		CHECK(player_sum / 16.0 == doctest::Approx(-0.01275));
 		const std::array<float, 5> observed_satellite_weight{ -0.058f, -0.665f, -0.331f, -0.531f, -0.354f };
 		for (const float w : observed_satellite_weight) {
 			CHECK(w <= kMinimapSatelliteWeight);

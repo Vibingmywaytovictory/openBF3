@@ -67,7 +67,7 @@ uniform float heading = 0.0;
 uniform float metres_per_unit = 1.375;
 uniform vec2 world_center = vec2(0.0);
 uniform float world_size = 1024.0;
-uniform float hatch_tile = 10.6;
+uniform vec2 hatch_wrap = vec2(70.0, 70.0);
 void fragment() {
 	vec2 p = local_rect.xy + UV * local_rect.zw;
 	vec2 d = p - centre_local;
@@ -83,7 +83,7 @@ void fragment() {
 		acc = vec4(detail_tint.rgb * w, w) + acc * (1.0 - w);
 	}
 	float outside = smoothstep(threshold - edge_width, threshold + edge_width, texture(combat_area, uv).r);
-	float h = has_hatch ? texture(hatch, r / hatch_tile).r : 1.0;
+	float h = has_hatch ? texture(hatch, uv * hatch_wrap).r : 1.0;
 	float ca = outside * area_color.a * h;
 	acc = vec4(area_color.rgb * ca, ca) + acc * (1.0 - ca);
 	vec2 m = (p - square_rect.xy) / square_rect.zw;
@@ -393,7 +393,7 @@ bool Bf3NativeHud::minimap_ready() {
 		minimap_material_->set_shader_parameter("satellite_weight", ui::kMinimapSatelliteWeight);
 		minimap_material_->set_shader_parameter("world_center", Vector2(d.world_center[0], d.world_center[1]));
 		minimap_material_->set_shader_parameter("world_size", d.world_size);
-		minimap_material_->set_shader_parameter("hatch_tile", ui::kMinimapHatchTileLocal);
+		minimap_material_->set_shader_parameter("hatch_wrap", Vector2(d.combat_area_multiply_wrap[0], d.combat_area_multiply_wrap[1]));
 	}
 	return true;
 }
@@ -802,7 +802,6 @@ void Bf3NativeHud::paint_minimap(const SwfEngineTarget &p_target, const ui::SwfS
 	minimap_material_->set_shader_parameter("player_xz", Vector2(pose_.x, pose_.z));
 	minimap_material_->set_shader_parameter("heading", pose_.yaw);
 	minimap_material_->set_shader_parameter("metres_per_unit", mpu / unit);
-	minimap_material_->set_shader_parameter("hatch_tile", ui::kMinimapHatchTileLocal * unit);
 	rs->canvas_item_clear(minimap_map_item_);
 	rs->canvas_item_add_rect(minimap_map_item_, Rect2(b.x_min, b.y_min, b.width(), b.height()), Color(1, 1, 1, 1));
 	paint_.minimap_maps++;

@@ -108,7 +108,6 @@ struct HudEkgLook {
 inline constexpr HudEkgLook kHudEkgLook{};
 
 inline constexpr float kMinimapMetresPerLocalUnit = 1.375f;
-inline constexpr float kMinimapHatchTileLocal = 10.6f;
 inline constexpr float kMinimapSatelliteWeight = 0.0f;
 inline constexpr float kMinimapSquareLocal = 170.0f;
 inline constexpr std::string_view kMinimapMaskTexture = "ui/hud/minimap/minimapmask";
