@@ -4,6 +4,7 @@
 #include "bf3/host/client_session.h"
 #include "client_clock.h"
 #include "client_link.h"
+#include "client_tracks.h"
 #include "client_transport.h"
 
 #include "bf3/sim/collision_world.h"
@@ -43,12 +44,6 @@ public:
 	void send_spawn_request(uint8_t p_kit);
 
 private:
-	struct Track {
-		bool used = false;
-		uint8_t generation = 0;
-		uint64_t last_seen_ns = 0;
-		std::deque<OtherSample> samples;
-	};
 	ClientSessionConfig config;
 	std::shared_ptr<const SharedLevel> level;
 	std::unique_ptr<sim::CollisionWorld> world;
@@ -69,7 +64,6 @@ private:
 	uint64_t serial = 0;
 	bool have_match = false;
 	uint8_t slot = 0;
-	uint8_t divisor = 2;
 	ClientClock clock{ config };
 
 	uint32_t next_sequence = 1;
@@ -91,14 +85,7 @@ private:
 	net::Snapshot pending_snapshot;
 	std::vector<sim::SoldierState> pending_spawned;
 
-	std::array<Track, net::kMaxSlots> tracks;
-	bool recv_valid = false;
-	double recv_offset = 0;
-	double recv_rate = 0;
-	std::deque<std::pair<uint64_t, double>> offsets;
-	uint64_t last_arrival_ns = 0;
-	double interval_mean_ms = 0;
-	double interval_mad_ms = 0;
+	RemoteTracks tracks{ config };
 	uint64_t last_tick_ns = 0;
 
 	struct ClSeq {
@@ -176,8 +163,6 @@ private:
 	std::vector<PredictedTimed> cl_timed_log;
 	std::vector<OwnTestSample> cl_sample_log;
 	std::vector<OwnTestSample> cl_sample_scratch;
-	std::vector<net::TimedOther> cl_track_scratch;
-	std::vector<net::OtherPose> cl_poses;
 
 	void cl_push(const PresentEvent &p_event);
 	bool cl_match_info(const net::MatchInfo &p_match, uint64_t p_now);
@@ -188,7 +173,6 @@ private:
 	void cl_snapshot(const net::Snapshot &p_snapshot, uint64_t p_now);
 	void cl_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d, uint64_t p_now);
 	void cl_note_arrival(uint16_t p_seq, uint64_t p_now);
-	void cl_track_reorder(sim::Tick p_tick, std::span<const net::OtherSoldier> p_records);
 	bool cl_wire_at(sim::Tick p_tick) const { return cl_gunplay && cl_wire_valid && cl_wire_tick == p_tick; }
 	bool cl_put_wire(const sim::SoldierState &p_s, sim::Tick p_spawn_tick);
 	void cl_weapons_spawn(const sim::SoldierState &p_s);
@@ -198,12 +182,8 @@ private:
 	void cl_command_made(sim::Command &r_command, uint64_t p_now);
 	void cl_predict_weapons(const sim::Command &p_command, const sim::SoldierState &p_before, const sim::SoldierState &p_after);
 	uint32_t cl_others_ack_bits() const;
-	void cl_publish_begin(uint64_t p_now);
 	void cl_publish_end(PresentationFrame &r_frame, uint64_t p_now);
 
-	static double local_ticks(uint64_t p_ns);
-	void received_time_sample(sim::Tick p_tick, uint64_t p_now);
-	void add_others(const net::Snapshot &p_snap, uint64_t p_now);
 	void handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_now);
 	void run_catch_up(const sim::SoldierState &p_base);
 	void authoritative(const sim::SoldierState &p_s, uint64_t p_now);

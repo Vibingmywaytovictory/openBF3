@@ -17,9 +17,6 @@ namespace bf3::host {
 
 namespace {
 
-constexpr size_t kTrackSamples = 8;
-constexpr uint64_t kTrackTimeoutNs = 1'000'000'000ull;
-
 float length3(const sim::Vec3 &p_v) {
 	return std::sqrt(p_v[0] * p_v[0] + p_v[1] * p_v[1] + p_v[2] * p_v[2]);
 }
@@ -57,58 +54,6 @@ void copy3(float (&r_to)[3], const sim::Vec3 &p_from) {
 
 }
 
-double ClientLoop::local_ticks(uint64_t p_ns) {
-	return double(p_ns) / kNsPerTick;
-}
-
-void ClientLoop::received_time_sample(sim::Tick p_tick, uint64_t p_now) {
-	const double o = double(p_tick) - local_ticks(p_now);
-	offsets.push_back({ p_now, o });
-	while (!offsets.empty() && p_now - offsets.front().first > 1'000'000'000ull) {
-		offsets.pop_front();
-	}
-	if (!recv_valid) {
-		recv_offset = o;
-		recv_valid = true;
-	}
-	if (last_arrival_ns != 0) {
-		const double interval = double(p_now - last_arrival_ns) / 1e6;
-		if (interval_mean_ms == 0.0) {
-			interval_mean_ms = interval;
-		}
-		interval_mean_ms += (interval - interval_mean_ms) / 16.0;
-		interval_mad_ms += (std::fabs(interval - interval_mean_ms) - interval_mad_ms) / 16.0;
-	}
-	last_arrival_ns = p_now;
-}
-
-void ClientLoop::add_others(const net::Snapshot &p_snap, uint64_t p_now) {
-	for (const net::OtherSoldier &o : p_snap.others) {
-		if (o.slot >= tracks.size() || o.slot == slot) {
-			continue;
-		}
-		Track &t = tracks[o.slot];
-		if (!t.used || t.generation != o.generation) {
-			t = Track();
-			t.used = true;
-			t.generation = o.generation;
-		}
-		t.last_seen_ns = p_now;
-		OtherSample s;
-		s.server_tick = p_snap.server_tick;
-		s.soldier = o;
-		auto at = std::lower_bound(t.samples.begin(), t.samples.end(), s.server_tick,
-				[](const OtherSample &a, sim::Tick b) { return a.server_tick < b; });
-		if (at != t.samples.end() && at->server_tick == s.server_tick) {
-			continue;
-		}
-		t.samples.insert(at, s);
-		while (t.samples.size() > kTrackSamples) {
-			t.samples.pop_front();
-		}
-	}
-}
-
 void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_now) {
 	const std::optional<net::MessageType> type = net::peek_type(p_d.bytes);
 	if (!type) {
@@ -126,7 +71,7 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 			have_match = true;
 			slot = m->slot;
 			stats_.slot = m->slot;
-			divisor = std::max<uint8_t>(m->snapshot_divisor, 1);
+			tracks.set_divisor(std::max<uint8_t>(m->snapshot_divisor, 1));
 			if (m->motor_hash != motor_hash) {
 				++stats_.motor_hash_mismatch;
 			}
@@ -154,14 +99,14 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 			clock.rtt_sample(*s, p_now, next_sequence);
 			const SnapshotOrder order = link.arrive(s->seq);
 			if (order == SnapshotOrder::Late) {
-				add_others(*s, p_now);
+				tracks.add(s->server_tick, s->others, slot, p_now);
 			}
 			if (order != SnapshotOrder::Newest) {
 				return;
 			}
 			clock.anchor_snapshot(s->server_tick, p_now);
-			received_time_sample(s->server_tick, p_now);
-			add_others(*s, p_now);
+			tracks.arrival(s->server_tick, p_now);
+			tracks.add(s->server_tick, s->others, slot, p_now);
 			pending_snapshot = std::move(*s);
 			pending_snapshot_valid = true;
 			return;
@@ -375,7 +320,7 @@ void ClientLoop::client_tick(uint64_t p_now) {
 }
 
 void ClientLoop::publish(uint64_t p_now, const sim::PredictionEntry *p_made, const sim::Command &p_cmd) {
-	cl_publish_begin(p_now);
+	tracks.count_timeouts(p_now);
 	PresentationFrame &f = *build;
 	f.serial = ++serial;
 	f.publish_ns = p_now;
@@ -399,54 +344,16 @@ void ClientLoop::publish(uint64_t p_now, const sim::PredictionEntry *p_made, con
 	f.events = events_acc;
 	events_acc = 0;
 
-	recv_rate = 0;
-	if (recv_valid && !offsets.empty()) {
-		double lo = offsets.front().second;
-		for (const auto &o : offsets) {
-			lo = std::min(lo, o.second);
-		}
-		const double step = 0.05;
-		const double diff = lo - recv_offset;
-		const double moved = std::clamp(diff, -step, step);
-		recv_offset += moved;
-		recv_rate = moved / 1.0;
-	}
-	const double snapshot_interval_ms = double(divisor) * kMsPerTick;
-	const double delay_ms =
-			std::clamp(2.0 * snapshot_interval_ms + interval_mad_ms, double(config.interp_min_ms), double(std::max(config.interp_min_ms, config.interp_max_ms)));
-	stats_.interp_delay_ms = delay_ms;
-	f.render_ticks_at_publish = local_ticks(p_now) + recv_offset - delay_ms / kMsPerTick;
-	f.ticks_per_ns = (1.0 + std::clamp(recv_rate, -0.05, 0.05)) / kNsPerTick;
 	f.extrapolate_max_ms = config.extrapolate_max_ms;
 	for (size_t k = 0; k < sim::kPoseCount; ++k) {
 		f.pose_eye_heights[k] = level->motor.poses[k].eye_height;
 	}
-	uint32_t n = 0;
-	for (size_t i = 0; i < tracks.size(); ++i) {
-		Track &t = tracks[i];
-		if (!t.used) {
-			continue;
-		}
-		if (p_now > t.last_seen_ns + kTrackTimeoutNs || t.samples.empty()) {
-			t = Track();
-			continue;
-		}
-		size_t first = 0;
-		while (first + 1 < t.samples.size() && double(t.samples[first + 1].server_tick) <= f.render_ticks_at_publish) {
-			++first;
-		}
-		OtherTrack &o = f.others[n++];
-		o.slot = uint8_t(i);
-		o.count = 0;
-		for (size_t k = first; k < t.samples.size() && o.count < kOtherSamples; ++k) {
-			o.samples[o.count++] = t.samples[k];
-		}
-	}
-	f.other_count = n;
+	tracks.publish(f, p_now);
 	cl_publish_end(f, p_now);
 	tdm_publish(f);
 	stats_.connected = link.connected();
 	clock.publish_stats(stats_);
+	tracks.publish_stats(stats_);
 	stats_.enet_rtt_ms = link.transport_rtt_ms();
 	stats_.netsim_out = link.out_stats();
 	stats_.netsim_in = link.in_stats();
@@ -459,6 +366,7 @@ void ClientLoop::publish(uint64_t p_now, const sim::PredictionEntry *p_made, con
 void ClientLoop::collect_stats() {
 	link.stats(stats_);
 	clock.stats(stats_);
+	tracks.stats(stats_);
 }
 
 void ClientLoop::copy_frame(PresentationFrame &r_to, const PresentationFrame &p_from) {
@@ -829,23 +737,11 @@ void ClientLoop::cl_note_arrival(uint16_t p_seq, uint64_t p_now) {
 	}
 }
 
-void ClientLoop::cl_track_reorder(sim::Tick p_tick, std::span<const net::OtherSoldier> p_records) {
-	for (const net::OtherSoldier &o : p_records) {
-		if (o.slot >= tracks.size() || o.slot == slot) {
-			continue;
-		}
-		const Track &t = tracks[o.slot];
-		if (t.used && t.generation != o.generation && !t.samples.empty() && p_tick < t.samples.back().server_tick) {
-			++stats_.generation_reorder;
-		}
-	}
-}
-
 void ClientLoop::cl_snapshot(const net::Snapshot &p_snapshot, uint64_t p_now) {
 	const bool newer = !link.have_snapshot() || net::seq_newer(p_snapshot.seq, link.newest_seq());
 	cl_note_arrival(p_snapshot.seq, p_now);
 	if (newer || p_snapshot.seq != link.newest_seq()) {
-		cl_track_reorder(p_snapshot.server_tick, p_snapshot.others);
+		tracks.reorder(p_snapshot.server_tick, p_snapshot.others, slot);
 	}
 	cl_records.add(p_snapshot.seq, p_snapshot.server_tick, true, p_snapshot.others);
 	if (newer) {
@@ -876,14 +772,9 @@ void ClientLoop::cl_datagram(net::MessageType p_type, const net::NetSim::Datagra
 			}
 			++stats_.snapshot_others_received;
 			cl_note_arrival(o->seq, p_now);
-			cl_track_reorder(o->server_tick, o->others);
+			tracks.reorder(o->server_tick, o->others, slot);
 			cl_records.add(o->seq, o->server_tick, false, o->others);
-
-			net::Snapshot as_snapshot;
-			as_snapshot.seq = o->seq;
-			as_snapshot.server_tick = o->server_tick;
-			as_snapshot.others = std::move(o->others);
-			add_others(as_snapshot, p_now);
+			tracks.add(o->server_tick, o->others, slot, p_now);
 			return;
 		}
 		case net::MessageType::ShotEvents: {
@@ -1186,14 +1077,6 @@ uint32_t ClientLoop::cl_others_ack_bits() const {
 	return link.have_snapshot() ? cl_records.mask(link.newest_seq(), false) : 0u;
 }
 
-void ClientLoop::cl_publish_begin(uint64_t p_now) {
-	for (const Track &t : tracks) {
-		if (t.used && !t.samples.empty() && p_now > t.last_seen_ns + kTrackTimeoutNs) {
-			++stats_.track_timeout;
-		}
-	}
-}
-
 void ClientLoop::cl_publish_end(PresentationFrame &r_frame, uint64_t p_now) {
 	(void)p_now;
 	r_frame.newest_seq = link.newest_seq();
@@ -1201,28 +1084,7 @@ void ClientLoop::cl_publish_end(PresentationFrame &r_frame, uint64_t p_now) {
 	r_frame.match_seed = cl_match_seed;
 	r_frame.own_kit = cl_kit;
 	r_frame.own_team = cl_team;
-	bool ahead = false;
-	cl_poses.clear();
-	const uint32_t n = std::min<uint32_t>(r_frame.other_count, uint32_t(r_frame.others.size()));
-	const double max_extra_ticks = std::max(0.0, double(config.extrapolate_max_ms)) / kMsPerTick;
-	for (uint32_t i = 0; i < n; ++i) {
-		OtherTrack &o = r_frame.others[i];
-		const Track &t = tracks[o.slot];
-		o.track_newest_tick = t.samples.empty() ? 0u : t.samples.back().server_tick;
-		if (link.have_snapshot() && o.track_newest_tick > cl_newest_tick) {
-			ahead = true;
-		}
-		if (cl_projectiles != nullptr && !t.samples.empty()) {
-			cl_track_scratch.clear();
-			for (const OtherSample &x : t.samples) {
-				cl_track_scratch.push_back({ x.server_tick, x.soldier });
-			}
-			cl_poses.push_back(net::sample_other(cl_track_scratch, r_frame.render_ticks_at_publish, r_frame.pose_eye_heights, max_extra_ticks));
-		}
-	}
-	if (ahead) {
-		++stats_.others_ahead;
-	}
+	const std::span<const net::OtherPose> poses = tracks.finish(r_frame, link.have_snapshot(), cl_newest_tick, cl_projectiles != nullptr);
 	r_frame.own_weapons_valid = false;
 	if (cl_gunplay && r_frame.valid && r_frame.tick > 0) {
 		const sim::WeaponPredictionEntry *a = cl_lane->find(r_frame.tick - 1u);
@@ -1234,7 +1096,7 @@ void ClientLoop::cl_publish_end(PresentationFrame &r_frame, uint64_t p_now) {
 		}
 	}
 	if (cl_projectiles != nullptr) {
-		cl_projectiles->step_remote(r_frame.render_ticks_at_publish, *world, cl_poses, cl_events);
+		cl_projectiles->step_remote(r_frame.render_ticks_at_publish, *world, poses, cl_events);
 		cl_sample_scratch.resize(4096);
 		size_t got = 0;
 		while ((got = cl_projectiles->take_samples(cl_sample_scratch)) > 0) {
