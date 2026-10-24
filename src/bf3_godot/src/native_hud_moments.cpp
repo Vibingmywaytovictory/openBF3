@@ -44,22 +44,22 @@ namespace ui = bf3::core::ui;
 namespace {
 
 constexpr std::array<NativeHudMoment, 16> kMoments{ {
-		{ "m01", 20, 100, 1, 100, 0, 4, 295, 44.125f, true, -140.0f, -455.0f, 1.470f, true },
-		{ "m02", 25, 217, 1, 100, 9, 12, 212, 95.250f, true, -208.0f, -508.0f, 1.370f },
-		{ "m03", 31, 124, 1, 100, 50, 61, 270, 95.250f, true, -251.0f, -500.0f, 1.380f },
-		{ "m04", 31, 217, 1, 100, 73, 83, 49, 99.250f, true, -217.0f, -557.0f, 1.310f },
-		{ "m05", 30, 217, 1, 100, 74, 83, 82, 97.250f, true, -217.0f, -557.0f, 1.325f },
-		{ "m06", 6, 217, 1, 94, 79, 85, 68, 115.375f, true, -129.0f, -535.0f, 1.405f, true },
-		{ "m07", 31, 192, 1, 94, 79, 85, 289, 96.125f, true, -112.0f, -543.0f, 1.230f },
-		{ "m08", 21, 192, 1, 94, 79, 87, 286, 72.250f, false, -232.0f, -554.0f, 1.370f, true },
-		{ "m09", 31, 168, 1, 100, 81, 88, 285, 115.250f, true, -222.0f, -558.0f, 1.310f },
-		{ "m10", 31, 168, 1, 74, 85, 89, 87, 99.250f, true, -207.0f, -548.0f, 1.375f },
-		{ "m11", 0, 0, 0, 87, 85, 89, 69, 4.250f, false, -207.0f, -549.0f, 1.390f },
-		{ "m12", 17, 217, 0, 100, 87, 89, 302, 115.250f, true, -210.0f, -543.0f, 1.375f },
-		{ "m13", 31, 217, 1, 100, 90, 93, 3, 92.000f, true, -174.0f, -516.0f, 1.380f },
-		{ "m14", 31, 217, 1, 100, 92, 98, 192, 115.250f, true, -171.0f, -533.0f, 1.385f },
-		{ "m15", 31, 217, 1, 100, 92, 99, 135, 115.250f, true, -173.0f, -542.0f, 1.390f },
-		{ "m16", 17, 199, 0, 100, 87, 89, 80, 97.250f, true, -212.0f, -548.0f, 1.375f },
+		{ "m01", 20, 100, 1, 100, 0, 4, 295, 44.125f, true, -140.0f, -455.0f, 678.0f, 926.0f, 66.0f, true },
+		{ "m02", 25, 217, 1, 100, 9, 12, 212, 95.250f, true, -208.0f, -508.0f, 722.0f, 857.0f, 152.0f },
+		{ "m03", 31, 124, 1, 100, 50, 61, 270, 95.250f, true, -251.0f, -500.0f, 765.0f, 851.0f, 91.5f },
+		{ "m04", 31, 217, 1, 100, 73, 83, 49, 99.250f, true, -217.0f, -557.0f, 726.0f, 910.0f, 312.5f },
+		{ "m05", 30, 217, 1, 100, 74, 83, 82, 97.250f, true, -217.0f, -557.0f, 728.0f, 909.0f, 279.5f },
+		{ "m06", 6, 217, 1, 94, 79, 85, 68, 115.375f, true, -129.0f, -535.0f, 760.0f, 920.0f, 294.0f, true },
+		{ "m07", 31, 192, 1, 94, 79, 85, 289, 96.125f, true, -112.0f, -543.0f, 792.0f, 926.0f, 69.0f },
+		{ "m08", 21, 192, 1, 94, 79, 87, 286, 72.250f, false, -232.0f, -554.0f, 752.0f, 912.0f, 76.5f, true },
+		{ "m09", 31, 168, 1, 100, 81, 88, 285, 115.250f, true, -222.0f, -558.0f, 734.0f, 914.0f, 77.0f },
+		{ "m10", 31, 168, 1, 74, 85, 89, 87, 99.250f, true, -207.0f, -548.0f, 717.0f, 897.0f, 275.0f },
+		{ "m11", 0, 0, 0, 87, 85, 89, 69, 4.250f, false, -207.0f, -549.0f, 717.0f, 898.0f, 293.0f },
+		{ "m12", 17, 217, 0, 100, 87, 89, 302, 115.250f, true, -210.0f, -543.0f, 723.0f, 896.0f, 59.5f },
+		{ "m13", 31, 217, 1, 100, 90, 93, 3, 92.000f, true, -174.0f, -516.0f, 684.0f, 868.0f, 359.5f },
+		{ "m14", 31, 217, 1, 100, 92, 98, 192, 115.250f, true, -171.0f, -533.0f, 685.0f, 882.0f, 168.5f },
+		{ "m15", 31, 217, 1, 100, 92, 99, 135, 115.250f, true, -173.0f, -542.0f, 685.0f, 889.0f, 229.5f },
+		{ "m16", 17, 199, 0, 100, 87, 89, 80, 97.250f, true, -212.0f, -548.0f, 724.0f, 898.0f, 286.0f },
 } };
 
 constexpr double kSettleSeconds = 3.0;
@@ -67,6 +67,7 @@ constexpr double kSettleStep = 1.0 / 30.0;
 constexpr int32_t kRenderFrames = 3;
 constexpr double kAliveTimeout = 90.0;
 constexpr double kArriveTimeout = 10.0;
+constexpr float kMapRegistrationTexels = 1024.0f;
 
 enum class MomentFade : uint8_t { None, In, Out };
 
@@ -490,12 +491,12 @@ float native_hud_moment_view_yaw(const NativeHudMoment &p_moment) {
 	return float(double(p_moment.compass_frame) * bf3::core::kDegToRad);
 }
 
-NativeHudMinimapPose native_hud_moment_pose(const NativeHudMoment &p_moment) {
+NativeHudMinimapPose native_hud_moment_pose(const NativeHudMoment &p_moment, const ui::MinimapMapping &p_mapping, float p_texture_side) {
 	NativeHudMinimapPose p;
-	p.x = p_moment.world_x;
-	p.z = p_moment.world_z;
-	p.yaw = native_hud_moment_view_yaw(p_moment);
-	p.metres_per_local_unit = p_moment.minimap_metres_per_unit;
+	const std::array<float, 2> w = ui::minimap_uv_to_world(p_mapping, { p_moment.map_texel_x / p_texture_side, p_moment.map_texel_y / p_texture_side });
+	p.x = w[0];
+	p.z = w[1];
+	p.yaw = float((360.0 - double(p_moment.map_rotation_deg)) * bf3::core::kDegToRad);
 	p.valid = true;
 	return p;
 }
@@ -624,7 +625,8 @@ void NativeHudMomentRun::hold(Bf3LevelSession &r_session, const NativeHudMoment 
 
 void NativeHudMomentRun::settle(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, const NativeHudMoment &p_moment, ui::HudModel p_model) {
 	const std::string id = p_moment.id;
-	const NativeHudMinimapPose pose = native_hud_moment_pose(p_moment);
+	const std::optional<ui::MinimapLevel> map = r_hud.minimap_level();
+	const NativeHudMinimapPose pose = map ? native_hud_moment_pose(p_moment, ui::minimap_mapping(map->data), kMapRegistrationTexels) : NativeHudMinimapPose{};
 	expect_kills_.clear();
 	expect_kill_frames_.clear();
 	reference_kill_alphas_.clear();
@@ -935,6 +937,20 @@ void NativeHudMomentRun::check(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, 
 	row(id + ".engine_targets", ps.bg_panels > 0 && ps.ekg_traces > 0 && ps.minimap_maps > 0,
 			"iBgDraw panels " + std::to_string(ps.bg_panels) + ", EKG traces " + std::to_string(ps.ekg_traces) + ", minimap maps " + std::to_string(ps.minimap_maps) +
 					", minimap icons " + std::to_string(ps.minimap_icons));
+	const std::optional<ui::MinimapLevel> map = r_hud.minimap_level();
+	if (!map) {
+		row(id + ".minimap", false, "no minimap level");
+	} else {
+		const NativeHudMinimapPose &mp = r_hud.minimap_pose();
+		const ui::MinimapUv uv = ui::world_to_minimap_uv(ui::minimap_mapping(map->data), mp.x, mp.z);
+		const float texel_error = std::max(std::fabs(uv.u * kMapRegistrationTexels - p_moment.map_texel_x), std::fabs(uv.v * kMapRegistrationTexels - p_moment.map_texel_y));
+		const float rotation_error = std::fabs(std::remainder(360.0f - float(double(mp.yaw) / bf3::core::kDegToRad) - p_moment.map_rotation_deg, 360.0f));
+		const float zoom = map->profile.zoom_small();
+		row(id + ".minimap", mp.valid && zoom == 0.0f && texel_error < 0.01f && rotation_error < 0.01f,
+				"MapZoom step " + std::to_string(map->profile.zoom_small_step) + " = " + std::to_string(zoom) + " (m/unit measured at zoom 0), opacity " +
+						std::to_string(map->profile.texture_opacity) + ", registration texel error " + std::to_string(texel_error) + ", rotation error " +
+						std::to_string(rotation_error));
+	}
 	check_messages(r_hud, p_moment);
 	check_squad(r_hud, p_moment);
 }

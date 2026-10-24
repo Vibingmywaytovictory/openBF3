@@ -211,8 +211,28 @@ struct MinimapObjective {
 	std::string entity;
 };
 
+inline constexpr std::string_view kMinimapTextureOpacityOption = "profile/minimaptextureopacity";
+inline constexpr std::string_view kMinimapZoomSmallOption = "profile/minimapzoomwhenmapissmall";
+inline constexpr std::string_view kMinimapZoomLargeOption = "profile/minimapzoomwhenmapislarge";
+inline constexpr std::string_view kMinimapInitGraph = "ui/flow/graph/ingame/playingminimapinit";
+inline constexpr std::string_view kMinimapZoomNode = "MapZoom";
+inline constexpr size_t kMaxMinimapZoomSteps = 16;
+
+struct MinimapProfile {
+	float texture_opacity = 0.0f;
+	int32_t zoom_small_step = 0;
+	int32_t zoom_large_step = 0;
+	std::vector<float> zoom_steps;
+	size_t zoom_nodes = 0;
+
+	float zoom_small() const { return zoom_small_step >= 0 && size_t(zoom_small_step) < zoom_steps.size() ? zoom_steps[size_t(zoom_small_step)] : 0.0f; }
+};
+
+Result<MinimapProfile> read_minimap_profile(const EbxResolver &p_db, level::WorkBudget &r_budget);
+
 struct MinimapLevel {
 	MinimapData data;
+	MinimapProfile profile;
 	std::string mode;
 	std::vector<CombatAreaMask> combat_areas;
 	std::vector<MinimapObjective> objectives;

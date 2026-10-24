@@ -157,8 +157,8 @@ These are structural, known, and listed so nobody mistakes them for design inten
   in it; `bf3dump swf as2`), so the renderer and the screen logic are open. The scene runs only the frame scripts'
   unconditional stop/play/goto and hands every other frame script to the HUD controller that owns the clip; the movies'
   AS2 classes, `onClipEvent` handlers and conditional frame code are not executed outside the HUD controllers. `Bf3SwfView` draws no gradients, static text, Bevel or ColorMatrix filters,
-  or blend modes other than normal, layer and add. The HUD does not sway with camera motion, the minimap zoom is a
-  fixed 1.375 m per local unit, the Reward rows (HudMessage_04, `Widget.Image.ImageManager`) are not driven, and the engine's UI
+  or blend modes other than normal, layer and add. The HUD does not sway with camera motion, the minimap draws at
+  1.375 m per local unit, measured at MapZoom 0 (the profile's small-map step), and the large-map step (1.2) is not applied, the Reward rows (HudMessage_04, `Widget.Image.ImageManager`) are not driven, and the engine's UI
   colour table behind `Util.ColorTinting` is read from hudmessage's kill-row name sprite (slot 0 its squad frame, 1 friendly,
   3 enemy, slot 2 none), which the footage's kill log killer and victim colours match. The engine message
   queue (`HudMessageComp`) takes queue sizes and times from `UIMessageCompData`, but its expiry, overflow and

@@ -6,6 +6,7 @@
 #include "bf3/core/ui/hud_messages.h"
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/core/ui/hud_screen.h"
+#include "bf3/core/ui/minimap.h"
 
 #include <godot_cpp/classes/font.hpp>
 #include <godot_cpp/classes/image.hpp>
@@ -37,7 +38,6 @@ struct NativeHudMinimapPose {
 	float x = 0.0f;
 	float z = 0.0f;
 	float yaw = 0.0f;
-	float metres_per_local_unit = 0.0f;
 	bool valid = false;
 };
 
@@ -98,6 +98,8 @@ public:
 	NativeHudReadout readout() const;
 	std::optional<bf3::core::ui::SwfRect> window_bounds(size_t p_view, std::string_view p_path) const;
 	double ekg_clock() const { return ekg_clock_; }
+	std::optional<bf3::core::ui::MinimapLevel> minimap_level();
+	const NativeHudMinimapPose &minimap_pose() const { return pose_; }
 	void set_ekg_clock(double p_seconds) { ekg_clock_ = p_seconds; }
 	void set_additive_coverage(bool p_coverage);
 	std::array<godot::Ref<godot::Image>, kNativeHudViews> capture_views() const;

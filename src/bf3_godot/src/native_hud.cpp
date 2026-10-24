@@ -335,6 +335,14 @@ void Bf3NativeHud::build() {
 	UtilityFunctions::print(to_godot("[hud] native HUD built in " + std::to_string(loaded_->seconds) + " s:" + summary));
 }
 
+std::optional<ui::MinimapLevel> Bf3NativeHud::minimap_level() {
+	if (!minimap_ready()) {
+		return std::nullopt;
+	}
+	std::shared_ptr<const MinimapAssets> a = minimap_source_->assets();
+	return a != nullptr ? std::optional<ui::MinimapLevel>(a->level) : std::nullopt;
+}
+
 bool Bf3NativeHud::minimap_ready() {
 	if (minimap_source_ == nullptr && is_inside_tree()) {
 		const TypedArray<Node> found = get_tree()->get_root()->find_children("*", "Bf3MinimapHud", true, false);
@@ -765,7 +773,7 @@ void Bf3NativeHud::paint_minimap(const SwfEngineTarget &p_target, const ui::SwfS
 	const Vector2 sq0(std::min(q0.x, q1.x), std::min(q0.y, q1.y));
 	const Vector2 sq1(std::max(q0.x, q1.x), std::max(q0.y, q1.y));
 	const Vector2 centre = (sq0 + sq1) * 0.5f;
-	const float mpu = pose_.metres_per_local_unit > 0.0f ? pose_.metres_per_local_unit : ui::kMinimapMetresPerLocalUnit;
+	const float mpu = ui::kMinimapMetresPerLocalUnit;
 	const float unit = std::max(1e-6f, (sq1.x - sq0.x) / ui::kMinimapSquareLocal);
 	minimap_material_->set_shader_parameter("local_rect", Vector4(b.x_min, b.y_min, b.width(), b.height()));
 	minimap_material_->set_shader_parameter("square_rect", Vector4(sq0.x, sq0.y, sq1.x - sq0.x, sq1.y - sq0.y));

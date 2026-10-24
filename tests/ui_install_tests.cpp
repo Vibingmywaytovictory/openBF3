@@ -33,6 +33,7 @@ using bf3::core::seconds_since;
 
 struct LevelMinimap {
 	MinimapData data;
+	MinimapProfile profile;
 	uint32_t sat_w = 0;
 	uint32_t sat_h = 0;
 	std::string error;
@@ -58,6 +59,12 @@ LevelMinimap read_level_minimap(const std::shared_ptr<Install> &p_install, const
 		return out;
 	}
 	out.data = *d;
+	Result<MinimapProfile> profile = read_minimap_profile(**lib, budget);
+	if (!profile) {
+		out.error = "profile: " + profile.error().message;
+		return out;
+	}
+	out.profile = *profile;
 	Result<L8Image> sat = load_l8_texture((*lib)->mount(0), d->satellite);
 	if (!sat) {
 		out.error = "satellite: " + sat.error().message;
@@ -137,11 +144,16 @@ TEST_SUITE("ui-minimap") {
 			const std::optional<Level> lvl = install->level(e.id);
 			REQUIRE(lvl.has_value());
 			const LevelMinimap m = read_level_minimap(install, *lvl);
+			const MinimapProfile &pr = m.profile;
+			const bool profile_ok = pr.texture_opacity == 0.5f && pr.zoom_small_step == 0 && pr.zoom_large_step == 2 && pr.zoom_nodes == 2 &&
+					pr.zoom_steps == std::vector<float>{ 0.0f, 0.4f, 1.2f } && pr.zoom_small() == 0.0f;
 			const bool ok = m.error.empty() && m.data.world_center[0] == e.cx && m.data.world_center[1] == e.cz && m.data.world_size == e.size &&
-					m.sat_w == e.side && m.sat_h == e.side;
+					m.sat_w == e.side && m.sat_h == e.side && profile_ok;
 			all = all && ok;
 			detail += std::string(e.id) + " (" + fmt("%g, %g)/%g", m.data.world_center[0], m.data.world_center[1], m.data.world_size) + " satellite " +
-					std::to_string(m.sat_w) + "x" + std::to_string(m.sat_h) + (m.error.empty() ? "" : " ERROR " + m.error) + "; ";
+					std::to_string(m.sat_w) + "x" + std::to_string(m.sat_h) + fmt(" opacity %g, MapZoom steps %zu x%zu, small step %d -> zoom %g, large step %d", pr.texture_opacity,
+							pr.zoom_steps.size(), pr.zoom_nodes, pr.zoom_small_step, pr.zoom_small(), pr.zoom_large_step) +
+					(m.error.empty() ? "" : " ERROR " + m.error) + "; ";
 		}
 		t2::row("minimap.reference", all, detail);
 		CHECK(all);

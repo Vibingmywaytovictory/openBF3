@@ -306,6 +306,77 @@ Result<CombatAreaMask> read_combat_area(const EbxResolver &p_db, std::string_vie
 	return m;
 }
 
+Result<MinimapProfile> read_minimap_profile(const EbxResolver &p_db, WorkBudget &r_budget) {
+	BF3_TRY(r_budget.status());
+	const auto option = [&](std::string_view p_name) -> Result<EbxValue> {
+		BF3_TRY(r_budget.charge(1));
+		const EbxPartition *p = p_db.partition_by_name(p_name);
+		if (p == nullptr) {
+			return make_error(std::string(p_name) + ": the profile option is not in the level");
+		}
+		const EbxInstance o = p->primary();
+		if (!o.is_a("ProfileOptionData")) {
+			return make_error(std::string(p_name) + ": a " + std::string(o.type_name()) + ", not a ProfileOptionData");
+		}
+		std::optional<EbxValue> v = o.get("Value");
+		if (!v) {
+			return make_error(std::string(p_name) + ": no Value");
+		}
+		return *v;
+	};
+	MinimapProfile out;
+	Result<EbxValue> opacity = option(kMinimapTextureOpacityOption);
+	BF3_TRY(opacity);
+	out.texture_opacity = opacity->as_f32().value_or(-1.0f);
+	if (!(out.texture_opacity >= 0.0f && out.texture_opacity <= 1.0f)) {
+		return make_error(std::string(kMinimapTextureOpacityOption) + ": Value is not in [0, 1]");
+	}
+	Result<EbxValue> small_step = option(kMinimapZoomSmallOption);
+	BF3_TRY(small_step);
+	Result<EbxValue> large_step = option(kMinimapZoomLargeOption);
+	BF3_TRY(large_step);
+	out.zoom_small_step = small_step->as_i32().value_or(-1);
+	out.zoom_large_step = large_step->as_i32().value_or(-1);
+	const EbxPartition *graph = p_db.partition_by_name(kMinimapInitGraph);
+	if (graph == nullptr) {
+		return make_error(std::string(kMinimapInitGraph) + ": the UI graph is not in the level");
+	}
+	for (const EbxInstance &node : graph->instances_of("DataStepNode")) {
+		BF3_TRY(r_budget.charge(1));
+		const std::optional<EbxValue> name = node.get("Name");
+		if (!name || name->as_str().value_or(std::string_view()) != kMinimapZoomNode) {
+			continue;
+		}
+		const std::optional<EbxValue> steps = node.get("Steps");
+		const OptionalEbxArray arr = steps ? steps->as_array() : OptionalEbxArray();
+		if (!arr || arr->size() == 0 || arr->size() > kMaxMinimapZoomSteps) {
+			return make_error(std::string(kMinimapInitGraph) + ": a MapZoom node without 1.." + std::to_string(kMaxMinimapZoomSteps) + " Steps");
+		}
+		std::vector<float> values;
+		for (const EbxValue &v : *arr) {
+			const float f = v.as_f32().value_or(std::nanf(""));
+			if (!std::isfinite(f)) {
+				return make_error(std::string(kMinimapInitGraph) + ": a MapZoom step is not finite");
+			}
+			values.push_back(f);
+		}
+		if (out.zoom_nodes > 0 && values != out.zoom_steps) {
+			return make_error(std::string(kMinimapInitGraph) + ": the MapZoom nodes disagree on their Steps");
+		}
+		out.zoom_steps = std::move(values);
+		out.zoom_nodes++;
+	}
+	if (out.zoom_nodes == 0) {
+		return make_error(std::string(kMinimapInitGraph) + ": no MapZoom DataStepNode");
+	}
+	for (const int32_t step : { out.zoom_small_step, out.zoom_large_step }) {
+		if (step < 0 || size_t(step) >= out.zoom_steps.size()) {
+			return make_error(std::string(kMinimapInitGraph) + ": a profile zoom step outside the MapZoom Steps");
+		}
+	}
+	return out;
+}
+
 Result<MinimapLevel> read_minimap_level(const level::LoadedLevel &p_level, const level::World &p_world) {
 	WorkBudget &budget = *p_world.budget;
 	BF3_TRY(budget.status());
@@ -316,6 +387,9 @@ Result<MinimapLevel> read_minimap_level(const level::LoadedLevel &p_level, const
 	Result<MinimapData> data = read_minimap_data(db, p_level.root(), p_level.info.id.empty() ? std::string_view(p_level.root_name) : std::string_view(p_level.info.id), budget);
 	BF3_TRY(data);
 	out.data = std::move(*data);
+	Result<MinimapProfile> profile = read_minimap_profile(db, budget);
+	BF3_TRY(profile);
+	out.profile = std::move(*profile);
 	for (const level::PlacedObject &object : p_world.objects) {
 		BF3_TRY(budget.charge(1));
 		if (object.kind == level::ObjectKind::Other && object.entity.is_a("UICombatAreaEntityData")) {
