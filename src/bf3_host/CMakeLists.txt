@@ -45,6 +45,8 @@ target_sources(bf3_host PRIVATE
     src/client_loop.h
     src/client_ticks.h
     src/client_transport.h
+    src/client_events.cpp
+    src/client_events.h
     src/client_tracks.cpp
     src/client_tracks.h
     src/client_clock.cpp

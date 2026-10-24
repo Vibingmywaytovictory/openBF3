@@ -83,7 +83,7 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 			core::Result<net::Spawned> s = net::decode_spawned(p_d.bytes);
 			if (s && pending_spawned.size() < 16) {
 				cl_spawned(*s);
-				tdm_spawned(*s);
+				feed.spawned(*s);
 				clock.anchor_spawned(s->state.tick, p_now);
 				pending_spawned.push_back(s->state);
 			}
@@ -367,6 +367,7 @@ void ClientLoop::collect_stats() {
 	link.stats(stats_);
 	clock.stats(stats_);
 	tracks.stats(stats_);
+	feed.stats(stats_);
 }
 
 void ClientLoop::copy_frame(PresentationFrame &r_to, const PresentationFrame &p_from) {
@@ -593,7 +594,7 @@ void ClientLoop::ClEmit::emitted(const sim::Command &p_command, const sim::weapo
 		e.value = shot.power;
 		e.extra = shot.pellets;
 		e.time = shot.time;
-		s.cl_push(e);
+		s.feed.push(e);
 		++s.stats_.predicted_shots;
 		if (!have_view) {
 			++s.stats_.no_view_shots;
@@ -617,7 +618,7 @@ void ClientLoop::ClEmit::emitted(const sim::Command &p_command, const sim::weapo
 		e.def = ws.def;
 		e.id = t.event;
 		e.time = t.time;
-		s.cl_push(e);
+		s.feed.push(e);
 		++s.stats_.predicted_timed;
 	}
 	if (s.config.record_predicted && (p_output.shot_count > 0 || p_output.timed_count > 0)) {
@@ -628,14 +629,6 @@ void ClientLoop::ClEmit::emitted(const sim::Command &p_command, const sim::weapo
 		for (size_t i = 0; i < p_output.timed_count && s.cl_timed_log.size() < kClLogLimit; ++i) {
 			s.cl_timed_log.push_back({ p_command.tick, p_output.timed[i] });
 		}
-	}
-}
-
-void ClientLoop::cl_push(const PresentEvent &p_event) {
-	PresentEvent e = p_event;
-	tdm_push(e);
-	if (!cl_events.push(e)) {
-		++stats_.events_overflow;
 	}
 }
 
@@ -754,10 +747,6 @@ void ClientLoop::cl_snapshot(const net::Snapshot &p_snapshot, uint64_t p_now) {
 	}
 }
 
-bool ClientLoop::cl_slot_ok(uint32_t p_slot) {
-	return p_slot < net::kMaxSlots;
-}
-
 bool ClientLoop::cl_def_ok(uint32_t p_def) const {
 	return cl_table != nullptr && p_def < cl_table->defs.size();
 }
@@ -787,7 +776,7 @@ void ClientLoop::cl_datagram(net::MessageType p_type, const net::NetSim::Datagra
 				if (r.slot == slot) {
 					continue;
 				}
-				if (!cl_slot_ok(r.slot) || !cl_def_ok(r.def)) {
+				if (!valid_slot(r.slot) || !cl_def_ok(r.def)) {
 					++stats_.bad_gunplay_events;
 					continue;
 				}
@@ -804,7 +793,7 @@ void ClientLoop::cl_datagram(net::MessageType p_type, const net::NetSim::Datagra
 				ev.value = r.power;
 				ev.extra = r.pellets;
 				ev.time = r.time;
-				cl_push(ev);
+				feed.push(ev);
 				++stats_.remote_shots;
 				if (cl_projectiles != nullptr) {
 					cl_projectiles->queue_remote(r);
@@ -819,7 +808,7 @@ void ClientLoop::cl_datagram(net::MessageType p_type, const net::NetSim::Datagra
 				return;
 			}
 			for (const net::HitEvent &h : e->hits) {
-				if (!cl_slot_ok(h.victim) || !cl_slot_ok(h.shooter)) {
+				if (!valid_slot(h.victim) || !valid_slot(h.shooter)) {
 					++stats_.bad_gunplay_events;
 					continue;
 				}
@@ -838,11 +827,11 @@ void ClientLoop::cl_datagram(net::MessageType p_type, const net::NetSim::Datagra
 				ev.extra = std::isfinite(h.health_after) ? uint32_t(std::clamp(h.health_after * 100.0f, 0.0f, 1.0e7f)) : 0u;
 				ev.material = uint32_t(h.zone);
 				ev.time = h.time;
-				cl_push(ev);
+				feed.push(ev);
 				++stats_.combat_hits;
 			}
 			for (const net::DeathEvent &d : e->deaths) {
-				if (!cl_slot_ok(d.victim) || !cl_slot_ok(d.killer) || (d.def != sim::weapons::kNoWeapon && !cl_def_ok(d.def))) {
+				if (!valid_slot(d.victim) || !valid_slot(d.killer) || (d.def != sim::weapons::kNoWeapon && !cl_def_ok(d.def))) {
 					++stats_.bad_gunplay_events;
 					continue;
 				}
@@ -860,11 +849,11 @@ void ClientLoop::cl_datagram(net::MessageType p_type, const net::NetSim::Datagra
 				ev.value = d.killer_health;
 				ev.extra = d.respawn_tick;
 				ev.seed = d.revive_until;
-				cl_push(ev);
+				feed.push(ev);
 				++stats_.combat_deaths;
 			}
 			for (const net::DetonationWire &d : e->detonations) {
-				if (!cl_slot_ok(d.shooter) || !cl_def_ok(d.def)) {
+				if (!valid_slot(d.shooter) || !cl_def_ok(d.def)) {
 					++stats_.bad_gunplay_events;
 					continue;
 				}
@@ -878,7 +867,7 @@ void ClientLoop::cl_datagram(net::MessageType p_type, const net::NetSim::Datagra
 				copy3(ev.pos, d.position);
 				copy3(ev.dir, d.normal);
 				ev.time = d.time;
-				cl_push(ev);
+				feed.push(ev);
 				++stats_.combat_detonations;
 			}
 			tdm_combat(*e);
@@ -937,7 +926,7 @@ void ClientLoop::cl_weapons_spawn(const sim::SoldierState &p_s) {
 	}
 	spawn.aux = cl_kit;
 	spawn.extra = cl_team;
-	cl_push(spawn);
+	feed.push(spawn);
 }
 
 void ClientLoop::cl_weapons_ring_miss(const sim::SoldierState &p_s) {
@@ -1068,8 +1057,8 @@ void ClientLoop::cl_predict_weapons(const sim::Command &p_command, const sim::So
 		cl_lane->put(cl_lane->step(from, p_command, p_before, p_after));
 	}
 	if (cl_projectiles != nullptr) {
-		cl_projectiles->step_own(p_command.tick, *world, cl_records, tdm_own_events);
-		tdm_drain_own();
+		cl_projectiles->step_own(p_command.tick, *world, cl_records, feed.own_staging());
+		feed.drain_own();
 	}
 }
 
@@ -1096,7 +1085,7 @@ void ClientLoop::cl_publish_end(PresentationFrame &r_frame, uint64_t p_now) {
 		}
 	}
 	if (cl_projectiles != nullptr) {
-		cl_projectiles->step_remote(r_frame.render_ticks_at_publish, *world, poses, cl_events);
+		cl_projectiles->step_remote(r_frame.render_ticks_at_publish, *world, poses, feed.ring());
 		cl_sample_scratch.resize(4096);
 		size_t got = 0;
 		while ((got = cl_projectiles->take_samples(cl_sample_scratch)) > 0) {
@@ -1113,7 +1102,7 @@ void ClientLoop::cl_publish_end(PresentationFrame &r_frame, uint64_t p_now) {
 }
 
 PresentationEvents &ClientLoop::events() {
-	return cl_events;
+	return feed.ring();
 }
 
 void ClientLoop::take_predicted(std::vector<PredictedShot> &r_shots, std::vector<PredictedTimed> &r_timed) {
@@ -1162,15 +1151,6 @@ bool ClientLoop::tdm_datagram(net::MessageType p_type, const net::NetSim::Datagr
 	}
 }
 
-void ClientLoop::tdm_spawned(const net::Spawned &p_spawned) {
-	uint32_t &life = tdm_revived_lives[p_spawned.state.life % tdm_revived_lives.size()];
-	if (p_spawned.revived) {
-		life = p_spawned.state.life;
-	} else if (life == p_spawned.state.life) {
-		life = 0;
-	}
-}
-
 void ClientLoop::tdm_combat(const net::CombatEvents &p_events) {
 	for (const net::DeathEvent &d : p_events.deaths) {
 		if (d.victim == slot && have_own) {
@@ -1182,7 +1162,7 @@ void ClientLoop::tdm_combat(const net::CombatEvents &p_events) {
 		}
 	}
 	for (const net::ReviveEvent &v : p_events.revives) {
-		if (!cl_slot_ok(v.reviver) || !cl_slot_ok(v.revived)) {
+		if (!valid_slot(v.reviver) || !valid_slot(v.revived)) {
 			++stats_.bad_gunplay_events;
 			continue;
 		}
@@ -1194,7 +1174,7 @@ void ClientLoop::tdm_combat(const net::CombatEvents &p_events) {
 		ev.id = v.tick;
 		ev.time = sim::weapons::tick_end(v.tick);
 		ev.flags = uint8_t((v.reviver == slot ? present_flags::kOwnShooter : 0u) | (v.revived == slot ? present_flags::kOwnVictim : 0u));
-		cl_push(ev);
+		feed.push(ev);
 		++stats_.revives;
 	}
 }
@@ -1228,24 +1208,6 @@ bool ClientLoop::tdm_unspawned(sim::Tick p_tick) {
 	return tdm_unspawned_now;
 }
 
-void ClientLoop::tdm_push(PresentEvent &r_event) {
-	present_own_shot_id(tdm_shot_ids, slot, r_event);
-	if (r_event.kind == PresentKind::Spawn && r_event.slot == slot && r_event.id != 0 &&
-			tdm_revived_lives[r_event.id % tdm_revived_lives.size()] == r_event.id) {
-		r_event.flags |= present_flags::kRevived;
-	}
-}
-
-void ClientLoop::tdm_drain_own() {
-	std::array<PresentEvent, 64> batch;
-	size_t got = 0;
-	while ((got = tdm_own_events.drain(batch)) > 0) {
-		for (size_t k = 0; k < got; ++k) {
-			cl_push(batch[k]);
-		}
-	}
-}
-
 void ClientLoop::tdm_publish(PresentationFrame &r_frame) {
 	r_frame.match_valid = tdm_match_valid;
 	r_frame.match = tdm_match;
@@ -1255,7 +1217,7 @@ void ClientLoop::tdm_publish(PresentationFrame &r_frame) {
 	r_frame.own_respawn_tick = dead_life ? tdm_respawn_tick : 0u;
 	r_frame.own_revive_until = dead_life ? tdm_revive_until : 0u;
 	r_frame.own_unspawned = tdm_unspawned_now;
-	stats_.own_shot_id_resets = tdm_shot_ids.resets();
+	stats_.own_shot_id_resets = feed.shot_id_resets();
 }
 
 void ClientLoop::send_spawn_request(uint8_t p_kit) {

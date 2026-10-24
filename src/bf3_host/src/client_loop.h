@@ -3,6 +3,7 @@
 #include "bf3/core/result.h"
 #include "bf3/host/client_session.h"
 #include "client_clock.h"
+#include "client_events.h"
 #include "client_link.h"
 #include "client_tracks.h"
 #include "client_transport.h"
@@ -157,17 +158,15 @@ private:
 	bool cl_fired = false;
 	uint16_t cl_fired_view_seq = 0;
 	uint64_t cl_fired_ns = 0;
-	PresentationEvents cl_events;
+	ClientEvents feed{ slot };
 	std::mutex cl_log_mutex;
 	std::vector<PredictedShot> cl_shot_log;
 	std::vector<PredictedTimed> cl_timed_log;
 	std::vector<OwnTestSample> cl_sample_log;
 	std::vector<OwnTestSample> cl_sample_scratch;
 
-	void cl_push(const PresentEvent &p_event);
 	bool cl_match_info(const net::MatchInfo &p_match, uint64_t p_now);
 	void cl_refuse(const char *p_reason);
-	static bool cl_slot_ok(uint32_t p_slot);
 	bool cl_def_ok(uint32_t p_def) const;
 	void cl_spawned(const net::Spawned &p_spawned);
 	void cl_snapshot(const net::Snapshot &p_snapshot, uint64_t p_now);
@@ -201,17 +200,11 @@ private:
 	sim::Tick tdm_respawn_tick = 0;
 	sim::Tick tdm_revive_until = 0;
 	bool tdm_unspawned_now = false;
-	std::array<uint32_t, 8> tdm_revived_lives{};
-	OwnShotIds tdm_shot_ids;
-	PresentationEvents tdm_own_events;
 	bool tdm_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d);
-	void tdm_spawned(const net::Spawned &p_spawned);
 	void tdm_combat(const net::CombatEvents &p_events);
 	bool tdm_rules(const net::MatchInfo &p_match);
 	void tdm_command(sim::Command &r_command);
 	bool tdm_unspawned(sim::Tick p_tick);
-	void tdm_push(PresentEvent &r_event);
-	void tdm_drain_own();
 	void tdm_publish(PresentationFrame &r_frame);
 };
 
