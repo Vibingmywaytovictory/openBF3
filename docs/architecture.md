@@ -165,8 +165,11 @@ These are structural, known, and listed so nobody mistakes them for design inten
   RemoveFlag order and the ScoreAggregation value (a sum reset after ScoreAggregateTime) are inferred, the MessageQuery DataKey to source table is measured (the key hash is unknown), and
   without squads in the model the kill feed's squad colour marks only the local player; its UpdatesPerSecond 3 is not applied.
   A kill row fades only by its timeline's `container` alpha (startAnim frames 1..4 in steps of 0.25, outAnim 10..14 in
-  steps of 0.2, 0.17 s at 30 fps); the footage's rows fade out over about 28 frames (0.9 s), which neither the AS2
-  nor UIMessageCompData (no fade field) explains. The damage indicator's Scale
+  steps of 0.2, 0.17 s at 30 fps). In the 18.57 footage the kill feed rows fade in smoothly over about 8 frames and out
+  over about 28 to about 0.4 before they vanish, 18 px apart at about 0.785 scale from y 100, just under the VU watermark
+  (0..84), while the movie stacks them 26 px apart from y 0; no screen, widget or binding data, placement or AS2 scales,
+  moves or fades HudMessage_02, and the kill log rows (same movie and classes) fade in the timeline's 5 frames in the same
+  footage, so that kill feed look is not reproduced. The damage indicator's Scale
   (the hit's damage) and Angle (clockwise from the view, checked against the sprite's rotation) are inferred, and the
   HudAlertMessage and LogMessage widgets have no source in TDM (no combat area, squads or log lines in the model).
   The Icon3D managers (SupportIconManager, MapmarkerManager, AlertManager) run their AS2 and create, update and remove
