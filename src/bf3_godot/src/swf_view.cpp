@@ -812,6 +812,7 @@ struct NodeRec {
 	bool built = false;
 	uint32_t text_revision = 0;
 	uint32_t character_revision = 0;
+	double grid_fit_key = 0.0;
 	const void *content = nullptr;
 	Canvas *canvas = nullptr;
 	bool in_alpha = false;
@@ -1346,6 +1347,19 @@ struct Bf3SwfView::Impl {
 		}
 	}
 
+	double grid_fit_shift(const ui::SwfSceneNode &p_node, float p_x, float p_baseline) const {
+		if (p_node.edit_text->grid_fit != ui::kSwfGridFitPixel) {
+			return 0.0;
+		}
+		const ui::SwfAffine w = ui::swf_concat(stage_to_window, ui::swf_affine(p_node.world));
+		const Hom h = tilt_chain(p_node.id, ui::kSwfNoNode);
+		const ui::SwfPoint a = ui::swf_apply(w, p_x, p_baseline);
+		const ui::SwfPoint b = ui::swf_apply(w, p_x, p_baseline + 1.0f);
+		const ui::SwfPoint sa = happly(h, a.x, a.y);
+		const ui::SwfPoint sb = happly(h, b.x, b.y);
+		return ui::swf_grid_fit_baseline_shift(p_node.edit_text->grid_fit, sa.y, double(sb.y) - double(sa.y));
+	}
+
 	void build_text(NodeRec &r_rec, const ui::SwfSceneNode &p_node) {
 		Piece &p = piece_at(r_rec, 0);
 		trim(r_rec, 1);
@@ -1384,9 +1398,10 @@ struct Bf3SwfView::Impl {
 					const double s = double(g.size) / double(ui::kSwfFontUnitsPerEm);
 					const Color col = color_of(g.color);
 					const int32_t base = int32_t(geo.verts.size());
+					const double baseline = double(g.baseline) + grid_fit_shift(p_node, g.x, g.baseline);
 					for (const ui::SwfPoint &v : mesh.vertices) {
 						Vert out;
-						out.p = { float(g.x + v.x * s), float(g.baseline + v.y * s) };
+						out.p = { float(g.x + v.x * s), float(baseline + v.y * s) };
 						out.uv = out.p;
 						out.color = col;
 						geo.verts.push_back(out);
@@ -1449,9 +1464,12 @@ struct Bf3SwfView::Impl {
 				: n.edit_text != nullptr		 ? static_cast<const void *>(n.edit_text)
 				: n.sub_image != nullptr		 ? static_cast<const void *>(n.sub_image)
 												 : nullptr;
-		if (r_rec.built && r_rec.content == content && r_rec.text_revision == n.text_revision && r_rec.character_revision == n.character_revision) {
+		const double grid_fit_key = n.kind == ui::SwfNodeKind::EditText && n.edit_text != nullptr ? grid_fit_shift(n, 0.0f, 0.0f) : 0.0;
+		if (r_rec.built && r_rec.content == content && r_rec.text_revision == n.text_revision && r_rec.character_revision == n.character_revision &&
+				r_rec.grid_fit_key == grid_fit_key) {
 			return;
 		}
+		r_rec.grid_fit_key = grid_fit_key;
 		stats.content_builds++;
 		r_rec.built = true;
 		r_rec.content_dirty = true;
@@ -2090,7 +2108,9 @@ struct Bf3SwfView::Impl {
 				return std::abs(g.sx - rec.built_scale_x) > 1e-4 || std::abs(g.sy - rec.built_scale_y) > 1e-4;
 			}();
 			const bool rebuild_stroke = rec.scale_dependent && std::abs(screen_scale(*n) - rec.built_scale_x) > 1e-4 * std::max(1.0, rec.built_scale_x);
-			if (rebuild_grid || rebuild_stroke) {
+			const bool rebuild_fit = n->kind == ui::SwfNodeKind::EditText && n->edit_text != nullptr && n->edit_text->grid_fit == ui::kSwfGridFitPixel &&
+					grid_fit_shift(*n, 0.0f, 0.0f) != rec.grid_fit_key;
+			if (rebuild_grid || rebuild_stroke || rebuild_fit) {
 				rec.built = false;
 				build(p_id, rec);
 				structure_dirty = true;

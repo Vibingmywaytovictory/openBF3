@@ -529,6 +529,8 @@ struct SwfEditText {
 	float leading = 0.0f;
 	std::string variable;
 	std::string initial_text;
+	uint8_t flash_type = 0;
+	uint8_t grid_fit = 0;
 
 	bool has(uint16_t p_flag) const { return (flags & p_flag) != 0; }
 };

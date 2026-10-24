@@ -11,6 +11,7 @@
 #include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/swf_movie.h"
 #include "bf3/core/ui/swf_scene.h"
+#include "bf3/core/ui/swf_text.h"
 #include "bf3/core/ui/ui_fonts.h"
 #include "bf3/core/util/elapsed.h"
 #include "test_support.h"
@@ -161,7 +162,10 @@ Bytes rich_tags() {
 						   }()),
 			show_frame(), end_tag() });
 	Bytes csm;
-	tag(csm, swf_tag::kCsmTextSettings, Bytes(12, 0));
+	Bytes csm_body(12, 0);
+	csm_body[0] = 31;
+	csm_body[2] = uint8_t((1u << 6) | (1u << 3));
+	tag(csm, swf_tag::kCsmTextSettings, csm_body);
 	Bytes unknown;
 	tag(unknown, 900, Bytes(5, 1));
 	Bytes file_attributes;
@@ -288,6 +292,17 @@ SwfLibrary layout_library() {
 }
 
 TEST_SUITE("ui-swf-unit") {
+	TEST_CASE("swf: CSMTextSettings pixel grid fit moves the baseline up to the window pixel row") {
+		CHECK(swf_grid_fit_baseline_shift(kSwfGridFitPixel, 505.9, 1.0) == doctest::Approx(-0.9));
+		CHECK(swf_grid_fit_baseline_shift(kSwfGridFitPixel, 505.9, 2.0) == doctest::Approx(-0.45));
+		CHECK(swf_grid_fit_baseline_shift(kSwfGridFitPixel, 505.0, 1.0) == 0.0);
+		CHECK(swf_grid_fit_baseline_shift(kSwfGridFitPixel, -0.25, 1.0) == doctest::Approx(-0.75));
+		CHECK(swf_grid_fit_baseline_shift(kSwfGridFitSubpixel, 505.9, 1.0) == 0.0);
+		CHECK(swf_grid_fit_baseline_shift(kSwfGridFitNone, 505.9, 1.0) == 0.0);
+		CHECK(swf_grid_fit_baseline_shift(kSwfGridFitPixel, std::nan(""), 1.0) == 0.0);
+		CHECK(swf_grid_fit_baseline_shift(kSwfGridFitPixel, 505.9, 0.0) == 0.0);
+	}
+
 	TEST_CASE("swf: every tag the reader keeps (GFX and CFX)") {
 		for (const bool cfx : { false, true }) {
 			CAPTURE(cfx);
@@ -301,6 +316,11 @@ TEST_SUITE("ui-swf-unit") {
 			CHECK(m.trailing_bytes == 0);
 			CHECK(m.unknown_tags == 1);
 			CHECK(m.csm_text_settings == 1);
+			REQUIRE(m.find_edit_text(31) != nullptr);
+			CHECK(m.find_edit_text(31)->flash_type == 1);
+			CHECK(m.find_edit_text(31)->grid_fit == kSwfGridFitPixel);
+			REQUIRE(m.find_edit_text(30) != nullptr);
+			CHECK(m.find_edit_text(30)->grid_fit == kSwfGridFitNone);
 
 			CHECK(m.exporter.present);
 			CHECK(m.exporter.version == 0x36f);
@@ -1099,6 +1119,14 @@ TEST_SUITE("ui-swf") {
 		CHECK(t.movies == 434);
 		CHECK(t.parsed == 434);
 		CHECK(t.errors == 0);
+		Result<std::shared_ptr<const SwfMovie>> tickets = lib->load("ui/assets/ticketcounter");
+		REQUIRE(tickets.ok());
+		for (const auto &[id, fit] : { std::pair<uint16_t, uint8_t>{ 3, kSwfGridFitSubpixel }, { 5, kSwfGridFitPixel }, { 6, kSwfGridFitSubpixel }, { 7, kSwfGridFitPixel } }) {
+			const SwfEditText *et = (*tickets)->find_edit_text(id);
+			REQUIRE(et != nullptr);
+			CHECK(et->flash_type == 1);
+			CHECK(et->grid_fit == fit);
+		}
 		CHECK(t.cfx == 371);
 		CHECK(t.gfx == 63);
 		CHECK(t.multi_sha1_names == 0);

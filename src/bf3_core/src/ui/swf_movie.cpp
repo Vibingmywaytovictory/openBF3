@@ -192,9 +192,16 @@ private:
 			case swf_tag::kDefineFontAlignZones:
 				st = align_zones(r);
 				break;
-			case swf_tag::kCsmTextSettings:
+			case swf_tag::kCsmTextSettings: {
 				m_.csm_text_settings++;
+				const uint16_t text_id = r.u16();
+				const uint8_t bits = r.u8();
+				if (r.failed()) {
+					break;
+				}
+				csm_.push_back({ text_id, bits });
 				return Status::success();
+			}
 			case swf_tag::kDefineScalingGrid: {
 				SwfScalingGrid g;
 				g.id = r.u16();
@@ -729,6 +736,14 @@ private:
 		std::stable_sort(m_.fonts.begin(), m_.fonts.end(), by_id);
 		std::stable_sort(m_.scaling_grids.begin(), m_.scaling_grids.end(), by_id);
 		std::stable_sort(m_.static_texts.begin(), m_.static_texts.end());
+		for (const auto &[text_id, bits] : csm_) {
+			for (SwfEditText &t : m_.edit_texts) {
+				if (t.id == text_id) {
+					t.flash_type = uint8_t(bits >> 6);
+					t.grid_fit = uint8_t((bits >> 3) & 7u);
+				}
+			}
+		}
 		for (size_t code = 0; code < counts_.size(); ++code) {
 			if (counts_[code] != 0) {
 				m_.tag_counts.push_back({ uint16_t(code), counts_[code] });
@@ -799,6 +814,7 @@ private:
 	SwfMovie &m_;
 	WorkBudget &budget_;
 	std::vector<uint32_t> counts_;
+	std::vector<std::pair<uint16_t, uint8_t>> csm_;
 	uint32_t tags_ = 0;
 	uint32_t events_ = 0;
 };
