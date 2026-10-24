@@ -637,7 +637,27 @@ TEST_SUITE("ui-hud-screen-unit") {
 		CHECK(kMinimapMetresPerLocalUnit == 1.375f);
 		CHECK(kMinimapHatchTileLocal == 10.6f);
 		CHECK(kMinimapSquareLocal == 170.0f);
-		row("engine_parts", "iBgDraw over W: ammo 0.854*W+(0.9,31.7,54.1) from 3552 frames, light and coverage share one ramp per axis from 0.36 to 1.05 of the AS2 fade (1/21 x 1/5.25 of renderHolder), TDM light starts at y 451; EKG 78.7 px/s, 1.04 s, peak 9 px, undershoot 3 px; minimap 1.375 m/unit");
+		const std::array<float, 5> observed_satellite_weight{ -0.058f, -0.665f, -0.331f, -0.531f, -0.354f };
+		for (const float w : observed_satellite_weight) {
+			CHECK(w <= kMinimapSatelliteWeight);
+		}
+		CHECK(kMinimapSatelliteWeight == 0.0f);
+		const auto video_y = [](std::array<float, 3> p_rgb) { return 16.0f + (0.2126f * p_rgb[0] + 0.7152f * p_rgb[1] + 0.0722f * p_rgb[2]) * 219.0f / 255.0f; };
+		const std::array<float, 3> tint{ 0.3f * 255.0f, 0.6f * 255.0f, 0.8f * 255.0f };
+		const std::array<float, 3> detail{ 0.9f * 255.0f, 255.0f, 255.0f };
+		const float opacity = 0.5f;
+		const float detail_alpha = 0.3f;
+		const std::array<float, 3> dark{ tint[0] * opacity, tint[1] * opacity, tint[2] * opacity };
+		const std::array<float, 3> light{ detail[0] * detail_alpha + dark[0] * (1.0f - detail_alpha), detail[1] * detail_alpha + dark[1] * (1.0f - detail_alpha),
+			detail[2] * detail_alpha + dark[2] * (1.0f - detail_alpha) };
+		const std::array<float, 2> observed_dark_y{ 77.2f, 76.5f };
+		const float observed_light_y = 122.0f;
+		for (const float y : observed_dark_y) {
+			CHECK(std::fabs(video_y(dark) - y) < 1.0f);
+		}
+		CHECK(std::fabs(video_y(light) - observed_light_y) < 1.0f);
+		row("engine_parts", "iBgDraw over W: ammo 0.854*W+(0.9,31.7,54.1) from 3552 frames, light and coverage share one ramp per axis from 0.36 to 1.05 of the AS2 fade (1/21 x 1/5.25 of renderHolder), TDM light starts at y 451; EKG 78.7 px/s, 1.04 s, peak 9 px, undershoot 3 px; minimap 1.375 m/unit at MapZoom 0, no satellite term (slope <= 0 on m01 m02 m13 m14 m16), "
+				"0.5 DetailTextureTint under a 0.3 detail tint where the field is above 0.5: dark Y 76.3 against 77.2 and 76.5, light Y 122.5 against 122.0 over a dark scene");
 	}
 }
 

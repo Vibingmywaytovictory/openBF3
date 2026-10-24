@@ -54,6 +54,8 @@ uniform float threshold = 0.496;
 uniform float edge_width = 0.01;
 uniform vec4 detail_tint = vec4(0.9, 1.0, 1.0, 0.3);
 uniform float detail_threshold = 0.5;
+uniform float opacity = 0.5;
+uniform float satellite_weight = 0.0;
 uniform bool has_detail = false;
 uniform bool has_mask = false;
 uniform bool has_hatch = false;
@@ -74,20 +76,22 @@ void fragment() {
 	vec2 r = vec2(d.x * c + d.y * s, -d.x * s + d.y * c);
 	vec2 world = player_xz - r * metres_per_unit;
 	vec2 uv = vec2(0.5) - (world - world_center) / world_size;
-	vec3 rgb = texture(satellite, uv).r * tint.rgb;
+	vec3 base = mix(tint.rgb, texture(satellite, uv).r * tint.rgb, satellite_weight);
+	vec4 acc = vec4(base * opacity, opacity);
 	if (has_detail) {
-		float dd = texture(detail, uv).r;
-		rgb = mix(rgb, detail_tint.rgb, detail_tint.a * (1.0 - smoothstep(detail_threshold - edge_width, detail_threshold + edge_width, dd)));
+		float w = detail_tint.a * smoothstep(detail_threshold - edge_width, detail_threshold + edge_width, texture(detail, uv).r);
+		acc = vec4(detail_tint.rgb * w, w) + acc * (1.0 - w);
 	}
 	float outside = smoothstep(threshold - edge_width, threshold + edge_width, texture(combat_area, uv).r);
 	float h = has_hatch ? texture(hatch, r / hatch_tile).r : 1.0;
-	rgb = mix(rgb, area_color.rgb, outside * area_color.a * h);
+	float ca = outside * area_color.a * h;
+	acc = vec4(area_color.rgb * ca, ca) + acc * (1.0 - ca);
 	vec2 m = (p - square_rect.xy) / square_rect.zw;
 	float a = has_mask ? texture(mask, m).r : 1.0;
 	if (m.x < 0.0 || m.y < 0.0 || m.x > 1.0 || m.y > 1.0) {
 		a = 0.0;
 	}
-	COLOR = vec4(rgb, a);
+	COLOR = vec4(acc.rgb / max(acc.a, 1e-6), acc.a * a);
 }
 )";
 
@@ -377,6 +381,8 @@ bool Bf3NativeHud::minimap_ready() {
 		minimap_material_->set_shader_parameter("threshold", d.combat_area_alpha_threshold);
 		minimap_material_->set_shader_parameter("detail_tint", Color(d.detail.color_tint[0], d.detail.color_tint[1], d.detail.color_tint[2], d.detail.color_tint[3]));
 		minimap_material_->set_shader_parameter("detail_threshold", d.detail.alpha_threshold);
+		minimap_material_->set_shader_parameter("opacity", a->level.profile.texture_opacity);
+		minimap_material_->set_shader_parameter("satellite_weight", ui::kMinimapSatelliteWeight);
 		minimap_material_->set_shader_parameter("world_center", Vector2(d.world_center[0], d.world_center[1]));
 		minimap_material_->set_shader_parameter("world_size", d.world_size);
 		minimap_material_->set_shader_parameter("hatch_tile", ui::kMinimapHatchTileLocal);
