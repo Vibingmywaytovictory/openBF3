@@ -2671,12 +2671,24 @@ double hud_bg_light_ramp_fraction_y() {
 	return fade / (1.0 + fade);
 }
 
-float hud_bg_ramp(const HudBgDrawLook &p_look, float p_inward_of_fade) {
-	const float span = p_look.ramp_full_of_fade - p_look.ramp_start_of_fade;
+namespace {
+
+float bg_ramp(float p_start, float p_full, float p_inward_of_fade) {
+	const float span = p_full - p_start;
 	if (!(span > 0.0f)) {
-		return p_inward_of_fade >= p_look.ramp_start_of_fade ? 1.0f : 0.0f;
+		return p_inward_of_fade >= p_start ? 1.0f : 0.0f;
 	}
-	return std::clamp((p_inward_of_fade - p_look.ramp_start_of_fade) / span, 0.0f, 1.0f);
+	return std::clamp((p_inward_of_fade - p_start) / span, 0.0f, 1.0f);
+}
+
+}
+
+float hud_bg_light_ramp(const HudBgDrawLook &p_look, float p_inward_of_fade) {
+	return bg_ramp(p_look.light_start_of_fade, p_look.light_full_of_fade, p_inward_of_fade);
+}
+
+float hud_bg_coverage_ramp(const HudBgDrawLook &p_look, float p_inward_of_fade) {
+	return bg_ramp(p_look.coverage_start_of_fade, p_look.coverage_full_of_fade, p_inward_of_fade);
 }
 
 float hud_ekg_beat_px(const HudEkgLook &p_look, float p_distance_px) {

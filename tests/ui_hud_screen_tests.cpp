@@ -640,15 +640,29 @@ TEST_SUITE("ui-hud-screen-unit") {
 		CHECK(bg.premul_rgb255 == observed_ammo_offset);
 		CHECK(1.0f - bg.coverage == doctest::Approx((observed_ammo_gain[0] + observed_ammo_gain[1] + observed_ammo_gain[2]) / 3.0f).epsilon(0.001));
 		CHECK(bg.premul_rgb255[2] / 255.0f > bg.coverage);
-		const float observed_light_start_of_fade = 0.36f;
-		const float observed_light_full_of_fade = 1.05f;
-		CHECK(bg.ramp_start_of_fade == observed_light_start_of_fade);
-		CHECK(bg.ramp_full_of_fade == observed_light_full_of_fade);
-		CHECK(hud_bg_ramp(bg, 0.0f) == 0.0f);
-		CHECK(hud_bg_ramp(bg, 0.36f) == 0.0f);
-		CHECK(hud_bg_ramp(bg, 0.705f) == doctest::Approx(0.5f));
-		CHECK(hud_bg_ramp(bg, 1.05f) == 1.0f);
-		CHECK(hud_bg_ramp(bg, 2.0f) == 1.0f);
+		const std::array<std::array<float, 2>, 6> observed_coverage_edges{ { { 0.087f, 0.812f }, { 0.193f, 0.603f }, { 0.247f, 0.633f }, { 0.311f, 0.782f }, { 0.518f, 0.717f }, { 0.205f, 0.855f } } };
+		const std::array<std::array<float, 2>, 6> observed_light_edges{ { { 0.195f, 0.965f }, { 0.296f, 1.008f }, { 0.273f, 0.988f }, { 0.272f, 1.283f }, { 0.393f, 1.104f }, { 0.210f, 0.953f } } };
+		const auto mean_of = [](const std::array<std::array<float, 2>, 6> &p_edges, size_t p_i) {
+			float s = 0.0f;
+			for (const auto &e : p_edges) {
+				s += e[p_i];
+			}
+			return s / float(p_edges.size());
+		};
+		CHECK(bg.coverage_start_of_fade == doctest::Approx(mean_of(observed_coverage_edges, 0)).epsilon(0.01));
+		CHECK(bg.coverage_full_of_fade == doctest::Approx(mean_of(observed_coverage_edges, 1)).epsilon(0.01));
+		CHECK(bg.light_start_of_fade == doctest::Approx(mean_of(observed_light_edges, 0)).epsilon(0.02));
+		CHECK(bg.light_full_of_fade == doctest::Approx(mean_of(observed_light_edges, 1)).epsilon(0.01));
+		CHECK((bg.coverage_start_of_fade + bg.coverage_full_of_fade) / 2.0f == doctest::Approx(0.5f).epsilon(0.01));
+		CHECK(bg.coverage_full_of_fade < bg.light_full_of_fade);
+		CHECK(hud_bg_coverage_ramp(bg, 0.0f) == 0.0f);
+		CHECK(hud_bg_coverage_ramp(bg, 0.26f) == 0.0f);
+		CHECK(hud_bg_coverage_ramp(bg, 0.495f) == doctest::Approx(0.5f));
+		CHECK(hud_bg_coverage_ramp(bg, 0.73f) == 1.0f);
+		CHECK(hud_bg_light_ramp(bg, 0.27f) == 0.0f);
+		CHECK(hud_bg_light_ramp(bg, 0.66f) == doctest::Approx(0.5f));
+		CHECK(hud_bg_light_ramp(bg, 1.05f) == 1.0f);
+		CHECK(hud_bg_light_ramp(bg, 2.0f) == 1.0f);
 		const HudEkgLook &k = kHudEkgLook;
 		CHECK(k.rect_x0 == 1056.0f);
 		CHECK(k.rect_y0 == 566.0f);

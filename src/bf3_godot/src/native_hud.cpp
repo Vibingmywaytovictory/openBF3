@@ -105,22 +105,28 @@ render_mode blend_premul_alpha;
 )";
 
 struct BgAxis {
-	std::array<float, 6> at{};
-	std::array<float, 6> ramp{};
+	std::array<float, 10> at{};
+	std::array<float, 10> light{};
+	std::array<float, 10> coverage{};
 };
 
 BgAxis bg_axis(float p_min, float p_max, float p_fade_fraction, const ui::HudBgDrawLook &p_look) {
 	const float fade = p_fade_fraction * (p_max - p_min);
 	const float half = (p_max - p_min) / 2.0f;
-	const std::array<float, 3> inward{ 0.0f, std::min(fade * p_look.ramp_start_of_fade, half), std::min(fade * p_look.ramp_full_of_fade, half) };
-	BgAxis a;
-	for (size_t i = 0; i < 3; ++i) {
-		a.at[i] = p_min + inward[i];
-		a.at[5 - i] = p_max - inward[i];
+	std::array<float, 5> inward{ 0.0f, p_look.coverage_start_of_fade, p_look.coverage_full_of_fade, p_look.light_start_of_fade, p_look.light_full_of_fade };
+	for (float &d : inward) {
+		d = std::min(fade * d, half);
 	}
-	for (size_t i = 0; i < 6; ++i) {
-		const float d = std::min(a.at[i] - p_min, p_max - a.at[i]);
-		a.ramp[i] = fade > 0.0f ? ui::hud_bg_ramp(p_look, d / fade) : 1.0f;
+	std::sort(inward.begin(), inward.end());
+	BgAxis a;
+	for (size_t i = 0; i < inward.size(); ++i) {
+		a.at[i] = p_min + inward[i];
+		a.at[a.at.size() - 1 - i] = p_max - inward[i];
+	}
+	for (size_t i = 0; i < a.at.size(); ++i) {
+		const float u = fade > 0.0f ? std::min(a.at[i] - p_min, p_max - a.at[i]) / fade : 1.0f;
+		a.light[i] = fade > 0.0f ? ui::hud_bg_light_ramp(p_look, u) : 1.0f;
+		a.coverage[i] = fade > 0.0f ? ui::hud_bg_coverage_ramp(p_look, u) : 1.0f;
 	}
 	return a;
 }
@@ -715,8 +721,8 @@ void Bf3NativeHud::paint_bg(const SwfEngineTarget &p_target) {
 	const BgAxis ax = bg_axis(b.x_min, b.x_max, float(ui::hud_bg_light_ramp_fraction_x()), k);
 	const BgAxis ay = bg_axis(b.y_min, b.y_max, float(ui::hud_bg_light_ramp_fraction_y()), k);
 	const auto colour_at = [&](size_t p_ix, size_t p_iy) {
-		const float r = ax.ramp[p_ix] * ay.ramp[p_iy];
-		return Color(k.premul_rgb255[0] / 255.0f * r, k.premul_rgb255[1] / 255.0f * r, k.premul_rgb255[2] / 255.0f * r, k.coverage * r);
+		const float l = ax.light[p_ix] * ay.light[p_iy];
+		return Color(k.premul_rgb255[0] / 255.0f * l, k.premul_rgb255[1] / 255.0f * l, k.premul_rgb255[2] / 255.0f * l, k.coverage * ax.coverage[p_ix] * ay.coverage[p_iy]);
 	};
 	for (size_t iy = 0; iy + 1 < ay.at.size(); ++iy) {
 		for (size_t ix = 0; ix + 1 < ax.at.size(); ++ix) {
