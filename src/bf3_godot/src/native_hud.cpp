@@ -843,7 +843,7 @@ void Bf3NativeHud::paint_minimap(const SwfEngineTarget &p_target, const ui::SwfS
 			draw(player, state, Vector2(p.x, p.y), st != nullptr && st->should_rotate ? view.heading - e.yaw : 0.0f);
 		}
 	}
-	const ui::HudIconChoice me = ui::soldier_icon(true, 0, 0);
+	const ui::HudIconChoice me = ui::local_player_icon(model_.squad.local_player_has_squad || model_.squad.local_squad_members.count > 0);
 	draw(a->atlas.find(me.icon), me.state, centre, ui::minimap_marker_angle(view));
 	rs->canvas_item_add_set_transform(minimap_icon_item_, Transform2D());
 }

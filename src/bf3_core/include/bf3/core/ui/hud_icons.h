@@ -149,6 +149,10 @@ constexpr HudIconChoice soldier_icon(bool p_local, int32_t p_team, int32_t p_loc
 	return { "UIHudIcon_Player", p_team == p_local_team ? HudIconState::Friendly : HudIconState::Enemy };
 }
 
+constexpr HudIconChoice local_player_icon(bool p_in_squad) {
+	return { "UIHudIcon_LocalPlayer", p_in_squad ? HudIconState::Squad : HudIconState::Default };
+}
+
 enum class ItemIconSource : uint8_t {
 	Weapon,
 	KitItem,

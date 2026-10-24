@@ -255,6 +255,10 @@ TEST_SUITE("ui2-contract") {
 		CHECK(ui::soldier_icon(false, 2, 1).state == S::Enemy);
 		CHECK(ui::soldier_icon(false, 1, 1).state == S::Friendly);
 		CHECK(ui::soldier_icon(false, 0, 1).state == S::Neutral);
+		CHECK(ui::local_player_icon(false).icon == "UIHudIcon_LocalPlayer");
+		CHECK(ui::local_player_icon(false).state == S::Default);
+		CHECK(ui::local_player_icon(true).icon == "UIHudIcon_LocalPlayer");
+		CHECK(ui::local_player_icon(true).state == S::Squad);
 	}
 
 	TEST_CASE("hud icon rects and frames") {
