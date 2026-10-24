@@ -63,7 +63,7 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 			if (m->motor_hash != motor_hash) {
 				++stats_.motor_hash_mismatch;
 			}
-			clock.start(m->server_tick, p_now, next_sequence);
+			clock.start(m->server_tick, p_now, input.next_sequence());
 			last_tick_ns = p_now;
 			return;
 		}
@@ -89,7 +89,7 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 			}
 			gunplay.snapshot(*s, newer);
 			server_events_acc = uint16_t(server_events_acc | s->own_events);
-			clock.rtt_sample(*s, p_now, next_sequence);
+			clock.rtt_sample(*s, p_now, input.next_sequence());
 			const SnapshotOrder order = link.arrive(s->seq);
 			if (order == SnapshotOrder::Late) {
 				tracks.add(s->server_tick, s->others, slot, p_now);
@@ -143,7 +143,7 @@ void ClientLoop::authoritative(const sim::SoldierState &p_s, uint64_t p_now) {
 	}
 
 	if (p_s.tick >= clock.next_tick()) {
-		clock.force_past(p_s.tick, p_now, next_sequence);
+		clock.force_past(p_s.tick, p_now, input.next_sequence());
 	}
 	last_auth = p_s;
 	have_auth = true;
@@ -152,7 +152,7 @@ void ClientLoop::authoritative(const sim::SoldierState &p_s, uint64_t p_now) {
 		own_life = p_s.life;
 		have_own = true;
 		spawn_state = p_s;
-		keep_pose = p_s.target_pose;
+		input.keep_pose(p_s.target_pose);
 
 		ring->put({ sim::hold_command(p_s), p_s, false });
 		gunplay.weapons_spawn(p_s);
@@ -202,47 +202,6 @@ void ClientLoop::authoritative(const sim::SoldierState &p_s, uint64_t p_now) {
 	}
 }
 
-sim::Command ClientLoop::sample_command(sim::Tick p_tick) {
-	InputSample s;
-	{
-		std::lock_guard lock(input_mutex);
-		s = input;
-	}
-	sim::Command c;
-	c.tick = p_tick;
-	c.sequence = next_sequence++;
-	const bool jumped = jump_seen && s.jump_presses != last_jump_presses;
-	jump_seen = true;
-	last_jump_presses = s.jump_presses;
-	if (s.life < own_life) {
-
-		c.yaw = spawn_state.yaw;
-		c.pitch = spawn_state.pitch;
-		c.pose = spawn_state.target_pose;
-		keep_pose = spawn_state.target_pose;
-		return c;
-	}
-	if (s.free_camera) {
-		c.yaw = last_made.yaw;
-		c.pitch = last_made.pitch;
-		c.pose = keep_pose;
-		return c;
-	}
-	c.move_forward = sim::quantize_axis(s.move_forward);
-	c.move_right = sim::quantize_axis(s.move_right);
-	c.yaw = sim::quantize_yaw(s.yaw);
-	c.pitch = sim::quantize_pitch(s.pitch);
-	c.buttons = s.held_buttons & sim::buttons::kWireMask & ~sim::buttons::kEdgeMask;
-	if (jumped) {
-		c.buttons |= sim::buttons::kJump;
-	}
-	if (s.pose_request == PoseRequest::Set && uint8_t(s.pose) < sim::kPoseCount) {
-		keep_pose = s.pose;
-	}
-	c.pose = keep_pose;
-	return c;
-}
-
 void ClientLoop::client_tick(uint64_t p_now) {
 
 	const double dt_ms = last_tick_ns != 0 && p_now > last_tick_ns ? double(p_now - last_tick_ns) / 1e6 : kMsPerTick;
@@ -256,7 +215,7 @@ void ClientLoop::client_tick(uint64_t p_now) {
 	}
 
 	if (pending_snapshot_valid && pending_snapshot.own.has_value() && have_own) {
-		if (const std::optional<sim::Tick> discard = clock.buffer_report(pending_snapshot, p_now, next_sequence)) {
+		if (const std::optional<sim::Tick> discard = clock.buffer_report(pending_snapshot, p_now, input.next_sequence())) {
 			ring->discard_after(*discard);
 		}
 	}
@@ -289,8 +248,8 @@ void ClientLoop::client_tick(uint64_t p_now) {
 		}
 
 		const sim::PredictionEntry *base = ring->find(c - 1u);
-		cmd = sample_command(c);
-		gunplay.command_made(cmd, latest_input(), own_life, p_now, link.have_snapshot(), link.newest_seq(), *build);
+		cmd = input.sample(c, own_life, spawn_state);
+		gunplay.command_made(cmd, input.latest(), own_life, p_now, link.have_snapshot(), link.newest_seq(), *build);
 		match.restrict(cmd);
 		if (base == nullptr || cmd.tick != base->state.tick + 1u) {
 			++stats_.step_precondition_failures;
@@ -302,7 +261,7 @@ void ClientLoop::client_tick(uint64_t p_now) {
 			events_acc |= state.events;
 			ring->put({ cmd, state, true });
 			made = ring->find(c);
-			last_made = cmd;
+			input.stepped(cmd);
 
 			clock.command_sent(cmd.sequence, p_now);
 			link.send_commands(cmd, gunplay.others_ack_bits(link.have_snapshot(), link.newest_seq()), p_now);
@@ -445,13 +404,7 @@ void ClientLoop::close() {
 }
 
 void ClientLoop::set_input(const InputSample &p_input) {
-	std::lock_guard lock(input_mutex);
-	input = p_input;
-}
-
-InputSample ClientLoop::latest_input() const {
-	std::lock_guard lock(input_mutex);
-	return input;
+	input.set(p_input);
 }
 
 bool ClientLoop::read_presentation(PresentationFrame &r_frame) const {

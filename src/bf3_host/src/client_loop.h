@@ -5,6 +5,7 @@
 #include "client_clock.h"
 #include "client_events.h"
 #include "client_gunplay.h"
+#include "client_input.h"
 #include "client_link.h"
 #include "client_match.h"
 #include "client_tracks.h"
@@ -56,8 +57,6 @@ private:
 	MonotonicClock now_ns;
 	ClientLink link{ now_ns };
 
-	mutable std::mutex input_mutex;
-	InputSample input;
 	mutable std::mutex frame_mutex;
 	std::unique_ptr<PresentationFrame> shared_frame = std::make_unique<PresentationFrame>();
 	std::atomic<int32_t> shift_request{ 0 };
@@ -68,12 +67,7 @@ private:
 	bool have_match = false;
 	uint8_t slot = 0;
 	ClientClock clock{ config };
-
-	uint32_t next_sequence = 1;
-	sim::Command last_made;
-	bool jump_seen = false;
-	uint32_t last_jump_presses = 0;
-	sim::Pose keep_pose = sim::Pose::Stand;
+	ClientInput input;
 
 	bool have_own = false;
 	uint32_t own_life = 0;
@@ -103,8 +97,6 @@ private:
 	void handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_now);
 	void run_catch_up(const sim::SoldierState &p_base);
 	void authoritative(const sim::SoldierState &p_s, uint64_t p_now);
-	InputSample latest_input() const;
-	sim::Command sample_command(sim::Tick p_tick);
 	void client_tick(uint64_t p_now);
 	void publish(uint64_t p_now, const sim::PredictionEntry *p_made, const sim::Command &p_cmd);
 	void collect_stats();
