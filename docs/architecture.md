@@ -183,8 +183,10 @@ These are structural, known, and listed so nobody mistakes them for design inten
   squad-mate or revive icons and a flatter interior, and the footage's glowing friendly markers over soldiers are not reproduced.
 * The crosshair arm is `round(100 (0.2 x spread deg + DispersionBaseOffset))` stage px; the 0.2 per degree is measured on
   the 18.57 footage at FOV 100 (`ui.hud.feed.install` footage rows) and its dependence on the field of view is not known.
-  The footage's bloom while firing, its gradual fall after a stop or landing without a shot and its suppressed sprint (5 deg)
-  and jump (7 deg) arms differ from the sim's spread (`spread_at`); the footage rows print them as INFO.
+  In the footage the moving minimum follows the motor's speed / walk speed as the soldier accelerates and stops (the
+  `move_onset` / `move_stop` rows); the sim applies it in full above 0.1 m/s. That, the footage's bloom while firing, its
+  fall after a landing without a shot and its suppressed sprint (5 deg) and jump (7 deg) arms differ from `spread_at`; the
+  footage rows print the sim's values as INFO.
 * Nametags are engine-drawn by `Bf3NativeHud` through `NativeTags` (`native_tags.cpp`): UIHudIcon_Player by relation, the
   squad kit icon for squad mates, names in `$Menu_medium` at the UINametagCompData sizes and tints; the name's kit icon
   (16 units in an 18-unit column) and its black glow are not measured, and the HealthBarSize bar is not drawn (other

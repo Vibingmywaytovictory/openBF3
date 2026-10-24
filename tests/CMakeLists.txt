@@ -564,8 +564,9 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     set_tests_properties(godot.fx_demo godot.fx_ref PROPERTIES RUN_SERIAL TRUE)
 endif()
 
-openbf3_test(test_ui_hud_feed test_main.cpp ui_hud_feed_tests.cpp weapons_support.h test_support.h)
+openbf3_test(test_ui_hud_feed test_main.cpp ui_hud_feed_tests.cpp weapons_support.h test_support.h gunplay_fixture.h)
 target_link_libraries(test_ui_hud_feed PRIVATE bf3_host bf3_sim_harness)
+target_compile_definitions(test_ui_hud_feed PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
 add_test(NAME ui.hud.feed.unit COMMAND test_ui_hud_feed --test-suite=ui-hud-feed-unit)
 add_test(NAME ui.hud.feed.install COMMAND test_ui_hud_feed --test-suite=ui-hud-feed-install)
 set_tests_properties(ui.hud.feed.unit PROPERTIES TIMEOUT 120)
