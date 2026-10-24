@@ -1100,20 +1100,24 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 			r_hud.set_additive_coverage(false);
 			Ref<Image> composite = composite_;
 			Ref<Image> layer = Bf3NativeHud::capture_layer(colour_, coverage);
+			Ref<Image> trans = swf_view_transmittance(colour_);
 			composite_ = Ref<Image>();
 			colour_ = {};
-			bool ok = composite.is_valid() && layer.is_valid();
+			bool ok = composite.is_valid() && layer.is_valid() && trans.is_valid();
 			std::string detail;
 			if (ok) {
 				composite->convert(Image::FORMAT_RGB8);
 				const std::string cp = out_dir_ + "/captures/" + m.id + ".png";
 				const std::string lp = out_dir_ + "/layers/" + m.id + ".png";
-				ok = composite->save_png(String::utf8(cp.c_str())) == OK && layer->save_png(String::utf8(lp.c_str())) == OK;
+				const std::string tp = out_dir_ + "/layers/" + m.id + "_trans.png";
+				ok = composite->save_png(String::utf8(cp.c_str())) == OK && layer->save_png(String::utf8(lp.c_str())) == OK && trans->save_png(String::utf8(tp.c_str())) == OK;
 				detail = std::to_string(composite->get_width()) + "x" + std::to_string(composite->get_height()) + " composite, " +
-						std::to_string(layer->get_width()) + "x" + std::to_string(layer->get_height()) + " HUD layer -> " + cp;
-				ok = ok && composite->get_width() == 1280 && composite->get_height() == 720 && layer->get_width() == 1280 && layer->get_height() == 720;
+						std::to_string(layer->get_width()) + "x" + std::to_string(layer->get_height()) + " HUD layer, " + std::to_string(trans->get_width()) + "x" +
+						std::to_string(trans->get_height()) + " transmittance -> " + cp;
+				ok = ok && composite->get_width() == 1280 && composite->get_height() == 720 && layer->get_width() == 1280 && layer->get_height() == 720 &&
+						trans->get_width() == 1280 && trans->get_height() == 720;
 			} else {
-				detail = "no viewport image or HUD layer";
+				detail = "no viewport image, HUD layer or transmittance";
 			}
 			row(std::string(m.id) + ".capture", ok, detail);
 			captured_ += ok ? 1 : 0;

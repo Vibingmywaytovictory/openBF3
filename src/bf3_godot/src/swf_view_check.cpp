@@ -4,6 +4,7 @@
 #include "godot_util.h"
 #include "swf_view.h"
 #include "ui_assets.h"
+#include "ui_swf_writer.h"
 
 #include "bf3/core/level/budget.h"
 #include "bf3/core/ui/swf_scene.h"
@@ -26,6 +27,7 @@
 #include <cmath>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 
@@ -57,6 +59,50 @@ constexpr int32_t kColorLevels = 2;
 constexpr std::array<std::pair<int, const char *>, 3> kTargets{ { { 1, "instance1.HudBackgroundWidget_01.Background.renderHolder" },
 		{ 1, "instance1.Minimap_01.map" }, { 0, "instance1.Health_01.Health.healthHolder.EKGRenderTarget" } } };
 constexpr std::array<const char *, 3> kTargetRenderers{ "t2;iBgDraw", "t2;iUIMinimapRender", "t2;iUISoldierCompRender" };
+constexpr const char *kTransmitMovie = "transmit";
+constexpr int32_t kTransmitSide = 40;
+constexpr uint8_t kTransmitAlphaLow = 102;
+constexpr uint8_t kTransmitAlphaHigh = 153;
+
+struct TransmitProbe {
+	const char *what;
+	int32_t x;
+	int32_t y;
+	uint8_t want;
+	int32_t tolerance;
+};
+
+constexpr std::array<TransmitProbe, 5> kTransmitProbes{ { { "outside every piece", 20, 20, 255, 0 }, { "add piece", 120, 120, 255, 0 },
+		{ "normal piece alpha 0.4", 220, 120, 153, 0 }, { "normal 0.6 over normal 0.4", 320, 120, 61, 1 }, { "add piece over normal 0.6", 420, 120, 102, 0 } } };
+
+std::shared_ptr<const ui::SwfLibrary> transmit_library() {
+	using namespace ui1test;
+	const auto square = [](uint16_t p_id, uint8_t p_alpha) {
+		ShapeFill f;
+		f.r = 255;
+		f.g = 255;
+		f.b = 255;
+		f.a = p_alpha;
+		ShapePath path;
+		path.fill1 = 1;
+		const int32_t side = kTransmitSide * 20;
+		path.segs = { { side, 0 }, { side, side }, { 0, side }, { 0, 0 } };
+		return define_shape_paths(3, p_id, float(kTransmitSide), float(kTransmitSide), { f }, {}, { path });
+	};
+	const auto place = [](uint16_t p_depth, uint16_t p_char, float p_x, bool p_add) {
+		Place p;
+		p.depth = p_depth;
+		p.character = p_char;
+		p.matrix = Mat{ 1, 0, 0, 1, p_x, 100 };
+		if (p_add) {
+			p.blend = 8;
+		}
+		return place_object2(p, true);
+	};
+	const Bytes tags = cat({ square(1, 255), square(2, kTransmitAlphaLow), square(3, kTransmitAlphaHigh), place(1, 1, 100, true), place(2, 2, 200, false),
+			place(3, 2, 300, false), place(4, 3, 300, false), place(5, 3, 400, false), place(6, 1, 400, true), show_frame(), end_tag() });
+	return std::make_shared<const ui::SwfLibrary>(ui::SwfLibrary::from_memory({ { std::string("ui/assets/") + kTransmitMovie, movie(tags) } }));
+}
 
 struct Box {
 	double x0 = 1e30;
@@ -483,6 +529,7 @@ struct Bf3SwfViewCheck::State {
 	int frames = 0;
 	double played_seconds = 0.0;
 	std::array<Bf3SwfView *, 4> views{};
+	Bf3SwfView *transmit = nullptr;
 	SubViewport *big = nullptr;
 	std::vector<Row> rows;
 	std::vector<Job> jobs;
@@ -1128,6 +1175,34 @@ void Bf3SwfViewCheck::_process(double p_delta) {
 							}
 						}
 					}
+				} });
+		s.jobs.push_back({ [this, &s]() {
+							  s.transmit = memnew(Bf3SwfView);
+							  s.transmit->set_playing(false);
+							  add_child(s.transmit);
+							  const bf3::core::Status st = s.transmit->open(transmit_library(), kTransmitMovie);
+							  s.add("open the synthetic transmittance movie", bool(st), st ? std::string("opened") : st.error().message);
+						  },
+				[]() {} });
+		s.jobs.push_back({ []() {},
+				[&s]() {
+					const Ref<Image> colour = s.transmit->is_open() ? s.transmit->capture_hud() : Ref<Image>();
+					const Ref<Image> trans = swf_view_transmittance(std::span<const Ref<Image>>(&colour, 1));
+					const Img lit = img_of(colour);
+					bool pass = trans.is_valid() && trans->get_format() == Image::FORMAT_L8 && lit.w == trans->get_width() && lit.h == trans->get_height();
+					std::string detail = trans.is_valid() ? fmt("%dx%d L8", trans->get_width(), trans->get_height()) : std::string("no transmittance image");
+					for (const TransmitProbe &p : kTransmitProbes) {
+						if (!pass || p.x >= lit.w || p.y >= lit.h) {
+							pass = false;
+							break;
+						}
+						const int32_t got = int32_t(std::lround(trans->get_pixel(p.x, p.y).r * 255.0f));
+						pass = pass && std::abs(got - int32_t(p.want)) <= p.tolerance;
+						detail += fmt("; %s %d (want %u)", p.what, got, p.want);
+					}
+					const bool add_lit = pass && lit.at(kTransmitProbes[1].x, kTransmitProbes[1].y, 0) > 250;
+					s.add("transmittance: add pieces keep the world, normal pieces multiply it by 1 - alpha", pass && add_lit,
+							detail + fmt("; add piece colour %u", pass ? lit.at(kTransmitProbes[1].x, kTransmitProbes[1].y, 0) : 0));
 				} });
 		s.phase = 3;
 		s.job = 0;

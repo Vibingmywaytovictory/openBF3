@@ -861,6 +861,7 @@ struct Bf3SwfView::Impl {
 	RenderingServer *rs = nullptr;
 	Bf3SwfView *owner = nullptr;
 	Bf3UiAssets *assets = nullptr;
+	std::shared_ptr<const ui::SwfLibrary> library;
 	std::optional<ui::SwfScene> scene;
 	std::string movie;
 	std::string error;
@@ -989,6 +990,7 @@ struct Bf3SwfView::Impl {
 			present_item = RID();
 		}
 		scene.reset();
+		library.reset();
 		structure_dirty = true;
 	}
 
@@ -2459,6 +2461,27 @@ Status Bf3SwfView::open(std::string_view p_movie) {
 	return Status::success();
 }
 
+Status Bf3SwfView::open(std::shared_ptr<const ui::SwfLibrary> p_library, std::string_view p_movie) {
+	close();
+	if (p_library == nullptr) {
+		impl_->error = "no SwfLibrary";
+		return make_error(impl_->error);
+	}
+	bf3::core::Result<ui::SwfScene> scene = ui::SwfScene::open(*p_library, p_movie);
+	if (!scene) {
+		impl_->error = scene.error().message;
+		return scene.error();
+	}
+	impl_->assets = Bf3UiAssets::current();
+	impl_->library = std::move(p_library);
+	impl_->scene.emplace(std::move(*scene));
+	impl_->movie = impl_->scene->movie_name();
+	impl_->error.clear();
+	impl_->structure_dirty = true;
+	impl_->update_fit();
+	return Status::success();
+}
+
 void Bf3SwfView::close() {
 	impl_->release();
 }
@@ -2668,6 +2691,44 @@ bool Bf3SwfView::set_renderer(const String &p_path, const String &p_renderer) {
 
 Ref<Image> Bf3SwfView::get_hud_image() const {
 	return capture_hud();
+}
+
+Ref<Image> swf_view_transmittance(std::span<const Ref<Image>> p_colour) {
+	int32_t w = 0;
+	int32_t h = 0;
+	std::vector<double> t;
+	for (const Ref<Image> &src : p_colour) {
+		if (src.is_null() || src->is_empty()) {
+			continue;
+		}
+		Ref<Image> img = src;
+		if (img->get_format() != Image::FORMAT_RGBA8) {
+			img = src->duplicate();
+			img->convert(Image::FORMAT_RGBA8);
+		}
+		if (t.empty()) {
+			w = img->get_width();
+			h = img->get_height();
+			t.assign(size_t(w) * size_t(h), 1.0);
+		} else if (img->get_width() != w || img->get_height() != h) {
+			return Ref<Image>();
+		}
+		const PackedByteArray d = img->get_data();
+		const uint8_t *px = d.ptr();
+		for (size_t i = 0; i < t.size(); ++i) {
+			t[i] *= 1.0 - double(px[i * 4 + 3]) / 255.0;
+		}
+	}
+	if (t.empty()) {
+		return Ref<Image>();
+	}
+	PackedByteArray bytes;
+	bytes.resize(int64_t(t.size()));
+	uint8_t *out = bytes.ptrw();
+	for (size_t i = 0; i < t.size(); ++i) {
+		out[i] = uint8_t(std::clamp(std::lround(255.0 * t[i]), 0L, 255L));
+	}
+	return Image::create_from_data(w, h, false, Image::FORMAT_L8, bytes);
 }
 
 }

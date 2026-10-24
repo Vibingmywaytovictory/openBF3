@@ -222,5 +222,6 @@ if(OPENBF3_BUILD_CHECKS)
         src/viewmodel_demo.h
     )
     target_link_libraries(bf3_godot PRIVATE bf3_sim_harness)
+    target_include_directories(bf3_godot PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 endif()
 target_compile_definitions(bf3_godot PRIVATE OPENBF3_BUILD_CHECKS=$<BOOL:${OPENBF3_BUILD_CHECKS}>)

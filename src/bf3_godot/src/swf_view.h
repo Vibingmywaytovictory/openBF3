@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -99,6 +100,7 @@ public:
 	void _process(double p_delta) override;
 
 	bf3::core::Status open(std::string_view p_movie);
+	bf3::core::Status open(std::shared_ptr<const bf3::core::ui::SwfLibrary> p_library, std::string_view p_movie);
 	void close();
 	bool is_open() const;
 	const std::string &error() const;
@@ -149,5 +151,7 @@ private:
 	struct Impl;
 	std::unique_ptr<Impl> impl_;
 };
+
+godot::Ref<godot::Image> swf_view_transmittance(std::span<const godot::Ref<godot::Image>> p_colour);
 
 }
