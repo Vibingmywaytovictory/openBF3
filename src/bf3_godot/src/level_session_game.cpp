@@ -616,7 +616,8 @@ void Bf3LevelSession::game_presented(double p_delta, uint64_t p_now_ns) {
 	}
 	g.weapon = host::PresentedWeapon();
 	if (g.alive && f.own_weapons_valid && g.gunplay != nullptr && g.gunplay->table != nullptr) {
-		g.weapon = host::present_weapon(f.own_weapons_prev, f.own_weapons_curr, f.tick, host::present_own_fraction(f, p_now_ns), *g.gunplay->table);
+		g.weapon = host::present_weapon(f.own_weapons_prev, f.own_weapons_curr, f.tick, host::present_own_fraction(f, p_now_ns), *g.gunplay->table,
+				sw::suppressed_sway(sw::weapon_sway_context(f.own_curr, f.own_command), 0.0f, g.gunplay->table->mechanics));
 	}
 
 	for (const host::PresentEvent &e : g.events) {

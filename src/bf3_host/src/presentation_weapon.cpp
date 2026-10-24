@@ -23,7 +23,7 @@ double seconds_at(int32_t p_offset, sim::Tick p_tick) {
 }
 
 PresentedWeapon present_weapon(const net::WeaponsWire &p_prev, const net::WeaponsWire &p_curr, sim::Tick p_curr_tick, double p_fraction,
-		const sw::WeaponTable &p_table) {
+		const sw::WeaponTable &p_table, const sw::SwayContext &p_sway) {
 	PresentedWeapon p;
 	if (p_curr.active >= sw::kMaxWeaponSlots) {
 		return p;
@@ -56,13 +56,18 @@ PresentedWeapon present_weapon(const net::WeaponsWire &p_prev, const net::Weapon
 	const bool same = a != nullptr && p_prev.active == p_curr.active && p_prev.slots[p_prev.active < sw::kMaxWeaponSlots ? p_prev.active : 0].def == slot.def;
 	const float t = float(f);
 	if (same) {
-		p.spread_deg = a->spread + (b->spread - a->spread) * t;
 		p.recoil.pitch = a->recoil.pitch + (b->recoil.pitch - a->recoil.pitch) * t;
 		p.recoil.yaw = a->recoil.yaw + (b->recoil.yaw - a->recoil.yaw) * t;
 	} else {
-		p.spread_deg = b->spread;
 		p.recoil = b->recoil;
 	}
+	const sw::SimTime now = sw::tick_start(p_curr_tick) + sw::SimTime(std::llround(f * double(sw::kTimeUnitsPerTick)));
+	const sw::SimTime curr_spread_time = net::weapons_wire_time(b->spread_time, p_curr_tick);
+	const bool before_curr_shot = same && curr_spread_time > now;
+	const net::WeaponTimersWire &held = before_curr_shot ? *a : *b;
+	const sw::SimTime held_time = before_curr_shot ? net::weapons_wire_time(a->spread_time, prev_tick) : curr_spread_time;
+	const sw::Dispersion disp = sw::effective_dispersion(p_table.defs[slot.def], p_sway);
+	p.spread_deg = sw::spread_at(held.spread, held_time, now, disp, p_table.mechanics);
 	p.zoomed = (b->flags & sw::slot_flags::kZoomWasDown) != 0;
 	p.events = p_curr.events;
 	return p;

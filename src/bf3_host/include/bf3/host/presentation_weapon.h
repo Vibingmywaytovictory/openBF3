@@ -33,6 +33,6 @@ struct PresentedWeapon {
 static_assert(std::is_trivially_copyable_v<PresentedWeapon>);
 
 PresentedWeapon present_weapon(const net::WeaponsWire &p_prev, const net::WeaponsWire &p_curr, sim::Tick p_curr_tick, double p_fraction,
-		const sim::weapons::WeaponTable &p_table);
+		const sim::weapons::WeaponTable &p_table, const sim::weapons::SwayContext &p_sway);
 
 }

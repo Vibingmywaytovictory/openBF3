@@ -61,6 +61,8 @@ static_assert(std::is_trivially_copyable_v<WeaponsWire>);
 
 WeaponsWire weapons_wire_view(const sim::weapons::SoldierWeaponsState &p_state, sim::Tick p_server_tick);
 
+sim::weapons::SimTime weapons_wire_time(int32_t p_offset, sim::Tick p_server_tick);
+
 core::Result<sim::weapons::SoldierWeaponsState> weapons_from_wire(const WeaponsWire &p_wire, sim::Tick p_server_tick, uint32_t p_player_slot,
 		size_t p_def_count);
 

@@ -189,6 +189,10 @@ void serialize(BitReadArchive &r_archive, WeaponsWire &r_wire, const WeaponsWire
 	serialize_weapons(r_archive, r_wire, p_faults);
 }
 
+sw::SimTime weapons_wire_time(int32_t p_offset, sim::Tick p_server_tick) {
+	return time_from(p_offset, sw::tick_start(p_server_tick));
+}
+
 WeaponsWire weapons_wire_view(const sw::SoldierWeaponsState &p_state, sim::Tick p_server_tick) {
 	const sw::SimTime base = sw::tick_start(p_server_tick);
 	WeaponsWire w;

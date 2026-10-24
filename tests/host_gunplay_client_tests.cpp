@@ -1124,7 +1124,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 		std::printf("events ring: %u events in order across threads, overflows %" PRIu64 " (the producer retried on full)\n", kCount, ring->overflows());
 	}
 
-	TEST_CASE("host.gunplay.client: present_weapon from two predicted ticks (phase, ammo, spread and recoil lerp, zoom, no lerp across items)") {
+	TEST_CASE("host.gunplay.client: present_weapon from two predicted ticks (phase, ammo, recoil lerp, spread from the held shot state at the frame time, zoom, no lerp across items)") {
 		const Tables &t = tables();
 		sw::SoldierWeaponsState w;
 		w.player_slot = 3;
@@ -1150,8 +1150,17 @@ TEST_SUITE("host-gunplay-client-unit") {
 			states.push_back(w);
 		}
 		auto view = [&](sim::Tick p_tick) { return net::weapons_wire_view(states[p_tick - 100], p_tick); };
+		const sw::SwayContext still;
+		sw::SwayContext moving;
+		moving.move = sw::SwayMove::Moving;
+		auto expected_spread = [&](sim::Tick p_curr_tick, double p_fraction, const sw::SwayContext &p_sway) {
+			const sw::SimTime now = sw::tick_start(p_curr_tick) + sw::SimTime(std::llround(p_fraction * double(sw::kTimeUnitsPerTick)));
+			const sw::WeaponSlotState &curr = states[p_curr_tick - 100].current();
+			const sw::WeaponSlotState &held = curr.spread_time > now ? states[p_curr_tick - 101].current() : curr;
+			return sw::spread_at(held.spread, held.spread_time, now, sw::effective_dispersion(t.table->defs[t.rifle], p_sway), t.table->mechanics);
+		};
 
-		const host::PresentedWeapon d = host::present_weapon(view(110), view(111), 111, 0.5, *t.table);
+		const host::PresentedWeapon d = host::present_weapon(view(110), view(111), 111, 0.5, *t.table, still);
 		REQUIRE(d.valid);
 		CHECK(d.def == t.rifle);
 		CHECK(d.magazine == 31);
@@ -1159,30 +1168,59 @@ TEST_SUITE("host-gunplay-client-unit") {
 		CHECK(d.phase_progress > 0.0f);
 		CHECK(d.phase_progress < 1.0f);
 		CHECK(std::fabs(d.time_s - (sw::units_to_seconds(sw::tick_end(110)) + 0.5 / 60.0)) < 1e-9);
+		CHECK(d.spread_deg == expected_spread(111, 0.5, still));
 
-		const host::PresentedWeapon f0 = host::present_weapon(view(164), view(165), 165, 0.0, *t.table);
-		const host::PresentedWeapon f1 = host::present_weapon(view(164), view(165), 165, 1.0, *t.table);
-		const host::PresentedWeapon fh = host::present_weapon(view(164), view(165), 165, 0.5, *t.table);
+		const host::PresentedWeapon f0 = host::present_weapon(view(164), view(165), 165, 0.0, *t.table, still);
+		const host::PresentedWeapon f1 = host::present_weapon(view(164), view(165), 165, 1.0, *t.table, still);
+		const host::PresentedWeapon fh = host::present_weapon(view(164), view(165), 165, 0.5, *t.table, still);
 		CHECK(f0.magazine < 31);
-		CHECK(f0.spread_deg == doctest::Approx(view(164).timers[0].spread));
-		CHECK(f1.spread_deg == doctest::Approx(view(165).timers[0].spread));
-		CHECK(fh.spread_deg == doctest::Approx(0.5f * (f0.spread_deg + f1.spread_deg)));
+		CHECK(f0.spread_deg == expected_spread(165, 0.0, still));
+		CHECK(f1.spread_deg == expected_spread(165, 1.0, still));
+		CHECK(fh.spread_deg == expected_spread(165, 0.5, still));
 		CHECK(fh.recoil.pitch == doctest::Approx(0.5f * (f0.recoil.pitch + f1.recoil.pitch)));
 
-		const host::PresentedWeapon z = host::present_weapon(view(190), view(191), 191, 0.3, *t.table);
+		const float still_min = sw::effective_dispersion(t.table->defs[t.rifle], still).min_angle;
+		for (sim::Tick tick = 160; tick <= 176; ++tick) {
+			CHECK(host::present_weapon(view(tick - 1), view(tick), tick, 0.1, *t.table, still).spread_deg == expected_spread(tick, 0.1, still));
+			CHECK(host::present_weapon(view(tick - 1), view(tick), tick, 0.9, *t.table, still).spread_deg == expected_spread(tick, 0.9, still));
+		}
+		net::WeaponsWire bloom_prev = view(175);
+		net::WeaponsWire bloom_curr = view(176);
+		REQUIRE(bloom_prev.timers[0].spread_time == bloom_curr.timers[0].spread_time + int32_t(sw::kTimeUnitsPerTick));
+		bloom_prev.timers[0].spread = 6.0f;
+		bloom_curr.timers[0].spread = 6.0f;
+		const sw::Dispersion still_disp = sw::effective_dispersion(t.table->defs[t.rifle], still);
+		const sw::SimTime bloom_time = net::weapons_wire_time(bloom_curr.timers[0].spread_time, 176);
+		const float early = host::present_weapon(bloom_prev, bloom_curr, 176, 0.1, *t.table, still).spread_deg;
+		const float late = host::present_weapon(bloom_prev, bloom_curr, 176, 0.9, *t.table, still).spread_deg;
+		CHECK(early == sw::spread_at(6.0f, bloom_time, sw::tick_start(176) + sw::kTimeUnitsPerTick / 10, still_disp, t.table->mechanics));
+		CHECK(late == sw::spread_at(6.0f, bloom_time, sw::tick_start(176) + 9 * sw::kTimeUnitsPerTick / 10, still_disp, t.table->mechanics));
+		CHECK(early > still_min);
+		CHECK(late < early);
+		CHECK(early - late == doctest::Approx(0.8 * still_disp.decrease_per_second / double(sim::kSimHz)).epsilon(1e-3));
+
+		const host::PresentedWeapon m = host::present_weapon(view(176), view(177), 177, 0.5, *t.table, moving);
+		const host::PresentedWeapon n = host::present_weapon(view(176), view(177), 177, 0.5, *t.table, still);
+		REQUIRE(sw::effective_dispersion(t.table->defs[t.rifle], moving).min_angle > still_min);
+		CHECK(n.spread_deg == still_min);
+		CHECK(m.spread_deg == expected_spread(177, 0.5, moving));
+		CHECK(m.spread_deg == sw::effective_dispersion(t.table->defs[t.rifle], moving).min_angle);
+
+		const host::PresentedWeapon z = host::present_weapon(view(190), view(191), 191, 0.3, *t.table, still);
 		CHECK(z.zoomed);
 
 		net::WeaponsWire other = view(164);
 		other.slots[other.active].def = t.pistol;
-		const host::PresentedWeapon s = host::present_weapon(other, view(165), 165, 0.5, *t.table);
-		CHECK(s.spread_deg == doctest::Approx(view(165).timers[0].spread));
+		const host::PresentedWeapon s = host::present_weapon(other, view(165), 165, 0.5, *t.table, still);
+		const sw::WeaponSlotState &curr165 = states[65].current();
+		CHECK(s.spread_deg == sw::spread_at(curr165.spread, curr165.spread_time, sw::tick_start(165) + sw::kTimeUnitsPerTick / 2, sw::effective_dispersion(t.table->defs[t.rifle], still), t.table->mechanics));
 
 		net::WeaponsWire bad = view(165);
 		bad.slots[bad.active].def = uint16_t(t.table->defs.size() + 3);
-		CHECK(!host::present_weapon(view(164), bad, 165, 0.5, *t.table).valid);
+		CHECK(!host::present_weapon(view(164), bad, 165, 0.5, *t.table, still).valid);
 		bad = view(165);
 		bad.active = 200;
-		CHECK(!host::present_weapon(view(164), bad, 165, 0.5, *t.table).valid);
+		CHECK(!host::present_weapon(view(164), bad, 165, 0.5, *t.table, still).valid);
 	}
 
 	TEST_CASE("host.gunplay.client: the weapon lane replays under catch_up without emitting twice; a dead soldier steps no weapon") {
