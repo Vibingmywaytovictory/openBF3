@@ -8,15 +8,24 @@
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/ui/hud_icons.h"
+#include "bf3/core/ui/hud_screen.h"
+#include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/text_db.h"
 #include "bf3/core/util/format.h"
 #include "bf3/host/hud_feed.h"
+#include "bf3/host/presentation_weapon.h"
+#include "bf3/net/weapons_wire.h"
+#include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/weapons/weapon_install.h"
+#include "bf3/sim/weapons/weapon_rules.h"
+#include "bf3/sim/weapons/weapon_sim.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -110,6 +119,103 @@ host::PresentEvent hit_event(uint8_t p_flags, int64_t p_time) {
 	e.time = p_time;
 	e.value = 25.0f;
 	return e;
+}
+
+struct XhairWindow {
+	bf3::sim::Tick from = 0;
+	bf3::sim::Tick to = 0;
+
+	bool has(bf3::sim::Tick p_tick) const { return p_tick >= from && p_tick < to; }
+};
+
+struct XhairScript {
+	XhairWindow walk;
+	XhairWindow sprint;
+	XhairWindow air;
+	XhairWindow fire;
+	bf3::sim::Tick last = 0;
+};
+
+struct XhairFrame {
+	bf3::sim::Tick tick = 0;
+	double arm = 0.0;
+	uint32_t shots = 0;
+	sw::SwayMove move = sw::SwayMove::Base;
+};
+
+constexpr bf3::sim::Tick kXhairSpawn = 100;
+
+std::vector<XhairFrame> crosshair_frames(const sw::WeaponTable &p_table, std::span<const uint16_t> p_loadout, const host::HudStatic &p_static, double p_base_offset,
+		const XhairScript &p_script) {
+	namespace sim = bf3::sim;
+	sw::SoldierWeaponsState w;
+	w.player_slot = 3;
+	REQUIRE(sw::spawn_soldier_weapons(w, p_table, p_loadout, 0, kXhairSpawn).ok());
+	std::vector<net::WeaponsWire> wires{ net::weapons_wire_view(w, kXhairSpawn) };
+	sim::SoldierState before;
+	before.flags = sim::soldier_flags::kAlive;
+	std::vector<sim::SoldierState> soldiers{ before };
+	std::vector<sim::Command> commands{ sim::Command{} };
+	std::vector<uint32_t> shots{ 0 };
+	const sim::MotorParams motor;
+	for (sim::Tick tick = kXhairSpawn + 1; tick <= p_script.last; ++tick) {
+		sim::SoldierState after = before;
+		const bool sprinting = p_script.sprint.has(tick);
+		after.flags = uint16_t(sim::soldier_flags::kAlive | (sprinting ? sim::soldier_flags::kSprinting : 0));
+		after.velocity = { 0.0f, 0.0f, sprinting ? 6.0f : (p_script.walk.has(tick) ? 1.5f : 0.0f) };
+		after.mode = p_script.air.has(tick) ? sim::MoveMode::InAir : sim::MoveMode::OnGround;
+		sim::Command c;
+		c.tick = tick;
+		c.buttons = p_script.fire.has(tick) ? sim::buttons::kFire : 0u;
+		sw::WeaponTickOutput out;
+		sw::step_weapons_with_rules(p_table, w, c, sw::make_weapon_context(motor, before, after, c), 1, kXhairSpawn, out);
+		wires.push_back(net::weapons_wire_view(w, tick));
+		soldiers.push_back(after);
+		commands.push_back(c);
+		shots.push_back(shots.back() + out.shot_count);
+		before = after;
+	}
+	host::HudFeedState state;
+	ui::HudModel model;
+	std::vector<XhairFrame> frames;
+	for (sim::Tick tick = kXhairSpawn + 2; tick <= p_script.last; tick += 2) {
+		const size_t i = size_t(tick - kXhairSpawn);
+		const sw::SwayContext sway = sw::suppressed_sway(sw::weapon_sway_context(soldiers[i], commands[i]), 0.0f, p_table.mechanics);
+		host::HudFeedInput in;
+		in.alive = true;
+		in.health = 100.0f;
+		in.now_s = sw::units_to_seconds(sw::tick_start(tick));
+		in.weapon = host::present_weapon(wires[i - 1], wires[i], tick, 0.0, p_table, sway);
+		host::fill_hud(in, {}, p_static, state, model);
+		frames.push_back({ tick, ui::hud_crosshair_arm(model.weapon.dispersion, p_base_offset), shots[i], sway.move });
+	}
+	return frames;
+}
+
+std::vector<XhairFrame> frames_in(const std::vector<XhairFrame> &p_frames, XhairWindow p_window) {
+	std::vector<XhairFrame> out;
+	for (const XhairFrame &f : p_frames) {
+		if (p_window.has(f.tick)) {
+			out.push_back(f);
+		}
+	}
+	return out;
+}
+
+bool arms_all(const std::vector<XhairFrame> &p_frames, double p_arm) {
+	return !p_frames.empty() && std::all_of(p_frames.begin(), p_frames.end(), [p_arm](const XhairFrame &f) { return f.arm == p_arm; });
+}
+
+double peak_arm(const std::vector<XhairFrame> &p_frames) {
+	double peak = 0.0;
+	for (const XhairFrame &f : p_frames) {
+		peak = std::max(peak, f.arm);
+	}
+	return peak;
+}
+
+double arm_at(const std::vector<XhairFrame> &p_frames, size_t p_index) {
+	return p_index < p_frames.size() ? p_frames[p_index].arm : -1.0;
 }
 
 }
@@ -235,6 +341,34 @@ TEST_CASE("fill_hud over scripted frames: ammo every frame, reload, ADS, switch,
 	CHECK(magazine == 31);
 	CHECK(reserve < 124);
 	row("feed.ammo", mismatches == 0, std::to_string(frames) + " frames, " + std::to_string(mismatches) + " mismatches (magazine / reserve / name / ADS / reload)");
+}
+
+TEST_CASE("walking opens the crosshair without a shot: the presented spread follows the predicted move state every frame") {
+	SyntheticKit k = synthetic_kit();
+	const uint16_t m16 = def_of(k, "weapons/m16a4/u_m16a4");
+	const uint16_t m9 = def_of(k, "weapons/m9/u_m9");
+	sw::SwayState &hip = k.table->defs[m16].sway[0][0];
+	hip.move[size_t(sw::SwayMove::Moving)] = hip.move[size_t(sw::SwayMove::Base)];
+	hip.move[size_t(sw::SwayMove::Base)].min_angle = 2.5f;
+	hip.move[size_t(sw::SwayMove::Moving)].min_angle = 3.0f;
+	hip.has_move[size_t(sw::SwayMove::Moving)] = true;
+	const host::HudStatic st = synthetic_static(k);
+	XhairScript script;
+	script.walk = { kXhairSpawn + 80, kXhairSpawn + 140 };
+	script.last = kXhairSpawn + 200;
+	const std::array<uint16_t, 2> loadout{ m16, m9 };
+	const std::vector<XhairFrame> frames = crosshair_frames(*k.table, loadout, st, 0.151, script);
+	const std::vector<XhairFrame> before = frames_in(frames, { kXhairSpawn + 40, script.walk.from });
+	const std::vector<XhairFrame> walking = frames_in(frames, script.walk);
+	const std::vector<XhairFrame> after = frames_in(frames, { script.walk.to, script.last + 1 });
+	const bool ok = arms_all(before, 65.0) && arms_all(walking, 75.0) && arms_all(after, 65.0) && frames.back().shots == 0;
+	CHECK(arms_all(before, 65.0));
+	CHECK(arms_all(walking, 75.0));
+	CHECK(arms_all(after, 65.0));
+	CHECK(frames.back().shots == 0);
+	row("feed.crosshair_walk", ok,
+			fmt("no shot fired: arms %.0f standing, %.0f on every walking frame from the first, %.0f after stopping (2.5 / 3.0 deg, offset 0.151)", arm_at(before, 0),
+					arm_at(walking, 0), arm_at(after, 0)));
 }
 
 TEST_CASE("hit indicator: 0.3 s per own server hit, level 1, others ignored") {
@@ -570,6 +704,110 @@ TEST_CASE("the 12 kit items: names, icons, static rows") {
 	row("kit.icons", icons == std::size(kKitItems), std::to_string(icons) + "/12 _small icons decode");
 	CHECK(names == 12);
 	CHECK(icons == 12);
+}
+
+TEST_CASE("crosshair footage: the M16A3 builds of the 18.57 recording through the sim, the HUD feed and crosshairdefault's binding") {
+	HudInstall *hi = hud_install();
+	if (hi == nullptr) {
+		return;
+	}
+	bf3::core::Result<sw::InstallWeapons> weapons = sw::open_install_weapons(hi->install);
+	REQUIRE_MESSAGE(weapons.ok(), (weapons.ok() ? std::string() : weapons.error().message));
+	bf3::core::Result<std::unique_ptr<bf3::core::EbxLibrary>> level = bf3::core::EbxLibrary::open(hi->install, { "Win32/Levels/MP_Subway/MP_Subway" });
+	REQUIRE_MESSAGE(level.ok(), (level.ok() ? std::string() : level.error().message));
+	bf3::core::Result<ui::HudScreenAsset> screen = ui::read_hud_screen_asset(**level, ui::kCrosshairDefaultPartition);
+	REQUIRE_MESSAGE(screen.ok(), (screen.ok() ? std::string() : screen.error().message));
+	const ui::HudWidgetNode *node = screen->find("Crosshair_01");
+	REQUIRE(node != nullptr);
+	REQUIRE(node->dispersion_base_offset.has_value());
+	const double offset = *node->dispersion_base_offset;
+
+	const std::vector<std::string> suppressed_unlocks{ "weapons/m16a4/u_m16a4_sound_suppressor", "weapons/m16a4/u_m16a4_eotech", "weapons/m16a4/u_m16a4_bipod" };
+	const std::vector<std::string> heavy_unlocks{ "weapons/m16a4/u_m16a4_heavybarrel" };
+	std::vector<gp::WeaponDef> defs;
+	for (const std::vector<std::string> *u : { &suppressed_unlocks, &heavy_unlocks }) {
+		bf3::core::Result<gp::WeaponDef> d = weapons->catalog->resolve("weapons/m16a4/u_m16a4", *u);
+		REQUIRE_MESSAGE(d.ok(), (d.ok() ? std::string() : d.error().message));
+		defs.push_back(std::move(*d));
+	}
+	bf3::core::Result<gp::WeaponDef> pistol = weapons->catalog->resolve("weapons/m9/u_m9");
+	REQUIRE_MESSAGE(pistol.ok(), (pistol.ok() ? std::string() : pistol.error().message));
+	defs.push_back(std::move(*pistol));
+	bf3::core::Result<std::shared_ptr<const sw::WeaponTable>> table = sw::make_weapon_table(defs, weapons->materials, sw::install_table_options(*weapons));
+	REQUIRE_MESSAGE(table.ok(), (table.ok() ? std::string() : table.error().message));
+	bf3::core::Result<host::HudStatic> st = host::make_hud_static(**table, defs);
+	REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
+
+	constexpr double kFootageSuppressedStand = 85.0;
+	constexpr double kFootageSuppressedMoving = 99.0;
+	constexpr double kFootageSuppressedSprint = 115.0;
+	constexpr double kFootageSuppressedJump = 155.0;
+	constexpr double kFootageHeavyStand = 75.0;
+	constexpr double kFootageHeavyMoving = 87.0;
+	constexpr double kFootageHeavyBurstPeak = 117.0;
+	constexpr double kFootageDecayPerFrame = 10.0;
+
+	const bf3::sim::Tick t0 = kXhairSpawn + 60;
+	XhairScript s;
+	s.walk = { t0 + 60, t0 + 120 };
+	s.sprint = { t0 + 150, t0 + 210 };
+	s.air = { t0 + 240, t0 + 270 };
+	s.fire = { t0 + 268, t0 + 270 };
+	s.last = t0 + 360;
+	const std::array<uint16_t, 2> suppressed{ 0, 2 };
+	const std::vector<XhairFrame> fs = crosshair_frames(**table, suppressed, *st, offset, s);
+	const std::vector<XhairFrame> stand = frames_in(fs, { t0, s.walk.from });
+	const std::vector<XhairFrame> walk = frames_in(fs, s.walk);
+	const std::vector<XhairFrame> sprint = frames_in(fs, s.sprint);
+	const std::vector<XhairFrame> air = frames_in(fs, { s.air.from, s.fire.from });
+	const std::vector<XhairFrame> landed = frames_in(fs, { s.air.to, s.last + 1 });
+	const std::vector<XhairFrame> before_shot = frames_in(fs, { t0, s.fire.from });
+	REQUIRE(!before_shot.empty());
+	REQUIRE(!landed.empty());
+	CHECK(arms_all(stand, kFootageSuppressedStand));
+	CHECK(arms_all(walk, kFootageSuppressedMoving));
+	CHECK(before_shot.back().shots == 0);
+	CHECK(landed.back().shots == 1);
+	size_t full_steps = 0;
+	bool steps_ok = true;
+	for (size_t i = 1; i < landed.size(); ++i) {
+		const double step = landed[i - 1].arm - landed[i].arm;
+		steps_ok = steps_ok && step >= 0.0 && step <= kFootageDecayPerFrame;
+		full_steps += step == kFootageDecayPerFrame ? 1 : 0;
+	}
+	CHECK(steps_ok);
+	CHECK(full_steps >= 5);
+	CHECK(landed.back().arm == kFootageSuppressedStand);
+	row("footage.suppressed.stand_move", arms_all(stand, kFootageSuppressedStand) && arms_all(walk, kFootageSuppressedMoving),
+			fmt("M16A3 + suppressor: arms %.0f standing and %.0f walking from the first walking frame (footage %.0f / %.0f at FOV 100, 1280x720)", arm_at(stand, 0), arm_at(walk, 0),
+					kFootageSuppressedStand, kFootageSuppressedMoving));
+	row("footage.suppressed.decay", steps_ok && full_steps >= 5 && landed.back().arm == kFootageSuppressedStand,
+			fmt("after a shot in the air and the landing the arms fall %zu frames by %.0f px per 30 fps frame (footage %.0f px per frame, 15 deg/s) to %.0f", full_steps,
+					kFootageDecayPerFrame, kFootageDecayPerFrame, landed.back().arm));
+	const std::vector<XhairFrame> after_walk = frames_in(fs, { s.walk.to, s.walk.to + 12 });
+	std::printf("INFO footage.suppressed.sprint sim arm %.0f, footage %.0f (the sim applies the suppressor's x1.4 to the Sprinting minimum)\n", peak_arm(sprint),
+			kFootageSuppressedSprint);
+	std::printf("INFO footage.suppressed.jump sim arm %.0f, footage %.0f (the sim's Jumping minimum is above the state's maximum, the footage clamps at 7 deg)\n", peak_arm(air),
+			kFootageSuppressedJump);
+	std::printf("INFO footage.suppressed.stop sim arms after stopping %.0f %.0f %.0f, the footage falls gradually from %.0f (the sim keeps no spread state between shots)\n",
+			arm_at(after_walk, 0), arm_at(after_walk, 1), arm_at(after_walk, 2), kFootageSuppressedMoving);
+
+	XhairScript h;
+	h.walk = { t0 + 60, t0 + 120 };
+	h.fire = { t0 + 150, t0 + 246 };
+	h.last = t0 + 300;
+	const std::array<uint16_t, 2> heavy{ 1, 2 };
+	const std::vector<XhairFrame> fh = crosshair_frames(**table, heavy, *st, offset, h);
+	const std::vector<XhairFrame> hstand = frames_in(fh, { t0, h.walk.from });
+	const std::vector<XhairFrame> hwalk = frames_in(fh, h.walk);
+	const std::vector<XhairFrame> burst = frames_in(fh, h.fire);
+	REQUIRE(!burst.empty());
+	CHECK(arms_all(hstand, kFootageHeavyStand));
+	CHECK(arms_all(hwalk, kFootageHeavyMoving));
+	row("footage.heavy.stand_move", arms_all(hstand, kFootageHeavyStand) && arms_all(hwalk, kFootageHeavyMoving),
+			fmt("M16A3 + heavy barrel: arms %.0f standing and %.0f walking (footage %.0f / %.0f)", arm_at(hstand, 0), arm_at(hwalk, 0), kFootageHeavyStand, kFootageHeavyMoving));
+	std::printf("INFO footage.heavy.burst sim peak arm %.0f over %u shots in 1.6 s, footage %.0f (the footage holds the bloom while firing, the sim decays 15 deg/s between shots)\n",
+			peak_arm(burst), burst.back().shots - burst.front().shots, kFootageHeavyBurstPeak);
 }
 
 TEST_CASE("install.unchanged") {

@@ -399,10 +399,20 @@ TEST_SUITE("ui-hud-screen-unit") {
 		CHECK(hud_compass_frame(211.01f) == 212);
 		CHECK(hud_compass_frame(-0.5f) == 0);
 		CHECK(hud_compass_frame(1e7f) == 280);
-		CHECK(hud_crosshair_dispersion(0.0f, 55.0f, 720.0f) == 0.0);
-		constexpr double kPi = 3.14159265358979323846;
-		CHECK(hud_crosshair_dispersion(1.0f, 55.0f, 720.0f) == doctest::Approx(360.0 * std::tan(kPi / 180.0) / std::tan(27.5 * kPi / 180.0) / 100.0));
-		CHECK(hud_crosshair_dispersion(1.0f, 0.0f, 720.0f) == 0.0);
+		CHECK(hud_crosshair_dispersion(0.0f) == 0.0);
+		CHECK(hud_crosshair_dispersion(std::nanf("")) == 0.0);
+		CHECK(hud_crosshair_dispersion(-1.0f) == 0.0);
+		CHECK(hud_crosshair_dispersion(3.5f) == doctest::Approx(0.7));
+		CHECK(hud_crosshair_arm(1.5f, 0.151f) == 45.0);
+		CHECK(hud_crosshair_arm(3.0f, 0.151f) == 75.0);
+		CHECK(hud_crosshair_arm(3.5f, 0.151f) == 85.0);
+		CHECK(hud_crosshair_arm(3.6f, 0.151f) == 87.0);
+		CHECK(hud_crosshair_arm(4.2f, 0.151f) == 99.0);
+		CHECK(hud_crosshair_arm(5.0f, 0.151f) == 115.0);
+		CHECK(hud_crosshair_arm(7.0f, 0.151f) == 155.0);
+		CHECK(hud_crosshair_arm(0.0f, 0.151f) == 15.0);
+		CHECK(hud_crosshair_arm(hud_crosshair_spread_for_arm(44.125, 0.151f), 0.151f) == 44.0);
+		CHECK(hud_crosshair_spread_for_arm(4.25, 0.151f) == 0.0f);
 		const double nan_value = As2Value::of("").to_number();
 		CHECK(std::isnan(nan_value));
 		CHECK(As2Value::of("12").to_number() == 12.0);
@@ -1049,9 +1059,13 @@ TEST_SUITE("ui-hud-screen") {
 			return;
 		}
 		HudModel m = moment_m02();
-		constexpr float kPi = 3.14159265358979323846f;
-		const float vfov = 55.0f;
-		m.weapon.dispersion = std::atan(44.125f / 360.0f * std::tan(vfov / 2.0f * kPi / 180.0f)) * 180.0f / kPi;
+		Result<HudScreenAsset> asset = read_hud_screen_asset(*r->level, kCrosshairDefaultPartition);
+		REQUIRE(asset.ok());
+		const HudWidgetNode *node = asset->find("Crosshair_01");
+		REQUIRE(node != nullptr);
+		REQUIRE(node->dispersion_base_offset.has_value());
+		CHECK(*node->dispersion_base_offset == double(0.151f));
+		m.weapon.dispersion = hud_crosshair_spread_for_arm(44.125, *node->dispersion_base_offset);
 		Screen s = initialized(*r, kCrosshairDefaultPartition, m);
 		const std::string x = "instance1.Crosshair_01";
 		CHECK(s.at(x).visible);
@@ -1081,7 +1095,18 @@ TEST_SUITE("ui-hud-screen") {
 		m.weapon.active_weapon_crosshair = 0;
 		s.hud->refresh(m);
 		CHECK_FALSE(s.at(x).visible);
-		row("crosshair", "dispersion 44.125 px -> arms at +-44, HideOnZoom fades 0.2 s out / 0.1 s in");
+		m.weapon.zoomed = false;
+		m.weapon.active_weapon_crosshair = 1;
+		m.weapon.dispersion = 4.2f;
+		s.hud->refresh(m);
+		s.hud->advance(0.0);
+		CHECK(s.at(x + ".crosshair.right").matrix.tx == 99.0f);
+		m.weapon.dispersion = 3.5f;
+		s.hud->refresh(m);
+		s.hud->advance(0.0);
+		CHECK(s.at(x + ".crosshair.right").matrix.tx == 85.0f);
+		row("crosshair", "UICrosshairDataBinding DispersionBaseOffset 0.151 as BaseValue, Dispersion 0.2 per degree: 44.125 px -> arms at +-44, 4.2 deg -> 99, 3.5 deg -> 85, "
+						 "HideOnZoom fades 0.2 s out / 0.1 s in");
 	}
 
 	TEST_CASE("hud screen: Hitindicator, LatencyIndicator and the widgets hidden until data") {

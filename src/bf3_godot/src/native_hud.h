@@ -56,6 +56,7 @@ struct NativeHudReadout {
 	bool crosshair_widget = false;
 	float crosshair_alpha = 0.0f;
 	float crosshair_arm = 0.0f;
+	double crosshair_base_offset = 0.0;
 	float stage_height = 0.0f;
 	float vfov_deg = 0.0f;
 	bool ammo_visible = false;

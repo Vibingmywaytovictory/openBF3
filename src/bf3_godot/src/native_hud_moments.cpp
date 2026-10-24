@@ -454,7 +454,7 @@ std::span<const NativeHudMoment> native_hud_moments() {
 	return kMoments;
 }
 
-ui::HudModel native_hud_moment_model(const NativeHudMoment &p_moment, const ui::HudModel &p_base, float p_vfov_deg, float p_stage_height) {
+ui::HudModel native_hud_moment_model(const NativeHudMoment &p_moment, const ui::HudModel &p_base, double p_crosshair_base_offset) {
 	ui::HudModel m = p_base;
 	m.soldier.is_alive = true;
 	m.soldier.health = float(p_moment.health);
@@ -469,8 +469,7 @@ ui::HudModel native_hud_moment_model(const NativeHudMoment &p_moment, const ui::
 	w.firing_mode_types = (1u << 0) | (1u << 2);
 	w.active_weapon_crosshair = 1;
 	w.zoomed = !p_moment.crosshair;
-	const double half = double(p_vfov_deg) * bf3::core::kDegToRad / 2.0;
-	w.dispersion = p_stage_height > 0.0f && p_vfov_deg > 0.0f ? float(std::atan(double(p_moment.dispersion_px) * std::tan(half) / (double(p_stage_height) / 2.0)) / bf3::core::kDegToRad) : 0.0f;
+	w.dispersion = ui::hud_crosshair_spread_for_arm(double(p_moment.dispersion_px), p_crosshair_base_offset);
 	w.absolute_dispersion = w.dispersion;
 	m.team.friendly_team = 1;
 	m.team.enemy_team1 = 2;
@@ -1114,10 +1113,7 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 		}
 		case Phase::Settle: {
 			const NativeHudMoment &m = *moments_[index_];
-			const Bf3SwfView *v = r_hud.view(0);
-			const float stage_h = v != nullptr ? v->visible_rect().height() : 720.0f;
-			const float vfov = r_hud.client().vertical_fov_deg > 0.0f ? r_hud.client().vertical_fov_deg : 55.0f;
-			settle(r_session, r_hud, m, native_hud_moment_model(m, r_hud.model(), vfov, stage_h));
+			settle(r_session, r_hud, m, native_hud_moment_model(m, r_hud.model(), r_hud.readout().crosshair_base_offset));
 			r_hud.set_visible(true);
 			frames_ = 0;
 			phase_ = Phase::Render;

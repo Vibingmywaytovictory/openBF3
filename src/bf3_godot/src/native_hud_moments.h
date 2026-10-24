@@ -55,7 +55,7 @@ struct NativeHudMoment {
 
 std::span<const NativeHudMoment> native_hud_moments();
 
-bf3::core::ui::HudModel native_hud_moment_model(const NativeHudMoment &p_moment, const bf3::core::ui::HudModel &p_base, float p_vfov_deg, float p_stage_height);
+bf3::core::ui::HudModel native_hud_moment_model(const NativeHudMoment &p_moment, const bf3::core::ui::HudModel &p_base, double p_crosshair_base_offset);
 float native_hud_moment_heading_deg(const NativeHudMoment &p_moment);
 float native_hud_moment_view_yaw(const NativeHudMoment &p_moment);
 std::array<float, 2> native_hud_moment_texel(const NativeHudMoment &p_moment);

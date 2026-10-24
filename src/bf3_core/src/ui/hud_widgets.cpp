@@ -862,6 +862,8 @@ public:
 
 	void initialize(HudWidgetHost &r_host, const HudWidgetInit &p_init) override { run_initialize(r_host, &p_init); }
 
+	void attach_node(HudWidgetHost &, const HudWidgetNode &p_node) override { base_offset_ = p_node.dispersion_base_offset.value_or(0.0); }
+
 	void update(HudWidgetHost &r_host, std::string_view p_key, const As2Value &p_value) override {
 		if (p_key == "Visible") {
 			r_host.self().set_visible(string_true(p_value));
@@ -889,11 +891,11 @@ public:
 		}
 	}
 
-	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const override {
+	void bind(const HudModel &p_model, const HudClientState &, HudData &r_out) const override {
 		const HudWeapon &w = p_model.weapon;
 		r_out.push_back({ "Visible", As2Value::of(p_model.soldier.is_alive && w.active_weapon_crosshair != 0) });
-		r_out.push_back({ "BaseValue", As2Value::of(0.0) });
-		r_out.push_back({ "Dispersion", As2Value::of(hud_crosshair_dispersion(w.dispersion, p_client.vertical_fov_deg, p_client.stage_height)) });
+		r_out.push_back({ "BaseValue", As2Value::of(base_offset_) });
+		r_out.push_back({ "Dispersion", As2Value::of(hud_crosshair_dispersion(w.dispersion)) });
 		r_out.push_back({ "Zoomed", As2Value::of(w.zoomed) });
 	}
 
@@ -939,6 +941,7 @@ private:
 	static constexpr double kFadeInSeconds = 0.1;
 	std::string type_ = "crosshair";
 	bool hide_on_zoom_ = false;
+	double base_offset_ = 0.0;
 	double base_ = 0.0;
 	double current_ = 0.0;
 	bool zoomed_ = false;
@@ -2653,12 +2656,20 @@ int32_t hud_compass_frame(float p_heading_deg) {
 	return ((h % 360) + 360) % 360;
 }
 
-double hud_crosshair_dispersion(float p_spread_deg, float p_vertical_fov_deg, float p_stage_height) {
-	if (!(p_spread_deg > 0.0f) || !(p_vertical_fov_deg > 0.0f) || !(p_vertical_fov_deg < 180.0f) || !(p_stage_height > 0.0f)) {
+double hud_crosshair_dispersion(float p_spread_deg) {
+	if (!(p_spread_deg > 0.0f) || !std::isfinite(p_spread_deg)) {
 		return 0.0;
 	}
-	const double gap = double(p_stage_height) / 2.0 * std::tan(double(p_spread_deg) * kDegToRad) / std::tan(double(p_vertical_fov_deg) * kDegToRad / 2.0);
-	return gap / 100.0;
+	return double(p_spread_deg) * kHudCrosshairDispersionPerDegree;
+}
+
+double hud_crosshair_arm(float p_spread_deg, double p_base_offset) {
+	return as2_round((hud_crosshair_dispersion(p_spread_deg) + p_base_offset) * 100.0);
+}
+
+float hud_crosshair_spread_for_arm(double p_arm, double p_base_offset) {
+	const double d = p_arm / 100.0 - p_base_offset;
+	return d > 0.0 && std::isfinite(d) ? float(d / kHudCrosshairDispersionPerDegree) : 0.0f;
 }
 
 double hud_bg_light_ramp_fraction_x() {

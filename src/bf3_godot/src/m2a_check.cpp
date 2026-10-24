@@ -13,6 +13,7 @@
 
 #include "bf3/audio/audio_config.h"
 #include "bf3/audio/game_audio_check.h"
+#include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/util/format.h"
 #include "bf3/core/util/percentile.h"
 #include "bf3/core/util/text.h"
@@ -505,7 +506,7 @@ struct M2aCheck::State {
 			bool bad = r.crosshair_widget != e->widget;
 			std::string why = bad ? "widget" : "";
 			if (!bad && r.crosshair_widget) {
-				const double want = std::round(0.5 * double(r.stage_height) * std::tan(e->spread * bf3::core::kDegToRad) / std::tan(0.5 * e->vfov * bf3::core::kDegToRad));
+				const double want = bf3::core::ui::hud_crosshair_arm(float(e->spread), r.crosshair_base_offset);
 				const double err = std::fabs(double(r.crosshair_arm) - want);
 				if (!e->zoomed) {
 					gap_err_max = std::max(gap_err_max, err);
@@ -1808,7 +1809,7 @@ void M2aCheck::State::build_hud() {
 	add("hud rows", 1.0, [](State &st, double, bool) {
 		st.row("e10.frames", double(st.frames_checked), ">= 240 frames with a weapon compared", st.frames_checked >= 240);
 		st.row("e10.crosshair_gap", st.gap_err_max,
-				fmt("crosshairdefault's arms at round((h/2) tan(presented spread) / tan(camera vfov / 2)) stage px +- 0.5, faded to alpha 0 in ADS and 1 at the hip "
+				fmt("crosshairdefault's arms at round(100 (0.2 x presented spread deg + DispersionBaseOffset)) stage px +- 0.5, faded to alpha 0 in ADS and 1 at the hip "
 					"after the 0.2 s / 0.1 s HideOnZoom tweens (%" PRIu64 " frames, %" PRIu64 " settled fades, %" PRIu64 " bad%s)",
 						st.gap_frames, st.fade_frames, st.gap_bad, st.hud_first_bad.empty() ? "" : (", first: " + st.hud_first_bad).c_str()),
 				st.gap_frames >= 120 && st.fade_frames >= 60 && st.gap_bad == 0);

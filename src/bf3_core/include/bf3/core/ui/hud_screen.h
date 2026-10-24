@@ -62,6 +62,7 @@ struct HudWidgetNode {
 	std::optional<HudDataSource> message_query;
 	std::optional<HudDataSource> widget_path_query;
 	int32_t number_of_rows = 0;
+	std::optional<double> dispersion_base_offset;
 
 	const HudDataSource *source(std::string_view p_name) const;
 };

@@ -117,10 +117,13 @@ inline constexpr int32_t kUiHudIconSquadLeader = 7;
 inline constexpr int32_t kUiHudIconDead = 145;
 inline constexpr std::array<int32_t, 4> kUiHudIconsOnRedMarker{ 18, 35, 15, 4 };
 inline constexpr int32_t kUiSpottedInfoNone = 0;
+inline constexpr double kHudCrosshairDispersionPerDegree = 0.2;
 
 int32_t hud_compass_frame(float p_heading_deg);
 
-double hud_crosshair_dispersion(float p_spread_deg, float p_vertical_fov_deg, float p_stage_height);
+double hud_crosshair_dispersion(float p_spread_deg);
+double hud_crosshair_arm(float p_spread_deg, double p_base_offset);
+float hud_crosshair_spread_for_arm(double p_arm, double p_base_offset);
 
 double hud_bg_light_ramp_fraction_x();
 double hud_bg_light_ramp_fraction_y();

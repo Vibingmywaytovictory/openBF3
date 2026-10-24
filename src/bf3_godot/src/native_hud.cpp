@@ -545,6 +545,14 @@ NativeHudReadout Bf3NativeHud::readout() const {
 			r.crosshair_arm = arm->matrix.tx;
 		}
 	}
+	if (screens_[2] != nullptr) {
+		for (const ui::HudWidgetNode &n : screens_[2]->asset().widgets) {
+			if (n.dispersion_base_offset) {
+				r.crosshair_base_offset = *n.dispersion_base_offset;
+				break;
+			}
+		}
+	}
 	const ui::SwfScene *mp = views_[0] != nullptr ? views_[0]->scene() : nullptr;
 	const std::string clip = "instance1.Ammo_01.Ammo.clip.cltxt.txtDisplay";
 	r.ammo_visible = shown(mp, clip);

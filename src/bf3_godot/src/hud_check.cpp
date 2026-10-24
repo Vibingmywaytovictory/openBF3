@@ -7,6 +7,7 @@
 #include "ui_assets.h"
 
 #include "bf3/core/install_snapshot.h"
+#include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/util/format.h"
 #include "bf3/host/hud_feed.h"
 #include "bf3/sim/weapons/weapon_install.h"
@@ -522,7 +523,7 @@ void Bf3HudCheck::verify_frame(const Frame &p_frame) {
 	bool cross_ok = r.crosshair_widget == alive;
 	if (cross_ok && alive) {
 		if (!p_frame.zoomed) {
-			const double want = std::round(0.5 * double(r.stage_height) * std::tan(double(p_frame.spread) * bf3::core::kDegToRad) / std::tan(0.5 * double(p_frame.vfov) * bf3::core::kDegToRad));
+			const double want = ui::hud_crosshair_arm(float(p_frame.spread), r.crosshair_base_offset);
 			const double err = std::fabs(double(r.crosshair_arm) - want);
 			++t.gap_frames;
 			t.max_gap_err = std::max(t.max_gap_err, err);
@@ -699,7 +700,7 @@ void Bf3HudCheck::finish() {
 		add_row(p + "ammo", t.ammo_bad == 0 && t.ammo_frames > 0,
 				fmt("hudmpscreen Ammo_01 clip / reserve text == magazine / reserve on %zu frames, %zu mismatches", t.ammo_frames, t.ammo_bad) + (t.ammo_bad ? err : std::string()));
 		add_row(p + "crosshair", t.crosshair_bad == 0 && t.max_gap_err <= kGapTolerancePx && t.ads_frames > 0 && t.ads_hidden == t.ads_frames && t.hip_opaque == t.hip_settled,
-				fmt("%zu mismatches; arms at round((h/2) tan(spread) / tan(vfov/2)) stage px, max |err| %.4f over %zu frames (<= %.1f); alpha 0 on %zu/%zu settled ADS "
+				fmt("%zu mismatches; arms at round(100 (0.2 x spread deg + DispersionBaseOffset)) stage px, max |err| %.4f over %zu frames (<= %.1f); alpha 0 on %zu/%zu settled ADS "
 					"frames, 1 on %zu/%zu settled hip frames",
 						t.crosshair_bad, t.max_gap_err, t.gap_frames, kGapTolerancePx, t.ads_hidden, t.ads_frames, t.hip_opaque, t.hip_settled) +
 						(t.crosshair_bad ? err : std::string()));

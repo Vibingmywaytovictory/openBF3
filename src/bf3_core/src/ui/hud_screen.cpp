@@ -77,6 +77,12 @@ void read_binding(const EbxResolver &p_db, const EbxPartition &p_part, const Ebx
 		r_widget.number_of_rows = rows ? rows->as_i32().value_or(0) : 0;
 		return;
 	}
+	if (b->is_a("UICrosshairDataBinding")) {
+		if (const std::optional<EbxValue> offset = b->get("DispersionBaseOffset")) {
+			r_widget.dispersion_base_offset = offset->as_f32();
+		}
+		return;
+	}
 	if (b->is_a("UIWidgetPathBinding")) {
 		if (const std::optional<EbxStruct> q = detail::sub(b->data(), "WidgetPathQuery")) {
 			r_widget.widget_path_query = source_of(p_db, p_part, *q);
