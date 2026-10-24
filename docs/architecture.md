@@ -158,7 +158,7 @@ These are structural, known, and listed so nobody mistakes them for design inten
   unconditional stop/play/goto and hands every other frame script to the HUD controller that owns the clip; the movies'
   AS2 classes, `onClipEvent` handlers and conditional frame code are not executed outside the HUD controllers. `Bf3SwfView` draws no gradients, static text, Bevel or ColorMatrix filters,
   or blend modes other than normal, layer and add. The HUD does not sway with camera motion, the minimap draws at
-  1.375 m per local unit, measured at MapZoom 0 (the profile's small-map step), and the large-map step (1.2) is not applied, the Reward rows (HudMessage_04, `Widget.Image.ImageManager`) are not driven, and the engine's UI
+  1.375 m per local unit, measured at MapZoom 0 (the small map InitSmall starts with); the large map's zoom 1.2 reaches the HUD's Zoom binding but not the drawn scale, and nothing toggles the map size, the Reward rows (HudMessage_04, `Widget.Image.ImageManager`) are not driven, and the engine's UI
   colour table behind `Util.ColorTinting` is read from hudmessage's kill-row name sprite (slot 0 its squad frame, 1 friendly,
   3 enemy, slot 2 none), which the footage's kill log killer and victim colours match. The engine message
   queue (`HudMessageComp`) takes queue sizes and times from `UIMessageCompData`, but its expiry, overflow and
@@ -177,6 +177,10 @@ These are structural, known, and listed so nobody mistakes them for design inten
   or grenade alerts in the model), and the engine component's placement (UI3dIconCompData snap, fade and scale) is not done.
   The moment fixture's fading kill rows sit on the nearest timeline frame with the row still present (0.20 for 0.00 and
   0.06, 0.50 for 0.28 and 0.43 fading in).
+* The in-round HUD does not pass the strict 1280x720 screenshot gate (the 16 footage moments against the moment
+  fixture's captures); there is no gate row, because the owner deferred pixel-exact HUD work on 2026-10-24. The main
+  visible differences: the kill feed rows sit larger and higher than the footage's, the minimap has no team-mate,
+  squad-mate or revive icons and a flatter interior, and the footage's glowing friendly markers over soldiers are not reproduced.
 * Nametags are engine-drawn by `Bf3NativeHud` through `NativeTags` (`native_tags.cpp`): UIHudIcon_Player by relation, the
   squad kit icon for squad mates, names in `$Menu_medium` at the UINametagCompData sizes and tints; the name's kit icon
   (16 units in an 18-unit column) and its black glow are not measured, and the HealthBarSize bar is not drawn (other
