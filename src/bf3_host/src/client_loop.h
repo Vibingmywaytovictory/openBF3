@@ -2,6 +2,7 @@
 
 #include "bf3/core/result.h"
 #include "bf3/host/client_session.h"
+#include "client_link.h"
 #include "client_transport.h"
 
 #include "bf3/sim/collision_world.h"
@@ -64,25 +65,18 @@ private:
 	sim::SoldierMotor motor;
 	std::unique_ptr<sim::PredictionRing> ring;
 	uint64_t motor_hash = 0;
-	std::unique_ptr<ClientTransport> transport;
 	MonotonicClock now_ns;
-	net::NetSim out;
-	net::NetSim in;
+	ClientLink link{ now_ns };
 
 	mutable std::mutex input_mutex;
 	InputSample input;
 	mutable std::mutex frame_mutex;
 	std::unique_ptr<PresentationFrame> shared_frame = std::make_unique<PresentationFrame>();
-	std::mutex debug_mutex;
-	std::deque<net::DebugRequest> debug_out;
-	std::deque<net::KitSelect> kit_out;
-	std::deque<net::DebugReport> reports;
 	std::atomic<int32_t> shift_request{ 0 };
 
 	std::unique_ptr<PresentationFrame> build = std::make_unique<PresentationFrame>();
 	ClientStats stats_;
 	uint64_t serial = 0;
-	bool connected = true;
 	bool have_match = false;
 	uint8_t slot = 0;
 	uint8_t divisor = 2;
@@ -108,7 +102,6 @@ private:
 	uint64_t anchor_ns = 0;
 
 	uint32_t next_sequence = 1;
-	std::deque<sim::Command> history;
 	std::array<SentTime, kSentTimes> sent_times{};
 	sim::Command last_made;
 	bool jump_seen = false;
@@ -124,9 +117,6 @@ private:
 	uint32_t events_acc = 0;
 	uint16_t server_events_acc = 0;
 
-	bool have_snapshot = false;
-	uint16_t newest_seq = 0;
-	uint32_t ack_bits = 0;
 	bool pending_snapshot_valid = false;
 	net::Snapshot pending_snapshot;
 	std::vector<sim::SoldierState> pending_spawned;
@@ -250,8 +240,6 @@ private:
 	double estimate(uint64_t p_now) const;
 	void begin_holdoff();
 	void reset_clock(uint64_t p_now);
-	void submit(uint8_t p_channel, std::vector<uint8_t> p_bytes, uint64_t p_now);
-	void release_out(uint64_t p_now);
 	void rtt_sample(const net::Snapshot &p_snap, uint64_t p_now);
 	void received_time_sample(sim::Tick p_tick, uint64_t p_now);
 	void add_others(const net::Snapshot &p_snap, uint64_t p_now);
@@ -262,6 +250,7 @@ private:
 	sim::Command sample_command(sim::Tick p_tick);
 	void client_tick(uint64_t p_now);
 	void publish(uint64_t p_now, const sim::PredictionEntry *p_made, const sim::Command &p_cmd);
+	void collect_stats();
 	static void copy_frame(PresentationFrame &r_to, const PresentationFrame &p_from);
 
 	bool tdm_match_valid = false;
@@ -275,7 +264,6 @@ private:
 	std::array<uint32_t, 8> tdm_revived_lives{};
 	OwnShotIds tdm_shot_ids;
 	PresentationEvents tdm_own_events;
-	std::deque<uint8_t> tdm_spawn_out;
 	bool tdm_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d);
 	void tdm_spawned(const net::Spawned &p_spawned);
 	void tdm_combat(const net::CombatEvents &p_events);
@@ -284,7 +272,6 @@ private:
 	bool tdm_unspawned(sim::Tick p_tick);
 	void tdm_push(PresentEvent &r_event);
 	void tdm_drain_own();
-	void tdm_send(uint64_t p_now);
 	void tdm_publish(PresentationFrame &r_frame);
 };
 

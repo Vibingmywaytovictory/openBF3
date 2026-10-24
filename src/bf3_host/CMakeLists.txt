@@ -45,6 +45,8 @@ target_sources(bf3_host PRIVATE
     src/client_loop.h
     src/client_ticks.h
     src/client_transport.h
+    src/client_link.cpp
+    src/client_link.h
     src/rest_check.cpp
     include/bf3/host/rest_check.h
 )

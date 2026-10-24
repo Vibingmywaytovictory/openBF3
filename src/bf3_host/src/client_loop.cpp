@@ -29,12 +29,6 @@ sim::Vec3 sub3(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 	return { p_a[0] - p_b[0], p_a[1] - p_b[1], p_a[2] - p_b[2] };
 }
 
-void set_error(ClientStats &r_stats, const std::string &p_text) {
-	const size_t n = std::min(p_text.size(), r_stats.last_error.size() - 1);
-	std::memcpy(r_stats.last_error.data(), p_text.data(), n);
-	r_stats.last_error[n] = '\0';
-}
-
 bool states_match(const sim::SoldierState &p_a, const sim::SoldierState &p_b, float p_pos_eps, float p_vel_eps) {
 	const uint16_t events_a = uint16_t(p_a.events & ~sim::soldier_events::kDamaged);
 	const uint16_t events_b = uint16_t(p_b.events & ~sim::soldier_events::kDamaged);
@@ -117,31 +111,6 @@ void ClientLoop::reset_clock(uint64_t p_now) {
 	next_tick = c;
 	++stats_.clock_resets;
 	begin_holdoff();
-}
-
-void ClientLoop::submit(uint8_t p_channel, std::vector<uint8_t> p_bytes, uint64_t p_now) {
-	if (p_bytes.empty()) {
-		return;
-	}
-	net::NetSim::Datagram d;
-	d.channel = p_channel;
-	d.reliable = p_channel != net::kChannelUnreliable;
-	d.bytes = std::move(p_bytes);
-	out.submit(std::move(d), p_now);
-}
-
-void ClientLoop::release_out(uint64_t p_now) {
-	bool sent = false;
-	net::NetSim::Datagram d;
-	while (out.poll(p_now, d)) {
-		if (transport != nullptr && connected) {
-			transport->send(d.channel, d.bytes, d.reliable ? net::Host::SendMode::Reliable : net::Host::SendMode::Unsequenced);
-			sent = true;
-		}
-	}
-	if (sent) {
-		transport->flush();
-	}
 }
 
 void ClientLoop::rtt_sample(const net::Snapshot &p_snap, uint64_t p_now) {
@@ -272,28 +241,16 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 			if (!s) {
 				return;
 			}
-			++stats_.snapshots_received;
 			cl_snapshot(*s, p_now);
 			server_events_acc = uint16_t(server_events_acc | s->own_events);
 			rtt_sample(*s, p_now);
-			if (have_snapshot && !net::seq_newer(s->seq, newest_seq)) {
-				if (s->seq != newest_seq) {
-					++stats_.snapshots_late;
-					const uint16_t back = uint16_t(newest_seq - s->seq);
-					if (back >= 1 && back <= 32) {
-						ack_bits |= 1u << (back - 1u);
-					}
-					add_others(*s, p_now);
-				}
+			const SnapshotOrder order = link.arrive(s->seq);
+			if (order == SnapshotOrder::Late) {
+				add_others(*s, p_now);
+			}
+			if (order != SnapshotOrder::Newest) {
 				return;
 			}
-			if (have_snapshot) {
-				const uint16_t gap = uint16_t(s->seq - newest_seq);
-				stats_.snapshots_lost += gap > 1 ? uint64_t(gap - 1u) : 0u;
-				ack_bits = gap >= 32 ? 0u : (ack_bits << gap) | (1u << (gap - 1u));
-			}
-			have_snapshot = true;
-			newest_seq = s->seq;
 			if (s->server_tick >= anchor_tick) {
 				anchor_tick = s->server_tick;
 				anchor_ns = p_now;
@@ -307,23 +264,17 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 		case net::MessageType::DebugReport: {
 			core::Result<net::DebugReport> r = net::decode_debug_report(p_d.bytes);
 			if (r) {
-				std::lock_guard lock(debug_mutex);
-				reports.push_back(std::move(*r));
-				while (reports.size() > 64) {
-					reports.pop_front();
-				}
+				link.report(std::move(*r));
 			}
 			return;
 		}
 		case net::MessageType::Kick: {
 			core::Result<net::Kick> k = net::decode_kick(p_d.bytes);
-			set_error(stats_, "kicked: " + (k ? k->reason : std::string("(bad kick)")));
-			connected = false;
+			link.drop("kicked: " + (k ? k->reason : std::string("(bad kick)")));
 			return;
 		}
 		case net::MessageType::Bye:
-			set_error(stats_, "the server said bye");
-			connected = false;
+			link.drop("the server said bye");
 			return;
 		default:
 			if (tdm_datagram(*type, p_d)) {
@@ -570,22 +521,8 @@ void ClientLoop::client_tick(uint64_t p_now) {
 			made = ring->find(c);
 			last_made = cmd;
 
-			history.push_back(cmd);
-			while (history.size() > net::kCommandsPerPacket) {
-				history.pop_front();
-			}
 			sent_times[cmd.sequence % kSentTimes] = { cmd.sequence, p_now };
-			net::CommandPacket p;
-			p.newest_snapshot = newest_seq;
-			p.snapshot_ack_bits = ack_bits;
-			p.others_ack_bits = cl_others_ack_bits();
-			p.count = uint8_t(history.size());
-			for (size_t i = 0; i < history.size(); ++i) {
-				p.commands[i] = history[history.size() - 1 - i];
-			}
-			submit(net::kChannelUnreliable, net::encode_command_packet(p), p_now);
-			++stats_.commands_sent;
-			release_out(p_now);
+			link.send_commands(cmd, cl_others_ack_bits(), p_now);
 		}
 	}
 	next_tick = c + 1u;
@@ -663,16 +600,21 @@ void ClientLoop::publish(uint64_t p_now, const sim::PredictionEntry *p_made, con
 	f.other_count = n;
 	cl_publish_end(f, p_now);
 	tdm_publish(f);
-	stats_.connected = connected;
+	stats_.connected = link.connected();
 	stats_.client_tick = next_tick;
 	stats_.target_buffer_ticks = target;
 	stats_.clock_adjust = float(rate_scale - 1.0);
-	stats_.enet_rtt_ms = transport != nullptr ? double(transport->rtt_ms()) : 0.0;
-	stats_.netsim_out = out.stats();
-	stats_.netsim_in = in.stats();
+	stats_.enet_rtt_ms = link.transport_rtt_ms();
+	stats_.netsim_out = link.out_stats();
+	stats_.netsim_in = link.in_stats();
+	collect_stats();
 	f.stats = stats_;
 	std::lock_guard lock(frame_mutex);
 	copy_frame(*shared_frame, f);
+}
+
+void ClientLoop::collect_stats() {
+	link.stats(stats_);
 }
 
 void ClientLoop::copy_frame(PresentationFrame &r_to, const PresentationFrame &p_from) {
@@ -695,66 +637,21 @@ void ClientLoop::iterate() {
 	}
 	uint64_t now = now_ns();
 	uint64_t deadline = now + 50'000'000ull;
-	if (clock_running && connected) {
+	if (clock_running && link.connected()) {
 		deadline = std::min(deadline, tick_deadline_ns(next_tick));
 	}
-	if (const uint64_t r = in.next_release_ns(); r != 0) {
-		deadline = std::min(deadline, r);
-	}
-	if (const uint64_t r = out.next_release_ns(); r != 0) {
-		deadline = std::min(deadline, r);
-	}
+	deadline = link.wait_deadline(deadline);
 	const uint32_t wait_ms = deadline > now ? uint32_t(std::min<uint64_t>((deadline - now) / 1'000'000ull, 50)) : 0u;
 
-	net::Host::Event ev;
-	int got = transport->service(wait_ms, ev);
-	while (got > 0) {
-		const uint64_t at = now_ns();
-		if (ev.type == net::Host::EventType::Receive) {
-			net::NetSim::Datagram d;
-			d.peer = ev.peer;
-			d.channel = ev.channel;
-			d.reliable = ev.channel != net::kChannelUnreliable;
-			d.bytes = std::move(ev.data);
-			in.submit(std::move(d), at);
-		} else if (ev.type == net::Host::EventType::Disconnect) {
-			connected = false;
-			set_error(stats_, "disconnected by the server");
-		}
-		got = transport->service(0, ev);
-	}
-	if (got < 0) {
-		connected = false;
-		set_error(stats_, "ENet service failed");
-	}
+	link.receive(wait_ms);
 	now = now_ns();
 	net::NetSim::Datagram d;
-	while (in.poll(now, d)) {
+	while (link.poll(now, d)) {
 		handle_datagram(d, now);
 	}
-	{
-		std::deque<net::DebugRequest> requests;
-		{
-			std::lock_guard lock(debug_mutex);
-			requests.swap(debug_out);
-		}
-		for (const net::DebugRequest &q : requests) {
-			submit(net::kChannelReliable, net::encode_debug(q), now);
-		}
-	}
-	{
-		std::deque<net::KitSelect> kits;
-		{
-			std::lock_guard lock(debug_mutex);
-			kits.swap(kit_out);
-		}
-		for (const net::KitSelect &k : kits) {
-			submit(net::kChannelReliable, net::encode_kit_select(k), now);
-		}
-	}
-	tdm_send(now);
-	release_out(now);
-	if (clock_running && connected) {
+	link.send_requests(now);
+	link.release(now);
+	if (clock_running && link.connected()) {
 		const double clock = clock_ticks(now);
 		if (clock >= double(next_tick)) {
 			if (clock - double(next_tick) > double(kMaxBurstTicks)) {
@@ -766,14 +663,7 @@ void ClientLoop::iterate() {
 }
 
 void ClientLoop::shutdown() {
-	if (transport != nullptr) {
-		if (connected) {
-			const std::vector<uint8_t> bye = net::encode_bye();
-			transport->send(net::kChannelReliable, bye, net::Host::SendMode::Reliable);
-			transport->flush();
-		}
-		transport->disconnect_all();
-	}
+	link.shutdown();
 }
 
 core::Status ClientLoop::init(const ClientSessionConfig &p_config, std::shared_ptr<const SharedLevel> p_level) {
@@ -789,29 +679,25 @@ core::Status ClientLoop::init(const ClientSessionConfig &p_config, std::shared_p
 	BF3_TRY(motor.init(*world, p_level->motor));
 	motor_hash = sim::motor_params_hash(p_level->motor);
 	ring = std::make_unique<sim::PredictionRing>(config.prediction_ring);
-	out = net::NetSim(p_config.netsim);
-	net::NetSimConfig in_config = p_config.netsim;
-	in_config.seed = p_config.netsim.seed * 0x9E3779B97F4A7C15ull + 0x632BE59BD9B4E019ull;
-	in = net::NetSim(in_config);
+	link.configure(p_config.netsim);
 	return core::Status::success();
 }
 
 void ClientLoop::begin(std::unique_ptr<ClientTransport> p_transport, MonotonicClock p_clock) {
-	transport = std::move(p_transport);
 	now_ns = std::move(p_clock);
+	link.attach(std::move(p_transport));
 	stats_ = ClientStats();
 	stats_.connected = true;
-	connected = true;
 	const uint64_t now = now_ns();
 	net::Hello hello;
 	hello.name = config.name;
 	hello_ns = now;
-	submit(net::kChannelReliable, net::encode_hello(hello), now);
-	release_out(now);
+	link.submit(net::kChannelReliable, net::encode_hello(hello), now);
+	link.release(now);
 }
 
 void ClientLoop::close() {
-	transport.reset();
+	link.close();
 }
 
 void ClientLoop::set_input(const InputSample &p_input) {
@@ -834,18 +720,11 @@ ClientStats ClientLoop::stats() const {
 }
 
 void ClientLoop::send_debug(const net::DebugRequest &p_request) {
-	std::lock_guard lock(debug_mutex);
-	debug_out.push_back(p_request);
+	link.queue_debug(p_request);
 }
 
 bool ClientLoop::take_debug_report(net::DebugReport &r_report) {
-	std::lock_guard lock(debug_mutex);
-	if (reports.empty()) {
-		return false;
-	}
-	r_report = std::move(reports.front());
-	reports.pop_front();
-	return true;
+	return link.take_report(r_report);
 }
 
 void ClientLoop::shift_clock(int32_t p_ticks) {
@@ -1018,18 +897,9 @@ void ClientLoop::cl_push(const PresentEvent &p_event) {
 
 void ClientLoop::cl_refuse(const char *p_reason) {
 	have_match = true;
-	stats_.refused = true;
-	set_error(stats_, p_reason);
-
-	if (transport != nullptr && connected) {
-		const std::vector<uint8_t> bye = net::encode_bye();
-		transport->send(net::kChannelReliable, bye, net::Host::SendMode::Reliable);
-		transport->flush();
-		transport->disconnect_all();
-	}
-	connected = false;
-
+	link.refuse(p_reason);
 	stats_.connected = false;
+	collect_stats();
 	std::lock_guard lock(frame_mutex);
 	shared_frame->stats = stats_;
 }
@@ -1096,11 +966,11 @@ bool ClientLoop::cl_match_info(const net::MatchInfo &p_match, uint64_t p_now) {
 		stats_.gunplay = true;
 	}
 	if (config.send_kit_select) {
-		submit(net::kChannelReliable, net::encode_kit_select(config.kit_select), p_now);
+		link.submit(net::kChannelReliable, net::encode_kit_select(config.kit_select), p_now);
 	}
 	net::Ready ready;
 	ready.source_digest = level->source_digest;
-	submit(net::kChannelReliable, net::encode_ready(ready), p_now);
+	link.submit(net::kChannelReliable, net::encode_ready(ready), p_now);
 	return true;
 }
 
@@ -1136,9 +1006,9 @@ void ClientLoop::cl_track_reorder(sim::Tick p_tick, std::span<const net::OtherSo
 }
 
 void ClientLoop::cl_snapshot(const net::Snapshot &p_snapshot, uint64_t p_now) {
-	const bool newer = !have_snapshot || net::seq_newer(p_snapshot.seq, newest_seq);
+	const bool newer = !link.have_snapshot() || net::seq_newer(p_snapshot.seq, link.newest_seq());
 	cl_note_arrival(p_snapshot.seq, p_now);
-	if (newer || p_snapshot.seq != newest_seq) {
+	if (newer || p_snapshot.seq != link.newest_seq()) {
 		cl_track_reorder(p_snapshot.server_tick, p_snapshot.others);
 	}
 	cl_records.add(p_snapshot.seq, p_snapshot.server_tick, true, p_snapshot.others);
@@ -1427,7 +1297,7 @@ void ClientLoop::cl_command_made(sim::Command &r_command, uint64_t p_now) {
 		quality = present_view_quality(*build, render);
 		seq = build->newest_seq;
 	}
-	if (!have_snapshot || !std::isfinite(render)) {
+	if (!link.have_snapshot() || !std::isfinite(render)) {
 		quality = sim::ViewQuality::None;
 	}
 	ClCommandView &v = cl_views[r_command.tick % kClCommandViews];
@@ -1448,7 +1318,7 @@ void ClientLoop::cl_command_made(sim::Command &r_command, uint64_t p_now) {
 	v.view.view_back_q8 = r_command.view_back_q8;
 	v.view.quality = r_command.view_quality;
 
-	const uint16_t back_seqs = uint16_t(newest_seq - seq);
+	const uint16_t back_seqs = uint16_t(link.newest_seq() - seq);
 	if (back_seqs < kViewSeqWindow) {
 		v.view.view_seq = seq;
 		v.view.main_bits = cl_records.mask(seq, true);
@@ -1477,7 +1347,7 @@ void ClientLoop::cl_predict_weapons(const sim::Command &p_command, const sim::So
 }
 
 uint32_t ClientLoop::cl_others_ack_bits() const {
-	return have_snapshot ? cl_records.mask(newest_seq, false) : 0u;
+	return link.have_snapshot() ? cl_records.mask(link.newest_seq(), false) : 0u;
 }
 
 void ClientLoop::cl_publish_begin(uint64_t p_now) {
@@ -1490,7 +1360,7 @@ void ClientLoop::cl_publish_begin(uint64_t p_now) {
 
 void ClientLoop::cl_publish_end(PresentationFrame &r_frame, uint64_t p_now) {
 	(void)p_now;
-	r_frame.newest_seq = newest_seq;
+	r_frame.newest_seq = link.newest_seq();
 	r_frame.newest_tick = cl_newest_tick;
 	r_frame.match_seed = cl_match_seed;
 	r_frame.own_kit = cl_kit;
@@ -1503,7 +1373,7 @@ void ClientLoop::cl_publish_end(PresentationFrame &r_frame, uint64_t p_now) {
 		OtherTrack &o = r_frame.others[i];
 		const Track &t = tracks[o.slot];
 		o.track_newest_tick = t.samples.empty() ? 0u : t.samples.back().server_tick;
-		if (have_snapshot && o.track_newest_tick > cl_newest_tick) {
+		if (link.have_snapshot() && o.track_newest_tick > cl_newest_tick) {
 			ahead = true;
 		}
 		if (cl_projectiles != nullptr && !t.samples.empty()) {
@@ -1563,11 +1433,7 @@ void ClientLoop::take_own_test_samples(std::vector<OwnTestSample> &r_samples) {
 }
 
 void ClientLoop::send_kit_select(const net::KitSelect &p_select) {
-	std::lock_guard lock(debug_mutex);
-	if (kit_out.size() >= 16) {
-		kit_out.pop_front();
-	}
-	kit_out.push_back(p_select);
+	link.queue_kit_select(p_select);
 }
 
 bool ClientLoop::tdm_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d) {
@@ -1682,18 +1548,6 @@ void ClientLoop::tdm_drain_own() {
 	}
 }
 
-void ClientLoop::tdm_send(uint64_t p_now) {
-	std::deque<uint8_t> kits;
-	{
-		std::lock_guard lock(debug_mutex);
-		kits.swap(tdm_spawn_out);
-	}
-	for (const uint8_t kit : kits) {
-		submit(net::kChannelReliable, net::encode_spawn_request({ kit, 0 }), p_now);
-		++stats_.spawn_requests;
-	}
-}
-
 void ClientLoop::tdm_publish(PresentationFrame &r_frame) {
 	r_frame.match_valid = tdm_match_valid;
 	r_frame.match = tdm_match;
@@ -1707,11 +1561,7 @@ void ClientLoop::tdm_publish(PresentationFrame &r_frame) {
 }
 
 void ClientLoop::send_spawn_request(uint8_t p_kit) {
-	std::lock_guard lock(debug_mutex);
-	if (tdm_spawn_out.size() >= 16) {
-		tdm_spawn_out.pop_front();
-	}
-	tdm_spawn_out.push_back(p_kit);
+	link.queue_spawn_request(p_kit);
 }
 
 }
