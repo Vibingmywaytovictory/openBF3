@@ -91,6 +91,7 @@ private:
 	std::vector<std::string> expect_log_;
 	int32_t expect_score_frame_ = -1;
 	int32_t expect_aggregator_frame_ = -1;
+	float name_scale_ = 0.0f;
 	std::string names_detail_;
 	godot::Ref<godot::Image> composite_;
 	std::array<godot::Ref<godot::Image>, kNativeHudViews> colour_;

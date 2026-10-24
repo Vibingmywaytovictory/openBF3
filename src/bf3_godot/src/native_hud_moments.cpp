@@ -271,12 +271,14 @@ const ui::SwfScene *scene_of(const Bf3NativeHud &p_hud, const char *p_path) {
 	return nullptr;
 }
 
-float window_scale(const Bf3NativeHud &p_hud) {
-	const Bf3SwfView *v = p_hud.view(0);
-	if (v == nullptr || v->get_viewport() == nullptr || !(v->visible_rect().width() > 0.0f)) {
-		return 1.0f;
+float layer_scale(const Bf3NativeHud &p_hud, const char *p_path) {
+	for (size_t i = 0; i < kNativeHudViews; ++i) {
+		const Bf3SwfView *v = p_hud.view(i);
+		if (v != nullptr && v->scene() != nullptr && v->scene()->find_node(p_path) != nullptr) {
+			return float(v->stage_fit().scale_x);
+		}
 	}
-	return float(v->get_viewport()->get_visible_rect().size.x) / v->visible_rect().width();
+	return 1.0f;
 }
 
 struct MessageRow {
@@ -662,11 +664,11 @@ void NativeHudMomentRun::settle(Bf3LevelSession &r_session, Bf3NativeHud &r_hud,
 	const int32_t total = int32_t(std::lround((flush + lead) / kSettleStep));
 	const auto step_before = [&](double p_seconds) { return total - int32_t(std::lround(p_seconds / kSettleStep)); };
 
-	const float sx = window_scale(r_hud);
 	const ui::SwfSceneNode *feed = node_of(r_hud, kKillFeedPath);
 	const ui::SwfSceneNode *log = node_of(r_hud, kKillLogPath);
-	const float feed_scale = (feed != nullptr ? feed->world.a : 1.0f) * sx;
-	const float log_scale = (log != nullptr ? log->world.a : 1.0f) * sx;
+	name_scale_ = layer_scale(r_hud, kKillLogPath);
+	const float feed_scale = (feed != nullptr ? feed->world.a : 1.0f) * layer_scale(r_hud, kKillFeedPath);
+	const float log_scale = (log != nullptr ? log->world.a : 1.0f) * name_scale_;
 	float worst = 0.0f;
 	const auto fitted_in = [&](NameFit &r_fit, std::string_view p_field, float p_scale, float p_px) {
 		const float s = p_scale * r_fit.chain_scale(p_field);
@@ -704,7 +706,7 @@ void NativeHudMomentRun::settle(Bf3LevelSession &r_session, Bf3NativeHud &r_hud,
 			row(id + ".squad_list", false, squad_error);
 		} else {
 			const ui::SwfSceneNode *sl = node_of(r_hud, kSquadListPath);
-			const float sl_scale = (sl != nullptr ? sl->world.a : 1.0f) * sx;
+			const float sl_scale = (sl != nullptr ? sl->world.a : 1.0f) * layer_scale(r_hud, kSquadListPath);
 			ui::HudSquadMemberList &members = m.squad.local_squad_members;
 			members = ui::HudSquadMemberList{};
 			for (size_t i = 0; i < squad->rows.size(); ++i) {
@@ -1083,6 +1085,13 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 			}
 			row(std::string(m.id) + ".capture", ok, detail);
 			captured_ += ok ? 1 : 0;
+			if (const ui::SwfScene *ls = name_scale_ > 0.0f && ok ? scene_of(r_hud, kKillLogPath) : nullptr) {
+				const float stage_px = name_scale_ * ls->stage().width();
+				row(std::string(m.id) + ".name_scale", std::fabs(stage_px - float(layer->get_width())) < 0.5f,
+						"names fitted at " + std::to_string(name_scale_) + " layer px per stage unit: stage " + std::to_string(ls->stage().width()) + " -> " +
+								std::to_string(stage_px) + " px, the HUD layer is " + std::to_string(layer->get_width()) + " px wide");
+			}
+			name_scale_ = 0.0f;
 			check(r_session, r_hud, m);
 			if (++index_ >= moments_.size()) {
 				phase_ = Phase::Done;
