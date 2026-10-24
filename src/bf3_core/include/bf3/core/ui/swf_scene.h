@@ -92,6 +92,7 @@ struct SwfSceneNode {
 	bool script_matrix = false;
 	bool script_color = false;
 	bool script_visible = false;
+	bool script_filters = false;
 
 	const SwfTimeline *timeline = nullptr;
 	uint32_t frame = 0;
@@ -193,6 +194,7 @@ public:
 	Status set_text_options(std::string_view p_path, const SwfTextOptions &p_options);
 	Status set_text_bounds(std::string_view p_path, const SwfRect &p_bounds);
 	Status set_text_color(std::string_view p_path, SwfColor p_color);
+	Status set_filters(std::string_view p_path, std::vector<SwfFilter> p_filters);
 
 	std::vector<SwfSceneChange> take_changes();
 

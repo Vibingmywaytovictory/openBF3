@@ -416,10 +416,8 @@ struct SwfScene::Impl {
 			r_n.effects_revision++;
 			r_n.blend_mode = p_slot.blend_mode;
 			r_n.cache_as_bitmap = p_slot.cache_as_bitmap;
-			if (p_slot.filters_from != kNoEvent) {
-				r_n.filters = p_parent_tl.events[p_slot.filters_from].filters;
-			} else {
-				r_n.filters.clear();
+			if (!r_n.script_filters) {
+				r_n.filters = p_slot.filters_from != kNoEvent ? p_parent_tl.events[p_slot.filters_from].filters : std::vector<SwfFilter>{};
 			}
 			source = p_slot.filters_from;
 		}
@@ -1131,6 +1129,24 @@ Status SwfScene::set_text_color(std::string_view p_path, SwfColor p_color) {
 		(*n)->text_color = p_color;
 		(*n)->text_revision++;
 	}
+	return Status::success();
+}
+
+Status SwfScene::set_filters(std::string_view p_path, std::vector<SwfFilter> p_filters) {
+	for (const SwfFilter &f : p_filters) {
+		for (const float v : { f.blur_x, f.blur_y, f.angle, f.distance, f.strength }) {
+			if (!std::isfinite(v)) {
+				return make_error("swf scene " + impl_->movie_name + ": filter value is not finite");
+			}
+		}
+	}
+	Result<SwfSceneNode *> n = impl_->at(p_path);
+	if (!n) {
+		return n.error();
+	}
+	(*n)->filters = std::move(p_filters);
+	(*n)->script_filters = true;
+	(*n)->effects_revision++;
 	return Status::success();
 }
 

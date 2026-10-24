@@ -2,6 +2,7 @@
 #include "bf3/core/ui/hud_messages.h"
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/hud_widgets.h"
+#include "bf3/core/ui/swf_text.h"
 #include "bf3/core/util/text.h"
 
 #include <algorithm>
@@ -1194,11 +1195,111 @@ private:
 	bool switch_message_ = false;
 };
 
+struct UiTint {
+	uint32_t text = 0;
+	uint32_t shadow = 0;
+	uint32_t glow = 0;
+};
+
+constexpr std::array<std::string_view, 4> kUiColourSlotNameFrames{ "squad", "friendly", "", "enemy" };
+constexpr float kTintShadowBlur = 8.0f;
+constexpr float kTintShadowStrength = 1.7f;
+constexpr double kTintShadowAngleDegrees = 90.0;
+constexpr float kTintShadowDistance = 1.0f;
+constexpr float kTintGlowBlur = 2.0f;
+constexpr float kTintGlowStrength = 1.0f;
+
+uint32_t rgb_of(SwfColor p_color) {
+	return (uint32_t(p_color.r) << 16) | (uint32_t(p_color.g) << 8) | uint32_t(p_color.b);
+}
+
+SwfColor opaque(uint32_t p_rgb) {
+	return SwfColor{ uint8_t((p_rgb >> 16) & 0xFFu), uint8_t((p_rgb >> 8) & 0xFFu), uint8_t(p_rgb & 0xFFu), 255 };
+}
+
+std::optional<UiTint> name_sprite_frame_tint(const SwfSceneNode &p_name_sprite, std::string_view p_label) {
+	if (p_label.empty() || p_name_sprite.timeline == nullptr || !p_name_sprite.movie) {
+		return std::nullopt;
+	}
+	const std::optional<uint32_t> frame = p_name_sprite.timeline->label_frame(p_label);
+	if (!frame) {
+		return std::nullopt;
+	}
+	std::optional<uint32_t> text, shadow, glow;
+	for (const SwfDisplayEvent &e : p_name_sprite.timeline->events) {
+		if (e.frame != *frame || !e.has_name) {
+			continue;
+		}
+		const SwfFilterKind wanted = e.name == "txt" ? SwfFilterKind::DropShadow : SwfFilterKind::Glow;
+		for (const SwfFilter &f : e.filters) {
+			if (f.kind == wanted) {
+				(e.name == "txt" ? shadow : glow) = rgb_of(f.color);
+			}
+		}
+		if (e.name == "txt") {
+			if (const SwfEditText *et = p_name_sprite.movie->find_edit_text(e.character)) {
+				text = rgb_of(swf_edit_text_format(*p_name_sprite.movie, *et).color);
+			}
+		}
+	}
+	if (!text || !shadow || !glow) {
+		return std::nullopt;
+	}
+	return UiTint{ *text, *shadow, *glow };
+}
+
+std::optional<UiTint> ui_colour_slot(const As2Clip &p_name_sprite, int32_t p_slot) {
+	const SwfSceneNode *n = p_name_sprite.node();
+	if (n == nullptr || p_slot < 0 || size_t(p_slot) >= kUiColourSlotNameFrames.size()) {
+		return std::nullopt;
+	}
+	return name_sprite_frame_tint(*n, kUiColourSlotNameFrames[size_t(p_slot)]);
+}
+
+void tint_two_texts(const As2Clip &p_name_sprite, int32_t p_slot) {
+	const std::optional<UiTint> t = ui_colour_slot(p_name_sprite, p_slot);
+	if (!t) {
+		return;
+	}
+	SwfFilter shadow;
+	shadow.kind = SwfFilterKind::DropShadow;
+	shadow.color = opaque(t->shadow);
+	shadow.blur_x = shadow.blur_y = kTintShadowBlur;
+	shadow.strength = kTintShadowStrength;
+	shadow.angle = float(kTintShadowAngleDegrees * kDegToRad);
+	shadow.distance = kTintShadowDistance;
+	shadow.composite_source = true;
+	shadow.passes = 1;
+	SwfFilter glow;
+	glow.kind = SwfFilterKind::Glow;
+	glow.color = opaque(t->glow);
+	glow.blur_x = glow.blur_y = kTintGlowBlur;
+	glow.strength = kTintGlowStrength;
+	glow.knockout = true;
+	glow.composite_source = true;
+	glow.passes = 1;
+	const As2Clip txt = p_name_sprite.child("txt");
+	txt.set_text_color(t->text);
+	txt.set_filters({ shadow });
+	p_name_sprite.child("txtBg").set_filters({ glow });
+}
+
+void tint_icon(const As2Clip &p_icon, const As2Clip &p_name_sprite, int32_t p_slot) {
+	if (const std::optional<UiTint> t = ui_colour_slot(p_name_sprite, p_slot)) {
+		p_icon.set_rgb(t->text);
+	}
+}
+
 class LocalKillLogMessageClass final : public MessageBaseClass {
 public:
 	void set_data(const As2Value &p_e) override {
 		MessageBaseClass::set_data(p_e);
 		const As2Value &v = p_e.field("Value");
+		const As2Clip c = container();
+		const int32_t killer_slot = colour_slot(v.field("KillerColor"));
+		tint_two_texts(c.child("killer"), killer_slot);
+		tint_two_texts(c.child("victim"), colour_slot(v.field("VictimColor")));
+		tint_icon(c.child("headShotIcon"), c.child("killer"), killer_slot);
 		set_field("killer", v.field("KillerName"));
 		set_field("victim", v.field("VictimName"));
 		set_message(v.field("Text").to_string());
@@ -1210,8 +1311,14 @@ public:
 private:
 	static constexpr float kTextOffset = 5.0f;
 	static constexpr float kKillerAloneX = 100.0f;
+	static constexpr std::array<int32_t, 3> kColConvert{ 1, 3, 0 };
 
 	As2Clip container() const { return host_->clip("container"); }
+
+	static int32_t colour_slot(const As2Value &p_color) {
+		const double c = p_color.to_number();
+		return c == 0.0 || c == 1.0 || c == 2.0 ? kColConvert[size_t(c)] : -1;
+	}
 
 	void set_field(std::string_view p_field, const As2Value &p_name) {
 		const As2Clip f = container().child(p_field);

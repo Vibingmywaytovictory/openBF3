@@ -442,6 +442,13 @@ void As2Clip::set_text_color(uint32_t p_rgb) const {
 	note(scene_->set_text_color(path_, SwfColor{ uint8_t((p_rgb >> 16) & 0xFFu), uint8_t((p_rgb >> 8) & 0xFFu), uint8_t(p_rgb & 0xFFu), 255 }));
 }
 
+void As2Clip::set_filters(std::vector<SwfFilter> p_filters) const {
+	if (mut() == nullptr) {
+		return;
+	}
+	note(scene_->set_filters(path_, std::move(p_filters)));
+}
+
 void As2Clip::set_auto_size(bool p_on) const {
 	set_auto_size(p_on ? SwfTextAutoSize::Left : SwfTextAutoSize::None);
 }
