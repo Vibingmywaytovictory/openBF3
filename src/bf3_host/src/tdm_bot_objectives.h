@@ -31,7 +31,8 @@ class BotRevive {
 public:
 	void new_life() { slot_ = -1; }
 	const DownedSoldier *update(TdmShared &r_shared, BotNavigation &r_navigation, const ReviveCheck &p_check);
-	sim::Tick &defib_next() { return defib_next_; }
+	bool defib_ready(sim::Tick p_tick) const { return p_tick >= defib_next_; }
+	void fired_defib(sim::Tick p_tick);
 
 private:
 	const DownedSoldier *find(const ServerView &p_view) const;

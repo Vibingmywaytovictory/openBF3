@@ -309,6 +309,7 @@ struct TdmBrain::Impl {
 		request.zoom = i.zoom;
 		request.quiet = !f.visible && f.tick - targeting.last_engaged() > 120u && p_activity != TdmBotActivity::Revive;
 		request.throw_ready = grenade.throw_ready();
+		request.defib_ready = medic.defib_ready(f.tick);
 		request.react_at = targeting.react_at();
 		request.target_distance = i.target_distance;
 		request.target = f.target;
@@ -318,7 +319,10 @@ struct TdmBrain::Impl {
 		request.eye = f.eye;
 		request.view_yaw = view_yaw;
 		request.view_pitch = view_pitch;
-		const WeaponCommand weapon = weapons.input(*shared, slot, f.arms, request, medic.defib_next(), rng);
+		const WeaponCommand weapon = weapons.input(*shared, slot, f.arms, request, rng);
+		if (weapon.defib_fired) {
+			medic.fired_defib(f.tick);
+		}
 		const sw::WeaponInput &in = weapon.input;
 		const float comp_yaw = weapon.comp_yaw, comp_pitch = weapon.comp_pitch;
 

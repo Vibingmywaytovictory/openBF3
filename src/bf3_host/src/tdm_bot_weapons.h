@@ -36,6 +36,7 @@ struct FireRequest {
 	bool zoom = false;
 	bool quiet = false;
 	bool throw_ready = false;
+	bool defib_ready = false;
 	sim::Tick react_at = 0;
 	float target_distance = 0.0f;
 	int target = -1;
@@ -49,6 +50,7 @@ struct FireRequest {
 struct WeaponCommand {
 	sim::weapons::WeaponInput input;
 	float comp_yaw = 0.0f, comp_pitch = 0.0f;
+	bool defib_fired = false;
 };
 
 class BotWeapons {
@@ -57,7 +59,7 @@ public:
 	void hold_fire() { bursting_ = false; }
 	uint8_t preferred_slot() const { return sidearm_ ? kSlotSidearm : kSlotPrimary; }
 
-	WeaponCommand input(TdmShared &r_shared, uint8_t p_slot, const BotArms &p_arms, const FireRequest &p_request, sim::Tick &r_defib_next, uint64_t &r_rng);
+	WeaponCommand input(TdmShared &r_shared, uint8_t p_slot, const BotArms &p_arms, const FireRequest &p_request, uint64_t &r_rng);
 
 private:
 	bool bursting_ = false;

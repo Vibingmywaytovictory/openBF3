@@ -17,7 +17,6 @@ namespace sw = sim::weapons;
 constexpr uint32_t kModeDelayTicks = 3;
 constexpr uint32_t kModeWaitTicks = 10;
 constexpr float kSingleShotBeyondMetres = 60.0f;
-constexpr uint32_t kDefibRetryTicks = 66;
 constexpr float kTacticalReload = 0.3f;
 constexpr float kFriendlyLineMetres = 0.8f;
 constexpr float kBurstPauseMinS = 0.15f, kBurstPauseMaxS = 0.35f;
@@ -56,8 +55,7 @@ void BotWeapons::new_life(sim::Tick p_tick) {
 	sidearm_ = false;
 }
 
-WeaponCommand BotWeapons::input(TdmShared &r_shared, uint8_t p_slot, const BotArms &p_arms, const FireRequest &p_request, sim::Tick &r_defib_next,
-		uint64_t &r_rng) {
+WeaponCommand BotWeapons::input(TdmShared &r_shared, uint8_t p_slot, const BotArms &p_arms, const FireRequest &p_request, uint64_t &r_rng) {
 	TdmShared &sh = r_shared;
 	const TdmBotConfig &c = *sh.config;
 	const FireRequest &q = p_request;
@@ -125,10 +123,10 @@ WeaponCommand BotWeapons::input(TdmShared &r_shared, uint8_t p_slot, const BotAr
 			if (trigger == Trigger::Grenade) {
 				fire = q.throw_ready && in_hand;
 			} else if (trigger == Trigger::Defib) {
-				if (in_hand && q.aligned && phase == sw::WeaponPhase::Ready && tick >= r_defib_next && !tapped_) {
+				if (in_hand && q.aligned && phase == sw::WeaponPhase::Ready && q.defib_ready && !tapped_) {
 					fire = true;
 					tapped_ = true;
-					r_defib_next = tick + kDefibRetryTicks;
+					out.defib_fired = true;
 					sh.count(&TdmBotStats::revive_shots, uint64_t(1));
 				} else {
 					tapped_ = false;

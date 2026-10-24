@@ -15,6 +15,7 @@ namespace sw = sim::weapons;
 constexpr float kRunSpeed = 4.5f;
 constexpr float kPathFactor = 1.3f;
 constexpr uint32_t kReviveTimeoutTicks = 900;
+constexpr uint32_t kDefibRetryTicks = 66;
 constexpr uint32_t kGrenadeLostMinTicks = 30, kGrenadeLostMaxTicks = 240;
 constexpr uint32_t kGrenadeSwitchTicks = 120, kGrenadeAfterTicks = 45, kGrenadeHoldExtraTicks = 4;
 constexpr float kRetreatMetres = 14.0f;
@@ -79,6 +80,10 @@ const DownedSoldier *BotRevive::update(TdmShared &r_shared, BotNavigation &r_nav
 		}
 	}
 	return slot_ >= 0 ? find(view) : nullptr;
+}
+
+void BotRevive::fired_defib(sim::Tick p_tick) {
+	defib_next_ = p_tick + kDefibRetryTicks;
 }
 
 bool BotGrenade::start(TdmShared &r_shared, BotTargeting &r_targeting, const sim::bots::Perception &p_perception, sim::Tick p_tick,
