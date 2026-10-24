@@ -183,7 +183,7 @@ out of the repo.
 
 | command | output |
 |---|---|
-| `list <out.tsv>` | every ebx/res entry, plus the chunk count, of every bundle of every non-chunk, non-Loc superbundle: `superbundle bundle kind name res_type original_size` (1,094,723 lines, byte-identical to the IW4L-based `ebx-dump list` probe) |
+| `list <out.tsv>` | every ebx/res entry, plus the chunk count, of every bundle of every non-chunk, non-Loc superbundle: `superbundle bundle kind name res_type original_size` (1,094,723 lines, the count `core.install` checks; byte-identical on 2026-10-14 to the listing of a research probe since removed) |
 | `chunk <sb> <guid>...` | whether the chunk is in the bundle index, its decoded size, its first 48 bytes |
 | `reshead <sb> <res>...` | res type, 16-byte meta, decoded size, first 64 bytes |
 | `chunks <sb>` | the bundle chunk index: id, sha1, stored size, tail-only flag, range |
@@ -200,10 +200,10 @@ out of the repo.
 
 For the EBX commands `<sb>` is a superbundle name, a comma-separated list (the first superbundle that holds a
 partition wins) or `@all-mp` (every MP/XP level superbundle plus Globals, Weapons, UI and default_settings_Win32).
-`find`, `types` and `dump` print the same bytes as the IW4L-based `ebx-dump` probe: JSON keys sorted, base-type fields
-first, references as `{"$ref": partition or "internal", "instance", "type"}`, floats as Rust's f32 `Display` text
-(shortest round-trip digits, exact ties rounded away from zero) read back as f64 and written like serde_json's zmij
-(`2.7849858e+23`, `1e-7`, fixed notation for exponents -5..15). `bf3dump numcheck` (ctest `tools.numtext`) checks
+`find`, `types` and `dump` print JSON with keys sorted, base-type fields first, references as `{"$ref": partition or
+"internal", "instance", "type"}`, floats as their shortest round-trip f32 digits (exact ties rounded away from zero)
+read back as f64 and written in shortest form (`2.7849858e+23`, `1e-7`, fixed notation for exponents -5..15); on
+2026-10-14 those bytes were checked once against a research probe since removed. `bf3dump numcheck` (ctest `tools.numtext`) checks
 these rules without an install.
 
 ## Engine pinning
@@ -428,7 +428,8 @@ Each `Loaded*` owns every byte its data refers to (`RawRes::payload`, `RawChunk:
 lives (moving it keeps them; nothing stores a view, so copies are safe). Errors are `Result` values: container
 failures keep `LevelMount`'s message, decode failures read `res <name>: <ResError text>`; a res whose chunk cannot be
 read fails as a whole. `read_raw_res` / `read_raw_chunk` give the bytes alone, and `decodable_res_names` lists a
-mount's MeshSet / DxTexture / Havok res the way the oracle's export does (first spelling per lowercase name, sorted).
+mount's MeshSet / DxTexture / Havok res in the order `bf3dump export res` writes them (first spelling per lowercase
+name, sorted).
 Loading is thread-safe across res (`LevelMount` reads are). `core.res.install` (exit 77 = skipped without an install)
 loads every MeshSet, DxTexture and Havok res of MP_Subway straight from the install on all cores, decodes every LOD,
 mip chain (and the 1,313 ranged views at their `logicalOffset`) and shape tree with triangles, convex pieces,
@@ -822,18 +823,9 @@ row-vector product); there is no IW conversion.
 
 `bf3dump level <LEVEL> <MODE> [--legacy-mvdb]` prints the canonical listing (sub-worlds, groups, every placement with
 its transform as f32 bit patterns, the mesh census variants and totals, the collision placements; every section
-sorted); `bf3dump levelmodes <LEVEL>` lists a level's modes. **Parity**: `research/probes/tools/level-oracle` (Rust,
-path-depends on IW4L `level_bf3`/`ebx_bf3`/`resource_bf3` and the `ebx-dump` install readers) prints the same listing
-through IW4L's own traversal:
-
-```bat
-set CARGO_TARGET_DIR=<scratch>\target
-cargo build --release --manifest-path research\probes\tools\level-oracle\Cargo.toml
-level-oracle level MP_Subway TeamDeathMatch0 > rust.txt  &  b\dev\tools\bf3dump\bf3dump.exe level MP_Subway TeamDeathMatch0 > cpp.txt
-```
-
-Result on 2026-10-14: every mode of every one of the 29 MP levels (230 level x mode runs, 5.7 k-18.3 k lines each) is
-byte-identical, transforms bit for bit; no MeshSet failed to decode. Load + traverse + census take 0.15-3.4 s per
+sorted); `bf3dump levelmodes <LEVEL>` lists a level's modes. **Parity** (history): on 2026-10-14 a research probe,
+since removed, printed the same listing through IW4L's own traversal: every mode of every one of the 29 MP levels
+(230 level x mode runs, 5.7 k-18.3 k lines each) was byte-identical, transforms bit for bit; no MeshSet failed to decode. Load + traverse + census take 0.15-3.4 s per
 run, median 0.24 s (warm file cache, 16 threads shared with other builds). Handoff §9 / sections/03 against `ctest -R core.level`:
 
 | level x mode | handoff | measured |
@@ -853,9 +845,9 @@ run, median 0.24 s (warm file cache, 16 threads shared with other builds). Hando
   geometry builder had gained destruction views: each destruction state's part is drawn by an instance of its own,
   hidden until the state shows. That is a renderer count, not a traversal one; the per-state expansion belongs to the
   destruction work, not to this traversal.
-* **Reproduced and attributed** (H hygiene, 2026-10-15): `level-oracle static-models MP_007 ConquestSmall0` runs
-  IW4L's own destruction, geometry and lighting builders and the assets lane's world-soup / static-model / held-back
-  rules (`research/probes/tools/level-oracle/src/static_models.rs`). Built against IW4L 3c4068e (the last commit
+* **Reproduced and attributed** (H hygiene, 2026-10-15): a research probe, since removed, ran IW4L's own
+  destruction, geometry and lighting builders and the assets lane's world-soup / static-model / held-back rules on
+  MP_007 ConquestSmall0. Built against IW4L 3c4068e (the last commit
   before the 2026-10-07 10:23 run logs that print the handoff line) it gives exactly 20,718 scene instances, 20,311
   static models and 12,725 held back; IW4L HEAD 49aca70 gives 20,324 (13 more ground-scatter squares from the
   2026-10-07 scatter commits), the rest unchanged. The decomposition, starting from the traversal's 6,847 mesh
@@ -876,8 +868,8 @@ run, median 0.24 s (warm file cache, 16 threads shared with other builds). Hando
   So 2,682 + 3,732 + 380 + 24 + 26 + 3 = 6,847, and the 739 by which the 7,586 shown static models exceeded the
   traversal's placements are the 1,172 scatter models minus the 433 placements that are not static models (404 world
   soup, 26 hidden, 3 empty). Our census does not expand destruction states or generate scatter yet; those numbers
-  belong to the destruction (plan M6) and Caspian terrain-scatter (M4) work, with `static-models` as their oracle. The
-  oracle needs the IW4L checkout it path-depends on; at another IW4L commit its scatter count may differ.
+  belong to the destruction (plan M6) and Caspian terrain-scatter (M4) work, with this table as their reference; at
+  another IW4L commit the scatter count differed.
 * sections/03's "Metro 702" composite placements that hide parts is Metro ConquestSmall0 (IW4L probe
   `geom_MP_Subway_ConquestSmall0.txt`); Metro TDM's is 710 (`3-CONVERTER-PART/geometry.md`), which `core.level` asserts.
 
@@ -969,7 +961,7 @@ the install by C++ at runtime and drawn in Godot, one mesh per 64 m tile. Three 
   (material bit 27) and invisible blockers (mesh names with `invisible` / `collisionmesh`).
 * **Terrain** (`res/terrain.h`, port of the heightfield parts of IW4L `resource_bf3` terrain.rs). The `Terrain` res
   names its `TerrainStreamingTree`. The tree's heightfield quadtree (embedded tiles, streamed lod0 chunks,
-  data-less and disabled nodes) becomes a `HeightGrid` with the Rust code's float order. The soup takes the first
+  data-less and disabled nodes) becomes a `HeightGrid` with IW4L's float order. The soup takes the first
   depth whose spacing reaches 2 m (Metro: depth 2, 513² samples, 2 m; Alborz: depth 5, 4097², 2 m).
   <!-- TC --> Since the terrain-collision track (docs/design/terrain-collision.md, `kCollisionSoupVersion` 2) the
   soup keeps every terrain as a **record**: the shared grid plus the object's frame (`SoupTerrain::grid` / `frame`),
@@ -1013,10 +1005,9 @@ the install by C++ at runtime and drawn in Godot, one mesh per 64 m tile. Three 
 
 `bf3dump collision <LEVEL> <MODE>` prints the soup in canonical form: sorted `T` lines per placement and terrain
 (state, counts, hash), `K` tiles (count, sum), then the totals and the surface and body histograms; timings go to
-stderr. **Parity**: `research/probes/tools/level-oracle collision <LEVEL> <MODE>` prints the same through IW4L's
-own crates (`HavokPhysicsData::shapes`, `resource_bf3::triangles`, `level_bf3::collision::Materials`,
-`TerrainStreamingTree::height_grid`). Result on 2026-10-15: all 230 level x mode runs of the 29 MP levels are
-byte-identical. That covers every placement hash, every tile sum and the 199 terrain grids (depth 2-5); MP_011 and the
+stderr. **Parity** (history): on 2026-10-15 a research probe, since removed, printed the same through IW4L's own
+crates (`HavokPhysicsData::shapes`, `resource_bf3::triangles`, `level_bf3::collision::Materials`,
+`TerrainStreamingTree::height_grid`): all 230 level x mode runs of the 29 MP levels were byte-identical. That covers every placement hash, every tile sum and the 199 terrain grids (depth 2-5); MP_011 and the
 four Close Quarters levels have no terrain. No res was missing and no triangle was non-finite. The largest soup is
 XP3_Shield RushLarge0 with 4.01 M triangles (2.70 M of them terrain). The most work-budget units any run spent was
 209,790 of 4,194,304.
@@ -1030,7 +1021,7 @@ Metro's bodies: 969,031 collision (174,080 of them terrain), 142,908 raycast, 2,
 grid pairs resolve.
 
 <!-- TC --> After the terrain-collision track (soup v2, every terrain cell kept; the listing is unchanged in form, its
-terrain lines now cover the whole grid; the oracle drops IW4L's `near` filter in one place):
+terrain lines now cover the whole grid; the probe dropped IW4L's `near` filter in one place):
 
 | level x mode | placements | triangles (terrain) | destroyed | degenerate | tiles | sum | terrain hash |
 |---|---|---|---|---|---|---|---|
@@ -1045,7 +1036,8 @@ entries); the overlay's Havok triangles are 940,091.
 skips with 77 otherwise or without an install). It prints a PASS/FAIL table and exits 0 or 1. Rows:
 * load: nothing missing or non-finite, the terrain built (TC: every terrain with its record);
 * godot_free.recompute: a second `load_level_collision` gives the same placement hashes, terrain hashes and totals;
-* oracle: the level-oracle numbers above (TC: Havok soup plus `hash_soup_terrain`, merged as the listing does);
+* oracle: the probe's numbers above, recorded in the check (TC: Havok soup plus `hash_soup_terrain`, merged as the
+  listing does);
 * terrain.window (TC): the window's tiles and triangles equal `append_soup_terrain_tile` over the tiles within the
   radius of the camera;
 * meshes: one valid mesh with one surface per (tile, layer) slot, 3 × the slot's triangles as vertices
@@ -1056,7 +1048,7 @@ skips with 77 otherwise or without an install). It prints a PASS/FAIL table and 
 * install.unchanged: sizes and mtimes of the 256 index files.
 `core.level.collision.unit` covers synthetic shapes, the word table, hashes, mirrored frames, deep trees and a
 synthetic terrain tree, plus 3,000 bit-flipped trees and every truncation. `core.level.collision` checks Metro and
-Alborz against the oracle numbers and feeds 32 mutated group res through the soup.
+Alborz against the probe's recorded numbers and feeds 32 mutated group res through the soup.
 
 Measured (dev build, 16 threads, RX 9070 XT, D3D12, 1152×648, warm file cache, idle machine):
 * `bf3dump collision` totals. Metro TDM: 0.54 s (mount 0.15, traverse 0.03, soup 0.36: decode 0.04, triangles 0.22,
@@ -1084,7 +1076,7 @@ quiet lock. Design doc §17 has the full rows.
 | gate | command | result |
 |---|---|---|
 | G1 coverage | `ctest --preset dev -R "^sim\.terrain$"` | 230 runs, 24 digests, 31 without terrain; 8.18 M lattice rays and 1.09 M open-cell rays, 0 bad; worst 1.0 cm (MP_013 quantisation); 0 combat tiles without ground on Caspian CQL (0/328) and Kharg CQL (0/1,614) |
-| G2 parity | `pwsh research/probes/tools/level-oracle/parity.ps1 -Out <scratch> -Jobs 6` | 230 / 230 identical; IW4L `49aca70d5a8c` (clean); wall 1,703 s with 6 jobs |
+| G2 parity | `bf3dump collision` against the research probe's listing for every level x mode (the probe and its script since removed) | 230 / 230 identical; IW4L `49aca70d5a8c` (clean); wall 1,703 s with 6 jobs |
 | G3 cost | `ctest --preset dev -R "^(tools\.tc_cost\|godot\.m1_load)$"` | cold / warm shapes total: Metro TDM 0.63 / 0.04 s, Shield RL 2.15 / 0.08 s, Alborz SR 2.88 / 0.09 s. Peak private bytes ≤ 642 MiB; resident ≤ 102 MiB; cache ≤ 102 MiB. E4 2.39 s, E5 1.92 s |
 | G4 S1 re-run | `ctest --preset dev -R "^host\.scale$"`, `... "^sim\.nav\.bake$"`, `... "^sim\.nav$"` | p99 tick: Metro 1.52 ms, Caspian 1.10 ms. Bake: Caspian 3.37 s, Kharg 3.07 s (1,240 tiles_wet, 3.49 M triangles_unwalkable; S1 dropped 1,290 cover tiles). G2 rows 485/566 and 661/709, unchanged |
 | G5 S2 re-run | `ctest --preset dev -R "^sim\.vehicle(\.unit)?$"` | G1, G1r, G1m and the new G1t (heightfield with hole and patch): 0 mismatching ticks. ExactPod max 1.9 mm |
@@ -1118,7 +1110,7 @@ saves `teleport_<i>.png` to `--shot-dir` and prints the settled feet.
 | `src/bf3_audio` | the mixer core and audio thread, DSP, sound patches, weapon and impact audio routing (Godot-free; links bf3_host for the presentation events) |
 | `src/bf3_godot` | the GDExtension: sessions, the Godot bridges for render, skin, fx and audio, HUD and minimap controls, the viewmodel, and the headless checks and demos (the only Godot code) |
 | `tools/bf3dump` | command-line install inspector and cache preparer on the Godot-free libraries |
-| `tools/antdump`, `tools/resdump` | Ant animation and resource dumps on `bf3_core` (resdump: parity with the Rust oracle) |
+| `tools/antdump`, `tools/resdump` | Ant animation and resource dumps on `bf3_core` (resdump: summaries over a `bf3dump export res` sample or the install) |
 | `tests/` | doctest executables and the ctest scripts (`godot_*.cmake` run the project headless or windowed) |
 | `bf3-opensource/` | the Godot project (Forward+, D3D12, Jolt); `scenes/main.tscn` is the main scene, `config/*.cfg` the tuning files |
 
