@@ -127,7 +127,7 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 			link.drop("the server said bye");
 			return;
 		default:
-			if (tdm_datagram(*type, p_d)) {
+			if (match.datagram(*type, p_d)) {
 				return;
 			}
 			cl_datagram(*type, p_d, p_now);
@@ -280,7 +280,7 @@ void ClientLoop::client_tick(uint64_t p_now) {
 	const sim::Tick c = clock.next_tick();
 	const sim::PredictionEntry *made = nullptr;
 	sim::Command cmd;
-	if (have_own && c > 0 && !tdm_unspawned(c)) {
+	if (have_own && c > 0 && !match.unspawned(c, have_own, spawn_state.tick)) {
 
 		if (ring->find(c - 1u) == nullptr) {
 			const sim::PredictionEntry *b = ring->newest_at_or_below(c - 1u);
@@ -298,7 +298,7 @@ void ClientLoop::client_tick(uint64_t p_now) {
 		const sim::PredictionEntry *base = ring->find(c - 1u);
 		cmd = sample_command(c);
 		cl_command_made(cmd, p_now);
-		tdm_command(cmd);
+		match.restrict(cmd);
 		if (base == nullptr || cmd.tick != base->state.tick + 1u) {
 			++stats_.step_precondition_failures;
 			assert(false && "ClientSession: prediction base missing");
@@ -350,7 +350,8 @@ void ClientLoop::publish(uint64_t p_now, const sim::PredictionEntry *p_made, con
 	}
 	tracks.publish(f, p_now);
 	cl_publish_end(f, p_now);
-	tdm_publish(f);
+	match.publish(f, have_own, own_life);
+	stats_.own_shot_id_resets = feed.shot_id_resets();
 	stats_.connected = link.connected();
 	clock.publish_stats(stats_);
 	tracks.publish_stats(stats_);
@@ -368,6 +369,8 @@ void ClientLoop::collect_stats() {
 	clock.stats(stats_);
 	tracks.stats(stats_);
 	feed.stats(stats_);
+	match.stats(stats_);
+	stats_.bad_gunplay_events = cl_bad_events + match.bad_events();
 }
 
 void ClientLoop::copy_frame(PresentationFrame &r_to, const PresentationFrame &p_from) {
@@ -643,7 +646,8 @@ void ClientLoop::cl_refuse(const char *p_reason) {
 
 bool ClientLoop::cl_match_info(const net::MatchInfo &p_match, uint64_t p_now) {
 	stats_.slot = p_match.slot;
-	if (!tdm_rules(p_match)) {
+	if (const char *refusal = match.check_rules(p_match, *level)) {
+		cl_refuse(refusal);
 		return false;
 	}
 	if (p_match.weapon_hash != 0) {
@@ -777,7 +781,7 @@ void ClientLoop::cl_datagram(net::MessageType p_type, const net::NetSim::Datagra
 					continue;
 				}
 				if (!valid_slot(r.slot) || !cl_def_ok(r.def)) {
-					++stats_.bad_gunplay_events;
+					++cl_bad_events;
 					continue;
 				}
 				PresentEvent ev;
@@ -809,7 +813,7 @@ void ClientLoop::cl_datagram(net::MessageType p_type, const net::NetSim::Datagra
 			}
 			for (const net::HitEvent &h : e->hits) {
 				if (!valid_slot(h.victim) || !valid_slot(h.shooter)) {
-					++stats_.bad_gunplay_events;
+					++cl_bad_events;
 					continue;
 				}
 				PresentEvent ev;
@@ -832,7 +836,7 @@ void ClientLoop::cl_datagram(net::MessageType p_type, const net::NetSim::Datagra
 			}
 			for (const net::DeathEvent &d : e->deaths) {
 				if (!valid_slot(d.victim) || !valid_slot(d.killer) || (d.def != sim::weapons::kNoWeapon && !cl_def_ok(d.def))) {
-					++stats_.bad_gunplay_events;
+					++cl_bad_events;
 					continue;
 				}
 				PresentEvent ev;
@@ -854,7 +858,7 @@ void ClientLoop::cl_datagram(net::MessageType p_type, const net::NetSim::Datagra
 			}
 			for (const net::DetonationWire &d : e->detonations) {
 				if (!valid_slot(d.shooter) || !cl_def_ok(d.def)) {
-					++stats_.bad_gunplay_events;
+					++cl_bad_events;
 					continue;
 				}
 				PresentEvent ev;
@@ -870,7 +874,7 @@ void ClientLoop::cl_datagram(net::MessageType p_type, const net::NetSim::Datagra
 				feed.push(ev);
 				++stats_.combat_detonations;
 			}
-			tdm_combat(*e);
+			match.combat(*e, have_own, own_life);
 			return;
 		}
 		default:
@@ -1121,103 +1125,6 @@ void ClientLoop::take_own_test_samples(std::vector<OwnTestSample> &r_samples) {
 
 void ClientLoop::send_kit_select(const net::KitSelect &p_select) {
 	link.queue_kit_select(p_select);
-}
-
-bool ClientLoop::tdm_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d) {
-	switch (p_type) {
-		case net::MessageType::MatchState: {
-			core::Result<net::MatchState> m = net::decode_match_state(p_d.bytes);
-			if (!m) {
-				++stats_.bad_tdm_datagrams;
-				return true;
-			}
-			tdm_match = *m;
-			tdm_match_valid = true;
-			++stats_.match_states;
-			return true;
-		}
-		case net::MessageType::PlayerList: {
-			core::Result<net::PlayerList> l = net::decode_player_list(p_d.bytes);
-			if (!l) {
-				++stats_.bad_tdm_datagrams;
-				return true;
-			}
-			apply_player_list(tdm_players, *l);
-			++stats_.player_lists;
-			return true;
-		}
-		default:
-			return false;
-	}
-}
-
-void ClientLoop::tdm_combat(const net::CombatEvents &p_events) {
-	for (const net::DeathEvent &d : p_events.deaths) {
-		if (d.victim == slot && have_own) {
-
-			tdm_death_valid = true;
-			tdm_death_life = own_life;
-			tdm_respawn_tick = d.respawn_tick;
-			tdm_revive_until = d.revive_until;
-		}
-	}
-	for (const net::ReviveEvent &v : p_events.revives) {
-		if (!valid_slot(v.reviver) || !valid_slot(v.revived)) {
-			++stats_.bad_gunplay_events;
-			continue;
-		}
-		PresentEvent ev;
-		ev.kind = PresentKind::Revive;
-		ev.timeline = PresentTimeline::Render;
-		ev.slot = v.reviver;
-		ev.aux = v.revived;
-		ev.id = v.tick;
-		ev.time = sim::weapons::tick_end(v.tick);
-		ev.flags = uint8_t((v.reviver == slot ? present_flags::kOwnShooter : 0u) | (v.revived == slot ? present_flags::kOwnVictim : 0u));
-		feed.push(ev);
-		++stats_.revives;
-	}
-}
-
-bool ClientLoop::tdm_rules(const net::MatchInfo &p_match) {
-	const char *refusal = rules_refusal(p_match, level->logic != nullptr, level->logic_digest);
-	if (refusal == nullptr) {
-		return true;
-	}
-	stats_.rules_mismatch = true;
-	cl_refuse(refusal);
-	return false;
-}
-
-void ClientLoop::tdm_command(sim::Command &r_command) {
-	if (!tdm_match_valid) {
-		return;
-	}
-	const sim::Command r = net::restrict_command(r_command, tdm_match.restrict_until_tick, tdm_match.restrict_mask);
-	if (r.move_forward != r_command.move_forward || r.move_right != r_command.move_right || r.buttons != r_command.buttons) {
-		++stats_.restricted_commands;
-	}
-	r_command = r;
-}
-
-bool ClientLoop::tdm_unspawned(sim::Tick p_tick) {
-	tdm_unspawned_now = have_own && own_unspawned_at(tdm_match_valid, tdm_match, spawn_state.tick, p_tick);
-	if (tdm_unspawned_now) {
-		++stats_.unspawned_ticks;
-	}
-	return tdm_unspawned_now;
-}
-
-void ClientLoop::tdm_publish(PresentationFrame &r_frame) {
-	r_frame.match_valid = tdm_match_valid;
-	r_frame.match = tdm_match;
-	r_frame.player_count = player_rows(tdm_players, r_frame.players);
-
-	const bool dead_life = tdm_death_valid && have_own && own_life == tdm_death_life;
-	r_frame.own_respawn_tick = dead_life ? tdm_respawn_tick : 0u;
-	r_frame.own_revive_until = dead_life ? tdm_revive_until : 0u;
-	r_frame.own_unspawned = tdm_unspawned_now;
-	stats_.own_shot_id_resets = feed.shot_id_resets();
 }
 
 void ClientLoop::send_spawn_request(uint8_t p_kit) {

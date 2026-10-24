@@ -5,6 +5,7 @@
 #include "client_clock.h"
 #include "client_events.h"
 #include "client_link.h"
+#include "client_match.h"
 #include "client_tracks.h"
 #include "client_transport.h"
 
@@ -159,6 +160,8 @@ private:
 	uint16_t cl_fired_view_seq = 0;
 	uint64_t cl_fired_ns = 0;
 	ClientEvents feed{ slot };
+	ClientMatch match{ feed, slot };
+	uint64_t cl_bad_events = 0;
 	std::mutex cl_log_mutex;
 	std::vector<PredictedShot> cl_shot_log;
 	std::vector<PredictedTimed> cl_timed_log;
@@ -191,21 +194,6 @@ private:
 	void publish(uint64_t p_now, const sim::PredictionEntry *p_made, const sim::Command &p_cmd);
 	void collect_stats();
 	static void copy_frame(PresentationFrame &r_to, const PresentationFrame &p_from);
-
-	bool tdm_match_valid = false;
-	net::MatchState tdm_match;
-	PlayerTable tdm_players;
-	bool tdm_death_valid = false;
-	uint32_t tdm_death_life = 0;
-	sim::Tick tdm_respawn_tick = 0;
-	sim::Tick tdm_revive_until = 0;
-	bool tdm_unspawned_now = false;
-	bool tdm_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d);
-	void tdm_combat(const net::CombatEvents &p_events);
-	bool tdm_rules(const net::MatchInfo &p_match);
-	void tdm_command(sim::Command &r_command);
-	bool tdm_unspawned(sim::Tick p_tick);
-	void tdm_publish(PresentationFrame &r_frame);
 };
 
 }
