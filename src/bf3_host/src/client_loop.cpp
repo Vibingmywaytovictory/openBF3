@@ -17,7 +17,6 @@ namespace bf3::host {
 
 namespace {
 
-constexpr uint32_t kMaxBurstTicks = 8;
 constexpr size_t kTrackSamples = 8;
 constexpr uint64_t kTrackTimeoutNs = 1'000'000'000ull;
 
@@ -60,88 +59,6 @@ void copy3(float (&r_to)[3], const sim::Vec3 &p_from) {
 
 double ClientLoop::local_ticks(uint64_t p_ns) {
 	return double(p_ns) / kNsPerTick;
-}
-
-double ClientLoop::clock_ticks(uint64_t p_now) const {
-	const double dt = p_now >= clock_base_ns ? double(p_now - clock_base_ns) : -double(clock_base_ns - p_now);
-	return clock_base_ticks + dt / kNsPerTick * rate_scale;
-}
-
-void ClientLoop::set_clock(double p_ticks, uint64_t p_now) {
-	clock_base_ticks = p_ticks;
-	clock_base_ns = p_now;
-}
-
-void ClientLoop::set_rate(double p_scale, uint64_t p_now) {
-	clock_base_ticks = clock_ticks(p_now);
-	clock_base_ns = p_now;
-	rate_scale = p_scale;
-}
-
-uint64_t ClientLoop::tick_deadline_ns(sim::Tick p_tick) const {
-	const double dt_ticks = double(p_tick) - clock_base_ticks;
-	const double ns = double(clock_base_ns) + dt_ticks * kNsPerTick / rate_scale;
-	return ns <= 0.0 ? 0u : uint64_t(ns);
-}
-
-double ClientLoop::rtt_for_estimate_ms() const {
-	return rtt_valid ? stats_.rtt_min_ms : hello_rtt_ms;
-}
-
-double ClientLoop::estimate(uint64_t p_now) const {
-	const double since = p_now >= anchor_ns ? double(p_now - anchor_ns) / kNsPerTick : 0.0;
-	return double(anchor_tick) + since + rtt_for_estimate_ms() / kMsPerTick + double(target);
-}
-
-void ClientLoop::begin_holdoff() {
-	holdoff = true;
-	holdoff_sequence = next_sequence;
-	reports8.clear();
-	reports64.clear();
-}
-
-void ClientLoop::reset_clock(uint64_t p_now) {
-	const double e = estimate(p_now);
-	const sim::Tick c = sim::Tick(std::max(0.0, std::floor(e)));
-	if (c < next_tick) {
-		ring->discard_after(c - 1u);
-	}
-	rate_scale = 1.0;
-	set_clock(e, p_now);
-	next_tick = c;
-	++stats_.clock_resets;
-	begin_holdoff();
-}
-
-void ClientLoop::rtt_sample(const net::Snapshot &p_snap, uint64_t p_now) {
-	if (next_sequence <= 1) {
-		return;
-	}
-	const uint32_t newest = next_sequence - 1u;
-	uint32_t seq = (newest & ~0xFFFFu) | p_snap.sequence_echo;
-	if (seq > newest) {
-		if (seq < 0x10000u) {
-			return;
-		}
-		seq -= 0x10000u;
-	}
-	const SentTime &t = sent_times[seq % kSentTimes];
-	if (t.sequence != seq || t.ns == 0 || seq == 0) {
-		return;
-	}
-	const uint64_t hold_ns = uint64_t(p_snap.echo_hold_100us) * 100000u;
-	const double ms = p_now > t.ns + hold_ns ? double(p_now - t.ns - hold_ns) / 1e6 : 0.0;
-	stats_.rtt_ms = rtt_valid ? stats_.rtt_ms + (ms - stats_.rtt_ms) * 0.1 : ms;
-	rtt_window.push_back({ p_now, ms });
-	while (!rtt_window.empty() && p_now - rtt_window.front().ns > 2'000'000'000ull) {
-		rtt_window.pop_front();
-	}
-	double lo = ms;
-	for (const RttSample &s : rtt_window) {
-		lo = std::min(lo, s.ms);
-	}
-	stats_.rtt_min_ms = lo;
-	rtt_valid = true;
 }
 
 void ClientLoop::received_time_sample(sim::Tick p_tick, uint64_t p_now) {
@@ -213,14 +130,8 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 			if (m->motor_hash != motor_hash) {
 				++stats_.motor_hash_mismatch;
 			}
-			hello_rtt_ms = hello_ns != 0 && p_now > hello_ns ? double(p_now - hello_ns) / 1e6 : 0.0;
-			anchor_tick = m->server_tick;
-			anchor_ns = p_now;
-			set_clock(estimate(p_now) + double(config.initial_clock_offset_ticks), p_now);
-			next_tick = sim::Tick(std::max(0.0, std::floor(clock_ticks(p_now))));
-			clock_running = true;
+			clock.start(m->server_tick, p_now, next_sequence);
 			last_tick_ns = p_now;
-			begin_holdoff();
 			return;
 		}
 		case net::MessageType::Spawned: {
@@ -228,10 +139,7 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 			if (s && pending_spawned.size() < 16) {
 				cl_spawned(*s);
 				tdm_spawned(*s);
-				if (s->state.tick > anchor_tick) {
-					anchor_tick = s->state.tick;
-					anchor_ns = p_now;
-				}
+				clock.anchor_spawned(s->state.tick, p_now);
 				pending_spawned.push_back(s->state);
 			}
 			return;
@@ -243,7 +151,7 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 			}
 			cl_snapshot(*s, p_now);
 			server_events_acc = uint16_t(server_events_acc | s->own_events);
-			rtt_sample(*s, p_now);
+			clock.rtt_sample(*s, p_now, next_sequence);
 			const SnapshotOrder order = link.arrive(s->seq);
 			if (order == SnapshotOrder::Late) {
 				add_others(*s, p_now);
@@ -251,10 +159,7 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 			if (order != SnapshotOrder::Newest) {
 				return;
 			}
-			if (s->server_tick >= anchor_tick) {
-				anchor_tick = s->server_tick;
-				anchor_ns = p_now;
-			}
+			clock.anchor_snapshot(s->server_tick, p_now);
 			received_time_sample(s->server_tick, p_now);
 			add_others(*s, p_now);
 			pending_snapshot = std::move(*s);
@@ -285,64 +190,8 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 	}
 }
 
-void ClientLoop::buffer_report(const net::Snapshot &p_snap, uint64_t p_now) {
-	stats_.command_buffer_ticks = p_snap.command_buffer_ticks;
-	if (holdoff) {
-
-		if (net::seq_newer(uint16_t(holdoff_sequence & 0xFFFFu), p_snap.sequence_echo) || next_sequence <= holdoff_sequence) {
-			return;
-		}
-		holdoff = false;
-	}
-	const int32_t report = p_snap.command_buffer_ticks;
-	reports64.push_back(report);
-	while (reports64.size() > 64) {
-		reports64.pop_front();
-	}
-	reports8.push_back(report);
-	while (reports8.size() > 8) {
-		reports8.pop_front();
-	}
-
-	double mean = 0;
-	for (int32_t r : reports64) {
-		mean += r;
-	}
-	mean /= double(reports64.size());
-	double mad = 0;
-	for (int32_t r : reports64) {
-		mad += std::fabs(double(r) - mean);
-	}
-	mad /= double(reports64.size());
-	const double extra = std::max(0.0, std::ceil(2.0 * mad - 1.0));
-	const uint32_t want = std::min<uint32_t>(config.target_buffer_ticks + uint32_t(extra), std::max(config.max_buffer_ticks, config.target_buffer_ticks));
-	if (want != candidate) {
-		candidate = want;
-		candidate_since_ns = p_now;
-	} else if (want != target && double(p_now - candidate_since_ns) >= double(config.target_hold_s) * 1e9) {
-		target = want;
-	}
-
-	if (std::fabs(double(report) - double(target)) * kMsPerTick > double(config.clock_reset_ms)) {
-		reset_clock(p_now);
-		return;
-	}
-
-	double err = 0;
-	for (int32_t r : reports8) {
-		err += r;
-	}
-	err = err / double(reports8.size()) - double(target);
-	double adjust = 0;
-	if (std::fabs(err) > double(config.clock_deadband_ticks)) {
-		adjust = -err / (double(sim::kSimHz) * std::max(0.01, double(config.clock_time_constant_s)));
-		adjust = std::clamp(adjust, -double(config.max_clock_adjust), double(config.max_clock_adjust));
-	}
-	set_rate(1.0 + adjust, p_now);
-}
-
 void ClientLoop::run_catch_up(const sim::SoldierState &p_base) {
-	const sim::CatchUpStats c = sim::catch_up(motor, p_base, *ring, next_tick);
+	const sim::CatchUpStats c = sim::catch_up(motor, p_base, *ring, clock.next_tick());
 	stats_.replayed_ticks += c.steps;
 }
 
@@ -355,15 +204,8 @@ void ClientLoop::authoritative(const sim::SoldierState &p_s, uint64_t p_now) {
 		return;
 	}
 
-	if (p_s.tick >= next_tick) {
-		const double e = estimate(p_now);
-		const sim::Tick c = std::max(sim::Tick(std::max(0.0, std::floor(e))), p_s.tick + 1u);
-		rate_scale = 1.0;
-		set_clock(std::max(e, double(c)), p_now);
-		next_tick = c;
-		++stats_.forced_forward;
-		++stats_.clock_resets;
-		begin_holdoff();
+	if (p_s.tick >= clock.next_tick()) {
+		clock.force_past(p_s.tick, p_now, next_sequence);
 	}
 	last_auth = p_s;
 	have_auth = true;
@@ -399,11 +241,12 @@ void ClientLoop::authoritative(const sim::SoldierState &p_s, uint64_t p_now) {
 	++stats_.reconciliations;
 	stats_.last_reconcile_tick = p_s.tick;
 	stats_.last_reconcile_ns = p_now;
-	const sim::PredictionEntry *before = next_tick > 0 ? ring->find(next_tick - 1u) : nullptr;
+	const sim::Tick next = clock.next_tick();
+	const sim::PredictionEntry *before = next > 0 ? ring->find(next - 1u) : nullptr;
 	const sim::Vec3 old_pos = before != nullptr ? before->state.position : p_s.position;
 	cl_weapons_reconcile(p_s);
 	run_catch_up(p_s);
-	const sim::PredictionEntry *after = next_tick > 0 ? ring->find(next_tick - 1u) : nullptr;
+	const sim::PredictionEntry *after = next > 0 ? ring->find(next - 1u) : nullptr;
 	const sim::Vec3 new_pos = after != nullptr ? after->state.position : p_s.position;
 	const sim::Vec3 corr = sub3(old_pos, new_pos);
 	const float m = length3(corr);
@@ -475,7 +318,9 @@ void ClientLoop::client_tick(uint64_t p_now) {
 	}
 
 	if (pending_snapshot_valid && pending_snapshot.own.has_value() && have_own) {
-		buffer_report(pending_snapshot, p_now);
+		if (const std::optional<sim::Tick> discard = clock.buffer_report(pending_snapshot, p_now, next_sequence)) {
+			ring->discard_after(*discard);
+		}
 	}
 	for (const sim::SoldierState &s : pending_spawned) {
 		authoritative(s, p_now);
@@ -487,7 +332,7 @@ void ClientLoop::client_tick(uint64_t p_now) {
 		}
 		pending_snapshot_valid = false;
 	}
-	const sim::Tick c = next_tick;
+	const sim::Tick c = clock.next_tick();
 	const sim::PredictionEntry *made = nullptr;
 	sim::Command cmd;
 	if (have_own && c > 0 && !tdm_unspawned(c)) {
@@ -521,11 +366,11 @@ void ClientLoop::client_tick(uint64_t p_now) {
 			made = ring->find(c);
 			last_made = cmd;
 
-			sent_times[cmd.sequence % kSentTimes] = { cmd.sequence, p_now };
+			clock.command_sent(cmd.sequence, p_now);
 			link.send_commands(cmd, cl_others_ack_bits(), p_now);
 		}
 	}
-	next_tick = c + 1u;
+	clock.set_next_tick(c + 1u);
 	publish(p_now, made, cmd);
 }
 
@@ -534,12 +379,12 @@ void ClientLoop::publish(uint64_t p_now, const sim::PredictionEntry *p_made, con
 	PresentationFrame &f = *build;
 	f.serial = ++serial;
 	f.publish_ns = p_now;
-	f.own_ticks_per_ns = rate_scale / kNsPerTick;
+	f.own_ticks_per_ns = clock.own_ticks_per_ns();
 	const sim::PredictionEntry *prev = p_made != nullptr && p_made->state.tick > 0 ? ring->find(p_made->state.tick - 1u) : nullptr;
 	f.valid = p_made != nullptr && prev != nullptr;
 	if (f.valid) {
 		f.tick = p_made->state.tick;
-		f.tick_fraction = std::clamp(clock_ticks(p_now) - double(f.tick), 0.0, 1.0);
+		f.tick_fraction = std::clamp(clock.ticks(p_now) - double(f.tick), 0.0, 1.0);
 		f.own_prev = prev->state;
 		f.own_curr = p_made->state;
 		f.own_command = p_cmd;
@@ -601,9 +446,7 @@ void ClientLoop::publish(uint64_t p_now, const sim::PredictionEntry *p_made, con
 	cl_publish_end(f, p_now);
 	tdm_publish(f);
 	stats_.connected = link.connected();
-	stats_.client_tick = next_tick;
-	stats_.target_buffer_ticks = target;
-	stats_.clock_adjust = float(rate_scale - 1.0);
+	clock.publish_stats(stats_);
 	stats_.enet_rtt_ms = link.transport_rtt_ms();
 	stats_.netsim_out = link.out_stats();
 	stats_.netsim_in = link.in_stats();
@@ -615,6 +458,7 @@ void ClientLoop::publish(uint64_t p_now, const sim::PredictionEntry *p_made, con
 
 void ClientLoop::collect_stats() {
 	link.stats(stats_);
+	clock.stats(stats_);
 }
 
 void ClientLoop::copy_frame(PresentationFrame &r_to, const PresentationFrame &p_from) {
@@ -630,15 +474,13 @@ void ClientLoop::copy_frame(PresentationFrame &r_to, const PresentationFrame &p_
 }
 
 void ClientLoop::iterate() {
-	if (const int32_t shift = shift_request.exchange(0); shift != 0 && clock_running) {
-		const uint64_t now = now_ns();
-		set_clock(clock_ticks(now) + double(shift), now);
-		next_tick = sim::Tick(int64_t(next_tick) + shift);
+	if (const int32_t shift = shift_request.exchange(0); shift != 0 && clock.running()) {
+		clock.shift(shift, now_ns());
 	}
 	uint64_t now = now_ns();
 	uint64_t deadline = now + 50'000'000ull;
-	if (clock_running && link.connected()) {
-		deadline = std::min(deadline, tick_deadline_ns(next_tick));
+	if (clock.running() && link.connected()) {
+		deadline = std::min(deadline, clock.tick_deadline_ns(clock.next_tick()));
 	}
 	deadline = link.wait_deadline(deadline);
 	const uint32_t wait_ms = deadline > now ? uint32_t(std::min<uint64_t>((deadline - now) / 1'000'000ull, 50)) : 0u;
@@ -651,14 +493,8 @@ void ClientLoop::iterate() {
 	}
 	link.send_requests(now);
 	link.release(now);
-	if (clock_running && link.connected()) {
-		const double clock = clock_ticks(now);
-		if (clock >= double(next_tick)) {
-			if (clock - double(next_tick) > double(kMaxBurstTicks)) {
-				next_tick = sim::Tick(std::floor(clock));
-			}
-			client_tick(now);
-		}
+	if (clock.running() && link.connected() && clock.due(now)) {
+		client_tick(now);
 	}
 }
 
@@ -691,7 +527,7 @@ void ClientLoop::begin(std::unique_ptr<ClientTransport> p_transport, MonotonicCl
 	const uint64_t now = now_ns();
 	net::Hello hello;
 	hello.name = config.name;
-	hello_ns = now;
+	clock.hello_sent(now);
 	link.submit(net::kChannelReliable, net::encode_hello(hello), now);
 	link.release(now);
 }
@@ -1256,7 +1092,7 @@ void ClientLoop::cl_after_match(const sim::SoldierState &p_s) {
 		return;
 	}
 	const float delta = p_s.health - at->state.health;
-	for (sim::Tick t = p_s.tick; t < next_tick; ++t) {
+	for (sim::Tick t = p_s.tick; t < clock.next_tick(); ++t) {
 		const sim::PredictionEntry *e = ring->find(t);
 		if (e == nullptr || e->state.life != p_s.life) {
 			continue;

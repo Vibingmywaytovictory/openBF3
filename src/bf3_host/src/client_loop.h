@@ -2,6 +2,7 @@
 
 #include "bf3/core/result.h"
 #include "bf3/host/client_session.h"
+#include "client_clock.h"
 #include "client_link.h"
 #include "client_transport.h"
 
@@ -48,17 +49,6 @@ private:
 		uint64_t last_seen_ns = 0;
 		std::deque<OtherSample> samples;
 	};
-	struct SentTime {
-		uint32_t sequence = 0;
-		uint64_t ns = 0;
-	};
-	struct RttSample {
-		uint64_t ns = 0;
-		double ms = 0;
-	};
-
-	static constexpr size_t kSentTimes = 1024;
-
 	ClientSessionConfig config;
 	std::shared_ptr<const SharedLevel> level;
 	std::unique_ptr<sim::CollisionWorld> world;
@@ -80,29 +70,9 @@ private:
 	bool have_match = false;
 	uint8_t slot = 0;
 	uint8_t divisor = 2;
-	uint64_t hello_ns = 0;
-	double hello_rtt_ms = 0;
-
-	bool clock_running = false;
-	double clock_base_ticks = 0;
-	uint64_t clock_base_ns = 0;
-	double rate_scale = 1.0;
-	sim::Tick next_tick = 0;
-	bool holdoff = true;
-	uint32_t holdoff_sequence = 1;
-	std::deque<int32_t> reports64;
-	std::deque<int32_t> reports8;
-	uint32_t target = 2;
-	uint32_t candidate = 2;
-	uint64_t candidate_since_ns = 0;
-	std::deque<RttSample> rtt_window;
-	bool rtt_valid = false;
-
-	sim::Tick anchor_tick = 0;
-	uint64_t anchor_ns = 0;
+	ClientClock clock{ config };
 
 	uint32_t next_sequence = 1;
-	std::array<SentTime, kSentTimes> sent_times{};
 	sim::Command last_made;
 	bool jump_seen = false;
 	uint32_t last_jump_presses = 0;
@@ -232,19 +202,9 @@ private:
 	void cl_publish_end(PresentationFrame &r_frame, uint64_t p_now);
 
 	static double local_ticks(uint64_t p_ns);
-	double clock_ticks(uint64_t p_now) const;
-	void set_clock(double p_ticks, uint64_t p_now);
-	void set_rate(double p_scale, uint64_t p_now);
-	uint64_t tick_deadline_ns(sim::Tick p_tick) const;
-	double rtt_for_estimate_ms() const;
-	double estimate(uint64_t p_now) const;
-	void begin_holdoff();
-	void reset_clock(uint64_t p_now);
-	void rtt_sample(const net::Snapshot &p_snap, uint64_t p_now);
 	void received_time_sample(sim::Tick p_tick, uint64_t p_now);
 	void add_others(const net::Snapshot &p_snap, uint64_t p_now);
 	void handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_now);
-	void buffer_report(const net::Snapshot &p_snap, uint64_t p_now);
 	void run_catch_up(const sim::SoldierState &p_base);
 	void authoritative(const sim::SoldierState &p_s, uint64_t p_now);
 	sim::Command sample_command(sim::Tick p_tick);
