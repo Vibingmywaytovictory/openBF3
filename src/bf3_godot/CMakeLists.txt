@@ -193,6 +193,8 @@ target_sources(bf3_godot PRIVATE
     src/ui_post_process.h
     src/ui_cursor.cpp
     src/ui_cursor.h
+    src/overview_map.cpp
+    src/overview_map.h
 )
 
 if(OPENBF3_BUILD_CHECKS)
