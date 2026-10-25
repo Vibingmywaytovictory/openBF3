@@ -303,6 +303,8 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/ui/ui_graph.h
     src/ui/ui_graph.cpp
     src/ui/ui_graph_flow.cpp
+    include/bf3/core/ui/ui_input.h
+    src/ui/ui_input.cpp
 )
 openbf3_registry(bf3_core src/ui/widgets bf3/core/ui/hud_widget_registry.h HudWidgetRegistry bf3::core::ui register_hud_widgets_ register_hud_widget_files)
 
