@@ -261,6 +261,7 @@ void Spawner::on_spawn(size_t p_slot, sim::Tick p_tick) {
 
 void Spawner::describe_spawned(size_t p_slot, net::Spawned &r_message) const {
 	r_message.kit = combat_.kit(p_slot);
+	r_message.defs = combat_.spawned_defs(p_slot);
 	r_message.team = uint8_t(std::clamp(slots_[p_slot].team, 0, int(net::kMaxTeam)));
 }
 

@@ -78,6 +78,7 @@ target_sources(bf3_host PRIVATE
 target_sources(bf3_host PRIVATE
     include/bf3/host/gunplay.h
     include/bf3/host/kits.h
+    include/bf3/host/loadout.h
     include/bf3/host/target_bots.h
     include/bf3/host/server_view.h
     include/bf3/host/lag_comp.h
@@ -98,6 +99,7 @@ target_sources(bf3_host PRIVATE
 
 target_sources(bf3_host PRIVATE
     src/kits.cpp
+    src/loadout.cpp
     src/target_bots.cpp
     src/gunplay.cpp
 )

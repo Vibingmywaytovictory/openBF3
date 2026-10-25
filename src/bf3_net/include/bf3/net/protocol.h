@@ -35,6 +35,13 @@ inline constexpr size_t kMaxNameBytes = 32;
 inline constexpr uint8_t kMaxKits = 4;
 inline constexpr uint8_t kMaxTeam = 2;
 inline constexpr uint16_t kMaxWireDefs = 255;
+inline constexpr size_t kLoadoutItems = sim::weapons::kMaxWeaponSlots;
+inline constexpr size_t kLoadoutAccessories = 4;
+inline constexpr std::array<uint16_t, sim::weapons::kMaxWeaponSlots> kNoSpawnDefs = [] {
+	std::array<uint16_t, sim::weapons::kMaxWeaponSlots> a{};
+	a.fill(sim::weapons::kNoWeapon);
+	return a;
+}();
 inline constexpr size_t kMaxTargetRows = 128;
 
 inline constexpr size_t kMaxDebugReportBytes = 2 * 1024 * 1024;
@@ -63,6 +70,7 @@ enum class MessageType : uint8_t {
 	PlayerList = 26,
 	SpawnRequest = 27,
 	SuicideRequest = 28,
+	LoadoutRequest = 29,
 };
 
 std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram);
@@ -115,6 +123,7 @@ struct Spawned {
 	uint8_t team = 1;
 
 	bool revived = false;
+	std::array<uint16_t, sim::weapons::kMaxWeaponSlots> defs = kNoSpawnDefs;
 };
 
 struct Loading {
@@ -491,6 +500,13 @@ struct SpawnRequest {
 
 struct SuicideRequest {};
 
+struct LoadoutRequest {
+	uint8_t kit = 0;
+	std::array<uint32_t, kLoadoutItems> items{};
+	std::array<uint32_t, kLoadoutAccessories> accessories{};
+	uint32_t specialization = 0;
+};
+
 std::vector<uint8_t> encode_match_state(const MatchState &p_message);
 core::Result<MatchState> decode_match_state(std::span<const uint8_t> p_datagram);
 
@@ -500,6 +516,8 @@ std::vector<uint8_t> encode_spawn_request(const SpawnRequest &p_message);
 core::Result<SpawnRequest> decode_spawn_request(std::span<const uint8_t> p_datagram);
 std::vector<uint8_t> encode_suicide_request();
 core::Result<SuicideRequest> decode_suicide_request(std::span<const uint8_t> p_datagram);
+std::vector<uint8_t> encode_loadout_request(const LoadoutRequest &p_message);
+core::Result<LoadoutRequest> decode_loadout_request(std::span<const uint8_t> p_datagram);
 
 bool set_player_name(PlayerRow &r_row, std::string_view p_name);
 std::string_view player_name(const PlayerRow &p_row);

@@ -8,6 +8,7 @@
 #include "bf3/host/kits.h"
 #include "bf3/host/lag_comp.h"
 #include "bf3/host/level_load.h"
+#include "bf3/host/loadout.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/collision_world.h"
@@ -92,6 +93,7 @@ struct GunplayStats {
 	uint64_t projectiles_refused = 0;
 	uint64_t budget_exhausted = 0;
 	uint64_t kit_select = 0, kit_select_refused = 0, team_change_refused = 0;
+	uint64_t loadout_select = 0, loadout_refused = 0, loadout_dropped = 0;
 	uint64_t shot_events_dropped = 0, combat_events_clamped = 0, others_dropped = 0;
 	uint64_t trace_dropped = 0;
 	uint32_t live_projectiles = 0;
@@ -124,6 +126,7 @@ struct GunplayLevel {
 	bool capsule_standin = false;
 	std::vector<std::string> notes;
 	KitTable kits;
+	LoadoutCatalog loadouts;
 	float sprint_recover_seconds = 0.12f;
 	float max_health = 100.0f;
 	uint64_t level_hash = 0;
@@ -139,6 +142,7 @@ core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared
 
 struct GunplayLoadOptions {
 	bool tdm_kits = false;
+	bool loadouts = false;
 };
 core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared_ptr<const core::Install> p_install, std::string_view p_level_id,
 		std::string_view p_mode, const GunplayLoadOptions &p_options);
@@ -165,6 +169,10 @@ public:
 	Gunplay &operator=(const Gunplay &) = delete;
 
 	void on_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_team, uint32_t p_tick);
+	bool select_loadout(uint8_t p_slot, uint8_t p_team, uint8_t p_kit, const LoadoutChoice &p_choice);
+	void refuse_loadout();
+	void forget_loadouts(uint8_t p_slot);
+	const Loadout &loadout(uint8_t p_slot) const;
 	void step_soldier(uint8_t p_slot, const sim::Command &p_command, const sim::SoldierState &p_before, const sim::SoldierState &p_after);
 	void step_projectiles(uint32_t p_tick, std::span<const sim::SoldierState> p_states);
 	void apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states, CombatEventSink &r_sink);

@@ -32,6 +32,9 @@ constexpr float kMaxDebugCoordinate = 1.0e6f;
 constexpr uint8_t kKnownWeaponFlags = weapon_flags::kExactAim | weapon_flags::kInfiniteMagazine;
 constexpr uint8_t kKnownRulesFlags = rules_flags::kTdm | rules_flags::kDeployScreen | rules_flags::kRevive;
 constexpr unsigned kWireSlotBits = 7;
+constexpr unsigned kWireDefBits = 8;
+constexpr uint32_t kNoWireDef = 0xFF;
+static_assert(kNoWireDef == kMaxWireDefs);
 static_assert((size_t(1) << kWireSlotBits) == kMaxSlots);
 constexpr unsigned kOthersCountBits = 8;
 constexpr int32_t kOtherPitchMaxCode = (1 << (quant::kSoldierPitchBits - 1)) - 1;
@@ -771,6 +774,11 @@ void serialize(A &r_a, M &r_m) {
 	r_a.bits(r_m.kit, 8);
 	r_a.bits(r_m.team, 8);
 	r_a.bits(r_m.revived, 1);
+	for (auto &def : r_m.defs) {
+		r_a.coded(
+				def, kWireDefBits, [](uint16_t p_def) { return p_def < kMaxWireDefs ? uint32_t(p_def) : kNoWireDef; },
+				[](uint32_t p_code) { return p_code == kNoWireDef ? sw::kNoWeapon : uint16_t(p_code); });
+	}
 	r_a.check("slot out of range", [&] { return r_m.slot < kMaxSlots; });
 	r_a.check("state field out of range", [&] { return state; });
 	r_a.check("kit or team out of range", [&] { return r_m.kit < kMaxKits && r_m.team <= kMaxTeam; });
@@ -1061,9 +1069,6 @@ constexpr double kHpScale = 100.0;
 constexpr uint32_t kHpMaxCode = 10'000'000;
 static_assert(kHpMaxCode < (1u << kHpBits));
 constexpr unsigned kNormalBits = 8;
-constexpr unsigned kWireDefBits = 8;
-constexpr uint32_t kNoWireDef = 0xFF;
-static_assert(kNoWireDef == kMaxWireDefs);
 
 constexpr uint32_t hp_code(float p_hp, size_t &r_clamped) {
 	const double t = double(p_hp) * kHpScale + 0.5;
@@ -1406,6 +1411,18 @@ void serialize(A &r_a, M &r_m) {
 
 template <class A, MaybeConst<SuicideRequest> M> void serialize(A &, M &) {}
 
+template <class A, MaybeConst<LoadoutRequest> M> void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.kit, 8);
+	for (auto &item : r_m.items) {
+		r_a.bits(item, 32);
+	}
+	for (auto &accessory : r_m.accessories) {
+		r_a.bits(accessory, 32);
+	}
+	r_a.bits(r_m.specialization, 32);
+	r_a.check("kit out of range", [&] { return r_m.kit < kMaxKits; });
+}
+
 struct Framing {
 	MessageType type;
 	const char *what;
@@ -1467,6 +1484,7 @@ std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram) {
 		case MessageType::PlayerList:
 		case MessageType::SpawnRequest:
 		case MessageType::SuicideRequest:
+		case MessageType::LoadoutRequest:
 			return MessageType(p_datagram[0]);
 	}
 	return std::nullopt;
@@ -1865,6 +1883,14 @@ std::vector<uint8_t> encode_suicide_request() {
 
 core::Result<SuicideRequest> decode_suicide_request(std::span<const uint8_t> p_datagram) {
 	return decode_as<SuicideRequest>(p_datagram, { MessageType::SuicideRequest, "SuicideRequest" });
+}
+
+std::vector<uint8_t> encode_loadout_request(const LoadoutRequest &p_message) {
+	return encode_as(MessageType::LoadoutRequest, kMaxReliableBytes, p_message);
+}
+
+core::Result<LoadoutRequest> decode_loadout_request(std::span<const uint8_t> p_datagram) {
+	return decode_as<LoadoutRequest>(p_datagram, { MessageType::LoadoutRequest, "LoadoutRequest" });
 }
 
 bool set_player_name(PlayerRow &r_row, std::string_view p_name) {

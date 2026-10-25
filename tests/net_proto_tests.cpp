@@ -255,6 +255,7 @@ int decode_reencode(std::span<const uint8_t> p_bytes) {
 		case net::MessageType::PlayerList:
 		case net::MessageType::SpawnRequest:
 		case net::MessageType::SuicideRequest:
+		case net::MessageType::LoadoutRequest:
 			return decode_reencode_v2(*type, p_bytes);
 	}
 	return -1;
@@ -622,7 +623,7 @@ TEST_SUITE("net-proto") {
 			const uint8_t b = uint8_t(t);
 			known += net::peek_type(std::span<const uint8_t>(&b, 1)).has_value() ? 1 : 0;
 		}
-		CHECK(known == 19);
+		CHECK(known == 20);
 		const uint8_t s = 1;
 		CHECK(net::peek_type(std::span<const uint8_t>(&s, 1)) == net::MessageType::Snapshot);
 	}
@@ -674,14 +675,24 @@ TEST_SUITE("net-proto") {
 			CHECK_FALSE(d->source_digest.has_value());
 		}
 		{
-			const net::Spawned s{ 5, 101, sample_state(rng, 4242) };
+			net::Spawned s{ 5, 101, sample_state(rng, 4242) };
+			s.defs = { 0, 1, sim::weapons::kNoWeapon, sim::weapons::kNoWeapon, sim::weapons::kNoWeapon,
+				sim::weapons::kNoWeapon, 254, 7 };
 			const std::vector<uint8_t> b = net::encode_spawned(s);
-			CHECK(b.size() == 1 + 1 + 4 + 77 + 2 + 1);
+			CHECK(b.size() == 1 + 1 + 4 + 77 + 2 + 9);
 			auto d = net::decode_spawned(b);
 			REQUIRE(d);
 			CHECK(d->slot == 5);
 			CHECK(d->spawn_index == 101);
 			CHECK(d->state == s.state);
+			CHECK(d->defs == s.defs);
+			s.defs[0] = 255;
+			s.defs[1] = 4000;
+			auto cut = net::decode_spawned(net::encode_spawned(s));
+			REQUIRE(cut);
+			CHECK(cut->defs[0] == sim::weapons::kNoWeapon);
+			CHECK(cut->defs[1] == sim::weapons::kNoWeapon);
+			CHECK(net::decode_spawned(net::encode_spawned(net::Spawned{}))->defs == net::kNoSpawnDefs);
 		}
 		{
 			auto d = net::decode_loading(net::encode_loading({ 9, 1000 }));
@@ -1087,8 +1098,17 @@ TEST_SUITE("net-proto") {
 				w.write_bits(0, 8);
 				w.write_bits(1, 8);
 				w.write_bool(false);
+				for (size_t i = 0; i < sim::weapons::kMaxWeaponSlots; ++i) {
+					w.write_bits(i == 0 ? 3u : 0xFFu, 8);
+				}
 			});
 		};
+		REQUIRE(net::decode_spawned(spawned(127, 2, 8, 50.0f)));
+		CHECK(net::decode_spawned(spawned(127, 2, 8, 50.0f))->defs[0] == 3);
+		CHECK(net::decode_spawned(spawned(127, 2, 8, 50.0f))->defs[1] == sim::weapons::kNoWeapon);
+		std::vector<uint8_t> no_defs = spawned(1, 0, 0, 50.0f);
+		no_defs.pop_back();
+		CHECK_FALSE(net::decode_spawned(no_defs));
 		CHECK(net::decode_spawned(spawned(127, 2, 8, 50.0f)));
 		CHECK_FALSE(net::decode_spawned(spawned(128, 0, 0, 50.0f)));
 		CHECK_FALSE(net::decode_spawned(spawned(0, 3, 0, 50.0f)));
@@ -2061,7 +2081,7 @@ TEST_SUITE("net-proto") {
 				s.kit = kit;
 				s.team = team;
 				const std::vector<uint8_t> b = net::encode_spawned(s);
-				CHECK(b.size() == 1 + 1 + 4 + 77 + 2 + 1);
+				CHECK(b.size() == 1 + 1 + 4 + 77 + 2 + 9);
 				auto d = net::decode_spawned(b);
 				CHECK(d.ok() == (kit < net::kMaxKits && team <= net::kMaxTeam));
 				if (d) {
@@ -3151,6 +3171,17 @@ int decode_reencode_v3(net::MessageType p_type, std::span<const uint8_t> p_bytes
 							net::encode_suicide_request() == std::vector<uint8_t>(p_bytes.begin(), p_bytes.end())
 					? 1
 					: -1;
+		case net::MessageType::LoadoutRequest: {
+			auto a = net::decode_loadout_request(p_bytes);
+			if (!a) {
+				return -1;
+			}
+			auto b = net::decode_loadout_request(net::encode_loadout_request(*a));
+			return b && b->kit == a->kit && b->items == a->items && b->accessories == a->accessories &&
+							b->specialization == a->specialization
+					? 1
+					: 0;
+		}
 		default:
 			return -1;
 	}
@@ -3174,6 +3205,12 @@ void append_v3_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>>
 	r_out.emplace_back("PlayerList (delta)", net::encode_player_list(delta));
 	r_out.emplace_back("SpawnRequest", net::encode_spawn_request({ 2, 0 }));
 	r_out.emplace_back("SuicideRequest", net::encode_suicide_request());
+	net::LoadoutRequest lr;
+	lr.kit = 3;
+	lr.items = { 2580429694u, 0u, 17u, 0u, 0u, 0u, 0u, 0xFFFFFFFFu };
+	lr.accessories = { 3011272554u, 0u, 1u, 0u };
+	lr.specialization = 0x80000001u;
+	r_out.emplace_back("LoadoutRequest", net::encode_loadout_request(lr));
 	r_out.emplace_back("CombatEvents (v3)", net::encode_combat_events(sample_combat_v3(rng, 88888, 2, 3, 1, 2), kFrame));
 	net::MatchInfo mi;
 	mi.level = "MP_Subway";
@@ -3398,6 +3435,30 @@ TEST_SUITE("net-proto") {
 		CHECK(dmi->rules_flags == mi.rules_flags);
 		mi.rules_flags = 1u << 3;
 		CHECK_FALSE(net::decode_match_info(net::encode_match_info(mi)));
+		net::LoadoutRequest lr;
+		lr.kit = 2;
+		for (size_t i = 0; i < lr.items.size(); ++i) {
+			lr.items[i] = uint32_t(0x01010101u * (i + 1));
+		}
+		lr.accessories = { 1u, 0xFFFFFFFFu, 0u, 42u };
+		lr.specialization = 7u;
+		const std::vector<uint8_t> lb = net::encode_loadout_request(lr);
+		CHECK(lb.size() == 1 + 1 + 4 * (net::kLoadoutItems + net::kLoadoutAccessories + 1));
+		auto dl = net::decode_loadout_request(lb);
+		REQUIRE(dl);
+		CHECK(dl->kit == 2);
+		CHECK(dl->items == lr.items);
+		CHECK(dl->accessories == lr.accessories);
+		CHECK(dl->specialization == 7u);
+		lr.kit = net::kMaxKits;
+		CHECK_FALSE(net::decode_loadout_request(net::encode_loadout_request(lr)));
+		std::vector<uint8_t> long_loadout = lb;
+		long_loadout.push_back(0);
+		CHECK_FALSE(net::decode_loadout_request(long_loadout));
+		std::vector<uint8_t> short_loadout = lb;
+		short_loadout.pop_back();
+		CHECK_FALSE(net::decode_loadout_request(short_loadout));
+		CHECK_FALSE(net::decode_loadout_request(net::encode_suicide_request()));
 		Rng rng(333);
 		for (const bool revived : { false, true }) {
 			net::Spawned sp{ 7, 3, sample_state(rng, 500) };
@@ -3771,7 +3832,7 @@ TEST_SUITE("net-proto") {
 			types.insert(uint8_t(*type));
 			samples.push_back({ name, std::move(bytes) });
 		}
-		CHECK(types.size() == 19);
+		CHECK(types.size() == 20);
 		static constexpr GoldenPin kPins[] = {
 			{ "Snapshot", 367, 0xa435d4ace31cf825ull, 0 },
 			{ "Snapshot (no own)", 20, 0xa85c8a910ea8826bull, 0 },
@@ -3779,7 +3840,7 @@ TEST_SUITE("net-proto") {
 			{ "Hello", 12, 0xb36010aca7922bd5ull, 0 },
 			{ "MatchInfo", 114, 0x1e0a24458af5f0feull, 0 },
 			{ "Ready", 34, 0x50302cdf0f51bcb5ull, 0 },
-			{ "Spawned", 86, 0x8986cc643035c128ull, 0 },
+			{ "Spawned", 94, 0x1af4b750393b4270ull, 0 },
 			{ "Loading", 4, 0xee6df9e3bb005a46ull, 0 },
 			{ "Kick", 20, 0x24730a3e43ab6c1aull, 0 },
 			{ "Bye", 1, 0xaf63cb4c8601cfa9ull, 0 },
@@ -3793,15 +3854,16 @@ TEST_SUITE("net-proto") {
 			{ "Debug (SpawnTarget)", 30, 0xbf53c23636c9b9efull, 0 },
 			{ "DebugReport (v2)", 916, 0xe73adddf5cc1ab3dull, 0 },
 			{ "MatchInfo (v2)", 82, 0x38ba6d216efb3d54ull, 0 },
-			{ "Spawned (v2)", 86, 0x57d89ea6073b2ad3ull, 0 },
+			{ "Spawned (v2)", 94, 0x9785ca9dec6fc2bbull, 0 },
 			{ "MatchState", 42, 0x6e8a7b2bfcb229a0ull, 0 },
 			{ "PlayerList (full)", 207, 0x68dd8ae5402d6955ull, 0 },
 			{ "PlayerList (delta)", 49, 0x4693a47620178101ull, 0 },
 			{ "SpawnRequest", 3, 0xb1d34918e6b14818ull, 0 },
 			{ "SuicideRequest", 1, 0xaf63d14c8601d9dbull, 0 },
+			{ "LoadoutRequest", 54, 0xbff00e287a388828ull, 0 },
 			{ "CombatEvents (v3)", 137, 0x40d29b14535383d7ull, 0 },
 			{ "MatchInfo (v3)", 82, 0x9f7d6df8af0ee7e8ull, 0 },
-			{ "Spawned (v3 revived)", 86, 0x45a73c3868a4d948ull, 0 },
+			{ "Spawned (v3 revived)", 94, 0x185c920e1aff4290ull, 0 },
 		};
 		check_golden(samples, kPins);
 	}
@@ -3813,7 +3875,7 @@ TEST_SUITE("net-proto") {
 			{ "Loading (permille above 1000)", 4, 0xd50714e3acc7701dull, 0 },
 			{ "Bye", 1, 0xaf63cb4c8601cfa9ull, 0 },
 			{ "MatchInfo (out-of-range fields travel as given)", 187, 0xd223af85467b08d5ull, 0 },
-			{ "Spawned (out-of-range fields travel as given)", 86, 0x1fc913c7d126bfa0ull, 0 },
+			{ "Spawned (out-of-range fields travel as given)", 94, 0x282e0ad5f170e1e8ull, 0 },
 			{ "Debug (out-of-range fields travel as given)", 30, 0x8236dbe05bdccf42ull, 0 },
 			{ "MatchState (clamped)", 42, 0x4b5c4a4eee33f13eull, 0 },
 			{ "PlayerList (canonicalised)", 48, 0x1f62d52eea86fb3cull, 8 },

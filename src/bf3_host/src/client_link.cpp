@@ -186,6 +186,14 @@ void ClientLink::queue_suicide_request() {
 	suicide_out_ = 1;
 }
 
+void ClientLink::queue_loadout_request(const net::LoadoutRequest &p_request) {
+	std::lock_guard lock(requests_mutex_);
+	if (loadout_out_.size() >= 16) {
+		loadout_out_.pop_front();
+	}
+	loadout_out_.push_back(p_request);
+}
+
 void ClientLink::report(net::DebugReport p_report) {
 	std::lock_guard lock(requests_mutex_);
 	reports_.push_back(std::move(p_report));
@@ -237,6 +245,14 @@ void ClientLink::send_requests(uint64_t p_now) {
 	}
 	if (suicides != 0) {
 		submit(net::kChannelReliable, net::encode_suicide_request(), p_now);
+	}
+	std::deque<net::LoadoutRequest> loadouts;
+	{
+		std::lock_guard lock(requests_mutex_);
+		loadouts.swap(loadout_out_);
+	}
+	for (const net::LoadoutRequest &l : loadouts) {
+		submit(net::kChannelReliable, net::encode_loadout_request(l), p_now);
 	}
 }
 

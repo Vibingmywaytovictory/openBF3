@@ -199,6 +199,10 @@ void ClientSession::send_suicide_request() {
 	impl_->loop.send_suicide_request();
 }
 
+void ClientSession::send_loadout_request(const net::LoadoutRequest &p_request) {
+	impl_->loop.send_loadout_request(p_request);
+}
+
 size_t ClientSession::stop_all() {
 	return g_registry.for_each_pinned([](ClientSession *p_session) { p_session->stop(); });
 }

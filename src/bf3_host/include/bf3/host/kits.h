@@ -31,6 +31,7 @@ struct KitLoadout {
 	std::array<std::string, sim::weapons::kMaxWeaponSlots> unlocks;
 	uint8_t active = 0;
 	int32_t hud_icon = 0;
+	std::string asset;
 };
 
 struct KitTable {

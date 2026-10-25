@@ -324,9 +324,13 @@ inline TdmLevel *load_tdm_level_once() {
 	cache.close();
 	l->seconds_load = detail::seconds_since(start);
 	detail::frame() = host::shot_frame(*l->shared->static_world);
-	std::printf("tdm fixture: Metro TDM loaded in %.2f s (shared %.2f s: gunplay %.2f s, logic %.2f s; bots %.2f s), %zu spawns, logic digest "
-				"%016llx\n",
-			l->seconds_load, seconds_shared, l->shared->seconds_gunplay, l->shared->seconds_logic, l->seconds_load - seconds_shared,
+	const host::GunplayLevel *g = l->shared->gunplay.get();
+	std::printf("tdm fixture: Metro TDM loaded in %.2f s (shared %.2f s: gunplay %.2f s [weapons %.2f, kits and "
+				"loadouts %.2f, capsules %.2f, %zu defs], "
+				"logic %.2f s; bots %.2f s), %zu spawns, logic digest %016llx\n",
+			l->seconds_load, seconds_shared, l->shared->seconds_gunplay, g != nullptr ? g->seconds_weapons : 0.0,
+			g != nullptr ? g->seconds_kits : 0.0, g != nullptr ? g->seconds_capsules : 0.0,
+			g != nullptr ? g->defs.size() : size_t(0), l->shared->seconds_logic, l->seconds_load - seconds_shared,
 			l->shared->spawns.size(), (unsigned long long)l->shared->logic_digest);
 	for (const std::string &n : l->shared->tdm_notes) {
 		std::printf("tdm fixture: note: %s\n", n.c_str());

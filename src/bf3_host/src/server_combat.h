@@ -12,6 +12,7 @@
 #include "server_slots.h"
 #include "server_soldiers.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -51,6 +52,9 @@ public:
 	void client_left(size_t p_slot);
 	void select_kit(size_t p_slot, const net::KitSelect &p_select, bool p_dev_commands);
 	void refuse_kit_select();
+	void select_loadout(size_t p_slot, uint8_t p_team, const net::LoadoutRequest &p_request);
+	void refuse_loadout();
+	std::array<uint16_t, sim::weapons::kMaxWeaponSlots> spawned_defs(size_t p_slot) const;
 
 	void record_tick(sim::Tick p_tick, const SlotTable &p_slots, const Soldiers &p_soldiers);
 	void fill_snapshot(size_t p_slot, net::Snapshot &r_snapshot) const;

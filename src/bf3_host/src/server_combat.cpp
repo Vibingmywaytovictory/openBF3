@@ -105,6 +105,7 @@ std::optional<uint8_t> Combat::client_joined(size_t p_slot, bool p_dev_commands,
 	}
 	g.history().client_reset(uint8_t(p_slot));
 	g.clear(uint8_t(p_slot));
+	g.forget_loadouts(uint8_t(p_slot));
 	r_message.match_seed = g.match_seed();
 	r_message.weapon_hash = g.weapon_hash();
 	r_message.weapon_flags = g.weapon_flags();
@@ -118,6 +119,7 @@ void Combat::client_left(size_t p_slot) {
 	if (gunplay_ != nullptr) {
 		gunplay_->history().client_reset(uint8_t(p_slot));
 		gunplay_->clear(uint8_t(p_slot));
+		gunplay_->forget_loadouts(uint8_t(p_slot));
 	}
 }
 
@@ -139,6 +141,30 @@ void Combat::select_kit(size_t p_slot, const net::KitSelect &p_select, bool p_de
 	if (gunplay_ != nullptr) {
 		gunplay_->count_kit_select(true, team_refused);
 	}
+}
+
+void Combat::select_loadout(size_t p_slot, uint8_t p_team, const net::LoadoutRequest &p_request) {
+	if (gunplay_ == nullptr) {
+		return;
+	}
+	LoadoutChoice choice;
+	choice.items = p_request.items;
+	choice.accessories = p_request.accessories;
+	choice.specialization = p_request.specialization;
+	gunplay_->select_loadout(uint8_t(p_slot), p_team, p_request.kit, choice);
+}
+
+void Combat::refuse_loadout() {
+	if (gunplay_ != nullptr) {
+		gunplay_->refuse_loadout();
+	}
+}
+
+std::array<uint16_t, sim::weapons::kMaxWeaponSlots> Combat::spawned_defs(size_t p_slot) const {
+	if (gunplay_ == nullptr || !gunplay_->armed(uint8_t(p_slot))) {
+		return net::kNoSpawnDefs;
+	}
+	return gunplay_->loadout(uint8_t(p_slot)).defs;
 }
 
 void Combat::refuse_kit_select() {

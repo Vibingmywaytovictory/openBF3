@@ -6,6 +6,7 @@
 #include "bf3/core/gameplay/eor_timeline.h"
 #include "bf3/core/gameplay/mode_def.h"
 #include "bf3/host/kits.h"
+#include "bf3/host/loadout.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/logic/round_natives.h"
 #include "bf3/sim/soldier_motor.h"
@@ -1253,6 +1254,183 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(o->rules().stats().refused[size_t(host::SpawnRefusal::Phase)] == phase0 + 1u);
 		CHECK(late.spawned.empty());
 		CHECK_FALSE(is_alive(o->state(late.slot())));
+	}
+
+	TEST_CASE("loadout: the install catalog holds every unlock of each kit slot; resolve_loadout keeps defaults and "
+			  "refuses foreign items") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		REQUIRE_FALSE(gl.loadouts.empty());
+		size_t defaults = 0;
+		for (const auto &team : gl.kits.loadouts) {
+			for (const host::KitLoadout &l : team) {
+				for (const uint16_t d : l.defs) {
+					if (d != sw::kNoWeapon) {
+						defaults = std::max<size_t>(defaults, size_t(d) + 1u);
+					}
+				}
+			}
+		}
+		const host::LoadoutKit *us_assault = gl.loadouts.kit(1, uint8_t(host::KitRole::Assault));
+		REQUIRE(us_assault != nullptr);
+		CHECK(us_assault->slots[0].size() == 28);
+		CHECK(us_assault->slots[1].size() == 18);
+		CHECK(us_assault->slots[6].size() == 1);
+		CHECK(us_assault->slots[7].size() == 2);
+		CHECK(us_assault->defaults[0] == 2580429694u);
+		const host::LoadoutItem *m16 = us_assault->find(0, 2580429694u);
+		REQUIRE(m16 != nullptr);
+		CHECK(m16->unlock == "weapons/m16a4/u_m16a4");
+		CHECK(m16->def == gl.kits.loadout(1, 0).defs[0]);
+		CHECK(m16->accessories[0].size() == 13);
+		CHECK(m16->accessories[1].size() == 3);
+		CHECK(m16->accessories[2].size() == 6);
+		CHECK(m16->accessories[3].size() == 1);
+		size_t simulated_items = 0, missing_defs = 0;
+		for (const auto &team : gl.loadouts.kits) {
+			for (const host::LoadoutKit &k : team) {
+				for (const uint8_t s : host::kKitSlots) {
+					for (const host::LoadoutItem &i : k.slots[s]) {
+						++simulated_items;
+						missing_defs +=
+								i.def < gl.defs.size() && gl.defs[i.def].unlock_identifier == i.identifier ? 0u : 1u;
+					}
+				}
+			}
+		}
+		CHECK(missing_defs == 0);
+
+		const host::Loadout plain = host::default_loadout(gl.loadouts, gl.kits, 1, 0);
+		CHECK(plain.defs == gl.kits.loadout(1, 0).defs);
+		CHECK_FALSE(plain.chosen);
+		core::Result<host::Loadout> echo =
+				host::resolve_loadout(gl.loadouts, gl.kits, 1, 0, host::LoadoutChoice{ plain.choice.items, {}, 0 });
+		REQUIRE(echo.ok());
+		CHECK(echo->defs == plain.defs);
+		host::LoadoutChoice pick;
+		const host::LoadoutItem &other = us_assault->slots[0].back();
+		pick.items[0] = other.identifier;
+		pick.accessories[0] = other.accessories[0].empty() ? 0u : other.accessories[0].front();
+		core::Result<host::Loadout> picked = host::resolve_loadout(gl.loadouts, gl.kits, 1, 0, pick);
+		REQUIRE_MESSAGE(picked.ok(), (picked.ok() ? std::string() : picked.error().message));
+		CHECK(picked->defs[0] == other.def);
+		CHECK(picked->defs[1] == plain.defs[1]);
+		CHECK(picked->chosen);
+		host::LoadoutChoice wrong_slot;
+		wrong_slot.items[0] = us_assault->slots[1].front().identifier;
+		CHECK_FALSE(host::resolve_loadout(gl.loadouts, gl.kits, 1, 0, wrong_slot).ok());
+		CHECK(host::resolve_loadout(gl.loadouts, gl.kits, 1, 0, host::LoadoutChoice{ {}, { 3011272554u, 0, 0, 0 }, 0 })
+						.ok());
+		CHECK_FALSE(host::resolve_loadout(
+				gl.loadouts, gl.kits, 1, 0, host::LoadoutChoice{ {}, { 0, 3011272554u, 0, 0 }, 0 })
+						.ok());
+		CHECK_FALSE(host::resolve_loadout(gl.loadouts, gl.kits, 1, 0, host::LoadoutChoice{ {}, {}, 12345u }).ok());
+		CHECK_FALSE(host::resolve_loadout(gl.loadouts, gl.kits, 3, 0, pick).ok());
+		CHECK_FALSE(host::resolve_loadout(gl.loadouts, gl.kits, 1, 4, pick).ok());
+		std::printf("loadout catalog: %zu items (%zu in simulated slots), %zu weapon defs (%zu defaults), US assault "
+					"28 primaries, M16A4 13/3/6/1 "
+					"accessories, hash %016" PRIx64 "\n",
+				gl.loadouts.items, simulated_items, gl.defs.size(), defaults, gl.loadouts.hash);
+	}
+
+	TEST_CASE("loadout: a LoadoutRequest picks the kit items, the next spawn carries them, a disallowed item is "
+			  "refused, bots keep theirs") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		std::unique_ptr<Match> m = start_match(*level, true, 43u);
+		std::vector<int> bots;
+		for (int i = 0; i < 3; ++i) {
+			bots.push_back(m->bot()->slot);
+		}
+		tdm::ScriptedPeer &p = m->join("picker");
+		p.ready();
+		REQUIRE(wait_in_round(*m));
+		const uint8_t team = m->rules().team_of(uint8_t(p.slot()));
+		REQUIRE((team == 1 || team == 2));
+		const host::LoadoutKit *kit = gl.loadouts.kit(team, 0);
+		REQUIRE(kit != nullptr);
+		const host::KitLoadout &plain = gl.kits.loadout(team, 0);
+		const host::LoadoutItem *primary = nullptr;
+		for (const host::LoadoutItem &i : kit->slots[0]) {
+			if (primary == nullptr && i.def != plain.defs[0] && !i.accessories[0].empty()) {
+				primary = &i;
+			}
+		}
+		const host::LoadoutItem *knife = nullptr;
+		for (const host::LoadoutItem &i : kit->slots[7]) {
+			if (knife == nullptr && i.def != plain.defs[7]) {
+				knife = &i;
+			}
+		}
+		REQUIRE(primary != nullptr);
+		REQUIRE(knife != nullptr);
+		REQUIRE_FALSE(kit->specializations.empty());
+		net::LoadoutRequest request;
+		request.kit = 0;
+		request.items[0] = primary->identifier;
+		request.items[7] = knife->identifier;
+		request.accessories[0] = primary->accessories[0].front();
+		request.specialization = kit->specializations.front();
+		const host::GunplayStats g0 = m->server.stats().gunplay;
+		const uint64_t bad0 = m->server.stats().bad_datagrams;
+		m->server.on_receive(p.peer(), net::kChannelReliable, net::encode_loadout_request(request));
+		net::LoadoutRequest wrong_slot = request;
+		wrong_slot.items[0] = kit->slots[1].front().identifier;
+		m->server.on_receive(p.peer(), net::kChannelReliable, net::encode_loadout_request(wrong_slot));
+		net::LoadoutRequest wrong_accessory = request;
+		wrong_accessory.accessories[0] = 12345u;
+		m->server.on_receive(p.peer(), net::kChannelReliable, net::encode_loadout_request(wrong_accessory));
+		std::vector<uint8_t> long_request = net::encode_loadout_request(request);
+		long_request.push_back(0);
+		m->server.on_receive(p.peer(), net::kChannelReliable, long_request);
+		m->ticks(1);
+		const host::GunplayStats g1 = m->server.stats().gunplay;
+		CHECK(g1.loadout_select == g0.loadout_select + 1u);
+		CHECK(g1.loadout_refused == g0.loadout_refused + 3u);
+		CHECK(m->server.stats().bad_datagrams == bad0 + 1u);
+
+		const size_t spawned0 = p.spawned.size();
+		p.spawn_request(0);
+		REQUIRE(m->until([&] { return is_alive(m->state(p.slot())); }, 240));
+		m->ticks(2);
+		const host::Gunplay &g = *m->server.gunplay();
+		const sw::SoldierWeaponsState &w = g.weapons(uint8_t(p.slot()));
+		CHECK(w.slots[0].def == primary->def);
+		CHECK(w.slots[1].def == plain.defs[1]);
+		CHECK(w.slots[6].def == plain.defs[6]);
+		CHECK(w.slots[7].def == knife->def);
+		const host::Loadout &carried = g.loadout(uint8_t(p.slot()));
+		CHECK(carried.chosen);
+		CHECK(carried.choice.items[0] == primary->identifier);
+		CHECK(carried.choice.items[7] == knife->identifier);
+		CHECK(carried.choice.items[1] == kit->defaults[1]);
+		CHECK(carried.choice.accessories[0] == primary->accessories[0].front());
+		CHECK(carried.choice.specialization == kit->specializations.front());
+		REQUIRE(p.spawned.size() > spawned0);
+		CHECK(p.spawned.back().defs == carried.defs);
+		CHECK(p.spawned.back().defs[0] == primary->def);
+		size_t bots_checked = 0;
+		for (const int b : bots) {
+			if (!g.armed(uint8_t(b))) {
+				continue;
+			}
+			++bots_checked;
+			CHECK(g.weapons(uint8_t(b)).slots[0].def == gl.kits.loadout(g.team(uint8_t(b)), g.kit(uint8_t(b))).defs[0]);
+			CHECK_FALSE(g.loadout(uint8_t(b)).chosen);
+		}
+		CHECK(bots_checked > 0);
+		CHECK(m->server.stats().gunplay.loadout_dropped == g0.loadout_dropped);
+		std::printf("loadout: the peer spawned with %s (def %u) and %s (def %u), 1 request taken, 3 refused, %zu bots "
+					"on their kit defaults\n",
+				primary->unlock.c_str(), unsigned(primary->def), knife->unlock.c_str(), unsigned(knife->def),
+				bots_checked);
+		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 
 	TEST_CASE("suicide: a SuicideRequest kills the peer's soldier as its own killer; refused while dead; a bad one is "

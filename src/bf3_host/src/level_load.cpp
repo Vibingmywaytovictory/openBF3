@@ -583,6 +583,7 @@ core::Status load_shared_gunplay(const LevelDatabase &p_db, SharedLevel &r_level
 	const std::string id = p_db.level->info.id.empty() ? p_db.level->root_name : p_db.level->info.id;
 	GunplayLoadOptions o;
 	o.tdm_kits = p_options.tdm;
+	o.loadouts = p_options.tdm;
 	core::Result<std::shared_ptr<const GunplayLevel>> g = load_gunplay_level(p_db.install, id, p_db.level->mode, o);
 	if (!g) {
 		return g.error();

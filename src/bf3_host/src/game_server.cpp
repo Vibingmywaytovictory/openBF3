@@ -306,6 +306,18 @@ struct GameServer::Impl {
 		match.request_spawn(size_t(p_slot), r->kit, r->spawn_choice, tick + 1u);
 	}
 
+	void receive_loadout_request(int p_slot, std::span<const uint8_t> p_datagram) {
+		core::Result<net::LoadoutRequest> r = net::decode_loadout_request(p_datagram);
+		if (!r || p_slot < 0 || size_t(p_slot) >= slots.size()) {
+			++bad_datagrams;
+			combat.refuse_loadout();
+			return;
+		}
+		const uint8_t team = match.on() ? match.rules()->team_of(uint8_t(p_slot))
+										: uint8_t(std::clamp(slots[size_t(p_slot)].team, 0, int(net::kMaxTeam)));
+		combat.select_loadout(size_t(p_slot), team, *r);
+	}
+
 	void receive_suicide_request(int p_slot, std::span<const uint8_t> p_datagram) {
 		if (!net::decode_suicide_request(p_datagram) || p_slot < 0 || size_t(p_slot) >= slots.size() || !match.on()) {
 			++bad_datagrams;
@@ -457,6 +469,9 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 			return;
 		case net::MessageType::SuicideRequest:
 			m.receive_suicide_request(at, p_datagram);
+			return;
+		case net::MessageType::LoadoutRequest:
+			m.receive_loadout_request(at, p_datagram);
 			return;
 		default:
 			++m.bad_datagrams;

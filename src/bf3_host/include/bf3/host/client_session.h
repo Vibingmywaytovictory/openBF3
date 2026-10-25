@@ -256,6 +256,7 @@ public:
 
 	void send_spawn_request(uint8_t p_kit);
 	void send_suicide_request();
+	void send_loadout_request(const net::LoadoutRequest &p_request);
 
 	static size_t stop_all();
 

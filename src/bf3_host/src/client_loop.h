@@ -42,6 +42,7 @@ public:
 	void send_kit_select(const net::KitSelect &p_select);
 	void send_spawn_request(uint8_t p_kit);
 	void send_suicide_request();
+	void send_loadout_request(const net::LoadoutRequest &p_request);
 
 private:
 	ClientSessionConfig config;

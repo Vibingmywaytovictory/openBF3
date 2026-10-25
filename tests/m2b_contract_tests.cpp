@@ -157,6 +157,7 @@ TEST_SUITE("m2b-contract") {
 		CHECK(level.logic_digest == 0);
 		CHECK(host::GunplayConfig().defib_def == sim::weapons::kNoWeapon);
 		CHECK_FALSE(host::GunplayLoadOptions().tdm_kits);
+		CHECK_FALSE(host::GunplayLoadOptions().loadouts);
 		CHECK(host::KitTableOptions().assault_gadget.empty());
 		CHECK(host::KitTable().defib_def == sim::weapons::kNoWeapon);
 		const sim::MotorParams motor;

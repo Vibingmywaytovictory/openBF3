@@ -243,7 +243,15 @@ core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared
 	if (p_options.tdm_kits) {
 		variants.insert(std::string(kTdmAssaultGadget));
 	}
-	for (const std::string &v : variants) {
+	std::vector<std::string> ordered(variants.begin(), variants.end());
+	if (p_options.loadouts) {
+		for (std::string &v : loadout_variants(kits)) {
+			if (!variants.contains(v)) {
+				ordered.push_back(std::move(v));
+			}
+		}
+	}
+	for (const std::string &v : ordered) {
 		core::Result<gp::WeaponDef> def = w->catalog->resolve(v);
 		if (!def) {
 			return core::error_at(where + ": weapon " + v, def.error());
@@ -259,6 +267,15 @@ core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared
 		return core::error_at(where, table.error());
 	}
 	level->kits = std::move(*table);
+	if (p_options.loadouts) {
+		core::Result<LoadoutCatalog> catalog =
+				make_loadout_catalog(db, *progression, kits, level->defs, level->kits, &budget);
+		if (!catalog) {
+			return core::error_at(where, catalog.error());
+		}
+		level->loadouts = std::move(*catalog);
+		level->kits.hash = (level->kits.hash ^ level->loadouts.hash) * 0x100000001B3ull;
+	}
 	for (const std::string &s : level->kits.skipped) {
 		level->notes.push_back("kits: skipped " + s);
 	}
@@ -360,6 +377,8 @@ struct Gunplay::Impl {
 		uint32_t reload_count = 0;
 		uint32_t burst_count = 0;
 		std::array<AckEntry, kAckRing> acks{};
+		std::array<std::optional<LoadoutChoice>, kKitCount> choices{};
+		Loadout loadout;
 	};
 	struct TickDeath {
 		net::DeathEvent event;
@@ -466,7 +485,15 @@ void Gunplay::on_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_team, uint32_t p
 		return;
 	}
 	const KitLoadout &l = m.level->kits.loadout(p_team, s.kit);
-	if (!sw::spawn_soldier_weapons(s.weapons, *m.table, l.defs, l.active, p_tick).ok()) {
+	s.loadout = default_loadout(m.level->loadouts, m.level->kits, p_team, s.kit);
+	if (const std::optional<LoadoutChoice> &choice = s.choices[s.kit]) {
+		if (core::Result<Loadout> chosen = resolve_loadout(m.level->loadouts, m.level->kits, p_team, s.kit, *choice)) {
+			s.loadout = std::move(*chosen);
+		} else {
+			++m.stats.loadout_dropped;
+		}
+	}
+	if (!sw::spawn_soldier_weapons(s.weapons, *m.table, s.loadout.defs, l.active, p_tick).ok()) {
 		return;
 	}
 	s.armed = true;
@@ -763,6 +790,34 @@ bool Gunplay::armed(uint8_t p_slot) const {
 
 uint8_t Gunplay::team(uint8_t p_slot) const {
 	return p_slot < impl_->slots.size() ? impl_->slots[p_slot].team : uint8_t(0);
+}
+
+bool Gunplay::select_loadout(uint8_t p_slot, uint8_t p_team, uint8_t p_kit, const LoadoutChoice &p_choice) {
+	Impl &m = *impl_;
+	if (p_slot >= m.slots.size() || p_kit >= kKitCount ||
+			!resolve_loadout(m.level->loadouts, m.level->kits, p_team, p_kit, p_choice)) {
+		++m.stats.loadout_refused;
+		return false;
+	}
+	m.slots[p_slot].choices[p_kit] = p_choice;
+	++m.stats.loadout_select;
+	return true;
+}
+
+void Gunplay::refuse_loadout() {
+	++impl_->stats.loadout_refused;
+}
+
+void Gunplay::forget_loadouts(uint8_t p_slot) {
+	if (p_slot < impl_->slots.size()) {
+		impl_->slots[p_slot].choices = {};
+		impl_->slots[p_slot].loadout = Loadout();
+	}
+}
+
+const Loadout &Gunplay::loadout(uint8_t p_slot) const {
+	static const Loadout kNone;
+	return p_slot < impl_->slots.size() ? impl_->slots[p_slot].loadout : kNone;
 }
 
 uint8_t Gunplay::kit(uint8_t p_slot) const {

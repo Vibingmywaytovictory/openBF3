@@ -237,6 +237,7 @@ void ClientGunplay::spawned(const net::Spawned &p_spawned, bool p_have_own, uint
 	l.life = p_spawned.state.life;
 	l.kit = p_spawned.kit;
 	l.team = p_spawned.team;
+	l.defs = p_spawned.defs;
 	if (p_have_own && p_spawned.state.life == p_own_life) {
 		kit_ = p_spawned.kit;
 		team_ = p_spawned.team;
@@ -409,13 +410,16 @@ void ClientGunplay::weapons_spawn(const sim::SoldierState &p_s) {
 	spawn.time = sim::weapons::tick_end(t);
 	if (l.valid && l.life == p_s.life && l.team >= 1 && l.team <= kKitTeams && l.kit < kKitCount) {
 		const KitLoadout &k = inputs_->kits.loadouts[size_t(l.team - 1)][l.kit];
+		const bool sent = std::any_of(
+				l.defs.begin(), l.defs.end(), [&](uint16_t p_def) { return p_def != sim::weapons::kNoWeapon; });
+		const std::array<uint16_t, sim::weapons::kMaxWeaponSlots> &defs = sent ? l.defs : k.defs;
 		sim::WeaponPredictionEntry e;
 		const sim::WeaponPredictionEntry *prev = lane_->newest_at_or_below(t);
 		if (prev != nullptr) {
 			e.state = prev->state;
 		}
 		e.state.player_slot = own_slot_;
-		if (sim::weapons::spawn_soldier_weapons(e.state, *table_, k.defs, k.active, t).ok()) {
+		if (sim::weapons::spawn_soldier_weapons(e.state, *table_, defs, k.active, t).ok()) {
 			e.tick = t;
 			e.spawn_tick = t;
 			lane_->put(e);

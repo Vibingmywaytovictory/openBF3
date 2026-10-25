@@ -31,7 +31,7 @@ struct Rng {
 
 const net::ShotQuantization kFrame{ { -2048.0f, -512.0f, -2048.0f } };
 
-constexpr std::array<net::MessageType, 19> kTypes = {
+constexpr std::array<net::MessageType, 20> kTypes = {
 	net::MessageType::Snapshot,
 	net::MessageType::CommandPacket,
 	net::MessageType::SnapshotOthers,
@@ -51,6 +51,7 @@ constexpr std::array<net::MessageType, 19> kTypes = {
 	net::MessageType::PlayerList,
 	net::MessageType::SpawnRequest,
 	net::MessageType::SuicideRequest,
+	net::MessageType::LoadoutRequest,
 };
 
 const char *type_name(net::MessageType p_type) {
@@ -93,6 +94,8 @@ const char *type_name(net::MessageType p_type) {
 			return "SpawnRequest";
 		case net::MessageType::SuicideRequest:
 			return "SuicideRequest";
+		case net::MessageType::LoadoutRequest:
+			return "LoadoutRequest";
 	}
 	return "?";
 }
@@ -211,6 +214,10 @@ Verdict decode_as(net::MessageType p_type, std::span<const uint8_t> p_bytes) {
 			return check(
 					p_bytes, [](std::span<const uint8_t> p) { return net::decode_suicide_request(p); },
 					[](const net::SuicideRequest &, bool &) { return net::encode_suicide_request(); });
+		case net::MessageType::LoadoutRequest:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_loadout_request(p); },
+					[](const net::LoadoutRequest &p_m, bool &) { return net::encode_loadout_request(p_m); });
 	}
 	return Verdict::Refused;
 }
@@ -512,6 +519,11 @@ std::vector<Sample> samples() {
 		out.push_back({ net::MessageType::PlayerList, "PlayerList (delta)", net::encode_player_list(pl) });
 		out.push_back({ net::MessageType::SpawnRequest, "SpawnRequest", net::encode_spawn_request({ 1, 0 }) });
 		out.push_back({ net::MessageType::SuicideRequest, "SuicideRequest", net::encode_suicide_request() });
+		net::LoadoutRequest loadout;
+		loadout.kit = 1;
+		loadout.items[0] = 2580429694u;
+		loadout.accessories[0] = 3011272554u;
+		out.push_back({ net::MessageType::LoadoutRequest, "LoadoutRequest", net::encode_loadout_request(loadout) });
 	}	return out;
 }
 

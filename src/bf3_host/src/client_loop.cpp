@@ -355,4 +355,8 @@ void ClientLoop::send_spawn_request(uint8_t p_kit) {
 void ClientLoop::send_suicide_request() {
 	link.queue_suicide_request();
 }
+
+void ClientLoop::send_loadout_request(const net::LoadoutRequest &p_request) {
+	link.queue_loadout_request(p_request);
+}
 }

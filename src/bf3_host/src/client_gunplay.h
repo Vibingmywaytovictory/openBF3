@@ -104,6 +104,7 @@ private:
 		uint32_t life = 0;
 		uint8_t kit = 0;
 		uint8_t team = 0;
+		std::array<uint16_t, sim::weapons::kMaxWeaponSlots> defs = net::kNoSpawnDefs;
 	};
 	static constexpr size_t kCommandViews = 256;
 	static constexpr size_t kLogLimit = size_t(1) << 20;
