@@ -8,8 +8,13 @@
 #include "godot_util.h"
 #include "hud_items.h"
 #include "input_mapper.h"
+#include "native_flow.h"
 #include "native_hud.h"
+#include "native_screens.h"
 #include "ui_assets.h"
+#if OPENBF3_BUILD_CHECKS
+#include "native_screens_check.h"
+#endif
 
 #include "bf3/core/util/elapsed.h"
 #include "bf3/host/game_server.h"
@@ -171,9 +176,74 @@ void build_tdm_ui(GameState &r_game, TdmState &r_m, bool p_headless) {
 			r_m.screen_records.add(r_m.tdm_hud.get());
 		}
 	}
+	if (r_m.windowed && r_m.native_screens && r_game.layer != nullptr && r_game.native_hud != nullptr) {
+		r_m.ui_screens = memnew(Bf3UiScreens);
+		r_m.ui_screens->set_name("NativeScreens");
+		r_m.ui_screens->set_manual(true);
+		r_game.layer->add_child(r_m.ui_screens);
+		r_m.ui_screens->adopt(r_game.native_hud);
+		r_m.screen_records.add(r_m.ui_screens);
+		r_m.native_flow =
+				std::unique_ptr<NativeFlow, void (*)(NativeFlow *)>(new NativeFlow(), &delete_part<NativeFlow>);
+		r_m.native_flow->set_keep_log(r_m.native_screens_check);
+	}
 	r_m.death_camera = std::unique_ptr<Bf3DeathCamera, void (*)(Bf3DeathCamera *)>(new Bf3DeathCamera(), &delete_part<Bf3DeathCamera>);
 	if (r_game.crowd != nullptr && !r_game.crowd->built()) {
 		r_game.crowd->set_corpse_seconds(r_m.corpse_seconds > 0.0f ? r_m.corpse_seconds : bf3::anim::kCrowdCorpseSeconds);
+	}
+}
+
+void step_native_screens(GameState &r_game, TdmState &r_m, const host::PresentationFrame &p_f,
+		const std::string &p_level, const std::string &p_mode, double p_delta) {
+	if (r_m.ui_screens == nullptr || r_m.native_flow == nullptr) {
+		return;
+	}
+	NativeFlow &flow = *r_m.native_flow;
+	if (!flow.started()) {
+		Bf3Localisation *loc = r_game.localisation != nullptr ? r_game.localisation : Bf3Localisation::current();
+		if (loc != nullptr && loc->install() != nullptr) {
+			flow.start(loc->install(), p_level, p_mode);
+		}
+	}
+	if (!r_m.native_client_set && r_game.native_hud != nullptr && r_game.native_hud->is_ready() &&
+			!r_game.native_hud->has_failed()) {
+		r_m.ui_screens->set_client(r_game.native_hud->client());
+		r_m.native_client_set = true;
+	}
+	if (!r_m.native_following && r_m.native_client_set && flow.poll()) {
+		r_m.ui_screens->set_resolver(flow.resolver());
+		r_m.ui_screens->follow(flow.session());
+		r_m.native_following = true;
+		UtilityFunctions::print(to_godot("[ui] native screens follow the client UI flow of " + p_level + " " + p_mode +
+				" (loaded in " + std::to_string(flow.load_seconds()) + " s)"));
+	}
+	if (flow.failed() && !r_m.native_failure_printed) {
+		r_m.native_failure_printed = true;
+		UtilityFunctions::print(to_godot("[ui] ERROR native screens: " + flow.error()));
+	}
+	r_m.ui_screens->set_model(r_game.hud_model);
+	host::UiGameState st;
+	st.joined = p_f.match_valid && p_f.stats.connected && !p_f.stats.refused;
+	st.phase = p_f.match_valid ? p_f.match.phase : net::MatchPhase::Loading;
+	st.counting_down = st.phase == net::MatchPhase::PreRound && p_f.match.countdown_end_tick > p_f.newest_tick;
+	st.own_deaths = r_m.own_deaths;
+	st.own_spawns = r_m.own_spawns;
+	st.winner = p_f.match.winner;
+	st.unspawned = p_f.own_unspawned;
+	if (r_m.native_following) {
+		if (const bf3::core::Status s = flow.tick(st, p_delta); !s && !r_m.native_failure_printed) {
+			r_m.native_failure_printed = true;
+			UtilityFunctions::print(to_godot("[ui] ERROR native screens: " + s.error().message));
+		}
+		for (const bf3::core::ui::UiFlowAction &a : flow.take_actions()) {
+			if (a.name == kUiFlowSpawnAction) {
+				r_m.deploy_click = true;
+			}
+		}
+	}
+	r_m.ui_screens->step(p_delta);
+	if (!r_m.native_screens_check) {
+		r_m.ui_screens->clear_log();
 	}
 }
 
@@ -219,6 +289,12 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 			error = s.error().message;
 		}
 		bots_ = m.options.bots;
+		m.native_screens_check = has_user_arg("native-screens-check");
+		m.native_screens =
+				m.native_screens_check || (has_user_arg("native-screens") && user_arg_value("native-screens") != "0");
+		if (m.native_screens_check && quit_after_ <= 0.0) {
+			quit_after_ = 1.0e9;
+		}
 		m.options.tdm_tuning_cfg = config_path("res://config/tdm_tuning.cfg");
 		m.options.bot_tuning_cfg = config_path("res://config/bot_tuning.cfg");
 		m.check_options.shots_dir = utf8_path(user_arg_value("m2b-shots"));
@@ -357,6 +433,7 @@ void Bf3LevelSession::tdm_presented(uint64_t p_now_ns) {
 	if (r_game.alive && (f.own_curr.life != m.own_life_seen || !m.was_alive)) {
 		m.own_life_seen = f.own_curr.life;
 		m.spawned_this_round = true;
+		++m.own_spawns;
 		m.life_revived = m.revive_seen_s >= 0.0 && now_s - m.revive_seen_s < 2.0;
 		if (m.deploy.armed && !m.life_revived) {
 			++m.deploys;
@@ -505,7 +582,22 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		}
 	}
 	m.kill_card_source = host::HudKillCardSource();
+	step_native_screens(r_game, m, f, level_id(), mode_id(), p_delta);
 	m.ms_tdm_hud = ms_since(t0);
+#if OPENBF3_BUILD_CHECKS
+	if (m.native_screens_check && m.ui_screens != nullptr && m.native_flow != nullptr && !m.finished) {
+		if (m.native_check == nullptr) {
+			m.native_check = std::unique_ptr<NativeScreensCheck, void (*)(NativeScreensCheck *)>(
+					new NativeScreensCheck(), &delete_part<NativeScreensCheck>);
+		}
+		if (m.native_check->frame(*m.ui_screens, *m.native_flow, now_s)) {
+			m.finished = true;
+			UtilityFunctions::print(to_godot(m.native_check->report()));
+			finish(m.native_check->exit_code());
+			return true;
+		}
+	}
+#endif
 
 	t0 = std::chrono::steady_clock::now();
 	const bool dead = !r_game.alive && m.spawned_this_round;
@@ -609,6 +701,15 @@ void Bf3LevelSession::tdm_shutdown() {
 	}
 	TdmState &m = *game_->tdm;
 	m.check.reset();
+	if (m.ui_screens != nullptr) {
+		m.screen_records.remove(m.ui_screens);
+		m.ui_screens->follow(nullptr);
+		m.ui_screens->set_resolver(nullptr);
+		m.ui_screens->adopt(nullptr);
+		m.ui_screens = nullptr;
+	}
+	m.native_check.reset();
+	m.native_flow.reset();
 	if (m.tdm_hud != nullptr) {
 		m.tdm_hud->shutdown();
 	}

@@ -104,6 +104,10 @@ target_sources(bf3_godot PRIVATE
     src/hud_items.h
     src/native_hud.cpp
     src/native_hud.h
+    src/native_flow.cpp
+    src/native_flow.h
+    src/native_screens.cpp
+    src/native_screens.h
     src/ui_screen_host.h
     src/ui_screen_records.cpp
     src/ui_screen_records.h
@@ -217,6 +221,8 @@ if(OPENBF3_BUILD_CHECKS)
         src/minimap_check.cpp
         src/minimap_check.h
         src/native_hud_moments.cpp
+        src/native_screens_check.cpp
+        src/native_screens_check.h
         src/s0_selftest.cpp
         src/s0_selftest.h
         src/swf_view_check.cpp

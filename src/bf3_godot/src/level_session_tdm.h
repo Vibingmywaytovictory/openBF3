@@ -15,6 +15,10 @@
 
 namespace bf3::godot_side {
 
+class Bf3UiScreens;
+class NativeFlow;
+class NativeScreensCheck;
+
 struct TdmState {
 
 	bool enabled = false;
@@ -75,6 +79,16 @@ struct TdmState {
 	bool death_view_end = false;
 	bool was_alive = false;
 	bool deploy_click = false;
+
+	bool native_screens = false;
+	bool native_screens_check = false;
+	bool native_following = false;
+	bool native_client_set = false;
+	bool native_failure_printed = false;
+	uint32_t own_spawns = 0;
+	Bf3UiScreens *ui_screens = nullptr;
+	std::unique_ptr<NativeFlow, void (*)(NativeFlow *)> native_flow{ nullptr, nullptr };
+	std::unique_ptr<NativeScreensCheck, void (*)(NativeScreensCheck *)> native_check{ nullptr, nullptr };
 };
 
 }

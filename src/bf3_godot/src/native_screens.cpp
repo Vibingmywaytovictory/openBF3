@@ -1,0 +1,654 @@
+#include "native_screens.h"
+
+#include "godot_util.h"
+#include "native_hud.h"
+#include "swf_view.h"
+#include "ui_assets.h"
+
+#include "bf3/core/ui/ui_graph.h"
+#include "bf3/core/ui/ui_input.h"
+#include "bf3/host/ui_flow_session.h"
+
+#include <godot_cpp/classes/engine.hpp>
+#include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/transform2d.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
+
+#include <algorithm>
+#include <cmath>
+
+using namespace godot;
+namespace ui = bf3::core::ui;
+
+namespace bf3::godot_side {
+
+const char *ui_screen_phase_name(UiScreenPhase p_phase) {
+	switch (p_phase) {
+		case UiScreenPhase::Entering:
+			return "entering";
+		case UiScreenPhase::Shown:
+			return "shown";
+		case UiScreenPhase::Exiting:
+			return "exiting";
+	}
+	return "?";
+}
+
+struct Bf3UiScreens::Entry {
+	std::string partition;
+	bool adopted = false;
+	bool movie = false;
+	uint64_t flow_id = 0;
+	UiScreenPhase phase = UiScreenPhase::Entering;
+	bool shown = true;
+	bool modal = false;
+	bool focused = false;
+	int32_t order = 0;
+	uint64_t shown_count = 1;
+	Bf3SwfView *view = nullptr;
+	std::unique_ptr<ui::SwfScene> scene;
+	std::unique_ptr<ui::HudScreen> screen;
+};
+
+Bf3UiScreens::Bf3UiScreens() = default;
+
+Bf3UiScreens::~Bf3UiScreens() = default;
+
+void Bf3UiScreens::_bind_methods() {}
+
+void Bf3UiScreens::_notification(int p_what) {
+	if (p_what == NOTIFICATION_PREDELETE) {
+		for (std::unique_ptr<Entry> &e : entries_) {
+			e->screen.reset();
+		}
+	}
+}
+
+void Bf3UiScreens::_ready() {
+	if (Engine::get_singleton()->is_editor_hint()) {
+		return;
+	}
+	set_process(true);
+}
+
+void Bf3UiScreens::_process(double p_delta) {
+	if (Engine::get_singleton()->is_editor_hint() || manual_) {
+		return;
+	}
+	step(p_delta);
+}
+
+void Bf3UiScreens::note(std::string p_line) {
+	if (log_.size() < kUiScreensMaxLog) {
+		log_.push_back(std::move(p_line));
+	}
+}
+
+void Bf3UiScreens::error(std::string p_message) {
+	note("error " + p_message);
+	if (errors_.size() < kUiScreensMaxErrors) {
+		errors_.push_back(std::move(p_message));
+	}
+}
+
+Bf3UiScreens::Entry *Bf3UiScreens::find(std::string_view p_partition) {
+	for (std::unique_ptr<Entry> &e : entries_) {
+		if (e->partition == p_partition) {
+			return e.get();
+		}
+	}
+	return nullptr;
+}
+
+const Bf3UiScreens::Entry *Bf3UiScreens::find(std::string_view p_partition) const {
+	for (const std::unique_ptr<Entry> &e : entries_) {
+		if (e->partition == p_partition) {
+			return e.get();
+		}
+	}
+	return nullptr;
+}
+
+ui::HudScreen *Bf3UiScreens::screen_of(const Entry &p_entry) const {
+	if (p_entry.adopted) {
+		return hud_ != nullptr ? hud_->find_screen(p_entry.partition).screen : nullptr;
+	}
+	return p_entry.screen.get();
+}
+
+Bf3SwfView *Bf3UiScreens::view_of(const Entry &p_entry) const {
+	if (p_entry.adopted) {
+		return hud_ != nullptr ? hud_->find_screen(p_entry.partition).view : nullptr;
+	}
+	return p_entry.view;
+}
+
+void Bf3UiScreens::adopt(Bf3NativeHud *p_hud) {
+	hud_ = p_hud;
+	if (hud_ == nullptr) {
+		return;
+	}
+	for (size_t i = 0; i < kNativeHudViews; ++i) {
+		if (find(kNativeHudPartitions[i]) != nullptr) {
+			continue;
+		}
+		auto e = std::make_unique<Entry>();
+		e->partition = std::string(kNativeHudPartitions[i]);
+		e->adopted = true;
+		e->order = int32_t(i);
+		e->phase = UiScreenPhase::Shown;
+		entries_.push_back(std::move(e));
+	}
+}
+
+void Bf3UiScreens::follow(host::UiFlowSession *p_session) {
+	session_ = p_session;
+}
+
+void Bf3UiScreens::set_drawn(std::string_view p_partition, bool p_drawn) {
+	if (p_drawn) {
+		drawn_.emplace(p_partition);
+	} else if (const auto it = drawn_.find(p_partition); it != drawn_.end()) {
+		drawn_.erase(it);
+	}
+}
+
+bf3::core::Status Bf3UiScreens::open_screen(std::string_view p_partition) {
+	if (Entry *e = find(p_partition)) {
+		if (e->adopted && hud_ != nullptr) {
+			BF3_TRY(hud_->open_screen(p_partition));
+		}
+		return bf3::core::Status::success();
+	}
+	if (db_ == nullptr) {
+		return bf3::core::make_error(std::string(p_partition) + ": Bf3UiScreens has no resolver for screen assets");
+	}
+	bf3::core::Result<ui::HudScreenAsset> asset = ui::read_hud_screen_asset(*db_, p_partition);
+	if (!asset) {
+		return asset.error();
+	}
+	return open_entry(p_partition, *asset, nullptr);
+}
+
+bf3::core::Status Bf3UiScreens::open_movie_screen(std::string_view p_movie, ui::HudRootData *p_data) {
+	if (find(p_movie) != nullptr) {
+		return bf3::core::Status::success();
+	}
+	BF3_TRY(open_entry(p_movie, ui::hud_movie_screen_asset(p_movie), p_data));
+	find(p_movie)->movie = true;
+	return bf3::core::Status::success();
+}
+
+bf3::core::Status Bf3UiScreens::open_entry(
+		std::string_view p_partition, const ui::HudScreenAsset &p_asset, ui::HudRootData *p_data) {
+	if (entries_.size() >= kUiScreensMax) {
+		return bf3::core::make_error(
+				std::string(p_partition) + ": more than " + std::to_string(kUiScreensMax) + " screens");
+	}
+	Bf3UiAssets *assets = Bf3UiAssets::current();
+	if (assets == nullptr || !assets->is_loaded() || assets->movies() == nullptr) {
+		return bf3::core::make_error(std::string(p_partition) + ": no Bf3UiAssets movies");
+	}
+	auto e = std::make_unique<Entry>();
+	e->partition = std::string(p_partition);
+	e->order = next_order_++;
+	ui::HudStageRects rects;
+	ui::SwfScene *scene = nullptr;
+	if (drawn_.count(p_partition) != 0) {
+		Bf3SwfView *v = memnew(Bf3SwfView);
+		v->set_name(to_godot(ui::ui_data_category_leaf(p_partition)));
+		v->set_playing(false);
+		add_child(v);
+		e->view = v;
+		if (const bf3::core::Status st = v->open(p_asset.movie); !st) {
+			remove_child(v);
+			v->queue_free();
+			return bf3::core::make_error(p_asset.movie + ": " + st.error().message);
+		}
+		scene = v->scene();
+		rects.visible = v->visible_rect();
+	} else {
+		bf3::core::Result<ui::SwfScene> made = ui::SwfScene::open(*assets->movies(), p_asset.movie);
+		if (!made) {
+			return bf3::core::make_error(p_asset.movie + ": " + made.error().message);
+		}
+		e->scene = std::make_unique<ui::SwfScene>(std::move(*made));
+		scene = e->scene.get();
+		rects.visible = scene->stage();
+	}
+	rects.original = scene->stage();
+	bf3::core::Result<std::unique_ptr<ui::HudScreen>> s =
+			ui::HudScreen::open(*scene, *assets->movies(), p_asset, assets->swf_fonts(), client_, rects);
+	if (!s) {
+		if (e->view != nullptr) {
+			remove_child(e->view);
+			e->view->queue_free();
+		}
+		return bf3::core::make_error(p_asset.name + ": " + s.error().message);
+	}
+	e->screen = std::move(*s);
+	e->screen->set_root_data(p_data);
+	const std::string partition = e->partition;
+	e->screen->set_event_sink([this, partition](const ui::HudWidgetEvent &p_event) {
+		++stats_.events_out;
+		note("event " + ui::ui_data_category_leaf(partition) + "." + p_event.instance + " " + p_event.query);
+		if (session_ != nullptr) {
+			session_->widget_fired(partition, p_event.instance, p_event.query,
+					p_event.param.defined() ? std::optional<std::string>(p_event.param.to_string()) : std::nullopt);
+		}
+	});
+	e->screen->initialize(model_);
+	++stats_.opened;
+	note("open " + ui::ui_data_category_leaf(partition) + (e->view != nullptr ? " drawn" : ""));
+	entries_.push_back(std::move(e));
+	arrange();
+	return bf3::core::Status::success();
+}
+
+void Bf3UiScreens::apply_visibility(Entry &r_entry) {
+	if (r_entry.view != nullptr) {
+		r_entry.view->set_visible(r_entry.shown);
+	}
+}
+
+bool Bf3UiScreens::show_screen(std::string_view p_partition) {
+	Entry *e = find(p_partition);
+	if (e == nullptr) {
+		return false;
+	}
+	if (e->adopted) {
+		return hud_ != nullptr && hud_->show_screen(p_partition);
+	}
+	e->shown_count += e->shown ? 0 : 1;
+	e->shown = true;
+	apply_visibility(*e);
+	return true;
+}
+
+bool Bf3UiScreens::hide_screen(std::string_view p_partition) {
+	Entry *e = find(p_partition);
+	if (e == nullptr) {
+		return false;
+	}
+	if (e->adopted) {
+		return hud_ != nullptr && hud_->hide_screen(p_partition);
+	}
+	e->shown = false;
+	apply_visibility(*e);
+	return true;
+}
+
+bool Bf3UiScreens::order_screen(std::string_view p_partition, int32_t p_order) {
+	Entry *e = find(p_partition);
+	if (e == nullptr) {
+		return false;
+	}
+	e->order = p_order;
+	if (e->adopted && hud_ != nullptr) {
+		hud_->order_screen(p_partition, p_order);
+	}
+	arrange();
+	return true;
+}
+
+void Bf3UiScreens::arrange() {
+	std::vector<Entry *> own;
+	for (std::unique_ptr<Entry> &e : entries_) {
+		if (!e->adopted && e->view != nullptr) {
+			own.push_back(e.get());
+		}
+	}
+	std::stable_sort(
+			own.begin(), own.end(), [](const Entry *p_a, const Entry *p_b) { return p_a->order < p_b->order; });
+	int32_t at = 0;
+	for (Entry *e : own) {
+		move_child(e->view, at++);
+	}
+}
+
+void Bf3UiScreens::begin_close(Entry &r_entry) {
+	if (r_entry.phase == UiScreenPhase::Exiting) {
+		return;
+	}
+	r_entry.phase = UiScreenPhase::Exiting;
+	if (r_entry.adopted) {
+		return;
+	}
+	if (r_entry.focused) {
+		r_entry.focused = false;
+		if (r_entry.screen != nullptr) {
+			r_entry.screen->set_focus(false);
+		}
+	}
+	if (r_entry.screen != nullptr) {
+		r_entry.screen->begin_exit();
+	}
+}
+
+bool Bf3UiScreens::close_screen(std::string_view p_partition) {
+	Entry *e = find(p_partition);
+	if (e == nullptr) {
+		return false;
+	}
+	begin_close(*e);
+	return true;
+}
+
+void Bf3UiScreens::drop(size_t p_index) {
+	Entry &e = *entries_[p_index];
+	if (e.adopted) {
+		e.flow_id = 0;
+		e.phase = UiScreenPhase::Shown;
+		return;
+	}
+	e.screen.reset();
+	if (e.view != nullptr) {
+		remove_child(e.view);
+		e.view->queue_free();
+		e.view = nullptr;
+	}
+	entries_.erase(entries_.begin() + std::ptrdiff_t(p_index));
+}
+
+bool Bf3UiScreens::set_screen_modal(std::string_view p_partition, bool p_modal) {
+	Entry *e = find(p_partition);
+	if (e == nullptr) {
+		return false;
+	}
+	if (e->adopted) {
+		return !p_modal;
+	}
+	e->modal = p_modal;
+	return true;
+}
+
+bool Bf3UiScreens::focus_screen(std::string_view p_partition) {
+	const Entry *target = find(p_partition);
+	if (target == nullptr || target->adopted) {
+		return false;
+	}
+	for (std::unique_ptr<Entry> &e : entries_) {
+		const bool want = e->partition == p_partition;
+		if (e->adopted || e->focused == want) {
+			continue;
+		}
+		e->focused = want;
+		if (e->screen != nullptr) {
+			e->screen->set_focus(want);
+		}
+	}
+	return true;
+}
+
+void Bf3UiScreens::clear_focus() {
+	for (std::unique_ptr<Entry> &e : entries_) {
+		if (e->adopted || !e->focused) {
+			continue;
+		}
+		e->focused = false;
+		if (e->screen != nullptr) {
+			e->screen->set_focus(false);
+		}
+	}
+}
+
+UiScreenSlot Bf3UiScreens::screen_slot(size_t p_index) const {
+	if (p_index >= entries_.size()) {
+		return {};
+	}
+	const Entry &e = *entries_[p_index];
+	if (e.adopted) {
+		UiScreenSlot s = hud_ != nullptr ? hud_->find_screen(e.partition) : UiScreenSlot{};
+		s.partition = e.partition;
+		return s;
+	}
+	return UiScreenSlot{ e.partition, e.screen.get(), e.view, e.shown, e.order, e.modal, e.focused };
+}
+
+bool Bf3UiScreens::reports(std::string_view p_partition) const {
+	const Entry *e = find(p_partition);
+	if (e != nullptr && e->adopted) {
+		return hud_ != nullptr && hud_->reports(p_partition);
+	}
+	return e != nullptr;
+}
+
+std::optional<UiScreenRecord> Bf3UiScreens::screen_record(std::string_view p_partition) const {
+	const Entry *e = find(p_partition);
+	if (e == nullptr) {
+		return std::nullopt;
+	}
+	if (e->adopted) {
+		return hud_ != nullptr ? hud_->screen_record(p_partition) : std::nullopt;
+	}
+	UiScreenRecord r;
+	r.visible = e->shown && e->phase != UiScreenPhase::Exiting && is_visible_in_tree();
+	r.shown = e->shown_count;
+	return r;
+}
+
+std::optional<UiScreenPhase> Bf3UiScreens::phase(std::string_view p_partition) const {
+	const Entry *e = find(p_partition);
+	return e != nullptr ? std::optional<UiScreenPhase>(e->phase) : std::nullopt;
+}
+
+void Bf3UiScreens::sync_flow() {
+	ui::UiFlow &flow = session_->flow();
+	for (const uint64_t id : flow.take_closing()) {
+		bool hosted = false;
+		for (std::unique_ptr<Entry> &e : entries_) {
+			if (e->flow_id == id) {
+				hosted = true;
+				note("close " + ui::ui_data_category_leaf(e->partition));
+				begin_close(*e);
+			}
+		}
+		if (!hosted) {
+			session_->screen_exited(id);
+		}
+	}
+	for (const uint64_t id : flow.take_opened()) {
+		const ui::UiFlowScreen *f = flow.screen(id);
+		if (f == nullptr) {
+			continue;
+		}
+		const std::string partition = f->partition;
+		const bool modal = f->modal;
+		const bool focusable = f->focusable;
+		for (size_t i = 0; i < entries_.size(); ++i) {
+			Entry &old = *entries_[i];
+			if (old.partition == partition && old.phase == UiScreenPhase::Exiting) {
+				const uint64_t old_id = old.flow_id;
+				drop(i);
+				if (old_id != 0) {
+					session_->screen_exited(old_id);
+				}
+				break;
+			}
+		}
+		if (const bf3::core::Status st = open_screen(partition); !st) {
+			++stats_.failed;
+			error(st.error().message);
+			session_->screen_initialized(id);
+			continue;
+		}
+		Entry *e = find(partition);
+		if (e == nullptr) {
+			continue;
+		}
+		e->flow_id = id;
+		if (e->adopted) {
+			e->phase = UiScreenPhase::Entering;
+			continue;
+		}
+		e->modal = modal;
+		if (focusable) {
+			focus_screen(partition);
+		}
+	}
+	for (std::unique_ptr<Entry> &e : entries_) {
+		if (e->adopted || e->flow_id == 0 || e->phase == UiScreenPhase::Exiting) {
+			continue;
+		}
+		const ui::UiFlowScreen *f = flow.screen(e->flow_id);
+		if (f != nullptr && f->shown != e->shown) {
+			e->shown_count += f->shown ? 1 : 0;
+			e->shown = f->shown;
+			apply_visibility(*e);
+		}
+	}
+}
+
+void Bf3UiScreens::deliver_widget_events() {
+	for (const host::UiFlowWidgetEvent &w : session_->take_widget_events()) {
+		Entry *e = find(w.partition);
+		ui::HudScreen *s = e != nullptr ? screen_of(*e) : nullptr;
+		if (s == nullptr) {
+			continue;
+		}
+		++stats_.events_in;
+		const ui::As2Value param = w.value ? ui::As2Value::of(*w.value) : ui::As2Value::of(0);
+		const bool taken = s->deliver_in_event(w.instance, w.query, param);
+		note("deliver " + ui::ui_data_category_leaf(w.partition) + "." + w.instance + " " + w.query +
+				(taken ? "" : " (no port)"));
+	}
+}
+
+void Bf3UiScreens::report_protocol() {
+	for (size_t i = 0; i < entries_.size();) {
+		Entry &e = *entries_[i];
+		ui::HudScreen *s = screen_of(e);
+		if (e.phase == UiScreenPhase::Entering && (e.adopted || (s != nullptr && s->enter_complete()))) {
+			e.phase = UiScreenPhase::Shown;
+			++stats_.entered;
+			note("entered " + ui::ui_data_category_leaf(e.partition));
+			if (session_ != nullptr && e.flow_id != 0) {
+				session_->screen_initialized(e.flow_id);
+			}
+		}
+		if (e.phase == UiScreenPhase::Exiting && (e.adopted || s == nullptr || s->exit_complete())) {
+			++stats_.exited;
+			note("exited " + ui::ui_data_category_leaf(e.partition));
+			const uint64_t id = e.flow_id;
+			const bool adopted = e.adopted;
+			drop(i);
+			if (session_ != nullptr && id != 0) {
+				session_->screen_exited(id);
+			}
+			if (!adopted) {
+				continue;
+			}
+		}
+		++i;
+	}
+}
+
+void Bf3UiScreens::step(double p_seconds) {
+	const double dt = std::isfinite(p_seconds) && p_seconds > 0.0 ? p_seconds : 0.0;
+	if (session_ != nullptr) {
+		sync_flow();
+		deliver_widget_events();
+	}
+	for (std::unique_ptr<Entry> &e : entries_) {
+		if (e->adopted || e->screen == nullptr) {
+			continue;
+		}
+		ui::SwfScene *scene = e->view != nullptr ? e->view->scene() : e->scene.get();
+		if (e->view != nullptr) {
+			ui::HudStageRects rects = e->screen->stage_rects();
+			rects.visible = e->view->visible_rect();
+			rects.original = scene->stage();
+			e->screen->set_stage_rects(rects);
+		}
+		e->screen->refresh(model_);
+		e->screen->advance(dt);
+		if (const bf3::core::Status st = scene->advance_seconds(dt); !st) {
+			error(e->partition + ": " + st.error().message);
+		}
+	}
+	report_protocol();
+}
+
+Bf3UiScreens::Entry *Bf3UiScreens::input_target() {
+	Entry *modal = nullptr;
+	Entry *focused = nullptr;
+	for (std::unique_ptr<Entry> &e : entries_) {
+		if (e->adopted || e->phase == UiScreenPhase::Exiting || !e->shown) {
+			continue;
+		}
+		if (e->modal && (modal == nullptr || e->order >= modal->order)) {
+			modal = e.get();
+		}
+		if (e->focused) {
+			focused = e.get();
+		}
+	}
+	return modal != nullptr ? modal : focused;
+}
+
+bool Bf3UiScreens::input_concept(int32_t p_concept, bool p_pressed) {
+	++stats_.concepts;
+	Entry *t = input_target();
+	ui::HudScreen *s = t != nullptr ? screen_of(*t) : nullptr;
+	if (s != nullptr && s->input_concept(p_concept, p_pressed)) {
+		note("concept " + std::string(ui::ui_input_concept_name(ui::UiInputConcept(p_concept))) + " to " +
+				ui::ui_data_category_leaf(t->partition));
+		return true;
+	}
+	if (!p_pressed || session_ == nullptr) {
+		return false;
+	}
+	++stats_.concepts_to_flow;
+	note("concept " + std::string(ui::ui_input_concept_name(ui::UiInputConcept(p_concept))) + " to the flow");
+	return session_->input_action(p_concept);
+}
+
+bool Bf3UiScreens::key(int32_t p_code, bool p_pressed) {
+	++stats_.keys;
+	Entry *t = input_target();
+	ui::HudScreen *s = t != nullptr ? screen_of(*t) : nullptr;
+	return s != nullptr && s->key(p_code, p_pressed);
+}
+
+std::optional<Vector2> Bf3UiScreens::stage_point(const Entry &p_entry, Vector2 p_viewport) const {
+	const Bf3SwfView *v = view_of(p_entry);
+	if (v == nullptr || !v->is_visible_in_tree()) {
+		return std::nullopt;
+	}
+	const Vector2 local = v->get_global_transform().affine_inverse().xform(p_viewport);
+	const SwfStageFit fit = v->stage_fit();
+	if (fit.scale_x == 0.0 || fit.scale_y == 0.0) {
+		return std::nullopt;
+	}
+	return Vector2(float((local.x - fit.offset_x) / fit.scale_x), float((local.y - fit.offset_y) / fit.scale_y));
+}
+
+bool Bf3UiScreens::mouse_move(Vector2 p_viewport) {
+	++stats_.mouse;
+	Entry *t = input_target();
+	ui::HudScreen *s = t != nullptr ? screen_of(*t) : nullptr;
+	const std::optional<Vector2> at = t != nullptr ? stage_point(*t, p_viewport) : std::nullopt;
+	return s != nullptr && at && s->mouse_move(at->x, at->y);
+}
+
+bool Bf3UiScreens::mouse_button(Vector2 p_viewport, int32_t p_button, bool p_pressed) {
+	++stats_.mouse;
+	Entry *t = input_target();
+	ui::HudScreen *s = t != nullptr ? screen_of(*t) : nullptr;
+	const std::optional<Vector2> at = t != nullptr ? stage_point(*t, p_viewport) : std::nullopt;
+	return s != nullptr && at && s->mouse_button(at->x, at->y, p_button, p_pressed);
+}
+
+bool Bf3UiScreens::mouse_wheel(Vector2 p_viewport, float p_delta) {
+	++stats_.mouse;
+	Entry *t = input_target();
+	ui::HudScreen *s = t != nullptr ? screen_of(*t) : nullptr;
+	const std::optional<Vector2> at = t != nullptr ? stage_point(*t, p_viewport) : std::nullopt;
+	return s != nullptr && at && s->mouse_wheel(at->x, at->y, p_delta);
+}
+
+}
+
+void openbf3_register_native_screens() {
+	GDREGISTER_CLASS(bf3::godot_side::Bf3UiScreens);
+}
