@@ -1,10 +1,10 @@
 #include "bf3/host/kits.h"
 
+#include "bf3/core/util/fnv.h"
 #include "bf3/core/util/text.h"
 
 #include <algorithm>
 #include <cctype>
-#include <cstring>
 
 namespace bf3::host {
 
@@ -25,21 +25,6 @@ bool role_of(std::string_view p_asset, KitRole &r_role) {
 		}
 	}
 	return false;
-}
-
-void fnv(uint64_t &r_hash, const void *p_data, size_t p_size) {
-	const unsigned char *b = static_cast<const unsigned char *>(p_data);
-	for (size_t i = 0; i < p_size; ++i) {
-		r_hash ^= b[i];
-		r_hash *= 0x100000001B3ull;
-	}
-}
-
-template <typename T>
-void fnv_value(uint64_t &r_hash, const T &p_value) {
-	unsigned char bytes[sizeof(T)];
-	std::memcpy(bytes, &p_value, sizeof(T));
-	fnv(r_hash, bytes, sizeof(T));
 }
 
 }
@@ -180,19 +165,19 @@ core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p
 }
 
 uint64_t kit_table_hash(const KitTable &p_table) {
-	uint64_t h = 0xCBF29CE484222325ull;
+	uint64_t h = core::kFnv1aOffset;
 	for (const auto &team : p_table.loadouts) {
 		for (const KitLoadout &l : team) {
-			fnv_value(h, l.team);
-			fnv_value(h, l.kit);
+			core::fnv1a_value(h, l.team);
+			core::fnv1a_value(h, l.kit);
 			for (const uint16_t d : l.defs) {
-				fnv_value(h, d);
+				core::fnv1a_value(h, d);
 			}
-			fnv_value(h, l.active);
+			core::fnv1a_value(h, l.active);
 		}
 	}
 	if (p_table.defib_def != sim::weapons::kNoWeapon) {
-		fnv_value(h, p_table.defib_def);
+		core::fnv1a_value(h, p_table.defib_def);
 	}
 	return h;
 }

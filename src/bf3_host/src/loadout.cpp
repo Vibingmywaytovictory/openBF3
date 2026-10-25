@@ -1,6 +1,7 @@
 #include "bf3/host/loadout.h"
 
 #include "bf3/core/ui/text_db.h"
+#include "bf3/core/util/fnv.h"
 #include "bf3/core/util/text.h"
 
 #include <algorithm>
@@ -16,13 +17,6 @@ using core::to_lower_ascii;
 
 bool simulated(size_t p_slot) {
 	return std::find(kKitSlots.begin(), kKitSlots.end(), uint8_t(p_slot)) != kKitSlots.end();
-}
-
-void fnv(uint64_t &r_hash, uint64_t p_value) {
-	for (int i = 0; i < 8; ++i) {
-		r_hash ^= (p_value >> (8 * i)) & 0xFFu;
-		r_hash *= 0x100000001B3ull;
-	}
 }
 
 bool contains(const std::vector<uint32_t> &p_ids, uint32_t p_id) {
@@ -224,26 +218,26 @@ core::Result<Loadout> resolve_loadout(const LoadoutCatalog &p_catalog, const Kit
 }
 
 uint64_t loadout_catalog_hash(const LoadoutCatalog &p_catalog) {
-	uint64_t h = 0xCBF29CE484222325ull;
+	uint64_t h = core::kFnv1aOffset;
 	for (const auto &team : p_catalog.kits) {
 		for (const LoadoutKit &k : team) {
 			for (size_t s = 0; s < kLoadoutSlots; ++s) {
-				fnv(h, k.defaults[s]);
-				fnv(h, k.slots[s].size());
+				core::fnv1a_value(h, uint64_t(k.defaults[s]));
+				core::fnv1a_value(h, uint64_t(k.slots[s].size()));
 				for (const LoadoutItem &i : k.slots[s]) {
-					fnv(h, i.identifier);
-					fnv(h, i.def);
+					core::fnv1a_value(h, uint64_t(i.identifier));
+					core::fnv1a_value(h, uint64_t(i.def));
 					for (const std::vector<uint32_t> &part : i.accessories) {
-						fnv(h, part.size());
+						core::fnv1a_value(h, uint64_t(part.size()));
 						for (const uint32_t a : part) {
-							fnv(h, a);
+							core::fnv1a_value(h, uint64_t(a));
 						}
 					}
 				}
 			}
-			fnv(h, k.specializations.size());
+			core::fnv1a_value(h, uint64_t(k.specializations.size()));
 			for (const uint32_t s : k.specializations) {
-				fnv(h, s);
+				core::fnv1a_value(h, uint64_t(s));
 			}
 		}
 	}

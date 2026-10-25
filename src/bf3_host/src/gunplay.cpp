@@ -10,6 +10,7 @@
 #include "bf3/core/install.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/fnv.h"
 #include "bf3/core/util/splitmix64.h"
 #include "bf3/core/util/text.h"
 #include "bf3/sim/soldier_motor.h"
@@ -274,7 +275,7 @@ core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared
 			return core::error_at(where, catalog.error());
 		}
 		level->loadouts = std::move(*catalog);
-		level->kits.hash = (level->kits.hash ^ level->loadouts.hash) * 0x100000001B3ull;
+		level->kits.hash = core::fnv1a_fold(level->kits.hash, level->loadouts.hash);
 	}
 	for (const std::string &s : level->kits.skipped) {
 		level->notes.push_back("kits: skipped " + s);
