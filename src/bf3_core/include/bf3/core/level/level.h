@@ -28,15 +28,28 @@ struct Minimap {
 	float world_range = 0.0f;
 };
 
+inline constexpr size_t kMaxLoadingHints = 1024;
+
+struct LoadingScreenInfo {
+	std::string movie;
+	std::string image_path;
+	std::string music_path;
+	EbxRef hint_asset;
+	std::vector<std::string> hints;
+};
+
 struct LevelInfo {
 	std::string id;
 	std::string zone;
 	std::string display_name;
 	std::string name_sid;
 	std::string description;
+	bool multiplayer = false;
+	bool coop = false;
 	float world_size_xz = 0.0f;
 	std::vector<std::string> modes;
 	std::optional<Minimap> minimap;
+	LoadingScreenInfo loading;
 };
 
 struct BundleSet {
@@ -93,6 +106,14 @@ private:
 };
 
 Result<LevelInfo> level_info(const Install &p_install, std::string_view p_level_id);
+
+Result<LevelMount> mount_level_description(const Install &p_install, std::string_view p_level_id);
+
+Result<LevelInfo> level_info(const LevelMount &p_mount, std::string_view p_level_id);
+
+Result<std::vector<std::string>> level_hints(const LevelMount &p_mount, const EbxRef &p_asset);
+
+Status read_game_tips(const EbxInstance &p_asset, WorkBudget &r_budget, std::vector<std::string> &r_out);
 
 Result<bool> includes(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode, WorkBudget &r_budget);
 

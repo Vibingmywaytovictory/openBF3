@@ -211,6 +211,54 @@ std::optional<Minimap> read_minimap(const EbxInstance &p_component) {
 	return m;
 }
 
+Status read_loading_screen(
+		const EbxResolver &p_db, const EbxInstance &p_component, WorkBudget &r_budget, LoadingScreenInfo &r_out) {
+	const auto text = [&](std::string_view p_field, std::string &r_text) -> Status {
+		const Result<std::optional<std::string_view>> s = charged_str(p_component.data(), p_field, r_budget);
+		if (!s) {
+			return s.error();
+		}
+		r_text = std::string(s->value_or(""));
+		return Status::success();
+	};
+	BF3_TRY(text("MPLoadingAssetPath", r_out.movie));
+	BF3_TRY(text("LoadingImagePath", r_out.image_path));
+	BF3_TRY(text("LoadingMusicPath", r_out.music_path));
+	const std::optional<EbxValue> hint = p_component.get("HintAsset");
+	r_out.hint_asset = (hint ? hint->as_ref() : std::nullopt).value_or(EbxRef::null());
+	if (const std::optional<EbxInstance> tips = p_db.follow(p_component.data(), "HintAsset")) {
+		BF3_TRY(read_game_tips(*tips, r_budget, r_out.hints));
+	}
+	return Status::success();
+}
+
+}
+
+Status read_game_tips(const EbxInstance &p_asset, WorkBudget &r_budget, std::vector<std::string> &r_out) {
+	if (!p_asset.is_a("GameTipAsset")) {
+		return make_error("hint asset is a " + std::string(p_asset.type_name()) + ", not a GameTipAsset");
+	}
+	const std::optional<EbxValue> tips = p_asset.get("Tips");
+	const OptionalEbxArray array = tips ? tips->as_array() : OptionalEbxArray();
+	if (!array) {
+		return Status::success();
+	}
+	if (array->size() > kMaxLoadingHints) {
+		return make_error("GameTipAsset lists " + std::to_string(array->size()) + " tips, more than " +
+				std::to_string(kMaxLoadingHints));
+	}
+	BF3_TRY(r_budget.charge(array->size()));
+	r_out.clear();
+	for (const EbxValue tip : *array) {
+		const Result<std::optional<std::string_view>> s = charged_str(tip.get("Text"), r_budget);
+		if (!s) {
+			return s.error();
+		}
+		if (*s && !(*s)->empty()) {
+			r_out.emplace_back(**s);
+		}
+	}
+	return Status::success();
 }
 
 bool mode_matches(std::string_view p_mode, std::string_view p_option) {
@@ -369,14 +417,23 @@ Result<LevelInfo> read_level_info(const EbxResolver &p_db, const EbxInstance &p_
 		if (!component.is_a("UILevelDescriptionComponent")) {
 			continue;
 		}
-		if ((info.minimap = read_minimap(component))) {
-			break;
+		if (!info.minimap) {
+			info.minimap = read_minimap(component);
+		}
+		if (info.loading.movie.empty()) {
+			BF3_TRY(read_loading_screen(p_db, component, r_budget, info.loading));
 		}
 	}
 
 	info.zone = zone_name(info.id);
 	BF3_TRY(text("Name", info.name_sid));
 	BF3_TRY(text("Description", info.description));
+	const auto flag = [&](std::string_view p_field) {
+		const std::optional<EbxValue> v = description ? description->get(p_field) : std::nullopt;
+		return (v ? v->as_bool() : std::nullopt).value_or(false);
+	};
+	info.multiplayer = flag("IsMultiplayer");
+	info.coop = flag("IsCoop");
 	const std::optional<EbxValue> size = p_root.get("WorldSizeXZ");
 	info.world_size_xz = (size ? size->as_f32() : std::nullopt).value_or(0.0f);
 	return info;
@@ -480,6 +537,14 @@ Result<std::unique_ptr<LoadedLevel>> load_level(std::shared_ptr<const Install> p
 }
 
 Result<LevelInfo> level_info(const Install &p_install, std::string_view p_level_id) {
+	Result<LevelMount> mount = mount_level_description(p_install, p_level_id);
+	if (!mount) {
+		return mount.error();
+	}
+	return level_info(*mount, p_level_id);
+}
+
+Result<LevelMount> mount_level_description(const Install &p_install, std::string_view p_level_id) {
 	Result<LevelMount> mount = p_install.mount_level(p_level_id);
 	if (!mount) {
 		return mount.error();
@@ -488,7 +553,7 @@ Result<LevelInfo> level_info(const Install &p_install, std::string_view p_level_
 	const std::string id = to_lower_ascii(p_level_id);
 	const std::string root_name = "levels/" + id + "/" + id;
 	std::vector<std::string> bundles;
-	for (const char *suffix : { "", "_settings_win32", "_gameconfiglight_win32" }) {
+	for (const char *suffix : { "", "_settings_win32", "_gameconfiglight_win32", "_uiloadingmp" }) {
 		if (std::optional<std::string> bundle = find_bundle(names, root_name + suffix)) {
 			bundles.push_back(std::move(*bundle));
 		}
@@ -500,16 +565,26 @@ Result<LevelInfo> level_info(const Install &p_install, std::string_view p_level_
 	if (!loaded) {
 		return error_at("bundles " + join_names(bundles), loaded.error());
 	}
+	return mount;
+}
+
+Result<LevelInfo> level_info(const LevelMount &p_mount, std::string_view p_level_id) {
+	const std::string id = to_lower_ascii(p_level_id);
+	const std::string root_name = "levels/" + id + "/" + id;
 	EbxDb db;
-	for (const std::string &name : { root_name, root_name + "/description_win32" }) {
-		Result<std::vector<uint8_t>> bytes = mount->read_ebx(name);
+	const auto parse = [&](const std::string &p_name) -> Status {
+		Result<std::vector<uint8_t>> bytes = p_mount.read_ebx(p_name);
 		if (!bytes) {
-			continue;
+			return Status::success();
 		}
-		Result<bool> inserted = db.parse_insert(name, std::move(*bytes));
+		Result<bool> inserted = db.parse_insert(p_name, std::move(*bytes));
 		if (!inserted) {
-			return error_at(name, inserted.error());
+			return error_at(p_name, inserted.error());
 		}
+		return Status::success();
+	};
+	for (const std::string &name : { root_name, root_name + "/description_win32" }) {
+		BF3_TRY(parse(name));
 	}
 	const EbxPartition *root = db.partition_by_name(root_name);
 	if (!root) {
@@ -517,6 +592,37 @@ Result<LevelInfo> level_info(const Install &p_install, std::string_view p_level_
 	}
 	WorkBudget budget;
 	return read_level_info(db, root->primary(), root_name, p_level_id, budget);
+}
+
+Result<std::vector<std::string>> level_hints(const LevelMount &p_mount, const EbxRef &p_asset) {
+	std::vector<std::string> out;
+	if (p_asset.kind != EbxRef::Kind::External) {
+		return out;
+	}
+	Result<std::unordered_map<Guid, std::string, GuidHash>> index = p_mount.ebx_partition_index();
+	if (!index) {
+		return index.error();
+	}
+	const auto named = index->find(p_asset.partition);
+	if (named == index->end()) {
+		return make_error("no loaded bundle holds the hint asset's partition");
+	}
+	Result<std::vector<uint8_t>> bytes = p_mount.read_ebx(named->second);
+	if (!bytes) {
+		return error_at(named->second, bytes.error());
+	}
+	EbxDb db;
+	Result<bool> inserted = db.parse_insert(named->second, std::move(*bytes));
+	if (!inserted) {
+		return error_at(named->second, inserted.error());
+	}
+	const std::optional<EbxInstance> tips = db.instance(p_asset.partition, p_asset.instance);
+	if (!tips) {
+		return make_error(named->second + ": no hint asset instance");
+	}
+	WorkBudget budget;
+	BF3_TRY(read_game_tips(*tips, budget, out));
+	return out;
 }
 
 }

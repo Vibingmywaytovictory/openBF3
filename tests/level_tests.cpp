@@ -1215,6 +1215,36 @@ TEST_SUITE("level_unit") {
 }
 
 TEST_SUITE("level") {
+	TEST_CASE("level: Metro's loading screen from its UILevelDescriptionComponent") {
+		const std::shared_ptr<Install> install = shared_install_or_skip();
+		if (!install) {
+			return;
+		}
+		Result<LevelMount> mount = mount_level_description(*install, "MP_Subway");
+		REQUIRE_MESSAGE(mount.ok(), (mount.ok() ? std::string() : mount.error().message));
+		Result<LevelInfo> info = level_info(*mount, "MP_Subway");
+		REQUIRE_MESSAGE(info.ok(), (info.ok() ? std::string() : info.error().message));
+		CHECK(info->name_sid == "ID_M_LEVELNAME_MP_SUBWAY");
+		CHECK(info->multiplayer);
+		CHECK_FALSE(info->coop);
+		const LoadingScreenInfo &l = info->loading;
+		CHECK(l.movie == "UI/Assets/LoadingScreen");
+		CHECK(l.image_path == "Levels/MP_Subway/UI/MP15_Loading");
+		CHECK(l.music_path == "Sound/Levels/MP15/Music/MP15_Music_Loading_01_Patchconfig");
+		CHECK(l.hint_asset.kind == EbxRef::Kind::External);
+		CHECK(l.hints.empty());
+		Result<std::vector<std::string>> hints = level_hints(*mount, l.hint_asset);
+		REQUIRE_MESSAGE(hints.ok(), (hints.ok() ? std::string() : hints.error().message));
+		REQUIRE(hints->size() == 89);
+		CHECK(hints->front() == "ID_M_HINT_MP01");
+		CHECK(hints->at(15) == "ID_M_HINT_MP16");
+		CHECK(hints->at(29) == "ID_M_HINT_MP29");
+		CHECK(hints->at(62) == "ID_M_HINT_GN01");
+		CHECK(hints->back() == "ID_M_HINT_MP77");
+		CHECK(mount->res_info("levels/mp_subway/ui/mp15_loading").has_value());
+		CHECK(mount->res_info("ui/assets/loadingscreen").has_value());
+	}
+
 	TEST_CASE("level: Metro TeamDeathMatch0 (handoff §9)") {
 		const std::shared_ptr<Install> install = shared_install_or_skip();
 		if (!install) {
@@ -1225,6 +1255,8 @@ TEST_SUITE("level") {
 		const World &world = *t.world;
 		CHECK(level.info.id == "MP_Subway");
 		CHECK(level.info.display_name == "Operation Metro");
+		CHECK(level.info.loading.movie == "UI/Assets/LoadingScreen");
+		CHECK(level.info.loading.hints.size() == 89);
 		CHECK(level.stats.partitions == 12315);
 		CHECK(level.stats.unresolved_imports == 0);
 		CHECK(level.stats.failed.empty());
