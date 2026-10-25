@@ -49,6 +49,7 @@ constexpr float kAs2TiltX = -15.0f;
 constexpr float kAs2TiltY = 15.0f;
 constexpr float kAs2Perspective = 25.0f;
 constexpr int32_t kRestCap = 600;
+constexpr uint32_t kRestMovieFrame = 90;
 constexpr int32_t kPlayFrames = 30;
 constexpr int32_t kPerfFrames = 300;
 constexpr int32_t kPerfTextFields = 8;
@@ -677,7 +678,8 @@ void Bf3SwfViewCheck::_process(double p_delta) {
 		RestTracker tracker;
 		bool settled = tracker.settled(*s.small_view(0)->scene()) & tracker.settled(*s.small_view(1)->scene());
 		int32_t rest = 0;
-		while (rest < kRestCap && !settled) {
+		const auto at_rest_frame = [&s]() { return s.small_view(0)->scene()->stats().ticks >= kRestMovieFrame && s.small_view(1)->scene()->stats().ticks >= kRestMovieFrame; };
+		while (rest < kRestCap && (!settled || !at_rest_frame())) {
 			for (Bf3SwfView *v : s.views) {
 				const bf3::core::Status st = v->scene()->advance(1);
 				(void)st;
@@ -692,7 +694,12 @@ void Bf3SwfViewCheck::_process(double p_delta) {
 				blockers += " " + b;
 			}
 		}
-		s.add("rest frame reached", settled, fmt("every playing timeline stopped or back on a frame it already showed after %d frames (cap %d)", rest, kRestCap) + blockers);
+		const uint32_t ticks0 = s.small_view(0)->scene()->stats().ticks;
+		const uint32_t ticks1 = s.small_view(1)->scene()->stats().ticks;
+		s.add("rest frame reached", settled && ticks0 == kRestMovieFrame && ticks1 == kRestMovieFrame,
+				fmt("every playing timeline stopped or back on a frame it already showed after %d frames (cap %d), at movie frames %u and %u (rest frame %u)", rest,
+						kRestCap, ticks0, ticks1, kRestMovieFrame) +
+						blockers);
 		s.phase = 2;
 		s.frames = 0;
 		return;
