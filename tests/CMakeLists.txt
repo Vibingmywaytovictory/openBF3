@@ -473,6 +473,7 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     set_tests_properties(godot.swf_view PROPERTIES RUN_SERIAL TRUE)
     openbf3_godot_row(godot.ui_widgets godot_ui_widgets.cmake WINDOW TIMEOUT 120)
     set_tests_properties(godot.ui_widgets PROPERTIES RUN_SERIAL TRUE)
+    openbf3_godot_row(godot.settings godot_settings.cmake HEADLESS TIMEOUT 240)
 endif()
 
 openbf3_test(test_ui2_contract test_main.cpp ui2_contract_tests.cpp)

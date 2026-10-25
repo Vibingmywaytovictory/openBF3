@@ -1,0 +1,7 @@
+[gd_scene format=3]
+
+[node name="Settings" type="Node"]
+
+[node name="Localisation" type="Bf3Localisation" parent="."]
+
+[node name="Check" type="Bf3SettingsCheck" parent="."]

@@ -25,6 +25,7 @@
 #include "hud_check.h"
 #include "hud_tdm_demo.h"
 #include "m2a_viewmodel_demo.h"
+#include "settings_check.h"
 #include "swf_view_check.h"
 #include "ui_font_check.h"
 #include "viewmodel_demo.h"
@@ -90,6 +91,7 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3ViewmodelDemo);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3UiFontCheck);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3SwfViewCheck);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3SettingsCheck);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3M2aViewmodelDemo);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3FxDemo);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3FxRef);
