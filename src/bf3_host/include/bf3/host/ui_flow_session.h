@@ -135,6 +135,7 @@ private:
 	std::unique_ptr<core::ui::UiFlow> flow_;
 	uint32_t scope_ = 0;
 	std::map<uint32_t, std::string> ui_graph_of_;
+	std::map<std::string, uint32_t, std::less<>> graph_owner_;
 	std::map<uint32_t, Fade> fades_;
 	std::vector<uint32_t> end_of_round_nodes_;
 	std::vector<uint32_t> pre_round_nodes_;

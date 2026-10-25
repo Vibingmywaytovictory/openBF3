@@ -190,6 +190,7 @@ core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const 
 
 core::Status UiFlowSession::start_logic() {
 	timers_.clear();
+	graph_owner_.clear();
 	flow_.reset();
 	runtime_.reset();
 	lg::LogicRuntimeOptions ro;
@@ -381,6 +382,7 @@ void UiFlowSession::ui_graph_input(uint32_t p_node, int32_t p_port) {
 		note("logic " + leaf + " " + std::string(kUiGraphExitPort));
 		flow_->close_graph(graph);
 	} else if (p_port == gp::logic_port_id(kUiGraphEnterPort)) {
+		graph_owner_[graph] = p_node;
 		note("logic " + leaf + " " + std::string(kUiGraphEnterPort));
 		if (asset) {
 			for (const ui::UiGraphNode &n : asset->nodes) {
@@ -404,6 +406,7 @@ void UiFlowSession::ui_graph_input(uint32_t p_node, int32_t p_port) {
 			note("logic " + leaf + " #" + std::to_string(p_port));
 		} else {
 			++stats_.inputs_fired;
+			graph_owner_[graph] = p_node;
 			note("logic " + leaf + "." + input->name);
 			flow_->fire_input(graph, input->name);
 		}
@@ -488,6 +491,10 @@ std::vector<UiFlowWidgetEvent> UiFlowSession::take_widget_events() {
 void UiFlowSession::graph_output(std::string_view p_graph, std::string_view p_output, int32_t p_id, bool) {
 	++stats_.outputs_raised;
 	note("logic out " + ui::ui_data_category_leaf(p_graph) + "." + std::string(p_output));
+	if (const auto owner = graph_owner_.find(p_graph); owner != graph_owner_.end()) {
+		raise(owner->second, p_id);
+		return;
+	}
 	for (const auto &[node, graph] : ui_graph_of_) {
 		if (graph == p_graph) {
 			raise(node, p_id);

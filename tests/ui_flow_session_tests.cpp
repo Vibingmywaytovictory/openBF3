@@ -165,8 +165,14 @@ TEST_SUITE("ui-flow-session") {
 		const Lines countdown = sc.phase("countdown");
 		sc.state.phase = net::MatchPhase::InRound;
 		sc.state.counting_down = false;
-		sc.run_to(600);
+		sc.run_to(500);
 		const Lines started = sc.phase("round started");
+		sc.input(ui::UiInputConcept::Menu);
+		sc.run_to(540);
+		const Lines menu = sc.phase("menu");
+		sc.input(ui::UiInputConcept::Deactivate);
+		sc.run_to(600);
+		const Lines resume = sc.phase("resume");
 		sc.state.own_deaths = 1;
 		sc.run_to(1000);
 		const Lines death = sc.phase("death");
@@ -207,6 +213,16 @@ TEST_SUITE("ui-flow-session") {
 			"push hudtdmscreen" };
 		first_spawn_expected.insert(first_spawn_expected.end(), spawned_tail.begin(), spawned_tail.end());
 		CHECK(first_spawn == first_spawn_expected);
+		const Lines menu_expected{ "close hudscreen", "close hudmpscreen", "close hudtdmscreen", "push ingamemenump",
+			"close scoreboardtwoteamshud32screen", "close tablistenerscreen", "deploy MouseInput",
+			"deploy ActivateCommoRose", "deploy GameInput", "deploy MouseCursor", "deploy MouseInput",
+			"deploy SetSelectedLevel", "deploy RestrictMouse", "deploy OnFrontendCameraChanged" };
+		CHECK(menu == menu_expected);
+		const Lines resume_expected{ "close ingamemenump", "deploy MouseInput", "deploy GameInput",
+			"deploy OnFrontendCameraChanged", "push hudscreen", "push scoreboardtwoteamshud32screen",
+			"push hudmpscreen", "push hudtdmscreen", "deploy MouseInput", "deploy GameInput",
+			"deploy StopScrollTextTimer" };
+		CHECK(resume == resume_expected);
 		CHECK(countdown ==
 				Lines{ "native PreRound.Countdown", "close preroundwaitingscreen", "push preroundwaitingscreen" });
 		CHECK(started == Lines{ "native PreRound.RoundStarted", "close preroundwaitingscreen" });
