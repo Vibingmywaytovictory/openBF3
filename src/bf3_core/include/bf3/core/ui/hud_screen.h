@@ -223,6 +223,7 @@ struct HudClientState {
 	std::function<std::string(uint32_t)> localise_hash;
 	std::function<std::optional<std::string>(std::string_view)> translate;
 	const HudPopup *popup = nullptr;
+	std::string vehicle_name;
 };
 
 struct HudTilt {

@@ -692,6 +692,83 @@ TEST_SUITE("ui-widgets") {
 		std::printf("ui.widgets list label %.1f px text, scrolled to x %.1f\n", tw, scrolled.x());
 	}
 
+	TEST_CASE("widgets: page headers show unless hidden on PC") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		ScreenRig menu;
+		open_screen(*r, menu, "ui/flow/screen/ingamemenump");
+		const HudWidgetState *w = menu.s.hud->widget(std::string(kHudScreenInstance) + ".PageHeader_01");
+		REQUIRE(w != nullptr);
+		CHECK(w->class_name == "Widget.Text.PageHeader");
+		CHECK(w->initialized);
+		CHECK(menu.clip("PageHeader_01").visible());
+		const SwfSceneNode *heading = menu.clip("PageHeader_01.heading").node();
+		REQUIRE(heading != nullptr);
+		CHECK(heading->text_options.auto_size != SwfTextAutoSize::None);
+		CHECK(menu.clip("PageHeader_01.subHeading").node()->text_options.auto_size != SwfTextAutoSize::None);
+		ScreenRig squad;
+		open_screen(*r, squad, "ui/flow/screen/squadscreen");
+		CHECK_FALSE(squad.clip("PageHeader_01").visible());
+		std::printf("ui.widgets page header '%s' / '%s'\n", menu.clip("PageHeader_01.heading").text().c_str(),
+				menu.clip("PageHeader_01.subHeading").text().c_str());
+	}
+
+	TEST_CASE("widgets: text fields attach their row type and take text") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		ScreenRig b;
+		open_screen(*r, b, "ui/flow/screen/eorprogressscreen");
+		CHECK(b.s.hud->stats().as2.missing_paths == 0);
+		const std::string path = std::string(kHudScreenInstance) + ".TextField_02";
+		const HudWidgetState *w = b.s.hud->widget(path);
+		REQUIRE(w != nullptr);
+		CHECK(w->class_name == "Widget.Text.TextField");
+		const As2Value *row_type = b.s.hud->host(path)->construct_param("m_rowType");
+		REQUIRE(row_type != nullptr);
+		const As2Clip field = b.clip("TextField_02." + row_type->to_string());
+		REQUIRE(field.exists());
+		CHECK(field.x() == 0.0f);
+		CHECK(field.y() == 0.0f);
+		const As2Clip self = b.clip("TextField_02");
+		CHECK(self.xscale() == 100.0f);
+		CHECK(self.yscale() == 100.0f);
+		const As2Clip display = field.child("txtDisplay");
+		REQUIRE(display.exists());
+		CHECK(display.text().empty());
+		HudWidgetController *c = b.s.hud->controller(path);
+		HudWidgetHost *h = b.s.hud->host(path);
+		c->update(*h, "Text", As2Value::of("ROUND OVER"));
+		CHECK(display.text() == "ROUND OVER");
+		c->update(*h, "Text", As2Value{});
+		CHECK(display.text().empty());
+		c->in_event(*h, 1, As2Value::of(0));
+		CHECK_FALSE(self.visible());
+		c->in_event(*h, 0, As2Value::of(0));
+		CHECK(self.visible());
+		c->update(*h, "Visible", As2Value::of(false));
+		CHECK_FALSE(self.visible());
+		std::printf("ui.widgets text field %s %.0fx%.0f\n", row_type->to_string().c_str(), display.width(),
+				display.height());
+		ScreenRig chat;
+		open_screen(*r, chat, "ui/flow/screen/chat/chatlogscreen");
+		const std::string chat_path = std::string(kHudScreenInstance) + ".TextField_01";
+		const As2Value *chat_type = chat.s.hud->host(chat_path)->construct_param("m_rowType");
+		REQUIRE(chat_type != nullptr);
+		CHECK(chat_type->to_string() == "ChatLogMode");
+		const As2Clip chat_self = chat.clip("TextField_01");
+		chat_self.set_visible(false);
+		chat.s.hud->controller(chat_path)->update(*chat.s.hud->host(chat_path), "Text", As2Value::of("hello"));
+		CHECK(chat_self.visible());
+		chat.s.hud->advance(3.9);
+		CHECK(chat_self.visible());
+		chat.s.hud->advance(0.2);
+		CHECK_FALSE(chat_self.visible());
+	}
+
 	TEST_CASE("widgets: install unchanged") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {

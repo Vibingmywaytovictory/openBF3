@@ -29,6 +29,16 @@ inline bool hud_platform_win32(const HudClientState &p_client) {
 	return p_client.platform == "win32" || p_client.platform.empty();
 }
 
+inline bool hud_vehicle_russian(const HudClientState &p_client) {
+	for (const std::string_view name : { "T90", "BMP2", "9K22", "Pantsir-S1", "Vodnik", "Mi28 Havoc", "Wz-11", "Ka-60",
+				 "Su25", "Su35", "A10", "SPRUT-SD" }) {
+		if (p_client.vehicle_name == name) {
+			return true;
+		}
+	}
+	return false;
+}
+
 inline SwfFilter as2_glow_filter(uint32_t p_rgb, double p_alpha, float p_blur_x, float p_blur_y, float p_strength,
 		int32_t p_quality, bool p_inner = false, bool p_knockout = false) {
 	SwfFilter f;
