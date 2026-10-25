@@ -242,6 +242,8 @@ if(OPENBF3_BUILD_CHECKS)
         src/ui_font_check.h
         src/viewmodel_demo.cpp
         src/viewmodel_demo.h
+        src/widget_shots_check.cpp
+        src/widget_shots_check.h
     )
     target_sources(bf3_godot PRIVATE
         src/ui_effects_check.cpp

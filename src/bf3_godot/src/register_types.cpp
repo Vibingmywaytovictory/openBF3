@@ -28,6 +28,7 @@
 #include "swf_view_check.h"
 #include "ui_font_check.h"
 #include "viewmodel_demo.h"
+#include "widget_shots_check.h"
 #endif
 
 #include "bf3/host/client_session.h"
@@ -95,6 +96,7 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3HudCheck);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioDemo);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmHudDemo);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3WidgetShotsCheck);
 
 	void openbf3_register_m2a_tp();
 	openbf3_register_m2a_tp();
