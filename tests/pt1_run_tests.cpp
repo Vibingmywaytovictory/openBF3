@@ -975,6 +975,69 @@ TEST_SUITE("pt1-run") {
 		}
 	}
 
+	TEST_CASE("1p grenade: the hand grenade's hold-and-release flow, its clips and branch ticks") {
+		Pt1Data *d = pt1_or_skip();
+		if (d == nullptr) {
+			return;
+		}
+		const bf3::core::ant::AntLibrary &lib = *d->library;
+		uint32_t ref = 0;
+		const bf3::core::ant::AntPackage &sp = *lib.static_package();
+		for (size_t i = 0; i < sp.object_count(); ++i) {
+			const bf3::core::ant::GdStruct o = sp.object(i);
+			if (o.type_name() == "WeaponAsset" && o.name() == "HandGrenade") {
+				ref = 0x15480000u | (o.guid().index() & 0xFFFFu);
+			}
+		}
+		REQUIRE(ref != 0u);
+		bf3::core::Result<uint32_t> type = weapon_type_index(lib, ref);
+		bf3::core::Result<uint32_t> specific = weapon_choice_index(lib, ref);
+		REQUIRE(type.ok());
+		REQUIRE(specific.ok());
+		if (!type.ok() || !specific.ok()) {
+			return;
+		}
+		CHECK(*type == uint32_t(AntWeaponType::Hand));
+		CHECK(*specific == 12u);
+		ChooserIndices idx;
+		idx.weapon_type = *type;
+		idx.specific_weapon = int64_t(*specific);
+		bf3::core::Result<AntHoldReleaseFlow> flow = read_hold_release_flow(lib, kVmWeaponHandlingWrapper, idx);
+		if (!flow.ok()) {
+			MESSAGE(flow.error().message);
+		}
+		REQUIRE(flow.ok());
+		if (!flow.ok()) {
+			return;
+		}
+		const AntHoldReleaseFlow &f = *flow;
+		CHECK(f.name == "1P_Handgrenade_FireStateFlow");
+		CHECK(f.idle.controller == "HandGrenade_IdlePose");
+		struct Want {
+			const AntClipRoute *route;
+			const char *controller;
+			uint32_t ticks;
+		};
+		for (const Want &w : { Want{ &f.start, "FireStart", 50 }, Want{ &f.hold, "Fire", 60 },
+					 Want{ &f.release, "FireRelease", 80 }, Want{ &f.deploy, "Deploy", 50 } }) {
+			MESSAGE(std::string(w.controller)
+					<< ": " << w.route->num_ticks << " ticks at " << w.route->fps << " fps x " << w.route->fps_scale);
+			CHECK(w.route->controller == w.controller);
+			CHECK(w.route->num_ticks == w.ticks);
+			CHECK(w.route->fps == doctest::Approx(30.0f));
+			CHECK(w.route->fps_scale == doctest::Approx(0.5f));
+			CHECK(w.route->sequence);
+		}
+		CHECK(f.hold.looping);
+		CHECK(f.hold.loop_end_tick == doctest::Approx(60.0f));
+		CHECK(f.release_from_tick == doctest::Approx(14.0f));
+		CHECK(f.release_until_tick == doctest::Approx(50.0f));
+		CHECK(f.release_in_tick == doctest::Approx(11.0f));
+		CHECK(f.hold_from_tick == doctest::Approx(42.0f));
+		CHECK(f.release_end_tick == doctest::Approx(70.0f));
+		CHECK(f.deploy_end_tick == doctest::Approx(48.0f));
+	}
+
 	TEST_CASE("install unchanged") {
 		Pt1Data *d = pt1_or_skip();
 		if (d == nullptr) {

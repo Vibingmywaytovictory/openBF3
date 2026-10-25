@@ -66,6 +66,170 @@ bool signal_default(const AntLibrary &p_library, const AntPackage &p_from, const
 	return s.read_bool("Default", r_value);
 }
 
+bool read_flag(const GdStruct &p_s, std::string_view p_name, bool &r_value) {
+	if (p_s.read_bool(p_name, r_value)) {
+		return true;
+	}
+	int64_t v = 0;
+	if (!p_s.read_int(p_name, v)) {
+		return false;
+	}
+	r_value = v != 0;
+	return true;
+}
+
+int64_t driven_index(const GdStruct &p_driver, int64_t p_default, const ChooserIndices &p_indices) {
+	if (p_driver.name() == "WeaponType_EnumGamestate") {
+		return int64_t(p_indices.weapon_type);
+	}
+	if (p_driver.name() == "SpecificWeapon_EnumGamestate" && p_indices.specific_weapon >= 0) {
+		return p_indices.specific_weapon;
+	}
+	return p_default;
+}
+
+core::Result<bool> chooser_step(
+		const AntLibrary &p_library, const AntPackage *&r_pkg, GdStruct &r_cur, const ChooserIndices &p_indices) {
+	const std::string_view type = r_cur.type_name();
+	auto take = [&](const GdGuid &p_g, const char *p_what) -> core::Result<bool> {
+		const GdStruct next = p_g.is_null() ? GdStruct() : p_library.resolve(*r_pkg, p_g);
+		if (!next.valid()) {
+			return core::make_error(label(r_cur) + ": " + p_what + " " + hex(p_g.index()) + " does not resolve");
+		}
+		r_pkg = &p_library.package_of(*r_pkg, p_g);
+		r_cur = next;
+		return true;
+	};
+	if (type == "IndexChooserControllerAsset") {
+		GdGuid ia;
+		if (!r_cur.read_guid("IndexAsset", ia) || ia.is_null()) {
+			return core::make_error(label(r_cur) + ": no IndexAsset");
+		}
+		const GdStruct index_asset = p_library.resolve(*r_pkg, ia);
+		int64_t index = 0;
+		if (!index_asset.valid() || !index_asset.read_int("Default", index)) {
+			return core::make_error(label(r_cur) + ": IndexAsset " + hex(ia.index()) + " has no Default");
+		}
+		index = driven_index(index_asset, index, p_indices);
+		const GdArray list = r_cur.array("ChoiceAssetList");
+		if (index < 0 || !list.valid() || uint64_t(index) >= list.size()) {
+			return core::make_error(label(r_cur) + ": index " + std::to_string(index) + " outside ChoiceAssetList (" +
+					std::to_string(list.size()) + ")");
+		}
+		GdGuid g;
+		if (!list.read_guid(uint32_t(index), g)) {
+			return core::make_error(label(r_cur) + ": unreadable ChoiceAssetList entry");
+		}
+		return take(g, "ChoiceAssetList entry");
+	}
+	if (type == "ContextDatabaseChooserWrapperAsset") {
+		GdGuid g;
+		if (!r_cur.read_guid("ContextDatabaseAsset", g)) {
+			return core::make_error(label(r_cur) + ": no ContextDatabaseAsset");
+		}
+		return take(g, "ContextDatabaseAsset");
+	}
+	if (type == "ContextDatabaseAsset") {
+		const GdArray fields = r_cur.array("FieldDescriptionAssets");
+		const GdStruct field = fields.valid() && fields.size() == 1 ? fields.element(0) : GdStruct();
+		GdGuid dg;
+		int64_t value = 0;
+		bool shift = false;
+		if (!field.valid() || !field.read_int("IntDefault", value) ||
+				!read_flag(field, "AutoShiftEnumsForBitmap", shift)) {
+			return core::make_error(label(r_cur) + ": " + std::to_string(fields.size()) +
+					" FieldDescriptionAssets (must be one with IntDefault and AutoShiftEnumsForBitmap)");
+		}
+		const GdStruct driver = field.read_guid("GameStateDriverAsset0", dg) && !dg.is_null()
+				? p_library.resolve(*r_pkg, dg)
+				: GdStruct();
+		if (driver.valid()) {
+			int64_t driver_default = value;
+			if (driver.read_int("Default", driver_default)) {
+				value = driver_default;
+			}
+			value = driven_index(driver, value, p_indices);
+		}
+		if (value < 0 || (shift && value >= 63)) {
+			return core::make_error(label(r_cur) + ": field value " + std::to_string(value) + " out of range");
+		}
+		const GdArray entries = r_cur.array("EntryAssets");
+		if (!entries.valid() || entries.empty() || entries.size() > kMaxChooserEntries) {
+			return core::make_error(label(r_cur) + ": " + std::to_string(entries.size()) + " EntryAssets (1.." +
+					std::to_string(kMaxChooserEntries) + ")");
+		}
+		for (uint32_t e = 0; e < entries.size(); ++e) {
+			const GdStruct entry = entries.element(e);
+			const GdArray cells = entry.valid() ? entry.array("Cells") : GdArray();
+			const GdStruct cell = cells.valid() && cells.size() == 1 ? cells.element(0) : GdStruct();
+			int64_t key = 0;
+			GdGuid g;
+			if (!cell.valid() || !cell.read_int("Int0", key) || !entry.read_guid("Asset", g)) {
+				return core::make_error(
+						label(r_cur) + ": entry " + std::to_string(e) + " has no single Cells[0].Int0 and Asset");
+			}
+			if (shift ? (uint64_t(key) & (uint64_t(1) << value)) != 0 : key == value) {
+				return take(g, "EntryAssets Asset");
+			}
+		}
+		return core::make_error(label(r_cur) + ": no entry holds field value " + std::to_string(value));
+	}
+	return false;
+}
+
+bool read_branch_tags(const AntLibrary &p_library, const AntPackage &p_pkg, const GdStruct &p_owner,
+		std::vector<AntBranchTag> &r_tags) {
+	GdGuid sg;
+	if (!p_owner.read_guid("TagCollectionSet", sg) || sg.is_null()) {
+		return true;
+	}
+	const GdStruct set = p_library.resolve(p_pkg, sg);
+	if (!set.valid()) {
+		return false;
+	}
+	const AntPackage &set_pkg = p_library.package_of(p_pkg, sg);
+	const GdArray keys = set.array("TagCollectionKeys");
+	for (uint32_t k = 0; keys.valid() && k < keys.size() && k < kMaxSignals; ++k) {
+		GdGuid cg;
+		const GdStruct coll = keys.read_guid(k, cg) && !cg.is_null() ? p_library.resolve(set_pkg, cg) : GdStruct();
+		if (!coll.valid()) {
+			return false;
+		}
+		const AntPackage &coll_pkg = p_library.package_of(set_pkg, cg);
+		const GdArray tags = coll.array("TagKeys");
+		for (uint32_t t = 0; tags.valid() && t < tags.size() && t < kMaxSignals; ++t) {
+			GdGuid tg;
+			const GdStruct tag = tags.read_guid(t, tg) && !tg.is_null() ? p_library.resolve(coll_pkg, tg) : GdStruct();
+			if (!tag.valid()) {
+				return false;
+			}
+			const AntPackage &tag_pkg = p_library.package_of(coll_pkg, tg);
+			AntBranchTag b;
+			GdGuid bt;
+			if (tag.type_name() == "BranchOutPointTag") {
+				if (!tag.read_float("Time", b.time) || !tag.read_float("Length", b.length) ||
+						!tag.read_guid("BranchTypeAsset", bt)) {
+					return false;
+				}
+			} else if (tag.type_name() == "BranchInWindowTag") {
+				b.branch_in = true;
+				if (!tag.read_float("Time", b.time) || !tag.read_guid("BranchType", bt)) {
+					return false;
+				}
+			} else {
+				continue;
+			}
+			const GdStruct type = bt.is_null() ? GdStruct() : p_library.resolve(tag_pkg, bt);
+			if (!type.valid() || !finite(b.time) || !finite(b.length)) {
+				return false;
+			}
+			b.type = std::string(type.name());
+			r_tags.push_back(std::move(b));
+		}
+	}
+	return true;
+}
+
 core::Result<AntClipRoute> route_from(const AntLibrary &p_library, const AntPackage &p_from, GdStruct p_start, const ChooserIndices &p_indices,
 		core::gameplay::WorkBudget &r_budget) {
 	AntClipRoute route;
@@ -119,32 +283,9 @@ core::Result<AntClipRoute> route_from(const AntLibrary &p_library, const AntPack
 			}
 			return route;
 		}
-		if (type == "IndexChooserControllerAsset") {
-			GdGuid ia;
-			if (!cur.read_guid("IndexAsset", ia) || ia.is_null()) {
-				return core::make_error(label(cur) + ": no IndexAsset");
-			}
-			const GdStruct index_asset = p_library.resolve(*pkg, ia);
-			int64_t index = 0;
-			if (!index_asset.valid() || !index_asset.read_int("Default", index)) {
-				return core::make_error(label(cur) + ": IndexAsset " + hex(ia.index()) + " has no Default");
-			}
-			if (index_asset.name() == "WeaponType_EnumGamestate") {
-				index = int64_t(p_indices.weapon_type);
-			} else if (index_asset.name() == "SpecificWeapon_EnumGamestate" && p_indices.specific_weapon >= 0) {
-				index = p_indices.specific_weapon;
-			}
-			const GdArray list = cur.array("ChoiceAssetList");
-			if (index < 0 || !list.valid() || uint64_t(index) >= list.size()) {
-				return core::make_error(label(cur) + ": index " + std::to_string(index) + " outside ChoiceAssetList (" + std::to_string(list.size()) + ")");
-			}
-			GdGuid g;
-			if (!list.read_guid(uint32_t(index), g)) {
-				return core::make_error(label(cur) + ": unreadable ChoiceAssetList entry");
-			}
-			if (core::Status s = follow(g, "ChoiceAssetList entry"); !s.ok()) {
-				return s.error();
-			}
+		if (core::Result<bool> chose = chooser_step(p_library, pkg, cur, p_indices); !chose) {
+			return chose.error();
+		} else if (*chose) {
 			continue;
 		}
 		if (type == "ChooserControllerAsset") {
@@ -203,6 +344,10 @@ core::Result<AntClipRoute> route_from(const AntLibrary &p_library, const AntPack
 		}
 		if (type == "LoopingControllerAsset") {
 			route.looping = true;
+			if (!cur.read_float("LoopEndTime", route.loop_end_tick) || !finite(route.loop_end_tick) ||
+					route.loop_end_tick < 0.0f) {
+				return core::make_error(label(cur) + ": no LoopEndTime");
+			}
 			GdGuid g;
 			if (!cur.read_guid("SubjectControllerAsset", g)) {
 				return core::make_error(label(cur) + ": no SubjectControllerAsset");
@@ -248,6 +393,9 @@ core::Result<AntClipRoute> route_from(const AntLibrary &p_library, const AntPack
 			if (!anim.valid() || !anim.read_guid("Asset", g) || !anim.read_float("StartInTime", in0) || !anim.read_float("EndInTime", in1) || !finite(in0) ||
 					!finite(in1) || in0 < 0.0f || !(in1 > in0) || in1 > 1.0e6f) {
 				return core::make_error(label(cur) + ": no Tracks[0].Anims[0] with Asset and a StartInTime < EndInTime window");
+			}
+			if (!read_branch_tags(p_library, *pkg, cur, route.branches)) {
+				return core::make_error(label(cur) + ": unreadable branch tags");
 			}
 			route.sequence = true;
 			route.start_in_tick = in0;
@@ -321,6 +469,214 @@ core::Result<uint32_t> weapon_type_index(const AntLibrary &p_library, uint32_t p
 		return core::make_error(where + ": the WeaponClassEnum pair has no EnumerationValueAsset Value");
 	}
 	return index;
+}
+
+core::Result<AntHoldReleaseFlow> read_hold_release_flow(
+		const AntLibrary &p_library, std::string_view p_wrapper, const ChooserIndices &p_indices) {
+	core::gameplay::WorkBudget budget;
+	const std::string where = "hold-and-release flow under " + std::string(p_wrapper);
+	core::Result<GdStruct> start = find_static(p_library, "ContextDatabaseChooserWrapperAsset", p_wrapper, budget);
+	if (!start) {
+		return core::error_at(where, start.error());
+	}
+	GdStruct cur = *start;
+	const AntPackage *pkg = p_library.static_package();
+	for (uint32_t depth = 0; cur.type_name() != "StateFlowControllerAsset"; ++depth) {
+		if (depth >= kMaxAntRouteDepth) {
+			return core::make_error(
+					where + ": no StateFlowControllerAsset within " + std::to_string(kMaxAntRouteDepth) + " choices");
+		}
+		core::Result<bool> chose = chooser_step(p_library, pkg, cur, p_indices);
+		if (!chose) {
+			return core::error_at(where, chose.error());
+		}
+		if (!*chose) {
+			return core::make_error(where + ": " + label(cur) + " is neither a chooser nor a state flow");
+		}
+	}
+	AntHoldReleaseFlow flow;
+	flow.name = std::string(cur.name());
+	const AntPackage &flow_pkg = *pkg;
+	struct Node {
+		GdStruct s;
+		const AntPackage *pkg = nullptr;
+	};
+	auto node_at = [&](const AntPackage &p_from, const GdGuid &p_g) -> Node {
+		Node n;
+		n.s = p_g.is_null() ? GdStruct() : p_library.resolve(p_from, p_g);
+		n.pkg = n.s.valid() ? &p_library.package_of(p_from, p_g) : nullptr;
+		return n;
+	};
+	auto requires_signal = [&](const Node &p_n, const char *p_field) {
+		const GdArray list = p_n.s.array(p_field);
+		for (uint32_t i = 0; list.valid() && i < list.size() && i < kMaxSignals; ++i) {
+			GdGuid g;
+			const GdStruct b = list.read_guid(i, g) && !g.is_null() ? p_library.resolve(*p_n.pkg, g) : GdStruct();
+			if (b.valid() && b.type_name() == "BoolAsset" && b.name() == kHoldAndReleaseSignal) {
+				return true;
+			}
+		}
+		return false;
+	};
+	struct Edge {
+		Node to;
+		std::string out_type, in_type;
+		bool conditioned = false;
+	};
+	auto edges_of = [&](const Node &p_n, std::vector<Edge> &r_edges) -> bool {
+		const GdArray list = p_n.s.array("Transitions");
+		if (!list.valid() || list.size() > kMaxSignals) {
+			return false;
+		}
+		for (uint32_t i = 0; i < list.size(); ++i) {
+			GdGuid g;
+			const Node t = list.read_guid(i, g) ? node_at(*p_n.pkg, g) : Node{};
+			GdGuid to;
+			if (!t.s.valid() || t.s.type_name() != "StateFlowTransitionAsset" || !t.s.read_guid("To", to)) {
+				return false;
+			}
+			Edge e;
+			e.to = node_at(*t.pkg, to);
+			if (!e.to.s.valid() || e.to.s.type_name() != "StateFlowNodeControllerAsset") {
+				return false;
+			}
+			for (const auto &[field, out] :
+					{ std::pair<const char *, std::string *>{ "BranchWindowTypeAsset", &e.out_type },
+							std::pair<const char *, std::string *>{ "BranchInWindowTypeAsset", &e.in_type } }) {
+				GdGuid bt;
+				const GdStruct type =
+						t.s.read_guid(field, bt) && !bt.is_null() ? p_library.resolve(*t.pkg, bt) : GdStruct();
+				if (type.valid()) {
+					*out = std::string(type.name());
+				}
+			}
+			e.conditioned = t.s.array("ConditionsRequiredTrue").size() > 0;
+			r_edges.push_back(std::move(e));
+		}
+		return true;
+	};
+	auto route_of = [&](const Node &p_n, AntClipRoute &r_route) -> core::Status {
+		GdGuid g;
+		if (!p_n.s.read_guid("SubjectController", g) || g.is_null()) {
+			return core::make_error(where + ": " + label(p_n.s) + " has no SubjectController");
+		}
+		const GdStruct subject = p_library.resolve(*p_n.pkg, g);
+		if (!subject.valid()) {
+			return core::make_error(where + ": " + label(p_n.s) + " subject does not resolve");
+		}
+		core::Result<AntClipRoute> r =
+				route_from(p_library, p_library.package_of(*p_n.pkg, g), subject, p_indices, budget);
+		if (!r) {
+			return core::error_at(where + ": " + label(p_n.s), r.error());
+		}
+		r_route = std::move(*r);
+		return core::Status::success();
+	};
+	auto window = [&](const AntClipRoute &p_route, const std::string &p_type, bool p_in, AntBranchTag &r_tag) {
+		for (const AntBranchTag &b : p_route.branches) {
+			if (b.branch_in == p_in && b.type == p_type) {
+				r_tag = b;
+				return true;
+			}
+		}
+		return false;
+	};
+
+	GdGuid sg;
+	const Node null_node = cur.read_guid("StartNode", sg) ? node_at(flow_pkg, sg) : Node{};
+	if (!null_node.s.valid() || !requires_signal(null_node, "EntryConditionsRequiredFalse")) {
+		return core::make_error(where + ": " + flow.name + " has no StartNode that requires " +
+				std::string(kHoldAndReleaseSignal) + " false");
+	}
+	std::vector<Edge> from_null, from_start, from_release, from_deploy;
+	if (!edges_of(null_node, from_null) || from_null.size() != 1 ||
+			!requires_signal(from_null[0].to, "EntryConditionsRequiredTrue")) {
+		return core::make_error(where + ": the StartNode has no single transition into a node that requires " +
+				std::string(kHoldAndReleaseSignal));
+	}
+	const Node start_node = from_null[0].to;
+	if (!edges_of(start_node, from_start)) {
+		return core::make_error(where + ": unreadable transitions from " + label(start_node.s));
+	}
+	const Edge *to_release = nullptr, *to_hold = nullptr;
+	for (const Edge &e : from_start) {
+		if (requires_signal(e.to, "EntryConditionsRequiredFalse")) {
+			to_release = &e;
+		} else if (requires_signal(e.to, "EntryConditionsRequiredTrue")) {
+			to_hold = &e;
+		}
+	}
+	if (to_release == nullptr || to_hold == nullptr) {
+		return core::make_error(where + ": " + label(start_node.s) + " lacks a release or a hold transition");
+	}
+	const Node release_node = to_release->to;
+	const Node hold_node = to_hold->to;
+	if (!edges_of(release_node, from_release)) {
+		return core::make_error(where + ": unreadable transitions from " + label(release_node.s));
+	}
+	const Edge *to_deploy = nullptr;
+	for (const Edge &e : from_release) {
+		if (e.conditioned && e.to.s.guid().index() != null_node.s.guid().index()) {
+			to_deploy = &e;
+		}
+	}
+	if (to_deploy == nullptr) {
+		return core::make_error(
+				where + ": " + label(release_node.s) + " has no conditioned transition to a deploy node");
+	}
+	const Node deploy_node = to_deploy->to;
+	if (!edges_of(deploy_node, from_deploy)) {
+		return core::make_error(where + ": unreadable transitions from " + label(deploy_node.s));
+	}
+	const Edge *deploy_to_null = nullptr;
+	for (const Edge &e : from_deploy) {
+		if (e.to.s.guid().index() == null_node.s.guid().index()) {
+			deploy_to_null = &e;
+		}
+	}
+	if (deploy_to_null == nullptr) {
+		return core::make_error(where + ": " + label(deploy_node.s) + " has no transition back to the StartNode");
+	}
+	for (const auto &[node, route] : { std::pair<const Node *, AntClipRoute *>{ &null_node, &flow.idle },
+				 std::pair<const Node *, AntClipRoute *>{ &start_node, &flow.start },
+				 std::pair<const Node *, AntClipRoute *>{ &hold_node, &flow.hold },
+				 std::pair<const Node *, AntClipRoute *>{ &release_node, &flow.release },
+				 std::pair<const Node *, AntClipRoute *>{ &deploy_node, &flow.deploy } }) {
+		if (core::Status s = route_of(*node, *route); !s.ok()) {
+			return s.error();
+		}
+	}
+	if (!flow.hold.looping || !(flow.hold.loop_end_tick > 0.0f)) {
+		return core::make_error(where + ": the hold node " + label(hold_node.s) + " is not a loop");
+	}
+	AntBranchTag tag;
+	if (!window(flow.start, to_release->out_type, false, tag)) {
+		return core::make_error(where + ": " + flow.start.controller + " has no " + to_release->out_type + " window");
+	}
+	flow.release_from_tick = tag.time;
+	flow.release_until_tick = tag.time + tag.length;
+	flow.release_in_tick = 0.0f;
+	if (!to_release->in_type.empty()) {
+		if (!window(flow.release, to_release->in_type, true, tag)) {
+			return core::make_error(
+					where + ": " + flow.release.controller + " has no " + to_release->in_type + " entry");
+		}
+		flow.release_in_tick = tag.time;
+	}
+	if (!window(flow.start, to_hold->out_type, false, tag)) {
+		return core::make_error(where + ": " + flow.start.controller + " has no " + to_hold->out_type + " window");
+	}
+	flow.hold_from_tick = tag.time;
+	if (!window(flow.release, to_deploy->out_type, false, tag)) {
+		return core::make_error(where + ": " + flow.release.controller + " has no " + to_deploy->out_type + " window");
+	}
+	flow.release_end_tick = tag.time;
+	if (!window(flow.deploy, deploy_to_null->out_type, false, tag)) {
+		return core::make_error(
+				where + ": " + flow.deploy.controller + " has no " + deploy_to_null->out_type + " window");
+	}
+	flow.deploy_end_tick = tag.time;
+	return flow;
 }
 
 core::Result<MoveGroupDef> read_move_group(const AntLibrary &p_library, std::string_view p_name, const ChooserIndices &p_indices) {

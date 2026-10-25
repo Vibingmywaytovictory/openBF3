@@ -31,6 +31,12 @@ struct ChooserIndices {
 	int64_t specific_weapon = -1;
 };
 
+struct AntBranchTag {
+	std::string type;
+	float time = 0.0f, length = 0.0f;
+	bool branch_in = false;
+};
+
 struct AntClipRoute {
 	uint32_t clip_controller = 0;
 	std::string controller;
@@ -43,6 +49,8 @@ struct AntClipRoute {
 	bool sequence = false;
 	bool looping = false;
 	std::vector<std::string> path;
+	std::vector<AntBranchTag> branches;
+	float loop_end_tick = 0.0f;
 };
 
 core::Result<AntClipRoute> route_ant_controller(const core::ant::AntLibrary &p_library, const core::ant::AntPackage &p_from, const core::ant::GdGuid &p_controller,
@@ -52,6 +60,21 @@ core::Result<AntClipRoute> route_ant_controller(const core::ant::AntLibrary &p_l
 		const ChooserIndices &p_indices);
 
 core::Result<uint32_t> weapon_type_index(const core::ant::AntLibrary &p_library, uint32_t p_ant_ref_asset_id);
+
+inline constexpr std::string_view kVmWeaponHandlingWrapper = "1P_WeaponHandlingWrapper";
+inline constexpr std::string_view kHoldAndReleaseSignal = "Game.Weapon.FireHoldAndRelease";
+
+struct AntHoldReleaseFlow {
+	std::string name;
+	AntClipRoute idle, start, hold, release, deploy;
+	float release_from_tick = 0.0f, release_until_tick = 0.0f, release_in_tick = 0.0f;
+	float hold_from_tick = 0.0f;
+	float release_end_tick = 0.0f;
+	float deploy_end_tick = 0.0f;
+};
+
+core::Result<AntHoldReleaseFlow> read_hold_release_flow(
+		const core::ant::AntLibrary &p_library, std::string_view p_wrapper, const ChooserIndices &p_indices);
 
 struct MoveGroupEntry {
 	float velocity = 0.0f;
