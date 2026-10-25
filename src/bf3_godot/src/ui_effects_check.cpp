@@ -3,6 +3,7 @@
 #include "bf3_localisation.h"
 #include "godot_util.h"
 #include "level_session.h"
+#include "ui_cursor.h"
 #include "ui_post_process.h"
 
 #include "bf3/core/ebx_db.h"
@@ -114,7 +115,12 @@ struct Bf3UiEffectsCheck::State {
 	Ref<Image> graded;
 	Ref<Image> after;
 	Ref<Image> glitched;
+	Ref<Image> deploy;
 	double dim_diff = 0.0;
+
+	Bf3UiCursor *cursor = nullptr;
+	Vector2 cursor_at;
+	float cursor_pixels = 1.0f;
 };
 
 Bf3UiEffectsCheck::Bf3UiEffectsCheck() :
@@ -349,9 +355,52 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			return;
 		}
 		case 6: {
-			save(capture(), "ui_effects_deploy.png");
+			s.deploy = capture();
+			save(s.deploy, "ui_effects_deploy.png");
 			row("frames", s.post->stats().glitch_frames >= 2 && s.post->stats().dim_frames >= 4,
 					bf3::core::fmt("%u glitch frames, %u dim frames, %u triggers", s.post->stats().glitch_frames, s.post->stats().dim_frames, s.post->stats().glitch_triggers));
+			s.cursor = Bf3UiCursor::ensure(get_parent());
+			const Rect2 visible = get_viewport()->get_visible_rect();
+			s.cursor_at = visible.position + visible.size * Vector2(0.5f, 0.5f);
+			s.cursor_pixels = s.deploy.is_valid() && visible.size.y > 0.0f ? float(s.deploy->get_height()) / visible.size.y : 1.0f;
+			s.cursor->set_cursor_position(s.cursor_at);
+			s.cursor->show_cursor();
+			s.phase = 7;
+			s.wait = kCaptureFrames;
+			return;
+		}
+		case 7: {
+			const Ref<Image> shown = capture();
+			save(shown, "ui_effects_cursor.png");
+			const float unit = s.cursor->cursor_scale() * s.cursor_pixels;
+			const Vector2 tip = s.cursor_at * s.cursor_pixels;
+			const Vector2 inside = tip + Vector2(3.0f, 9.0f) * unit;
+			const Vector2 outside = tip + Vector2(12.0f, 4.0f) * unit;
+			const Rgb fill = pixel(shown, int32_t(inside.x), int32_t(inside.y));
+			const Rgb off = pixel(shown, int32_t(outside.x), int32_t(outside.y));
+			const Rgb off_before = pixel(s.deploy, int32_t(outside.x), int32_t(outside.y));
+			const auto c8 = [](float p_v) { return double(p_v) * 255.0; };
+			const bool fill_ok = near(c8(fill.r), kUiCursorFillRgb[0], 4.0) && near(c8(fill.g), kUiCursorFillRgb[1], 4.0) && near(c8(fill.b), kUiCursorFillRgb[2], 4.0);
+			const bool off_ok = near(off.r, off_before.r, 2.0 / 255.0) && near(off.g, off_before.g, 2.0 / 255.0) && near(off.b, off_before.b, 2.0 / 255.0);
+			row("cursor shown", s.cursor->cursor_shown() && s.cursor->get_layer() > kUiGlitchLayer && fill_ok && off_ok && s.cursor->stats().shows == 1,
+					bf3::core::fmt("layer %d over %d, scale %.3f, fill at (%.0f, %.0f) %.0f %.0f %.0f (art %u %u %u), beside the arrow unchanged %d", int(s.cursor->get_layer()),
+							int(kUiGlitchLayer), double(s.cursor->cursor_scale()), double(inside.x), double(inside.y), c8(fill.r), c8(fill.g), c8(fill.b),
+							unsigned(kUiCursorFillRgb[0]), unsigned(kUiCursorFillRgb[1]), unsigned(kUiCursorFillRgb[2]), int(off_ok)));
+			s.cursor->hide_cursor();
+			s.phase = 8;
+			s.wait = kCaptureFrames;
+			return;
+		}
+		case 8: {
+			const Ref<Image> hidden = capture();
+			const float unit = s.cursor->cursor_scale() * s.cursor_pixels;
+			const Vector2 inside = s.cursor_at * s.cursor_pixels + Vector2(3.0f, 9.0f) * unit;
+			const Rgb now = pixel(hidden, int32_t(inside.x), int32_t(inside.y));
+			const Rgb before = pixel(s.deploy, int32_t(inside.x), int32_t(inside.y));
+			const bool gone = near(now.r, before.r, 2.0 / 255.0) && near(now.g, before.g, 2.0 / 255.0) && near(now.b, before.b, 2.0 / 255.0);
+			row("cursor hidden", !s.cursor->cursor_shown() && gone && s.cursor->stats().hides == 1,
+					bf3::core::fmt("pixel under the arrow %.0f %.0f %.0f, before the cursor %.0f %.0f %.0f", double(now.r) * 255.0, double(now.g) * 255.0, double(now.b) * 255.0,
+							double(before.r) * 255.0, double(before.g) * 255.0, double(before.b) * 255.0));
 			finish();
 			return;
 		}

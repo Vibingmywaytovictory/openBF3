@@ -2,6 +2,7 @@
 
 #include "bf3_localisation.h"
 #include "godot_util.h"
+#include "ui_cursor.h"
 
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/install.h"
@@ -476,4 +477,5 @@ void Bf3UiPostProcess::_process(double p_delta) {
 
 void openbf3_register_ui_effects() {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3UiPostProcess);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3UiCursor);
 }

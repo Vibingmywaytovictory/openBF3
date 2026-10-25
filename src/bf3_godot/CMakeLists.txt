@@ -191,6 +191,8 @@ target_sources(bf3_godot PRIVATE
 target_sources(bf3_godot PRIVATE
     src/ui_post_process.cpp
     src/ui_post_process.h
+    src/ui_cursor.cpp
+    src/ui_cursor.h
 )
 
 if(OPENBF3_BUILD_CHECKS)
