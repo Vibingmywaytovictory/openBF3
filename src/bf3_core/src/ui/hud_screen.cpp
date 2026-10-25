@@ -2,6 +2,7 @@
 
 #include "ui_ebx.h"
 
+#include "bf3/core/ui/swf_hit.h"
 #include "bf3/core/util/text.h"
 
 #include <algorithm>
@@ -172,6 +173,28 @@ Result<HudScreenAsset> read_hud_screen_asset(const EbxResolver &p_db, std::strin
 		if (const std::optional<EbxRef> asset = detail::ref(n.data(), "WidgetAsset")) {
 			w.widget_asset = detail::ref_partition(p_db, *part, *asset).value_or(std::string());
 		}
+		if (const EbxPartition *wp = w.widget_asset.empty() ? nullptr : p_db.partition_by_name(w.widget_asset)) {
+			const std::optional<EbxValue> events = wp->primary().get("WidgetEvents");
+			if (const OptionalEbxArray arr = events ? events->as_array() : OptionalEbxArray()) {
+				if (arr->size() > kHudMaxWidgetEvents) {
+					return make_error("hud screen: widget asset " + w.widget_asset + " has " +
+							std::to_string(arr->size()) + " events");
+				}
+				for (const EbxValue &v : *arr) {
+					const std::optional<EbxStruct> s = v.as_struct();
+					if (!s) {
+						continue;
+					}
+					const std::optional<EbxValue> is_output = s->get("IsOutput");
+					w.events.push_back(HudWidgetEventPort{ text_of(s->get("Name")), text_of(s->get("Query")),
+							is_output && is_output->as_bool().value_or(false) });
+				}
+			}
+		}
+		const std::optional<EbxValue> focus = n.get("FocusIndex");
+		w.focus_index = focus ? focus->as_i32().value_or(0) : 0;
+		const std::optional<EbxValue> always = n.get("AlwaysInFocus");
+		w.always_in_focus = always && always->as_bool().value_or(false);
 		if (const std::optional<EbxValue> props = n.get("WidgetProperties")) {
 			if (const OptionalEbxArray arr = props->as_array()) {
 				if (arr->size() > kHudMaxWidgetProperties) {
@@ -344,9 +367,9 @@ const As2Value *hud_data_find(const HudData &p_data, std::string_view p_key) {
 }
 
 const std::string *HudWidgetInit::property(std::string_view p_name) const {
-	for (const HudWidgetProperty &p : properties) {
-		if (p.name == p_name) {
-			return &p.value;
+	for (auto it = properties.rbegin(); it != properties.rend(); ++it) {
+		if (it->name == p_name) {
+			return &it->value;
 		}
 	}
 	return nullptr;
@@ -373,6 +396,37 @@ double hud_tween_ease(HudTweenEase p_ease, double p_t) {
 		case HudTweenEase::ExpoOut: return t == 1.0 ? 1.0 : 1.001 * (1.0 - std::pow(2.0, -10.0 * t));
 	}
 	return t;
+}
+
+namespace {
+
+std::string hud_linkage_of(const As2Clip &p_parent, std::string_view p_linkage) {
+	const SwfSceneNode *n = p_parent.node();
+	if (n == nullptr || n->movie == nullptr || n->movie->export_id(p_linkage)) {
+		return std::string(p_linkage);
+	}
+	for (const SwfImport &imp : n->movie->imports) {
+		for (const SwfExport &e : imp.symbols) {
+			if (e.name == p_linkage) {
+				return std::string(p_linkage);
+			}
+		}
+	}
+	for (const SwfExport &e : n->movie->exports) {
+		if (iequals_ascii(e.name, p_linkage)) {
+			return e.name;
+		}
+	}
+	for (const SwfImport &imp : n->movie->imports) {
+		for (const SwfExport &e : imp.symbols) {
+			if (iequals_ascii(e.name, p_linkage)) {
+				return e.name;
+			}
+		}
+	}
+	return std::string(p_linkage);
+}
+
 }
 
 HudWidgetHost::HudWidgetHost(HudScreen &r_screen, std::string p_path, std::string p_class) :
@@ -438,7 +492,7 @@ void HudWidgetHost::add_tween(const As2Clip &p_clip, HudTweenProperty p_property
 }
 
 As2Clip HudWidgetHost::attach_movie(const As2Clip &p_parent, std::string_view p_linkage, std::string_view p_name, int32_t p_depth) {
-	const As2Clip made = p_parent.attach_movie(p_linkage, p_name, p_depth);
+	const As2Clip made = p_parent.attach_movie(hud_linkage_of(p_parent, p_linkage), p_name, p_depth);
 	if (const SwfSceneNode *n = made.node()) {
 		screen_.construct_subtree(n->id);
 	}
@@ -476,6 +530,84 @@ const HudClientState &HudWidgetHost::client() const {
 	return screen_.client();
 }
 
+void HudWidgetHost::emit(int32_t p_index, std::string p_query, const As2Value &p_param) {
+	HudWidgetEvent e;
+	e.widget = path_;
+	const size_t dot = path_.rfind('.');
+	e.instance = dot == std::string::npos ? path_ : path_.substr(dot + 1);
+	e.index = p_index;
+	e.query = std::move(p_query);
+	e.param = p_param;
+	screen_.events_fired_++;
+	if (screen_.event_sink_) {
+		screen_.event_sink_(e);
+	}
+}
+
+bool HudWidgetHost::fire_event(int32_t p_index, const As2Value &p_param) {
+	if (p_index < 0 || size_t(p_index) >= events_.size()) {
+		return false;
+	}
+	emit(p_index, events_[size_t(p_index)].query, p_param);
+	return true;
+}
+
+void HudWidgetHost::fire_query(std::string_view p_query, const As2Value &p_param) {
+	emit(-1, std::string(p_query), p_param);
+}
+
+void HudWidgetHost::request_focus() {
+	screen_.focus_widget(path_);
+}
+
+void HudWidgetHost::set_mouse_target(const As2Clip &p_clip, bool p_enabled) {
+	std::vector<HudMouseTarget> &list = screen_.mouse_targets_;
+	const auto it =
+			std::find_if(list.begin(), list.end(), [&](const HudMouseTarget &t) { return t.path == p_clip.path(); });
+	if (!p_enabled) {
+		if (it != list.end()) {
+			list.erase(it);
+		}
+		return;
+	}
+	if (it == list.end()) {
+		list.push_back(HudMouseTarget{ p_clip.path(), path_, {} });
+	} else {
+		it->widget = path_;
+	}
+}
+
+void HudWidgetHost::set_hit_area(const As2Clip &p_clip, const As2Clip &p_area) {
+	for (HudMouseTarget &t : screen_.mouse_targets_) {
+		if (t.path == p_clip.path()) {
+			t.hit_area = p_area.path();
+		}
+	}
+}
+
+void HudWidgetHost::add_mouse_wheel_listener() {
+	std::vector<std::string> &list = screen_.wheel_listeners_;
+	if (std::find(list.begin(), list.end(), path_) == list.end()) {
+		list.push_back(path_);
+	}
+}
+
+float HudWidgetHost::xmouse(const As2Clip &p_clip) const {
+	const SwfSceneNode *n = p_clip.node();
+	const std::optional<SwfPointF> p = n != nullptr
+			? swf_stage_to_local(swf_world_matrix(*screen_.scene_, n->id), screen_.mouse_x_, screen_.mouse_y_)
+			: std::nullopt;
+	return p ? p->x : 0.0f;
+}
+
+float HudWidgetHost::ymouse(const As2Clip &p_clip) const {
+	const SwfSceneNode *n = p_clip.node();
+	const std::optional<SwfPointF> p = n != nullptr
+			? swf_stage_to_local(swf_world_matrix(*screen_.scene_, n->id), screen_.mouse_x_, screen_.mouse_y_)
+			: std::nullopt;
+	return p ? p->y : 0.0f;
+}
+
 HudScreen::~HudScreen() {
 	if (scene_ != nullptr) {
 		scene_->set_frame_script_handler({});
@@ -492,6 +624,18 @@ void HudScreen::retire(std::string_view p_path) {
 	}
 	tweens_.erase(std::remove_if(tweens_.begin(), tweens_.end(), [&](const HudTween &t) { return t.path == p_path || t.path.starts_with(prefix); }),
 			tweens_.end());
+	const auto under = [&](const std::string &p_other) { return p_other == p_path || p_other.starts_with(prefix); };
+	mouse_targets_.erase(std::remove_if(mouse_targets_.begin(), mouse_targets_.end(),
+								 [&](const HudMouseTarget &t) { return under(t.path) || under(t.widget); }),
+			mouse_targets_.end());
+	wheel_listeners_.erase(
+			std::remove_if(wheel_listeners_.begin(), wheel_listeners_.end(), under), wheel_listeners_.end());
+	if (under(hover_)) {
+		hover_.clear();
+	}
+	if (under(pressed_)) {
+		pressed_.clear();
+	}
 }
 
 void HudScreen::sweep() {
@@ -808,6 +952,11 @@ void HudScreen::initialize(const HudModel &p_model) {
 			continue;
 		}
 		w->screen_widget = true;
+		w->host->set_events(n.events);
+		if (n.focus_index > 0 && (focused_widget_.empty() || n.focus_index < focus_index_)) {
+			focused_widget_ = w->path;
+			focus_index_ = n.focus_index;
+		}
 		w->controller->attach_node(*w->host, n);
 		if (!w->controller->screen_initialized()) {
 			continue;
@@ -882,7 +1031,7 @@ void HudScreen::set_focus(bool p_focused) {
 	focused_ = p_focused;
 	for (size_t i = 0; i < widgets_.size(); ++i) {
 		HudWidgetState &w = *widgets_[i];
-		if (w.retired || w.controller == nullptr || w.host == nullptr) {
+		if (w.retired || w.controller == nullptr || w.host == nullptr || !takes_focus(w)) {
 			continue;
 		}
 		if (p_focused) {
@@ -891,6 +1040,197 @@ void HudScreen::set_focus(bool p_focused) {
 			w.controller->focus_lost(*w.host);
 		}
 	}
+}
+
+bool HudScreen::takes_focus(const HudWidgetState &p_widget) const {
+	if (p_widget.path == focused_widget_) {
+		return true;
+	}
+	if (!p_widget.screen_widget) {
+		return false;
+	}
+	for (const HudWidgetNode &n : asset_.widgets) {
+		if (n.always_in_focus && p_widget.path == std::string(kHudScreenInstance) + "." + n.instance) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void HudScreen::focus_widget(std::string_view p_path) {
+	if (focused_widget_ == p_path) {
+		return;
+	}
+	const std::string was = focused_widget_;
+	focused_widget_ = std::string(p_path);
+	if (!focused_) {
+		return;
+	}
+	for (size_t i = 0; i < widgets_.size(); ++i) {
+		HudWidgetState &w = *widgets_[i];
+		if (w.retired || w.controller == nullptr || w.host == nullptr) {
+			continue;
+		}
+		if (w.path == was && !takes_focus(w)) {
+			w.controller->focus_lost(*w.host);
+		} else if (w.path == focused_widget_) {
+			w.controller->focus_gained(*w.host);
+		}
+	}
+}
+
+bool HudScreen::deliver_in_event(std::string_view p_instance, std::string_view p_query, const As2Value &p_param) {
+	const std::string path = std::string(kHudScreenInstance) + "." + std::string(p_instance);
+	for (size_t i = 0; i < widgets_.size(); ++i) {
+		HudWidgetState &w = *widgets_[i];
+		if (w.retired || !w.screen_widget || w.path != path) {
+			continue;
+		}
+		bool any = false;
+		const std::vector<HudWidgetEventPort> events = w.host->events();
+		for (size_t e = 0; e < events.size(); ++e) {
+			if (events[e].query == p_query) {
+				any = true;
+				w.controller->in_event(*w.host, int32_t(e), p_param);
+			}
+		}
+		return any;
+	}
+	return false;
+}
+
+bool HudScreen::input_concept(int32_t p_concept, bool p_pressed) {
+	bool handled = false;
+	for (size_t i = 0; i < widgets_.size(); ++i) {
+		HudWidgetState &w = *widgets_[i];
+		if (!w.retired && w.initialized && takes_focus(w)) {
+			handled = w.controller->input_concept(*w.host, p_concept, p_pressed) || handled;
+		}
+	}
+	return handled;
+}
+
+bool HudScreen::key(int32_t p_code, bool p_pressed) {
+	bool handled = false;
+	for (size_t i = 0; i < widgets_.size(); ++i) {
+		HudWidgetState &w = *widgets_[i];
+		if (!w.retired && (w.initialized || !w.screen_widget)) {
+			handled = w.controller->key(*w.host, p_code, p_pressed) || handled;
+		}
+	}
+	return handled;
+}
+
+std::string HudScreen::hit_target(float p_stage_x, float p_stage_y) const {
+	if (mouse_targets_.empty()) {
+		return {};
+	}
+	std::unordered_map<SwfNodeId, SwfHitTarget> by_node;
+	std::unordered_map<SwfNodeId, std::string> paths;
+	for (const HudMouseTarget &t : mouse_targets_) {
+		const SwfNodeId id = scene_->find(t.path);
+		if (id == kSwfNoNode) {
+			continue;
+		}
+		const SwfNodeId area = t.hit_area.empty() ? kSwfNoNode : scene_->find(t.hit_area);
+		by_node[id] = SwfHitTarget{ id, area };
+		paths[id] = t.path;
+	}
+	const SwfHitWorld world(*scene_);
+	const SwfNodeId hit =
+			world.topmost_target(p_stage_x, p_stage_y, [&](SwfNodeId p_id) -> std::optional<SwfHitTarget> {
+				const auto it = by_node.find(p_id);
+				return it == by_node.end() ? std::nullopt : std::optional<SwfHitTarget>(it->second);
+			});
+	const auto it = paths.find(hit);
+	return it == paths.end() ? std::string() : it->second;
+}
+
+bool HudScreen::dispatch_mouse(const std::string &p_target, HudMouse p_mouse) {
+	if (p_target.empty()) {
+		return false;
+	}
+	std::string widget;
+	for (const HudMouseTarget &t : mouse_targets_) {
+		if (t.path == p_target) {
+			widget = t.widget;
+		}
+	}
+	p_mouse.target = p_target;
+	for (size_t i = 0; i < widgets_.size(); ++i) {
+		HudWidgetState &w = *widgets_[i];
+		if (w.retired || w.path != widget) {
+			continue;
+		}
+		switch (p_mouse.kind) {
+			case HudMouseKind::Move:
+			case HudMouseKind::RollOver:
+			case HudMouseKind::RollOut:
+				return w.controller->mouse_move(*w.host, p_mouse);
+			case HudMouseKind::Press:
+				return w.controller->mouse_press(*w.host, p_mouse);
+			case HudMouseKind::Release:
+			case HudMouseKind::ReleaseOutside:
+				return w.controller->mouse_release(*w.host, p_mouse);
+			case HudMouseKind::Wheel:
+				return w.controller->mouse_wheel(*w.host, p_mouse);
+		}
+	}
+	return false;
+}
+
+bool HudScreen::mouse_move(float p_stage_x, float p_stage_y) {
+	mouse_x_ = p_stage_x;
+	mouse_y_ = p_stage_y;
+	const std::string target = hit_target(p_stage_x, p_stage_y);
+	bool handled = false;
+	if (target != hover_) {
+		const std::string was = hover_;
+		hover_ = target;
+		if (pressed_.empty()) {
+			handled = dispatch_mouse(was, HudMouse{ p_stage_x, p_stage_y, 0, HudMouseKind::RollOut }) || handled;
+			handled = dispatch_mouse(target, HudMouse{ p_stage_x, p_stage_y, 0, HudMouseKind::RollOver }) || handled;
+		}
+	}
+	return dispatch_mouse(target, HudMouse{ p_stage_x, p_stage_y, 0, HudMouseKind::Move }) || handled;
+}
+
+bool HudScreen::mouse_button(float p_stage_x, float p_stage_y, int32_t p_button, bool p_pressed) {
+	if (p_button != 1) {
+		return false;
+	}
+	mouse_move(p_stage_x, p_stage_y);
+	if (p_pressed) {
+		pressed_ = hover_;
+		return dispatch_mouse(pressed_, HudMouse{ p_stage_x, p_stage_y, p_button, HudMouseKind::Press });
+	}
+	const std::string was = pressed_;
+	pressed_.clear();
+	if (was.empty()) {
+		return false;
+	}
+	if (was == hover_) {
+		return dispatch_mouse(was, HudMouse{ p_stage_x, p_stage_y, p_button, HudMouseKind::Release });
+	}
+	const bool handled = dispatch_mouse(was, HudMouse{ p_stage_x, p_stage_y, p_button, HudMouseKind::ReleaseOutside });
+	return dispatch_mouse(hover_, HudMouse{ p_stage_x, p_stage_y, 0, HudMouseKind::RollOver }) || handled;
+}
+
+bool HudScreen::mouse_wheel(float p_stage_x, float p_stage_y, float p_delta) {
+	mouse_x_ = p_stage_x;
+	mouse_y_ = p_stage_y;
+	bool handled = false;
+	const std::vector<std::string> listeners = wheel_listeners_;
+	for (const std::string &path : listeners) {
+		for (size_t i = 0; i < widgets_.size(); ++i) {
+			HudWidgetState &w = *widgets_[i];
+			if (!w.retired && w.path == path) {
+				HudMouse m{ p_stage_x, p_stage_y, 0, HudMouseKind::Wheel, path, p_delta };
+				handled = w.controller->mouse_wheel(*w.host, m) || handled;
+			}
+		}
+	}
+	return handled;
 }
 
 void HudScreen::advance(double p_seconds) {

@@ -9,6 +9,7 @@
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/hud_widget_registry.h"
 #include "bf3/core/ui/hud_widgets.h"
+#include "bf3/core/ui/swf_hit.h"
 #include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/swf_scene.h"
 #include "bf3/core/ui/swf_text.h"
@@ -356,14 +357,18 @@ constexpr std::array<float, 5> kKillRowFadeOut{ 1.0f, 205.0f / 256.0f, 154.0f / 
 TEST_SUITE("ui-hud-screen-unit") {
 	TEST_CASE("hud screen unit: each AS2 class registers its controller once from its widget file") {
 		const std::vector<std::string> want{ "Screen.Weapon.CrosshairDefault", "Shared.HudBackground",
-			"Widget.Crosshair.Crosshair", "Widget.Crosshair.Hitindicator", "Widget.Hud.Ammo", "Widget.Hud.Compass",
-			"Widget.Hud.DamageIndicator", "Widget.Hud.Health", "Widget.Hud.HudBackgroundWidget", "Widget.Hud.Minimap",
-			"Widget.Hud.PassangerList", "Widget.Hud.SquadList", "Widget.Hud.VehicleHealth",
-			"Widget.Icon3D.Alerts.AlertManager", "Widget.Icon3D.Alerts.Alerttag",
-			"Widget.Icon3D.Interaction.InteractionManager", "Widget.Icon3D.Mapmarker.MapmarkerManager",
-			"Widget.Icon3D.Mapmarker.Mapmarkertag", "Widget.Icon3D.TeamSupport.SupportIconManager",
-			"Widget.Icon3D.TeamSupport.SupportIconTag", "Widget.Image.ImageManager", "Widget.Message.HudAlertMessage",
-			"Widget.Message.HudMessage", "Widget.Message.LogMessage", "Widget.Message.MessageTypes.GameMessage",
+			"Widget.Button.Button", "Widget.Button.Buttons.ButtonBase", "Widget.Button.Buttons.IconButton",
+			"Widget.Button.Buttons.LargeArrowButton", "Widget.Button.Buttons.ResizableButton",
+			"Widget.Button.Buttons.TextButton", "Widget.Button.Buttons.TextIconButton",
+			"Widget.Button.Buttons.TextIconButtonAlignedRight", "Widget.Crosshair.Crosshair",
+			"Widget.Crosshair.Hitindicator", "Widget.Hud.Ammo", "Widget.Hud.Compass", "Widget.Hud.DamageIndicator",
+			"Widget.Hud.Health", "Widget.Hud.HudBackgroundWidget", "Widget.Hud.Minimap", "Widget.Hud.PassangerList",
+			"Widget.Hud.SquadList", "Widget.Hud.VehicleHealth", "Widget.Icon3D.Alerts.AlertManager",
+			"Widget.Icon3D.Alerts.Alerttag", "Widget.Icon3D.Interaction.InteractionManager",
+			"Widget.Icon3D.Mapmarker.MapmarkerManager", "Widget.Icon3D.Mapmarker.Mapmarkertag",
+			"Widget.Icon3D.TeamSupport.SupportIconManager", "Widget.Icon3D.TeamSupport.SupportIconTag",
+			"Widget.Image.ImageManager", "Widget.Message.HudAlertMessage", "Widget.Message.HudMessage",
+			"Widget.Message.LogMessage", "Widget.Message.MessageTypes.GameMessage",
 			"Widget.Message.MessageTypes.KillLogMessage", "Widget.Message.MessageTypes.LocalKillLogMessage",
 			"Widget.Message.MessageTypes.ScoreMessage", "Widget.Message.ObjectiveMessage",
 			"Widget.Message.ScoreAggregator", "Widget.Message.TooltipMessage", "Widget.Misc.LatencyIndicator",
@@ -2091,6 +2096,77 @@ TEST_SUITE("ui-hud-screen") {
 		}
 		CHECK(controllers > 0);
 		row("input_hooks", std::to_string(controllers) + " controllers over the 4 in-round screens: concept, key, mouse and focus hooks unhandled, screen focus given and taken back, no scene change");
+	}
+
+	TEST_CASE("hud screen: hit test clicks spawnscreenpc Button_03") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		Screen s = open_screen(*r, "ui/flow/screen/spawnscreenpc", text_client(text_db(*r)));
+		const auto node = std::find_if(s.asset.widgets.begin(), s.asset.widgets.end(),
+				[](const HudWidgetNode &w) { return w.instance == "Button_03"; });
+		REQUIRE(node != s.asset.widgets.end());
+		std::vector<std::string> props;
+		for (const HudWidgetProperty &p : node->properties) {
+			props.push_back(p.name + "=" + p.value);
+		}
+		const std::vector<std::string> expected_props{ "TextData=", "IconData=", "Visible=", "Toggled=",
+			"TextData=ID_M_HIDE_MAP;ID_M_SHOW_MAP", "IconData=3;4", "Visible=", "Toggled=" };
+		CHECK(props == expected_props);
+		REQUIRE(node->events.size() > 11);
+		const std::string hide_query = node->events[11].query;
+		std::printf("ui.hud.screen hit Button_03 events %zu hide '%s' '%s'\n", node->events.size(),
+				node->events[11].name.c_str(), hide_query.c_str());
+		std::vector<std::string> fired;
+		s.hud->set_event_sink([&](const HudWidgetEvent &e) {
+			fired.push_back(std::to_string(e.index) + " " + e.query + " " + e.param.to_string());
+		});
+		s.hud->initialize(HudModel{});
+		const bool listed =
+				std::any_of(s.hud->mouse_targets().begin(), s.hud->mouse_targets().end(), [](const HudMouseTarget &t) {
+					return t.path == "instance1.Button_03" && t.widget == "instance1.Button_03";
+				});
+		CHECK(listed);
+		const SwfSceneNode *label = s.scene->find_node("instance1.Button_03.button.label.txt");
+		const SwfSceneNode *bg = s.scene->find_node("instance1.Button_03.button.bgHolder");
+		REQUIRE(label != nullptr);
+		REQUIRE(bg != nullptr);
+		CHECK(label->text == "HIDE MAP");
+		const SwfRect lb = swf_node_local_bounds(*s.scene, *bg);
+		const SwfMatrix bw = swf_world_matrix(*s.scene, bg->id);
+		const float cx = bw.tx + (lb.x_min + lb.x_max) * 0.5f;
+		const float cy = bw.ty + (lb.y_min + lb.y_max) * 0.5f;
+		std::printf("ui.hud.screen hit Button_03 at %.1f %.1f\n", cx, cy);
+		CHECK(s.hud->hit_target(cx, cy) == "instance1.Button_03");
+		CHECK(s.hud->hit_target(cx, cy + 400.0f).empty());
+		CHECK(s.hud->mouse_move(cx, cy));
+		CHECK(s.hud->hovered() == "instance1.Button_03");
+		CHECK(s.hud->mouse_button(cx, cy, 1, true));
+		CHECK(s.hud->mouse_button(cx, cy, 1, false));
+		CHECK(s.hud->mouse_move(cx, cy + 400.0f));
+		const std::vector<std::string> click{ "1 UIWidgetEventID_OnItemOver ID_M_HIDE_MAP",
+			"0 UIWidgetEventID_OnItemPressed ID_M_HIDE_MAP", "4 UIWidgetEventID_ToggledOn ID_M_HIDE_MAP",
+			"-1 UIWidgetEventID_PlaySoundSelect false", "3 UIWidgetEventID_OnItemReleased ID_M_HIDE_MAP",
+			"2 UIWidgetEventID_OnItemOut ID_M_HIDE_MAP" };
+		CHECK(fired == click);
+		CHECK(label->text == "SHOW MAP");
+		fired.clear();
+		s.hud->mouse_move(cx, cy);
+		s.hud->mouse_button(cx, cy, 1, true);
+		s.hud->mouse_move(cx, cy + 400.0f);
+		s.hud->mouse_button(cx, cy + 400.0f, 1, false);
+		const std::vector<std::string> outside{ "1 UIWidgetEventID_OnItemOver ID_M_HIDE_MAP",
+			"0 UIWidgetEventID_OnItemPressed ID_M_HIDE_MAP" };
+		CHECK(fired == outside);
+		CHECK(s.hud->hovered().empty());
+		CHECK(label->text == "SHOW MAP");
+		const SwfSceneNode *self = s.scene->find_node("instance1.Button_03");
+		REQUIRE(self != nullptr);
+		CHECK(self->visible);
+		CHECK(s.hud->deliver_in_event("Button_03", hide_query));
+		CHECK_FALSE(self->visible);
+		CHECK(s.hud->hit_target(cx, cy).empty());
 	}
 
 	TEST_CASE("hud screen: install unchanged") {

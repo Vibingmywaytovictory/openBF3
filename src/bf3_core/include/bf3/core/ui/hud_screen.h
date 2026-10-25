@@ -55,10 +55,22 @@ struct HudDataSource {
 	bool on_initialize = true;
 };
 
+struct HudWidgetEventPort {
+	std::string name;
+	std::string query;
+	bool output = false;
+	bool operator==(const HudWidgetEventPort &) const = default;
+};
+
+inline constexpr size_t kHudMaxWidgetEvents = 64;
+
 struct HudWidgetNode {
 	std::string instance;
 	std::string name;
 	std::string widget_asset;
+	std::vector<HudWidgetEventPort> events;
+	int32_t focus_index = 0;
+	bool always_in_focus = false;
 	HudAxisAlign horizontal = HudAxisAlign::Centre;
 	HudAxisAlign vertical = HudAxisAlign::Centre;
 	int32_t z_depth_level = 0;
@@ -262,18 +274,61 @@ public:
 	const HudClientState &client() const;
 	HudScreen &screen() { return screen_; }
 
+	void set_events(std::vector<HudWidgetEventPort> p_events) { events_ = std::move(p_events); }
+	const std::vector<HudWidgetEventPort> &events() const { return events_; }
+	bool fire_event(int32_t p_index, const As2Value &p_param = As2Value::of(0));
+	void fire_query(std::string_view p_query, const As2Value &p_param);
+	void request_focus();
+	void set_mouse_target(const As2Clip &p_clip, bool p_enabled);
+	void set_hit_area(const As2Clip &p_clip, const As2Clip &p_area);
+	void add_mouse_wheel_listener();
+	float xmouse(const As2Clip &p_clip) const;
+	float ymouse(const As2Clip &p_clip) const;
+
 private:
 	HudScreen &screen_;
 	std::string path_;
 	std::string class_;
 	As2Clip self_;
 	std::map<std::string, As2Value, std::less<>> params_;
+	std::vector<HudWidgetEventPort> events_;
+
+	void emit(int32_t p_index, std::string p_query, const As2Value &p_param);
+};
+
+enum class HudMouseKind : uint8_t {
+	Move,
+	RollOver,
+	RollOut,
+	Press,
+	Release,
+	ReleaseOutside,
+	Wheel,
 };
 
 struct HudMouse {
 	float stage_x = 0.0f;
 	float stage_y = 0.0f;
 	int32_t button = 0;
+	HudMouseKind kind = HudMouseKind::Move;
+	std::string target;
+	float wheel = 0.0f;
+};
+
+struct HudWidgetEvent {
+	std::string widget;
+	std::string instance;
+	int32_t index = 0;
+	std::string query;
+	As2Value param;
+};
+
+using HudWidgetEventSink = std::function<void(const HudWidgetEvent &)>;
+
+struct HudMouseTarget {
+	std::string path;
+	std::string widget;
+	std::string hit_area;
 };
 
 class HudWidgetController {
@@ -298,6 +353,8 @@ public:
 	virtual bool mouse_move(HudWidgetHost &, const HudMouse &) { return false; }
 	virtual bool mouse_press(HudWidgetHost &, const HudMouse &) { return false; }
 	virtual bool mouse_release(HudWidgetHost &, const HudMouse &) { return false; }
+	virtual bool mouse_wheel(HudWidgetHost &, const HudMouse &) { return false; }
+	virtual void in_event(HudWidgetHost &, int32_t, const As2Value &) {}
 	virtual void focus_gained(HudWidgetHost &) {}
 	virtual void focus_lost(HudWidgetHost &) {}
 };
@@ -334,6 +391,20 @@ public:
 	void set_stage_rects(const HudStageRects &p_rects);
 	void set_focus(bool p_focused);
 	bool has_focus() const { return focused_; }
+	void set_event_sink(HudWidgetEventSink p_sink) { event_sink_ = std::move(p_sink); }
+	bool deliver_in_event(
+			std::string_view p_instance, std::string_view p_query, const As2Value &p_param = As2Value::of(0));
+	bool input_concept(int32_t p_concept, bool p_pressed);
+	bool key(int32_t p_code, bool p_pressed);
+	bool mouse_move(float p_stage_x, float p_stage_y);
+	bool mouse_button(float p_stage_x, float p_stage_y, int32_t p_button, bool p_pressed);
+	bool mouse_wheel(float p_stage_x, float p_stage_y, float p_delta);
+	std::string hit_target(float p_stage_x, float p_stage_y) const;
+	const std::string &focused_widget() const { return focused_widget_; }
+	void focus_widget(std::string_view p_path);
+	const std::string &hovered() const { return hover_; }
+	const std::vector<HudMouseTarget> &mouse_targets() const { return mouse_targets_; }
+	uint64_t events_fired() const { return events_fired_; }
 	const HudClientState &client() const { return client_; }
 	const HudStageRects &stage_rects() const { return rects_; }
 
@@ -391,6 +462,19 @@ private:
 	HudScreenStats stats_;
 	bool initialized_ = false;
 	bool focused_ = false;
+	HudWidgetEventSink event_sink_;
+	uint64_t events_fired_ = 0;
+	std::vector<HudMouseTarget> mouse_targets_;
+	std::vector<std::string> wheel_listeners_;
+	std::string hover_;
+	std::string pressed_;
+	float mouse_x_ = 0.0f;
+	float mouse_y_ = 0.0f;
+	std::string focused_widget_;
+	int32_t focus_index_ = 0;
+
+	bool dispatch_mouse(const std::string &p_target, HudMouse p_mouse);
+	bool takes_focus(const HudWidgetState &p_widget) const;
 };
 
 }
