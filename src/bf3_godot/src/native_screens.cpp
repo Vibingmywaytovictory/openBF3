@@ -11,6 +11,7 @@
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/transform2d.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -58,10 +59,15 @@ void Bf3UiScreens::_bind_methods() {}
 
 void Bf3UiScreens::_notification(int p_what) {
 	if (p_what == NOTIFICATION_PREDELETE) {
+		hud_id_ = 0;
 		for (std::unique_ptr<Entry> &e : entries_) {
 			e->screen.reset();
 		}
 	}
+}
+
+Bf3NativeHud *Bf3UiScreens::hud() const {
+	return hud_id_ != 0 ? Object::cast_to<Bf3NativeHud>(ObjectDB::get_instance(hud_id_)) : nullptr;
 }
 
 void Bf3UiScreens::_ready() {
@@ -111,21 +117,23 @@ const Bf3UiScreens::Entry *Bf3UiScreens::find(std::string_view p_partition) cons
 
 ui::HudScreen *Bf3UiScreens::screen_of(const Entry &p_entry) const {
 	if (p_entry.adopted) {
-		return hud_ != nullptr ? hud_->find_screen(p_entry.partition).screen : nullptr;
+		const Bf3NativeHud *h = hud();
+		return h != nullptr ? h->find_screen(p_entry.partition).screen : nullptr;
 	}
 	return p_entry.screen.get();
 }
 
 Bf3SwfView *Bf3UiScreens::view_of(const Entry &p_entry) const {
 	if (p_entry.adopted) {
-		return hud_ != nullptr ? hud_->find_screen(p_entry.partition).view : nullptr;
+		const Bf3NativeHud *h = hud();
+		return h != nullptr ? h->find_screen(p_entry.partition).view : nullptr;
 	}
 	return p_entry.view;
 }
 
 void Bf3UiScreens::adopt(Bf3NativeHud *p_hud) {
-	hud_ = p_hud;
-	if (hud_ == nullptr) {
+	hud_id_ = p_hud != nullptr ? p_hud->get_instance_id() : 0;
+	if (p_hud == nullptr) {
 		return;
 	}
 	for (size_t i = 0; i < kNativeHudViews; ++i) {
@@ -155,8 +163,9 @@ void Bf3UiScreens::set_drawn(std::string_view p_partition, bool p_drawn) {
 
 bf3::core::Status Bf3UiScreens::open_screen(std::string_view p_partition) {
 	if (Entry *e = find(p_partition)) {
-		if (e->adopted && hud_ != nullptr) {
-			BF3_TRY(hud_->open_screen(p_partition));
+		Bf3NativeHud *h = e->adopted ? hud() : nullptr;
+		if (h != nullptr) {
+			BF3_TRY(h->open_screen(p_partition));
 		}
 		return bf3::core::Status::success();
 	}
@@ -257,7 +266,8 @@ bool Bf3UiScreens::show_screen(std::string_view p_partition) {
 		return false;
 	}
 	if (e->adopted) {
-		return hud_ != nullptr && hud_->show_screen(p_partition);
+		Bf3NativeHud *h = hud();
+		return h != nullptr && h->show_screen(p_partition);
 	}
 	e->shown_count += e->shown ? 0 : 1;
 	e->shown = true;
@@ -271,7 +281,8 @@ bool Bf3UiScreens::hide_screen(std::string_view p_partition) {
 		return false;
 	}
 	if (e->adopted) {
-		return hud_ != nullptr && hud_->hide_screen(p_partition);
+		Bf3NativeHud *h = hud();
+		return h != nullptr && h->hide_screen(p_partition);
 	}
 	e->shown = false;
 	apply_visibility(*e);
@@ -284,8 +295,8 @@ bool Bf3UiScreens::order_screen(std::string_view p_partition, int32_t p_order) {
 		return false;
 	}
 	e->order = p_order;
-	if (e->adopted && hud_ != nullptr) {
-		hud_->order_screen(p_partition, p_order);
+	if (Bf3NativeHud *h = e->adopted ? hud() : nullptr) {
+		h->order_screen(p_partition, p_order);
 	}
 	arrange();
 	return true;
@@ -398,7 +409,8 @@ UiScreenSlot Bf3UiScreens::screen_slot(size_t p_index) const {
 	}
 	const Entry &e = *entries_[p_index];
 	if (e.adopted) {
-		UiScreenSlot s = hud_ != nullptr ? hud_->find_screen(e.partition) : UiScreenSlot{};
+		const Bf3NativeHud *h = hud();
+		UiScreenSlot s = h != nullptr ? h->find_screen(e.partition) : UiScreenSlot{};
 		s.partition = e.partition;
 		return s;
 	}
@@ -408,7 +420,8 @@ UiScreenSlot Bf3UiScreens::screen_slot(size_t p_index) const {
 bool Bf3UiScreens::reports(std::string_view p_partition) const {
 	const Entry *e = find(p_partition);
 	if (e != nullptr && e->adopted) {
-		return hud_ != nullptr && hud_->reports(p_partition);
+		const Bf3NativeHud *h = hud();
+		return h != nullptr && h->reports(p_partition);
 	}
 	return e != nullptr;
 }
@@ -419,7 +432,8 @@ std::optional<UiScreenRecord> Bf3UiScreens::screen_record(std::string_view p_par
 		return std::nullopt;
 	}
 	if (e->adopted) {
-		return hud_ != nullptr ? hud_->screen_record(p_partition) : std::nullopt;
+		const Bf3NativeHud *h = hud();
+		return h != nullptr ? h->screen_record(p_partition) : std::nullopt;
 	}
 	UiScreenRecord r;
 	r.visible = e->shown && e->phase != UiScreenPhase::Exiting && is_visible_in_tree();

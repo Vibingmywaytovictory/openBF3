@@ -113,6 +113,7 @@ protected:
 private:
 	struct Entry;
 
+	Bf3NativeHud *hud() const;
 	Entry *find(std::string_view p_partition);
 	const Entry *find(std::string_view p_partition) const;
 	bf3::core::ui::HudScreen *screen_of(const Entry &p_entry) const;
@@ -132,7 +133,7 @@ private:
 	void error(std::string p_message);
 
 	const bf3::core::EbxResolver *db_ = nullptr;
-	Bf3NativeHud *hud_ = nullptr;
+	uint64_t hud_id_ = 0;
 	bf3::host::UiFlowSession *session_ = nullptr;
 	bool manual_ = false;
 	std::vector<std::unique_ptr<Entry>> entries_;

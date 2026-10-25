@@ -36,16 +36,27 @@ struct UiLookupRecord {
 	uint64_t missing_strings = 0;
 };
 
+class UiScreenRecordSet;
+
 class UiScreenRecords {
 public:
-	virtual ~UiScreenRecords() = default;
+	UiScreenRecords() = default;
+	UiScreenRecords(const UiScreenRecords &) = delete;
+	UiScreenRecords &operator=(const UiScreenRecords &) = delete;
+	virtual ~UiScreenRecords();
 	virtual bool reports(std::string_view p_partition) const = 0;
 	virtual std::optional<UiScreenRecord> screen_record(std::string_view p_partition) const = 0;
 	virtual std::optional<UiLookupRecord> lookup_record() const { return std::nullopt; }
+
+private:
+	friend class UiScreenRecordSet;
+	mutable std::vector<UiScreenRecordSet *> sets_;
 };
 
 class UiScreenRecordSet final : public UiScreenRecords {
 public:
+	UiScreenRecordSet() = default;
+	~UiScreenRecordSet() override;
 	void add(const UiScreenRecords *p_source);
 	void remove(const UiScreenRecords *p_source);
 	size_t sources() const { return sources_.size(); }
@@ -55,6 +66,7 @@ public:
 	std::optional<UiLookupRecord> lookup_record() const override;
 
 private:
+	friend class UiScreenRecords;
 	std::vector<const UiScreenRecords *> sources_;
 };
 

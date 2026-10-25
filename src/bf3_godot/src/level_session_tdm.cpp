@@ -31,6 +31,7 @@
 #include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <algorithm>
@@ -45,6 +46,10 @@ using namespace godot;
 namespace host = bf3::host;
 namespace net = bf3::net;
 namespace sim = bf3::sim;
+
+Bf3UiScreens *tdm_ui_screens(const TdmState &p_m) {
+	return p_m.ui_screens_id != 0 ? Object::cast_to<Bf3UiScreens>(ObjectDB::get_instance(p_m.ui_screens_id)) : nullptr;
+}
 
 namespace {
 
@@ -180,12 +185,13 @@ void build_tdm_ui(GameState &r_game, TdmState &r_m, bool p_headless) {
 		}
 	}
 	if (r_m.windowed && r_m.native_screens && r_game.layer != nullptr && r_game.native_hud != nullptr) {
-		r_m.ui_screens = memnew(Bf3UiScreens);
-		r_m.ui_screens->set_name("NativeScreens");
-		r_m.ui_screens->set_manual(true);
-		r_game.layer->add_child(r_m.ui_screens);
-		r_m.ui_screens->adopt(r_game.native_hud);
-		r_m.screen_records.add(r_m.ui_screens);
+		Bf3UiScreens *screens = memnew(Bf3UiScreens);
+		screens->set_name("NativeScreens");
+		screens->set_manual(true);
+		r_game.layer->add_child(screens);
+		screens->adopt(r_game.native_hud);
+		r_m.screen_records.add(screens);
+		r_m.ui_screens_id = screens->get_instance_id();
 		r_m.native_flow =
 				std::unique_ptr<NativeFlow, void (*)(NativeFlow *)>(new NativeFlow(), &delete_part<NativeFlow>);
 		r_m.native_flow->set_keep_log(r_m.native_screens_check);
@@ -198,7 +204,8 @@ void build_tdm_ui(GameState &r_game, TdmState &r_m, bool p_headless) {
 
 void step_native_screens(GameState &r_game, TdmState &r_m, const host::PresentationFrame &p_f,
 		const std::string &p_level, const std::string &p_mode, double p_delta) {
-	if (r_m.ui_screens == nullptr || r_m.native_flow == nullptr) {
+	Bf3UiScreens *screens = tdm_ui_screens(r_m);
+	if (screens == nullptr || r_m.native_flow == nullptr) {
 		return;
 	}
 	NativeFlow &flow = *r_m.native_flow;
@@ -210,12 +217,12 @@ void step_native_screens(GameState &r_game, TdmState &r_m, const host::Presentat
 	}
 	if (!r_m.native_client_set && r_game.native_hud != nullptr && r_game.native_hud->is_ready() &&
 			!r_game.native_hud->has_failed()) {
-		r_m.ui_screens->set_client(r_game.native_hud->client());
+		screens->set_client(r_game.native_hud->client());
 		r_m.native_client_set = true;
 	}
 	if (!r_m.native_following && r_m.native_client_set && flow.poll()) {
-		r_m.ui_screens->set_resolver(flow.resolver());
-		r_m.ui_screens->follow(flow.session());
+		screens->set_resolver(flow.resolver());
+		screens->follow(flow.session());
 		r_m.native_following = true;
 		UtilityFunctions::print(to_godot("[ui] native screens follow the client UI flow of " + p_level + " " + p_mode +
 				" (loaded in " + std::to_string(flow.load_seconds()) + " s)"));
@@ -224,7 +231,7 @@ void step_native_screens(GameState &r_game, TdmState &r_m, const host::Presentat
 		r_m.native_failure_printed = true;
 		UtilityFunctions::print(to_godot("[ui] ERROR native screens: " + flow.error()));
 	}
-	r_m.ui_screens->set_model(r_game.hud_model);
+	screens->set_model(r_game.hud_model);
 	host::UiGameState st;
 	st.joined = p_f.match_valid && p_f.stats.connected && !p_f.stats.refused;
 	st.phase = p_f.match_valid ? p_f.match.phase : net::MatchPhase::Loading;
@@ -244,9 +251,9 @@ void step_native_screens(GameState &r_game, TdmState &r_m, const host::Presentat
 			}
 		}
 	}
-	r_m.ui_screens->step(p_delta);
+	screens->step(p_delta);
 	if (!r_m.native_screens_check) {
-		r_m.ui_screens->clear_log();
+		screens->clear_log();
 	}
 }
 
@@ -257,7 +264,8 @@ void Bf3LevelSession::tdm_ui_input(const Ref<InputEvent> &p_event) {
 		return;
 	}
 	TdmState &m = *game_->tdm;
-	if (m.ui_screens == nullptr || m.native_flow == nullptr || !m.native_following) {
+	Bf3UiScreens *screens = tdm_ui_screens(m);
+	if (screens == nullptr || m.native_flow == nullptr || !m.native_following) {
 		return;
 	}
 	const bf3::core::ui::UiInputRouter &router = m.native_flow->router();
@@ -270,27 +278,27 @@ void Bf3LevelSession::tdm_ui_input(const Ref<InputEvent> &p_event) {
 		if (idk.empty()) {
 			return;
 		}
-		m.ui_screens->key(bf3::core::ui::ui_flash_key_code(idk), k->is_pressed());
+		screens->key(bf3::core::ui::ui_flash_key_code(idk), k->is_pressed());
 		for (const bf3::core::ui::UiInputConcept c : router.concepts_of_key(idk)) {
-			m.ui_screens->input_concept(int32_t(c), k->is_pressed());
+			screens->input_concept(int32_t(c), k->is_pressed());
 		}
 	} else if (const InputEventMouseButton *mb = Object::cast_to<InputEventMouseButton>(p_event.ptr())) {
 		const MouseButton b = mb->get_button_index();
 		if (b == MOUSE_BUTTON_WHEEL_UP || b == MOUSE_BUTTON_WHEEL_DOWN) {
 			if (mb->is_pressed()) {
-				m.ui_screens->mouse_wheel(mb->get_position(),
+				screens->mouse_wheel(mb->get_position(),
 						b == MOUSE_BUTTON_WHEEL_UP ? kUiWheelLinesPerNotch : -kUiWheelLinesPerNotch);
 			}
 			return;
 		}
-		m.ui_screens->mouse_button(mb->get_position(), int32_t(b), mb->is_pressed());
+		screens->mouse_button(mb->get_position(), int32_t(b), mb->is_pressed());
 		if (const std::string_view idb = ui_idb_of_button(b); !idb.empty()) {
 			for (const bf3::core::ui::UiInputConcept c : router.concepts_of_mouse(idb)) {
-				m.ui_screens->input_concept(int32_t(c), mb->is_pressed());
+				screens->input_concept(int32_t(c), mb->is_pressed());
 			}
 		}
 	} else if (const InputEventMouseMotion *mm = Object::cast_to<InputEventMouseMotion>(p_event.ptr())) {
-		m.ui_screens->mouse_move(mm->get_position());
+		screens->mouse_move(mm->get_position());
 	}
 }
 
@@ -629,7 +637,8 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 	step_native_screens(r_game, m, f, level_id(), mode_id(), p_delta);
 	m.ms_tdm_hud = ms_since(t0);
 #if OPENBF3_BUILD_CHECKS
-	if (m.native_screens_check && m.ui_screens != nullptr && m.native_flow != nullptr && !m.finished) {
+	Bf3UiScreens *screens = tdm_ui_screens(m);
+	if (m.native_screens_check && screens != nullptr && m.native_flow != nullptr && !m.finished) {
 		if (m.native_check == nullptr) {
 			m.native_check = std::unique_ptr<NativeScreensCheck, void (*)(NativeScreensCheck *)>(
 					new NativeScreensCheck(), &delete_part<NativeScreensCheck>);
@@ -642,7 +651,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			k->set_pressed(p_pressed);
 			tdm_ui_input(k);
 		};
-		if (m.native_check->frame(*m.ui_screens, *m.native_flow, now_s, press)) {
+		if (m.native_check->frame(*screens, *m.native_flow, now_s, press)) {
 			m.finished = true;
 			UtilityFunctions::print(to_godot(m.native_check->report()));
 			finish(m.native_check->exit_code());
@@ -753,13 +762,13 @@ void Bf3LevelSession::tdm_shutdown() {
 	}
 	TdmState &m = *game_->tdm;
 	m.check.reset();
-	if (m.ui_screens != nullptr) {
-		m.screen_records.remove(m.ui_screens);
-		m.ui_screens->follow(nullptr);
-		m.ui_screens->set_resolver(nullptr);
-		m.ui_screens->adopt(nullptr);
-		m.ui_screens = nullptr;
+	if (Bf3UiScreens *screens = tdm_ui_screens(m)) {
+		m.screen_records.remove(screens);
+		screens->follow(nullptr);
+		screens->set_resolver(nullptr);
+		screens->adopt(nullptr);
 	}
+	m.ui_screens_id = 0;
 	m.native_check.reset();
 	m.native_flow.reset();
 	if (m.tdm_hud != nullptr) {
@@ -770,7 +779,7 @@ void Bf3LevelSession::tdm_shutdown() {
 }
 
 const Bf3UiScreens *Bf3LevelSession::screen_stack() const {
-	return game_ && game_->tdm ? game_->tdm->ui_screens : nullptr;
+	return game_ && game_->tdm ? tdm_ui_screens(*game_->tdm) : nullptr;
 }
 
 const UiScreenRecords *Bf3LevelSession::screen_records() const {

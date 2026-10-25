@@ -14,14 +14,31 @@ std::string UiScreenRecord::text(std::string_view p_fact) const {
 	return it != texts.end() ? it->second : std::string();
 }
 
+UiScreenRecords::~UiScreenRecords() {
+	for (UiScreenRecordSet *set : sets_) {
+		set->sources_.erase(std::remove(set->sources_.begin(), set->sources_.end(), this), set->sources_.end());
+	}
+}
+
+UiScreenRecordSet::~UiScreenRecordSet() {
+	for (const UiScreenRecords *s : sources_) {
+		s->sets_.erase(std::remove(s->sets_.begin(), s->sets_.end(), this), s->sets_.end());
+	}
+}
+
 void UiScreenRecordSet::add(const UiScreenRecords *p_source) {
 	if (p_source != nullptr && p_source != this && std::find(sources_.begin(), sources_.end(), p_source) == sources_.end()) {
 		sources_.push_back(p_source);
+		p_source->sets_.push_back(this);
 	}
 }
 
 void UiScreenRecordSet::remove(const UiScreenRecords *p_source) {
+	if (std::find(sources_.begin(), sources_.end(), p_source) == sources_.end()) {
+		return;
+	}
 	sources_.erase(std::remove(sources_.begin(), sources_.end(), p_source), sources_.end());
+	p_source->sets_.erase(std::remove(p_source->sets_.begin(), p_source->sets_.end(), this), p_source->sets_.end());
 }
 
 bool UiScreenRecordSet::reports(std::string_view p_partition) const {

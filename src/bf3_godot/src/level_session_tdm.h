@@ -86,9 +86,10 @@ struct TdmState {
 	bool native_client_set = false;
 	bool native_failure_printed = false;
 	uint32_t own_spawns = 0;
-	Bf3UiScreens *ui_screens = nullptr;
+	uint64_t ui_screens_id = 0;
 	std::unique_ptr<NativeFlow, void (*)(NativeFlow *)> native_flow{ nullptr, nullptr };
 	std::unique_ptr<NativeScreensCheck, void (*)(NativeScreensCheck *)> native_check{ nullptr, nullptr };
 };
 
+Bf3UiScreens *tdm_ui_screens(const TdmState &p_m);
 }

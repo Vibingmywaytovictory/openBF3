@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -301,6 +302,22 @@ TEST_SUITE("m2b-contract2") {
 		set.remove(&third);
 		CHECK(!set.lookup_record());
 		CHECK(!set.reports(ui::kSpawnScreenPcPartition));
+		{
+			const Source brief(ui::kHudMpScreenPartition, 3, std::nullopt);
+			set.add(&brief);
+			CHECK(set.screen_record(ui::kHudMpScreenPartition)->shown == 3);
+		}
+		CHECK(set.sources() == 1);
+		CHECK(!set.reports(ui::kHudMpScreenPartition));
+		auto outer = std::make_unique<gs::UiScreenRecordSet>();
+		outer->add(&third);
+		outer->add(&set);
+		set.add(&third);
+		CHECK(outer->sources() == 2);
+		outer.reset();
+		set.remove(&third);
+		CHECK(set.sources() == 1);
+		CHECK(set.screen_record(ui::kKillScreenPartition)->shown == 2);
 	}
 
 	TEST_CASE("m2b.contract2: ui's fill_hud_tdm (pending until ui lands)") {
