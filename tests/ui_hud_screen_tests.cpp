@@ -309,7 +309,7 @@ TEST_SUITE("ui-hud-screen-unit") {
 			"Widget.ScreenSpecific.ScoreboardSpectatorBox", "Widget.Button.TabBar", "fb.Base.UIPopup",
 			"Widget.Popup.PopupGenericWidget", "Widget.Popup.PopupButtonsManager", "Widget.Image.Dimmer",
 			"Widget.List.ListLabel", "Widget.Text.TextField", "Widget.Text.PageHeader", "Widget.Input.InputListener",
-			"Widget.Button.ConsoleButtonBar" };
+			"Widget.Button.ConsoleButtonBar", "Screen.LoadingScreen", "Widget.Message.LoadingMessage" };
 		const HudWidgetRegistry &installed = HudWidgetRegistry::installed();
 		std::vector<std::string> sorted = want;
 		std::sort(sorted.begin(), sorted.end());
@@ -2329,8 +2329,9 @@ TEST_SUITE("ui-hud-screen") {
 		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
 		HudScreen &hud = **made;
 		const std::vector<std::string> &unknown = hud.stats().unknown_class_paths;
-		CHECK(std::find(unknown.begin(), unknown.end(), std::string(kHudScreenInstance) + " Screen.LoadingScreen") !=
+		CHECK(std::find(unknown.begin(), unknown.end(), std::string(kHudScreenInstance) + " Screen.LoadingScreen") ==
 				unknown.end());
+		CHECK(hud.controller(kHudScreenInstance) != nullptr);
 		HudRootDataMap data;
 		data.set_data("gameType", As2Value::of("multiplayer"));
 		data.set_data("gameMode", As2Value::of("team deathmatch"));

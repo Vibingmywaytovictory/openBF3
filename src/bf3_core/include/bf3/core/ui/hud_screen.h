@@ -461,8 +461,9 @@ struct HudWidgetState {
 
 class HudScreen {
 public:
-	static Result<std::unique_ptr<HudScreen>> open(SwfScene &r_scene, const SwfLibrary &p_library, const HudScreenAsset &p_asset, const SwfFontSet *p_fonts,
-			HudClientState p_client = {}, HudStageRects p_rects = {});
+	static Result<std::unique_ptr<HudScreen>> open(SwfScene &r_scene, const SwfLibrary &p_library,
+			const HudScreenAsset &p_asset, const SwfFontSet *p_fonts, HudClientState p_client = {},
+			HudStageRects p_rects = {}, HudRootData *p_root_data = nullptr);
 
 	HudScreen(const HudScreen &) = delete;
 	HudScreen &operator=(const HudScreen &) = delete;

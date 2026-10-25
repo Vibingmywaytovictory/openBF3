@@ -292,6 +292,7 @@ target_sources(bf3_core PRIVATE
     src/ui/hud_model.cpp
     include/bf3/core/ui/as2_clip.h
     include/bf3/core/ui/as2_clip_loader.h
+    include/bf3/core/ui/loading_screen.h
     include/bf3/core/ui/hud_screen.h
     include/bf3/core/ui/hud_widgets.h
     include/bf3/core/ui/hud_messages.h

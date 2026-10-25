@@ -1142,8 +1142,9 @@ void HudScreen::translate_texts(SwfNodeId p_root) {
 	}
 }
 
-Result<std::unique_ptr<HudScreen>> HudScreen::open(SwfScene &r_scene, const SwfLibrary &p_library, const HudScreenAsset &p_asset, const SwfFontSet *p_fonts,
-		HudClientState p_client, HudStageRects p_rects) {
+Result<std::unique_ptr<HudScreen>> HudScreen::open(SwfScene &r_scene, const SwfLibrary &p_library,
+		const HudScreenAsset &p_asset, const SwfFontSet *p_fonts, HudClientState p_client, HudStageRects p_rects,
+		HudRootData *p_root_data) {
 	std::unique_ptr<HudScreen> s(new HudScreen());
 	s->scene_ = &r_scene;
 	s->library_ = &p_library;
@@ -1151,6 +1152,7 @@ Result<std::unique_ptr<HudScreen>> HudScreen::open(SwfScene &r_scene, const SwfL
 	s->asset_ = p_asset;
 	s->client_ = std::move(p_client);
 	s->rects_ = p_rects;
+	s->root_data_ = p_root_data;
 	if (s->scene_->find_node(kHudScreenInstance) == nullptr) {
 		return make_error("hud screen " + p_asset.name + ": movie " + r_scene.movie_name() + " has no " + std::string(kHudScreenInstance));
 	}
