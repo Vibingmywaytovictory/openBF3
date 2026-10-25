@@ -820,6 +820,7 @@ struct NodeRec {
 	bool additive = false;
 	bool seen = false;
 	bool grid = false;
+	ui::SwfAffine built_to_owner;
 	double built_scale_x = 1.0;
 	double built_scale_y = 1.0;
 	bool scale_dependent = false;
@@ -1168,20 +1169,42 @@ struct Bf3SwfView::Impl {
 		r_piece.applied.valid = false;
 	}
 
+	const ui::SwfSceneNode *grid_owner(const ui::SwfSceneNode &p_node, ui::SwfAffine *r_to_owner = nullptr) const {
+		ui::SwfAffine to_owner = ui::swf_affine(p_node.matrix);
+		for (const ui::SwfSceneNode *s = node(p_node.parent); s != nullptr; s = node(s->parent)) {
+			if (s->scaling_grid != nullptr) {
+				if (r_to_owner != nullptr) {
+					*r_to_owner = to_owner;
+				}
+				return s;
+			}
+			to_owner = ui::swf_concat(ui::swf_affine(s->matrix), to_owner);
+		}
+		return nullptr;
+	}
+
+	void add_grid_bounds(const ui::SwfSceneNode &p_node, const ui::SwfAffine &p_to_owner, Bounds &r_bounds) const {
+		for (const ui::SwfNodeId c : p_node.children) {
+			const ui::SwfSceneNode *k = node(c);
+			if (k == nullptr || k->scaling_grid != nullptr) {
+				continue;
+			}
+			const ui::SwfAffine m = ui::swf_concat(p_to_owner, ui::swf_affine(k->matrix));
+			if (k->shape != nullptr) {
+				r_bounds.add(project_rect(k->shape->bounds, m, Hom{}));
+			}
+			add_grid_bounds(*k, m, r_bounds);
+		}
+	}
+
 	GridWarp grid_for(const ui::SwfSceneNode &p_node) const {
 		GridWarp g;
-		const ui::SwfSceneNode *sprite = node(p_node.parent);
-		if (sprite == nullptr || sprite->scaling_grid == nullptr || p_node.shape == nullptr) {
+		const ui::SwfSceneNode *sprite = p_node.shape != nullptr ? grid_owner(p_node) : nullptr;
+		if (sprite == nullptr) {
 			return g;
 		}
 		Bounds sb;
-		for (const ui::SwfNodeId c : sprite->children) {
-			const ui::SwfSceneNode *k = node(c);
-			if (k != nullptr && k->shape != nullptr) {
-				const Bounds kb = project_rect(k->shape->bounds, ui::swf_affine(k->matrix), Hom{});
-				sb.add(kb);
-			}
-		}
+		add_grid_bounds(*sprite, ui::SwfAffine{}, sb);
 		if (sb.empty()) {
 			return g;
 		}
@@ -1218,7 +1241,11 @@ struct Bf3SwfView::Impl {
 		r_rec.grid = grid.active;
 		r_rec.built_scale_x = grid.sx;
 		r_rec.built_scale_y = grid.sy;
-		const ui::SwfAffine to_sprite = grid.active ? ui::swf_affine(p_node.matrix) : ui::SwfAffine{};
+		ui::SwfAffine to_sprite;
+		if (grid.active) {
+			grid_owner(p_node, &to_sprite);
+		}
+		r_rec.built_to_owner = to_sprite;
 		auto pos = [&](ui::SwfPoint p) { return grid.active ? ui::swf_apply(to_sprite, p.x, p.y) : p; };
 		size_t count = 0;
 		Geometry solid;
@@ -2153,7 +2180,10 @@ struct Bf3SwfView::Impl {
 		if (rec.drawn && rec.canvas != nullptr) {
 			const bool rebuild_grid = rec.grid && [&] {
 				const GridWarp g = grid_for(*n);
-				return std::abs(g.sx - rec.built_scale_x) > 1e-4 || std::abs(g.sy - rec.built_scale_y) > 1e-4;
+				ui::SwfAffine to_owner;
+				grid_owner(*n, &to_owner);
+				return !g.active || to_owner != rec.built_to_owner || std::abs(g.sx - rec.built_scale_x) > 1e-4 ||
+						std::abs(g.sy - rec.built_scale_y) > 1e-4;
 			}();
 			const bool rebuild_stroke = rec.scale_dependent && std::abs(screen_scale(*n) - rec.built_scale_x) > 1e-4 * std::max(1.0, rec.built_scale_x);
 			if (rebuild_grid || rebuild_stroke) {
@@ -2163,7 +2193,8 @@ struct Bf3SwfView::Impl {
 				return;
 			}
 			Canvas &c = *rec.canvas;
-			const ui::SwfSceneNode *frame = rec.grid ? node(n->parent) : n;
+			const ui::SwfSceneNode *grid_root = rec.grid ? grid_owner(*n) : nullptr;
+			const ui::SwfSceneNode *frame = grid_root != nullptr ? grid_root : n;
 			const Transform2D xf = xform_of(ui::swf_concat(stage_to_window, ui::swf_affine(frame->world)));
 			const std::array<Vector3, 3> h = rows(tilt_chain(p_id, c.tilt_floor));
 			Color cmul(0.0f, 0.0f, 0.0f, 0.0f);
@@ -2216,7 +2247,8 @@ struct Bf3SwfView::Impl {
 		if (!rec.in_alpha && !n->world_visible) {
 			return b;
 		}
-		const ui::SwfSceneNode *frame = rec.grid ? node(n->parent) : n;
+		const ui::SwfSceneNode *grid_root = rec.grid ? grid_owner(*n) : nullptr;
+		const ui::SwfSceneNode *frame = grid_root != nullptr ? grid_root : n;
 		const ui::SwfAffine m = ui::swf_concat(stage_to_window, ui::swf_affine(frame->world));
 		const Hom h = tilt_chain(p_id, p_c.tilt_floor);
 		for (const Piece &p : rec.pieces) {
