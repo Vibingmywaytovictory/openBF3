@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <optional>
 #include <utility>
 
@@ -188,7 +189,8 @@ private:
 			upper.set_text(m != nullptr ? r_host.translate(m->description) : std::string());
 		}
 		const As2Clip top = r_host.clip("bg.bgTop");
-		top.set_height(std::max(upper.y() + upper.height() + kDescriptionPadding, top.height()));
+		const float upper_height = upper.text_layout_bounds().height() * std::fabs(upper.yscale()) / 100.0f;
+		top.set_height(std::max(upper.y() + upper_height + kDescriptionPadding, top.height()));
 	}
 
 	void update_hint(HudWidgetHost &r_host) const {
