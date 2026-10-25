@@ -2037,6 +2037,45 @@ TEST_SUITE("ui-hud-screen") {
 						"5/-15 at fov 25 on t2, Objective shown, AlertManager and InteractionManager shown");
 	}
 
+	TEST_CASE("hud screen: the in-round controllers take no input, so the input hooks change nothing") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const HudModel m = moment_m02();
+		uint32_t controllers = 0;
+		for (std::string_view partition : { kHudMpScreenPartition, kHudTdmScreenPartition, kCrosshairDefaultPartition, kHudSharedScreenPartition }) {
+			Screen s = initialized(*r, partition, m);
+			s.hud->refresh(m);
+			s.scene->take_changes();
+			const HudScreenStats before = s.hud->stats();
+			for (const std::unique_ptr<HudWidgetState> &w : s.hud->widgets()) {
+				if (w->controller == nullptr || w->host == nullptr) {
+					continue;
+				}
+				++controllers;
+				HudWidgetController &c = *w->controller;
+				HudWidgetHost &h = *w->host;
+				const HudMouse mouse{ 640.0f, 360.0f, 1 };
+				c.focus_gained(h);
+				CHECK_FALSE(c.input_concept(h, 0, true));
+				CHECK_FALSE(c.input_concept(h, 0, false));
+				CHECK_FALSE(c.key(h, 13, true));
+				CHECK_FALSE(c.key(h, 13, false));
+				CHECK_FALSE(c.mouse_move(h, mouse));
+				CHECK_FALSE(c.mouse_press(h, mouse));
+				CHECK_FALSE(c.mouse_release(h, mouse));
+				c.focus_lost(h);
+			}
+			CHECK(s.scene->take_changes().empty());
+			CHECK(s.hud->stats().updates == before.updates);
+			CHECK(s.hud->stats().as2.failed_ops == before.as2.failed_ops);
+			CHECK(s.hud->stats().as2.missing_paths == before.as2.missing_paths);
+		}
+		CHECK(controllers > 0);
+		row("input_hooks", std::to_string(controllers) + " controllers over the 4 in-round screens: concept, key, mouse and focus hooks unhandled, no scene change");
+	}
+
 	TEST_CASE("hud screen: install unchanged") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {

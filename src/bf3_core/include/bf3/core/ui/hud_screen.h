@@ -265,6 +265,12 @@ private:
 	std::map<std::string, As2Value, std::less<>> params_;
 };
 
+struct HudMouse {
+	float stage_x = 0.0f;
+	float stage_y = 0.0f;
+	int32_t button = 0;
+};
+
 class HudWidgetController {
 public:
 	virtual ~HudWidgetController() = default;
@@ -282,6 +288,13 @@ public:
 	virtual void tween_complete(HudWidgetHost &, uint32_t) {}
 	virtual void frame_script(HudWidgetHost &, const HudFrameScript &) {}
 	virtual void bind(const HudModel &, const HudClientState &, HudData &) const {}
+	virtual bool input_concept(HudWidgetHost &, int32_t, bool) { return false; }
+	virtual bool key(HudWidgetHost &, int32_t, bool) { return false; }
+	virtual bool mouse_move(HudWidgetHost &, const HudMouse &) { return false; }
+	virtual bool mouse_press(HudWidgetHost &, const HudMouse &) { return false; }
+	virtual bool mouse_release(HudWidgetHost &, const HudMouse &) { return false; }
+	virtual void focus_gained(HudWidgetHost &) {}
+	virtual void focus_lost(HudWidgetHost &) {}
 };
 
 std::unique_ptr<HudWidgetController> make_hud_widget_controller(std::string_view p_class);
