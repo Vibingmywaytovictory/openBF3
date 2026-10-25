@@ -379,6 +379,16 @@ void NativeHudMomentRun::check_host(Bf3NativeHud &r_hud) {
 	const bool top = host.order_screen(ui::kHudMpScreenPartition, int32_t(kNativeHudViews)) && host.find_screen(ui::kHudMpScreenPartition).view->get_index() == int32_t(kNativeHudViews) - 1;
 	const bool back = host.order_screen(ui::kHudMpScreenPartition, 0) && host.find_screen(ui::kHudMpScreenPartition).view->get_index() == 0;
 	row("host.order", top && back, std::string("hudmpscreen drawn last at order ") + std::to_string(kNativeHudViews) + " " + (top ? "yes" : "no") + ", first again at 0 " + (back ? "yes" : "no"));
+	bool inert = !host.focus_screen(ui::kKillScreenPartition) && !host.set_screen_modal(ui::kKillScreenPartition, false);
+	for (size_t i = 0; i < kNativeHudViews; ++i) {
+		const std::string_view p = kNativeHudPartitions[i];
+		inert = inert && !host.focus_screen(p) && !host.set_screen_modal(p, true) && host.set_screen_modal(p, false);
+		const UiScreenSlot s = host.screen_slot(i);
+		inert = inert && !s.modal && !s.focused && s.screen != nullptr && !s.screen->has_focus();
+	}
+	host.clear_focus();
+	inert = inert && host.focused_screen().partition.empty() && host.top_modal_screen().partition.empty();
+	row("host.focus_modal", inert, std::string("the in-round screens never take focus and are never modal: ") + (inert ? "focus and modal refused, none focused, none modal" : "a screen took focus or became modal"));
 	const bool closed = host.close_screen(crosshair) && host.find_screen(crosshair).screen == nullptr && host.find_screen(crosshair).view == nullptr;
 	const bf3::core::Status reopened = host.open_screen(crosshair);
 	r_hud.step(kNativeHudMomentStep);

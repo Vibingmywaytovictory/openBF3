@@ -100,6 +100,9 @@ public:
 	bool hide_screen(std::string_view p_partition) override;
 	bool order_screen(std::string_view p_partition, int32_t p_order) override;
 	bool close_screen(std::string_view p_partition) override;
+	bool set_screen_modal(std::string_view p_partition, bool p_modal) override;
+	bool focus_screen(std::string_view p_partition) override;
+	void clear_focus() override {}
 	size_t screen_count() const override { return kNativeHudViews; }
 	UiScreenSlot screen_slot(size_t p_index) const override;
 	bool reports(std::string_view p_partition) const override;

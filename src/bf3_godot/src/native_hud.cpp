@@ -434,6 +434,14 @@ bool Bf3NativeHud::close_screen(std::string_view p_partition) {
 	return true;
 }
 
+bool Bf3NativeHud::set_screen_modal(std::string_view p_partition, bool p_modal) {
+	return !p_modal && native_hud_index(p_partition).has_value();
+}
+
+bool Bf3NativeHud::focus_screen(std::string_view) {
+	return false;
+}
+
 UiScreenSlot Bf3NativeHud::screen_slot(size_t p_index) const {
 	if (p_index >= kNativeHudViews) {
 		return {};
