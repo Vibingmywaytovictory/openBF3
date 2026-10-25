@@ -7,6 +7,7 @@
 #include "bf3/core/ui/as2_clip.h"
 #include "bf3/core/ui/hud_messages.h"
 #include "bf3/core/ui/hud_screen.h"
+#include "bf3/core/ui/hud_widget_registry.h"
 #include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/swf_scene.h"
@@ -353,6 +354,36 @@ constexpr std::array<float, 5> kKillRowFadeOut{ 1.0f, 205.0f / 256.0f, 154.0f / 
 }
 
 TEST_SUITE("ui-hud-screen-unit") {
+	TEST_CASE("hud screen unit: each AS2 class registers its controller once from its widget file") {
+		const std::vector<std::string> want{ "Screen.Weapon.CrosshairDefault", "Shared.HudBackground", "Widget.Crosshair.Crosshair", "Widget.Crosshair.Hitindicator",
+			"Widget.Hud.Ammo", "Widget.Hud.Compass", "Widget.Hud.DamageIndicator", "Widget.Hud.Health", "Widget.Hud.HudBackgroundWidget", "Widget.Hud.Minimap",
+			"Widget.Hud.PassangerList", "Widget.Hud.SquadList", "Widget.Hud.VehicleHealth", "Widget.Icon3D.Alerts.AlertManager", "Widget.Icon3D.Alerts.Alerttag",
+			"Widget.Icon3D.Interaction.InteractionManager", "Widget.Icon3D.Mapmarker.MapmarkerManager", "Widget.Icon3D.Mapmarker.Mapmarkertag",
+			"Widget.Icon3D.TeamSupport.SupportIconManager", "Widget.Icon3D.TeamSupport.SupportIconTag", "Widget.Message.HudAlertMessage", "Widget.Message.HudMessage",
+			"Widget.Message.LogMessage", "Widget.Message.MessageTypes.GameMessage", "Widget.Message.MessageTypes.KillLogMessage",
+			"Widget.Message.MessageTypes.LocalKillLogMessage", "Widget.Message.MessageTypes.ScoreMessage", "Widget.Message.ObjectiveMessage",
+			"Widget.Message.ScoreAggregator", "Widget.Message.TooltipMessage", "Widget.Misc.LatencyIndicator", "Widget.TicketCounter.TicketCounter", "fb.Base.UIScreen" };
+		const HudWidgetRegistry &installed = HudWidgetRegistry::installed();
+		std::vector<std::string> sorted = want;
+		std::sort(sorted.begin(), sorted.end());
+		CHECK(installed.classes() == sorted);
+		CHECK(installed.rejected().empty());
+		for (const std::string &c : want) {
+			CHECK_MESSAGE(make_hud_widget_controller(c) != nullptr, c);
+			CHECK_MESSAGE(hud_widget_class_known(c), c);
+		}
+		CHECK(make_hud_widget_controller("Widget.Image.ImageManager") == nullptr);
+		CHECK_FALSE(hud_widget_class_known("Widget.Image.ImageManager"));
+		HudWidgetRegistry local;
+		CHECK(local.add("Test.Class", [] { return make_hud_widget_controller("fb.Base.UIScreen"); }));
+		CHECK_FALSE(local.add("Test.Class", [] { return make_hud_widget_controller("fb.Base.UIScreen"); }));
+		CHECK_FALSE(local.add("", [] { return make_hud_widget_controller("fb.Base.UIScreen"); }));
+		CHECK_FALSE(local.add("Test.Empty", HudWidgetFactory{}));
+		CHECK(local.rejected() == std::vector<std::string>{ "Test.Class", "", "Test.Empty" });
+		CHECK(local.make("Test.Class") != nullptr);
+		row("registry", std::to_string(installed.classes().size()) + " AS2 classes, each registered once");
+	}
+
 	TEST_CASE("hud screen unit: the compass frame is the heading rounded up, as the footage's minimap and compass show") {
 		struct StillMoment {
 			const char *id;

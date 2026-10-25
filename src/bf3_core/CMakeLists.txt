@@ -288,7 +288,11 @@ target_sources(bf3_core PRIVATE
     src/ui/hud_screen.cpp
     src/ui/hud_widgets.cpp
     src/ui/hud_messages.cpp
+    include/bf3/core/ui/hud_widget_registry.h
+    src/ui/hud_widget_registry.cpp
+    src/ui/widgets/hud_widget_support.h
 )
+openbf3_registry(bf3_core src/ui/widgets bf3/core/ui/hud_widget_registry.h HudWidgetRegistry bf3::core::ui register_hud_widgets_ register_hud_widget_files)
 
 target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/grid_pairs.h
