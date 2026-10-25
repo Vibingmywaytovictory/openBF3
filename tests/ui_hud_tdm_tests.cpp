@@ -912,6 +912,15 @@ TEST_CASE("the loadout screens: kit and customization from the catalog and the o
 	CHECK_FALSE(m.user.is_ingame);
 	CHECK_FALSE(menu.entries[2].enabled);
 	CHECK(state.bad_inputs == 1);
+	CHECK(state.rows_dropped == 0);
+	in.match_valid = true;
+	for (uint32_t id = 600; assault.slots[2].size() < ui::kHudGridItems + 2; ++id) {
+		assault.slots[2].push_back(item(id, sw::kNoWeapon));
+	}
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(c.kit_grid_data[2].count == ui::kHudGridItems);
+	CHECK(c.kit_grid_selected[2] == 1);
+	CHECK(state.rows_dropped == 2);
 	row("unit.loadout_screens", state.bad_inputs == 1 && c.kit_primary_weapon.item_id == 1001,
 			"kit, customization grids and accessories from a 8-item catalog, a bad stored choice falls back to the "
 			"defaults, 5 menu entries");

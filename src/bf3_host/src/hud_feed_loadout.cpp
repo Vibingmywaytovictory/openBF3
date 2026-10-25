@@ -11,12 +11,13 @@ namespace ui = bf3::core::ui;
 namespace {
 
 void fill_list(const HudStatic &p_static, std::span<const uint32_t> p_ids, uint32_t p_selected, ui::HudItemList &r_list,
-		int16_t &r_selected) {
+		int16_t &r_selected, uint64_t &r_dropped) {
 	r_list = ui::HudItemList();
 	r_selected = -1;
 	for (const uint32_t id : p_ids) {
 		if (r_list.count >= r_list.items.size()) {
-			break;
+			++r_dropped;
+			continue;
 		}
 		if (id == p_selected && p_selected != 0) {
 			r_selected = int16_t(r_list.count);
@@ -106,13 +107,15 @@ void feed_loadout(Frame &r_frame) {
 	c.weapon_accessory4 = item_or_empty(st, choice.accessories[3]);
 	for (size_t i = 0; i < kHudSpawnSlots.size(); ++i) {
 		const std::vector<uint32_t> ids = ids_of(selected->slots[kHudSpawnSlots[i]]);
-		fill_list(st, ids, choice.items[kHudSpawnSlots[i]], c.kit_grid_data[i], c.kit_grid_selected[i]);
+		fill_list(st, ids, choice.items[kHudSpawnSlots[i]], c.kit_grid_data[i], c.kit_grid_selected[i],
+				r_frame.state.rows_dropped);
 	}
 	const LoadoutItem *weapon = selected->find(kLoadoutAccessoryWeapon, choice.items[kLoadoutAccessoryWeapon]);
 	for (size_t a = 0; a < c.accessory_grid.size(); ++a) {
 		const std::span<const uint32_t> ids =
 				weapon != nullptr ? std::span<const uint32_t>(weapon->accessories[a]) : std::span<const uint32_t>();
-		fill_list(st, ids, choice.accessories[a], c.accessory_grid[a], c.accessory_selected[a]);
+		fill_list(st, ids, choice.accessories[a], c.accessory_grid[a], c.accessory_selected[a],
+				r_frame.state.rows_dropped);
 	}
 }
 
