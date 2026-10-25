@@ -54,6 +54,9 @@ void accumulate(const SwfScene &p_scene, const SwfSceneNode &p_node, const SwfMa
 		default:
 			break;
 	}
+	if (p_node.drawing != nullptr && !p_node.drawing->meshes.empty()) {
+		r_acc.add(p_node.drawing->bounds, p_to);
+	}
 	if (p_depth >= kSwfSceneMaxNesting) {
 		return;
 	}
@@ -558,6 +561,37 @@ void As2Clip::clear_mask() const {
 		return;
 	}
 	note(scene_->clear_mask(path_));
+}
+
+void As2Clip::draw(const SwfDrawOp &p_op) const {
+	if (mut() == nullptr) {
+		return;
+	}
+	note(scene_->draw(path_, p_op));
+}
+
+void As2Clip::clear() const {
+	draw(SwfDrawOp::clear());
+}
+
+void As2Clip::begin_fill(uint32_t p_rgb, double p_alpha_percent) const {
+	draw(SwfDrawOp::begin_fill(swf_draw_fill_color(p_rgb, p_alpha_percent)));
+}
+
+void As2Clip::move_to(float p_x, float p_y) const {
+	draw(SwfDrawOp::move_to(p_x, p_y));
+}
+
+void As2Clip::line_to(float p_x, float p_y) const {
+	draw(SwfDrawOp::line_to(p_x, p_y));
+}
+
+void As2Clip::curve_to(float p_control_x, float p_control_y, float p_x, float p_y) const {
+	draw(SwfDrawOp::curve_to(p_control_x, p_control_y, p_x, p_y));
+}
+
+void As2Clip::end_fill() const {
+	draw(SwfDrawOp::end_fill());
 }
 
 }

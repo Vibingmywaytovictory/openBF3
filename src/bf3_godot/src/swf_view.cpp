@@ -1209,9 +1209,9 @@ struct Bf3SwfView::Impl {
 		return std::sqrt(std::abs(w.a * w.d - w.b * w.c));
 	}
 
-	void build_shape(NodeRec &r_rec, const ui::SwfSceneNode &p_node) {
-		const ui::SwfShape &shape = *p_node.shape;
-		const GridWarp grid = grid_for(p_node);
+	void build_shape(NodeRec &r_rec, const ui::SwfSceneNode &p_node, const ui::SwfShape &p_shape, const GridWarp &p_grid) {
+		const ui::SwfShape &shape = p_shape;
+		const GridWarp &grid = p_grid;
 		r_rec.grid = grid.active;
 		r_rec.built_scale_x = grid.sx;
 		r_rec.built_scale_y = grid.sy;
@@ -1450,6 +1450,7 @@ struct Bf3SwfView::Impl {
 		const void *content = n.shape != nullptr ? static_cast<const void *>(n.shape)
 				: n.edit_text != nullptr		 ? static_cast<const void *>(n.edit_text)
 				: n.sub_image != nullptr		 ? static_cast<const void *>(n.sub_image)
+				: n.drawing != nullptr			 ? static_cast<const void *>(n.drawing.get())
 												 : nullptr;
 		if (r_rec.built && r_rec.content == content && r_rec.text_revision == n.text_revision && r_rec.character_revision == n.character_revision) {
 			return;
@@ -1462,7 +1463,9 @@ struct Bf3SwfView::Impl {
 		r_rec.text_revision = n.text_revision;
 		r_rec.character_revision = n.character_revision;
 		if (n.kind == ui::SwfNodeKind::Shape && n.shape != nullptr) {
-			build_shape(r_rec, n);
+			build_shape(r_rec, n, *n.shape, grid_for(n));
+		} else if (n.drawing != nullptr) {
+			build_shape(r_rec, n, *n.drawing, GridWarp{});
 		} else if (n.kind == ui::SwfNodeKind::EditText && n.edit_text != nullptr) {
 			build_text(r_rec, n);
 		} else if (n.kind == ui::SwfNodeKind::Bitmap && n.sub_image != nullptr) {

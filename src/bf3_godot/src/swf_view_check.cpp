@@ -248,14 +248,15 @@ void expect_node(const ui::SwfScene &p_scene, const ui::SwfFontSet *p_fonts, ui:
 		r_out.box.add(q[0] + margin, q[1] + margin);
 		r_out.margin = std::max(r_out.margin, margin);
 	};
-	if (n->shape != nullptr) {
-		for (const ui::SwfFillMesh &mesh : n->shape->meshes) {
+	const ui::SwfShape *shape = n->shape != nullptr ? n->shape : n->drawing.get();
+	if (shape != nullptr) {
+		for (const ui::SwfFillMesh &mesh : shape->meshes) {
 			for (const ui::SwfPoint &v : mesh.vertices) {
 				put(v.x, v.y);
 			}
 		}
-		for (const ui::SwfStroke &st : n->shape->strokes) {
-			const double hw = st.line < n->shape->lines.size() ? std::max(0.5, double(n->shape->lines[st.line].width) * 0.5) : 0.5;
+		for (const ui::SwfStroke &st : shape->strokes) {
+			const double hw = st.line < shape->lines.size() ? std::max(0.5, double(shape->lines[st.line].width) * 0.5) : 0.5;
 			for (const ui::SwfPoint &v : st.points) {
 				put(v.x - hw, v.y - hw);
 				put(v.x + hw, v.y + hw);

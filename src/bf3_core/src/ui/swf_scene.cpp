@@ -192,6 +192,7 @@ struct SwfScene::Impl {
 	std::vector<SwfNodeId> removed_reported;
 	std::vector<uint32_t> jumps;
 	std::vector<uint32_t> filter_source;
+	std::vector<std::unique_ptr<SwfDrawing>> drawings;
 	std::deque<std::pair<SwfNodeId, uint32_t>> queue;
 	SwfSceneStats stats;
 	double accumulator = 0.0;
@@ -382,6 +383,7 @@ struct SwfScene::Impl {
 		}
 		nodes[s].reset();
 		timelines[s].reset();
+		drawings[s].reset();
 		if (generations[s] < kMaxGeneration) {
 			generations[s]++;
 			free_slots.push_back(s);
@@ -478,6 +480,7 @@ struct SwfScene::Impl {
 			reported.emplace_back();
 			jumps.push_back(0);
 			filter_source.push_back(kNoEvent);
+			drawings.emplace_back();
 			stats.node_slots = uint32_t(nodes.size());
 		}
 		const SwfNodeId id = s | (uint32_t(generations[s]) << kSlotBits);
@@ -487,6 +490,7 @@ struct SwfScene::Impl {
 		reported[s] = Reported{};
 		jumps[s] = 0;
 		filter_source[s] = kNoEvent;
+		drawings[s].reset();
 		return id;
 	}
 
@@ -1199,6 +1203,33 @@ Status SwfScene::clear_mask(std::string_view p_path) {
 		return n.error();
 	}
 	(*n)->script_mask = kSwfNoNode;
+	return Status::success();
+}
+
+Status SwfScene::draw(std::string_view p_path, const SwfDrawOp &p_op) {
+	Impl &im = *impl_;
+	Result<SwfSceneNode *> n = im.at(p_path);
+	if (!n) {
+		return n.error();
+	}
+	if ((*n)->kind != SwfNodeKind::Sprite && (*n)->kind != SwfNodeKind::Root) {
+		return make_error("swf scene " + im.movie_name + ": " + std::string(p_path) + " is a " + swf_node_kind_name((*n)->kind) + ", not a movie clip");
+	}
+	std::unique_ptr<SwfDrawing> &d = im.drawings[slot_of((*n)->id)];
+	if (d == nullptr) {
+		d = std::make_unique<SwfDrawing>();
+	}
+	BF3_TRY(d->apply(p_op));
+	std::shared_ptr<const SwfShape> shape;
+	if (!d->empty()) {
+		Result<std::shared_ptr<const SwfShape>> built = d->shape();
+		if (!built) {
+			return make_error("swf scene " + im.movie_name + ": " + std::string(p_path) + ": " + built.error().message);
+		}
+		shape = std::move(*built);
+	}
+	(*n)->drawing = std::move(shape);
+	(*n)->character_revision++;
 	return Status::success();
 }
 

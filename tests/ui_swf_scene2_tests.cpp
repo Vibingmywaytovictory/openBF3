@@ -69,6 +69,34 @@ uint32_t change_of(const std::vector<SwfSceneChange> &p_changes, SwfNodeId p_id)
 	return what;
 }
 
+double filled_area(const SwfShape &p_shape) {
+	double area = 0.0;
+	for (const SwfFillMesh &m : p_shape.meshes) {
+		for (size_t i = 0; i + 2 < m.indices.size(); i += 3) {
+			const SwfPoint a = m.vertices[m.indices[i]];
+			const SwfPoint b = m.vertices[m.indices[i + 1]];
+			const SwfPoint c = m.vertices[m.indices[i + 2]];
+			area += std::abs(double(b.x - a.x) * double(c.y - a.y) - double(c.x - a.x) * double(b.y - a.y)) * 0.5;
+		}
+	}
+	return area;
+}
+
+std::shared_ptr<const SwfShape> drawn(const std::vector<SwfDrawOp> &p_ops) {
+	SwfDrawing d;
+	for (const SwfDrawOp &op : p_ops) {
+		REQUIRE(d.apply(op).ok());
+	}
+	Result<std::shared_ptr<const SwfShape>> shape = d.shape();
+	REQUIRE_MESSAGE(shape.ok(), (shape.ok() ? std::string() : shape.error().message));
+	return *shape;
+}
+
+std::vector<SwfDrawOp> square_ops(float p_x, float p_y, float p_side) {
+	return { SwfDrawOp::move_to(p_x, p_y), SwfDrawOp::line_to(p_x + p_side, p_y), SwfDrawOp::line_to(p_x + p_side, p_y + p_side),
+		SwfDrawOp::line_to(p_x, p_y + p_side), SwfDrawOp::line_to(p_x, p_y) };
+}
+
 }
 
 TEST_SUITE("ui-scene2-unit") {
@@ -122,5 +150,93 @@ TEST_SUITE("ui-scene2-unit") {
 		CHECK_FALSE(s.set_mask("content", "").ok());
 		CHECK_FALSE(s.set_mask("missing", "maskclip").ok());
 		CHECK_FALSE(s.set_mask("content", "missing").ok());
+	}
+
+	TEST_CASE("swf draw: fills close their contours, curves flatten, holes are even-odd, an open fill draws, clear resets") {
+		const SwfColor red{ 255, 0, 0, 255 };
+		std::vector<SwfDrawOp> ops{ SwfDrawOp::begin_fill(red) };
+		for (const SwfDrawOp &op : square_ops(0.0f, 0.0f, 10.0f)) {
+			ops.push_back(op);
+		}
+		ops.push_back(SwfDrawOp::end_fill());
+		std::shared_ptr<const SwfShape> sq = drawn(ops);
+		REQUIRE(sq->meshes.size() == 1);
+		CHECK(sq->meshes[0].outline.size() == 4);
+		CHECK(sq->fills[0].color == red);
+		CHECK(sq->bounds == SwfRect{ 0.0f, 10.0f, 0.0f, 10.0f });
+		CHECK(filled_area(*sq) == doctest::Approx(100.0));
+
+		std::vector<SwfDrawOp> holed{ SwfDrawOp::begin_fill(red) };
+		for (const SwfDrawOp &op : square_ops(0.0f, 0.0f, 20.0f)) {
+			holed.push_back(op);
+		}
+		for (const SwfDrawOp &op : square_ops(5.0f, 5.0f, 10.0f)) {
+			holed.push_back(op);
+		}
+		holed.push_back(SwfDrawOp::end_fill());
+		CHECK(filled_area(*drawn(holed)) == doctest::Approx(300.0));
+
+		const std::shared_ptr<const SwfShape> arch = drawn({ SwfDrawOp::begin_fill(red), SwfDrawOp::move_to(0.0f, 0.0f), SwfDrawOp::curve_to(10.0f, 20.0f, 20.0f, 0.0f),
+				SwfDrawOp::line_to(0.0f, 0.0f), SwfDrawOp::end_fill() });
+		CHECK(arch->meshes[0].outline.size() > 4);
+		CHECK(filled_area(*arch) == doctest::Approx(20.0 * 10.0 * 2.0 / 3.0).epsilon(0.01));
+
+		const std::shared_ptr<const SwfShape> open = drawn({ SwfDrawOp::begin_fill(red), SwfDrawOp::move_to(0.0f, 0.0f), SwfDrawOp::line_to(8.0f, 0.0f),
+				SwfDrawOp::line_to(8.0f, 4.0f) });
+		CHECK(filled_area(*open) == doctest::Approx(16.0));
+		CHECK(drawn({ SwfDrawOp::move_to(0.0f, 0.0f), SwfDrawOp::line_to(8.0f, 0.0f), SwfDrawOp::line_to(8.0f, 4.0f) })->meshes.empty());
+
+		SwfDrawing d;
+		for (const SwfDrawOp &op : ops) {
+			REQUIRE(d.apply(op).ok());
+		}
+		CHECK_FALSE(d.empty());
+		REQUIRE(d.apply(SwfDrawOp::clear()).ok());
+		CHECK(d.empty());
+		CHECK(d.commands() == 0);
+		for (uint32_t i = 0; i < kSwfDrawMaxCommands; ++i) {
+			REQUIRE(d.apply(SwfDrawOp::line_to(float(i), 0.0f)).ok());
+		}
+		CHECK_FALSE(d.apply(SwfDrawOp::line_to(0.0f, 0.0f)).ok());
+		CHECK_FALSE(SwfDrawing{}.apply(SwfDrawOp::line_to(std::nanf(""), 0.0f)).ok());
+		CHECK(swf_draw_fill_color(0xff8000u, 100.0) == SwfColor{ 255, 128, 0, 255 });
+		CHECK(swf_draw_fill_color(0x000000u, 0.0).a == 0);
+	}
+
+	TEST_CASE("swf scene: drawRect into an empty clip draws, sizes the clip, masks, and clears") {
+		const SwfLibrary lib = two_boxes_library();
+		SwfScene s = open_scene(lib, "boxes");
+		s.take_changes();
+		As2Clip content(&s, "content");
+		const As2Clip mask = content.create_empty_movie_clip("mask", 7);
+		REQUIRE(mask.exists());
+		mask.begin_fill(0x000000u);
+		mask.move_to(0.0f, 0.0f);
+		mask.line_to(30.0f, 0.0f);
+		mask.line_to(30.0f, 12.0f);
+		mask.line_to(0.0f, 12.0f);
+		mask.line_to(0.0f, 0.0f);
+		mask.end_fill();
+		const SwfSceneNode &m = need(s, "content.mask");
+		REQUIRE(m.drawing != nullptr);
+		CHECK(m.drawing->fills[0].color == SwfColor{ 0, 0, 0, 255 });
+		CHECK(mask.width() == doctest::Approx(30.0f));
+		CHECK(mask.height() == doctest::Approx(12.0f));
+		CHECK(content.width() == doctest::Approx(40.0f));
+		std::vector<SwfSceneChange> ch = s.take_changes();
+		CHECK((change_of(ch, m.id) & swf_change::kCreated) != 0);
+		mask.set_width(18.0f);
+		CHECK(mask.width() == doctest::Approx(18.0f));
+		CHECK(need(s, "content.mask").matrix.a == doctest::Approx(0.6f));
+		REQUIRE(s.set_mask("content.fill", "content.mask").ok());
+		s.take_changes();
+		CHECK(need(s, "content.fill").masks == std::vector<SwfNodeId>{ m.id });
+		mask.clear();
+		ch = s.take_changes();
+		CHECK(need(s, "content.mask").drawing == nullptr);
+		CHECK((change_of(ch, m.id) & swf_change::kCharacter) != 0);
+		CHECK(mask.width() == 0.0f);
+		CHECK_FALSE(s.draw("content.fill", SwfDrawOp::begin_fill(SwfColor{})).ok());
+		CHECK(s.draw("", SwfDrawOp::begin_fill(SwfColor{})).ok());
 	}
 }

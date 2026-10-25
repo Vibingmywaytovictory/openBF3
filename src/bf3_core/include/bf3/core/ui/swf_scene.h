@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/core/result.h"
+#include "bf3/core/ui/swf_draw.h"
 #include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/swf_movie.h"
 #include "bf3/core/ui/swf_text.h"
@@ -101,6 +102,7 @@ struct SwfSceneNode {
 	const SwfEditText *edit_text = nullptr;
 	const SwfSubImage *sub_image = nullptr;
 	const SwfScalingGrid *scaling_grid = nullptr;
+	std::shared_ptr<const SwfShape> drawing;
 	std::string text;
 	bool html = false;
 	SwfTextOptions text_options;
@@ -198,6 +200,7 @@ public:
 	Status set_filters(std::string_view p_path, std::vector<SwfFilter> p_filters);
 	Status set_mask(std::string_view p_path, std::string_view p_mask_path);
 	Status clear_mask(std::string_view p_path);
+	Status draw(std::string_view p_path, const SwfDrawOp &p_op);
 
 	std::vector<SwfSceneChange> take_changes();
 

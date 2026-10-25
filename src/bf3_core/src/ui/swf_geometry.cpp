@@ -30,8 +30,8 @@ struct OpenTrapezoid {
 
 class Sweep {
 public:
-	Sweep(WorkBudget &r_budget, SwfTriangulation &r_out) :
-			budget_(r_budget), out_(r_out) {}
+	Sweep(SwfFillRule p_rule, WorkBudget &r_budget, SwfTriangulation &r_out) :
+			rule_(p_rule), budget_(r_budget), out_(r_out) {}
 
 	Status run(std::span<const SwfPoint> p_outline, std::span<const uint32_t> p_ends) {
 		BF3_TRY(collect(p_outline, p_ends));
@@ -144,7 +144,7 @@ private:
 		int wind = 0;
 		for (size_t i = 0; i + 1 < active_.size(); ++i) {
 			wind += edges_[active_[i]].wind;
-			if (wind == 0) {
+			if (rule_ == SwfFillRule::EvenOdd ? (wind & 1) == 0 : wind == 0) {
 				continue;
 			}
 			const uint32_t l = active_[i];
@@ -205,6 +205,7 @@ private:
 		}
 	}
 
+	SwfFillRule rule_;
 	WorkBudget &budget_;
 	SwfTriangulation &out_;
 	std::vector<SweepEdge> edges_;
@@ -257,8 +258,13 @@ uint32_t swf_curve_segments(SwfPoint p_from, SwfPoint p_control, SwfPoint p_to, 
 
 Status swf_triangulate_nonzero(std::span<const SwfPoint> p_outline, std::span<const uint32_t> p_contour_ends, WorkBudget &r_budget,
 		SwfTriangulation &r_out) {
+	return swf_triangulate(p_outline, p_contour_ends, SwfFillRule::NonZero, r_budget, r_out);
+}
+
+Status swf_triangulate(std::span<const SwfPoint> p_outline, std::span<const uint32_t> p_contour_ends, SwfFillRule p_rule, WorkBudget &r_budget,
+		SwfTriangulation &r_out) {
 	r_out = SwfTriangulation{};
-	Sweep sweep(r_budget, r_out);
+	Sweep sweep(p_rule, r_budget, r_out);
 	return sweep.run(p_outline, p_contour_ends);
 }
 

@@ -77,6 +77,12 @@ public:
 	void remove_movie_clip() const;
 	void set_mask(const As2Clip &p_mask) const;
 	void clear_mask() const;
+	void clear() const;
+	void begin_fill(uint32_t p_rgb, double p_alpha_percent = 100.0) const;
+	void move_to(float p_x, float p_y) const;
+	void line_to(float p_x, float p_y) const;
+	void curve_to(float p_control_x, float p_control_y, float p_x, float p_y) const;
+	void end_fill() const;
 
 private:
 	SwfSceneNode *mut() const;
@@ -85,6 +91,7 @@ private:
 	void miss() const;
 	void jump(int32_t p_as2_frame, bool p_play) const;
 	void jump(std::string_view p_label, bool p_play) const;
+	void draw(const SwfDrawOp &p_op) const;
 
 	SwfScene *scene_ = nullptr;
 	std::string path_;
