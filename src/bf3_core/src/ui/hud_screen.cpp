@@ -109,10 +109,14 @@ float tween_value(const As2Clip &p_clip, HudTweenProperty p_property) {
 		case HudTweenProperty::Height: return p_clip.height();
 		case HudTweenProperty::X: return p_clip.x();
 		case HudTweenProperty::Y: return p_clip.y();
+		case HudTweenProperty::Custom:
+			break;
 	}
-	return 0.0f;
+	return std::nanf("");
 }
 
+constexpr uint32_t kMaxIntervalFiresPerAdvance = 16;
+constexpr uint32_t kMaxEnterFramesPerAdvance = 8;
 }
 
 const HudDataSource *HudWidgetNode::source(std::string_view p_name) const {
@@ -516,6 +520,56 @@ void HudWidgetHost::remove_tweens(const As2Clip &p_clip) {
 	list.erase(std::remove_if(list.begin(), list.end(), [&](const HudTween &t) { return t.path == p_clip.path(); }), list.end());
 }
 
+void HudWidgetHost::add_custom_tween(
+		std::string_view p_name, float p_to, double p_seconds, HudTweenEase p_ease, uint32_t p_on_complete) {
+	std::vector<HudTween> &list = screen_.tweens_;
+	list.erase(std::remove_if(list.begin(), list.end(),
+					   [&](const HudTween &t) {
+						   return t.path == path_ && t.property == HudTweenProperty::Custom && t.name == p_name;
+					   }),
+			list.end());
+	HudTween t;
+	t.path = path_;
+	t.property = HudTweenProperty::Custom;
+	t.name = std::string(p_name);
+	t.ease = p_ease;
+	t.to = p_to;
+	t.seconds = p_seconds;
+	t.on_complete = p_on_complete;
+	if (!(p_seconds > 0.0)) {
+		screen_.apply_tween(t, p_to);
+		return;
+	}
+	list.push_back(std::move(t));
+}
+
+uint32_t HudWidgetHost::set_interval(double p_seconds) {
+	const uint32_t id = screen_.next_interval_++;
+	screen_.intervals_.push_back(
+			HudScreen::Interval{ path_, id, std::isfinite(p_seconds) && p_seconds > 0.0 ? p_seconds : 0.0, 0.0 });
+	return id;
+}
+
+void HudWidgetHost::clear_interval(uint32_t p_id) {
+	std::vector<HudScreen::Interval> &list = screen_.intervals_;
+	list.erase(std::remove_if(list.begin(), list.end(), [&](const HudScreen::Interval &i) { return i.id == p_id; }),
+			list.end());
+}
+
+void HudWidgetHost::set_enter_frame(bool p_on) {
+	if (HudWidgetState *w = screen_.owner_of(path_)) {
+		w->enter_frame = p_on;
+	}
+}
+
+void HudWidgetHost::exit_complete() {
+	HudWidgetState *w = screen_.owner_of(path_);
+	if (w != nullptr && w->exiting) {
+		w->exiting = false;
+		screen_.exits_pending_--;
+	}
+}
+
 std::string HudWidgetHost::translate(std::string_view p_text) const {
 	const HudClientState &c = screen_.client();
 	if (p_text.starts_with("ID_") && c.translate) {
@@ -630,6 +684,9 @@ void HudScreen::retire(std::string_view p_path) {
 			mouse_targets_.end());
 	wheel_listeners_.erase(
 			std::remove_if(wheel_listeners_.begin(), wheel_listeners_.end(), under), wheel_listeners_.end());
+	intervals_.erase(
+			std::remove_if(intervals_.begin(), intervals_.end(), [&](const Interval &i) { return under(i.path); }),
+			intervals_.end());
 	if (under(hover_)) {
 		hover_.clear();
 	}
@@ -690,6 +747,9 @@ void HudScreen::on_frame_script(SwfNodeId p_node, uint32_t p_frame) {
 	fs.path = n->path;
 	fs.frame = p_frame;
 	fs.names = &frame_names(*n, p_frame);
+	if (fs.path == kHudScreenInstance && exiting_ && fs.calls("onExitComplete")) {
+		exit_called_ = true;
+	}
 	HudWidgetState *owner = nullptr;
 	for (const std::unique_ptr<HudWidgetState> &w : widgets_) {
 		if (w->retired || !(fs.path == w->path || fs.path.starts_with(w->path + "."))) {
@@ -1013,7 +1073,103 @@ void HudScreen::refresh(const HudModel &p_model) {
 	}
 }
 
+HudWidgetState *HudScreen::owner_of(std::string_view p_path) {
+	for (const std::unique_ptr<HudWidgetState> &w : widgets_) {
+		if (!w->retired && w->path == p_path) {
+			return w.get();
+		}
+	}
+	return nullptr;
+}
+
+bool HudScreen::enter_complete() const {
+	if (!initialized_) {
+		return false;
+	}
+	for (const std::unique_ptr<HudWidgetState> &w : widgets_) {
+		if (w->screen_widget && !w->retired && !w->initialized) {
+			return false;
+		}
+	}
+	return true;
+}
+
+void HudScreen::begin_exit() {
+	if (exiting_) {
+		return;
+	}
+	exiting_ = true;
+	exits_pending_ = 0;
+	exits_counted_ = 0;
+	for (size_t i = 0; i < widgets_.size(); ++i) {
+		HudWidgetState &w = *widgets_[i];
+		if (!w.screen_widget || !w.initialized || w.retired) {
+			continue;
+		}
+		w.exiting = true;
+		exits_pending_++;
+		exits_counted_++;
+		if (w.controller->begin_exit(*w.host) && w.exiting) {
+			w.exiting = false;
+			exits_pending_--;
+		}
+	}
+	const As2Clip root = clip(kHudScreenInstance);
+	const uint32_t before = root.current_frame();
+	root.goto_and_play("onExit");
+	if (!exit_called_ && root.current_frame() == before) {
+		exit_called_ = true;
+	}
+}
+
+void HudScreen::run_timers(double p_seconds) {
+	std::vector<std::pair<std::string, uint32_t>> due;
+	for (Interval &i : intervals_) {
+		i.elapsed += p_seconds;
+		if (i.period <= 0.0) {
+			due.emplace_back(i.path, i.id);
+			i.elapsed = 0.0;
+			continue;
+		}
+		for (uint32_t k = 0; k < kMaxIntervalFiresPerAdvance && i.elapsed >= i.period; ++k) {
+			i.elapsed -= i.period;
+			due.emplace_back(i.path, i.id);
+		}
+		i.elapsed = std::min(i.elapsed, i.period);
+	}
+	for (const auto &[path, id] : due) {
+		const bool live =
+				std::any_of(intervals_.begin(), intervals_.end(), [&](const Interval &i) { return i.id == id; });
+		HudWidgetState *w = live ? owner_of(path) : nullptr;
+		if (w != nullptr) {
+			w->controller->interval(*w->host, id);
+		}
+	}
+	const float fps = scene_->frame_rate();
+	if (!(fps > 0.0f)) {
+		return;
+	}
+	frame_clock_ += p_seconds * double(fps);
+	const double whole = std::floor(frame_clock_);
+	frame_clock_ -= whole;
+	const uint32_t frames = uint32_t(std::min(whole, double(kMaxEnterFramesPerAdvance)));
+	for (uint32_t f = 0; f < frames; ++f) {
+		for (size_t i = 0; i < widgets_.size(); ++i) {
+			HudWidgetState &w = *widgets_[i];
+			if (w.enter_frame && !w.retired) {
+				w.controller->enter_frame(*w.host);
+			}
+		}
+	}
+}
+
 void HudScreen::apply_tween(const HudTween &p_tween, float p_value) {
+	if (p_tween.property == HudTweenProperty::Custom) {
+		if (HudWidgetState *w = owner_of(p_tween.path)) {
+			w->controller->set_tween_property(*w->host, p_tween.name, p_value);
+		}
+		return;
+	}
 	const As2Clip c = clip(p_tween.path);
 	switch (p_tween.property) {
 		case HudTweenProperty::Alpha: c.set_alpha(p_value); break;
@@ -1021,6 +1177,8 @@ void HudScreen::apply_tween(const HudTween &p_tween, float p_value) {
 		case HudTweenProperty::Height: c.set_height(p_value); break;
 		case HudTweenProperty::X: c.set_x(p_value); break;
 		case HudTweenProperty::Y: c.set_y(p_value); break;
+		case HudTweenProperty::Custom:
+			break;
 	}
 }
 
@@ -1238,21 +1396,28 @@ void HudScreen::advance(double p_seconds) {
 		return;
 	}
 	sweep();
+	run_timers(p_seconds);
 	std::vector<std::pair<std::string, uint32_t>> completed;
-	for (HudTween &t : tweens_) {
+	const size_t running = tweens_.size();
+	for (size_t i = 0; i < running && i < tweens_.size(); ++i) {
+		HudTween &t = tweens_[i];
 		if (!t.started) {
 			t.started = true;
-			const float v = tween_value(clip(t.path), t.property);
+			HudWidgetState *owner = t.property == HudTweenProperty::Custom ? owner_of(t.path) : nullptr;
+			const float v = t.property != HudTweenProperty::Custom ? tween_value(clip(t.path), t.property)
+					: owner != nullptr ? owner->controller->tween_property(*owner->host, t.name).value_or(std::nanf(""))
+									   : std::nanf("");
 			t.from = std::isnan(v) ? t.to : v;
 		}
 		t.elapsed += p_seconds;
 		const bool done = t.elapsed >= t.seconds;
 		const double k = done ? 1.0 : hud_tween_ease(t.ease, t.elapsed / t.seconds);
-		apply_tween(t, done ? t.to : float(double(t.from) + (double(t.to) - double(t.from)) * k));
+		const HudTween step = t;
 		stats_.tweens_run++;
-		if (done && t.on_complete != 0) {
-			completed.emplace_back(t.path, t.on_complete);
+		if (done && step.on_complete != 0) {
+			completed.emplace_back(step.path, step.on_complete);
 		}
+		apply_tween(step, done ? step.to : float(double(step.from) + (double(step.to) - double(step.from)) * k));
 	}
 	tweens_.erase(std::remove_if(tweens_.begin(), tweens_.end(), [](const HudTween &t) { return t.elapsed >= t.seconds; }), tweens_.end());
 	for (const auto &[path, id] : completed) {

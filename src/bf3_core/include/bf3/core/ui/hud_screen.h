@@ -213,11 +213,13 @@ enum class HudTweenProperty : uint8_t {
 	Height,
 	X,
 	Y,
+	Custom,
 };
 
 struct HudTween {
 	std::string path;
 	HudTweenProperty property = HudTweenProperty::Alpha;
+	std::string name;
 	HudTweenEase ease = HudTweenEase::Linear;
 	float from = 0.0f;
 	float to = 0.0f;
@@ -267,6 +269,12 @@ public:
 	void renderer(const As2Clip &p_clip, std::string_view p_renderer);
 	void add_tween(const As2Clip &p_clip, HudTweenProperty p_property, float p_to, double p_seconds, HudTweenEase p_ease, uint32_t p_on_complete = 0);
 	void remove_tweens(const As2Clip &p_clip);
+	void add_custom_tween(
+			std::string_view p_name, float p_to, double p_seconds, HudTweenEase p_ease, uint32_t p_on_complete = 0);
+	uint32_t set_interval(double p_seconds);
+	void clear_interval(uint32_t p_id);
+	void set_enter_frame(bool p_on);
+	void exit_complete();
 	As2Clip attach_movie(const As2Clip &p_parent, std::string_view p_linkage, std::string_view p_name, int32_t p_depth);
 	As2Clip create_empty_movie_clip(const As2Clip &p_parent, std::string_view p_name, int32_t p_depth);
 	void remove_movie_clip(const As2Clip &p_clip);
@@ -346,6 +354,11 @@ public:
 	virtual void drive(HudWidgetHost &, const HudModel &, const HudClientState &) {}
 	virtual void advance(HudWidgetHost &, double) {}
 	virtual void tween_complete(HudWidgetHost &, uint32_t) {}
+	virtual std::optional<float> tween_property(HudWidgetHost &, std::string_view) { return std::nullopt; }
+	virtual void set_tween_property(HudWidgetHost &, std::string_view, float) {}
+	virtual void interval(HudWidgetHost &, uint32_t) {}
+	virtual void enter_frame(HudWidgetHost &) {}
+	virtual bool begin_exit(HudWidgetHost &) { return true; }
 	virtual void frame_script(HudWidgetHost &, const HudFrameScript &) {}
 	virtual void bind(const HudModel &, const HudClientState &, HudData &) const {}
 	virtual bool input_concept(HudWidgetHost &, int32_t, bool) { return false; }
@@ -370,6 +383,8 @@ struct HudWidgetState {
 	bool screen_widget = false;
 	bool initialized = false;
 	bool retired = false;
+	bool exiting = false;
+	bool enter_frame = false;
 	std::unique_ptr<HudWidgetController> controller;
 	std::unique_ptr<HudWidgetHost> host;
 	std::map<std::string, As2Value, std::less<>> sent;
@@ -391,6 +406,11 @@ public:
 	void set_stage_rects(const HudStageRects &p_rects);
 	void set_focus(bool p_focused);
 	bool has_focus() const { return focused_; }
+	void begin_exit();
+	bool enter_complete() const;
+	bool exiting() const { return exiting_; }
+	bool exit_complete() const { return exiting_ && exits_pending_ == 0 && (exit_called_ || exits_counted_ > 0); }
+	size_t intervals() const { return intervals_.size(); }
 	void set_event_sink(HudWidgetEventSink p_sink) { event_sink_ = std::move(p_sink); }
 	bool deliver_in_event(
 			std::string_view p_instance, std::string_view p_query, const As2Value &p_param = As2Value::of(0));
@@ -472,6 +492,21 @@ private:
 	float mouse_y_ = 0.0f;
 	std::string focused_widget_;
 	int32_t focus_index_ = 0;
+	struct Interval {
+		std::string path;
+		uint32_t id = 0;
+		double period = 0.0;
+		double elapsed = 0.0;
+	};
+	std::vector<Interval> intervals_;
+	uint32_t next_interval_ = 1;
+	double frame_clock_ = 0.0;
+	bool exiting_ = false;
+	bool exit_called_ = false;
+	uint32_t exits_pending_ = 0;
+	uint32_t exits_counted_ = 0;
+	HudWidgetState *owner_of(std::string_view p_path);
+	void run_timers(double p_seconds);
 
 	bool dispatch_mouse(const std::string &p_target, HudMouse p_mouse);
 	bool takes_focus(const HudWidgetState &p_widget) const;

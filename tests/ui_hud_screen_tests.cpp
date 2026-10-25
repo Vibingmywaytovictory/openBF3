@@ -2098,6 +2098,95 @@ TEST_SUITE("ui-hud-screen") {
 		row("input_hooks", std::to_string(controllers) + " controllers over the 4 in-round screens: concept, key, mouse and focus hooks unhandled, screen focus given and taken back, no scene change");
 	}
 
+	TEST_CASE("hud screen: controller timers, enter frames, custom tweens and the screen exit") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		struct Probe : HudWidgetController {
+			std::vector<uint32_t> fired;
+			uint32_t frames = 0;
+			float value = 0.0f;
+			std::vector<float> set;
+			std::optional<float> tween_property(HudWidgetHost &, std::string_view p_name) override {
+				return p_name == "newFrame" ? std::optional<float>(value) : std::nullopt;
+			}
+			void set_tween_property(HudWidgetHost &, std::string_view p_name, float p_value) override {
+				if (p_name == "newFrame") {
+					value = p_value;
+					set.push_back(p_value);
+				}
+			}
+			void interval(HudWidgetHost &, uint32_t p_id) override { fired.push_back(p_id); }
+			void enter_frame(HudWidgetHost &) override { ++frames; }
+			bool begin_exit(HudWidgetHost &) override { return false; }
+		};
+		Screen s = open_screen(*r, "ui/flow/screen/preroundwaitingscreen");
+		CHECK_FALSE(s.hud->enter_complete());
+		s.hud->initialize(HudModel{});
+		CHECK(s.hud->enter_complete());
+		const std::string path = std::string(kHudScreenInstance) + ".HudAlertMessage_03";
+		HudWidgetState *w = nullptr;
+		for (const std::unique_ptr<HudWidgetState> &cand : s.hud->widgets()) {
+			if (cand->path == path) {
+				w = cand.get();
+			}
+		}
+		REQUIRE(w != nullptr);
+		auto made = std::make_unique<Probe>();
+		Probe &probe = *made;
+		w->controller = std::move(made);
+		HudWidgetHost &host = *w->host;
+		const uint32_t id = host.set_interval(0.25);
+		const uint32_t other = host.set_interval(0.5);
+		s.hud->advance(1.0);
+		CHECK(probe.fired == std::vector<uint32_t>{ id, id, id, id, other, other });
+		host.clear_interval(id);
+		probe.fired.clear();
+		s.hud->advance(0.5);
+		CHECK(probe.fired == std::vector<uint32_t>{ other });
+		host.clear_interval(other);
+		CHECK(s.hud->intervals() == 0);
+		const float fps = s.scene->frame_rate();
+		REQUIRE(fps > 0.0f);
+		host.set_enter_frame(true);
+		for (int i = 0; i < 10; ++i) {
+			s.hud->advance(0.1);
+		}
+		CHECK(probe.frames == uint32_t(std::lround(fps)));
+		host.set_enter_frame(false);
+		s.hud->advance(1.0);
+		CHECK(probe.frames == uint32_t(std::lround(fps)));
+		host.add_custom_tween("newFrame", 360.0f, 2.0, HudTweenEase::Linear);
+		s.hud->advance(1.0);
+		CHECK(probe.value == doctest::Approx(180.0f));
+		s.hud->advance(1.0);
+		CHECK(probe.value == 360.0f);
+		CHECK(s.hud->tweens().empty());
+		const As2Clip root = s.clip(kHudScreenInstance);
+		CHECK(root.current_frame() == 1);
+		s.hud->begin_exit();
+		CHECK(s.hud->exiting());
+		s.hud->advance(0.1);
+		REQUIRE(s.scene->advance_seconds(0.1).ok());
+		CHECK(root.current_frame() == s.label(kHudScreenInstance, "onExit") + 1);
+		CHECK_FALSE(s.hud->exit_complete());
+		host.exit_complete();
+		CHECK(s.hud->exit_complete());
+		Screen t = open_screen(*r, "ui/flow/screen/preroundwaitingscreen");
+		t.hud->initialize(HudModel{});
+		REQUIRE(t.hud->enter_complete());
+		const As2Clip other_root = t.clip(kHudScreenInstance);
+		const uint32_t frame_before_exit = other_root.current_frame();
+		t.hud->begin_exit();
+		CHECK(t.hud->exit_complete());
+		CHECK(other_root.current_frame() != frame_before_exit);
+		row("timers",
+				std::to_string(probe.frames) + " enter frames at " + std::to_string(fps) +
+						" fps; intervals, the newFrame tween, the onExit frame's onExitComplete and an exit that ends "
+						"with its last widget's");
+	}
+
 	TEST_CASE("hud screen: hit test clicks spawnscreenpc Button_03") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {
