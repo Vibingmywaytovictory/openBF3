@@ -40,9 +40,10 @@ SwfImageInfo read_swf_image_info(const LevelMount &p_mount, std::string_view p_r
 		out.error = "res " + std::string(p_res_name) + ": " + e.message();
 		return out;
 	}
-	if (tex.kind != res::TextureKind::Texture2D || tex.faces() != 1 || tex.width == 0 || tex.height == 0 || tex.width > kSwfImageMaxSide ||
-			tex.height > kSwfImageMaxSide) {
-		out.error = "res " + std::string(p_res_name) + ": not a 2D image up to " + std::to_string(kSwfImageMaxSide) + " texels";
+	if (tex.kind != res::TextureKind::Texture2D || tex.faces() != 1 || tex.width == 0 || tex.height == 0 ||
+			tex.width > kSwfImageMaxSide || tex.height > kSwfImageMaxSide) {
+		out.error = "res " + std::string(p_res_name) + ": not a 2D image up to " + std::to_string(kSwfImageMaxSide) +
+				" texels";
 		return out;
 	}
 	out.status = SwfImageStatus::Ready;
@@ -51,8 +52,7 @@ SwfImageInfo read_swf_image_info(const LevelMount &p_mount, std::string_view p_r
 	return out;
 }
 
-SwfMountImages::SwfMountImages(LevelMount p_mount) :
-		mount_(std::move(p_mount)) {}
+SwfMountImages::SwfMountImages(LevelMount p_mount) : mount_(std::move(p_mount)) {}
 
 SwfImageInfo SwfMountImages::request(std::string_view p_res_name) {
 	++requests_;

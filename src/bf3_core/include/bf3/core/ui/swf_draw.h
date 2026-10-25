@@ -30,7 +30,9 @@ struct SwfDrawOp {
 	static SwfDrawOp begin_fill(SwfColor p_color) { return { SwfDrawOpKind::BeginFill, p_color, {}, {} }; }
 	static SwfDrawOp move_to(float p_x, float p_y) { return { SwfDrawOpKind::MoveTo, {}, { p_x, p_y }, {} }; }
 	static SwfDrawOp line_to(float p_x, float p_y) { return { SwfDrawOpKind::LineTo, {}, { p_x, p_y }, {} }; }
-	static SwfDrawOp curve_to(float p_cx, float p_cy, float p_x, float p_y) { return { SwfDrawOpKind::CurveTo, {}, { p_x, p_y }, { p_cx, p_cy } }; }
+	static SwfDrawOp curve_to(float p_cx, float p_cy, float p_x, float p_y) {
+		return { SwfDrawOpKind::CurveTo, {}, { p_x, p_y }, { p_cx, p_cy } };
+	}
 	static SwfDrawOp end_fill() { return { SwfDrawOpKind::EndFill, {}, {}, {} }; }
 };
 

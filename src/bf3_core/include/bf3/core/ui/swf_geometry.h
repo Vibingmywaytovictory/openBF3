@@ -31,7 +31,7 @@ enum class SwfFillRule : uint8_t {
 Status swf_triangulate_nonzero(std::span<const SwfPoint> p_outline, std::span<const uint32_t> p_contour_ends, WorkBudget &r_budget,
 		SwfTriangulation &r_out);
 
-Status swf_triangulate(std::span<const SwfPoint> p_outline, std::span<const uint32_t> p_contour_ends, SwfFillRule p_rule, WorkBudget &r_budget,
-		SwfTriangulation &r_out);
+Status swf_triangulate(std::span<const SwfPoint> p_outline, std::span<const uint32_t> p_contour_ends,
+		SwfFillRule p_rule, WorkBudget &r_budget, SwfTriangulation &r_out);
 
 }

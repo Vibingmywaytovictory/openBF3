@@ -115,8 +115,9 @@ public:
 };
 
 std::vector<SwfDrawOp> square_ops(float p_x, float p_y, float p_side) {
-	return { SwfDrawOp::move_to(p_x, p_y), SwfDrawOp::line_to(p_x + p_side, p_y), SwfDrawOp::line_to(p_x + p_side, p_y + p_side),
-		SwfDrawOp::line_to(p_x, p_y + p_side), SwfDrawOp::line_to(p_x, p_y) };
+	return { SwfDrawOp::move_to(p_x, p_y), SwfDrawOp::line_to(p_x + p_side, p_y),
+		SwfDrawOp::line_to(p_x + p_side, p_y + p_side), SwfDrawOp::line_to(p_x, p_y + p_side),
+		SwfDrawOp::line_to(p_x, p_y) };
 }
 
 }
@@ -174,7 +175,8 @@ TEST_SUITE("ui-scene2-unit") {
 		CHECK_FALSE(s.set_mask("content", "missing").ok());
 	}
 
-	TEST_CASE("swf draw: fills close their contours, curves flatten, holes are even-odd, an open fill draws, clear resets") {
+	TEST_CASE("swf draw: fills close their contours, curves flatten, holes are even-odd, an open fill draws, clear "
+			  "resets") {
 		const SwfColor red{ 255, 0, 0, 255 };
 		std::vector<SwfDrawOp> ops{ SwfDrawOp::begin_fill(red) };
 		for (const SwfDrawOp &op : square_ops(0.0f, 0.0f, 10.0f)) {
@@ -198,15 +200,17 @@ TEST_SUITE("ui-scene2-unit") {
 		holed.push_back(SwfDrawOp::end_fill());
 		CHECK(filled_area(*drawn(holed)) == doctest::Approx(300.0));
 
-		const std::shared_ptr<const SwfShape> arch = drawn({ SwfDrawOp::begin_fill(red), SwfDrawOp::move_to(0.0f, 0.0f), SwfDrawOp::curve_to(10.0f, 20.0f, 20.0f, 0.0f),
-				SwfDrawOp::line_to(0.0f, 0.0f), SwfDrawOp::end_fill() });
+		const std::shared_ptr<const SwfShape> arch = drawn({ SwfDrawOp::begin_fill(red), SwfDrawOp::move_to(0.0f, 0.0f),
+				SwfDrawOp::curve_to(10.0f, 20.0f, 20.0f, 0.0f), SwfDrawOp::line_to(0.0f, 0.0f),
+				SwfDrawOp::end_fill() });
 		CHECK(arch->meshes[0].outline.size() > 4);
 		CHECK(filled_area(*arch) == doctest::Approx(20.0 * 10.0 * 2.0 / 3.0).epsilon(0.01));
 
-		const std::shared_ptr<const SwfShape> open = drawn({ SwfDrawOp::begin_fill(red), SwfDrawOp::move_to(0.0f, 0.0f), SwfDrawOp::line_to(8.0f, 0.0f),
-				SwfDrawOp::line_to(8.0f, 4.0f) });
+		const std::shared_ptr<const SwfShape> open = drawn({ SwfDrawOp::begin_fill(red), SwfDrawOp::move_to(0.0f, 0.0f),
+				SwfDrawOp::line_to(8.0f, 0.0f), SwfDrawOp::line_to(8.0f, 4.0f) });
 		CHECK(filled_area(*open) == doctest::Approx(16.0));
-		CHECK(drawn({ SwfDrawOp::move_to(0.0f, 0.0f), SwfDrawOp::line_to(8.0f, 0.0f), SwfDrawOp::line_to(8.0f, 4.0f) })->meshes.empty());
+		CHECK(drawn({ SwfDrawOp::move_to(0.0f, 0.0f), SwfDrawOp::line_to(8.0f, 0.0f), SwfDrawOp::line_to(8.0f, 4.0f) })
+						->meshes.empty());
 
 		SwfDrawing d;
 		for (const SwfDrawOp &op : ops) {
@@ -262,7 +266,8 @@ TEST_SUITE("ui-scene2-unit") {
 		CHECK(s.draw("", SwfDrawOp::begin_fill(SwfColor{})).ok());
 	}
 
-	TEST_CASE("swf scene: swapDepths swaps two siblings or moves to an empty depth, and a swapped timeline clip leaves its timeline") {
+	TEST_CASE("swf scene: swapDepths swaps two siblings or moves to an empty depth, and a swapped timeline clip leaves "
+			  "its timeline") {
 		const SwfLibrary lib = two_boxes_library();
 		SwfScene s = open_scene(lib, "boxes");
 		As2Clip root(&s, "");
@@ -346,8 +351,10 @@ TEST_SUITE("ui-scene2-unit") {
 		CHECK(c.alpha() == doctest::Approx(50.0f));
 	}
 
-	TEST_CASE("swf scene: loadClip img:// replaces a clip's content with the image after the source reports it, and unloadClip clears it") {
-		CHECK(swf_image_res_name("img://UI/Art/Persistence\\DogTag/inactivetag_left") == "ui/art/persistence/dogtag/inactivetag_left");
+	TEST_CASE("swf scene: loadClip img:// replaces a clip's content with the image after the source reports it, and "
+			  "unloadClip clears it") {
+		CHECK(swf_image_res_name("img://UI/Art/Persistence\\DogTag/inactivetag_left") ==
+				"ui/art/persistence/dogtag/inactivetag_left");
 		CHECK(swf_image_res_name("UI/Art/x") == "ui/art/x");
 		const SwfLibrary lib = two_boxes_library();
 		SwfScene s = open_scene(lib, "boxes");
@@ -396,7 +403,8 @@ TEST_SUITE("ui-scene2-unit") {
 		CHECK_FALSE(s.load_image("other", "ui/art/box", 0, 4).ok());
 	}
 
-	TEST_CASE("game utils: getKitFrameLabel, isImagePath, string2object and UIBase.ObjectToArray follow the retail AS2") {
+	TEST_CASE(
+			"game utils: getKitFrameLabel, isImagePath, string2object and UIBase.ObjectToArray follow the retail AS2") {
 		CHECK(game_utils_kit_frame_label("USAssault") == "assault");
 		CHECK(game_utils_kit_frame_label("RUEngineer") == "engineer");
 		CHECK(game_utils_kit_frame_label("ID_M_SUPPORT") == "medic");

@@ -1,7 +1,7 @@
 #include "ui_textures.h"
 
-#include "bf3_localisation.h"
 #include "bf3/core/res/res_loader.h"
+#include "bf3_localisation.h"
 #include "render_bridge.h"
 
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -24,8 +24,7 @@ std::shared_ptr<Bf3UiTextures> Bf3UiTextures::shared() {
 	return t;
 }
 
-Bf3UiTextures::Bf3UiTextures(std::shared_ptr<const bf3::core::Install> p_install) :
-		install_(std::move(p_install)) {}
+Bf3UiTextures::Bf3UiTextures(std::shared_ptr<const bf3::core::Install> p_install) : install_(std::move(p_install)) {}
 
 Bf3UiTextures::~Bf3UiTextures() {
 	{
@@ -119,7 +118,8 @@ void Bf3UiTextures::run() {
 				if (!loaded) {
 					error = loaded.error().message;
 				} else {
-					bf3::core::Result<bf3::render::PreparedTexture> prep = bf3::render::prepare_texture(*loaded, bf3::render::TextureRole::Color);
+					bf3::core::Result<bf3::render::PreparedTexture> prep =
+							bf3::render::prepare_texture(*loaded, bf3::render::TextureRole::Color);
 					if (!prep) {
 						error = prep.error().message;
 					} else {

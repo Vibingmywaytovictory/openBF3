@@ -261,8 +261,8 @@ Status swf_triangulate_nonzero(std::span<const SwfPoint> p_outline, std::span<co
 	return swf_triangulate(p_outline, p_contour_ends, SwfFillRule::NonZero, r_budget, r_out);
 }
 
-Status swf_triangulate(std::span<const SwfPoint> p_outline, std::span<const uint32_t> p_contour_ends, SwfFillRule p_rule, WorkBudget &r_budget,
-		SwfTriangulation &r_out) {
+Status swf_triangulate(std::span<const SwfPoint> p_outline, std::span<const uint32_t> p_contour_ends,
+		SwfFillRule p_rule, WorkBudget &r_budget, SwfTriangulation &r_out) {
 	r_out = SwfTriangulation{};
 	Sweep sweep(p_rule, r_budget, r_out);
 	return sweep.run(p_outline, p_contour_ends);

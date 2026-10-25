@@ -62,7 +62,8 @@ inline Retail *retail_or_skip() {
 			return &r;
 		}
 		r.fonts = std::make_unique<SwfFontSet>(std::move(*fonts));
-		Result<std::unique_ptr<EbxLibrary>> level = EbxLibrary::open(r.mount->install, { "Win32/Levels/MP_Subway/MP_Subway" });
+		Result<std::unique_ptr<EbxLibrary>> level =
+				EbxLibrary::open(r.mount->install, { "Win32/Levels/MP_Subway/MP_Subway" });
 		if (!level) {
 			r.error = level.error().message;
 			return &r;
@@ -94,7 +95,8 @@ struct RetailScreen {
 	}
 };
 
-inline RetailScreen open_retail_screen(Retail &r_r, std::string_view p_partition, bf3::core::ui::HudClientState p_client = {}) {
+inline RetailScreen open_retail_screen(
+		Retail &r_r, std::string_view p_partition, bf3::core::ui::HudClientState p_client = {}) {
 	using namespace bf3::core;
 	using namespace bf3::core::ui;
 	RetailScreen s;
@@ -105,7 +107,8 @@ inline RetailScreen open_retail_screen(Retail &r_r, std::string_view p_partition
 	REQUIRE_MESSAGE(scene.ok(), (scene.ok() ? std::string() : scene.error().message));
 	s.scene = std::make_unique<SwfScene>(std::move(*scene));
 	s.scene->set_image_source(r_r.images);
-	Result<std::unique_ptr<HudScreen>> hud = HudScreen::open(*s.scene, *r_r.lib, s.asset, r_r.fonts.get(), std::move(p_client));
+	Result<std::unique_ptr<HudScreen>> hud =
+			HudScreen::open(*s.scene, *r_r.lib, s.asset, r_r.fonts.get(), std::move(p_client));
 	REQUIRE_MESSAGE(hud.ok(), (hud.ok() ? std::string() : hud.error().message));
 	s.hud = std::move(*hud);
 	return s;

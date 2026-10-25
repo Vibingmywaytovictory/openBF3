@@ -20,7 +20,8 @@ bool finite(SwfPoint p_p) {
 
 SwfColor swf_draw_fill_color(uint32_t p_rgb, double p_alpha_percent) {
 	const double a = std::isfinite(p_alpha_percent) ? std::clamp(p_alpha_percent, 0.0, 100.0) : 100.0;
-	return SwfColor{ uint8_t((p_rgb >> 16) & 0xFFu), uint8_t((p_rgb >> 8) & 0xFFu), uint8_t(p_rgb & 0xFFu), uint8_t(std::lround(a * 2.55)) };
+	return SwfColor{ uint8_t((p_rgb >> 16) & 0xFFu), uint8_t((p_rgb >> 8) & 0xFFu), uint8_t(p_rgb & 0xFFu),
+		uint8_t(std::lround(a * 2.55)) };
 }
 
 void SwfDrawing::close_contour() {
@@ -51,7 +52,8 @@ Status SwfDrawing::apply(const SwfDrawOp &p_op) {
 		return make_error("swf drawing: a point is not finite");
 	}
 	if (commands_ >= kSwfDrawMaxCommands) {
-		return make_error("swf drawing: more than " + std::to_string(kSwfDrawMaxCommands) + " commands since the last clear");
+		return make_error(
+				"swf drawing: more than " + std::to_string(kSwfDrawMaxCommands) + " commands since the last clear");
 	}
 	++commands_;
 	switch (p_op.kind) {
@@ -81,8 +83,9 @@ Status SwfDrawing::apply(const SwfDrawOp &p_op) {
 				for (uint32_t i = 1; i <= n; ++i) {
 					const double t = double(i) / double(n);
 					const double u = 1.0 - t;
-					fills_.back().outline.push_back({ float(u * u * pen_.x + 2.0 * u * t * p_op.control.x + t * t * p_op.to.x),
-							float(u * u * pen_.y + 2.0 * u * t * p_op.control.y + t * t * p_op.to.y) });
+					fills_.back().outline.push_back(
+							{ float(u * u * pen_.x + 2.0 * u * t * p_op.control.x + t * t * p_op.to.x),
+									float(u * u * pen_.y + 2.0 * u * t * p_op.control.y + t * t * p_op.to.y) });
 				}
 			}
 			pen_ = p_op.to;
@@ -93,7 +96,8 @@ Status SwfDrawing::apply(const SwfDrawOp &p_op) {
 				filling_ = false;
 			}
 			return Status::success();
-		case SwfDrawOpKind::Clear: break;
+		case SwfDrawOpKind::Clear:
+			break;
 	}
 	return Status::success();
 }

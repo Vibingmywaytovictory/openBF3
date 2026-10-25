@@ -1211,7 +1211,8 @@ struct Bf3SwfView::Impl {
 		return std::sqrt(std::abs(w.a * w.d - w.b * w.c));
 	}
 
-	void build_shape(NodeRec &r_rec, const ui::SwfSceneNode &p_node, const ui::SwfShape &p_shape, const GridWarp &p_grid) {
+	void build_shape(
+			NodeRec &r_rec, const ui::SwfSceneNode &p_node, const ui::SwfShape &p_shape, const GridWarp &p_grid) {
 		const ui::SwfShape &shape = p_shape;
 		const GridWarp &grid = p_grid;
 		r_rec.grid = grid.active;

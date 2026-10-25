@@ -267,7 +267,8 @@ void expect_node(const ui::SwfScene &p_scene, const ui::SwfFontSet *p_fonts, ui:
 			}
 		}
 		for (const ui::SwfStroke &st : shape->strokes) {
-			const double hw = st.line < shape->lines.size() ? std::max(0.5, double(shape->lines[st.line].width) * 0.5) : 0.5;
+			const double hw =
+					st.line < shape->lines.size() ? std::max(0.5, double(shape->lines[st.line].width) * 0.5) : 0.5;
 			for (const ui::SwfPoint &v : st.points) {
 				put(v.x - hw, v.y - hw);
 				put(v.x + hw, v.y + hw);
@@ -647,7 +648,8 @@ void Bf3SwfViewCheck::run_images() {
 			add_child(v);
 			s.image_views[i] = v;
 			const bf3::core::Status st = v->open(movies[i]);
-			s.add(fmt("open %s for img:// images", movies[i]), bool(st), st ? std::string("opened") : st.error().message);
+			s.add(fmt("open %s for img:// images", movies[i]), bool(st),
+					st ? std::string("opened") : st.error().message);
 		}
 		const auto image_holder = [](const ui::As2Clip &p_manager) {
 			const float w = p_manager.width();
@@ -676,7 +678,8 @@ void Bf3SwfViewCheck::run_images() {
 			advanced.set_x(190.0f);
 			advanced.set_y(-45.0f);
 			advanced.set_rotation(-5.0f);
-			for (const auto &[tag, url] : { std::pair{ basic, kDogTagBasicUrl }, std::pair{ advanced, kDogTagAdvancedUrl } }) {
+			for (const auto &[tag, url] :
+					{ std::pair{ basic, kDogTagBasicUrl }, std::pair{ advanced, kDogTagAdvancedUrl } }) {
 				const ui::As2Clip manager = tag.attach_movie("ImageManager", "ImageManager", 3);
 				manager.set_width(kDogTagSide);
 				manager.set_height(kDogTagSide);
@@ -735,16 +738,20 @@ void Bf3SwfViewCheck::run_images() {
 			}
 		}
 		pass = pass && loaded && area > 0 && lit * 100 >= area;
-		detail += fmt("; %s %s %ux%u, %u of %u px lit", loader.res_name().c_str(), loaded ? "loaded" : ("not loaded: " + loader.error()).c_str(), n != nullptr ? n->image_width : 0,
+		detail += fmt("; %s %s %ux%u, %u of %u px lit", loader.res_name().c_str(),
+				loaded ? "loaded" : ("not loaded: " + loader.error()).c_str(), n != nullptr ? n->image_width : 0,
 				n != nullptr ? n->image_height : 0, lit, area);
 	}
 	for (Bf3SwfView *v : s.image_views) {
 		pass = pass && v->is_open() && v->stats().missing_textures == 0;
 	}
-	s.add("img:// images drawn: inactivetag_left/right in DogTagPair's tags, m16a4 line-art in ImageManager's imgHolder", pass, detail);
+	s.add("img:// images drawn: inactivetag_left/right in DogTagPair's tags, m16a4 line-art in ImageManager's "
+		  "imgHolder",
+			pass, detail);
 	if (!s.shot_dir.empty() && both.w > 0) {
 		Bf3Localisation *loc = Bf3Localisation::current();
-		const std::filesystem::path target = std::filesystem::path(std::u8string(s.shot_dir.begin(), s.shot_dir.end())) / "swf_view_images.png";
+		const std::filesystem::path target =
+				std::filesystem::path(std::u8string(s.shot_dir.begin(), s.shot_dir.end())) / "swf_view_images.png";
 		bool ok = loc != nullptr && loc->reader().write_guard().allows_write(target);
 		if (ok) {
 			PackedByteArray bytes;
@@ -825,7 +832,10 @@ void Bf3SwfViewCheck::_process(double p_delta) {
 		RestTracker tracker;
 		bool settled = tracker.settled(*s.small_view(0)->scene()) & tracker.settled(*s.small_view(1)->scene());
 		int32_t rest = 0;
-		const auto at_rest_frame = [&s]() { return s.small_view(0)->scene()->stats().ticks >= kRestMovieFrame && s.small_view(1)->scene()->stats().ticks >= kRestMovieFrame; };
+		const auto at_rest_frame = [&s]() {
+			return s.small_view(0)->scene()->stats().ticks >= kRestMovieFrame &&
+					s.small_view(1)->scene()->stats().ticks >= kRestMovieFrame;
+		};
 		while (rest < kRestCap && (!settled || !at_rest_frame())) {
 			for (Bf3SwfView *v : s.views) {
 				const bf3::core::Status st = v->scene()->advance(1);
@@ -844,8 +854,9 @@ void Bf3SwfViewCheck::_process(double p_delta) {
 		const uint32_t ticks0 = s.small_view(0)->scene()->stats().ticks;
 		const uint32_t ticks1 = s.small_view(1)->scene()->stats().ticks;
 		s.add("rest frame reached", settled && ticks0 == kRestMovieFrame && ticks1 == kRestMovieFrame,
-				fmt("every playing timeline stopped or back on a frame it already showed after %d frames (cap %d), at movie frames %u and %u (rest frame %u)", rest,
-						kRestCap, ticks0, ticks1, kRestMovieFrame) +
+				fmt("every playing timeline stopped or back on a frame it already showed after %d frames (cap %d), at "
+					"movie frames %u and %u (rest frame %u)",
+						rest, kRestCap, ticks0, ticks1, kRestMovieFrame) +
 						blockers);
 		s.phase = 2;
 		s.frames = 0;

@@ -355,15 +355,20 @@ constexpr std::array<float, 5> kKillRowFadeOut{ 1.0f, 205.0f / 256.0f, 154.0f / 
 
 TEST_SUITE("ui-hud-screen-unit") {
 	TEST_CASE("hud screen unit: each AS2 class registers its controller once from its widget file") {
-		const std::vector<std::string> want{ "Screen.Weapon.CrosshairDefault", "Shared.HudBackground", "Widget.Crosshair.Crosshair", "Widget.Crosshair.Hitindicator",
-			"Widget.Hud.Ammo", "Widget.Hud.Compass", "Widget.Hud.DamageIndicator", "Widget.Hud.Health", "Widget.Hud.HudBackgroundWidget", "Widget.Hud.Minimap",
-			"Widget.Hud.PassangerList", "Widget.Hud.SquadList", "Widget.Hud.VehicleHealth", "Widget.Icon3D.Alerts.AlertManager", "Widget.Icon3D.Alerts.Alerttag",
-			"Widget.Icon3D.Interaction.InteractionManager", "Widget.Icon3D.Mapmarker.MapmarkerManager", "Widget.Icon3D.Mapmarker.Mapmarkertag",
-			"Widget.Icon3D.TeamSupport.SupportIconManager", "Widget.Icon3D.TeamSupport.SupportIconTag", "Widget.Image.ImageManager", "Widget.Message.HudAlertMessage", "Widget.Message.HudMessage",
-			"Widget.Message.LogMessage", "Widget.Message.MessageTypes.GameMessage", "Widget.Message.MessageTypes.KillLogMessage",
-			"Widget.Message.MessageTypes.LocalKillLogMessage", "Widget.Message.MessageTypes.ScoreMessage", "Widget.Message.ObjectiveMessage",
-			"Widget.Message.ScoreAggregator", "Widget.Message.TooltipMessage", "Widget.Misc.LatencyIndicator", "Widget.TicketCounter.TicketCounter", "fb.Base.UIScreen",
-			"Util.ScrollText", "Util.SimpleScrollText", "Util.SimpleTextBlockScroll", "Shared.KitIcons", "Shared.ServiceStars" };
+		const std::vector<std::string> want{ "Screen.Weapon.CrosshairDefault", "Shared.HudBackground",
+			"Widget.Crosshair.Crosshair", "Widget.Crosshair.Hitindicator", "Widget.Hud.Ammo", "Widget.Hud.Compass",
+			"Widget.Hud.DamageIndicator", "Widget.Hud.Health", "Widget.Hud.HudBackgroundWidget", "Widget.Hud.Minimap",
+			"Widget.Hud.PassangerList", "Widget.Hud.SquadList", "Widget.Hud.VehicleHealth",
+			"Widget.Icon3D.Alerts.AlertManager", "Widget.Icon3D.Alerts.Alerttag",
+			"Widget.Icon3D.Interaction.InteractionManager", "Widget.Icon3D.Mapmarker.MapmarkerManager",
+			"Widget.Icon3D.Mapmarker.Mapmarkertag", "Widget.Icon3D.TeamSupport.SupportIconManager",
+			"Widget.Icon3D.TeamSupport.SupportIconTag", "Widget.Image.ImageManager", "Widget.Message.HudAlertMessage",
+			"Widget.Message.HudMessage", "Widget.Message.LogMessage", "Widget.Message.MessageTypes.GameMessage",
+			"Widget.Message.MessageTypes.KillLogMessage", "Widget.Message.MessageTypes.LocalKillLogMessage",
+			"Widget.Message.MessageTypes.ScoreMessage", "Widget.Message.ObjectiveMessage",
+			"Widget.Message.ScoreAggregator", "Widget.Message.TooltipMessage", "Widget.Misc.LatencyIndicator",
+			"Widget.TicketCounter.TicketCounter", "fb.Base.UIScreen", "Util.ScrollText", "Util.SimpleScrollText",
+			"Util.SimpleTextBlockScroll", "Shared.KitIcons", "Shared.ServiceStars" };
 		const HudWidgetRegistry &installed = HudWidgetRegistry::installed();
 		std::vector<std::string> sorted = want;
 		std::sort(sorted.begin(), sorted.end());
@@ -831,7 +836,8 @@ TEST_SUITE("ui-hud-screen") {
 		}
 		Screen s = open_screen(*r, kHudMpScreenPartition);
 		CHECK(s.hud->stats().unknown_classes == 0);
-		CHECK(std::count_if(s.hud->widgets().begin(), s.hud->widgets().end(), [](const auto &w) { return w->class_name == "Widget.Image.ImageManager"; }) == 4);
+		CHECK(std::count_if(s.hud->widgets().begin(), s.hud->widgets().end(),
+					  [](const auto &w) { return w->class_name == "Widget.Image.ImageManager"; }) == 4);
 		Screen t = open_screen(*r, kHudTdmScreenPartition);
 		CHECK(t.hud->stats().unknown_classes == 0);
 		CHECK(t.hud->widget("instance1.Compass_01.multiplayerCompass.bg") != nullptr);

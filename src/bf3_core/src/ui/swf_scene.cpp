@@ -402,7 +402,9 @@ struct SwfScene::Impl {
 			return Status::success();
 		}
 		SwfSceneNode *other = get(child_at(*parent, p_depth));
-		auto drop = [&](SwfNodeId p_id) { parent->children.erase(std::find(parent->children.begin(), parent->children.end(), p_id)); };
+		auto drop = [&](SwfNodeId p_id) {
+			parent->children.erase(std::find(parent->children.begin(), parent->children.end(), p_id));
+		};
 		drop(r_n.id);
 		if (other != nullptr) {
 			drop(other->id);
@@ -785,8 +787,8 @@ struct SwfScene::Impl {
 		return out;
 	}
 
-	void update(SwfNodeId p_id, const SwfMatrix &p_world, const SwfColorXform &p_color, bool p_visible, const std::vector<SwfNodeId> &p_masks,
-			const std::vector<SwfNodeId> &p_script_masks) {
+	void update(SwfNodeId p_id, const SwfMatrix &p_world, const SwfColorXform &p_color, bool p_visible,
+			const std::vector<SwfNodeId> &p_masks, const std::vector<SwfNodeId> &p_script_masks) {
 		SwfSceneNode &n = *get(p_id);
 		n.world = swf_concat(p_world, n.matrix);
 		n.world_color = swf_concat(p_color, n.color);
@@ -803,7 +805,8 @@ struct SwfScene::Impl {
 			for (const SwfSceneNode *m : active) {
 				masks.push_back(m->id);
 			}
-			child.is_mask = child.clip_depth != 0 || std::binary_search(p_script_masks.begin(), p_script_masks.end(), c);
+			child.is_mask =
+					child.clip_depth != 0 || std::binary_search(p_script_masks.begin(), p_script_masks.end(), c);
 			update(c, n.world, n.world_color, n.world_visible, masks, p_script_masks);
 			if (child.clip_depth != 0) {
 				active.push_back(&child);
@@ -1095,7 +1098,8 @@ Status SwfScene::swap_depths(std::string_view p_path, std::string_view p_other_p
 		return other.error();
 	}
 	if ((*other)->parent != (*n)->parent || (*other)->id == 0) {
-		return make_error("swf scene " + im.movie_name + ": " + std::string(p_path) + " and " + std::string(p_other_path) + " are not siblings");
+		return make_error("swf scene " + im.movie_name + ": " + std::string(p_path) + " and " +
+				std::string(p_other_path) + " are not siblings");
 	}
 	return im.swap_with(**n, (*other)->depth);
 }
@@ -1107,7 +1111,8 @@ Status SwfScene::swap_depths(std::string_view p_path, int32_t p_as2_depth) {
 		return n.error();
 	}
 	if (p_as2_depth < -kSwfAs2DepthOffset || p_as2_depth > kSwfAs2MaxDepth) {
-		return make_error("swf scene " + im.movie_name + ": depth " + std::to_string(p_as2_depth) + " outside the AS2 range");
+		return make_error(
+				"swf scene " + im.movie_name + ": depth " + std::to_string(p_as2_depth) + " outside the AS2 range");
 	}
 	return im.swap_with(**n, p_as2_depth + kSwfAs2DepthOffset);
 }
@@ -1241,7 +1246,8 @@ Status SwfScene::set_mask(std::string_view p_path, std::string_view p_mask_path)
 		return mask.error();
 	}
 	if (*mask == *n || (*mask)->id == 0) {
-		return make_error("swf scene " + im.movie_name + ": " + std::string(p_mask_path) + " cannot mask " + std::string(p_path));
+		return make_error(
+				"swf scene " + im.movie_name + ": " + std::string(p_mask_path) + " cannot mask " + std::string(p_path));
 	}
 	const SwfNodeId mask_id = (*mask)->id;
 	for (const std::unique_ptr<SwfSceneNode> &other : im.nodes) {
@@ -1269,7 +1275,8 @@ Status SwfScene::draw(std::string_view p_path, const SwfDrawOp &p_op) {
 		return n.error();
 	}
 	if ((*n)->kind != SwfNodeKind::Sprite && (*n)->kind != SwfNodeKind::Root) {
-		return make_error("swf scene " + im.movie_name + ": " + std::string(p_path) + " is a " + swf_node_kind_name((*n)->kind) + ", not a movie clip");
+		return make_error("swf scene " + im.movie_name + ": " + std::string(p_path) + " is a " +
+				swf_node_kind_name((*n)->kind) + ", not a movie clip");
 	}
 	std::unique_ptr<SwfDrawing> &d = im.drawings[slot_of((*n)->id)];
 	if (d == nullptr) {
@@ -1297,10 +1304,13 @@ Status SwfScene::load_image(std::string_view p_path, std::string_view p_res_name
 	}
 	SwfSceneNode &node = **n;
 	if (node.kind != SwfNodeKind::Sprite) {
-		return make_error("swf scene " + im.movie_name + ": " + std::string(p_path) + " is a " + swf_node_kind_name(node.kind) + ", not a movie clip");
+		return make_error("swf scene " + im.movie_name + ": " + std::string(p_path) + " is a " +
+				swf_node_kind_name(node.kind) + ", not a movie clip");
 	}
-	if (p_res_name.empty() || p_width == 0 || p_height == 0 || p_width > kSwfImageMaxSide || p_height > kSwfImageMaxSide) {
-		return make_error("swf scene " + im.movie_name + ": image '" + std::string(p_res_name) + "' has no usable size");
+	if (p_res_name.empty() || p_width == 0 || p_height == 0 || p_width > kSwfImageMaxSide ||
+			p_height > kSwfImageMaxSide) {
+		return make_error(
+				"swf scene " + im.movie_name + ": image '" + std::string(p_res_name) + "' has no usable size");
 	}
 	im.clear_children(node);
 	im.drawings[slot_of(node.id)].reset();

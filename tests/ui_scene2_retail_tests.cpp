@@ -40,8 +40,10 @@ size_t index_in(const std::vector<SwfNodeId> &p_order, SwfNodeId p_id) {
 }
 
 SwfRect world_rect(const SwfRect &p_local, const SwfMatrix &p_world) {
-	SwfRect r{ std::numeric_limits<float>::max(), std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max(), std::numeric_limits<float>::lowest() };
-	for (const auto &[x, y] : { std::pair{ p_local.x_min, p_local.y_min }, std::pair{ p_local.x_max, p_local.y_min }, std::pair{ p_local.x_min, p_local.y_max }, std::pair{ p_local.x_max, p_local.y_max } }) {
+	SwfRect r{ std::numeric_limits<float>::max(), std::numeric_limits<float>::lowest(),
+		std::numeric_limits<float>::max(), std::numeric_limits<float>::lowest() };
+	for (const auto &[x, y] : { std::pair{ p_local.x_min, p_local.y_min }, std::pair{ p_local.x_max, p_local.y_min },
+				 std::pair{ p_local.x_min, p_local.y_max }, std::pair{ p_local.x_max, p_local.y_max } }) {
 		const float wx = p_world.a * x + p_world.c * y + p_world.tx;
 		const float wy = p_world.b * x + p_world.d * y + p_world.ty;
 		r.x_min = std::min(r.x_min, wx);
@@ -75,7 +77,8 @@ TEST_SUITE("ui-scene2") {
 		if (r == nullptr) {
 			return;
 		}
-		for (const auto &[url, w, h] : { std::tuple{ kDogTagLeft, 256u, 256u }, std::tuple{ kDogTagRight, 256u, 256u }, std::tuple{ kWeaponLineArt, 256u, 64u } }) {
+		for (const auto &[url, w, h] : { std::tuple{ kDogTagLeft, 256u, 256u }, std::tuple{ kDogTagRight, 256u, 256u },
+					 std::tuple{ kWeaponLineArt, 256u, 64u } }) {
 			const SwfImageInfo info = r->images->request(swf_image_res_name(url));
 			CHECK_MESSAGE(info.status == SwfImageStatus::Ready, (std::string(url) + ": " + info.error));
 			CHECK(info.width == w);
@@ -86,7 +89,8 @@ TEST_SUITE("ui-scene2") {
 		CHECK_FALSE(none.error.empty());
 	}
 
-	TEST_CASE("ImageManager: killscreen's weaponImage streams the line-art into imgHolder, resizes, centres, queues and reports") {
+	TEST_CASE("ImageManager: killscreen's weaponImage streams the line-art into imgHolder, resizes, centres, queues "
+			  "and reports") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {
 			return;
@@ -106,7 +110,8 @@ TEST_SUITE("ui-scene2") {
 		CHECK(size.height() == doctest::Approx(64.0f).epsilon(0.001));
 
 		std::vector<std::string> calls;
-		weapon->register_callback([&](std::string_view p_message, ImageManagerWidget &) { calls.emplace_back(p_message); });
+		weapon->register_callback(
+				[&](std::string_view p_message, ImageManagerWidget &) { calls.emplace_back(p_message); });
 		weapon->update(host, "ImageUrl", As2Value::of(std::string(kWeaponLineArt)));
 		CHECK(calls == std::vector<std::string>{ "LoadStarted" });
 		CHECK(weapon->currently_loading());
@@ -132,7 +137,9 @@ TEST_SUITE("ui-scene2") {
 		CHECK(calls == std::vector<std::string>{ "LoadStarted", "ImageLoaded", "UnLoadImage", "LoadStarted" });
 		CHECK(s.at(std::string(kWeaponImage) + ".imgHolder").image.empty());
 		s.hud->advance(1.0 / 30.0);
-		CHECK(calls == std::vector<std::string>{ "LoadStarted", "ImageLoaded", "UnLoadImage", "LoadStarted", "UnLoadImage", "LoadStarted", "ImageLoaded" });
+		CHECK(calls ==
+				std::vector<std::string>{ "LoadStarted", "ImageLoaded", "UnLoadImage", "LoadStarted", "UnLoadImage",
+						"LoadStarted", "ImageLoaded" });
 		s.hud->advance(1.0 / 30.0);
 		CHECK(calls.size() == 8);
 		CHECK(calls.back() == "ImageLoaded");
@@ -146,7 +153,8 @@ TEST_SUITE("ui-scene2") {
 		auto *rank = dynamic_cast<ImageManagerWidget *>(s.hud->controller(kRankImage));
 		REQUIRE(rank != nullptr);
 		std::vector<std::string> rank_calls;
-		rank->register_callback([&](std::string_view p_message, ImageManagerWidget &) { rank_calls.emplace_back(p_message); });
+		rank->register_callback(
+				[&](std::string_view p_message, ImageManagerWidget &) { rank_calls.emplace_back(p_message); });
 		rank->update_image_url(*s.hud->host(kRankImage), "UI/Art/Persistence/Weapons/no_such_weapon");
 		s.hud->advance(1.0 / 30.0);
 		CHECK(rank_calls == std::vector<std::string>{ "LoadStarted", "LoadError2" });
@@ -195,7 +203,8 @@ TEST_SUITE("ui-scene2") {
 		REQUIRE(weapon != nullptr);
 		HudWidgetHost &host = *s.hud->host(kWeaponImage);
 		std::vector<std::string> calls;
-		weapon->register_callback([&](std::string_view p_message, ImageManagerWidget &) { calls.emplace_back(p_message); });
+		weapon->register_callback(
+				[&](std::string_view p_message, ImageManagerWidget &) { calls.emplace_back(p_message); });
 		weapon->update_image_url(host, kWeaponLineArt);
 		weapon->update_image_url(host, "");
 		s.hud->advance(1.0 / 30.0);
@@ -206,7 +215,8 @@ TEST_SUITE("ui-scene2") {
 		CHECK(s.at(std::string(kWeaponImage) + ".imgHolder").image == "ui/art/persistence/weapons/m16a4");
 	}
 
-	TEST_CASE("DogTagPair on the retail movie: the tags sit at 19,-65 rot 8 and 190,-45 rot -5, and swapDepths raises the advanced tag") {
+	TEST_CASE("DogTagPair on the retail movie: the tags sit at 19,-65 rot 8 and 190,-45 rot -5, and swapDepths raises "
+			  "the advanced tag") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {
 			return;
@@ -258,7 +268,8 @@ TEST_SUITE("ui-scene2") {
 		CHECK(b.world.tx == doctest::Approx(19.0f));
 	}
 
-	TEST_CASE("ScrollText on the spawn screen's kitbar: the runtime mask clips kitItem text, and ScrollTextTimer scrolls it out and back") {
+	TEST_CASE("ScrollText on the spawn screen's kitbar: the runtime mask clips kitItem text, and ScrollTextTimer "
+			  "scrolls it out and back") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {
 			return;
@@ -268,7 +279,8 @@ TEST_SUITE("ui-scene2") {
 		auto *kit = dynamic_cast<ScrollTextWidget *>(s.hud->controller(item));
 		REQUIRE(kit != nullptr);
 		for (int i = 1; i < 5; ++i) {
-			CHECK(dynamic_cast<ScrollTextWidget *>(s.hud->controller("instance1.KitBar_01.kitItem_" + std::to_string(i))) != nullptr);
+			CHECK(dynamic_cast<ScrollTextWidget *>(
+						  s.hud->controller("instance1.KitBar_01.kitItem_" + std::to_string(i))) != nullptr);
 		}
 		const As2Clip txt = kit->field();
 		REQUIRE(txt.exists());
@@ -355,7 +367,8 @@ TEST_SUITE("ui-scene2") {
 		CHECK(s.hud->stats().as2.failed_ops == 0);
 	}
 
-	TEST_CASE("List viewport mask on the spawn screen's List_01: setupMask's listMask clips the rows below the start height") {
+	TEST_CASE("List viewport mask on the spawn screen's List_01: setupMask's listMask clips the rows below the start "
+			  "height") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {
 			return;
@@ -386,7 +399,8 @@ TEST_SUITE("ui-scene2") {
 		std::vector<As2Clip> rows;
 		float y = 0.0f;
 		for (int i = 0; y < start_h * 2.0f && i < 64; ++i) {
-			const As2Clip row = holder.attach_movie("teamSpawn", "row" + std::to_string(i), holder.next_highest_depth());
+			const As2Clip row =
+					holder.attach_movie("teamSpawn", "row" + std::to_string(i), holder.next_highest_depth());
 			REQUIRE(row.exists());
 			row.set_y(y);
 			REQUIRE(row.height() > 0.0f);
@@ -417,7 +431,8 @@ TEST_SUITE("ui-scene2") {
 		CHECK(s.hud->stats().as2.failed_ops == 0);
 	}
 
-	TEST_CASE("Shared.KitIcons and Shared.ServiceStars on the kill card: the star count hides until set, clamps to 0..100 and sizes the weapon stars") {
+	TEST_CASE("Shared.KitIcons and Shared.ServiceStars on the kill card: the star count hides until set, clamps to "
+			  "0..100 and sizes the weapon stars") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {
 			return;
@@ -448,7 +463,8 @@ TEST_SUITE("ui-scene2") {
 		CHECK(s.hud->stats().as2.failed_ops == 0);
 	}
 
-	TEST_CASE("textAutoSize fit on SpawnTimer's DEPLOY field: swf_text's GFx fit grows the 32 px label to fill the field and shrinks a long one, shrink only shrinks") {
+	TEST_CASE("textAutoSize fit on SpawnTimer's DEPLOY field: swf_text's GFx fit grows the 32 px label to fill the "
+			  "field and shrinks a long one, shrink only shrinks") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {
 			return;
@@ -494,7 +510,8 @@ TEST_SUITE("ui-scene2") {
 		CHECK(stats.failed_ops == 0);
 	}
 
-	TEST_CASE("swf census: no retail UI movie has a gradient fill, so Bf3SwfView's unsupported_fills stays 0 on every screen") {
+	TEST_CASE("swf census: no retail UI movie has a gradient fill, so Bf3SwfView's unsupported_fills stays 0 on every "
+			  "screen") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {
 			return;
@@ -521,8 +538,10 @@ TEST_SUITE("ui-scene2") {
 		CHECK(movies > 400);
 		CHECK(kinds[size_t(SwfFillKind::Solid)] > 0);
 		CHECK(kinds[size_t(SwfFillKind::Bitmap)] > 0);
-		MESSAGE("census " << movies << " movies: " << kinds[size_t(SwfFillKind::Solid)] << " solid, " << kinds[size_t(SwfFillKind::Bitmap)] << " bitmap, "
-						  << kinds[size_t(SwfFillKind::LinearGradient)] + kinds[size_t(SwfFillKind::RadialGradient)] + kinds[size_t(SwfFillKind::FocalGradient)]
+		MESSAGE("census " << movies << " movies: " << kinds[size_t(SwfFillKind::Solid)] << " solid, "
+						  << kinds[size_t(SwfFillKind::Bitmap)] << " bitmap, "
+						  << kinds[size_t(SwfFillKind::LinearGradient)] + kinds[size_t(SwfFillKind::RadialGradient)] +
+						kinds[size_t(SwfFillKind::FocalGradient)]
 						  << " gradient fills");
 	}
 }

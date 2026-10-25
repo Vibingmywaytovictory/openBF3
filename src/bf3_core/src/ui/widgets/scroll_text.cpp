@@ -78,7 +78,8 @@ void ScrollTextTimer::tick(const void *p_clock, double p_seconds) {
 	if (tween_) {
 		tween_->elapsed += p_seconds;
 		const bool done = tween_->elapsed >= tween_->seconds;
-		value_ = done ? tween_->to : ease_in_out_sine(tween_->elapsed, tween_->from, tween_->to - tween_->from, tween_->seconds);
+		value_ = done ? tween_->to
+					  : ease_in_out_sine(tween_->elapsed, tween_->from, tween_->to - tween_->from, tween_->seconds);
 		if (done) {
 			tween_.reset();
 		}
@@ -101,11 +102,21 @@ void ScrollTextTimer::release_clock(const void *p_clock) {
 void ScrollTextTimer::set_timeout(Phase p_phase) {
 	phase_ = p_phase;
 	switch (p_phase) {
-		case Phase::BeginDelay: remaining_ = kBeginDelay; break;
-		case Phase::ScrollForward: remaining_ = kScrollForwardTime; break;
-		case Phase::EndDelay: remaining_ = kEndDelay; break;
-		case Phase::ScrollBack: remaining_ = kScrollBackTime; break;
-		case Phase::Stopped: remaining_ = 0.0; break;
+		case Phase::BeginDelay:
+			remaining_ = kBeginDelay;
+			break;
+		case Phase::ScrollForward:
+			remaining_ = kScrollForwardTime;
+			break;
+		case Phase::EndDelay:
+			remaining_ = kEndDelay;
+			break;
+		case Phase::ScrollBack:
+			remaining_ = kScrollBackTime;
+			break;
+		case Phase::Stopped:
+			remaining_ = 0.0;
+			break;
 	}
 }
 
@@ -136,7 +147,8 @@ void ScrollTextTimer::timeout_fired() {
 			update_listeners();
 			set_timeout(Phase::BeginDelay);
 			break;
-		case Phase::Stopped: break;
+		case Phase::Stopped:
+			break;
 	}
 }
 

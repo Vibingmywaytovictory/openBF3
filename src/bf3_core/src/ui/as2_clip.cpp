@@ -327,7 +327,8 @@ void As2Clip::set_rotation(float p_degrees) const {
 	}
 	SwfMatrix m = n->matrix;
 	const double xs = std::hypot(double(m.a), double(m.b));
-	const double ys = std::hypot(double(m.c), double(m.d)) * (double(m.a) * double(m.d) - double(m.b) * double(m.c) < 0.0 ? -1.0 : 1.0);
+	const double ys = std::hypot(double(m.c), double(m.d)) *
+			(double(m.a) * double(m.d) - double(m.b) * double(m.c) < 0.0 ? -1.0 : 1.0);
 	const double r = std::remainder(double(p_degrees), 360.0) * std::numbers::pi / 180.0;
 	m.a = float(xs * std::cos(r));
 	m.b = float(xs * std::sin(r));
@@ -367,8 +368,8 @@ As2ColorTransform As2Clip::color_transform() const {
 		return {};
 	}
 	const SwfColorXform &c = n->color;
-	return { double(c.mul[0]) * 100.0, double(c.add[0]), double(c.mul[1]) * 100.0, double(c.add[1]), double(c.mul[2]) * 100.0, double(c.add[2]),
-		double(c.mul[3]) * 100.0, double(c.add[3]) };
+	return { double(c.mul[0]) * 100.0, double(c.add[0]), double(c.mul[1]) * 100.0, double(c.add[1]),
+		double(c.mul[2]) * 100.0, double(c.add[2]), double(c.mul[3]) * 100.0, double(c.add[3]) };
 }
 
 void As2Clip::set_color_transform(const As2ColorTransformPatch &p_patch) const {

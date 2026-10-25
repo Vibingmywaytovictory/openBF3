@@ -139,7 +139,8 @@ std::optional<As2Value> ui_base_object_to_array(const As2Value &p_object) {
 		}
 		case As2Value::Kind::Undefined:
 		case As2Value::Kind::Bool:
-		case As2Value::Kind::Number: return std::nullopt;
+		case As2Value::Kind::Number:
+			return std::nullopt;
 	}
 	return std::nullopt;
 }
