@@ -101,6 +101,7 @@ public:
 	double ekg_clock() const { return ekg_clock_; }
 	std::optional<bf3::core::ui::MinimapLevel> minimap_level();
 	uint32_t minimap_combat_area_side();
+	bool minimap_ready();
 	const NativeHudMinimapPose &minimap_pose() const { return pose_; }
 	void set_ekg_clock(double p_seconds) { ekg_clock_ = p_seconds; }
 	void set_additive_coverage(bool p_coverage);
@@ -127,7 +128,6 @@ private:
 	void paint_ekg(const SwfEngineTarget &p_target);
 	void paint_minimap(const SwfEngineTarget &p_target, const bf3::core::ui::SwfScene &p_scene);
 	void paint_tags();
-	bool minimap_ready();
 
 	std::string level_ = "MP_Subway";
 	bool manual_ = false;

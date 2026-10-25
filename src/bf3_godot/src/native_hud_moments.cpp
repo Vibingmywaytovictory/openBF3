@@ -1041,11 +1041,16 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 			const host::PresentationFrame &f = r_session.frame();
 			const bool alive = r_hud.model().soldier.is_alive;
 			const bool in_round = f.match_valid && f.match.phase == net::MatchPhase::InRound;
-			if (!alive || !in_round) {
+			const bool minimap = r_hud.minimap_ready();
+			if (!alive || !in_round || !minimap) {
 				if (waited_ > kAliveTimeout) {
-					row("alive_in_round", false,
-							"after " + std::to_string(kAliveTimeout) + " s: own soldier " + (alive ? "alive" : "not spawned") + ", round " +
-									(in_round ? "in round" : "not in round"));
+					if (!alive || !in_round) {
+						row("alive_in_round", false,
+								"after " + std::to_string(kAliveTimeout) + " s: own soldier " + (alive ? "alive" : "not spawned") + ", round " +
+										(in_round ? "in round" : "not in round"));
+					} else {
+						row("minimap_ready", false, "after " + std::to_string(kAliveTimeout) + " s: the minimap source has no satellite texture to paint");
+					}
 					phase_ = Phase::Done;
 					return true;
 				}
