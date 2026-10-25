@@ -437,6 +437,12 @@ foreach(_w IN ITEMS assets:*screen*assets* ticket_counter:*TicketCounter* ammo:*
 endforeach()
 openbf3_split_cover(NAME ui.hud.screen.split_cover EXE test_ui_hud_screen SUITE ui-hud-screen GROUP ui-hud-screen
     INSTALL_CASE ${_openbf3_hud_screen_install})
+openbf3_test(test_ui_graph test_main.cpp ui_graph_tests.cpp test_support.h)
+target_link_libraries(test_ui_graph PRIVATE bf3_core)
+add_test(NAME ui.graph.unit COMMAND test_ui_graph --test-suite=ui-graph-unit)
+add_test(NAME ui.graph COMMAND test_ui_graph --test-suite=ui-graph)
+set_tests_properties(ui.graph PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(ui.graph.unit ui.graph PROPERTIES TIMEOUT 300)
 add_test(NAME core.ui.as2.unit COMMAND test_ui1 --test-suite=ui-avm1-unit)
 add_test(NAME core.ui.as2 COMMAND test_ui1 --test-suite=ui-avm1)
 set_tests_properties(core.ui.as2 PROPERTIES SKIP_RETURN_CODE 77)
