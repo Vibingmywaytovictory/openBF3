@@ -206,6 +206,17 @@ int cmd_movie(const std::shared_ptr<Install> &p_install, const std::string &p_na
 				font.c_str(), double(t.height), t.color.r, t.color.g, t.color.b, t.color.a, t.align, double(t.bounds.x_min), double(t.bounds.y_min),
 				double(t.bounds.x_max), double(t.bounds.y_max), t.flags, t.variable.c_str(), t.initial_text.substr(0, 60).c_str());
 	}
+	for (const SwfShape &s : m.shapes) {
+		std::printf("shape #%u bounds (%g, %g)-(%g, %g), %zu fills:", s.id, double(s.bounds.x_min),
+				double(s.bounds.y_min), double(s.bounds.x_max), double(s.bounds.y_max), s.fills.size());
+		for (const SwfFillStyle &f : s.fills) {
+			std::printf(" %s", swf_fill_kind_name(f.kind));
+			if (f.bitmap_id != 0) {
+				std::printf(" #%u at %s", f.bitmap_id, mat(f.matrix).c_str());
+			}
+		}
+		std::printf("\n");
+	}
 	for (const SwfScalingGrid &g : m.scaling_grids) {
 		std::printf("scaling grid #%u (%g, %g)-(%g, %g)\n", g.id, double(g.splitter.x_min), double(g.splitter.y_min), double(g.splitter.x_max),
 				double(g.splitter.y_max));
