@@ -13,6 +13,7 @@
 #include "ui_retail_support.h"
 
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <string>
 #include <string_view>
@@ -804,6 +805,52 @@ TEST_SUITE("ui-widgets") {
 		REQUIRE(b.events.size() == 4u);
 		CHECK(b.events[3].index == 4);
 		CHECK(b.events[3].query == "UIWidgetEventID_OnComReleased");
+	}
+
+	TEST_CASE("widgets: console button bar stays hidden on PC and lays out pushed buttons") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		ScreenRig b;
+		open_screen(*r, b, "ui/flow/screen/ingamemenump");
+		const std::string path = std::string(kHudScreenInstance) + ".ConsoleButtonBar_01";
+		const HudWidgetState *w = b.s.hud->widget(path);
+		REQUIRE(w != nullptr);
+		CHECK(w->class_name == "Widget.Button.ConsoleButtonBar");
+		CHECK(w->initialized);
+		const As2Clip bar = b.clip("ConsoleButtonBar_01");
+		CHECK_FALSE(bar.visible());
+		CHECK_FALSE(b.clip("ConsoleButtonBar_01.layoutGuide").visible());
+		b.s.hud->focus_widget(path);
+		b.s.hud->input_concept(int32_t(UiInputConcept::Activate), true);
+		CHECK(b.events.empty());
+		REQUIRE(b.s.hud->deliver_in_event("ConsoleButtonBar_01", "UIWidgetEventID_Update",
+				As2Value::of("ID_M_SELECT,IDB_Rdown,false,0;ID_M_BACK,IDB_Rright,true,0")));
+		const As2Clip select = b.clip("ConsoleButtonBar_01.button_IDB_Rdown");
+		const As2Clip back = b.clip("ConsoleButtonBar_01.button_IDB_Rright");
+		REQUIRE(select.exists());
+		REQUIRE(back.exists());
+		CHECK_FALSE(bar.visible());
+		CHECK(select.x() == 0.0f);
+		const As2Clip icon = select.child("btnIcon");
+		const As2Clip label = select.child("btnLabel");
+		CHECK(back.x() == doctest::Approx(icon.width() + 5.0f + label.text_width() + 15.0f));
+		CHECK(label.x() == doctest::Approx(std::floor(icon.width() + 0.5f)));
+		CHECK(label.text() == select.child("btnLabelBg").text());
+		CHECK(back.alpha() == doctest::Approx(25.0));
+		b.s.hud->input_concept(int32_t(UiInputConcept::Activate), true);
+		REQUIRE(b.events.size() == 1u);
+		CHECK(b.events[0].index == 0);
+		CHECK(b.events[0].param.to_string() == "ID_M_SELECT");
+		b.s.hud->input_concept(int32_t(UiInputConcept::Deactivate), true);
+		CHECK(b.events.size() == 1u);
+		REQUIRE(b.s.hud->deliver_in_event("ConsoleButtonBar_01", "UIWidgetEventID_Show"));
+		CHECK(bar.visible());
+		REQUIRE(b.s.hud->deliver_in_event("ConsoleButtonBar_01", "UIWidgetEventID_Hide"));
+		CHECK_FALSE(bar.visible());
+		CHECK(b.s.hud->stats().as2.missing_paths == 0);
+		std::printf("ui.widgets console button bar: SELECT '%s' at 0, BACK at %.1f\n", label.text().c_str(), back.x());
 	}
 
 	TEST_CASE("widgets: install unchanged") {
