@@ -893,6 +893,11 @@ add_test(NAME ui.hud.tdm.install COMMAND test_ui_hud_tdm --test-suite=ui-hud-tdm
 set_tests_properties(ui.hud.tdm.unit PROPERTIES TIMEOUT 120)
 set_tests_properties(ui.hud.tdm.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 
+openbf3_test(test_ui_flow_session test_main.cpp ui_flow_session_tests.cpp test_support.h)
+target_link_libraries(test_ui_flow_session PRIVATE bf3_host)
+add_test(NAME ui.flow.session COMMAND test_ui_flow_session --test-suite=ui-flow-session)
+set_tests_properties(ui.flow.session PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+
 openbf3_test(test_m2b_gx test_main.cpp m2b_gx_tests.cpp test_support.h ${CMAKE_SOURCE_DIR}/src/bf3_godot/src/tdm_flow.cpp
     ${CMAKE_SOURCE_DIR}/src/bf3_godot/src/m2b_check_rows.cpp)
 target_link_libraries(test_m2b_gx PRIVATE bf3_host bf3_anim bf3_fx bf3_render)

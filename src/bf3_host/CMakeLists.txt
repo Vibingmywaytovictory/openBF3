@@ -145,3 +145,8 @@ target_sources(bf3_host PRIVATE
 target_sources(bf3_host PRIVATE
     src/hud_feed_tdm.cpp
 )
+
+target_sources(bf3_host PRIVATE
+    include/bf3/host/ui_flow_session.h
+    src/ui_flow_session.cpp
+)
