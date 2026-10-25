@@ -130,27 +130,8 @@ void row(const char *p_name, const std::string &p_detail) {
 	std::fflush(stdout);
 }
 
-const TextDatabase &text_db(Retail &r_r) {
-	static std::unique_ptr<TextDatabase> db;
-	if (db == nullptr) {
-		Result<TextDatabase> t = open_text_database(r_r.mount->install);
-		REQUIRE_MESSAGE(t.ok(), (t.ok() ? std::string() : t.error().message));
-		db = std::make_unique<TextDatabase>(std::move(*t));
-	}
-	return *db;
-}
-
 HudClientState text_client(const TextDatabase &p_db) {
-	HudClientState c = test_client();
-	c.localise_hash = [&p_db](uint32_t p_hash) {
-		const std::optional<std::string_view> t = p_db.find(p_hash);
-		return t ? std::string(*t) : std::string();
-	};
-	c.translate = [&p_db](std::string_view p_sid) -> std::optional<std::string> {
-		const std::optional<std::string_view> t = p_db.find_sid(p_sid);
-		return t ? std::optional<std::string>(std::string(*t)) : std::nullopt;
-	};
-	return c;
+	return ui_retail::retail_text_client(p_db, test_client());
 }
 
 void set_player(HudModel &r_m, uint8_t p_player, int8_t p_team, std::string_view p_name) {
@@ -1546,7 +1527,7 @@ TEST_SUITE("ui-hud-screen") {
 		CHECK(kill.short_seconds == 1.0f);
 		CHECK(kill.row_type == "Kill");
 		CHECK(data.score_aggregate_time == 8.0f);
-		const TextDatabase &db = text_db(*r);
+		const TextDatabase &db = ui_retail::retail_text_db(*r);
 		CHECK(db.find(kHudKillWeaponFormatHash) == kHudKillWeaponFormat);
 		const uint32_t weapon = text_hash("ID_P_WNAME_M16A4");
 		const std::optional<std::string_view> weapon_name = db.find(weapon);
@@ -1691,7 +1672,7 @@ TEST_SUITE("ui-hud-screen") {
 		if (r == nullptr) {
 			return;
 		}
-		const TextDatabase &db = text_db(*r);
+		const TextDatabase &db = ui_retail::retail_text_db(*r);
 		HudMessageComp comp(message_data(*r));
 		HudClientState c = text_client(db);
 		c.messages = &comp;
@@ -1730,7 +1711,7 @@ TEST_SUITE("ui-hud-screen") {
 		CHECK(info.normal_seconds == 5.0f);
 		CHECK(info.short_seconds == 1.0f);
 		CHECK(info.row_type == "LocalKill");
-		const TextDatabase &db = text_db(*r);
+		const TextDatabase &db = ui_retail::retail_text_db(*r);
 		const uint32_t weapon = text_hash("ID_P_WNAME_M16A4");
 		const std::string weapon_text = "[" + std::string(db.find(weapon).value_or("?")) + "]";
 		HudMessageComp comp(data);
@@ -1849,7 +1830,7 @@ TEST_SUITE("ui-hud-screen") {
 		CHECK(info.normal_seconds == 5.0f);
 		CHECK(info.short_seconds == 5.0f);
 		CHECK(info.row_type == "Score");
-		const TextDatabase &db = text_db(*r);
+		const TextDatabase &db = ui_retail::retail_text_db(*r);
 		CHECK(db.find_sid(kHudScoreKillSid) == "ENEMY KILLED {0:s}");
 		CHECK(db.find_sid(kHudScoreHeadshotSid) == "HEADSHOT {0:s}");
 		HudMessageComp comp(data);
@@ -1943,7 +1924,7 @@ TEST_SUITE("ui-hud-screen") {
 		}
 		const HudMessageCompData data = message_data(*r);
 		HudMessageComp comp(data);
-		HudClientState c = text_client(text_db(*r));
+		HudClientState c = text_client(ui_retail::retail_text_db(*r));
 		c.messages = &comp;
 		HudModel m = kill_model();
 		Screen s = initialized(*r, kHudMpScreenPartition, m, c);
@@ -2057,7 +2038,7 @@ TEST_SUITE("ui-hud-screen") {
 		if (r == nullptr) {
 			return;
 		}
-		const TextDatabase &db = text_db(*r);
+		const TextDatabase &db = ui_retail::retail_text_db(*r);
 		HudModel m = moment_m02();
 		Screen s = initialized(*r, kHudMpScreenPartition, m, text_client(db));
 		const std::string al = "instance1.HudAlertMessage_01";
@@ -2373,7 +2354,7 @@ TEST_SUITE("ui-hud-screen") {
 		if (r == nullptr) {
 			return;
 		}
-		Screen s = open_screen(*r, "ui/flow/screen/spawnscreenpc", text_client(text_db(*r)));
+		Screen s = open_screen(*r, "ui/flow/screen/spawnscreenpc", text_client(ui_retail::retail_text_db(*r)));
 		const auto node = std::find_if(s.asset.widgets.begin(), s.asset.widgets.end(),
 				[](const HudWidgetNode &w) { return w.instance == "Button_03"; });
 		REQUIRE(node != s.asset.widgets.end());

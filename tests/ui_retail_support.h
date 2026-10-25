@@ -8,10 +8,12 @@
 #include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/swf_scene.h"
 #include "bf3/core/ui/swf_text.h"
+#include "bf3/core/ui/text_db.h"
 #include "bf3/core/ui/ui_fonts.h"
 #include "test_support.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -84,6 +86,29 @@ inline const std::shared_ptr<bf3::core::ui::SwfMountImages> &retail_images(Retai
 		r_r.images = std::make_shared<bf3::core::ui::SwfMountImages>(std::move(*images));
 	}
 	return r_r.images;
+}
+
+inline const bf3::core::ui::TextDatabase &retail_text_db(Retail &r_r) {
+	static std::unique_ptr<bf3::core::ui::TextDatabase> db;
+	if (db == nullptr) {
+		bf3::core::Result<bf3::core::ui::TextDatabase> t = bf3::core::ui::open_text_database(r_r.mount->install);
+		REQUIRE_MESSAGE(t.ok(), (t.ok() ? std::string() : t.error().message));
+		db = std::make_unique<bf3::core::ui::TextDatabase>(std::move(*t));
+	}
+	return *db;
+}
+
+inline bf3::core::ui::HudClientState retail_text_client(
+		const bf3::core::ui::TextDatabase &p_db, bf3::core::ui::HudClientState p_client = {}) {
+	p_client.localise_hash = [&p_db](uint32_t p_hash) {
+		const std::optional<std::string_view> t = p_db.find(p_hash);
+		return t ? std::string(*t) : std::string();
+	};
+	p_client.translate = [&p_db](std::string_view p_sid) -> std::optional<std::string> {
+		const std::optional<std::string_view> t = p_db.find_sid(p_sid);
+		return t ? std::optional<std::string>(std::string(*t)) : std::nullopt;
+	};
+	return p_client;
 }
 
 struct RetailScreen {
