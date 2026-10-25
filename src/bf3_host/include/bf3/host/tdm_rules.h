@@ -39,7 +39,6 @@ struct TdmTuning {
 
 	float revive_wait_radius_m = 20.0f;
 	float revive_wait_s = 8.0f;
-	float restart_estimate_s = 60.0f;
 
 	bool revive_takes_kill = true;
 	float defib_range_m = 1.8f;

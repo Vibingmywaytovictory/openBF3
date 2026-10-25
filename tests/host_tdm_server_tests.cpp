@@ -3,6 +3,7 @@
 #include "gunplay_fixture.h"
 #include "tdm_fixture.h"
 
+#include "bf3/core/gameplay/eor_timeline.h"
 #include "bf3/core/gameplay/mode_def.h"
 #include "bf3/host/kits.h"
 #include "bf3/sim/collision_world.h"
@@ -1085,6 +1086,28 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(scoring.score("ID_SCORE_SAVIOUR") == std::optional<double>(20.0));
 		CHECK(level->shared->tdm_tuning->score_kill == 100);
 		CHECK(level->shared->tdm_tuning->score_headshot == 10);
+	}
+
+	TEST_CASE("end of round: the uiendofroundlogic timeline rides on the shared level") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		REQUIRE(level->shared->eor != nullptr);
+		const core::gameplay::EorTimeline &t = *level->shared->eor;
+		std::printf("end of round: fade %.2f s, scoreboard after %.2f s, end-of-round request after %.2f s, PreEorTime "
+					"%.2f s, EorTime %.2f s, restart "
+					"after %.2f s\n",
+				double(t.fade_s), double(t.scoreboard_delay_s), double(t.request_eor_delay_s), double(t.pre_eor_s),
+				double(t.eor_s), double(t.restart_delay_s));
+		CHECK(t.fade_s == 1.0f);
+		CHECK(t.scoreboard_delay_s == 4.0f);
+		CHECK(t.request_eor_delay_s == 9.0f);
+		CHECK(t.pre_eor_s == 12.0f);
+		CHECK(t.eor_s == 48.0f);
+		CHECK(t.restart_delay_s == 60.0f);
+		CHECK(t.pre_eor_s + t.eor_s == t.restart_delay_s);
+		CHECK(t.fade_s + t.request_eor_delay_s <= t.pre_eor_s);
 	}
 
 	TEST_CASE("round start: the data's RoundMinPlayerCount holds one peer in the pre-round; the min-players override starts it") {

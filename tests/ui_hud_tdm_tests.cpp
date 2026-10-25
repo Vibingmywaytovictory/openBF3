@@ -5,6 +5,7 @@
 #include "hud_tdm_text.h"
 
 #include "bf3/core/ebx_db.h"
+#include "bf3/core/gameplay/eor_timeline.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
@@ -32,6 +33,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ui = bf3::core::ui;
@@ -594,13 +596,44 @@ TEST_CASE("round stats: a replayed kill log gives the kill matrix, streaks, neme
 	CHECK(e.player_team_index == 1);
 	CHECK(e.in_match);
 	CHECK(!e.is_ranked);
+	CHECK(e.stage == ui::HudEorStage::None);
+
+	bf3::core::gameplay::EorTimeline timeline;
+	timeline.fade_s = 1.0f;
+	timeline.scoreboard_delay_s = 4.0f;
+	timeline.request_eor_delay_s = 9.0f;
+	timeline.pre_eor_s = 12.0f;
+	timeline.eor_s = 48.0f;
+	timeline.restart_delay_s = 60.0f;
+	in.eor = &timeline;
+	in.match.unspawn_tick = in.match.round_end_tick + 60;
+	in.match.restart_tick = in.match.unspawn_tick + 60 * 60;
+	const std::array<std::pair<double, ui::HudEorStage>, 9> stages{ { { 0.0, ui::HudEorStage::Fade },
+			{ 0.5, ui::HudEorStage::Fade }, { 1.0, ui::HudEorStage::PreEor }, { 4.5, ui::HudEorStage::PreEor },
+			{ 5.0, ui::HudEorStage::Scoreboard }, { 11.5, ui::HudEorStage::Scoreboard }, { 12.0, ui::HudEorStage::Eor },
+			{ 30.0, ui::HudEorStage::Eor }, { 59.5, ui::HudEorStage::Eor } } };
+	const std::array<double, 4> starts{ 0.0, 1.0, 5.0, 12.0 };
+	size_t stage_misses = 0;
+	for (const auto &[at, stage] : stages) {
+		in.server_tick = in.match.unspawn_tick + bf3::sim::Tick(at * 60.0);
+		host::fill_hud_tdm(in, {}, st, state, m);
+		const double since = at - starts[size_t(stage) - 1];
+		const bool hit = m.end_of_round.stage == stage && std::abs(m.end_of_round.stage_seconds - since) < 1e-4 &&
+				std::abs(m.end_of_round.time_until_level_change - (60.0 - at)) < 1e-4;
+		stage_misses += hit ? 0 : 1;
+	}
+	CHECK(stage_misses == 0);
+	in.server_tick = in.match.unspawn_tick - 1;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(m.end_of_round.stage == ui::HudEorStage::None);
+	in.eor = nullptr;
 
 	in.match.phase = net::MatchPhase::PreRound;
 	host::fill_hud_tdm(in, {}, st, state, m);
 	CHECK(state.stats.own_kills == 0);
 	CHECK(host::round_stats_kills(state.stats, 2, 1) == 0);
 	CHECK(state.bad_inputs == unknown_killers);
-	row("unit.round_stats", mismatched == 0 && state.stats.own_kills == 0,
+	row("unit.round_stats", mismatched == 0 && state.stats.own_kills == 0 && stage_misses == 0,
 			std::to_string(log.size()) + " deaths replayed, " + std::to_string(own_kills) + " own kills, " +
 					std::to_string(own_deaths) + " own deaths, streak " + std::to_string(longest) + ", nemesis " +
 					std::to_string(nemesis) + ", best def " + std::to_string(best_def));

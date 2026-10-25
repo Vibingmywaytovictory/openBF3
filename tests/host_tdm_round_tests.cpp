@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "bf3/core/gameplay/eor_timeline.h"
 #include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/thread_pool.h"
 #include "bf3/core/util/percentile.h"
@@ -652,8 +653,18 @@ TEST_SUITE("host-tdm-round") {
 			const core::gameplay::LogicGraph *graph = level->shared->logic.get();
 			size_t timeline_seen = 0;
 			std::vector<sim::logic::NativeTimelineEntry> spawn_inputs;
-			c.on_tick = [&](sim::Tick, host::GameServer &r_server, tt::ScriptedPeer *p_peer) {
+			sim::Tick unspawn_seen = 0;
+			sim::Tick restart_seen = 0;
+			sim::Tick restart_announced = 0;
+			c.on_tick = [&](sim::Tick p_tick, host::GameServer &r_server, tt::ScriptedPeer *p_peer) {
 				if (const host::TdmRules *rules = r_server.rules(); rules != nullptr) {
+					if (unspawn_seen == 0 && rules->match_state().unspawn_tick != 0) {
+						unspawn_seen = rules->match_state().unspawn_tick;
+						restart_announced = rules->match_state().restart_tick;
+					}
+					if (unspawn_seen != 0 && restart_seen == 0 && rules->phase() != net::MatchPhase::RoundOver) {
+						restart_seen = p_tick;
+					}
 					const std::span<const sim::logic::RoundNatives::NativeCoverage> cov = rules->natives().coverage();
 					coverage.assign(cov.begin(), cov.end());
 					if (!server_over && rules->phase() == net::MatchPhase::RoundOver) {
@@ -747,6 +758,17 @@ TEST_SUITE("host-tdm-round") {
 					over->kills[1], int(restarted->phase), restarted->kills[0], restarted->kills[1], peer_states.back().kills[0], peer_states.back().kills[1]);
 			CHECK(restarted->kills[0] == 0);
 			CHECK(restarted->kills[1] == 0);
+
+			REQUIRE(level->shared->eor != nullptr);
+			const sim::Tick eor_ticks =
+					sim::Tick(std::lround(double(level->shared->eor->restart_delay_s) * double(sim::kSimHz)));
+			std::printf("host.tdm.round: unspawn at %u, restart announced for %u, the restart in place at %u "
+						"(end-of-round delay %.1f s from "
+						"uiendofroundlogic)\n",
+					unspawn_seen, restart_announced, restart_seen, double(level->shared->eor->restart_delay_s));
+			CHECK(unspawn_seen != 0u);
+			CHECK(restart_announced == unspawn_seen + eor_ticks);
+			CHECK(restart_seen == restart_announced);
 		}
 	}
 	TEST_CASE("host-tdm-round: install unchanged") {

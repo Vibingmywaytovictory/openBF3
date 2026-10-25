@@ -8,6 +8,7 @@
 #include "bf3/core/level/world.h"
 #include "bf3/sim/static_world.h"
 
+#include "bf3/core/gameplay/eor_timeline.h"
 #include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/gameplay/logic_world.h"
 #include "bf3/core/gameplay/mode_def.h"
@@ -563,6 +564,11 @@ core::Status load_shared_tdm(const LevelDatabase &p_db, const SharedLoadOptions 
 	} else {
 		r_level.tdm_notes.push_back("scoring: " + scoring.error().message + " (the defaults)");
 	}
+	core::Result<gp::EorTimeline> eor = gp::read_eor_timeline(level.db());
+	if (!eor) {
+		return core::error_at("tdm", eor.error());
+	}
+	r_level.eor = std::make_shared<const gp::EorTimeline>(*eor);
 	set_immunity_abort(level, *tuning, r_level);
 	r_level.tdm_tuning = std::make_shared<const TdmTuning>(std::move(*tuning));
 	r_level.seconds_logic = seconds_since(clock);

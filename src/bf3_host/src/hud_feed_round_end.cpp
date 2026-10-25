@@ -25,6 +25,33 @@ float round_seconds(const Frame &p_frame) {
 	return float(double(std::min<sim::Tick>(end - ms.round_start_tick, kMaxAheadTicks)) / double(sim::kSimHz));
 }
 
+void feed_eor_stage(const Frame &p_frame, ui::HudEndOfRound &r_eor) {
+	r_eor.stage = ui::HudEorStage::None;
+	r_eor.stage_seconds = 0.0f;
+	const core::gameplay::EorTimeline *t = p_frame.input.eor;
+	const sim::Tick unspawn = p_frame.input.match.unspawn_tick;
+	if (!p_frame.round_over || !p_frame.match || t == nullptr || unspawn == 0 || p_frame.now_tick < unspawn) {
+		return;
+	}
+	const double since = double(std::min<sim::Tick>(p_frame.now_tick - unspawn, kMaxAheadTicks)) / double(sim::kSimHz);
+	const double pre_eor = double(t->fade_s);
+	const double scoreboard = pre_eor + double(t->scoreboard_delay_s);
+	const double eor = std::max(double(t->pre_eor_s), pre_eor + double(t->request_eor_delay_s));
+	if (since < pre_eor) {
+		r_eor.stage = ui::HudEorStage::Fade;
+		r_eor.stage_seconds = float(since);
+	} else if (since < scoreboard) {
+		r_eor.stage = ui::HudEorStage::PreEor;
+		r_eor.stage_seconds = float(since - pre_eor);
+	} else if (since < eor) {
+		r_eor.stage = ui::HudEorStage::Scoreboard;
+		r_eor.stage_seconds = float(since - scoreboard);
+	} else {
+		r_eor.stage = ui::HudEorStage::Eor;
+		r_eor.stage_seconds = float(since - eor);
+	}
+}
+
 void feed_eor_stats(Frame &r_frame, ui::HudEndOfRound &r_eor) {
 	const RoundStats &st = r_frame.state.stats;
 	const ui::HudModel &model = r_frame.model;
@@ -119,6 +146,7 @@ void feed_round_end(Frame &r_frame) {
 	eor.seconds_to_next_round = match && in.match.restart_tick != 0
 			? seconds_until(now_tick, in.match.restart_tick, state.bad_inputs)
 			: 0.0f;
+	feed_eor_stage(r_frame, eor);
 	feed_eor_stats(r_frame, eor);
 }
 

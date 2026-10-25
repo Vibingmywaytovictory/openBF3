@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/core/gameplay/eor_timeline.h"
 #include "bf3/core/gameplay/weapon_def.h"
 #include "bf3/core/result.h"
 #include "bf3/core/ui/hud_icons.h"
@@ -115,6 +116,7 @@ struct HudFeedInput {
 	HudKillCardSource kill_card_source;
 	int32_t score_kill = 0;
 	int32_t score_headshot = 0;
+	const core::gameplay::EorTimeline *eor = nullptr;
 };
 
 struct HudFeedState {

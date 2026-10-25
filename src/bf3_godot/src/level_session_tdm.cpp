@@ -615,10 +615,12 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		in.scoreboard_held = m.scoreboard_held;
 		in.kits = r_game.gunplay != nullptr ? &r_game.gunplay->kits : nullptr;
 		in.kill_card_source = m.kill_card_source;
-		if (const std::shared_ptr<const host::SharedLevel> level = shared_level(); level != nullptr && level->tdm_tuning != nullptr) {
+		const std::shared_ptr<const host::SharedLevel> level = shared_level();
+		if (level != nullptr && level->tdm_tuning != nullptr) {
 			in.score_kill = level->tdm_tuning->score_kill;
 			in.score_headshot = level->tdm_tuning->score_headshot;
 		}
+		in.eor = level != nullptr ? level->eor.get() : nullptr;
 		host::fill_hud_tdm(in, r_game.events, r_game.hud_static, m.tdm_state, r_game.hud_model);
 		if (!m.options.deploy_screen) {
 			r_game.hud_model.spawn_screen.visible = false;

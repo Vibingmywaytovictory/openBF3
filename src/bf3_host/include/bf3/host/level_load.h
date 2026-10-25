@@ -26,6 +26,7 @@ class World;
 namespace bf3::core::gameplay {
 class LogicGraph;
 struct ScoringTable;
+struct EorTimeline;
 }
 namespace bf3::sim::logic {
 struct RoundNativeParams;
@@ -107,6 +108,7 @@ struct SharedLevel {
 	std::shared_ptr<const sim::logic::RoundNativeParams> logic_natives;
 	std::shared_ptr<const TdmTuning> tdm_tuning;
 	std::shared_ptr<const core::gameplay::ScoringTable> scoring;
+	std::shared_ptr<const core::gameplay::EorTimeline> eor;
 	std::vector<std::string> tdm_notes;
 };
 

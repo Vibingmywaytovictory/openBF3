@@ -1,5 +1,6 @@
 #include "bf3/host/tdm_rules.h"
 
+#include "bf3/core/gameplay/eor_timeline.h"
 #include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/gameplay/soldier_def.h"
 #include "bf3/core/util/finite.h"
@@ -177,7 +178,6 @@ KeyOutcome parse_immunity_abort_map(const Key &, std::string_view p_value, TdmTu
 const Key kKeys[] = {
 	{ "revive_wait_radius_m", KeyKind::Float, 0.0f, 1000.0f, BF3_TDM_FIELD(revive_wait_radius_m) },
 	{ "revive_wait_s", KeyKind::Float, 0.0f, 3600.0f, BF3_TDM_FIELD(revive_wait_s) },
-	{ "restart_estimate_s", KeyKind::Float, 0.0f, 3600.0f, BF3_TDM_FIELD(restart_estimate_s) },
 	{ "revive_takes_kill", KeyKind::Bool, 0, 0, BF3_TDM_FIELD(revive_takes_kill) },
 	{ "defib_range_m", KeyKind::Float, 0.0f, 100.0f, BF3_TDM_FIELD(defib_range_m) },
 	{ "corpse_up_m", KeyKind::Float, -10.0f, 10.0f, BF3_TDM_FIELD(corpse_up_m) },
@@ -291,6 +291,7 @@ struct TdmRules::Impl {
 	std::shared_ptr<const BotLevel> bots;
 	std::shared_ptr<const TdmTuning> tuning_holder;
 	const TdmTuning *tuning = nullptr;
+	std::shared_ptr<const core::gameplay::EorTimeline> eor;
 	sim::MotorParams motor;
 	MatchRulesConfig config;
 	uint64_t match_seed = 0;
@@ -462,6 +463,9 @@ core::Result<std::unique_ptr<TdmRules>> TdmRules::create(const SharedLevel &p_le
 	if (p_level.gunplay == nullptr) {
 		return core::make_error("tdm rules: the level has no gunplay tables (SharedLoadOptions::gunplay)");
 	}
+	if (p_level.eor == nullptr) {
+		return core::make_error("tdm rules: the level has no end-of-round timeline (SharedLoadOptions::tdm)");
+	}
 	if (p_max_slots == 0 || p_max_slots > kMaxRuleSlots) {
 		return core::make_error("tdm rules: " + std::to_string(p_max_slots) + " slots (1.." + std::to_string(kMaxRuleSlots) + ")");
 	}
@@ -469,6 +473,7 @@ core::Result<std::unique_ptr<TdmRules>> TdmRules::create(const SharedLevel &p_le
 	Impl &m = *rules->impl_;
 	m.graph = p_level.logic;
 	m.gunplay = p_level.gunplay;
+	m.eor = p_level.eor;
 	m.bots = std::move(p_bots);
 	m.tuning_holder = p_level.tdm_tuning != nullptr ? p_level.tdm_tuning : std::make_shared<const TdmTuning>();
 	m.tuning = m.tuning_holder.get();
@@ -832,7 +837,7 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		}
 		if (m.natives->take_unspawn_all()) {
 			m.state.unspawn_tick = p_tick;
-			m.state.restart_tick = p_tick + ticks_of(m.tuning->restart_estimate_s);
+			m.state.restart_tick = p_tick + ticks_of(m.eor->restart_delay_s);
 			for (size_t i = 0; i < m.slots.size(); ++i) {
 				Impl::Slot &s = m.slots[i];
 				if (s.connected && i < net::kMaxPlayerRows) {
