@@ -6,8 +6,12 @@
 #include <godot_cpp/classes/input_event.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <godot_cpp/classes/global_constants.hpp>
+
 #include <array>
 #include <cstdint>
+#include <string>
+#include <string_view>
 
 namespace bf3::godot_side {
 
@@ -28,6 +32,9 @@ enum class InputAction : uint8_t {
 inline constexpr size_t kInputActionCount = size_t(InputAction::Count);
 
 const char *input_action_name(InputAction p_action);
+
+std::string ui_idk_of_key(godot::Key p_key);
+std::string_view ui_idb_of_button(godot::MouseButton p_button);
 
 struct ViewAngles {
 	float yaw = 0.0f;

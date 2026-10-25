@@ -38,6 +38,19 @@ void NativeScreensCheck::advance(double p_now_s) {
 			}
 			++at;
 		}
+		if (steps_[next_].absent) {
+			if (at != lines_.size()) {
+				failure_ = "'" + std::string(want) + "' within " + std::to_string(kNativeScreensCheckHoldSeconds) +
+						" s of the step before";
+				return;
+			}
+			if (p_now_s - steps_[next_ - 1].seen_s < kNativeScreensCheckHoldSeconds) {
+				return;
+			}
+			steps_[next_].seen_s = p_now_s;
+			++next_;
+			continue;
+		}
 		if (at == lines_.size()) {
 			return;
 		}
@@ -47,7 +60,7 @@ void NativeScreensCheck::advance(double p_now_s) {
 	}
 }
 
-bool NativeScreensCheck::frame(Bf3UiScreens &r_screens, NativeFlow &r_flow, double p_now_s) {
+bool NativeScreensCheck::frame(Bf3UiScreens &r_screens, NativeFlow &r_flow, double p_now_s, const PressKey &p_press) {
 	if (done_) {
 		return true;
 	}
@@ -58,13 +71,13 @@ bool NativeScreensCheck::frame(Bf3UiScreens &r_screens, NativeFlow &r_flow, doub
 	actions_ = r_flow.actions();
 	collect(r_screens, r_flow, p_now_s);
 	advance(p_now_s);
-	if (next_ < steps_.size() && next_ > 0 && steps_[next_].press && !steps_[next_].sent &&
+	if (next_ < steps_.size() && next_ > 0 && steps_[next_].press != godot::KEY_NONE && !steps_[next_].sent &&
 			p_now_s - steps_[next_ - 1].seen_s >= kNativeScreensCheckHoldSeconds) {
 		Step &s = steps_[next_];
 		s.sent = true;
-		take("check presses " + std::string(bf3::core::ui::ui_input_concept_name(*s.press)), p_now_s);
-		r_screens.input_concept(int32_t(*s.press), true);
-		r_screens.input_concept(int32_t(*s.press), false);
+		take("check presses " + std::string(s.key_name), p_now_s);
+		p_press(s.press, true);
+		p_press(s.press, false);
 		collect(r_screens, r_flow, p_now_s);
 		advance(p_now_s);
 	}
@@ -90,10 +103,8 @@ std::string NativeScreensCheck::report() const {
 	std::string out = "[ui] native screens check: flow loaded in " + std::to_string(load_seconds_) + " s, " +
 			std::to_string(actions_) + " flow actions\n";
 	for (const Step &s : steps_) {
-		out += "[ui]   " +
-				std::string(
-						s.press ? "press " + std::string(bf3::core::ui::ui_input_concept_name(*s.press)) + ", " : "") +
-				s.line + ": " +
+		out += "[ui]   " + std::string(s.key_name != nullptr ? "press " + std::string(s.key_name) + ", " : "") +
+				(s.absent ? "no " : "") + s.line + ": " +
 				(s.seen_s >= 0.0 ? "at " + std::to_string(s.seen_s - start_s_) + " s" : std::string("not seen")) + "\n";
 	}
 	if (!passed_) {

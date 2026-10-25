@@ -25,6 +25,9 @@
 
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/canvas_layer.hpp>
+#include <godot_cpp/classes/input_event_key.hpp>
+#include <godot_cpp/classes/input_event_mouse_button.hpp>
+#include <godot_cpp/classes/input_event_mouse_motion.hpp>
 #include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/viewport.hpp>
@@ -247,6 +250,48 @@ void step_native_screens(GameState &r_game, TdmState &r_m, const host::Presentat
 	}
 }
 
+}
+
+void Bf3LevelSession::tdm_ui_input(const Ref<InputEvent> &p_event) {
+	if (!game_ || !game_->tdm) {
+		return;
+	}
+	TdmState &m = *game_->tdm;
+	if (m.ui_screens == nullptr || m.native_flow == nullptr || !m.native_following) {
+		return;
+	}
+	const bf3::core::ui::UiInputRouter &router = m.native_flow->router();
+	if (const InputEventKey *k = Object::cast_to<InputEventKey>(p_event.ptr())) {
+		if (k->is_echo()) {
+			return;
+		}
+		const Key code = k->get_physical_keycode() != KEY_NONE ? k->get_physical_keycode() : k->get_keycode();
+		const std::string idk = ui_idk_of_key(code);
+		if (idk.empty()) {
+			return;
+		}
+		m.ui_screens->key(bf3::core::ui::ui_flash_key_code(idk), k->is_pressed());
+		for (const bf3::core::ui::UiInputConcept c : router.concepts_of_key(idk)) {
+			m.ui_screens->input_concept(int32_t(c), k->is_pressed());
+		}
+	} else if (const InputEventMouseButton *mb = Object::cast_to<InputEventMouseButton>(p_event.ptr())) {
+		const MouseButton b = mb->get_button_index();
+		if (b == MOUSE_BUTTON_WHEEL_UP || b == MOUSE_BUTTON_WHEEL_DOWN) {
+			if (mb->is_pressed()) {
+				m.ui_screens->mouse_wheel(mb->get_position(),
+						b == MOUSE_BUTTON_WHEEL_UP ? kUiWheelLinesPerNotch : -kUiWheelLinesPerNotch);
+			}
+			return;
+		}
+		m.ui_screens->mouse_button(mb->get_position(), int32_t(b), mb->is_pressed());
+		if (const std::string_view idb = ui_idb_of_button(b); !idb.empty()) {
+			for (const bf3::core::ui::UiInputConcept c : router.concepts_of_mouse(idb)) {
+				m.ui_screens->input_concept(int32_t(c), mb->is_pressed());
+			}
+		}
+	} else if (const InputEventMouseMotion *mm = Object::cast_to<InputEventMouseMotion>(p_event.ptr())) {
+		m.ui_screens->mouse_move(mm->get_position());
+	}
 }
 
 void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
@@ -590,7 +635,15 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			m.native_check = std::unique_ptr<NativeScreensCheck, void (*)(NativeScreensCheck *)>(
 					new NativeScreensCheck(), &delete_part<NativeScreensCheck>);
 		}
-		if (m.native_check->frame(*m.ui_screens, *m.native_flow, now_s)) {
+		const auto press = [this](Key p_key, bool p_pressed) {
+			Ref<InputEventKey> k;
+			k.instantiate();
+			k->set_keycode(p_key);
+			k->set_physical_keycode(p_key);
+			k->set_pressed(p_pressed);
+			tdm_ui_input(k);
+		};
+		if (m.native_check->frame(*m.ui_screens, *m.native_flow, now_s, press)) {
 			m.finished = true;
 			UtilityFunctions::print(to_godot(m.native_check->report()));
 			finish(m.native_check->exit_code());

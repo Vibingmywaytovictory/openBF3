@@ -710,4 +710,81 @@ bool InputMapper::tdm_handle_event(const Ref<InputEvent> &p_event) {
 	return false;
 }
 
+std::string ui_idk_of_key(godot::Key p_key) {
+	const int64_t k = int64_t(p_key);
+	if (k >= int64_t(godot::KEY_A) && k <= int64_t(godot::KEY_Z)) {
+		return "IDK_" + std::string(1, char('A' + (k - int64_t(godot::KEY_A))));
+	}
+	if (k >= int64_t(godot::KEY_0) && k <= int64_t(godot::KEY_9)) {
+		return "IDK_" + std::string(1, char('0' + (k - int64_t(godot::KEY_0))));
+	}
+	if (k >= int64_t(godot::KEY_F1) && k <= int64_t(godot::KEY_F15)) {
+		return "IDK_F" + std::to_string(1 + (k - int64_t(godot::KEY_F1)));
+	}
+	if (k >= int64_t(godot::KEY_KP_0) && k <= int64_t(godot::KEY_KP_9)) {
+		return "IDK_Numpad" + std::to_string(k - int64_t(godot::KEY_KP_0));
+	}
+	struct Row {
+		godot::Key key;
+		const char *idk;
+	};
+	static constexpr Row kRows[] = {
+		{ godot::KEY_BACKSPACE, "IDK_Backspace" },
+		{ godot::KEY_TAB, "IDK_Tab" },
+		{ godot::KEY_ENTER, "IDK_Enter" },
+		{ godot::KEY_KP_ENTER, "IDK_NumpadEnter" },
+		{ godot::KEY_SHIFT, "IDK_LeftShift" },
+		{ godot::KEY_CTRL, "IDK_LeftCtrl" },
+		{ godot::KEY_ALT, "IDK_LeftAlt" },
+		{ godot::KEY_PAUSE, "IDK_Pause" },
+		{ godot::KEY_CAPSLOCK, "IDK_CapsLock" },
+		{ godot::KEY_ESCAPE, "IDK_Escape" },
+		{ godot::KEY_SPACE, "IDK_Space" },
+		{ godot::KEY_PAGEUP, "IDK_PageUp" },
+		{ godot::KEY_PAGEDOWN, "IDK_PageDown" },
+		{ godot::KEY_END, "IDK_End" },
+		{ godot::KEY_HOME, "IDK_Home" },
+		{ godot::KEY_LEFT, "IDK_ArrowLeft" },
+		{ godot::KEY_UP, "IDK_ArrowUp" },
+		{ godot::KEY_RIGHT, "IDK_ArrowRight" },
+		{ godot::KEY_DOWN, "IDK_ArrowDown" },
+		{ godot::KEY_INSERT, "IDK_Insert" },
+		{ godot::KEY_DELETE, "IDK_Delete" },
+		{ godot::KEY_KP_MULTIPLY, "IDK_Multiply" },
+		{ godot::KEY_KP_ADD, "IDK_Add" },
+		{ godot::KEY_KP_SUBTRACT, "IDK_Subtract" },
+		{ godot::KEY_KP_PERIOD, "IDK_Decimal" },
+		{ godot::KEY_KP_DIVIDE, "IDK_Divide" },
+		{ godot::KEY_SEMICOLON, "IDK_Semicolon" },
+		{ godot::KEY_EQUAL, "IDK_Equals" },
+		{ godot::KEY_COMMA, "IDK_Comma" },
+		{ godot::KEY_MINUS, "IDK_Minus" },
+		{ godot::KEY_PERIOD, "IDK_Period" },
+		{ godot::KEY_SLASH, "IDK_Slash" },
+		{ godot::KEY_QUOTELEFT, "IDK_Grave" },
+		{ godot::KEY_BRACKETLEFT, "IDK_LeftBracket" },
+		{ godot::KEY_BACKSLASH, "IDK_Backslash" },
+		{ godot::KEY_BRACKETRIGHT, "IDK_RightBracket" },
+		{ godot::KEY_APOSTROPHE, "IDK_Apostrophe" },
+	};
+	for (const Row &r : kRows) {
+		if (r.key == p_key) {
+			return r.idk;
+		}
+	}
+	return {};
+}
+
+std::string_view ui_idb_of_button(godot::MouseButton p_button) {
+	switch (p_button) {
+		case godot::MOUSE_BUTTON_LEFT:
+			return "IDB_Button_0";
+		case godot::MOUSE_BUTTON_RIGHT:
+			return "IDB_Button_1";
+		case godot::MOUSE_BUTTON_MIDDLE:
+			return "IDB_Button_2";
+		default:
+			return {};
+	}
+}
 }

@@ -1,10 +1,10 @@
 #pragma once
 
-#include "bf3/core/ui/ui_input.h"
+#include <godot_cpp/classes/global_constants.hpp>
 
 #include <cstddef>
 #include <cstdint>
-#include <optional>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -19,15 +19,18 @@ inline constexpr size_t kNativeScreensCheckMaxLines = 8192;
 
 class NativeScreensCheck {
 public:
-	bool frame(Bf3UiScreens &r_screens, NativeFlow &r_flow, double p_now_s);
+	using PressKey = std::function<void(godot::Key, bool)>;
+
+	bool frame(Bf3UiScreens &r_screens, NativeFlow &r_flow, double p_now_s, const PressKey &p_press);
 	std::string report() const;
 	int exit_code() const { return passed_ ? 0 : 1; }
 
 private:
-	using Concept = bf3::core::ui::UiInputConcept;
 	struct Step {
 		const char *line;
-		std::optional<Concept> press;
+		godot::Key press = godot::KEY_NONE;
+		const char *key_name = nullptr;
+		bool absent = false;
 		bool sent = false;
 		double seen_s = -1.0;
 	};
@@ -35,10 +38,11 @@ private:
 	void collect(Bf3UiScreens &r_screens, NativeFlow &r_flow, double p_now_s);
 	void advance(double p_now_s);
 
-	std::vector<Step> steps_{ { "screens entered spawnscreenpc", std::nullopt },
-		{ "flow action Spawn(", Concept::Activate }, { "screens exited spawnscreenpc", std::nullopt },
-		{ "screens entered hudmpscreen", std::nullopt }, { "screens entered ingamemenump", Concept::Menu },
-		{ "screens exited ingamemenump", Concept::Deactivate }, { "screens entered hudmpscreen", std::nullopt } };
+	std::vector<Step> steps_{ { "screens entered spawnscreenpc" }, { "flow action Spawn(", godot::KEY_ENTER, "Enter" },
+		{ "screens exited spawnscreenpc" }, { "screens entered hudmpscreen" },
+		{ "screens entered ingamemenump", godot::KEY_ESCAPE, "Escape" },
+		{ "screens exited ingamemenump", godot::KEY_ESCAPE, "Escape" }, { "screens entered hudmpscreen" },
+		{ "screens open ingamemenump", godot::KEY_NONE, nullptr, true } };
 	size_t next_ = 0;
 	size_t cursor_ = 0;
 	double start_s_ = -1.0;

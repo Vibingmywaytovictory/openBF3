@@ -248,6 +248,7 @@ private:
 	void tdm_presented(uint64_t p_now_ns);
 	bool tdm_frame(uint64_t p_now_ns, double p_delta, godot::Camera3D *p_camera, bool p_free_camera);
 	void tdm_shutdown();
+	void tdm_ui_input(const godot::Ref<godot::InputEvent> &p_event);
 	bool tdm_join_ready() const;
 	std::unique_ptr<Game, GameDeleter> game_;
 };

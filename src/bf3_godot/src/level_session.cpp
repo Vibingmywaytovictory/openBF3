@@ -829,6 +829,7 @@ void Bf3LevelSession::_unhandled_input(const Ref<InputEvent> &p_event) {
 		return;
 	}
 	mapper_.handle_event(p_event);
+	tdm_ui_input(p_event);
 
 	if (const InputEventKey *k = Object::cast_to<InputEventKey>(p_event.ptr())) {
 		if (k->is_pressed() && !k->is_echo() && k->get_keycode() == KEY_F7 && nav_draw_.uploaded()) {
