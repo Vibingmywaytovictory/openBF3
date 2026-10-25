@@ -3,6 +3,7 @@
 #include "ui_ebx.h"
 
 #include "bf3/core/ui/swf_hit.h"
+#include "bf3/core/ui/ui_direct_access.h"
 #include "bf3/core/util/text.h"
 
 #include <algorithm>
@@ -562,6 +563,14 @@ void HudWidgetHost::set_enter_frame(bool p_on) {
 	}
 }
 
+std::optional<uint32_t> HudWidgetHost::register_mc(const As2Clip &p_clip, const std::vector<As2Value> &p_args) {
+	return screen_.direct_access().register_mc(p_clip.path(), p_args);
+}
+
+void HudWidgetHost::unregister_mc(uint32_t p_id) {
+	screen_.direct_access().unregister_mc(p_id);
+}
+
 void HudWidgetHost::exit_complete() {
 	HudWidgetState *w = screen_.owner_of(path_);
 	if (w != nullptr && w->exiting) {
@@ -662,6 +671,90 @@ float HudWidgetHost::ymouse(const As2Clip &p_clip) const {
 	return p ? p->y : 0.0f;
 }
 
+struct HudScreen::DirectAccessTarget : UiDirectAccessTarget {
+	HudScreen &screen;
+	explicit DirectAccessTarget(HudScreen &r_screen) : screen(r_screen) {}
+
+	void direct_access(const UiDirectAccessApply &p_apply) override {
+		const As2Clip c = screen.clip(p_apply.clip);
+		const As2Value &v = p_apply.value;
+		const float f = float(v.to_number());
+		switch (p_apply.op) {
+			case UiDirectAccessOp::Text:
+				c.set_text(v.to_string());
+				return;
+			case UiDirectAccessOp::GotoAndStop:
+			case UiDirectAccessOp::GotoAndPlay: {
+				const bool play = p_apply.op == UiDirectAccessOp::GotoAndPlay;
+				if (v.kind == As2Value::Kind::Number) {
+					play ? c.goto_and_play(int32_t(v.number)) : c.goto_and_stop(int32_t(v.number));
+				} else {
+					play ? c.goto_and_play(v.to_string()) : c.goto_and_stop(v.to_string());
+				}
+				return;
+			}
+			case UiDirectAccessOp::Visible:
+				c.set_visible(v.truthy());
+				return;
+			case UiDirectAccessOp::Scale:
+				c.set_xscale(f);
+				c.set_yscale(f);
+				return;
+			case UiDirectAccessOp::ScaleX:
+				c.set_xscale(f);
+				return;
+			case UiDirectAccessOp::ScaleY:
+				c.set_yscale(f);
+				return;
+			case UiDirectAccessOp::Color:
+				c.set_rgb(uint32_t(int64_t(v.to_number())) & 0xffffffu);
+				return;
+			case UiDirectAccessOp::X:
+				c.set_x(f);
+				return;
+			case UiDirectAccessOp::Y:
+				c.set_y(f);
+				return;
+			case UiDirectAccessOp::BumpX:
+			case UiDirectAccessOp::BumpY:
+			case UiDirectAccessOp::Rotation:
+			case UiDirectAccessOp::Invoke:
+			case UiDirectAccessOp::Array:
+			case UiDirectAccessOp::Member:
+			case UiDirectAccessOp::ArrayLengthInvoke:
+				break;
+		}
+		if (HudWidgetState *w = screen.deepest_owner_of(p_apply.clip)) {
+			w->controller->direct_access(*w->host, p_apply);
+		}
+	}
+};
+
+HudScreen::HudScreen() = default;
+
+UiDirectAccess &HudScreen::direct_access() {
+	if (direct_ == nullptr) {
+		direct_target_ = std::make_unique<DirectAccessTarget>(*this);
+		direct_ = std::make_unique<UiDirectAccess>(*direct_target_);
+	}
+	return *direct_;
+}
+
+HudWidgetState *HudScreen::deepest_owner_of(std::string_view p_path) {
+	HudWidgetState *owner = nullptr;
+	for (const std::unique_ptr<HudWidgetState> &w : widgets_) {
+		const bool under = p_path == w->path ||
+				(p_path.size() > w->path.size() && p_path.starts_with(w->path) && p_path[w->path.size()] == '.');
+		if (w->retired || !under) {
+			continue;
+		}
+		if (owner == nullptr || w->path.size() > owner->path.size()) {
+			owner = w.get();
+		}
+	}
+	return owner;
+}
+
 HudScreen::~HudScreen() {
 	if (scene_ != nullptr) {
 		scene_->set_frame_script_handler({});
@@ -687,6 +780,9 @@ void HudScreen::retire(std::string_view p_path) {
 	intervals_.erase(
 			std::remove_if(intervals_.begin(), intervals_.end(), [&](const Interval &i) { return under(i.path); }),
 			intervals_.end());
+	if (direct_ != nullptr) {
+		direct_->unregister_under(p_path);
+	}
 	if (under(hover_)) {
 		hover_.clear();
 	}

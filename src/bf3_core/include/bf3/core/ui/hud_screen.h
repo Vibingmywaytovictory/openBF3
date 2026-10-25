@@ -245,6 +245,8 @@ struct HudScreenStats {
 };
 
 class HudScreen;
+class UiDirectAccess;
+struct UiDirectAccessApply;
 
 struct HudFrameScript {
 	std::string path;
@@ -275,6 +277,8 @@ public:
 	void clear_interval(uint32_t p_id);
 	void set_enter_frame(bool p_on);
 	void exit_complete();
+	std::optional<uint32_t> register_mc(const As2Clip &p_clip, const std::vector<As2Value> &p_args);
+	void unregister_mc(uint32_t p_id);
 	As2Clip attach_movie(const As2Clip &p_parent, std::string_view p_linkage, std::string_view p_name, int32_t p_depth);
 	As2Clip create_empty_movie_clip(const As2Clip &p_parent, std::string_view p_name, int32_t p_depth);
 	void remove_movie_clip(const As2Clip &p_clip);
@@ -359,6 +363,7 @@ public:
 	virtual void interval(HudWidgetHost &, uint32_t) {}
 	virtual void enter_frame(HudWidgetHost &) {}
 	virtual bool begin_exit(HudWidgetHost &) { return true; }
+	virtual void direct_access(HudWidgetHost &, const UiDirectAccessApply &) {}
 	virtual void frame_script(HudWidgetHost &, const HudFrameScript &) {}
 	virtual void bind(const HudModel &, const HudClientState &, HudData &) const {}
 	virtual bool input_concept(HudWidgetHost &, int32_t, bool) { return false; }
@@ -411,6 +416,7 @@ public:
 	bool exiting() const { return exiting_; }
 	bool exit_complete() const { return exiting_ && exits_pending_ == 0 && (exit_called_ || exits_counted_ > 0); }
 	size_t intervals() const { return intervals_.size(); }
+	UiDirectAccess &direct_access();
 	void set_event_sink(HudWidgetEventSink p_sink) { event_sink_ = std::move(p_sink); }
 	bool deliver_in_event(
 			std::string_view p_instance, std::string_view p_query, const As2Value &p_param = As2Value::of(0));
@@ -448,7 +454,7 @@ public:
 
 private:
 	friend class HudWidgetHost;
-	HudScreen() = default;
+	HudScreen();
 
 	void discover(SwfNodeId p_root);
 	void retire(std::string_view p_path);
@@ -506,6 +512,10 @@ private:
 	uint32_t exits_pending_ = 0;
 	uint32_t exits_counted_ = 0;
 	HudWidgetState *owner_of(std::string_view p_path);
+	HudWidgetState *deepest_owner_of(std::string_view p_path);
+	struct DirectAccessTarget;
+	std::unique_ptr<DirectAccessTarget> direct_target_;
+	std::unique_ptr<UiDirectAccess> direct_;
 	void run_timers(double p_seconds);
 
 	bool dispatch_mouse(const std::string &p_target, HudMouse p_mouse);

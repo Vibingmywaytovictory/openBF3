@@ -14,6 +14,7 @@
 #include "bf3/core/ui/swf_scene.h"
 #include "bf3/core/ui/swf_text.h"
 #include "bf3/core/ui/text_db.h"
+#include "bf3/core/ui/ui_direct_access.h"
 #include "bf3/core/ui/ui_fonts.h"
 #include "test_support.h"
 
@@ -393,6 +394,88 @@ TEST_SUITE("ui-hud-screen-unit") {
 		CHECK(local.rejected() == std::vector<std::string>{ "Test.Class", "", "Test.Empty" });
 		CHECK(local.make("Test.Class") != nullptr);
 		row("registry", std::to_string(installed.classes().size()) + " AS2 classes, each registered once");
+	}
+
+	TEST_CASE("hud screen unit: DirectAccess registerMC types 13 array item, 14 member and 15 array-length invoke") {
+		struct Log : UiDirectAccessTarget {
+			std::vector<std::string> lines;
+			UiDirectAccess *da = nullptr;
+			void direct_access(const UiDirectAccessApply &p_apply) override {
+				lines.push_back(p_apply.clip + " " + ui_direct_access_op_name(p_apply.op) + " " + p_apply.name + "=" +
+						p_apply.value.to_string());
+				if (p_apply.op == UiDirectAccessOp::ArrayLengthInvoke && da != nullptr) {
+					for (int32_t i = 0; i < int32_t(p_apply.value.to_number()); ++i) {
+						const std::string row = "list.row" + std::to_string(i);
+						da->register_mc(row + ".label",
+								{ As2Value::of(13), As2Value::of("rows"), As2Value::of(0), As2Value::of(i),
+										As2Value::of("Label") });
+						da->register_mc(row,
+								{ As2Value::of(13), As2Value::of("rows"), As2Value::of(14), As2Value::of(i),
+										As2Value::of("Index"), As2Value::of("ID") });
+					}
+				}
+			}
+		};
+		Log log;
+		UiDirectAccess da(log);
+		log.da = &da;
+		const auto row_of = [](const char *p_label, int32_t p_index) {
+			As2Value r = As2Value::object();
+			r.set("Label", As2Value::of(p_label));
+			r.set("Index", As2Value::of(p_index));
+			return r;
+		};
+		REQUIRE(da.register_mc("list", { As2Value::of(15), As2Value::of("rows"), As2Value::of("updateList") })
+						.has_value());
+		REQUIRE(da.register_mc(
+						  "count", { As2Value::of(14), As2Value::of("rows"), As2Value::of("size"), As2Value::of(true) })
+						.has_value());
+		const std::optional<uint32_t> title = da.register_mc("title", { As2Value::of(0), As2Value::of("name") });
+		REQUIRE(title.has_value());
+		REQUIRE(da.register_mc("title", { As2Value::of(12), As2Value::of("name"), As2Value::of("setText") })
+						.has_value());
+		CHECK(log.lines.empty());
+		da.set_array("rows", { row_of("ALPHA", 0), row_of("BRAVO", 1) });
+		const std::vector<std::string> first{ "list REGISTER_ARRAYLENGTHINVOKE updateList=2",
+			"list.row0.label REGISTER_TEXT =ALPHA", "list.row0 REGISTER_MEMBER ID=0",
+			"list.row1.label REGISTER_TEXT =BRAVO", "list.row1 REGISTER_MEMBER ID=1", "count REGISTER_MEMBER size=2" };
+		CHECK(log.lines == first);
+		log.lines.clear();
+		da.set_array("rows", { row_of("ALPHA", 0), row_of("CHARLIE", 1) });
+		CHECK(log.lines == std::vector<std::string>{ "list.row1.label REGISTER_TEXT =CHARLIE" });
+		log.lines.clear();
+		da.set_value("name", As2Value::of("US"));
+		CHECK(log.lines == std::vector<std::string>{ "title REGISTER_TEXT =US", "title REGISTER_INVOKE setText=US" });
+		log.lines.clear();
+		da.set_value("name", As2Value::of("US"));
+		CHECK(log.lines.empty());
+		CHECK(da.unregister_mc(*title));
+		CHECK_FALSE(da.unregister_mc(*title));
+		da.set_value("name", As2Value::of("RU"));
+		CHECK(log.lines == std::vector<std::string>{ "title REGISTER_INVOKE setText=RU" });
+		log.lines.clear();
+		REQUIRE(da.register_mc("late", { As2Value::of(3), As2Value::of("name") }).has_value());
+		CHECK(log.lines == std::vector<std::string>{ "late REGISTER_VISIBLE =RU" });
+		CHECK(da.unregister_under("list") == 5);
+		log.lines.clear();
+		da.set_array("rows", { row_of("DELTA", 0) });
+		CHECK(log.lines == std::vector<std::string>{ "count REGISTER_MEMBER size=1" });
+		CHECK(da.errors().empty());
+		CHECK_FALSE(da.register_mc("bad", {}).has_value());
+		CHECK_FALSE(da.register_mc("bad", { As2Value::of(17), As2Value::of("name") }).has_value());
+		CHECK_FALSE(da.register_mc("bad", { As2Value::of(0) }).has_value());
+		CHECK_FALSE(da.register_mc("bad",
+							  { As2Value::of(13), As2Value::of("rows"), As2Value::of(13), As2Value::of(0),
+									  As2Value::of("Label") })
+						.has_value());
+		CHECK(da.errors().size() == 4);
+		const std::optional<uint32_t> text_first = da.register_mc("swapped",
+				{ As2Value::of(13), As2Value::of(0), As2Value::of("rows"), As2Value::of(0), As2Value::of("Label") });
+		REQUIRE(text_first.has_value());
+		CHECK(log.lines.back() == "swapped REGISTER_TEXT =DELTA");
+		row("direct_access",
+				std::to_string(da.applied()) +
+						" direct-access applies over arrays, members, invokes and length invokes");
 	}
 
 	TEST_CASE("hud screen unit: the compass frame is the heading rounded up, as the footage's minimap and compass show") {
@@ -2185,6 +2268,57 @@ TEST_SUITE("ui-hud-screen") {
 				std::to_string(probe.frames) + " enter frames at " + std::to_string(fps) +
 						" fps; intervals, the newFrame tween, the onExit frame's onExitComplete and an exit that ends "
 						"with its last widget's");
+	}
+
+	TEST_CASE("hud screen: DirectAccess on a screen clip sets visibility and reaches the controller") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		struct Probe : HudWidgetController {
+			std::vector<std::string> seen;
+			void direct_access(HudWidgetHost &, const UiDirectAccessApply &p_apply) override {
+				seen.push_back(p_apply.clip + " " + ui_direct_access_op_name(p_apply.op) + " " + p_apply.name + "=" +
+						p_apply.value.to_string());
+			}
+		};
+		Screen s = open_screen(*r, "ui/flow/screen/preroundwaitingscreen");
+		s.hud->initialize(HudModel{});
+		const std::string path = std::string(kHudScreenInstance) + ".HudAlertMessage_03";
+		HudWidgetState *w = nullptr;
+		for (const std::unique_ptr<HudWidgetState> &cand : s.hud->widgets()) {
+			if (cand->path == path) {
+				w = cand.get();
+			}
+		}
+		REQUIRE(w != nullptr);
+		auto made = std::make_unique<Probe>();
+		Probe &probe = *made;
+		w->controller = std::move(made);
+		HudWidgetHost &host = *w->host;
+		const As2Clip self = s.clip(path);
+		REQUIRE(self.exists());
+		CHECK_FALSE(self.visible());
+		const std::optional<uint32_t> vis = host.register_mc(self, { As2Value::of(3), As2Value::of("shown") });
+		REQUIRE(vis.has_value());
+		REQUIRE(host.register_mc(self,
+							{ As2Value::of(14), As2Value::of("shown"), As2Value::of("m_shown"), As2Value::of(false) })
+						.has_value());
+		s.hud->direct_access().set_value("shown", As2Value::of(true));
+		CHECK(self.visible());
+		s.hud->direct_access().set_value("shown", As2Value::of(false));
+		CHECK_FALSE(self.visible());
+		CHECK(probe.seen ==
+				std::vector<std::string>{
+						path + " REGISTER_MEMBER m_shown=true", path + " REGISTER_MEMBER m_shown=false" });
+		host.unregister_mc(*vis);
+		s.hud->direct_access().set_value("shown", As2Value::of(true));
+		CHECK_FALSE(self.visible());
+		CHECK(probe.seen.size() == 3);
+		CHECK(s.hud->direct_access().registrations() == 1);
+		REQUIRE(s.scene->find_node(path) != nullptr);
+		CHECK(s.hud->direct_access().errors().empty());
+		row("direct_access_screen", "REGISTER_VISIBLE on " + path + " and REGISTER_MEMBER to its controller");
 	}
 
 	TEST_CASE("hud screen: hit test clicks spawnscreenpc Button_03") {

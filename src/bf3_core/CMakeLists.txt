@@ -305,6 +305,8 @@ target_sources(bf3_core PRIVATE
     src/ui/ui_graph_flow.cpp
     include/bf3/core/ui/ui_input.h
     src/ui/ui_input.cpp
+    include/bf3/core/ui/ui_direct_access.h
+    src/ui/ui_direct_access.cpp
     include/bf3/core/ui/swf_hit.h
     src/ui/swf_hit.cpp
 )
