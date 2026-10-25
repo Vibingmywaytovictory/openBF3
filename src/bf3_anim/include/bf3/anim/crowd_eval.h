@@ -180,6 +180,7 @@ inline constexpr float kCrowdDeathBlendSeconds = 0.5f;
 inline constexpr float kCrowdDeathHideSeconds = 3.0f;
 inline constexpr float kCrowdFireKickSeconds = 0.05f;
 inline constexpr float kCrowdFireKickDeg = 3.0f;
+inline constexpr float kCrowdLayerRampSeconds = 0.15f;
 
 struct CrowdStanceSet {
 	const ServerPoseClips *pose = nullptr;

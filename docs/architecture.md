@@ -209,11 +209,11 @@ These are structural, known, and listed so nobody mistakes them for design inten
   G is EIAThrowGrenade (input/soldierweaponswitching: slot 6, FireAndSwitchBackToPrev; nothing when the slot is empty and
   AllowSwitchingToWeaponOutOfAmmo false): `InputMapper` holds fire until the hold starts and G is up, then switches back
   once the next grenade is loaded or none is left; that switch-map row is hard-coded and the switch-back moment inferred.
-* Remote soldiers and bots holding a grenade (replicated WeaponPhase::Holding) play 3P_Master_WepHandlingStateFlow's
-  HandgrenadeInNode clip, held at its EndTime, and on the RemoteShot its HandgrenadeReleaseNode clip (`read_throw_flow_3p`,
-  the stand item of each SignalBlendArray), through FullBody_ThrowBlendMaskArray: value 0 (ThrowBlendMask) when moving, 1
-  (EverythingBlendMask) when still; that mapping is inferred, as the PoseState signal's bytecode is not run. Crouch, prone
-  and MP_Quickthrow items are not loaded, and the layer replaces the firing kick for the grenade.
+* Remote soldiers and bots holding a grenade (replicated Holding) play 3P_Master_WepHandlingStateFlow's HandgrenadeInNode
+  clip, held at its EndTime, then on the RemoteShot the HandgrenadeReleaseNode clip until its master sequence's End Branch_3P
+  tag (tick 115 of 122), fading over the 0.15 s layer ramp, not the transition's BezierBlend (`read_throw_flow_3p`, stand
+  items), masked by FullBody_ThrowBlendMaskArray 0 (moving) or 1 (still), a mapping inferred as the PoseState bytecode is
+  not run; crouch, prone and MP_Quickthrow items are not loaded; the layer replaces the firing kick for the grenade.
 * The container, EBX, payload, resource, level-soup and lag-compensation readers were written as ports of the
   earlier Rust experiment (IW4L); on 2026-10-24 the owner decided to keep them as they are, not re-derive them, and the
   install tests hold their numbers. No Rust is left in the tree.

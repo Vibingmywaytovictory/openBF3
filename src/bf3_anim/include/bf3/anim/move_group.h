@@ -81,7 +81,9 @@ inline constexpr std::string_view k3pWeaponHandlingFlow = "3P_Master_WepHandling
 struct AntThrowFlow3p {
 	std::string in_node, release_node;
 	AntClipRoute in, release;
-	float in_end_tick = 0.0f, release_end_tick = 0.0f;
+	float in_end_tick = 0.0f, release_length_tick = 0.0f;
+	std::string leave_type, leave_node;
+	float release_end_tick = 0.0f, release_end_window_ticks = 0.0f;
 };
 
 core::Result<AntThrowFlow3p> read_throw_flow_3p(

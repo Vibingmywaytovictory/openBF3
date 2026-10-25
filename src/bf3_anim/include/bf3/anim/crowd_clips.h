@@ -173,9 +173,9 @@ core::Result<BoneMask> read_blend_mask(
 
 struct CrowdThrowClips {
 	CrowdClipData in, release;
-	float in_seconds = 0.0f, release_seconds = 0.0f;
+	float in_seconds = 0.0f, release_seconds = 0.0f, release_length_seconds = 0.0f;
 	BoneMask moving, still;
-	std::string in_name, release_name;
+	std::string in_name, release_name, release_leave;
 };
 
 core::Result<CrowdThrowClips> load_crowd_throw(

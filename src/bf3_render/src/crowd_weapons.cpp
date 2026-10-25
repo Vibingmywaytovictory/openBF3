@@ -273,9 +273,10 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 			r_part.throw_clips = std::move(*clips);
 			r_part.have_throw = true;
 			char line[256];
-			std::snprintf(line, sizeof(line), "; throw %s %.3f s, %s %.3f s", r_part.throw_clips.in_name.c_str(),
-					double(r_part.throw_clips.in_seconds), r_part.throw_clips.release_name.c_str(),
-					double(r_part.throw_clips.release_seconds));
+			std::snprintf(line, sizeof(line), "; throw %s %.3f s, %s %.3f s (leaves on %s at %.3f s)",
+					r_part.throw_clips.in_name.c_str(), double(r_part.throw_clips.in_seconds),
+					r_part.throw_clips.release_name.c_str(), double(r_part.throw_clips.release_length_seconds),
+					r_part.throw_clips.release_leave.c_str(), double(r_part.throw_clips.release_seconds));
 			throw_line = line;
 		} else {
 			throw_line = "; no throw clips (" +

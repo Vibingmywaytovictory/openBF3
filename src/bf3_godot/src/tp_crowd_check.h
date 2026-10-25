@@ -71,6 +71,7 @@ private:
 	std::unique_ptr<Script> script_;
 	godot::Camera3D *camera_ = nullptr;
 	double t_ = 0.0;
+	double throw_last_on_ = -1.0;
 	uint64_t frame_ = 0;
 	int shot_index_ = 0;
 	double rebases_after_switch_ = 0.0;

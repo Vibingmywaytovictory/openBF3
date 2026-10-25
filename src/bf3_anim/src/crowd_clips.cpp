@@ -731,8 +731,10 @@ core::Result<CrowdThrowClips> load_crowd_throw(
 	out.release = std::move(*release);
 	auto seconds = [](const AntClipRoute &p_route, float p_tick) { return p_tick * p_route.fps_scale / p_route.fps; };
 	out.in_seconds = std::min(seconds(flow->in, flow->in_end_tick), out.in.tracks.duration_seconds());
-	out.release_seconds =
-			std::min(seconds(flow->release, flow->release_end_tick), out.release.tracks.duration_seconds());
+	out.release_length_seconds =
+			std::min(seconds(flow->release, flow->release_length_tick), out.release.tracks.duration_seconds());
+	out.release_seconds = std::min(seconds(flow->release, flow->release_end_tick), out.release_length_seconds);
+	out.release_leave = flow->leave_type + " to " + flow->leave_node;
 	if (!(out.in_seconds > 0.0f) || !(out.release_seconds > 0.0f)) {
 		return core::make_error(where + ": an empty in or release clip");
 	}

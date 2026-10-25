@@ -767,8 +767,47 @@ core::Result<AntThrowFlow3p> read_throw_flow_3p(
 			if (core::Status s = item_route(subject_of(node), out.in, out.in_end_tick); !s.ok()) {
 				return s.error();
 			}
-			if (core::Status s = item_route(subject_of(next), out.release, out.release_end_tick); !s.ok()) {
+			if (core::Status s = item_route(subject_of(next), out.release, out.release_length_tick); !s.ok()) {
 				return s.error();
+			}
+			const GdArray leaves = next.array("Transitions");
+			for (uint32_t l = 0; leaves.valid() && l < leaves.size() && l < kMaxSignals && out.leave_type.empty();
+					++l) {
+				GdGuid lg, bt, dest;
+				const GdStruct leave =
+						leaves.read_guid(l, lg) && !lg.is_null() ? p_library.resolve(stat, lg) : GdStruct();
+				const GdStruct type = leave.valid() && leave.read_guid("BranchWindowTypeAsset", bt) && !bt.is_null()
+						? p_library.resolve(stat, bt)
+						: GdStruct();
+				const GdStruct to_node = type.valid() && leave.read_guid("To", dest) && !dest.is_null()
+						? p_library.resolve(stat, dest)
+						: GdStruct();
+				if (to_node.valid()) {
+					out.leave_type = std::string(type.name());
+					out.leave_node = std::string(to_node.name());
+				}
+			}
+			GdGuid mg;
+			const GdStruct master = subject_of(next).read_guid("MasterController", mg) && !mg.is_null()
+					? p_library.resolve(stat, mg)
+					: GdStruct();
+			std::vector<AntBranchTag> tags;
+			if (out.leave_type.empty() || !master.valid() ||
+					!read_branch_tags(p_library, p_library.package_of(stat, mg), master, tags)) {
+				return core::make_error(where + ": " + out.release_node +
+						" has no branch-typed transition out or no readable MasterController tags");
+			}
+			bool found = false;
+			for (const AntBranchTag &b : tags) {
+				if (!b.branch_in && b.type == out.leave_type && !found) {
+					out.release_end_tick = b.time;
+					out.release_end_window_ticks = b.length;
+					found = true;
+				}
+			}
+			if (!found || !(out.release_end_tick > 0.0f) || out.release_end_tick > out.release_length_tick) {
+				return core::make_error(where + ": " + std::string(master.name()) + " has no " + out.leave_type +
+						" branch-out point within the release");
 			}
 			return out;
 		}

@@ -4,6 +4,7 @@
 #include "godot_util.h"
 #include "level_session.h"
 
+#include "bf3/anim/crowd_eval.h"
 #include "bf3/anim/crowd_stage.h"
 #include "bf3/core/install.h"
 #include "bf3/core/util/format.h"
@@ -38,6 +39,7 @@ constexpr double kSwitchAt = 6.0;
 constexpr double kHoldAt = 3.0;
 constexpr double kThrowAt = 3.6;
 constexpr size_t kThrower = 11;
+constexpr double kReleaseLeaveTick = 115.0;
 
 void log(const std::string &p_line) {
 	UtilityFunctions::print(to_godot("[tp] " + p_line));
@@ -319,6 +321,14 @@ void Bf3TpCrowdCheck::check_at(double p_t) {
 		row("t 8.0 s: the respawned soldier drawn", st.soldiers == 12, fmt("%u", st.soldiers));
 		row("t 8.0 s: 10 muzzles", st.muzzles == 10, fmt("%u", st.muzzles));
 		row("t 8.0 s: the throw ended", st.throwing == 0, fmt("%u throwing", st.throwing));
+		const double branch = kThrowAt + kReleaseLeaveTick / 60.0;
+		const double leave = branch + double(anim::kCrowdLayerRampSeconds);
+		row("t 8.0 s: the release leaves on End Branch_3P", throw_last_on_ >= branch && throw_last_on_ <= leave + kStep,
+				fmt("last drawn at %.4f s; End Branch_3P (tick %.0f) at %.4f s, left after the ramp at %.4f s",
+						throw_last_on_, kReleaseLeaveTick, branch, leave));
+	}
+	if (p_t > kThrowAt && p_t < kThrowAt + 3.0 && st.throwing == 1) {
+		throw_last_on_ = p_t;
 	}
 }
 

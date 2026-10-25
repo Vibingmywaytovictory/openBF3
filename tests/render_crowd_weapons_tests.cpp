@@ -161,11 +161,15 @@ TEST_SUITE("render-crowd-weapons") {
 				std::printf("render.crowd_weapons team %zu %s: throw in %s %.4f s (%u frames), release %s %.4f s (%u "
 							"frames)\n",
 						t, p.spec.weapon_def.c_str(), c.in_name.c_str(), double(c.in_seconds), c.in.tracks.end_frame,
-						c.release_name.c_str(), double(c.release_seconds), c.release.tracks.end_frame);
+						c.release_name.c_str(), double(c.release_length_seconds), c.release.tracks.end_frame);
+				std::printf("render.crowd_weapons team %zu %s: the release leaves on %s at %.4f s\n", t,
+						p.spec.weapon_def.c_str(), c.release_leave.c_str(), double(c.release_seconds));
 				CHECK(c.in_name == "Master_Throw_Stand_FireIn");
 				CHECK(c.in_seconds == doctest::Approx(16.0 / 60.0));
 				CHECK(c.release_name == "Throw_Stand_FireRelease");
-				CHECK(c.release_seconds == doctest::Approx(122.0 / 60.0));
+				CHECK(c.release_length_seconds == doctest::Approx(122.0 / 60.0));
+				CHECK(c.release_leave == "End Branch_3P to HandNode");
+				CHECK(c.release_seconds == doctest::Approx(115.0 / 60.0));
 				struct Want {
 					const char *joint;
 					float moving, still;
@@ -280,7 +284,11 @@ TEST_SUITE("render-crowd-weapons") {
 		}
 		step(60);
 		CHECK((*ev)->combat_stats().throwing == 2);
-		step(int(std::ceil(122.0 / 60.0 * 60.0)));
+		const float ramp_frames = anim::kCrowdLayerRampSeconds * 60.0f;
+		const int leave_frame = 115;
+		step(leave_frame + int(std::floor(ramp_frames)) - 1 - 60);
+		CHECK((*ev)->combat_stats().throwing == 2);
+		step(int(std::ceil(ramp_frames)) + 1);
 		CHECK((*ev)->combat_stats().throwing == 0);
 		std::printf("render.crowd_weapons throw layer: %u of 2 grenade soldiers holding drew the throw-in, largest "
 					"palette change %.3f; release drawn, then off\n",

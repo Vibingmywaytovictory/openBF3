@@ -18,7 +18,7 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-constexpr float kReloadRampSeconds = 0.15f;
+constexpr float kReloadRampSeconds = kCrowdLayerRampSeconds;
 
 using bf3::core::finite;
 
@@ -610,7 +610,8 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 					return core::make_error(ww + ": throw clip or mask is not rig-sized");
 				}
 				if (!(tc.in_seconds > 0.0f) || !(tc.release_seconds > 0.0f) || !std::isfinite(tc.in_seconds) ||
-						!std::isfinite(tc.release_seconds)) {
+						!std::isfinite(tc.release_seconds) || !(tc.release_length_seconds >= tc.release_seconds) ||
+						!std::isfinite(tc.release_length_seconds)) {
 					return core::make_error(ww + ": throw clip lengths are not positive");
 				}
 				mw.throw_clips = cw.throw_clips;
@@ -1083,12 +1084,13 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 		const CrowdClipData *clip = nullptr;
 		const BoneMask *mask = nullptr;
 		float t = 0.0f, w = 0.0f;
-		if (fire_age >= 0.0 && fire_age < double(throw_clips->release_seconds)) {
+		if (fire_age >= 0.0 && fire_age < double(throw_clips->release_seconds + kReloadRampSeconds)) {
 			clip = &throw_clips->release;
 			mask = &weapon->throw_masks[1][area];
-			t = float(fire_age);
-			const float in_w = xs.held_into_release ? 1.0f : t / kReloadRampSeconds;
-			w = std::min({ 1.0f, in_w, (throw_clips->release_seconds - t) / kReloadRampSeconds });
+			const float age = float(fire_age);
+			t = std::min(age, throw_clips->release_length_seconds);
+			const float in_w = xs.held_into_release ? 1.0f : age / kReloadRampSeconds;
+			w = std::min({ 1.0f, in_w, 1.0f - (age - throw_clips->release_seconds) / kReloadRampSeconds });
 		} else if (xs.holding) {
 			clip = &throw_clips->in;
 			mask = &weapon->throw_masks[0][area];
