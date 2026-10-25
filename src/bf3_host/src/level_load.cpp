@@ -251,6 +251,7 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 	if (shared->spawns.empty()) {
 		return core::make_error("load_shared_level: the mode has no spawn points");
 	}
+	shared->spawners = spawns->spawners;
 	for (const core::level::CharacterSpawnerDef &s : spawns->spawners) {
 		if (s.enabled && std::isfinite(s.protection_radius) && s.protection_radius > 0.0f) {
 			shared->spawn_protection_radius = s.protection_radius;

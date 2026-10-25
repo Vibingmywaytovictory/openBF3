@@ -1112,6 +1112,22 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(t.fade_s + t.request_eor_delay_s <= t.pre_eor_s);
 	}
 
+	TEST_CASE("deploy list: the TDM setup's two character spawners, one per team, both RANDOM SPAWN POINT") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		std::vector<int> teams;
+		for (const core::level::CharacterSpawnerDef &s : level->shared->spawners) {
+			if (s.enabled && !s.location_text_sid.empty()) {
+				teams.push_back(s.team);
+				CHECK(s.location_text_sid == "ID_H_MP_DM_RANDOMSPAWN");
+			}
+		}
+		std::sort(teams.begin(), teams.end());
+		CHECK(teams == std::vector<int>{ 1, 2 });
+	}
+
 	TEST_CASE("round start: the data's RoundMinPlayerCount holds one peer in the pre-round; the min-players override starts it") {
 		tdm::TdmLevel *level = tdm::load_tdm_level_once();
 		if (level == nullptr) {

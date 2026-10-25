@@ -2,6 +2,7 @@
 
 #include "bf3/core/gameplay/eor_timeline.h"
 #include "bf3/core/gameplay/weapon_def.h"
+#include "bf3/core/level/spawn_points.h"
 #include "bf3/core/result.h"
 #include "bf3/core/ui/hud_icons.h"
 #include "bf3/core/ui/hud_model.h"
@@ -123,6 +124,7 @@ struct HudFeedInput {
 	bool in_menu = false;
 	std::string_view game_mode;
 	uint32_t level_name_sid_hash = 0;
+	std::span<const core::level::CharacterSpawnerDef> spawners;
 };
 
 struct HudFeedState {
@@ -188,6 +190,7 @@ struct HudTdmFeedState {
 	uint64_t own_deaths = 0;
 	uint64_t unknown_defs = 0;
 	uint64_t bad_inputs = 0;
+	uint64_t rows_dropped = 0;
 	uint64_t frames = 0;
 
 	RoundStats stats;

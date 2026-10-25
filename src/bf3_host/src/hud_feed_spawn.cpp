@@ -1,5 +1,6 @@
 #include "hud_feed_tdm_parts.h"
 
+#include "bf3/core/ui/text_db.h"
 #include "bf3/host/kits.h"
 
 namespace bf3::host::tdm_feed {
@@ -53,6 +54,22 @@ void feed_spawn(Frame &r_frame) {
 			d1 > d0 && d1 - d0 <= kMaxAheadTicks ? float(double(d1 - d0) / double(sim::kSimHz)) : 0.0f;
 	model.spawn_points.can_spawn = sp.can_deploy;
 	model.spawn_points.has_valid_spawn = match;
+	ui::HudSpawnPointList &list = model.spawn_points.spawn_points;
+	list = ui::HudSpawnPointList();
+	for (const core::level::CharacterSpawnerDef &s : in.spawners) {
+		if (!s.enabled || r_frame.own_team == 0 || s.team != r_frame.own_team || s.location_text_sid.empty()) {
+			continue;
+		}
+		if (list.count >= list.points.size()) {
+			++state.rows_dropped;
+			continue;
+		}
+		ui::HudSpawnPoint &p = list.points[list.count++];
+		p.kind = ui::HudSpawnKind::Hq;
+		p.team = int8_t(r_frame.own_team);
+		p.available = match;
+		p.label_sid_hash = ui::text_hash(s.location_text_sid);
+	}
 }
 
 }

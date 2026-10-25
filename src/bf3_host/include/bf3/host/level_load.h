@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/core/cache/digest.h"
+#include "bf3/core/level/spawn_points.h"
 #include "bf3/core/result.h"
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/spawn.h"
@@ -94,6 +95,7 @@ struct SharedLevel {
 	std::optional<core::Sha256Digest> source_digest;
 	std::shared_ptr<const sim::StaticWorldShapes> static_world;
 	std::vector<sim::SpawnPoint> spawns;
+	std::vector<core::level::CharacterSpawnerDef> spawners;
 	float spawn_protection_radius = 10.0f;
 	sim::MotorParams motor;
 	double seconds_shapes = 0.0;

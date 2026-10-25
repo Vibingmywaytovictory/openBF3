@@ -716,6 +716,56 @@ TEST_CASE("the kit bar: the own team's loadouts in slots 0, 1, 2, 6, 7") {
 	CHECK(state.bad_inputs == 0);
 }
 
+TEST_CASE("the deploy list: one row per enabled spawner of the own team, labelled by its LocationTextSid") {
+	const host::HudStatic st = make_static();
+	std::vector<bf3::core::level::CharacterSpawnerDef> spawners(4);
+	spawners[0].team = 2;
+	spawners[0].location_text_sid = "ID_H_MP_DM_RANDOMSPAWN";
+	spawners[1].team = 1;
+	spawners[1].location_text_sid = "ID_H_MP_DM_RANDOMSPAWN";
+	spawners[2].team = 2;
+	spawners[2].enabled = false;
+	spawners[2].location_text_sid = "ID_DISABLED";
+	spawners[3].team = 2;
+	host::HudFeedInput in;
+	in.tdm = true;
+	in.match_valid = true;
+	in.match.phase = net::MatchPhase::InRound;
+	in.own_slot = 1;
+	in.own_team = 2;
+	in.alive = false;
+	in.spawners = spawners;
+	host::HudTdmFeedState state;
+	ui::HudModel m;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	const ui::HudSpawnPointList &list = m.spawn_points.spawn_points;
+	REQUIRE(list.count == 1);
+	CHECK(list.points[0].kind == ui::HudSpawnKind::Hq);
+	CHECK(list.points[0].team == 2);
+	CHECK(list.points[0].available);
+	CHECK(list.points[0].label_sid_hash == ui::text_hash("ID_H_MP_DM_RANDOMSPAWN"));
+	CHECK(list.points[0].player == ui::kHudNoPlayer);
+	CHECK(m.spawn_points.has_valid_spawn);
+	in.match_valid = false;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	REQUIRE(list.count == 1);
+	CHECK_FALSE(list.points[0].available);
+	in.match_valid = true;
+	in.own_team = 0;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(list.count == 0);
+	std::vector<bf3::core::level::CharacterSpawnerDef> many(ui::kHudMaxSpawnPoints + 3, spawners[0]);
+	in.own_team = 2;
+	in.spawners = many;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(list.count == ui::kHudMaxSpawnPoints);
+	CHECK(state.rows_dropped == 3);
+	in.spawners = {};
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(list.count == 0);
+	CHECK(state.bad_inputs == 0);
+}
+
 TEST_CASE("the loadout screens: kit and customization from the catalog and the own choices; the menu, user, settings "
 		  "and level") {
 	const host::HudStatic st = make_static();
@@ -1047,6 +1097,7 @@ TEST_CASE("every string resolves to its recorded English") {
 		{ gs::TdmText::Count, host::kHudMenuSids[3], "OPTIONS" },
 		{ gs::TdmText::Count, host::kHudMenuSids[4], "QUIT" },
 		{ gs::TdmText::Count, host::kHudTdmModeSid, "TEAM DEATHMATCH" },
+		{ gs::TdmText::Count, "ID_H_MP_DM_RANDOMSPAWN", "RANDOM SPAWN POINT" },
 		{ gs::TdmText::Count, "ID_M_LEVELNAME_MP_SUBWAY", "OPERATION M\xC3\x89TRO" },
 	};
 	for (const gs::TdmTextEntry &e : kFeedTexts) {

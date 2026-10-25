@@ -628,6 +628,8 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		in.level_name_sid_hash = level != nullptr && !level->level_name_sid.empty()
 				? bf3::core::ui::text_hash(level->level_name_sid)
 				: 0u;
+		in.spawners = level != nullptr ? std::span<const bf3::core::level::CharacterSpawnerDef>(level->spawners)
+									   : std::span<const bf3::core::level::CharacterSpawnerDef>();
 		host::fill_hud_tdm(in, r_game.events, r_game.hud_static, m.tdm_state, r_game.hud_model);
 		if (!m.options.deploy_screen) {
 			r_game.hud_model.spawn_screen.visible = false;
