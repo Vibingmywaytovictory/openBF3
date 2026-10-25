@@ -522,6 +522,27 @@ TEST_SUITE("ui-widgets") {
 		CHECK(b.clip("PopupGenericWidget_01").visible());
 		CHECK(b.clip("PopupGenericWidget_01.popupTitle").text() == "Options");
 		CHECK(b.clip("PopupGenericWidget_01.popupText").text() == "Save settings?");
+		std::string box;
+		for (const SwfNodeId id : b.clip("PopupGenericWidget_01").node()->children) {
+			const SwfSceneNode *c = b.s.scene->node(id);
+			if (c != nullptr && b.s.scene->find_node(c->path + ".header") != nullptr) {
+				box = c->path;
+			}
+		}
+		REQUIRE_FALSE(box.empty());
+		const As2Clip popup_box = b.s.hud->clip(box);
+		CHECK(popup_box.xscale() == 100.0f);
+		CHECK(popup_box.yscale() == 100.0f);
+		CHECK(b.s.hud->clip(box + ".icon").current_frame() == 2u);
+		CHECK(b.s.hud->clip(box + ".header").width() == doctest::Approx(609.93).epsilon(1e-4));
+		CHECK(b.s.hud->clip(box + ".header").height() == doctest::Approx(34.0));
+		CHECK(b.s.hud->clip(box + ".bg").width() == doctest::Approx(609.93).epsilon(1e-4));
+		CHECK(b.s.hud->clip(box + ".bg").height() == doctest::Approx(265.99).epsilon(1e-4));
+		CHECK(b.s.hud->clip(box + ".icon").x() == doctest::Approx(564.93).epsilon(1e-4));
+		std::printf("ui.widgets popup box %.2f x %.2f, header %.2f x %.2f, bg y %.2f h %.2f, icon x %.2f\n",
+				popup_box.width(), popup_box.height(), b.s.hud->clip(box + ".header").width(),
+				b.s.hud->clip(box + ".header").height(), b.s.hud->clip(box + ".bg").y(),
+				b.s.hud->clip(box + ".bg").height(), b.s.hud->clip(box + ".icon").x());
 		const As2Clip dimmer = b.clip("Dimmer_01");
 		CHECK(dimmer.visible());
 		CHECK(dimmer.width() == doctest::Approx(1280.0 + 256.0));
