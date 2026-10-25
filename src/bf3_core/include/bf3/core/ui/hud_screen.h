@@ -226,6 +226,10 @@ struct HudClientState {
 	std::string vehicle_name;
 };
 
+class TextDatabase;
+
+HudClientState hud_text_client(std::shared_ptr<const TextDatabase> p_db, HudClientState p_client = {});
+
 struct HudTilt {
 	std::string path;
 	float x_rotation = 0.0f;

@@ -292,21 +292,7 @@ void Bf3NativeHud::build() {
 		UtilityFunctions::push_error(to_godot("[hud] native HUD not drawn: " + error_));
 		return;
 	}
-	std::shared_ptr<const ui::TextDatabase> db = loc != nullptr ? loc->database() : nullptr;
-	client_.localise_hash = [db](uint32_t p_hash) -> std::string {
-		if (db == nullptr) {
-			return {};
-		}
-		const std::optional<std::string_view> t = db->find(p_hash);
-		return t ? std::string(*t) : std::string();
-	};
-	client_.translate = [db](std::string_view p_sid) -> std::optional<std::string> {
-		if (db == nullptr) {
-			return std::nullopt;
-		}
-		const std::optional<std::string_view> t = db->find_sid(p_sid);
-		return t ? std::optional<std::string>(std::string(*t)) : std::nullopt;
-	};
+	client_ = ui::hud_text_client(loc != nullptr ? loc->database() : nullptr, std::move(client_));
 	client_.vertical_fov_deg = float(vfov_deg_);
 	messages_ = std::make_unique<ui::HudMessageComp>(*loaded_->messages);
 	client_.messages = messages_.get();

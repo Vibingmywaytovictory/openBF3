@@ -128,19 +128,7 @@ struct Bf3WidgetShotsCheck::State {
 		rows.push_back({ p_name, p_pass, p_detail });
 	}
 
-	ui::HudClientState client() const {
-		ui::HudClientState c;
-		std::shared_ptr<const ui::TextDatabase> t = db;
-		c.localise_hash = [t](uint32_t p_hash) {
-			const std::optional<std::string_view> s = t->find(p_hash);
-			return s ? std::string(*s) : std::string();
-		};
-		c.translate = [t](std::string_view p_sid) -> std::optional<std::string> {
-			const std::optional<std::string_view> s = t->find_sid(p_sid);
-			return s ? std::optional<std::string>(std::string(*s)) : std::nullopt;
-		};
-		return c;
-	}
+	ui::HudClientState client() const { return ui::hud_text_client(db); }
 };
 
 Bf3WidgetShotsCheck::Bf3WidgetShotsCheck() : state_(std::make_unique<State>()) {}

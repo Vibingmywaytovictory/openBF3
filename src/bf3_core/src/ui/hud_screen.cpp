@@ -3,6 +3,7 @@
 #include "ui_ebx.h"
 
 #include "bf3/core/ui/swf_hit.h"
+#include "bf3/core/ui/text_db.h"
 #include "bf3/core/ui/ui_direct_access.h"
 #include "bf3/core/util/text.h"
 
@@ -179,6 +180,18 @@ std::string hud_screen_movie(std::string_view p_screen_name) {
 	const size_t slash = p_screen_name.rfind('/');
 	const std::string leaf = to_lower_ascii(slash == std::string_view::npos ? p_screen_name : p_screen_name.substr(slash + 1));
 	return leaf.empty() ? std::string() : "ui/assets/" + leaf;
+}
+
+HudClientState hud_text_client(std::shared_ptr<const TextDatabase> p_db, HudClientState p_client) {
+	p_client.localise_hash = [p_db](uint32_t p_hash) -> std::string {
+		const std::optional<std::string_view> t = p_db != nullptr ? p_db->find(p_hash) : std::nullopt;
+		return t ? std::string(*t) : std::string();
+	};
+	p_client.translate = [p_db](std::string_view p_sid) -> std::optional<std::string> {
+		const std::optional<std::string_view> t = p_db != nullptr ? p_db->find_sid(p_sid) : std::nullopt;
+		return t ? std::optional<std::string>(std::string(*t)) : std::nullopt;
+	};
+	return p_client;
 }
 
 HudScreenAsset hud_movie_screen_asset(std::string_view p_movie) {

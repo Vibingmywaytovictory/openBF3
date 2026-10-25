@@ -100,15 +100,8 @@ inline const bf3::core::ui::TextDatabase &retail_text_db(Retail &r_r) {
 
 inline bf3::core::ui::HudClientState retail_text_client(
 		const bf3::core::ui::TextDatabase &p_db, bf3::core::ui::HudClientState p_client = {}) {
-	p_client.localise_hash = [&p_db](uint32_t p_hash) {
-		const std::optional<std::string_view> t = p_db.find(p_hash);
-		return t ? std::string(*t) : std::string();
-	};
-	p_client.translate = [&p_db](std::string_view p_sid) -> std::optional<std::string> {
-		const std::optional<std::string_view> t = p_db.find_sid(p_sid);
-		return t ? std::optional<std::string>(std::string(*t)) : std::nullopt;
-	};
-	return p_client;
+	return bf3::core::ui::hud_text_client(
+			std::shared_ptr<const bf3::core::ui::TextDatabase>(std::shared_ptr<void>(), &p_db), std::move(p_client));
 }
 
 struct RetailScreen {
