@@ -40,6 +40,7 @@ struct Frame {
 	std::array<Rank, core::ui::kHudMaxPlayers> ranked{};
 	size_t ranked_count = 0;
 	bool card_up = false;
+	bool card_pending = false;
 };
 
 float seconds_until(sim::Tick p_now, sim::Tick p_until, uint64_t &r_bad);

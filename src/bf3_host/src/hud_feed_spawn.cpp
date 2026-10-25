@@ -15,7 +15,7 @@ void feed_spawn(Frame &r_frame) {
 	const sim::Tick now_tick = r_frame.now_tick;
 	const bool dead = !in.alive || in.own_unspawned;
 	ui::HudSpawnScreen &sp = model.spawn_screen;
-	sp.visible = match && dead && !r_frame.card_up && !r_frame.round_over;
+	sp.visible = match && dead && !r_frame.card_up && !r_frame.card_pending && !r_frame.round_over;
 	sp.at_join = !in.spawned_this_round;
 	uint8_t kit = in.spawn_kit;
 	if (kit >= kKitCount) {

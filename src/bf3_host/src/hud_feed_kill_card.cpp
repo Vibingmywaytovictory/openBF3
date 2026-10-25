@@ -103,7 +103,8 @@ void feed_kill_card(Frame &r_frame, std::span<const PresentEvent> p_drained) {
 			state.kill_card_serial = 1;
 		}
 		++state.own_deaths;
-		state.kill_card_until_s = now_s + kKillCardSeconds;
+		state.kill_card_from_s = now_s + kKillCardDelaySeconds;
+		state.kill_card_until_s = state.kill_card_from_s + kKillCardSeconds;
 		state.own_death_respawn_tick = e.extra;
 		state.own_death_tick =
 				e.time > 0 ? sim::Tick(std::min<int64_t>(e.time / sw::kTimeUnitsPerTick, int64_t(UINT32_MAX))) : 0;
@@ -125,7 +126,8 @@ void feed_kill_card(Frame &r_frame, std::span<const PresentEvent> p_drained) {
 				? src.distance_m
 				: -1.0f;
 	}
-	r_frame.card_up = card.serial != 0 && now_s < state.kill_card_until_s;
+	r_frame.card_pending = card.serial != 0 && now_s < state.kill_card_from_s && now_s < state.kill_card_until_s;
+	r_frame.card_up = card.serial != 0 && !r_frame.card_pending && now_s < state.kill_card_until_s;
 	card.visible = r_frame.card_up;
 	card.seconds_left = r_frame.card_up ? float(state.kill_card_until_s - now_s) : 0.0f;
 }

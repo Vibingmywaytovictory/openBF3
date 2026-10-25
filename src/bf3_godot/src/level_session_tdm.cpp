@@ -533,7 +533,7 @@ void Bf3LevelSession::tdm_presented(uint64_t p_now_ns) {
 	si.phase = f.match.phase;
 	si.own_alive = r_game.alive;
 	si.own_unspawned = f.own_unspawned;
-	si.kill_card_up = m.own_death_s >= 0.0 && now_s - m.own_death_s < host::kKillCardSeconds;
+	si.kill_card_up = m.own_death_s >= 0.0 && now_s - m.own_death_s < host::kDeathScreenSeconds;
 	m.spawn_screen = tdm_spawn_screen_up(si);
 	r_mapper.set_spawn_screen(m.spawn_screen);
 	m.can_deploy = tdm_can_deploy(f.match_valid, f.match, f.newest_tick, f.own_respawn_tick);

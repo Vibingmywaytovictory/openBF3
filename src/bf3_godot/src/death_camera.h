@@ -12,7 +12,7 @@ class CollisionWorld;
 namespace bf3::godot_side {
 
 struct DeathCameraParams {
-	float seconds = 4.0f;
+	float seconds = 3.9f;
 	float orbit_seconds = 1.0f;
 	float turn_seconds = 0.75f;
 	float back_m = 2.5f;

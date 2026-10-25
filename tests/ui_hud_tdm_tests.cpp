@@ -220,7 +220,7 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 	in.kill_card_source.distance_m = 23.4f;
 	in.match.kills = { 2, 2 };
 	frame(1002, std::span<const host::PresentEvent>(&own_death, 1));
-	CHECK(m.kill_card.visible);
+	CHECK(!m.kill_card.visible);
 	CHECK(m.kill_card.serial == 1);
 	CHECK(m.kill_card.killer == 6);
 	CHECK(m.kill_card.killer_kit == 2);
@@ -230,19 +230,34 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 	CHECK(m.kill_card.weapon_name_sid_hash == 2004);
 	CHECK(m.kill_card.killer_health == doctest::Approx(37.5f));
 	CHECK(m.kill_card.distance_m == doctest::Approx(23.4f));
-	CHECK(m.kill_card.seconds_left == doctest::Approx(host::kKillCardSeconds));
+	CHECK(m.kill_card.seconds_left == 0.0f);
 	CHECK(!m.spawn_screen.visible);
 	CHECK(m.soldier.show_medic_revive);
 	CHECK(m.spawn_logic.start_time_to_respawn == doctest::Approx(5.0f));
 
 	in.kill_card_source = {};
+	const double card_from = 1002 * dt + host::kKillCardDelaySeconds;
+	const double card_until = card_from + host::kKillCardSeconds;
 	uint32_t card_frames = 0;
+	uint32_t expected_frames = 0;
+	uint32_t early_screens = 0;
+	float first_seconds_left = -1.0f;
 	bf3::sim::Tick t = 1003;
 	for (; t < 1002 + 4 * 60 + 2; ++t) {
 		frame(t, {});
+		const double now = double(t) * dt;
+		expected_frames += now >= card_from && now < card_until ? 1 : 0;
 		card_frames += m.kill_card.visible ? 1 : 0;
+		early_screens += now < card_until && m.spawn_screen.visible ? 1 : 0;
+		if (m.kill_card.visible && first_seconds_left < 0.0f) {
+			first_seconds_left = m.kill_card.seconds_left;
+		}
 	}
-	CHECK(card_frames == 4 * 60 - 1);
+	CHECK(card_frames == expected_frames);
+	CHECK(expected_frames >= 3 * 60 - 1);
+	CHECK(expected_frames <= 3 * 60 + 1);
+	CHECK(early_screens == 0);
+	CHECK(first_seconds_left == doctest::Approx(host::kKillCardSeconds).epsilon(dt / host::kKillCardSeconds));
 	CHECK(!m.kill_card.visible);
 	CHECK(m.spawn_screen.visible);
 	CHECK(!m.spawn_screen.at_join);
@@ -273,6 +288,8 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 	in.own_respawn_tick = 2300;
 	in.own_revive_until = 2780;
 	frame(2001, std::span<const host::PresentEvent>(&own_death2, 1));
+	CHECK(!m.kill_card.visible);
+	frame(2001 + 60, {});
 	CHECK(m.kill_card.visible);
 	CHECK(m.kill_card.serial == 2);
 	CHECK(m.kill_card.distance_m < 0.0f);
