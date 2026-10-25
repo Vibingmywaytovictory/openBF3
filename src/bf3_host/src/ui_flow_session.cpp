@@ -419,12 +419,28 @@ void UiFlowSession::ui_graph_input(uint32_t p_node, int32_t p_port) {
 
 bool UiFlowSession::input_action(int32_t p_action) {
 	const bool handled = flow_->input_action(p_action);
+	drain_flow_log();
+	initialize_opened();
+	return handled;
+}
+
+void UiFlowSession::drain_flow_log() {
 	for (const std::string &l : flow_->log()) {
 		note(l);
 	}
 	flow_->clear_log();
+}
+
+void UiFlowSession::screen_initialized(uint64_t p_screen) {
+	flow_->screen_initialized(p_screen);
+	drain_flow_log();
 	initialize_opened();
-	return handled;
+}
+
+void UiFlowSession::screen_exited(uint64_t p_screen) {
+	flow_->screen_exited(p_screen);
+	drain_flow_log();
+	initialize_opened();
 }
 
 bool UiFlowSession::widget_fired(std::string_view p_partition, std::string_view p_instance, std::string_view p_query,
@@ -502,4 +518,17 @@ void UiFlowSession::graph_output(std::string_view p_graph, std::string_view p_ou
 	}
 }
 
+void ui_flow_tdm_pc_defaults(UiFlowSession &r_session) {
+	r_session.set_data("ui/uicomponents/uisettingscomp", -668821714, "win32");
+	r_session.set_data("ui/uicomponents/uisettingscomp", 1733092213, "TeamDeathMatch0");
+	r_session.set_data("ui/uicomponents/uisettingscomp", 1870459195, "TeamDeathMatch");
+	r_session.set_data("ui/uicomponents/uispawnpointcomp", -990983020, "True");
+	r_session.set_data("ui/uicomponents/uispawnpointcomp", -225037516, "True");
+	r_session.set_data("ui/uicomponents/uispectatorcomp", -366910738, "False");
+	r_session.set_data("ui/uicomponents/uiendofroundcomp", -1857162541, "False");
+	r_session.set_data("ui/uicomponents/uiendofroundcomp", 1450248605, "False");
+	r_session.set_data("ui/uicomponents/uisoldiercomp", 347110003, "True");
+	r_session.set_data("ui/uicomponents/uikitcomp", 1985842909, "0");
+	r_session.set_data("ui/uicomponents/uispawnlogiccomp", -1005581981, "0");
+}
 }

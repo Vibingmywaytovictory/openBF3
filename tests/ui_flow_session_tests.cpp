@@ -118,21 +118,6 @@ struct Script {
 		return -1;
 	}
 };
-
-void tdm_pc_settings(UiFlowSession &r_session) {
-	r_session.set_data("ui/uicomponents/uisettingscomp", -668821714, "win32");
-	r_session.set_data("ui/uicomponents/uisettingscomp", 1733092213, "TeamDeathMatch0");
-	r_session.set_data("ui/uicomponents/uisettingscomp", 1870459195, "TeamDeathMatch");
-	r_session.set_data("ui/uicomponents/uispawnpointcomp", -990983020, "True");
-	r_session.set_data("ui/uicomponents/uispawnpointcomp", -225037516, "True");
-	r_session.set_data("ui/uicomponents/uispectatorcomp", -366910738, "False");
-	r_session.set_data("ui/uicomponents/uiendofroundcomp", -1857162541, "False");
-	r_session.set_data("ui/uicomponents/uiendofroundcomp", 1450248605, "False");
-	r_session.set_data("ui/uicomponents/uisoldiercomp", 347110003, "True");
-	r_session.set_data("ui/uicomponents/uikitcomp", 1985842909, "0");
-	r_session.set_data("ui/uicomponents/uispawnlogiccomp", -1005581981, "0");
-}
-
 }
 
 TEST_SUITE("ui-flow-session") {
@@ -149,7 +134,7 @@ TEST_SUITE("ui-flow-session") {
 					"%zu, round over %zu\n",
 				st.ui_graph_nodes, st.graphs, st.watches, st.fades, st.end_of_round_nodes, st.pre_round_nodes,
 				st.round_over_nodes);
-		tdm_pc_settings(s);
+		ui_flow_tdm_pc_defaults(s);
 		Script sc{ s };
 		sc.state.phase = net::MatchPhase::PreRound;
 		sc.state.joined = true;
@@ -271,6 +256,73 @@ TEST_SUITE("ui-flow-session") {
 		}
 		for (const std::string &e : s.flow().errors()) {
 			std::printf("ui.flow.session flow error %s\n", e.c_str());
+		}
+		CHECK(s.errors().empty());
+		CHECK(s.flow().errors().empty());
+	}
+
+	TEST_CASE("ui flow session: a screen host reports enter and exit") {
+		Level *l = level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		UiFlowSessionOptions o;
+		o.initialize_screens = false;
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level, o);
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		UiFlowSession &s = **made;
+		ui_flow_tdm_pc_defaults(s);
+		UiGameState st;
+		st.phase = net::MatchPhase::PreRound;
+		st.joined = true;
+		const auto run = [&](int p_ticks) {
+			for (int i = 0; i < p_ticks; ++i) {
+				REQUIRE(s.update(st).ok());
+			}
+		};
+		const auto names = [&](const std::vector<uint64_t> &p_ids) {
+			Lines out;
+			for (const uint64_t id : p_ids) {
+				const ui::UiFlowScreen *f = s.flow().screen(id);
+				out.push_back(f != nullptr ? ui::ui_data_category_leaf(f->partition) : std::string("?"));
+			}
+			return out;
+		};
+		run(60);
+		const std::vector<uint64_t> joined = s.flow().take_opened();
+		for (const std::string &n : names(joined)) {
+			std::printf("ui.flow.session host opened %s\n", n.c_str());
+		}
+		CHECK(names(joined) ==
+				Lines{ "chatlogscreen", "spawnscreenticketcountertdmscreen", "scoreboardtwoteamshud32screen",
+						"spawnbuttonscreen", "spawnscreenpc" });
+		for (const uint64_t id : joined) {
+			CHECK_FALSE(s.flow().screen(id)->initialized);
+		}
+		CHECK(std::count(s.log().begin(), s.log().end(), "push emptyscreen") == 0);
+		s.clear_log();
+		for (const uint64_t id : joined) {
+			s.screen_initialized(id);
+			CHECK(s.flow().screen(id)->initialized);
+		}
+		for (const std::string &line : s.log()) {
+			std::printf("ui.flow.session host initialized: %s\n", line.c_str());
+		}
+		CHECK(std::count(s.log().begin(), s.log().end(), "push emptyscreen") == 1);
+		CHECK(std::count(s.log().begin(), s.log().end(), "push tablistenerscreen") == 1);
+		CHECK(names(s.flow().take_opened()) == Lines{ "emptyscreen", "tablistenerscreen" });
+		st.own_spawns = 1;
+		run(60);
+		const std::vector<uint64_t> closing = s.flow().take_closing();
+		for (const std::string &n : names(closing)) {
+			std::printf("ui.flow.session host closing %s\n", n.c_str());
+		}
+		CHECK(names(closing) == Lines{ "spawnscreenpc", "spawnbuttonscreen", "spawnscreenticketcountertdmscreen" });
+		for (const uint64_t id : closing) {
+			REQUIRE(s.flow().screen(id) != nullptr);
+			CHECK(s.flow().screen(id)->exiting);
+			s.screen_exited(id);
+			CHECK(s.flow().screen(id) == nullptr);
 		}
 		CHECK(s.errors().empty());
 		CHECK(s.flow().errors().empty());

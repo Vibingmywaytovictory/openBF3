@@ -84,6 +84,8 @@ public:
 	bool widget_fired(std::string_view p_partition, std::string_view p_instance, std::string_view p_query,
 			std::optional<std::string> p_value = std::nullopt);
 	void set_data(std::string_view p_category, int32_t p_key, std::string p_value);
+	void screen_initialized(uint64_t p_screen);
+	void screen_exited(uint64_t p_screen);
 
 	core::ui::UiFlow &flow() { return *flow_; }
 	const core::ui::UiFlow &flow() const { return *flow_; }
@@ -123,6 +125,7 @@ private:
 	void ui_graph_input(uint32_t p_node, int32_t p_port);
 	void pre_round(UiPreRoundEvent p_event);
 	void note(std::string p_line);
+	void drain_flow_log();
 	void initialize_opened();
 
 	UiFlowSessionOptions options_;
@@ -152,4 +155,5 @@ private:
 	UiFlowSessionStats stats_;
 };
 
+void ui_flow_tdm_pc_defaults(UiFlowSession &r_session);
 }
