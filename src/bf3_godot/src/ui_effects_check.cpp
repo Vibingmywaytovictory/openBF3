@@ -228,6 +228,7 @@ struct Bf3UiEffectsCheck::State {
 	Bf3UiCursor *cursor = nullptr;
 	Vector2 cursor_at;
 	float cursor_pixels = 1.0f;
+	Rgb cursor_fill;
 
 	Bf3OverviewMap *overview = nullptr;
 	CanvasLayer *overview_layer = nullptr;
@@ -492,6 +493,7 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			const Vector2 inside = tip + Vector2(3.0f, 9.0f) * unit;
 			const Vector2 outside = tip + Vector2(12.0f, 4.0f) * unit;
 			const Rgb fill = pixel(shown, int32_t(inside.x), int32_t(inside.y));
+			s.cursor_fill = fill;
 			const Rgb off = pixel(shown, int32_t(outside.x), int32_t(outside.y));
 			const Rgb off_before = pixel(s.deploy, int32_t(outside.x), int32_t(outside.y));
 			const auto c8 = [](float p_v) { return double(p_v) * 255.0; };
@@ -513,9 +515,11 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			const Rgb now = pixel(hidden, int32_t(inside.x), int32_t(inside.y));
 			const Rgb before = pixel(s.deploy, int32_t(inside.x), int32_t(inside.y));
 			const bool gone = near(now.r, before.r, 2.0 / 255.0) && near(now.g, before.g, 2.0 / 255.0) && near(now.b, before.b, 2.0 / 255.0);
-			row("cursor hidden", !s.cursor->cursor_shown() && gone && s.cursor->stats().hides == 1,
-					bf3::core::fmt("pixel under the arrow %.0f %.0f %.0f, before the cursor %.0f %.0f %.0f", double(now.r) * 255.0, double(now.g) * 255.0, double(now.b) * 255.0,
-							double(before.r) * 255.0, double(before.g) * 255.0, double(before.b) * 255.0));
+			const float shown_diff = std::max({ std::fabs(s.cursor_fill.r - now.r), std::fabs(s.cursor_fill.g - now.g), std::fabs(s.cursor_fill.b - now.b) });
+			row("cursor hidden", !s.cursor->cursor_shown() && gone && shown_diff > 0.25f && s.cursor->stats().hides == 1,
+					bf3::core::fmt("pixel under the arrow %.0f %.0f %.0f, before the cursor %.0f %.0f %.0f, while shown %.0f %.0f %.0f", double(now.r) * 255.0,
+							double(now.g) * 255.0, double(now.b) * 255.0, double(before.r) * 255.0, double(before.g) * 255.0, double(before.b) * 255.0,
+							double(s.cursor_fill.r) * 255.0, double(s.cursor_fill.g) * 255.0, double(s.cursor_fill.b) * 255.0));
 			s.overview_layer = memnew(CanvasLayer);
 			s.overview_layer->set_name("OverviewCheckUi");
 			get_parent()->add_child(s.overview_layer);
