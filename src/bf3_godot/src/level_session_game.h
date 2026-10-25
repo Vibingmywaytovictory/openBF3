@@ -5,6 +5,7 @@
 #include "crosshair_walk_check.h"
 #include "native_hud_moments.h"
 #include "game_frame.h"
+#include "game_settings.h"
 #include "tdm_flow.h"
 
 #include "bf3/anim/viewmodel_anim.h"
@@ -191,6 +192,9 @@ struct GameState {
 	std::unique_ptr<Bf3GameFx, void (*)(Bf3GameFx *)> fx{ nullptr, nullptr };
 	std::unique_ptr<Bf3GameAudio, void (*)(Bf3GameAudio *)> audio{ nullptr, nullptr };
 	std::unique_ptr<Bf3GameCrowd, void (*)(Bf3GameCrowd *)> crowd{ nullptr, nullptr };
+	std::unique_ptr<GameSettings> settings;
+	std::string settings_path;
+	bool settings_missed_printed = false;
 	bool crowd_built = false;
 	std::vector<std::string> part_notes;
 

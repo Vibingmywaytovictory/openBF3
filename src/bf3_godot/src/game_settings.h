@@ -26,6 +26,8 @@ class InputMapper;
 inline constexpr std::string_view kSettingsFile = "user://settings.cfg";
 inline constexpr std::string_view kRefusedSettingsSuffix = ".refused";
 
+std::string settings_file_of_args();
+
 class GameSettings {
 public:
 	static core::Result<std::unique_ptr<GameSettings>> load(const core::EbxResolver &p_db);

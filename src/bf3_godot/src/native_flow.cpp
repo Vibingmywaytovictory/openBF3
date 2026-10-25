@@ -88,9 +88,19 @@ bool NativeFlow::poll() {
 		return false;
 	}
 	level_ = std::move(loaded_->level);
+	base_bindings_ = loaded_->bindings;
 	router_.set_bindings(std::move(loaded_->bindings));
 	session_ = std::move(loaded_->session);
 	loaded_.reset();
+	return true;
+}
+
+bool NativeFlow::apply_key_bindings(const bf3::core::ui::KeyBindingTable &p_table, uint64_t p_revision) {
+	if (session_ == nullptr || p_revision == bindings_revision_) {
+		return false;
+	}
+	bindings_revision_ = p_revision;
+	router_.set_bindings(bf3::core::ui::ui_input_bindings_with(base_bindings_, p_table));
 	return true;
 }
 

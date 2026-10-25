@@ -20,6 +20,11 @@ namespace bf3::godot_side {
 using namespace godot;
 namespace ui = bf3::core::ui;
 
+std::string settings_file_of_args() {
+	const std::string arg = user_arg_value("settings-file");
+	return arg.empty() ? std::string(kSettingsFile) : arg;
+}
+
 core::Result<std::unique_ptr<GameSettings>> GameSettings::load(const core::EbxResolver &p_db) {
 	core::Result<ui::OptionsCatalog> catalog = ui::read_options_catalog(p_db);
 	if (!catalog) {

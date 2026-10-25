@@ -537,6 +537,14 @@ bool Bf3LevelSession::game_load_assets(const host::LevelDatabase &p_db, bf3::cor
 				note(line);
 			}
 		}
+		if (!g.checks()) {
+			bf3::core::Result<std::unique_ptr<GameSettings>> settings = GameSettings::load(p_db.level->db());
+			if (!settings) {
+				note("[game] ERROR settings: " + settings.error().message);
+			} else {
+				g.settings = std::move(*settings);
+			}
+		}
 	}
 	return true;
 }
@@ -953,11 +961,36 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		}
 		g.part_notes.clear();
 		build_game_ui(this, g, !headless_);
-		g.base_sensitivity = mapper_.mouse_sensitivity;
 		if (!g.hud_static_error.empty()) {
 			UtilityFunctions::print(to_godot("[game] HUD feed without weapon rows: " + g.hud_static_error));
 		}
+		if (g.settings != nullptr) {
+			g.settings->read_display();
+			g.settings_path = settings_file_of_args();
+			const std::string &path = g.settings_path;
+			const bf3::core::Result<bool> read = g.settings->read_file(path);
+			if (!read) {
+				UtilityFunctions::print(to_godot("[game] ERROR settings: " + read.error().message));
+			} else if (*read) {
+				UtilityFunctions::print(to_godot("[game] settings: " + path + " loaded"));
+			} else {
+				UtilityFunctions::print(to_godot("[game] settings: no " + path + ", the install's defaults"));
+			}
+		}
 	}
+	if (g.settings != nullptr) {
+		const bf3::core::Status s =
+				g.settings->frame(mapper_, g.audio != nullptr ? g.audio->mixer() : nullptr, g.settings_path);
+		if (!s) {
+			UtilityFunctions::print(to_godot("[game] ERROR settings: " + s.error().message));
+		}
+		if (g.settings->missed_inputs() != 0 && !g.settings_missed_printed) {
+			g.settings_missed_printed = true;
+			UtilityFunctions::print(to_godot("[game] settings: " + std::to_string(g.settings->missed_inputs()) +
+					" key binding inputs have no Godot key"));
+		}
+	}
+	g.base_sensitivity = mapper_.base_sensitivity;
 
 	if (!g.vm_built && g.vm_done.load(std::memory_order_acquire)) {
 		g.vm_built = true;

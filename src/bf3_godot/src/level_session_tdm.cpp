@@ -242,6 +242,9 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 		r_m.native_failure_printed = true;
 		UtilityFunctions::print(to_godot("[ui] ERROR native screens: " + flow.error()));
 	}
+	if (r_m.native_following && r_game.settings != nullptr) {
+		flow.apply_key_bindings(r_game.settings->store().key_bindings(), r_game.settings->store().revision());
+	}
 	host::UiGameState st;
 	st.joined = p_f.match_valid && p_f.stats.connected && !p_f.stats.refused;
 	st.phase = p_f.match_valid ? p_f.match.phase : net::MatchPhase::Loading;

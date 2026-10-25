@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/core/ui/key_bindings.h"
 #include "bf3/core/ui/ui_graph.h"
 #include "bf3/core/ui/ui_input.h"
 #include "bf3/host/ui_flow_session.h"
@@ -46,6 +47,7 @@ public:
 	bf3::host::UiFlowSession *session() { return session_.get(); }
 	const bf3::core::EbxResolver *resolver() const;
 	const bf3::core::ui::UiInputRouter &router() const { return router_; }
+	bool apply_key_bindings(const bf3::core::ui::KeyBindingTable &p_table, uint64_t p_revision);
 
 	bf3::core::Status tick(const bf3::host::UiGameState &p_state, double p_seconds);
 	std::vector<bf3::core::ui::UiFlowAction> take_actions();
@@ -64,6 +66,8 @@ private:
 	std::unique_ptr<bf3::core::level::LoadedLevel> level_;
 	std::unique_ptr<bf3::host::UiFlowSession> session_;
 	bf3::core::ui::UiInputRouter router_;
+	bf3::core::ui::UiInputBindings base_bindings_;
+	uint64_t bindings_revision_ = ~0ull;
 	std::string error_;
 	double load_seconds_ = 0.0;
 	double clock_ = 0.0;
