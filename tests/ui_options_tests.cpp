@@ -3,9 +3,12 @@
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_snapshot.h"
+#include "bf3/core/ui/hud_model.h"
 #include "bf3/core/ui/key_bindings.h"
 #include "bf3/core/ui/options.h"
+#include "bf3/core/ui/options_model.h"
 #include "bf3/core/ui/settings_store.h"
+#include "bf3/core/ui/ui_graph.h"
 #include "test_support.h"
 
 #include <cstdio>
@@ -235,20 +238,40 @@ OptionsCatalog sample_catalog() {
 	ProfileOption award = numeric("TrackAward0", ProfileOptionKind::String, 0.0, 0.0, 0.0, 0.0);
 	award.max_length = 8;
 	c.stored.push_back(award);
-	const auto add = [&](std::string_view p_source, OptionKind p_kind, std::string_view p_option) {
+	const auto add = [&](std::string_view p_source, OptionKind p_kind, std::string_view p_option, OptionRowType p_row,
+							 std::vector<std::string> p_choices) {
 		OptionSetting s;
 		s.source = std::string(p_source);
 		s.kind = p_kind;
 		s.option_id = std::string(p_option);
+		s.row = p_row;
+		s.label = "ID_" + s.source;
+		s.data_key = option_source_named(p_source)->data_key;
+		const ProfileOption *o = c.option(p_option);
+		s.min = o->min;
+		s.max = o->max;
+		s.step = o->step;
+		s.default_value = o->default_number();
+		s.choices = std::move(p_choices);
 		c.settings.push_back(std::move(s));
 	};
-	add("MasterVolume", OptionKind::Number, "Volume");
-	add("VSync", OptionKind::Bool, "VSync");
-	add("MinimapType", OptionKind::Enum, "MinimapType");
-	add("FieldOfView", OptionKind::Number, "FieldOfView");
-	add("Resolution", OptionKind::DisplayMode, kResolutionWidth);
-	add("FullscreenEnabled", OptionKind::Bool, "FullscreenEnabled");
+	std::vector<std::string> fov;
+	for (int v = 60; v <= 90; ++v) {
+		fov.push_back(std::to_string(v));
+	}
+	add("MasterVolume", OptionKind::Number, "Volume", OptionRowType::BarSelector, {});
+	add("VSync", OptionKind::Bool, "VSync", OptionRowType::TextSelector, { "ID_M_OPTIONS_OFF", "ID_M_OPTIONS_ON" });
+	add("MinimapType", OptionKind::Enum, "MinimapType", OptionRowType::TextSelector,
+			{ "ID_M_SATELLITE", "ID_M_HYBRID", "ID_M_DETAILTEXTURE" });
+	add("FieldOfView", OptionKind::Number, "FieldOfView", OptionRowType::TextSelector, fov);
+	add("Resolution", OptionKind::DisplayMode, kResolutionWidth, OptionRowType::TextSelector, {});
+	add("FullscreenEnabled", OptionKind::Bool, "FullscreenEnabled", OptionRowType::TextSelector,
+			{ "ID_M_OPTIONS_OFF", "ID_M_OPTIONS_ON" });
 	return c;
+}
+
+int32_t key_of(std::string_view p_source) {
+	return option_source_named(p_source)->data_key;
 }
 
 std::string cells(const KeyBindingRow &p_row) {
@@ -465,6 +488,103 @@ TEST_SUITE("ui-settings-unit") {
 		CHECK(s.value(kResolutionWidth) == 1920.0);
 		CHECK(s.setting_value("FullscreenEnabled") == 0.0);
 	}
+
+	TEST_CASE("options model: AS2 row data from the store, SetOptionValue, actions and key capture") {
+		const OptionsCatalog cat = sample_catalog();
+		OptionsSession o(cat, sample_table());
+		o.runtime().display_modes = { { 1280, 720, 60 }, { 1920, 1080, 144 } };
+		o.runtime().monitors = 2;
+		OptionsModel m = o.model();
+		REQUIRE(m.rows.size() == 6);
+		const OptionRowData *vol = m.row_of_field("master_volume");
+		REQUIRE(vol != nullptr);
+		CHECK(vol->row == OptionRowType::BarSelector);
+		CHECK(vol->label == "ID_MasterVolume");
+		CHECK(vol->hint == "ID_MasterVolume_HINT");
+		CHECK(vol->from == 0.0);
+		CHECK(vol->to == 1.0);
+		CHECK(vol->step == 0.01);
+		CHECK(vol->value == 1.0);
+		const OptionRowData *vsync = m.row_of_field("v_sync");
+		REQUIRE(vsync != nullptr);
+		CHECK(vsync->choices == std::vector<OptionChoice>{ { "ID_M_OPTIONS_OFF", 0 }, { "ID_M_OPTIONS_ON", 1 } });
+		CHECK(vsync->highlighted == 0);
+		const OptionRowData *fov = m.row_of_key(key_of("FieldOfView"));
+		REQUIRE(fov != nullptr);
+		CHECK(fov->choices.size() == 31);
+		CHECK(fov->choices[10] == OptionChoice{ "70", 70 });
+		CHECK(fov->highlighted == 10);
+		const OptionRowData *res = m.row_of_field("resolution");
+		REQUIRE(res != nullptr);
+		CHECK(res->choices == std::vector<OptionChoice>{ { "1280x720 60.00Hz", 0 }, { "1920x1080 144.00Hz", 1 } });
+		CHECK(m.has_field("settings_changed"));
+		CHECK(m.has_field("key_bindings_row"));
+		CHECK_FALSE(m.has_field("music_volume"));
+		CHECK_FALSE(m.settings_changed);
+
+		CHECK(o.set_option_value(key_of("MasterVolume"), 0.333));
+		CHECK(o.store().value("Volume") == doctest::Approx(0.33));
+		CHECK(o.set_option_value(key_of("FieldOfView"), 75.0));
+		CHECK_FALSE(o.set_option_value(key_of("FieldOfView"), 91.0));
+		CHECK(o.set_option_value(key_of("MinimapType"), 2.0));
+		CHECK(o.set_option_value(key_of("Resolution"), 1.0));
+		CHECK_FALSE(o.set_option_value(key_of("Resolution"), 2.0));
+		CHECK_FALSE(o.set_option_value(12345, 1.0));
+		m = o.model();
+		CHECK(m.row_of_field("field_of_view")->highlighted == 15);
+		CHECK(m.row_of_field("minimap_type")->highlighted == 2);
+		CHECK(m.row_of_field("resolution")->highlighted == 1);
+		CHECK(m.settings_changed);
+		CHECK(m.video_settings_changed);
+		CHECK(o.reset_to_default("FieldOfView"));
+		CHECK(o.store().value("FieldOfView") == 70.0);
+		CHECK(o.reset_to_default("Resolution"));
+		CHECK(o.store().value(kResolutionWidth) == 0.0);
+		CHECK_FALSE(o.reset_to_default("Nothing"));
+		CHECK(o.run(OptionsAction::Save));
+		CHECK_FALSE(o.model().settings_changed);
+		CHECK(o.run(OptionsAction::Reset));
+		CHECK(o.store().value("MinimapType") == 0.0);
+		CHECK(o.run(OptionsAction::Revert));
+		CHECK(o.store().value("MinimapType") == 2.0);
+		CHECK_FALSE(o.run(OptionsAction::None));
+		o.exit();
+		CHECK(o.model().exiting_options);
+		o.enter();
+		CHECK_FALSE(o.model().exiting_options);
+
+		REQUIRE(o.bind_key(2, KeyColumn::Keyboard));
+		m = o.model();
+		CHECK(m.key_binding_mode);
+		CHECK(m.key_bindings_row == 2);
+		CHECK(m.key_bindings_column == 0);
+		CHECK(o.key_pressed("IDK_X") == KeyBindResult::Conflict);
+		CHECK(o.model().key_bind_conflict);
+		CHECK(o.run(OptionsAction::ConfirmBind));
+		m = o.model();
+		CHECK_FALSE(m.key_binding_mode);
+		CHECK(m.key_bindings_row == -1);
+		CHECK(m.key_bindings[0][2].inputs[0] == "ID_IDK_X");
+		CHECK(m.key_bindings[0][2].label == "ID_M_OPTIONS_CONCEPTJUMP");
+		CHECK(m.key_tab_labels.size() == 5);
+		CHECK(m.settings_changed);
+
+		const std::vector<std::string> save = { "SAVE" };
+		const std::vector<std::string> revert = { "REVERT" };
+		const std::vector<std::string> apply = { "APPLY" };
+		const std::vector<std::string> one = { "1" };
+		const std::vector<std::string> zero = { "0" };
+		CHECK(options_action_of(-2113864226, save) == OptionsAction::Save);
+		CHECK(options_action_of(-2113864226, revert) == OptionsAction::Revert);
+		CHECK(options_action_of(-145439803, apply) == OptionsAction::ApplyVideo);
+		CHECK(options_action_of(-145439803, revert) == OptionsAction::RevertVideo);
+		CHECK(options_action_of(-936324416, {}) == OptionsAction::Reset);
+		CHECK(options_action_of(-164353320, {}) == OptionsAction::BindKey);
+		CHECK(options_action_of(1887665057, one) == OptionsAction::ConfirmBind);
+		CHECK(options_action_of(1887665057, zero) == OptionsAction::RevertBind);
+		CHECK(options_action_of(-2113864226, one) == OptionsAction::None);
+		CHECK(options_action_of(7, {}) == OptionsAction::None);
+	}
 }
 
 TEST_SUITE("ui-options") {
@@ -660,6 +780,58 @@ TEST_SUITE("ui-options") {
 		REQUIRE(again.load_text(back.saved_text()).ok());
 		CHECK(again.value("Volume") == doctest::Approx(0.3));
 		CHECK(again.key_bindings().input({ 0, 0, KeyColumn::Keyboard }) == "IDK_ArrowUp");
+	}
+
+	TEST_CASE("options model: every UISettingsComp model row is a model field; optionsgraph's actions map") {
+		OptionsLevel *l = options_level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		Result<OptionsCatalog> c = read_options_catalog(*l->lib);
+		Result<KeyBindingMaps> maps = read_key_binding_maps(*l->lib);
+		Result<std::vector<std::string>> tabs = read_key_binding_tabs(*l->lib);
+		REQUIRE((c.ok() && maps.ok() && tabs.ok()));
+		Result<KeyBindingTable> t = KeyBindingTable::build(*maps, *tabs);
+		REQUIRE(t.ok());
+		OptionsSession o(*c, *t);
+		const OptionsModel m = o.model();
+		CHECK(m.rows.size() == 41);
+		size_t served = 0;
+		for (const HudBinding &b : kHudBindings) {
+			if (b.component != "UISettingsCompData" || b.kind != HudBindKind::Model) {
+				continue;
+			}
+			if (b.field == "current_game_mode" || b.field == "current_game_mode_name" || b.field == "is_pc") {
+				continue;
+			}
+			CAPTURE(b.source);
+			CHECK(m.has_field(b.field));
+			++served;
+		}
+		CHECK(served == 49);
+		for (const OptionRowData &r : m.rows) {
+			CAPTURE(r.source);
+			if (r.row == OptionRowType::TextSelector && r.source != "Resolution") {
+				CHECK(!r.choices.empty());
+				CHECK(r.highlighted >= 0);
+				CHECK(size_t(r.highlighted) < r.choices.size());
+			}
+		}
+		CHECK(m.row_of_field("minimap_type")->hint == "ID_M_MINIMAPTYPE_HINT");
+		Result<UiGraphAsset> g = read_ui_graph_asset(*l->lib, "ui/flow/graph/options/optionsgraph");
+		REQUIRE_MESSAGE(g.ok(), (g.ok() ? std::string() : g.error().message));
+		std::string actions;
+		for (const UiGraphNode &n : g->nodes) {
+			const OptionsAction a = options_action_of(n.action_key, n.params);
+			if (a != OptionsAction::None) {
+				actions += n.name + "=" + std::to_string(int(a)) + " ";
+			}
+		}
+		std::printf("ui.options graph actions %s\n", actions.c_str());
+		CHECK(actions ==
+				"SaveOptions=1 RevertResolution=4 RevertOptions=2 Reset Options=5 ApplyVideoSettings=3 BindKey=6 "
+				"ConfirmBindKey=7 RevertBindKey=8 "
+				"Reset Options=5 ");
 	}
 
 	TEST_CASE("options: install unchanged") {

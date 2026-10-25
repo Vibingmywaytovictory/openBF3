@@ -18,9 +18,9 @@ namespace {
 constexpr float kPi = 3.14159265358979f;
 
 static_assert(std::size(ui::kHudBindings) == 515);
-static_assert(ui::hud_binding_count(ui::HudBindKind::Model) == 226);
-static_assert(ui::hud_binding_count(ui::HudBindKind::Client) == 131);
-static_assert(ui::hud_binding_count(ui::HudBindKind::Unused) == 158);
+static_assert(ui::hud_binding_count(ui::HudBindKind::Model) == 275);
+static_assert(ui::hud_binding_count(ui::HudBindKind::Client) == 88);
+static_assert(ui::hud_binding_count(ui::HudBindKind::Unused) == 152);
 static_assert(ui::hud_binding_count("UIWeaponCompData") == 63);
 static_assert(ui::hud_binding_count("UISoldierCompData") == 16);
 static_assert(ui::hud_binding_count("UICapturepointCompData") == 12);
