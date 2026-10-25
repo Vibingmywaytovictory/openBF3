@@ -125,6 +125,8 @@ struct GameState {
 	std::string vm_tuning_source;
 
 	std::array<std::unordered_map<uint16_t, int>, 2> def_items;
+	std::vector<bool> def_switch_when_empty;
+	bool slot_selectable(const bf3::net::WeaponSlotWire &p_slot) const;
 	std::unique_ptr<bf3::sim::CollisionWorld> world;
 	std::shared_ptr<ServerShotRecorder> recorder;
 

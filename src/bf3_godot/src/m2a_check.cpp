@@ -1695,6 +1695,44 @@ void M2aCheck::State::kit_quick_throw(const std::string &p_tag) {
 				"the viewmodel drew the grenade's ThrowStart and Throw clips", (st.clips_seen & want) == want);
 		return true;
 	});
+	auto fire_frames = std::make_shared<uint32_t>(0);
+	auto off_weapon_frames = std::make_shared<uint32_t>(0);
+	add(tag + " empty", 2.0, [fire_frames, off_weapon_frames](State &st, double p_t, bool p_first) {
+		if (p_first) {
+			st.mark();
+			*fire_frames = 0;
+			*off_weapon_frames = 0;
+			st.mapper().script_press(Action::Grenade);
+			st.mapper().script_hold(Action::Grenade, true);
+		}
+		if (p_t >= 0.1) {
+			st.mapper().script_hold(Action::Grenade, false);
+		}
+		*fire_frames += (st.mapper().sample().held_buttons & sw::weapon_buttons::kFire) != 0 ? 1u : 0u;
+		*off_weapon_frames += st.g.weapon.active_slot != 0 || st.g.weapon.pending_slot != 0xFF ? 1u : 0u;
+		return p_t >= 1.5;
+	});
+	add(tag + " empty rows", 1.0, [tag, fire_frames, off_weapon_frames](State &st, double, bool) {
+		const net::WeaponSlotWire &g6 = st.f().own_weapons_curr.slots[InputMapper::kQuickThrowSlot];
+		st.row(tag + ".empty.no_grenade", double(g6.magazine + g6.reserve),
+				"every grenade is used before G is pressed again (magazine + reserve of slot 6)",
+				st.f().own_weapons_valid && g6.magazine == 0 && g6.reserve == 0);
+		uint32_t switches = 0;
+		for (size_t i = st.mark_timed; i < st.g.server_timed.size(); ++i) {
+			const sw::TimedWeaponEvent &e = st.g.server_timed[i].event;
+			switches += (e.event & sw::weapon_events::kDeployStarted) != 0 ? 1u : 0u;
+		}
+		st.row(tag + ".empty.no_switch", double(switches) + 10.0 * double(*off_weapon_frames),
+				"G with no grenade left switches nothing (AllowSwitchingToWeaponOutOfAmmo false): no DeployStarted on "
+				"the server, the primary stays in hand (value deploys + 10 x frames off slot 0)",
+				switches == 0 && *off_weapon_frames == 0 && st.g.weapon.active_slot == 0 &&
+						st.mapper().wanted_slot() == 0xFF);
+		st.row(tag + ".empty.no_fire", double(*fire_frames), "no fire input is held for the missing grenade",
+				*fire_frames == 0);
+		st.row(tag + ".empty.not_quick", st.mapper().quick_throwing() ? 1.0 : 0.0, "no quick throw is left pending",
+				!st.mapper().quick_throwing());
+		return true;
+	});
 }
 
 void M2aCheck::State::kit_m67(const std::string &p_tag, bool p_shots) {

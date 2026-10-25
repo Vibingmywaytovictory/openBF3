@@ -383,6 +383,8 @@ TEST_SUITE("gameplay") {
 		CHECK(m67.projectile.explosion.inner_blast_radius == 1.5f);
 		CHECK(m67.projectile.explosion.blast_radius == 7.0f);
 		CHECK(m67.fire.hold_delay == 0.5f);
+		CHECK_FALSE(m67.allow_switching_out_of_ammo);
+		CHECK(s870.allow_switching_out_of_ammo);
 
 		CHECK(base_variant_of(*lib, "weapons/m16a4/m16a4") == "weapons/m16a4/u_m16a4");
 		const WeaponDef ugl = resolve(*lib, "weapons/m16a4/u_m16a4_m320_he");

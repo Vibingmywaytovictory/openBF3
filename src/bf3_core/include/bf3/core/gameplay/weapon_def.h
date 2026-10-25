@@ -275,6 +275,7 @@ struct WeaponDef {
 	bool silenced = false;
 	bool enable_breath_control = false;
 	bool can_be_in_supported_shooting = false;
+	bool allow_switching_out_of_ammo = true;
 
 	std::string firing_data;
 	float deploy_time = 0;

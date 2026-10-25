@@ -134,8 +134,11 @@ std::string format_weapon(const WeaponDef &p_w, const MaterialGrid *p_grid, cons
 	}
 	line("class", p_w.weapon_class + "  anim " + p_w.anim_base_set + (p_w.weapon_anim_type.empty() ? "" : " / " + p_w.weapon_anim_type) + "  render fov " +
 					num(p_w.render_fov) + "  zoom fov " + (p_w.zoom_render_fov > 0 ? num(p_w.zoom_render_fov) : "-"));
-	line("flags", std::string("silenced ") + (p_w.silenced ? "yes" : "no") + "  breath control " + (p_w.enable_breath_control ? "yes" : "no") +
-					"  supported shooting " + (p_w.can_be_in_supported_shooting ? "yes" : "no"));
+	line("flags",
+			std::string("silenced ") + (p_w.silenced ? "yes" : "no") + "  breath control " +
+					(p_w.enable_breath_control ? "yes" : "no") + "  supported shooting " +
+					(p_w.can_be_in_supported_shooting ? "yes" : "no") + "  switch to when empty " +
+					(p_w.allow_switching_out_of_ammo ? "yes" : "no"));
 	line("aiming", p_w.aiming_controller);
 	line("sound", p_w.sound);
 	line("firing data", p_w.firing_data);

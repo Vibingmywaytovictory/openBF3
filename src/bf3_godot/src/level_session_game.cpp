@@ -187,6 +187,18 @@ int GameState::item_of(uint8_t p_team, uint16_t p_def) const {
 	return it != def_items[size_t(p_team - 1)].end() ? it->second : -1;
 }
 
+bool GameState::slot_selectable(const bf3::net::WeaponSlotWire &p_slot) const {
+	if (p_slot.def == sw::kNoWeapon) {
+		return false;
+	}
+	if (p_slot.magazine > 0 || p_slot.reserve > 0 || p_slot.def >= def_switch_when_empty.size() ||
+			def_switch_when_empty[p_slot.def]) {
+		return true;
+	}
+	return gunplay != nullptr && gunplay->table != nullptr && p_slot.def < gunplay->table->defs.size() &&
+			gunplay->table->defs[p_slot.def].unlimited_ammo;
+}
+
 bool GameState::hud_ready() const {
 	return (hud_items == nullptr || hud_items->is_loaded()) && (native_hud == nullptr || native_hud->is_ready());
 }
@@ -422,6 +434,10 @@ bool Bf3LevelSession::game_load_assets(const host::LevelDatabase &p_db, bf3::cor
 		return false;
 	}
 	g.gunplay = *inputs;
+	g.def_switch_when_empty.clear();
+	for (const bf3::core::gameplay::WeaponDef &d : shared->gunplay->defs) {
+		g.def_switch_when_empty.push_back(d.allow_switching_out_of_ammo);
+	}
 	bf3::core::Result<host::HudStatic> hud_static = host::make_hud_static(*g.gunplay->table, shared->gunplay->defs);
 	if (hud_static) {
 		g.hud_static = std::move(*hud_static);
@@ -682,15 +698,16 @@ void Bf3LevelSession::game_presented(double p_delta, uint64_t p_now_ns) {
 		g.killed_by = 0xFF;
 	}
 
-	uint16_t filled = 0;
+	uint16_t selectable = 0;
 	if (f.own_weapons_valid) {
 		for (size_t s = 0; s < sw::kMaxWeaponSlots; ++s) {
-			if (f.own_weapons_curr.slots[s].def != sw::kNoWeapon) {
-				filled = uint16_t(filled | (1u << s));
+			if (g.slot_selectable(f.own_weapons_curr.slots[s])) {
+				selectable = uint16_t(selectable | (1u << s));
 			}
 		}
 	}
-	mapper_.set_weapon_slots(g.weapon.valid ? g.weapon.active_slot : uint8_t(0), g.weapon.valid ? g.weapon.pending_slot : uint8_t(0xFF), filled);
+	mapper_.set_weapon_slots(g.weapon.valid ? g.weapon.active_slot : uint8_t(0),
+			g.weapon.valid ? g.weapon.pending_slot : uint8_t(0xFF), selectable);
 	mapper_.set_active_weapon(
 			g.weapon.valid ? g.weapon.phase : sw::WeaponPhase::None, g.weapon.magazine, g.weapon.reserve);
 	mapper_.set_weapons_allowed(done_ && g.alive && g.weapon.valid);

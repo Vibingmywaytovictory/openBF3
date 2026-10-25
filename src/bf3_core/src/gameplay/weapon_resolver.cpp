@@ -223,6 +223,7 @@ Result<WeaponDef> resolve_weapon(const EbxResolver &p_db, std::string_view p_par
 	w.silenced = f.flag_or(s, "IsSilenced", false);
 	w.enable_breath_control = f.flag_or(s, "EnableBreathControl", false);
 	w.can_be_in_supported_shooting = f.flag_or(s, "CanBeInSupportedShooting", false);
+	w.allow_switching_out_of_ammo = f.flag_or(s, "AllowSwitchingToWeaponOutOfAmmo", true);
 	w.aiming_controller = ref_partition(f, s, "AimingController");
 
 	const std::vector<ModifierEntry> mods = active_modifiers(f, s, active);

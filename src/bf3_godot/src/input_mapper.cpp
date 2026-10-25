@@ -318,12 +318,14 @@ void InputMapper::set_weapons_allowed(bool p_allowed) {
 	weapon_.allowed = p_allowed;
 }
 
-void InputMapper::set_weapon_slots(uint8_t p_active, uint8_t p_pending, uint16_t p_filled) {
+void InputMapper::set_weapon_slots(uint8_t p_active, uint8_t p_pending, uint16_t p_selectable) {
 	weapon_.active = p_active;
 	weapon_.pending = p_pending;
-	weapon_.filled = p_filled;
+	weapon_.filled = p_selectable;
 
-	if (weapon_.wanted != 0xFF && (weapon_.wanted == p_active || weapon_.wanted == p_pending || (p_filled & (1u << weapon_.wanted)) == 0)) {
+	if (weapon_.wanted != 0xFF &&
+			(weapon_.wanted == p_active || weapon_.wanted == p_pending ||
+					(p_selectable & (1u << weapon_.wanted)) == 0)) {
 		weapon_.wanted = 0xFF;
 	}
 }
@@ -354,8 +356,12 @@ void InputMapper::set_active_weapon(sim::weapons::WeaponPhase p_phase, int32_t p
 	}
 }
 
+bool InputMapper::slot_selectable(uint8_t p_slot) const {
+	return p_slot < sim::weapons::kMaxWeaponSlots && (weapon_.filled == 0 || (weapon_.filled & (1u << p_slot)) != 0);
+}
+
 void InputMapper::select_weapon(uint8_t p_slot) {
-	if (p_slot < sim::weapons::kMaxWeaponSlots && (weapon_.filled == 0 || (weapon_.filled & (1u << p_slot)) != 0)) {
+	if (slot_selectable(p_slot)) {
 		weapon_.wanted = p_slot;
 	}
 }
@@ -452,7 +458,7 @@ void InputMapper::script_press(WeaponAction p_action) {
 			break;
 		case WeaponAction::Grenade:
 			select_weapon(kQuickThrowSlot);
-			if (weapon_.allowed && !free_camera_ &&
+			if (weapon_.allowed && !free_camera_ && slot_selectable(kQuickThrowSlot) &&
 					(weapon_.wanted == kQuickThrowSlot || weapon_.active == kQuickThrowSlot) && !weapon_.quick) {
 				weapon_.quick = true;
 				weapon_.quick_held = false;

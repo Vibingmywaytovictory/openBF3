@@ -110,7 +110,7 @@ public:
 	void set_weapons_allowed(bool p_allowed);
 	bool weapons_allowed() const { return weapon_.allowed; }
 
-	void set_weapon_slots(uint8_t p_active, uint8_t p_pending, uint16_t p_filled);
+	void set_weapon_slots(uint8_t p_active, uint8_t p_pending, uint16_t p_selectable);
 	static constexpr uint8_t kQuickThrowSlot = 6;
 	void set_active_weapon(bf3::sim::weapons::WeaponPhase p_phase, int32_t p_magazine, int32_t p_reserve);
 	bool quick_throwing() const { return weapon_.quick; }
@@ -131,6 +131,7 @@ public:
 private:
 	bool weapon_handle_event(const godot::Ref<godot::InputEvent> &p_event);
 	void weapon_sample(bf3::host::InputSample &r_sample) const;
+	bool slot_selectable(uint8_t p_slot) const;
 	void select_weapon(uint8_t p_slot);
 	void cycle_weapon(int p_direction);
 	struct WeaponKeys {

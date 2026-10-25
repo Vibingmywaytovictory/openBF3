@@ -339,6 +339,7 @@ void io_def(IO &io, WeaponDef &d) {
 	io.v(d.silenced);
 	io.v(d.enable_breath_control);
 	io.v(d.can_be_in_supported_shooting);
+	io.v(d.allow_switching_out_of_ammo);
 	io.v(d.firing_data);
 	io.v(d.deploy_time);
 	io.v(d.alt_deploy_time);
