@@ -154,7 +154,7 @@ void ImageManagerWidget::hide(HudWidgetHost &r_host) {
 
 void ImageManagerWidget::dequeue(HudWidgetHost &r_host) {
 	currently_loading_ = false;
-	if (queued_) {
+	if (queued_ && !queued_->empty()) {
 		const std::string next = *queued_;
 		update_image_url(r_host, next);
 		queued_.reset();

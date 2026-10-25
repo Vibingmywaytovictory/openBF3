@@ -185,6 +185,27 @@ TEST_SUITE("ui-scene2") {
 		CHECK(s.hud->stats().as2.failed_ops == 0);
 	}
 
+	TEST_CASE("ImageManager: dequeue skips a queued empty url as the AS2 truthiness test does") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		RetailScreen s = open_retail_screen(*r, kKillScreenPartition);
+		auto *weapon = dynamic_cast<ImageManagerWidget *>(s.hud->controller(kWeaponImage));
+		REQUIRE(weapon != nullptr);
+		HudWidgetHost &host = *s.hud->host(kWeaponImage);
+		std::vector<std::string> calls;
+		weapon->register_callback([&](std::string_view p_message, ImageManagerWidget &) { calls.emplace_back(p_message); });
+		weapon->update_image_url(host, kWeaponLineArt);
+		weapon->update_image_url(host, "");
+		s.hud->advance(1.0 / 30.0);
+		s.hud->advance(1.0 / 30.0);
+		CHECK(calls == std::vector<std::string>{ "LoadStarted", "ImageLoaded" });
+		CHECK(weapon->url() == kWeaponLineArt);
+		CHECK(weapon->contains_image());
+		CHECK(s.at(std::string(kWeaponImage) + ".imgHolder").image == "ui/art/persistence/weapons/m16a4");
+	}
+
 	TEST_CASE("DogTagPair on the retail movie: the tags sit at 19,-65 rot 8 and 190,-45 rot -5, and swapDepths raises the advanced tag") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {
