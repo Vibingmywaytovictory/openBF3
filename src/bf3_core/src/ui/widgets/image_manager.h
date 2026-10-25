@@ -60,6 +60,7 @@ private:
 	bool contains_image_ = false;
 	bool currently_loading_ = false;
 	bool texture_pending_ = false;
+	bool texture_requested_ = false;
 };
 
 }

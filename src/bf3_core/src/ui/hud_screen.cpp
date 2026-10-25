@@ -554,7 +554,7 @@ void HudWidgetHost::add_tween(const As2Clip &p_clip, HudTweenProperty p_property
 As2Clip HudWidgetHost::attach_movie(const As2Clip &p_parent, std::string_view p_linkage, std::string_view p_name, int32_t p_depth) {
 	const As2Clip made = p_parent.attach_movie(hud_linkage_of(p_parent, p_linkage), p_name, p_depth);
 	if (const SwfSceneNode *n = made.node()) {
-		screen_.construct_subtree(n->id);
+		screen_.construct_subtree(n->id, true);
 	}
 	return made;
 }
@@ -737,11 +737,32 @@ float HudWidgetHost::ymouse(const As2Clip &p_clip) const {
 	return p ? p->y : 0.0f;
 }
 
+class HudScreen::ActionBlock {
+public:
+	explicit ActionBlock(HudScreen &r_screen) : screen_(r_screen) {
+		if (screen_.action_depth_ == 0) {
+			screen_.run_queued_loads();
+		}
+		++screen_.action_depth_;
+	}
+	ActionBlock(const ActionBlock &) = delete;
+	ActionBlock &operator=(const ActionBlock &) = delete;
+	~ActionBlock() {
+		if (--screen_.action_depth_ == 0) {
+			screen_.run_queued_loads();
+		}
+	}
+
+private:
+	HudScreen &screen_;
+};
+
 struct HudScreen::DirectAccessTarget : UiDirectAccessTarget {
 	HudScreen &screen;
 	explicit DirectAccessTarget(HudScreen &r_screen) : screen(r_screen) {}
 
 	void direct_access(const UiDirectAccessApply &p_apply) override {
+		const ActionBlock block(screen);
 		const As2Clip c = screen.clip(p_apply.clip);
 		const As2Value &v = p_apply.value;
 		const float f = float(v.to_number());
@@ -922,6 +943,7 @@ void HudScreen::on_frame_script(SwfNodeId p_node, uint32_t p_frame) {
 		}
 	}
 	if (owner != nullptr) {
+		const ActionBlock block(*this);
 		owner->controller->frame_script(*owner->host, fs);
 	}
 }
@@ -1006,7 +1028,7 @@ std::vector<std::pair<std::string, As2Value>> HudScreen::construct_params_of(con
 	return out;
 }
 
-void HudScreen::discover(SwfNodeId p_root) {
+void HudScreen::discover(SwfNodeId p_root, bool p_queue_loads) {
 	const SwfSceneNode *n = scene_->node(p_root);
 	if (n == nullptr) {
 		return;
@@ -1063,6 +1085,10 @@ void HudScreen::discover(SwfNodeId p_root) {
 		w->controller->construct(*w->host);
 	}
 	for (const auto &[entry, w] : made) {
+		if (p_queue_loads) {
+			queued_loads_.push_back(w->path);
+			continue;
+		}
 		if (const SwfSceneNode *node = scene_->find_node(w->path)) {
 			original_positions_[w->path] = { node->matrix.tx, node->matrix.ty };
 		}
@@ -1070,9 +1096,26 @@ void HudScreen::discover(SwfNodeId p_root) {
 	}
 }
 
-void HudScreen::construct_subtree(SwfNodeId p_root) {
+void HudScreen::run_queued_loads() {
+	++action_depth_;
+	for (size_t i = 0; i < queued_loads_.size(); ++i) {
+		const std::string path = queued_loads_[i];
+		HudWidgetState *w = owner_of(path);
+		if (w == nullptr) {
+			continue;
+		}
+		if (const SwfSceneNode *node = scene_->find_node(path)) {
+			original_positions_[path] = { node->matrix.tx, node->matrix.ty };
+		}
+		w->controller->on_clip_load(*w->host);
+	}
+	queued_loads_.clear();
+	--action_depth_;
+}
+
+void HudScreen::construct_subtree(SwfNodeId p_root, bool p_queue_loads) {
 	translate_texts(p_root);
-	discover(p_root);
+	discover(p_root, p_queue_loads);
 }
 
 void HudScreen::translate_texts(SwfNodeId p_root) {
@@ -1113,7 +1156,8 @@ Result<std::unique_ptr<HudScreen>> HudScreen::open(SwfScene &r_scene, const SwfL
 	}
 	HudScreen *self = s.get();
 	r_scene.set_frame_script_handler([self](SwfNodeId p_node, uint32_t p_frame) { self->on_frame_script(p_node, p_frame); });
-	s->construct_subtree(r_scene.root());
+	s->construct_subtree(r_scene.root(), false);
+	s->run_queued_loads();
 	return s;
 }
 
@@ -1128,6 +1172,7 @@ void HudScreen::set_stage_rects(const HudStageRects &p_rects) {
 	if (!changed || !initialized_) {
 		return;
 	}
+	const ActionBlock block(*this);
 	for (const HudWidgetNode &n : asset_.widgets) {
 		for (const std::unique_ptr<HudWidgetState> &w : widgets_) {
 			if (w->screen_widget && w->instance == n.instance) {
@@ -1160,6 +1205,7 @@ void HudScreen::initialize(const HudModel &p_model) {
 	if (initialized_) {
 		return;
 	}
+	const ActionBlock block(*this);
 	initialized_ = true;
 	if (HudWidgetController *screen = controller(kHudScreenInstance)) {
 		if (HudWidgetHost *screen_host = host(kHudScreenInstance)) {
@@ -1211,6 +1257,7 @@ void HudScreen::initialize(const HudModel &p_model) {
 }
 
 void HudScreen::refresh(const HudModel &p_model) {
+	const ActionBlock block(*this);
 	if (!initialized_) {
 		initialize(p_model);
 		return;
@@ -1265,6 +1312,7 @@ void HudScreen::begin_exit() {
 	if (exiting_) {
 		return;
 	}
+	const ActionBlock block(*this);
 	exiting_ = true;
 	exits_pending_ = 0;
 	exits_counted_ = 0;
@@ -1354,6 +1402,7 @@ void HudScreen::set_focus(bool p_focused) {
 		return;
 	}
 	focused_ = p_focused;
+	const ActionBlock block(*this);
 	for (size_t i = 0; i < widgets_.size(); ++i) {
 		HudWidgetState &w = *widgets_[i];
 		if (w.retired || w.controller == nullptr || w.host == nullptr || !takes_focus(w)) {
@@ -1391,6 +1440,7 @@ void HudScreen::focus_widget(std::string_view p_path) {
 	if (!focused_) {
 		return;
 	}
+	const ActionBlock block(*this);
 	for (size_t i = 0; i < widgets_.size(); ++i) {
 		HudWidgetState &w = *widgets_[i];
 		if (w.retired || w.controller == nullptr || w.host == nullptr) {
@@ -1405,6 +1455,7 @@ void HudScreen::focus_widget(std::string_view p_path) {
 }
 
 bool HudScreen::deliver_in_event(std::string_view p_instance, std::string_view p_query, const As2Value &p_param) {
+	const ActionBlock block(*this);
 	const std::string path = std::string(kHudScreenInstance) + "." + std::string(p_instance);
 	for (size_t i = 0; i < widgets_.size(); ++i) {
 		HudWidgetState &w = *widgets_[i];
@@ -1425,6 +1476,7 @@ bool HudScreen::deliver_in_event(std::string_view p_instance, std::string_view p
 }
 
 bool HudScreen::input_concept(int32_t p_concept, bool p_pressed) {
+	const ActionBlock block(*this);
 	bool handled = false;
 	for (size_t i = 0; i < widgets_.size(); ++i) {
 		HudWidgetState &w = *widgets_[i];
@@ -1436,6 +1488,7 @@ bool HudScreen::input_concept(int32_t p_concept, bool p_pressed) {
 }
 
 bool HudScreen::key(int32_t p_code, bool p_pressed) {
+	const ActionBlock block(*this);
 	bool handled = false;
 	for (size_t i = 0; i < widgets_.size(); ++i) {
 		HudWidgetState &w = *widgets_[i];
@@ -1505,6 +1558,7 @@ bool HudScreen::dispatch_mouse(const std::string &p_target, HudMouse p_mouse) {
 }
 
 bool HudScreen::mouse_move(float p_stage_x, float p_stage_y) {
+	const ActionBlock block(*this);
 	mouse_x_ = p_stage_x;
 	mouse_y_ = p_stage_y;
 	const std::string target = hit_target(p_stage_x, p_stage_y);
@@ -1524,6 +1578,7 @@ bool HudScreen::mouse_button(float p_stage_x, float p_stage_y, int32_t p_button,
 	if (p_button != 1) {
 		return false;
 	}
+	const ActionBlock block(*this);
 	mouse_move(p_stage_x, p_stage_y);
 	if (p_pressed) {
 		pressed_ = hover_;
@@ -1542,6 +1597,7 @@ bool HudScreen::mouse_button(float p_stage_x, float p_stage_y, int32_t p_button,
 }
 
 bool HudScreen::mouse_wheel(float p_stage_x, float p_stage_y, float p_delta) {
+	const ActionBlock block(*this);
 	mouse_x_ = p_stage_x;
 	mouse_y_ = p_stage_y;
 	bool handled = false;
@@ -1562,6 +1618,7 @@ void HudScreen::advance(double p_seconds) {
 	if (!std::isfinite(p_seconds) || p_seconds < 0.0) {
 		return;
 	}
+	const ActionBlock block(*this);
 	sweep();
 	run_timers(p_seconds);
 	std::vector<std::pair<std::string, uint32_t>> completed;

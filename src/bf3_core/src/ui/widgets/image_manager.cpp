@@ -47,8 +47,12 @@ void ImageManagerWidget::update(HudWidgetHost &r_host, std::string_view p_key, c
 }
 
 void ImageManagerWidget::advance(HudWidgetHost &r_host, double) {
-	if (!texture_pending_) {
+	if (!texture_pending_ || !holder_.exists()) {
 		return;
+	}
+	if (!texture_requested_) {
+		texture_requested_ = true;
+		loader_.load_clip(holder_, url_);
 	}
 	const As2ClipLoader::State st = loader_.poll();
 	if (st == As2ClipLoader::State::Loading) {
@@ -85,8 +89,8 @@ void ImageManagerWidget::load_image(HudWidgetHost &r_host) {
 		handle_call("LoadError1");
 		dequeue(r_host);
 	} else {
-		loader_.load_clip(holder_, url_);
 		texture_pending_ = true;
+		texture_requested_ = false;
 		show_spinner(r_host);
 		handle_call("LoadStarted");
 	}
@@ -137,6 +141,7 @@ void ImageManagerWidget::unload_image(HudWidgetHost &) {
 		loader_.unload_clip();
 	}
 	texture_pending_ = false;
+	texture_requested_ = false;
 	contains_image_ = false;
 	loaded_ = false;
 	currently_loading_ = false;

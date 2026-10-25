@@ -151,7 +151,8 @@ TEST_SUITE("ui-scene2") {
 		CHECK(s.hud->stats().as2.failed_ops == 0);
 	}
 
-	TEST_CASE("ImageManager: an attachMovie'd ImageManager is hidden by its constructor until an image loads") {
+	TEST_CASE("ImageManager: an attachMovie'd ImageManager is hidden by its constructor until an image loads; its "
+			  "onLoad waits for the end of the action block, as Flash queues it") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {
 			return;
@@ -168,14 +169,43 @@ TEST_SUITE("ui-scene2") {
 		CHECK_FALSE(made.visible());
 		REQUIRE(host.clip("spinnerMc").exists());
 		CHECK(host.clip("spinnerMc").visible());
-		REQUIRE(nested->holder().exists());
+		CHECK_FALSE(nested->holder().exists());
 		nested->update_image_url(host, kDogTagLeft);
 		CHECK(made.visible());
 		CHECK(nested->currently_loading());
 		s.hud->advance(1.0 / 30.0);
+		REQUIRE(nested->holder().exists());
 		CHECK(nested->is_loaded());
 		CHECK(s.at(made.path() + ".imgHolder").image == "ui/art/persistence/dogtag/inactivetag_left");
 		CHECK(s.hud->stats().as2.failed_ops == 0);
+	}
+
+	TEST_CASE("ImageManager: a size set right after attachMovie is the onLoad's start size, so resizeToTargetWidth "
+			  "fills it") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		RetailScreen s = open_retail_screen(*r, kKillScreenPartition);
+		HudWidgetHost &weapon_host = *s.hud->host(kWeaponImage);
+		const As2Clip killed(s.scene.get(), "instance1.KillCam_01.killed");
+		const As2Clip made = weapon_host.attach_movie(killed, "ImageManager", "ImageManager", 3);
+		REQUIRE(made.exists());
+		made.set_width(256.0f);
+		made.set_height(256.0f);
+		auto *nested = dynamic_cast<ImageManagerWidget *>(s.hud->controller(made.path()));
+		REQUIRE(nested != nullptr);
+		nested->resize_to_target_width = true;
+		nested->update_image_url(*s.hud->host(made.path()), kDogTagLeft);
+		s.hud->advance(1.0 / 30.0);
+		REQUIRE(nested->is_loaded());
+		CHECK(made.xscale() == doctest::Approx(100.0f));
+		CHECK(made.yscale() == doctest::Approx(100.0f));
+		CHECK(As2Clip(s.scene.get(), made.path() + ".sizeClip").width() == doctest::Approx(256.0f));
+		CHECK(As2Clip(s.scene.get(), made.path() + ".sizeClip").height() == doctest::Approx(256.0f));
+		CHECK(nested->holder().width() == doctest::Approx(256.0f));
+		CHECK(nested->holder().height() == doctest::Approx(256.0f));
+		CHECK(As2Clip(s.scene.get(), made.path() + ".spinnerMc").x() == doctest::Approx(128.0f));
 	}
 
 	TEST_CASE("ImageManager: dequeue skips a queued empty url as the AS2 truthiness test does") {

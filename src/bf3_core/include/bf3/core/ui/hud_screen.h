@@ -522,13 +522,14 @@ private:
 	friend class HudWidgetHost;
 	HudScreen();
 
-	void discover(SwfNodeId p_root);
+	void discover(SwfNodeId p_root, bool p_queue_loads);
 	void retire(std::string_view p_path);
 	void sweep();
 	void on_frame_script(SwfNodeId p_node, uint32_t p_frame);
 	const std::vector<std::string> &frame_names(const SwfSceneNode &p_node, uint32_t p_frame);
 	const Avm1Movie &avm1_of(const SwfSceneNode &p_node);
-	void construct_subtree(SwfNodeId p_root);
+	void construct_subtree(SwfNodeId p_root, bool p_queue_loads);
+	void run_queued_loads();
 	void translate_texts(SwfNodeId p_root);
 	void align(HudWidgetState &r_widget, const HudWidgetNode &p_node);
 	void apply_tween(const HudTween &p_tween, float p_value);
@@ -581,6 +582,9 @@ private:
 	HudWidgetState *owner_of(std::string_view p_path);
 	HudWidgetState *deepest_owner_of(std::string_view p_path);
 	struct DirectAccessTarget;
+	class ActionBlock;
+	uint32_t action_depth_ = 0;
+	std::vector<std::string> queued_loads_;
 	std::unique_ptr<DirectAccessTarget> direct_target_;
 	std::unique_ptr<UiDirectAccess> direct_;
 	void run_timers(double p_seconds);
