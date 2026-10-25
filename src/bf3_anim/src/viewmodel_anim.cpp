@@ -450,6 +450,8 @@ struct ViewmodelAnimator::Impl {
 	bool next_pending = false;
 	double release_due = -1;
 	double last_release_cue = -1;
+	bool switch_back = false;
+	double release_end = -1;
 
 	Impl(const Skeleton &p_rig, std::span<const VmClipRef, kVmClips> p_clips, const ViewmodelTuning &p_tuning) :
 			rig(p_rig), tuning(p_tuning) {
@@ -667,7 +669,11 @@ struct ViewmodelAnimator::Impl {
 			if (cur.active && cur.flow_release && cur.fade_out_start < 0) {
 				const double end = cur.start + double(flow.release_end_s - cur.offset);
 				if (p_time >= end) {
-					if (next_pending) {
+					release_end = end;
+					if (switch_back && flow.skip_undeploy) {
+						next_pending = false;
+						cur.flow_release = false;
+					} else if (next_pending) {
 						next_pending = false;
 						start_action(VmClip::Deploy, end, false);
 					} else {
@@ -775,6 +781,7 @@ struct ViewmodelAnimator::Impl {
 	void step(const ViewmodelFrameInput &p_input, std::span<const VmCue> p_cues, LocalPose &r_pose, ViewmodelOutput &r_out) {
 		const double t = p_input.time_s;
 		const float dt = std::clamp(finite_or(p_input.dt, 0.0f), 0.0f, kMaxFrameSeconds);
+		switch_back = p_input.switch_back;
 		for (const VmCue &c : p_cues) {
 			on_cue(c, p_input);
 		}
@@ -888,6 +895,7 @@ struct ViewmodelAnimator::Impl {
 				spring_at_rest(tuning.bob, bob_target, bob_amp) && spring_at_rest(tuning.kick, 0.0f, kick_back) &&
 				spring_at_rest(tuning.kick, 0.0f, kick_pitch) && spring_at_rest(tuning.camera_recoil, 0.0f, cam_pitch) &&
 				spring_at_rest(tuning.camera_recoil, 0.0f, cam_yaw);
+		r_out.release_end_s = release_end;
 		if (cur.active) {
 			r_out.action_clip = uint32_t(cur.role);
 			r_out.action_time_s = clip_time(cur, t);
@@ -922,6 +930,7 @@ struct ViewmodelAnimator::Impl {
 		next_pending = false;
 		release_due = -1;
 		last_release_cue = -1;
+		release_end = -1;
 		if (delta_loco) {
 			vm_loco_reset(*delta_loco);
 		}
@@ -1067,6 +1076,7 @@ void ViewmodelAnimator::set_throw_flow(const VmThrowFlow &p_flow) {
 	m.next_pending = false;
 	m.release_due = -1;
 	m.last_release_cue = -1;
+	m.release_end = -1;
 }
 
 void ViewmodelAnimator::set_locomotion(const VmLocomotion &p_locomotion) {

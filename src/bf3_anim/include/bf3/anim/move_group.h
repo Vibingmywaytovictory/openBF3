@@ -64,6 +64,13 @@ core::Result<uint32_t> weapon_type_index(const core::ant::AntLibrary &p_library,
 inline constexpr std::string_view kVmWeaponHandlingWrapper = "1P_WeaponHandlingWrapper";
 inline constexpr std::string_view kHoldAndReleaseSignal = "Game.Weapon.FireHoldAndRelease";
 
+inline constexpr std::string_view kSkipUndeploySignal = "1P_SkipUndeploy";
+
+struct AntBoolStateTag {
+	bool found = false, value = false;
+	float time = 0.0f, duration = 0.0f;
+};
+
 struct AntHoldReleaseFlow {
 	std::string name;
 	AntClipRoute idle, start, hold, release, deploy;
@@ -71,6 +78,7 @@ struct AntHoldReleaseFlow {
 	float hold_from_tick = 0.0f;
 	float release_end_tick = 0.0f;
 	float deploy_end_tick = 0.0f;
+	AntBoolStateTag skip_undeploy;
 };
 
 core::Result<AntHoldReleaseFlow> read_hold_release_flow(

@@ -758,6 +758,7 @@ struct M2aCheck::State {
 	void kit_knife(const std::string &p_tag);
 	void kit_m67(const std::string &p_tag, bool p_shots);
 	void kit_quick_throw(const std::string &p_tag);
+	void kit_quick_return(const std::string &p_tag);
 	void build_hud();
 	void build_ads();
 	void build_play();
@@ -1422,6 +1423,9 @@ void M2aCheck::State::build_kits() {
 				st.row(tag + ".slot_defs", defs_ok ? 1.0 : 0.0, "slots 0, 1, 6, 7 hold the kit table's defs", defs_ok);
 				return true;
 			});
+			if (team == 1 && kit == 1) {
+				kit_quick_return(tag);
+			}
 			for (const uint8_t slot : { uint8_t(1), uint8_t(7), uint8_t(6), uint8_t(0) }) {
 				kit_deploy(tag, team, kit, slot);
 				if (slot == 1 || slot == 0) {
@@ -1452,7 +1456,7 @@ void M2aCheck::State::kit_deploy(const std::string &p_tag, uint8_t p_team, uint8
 	add(fmt("%s deploy %u", p_tag.c_str(), unsigned(p_slot)), 6.0, [p_slot](State &st, double, bool p_first) {
 		if (p_first) {
 			st.mark();
-			if (p_slot == InputMapper::kQuickThrowSlot) {
+			if (p_slot == st.mapper().quick_throw_slot()) {
 				st.mapper().script_select(p_slot);
 			} else {
 				st.mapper().script_press(
@@ -1682,12 +1686,12 @@ void M2aCheck::State::kit_quick_throw(const std::string &p_tag) {
 	add(tag + " rows", 1.0, [tag](State &st, double, bool) {
 		bool thrown = false;
 		for (size_t i = st.mark_server; i < st.g.server_shots.size(); ++i) {
-			thrown = thrown || st.g.server_shots[i].shot.weapon_slot == InputMapper::kQuickThrowSlot;
+			thrown = thrown || st.g.server_shots[i].shot.weapon_slot == st.mapper().quick_throw_slot();
 		}
 		st.row(tag + ".thrown", thrown ? 1.0 : 0.0,
 				"a G tap from the primary threw an M67 (EIAThrowGrenade: slot 6, FireAndSwitchBackToPrev)", thrown);
 		st.row(tag + ".switched_back", double(st.g.weapon.active_slot),
-				"the primary is back in hand after the throw and the next grenade",
+				"the primary is back in hand after the quick throw",
 				thrown && st.g.weapon.active_slot == 0 && !st.mapper().quick_throwing());
 		const uint32_t want =
 				(1u << uint32_t(bf3::anim::VmClip::ThrowStart)) | (1u << uint32_t(bf3::anim::VmClip::Throw));
@@ -1713,7 +1717,8 @@ void M2aCheck::State::kit_quick_throw(const std::string &p_tag) {
 		return p_t >= 1.5;
 	});
 	add(tag + " empty rows", 1.0, [tag, fire_frames, off_weapon_frames](State &st, double, bool) {
-		const net::WeaponSlotWire &g6 = st.f().own_weapons_curr.slots[InputMapper::kQuickThrowSlot];
+		const net::WeaponSlotWire &g6 =
+				st.f().own_weapons_curr.slots[st.mapper().quick_throw_slot() % sw::kMaxWeaponSlots];
 		st.row(tag + ".empty.no_grenade", double(g6.magazine + g6.reserve),
 				"every grenade is used before G is pressed again (magazine + reserve of slot 6)",
 				st.f().own_weapons_valid && g6.magazine == 0 && g6.reserve == 0);
@@ -1731,6 +1736,83 @@ void M2aCheck::State::kit_quick_throw(const std::string &p_tag) {
 				*fire_frames == 0);
 		st.row(tag + ".empty.not_quick", st.mapper().quick_throwing() ? 1.0 : 0.0, "no quick throw is left pending",
 				!st.mapper().quick_throwing());
+		return true;
+	});
+}
+
+void M2aCheck::State::kit_quick_return(const std::string &p_tag) {
+	const std::string tag = p_tag + ".quick";
+	struct Seen {
+		bool thrown_clip = false;
+		uint32_t next_deploy_frames = 0;
+		double release_end = -1;
+		float release_in = 0, release_end_flow = 0;
+		bool skip_undeploy = false;
+		double frame_dt = 0;
+	};
+	auto seen = std::make_shared<Seen>();
+	add(tag + " return", 8.0, [seen](State &st, double p_t, bool p_first) {
+		if (p_first) {
+			st.mark();
+			*seen = Seen{};
+			st.mapper().script_view(st.mapper().view().yaw, float(25.0 * bf3::core::kDegToRad));
+			st.mapper().script_press(Action::Grenade);
+			st.mapper().script_hold(Action::Grenade, true);
+		}
+		if (p_t >= 0.1) {
+			st.mapper().script_hold(Action::Grenade, false);
+		}
+		const Bf3Viewmodel *vm = st.g.own_viewmodel();
+		const bf3::render::ViewmodelItem *item = vm != nullptr ? vm->current_item() : nullptr;
+		if (vm != nullptr && item != nullptr && st.g.weapon.active_slot == st.mapper().quick_throw_slot()) {
+			const uint32_t clip = vm->output().action_clip;
+			seen->thrown_clip = seen->thrown_clip || clip == uint32_t(bf3::anim::VmClip::Throw);
+			seen->next_deploy_frames += seen->thrown_clip && clip == uint32_t(bf3::anim::VmClip::Deploy) ? 1u : 0u;
+			seen->release_in = item->throw_flow.release_in_s;
+			seen->release_end_flow = item->throw_flow.release_end_s;
+			seen->skip_undeploy = item->throw_flow.skip_undeploy;
+		}
+		if (vm != nullptr && vm->output().release_end_s > seen->release_end && seen->thrown_clip) {
+			seen->release_end = vm->output().release_end_s;
+		}
+		seen->frame_dt = std::max(seen->frame_dt, st.dt);
+		return p_t >= 0.5 && !st.mapper().quick_throwing() && st.ready() && st.g.weapon.active_slot == 0;
+	});
+	add(tag + " return rows", 1.0, [tag, seen](State &st, double, bool) {
+		const uint8_t slot = st.mapper().quick_throw_slot();
+		sw::SimTime thrown = -1, back = -1;
+		for (size_t i = st.mark_timed; i < st.g.server_timed.size(); ++i) {
+			const sw::TimedWeaponEvent &e = st.g.server_timed[i].event;
+			if (thrown < 0 && (e.event & sw::weapon_events::kThrown) != 0 && e.weapon_slot == slot) {
+				thrown = e.time;
+			}
+			if (thrown >= 0 && back < 0 && (e.event & sw::weapon_events::kDeployStarted) != 0 && e.weapon_slot == 0) {
+				back = e.time;
+			}
+		}
+		const net::WeaponSlotWire &g = st.f().own_weapons_curr.slots[slot % sw::kMaxWeaponSlots];
+		st.row(tag + ".next_left", double(g.magazine + g.reserve),
+				"a grenade is left after the quick throw (magazine + reserve of the grenade slot)",
+				st.f().own_weapons_valid && g.magazine + g.reserve > 0);
+		const double flow_s = double(seen->release_end_flow) - double(seen->release_in);
+		const double release_s =
+				thrown >= 0 && seen->release_end >= 0 ? seen->release_end - sw::units_to_seconds(thrown) : -1.0;
+		st.row(tag + ".release_end_s", release_s,
+				fmt("the 1P release ends on its end branch: release end - server Thrown == the flow's release end "
+					"- its branch-in (%.4f s); 1P_SkipUndeploy %s",
+						flow_s, seen->skip_undeploy ? "set" : "not set"),
+				seen->skip_undeploy && release_s >= 0 && std::abs(release_s - flow_s) < 1e-4);
+		const double bound = seen->frame_dt + 1.0 / double(sim::kSimHz);
+		const double lag = back >= 0 && seen->release_end >= 0 ? sw::units_to_seconds(back) - seen->release_end : -1.0;
+		st.row(tag + ".switch_back_s", lag,
+				fmt("FireAndSwitchBackToPrev: the primary's server DeployStarted follows the release end within "
+					"one frame and one tick (%.4f s; Thrown to DeployStarted %.4f s)",
+						bound, back >= 0 && thrown >= 0 ? sw::units_to_seconds(back - thrown) : -1.0),
+				lag >= 0.0 && lag <= bound);
+		st.row(tag + ".no_next_deploy", double(seen->next_deploy_frames),
+				"no next-grenade Deploy is drawn after a quick throw (frames of the grenade's Deploy clip after Throw)",
+				seen->thrown_clip && seen->next_deploy_frames == 0);
+		st.events_equal_row(tag + ".return.events_equal");
 		return true;
 	});
 }
@@ -1799,6 +1881,14 @@ void M2aCheck::State::kit_m67(const std::string &p_tag, bool p_shots) {
 				fuse == want && d != nullptr && fuse == d->projectile.time_to_live);
 		const uint32_t clip = 1u << uint32_t(bf3::anim::VmClip::Throw);
 		st.row(tag + ".fire_clip", (st.clips_seen & clip) != 0 ? 1.0 : 0.0, "the viewmodel drew its Throw clip (or stand-in)", (st.clips_seen & clip) != 0);
+		const uint8_t slot = st.mapper().quick_throw_slot() % sw::kMaxWeaponSlots;
+		const net::WeaponSlotWire &g = st.f().own_weapons_curr.slots[slot];
+		const bool left = st.f().own_weapons_valid && g.magazine + g.reserve > 0;
+		const bool deployed = (st.clips_seen & (1u << uint32_t(bf3::anim::VmClip::Deploy))) != 0;
+		st.row(tag + ".next_deploy", deployed ? 1.0 : 0.0,
+				fmt("a throw from the grenade slot deploys the next grenade when one is left (%s left)",
+						left ? "one" : "none"),
+				deployed == left && st.g.weapon.active_slot == slot);
 		st.events_equal_row(tag + ".events_equal");
 		return true;
 	});

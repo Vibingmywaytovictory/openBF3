@@ -911,12 +911,14 @@ TEST_SUITE("anim-viewmodel-unit") {
 			anim::VmCue::Kind kind;
 			double at;
 		};
+		double release_end = -1;
 		auto run = [&](std::vector<Cue> p_cues, double p_until, bool p_flow, std::vector<Seen> &r_seen,
-						   float &r_max_hold_time) {
+						   float &r_max_hold_time, bool p_switch_back = false) {
 			anim::ViewmodelAnimator a(rig.skeleton, rig.refs, tuning);
 			if (p_flow) {
 				a.set_throw_flow(flow);
 			}
+			release_end = -1;
 			anim::LocalPose pose;
 			anim::ViewmodelOutput out;
 			r_seen.clear();
@@ -935,7 +937,9 @@ TEST_SUITE("anim-viewmodel-unit") {
 				anim::ViewmodelFrameInput in;
 				in.time_s = now;
 				in.dt = dt;
+				in.switch_back = p_switch_back;
 				a.step(in, cues, pose, out);
+				release_end = out.release_end_s;
 				if (r_seen.empty() || r_seen.back().clip != out.action_clip) {
 					r_seen.push_back(Seen{ out.action_clip, out.action_start_s, out.action_time_s });
 				}
@@ -961,6 +965,24 @@ TEST_SUITE("anim-viewmodel-unit") {
 		CHECK(seen[3].clip == uint32_t(VmClip::Deploy));
 		CHECK(seen[3].at == doctest::Approx(0.6 + 59.0 / 60.0));
 		CHECK(seen[4].clip == uint32_t(VmClip::Idle));
+		CHECK(release_end == doctest::Approx(0.6 + 59.0 / 60.0));
+
+		const std::vector<Cue> quick = { { K::HoldStarted, 0.1 }, { K::Thrown, 0.6 }, { K::ReloadStarted, 0.8 } };
+		run(quick, 3.0, true, seen, hold_t, true);
+		REQUIRE(seen.size() >= 4);
+		CHECK(seen[3].clip == uint32_t(VmClip::Deploy));
+		flow.skip_undeploy = true;
+		run(quick, 3.0, true, seen, hold_t, true);
+		REQUIRE(seen.size() >= 3);
+		CHECK(seen[2].clip == uint32_t(VmClip::Throw));
+		for (const Seen &s : seen) {
+			CHECK(s.clip != uint32_t(VmClip::Deploy));
+		}
+		CHECK(release_end == doctest::Approx(0.6 + 59.0 / 60.0));
+		run(quick, 3.0, true, seen, hold_t, false);
+		REQUIRE(seen.size() >= 4);
+		CHECK(seen[3].clip == uint32_t(VmClip::Deploy));
+		flow.skip_undeploy = false;
 
 		run({ { K::HoldStarted, 0.1 }, { K::Thrown, 1.9 } }, 3.5, true, seen, hold_t);
 		REQUIRE(seen.size() == 5);

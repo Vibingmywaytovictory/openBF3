@@ -331,6 +331,7 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 	in.sprinting = p_frame.sprinting;
 	in.view_yaw_rate = p_frame.view_yaw_rate;
 	in.view_pitch_rate = p_frame.view_pitch_rate;
+	in.switch_back = p_frame.switch_back;
 	animator_->step(in, p_cues, pose_, output_);
 	bf3::anim::model_pose(set_->rig, pose_, model_);
 

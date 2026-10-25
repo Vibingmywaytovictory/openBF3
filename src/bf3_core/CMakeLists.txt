@@ -160,12 +160,14 @@ target_sources(bf3_core PRIVATE
     src/gameplay/logic_world.cpp
     src/gameplay/soldier_def.cpp
     src/gameplay/kit_def.cpp
+    src/gameplay/weapon_switching.cpp
     src/gameplay/mode_def.cpp
     src/gameplay/eor_timeline.cpp
     src/gameplay/vehicle_def.cpp
     include/bf3/core/gameplay/logic_world.h
     include/bf3/core/gameplay/soldier_def.h
     include/bf3/core/gameplay/kit_def.h
+    include/bf3/core/gameplay/weapon_switching.h
     include/bf3/core/gameplay/mode_def.h
     include/bf3/core/gameplay/eor_timeline.h
     include/bf3/core/gameplay/vehicle_def.h

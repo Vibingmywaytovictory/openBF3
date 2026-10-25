@@ -126,6 +126,7 @@ struct GameState {
 
 	std::array<std::unordered_map<uint16_t, int>, 2> def_items;
 	std::vector<bool> def_switch_when_empty;
+	double vm_release_end_seen = -1;
 	bool slot_selectable(const bf3::net::WeaponSlotWire &p_slot) const;
 	std::unique_ptr<bf3::sim::CollisionWorld> world;
 	std::shared_ptr<ServerShotRecorder> recorder;

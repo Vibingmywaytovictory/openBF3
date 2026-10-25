@@ -177,8 +177,8 @@ core::Result<bool> chooser_step(
 	return false;
 }
 
-bool read_branch_tags(const AntLibrary &p_library, const AntPackage &p_pkg, const GdStruct &p_owner,
-		std::vector<AntBranchTag> &r_tags) {
+template <typename Visit>
+bool visit_tags(const AntLibrary &p_library, const AntPackage &p_pkg, const GdStruct &p_owner, Visit &&p_visit) {
 	GdGuid sg;
 	if (!p_owner.read_guid("TagCollectionSet", sg) || sg.is_null()) {
 		return true;
@@ -203,31 +203,62 @@ bool read_branch_tags(const AntLibrary &p_library, const AntPackage &p_pkg, cons
 			if (!tag.valid()) {
 				return false;
 			}
-			const AntPackage &tag_pkg = p_library.package_of(coll_pkg, tg);
-			AntBranchTag b;
-			GdGuid bt;
-			if (tag.type_name() == "BranchOutPointTag") {
-				if (!tag.read_float("Time", b.time) || !tag.read_float("Length", b.length) ||
-						!tag.read_guid("BranchTypeAsset", bt)) {
-					return false;
-				}
-			} else if (tag.type_name() == "BranchInWindowTag") {
-				b.branch_in = true;
-				if (!tag.read_float("Time", b.time) || !tag.read_guid("BranchType", bt)) {
-					return false;
-				}
-			} else {
-				continue;
-			}
-			const GdStruct type = bt.is_null() ? GdStruct() : p_library.resolve(tag_pkg, bt);
-			if (!type.valid() || !finite(b.time) || !finite(b.length)) {
+			if (!p_visit(tag, p_library.package_of(coll_pkg, tg))) {
 				return false;
 			}
-			b.type = std::string(type.name());
-			r_tags.push_back(std::move(b));
 		}
 	}
 	return true;
+}
+
+bool read_branch_tags(const AntLibrary &p_library, const AntPackage &p_pkg, const GdStruct &p_owner,
+		std::vector<AntBranchTag> &r_tags) {
+	return visit_tags(p_library, p_pkg, p_owner, [&](const GdStruct &p_tag, const AntPackage &p_tag_pkg) {
+		AntBranchTag b;
+		GdGuid bt;
+		if (p_tag.type_name() == "BranchOutPointTag") {
+			if (!p_tag.read_float("Time", b.time) || !p_tag.read_float("Length", b.length) ||
+					!p_tag.read_guid("BranchTypeAsset", bt)) {
+				return false;
+			}
+		} else if (p_tag.type_name() == "BranchInWindowTag") {
+			b.branch_in = true;
+			if (!p_tag.read_float("Time", b.time) || !p_tag.read_guid("BranchType", bt)) {
+				return false;
+			}
+		} else {
+			return true;
+		}
+		const GdStruct type = bt.is_null() ? GdStruct() : p_library.resolve(p_tag_pkg, bt);
+		if (!type.valid() || !finite(b.time) || !finite(b.length)) {
+			return false;
+		}
+		b.type = std::string(type.name());
+		r_tags.push_back(std::move(b));
+		return true;
+	});
+}
+
+bool read_bool_state_tag(const AntLibrary &p_library, const AntPackage &p_pkg, const GdStruct &p_owner,
+		std::string_view p_signal, AntBoolStateTag &r_tag) {
+	return visit_tags(p_library, p_pkg, p_owner, [&](const GdStruct &p_tag, const AntPackage &p_tag_pkg) {
+		GdGuid vg;
+		if (p_tag.type_name() != "BoolGameStateTag" || !p_tag.read_guid("ValueAsset", vg) || vg.is_null()) {
+			return true;
+		}
+		const GdStruct value = p_library.resolve(p_tag_pkg, vg);
+		if (!value.valid() || value.type_name() != "BoolAsset" || value.name() != p_signal) {
+			return true;
+		}
+		AntBoolStateTag t;
+		t.found = true;
+		if (!p_tag.read_float("Time", t.time) || !p_tag.read_float("Duration", t.duration) ||
+				!p_tag.read_bool("Value", t.value) || !finite(t.time) || !finite(t.duration) || r_tag.found) {
+			return false;
+		}
+		r_tag = t;
+		return true;
+	});
 }
 
 core::Result<AntClipRoute> route_from(const AntLibrary &p_library, const AntPackage &p_from, GdStruct p_start, const ChooserIndices &p_indices,
@@ -676,6 +707,10 @@ core::Result<AntHoldReleaseFlow> read_hold_release_flow(
 				where + ": " + flow.deploy.controller + " has no " + deploy_to_null->out_type + " window");
 	}
 	flow.deploy_end_tick = tag.time;
+	if (!read_bool_state_tag(p_library, *start_node.pkg, start_node.s, kSkipUndeploySignal, flow.skip_undeploy)) {
+		return core::make_error(where + ": " + label(start_node.s) + " has an unreadable " +
+				std::string(kSkipUndeploySignal) + " BoolGameStateTag");
+	}
 	return flow;
 }
 

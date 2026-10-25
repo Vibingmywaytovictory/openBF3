@@ -111,9 +111,12 @@ public:
 	bool weapons_allowed() const { return weapon_.allowed; }
 
 	void set_weapon_slots(uint8_t p_active, uint8_t p_pending, uint16_t p_selectable);
-	static constexpr uint8_t kQuickThrowSlot = 6;
+	void set_quick_throw(uint8_t p_slot, uint16_t p_switch_back_from);
+	uint8_t quick_throw_slot() const { return weapon_.quick_slot; }
 	void set_active_weapon(bf3::sim::weapons::WeaponPhase p_phase, int32_t p_magazine, int32_t p_reserve);
+	void set_quick_release(bool p_by_flow, bool p_ended);
 	bool quick_throwing() const { return weapon_.quick; }
+	bool quick_switching_back() const { return weapon_.quick && weapon_.quick_back != 0xFF; }
 
 	void weapon_frame(const bf3::host::PresentationFrame &p_frame, uint64_t p_now_ns);
 
@@ -151,8 +154,10 @@ private:
 		uint32_t life = 0;
 		uint64_t swallowed_clicks = 0;
 		const bf3::host::PresentationFrame *frame = nullptr;
-		bool quick = false, quick_held = false;
+		bool quick = false, quick_held = false, quick_by_flow = false;
 		uint8_t quick_back = 0xFF;
+		uint8_t quick_slot = 0xFF;
+		uint16_t quick_back_from = 0;
 	} weapon_;
 
 public:

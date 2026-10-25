@@ -438,6 +438,17 @@ bool Bf3LevelSession::game_load_assets(const host::LevelDatabase &p_db, bf3::cor
 	for (const bf3::core::gameplay::WeaponDef &d : shared->gunplay->defs) {
 		g.def_switch_when_empty.push_back(d.allow_switching_out_of_ammo);
 	}
+	const bf3::core::gameplay::WeaponSwitching &switching = shared->gunplay->switching;
+	const bf3::core::gameplay::DirectWeaponSwitch *grenade =
+			switching.direct_of(bf3::core::gameplay::kThrowGrenadeAction);
+	uint16_t switch_back_from = 0;
+	for (uint8_t s = 0; s < sw::kMaxWeaponSlots; ++s) {
+		if (grenade != nullptr && switching.switches_back(bf3::core::gameplay::kThrowGrenadeAction, s)) {
+			switch_back_from = uint16_t(switch_back_from | (1u << s));
+		}
+	}
+	mapper_.set_quick_throw(
+			grenade != nullptr ? grenade->to_slot : bf3::core::gameplay::kNoSwitchSlot, switch_back_from);
 	bf3::core::Result<host::HudStatic> hud_static = host::make_hud_static(*g.gunplay->table, shared->gunplay->defs);
 	if (hud_static) {
 		g.hud_static = std::move(*hud_static);
@@ -1041,7 +1052,13 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			const float speed = std::hypot(f.own_curr.velocity[0], f.own_curr.velocity[2]);
 			ViewmodelFrame vf = viewmodel_frame_from(g.weapon, cameras_.last_eye(), view.yaw, view.pitch, dt, sprinting, speed, yaw_rate, pitch_rate);
 			vf.grounded = (f.own_curr.flags & sim::soldier_flags::kGrounded) != 0;
+			vf.switch_back = mapper_.quick_switching_back();
 			own_vm->present(vf, g.cues, camera);
+			const bf3::render::ViewmodelItem *vm_item = own_vm->current_item();
+			const bool by_flow = vm_item != nullptr && vm_item->throw_flow.valid() && vm_item->throw_flow.skip_undeploy;
+			const double release_end = own_vm->output().release_end_s;
+			mapper_.set_quick_release(by_flow, release_end > g.vm_release_end_seen);
+			g.vm_release_end_seen = std::max(g.vm_release_end_seen, release_end);
 			mapper_.mouse_sensitivity = g.base_sensitivity * std::clamp(own_vm->look_scale(), 0.05f, 4.0f);
 		} else {
 			mapper_.mouse_sensitivity = g.base_sensitivity;

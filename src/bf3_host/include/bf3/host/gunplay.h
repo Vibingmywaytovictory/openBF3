@@ -4,6 +4,7 @@
 #include "bf3/core/gameplay/material_grid.h"
 #include "bf3/core/gameplay/soldier_def.h"
 #include "bf3/core/gameplay/weapon_def.h"
+#include "bf3/core/gameplay/weapon_switching.h"
 #include "bf3/core/result.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/lag_comp.h"
@@ -127,6 +128,7 @@ struct GunplayLevel {
 	std::vector<std::string> notes;
 	KitTable kits;
 	LoadoutCatalog loadouts;
+	core::gameplay::WeaponSwitching switching;
 	float sprint_recover_seconds = 0.12f;
 	float max_health = 100.0f;
 	uint64_t level_hash = 0;

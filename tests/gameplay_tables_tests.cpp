@@ -7,6 +7,7 @@
 #include "bf3/core/gameplay/mode_def.h"
 #include "bf3/core/gameplay/soldier_def.h"
 #include "bf3/core/gameplay/vehicle_def.h"
+#include "bf3/core/gameplay/weapon_switching.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/util/elapsed.h"
@@ -2008,6 +2009,41 @@ TEST_SUITE("tables") {
 			CHECK(cql.tickets(1)->initial_tickets == 300);
 			CHECK(cql.flag_area_value().value_or(-1) == Approx(34));
 		}
+	}
+
+	TEST_CASE("gameplay: WeaponSwitching (input/soldierweaponswitching)") {
+		Mounted m;
+		if (!open_or_skip(m)) {
+			return;
+		}
+		const std::unique_ptr<EbxLibrary> lib = open_level(m, "MP_001");
+		const Result<WeaponSwitching> read = read_weapon_switching(*lib);
+		REQUIRE_MESSAGE(read.ok(), (read.ok() ? std::string() : read.error().message));
+		const WeaponSwitching &w = *read;
+		CHECK(w.direct.size() == 9);
+		CHECK(w.map.size() == 48);
+		const DirectWeaponSwitch *grenade = w.direct_of(kThrowGrenadeAction);
+		REQUIRE(grenade != nullptr);
+		CHECK(grenade->to_slot == 6);
+		CHECK(grenade->fire_and_switch_back);
+		CHECK_FALSE(grenade->quick_switch);
+		const DirectWeaponSwitch *melee = w.direct_of("EIAMeleeAttack");
+		REQUIRE(melee != nullptr);
+		CHECK(melee->to_slot == 7);
+		CHECK(melee->fire_and_switch_back);
+		CHECK(melee->quick_switch);
+		for (uint8_t from = 0; from < 8; ++from) {
+			CAPTURE(int(from));
+			const WeaponSwitch *row = w.switch_of(kThrowGrenadeAction, from);
+			REQUIRE(row != nullptr);
+			CHECK(row->to_slots == std::vector<uint8_t>{ 6 });
+			CHECK(w.switches_back(kThrowGrenadeAction, from) == (from != 7));
+		}
+		const WeaponSwitch *primary = w.switch_of("EIASwitchPrimaryWeapon", 0);
+		REQUIRE(primary != nullptr);
+		CHECK(primary->to_slots == std::vector<uint8_t>{ 1 });
+		CHECK_FALSE(primary->fire_and_switch_back);
+		CHECK(w.switch_of(kThrowGrenadeAction, 8) == nullptr);
 	}
 
 	TEST_CASE("gameplay: KitDef per team (plan §3.4)") {

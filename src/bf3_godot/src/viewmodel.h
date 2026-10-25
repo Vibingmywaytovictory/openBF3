@@ -47,6 +47,7 @@ struct ViewmodelFrame {
 	godot::Vector3 eye;
 	double yaw = 0, pitch = 0;
 	float view_yaw_rate = 0, view_pitch_rate = 0;
+	bool switch_back = false;
 };
 
 ViewmodelFrame viewmodel_frame_from(const bf3::host::PresentedWeapon &p_weapon, const godot::Vector3 &p_eye, double p_yaw, double p_pitch, float p_dt,

@@ -1036,6 +1036,10 @@ TEST_SUITE("pt1-run") {
 		CHECK(f.hold_from_tick == doctest::Approx(42.0f));
 		CHECK(f.release_end_tick == doctest::Approx(70.0f));
 		CHECK(f.deploy_end_tick == doctest::Approx(48.0f));
+		CHECK(f.skip_undeploy.found);
+		CHECK(f.skip_undeploy.value);
+		CHECK(f.skip_undeploy.time == doctest::Approx(0.0f));
+		CHECK(f.skip_undeploy.duration == doctest::Approx(4.0f));
 	}
 
 	TEST_CASE("install unchanged") {

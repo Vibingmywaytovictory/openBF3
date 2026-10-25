@@ -221,6 +221,11 @@ core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared
 	if (!progression) {
 		return core::error_at(where + ": progression", progression.error());
 	}
+	core::Result<gp::WeaponSwitching> switching = gp::read_weapon_switching(db, &budget);
+	if (!switching) {
+		return core::error_at(where + ": weapon switching", switching.error());
+	}
+	level->switching = std::move(*switching);
 	std::vector<gp::KitDef> kits;
 	std::set<std::string> variants;
 	for (const gp::TeamDef &t : mode->teams) {

@@ -1472,17 +1472,19 @@ void load_viewmodel_throw_flow(const core::ant::AntLibrary &p_library, const ani
 	f.hold_loop_s = seconds(flow->hold, flow->hold.loop_end_tick);
 	f.release_in_s = seconds(flow->release, flow->release_in_tick);
 	f.release_end_s = seconds(flow->release, flow->release_end_tick);
+	f.skip_undeploy = flow->skip_undeploy.found && flow->skip_undeploy.value;
 	r_item.throw_flow_name = flow->name;
-	char line[320];
+	char line[384];
 	std::snprintf(line, sizeof(line),
 			": %s, %s %.3f s, %s loop %.3f s, %s %.3f s from %.3f, %s %.3f s; release %.3f..%.3f, hold at %.3f, "
-			"redeploy at %.3f",
+			"redeploy at %.3f%s",
 			flow->name.c_str(), r_item.clips[size_t(Role::ThrowStart)].name.c_str(),
 			double(r_item.clips[size_t(Role::ThrowStart)].seconds), r_item.clips[size_t(Role::ThrowHold)].name.c_str(),
 			double(f.hold_loop_s), r_item.clips[size_t(Role::Throw)].name.c_str(),
 			double(r_item.clips[size_t(Role::Throw)].seconds), double(f.release_in_s),
 			r_item.clips[size_t(Role::Deploy)].name.c_str(), double(r_item.clips[size_t(Role::Deploy)].seconds),
-			double(f.release_from_s), double(f.release_until_s), double(f.hold_from_s), double(f.release_end_s));
+			double(f.release_from_s), double(f.release_until_s), double(f.hold_from_s), double(f.release_end_s),
+			f.skip_undeploy ? ", the start sets 1P_SkipUndeploy" : "");
 	r_notes.push_back(where + line);
 }
 

@@ -121,6 +121,7 @@ struct ViewmodelFrameInput {
 	bool grounded = true;
 	bool sprinting = false;
 	float view_yaw_rate = 0, view_pitch_rate = 0;
+	bool switch_back = false;
 };
 
 struct ViewmodelOutput {
@@ -138,6 +139,7 @@ struct ViewmodelOutput {
 	uint32_t shots = 0;
 	float loco_run_weight = 0, loco_sprint_weight = 0;
 	float loco_run_frame = 0, loco_sprint_frame = 0;
+	double release_end_s = -1;
 };
 
 struct VmLocomotion;
@@ -236,6 +238,7 @@ struct VmThrowFlow {
 	float release_from_s = 0.0f, release_until_s = 0.0f, release_in_s = 0.0f;
 	float hold_from_s = 0.0f, hold_loop_s = 0.0f;
 	float release_end_s = 0.0f;
+	bool skip_undeploy = false;
 	bool valid() const;
 };
 
