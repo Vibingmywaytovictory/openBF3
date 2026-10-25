@@ -3,10 +3,13 @@
 #include "bf3/sim/sim_types.h"
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 namespace bf3::host {
 struct PresentedWeapon;
+struct PresentationFrame;
+struct SharedLevel;
 }
 
 namespace bf3::sim::weapons {
@@ -39,8 +42,21 @@ private:
 		float first_bad = -1.0f;
 	};
 
+	struct Ramp {
+		uint32_t frames = 0;
+		uint32_t matched = 0;
+		uint32_t between = 0;
+		double largest_step = 0.0;
+		double last = -1.0;
+		float first_bad = -1.0f;
+		double first_bad_want = -1.0;
+	};
+
 	void teleport(Bf3LevelSession &r_session);
 	void sample(Tally &r_tally, float p_arm, double p_want);
+	void sample_ramp(Ramp &r_ramp, float p_arm, double p_want);
+	double blend_arm(const bf3::host::PresentationFrame &p_frame, const CrosshairWalkInputs &p_in) const;
+	void ramp_row(const std::string &p_name, const Ramp &p_ramp, const std::string &p_what);
 	void row(const std::string &p_name, bool p_pass, const std::string &p_detail);
 	void finish_rows(const CrosshairWalkInputs &p_in);
 
@@ -59,6 +75,11 @@ private:
 	Tally stand_;
 	Tally walk_;
 	Tally stop_;
+	std::shared_ptr<const bf3::host::SharedLevel> level_;
+	double offset_ = 0.0;
+	double drawn_arm_ = -1.0;
+	Ramp rise_;
+	Ramp fall_;
 	uint32_t rows_ = 0;
 	uint32_t failures_ = 0;
 };
