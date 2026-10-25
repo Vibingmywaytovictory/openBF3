@@ -11,6 +11,7 @@
 #include "ui_retail_support.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -443,5 +444,37 @@ TEST_SUITE("ui-scene2") {
 		txt.set_text_fit(SwfTextFit::None);
 		CHECK(layout().scale == 1.0f);
 		CHECK(stats.failed_ops == 0);
+	}
+
+	TEST_CASE("swf census: no retail UI movie has a gradient fill, so Bf3SwfView's unsupported_fills stays 0 on every screen") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		std::array<uint32_t, 5> kinds{};
+		uint32_t movies = 0;
+		for (const SwfMovieSource &src : r->lib->movies()) {
+			Result<std::shared_ptr<const SwfMovie>> m = r->lib->load(src.name);
+			CHECK_MESSAGE(m.ok(), src.name);
+			if (!m) {
+				continue;
+			}
+			movies++;
+			uint32_t gradients = 0;
+			for (const SwfShape &shape : (*m)->shapes) {
+				for (const SwfFillStyle &f : shape.fills) {
+					kinds[size_t(f.kind)]++;
+					gradients += f.kind != SwfFillKind::Solid && f.kind != SwfFillKind::Bitmap ? 1 : 0;
+				}
+			}
+			CHECK_MESSAGE(gradients == 0, src.name);
+		}
+		CHECK(movies == r->lib->movies().size());
+		CHECK(movies > 400);
+		CHECK(kinds[size_t(SwfFillKind::Solid)] > 0);
+		CHECK(kinds[size_t(SwfFillKind::Bitmap)] > 0);
+		MESSAGE("census " << movies << " movies: " << kinds[size_t(SwfFillKind::Solid)] << " solid, " << kinds[size_t(SwfFillKind::Bitmap)] << " bitmap, "
+						  << kinds[size_t(SwfFillKind::LinearGradient)] + kinds[size_t(SwfFillKind::RadialGradient)] + kinds[size_t(SwfFillKind::FocalGradient)]
+						  << " gradient fills");
 	}
 }
