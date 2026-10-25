@@ -44,6 +44,7 @@ struct LogicRuntimeOptions {
 	size_t max_watches = 1024;
 	size_t max_watch_hits_per_tick = 65536;
 	LogicPlatform platform = LogicPlatform::Win32;
+	bool immediate_properties = false;
 };
 
 struct LogicContext {

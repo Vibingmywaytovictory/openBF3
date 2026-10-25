@@ -23,6 +23,8 @@ using T = LogicTypeId;
 
 namespace {
 
+constexpr uint32_t kMaxImmediatePropertyDepth = 64;
+
 int32_t platform_port(LogicPlatform p_platform) {
 	switch (p_platform) {
 		case LogicPlatform::Xenon:
@@ -306,6 +308,7 @@ struct LogicRuntime::State {
 	bool started = false;
 
 	bool settling = false;
+	uint32_t property_depth = 0;
 	std::optional<core::Error> fault;
 	LogicTickStats stats;
 	size_t tick_deliveries = 0;
@@ -531,6 +534,15 @@ struct LogicRuntime::State {
 			it.target_port = e.target_port;
 			it.property = true;
 			it.value = p_value;
+			if (options.immediate_properties && property_depth < kMaxImmediatePropertyDepth) {
+				++property_depth;
+				deliver(it);
+				--property_depth;
+				if (fault) {
+					return;
+				}
+				continue;
+			}
 			if (!enqueue(it)) {
 				return;
 			}

@@ -1598,6 +1598,30 @@ TEST_SUITE("logic-unit") {
 		}
 	}
 
+	TEST_CASE("logic: immediate_properties lets a CompareBool read a Bool set earlier in the same event") {
+		G g;
+		const uint32_t s = g.node(LogicTypeId::EventSplitter);
+		const uint32_t b = g.node(LogicTypeId::Bool);
+		const uint32_t cb = g.node(LogicTypeId::CompareBool);
+		g.b.add_property(b, port::kValue, cb, logic_port_id("Bool"));
+		g.b.add_event(s, port::kSplitterOut, b, port::kSetTrue);
+		g.b.add_event(s, port::kSplitterOut, cb, port::kIn);
+		const uint32_t on_true = event_sink(g, cb, port::kOnTrue);
+		const uint32_t on_false = event_sink(g, cb, port::kOnFalse);
+		const std::shared_ptr<const LogicGraph> graph = g.finish();
+		for (const bool immediate : { false, true }) {
+			LogicRuntimeOptions o;
+			o.immediate_properties = immediate;
+			LogicRuntime rt = make_runtime(graph, o);
+			start(rt);
+			force(rt, s);
+			step(rt);
+			CHECK(ticks_into(rt, on_true, port::kIn) == (immediate ? std::vector<Tick>{ 1 } : std::vector<Tick>{}));
+			CHECK(ticks_into(rt, on_false, port::kIn) == (immediate ? std::vector<Tick>{} : std::vector<Tick>{ 1 }));
+			no_unhandled(rt);
+		}
+	}
+
 	TEST_CASE("logic: Int and Float - Increment, Decrement, Reset to DefaultValue, publish on change only, wrapping") {
 		G g;
 		const auto number = [&](LogicTypeId p_type, LogicValue p_default, std::optional<LogicValue> p_step) {
