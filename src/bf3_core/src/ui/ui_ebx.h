@@ -30,6 +30,16 @@ inline std::optional<double> number(const std::optional<EbxValue> &p_value) {
 	return std::nullopt;
 }
 
+inline std::string text_of(const std::optional<EbxValue> &p_value) {
+	if (!p_value) {
+		return {};
+	}
+	if (const std::optional<std::string_view> e = p_value->enum_name()) {
+		return std::string(*e);
+	}
+	return std::string(p_value->as_str().value_or(std::string_view()));
+}
+
 inline std::optional<float> f32(const EbxStruct &p_s, std::string_view p_path) {
 	const std::optional<double> d = number(p_s.get_path(p_path));
 	return d ? std::optional<float>(float(*d)) : std::nullopt;

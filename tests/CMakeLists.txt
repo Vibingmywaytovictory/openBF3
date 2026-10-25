@@ -983,6 +983,11 @@ add_test(NAME anim.pt1_run COMMAND test_pt1_run --test-suite=pt1-run)
 set_tests_properties(anim.pt1_run PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(anim.pt1_run.unit anim.pt1_run PROPERTIES TIMEOUT 300)
 
+openbf3_test(test_ui_options test_main.cpp ui_options_tests.cpp test_support.h)
+target_link_libraries(test_ui_options PRIVATE bf3_core)
+add_test(NAME ui.options.install COMMAND test_ui_options --test-suite=ui-options)
+set_tests_properties(ui.options.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME hygiene.rules COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tools/check_hygiene.py" "${CMAKE_SOURCE_DIR}")
 set_tests_properties(hygiene.rules PROPERTIES TIMEOUT 120 LABELS "unit")

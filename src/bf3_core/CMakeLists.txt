@@ -372,3 +372,8 @@ target_sources(bf3_core PRIVATE
     src/gameplay/kit_appearance.cpp
     include/bf3/core/gameplay/kit_appearance.h
 )
+
+target_sources(bf3_core PRIVATE
+    include/bf3/core/ui/options.h
+    src/ui/options.cpp
+)
