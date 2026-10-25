@@ -1144,6 +1144,22 @@ TEST_CASE("every font resolves to a BF3 font of the en mapping") {
 	}
 }
 
+TEST_CASE("the kill card's default dogtags are TextureAssets of Win32/UI") {
+	TdmInstall *ti = tdm_install();
+	if (ti == nullptr) {
+		return;
+	}
+	bf3::core::Result<std::unique_ptr<bf3::core::EbxLibrary>> ebx =
+			bf3::core::EbxLibrary::open(ti->install, { "Win32/UI" });
+	REQUIRE_MESSAGE(ebx.ok(), (ebx.ok() ? std::string() : ebx.error().message));
+	for (const std::string_view path : { host::kDefaultBasicDogtag, host::kDefaultAdvancedDogtag }) {
+		const bf3::core::EbxPartition *p = (*ebx)->partition_by_name(path);
+		const std::string type = p != nullptr ? std::string(p->primary().type_name()) : std::string("absent");
+		row(std::string("dogtag.") + std::string(path), type == "TextureAsset", type);
+		CHECK_MESSAGE(type == "TextureAsset", std::string(path));
+	}
+}
+
 TEST_CASE("every atlas icon and placement resolves") {
 	TdmInstall *ti = tdm_install();
 	if (ti == nullptr) {
