@@ -27,8 +27,6 @@ constexpr int32_t kConceptNavigateLeft = 2;
 constexpr int32_t kConceptNavigateRight = 3;
 constexpr int32_t kConceptActivate = 6;
 
-constexpr std::string_view kSoundSelect = "UIWidgetEventID_PlaySoundSelect";
-constexpr std::string_view kSoundNavigate = "UIWidgetEventID_PlaySoundNavigate";
 constexpr uint32_t kPremiumText = 15302420;
 
 enum class ButtonState : uint8_t {

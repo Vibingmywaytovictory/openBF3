@@ -134,4 +134,8 @@ float hud_ekg_beat_px(const HudEkgLook &p_look, float p_distance_px);
 float hud_ekg_offset_px(const HudEkgLook &p_look, double p_clock_seconds, float p_screen_x);
 float hud_ekg_alpha(const HudEkgLook &p_look, float p_screen_x);
 
+std::string hud_list_access_handle(const HudDataSource &p_query);
+bool hud_list_set_rows(HudScreen &r_screen, std::string_view p_instance, const As2Value &p_rows);
+bool hud_list_set_direct_rows(HudScreen &r_screen, std::string_view p_instance, std::vector<As2Value> p_rows);
+
 }

@@ -6,6 +6,7 @@
 #include "bf3/core/ui/hud_widget_registry.h"
 #include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/swf_text.h"
+#include "bf3/core/ui/ui_input.h"
 #include "bf3/core/util/text.h"
 
 #include <algorithm>
@@ -20,6 +21,29 @@
 #include <vector>
 
 namespace bf3::core::ui {
+
+inline constexpr std::string_view kSoundSelect = "UIWidgetEventID_PlaySoundSelect";
+inline constexpr std::string_view kSoundNavigate = "UIWidgetEventID_PlaySoundNavigate";
+
+inline bool hud_platform_win32(const HudClientState &p_client) {
+	return p_client.platform == "win32" || p_client.platform.empty();
+}
+
+inline SwfFilter as2_glow_filter(uint32_t p_rgb, double p_alpha, float p_blur_x, float p_blur_y, float p_strength,
+		int32_t p_quality, bool p_inner = false, bool p_knockout = false) {
+	SwfFilter f;
+	f.kind = SwfFilterKind::Glow;
+	f.color = SwfColor{ uint8_t((p_rgb >> 16) & 0xffu), uint8_t((p_rgb >> 8) & 0xffu), uint8_t(p_rgb & 0xffu),
+		uint8_t(std::lround(std::clamp(p_alpha, 0.0, 1.0) * 255.0)) };
+	f.blur_x = p_blur_x;
+	f.blur_y = p_blur_y;
+	f.strength = p_strength;
+	f.inner = p_inner;
+	f.knockout = p_knockout;
+	f.composite_source = true;
+	f.passes = uint8_t(std::clamp(p_quality, 0, 15));
+	return f;
+}
 
 inline bool string_true(const As2Value &p_v) {
 	return to_lower_ascii(p_v.to_string()) == "true";

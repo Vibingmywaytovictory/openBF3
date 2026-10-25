@@ -452,6 +452,8 @@ double hud_tween_ease(HudTweenEase p_ease, double p_t) {
 			return u * u * ((s + 1.0) * u + s) + 1.0;
 		}
 		case HudTweenEase::ExpoOut: return t == 1.0 ? 1.0 : 1.001 * (1.0 - std::pow(2.0, -10.0 * t));
+		case HudTweenEase::EaseOutQuad:
+			return t * (2.0 - t);
 	}
 	return t;
 }

@@ -230,6 +230,7 @@ enum class HudTweenEase : uint8_t {
 	Linear,
 	EaseOutBack,
 	ExpoOut,
+	EaseOutQuad,
 };
 
 enum class HudTweenProperty : uint8_t {
