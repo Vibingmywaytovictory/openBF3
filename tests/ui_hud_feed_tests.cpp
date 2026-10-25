@@ -850,25 +850,26 @@ TEST_CASE("crosshair footage: the M16A3 builds of the 18.57 recording through th
 			fmt("M16A3 + heavy barrel: arms %.0f standing and %.0f from 0.5 s into a walk (footage %.0f / %.0f)", arm_at(wh.stand, 0), arm_at(wh.settled, 0), kFootageHeavyStand,
 					kFootageHeavyMoving));
 
-	const RampMatch onset_blend = match_ramp(kFootageHeavyOnset, wh.onset_blend);
-	const RampMatch onset_sim = match_ramp(kFootageHeavyOnset, wh.onset_sim);
-	const RampMatch stop_blend = match_ramp(kFootageSuppressedStop, ws.stop_blend);
-	const RampMatch stop_sim = match_ramp(kFootageSuppressedStop, ws.stop_sim);
-	REQUIRE(onset_blend.frame + kFootageHeavyOnset.size() <= wh.onset_blend.size());
-	REQUIRE(stop_blend.frame + kFootageSuppressedStop.size() <= ws.stop_blend.size());
-	CHECK(onset_blend.max_error <= kFootageArmRounding);
-	CHECK(stop_blend.max_error <= kFootageArmRounding);
-	row("footage.heavy.move_onset", onset_blend.max_error <= kFootageArmRounding,
-			fmt("footage arms per 30 fps frame from 104.87 s: %s; the moving minimum blended by the motor's speed / walk speed (%.1f m/s): %s, max %.0f px",
+	const RampMatch onset = match_ramp(kFootageHeavyOnset, wh.onset_sim);
+	const RampMatch stop = match_ramp(kFootageSuppressedStop, ws.stop_sim);
+	REQUIRE(onset.frame + kFootageHeavyOnset.size() <= wh.onset_sim.size());
+	REQUIRE(stop.frame + kFootageSuppressedStop.size() <= ws.stop_sim.size());
+	const bool onset_is_blend = wh.onset_sim == wh.onset_blend;
+	const bool stop_is_blend = ws.stop_sim == ws.stop_blend;
+	CHECK(onset.max_error <= kFootageArmRounding);
+	CHECK(stop.max_error <= kFootageArmRounding);
+	CHECK(onset_is_blend);
+	CHECK(stop_is_blend);
+	row("footage.heavy.move_onset", onset.max_error <= kFootageArmRounding && onset_is_blend,
+			fmt("footage arms per 30 fps frame from 104.87 s: %s; the sim's presented arms as the motor accelerates to its walk speed (%.1f m/s): %s, max %.0f px, %s the speed / walk "
+				"speed blend of the moving minimum",
 					arms_text(kFootageHeavyOnset).c_str(), double(walk_speed),
-					arms_text(std::span<const double>(wh.onset_blend).subspan(onset_blend.frame, kFootageHeavyOnset.size())).c_str(), onset_blend.max_error));
-	row("footage.suppressed.move_stop", stop_blend.max_error <= kFootageArmRounding,
-			fmt("footage arms per 30 fps frame from 301.88 s: %s; the blend as the motor decelerates: %s, max %.0f px", arms_text(kFootageSuppressedStop).c_str(),
-					arms_text(std::span<const double>(ws.stop_blend).subspan(stop_blend.frame, kFootageSuppressedStop.size())).c_str(), stop_blend.max_error));
-	std::printf("INFO footage.heavy.move_onset sim arms %s, at best %.0f px from the footage (the sim's Moving minimum applies in full above 0.1 m/s)\n",
-			arms_text(wh.onset_sim).c_str(), onset_sim.max_error);
-	std::printf("INFO footage.suppressed.move_stop sim arms %s, at best %.0f px from the footage (the sim's Moving minimum applies in full above 0.1 m/s)\n",
-			arms_text(ws.stop_sim).c_str(), stop_sim.max_error);
+					arms_text(std::span<const double>(wh.onset_sim).subspan(onset.frame, kFootageHeavyOnset.size())).c_str(), onset.max_error,
+					onset_is_blend ? "equal to" : "not equal to"));
+	row("footage.suppressed.move_stop", stop.max_error <= kFootageArmRounding && stop_is_blend,
+			fmt("footage arms per 30 fps frame from 301.88 s: %s; the sim's presented arms as the motor decelerates: %s, max %.0f px, %s the blend",
+					arms_text(kFootageSuppressedStop).c_str(), arms_text(std::span<const double>(ws.stop_sim).subspan(stop.frame, kFootageSuppressedStop.size())).c_str(),
+					stop.max_error, stop_is_blend ? "equal to" : "not equal to"));
 
 	XhairScript s;
 	s.sprint = { t0 + 150, t0 + 210 };
