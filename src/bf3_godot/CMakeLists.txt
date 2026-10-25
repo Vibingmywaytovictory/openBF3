@@ -188,6 +188,11 @@ target_sources(bf3_godot PRIVATE
     src/iff_frame.cpp
 )
 
+target_sources(bf3_godot PRIVATE
+    src/ui_post_process.cpp
+    src/ui_post_process.h
+)
+
 if(OPENBF3_BUILD_CHECKS)
     target_sources(bf3_godot PRIVATE
         src/audio_demo.cpp
@@ -233,6 +238,10 @@ if(OPENBF3_BUILD_CHECKS)
         src/ui_font_check.h
         src/viewmodel_demo.cpp
         src/viewmodel_demo.h
+    )
+    target_sources(bf3_godot PRIVATE
+        src/ui_effects_check.cpp
+        src/ui_effects_check.h
     )
     target_link_libraries(bf3_godot PRIVATE bf3_sim_harness)
     target_include_directories(bf3_godot PRIVATE ${PROJECT_SOURCE_DIR}/tests)

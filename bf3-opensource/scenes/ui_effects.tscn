@@ -1,0 +1,11 @@
+[gd_scene format=3]
+
+[node name="UiEffects" type="Node3D"]
+
+[node name="Session" type="Bf3LevelSession" parent="."]
+metadata/openbf3_game = true
+metadata/openbf3_tdm = true
+
+[node name="MinimapHud" type="Bf3MinimapHud" parent="."]
+
+[node name="Check" type="Bf3UiEffectsCheck" parent="."]

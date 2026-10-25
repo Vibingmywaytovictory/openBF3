@@ -82,6 +82,9 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	void openbf3_register_tdm_hud();
 	openbf3_register_tdm_hud();
 
+	void openbf3_register_ui_effects();
+	openbf3_register_ui_effects();
+
 #if OPENBF3_BUILD_CHECKS
 	GDREGISTER_CLASS(bf3::godot_side::Bf3ViewmodelDemo);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3UiFontCheck);
@@ -98,6 +101,9 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 
 	void openbf3_register_m2a_fx3();
 	openbf3_register_m2a_fx3();
+
+	void openbf3_register_ui_effects_check();
+	openbf3_register_ui_effects_check();
 #endif
 }
 
