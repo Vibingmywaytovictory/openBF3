@@ -4,6 +4,7 @@
 #include "bf3/core/ui/as2_clip_loader.h"
 #include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/swf_scene.h"
+#include "kit_icons.h"
 #include "test_support.h"
 #include "ui_swf_writer.h"
 
@@ -393,5 +394,61 @@ TEST_SUITE("ui-scene2-unit") {
 		into_shape.load_clip(As2Clip(&s, "other.fill"), "img://ui/art/box");
 		CHECK(into_shape.poll() == As2ClipLoader::State::Failed);
 		CHECK_FALSE(s.load_image("other", "ui/art/box", 0, 4).ok());
+	}
+
+	TEST_CASE("game utils: getKitFrameLabel, isImagePath, string2object and UIBase.ObjectToArray follow the retail AS2") {
+		CHECK(game_utils_kit_frame_label("USAssault") == "assault");
+		CHECK(game_utils_kit_frame_label("RUEngineer") == "engineer");
+		CHECK(game_utils_kit_frame_label("ID_M_SUPPORT") == "medic");
+		CHECK(game_utils_kit_frame_label("RURecon") == "recon");
+		CHECK(game_utils_kit_frame_label("usassault").empty());
+		CHECK(game_utils_kit_frame_label("ID_M_MEDIC").empty());
+
+		CHECK(game_utils_is_image_path(As2Value::of("UI/Art/Persistence/Weapons/m16a4")));
+		CHECK_FALSE(game_utils_is_image_path(As2Value::of("ui/art/persistence/weapons/m16a4")));
+		CHECK_FALSE(game_utils_is_image_path(As2Value::of("UI/Ar")));
+		CHECK_FALSE(game_utils_is_image_path(As2Value::undefined()));
+
+		const As2Value o = game_utils_string2object("Name;;M16A4;;Slots;;[[A,,B,,]];;Empty;;[[]];;Odd");
+		CHECK(o.kind == As2Value::Kind::Object);
+		CHECK(o.field("Name").to_string() == "M16A4");
+		const As2Value &slots = o.field("Slots");
+		REQUIRE(slots.kind == As2Value::Kind::List);
+		REQUIRE(slots.size() == 3);
+		CHECK(slots.at(0).to_string() == "A");
+		CHECK(slots.at(1).to_string() == "B");
+		CHECK(slots.at(2).to_string().empty());
+		REQUIRE(o.field("Empty").size() == 1);
+		CHECK(o.field("Empty").at(0).to_string().empty());
+		CHECK(o.names.size() == 4);
+		CHECK_FALSE(o.field("Odd").defined());
+		const As2Value again = game_utils_string2object("a;;1;;a;;[[x");
+		CHECK(again.names.size() == 1);
+		REQUIRE(again.field("a").size() == 1);
+		CHECK(again.field("a").at(0).to_string().empty());
+
+		CHECK(as2_service_stars_text(7.0) == "7");
+		CHECK(as2_service_stars_text(-2.0) == "0");
+		CHECK(as2_service_stars_text(101.0) == "100");
+		CHECK(as2_service_stars_text(2.5) == "2.5");
+		CHECK(as2_service_stars_text(std::nan("")) == "NaN");
+
+		As2Value list = As2Value::array({ As2Value::of(1.0), As2Value::of("x") });
+		const std::optional<As2Value> copy = ui_base_object_to_array(list);
+		REQUIRE(copy.has_value());
+		CHECK(*copy == list);
+		As2Value like = As2Value::object();
+		like.set("length", As2Value::of(3.0)).set("0", As2Value::of("a")).set("2", As2Value::of("c"));
+		const std::optional<As2Value> arr = ui_base_object_to_array(like);
+		REQUIRE(arr.has_value());
+		REQUIRE(arr->size() == 3);
+		CHECK(arr->at(0).to_string() == "a");
+		CHECK_FALSE(arr->at(1).defined());
+		CHECK(arr->at(2).to_string() == "c");
+		CHECK_FALSE(ui_base_object_to_array(As2Value::object()).has_value());
+		CHECK_FALSE(ui_base_object_to_array(As2Value::of(4.0)).has_value());
+		CHECK_FALSE(ui_base_object_to_array(As2Value::undefined()).has_value());
+		CHECK(ui_base_object_to_array(As2Value::numbers({ 1.0, 2.0 }))->size() == 2);
+		CHECK(ui_base_object_to_array(As2Value::of("abc"))->size() == 3);
 	}
 }

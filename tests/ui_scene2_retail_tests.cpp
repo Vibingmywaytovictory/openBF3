@@ -5,6 +5,7 @@
 #include "bf3/core/ui/swf_image.h"
 #include "bf3/core/ui/swf_scene.h"
 #include "image_manager.h"
+#include "kit_icons.h"
 #include "scroll_text.h"
 #include "test_support.h"
 #include "ui_retail_support.h"
@@ -364,6 +365,37 @@ TEST_SUITE("ui-scene2") {
 		}
 		CHECK(inside > 0);
 		CHECK(outside > 0);
+		CHECK(s.hud->stats().as2.failed_ops == 0);
+	}
+
+	TEST_CASE("Shared.KitIcons and Shared.ServiceStars on the kill card: the star count hides until set, clamps to 0..100 and sizes the weapon stars") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		RetailScreen s = open_retail_screen(*r, kKillScreenPartition);
+		const std::string kit_path = "instance1.KillCam_01.killed.kitIcon";
+		auto *kit = dynamic_cast<KitIconsWidget *>(s.hud->controller(kit_path));
+		REQUIRE(kit != nullptr);
+		CHECK(kit->service_stars().path() == kit_path + ".serviceStars");
+		CHECK_FALSE(s.at(kit_path + ".serviceStars").visible);
+		kit->set_stars(14.0);
+		CHECK(s.at(kit_path + ".serviceStars").visible);
+		CHECK(s.at(kit_path + ".serviceStars.txt").text == "14");
+		kit->set_stars(250.0);
+		CHECK(s.at(kit_path + ".serviceStars.txt").text == "100");
+		kit->set_stars(-1.0);
+		CHECK(s.at(kit_path + ".serviceStars.txt").text == "0");
+
+		const std::string weapon_path = "instance1.KillCam_01.killed.weaponStars";
+		auto *weapon = dynamic_cast<ServiceStarsWidget *>(s.hud->controller(weapon_path));
+		REQUIRE(weapon != nullptr);
+		CHECK(s.at(weapon_path + ".txt").text.empty());
+		CHECK(weapon->width() == doctest::Approx(weapon->field().x()));
+		weapon->set_stars(3.0);
+		CHECK(s.at(weapon_path + ".txt").text == "3");
+		CHECK(weapon->width() > weapon->field().x());
+		CHECK(weapon->width() == doctest::Approx(weapon->field().x() + weapon->field().text_width()));
 		CHECK(s.hud->stats().as2.failed_ops == 0);
 	}
 }

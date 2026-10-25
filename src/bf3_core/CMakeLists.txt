@@ -298,6 +298,7 @@ target_sources(bf3_core PRIVATE
     src/ui/hud_widget_registry.cpp
     src/ui/widgets/hud_widget_support.h
     src/ui/widgets/image_manager.h
+    src/ui/widgets/kit_icons.h
     src/ui/widgets/scroll_text.h
 )
 openbf3_registry(bf3_core src/ui/widgets bf3/core/ui/hud_widget_registry.h HudWidgetRegistry bf3::core::ui register_hud_widgets_ register_hud_widget_files)

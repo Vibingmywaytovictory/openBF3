@@ -1,0 +1,44 @@
+#pragma once
+
+#include "bf3/core/ui/as2_clip.h"
+#include "bf3/core/ui/hud_screen.h"
+
+#include <optional>
+#include <string>
+#include <string_view>
+
+namespace bf3::core::ui {
+
+std::string as2_service_stars_text(double p_stars);
+
+class KitIconsWidget final : public HudWidgetController {
+public:
+	void construct(HudWidgetHost &r_host) override;
+
+	void set_stars(double p_stars) const;
+
+	const As2Clip &service_stars() const { return service_stars_; }
+
+private:
+	As2Clip service_stars_;
+};
+
+class ServiceStarsWidget final : public HudWidgetController {
+public:
+	void construct(HudWidgetHost &r_host) override;
+
+	void set_stars(double p_stars) const;
+	float width() const;
+
+	const As2Clip &field() const { return txt_; }
+
+private:
+	As2Clip txt_;
+};
+
+std::string game_utils_kit_frame_label(std::string_view p_kit);
+bool game_utils_is_image_path(const As2Value &p_path);
+As2Value game_utils_string2object(std::string_view p_text);
+std::optional<As2Value> ui_base_object_to_array(const As2Value &p_object);
+
+}
