@@ -43,6 +43,7 @@ enum class UiInputConcept : int32_t {
 
 inline constexpr int32_t kUiInputConceptCount = 23;
 
+bool input_is_bound(std::string_view p_input);
 std::string_view ui_input_concept_name(UiInputConcept p_concept);
 std::optional<UiInputConcept> ui_input_concept_of_action(std::string_view p_ui_input_action);
 std::string_view ui_input_concept_identifier(UiInputConcept p_concept);

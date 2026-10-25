@@ -3,6 +3,7 @@
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_snapshot.h"
+#include "bf3/core/ui/key_bindings.h"
 #include "bf3/core/ui/options.h"
 #include "test_support.h"
 
@@ -171,6 +172,143 @@ OptionsLevel *options_level_or_skip() {
 	return &l;
 }
 
+ConceptInput in(ConceptDevice p_device, std::string_view p_input, bool p_negate = false) {
+	return { p_device, std::string(p_input), p_negate, false };
+}
+
+KeyBindingMaps sample_maps() {
+	KeyBindingMaps m;
+	for (std::string_view id : kKeyBindingTabMaps) {
+		InputActionMap a;
+		a.id = std::string(id);
+		m.maps.push_back(std::move(a));
+	}
+	std::vector<InputConcept> &inf = m.maps[0].concepts;
+	inf.push_back({ "ConceptMoveFB", "ID_M_OPTIONS_CONCEPTMOVEFB_FOOT", false, "ConceptUndefined",
+			{ in(ConceptDevice::Pad, "IDA_Axis0Y"), in(ConceptDevice::Keyboard, "IDK_W"),
+					in(ConceptDevice::Keyboard, "IDK_S", true) } });
+	inf.push_back({ "ConceptJump", "", false, "ConceptUndefined",
+			{ in(ConceptDevice::Pad, "IDB_Rdown"), in(ConceptDevice::Keyboard, "IDK_Space") } });
+	inf.push_back({ "ConceptFire", "", false, "ConceptUndefined",
+			{ in(ConceptDevice::Pad, "IDB_Rtrigger"), in(ConceptDevice::Mouse, "IDB_Button_0"),
+					in(ConceptDevice::Keyboard, "IDK_Undefined") } });
+	inf.push_back({ "ConceptCommMenu1", "", true, "ConceptCommMenu1", { in(ConceptDevice::Keyboard, "IDK_Q") } });
+	inf.push_back({ "ConceptCrouch", "", false, "ConceptUndefined", { in(ConceptDevice::Keyboard, "IDK_X") } });
+	m.maps[4].concepts.push_back(
+			{ "ConceptMapSize", "", false, "ConceptUndefined", { in(ConceptDevice::Keyboard, "IDK_M") } });
+	return m;
+}
+
+KeyBindingTable sample_table() {
+	const std::vector<std::string> labels = { "A", "B", "C", "D", "E" };
+	Result<KeyBindingTable> t = KeyBindingTable::build(sample_maps(), labels);
+	REQUIRE(t.ok());
+	return std::move(*t);
+}
+
+std::string cells(const KeyBindingRow &p_row) {
+	return p_row.label + "|" + p_row.inputs[0] + "|" + p_row.inputs[1] + "|" + p_row.inputs[2];
+}
+
+}
+
+TEST_SUITE("ui-settings-unit") {
+	TEST_CASE("key bindings: rows per concept, a negative row for an axis, hidden concepts left out") {
+		const KeyBindingTable t = sample_table();
+		REQUIRE(t.tabs().size() == 5);
+		const std::vector<KeyBindingRow> &rows = t.tabs()[0].rows;
+		REQUIRE(rows.size() == 5);
+		CHECK(cells(rows[0]) == "ID_M_OPTIONS_CONCEPTMOVEFB_FOOT|IDK_W||IDA_Axis0Y");
+		CHECK(cells(rows[1]) == "ID_M_OPTIONS_CONCEPTMOVEFB_FOOT_NEG|IDK_S||IDA_Axis0Y");
+		CHECK(rows[1].negative);
+		CHECK(cells(rows[2]) == "ID_M_OPTIONS_CONCEPTJUMP|IDK_Space||IDB_Rdown");
+		CHECK(cells(rows[3]) == "ID_M_OPTIONS_CONCEPTFIRE||IDB_Button_0|IDB_Rtrigger");
+		CHECK(cells(rows[4]) == "ID_M_OPTIONS_CONCEPTCROUCH|IDK_X||");
+		CHECK(t.tabs()[4].map_id == "default");
+		CHECK(t.tabs()[4].label == "E");
+		CHECK(key_input_sid("IDK_LeftShift") == "ID_IDK_LeftShift");
+		CHECK(key_input_sid("IDK_None").empty());
+		CHECK_FALSE(input_is_bound("IDK_None"));
+		CHECK_FALSE(input_is_bound("IDB_Button_Undefined"));
+		CHECK_FALSE(input_is_bound(""));
+		CHECK(input_is_bound("IDA_Axis0Y"));
+		CHECK(input_fits(KeyColumn::Keyboard, "IDK_V"));
+		CHECK_FALSE(input_fits(KeyColumn::Keyboard, "IDB_Button_1"));
+		CHECK(input_fits(KeyColumn::Mouse, "IDB_Button_1"));
+		CHECK_FALSE(input_fits(KeyColumn::Mouse, "IDB_Rdown"));
+		CHECK(input_fits(KeyColumn::Joystick, "IDB_Rdown"));
+		CHECK_FALSE(input_fits(KeyColumn::Joystick, "IDB_Button_0"));
+		const std::vector<std::string> four = { "A", "B", "C", "D" };
+		CHECK_FALSE(KeyBindingTable::build(sample_maps(), four).ok());
+	}
+
+	TEST_CASE("key bindings: capture binds, reports a key in use, cancels on Escape and clears") {
+		KeyBindingTable t = sample_table();
+		KeyBindCapture cap;
+		const KeyCell jump{ 0, 2, KeyColumn::Keyboard };
+		const KeyCell crouch{ 0, 4, KeyColumn::Keyboard };
+		CHECK(cap.press(t, "IDK_J") == KeyBindResult::Refused);
+		REQUIRE(cap.begin(t, jump));
+		CHECK(cap.press(t, "IDB_Button_1") == KeyBindResult::Refused);
+		CHECK(cap.waiting());
+		CHECK(cap.press(t, "IDK_X") == KeyBindResult::Conflict);
+		CHECK(cap.conflict_pending());
+		REQUIRE(cap.conflicts().size() == 1);
+		CHECK(cap.conflicts()[0] == crouch);
+		CHECK(cap.press(t, "IDK_J") == KeyBindResult::Refused);
+		CHECK(cap.confirm(t, false) == KeyBindResult::Cancelled);
+		CHECK(t.input(jump) == "IDK_Space");
+		REQUIRE(cap.begin(t, jump));
+		CHECK(cap.press(t, "IDK_X") == KeyBindResult::Conflict);
+		CHECK(cap.confirm(t, true) == KeyBindResult::Bound);
+		CHECK(t.input(jump) == "IDK_X");
+		CHECK(t.input(crouch) == "IDK_X");
+		CHECK(t.holders(0, KeyColumn::Keyboard, "IDK_X").size() == 2);
+		REQUIRE(cap.begin(t, jump));
+		CHECK(cap.press(t, "IDK_Escape") == KeyBindResult::Cancelled);
+		CHECK(t.input(jump) == "IDK_X");
+		REQUIRE(cap.begin(t, jump));
+		CHECK(cap.press(t, "IDK_K") == KeyBindResult::Bound);
+		CHECK(t.input(jump) == "IDK_K");
+		REQUIRE(cap.begin(t, jump));
+		CHECK(cap.clear(t) == KeyBindResult::Cleared);
+		CHECK(t.input(jump).empty());
+		CHECK_FALSE(cap.waiting());
+		CHECK(cap.confirm(t, true) == KeyBindResult::Refused);
+		CHECK_FALSE(cap.begin(t, { 0, 99, KeyColumn::Keyboard }));
+	}
+
+	TEST_CASE("key bindings: overrides round-trip and reset; UI bindings follow the common tab") {
+		KeyBindingTable t = sample_table();
+		CHECK(t.is_default());
+		CHECK(t.overrides().empty());
+		REQUIRE(t.set({ 0, 2, KeyColumn::Keyboard }, "IDK_J"));
+		REQUIRE(t.set({ 0, 1, KeyColumn::Keyboard }, ""));
+		REQUIRE(t.set({ 4, 0, KeyColumn::Keyboard }, "IDK_Comma"));
+		CHECK_FALSE(t.set({ 0, 2, KeyColumn::Keyboard }, "IDB_Button_0"));
+		const std::vector<std::pair<std::string, std::string>> o = t.overrides();
+		REQUIRE(o.size() == 3);
+		CHECK(o[0] == std::pair<std::string, std::string>("bind.infantry.ConceptMoveFB.neg.keyboard", ""));
+		CHECK(o[1] == std::pair<std::string, std::string>("bind.infantry.ConceptJump.keyboard", "IDK_J"));
+		CHECK(o[2] == std::pair<std::string, std::string>("bind.default.ConceptMapSize.keyboard", "IDK_Comma"));
+		KeyBindingTable back = sample_table();
+		for (const auto &[k, v] : o) {
+			CHECK(back.apply_override(k, v));
+		}
+		CHECK(back.overrides() == o);
+		CHECK_FALSE(back.apply_override("bind.infantry.ConceptNothing.keyboard", "IDK_A"));
+		CHECK_FALSE(back.apply_override("bind.infantry.ConceptJump.feet", "IDK_A"));
+		CHECK_FALSE(back.apply_override("other.infantry.ConceptJump.keyboard", "IDK_A"));
+		UiInputBindings base;
+		base.bindings = { { "ConceptMapSize", UiInputDevice::Keyboard, "IDK_M" },
+			{ "ConceptActivate", UiInputDevice::Keyboard, "IDK_Enter" } };
+		const UiInputBindings ui = ui_input_bindings_with(base, back);
+		CHECK(ui.keys_of("ConceptMapSize") == std::vector<std::string>{ "IDK_Comma" });
+		CHECK(ui.keys_of("ConceptActivate") == std::vector<std::string>{ "IDK_Enter" });
+		back.reset();
+		CHECK(back.is_default());
+		CHECK(ui_input_bindings_with(base, back).bindings == base.bindings);
+	}
 }
 
 TEST_SUITE("ui-options") {
@@ -252,6 +390,89 @@ TEST_SUITE("ui-options") {
 			CHECK(option_source_of_key(s.data_key) == option_source_named(s.source));
 		}
 		CHECK(option_sources().size() == std::size(kExpectedSettings));
+	}
+
+	TEST_CASE("key bindings: the five tabs of input/inputconfiguration's user maps") {
+		OptionsLevel *l = options_level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		Result<KeyBindingMaps> maps = read_key_binding_maps(*l->lib);
+		REQUIRE_MESSAGE(maps.ok(), (maps.ok() ? std::string() : maps.error().message));
+		std::string ids;
+		for (const InputActionMap &m : maps->maps) {
+			ids += m.id + "=" + m.partition + "/" + std::to_string(m.settings_scheme) + " ";
+		}
+		std::printf("ui.options maps %s\n", ids.c_str());
+		CHECK(ids ==
+				"infantry=input/venicesoldierinputconcepts/0 mav=input/venicemavinputconcepts/0 "
+				"jet=input/venicejetinputconcepts/3 "
+				"heli=input/veniceheliinputconcepts/2 gunner=input/venicegunnerinputconcepts/0 "
+				"gunship=input/veniceac130inputconcepts/1 "
+				"vehicle=input/venicetankinputconcepts/1 default=input/defaultinputconcepts/0 ");
+		Result<std::vector<std::string>> tabs = read_key_binding_tabs(*l->lib);
+		REQUIRE(tabs.ok());
+		CHECK(joined(*tabs) ==
+				"ID_M_OPTIONS_ON_FOOT;ID_M_OPTIONS_IN_VEHICLE;ID_M_OPTIONS_IN_JET;ID_M_OPTIONS_IN_HELI;ID_M_OPTIONS_"
+				"ALL");
+		Result<KeyBindingTable> t = KeyBindingTable::build(*maps, *tabs);
+		REQUIRE_MESSAGE(t.ok(), (t.ok() ? std::string() : t.error().message));
+		for (const KeyBindingTab &tab : t->tabs()) {
+			std::printf("ui.options key tab %s %s %zu rows\n", tab.label.c_str(), tab.map_id.c_str(), tab.rows.size());
+		}
+		REQUIRE(t->tabs().size() == 5);
+		CHECK(t->tabs()[0].rows.size() == 46);
+		CHECK(t->tabs()[1].rows.size() == 32);
+		CHECK(t->tabs()[2].rows.size() == 22);
+		CHECK(t->tabs()[3].rows.size() == 28);
+		CHECK(t->tabs()[4].rows.size() == 10);
+		const auto row_cells = [&](std::string_view p_map, std::string_view p_concept, bool p_negative) {
+			const KeyBindingRow *r = t->row(p_map, p_concept, p_negative);
+			return r == nullptr ? std::string("missing") : cells(*r);
+		};
+		CHECK(row_cells("infantry", "ConceptMoveFB", false) == "ID_M_OPTIONS_CONCEPTMOVEFB_FOOT|IDK_W||IDA_Axis0Y");
+		CHECK(row_cells("infantry", "ConceptMoveFB", true) == "ID_M_OPTIONS_CONCEPTMOVEFB_FOOT_NEG|IDK_S||IDA_Axis0Y");
+		CHECK(row_cells("infantry", "ConceptPitch", false) == "ID_M_OPTIONS_CONCEPTPITCH_FOOT||IDA_Axis0Y|IDA_Axis1Y");
+		CHECK(row_cells("infantry", "ConceptYaw", false) == "ID_M_OPTIONS_CONCEPTYAW_FOOT||IDA_Axis0X|IDA_Axis1X");
+		CHECK(row_cells("infantry", "ConceptSprint", false) == "ID_M_OPTIONS_CONCEPTSPRINT|IDK_LeftShift||IDB_Lthumb");
+		CHECK(row_cells("infantry", "ConceptCrouch", false) == "ID_M_OPTIONS_CONCEPTCROUCH|IDK_X||");
+		CHECK(row_cells("infantry", "ConceptCrouchOnHold", false) == "ID_M_OPTIONS_CONCEPTCROUCHONHOLD|IDK_LeftCtrl||");
+		CHECK(row_cells("infantry", "ConceptFire", false) == "ID_M_OPTIONS_CONCEPTFIRE||IDB_Button_0|IDB_Rtrigger");
+		CHECK(row_cells("infantry", "ConceptZoom", false) == "ID_M_OPTIONS_CONCEPTZOOM||IDB_Button_1|IDB_Ltrigger");
+		CHECK(row_cells("infantry", "ConceptCycleFireMode", false) ==
+				"ID_M_OPTIONS_CONCEPTCYCLEFIREMODE|IDK_V||IDB_Ldown");
+		CHECK(row_cells("infantry", "ConceptSwitchToStaticGadget", false) ==
+				"ID_M_OPTIONS_CONCEPTSELECTINVENTORYITEM3|IDK_3||");
+		CHECK(row_cells("infantry", "ConceptCommMenu1", false) == "missing");
+		CHECK(row_cells("default", "ConceptScoreboard", false) == "ID_M_OPTIONS_CONCEPTSCOREBOARD|IDK_Tab||IDB_alt");
+		CHECK(row_cells("default", "ConceptToggleMinimapType", false) == "ID_M_OPTIONS_CONCEPTTOGGLEMINIMAP|IDK_B||");
+		const KeyBindingTab *heli = t->tab_of_map("heli");
+		REQUIRE(heli != nullptr);
+		std::vector<std::string> footage;
+		for (const KeyBindingRow &r : heli->rows) {
+			footage.push_back(cells(r));
+		}
+		const std::vector<std::string> heli_footage = {
+			"ID_M_OPTIONS_CONCEPTMOVEFB_HELI|IDK_W||IDB_Rtrigger",
+			"ID_M_OPTIONS_CONCEPTMOVEFB_HELI_NEG|IDK_S||IDB_Ltrigger",
+			"ID_M_OPTIONS_CONCEPTYAW_HELI|IDK_D||IDA_Axis0X",
+			"ID_M_OPTIONS_CONCEPTYAW_HELI_NEG|IDK_A||IDA_Axis0X",
+			"ID_M_OPTIONS_CONCEPTPITCH_HELI|IDK_ArrowUp|IDA_Axis0Y|IDA_Axis1Y",
+			"ID_M_OPTIONS_CONCEPTPITCH_HELI_NEG|IDK_ArrowDown|IDA_Axis0Y|IDA_Axis1Y",
+			"ID_M_OPTIONS_CONCEPTROLL|IDK_ArrowRight|IDA_Axis0X|IDA_Axis1X",
+			"ID_M_OPTIONS_CONCEPTROLL_NEG|IDK_ArrowLeft|IDA_Axis0X|IDA_Axis1X",
+			"ID_M_OPTIONS_CONCEPTTOGGLECAMERA|IDK_C||IDB_Rthumb",
+			"ID_M_OPTIONS_CONCEPTZOOM_AIRCRAFT||IDB_Button_1|IDB_Ldown",
+			"ID_M_OPTIONS_CONCEPTCAMERAPITCH||IDA_Axis0Y|IDA_Axis1Y",
+			"ID_M_OPTIONS_CONCEPTCAMERAPITCH_NEG||IDA_Axis0Y|IDA_Axis1Y",
+			"ID_M_OPTIONS_CONCEPTCAMERAYAW||IDA_Axis0X|IDA_Axis1X",
+		};
+		REQUIRE(footage.size() >= heli_footage.size());
+		CHECK(std::vector<std::string>(footage.begin(), footage.begin() + std::ptrdiff_t(heli_footage.size())) ==
+				heli_footage);
+		Result<UiInputBindings> ui = read_ui_input_bindings(*l->lib);
+		REQUIRE(ui.ok());
+		CHECK(ui_input_bindings_with(*ui, *t).bindings == ui->bindings);
 	}
 
 	TEST_CASE("options: install unchanged") {

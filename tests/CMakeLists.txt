@@ -987,6 +987,8 @@ openbf3_test(test_ui_options test_main.cpp ui_options_tests.cpp test_support.h)
 target_link_libraries(test_ui_options PRIVATE bf3_core)
 add_test(NAME ui.options.install COMMAND test_ui_options --test-suite=ui-options)
 set_tests_properties(ui.options.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+add_test(NAME ui.settings.unit COMMAND test_ui_options --test-suite=ui-settings-unit)
+set_tests_properties(ui.settings.unit PROPERTIES TIMEOUT 60)
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME hygiene.rules COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tools/check_hygiene.py" "${CMAKE_SOURCE_DIR}")

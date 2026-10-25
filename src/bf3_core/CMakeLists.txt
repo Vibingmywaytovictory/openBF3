@@ -377,3 +377,8 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/ui/options.h
     src/ui/options.cpp
 )
+
+target_sources(bf3_core PRIVATE
+    include/bf3/core/ui/key_bindings.h
+    src/ui/key_bindings.cpp
+)

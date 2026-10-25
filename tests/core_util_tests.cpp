@@ -121,8 +121,11 @@ TEST_SUITE("core-util-unit") {
 		CHECK_FALSE(finite(Point{ 1, 2, inf }));
 	}
 
-	TEST_CASE("core.util: ascii lower, iequals and trim") {
+	TEST_CASE("core.util: ascii lower, upper, iequals and trim") {
 		CHECK(to_lower_ascii('Q') == 'q');
+		CHECK(to_upper_ascii('q') == 'Q');
+		CHECK(to_upper_ascii("ConceptJump_7") == "CONCEPTJUMP_7");
+		CHECK(to_upper_ascii("\xE4x") == "\xE4X");
 		CHECK(to_lower_ascii('7') == '7');
 		CHECK(to_lower_ascii("Levels/MP_Subway") == "levels/mp_subway");
 		CHECK(to_lower_ascii("\xC4X") == "\xC4x");

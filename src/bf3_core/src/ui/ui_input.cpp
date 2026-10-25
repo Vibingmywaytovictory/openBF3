@@ -93,11 +93,10 @@ constexpr KeyRow kKeys[] = {
 
 constexpr std::string_view kUiInputActionPrefix = "UIInputAction_";
 constexpr std::string_view kIdkPrefix = "IDK_";
-
-bool unbound(std::string_view p_key) {
-	return p_key.empty() || p_key.ends_with("_Undefined");
 }
 
+bool input_is_bound(std::string_view p_input) {
+	return !p_input.empty() && !p_input.ends_with("_Undefined") && p_input != "IDK_None";
 }
 
 std::string_view ui_input_concept_name(UiInputConcept p_concept) {
@@ -232,7 +231,7 @@ Result<UiInputBindings> read_ui_input_bindings(const EbxResolver &p_db, std::str
 					return;
 				}
 				const std::optional<std::string_view> k = key ? key->enum_name() : std::nullopt;
-				if (!k || unbound(*k)) {
+				if (!k || !input_is_bound(*k)) {
 					return;
 				}
 				if (out.bindings.size() >= kUiInputMaxBindings) {

@@ -18,6 +18,14 @@ std::string to_lower_ascii(std::string_view p_text) {
 	return out;
 }
 
+std::string to_upper_ascii(std::string_view p_text) {
+	std::string out(p_text);
+	for (char &c : out) {
+		c = to_upper_ascii(c);
+	}
+	return out;
+}
+
 bool iequals_ascii(std::string_view p_a, std::string_view p_b) {
 	if (p_a.size() != p_b.size()) {
 		return false;
