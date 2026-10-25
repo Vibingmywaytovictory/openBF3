@@ -416,6 +416,30 @@ TEST_SUITE("ui-graph") {
 		CHECK(run.flow.errors().empty());
 	}
 
+	TEST_CASE("ui graph: playingminimapinit MapZoom increments and steps the zoom") {
+		RetailGraphs *r = retail_graphs_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		constexpr std::string_view graph = "ui/flow/graph/ingame/playingminimapinit";
+		Run run(*r);
+		REQUIRE(run.flow.fire_input(graph, "Initialized"));
+		CHECK(run.host.data["uiminimapcomp#-1358262034"] == "True");
+		CHECK(run.host.data["uiminimapcomp#1404427580"] == "0");
+		std::vector<std::string> zoom;
+		std::vector<std::string> level;
+		for (int i = 0; i < 4; ++i) {
+			REQUIRE(run.flow.fire_input(graph, "MapZoom"));
+			zoom.push_back(run.host.data["uiminimapcomp#1404427580"]);
+			level.push_back(run.host.data["uiminimapcomp#-1127323954"]);
+		}
+		CHECK(zoom == Lines{ "0.4", "1.2", "0", "0.4" });
+		CHECK(level == Lines{ "1", "2", "0", "1" });
+		CHECK(run.host.data["uiminimapcomp#-1095821268"].empty());
+		run.take("playingminimapinit.MapZoom");
+		CHECK(run.flow.errors().empty());
+	}
+
 	TEST_CASE("ui graph: spawngraphpc EnterSpawn and deploy") {
 		RetailGraphs *r = retail_graphs_or_skip();
 		if (r == nullptr) {

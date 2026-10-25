@@ -19,6 +19,7 @@ inline constexpr size_t kUiGraphMaxNodes = 1024;
 inline constexpr size_t kUiGraphMaxPortsPerNode = 256;
 inline constexpr size_t kUiGraphMaxConnections = 4096;
 inline constexpr size_t kUiGraphMaxParams = 64;
+inline constexpr size_t kUiGraphMaxSteps = 64;
 inline constexpr size_t kUiActionMaxKeys = 4096;
 
 enum class UiGraphNodeKind : uint8_t {
@@ -31,6 +32,8 @@ enum class UiGraphNodeKind : uint8_t {
 	DataSet,
 	DataGet,
 	DataToggle,
+	DataIncrement,
+	DataStep,
 	BinaryLogic,
 	ComparisonLogic,
 	OperandLogic,
@@ -91,6 +94,11 @@ struct UiGraphNode {
 	bool skip_fractionals = false;
 	std::string op;
 	double literal = 0.0;
+	UiDataRef current_step;
+	double increment = 0.0;
+	double minimum = 0.0;
+	double maximum = 0.0;
+	std::vector<double> steps;
 	int32_t output_id = 0;
 	bool destroy_graph = false;
 	std::string dialog_title;

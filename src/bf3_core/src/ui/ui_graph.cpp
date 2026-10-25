@@ -62,6 +62,8 @@ UiGraphNodeKind kind_of(const EbxInstance &p_i) {
 		{ "DataSetNode", UiGraphNodeKind::DataSet },
 		{ "DataGetNode", UiGraphNodeKind::DataGet },
 		{ "DataToggleNode", UiGraphNodeKind::DataToggle },
+		{ "DataIncrementNode", UiGraphNodeKind::DataIncrement },
+		{ "DataStepNode", UiGraphNodeKind::DataStep },
 		{ "BinaryLogicNode", UiGraphNodeKind::BinaryLogic },
 		{ "ComparisonLogicNode", UiGraphNodeKind::ComparisonLogic },
 		{ "OperandLogicNode", UiGraphNodeKind::OperandLogic },
@@ -150,6 +152,10 @@ const char *ui_graph_node_kind_name(UiGraphNodeKind p_kind) {
 			return "DataGet";
 		case UiGraphNodeKind::DataToggle:
 			return "DataToggle";
+		case UiGraphNodeKind::DataIncrement:
+			return "DataIncrement";
+		case UiGraphNodeKind::DataStep:
+			return "DataStep";
 		case UiGraphNodeKind::BinaryLogic:
 			return "BinaryLogic";
 		case UiGraphNodeKind::ComparisonLogic:
@@ -276,6 +282,21 @@ Result<UiGraphAsset> read_ui_graph_asset(const EbxResolver &p_db, std::string_vi
 			node.op = text_of(n->get("Operator"));
 			if (const std::optional<EbxValue> lit = n->get("RightLiteralOperand")) {
 				node.literal = detail::number(lit).value_or(0.0);
+			}
+			node.current_step = data_of(p_db, *part, n->get("CurrentStepDataSource"));
+			node.increment = detail::number(n->get("IncrementSize")).value_or(0.0);
+			node.minimum = detail::number(n->get("Min")).value_or(0.0);
+			node.maximum = detail::number(n->get("Max")).value_or(0.0);
+			if (const std::optional<EbxValue> steps = n->get("Steps")) {
+				if (const OptionalEbxArray arr = steps->as_array()) {
+					if (arr->size() > kUiGraphMaxSteps) {
+						return make_error("ui graph: " + std::string(p_partition) + ": node " + node.name + " has " +
+								std::to_string(arr->size()) + " steps");
+					}
+					for (const EbxValue &step : *arr) {
+						node.steps.push_back(step.as_f32().value_or(0.0f));
+					}
+				}
 			}
 			node.output_id = i32_of(*n, "Id");
 			node.destroy_graph = flag_of(*n, "DestroyGraph");

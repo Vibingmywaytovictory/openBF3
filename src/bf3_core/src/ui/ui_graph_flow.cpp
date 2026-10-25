@@ -3,6 +3,7 @@
 #include "bf3/core/util/text.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <map>
@@ -28,6 +29,15 @@ std::optional<double> number_of(std::string_view p_text) {
 		return std::nullopt;
 	}
 	return d;
+}
+
+std::string number_text(double p_value) {
+	if (p_value == std::trunc(p_value) && std::abs(p_value) < 1e15) {
+		return std::to_string(int64_t(p_value));
+	}
+	char buf[32];
+	const std::to_chars_result r = std::to_chars(buf, buf + sizeof(buf), float(p_value));
+	return std::string(buf, r.ptr);
 }
 
 std::string data_text(const UiDataRef &p_ref) {
@@ -477,6 +487,36 @@ void UiFlow::enter(Instance &r_inst, uint32_t p_node, uint32_t p_port, const std
 			const std::optional<std::string> v = host_.data_get(n.data);
 			const std::string value = v && ui_flow_truthy(*v) ? "False" : "True";
 			note("toggle " + data_text(n.data) + "=" + value);
+			host_.data_set(n.data, value, false);
+			if (const std::optional<uint32_t> o = n.port(UiGraphPortRole::Out)) {
+				follow(r_inst, p_node, *o, value);
+			}
+			break;
+		}
+		case UiGraphNodeKind::DataIncrement: {
+			const std::optional<std::string> v = host_.data_get(n.data);
+			double next = (v ? number_of(*v).value_or(n.minimum) : n.minimum) + n.increment;
+			if (next > n.maximum) {
+				next = n.minimum;
+			}
+			const std::string value = number_text(next);
+			note("increment " + data_text(n.data) + "=" + value);
+			host_.data_set(n.data, value, false);
+			if (const std::optional<uint32_t> o = n.port(UiGraphPortRole::Out)) {
+				follow(r_inst, p_node, *o, value);
+			}
+			break;
+		}
+		case UiGraphNodeKind::DataStep: {
+			if (n.steps.empty()) {
+				error("node " + n.name + " in " + r_inst.graph + " has no steps");
+				break;
+			}
+			const std::optional<std::string> v = host_.data_get(n.current_step);
+			const double at = v ? number_of(*v).value_or(0.0) : 0.0;
+			const size_t index = size_t(std::clamp(at, 0.0, double(n.steps.size() - 1)));
+			const std::string value = number_text(n.steps[index]);
+			note("step " + data_text(n.data) + "=" + value);
 			host_.data_set(n.data, value, false);
 			if (const std::optional<uint32_t> o = n.port(UiGraphPortRole::Out)) {
 				follow(r_inst, p_node, *o, value);
