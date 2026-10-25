@@ -225,7 +225,8 @@ bool CrosshairWalkRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, con
 			}
 			offset_ = offset;
 			drawn_arm_ = blend_arm(f, p_in);
-			stand_arm_ =core::ui::hud_crosshair_arm(sw::effective_dispersion(def, sw::SwayContext{}).min_angle, offset);
+			stand_arm_ =
+					core::ui::hud_crosshair_arm(sw::effective_dispersion(def, sw::SwayContext{}).min_angle, offset);
 			moving_arm_ = core::ui::hud_crosshair_arm(sw::effective_dispersion(def, moving).min_angle, offset);
 			shots_at_start_ = p_in.own_shots;
 			magazine_at_start_ = p_in.weapon->magazine;
