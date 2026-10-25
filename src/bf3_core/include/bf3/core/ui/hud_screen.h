@@ -194,6 +194,18 @@ class HudDamageIndicatorComp;
 class HudMessageComp;
 struct HudWorldTags;
 
+struct HudPopupButton {
+	std::string label;
+	int32_t input_concept = -1;
+};
+
+struct HudPopup {
+	std::string title;
+	std::string text;
+	std::vector<HudPopupButton> buttons;
+	bool show_dimmer = true;
+};
+
 struct HudClientState {
 	const HudMessageComp *messages = nullptr;
 	const HudDamageIndicatorComp *damage = nullptr;
@@ -210,6 +222,7 @@ struct HudClientState {
 	float stage_height = 720.0f;
 	std::function<std::string(uint32_t)> localise_hash;
 	std::function<std::optional<std::string>(std::string_view)> translate;
+	const HudPopup *popup = nullptr;
 };
 
 struct HudTilt {
@@ -403,6 +416,7 @@ public:
 	virtual void pre_update_screen_size(HudWidgetHost &) {}
 	virtual void update_screen_size(HudWidgetHost &) {}
 	virtual void initialize(HudWidgetHost &, const HudWidgetInit &) {}
+	virtual void initialize_screen(HudWidgetHost &) {}
 	virtual void update(HudWidgetHost &, std::string_view, const As2Value &) {}
 	virtual void drive(HudWidgetHost &, const HudModel &, const HudClientState &) {}
 	virtual void advance(HudWidgetHost &, double) {}

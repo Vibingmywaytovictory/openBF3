@@ -27,6 +27,9 @@ namespace {
 constexpr std::string_view kScoreboard32 = "ui/flow/screen/scoreboards/scoreboardtwoteamshud32screen";
 constexpr std::string_view kScoreboardTwoTeams = "ui/flow/screen/scoreboards/scoreboardtwoteamsscreen";
 constexpr std::string_view kSpawnScreenPc = "ui/flow/screen/spawnscreenpc";
+constexpr std::string_view kPopupGeneric = "ui/flow/screen/popups/popupgeneric";
+constexpr uint32_t kOptionsTitleHash = 0x2ad6638eu;
+constexpr uint32_t kSaveSettingsHash = 0xbed6cb61u;
 
 void check_scoreboard_list(const HudScreenAsset &p_asset, std::string_view p_instance, int32_t p_key) {
 	const HudWidgetNode *node = p_asset.find(p_instance);
@@ -480,6 +483,96 @@ TEST_SUITE("ui-widgets") {
 		CHECK(b.events.back().param.to_string() == "ID2");
 		CHECK(b.clip("TabBar_01.tabBarHolder.button_2.button.bgHolder.selected_mc").visible());
 		CHECK_FALSE(b.clip("TabBar_01.tabBarHolder.button_0.button.bgHolder.selected_mc").visible());
+	}
+
+	TEST_CASE("widgets: generic popup shows Save settings with YES and NO") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const TextDatabase &db = ui_retail::retail_text_db(*r);
+		HudPopup popup;
+		popup.title = std::string(db.find(kOptionsTitleHash).value_or(""));
+		popup.text = std::string(db.find(kSaveSettingsHash).value_or(""));
+		popup.buttons = { { "ID_M_POPUP_YES", -1 }, { "ID_M_POPUP_NO", -1 } };
+		REQUIRE(popup.title == "Options");
+		REQUIRE(popup.text == "Save settings?");
+		HudClientState client;
+		client.popup = &popup;
+		ScreenRig b;
+		open_screen(*r, b, kPopupGeneric, client);
+		CHECK(b.s.hud->stats().widgets_missing == 0);
+		CHECK(b.s.hud->stats().as2.missing_paths == 0);
+		CHECK_MESSAGE(b.s.hud->stats().as2.failed_ops == 0, b.s.hud->stats().as2.last_failure);
+		const As2Clip screen = b.s.hud->clip(kHudScreenInstance);
+		CHECK(screen.xscale() == doctest::Approx(80.0));
+		CHECK(screen.alpha() == doctest::Approx(0.0));
+		CHECK(screen.x() == doctest::Approx(128.0));
+		CHECK(screen.y() == doctest::Approx(72.0));
+		b.s.hud->advance(0.2);
+		CHECK(screen.xscale() > 95.0f);
+		CHECK(screen.xscale() < 100.0f);
+		b.s.hud->advance(0.25);
+		CHECK(screen.xscale() == doctest::Approx(100.0));
+		CHECK(screen.yscale() == doctest::Approx(100.0));
+		CHECK(screen.alpha() == doctest::Approx(100.0));
+		CHECK(screen.x() == doctest::Approx(0.0));
+		CHECK(screen.y() == doctest::Approx(0.0));
+		CHECK(b.s.hud->enter_complete());
+		CHECK(b.clip("PopupGenericWidget_01").visible());
+		CHECK(b.clip("PopupGenericWidget_01.popupTitle").text() == "Options");
+		CHECK(b.clip("PopupGenericWidget_01.popupText").text() == "Save settings?");
+		const As2Clip dimmer = b.clip("Dimmer_01");
+		CHECK(dimmer.visible());
+		CHECK(dimmer.width() == doctest::Approx(1280.0 + 256.0));
+		CHECK(dimmer.height() == doctest::Approx(720.0 + 144.0));
+		CHECK(b.clip("Dimmer_01.dimmer").visible());
+		const As2Clip manager = b.clip("PopupButtonsManager_01");
+		CHECK(manager.visible());
+		CHECK(manager.xscale() == doctest::Approx(100.0));
+		CHECK_FALSE(b.clip("PopupButtonsManager_01.placeholder").visible());
+		const As2Clip holder = b.clip("PopupButtonsManager_01.holder");
+		const As2Clip yes = b.clip("PopupButtonsManager_01.holder.btn0");
+		const As2Clip no = b.clip("PopupButtonsManager_01.holder.btn1");
+		REQUIRE(yes.exists());
+		REQUIRE(no.exists());
+		CHECK(b.clip("PopupButtonsManager_01.holder.btn0.button.label.txt").text() == "YES");
+		CHECK(b.clip("PopupButtonsManager_01.holder.btn1.button.label.txt").text() == "NO");
+		const float yes_width = b.clip("PopupButtonsManager_01.holder.btn0.button.bgHolder").width() - 2.0f;
+		CHECK(yes.x() == 0.0f);
+		CHECK(no.x() == doctest::Approx(yes_width + 12.0f));
+		CHECK(b.clip("PopupButtonsManager_01.holder.btn0.button.bgHolder.selected_mc").visible());
+		CHECK(b.clip("PopupButtonsManager_01.holder.btn0.button.labelInvert").visible());
+		CHECK_FALSE(b.clip("PopupButtonsManager_01.holder.btn1.button.bgHolder.selected_mc").visible());
+		const float yes_left = manager.x() + holder.x() + yes.x();
+		const float no_left = manager.x() + holder.x() + no.x();
+		std::printf("ui.widgets popup buttons YES x %.1f w %.1f, NO x %.1f, row y %.1f, holder x %.1f\n", yes_left,
+				yes_width, no_left, manager.y(), holder.x());
+		const std::string mgr = std::string(kHudScreenInstance) + ".PopupButtonsManager_01";
+		b.s.hud->focus_widget(mgr);
+		b.events.clear();
+		b.s.hud->input_concept(int32_t(UiInputConcept::NavigateRight), true);
+		CHECK(b.clip("PopupButtonsManager_01.holder.btn1.button.bgHolder.selected_mc").visible());
+		CHECK_FALSE(b.clip("PopupButtonsManager_01.holder.btn0.button.bgHolder.selected_mc").visible());
+		b.s.hud->input_concept(int32_t(UiInputConcept::NavigateRight), true);
+		CHECK(b.clip("PopupButtonsManager_01.holder.btn1.button.bgHolder.selected_mc").visible());
+		b.s.hud->input_concept(int32_t(UiInputConcept::Activate), true);
+		REQUIRE_FALSE(b.events.empty());
+		CHECK(b.events.back().instance == "PopupButtonsManager_01");
+		CHECK(b.events.back().index == 0);
+		CHECK(b.events.back().param.to_string() == "ID_M_POPUP_NO");
+		const float click_x = yes_left + yes_width * 0.5f;
+		const float click_y = manager.y() + 10.0f;
+		CHECK(b.s.hud->hit_target(click_x, click_y) == mgr + ".holder.btn0");
+		b.events.clear();
+		b.s.hud->mouse_move(click_x, click_y);
+		b.s.hud->mouse_button(click_x, click_y, 1, true);
+		b.s.hud->mouse_button(click_x, click_y, 1, false);
+		REQUIRE(b.events.size() == 2u);
+		CHECK(b.events[0].query == "UIWidgetEventID_PlaySoundSelect");
+		CHECK(b.events[1].index == 0);
+		CHECK(b.events[1].param.to_string() == "ID_M_POPUP_YES");
+		CHECK(b.s.hud->hit_target(100.0f, 100.0f) == std::string(kHudScreenInstance) + ".Dimmer_01");
 	}
 
 	TEST_CASE("widgets: install unchanged") {

@@ -133,15 +133,21 @@ public:
 
 	void set_state(ButtonState p_state) {
 		const As2Clip bg = host_->clip("bgHolder");
+		const auto hide = [&bg](ButtonState p_hidden) {
+			const As2Clip c = bg.child(state_clip(p_hidden));
+			if (c.exists()) {
+				c.set_visible(false);
+			}
+		};
 		for (const ButtonState s : { ButtonState::Normal, ButtonState::Over, ButtonState::Press }) {
-			bg.child(state_clip(s)).set_visible(false);
+			hide(s);
 		}
 		if (!highlighted_) {
-			bg.child(state_clip(ButtonState::Highlight)).set_visible(false);
+			hide(ButtonState::Highlight);
 		}
 		for (const ButtonState s : { ButtonState::OverSelected, ButtonState::PressSelected, ButtonState::Selected,
 					 ButtonState::Inactive }) {
-			bg.child(state_clip(s)).set_visible(false);
+			hide(s);
 		}
 		ButtonState state = p_state;
 		if (highlighted_ && state == ButtonState::Normal) {
@@ -455,9 +461,13 @@ public:
 		if (p_mouse.target != r_host.path()) {
 			return false;
 		}
-		set_state(r_host, ButtonState::Press);
-		call_or_fire(callbacks_.press, kPressed);
+		press();
 		return true;
+	}
+
+	void press() override {
+		set_state(*host_, ButtonState::Press);
+		call_or_fire(callbacks_.press, kPressed);
 	}
 
 	bool mouse_release(HudWidgetHost &r_host, const HudMouse &p_mouse) override {

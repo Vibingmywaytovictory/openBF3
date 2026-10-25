@@ -1161,6 +1161,11 @@ void HudScreen::initialize(const HudModel &p_model) {
 		return;
 	}
 	initialized_ = true;
+	if (HudWidgetController *screen = controller(kHudScreenInstance)) {
+		if (HudWidgetHost *screen_host = host(kHudScreenInstance)) {
+			screen->initialize_screen(*screen_host);
+		}
+	}
 	const std::string prefix = std::string(kHudScreenInstance) + ".";
 	for (const HudWidgetNode &n : asset_.widgets) {
 		HudWidgetState *w = nullptr;
