@@ -2,6 +2,7 @@
 
 #include "level_session.h"
 #include "native_hud.h"
+#include "native_screens.h"
 #include "swf_view.h"
 #include "ui_assets.h"
 
@@ -364,6 +365,38 @@ void NativeHudMomentRun::hold(Bf3LevelSession &r_session) {
 	client->send_debug(q);
 }
 
+void NativeHudMomentRun::check_stack(const Bf3LevelSession &p_session, const Bf3NativeHud &p_hud) {
+	const Bf3UiScreens *stack = p_session.screen_stack();
+	const UiScreenRecords *records = p_session.screen_records();
+	if (stack == nullptr || records == nullptr) {
+		row("stack", false, "the round has no native screen stack");
+		return;
+	}
+	const UiScreenHost &hud = p_hud;
+	const UiScreenRecords &hud_records = p_hud;
+	std::string differ;
+	for (const std::string_view p : kNativeHudPartitions) {
+		const UiScreenSlot a = stack->find_screen(p);
+		const UiScreenSlot b = hud.find_screen(p);
+		const std::optional<UiScreenRecord> ra = records->screen_record(p);
+		const std::optional<UiScreenRecord> rb = hud_records.screen_record(p);
+		const bool same_slot = a.partition == p && a.screen == b.screen && a.view == b.view && a.shown == b.shown &&
+				a.order == b.order && !a.modal && !a.focused && a.screen != nullptr && !a.screen->has_focus();
+		const bool same_record = ra && rb && ra->visible == rb->visible && ra->shown == rb->shown;
+		if (!same_slot || !same_record) {
+			differ += (differ.empty() ? "" : ", ") + std::string(p) + (same_slot ? " record" : " slot");
+		}
+	}
+	const std::optional<UiScreenPhase> mp = stack->phase(ui::kHudMpScreenPartition);
+	const bool following = mp == UiScreenPhase::Shown && stack->stats().entered > 0 && stack->errors().empty();
+	const std::string hosted = differ.empty() ? "yes" : "no, " + differ;
+	row("stack", differ.empty() && following,
+			"Bf3UiScreens slots and round records of the 4 in-round screens are Bf3NativeHud's: " + hosted +
+					"; hudmpscreen " + (mp ? ui_screen_phase_name(*mp) : "not in the stack") + ", " +
+					std::to_string(stack->stats().entered) + " entered, " + std::to_string(stack->errors().size()) +
+					" errors");
+}
+
 void NativeHudMomentRun::check_host(Bf3NativeHud &r_hud) {
 	UiScreenHost &host = r_hud;
 	bool slots = host.screen_count() == kNativeHudViews;
@@ -571,6 +604,7 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 			}
 			m.group->check(*this, r_session, r_hud, m.moment, ok ? layer : Ref<Image>());
 			if (++index_ >= moments_.size()) {
+				check_stack(r_session, r_hud);
 				check_host(r_hud);
 				phase_ = Phase::Done;
 				return true;

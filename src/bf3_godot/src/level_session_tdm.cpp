@@ -335,8 +335,7 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 		}
 		bots_ = m.options.bots;
 		m.native_screens_check = has_user_arg("native-screens-check");
-		m.native_screens =
-				m.native_screens_check || (has_user_arg("native-screens") && user_arg_value("native-screens") != "0");
+		m.native_screens = m.native_screens_check || user_arg_value("native-screens") != "0";
 		if (m.native_screens_check && quit_after_ <= 0.0) {
 			quit_after_ = 1.0e9;
 		}
@@ -768,6 +767,14 @@ void Bf3LevelSession::tdm_shutdown() {
 		m.tdm_hud->shutdown();
 	}
 	m.death_camera.reset();
+}
+
+const Bf3UiScreens *Bf3LevelSession::screen_stack() const {
+	return game_ && game_->tdm ? game_->tdm->ui_screens : nullptr;
+}
+
+const UiScreenRecords *Bf3LevelSession::screen_records() const {
+	return game_ && game_->tdm ? &game_->tdm->screen_records : nullptr;
 }
 
 bool Bf3LevelSession::tdm_join_ready() const {

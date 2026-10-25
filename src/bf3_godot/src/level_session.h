@@ -53,9 +53,11 @@ class CollisionWorld;
 namespace bf3::godot_side {
 
 class Bf3UiAssets;
+class Bf3UiScreens;
 class M1Check;
 class M1LoadCheck;
 class ShotRunner;
+class UiScreenRecords;
 
 struct SessionTimings {
 	uint64_t ready_us = 0;
@@ -117,6 +119,8 @@ public:
 
 	const bf3::sim::CollisionWorld *collision_world() const;
 	Bf3UiAssets *ui_assets() const;
+	const Bf3UiScreens *screen_stack() const;
+	const UiScreenRecords *screen_records() const;
 
 	bool restart_client(const std::string &p_netsim, uint64_t p_seed, std::string *r_error);
 

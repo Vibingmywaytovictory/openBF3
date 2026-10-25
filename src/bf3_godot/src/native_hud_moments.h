@@ -116,6 +116,7 @@ private:
 	};
 	void hold(Bf3LevelSession &r_session);
 	void check_host(Bf3NativeHud &r_hud);
+	void check_stack(const Bf3LevelSession &p_session, const Bf3NativeHud &p_hud);
 
 	std::string out_dir_;
 	NativeHudMomentGroups groups_;
