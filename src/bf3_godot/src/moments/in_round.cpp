@@ -245,6 +245,7 @@ void push_score(ui::HudScoreFeed &r_f, std::string_view p_sid, int32_t p_points)
 
 class InRoundMoments final : public NativeHudMomentGroup {
 public:
+	NativeHudMomentWait ready(const Bf3LevelSession &p_session, Bf3NativeHud &r_hud) override;
 	size_t moment_count() const override { return kMoments.size(); }
 	std::string_view moment_id(size_t p_moment) const override { return kMoments[p_moment].id; }
 	std::optional<NativeHudMomentPlace> place(NativeHudMomentRun &r_run, Bf3NativeHud &r_hud, size_t p_moment) override;
@@ -327,6 +328,22 @@ std::array<float, 2> native_hud_moment_world_xz(const NativeHudMoment &p_moment,
 
 float native_hud_moment_registered_heading_deg(const NativeHudMoment &p_moment) {
 	return 360.0f - (p_moment.detail_ambiguous ? p_moment.area_rotation_deg : p_moment.map_rotation_deg);
+}
+
+NativeHudMomentWait InRoundMoments::ready(const Bf3LevelSession &p_session, Bf3NativeHud &r_hud) {
+	const host::PresentationFrame &f = p_session.frame();
+	const bool alive = r_hud.model().soldier.is_alive;
+	const bool in_round = f.match_valid && f.match.phase == net::MatchPhase::InRound;
+	const bool minimap = r_hud.minimap_ready();
+	if (!alive || !in_round) {
+		return { false, "alive_in_round",
+			std::string("own soldier ") + (alive ? "alive" : "not spawned") + ", round " +
+					(in_round ? "in round" : "not in round") };
+	}
+	if (!minimap) {
+		return { false, "minimap_ready", "the minimap source has no satellite texture to paint" };
+	}
+	return { true, {}, {} };
 }
 
 std::optional<NativeHudMomentPlace> InRoundMoments::place(NativeHudMomentRun &r_run, Bf3NativeHud &r_hud, size_t p_moment) {

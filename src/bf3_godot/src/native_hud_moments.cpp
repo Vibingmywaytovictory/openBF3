@@ -40,7 +40,7 @@ namespace ui = bf3::core::ui;
 namespace {
 
 constexpr int32_t kRenderFrames = 3;
-constexpr double kAliveTimeout = 90.0;
+constexpr double kGroupWaitTimeout = 90.0;
 constexpr double kArriveTimeout = 10.0;
 constexpr std::string_view kNameGlyphs = "WMHNEI";
 constexpr float kArriveXz = 0.25f;
@@ -444,7 +444,7 @@ void NativeHudMomentRun::check_host(Bf3NativeHud &r_hud) {
 
 bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, double p_delta) {
 	switch (phase_) {
-		case Phase::WaitAlive: {
+		case Phase::Wait: {
 			waited_ += p_delta;
 			if (!r_hud.is_ready()) {
 				return false;
@@ -454,31 +454,25 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 				phase_ = Phase::Done;
 				return true;
 			}
-			const host::PresentationFrame &f = r_session.frame();
-			const bool alive = r_hud.model().soldier.is_alive;
-			const bool in_round = f.match_valid && f.match.phase == net::MatchPhase::InRound;
-			const bool minimap = r_hud.minimap_ready();
-			if (!alive || !in_round || !minimap) {
-				if (waited_ > kAliveTimeout) {
-					if (!alive || !in_round) {
-						row("alive_in_round", false,
-								"after " + std::to_string(kAliveTimeout) + " s: own soldier " + (alive ? "alive" : "not spawned") + ", round " +
-										(in_round ? "in round" : "not in round"));
-					} else {
-						row("minimap_ready", false, "after " + std::to_string(kAliveTimeout) + " s: the minimap source has no satellite texture to paint");
-					}
+			const NativeHudMomentWait wait = moments_[index_].group->ready(r_session, r_hud);
+			if (!wait.met) {
+				if (waited_ > kGroupWaitTimeout) {
+					row(wait.row, false, "after " + std::to_string(kGroupWaitTimeout) + " s: " + wait.detail);
 					phase_ = Phase::Done;
 					return true;
 				}
 				return false;
 			}
-			r_hud.set_manual(true);
-			InputMapper &mapper = r_session.mapper();
-			mapper.set_scripted(true);
-			mapper.release_all();
-			mapper.set_free_camera(false);
-			r_session.cameras().set_free(false);
-			index_ = 0;
+			if (!scripted_) {
+				scripted_ = true;
+				r_hud.set_manual(true);
+				InputMapper &mapper = r_session.mapper();
+				mapper.set_scripted(true);
+				mapper.release_all();
+				mapper.set_free_camera(false);
+				r_session.cameras().set_free(false);
+			}
+			waited_ = 0.0;
 			phase_ = Phase::Place;
 			return false;
 		}
@@ -609,7 +603,7 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 				phase_ = Phase::Done;
 				return true;
 			}
-			phase_ = Phase::Place;
+			phase_ = moments_[index_].group == moments_[index_ - 1].group ? Phase::Place : Phase::Wait;
 			return false;
 		}
 		case Phase::Done:

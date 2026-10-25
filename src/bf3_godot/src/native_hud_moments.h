@@ -44,9 +44,16 @@ struct NativeHudMomentPlace {
 	float view_yaw = 0.0f;
 };
 
+struct NativeHudMomentWait {
+	bool met = false;
+	std::string row;
+	std::string detail;
+};
+
 class NativeHudMomentGroup {
 public:
 	virtual ~NativeHudMomentGroup() = default;
+	virtual NativeHudMomentWait ready(const Bf3LevelSession &p_session, Bf3NativeHud &r_hud) = 0;
 	virtual size_t moment_count() const = 0;
 	virtual std::string_view moment_id(size_t p_moment) const = 0;
 	virtual std::optional<NativeHudMomentPlace> place(NativeHudMomentRun &r_run, Bf3NativeHud &r_hud, size_t p_moment) = 0;
@@ -108,7 +115,7 @@ public:
 	const bf3::sim::Vec3 &feet() const { return feet_; }
 
 private:
-	enum class Phase : uint8_t { WaitAlive, Place, Arrive, Settle, Render, Capture, Coverage, Done };
+	enum class Phase : uint8_t { Wait, Place, Arrive, Settle, Render, Capture, Coverage, Done };
 	struct Selected {
 		NativeHudMomentGroup *group = nullptr;
 		size_t moment = 0;
@@ -121,7 +128,8 @@ private:
 	std::string out_dir_;
 	NativeHudMomentGroups groups_;
 	std::vector<Selected> moments_;
-	Phase phase_ = Phase::WaitAlive;
+	Phase phase_ = Phase::Wait;
+	bool scripted_ = false;
 	size_t index_ = 0;
 	int32_t frames_ = 0;
 	double waited_ = 0.0;
