@@ -25,6 +25,11 @@ inline bool string_true(const As2Value &p_v) {
 	return to_lower_ascii(p_v.to_string()) == "true";
 }
 
+inline bool hud_soldier_widgets_visible(const HudModel &p_model, const HudClientState &p_client) {
+	return !p_client.hardcore && !p_model.user.is_in_menu && !p_model.kill_card.visible &&
+			!p_model.spawn_screen.visible && !p_model.end_of_round.visible;
+}
+
 inline double as2_round(double p_v) {
 	return std::floor(p_v + 0.5);
 }

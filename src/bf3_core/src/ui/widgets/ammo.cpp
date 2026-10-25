@@ -148,7 +148,7 @@ public:
 			}
 		}
 		r_out.push_back({ "FiringModeTypes", As2Value::numbers(std::move(modes)) });
-		r_out.push_back({ "Visible", As2Value::of(!p_client.hardcore) });
+		r_out.push_back({ "Visible", As2Value::of(hud_soldier_widgets_visible(p_model, p_client)) });
 		if (!p_client.reload_button.empty()) {
 			r_out.push_back({ "ReloadButton", As2Value::of(p_client.reload_button) });
 		}

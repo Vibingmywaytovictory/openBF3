@@ -425,6 +425,46 @@ TEST_SUITE("ui-hud-screen-unit") {
 						" direct-access applies over arrays, members, invokes and length invokes");
 	}
 
+	TEST_CASE("hud screen unit: Ammo, Health and Minimap bind Visible false while the kill card, spawn screen, end of "
+			  "round or the menu is up") {
+		const std::array<const char *, 3> classes{ "Widget.Hud.Ammo", "Widget.Hud.Health", "Widget.Hud.Minimap" };
+		const auto visible = [](const HudWidgetController &p_ctl, const HudModel &p_model,
+									 const HudClientState &p_client) {
+			HudData bound;
+			p_ctl.bind(p_model, p_client, bound);
+			const As2Value *v = hud_data_find(bound, "Visible");
+			REQUIRE(v != nullptr);
+			return v->truthy();
+		};
+		size_t hidden = 0;
+		for (const char *c : classes) {
+			const std::unique_ptr<HudWidgetController> ctl = make_hud_widget_controller(c);
+			REQUIRE_MESSAGE(ctl != nullptr, c);
+			const HudModel alive = moment_m02();
+			const HudClientState client = test_client();
+			CHECK_MESSAGE(visible(*ctl, alive, client), c);
+			HudModel m = alive;
+			m.user.is_in_menu = true;
+			hidden += visible(*ctl, m, client) ? 0u : 1u;
+			m = alive;
+			m.kill_card.visible = true;
+			hidden += visible(*ctl, m, client) ? 0u : 1u;
+			m = alive;
+			m.spawn_screen.visible = true;
+			hidden += visible(*ctl, m, client) ? 0u : 1u;
+			m = alive;
+			m.end_of_round.visible = true;
+			hidden += visible(*ctl, m, client) ? 0u : 1u;
+			HudClientState hardcore = client;
+			hardcore.hardcore = true;
+			hidden += visible(*ctl, alive, hardcore) ? 0u : 1u;
+		}
+		CHECK(hidden == classes.size() * 5);
+		row("soldier_visible",
+				std::to_string(hidden) +
+						" of 15 hidden binds: menu, kill card, spawn screen, end of round, hardcore on 3 widgets");
+	}
+
 	TEST_CASE("hud screen unit: the compass frame is the heading rounded up, as the footage's minimap and compass show") {
 		struct StillMoment {
 			const char *id;
@@ -1028,6 +1068,16 @@ TEST_SUITE("ui-hud-screen") {
 		m.soldier.health = 0.0f;
 		s.hud->refresh(m);
 		CHECK(s.at(holder + ".amtxt.txtDisplay").text == "0");
+		m.user.is_in_menu = true;
+		s.hud->refresh(m);
+		CHECK_FALSE(s.at(h).visible);
+		m.user.is_in_menu = false;
+		m.kill_card.visible = true;
+		s.hud->refresh(m);
+		CHECK_FALSE(s.at(h).visible);
+		m.kill_card.visible = false;
+		s.hud->refresh(m);
+		CHECK(s.at(h).visible);
 		row("health", "94 -> \"94\", 55.5 -> \"56\", EKG target t2;iUISoldierCompRender");
 	}
 
@@ -1127,6 +1177,12 @@ TEST_SUITE("ui-hud-screen") {
 		CHECK(s.clip(mm).width() == doctest::Approx(600.0f).epsilon(0.001));
 		CHECK(s.clip(mm).x() == doctest::Approx(x0 - 40.0f));
 		CHECK(s.hud->tweens().empty());
+		HudModel dead = moment_m02();
+		dead.spawn_screen.visible = true;
+		s.hud->refresh(dead);
+		CHECK_FALSE(s.at(mm).visible);
+		s.hud->refresh(moment_m02());
+		CHECK(s.at(mm).visible);
 		row("minimap", "map t2;iUIMinimapRender, Size false tweens 4 properties over 0.05 s easeOutBack to 600 px");
 	}
 

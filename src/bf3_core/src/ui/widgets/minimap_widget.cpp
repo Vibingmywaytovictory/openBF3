@@ -36,6 +36,8 @@ public:
 	void update(HudWidgetHost &r_host, std::string_view p_key, const As2Value &p_value) override {
 		if (p_key == "Size") {
 			update_size(r_host, p_value.truthy(), false);
+		} else if (p_key == "Visible") {
+			r_host.self().set_visible(p_value.truthy());
 		} else if (p_key == "Zoom") {
 			zoom_ = p_value.to_number();
 		} else if (p_key == "ShowCross") {
@@ -73,7 +75,7 @@ public:
 		r_out.push_back({ "Size", As2Value::of(p_client.minimap_small) });
 		r_out.push_back({ "Zoom", As2Value::of(double(p_client.minimap_zoom)) });
 		r_out.push_back({ "ShowCross", As2Value::of(p_client.show_minimap_cross) });
-		r_out.push_back({ "Visible", As2Value::of(!p_client.hardcore) });
+		r_out.push_back({ "Visible", As2Value::of(hud_soldier_widgets_visible(p_model, p_client)) });
 		r_out.push_back({ "ShowAirRadar", As2Value::of(p_model.minimap.air_radar_mask_enabled || p_client.show_air_radar) });
 	}
 

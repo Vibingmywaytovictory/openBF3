@@ -35,12 +35,14 @@ public:
 	void update(HudWidgetHost &r_host, std::string_view p_key, const As2Value &p_value) override {
 		if (p_key == "Health") {
 			set_health(r_host, p_value);
+		} else if (p_key == "Visible") {
+			r_host.self().set_visible(p_value.truthy());
 		}
 	}
 
 	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const override {
 		r_out.push_back({ "Health", As2Value::of(double(p_model.soldier.health)) });
-		r_out.push_back({ "Visible", As2Value::of(!p_client.hardcore) });
+		r_out.push_back({ "Visible", As2Value::of(hud_soldier_widgets_visible(p_model, p_client)) });
 	}
 
 private:
