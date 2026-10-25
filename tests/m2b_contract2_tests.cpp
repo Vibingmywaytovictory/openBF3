@@ -212,24 +212,21 @@ TEST_SUITE("m2b-contract2") {
 		r.deploy_enabled = true;
 		r.selected_kit = 2;
 		r.spawn_screen_shown = 3;
-		r.kill_card_visible = true;
-		r.kill_card_item = 0x0fd83dfau;
-		r.kill_card_weapon_named = true;
-		const std::string killer = "Killer";
-		std::copy(killer.begin(), killer.end(), r.kill_card_killer.begin());
 		r.round_end_visible = true;
 		r.round_end_shown = 1;
 		r.missing_fonts = 1;
 		r.missing_icons = 2;
 		r.missing_strings = 3;
 
-		for (std::string_view p : { ui::kScoreboardHud32ScreenPartition, ui::kSpawnScreenPcPartition, ui::kKillScreenPartition, ui::kPreRoundWaitingScreenPartition,
-					 ui::kEorWinningTeamScreenPartition }) {
+		for (std::string_view p : { ui::kScoreboardHud32ScreenPartition, ui::kSpawnScreenPcPartition,
+					 ui::kPreRoundWaitingScreenPartition, ui::kEorWinningTeamScreenPartition }) {
 			CHECK_MESSAGE(gs::tdm_hud_reports(p), p);
 			CHECK_MESSAGE(gs::tdm_hud_screen_record(r, p).has_value(), p);
 		}
-		CHECK(!gs::tdm_hud_reports(ui::kHudMpScreenPartition));
-		CHECK(!gs::tdm_hud_screen_record(r, ui::kHudMpScreenPartition));
+		for (std::string_view p : { ui::kHudMpScreenPartition, ui::kKillScreenPartition }) {
+			CHECK_MESSAGE(!gs::tdm_hud_reports(p), p);
+			CHECK_MESSAGE(!gs::tdm_hud_screen_record(r, p), p);
+		}
 		const gs::UiScreenRecord board = *gs::tdm_hud_screen_record(r, ui::kScoreboardHud32ScreenPartition);
 		CHECK(board.visible);
 		CHECK(board.number(gs::kUiFactRows) == 24.0);
@@ -240,13 +237,8 @@ TEST_SUITE("m2b-contract2") {
 		CHECK(spawn.shown == 3);
 		CHECK(spawn.number(gs::kUiFactDeployEnabled) == 1.0);
 		CHECK(spawn.number(gs::kUiFactSelectedKit) == 2.0);
-		const gs::UiScreenRecord card = *gs::tdm_hud_screen_record(r, ui::kKillScreenPartition);
-		CHECK(card.visible);
-		CHECK(card.text(gs::kUiFactKiller) == killer);
-		CHECK(card.number(gs::kUiFactItem) == double(0x0fd83dfau));
-		CHECK(card.number(gs::kUiFactWeaponNamed) == 1.0);
-		CHECK(card.text("unknown").empty());
-		CHECK(card.number("unknown") == 0.0);
+		CHECK(spawn.text("unknown").empty());
+		CHECK(spawn.number("unknown") == 0.0);
 		CHECK(!gs::tdm_hud_screen_record(r, ui::kPreRoundWaitingScreenPartition)->visible);
 		const gs::UiScreenRecord eor = *gs::tdm_hud_screen_record(r, ui::kEorWinningTeamScreenPartition);
 		CHECK(eor.visible);

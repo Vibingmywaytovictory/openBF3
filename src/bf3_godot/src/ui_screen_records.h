@@ -7,6 +7,10 @@
 #include <string_view>
 #include <vector>
 
+namespace bf3::core::ui {
+class HudScreen;
+}
+
 namespace bf3::godot_side {
 
 inline constexpr std::string_view kUiFactRows = "rows";
@@ -14,9 +18,9 @@ inline constexpr std::string_view kUiFactTeam1Kills = "team1_kills";
 inline constexpr std::string_view kUiFactTeam2Kills = "team2_kills";
 inline constexpr std::string_view kUiFactDeployEnabled = "deploy_enabled";
 inline constexpr std::string_view kUiFactSelectedKit = "selected_kit";
-inline constexpr std::string_view kUiFactKiller = "killer";
-inline constexpr std::string_view kUiFactItem = "item";
-inline constexpr std::string_view kUiFactWeaponNamed = "weapon_named";
+inline constexpr std::string_view kUiFactKiller = "KillCam_01.Name";
+inline constexpr std::string_view kUiFactKillerWeapon = "KillCam_01.Weapon";
+inline constexpr std::string_view kUiFactKillerWeaponImage = "KillCam_01.WeaponImage";
 
 struct UiScreenRecord {
 	bool visible = false;
@@ -35,6 +39,8 @@ struct UiLookupRecord {
 	uint64_t missing_icons = 0;
 	uint64_t missing_strings = 0;
 };
+
+void add_screen_widget_facts(const bf3::core::ui::HudScreen &p_screen, UiScreenRecord &r_record);
 
 class UiScreenRecordSet;
 

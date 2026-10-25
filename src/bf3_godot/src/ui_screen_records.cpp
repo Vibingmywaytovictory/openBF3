@@ -1,5 +1,7 @@
 #include "ui_screen_records.h"
 
+#include "bf3/core/ui/hud_screen.h"
+
 #include <algorithm>
 
 namespace bf3::godot_side {
@@ -12,6 +14,23 @@ double UiScreenRecord::number(std::string_view p_fact) const {
 std::string UiScreenRecord::text(std::string_view p_fact) const {
 	const auto it = texts.find(p_fact);
 	return it != texts.end() ? it->second : std::string();
+}
+
+void add_screen_widget_facts(const bf3::core::ui::HudScreen &p_screen, UiScreenRecord &r_record) {
+	using bf3::core::ui::As2Value;
+	for (const std::unique_ptr<bf3::core::ui::HudWidgetState> &w : p_screen.widgets()) {
+		if (!w->screen_widget || w->instance.empty()) {
+			continue;
+		}
+		for (const auto &[key, value] : w->sent) {
+			const std::string fact = w->instance + "." + key;
+			if (value.kind == As2Value::Kind::String) {
+				r_record.texts.insert_or_assign(fact, value.text);
+			} else if (value.kind == As2Value::Kind::Number || value.kind == As2Value::Kind::Bool) {
+				r_record.numbers.insert_or_assign(fact, value.to_number());
+			}
+		}
+	}
 }
 
 UiScreenRecords::~UiScreenRecords() {

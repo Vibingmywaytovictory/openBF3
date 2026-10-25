@@ -192,6 +192,7 @@ void build_tdm_ui(
 		Bf3UiScreens *screens = memnew(Bf3UiScreens);
 		screens->set_name("NativeScreens");
 		screens->set_manual(true);
+		screens->set_drawn(bf3::core::ui::kKillScreenPartition, true);
 		r_game.layer->add_child(screens);
 		screens->adopt(r_game.native_hud);
 		r_m.screen_records.add(screens);

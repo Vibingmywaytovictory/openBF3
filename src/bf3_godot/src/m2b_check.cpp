@@ -342,7 +342,8 @@ struct M2bCheck::State {
 				const core::ui::HudKillCard &kc = g.hud_model.kill_card;
 				bool ok = kc.visible && kc.killer != core::ui::kHudNoPlayer && !kc.suicide && kc.item_id != 0;
 				if (const std::optional<UiScreenRecord> r = tally.windowed ? m.screen_records.screen_record(core::ui::kKillScreenPartition) : std::nullopt) {
-					ok = ok && r->visible && !r->text(kUiFactKiller).empty() && r->number(kUiFactItem) != 0.0 && r->number(kUiFactWeaponNamed) != 0.0;
+					ok = ok && r->visible && !r->text(kUiFactKiller).empty() && !r->text(kUiFactKillerWeapon).empty() &&
+							!r->text(kUiFactKillerWeaponImage).empty();
 				}
 				++tally.kill_cards_checked;
 				if (!ok) {

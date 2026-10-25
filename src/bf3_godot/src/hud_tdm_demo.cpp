@@ -32,8 +32,9 @@ namespace ui = bf3::core::ui;
 
 namespace {
 
-constexpr int kStages = 7;
-const char *const kStageNames[kStages] = { "pre_round", "spawn_join", "kill_feed", "kill_card", "spawn_dead", "scoreboard", "round_end" };
+constexpr int kStages = 6;
+const char *const kStageNames[kStages] = { "pre_round", "spawn_join", "kill_feed", "spawn_dead", "scoreboard",
+	"round_end" };
 constexpr uint8_t kLocal = 0;
 constexpr uint8_t kPlayers = 24;
 constexpr uint8_t kKiller = 5;
@@ -133,7 +134,6 @@ void Bf3TdmHudDemo::pick_items() {
 	}
 	for (const ui::ItemIcon *icon : chosen) {
 		items_.push_back(icon->item_id);
-		item_names_.push_back(icon->name_sid.empty() ? 0u : ui::text_hash(icon->name_sid));
 	}
 }
 
@@ -149,7 +149,7 @@ ui::HudModel Bf3TdmHudDemo::stage_model(int p_stage) const {
 		put_name(p.name, s == kLocal ? std::string("openBF3") : "Bot " + std::to_string(100 + s).substr(1));
 		p.team = int8_t(s % 2 == 0 ? 1 : 2);
 		p.kit = int8_t(s % 4);
-		p.alive = s != kLocal || p_stage == 2 || p_stage == 5;
+		p.alive = s != kLocal || p_stage == 2 || p_stage == 4;
 		p.local = s == kLocal;
 		p.bot = s != kLocal;
 		p.kills = int16_t((s * 7) % 13);
@@ -169,18 +169,18 @@ ui::HudModel Bf3TdmHudDemo::stage_model(int p_stage) const {
 	fill_list(t.team2_players, m, 2);
 	t.friendly_team_players = t.team1_players;
 	t.enemy_team1_players = t.team2_players;
-	t.scoreboard_enabled = p_stage == 5;
+	t.scoreboard_enabled = p_stage == 4;
 	ui::HudKillCounter &kc = m.kill_counter;
 	const bool in_round = p_stage >= 2;
-	kc.team1_kills = in_round ? (p_stage == 6 ? 100 : 23) : 0;
-	kc.team2_kills = in_round ? (p_stage == 6 ? 87 : 19) : 0;
+	kc.team1_kills = in_round ? (p_stage == 5 ? 100 : 23) : 0;
+	kc.team2_kills = in_round ? (p_stage == 5 ? 87 : 19) : 0;
 	kc.team1_max_kills = 100;
 	kc.team2_max_kills = 100;
 	kc.player_team = 1;
 	kc.player_team_kills = kc.team1_kills;
 	kc.enemy_team_kills = kc.team2_kills;
 
-	if (p_stage >= 2 && p_stage <= 5) {
+	if (p_stage >= 2 && p_stage <= 4) {
 		ui::HudKillFeed &f = m.messages.kill_message;
 		const uint8_t killers[6] = { 3, 8, kLocal, 11, 2, kKiller };
 		const uint8_t victims[6] = { 6, 1, 7, 4, 9, kLocal };
@@ -202,35 +202,22 @@ ui::HudModel Bf3TdmHudDemo::stage_model(int p_stage) const {
 	if (p_stage == 0) {
 		m.pre_round = { true, true, 7.4f, true };
 	}
-	if (p_stage == 1 || p_stage == 4) {
+	if (p_stage == 1 || p_stage == 3) {
 		ui::HudSpawnScreen &sp = m.spawn_screen;
 		sp.visible = true;
 		sp.at_join = p_stage == 1;
 		sp.selected_kit = p_stage == 1 ? 0 : 1;
 		sp.can_deploy = p_stage == 1;
 		sp.seconds_to_deploy = p_stage == 1 ? 0.0f : 4.2f;
-		sp.revive_possible = p_stage == 4;
-		sp.seconds_revive_left = p_stage == 4 ? 6.8f : 0.0f;
+		sp.revive_possible = p_stage == 3;
+		sp.seconds_revive_left = p_stage == 3 ? 6.8f : 0.0f;
 		for (size_t k = 0; k < ui::kHudKitCount; ++k) {
 			for (size_t i = 0; i < ui::kHudSpawnKitItems; ++i) {
 				sp.kit_items[k][i] = i == 4 ? 0u : item(k * 4 + i);
 			}
 		}
 	}
-	if (p_stage == 3) {
-		ui::HudKillCard &c = m.kill_card;
-		c.serial = 1;
-		c.visible = true;
-		c.killer = kKiller;
-		c.killer_kit = m.players[kKiller].kit;
-		c.headshot = true;
-		c.item_id = item(5);
-		c.weapon_name_sid_hash = item_names_.empty() ? 0u : item_names_[5 % item_names_.size()];
-		c.distance_m = 37.4f;
-		c.killer_health = 64.0f;
-		c.seconds_left = 2.5f;
-	}
-	if (p_stage == 6) {
+	if (p_stage == 5) {
 		ui::HudEndOfRound &e = m.end_of_round;
 		e.visible = true;
 		e.winner = 1;
@@ -287,13 +274,10 @@ void Bf3TdmHudDemo::check_stage(int p_stage) {
 	const UiScreenRecords &records = *hud_;
 	const UiScreenRecord pre_round = records.screen_record(ui::kPreRoundWaitingScreenPartition).value_or(UiScreenRecord{});
 	const UiScreenRecord spawn = records.screen_record(ui::kSpawnScreenPcPartition).value_or(UiScreenRecord{});
-	const UiScreenRecord kill_card = records.screen_record(ui::kKillScreenPartition).value_or(UiScreenRecord{});
 	const UiScreenRecord scoreboard = records.screen_record(ui::kScoreboardHud32ScreenPartition).value_or(UiScreenRecord{});
 	const UiScreenRecord round_end = records.screen_record(ui::kEorWinningTeamScreenPartition).value_or(UiScreenRecord{});
 	const UiLookupRecord lookups = records.lookup_record().value_or(UiLookupRecord{});
 	const bool deploy_enabled = spawn.number(kUiFactDeployEnabled) != 0.0;
-	const uint32_t item = uint32_t(kill_card.number(kUiFactItem));
-	const bool weapon_named = kill_card.number(kUiFactWeaponNamed) != 0.0;
 	const int32_t rows = int32_t(scoreboard.number(kUiFactRows));
 	const int32_t team1_kills = int32_t(scoreboard.number(kUiFactTeam1Kills));
 	const int32_t team2_kills = int32_t(scoreboard.number(kUiFactTeam2Kills));
@@ -321,18 +305,10 @@ void Bf3TdmHudDemo::check_stage(int p_stage) {
 			break;
 		}
 		case 2:
-			row(name, !spawn.visible && !kill_card.visible && lookups.model_serial == stage_model(2).serial,
-					"spawn screen and kill card hidden; the kill feed is the native HUD's (HudMessage_02)");
+			row(name, !spawn.visible && lookups.model_serial == stage_model(2).serial,
+					"spawn screen hidden; the kill feed is the native HUD's (HudMessage_02)");
 			break;
 		case 3: {
-			const ui::HudModel m = stage_model(3);
-			const std::string killer = kill_card.text(kUiFactKiller);
-			const bool named = killer == std::string(m.players[kKiller].name.data(), strnlen(m.players[kKiller].name.data(), m.players[kKiller].name.size()));
-			row(name, kill_card.visible && item == m.kill_card.item_id && item != 0 && weapon_named && named,
-					std::string("killer '") + killer + "', item " + std::to_string(item) + ", weapon named " + std::to_string(weapon_named));
-			break;
-		}
-		case 4: {
 			BaseButton *deploy = Object::cast_to<BaseButton>(get_node_or_null("Bf3TdmHud/SpawnScreen/Deploy"));
 			if (deploy != nullptr) {
 				deploy->emit_signal("pressed");
@@ -343,11 +319,11 @@ void Bf3TdmHudDemo::check_stage(int p_stage) {
 							std::to_string(taken));
 			break;
 		}
-		case 5:
+		case 4:
 			row(name, scoreboard.visible && rows == kPlayers && team1_kills == 23 && team2_kills == 19,
 					std::to_string(rows) + " rows, " + std::to_string(team1_kills) + " : " + std::to_string(team2_kills));
 			break;
-		case 6:
+		case 5:
 			row(name, round_end.visible && round_end.shown == 1 && !scoreboard.visible && hud_->wants_mouse(),
 					"visible " + std::to_string(round_end.visible) + ", shown " + std::to_string(round_end.shown));
 			break;

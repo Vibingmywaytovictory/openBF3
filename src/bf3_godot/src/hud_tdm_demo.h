@@ -43,7 +43,6 @@ private:
 	int frames_ = 0;
 	uint32_t serial_ = 0;
 	std::vector<uint32_t> items_;
-	std::vector<uint32_t> item_names_;
 	int failed_ = 0;
 	int rows_ = 0;
 	bool done_ = false;

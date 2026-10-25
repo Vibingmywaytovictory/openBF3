@@ -9,6 +9,7 @@
 #include "image_manager.h"
 #include "test_support.h"
 #include "ui_retail_support.h"
+#include "ui_screen_records.h"
 
 #include <algorithm>
 #include <array>
@@ -353,5 +354,25 @@ TEST_SUITE("ui-kill-card") {
 		CHECK(s.at(clip("suicide.text")).text ==
 				retail_text_db(*r).find_sid("ID_M_BAD_LUCK").value_or("ID_M_BAD_LUCK"));
 		CHECK(s.hud->stats().as2.failed_ops == 0);
+	}
+
+	TEST_CASE("KillCam screen record: the native killscreen reports what its widgets were sent as <instance>.<key> "
+			  "facts, the killer's name, weapon and weapon image among them") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		RetailScreen s = open_retail_screen(*r, kKillScreenPartition, card_client(*r));
+		s.hud->initialize(footage_card());
+		bf3::godot_side::UiScreenRecord rec;
+		bf3::godot_side::add_screen_widget_facts(*s.hud, rec);
+		CHECK(rec.text(bf3::godot_side::kUiFactKiller) == kKiller);
+		CHECK(rec.text(bf3::godot_side::kUiFactKillerWeapon) == "AEK-971");
+		CHECK(rec.text(bf3::godot_side::kUiFactKillerWeaponImage) == kWeaponImage);
+		CHECK(rec.number("KillCam_01.Health") == 83.0);
+		CHECK(rec.number("KillCam_01.HisScore") == 2.0);
+		CHECK(rec.number("KillCam_01.Suicide") == 0.0);
+		CHECK(rec.texts.count("KillCam_01.DogtagBasic") == 0);
+		CHECK(rec.numbers.count("KillCam_01.DogtagBasic") == 0);
 	}
 }

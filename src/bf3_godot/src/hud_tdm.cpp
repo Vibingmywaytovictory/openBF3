@@ -3,7 +3,6 @@
 #include "hud_items.h"
 #include "hud_tdm_screen.h"
 #include "hud_scoreboard.h"
-#include "kill_card.h"
 #include "pre_round.h"
 #include "round_end.h"
 #include "spawn_screen.h"
@@ -313,15 +312,13 @@ struct Bf3TdmHud::Impl {
 	Control *root = nullptr;
 	Bf3TdmScoreboard *scoreboard = nullptr;
 	Bf3TdmSpawnScreen *spawn = nullptr;
-	Bf3TdmKillCard *kill_card = nullptr;
 	Bf3TdmPreRound *pre_round = nullptr;
 	Bf3TdmRoundEnd *round_end = nullptr;
 
 	bool alive() const { return root != nullptr && ObjectDB::get_instance(root_id) != nullptr; }
 	template <typename F>
 	void each(F &&p_f) {
-
-		Bf3TdmScreen *screens[] = { pre_round, spawn, kill_card, round_end, scoreboard };
+		Bf3TdmScreen *screens[] = { pre_round, spawn, round_end, scoreboard };
 		for (Bf3TdmScreen *s : screens) {
 			if (s != nullptr) {
 				p_f(*s);
@@ -355,10 +352,9 @@ bool Bf3TdmHud::build(Node *p_parent, Bf3Localisation *p_localisation, Bf3UiAsse
 	m.root->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 	m.pre_round = memnew(Bf3TdmPreRound);
 	m.spawn = memnew(Bf3TdmSpawnScreen);
-	m.kill_card = memnew(Bf3TdmKillCard);
 	m.round_end = memnew(Bf3TdmRoundEnd);
 	m.scoreboard = memnew(Bf3TdmScoreboard);
-	const char *names[] = { "PreRound", "SpawnScreen", "KillCard", "RoundEnd", "Scoreboard" };
+	const char *names[] = { "PreRound", "SpawnScreen", "RoundEnd", "Scoreboard" };
 	size_t i = 0;
 	m.each([&](Bf3TdmScreen &s) {
 		s.set_name(names[i++]);
@@ -372,7 +368,7 @@ bool Bf3TdmHud::build(Node *p_parent, Bf3Localisation *p_localisation, Bf3UiAsse
 	m.root_id = m.root->get_instance_id();
 	m.each([&](Bf3TdmScreen &s) { s.build_screen(); });
 	m.ctx.resolve(m.root);
-	UtilityFunctions::print("Bf3TdmHud: built (scoreboard, spawn screen, kill card, pre-round, round end)");
+	UtilityFunctions::print("Bf3TdmHud: built (scoreboard, spawn screen, pre-round, round end)");
 	return true;
 }
 
@@ -433,7 +429,6 @@ void Bf3TdmHud::shutdown() {
 	m.root_id = 0;
 	m.scoreboard = nullptr;
 	m.spawn = nullptr;
-	m.kill_card = nullptr;
 	m.pre_round = nullptr;
 	m.round_end = nullptr;
 }
@@ -444,7 +439,6 @@ void openbf3_register_tdm_hud() {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmScreen);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmScoreboard);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmSpawnScreen);
-	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmKillCard);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmPreRound);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmRoundEnd);
 }

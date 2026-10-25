@@ -438,6 +438,9 @@ std::optional<UiScreenRecord> Bf3UiScreens::screen_record(std::string_view p_par
 	UiScreenRecord r;
 	r.visible = e->shown && e->phase != UiScreenPhase::Exiting && is_visible_in_tree();
 	r.shown = e->shown_count;
+	if (e->screen != nullptr) {
+		add_screen_widget_facts(*e->screen, r);
+	}
 	return r;
 }
 

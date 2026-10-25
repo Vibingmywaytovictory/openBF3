@@ -34,12 +34,6 @@ struct TdmHudRecords {
 	uint8_t selected_kit = 0;
 	uint64_t spawn_screen_shown = 0;
 
-	bool kill_card_visible = false;
-	uint32_t kill_card_serial = 0;
-	core::ui::HudPlayerName kill_card_killer{};
-	uint32_t kill_card_item = 0;
-	bool kill_card_weapon_named = false;
-
 	bool pre_round_visible = false;
 	bool round_end_visible = false;
 	uint64_t round_end_shown = 0;

@@ -3,7 +3,6 @@
 #include "bf3/core/ui/hud_screen.h"
 
 #include <array>
-#include <cstring>
 #include <string>
 
 namespace bf3::godot_side {
@@ -12,9 +11,8 @@ namespace ui = bf3::core::ui;
 
 namespace {
 
-constexpr std::array<std::string_view, 5> kTdmHudPartitions{ ui::kScoreboardHud32ScreenPartition, ui::kSpawnScreenPcPartition, ui::kKillScreenPartition,
-	ui::kPreRoundWaitingScreenPartition, ui::kEorWinningTeamScreenPartition };
-
+constexpr std::array<std::string_view, 4> kTdmHudPartitions{ ui::kScoreboardHud32ScreenPartition,
+	ui::kSpawnScreenPcPartition, ui::kPreRoundWaitingScreenPartition, ui::kEorWinningTeamScreenPartition };
 }
 
 bool tdm_hud_reports(std::string_view p_partition) {
@@ -38,12 +36,6 @@ std::optional<UiScreenRecord> tdm_hud_screen_record(const TdmHudRecords &p_recor
 		r.shown = p_records.spawn_screen_shown;
 		r.numbers.emplace(kUiFactDeployEnabled, p_records.deploy_enabled ? 1.0 : 0.0);
 		r.numbers.emplace(kUiFactSelectedKit, double(p_records.selected_kit));
-	} else if (p_partition == ui::kKillScreenPartition) {
-		r.visible = p_records.kill_card_visible;
-		r.numbers.emplace(kUiFactItem, double(p_records.kill_card_item));
-		r.numbers.emplace(kUiFactWeaponNamed, p_records.kill_card_weapon_named ? 1.0 : 0.0);
-		const ui::HudPlayerName &killer = p_records.kill_card_killer;
-		r.texts.emplace(kUiFactKiller, std::string(killer.data(), strnlen(killer.data(), killer.size())));
 	} else if (p_partition == ui::kPreRoundWaitingScreenPartition) {
 		r.visible = p_records.pre_round_visible;
 	} else if (p_partition == ui::kEorWinningTeamScreenPartition) {
