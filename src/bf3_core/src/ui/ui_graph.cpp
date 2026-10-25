@@ -12,15 +12,7 @@ namespace bf3::core::ui {
 
 namespace {
 
-std::string text_of(const std::optional<EbxValue> &p_value) {
-	if (!p_value) {
-		return {};
-	}
-	if (const std::optional<std::string_view> e = p_value->enum_name()) {
-		return std::string(*e);
-	}
-	return std::string(p_value->as_str().value_or(std::string_view()));
-}
+using detail::text_of;
 
 bool flag_of(const EbxInstance &p_i, std::string_view p_field) {
 	const std::optional<EbxValue> v = p_i.get(p_field);

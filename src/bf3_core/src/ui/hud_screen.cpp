@@ -29,15 +29,7 @@ HudAxisAlign axis_of(std::string_view p_enum) {
 	return HudAxisAlign::Centre;
 }
 
-std::string text_of(const std::optional<EbxValue> &p_value) {
-	if (!p_value) {
-		return {};
-	}
-	if (const std::optional<std::string_view> e = p_value->enum_name()) {
-		return std::string(*e);
-	}
-	return std::string(p_value->as_str().value_or(std::string_view()));
-}
+using detail::text_of;
 
 As2Value value_of(const Avm1Value &p_v) {
 	switch (p_v.type) {
