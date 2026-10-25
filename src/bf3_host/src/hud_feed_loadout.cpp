@@ -97,7 +97,7 @@ void feed_loadout(Frame &r_frame) {
 	c.kit_primary_weapon = item_or_empty(st, choice.items[size_t(core::gameplay::WeaponSlot::Primary)]);
 	c.kit_secondary_weapon = item_or_empty(st, choice.items[size_t(core::gameplay::WeaponSlot::Sidearm)]);
 	c.kit_gadget1 = item_or_empty(st, choice.items[size_t(core::gameplay::WeaponSlot::Gadget1)]);
-	c.kit_gadget2 = item_or_empty(st, choice.items[kHudGadget2Slot]);
+	c.kit_gadget2 = item_or_empty(st, choice.items[size_t(core::gameplay::WeaponSlot::Gadget2)]);
 	c.kit_specialization = item_or_empty(st, choice.specialization);
 	c.weapon_accessory_main = c.kit_primary_weapon;
 	c.weapon_accessory1 = item_or_empty(st, choice.accessories[0]);

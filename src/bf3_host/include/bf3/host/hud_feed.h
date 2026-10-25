@@ -170,7 +170,6 @@ inline constexpr std::string_view kDefaultBasicDogtag = "ui/art/persistence/dogt
 inline constexpr std::string_view kDefaultAdvancedDogtag = "ui/art/persistence/dogtag/defaulttag_right";
 
 inline constexpr std::array<uint8_t, core::ui::kHudSpawnKitItems> kHudSpawnSlots{ 0, 1, 2, 6, 7 };
-inline constexpr size_t kHudGadget2Slot = 5;
 
 inline constexpr std::array<std::string_view, 5> kHudMenuSids{ "ID_M_IGMMP_RESUME", "ID_M_IGMMP_SCOREBOARD",
 	"ID_M_IGMMP_SUICIDE", "ID_M_IGMMP_OPTIONS", "ID_M_IGMMP_QUIT" };
