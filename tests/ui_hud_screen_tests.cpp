@@ -2321,6 +2321,50 @@ TEST_SUITE("ui-hud-screen") {
 		row("direct_access_screen", "REGISTER_VISIBLE on " + path + " and REGISTER_MEMBER to its controller");
 	}
 
+	TEST_CASE("hud screen: a movie screen without a UIScreenAsset reads _root.getData from its host") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const HudScreenAsset asset = hud_movie_screen_asset("ui/assets/loadingscreen");
+		CHECK(asset.partition == "ui/assets/loadingscreen");
+		CHECK(asset.name == "loadingscreen");
+		CHECK(asset.movie == "ui/assets/loadingscreen");
+		CHECK(asset.widgets.empty());
+		Result<SwfScene> scene = SwfScene::open(*r->lib, asset.movie);
+		REQUIRE_MESSAGE(scene.ok(), (scene.ok() ? std::string() : scene.error().message));
+		SwfScene sc = std::move(*scene);
+		Result<std::unique_ptr<HudScreen>> made = HudScreen::open(sc, *r->lib, asset, r->fonts.get(), test_client());
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		HudScreen &hud = **made;
+		const std::vector<std::string> &unknown = hud.stats().unknown_class_paths;
+		CHECK(std::find(unknown.begin(), unknown.end(), std::string(kHudScreenInstance) + " Screen.LoadingScreen") !=
+				unknown.end());
+		HudRootDataMap data;
+		data.set_data("gameType", As2Value::of("multiplayer"));
+		data.set_data("gameMode", As2Value::of("team deathmatch"));
+		data.set_data("levelName", As2Value::of("ID_M_LEVEL_MP_SUBWAY"));
+		HudWidgetHost host(hud, std::string(kHudScreenInstance), "Screen.LoadingScreen");
+		CHECK_FALSE(host.root_get_data("gameMode").defined());
+		hud.set_root_data(&data);
+		CHECK(host.root_get_data("gameType").to_string() == "multiplayer");
+		CHECK(host.root_get_data("gameMode").to_string() == "team deathmatch");
+		CHECK(host.root_get_data("levelName").to_string() == "ID_M_LEVEL_MP_SUBWAY");
+		CHECK_FALSE(host.root_get_data("serverName").defined());
+		host.root_set_data("joinSquadHasShowed", As2Value::of(true));
+		CHECK(data.get_data("joinSquadHasShowed").truthy());
+		CHECK(data.reads() == 5);
+		CHECK(data.writes() == 4);
+		hud.initialize(HudModel{});
+		CHECK(hud.initialized());
+		CHECK(hud.enter_complete());
+		hud.begin_exit();
+		hud.advance(1.0 / 30.0);
+		CHECK(hud.exit_complete());
+		row("movie_screen",
+				"ui/assets/loadingscreen opens without a UIScreenAsset and reads _root.getData from the host");
+	}
+
 	TEST_CASE("hud screen: hit test clicks spawnscreenpc Button_03") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {

@@ -148,6 +148,26 @@ std::string hud_screen_movie(std::string_view p_screen_name) {
 	return leaf.empty() ? std::string() : "ui/assets/" + leaf;
 }
 
+HudScreenAsset hud_movie_screen_asset(std::string_view p_movie) {
+	HudScreenAsset out;
+	out.partition = std::string(p_movie);
+	const size_t slash = p_movie.rfind('/');
+	out.name = std::string(slash == std::string_view::npos ? p_movie : p_movie.substr(slash + 1));
+	out.movie = std::string(p_movie);
+	return out;
+}
+
+As2Value HudRootDataMap::get_data(std::string_view p_key) const {
+	++reads_;
+	const auto it = values_.find(p_key);
+	return it == values_.end() ? As2Value() : it->second;
+}
+
+void HudRootDataMap::set_data(std::string_view p_key, const As2Value &p_value) {
+	++writes_;
+	values_[std::string(p_key)] = p_value;
+}
+
 Result<HudScreenAsset> read_hud_screen_asset(const EbxResolver &p_db, std::string_view p_partition) {
 	const EbxPartition *part = p_db.partition_by_name(p_partition);
 	if (part == nullptr) {
@@ -591,6 +611,17 @@ std::string HudWidgetHost::translate(std::string_view p_text) const {
 
 const HudClientState &HudWidgetHost::client() const {
 	return screen_.client();
+}
+
+As2Value HudWidgetHost::root_get_data(std::string_view p_key) const {
+	const HudRootData *d = screen_.root_data();
+	return d != nullptr ? d->get_data(p_key) : As2Value();
+}
+
+void HudWidgetHost::root_set_data(std::string_view p_key, const As2Value &p_value) {
+	if (HudRootData *d = screen_.root_data()) {
+		d->set_data(p_key, p_value);
+	}
 }
 
 void HudWidgetHost::emit(int32_t p_index, std::string p_query, const As2Value &p_param) {

@@ -96,6 +96,7 @@ struct HudScreenAsset {
 Result<HudScreenAsset> read_hud_screen_asset(const EbxResolver &p_db, std::string_view p_partition);
 
 std::string hud_screen_movie(std::string_view p_screen_name);
+HudScreenAsset hud_movie_screen_asset(std::string_view p_movie);
 
 struct As2Value {
 	enum class Kind : uint8_t {
@@ -256,6 +257,27 @@ struct HudFrameScript {
 	bool calls(std::string_view p_name) const;
 };
 
+class HudRootData {
+public:
+	virtual ~HudRootData() = default;
+	virtual As2Value get_data(std::string_view p_key) const = 0;
+	virtual void set_data(std::string_view p_key, const As2Value &p_value) = 0;
+};
+
+class HudRootDataMap final : public HudRootData {
+public:
+	As2Value get_data(std::string_view p_key) const override;
+	void set_data(std::string_view p_key, const As2Value &p_value) override;
+	const std::map<std::string, As2Value, std::less<>> &values() const { return values_; }
+	uint64_t reads() const { return reads_; }
+	uint64_t writes() const { return writes_; }
+
+private:
+	std::map<std::string, As2Value, std::less<>> values_;
+	mutable uint64_t reads_ = 0;
+	uint64_t writes_ = 0;
+};
+
 class HudWidgetHost {
 public:
 	HudWidgetHost(HudScreen &r_screen, std::string p_path, std::string p_class);
@@ -284,6 +306,8 @@ public:
 	void remove_movie_clip(const As2Clip &p_clip);
 	std::string translate(std::string_view p_text) const;
 	const HudClientState &client() const;
+	As2Value root_get_data(std::string_view p_key) const;
+	void root_set_data(std::string_view p_key, const As2Value &p_value);
 	HudScreen &screen() { return screen_; }
 
 	void set_events(std::vector<HudWidgetEventPort> p_events) { events_ = std::move(p_events); }
@@ -418,6 +442,8 @@ public:
 	size_t intervals() const { return intervals_.size(); }
 	UiDirectAccess &direct_access();
 	void set_event_sink(HudWidgetEventSink p_sink) { event_sink_ = std::move(p_sink); }
+	void set_root_data(HudRootData *p_data) { root_data_ = p_data; }
+	HudRootData *root_data() const { return root_data_; }
 	bool deliver_in_event(
 			std::string_view p_instance, std::string_view p_query, const As2Value &p_param = As2Value::of(0));
 	bool input_concept(int32_t p_concept, bool p_pressed);
@@ -489,6 +515,7 @@ private:
 	bool initialized_ = false;
 	bool focused_ = false;
 	HudWidgetEventSink event_sink_;
+	HudRootData *root_data_ = nullptr;
 	uint64_t events_fired_ = 0;
 	std::vector<HudMouseTarget> mouse_targets_;
 	std::vector<std::string> wheel_listeners_;
