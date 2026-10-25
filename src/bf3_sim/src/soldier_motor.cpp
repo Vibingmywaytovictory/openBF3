@@ -87,6 +87,45 @@ void apply_gain(GainModel p_model, float p_factor, const float p_target[2], floa
 	}
 }
 
+const StateSpeed &speed_of(const MotorParams &p_params, Pose p_pose, bool p_grounded, MoveMode p_mode) {
+	const PoseParams &pp = p_params.poses[size_t(p_pose)];
+	if (p_grounded) {
+		return pp.on_ground;
+	}
+	return p_mode == MoveMode::Falling ? pp.falling : pp.in_air;
+}
+
+const StateSpeed &move_speed(const MotorParams &p_params, const SoldierState &p_state, bool p_grounded) {
+	const StateSpeed *speed = &speed_of(p_params, p_state.pose, p_grounded, p_state.mode);
+	if (p_state.target_pose != p_state.pose) {
+		const StateSpeed &other = speed_of(p_params, p_state.target_pose, p_grounded, p_state.mode);
+		if (!p_params.tuning.transition_uses_slower_pose || other.velocity < speed->velocity) {
+			speed = &other;
+		}
+	}
+	return *speed;
+}
+
+float directional_speed(const StateSpeed &p_speed, float p_forward, float p_right) {
+	const float along = p_forward >= 0.0f ? p_speed.forward : p_speed.backward;
+	const float side = p_right >= 0.0f ? p_speed.right : p_speed.left;
+	const float w_forward = (p_forward * p_forward) / (p_forward * p_forward + p_right * p_right);
+	return p_speed.velocity * (w_forward * along + (1.0f - w_forward) * side);
+}
+
+}
+
+float walk_speed(const MotorParams &p_params, const SoldierState &p_state) {
+	const float yaw = yaw_radians(p_state.yaw);
+	const float sy = JPH::Sin(yaw);
+	const float cy = JPH::Cos(yaw);
+	const float vx = p_state.velocity[0];
+	const float vz = p_state.velocity[2];
+	const float forward = sy * vx + cy * vz;
+	const float right = sy * vz - cy * vx;
+	const bool still = forward * forward + right * right <= 0.0f;
+	return directional_speed(move_speed(p_params, p_state, true), still ? 1.0f : forward, still ? 0.0f : right) *
+			eval(p_params.poses[size_t(p_state.pose)].throttle, 1.0f);
 }
 
 struct SoldierMotor::Impl {
@@ -101,7 +140,6 @@ struct SoldierMotor::Impl {
 
 	bool pose_fits(Pose p_pose, const Vec3 &p_feet, uint16_t p_yaw) const;
 	bool footprint_free(const Vec3 &p_feet, uint16_t p_yaw) const;
-	const StateSpeed &speed_of(Pose p_pose, bool p_grounded, MoveMode p_mode) const;
 };
 
 bool SoldierMotor::Impl::footprint_free(const Vec3 &p_feet, uint16_t p_yaw) const {
@@ -132,14 +170,6 @@ bool SoldierMotor::Impl::pose_fits(Pose p_pose, const Vec3 &p_feet, uint16_t p_y
 		return false;
 	}
 	return p_pose != Pose::Prone || footprint_free(p_feet, p_yaw);
-}
-
-const StateSpeed &SoldierMotor::Impl::speed_of(Pose p_pose, bool p_grounded, MoveMode p_mode) const {
-	const PoseParams &pp = params.poses[size_t(p_pose)];
-	if (p_grounded) {
-		return pp.on_ground;
-	}
-	return p_mode == MoveMode::Falling ? pp.falling : pp.in_air;
 }
 
 SoldierMotor::SoldierMotor() :
@@ -325,13 +355,7 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, MotorSt
 
 	float target[2] = { 0.0f, 0.0f };
 	float target_speed = 0.0f;
-	const StateSpeed *speed = &m.speed_of(s.pose, grounded0, s.mode);
-	if (s.target_pose != s.pose) {
-		const StateSpeed &other = m.speed_of(s.target_pose, grounded0, s.mode);
-		if (!tun.transition_uses_slower_pose || other.velocity < speed->velocity) {
-			speed = &other;
-		}
-	}
+	const StateSpeed *speed = &move_speed(p, s, grounded0);
 	float f = forward_in;
 	float rgt = right_in;
 	const float mag2 = f * f + rgt * rgt;
@@ -344,10 +368,7 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, MotorSt
 			mag = 1.0f;
 		}
 		const float throttle = eval(p.poses[size_t(s.pose)].throttle, mag);
-		const float along = f >= 0.0f ? speed->forward : speed->backward;
-		const float side = rgt >= 0.0f ? speed->right : speed->left;
-		const float w_forward = (f * f) / (f * f + rgt * rgt);
-		float value = speed->velocity * (w_forward * along + (1.0f - w_forward) * side) * throttle;
+		float value = directional_speed(*speed, f, rgt) * throttle;
 		if (sprinting) {
 			value *= speed->sprint_multiplier * p.body_sprint_multiplier;
 		}

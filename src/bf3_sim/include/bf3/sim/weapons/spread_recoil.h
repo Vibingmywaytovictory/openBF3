@@ -16,6 +16,7 @@ struct SwayContext {
 	Stance stance = Stance::Stand;
 	Zoom zoom = Zoom::NoZoom;
 	SwayMove move = SwayMove::Base;
+	float move_fraction = 1.0f;
 	bool suppressed = false;
 	bool supported = false;
 	bool light_on = false;

@@ -125,6 +125,8 @@ static_assert(std::is_trivially_copyable_v<MotorParams>);
 core::Result<MotorParams> make_motor_params(const core::gameplay::SoldierDef &p_def, const MotorTuning &p_tuning = {});
 float eval(const Curve &p_curve, float p_x);
 
+float walk_speed(const MotorParams &p_params, const SoldierState &p_state);
+
 uint64_t motor_params_hash(const MotorParams &p_params);
 
 struct MotorStepInfo {

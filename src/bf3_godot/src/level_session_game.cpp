@@ -618,9 +618,10 @@ void Bf3LevelSession::game_presented(double p_delta, uint64_t p_now_ns) {
 		g.recorder->watch_slot(int(f.stats.slot));
 	}
 	g.weapon = host::PresentedWeapon();
-	if (g.alive && f.own_weapons_valid && g.gunplay != nullptr && g.gunplay->table != nullptr) {
+	const std::shared_ptr<const host::SharedLevel> level = shared_level();
+	if (g.alive && f.own_weapons_valid && g.gunplay != nullptr && g.gunplay->table != nullptr && level != nullptr) {
 		g.weapon = host::present_weapon(f.own_weapons_prev, f.own_weapons_curr, f.tick, host::present_own_fraction(f, p_now_ns), *g.gunplay->table,
-				sw::suppressed_sway(sw::weapon_sway_context(f.own_curr, f.own_command), 0.0f, g.gunplay->table->mechanics));
+				sw::suppressed_sway(sw::weapon_sway_context(level->motor, f.own_curr, f.own_command), 0.0f, g.gunplay->table->mechanics));
 	}
 
 	for (const host::PresentEvent &e : g.events) {

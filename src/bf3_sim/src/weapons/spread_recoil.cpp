@@ -44,6 +44,20 @@ void apply_gated(T &r_value, const WeaponSimDef &p_def, const SwayContext &p_con
 	}
 }
 
+Dispersion move_dispersion(const SwayState &p_state, SwayMove p_move) {
+	const size_t m = std::min<size_t>(size_t(p_move), size_t(SwayMove::Count) - 1);
+	return p_state.has_move[m] ? p_state.move[m] : p_state.move[size_t(SwayMove::Base)];
+}
+
+Dispersion blend(const Dispersion &p_from, const Dispersion &p_to, float p_t) {
+	Dispersion d;
+	d.min_angle = p_from.min_angle + (p_to.min_angle - p_from.min_angle) * p_t;
+	d.max_angle = p_from.max_angle + (p_to.max_angle - p_from.max_angle) * p_t;
+	d.increase_per_shot = p_from.increase_per_shot + (p_to.increase_per_shot - p_from.increase_per_shot) * p_t;
+	d.decrease_per_second = p_from.decrease_per_second + (p_to.decrease_per_second - p_from.decrease_per_second) * p_t;
+	return d;
+}
+
 float approach_zero(float p_value, float p_step) {
 	if (p_value > 0) {
 		return std::max(0.0f, p_value - p_step);
@@ -55,8 +69,10 @@ float approach_zero(float p_value, float p_step) {
 
 Dispersion effective_dispersion(const WeaponSimDef &p_def, const SwayContext &p_context) {
 	const SwayState &st = state_of(p_def, p_context);
-	const size_t m = std::min<size_t>(size_t(p_context.move), size_t(SwayMove::Count) - 1);
-	Dispersion d = st.has_move[m] ? st.move[m] : st.move[size_t(SwayMove::Base)];
+	Dispersion d = move_dispersion(st, p_context.move);
+	if (p_context.move == SwayMove::Moving && p_context.move_fraction < 1.0f) {
+		d = blend(move_dispersion(st, SwayMove::Base), d, std::max(0.0f, p_context.move_fraction));
+	}
 	apply_gated(d, p_def, p_context);
 
 	d.min_angle = std::max(0.0f, d.min_angle);

@@ -193,7 +193,7 @@ std::vector<XhairFrame> crosshair_frames(const sw::WeaponTable &p_table, std::sp
 	std::vector<XhairFrame> frames;
 	for (sim::Tick tick = kXhairSpawn + 2; tick <= p_script.last; tick += 2) {
 		const size_t i = size_t(tick - kXhairSpawn);
-		const sw::SwayContext sway = sw::suppressed_sway(sw::weapon_sway_context(soldiers[i], commands[i]), 0.0f, p_table.mechanics);
+		const sw::SwayContext sway = sw::suppressed_sway(sw::weapon_sway_context(motor, soldiers[i], commands[i]), 0.0f, p_table.mechanics);
 		host::HudFeedInput in;
 		in.alive = true;
 		in.health = 100.0f;

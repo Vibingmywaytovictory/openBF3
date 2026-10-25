@@ -589,7 +589,7 @@ uint64_t soldier_weapons_hash(const SoldierWeaponsState &p_state) {
 	return h.value();
 }
 
-SwayContext weapon_sway_context(const SoldierState &p_after, const Command &p_command) {
+SwayContext weapon_sway_context(const MotorParams &p_motor, const SoldierState &p_after, const Command &p_command) {
 	SwayContext sway;
 	sway.stance = Stance(std::min<uint8_t>(uint8_t(p_after.target_pose), 2));
 	sway.zoom = (p_command.buttons & weapon_buttons::kZoom) != 0 ? Zoom::Zoom : Zoom::NoZoom;
@@ -598,8 +598,10 @@ SwayContext weapon_sway_context(const SoldierState &p_after, const Command &p_co
 		sway.move = SwayMove::Sprinting;
 	} else if (p_after.mode == MoveMode::Jumping || p_after.mode == MoveMode::InAir || p_after.mode == MoveMode::Falling) {
 		sway.move = SwayMove::Jumping;
-	} else if (hs2 > 0.01f) {
+	} else if (hs2 > 0.0f) {
 		sway.move = SwayMove::Moving;
+		const float walk = walk_speed(p_motor, p_after);
+		sway.move_fraction = walk > 0.0f ? std::min(1.0f, std::sqrt(hs2) / walk) : 1.0f;
 	} else {
 		sway.move = SwayMove::Base;
 	}
@@ -613,7 +615,7 @@ WeaponContext make_weapon_context(const MotorParams &p_motor, const SoldierState
 	c.eye_end = { p_after.position[0], p_after.position[1] + eye_height_of(p_motor, p_after), p_after.position[2] };
 	c.yaw = p_command.yaw;
 	c.pitch = p_command.pitch;
-	c.sway = weapon_sway_context(p_after, p_command);
+	c.sway = weapon_sway_context(p_motor, p_after, p_command);
 	c.alive = (p_after.flags & soldier_flags::kAlive) != 0 && p_after.mode != MoveMode::Dead;
 	c.sprinting = (p_after.flags & soldier_flags::kSprinting) != 0;
 	c.suppression = std::isfinite(p_suppression) ? p_suppression : 0.0f;

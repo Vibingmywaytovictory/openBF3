@@ -1,6 +1,7 @@
 #include "test_support.h"
 #include "weapons_support.h"
 
+#include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/soldier_state.h"
 #include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/damage.h"
@@ -721,41 +722,73 @@ TEST_SUITE("weapons-unit") {
 		rise.min_spread_rise = MinSpreadRise::AtDecreaseRate;
 		const SimTime now = 600 * kTimeUnitsPerTick;
 
+		MotorParams motor;
+		for (PoseParams &pp : motor.poses) {
+			pp.on_ground.velocity = 2.0f;
+			pp.on_ground.backward = 0.5f;
+			pp.on_ground.left = 0.75f;
+			pp.on_ground.right = 0.75f;
+			pp.throttle.points[0] = { 0.0f, 1.0f };
+			pp.throttle.count = 1;
+		}
 		SoldierState still;
 		still.flags = soldier_flags::kAlive;
 		Command c;
 		c.tick = 600;
 		const auto spread_now = [&](const SoldierState &p_state, const Command &p_command, float p_stored, SimTime p_stored_time, const Mechanics &p_mech) {
-			return spread_at(p_stored, p_stored_time, now, effective_dispersion(d, weapon_sway_context(p_state, p_command)), p_mech);
+			return spread_at(p_stored, p_stored_time, now, effective_dispersion(d, weapon_sway_context(motor, p_state, p_command)), p_mech);
 		};
-		CHECK(weapon_sway_context(still, c).move == SwayMove::Base);
+		CHECK(weapon_sway_context(motor, still, c).move == SwayMove::Base);
 		CHECK(spread_now(still, c, 0.0f, 0, immediate) == 2.5f);
 
 		SoldierState walking = still;
-		walking.velocity = { 1.2f, 0.0f, 0.0f };
-		CHECK(weapon_sway_context(walking, c).move == SwayMove::Moving);
+		walking.velocity = { 0.0f, 0.0f, 2.0f };
+		CHECK(walk_speed(motor, walking) == 2.0f);
+		CHECK(weapon_sway_context(motor, walking, c).move == SwayMove::Moving);
+		CHECK(weapon_sway_context(motor, walking, c).move_fraction == 1.0f);
 		CHECK(spread_now(walking, c, 2.5f, now - kTimeUnitsPerTick, immediate) == 3.0f);
+		SoldierState half = still;
+		half.velocity = { 0.0f, 0.0f, 1.0f };
+		CHECK(weapon_sway_context(motor, half, c).move_fraction == 0.5f);
+		CHECK(spread_now(half, c, 0.0f, 0, immediate) == 2.75f);
+		SoldierState backing = still;
+		backing.velocity = { 0.0f, 0.0f, -0.5f };
+		CHECK(walk_speed(motor, backing) == 1.0f);
+		CHECK(spread_now(backing, c, 0.0f, 0, immediate) == 2.75f);
+		SoldierState sidestep = still;
+		sidestep.velocity = { 0.75f, 0.0f, 0.0f };
+		CHECK(walk_speed(motor, sidestep) == 1.5f);
+		CHECK(spread_now(sidestep, c, 0.0f, 0, immediate) == 2.75f);
+		SoldierState turned = still;
+		turned.yaw = uint16_t(kYawSteps / 4);
+		turned.velocity = { 2.0f, 0.0f, 0.0f };
+		CHECK(walk_speed(motor, turned) == doctest::Approx(2.0f));
+		CHECK(spread_now(turned, c, 0.0f, 0, immediate) == doctest::Approx(3.0f));
 		SoldierState creeping = still;
 		creeping.velocity = { 0.05f, 0.0f, 0.05f };
-		CHECK(weapon_sway_context(creeping, c).move == SwayMove::Base);
+		const float creep_walk = 2.0f * (0.5f * 1.0f + 0.5f * 0.75f);
+		CHECK(walk_speed(motor, creeping) == doctest::Approx(creep_walk));
+		CHECK(weapon_sway_context(motor, creeping, c).move == SwayMove::Moving);
+		CHECK(spread_now(creeping, c, 0.0f, 0, immediate) == doctest::Approx(2.5f + 0.5f * std::sqrt(0.005f) / creep_walk));
+		CHECK(spread_at(0.0f, 0, now, effective_dispersion(d, weapon_sway_context(MotorParams{}, half, c)), immediate) == 3.0f);
 
 		SoldierState airborne = still;
 		airborne.mode = MoveMode::Jumping;
-		CHECK(weapon_sway_context(airborne, c).move == SwayMove::Jumping);
+		CHECK(weapon_sway_context(motor, airborne, c).move == SwayMove::Jumping);
 		CHECK(spread_now(airborne, c, 2.5f, now - kTimeUnitsPerTick, immediate) == 7.0f);
 		SoldierState falling = still;
 		falling.mode = MoveMode::Falling;
-		CHECK(weapon_sway_context(falling, c).move == SwayMove::Jumping);
+		CHECK(weapon_sway_context(motor, falling, c).move == SwayMove::Jumping);
 		SoldierState sprint = walking;
 		sprint.flags = uint16_t(soldier_flags::kAlive | soldier_flags::kSprinting);
-		CHECK(weapon_sway_context(sprint, c).move == SwayMove::Sprinting);
+		CHECK(weapon_sway_context(motor, sprint, c).move == SwayMove::Sprinting);
 
 		SoldierState crouched = still;
 		crouched.target_pose = Pose::Crouch;
 		SoldierState prone = still;
 		prone.target_pose = Pose::Prone;
-		CHECK(weapon_sway_context(crouched, c).stance == Stance::Crouch);
-		CHECK(weapon_sway_context(prone, c).stance == Stance::Prone);
+		CHECK(weapon_sway_context(motor, crouched, c).stance == Stance::Crouch);
+		CHECK(weapon_sway_context(motor, prone, c).stance == Stance::Prone);
 		CHECK(spread_now(crouched, c, 0.0f, 0, immediate) == 2.0f);
 		CHECK(spread_now(prone, c, 0.0f, 0, immediate) == 1.5f);
 		SoldierState crouch_walk = crouched;
@@ -767,7 +800,7 @@ TEST_SUITE("weapons-unit") {
 
 		Command zoom = c;
 		zoom.buttons = buttons::kZoom;
-		CHECK(weapon_sway_context(still, zoom).zoom == Zoom::Zoom);
+		CHECK(weapon_sway_context(motor, still, zoom).zoom == Zoom::Zoom);
 		CHECK(spread_now(still, zoom, 0.0f, 0, immediate) == 0.2f);
 
 		const float decrease = d.sway[0][0].move[0].decrease_per_second;
@@ -781,7 +814,7 @@ TEST_SUITE("weapons-unit") {
 		CHECK(spread_now(walking, c, 2.5f, now - kTimeUnitsPerSecond / 60, rise) == doctest::Approx(2.5f + decrease / 60.0f));
 		CHECK(spread_now(walking, c, 2.5f, now - kTimeUnitsPerSecond, rise) == 3.0f);
 
-		SwayContext quiet = weapon_sway_context(still, c);
+		SwayContext quiet = weapon_sway_context(motor, still, c);
 		CHECK_FALSE(suppressed_sway(quiet, 0.29f, immediate).suppressed);
 		CHECK(suppressed_sway(quiet, 0.3f, immediate).suppressed);
 		quiet.suppressed = true;
