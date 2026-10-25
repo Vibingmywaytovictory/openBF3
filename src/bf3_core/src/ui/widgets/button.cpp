@@ -1,4 +1,4 @@
-#include "hud_widget_support.h"
+#include "button.h"
 
 namespace bf3::core::ui {
 
@@ -72,19 +72,6 @@ ButtonState selected_variant(ButtonState p_state) {
 			return ButtonState::PressSelected;
 		default:
 			return p_state;
-	}
-}
-
-std::vector<std::string> split_semicolon(std::string_view p_text) {
-	std::vector<std::string> out;
-	size_t at = 0;
-	while (true) {
-		const size_t semi = p_text.find(';', at);
-		out.emplace_back(p_text.substr(at, semi == std::string_view::npos ? std::string_view::npos : semi - at));
-		if (semi == std::string_view::npos) {
-			return out;
-		}
-		at = semi + 1;
 	}
 }
 
@@ -200,6 +187,7 @@ public:
 		host_->clip("labelInvert.txt").set_text(shown);
 		if (kind_ == ButtonKind::Text && p_text == "ID_M_PREMIUM") {
 			host_->clip("label.txt").set_text_color(kPremiumText);
+			host_->clip("label.txt").set_filters({ as2_glow_filter(0u, 1.0, 5.0f, 5.0f, 1.0f, 1) });
 		}
 		set_text_field_width();
 	}
@@ -326,6 +314,7 @@ private:
 		host_->clip("labelInvert").set_visible(p_inverted);
 	}
 
+public:
 	void set_text_field_width() {
 		const As2Clip self = host_->self();
 		const As2Clip label = host_->clip("label");
@@ -362,6 +351,7 @@ private:
 		}
 	}
 
+private:
 	ButtonKind kind_;
 	HudWidgetHost *host_ = nullptr;
 	float start_w_ = 0.0f;
@@ -375,9 +365,10 @@ private:
 	As2Clip current_bg_;
 };
 
-class ButtonClass final : public HudWidgetController {
+class ButtonClass final : public HudWidgetController, public HudButton {
 public:
 	void construct(HudWidgetHost &r_host) override {
+		host_ = &r_host;
 		r_host.self().set_visible(false);
 		button_type_ = param_or(r_host, "buttonType", "LargeTextButton");
 		button_text_ = param_or(r_host, "buttonText", "Button");
@@ -405,10 +396,10 @@ public:
 		}
 		add_button_type(r_host);
 		const std::string *text_data = p_init.property("TextData");
-		update_texts(r_host, split_semicolon(text_data != nullptr && !text_data->empty() ? *text_data : button_text_));
+		update_texts(r_host, as2_split(text_data != nullptr && !text_data->empty() ? *text_data : button_text_, ";"));
 		const std::string *icon_data = p_init.property("IconData");
 		update_icons(
-				r_host, split_semicolon(icon_data != nullptr && !icon_data->empty() ? *icon_data : button_icon_frame_));
+				r_host, as2_split(icon_data != nullptr && !icon_data->empty() ? *icon_data : button_icon_frame_, ";"));
 		const std::string *toggled = p_init.property("Toggled");
 		update_toggle(r_host, toggled != nullptr && *toggled == "true" ? 1 : 0, false);
 		const As2Value *visible = p_init.value("Visible");
@@ -418,7 +409,8 @@ public:
 			r_host.self().set_visible(false);
 		}
 		if (platform == "win32" || platform.empty()) {
-			r_host.set_mouse_target(r_host.self(), true);
+			mouse_enabled_ = true;
+			r_host.set_mouse_target(r_host.self(), active_);
 		}
 		setup_refresh_data(*this, r_host, p_init.data);
 	}
@@ -448,12 +440,12 @@ public:
 		}
 		if (p_mouse.kind == HudMouseKind::RollOver) {
 			set_state(r_host, ButtonState::Over);
-			r_host.fire_event(kOver, As2Value::of(current_label_));
+			call_or_fire(callbacks_.over, kOver);
 			return true;
 		}
 		if (p_mouse.kind == HudMouseKind::RollOut) {
 			set_state(r_host, ButtonState::Normal);
-			r_host.fire_event(kOut, As2Value::of(current_label_));
+			call_or_fire(callbacks_.out, kOut);
 			return true;
 		}
 		return false;
@@ -464,7 +456,7 @@ public:
 			return false;
 		}
 		set_state(r_host, ButtonState::Press);
-		r_host.fire_event(kPressed, As2Value::of(current_label_));
+		call_or_fire(callbacks_.press, kPressed);
 		return true;
 	}
 
@@ -530,22 +522,102 @@ public:
 		}
 	}
 
-	void focus_gained(HudWidgetHost &r_host) override {
-		if (ButtonTypeClass *b = button(r_host)) {
-			b->set_selected(true);
-		}
-	}
+	void focus_gained(HudWidgetHost &) override { set_selected(true); }
 
-	void focus_lost(HudWidgetHost &r_host) override {
-		if (ButtonTypeClass *b = button(r_host)) {
-			b->set_selected(false);
-		}
-	}
+	void focus_lost(HudWidgetHost &) override { set_selected(false); }
 
 	int32_t toggle_index() const { return toggle_index_; }
-	const std::string &current_label() const { return current_label_; }
+	const std::string &current_label() const override { return current_label_; }
+
+	void set_button_type(std::string p_type) override { button_type_ = std::move(p_type); }
+	void set_button_text(std::string p_text) override { button_text_ = std::move(p_text); }
+	void set_align_text(std::string p_align) override { align_text_ = std::move(p_align); }
+	void set_resize_if_too_wide(bool p_resize) override { resize_if_too_wide_ = p_resize; }
+	void set_callbacks(HudButtonCallbacks p_callbacks) override { callbacks_ = std::move(p_callbacks); }
+	void set_send_event_with_function(bool p_send) override { send_event_with_function_ = p_send; }
+
+	float button_width() override {
+		ButtonTypeClass *b = button(*host_);
+		return b != nullptr ? b->start_width() : 0.0f;
+	}
+
+	void set_button_width(float p_width) override {
+		if (ButtonTypeClass *b = button(*host_)) {
+			b->set_size(p_width, start_h_);
+			if (b->has_label()) {
+				b->set_text_field_width();
+			}
+		}
+		align_plus();
+	}
+
+	void set_selected(bool p_selected) override {
+		selected_ = p_selected;
+		if (ButtonTypeClass *b = button(*host_)) {
+			b->set_selected(selected_);
+		}
+	}
+
+	bool selected() override {
+		ButtonTypeClass *b = button(*host_);
+		return b != nullptr && b->selected();
+	}
+
+	void set_highlighted(bool p_highlighted) override {
+		highlighted_ = p_highlighted;
+		if (ButtonTypeClass *b = button(*host_)) {
+			b->set_highlighted(highlighted_);
+		}
+	}
+
+	void set_active(bool p_active) override {
+		active_ = p_active;
+		host_->set_mouse_target(host_->self(), active_ && mouse_enabled_);
+		if (active_) {
+			set_highlighted(highlighted_);
+		} else {
+			set_state(*host_, ButtonState::Inactive);
+		}
+	}
+
+	void set_plus() override {
+		if (!plus_path_.empty()) {
+			return;
+		}
+		const As2Clip self = host_->self();
+		plus_path_ = host_->attach_movie(self, "PlusSign", "plusSign", self.next_highest_depth()).path();
+		align_plus();
+	}
+
+	void remove_plus() override {
+		if (plus_path_.empty()) {
+			return;
+		}
+		host_->remove_movie_clip(host_->screen().clip(plus_path_));
+		plus_path_.clear();
+	}
 
 private:
+	void call_or_fire(const HudButtonCallback &p_callback, int32_t p_event) {
+		if (p_callback) {
+			p_callback(std::string(clip_leaf(host_->path())));
+			if (send_event_with_function_) {
+				host_->fire_event(p_event, As2Value::of(current_label_));
+			}
+			return;
+		}
+		host_->fire_event(p_event, As2Value::of(current_label_));
+	}
+
+	void align_plus() {
+		if (plus_path_.empty()) {
+			return;
+		}
+		const As2Clip plus = host_->screen().clip(plus_path_);
+		const float width = resize_if_too_wide_ ? host_->self().width() : start_w_;
+		plus.set_x(std::floor(width - plus.width() - 1.0f));
+	}
+
 	static std::string param_or(const HudWidgetHost &p_host, std::string_view p_name, std::string_view p_default) {
 		const As2Value *v = p_host.construct_param(p_name);
 		return v != nullptr && v->defined() ? v->to_string() : std::string(p_default);
@@ -583,8 +655,10 @@ private:
 			update_toggle(r_host, toggle_index_ + 1, true);
 		}
 		set_state(r_host, ButtonState::Over);
-		r_host.fire_query(kSoundSelect, As2Value::of(false));
-		r_host.fire_event(kReleased, As2Value::of(current_label_));
+		if (!callbacks_.release && !callbacks_.press) {
+			r_host.fire_query(kSoundSelect, As2Value::of(false));
+		}
+		call_or_fire(callbacks_.release, kReleased);
 	}
 
 	void update_texts(HudWidgetHost &r_host, std::vector<std::string> p_texts) {
@@ -642,6 +716,12 @@ private:
 		}
 	}
 
+	HudWidgetHost *host_ = nullptr;
+	HudButtonCallbacks callbacks_;
+	bool send_event_with_function_ = false;
+	bool active_ = true;
+	bool mouse_enabled_ = false;
+	std::string plus_path_;
 	std::string button_type_;
 	std::string button_text_;
 	std::string icon_type_;

@@ -54,6 +54,44 @@ inline bool hud_soldier_widgets_visible(const HudModel &p_model, const HudClient
 			!p_model.spawn_screen.visible && !p_model.end_of_round.visible;
 }
 
+inline std::vector<std::string> as2_split(std::string_view p_text, std::string_view p_separator) {
+	std::vector<std::string> out;
+	size_t at = 0;
+	for (size_t hit = p_text.find(p_separator); hit != std::string_view::npos; hit = p_text.find(p_separator, at)) {
+		out.emplace_back(p_text.substr(at, hit - at));
+		at = hit + p_separator.size();
+	}
+	out.emplace_back(p_text.substr(at));
+	return out;
+}
+
+inline bool as2_loose_equals(const As2Value &p_a, const As2Value &p_b) {
+	if (p_a.kind == As2Value::Kind::Undefined || p_b.kind == As2Value::Kind::Undefined) {
+		return p_a.kind == p_b.kind;
+	}
+	if (p_a.kind == As2Value::Kind::String && p_b.kind == As2Value::Kind::String) {
+		return p_a.text == p_b.text;
+	}
+	if (p_a.kind == As2Value::Kind::Object || p_a.kind == As2Value::Kind::List || p_b.kind == As2Value::Kind::Object ||
+			p_b.kind == As2Value::Kind::List) {
+		return p_a == p_b;
+	}
+	return p_a.to_number() == p_b.to_number();
+}
+
+inline bool as2_equals_true(const As2Value &p_v) {
+	return p_v.kind == As2Value::Kind::Bool ? p_v.boolean : p_v.to_number() == 1.0;
+}
+
+inline bool as2_equals_false(const As2Value &p_v) {
+	return p_v.kind == As2Value::Kind::Bool ? !p_v.boolean : p_v.to_number() == 0.0;
+}
+
+inline std::string_view clip_leaf(std::string_view p_path) {
+	const size_t dot = p_path.rfind('.');
+	return dot == std::string_view::npos ? p_path : p_path.substr(dot + 1);
+}
+
 inline double as2_round(double p_v) {
 	return std::floor(p_v + 0.5);
 }

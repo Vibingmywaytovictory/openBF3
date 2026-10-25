@@ -50,35 +50,8 @@ std::optional<int32_t> index_of(double p_index) {
 	return int32_t(p_index);
 }
 
-bool loose_equals(const As2Value &p_a, const As2Value &p_b) {
-	if (p_a.kind == As2Value::Kind::Undefined || p_b.kind == As2Value::Kind::Undefined) {
-		return p_a.kind == p_b.kind;
-	}
-	if (p_a.kind == As2Value::Kind::String && p_b.kind == As2Value::Kind::String) {
-		return p_a.text == p_b.text;
-	}
-	if (p_a.kind == As2Value::Kind::Object || p_a.kind == As2Value::Kind::List || p_b.kind == As2Value::Kind::Object ||
-			p_b.kind == As2Value::Kind::List) {
-		return p_a == p_b;
-	}
-	return p_a.to_number() == p_b.to_number();
-}
-
 bool is_null(const As2Value &p_v) {
 	return p_v.kind == As2Value::Kind::Undefined;
-}
-
-std::vector<std::string> split_on(std::string_view p_text, char p_sep) {
-	std::vector<std::string> out;
-	size_t at = 0;
-	while (true) {
-		const size_t next = p_text.find(p_sep, at);
-		out.emplace_back(p_text.substr(at, next == std::string_view::npos ? std::string_view::npos : next - at));
-		if (next == std::string_view::npos) {
-			return out;
-		}
-		at = next + 1;
-	}
 }
 
 struct RowRequest {
@@ -253,8 +226,8 @@ public:
 		const As2Value disabled = value("DisabledRows");
 		high_light_on_update_ = value("HighLightOnUpdate").truthy();
 		keep_scroll_offset_ = value("KeepScrollOffset").truthy();
-		if (!loose_equals(disabled, As2Value::of(""))) {
-			disabled_rows_ = split_on(disabled.to_string(), ';');
+		if (!as2_loose_equals(disabled, As2Value::of(""))) {
+			disabled_rows_ = as2_split(disabled.to_string(), ";");
 		} else {
 			disabled_rows_.reset();
 		}
@@ -628,13 +601,13 @@ private:
 	}
 
 	void sort_properties() {
-		if (!loose_equals(p_row_type_, As2Value::of(""))) {
+		if (!as2_loose_equals(p_row_type_, As2Value::of(""))) {
 			row_type_ = p_row_type_.to_string();
 		}
-		if (!loose_equals(p_row_spacing_, As2Value::of(0))) {
+		if (!as2_loose_equals(p_row_spacing_, As2Value::of(0))) {
 			row_spacing_ = p_row_spacing_.to_number();
 		}
-		if (!loose_equals(p_navigation_type_, As2Value::of(""))) {
+		if (!as2_loose_equals(p_navigation_type_, As2Value::of(""))) {
 			navigation_type_ = p_navigation_type_.to_string();
 		}
 	}
@@ -879,8 +852,8 @@ private:
 
 	void fire_highlight_event(double p_index, bool p_by_user) {
 		const As2Value v = highlighted_index_value(p_index);
-		if (!p_by_user || row_count_ == 0.0 || loose_equals(v, As2Value::of("LABEL")) ||
-				loose_equals(v, As2Value::of(RowBaseClass::kNoId))) {
+		if (!p_by_user || row_count_ == 0.0 || as2_loose_equals(v, As2Value::of("LABEL")) ||
+				as2_loose_equals(v, As2Value::of(RowBaseClass::kNoId))) {
 			return;
 		}
 		host_->fire_event(kHighlighted, v);
@@ -973,7 +946,7 @@ private:
 	void enter_selected(const As2Value &p_param) {
 		const std::string wanted = p_param.to_string();
 		for (size_t i = 0; i < data_array_.size(); ++i) {
-			if (loose_equals(data_array_.items[i].field("SubIndex"), As2Value::of(wanted))) {
+			if (as2_loose_equals(data_array_.items[i].field("SubIndex"), As2Value::of(wanted))) {
 				logic_.set_highlighted(double(i), true, false);
 				break;
 			}
@@ -1721,7 +1694,7 @@ void RowBaseClass::set_highlighted(bool p_highlighted) {
 	if (o == nullptr) {
 		return;
 	}
-	if (use_direct_access_ && loose_equals(id_, As2Value::of(kNoId))) {
+	if (use_direct_access_ && as2_loose_equals(id_, As2Value::of(kNoId))) {
 		return;
 	}
 	o->row_highlighted(index_, highlighted_);
@@ -1859,7 +1832,7 @@ void RowBaseClass::set_mouse_enabled(bool p_enabled) {
 }
 
 void RowBaseClass::set_id(const As2Value &p_id) {
-	if (loose_equals(p_id, id_)) {
+	if (as2_loose_equals(p_id, id_)) {
 		return;
 	}
 	id_ = p_id;

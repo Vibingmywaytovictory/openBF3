@@ -16,11 +16,6 @@ double acceptable_percentage(double p_percentage) {
 	return p_percentage;
 }
 
-std::string_view leaf_of(std::string_view p_path) {
-	const size_t dot = p_path.rfind('.');
-	return dot == std::string_view::npos ? p_path : p_path.substr(dot + 1);
-}
-
 }
 
 void ScrollBarClass::construct(HudWidgetHost &r_host) {
@@ -100,7 +95,7 @@ double ScrollBarClass::ymouse() const {
 }
 
 bool ScrollBarClass::mouse_press(HudWidgetHost &, const HudMouse &p_mouse) {
-	mouse_pressed(leaf_of(p_mouse.target));
+	mouse_pressed(clip_leaf(p_mouse.target));
 	return true;
 }
 

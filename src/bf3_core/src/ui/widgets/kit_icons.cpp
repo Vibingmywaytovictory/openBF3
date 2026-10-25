@@ -12,17 +12,6 @@ constexpr std::string_view kArraySeparator = ",,";
 constexpr std::string_view kImagePathPrefix = "UI/Art/";
 constexpr size_t kObjectToArrayMax = 65536;
 
-std::vector<std::string> as2_split(std::string_view p_text, std::string_view p_separator) {
-	std::vector<std::string> out;
-	size_t at = 0;
-	for (size_t hit = p_text.find(p_separator); hit != std::string_view::npos; hit = p_text.find(p_separator, at)) {
-		out.emplace_back(p_text.substr(at, hit - at));
-		at = hit + p_separator.size();
-	}
-	out.emplace_back(p_text.substr(at));
-	return out;
-}
-
 std::string as2_substr(std::string_view p_text, size_t p_start, int64_t p_length) {
 	if (p_start >= p_text.size() || p_length <= 0) {
 		return {};

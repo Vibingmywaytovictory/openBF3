@@ -8,16 +8,6 @@ constexpr uint32_t kRowTextGlow = 0x73C3FFu;
 constexpr uint32_t kWhite = 0xFFFFFFu;
 constexpr std::string_view kReadySid = "ID_M_SCOREBOARD_READY";
 
-bool same(const As2Value &p_a, const As2Value &p_b) {
-	if (p_a.kind == As2Value::Kind::Undefined || p_b.kind == As2Value::Kind::Undefined) {
-		return p_a.kind == p_b.kind;
-	}
-	if (p_a.kind == As2Value::Kind::String && p_b.kind == As2Value::Kind::String) {
-		return p_a.text == p_b.text;
-	}
-	return p_a.to_number() == p_b.to_number();
-}
-
 std::string dash_if_undefined(const As2Value &p_v, std::string_view p_dash) {
 	const std::string s = p_v.to_string();
 	return s == "undefined" ? std::string(p_dash) : s;
@@ -40,8 +30,7 @@ public:
 	}
 
 	void set_data(const As2Value &p_data) override {
-		const As2Value &da = p_data.field("useDirectAccess");
-		if (da.kind == As2Value::Kind::Bool ? da.boolean : same(da, As2Value::of(true))) {
+		if (as2_equals_true(p_data.field("useDirectAccess"))) {
 			set_text("Label", "-");
 			set_text("NumLabel", As2Value::of(row_index() + 1.0).to_string());
 			set_text("KillsLabel", "-");
@@ -96,7 +85,7 @@ protected:
 		if (p_name == "isLocalSquad") {
 			set_local_squad(p_value);
 		} else if (p_name == "isLocalPlayer") {
-			if (!same(p_value, local_player_)) {
+			if (!as2_loose_equals(p_value, local_player_)) {
 				local_player_ = p_value;
 				state_changed();
 			}
@@ -112,7 +101,7 @@ private:
 	void set_text(std::string_view p_name, std::string_view p_text) const { host_->clip(p_name).set_text(p_text); }
 
 	void set_local_squad(const As2Value &p_value) {
-		if (same(p_value, local_squad_)) {
+		if (as2_loose_equals(p_value, local_squad_)) {
 			return;
 		}
 		local_squad_ = p_value;
@@ -215,10 +204,6 @@ bool mode_gun_master(const As2Value &p_mode) {
 	return mode_starts_with(p_mode, "GunMaster");
 }
 
-bool equals_true(const As2Value &p_v) {
-	return p_v.kind == As2Value::Kind::Bool ? p_v.boolean : p_v.to_number() == 1.0;
-}
-
 class ScoreboardHeaderClass final : public HudWidgetController {
 public:
 	void construct(HudWidgetHost &r_host) override {
@@ -297,7 +282,7 @@ public:
 		if (p_key == "TeamName") {
 			update_team_name(p_value);
 		} else if (p_key == "TeamIsWinner") {
-			r_host.clip("winnerText").set_visible(equals_true(p_value));
+			r_host.clip("winnerText").set_visible(as2_equals_true(p_value));
 			update_winner_pos();
 		} else if (p_key == "TeamID") {
 			if (p_value.defined()) {
