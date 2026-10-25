@@ -438,6 +438,11 @@ foreach(_w IN ITEMS assets:*screen*assets* ticket_counter:*TicketCounter* ammo:*
 endforeach()
 openbf3_split_cover(NAME ui.hud.screen.split_cover EXE test_ui_hud_screen SUITE ui-hud-screen GROUP ui-hud-screen
     INSTALL_CASE ${_openbf3_hud_screen_install})
+openbf3_test(test_ui_widgets test_main.cpp ui_widgets_tests.cpp ui_retail_support.h test_support.h)
+target_link_libraries(test_ui_widgets PRIVATE bf3_core)
+target_include_directories(test_ui_widgets PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_core/src/ui/widgets)
+add_test(NAME ui.widgets COMMAND test_ui_widgets --test-suite=ui-widgets)
+set_tests_properties(ui.widgets PROPERTIES SKIP_RETURN_CODE 77)
 openbf3_test(test_ui_graph test_main.cpp ui_graph_tests.cpp ui_input_tests.cpp test_support.h)
 target_link_libraries(test_ui_graph PRIVATE bf3_core)
 add_test(NAME ui.graph.unit COMMAND test_ui_graph --test-suite=ui-graph-unit)

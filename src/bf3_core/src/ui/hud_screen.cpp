@@ -63,7 +63,36 @@ HudDataSource source_of(const EbxResolver &p_db, const EbxPartition &p_part, con
 		out.category_short_name = text_of(category->get("ShortName"));
 	}
 	out.on_initialize = detail::flag_or(p_info, "UpdateOnInitialize", true);
+	out.use_direct_access = detail::flag_or(p_info, "UseDirectAccess", false);
 	return out;
+}
+
+HudListBinding list_binding_of(const EbxResolver &p_db, const EbxPartition &p_part, const EbxStruct &p_b) {
+	HudListBinding l;
+	if (const std::optional<EbxStruct> q = detail::sub(p_b, "ListQuery")) {
+		l.list_query = source_of(p_db, p_part, *q);
+	}
+	l.row_type = text_of(p_b.get("RowType"));
+	l.empty_row_type = text_of(p_b.get("EmptyRowType"));
+	l.navigation_type = text_of(p_b.get("NavigationType"));
+	l.unfocus_mode = text_of(p_b.get("UnFocusMode"));
+	l.disabled_rows = text_of(p_b.get("DisabledRows"));
+	l.list_index = detail::i32_or(p_b, "ListIndex", 0);
+	l.row_spacing = detail::i32_or(p_b, "RowSpacing", 0);
+	if (const std::optional<EbxStruct> d = detail::sub(p_b, "DefaultHighlightedRow")) {
+		l.default_highlighted_row = detail::i32_or(*d, "DefaultSelectionIndex", -1);
+	}
+	l.use_scroll_bar = detail::flag_or(p_b, "UseScrollBar", false);
+	l.high_light_on_update = detail::flag_or(p_b, "HighLightOnUpdate", false);
+	l.visible = detail::flag_or(p_b, "Visible", true);
+	l.clear_list_at_navigation_event = detail::flag_or(p_b, "ClearListAtNavigationEvent", false);
+	l.data_includes_button_layout = detail::flag_or(p_b, "DataIncludesButtonLayout", false);
+	l.fire_highlight_on_mouse_out = detail::flag_or(p_b, "FireHighlightOnMouseOut", false);
+	l.screen_rotation_enabled = detail::flag_or(p_b, "ScreenRotationEnabled", false);
+	l.send_index_with_event = detail::flag_or(p_b, "SendIndexWithEvent", false);
+	l.spinner_enabled = detail::flag_or(p_b, "SpinnerEnabled", false);
+	l.use_3d_selection = detail::flag_or(p_b, "Use3DSelection", false);
+	return l;
 }
 
 void read_binding(const EbxResolver &p_db, const EbxPartition &p_part, const EbxInstance &p_node, HudWidgetNode &r_widget) {
@@ -83,6 +112,10 @@ void read_binding(const EbxResolver &p_db, const EbxPartition &p_part, const Ebx
 		if (const std::optional<EbxValue> offset = b->get("DispersionBaseOffset")) {
 			r_widget.dispersion_base_offset = offset->as_f32();
 		}
+		return;
+	}
+	if (b->is_a("UIListDataBinding")) {
+		r_widget.list = list_binding_of(p_db, p_part, b->data());
 		return;
 	}
 	if (b->is_a("UIWidgetPathBinding")) {

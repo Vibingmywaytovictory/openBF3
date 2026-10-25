@@ -45,6 +45,11 @@ inline bool flag_or(const EbxStruct &p_s, std::string_view p_path, bool p_defaul
 	return b.value_or(p_default);
 }
 
+inline int32_t i32_or(const EbxStruct &p_s, std::string_view p_field, int32_t p_default) {
+	const std::optional<EbxValue> v = p_s.get(p_field);
+	return v ? v->as_i32().value_or(p_default) : p_default;
+}
+
 inline std::array<float, 4> vec4_or(const EbxStruct &p_s, std::string_view p_field, std::array<float, 4> p_default) {
 	const std::optional<EbxValue> v = p_s.get(p_field);
 	const std::optional<EbxStruct> s = v ? v->as_struct() : std::nullopt;

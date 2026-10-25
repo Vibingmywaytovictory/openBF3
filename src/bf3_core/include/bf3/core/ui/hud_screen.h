@@ -53,6 +53,29 @@ struct HudDataSource {
 	std::string category;
 	std::string category_short_name;
 	bool on_initialize = true;
+	bool use_direct_access = false;
+};
+
+struct HudListBinding {
+	HudDataSource list_query;
+	std::string row_type;
+	std::string empty_row_type;
+	std::string navigation_type;
+	std::string unfocus_mode;
+	std::string disabled_rows;
+	int32_t list_index = 0;
+	int32_t row_spacing = 0;
+	int32_t default_highlighted_row = -1;
+	bool use_scroll_bar = false;
+	bool high_light_on_update = false;
+	bool visible = true;
+	bool clear_list_at_navigation_event = false;
+	bool data_includes_button_layout = false;
+	bool fire_highlight_on_mouse_out = false;
+	bool screen_rotation_enabled = false;
+	bool send_index_with_event = false;
+	bool spinner_enabled = false;
+	bool use_3d_selection = false;
 };
 
 struct HudWidgetEventPort {
@@ -78,6 +101,7 @@ struct HudWidgetNode {
 	std::vector<HudDataSource> sources;
 	std::optional<HudDataSource> message_query;
 	std::optional<HudDataSource> widget_path_query;
+	std::optional<HudListBinding> list;
 	int32_t number_of_rows = 0;
 	std::optional<double> dispersion_base_offset;
 
