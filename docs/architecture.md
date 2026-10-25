@@ -188,8 +188,10 @@ These are structural, known, and listed so nobody mistakes them for design inten
   the 18.57 footage at FOV 100 (`ui.hud.feed.install` footage rows) and its dependence on the field of view is not known.
   The stance's Base dispersion blends into its Moving one by horizontal speed / the motor's `walk_speed` for the pose and
   direction, as the footage's arm rises and falls when the soldier starts and stops (the `move_onset` / `move_stop` rows);
-  the weapon data has no speed term. The footage's bloom while firing, its fall after a landing without a shot and its
-  suppressed sprint (5 deg) and jump (7 deg) arms differ from `spread_at`; the footage rows print the sim's values as INFO.
+  the weapon data has no speed term. The footage's bloom while firing, its fall after a landing without a shot, its
+  suppressed sprint (5 deg) and jump (7 deg) arms and the heavy barrel's held 95 arm (4.0 deg) after about 0.7 s of walking
+  (the sim holds the Moving minimum's 87, 3.6 deg; no data state gives 4.0) differ from `spread_at`; the footage rows print
+  the sim's values as INFO.
 * Nametags are engine-drawn by `Bf3NativeHud` through `NativeTags` (`native_tags.cpp`): UIHudIcon_Player by relation, the
   squad kit icon for squad mates, names in `$Menu_medium` at the UINametagCompData sizes and tints; the name's kit icon
   (16 units in an 18-unit column) and its black glow are not measured, and the HealthBarSize bar is not drawn (other

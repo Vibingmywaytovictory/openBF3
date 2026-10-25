@@ -804,6 +804,7 @@ TEST_CASE("crosshair footage: the M16A3 builds of the 18.57 recording through th
 	constexpr double kFootageSuppressedJump = 155.0;
 	constexpr double kFootageHeavyStand = 75.0;
 	constexpr double kFootageHeavyMoving = 87.0;
+	constexpr double kFootageHeavyWalkHeld = 95.0;
 	constexpr double kFootageHeavyBurstPeak = 117.0;
 	constexpr double kFootageDecayPerFrame = 10.0;
 	constexpr std::array<double, 7> kFootageHeavyOnset{ 82.0, 84.0, 85.0, 86.0, 86.0, 86.0, 87.0 };
@@ -817,6 +818,8 @@ TEST_CASE("crosshair footage: the M16A3 builds of the 18.57 recording through th
 	struct Walked {
 		std::vector<XhairFrame> stand;
 		std::vector<XhairFrame> settled;
+		std::vector<XhairFrame> held;
+		std::vector<XhairFrame> late;
 		std::vector<double> onset_sim, onset_blend, stop_sim, stop_blend;
 	};
 	const auto walked = [&](const std::array<uint16_t, 2> &p_loadout) {
@@ -825,6 +828,8 @@ TEST_CASE("crosshair footage: the M16A3 builds of the 18.57 recording through th
 		Walked w;
 		w.stand = frames_in(f, { t0, walk.walk.from });
 		w.settled = frames_in(f, { walk.walk.from + 30, walk.walk.to });
+		w.held = frames_in(f, { walk.walk.from + 15, walk.walk.from + 39 });
+		w.late = frames_in(f, { walk.walk.from + 42, walk.walk.to });
 		for (const XhairFrame &x : frames_in(f, { walk.walk.from - 4, walk.walk.from + 30 })) {
 			w.onset_sim.push_back(x.arm);
 			w.onset_blend.push_back(speed_fraction_arm(def, x.speed, walk_speed, offset));
@@ -842,13 +847,15 @@ TEST_CASE("crosshair footage: the M16A3 builds of the 18.57 recording through th
 	CHECK(arms_all(ws.stand, kFootageSuppressedStand));
 	CHECK(arms_all(ws.settled, kFootageSuppressedMoving));
 	CHECK(arms_all(wh.stand, kFootageHeavyStand));
-	CHECK(arms_all(wh.settled, kFootageHeavyMoving));
+	CHECK(arms_all(wh.held, kFootageHeavyMoving));
 	row("footage.suppressed.stand_move", arms_all(ws.stand, kFootageSuppressedStand) && arms_all(ws.settled, kFootageSuppressedMoving),
 			fmt("M16A3 + suppressor: arms %.0f standing and %.0f from 0.5 s into a walk (footage %.0f / %.0f at FOV 100, 1280x720)", arm_at(ws.stand, 0), arm_at(ws.settled, 0),
 					kFootageSuppressedStand, kFootageSuppressedMoving));
-	row("footage.heavy.stand_move", arms_all(wh.stand, kFootageHeavyStand) && arms_all(wh.settled, kFootageHeavyMoving),
-			fmt("M16A3 + heavy barrel: arms %.0f standing and %.0f from 0.5 s into a walk (footage %.0f / %.0f)", arm_at(wh.stand, 0), arm_at(wh.settled, 0), kFootageHeavyStand,
-					kFootageHeavyMoving));
+	row("footage.heavy.stand_move", arms_all(wh.stand, kFootageHeavyStand) && arms_all(wh.held, kFootageHeavyMoving),
+			fmt("M16A3 + heavy barrel: arms %.0f standing and %.0f from 0.25 to 0.65 s into a walk (footage %.0f / %.0f from about 0.23 to 0.7 s)", arm_at(wh.stand, 0),
+					arm_at(wh.held, 0), kFootageHeavyStand, kFootageHeavyMoving));
+	std::printf("INFO footage.heavy.walk_held footage arm %.0f (%.2f deg) held from about 0.7 s into the walks at 105.60 s and 201.50 s, sim arm %.0f (%.2f deg, the stance's Moving minimum); no data state gives the footage's level\n",
+			kFootageHeavyWalkHeld, double(ui::hud_crosshair_spread_for_arm(kFootageHeavyWalkHeld, offset)), arm_at(wh.late, 0), double(ui::hud_crosshair_spread_for_arm(arm_at(wh.late, 0), offset)));
 
 	const RampMatch onset = match_ramp(kFootageHeavyOnset, wh.onset_sim);
 	const RampMatch stop = match_ramp(kFootageSuppressedStop, ws.stop_sim);
