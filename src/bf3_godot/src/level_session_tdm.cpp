@@ -684,7 +684,8 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			m.native_check = std::unique_ptr<NativeScreensCheck, void (*)(NativeScreensCheck *)>(
 					new NativeScreensCheck(), &delete_part<NativeScreensCheck>);
 		}
-		const auto press = [this](Key p_key, bool p_pressed) {
+		NativeScreensCheckIo io;
+		io.press = [this](Key p_key, bool p_pressed) {
 			Ref<InputEventKey> k;
 			k.instantiate();
 			k->set_keycode(p_key);
@@ -692,7 +693,22 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			k->set_pressed(p_pressed);
 			tdm_ui_input(k);
 		};
-		if (m.native_check->frame(*screens, *m.native_flow, now_s, press)) {
+		io.suicide = [this] {
+			if (host::ClientSession *c = client()) {
+				c->send_suicide_request();
+			}
+		};
+		io.revive = [this] {
+			if (host::ClientSession *c = client()) {
+				net::DebugRequest q;
+				q.kind = net::DebugKind::Revive;
+				c->send_debug(q);
+			}
+		};
+		const std::shared_ptr<const host::SharedLevel> check_level = shared_level();
+		io.death = check_level != nullptr && check_level->death != nullptr ? *check_level->death
+																		   : bf3::core::gameplay::DeathTimeline{};
+		if (m.native_check->frame(*screens, *m.native_flow, now_s, io)) {
 			m.finished = true;
 			UtilityFunctions::print(to_godot(m.native_check->report()));
 			finish(m.native_check->exit_code());

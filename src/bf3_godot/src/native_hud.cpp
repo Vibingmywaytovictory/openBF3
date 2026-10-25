@@ -467,6 +467,9 @@ std::optional<UiScreenRecord> Bf3NativeHud::screen_record(std::string_view p_par
 	UiScreenRecord r;
 	r.visible = views_[*i] != nullptr && shown_[*i] && is_visible_in_tree();
 	r.shown = shown_count_[*i];
+	if (screens_[*i] != nullptr) {
+		add_screen_widget_facts(*screens_[*i], r);
+	}
 	return r;
 }
 
