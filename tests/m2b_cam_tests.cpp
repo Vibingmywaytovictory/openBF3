@@ -187,6 +187,37 @@ TEST_SUITE("m2b-cam-unit") {
 		open.begin(start_at_origin(0xFF), 0.0);
 		CHECK(open.step(2.0, nullptr, nullptr).camera.trans.z == doctest::Approx(-p.back_m).epsilon(1e-3));
 	}
+
+	TEST_CASE("death camera: on the killer the view narrows from the death FOV until the killer's view height fills "
+			  "it, as in the 18.57 footage's kill cam; no death FOV, no zoom") {
+		const gs::DeathCameraParams p{};
+		const fx::Vec3 killer{ 0.0f, 0.0f, -20.0f };
+		gs::DeathCameraStart s = start_at_origin(5);
+		s.vfov_deg = 70.0f;
+		gs::Bf3DeathCamera cam;
+		cam.begin(s, 0.0);
+		CHECK(cam.step(0.5, &killer, nullptr).vfov_deg == 70.0f);
+		const gs::DeathCameraView turning = cam.step(p.orbit_seconds + 0.5 * p.turn_seconds, &killer, nullptr);
+		REQUIRE(turning.on_killer);
+		const gs::DeathCameraView v = cam.step(p.orbit_seconds + p.turn_seconds + 0.5, &killer, nullptr);
+		REQUIRE(v.on_killer);
+		const fx::Vec3 aim{ killer.x, killer.y + p.killer_height_m, killer.z };
+		const float dist = cam_len(cam_sub(aim, v.camera.trans));
+		const float want = 2.0f * std::atan(0.5f * p.killer_view_height_m / dist) * 57.29577951308232f;
+		CHECK(v.vfov_deg == doctest::Approx(want).epsilon(1e-4));
+		CHECK(v.vfov_deg < turning.vfov_deg);
+		CHECK(turning.vfov_deg < 70.0f);
+
+		s.vfov_deg = 0.0f;
+		gs::Bf3DeathCamera plain;
+		plain.begin(s, 0.0);
+		CHECK(plain.step(p.orbit_seconds + p.turn_seconds + 0.5, &killer, nullptr).vfov_deg == 0.0f);
+
+		s.vfov_deg = std::numeric_limits<float>::quiet_NaN();
+		gs::Bf3DeathCamera bad;
+		bad.begin(s, 0.0);
+		CHECK(!bad.active());
+	}
 }
 
 TEST_SUITE("m2b-cam-unit") {

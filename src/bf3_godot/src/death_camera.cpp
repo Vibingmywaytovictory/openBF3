@@ -16,6 +16,9 @@ using fx::Vec3;
 
 constexpr float kAheadM = 5.0f;
 constexpr float kMinPivotM = 0.3f;
+constexpr float kMinZoomVfovDeg = 1.0f;
+constexpr float kMaxVfovDeg = 170.0f;
+constexpr float kRadToDeg = 57.29577951308232f;
 
 Vec3 add(const Vec3 &p_a, const Vec3 &p_b) {
 	return Vec3{ p_a.x + p_b.x, p_a.y + p_b.y, p_a.z + p_b.z };
@@ -91,6 +94,7 @@ Bf3DeathCamera::Bf3DeathCamera(const DeathCameraParams &p_params) :
 	params_.eye_height_m = sane(params_.eye_height_m, d.eye_height_m, -10.0f, 10.0f);
 	params_.camera_radius_m = sane(params_.camera_radius_m, d.camera_radius_m, 0.0f, 10.0f);
 	params_.killer_height_m = sane(params_.killer_height_m, d.killer_height_m, -10.0f, 10.0f);
+	params_.killer_view_height_m = sane(params_.killer_view_height_m, d.killer_view_height_m, 0.1f, 100.0f);
 }
 
 void Bf3DeathCamera::begin(const DeathCameraStart &p_start, double p_now_s) {
@@ -100,7 +104,9 @@ void Bf3DeathCamera::begin(const DeathCameraStart &p_start, double p_now_s) {
 	killer_seen_ = false;
 	last_killer_ = fx::Vec3{};
 	turned_counted_ = false;
-	active_ = finite(p_start.corpse) && finite(p_start.eye) && std::isfinite(p_start.yaw_rad) && std::isfinite(p_now_s);
+	active_ = finite(p_start.corpse) && finite(p_start.eye) && std::isfinite(p_start.yaw_rad) &&
+			std::isfinite(p_now_s) && std::isfinite(p_start.vfov_deg) && p_start.vfov_deg >= 0.0f &&
+			p_start.vfov_deg <= kMaxVfovDeg;
 	if (!active_) {
 		++stats_.bad_inputs;
 	}
@@ -143,6 +149,9 @@ DeathCameraView Bf3DeathCamera::step(double p_now_s, const fx::Vec3 *p_killer, c
 	const float s = ease(t, p.orbit_seconds);
 	Vec3 pos = lerp(start_.eye, orbit, s);
 	Vec3 target = lerp(add(start_.eye, mul(fwd, kAheadM)), pivot, s);
+	float vfov = start_.vfov_deg;
+	float zoom_vfov = start_.vfov_deg;
+	float zoom = 0.0f;
 
 	if (want_killer && killer_seen_ && t >= double(p.orbit_seconds)) {
 		v.on_killer = true;
@@ -158,6 +167,7 @@ DeathCameraView Bf3DeathCamera::step(double p_now_s, const fx::Vec3 *p_killer, c
 		const Vec3 over = add(sub(start_.corpse, mul(dir, p.back_m)), mul(up, p.up_m));
 		pos = lerp(orbit, over, k);
 		target = lerp(pivot, killer, k);
+		zoom = k;
 	}
 
 	if (p_world != nullptr) {
@@ -179,7 +189,17 @@ DeathCameraView Bf3DeathCamera::step(double p_now_s, const fx::Vec3 *p_killer, c
 		active_ = false;
 		return DeathCameraView{};
 	}
+	if (v.on_killer && start_.vfov_deg > 0.0f) {
+		const Vec3 killer = add(last_killer_, mul(up, p.killer_height_m));
+		const float dist = length(sub(killer, pos));
+		if (dist > 1e-3f && std::isfinite(dist)) {
+			zoom_vfov = std::min(start_.vfov_deg,
+					std::max(kMinZoomVfovDeg, 2.0f * std::atan(0.5f * p.killer_view_height_m / dist) * kRadToDeg));
+		}
+		vfov = start_.vfov_deg + (zoom_vfov - start_.vfov_deg) * zoom;
+	}
 	v.active = true;
+	v.vfov_deg = vfov;
 	v.finished = t >= double(p.seconds);
 	v.camera = look_from(pos, forward);
 	return v;

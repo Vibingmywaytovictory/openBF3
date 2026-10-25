@@ -23,7 +23,8 @@ struct DeathCameraParams {
 	float eye_height_m = 0.4f;
 	float camera_radius_m = 0.2f;
 
-	float killer_height_m = 1.2f;
+	float killer_height_m = 0.95f;
+	float killer_view_height_m = 2.95f;
 };
 static_assert(std::is_trivially_copyable_v<DeathCameraParams>);
 
@@ -35,6 +36,7 @@ struct DeathCameraStart {
 	fx::Vec3 eye{};
 	uint8_t killer_slot = 0xFF;
 	bool killer_camera = true;
+	float vfov_deg = 0.0f;
 };
 static_assert(std::is_trivially_copyable_v<DeathCameraStart>);
 
@@ -42,6 +44,7 @@ struct DeathCameraView {
 	bool active = false;
 	bool on_killer = false;
 	bool finished = false;
+	float vfov_deg = 0.0f;
 	fx::Transform camera;
 };
 static_assert(std::is_trivially_copyable_v<DeathCameraView>);

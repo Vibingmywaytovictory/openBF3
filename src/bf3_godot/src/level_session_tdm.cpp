@@ -144,7 +144,8 @@ Transform3D camera_transform(const fx::Transform &p_t) {
 	return Transform3D(b, Vector3(p_t.trans.x, p_t.trans.y, p_t.trans.z));
 }
 
-void keep_view(TdmState &r_m, const Transform3D &p_t) {
+void keep_view(TdmState &r_m, const Transform3D &p_t, float p_vfov_deg) {
+	r_m.view_vfov_deg = p_vfov_deg;
 	for (int c = 0; c < 3; ++c) {
 		const Vector3 col = p_t.basis.get_column(c);
 		r_m.view_basis[c * 3 + 0] = col.x;
@@ -699,6 +700,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			st.eye = fx::Vec3{ eye.x, eye.y, eye.z };
 			st.killer_slot = m.own_killer == m.own_slot ? uint8_t(0xFF) : m.own_killer;
 			st.killer_camera = !f.match_valid || f.match.killer_camera;
+			st.vfov_deg = p_camera != nullptr ? float(p_camera->get_fov()) : 0.0f;
 			m.death_camera->begin(st, now_s);
 		}
 		if (m.death_camera->active()) {
@@ -711,7 +713,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			const DeathCameraView v = m.death_camera->step(now_s, seen ? &killer : nullptr, r_game.world.get());
 			if (v.active && p_camera != nullptr) {
 				const Transform3D t = camera_transform(v.camera);
-				keep_view(m, t);
+				keep_view(m, t, v.vfov_deg);
 			}
 		}
 	}
@@ -720,6 +722,9 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 	if (p_camera != nullptr && !p_free_camera) {
 		if (dead && m.view_valid) {
 			p_camera->set_global_transform(kept_view(m));
+			if (m.view_vfov_deg > 0.0f) {
+				p_camera->set_fov(m.view_vfov_deg);
+			}
 		} else if (!m.spawned_this_round && !f.valid && !m.join_view_placed) {
 
 			const std::shared_ptr<const host::SharedLevel> shared = shared_level();

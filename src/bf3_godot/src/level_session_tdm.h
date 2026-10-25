@@ -71,6 +71,7 @@ struct TdmState {
 	bool view_valid = false;
 	float view_basis[9] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
 	float view_origin[3] = { 0, 0, 0 };
+	float view_vfov_deg = 0.0f;
 	bool join_view_placed = false;
 	uint64_t ui_build_failures = 0;
 	float corpse_seconds = 0.0f;
