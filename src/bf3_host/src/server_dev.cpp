@@ -69,6 +69,12 @@ void DevCommands::handle_debug(size_t p_slot, const net::DebugRequest &p_request
 			spawner_.seed(uint64_t(p_request.index) * 0x9E3779B97F4A7C15ull + 1u);
 			report(uint32_t(p_slot), p_request.id, true, "seed set");
 			return;
+		case net::DebugKind::Revive: {
+			TdmRules *rules = match_.rules();
+			const bool ok = rules != nullptr && p_slot < net::kMaxSlots && rules->request_revive(uint8_t(p_slot));
+			report(uint32_t(p_slot), p_request.id, ok, ok ? "revive requested" : "revive: no revivable body");
+			return;
+		}
 		case net::DebugKind::SpawnTarget:
 		case net::DebugKind::TargetInfo:
 		case net::DebugKind::Teleport:

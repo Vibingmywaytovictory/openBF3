@@ -1499,6 +1499,56 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 
+	TEST_CASE("revive: a Revive debug request brings the dead peer back at its corpse as its own reviver; refused "
+			  "while alive") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		std::unique_ptr<Match> m = start_match(*level, true, 43u);
+		for (int i = 0; i < 3; ++i) {
+			m->bot();
+		}
+		tdm::ScriptedPeer &p = m->join("lazarus");
+		p.ready();
+		REQUIRE(wait_in_round(*m));
+		p.spawn_request(1);
+		REQUIRE(m->until([&] { return is_alive(m->state(p.slot())); }, 240));
+		m->ticks(30);
+		m->server.on_receive(p.peer(), net::kChannelReliable, net::encode_suicide_request());
+		m->ticks(3);
+		REQUIRE_FALSE(is_alive(m->state(p.slot())));
+		const sim::SoldierState dead = *m->state(p.slot());
+		REQUIRE(m->row(p.slot()) != nullptr);
+		const int32_t score = m->row(p.slot())->score;
+		const host::RulesStats s0 = m->rules().stats();
+		net::DebugRequest q;
+		q.kind = net::DebugKind::Revive;
+		q.id = m->next_debug++;
+		p.debug(q);
+		m->ticks(3);
+		REQUIRE(is_alive(m->state(p.slot())));
+		const sim::SoldierState back = *m->state(p.slot());
+		const net::ReviveEvent *re = last_revive(p, p.slot());
+		REQUIRE(re != nullptr);
+		std::printf("revive request: life %u -> %u, %.2f hp, %.3f m from the corpse, revives +%" PRIu64
+					", reviver %u\n",
+				unsigned(dead.life), unsigned(back.life), back.health, distance(back.position, dead.position),
+				m->rules().stats().revives - s0.revives, unsigned(re->reviver));
+		CHECK(back.life == dead.life + 1u);
+		CHECK(distance(back.position, dead.position) < 0.25f);
+		CHECK(m->rules().stats().revives == s0.revives + 1u);
+		CHECK(int(re->reviver) == p.slot());
+		CHECK(m->row(p.slot())->score == score);
+		CHECK(m->rules().downed().empty());
+		q.id = m->next_debug++;
+		p.debug(q);
+		m->ticks(3);
+		CHECK(m->state(p.slot())->life == back.life);
+		CHECK(m->rules().stats().revives == s0.revives + 1u);
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+
 	TEST_CASE("install unchanged") {
 		tdm::TdmLevel *level = tdm::load_tdm_level_once();
 		if (level == nullptr) {

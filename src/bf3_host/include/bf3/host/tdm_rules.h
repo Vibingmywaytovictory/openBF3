@@ -145,6 +145,7 @@ public:
 	void on_spawned(uint8_t p_slot, uint32_t p_tick);
 	SpawnRefusal request_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_spawn_choice, uint32_t p_tick);
 	bool request_suicide(uint8_t p_slot);
+	bool request_revive(uint8_t p_slot);
 	bool take_suicide(uint8_t p_slot);
 
 	core::Status step(uint32_t p_tick, const ServerView &p_view, const Gunplay &p_gunplay, std::span<sim::SoldierState> r_states,

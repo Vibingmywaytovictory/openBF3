@@ -7,6 +7,7 @@
 #include "bf3/sim/soldier_state.h"
 #include "bf3/sim/spawn.h"
 #include "server_combat.h"
+#include "server_match.h"
 #include "server_outbox.h"
 #include "server_slots.h"
 #include "server_soldiers.h"
@@ -24,9 +25,10 @@ namespace bf3::host {
 
 class DevCommands {
 public:
-	DevCommands(SlotTable &r_slots, Soldiers &r_soldiers, Spawner &r_spawner, Combat &r_combat, const sim::SoldierMotor &p_motor, Outbox &r_outbox,
-			std::function<void(size_t)> p_reset_slot) :
-			slots_(r_slots), soldiers_(r_soldiers), spawner_(r_spawner), combat_(r_combat), motor_(p_motor), outbox_(r_outbox), reset_slot_(std::move(p_reset_slot)) {}
+	DevCommands(SlotTable &r_slots, Soldiers &r_soldiers, Spawner &r_spawner, Combat &r_combat, MatchControl &r_match,
+			const sim::SoldierMotor &p_motor, Outbox &r_outbox, std::function<void(size_t)> p_reset_slot) :
+			slots_(r_slots), soldiers_(r_soldiers), spawner_(r_spawner), combat_(r_combat), match_(r_match),
+			motor_(p_motor), outbox_(r_outbox), reset_slot_(std::move(p_reset_slot)) {}
 
 	void configure(const GameServerConfig &p_config, const sim::CollisionWorld &p_world, size_t p_slots);
 	void reset(size_t p_slot) { per_slot_[p_slot] = PerSlot(); }
@@ -71,6 +73,7 @@ private:
 	Soldiers &soldiers_;
 	Spawner &spawner_;
 	Combat &combat_;
+	MatchControl &match_;
 	const sim::SoldierMotor &motor_;
 	Outbox &outbox_;
 	std::function<void(size_t)> reset_slot_;

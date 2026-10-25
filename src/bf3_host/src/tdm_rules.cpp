@@ -16,6 +16,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <utility>
 
 namespace bf3::host {
 
@@ -305,6 +306,7 @@ struct TdmRules::Impl {
 	bool faulted = false;
 	std::vector<Slot> slots;
 	std::vector<DownedSoldier> downed;
+	std::vector<uint8_t> revive_requests;
 	std::vector<sim::FriendlyDeath> death_ring;
 	std::vector<sim::SoldierState> last_states;
 	net::MatchState state;
@@ -391,6 +393,31 @@ struct TdmRules::Impl {
 			}
 		}
 		return false;
+	}
+
+	bool revivable(uint8_t p_slot, uint8_t p_team, uint32_t p_tick) const {
+		bool out = false;
+		for (const DownedSoldier &d : downed) {
+			out |= d.slot == p_slot && d.team == p_team && d.team == team_of(p_slot) && d.until_tick >= p_tick;
+		}
+		return out;
+	}
+
+	void revive_order(uint8_t p_slot, uint8_t p_reviver, std::vector<RulesOrder> &r_orders) {
+		Slot &target = slots[p_slot];
+		if (target.bot || target.deploy) {
+			target.kit = target.row_kit;
+		}
+		RulesOrder o;
+		o.kind = RulesOrder::Kind::Revive;
+		o.slot = p_slot;
+		o.position = target.corpse;
+		o.yaw = target.corpse_yaw;
+		o.health = post_revive_health;
+		o.reviver = p_reviver;
+		r_orders.push_back(o);
+		remove_downed(p_slot);
+		target.corpse_valid = false;
 	}
 
 	void remove_downed(uint8_t p_slot) {
@@ -630,7 +657,7 @@ void TdmRules::revive(const net::ReviveEvent &p_event) {
 	Impl::Slot &r = m.slots[p_event.reviver];
 	Impl::Slot &d = m.slots[p_event.revived];
 	++m.stats.revives;
-	if (r.connected) {
+	if (r.connected && p_event.reviver != p_event.revived) {
 		r.score += m.tuning->score_revive;
 	}
 	if (d.deaths > 0) {
@@ -722,6 +749,18 @@ bool TdmRules::request_suicide(uint8_t p_slot) {
 		return false;
 	}
 	s->suicide = true;
+	return true;
+}
+
+bool TdmRules::request_revive(uint8_t p_slot) {
+	Impl &m = *impl_;
+	if (p_slot >= m.slots.size() || !m.slots[p_slot].connected || m.slots[p_slot].alive ||
+			!m.slots[p_slot].corpse_valid || !m.revivable(p_slot, m.team_of(p_slot), m.hint_tick()) || m.faulted) {
+		return false;
+	}
+	if (std::find(m.revive_requests.begin(), m.revive_requests.end(), p_slot) == m.revive_requests.end()) {
+		m.revive_requests.push_back(p_slot);
+	}
 	return true;
 }
 
@@ -919,11 +958,7 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 				if (p_view.world().ray(e.origin, delta, sim::query_mask::kProjectile)) {
 					continue;
 				}
-				bool revivable = false;
-				for (const DownedSoldier &d : m.downed) {
-					revivable |= d.slot == i && d.team == team && d.team == m.team_of(i) && d.until_tick >= p_tick;
-				}
-				if (!revivable) {
+				if (!m.revivable(uint8_t(i), team, p_tick)) {
 					refused = true;
 					continue;
 				}
@@ -936,21 +971,13 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 				++(refused ? m.stats.defib_refused : m.stats.defib_misses);
 				continue;
 			}
-			Impl::Slot &target = m.slots[size_t(best)];
-
-			if (target.bot || target.deploy) {
-				target.kit = target.row_kit;
-			}
-			RulesOrder o;
-			o.kind = RulesOrder::Kind::Revive;
-			o.slot = uint8_t(best);
-			o.position = target.corpse;
-			o.yaw = target.corpse_yaw;
-			o.health = m.post_revive_health;
-			o.reviver = uint8_t(e.player_slot);
-			r_orders.push_back(o);
-			m.remove_downed(uint8_t(best));
-			m.slots[size_t(best)].corpse_valid = false;
+			m.revive_order(uint8_t(best), uint8_t(e.player_slot), r_orders);
+		}
+	}
+	for (const uint8_t slot : std::exchange(m.revive_requests, {})) {
+		if (slot < n && m.slots[slot].connected && !state_alive(r_states[slot]) && m.slots[slot].corpse_valid &&
+				m.revivable(slot, m.team_of(slot), p_tick)) {
+			m.revive_order(slot, slot, r_orders);
 		}
 	}
 

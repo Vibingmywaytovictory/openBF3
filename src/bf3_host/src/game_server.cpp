@@ -80,7 +80,8 @@ struct GameServer::Impl {
 	Spawner spawner{ slots, soldiers, match, combat, motor, outbox };
 	CombatLog combat_log{ spawner, match, combat };
 	SnapshotWriter snapshots{ slots, soldiers, commands, combat, combat_log, motor, outbox };
-	DevCommands dev{ slots, soldiers, spawner, combat, motor, outbox, [this](size_t p_slot) { reset_slot(p_slot); } };
+	DevCommands dev{ slots, soldiers, spawner, combat, match, motor, outbox,
+		[this](size_t p_slot) { reset_slot(p_slot); } };
 	uint64_t bad_datagrams = 0;
 	uint64_t level_mismatch_kicks = 0;
 	uint64_t step_precondition_failures = 0;

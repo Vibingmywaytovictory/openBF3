@@ -806,7 +806,9 @@ void serialize(A &r_a, M &r_m) {
 	r_a.bits(r_m.ticks, 32);
 	r_a.bits(r_m.slot, 8);
 	r_a.bits(r_m.pose, 8);
-	r_a.check("unknown kind", [&] { return uint8_t(r_m.kind) >= uint8_t(DebugKind::Teleport) && uint8_t(r_m.kind) <= uint8_t(DebugKind::TargetInfo); });
+	r_a.check("unknown kind", [&] {
+		return uint8_t(r_m.kind) >= uint8_t(DebugKind::Teleport) && uint8_t(r_m.kind) <= uint8_t(DebugKind::Revive);
+	});
 	r_a.check("slot or pose out of range", [&] { return r_m.slot < kMaxSlots && valid_pose(uint8_t(r_m.pose)); });
 	r_a.check("position out of range", [&] {
 		return finite(r_m.position) && std::fabs(r_m.position[0]) <= kMaxDebugCoordinate && std::fabs(r_m.position[1]) <= kMaxDebugCoordinate &&

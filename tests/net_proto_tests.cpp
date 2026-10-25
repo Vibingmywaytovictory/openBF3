@@ -1134,7 +1134,8 @@ TEST_SUITE("net-proto") {
 		};
 		CHECK(net::decode_debug(debug(1, 10.0f, 60)));
 		CHECK_FALSE(net::decode_debug(debug(0, 10.0f, 60)));
-		CHECK_FALSE(net::decode_debug(debug(8, 10.0f, 60)));
+		CHECK(net::decode_debug(debug(8, 10.0f, 60)));
+		CHECK_FALSE(net::decode_debug(debug(9, 10.0f, 60)));
 		CHECK_FALSE(net::decode_debug(debug(1, std::numeric_limits<float>::infinity(), 60)));
 		CHECK_FALSE(net::decode_debug(debug(1, 2.0e6f, 60)));
 		CHECK_FALSE(net::decode_debug(debug(5, 0.0f, net::kMaxTraceTicks + 1)));
@@ -2101,7 +2102,8 @@ TEST_SUITE("net-proto") {
 		}
 		CHECK_FALSE(net::decode_kit_select(std::vector<uint8_t>{ uint8_t(net::MessageType::KitSelect), 1 }));
 		CHECK_FALSE(net::decode_kit_select(std::vector<uint8_t>{ uint8_t(net::MessageType::KitSelect), 1, 1, 0 }));
-		for (const net::DebugKind kind : { net::DebugKind::SpawnTarget, net::DebugKind::TargetInfo }) {
+		for (const net::DebugKind kind :
+				{ net::DebugKind::SpawnTarget, net::DebugKind::TargetInfo, net::DebugKind::Revive }) {
 			for (const sim::Pose pose : { sim::Pose::Stand, sim::Pose::Crouch, sim::Pose::Prone }) {
 				net::DebugRequest r;
 				r.kind = kind;
@@ -2124,7 +2126,7 @@ TEST_SUITE("net-proto") {
 		bad.pose = sim::Pose(3);
 		CHECK_FALSE(net::decode_debug(net::encode_debug(bad)));
 		bad.pose = sim::Pose::Stand;
-		bad.kind = net::DebugKind(8);
+		bad.kind = net::DebugKind(9);
 		CHECK_FALSE(net::decode_debug(net::encode_debug(bad)));
 	}
 

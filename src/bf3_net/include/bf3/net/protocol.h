@@ -148,6 +148,8 @@ enum class DebugKind : uint8_t {
 	SpawnTarget = 6,
 
 	TargetInfo = 7,
+
+	Revive = 8,
 };
 inline constexpr uint32_t kMaxTraceTicks = 1200;
 
