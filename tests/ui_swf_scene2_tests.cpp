@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <string>
 #include <vector>
 
@@ -238,5 +239,89 @@ TEST_SUITE("ui-scene2-unit") {
 		CHECK(mask.width() == 0.0f);
 		CHECK_FALSE(s.draw("content.fill", SwfDrawOp::begin_fill(SwfColor{})).ok());
 		CHECK(s.draw("", SwfDrawOp::begin_fill(SwfColor{})).ok());
+	}
+
+	TEST_CASE("swf scene: swapDepths swaps two siblings or moves to an empty depth, and a swapped timeline clip leaves its timeline") {
+		const SwfLibrary lib = two_boxes_library();
+		SwfScene s = open_scene(lib, "boxes");
+		As2Clip root(&s, "");
+		const As2Clip a = root.attach_movie("Box", "a", 1);
+		const As2Clip b = root.attach_movie("Box", "b", 2);
+		REQUIRE(a.exists());
+		REQUIRE(b.exists());
+		const SwfNodeId ia = a.node()->id;
+		const SwfNodeId ib = b.node()->id;
+		s.take_changes();
+		const auto order_of = [&](SwfNodeId p_id) {
+			const std::vector<SwfNodeId> order = s.draw_order();
+			return std::find(order.begin(), order.end(), p_id) - order.begin();
+		};
+		CHECK(order_of(ia) < order_of(ib));
+		a.swap_depths(b);
+		CHECK(a.depth() == 2);
+		CHECK(b.depth() == 1);
+		CHECK(order_of(ib) < order_of(ia));
+		CHECK((change_of(s.take_changes(), 0) & swf_change::kChildren) != 0);
+		a.swap_depths(9);
+		CHECK(a.depth() == 9);
+		CHECK(b.depth() == 1);
+		CHECK(order_of(ib) < order_of(ia));
+		b.swap_depths(9);
+		CHECK(b.depth() == 9);
+		CHECK(a.depth() == 1);
+
+		const SwfNodeId content = need(s, "content").id;
+		REQUIRE(s.swap_depths("content", "other").ok());
+		CHECK(need(s, "content").depth == 3);
+		CHECK(need(s, "other").depth == 1);
+		CHECK(need(s, "content").dynamic);
+		CHECK(need(s, "other").dynamic);
+		REQUIRE(s.advance(3).ok());
+		CHECK(need(s, "content").id == content);
+		CHECK_FALSE(s.swap_depths("content", "content.fill").ok());
+		CHECK_FALSE(s.swap_depths("", 4).ok());
+		CHECK_FALSE(s.swap_depths("content", kSwfAs2MaxDepth + 1).ok());
+	}
+
+	TEST_CASE("as2 clip: _rotation keeps the scales, and Color.setTransform changes only the fields it is given") {
+		const SwfLibrary lib = two_boxes_library();
+		SwfScene s = open_scene(lib, "boxes");
+		const As2Clip c(&s, "content");
+		c.set_xscale(200.0f);
+		c.set_rotation(8.0f);
+		CHECK(c.rotation() == doctest::Approx(8.0f));
+		CHECK(c.xscale() == doctest::Approx(200.0f));
+		CHECK(c.yscale() == doctest::Approx(100.0f));
+		const SwfMatrix &m = need(s, "content").matrix;
+		CHECK(m.a == doctest::Approx(2.0 * std::cos(8.0 * std::numbers::pi / 180.0)));
+		CHECK(m.b == doctest::Approx(2.0 * std::sin(8.0 * std::numbers::pi / 180.0)));
+		CHECK(m.c == doctest::Approx(-std::sin(8.0 * std::numbers::pi / 180.0)));
+		CHECK(m.tx == 100.0f);
+		c.set_rotation(-5.0f);
+		CHECK(c.rotation() == doctest::Approx(-5.0f));
+		c.set_rotation(355.0f);
+		CHECK(c.rotation() == doctest::Approx(-5.0f));
+
+		As2ColorTransformPatch dim;
+		dim.aa = 100.0;
+		dim.ra = 30.0;
+		dim.ga = 30.0;
+		dim.ba = 30.0;
+		dim.ab = 0.0;
+		dim.rb = 7.0;
+		dim.gb = 11.0;
+		dim.bb = 11.0;
+		c.set_color_transform(dim);
+		const SwfColorXform &x = need(s, "content").color;
+		CHECK(x.mul == std::array<float, 4>{ 0.3f, 0.3f, 0.3f, 1.0f });
+		CHECK(x.add == std::array<float, 4>{ 7.0f, 11.0f, 11.0f, 0.0f });
+		As2ColorTransformPatch alpha_only;
+		alpha_only.aa = 50.0;
+		c.set_color_transform(alpha_only);
+		const As2ColorTransform t = c.color_transform();
+		CHECK(t.ra == doctest::Approx(30.0));
+		CHECK(t.gb == doctest::Approx(11.0));
+		CHECK(t.aa == doctest::Approx(50.0));
+		CHECK(c.alpha() == doctest::Approx(50.0f));
 	}
 }

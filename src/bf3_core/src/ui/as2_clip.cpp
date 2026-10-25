@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <numbers>
 
 namespace bf3::core::ui {
 
@@ -308,6 +309,30 @@ void As2Clip::set_height(float p_height) const {
 	note(scene_->set_matrix(path_, m));
 }
 
+float As2Clip::rotation() const {
+	const SwfSceneNode *n = node();
+	if (n == nullptr) {
+		return std::numeric_limits<float>::quiet_NaN();
+	}
+	return float(std::atan2(double(n->matrix.b), double(n->matrix.a)) * 180.0 / std::numbers::pi);
+}
+
+void As2Clip::set_rotation(float p_degrees) const {
+	const SwfSceneNode *n = mut();
+	if (n == nullptr || !std::isfinite(p_degrees)) {
+		return;
+	}
+	SwfMatrix m = n->matrix;
+	const double xs = std::hypot(double(m.a), double(m.b));
+	const double ys = std::hypot(double(m.c), double(m.d)) * (double(m.a) * double(m.d) - double(m.b) * double(m.c) < 0.0 ? -1.0 : 1.0);
+	const double r = std::remainder(double(p_degrees), 360.0) * std::numbers::pi / 180.0;
+	m.a = float(xs * std::cos(r));
+	m.b = float(xs * std::sin(r));
+	m.c = float(-ys * std::sin(r));
+	m.d = float(ys * std::cos(r));
+	note(scene_->set_matrix(path_, m));
+}
+
 float As2Clip::alpha() const {
 	const SwfSceneNode *n = node();
 	return n != nullptr ? n->color.mul[3] * 100.0f : std::numeric_limits<float>::quiet_NaN();
@@ -330,6 +355,35 @@ void As2Clip::set_rgb(uint32_t p_rgb) const {
 	c.add[0] = float((p_rgb >> 16) & 0xFFu);
 	c.add[1] = float((p_rgb >> 8) & 0xFFu);
 	c.add[2] = float(p_rgb & 0xFFu);
+	note(scene_->set_color(path_, c));
+}
+
+As2ColorTransform As2Clip::color_transform() const {
+	const SwfSceneNode *n = node();
+	if (n == nullptr) {
+		return {};
+	}
+	const SwfColorXform &c = n->color;
+	return { double(c.mul[0]) * 100.0, double(c.add[0]), double(c.mul[1]) * 100.0, double(c.add[1]), double(c.mul[2]) * 100.0, double(c.add[2]),
+		double(c.mul[3]) * 100.0, double(c.add[3]) };
+}
+
+void As2Clip::set_color_transform(const As2ColorTransformPatch &p_patch) const {
+	const SwfSceneNode *n = mut();
+	if (n == nullptr) {
+		return;
+	}
+	SwfColorXform c = n->color;
+	const std::optional<double> mul[4] = { p_patch.ra, p_patch.ga, p_patch.ba, p_patch.aa };
+	const std::optional<double> add[4] = { p_patch.rb, p_patch.gb, p_patch.bb, p_patch.ab };
+	for (int i = 0; i < 4; ++i) {
+		if (mul[i] && std::isfinite(*mul[i])) {
+			c.mul[size_t(i)] = float(*mul[i] / 100.0);
+		}
+		if (add[i] && std::isfinite(*add[i])) {
+			c.add[size_t(i)] = float(*add[i]);
+		}
+	}
 	note(scene_->set_color(path_, c));
 }
 
@@ -496,6 +550,25 @@ std::optional<SwfTextLayout> As2Clip::layout() const {
 		return std::nullopt;
 	}
 	return std::move(*layout);
+}
+
+int32_t As2Clip::depth() const {
+	const SwfSceneNode *n = node();
+	return n != nullptr ? n->as2_depth() : 0;
+}
+
+void As2Clip::swap_depths(const As2Clip &p_other) const {
+	if (mut() == nullptr || p_other.mut() == nullptr) {
+		return;
+	}
+	note(scene_->swap_depths(path_, p_other.path()));
+}
+
+void As2Clip::swap_depths(int32_t p_as2_depth) const {
+	if (mut() == nullptr) {
+		return;
+	}
+	note(scene_->swap_depths(path_, p_as2_depth));
 }
 
 int32_t As2Clip::next_highest_depth() const {

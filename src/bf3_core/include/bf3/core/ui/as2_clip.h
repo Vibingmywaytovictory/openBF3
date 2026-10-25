@@ -11,6 +11,28 @@
 
 namespace bf3::core::ui {
 
+struct As2ColorTransform {
+	double ra = 100.0;
+	double rb = 0.0;
+	double ga = 100.0;
+	double gb = 0.0;
+	double ba = 100.0;
+	double bb = 0.0;
+	double aa = 100.0;
+	double ab = 0.0;
+};
+
+struct As2ColorTransformPatch {
+	std::optional<double> ra;
+	std::optional<double> rb;
+	std::optional<double> ga;
+	std::optional<double> gb;
+	std::optional<double> ba;
+	std::optional<double> bb;
+	std::optional<double> aa;
+	std::optional<double> ab;
+};
+
 struct As2Stats {
 	uint32_t missing_paths = 0;
 	uint32_t missing_labels = 0;
@@ -46,9 +68,13 @@ public:
 	float height() const;
 	void set_width(float p_width) const;
 	void set_height(float p_height) const;
+	float rotation() const;
+	void set_rotation(float p_degrees) const;
 	float alpha() const;
 	void set_alpha(float p_percent) const;
 	void set_rgb(uint32_t p_rgb) const;
+	As2ColorTransform color_transform() const;
+	void set_color_transform(const As2ColorTransformPatch &p_patch) const;
 	bool visible() const;
 	void set_visible(bool p_visible) const;
 
@@ -71,7 +97,10 @@ public:
 	float text_width() const;
 	float text_height() const;
 
+	int32_t depth() const;
 	int32_t next_highest_depth() const;
+	void swap_depths(const As2Clip &p_other) const;
+	void swap_depths(int32_t p_as2_depth) const;
 	As2Clip attach_movie(std::string_view p_linkage, std::string_view p_name, int32_t p_depth) const;
 	As2Clip create_empty_movie_clip(std::string_view p_name, int32_t p_depth) const;
 	void remove_movie_clip() const;

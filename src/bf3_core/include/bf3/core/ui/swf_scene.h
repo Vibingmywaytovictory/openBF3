@@ -186,6 +186,8 @@ public:
 
 	Result<SwfNodeId> attach_movie(std::string_view p_parent_path, std::string_view p_linkage, std::string_view p_name, int32_t p_as2_depth);
 	Status remove_movie(std::string_view p_path);
+	Status swap_depths(std::string_view p_path, std::string_view p_other_path);
+	Status swap_depths(std::string_view p_path, int32_t p_as2_depth);
 	Result<SwfNodeId> create_empty_movie_clip(std::string_view p_parent_path, std::string_view p_name, int32_t p_as2_depth);
 	void set_frame_script_handler(std::function<void(SwfNodeId, uint32_t)> p_handler);
 

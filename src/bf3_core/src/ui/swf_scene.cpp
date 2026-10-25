@@ -392,6 +392,33 @@ struct SwfScene::Impl {
 		stats.live_nodes--;
 	}
 
+	Status swap_with(SwfSceneNode &r_n, int32_t p_depth) {
+		SwfSceneNode *parent = get(r_n.parent);
+		if (parent == nullptr) {
+			return make_error("swf scene " + movie_name + ": the root has no depth to swap");
+		}
+		if (p_depth == r_n.depth) {
+			return Status::success();
+		}
+		SwfSceneNode *other = get(child_at(*parent, p_depth));
+		auto drop = [&](SwfNodeId p_id) { parent->children.erase(std::find(parent->children.begin(), parent->children.end(), p_id)); };
+		drop(r_n.id);
+		if (other != nullptr) {
+			drop(other->id);
+			other->depth = r_n.depth;
+			other->dynamic = true;
+		}
+		r_n.depth = p_depth;
+		r_n.dynamic = true;
+		insert_child(*parent, r_n.id);
+		repath(r_n);
+		if (other != nullptr) {
+			insert_child(*parent, other->id);
+			repath(*other);
+		}
+		return Status::success();
+	}
+
 	void clear_children(SwfSceneNode &r_n) {
 		while (!r_n.children.empty()) {
 			remove(r_n.children.back());
@@ -1054,6 +1081,34 @@ Status SwfScene::remove_movie(std::string_view p_path) {
 	}
 	impl_->remove((*n)->id);
 	return Status::success();
+}
+
+Status SwfScene::swap_depths(std::string_view p_path, std::string_view p_other_path) {
+	Impl &im = *impl_;
+	Result<SwfSceneNode *> n = im.at(p_path);
+	if (!n) {
+		return n.error();
+	}
+	Result<SwfSceneNode *> other = im.at(p_other_path);
+	if (!other) {
+		return other.error();
+	}
+	if ((*other)->parent != (*n)->parent || (*other)->id == 0) {
+		return make_error("swf scene " + im.movie_name + ": " + std::string(p_path) + " and " + std::string(p_other_path) + " are not siblings");
+	}
+	return im.swap_with(**n, (*other)->depth);
+}
+
+Status SwfScene::swap_depths(std::string_view p_path, int32_t p_as2_depth) {
+	Impl &im = *impl_;
+	Result<SwfSceneNode *> n = im.at(p_path);
+	if (!n) {
+		return n.error();
+	}
+	if (p_as2_depth < -kSwfAs2DepthOffset || p_as2_depth > kSwfAs2MaxDepth) {
+		return make_error("swf scene " + im.movie_name + ": depth " + std::to_string(p_as2_depth) + " outside the AS2 range");
+	}
+	return im.swap_with(**n, p_as2_depth + kSwfAs2DepthOffset);
 }
 
 Status SwfScene::set_visible(std::string_view p_path, bool p_visible) {
