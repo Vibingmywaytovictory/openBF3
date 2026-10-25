@@ -33,7 +33,7 @@ void feed_spawn(Frame &r_frame) {
 	}
 	if (in.kits != nullptr) {
 		for (uint8_t k = 0; k < kKitCount; ++k) {
-			const KitLoadout &l = in.kits->loadout(r_frame.my_team, k);
+			const Loadout &l = r_frame.loadouts[k];
 			for (size_t i = 0; i < kHudSpawnSlots.size(); ++i) {
 				const uint16_t def = l.defs[kHudSpawnSlots[i]];
 				const HudStaticRow *r = def != sw::kNoWeapon ? r_frame.statics.row(def) : nullptr;

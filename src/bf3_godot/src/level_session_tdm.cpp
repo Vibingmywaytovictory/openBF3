@@ -16,6 +16,7 @@
 #include "native_screens_check.h"
 #endif
 
+#include "bf3/core/ui/text_db.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/kits.h"
@@ -621,6 +622,12 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			in.score_headshot = level->tdm_tuning->score_headshot;
 		}
 		in.eor = level != nullptr ? level->eor.get() : nullptr;
+		in.loadouts = level != nullptr && level->gunplay != nullptr ? &level->gunplay->loadouts : nullptr;
+		in.loadout_choices = m.loadout_choices;
+		in.game_mode = level != nullptr ? std::string_view(level->mode) : std::string_view();
+		in.level_name_sid_hash = level != nullptr && !level->level_name_sid.empty()
+				? bf3::core::ui::text_hash(level->level_name_sid)
+				: 0u;
 		host::fill_hud_tdm(in, r_game.events, r_game.hud_static, m.tdm_state, r_game.hud_model);
 		if (!m.options.deploy_screen) {
 			r_game.hud_model.spawn_screen.visible = false;

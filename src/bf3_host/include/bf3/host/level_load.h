@@ -90,6 +90,7 @@ struct TdmTuning;
 struct SharedLevel {
 	std::string level;
 	std::string mode;
+	std::string level_name_sid;
 	std::optional<core::Sha256Digest> source_digest;
 	std::shared_ptr<const sim::StaticWorldShapes> static_world;
 	std::vector<sim::SpawnPoint> spawns;

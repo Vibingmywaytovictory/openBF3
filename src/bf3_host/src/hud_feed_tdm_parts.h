@@ -42,6 +42,7 @@ struct Frame {
 	bool card_up = false;
 	bool card_pending = false;
 	std::array<int8_t, core::ui::kHudMaxPlayers> teams{};
+	std::array<Loadout, kKitCount> loadouts{};
 };
 
 float seconds_until(sim::Tick p_now, sim::Tick p_until, uint64_t &r_bad);
@@ -51,5 +52,8 @@ void feed_kill_card(Frame &r_frame, std::span<const PresentEvent> p_drained);
 void feed_spawn(Frame &r_frame);
 void feed_round_end(Frame &r_frame);
 void feed_round_stats(Frame &r_frame, std::span<const PresentEvent> p_drained);
+Loadout frame_loadout(Frame &r_frame, uint8_t p_kit);
+void feed_loadout(Frame &r_frame);
+void feed_menu(Frame &r_frame);
 
 }

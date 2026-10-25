@@ -34,6 +34,7 @@ struct LoadoutKit {
 	std::array<std::vector<LoadoutItem>, kLoadoutSlots> slots;
 	std::array<uint32_t, kLoadoutSlots> defaults{};
 	std::vector<uint32_t> specializations;
+	uint32_t label_sid_hash = 0;
 
 	const LoadoutItem *find(size_t p_slot, uint32_t p_identifier) const;
 };

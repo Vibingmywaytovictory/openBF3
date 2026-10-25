@@ -6,6 +6,7 @@
 #include "bf3/core/ui/hud_icons.h"
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/core/ui/swf_layout.h"
+#include "bf3/host/loadout.h"
 #include "bf3/host/presentation_events.h"
 #include "bf3/host/presentation_weapon.h"
 #include "bf3/host/round_stats.h"
@@ -117,6 +118,11 @@ struct HudFeedInput {
 	int32_t score_kill = 0;
 	int32_t score_headshot = 0;
 	const core::gameplay::EorTimeline *eor = nullptr;
+	const LoadoutCatalog *loadouts = nullptr;
+	std::array<LoadoutChoice, kKitCount> loadout_choices{};
+	bool in_menu = false;
+	std::string_view game_mode;
+	uint32_t level_name_sid_hash = 0;
 };
 
 struct HudFeedState {
@@ -162,6 +168,11 @@ inline constexpr std::string_view kDefaultBasicDogtag = "ui/art/persistence/dogt
 inline constexpr std::string_view kDefaultAdvancedDogtag = "ui/art/persistence/dogtag/defaulttag_right";
 
 inline constexpr std::array<uint8_t, core::ui::kHudSpawnKitItems> kHudSpawnSlots{ 0, 1, 2, 6, 7 };
+inline constexpr size_t kHudGadget2Slot = 5;
+
+inline constexpr std::array<std::string_view, 5> kHudMenuSids{ "ID_M_IGMMP_RESUME", "ID_M_IGMMP_SCOREBOARD",
+	"ID_M_IGMMP_SUICIDE", "ID_M_IGMMP_OPTIONS", "ID_M_IGMMP_QUIT" };
+inline constexpr std::string_view kHudTdmModeSid = "ID_M_GAMEMODE_TEAMDEATHMATCH";
 
 struct HudTdmFeedState {
 	uint32_t kill_serial = 0;

@@ -8,6 +8,7 @@
 #include "bf3/host/hud_feed.h"
 #include "bf3/sim/sim_types.h"
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -36,6 +37,7 @@ struct TdmState {
 	std::unique_ptr<Bf3DeathCamera, void (*)(Bf3DeathCamera *)> death_camera{ nullptr, nullptr };
 
 	uint8_t spawn_kit = 0;
+	std::array<bf3::host::LoadoutChoice, bf3::host::kKitCount> loadout_choices{};
 	bool scoreboard_held = false;
 	bool spawned_this_round = false;
 	uint64_t spawn_requests_sent = 0;

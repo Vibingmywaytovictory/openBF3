@@ -79,11 +79,17 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 	}
 	f.now_s = std::isfinite(p_input.now_s) ? p_input.now_s : 0.0;
 
+	for (uint8_t k = 0; k < kKitCount; ++k) {
+		f.loadouts[k] = tdm_feed::frame_loadout(f, k);
+	}
+
 	tdm_feed::feed_scoreboard(f);
 	tdm_feed::feed_round_stats(f, p_drained);
 	tdm_feed::feed_kill_card(f, p_drained);
 	tdm_feed::feed_spawn(f);
+	tdm_feed::feed_loadout(f);
 	tdm_feed::feed_round_end(f);
+	tdm_feed::feed_menu(f);
 }
 
 }

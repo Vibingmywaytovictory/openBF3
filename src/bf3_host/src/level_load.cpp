@@ -234,6 +234,7 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 	auto shared = std::make_shared<SharedLevel>();
 	shared->level = level.info.id.empty() ? level.root_name : level.info.id;
 	shared->mode = level.mode;
+	shared->level_name_sid = level.info.name_sid;
 
 	auto clock = std::chrono::steady_clock::now();
 

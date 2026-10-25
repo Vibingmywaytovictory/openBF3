@@ -5,6 +5,7 @@
 
 #include "bf3/core/gameplay/eor_timeline.h"
 #include "bf3/core/gameplay/mode_def.h"
+#include "bf3/core/ui/text_db.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/loadout.h"
 #include "bf3/sim/collision_world.h"
@@ -1264,6 +1265,9 @@ TEST_SUITE("host-tdm-server") {
 		}
 		const host::GunplayLevel &gl = *level->shared->gunplay;
 		REQUIRE_FALSE(gl.loadouts.empty());
+		CHECK(level->shared->level_name_sid == "ID_M_LEVELNAME_MP_SUBWAY");
+		CHECK(gl.loadouts.kit(1, 0)->label_sid_hash == core::ui::text_hash("ID_M_ASSAULT"));
+		CHECK(gl.loadouts.kit(2, 3)->label_sid_hash == core::ui::text_hash("ID_M_RECON"));
 		size_t defaults = 0;
 		for (const auto &team : gl.kits.loadouts) {
 			for (const host::KitLoadout &l : team) {

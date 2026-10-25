@@ -716,6 +716,157 @@ TEST_CASE("the kit bar: the own team's loadouts in slots 0, 1, 2, 6, 7") {
 	CHECK(state.bad_inputs == 0);
 }
 
+TEST_CASE("the loadout screens: kit and customization from the catalog and the own choices; the menu, user, settings "
+		  "and level") {
+	const host::HudStatic st = make_static();
+	host::KitTable kits;
+	for (uint8_t team = 0; team < host::kKitTeams; ++team) {
+		for (uint8_t k = 0; k < host::kKitCount; ++k) {
+			host::KitLoadout &l = kits.loadouts[team][k];
+			l.kit = k;
+			l.team = uint8_t(team + 1);
+			l.defs.fill(sw::kNoWeapon);
+			l.defs[0] = 0;
+			l.defs[1] = 2;
+			l.defs[6] = 3;
+			l.defs[7] = 4;
+			l.hud_icon = int32_t(70 + 2 * k + team);
+		}
+		kits.loadouts[team][0].defs[host::kKitGadgetSlot] = 5;
+	}
+	host::LoadoutCatalog catalog;
+	host::LoadoutKit &assault = catalog.kits[0][0];
+	const auto item = [](uint32_t p_id, uint16_t p_def, std::vector<uint32_t> p_optics = {}) {
+		host::LoadoutItem i;
+		i.identifier = p_id;
+		i.unlock = "u_" + std::to_string(p_id);
+		i.def = p_def;
+		i.accessories[0] = std::move(p_optics);
+		return i;
+	};
+	assault.slots[0] = { item(1000, 0, { 201, 202 }), item(1001, 1, { 203 }) };
+	assault.slots[1] = { item(1002, 2) };
+	assault.slots[2] = { item(401, sw::kNoWeapon), item(402, sw::kNoWeapon) };
+	assault.slots[5] = { item(501, sw::kNoWeapon) };
+	assault.slots[6] = { item(1003, 3) };
+	assault.slots[7] = { item(1004, 4) };
+	assault.defaults = { 1000, 1002, 1005, 0, 0, 0, 1003, 1004 };
+	assault.specializations = { 301, 302 };
+	assault.label_sid_hash = ui::text_hash("ID_M_ASSAULT");
+	catalog.items = 8;
+	std::vector<net::PlayerRow> rows{ player(1, 1, "Own"), player(4, 2, "Other") };
+	host::HudFeedInput in;
+	in.tdm = true;
+	in.match_valid = true;
+	in.match.phase = net::MatchPhase::InRound;
+	in.players = rows;
+	in.own_slot = 1;
+	in.own_team = 1;
+	in.alive = false;
+	in.kits = &kits;
+	in.loadouts = &catalog;
+	in.game_mode = "TeamDeathMatch0";
+	in.level_name_sid_hash = 0x90111346u;
+	host::HudTdmFeedState state;
+	ui::HudModel m;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	const ui::HudCustomization &c = m.customization;
+	CHECK(m.spawn_screen.kit_items[0] == std::array<uint32_t, 5>{ 1000, 1002, 1005, 1003, 1004 });
+	CHECK(m.kit.selected_kit == 0);
+	CHECK(m.kit.number_of_kits == 4);
+	CHECK(m.kit.selected_kit_name == ui::text_hash("ID_M_ASSAULT"));
+	CHECK(c.customization_team == 1);
+	CHECK(c.kits_data[0].name_sid_hash == ui::text_hash("ID_M_ASSAULT"));
+	CHECK(c.kits_data[0].hud_icon == 70);
+	CHECK(c.kits_data[2].hud_icon == 74);
+	CHECK(c.kits_data[0].items[0].item_id == 1000);
+	CHECK(c.kits_data[0].items[2].item_id == 1005);
+	CHECK(c.kit_primary_weapon.item_id == 1000);
+	CHECK(c.kit_secondary_weapon.item_id == 1002);
+	CHECK(c.kit_gadget1.item_id == 1005);
+	CHECK(c.kit_gadget2.item_id == 0);
+	CHECK(c.kit_specialization.item_id == 0);
+	CHECK(c.weapon_accessory_main.item_id == 1000);
+	CHECK(c.kit_grid_data[0].count == 2);
+	CHECK(c.kit_grid_data[0].items[1].item_id == 1001);
+	CHECK(c.kit_grid_selected[0] == 0);
+	CHECK(c.kit_grid_data[2].count == 2);
+	CHECK(c.kit_grid_selected[2] == -1);
+	CHECK(c.kit_grid_data[4].count == 1);
+	CHECK(c.kit_grid_selected[4] == 0);
+	CHECK(c.accessory_grid[0].count == 2);
+	CHECK(c.accessory_grid[0].items[1].item_id == 202);
+	CHECK(c.accessory_selected[0] == -1);
+	CHECK(c.accessory_grid[1].count == 0);
+	CHECK(state.bad_inputs == 0);
+
+	host::LoadoutChoice pick;
+	pick.items[0] = 1001;
+	pick.items[2] = 402;
+	pick.items[5] = 501;
+	pick.accessories[0] = 203;
+	pick.specialization = 302;
+	in.loadout_choices[0] = pick;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(m.spawn_screen.kit_items[0] == std::array<uint32_t, 5>{ 1001, 1002, 1005, 1003, 1004 });
+	CHECK(c.kits_data[0].items[0].item_id == 1001);
+	CHECK(c.kits_data[0].items[2].item_id == 402);
+	CHECK(c.kit_primary_weapon.item_id == 1001);
+	CHECK(c.kit_gadget1.item_id == 402);
+	CHECK(c.kit_gadget2.item_id == 501);
+	CHECK(c.kit_specialization.item_id == 302);
+	CHECK(c.weapon_accessory_main.item_id == 1001);
+	CHECK(c.weapon_accessory1.item_id == 203);
+	CHECK(c.weapon_accessory2.item_id == 0);
+	CHECK(c.kit_grid_selected[0] == 1);
+	CHECK(c.kit_grid_selected[2] == 1);
+	CHECK(c.accessory_grid[0].count == 1);
+	CHECK(c.accessory_selected[0] == 0);
+	CHECK(state.bad_inputs == 0);
+	in.loadout_choices[0].items[0] = 999;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(state.bad_inputs == 1);
+	CHECK(c.kit_primary_weapon.item_id == 1000);
+	CHECK(m.spawn_screen.kit_items[0][0] == 1000);
+	in.loadout_choices[0] = pick;
+
+	const ui::HudMenuList &menu = m.ingame_menu.menu_entries;
+	REQUIRE(menu.count == host::kHudMenuSids.size());
+	for (size_t i = 0; i < menu.count; ++i) {
+		CHECK(menu.entries[i].label_sid_hash == ui::text_hash(host::kHudMenuSids[i]));
+		CHECK(menu.entries[i].action == ui::HudMenuAction(i));
+	}
+	CHECK(menu.entries[0].enabled);
+	CHECK(menu.entries[1].enabled);
+	CHECK_FALSE(menu.entries[2].enabled);
+	CHECK_FALSE(menu.entries[3].enabled);
+	CHECK(menu.entries[4].enabled);
+	in.alive = true;
+	in.in_menu = true;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(menu.entries[2].enabled);
+	CHECK(m.user.is_in_menu);
+	CHECK(m.user.is_ingame);
+	CHECK(std::string(m.user.user_name.data()) == "Own");
+	CHECK(std::string(m.settings.current_game_mode.data()) == "TeamDeathMatch0");
+	CHECK(m.settings.current_game_mode_name == ui::text_hash(host::kHudTdmModeSid));
+	CHECK(m.settings.is_pc);
+	CHECK(m.level.current_level == 0x90111346u);
+	in.match.phase = net::MatchPhase::RoundOver;
+	in.in_menu = false;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK_FALSE(menu.entries[2].enabled);
+	CHECK_FALSE(m.user.is_in_menu);
+	in.match_valid = false;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK_FALSE(m.user.is_ingame);
+	CHECK_FALSE(menu.entries[2].enabled);
+	CHECK(state.bad_inputs == 1);
+	row("unit.loadout_screens", state.bad_inputs == 1 && c.kit_primary_weapon.item_id == 1001,
+			"kit, customization grids and accessories from a 8-item catalog, a bad stored choice falls back to the "
+			"defaults, 5 menu entries");
+}
+
 TEST_CASE("hostile inputs are skipped or clamped and counted") {
 	const host::HudStatic st = make_static();
 	std::vector<net::PlayerRow> rows{ player(200, 1, "Spectator slot"), player(3, 9, "Bad team"), player(4, 1, "Bad kit") };
@@ -889,6 +1040,22 @@ TEST_CASE("every string resolves to its recorded English") {
 	bf3::core::Result<ui::TextDatabase> text = ui::open_text_database(ti->install);
 	REQUIRE_MESSAGE(text.ok(), (text.ok() ? std::string() : text.error().message));
 	size_t ok = 0;
+	constexpr gs::TdmTextEntry kFeedTexts[] = {
+		{ gs::TdmText::Count, host::kHudMenuSids[0], "RESUME" },
+		{ gs::TdmText::Count, host::kHudMenuSids[1], "SCOREBOARD" },
+		{ gs::TdmText::Count, host::kHudMenuSids[2], "SUICIDE" },
+		{ gs::TdmText::Count, host::kHudMenuSids[3], "OPTIONS" },
+		{ gs::TdmText::Count, host::kHudMenuSids[4], "QUIT" },
+		{ gs::TdmText::Count, host::kHudTdmModeSid, "TEAM DEATHMATCH" },
+		{ gs::TdmText::Count, "ID_M_LEVELNAME_MP_SUBWAY", "OPERATION M\xC3\x89TRO" },
+	};
+	for (const gs::TdmTextEntry &e : kFeedTexts) {
+		const std::optional<std::string_view> t = text->find_sid(e.sid);
+		const bool pass = t.has_value() && *t == e.english && text->resolves(e.sid);
+		row(std::string("text.") + std::string(e.sid), pass,
+				"'" + (t ? std::string(*t) : std::string("absent")) + "' (want '" + std::string(e.english) + "')");
+		CHECK_MESSAGE(pass, std::string(e.sid));
+	}
 	for (const gs::TdmTextEntry &e : gs::kTdmTexts) {
 		const std::optional<std::string_view> t = text->find_sid(e.sid);
 		const bool pass = t.has_value() && *t == e.english && text->resolves(e.sid);

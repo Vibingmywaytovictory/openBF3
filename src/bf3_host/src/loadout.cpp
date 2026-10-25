@@ -1,5 +1,6 @@
 #include "bf3/host/loadout.h"
 
+#include "bf3/core/ui/text_db.h"
 #include "bf3/core/util/text.h"
 
 #include <algorithm>
@@ -98,6 +99,7 @@ core::Result<LoadoutCatalog> make_loadout_catalog(const core::EbxResolver &p_db,
 				return core::make_error(where + ": the kit " + l.asset + " was not read");
 			}
 			LoadoutKit &lk = out.kits[t][k];
+			lk.label_sid_hash = kit->label_sid.empty() ? 0u : core::ui::text_hash(kit->label_sid);
 			for (size_t s = 0; s < kLoadoutSlots; ++s) {
 				const uint16_t def = l.defs[s];
 				if (def != sim::weapons::kNoWeapon && def < p_defs.size()) {
