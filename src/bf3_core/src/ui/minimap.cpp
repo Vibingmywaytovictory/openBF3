@@ -565,8 +565,10 @@ Result<L8Image> combat_area_min_field(std::span<const L8Image> p_masks) {
 	return out;
 }
 
-std::optional<MinimapWorldRect> combat_area_bounds(const L8Image &p_field, float p_threshold, const MinimapMapping &p_mapping) {
-	if (p_field.empty() || p_field.texels.size() != size_t(p_field.width) * p_field.height || !(p_mapping.size > 0.0f)) {
+std::optional<MinimapWorldRect> combat_area_bounds(
+		const L8Image &p_field, float p_threshold, const MinimapMapping &p_mapping) {
+	if (p_field.empty() || p_field.texels.size() != size_t(p_field.width) * p_field.height ||
+			!(p_mapping.size > 0.0f)) {
 		return std::nullopt;
 	}
 	uint32_t u0 = p_field.width, v0 = p_field.height, u1 = 0, v1 = 0;
@@ -585,12 +587,15 @@ std::optional<MinimapWorldRect> combat_area_bounds(const L8Image &p_field, float
 	if (!any) {
 		return std::nullopt;
 	}
-	const std::array<float, 2> a = minimap_uv_to_world(p_mapping, { float(u0) / float(p_field.width), float(v0) / float(p_field.height) });
-	const std::array<float, 2> b = minimap_uv_to_world(p_mapping, { float(u1) / float(p_field.width), float(v1) / float(p_field.height) });
+	const std::array<float, 2> a =
+			minimap_uv_to_world(p_mapping, { float(u0) / float(p_field.width), float(v0) / float(p_field.height) });
+	const std::array<float, 2> b =
+			minimap_uv_to_world(p_mapping, { float(u1) / float(p_field.width), float(v1) / float(p_field.height) });
 	return MinimapWorldRect{ std::min(a[0], b[0]), std::min(a[1], b[1]), std::max(a[0], b[0]), std::max(a[1], b[1]) };
 }
 
-MinimapView minimap_overview_view(const MinimapWorldRect &p_area, float p_margin, float p_x, float p_y, float p_width, float p_height) {
+MinimapView minimap_overview_view(
+		const MinimapWorldRect &p_area, float p_margin, float p_x, float p_y, float p_width, float p_height) {
 	MinimapView v;
 	v.center_x = p_x + p_width * 0.5f;
 	v.center_y = p_y + p_height * 0.5f;

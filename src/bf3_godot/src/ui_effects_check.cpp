@@ -52,7 +52,8 @@ struct Rgb {
 };
 
 Rgb pixel(const Ref<Image> &p_img, int32_t p_x, int32_t p_y) {
-	const Color c = p_img->get_pixel(std::clamp(p_x, 0, p_img->get_width() - 1), std::clamp(p_y, 0, p_img->get_height() - 1));
+	const Color c =
+			p_img->get_pixel(std::clamp(p_x, 0, p_img->get_width() - 1), std::clamp(p_y, 0, p_img->get_height() - 1));
 	return Rgb{ c.r, c.g, c.b };
 }
 
@@ -138,7 +139,8 @@ bf3::core::Result<ui::SwfMatrix> screen_overview_placement(std::string_view p_mo
 		return bf3::core::make_error("Bf3UiAssets is not loaded");
 	}
 	ui::WorkBudget budget(ui::kSwfLayoutBudgetUnits);
-	bf3::core::Result<ui::SwfLayoutNode> tree = ui::read_layout(*assets->movies(), p_movie, ui::SwfLayoutOptions{}, budget);
+	bf3::core::Result<ui::SwfLayoutNode> tree =
+			ui::read_layout(*assets->movies(), p_movie, ui::SwfLayoutOptions{}, budget);
 	if (!tree) {
 		return tree.error();
 	}
@@ -198,7 +200,8 @@ bool box_near(const ui::SwfRect &p_a, const ui::SwfRect &p_b) {
 }
 
 std::string box_text(const ui::SwfRect &p_r) {
-	return bf3::core::fmt("%.0f..%.0f x %.0f..%.0f", double(p_r.x_min), double(p_r.x_max), double(p_r.y_min), double(p_r.y_max));
+	return bf3::core::fmt(
+			"%.0f..%.0f x %.0f..%.0f", double(p_r.x_min), double(p_r.x_max), double(p_r.y_min), double(p_r.y_max));
 }
 
 }
@@ -241,8 +244,7 @@ struct Bf3UiEffectsCheck::State {
 	int overview_waits = 0;
 };
 
-Bf3UiEffectsCheck::Bf3UiEffectsCheck() :
-		state_(std::make_unique<State>()) {}
+Bf3UiEffectsCheck::Bf3UiEffectsCheck() : state_(std::make_unique<State>()) {}
 
 Bf3UiEffectsCheck::~Bf3UiEffectsCheck() {
 	if (state_ && state_->loader.joinable()) {
@@ -250,8 +252,7 @@ Bf3UiEffectsCheck::~Bf3UiEffectsCheck() {
 	}
 }
 
-void Bf3UiEffectsCheck::_bind_methods() {
-}
+void Bf3UiEffectsCheck::_bind_methods() {}
 
 void Bf3UiEffectsCheck::_ready() {
 	if (Engine::get_singleton()->is_editor_hint()) {
@@ -280,7 +281,8 @@ void Bf3UiEffectsCheck::finish() {
 	if (s.loader.joinable()) {
 		s.loader.join();
 	}
-	UtilityFunctions::print(to_godot(std::string("UI EFFECTS CHECK: ") + (s.failed || s.rows == 0 ? "FAIL" : "PASS") + " (" + std::to_string(s.rows) + " rows)"));
+	UtilityFunctions::print(to_godot(std::string("UI EFFECTS CHECK: ") + (s.failed || s.rows == 0 ? "FAIL" : "PASS") +
+			" (" + std::to_string(s.rows) + " rows)"));
 	const int code = s.failed || s.rows == 0 ? 1 : 0;
 	if (s.session != nullptr) {
 		s.session->finish(code);
@@ -296,7 +298,8 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 	}
 	s.clock += p_delta;
 	if (s.clock > kTimeoutSeconds) {
-		row("timeout", false, "phase " + std::to_string(s.phase) + " after " + std::to_string(int(kTimeoutSeconds)) + " s");
+		row("timeout", false,
+				"phase " + std::to_string(s.phase) + " after " + std::to_string(int(kTimeoutSeconds)) + " s");
 		finish();
 		return;
 	}
@@ -338,14 +341,19 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			}
 			if (s.post == nullptr) {
 				s.post = Bf3UiPostProcess::ensure(get_parent(), s.session->level_id());
-				std::shared_ptr<const bf3::core::Install> install = Bf3Localisation::current() != nullptr ? Bf3Localisation::current()->install() : nullptr;
+				std::shared_ptr<const bf3::core::Install> install =
+						Bf3Localisation::current() != nullptr ? Bf3Localisation::current()->install() : nullptr;
 				const std::string sb = "Win32/Levels/" + s.session->level_id() + "/" + s.session->level_id();
 				s.loader = std::thread([&s, install, sb] {
 					if (install == nullptr) {
 						s.load_error = "no install";
-					} else if (bf3::core::Result<std::unique_ptr<bf3::core::EbxLibrary>> lib = bf3::core::EbxLibrary::open(install, { sb }, 2); !lib) {
+					} else if (bf3::core::Result<std::unique_ptr<bf3::core::EbxLibrary>> lib =
+									   bf3::core::EbxLibrary::open(install, { sb }, 2);
+							!lib) {
 						s.load_error = lib.error().message;
-					} else if (bf3::core::Result<std::vector<ui::PostProcessAction>> a = ui::read_post_process_actions(**lib, kSpawnGraph); !a) {
+					} else if (bf3::core::Result<std::vector<ui::PostProcessAction>> a =
+									   ui::read_post_process_actions(**lib, kSpawnGraph);
+							!a) {
 						s.load_error = a.error().message;
 					} else {
 						s.actions = std::move(*a);
@@ -360,15 +368,21 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 				finish();
 				return;
 			}
-			if (!s.post->is_ready() || !s.loaded.load(std::memory_order_acquire) || s.clock - s.ready_at < kSettleSeconds) {
+			if (!s.post->is_ready() || !s.loaded.load(std::memory_order_acquire) ||
+					s.clock - s.ready_at < kSettleSeconds) {
 				return;
 			}
 			s.loader.join();
 			const ui::UiPostProcessData &d = *s.post->data();
-			row("post process data", s.load_error.empty() && !s.actions.empty() && d.enabled && d.time_scale > 0.0f && s.post->noise() != nullptr,
-					bf3::core::fmt("RShift %.3f Distort %.3f XPower %.2f TimeScale %.1f Highlight %.1f/%.1f noise %ux%u, %zu PostProcessEffect actions in %s %s",
-							double(d.r_shift), double(d.distort), double(d.x_power), double(d.time_scale), double(d.highlight), double(d.highlight_threshold),
-							s.post->noise() != nullptr ? s.post->noise()->width : 0u, s.post->noise() != nullptr ? s.post->noise()->height : 0u, s.actions.size(),
+			row("post process data",
+					s.load_error.empty() && !s.actions.empty() && d.enabled && d.time_scale > 0.0f &&
+							s.post->noise() != nullptr,
+					bf3::core::fmt("RShift %.3f Distort %.3f XPower %.2f TimeScale %.1f Highlight %.1f/%.1f noise "
+								   "%ux%u, %zu PostProcessEffect actions in %s %s",
+							double(d.r_shift), double(d.distort), double(d.x_power), double(d.time_scale),
+							double(d.highlight), double(d.highlight_threshold),
+							s.post->noise() != nullptr ? s.post->noise()->width : 0u,
+							s.post->noise() != nullptr ? s.post->noise()->height : 0u, s.actions.size(),
 							std::string(kSpawnGraph).c_str(), s.load_error.c_str()));
 			if (s.failed) {
 				finish();
@@ -391,9 +405,12 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			const float full = s.post->dim_visibility();
 			const float uniform = float(s.post->grade_material()->get_shader_parameter("visibility"));
 			const ui::UiDimmerRamp &r = *s.post->ramp();
-			row("dim ramp", near(half, 0.5, 1e-3) && drawn_half && near(full, 1.0, 1e-6) && near(uniform, 1.0, 1e-6) && r.in.length_ms == 250.0f,
-					bf3::core::fmt("visibility %.3f at 125 ms, %.3f at 251 ms (uniform %.3f), ramp %.0f ms over %s", double(half), double(full), double(uniform),
-							double(r.in.length_ms), r.visual_environment.c_str()));
+			row("dim ramp",
+					near(half, 0.5, 1e-3) && drawn_half && near(full, 1.0, 1e-6) && near(uniform, 1.0, 1e-6) &&
+							r.in.length_ms == 250.0f,
+					bf3::core::fmt("visibility %.3f at 125 ms, %.3f at 251 ms (uniform %.3f), ramp %.0f ms over %s",
+							double(half), double(full), double(uniform), double(r.in.length_ms),
+							r.visual_environment.c_str()));
 			s.phase = 2;
 			s.wait = kCaptureFrames;
 			return;
@@ -408,15 +425,17 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			const double want_gr = double(g.brightness[1]) / double(g.brightness[0]);
 			const std::optional<double> base_br = median_ratio(s.base, 2, 0);
 			row("dim grade", br && gr && near(*br, want_br, want_br * 0.12) && near(*gr, want_gr, want_gr * 0.12),
-					bf3::core::fmt("median B/R %.3f (grade %.3f, before %.3f), G/R %.3f (grade %.3f)", br.value_or(-1.0), want_br, base_br.value_or(-1.0),
-							gr.value_or(-1.0), want_gr));
+					bf3::core::fmt("median B/R %.3f (grade %.3f, before %.3f), G/R %.3f (grade %.3f)",
+							br.value_or(-1.0), want_br, base_br.value_or(-1.0), gr.value_or(-1.0), want_gr));
 			s.post->dim_out();
 			s.post->step(0.125);
 			const float half = s.post->dim_visibility();
 			s.post->step(0.126);
-			row("dim out", near(half, 0.5, 1e-3) && s.post->dim_visibility() == 0.0f && !s.post->grade_drawn() && !s.post->dim_enabled() &&
-							s.post->stats().dim_ins == 1 && s.post->stats().dim_outs == 1,
-					bf3::core::fmt("visibility %.3f at 125 ms, %.3f at 251 ms, grade drawn %d", double(half), double(s.post->dim_visibility()), int(s.post->grade_drawn())));
+			row("dim out",
+					near(half, 0.5, 1e-3) && s.post->dim_visibility() == 0.0f && !s.post->grade_drawn() &&
+							!s.post->dim_enabled() && s.post->stats().dim_ins == 1 && s.post->stats().dim_outs == 1,
+					bf3::core::fmt("visibility %.3f at 125 ms, %.3f at 251 ms, grade drawn %d", double(half),
+							double(s.post->dim_visibility()), int(s.post->grade_drawn())));
 			s.phase = 3;
 			s.wait = kCaptureFrames;
 			return;
@@ -433,12 +452,18 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			const ui::UiPostProcessData &d = *s.post->data();
 			const Ref<ShaderMaterial> m = s.post->glitch_material();
 			const auto param = [&](const char *p_name) { return double(float(m->get_shader_parameter(p_name))); };
-			row("glitch trigger", near(s.post->glitch_power(), power, 1e-6) && s.post->glitch_drawn() && near(param("power"), power, 1e-6) &&
-							near(param("r_shift"), d.r_shift, 1e-7) && near(param("distort"), d.distort, 1e-7) && near(param("x_power"), d.x_power, 1e-7) &&
-							near(param("y_power"), d.y_power, 1e-7) && near(param("time_scale"), d.time_scale, 1e-7) && near(param("highlight"), d.highlight, 1e-7) &&
-							near(param("highlight_threshold"), d.highlight_threshold, 1e-7) && s.post->stats().last_trigger_power == power,
-					bf3::core::fmt("power %.3f from %s %s, shader RShift %.3f Distort %.3f XPower %.2f TimeScale %.1f Highlight %.1f/%.1f", double(power),
-							std::string(kSpawnGraph).c_str(), s.actions.front().name.c_str(), param("r_shift"), param("distort"), param("x_power"), param("time_scale"),
+			row("glitch trigger",
+					near(s.post->glitch_power(), power, 1e-6) && s.post->glitch_drawn() &&
+							near(param("power"), power, 1e-6) && near(param("r_shift"), d.r_shift, 1e-7) &&
+							near(param("distort"), d.distort, 1e-7) && near(param("x_power"), d.x_power, 1e-7) &&
+							near(param("y_power"), d.y_power, 1e-7) && near(param("time_scale"), d.time_scale, 1e-7) &&
+							near(param("highlight"), d.highlight, 1e-7) &&
+							near(param("highlight_threshold"), d.highlight_threshold, 1e-7) &&
+							s.post->stats().last_trigger_power == power,
+					bf3::core::fmt("power %.3f from %s %s, shader RShift %.3f Distort %.3f XPower %.2f TimeScale %.1f "
+								   "Highlight %.1f/%.1f",
+							double(power), std::string(kSpawnGraph).c_str(), s.actions.front().name.c_str(),
+							param("r_shift"), param("distort"), param("x_power"), param("time_scale"),
 							param("highlight"), param("highlight_threshold")));
 			s.phase = 4;
 			s.wait = kCaptureFrames;
@@ -448,15 +473,18 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			s.glitched = capture();
 			save(s.glitched, "ui_effects_glitch.png");
 			const double diff = mean_abs_diff(s.glitched, s.after);
-			row("glitch drawn", diff > 0.01 && diff > s.dim_diff * 3.0, bf3::core::fmt("mean |glitch - before| %.4f against frame noise %.4f", diff, s.dim_diff));
+			row("glitch drawn", diff > 0.01 && diff > s.dim_diff * 3.0,
+					bf3::core::fmt("mean |glitch - before| %.4f against frame noise %.4f", diff, s.dim_diff));
 			const ui::UiPostProcessData &d = *s.post->data();
 			const float power = s.actions.front().power;
 			const double life = ui::ui_glitch_seconds(d, power);
 			s.post->step(life * 0.5);
 			const float mid = s.post->glitch_power();
 			s.post->step(life * 0.5 + 1e-4);
-			row("glitch decay", near(mid, power * 0.5, 1e-4) && s.post->glitch_power() == 0.0f && !s.post->glitch_drawn(),
-					bf3::core::fmt("power %.3f at %.1f ms, 0 after %.1f ms (TimeScale %.1f per s)", double(mid), life * 500.0, life * 1000.0, double(d.time_scale)));
+			row("glitch decay",
+					near(mid, power * 0.5, 1e-4) && s.post->glitch_power() == 0.0f && !s.post->glitch_drawn(),
+					bf3::core::fmt("power %.3f at %.1f ms, 0 after %.1f ms (TimeScale %.1f per s)", double(mid),
+							life * 500.0, life * 1000.0, double(d.time_scale)));
 			s.post->dim_in();
 			s.post->step(0.3);
 			s.post->trigger_glitch(power);
@@ -476,11 +504,14 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			s.deploy = capture();
 			save(s.deploy, "ui_effects_deploy.png");
 			row("frames", s.post->stats().glitch_frames >= 2 && s.post->stats().dim_frames >= 4,
-					bf3::core::fmt("%u glitch frames, %u dim frames, %u triggers", s.post->stats().glitch_frames, s.post->stats().dim_frames, s.post->stats().glitch_triggers));
+					bf3::core::fmt("%u glitch frames, %u dim frames, %u triggers", s.post->stats().glitch_frames,
+							s.post->stats().dim_frames, s.post->stats().glitch_triggers));
 			s.cursor = Bf3UiCursor::ensure(get_parent());
 			const Rect2 visible = get_viewport()->get_visible_rect();
 			s.cursor_at = visible.position + visible.size * Vector2(0.5f, 0.5f);
-			s.cursor_pixels = s.deploy.is_valid() && visible.size.y > 0.0f ? float(s.deploy->get_height()) / visible.size.y : 1.0f;
+			s.cursor_pixels = s.deploy.is_valid() && visible.size.y > 0.0f
+					? float(s.deploy->get_height()) / visible.size.y
+					: 1.0f;
 			s.cursor->set_cursor_position(s.cursor_at);
 			s.cursor->show_cursor();
 			s.phase = 7;
@@ -499,12 +530,19 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			const Rgb off = pixel(shown, int32_t(outside.x), int32_t(outside.y));
 			const Rgb off_before = pixel(s.deploy, int32_t(outside.x), int32_t(outside.y));
 			const auto c8 = [](float p_v) { return double(p_v) * 255.0; };
-			const bool fill_ok = near(c8(fill.r), kUiCursorFillRgb[0], 4.0) && near(c8(fill.g), kUiCursorFillRgb[1], 4.0) && near(c8(fill.b), kUiCursorFillRgb[2], 4.0);
-			const bool off_ok = near(off.r, off_before.r, 2.0 / 255.0) && near(off.g, off_before.g, 2.0 / 255.0) && near(off.b, off_before.b, 2.0 / 255.0);
-			row("cursor shown", s.cursor->cursor_shown() && s.cursor->get_layer() > kUiGlitchLayer && fill_ok && off_ok && s.cursor->stats().shows == 1,
-					bf3::core::fmt("layer %d over %d, scale %.3f, fill at (%.0f, %.0f) %.0f %.0f %.0f (art %u %u %u), beside the arrow unchanged %d", int(s.cursor->get_layer()),
-							int(kUiGlitchLayer), double(s.cursor->cursor_scale()), double(inside.x), double(inside.y), c8(fill.r), c8(fill.g), c8(fill.b),
-							unsigned(kUiCursorFillRgb[0]), unsigned(kUiCursorFillRgb[1]), unsigned(kUiCursorFillRgb[2]), int(off_ok)));
+			const bool fill_ok = near(c8(fill.r), kUiCursorFillRgb[0], 4.0) &&
+					near(c8(fill.g), kUiCursorFillRgb[1], 4.0) && near(c8(fill.b), kUiCursorFillRgb[2], 4.0);
+			const bool off_ok = near(off.r, off_before.r, 2.0 / 255.0) && near(off.g, off_before.g, 2.0 / 255.0) &&
+					near(off.b, off_before.b, 2.0 / 255.0);
+			row("cursor shown",
+					s.cursor->cursor_shown() && s.cursor->get_layer() > kUiGlitchLayer && fill_ok && off_ok &&
+							s.cursor->stats().shows == 1,
+					bf3::core::fmt("layer %d over %d, scale %.3f, fill at (%.0f, %.0f) %.0f %.0f %.0f (art %u %u %u), "
+								   "beside the arrow unchanged %d",
+							int(s.cursor->get_layer()), int(kUiGlitchLayer), double(s.cursor->cursor_scale()),
+							double(inside.x), double(inside.y), c8(fill.r), c8(fill.g), c8(fill.b),
+							unsigned(kUiCursorFillRgb[0]), unsigned(kUiCursorFillRgb[1]), unsigned(kUiCursorFillRgb[2]),
+							int(off_ok)));
 			s.cursor->hide_cursor();
 			s.phase = 8;
 			s.wait = kCaptureFrames;
@@ -516,12 +554,18 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			const Vector2 inside = s.cursor_at * s.cursor_pixels + Vector2(3.0f, 9.0f) * unit;
 			const Rgb now = pixel(hidden, int32_t(inside.x), int32_t(inside.y));
 			const Rgb before = pixel(s.deploy, int32_t(inside.x), int32_t(inside.y));
-			const bool gone = near(now.r, before.r, 2.0 / 255.0) && near(now.g, before.g, 2.0 / 255.0) && near(now.b, before.b, 2.0 / 255.0);
-			const float shown_diff = std::max({ std::fabs(s.cursor_fill.r - now.r), std::fabs(s.cursor_fill.g - now.g), std::fabs(s.cursor_fill.b - now.b) });
-			row("cursor hidden", !s.cursor->cursor_shown() && gone && shown_diff > 0.25f && s.cursor->stats().hides == 1,
-					bf3::core::fmt("pixel under the arrow %.0f %.0f %.0f, before the cursor %.0f %.0f %.0f, while shown %.0f %.0f %.0f", double(now.r) * 255.0,
-							double(now.g) * 255.0, double(now.b) * 255.0, double(before.r) * 255.0, double(before.g) * 255.0, double(before.b) * 255.0,
-							double(s.cursor_fill.r) * 255.0, double(s.cursor_fill.g) * 255.0, double(s.cursor_fill.b) * 255.0));
+			const bool gone = near(now.r, before.r, 2.0 / 255.0) && near(now.g, before.g, 2.0 / 255.0) &&
+					near(now.b, before.b, 2.0 / 255.0);
+			const float shown_diff = std::max({ std::fabs(s.cursor_fill.r - now.r), std::fabs(s.cursor_fill.g - now.g),
+					std::fabs(s.cursor_fill.b - now.b) });
+			row("cursor hidden",
+					!s.cursor->cursor_shown() && gone && shown_diff > 0.25f && s.cursor->stats().hides == 1,
+					bf3::core::fmt("pixel under the arrow %.0f %.0f %.0f, before the cursor %.0f %.0f %.0f, while "
+								   "shown %.0f %.0f %.0f",
+							double(now.r) * 255.0, double(now.g) * 255.0, double(now.b) * 255.0,
+							double(before.r) * 255.0, double(before.g) * 255.0, double(before.b) * 255.0,
+							double(s.cursor_fill.r) * 255.0, double(s.cursor_fill.g) * 255.0,
+							double(s.cursor_fill.b) * 255.0));
 			s.overview_layer = memnew(CanvasLayer);
 			s.overview_layer->set_name("OverviewCheckUi");
 			get_parent()->add_child(s.overview_layer);
@@ -531,19 +575,26 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			s.overview_layer->add_child(s.overview_view);
 			const bf3::core::Result<ui::SwfMatrix> deploy_at = screen_overview_placement(kDeployScreenMovie);
 			const bf3::core::Result<ui::SwfMatrix> menu_at = screen_overview_placement(kMenuScreenMovie);
-			const bf3::core::Status read = !deploy_at ? deploy_at.error() : !menu_at ? menu_at.error() : bf3::core::Status::success();
+			const bf3::core::Status read = !deploy_at ? deploy_at.error()
+					: !menu_at						  ? menu_at.error()
+													  : bf3::core::Status::success();
 			if (read) {
 				s.deploy_placement = *deploy_at;
 				s.menu_placement = *menu_at;
 			}
 			const bf3::core::Status opened = read ? s.overview_view->open("overviewmap") : read;
 			s.overview_path = opened ? overview_symbol_path(*s.overview_view->scene()) : std::string();
-			const bf3::core::Status placed = s.overview_path.empty() ? bf3::core::make_error("no OverviewMap instance")
-																	 : s.overview_view->scene()->set_matrix(s.overview_path, s.deploy_placement);
+			const bf3::core::Status placed = s.overview_path.empty()
+					? bf3::core::make_error("no OverviewMap instance")
+					: s.overview_view->scene()->set_matrix(s.overview_path, s.deploy_placement);
 			s.overview = Bf3OverviewMap::ensure(get_parent());
-			const bf3::core::Status attached = opened && placed ? s.overview->attach(s.overview_view) : bf3::core::make_error("not opened");
-			std::string detail = s.overview_view->scene() != nullptr ? s.overview_view->scene()->movie_name() + " " + s.overview_path : std::string();
-			detail += bf3::core::fmt(", OverviewMap_01 at %s in %s and %s in %s", matrix_text(s.deploy_placement).c_str(), std::string(kDeployScreenMovie).c_str(),
+			const bf3::core::Status attached =
+					opened && placed ? s.overview->attach(s.overview_view) : bf3::core::make_error("not opened");
+			std::string detail = s.overview_view->scene() != nullptr
+					? s.overview_view->scene()->movie_name() + " " + s.overview_path
+					: std::string();
+			detail += bf3::core::fmt(", OverviewMap_01 at %s in %s and %s in %s",
+					matrix_text(s.deploy_placement).c_str(), std::string(kDeployScreenMovie).c_str(),
 					matrix_text(s.menu_placement).c_str(), std::string(kMenuScreenMovie).c_str());
 			for (const bf3::core::Status *st : { &opened, &placed, &attached }) {
 				if (!*st) {
@@ -569,8 +620,10 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			}
 			const float cx = (area->x0 + area->x1) * 0.5f;
 			const float cz = (area->z0 + area->z1) * 0.5f;
-			s.overview->set_marks({ { OverviewMarkKind::Dead, cx - 10.0f, cz - 25.0f, 0.0f }, { OverviewMarkKind::Enemy, cx + 40.0f, cz - 20.0f, 1.0f },
-					{ OverviewMarkKind::Friendly, cx + 20.0f, cz + 10.0f, 2.0f }, { OverviewMarkKind::Squad, cx - 25.0f, cz + 5.0f, 3.0f },
+			s.overview->set_marks({ { OverviewMarkKind::Dead, cx - 10.0f, cz - 25.0f, 0.0f },
+					{ OverviewMarkKind::Enemy, cx + 40.0f, cz - 20.0f, 1.0f },
+					{ OverviewMarkKind::Friendly, cx + 20.0f, cz + 10.0f, 2.0f },
+					{ OverviewMarkKind::Squad, cx - 25.0f, cz + 5.0f, 3.0f },
 					{ OverviewMarkKind::Local, cx, cz, 0.5f } });
 			s.phase = 10;
 			s.wait = kCaptureFrames * 2;
@@ -583,8 +636,12 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			const std::optional<ui::SwfRect> box = overview_box(*s.overview_view, s.overview_path);
 			const float sx = shot.is_valid() ? float(shot->get_width()) / 1280.0f : 1.0f;
 			const float mid_y = box ? (box->y_min + box->y_max) * 0.5f : 0.0f;
-			const Rgb hatch = box ? patch_mean(shot, int32_t((box->x_min + 2.0f) * sx), int32_t((mid_y - 8.0f) * sx), int32_t(16.0f * sx)) : Rgb{};
-			const Rgb inside = box ? patch_mean(shot, int32_t(((box->x_min + box->x_max) * 0.5f - 40.0f) * sx), int32_t((mid_y - 28.0f) * sx), int32_t(16.0f * sx)) : Rgb{};
+			const Rgb hatch = box ? patch_mean(shot, int32_t((box->x_min + 2.0f) * sx), int32_t((mid_y - 8.0f) * sx),
+											int32_t(16.0f * sx))
+								  : Rgb{};
+			const Rgb inside = box ? patch_mean(shot, int32_t(((box->x_min + box->x_max) * 0.5f - 40.0f) * sx),
+											 int32_t((mid_y - 28.0f) * sx), int32_t(16.0f * sx))
+								   : Rgb{};
 			const float hatch_rb = hatch.r / std::max(hatch.b, 1e-3f);
 			const float inside_rb = inside.r / std::max(inside.b, 1e-3f);
 			const bool placed = box && box_near(*box, kDeployMovieBox);
@@ -601,7 +658,8 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 							double(st.pixels_per_metre), double(st.area.x0), double(st.area.x1), double(st.area.z0),
 							double(st.area.z1), st.icons, st.skulls, st.objectives, double(hatch_rb),
 							double(inside_rb)));
-			if (const bf3::core::Status moved = s.overview_view->scene()->set_matrix(s.overview_path, s.menu_placement); !moved) {
+			if (const bf3::core::Status moved = s.overview_view->scene()->set_matrix(s.overview_path, s.menu_placement);
+					!moved) {
 				row("overview menu", false, moved.error().message);
 				finish();
 				return;

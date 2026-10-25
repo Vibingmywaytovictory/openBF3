@@ -84,8 +84,7 @@ float dimmer_track_value(const DimmerTrack &p_track, double p_elapsed_ms);
 
 class UiDimmer {
 public:
-	explicit UiDimmer(UiDimmerRamp p_ramp) :
-			ramp_(std::move(p_ramp)) {}
+	explicit UiDimmer(UiDimmerRamp p_ramp) : ramp_(std::move(p_ramp)) {}
 
 	void fade_in(double p_now_s);
 	void fade_out(double p_now_s);
@@ -110,6 +109,7 @@ struct PostProcessAction {
 	float power = 0.0f;
 };
 
-Result<std::vector<PostProcessAction>> read_post_process_actions(const EbxResolver &p_db, std::string_view p_graph_partition);
+Result<std::vector<PostProcessAction>> read_post_process_actions(
+		const EbxResolver &p_db, std::string_view p_graph_partition);
 
 }

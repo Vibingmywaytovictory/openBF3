@@ -332,11 +332,13 @@ struct MinimapWorldRect {
 	float z1 = 0.0f;
 };
 
-std::optional<MinimapWorldRect> combat_area_bounds(const L8Image &p_field, float p_threshold, const MinimapMapping &p_mapping);
+std::optional<MinimapWorldRect> combat_area_bounds(
+		const L8Image &p_field, float p_threshold, const MinimapMapping &p_mapping);
 
 inline constexpr float kMinimapOverviewMargin = 1.15f;
 
-MinimapView minimap_overview_view(const MinimapWorldRect &p_area, float p_margin, float p_x, float p_y, float p_width, float p_height);
+MinimapView minimap_overview_view(
+		const MinimapWorldRect &p_area, float p_margin, float p_x, float p_y, float p_width, float p_height);
 
 struct MinimapCensus {
 	size_t partitions_scanned = 0;

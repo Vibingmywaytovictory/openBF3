@@ -147,8 +147,7 @@ Bf3OverviewMap *Bf3OverviewMap::ensure(Node *p_parent) {
 	return m;
 }
 
-void Bf3OverviewMap::_bind_methods() {
-}
+void Bf3OverviewMap::_bind_methods() {}
 
 void Bf3OverviewMap::_notification(int p_what) {
 	if (p_what == NOTIFICATION_ENTER_TREE && g_current == nullptr) {
@@ -246,7 +245,8 @@ bool Bf3OverviewMap::source_ready() {
 			source_ = Object::cast_to<Bf3MinimapHud>(found[0]);
 		}
 	}
-	if (source_ == nullptr || !source_->ready_to_draw() || source_->satellite_texture().is_null() || source_->assets() == nullptr) {
+	if (source_ == nullptr || !source_->ready_to_draw() || source_->satellite_texture().is_null() ||
+			source_->assets() == nullptr) {
 		return false;
 	}
 	if (material_.is_null()) {
@@ -263,16 +263,21 @@ bool Bf3OverviewMap::source_ready() {
 		material_->set_shader_parameter("has_detail", source_->has_detail());
 		material_->set_shader_parameter("hatch", source_->hatch_texture());
 		material_->set_shader_parameter("has_hatch", source_->hatch_texture().is_valid());
-		material_->set_shader_parameter("tint", Color(d.detail_texture_tint[0], d.detail_texture_tint[1], d.detail_texture_tint[2], d.detail_texture_tint[3]));
-		material_->set_shader_parameter("area_color", Color(d.combat_area_color[0], d.combat_area_color[1], d.combat_area_color[2], d.combat_area_color[3]));
+		material_->set_shader_parameter("tint",
+				Color(d.detail_texture_tint[0], d.detail_texture_tint[1], d.detail_texture_tint[2],
+						d.detail_texture_tint[3]));
+		material_->set_shader_parameter("area_color",
+				Color(d.combat_area_color[0], d.combat_area_color[1], d.combat_area_color[2], d.combat_area_color[3]));
 		material_->set_shader_parameter("threshold", d.combat_area_alpha_threshold);
-		material_->set_shader_parameter("detail_tint", Color(d.detail.color_tint[0], d.detail.color_tint[1], d.detail.color_tint[2], d.detail.color_tint[3]));
+		material_->set_shader_parameter("detail_tint",
+				Color(d.detail.color_tint[0], d.detail.color_tint[1], d.detail.color_tint[2], d.detail.color_tint[3]));
 		material_->set_shader_parameter("detail_threshold", d.detail.alpha_threshold);
 		material_->set_shader_parameter("opacity", a->level.profile.texture_opacity);
 		material_->set_shader_parameter("satellite_weight", ui::kMinimapSatelliteWeight);
 		material_->set_shader_parameter("world_center", Vector2(d.world_center[0], d.world_center[1]));
 		material_->set_shader_parameter("world_size", d.world_size);
-		material_->set_shader_parameter("hatch_wrap", Vector2(d.combat_area_multiply_wrap[0], d.combat_area_multiply_wrap[1]));
+		material_->set_shader_parameter(
+				"hatch_wrap", Vector2(d.combat_area_multiply_wrap[0], d.combat_area_multiply_wrap[1]));
 	}
 	return true;
 }
@@ -322,7 +327,8 @@ void Bf3OverviewMap::paint_target(const SwfEngineTarget &p_target, const ui::Swf
 		return;
 	}
 	const ui::SwfRect &b = p_target.local_bounds;
-	const ui::MinimapView view = ui::minimap_overview_view(*world, ui::kMinimapOverviewMargin, b.x_min, b.y_min, b.width(), b.height());
+	const ui::MinimapView view =
+			ui::minimap_overview_view(*world, ui::kMinimapOverviewMargin, b.x_min, b.y_min, b.width(), b.height());
 	if (!(view.pixels_per_metre > 0.0f)) {
 		return;
 	}
@@ -348,9 +354,11 @@ void Bf3OverviewMap::paint_target(const SwfEngineTarget &p_target, const ui::Swf
 	}
 	const float unit = 1.0f / stage_per_local;
 	const auto inside = [&](const ui::ScreenPoint &p) {
-		return std::isfinite(p.x) && std::isfinite(p.y) && p.x >= b.x_min && p.y >= b.y_min && p.x <= b.x_max && p.y <= b.y_max;
+		return std::isfinite(p.x) && std::isfinite(p.y) && p.x >= b.x_min && p.y >= b.y_min && p.x <= b.x_max &&
+				p.y <= b.y_max;
 	};
-	const auto draw = [&](const ui::HudIcon *p_icon, ui::HudIconState p_state, const ui::ScreenPoint &p_at, float p_yaw) -> bool {
+	const auto draw = [&](const ui::HudIcon *p_icon, ui::HudIconState p_state, const ui::ScreenPoint &p_at,
+							  float p_yaw) -> bool {
 		const ui::HudIconStateFrames *st = p_icon != nullptr ? p_icon->state(p_state) : nullptr;
 		if (st == nullptr && p_icon != nullptr) {
 			st = p_icon->state(ui::HudIconState::Default);
@@ -358,7 +366,8 @@ void Bf3OverviewMap::paint_target(const SwfEngineTarget &p_target, const ui::Swf
 		if (st == nullptr || st->frames.empty()) {
 			return false;
 		}
-		const ui::HudIconRect r = ui::hud_icon_rect(st->frames.front(), uint32_t(atlas->get_width()), uint32_t(atlas->get_height()));
+		const ui::HudIconRect r =
+				ui::hud_icon_rect(st->frames.front(), uint32_t(atlas->get_width()), uint32_t(atlas->get_height()));
 		if (r.width <= 0 || r.height <= 0) {
 			return false;
 		}
@@ -366,7 +375,9 @@ void Bf3OverviewMap::paint_target(const SwfEngineTarget &p_target, const ui::Swf
 		const float h = float(r.height) * unit;
 		const float angle = st->should_rotate ? -p_yaw : 0.0f;
 		rs->canvas_item_add_set_transform(r_target.icon_item, Transform2D(angle, Vector2(p_at.x, p_at.y)));
-		rs->canvas_item_add_texture_rect_region(r_target.icon_item, Rect2(r.flip_x ? w * 0.5f : -w * 0.5f, r.flip_y ? h * 0.5f : -h * 0.5f, r.flip_x ? -w : w, r.flip_y ? -h : h),
+		rs->canvas_item_add_texture_rect_region(r_target.icon_item,
+				Rect2(r.flip_x ? w * 0.5f : -w * 0.5f, r.flip_y ? h * 0.5f : -h * 0.5f, r.flip_x ? -w : w,
+						r.flip_y ? -h : h),
 				atlas->get_rid(), Rect2(float(r.x), float(r.y), float(r.width), float(r.height)));
 		stats_.icons++;
 		return true;
@@ -380,8 +391,8 @@ void Bf3OverviewMap::paint_target(const SwfEngineTarget &p_target, const ui::Swf
 			stats_.objectives++;
 		}
 	}
-	const OverviewMarkKind order[] = { OverviewMarkKind::Dead, OverviewMarkKind::Enemy, OverviewMarkKind::Friendly, OverviewMarkKind::Squad,
-		OverviewMarkKind::Local };
+	const OverviewMarkKind order[] = { OverviewMarkKind::Dead, OverviewMarkKind::Enemy, OverviewMarkKind::Friendly,
+		OverviewMarkKind::Squad, OverviewMarkKind::Local };
 	for (const OverviewMarkKind kind : order) {
 		for (const OverviewMark &mk : marks_) {
 			if (mk.kind != kind) {

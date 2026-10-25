@@ -28,7 +28,8 @@ Result<UiPostProcessData> read_ui_post_process(const EbxResolver &p_db) {
 	}
 	const EbxInstance root = part->primary();
 	if (!root.is_a("UIPostProcessComponentData")) {
-		return make_error("ui post process: " + std::string(kUiPostProcessCompPartition) + " is a " + std::string(root.type_name()));
+		return make_error("ui post process: " + std::string(kUiPostProcessCompPartition) + " is a " +
+				std::string(root.type_name()));
 	}
 	const EbxStruct d = root.data();
 	UiPostProcessData out;
@@ -75,7 +76,8 @@ Result<UiPostProcessData> read_ui_post_process(const EbxResolver &p_db) {
 }
 
 float ui_glitch_power(const UiPostProcessData &p_data, float p_start_power, double p_elapsed_s) {
-	if (!std::isfinite(p_start_power) || p_start_power <= 0.0f || !std::isfinite(p_elapsed_s) || !(p_data.time_scale > 0.0f)) {
+	if (!std::isfinite(p_start_power) || p_start_power <= 0.0f || !std::isfinite(p_elapsed_s) ||
+			!(p_data.time_scale > 0.0f)) {
 		return 0.0f;
 	}
 	const double left = double(p_start_power) - std::max(0.0, p_elapsed_s) * double(p_data.time_scale);
@@ -95,7 +97,8 @@ Result<MenuGrade> read_menu_visual_environment(const EbxResolver &p_db) {
 		return make_error("menu grade: no partition " + std::string(kMenuVisualEnvironmentPartition));
 	}
 	if (!part->primary().is_a("VisualEnvironmentBlueprint")) {
-		return make_error("menu grade: " + std::string(kMenuVisualEnvironmentPartition) + " is a " + std::string(part->primary().type_name()));
+		return make_error("menu grade: " + std::string(kMenuVisualEnvironmentPartition) + " is a " +
+				std::string(part->primary().type_name()));
 	}
 	MenuGrade out;
 	for (const EbxInstance &c : part->instances_of("ColorCorrectionComponentData")) {
@@ -169,7 +172,8 @@ float menu_vignette(const MenuGrade &p_grade, float p_u, float p_v) {
 	const float x = (p_u - 0.5f) * p_grade.vignette_scale[0];
 	const float y = (p_v - 0.5f) * p_grade.vignette_scale[1];
 	const float d = std::sqrt(x * x + y * y);
-	return std::pow(std::clamp(d, 0.0f, 1.0f), std::max(p_grade.vignette_exponent, 1e-3f)) * std::clamp(p_grade.vignette_opacity, 0.0f, 1.0f);
+	return std::pow(std::clamp(d, 0.0f, 1.0f), std::max(p_grade.vignette_exponent, 1e-3f)) *
+			std::clamp(p_grade.vignette_opacity, 0.0f, 1.0f);
 }
 
 Result<UiDimmerRamp> read_ingame_dimmer(const EbxResolver &p_db) {
@@ -178,7 +182,8 @@ Result<UiDimmerRamp> read_ingame_dimmer(const EbxResolver &p_db) {
 		return make_error("ingame dimmer: no partition " + std::string(kIngameDimmerPartition));
 	}
 	if (!part->primary().is_a("LogicPrefabBlueprint")) {
-		return make_error("ingame dimmer: " + std::string(kIngameDimmerPartition) + " is a " + std::string(part->primary().type_name()));
+		return make_error("ingame dimmer: " + std::string(kIngameDimmerPartition) + " is a " +
+				std::string(part->primary().type_name()));
 	}
 	UiDimmerRamp out;
 	bool have_in = false;
@@ -193,15 +198,18 @@ Result<UiDimmerRamp> read_ingame_dimmer(const EbxResolver &p_db) {
 		const OptionalEbxArray ta = times ? times->as_array() : OptionalEbxArray{};
 		const OptionalEbxArray va = values ? values->as_array() : OptionalEbxArray{};
 		if (!ta || !va || ta->size() != va->size() || ta->size() < 2 || ta->size() > kMaxDimmerKeys) {
-			return make_error("ingame dimmer: track " + std::to_string(track.event_id) + " has no matching Times and Values");
+			return make_error(
+					"ingame dimmer: track " + std::to_string(track.event_id) + " has no matching Times and Values");
 		}
 		for (size_t i = 0; i < ta->size(); ++i) {
 			const std::optional<EbxValue> tv = ta->get(i);
 			const std::optional<EbxValue> vv = va->get(i);
 			const std::optional<double> ms = detail::number(tv);
 			const std::optional<double> value = detail::number(vv);
-			if (!ms || !value || !std::isfinite(*ms) || !std::isfinite(*value) || (!track.keys.empty() && float(*ms) < track.keys.back().ms)) {
-				return make_error("ingame dimmer: track " + std::to_string(track.event_id) + " key " + std::to_string(i) + " is not a rising time");
+			if (!ms || !value || !std::isfinite(*ms) || !std::isfinite(*value) ||
+					(!track.keys.empty() && float(*ms) < track.keys.back().ms)) {
+				return make_error("ingame dimmer: track " + std::to_string(track.event_id) + " key " +
+						std::to_string(i) + " is not a rising time");
 			}
 			track.keys.push_back(DimmerKey{ float(*ms), float(*value) });
 		}
@@ -284,7 +292,8 @@ bool UiDimmer::enabled(double p_now_s) const {
 	return !(out_started_ && (p_now_s - out_at_s_) * 1000.0 >= double(ramp_.out.length_ms));
 }
 
-Result<std::vector<PostProcessAction>> read_post_process_actions(const EbxResolver &p_db, std::string_view p_graph_partition) {
+Result<std::vector<PostProcessAction>> read_post_process_actions(
+		const EbxResolver &p_db, std::string_view p_graph_partition) {
 	const EbxPartition *part = p_db.partition_by_name(p_graph_partition);
 	if (part == nullptr) {
 		return make_error("post process actions: no partition " + std::string(p_graph_partition));
@@ -305,9 +314,11 @@ Result<std::vector<PostProcessAction>> read_post_process_actions(const EbxResolv
 		const std::optional<EbxValue> first = pa && !pa->empty() ? pa->get(0) : std::nullopt;
 		const std::optional<std::string_view> text = first ? first->as_str() : std::nullopt;
 		float power = 0.0f;
-		const std::from_chars_result r = text ? std::from_chars(text->data(), text->data() + text->size(), power) : std::from_chars_result{ nullptr, std::errc::invalid_argument };
+		const std::from_chars_result r = text ? std::from_chars(text->data(), text->data() + text->size(), power)
+											  : std::from_chars_result{ nullptr, std::errc::invalid_argument };
 		if (r.ec != std::errc() || r.ptr != text->data() + text->size() || !std::isfinite(power) || power < 0.0f) {
-			return make_error("post process actions: " + std::string(p_graph_partition) + " " + action.name + " has no numeric power");
+			return make_error("post process actions: " + std::string(p_graph_partition) + " " + action.name +
+					" has no numeric power");
 		}
 		action.power = power;
 		out.push_back(std::move(action));

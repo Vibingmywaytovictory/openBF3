@@ -85,7 +85,8 @@ private:
 	void join_loader();
 	void build();
 	void apply();
-	godot::CanvasLayer *make_layer(const char *p_name, int32_t p_layer, const godot::Ref<godot::ShaderMaterial> &p_material, godot::RID &r_item);
+	godot::CanvasLayer *make_layer(const char *p_name, int32_t p_layer,
+			const godot::Ref<godot::ShaderMaterial> &p_material, godot::RID &r_item);
 	void cover(godot::RID p_item);
 
 	std::string level_ = "MP_Subway";

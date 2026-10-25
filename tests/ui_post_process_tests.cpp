@@ -45,7 +45,8 @@ SubwayLevel *level_or_skip() {
 		if (l.mount == nullptr) {
 			return nullptr;
 		}
-		Result<std::unique_ptr<EbxLibrary>> lib = EbxLibrary::open(l.mount->install, { "Win32/Levels/MP_Subway/MP_Subway" });
+		Result<std::unique_ptr<EbxLibrary>> lib =
+				EbxLibrary::open(l.mount->install, { "Win32/Levels/MP_Subway/MP_Subway" });
 		REQUIRE_MESSAGE(lib.ok(), (lib.ok() ? std::string() : lib.error().message));
 		l.lib = std::move(*lib);
 	} else if (l.mount == nullptr) {
@@ -172,9 +173,10 @@ TEST_SUITE("ui-post-process") {
 			}
 		}
 		CHECK(distinct > 64);
-		std::printf("ui.post_process data: RShift %.3f Distort %.3f XPower %.2f TimeScale %.1f Highlight %.1f/%.1f noise %s %ux%u L8, %zu levels\n",
-				double(d->r_shift), double(d->distort), double(d->x_power), double(d->time_scale), double(d->highlight), double(d->highlight_threshold),
-				d->noise_texture.c_str(), noise->width, noise->height, distinct);
+		std::printf("ui.post_process data: RShift %.3f Distort %.3f XPower %.2f TimeScale %.1f Highlight %.1f/%.1f "
+					"noise %s %ux%u L8, %zu levels\n",
+				double(d->r_shift), double(d->distort), double(d->x_power), double(d->time_scale), double(d->highlight),
+				double(d->highlight_threshold), d->noise_texture.c_str(), noise->width, noise->height, distinct);
 	}
 
 	TEST_CASE("post process: the menu visual environment from the install") {
@@ -244,7 +246,8 @@ TEST_SUITE("ui-post-process") {
 				CHECK(p.power == doctest::Approx(0.35f));
 			}
 		}
-		Result<std::vector<PostProcessAction>> eor = read_post_process_actions(*l->lib, "ui/flow/graph/endofround/preendofroundgraph");
+		Result<std::vector<PostProcessAction>> eor =
+				read_post_process_actions(*l->lib, "ui/flow/graph/endofround/preendofroundgraph");
 		REQUIRE_MESSAGE(eor.ok(), (eor.ok() ? std::string() : eor.error().message));
 		bool scoreboard = false;
 		for (const PostProcessAction &p : *eor) {

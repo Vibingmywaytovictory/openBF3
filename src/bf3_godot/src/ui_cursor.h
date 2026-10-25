@@ -10,8 +10,9 @@
 
 namespace bf3::godot_side {
 
-inline constexpr std::array<godot::Vector2, 7> kUiCursorArrow{ godot::Vector2(0.0f, 0.0f), godot::Vector2(13.0f, 13.0f), godot::Vector2(7.8f, 13.0f),
-	godot::Vector2(9.6f, 18.6f), godot::Vector2(7.4f, 19.2f), godot::Vector2(5.0f, 13.8f), godot::Vector2(0.0f, 18.5f) };
+inline constexpr std::array<godot::Vector2, 7> kUiCursorArrow{ godot::Vector2(0.0f, 0.0f), godot::Vector2(13.0f, 13.0f),
+	godot::Vector2(7.8f, 13.0f), godot::Vector2(9.6f, 18.6f), godot::Vector2(7.4f, 19.2f), godot::Vector2(5.0f, 13.8f),
+	godot::Vector2(0.0f, 18.5f) };
 inline constexpr float kUiCursorOutlinePx = 1.0f;
 inline constexpr uint8_t kUiCursorFillRgb[3] = { 214, 245, 249 };
 inline constexpr uint8_t kUiCursorOutlineRgb[3] = { 22, 64, 90 };

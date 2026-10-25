@@ -224,7 +224,9 @@ void Bf3UiPostProcess::start_loader() {
 		auto out = std::make_unique<Loaded>();
 		if (install == nullptr) {
 			out->error = "no install (no Bf3Localisation)";
-		} else if (bf3::core::Result<std::unique_ptr<bf3::core::EbxLibrary>> lib = bf3::core::EbxLibrary::open(install, { superbundle }, 2); !lib) {
+		} else if (bf3::core::Result<std::unique_ptr<bf3::core::EbxLibrary>> lib =
+						   bf3::core::EbxLibrary::open(install, { superbundle }, 2);
+				!lib) {
 			out->error = superbundle + ": " + lib.error().message;
 		} else {
 			bf3::core::Result<ui::UiPostProcessData> d = ui::read_ui_post_process(**lib);
@@ -261,7 +263,8 @@ void Bf3UiPostProcess::start_loader() {
 	});
 }
 
-CanvasLayer *Bf3UiPostProcess::make_layer(const char *p_name, int32_t p_layer, const Ref<ShaderMaterial> &p_material, RID &r_item) {
+CanvasLayer *Bf3UiPostProcess::make_layer(
+		const char *p_name, int32_t p_layer, const Ref<ShaderMaterial> &p_material, RID &r_item) {
 	CanvasLayer *layer = memnew(CanvasLayer);
 	layer->set_name(p_name);
 	layer->set_layer(p_layer);
@@ -296,7 +299,8 @@ void Bf3UiPostProcess::build() {
 	PackedByteArray bytes;
 	bytes.resize(int64_t(noise_.texels.size()));
 	std::copy(noise_.texels.begin(), noise_.texels.end(), bytes.ptrw());
-	Ref<Image> img = Image::create_from_data(int32_t(noise_.width), int32_t(noise_.height), false, Image::FORMAT_L8, bytes);
+	Ref<Image> img =
+			Image::create_from_data(int32_t(noise_.width), int32_t(noise_.height), false, Image::FORMAT_L8, bytes);
 	noise_texture_ = ImageTexture::create_from_image(img);
 
 	glitch_material_ = make_material(kGlitchShader);
@@ -339,8 +343,9 @@ void Bf3UiPostProcess::build() {
 		stats_.pending_applied++;
 	}
 	pending_dim_ = 0;
-	UtilityFunctions::print(to_godot("[ui post process] ready in " + std::to_string(int(loaded_->seconds * 1000.0 + 0.5)) + " ms: noise " +
-			d.noise_texture + " " + std::to_string(noise_.width) + "x" + std::to_string(noise_.height) + ", dimmer " +
+	UtilityFunctions::print(to_godot("[ui post process] ready in " +
+			std::to_string(int(loaded_->seconds * 1000.0 + 0.5)) + " ms: noise " + d.noise_texture + " " +
+			std::to_string(noise_.width) + "x" + std::to_string(noise_.height) + ", dimmer " +
 			std::to_string(int(dimmer_->ramp().in.length_ms)) + " ms over " + dimmer_->ramp().visual_environment));
 	loaded_.reset();
 	apply();
