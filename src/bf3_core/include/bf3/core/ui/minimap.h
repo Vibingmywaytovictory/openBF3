@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -323,6 +324,19 @@ Result<std::vector<std::array<float, 2>>> read_area_polygon(const level::LoadedL
 		std::string_view p_partition);
 
 Result<L8Image> combat_area_min_field(std::span<const L8Image> p_masks);
+
+struct MinimapWorldRect {
+	float x0 = 0.0f;
+	float z0 = 0.0f;
+	float x1 = 0.0f;
+	float z1 = 0.0f;
+};
+
+std::optional<MinimapWorldRect> combat_area_bounds(const L8Image &p_field, float p_threshold, const MinimapMapping &p_mapping);
+
+inline constexpr float kMinimapOverviewMargin = 1.13f;
+
+MinimapView minimap_overview_view(const MinimapWorldRect &p_area, float p_margin, float p_x, float p_y, float p_width, float p_height);
 
 struct MinimapCensus {
 	size_t partitions_scanned = 0;

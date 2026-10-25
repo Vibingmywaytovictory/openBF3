@@ -565,6 +565,44 @@ Result<L8Image> combat_area_min_field(std::span<const L8Image> p_masks) {
 	return out;
 }
 
+std::optional<MinimapWorldRect> combat_area_bounds(const L8Image &p_field, float p_threshold, const MinimapMapping &p_mapping) {
+	if (p_field.empty() || p_field.texels.size() != size_t(p_field.width) * p_field.height || !(p_mapping.size > 0.0f)) {
+		return std::nullopt;
+	}
+	uint32_t u0 = p_field.width, v0 = p_field.height, u1 = 0, v1 = 0;
+	bool any = false;
+	for (uint32_t v = 0; v < p_field.height; ++v) {
+		for (uint32_t u = 0; u < p_field.width; ++u) {
+			if (sdf_inside(p_field.texels[size_t(v) * p_field.width + u], p_threshold)) {
+				u0 = std::min(u0, u);
+				v0 = std::min(v0, v);
+				u1 = std::max(u1, u + 1);
+				v1 = std::max(v1, v + 1);
+				any = true;
+			}
+		}
+	}
+	if (!any) {
+		return std::nullopt;
+	}
+	const std::array<float, 2> a = minimap_uv_to_world(p_mapping, { float(u0) / float(p_field.width), float(v0) / float(p_field.height) });
+	const std::array<float, 2> b = minimap_uv_to_world(p_mapping, { float(u1) / float(p_field.width), float(v1) / float(p_field.height) });
+	return MinimapWorldRect{ std::min(a[0], b[0]), std::min(a[1], b[1]), std::max(a[0], b[0]), std::max(a[1], b[1]) };
+}
+
+MinimapView minimap_overview_view(const MinimapWorldRect &p_area, float p_margin, float p_x, float p_y, float p_width, float p_height) {
+	MinimapView v;
+	v.center_x = p_x + p_width * 0.5f;
+	v.center_y = p_y + p_height * 0.5f;
+	v.player_x = (p_area.x0 + p_area.x1) * 0.5f;
+	v.player_z = (p_area.z0 + p_area.z1) * 0.5f;
+	v.heading = 0.0f;
+	v.rotate = false;
+	const float span = std::max(p_area.x1 - p_area.x0, p_area.z1 - p_area.z0) * std::max(p_margin, 1e-3f);
+	v.pixels_per_metre = span > 0.0f && std::isfinite(span) ? std::min(p_width, p_height) / span : 0.0f;
+	return v;
+}
+
 double mask_box_iou(const std::vector<bool> &p_mask, uint32_t p_side, const MinimapMapping &p_mapping, uint8_t p_variant,
 		std::array<float, 4> p_box_x0_x1_z0_z1) {
 	const auto [x0, x1, z0, z1] = p_box_x0_x1_z0_z1;
