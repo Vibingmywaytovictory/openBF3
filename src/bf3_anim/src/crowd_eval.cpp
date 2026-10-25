@@ -446,6 +446,8 @@ bool crowd_move_pose(CrowdMoveRun &r_run, uint32_t p_i, size_t p_stance, const C
 struct CrowdEvaluator::Impl::Combat {
 	struct Weapon {
 		const SkinBinds *binds = nullptr;
+		const CrowdThrowClips *throw_clips = nullptr;
+		std::array<std::array<BoneMask, 2>, 2> throw_masks;
 		const CrowdClipData *reload = nullptr;
 		float reload_rate = 1.0f;
 		float reload_seconds = 0.0f;
@@ -482,6 +484,9 @@ struct CrowdEvaluator::Impl::Combat {
 		uint8_t fire_seq = 0;
 		bool fire_seen = false;
 		double fire_since = -1.0e9;
+		bool holding = false;
+		double hold_since = -1.0e9;
+		bool held_into_release = false;
 		bool dead = false;
 		double dead_since = 0.0;
 		uint8_t death_stance = 0;
@@ -494,7 +499,8 @@ struct CrowdEvaluator::Impl::Combat {
 		LocalPose extra, extra2, alive;
 
 		uint8_t stance = 0;
-		bool transition = false, moving = false, firing = false, dying = false, wrote_weapon = false, wrote_muzzle = false;
+		bool transition = false, moving = false, firing = false, throwing = false, dying = false, wrote_weapon = false,
+			 wrote_muzzle = false;
 
 		uint64_t fallbacks = 0, bad_weapon = 0, bad_stance = 0, cancelled = 0, deaths = 0, hidden_count = 0;
 	};
@@ -597,6 +603,29 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 			}
 			Impl::Combat::Weapon mw;
 			mw.binds = cw.binds;
+			if (cw.throw_clips != nullptr) {
+				const CrowdThrowClips &tc = *cw.throw_clips;
+				if (tc.in.mask.size() != rig.size() || tc.release.mask.size() != rig.size() ||
+						tc.moving.size() != rig.size() || tc.still.size() != rig.size()) {
+					return core::make_error(ww + ": throw clip or mask is not rig-sized");
+				}
+				if (!(tc.in_seconds > 0.0f) || !(tc.release_seconds > 0.0f) || !std::isfinite(tc.in_seconds) ||
+						!std::isfinite(tc.release_seconds)) {
+					return core::make_error(ww + ": throw clip lengths are not positive");
+				}
+				mw.throw_clips = cw.throw_clips;
+				for (size_t c = 0; c < 2; ++c) {
+					for (size_t a = 0; a < 2; ++a) {
+						const BoneMask &clip_mask = c == 0 ? tc.in.mask : tc.release.mask;
+						const BoneMask &area = a == 0 ? tc.still : tc.moving;
+						BoneMask &dst = mw.throw_masks[c][a];
+						dst.weight.resize(rig.size());
+						for (size_t j = 0; j < rig.size(); ++j) {
+							dst.weight[j] = clip_mask.weight[j] * area.weight[j];
+						}
+					}
+				}
+			}
 			mw.reload = cw.reload;
 			mw.reload_rate = std::isfinite(cw.reload_rate) && cw.reload_rate > 0.0f ? cw.reload_rate : 1.0f;
 			if (cw.reload != nullptr) {
@@ -795,7 +824,7 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 	Combat::Soldier &xs = x.soldiers[p_i];
 	s.skipped_lod = s.hidden = s.two_cycle = s.idle_mix = s.reloading = s.aiming = false;
 	s.loco_clips = 0;
-	xs.transition = xs.moving = xs.firing = xs.dying = xs.wrote_weapon = xs.wrote_muzzle = false;
+	xs.transition = xs.moving = xs.firing = xs.throwing = xs.dying = xs.wrote_weapon = xs.wrote_muzzle = false;
 	s.tier = int8_t(temporal_lod_tier(config.lod, s.input.camera_distance));
 	s.clock += dt;
 	const auto finish = [&] { s.done_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count(); };
@@ -820,9 +849,14 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 	if (s.input.fire_seq != xs.fire_seq) {
 		if (xs.fire_seen) {
 			xs.fire_since = s.clock;
+			xs.held_into_release = xs.holding;
 		}
 		xs.fire_seq = s.input.fire_seq;
 	}
+	if (s.input.holding && !xs.holding) {
+		xs.hold_since = s.clock;
+	}
+	xs.holding = s.input.holding;
 	xs.fire_seen = true;
 	const double dead_age = xs.dead ? s.clock - xs.dead_since : 0.0;
 	xs.hidden = xs.dead && dead_age >= double(x.corpse_seconds);
@@ -1043,7 +1077,31 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 
 	float kick = 0.0f;
 	const double fire_age = s.clock - xs.fire_since;
-	if (!xs.dead && fire_age >= 0.0) {
+	const CrowdThrowClips *throw_clips = weapon != nullptr ? weapon->throw_clips : nullptr;
+	if (throw_clips != nullptr && !xs.dead) {
+		const size_t area = xs.moving ? 1 : 0;
+		const CrowdClipData *clip = nullptr;
+		const BoneMask *mask = nullptr;
+		float t = 0.0f, w = 0.0f;
+		if (fire_age >= 0.0 && fire_age < double(throw_clips->release_seconds)) {
+			clip = &throw_clips->release;
+			mask = &weapon->throw_masks[1][area];
+			t = float(fire_age);
+			const float in_w = xs.held_into_release ? 1.0f : t / kReloadRampSeconds;
+			w = std::min({ 1.0f, in_w, (throw_clips->release_seconds - t) / kReloadRampSeconds });
+		} else if (xs.holding) {
+			clip = &throw_clips->in;
+			mask = &weapon->throw_masks[0][area];
+			const float age = float(s.clock - xs.hold_since);
+			t = std::min(age, throw_clips->in_seconds);
+			w = std::min(1.0f, age / kReloadRampSeconds);
+		}
+		if (clip != nullptr && w > 0.0f &&
+				sample_pose(rig, clip->clip, clip->tracks, t * clip->tracks.fps, xs.extra, s.scratch)) {
+			override_masked(s.pose, xs.extra, *mask, w);
+			xs.throwing = true;
+		}
+	} else if (!xs.dead && fire_age >= 0.0) {
 		if (!in_transition && to == 1 && x.crouch_fire != nullptr) {
 			const CrowdClipData &clip = *x.crouch_fire;
 			const float dur = clip.tracks.duration_seconds();
@@ -1178,6 +1236,7 @@ CrowdCombatStats CrowdEvaluator::combat_stats() const {
 		r.moving_crouch += !xs.transition && xs.stance == 1 && xs.moving ? 1 : 0;
 		r.moving_prone += !xs.transition && xs.stance == 2 && xs.moving ? 1 : 0;
 		r.firing += xs.firing ? 1 : 0;
+		r.throwing += xs.throwing ? 1 : 0;
 		r.dying += xs.dying ? 1 : 0;
 		r.weapon_palettes += xs.wrote_weapon ? 1 : 0;
 		r.muzzles += xs.wrote_muzzle ? 1 : 0;

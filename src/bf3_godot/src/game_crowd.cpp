@@ -281,6 +281,7 @@ void Bf3GameCrowd::Impl::build_inputs(const GameFrame &p_frame) {
 			}
 			s.sample_tick = w->sample_tick;
 			in.ads = w->ads;
+			in.holding = w->phase == sim::weapons::WeaponPhase::Holding;
 		}
 		in.weapon = s.weapon;
 		in.fire_seq = s.fire_seq;
@@ -416,6 +417,7 @@ void Bf3GameCrowd::Impl::draw_weapons(const GameFrame &p_frame) {
 		}
 	}
 	stats.muzzles = uint32_t(muzzles.size());
+	stats.throwing = eval->combat_stats().throwing;
 }
 
 void Bf3GameCrowd::Impl::clear_draw() {

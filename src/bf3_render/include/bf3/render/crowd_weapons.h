@@ -32,6 +32,8 @@ struct CrowdWeaponPart {
 	bool have_reload = false;
 	anim::CrowdClipData reload;
 	float reload_rate = 1.0f;
+	bool have_throw = false;
+	anim::CrowdThrowClips throw_clips;
 	int32_t muzzle_joint = -1;
 	anim::Xform muzzle_offset = anim::xform_identity();
 	uint64_t vertices = 0, triangles = 0;
@@ -83,6 +85,7 @@ inline std::vector<anim::CrowdWeapon> crowd_weapons_of(const CrowdWeaponSet &p_s
 		}
 		anim::CrowdWeapon w;
 		w.binds = &part.binds;
+		w.throw_clips = part.have_throw ? &part.throw_clips : nullptr;
 		w.reload = part.have_reload ? &part.reload : nullptr;
 		w.reload_rate = part.reload_rate;
 		w.weapon_joints = part.weapon_joints.weight.empty() ? nullptr : &part.weapon_joints;

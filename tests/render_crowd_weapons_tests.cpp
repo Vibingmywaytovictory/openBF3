@@ -148,6 +148,40 @@ TEST_SUITE("render-crowd-weapons") {
 			std::printf("render.crowd_weapons team %zu item 0: %u of %zu binds are S3's team weapon binds\n", t, matched, items[0].binds.size());
 		}
 		CHECK(muzzles >= firearms);
+		uint32_t grenades = 0;
+		for (size_t t = 0; t < 2; ++t) {
+			for (const render::CrowdWeaponPart &p : (*set)->teams[t]) {
+				const bool grenade = p.spec.weapon_def.find("m67") != std::string::npos;
+				CHECK(p.have_throw == grenade);
+				if (!grenade || !p.have_throw) {
+					continue;
+				}
+				++grenades;
+				const anim::CrowdThrowClips &c = p.throw_clips;
+				std::printf("render.crowd_weapons team %zu %s: throw in %s %.4f s (%u frames), release %s %.4f s (%u "
+							"frames)\n",
+						t, p.spec.weapon_def.c_str(), c.in_name.c_str(), double(c.in_seconds), c.in.tracks.end_frame,
+						c.release_name.c_str(), double(c.release_seconds), c.release.tracks.end_frame);
+				CHECK(c.in_name == "Master_Throw_Stand_FireIn");
+				CHECK(c.in_seconds == doctest::Approx(16.0 / 60.0));
+				CHECK(c.release_name == "Throw_Stand_FireRelease");
+				CHECK(c.release_seconds == doctest::Approx(122.0 / 60.0));
+				struct Want {
+					const char *joint;
+					float moving, still;
+				};
+				for (const Want &w : { Want{ "Spine2", 1.0f, 1.0f }, Want{ "Hips", 0.5f, 1.0f },
+							 Want{ "RightHand", 1.0f, 1.0f }, Want{ "LeftLeg", 0.0f, 1.0f } }) {
+					const int32_t j = rig.find(w.joint);
+					REQUIRE(j >= 0);
+					MESSAGE(std::string(w.joint) << ": ThrowBlendMask " << c.moving.weight[size_t(j)]
+												 << ", EverythingBlendMask " << c.still.weight[size_t(j)]);
+					CHECK(c.moving.weight[size_t(j)] == doctest::Approx(w.moving));
+					CHECK(c.still.weight[size_t(j)] == doctest::Approx(w.still));
+				}
+			}
+		}
+		CHECK(grenades == 2);
 
 		std::array<uint64_t, 2> before_vertices{ a.teams[0].vertices, a.teams[1].vertices };
 		CHECK(render::strip_team_weapon_parts(**assets) == 2);
@@ -209,6 +243,48 @@ TEST_SUITE("render-crowd-weapons") {
 					"weapons %.2f s (branch, unlocked, shared machine: indicative only)\n",
 				n, ms.weapon_palettes, ms.muzzles, (*ev)->stats().reloading, s_assets, s_gunplay, s_weapons);
 		CHECK(ms.weapon_palettes == n);
+		CHECK(ms.throwing == 0);
+
+		k = 0;
+		std::vector<uint32_t> throwers;
+		for (uint8_t t = 0; t < 2; ++t) {
+			for (size_t i = 0; i < views[t].size(); ++i, ++k) {
+				if (views[t][i].throw_clips != nullptr) {
+					throwers.push_back(k);
+					in[k].holding = true;
+				}
+			}
+		}
+		REQUIRE(throwers.size() == 2);
+		auto step = [&](int p_frames) {
+			for (int f = 0; f < p_frames; ++f) {
+				(*ev)->set_inputs(in, 1.0 / 60.0);
+				(*ev)->evaluate_all_here();
+			}
+		};
+		const std::vector<anim::Mat34> rest_palette(
+				(*ev)->palette(throwers[0]).begin(), (*ev)->palette(throwers[0]).end());
+		step(30);
+		const anim::CrowdCombatStats holding = (*ev)->combat_stats();
+		CHECK(holding.throwing == 2);
+		const std::vector<anim::Mat34> hold_palette(
+				(*ev)->palette(throwers[0]).begin(), (*ev)->palette(throwers[0]).end());
+		float hold_moved = 0.0f;
+		for (size_t b = 0; b < hold_palette.size() && b < rest_palette.size(); ++b) {
+			hold_moved = std::max(hold_moved, anim::mat_max_diff(hold_palette[b], rest_palette[b]));
+		}
+		CHECK(hold_moved > 0.01f);
+		for (const uint32_t w : throwers) {
+			in[w].holding = false;
+			in[w].fire_seq = uint8_t(in[w].fire_seq + 1);
+		}
+		step(60);
+		CHECK((*ev)->combat_stats().throwing == 2);
+		step(int(std::ceil(122.0 / 60.0 * 60.0)));
+		CHECK((*ev)->combat_stats().throwing == 0);
+		std::printf("render.crowd_weapons throw layer: %u of 2 grenade soldiers holding drew the throw-in, largest "
+					"palette change %.3f; release drawn, then off\n",
+				holding.throwing, double(hold_moved));
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
 		std::printf("render.crowd_weapons install.unchanged %s\n", diff.clean() ? "yes" : diff.summary().c_str());
 		CHECK(diff.clean());

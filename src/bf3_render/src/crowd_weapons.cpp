@@ -255,6 +255,36 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 			r_notes.push_back("weapon " + spec.weapon_def + " did not resolve (reload rate 1, no muzzle): " + w.error().message);
 		}
 	}
+	std::string throw_line;
+	if (data && def && def->fire.logic == core::gameplay::FireLogic::HoldAndRelease) {
+		core::Result<uint32_t> ref = weapon_ant_ref(*data, spec.weapon_unlock);
+		core::Result<uint32_t> type =
+				ref ? anim::weapon_type_index(*p_assets.library, *ref) : core::Result<uint32_t>(ref.error());
+		core::Result<uint32_t> index =
+				ref ? anim::weapon_choice_index(*p_assets.library, *ref) : core::Result<uint32_t>(ref.error());
+		core::Result<anim::CrowdThrowClips> clips = core::make_error("no AntRef");
+		if (type && index) {
+			anim::ChooserIndices idx;
+			idx.weapon_type = *type;
+			idx.specific_weapon = int64_t(*index);
+			clips = anim::load_crowd_throw(p_assets.clips, *p_assets.library, idx);
+		}
+		if (clips) {
+			r_part.throw_clips = std::move(*clips);
+			r_part.have_throw = true;
+			char line[256];
+			std::snprintf(line, sizeof(line), "; throw %s %.3f s, %s %.3f s", r_part.throw_clips.in_name.c_str(),
+					double(r_part.throw_clips.in_seconds), r_part.throw_clips.release_name.c_str(),
+					double(r_part.throw_clips.release_seconds));
+			throw_line = line;
+		} else {
+			throw_line = "; no throw clips (" +
+					(!type ? type.error().message
+									: !index ? index.error().message
+											 : clips.error().message) +
+					")";
+		}
+	}
 	if (r_part.have_reload && def && std::isfinite(def->fire.reload_time) && def->fire.reload_time > 0.0f) {
 		const float rate = r_part.reload.tracks.duration_seconds() / def->fire.reload_time;
 		r_part.reload_rate = std::isfinite(rate) ? std::clamp(rate, kReloadRateMin, kReloadRateMax) : 1.0f;
@@ -288,8 +318,10 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 		muzzle_line = "no muzzle (no Wep_Root)";
 	}
 	char line[512];
-	std::snprintf(line, sizeof(line), "item def %u %s: mesh %s, %zu binds, %llu vertices, %llu triangles; %s; %s", unsigned(spec.def), spec.weapon_def.c_str(),
-			spec.mesh.c_str(), r_part.binds.size(), (unsigned long long)r_part.vertices, (unsigned long long)r_part.triangles, reload_line.c_str(), muzzle_line.c_str());
+	std::snprintf(line, sizeof(line), "item def %u %s: mesh %s, %zu binds, %llu vertices, %llu triangles; %s; %s",
+			unsigned(spec.def), spec.weapon_def.c_str(), spec.mesh.c_str(), r_part.binds.size(),
+			(unsigned long long)r_part.vertices, (unsigned long long)r_part.triangles,
+			(reload_line + throw_line).c_str(), muzzle_line.c_str());
 	r_notes.push_back(line);
 	return core::Status::success();
 }

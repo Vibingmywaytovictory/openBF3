@@ -161,4 +161,24 @@ struct CrowdMoveGroupSet {
 
 core::Result<CrowdMoveGroupSet> load_crowd_move_groups(const CrowdClipSet &p_set, const core::ant::AntLibrary &p_library, const CrowdMoveGroupNames &p_names = {});
 
+core::Result<CrowdClipData> load_route_clip(const CrowdClipSet &p_set, const core::ant::AntLibrary &p_library,
+		const AntClipRoute &p_route, const std::string &p_where);
+
+inline constexpr std::string_view kCrowdThrowMaskArray = "FullBody_ThrowBlendMaskArray";
+inline constexpr float kCrowdMaskMoving = 0.0f;
+inline constexpr float kCrowdMaskStill = 1.0f;
+
+core::Result<BoneMask> read_blend_mask(
+		const core::ant::AntLibrary &p_library, const Skeleton &p_rig, std::string_view p_array, float p_value);
+
+struct CrowdThrowClips {
+	CrowdClipData in, release;
+	float in_seconds = 0.0f, release_seconds = 0.0f;
+	BoneMask moving, still;
+	std::string in_name, release_name;
+};
+
+core::Result<CrowdThrowClips> load_crowd_throw(
+		const CrowdClipSet &p_set, const core::ant::AntLibrary &p_library, const ChooserIndices &p_indices);
+
 }

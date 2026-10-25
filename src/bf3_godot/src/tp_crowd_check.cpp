@@ -35,6 +35,9 @@ constexpr double kEnd = 9.0;
 constexpr double kDeathAt = 2.0;
 constexpr double kRespawnAt = 7.0;
 constexpr double kSwitchAt = 6.0;
+constexpr double kHoldAt = 3.0;
+constexpr double kThrowAt = 3.6;
+constexpr size_t kThrower = 11;
 
 void log(const std::string &p_line) {
 	UtilityFunctions::print(to_godot("[tp] " + p_line));
@@ -219,6 +222,11 @@ void Bf3TpCrowdCheck::scripted_frame(double p_t, std::vector<host::PresentedSold
 			case 6:
 				o.pitch = 0.52f;
 				break;
+			case kThrower:
+				if (p_t >= kHoldAt && p_t < kThrowAt) {
+					w.phase = sim::weapons::WeaponPhase::Holding;
+				}
+				break;
 			case 8: {
 				const double c = std::fmod(p_t, 6.0);
 				if (c < 2.0) {
@@ -259,6 +267,9 @@ void Bf3TpCrowdCheck::scripted_frame(double p_t, std::vector<host::PresentedSold
 	if (crossed(kDeathAt - 0.05)) {
 		event(host::PresentKind::Death, s.soldiers[3].slot, s.soldiers[9].slot, kDeathAt);
 	}
+	if (crossed(kThrowAt - 0.05)) {
+		event(host::PresentKind::RemoteShot, s.soldiers[kThrower].slot, 0, kThrowAt);
+	}
 }
 
 void Bf3TpCrowdCheck::check_at(double p_t) {
@@ -274,6 +285,7 @@ void Bf3TpCrowdCheck::check_at(double p_t) {
 		row("t 1.5 s: 12 soldiers drawn", st.soldiers == 12, fmt("%u", st.soldiers));
 		row("t 1.5 s: 12 weapon instances", st.weapon_instances == 12, fmt("%u", st.weapon_instances));
 		row("t 1.5 s: 10 muzzles (no knife, no M67)", st.muzzles == 10, fmt("%u", st.muzzles));
+		row("t 1.5 s: no soldier throwing", st.throwing == 0, fmt("%u", st.throwing));
 		row("t 1.5 s: unknown weapons 0", st.unknown_weapons == 0 && script_->unknown_defs == 0, fmt("%u (script defs missing %u)", st.unknown_weapons, script_->unknown_defs));
 
 		bool found = false;
@@ -295,12 +307,18 @@ void Bf3TpCrowdCheck::check_at(double p_t) {
 		}
 	} else if (std::fabs(p_t - 2.4) < kStep * 0.5) {
 		row("t 2.4 s: the dying soldier still drawn", st.soldiers == 12, fmt("%u", st.soldiers));
+	} else if (std::fabs(p_t - 3.4) < kStep * 0.5) {
+		row("t 3.4 s: the holding M67 soldier draws the 3P throw-in", st.throwing == 1,
+				fmt("%u throwing", st.throwing));
+	} else if (std::fabs(p_t - 4.6) < kStep * 0.5) {
+		row("t 4.6 s: the thrown M67 plays the 3P release", st.throwing == 1, fmt("%u throwing", st.throwing));
 	} else if (std::fabs(p_t - 5.5) < kStep * 0.5) {
 		row("t 5.5 s: the dead soldier hidden after 3 s", st.soldiers == 11, fmt("%u", st.soldiers));
 		row("t 5.5 s: 9 muzzles", st.muzzles == 9, fmt("%u", st.muzzles));
 	} else if (std::fabs(p_t - 8.0) < kStep * 0.5) {
 		row("t 8.0 s: the respawned soldier drawn", st.soldiers == 12, fmt("%u", st.soldiers));
 		row("t 8.0 s: 10 muzzles", st.muzzles == 10, fmt("%u", st.muzzles));
+		row("t 8.0 s: the throw ended", st.throwing == 0, fmt("%u throwing", st.throwing));
 	}
 }
 
@@ -424,7 +442,7 @@ void Bf3TpCrowdCheck::_process(double p_delta) {
 	}
 	check_at(t_);
 	if (shots_) {
-		for (const double at : { 1.5, 2.25, 2.6, 6.5 }) {
+		for (const double at : { 1.5, 2.25, 2.6, 3.4, 3.9, 4.3, 6.5 }) {
 			if (pt1_run_mode()) {
 				break;
 			}

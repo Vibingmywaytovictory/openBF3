@@ -679,6 +679,104 @@ core::Result<AntHoldReleaseFlow> read_hold_release_flow(
 	return flow;
 }
 
+core::Result<AntThrowFlow3p> read_throw_flow_3p(
+		const AntLibrary &p_library, std::string_view p_flow, const ChooserIndices &p_indices) {
+	core::gameplay::WorkBudget budget;
+	const std::string where = "3p throw flow " + std::string(p_flow);
+	core::Result<GdStruct> flow = find_static(p_library, "StateFlowControllerAsset", p_flow, budget);
+	if (!flow) {
+		return core::error_at(where, flow.error());
+	}
+	const AntPackage &stat = *p_library.static_package();
+	auto has_signal = [&](const GdStruct &p_node, const char *p_field) {
+		const GdArray list = p_node.array(p_field);
+		for (uint32_t i = 0; list.valid() && i < list.size() && i < kMaxSignals; ++i) {
+			GdGuid g;
+			const GdStruct b = list.read_guid(i, g) && !g.is_null() ? p_library.resolve(stat, g) : GdStruct();
+			if (b.valid() && b.type_name() == "BoolAsset" && b.name() == kHoldAndReleaseSignal) {
+				return true;
+			}
+		}
+		return false;
+	};
+	auto subject_of = [&](const GdStruct &p_node) {
+		GdGuid g;
+		const GdStruct s =
+				p_node.read_guid("SubjectController", g) && !g.is_null() ? p_library.resolve(stat, g) : GdStruct();
+		return s.valid() && s.type_name() == "SignalBlendArrayControllerAsset" ? s : GdStruct();
+	};
+	auto item_route = [&](const GdStruct &p_array, AntClipRoute &r_route, float &r_end) -> core::Status {
+		GdGuid sg, ag;
+		const GdStruct signal =
+				p_array.read_guid("BlendSignal", sg) && !sg.is_null() ? p_library.resolve(stat, sg) : GdStruct();
+		const GdStruct blend =
+				p_array.read_guid("BlendArray", ag) && !ag.is_null() ? p_library.resolve(stat, ag) : GdStruct();
+		float at = 0.0f;
+		if (!signal.valid() || !signal.read_float("DefaultFloat", at) || !blend.valid()) {
+			return core::make_error(where + ": " + label(p_array) + " has no BlendSignal DefaultFloat or BlendArray");
+		}
+		const GdArray items = blend.array("Items");
+		for (uint32_t i = 0; items.valid() && i < items.size() && i < kMaxChooserEntries; ++i) {
+			const GdStruct item = items.element(i);
+			float x = 0.0f, end = 0.0f;
+			GdGuid cg;
+			if (!item.valid() || !item.read_float("X", x) || !item.read_float("EndTime", end) ||
+					!item.read_guid("Clip", cg) || x != at) {
+				continue;
+			}
+			const GdStruct clip = cg.is_null() ? GdStruct() : p_library.resolve(stat, cg);
+			if (!clip.valid()) {
+				return core::make_error(
+						where + ": " + label(p_array) + " item " + std::to_string(i) + " does not resolve");
+			}
+			core::Result<AntClipRoute> r =
+					route_from(p_library, p_library.package_of(stat, cg), clip, p_indices, budget);
+			if (!r) {
+				return core::error_at(where + ": " + label(p_array), r.error());
+			}
+			r_route = std::move(*r);
+			r_end = end;
+			return core::Status::success();
+		}
+		return core::make_error(
+				where + ": " + label(p_array) + " has no item at its signal's default " + std::to_string(at));
+	};
+	const GdArray nodes = flow->array("StateFlowNodeAssets");
+	for (uint32_t n = 0; nodes.valid() && n < nodes.size(); ++n) {
+		if (core::Status s = budget.charge(1); !s.ok()) {
+			return s.error();
+		}
+		GdGuid ng;
+		const GdStruct node = nodes.read_guid(n, ng) && !ng.is_null() ? p_library.resolve(stat, ng) : GdStruct();
+		if (!node.valid() || !has_signal(node, "EntryConditionsRequiredTrue") || !subject_of(node).valid()) {
+			continue;
+		}
+		const GdArray transitions = node.array("Transitions");
+		for (uint32_t t = 0; transitions.valid() && t < transitions.size() && t < kMaxSignals; ++t) {
+			GdGuid tg, to;
+			const GdStruct tr =
+					transitions.read_guid(t, tg) && !tg.is_null() ? p_library.resolve(stat, tg) : GdStruct();
+			const GdStruct next =
+					tr.valid() && tr.read_guid("To", to) && !to.is_null() ? p_library.resolve(stat, to) : GdStruct();
+			if (!next.valid() || !has_signal(next, "EntryConditionsRequiredFalse") || !subject_of(next).valid()) {
+				continue;
+			}
+			AntThrowFlow3p out;
+			out.in_node = std::string(node.name());
+			out.release_node = std::string(next.name());
+			if (core::Status s = item_route(subject_of(node), out.in, out.in_end_tick); !s.ok()) {
+				return s.error();
+			}
+			if (core::Status s = item_route(subject_of(next), out.release, out.release_end_tick); !s.ok()) {
+				return s.error();
+			}
+			return out;
+		}
+	}
+	return core::make_error(where + ": no node entered on " + std::string(kHoldAndReleaseSignal) +
+			" with a blend array and a release transition");
+}
+
 core::Result<MoveGroupDef> read_move_group(const AntLibrary &p_library, std::string_view p_name, const ChooserIndices &p_indices) {
 	core::gameplay::WorkBudget budget;
 	const std::string where = "move group " + std::string(p_name);

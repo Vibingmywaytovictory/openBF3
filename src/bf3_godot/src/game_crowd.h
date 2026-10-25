@@ -27,6 +27,7 @@ struct GameCrowdStats {
 	uint32_t unknown_weapons = 0;
 	uint32_t weapon_instances = 0;
 	uint32_t weapon_rebases = 0;
+	uint32_t throwing = 0;
 	uint64_t frames = 0;
 	uint64_t frozen_frames = 0;
 };

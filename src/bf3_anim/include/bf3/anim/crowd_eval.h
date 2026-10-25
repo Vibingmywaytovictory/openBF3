@@ -49,6 +49,7 @@ struct CrowdSoldierInput {
 
 	bool revived = false;
 	bool sprinting = false;
+	bool holding = false;
 };
 
 struct CrowdConfig {
@@ -65,6 +66,7 @@ struct CrowdConfig {
 inline constexpr uint32_t kMaxCrowdWeapons = 8;
 struct CrowdWeapon {
 	const SkinBinds *binds = nullptr;
+	const CrowdThrowClips *throw_clips = nullptr;
 	const CrowdClipData *reload = nullptr;
 	float reload_rate = 1.0f;
 	const BoneMask *weapon_joints = nullptr;
@@ -194,6 +196,7 @@ struct CrowdCombatStats {
 	uint32_t transitions = 0;
 	uint32_t moving_crouch = 0, moving_prone = 0;
 	uint32_t firing = 0;
+	uint32_t throwing = 0;
 	uint32_t dying = 0;
 	uint32_t weapon_palettes = 0;
 	uint32_t muzzles = 0;

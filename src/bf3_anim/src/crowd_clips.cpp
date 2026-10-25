@@ -23,6 +23,7 @@ namespace {
 constexpr uint32_t kAntRefHigh = 0x15480000u;
 constexpr uint32_t kMaxRefHops = 16;
 constexpr uint32_t kMaxChooserDepth = 8;
+constexpr uint32_t kMaxMaskEntries = 64;
 
 std::string hex(uint32_t p_v) {
 	char b[16];
@@ -568,12 +569,189 @@ float wrap_pi(float p_a) {
 
 }
 
+core::Result<CrowdClipData> load_route_clip(const CrowdClipSet &p_set, const AntLibrary &p_library,
+		const AntClipRoute &p_route, const std::string &p_where) {
+	if (!p_set.package) {
+		return core::make_error(p_where + ": no clip package");
+	}
+	const AntPackage &pkg = *p_set.package;
+	GdStruct clip = pkg.find(p_route.anim_index);
+	const AntPackage *clip_package = &pkg;
+	if ((!clip.valid() || !core::ant::is_clip(clip)) && p_route.controller_package != nullptr) {
+		clip = p_route.controller_package->find(p_route.anim_index);
+		clip_package = p_route.controller_package;
+	}
+	if (!clip.valid() || !core::ant::is_clip(clip)) {
+		return core::make_error(p_where + ": " + p_route.controller + ": Anim " + hex(p_route.anim_index) +
+				" is not a clip of " + pkg.name());
+	}
+	core::Result<CrowdClipData> d = make_clip(p_library, *clip_package, clip, p_where + " " + p_route.controller);
+	if (!d) {
+		return d.error();
+	}
+	const core::ant::AntRig *rig = p_set.get(CrowdClip::Idle).binding.rig;
+	if (d->binding.rig != rig) {
+		return core::make_error(p_where + ": " + p_route.controller + " binds to rig " +
+				std::string(d->binding.rig->name) + ", not the crowd rig");
+	}
+	if (core::Status s = track_clip(*d, p_set.rig, p_where + " " + p_route.controller); !s.ok()) {
+		return s.error();
+	}
+	return d;
+}
+
+core::Result<BoneMask> read_blend_mask(
+		const AntLibrary &p_library, const Skeleton &p_rig, std::string_view p_array, float p_value) {
+	const std::string where = "blend mask array " + std::string(p_array);
+	const AntPackage *stat = p_library.static_package();
+	if (stat == nullptr) {
+		return core::make_error(where + ": no static package");
+	}
+	core::gameplay::WorkBudget budget;
+	GdStruct array;
+	uint32_t hits = 0;
+	for (size_t i = 0; i < stat->object_count(); ++i) {
+		if (core::Status s = budget.charge(1); !s.ok()) {
+			return core::error_at(where, s.error());
+		}
+		const GdStruct o = stat->object(i);
+		if (o.name() == p_array && o.type_name() == "BlendMaskArrayControllerAsset") {
+			++hits;
+			array = o;
+		}
+	}
+	if (hits != 1) {
+		return core::make_error(where + ": " + std::to_string(hits) + " objects of that name (must be exactly one)");
+	}
+	const GdArray masks = array.array("Masks");
+	const GdArray values = array.array("Values");
+	GdStruct list;
+	for (uint32_t i = 0;
+			masks.valid() && values.valid() && i < masks.size() && i < values.size() && i < kMaxMaskEntries; ++i) {
+		float v = 0.0f;
+		GdGuid g;
+		if (values.read_float(i, v) && v == p_value && masks.read_guid(i, g) && !g.is_null()) {
+			list = p_library.resolve(*stat, g);
+		}
+	}
+	GdGuid hg;
+	const GdStruct hierarchy = list.valid() && list.read_guid("DofSetListKey", hg) && !hg.is_null()
+			? p_library.resolve(*stat, hg)
+			: GdStruct();
+	if (!list.valid() || list.type_name() != "BlendMaskListAsset" || !hierarchy.valid()) {
+		return core::make_error(
+				where + ": no BlendMaskListAsset with a DofSetListKey at value " + std::to_string(p_value));
+	}
+	const GdArray layouts = hierarchy.array("LayoutAssets");
+	const GdArray mask_keys = list.array("MaskKeys");
+	const GdArray default_keys = list.array("DefaultDofSetKeys");
+	const GdArray default_values = list.array("DefaultValues");
+	BoneMask out;
+	out.weight.assign(p_rig.size(), 0.0f);
+	std::vector<bool> rotation_set(p_rig.size(), false);
+	uint32_t matched = 0;
+	for (uint32_t l = 0; layouts.valid() && l < layouts.size() && l < kMaxMaskEntries; ++l) {
+		GdGuid lg;
+		const GdStruct layout = layouts.read_guid(l, lg) && !lg.is_null() ? p_library.resolve(*stat, lg) : GdStruct();
+		if (!layout.valid()) {
+			return core::make_error(where + ": layout " + std::to_string(l) + " does not resolve");
+		}
+		GdArray slot_values;
+		float flat = 0.0f;
+		for (uint32_t m = 0; mask_keys.valid() && m < mask_keys.size() && m < kMaxMaskEntries && !slot_values.valid();
+				++m) {
+			GdGuid mg, dg;
+			const GdStruct mask =
+					mask_keys.read_guid(m, mg) && !mg.is_null() ? p_library.resolve(*stat, mg) : GdStruct();
+			if (mask.valid() && mask.read_guid("DofSetKey", dg) && dg.index() == lg.index()) {
+				slot_values = mask.array("Values");
+			}
+		}
+		for (uint32_t d = 0;
+				!slot_values.valid() && default_keys.valid() && d < default_keys.size() && d < kMaxMaskEntries; ++d) {
+			GdGuid dg;
+			if (default_keys.read_guid(d, dg) && dg.index() == lg.index() && !default_values.read_float(d, flat)) {
+				return core::make_error(where + ": DefaultValues[" + std::to_string(d) + "] unreadable");
+			}
+		}
+		const GdArray slots = layout.array("Slots");
+		for (uint32_t s = 0; slots.valid() && s < slots.size() && s < kMaxCrowdRigJoints; ++s) {
+			const GdStruct entry = slots.element(s);
+			std::string_view name;
+			if (!entry.valid() || !entry.read_string("Name", name)) {
+				continue;
+			}
+			const size_t dot = name.rfind('.');
+			if (dot == std::string_view::npos) {
+				continue;
+			}
+			const int32_t joint = p_rig.find(std::string(name.substr(0, dot)));
+			if (joint < 0) {
+				continue;
+			}
+			float w = flat;
+			if (slot_values.valid() && !slot_values.read_float(s, w)) {
+				return core::make_error(where + ": " + std::string(name) + " has no mask value");
+			}
+			if (!std::isfinite(w)) {
+				return core::make_error(where + ": " + std::string(name) + " mask value is not finite");
+			}
+			const bool rotation = name.substr(dot) == ".q";
+			if (rotation || !rotation_set[size_t(joint)]) {
+				out.weight[size_t(joint)] = std::clamp(w, 0.0f, 1.0f);
+				rotation_set[size_t(joint)] = rotation_set[size_t(joint)] || rotation;
+			}
+			++matched;
+		}
+	}
+	if (matched == 0) {
+		return core::make_error(where + ": no slot names a joint of the rig");
+	}
+	return out;
+}
+
+core::Result<CrowdThrowClips> load_crowd_throw(
+		const CrowdClipSet &p_set, const AntLibrary &p_library, const ChooserIndices &p_indices) {
+	core::Result<AntThrowFlow3p> flow = read_throw_flow_3p(p_library, k3pWeaponHandlingFlow, p_indices);
+	if (!flow) {
+		return flow.error();
+	}
+	const std::string where = "3p throw";
+	CrowdThrowClips out;
+	core::Result<CrowdClipData> in = load_route_clip(p_set, p_library, flow->in, where + " " + flow->in_node);
+	if (!in) {
+		return in.error();
+	}
+	core::Result<CrowdClipData> release =
+			load_route_clip(p_set, p_library, flow->release, where + " " + flow->release_node);
+	if (!release) {
+		return release.error();
+	}
+	out.in = std::move(*in);
+	out.release = std::move(*release);
+	auto seconds = [](const AntClipRoute &p_route, float p_tick) { return p_tick * p_route.fps_scale / p_route.fps; };
+	out.in_seconds = std::min(seconds(flow->in, flow->in_end_tick), out.in.tracks.duration_seconds());
+	out.release_seconds =
+			std::min(seconds(flow->release, flow->release_end_tick), out.release.tracks.duration_seconds());
+	if (!(out.in_seconds > 0.0f) || !(out.release_seconds > 0.0f)) {
+		return core::make_error(where + ": an empty in or release clip");
+	}
+	core::Result<BoneMask> moving = read_blend_mask(p_library, p_set.rig, kCrowdThrowMaskArray, kCrowdMaskMoving);
+	core::Result<BoneMask> still = read_blend_mask(p_library, p_set.rig, kCrowdThrowMaskArray, kCrowdMaskStill);
+	if (!moving || !still) {
+		return !moving ? moving.error() : still.error();
+	}
+	out.moving = std::move(*moving);
+	out.still = std::move(*still);
+	out.in_name = flow->in.controller;
+	out.release_name = flow->release.controller;
+	return out;
+}
+
 core::Result<CrowdMoveGroupSet> load_crowd_move_groups(const CrowdClipSet &p_set, const AntLibrary &p_library, const CrowdMoveGroupNames &p_names) {
 	if (!p_set.package || p_set.rig.size() == 0 || p_set.root_joint < 0 || p_library.static_package() == nullptr) {
 		return core::make_error("crowd move groups: no clip package, rig, root joint or static package");
 	}
-	const AntPackage &pkg = *p_set.package;
-	const core::ant::AntRig *rig = p_set.get(CrowdClip::Idle).binding.rig;
 	CrowdMoveGroupSet out;
 	LocalPose pose;
 	core::ant::ClipPose scratch;
@@ -589,27 +767,9 @@ core::Result<CrowdMoveGroupSet> load_crowd_move_groups(const CrowdClipSet &p_set
 		g.def = std::move(*def);
 		std::string why;
 		for (const AntClipRoute &route : g.def.clips) {
-			GdStruct clip = pkg.find(route.anim_index);
-			const AntPackage *clip_package = &pkg;
-			if ((!clip.valid() || !core::ant::is_clip(clip)) && route.controller_package != nullptr) {
-				clip = route.controller_package->find(route.anim_index);
-				clip_package = route.controller_package;
-			}
-			if (!clip.valid() || !core::ant::is_clip(clip)) {
-				why = route.controller + ": Anim " + hex(route.anim_index) + " is not a clip of " + pkg.name();
-				break;
-			}
-			core::Result<CrowdClipData> d = make_clip(p_library, *clip_package, clip, where + " " + route.controller);
+			core::Result<CrowdClipData> d = load_route_clip(p_set, p_library, route, where);
 			if (!d) {
 				why = d.error().message;
-				break;
-			}
-			if (d->binding.rig != rig) {
-				why = route.controller + " binds to rig " + std::string(d->binding.rig->name) + ", not the crowd rig";
-				break;
-			}
-			if (core::Status s = track_clip(*d, p_set.rig, where + " " + route.controller); !s.ok()) {
-				why = s.error().message;
 				break;
 			}
 			MoveGroupClipTiming tm;

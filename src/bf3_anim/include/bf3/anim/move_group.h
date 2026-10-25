@@ -76,6 +76,17 @@ struct AntHoldReleaseFlow {
 core::Result<AntHoldReleaseFlow> read_hold_release_flow(
 		const core::ant::AntLibrary &p_library, std::string_view p_wrapper, const ChooserIndices &p_indices);
 
+inline constexpr std::string_view k3pWeaponHandlingFlow = "3P_Master_WepHandlingStateFlow";
+
+struct AntThrowFlow3p {
+	std::string in_node, release_node;
+	AntClipRoute in, release;
+	float in_end_tick = 0.0f, release_end_tick = 0.0f;
+};
+
+core::Result<AntThrowFlow3p> read_throw_flow_3p(
+		const core::ant::AntLibrary &p_library, std::string_view p_flow, const ChooserIndices &p_indices);
+
 struct MoveGroupEntry {
 	float velocity = 0.0f;
 	float item_speed = 1.0f;
