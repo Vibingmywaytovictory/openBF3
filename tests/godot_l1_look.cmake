@@ -40,18 +40,9 @@ set(l1_p99 "")
 foreach(round RANGE 1 ${ROUNDS})
     foreach(look m1 l1)
         set(views "${shots}/${look}_street.png@-196.14,61.47,-568.25,-136.6,0;${shots}/${look}_station.png@-167.76,66.2,-475.19,-150.8,0;${shots}/${look}_park.png@-40,110,-230,30,-20;${shots}/${look}_overview.png@-150,260,-800,0,-40")
-        execute_process(
-            COMMAND "${godot}" --fullscreen --disable-vsync --path "${PROJECT_DIR}" res://scenes/m1_metro.tscn -- "--look=${look}" "--bf3-cache=${root}"
-                --no-hud --shot-settle=3 --shot-measure=300 "--shots=${views}" --quit-after=1
-            TIMEOUT 240
-            RESULT_VARIABLE rc
-            OUTPUT_VARIABLE out
-            ERROR_VARIABLE err)
-        if(out MATCHES "no usable install" OR err MATCHES "no usable install")
-            file(REMOVE_RECURSE "${root}")
-            message("SKIPPED: no BF3 install found")
-            cmake_language(EXIT 77)
-        endif()
+        godot_run(QUIET SKIP_WITHOUT_INSTALL TIMEOUT 240 REMOVE_ON_SKIP "${root}"
+            ARGS --fullscreen --disable-vsync --path "${PROJECT_DIR}" res://scenes/m1_metro.tscn -- "--look=${look}" "--bf3-cache=${root}"
+                --no-hud --shot-settle=3 --shot-measure=300 "--shots=${views}" --quit-after=1)
         string(REGEX MATCHALL "\\[look\\] frame time[^\n]*" lines "${out}")
         foreach(line IN LISTS lines)
             message("round ${round} ${look}: ${line}")
