@@ -1139,7 +1139,8 @@ TEST_SUITE("net-proto") {
 		CHECK_FALSE(net::decode_match_info(match(0, 2, 0, 2)));
 		CHECK_FALSE(net::decode_match_info(match(60, 0, 0, 2)));
 		CHECK_FALSE(net::decode_match_info(match(60, 2, 128, 2)));
-		CHECK_FALSE(net::decode_match_info(match(60, 2, 0, 4)));
+		CHECK(net::decode_match_info(match(60, 2, 0, 4)));
+		CHECK_FALSE(net::decode_match_info(match(60, 2, 0, 5)));
 		CHECK_FALSE(net::decode_loading(craft(net::MessageType::Loading, [](net::BitWriter &w) {
 			w.write_bits(1, 8);
 			w.write_bits(1001, 16);
@@ -3061,7 +3062,7 @@ net::PlayerRow sample_row(Rng &r_rng, uint8_t p_slot) {
 
 net::MatchState sample_match_state(Rng &r_rng) {
 	net::MatchState m;
-	m.phase = net::MatchPhase(r_rng.below(4));
+	m.phase = net::MatchPhase(r_rng.below(5));
 	m.round_start_tick = uint32_t(r_rng.next());
 	m.countdown_end_tick = uint32_t(r_rng.next());
 	m.kills = { int32_t(uint32_t(r_rng.next())), -int32_t(r_rng.below(5)) };
@@ -3073,14 +3074,17 @@ net::MatchState sample_match_state(Rng &r_rng) {
 	m.restart_tick = uint32_t(r_rng.next());
 	m.restrict_until_tick = UINT32_MAX;
 	m.restrict_mask = uint32_t(r_rng.next()) & net::restrict_bits::kAll;
+	m.players_needed = uint16_t(m.round_start_tick ^ m.restart_tick);
 	return m;
 }
 
 bool same_match_state(const net::MatchState &p_a, const net::MatchState &p_b) {
-	return p_a.phase == p_b.phase && p_a.round_start_tick == p_b.round_start_tick && p_a.countdown_end_tick == p_b.countdown_end_tick &&
-			p_a.kills == p_b.kills && p_a.kill_limit == p_b.kill_limit && p_a.winner == p_b.winner && p_a.killer_camera == p_b.killer_camera &&
-			p_a.round_end_tick == p_b.round_end_tick && p_a.unspawn_tick == p_b.unspawn_tick && p_a.restart_tick == p_b.restart_tick &&
-			p_a.restrict_until_tick == p_b.restrict_until_tick && p_a.restrict_mask == p_b.restrict_mask;
+	return p_a.phase == p_b.phase && p_a.round_start_tick == p_b.round_start_tick &&
+			p_a.countdown_end_tick == p_b.countdown_end_tick && p_a.kills == p_b.kills &&
+			p_a.kill_limit == p_b.kill_limit && p_a.winner == p_b.winner && p_a.killer_camera == p_b.killer_camera &&
+			p_a.round_end_tick == p_b.round_end_tick && p_a.unspawn_tick == p_b.unspawn_tick &&
+			p_a.restart_tick == p_b.restart_tick && p_a.restrict_until_tick == p_b.restrict_until_tick &&
+			p_a.restrict_mask == p_b.restrict_mask && p_a.players_needed == p_b.players_needed;
 }
 
 bool same_row(const net::PlayerRow &p_a, const net::PlayerRow &p_b) {
@@ -3185,7 +3189,7 @@ TEST_SUITE("net-proto") {
 		for (int i = 0; i < 200; ++i) {
 			const net::MatchState m = sample_match_state(rng);
 			const std::vector<uint8_t> b = net::encode_match_state(m);
-			REQUIRE(b.size() == 1 + 39);
+			REQUIRE(b.size() == 1 + 41);
 			auto d = net::decode_match_state(b);
 			REQUIRE(d);
 			CHECK(same_match_state(m, *d));
@@ -3198,7 +3202,7 @@ TEST_SUITE("net-proto") {
 		m.kill_limit = -3;
 		auto dm = net::decode_match_state(net::encode_match_state(m));
 		REQUIRE(dm);
-		CHECK(dm->phase == net::MatchPhase::RoundOver);
+		CHECK(dm->phase == net::MatchPhase::Restarting);
 		CHECK(dm->winner == 2);
 		CHECK(dm->kill_limit == 0);
 		const auto state = [](uint32_t p_phase, uint32_t p_winner, int32_t p_limit) {
@@ -3215,10 +3219,12 @@ TEST_SUITE("net-proto") {
 					w.write_bits(0, 32);
 				}
 				w.write_bits(0, 13);
+				w.write_bits(7, 16);
 			});
 		};
 		CHECK(net::decode_match_state(state(3, 2, 100)));
-		CHECK_FALSE(net::decode_match_state(state(4, 0, 100)));
+		CHECK(net::decode_match_state(state(4, 0, 100))->players_needed == 7);
+		CHECK_FALSE(net::decode_match_state(state(5, 0, 100)));
 		CHECK_FALSE(net::decode_match_state(state(0, 3, 100)));
 		CHECK_FALSE(net::decode_match_state(state(0, 0, -1)));
 		std::vector<uint8_t> extra = state(1, 1, 5);
@@ -3781,7 +3787,7 @@ TEST_SUITE("net-proto") {
 			{ "DebugReport (v2)", 916, 0xe73adddf5cc1ab3dull, 0 },
 			{ "MatchInfo (v2)", 82, 0x38ba6d216efb3d54ull, 0 },
 			{ "Spawned (v2)", 86, 0x57d89ea6073b2ad3ull, 0 },
-			{ "MatchState", 40, 0xb041faa8f480b7cbull, 0 },
+			{ "MatchState", 42, 0x6e8a7b2bfcb229a0ull, 0 },
 			{ "PlayerList (full)", 207, 0x68dd8ae5402d6955ull, 0 },
 			{ "PlayerList (delta)", 49, 0x4693a47620178101ull, 0 },
 			{ "SpawnRequest", 3, 0xb1d34918e6b14818ull, 0 },
@@ -3801,7 +3807,7 @@ TEST_SUITE("net-proto") {
 			{ "MatchInfo (out-of-range fields travel as given)", 187, 0xd223af85467b08d5ull, 0 },
 			{ "Spawned (out-of-range fields travel as given)", 86, 0x1fc913c7d126bfa0ull, 0 },
 			{ "Debug (out-of-range fields travel as given)", 30, 0x8236dbe05bdccf42ull, 0 },
-			{ "MatchState (clamped)", 40, 0x29d7cc3c932022cbull, 0 },
+			{ "MatchState (clamped)", 42, 0x4b5c4a4eee33f13eull, 0 },
 			{ "PlayerList (canonicalised)", 48, 0x1f62d52eea86fb3cull, 8 },
 			{ "PlayerList (full drops removed)", 26, 0x8fda9f79ddcc06baull, 1 },
 			{ "CommandPacket (clamped, chain cut at a gap)", 57, 0x54a8e4154ecc6c70ull, 0 },

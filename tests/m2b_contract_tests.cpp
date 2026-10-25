@@ -92,8 +92,9 @@ static_assert(uint8_t(host::SpawnRefusal::None) == 0 && uint8_t(host::SpawnRefus
 static_assert(uint8_t(host::RulesOrder::Kind::Spawn) == 0 && uint8_t(host::RulesOrder::Kind::Revive) == 1 &&
 		uint8_t(host::RulesOrder::Kind::Unspawn) == 2);
 static_assert(uint8_t(host::MatchRulesConfig::Mode::None) == 0 && uint8_t(host::MatchRulesConfig::Mode::Tdm) == 1);
-static_assert(uint8_t(net::MatchPhase::Loading) == 0 && uint8_t(net::MatchPhase::PreRound) == 1 && uint8_t(net::MatchPhase::InRound) == 2 &&
-		uint8_t(net::MatchPhase::RoundOver) == 3);
+static_assert(uint8_t(net::MatchPhase::Loading) == 0 && uint8_t(net::MatchPhase::PreRound) == 1 &&
+		uint8_t(net::MatchPhase::InRound) == 2 && uint8_t(net::MatchPhase::RoundOver) == 3 &&
+		uint8_t(net::MatchPhase::Restarting) == 4);
 
 static_assert(net::rules_flags::kTdm == 1 && net::rules_flags::kDeployScreen == 2 && net::rules_flags::kRevive == 4);
 static_assert(net::restrict_bits::kThrottle == 1u && net::restrict_bits::kThrowGrenade == (1u << 12) && net::restrict_bits::kAll == 0x1FFFu);

@@ -45,7 +45,7 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 	tdm_feed::Frame f{ p_input, p_static, r_state, r_model };
 	f.match = p_input.match_valid;
 	f.phase = f.match ? p_input.match.phase : net::MatchPhase::Loading;
-	if (uint8_t(f.phase) > uint8_t(net::MatchPhase::RoundOver)) {
+	if (uint8_t(f.phase) > uint8_t(net::MatchPhase::Restarting)) {
 		++r_state.bad_inputs;
 		f.phase = net::MatchPhase::Loading;
 	}
@@ -67,7 +67,7 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 		++r_state.bad_inputs;
 		f.winner = 0;
 	}
-	f.round_over = f.phase == net::MatchPhase::RoundOver;
+	f.round_over = f.phase == net::MatchPhase::RoundOver || f.phase == net::MatchPhase::Restarting;
 	f.team1_kills = f.match ? std::max(p_input.match.kills[0], 0) : 0;
 	f.team2_kills = f.match ? std::max(p_input.match.kills[1], 0) : 0;
 	f.kill_limit = f.match ? std::max(p_input.match.kill_limit, 0) : 0;

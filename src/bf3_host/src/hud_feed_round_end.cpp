@@ -75,7 +75,8 @@ void feed_eor_stats(Frame &r_frame, ui::HudEndOfRound &r_eor) {
 void feed_round_stats(Frame &r_frame, std::span<const PresentEvent> p_drained) {
 	HudTdmFeedState &state = r_frame.state;
 	const net::MatchPhase last = state.stats_phase;
-	if (last == net::MatchPhase::RoundOver && r_frame.phase != net::MatchPhase::RoundOver) {
+	const bool was_over = last == net::MatchPhase::RoundOver || last == net::MatchPhase::Restarting;
+	if (was_over && !r_frame.round_over) {
 		round_stats_reset(state.stats, r_frame.own_slot);
 	}
 	state.stats_phase = r_frame.phase;
@@ -103,6 +104,8 @@ void feed_round_end(Frame &r_frame) {
 	pre.seconds_left =
 			pre.counting_down ? seconds_until(now_tick, in.match.countdown_end_tick, state.bad_inputs) : 0.0f;
 	pre.input_restricted = match && in.match.restrict_until_tick != 0 && now_tick < in.match.restrict_until_tick;
+	pre.players_needed = pre.visible && match ? int32_t(in.match.players_needed) : 0;
+	pre.count_left = pre.players_needed;
 
 	ui::HudEndOfRound &eor = model.end_of_round;
 	eor.visible = r_frame.round_over;

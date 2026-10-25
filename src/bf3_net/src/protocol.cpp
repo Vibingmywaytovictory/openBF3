@@ -755,7 +755,7 @@ void serialize(A &r_a, M &r_m) {
 	r_a.check("unknown rules flags", [&] { return (r_m.rules_flags & ~kKnownRulesFlags) == 0; });
 	r_a.check("zero tick rate or snapshot divisor", [&] { return r_m.sim_hz != 0 && r_m.snapshot_divisor != 0; });
 	r_a.check("slot out of range", [&] { return r_m.slot < kMaxSlots; });
-	r_a.check("unknown phase", [&] { return uint8_t(r_m.phase) <= uint8_t(MatchPhase::RoundOver); });
+	r_a.check("unknown phase", [&] { return uint8_t(r_m.phase) <= uint8_t(MatchPhase::Restarting); });
 }
 
 template <class A, MaybeConst<Ready> M>
@@ -1279,14 +1279,15 @@ void serialize(A &r_a, M &r_m) {
 	r_a.bits(r_m.restart_tick, 32);
 	r_a.bits(r_m.restrict_until_tick, 32);
 	r_a.bits(r_m.restrict_mask, kRestrictMaskBits);
-	r_a.check("unknown phase", [&] { return uint8_t(r_m.phase) <= uint8_t(MatchPhase::RoundOver); });
+	r_a.bits(r_m.players_needed, 16);
+	r_a.check("unknown phase", [&] { return uint8_t(r_m.phase) <= uint8_t(MatchPhase::Restarting); });
 	r_a.check("winner out of range", [&] { return r_m.winner <= kMaxTeam; });
 	r_a.check("negative kill limit", [&] { return r_m.kill_limit >= 0; });
 }
 
 MatchState canonical_match_state(const MatchState &p_message) {
 	MatchState m = p_message;
-	m.phase = MatchPhase(std::min<uint8_t>(uint8_t(m.phase), uint8_t(MatchPhase::RoundOver)));
+	m.phase = MatchPhase(std::min<uint8_t>(uint8_t(m.phase), uint8_t(MatchPhase::Restarting)));
 	m.kill_limit = std::max<int32_t>(m.kill_limit, 0);
 	m.winner = std::min<uint8_t>(m.winner, kMaxTeam);
 	m.restrict_mask &= restrict_bits::kAll;

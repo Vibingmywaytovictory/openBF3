@@ -936,7 +936,9 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		net::MatchState &ms = m.state;
 		ms.phase = phase == lg::RoundPhase::PreRound ? net::MatchPhase::PreRound
 				: phase == lg::RoundPhase::InRound	 ? net::MatchPhase::InRound
-													 : net::MatchPhase::RoundOver;
+				: phase == lg::RoundPhase::RoundOver ? net::MatchPhase::RoundOver
+													 : net::MatchPhase::Restarting;
+		ms.players_needed = uint16_t(std::min<uint32_t>(nat.players_needed(), UINT16_MAX));
 		const sim::Tick end = nat.countdown_end_tick();
 		ms.countdown_end_tick = phase == lg::RoundPhase::PreRound && end != 0 ? m.base + end : 0;
 		ms.kills = { nat.kills(1), nat.kills(2) };

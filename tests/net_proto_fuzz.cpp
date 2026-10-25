@@ -479,6 +479,7 @@ std::vector<Sample> samples() {
 		m.unspawn_tick = tick + 9000;
 		m.restrict_until_tick = tick - 300;
 		m.restrict_mask = net::restrict_bits::kYaw | net::restrict_bits::kPitch | net::restrict_bits::kJump;
+		m.players_needed = 3;
 		out.push_back({ net::MessageType::MatchState, "MatchState", net::encode_match_state(m) });
 		net::PlayerList pl;
 		pl.server_tick = tick;

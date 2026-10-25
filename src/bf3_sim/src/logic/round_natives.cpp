@@ -514,8 +514,7 @@ core::Status RoundNatives::tick_round(Tick p_tick, LogicRuntime &r_runtime) {
 		return core::Status::success();
 	}
 	const uint32_t players = s.player_count();
-	const int32_t min_players = s.config.min_players_override >= 0 ? s.config.min_players_override : s.params.round_min_players;
-	if (!s.counting && players >= uint32_t(std::clamp(min_players, 0, 256))) {
+	if (!s.counting && players >= min_players()) {
 		const float seconds = s.config.preround_override_s >= 0.0f && std::isfinite(s.config.preround_override_s) ? s.config.preround_override_s
 																												 : s.params.round_restart_countdown_s;
 		s.counting = true;
@@ -609,6 +608,21 @@ bool RoundNatives::moves_at_death(uint8_t p_slot) const {
 
 uint32_t RoundNatives::players() const {
 	return state_->player_count();
+}
+
+uint32_t RoundNatives::min_players() const {
+	const State &s = *state_;
+	const int32_t n = s.config.min_players_override >= 0 ? s.config.min_players_override : s.params.round_min_players;
+	return uint32_t(std::clamp(n, 0, 256));
+}
+
+uint32_t RoundNatives::players_needed() const {
+	const State &s = *state_;
+	if (s.phase != RoundPhase::PreRound || s.counting) {
+		return 0;
+	}
+	const uint32_t players = s.player_count();
+	return players >= min_players() ? 0 : min_players() - players;
 }
 
 const RoundNativeParams &RoundNatives::params() const {

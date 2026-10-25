@@ -71,7 +71,7 @@ struct Hello {
 	std::string name;
 };
 
-enum class MatchPhase : uint8_t { Loading = 0, PreRound = 1, InRound = 2, RoundOver = 3 };
+enum class MatchPhase : uint8_t { Loading = 0, PreRound = 1, InRound = 2, RoundOver = 3, Restarting = 4 };
 
 struct MatchInfo {
 	uint16_t protocol = kProtocolVersion;
@@ -454,6 +454,7 @@ struct MatchState {
 	sim::Tick restart_tick = 0;
 	sim::Tick restrict_until_tick = 0;
 	uint32_t restrict_mask = restrict_bits::kAll;
+	uint16_t players_needed = 0;
 };
 static_assert(std::is_trivially_copyable_v<MatchState>);
 

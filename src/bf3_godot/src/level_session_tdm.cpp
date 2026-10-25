@@ -63,6 +63,8 @@ const char *phase_name(net::MatchPhase p_phase) {
 			return "in round";
 		case net::MatchPhase::RoundOver:
 			return "round over";
+		case net::MatchPhase::Restarting:
+			return "restarting";
 	}
 	return "?";
 }
@@ -511,7 +513,8 @@ void Bf3LevelSession::tdm_presented(uint64_t p_now_ns) {
 	}
 
 	if (f.match_valid) {
-		if (m.last_phase == net::MatchPhase::RoundOver && f.match.phase != net::MatchPhase::RoundOver) {
+		const bool over = f.match.phase == net::MatchPhase::RoundOver || f.match.phase == net::MatchPhase::Restarting;
+		if ((m.last_phase == net::MatchPhase::RoundOver || m.last_phase == net::MatchPhase::Restarting) && !over) {
 			m.spawned_this_round = false;
 			m.own_death_s = -1.0;
 		}
@@ -519,7 +522,7 @@ void Bf3LevelSession::tdm_presented(uint64_t p_now_ns) {
 			print_match(f.match);
 		}
 		m.last_phase = f.match.phase;
-		m.round_end = f.match.phase == net::MatchPhase::RoundOver;
+		m.round_end = over;
 	}
 	if (!m.options.deploy_screen) {
 		m.spawn_screen = false;

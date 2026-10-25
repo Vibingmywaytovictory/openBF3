@@ -1101,11 +1101,14 @@ TEST_SUITE("host-tdm-server") {
 		held->join("alone");
 		CHECK_FALSE(wait_in_round(*held));
 		CHECK(held->rules().phase() == net::MatchPhase::PreRound);
+		CHECK(held->rules().match_state().players_needed == uint16_t(data_min - 1));
+		CHECK(held->rules().match_state().countdown_end_tick == 0);
 
 		std::unique_ptr<Match> started = start_match(*level, false, 7, 0, 1);
 		started->join("alone");
 		CHECK(wait_in_round(*started));
 		CHECK(started->rules().phase() == net::MatchPhase::InRound);
+		CHECK(started->rules().match_state().players_needed == 0);
 	}
 
 	TEST_CASE("hostile: SpawnRequest refusals and v3 datagrams") {

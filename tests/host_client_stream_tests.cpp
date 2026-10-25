@@ -44,10 +44,13 @@ struct StreamHashes {
 	uint64_t stats = 0;
 };
 
-constexpr StreamHashes kAlpha{ 0xaad594ad9b4c4af0ull, 0xc3fcd8e72e545af6ull, 0x99409d2d98325da4ull, 0xe2d5b4066f29e3c6ull, 0xaa0afe7ac4d9d868ull, 0xb7440481e8ea84c2ull };
-constexpr StreamHashes kBravo{ 0x25f8d227e5de5412ull, 0x8deba73881c6321bull, 0x8b7d4c011244ce54ull, 0x8c7a523d8379a24bull, 0xe2426b0a01eba8e1ull, 0x4603eae802fef817ull };
+constexpr StreamHashes kAlpha{ 0xaad594ad9b4c4af0ull, 0xd2b0e57a19825476ull, 0x99409d2d98325da4ull,
+	0xe2d5b4066f29e3c6ull, 0xaa0afe7ac4d9d868ull, 0xb7440481e8ea84c2ull };
+constexpr StreamHashes kBravo{ 0x25f8d227e5de5412ull, 0x87ec7d5adc3b7b23ull, 0x8b7d4c011244ce54ull,
+	0x8c7a523d8379a24bull, 0xe2426b0a01eba8e1ull, 0x4603eae802fef817ull };
 constexpr StreamHashes kCharlie{ 0xe725154fbc396869ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0x7018103a93ee23afull };
-constexpr StreamHashes kDelta{ 0xda50c24242a75360ull, 0xfd68feefb95a098cull, 0x1696f56b23947cb4ull, 0xccd97b8938eeaf83ull, 0xa2311db0a78ab8b8ull, 0xc899b236d3b4444cull };
+constexpr StreamHashes kDelta{ 0xda50c24242a75360ull, 0xa3b70511400f5814ull, 0x1696f56b23947cb4ull,
+	0xccd97b8938eeaf83ull, 0xa2311db0a78ab8b8ull, 0xc899b236d3b4444cull };
 
 constexpr uint32_t kTdmTicks = 1500;
 constexpr uint32_t kDevTicks = 600;
@@ -117,6 +120,7 @@ void add_match(Fnv &r_h, const net::MatchState &p_m) {
 	r_h.add(p_m.restart_tick);
 	r_h.add(p_m.restrict_until_tick);
 	r_h.add(p_m.restrict_mask);
+	r_h.add(p_m.players_needed);
 }
 
 void add_row(Fnv &r_h, const net::PlayerRow &p_r) {

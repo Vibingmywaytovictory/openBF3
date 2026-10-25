@@ -92,6 +92,8 @@ public:
 	uint32_t balance_moves() const;
 	bool moves_at_death(uint8_t p_slot) const;
 	uint32_t players() const;
+	uint32_t min_players() const;
+	uint32_t players_needed() const;
 	const RoundNativeParams &params() const;
 
 	struct NativeCoverage {
