@@ -79,12 +79,12 @@ TEST_SUITE("ui-scene2") {
 		}
 		for (const auto &[url, w, h] : { std::tuple{ kDogTagLeft, 256u, 256u }, std::tuple{ kDogTagRight, 256u, 256u },
 					 std::tuple{ kWeaponLineArt, 256u, 64u } }) {
-			const SwfImageInfo info = r->images->request(swf_image_res_name(url));
+			const SwfImageInfo info = retail_images(*r)->request(swf_image_res_name(url));
 			CHECK_MESSAGE(info.status == SwfImageStatus::Ready, (std::string(url) + ": " + info.error));
 			CHECK(info.width == w);
 			CHECK(info.height == h);
 		}
-		const SwfImageInfo none = r->images->request("ui/art/persistence/weapons/no_such_weapon");
+		const SwfImageInfo none = retail_images(*r)->request("ui/art/persistence/weapons/no_such_weapon");
 		CHECK(none.status == SwfImageStatus::Missing);
 		CHECK_FALSE(none.error.empty());
 	}

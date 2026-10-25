@@ -69,18 +69,21 @@ inline Retail *retail_or_skip() {
 			return &r;
 		}
 		r.level = std::move(*level);
-		Result<LevelMount> images = mount_swf_images(*r.mount->install);
-		if (!images) {
-			r.error = images.error().message;
-			return &r;
-		}
-		r.images = std::make_shared<SwfMountImages>(std::move(*images));
 	} else if (r.mount == nullptr) {
 		bf3::test::shared_mount_or_skip();
 		return nullptr;
 	}
 	REQUIRE_MESSAGE(r.error.empty(), r.error);
 	return &r;
+}
+
+inline const std::shared_ptr<bf3::core::ui::SwfMountImages> &retail_images(Retail &r_r) {
+	if (r_r.images == nullptr) {
+		bf3::core::Result<bf3::core::LevelMount> images = bf3::core::ui::mount_swf_images(*r_r.mount->install);
+		REQUIRE_MESSAGE(images.ok(), (images.ok() ? std::string() : images.error().message));
+		r_r.images = std::make_shared<bf3::core::ui::SwfMountImages>(std::move(*images));
+	}
+	return r_r.images;
 }
 
 struct RetailScreen {
@@ -106,7 +109,7 @@ inline RetailScreen open_retail_screen(
 	Result<SwfScene> scene = SwfScene::open(*r_r.lib, asset->movie);
 	REQUIRE_MESSAGE(scene.ok(), (scene.ok() ? std::string() : scene.error().message));
 	s.scene = std::make_unique<SwfScene>(std::move(*scene));
-	s.scene->set_image_source(r_r.images);
+	s.scene->set_image_source(retail_images(r_r));
 	Result<std::unique_ptr<HudScreen>> hud =
 			HudScreen::open(*s.scene, *r_r.lib, s.asset, r_r.fonts.get(), std::move(p_client));
 	REQUIRE_MESSAGE(hud.ok(), (hud.ok() ? std::string() : hud.error().message));

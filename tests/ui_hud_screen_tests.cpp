@@ -17,6 +17,7 @@
 #include "bf3/core/ui/ui_direct_access.h"
 #include "bf3/core/ui/ui_fonts.h"
 #include "test_support.h"
+#include "ui_retail_support.h"
 
 #include <algorithm>
 #include <array>
@@ -31,64 +32,10 @@
 
 using namespace bf3::core;
 using namespace bf3::core::ui;
+using ui_retail::Retail;
+using ui_retail::retail_or_skip;
 
 namespace {
-
-struct Retail {
-	bf3::test::Mounted *mount = nullptr;
-	std::unique_ptr<SwfLibrary> lib;
-	std::unique_ptr<SwfFontSet> fonts;
-	std::unique_ptr<EbxLibrary> level;
-	std::unique_ptr<EbxLibrary> ui;
-	std::string error;
-};
-
-Retail *retail_or_skip() {
-	static Retail r;
-	static bool tried = false;
-	if (!tried) {
-		tried = true;
-		r.mount = bf3::test::shared_mount_or_skip();
-		if (r.mount == nullptr) {
-			return nullptr;
-		}
-		Result<SwfLibrary> lib = SwfLibrary::open(r.mount->install);
-		if (!lib) {
-			r.error = lib.error().message;
-			return &r;
-		}
-		r.lib = std::make_unique<SwfLibrary>(std::move(*lib));
-		Result<std::unique_ptr<EbxLibrary>> ui = EbxLibrary::open(r.mount->install, { "Win32/UI" });
-		if (!ui) {
-			r.error = ui.error().message;
-			return &r;
-		}
-		r.ui = std::move(*ui);
-		Result<FontMappingCollection> mapping = font_mapping_for_text_database(*r.ui, "localization/us_loc");
-		if (!mapping) {
-			r.error = mapping.error().message;
-			return &r;
-		}
-		WorkBudget fb(kUiFontConvertBudgetUnits);
-		Result<SwfFontSet> fonts = SwfFontSet::load(*r.lib, *mapping, fb);
-		if (!fonts) {
-			r.error = fonts.error().message;
-			return &r;
-		}
-		r.fonts = std::make_unique<SwfFontSet>(std::move(*fonts));
-		Result<std::unique_ptr<EbxLibrary>> level = EbxLibrary::open(r.mount->install, { "Win32/Levels/MP_Subway/MP_Subway" });
-		if (!level) {
-			r.error = level.error().message;
-			return &r;
-		}
-		r.level = std::move(*level);
-	} else if (r.mount == nullptr) {
-		bf3::test::shared_mount_or_skip();
-		return nullptr;
-	}
-	REQUIRE_MESSAGE(r.error.empty(), r.error);
-	return &r;
-}
 
 struct Screen {
 	std::unique_ptr<SwfScene> scene;

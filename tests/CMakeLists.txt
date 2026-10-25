@@ -420,7 +420,7 @@ target_include_directories(test_ui_scene2 PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_co
 add_test(NAME core.ui.scene2.unit COMMAND test_ui_scene2 --test-suite=ui-scene2-unit)
 add_test(NAME core.ui.scene2 COMMAND test_ui_scene2 --test-suite=ui-scene2)
 set_tests_properties(core.ui.scene2 PROPERTIES SKIP_RETURN_CODE 77)
-openbf3_test(test_ui_hud_screen test_main.cpp ui_hud_screen_tests.cpp test_support.h)
+openbf3_test(test_ui_hud_screen test_main.cpp ui_hud_screen_tests.cpp ui_retail_support.h test_support.h)
 target_link_libraries(test_ui_hud_screen PRIVATE bf3_core)
 add_test(NAME ui.hud.screen.unit COMMAND test_ui_hud_screen --test-suite=ui-hud-screen-unit)
 set(_openbf3_hud_screen_install "*hud*screen:*install*unchanged*")
