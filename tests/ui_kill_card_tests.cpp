@@ -1,9 +1,12 @@
 #include <doctest/doctest.h>
 
 #include "bf3/core/ui/as2_clip.h"
+#include "bf3/core/ui/hud_messages.h"
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/core/ui/hud_screen.h"
+#include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/swf_scene.h"
+#include "bf3/core/ui/text_db.h"
 #include "bf3/core/ui/ui_input.h"
 #include "dog_tag.h"
 #include "image_manager.h"
@@ -374,5 +377,66 @@ TEST_SUITE("ui-kill-card") {
 		CHECK(rec.number("KillCam_01.Suicide") == 0.0);
 		CHECK(rec.texts.count("KillCam_01.DogtagBasic") == 0);
 		CHECK(rec.numbers.count("KillCam_01.DogtagBasic") == 0);
+	}
+
+	TEST_CASE(
+			"Killscreen messages: HudMessage_01 takes the client's Score rows, HudMessage_02 its LocalKill rows and "
+			"ScoreAggregator its aggregate, from the same HudMessageComp the HUD's own message widgets read; "
+			"HudMessage_02 sits at y 604, its row text at 604..634 where 18.57 at 73.0 s shows a kill row at y ~622") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		Result<HudMessageCompData> data = read_hud_message_comp(*r->level);
+		REQUIRE(data.ok());
+		HudMessageComp comp(*data);
+		HudClientState c = retail_text_client(retail_text_db(*r));
+		c.messages = &comp;
+		HudModel m = footage_card();
+		RetailScreen s = open_retail_screen(*r, kKillScreenPartition, c);
+		const struct {
+			std::string_view instance;
+			int32_t key;
+			HudMessageSource source;
+		} kParts[] = { { "HudMessage_01", 1802462620, HudMessageSource::Score },
+			{ "HudMessage_02", 1675248891, HudMessageSource::LocalKill } };
+		s.hud->initialize(m);
+		for (const auto &part : kParts) {
+			const HudWidgetNode *node = s.asset.find(part.instance);
+			REQUIRE_MESSAGE(node != nullptr, std::string(part.instance));
+			REQUIRE(node->message_query.has_value());
+			CHECK(node->message_query->key == part.key);
+			const auto *api =
+					dynamic_cast<HudMessageApi *>(s.hud->controller("instance1." + std::string(part.instance)));
+			REQUIRE(api != nullptr);
+			CHECK(api->source() == part.source);
+		}
+		HudScoreFeed &scores = m.messages.score_message;
+		scores.newest_serial = 1;
+		scores.events[1 % scores.events.size()] = HudScoreEvent{};
+		scores.events[1 % scores.events.size()].serial = 1;
+		scores.events[1 % scores.events.size()].sid_hash = text_hash(kHudScoreKillSid);
+		scores.events[1 % scores.events.size()].points = 100;
+		HudKillFeed &kills = m.messages.local_kill_message;
+		kills.newest_serial = 1;
+		kills.lines[1 % kills.lines.size()] = HudKill{};
+		kills.lines[1 % kills.lines.size()].serial = 1;
+		kills.lines[1 % kills.lines.size()].killer = m.local_player;
+		kills.lines[1 % kills.lines.size()].victim = 1;
+		comp.update(m, c, 0.0);
+		s.hud->refresh(m);
+		advance_frames(*s.hud, 2);
+		const auto rows = [&](std::string_view p_instance) {
+			return dynamic_cast<HudMessageApi *>(s.hud->controller("instance1." + std::string(p_instance)))->rows();
+		};
+		CHECK(rows("HudMessage_01") == 1);
+		CHECK(rows("HudMessage_02") == 1);
+		REQUIRE(comp.list(HudMessageSource::Score).size() == 1);
+		const std::string score_row = "instance1.HudMessage_01.messageHolder.message_" +
+				comp.list(HudMessageSource::Score).at(0).field("Id").to_string();
+		CHECK(s.at(score_row + ".scoringMessage.txt").text == "ENEMY KILLED 100");
+		CHECK(s.at("instance1.ScoreAggregator_01.aggHolder.scoringMessage.txt").text == "100");
+		CHECK(s.hud->stats().as2.failed_ops == 0);
+		CHECK(s.at("instance1.HudMessage_02").matrix.ty == 604.0f);
 	}
 }
