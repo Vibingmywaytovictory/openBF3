@@ -339,9 +339,6 @@ void Bf3OverviewMap::paint_target(const SwfEngineTarget &p_target, const ui::Swf
 	stats_.local_bounds = b;
 
 	rs->canvas_item_clear(r_target.icon_item);
-	stats_.icons = 0;
-	stats_.skulls = 0;
-	stats_.objectives = 0;
 	std::shared_ptr<const MinimapAssets> a = source_->assets();
 	const Ref<ImageTexture> atlas = source_->icon_texture();
 	if (a == nullptr || atlas.is_null()) {
@@ -429,6 +426,9 @@ void Bf3OverviewMap::_process(double) {
 	if (attached_.empty() || !source_ready()) {
 		return;
 	}
+	stats_.icons = 0;
+	stats_.skulls = 0;
+	stats_.objectives = 0;
 	for (auto it = attached_.begin(); it != attached_.end();) {
 		Bf3SwfView *v = Object::cast_to<Bf3SwfView>(ObjectDB::get_instance(uint64_t(it->view)));
 		if (v == nullptr) {
