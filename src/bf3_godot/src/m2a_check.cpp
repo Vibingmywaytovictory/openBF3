@@ -46,6 +46,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <memory>
 #include <set>
 #include <tuple>
 
@@ -755,7 +756,8 @@ struct M2aCheck::State {
 	void kit_gaps(const std::string &p_tag, uint8_t p_slot);
 	void kit_fire_reload(const std::string &p_tag, uint8_t p_slot);
 	void kit_knife(const std::string &p_tag);
-	void kit_m67(const std::string &p_tag);
+	void kit_m67(const std::string &p_tag, bool p_shots);
+	void kit_quick_throw(const std::string &p_tag);
 	void build_hud();
 	void build_ads();
 	void build_play();
@@ -1428,8 +1430,11 @@ void M2aCheck::State::build_kits() {
 				} else if (slot == 7) {
 					kit_knife(tag);
 				} else {
-					kit_m67(tag);
+					kit_m67(tag, team == 1 && kit == 0);
 				}
+			}
+			if (team == 1 && kit == 0) {
+				kit_quick_throw(tag);
 			}
 		}
 	}
@@ -1447,8 +1452,12 @@ void M2aCheck::State::kit_deploy(const std::string &p_tag, uint8_t p_team, uint8
 	add(fmt("%s deploy %u", p_tag.c_str(), unsigned(p_slot)), 6.0, [p_slot](State &st, double, bool p_first) {
 		if (p_first) {
 			st.mark();
-			const Action key = p_slot == 1 ? Action::Sidearm : (p_slot == 6 ? Action::Grenade : (p_slot == 7 ? Action::Knife : Action::Primary));
-			st.mapper().script_press(key);
+			if (p_slot == InputMapper::kQuickThrowSlot) {
+				st.mapper().script_select(p_slot);
+			} else {
+				st.mapper().script_press(
+						p_slot == 1 ? Action::Sidearm : (p_slot == 7 ? Action::Knife : Action::Primary));
+			}
 		}
 		return st.ready() && st.g.weapon.active_slot == p_slot;
 	});
@@ -1656,11 +1665,52 @@ void M2aCheck::State::kit_knife(const std::string &p_tag) {
 	});
 }
 
-void M2aCheck::State::kit_m67(const std::string &p_tag) {
+void M2aCheck::State::kit_quick_throw(const std::string &p_tag) {
+	const std::string tag = p_tag + ".quick";
+	add(tag + " throw", 8.0, [](State &st, double p_t, bool p_first) {
+		if (p_first) {
+			st.mark();
+			st.mapper().script_view(st.mapper().view().yaw, float(25.0 * bf3::core::kDegToRad));
+			st.mapper().script_press(Action::Grenade);
+			st.mapper().script_hold(Action::Grenade, true);
+		}
+		if (p_t >= 0.1) {
+			st.mapper().script_hold(Action::Grenade, false);
+		}
+		return p_t >= 0.5 && !st.mapper().quick_throwing() && st.ready() && st.g.weapon.active_slot == 0;
+	});
+	add(tag + " rows", 1.0, [tag](State &st, double, bool) {
+		bool thrown = false;
+		for (size_t i = st.mark_server; i < st.g.server_shots.size(); ++i) {
+			thrown = thrown || st.g.server_shots[i].shot.weapon_slot == InputMapper::kQuickThrowSlot;
+		}
+		st.row(tag + ".thrown", thrown ? 1.0 : 0.0,
+				"a G tap from the primary threw an M67 (EIAThrowGrenade: slot 6, FireAndSwitchBackToPrev)", thrown);
+		st.row(tag + ".switched_back", double(st.g.weapon.active_slot),
+				"the primary is back in hand after the throw and the next grenade",
+				thrown && st.g.weapon.active_slot == 0 && !st.mapper().quick_throwing());
+		const uint32_t want =
+				(1u << uint32_t(bf3::anim::VmClip::ThrowStart)) | (1u << uint32_t(bf3::anim::VmClip::Throw));
+		st.row(tag + ".throw_clips", double(st.clips_seen & want),
+				"the viewmodel drew the grenade's ThrowStart and Throw clips", (st.clips_seen & want) == want);
+		return true;
+	});
+}
+
+void M2aCheck::State::kit_m67(const std::string &p_tag, bool p_shots) {
 	const std::string tag = p_tag + ".slot6";
 	teleport_lane();
 	place_target(18.0f);
-	add(tag + " throw", 8.0, [](State &st, double p_t, bool p_first) {
+	auto shots_taken = std::make_shared<uint32_t>(0);
+	add(tag + " throw", 8.0, [p_shots, shots_taken](State &st, double p_t, bool p_first) {
+		if (p_shots) {
+			const double at[] = { 0.3, 0.75, 1.9 };
+			const char *names[] = { "m67_1p_throw_start", "m67_1p_release", "m67_1p_redeploy" };
+			if (*shots_taken < 3 && p_t >= at[*shots_taken]) {
+				st.save_shot(names[*shots_taken]);
+				++*shots_taken;
+			}
+		}
 		if (p_first) {
 			st.mark();
 			st.counter = uint32_t(st.g.server_detonations.size());

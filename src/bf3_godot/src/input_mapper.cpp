@@ -328,6 +328,32 @@ void InputMapper::set_weapon_slots(uint8_t p_active, uint8_t p_pending, uint16_t
 	}
 }
 
+void InputMapper::set_active_weapon(sim::weapons::WeaponPhase p_phase, int32_t p_magazine, int32_t p_reserve) {
+	if (!weapon_.quick) {
+		return;
+	}
+	const bool on = weapon_.active == kQuickThrowSlot && weapon_.pending == 0xFF;
+	if (on && p_phase == sim::weapons::WeaponPhase::Holding) {
+		weapon_.quick_held = true;
+		return;
+	}
+	if (on && weapon_.quick_held && p_phase == sim::weapons::WeaponPhase::Ready && (p_magazine > 0 || p_reserve <= 0)) {
+		const uint8_t back = weapon_.quick_back;
+		weapon_.quick = false;
+		weapon_.quick_held = false;
+		weapon_.quick_back = 0xFF;
+		if (back != 0xFF) {
+			select_weapon(back);
+		}
+		return;
+	}
+	if (!on && weapon_.pending != kQuickThrowSlot && weapon_.wanted != kQuickThrowSlot) {
+		weapon_.quick = false;
+		weapon_.quick_held = false;
+		weapon_.quick_back = 0xFF;
+	}
+}
+
 void InputMapper::select_weapon(uint8_t p_slot) {
 	if (p_slot < sim::weapons::kMaxWeaponSlots && (weapon_.filled == 0 || (weapon_.filled & (1u << p_slot)) != 0)) {
 		weapon_.wanted = p_slot;
@@ -425,7 +451,13 @@ void InputMapper::script_press(WeaponAction p_action) {
 			select_weapon(1);
 			break;
 		case WeaponAction::Grenade:
-			select_weapon(6);
+			select_weapon(kQuickThrowSlot);
+			if (weapon_.allowed && !free_camera_ &&
+					(weapon_.wanted == kQuickThrowSlot || weapon_.active == kQuickThrowSlot) && !weapon_.quick) {
+				weapon_.quick = true;
+				weapon_.quick_held = false;
+				weapon_.quick_back = weapon_.active != kQuickThrowSlot ? weapon_.active : uint8_t(0xFF);
+			}
 			break;
 		case WeaponAction::Knife:
 			select_weapon(7);
@@ -476,6 +508,9 @@ void InputMapper::weapon_frame(const bf3::host::PresentationFrame &p_frame, uint
 
 		weapon_.life = life_;
 		weapon_.wanted = 0xFF;
+		weapon_.quick = false;
+		weapon_.quick_held = false;
+		weapon_.quick_back = 0xFF;
 	}
 	if (scripted_) {
 		return;
@@ -516,7 +551,9 @@ void InputMapper::weapon_sample(bf3::host::InputSample &r_sample) const {
 		return;
 	}
 	sim::weapons::WeaponInput w;
-	w.fire = weapon_.held[size_t(WeaponAction::Fire)];
+	const bool quick_fire = weapon_.quick && weapon_.active == kQuickThrowSlot && weapon_.pending == 0xFF &&
+			(weapon_.held[size_t(WeaponAction::Grenade)] || !weapon_.quick_held);
+	w.fire = weapon_.held[size_t(WeaponAction::Fire)] || quick_fire;
 	w.zoom = weapon_.held[size_t(WeaponAction::Ads)];
 	w.reload = weapon_.held[size_t(WeaponAction::Reload)] || (weapon_.reload_until_ns != 0 && weapon_.now_ns < weapon_.reload_until_ns);
 	w.fire_mode_counter = weapon_.mode_counter;

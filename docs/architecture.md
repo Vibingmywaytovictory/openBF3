@@ -204,6 +204,9 @@ These are structural, known, and listed so nobody mistakes them for design inten
   kThrown from its branch-in tick, then Deploy at the release's end branch when the next grenade's reload has started
   (BulletsLeftInGun read as a grenade left), else idle. Its transitions use the 0.1 s crossfade, not the data's blend
   assets, and the sim's next grenade is ready (ReloadTime 1.0 s from 0.2 s after the throw) 0.62 s before Deploy ends.
+  G is EIAThrowGrenade (input/soldierweaponswitching: slot 6, FireAndSwitchBackToPrev): `InputMapper` selects slot 6,
+  holds fire until the hold starts and G is up, and switches back once the next grenade is loaded or none is left; the
+  mapper hard-codes that row of the switch map instead of reading it, and the moment of the switch back is inferred.
 * The container, EBX, payload, resource, level-soup and lag-compensation readers were written as ports of the
   earlier Rust experiment (IW4L); on 2026-10-24 the owner decided to keep them as they are, not re-derive them, and the
   install tests hold their numbers. No Rust is left in the tree.

@@ -691,6 +691,8 @@ void Bf3LevelSession::game_presented(double p_delta, uint64_t p_now_ns) {
 		}
 	}
 	mapper_.set_weapon_slots(g.weapon.valid ? g.weapon.active_slot : uint8_t(0), g.weapon.valid ? g.weapon.pending_slot : uint8_t(0xFF), filled);
+	mapper_.set_active_weapon(
+			g.weapon.valid ? g.weapon.phase : sw::WeaponPhase::None, g.weapon.magazine, g.weapon.reserve);
 	mapper_.set_weapons_allowed(done_ && g.alive && g.weapon.valid);
 	tdm_presented(p_now_ns);
 
