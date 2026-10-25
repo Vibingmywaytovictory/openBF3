@@ -1,5 +1,6 @@
 #include "bf3/render/viewmodel_set.h"
 
+#include "bf3/anim/crowd_clips.h"
 #include "bf3/core/ant/ant_install_source.h"
 #include "bf3/core/ebx.h"
 #include "bf3/core/ebx_db.h"
@@ -28,6 +29,8 @@ using Source = ViewmodelClipSource;
 
 static_assert(size_t(ViewmodelClipRole::Count) == anim::kVmClips, "viewmodel_set.h and viewmodel_anim.h list the same roles");
 static_assert(uint8_t(ViewmodelClipRole::Sprint) == uint8_t(anim::VmClip::Sprint));
+static_assert(uint8_t(ViewmodelClipRole::ThrowStart) == uint8_t(anim::VmClip::ThrowStart));
+static_assert(uint8_t(ViewmodelClipRole::ThrowHold) == uint8_t(anim::VmClip::ThrowHold));
 static_assert(uint8_t(ViewmodelClipRole::ZoomIdle) == uint8_t(anim::VmClip::ZoomIdle));
 static_assert(uint8_t(ViewmodelClipRole::Knife) == uint8_t(anim::VmClip::Knife));
 
@@ -730,6 +733,9 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		}
 		if (locomotion_ant_ref && *locomotion_ant_ref >= 0 && *locomotion_ant_ref <= int64_t(UINT32_MAX)) {
 			load_viewmodel_locomotion(ant, set->rig, uint32_t(*locomotion_ant_ref), item, set->notes);
+			if (item.kind == ViewmodelItemKind::Grenade) {
+				load_viewmodel_throw_flow(ant, set->rig, uint32_t(*locomotion_ant_ref), item, set->notes);
+			}
 		} else {
 			set->notes.push_back(spec.unlock + " 1p locomotion: no WeaponStates[0].Weapon.AssetId (the procedural bob)");
 		}
@@ -787,7 +793,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 			stand_in(Role::Knife, Source::ProceduralStandIn, "procedural stab", kKnifeStandInSeconds);
 		} else if (item.kind == ViewmodelItemKind::Grenade) {
 			stand_in(Role::Throw, Source::ProceduralStandIn, "procedural throw swing", kThrowStandInSeconds);
-			if (item.reload_time > 0.0f) {
+			if (item.reload_time > 0.0f && !item.throw_flow.valid()) {
 				stand_in(Role::Reload, Source::ProceduralStandIn, "procedural lower and raise over ReloadTime (next grenade)", item.reload_time);
 			}
 		} else {
@@ -1023,7 +1029,11 @@ ViewmodelCoverage viewmodel_coverage(const ViewmodelItem &p_item) {
 			break;
 		case ViewmodelItemKind::Grenade:
 			pick(c.entries[1], "fire", { Role::Throw, Role::Fire });
-			pick(c.entries[2], "reload", { Role::Reload });
+			if (p_item.throw_flow.valid()) {
+				pick(c.entries[2], "next grenade", { Role::Deploy });
+			} else {
+				pick(c.entries[2], "reload", { Role::Reload });
+			}
 			break;
 		case ViewmodelItemKind::Gun:
 			pick(c.entries[1], "fire", { Role::FireSingle, Role::Fire });
@@ -1309,6 +1319,27 @@ std::string route_path(const anim::AntClipRoute &p_route) {
 	return out;
 }
 
+core::Status load_route_clip(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig,
+		const anim::AntClipRoute &p_route, ViewmodelClip &r_clip) {
+	const core::ant::AntPackage *sp = p_library.static_package();
+	const core::ant::AntPackage *pkg = p_route.controller_package != nullptr ? p_route.controller_package : sp;
+	core::ant::GdStruct c = pkg != nullptr ? pkg->find(p_route.anim_index) : core::ant::GdStruct{};
+	if ((!c.valid() || !core::ant::is_clip(c)) && sp != nullptr && pkg != sp) {
+		pkg = sp;
+		c = sp->find(p_route.anim_index);
+	}
+	if (!c.valid() || !core::ant::is_clip(c)) {
+		return core::make_error(p_route.controller + "'s Anim is not a clip");
+	}
+	bool unsupported = false;
+	ViewmodelClip clip;
+	if (const core::Status st = load_role_clip(p_library, *pkg, c, p_rig, clip, unsupported); !st.ok()) {
+		return st;
+	}
+	r_clip = std::move(clip);
+	return core::Status::success();
+}
+
 void load_delta_clip(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, std::string_view p_chooser, const anim::ChooserIndices &p_indices,
 		const std::string &p_where, ViewmodelClip &r_clip, float &r_start, float &r_end, std::string &r_path, std::vector<std::string> &r_notes) {
 	core::Result<anim::AntClipRoute> route = anim::route_ant_controller(p_library, "IndexChooserControllerAsset", p_chooser, p_indices);
@@ -1387,6 +1418,72 @@ void load_viewmodel_locomotion(const core::ant::AntLibrary &p_library, const ani
 		return;
 	}
 	r_item.locomotion = std::move(l);
+}
+
+void load_viewmodel_throw_flow(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, uint32_t p_ant_ref,
+		ViewmodelItem &r_item, std::vector<std::string> &r_notes) {
+	const std::string where = r_item.unlock + " 1p throw";
+	core::Result<uint32_t> type = anim::weapon_type_index(p_library, p_ant_ref);
+	core::Result<uint32_t> specific = anim::weapon_choice_index(p_library, p_ant_ref);
+	if (!type || !specific) {
+		r_notes.push_back(
+				where + ": " + (!type ? type.error().message : specific.error().message) + " (the procedural throw)");
+		return;
+	}
+	anim::ChooserIndices idx;
+	idx.weapon_type = *type;
+	idx.specific_weapon = int64_t(*specific);
+	core::Result<anim::AntHoldReleaseFlow> flow =
+			anim::read_hold_release_flow(p_library, anim::kVmWeaponHandlingWrapper, idx);
+	if (!flow) {
+		r_notes.push_back(where + ": " + flow.error().message + " (the procedural throw)");
+		return;
+	}
+	struct Want {
+		Role role;
+		const anim::AntClipRoute *route;
+	};
+	std::array<ViewmodelClip, 4> loaded;
+	const std::array<Want, 4> wants = { Want{ Role::ThrowStart, &flow->start }, Want{ Role::ThrowHold, &flow->hold },
+		Want{ Role::Throw, &flow->release }, Want{ Role::Deploy, &flow->deploy } };
+	for (size_t i = 0; i < wants.size(); ++i) {
+		if (const core::Status st = load_route_clip(p_library, p_rig, *wants[i].route, loaded[i]); !st.ok()) {
+			r_notes.push_back(where + " " + viewmodel_clip_role_name(wants[i].role) + ": " + st.error().message +
+					" (the procedural throw)");
+			return;
+		}
+	}
+	for (size_t i = 0; i < wants.size(); ++i) {
+		r_item.clips[size_t(wants[i].role)] = std::move(loaded[i]);
+	}
+	if (r_item.clips[size_t(Role::Idle)].source == Source::Missing) {
+		ViewmodelClip idle;
+		if (load_route_clip(p_library, p_rig, flow->idle, idle).ok()) {
+			r_item.clips[size_t(Role::Idle)] = std::move(idle);
+		}
+	}
+	auto seconds = [&](const anim::AntClipRoute &p_route, float p_tick) {
+		return p_tick * p_route.fps_scale / p_route.fps;
+	};
+	anim::VmThrowFlow &f = r_item.throw_flow;
+	f.release_from_s = seconds(flow->start, flow->release_from_tick);
+	f.release_until_s = seconds(flow->start, flow->release_until_tick);
+	f.hold_from_s = seconds(flow->start, flow->hold_from_tick);
+	f.hold_loop_s = seconds(flow->hold, flow->hold.loop_end_tick);
+	f.release_in_s = seconds(flow->release, flow->release_in_tick);
+	f.release_end_s = seconds(flow->release, flow->release_end_tick);
+	r_item.throw_flow_name = flow->name;
+	char line[320];
+	std::snprintf(line, sizeof(line),
+			": %s, %s %.3f s, %s loop %.3f s, %s %.3f s from %.3f, %s %.3f s; release %.3f..%.3f, hold at %.3f, "
+			"redeploy at %.3f",
+			flow->name.c_str(), r_item.clips[size_t(Role::ThrowStart)].name.c_str(),
+			double(r_item.clips[size_t(Role::ThrowStart)].seconds), r_item.clips[size_t(Role::ThrowHold)].name.c_str(),
+			double(f.hold_loop_s), r_item.clips[size_t(Role::Throw)].name.c_str(),
+			double(r_item.clips[size_t(Role::Throw)].seconds), double(f.release_in_s),
+			r_item.clips[size_t(Role::Deploy)].name.c_str(), double(r_item.clips[size_t(Role::Deploy)].seconds),
+			double(f.release_from_s), double(f.release_until_s), double(f.hold_from_s), double(f.release_end_s));
+	r_notes.push_back(where + line);
 }
 
 anim::VmLocomotion viewmodel_locomotion(const ViewmodelItem &p_item) {

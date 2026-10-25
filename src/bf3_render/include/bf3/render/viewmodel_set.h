@@ -39,6 +39,8 @@ enum class ViewmodelClipRole : uint8_t {
 	Throw = 10,
 	Knife = 11,
 	Sprint = 12,
+	ThrowStart = 13,
+	ThrowHold = 14,
 	Count
 };
 inline constexpr size_t kViewmodelClipRoles = size_t(ViewmodelClipRole::Count);
@@ -154,6 +156,8 @@ struct ViewmodelItem {
 	std::vector<ViewmodelSlotLook> weapon_looks;
 	uint32_t hidden_surfaces = 0;
 	std::shared_ptr<const ViewmodelLocomotionClips> locomotion;
+	anim::VmThrowFlow throw_flow;
+	std::string throw_flow_name;
 };
 
 std::array<anim::VmClipRef, anim::kVmClips> viewmodel_clip_refs(const ViewmodelItem &p_item);
@@ -271,5 +275,8 @@ void load_viewmodel_locomotion(const core::ant::AntLibrary &p_library, const ani
 		std::vector<std::string> &r_notes);
 
 anim::VmLocomotion viewmodel_locomotion(const ViewmodelItem &p_item);
+
+void load_viewmodel_throw_flow(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, uint32_t p_ant_ref,
+		ViewmodelItem &r_item, std::vector<std::string> &r_notes);
 
 }

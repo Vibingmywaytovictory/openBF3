@@ -71,6 +71,7 @@ uint32_t skin_item(const ViewmodelSet &p_set, const ViewmodelItem &p_item, const
 	using bf3::anim::VmCue;
 	const std::array<bf3::anim::VmClipRef, bf3::anim::kVmClips> refs = bf3::render::viewmodel_clip_refs(p_item);
 	bf3::anim::ViewmodelAnimator animator(p_set.rig, refs, p_tuning);
+	animator.set_throw_flow(p_item.throw_flow);
 	bf3::anim::LocalPose pose;
 	std::vector<bf3::anim::Xform> model;
 	bf3::anim::ViewmodelOutput out;
@@ -92,7 +93,14 @@ uint32_t skin_item(const ViewmodelSet &p_set, const ViewmodelItem &p_item, const
 	};
 	add(VmCue::Kind::DeployStarted, 0.0);
 	add(VmCue::Kind::DeployFinished, deploy);
-	add(p_item.kind == bf3::render::ViewmodelItemKind::Grenade ? VmCue::Kind::Thrown : VmCue::Kind::Shot, fire_at);
+	const bool grenade = p_item.kind == bf3::render::ViewmodelItemKind::Grenade;
+	if (grenade) {
+		add(VmCue::Kind::HoldStarted, fire_at - 0.5);
+	}
+	add(grenade ? VmCue::Kind::Thrown : VmCue::Kind::Shot, fire_at);
+	if (grenade) {
+		add(VmCue::Kind::ReloadStarted, fire_at + 0.2);
+	}
 	if (p_item.kind == bf3::render::ViewmodelItemKind::Gun) {
 		add(VmCue::Kind::ReloadStarted, reload_at);
 		add(VmCue::Kind::ReloadFinished, reload_at + reload);

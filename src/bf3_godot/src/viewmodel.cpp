@@ -105,6 +105,9 @@ void viewmodel_cues_from(std::span<const bf3::present::PresentEvent> p_events, i
 				case sw::weapon_events::kThrown:
 					c.kind = Kind::Thrown;
 					break;
+				case sw::weapon_events::kHoldStarted:
+					c.kind = Kind::HoldStarted;
+					break;
 				default:
 					continue;
 			}
@@ -259,6 +262,7 @@ void Bf3Viewmodel::select_item(int p_index) {
 	if (!has_user_arg("no-locomotion")) {
 		animator_->set_locomotion(bf3::render::viewmodel_locomotion(set_->items[size_t(item_)]));
 	}
+	animator_->set_throw_flow(set_->items[size_t(item_)].throw_flow);
 	ads_params_ = bf3::render::viewmodel_ads_params(set_->items[size_t(item_)], tuning_);
 	viewmodel_fov_ = -1;
 	set_viewmodel_fov(ads_params_.render_fov);

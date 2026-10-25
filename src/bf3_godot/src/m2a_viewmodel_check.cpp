@@ -100,6 +100,9 @@ struct Accum {
 	double present_us_sum = 0, present_us_max = 0;
 	uint64_t present_frames = 0;
 	std::map<std::string, std::string> ads_info;
+
+	uint32_t throws = 0, throws_bad = 0;
+	std::string throw_lines;
 };
 
 const sw::TimedWeaponEvent *find_event(const vm_script::KitRun &p_run, uint32_t p_event, uint8_t p_slot, double p_from_s) {
@@ -185,6 +188,33 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 			}
 		}
 		reloads.push_back(r);
+	}
+
+	struct Throw {
+		uint8_t slot = 0;
+		double hold = -1, thrown = -1;
+		struct Seen {
+			uint32_t clip;
+			double t, start;
+			float time;
+		};
+		std::vector<Seen> seen;
+	};
+	std::vector<Throw> throws;
+	for (const vm_script::Mark &m : run.marks) {
+		if (m.label != "throw") {
+			continue;
+		}
+		Throw th;
+		th.slot = m.slot;
+		const double from = m.time_s - 2.0;
+		if (const sw::TimedWeaponEvent *h = find_event(run, sw::weapon_events::kHoldStarted, m.slot, from)) {
+			th.hold = sw::units_to_seconds(h->time);
+			if (const sw::TimedWeaponEvent *e = find_event(run, sw::weapon_events::kThrown, m.slot, th.hold)) {
+				th.thrown = sw::units_to_seconds(e->time);
+			}
+		}
+		throws.push_back(th);
 	}
 
 	double last_input = t0;
@@ -340,6 +370,15 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 			}
 		}
 
+		for (Throw &th : throws) {
+			if (th.slot != slot || th.hold < 0 || t + 1e-9 < th.hold) {
+				continue;
+			}
+			if (th.seen.empty() || th.seen.back().clip != out.action_clip) {
+				th.seen.push_back({ out.action_clip, t, out.action_start_s, out.action_time_s });
+			}
+		}
+
 		for (Reload &r : reloads) {
 			if (r.slot != slot || r.started < 0) {
 				continue;
@@ -379,6 +418,54 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 		}
 		r_acc.transition_lines += fmt("    %s %s @%3.0f fps: in %.4f s (FOV time %.3f, %+.2f frames)  out %.4f s (FOV time %.3f, %+.2f frames)%s\n", kit_name.c_str(),
 				name.c_str(), p_fps, in, double(tr.t_in), (in - double(tr.t_in)) / dt, outv, double(tr.t_out), (outv - double(tr.t_out)) / dt, ok ? "" : "  FAIL");
+	}
+	for (const Throw &th : throws) {
+		using bf3::anim::VmClip;
+		using Role = bf3::render::ViewmodelClipRole;
+		++r_acc.throws;
+		const int item = kit.item[th.slot];
+		if (item < 0) {
+			++r_acc.throws_bad;
+			continue;
+		}
+		const bf3::render::ViewmodelItem &it = set.items[size_t(item)];
+		const bf3::anim::VmThrowFlow &f = it.throw_flow;
+		bool retail = f.valid();
+		for (const Role r : { Role::ThrowStart, Role::ThrowHold, Role::Throw, Role::Deploy }) {
+			retail = retail && it.clips[size_t(r)].source == bf3::render::ViewmodelClipSource::Clip;
+		}
+		const double eps = 1e-6;
+		std::string order;
+		for (const Throw::Seen &e : th.seen) {
+			order += std::string(order.empty() ? "" : " > ") + bf3::anim::vm_clip_name(VmClip(e.clip));
+		}
+		const bool shape = th.seen.size() == 4 && th.seen[0].clip == uint32_t(VmClip::ThrowStart) &&
+				th.seen[1].clip == uint32_t(VmClip::Throw) && th.seen[2].clip == uint32_t(VmClip::Deploy) &&
+				th.seen[3].clip == uint32_t(VmClip::Idle);
+		bool timing = false;
+		double entry = 0, redeploy = 0, deploy_len = 0;
+		if (shape && th.thrown >= 0) {
+			entry = double(th.seen[1].time) - (th.seen[1].t - th.seen[1].start);
+			redeploy = th.seen[2].start - th.thrown;
+			deploy_len = th.seen[3].t - th.seen[2].start;
+			const double deploy_s = double(it.clips[size_t(Role::Deploy)].seconds);
+			timing = std::fabs(th.seen[0].start - th.hold) <= eps && std::fabs(th.seen[1].start - th.thrown) <= eps &&
+					std::fabs(entry - double(f.release_in_s)) <= 1e-4 &&
+					std::fabs(redeploy - double(f.release_end_s - f.release_in_s)) <= eps &&
+					deploy_len >= deploy_s - eps && deploy_len <= deploy_s + dt + eps;
+		}
+		const bool ok = retail && shape && timing;
+		r_acc.throws_bad += ok ? 0 : 1;
+		r_acc.throw_lines += fmt("    %s %s @%3.0f fps (%s): %s; %s %.3f s / %s %.3f s / %s %.3f s / %s %.3f s; hold "
+								 "%.3f s, release entered at %.4f s (data %.4f), "
+								 "redeploy %.4f s after the throw (data %.4f), deploy shown %.4f s%s\n",
+				kit_name.c_str(), short_unlock(it.unlock).c_str(), p_fps, it.throw_flow_name.c_str(), order.c_str(),
+				it.clips[size_t(Role::ThrowStart)].name.c_str(), double(it.clips[size_t(Role::ThrowStart)].seconds),
+				it.clips[size_t(Role::ThrowHold)].name.c_str(), double(it.clips[size_t(Role::ThrowHold)].seconds),
+				it.clips[size_t(Role::Throw)].name.c_str(), double(it.clips[size_t(Role::Throw)].seconds),
+				it.clips[size_t(Role::Deploy)].name.c_str(), double(it.clips[size_t(Role::Deploy)].seconds),
+				th.thrown - th.hold, entry, double(f.release_in_s), redeploy, double(f.release_end_s - f.release_in_s),
+				deploy_len, ok ? "" : "  FAIL");
 	}
 	for (const Reload &r : reloads) {
 		++r_acc.reloads;
@@ -463,6 +550,11 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 					dst->worst_clip_start_s = std::max(dst->worst_clip_start_s, a.worst_clip_start_s);
 					dst->worst_fire_after_s = std::max(dst->worst_fire_after_s, a.worst_fire_after_s);
 					dst->worst_cut_s = std::max(dst->worst_cut_s, a.worst_cut_s);
+					dst->throws += a.throws;
+					dst->throws_bad += a.throws_bad;
+					if (mi == 0) {
+						dst->throw_lines += a.throw_lines;
+					}
 					if (mi == 0) {
 						dst->e5_lines += a.e5_lines;
 					}
@@ -538,6 +630,13 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 			fmt("%u reloads: the shot takes the reload clip off within %.3f s (<= crossfade %.2f + 1 frame; authored rate, §16 Q4)", all.reloads, all.worst_cut_s,
 					double(bf3::anim::kViewmodelCrossfadeSeconds)));
 
+	print("[vm] grenade throws (specific FOV mode passes):\n" + all.throw_lines);
+	row("vm.grenade_flow", all.throws > 0 && all.throws_bad == 0,
+			fmt("%u scripted throws: the hand grenade's FireStart > FireRelease > Deploy > idle clips from "
+				"1P_WeaponHandlingWrapper's state flow, the release "
+				"entered at its branch-in tick on kThrown, the redeploy at its end branch, the deploy clip played "
+				"whole (%u bad)",
+					all.throws, all.throws_bad));
 	{
 		uint32_t items = 0, covered = 0, clips = 0, stand_ins = 0, na = 0;
 		std::string lines;

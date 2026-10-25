@@ -18,7 +18,24 @@ namespace bf3::anim {
 
 inline constexpr float kViewmodelCrossfadeSeconds = 0.1f;
 
-enum class VmClip : uint8_t { Deploy, Idle, Fire, FireSingle, Reload, ReloadEmpty, Bolt, ZoomIn, ZoomOut, ZoomIdle, Throw, Knife, Sprint, Count };
+enum class VmClip : uint8_t {
+	Deploy,
+	Idle,
+	Fire,
+	FireSingle,
+	Reload,
+	ReloadEmpty,
+	Bolt,
+	ZoomIn,
+	ZoomOut,
+	ZoomIdle,
+	Throw,
+	Knife,
+	Sprint,
+	ThrowStart,
+	ThrowHold,
+	Count
+};
 inline constexpr size_t kVmClips = size_t(VmClip::Count);
 const char *vm_clip_name(VmClip p_clip);
 
@@ -76,7 +93,18 @@ core::Result<ViewmodelTuning> parse_viewmodel_tuning(std::string_view p_text);
 std::string format_viewmodel_tuning(const ViewmodelTuning &p_tuning);
 
 struct VmCue {
-	enum class Kind : uint8_t { Shot, DeployStarted, DeployFinished, ReloadStarted, ReloadCommitted, ReloadFinished, ReloadCancelled, BoltStarted, Thrown };
+	enum class Kind : uint8_t {
+		Shot,
+		DeployStarted,
+		DeployFinished,
+		ReloadStarted,
+		ReloadCommitted,
+		ReloadFinished,
+		ReloadCancelled,
+		BoltStarted,
+		Thrown,
+		HoldStarted
+	};
 	Kind kind = Kind::Shot;
 	double time_s = 0;
 	bool empty_reload = false;
@@ -113,6 +141,7 @@ struct ViewmodelOutput {
 };
 
 struct VmLocomotion;
+struct VmThrowFlow;
 
 class ViewmodelAnimator {
 public:
@@ -129,6 +158,8 @@ public:
 	std::array<SpringState, 7> springs() const;
 
 	void set_locomotion(const VmLocomotion &p_locomotion);
+
+	void set_throw_flow(const VmThrowFlow &p_flow);
 
 private:
 	struct Impl;
@@ -199,6 +230,13 @@ struct VmDeltaClip {
 struct VmLocomotion {
 	VmDeltaClip run;
 	VmDeltaClip sprint;
+};
+
+struct VmThrowFlow {
+	float release_from_s = 0.0f, release_until_s = 0.0f, release_in_s = 0.0f;
+	float hold_from_s = 0.0f, hold_loop_s = 0.0f;
+	float release_end_s = 0.0f;
+	bool valid() const;
 };
 
 }

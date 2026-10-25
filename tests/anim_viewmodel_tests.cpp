@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <limits>
 #include <random>
 #include <sstream>
 #include <string>
@@ -879,6 +880,116 @@ TEST_SUITE("anim-viewmodel-unit") {
 		}
 		CHECK(std::fabs(out.weapon_offset.t.y) < 1e-3f);
 		CHECK(out.action_clip == uint32_t(VmClip::Idle));
+	}
+
+	TEST_CASE("anim.viewmodel: the hold-and-release flow: start, hold loop, release from its entry tick, redeploy or "
+			  "idle") {
+		const anim::ViewmodelTuning tuning = shipped_tuning();
+		Rig rig;
+		rig.skeleton = three_bones();
+		add_clip(rig, VmClip::Idle, 0, 0, 0);
+		add_clip(rig, VmClip::ThrowStart, 0, 25, 25);
+		add_clip(rig, VmClip::ThrowHold, 30, 30, 35);
+		add_clip(rig, VmClip::Throw, 0, 40, 40);
+		add_clip(rig, VmClip::Deploy, -50, 0, 25);
+		finish_rig(rig, { VmClip::Idle, VmClip::ThrowStart, VmClip::ThrowHold, VmClip::Throw, VmClip::Deploy });
+		anim::VmThrowFlow flow;
+		flow.release_from_s = 14.0f / 60.0f;
+		flow.release_until_s = 50.0f / 60.0f;
+		flow.release_in_s = 11.0f / 60.0f;
+		flow.hold_from_s = 42.0f / 60.0f;
+		flow.hold_loop_s = 1.0f;
+		flow.release_end_s = 70.0f / 60.0f;
+		REQUIRE(flow.valid());
+		const float dt = 1.0f / 60.0f;
+		struct Seen {
+			uint32_t clip;
+			double at;
+			float time;
+		};
+		struct Cue {
+			anim::VmCue::Kind kind;
+			double at;
+		};
+		auto run = [&](std::vector<Cue> p_cues, double p_until, bool p_flow, std::vector<Seen> &r_seen,
+						   float &r_max_hold_time) {
+			anim::ViewmodelAnimator a(rig.skeleton, rig.refs, tuning);
+			if (p_flow) {
+				a.set_throw_flow(flow);
+			}
+			anim::LocalPose pose;
+			anim::ViewmodelOutput out;
+			r_seen.clear();
+			r_max_hold_time = 0.0f;
+			size_t next = 0;
+			for (int i = 1; double(i) * dt <= p_until; ++i) {
+				const double now = double(i) * dt;
+				std::vector<anim::VmCue> cues;
+				while (next < p_cues.size() && p_cues[next].at <= now) {
+					anim::VmCue c;
+					c.kind = p_cues[next].kind;
+					c.time_s = p_cues[next].at;
+					cues.push_back(c);
+					++next;
+				}
+				anim::ViewmodelFrameInput in;
+				in.time_s = now;
+				in.dt = dt;
+				a.step(in, cues, pose, out);
+				if (r_seen.empty() || r_seen.back().clip != out.action_clip) {
+					r_seen.push_back(Seen{ out.action_clip, out.action_start_s, out.action_time_s });
+				}
+				if (out.action_clip == uint32_t(VmClip::ThrowHold)) {
+					r_max_hold_time = std::max(r_max_hold_time, out.action_time_s);
+				}
+				CHECK(std::isfinite(bone1_yaw_deg(pose)));
+			}
+		};
+		using K = anim::VmCue::Kind;
+		std::vector<Seen> seen;
+		float hold_t = 0;
+
+		run({ { K::HoldStarted, 0.1 }, { K::Shot, 0.6 }, { K::Thrown, 0.6 }, { K::ReloadStarted, 0.8 } }, 3.0, true,
+				seen, hold_t);
+		REQUIRE(seen.size() == 5);
+		CHECK(seen[0].clip == uint32_t(VmClip::Idle));
+		CHECK(seen[1].clip == uint32_t(VmClip::ThrowStart));
+		CHECK(seen[1].at == doctest::Approx(0.1));
+		CHECK(seen[2].clip == uint32_t(VmClip::Throw));
+		CHECK(seen[2].at == doctest::Approx(0.6));
+		CHECK(seen[2].time == doctest::Approx(11.0f / 60.0f).epsilon(0.02));
+		CHECK(seen[3].clip == uint32_t(VmClip::Deploy));
+		CHECK(seen[3].at == doctest::Approx(0.6 + 59.0 / 60.0));
+		CHECK(seen[4].clip == uint32_t(VmClip::Idle));
+
+		run({ { K::HoldStarted, 0.1 }, { K::Thrown, 1.9 } }, 3.5, true, seen, hold_t);
+		REQUIRE(seen.size() == 5);
+		CHECK(seen[1].clip == uint32_t(VmClip::ThrowStart));
+		CHECK(seen[2].clip == uint32_t(VmClip::ThrowHold));
+		CHECK(seen[2].at == doctest::Approx(0.1 + 42.0 / 60.0));
+		CHECK(hold_t < 1.0f);
+		CHECK(hold_t > 0.9f);
+		CHECK(seen[3].clip == uint32_t(VmClip::Throw));
+		CHECK(seen[3].at == doctest::Approx(1.9));
+		CHECK(seen[3].time < 0.02f);
+		CHECK(seen[4].clip == uint32_t(VmClip::Idle));
+
+		run({ { K::HoldStarted, 0.1 }, { K::Thrown, 0.15 } }, 2.0, true, seen, hold_t);
+		REQUIRE(seen.size() >= 3);
+		CHECK(seen[2].clip == uint32_t(VmClip::Throw));
+		CHECK(seen[2].at == doctest::Approx(0.1 + 14.0 / 60.0));
+
+		run({ { K::HoldStarted, 0.1 }, { K::Thrown, 0.6 } }, 2.0, false, seen, hold_t);
+		REQUIRE(seen.size() >= 2);
+		CHECK(seen[1].clip == uint32_t(VmClip::Throw));
+		CHECK(seen[1].at == doctest::Approx(0.6));
+
+		anim::VmThrowFlow broken = flow;
+		broken.hold_loop_s = 0.0f;
+		CHECK_FALSE(broken.valid());
+		broken = flow;
+		broken.release_end_s = std::numeric_limits<float>::quiet_NaN();
+		CHECK_FALSE(broken.valid());
 	}
 
 	TEST_CASE("anim.viewmodel: E19 the animator's springs are at rest within the settle time after shots, a turn and a run") {

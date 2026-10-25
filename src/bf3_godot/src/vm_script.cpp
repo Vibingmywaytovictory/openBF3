@@ -261,7 +261,7 @@ KitRun run_kit(const sw::WeaponTable &p_table, size_t p_kit, const std::array<ui
 	}
 	d.idle(0.15);
 	d.mark("throw");
-	d.idle(1.6);
+	d.idle(2.2);
 
 	d.select(3);
 	d.wait_deployed(3, false);

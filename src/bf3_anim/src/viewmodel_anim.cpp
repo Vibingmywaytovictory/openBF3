@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <limits>
 #include <string>
 #include <system_error>
 
@@ -72,6 +73,10 @@ const char *vm_clip_name(VmClip p_clip) {
 			return "Knife";
 		case VmClip::Sprint:
 			return "Sprint";
+		case VmClip::ThrowStart:
+			return "ThrowStart";
+		case VmClip::ThrowHold:
+			return "ThrowHold";
 		case VmClip::Count:
 			break;
 	}
@@ -98,6 +103,8 @@ const char *vm_cue_name(VmCue::Kind p_kind) {
 			return "BoltStarted";
 		case VmCue::Kind::Thrown:
 			return "Thrown";
+		case VmCue::Kind::HoldStarted:
+			return "HoldStarted";
 	}
 	return "?";
 }
@@ -398,6 +405,9 @@ struct Action {
 	bool cut_in = false;
 	double fade_out_start = -1;
 	float fade_from = 1;
+	float offset = 0;
+	float loop = 0;
+	bool flow_release = false;
 };
 
 }
@@ -434,6 +444,12 @@ struct ViewmodelAnimator::Impl {
 	SpringState sway_x, sway_y, bob_amp, kick_back, kick_pitch, cam_pitch, cam_yaw;
 	float sway_tx = 0, sway_ty = 0, bob_target = 0;
 	std::unique_ptr<VmDeltaLoco, VmDeltaLocoDeleter> delta_loco;
+
+	VmThrowFlow flow;
+	bool has_flow = false;
+	bool next_pending = false;
+	double release_due = -1;
+	double last_release_cue = -1;
 
 	Impl(const Skeleton &p_rig, std::span<const VmClipRef, kVmClips> p_clips, const ViewmodelTuning &p_tuning) :
 			rig(p_rig), tuning(p_tuning) {
@@ -526,8 +542,9 @@ struct ViewmodelAnimator::Impl {
 		const float x = kViewmodelCrossfadeSeconds;
 		const float t = float(p_t - p_a.start);
 		float w = p_a.cut_in ? 1.0f : clamp01(t / x + (t >= 0 ? 1e-6f : 0.0f));
-		if (p_a.seconds > 0.0f && !p_a.procedural) {
-			w = std::min(w, clamp01((p_a.seconds - t) / x));
+		const float span = p_a.loop > 0.0f ? std::numeric_limits<float>::max() : p_a.seconds;
+		if (span > 0.0f && !p_a.procedural) {
+			w = std::min(w, clamp01((span - t) / x));
 		} else if (p_a.seconds > 0.0f) {
 			w = t < p_a.seconds ? w : 0.0f;
 		} else {
@@ -540,6 +557,14 @@ struct ViewmodelAnimator::Impl {
 		return w;
 	}
 
+	float clip_time(const Action &p_a, double p_t) const {
+		const float t = p_a.offset + float(p_t - p_a.start);
+		if (p_a.loop > 0.0f) {
+			return std::fmod(std::max(0.0f, t), p_a.loop);
+		}
+		return t;
+	}
+
 	bool finished(const Action &p_a, double p_t) const {
 		if (!p_a.active) {
 			return true;
@@ -548,12 +573,15 @@ struct ViewmodelAnimator::Impl {
 		if (p_a.fade_out_start >= 0 && p_t - p_a.fade_out_start >= kViewmodelCrossfadeSeconds) {
 			return true;
 		}
+		if (p_a.loop > 0.0f) {
+			return false;
+		}
 		return t >= double(p_a.seconds);
 	}
 
 	void action_pose(const Action &p_a, double p_t, LocalPose &r_pose) {
 		if (!p_a.procedural) {
-			apply_clip_at(p_a.role, float(p_t - p_a.start), r_pose);
+			apply_clip_at(p_a.role, clip_time(p_a, p_t), r_pose);
 		}
 	}
 
@@ -596,8 +624,94 @@ struct ViewmodelAnimator::Impl {
 		}
 	}
 
+	void start_release(double p_time, float p_offset) {
+		start_action(VmClip::Throw, p_time, false);
+		cur.offset = std::clamp(p_offset, 0.0f, cur.seconds);
+		cur.seconds = std::max(0.0f, cur.seconds - cur.offset);
+		cur.flow_release = true;
+		release_due = -1;
+	}
+
+	void release(double p_time) {
+		if (p_time == last_release_cue) {
+			return;
+		}
+		last_release_cue = p_time;
+		if (cur.active && cur.role == VmClip::ThrowStart) {
+			const double from = cur.start + double(flow.release_from_s);
+			if (p_time < from) {
+				release_due = from;
+			} else {
+				start_release(p_time, flow.release_in_s);
+			}
+			return;
+		}
+		start_release(p_time, 0.0f);
+	}
+
+	void advance_flow(double p_time) {
+		if (!has_flow) {
+			return;
+		}
+		for (int guard = 0; guard < 4; ++guard) {
+			if (release_due >= 0 && p_time >= release_due) {
+				start_release(release_due, flow.release_in_s);
+				continue;
+			}
+			if (cur.active && cur.role == VmClip::ThrowStart && release_due < 0 &&
+					p_time >= cur.start + double(flow.hold_from_s)) {
+				start_action(VmClip::ThrowHold, cur.start + double(flow.hold_from_s), false);
+				cur.loop = flow.hold_loop_s;
+				continue;
+			}
+			if (cur.active && cur.flow_release && cur.fade_out_start < 0) {
+				const double end = cur.start + double(flow.release_end_s - cur.offset);
+				if (p_time >= end) {
+					if (next_pending) {
+						next_pending = false;
+						start_action(VmClip::Deploy, end, false);
+					} else {
+						fade_out(end);
+					}
+					continue;
+				}
+			}
+			break;
+		}
+	}
+
 	void on_cue(const VmCue &p_cue, const ViewmodelFrameInput &p_input) {
 		const double t = p_cue.time_s;
+		advance_flow(t);
+		if (has_flow) {
+			switch (p_cue.kind) {
+				case VmCue::Kind::HoldStarted:
+					next_pending = false;
+					release_due = -1;
+					start_action(VmClip::ThrowStart, t, false);
+					return;
+				case VmCue::Kind::Shot:
+					++shots;
+					release(t);
+					return;
+				case VmCue::Kind::Thrown:
+					release(t);
+					return;
+				case VmCue::Kind::ReloadStarted:
+					if (cur.active && cur.flow_release && cur.fade_out_start < 0) {
+						next_pending = true;
+					} else {
+						start_action(VmClip::Deploy, t, false);
+					}
+					return;
+				case VmCue::Kind::DeployStarted:
+					next_pending = false;
+					release_due = -1;
+					break;
+				default:
+					break;
+			}
+		}
 		switch (p_cue.kind) {
 			case VmCue::Kind::Shot: {
 				++shots;
@@ -653,6 +767,7 @@ struct ViewmodelAnimator::Impl {
 			case VmCue::Kind::DeployFinished:
 			case VmCue::Kind::ReloadCommitted:
 			case VmCue::Kind::ReloadFinished:
+			case VmCue::Kind::HoldStarted:
 				break;
 		}
 	}
@@ -663,6 +778,7 @@ struct ViewmodelAnimator::Impl {
 		for (const VmCue &c : p_cues) {
 			on_cue(c, p_input);
 		}
+		advance_flow(t);
 		time = t;
 		have_time = true;
 		if (prev.active && (finished(prev, t) || weight_of(prev, t) <= 0.0f)) {
@@ -774,7 +890,7 @@ struct ViewmodelAnimator::Impl {
 				spring_at_rest(tuning.camera_recoil, 0.0f, cam_yaw);
 		if (cur.active) {
 			r_out.action_clip = uint32_t(cur.role);
-			r_out.action_time_s = float(t - cur.start);
+			r_out.action_time_s = clip_time(cur, t);
 			r_out.action_start_s = cur.start;
 			r_out.action_weight = weight_of(cur, t) * ((cur.role == VmClip::Fire || cur.role == VmClip::FireSingle) ? 1.0f - ads : 1.0f);
 			r_out.action_procedural = cur.procedural;
@@ -803,6 +919,9 @@ struct ViewmodelAnimator::Impl {
 		shots = 0;
 		sway_x = sway_y = bob_amp = kick_back = kick_pitch = cam_pitch = cam_yaw = SpringState{};
 		sway_tx = sway_ty = bob_target = 0;
+		next_pending = false;
+		release_due = -1;
+		last_release_cue = -1;
 		if (delta_loco) {
 			vm_loco_reset(*delta_loco);
 		}
@@ -931,6 +1050,23 @@ void vm_loco_reset(VmDeltaLoco &r_loco) {
 	r_loco.run_frame = r_loco.loco.run.start_frame;
 	r_loco.sprint_frame = r_loco.loco.sprint.start_frame;
 	r_loco.move_w = 0.0f;
+}
+
+bool VmThrowFlow::valid() const {
+	auto ok = [](float p_v) { return std::isfinite(p_v) && p_v >= 0.0f; };
+	return ok(release_from_s) && ok(release_until_s) && ok(release_in_s) && ok(hold_from_s) && ok(release_end_s) &&
+			std::isfinite(hold_loop_s) && hold_loop_s > 0.0f && release_until_s >= release_from_s &&
+			release_end_s > release_in_s;
+}
+
+void ViewmodelAnimator::set_throw_flow(const VmThrowFlow &p_flow) {
+	Impl &m = *impl_;
+	m.flow = p_flow;
+	m.has_flow = p_flow.valid() && m.has_clip(VmClip::ThrowStart) && m.has_clip(VmClip::ThrowHold) &&
+			m.has_clip(VmClip::Throw);
+	m.next_pending = false;
+	m.release_due = -1;
+	m.last_release_cue = -1;
 }
 
 void ViewmodelAnimator::set_locomotion(const VmLocomotion &p_locomotion) {

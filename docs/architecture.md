@@ -199,6 +199,11 @@ These are structural, known, and listed so nobody mistakes them for design inten
   and squad kit icons show only in the moment fixture. Data.UINametagComp.getUIColor is native, so the SquadList takes its
   slot 0 as the squadlist txt field's authored colour (e4ff9d; only the icons' setRGB changes the look) and leaves out
   tint2Texts' shadow and glow filters, whose colours are not in the install.
+* The 1P hand grenade plays its state flow (`read_hold_release_flow`, 1P_WeaponHandlingWrapper to
+  1P_Handgrenade_FireStateFlow): FireStart on kHoldStarted, the Fire loop from FireStart's end branch, FireRelease on
+  kThrown from its branch-in tick, then Deploy at the release's end branch when the next grenade's reload has started
+  (BulletsLeftInGun read as a grenade left), else idle. Its transitions use the 0.1 s crossfade, not the data's blend
+  assets, and the sim's next grenade is ready (ReloadTime 1.0 s from 0.2 s after the throw) 0.62 s before Deploy ends.
 * The container, EBX, payload, resource, level-soup and lag-compensation readers were written as ports of the
   earlier Rust experiment (IW4L); on 2026-10-24 the owner decided to keep them as they are, not re-derive them, and the
   install tests hold their numbers. No Rust is left in the tree.
