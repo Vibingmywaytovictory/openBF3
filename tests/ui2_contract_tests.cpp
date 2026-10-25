@@ -17,10 +17,10 @@ namespace {
 
 constexpr float kPi = 3.14159265358979f;
 
-static_assert(std::size(ui::kHudBindings) == 235);
-static_assert(ui::hud_binding_count(ui::HudBindKind::Model) == 150);
-static_assert(ui::hud_binding_count(ui::HudBindKind::Client) == 35);
-static_assert(ui::hud_binding_count(ui::HudBindKind::Unused) == 50);
+static_assert(std::size(ui::kHudBindings) == 515);
+static_assert(ui::hud_binding_count(ui::HudBindKind::Model) == 226);
+static_assert(ui::hud_binding_count(ui::HudBindKind::Client) == 131);
+static_assert(ui::hud_binding_count(ui::HudBindKind::Unused) == 158);
 static_assert(ui::hud_binding_count("UIWeaponCompData") == 63);
 static_assert(ui::hud_binding_count("UISoldierCompData") == 16);
 static_assert(ui::hud_binding_count("UICapturepointCompData") == 12);
@@ -32,6 +32,16 @@ static_assert(ui::hud_binding_count("UISpawnPointCompData") == 6);
 static_assert(ui::hud_binding_count("UISpawnLogicCompData") == 4);
 static_assert(ui::hud_binding_count("UISquadCompData") == 30);
 static_assert(ui::hud_binding_count("UITeamCompData") == 35);
+static_assert(ui::hud_binding_count("UIKillCardCompData") == 27);
+static_assert(ui::hud_binding_count("UIKitCompData") == 4);
+static_assert(ui::hud_binding_count("UICustomizationCompData") == 59);
+static_assert(ui::hud_binding_count("UIPreRoundCompData") == 3);
+static_assert(ui::hud_binding_count("UIEndOfRoundCompData") == 52);
+static_assert(ui::hud_binding_count("UISettingsCompData") == 89);
+static_assert(ui::hud_binding_count("UILevelCompData") == 23);
+static_assert(ui::hud_binding_count("UIIngameMenuCompData") == 1);
+static_assert(ui::hud_binding_count("UIPopupCompData") == 7);
+static_assert(ui::hud_binding_count("UserComponentData") == 15);
 static_assert(std::is_trivially_copyable_v<ui::HudModel>);
 static_assert(std::is_standard_layout_v<ui::HudModel>);
 
@@ -46,7 +56,7 @@ bool near(float p_a, float p_b, float p_eps) {
 TEST_SUITE("ui2-contract") {
 	TEST_CASE("binding rows: every bound component, no duplicate, Model fields are snake_case of the source") {
 		std::set<std::string_view> components(std::begin(ui::kHudBoundComponents), std::end(ui::kHudBoundComponents));
-		CHECK(components.size() == 11);
+		CHECK(components.size() == 21);
 		std::set<std::pair<std::string_view, std::string_view>> seen;
 		size_t sum = 0;
 		for (std::string_view c : ui::kHudBoundComponents) {

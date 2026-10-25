@@ -368,6 +368,41 @@ struct HudKillCard {
 	float distance_m = -1.0f;
 	float killer_health = 0.0f;
 	float seconds_left = 0.0f;
+
+	HudPlayerName killer_name{};
+	int32_t killer_rank = 0;
+	int32_t killer_score = 0;
+	uint32_t killer_weapon_name = 0;
+	uint32_t killer_weapon_icon = 0;
+	bool is_suicide = false;
+	int32_t killer_player_kills = 0;
+	int32_t player_killer_kills = 0;
+	uint32_t killer_weapon_spec1_id = 0;
+	uint32_t killer_weapon_spec1_name = 0;
+	uint32_t killer_weapon_spec2_id = 0;
+	uint32_t killer_weapon_spec2_name = 0;
+	uint32_t killer_weapon_spec3_id = 0;
+	uint32_t killer_weapon_spec3_name = 0;
+	int32_t killer_weapon_type = 0;
+	int32_t killer_vehicle_seat = -1;
+	HudText killer_weapon_image_path{};
+	HudText killer_rank_image_path{};
+	int32_t killer_weapon_service_stars = 0;
+	int32_t killer_kit_service_stars = 0;
+	HudText killer_dogtag_image_path{};
+	HudText killer_basic_dog_tag{};
+	HudText killer_advanced_dog_tag{};
+	bool is_bad_luck = false;
+	bool is_pro = false;
+};
+
+enum class HudEorStage : uint8_t { None, Fade, PreEor, Scoreboard, Eor };
+
+struct HudBestWeapon {
+	uint32_t item_id = 0;
+	uint32_t name_sid_hash = 0;
+	int32_t kills = 0;
+	HudText image_path{};
 };
 
 struct HudEndOfRound {
@@ -378,6 +413,32 @@ struct HudEndOfRound {
 	int32_t kill_limit = 0;
 	std::array<uint8_t, kHudTopPlayers> top_players{ kHudNoPlayer, kHudNoPlayer, kHudNoPlayer };
 	float seconds_to_next_round = 0.0f;
+
+	HudEorStage stage = HudEorStage::None;
+	float stage_seconds = 0.0f;
+	int32_t winning_team = 0;
+	bool local_player_in_winning_team = false;
+	float time_until_level_change = 0.0f;
+	int32_t combat_score = 0;
+	int32_t total_score = 0;
+	int32_t kills = 0;
+	int32_t deaths = 0;
+	float kill_death_ratio = 0.0f;
+	HudBestWeapon best_weapon_info{};
+	float round_duration = 0.0f;
+	float kills_per_minute = 0.0f;
+	int32_t longest_streak = 0;
+	int32_t longest_nemesis_streak = 0;
+	int32_t dogtags_taken = 0;
+	float longest_headshot = 0.0f;
+	float total_playtime = 0.0f;
+	float score_per_minute = 0.0f;
+	HudPlayerName name{};
+	std::array<int32_t, 2> team_results{};
+	int32_t player_team_index = 0;
+	bool in_match = false;
+	bool is_ranked = false;
+	bool is_spectator = false;
 };
 
 struct HudSpawnScreen {
@@ -397,6 +458,9 @@ struct HudPreRound {
 	bool counting_down = false;
 	float seconds_left = 0.0f;
 	bool input_restricted = false;
+
+	int32_t count_left = 0;
+	int32_t players_needed = 0;
 };
 
 inline constexpr size_t kHudDamageFeedSize = 8;
@@ -411,6 +475,85 @@ struct HudDamageHit {
 struct HudDamageFeed {
 	uint32_t newest_serial = 0;
 	std::array<HudDamageHit, kHudDamageFeedSize> hits{};
+};
+
+inline constexpr size_t kHudGridItems = 32;
+inline constexpr size_t kHudAccessorySlots = 4;
+inline constexpr size_t kHudMenuEntries = 8;
+
+struct HudItem {
+	uint32_t item_id = 0;
+	uint32_t name_sid_hash = 0;
+	HudText image_path{};
+};
+
+struct HudItemList {
+	uint8_t count = 0;
+	std::array<HudItem, kHudGridItems> items{};
+};
+
+struct HudKitEntry {
+	uint32_t name_sid_hash = 0;
+	int32_t hud_icon = 0;
+	std::array<HudItem, kHudSpawnKitItems> items{};
+};
+
+struct HudKit {
+	int32_t selected_kit = 0;
+	int32_t number_of_kits = int32_t(kHudKitCount);
+	uint32_t selected_kit_name = 0;
+};
+
+struct HudCustomization {
+	HudItem kit_primary_weapon{};
+	HudItem kit_secondary_weapon{};
+	HudItem kit_gadget1{};
+	HudItem kit_gadget2{};
+	HudItem kit_specialization{};
+	HudItem weapon_accessory_main{};
+	HudItem weapon_accessory1{};
+	HudItem weapon_accessory2{};
+	HudItem weapon_accessory3{};
+	HudItem weapon_accessory4{};
+	std::array<HudItemList, kHudSpawnKitItems> kit_grid_data{};
+	std::array<int16_t, kHudSpawnKitItems> kit_grid_selected{};
+	std::array<HudItemList, kHudAccessorySlots> accessory_grid{};
+	std::array<int16_t, kHudAccessorySlots> accessory_selected{};
+	std::array<HudKitEntry, kHudKitCount> kits_data{};
+	int32_t customization_team = 0;
+};
+
+struct HudSettings {
+	HudText current_game_mode{};
+	uint32_t current_game_mode_name = 0;
+	bool is_pc = true;
+};
+
+struct HudLevel {
+	uint32_t current_level = 0;
+};
+
+enum class HudMenuAction : uint8_t { Resume, Scoreboard, Suicide, Options, Quit };
+
+struct HudMenuEntry {
+	uint32_t label_sid_hash = 0;
+	HudMenuAction action = HudMenuAction::Resume;
+	bool enabled = false;
+};
+
+struct HudMenuList {
+	uint8_t count = 0;
+	std::array<HudMenuEntry, kHudMenuEntries> entries{};
+};
+
+struct HudIngameMenu {
+	HudMenuList menu_entries{};
+};
+
+struct HudUser {
+	HudPlayerName user_name{};
+	bool is_ingame = false;
+	bool is_in_menu = false;
 };
 
 struct HudModel {
@@ -438,6 +581,12 @@ struct HudModel {
 	HudSpawnScreen spawn_screen;
 	HudPreRound pre_round;
 	HudDamageFeed damage;
+	HudKit kit;
+	HudCustomization customization;
+	HudSettings settings;
+	HudLevel level;
+	HudIngameMenu ingame_menu;
+	HudUser user;
 };
 static_assert(std::is_trivially_copyable_v<HudModel>);
 
@@ -455,6 +604,7 @@ enum class HudWave : uint8_t {
 	M4,
 	M5,
 	M7,
+	Screens,
 };
 
 struct HudBinding {
@@ -701,6 +851,288 @@ inline constexpr HudBinding kHudBindings[] = {
 	{ "UITeamCompData", "ButtonLayout", HudBindKind::Client, HudWave::None, "" },
 	{ "UITeamCompData", "Spectators", HudBindKind::Unused, HudWave::None, "" },
 	{ "UITeamCompData", "SortedPlayers", HudBindKind::Model, HudWave::M2b, "sorted_players" },
+	{ "UIKillCardCompData", "KillerName", HudBindKind::Model, HudWave::Screens, "killer_name" },
+	{ "UIKillCardCompData", "KillerRank", HudBindKind::Model, HudWave::Screens, "killer_rank" },
+	{ "UIKillCardCompData", "KillerHealth", HudBindKind::Model, HudWave::Screens, "killer_health" },
+	{ "UIKillCardCompData", "KillerKit", HudBindKind::Model, HudWave::Screens, "killer_kit" },
+	{ "UIKillCardCompData", "KillerScore", HudBindKind::Model, HudWave::Screens, "killer_score" },
+	{ "UIKillCardCompData", "KillerWeaponName", HudBindKind::Model, HudWave::Screens, "killer_weapon_name" },
+	{ "UIKillCardCompData", "KillerWeaponIcon", HudBindKind::Model, HudWave::Screens, "killer_weapon_icon" },
+	{ "UIKillCardCompData", "isSuicide", HudBindKind::Model, HudWave::Screens, "is_suicide" },
+	{ "UIKillCardCompData", "KillerPlayerKills", HudBindKind::Model, HudWave::Screens, "killer_player_kills" },
+	{ "UIKillCardCompData", "PlayerKillerKills", HudBindKind::Model, HudWave::Screens, "player_killer_kills" },
+	{ "UIKillCardCompData", "KillerWeaponSpec1Id", HudBindKind::Model, HudWave::Screens, "killer_weapon_spec1_id" },
+	{ "UIKillCardCompData", "KillerWeaponSpec1Name", HudBindKind::Model, HudWave::Screens, "killer_weapon_spec1_name" },
+	{ "UIKillCardCompData", "KillerWeaponSpec2Id", HudBindKind::Model, HudWave::Screens, "killer_weapon_spec2_id" },
+	{ "UIKillCardCompData", "KillerWeaponSpec2Name", HudBindKind::Model, HudWave::Screens, "killer_weapon_spec2_name" },
+	{ "UIKillCardCompData", "KillerWeaponSpec3Id", HudBindKind::Model, HudWave::Screens, "killer_weapon_spec3_id" },
+	{ "UIKillCardCompData", "KillerWeaponSpec3Name", HudBindKind::Model, HudWave::Screens, "killer_weapon_spec3_name" },
+	{ "UIKillCardCompData", "KillerWeaponType", HudBindKind::Model, HudWave::Screens, "killer_weapon_type" },
+	{ "UIKillCardCompData", "KillerVehicleSeat", HudBindKind::Model, HudWave::Screens, "killer_vehicle_seat" },
+	{ "UIKillCardCompData", "KillerWeaponImagePath", HudBindKind::Model, HudWave::Screens, "killer_weapon_image_path" },
+	{ "UIKillCardCompData", "KillerRankImagePath", HudBindKind::Model, HudWave::Screens, "killer_rank_image_path" },
+	{ "UIKillCardCompData", "KillerWeaponServiceStars", HudBindKind::Model, HudWave::Screens,
+			"killer_weapon_service_stars" },
+	{ "UIKillCardCompData", "KillerKitServiceStars", HudBindKind::Model, HudWave::Screens, "killer_kit_service_stars" },
+	{ "UIKillCardCompData", "KillerDogtagImagePath", HudBindKind::Model, HudWave::Screens, "killer_dogtag_image_path" },
+	{ "UIKillCardCompData", "KillerBasicDogTag", HudBindKind::Model, HudWave::Screens, "killer_basic_dog_tag" },
+	{ "UIKillCardCompData", "KillerAdvancedDogTag", HudBindKind::Model, HudWave::Screens, "killer_advanced_dog_tag" },
+	{ "UIKillCardCompData", "isBadLuck", HudBindKind::Model, HudWave::Screens, "is_bad_luck" },
+	{ "UIKillCardCompData", "IsPro", HudBindKind::Model, HudWave::Screens, "is_pro" },
+	{ "UIKitCompData", "SelectedKit", HudBindKind::Model, HudWave::Screens, "selected_kit" },
+	{ "UIKitCompData", "NumberOfKits", HudBindKind::Model, HudWave::Screens, "number_of_kits" },
+	{ "UIKitCompData", "SelectedKitName", HudBindKind::Model, HudWave::Screens, "selected_kit_name" },
+	{ "UIKitCompData", "SelectedVehicleName", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustomizeInfo", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustSelectedWeaponCategory", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustSelectedVehicle", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustSelectedVehicleCategory", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustRecievedStats", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "KitPrimaryWeapon", HudBindKind::Model, HudWave::Screens, "kit_primary_weapon" },
+	{ "UICustomizationCompData", "KitSecondaryWeapon", HudBindKind::Model, HudWave::Screens, "kit_secondary_weapon" },
+	{ "UICustomizationCompData", "KitGadget1", HudBindKind::Model, HudWave::Screens, "kit_gadget1" },
+	{ "UICustomizationCompData", "KitGadget2", HudBindKind::Model, HudWave::Screens, "kit_gadget2" },
+	{ "UICustomizationCompData", "KitSpecialization", HudBindKind::Model, HudWave::Screens, "kit_specialization" },
+	{ "UICustomizationCompData", "SelectedKitProgression", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "WeaponAccessoryMain", HudBindKind::Model, HudWave::Screens, "weapon_accessory_main" },
+	{ "UICustomizationCompData", "WeaponAccessory1", HudBindKind::Model, HudWave::Screens, "weapon_accessory1" },
+	{ "UICustomizationCompData", "WeaponAccessory2", HudBindKind::Model, HudWave::Screens, "weapon_accessory2" },
+	{ "UICustomizationCompData", "WeaponAccessory3", HudBindKind::Model, HudWave::Screens, "weapon_accessory3" },
+	{ "UICustomizationCompData", "WeaponAccessory4", HudBindKind::Model, HudWave::Screens, "weapon_accessory4" },
+	{ "UICustomizationCompData", "LandVehiclesData", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "LandVehicleProperty1", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "LandVehicleProperty2", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "LandVehicleProperty3", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "AirVehiclesData", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "AirVehiclePilotProperty1", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "AirVehiclePilotProperty2", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "AirVehiclePilotProperty3", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "AirVehicleGunnerProperty1", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "AirVehicleGunnerProperty2", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "AirVehicleGunnerProperty3", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustSelectedAccessory1", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustSelectedAccessory2", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustSelectedAccessory3", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustSelectedAccessory4", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustSelectedAccessory5", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustSelectedAccessory6", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustPrimaryWeapon", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustSecondaryWeapon", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustGadgetOne", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustGadgetTwo", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustSpecialization", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "SaveAccessoriesEnabled", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "SaveLoadoutEnabled", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "KitAppearance", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustSelectedAppearance", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustomizationFrontend", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "SpawnIsSelectingItem", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "SpawnSelectedSlot", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "KitGridData", HudBindKind::Model, HudWave::Screens, "kit_grid_data" },
+	{ "UICustomizationCompData", "KitGridSelected", HudBindKind::Model, HudWave::Screens, "kit_grid_selected" },
+	{ "UICustomizationCompData", "SaveAppearanceEnabled", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "SaveVehicleAccessoriesEnabled", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustomizationTeam", HudBindKind::Model, HudWave::Screens, "customization_team" },
+	{ "UICustomizationCompData", "CustomizationTabs", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "DeployTabs", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "IsCustomizationUnseen", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "ButtonLayout", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustomizationHeader", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "CustomizationSubHeader", HudBindKind::Client, HudWave::None, "" },
+	{ "UICustomizationCompData", "KitsData", HudBindKind::Model, HudWave::Screens, "kits_data" },
+	{ "UICustomizationCompData", "HasGunnerSeat", HudBindKind::Unused, HudWave::None, "" },
+	{ "UICustomizationCompData", "StoredOptionAppearanceForKit", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIPreRoundCompData", "CountLeft", HudBindKind::Model, HudWave::Screens, "count_left" },
+	{ "UIPreRoundCompData", "MessageSID", HudBindKind::Client, HudWave::None, "" },
+	{ "UIPreRoundCompData", "TitleSID", HudBindKind::Client, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "WinningTeam", HudBindKind::Model, HudWave::Screens, "winning_team" },
+	{ "UIEndOfRoundCompData", "LocalPlayerInWinningTeam", HudBindKind::Model, HudWave::Screens,
+			"local_player_in_winning_team" },
+	{ "UIEndOfRoundCompData", "TimeUntilLevelChange", HudBindKind::Model, HudWave::Screens, "time_until_level_change" },
+	{ "UIEndOfRoundCompData", "Unlocks", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "BucketUnlocks", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "RankUnlocks", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "StatUnlocks", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "Awards", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "BucketUnlockLevels", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "RankUnlockLevels", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "AssaultScore", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "EngineerScore", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "ReconScore", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "SupportScore", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "CombatScore", HudBindKind::Model, HudWave::Screens, "combat_score" },
+	{ "UIEndOfRoundCompData", "AwardScore", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "UnlockScore", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "TotalScore", HudBindKind::Model, HudWave::Screens, "total_score" },
+	{ "UIEndOfRoundCompData", "Kills", HudBindKind::Model, HudWave::Screens, "kills" },
+	{ "UIEndOfRoundCompData", "Deaths", HudBindKind::Model, HudWave::Screens, "deaths" },
+	{ "UIEndOfRoundCompData", "KillDeathRatio", HudBindKind::Model, HudWave::Screens, "kill_death_ratio" },
+	{ "UIEndOfRoundCompData", "BestWeaponInfo", HudBindKind::Model, HudWave::Screens, "best_weapon_info" },
+	{ "UIEndOfRoundCompData", "BestVehicleInfo", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "RoundDuration", HudBindKind::Model, HudWave::Screens, "round_duration" },
+	{ "UIEndOfRoundCompData", "KillsPerMinute", HudBindKind::Model, HudWave::Screens, "kills_per_minute" },
+	{ "UIEndOfRoundCompData", "LongestStreak", HudBindKind::Model, HudWave::Screens, "longest_streak" },
+	{ "UIEndOfRoundCompData", "LongestNemesisStreak", HudBindKind::Model, HudWave::Screens, "longest_nemesis_streak" },
+	{ "UIEndOfRoundCompData", "DogtagsTaken", HudBindKind::Model, HudWave::Screens, "dogtags_taken" },
+	{ "UIEndOfRoundCompData", "LongestHeadshot", HudBindKind::Model, HudWave::Screens, "longest_headshot" },
+	{ "UIEndOfRoundCompData", "TotalPlaytime", HudBindKind::Model, HudWave::Screens, "total_playtime" },
+	{ "UIEndOfRoundCompData", "ScorePerMinute", HudBindKind::Model, HudWave::Screens, "score_per_minute" },
+	{ "UIEndOfRoundCompData", "Name", HudBindKind::Model, HudWave::Screens, "name" },
+	{ "UIEndOfRoundCompData", "RankName", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "CurrentRankImage", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "NextRankImage", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "RSPMessage", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "RoundStartRankImage", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "TeamResults", HudBindKind::Model, HudWave::Screens, "team_results" },
+	{ "UIEndOfRoundCompData", "PlayerTeamIndex", HudBindKind::Model, HudWave::Screens, "player_team_index" },
+	{ "UIEndOfRoundCompData", "AssignmentUnlocks", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "HasKarkandLicense", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "ButtonLayout", HudBindKind::Client, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "EORTabsSetup", HudBindKind::Client, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "MatchStats", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "InMatch", HudBindKind::Model, HudWave::Screens, "in_match" },
+	{ "UIEndOfRoundCompData", "LevelChangeTimerText", HudBindKind::Client, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "IsRanked", HudBindKind::Model, HudWave::Screens, "is_ranked" },
+	{ "UIEndOfRoundCompData", "IsSpectator", HudBindKind::Model, HudWave::Screens, "is_spectator" },
+	{ "UIEndOfRoundCompData", "ScoreMultiplier", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "VehicleUnlockLevels", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "KitUnlockLevels", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "PlayerWonPositionData", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "CurrentGameMode", HudBindKind::Model, HudWave::Screens, "current_game_mode" },
+	{ "UISettingsCompData", "Platform", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "Ps3EnterButton", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "MasterVolume", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "MusicVolume", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "DialogueVolume", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "YourSoundSystem", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "VoiceOverLanguage", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "Brightness", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "Contrast", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "Resolution", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "TextureQuality", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "ShadowQuality", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "EffectsQuality", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "AntiAliasing", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "AnisotropicFilter", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "VSync", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "AmbientOcclusion", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "VerticalLook", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "VerticalFlight", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "Vibration", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "Sensitivity", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "Subtitles", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "HintSystem", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "AimAssist", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "ReloadHint", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "SoldierButtons", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "SoldierSticks", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "VehicleButtons", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "VehicleSticks", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "HeliButtons", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "HeliSticks", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "CurrentGameModeName", HudBindKind::Model, HudWave::Screens, "current_game_mode_name" },
+	{ "UISettingsCompData", "FullscreenEnabled", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "OverallGraphicsQuality", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "FullscreenScreen", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "FullscreenEnabledBool", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "SettingsChanged", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "SetOptionValue", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "SetOptionKey", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "ScreenSafeAreaWidth", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "ScreenSafeAreaHeight", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "ZoomToggle", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "MeshQuality", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "TransparentShadows", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "MotionBlur", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "UndergrowthQuality", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "TerrainQuality", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "AntiAliasingDeferred", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "AntiAliasingPost", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "FieldOfView", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "KeyBindings", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "VideoSettingsChanged", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "ExitingOptions", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "KeyBindingsColumn", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "KeyBindingsRow", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "KeyBindingMode", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "VerticalLand", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "CurrentGameModeClass", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "SelectedTab", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "StereoMode", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "Stereoscopy", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "StereoConvergence", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "MotionBlurEnabled", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "MouseRawInput", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "MouseSensitivity", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "LayoutHighlighted", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "LayoutAlternativeSelected", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "LayoutAlternativesSelected", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "CalibrationDone", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "ControllerIndex", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "JetButtons", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "JetSticks", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "DimmerEnabled", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "ButtonLayout", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "SetKeyBindingMode", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "VendorAmd", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "MouseSensitivityVehicle", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "ColorblindSupport", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "NetworkFrequencyFactor", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "MinimapType", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "MinimapTextureOpacity", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "MinimapZoomWhenMapIsLarge", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "MinimapZoomWhenMapIsSmall", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "ConsoleAntiAlias", HudBindKind::Unused, HudWave::None, "" },
+	{ "UISettingsCompData", "ShowSelect", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "BreathToggle", HudBindKind::Client, HudWave::None, "" },
+	{ "UISettingsCompData", "IsPC", HudBindKind::Model, HudWave::Screens, "is_pc" },
+	{ "UISettingsCompData", "IsPS3JapaneseDD", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "BuiltLevels", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "BuiltSPLevels", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "BuiltMPLevels", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "BuiltCoopLevels", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "BuiltAnyMPLevels", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "BuiltAnyCoopLevels", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "SelectedLevelId", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "SelectedLevelName", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "SelectedLevelDescription", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "SelectedLevelImage", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "SelectedLevelCompletedDifficulty", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "QuickMatchGamemode", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "QuickMatchHardcore", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "QuickMatchMap", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "QuickMatchRegion", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "QuickMatchServerType", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "LoadMPLevelsLocally", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "GameModes", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "SelectedCoopLevel", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "SelectedCoopDifficulty", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "SelectedCoopLeaderboardMission", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "UnlockedSPLevels", HudBindKind::Unused, HudWave::None, "" },
+	{ "UILevelCompData", "CurrentLevel", HudBindKind::Model, HudWave::Screens, "current_level" },
+	{ "UIIngameMenuCompData", "MenuEntries", HudBindKind::Model, HudWave::Screens, "menu_entries" },
+	{ "UIPopupCompData", "PopupTitle", HudBindKind::Client, HudWave::None, "" },
+	{ "UIPopupCompData", "PopupText", HudBindKind::Client, HudWave::None, "" },
+	{ "UIPopupCompData", "PopupType", HudBindKind::Client, HudWave::None, "" },
+	{ "UIPopupCompData", "PopupButtons", HudBindKind::Client, HudWave::None, "" },
+	{ "UIPopupCompData", "PopupIsVisible", HudBindKind::Client, HudWave::None, "" },
+	{ "UIPopupCompData", "ShowDimmer", HudBindKind::Client, HudWave::None, "" },
+	{ "UIPopupCompData", "PopupId", HudBindKind::Client, HudWave::None, "" },
+	{ "UserComponentData", "UserName", HudBindKind::Model, HudWave::Screens, "user_name" },
+	{ "UserComponentData", "NeedToPressStart", HudBindKind::Unused, HudWave::None, "" },
+	{ "UserComponentData", "HasPressedStart", HudBindKind::Unused, HudWave::None, "" },
+	{ "UserComponentData", "WidgetPath", HudBindKind::Unused, HudWave::None, "" },
+	{ "UserComponentData", "IsIngame", HudBindKind::Model, HudWave::Screens, "is_ingame" },
+	{ "UserComponentData", "NeedToShowStartupVideos", HudBindKind::Unused, HudWave::None, "" },
+	{ "UserComponentData", "InsufficientSpace", HudBindKind::Unused, HudWave::None, "" },
+	{ "UserComponentData", "ArrivingFromLauncher", HudBindKind::Unused, HudWave::None, "" },
+	{ "UserComponentData", "IsOpenBeta", HudBindKind::Unused, HudWave::None, "" },
+	{ "UserComponentData", "IngameMenuHighlightedRow", HudBindKind::Client, HudWave::None, "" },
+	{ "UserComponentData", "StartSinglePlayerMenu", HudBindKind::Unused, HudWave::None, "" },
+	{ "UserComponentData", "IsInMenu", HudBindKind::Model, HudWave::Screens, "is_in_menu" },
+	{ "UserComponentData", "AllowIdleMovie", HudBindKind::Unused, HudWave::None, "" },
+	{ "UserComponentData", "ShowXPack1Obsolete", HudBindKind::Unused, HudWave::None, "" },
+	{ "UserComponentData", "UserGeneratedContentEnabled", HudBindKind::Unused, HudWave::None, "" },
 };
 
 inline constexpr std::span<const HudBinding> hud_bindings() {
@@ -719,6 +1151,16 @@ inline constexpr std::string_view kHudBoundComponents[] = {
 	"UISpawnLogicCompData",
 	"UISquadCompData",
 	"UITeamCompData",
+	"UIKillCardCompData",
+	"UIKitCompData",
+	"UICustomizationCompData",
+	"UIPreRoundCompData",
+	"UIEndOfRoundCompData",
+	"UISettingsCompData",
+	"UILevelCompData",
+	"UIIngameMenuCompData",
+	"UIPopupCompData",
+	"UserComponentData",
 };
 
 constexpr size_t hud_binding_count(std::string_view p_component) {

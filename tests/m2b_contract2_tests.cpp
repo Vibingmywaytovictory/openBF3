@@ -45,18 +45,18 @@ void pending(const char *p_key, const char *p_row, const char *p_reason) {
 }
 
 constexpr size_t kM2aHudModelSize = 9016;
-constexpr size_t kM2bHudModelSize = 9312;
+constexpr size_t kHudModelSize = 53920;
 
-static_assert(sizeof(ui::HudKillCard) == 32);
+static_assert(sizeof(ui::HudKillCard) == 776 && offsetof(ui::HudKillCard, killer_name) == 32);
 static_assert(offsetof(ui::HudKillCard, killer) == 5 && offsetof(ui::HudKillCard, item_id) == 12 &&
 		offsetof(ui::HudKillCard, distance_m) == 20 && offsetof(ui::HudKillCard, seconds_left) == 28);
-static_assert(sizeof(ui::HudEndOfRound) == 24);
+static_assert(sizeof(ui::HudEndOfRound) == 284 && offsetof(ui::HudEndOfRound, stage) == 24);
 static_assert(offsetof(ui::HudEndOfRound, team_kills) == 4 && offsetof(ui::HudEndOfRound, kill_limit) == 12 &&
 		offsetof(ui::HudEndOfRound, top_players) == 16 && offsetof(ui::HudEndOfRound, seconds_to_next_round) == 20);
 static_assert(sizeof(ui::HudSpawnScreen) == 96);
 static_assert(offsetof(ui::HudSpawnScreen, can_deploy) == 3 && offsetof(ui::HudSpawnScreen, seconds_to_deploy) == 4 &&
 		offsetof(ui::HudSpawnScreen, seconds_revive_left) == 12 && offsetof(ui::HudSpawnScreen, kit_items) == 16);
-static_assert(sizeof(ui::HudPreRound) == 12);
+static_assert(sizeof(ui::HudPreRound) == 20 && offsetof(ui::HudPreRound, count_left) == 12);
 static_assert(offsetof(ui::HudPreRound, seconds_left) == 4 && offsetof(ui::HudPreRound, input_restricted) == 8);
 
 static_assert(offsetof(ui::HudModel, kill_card) == offsetof(ui::HudModel, team) + sizeof(ui::HudTeam));
@@ -66,7 +66,8 @@ static_assert(offsetof(ui::HudModel, spawn_screen) == offsetof(ui::HudModel, end
 static_assert(offsetof(ui::HudModel, pre_round) == offsetof(ui::HudModel, spawn_screen) + sizeof(ui::HudSpawnScreen));
 static_assert(offsetof(ui::HudModel, damage) == offsetof(ui::HudModel, pre_round) + sizeof(ui::HudPreRound));
 static_assert(sizeof(ui::HudDamageHit) == 16 && sizeof(ui::HudDamageFeed) == 4 + 16 * ui::kHudDamageFeedSize);
-static_assert(sizeof(ui::HudModel) == kM2bHudModelSize && alignof(ui::HudModel) == 8);
+static_assert(offsetof(ui::HudModel, kit) == offsetof(ui::HudModel, damage) + sizeof(ui::HudDamageFeed));
+static_assert(sizeof(ui::HudModel) == kHudModelSize && alignof(ui::HudModel) == 8);
 static_assert(std::is_trivially_copyable_v<ui::HudModel>);
 static_assert(std::is_trivially_copyable_v<ui::HudKillCard> && std::is_trivially_copyable_v<ui::HudEndOfRound> &&
 		std::is_trivially_copyable_v<ui::HudSpawnScreen> && std::is_trivially_copyable_v<ui::HudPreRound>);

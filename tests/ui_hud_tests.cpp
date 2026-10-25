@@ -142,11 +142,11 @@ TEST_SUITE("ui-hud-unit") {
 		const ui::HudSourceTable exact = table_from_rows();
 		const ui::HudBindingReport r = ui::check_hud_bindings(exact);
 		CHECK(r.ok());
-		CHECK(r.rows == 235);
-		CHECK(r.matched == 235);
-		CHECK(r.kinds[0] == 150);
-		CHECK(r.kinds[1] == 35);
-		CHECK(r.kinds[2] == 50);
+		CHECK(r.rows == 515);
+		CHECK(r.matched == 515);
+		CHECK(r.kinds[0] == 226);
+		CHECK(r.kinds[1] == 131);
+		CHECK(r.kinds[2] == 158);
 		REQUIRE(r.unbound_components.size() == 1);
 		CHECK(r.unbound_components[0] == "UIVehicleCompData");
 		CHECK(r.unbound_sources == 3);
@@ -162,7 +162,7 @@ TEST_SUITE("ui-hud-unit") {
 		CHECK(m.not_in_install[0] == "UIWeaponCompData.ActiveWeaponAmmo");
 		REQUIRE(m.not_in_rows.size() == 1);
 		CHECK(m.not_in_rows[0] == "UIWeaponCompData.ActiveWeaponLaserPointer");
-		CHECK(m.matched == 234);
+		CHECK(m.matched == 514);
 
 		ui::HudSourceTable gone = exact;
 		gone.types.erase(std::find_if(gone.types.begin(), gone.types.end(), [](const ui::HudComponentType &t) { return t.type == "UISquadCompData"; }));
