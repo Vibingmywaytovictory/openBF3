@@ -135,6 +135,7 @@ private:
 	void start_loader();
 	void build();
 	bf3::core::Status open_view(size_t p_index);
+	void drop_view(size_t p_index);
 	void arrange();
 	void apply_effects(size_t p_index);
 	void paint(size_t p_index);

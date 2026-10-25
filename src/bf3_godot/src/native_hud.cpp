@@ -341,6 +341,7 @@ bf3::core::Status Bf3NativeHud::open_view(size_t p_index) {
 	views_[p_index] = v;
 	const bf3::core::Status st = v->open(asset.movie);
 	if (!st) {
+		drop_view(p_index);
 		return bf3::core::make_error(asset.movie + ": " + st.error().message);
 	}
 	ui::HudStageRects rects;
@@ -348,6 +349,7 @@ bf3::core::Status Bf3NativeHud::open_view(size_t p_index) {
 	rects.original = v->scene()->stage();
 	bf3::core::Result<std::unique_ptr<ui::HudScreen>> s = ui::HudScreen::open(*v->scene(), *assets->movies(), asset, assets->swf_fonts(), client_, rects);
 	if (!s) {
+		drop_view(p_index);
 		return bf3::core::make_error(asset.name + ": " + s.error().message);
 	}
 	screens_[p_index] = std::move(*s);
@@ -423,11 +425,7 @@ bool Bf3NativeHud::close_screen(std::string_view p_partition) {
 		return false;
 	}
 	screens_[*i].reset();
-	if (Bf3SwfView *v = views_[*i]) {
-		remove_child(v);
-		v->queue_free();
-	}
-	views_[*i] = nullptr;
+	drop_view(*i);
 	shown_[*i] = false;
 	effects_seen_[*i] = 0;
 	painted_bounds_.clear();
@@ -440,6 +438,14 @@ bool Bf3NativeHud::set_screen_modal(std::string_view p_partition, bool p_modal) 
 
 bool Bf3NativeHud::focus_screen(std::string_view) {
 	return false;
+}
+
+void Bf3NativeHud::drop_view(size_t p_index) {
+	if (Bf3SwfView *v = views_[p_index]) {
+		remove_child(v);
+		v->queue_free();
+	}
+	views_[p_index] = nullptr;
 }
 
 UiScreenSlot Bf3NativeHud::screen_slot(size_t p_index) const {
