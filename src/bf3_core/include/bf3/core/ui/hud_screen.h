@@ -24,6 +24,7 @@ inline constexpr std::string_view kHudMpScreenPartition = "ui/flow/screen/hudmps
 inline constexpr std::string_view kHudTdmScreenPartition = "ui/flow/screen/hudtdmscreen";
 inline constexpr std::string_view kCrosshairDefaultPartition = "ui/flow/screen/weapon/crosshairdefault";
 inline constexpr std::string_view kHudSharedScreenPartition = "ui/flow/screen/hudscreen";
+inline constexpr std::string_view kKillScreenPartition = "ui/flow/screen/killscreen";
 inline constexpr std::string_view kHudScreenInstance = "instance1";
 inline constexpr size_t kHudMaxScreenWidgets = 64;
 inline constexpr size_t kHudMaxWidgetProperties = 32;

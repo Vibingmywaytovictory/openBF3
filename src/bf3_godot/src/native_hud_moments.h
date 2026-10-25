@@ -81,6 +81,7 @@ private:
 	void check(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, const NativeHudMoment &p_moment);
 	void check_messages(Bf3NativeHud &r_hud, const NativeHudMoment &p_moment);
 	void check_squad(Bf3NativeHud &r_hud, const NativeHudMoment &p_moment);
+	void check_host(Bf3NativeHud &r_hud);
 	void row(const std::string &p_name, bool p_pass, const std::string &p_detail);
 
 	std::string out_dir_;

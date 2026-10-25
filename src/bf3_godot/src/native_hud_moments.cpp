@@ -244,9 +244,9 @@ bool at_feet(const sim::Vec3 &p_at, const sim::Vec3 &p_feet) {
 	return std::sqrt(dx * dx + dz * dz) <= kArriveXz && std::fabs(p_at[1] - p_feet[1]) <= kArriveY;
 }
 
-const char *text_of(const Bf3NativeHud &p_hud, const char *p_path) {
-	for (size_t i = 0; i < kNativeHudViews; ++i) {
-		const Bf3SwfView *v = p_hud.view(i);
+const char *text_of(const UiScreenHost &p_hud, const char *p_path) {
+	for (size_t i = 0; i < p_hud.screen_count(); ++i) {
+		const Bf3SwfView *v = p_hud.screen_slot(i).view;
 		const ui::SwfSceneNode *n = v != nullptr && v->scene() != nullptr ? v->scene()->find_node(p_path) : nullptr;
 		if (n != nullptr) {
 			return n->text.c_str();
@@ -255,9 +255,9 @@ const char *text_of(const Bf3NativeHud &p_hud, const char *p_path) {
 	return nullptr;
 }
 
-const ui::SwfSceneNode *node_of(const Bf3NativeHud &p_hud, const char *p_path) {
-	for (size_t i = 0; i < kNativeHudViews; ++i) {
-		const Bf3SwfView *v = p_hud.view(i);
+const ui::SwfSceneNode *node_of(const UiScreenHost &p_hud, const char *p_path) {
+	for (size_t i = 0; i < p_hud.screen_count(); ++i) {
+		const Bf3SwfView *v = p_hud.screen_slot(i).view;
 		const ui::SwfSceneNode *n = v != nullptr && v->scene() != nullptr ? v->scene()->find_node(p_path) : nullptr;
 		if (n != nullptr) {
 			return n;
@@ -266,9 +266,9 @@ const ui::SwfSceneNode *node_of(const Bf3NativeHud &p_hud, const char *p_path) {
 	return nullptr;
 }
 
-const ui::SwfScene *scene_of(const Bf3NativeHud &p_hud, const char *p_path) {
-	for (size_t i = 0; i < kNativeHudViews; ++i) {
-		const Bf3SwfView *v = p_hud.view(i);
+const ui::SwfScene *scene_of(const UiScreenHost &p_hud, const char *p_path) {
+	for (size_t i = 0; i < p_hud.screen_count(); ++i) {
+		const Bf3SwfView *v = p_hud.screen_slot(i).view;
 		if (v != nullptr && v->scene() != nullptr && v->scene()->find_node(p_path) != nullptr) {
 			return v->scene();
 		}
@@ -276,9 +276,9 @@ const ui::SwfScene *scene_of(const Bf3NativeHud &p_hud, const char *p_path) {
 	return nullptr;
 }
 
-float layer_scale(const Bf3NativeHud &p_hud, const char *p_path) {
-	for (size_t i = 0; i < kNativeHudViews; ++i) {
-		const Bf3SwfView *v = p_hud.view(i);
+float layer_scale(const UiScreenHost &p_hud, const char *p_path) {
+	for (size_t i = 0; i < p_hud.screen_count(); ++i) {
+		const Bf3SwfView *v = p_hud.screen_slot(i).view;
 		if (v != nullptr && v->scene() != nullptr && v->scene()->find_node(p_path) != nullptr) {
 			return float(v->stage_fit().scale_x);
 		}
@@ -293,7 +293,7 @@ struct MessageRow {
 	std::string text;
 };
 
-std::vector<MessageRow> message_rows(const Bf3NativeHud &p_hud, const char *p_widget, const char *p_text) {
+std::vector<MessageRow> message_rows(const UiScreenHost &p_hud, const char *p_widget, const char *p_text) {
 	std::vector<MessageRow> out;
 	const std::string holder = std::string(p_widget) + ".messageHolder";
 	const ui::SwfScene *sc = scene_of(p_hud, holder.c_str());
@@ -1026,6 +1026,33 @@ void NativeHudMomentRun::check_squad(Bf3NativeHud &r_hud, const NativeHudMoment 
 	row(id + ".squad_list", ok, detail + "; names fill the reference's masked name rects");
 }
 
+void NativeHudMomentRun::check_host(Bf3NativeHud &r_hud) {
+	UiScreenHost &host = r_hud;
+	bool slots = host.screen_count() == kNativeHudViews;
+	for (size_t i = 0; slots && i < kNativeHudViews; ++i) {
+		const UiScreenSlot s = host.screen_slot(i);
+		slots = s.partition == kNativeHudPartitions[i] && s.screen != nullptr && s.view != nullptr && s.shown && s.order == int32_t(i) && s.view->get_index() == int32_t(i);
+	}
+	row("host.slots", slots, std::to_string(host.screen_count()) + " in-round screens open, shown and drawn in partition order");
+	const std::string_view crosshair = ui::kCrosshairDefaultPartition;
+	const bool hidden = host.hide_screen(crosshair) && !host.find_screen(crosshair).shown && !host.find_screen(crosshair).view->is_visible();
+	const bool reshown = host.show_screen(crosshair) && host.find_screen(crosshair).shown && host.find_screen(crosshair).view->is_visible();
+	row("host.show_hide", hidden && reshown, std::string("crosshairdefault hidden ") + (hidden ? "yes" : "no") + ", shown again " + (reshown ? "yes" : "no"));
+	const bool top = host.order_screen(ui::kHudMpScreenPartition, int32_t(kNativeHudViews)) && host.find_screen(ui::kHudMpScreenPartition).view->get_index() == int32_t(kNativeHudViews) - 1;
+	const bool back = host.order_screen(ui::kHudMpScreenPartition, 0) && host.find_screen(ui::kHudMpScreenPartition).view->get_index() == 0;
+	row("host.order", top && back, std::string("hudmpscreen drawn last at order ") + std::to_string(kNativeHudViews) + " " + (top ? "yes" : "no") + ", first again at 0 " + (back ? "yes" : "no"));
+	const bool closed = host.close_screen(crosshair) && host.find_screen(crosshair).screen == nullptr && host.find_screen(crosshair).view == nullptr;
+	const bf3::core::Status reopened = host.open_screen(crosshair);
+	r_hud.step(kSettleStep);
+	const UiScreenSlot again = host.find_screen(crosshair);
+	const bool live = reopened && again.screen != nullptr && again.view != nullptr && again.shown && again.screen->initialized() && again.view->get_index() == 2;
+	row("host.close_open", closed && live,
+			std::string("crosshairdefault closed ") + (closed ? "yes" : "no") + ", reopened " + (reopened ? std::string("yes") : reopened.error().message) + ", initialized after a step " +
+					(live ? "yes" : "no"));
+	const bf3::core::Status foreign = host.open_screen(ui::kKillScreenPartition);
+	row("host.foreign", !foreign && host.screen_count() == kNativeHudViews, "killscreen refused: " + (foreign ? std::string("opened") : foreign.error().message));
+}
+
 bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, double p_delta) {
 	switch (phase_) {
 		case Phase::WaitAlive: {
@@ -1198,6 +1225,7 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 			name_scale_ = 0.0f;
 			check(r_session, r_hud, m);
 			if (++index_ >= moments_.size()) {
+				check_host(r_hud);
 				phase_ = Phase::Done;
 				return true;
 			}

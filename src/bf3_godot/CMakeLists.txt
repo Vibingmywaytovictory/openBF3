@@ -102,6 +102,7 @@ target_sources(bf3_godot PRIVATE
     src/hud_items.h
     src/native_hud.cpp
     src/native_hud.h
+    src/ui_screen_host.h
     src/native_tags.cpp
     src/native_tags.h
     src/native_hud_moments.h

@@ -312,37 +312,145 @@ void Bf3NativeHud::build() {
 	client_.messages = messages_.get();
 	damage_ = std::make_unique<ui::HudDamageIndicatorComp>(*loaded_->damage);
 	client_.damage = damage_.get();
-	static const char *const kNames[kNativeHudViews] = { "HudMp", "HudTdm", "Crosshair", "HudShared" };
 	std::string summary;
 	for (size_t i = 0; i < kNativeHudViews; ++i) {
-		const ui::HudScreenAsset &asset = *loaded_->assets[i];
-		Bf3SwfView *v = memnew(Bf3SwfView);
-		v->set_name(kNames[i]);
-		v->set_playing(false);
-		add_child(v);
-		views_[i] = v;
-		const bf3::core::Status st = v->open(asset.movie);
+		const bf3::core::Status st = open_view(i);
 		if (!st) {
 			failed_ = true;
-			error_ = asset.movie + ": " + st.error().message;
+			error_ = st.error().message;
 			UtilityFunctions::push_error(to_godot("[hud] native HUD not drawn: " + error_));
 			return;
 		}
-		ui::HudStageRects rects;
-		rects.visible = v->visible_rect();
-		rects.original = v->scene()->stage();
-		bf3::core::Result<std::unique_ptr<ui::HudScreen>> s = ui::HudScreen::open(*v->scene(), *assets->movies(), asset, assets->swf_fonts(), client_, rects);
-		if (!s) {
-			failed_ = true;
-			error_ = asset.name + ": " + s.error().message;
-			UtilityFunctions::push_error(to_godot("[hud] native HUD not drawn: " + error_));
-			return;
-		}
-		screens_[i] = std::move(*s);
-		summary += " " + asset.name + " " + std::to_string(screens_[i]->stats().instances) + " instances / " + std::to_string(screens_[i]->stats().controllers) +
-				" controllers;";
+		summary += " " + screens_[i]->asset().name + " " + std::to_string(screens_[i]->stats().instances) + " instances / " +
+				std::to_string(screens_[i]->stats().controllers) + " controllers;";
 	}
 	UtilityFunctions::print(to_godot("[hud] native HUD built in " + std::to_string(loaded_->seconds) + " s:" + summary));
+}
+
+bf3::core::Status Bf3NativeHud::open_view(size_t p_index) {
+	static const char *const kNames[kNativeHudViews] = { "HudMp", "HudTdm", "Crosshair", "HudShared" };
+	Bf3UiAssets *assets = Bf3UiAssets::current();
+	if (!loaded_ || !loaded_->assets[p_index] || assets == nullptr || assets->movies() == nullptr) {
+		return bf3::core::make_error(std::string(kNativeHudPartitions[p_index]) + ": no loaded screen asset or Bf3UiAssets movies");
+	}
+	const ui::HudScreenAsset &asset = *loaded_->assets[p_index];
+	Bf3SwfView *v = memnew(Bf3SwfView);
+	v->set_name(kNames[p_index]);
+	v->set_playing(false);
+	add_child(v);
+	views_[p_index] = v;
+	const bf3::core::Status st = v->open(asset.movie);
+	if (!st) {
+		return bf3::core::make_error(asset.movie + ": " + st.error().message);
+	}
+	ui::HudStageRects rects;
+	rects.visible = v->visible_rect();
+	rects.original = v->scene()->stage();
+	bf3::core::Result<std::unique_ptr<ui::HudScreen>> s = ui::HudScreen::open(*v->scene(), *assets->movies(), asset, assets->swf_fonts(), client_, rects);
+	if (!s) {
+		return bf3::core::make_error(asset.name + ": " + s.error().message);
+	}
+	screens_[p_index] = std::move(*s);
+	effects_seen_[p_index] = 0;
+	shown_[p_index] = true;
+	return bf3::core::Status::success();
+}
+
+namespace {
+
+std::optional<size_t> native_hud_index(std::string_view p_partition) {
+	for (size_t i = 0; i < kNativeHudViews; ++i) {
+		if (kNativeHudPartitions[i] == p_partition) {
+			return i;
+		}
+	}
+	return std::nullopt;
+}
+
+}
+
+bf3::core::Status Bf3NativeHud::open_screen(std::string_view p_partition) {
+	const std::optional<size_t> i = native_hud_index(p_partition);
+	if (!i) {
+		return bf3::core::make_error(std::string(p_partition) + ": Bf3NativeHud hosts only the four in-round screens");
+	}
+	if (!built_ || failed_) {
+		return bf3::core::make_error(std::string(p_partition) + ": the native HUD is not built");
+	}
+	if (screens_[*i] != nullptr) {
+		return bf3::core::Status::success();
+	}
+	const bf3::core::Status st = open_view(*i);
+	arrange();
+	return st;
+}
+
+bool Bf3NativeHud::show_screen(std::string_view p_partition) {
+	const std::optional<size_t> i = native_hud_index(p_partition);
+	if (!i || views_[*i] == nullptr) {
+		return false;
+	}
+	views_[*i]->set_visible(true);
+	shown_[*i] = true;
+	return true;
+}
+
+bool Bf3NativeHud::hide_screen(std::string_view p_partition) {
+	const std::optional<size_t> i = native_hud_index(p_partition);
+	if (!i || views_[*i] == nullptr) {
+		return false;
+	}
+	views_[*i]->set_visible(false);
+	shown_[*i] = false;
+	return true;
+}
+
+bool Bf3NativeHud::order_screen(std::string_view p_partition, int32_t p_order) {
+	const std::optional<size_t> i = native_hud_index(p_partition);
+	if (!i) {
+		return false;
+	}
+	order_[*i] = p_order;
+	arrange();
+	return true;
+}
+
+bool Bf3NativeHud::close_screen(std::string_view p_partition) {
+	const std::optional<size_t> i = native_hud_index(p_partition);
+	if (!i || (views_[*i] == nullptr && screens_[*i] == nullptr)) {
+		return false;
+	}
+	screens_[*i].reset();
+	if (Bf3SwfView *v = views_[*i]) {
+		remove_child(v);
+		v->queue_free();
+	}
+	views_[*i] = nullptr;
+	shown_[*i] = false;
+	effects_seen_[*i] = 0;
+	painted_bounds_.clear();
+	return true;
+}
+
+UiScreenSlot Bf3NativeHud::screen_slot(size_t p_index) const {
+	if (p_index >= kNativeHudViews) {
+		return {};
+	}
+	return UiScreenSlot{ kNativeHudPartitions[p_index], screens_[p_index].get(), views_[p_index], shown_[p_index], order_[p_index] };
+}
+
+void Bf3NativeHud::arrange() {
+	std::array<size_t, kNativeHudViews> by_order{};
+	for (size_t i = 0; i < kNativeHudViews; ++i) {
+		by_order[i] = i;
+	}
+	std::stable_sort(by_order.begin(), by_order.end(), [this](size_t p_a, size_t p_b) { return order_[p_a] < order_[p_b]; });
+	int32_t at = 0;
+	for (const size_t i : by_order) {
+		if (views_[i] != nullptr) {
+			move_child(views_[i], at++);
+		}
+	}
 }
 
 std::optional<ui::MinimapLevel> Bf3NativeHud::minimap_level() {
@@ -573,7 +681,7 @@ NativeHudReadout Bf3NativeHud::readout() const {
 }
 
 std::optional<ui::SwfRect> Bf3NativeHud::window_bounds(size_t p_view, std::string_view p_path) const {
-	const Bf3SwfView *v = view(p_view);
+	const Bf3SwfView *v = p_view < kNativeHudViews ? views_[p_view] : nullptr;
 	const ui::SwfScene *sc = v != nullptr ? v->scene() : nullptr;
 	const ui::SwfSceneNode *root = sc != nullptr ? sc->find_node(p_path) : nullptr;
 	if (root == nullptr || !root->world_visible) {
