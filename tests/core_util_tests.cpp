@@ -226,6 +226,23 @@ TEST_SUITE("core-util-unit") {
 		CHECK(fault_of("count=5,fast", list) == "sample line 2: needs fast first");
 	}
 
+	TEST_CASE("core.util: an unknown hook takes keys the table lacks") {
+		CHECK(fault_of("colour = red") == "sample line 1: unknown key `colour`");
+		KeyValueGrammar<Sample> open = kSample;
+		open.unknown = [](std::string_view p_key, std::string_view p_value, Sample &r_value) -> KeyOutcome {
+			if (p_key == "bad") {
+				return { KeyFault::BadValue, 0.0, "bad is refused" };
+			}
+			r_value.offset = int32_t(p_key.size() * 10 + p_value.size());
+			return {};
+		};
+		const Result<Sample> r = parse_key_values("count = 4\ncolour = red\n", open);
+		REQUIRE(r);
+		CHECK(r->count == 4);
+		CHECK(r->offset == 63);
+		CHECK(fault_of("bad = 1", open) == "sample line 1: `bad` bad is refused");
+	}
+
 	TEST_CASE("core.util: a failed parse leaves the caller's start value alone") {
 		Sample start;
 		start.count = 11;

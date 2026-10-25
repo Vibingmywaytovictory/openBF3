@@ -94,6 +94,7 @@ template <class T> struct KeyValueGrammar {
 	bool skip_empty = true;
 	KeyFaultMessage message = key_fault_message;
 	KeyOutcome (*bare)(std::string_view p_item, size_t p_index, T &r_value) = nullptr;
+	KeyOutcome (*unknown)(std::string_view p_key, std::string_view p_value, T &r_value) = nullptr;
 };
 
 template <class T> KeyOutcome parse_key_value(const KeyDef<T> &p_key, std::string_view p_value, T &r_value) {
@@ -178,7 +179,16 @@ Result<T> parse_key_values(std::string_view p_text, const KeyValueGrammar<T> &p_
 		const auto key = std::find_if(p_grammar.keys.begin(), p_grammar.keys.end(),
 				[&](const KeyDef<T> &p_key) { return p_key.name == info.key; });
 		if (key == p_grammar.keys.end()) {
-			return fail(KeyFault::UnknownKey);
+			if (p_grammar.unknown == nullptr) {
+				return fail(KeyFault::UnknownKey);
+			}
+			const KeyOutcome outcome = p_grammar.unknown(info.key, info.value, p_value);
+			if (outcome.fault != KeyFault::None) {
+				info.detail = outcome.detail;
+				return fail(outcome.fault);
+			}
+			++index;
+			continue;
 		}
 		const size_t k = size_t(key - p_grammar.keys.begin());
 		if (p_grammar.unique_keys && seen[k]) {

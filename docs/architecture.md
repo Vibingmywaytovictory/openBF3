@@ -54,7 +54,7 @@ bf3_godot (shared library)     the GDExtension: sessions, bridges to RenderingSe
 Tools: `tools/bf3dump` (install inspector, cache preparer, many `*_commands.cpp`), `tools/antdump`,
 `tools/resdump`. Shared helpers live once in `bf3_core`: `bf3/core/math.h` (`Vec3`, which every module's `Vec3` is,
 and `Transform`, which `res::Transform`, `fx::Transform` and `DriveTransform` are; `LevelTransform` adds a scale) and
-`bf3/core/util/` (`fmt`, `seconds_since`, `finite`, ASCII text, `splitmix64`, `fnv1a`, percentiles, the key=value grammar).
+`bf3/core/util/` (`fmt`, `seconds_since`, `finite`, ASCII text, `splitmix64`, `fnv1a`, percentiles, the key=value grammar, whose `unknown` hook takes keys outside its table).
 Tests: one doctest executable per area in `tests/` (the install fixture `Mounted`/`open_or_skip` and `wait_until` in
 `test_support.h`); `tests/CMakeLists.txt` registers the rows; `tests/godot_*.cmake` run Godot headless or windowed
 through `godot_common.cmake` (the window probe, `godot_run`, `godot_require_pass`; [testing.md](testing.md)).
