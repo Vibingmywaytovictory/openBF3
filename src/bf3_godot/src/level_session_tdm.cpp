@@ -764,6 +764,7 @@ void Bf3LevelSession::tdm_shutdown() {
 	m.native_check.reset();
 	m.native_flow.reset();
 	if (m.tdm_hud != nullptr) {
+		m.screen_records.remove(m.tdm_hud.get());
 		m.tdm_hud->shutdown();
 	}
 	m.death_camera.reset();
