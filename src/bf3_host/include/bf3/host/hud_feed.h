@@ -20,6 +20,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -118,6 +119,7 @@ struct HudFeedInput {
 	bool scoreboard_held = false;
 	const KitTable *kits = nullptr;
 	HudKillCardSource kill_card_source;
+	std::optional<bool> kill_screen_up;
 	int32_t score_kill = 0;
 	int32_t score_headshot = 0;
 	const core::gameplay::EorTimeline *eor = nullptr;

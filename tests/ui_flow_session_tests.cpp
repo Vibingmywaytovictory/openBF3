@@ -3,6 +3,7 @@
 #include "bf3/core/gameplay/death_timeline.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/level.h"
+#include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/ui_input.h"
 #include "bf3/host/ui_flow_session.h"
 #include "test_support.h"
@@ -162,7 +163,10 @@ TEST_SUITE("ui-flow-session") {
 		sc.run_to(600);
 		const Lines resume = sc.phase("resume");
 		sc.state.own_deaths = 1;
+		sc.run_to(700);
+		CHECK(s.flow().find_screen(ui::kKillScreenPartition) != nullptr);
 		sc.run_to(1000);
+		CHECK(s.flow().find_screen(ui::kKillScreenPartition) == nullptr);
 		const Lines death = sc.phase("death");
 		sc.input(ui::UiInputConcept::Activate);
 		sc.run_to(1060);

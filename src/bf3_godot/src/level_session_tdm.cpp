@@ -210,8 +210,10 @@ void build_tdm_ui(
 	}
 }
 
-void step_native_screens(GameState &r_game, TdmState &r_m, const host::PresentationFrame &p_f,
-		const std::string &p_level, const std::string &p_mode, double p_delta) {
+void tick_native_flow(GameState &r_game, TdmState &r_m, const host::PresentationFrame &p_f, const std::string &p_level,
+		const std::string &p_mode, double p_now_s) {
+	r_m.native_delta_s = r_m.native_clock_s >= 0.0 ? std::clamp(p_now_s - r_m.native_clock_s, 0.0, 1.0) : 0.0;
+	r_m.native_clock_s = p_now_s;
 	Bf3UiScreens *screens = tdm_ui_screens(r_m);
 	if (screens == nullptr || r_m.native_flow == nullptr) {
 		return;
@@ -239,7 +241,6 @@ void step_native_screens(GameState &r_game, TdmState &r_m, const host::Presentat
 		r_m.native_failure_printed = true;
 		UtilityFunctions::print(to_godot("[ui] ERROR native screens: " + flow.error()));
 	}
-	screens->set_model(r_game.hud_model);
 	host::UiGameState st;
 	st.joined = p_f.match_valid && p_f.stats.connected && !p_f.stats.refused;
 	st.phase = p_f.match_valid ? p_f.match.phase : net::MatchPhase::Loading;
@@ -249,7 +250,7 @@ void step_native_screens(GameState &r_game, TdmState &r_m, const host::Presentat
 	st.winner = p_f.match.winner;
 	st.unspawned = p_f.own_unspawned;
 	if (r_m.native_following) {
-		if (const bf3::core::Status s = flow.tick(st, p_delta); !s && !r_m.native_failure_printed) {
+		if (const bf3::core::Status s = flow.tick(st, r_m.native_delta_s); !s && !r_m.native_failure_printed) {
 			r_m.native_failure_printed = true;
 			UtilityFunctions::print(to_godot("[ui] ERROR native screens: " + s.error().message));
 		}
@@ -259,12 +260,26 @@ void step_native_screens(GameState &r_game, TdmState &r_m, const host::Presentat
 			}
 		}
 	}
-	screens->step(p_delta);
+}
+
+std::optional<bool> native_kill_screen_up(TdmState &r_m) {
+	if (!r_m.native_following || r_m.native_flow == nullptr || r_m.native_flow->session() == nullptr) {
+		return std::nullopt;
+	}
+	return r_m.native_flow->session()->flow().find_screen(bf3::core::ui::kKillScreenPartition) != nullptr;
+}
+
+void step_native_screens(GameState &r_game, TdmState &r_m) {
+	Bf3UiScreens *screens = tdm_ui_screens(r_m);
+	if (screens == nullptr || r_m.native_flow == nullptr) {
+		return;
+	}
+	screens->set_model(r_game.hud_model);
+	screens->step(r_m.native_delta_s);
 	if (!r_m.native_screens_check) {
 		screens->clear_log();
 	}
 }
-
 }
 
 void Bf3LevelSession::tdm_ui_input(const Ref<InputEvent> &p_event) {
@@ -603,8 +618,10 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 	m.scoreboard_held = tdm_scoreboard_shown(mapper.scoreboard_held(), f.match_valid, f.match.phase);
 
 	auto t0 = std::chrono::steady_clock::now();
+	tick_native_flow(r_game, m, f, level_id(), mode_id(), now_s);
 	{
 		host::HudFeedInput in;
+		in.kill_screen_up = native_kill_screen_up(m);
 		in.weapon = r_game.weapon;
 		in.alive = r_game.alive;
 		in.health = f.own_curr.health;
@@ -658,7 +675,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		}
 	}
 	m.kill_card_source = host::HudKillCardSource();
-	step_native_screens(r_game, m, f, level_id(), mode_id(), p_delta);
+	step_native_screens(r_game, m);
 	m.ms_tdm_hud = ms_since(t0);
 #if OPENBF3_BUILD_CHECKS
 	Bf3UiScreens *screens = tdm_ui_screens(m);

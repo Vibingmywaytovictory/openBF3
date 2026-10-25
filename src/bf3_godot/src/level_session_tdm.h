@@ -88,6 +88,8 @@ struct TdmState {
 	bool native_following = false;
 	bool native_client_set = false;
 	bool native_failure_printed = false;
+	double native_clock_s = -1.0;
+	double native_delta_s = 0.0;
 	uint32_t own_spawns = 0;
 	uint64_t ui_screens_id = 0;
 	std::unique_ptr<NativeFlow, void (*)(NativeFlow *)> native_flow{ nullptr, nullptr };

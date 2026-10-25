@@ -458,6 +458,74 @@ TEST_CASE("the kill-feed ring keeps the newest 8; unknown defs are counted") {
 	CHECK(!m.kill_card.visible);
 }
 
+TEST_CASE("the UI flow's killscreen drives the kill card while it runs; a revive ends the card") {
+	const host::HudStatic st = make_static();
+	std::vector<net::PlayerRow> rows{ player(3, 1, "Me", 0, 0, false), player(6, 2, "Bot RU 3", 300, 3) };
+	host::HudFeedInput in;
+	in.tdm = true;
+	in.match_valid = true;
+	in.match.phase = net::MatchPhase::InRound;
+	in.match.kill_limit = 100;
+	in.players = rows;
+	in.own_slot = 3;
+	in.own_team = 1;
+	in.alive = true;
+	in.spawned_this_round = true;
+	const bf3::core::gameplay::DeathTimeline timeline{ 1.0f, 4.0f };
+	in.death = &timeline;
+	host::HudTdmFeedState state;
+	ui::HudModel m;
+	const double dt = 1.0 / 60.0;
+	const auto frame = [&](bf3::sim::Tick p_tick, std::span<const host::PresentEvent> p_events) {
+		in.server_tick = p_tick;
+		in.now_s = double(p_tick) * dt;
+		host::fill_hud_tdm(in, p_events, st, state, m);
+	};
+	host::PresentEvent revive;
+	revive.kind = host::PresentKind::Revive;
+	revive.timeline = host::PresentTimeline::Render;
+	revive.slot = 6;
+	revive.aux = 3;
+	frame(100, {});
+	host::PresentEvent own_death = death(6, 3, 0, host::present_flags::kOwnVictim, 100);
+	own_death.extra = 1000;
+	own_death.seed = 2000;
+	in.alive = false;
+	in.own_respawn_tick = 1000;
+	in.own_revive_until = 2000;
+	in.kill_screen_up = false;
+	frame(101, std::span<const host::PresentEvent>(&own_death, 1));
+	CHECK(!m.kill_card.visible);
+	frame(101 + 70, {});
+	CHECK(!m.kill_card.visible);
+	CHECK(!m.spawn_screen.visible);
+	in.kill_screen_up = true;
+	frame(101 + 71, {});
+	CHECK(m.kill_card.visible);
+	CHECK(m.kill_card.seconds_left > 0.0f);
+	CHECK(!m.spawn_screen.visible);
+	in.alive = true;
+	in.kill_screen_up = false;
+	frame(200, std::span<const host::PresentEvent>(&revive, 1));
+	CHECK(!m.kill_card.visible);
+	CHECK(!m.spawn_screen.visible);
+
+	in.kill_screen_up.reset();
+	host::PresentEvent own_death2 = death(6, 3, 0, host::present_flags::kOwnVictim, 300);
+	own_death2.extra = 1300;
+	own_death2.seed = 2300;
+	in.alive = false;
+	frame(301, std::span<const host::PresentEvent>(&own_death2, 1));
+	frame(301 + 61, {});
+	CHECK(m.kill_card.visible);
+	in.alive = true;
+	frame(400, std::span<const host::PresentEvent>(&revive, 1));
+	CHECK(!m.kill_card.visible);
+	CHECK(!m.spawn_screen.visible);
+	frame(401, {});
+	CHECK(!m.kill_card.visible);
+}
+
 TEST_CASE("round stats: a replayed kill log gives the kill matrix, streaks, nemesis, best weapon and the round-end "
 		  "page") {
 	host::HudStatic st = make_static();

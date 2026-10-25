@@ -48,8 +48,9 @@ void feed_kill_card(Frame &r_frame, std::span<const PresentEvent> p_drained) {
 	ui::HudMessages &msg = model.messages;
 	ui::HudKillCard &card = model.kill_card;
 	for (const PresentEvent &e : p_drained) {
-		if (e.kind == PresentKind::Spawn) {
-			if (own_slot != ui::kHudNoPlayer && e.slot == own_slot) {
+		if (e.kind == PresentKind::Spawn || e.kind == PresentKind::Revive) {
+			const uint8_t back = e.kind == PresentKind::Revive ? e.aux : e.slot;
+			if (own_slot != ui::kHudNoPlayer && back == own_slot) {
 				state.kill_card_until_s = 0;
 			}
 			continue;
@@ -143,8 +144,10 @@ void feed_kill_card(Frame &r_frame, std::span<const PresentEvent> p_drained) {
 		hud_text(card.killer_basic_dog_tag, kDefaultBasicDogtag);
 		hud_text(card.killer_advanced_dog_tag, kDefaultAdvancedDogtag);
 	}
-	r_frame.card_pending = card.serial != 0 && now_s < state.kill_card_from_s && now_s < state.kill_card_until_s;
-	r_frame.card_up = card.serial != 0 && !r_frame.card_pending && now_s < state.kill_card_until_s;
+	const bool before_screens = card.serial != 0 && now_s < state.kill_card_until_s;
+	r_frame.card_up = in.kill_screen_up ? card.serial != 0 && *in.kill_screen_up
+										: before_screens && now_s >= state.kill_card_from_s;
+	r_frame.card_pending = before_screens && !r_frame.card_up;
 	card.visible = r_frame.card_up;
 	card.seconds_left = r_frame.card_up ? float(state.kill_card_until_s - now_s) : 0.0f;
 }
