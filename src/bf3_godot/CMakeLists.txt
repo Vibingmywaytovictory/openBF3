@@ -73,6 +73,8 @@ target_sources(bf3_godot PRIVATE
     src/ui_assets.h
     src/swf_view.cpp
     src/swf_view.h
+    src/ui_textures.cpp
+    src/ui_textures.h
 )
 
 target_sources(bf3_godot PRIVATE

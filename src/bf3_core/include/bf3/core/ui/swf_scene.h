@@ -2,6 +2,7 @@
 
 #include "bf3/core/result.h"
 #include "bf3/core/ui/swf_draw.h"
+#include "bf3/core/ui/swf_image.h"
 #include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/swf_movie.h"
 #include "bf3/core/ui/swf_text.h"
@@ -103,6 +104,9 @@ struct SwfSceneNode {
 	const SwfSubImage *sub_image = nullptr;
 	const SwfScalingGrid *scaling_grid = nullptr;
 	std::shared_ptr<const SwfShape> drawing;
+	std::string image;
+	uint32_t image_width = 0;
+	uint32_t image_height = 0;
 	std::string text;
 	bool html = false;
 	SwfTextOptions text_options;
@@ -203,6 +207,10 @@ public:
 	Status set_mask(std::string_view p_path, std::string_view p_mask_path);
 	Status clear_mask(std::string_view p_path);
 	Status draw(std::string_view p_path, const SwfDrawOp &p_op);
+	Status load_image(std::string_view p_path, std::string_view p_res_name, uint32_t p_width, uint32_t p_height);
+	Status unload_image(std::string_view p_path);
+	void set_image_source(std::shared_ptr<SwfImageSource> p_source);
+	SwfImageSource *image_source() const;
 
 	std::vector<SwfSceneChange> take_changes();
 

@@ -239,6 +239,7 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/ui/swf_layout.h
     include/bf3/core/ui/swf_draw.h
     include/bf3/core/ui/swf_geometry.h
+    include/bf3/core/ui/swf_image.h
     include/bf3/core/ui/swf_scene.h
     include/bf3/core/ui/swf_text.h
 )
@@ -250,6 +251,7 @@ target_sources(bf3_core PRIVATE
     src/ui/swf_shape.cpp
     src/ui/swf_draw.cpp
     src/ui/swf_geometry.cpp
+    src/ui/swf_image.cpp
     src/ui/swf_actions.cpp
     src/ui/swf_display.cpp
     src/ui/swf_scene.cpp
@@ -283,16 +285,19 @@ target_sources(bf3_core PRIVATE
     src/ui/hud_sources.cpp
     src/ui/hud_model.cpp
     include/bf3/core/ui/as2_clip.h
+    include/bf3/core/ui/as2_clip_loader.h
     include/bf3/core/ui/hud_screen.h
     include/bf3/core/ui/hud_widgets.h
     include/bf3/core/ui/hud_messages.h
     src/ui/as2_clip.cpp
+    src/ui/as2_clip_loader.cpp
     src/ui/hud_screen.cpp
     src/ui/hud_widgets.cpp
     src/ui/hud_messages.cpp
     include/bf3/core/ui/hud_widget_registry.h
     src/ui/hud_widget_registry.cpp
     src/ui/widgets/hud_widget_support.h
+    src/ui/widgets/image_manager.h
 )
 openbf3_registry(bf3_core src/ui/widgets bf3/core/ui/hud_widget_registry.h HudWidgetRegistry bf3::core::ui register_hud_widgets_ register_hud_widget_files)
 

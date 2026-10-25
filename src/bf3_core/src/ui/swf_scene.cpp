@@ -193,6 +193,7 @@ struct SwfScene::Impl {
 	std::vector<uint32_t> jumps;
 	std::vector<uint32_t> filter_source;
 	std::vector<std::unique_ptr<SwfDrawing>> drawings;
+	std::shared_ptr<SwfImageSource> images;
 	std::deque<std::pair<SwfNodeId, uint32_t>> queue;
 	SwfSceneStats stats;
 	double accumulator = 0.0;
@@ -1286,6 +1287,55 @@ Status SwfScene::draw(std::string_view p_path, const SwfDrawOp &p_op) {
 	(*n)->drawing = std::move(shape);
 	(*n)->character_revision++;
 	return Status::success();
+}
+
+Status SwfScene::load_image(std::string_view p_path, std::string_view p_res_name, uint32_t p_width, uint32_t p_height) {
+	Impl &im = *impl_;
+	Result<SwfSceneNode *> n = im.at(p_path);
+	if (!n) {
+		return n.error();
+	}
+	SwfSceneNode &node = **n;
+	if (node.kind != SwfNodeKind::Sprite) {
+		return make_error("swf scene " + im.movie_name + ": " + std::string(p_path) + " is a " + swf_node_kind_name(node.kind) + ", not a movie clip");
+	}
+	if (p_res_name.empty() || p_width == 0 || p_height == 0 || p_width > kSwfImageMaxSide || p_height > kSwfImageMaxSide) {
+		return make_error("swf scene " + im.movie_name + ": image '" + std::string(p_res_name) + "' has no usable size");
+	}
+	im.clear_children(node);
+	im.drawings[slot_of(node.id)].reset();
+	node.drawing.reset();
+	node.timeline = &empty_clip_timeline();
+	im.timelines[slot_of(node.id)] = std::make_unique<TimelineState>();
+	node.frame = 0;
+	node.playing = false;
+	node.image = std::string(p_res_name);
+	node.image_width = p_width;
+	node.image_height = p_height;
+	node.character_revision++;
+	return Status::success();
+}
+
+Status SwfScene::unload_image(std::string_view p_path) {
+	Result<SwfSceneNode *> n = impl_->at(p_path);
+	if (!n) {
+		return n.error();
+	}
+	if (!(*n)->image.empty()) {
+		(*n)->image.clear();
+		(*n)->image_width = 0;
+		(*n)->image_height = 0;
+		(*n)->character_revision++;
+	}
+	return Status::success();
+}
+
+void SwfScene::set_image_source(std::shared_ptr<SwfImageSource> p_source) {
+	impl_->images = std::move(p_source);
+}
+
+SwfImageSource *SwfScene::image_source() const {
+	return impl_->images.get();
 }
 
 Status SwfScene::set_text_bounds(std::string_view p_path, const SwfRect &p_bounds) {

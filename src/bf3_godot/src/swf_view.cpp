@@ -2,6 +2,7 @@
 
 #include "godot_util.h"
 #include "ui_assets.h"
+#include "ui_textures.h"
 
 #include "bf3/core/level/budget.h"
 #include "bf3/core/ui/swf_font.h"
@@ -862,6 +863,7 @@ struct Bf3SwfView::Impl {
 	Bf3SwfView *owner = nullptr;
 	Bf3UiAssets *assets = nullptr;
 	std::shared_ptr<const ui::SwfLibrary> library;
+	std::shared_ptr<Bf3UiTextures> textures;
 	std::optional<ui::SwfScene> scene;
 	std::string movie;
 	std::string error;
@@ -1445,12 +1447,43 @@ struct Bf3SwfView::Impl {
 		emit(p, geo, tex->get_rid());
 	}
 
+	void build_image(NodeRec &r_rec, const ui::SwfSceneNode &p_node) {
+		Ref<Texture2D> tex = textures != nullptr ? textures->texture(p_node.image) : Ref<Texture2D>();
+		if (tex.is_null()) {
+			r_rec.counts.missing_textures++;
+			warn_once("no texture for image " + p_node.image + " in " + p_node.path);
+			trim(r_rec, 0);
+			return;
+		}
+		Piece &p = piece_at(r_rec, 0);
+		trim(r_rec, 1);
+		const float w = float(p_node.image_width);
+		const float h = float(p_node.image_height);
+		const float tw = float(std::max<int32_t>(1, tex->get_width()));
+		const float th = float(std::max<int32_t>(1, tex->get_height()));
+		Geometry geo;
+		const Color white(1.0f, 1.0f, 1.0f, 1.0f);
+		const Vert a{ { 0.0f, 0.0f }, { 0.0f, 0.0f }, white };
+		const Vert b{ { w, 0.0f }, { tw, 0.0f }, white };
+		const Vert c{ { w, h }, { tw, th }, white };
+		const Vert d{ { 0.0f, h }, { 0.0f, th }, white };
+		geo.add_triangle(a, b, c);
+		geo.add_triangle(a, c, d);
+		const float rect[4] = { 0.0f, 0.0f, tw, th };
+		const float inv[2] = { 1.0f / tw, 1.0f / th };
+		configure(p, kModeBitmap, true, rect, inv);
+		p.wrap = false;
+		p.texture = tex;
+		emit(p, geo, tex->get_rid());
+	}
+
 	void build(ui::SwfNodeId p_id, NodeRec &r_rec) {
 		const ui::SwfSceneNode &n = *node(p_id);
 		const void *content = n.shape != nullptr ? static_cast<const void *>(n.shape)
 				: n.edit_text != nullptr		 ? static_cast<const void *>(n.edit_text)
 				: n.sub_image != nullptr		 ? static_cast<const void *>(n.sub_image)
 				: n.drawing != nullptr			 ? static_cast<const void *>(n.drawing.get())
+				: !n.image.empty()				 ? static_cast<const void *>(&n.image)
 												 : nullptr;
 		if (r_rec.built && r_rec.content == content && r_rec.text_revision == n.text_revision && r_rec.character_revision == n.character_revision) {
 			return;
@@ -1464,6 +1497,8 @@ struct Bf3SwfView::Impl {
 		r_rec.character_revision = n.character_revision;
 		if (n.kind == ui::SwfNodeKind::Shape && n.shape != nullptr) {
 			build_shape(r_rec, n, *n.shape, grid_for(n));
+		} else if (!n.image.empty()) {
+			build_image(r_rec, n);
 		} else if (n.drawing != nullptr) {
 			build_shape(r_rec, n, *n.drawing, GridWarp{});
 		} else if (n.kind == ui::SwfNodeKind::EditText && n.edit_text != nullptr) {
@@ -2482,6 +2517,8 @@ Status Bf3SwfView::open(std::string_view p_movie) {
 	}
 	impl_->assets = assets;
 	impl_->scene.emplace(std::move(*scene));
+	impl_->textures = Bf3UiTextures::shared();
+	impl_->scene->set_image_source(impl_->textures);
 	impl_->movie = impl_->scene->movie_name();
 	impl_->error.clear();
 	impl_->structure_dirty = true;
@@ -2503,6 +2540,8 @@ Status Bf3SwfView::open(std::shared_ptr<const ui::SwfLibrary> p_library, std::st
 	impl_->assets = Bf3UiAssets::current();
 	impl_->library = std::move(p_library);
 	impl_->scene.emplace(std::move(*scene));
+	impl_->textures = Bf3UiTextures::shared();
+	impl_->scene->set_image_source(impl_->textures);
 	impl_->movie = impl_->scene->movie_name();
 	impl_->error.clear();
 	impl_->structure_dirty = true;

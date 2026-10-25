@@ -359,7 +359,7 @@ TEST_SUITE("ui-hud-screen-unit") {
 			"Widget.Hud.Ammo", "Widget.Hud.Compass", "Widget.Hud.DamageIndicator", "Widget.Hud.Health", "Widget.Hud.HudBackgroundWidget", "Widget.Hud.Minimap",
 			"Widget.Hud.PassangerList", "Widget.Hud.SquadList", "Widget.Hud.VehicleHealth", "Widget.Icon3D.Alerts.AlertManager", "Widget.Icon3D.Alerts.Alerttag",
 			"Widget.Icon3D.Interaction.InteractionManager", "Widget.Icon3D.Mapmarker.MapmarkerManager", "Widget.Icon3D.Mapmarker.Mapmarkertag",
-			"Widget.Icon3D.TeamSupport.SupportIconManager", "Widget.Icon3D.TeamSupport.SupportIconTag", "Widget.Message.HudAlertMessage", "Widget.Message.HudMessage",
+			"Widget.Icon3D.TeamSupport.SupportIconManager", "Widget.Icon3D.TeamSupport.SupportIconTag", "Widget.Image.ImageManager", "Widget.Message.HudAlertMessage", "Widget.Message.HudMessage",
 			"Widget.Message.LogMessage", "Widget.Message.MessageTypes.GameMessage", "Widget.Message.MessageTypes.KillLogMessage",
 			"Widget.Message.MessageTypes.LocalKillLogMessage", "Widget.Message.MessageTypes.ScoreMessage", "Widget.Message.ObjectiveMessage",
 			"Widget.Message.ScoreAggregator", "Widget.Message.TooltipMessage", "Widget.Misc.LatencyIndicator", "Widget.TicketCounter.TicketCounter", "fb.Base.UIScreen" };
@@ -372,8 +372,8 @@ TEST_SUITE("ui-hud-screen-unit") {
 			CHECK_MESSAGE(make_hud_widget_controller(c) != nullptr, c);
 			CHECK_MESSAGE(hud_widget_class_known(c), c);
 		}
-		CHECK(make_hud_widget_controller("Widget.Image.ImageManager") == nullptr);
-		CHECK_FALSE(hud_widget_class_known("Widget.Image.ImageManager"));
+		CHECK(make_hud_widget_controller("Widget.NoSuch.Class") == nullptr);
+		CHECK_FALSE(hud_widget_class_known("Widget.NoSuch.Class"));
 		HudWidgetRegistry local;
 		CHECK(local.add("Test.Class", [] { return make_hud_widget_controller("fb.Base.UIScreen"); }));
 		CHECK_FALSE(local.add("Test.Class", [] { return make_hud_widget_controller("fb.Base.UIScreen"); }));
@@ -829,10 +829,8 @@ TEST_SUITE("ui-hud-screen") {
 			CHECK_MESSAGE((a.ok() && !a->movie.empty()), partition);
 		}
 		Screen s = open_screen(*r, kHudMpScreenPartition);
-		CHECK(s.hud->stats().unknown_classes == 4);
-		for (const std::string &u : s.hud->stats().unknown_class_paths) {
-			CHECK_MESSAGE(u.find("Widget.Image.ImageManager") != std::string::npos, u);
-		}
+		CHECK(s.hud->stats().unknown_classes == 0);
+		CHECK(std::count_if(s.hud->widgets().begin(), s.hud->widgets().end(), [](const auto &w) { return w->class_name == "Widget.Image.ImageManager"; }) == 4);
 		Screen t = open_screen(*r, kHudTdmScreenPartition);
 		CHECK(t.hud->stats().unknown_classes == 0);
 		CHECK(t.hud->widget("instance1.Compass_01.multiplayerCompass.bg") != nullptr);

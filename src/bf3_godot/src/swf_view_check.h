@@ -26,6 +26,7 @@ private:
 	struct State;
 	void setup();
 	void finish();
+	void run_images();
 	std::unique_ptr<State> state_;
 };
 

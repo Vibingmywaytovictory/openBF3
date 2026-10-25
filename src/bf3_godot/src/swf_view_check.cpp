@@ -7,6 +7,8 @@
 #include "ui_swf_writer.h"
 
 #include "bf3/core/level/budget.h"
+#include "bf3/core/ui/as2_clip.h"
+#include "bf3/core/ui/as2_clip_loader.h"
 #include "bf3/core/ui/swf_scene.h"
 #include "bf3/core/ui/swf_text.h"
 #include "bf3/core/util/format.h"
@@ -50,6 +52,15 @@ constexpr float kAs2TiltY = 15.0f;
 constexpr float kAs2Perspective = 25.0f;
 constexpr int32_t kRestCap = 600;
 constexpr uint32_t kRestMovieFrame = 90;
+constexpr int32_t kImageWaitFrames = 600;
+constexpr const char *kDogTagMovie = "ui/assets/dogtagpair";
+constexpr const char *kImageManagerMovie = "ui/assets/imagemanager";
+constexpr const char *kDogTagBasicUrl = "UI/Art/Persistence/DogTag/inactivetag_left";
+constexpr const char *kDogTagAdvancedUrl = "UI/Art/Persistence/DogTag/inactivetag_right";
+constexpr const char *kWeaponLineArtUrl = "UI/Art/Persistence/Weapons/m16a4";
+constexpr float kDogTagSide = 256.0f;
+constexpr float kDogTagPairX = 380.0f;
+constexpr float kDogTagPairY = 200.0f;
 constexpr int32_t kPlayFrames = 30;
 constexpr int32_t kPerfFrames = 300;
 constexpr int32_t kPerfTextFields = 8;
@@ -260,6 +271,13 @@ void expect_node(const ui::SwfScene &p_scene, const ui::SwfFontSet *p_fonts, ui:
 			for (const ui::SwfPoint &v : st.points) {
 				put(v.x - hw, v.y - hw);
 				put(v.x + hw, v.y + hw);
+			}
+		}
+	}
+	if (!n->image.empty()) {
+		for (const double x : { 0.0, double(n->image_width) }) {
+			for (const double y : { 0.0, double(n->image_height) }) {
+				put(x, y);
 			}
 		}
 	}
@@ -532,6 +550,11 @@ struct Bf3SwfViewCheck::State {
 	double played_seconds = 0.0;
 	std::array<Bf3SwfView *, 4> views{};
 	Bf3SwfView *transmit = nullptr;
+	std::array<Bf3SwfView *, 2> image_views{};
+	std::vector<std::pair<int, ui::As2ClipLoader>> image_loads;
+	int image_frames = 0;
+	int image_settle = 0;
+	bool images_done = false;
 	SubViewport *big = nullptr;
 	std::vector<Row> rows;
 	std::vector<Job> jobs;
@@ -612,6 +635,129 @@ void Bf3SwfViewCheck::finish() {
 	UtilityFunctions::print(all && s.exit_code == 0 ? "SWF VIEW CHECK: PASS" : "SWF VIEW CHECK: FAIL");
 	set_process(false);
 	get_tree()->quit(all && s.exit_code == 0 ? 0 : 1);
+}
+
+void Bf3SwfViewCheck::run_images() {
+	State &s = *state_;
+	if (s.image_frames == 0) {
+		const char *movies[2] = { kDogTagMovie, kImageManagerMovie };
+		for (size_t i = 0; i < s.image_views.size(); ++i) {
+			Bf3SwfView *v = memnew(Bf3SwfView);
+			v->set_playing(false);
+			add_child(v);
+			s.image_views[i] = v;
+			const bf3::core::Status st = v->open(movies[i]);
+			s.add(fmt("open %s for img:// images", movies[i]), bool(st), st ? std::string("opened") : st.error().message);
+		}
+		const auto image_holder = [](const ui::As2Clip &p_manager) {
+			const float w = p_manager.width();
+			const float h = p_manager.height();
+			p_manager.set_xscale(100.0f);
+			p_manager.set_yscale(100.0f);
+			const ui::As2Clip size = p_manager.child("sizeClip");
+			size.set_width(w);
+			size.set_height(h);
+			size.set_visible(false);
+			p_manager.child("spinnerMc").set_visible(false);
+			return p_manager.create_empty_movie_clip("imgHolder", p_manager.next_highest_depth());
+		};
+		if (s.image_views[0]->is_open()) {
+			ui::SwfScene &sc = *s.image_views[0]->scene();
+			const ui::As2Clip widget(&sc, "widget");
+			widget.set_x(kDogTagPairX);
+			widget.set_y(kDogTagPairY);
+			const ui::As2Clip holder = widget.child("holder");
+			holder.child("sizeClip").set_visible(false);
+			const ui::As2Clip advanced = holder.attach_movie("DogTag", "advancedTag", holder.next_highest_depth());
+			const ui::As2Clip basic = holder.attach_movie("DogTag", "basicTag", holder.next_highest_depth());
+			basic.set_x(19.0f);
+			basic.set_y(-65.0f);
+			basic.set_rotation(8.0f);
+			advanced.set_x(190.0f);
+			advanced.set_y(-45.0f);
+			advanced.set_rotation(-5.0f);
+			for (const auto &[tag, url] : { std::pair{ basic, kDogTagBasicUrl }, std::pair{ advanced, kDogTagAdvancedUrl } }) {
+				const ui::As2Clip manager = tag.attach_movie("ImageManager", "ImageManager", 3);
+				manager.set_width(kDogTagSide);
+				manager.set_height(kDogTagSide);
+				s.image_loads.emplace_back(0, ui::As2ClipLoader{});
+				s.image_loads.back().second.load_clip(image_holder(manager), url);
+			}
+		}
+		if (s.image_views[1]->is_open()) {
+			ui::SwfScene &sc = *s.image_views[1]->scene();
+			s.image_loads.emplace_back(1, ui::As2ClipLoader{});
+			s.image_loads.back().second.load_clip(image_holder(ui::As2Clip(&sc, "imgManager")), kWeaponLineArtUrl);
+		}
+	}
+	++s.image_frames;
+	bool waiting = false;
+	for (auto &[view, loader] : s.image_loads) {
+		waiting = waiting || loader.poll() == ui::As2ClipLoader::State::Loading;
+	}
+	if (waiting && s.image_frames < kImageWaitFrames) {
+		return;
+	}
+	if (++s.image_settle < 3) {
+		return;
+	}
+	const Img dogtags = img_of(s.image_views[0]->is_open() ? s.image_views[0]->capture_hud() : Ref<Image>());
+	const Img weapon = img_of(s.image_views[1]->is_open() ? s.image_views[1]->capture_hud() : Ref<Image>());
+	const Img both = premul_over(weapon, dogtags);
+	bool pass = s.image_loads.size() == 3;
+	std::string detail = fmt("%zu loads after %d frames", s.image_loads.size(), s.image_frames);
+	for (const auto &[view, loader] : s.image_loads) {
+		const Img &img = view == 0 ? dogtags : weapon;
+		const ui::SwfSceneNode *n = loader.target().node();
+		const bool loaded = loader.state() == ui::As2ClipLoader::State::Loaded && n != nullptr && !n->image.empty();
+		uint32_t lit = 0;
+		uint32_t area = 0;
+		if (loaded && img.w > 0) {
+			double x0 = 1e9;
+			double y0 = 1e9;
+			double x1 = -1e9;
+			double y1 = -1e9;
+			for (const double x : { 0.0, double(n->image_width) }) {
+				for (const double y : { 0.0, double(n->image_height) }) {
+					const double wx = double(n->world.a) * x + double(n->world.c) * y + double(n->world.tx);
+					const double wy = double(n->world.b) * x + double(n->world.d) * y + double(n->world.ty);
+					x0 = std::min(x0, wx);
+					y0 = std::min(y0, wy);
+					x1 = std::max(x1, wx);
+					y1 = std::max(y1, wy);
+				}
+			}
+			for (int32_t y = std::max(0, int32_t(y0)); y < std::min(img.h, int32_t(std::ceil(y1))); ++y) {
+				for (int32_t x = std::max(0, int32_t(x0)); x < std::min(img.w, int32_t(std::ceil(x1))); ++x) {
+					++area;
+					lit += img.at(x, y, 3) > 8 ? 1 : 0;
+				}
+			}
+		}
+		pass = pass && loaded && area > 0 && lit * 100 >= area;
+		detail += fmt("; %s %s %ux%u, %u of %u px lit", loader.res_name().c_str(), loaded ? "loaded" : ("not loaded: " + loader.error()).c_str(), n != nullptr ? n->image_width : 0,
+				n != nullptr ? n->image_height : 0, lit, area);
+	}
+	for (Bf3SwfView *v : s.image_views) {
+		pass = pass && v->is_open() && v->stats().missing_textures == 0;
+	}
+	s.add("img:// images drawn: inactivetag_left/right in DogTagPair's tags, m16a4 line-art in ImageManager's imgHolder", pass, detail);
+	if (!s.shot_dir.empty() && both.w > 0) {
+		Bf3Localisation *loc = Bf3Localisation::current();
+		const std::filesystem::path target = std::filesystem::path(std::u8string(s.shot_dir.begin(), s.shot_dir.end())) / "swf_view_images.png";
+		bool ok = loc != nullptr && loc->reader().write_guard().allows_write(target);
+		if (ok) {
+			PackedByteArray bytes;
+			bytes.resize(int64_t(both.px.size()));
+			std::copy(both.px.begin(), both.px.end(), bytes.ptrw());
+			Ref<Image> out = Image::create_from_data(both.w, both.h, false, Image::FORMAT_RGBA8, bytes);
+			const std::u8string u8 = target.u8string();
+			ok = out.is_valid() && out->save_png(to_godot(std::string(u8.begin(), u8.end()))) == OK;
+		}
+		s.add("shot swf_view_images.png", ok, ok ? fmt("%dx%d", both.w, both.h) : std::string("not written"));
+	}
+	s.images_done = true;
+	s.phase = 3;
 }
 
 void Bf3SwfViewCheck::_process(double p_delta) {
@@ -1231,6 +1377,11 @@ void Bf3SwfViewCheck::_process(double p_delta) {
 			s.job_armed = true;
 			return;
 		}
+		if (!s.images_done) {
+			s.phase = 5;
+			s.image_frames = 0;
+			return;
+		}
 		for (int m = 0; m < 2; ++m) {
 			const ui::SwfScene &sc = *s.small_view(m)->scene();
 			for (const ui::SwfNodeId id : sc.draw_order()) {
@@ -1246,6 +1397,10 @@ void Bf3SwfViewCheck::_process(double p_delta) {
 			s.perf_structure0[m] = s.small_view(m)->stats().structure_passes;
 			s.perf_builds0[m] = s.small_view(m)->stats().content_builds;
 		}
+		return;
+	}
+	if (s.phase == 5) {
+		run_images();
 		return;
 	}
 	if (s.phase == 4) {

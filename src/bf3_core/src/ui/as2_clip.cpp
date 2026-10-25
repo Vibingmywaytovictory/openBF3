@@ -55,6 +55,9 @@ void accumulate(const SwfScene &p_scene, const SwfSceneNode &p_node, const SwfMa
 		default:
 			break;
 	}
+	if (!p_node.image.empty()) {
+		r_acc.add(SwfRect{ 0.0f, float(p_node.image_width), 0.0f, float(p_node.image_height) }, p_to);
+	}
 	if (p_node.drawing != nullptr && !p_node.drawing->meshes.empty()) {
 		r_acc.add(p_node.drawing->bounds, p_to);
 	}

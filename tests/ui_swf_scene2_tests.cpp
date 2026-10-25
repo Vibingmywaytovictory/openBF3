@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "bf3/core/ui/as2_clip.h"
+#include "bf3/core/ui/as2_clip_loader.h"
 #include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/swf_scene.h"
 #include "test_support.h"
@@ -92,6 +93,25 @@ std::shared_ptr<const SwfShape> drawn(const std::vector<SwfDrawOp> &p_ops) {
 	REQUIRE_MESSAGE(shape.ok(), (shape.ok() ? std::string() : shape.error().message));
 	return *shape;
 }
+
+class FakeImages final : public SwfImageSource {
+public:
+	SwfImageInfo request(std::string_view p_res_name) override {
+		++requests;
+		SwfImageInfo info;
+		if (p_res_name == "ui/art/missing") {
+			info.status = SwfImageStatus::Missing;
+			info.error = "no such res";
+		} else if (requests > loading_polls) {
+			info.status = SwfImageStatus::Ready;
+			info.width = 64;
+			info.height = 32;
+		}
+		return info;
+	}
+	uint32_t loading_polls = 2;
+	uint32_t requests = 0;
+};
 
 std::vector<SwfDrawOp> square_ops(float p_x, float p_y, float p_side) {
 	return { SwfDrawOp::move_to(p_x, p_y), SwfDrawOp::line_to(p_x + p_side, p_y), SwfDrawOp::line_to(p_x + p_side, p_y + p_side),
@@ -323,5 +343,55 @@ TEST_SUITE("ui-scene2-unit") {
 		CHECK(t.gb == doctest::Approx(11.0));
 		CHECK(t.aa == doctest::Approx(50.0));
 		CHECK(c.alpha() == doctest::Approx(50.0f));
+	}
+
+	TEST_CASE("swf scene: loadClip img:// replaces a clip's content with the image after the source reports it, and unloadClip clears it") {
+		CHECK(swf_image_res_name("img://UI/Art/Persistence\\DogTag/inactivetag_left") == "ui/art/persistence/dogtag/inactivetag_left");
+		CHECK(swf_image_res_name("UI/Art/x") == "ui/art/x");
+		const SwfLibrary lib = two_boxes_library();
+		SwfScene s = open_scene(lib, "boxes");
+		As2ClipLoader early;
+		early.load_clip(As2Clip(&s, "content"), "img://ui/art/box");
+		CHECK(early.poll() == As2ClipLoader::State::Failed);
+		auto images = std::make_shared<FakeImages>();
+		s.set_image_source(images);
+		CHECK(s.image_source() == images.get());
+		As2Clip content(&s, "content");
+		content.set_xscale(50.0f);
+		As2ClipLoader loader;
+		loader.load_clip(content, "img://UI/Art/Box");
+		CHECK(loader.res_name() == "ui/art/box");
+		s.take_changes();
+		CHECK(loader.poll() == As2ClipLoader::State::Loading);
+		CHECK(loader.poll() == As2ClipLoader::State::Loading);
+		CHECK(need(s, "content").children.size() == 1);
+		CHECK(loader.poll() == As2ClipLoader::State::Loaded);
+		const SwfSceneNode &n = need(s, "content");
+		CHECK(n.children.empty());
+		CHECK(n.image == "ui/art/box");
+		CHECK(n.image_width == 64);
+		CHECK(n.image_height == 32);
+		CHECK_FALSE(n.playing);
+		CHECK(content.width() == doctest::Approx(32.0f));
+		CHECK(content.height() == doctest::Approx(32.0f));
+		std::vector<SwfSceneChange> ch = s.take_changes();
+		CHECK((change_of(ch, n.id) & swf_change::kCharacter) != 0);
+		CHECK(s.find_node("content.fill") == nullptr);
+		REQUIRE(s.advance(2).ok());
+		CHECK(need(s, "content").image == "ui/art/box");
+		loader.unload_clip();
+		CHECK(need(s, "content").image.empty());
+		CHECK(loader.state() == As2ClipLoader::State::Idle);
+		CHECK(content.width() == 0.0f);
+
+		As2ClipLoader missing;
+		missing.load_clip(As2Clip(&s, "other"), "img://ui/art/missing");
+		CHECK(missing.poll() == As2ClipLoader::State::Failed);
+		CHECK(missing.error() == "no such res");
+		CHECK(need(s, "other").image.empty());
+		As2ClipLoader into_shape;
+		into_shape.load_clip(As2Clip(&s, "other.fill"), "img://ui/art/box");
+		CHECK(into_shape.poll() == As2ClipLoader::State::Failed);
+		CHECK_FALSE(s.load_image("other", "ui/art/box", 0, 4).ok());
 	}
 }
