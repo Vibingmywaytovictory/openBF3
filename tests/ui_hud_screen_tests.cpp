@@ -303,7 +303,8 @@ TEST_SUITE("ui-hud-screen-unit") {
 			"Widget.Message.ScoreAggregator", "Widget.Message.TooltipMessage", "Widget.Misc.LatencyIndicator",
 			"Widget.TicketCounter.TicketCounter", "fb.Base.UIScreen", "Util.ScrollText", "Util.SimpleScrollText",
 			"Util.SimpleTextBlockScroll", "Shared.KitIcons", "Shared.ServiceStars", "Graphics.GlowRect",
-			"Widget.Bar.ScrollBar", "Widget.List.List", "Widget.List.Rows.RowBase", "Widget.List.Rows.ScoreBoardRow" };
+			"Widget.Bar.ScrollBar", "Widget.List.List", "Widget.List.Rows.RowBase", "Widget.List.Rows.ScoreBoardRow",
+			"Widget.List.ScoreboardHeader", "Widget.ScreenSpecific.ScoreboardSpectatorBox" };
 		const HudWidgetRegistry &installed = HudWidgetRegistry::installed();
 		std::vector<std::string> sorted = want;
 		std::sort(sorted.begin(), sorted.end());

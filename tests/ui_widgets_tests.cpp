@@ -5,7 +5,9 @@
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/swf_scene.h"
+#include "bf3/core/ui/text_db.h"
 #include "bf3/core/ui/ui_direct_access.h"
+#include "bf3/core/ui/ui_input.h"
 #include "test_support.h"
 #include "ui_retail_support.h"
 
@@ -22,6 +24,7 @@ using ui_retail::retail_or_skip;
 namespace {
 
 constexpr std::string_view kScoreboard32 = "ui/flow/screen/scoreboards/scoreboardtwoteamshud32screen";
+constexpr std::string_view kScoreboardTwoTeams = "ui/flow/screen/scoreboards/scoreboardtwoteamsscreen";
 
 void check_scoreboard_list(const HudScreenAsset &p_asset, std::string_view p_instance, int32_t p_key) {
 	const HudWidgetNode *node = p_asset.find(p_instance);
@@ -85,11 +88,11 @@ struct Scoreboard {
 	}
 };
 
-void open_scoreboard(Retail &r_r, Scoreboard &r_b) {
-	r_b.s = ui_retail::open_retail_screen(
-			r_r, kScoreboard32, ui_retail::retail_text_client(ui_retail::retail_text_db(r_r)));
+void open_scoreboard(
+		Retail &r_r, Scoreboard &r_b, const HudModel &p_model = {}, std::string_view p_screen = kScoreboard32) {
+	r_b.s = ui_retail::open_retail_screen(r_r, p_screen, ui_retail::retail_text_client(ui_retail::retail_text_db(r_r)));
 	r_b.s.hud->set_event_sink([&r_b](const HudWidgetEvent &p_e) { r_b.events.push_back(p_e); });
-	r_b.s.hud->initialize(HudModel{});
+	r_b.s.hud->initialize(p_model);
 	r_b.s.hud->set_focus(true);
 }
 
@@ -254,6 +257,120 @@ TEST_SUITE("ui-widgets") {
 		REQUIRE(!last.empty());
 		CHECK(b.s.hud->clip(last + ".Label").text() == "PLAYER 31");
 		CHECK(b.s.hud->clip(last + ".NumLabel").text() == "32");
+	}
+
+	TEST_CASE("widgets: scoreboard headers bind team names, kills and mode colours") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudModel m;
+		m.team.friendly_team_name = text_hash("ID_M_US");
+		m.team.enemy_team1_name = text_hash("ID_M_RU");
+		m.kill_counter.player_team_kills = 50;
+		m.kill_counter.enemy_team_kills = 61;
+		Scoreboard b;
+		open_scoreboard(*r, b, m);
+		CHECK(b.s.hud->stats().widgets_missing == 0);
+		CHECK(b.s.hud->stats().as2.missing_paths == 0);
+		CHECK_MESSAGE(b.s.hud->stats().as2.failed_ops == 0, b.s.hud->stats().as2.last_failure);
+		const TextDatabase &db = ui_retail::retail_text_db(*r);
+		const auto sid = [&](std::string_view p_sid) { return std::string(db.find_sid(p_sid).value_or("")); };
+		struct Want {
+			const char *instance;
+			std::string team;
+			const char *kills;
+			uint32_t colour;
+		};
+		for (const Want &w : { Want{ "ScoreboardHeader_01", sid("ID_M_US"), "50", 0x73C3FFu },
+					 Want{ "ScoreboardHeader_02", sid("ID_M_RU"), "61", 0x963232u } }) {
+			const std::string h = w.instance;
+			CHECK(b.clip(h).visible());
+			const As2Clip team = b.clip(h + ".teamText");
+			CHECK(!w.team.empty());
+			CHECK(team.text() == w.team);
+			const As2Clip ticket = b.clip(h + ".ticketText");
+			CHECK(ticket.visible());
+			CHECK(ticket.text() == w.kills);
+			CHECK(ticket.x() == doctest::Approx(team.x() + team.text_width() + 25.0f));
+			CHECK_FALSE(b.clip(h + ".winnerText").visible());
+			CHECK_FALSE(b.clip(h + ".ObjectivesIcon").visible());
+			CHECK(b.clip(h + ".killsText").text() == sid("ID_H_SCOREBOARD_KILLS"));
+			CHECK(b.clip(h + ".deathsText").text() == sid("ID_H_SCOREBOARD_DEATH"));
+			CHECK(b.clip(h + ".scoreText").text() == sid("ID_H_SCOREBOARD_SCORE"));
+			CHECK(b.clip(h + ".pingText").text() == sid("ID_M_SB_CONNECTION"));
+			CHECK(b.clip(h + ".pingText").visible());
+			const As2ColorTransform bg = b.clip(h + ".bg").color_transform();
+			CHECK(bg.ra == 0.0);
+			CHECK(bg.ga == 0.0);
+			CHECK(bg.ba == 0.0);
+			CHECK(bg.aa == 100.0);
+			CHECK(bg.rb == double((w.colour >> 16) & 0xffu));
+			CHECK(bg.gb == double((w.colour >> 8) & 0xffu));
+			CHECK(bg.bb == double(w.colour & 0xffu));
+			const SwfSceneNode *label = b.clip(h + ".teamText").node();
+			REQUIRE(label != nullptr);
+			REQUIRE(label->filters.size() == 1u);
+			CHECK(label->filters[0].kind == SwfFilterKind::Glow);
+			CHECK(label->filters[0].blur_x == 7.0f);
+			CHECK(label->filters[0].strength == 3.0f);
+			CHECK(label->filters[0].passes == 2);
+			CHECK(label->filters[0].color.r == uint8_t(w.colour >> 16));
+		}
+		m.kill_counter.player_team_kills = 51;
+		b.s.hud->refresh(m);
+		CHECK(b.clip("ScoreboardHeader_01.ticketText").text() == "51");
+		CHECK(b.clip("ScoreboardHeader_02.ticketText").text() == "61");
+		std::printf("ui.widgets scoreboard headers %s %s | %s %s\n",
+				b.clip("ScoreboardHeader_01.teamText").text().c_str(),
+				b.clip("ScoreboardHeader_01.ticketText").text().c_str(),
+				b.clip("ScoreboardHeader_02.teamText").text().c_str(),
+				b.clip("ScoreboardHeader_02.ticketText").text().c_str());
+	}
+
+	TEST_CASE("widgets: scoreboard header Tab release fires its event") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		Scoreboard b;
+		open_scoreboard(*r, b);
+		const std::string focused = b.s.hud->focused_widget();
+		b.events.clear();
+		b.s.hud->input_concept(int32_t(UiInputConcept::Tab), true);
+		CHECK(b.events.empty());
+		b.s.hud->input_concept(int32_t(UiInputConcept::Tab), false);
+		REQUIRE(b.events.size() == 1u);
+		CHECK(focused == std::string(kHudScreenInstance) + ".ScoreboardHeader_02");
+		CHECK(b.events[0].instance == "ScoreboardHeader_02");
+		CHECK(b.events[0].query == "UIWidgetEventID_OnItemReleased");
+	}
+
+	TEST_CASE("widgets: scoreboard spectator box joins names as the AS2 does") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		Scoreboard b;
+		open_scoreboard(*r, b, HudModel{}, kScoreboardTwoTeams);
+		CHECK(b.s.hud->stats().widgets_missing == 0);
+		const std::string path = std::string(kHudScreenInstance) + ".ScoreboardSpectatorBox_01";
+		HudWidgetController *box = b.s.hud->controller(path);
+		REQUIRE(box != nullptr);
+		HudWidgetHost *host = b.s.hud->host(path);
+		REQUIRE(host != nullptr);
+		CHECK_FALSE(b.clip("ScoreboardSpectatorBox_01").visible());
+		As2Value one = As2Value::array();
+		one.push(As2Value::object().set("Name", As2Value::of("ALPHA")));
+		box->update(*host, "Spectators", one);
+		CHECK(b.clip("ScoreboardSpectatorBox_01").visible());
+		CHECK(b.clip("ScoreboardSpectatorBox_01.Label0").text() == "ALPHA");
+		one.push(As2Value::object().set("Name", As2Value::of("BRAVO")));
+		box->update(*host, "Spectators", one);
+		CHECK(b.clip("ScoreboardSpectatorBox_01.Label0").text() == ", BRAVO");
+		box->update(*host, "Spectators", As2Value::array());
+		CHECK_FALSE(b.clip("ScoreboardSpectatorBox_01").visible());
+		CHECK(b.clip("ScoreboardSpectatorBox_01.Label0").text() == ", BRAVO");
 	}
 
 	TEST_CASE("widgets: install unchanged") {
