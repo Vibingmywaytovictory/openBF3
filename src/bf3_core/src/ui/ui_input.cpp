@@ -192,60 +192,39 @@ Result<UiInputBindings> read_ui_input_bindings(const EbxResolver &p_db, std::str
 				", not an EntryInputActionMapsData");
 	}
 	UiInputBindings out;
-	const auto each_ref = [&](const EbxInstance &p_i, std::string_view p_field, const auto &p_fn) {
-		const std::optional<EbxValue> v = p_i.get(p_field);
-		const OptionalEbxArray arr = v ? v->as_array() : OptionalEbxArray();
-		if (!arr) {
-			return;
-		}
-		for (const EbxValue &e : *arr) {
-			const std::optional<EbxRef> r = e.as_ref();
-			if (!r || r->kind != EbxRef::Kind::Internal) {
-				continue;
-			}
-			if (const std::optional<EbxInstance> t = part->resolve(*r)) {
-				p_fn(*t);
-			}
-		}
-	};
-	bool full = false;
-	each_ref(root, "InputActionMaps", [&](const EbxInstance &p_map) {
-		each_ref(p_map, "Actions", [&](const EbxInstance &p_actions) {
-			const std::optional<EbxValue> id = p_actions.get("ConceptIdentifier");
+	for (const EbxInstance &map : p_db.follow_all(root.data(), "InputActionMaps")) {
+		for (const EbxInstance &actions : p_db.follow_all(map.data(), "Actions")) {
+			const std::optional<EbxValue> id = actions.get("ConceptIdentifier");
 			const std::optional<std::string_view> ui_concept = !id ? std::nullopt
 					: id->enum_name()							   ? id->enum_name()
 																   : id->as_str();
 			if (!ui_concept) {
-				return;
+				continue;
 			}
-			each_ref(p_actions, "InputActions", [&](const EbxInstance &p_action) {
+			for (const EbxInstance &action : p_db.follow_all(actions.data(), "InputActions")) {
 				UiKeyBinding b;
 				b.ui_concept = std::string(*ui_concept);
 				std::optional<EbxValue> key;
-				if (p_action.is_a("KeyboardInputActionData")) {
-					key = p_action.get("Key");
-				} else if (p_action.is_a("MouseInputActionData")) {
+				if (action.is_a("KeyboardInputActionData")) {
+					key = action.get("Key");
+				} else if (action.is_a("MouseInputActionData")) {
 					b.device = UiInputDevice::Mouse;
-					key = p_action.get("Button");
+					key = action.get("Button");
 				} else {
-					return;
+					continue;
 				}
 				const std::optional<std::string_view> k = key ? key->enum_name() : std::nullopt;
 				if (!k || !input_is_bound(*k)) {
-					return;
+					continue;
 				}
 				if (out.bindings.size() >= kUiInputMaxBindings) {
-					full = true;
-					return;
+					return make_error("ui input: " + std::string(p_partition) + " has more than " +
+							std::to_string(kUiInputMaxBindings) + " bindings");
 				}
 				b.key = std::string(*k);
 				out.bindings.push_back(std::move(b));
-			});
-		});
-	});
-	if (full) {
-		return make_error("ui input: " + std::string(p_partition) + " has more than " +
-				std::to_string(kUiInputMaxBindings) + " bindings");
+			}
+		}
 	}
 	return out;
 }
