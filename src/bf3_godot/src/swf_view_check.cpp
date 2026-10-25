@@ -729,6 +729,9 @@ void Bf3SwfViewCheck::_process(double p_delta) {
 				if (n.clip_depth != 0 && !under_mask(sc, *sc.node(n.parent))) {
 					++masks;
 				}
+				if (n.script_mask != ui::kSwfNoNode && sc.node(n.script_mask) != nullptr && !under_mask(sc, n)) {
+					++masks;
+				}
 				if (under_mask(sc, n)) {
 					continue;
 				}

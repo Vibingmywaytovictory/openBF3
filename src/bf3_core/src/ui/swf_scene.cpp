@@ -737,12 +737,32 @@ struct SwfScene::Impl {
 		return n;
 	}
 
-	void update(SwfNodeId p_id, const SwfMatrix &p_world, const SwfColorXform &p_color, bool p_visible, const std::vector<SwfNodeId> &p_masks) {
+	std::vector<SwfNodeId> live_script_masks() {
+		std::vector<SwfNodeId> out;
+		for (const std::unique_ptr<SwfSceneNode> &n : nodes) {
+			if (n == nullptr || n->script_mask == kSwfNoNode) {
+				continue;
+			}
+			if (get(n->script_mask) == nullptr) {
+				n->script_mask = kSwfNoNode;
+				continue;
+			}
+			out.push_back(n->script_mask);
+		}
+		std::sort(out.begin(), out.end());
+		return out;
+	}
+
+	void update(SwfNodeId p_id, const SwfMatrix &p_world, const SwfColorXform &p_color, bool p_visible, const std::vector<SwfNodeId> &p_masks,
+			const std::vector<SwfNodeId> &p_script_masks) {
 		SwfSceneNode &n = *get(p_id);
 		n.world = swf_concat(p_world, n.matrix);
 		n.world_color = swf_concat(p_color, n.color);
 		n.world_visible = p_visible && n.visible;
 		n.masks = p_masks;
+		if (n.script_mask != kSwfNoNode) {
+			n.masks.push_back(n.script_mask);
+		}
 		std::vector<const SwfSceneNode *> active;
 		for (const SwfNodeId c : n.children) {
 			SwfSceneNode &child = *get(c);
@@ -751,8 +771,8 @@ struct SwfScene::Impl {
 			for (const SwfSceneNode *m : active) {
 				masks.push_back(m->id);
 			}
-			child.is_mask = child.clip_depth != 0;
-			update(c, n.world, n.world_color, n.world_visible, masks);
+			child.is_mask = child.clip_depth != 0 || std::binary_search(p_script_masks.begin(), p_script_masks.end(), c);
+			update(c, n.world, n.world_color, n.world_visible, masks, p_script_masks);
 			if (child.clip_depth != 0) {
 				active.push_back(&child);
 			}
@@ -765,7 +785,7 @@ struct SwfScene::Impl {
 			out.push_back({ id, swf_change::kRemoved });
 		}
 		removed_reported.clear();
-		update(0, SwfMatrix{}, SwfColorXform{}, true, {});
+		update(0, SwfMatrix{}, SwfColorXform{}, true, {}, live_script_masks());
 		std::vector<SwfNodeId> order;
 		preorder(0, order);
 		for (const SwfNodeId id : order) {
@@ -1147,6 +1167,38 @@ Status SwfScene::set_filters(std::string_view p_path, std::vector<SwfFilter> p_f
 	(*n)->filters = std::move(p_filters);
 	(*n)->script_filters = true;
 	(*n)->effects_revision++;
+	return Status::success();
+}
+
+Status SwfScene::set_mask(std::string_view p_path, std::string_view p_mask_path) {
+	Impl &im = *impl_;
+	Result<SwfSceneNode *> n = im.at(p_path);
+	if (!n) {
+		return n.error();
+	}
+	Result<SwfSceneNode *> mask = im.at(p_mask_path);
+	if (!mask) {
+		return mask.error();
+	}
+	if (*mask == *n || (*mask)->id == 0) {
+		return make_error("swf scene " + im.movie_name + ": " + std::string(p_mask_path) + " cannot mask " + std::string(p_path));
+	}
+	const SwfNodeId mask_id = (*mask)->id;
+	for (const std::unique_ptr<SwfSceneNode> &other : im.nodes) {
+		if (other != nullptr && other->script_mask == mask_id) {
+			other->script_mask = kSwfNoNode;
+		}
+	}
+	(*n)->script_mask = mask_id;
+	return Status::success();
+}
+
+Status SwfScene::clear_mask(std::string_view p_path) {
+	Result<SwfSceneNode *> n = impl_->at(p_path);
+	if (!n) {
+		return n.error();
+	}
+	(*n)->script_mask = kSwfNoNode;
 	return Status::success();
 }
 

@@ -546,4 +546,18 @@ void As2Clip::remove_movie_clip() const {
 	note(scene_->remove_movie(path_));
 }
 
+void As2Clip::set_mask(const As2Clip &p_mask) const {
+	if (mut() == nullptr || p_mask.mut() == nullptr) {
+		return;
+	}
+	note(scene_->set_mask(path_, p_mask.path()));
+}
+
+void As2Clip::clear_mask() const {
+	if (mut() == nullptr) {
+		return;
+	}
+	note(scene_->clear_mask(path_));
+}
+
 }

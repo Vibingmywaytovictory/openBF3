@@ -75,6 +75,8 @@ public:
 	As2Clip attach_movie(std::string_view p_linkage, std::string_view p_name, int32_t p_depth) const;
 	As2Clip create_empty_movie_clip(std::string_view p_name, int32_t p_depth) const;
 	void remove_movie_clip() const;
+	void set_mask(const As2Clip &p_mask) const;
+	void clear_mask() const;
 
 private:
 	SwfSceneNode *mut() const;

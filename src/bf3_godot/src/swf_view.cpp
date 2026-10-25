@@ -1713,11 +1713,23 @@ struct Bf3SwfView::Impl {
 				return;
 			}
 		}
+		if (!p_ctx.alpha && n->is_mask && n->clip_depth == 0) {
+			return;
+		}
+		const ui::SwfSceneNode *script_mask = !p_ctx.alpha && own ? node(n->script_mask) : nullptr;
 		Canvas *canvas = &r_canvas;
+		if (script_mask != nullptr) {
+			Canvas &g = canvas_for(CanvasKind::Mask, script_mask->id, &r_canvas);
+			link_viewports(g);
+			place_quad(g);
+			stats.mask_groups++;
+			canvas = &g;
+		}
 		if (!p_ctx.alpha && own) {
 			const auto rt = renderers.find(p_id);
 			if (rt != renderers.end() && rt->second.find(";i") != std::string::npos) {
-				plan_target(p_id, rt->second, r_canvas);
+				plan_target(p_id, rt->second, *canvas);
+				plan_script_mask(script_mask, *canvas, p_ctx);
 				return;
 			}
 			std::vector<ui::SwfFilter> filters;
@@ -1737,7 +1749,7 @@ struct Bf3SwfView::Impl {
 				warn_once("blend mode " + std::to_string(blend) + " drawn as normal on " + n->path);
 			}
 			if (filters_enabled && !filters.empty()) {
-				Canvas &f = canvas_for(CanvasKind::Filter, p_id, &r_canvas);
+				Canvas &f = canvas_for(CanvasKind::Filter, p_id, canvas);
 				f.additive = add || p_ctx.additive;
 				setup_filter_stages(f, filters);
 				link_viewports(f);
@@ -1772,6 +1784,19 @@ struct Bf3SwfView::Impl {
 			attach_pieces(p_id, rec, *canvas, p_ctx.alpha, p_ctx.additive);
 		}
 		plan_range(n->children, 0, n->children.size(), *canvas, p_ctx);
+		if (script_mask != nullptr) {
+			plan_script_mask(script_mask, canvases[canvas_key(CanvasKind::Mask, script_mask->id)], p_ctx);
+		}
+	}
+
+	void plan_script_mask(const ui::SwfSceneNode *p_mask, Canvas &r_group, Ctx p_ctx) {
+		if (p_mask == nullptr) {
+			return;
+		}
+		p_ctx.alpha = true;
+		p_ctx.additive = false;
+		p_ctx.enabled = true;
+		plan_node(p_mask->id, r_group, p_ctx);
 	}
 
 	void plan_range(const std::vector<ui::SwfNodeId> &p_kids, size_t p_begin, size_t p_end, Canvas &r_canvas, Ctx p_ctx) {

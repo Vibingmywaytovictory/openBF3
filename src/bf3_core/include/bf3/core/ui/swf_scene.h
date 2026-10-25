@@ -114,6 +114,7 @@ struct SwfSceneNode {
 	bool world_visible = true;
 	bool is_mask = false;
 	std::vector<SwfNodeId> masks;
+	SwfNodeId script_mask = kSwfNoNode;
 
 	uint32_t text_revision = 0;
 	uint32_t character_revision = 0;
@@ -195,6 +196,8 @@ public:
 	Status set_text_bounds(std::string_view p_path, const SwfRect &p_bounds);
 	Status set_text_color(std::string_view p_path, SwfColor p_color);
 	Status set_filters(std::string_view p_path, std::vector<SwfFilter> p_filters);
+	Status set_mask(std::string_view p_path, std::string_view p_mask_path);
+	Status clear_mask(std::string_view p_path);
 
 	std::vector<SwfSceneChange> take_changes();
 
