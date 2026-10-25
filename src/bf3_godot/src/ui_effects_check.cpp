@@ -5,11 +5,13 @@
 #include "level_session.h"
 #include "overview_map.h"
 #include "swf_view.h"
+#include "ui_assets.h"
 #include "ui_cursor.h"
 #include "ui_post_process.h"
 
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/install.h"
+#include "bf3/core/ui/swf_layout.h"
 #include "bf3/core/ui/ui_post_process.h"
 #include "bf3/core/util/format.h"
 
@@ -110,12 +112,46 @@ Rgb patch_mean(const Ref<Image> &p_img, int32_t p_x, int32_t p_y, int32_t p_side
 	return n > 0 ? Rgb{ sum.r / float(n), sum.g / float(n), sum.b / float(n) } : sum;
 }
 
-constexpr float kDeployOverviewX = 769.0f;
-constexpr float kDeployOverviewY = 132.0f;
-constexpr float kDeployOverviewScale = 0.737f;
+constexpr std::string_view kDeployScreenMovie = "ui/assets/spawnscreenpc";
+constexpr std::string_view kMenuScreenMovie = "ui/assets/ingamemenump";
+constexpr ui::SwfRect kDeployMovieBox{ 769.0f, 1183.3f, 132.0f, 547.8f };
+constexpr ui::SwfRect kMenuMovieBox{ 778.0f, 1179.0f, 153.0f, 554.0f };
 constexpr ui::SwfRect kDeployFootageBox{ 777.0f, 1177.0f, 136.0f, 526.0f };
 constexpr ui::SwfRect kMenuFootageBox{ 783.0f, 1173.0f, 153.0f, 545.0f };
 constexpr float kOverviewBoxTolerance = 1.5f;
+
+const ui::SwfLayoutNode *find_overview_node(const ui::SwfLayoutNode &p_node) {
+	if (p_node.symbol == kOverviewMapSymbol) {
+		return &p_node;
+	}
+	for (const ui::SwfLayoutNode &c : p_node.children) {
+		if (const ui::SwfLayoutNode *hit = find_overview_node(c)) {
+			return hit;
+		}
+	}
+	return nullptr;
+}
+
+bf3::core::Result<ui::SwfMatrix> screen_overview_placement(std::string_view p_movie) {
+	Bf3UiAssets *assets = Bf3UiAssets::current();
+	if (assets == nullptr || !assets->is_loaded() || assets->movies() == nullptr) {
+		return bf3::core::make_error("Bf3UiAssets is not loaded");
+	}
+	ui::WorkBudget budget(ui::kSwfLayoutBudgetUnits);
+	bf3::core::Result<ui::SwfLayoutNode> tree = ui::read_layout(*assets->movies(), p_movie, ui::SwfLayoutOptions{}, budget);
+	if (!tree) {
+		return tree.error();
+	}
+	const ui::SwfLayoutNode *n = find_overview_node(*tree);
+	if (n == nullptr) {
+		return bf3::core::make_error("no OverviewMap instance in " + std::string(p_movie));
+	}
+	return n->stage;
+}
+
+std::string matrix_text(const ui::SwfMatrix &p_m) {
+	return bf3::core::fmt("%.0f,%.0f x %.4f/%.4f", double(p_m.tx), double(p_m.ty), double(p_m.a), double(p_m.d));
+}
 
 std::string overview_symbol_path(const ui::SwfScene &p_scene) {
 	for (const ui::SwfNodeId id : p_scene.draw_order()) {
@@ -197,6 +233,8 @@ struct Bf3UiEffectsCheck::State {
 	CanvasLayer *overview_layer = nullptr;
 	Bf3SwfView *overview_view = nullptr;
 	std::string overview_path;
+	ui::SwfMatrix deploy_placement;
+	ui::SwfMatrix menu_placement;
 	int overview_waits = 0;
 };
 
@@ -485,15 +523,22 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			s.overview_view->set_name("OverviewMapView");
 			s.overview_view->set_playing(false);
 			s.overview_layer->add_child(s.overview_view);
-			const bf3::core::Status opened = s.overview_view->open("overviewmap");
+			const bf3::core::Result<ui::SwfMatrix> deploy_at = screen_overview_placement(kDeployScreenMovie);
+			const bf3::core::Result<ui::SwfMatrix> menu_at = screen_overview_placement(kMenuScreenMovie);
+			const bf3::core::Status read = !deploy_at ? deploy_at.error() : !menu_at ? menu_at.error() : bf3::core::Status::success();
+			if (read) {
+				s.deploy_placement = *deploy_at;
+				s.menu_placement = *menu_at;
+			}
+			const bf3::core::Status opened = read ? s.overview_view->open("overviewmap") : read;
 			s.overview_path = opened ? overview_symbol_path(*s.overview_view->scene()) : std::string();
-			const bf3::core::Status placed = s.overview_path.empty()
-					? bf3::core::make_error("no OverviewMap instance")
-					: s.overview_view->scene()->set_matrix(s.overview_path,
-							  ui::SwfMatrix{ kDeployOverviewScale, 0.0f, 0.0f, kDeployOverviewScale, kDeployOverviewX, kDeployOverviewY });
+			const bf3::core::Status placed = s.overview_path.empty() ? bf3::core::make_error("no OverviewMap instance")
+																	 : s.overview_view->scene()->set_matrix(s.overview_path, s.deploy_placement);
 			s.overview = Bf3OverviewMap::ensure(get_parent());
 			const bf3::core::Status attached = opened && placed ? s.overview->attach(s.overview_view) : bf3::core::make_error("not opened");
 			std::string detail = s.overview_view->scene() != nullptr ? s.overview_view->scene()->movie_name() + " " + s.overview_path : std::string();
+			detail += bf3::core::fmt(", OverviewMap_01 at %s in %s and %s in %s", matrix_text(s.deploy_placement).c_str(), std::string(kDeployScreenMovie).c_str(),
+					matrix_text(s.menu_placement).c_str(), std::string(kMenuScreenMovie).c_str());
 			for (const bf3::core::Status *st : { &opened, &placed, &attached }) {
 				if (!*st) {
 					detail += " " + st->error().message;
@@ -536,25 +581,13 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			const Rgb inside = box ? patch_mean(shot, int32_t(((box->x_min + box->x_max) * 0.5f - 40.0f) * sx), int32_t((mid_y - 28.0f) * sx), int32_t(16.0f * sx)) : Rgb{};
 			const float hatch_rb = hatch.r / std::max(hatch.b, 1e-3f);
 			const float inside_rb = inside.r / std::max(inside.b, 1e-3f);
-			const bool placed = box && near(box->x_min, kDeployOverviewX, 1.0) && near(box->y_min, kDeployOverviewY, 1.0);
+			const bool placed = box && box_near(*box, kDeployMovieBox);
 			row("overview deploy", st.maps >= 1 && st.paints >= 1 && st.skulls == 1 && st.icons == 5 && placed && hatch_rb > inside_rb + 0.2f,
-					bf3::core::fmt("map box %s from the placement %.0f,%.0f x %.3f (footage %s), %.3f px/m, area x %.0f..%.0f z %.0f..%.0f, %u icons, %u skulls, %u objectives, R/B outside the area %.2f, inside %.2f",
-							box ? box_text(*box).c_str() : "none", double(kDeployOverviewX), double(kDeployOverviewY), double(kDeployOverviewScale),
-							box_text(kDeployFootageBox).c_str(), double(st.pixels_per_metre), double(st.area.x0), double(st.area.x1),
-							double(st.area.z0), double(st.area.z1), st.icons, st.skulls, st.objectives, double(hatch_rb), double(inside_rb)));
-			const std::vector<SwfEngineTarget> targets = s.overview_view->engine_targets(kOverviewMapRenderer);
-			const ui::SwfSceneNode *n = targets.empty() ? nullptr : s.overview_view->scene()->node(targets.front().node);
-			if (n == nullptr) {
-				finish();
-				return;
-			}
-			const ui::SwfMatrix inner = n->matrix;
-			const ui::SwfRect &b = targets.front().local_bounds;
-			const float local_w = std::max(1e-3f, b.width() * inner.a);
-			const float scale = kMenuFootageBox.width() / local_w;
-			const float x = kMenuFootageBox.x_min - scale * (inner.a * b.x_min + inner.tx);
-			const float y = kMenuFootageBox.y_min - scale * (inner.d * b.y_min + inner.ty);
-			if (const bf3::core::Status moved = s.overview_view->scene()->set_matrix(s.overview_path, ui::SwfMatrix{ scale, 0.0f, 0.0f, scale, x, y }); !moved) {
+					bf3::core::fmt("map box %s from %s's OverviewMap_01 %s (data %s, footage %s), %.3f px/m, area x %.0f..%.0f z %.0f..%.0f, %u icons, %u skulls, %u objectives, R/B outside the area %.2f, inside %.2f",
+							box ? box_text(*box).c_str() : "none", std::string(kDeployScreenMovie).c_str(), matrix_text(s.deploy_placement).c_str(),
+							box_text(kDeployMovieBox).c_str(), box_text(kDeployFootageBox).c_str(), double(st.pixels_per_metre), double(st.area.x0),
+							double(st.area.x1), double(st.area.z0), double(st.area.z1), st.icons, st.skulls, st.objectives, double(hatch_rb), double(inside_rb)));
+			if (const bf3::core::Status moved = s.overview_view->scene()->set_matrix(s.overview_path, s.menu_placement); !moved) {
 				row("overview menu", false, moved.error().message);
 				finish();
 				return;
@@ -569,10 +602,11 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			const std::optional<ui::SwfRect> box = overview_box(*s.overview_view);
 			const OverviewMapStats &st = s.overview->stats();
 			const SwfViewStats &vs = s.overview_view->stats();
-			row("overview menu", box && box_near(*box, kMenuFootageBox) && st.skulls == 1 && st.icons == 5 && vs.missing_textures == 0,
-					bf3::core::fmt("map box %s (footage %s), %.3f px/m, %u paints; view %u items, %u bitmap fills, %u missing textures, %u engine targets",
-							box ? box_text(*box).c_str() : "none", box_text(kMenuFootageBox).c_str(), double(st.pixels_per_metre), st.paints, vs.items, vs.bitmap_fill_items,
-							vs.missing_textures, vs.engine_targets));
+			row("overview menu", box && box_near(*box, kMenuMovieBox) && st.skulls == 1 && st.icons == 5 && vs.missing_textures == 0,
+					bf3::core::fmt("map box %s from %s's OverviewMap_01 %s (data %s, footage %s), %.3f px/m, %u paints; view %u items, %u bitmap fills, %u missing textures, %u engine targets",
+							box ? box_text(*box).c_str() : "none", std::string(kMenuScreenMovie).c_str(), matrix_text(s.menu_placement).c_str(),
+							box_text(kMenuMovieBox).c_str(), box_text(kMenuFootageBox).c_str(), double(st.pixels_per_metre), st.paints, vs.items,
+							vs.bitmap_fill_items, vs.missing_textures, vs.engine_targets));
 			finish();
 			return;
 		}

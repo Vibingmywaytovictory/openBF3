@@ -334,7 +334,7 @@ struct MinimapWorldRect {
 
 std::optional<MinimapWorldRect> combat_area_bounds(const L8Image &p_field, float p_threshold, const MinimapMapping &p_mapping);
 
-inline constexpr float kMinimapOverviewMargin = 1.13f;
+inline constexpr float kMinimapOverviewMargin = 1.15f;
 
 MinimapView minimap_overview_view(const MinimapWorldRect &p_area, float p_margin, float p_x, float p_y, float p_width, float p_height);
 

@@ -104,9 +104,9 @@ TEST_SUITE("ui-overview") {
 		CHECK(std::fabs(area->x1 - box.x1) <= 2.0f * texel);
 		CHECK(std::fabs(area->z0 - box.z0) <= 2.0f * texel);
 		CHECK(std::fabs(area->z1 - box.z1) <= 2.0f * texel);
-		const MinimapView menu = minimap_overview_view(*area, kMinimapOverviewMargin, 783.0f, 153.0f, 390.0f, 392.0f);
-		const MinimapView deploy = minimap_overview_view(*area, kMinimapOverviewMargin, 769.0f, 132.0f, 414.0f, 415.0f);
-		std::printf("ui.overview margin %.2f: menu box %.3f px/m (18.57 footage at 176.5 s 345 px over 200 m, 1.725), deploy box %.3f px/m (76.0 s 365 px, 1.825)\n",
+		const MinimapView menu = minimap_overview_view(*area, kMinimapOverviewMargin, 778.0f, 153.0f, 1024.0f * 0.391623f, 1024.0f * 0.39159f);
+		const MinimapView deploy = minimap_overview_view(*area, kMinimapOverviewMargin, 769.0f, 132.0f, 1024.0f * 0.404595f, 1024.0f * 0.406045f);
+		std::printf("ui.overview margin %.2f: ingamemenump box %.3f px/m (18.57 footage at 176.5 s 345 px over 200 m, 1.725), spawnscreenpc box %.3f px/m (76.0 s 365 px, 1.825)\n",
 				double(kMinimapOverviewMargin), double(menu.pixels_per_metre), double(deploy.pixels_per_metre));
 		CHECK(menu.pixels_per_metre == doctest::Approx(1.725f).epsilon(0.02));
 		CHECK(deploy.pixels_per_metre == doctest::Approx(1.825f).epsilon(0.02));
