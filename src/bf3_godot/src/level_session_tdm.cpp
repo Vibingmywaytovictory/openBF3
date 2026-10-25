@@ -165,7 +165,8 @@ Transform3D kept_view(const TdmState &p_m) {
 	return Transform3D(b, Vector3(p_m.view_origin[0], p_m.view_origin[1], p_m.view_origin[2]));
 }
 
-void build_tdm_ui(GameState &r_game, TdmState &r_m, bool p_headless) {
+void build_tdm_ui(
+		GameState &r_game, TdmState &r_m, bool p_headless, const bf3::core::gameplay::DeathTimeline *p_death) {
 	r_m.built = true;
 	r_m.windowed = !p_headless;
 
@@ -199,7 +200,9 @@ void build_tdm_ui(GameState &r_game, TdmState &r_m, bool p_headless) {
 				std::unique_ptr<NativeFlow, void (*)(NativeFlow *)>(new NativeFlow(), &delete_part<NativeFlow>);
 		r_m.native_flow->set_keep_log(r_m.native_screens_check);
 	}
-	r_m.death_camera = std::unique_ptr<Bf3DeathCamera, void (*)(Bf3DeathCamera *)>(new Bf3DeathCamera(), &delete_part<Bf3DeathCamera>);
+	r_m.death_camera = std::unique_ptr<Bf3DeathCamera, void (*)(Bf3DeathCamera *)>(
+			new Bf3DeathCamera(p_death != nullptr ? death_camera_params(*p_death) : DeathCameraParams{}),
+			&delete_part<Bf3DeathCamera>);
 	if (r_game.crowd != nullptr && !r_game.crowd->built()) {
 		r_game.crowd->set_corpse_seconds(r_m.corpse_seconds > 0.0f ? r_m.corpse_seconds : bf3::anim::kCrowdCorpseSeconds);
 	}
@@ -537,7 +540,10 @@ void Bf3LevelSession::tdm_presented(uint64_t p_now_ns) {
 	si.phase = f.match.phase;
 	si.own_alive = r_game.alive;
 	si.own_unspawned = f.own_unspawned;
-	si.kill_card_up = m.own_death_s >= 0.0 && now_s - m.own_death_s < host::kDeathScreenSeconds;
+	const std::shared_ptr<const host::SharedLevel> death_level = shared_level();
+	const double spawn_screens_s =
+			death_level != nullptr && death_level->death != nullptr ? double(death_level->death->spawn_screens_s) : 0.0;
+	si.kill_card_up = m.own_death_s >= 0.0 && now_s - m.own_death_s < spawn_screens_s;
 	m.spawn_screen = tdm_spawn_screen_up(si);
 	r_mapper.set_spawn_screen(m.spawn_screen);
 	m.can_deploy = tdm_can_deploy(f.match_valid, f.match, f.newest_tick, f.own_respawn_tick);
@@ -588,7 +594,8 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 	const double now_s = double(p_now_ns) * 1e-9;
 	using bf3::core::ms_since;
 	if (!m.built) {
-		build_tdm_ui(r_game, m, headless_);
+		const std::shared_ptr<const host::SharedLevel> level = shared_level();
+		build_tdm_ui(r_game, m, headless_, level != nullptr ? level->death.get() : nullptr);
 	}
 	InputMapper &mapper = mapper_;
 	m.scoreboard_held = tdm_scoreboard_shown(mapper.scoreboard_held(), f.match_valid, f.match.phase);
@@ -622,6 +629,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			in.score_headshot = level->tdm_tuning->score_headshot;
 		}
 		in.eor = level != nullptr ? level->eor.get() : nullptr;
+		in.death = level != nullptr ? level->death.get() : nullptr;
 		in.loadouts = level != nullptr && level->gunplay != nullptr ? &level->gunplay->loadouts : nullptr;
 		in.loadout_choices = m.loadout_choices;
 		in.game_mode = level != nullptr ? std::string_view(level->mode) : std::string_view();

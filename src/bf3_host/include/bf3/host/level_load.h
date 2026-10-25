@@ -27,6 +27,7 @@ class World;
 namespace bf3::core::gameplay {
 class LogicGraph;
 struct ScoringTable;
+struct DeathTimeline;
 struct EorTimeline;
 }
 namespace bf3::sim::logic {
@@ -112,6 +113,7 @@ struct SharedLevel {
 	std::shared_ptr<const TdmTuning> tdm_tuning;
 	std::shared_ptr<const core::gameplay::ScoringTable> scoring;
 	std::shared_ptr<const core::gameplay::EorTimeline> eor;
+	std::shared_ptr<const core::gameplay::DeathTimeline> death;
 	std::vector<std::string> tdm_notes;
 };
 

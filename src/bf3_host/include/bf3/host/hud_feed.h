@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/core/gameplay/death_timeline.h"
 #include "bf3/core/gameplay/eor_timeline.h"
 #include "bf3/core/gameplay/weapon_def.h"
 #include "bf3/core/level/spawn_points.h"
@@ -119,6 +120,7 @@ struct HudFeedInput {
 	int32_t score_kill = 0;
 	int32_t score_headshot = 0;
 	const core::gameplay::EorTimeline *eor = nullptr;
+	const core::gameplay::DeathTimeline *death = nullptr;
 	const LoadoutCatalog *loadouts = nullptr;
 	std::array<LoadoutChoice, kKitCount> loadout_choices{};
 	bool in_menu = false;
@@ -161,10 +163,6 @@ int32_t hud_grenade_count(const net::WeaponsWire &p_weapons, const HudStatic &p_
 }
 
 namespace bf3::host {
-
-inline constexpr double kKillCardDelaySeconds = 0.9;
-inline constexpr double kKillCardSeconds = 3.0;
-inline constexpr double kDeathScreenSeconds = kKillCardDelaySeconds + kKillCardSeconds;
 
 inline constexpr std::string_view kDefaultBasicDogtag = "ui/art/persistence/dogtag/defaulttag_left";
 inline constexpr std::string_view kDefaultAdvancedDogtag = "ui/art/persistence/dogtag/defaulttag_right";

@@ -1,5 +1,6 @@
 #include "death_camera.h"
 
+#include "bf3/core/gameplay/death_timeline.h"
 #include "bf3/core/util/finite.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
@@ -69,6 +70,13 @@ fx::Transform look_from(const Vec3 &p_from, const Vec3 &p_forward) {
 	return t;
 }
 
+}
+
+DeathCameraParams death_camera_params(const core::gameplay::DeathTimeline &p_death) {
+	DeathCameraParams p;
+	p.seconds = p_death.spawn_screens_s;
+	p.orbit_seconds = p_death.kill_card_s;
+	return p;
 }
 
 Bf3DeathCamera::Bf3DeathCamera(const DeathCameraParams &p_params) :

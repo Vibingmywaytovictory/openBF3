@@ -5,6 +5,7 @@
 #include "hud_tdm_text.h"
 
 #include "bf3/core/ebx_db.h"
+#include "bf3/core/gameplay/death_timeline.h"
 #include "bf3/core/gameplay/eor_timeline.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
@@ -121,6 +122,8 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 	in.own_unspawned = false;
 	in.spawned_this_round = false;
 	in.spawn_kit = 2;
+	const bf3::core::gameplay::DeathTimeline timeline{ 1.0f, 4.0f };
+	in.death = &timeline;
 	host::HudTdmFeedState state;
 	ui::HudModel m;
 	const double dt = 1.0 / 60.0;
@@ -238,14 +241,15 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 	CHECK(m.spawn_logic.start_time_to_respawn == doctest::Approx(5.0f));
 
 	in.kill_card_source = {};
-	const double card_from = 1002 * dt + host::kKillCardDelaySeconds;
-	const double card_until = card_from + host::kKillCardSeconds;
+	const double card_from = 1002 * dt + timeline.kill_card_s;
+	const double card_until = 1002 * dt + timeline.spawn_screens_s;
 	uint32_t card_frames = 0;
 	uint32_t expected_frames = 0;
 	uint32_t early_screens = 0;
 	float first_seconds_left = -1.0f;
 	bf3::sim::Tick t = 1003;
-	for (; t < 1002 + 4 * 60 + 2; ++t) {
+	const bf3::sim::Tick screens_tick = 1002 + bf3::sim::Tick(std::ceil(timeline.spawn_screens_s / dt));
+	for (; t < screens_tick + 8; ++t) {
 		frame(t, {});
 		const double now = double(t) * dt;
 		expected_frames += now >= card_from && now < card_until ? 1 : 0;
@@ -259,7 +263,8 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 	CHECK(expected_frames >= 3 * 60 - 1);
 	CHECK(expected_frames <= 3 * 60 + 1);
 	CHECK(early_screens == 0);
-	CHECK(first_seconds_left == doctest::Approx(host::kKillCardSeconds).epsilon(dt / host::kKillCardSeconds));
+	CHECK(first_seconds_left ==
+			doctest::Approx(timeline.kill_card_lifetime_s()).epsilon(dt / timeline.kill_card_lifetime_s()));
 	CHECK(!m.kill_card.visible);
 	CHECK(m.spawn_screen.visible);
 	CHECK(!m.spawn_screen.at_join);
@@ -291,7 +296,7 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 	in.own_revive_until = 2780;
 	frame(2001, std::span<const host::PresentEvent>(&own_death2, 1));
 	CHECK(!m.kill_card.visible);
-	frame(2001 + 60, {});
+	frame(2001 + bf3::sim::Tick(std::ceil(timeline.kill_card_s / dt)) + 1, {});
 	CHECK(m.kill_card.visible);
 	CHECK(m.kill_card.serial == 2);
 	CHECK(m.kill_card.distance_m < 0.0f);

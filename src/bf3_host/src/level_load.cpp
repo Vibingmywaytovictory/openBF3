@@ -8,6 +8,7 @@
 #include "bf3/core/level/world.h"
 #include "bf3/sim/static_world.h"
 
+#include "bf3/core/gameplay/death_timeline.h"
 #include "bf3/core/gameplay/eor_timeline.h"
 #include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/gameplay/logic_world.h"
@@ -571,6 +572,17 @@ core::Status load_shared_tdm(const LevelDatabase &p_db, const SharedLoadOptions 
 		return core::error_at("tdm", eor.error());
 	}
 	r_level.eor = std::make_shared<const gp::EorTimeline>(*eor);
+	gp::LogicGraphOptions client = go;
+	client.side = gp::LogicSide::Client;
+	core::Result<gp::LogicGraph> client_graph = gp::build_logic_graph(*world, client);
+	if (!client_graph) {
+		return core::error_at("tdm: client logic graph", client_graph.error());
+	}
+	core::Result<gp::DeathTimeline> death = gp::read_death_timeline(level.db(), *client_graph);
+	if (!death) {
+		return core::error_at("tdm", death.error());
+	}
+	r_level.death = std::make_shared<const gp::DeathTimeline>(*death);
 	set_immunity_abort(level, *tuning, r_level);
 	r_level.tdm_tuning = std::make_shared<const TdmTuning>(std::move(*tuning));
 	r_level.seconds_logic = seconds_since(clock);

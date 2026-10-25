@@ -11,6 +11,7 @@
 
 #include "bf3/core/util/format.h"
 #include "bf3/host/hud_feed.h"
+#include "bf3/host/level_load.h"
 #include "bf3/net/protocol.h"
 
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -34,8 +35,7 @@ constexpr double kM2bJoinShotDelayS = 1.5;
 constexpr double kM2bChooseDelayS = 0.6;
 constexpr double kM2bTabEveryS = 9.0;
 constexpr double kM2bTabHoldS = 0.6;
-constexpr double kM2bKillCardCheckS = host::kKillCardDelaySeconds + 0.2;
-static_assert(kM2bKillCardCheckS < host::kDeathScreenSeconds);
+constexpr double kM2bKillCardCheckAfterS = 0.2;
 
 constexpr double kM2bSeekEnemyAfterS = 6.0;
 constexpr double kM2bSeekEveryS = 4.0;
@@ -91,6 +91,10 @@ struct M2bCheck::State {
 			s(r_s), g(r_g), m(r_m) {}
 
 	const host::PresentationFrame &f() const { return s.frame(); }
+	core::gameplay::DeathTimeline death() const {
+		const std::shared_ptr<const host::SharedLevel> l = s.shared_level();
+		return l != nullptr && l->death != nullptr ? *l->death : core::gameplay::DeathTimeline{};
+	}
 	InputMapper &mapper() { return s.mapper(); }
 	void note(const std::string &p_line) { UtilityFunctions::print(to_godot("[m2b] " + p_line)); }
 	bool save_shot(const char *p_name) {
@@ -126,7 +130,7 @@ struct M2bCheck::State {
 		}
 		death_pending = false;
 		const bool had_time =
-				m2b_death_had_screen_time(death_t, p_t, round_over_t, host::kDeathScreenSeconds + kM2bScreenGraceS);
+				m2b_death_had_screen_time(death_t, p_t, round_over_t, death().spawn_screens_s + kM2bScreenGraceS);
 		if (death_screen_seen) {
 			++tally.deaths_checked;
 			++tally.screens_after_death;
@@ -332,7 +336,7 @@ struct M2bCheck::State {
 	void ui_tally(double p_now_s, double p_t) {
 		(void)p_now_s;
 
-		if (death_pending && !killcard_checked && p_t - death_t >= kM2bKillCardCheckS) {
+		if (death_pending && !killcard_checked && p_t - death_t >= death().kill_card_s + kM2bKillCardCheckAfterS) {
 			killcard_checked = true;
 			if (death_by_soldier) {
 				const core::ui::HudKillCard &kc = g.hud_model.kill_card;
@@ -459,7 +463,7 @@ bool M2bCheck::frame(uint64_t p_now_ns, double p_dt) {
 	switch (st.cases[st.next_case]) {
 		case M2bCase::Play: {
 			st.play_frame(t, p_now_ns);
-			const bool settled = !st.death_pending || t - st.death_t >= host::kDeathScreenSeconds + kM2bScreenGraceS;
+			const bool settled = !st.death_pending || t - st.death_t >= st.death().spawn_screens_s + kM2bScreenGraceS;
 			const bool over_long_enough = st.round_over_t >= 0.0 && t - st.round_over_t >= kM2bRoundOverHoldS && (st.round_end_shot || !st.tally.windowed);
 			const bool enough = st.m.own_deaths >= 1 && st.m.deploys >= 2 && settled;
 			const bool end = (over_long_enough && (enough || t >= st.options.play_seconds)) || t >= st.options.play_seconds + kM2bHardEndAfterS ||

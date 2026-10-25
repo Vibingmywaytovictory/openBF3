@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "bf3/anim/crowd_eval.h"
+#include "bf3/core/gameplay/death_timeline.h"
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/host/hud_feed.h"
@@ -89,7 +90,9 @@ static_assert(std::is_same_v<decltype(&host::fill_hud_tdm),
 static_assert(std::is_same_v<decltype(&gs::Bf3DeathCamera::step),
 		gs::DeathCameraView (gs::Bf3DeathCamera::*)(double, const fx::Vec3 *, const sim::CollisionWorld *)>);
 
-static_assert(host::kKillCardSeconds == 3.0 && host::kKillCardDelaySeconds == 0.9);
+static_assert(std::is_same_v<decltype(host::HudFeedInput::death), const core::gameplay::DeathTimeline *>);
+static_assert(std::is_same_v<decltype(&gs::death_camera_params),
+		gs::DeathCameraParams (*)(const core::gameplay::DeathTimeline &)>);
 static_assert(host::kHudSpawnSlots == std::array<uint8_t, 5>{ 0, 1, 2, 6, 7 });
 static_assert(host::kHudSpawnSlots[2] == host::kKitGadgetSlot && host::kHudSpawnSlots[0] == host::kKitSlots[0] &&
 		host::kHudSpawnSlots[1] == host::kKitSlots[1] && host::kHudSpawnSlots[3] == host::kKitSlots[2] && host::kHudSpawnSlots[4] == host::kKitSlots[3]);
@@ -152,8 +155,9 @@ TEST_SUITE("m2b-contract2") {
 		const anim::CrowdStanceSet s{};
 		CHECK(s.corpse_seconds == anim::kCrowdDeathHideSeconds);
 
-		const gs::DeathCameraParams dp{};
-		CHECK(dp.seconds == float(host::kDeathScreenSeconds));
+		const gs::DeathCameraParams dp = gs::death_camera_params(core::gameplay::DeathTimeline{ 1.0f, 4.0f });
+		CHECK(dp.seconds == 4.0f);
+		CHECK(dp.orbit_seconds == 1.0f);
 		CHECK(dp.orbit_seconds + dp.turn_seconds < dp.seconds);
 		CHECK(dp.camera_radius_m > 0.0f);
 		const gs::DeathCameraStart ds{};
@@ -355,6 +359,8 @@ TEST_SUITE("m2b-contract2") {
 			in.now_s = 10.0;
 			in.kill_card_source.killer_seen = true;
 			in.kill_card_source.distance_m = 12.5f;
+			const core::gameplay::DeathTimeline timeline{ 1.0f, 4.0f };
+			in.death = &timeline;
 			host::PresentEvent death{};
 			death.kind = host::PresentKind::Death;
 			death.timeline = host::PresentTimeline::Render;
@@ -371,7 +377,7 @@ TEST_SUITE("m2b-contract2") {
 			CHECK(m.messages.kill_message.newest_serial == 1);
 			CHECK(!m.kill_card.visible);
 			CHECK(!m.spawn_screen.visible);
-			in.now_s = 10.0 + host::kKillCardDelaySeconds + 0.1;
+			in.now_s = 10.0 + timeline.kill_card_s + 0.1;
 			host::fill_hud_tdm(in, {}, st, state, m);
 			CHECK(m.kill_card.visible);
 			CHECK(m.kill_card.serial == 1);
@@ -386,7 +392,7 @@ TEST_SUITE("m2b-contract2") {
 			CHECK(m.kill_counter.team2_kills == 1);
 			CHECK(m.kill_counter.team1_max_kills == 100);
 
-			in.now_s = 10.0 + host::kDeathScreenSeconds + 0.1;
+			in.now_s = 10.0 + timeline.spawn_screens_s + 0.1;
 			in.server_tick = 1250;
 			host::fill_hud_tdm(in, {}, st, state, m);
 			CHECK(!m.kill_card.visible);

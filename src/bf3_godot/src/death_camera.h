@@ -8,6 +8,9 @@
 namespace bf3::sim {
 class CollisionWorld;
 }
+namespace bf3::core::gameplay {
+struct DeathTimeline;
+}
 
 namespace bf3::godot_side {
 
@@ -23,6 +26,8 @@ struct DeathCameraParams {
 	float killer_height_m = 1.2f;
 };
 static_assert(std::is_trivially_copyable_v<DeathCameraParams>);
+
+DeathCameraParams death_camera_params(const core::gameplay::DeathTimeline &p_death);
 
 struct DeathCameraStart {
 	fx::Vec3 corpse{};

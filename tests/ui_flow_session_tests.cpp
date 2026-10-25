@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "bf3/core/gameplay/death_timeline.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/ui/ui_input.h"
@@ -224,6 +225,15 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(sc.at("push killscreen", 601) - died == int64_t(sim::logic::logic_delay_ticks(1.0)));
 		CHECK(sc.at("push spawnscreenticketcountertdmscreen", 601) - died ==
 				int64_t(sim::logic::logic_delay_ticks(4.0)));
+		const core::Result<core::gameplay::DeathTimeline> timeline =
+				core::gameplay::read_death_timeline(l->level->db(), s.runtime().graph());
+		REQUIRE_MESSAGE(timeline.ok(), (timeline.ok() ? std::string() : timeline.error().message));
+		CHECK(timeline->kill_card_s == 1.0f);
+		CHECK(timeline->spawn_screens_s == 4.0f);
+		CHECK(timeline->kill_card_lifetime_s() == 3.0f);
+		CHECK(sc.at("push killscreen", 601) - died == int64_t(sim::logic::logic_delay_ticks(timeline->kill_card_s)));
+		CHECK(sc.at("close killscreen", 601) - died ==
+				int64_t(sim::logic::logic_delay_ticks(timeline->spawn_screens_s)));
 		Lines deploy_expected{ "deploy OnFrontendCameraChanged", "deploy Spawn", "native Playing",
 			"close spawnscreenpc", "close spawnbuttonscreen", "close spawnscreenticketcountertdmscreen" };
 		deploy_expected.insert(deploy_expected.end(), spawned_tail.begin(), spawned_tail.end());
