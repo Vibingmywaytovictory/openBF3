@@ -30,6 +30,21 @@ public:
 	virtual void row_state(const std::string &p_state) = 0;
 };
 
+class HudListLabel {
+public:
+	virtual ~HudListLabel() = default;
+	virtual void set_text(std::string p_text) = 0;
+	virtual const std::string &text() const = 0;
+	virtual void set_label_width(float p_width) = 0;
+	virtual float label_width() const = 0;
+	virtual void set_type(std::string_view p_type) = 0;
+	virtual std::string type() const = 0;
+	virtual float text_width() const = 0;
+	virtual void set_scrollable(bool p_scrollable) = 0;
+	virtual void set_interactive(bool p_interactive) = 0;
+	virtual const std::string &label_state() const = 0;
+};
+
 class RowBaseClass : public HudWidgetController {
 public:
 	static constexpr double kNoId = -123456789.0;

@@ -8,6 +8,7 @@
 #include "bf3/core/ui/text_db.h"
 #include "bf3/core/ui/ui_direct_access.h"
 #include "bf3/core/ui/ui_input.h"
+#include "list.h"
 #include "test_support.h"
 #include "ui_retail_support.h"
 
@@ -594,6 +595,101 @@ TEST_SUITE("ui-widgets") {
 		CHECK(b.events[1].index == 0);
 		CHECK(b.events[1].param.to_string() == "ID_M_POPUP_YES");
 		CHECK(b.s.hud->hit_target(100.0f, 100.0f) == std::string(kHudScreenInstance) + ".Dimmer_01");
+	}
+
+	TEST_CASE("widgets: list label follows its row's state") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		ScreenRig b;
+		open_scoreboard(*r, b);
+		REQUIRE(hud_list_set_direct_rows(*b.s.hud, "List_01", scoreboard_rows(32, 3)));
+		const std::string row5 = b.row(5);
+		REQUIRE(!row5.empty());
+		const As2Clip row_clip = b.s.hud->clip(row5);
+		HudWidgetHost *row_host = b.s.hud->host(row5);
+		REQUIRE(row_host != nullptr);
+		const As2Clip lbl = row_host->attach_movie(row_clip, "mc_label", "lbl", row_clip.next_highest_depth());
+		REQUIRE(lbl.exists());
+		const HudWidgetState *state = b.s.hud->widget(lbl.path());
+		REQUIRE(state != nullptr);
+		CHECK(state->class_name == "Widget.List.ListLabel");
+		HudListLabel *label = dynamic_cast<HudListLabel *>(b.s.hud->controller(lbl.path()));
+		REQUIRE(label != nullptr);
+		const As2Clip txt = lbl.child("txtField");
+		REQUIRE(txt.exists());
+		CHECK(label->text() == "LABEL");
+		CHECK(txt.text() == "LABEL");
+		REQUIRE(txt.node()->edit_text != nullptr);
+		CHECK(txt.node()->edit_text->id == 318);
+		CHECK(txt.node()->edit_text->height == 22.0f);
+		CHECK(label->type() == "medium");
+		CHECK(label->label_state() == "standard");
+		CHECK(txt.text_color() == 0xFFFFFFu);
+		const auto glow = [&txt]() {
+			const SwfSceneNode *n = txt.node();
+			REQUIRE(n != nullptr);
+			REQUIRE(n->filters.size() == 1u);
+			return n->filters[0];
+		};
+		CHECK(glow().color.r == 0x73);
+		CHECK(glow().color.g == 0xC3);
+		CHECK(glow().color.b == 0xFF);
+		CHECK(glow().blur_x == 8.0f);
+		CHECK(glow().strength == 1.0f);
+		label->set_text("ASSAULT");
+		CHECK(txt.text() == "ASSAULT");
+		CHECK(txt.height() == doctest::Approx(txt.text_height()));
+		const float x = 103.0f + 200.0f;
+		const float y = 154.0f + 28.0f * 5.0f + 14.0f;
+		b.s.hud->mouse_move(x, y);
+		CHECK(label->label_state() == "standard");
+		b.s.hud->mouse_button(x, y, 1, true);
+		b.s.hud->mouse_button(x, y, 1, false);
+		CHECK(b.frame_label(row5) == "overSelected");
+		CHECK(label->label_state() == "inverted");
+		CHECK(txt.text_color() == 0u);
+		CHECK(glow().color.r == 0);
+		CHECK(glow().color.b == 0);
+		CHECK(glow().strength == 0.75f);
+		CHECK(txt.alpha() == doctest::Approx(100.0));
+		b.s.hud->mouse_move(x, y + 28.0f);
+		b.s.hud->mouse_button(x, y + 28.0f, 1, true);
+		b.s.hud->mouse_button(x, y + 28.0f, 1, false);
+		CHECK(b.frame_label(row5) == "out");
+		CHECK(label->label_state() == "standard");
+		CHECK(txt.text_color() == 0xFFFFFFu);
+		RowBaseClass *row = dynamic_cast<RowBaseClass *>(b.s.hud->controller(row5));
+		REQUIRE(row != nullptr);
+		row->set_disabled(true);
+		CHECK(label->label_state() == "inactive");
+		CHECK(txt.alpha() == doctest::Approx(60.0));
+		CHECK(txt.text_color() == 0u);
+		row->set_disabled(false);
+		label->set_interactive(false);
+		b.s.hud->mouse_move(x, y);
+		b.s.hud->mouse_button(x, y, 1, true);
+		b.s.hud->mouse_button(x, y, 1, false);
+		CHECK(b.frame_label(row5) == "overSelected");
+		CHECK(label->label_state() == "standard");
+		CHECK(txt.text_color() == 0xFFFFFFu);
+		label->set_type("Bold");
+		CHECK(label->type() == "bold");
+		label->set_scrollable(true);
+		label->set_label_width(40.0f);
+		label->set_text("A LONG LIST LABEL THAT SCROLLS");
+		const As2Clip scrolled = lbl.child("txtField");
+		const float tw = scrolled.text_width();
+		REQUIRE(tw > 40.0f);
+		CHECK(lbl.child("mask").exists());
+		CHECK(scrolled.width() == doctest::Approx(tw + 5.0f));
+		CHECK(scrolled.x() == 0.0f);
+		b.s.hud->advance(2.5);
+		b.s.hud->advance(2.0);
+		CHECK(scrolled.x() == doctest::Approx(-(tw - 40.0f + 5.0f)).epsilon(0.01));
+		CHECK(b.s.hud->stats().as2.missing_paths == 0);
+		std::printf("ui.widgets list label %.1f px text, scrolled to x %.1f\n", tw, scrolled.x());
 	}
 
 	TEST_CASE("widgets: install unchanged") {
