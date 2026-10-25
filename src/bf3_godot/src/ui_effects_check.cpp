@@ -163,17 +163,19 @@ std::string overview_symbol_path(const ui::SwfScene &p_scene) {
 	return {};
 }
 
-std::optional<ui::SwfRect> overview_box(const Bf3SwfView &p_view) {
+std::optional<ui::SwfRect> overview_box(const Bf3SwfView &p_view, std::string_view p_path) {
 	const std::vector<SwfEngineTarget> targets = p_view.engine_targets(kOverviewMapRenderer);
 	const ui::SwfScene *scene = p_view.scene();
-	if (targets.empty() || scene == nullptr) {
+	const auto it =
+			std::find_if(targets.begin(), targets.end(), [&](const SwfEngineTarget &t) { return t.path == p_path; });
+	if (it == targets.end() || scene == nullptr) {
 		return std::nullopt;
 	}
-	const ui::SwfSceneNode *n = scene->node(targets.front().node);
+	const ui::SwfSceneNode *n = scene->node(it->node);
 	if (n == nullptr) {
 		return std::nullopt;
 	}
-	const ui::SwfRect &b = targets.front().local_bounds;
+	const ui::SwfRect &b = it->local_bounds;
 	const SwfStageFit f = p_view.stage_fit();
 	const ui::SwfMatrix &m = n->world;
 	ui::SwfRect out{ 1e9f, -1e9f, 1e9f, -1e9f };
@@ -578,7 +580,7 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			const Ref<Image> shot = capture();
 			save(shot, "ui_effects_overview_deploy.png");
 			const OverviewMapStats &st = s.overview->stats();
-			const std::optional<ui::SwfRect> box = overview_box(*s.overview_view);
+			const std::optional<ui::SwfRect> box = overview_box(*s.overview_view, s.overview_path);
 			const float sx = shot.is_valid() ? float(shot->get_width()) / 1280.0f : 1.0f;
 			const float mid_y = box ? (box->y_min + box->y_max) * 0.5f : 0.0f;
 			const Rgb hatch = box ? patch_mean(shot, int32_t((box->x_min + 2.0f) * sx), int32_t((mid_y - 8.0f) * sx), int32_t(16.0f * sx)) : Rgb{};
@@ -586,11 +588,19 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			const float hatch_rb = hatch.r / std::max(hatch.b, 1e-3f);
 			const float inside_rb = inside.r / std::max(inside.b, 1e-3f);
 			const bool placed = box && box_near(*box, kDeployMovieBox);
-			row("overview deploy", st.maps >= 1 && st.paints >= 1 && st.skulls == 1 && st.icons == 5 && placed && hatch_rb > inside_rb + 0.2f,
-					bf3::core::fmt("map box %s from %s's OverviewMap_01 %s (data %s, footage %s), %.3f px/m, area x %.0f..%.0f z %.0f..%.0f, %u icons, %u skulls, %u objectives, R/B outside the area %.2f, inside %.2f",
-							box ? box_text(*box).c_str() : "none", std::string(kDeployScreenMovie).c_str(), matrix_text(s.deploy_placement).c_str(),
-							box_text(kDeployMovieBox).c_str(), box_text(kDeployFootageBox).c_str(), double(st.pixels_per_metre), double(st.area.x0),
-							double(st.area.x1), double(st.area.z0), double(st.area.z1), st.icons, st.skulls, st.objectives, double(hatch_rb), double(inside_rb)));
+			row("overview deploy",
+					st.maps >= 1 && st.paints >= 1 && st.skulls == 1 && st.icons == 5 && placed &&
+							hatch_rb > inside_rb + 0.2f,
+					bf3::core::fmt("%s target on %s, clip box %s from %s's OverviewMap_01 %s (data %s, footage %s), "
+								   "%.3f stage px/m (%.3f in the clip), area x %.0f..%.0f z %.0f..%.0f, %u icons, %u "
+								   "skulls, %u objectives, R/B outside the area %.2f, inside %.2f",
+							std::string(kOverviewMapRenderer).c_str(), s.overview_path.c_str(),
+							box ? box_text(*box).c_str() : "none", std::string(kDeployScreenMovie).c_str(),
+							matrix_text(s.deploy_placement).c_str(), box_text(kDeployMovieBox).c_str(),
+							box_text(kDeployFootageBox).c_str(), double(st.stage_pixels_per_metre),
+							double(st.pixels_per_metre), double(st.area.x0), double(st.area.x1), double(st.area.z0),
+							double(st.area.z1), st.icons, st.skulls, st.objectives, double(hatch_rb),
+							double(inside_rb)));
 			if (const bf3::core::Status moved = s.overview_view->scene()->set_matrix(s.overview_path, s.menu_placement); !moved) {
 				row("overview menu", false, moved.error().message);
 				finish();
@@ -603,14 +613,20 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 		case 11: {
 			const Ref<Image> shot = capture();
 			save(shot, "ui_effects_overview_menu.png");
-			const std::optional<ui::SwfRect> box = overview_box(*s.overview_view);
+			const std::optional<ui::SwfRect> box = overview_box(*s.overview_view, s.overview_path);
 			const OverviewMapStats &st = s.overview->stats();
 			const SwfViewStats &vs = s.overview_view->stats();
-			row("overview menu", box && box_near(*box, kMenuMovieBox) && st.skulls == 1 && st.icons == 5 && vs.missing_textures == 0,
-					bf3::core::fmt("map box %s from %s's OverviewMap_01 %s (data %s, footage %s), %.3f px/m, %u paints; view %u items, %u bitmap fills, %u missing textures, %u engine targets",
-							box ? box_text(*box).c_str() : "none", std::string(kMenuScreenMovie).c_str(), matrix_text(s.menu_placement).c_str(),
-							box_text(kMenuMovieBox).c_str(), box_text(kMenuFootageBox).c_str(), double(st.pixels_per_metre), st.paints, vs.items,
-							vs.bitmap_fill_items, vs.missing_textures, vs.engine_targets));
+			row("overview menu",
+					box && box_near(*box, kMenuMovieBox) && st.skulls == 1 && st.icons == 5 && vs.missing_textures == 0,
+					bf3::core::fmt("%s target on %s, clip box %s from %s's OverviewMap_01 %s (data %s, footage %s), "
+								   "%.3f stage px/m (%.3f in the clip), %u paints; view %u items, %u bitmap fills, %u "
+								   "missing textures, %u engine targets",
+							std::string(kOverviewMapRenderer).c_str(), s.overview_path.c_str(),
+							box ? box_text(*box).c_str() : "none", std::string(kMenuScreenMovie).c_str(),
+							matrix_text(s.menu_placement).c_str(), box_text(kMenuMovieBox).c_str(),
+							box_text(kMenuFootageBox).c_str(), double(st.stage_pixels_per_metre),
+							double(st.pixels_per_metre), st.paints, vs.items, vs.bitmap_fill_items, vs.missing_textures,
+							vs.engine_targets));
 			finish();
 			return;
 		}

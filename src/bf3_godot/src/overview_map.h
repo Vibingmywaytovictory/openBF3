@@ -4,6 +4,7 @@
 #include "swf_view.h"
 
 #include "bf3/core/result.h"
+#include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/minimap.h"
 #include "bf3/core/ui/swf_scene.h"
 
@@ -23,9 +24,8 @@ namespace bf3::godot_side {
 
 class Bf3MinimapHud;
 
-inline constexpr std::string_view kOverviewMapRenderer = "openbf3;iOverviewMap";
+inline constexpr std::string_view kOverviewMapRenderer = bf3::core::ui::kMinimapRenderer;
 inline constexpr std::string_view kOverviewMapSymbol = "OverviewMap";
-inline constexpr std::string_view kOverviewMapClip = "map";
 
 enum class OverviewMarkKind : uint8_t {
 	Local,
@@ -52,6 +52,7 @@ struct OverviewMapStats {
 	uint32_t skulls = 0;
 	uint32_t objectives = 0;
 	float pixels_per_metre = 0.0f;
+	float stage_pixels_per_metre = 0.0f;
 	bf3::core::ui::SwfRect local_bounds;
 	bf3::core::ui::MinimapWorldRect area;
 };
@@ -70,7 +71,7 @@ public:
 	void _process(double p_delta) override;
 
 	bf3::core::Status attach(Bf3SwfView *p_view);
-	bf3::core::Status attach(Bf3SwfView *p_view, std::string_view p_map_path);
+	bf3::core::Status attach(Bf3SwfView *p_view, std::string_view p_overview_path);
 	void detach(Bf3SwfView *p_view);
 	void set_marks(std::vector<OverviewMark> p_marks) { marks_ = std::move(p_marks); }
 	const std::vector<OverviewMark> &marks() const { return marks_; }

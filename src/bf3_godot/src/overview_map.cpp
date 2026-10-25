@@ -87,12 +87,8 @@ ui::HudIconChoice mark_icon(OverviewMarkKind p_kind) {
 	return { kPlayerIcon, ui::HudIconState::Neutral };
 }
 
-bool is_map_clip(const ui::SwfScene &p_scene, const ui::SwfSceneNode &p_node) {
-	if (p_node.name != kOverviewMapClip) {
-		return false;
-	}
-	const ui::SwfSceneNode *owner = p_scene.node(p_node.parent);
-	return owner != nullptr && owner->symbol == kOverviewMapSymbol;
+bool is_overview_clip(const ui::SwfSceneNode &p_node) {
+	return p_node.symbol == kOverviewMapSymbol;
 }
 
 }
@@ -190,12 +186,13 @@ bf3::core::Status Bf3OverviewMap::attach(Bf3SwfView *p_view) {
 	std::vector<std::string> paths;
 	for (const ui::SwfNodeId id : scene.draw_order()) {
 		const ui::SwfSceneNode *n = scene.node(id);
-		if (n != nullptr && is_map_clip(scene, *n)) {
+		if (n != nullptr && is_overview_clip(*n)) {
 			paths.push_back(n->path);
 		}
 	}
 	if (paths.empty()) {
-		return bf3::core::make_error("overview map: no " + std::string(kOverviewMapSymbol) + "." + std::string(kOverviewMapClip) + " clip in " + scene.movie_name());
+		return bf3::core::make_error(
+				"overview map: no " + std::string(kOverviewMapSymbol) + " clip in " + scene.movie_name());
 	}
 	for (const std::string &p : paths) {
 		if (bf3::core::Status st = attach(p_view, p); !st) {
@@ -205,11 +202,11 @@ bf3::core::Status Bf3OverviewMap::attach(Bf3SwfView *p_view) {
 	return bf3::core::Status::success();
 }
 
-bf3::core::Status Bf3OverviewMap::attach(Bf3SwfView *p_view, std::string_view p_map_path) {
+bf3::core::Status Bf3OverviewMap::attach(Bf3SwfView *p_view, std::string_view p_overview_path) {
 	if (p_view == nullptr || p_view->scene() == nullptr) {
 		return bf3::core::make_error("overview map: no open view");
 	}
-	if (bf3::core::Status st = p_view->set_renderer_string(p_map_path, kOverviewMapRenderer); !st) {
+	if (bf3::core::Status st = p_view->set_renderer_string(p_overview_path, kOverviewMapRenderer); !st) {
 		return st;
 	}
 	const ObjectID id = ObjectID(p_view->get_instance_id());
@@ -218,8 +215,9 @@ bf3::core::Status Bf3OverviewMap::attach(Bf3SwfView *p_view, std::string_view p_
 		attached_.push_back(Attached{ id, {}, {} });
 		it = attached_.end() - 1;
 	}
-	if (std::find(it->paths.begin(), it->paths.end(), p_map_path) == it->paths.end()) {
-		it->paths.emplace_back(p_map_path);
+	if (std::find(it->paths.begin(), it->paths.end(), p_overview_path) == it->paths.end()) {
+		it->paths.emplace_back(p_overview_path);
+		it->targets.emplace_back();
 		stats_.attached++;
 	}
 	return bf3::core::Status::success();
@@ -328,6 +326,9 @@ void Bf3OverviewMap::paint_target(const SwfEngineTarget &p_target, const ui::Swf
 	if (!(view.pixels_per_metre > 0.0f)) {
 		return;
 	}
+	const ui::SwfSceneNode *clip = p_scene.node(p_target.node);
+	const ui::SwfAffine m = clip != nullptr ? ui::swf_affine(clip->world) : ui::SwfAffine{};
+	const float stage_per_local = std::max(1e-6f, float(std::sqrt(m.a * m.a + m.b * m.b)));
 	r_target.material->set_shader_parameter("local_rect", Vector4(b.x_min, b.y_min, b.width(), b.height()));
 	r_target.material->set_shader_parameter("centre_local", Vector2(view.center_x, view.center_y));
 	r_target.material->set_shader_parameter("area_centre", Vector2(view.player_x, view.player_z));
@@ -336,6 +337,7 @@ void Bf3OverviewMap::paint_target(const SwfEngineTarget &p_target, const ui::Swf
 	rs->canvas_item_add_rect(r_target.map_item, Rect2(b.x_min, b.y_min, b.width(), b.height()), Color(1, 1, 1, 1));
 	stats_.maps++;
 	stats_.pixels_per_metre = view.pixels_per_metre;
+	stats_.stage_pixels_per_metre = view.pixels_per_metre * stage_per_local;
 	stats_.local_bounds = b;
 
 	rs->canvas_item_clear(r_target.icon_item);
@@ -344,9 +346,6 @@ void Bf3OverviewMap::paint_target(const SwfEngineTarget &p_target, const ui::Swf
 	if (a == nullptr || atlas.is_null()) {
 		return;
 	}
-	const ui::SwfSceneNode *map = p_scene.node(p_target.node);
-	const ui::SwfAffine m = map != nullptr ? ui::swf_affine(map->world) : ui::SwfAffine{};
-	const float stage_per_local = std::max(1e-6f, float(std::sqrt(m.a * m.a + m.b * m.b)));
 	const float unit = 1.0f / stage_per_local;
 	const auto inside = [&](const ui::ScreenPoint &p) {
 		return std::isfinite(p.x) && std::isfinite(p.y) && p.x >= b.x_min && p.y >= b.y_min && p.x <= b.x_max && p.y <= b.y_max;
@@ -405,14 +404,13 @@ void Bf3OverviewMap::paint(Bf3SwfView &r_view, Attached &r_attached) {
 		return;
 	}
 	const std::vector<SwfEngineTarget> targets = r_view.engine_targets(kOverviewMapRenderer);
-	if (r_attached.targets.size() < targets.size()) {
-		r_attached.targets.resize(targets.size());
-	}
-	for (size_t i = 0; i < targets.size(); ++i) {
-		const SwfEngineTarget &t = targets[i];
-		if (!t.canvas_item.is_valid()) {
+	for (size_t i = 0; i < r_attached.paths.size(); ++i) {
+		const auto found = std::find_if(targets.begin(), targets.end(),
+				[&](const SwfEngineTarget &e) { return e.path == r_attached.paths[i]; });
+		if (found == targets.end() || !found->canvas_item.is_valid()) {
 			continue;
 		}
+		const SwfEngineTarget &t = *found;
 		paint_target(t, *scene, r_attached.targets[i]);
 		if (!t.live) {
 			if (const bf3::core::Status st = r_view.set_engine_target_live(t.path, true); !st) {
