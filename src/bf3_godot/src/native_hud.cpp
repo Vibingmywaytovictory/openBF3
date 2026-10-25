@@ -353,6 +353,7 @@ bf3::core::Status Bf3NativeHud::open_view(size_t p_index) {
 	screens_[p_index] = std::move(*s);
 	effects_seen_[p_index] = 0;
 	shown_[p_index] = true;
+	++shown_count_[p_index];
 	return bf3::core::Status::success();
 }
 
@@ -391,6 +392,7 @@ bool Bf3NativeHud::show_screen(std::string_view p_partition) {
 		return false;
 	}
 	views_[*i]->set_visible(true);
+	shown_count_[*i] += shown_[*i] ? 0 : 1;
 	shown_[*i] = true;
 	return true;
 }
@@ -437,6 +439,21 @@ UiScreenSlot Bf3NativeHud::screen_slot(size_t p_index) const {
 		return {};
 	}
 	return UiScreenSlot{ kNativeHudPartitions[p_index], screens_[p_index].get(), views_[p_index], shown_[p_index], order_[p_index] };
+}
+
+bool Bf3NativeHud::reports(std::string_view p_partition) const {
+	return built_ && !failed_ && native_hud_index(p_partition).has_value();
+}
+
+std::optional<UiScreenRecord> Bf3NativeHud::screen_record(std::string_view p_partition) const {
+	const std::optional<size_t> i = reports(p_partition) ? native_hud_index(p_partition) : std::nullopt;
+	if (!i) {
+		return std::nullopt;
+	}
+	UiScreenRecord r;
+	r.visible = views_[*i] != nullptr && shown_[*i] && is_visible_in_tree();
+	r.shown = shown_count_[*i];
+	return r;
 }
 
 void Bf3NativeHud::arrange() {

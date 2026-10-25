@@ -387,6 +387,14 @@ void NativeHudMomentRun::check_host(Bf3NativeHud &r_hud) {
 	row("host.close_open", closed && live,
 			std::string("crosshairdefault closed ") + (closed ? "yes" : "no") + ", reopened " + (reopened ? std::string("yes") : reopened.error().message) + ", initialized after a step " +
 					(live ? "yes" : "no"));
+	const UiScreenRecords &records = r_hud;
+	const std::optional<UiScreenRecord> crosshair_record = records.screen_record(crosshair);
+	const std::optional<UiScreenRecord> mp_record = records.screen_record(ui::kHudMpScreenPartition);
+	const bool recorded = crosshair_record && crosshair_record->visible && crosshair_record->shown == 3 && mp_record && mp_record->visible && mp_record->shown == 1 &&
+			!records.reports(ui::kKillScreenPartition) && !records.lookup_record();
+	row("host.records", recorded,
+			"crosshairdefault shown " + (crosshair_record ? std::to_string(crosshair_record->shown) : std::string("unreported")) + " times (built, shown again, reopened), hudmpscreen " +
+					(mp_record ? std::to_string(mp_record->shown) : std::string("unreported")) + ", killscreen not reported");
 	const bf3::core::Status foreign = host.open_screen(ui::kKillScreenPartition);
 	row("host.foreign", !foreign && host.screen_count() == kNativeHudViews, "killscreen refused: " + (foreign ? std::string("opened") : foreign.error().message));
 }

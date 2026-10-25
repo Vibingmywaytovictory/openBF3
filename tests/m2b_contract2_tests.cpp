@@ -2,6 +2,7 @@
 
 #include "bf3/anim/crowd_eval.h"
 #include "bf3/core/ui/hud_model.h"
+#include "bf3/core/ui/hud_screen.h"
 #include "bf3/host/hud_feed.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/presentation_events.h"
@@ -15,12 +16,15 @@
 
 #include "test_support.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -189,6 +193,114 @@ TEST_SUITE("m2b-contract2") {
 		for (const char *bad : { "", "Play", "play,play", "play,", ",play", "all", "play,fx", long_arg.c_str() }) {
 			CHECK_MESSAGE(!gs::parse_m2b_cases(bad).ok(), bad);
 		}
+	}
+
+	TEST_CASE("m2b.contract2: the TDM screens report through UiScreenRecords, and a record set composes sources") {
+		gs::TdmHudRecords r{};
+		r.model_serial = 9;
+		r.draws = 5;
+		r.scoreboard_visible = true;
+		r.scoreboard_rows = 24;
+		r.scoreboard_team_kills = { 23, 19 };
+		r.spawn_screen_visible = true;
+		r.deploy_enabled = true;
+		r.selected_kit = 2;
+		r.spawn_screen_shown = 3;
+		r.kill_card_visible = true;
+		r.kill_card_item = 0x0fd83dfau;
+		r.kill_card_weapon_named = true;
+		const std::string killer = "Killer";
+		std::copy(killer.begin(), killer.end(), r.kill_card_killer.begin());
+		r.round_end_visible = true;
+		r.round_end_shown = 1;
+		r.missing_fonts = 1;
+		r.missing_icons = 2;
+		r.missing_strings = 3;
+
+		for (std::string_view p : { ui::kScoreboardHud32ScreenPartition, ui::kSpawnScreenPcPartition, ui::kKillScreenPartition, ui::kPreRoundWaitingScreenPartition,
+					 ui::kEorWinningTeamScreenPartition }) {
+			CHECK_MESSAGE(gs::tdm_hud_reports(p), p);
+			CHECK_MESSAGE(gs::tdm_hud_screen_record(r, p).has_value(), p);
+		}
+		CHECK(!gs::tdm_hud_reports(ui::kHudMpScreenPartition));
+		CHECK(!gs::tdm_hud_screen_record(r, ui::kHudMpScreenPartition));
+		const gs::UiScreenRecord board = *gs::tdm_hud_screen_record(r, ui::kScoreboardHud32ScreenPartition);
+		CHECK(board.visible);
+		CHECK(board.number(gs::kUiFactRows) == 24.0);
+		CHECK(board.number(gs::kUiFactTeam1Kills) == 23.0);
+		CHECK(board.number(gs::kUiFactTeam2Kills) == 19.0);
+		const gs::UiScreenRecord spawn = *gs::tdm_hud_screen_record(r, ui::kSpawnScreenPcPartition);
+		CHECK(spawn.visible);
+		CHECK(spawn.shown == 3);
+		CHECK(spawn.number(gs::kUiFactDeployEnabled) == 1.0);
+		CHECK(spawn.number(gs::kUiFactSelectedKit) == 2.0);
+		const gs::UiScreenRecord card = *gs::tdm_hud_screen_record(r, ui::kKillScreenPartition);
+		CHECK(card.visible);
+		CHECK(card.text(gs::kUiFactKiller) == killer);
+		CHECK(card.number(gs::kUiFactItem) == double(0x0fd83dfau));
+		CHECK(card.number(gs::kUiFactWeaponNamed) == 1.0);
+		CHECK(card.text("unknown").empty());
+		CHECK(card.number("unknown") == 0.0);
+		CHECK(!gs::tdm_hud_screen_record(r, ui::kPreRoundWaitingScreenPartition)->visible);
+		const gs::UiScreenRecord eor = *gs::tdm_hud_screen_record(r, ui::kEorWinningTeamScreenPartition);
+		CHECK(eor.visible);
+		CHECK(eor.shown == 1);
+		const gs::UiLookupRecord look = gs::tdm_hud_lookup_record(r);
+		CHECK(look.model_serial == 9);
+		CHECK(look.draws == 5);
+		CHECK(look.missing_fonts + look.missing_icons + look.missing_strings == 6);
+
+		class Source final : public gs::UiScreenRecords {
+		public:
+			Source(std::string_view p_partition, uint64_t p_shown, std::optional<gs::UiLookupRecord> p_lookup) :
+					partition_(p_partition), shown_(p_shown), lookup_(p_lookup) {}
+			bool reports(std::string_view p_partition) const override { return p_partition == partition_; }
+			std::optional<gs::UiScreenRecord> screen_record(std::string_view p_partition) const override {
+				if (!reports(p_partition)) {
+					return std::nullopt;
+				}
+				gs::UiScreenRecord out;
+				out.visible = true;
+				out.shown = shown_;
+				return out;
+			}
+			std::optional<gs::UiLookupRecord> lookup_record() const override { return lookup_; }
+
+		private:
+			std::string_view partition_;
+			uint64_t shown_ = 0;
+			std::optional<gs::UiLookupRecord> lookup_;
+		};
+		const Source first(ui::kKillScreenPartition, 1, gs::UiLookupRecord{ 4, 10, 1, 0, 0 });
+		const Source second(ui::kKillScreenPartition, 2, std::nullopt);
+		const Source third(ui::kSpawnScreenPcPartition, 7, gs::UiLookupRecord{ 6, 5, 0, 2, 3 });
+		gs::UiScreenRecordSet set;
+		CHECK(!set.lookup_record());
+		CHECK(!set.screen_record(ui::kKillScreenPartition));
+		set.add(&first);
+		set.add(&second);
+		set.add(&third);
+		set.add(&first);
+		set.add(nullptr);
+		set.add(&set);
+		CHECK(set.sources() == 3);
+		CHECK(set.reports(ui::kSpawnScreenPcPartition));
+		CHECK(!set.reports(ui::kHudMpScreenPartition));
+		CHECK(set.screen_record(ui::kKillScreenPartition)->shown == 1);
+		CHECK(set.screen_record(ui::kSpawnScreenPcPartition)->shown == 7);
+		const gs::UiLookupRecord sum = *set.lookup_record();
+		CHECK(sum.model_serial == 6);
+		CHECK(sum.draws == 15);
+		CHECK(sum.missing_fonts == 1);
+		CHECK(sum.missing_icons == 2);
+		CHECK(sum.missing_strings == 3);
+		set.remove(&first);
+		CHECK(set.sources() == 2);
+		CHECK(set.screen_record(ui::kKillScreenPartition)->shown == 2);
+		CHECK(set.lookup_record()->draws == 5);
+		set.remove(&third);
+		CHECK(!set.lookup_record());
+		CHECK(!set.reports(ui::kSpawnScreenPcPartition));
 	}
 
 	TEST_CASE("m2b.contract2: ui's fill_hud_tdm (pending until ui lands)") {

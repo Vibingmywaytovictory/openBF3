@@ -167,6 +167,8 @@ void build_tdm_ui(GameState &r_game, TdmState &r_m, bool p_headless) {
 			UtilityFunctions::print(to_godot("[tdm] ERROR TDM HUD build: " + error));
 			r_m.tdm_hud.reset();
 			++r_m.ui_build_failures;
+		} else {
+			r_m.screen_records.add(r_m.tdm_hud.get());
 		}
 	}
 	r_m.death_camera = std::unique_ptr<Bf3DeathCamera, void (*)(Bf3DeathCamera *)>(new Bf3DeathCamera(), &delete_part<Bf3DeathCamera>);

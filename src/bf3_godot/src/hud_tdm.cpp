@@ -409,6 +409,18 @@ TdmHudRecords Bf3TdmHud::records() const {
 	return impl_->ctx.records;
 }
 
+bool Bf3TdmHud::reports(std::string_view p_partition) const {
+	return built() && tdm_hud_reports(p_partition);
+}
+
+std::optional<UiScreenRecord> Bf3TdmHud::screen_record(std::string_view p_partition) const {
+	return built() ? tdm_hud_screen_record(impl_->ctx.records, p_partition) : std::nullopt;
+}
+
+std::optional<UiLookupRecord> Bf3TdmHud::lookup_record() const {
+	return built() ? std::optional<UiLookupRecord>(tdm_hud_lookup_record(impl_->ctx.records)) : std::nullopt;
+}
+
 void Bf3TdmHud::shutdown() {
 	if (!impl_) {
 		return;

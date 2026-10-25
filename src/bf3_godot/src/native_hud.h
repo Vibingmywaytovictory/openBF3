@@ -3,6 +3,7 @@
 #include "native_tags.h"
 #include "swf_view.h"
 #include "ui_screen_host.h"
+#include "ui_screen_records.h"
 
 #include "bf3/core/ui/hud_messages.h"
 #include "bf3/core/ui/hud_model.h"
@@ -67,7 +68,7 @@ struct NativeHudReadout {
 	bool hit_shown = false;
 };
 
-class Bf3NativeHud : public godot::Node2D, public UiScreenHost {
+class Bf3NativeHud : public godot::Node2D, public UiScreenHost, public UiScreenRecords {
 	GDCLASS(Bf3NativeHud, godot::Node2D)
 
 public:
@@ -101,6 +102,8 @@ public:
 	bool close_screen(std::string_view p_partition) override;
 	size_t screen_count() const override { return kNativeHudViews; }
 	UiScreenSlot screen_slot(size_t p_index) const override;
+	bool reports(std::string_view p_partition) const override;
+	std::optional<UiScreenRecord> screen_record(std::string_view p_partition) const override;
 	const NativeHudPaintStats &paint_stats() const { return paint_; }
 	NativeHudReadout readout() const;
 	std::optional<bf3::core::ui::SwfRect> window_bounds(size_t p_view, std::string_view p_path) const;
@@ -152,6 +155,7 @@ private:
 	std::array<std::unique_ptr<bf3::core::ui::HudScreen>, kNativeHudViews> screens_;
 	std::array<uint32_t, kNativeHudViews> effects_seen_{};
 	std::array<bool, kNativeHudViews> shown_{};
+	std::array<uint64_t, kNativeHudViews> shown_count_{};
 	std::array<int32_t, kNativeHudViews> order_{ 0, 1, 2, 3 };
 	bf3::core::ui::HudModel model_{};
 	uint64_t stepped_serial_ = 0;

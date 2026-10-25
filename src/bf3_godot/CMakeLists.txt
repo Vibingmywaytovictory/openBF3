@@ -103,6 +103,8 @@ target_sources(bf3_godot PRIVATE
     src/native_hud.cpp
     src/native_hud.h
     src/ui_screen_host.h
+    src/ui_screen_records.cpp
+    src/ui_screen_records.h
     src/native_tags.cpp
     src/native_tags.h
     src/native_hud_moments.h
@@ -155,6 +157,7 @@ target_sources(bf3_godot PRIVATE
 
 target_sources(bf3_godot PRIVATE
     src/hud_tdm.cpp
+    src/tdm_hud_records.cpp
     src/hud_tdm_screen.h
     src/hud_tdm_text.h
     src/hud_scoreboard.h

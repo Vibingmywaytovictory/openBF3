@@ -25,6 +25,7 @@ struct TdmState {
 	bool checks() const { return !cases.empty(); }
 
 	std::unique_ptr<Bf3TdmHud, void (*)(Bf3TdmHud *)> tdm_hud{ nullptr, nullptr };
+	UiScreenRecordSet screen_records;
 	bf3::host::HudTdmFeedState tdm_state;
 	bf3::host::HudKillCardSource kill_card_source;
 

@@ -822,6 +822,12 @@ TEST_SUITE("ui-hud-screen") {
 			hide_on_zoom = hide_on_zoom || (p.name == "HideOnZoom" && p.value == "true");
 		}
 		CHECK(hide_on_zoom);
+		for (std::string_view partition : { kKillScreenPartition, kSpawnScreenPcPartition, kScoreboardHud32ScreenPartition, kPreRoundWaitingScreenPartition,
+					 kEorWinningTeamScreenPartition }) {
+			Result<HudScreenAsset> a = read_hud_screen_asset(*r->level, partition);
+			CHECK_MESSAGE(a.ok(), partition);
+			CHECK_MESSAGE((a.ok() && !a->movie.empty()), partition);
+		}
 		Screen s = open_screen(*r, kHudMpScreenPartition);
 		CHECK(s.hud->stats().unknown_classes == 4);
 		for (const std::string &u : s.hud->stats().unknown_class_paths) {

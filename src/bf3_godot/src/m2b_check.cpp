@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 namespace bf3::godot_side {
 
@@ -310,11 +311,10 @@ struct M2bCheck::State {
 		}
 		int32_t k1 = g.hud_model.kill_counter.team1_kills, k2 = g.hud_model.kill_counter.team2_kills;
 		bool shown = g.hud_model.team.scoreboard_enabled;
-		if (m.tdm_hud != nullptr && m.tdm_hud->built() && tally.windowed) {
-			const TdmHudRecords r = m.tdm_hud->records();
-			shown = r.scoreboard_visible;
-			k1 = r.scoreboard_team_kills[0];
-			k2 = r.scoreboard_team_kills[1];
+		if (const std::optional<UiScreenRecord> r = tally.windowed ? m.screen_records.screen_record(core::ui::kScoreboardHud32ScreenPartition) : std::nullopt) {
+			shown = r->visible;
+			k1 = int32_t(r->number(kUiFactTeam1Kills));
+			k2 = int32_t(r->number(kUiFactTeam2Kills));
 		}
 		++tally.scoreboard_samples;
 
@@ -334,9 +334,8 @@ struct M2bCheck::State {
 			if (death_by_soldier) {
 				const core::ui::HudKillCard &kc = g.hud_model.kill_card;
 				bool ok = kc.visible && kc.killer != core::ui::kHudNoPlayer && !kc.suicide && kc.item_id != 0;
-				if (m.tdm_hud != nullptr && m.tdm_hud->built() && tally.windowed) {
-					const TdmHudRecords r = m.tdm_hud->records();
-					ok = ok && r.kill_card_visible && r.kill_card_killer[0] != 0 && r.kill_card_item != 0 && r.kill_card_weapon_named;
+				if (const std::optional<UiScreenRecord> r = tally.windowed ? m.screen_records.screen_record(core::ui::kKillScreenPartition) : std::nullopt) {
+					ok = ok && r->visible && !r->text(kUiFactKiller).empty() && r->number(kUiFactItem) != 0.0 && r->number(kUiFactWeaponNamed) != 0.0;
 				}
 				++tally.kill_cards_checked;
 				if (!ok) {
@@ -379,11 +378,13 @@ struct M2bCheck::State {
 				tally.minimap_friendly = tags->stats().minimap_friendly;
 			}
 		}
-		if (m.tdm_hud != nullptr && m.tdm_hud->built() && tally.windowed) {
-			const TdmHudRecords r = m.tdm_hud->records();
-			tally.spawn_screen_model_shown = uint32_t(std::min<uint64_t>(r.spawn_screen_shown, 0xFFFFFFFFu));
-			tally.round_end_shown = tally.round_end_shown && r.round_end_shown > 0;
-			tally.missing_lookups = r.missing_fonts + r.missing_icons + r.missing_strings;
+		const std::optional<UiScreenRecord> spawn = m.screen_records.screen_record(core::ui::kSpawnScreenPcPartition);
+		const std::optional<UiScreenRecord> round_end = m.screen_records.screen_record(core::ui::kEorWinningTeamScreenPartition);
+		const std::optional<UiLookupRecord> lookups = m.screen_records.lookup_record();
+		if (spawn && round_end && lookups && tally.windowed) {
+			tally.spawn_screen_model_shown = uint32_t(std::min<uint64_t>(spawn->shown, 0xFFFFFFFFu));
+			tally.round_end_shown = tally.round_end_shown && round_end->shown > 0;
+			tally.missing_lookups = lookups->missing_fonts + lookups->missing_icons + lookups->missing_strings;
 		} else if (tally.windowed) {
 			tally.missing_lookups = 1;
 		}

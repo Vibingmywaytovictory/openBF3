@@ -1,11 +1,15 @@
 #pragma once
 
+#include "ui_screen_records.h"
+
 #include "bf3/core/ui/hud_model.h"
 
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <type_traits>
 
 namespace godot {
@@ -46,10 +50,14 @@ struct TdmHudRecords {
 };
 static_assert(std::is_trivially_copyable_v<TdmHudRecords>);
 
-class Bf3TdmHud {
+bool tdm_hud_reports(std::string_view p_partition);
+std::optional<UiScreenRecord> tdm_hud_screen_record(const TdmHudRecords &p_records, std::string_view p_partition);
+UiLookupRecord tdm_hud_lookup_record(const TdmHudRecords &p_records);
+
+class Bf3TdmHud final : public UiScreenRecords {
 public:
 	Bf3TdmHud();
-	~Bf3TdmHud();
+	~Bf3TdmHud() override;
 	Bf3TdmHud(const Bf3TdmHud &) = delete;
 	Bf3TdmHud &operator=(const Bf3TdmHud &) = delete;
 
@@ -63,6 +71,9 @@ public:
 
 	bool wants_mouse() const;
 	TdmHudRecords records() const;
+	bool reports(std::string_view p_partition) const override;
+	std::optional<UiScreenRecord> screen_record(std::string_view p_partition) const override;
+	std::optional<UiLookupRecord> lookup_record() const override;
 	void shutdown();
 
 private:

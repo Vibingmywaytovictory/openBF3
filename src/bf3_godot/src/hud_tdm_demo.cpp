@@ -6,6 +6,7 @@
 #include "ui_assets.h"
 
 #include "bf3/core/ui/hud_icons.h"
+#include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/text_db.h"
 
 #include <godot_cpp/classes/base_button.hpp>
@@ -283,11 +284,23 @@ void Bf3TdmHudDemo::_process(double p_delta) {
 }
 
 void Bf3TdmHudDemo::check_stage(int p_stage) {
-	const TdmHudRecords r = hud_->records();
+	const UiScreenRecords &records = *hud_;
+	const UiScreenRecord pre_round = records.screen_record(ui::kPreRoundWaitingScreenPartition).value_or(UiScreenRecord{});
+	const UiScreenRecord spawn = records.screen_record(ui::kSpawnScreenPcPartition).value_or(UiScreenRecord{});
+	const UiScreenRecord kill_card = records.screen_record(ui::kKillScreenPartition).value_or(UiScreenRecord{});
+	const UiScreenRecord scoreboard = records.screen_record(ui::kScoreboardHud32ScreenPartition).value_or(UiScreenRecord{});
+	const UiScreenRecord round_end = records.screen_record(ui::kEorWinningTeamScreenPartition).value_or(UiScreenRecord{});
+	const UiLookupRecord lookups = records.lookup_record().value_or(UiLookupRecord{});
+	const bool deploy_enabled = spawn.number(kUiFactDeployEnabled) != 0.0;
+	const uint32_t item = uint32_t(kill_card.number(kUiFactItem));
+	const bool weapon_named = kill_card.number(kUiFactWeaponNamed) != 0.0;
+	const int32_t rows = int32_t(scoreboard.number(kUiFactRows));
+	const int32_t team1_kills = int32_t(scoreboard.number(kUiFactTeam1Kills));
+	const int32_t team2_kills = int32_t(scoreboard.number(kUiFactTeam2Kills));
 	const std::string name = kStageNames[p_stage];
 	switch (p_stage) {
 		case 0:
-			row(name, r.pre_round_visible && !r.spawn_screen_visible && !r.round_end_visible, "pre_round_visible " + std::to_string(r.pre_round_visible));
+			row(name, pre_round.visible && !spawn.visible && !round_end.visible, "pre_round_visible " + std::to_string(pre_round.visible));
 			break;
 		case 1: {
 			bool clicked = false;
@@ -302,21 +315,21 @@ void Bf3TdmHudDemo::check_stage(int p_stage) {
 				deploy_click = hud_->take_deploy_click();
 				clicked = kit_click == 2 && deploy_click && hud_->take_kit_click() == -1 && !hud_->take_deploy_click();
 			}
-			row(name, r.spawn_screen_visible && r.deploy_enabled && hud_->wants_mouse() && clicked,
-					"visible " + std::to_string(r.spawn_screen_visible) + ", deploy_enabled " + std::to_string(r.deploy_enabled) + ", kit click " +
+			row(name, spawn.visible && deploy_enabled && hud_->wants_mouse() && clicked,
+					"visible " + std::to_string(spawn.visible) + ", deploy_enabled " + std::to_string(deploy_enabled) + ", kit click " +
 							std::to_string(kit_click) + ", deploy click " + std::to_string(deploy_click));
 			break;
 		}
 		case 2:
-			row(name, !r.spawn_screen_visible && !r.kill_card_visible && r.model_serial == stage_model(2).serial,
+			row(name, !spawn.visible && !kill_card.visible && lookups.model_serial == stage_model(2).serial,
 					"spawn screen and kill card hidden; the kill feed is the native HUD's (HudMessage_02)");
 			break;
 		case 3: {
 			const ui::HudModel m = stage_model(3);
-			const bool named = std::strncmp(r.kill_card_killer.data(), m.players[kKiller].name.data(), r.kill_card_killer.size()) == 0;
-			row(name, r.kill_card_visible && r.kill_card_item == m.kill_card.item_id && r.kill_card_item != 0 && r.kill_card_weapon_named && named,
-					std::string("killer '") + r.kill_card_killer.data() + "', item " + std::to_string(r.kill_card_item) + ", weapon named " +
-							std::to_string(r.kill_card_weapon_named));
+			const std::string killer = kill_card.text(kUiFactKiller);
+			const bool named = killer == std::string(m.players[kKiller].name.data(), strnlen(m.players[kKiller].name.data(), m.players[kKiller].name.size()));
+			row(name, kill_card.visible && item == m.kill_card.item_id && item != 0 && weapon_named && named,
+					std::string("killer '") + killer + "', item " + std::to_string(item) + ", weapon named " + std::to_string(weapon_named));
 			break;
 		}
 		case 4: {
@@ -325,18 +338,18 @@ void Bf3TdmHudDemo::check_stage(int p_stage) {
 				deploy->emit_signal("pressed");
 			}
 			const bool taken = hud_->take_deploy_click();
-			row(name, r.spawn_screen_visible && !r.deploy_enabled && r.selected_kit == 1 && r.spawn_screen_shown == 2 && !taken,
-					"deploy_enabled " + std::to_string(r.deploy_enabled) + ", shown " + std::to_string(r.spawn_screen_shown) + ", early click taken " +
+			row(name, spawn.visible && !deploy_enabled && spawn.number(kUiFactSelectedKit) == 1.0 && spawn.shown == 2 && !taken,
+					"deploy_enabled " + std::to_string(deploy_enabled) + ", shown " + std::to_string(spawn.shown) + ", early click taken " +
 							std::to_string(taken));
 			break;
 		}
 		case 5:
-			row(name, r.scoreboard_visible && r.scoreboard_rows == kPlayers && r.scoreboard_team_kills[0] == 23 && r.scoreboard_team_kills[1] == 19,
-					std::to_string(r.scoreboard_rows) + " rows, " + std::to_string(r.scoreboard_team_kills[0]) + " : " + std::to_string(r.scoreboard_team_kills[1]));
+			row(name, scoreboard.visible && rows == kPlayers && team1_kills == 23 && team2_kills == 19,
+					std::to_string(rows) + " rows, " + std::to_string(team1_kills) + " : " + std::to_string(team2_kills));
 			break;
 		case 6:
-			row(name, r.round_end_visible && r.round_end_shown == 1 && !r.scoreboard_visible && hud_->wants_mouse(),
-					"visible " + std::to_string(r.round_end_visible) + ", shown " + std::to_string(r.round_end_shown));
+			row(name, round_end.visible && round_end.shown == 1 && !scoreboard.visible && hud_->wants_mouse(),
+					"visible " + std::to_string(round_end.visible) + ", shown " + std::to_string(round_end.shown));
 			break;
 		default:
 			break;
@@ -378,7 +391,8 @@ void Bf3TdmHudDemo::finish() {
 		return;
 	}
 	if (hud_) {
-		const TdmHudRecords r = hud_->records();
+		const UiScreenRecords &records = *hud_;
+		const UiLookupRecord r = records.lookup_record().value_or(UiLookupRecord{});
 		row("lookups", r.missing_fonts == 0 && r.missing_icons == 0 && r.missing_strings == 0 && r.draws > 0,
 				"missing fonts " + std::to_string(r.missing_fonts) + ", icons " + std::to_string(r.missing_icons) + ", strings " + std::to_string(r.missing_strings) +
 						", " + std::to_string(r.draws) + " models set");
