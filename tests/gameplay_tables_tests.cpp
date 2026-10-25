@@ -2097,6 +2097,25 @@ TEST_SUITE("tables") {
 		}
 		CHECK(variants == 8);
 		CHECK(free_variants == 6);
+
+		const KitUnlock *m16 = own->default_unlock(WeaponSlot::Primary);
+		REQUIRE(m16 != nullptr);
+		CHECK(m16->unlock == "weapons/m16a4/u_m16a4");
+		CHECK(m16->identifier == 2580429694u);
+		const Result<std::vector<KitSlot>> parts = read_weapon_customization(*lib, m16->unlock, progression);
+		REQUIRE_MESSAGE(parts.ok(), (parts.ok() ? std::string() : parts.error().message));
+		REQUIRE(parts->size() == 4);
+		CHECK((*parts)[0].unlocks.size() == 13);
+		CHECK((*parts)[1].unlocks.size() == 3);
+		CHECK((*parts)[2].unlocks.size() == 6);
+		CHECK((*parts)[3].unlocks.size() == 1);
+		CHECK((*parts)[0].unlocks[1].unlock == "weapons/m16a4/u_m16a4_rx01");
+		CHECK((*parts)[0].unlocks[1].identifier == 3011272554u);
+		CHECK((*parts)[0].unlocks[11].unlock == "weapons/common/nooptics");
+		CHECK((*parts)[2].unlocks[2].unlock == "weapons/m16a4/u_m16a4_sound_suppressor");
+		CHECK((*parts)[3].unlocks[0].unlock == "weapons/common/nocamo");
+		CHECK_FALSE(read_weapon_customization(*lib, "gameplay/kits/usassault", progression).ok());
+		CHECK_FALSE(read_weapon_customization(*lib, "weapons/m16a4/absent", progression).ok());
 	}
 
 	TEST_CASE("gameplay: VehicleDef (plan §7.4)") {

@@ -49,6 +49,10 @@ KitUnlock read_unlock(WorkBudget &r_budget, const EbxResolver &p_db, const EbxIn
 	if (p_unlock.is_a("SoldierWeaponUnlockAsset")) {
 		out.weapon = ref_name(r_budget, p_db, p_unlock.data(), "Weapon");
 	}
+	if (const std::optional<double> id = number(p_unlock.data(), "Identifier");
+			id && *id >= 0.0 && *id <= double(UINT32_MAX)) {
+		out.identifier = uint32_t(*id);
+	}
 	out.gate = p_progression.gate(p_unlock.guid());
 	const std::optional<EbxValue> extra = p_unlock.get("Extra");
 	const std::optional<EbxRef> extra_ref = extra ? extra->as_ref() : std::nullopt;
@@ -202,6 +206,42 @@ Result<KitDef> read_kit_def(const EbxResolver &p_db, std::string_view p_asset, c
 	}
 	if (const Status spent = budget.status(); !spent) {
 		return error_at("kit " + name, spent.error());
+	}
+	return out;
+}
+
+Result<std::vector<KitSlot>> read_weapon_customization(const EbxResolver &p_db, std::string_view p_weapon_unlock,
+		const UnlockProgression &p_progression, WorkBudget *p_budget) {
+	WorkBudget own;
+	WorkBudget &budget = p_budget != nullptr ? *p_budget : own;
+	const std::string name = to_lower_ascii(p_weapon_unlock);
+	const std::string where = "weapon customization " + name;
+	const EbxPartition *partition = p_db.partition_by_name(name);
+	if (!partition) {
+		return make_error(where + ": no partition");
+	}
+	const EbxInstance unlock = partition->primary();
+	if (!unlock.is_a("SoldierWeaponUnlockAsset")) {
+		return make_error(where + ": " + std::string(unlock.type_name()) + " is not a SoldierWeaponUnlockAsset");
+	}
+	const std::optional<EbxInstance> blueprint = p_db.follow(unlock.data(), "Weapon");
+	if (!blueprint || !blueprint->is_a("SoldierWeaponBlueprint")) {
+		return make_error(where + ": no SoldierWeaponBlueprint");
+	}
+	const std::optional<EbxInstance> weapon = p_db.follow(blueprint->data(), "Object");
+	if (!weapon || !weapon->is_a("SoldierWeaponData")) {
+		return make_error(where + ": the blueprint has no SoldierWeaponData");
+	}
+	BF3_TRY(budget.charge_type(weapon->data()));
+	std::vector<KitSlot> out;
+	if (const std::optional<EbxInstance> asset = p_db.follow(weapon->data(), "Customization")) {
+		if (!asset->is_a("SoldierWeaponCustomizationAsset")) {
+			return make_error(where + ": Customization is a " + std::string(asset->type_name()));
+		}
+		out = read_table(budget, p_db, asset->data(), "Customization", p_progression);
+	}
+	if (const Status spent = budget.status(); !spent) {
+		return error_at(where, spent.error());
 	}
 	return out;
 }

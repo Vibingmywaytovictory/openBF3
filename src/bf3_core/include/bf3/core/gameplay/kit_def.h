@@ -38,6 +38,7 @@ struct KitUnlock {
 	std::string weapon;
 	UnlockGate gate = UnlockGate::Free;
 	bool variant = false;
+	uint32_t identifier = 0;
 };
 
 struct KitSlot {
@@ -71,6 +72,9 @@ struct TeamDef {
 
 Result<KitDef> read_kit_def(const EbxResolver &p_db, std::string_view p_asset, const UnlockProgression *p_progression = nullptr,
 		WorkBudget *p_budget = nullptr);
+
+Result<std::vector<KitSlot>> read_weapon_customization(const EbxResolver &p_db, std::string_view p_weapon_unlock,
+		const UnlockProgression &p_progression, WorkBudget *p_budget = nullptr);
 
 Result<TeamDef> read_team_data(const EbxResolver &p_db, const EbxInstance &p_team_data, WorkBudget *p_budget = nullptr);
 
