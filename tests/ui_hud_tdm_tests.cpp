@@ -1222,6 +1222,7 @@ TEST_CASE("the 13 TDM kit items: names and _small icons") {
 	CHECK(table_items > std::size(kTdmKitItems));
 	size_t ok = 0;
 	size_t pathed = 0;
+	size_t arted = 0;
 	for (const KitItem &k : kTdmKitItems) {
 		bf3::core::Result<gp::WeaponDef> d = weapons->catalog->resolve(std::string(k.variant));
 		REQUIRE_MESSAGE(d.ok(), (std::string(k.variant) + ": " + (d.ok() ? std::string() : d.error().message)));
@@ -1245,6 +1246,21 @@ TEST_CASE("the 13 TDM kit items: names and _small icons") {
 				std::string_view(item.image_path.data()) == icon->path.substr(0, item.image_path.size() - 1);
 		pathed += path_ok ? 1 : 0;
 		CHECK_MESSAGE(path_ok, std::string(k.variant));
+		const host::HudStaticItem *listed = table.item(d->unlock_identifier);
+		bool art_ok = icon != nullptr && !icon->texture_path.empty() && listed != nullptr &&
+				std::string_view(listed->texture_path.data()) == icon->texture_path;
+		std::string art_detail = icon != nullptr ? icon->texture_path : std::string("no description");
+		if (art_ok) {
+			ui::ItemIcon art = *icon;
+			art.res_name = ui::item_res_name(icon->texture_path);
+			bf3::core::Result<ui::ItemIconImage> img = ui::load_item_icon((*ebx)->mount(0), art);
+			art_ok = img.ok() && img->width == 256 && img->height == 64;
+			art_detail += img.ok() ? " " + std::to_string(img->width) + "x" + std::to_string(img->height)
+								   : ": " + img.error().message;
+		}
+		arted += art_ok ? 1 : 0;
+		row("kit_art." + std::string(k.variant), art_ok, art_detail);
+		CHECK_MESSAGE(art_ok, std::string(k.variant));
 		ok += name_ok && icon_ok ? 1 : 0;
 		row("kit." + std::string(k.variant), name_ok && icon_ok,
 				"item " + std::to_string(d->unlock_identifier) + ", name '" + (name ? std::string(*name) : std::string("?")) + "', icon " + icon_detail);
@@ -1255,6 +1271,9 @@ TEST_CASE("the 13 TDM kit items: names and _small icons") {
 	row("kit.item_table", pathed == std::size(kTdmKitItems),
 			std::to_string(table_items) + " items in the HUD item table, " + std::to_string(pathed) + "/" +
 					std::to_string(std::size(kTdmKitItems)) + " kit items with their image path");
+	row("kit.item_art", arted == std::size(kTdmKitItems),
+			std::to_string(arted) + "/" + std::to_string(std::size(kTdmKitItems)) +
+					" kit items with their 256x64 TexturePath art");
 }
 
 TEST_CASE("install.unchanged") {

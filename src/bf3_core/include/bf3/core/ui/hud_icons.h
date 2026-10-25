@@ -166,6 +166,7 @@ struct ItemIcon {
 	std::string path;
 	std::string res_name;
 	std::string hud_icon;
+	std::string texture_path;
 };
 
 class ItemIconIndex {
@@ -187,6 +188,7 @@ struct ItemIconImage {
 	res::TextureFormat format = res::TextureFormat::Dxt5;
 	std::vector<uint8_t> data;
 };
+std::string item_res_name(std::string_view p_path);
 Result<ItemIconImage> load_item_icon(const LevelMount &p_mount, const ItemIcon &p_icon);
 
 Result<ItemIconImage> decode_item_icon(const res::DxTexture &p_texture, std::span<const uint8_t> p_chunk, std::string_view p_name);

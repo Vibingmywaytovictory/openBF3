@@ -63,6 +63,7 @@ struct HudStaticItem {
 	uint32_t item_id = 0;
 	uint32_t name_sid_hash = 0;
 	core::ui::HudText image_path{};
+	core::ui::HudText texture_path{};
 };
 static_assert(std::is_trivially_copyable_v<HudStaticItem>);
 

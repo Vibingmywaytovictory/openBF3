@@ -138,7 +138,7 @@ void feed_kill_card(Frame &r_frame, std::span<const PresentEvent> p_drained) {
 		card.is_bad_luck = killer == ui::kHudNoPlayer;
 		card.killer_weapon_type = row != nullptr ? row->weapon_class : 0;
 		if (const HudStaticItem *item = r_frame.statics.item(card.item_id)) {
-			card.killer_weapon_image_path = item->image_path;
+			card.killer_weapon_image_path = item->texture_path;
 		}
 		hud_text(card.killer_basic_dog_tag, kDefaultBasicDogtag);
 		hud_text(card.killer_advanced_dog_tag, kDefaultAdvancedDogtag);

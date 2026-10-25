@@ -25,12 +25,12 @@ constexpr Source kSources[] = {
 	{ kVehicleMetadataPartition, ItemIconSource::Vehicle, "TexturePath" },
 };
 
-std::string res_key(std::string_view p_path) {
+}
+
+std::string item_res_name(std::string_view p_path) {
 	std::string out = to_lower_ascii(p_path);
 	std::replace(out.begin(), out.end(), '\\', '/');
 	return out;
-}
-
 }
 
 Result<ItemIconIndex> ItemIconIndex::read(const EbxResolver &p_ui, gameplay::WorkBudget *p_budget) {
@@ -70,12 +70,15 @@ Result<ItemIconIndex> ItemIconIndex::read(const EbxResolver &p_ui, gameplay::Wor
 			}
 			BF3_TRY(budget.charge(ids->size()));
 			const std::string_view path = item->get(source.path_field) ? item->get(source.path_field)->as_str().value_or("") : std::string_view();
+			const std::string_view texture =
+					item->get("TexturePath") ? item->get("TexturePath")->as_str().value_or("") : std::string_view();
 			const std::string_view name = item->get("Name") ? item->get("Name")->as_str().value_or("") : std::string_view();
 			std::string_view hud_icon;
 			if (const std::optional<EbxValue> h = item->get("HudIcon")) {
 				hud_icon = h->enum_name().value_or(h->as_str().value_or(""));
 			}
-			if (path.size() > kMaxItemIconPath || name.size() > kMaxItemIconPath || hud_icon.size() > kMaxItemIconPath) {
+			if (path.size() > kMaxItemIconPath || texture.size() > kMaxItemIconPath || name.size() > kMaxItemIconPath ||
+					hud_icon.size() > kMaxItemIconPath) {
 				return make_error(std::string(source.partition) + ": a description's text is longer than " + std::to_string(kMaxItemIconPath) + " bytes");
 			}
 			for (const EbxValue id_value : *ids) {
@@ -90,14 +93,15 @@ Result<ItemIconIndex> ItemIconIndex::read(const EbxResolver &p_ui, gameplay::Wor
 				if (out.icons_.size() >= kMaxItemIcons) {
 					return make_error("item icon index: more than " + std::to_string(kMaxItemIcons) + " ids");
 				}
-				BF3_TRY(budget.charge_bytes(2 * path.size() + name.size() + hud_icon.size()));
+				BF3_TRY(budget.charge_bytes(2 * path.size() + texture.size() + name.size() + hud_icon.size()));
 				ItemIcon icon;
 				icon.item_id = *id;
 				icon.source = source.kind;
 				icon.name_sid = std::string(name);
 				icon.path = std::string(path);
-				icon.res_name = res_key(path);
+				icon.res_name = item_res_name(path);
 				icon.hud_icon = std::string(hud_icon);
+				icon.texture_path = std::string(texture);
 				out.icons_.push_back(std::move(icon));
 			}
 		}

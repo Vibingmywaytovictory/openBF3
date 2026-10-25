@@ -148,6 +148,7 @@ size_t apply_item_table(HudStatic &r_static, const ui::ItemIconIndex &p_items) {
 		it.item_id = icon.item_id;
 		it.name_sid_hash = icon.name_sid.empty() ? 0 : ui::text_hash(icon.name_sid);
 		hud_text(it.image_path, icon.path);
+		hud_text(it.texture_path, icon.texture_path);
 		r_static.items.push_back(it);
 	}
 	std::sort(r_static.items.begin(), r_static.items.end(),
