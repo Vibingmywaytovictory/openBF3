@@ -144,6 +144,11 @@ target_sources(bf3_host PRIVATE
 
 target_sources(bf3_host PRIVATE
     src/hud_feed_tdm.cpp
+    src/hud_feed_tdm_parts.h
+    src/hud_feed_scoreboard.cpp
+    src/hud_feed_kill_card.cpp
+    src/hud_feed_spawn.cpp
+    src/hud_feed_round_end.cpp
 )
 
 target_sources(bf3_host PRIVATE
