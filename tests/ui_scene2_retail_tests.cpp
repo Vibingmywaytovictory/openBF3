@@ -5,11 +5,13 @@
 #include "bf3/core/ui/swf_image.h"
 #include "bf3/core/ui/swf_scene.h"
 #include "image_manager.h"
+#include "scroll_text.h"
 #include "test_support.h"
 #include "ui_retail_support.h"
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <string>
 #include <tuple>
@@ -33,6 +35,34 @@ std::vector<SwfNodeId> order_of(const SwfScene &p_scene) {
 
 size_t index_in(const std::vector<SwfNodeId> &p_order, SwfNodeId p_id) {
 	return size_t(std::find(p_order.begin(), p_order.end(), p_id) - p_order.begin());
+}
+
+SwfRect world_rect(const SwfRect &p_local, const SwfMatrix &p_world) {
+	SwfRect r{ std::numeric_limits<float>::max(), std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max(), std::numeric_limits<float>::lowest() };
+	for (const auto &[x, y] : { std::pair{ p_local.x_min, p_local.y_min }, std::pair{ p_local.x_max, p_local.y_min }, std::pair{ p_local.x_min, p_local.y_max }, std::pair{ p_local.x_max, p_local.y_max } }) {
+		const float wx = p_world.a * x + p_world.c * y + p_world.tx;
+		const float wy = p_world.b * x + p_world.d * y + p_world.ty;
+		r.x_min = std::min(r.x_min, wx);
+		r.x_max = std::max(r.x_max, wx);
+		r.y_min = std::min(r.y_min, wy);
+		r.y_max = std::max(r.y_max, wy);
+	}
+	return r;
+}
+
+SwfRect world_rect(const SwfScene &p_scene, const SwfSceneNode &p_node) {
+	return world_rect(swf_node_local_bounds(p_scene, p_node), p_node.world);
+}
+
+bool masked_by(const SwfSceneNode &p_node, SwfNodeId p_mask) {
+	return std::find(p_node.masks.begin(), p_node.masks.end(), p_mask) != p_node.masks.end();
+}
+
+void advance_for(HudScreen &r_hud, double p_seconds) {
+	constexpr double kStep = 1.0 / 32.0;
+	for (double t = 0.0; t + kStep * 0.5 < p_seconds; t += kStep) {
+		r_hud.advance(kStep);
+	}
 }
 
 }
@@ -176,5 +206,164 @@ TEST_SUITE("ui-scene2") {
 		const SwfSceneNode &b = *basic.node();
 		CHECK(b.world.a == doctest::Approx(std::cos(8.0 * std::numbers::pi / 180.0)));
 		CHECK(b.world.tx == doctest::Approx(19.0f));
+	}
+
+	TEST_CASE("ScrollText on the spawn screen's kitbar: the runtime mask clips kitItem text, and ScrollTextTimer scrolls it out and back") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		RetailScreen s = open_retail_screen(*r, kSpawnScreenPcPartition);
+		const std::string item = "instance1.KitBar_01.kitItem_0";
+		auto *kit = dynamic_cast<ScrollTextWidget *>(s.hud->controller(item));
+		REQUIRE(kit != nullptr);
+		for (int i = 1; i < 5; ++i) {
+			CHECK(dynamic_cast<ScrollTextWidget *>(s.hud->controller("instance1.KitBar_01.kitItem_" + std::to_string(i))) != nullptr);
+		}
+		const As2Clip txt = kit->field();
+		REQUIRE(txt.exists());
+		CHECK(txt.path() == item + ".txt");
+		const float field_w = txt.width();
+		const float field_h = txt.height();
+		CHECK(field_w > 0.0f);
+		CHECK(kit->mask_width() == field_w);
+		const SwfSceneNode &mask = s.at(item + ".mask");
+		REQUIRE(mask.drawing != nullptr);
+		CHECK(kit->mask().local_bounds() == SwfRect{ 0.0f, field_w, 0.0f, field_h });
+		CHECK(s.at(item).script_mask == mask.id);
+		s.scene->take_changes();
+		CHECK(s.at(item + ".mask").is_mask);
+		CHECK(masked_by(s.at(item + ".txt"), mask.id));
+		CHECK_FALSE(kit->registered());
+
+		kit->set_text("ASSAULT");
+		CHECK_FALSE(kit->registered());
+		CHECK(kit->scroll_distance() < 0.0f);
+		CHECK(txt.width() == doctest::Approx(field_w));
+		CHECK(txt.x() == 0.0f);
+
+		const std::string long_name = "ASSAULT RIFLE WITH AN UNDERSLUNG GRENADE LAUNCHER";
+		kit->set_text(long_name);
+		const float d = txt.text_width() - field_w;
+		REQUIRE(d > 0.0f);
+		CHECK(kit->registered());
+		CHECK(kit->scroll_distance() == doctest::Approx(d));
+		CHECK(kit->text_width() == field_w);
+		CHECK(txt.node()->text_options.auto_size == SwfTextAutoSize::Left);
+		CHECK(txt.text_layout_bounds().width() > field_w);
+		CHECK(kit->preferred_width() == doctest::Approx(txt.text_layout_bounds().width()));
+		REQUIRE(kit->timer() != nullptr);
+		CHECK(kit->timer()->listeners() == 1);
+		CHECK(kit->timer()->phase() == ScrollTextTimer::Phase::BeginDelay);
+		s.scene->take_changes();
+		const SwfRect clip_rect = world_rect(*s.scene, s.at(item + ".mask"));
+		CHECK(clip_rect.width() == doctest::Approx(field_w));
+		const auto text_rect = [&] { return world_rect(txt.text_layout_bounds(), s.at(item + ".txt").world); };
+		CHECK(text_rect().x_max > clip_rect.x_max + d * 0.5f);
+		CHECK(masked_by(s.at(item + ".txt"), s.at(item + ".mask").id));
+
+		advance_for(*s.hud, ScrollTextTimer::kBeginDelay);
+		CHECK(kit->timer()->phase() == ScrollTextTimer::Phase::ScrollForward);
+		CHECK(kit->timer()->tweening());
+		CHECK(txt.x() == 0.0f);
+		advance_for(*s.hud, 1.0);
+		CHECK(kit->timer()->value() == doctest::Approx(0.5));
+		CHECK(txt.x() == doctest::Approx(-(d + 5.0f) * 0.5f).epsilon(0.001));
+
+		const std::string other = "instance1.KitBar_01.kitItem_1";
+		auto *kit1 = dynamic_cast<ScrollTextWidget *>(s.hud->controller(other));
+		REQUIRE(kit1 != nullptr);
+		kit1->set_text(long_name + " AND A TACTICAL LIGHT");
+		CHECK(kit1->timer() == kit->timer());
+		CHECK(kit->timer()->listeners() == 2);
+		CHECK(kit1->field().x() == doctest::Approx(-(kit1->scroll_distance() + 5.0f) * 0.5f).epsilon(0.001));
+
+		advance_for(*s.hud, 1.0);
+		CHECK(kit->timer()->phase() == ScrollTextTimer::Phase::EndDelay);
+		CHECK_FALSE(kit->timer()->tweening());
+		CHECK(txt.x() == doctest::Approx(-(d + 5.0f)).epsilon(0.001));
+		s.scene->take_changes();
+		CHECK(text_rect().x_min < clip_rect.x_min - d * 0.5f);
+		advance_for(*s.hud, ScrollTextTimer::kEndDelay);
+		CHECK(kit->timer()->phase() == ScrollTextTimer::Phase::ScrollBack);
+		CHECK(txt.x() == doctest::Approx(-(d + 5.0f)).epsilon(0.001));
+		advance_for(*s.hud, ScrollTextTimer::kScrollBackTime * 0.5);
+		CHECK(txt.x() == doctest::Approx(-(d + 5.0f) * 0.5f).epsilon(0.001));
+		advance_for(*s.hud, ScrollTextTimer::kScrollBackTime * 0.5);
+		CHECK(kit->timer()->phase() == ScrollTextTimer::Phase::BeginDelay);
+		CHECK(txt.x() == 0.0f);
+		CHECK(kit1->field().x() == 0.0f);
+
+		kit->set_width(field_w * 0.5f);
+		CHECK(kit->mask().width() == doctest::Approx(field_w * 0.5f));
+		CHECK(kit->scroll_distance() == doctest::Approx(txt.text_width() - field_w * 0.5f));
+		kit->set_text("AK");
+		CHECK_FALSE(kit->registered());
+		CHECK(kit->timer()->listeners() == 1);
+		CHECK(txt.node()->text_options.auto_size == SwfTextAutoSize::None);
+		CHECK(txt.width() == doctest::Approx(field_w * 0.5f));
+		CHECK(s.hud->stats().as2.failed_ops == 0);
+	}
+
+	TEST_CASE("List viewport mask on the spawn screen's List_01: setupMask's listMask clips the rows below the start height") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		RetailScreen s = open_retail_screen(*r, kSpawnScreenPcPartition);
+		const As2Clip list = s.hud->clip("instance1.List_01");
+		REQUIRE(list.exists());
+		const float start_w = std::round(list.width());
+		const float start_h = std::round(list.height());
+		list.set_xscale(100.0f);
+		list.set_yscale(100.0f);
+		list.set_x(std::round(list.x()));
+		list.set_y(std::round(list.y()));
+		const As2Clip size = list.child("listSize");
+		size.set_width(start_w);
+		size.set_height(start_h);
+		size.set_alpha(50.0f);
+		size.set_visible(false);
+		const As2Clip holder = list.create_empty_movie_clip("ListHolder", list.next_highest_depth());
+		const As2Clip list_mask = list.attach_movie("listMask", "listMask", list.next_highest_depth());
+		REQUIRE(holder.exists());
+		REQUIRE(list_mask.exists());
+		list_mask.set_x(-5.0f);
+		list_mask.set_width(start_w + 10.0f);
+		list_mask.set_height(start_h);
+		list_mask.set_alpha(0.0f);
+		holder.set_mask(list_mask);
+		std::vector<As2Clip> rows;
+		float y = 0.0f;
+		for (int i = 0; y < start_h * 2.0f && i < 64; ++i) {
+			const As2Clip row = holder.attach_movie("teamSpawn", "row" + std::to_string(i), holder.next_highest_depth());
+			REQUIRE(row.exists());
+			row.set_y(y);
+			REQUIRE(row.height() > 0.0f);
+			y += row.height();
+			rows.push_back(row);
+		}
+		s.scene->take_changes();
+		const SwfSceneNode &m = *list_mask.node();
+		CHECK(m.is_mask);
+		CHECK(s.at(holder.path()).script_mask == m.id);
+		const SwfRect view = world_rect(*s.scene, m);
+		CHECK(view.width() == doctest::Approx(start_w + 10.0f));
+		CHECK(view.height() == doctest::Approx(start_h));
+		uint32_t inside = 0;
+		uint32_t outside = 0;
+		for (const As2Clip &row : rows) {
+			const SwfSceneNode &n = *row.node();
+			CHECK(masked_by(n, m.id));
+			const SwfRect rr = world_rect(*s.scene, n);
+			if (rr.y_max <= view.y_max + 0.5f) {
+				inside++;
+			} else if (rr.y_min >= view.y_max - 0.5f) {
+				outside++;
+			}
+		}
+		CHECK(inside > 0);
+		CHECK(outside > 0);
+		CHECK(s.hud->stats().as2.failed_ops == 0);
 	}
 }

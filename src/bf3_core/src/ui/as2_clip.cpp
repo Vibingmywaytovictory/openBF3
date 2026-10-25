@@ -533,6 +533,11 @@ float As2Clip::text_height() const {
 	return l ? l->text_height : 0.0f;
 }
 
+SwfRect As2Clip::text_layout_bounds() const {
+	const std::optional<SwfTextLayout> l = layout();
+	return l ? l->bounds : SwfRect{};
+}
+
 std::optional<SwfTextLayout> As2Clip::layout() const {
 	const SwfSceneNode *n = mut();
 	if (n == nullptr || n->kind != SwfNodeKind::EditText || fonts_ == nullptr) {

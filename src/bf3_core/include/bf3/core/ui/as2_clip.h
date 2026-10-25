@@ -96,6 +96,7 @@ public:
 	void set_auto_size(SwfTextAutoSize p_mode) const;
 	float text_width() const;
 	float text_height() const;
+	SwfRect text_layout_bounds() const;
 
 	int32_t depth() const;
 	int32_t next_highest_depth() const;
