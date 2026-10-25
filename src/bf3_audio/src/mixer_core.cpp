@@ -112,6 +112,8 @@ struct MixerCore::Impl {
 	size_t mixer_value_count = 0;
 	MixTap *tap = nullptr;
 	float output_gain = 1.0f;
+	std::array<float, size_t(core::audio::MasterBus::Unknown)> bus_gain{};
+	std::array<std::atomic<float>, size_t(core::audio::MasterBus::Unknown)> bus_gain_seen{};
 	std::atomic<uint64_t> rendered{ 0 };
 	std::chrono::steady_clock::time_point last_call{};
 	bool have_last_call = false;
@@ -152,6 +154,10 @@ struct MixerCore::Impl {
 		block.assign(size_t(kBlockFrames) * 2, 0.0f);
 		mixer_values.resize(64);
 		output_gain = db_to_gain(p_config.output_gain_db);
+		bus_gain.fill(1.0f);
+		for (std::atomic<float> &g : bus_gain_seen) {
+			g.store(1.0f, std::memory_order_relaxed);
+		}
 		a3_init();
 	}
 
@@ -392,6 +398,12 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 			case MixerCommandType::SetBank:
 				stats.acked_epoch.store(cmd.epoch, std::memory_order_release);
 				break;
+			case MixerCommandType::SetBusGain:
+				if (cmd.name_hash < m.bus_gain.size() && std::isfinite(cmd.value) && cmd.value >= 0.0f) {
+					m.bus_gain[cmd.name_hash] = cmd.value;
+					m.bus_gain_seen[cmd.name_hash].store(cmd.value, std::memory_order_relaxed);
+				}
+				break;
 		}
 	}
 	m.pending_count = write;
@@ -472,8 +484,8 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 	for (uint32_t i = 0; i < kBlockFrames; ++i) {
 		float l = 0.0f, r = 0.0f;
 		for (size_t b = 0; b < size_t(core::audio::MasterBus::Unknown); ++b) {
-			l += m.buses.channels[b][0][i];
-			r += m.buses.channels[b][1][i];
+			l += m.buses.channels[b][0][i] * m.bus_gain[b];
+			r += m.buses.channels[b][1][i] * m.bus_gain[b];
 		}
 		m.block[size_t(i) * 2] = l * m.output_gain;
 		m.block[size_t(i) * 2 + 1] = r * m.output_gain;
@@ -493,6 +505,11 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 		m.note_event(MixerCutKind::LateBlock, kNoInstance, float(double(ns) / 1e6), nullptr);
 	}
 	record_mix_ns(stats, ns, budget_ns);
+}
+
+float MixerCore::bus_gain(core::audio::MasterBus p_bus) const {
+	const size_t b = size_t(p_bus);
+	return b < impl_->bus_gain_seen.size() ? impl_->bus_gain_seen[b].load(std::memory_order_relaxed) : 0.0f;
 }
 
 uint32_t MixerCore::mix(float *r_interleaved_stereo, uint32_t p_frames) {

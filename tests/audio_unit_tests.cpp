@@ -1670,4 +1670,57 @@ TEST_SUITE("audio-mixer") {
 		CHECK(outs[0] == outs[1]);
 		CHECK(std::any_of(outs[0].begin(), outs[0].end(), [](float v) { return v != 0.0f; }));
 	}
+	TEST_CASE("a bus gain scales only that bus's share of the output and reads back once applied") {
+		const TestWave w = make_wave(1, 3000, -1, -1, 48000, true);
+		const std::shared_ptr<const SoundProgram> prog = one_shot_program(w);
+		const auto render = [&](MasterBus p_bus, float p_gain, float &r_seen) {
+			ba::MixerCore mixer(ba::MixerConfig{});
+			CHECK(mixer.bus_gain(p_bus) == 1.0f);
+			ba::MixerCommand gain;
+			gain.type = ba::MixerCommandType::SetBusGain;
+			gain.name_hash = uint32_t(p_bus);
+			gain.value = p_gain;
+			REQUIRE(mixer.push(gain));
+			ba::MixerCommand bad = gain;
+			bad.name_hash = uint32_t(MasterBus::Unknown);
+			REQUIRE(mixer.push(bad));
+			auto inst = instance(prog, w.bank);
+			ba::MixerCommand start;
+			start.type = ba::MixerCommandType::Start;
+			start.handle = mixer.next_handle();
+			start.instance = inst.get();
+			start.at_frame = 600;
+			REQUIRE(mixer.push(start));
+			(void)inst.release();
+			ba::MixerCommand ev;
+			ev.type = ba::MixerCommandType::PostEvent;
+			ev.handle = start.handle;
+			ev.name_hash = 1;
+			ev.at_frame = 700;
+			REQUIRE(mixer.push(ev));
+			std::vector<float> all, buf(2 * 512);
+			while (all.size() < 2 * 4096) {
+				mixer.mix(buf.data(), 512);
+				all.insert(all.end(), buf.begin(), buf.end());
+			}
+			r_seen = mixer.bus_gain(p_bus);
+			return all;
+		};
+		float seen = 0.0f;
+		const std::vector<float> full = render(MasterBus::GameMixMain, 1.0f, seen);
+		const std::vector<float> half = render(MasterBus::GameMixMain, 0.5f, seen);
+		CHECK(seen == 0.5f);
+		const std::vector<float> muted = render(MasterBus::GameMixMain, 0.0f, seen);
+		const std::vector<float> other = render(MasterBus::Music, 0.0f, seen);
+		CHECK(seen == 0.0f);
+		REQUIRE(full.size() == half.size());
+		float peak = 0.0f;
+		for (size_t i = 0; i < full.size(); ++i) {
+			peak = std::max(peak, std::fabs(full[i]));
+			CHECK(half[i] == doctest::Approx(full[i] * 0.5f).epsilon(1e-6));
+		}
+		CHECK(peak > 0.1f);
+		CHECK(std::all_of(muted.begin(), muted.end(), [](float v) { return v == 0.0f; }));
+		CHECK(other == full);
+	}
 }
