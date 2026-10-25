@@ -184,10 +184,6 @@ constexpr uint32_t kSquadColour = 8429618u;
 constexpr uint32_t kEnemyColour = 9843250u;
 constexpr int32_t kHeaderRelease = 0;
 
-template <size_t N> std::string fixed_text(const std::array<char, N> &p_text) {
-	return std::string(p_text.data(), strnlen(p_text.data(), p_text.size()));
-}
-
 bool mode_starts_with(const As2Value &p_mode, std::string_view p_prefix) {
 	return p_mode.to_string().starts_with(p_prefix);
 }
@@ -262,7 +258,7 @@ public:
 							friendly ? p_model.kill_counter.player_team_kills : p_model.kill_counter.enemy_team_kills);
 					break;
 				case HeaderField::GameMode:
-					v = As2Value::of(fixed_text(p_model.settings.current_game_mode));
+					v = As2Value::of(hud_string(p_model.settings.current_game_mode));
 					break;
 			}
 			r_out.push_back({ src.name, std::move(v), src.on_initialize });

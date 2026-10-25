@@ -1,8 +1,10 @@
 #pragma once
 
 #include "bf3/core/ui/as2_clip.h"
+#include "bf3/core/ui/hud_model.h"
 #include "bf3/core/ui/hud_screen.h"
 
+#include <array>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -35,6 +37,20 @@ public:
 private:
 	As2Clip txt_;
 };
+
+struct GameUtilsKit {
+	std::string_view us;
+	std::string_view ru;
+	std::string_view sid;
+	std::string_view label;
+};
+
+inline constexpr std::array<GameUtilsKit, kHudKitCount> kGameUtilsKits{ {
+		{ "USAssault", "RUAssault", "ID_M_ASSAULT", "assault" },
+		{ "USEngineer", "RUEngineer", "ID_M_ENGINEER", "engineer" },
+		{ "USMedic", "RUMedic", "ID_M_SUPPORT", "medic" },
+		{ "USRecon", "RURecon", "ID_M_RECON", "recon" },
+} };
 
 std::string game_utils_kit_frame_label(std::string_view p_kit);
 bool game_utils_is_image_path(const As2Value &p_path);

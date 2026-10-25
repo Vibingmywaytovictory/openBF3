@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 
 namespace bf3::core::ui {
 
@@ -38,8 +37,7 @@ std::string hud_player_name(const HudModel &p_model, uint8_t p_player) {
 	if (p_player >= p_model.players.size()) {
 		return {};
 	}
-	const HudPlayerName &n = p_model.players[p_player].name;
-	return std::string(n.data(), strnlen(n.data(), n.size()));
+	return hud_string(p_model.players[p_player].name);
 }
 
 Result<HudMessageCompData> read_hud_message_comp(const EbxResolver &p_db) {

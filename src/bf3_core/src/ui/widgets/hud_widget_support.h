@@ -169,6 +169,14 @@ inline double as2_number(const As2Value &p_v) {
 	return p_v.to_number();
 }
 
+inline std::string as2_text(const As2Value &p_v) {
+	return p_v.defined() ? p_v.to_string() : std::string();
+}
+
+inline double as2_parse_int(const As2Value &p_v) {
+	return std::trunc(As2Value::of(p_v.to_string()).to_number());
+}
+
 inline int32_t as2_int(const As2Value &p_v) {
 	const double n = as2_number(p_v);
 	return std::isfinite(n) ? int32_t(std::trunc(n)) : 0;

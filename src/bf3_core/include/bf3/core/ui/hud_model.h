@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <span>
 #include <string>
 #include <string_view>
@@ -28,6 +29,10 @@ inline constexpr uint8_t kHudNoPlayer = 0xFF;
 
 using HudPlayerName = std::array<char, kHudNameBytes>;
 using HudText = std::array<char, kHudTextBytes>;
+
+template <size_t N> std::string hud_string(const std::array<char, N> &p_text) {
+	return std::string(p_text.data(), strnlen(p_text.data(), N));
+}
 
 struct HudWeaponSlot {
 	uint32_t item_id = 0;

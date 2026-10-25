@@ -60,17 +60,10 @@ float ServiceStarsWidget::width() const {
 }
 
 std::string game_utils_kit_frame_label(std::string_view p_kit) {
-	if (p_kit == "USAssault" || p_kit == "RUAssault" || p_kit == "ID_M_ASSAULT") {
-		return "assault";
-	}
-	if (p_kit == "USEngineer" || p_kit == "RUEngineer" || p_kit == "ID_M_ENGINEER") {
-		return "engineer";
-	}
-	if (p_kit == "USMedic" || p_kit == "RUMedic" || p_kit == "ID_M_SUPPORT") {
-		return "medic";
-	}
-	if (p_kit == "USRecon" || p_kit == "RURecon" || p_kit == "ID_M_RECON") {
-		return "recon";
+	for (const GameUtilsKit &k : kGameUtilsKits) {
+		if (p_kit == k.us || p_kit == k.ru || p_kit == k.sid) {
+			return std::string(k.label);
+		}
 	}
 	return {};
 }

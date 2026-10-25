@@ -6,7 +6,6 @@
 #include "bf3/core/ui/ui_input.h"
 
 #include <array>
-#include <cmath>
 
 namespace bf3::core::ui {
 
@@ -167,7 +166,7 @@ void DogTagPairWidget::initialize_tag(
 void DogTagPairWidget::initialize_pair(const As2Value &p_init_data) {
 	loaded_ = false;
 	const As2Value &p_static = p_init_data.field("p_static");
-	const bool static_param = p_static.defined() && std::trunc(As2Value::of(p_static.to_string()).to_number()) == 1.0;
+	const bool static_param = p_static.defined() && as2_parse_int(p_static) == 1.0;
 	static_ = static_param || param_true(*host_, "f_static");
 	initialize_tag(basic_, kBasic, kBasicX, kBasicY, kBasicRotation);
 	initialize_tag(advanced_, kAdvanced, kAdvancedX, kAdvancedY, kAdvancedRotation);

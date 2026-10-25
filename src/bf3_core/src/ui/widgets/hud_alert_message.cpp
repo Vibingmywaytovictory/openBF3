@@ -50,10 +50,10 @@ public:
 			}
 		}
 		if (p_key == "Description") {
-			description_text_ = text_or_empty(p_value);
+			description_text_ = as2_text(p_value);
 			setup_message();
 		} else if (p_key == "Title") {
-			title_text_ = text_or_empty(p_value);
+			title_text_ = as2_text(p_value);
 			setup_message();
 		} else if (p_key == "Timer") {
 			const std::string v = p_value.to_string();
@@ -109,11 +109,6 @@ private:
 			{ "FlagHolderVisibility", "ID_H_ALERT_YOU_HAVE_THE_FLAG", false },
 			{ "LastManStandingVisibility", "ID_H_ALERT_LAST_MAN_STANDING", true },
 	} };
-
-	static std::string text_or_empty(const As2Value &p_value) {
-		const std::string v = p_value.defined() ? p_value.to_string() : std::string();
-		return v;
-	}
 
 	void show(const As2Value &p_value, std::string_view p_type) {
 		if (!p_value.defined()) {
