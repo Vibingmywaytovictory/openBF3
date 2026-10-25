@@ -3,6 +3,7 @@
 #include "level_session.h"
 #include "native_hud.h"
 #include "native_hud_moments.h"
+#include "moments/in_round_moments.h"
 
 #include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/util/format.h"
