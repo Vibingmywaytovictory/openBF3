@@ -11,6 +11,7 @@
 #include "test_support.h"
 #include "ui_retail_support.h"
 
+#include <array>
 #include <cstdio>
 #include <string>
 #include <string_view>
@@ -25,6 +26,7 @@ namespace {
 
 constexpr std::string_view kScoreboard32 = "ui/flow/screen/scoreboards/scoreboardtwoteamshud32screen";
 constexpr std::string_view kScoreboardTwoTeams = "ui/flow/screen/scoreboards/scoreboardtwoteamsscreen";
+constexpr std::string_view kSpawnScreenPc = "ui/flow/screen/spawnscreenpc";
 
 void check_scoreboard_list(const HudScreenAsset &p_asset, std::string_view p_instance, int32_t p_key) {
 	const HudWidgetNode *node = p_asset.find(p_instance);
@@ -55,7 +57,7 @@ void check_scoreboard_list(const HudScreenAsset &p_asset, std::string_view p_ins
 	CHECK(l.list_query.on_initialize);
 }
 
-struct Scoreboard {
+struct ScreenRig {
 	ui_retail::RetailScreen s;
 	std::vector<HudWidgetEvent> events;
 
@@ -89,10 +91,18 @@ struct Scoreboard {
 };
 
 void open_scoreboard(
-		Retail &r_r, Scoreboard &r_b, const HudModel &p_model = {}, std::string_view p_screen = kScoreboard32) {
+		Retail &r_r, ScreenRig &r_b, const HudModel &p_model = {}, std::string_view p_screen = kScoreboard32) {
 	r_b.s = ui_retail::open_retail_screen(r_r, p_screen, ui_retail::retail_text_client(ui_retail::retail_text_db(r_r)));
 	r_b.s.hud->set_event_sink([&r_b](const HudWidgetEvent &p_e) { r_b.events.push_back(p_e); });
 	r_b.s.hud->initialize(p_model);
+	r_b.s.hud->set_focus(true);
+}
+
+void open_screen(Retail &r_r, ScreenRig &r_b, std::string_view p_screen, HudClientState p_client = {}) {
+	r_b.s = ui_retail::open_retail_screen(
+			r_r, p_screen, ui_retail::retail_text_client(ui_retail::retail_text_db(r_r), std::move(p_client)));
+	r_b.s.hud->set_event_sink([&r_b](const HudWidgetEvent &p_e) { r_b.events.push_back(p_e); });
+	r_b.s.hud->initialize(HudModel{});
 	r_b.s.hud->set_focus(true);
 }
 
@@ -140,7 +150,7 @@ TEST_SUITE("ui-widgets") {
 		if (r == nullptr) {
 			return;
 		}
-		Scoreboard b;
+		ScreenRig b;
 		open_scoreboard(*r, b);
 		const HudWidgetState *list_widget = b.s.hud->widget(std::string(kHudScreenInstance) + ".List_01");
 		REQUIRE(list_widget != nullptr);
@@ -201,7 +211,7 @@ TEST_SUITE("ui-widgets") {
 		if (r == nullptr) {
 			return;
 		}
-		Scoreboard b;
+		ScreenRig b;
 		open_scoreboard(*r, b);
 		REQUIRE(hud_list_set_direct_rows(*b.s.hud, "List_01", scoreboard_rows(32, 3)));
 		const std::string row5 = b.row(5);
@@ -240,7 +250,7 @@ TEST_SUITE("ui-widgets") {
 		if (r == nullptr) {
 			return;
 		}
-		Scoreboard b;
+		ScreenRig b;
 		open_scoreboard(*r, b);
 		REQUIRE(hud_list_set_direct_rows(*b.s.hud, "List_01", scoreboard_rows(32, 3)));
 		const float x = 103.0f + 520.0f + 12.0f;
@@ -269,7 +279,7 @@ TEST_SUITE("ui-widgets") {
 		m.team.enemy_team1_name = text_hash("ID_M_RU");
 		m.kill_counter.player_team_kills = 50;
 		m.kill_counter.enemy_team_kills = 61;
-		Scoreboard b;
+		ScreenRig b;
 		open_scoreboard(*r, b, m);
 		CHECK(b.s.hud->stats().widgets_missing == 0);
 		CHECK(b.s.hud->stats().as2.missing_paths == 0);
@@ -333,7 +343,7 @@ TEST_SUITE("ui-widgets") {
 		if (r == nullptr) {
 			return;
 		}
-		Scoreboard b;
+		ScreenRig b;
 		open_scoreboard(*r, b);
 		const std::string focused = b.s.hud->focused_widget();
 		b.events.clear();
@@ -351,7 +361,7 @@ TEST_SUITE("ui-widgets") {
 		if (r == nullptr) {
 			return;
 		}
-		Scoreboard b;
+		ScreenRig b;
 		open_scoreboard(*r, b, HudModel{}, kScoreboardTwoTeams);
 		CHECK(b.s.hud->stats().widgets_missing == 0);
 		const std::string path = std::string(kHudScreenInstance) + ".ScoreboardSpectatorBox_01";
@@ -371,6 +381,105 @@ TEST_SUITE("ui-widgets") {
 		box->update(*host, "Spectators", As2Value::array());
 		CHECK_FALSE(b.clip("ScoreboardSpectatorBox_01").visible());
 		CHECK(b.clip("ScoreboardSpectatorBox_01.Label0").text() == ", BRAVO");
+	}
+
+	TEST_CASE("widgets: spawn screen tab bar lays out its three tabs and selects on click") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		ScreenRig b;
+		open_screen(*r, b, kSpawnScreenPc);
+		const TextDatabase &db = ui_retail::retail_text_db(*r);
+		const std::string bar = std::string(kHudScreenInstance) + ".TabBar_01";
+		const HudWidgetState *w = b.s.hud->widget(bar);
+		REQUIRE(w != nullptr);
+		CHECK(w->initialized);
+		CHECK(w->class_name == "Widget.Button.TabBar");
+		CHECK(b.clip("TabBar_01").visible());
+		CHECK_FALSE(b.clip("TabBar_01.tabBarSize").visible());
+		const float bar_width = b.clip("TabBar_01.tabBarSize").width();
+		const std::array<std::string_view, 3> sids{ "ID_M_TAB_SPAWN", "ID_M_TAB_SQUAD", "ID_M_TAB_CUSTOMIZE" };
+		float next_x = 0.0f;
+		std::array<float, 3> centre_x{};
+		const float row_y = b.clip("TabBar_01").y() + 17.0f;
+		for (size_t i = 0; i < sids.size(); ++i) {
+			const std::string tab = "TabBar_01.tabBarHolder.button_" + std::to_string(i);
+			const As2Clip mc = b.clip(tab);
+			REQUIRE(mc.exists());
+			CHECK(b.clip(tab + ".button.label.txt").text() == std::string(db.find_sid(sids[i]).value_or("?")));
+			CHECK(mc.x() == doctest::Approx(next_x));
+			const float width = b.clip(tab + ".button.bgHolder").width() - 2.0f;
+			next_x = mc.x() + width + 2.0f;
+			centre_x[i] = b.clip("TabBar_01").x() + mc.x() + width * 0.5f;
+		}
+		CHECK(next_x - 2.0f == doctest::Approx(bar_width).epsilon(0.01));
+		CHECK(b.clip("TabBar_01.tabBarHolder.button_0.button.bgHolder.selected_mc").visible());
+		CHECK(b.clip("TabBar_01.tabBarHolder.button_0.button.labelInvert").visible());
+		CHECK_FALSE(b.clip("TabBar_01.tabBarHolder.button_2.button.bgHolder.selected_mc").visible());
+		const std::string tab2 = bar + ".tabBarHolder.button_2";
+		CHECK(b.s.hud->hit_target(centre_x[2], row_y) == tab2);
+		b.events.clear();
+		b.s.hud->mouse_move(centre_x[2], row_y);
+		REQUIRE_FALSE(b.events.empty());
+		CHECK(b.events.back().instance == "TabBar_01");
+		CHECK(b.events.back().index == 2);
+		CHECK(b.events.back().param.to_string() == "ID2");
+		CHECK(b.clip("TabBar_01.tabBarHolder.button_2.button.bgHolder.over_mc").visible());
+		b.s.hud->mouse_button(centre_x[2], row_y, 1, true);
+		CHECK(b.events.back().index == 0);
+		b.s.hud->mouse_button(centre_x[2], row_y, 1, false);
+		CHECK(b.events.back().index == 1);
+		CHECK(b.events.back().param.to_string() == "ID2");
+		CHECK(b.clip("TabBar_01.tabBarHolder.button_2.button.bgHolder.selected_mc").visible());
+		CHECK_FALSE(b.clip("TabBar_01.tabBarHolder.button_0.button.bgHolder.selected_mc").visible());
+		CHECK(b.clip("TabBar_01.tabBarHolder.button_0.button.label").visible());
+		const size_t before = b.events.size();
+		b.s.hud->input_concept(int32_t(UiInputConcept::TabLeft), true);
+		b.s.hud->input_concept(int32_t(UiInputConcept::TabLeft), false);
+		CHECK(b.events.size() == before);
+		HudWidgetController *c = b.s.hud->controller(bar);
+		REQUIRE(c != nullptr);
+		c->update(*b.s.hud->host(bar), "SelectedTab", As2Value::of(1));
+		CHECK(b.clip("TabBar_01.tabBarHolder.button_1.button.bgHolder.selected_mc").visible());
+		CHECK_FALSE(b.clip("TabBar_01.tabBarHolder.button_2.button.bgHolder.selected_mc").visible());
+		std::printf("ui.widgets tab bar %.0f px: %s %.0f | %s %.0f | %s %.0f\n", bar_width,
+				b.clip("TabBar_01.tabBarHolder.button_0.button.label.txt").text().c_str(),
+				b.clip("TabBar_01.tabBarHolder.button_0").x(),
+				b.clip("TabBar_01.tabBarHolder.button_1.button.label.txt").text().c_str(),
+				b.clip("TabBar_01.tabBarHolder.button_1").x(),
+				b.clip("TabBar_01.tabBarHolder.button_2.button.label.txt").text().c_str(),
+				b.clip("TabBar_01.tabBarHolder.button_2").x());
+	}
+
+	TEST_CASE("widgets: console tab bar steps tabs on TabLeft and TabRight releases") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudClientState console;
+		console.platform = "ps3";
+		ScreenRig b;
+		open_screen(*r, b, kSpawnScreenPc, console);
+		const std::string bar = std::string(kHudScreenInstance) + ".TabBar_01";
+		b.s.hud->focus_widget(bar);
+		REQUIRE(b.s.hud->focused_widget() == bar);
+		CHECK(b.clip("TabBar_01.tabBarHolder.btnIcon1").exists());
+		CHECK(b.clip("TabBar_01.tabBarHolder.btnIcon2").exists());
+		CHECK(b.clip("TabBar_01.tabBarHolder.button_0").x() > 0.0f);
+		b.events.clear();
+		b.s.hud->input_concept(int32_t(UiInputConcept::TabRight), true);
+		CHECK(b.events.empty());
+		b.s.hud->input_concept(int32_t(UiInputConcept::TabRight), false);
+		REQUIRE_FALSE(b.events.empty());
+		CHECK(b.events.back().index == 1);
+		CHECK(b.events.back().param.to_string() == "ID1");
+		CHECK(b.clip("TabBar_01.tabBarHolder.button_1.button.bgHolder.selected_mc").visible());
+		b.s.hud->input_concept(int32_t(UiInputConcept::TabLeft), false);
+		b.s.hud->input_concept(int32_t(UiInputConcept::TabLeft), false);
+		CHECK(b.events.back().param.to_string() == "ID2");
+		CHECK(b.clip("TabBar_01.tabBarHolder.button_2.button.bgHolder.selected_mc").visible());
+		CHECK_FALSE(b.clip("TabBar_01.tabBarHolder.button_0.button.bgHolder.selected_mc").visible());
 	}
 
 	TEST_CASE("widgets: install unchanged") {
