@@ -302,6 +302,7 @@ target_sources(bf3_core PRIVATE
     src/ui/hud_messages.cpp
     include/bf3/core/ui/hud_widget_registry.h
     src/ui/hud_widget_registry.cpp
+    src/ui/widgets/dog_tag.h
     src/ui/widgets/hud_widget_support.h
     src/ui/widgets/image_manager.h
     src/ui/widgets/kit_icons.h
