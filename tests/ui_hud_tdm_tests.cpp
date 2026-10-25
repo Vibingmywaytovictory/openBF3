@@ -442,6 +442,161 @@ TEST_CASE("the kill-feed ring keeps the newest 8; unknown defs are counted") {
 	CHECK(!m.kill_card.visible);
 }
 
+TEST_CASE("round stats: a replayed kill log gives the kill matrix, streaks, nemesis, best weapon and the round-end "
+		  "page") {
+	host::HudStatic st = make_static();
+	st.rows[5].weapon_class = host::hud_weapon_class("wcKnife");
+	std::vector<net::PlayerRow> rows;
+	for (uint8_t s = 0; s < 8; ++s) {
+		rows.push_back(player(s, uint8_t(1 + s % 2), s == 2 ? "Me" : "Bot", int32_t(s) * 10, 0, s != 2));
+	}
+	rows[2].score = 1500;
+	host::HudFeedInput in;
+	in.tdm = true;
+	in.match_valid = true;
+	in.match.phase = net::MatchPhase::InRound;
+	in.match.round_start_tick = 600;
+	in.match.kill_limit = 100;
+	in.players = rows;
+	in.own_slot = 2;
+	in.own_team = 1;
+	in.alive = true;
+	in.own_position = { 0.0f, 0.0f, 0.0f };
+	std::vector<bf3::present::PresentedSoldier> others;
+	for (uint8_t s = 0; s < 8; ++s) {
+		bf3::present::PresentedSoldier p;
+		p.slot = s;
+		p.position = { float(s) * 3.0f, 0.0f, float(s) * 4.0f };
+		others.push_back(p);
+	}
+	in.others = others;
+	host::HudTdmFeedState state;
+	ui::HudModel m;
+
+	struct Kill {
+		uint8_t killer;
+		uint8_t victim;
+		uint16_t def;
+		bool headshot;
+	};
+	std::vector<Kill> log;
+	uint64_t seed = 0x9E3779B97F4A7C15ull;
+	const auto next = [&](uint32_t p_n) {
+		seed = seed * 6364136223846793005ull + 1442695040888963407ull;
+		return uint32_t((seed >> 33) % p_n);
+	};
+	for (int i = 0; i < 400; ++i) {
+		const uint8_t victim = uint8_t(next(8));
+		const uint32_t k = next(10);
+		const uint8_t killer = k == 9 ? uint8_t(255) : k == 8 ? victim : uint8_t(next(8));
+		log.push_back({ killer, victim, uint16_t(next(6)), next(3) == 0 });
+	}
+	for (int i = 0; i < 6; ++i) {
+		log.push_back({ 2, 1, 5, i == 3 });
+	}
+
+	std::array<std::array<uint32_t, 8>, 8> kills{};
+	std::array<std::array<uint32_t, 8>, 8> run{};
+	std::array<uint32_t, 6> by_def{};
+	uint32_t own_kills = 0, own_deaths = 0, streak = 0, longest = 0, nemesis = 0, dogtags = 0, unknown_killers = 0;
+	float headshot = 0.0f;
+	const auto team = [](uint8_t p_slot) { return 1 + p_slot % 2; };
+	bf3::sim::Tick tick = 700;
+	for (const Kill &k : log) {
+		const bool suicide = k.killer == k.victim || k.killer >= 8;
+		const bool tk = !suicide && team(k.killer) == team(k.victim);
+		unknown_killers += k.killer >= 8 ? 1 : 0;
+		if (!suicide && !tk) {
+			++kills[k.killer][k.victim];
+			++run[k.killer][k.victim];
+			run[k.victim][k.killer] = 0;
+		}
+		if (k.victim == 2) {
+			++own_deaths;
+			streak = 0;
+		} else if (k.killer == 2 && !suicide && !tk) {
+			++own_kills;
+			++by_def[k.def];
+			dogtags += k.def == 5 ? 1 : 0;
+			longest = std::max(longest, ++streak);
+			nemesis = std::max(nemesis, run[2][k.victim]);
+			if (k.headshot) {
+				headshot = std::max(headshot,
+						std::sqrt(
+								float(k.victim * 3) * float(k.victim * 3) + float(k.victim * 4) * float(k.victim * 4)));
+			}
+		}
+		uint8_t flags = k.headshot ? host::present_flags::kHeadshot : uint8_t(0);
+		flags |= k.killer == 2 ? host::present_flags::kOwnShooter : uint8_t(0);
+		flags |= k.victim == 2 ? host::present_flags::kOwnVictim : uint8_t(0);
+		const host::PresentEvent e = death(k.killer, k.victim, k.def, flags, tick);
+		in.server_tick = ++tick;
+		in.now_s = double(tick) / 60.0;
+		host::fill_hud_tdm(in, std::span<const host::PresentEvent>(&e, 1), st, state, m);
+		if (k.victim == 2 && !suicide) {
+			CHECK(m.kill_card.killer_player_kills == int32_t(kills[k.killer][2]));
+			CHECK(m.kill_card.player_killer_kills == int32_t(kills[2][k.killer]));
+			CHECK(name_of(m.kill_card.killer_name) == "Bot");
+			CHECK(m.kill_card.killer_score == int32_t(k.killer) * 10);
+		}
+	}
+	uint32_t mismatched = 0;
+	for (uint8_t a = 0; a < 8; ++a) {
+		for (uint8_t b = 0; b < 8; ++b) {
+			mismatched += host::round_stats_kills(state.stats, a, b) != kills[a][b] ? 1 : 0;
+			mismatched += host::round_stats_nemesis(state.stats, a, b) != run[a][b] ? 1 : 0;
+		}
+	}
+	CHECK(mismatched == 0);
+	CHECK(state.stats.own_kills == own_kills);
+	CHECK(state.stats.own_deaths == own_deaths);
+	CHECK(state.stats.longest_streak == longest);
+	CHECK(state.stats.longest_nemesis_streak == nemesis);
+	CHECK(state.stats.longest_headshot_m == doctest::Approx(headshot));
+	CHECK(state.stats.deaths_seen == log.size());
+	CHECK(own_kills >= 6);
+	const uint16_t best_def = uint16_t(std::max_element(by_def.begin(), by_def.end()) - by_def.begin());
+
+	in.match.phase = net::MatchPhase::RoundOver;
+	in.match.round_end_tick = 600 + 60 * 300;
+	in.match.winner = 1;
+	in.match.kills = { 100, 87 };
+	in.server_tick = in.match.round_end_tick + 30;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	const ui::HudEndOfRound &e = m.end_of_round;
+	CHECK(e.visible);
+	CHECK(e.kills == int32_t(own_kills));
+	CHECK(e.deaths == int32_t(own_deaths));
+	CHECK(e.kill_death_ratio == doctest::Approx(double(own_kills) / double(own_deaths)));
+	CHECK(e.best_weapon_info.item_id == 1000u + best_def);
+	CHECK(e.best_weapon_info.kills == int32_t(by_def[best_def]));
+	CHECK(e.dogtags_taken == int32_t(dogtags));
+	CHECK(e.round_duration == doctest::Approx(300.0f));
+	CHECK(e.kills_per_minute == doctest::Approx(double(own_kills) / 5.0));
+	CHECK(e.score_per_minute == doctest::Approx(1500.0 / 5.0));
+	CHECK(e.total_score == 1500);
+	CHECK(e.longest_streak == int32_t(longest));
+	CHECK(e.longest_nemesis_streak == int32_t(nemesis));
+	CHECK(e.longest_headshot == doctest::Approx(headshot));
+	CHECK(name_of(e.name) == "Me");
+	CHECK(e.winning_team == 1);
+	CHECK(e.local_player_in_winning_team);
+	CHECK(e.team_results == std::array<int32_t, 2>{ 100, 87 });
+	CHECK(e.player_team_index == 1);
+	CHECK(e.in_match);
+	CHECK(!e.is_ranked);
+
+	in.match.phase = net::MatchPhase::PreRound;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(state.stats.own_kills == 0);
+	CHECK(host::round_stats_kills(state.stats, 2, 1) == 0);
+	CHECK(state.bad_inputs == unknown_killers);
+	row("unit.round_stats", mismatched == 0 && state.stats.own_kills == 0,
+			std::to_string(log.size()) + " deaths replayed, " + std::to_string(own_kills) + " own kills, " +
+					std::to_string(own_deaths) + " own deaths, streak " + std::to_string(longest) + ", nemesis " +
+					std::to_string(nemesis) + ", best def " + std::to_string(best_def));
+}
+
 TEST_CASE("own kills raise the scoring table's kill and headshot score messages") {
 	const host::HudStatic st = make_static();
 	std::vector<net::PlayerRow> rows{ player(1, 2, "Bot RU 1", 300, 3), player(2, 1, "Bot US 1", 200, 2), player(3, 1, "Me", 0, 0, false) };
@@ -772,7 +927,11 @@ TEST_CASE("the 13 TDM kit items: names and _small icons") {
 	REQUIRE_MESSAGE(items.ok(), (items.ok() ? std::string() : items.error().message));
 	bf3::core::Result<ui::TextDatabase> text = ui::open_text_database(ti->install);
 	REQUIRE_MESSAGE(text.ok(), (text.ok() ? std::string() : text.error().message));
+	host::HudStatic table;
+	const size_t table_items = host::apply_item_table(table, *items);
+	CHECK(table_items > std::size(kTdmKitItems));
 	size_t ok = 0;
+	size_t pathed = 0;
 	for (const KitItem &k : kTdmKitItems) {
 		bf3::core::Result<gp::WeaponDef> d = weapons->catalog->resolve(std::string(k.variant));
 		REQUIRE_MESSAGE(d.ok(), (std::string(k.variant) + ": " + (d.ok() ? std::string() : d.error().message)));
@@ -791,6 +950,11 @@ TEST_CASE("the 13 TDM kit items: names and _small icons") {
 			icon_ok = img.ok() && img->width > 0 && img->height > 0 && !img->data.empty();
 			icon_detail += img.ok() ? " " + std::to_string(img->width) + "x" + std::to_string(img->height) : ": " + img.error().message;
 		}
+		const ui::HudItem item = host::hud_item(table, d->unlock_identifier);
+		const bool path_ok = icon != nullptr && !icon->path.empty() &&
+				std::string_view(item.image_path.data()) == icon->path.substr(0, item.image_path.size() - 1);
+		pathed += path_ok ? 1 : 0;
+		CHECK_MESSAGE(path_ok, std::string(k.variant));
 		ok += name_ok && icon_ok ? 1 : 0;
 		row("kit." + std::string(k.variant), name_ok && icon_ok,
 				"item " + std::to_string(d->unlock_identifier) + ", name '" + (name ? std::string(*name) : std::string("?")) + "', icon " + icon_detail);
@@ -798,6 +962,9 @@ TEST_CASE("the 13 TDM kit items: names and _small icons") {
 		CHECK_MESSAGE(icon_ok, std::string(k.variant));
 	}
 	row("kit.all", ok == std::size(kTdmKitItems), std::to_string(ok) + "/" + std::to_string(std::size(kTdmKitItems)) + " kit items with a name and an icon");
+	row("kit.item_table", pathed == std::size(kTdmKitItems),
+			std::to_string(table_items) + " items in the HUD item table, " + std::to_string(pathed) + "/" +
+					std::to_string(std::size(kTdmKitItems)) + " kit items with their image path");
 }
 
 TEST_CASE("install.unchanged") {

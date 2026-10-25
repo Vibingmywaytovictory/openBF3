@@ -80,6 +80,7 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 	f.now_s = std::isfinite(p_input.now_s) ? p_input.now_s : 0.0;
 
 	tdm_feed::feed_scoreboard(f);
+	tdm_feed::feed_round_stats(f, p_drained);
 	tdm_feed::feed_kill_card(f, p_drained);
 	tdm_feed::feed_spawn(f);
 	tdm_feed::feed_round_end(f);

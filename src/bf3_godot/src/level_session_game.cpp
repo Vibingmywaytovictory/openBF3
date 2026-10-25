@@ -974,8 +974,13 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 	if (g.hud_items != nullptr && g.hud_items->is_loaded() && !g.hud_names_applied) {
 		g.hud_names_applied = true;
 		const size_t filled = g.hud_items->item_index() != nullptr ? host::apply_item_names(g.hud_static, *g.hud_items->item_index()) : 0;
-		UtilityFunctions::print(to_godot("[game] HUD items loaded" + (g.hud_items->load_error().empty() ? std::string() : " (" + g.hud_items->load_error() + ")") + ": " +
-				std::to_string(g.hud_static.rows.size()) + " weapon rows, " + std::to_string(filled) + " names from the item index, " +
+		const size_t items = g.hud_items->item_index() != nullptr
+				? host::apply_item_table(g.hud_static, *g.hud_items->item_index())
+				: 0;
+		UtilityFunctions::print(to_godot("[game] HUD items loaded" +
+				(g.hud_items->load_error().empty() ? std::string() : " (" + g.hud_items->load_error() + ")") + ": " +
+				std::to_string(g.hud_static.rows.size()) + " weapon rows, " + std::to_string(filled) +
+				" names from the item index, " + std::to_string(items) + " items, " +
 				std::to_string(g.hud_items->icon_count()) + " icons"));
 	}
 	const bool free_camera = mapper_.free_camera();

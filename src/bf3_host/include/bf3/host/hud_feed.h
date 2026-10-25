@@ -7,6 +7,7 @@
 #include "bf3/core/ui/swf_layout.h"
 #include "bf3/host/presentation_events.h"
 #include "bf3/host/presentation_weapon.h"
+#include "bf3/host/round_stats.h"
 #include "bf3/net/protocol.h"
 #include "bf3/net/weapons_wire.h"
 #include "bf3/present/presented.h"
@@ -54,14 +55,29 @@ struct HudStaticRow {
 };
 static_assert(std::is_trivially_copyable_v<HudStaticRow>);
 
+struct HudStaticItem {
+	uint32_t item_id = 0;
+	uint32_t name_sid_hash = 0;
+	core::ui::HudText image_path{};
+};
+static_assert(std::is_trivially_copyable_v<HudStaticItem>);
+
 struct HudStatic {
 	std::vector<HudStaticRow> rows;
+	std::vector<HudStaticItem> items;
 	const HudStaticRow *row(uint16_t p_def) const { return p_def < rows.size() ? &rows[p_def] : nullptr; }
+	const HudStaticItem *item(uint32_t p_item_id) const;
 };
 
 core::Result<HudStatic> make_hud_static(const sim::weapons::WeaponTable &p_table, std::span<const core::gameplay::WeaponDef> p_defs);
 
 size_t apply_item_names(HudStatic &r_static, const core::ui::ItemIconIndex &p_items);
+
+size_t apply_item_table(HudStatic &r_static, const core::ui::ItemIconIndex &p_items);
+
+core::ui::HudItem hud_item(const HudStatic &p_static, uint32_t p_item_id);
+
+void hud_text(core::ui::HudText &r_out, std::string_view p_text);
 
 struct KitTable;
 
@@ -140,6 +156,9 @@ inline constexpr double kKillCardDelaySeconds = 0.9;
 inline constexpr double kKillCardSeconds = 3.0;
 inline constexpr double kDeathScreenSeconds = kKillCardDelaySeconds + kKillCardSeconds;
 
+inline constexpr std::string_view kDefaultBasicDogtag = "ui/art/persistence/dogtag/defaulttag_left";
+inline constexpr std::string_view kDefaultAdvancedDogtag = "ui/art/persistence/dogtag/defaulttag_right";
+
 inline constexpr std::array<uint8_t, core::ui::kHudSpawnKitItems> kHudSpawnSlots{ 0, 1, 2, 6, 7 };
 
 struct HudTdmFeedState {
@@ -157,6 +176,9 @@ struct HudTdmFeedState {
 	uint64_t unknown_defs = 0;
 	uint64_t bad_inputs = 0;
 	uint64_t frames = 0;
+
+	RoundStats stats;
+	net::MatchPhase stats_phase = net::MatchPhase::Loading;
 };
 static_assert(std::is_trivially_copyable_v<HudTdmFeedState>);
 

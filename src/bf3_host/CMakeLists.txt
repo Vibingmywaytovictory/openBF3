@@ -149,6 +149,8 @@ target_sources(bf3_host PRIVATE
     src/hud_feed_kill_card.cpp
     src/hud_feed_spawn.cpp
     src/hud_feed_round_end.cpp
+    include/bf3/host/round_stats.h
+    src/round_stats.cpp
 )
 
 target_sources(bf3_host PRIVATE

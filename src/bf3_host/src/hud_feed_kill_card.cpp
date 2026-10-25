@@ -125,6 +125,23 @@ void feed_kill_card(Frame &r_frame, std::span<const PresentEvent> p_drained) {
 		card.distance_m = !suicide && src.killer_seen && std::isfinite(src.distance_m) && src.distance_m >= 0.0f
 				? src.distance_m
 				: -1.0f;
+		const bool known_killer = !suicide && r_frame.present[killer];
+		if (known_killer) {
+			card.killer_name = model.players[killer].name;
+			card.killer_score = model.players[killer].score;
+			card.killer_player_kills = round_stats_kills(state.stats, killer, victim);
+			card.player_killer_kills = round_stats_kills(state.stats, victim, killer);
+		}
+		card.killer_weapon_name = card.weapon_name_sid_hash;
+		card.killer_weapon_icon = card.item_id;
+		card.is_suicide = suicide && killer != ui::kHudNoPlayer;
+		card.is_bad_luck = killer == ui::kHudNoPlayer;
+		card.killer_weapon_type = row != nullptr ? row->weapon_class : 0;
+		if (const HudStaticItem *item = r_frame.statics.item(card.item_id)) {
+			card.killer_weapon_image_path = item->image_path;
+		}
+		hud_text(card.killer_basic_dog_tag, kDefaultBasicDogtag);
+		hud_text(card.killer_advanced_dog_tag, kDefaultAdvancedDogtag);
 	}
 	r_frame.card_pending = card.serial != 0 && now_s < state.kill_card_from_s && now_s < state.kill_card_until_s;
 	r_frame.card_up = card.serial != 0 && !r_frame.card_pending && now_s < state.kill_card_until_s;

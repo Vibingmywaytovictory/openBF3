@@ -126,6 +126,49 @@ core::Result<HudStatic> make_hud_static(const sw::WeaponTable &p_table, std::spa
 	return out;
 }
 
+const HudStaticItem *HudStatic::item(uint32_t p_item_id) const {
+	const auto it = std::lower_bound(items.begin(), items.end(), p_item_id,
+			[](const HudStaticItem &p_a, uint32_t p_id) { return p_a.item_id < p_id; });
+	return it != items.end() && it->item_id == p_item_id ? &*it : nullptr;
+}
+
+void hud_text(ui::HudText &r_out, std::string_view p_text) {
+	r_out.fill(char(0));
+	const size_t n = std::min(p_text.size(), r_out.size() - 1);
+	std::copy_n(p_text.begin(), n, r_out.begin());
+}
+
+size_t apply_item_table(HudStatic &r_static, const ui::ItemIconIndex &p_items) {
+	r_static.items.clear();
+	for (const ui::ItemIcon &icon : p_items.icons()) {
+		if (icon.item_id == 0) {
+			continue;
+		}
+		HudStaticItem it;
+		it.item_id = icon.item_id;
+		it.name_sid_hash = icon.name_sid.empty() ? 0 : ui::text_hash(icon.name_sid);
+		hud_text(it.image_path, icon.path);
+		r_static.items.push_back(it);
+	}
+	std::sort(r_static.items.begin(), r_static.items.end(),
+			[](const HudStaticItem &p_a, const HudStaticItem &p_b) { return p_a.item_id < p_b.item_id; });
+	r_static.items.erase(
+			std::unique(r_static.items.begin(), r_static.items.end(),
+					[](const HudStaticItem &p_a, const HudStaticItem &p_b) { return p_a.item_id == p_b.item_id; }),
+			r_static.items.end());
+	return r_static.items.size();
+}
+
+ui::HudItem hud_item(const HudStatic &p_static, uint32_t p_item_id) {
+	ui::HudItem out;
+	out.item_id = p_item_id;
+	if (const HudStaticItem *it = p_static.item(p_item_id)) {
+		out.name_sid_hash = it->name_sid_hash;
+		out.image_path = it->image_path;
+	}
+	return out;
+}
+
 size_t apply_item_names(HudStatic &r_static, const ui::ItemIconIndex &p_items) {
 	size_t filled = 0;
 	for (HudStaticRow &r : r_static.rows) {
