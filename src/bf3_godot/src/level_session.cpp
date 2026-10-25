@@ -246,8 +246,8 @@ void Bf3LevelSession::_ready() {
 
 	mapper_.install_actions();
 	cameras_.attach(this);
-	if (scene_ || !headless_) {
-		loading_.attach(this, "openBF3  " + level_ + "  " + mode_);
+	if (!headless_) {
+		loading_.attach(this, level_, mode_, seed_);
 	}
 	build_hud();
 	if (scene_) {
@@ -789,7 +789,7 @@ void Bf3LevelSession::try_done() {
 	timings_.done_from_ready_s = double(timings_.done_us - timings_.ready_us) / 1e6;
 	progress_.begin(host::LoadStage::Done);
 	progress_.end(host::LoadStage::Done);
-	loading_.remove();
+	loading_.remove(double(timings_.done_us) / 1e6);
 	set_loading_display(false);
 	if (!mapper_.scripted() && !headless_) {
 		mapper_.set_capture(true);
@@ -886,26 +886,12 @@ void Bf3LevelSession::_process(double p_delta) {
 		client_->set_input(mapper_.sample());
 		game_presented(p_delta, now_ns);
 	}
+	loading_.update(double(now_us()) / 1e6, progress_);
 	try_done();
 	if (!done_) {
 		++timings_.loading_frames;
 		timings_.loading_frame_ms_sum += p_delta * 1000.0;
 		timings_.loading_frame_ms_max = std::max(timings_.loading_frame_ms_max, p_delta * 1000.0);
-		std::string detail;
-		if (upload_.begun()) {
-			const UploadStats st = upload_.stats();
-			char line[256];
-			std::snprintf(line, sizeof(line), "upload: %llu meshes, %llu textures, %llu instances, %llu materials (C1 %llu tasks)",
-					(unsigned long long)(st.meshes + st.terrains), (unsigned long long)st.textures, (unsigned long long)st.instances,
-					(unsigned long long)st.materials, (unsigned long long)st.tasks);
-			detail = line;
-		}
-		std::string error;
-		if (failed_) {
-			std::lock_guard lock(loader_mutex_);
-			error = "load failed: " + load_error_;
-		}
-		loading_.update(progress_, now_us(), error.empty() ? detail : error);
 		return;
 	}
 	since_done_ += p_delta;

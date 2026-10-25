@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 namespace bf3::godot_side {
 
@@ -27,6 +28,8 @@ public:
 	Bf3UiTextures(const Bf3UiTextures &) = delete;
 	Bf3UiTextures &operator=(const Bf3UiTextures &) = delete;
 
+	void add_mount(std::shared_ptr<const bf3::core::LevelMount> p_mount);
+	void remove_mount(const bf3::core::LevelMount *p_mount);
 	bf3::core::ui::SwfImageInfo request(std::string_view p_res_name) override;
 	godot::Ref<godot::Texture2D> texture(std::string_view p_res_name) const;
 	uint32_t decoded() const;
@@ -46,6 +49,7 @@ private:
 	std::condition_variable wake_;
 	std::deque<std::string> queue_;
 	std::map<std::string, Entry, std::less<>> entries_;
+	std::vector<std::shared_ptr<const bf3::core::LevelMount>> mounts_;
 	bool stop_ = false;
 	uint32_t decoded_ = 0;
 	uint32_t failed_ = 0;

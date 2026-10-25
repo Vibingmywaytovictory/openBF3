@@ -19,6 +19,7 @@ namespace bf3::godot_side {
 class Bf3UiScreens;
 class NativeFlow;
 class NativeScreensCheck;
+class LoadingScreenCheck;
 
 struct TdmState {
 
@@ -85,6 +86,7 @@ struct TdmState {
 
 	bool native_screens = false;
 	bool native_screens_check = false;
+	bool loading_screen_check = false;
 	bool native_following = false;
 	bool native_client_set = false;
 	bool native_failure_printed = false;
@@ -94,6 +96,7 @@ struct TdmState {
 	uint64_t ui_screens_id = 0;
 	std::unique_ptr<NativeFlow, void (*)(NativeFlow *)> native_flow{ nullptr, nullptr };
 	std::unique_ptr<NativeScreensCheck, void (*)(NativeScreensCheck *)> native_check{ nullptr, nullptr };
+	std::unique_ptr<LoadingScreenCheck, void (*)(LoadingScreenCheck *)> loading_check{ nullptr, nullptr };
 };
 
 Bf3UiScreens *tdm_ui_screens(const TdmState &p_m);

@@ -78,6 +78,7 @@ public:
 	void set_model(const bf3::core::ui::HudModel &p_model) { model_ = p_model; }
 	void set_client(bf3::core::ui::HudClientState p_client) { client_ = std::move(p_client); }
 	bf3::core::Status open_movie_screen(std::string_view p_movie, bf3::core::ui::HudRootData *p_data);
+	bf3::core::ui::HudScreen *hud_screen(std::string_view p_partition);
 	void step(double p_seconds);
 
 	bool input_concept(int32_t p_concept, bool p_pressed);

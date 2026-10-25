@@ -101,6 +101,20 @@ const char *load_stage_name(LoadStage p_stage) {
 	return "unknown";
 }
 
+const char *cache_warmth_name(CacheWarmth p_warmth) {
+	switch (p_warmth) {
+		case CacheWarmth::Cold:
+			return "cold";
+		case CacheWarmth::Partial:
+			return "partial";
+		case CacheWarmth::Warm:
+			return "warm";
+		case CacheWarmth::Unknown:
+			break;
+	}
+	return "unknown";
+}
+
 void LoadProgress::begin(LoadStage p_stage, uint32_t p_total) {
 	const size_t i = size_t(p_stage);
 	if (i >= kLoadStageCount) {

@@ -188,6 +188,11 @@ bf3::core::Status Bf3UiScreens::open_movie_screen(std::string_view p_movie, ui::
 	return bf3::core::Status::success();
 }
 
+ui::HudScreen *Bf3UiScreens::hud_screen(std::string_view p_partition) {
+	const Entry *e = find(p_partition);
+	return e != nullptr ? screen_of(*e) : nullptr;
+}
+
 bf3::core::Status Bf3UiScreens::open_entry(
 		std::string_view p_partition, const ui::HudScreenAsset &p_asset, ui::HudRootData *p_data) {
 	if (entries_.size() >= kUiScreensMax) {
@@ -227,7 +232,7 @@ bf3::core::Status Bf3UiScreens::open_entry(
 	}
 	rects.original = scene->stage();
 	bf3::core::Result<std::unique_ptr<ui::HudScreen>> s =
-			ui::HudScreen::open(*scene, *assets->movies(), p_asset, assets->swf_fonts(), client_, rects);
+			ui::HudScreen::open(*scene, *assets->movies(), p_asset, assets->swf_fonts(), client_, rects, p_data);
 	if (!s) {
 		if (e->view != nullptr) {
 			remove_child(e->view);
@@ -236,7 +241,6 @@ bf3::core::Status Bf3UiScreens::open_entry(
 		return bf3::core::make_error(p_asset.name + ": " + s.error().message);
 	}
 	e->screen = std::move(*s);
-	e->screen->set_root_data(p_data);
 	const std::string partition = e->partition;
 	e->screen->set_event_sink([this, partition](const ui::HudWidgetEvent &p_event) {
 		++stats_.events_out;

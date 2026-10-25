@@ -4,11 +4,11 @@
 #include "input_mapper.h"
 #include "level_session.h"
 #include "level_upload.h"
-#include "loading_screen.h"
 
 #include "bf3/core/util/format.h"
 #include "bf3/core/util/percentile.h"
 #include "bf3/host/game_server.h"
+#include "bf3/host/level_load.h"
 #include "bf3/net/loopback_ping.h"
 
 #include <godot_cpp/classes/camera3d.hpp>

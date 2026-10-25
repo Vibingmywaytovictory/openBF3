@@ -13,6 +13,7 @@
 #include "native_screens.h"
 #include "ui_assets.h"
 #if OPENBF3_BUILD_CHECKS
+#include "loading_screen_check.h"
 #include "native_screens_check.h"
 #endif
 
@@ -200,7 +201,7 @@ void build_tdm_ui(
 		r_m.ui_screens_id = screens->get_instance_id();
 		r_m.native_flow =
 				std::unique_ptr<NativeFlow, void (*)(NativeFlow *)>(new NativeFlow(), &delete_part<NativeFlow>);
-		r_m.native_flow->set_keep_log(r_m.native_screens_check);
+		r_m.native_flow->set_keep_log(r_m.native_screens_check || r_m.loading_screen_check);
 	}
 	r_m.death_camera = std::unique_ptr<Bf3DeathCamera, void (*)(Bf3DeathCamera *)>(
 			new Bf3DeathCamera(p_death != nullptr ? death_camera_params(*p_death) : DeathCameraParams{}),
@@ -276,7 +277,7 @@ void step_native_screens(GameState &r_game, TdmState &r_m) {
 	}
 	screens->set_model(r_game.hud_model);
 	screens->step(r_m.native_delta_s);
-	if (!r_m.native_screens_check) {
+	if (!r_m.native_screens_check && !r_m.loading_screen_check) {
 		screens->clear_log();
 	}
 }
@@ -366,8 +367,9 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 		}
 		bots_ = m.options.bots;
 		m.native_screens_check = has_user_arg("native-screens-check");
-		m.native_screens = m.native_screens_check || user_arg_value("native-screens") != "0";
-		if (m.native_screens_check && quit_after_ <= 0.0) {
+		m.loading_screen_check = has_user_arg("loading-screen-check");
+		m.native_screens = m.native_screens_check || m.loading_screen_check || user_arg_value("native-screens") != "0";
+		if ((m.native_screens_check || m.loading_screen_check) && quit_after_ <= 0.0) {
 			quit_after_ = 1.0e9;
 		}
 		m.options.tdm_tuning_cfg = config_path("res://config/tdm_tuning.cfg");
@@ -715,6 +717,33 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			return true;
 		}
 	}
+	if (m.loading_screen_check && screens != nullptr && m.native_flow != nullptr && !m.finished) {
+		if (m.loading_check == nullptr) {
+			m.loading_check = std::unique_ptr<LoadingScreenCheck, void (*)(LoadingScreenCheck *)>(
+					new LoadingScreenCheck(user_arg_value("loading-shots")), &delete_part<LoadingScreenCheck>);
+		}
+		LoadingScreenCheckIo io;
+		io.press = [this](Key p_key, bool p_pressed) {
+			Ref<InputEventKey> k;
+			k.instantiate();
+			k->set_keycode(p_key);
+			k->set_physical_keycode(p_key);
+			k->set_pressed(p_pressed);
+			tdm_ui_input(k);
+		};
+		io.reopen = [this] { loading_.attach(this, level_, mode_, seed_); };
+		io.close = [this, now_s] { loading_.remove(now_s); };
+		io.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		io.captured = [this] { return mapper_.captured(); };
+		io.ready_s = double(timings_.ready_us) / 1e6;
+		io.done_s = double(timings_.done_us) / 1e6;
+		if (m.loading_check->frame(loading_, *screens, *m.native_flow, now_s, io)) {
+			m.finished = true;
+			UtilityFunctions::print(to_godot(m.loading_check->report()));
+			finish(m.loading_check->exit_code());
+			return true;
+		}
+	}
 #endif
 
 	t0 = std::chrono::steady_clock::now();
@@ -831,6 +860,7 @@ void Bf3LevelSession::tdm_shutdown() {
 	}
 	m.ui_screens_id = 0;
 	m.native_check.reset();
+	m.loading_check.reset();
 	m.native_flow.reset();
 	if (m.tdm_hud != nullptr) {
 		m.screen_records.remove(m.tdm_hud.get());

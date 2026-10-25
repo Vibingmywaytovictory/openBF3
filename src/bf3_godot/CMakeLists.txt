@@ -46,8 +46,8 @@ target_sources(bf3_godot PRIVATE
     src/fp_camera.h
     src/input_mapper.cpp
     src/input_mapper.h
-    src/loading_screen.cpp
-    src/loading_screen.h
+    src/native_loading.cpp
+    src/native_loading.h
 )
 target_link_libraries(bf3_godot PRIVATE psapi)
 
@@ -223,6 +223,8 @@ if(OPENBF3_BUILD_CHECKS)
         src/m2b_check.cpp
         src/m2b_check_rows.cpp
         src/m2b_check_rows.h
+        src/loading_screen_check.cpp
+        src/loading_screen_check.h
         src/m9_reload_check.cpp
         src/m9_reload_check.h
         src/minimap_check.cpp

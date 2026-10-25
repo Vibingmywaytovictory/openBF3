@@ -3,8 +3,8 @@
 #include "fp_camera.h"
 #include "input_mapper.h"
 #include "level_upload.h"
-#include "loading_screen.h"
 #include "look_bridge.h"
+#include "native_loading.h"
 
 #include "nav_overlay.h"
 
@@ -193,7 +193,7 @@ private:
 	godot::Callable upload_task_;
 	InputMapper mapper_;
 	FpCamera cameras_;
-	LoadingScreen loading_;
+	NativeLoading loading_;
 	godot::DirectionalLight3D *sun_ = nullptr;
 	godot::WorldEnvironment *environment_ = nullptr;
 	LookBridge look_;

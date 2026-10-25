@@ -6,6 +6,8 @@
 
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <iterator>
+
 namespace bf3::godot_side {
 
 using namespace godot;
@@ -35,6 +37,24 @@ Bf3UiTextures::~Bf3UiTextures() {
 	if (worker_.joinable()) {
 		worker_.join();
 	}
+}
+
+void Bf3UiTextures::add_mount(std::shared_ptr<const bf3::core::LevelMount> p_mount) {
+	if (p_mount == nullptr) {
+		return;
+	}
+	std::lock_guard lock(mutex_);
+	for (auto it = entries_.begin(); it != entries_.end();) {
+		it = it->second.decoded && it->second.info.status == ui::SwfImageStatus::Missing ? entries_.erase(it)
+																						 : std::next(it);
+	}
+	mounts_.push_back(std::move(p_mount));
+}
+
+void Bf3UiTextures::remove_mount(const bf3::core::LevelMount *p_mount) {
+	std::lock_guard lock(mutex_);
+	std::erase_if(
+			mounts_, [p_mount](const std::shared_ptr<const bf3::core::LevelMount> &m) { return m.get() == p_mount; });
 }
 
 ui::SwfImageInfo Bf3UiTextures::request(std::string_view p_res_name) {
@@ -105,28 +125,36 @@ void Bf3UiTextures::run() {
 			name = std::move(queue_.front());
 			queue_.pop_front();
 		}
+		std::vector<std::shared_ptr<const bf3::core::LevelMount>> extra;
+		{
+			std::lock_guard lock(mutex_);
+			extra = mounts_;
+		}
 		std::optional<bf3::render::PreparedTexture> prepared;
-		std::string error;
-		if (!mount) {
-			error = mount.error().message;
-		} else {
-			const ui::SwfImageInfo info = ui::read_swf_image_info(*mount, name);
+		std::string error = mount ? std::string() : mount.error().message;
+		const auto decode = [&](const bf3::core::LevelMount &p_mount) {
+			const ui::SwfImageInfo info = ui::read_swf_image_info(p_mount, name);
 			if (info.status != ui::SwfImageStatus::Ready) {
 				error = info.error;
-			} else {
-				bf3::core::Result<bf3::core::res::LoadedTexture> loaded = bf3::core::res::load_texture(*mount, name);
-				if (!loaded) {
-					error = loaded.error().message;
-				} else {
-					bf3::core::Result<bf3::render::PreparedTexture> prep =
-							bf3::render::prepare_texture(*loaded, bf3::render::TextureRole::Color);
-					if (!prep) {
-						error = prep.error().message;
-					} else {
-						prepared = std::move(*prep);
-					}
-				}
+				return false;
 			}
+			bf3::core::Result<bf3::core::res::LoadedTexture> loaded = bf3::core::res::load_texture(p_mount, name);
+			if (!loaded) {
+				error = loaded.error().message;
+				return true;
+			}
+			bf3::core::Result<bf3::render::PreparedTexture> prep =
+					bf3::render::prepare_texture(*loaded, bf3::render::TextureRole::Color);
+			if (!prep) {
+				error = prep.error().message;
+			} else {
+				prepared = std::move(*prep);
+			}
+			return true;
+		};
+		bool found = mount && decode(*mount);
+		for (size_t i = 0; !found && i < extra.size(); ++i) {
+			found = decode(*extra[i]);
 		}
 		std::lock_guard lock(mutex_);
 		Entry &e = entries_[name];

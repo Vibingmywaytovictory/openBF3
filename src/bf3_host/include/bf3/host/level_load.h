@@ -53,6 +53,7 @@ inline constexpr size_t kLoadStageCount = 11;
 const char *load_stage_name(LoadStage p_stage);
 
 enum class CacheWarmth : uint8_t { Unknown = 0, Cold = 1, Partial = 2, Warm = 3 };
+const char *cache_warmth_name(CacheWarmth p_warmth);
 
 struct LoadProgress {
 	std::atomic<uint8_t> stage{ uint8_t(LoadStage::Mount) };
