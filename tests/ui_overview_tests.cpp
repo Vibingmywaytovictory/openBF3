@@ -39,35 +39,17 @@ L8Image field_with_inside(uint32_t p_side, uint32_t p_u0, uint32_t p_v0, uint32_
 	return img;
 }
 
-const SwfLayoutNode *find_symbol(const SwfLayoutNode &p_node, std::string_view p_symbol) {
-	if (p_node.symbol == p_symbol) {
-		return &p_node;
-	}
-	for (const SwfLayoutNode &c : p_node.children) {
-		if (const SwfLayoutNode *hit = find_symbol(c, p_symbol)) {
-			return hit;
-		}
-	}
-	return nullptr;
-}
-
 void add_shape_boxes(const SwfLibrary &p_lib, const SwfLayoutNode &p_node, SwfRect &r_box, uint32_t &r_shapes) {
 	if (p_node.kind == SwfLayoutKind::Shape && p_node.symbol.starts_with("#")) {
 		Result<std::shared_ptr<const SwfMovie>> movie = p_lib.load(p_node.movie);
 		const SwfShape *shape =
 				movie.ok() ? (*movie)->find_shape(uint16_t(std::stoul(p_node.symbol.substr(1)))) : nullptr;
 		if (shape != nullptr) {
-			const SwfMatrix &m = p_node.stage;
-			for (const float x : { shape->bounds.x_min, shape->bounds.x_max }) {
-				for (const float y : { shape->bounds.y_min, shape->bounds.y_max }) {
-					const float sx = m.a * x + m.c * y + m.tx;
-					const float sy = m.b * x + m.d * y + m.ty;
-					r_box.x_min = std::min(r_box.x_min, sx);
-					r_box.x_max = std::max(r_box.x_max, sx);
-					r_box.y_min = std::min(r_box.y_min, sy);
-					r_box.y_max = std::max(r_box.y_max, sy);
-				}
-			}
+			const SwfRect b = swf_transform_bounds(shape->bounds, p_node.stage);
+			r_box.x_min = std::min(r_box.x_min, b.x_min);
+			r_box.x_max = std::max(r_box.x_max, b.x_max);
+			r_box.y_min = std::min(r_box.y_min, b.y_min);
+			r_box.y_max = std::max(r_box.y_max, b.y_max);
 			r_shapes++;
 		}
 	}
@@ -86,7 +68,7 @@ OverviewClipBox overview_clip_box(const SwfLibrary &p_lib, std::string_view p_mo
 	WorkBudget budget(kSwfLayoutBudgetUnits);
 	Result<SwfLayoutNode> tree = read_layout(p_lib, p_movie, SwfLayoutOptions{}, budget);
 	REQUIRE_MESSAGE(tree.ok(), (tree.ok() ? std::string() : tree.error().message));
-	const SwfLayoutNode *clip = find_symbol(*tree, "OverviewMap");
+	const SwfLayoutNode *clip = find_layout_symbol(*tree, "OverviewMap");
 	REQUIRE(clip != nullptr);
 	add_shape_boxes(p_lib, *clip, out.box, out.shapes);
 	return out;

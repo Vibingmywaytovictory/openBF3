@@ -39,23 +39,8 @@ size_t index_in(const std::vector<SwfNodeId> &p_order, SwfNodeId p_id) {
 	return size_t(std::find(p_order.begin(), p_order.end(), p_id) - p_order.begin());
 }
 
-SwfRect world_rect(const SwfRect &p_local, const SwfMatrix &p_world) {
-	SwfRect r{ std::numeric_limits<float>::max(), std::numeric_limits<float>::lowest(),
-		std::numeric_limits<float>::max(), std::numeric_limits<float>::lowest() };
-	for (const auto &[x, y] : { std::pair{ p_local.x_min, p_local.y_min }, std::pair{ p_local.x_max, p_local.y_min },
-				 std::pair{ p_local.x_min, p_local.y_max }, std::pair{ p_local.x_max, p_local.y_max } }) {
-		const float wx = p_world.a * x + p_world.c * y + p_world.tx;
-		const float wy = p_world.b * x + p_world.d * y + p_world.ty;
-		r.x_min = std::min(r.x_min, wx);
-		r.x_max = std::max(r.x_max, wx);
-		r.y_min = std::min(r.y_min, wy);
-		r.y_max = std::max(r.y_max, wy);
-	}
-	return r;
-}
-
 SwfRect world_rect(const SwfScene &p_scene, const SwfSceneNode &p_node) {
-	return world_rect(swf_node_local_bounds(p_scene, p_node), p_node.world);
+	return swf_transform_bounds(swf_node_local_bounds(p_scene, p_node), p_node.world);
 }
 
 bool masked_by(const SwfSceneNode &p_node, SwfNodeId p_mask) {
@@ -320,7 +305,9 @@ TEST_SUITE("ui-scene2") {
 		s.scene->take_changes();
 		const SwfRect clip_rect = world_rect(*s.scene, s.at(item + ".mask"));
 		CHECK(clip_rect.width() == doctest::Approx(field_w));
-		const auto text_rect = [&] { return world_rect(txt.text_layout_bounds(), s.at(item + ".txt").world); };
+		const auto text_rect = [&] {
+			return swf_transform_bounds(txt.text_layout_bounds(), s.at(item + ".txt").world);
+		};
 		CHECK(text_rect().x_max > clip_rect.x_max + d * 0.5f);
 		CHECK(masked_by(s.at(item + ".txt"), s.at(item + ".mask").id));
 

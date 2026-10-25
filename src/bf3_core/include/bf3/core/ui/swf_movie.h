@@ -3,6 +3,7 @@
 #include "bf3/core/level/budget.h"
 #include "bf3/core/result.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -106,6 +107,23 @@ struct SwfRect {
 	float height() const { return y_max - y_min; }
 	bool operator==(const SwfRect &) const = default;
 };
+
+constexpr SwfRect swf_transform_bounds(const SwfRect &p_rect, const SwfMatrix &p_m) {
+	SwfRect out;
+	bool first = true;
+	for (const float x : { p_rect.x_min, p_rect.x_max }) {
+		for (const float y : { p_rect.y_min, p_rect.y_max }) {
+			const float sx = p_m.a * x + p_m.c * y + p_m.tx;
+			const float sy = p_m.b * x + p_m.d * y + p_m.ty;
+			out.x_min = first ? sx : std::min(out.x_min, sx);
+			out.x_max = first ? sx : std::max(out.x_max, sx);
+			out.y_min = first ? sy : std::min(out.y_min, sy);
+			out.y_max = first ? sy : std::max(out.y_max, sy);
+			first = false;
+		}
+	}
+	return out;
+}
 
 struct SwfColor {
 	uint8_t r = 0;

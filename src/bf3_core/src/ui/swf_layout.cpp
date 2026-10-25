@@ -188,6 +188,18 @@ std::span<const std::string_view> hud_screen_movies() {
 	return kHudScreens;
 }
 
+const SwfLayoutNode *find_layout_symbol(const SwfLayoutNode &p_node, std::string_view p_symbol) {
+	if (p_node.symbol == p_symbol) {
+		return &p_node;
+	}
+	for (const SwfLayoutNode &c : p_node.children) {
+		if (const SwfLayoutNode *hit = find_layout_symbol(c, p_symbol)) {
+			return hit;
+		}
+	}
+	return nullptr;
+}
+
 Result<SwfLayoutNode> read_layout(const SwfLibrary &p_movies, std::string_view p_movie, const SwfLayoutOptions &p_options, WorkBudget &r_budget) {
 	const std::string name = movie_key(p_movie);
 	Result<std::shared_ptr<const SwfMovie>> movie = p_movies.load(name);

@@ -70,6 +70,7 @@ struct SwfLayoutOptions {
 };
 
 Result<SwfLayoutNode> read_layout(const SwfLibrary &p_movies, std::string_view p_movie, const SwfLayoutOptions &p_options, WorkBudget &r_budget);
+const SwfLayoutNode *find_layout_symbol(const SwfLayoutNode &p_node, std::string_view p_symbol);
 
 struct HudPlacement {
 	std::string movie;

@@ -121,18 +121,6 @@ constexpr ui::SwfRect kDeployFootageBox{ 777.0f, 1177.0f, 136.0f, 526.0f };
 constexpr ui::SwfRect kMenuFootageBox{ 783.0f, 1173.0f, 153.0f, 545.0f };
 constexpr float kOverviewBoxTolerance = 1.5f;
 
-const ui::SwfLayoutNode *find_overview_node(const ui::SwfLayoutNode &p_node) {
-	if (p_node.symbol == kOverviewMapSymbol) {
-		return &p_node;
-	}
-	for (const ui::SwfLayoutNode &c : p_node.children) {
-		if (const ui::SwfLayoutNode *hit = find_overview_node(c)) {
-			return hit;
-		}
-	}
-	return nullptr;
-}
-
 bf3::core::Result<ui::SwfMatrix> screen_overview_placement(std::string_view p_movie) {
 	Bf3UiAssets *assets = Bf3UiAssets::current();
 	if (assets == nullptr || !assets->is_loaded() || assets->movies() == nullptr) {
@@ -144,7 +132,7 @@ bf3::core::Result<ui::SwfMatrix> screen_overview_placement(std::string_view p_mo
 	if (!tree) {
 		return tree.error();
 	}
-	const ui::SwfLayoutNode *n = find_overview_node(*tree);
+	const ui::SwfLayoutNode *n = ui::find_layout_symbol(*tree, kOverviewMapSymbol);
 	if (n == nullptr) {
 		return bf3::core::make_error("no OverviewMap instance in " + std::string(p_movie));
 	}
@@ -177,21 +165,10 @@ std::optional<ui::SwfRect> overview_box(const Bf3SwfView &p_view, std::string_vi
 	if (n == nullptr) {
 		return std::nullopt;
 	}
-	const ui::SwfRect &b = it->local_bounds;
+	const ui::SwfRect w = ui::swf_transform_bounds(it->local_bounds, n->world);
 	const SwfStageFit f = p_view.stage_fit();
-	const ui::SwfMatrix &m = n->world;
-	ui::SwfRect out{ 1e9f, -1e9f, 1e9f, -1e9f };
-	for (const float x : { b.x_min, b.x_max }) {
-		for (const float y : { b.y_min, b.y_max }) {
-			const float sx = float((m.a * x + m.c * y + m.tx) * f.scale_x + f.offset_x);
-			const float sy = float((m.b * x + m.d * y + m.ty) * f.scale_y + f.offset_y);
-			out.x_min = std::min(out.x_min, sx);
-			out.x_max = std::max(out.x_max, sx);
-			out.y_min = std::min(out.y_min, sy);
-			out.y_max = std::max(out.y_max, sy);
-		}
-	}
-	return out;
+	return ui::SwfRect{ float(w.x_min * f.scale_x + f.offset_x), float(w.x_max * f.scale_x + f.offset_x),
+		float(w.y_min * f.scale_y + f.offset_y), float(w.y_max * f.scale_y + f.offset_y) };
 }
 
 bool box_near(const ui::SwfRect &p_a, const ui::SwfRect &p_b) {
