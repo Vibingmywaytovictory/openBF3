@@ -298,7 +298,7 @@ void Bf3LevelSession::tdm_ui_input(const Ref<InputEvent> &p_event) {
 			return;
 		}
 		const Key code = k->get_physical_keycode() != KEY_NONE ? k->get_physical_keycode() : k->get_keycode();
-		const std::string idk = ui_idk_of_key(code);
+		const std::string idk = ui_idk_of_key(code, k->get_location());
 		if (idk.empty()) {
 			return;
 		}

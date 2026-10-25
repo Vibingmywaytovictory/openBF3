@@ -34,6 +34,7 @@ constexpr ActionKey kActions[] = {
 	{ InputAction::FreeCamera, "bf3_free_camera", KEY_F6 },
 	{ InputAction::Up, "bf3_up", KEY_E },
 	{ InputAction::Down, "bf3_down", KEY_Q },
+	{ InputAction::CrouchHold, "bf3_crouch_hold", KEY_NONE },
 };
 static_assert(sizeof(kActions) / sizeof(kActions[0]) == kInputActionCount);
 
@@ -74,12 +75,43 @@ void InputMapper::install_actions() {
 			continue;
 		}
 		map->add_action(a.name);
+		if (a.key == KEY_NONE) {
+			continue;
+		}
 		Ref<InputEventKey> key;
 		key.instantiate();
 		key->set_physical_keycode(a.key);
 		map->action_add_event(a.name, key);
 	}
 	actions_installed_ = true;
+}
+
+size_t InputMapper::rebind(std::string_view p_action, std::span<const std::string> p_inputs) {
+	InputMap *map = InputMap::get_singleton();
+	const StringName name(String::utf8(p_action.data(), int64_t(p_action.size())));
+	if (map->has_action(name)) {
+		map->action_erase_events(name);
+	} else {
+		map->add_action(name);
+	}
+	size_t missed = 0;
+	for (const std::string &input : p_inputs) {
+		if (const Key k = key_of_ui_idk(input); k != KEY_NONE) {
+			Ref<InputEventKey> key;
+			key.instantiate();
+			key->set_physical_keycode(k);
+			key->set_location(key_location_of_ui_idk(input));
+			map->action_add_event(name, key);
+		} else if (const MouseButton b = button_of_ui_idb(input); b != MOUSE_BUTTON_NONE) {
+			Ref<InputEventMouseButton> mb;
+			mb.instantiate();
+			mb->set_button_index(b);
+			map->action_add_event(name, mb);
+		} else {
+			++missed;
+		}
+	}
+	return missed;
 }
 
 void InputMapper::set_capture(bool p_capture) {
@@ -94,7 +126,8 @@ void InputMapper::set_capture(bool p_capture) {
 void InputMapper::look(float p_dx, float p_dy) {
 	ViewAngles &v = free_camera_ ? free_view_ : view_;
 	v.yaw = wrap_yaw(v.yaw - p_dx * mouse_sensitivity);
-	v.pitch = clamp_pitch(v.pitch - p_dy * mouse_sensitivity);
+	const float flip = invert_look && !free_camera_ ? -1.0f : 1.0f;
+	v.pitch = clamp_pitch(v.pitch - p_dy * mouse_sensitivity * flip);
 }
 
 void InputMapper::handle_event(const Ref<InputEvent> &p_event) {
@@ -117,10 +150,9 @@ void InputMapper::handle_event(const Ref<InputEvent> &p_event) {
 	if (const InputEventMouseButton *mb = Object::cast_to<InputEventMouseButton>(p_event.ptr())) {
 		if (mb->is_pressed() && !captured_ && mb->get_button_index() == MOUSE_BUTTON_LEFT) {
 			set_capture(true);
+			return;
 		}
-		return;
-	}
-	if (const InputEventKey *key = Object::cast_to<InputEventKey>(p_event.ptr())) {
+	} else if (const InputEventKey *key = Object::cast_to<InputEventKey>(p_event.ptr())) {
 		if (key->is_pressed() && !key->is_echo() && key->get_keycode() == KEY_ESCAPE) {
 			set_capture(false);
 			return;
@@ -131,6 +163,12 @@ void InputMapper::handle_event(const Ref<InputEvent> &p_event) {
 		if (p_event->is_action_pressed(input_action_name(a), false, false)) {
 			press(a);
 		}
+	}
+	const char *hold = input_action_name(InputAction::CrouchHold);
+	if (!free_camera_ && p_event->is_action_pressed(hold, false, false)) {
+		pose_ = sim::Pose::Crouch;
+	} else if (!free_camera_ && p_event->is_action_released(hold, false) && pose_ == sim::Pose::Crouch) {
+		pose_ = sim::Pose::Stand;
 	}
 }
 
@@ -313,6 +351,7 @@ void InputMapper::enable_weapons(bool p_on) {
 void InputMapper::set_weapons_allowed(bool p_allowed) {
 	if (weapon_.allowed && !p_allowed) {
 		weapon_.held.fill(false);
+		weapon_.ads_latched = false;
 		weapon_.reload_until_ns = 0;
 	}
 	weapon_.allowed = p_allowed;
@@ -423,19 +462,20 @@ bool InputMapper::weapon_handle_event(const Ref<InputEvent> &p_event) {
 		if (!mb->is_pressed() || free_camera_) {
 			return false;
 		}
-		if (mb->get_button_index() == MOUSE_BUTTON_LEFT && weapon_.allowed && !weapon_.swallow_fire) {
-			++weapon_.fire_presses;
+		if (p_event->is_action_pressed(weapon_action_name(WeaponAction::Fire), false, false)) {
+			if (weapon_.allowed && !weapon_.swallow_fire) {
+				++weapon_.fire_presses;
+			}
 		} else if (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP && weapon_.allowed) {
 			cycle_weapon(-1);
 		} else if (mb->get_button_index() == MOUSE_BUTTON_WHEEL_DOWN && weapon_.allowed) {
 			cycle_weapon(1);
 		}
-		return false;
-	}
-	if (const InputEventKey *key = Object::cast_to<InputEventKey>(p_event.ptr())) {
+	} else if (const InputEventKey *key = Object::cast_to<InputEventKey>(p_event.ptr())) {
 		if (key->is_pressed() && !key->is_echo() && key->get_keycode() == KEY_ESCAPE) {
 
 			weapon_.held.fill(false);
+			weapon_.ads_latched = false;
 			weapon_.reload_until_ns = 0;
 			return false;
 		}
@@ -443,8 +483,16 @@ bool InputMapper::weapon_handle_event(const Ref<InputEvent> &p_event) {
 	if (!captured_) {
 		return false;
 	}
+	const bool mouse = Object::cast_to<InputEventMouseButton>(p_event.ptr()) != nullptr;
 	for (const WeaponActionKey &a : kWeaponActions) {
-		if (a.key == KEY_NONE || !p_event->is_action_pressed(a.name, false, false)) {
+		if ((mouse && a.action == WeaponAction::Fire) || !p_event->is_action_pressed(a.name, false, false)) {
+			continue;
+		}
+		if (a.action == WeaponAction::Fire && weapon_.swallow_fire) {
+			continue;
+		}
+		if (a.action == WeaponAction::Ads) {
+			weapon_.ads_latched = !hold_to_zoom && weapon_.allowed && !free_camera_ && !weapon_.ads_latched;
 			continue;
 		}
 		script_press(a.action);
@@ -536,6 +584,7 @@ void InputMapper::weapon_frame(const bf3::host::PresentationFrame &p_frame, uint
 	if (life_ != weapon_.life) {
 
 		weapon_.life = life_;
+		weapon_.ads_latched = false;
 		weapon_.wanted = 0xFF;
 		weapon_.quick = false;
 		weapon_.quick_held = false;
@@ -546,11 +595,15 @@ void InputMapper::weapon_frame(const bf3::host::PresentationFrame &p_frame, uint
 	}
 	if (!captured_) {
 		weapon_.held.fill(false);
+		weapon_.ads_latched = false;
 		return;
 	}
 	Input *in = Input::get_singleton();
 	for (const WeaponActionKey &a : kWeaponActions) {
 		weapon_.held[size_t(a.action)] = in->is_action_pressed(a.name);
+	}
+	if (!hold_to_zoom) {
+		weapon_.held[size_t(WeaponAction::Ads)] = weapon_.ads_latched;
 	}
 	if (weapon_.swallow_fire) {
 		if (weapon_.held[size_t(WeaponAction::Fire)]) {
@@ -739,7 +792,70 @@ bool InputMapper::tdm_handle_event(const Ref<InputEvent> &p_event) {
 	return false;
 }
 
-std::string ui_idk_of_key(godot::Key p_key) {
+namespace {
+
+struct IdkRow {
+	godot::Key key;
+	const char *idk;
+};
+
+constexpr IdkRow kIdkRows[] = {
+	{ godot::KEY_BACKSPACE, "IDK_Backspace" },
+	{ godot::KEY_TAB, "IDK_Tab" },
+	{ godot::KEY_ENTER, "IDK_Enter" },
+	{ godot::KEY_KP_ENTER, "IDK_NumpadEnter" },
+	{ godot::KEY_PAUSE, "IDK_Pause" },
+	{ godot::KEY_CAPSLOCK, "IDK_CapsLock" },
+	{ godot::KEY_ESCAPE, "IDK_Escape" },
+	{ godot::KEY_SPACE, "IDK_Space" },
+	{ godot::KEY_PAGEUP, "IDK_PageUp" },
+	{ godot::KEY_PAGEDOWN, "IDK_PageDown" },
+	{ godot::KEY_END, "IDK_End" },
+	{ godot::KEY_HOME, "IDK_Home" },
+	{ godot::KEY_LEFT, "IDK_ArrowLeft" },
+	{ godot::KEY_UP, "IDK_ArrowUp" },
+	{ godot::KEY_RIGHT, "IDK_ArrowRight" },
+	{ godot::KEY_DOWN, "IDK_ArrowDown" },
+	{ godot::KEY_INSERT, "IDK_Insert" },
+	{ godot::KEY_DELETE, "IDK_Delete" },
+	{ godot::KEY_KP_MULTIPLY, "IDK_Multiply" },
+	{ godot::KEY_KP_ADD, "IDK_Add" },
+	{ godot::KEY_KP_SUBTRACT, "IDK_Subtract" },
+	{ godot::KEY_KP_PERIOD, "IDK_Decimal" },
+	{ godot::KEY_KP_DIVIDE, "IDK_Divide" },
+	{ godot::KEY_SEMICOLON, "IDK_Semicolon" },
+	{ godot::KEY_EQUAL, "IDK_Equals" },
+	{ godot::KEY_COMMA, "IDK_Comma" },
+	{ godot::KEY_MINUS, "IDK_Minus" },
+	{ godot::KEY_PERIOD, "IDK_Period" },
+	{ godot::KEY_SLASH, "IDK_Slash" },
+	{ godot::KEY_QUOTELEFT, "IDK_Grave" },
+	{ godot::KEY_BRACKETLEFT, "IDK_LeftBracket" },
+	{ godot::KEY_BACKSLASH, "IDK_Backslash" },
+	{ godot::KEY_BRACKETRIGHT, "IDK_RightBracket" },
+	{ godot::KEY_APOSTROPHE, "IDK_Apostrophe" },
+};
+
+struct ModifierRow {
+	godot::Key key;
+	const char *left;
+	const char *right;
+};
+
+constexpr ModifierRow kModifierRows[] = {
+	{ godot::KEY_SHIFT, "IDK_LeftShift", "IDK_RightShift" },
+	{ godot::KEY_CTRL, "IDK_LeftCtrl", "IDK_RightCtrl" },
+	{ godot::KEY_ALT, "IDK_LeftAlt", "IDK_RightAlt" },
+};
+
+}
+
+std::string ui_idk_of_key(godot::Key p_key, godot::KeyLocation p_location) {
+	for (const ModifierRow &r : kModifierRows) {
+		if (r.key == p_key) {
+			return p_location == godot::KEY_LOCATION_RIGHT ? r.right : r.left;
+		}
+	}
 	const int64_t k = int64_t(p_key);
 	if (k >= int64_t(godot::KEY_A) && k <= int64_t(godot::KEY_Z)) {
 		return "IDK_" + std::string(1, char('A' + (k - int64_t(godot::KEY_A))));
@@ -753,50 +869,7 @@ std::string ui_idk_of_key(godot::Key p_key) {
 	if (k >= int64_t(godot::KEY_KP_0) && k <= int64_t(godot::KEY_KP_9)) {
 		return "IDK_Numpad" + std::to_string(k - int64_t(godot::KEY_KP_0));
 	}
-	struct Row {
-		godot::Key key;
-		const char *idk;
-	};
-	static constexpr Row kRows[] = {
-		{ godot::KEY_BACKSPACE, "IDK_Backspace" },
-		{ godot::KEY_TAB, "IDK_Tab" },
-		{ godot::KEY_ENTER, "IDK_Enter" },
-		{ godot::KEY_KP_ENTER, "IDK_NumpadEnter" },
-		{ godot::KEY_SHIFT, "IDK_LeftShift" },
-		{ godot::KEY_CTRL, "IDK_LeftCtrl" },
-		{ godot::KEY_ALT, "IDK_LeftAlt" },
-		{ godot::KEY_PAUSE, "IDK_Pause" },
-		{ godot::KEY_CAPSLOCK, "IDK_CapsLock" },
-		{ godot::KEY_ESCAPE, "IDK_Escape" },
-		{ godot::KEY_SPACE, "IDK_Space" },
-		{ godot::KEY_PAGEUP, "IDK_PageUp" },
-		{ godot::KEY_PAGEDOWN, "IDK_PageDown" },
-		{ godot::KEY_END, "IDK_End" },
-		{ godot::KEY_HOME, "IDK_Home" },
-		{ godot::KEY_LEFT, "IDK_ArrowLeft" },
-		{ godot::KEY_UP, "IDK_ArrowUp" },
-		{ godot::KEY_RIGHT, "IDK_ArrowRight" },
-		{ godot::KEY_DOWN, "IDK_ArrowDown" },
-		{ godot::KEY_INSERT, "IDK_Insert" },
-		{ godot::KEY_DELETE, "IDK_Delete" },
-		{ godot::KEY_KP_MULTIPLY, "IDK_Multiply" },
-		{ godot::KEY_KP_ADD, "IDK_Add" },
-		{ godot::KEY_KP_SUBTRACT, "IDK_Subtract" },
-		{ godot::KEY_KP_PERIOD, "IDK_Decimal" },
-		{ godot::KEY_KP_DIVIDE, "IDK_Divide" },
-		{ godot::KEY_SEMICOLON, "IDK_Semicolon" },
-		{ godot::KEY_EQUAL, "IDK_Equals" },
-		{ godot::KEY_COMMA, "IDK_Comma" },
-		{ godot::KEY_MINUS, "IDK_Minus" },
-		{ godot::KEY_PERIOD, "IDK_Period" },
-		{ godot::KEY_SLASH, "IDK_Slash" },
-		{ godot::KEY_QUOTELEFT, "IDK_Grave" },
-		{ godot::KEY_BRACKETLEFT, "IDK_LeftBracket" },
-		{ godot::KEY_BACKSLASH, "IDK_Backslash" },
-		{ godot::KEY_BRACKETRIGHT, "IDK_RightBracket" },
-		{ godot::KEY_APOSTROPHE, "IDK_Apostrophe" },
-	};
-	for (const Row &r : kRows) {
+	for (const IdkRow &r : kIdkRows) {
 		if (r.key == p_key) {
 			return r.idk;
 		}
@@ -815,5 +888,62 @@ std::string_view ui_idb_of_button(godot::MouseButton p_button) {
 		default:
 			return {};
 	}
+}
+
+godot::Key key_of_ui_idk(std::string_view p_idk) {
+	if (!p_idk.starts_with("IDK_")) {
+		return godot::KEY_NONE;
+	}
+	const std::string_view n = p_idk.substr(4);
+	const auto digits = [](std::string_view p_text) {
+		return !p_text.empty() && p_text.size() <= 2 &&
+				std::all_of(p_text.begin(), p_text.end(), [](char c) { return c >= '0' && c <= '9'; });
+	};
+	if (n.size() == 1 && n[0] >= 'A' && n[0] <= 'Z') {
+		return godot::Key(int64_t(godot::KEY_A) + (n[0] - 'A'));
+	}
+	if (n.size() == 1 && n[0] >= '0' && n[0] <= '9') {
+		return godot::Key(int64_t(godot::KEY_0) + (n[0] - '0'));
+	}
+	if (n.size() >= 2 && n[0] == 'F' && digits(n.substr(1))) {
+		const int f = std::stoi(std::string(n.substr(1)));
+		return f >= 1 && f <= 15 ? godot::Key(int64_t(godot::KEY_F1) + (f - 1)) : godot::KEY_NONE;
+	}
+	if (n.size() == 7 && n.starts_with("Numpad") && digits(n.substr(6))) {
+		return godot::Key(int64_t(godot::KEY_KP_0) + (n[6] - '0'));
+	}
+	for (const IdkRow &r : kIdkRows) {
+		if (p_idk == r.idk) {
+			return r.key;
+		}
+	}
+	for (const ModifierRow &r : kModifierRows) {
+		if (p_idk == r.left || p_idk == r.right) {
+			return r.key;
+		}
+	}
+	return godot::KEY_NONE;
+}
+
+godot::KeyLocation key_location_of_ui_idk(std::string_view p_idk) {
+	for (const ModifierRow &r : kModifierRows) {
+		if (p_idk == r.left) {
+			return godot::KEY_LOCATION_LEFT;
+		}
+		if (p_idk == r.right) {
+			return godot::KEY_LOCATION_RIGHT;
+		}
+	}
+	return godot::KEY_LOCATION_UNSPECIFIED;
+}
+
+godot::MouseButton button_of_ui_idb(std::string_view p_idb) {
+	for (const godot::MouseButton b :
+			{ godot::MOUSE_BUTTON_LEFT, godot::MOUSE_BUTTON_RIGHT, godot::MOUSE_BUTTON_MIDDLE }) {
+		if (p_idb == ui_idb_of_button(b)) {
+			return b;
+		}
+	}
+	return godot::MOUSE_BUTTON_NONE;
 }
 }

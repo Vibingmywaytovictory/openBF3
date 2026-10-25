@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -27,14 +28,20 @@ enum class InputAction : uint8_t {
 	FreeCamera,
 	Up,
 	Down,
+	CrouchHold,
 	Count,
 };
 inline constexpr size_t kInputActionCount = size_t(InputAction::Count);
 
 const char *input_action_name(InputAction p_action);
 
-std::string ui_idk_of_key(godot::Key p_key);
+inline constexpr float kBaseLookRadiansPerCount = 0.0022f;
+
+std::string ui_idk_of_key(godot::Key p_key, godot::KeyLocation p_location = godot::KEY_LOCATION_UNSPECIFIED);
 std::string_view ui_idb_of_button(godot::MouseButton p_button);
+godot::Key key_of_ui_idk(std::string_view p_idk);
+godot::KeyLocation key_location_of_ui_idk(std::string_view p_idk);
+godot::MouseButton button_of_ui_idb(std::string_view p_idb);
 
 struct ViewAngles {
 	float yaw = 0.0f;
@@ -48,6 +55,7 @@ public:
 	static float clamp_pitch(float p_pitch);
 
 	void install_actions();
+	size_t rebind(std::string_view p_action, std::span<const std::string> p_inputs);
 
 	void handle_event(const godot::Ref<godot::InputEvent> &p_event);
 
@@ -81,7 +89,10 @@ public:
 	godot::Vector3 free_move() const;
 	float free_speed_factor() const { return held(InputAction::Sprint) ? 6.0f : 1.0f; }
 
-	float mouse_sensitivity = 0.0022f;
+	float base_sensitivity = kBaseLookRadiansPerCount;
+	float mouse_sensitivity = kBaseLookRadiansPerCount;
+	bool invert_look = false;
+	bool hold_to_zoom = true;
 
 private:
 	void press(InputAction p_action);
@@ -142,6 +153,7 @@ private:
 		bool installed = false;
 		bool allowed = false;
 		bool swallow_fire = false;
+		bool ads_latched = false;
 		std::array<bool, kWeaponActionCount> held{};
 		uint32_t fire_presses = 0;
 		uint8_t wanted = 0xFF;
