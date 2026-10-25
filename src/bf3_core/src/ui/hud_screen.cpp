@@ -875,6 +875,24 @@ void HudScreen::apply_tween(const HudTween &p_tween, float p_value) {
 	}
 }
 
+void HudScreen::set_focus(bool p_focused) {
+	if (focused_ == p_focused) {
+		return;
+	}
+	focused_ = p_focused;
+	for (size_t i = 0; i < widgets_.size(); ++i) {
+		HudWidgetState &w = *widgets_[i];
+		if (w.retired || w.controller == nullptr || w.host == nullptr) {
+			continue;
+		}
+		if (p_focused) {
+			w.controller->focus_gained(*w.host);
+		} else {
+			w.controller->focus_lost(*w.host);
+		}
+	}
+}
+
 void HudScreen::advance(double p_seconds) {
 	if (!std::isfinite(p_seconds) || p_seconds < 0.0) {
 		return;

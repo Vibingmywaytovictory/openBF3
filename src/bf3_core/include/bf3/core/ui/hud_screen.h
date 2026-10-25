@@ -332,6 +332,8 @@ public:
 	void advance(double p_seconds);
 	void set_client(HudClientState p_client);
 	void set_stage_rects(const HudStageRects &p_rects);
+	void set_focus(bool p_focused);
+	bool has_focus() const { return focused_; }
 	const HudClientState &client() const { return client_; }
 	const HudStageRects &stage_rects() const { return rects_; }
 
@@ -388,6 +390,7 @@ private:
 	std::vector<HudTween> tweens_;
 	HudScreenStats stats_;
 	bool initialized_ = false;
+	bool focused_ = false;
 };
 
 }

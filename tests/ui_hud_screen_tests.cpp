@@ -2073,13 +2073,19 @@ TEST_SUITE("ui-hud-screen") {
 				CHECK_FALSE(c.mouse_release(h, mouse));
 				c.focus_lost(h);
 			}
+			CHECK_FALSE(s.hud->has_focus());
+			s.hud->set_focus(true);
+			CHECK(s.hud->has_focus());
+			s.hud->set_focus(true);
+			s.hud->set_focus(false);
+			CHECK_FALSE(s.hud->has_focus());
 			CHECK(s.scene->take_changes().empty());
 			CHECK(s.hud->stats().updates == before.updates);
 			CHECK(s.hud->stats().as2.failed_ops == before.as2.failed_ops);
 			CHECK(s.hud->stats().as2.missing_paths == before.as2.missing_paths);
 		}
 		CHECK(controllers > 0);
-		row("input_hooks", std::to_string(controllers) + " controllers over the 4 in-round screens: concept, key, mouse and focus hooks unhandled, no scene change");
+		row("input_hooks", std::to_string(controllers) + " controllers over the 4 in-round screens: concept, key, mouse and focus hooks unhandled, screen focus given and taken back, no scene change");
 	}
 
 	TEST_CASE("hud screen: install unchanged") {
