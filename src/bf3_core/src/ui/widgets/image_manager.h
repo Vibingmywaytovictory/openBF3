@@ -14,6 +14,7 @@ class ImageManagerWidget final : public HudWidgetController {
 public:
 	using Callback = std::function<void(std::string_view p_message, ImageManagerWidget &r_manager)>;
 
+	void construct(HudWidgetHost &r_host) override;
 	void on_clip_load(HudWidgetHost &r_host) override;
 	void initialize(HudWidgetHost &r_host, const HudWidgetInit &p_init) override;
 	void update(HudWidgetHost &r_host, std::string_view p_key, const As2Value &p_value) override;

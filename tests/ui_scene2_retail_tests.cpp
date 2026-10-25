@@ -158,6 +158,33 @@ TEST_SUITE("ui-scene2") {
 		CHECK(s.hud->stats().as2.failed_ops == 0);
 	}
 
+	TEST_CASE("ImageManager: an attachMovie'd ImageManager is hidden by its constructor until an image loads") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		RetailScreen s = open_retail_screen(*r, kKillScreenPartition);
+		CHECK_FALSE(s.at(kWeaponImage).visible);
+		HudWidgetHost &weapon_host = *s.hud->host(kWeaponImage);
+		const As2Clip killed(s.scene.get(), "instance1.KillCam_01.killed");
+		const As2Clip made = weapon_host.attach_movie(killed, "ImageManager", "ImageManager", 3);
+		REQUIRE(made.exists());
+		auto *nested = dynamic_cast<ImageManagerWidget *>(s.hud->controller(made.path()));
+		REQUIRE(nested != nullptr);
+		HudWidgetHost &host = *s.hud->host(made.path());
+		CHECK_FALSE(made.visible());
+		REQUIRE(host.clip("spinnerMc").exists());
+		CHECK(host.clip("spinnerMc").visible());
+		REQUIRE(nested->holder().exists());
+		nested->update_image_url(host, kDogTagLeft);
+		CHECK(made.visible());
+		CHECK(nested->currently_loading());
+		s.hud->advance(1.0 / 30.0);
+		CHECK(nested->is_loaded());
+		CHECK(s.at(made.path() + ".imgHolder").image == "ui/art/persistence/dogtag/inactivetag_left");
+		CHECK(s.hud->stats().as2.failed_ops == 0);
+	}
+
 	TEST_CASE("DogTagPair on the retail movie: the tags sit at 19,-65 rot 8 and 190,-45 rot -5, and swapDepths raises the advanced tag") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {

@@ -4,6 +4,10 @@
 
 namespace bf3::core::ui {
 
+void ImageManagerWidget::construct(HudWidgetHost &r_host) {
+	r_host.self().set_visible(false);
+}
+
 void ImageManagerWidget::on_clip_load(HudWidgetHost &r_host) {
 	const As2Clip &self = r_host.self();
 	holder_ = r_host.create_empty_movie_clip(self, "imgHolder", self.next_highest_depth());
