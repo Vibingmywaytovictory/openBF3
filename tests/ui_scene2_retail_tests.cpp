@@ -398,4 +398,50 @@ TEST_SUITE("ui-scene2") {
 		CHECK(weapon->width() == doctest::Approx(weapon->field().x() + weapon->field().text_width()));
 		CHECK(s.hud->stats().as2.failed_ops == 0);
 	}
+
+	TEST_CASE("textAutoSize fit on SpawnTimer's DEPLOY field: swf_text's GFx fit grows the 32 px label to fill the field and shrinks a long one, shrink only shrinks") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		Result<SwfScene> opened = SwfScene::open(*r->lib, "ui/assets/spawntimer");
+		REQUIRE(opened.ok());
+		SwfScene &s = *opened;
+		As2Stats stats;
+		const As2Clip txt(&s, "spawnTimer.deploy.textDeploy.txt", &stats, r->fonts.get());
+		REQUIRE(txt.exists());
+		const auto layout = [&] {
+			WorkBudget budget(kSwfTextBudgetUnits);
+			Result<SwfTextLayout> l = swf_layout_node_text(*r->fonts, *txt.node(), budget);
+			REQUIRE(l.ok());
+			return *l;
+		};
+		const SwfRect field = swf_node_text_bounds(*txt.node());
+		const float inner_w = field.width() - 2.0f * kSwfTextGutter;
+		const float inner_h = field.height() - 2.0f * kSwfTextGutter;
+		txt.set_text("DEPLOY");
+		const SwfTextLayout plain = layout();
+		CHECK(plain.scale == 1.0f);
+		REQUIRE(plain.text_width < inner_w);
+		txt.set_text_fit(SwfTextFit::Shrink);
+		CHECK(layout().scale == 1.0f);
+		txt.set_text_fit(SwfTextFit::Fit);
+		const SwfTextLayout grown = layout();
+		CHECK(grown.scale > 1.0f);
+		CHECK(grown.text_width <= inner_w + 1e-3f);
+		CHECK(grown.text_height <= inner_h + 1e-3f);
+		CHECK((grown.text_width >= inner_w * 0.99f || grown.text_height >= inner_h * 0.99f));
+		CHECK(grown.text_width == doctest::Approx(plain.text_width * grown.scale).epsilon(0.02));
+
+		txt.set_text("DEPLOY DEPLOY DEPLOY DEPLOY DEPLOY");
+		const SwfTextLayout fit_long = layout();
+		CHECK(fit_long.scale < 1.0f);
+		CHECK(fit_long.text_width <= inner_w + 1e-3f);
+		CHECK(fit_long.text_width >= inner_w * 0.99f);
+		txt.set_text_fit(SwfTextFit::Shrink);
+		CHECK(layout().scale == doctest::Approx(fit_long.scale).epsilon(0.001));
+		txt.set_text_fit(SwfTextFit::None);
+		CHECK(layout().scale == 1.0f);
+		CHECK(stats.failed_ops == 0);
+	}
 }

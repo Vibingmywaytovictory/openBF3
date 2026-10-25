@@ -523,6 +523,16 @@ void As2Clip::set_auto_size(SwfTextAutoSize p_mode) const {
 	note(scene_->set_text_options(path_, o));
 }
 
+void As2Clip::set_text_fit(SwfTextFit p_mode) const {
+	const SwfSceneNode *n = mut();
+	if (n == nullptr || n->kind != SwfNodeKind::EditText) {
+		return;
+	}
+	SwfTextOptions o = n->text_options;
+	o.fit = p_mode;
+	note(scene_->set_text_options(path_, o));
+}
+
 float As2Clip::text_width() const {
 	const std::optional<SwfTextLayout> l = layout();
 	return l ? l->text_width : 0.0f;

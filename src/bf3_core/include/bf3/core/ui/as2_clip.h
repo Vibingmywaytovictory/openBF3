@@ -94,6 +94,7 @@ public:
 	void set_filters(std::vector<SwfFilter> p_filters) const;
 	void set_auto_size(bool p_on) const;
 	void set_auto_size(SwfTextAutoSize p_mode) const;
+	void set_text_fit(SwfTextFit p_mode) const;
 	float text_width() const;
 	float text_height() const;
 	SwfRect text_layout_bounds() const;
