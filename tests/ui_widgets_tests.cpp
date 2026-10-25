@@ -769,6 +769,43 @@ TEST_SUITE("ui-widgets") {
 		CHECK_FALSE(chat_self.visible());
 	}
 
+	TEST_CASE("widgets: input listener fires Tab and Com events") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		ScreenRig b;
+		open_screen(*r, b, "ui/flow/screen/tablistenerscreen");
+		const std::string path = std::string(kHudScreenInstance) + ".InputListener_01";
+		const HudWidgetState *w = b.s.hud->widget(path);
+		REQUIRE(w != nullptr);
+		CHECK(w->class_name == "Widget.Input.InputListener");
+		CHECK_FALSE(b.clip("InputListener_01").visible());
+		b.s.hud->focus_widget(path);
+		b.s.hud->input_concept(int32_t(UiInputConcept::Tab), true);
+		REQUIRE(b.events.size() == 1u);
+		CHECK(b.events[0].index == 1);
+		CHECK(b.events[0].query == "UIWidgetEventID_OnItemPressed");
+		b.s.hud->input_concept(int32_t(UiInputConcept::Tab), false);
+		REQUIRE(b.events.size() == 2u);
+		CHECK(b.events[1].index == 2);
+		CHECK(b.events[1].query == "UIWidgetEventID_OnItemReleased");
+		b.s.hud->input_concept(int32_t(UiInputConcept::Com), true);
+		CHECK(b.events.size() == 2u);
+		b.s.hud->advance(0.1);
+		CHECK(b.events.size() == 2u);
+		b.s.hud->advance(0.15);
+		REQUIRE(b.events.size() == 3u);
+		CHECK(b.events[2].index == 3);
+		CHECK(b.events[2].query == "UIWidgetEventID_OnComPressed");
+		b.s.hud->advance(1.0);
+		CHECK(b.events.size() == 3u);
+		b.s.hud->input_concept(int32_t(UiInputConcept::Com), false);
+		REQUIRE(b.events.size() == 4u);
+		CHECK(b.events[3].index == 4);
+		CHECK(b.events[3].query == "UIWidgetEventID_OnComReleased");
+	}
+
 	TEST_CASE("widgets: install unchanged") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {
