@@ -254,6 +254,7 @@ int decode_reencode(std::span<const uint8_t> p_bytes) {
 		case net::MessageType::MatchState:
 		case net::MessageType::PlayerList:
 		case net::MessageType::SpawnRequest:
+		case net::MessageType::SuicideRequest:
 			return decode_reencode_v2(*type, p_bytes);
 	}
 	return -1;
@@ -621,7 +622,7 @@ TEST_SUITE("net-proto") {
 			const uint8_t b = uint8_t(t);
 			known += net::peek_type(std::span<const uint8_t>(&b, 1)).has_value() ? 1 : 0;
 		}
-		CHECK(known == 18);
+		CHECK(known == 19);
 		const uint8_t s = 1;
 		CHECK(net::peek_type(std::span<const uint8_t>(&s, 1)) == net::MessageType::Snapshot);
 	}
@@ -3145,6 +3146,11 @@ int decode_reencode_v3(net::MessageType p_type, std::span<const uint8_t> p_bytes
 			auto b = net::decode_spawn_request(net::encode_spawn_request(*a));
 			return b && b->kit == a->kit && b->spawn_choice == a->spawn_choice ? 1 : 0;
 		}
+		case net::MessageType::SuicideRequest:
+			return net::decode_suicide_request(p_bytes) &&
+							net::encode_suicide_request() == std::vector<uint8_t>(p_bytes.begin(), p_bytes.end())
+					? 1
+					: -1;
 		default:
 			return -1;
 	}
@@ -3167,6 +3173,7 @@ void append_v3_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>>
 	delta.removed = { 0, 7, 40 };
 	r_out.emplace_back("PlayerList (delta)", net::encode_player_list(delta));
 	r_out.emplace_back("SpawnRequest", net::encode_spawn_request({ 2, 0 }));
+	r_out.emplace_back("SuicideRequest", net::encode_suicide_request());
 	r_out.emplace_back("CombatEvents (v3)", net::encode_combat_events(sample_combat_v3(rng, 88888, 2, 3, 1, 2), kFrame));
 	net::MatchInfo mi;
 	mi.level = "MP_Subway";
@@ -3764,7 +3771,7 @@ TEST_SUITE("net-proto") {
 			types.insert(uint8_t(*type));
 			samples.push_back({ name, std::move(bytes) });
 		}
-		CHECK(types.size() == 18);
+		CHECK(types.size() == 19);
 		static constexpr GoldenPin kPins[] = {
 			{ "Snapshot", 367, 0xa435d4ace31cf825ull, 0 },
 			{ "Snapshot (no own)", 20, 0xa85c8a910ea8826bull, 0 },
@@ -3791,6 +3798,7 @@ TEST_SUITE("net-proto") {
 			{ "PlayerList (full)", 207, 0x68dd8ae5402d6955ull, 0 },
 			{ "PlayerList (delta)", 49, 0x4693a47620178101ull, 0 },
 			{ "SpawnRequest", 3, 0xb1d34918e6b14818ull, 0 },
+			{ "SuicideRequest", 1, 0xaf63d14c8601d9dbull, 0 },
 			{ "CombatEvents (v3)", 137, 0x40d29b14535383d7ull, 0 },
 			{ "MatchInfo (v3)", 82, 0x9f7d6df8af0ee7e8ull, 0 },
 			{ "Spawned (v3 revived)", 86, 0x45a73c3868a4d948ull, 0 },

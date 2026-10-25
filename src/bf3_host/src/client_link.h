@@ -47,6 +47,7 @@ public:
 	void queue_debug(const net::DebugRequest &p_request);
 	void queue_kit_select(const net::KitSelect &p_select);
 	void queue_spawn_request(uint8_t p_kit);
+	void queue_suicide_request();
 	void report(net::DebugReport p_report);
 	bool take_report(net::DebugReport &r_report);
 	void send_requests(uint64_t p_now);
@@ -76,6 +77,7 @@ private:
 	std::deque<net::DebugRequest> debug_out_;
 	std::deque<net::KitSelect> kit_out_;
 	std::deque<uint8_t> spawn_out_;
+	uint32_t suicide_out_ = 0;
 	std::deque<net::DebugReport> reports_;
 
 	uint64_t snapshots_received_ = 0;

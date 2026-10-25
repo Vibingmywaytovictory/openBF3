@@ -41,6 +41,8 @@ public:
 	sim::Command restrict(const sim::Command &p_command) const;
 	size_t choose_spawn(size_t p_slot, std::span<const sim::SpawnPoint> p_points, const ServerView &p_view, sim::Tick p_tick) const;
 	void request_spawn(size_t p_slot, uint8_t p_kit, uint8_t p_spawn_choice, sim::Tick p_tick);
+	void request_suicide(size_t p_slot);
+	bool take_suicide(size_t p_slot);
 
 	void describe(net::MatchInfo &r_message) const;
 	MatchBroadcast join_messages(sim::Tick p_tick) const;

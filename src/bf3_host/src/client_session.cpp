@@ -195,6 +195,10 @@ void ClientSession::send_spawn_request(uint8_t p_kit) {
 	impl_->loop.send_spawn_request(p_kit);
 }
 
+void ClientSession::send_suicide_request() {
+	impl_->loop.send_suicide_request();
+}
+
 size_t ClientSession::stop_all() {
 	return g_registry.for_each_pinned([](ClientSession *p_session) { p_session->stop(); });
 }

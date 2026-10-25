@@ -62,6 +62,7 @@ enum class MessageType : uint8_t {
 	MatchState = 25,
 	PlayerList = 26,
 	SpawnRequest = 27,
+	SuicideRequest = 28,
 };
 
 std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram);
@@ -488,6 +489,8 @@ struct SpawnRequest {
 	uint8_t spawn_choice = 0;
 };
 
+struct SuicideRequest {};
+
 std::vector<uint8_t> encode_match_state(const MatchState &p_message);
 core::Result<MatchState> decode_match_state(std::span<const uint8_t> p_datagram);
 
@@ -495,6 +498,8 @@ std::vector<uint8_t> encode_player_list(const PlayerList &p_message, size_t *r_c
 core::Result<PlayerList> decode_player_list(std::span<const uint8_t> p_datagram);
 std::vector<uint8_t> encode_spawn_request(const SpawnRequest &p_message);
 core::Result<SpawnRequest> decode_spawn_request(std::span<const uint8_t> p_datagram);
+std::vector<uint8_t> encode_suicide_request();
+core::Result<SuicideRequest> decode_suicide_request(std::span<const uint8_t> p_datagram);
 
 bool set_player_name(PlayerRow &r_row, std::string_view p_name);
 std::string_view player_name(const PlayerRow &p_row);

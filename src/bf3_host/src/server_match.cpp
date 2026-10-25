@@ -68,6 +68,14 @@ void MatchControl::request_spawn(size_t p_slot, uint8_t p_kit, uint8_t p_spawn_c
 	(void)rules_->request_spawn(uint8_t(p_slot), p_kit, p_spawn_choice, p_tick);
 }
 
+void MatchControl::request_suicide(size_t p_slot) {
+	(void)rules_->request_suicide(uint8_t(p_slot));
+}
+
+bool MatchControl::take_suicide(size_t p_slot) {
+	return on() && rules_->take_suicide(uint8_t(p_slot));
+}
+
 void MatchControl::describe(net::MatchInfo &r_message) const {
 	if (!on()) {
 		return;

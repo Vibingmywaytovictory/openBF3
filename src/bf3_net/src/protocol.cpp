@@ -1404,6 +1404,8 @@ void serialize(A &r_a, M &r_m) {
 	r_a.bits(r_m.spawn_choice, 8);
 }
 
+template <class A, MaybeConst<SuicideRequest> M> void serialize(A &, M &) {}
+
 struct Framing {
 	MessageType type;
 	const char *what;
@@ -1464,6 +1466,7 @@ std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram) {
 		case MessageType::MatchState:
 		case MessageType::PlayerList:
 		case MessageType::SpawnRequest:
+		case MessageType::SuicideRequest:
 			return MessageType(p_datagram[0]);
 	}
 	return std::nullopt;
@@ -1854,6 +1857,14 @@ std::vector<uint8_t> encode_spawn_request(const SpawnRequest &p_message) {
 
 core::Result<SpawnRequest> decode_spawn_request(std::span<const uint8_t> p_datagram) {
 	return decode_as<SpawnRequest>(p_datagram, { MessageType::SpawnRequest, "SpawnRequest" });
+}
+
+std::vector<uint8_t> encode_suicide_request() {
+	return encode_as(MessageType::SuicideRequest, kMaxReliableBytes, SuicideRequest{});
+}
+
+core::Result<SuicideRequest> decode_suicide_request(std::span<const uint8_t> p_datagram) {
+	return decode_as<SuicideRequest>(p_datagram, { MessageType::SuicideRequest, "SuicideRequest" });
 }
 
 bool set_player_name(PlayerRow &r_row, std::string_view p_name) {

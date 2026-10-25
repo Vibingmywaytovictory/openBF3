@@ -41,6 +41,7 @@ public:
 	void take_own_test_samples(std::vector<OwnTestSample> &r_samples);
 	void send_kit_select(const net::KitSelect &p_select);
 	void send_spawn_request(uint8_t p_kit);
+	void send_suicide_request();
 
 private:
 	ClientSessionConfig config;

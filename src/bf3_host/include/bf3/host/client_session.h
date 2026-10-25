@@ -255,6 +255,7 @@ public:
 	void send_kit_select(const net::KitSelect &p_select);
 
 	void send_spawn_request(uint8_t p_kit);
+	void send_suicide_request();
 
 	static size_t stop_all();
 

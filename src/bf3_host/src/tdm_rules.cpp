@@ -273,6 +273,7 @@ struct TdmRules::Impl {
 		uint32_t last_damage = 0;
 		bool damaged = false;
 		bool pending_spawn = false;
+		bool suicide = false;
 		uint32_t last_request = UINT32_MAX;
 		int64_t shot_cursor = -1;
 		bool corpse_valid = false;
@@ -690,6 +691,7 @@ void TdmRules::on_spawned(uint8_t p_slot, uint32_t p_tick) {
 	s.alive = true;
 	++s.life;
 	s.pending_spawn = false;
+	s.suicide = false;
 	s.corpse_valid = false;
 	s.corpse_fresh = false;
 	s.revive_until = 0;
@@ -703,6 +705,33 @@ void TdmRules::on_spawned(uint8_t p_slot, uint32_t p_tick) {
 			m.fault(st.error());
 		}
 	}
+}
+
+bool TdmRules::request_suicide(uint8_t p_slot) {
+	Impl &m = *impl_;
+	Impl::Slot *s = p_slot < m.slots.size() ? &m.slots[p_slot] : nullptr;
+	const lg::RoundPhase phase = m.natives ? m.natives->phase() : lg::RoundPhase::Restarting;
+	const bool open = phase == lg::RoundPhase::PreRound || phase == lg::RoundPhase::InRound;
+	if (s == nullptr || !s->connected || !s->alive || !open || m.faulted) {
+		++m.stats.suicides_refused;
+		return false;
+	}
+	s->suicide = true;
+	return true;
+}
+
+bool TdmRules::take_suicide(uint8_t p_slot) {
+	Impl &m = *impl_;
+	Impl::Slot *s = p_slot < m.slots.size() ? &m.slots[p_slot] : nullptr;
+	if (s == nullptr || !s->suicide) {
+		return false;
+	}
+	s->suicide = false;
+	if (!s->alive) {
+		return false;
+	}
+	++m.stats.suicides;
+	return true;
 }
 
 SpawnRefusal TdmRules::request_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_spawn_choice, uint32_t p_tick) {

@@ -352,4 +352,7 @@ void ClientLoop::send_spawn_request(uint8_t p_kit) {
 	link.queue_spawn_request(p_kit);
 }
 
+void ClientLoop::send_suicide_request() {
+	link.queue_suicide_request();
+}
 }

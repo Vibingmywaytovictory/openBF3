@@ -118,6 +118,7 @@ struct RulesStats {
 	uint64_t spawns_scored = 0;
 	uint64_t spawns_enemy_within_10m = 0;
 	uint64_t runtime_faults = 0;
+	uint64_t suicides = 0, suicides_refused = 0;
 };
 static_assert(std::is_trivially_copyable_v<RulesStats>);
 
@@ -144,6 +145,8 @@ public:
 	void on_disconnect(uint8_t p_slot);
 	void on_spawned(uint8_t p_slot, uint32_t p_tick);
 	SpawnRefusal request_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_spawn_choice, uint32_t p_tick);
+	bool request_suicide(uint8_t p_slot);
+	bool take_suicide(uint8_t p_slot);
 
 	core::Status step(uint32_t p_tick, const ServerView &p_view, const Gunplay &p_gunplay, std::span<sim::SoldierState> r_states,
 			std::vector<RulesOrder> &r_orders);

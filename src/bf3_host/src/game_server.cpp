@@ -202,6 +202,9 @@ struct GameServer::Impl {
 			if (!s.dummy) {
 				soldiers.command(i, match.restrict(body.last));
 			}
+			if (was_alive && !s.dummy && match.take_suicide(i)) {
+				soldiers.kill(i);
+			}
 			soldiers.step(i, motor);
 			++times.motor_steps;
 			if (was_alive && !s.dummy) {
@@ -301,6 +304,14 @@ struct GameServer::Impl {
 			return;
 		}
 		match.request_spawn(size_t(p_slot), r->kit, r->spawn_choice, tick + 1u);
+	}
+
+	void receive_suicide_request(int p_slot, std::span<const uint8_t> p_datagram) {
+		if (!net::decode_suicide_request(p_datagram) || p_slot < 0 || size_t(p_slot) >= slots.size() || !match.on()) {
+			++bad_datagrams;
+			return;
+		}
+		match.request_suicide(size_t(p_slot));
 	}
 };
 
@@ -443,6 +454,9 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 			return;
 		case net::MessageType::SpawnRequest:
 			m.receive_spawn_request(at, p_datagram);
+			return;
+		case net::MessageType::SuicideRequest:
+			m.receive_suicide_request(at, p_datagram);
 			return;
 		default:
 			++m.bad_datagrams;

@@ -181,6 +181,11 @@ void ClientLink::queue_spawn_request(uint8_t p_kit) {
 	spawn_out_.push_back(p_kit);
 }
 
+void ClientLink::queue_suicide_request() {
+	std::lock_guard lock(requests_mutex_);
+	suicide_out_ = 1;
+}
+
 void ClientLink::report(net::DebugReport p_report) {
 	std::lock_guard lock(requests_mutex_);
 	reports_.push_back(std::move(p_report));
@@ -224,6 +229,14 @@ void ClientLink::send_requests(uint64_t p_now) {
 	for (const uint8_t kit : spawns) {
 		submit(net::kChannelReliable, net::encode_spawn_request({ kit, 0 }), p_now);
 		++spawn_requests_;
+	}
+	uint32_t suicides = 0;
+	{
+		std::lock_guard lock(requests_mutex_);
+		std::swap(suicides, suicide_out_);
+	}
+	if (suicides != 0) {
+		submit(net::kChannelReliable, net::encode_suicide_request(), p_now);
 	}
 }
 

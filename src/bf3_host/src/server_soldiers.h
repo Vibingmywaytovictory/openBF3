@@ -53,6 +53,7 @@ public:
 
 	void command(size_t p_slot, const sim::Command &p_command) { soldiers_[p_slot].last = p_command; }
 	void step(size_t p_slot, const sim::SoldierMotor &p_motor) { p_motor.step(soldiers_[p_slot].state, soldiers_[p_slot].last); }
+	void kill(size_t p_slot) { soldiers_[p_slot].state.health = 0.0f; }
 
 	void take_rules(std::span<const sim::SoldierState> p_states, const SlotTable &p_slots) {
 		for (size_t i = 0; i < soldiers_.size(); ++i) {
