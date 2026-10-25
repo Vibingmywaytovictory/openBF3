@@ -109,6 +109,11 @@ double SettingsStore::default_value(std::string_view p_option) const {
 	return i < defaults_.numbers.size() ? defaults_.numbers[i] : 0.0;
 }
 
+double SettingsStore::applied_value(std::string_view p_option) const {
+	const size_t i = index_of(p_option);
+	return i < applied_video_.numbers.size() ? applied_video_.numbers[i] : 0.0;
+}
+
 const std::string &SettingsStore::text(std::string_view p_option) const {
 	static const std::string kEmpty;
 	const size_t i = index_of(p_option);
@@ -217,6 +222,7 @@ bool SettingsStore::video_settings_changed() const {
 void SettingsStore::save() {
 	saved_ = live_;
 	saved_bindings_ = bindings_;
+	++saved_revision_;
 }
 
 void SettingsStore::revert() {
@@ -237,6 +243,7 @@ void SettingsStore::reset_to_defaults() {
 void SettingsStore::apply_video() {
 	previous_video_ = applied_video_;
 	applied_video_ = live_;
+	++revision_;
 }
 
 void SettingsStore::keep_video() {
@@ -248,6 +255,7 @@ void SettingsStore::revert_video() {
 	copy_video(previous_video_, live_);
 	if (saved_new) {
 		copy_video(previous_video_, saved_);
+		++saved_revision_;
 	}
 	applied_video_ = live_;
 	previous_video_ = live_;

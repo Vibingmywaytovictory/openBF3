@@ -39,6 +39,7 @@ public:
 	bool set_value(std::string_view p_option, double p_value);
 	bool set_text(std::string_view p_option, std::string_view p_text);
 	double default_value(std::string_view p_option) const;
+	double applied_value(std::string_view p_option) const;
 
 	double setting_value(std::string_view p_source) const;
 	bool change(std::string_view p_source, double p_value);
@@ -59,6 +60,7 @@ public:
 
 	uint64_t revision() const { return revision_; }
 	void touch() { ++revision_; }
+	uint64_t saved_revision() const { return saved_revision_; }
 
 	std::string saved_text() const;
 	Result<uint32_t> load_text(std::string_view p_text);
@@ -80,6 +82,7 @@ private:
 	KeyBindingTable saved_bindings_;
 	std::vector<std::pair<std::string, std::string>> unknown_;
 	uint64_t revision_ = 0;
+	uint64_t saved_revision_ = 0;
 };
 
 }

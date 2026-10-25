@@ -392,3 +392,8 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/ui/options_model.h
     src/ui/options_model.cpp
 )
+
+target_sources(bf3_core PRIVATE
+    include/bf3/core/ui/settings_effects.h
+    src/ui/settings_effects.cpp
+)

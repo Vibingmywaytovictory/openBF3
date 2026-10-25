@@ -7,6 +7,7 @@
 #include "bf3/core/ui/key_bindings.h"
 #include "bf3/core/ui/options.h"
 #include "bf3/core/ui/options_model.h"
+#include "bf3/core/ui/settings_effects.h"
 #include "bf3/core/ui/settings_store.h"
 #include "bf3/core/ui/ui_graph.h"
 #include "test_support.h"
@@ -267,6 +268,23 @@ OptionsCatalog sample_catalog() {
 	add("Resolution", OptionKind::DisplayMode, kResolutionWidth, OptionRowType::TextSelector, {});
 	add("FullscreenEnabled", OptionKind::Bool, "FullscreenEnabled", OptionRowType::TextSelector,
 			{ "ID_M_OPTIONS_OFF", "ID_M_OPTIONS_ON" });
+	return c;
+}
+
+OptionsCatalog effects_catalog() {
+	OptionsCatalog c;
+	c.stored.push_back(numeric("Volume", ProfileOptionKind::Float, 0.0, 1.0, 0.01, 1.0));
+	c.stored.push_back(numeric("MusicVolume", ProfileOptionKind::Float, 0.0, 1.0, 0.01, 1.0));
+	c.stored.push_back(numeric("DialogueVolume", ProfileOptionKind::Float, 0.0, 1.0, 0.01, 1.0));
+	c.stored.push_back(numeric("MouseSensitivity", ProfileOptionKind::Float, 0.0, 1.5, 0.01, 0.5));
+	c.stored.push_back(numeric("Scheme0FlipY", ProfileOptionKind::Bool, 0.0, 1.0, 1.0, 0.0));
+	c.stored.push_back(numeric("HoldButtonToZoom", ProfileOptionKind::Bool, 0.0, 1.0, 1.0, 1.0));
+	c.stored.push_back(numeric("VSync", ProfileOptionKind::Bool, 0.0, 1.0, 1.0, 0.0));
+	c.stored.push_back(numeric(kResolutionWidth, ProfileOptionKind::Int, 0.0, 100000.0, 1.0, 0.0));
+	c.stored.push_back(numeric(kResolutionHeight, ProfileOptionKind::Int, 0.0, 100000.0, 1.0, 0.0));
+	c.stored.push_back(numeric(kResolutionHertz, ProfileOptionKind::Int, 1.0, 10000.0, 1.0, 0.0));
+	c.stored.push_back(numeric("FullscreenEnabled", ProfileOptionKind::Bool, 0.0, 1.0, 1.0, 0.0));
+	c.stored.push_back(numeric("FullscreenScreen", ProfileOptionKind::Int, 0.0, 1000.0, 1.0, 0.0));
 	return c;
 }
 
@@ -585,6 +603,67 @@ TEST_SUITE("ui-settings-unit") {
 		CHECK(options_action_of(-2113864226, one) == OptionsAction::None);
 		CHECK(options_action_of(7, {}) == OptionsAction::None);
 	}
+
+	TEST_CASE("settings effects: the bindings feed the game actions; volumes, look and video follow the store") {
+		KeyBindingTable t = sample_table();
+		const ActionConcept *jump = action_concept("bf3_jump");
+		REQUIRE(jump != nullptr);
+		CHECK(action_concept("bf3_nothing") == nullptr);
+		CHECK(action_inputs(t, *jump) == std::vector<std::string>{ "IDK_Space" });
+		CHECK(action_inputs(t, *action_concept("bf3_forward")) == std::vector<std::string>{ "IDK_W" });
+		CHECK(action_inputs(t, *action_concept("bf3_back")) == std::vector<std::string>{ "IDK_S" });
+		CHECK(action_inputs(t, *action_concept("bf3_fire")) == std::vector<std::string>{ "IDB_Button_0" });
+		CHECK(action_inputs(t, *action_concept("bf3_prone")).empty());
+		REQUIRE(t.set({ 0, 2, KeyColumn::Keyboard }, "IDK_J"));
+		CHECK(action_inputs(t, *jump) == std::vector<std::string>{ "IDK_J" });
+		REQUIRE(t.set({ 0, 3, KeyColumn::Keyboard }, "IDK_K"));
+		CHECK(action_inputs(t, *action_concept("bf3_fire")) == std::vector<std::string>{ "IDK_K", "IDB_Button_0" });
+		REQUIRE(t.set({ 0, 2, KeyColumn::Keyboard }, ""));
+		CHECK(action_inputs(t, *jump).empty());
+
+		const OptionsCatalog cat = effects_catalog();
+		SettingsStore s(cat, sample_table());
+		SettingsEffects e = settings_effects(s);
+		for (const float g : e.bus_gains) {
+			CHECK(g == 1.0f);
+		}
+		CHECK(e.look_scale == 1.0f);
+		CHECK_FALSE(e.invert_look);
+		CHECK(e.hold_to_zoom);
+		CHECK(e.video == VideoEffects{});
+		REQUIRE(s.set_value("Volume", 0.5));
+		REQUIRE(s.set_value("MusicVolume", 0.5));
+		REQUIRE(s.set_value("DialogueVolume", 0.0));
+		REQUIRE(s.set_value("MouseSensitivity", 1.0));
+		REQUIRE(s.set_value("Scheme0FlipY", 1.0));
+		REQUIRE(s.set_value("HoldButtonToZoom", 0.0));
+		REQUIRE(s.set_value("VSync", 1.0));
+		REQUIRE(s.set_value("FullscreenEnabled", 1.0));
+		REQUIRE(s.set_display_mode(1280, 720, 60));
+		e = settings_effects(s);
+		CHECK(e.bus_gains[size_t(audio::MasterBus::GameMixMain)] == 0.5f);
+		CHECK(e.bus_gains[size_t(audio::MasterBus::Reverb)] == 0.5f);
+		CHECK(e.bus_gains[size_t(audio::MasterBus::Music)] == 0.25f);
+		CHECK(e.bus_gains[size_t(audio::MasterBus::LoadingMusic)] == 0.25f);
+		CHECK(e.bus_gains[size_t(audio::MasterBus::Dialog)] == 0.0f);
+		CHECK(e.bus_gains[size_t(audio::MasterBus::NarrVoice)] == 0.0f);
+		CHECK(e.look_scale == 2.0f);
+		CHECK(e.invert_look);
+		CHECK_FALSE(e.hold_to_zoom);
+		CHECK(e.video.vsync);
+		CHECK_FALSE(e.video.fullscreen);
+		CHECK(e.video.width == 0);
+		const uint64_t before = s.revision();
+		s.apply_video();
+		CHECK(s.revision() > before);
+		e = settings_effects(s);
+		CHECK(e.video == VideoEffects{ true, 0, 1280, 720, true });
+		s.revert_video();
+		CHECK(settings_effects(s).video == VideoEffects{ false, 0, 0, 0, true });
+		CHECK(s.saved_revision() == 0);
+		s.save();
+		CHECK(s.saved_revision() == 1);
+	}
 }
 
 TEST_SUITE("ui-options") {
@@ -749,6 +828,54 @@ TEST_SUITE("ui-options") {
 		Result<UiInputBindings> ui = read_ui_input_bindings(*l->lib);
 		REQUIRE(ui.ok());
 		CHECK(ui_input_bindings_with(*ui, *t).bindings == ui->bindings);
+	}
+
+	TEST_CASE("settings effects: every game action's concept is a key binding row with the install's inputs") {
+		OptionsLevel *l = options_level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		Result<KeyBindingMaps> maps = read_key_binding_maps(*l->lib);
+		Result<std::vector<std::string>> tabs = read_key_binding_tabs(*l->lib);
+		REQUIRE(maps.ok());
+		REQUIRE(tabs.ok());
+		Result<KeyBindingTable> t = KeyBindingTable::build(*maps, *tabs);
+		REQUIRE(t.ok());
+		std::string got;
+		for (const ActionConcept &a : kActionConcepts) {
+			CAPTURE(a.action);
+			CHECK(t->row(a.map, a.concept_id, a.negative) != nullptr);
+			got += std::string(a.action) + "=" + joined(action_inputs(*t, a)) + " ";
+		}
+		std::printf("ui.options game actions %s\n", got.c_str());
+		CHECK(got ==
+				"bf3_forward=IDK_W bf3_back=IDK_S bf3_left=IDK_A bf3_right=IDK_D bf3_sprint=IDK_LeftShift "
+				"bf3_jump=IDK_Space bf3_crouch=IDK_X bf3_crouch_hold=IDK_LeftCtrl bf3_prone=IDK_Z "
+				"bf3_fire=IDB_Button_0 bf3_ads=IDB_Button_1 bf3_reload=IDK_R bf3_primary=IDK_1 bf3_sidearm=IDK_2 "
+				"bf3_gadget=IDK_3 bf3_grenade=IDK_G bf3_knife=IDK_F bf3_fire_mode=IDK_V bf3_scoreboard=IDK_Tab ");
+		Result<OptionsCatalog> c = read_options_catalog(*l->lib);
+		REQUIRE(c.ok());
+		for (std::string_view id : { kVolumeOption, kMusicVolumeOption, kDialogueVolumeOption, kMouseSensitivityOption,
+					 kFlipLookOption, kHoldToZoomOption, kFullscreenOption, kMonitorOption, kVSyncOption }) {
+			CAPTURE(id);
+			CHECK(c->option(id) != nullptr);
+		}
+		CHECK(c->option(kVolumeOption)->default_number() == 1.0);
+		CHECK(c->option(kMusicVolumeOption)->default_number() == double(0.7f));
+		CHECK(c->option(kDialogueVolumeOption)->default_number() == double(0.7f));
+		SettingsStore s(*c, std::move(*t));
+		const SettingsEffects e = settings_effects(s);
+		for (size_t b = 0; b < kMasterBusCount; ++b) {
+			const audio::MasterBus bus = audio::MasterBus(b);
+			const bool voice_or_music = bus == audio::MasterBus::Music || bus == audio::MasterBus::LoadingMusic ||
+					bus == audio::MasterBus::Dialog || bus == audio::MasterBus::NarrVoice;
+			CAPTURE(b);
+			CHECK(e.bus_gains[b] == (voice_or_music ? 0.7f : 1.0f));
+		}
+		CHECK(e.look_scale == 1.0f);
+		CHECK_FALSE(e.invert_look);
+		CHECK(e.hold_to_zoom);
+		CHECK(e.video == VideoEffects{});
 	}
 
 	TEST_CASE("settings store: the install's defaults round-trip through the text format") {
