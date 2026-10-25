@@ -481,6 +481,13 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     set_tests_properties(godot.ui2 PROPERTIES RUN_SERIAL TRUE)
 endif()
 
+openbf3_test(test_ui_post_process test_main.cpp ui_post_process_tests.cpp test_support.h)
+target_link_libraries(test_ui_post_process PRIVATE bf3_core)
+add_test(NAME ui.post_process.unit COMMAND test_ui_post_process --test-suite=ui-post-process-unit)
+add_test(NAME ui.post_process.install COMMAND test_ui_post_process --test-suite=ui-post-process)
+set_tests_properties(ui.post_process.install PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(ui.post_process.unit ui.post_process.install PROPERTIES TIMEOUT 300)
+
 openbf3_test(test_weapons_contract test_main.cpp weapons_contract_tests.cpp test_support.h)
 target_link_libraries(test_weapons_contract PRIVATE bf3_sim bf3_sim_harness)
 add_test(NAME m2a.weapons.contract COMMAND test_weapons_contract --test-suite=weapons-contract)

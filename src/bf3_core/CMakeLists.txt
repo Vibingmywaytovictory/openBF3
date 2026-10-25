@@ -313,6 +313,11 @@ target_sources(bf3_core PRIVATE
 openbf3_registry(bf3_core src/ui/widgets bf3/core/ui/hud_widget_registry.h HudWidgetRegistry bf3::core::ui register_hud_widgets_ register_hud_widget_files)
 
 target_sources(bf3_core PRIVATE
+    include/bf3/core/ui/ui_post_process.h
+    src/ui/ui_post_process.cpp
+)
+
+target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/grid_pairs.h
     src/gameplay/grid_pairs.cpp
 )
