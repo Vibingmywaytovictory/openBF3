@@ -93,6 +93,14 @@ struct LogicEdge {
 	uint64_t connection = 0;
 };
 
+struct LogicEntry {
+	uint32_t scope = 0;
+	int32_t port = 0;
+	uint32_t target = 0;
+	int32_t target_port = 0;
+	LogicEventTarget target_type = LogicEventTarget::ClientAndServer;
+};
+
 struct LogicInput {
 	int32_t port = 0;
 	LogicValue value;
@@ -171,6 +179,9 @@ public:
 	std::span<const LogicEdge> link_edges() const { return link_edges_; }
 
 	std::span<const LogicEdge> networked_edges() const { return networked_edges_; }
+	std::span<const LogicEntry> entries() const { return entries_; }
+	std::span<const LogicEntry> entries_of(uint32_t p_scope, int32_t p_port) const;
+	std::optional<uint32_t> scope_named(std::string_view p_name) const;
 	std::span<const LogicParam> params() const { return params_; }
 	std::span<const LogicInput> initial_inputs() const { return inputs_; }
 	std::span<const LogicScopeInfo> scopes() const { return scopes_; }
@@ -212,6 +223,8 @@ public:
 				uint64_t p_connection);
 		void add_property(uint32_t p_source, int32_t p_source_port, uint32_t p_target, int32_t p_target_port);
 		void add_link(uint32_t p_source, int32_t p_source_port, uint32_t p_target, int32_t p_target_port);
+		void add_entry(uint32_t p_scope, int32_t p_port, uint32_t p_target, int32_t p_target_port,
+				LogicEventTarget p_target_type);
 		Result<LogicGraph> finish(const LogicGraphOptions &p_caps = {});
 
 	private:
@@ -226,6 +239,7 @@ private:
 	LogicSide side_ = LogicSide::Server;
 	std::vector<LogicNode> nodes_;
 	std::vector<LogicEdge> event_edges_, property_edges_, link_edges_, networked_edges_;
+	std::vector<LogicEntry> entries_;
 	std::vector<LogicParam> params_;
 	std::vector<LogicInput> inputs_;
 	std::vector<LogicScopeInfo> scopes_;

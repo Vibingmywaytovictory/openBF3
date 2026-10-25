@@ -50,7 +50,7 @@ constexpr LogicTypeInfo kRows[] = {
 
 	{ T::BoolHub, "BoolHubEntityData", C::Primitive, false },
 	{ T::EventAndGate, "EventAndGateEntityData", C::Primitive, false },
-	{ T::PlatformSplitter, "PlatformSplitterEntityData", C::Primitive, false },
+	{ T::PlatformSplitter, "PlatformSplitterEntityData", C::Primitive, true },
 	{ T::PropertyDebug, "PropertyDebugEntityData", C::Primitive, false },
 	{ T::SyncedTransform, "SyncedTransformEntityData", C::Primitive, false },
 	{ T::ToWorldSpaceTransform, "ToWorldSpaceTransformEntityData", C::Primitive, false },
@@ -63,7 +63,7 @@ constexpr LogicTypeInfo kRows[] = {
 	{ T::Vec3MathOp, "Vec3MathOpEntityData", C::Primitive, false },
 	{ T::VecSplitter, "VecSplitterEntityData", C::Primitive, false },
 	{ T::RandomEvent, "RandomEventEntityData", C::Primitive, false },
-	{ T::FloatHub, "FloatHubEntityData", C::Primitive, false },
+	{ T::FloatHub, "FloatHubEntityData", C::Primitive, true },
 	{ T::EventMemory, "EventMemoryEntityData", C::Primitive, false },
 	{ T::EulerTransform, "EulerTransformEntityData", C::Primitive, false },
 	{ T::EulerTransformSplitter, "EulerTransformSplitterEntityData", C::Primitive, false },

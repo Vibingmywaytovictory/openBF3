@@ -684,6 +684,25 @@ TEST_SUITE("logic-unit") {
 		CHECK(g->find_nodes(LogicNodeRef{ syn.s.guid(rq), Guid{} }, LogicTypeId::EventGate) == std::vector<uint32_t>{ ndeep });
 		CHECK(g->find_nodes(LogicNodeRef{ syn.s.guid(r), syn.s.guid(deepest) }) == std::vector<uint32_t>{ ndeep });
 		CHECK(g->find_nodes(LogicNodeRef{ Guid{}, syn.s.guid(sink) }) == std::vector<uint32_t>{ nsink });
+
+		const auto targets = [&](uint32_t p_scope, int32_t p_port) {
+			std::vector<std::pair<uint32_t, int32_t>> out;
+			for (const LogicEntry &e : g->entries_of(p_scope, p_port)) {
+				out.emplace_back(e.target, e.target_port);
+			}
+			std::sort(out.begin(), out.end());
+			return out;
+		};
+		const uint32_t scope_p = g->nodes()[ninner].scope;
+		const uint32_t scope_q = g->nodes()[ndeep].scope;
+		CHECK(targets(scope_p, kX) == std::vector<std::pair<uint32_t, int32_t>>{ { ninner, port::kIn } });
+		std::vector<std::pair<uint32_t, int32_t>> deep{ { ndeep, port::kIn }, { nsink2, port::kIn } };
+		std::sort(deep.begin(), deep.end());
+		CHECK(targets(scope_p, kX2) == deep);
+		CHECK(targets(scope_q, kX) == deep);
+		CHECK(targets(scope_p, kY).empty());
+		CHECK(g->scope_named(g->text(g->scopes()[0].name)) == std::optional<uint32_t>(0));
+		CHECK_FALSE(g->scope_named("no such scope").has_value());
 	}
 
 	TEST_CASE("logic: unbound reference, Client realm, TargetType filter, connected vs unconnected unknown types") {
@@ -1534,6 +1553,49 @@ TEST_SUITE("logic-unit") {
 		CHECK(seen == std::vector<int64_t>{ 9, 11, 9, 5, 5 });
 		CHECK(property_ticks(rt, sink) == std::vector<Tick>{ 0, 1, 2, 3, 4 });
 		no_unhandled(rt);
+	}
+
+	TEST_CASE("logic: FloatHub picks In0..In9 by InputSelect; PlatformSplitter fires the runtime's platform; "
+			  "deliver_event enters a node's input") {
+		G g;
+		const uint32_t hub = g.node(LogicTypeId::FloatHub);
+		g.b.add_param(hub, kInPorts[0], v_float(4.0));
+		g.b.add_param(hub, kInPorts[1], v_float(2.0));
+		const Counter cnt = counter(g);
+		g.b.add_property(cnt.node, port::kValue, hub, logic_port_id("InputSelect"));
+		const uint32_t split = g.node(LogicTypeId::PlatformSplitter, LogicRealm::Client);
+		const uint32_t win32 = event_sink(g, split, logic_port_id("Platform_Win32"));
+		const uint32_t xenon = event_sink(g, split, logic_port_id("Platform_Xenon"));
+		const uint32_t ps3 = event_sink(g, split, logic_port_id("Platform_Ps3"));
+		const uint32_t gate = g.node(LogicTypeId::EventGate);
+		const uint32_t after_gate = event_sink(g, gate, port::kOut);
+		const std::shared_ptr<const LogicGraph> graph = g.finish();
+		for (const LogicPlatform platform : { LogicPlatform::Win32, LogicPlatform::Xenon, LogicPlatform::Ps3 }) {
+			LogicRuntimeOptions o;
+			o.platform = platform;
+			LogicRuntime rt = make_runtime(graph, o);
+			start(rt);
+			CHECK(out_float(rt, hub) == 4.0);
+			REQUIRE(rt.deliver_event(split, logic_port_id("Impulse")).ok());
+			REQUIRE(rt.deliver_event(gate, port::kIn).ok());
+			step(rt);
+			CHECK(ticks_into(rt, win32, port::kIn) ==
+					(platform == LogicPlatform::Win32 ? std::vector<Tick>{ 1 } : std::vector<Tick>{}));
+			CHECK(ticks_into(rt, xenon, port::kIn) ==
+					(platform == LogicPlatform::Xenon ? std::vector<Tick>{ 1 } : std::vector<Tick>{}));
+			CHECK(ticks_into(rt, ps3, port::kIn) ==
+					(platform == LogicPlatform::Ps3 ? std::vector<Tick>{ 1 } : std::vector<Tick>{}));
+			CHECK(ticks_into(rt, gate, port::kIn) == std::vector<Tick>{ 1 });
+			CHECK(ticks_into(rt, after_gate, port::kIn) == std::vector<Tick>{ 1 });
+			force(rt, cnt.inc);
+			step(rt);
+			CHECK(out_float(rt, hub) == 2.0);
+			force(rt, cnt.inc);
+			step(rt);
+			CHECK(out_float(rt, hub) == 0.0);
+			CHECK_FALSE(rt.deliver_event(9999, port::kIn).ok());
+			no_unhandled(rt);
+		}
 	}
 
 	TEST_CASE("logic: Int and Float - Increment, Decrement, Reset to DefaultValue, publish on change only, wrapping") {

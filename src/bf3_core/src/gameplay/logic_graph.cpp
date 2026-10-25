@@ -387,6 +387,7 @@ struct GraphParts {
 	std::vector<std::pair<uint32_t, LogicParam>> params;
 	std::vector<std::pair<uint32_t, LogicInput>> inputs;
 	std::vector<LogicEdge> events, properties, links, networked;
+	std::vector<LogicEntry> entries;
 	std::vector<std::string> texts;
 	std::map<std::string, uint32_t, std::less<>> text_index;
 	LogicGraphStats stats;
@@ -514,6 +515,11 @@ Result<LogicGraph> LogicGraphBuild::finalize(GraphParts &&r_parts, const LogicGr
 	BF3_TRY(check_edges(r_parts.properties, "property", false));
 	BF3_TRY(check_edges(r_parts.links, "link", false));
 	BF3_TRY(check_edges(r_parts.networked, "networked", true));
+	for (const LogicEntry &e : r_parts.entries) {
+		if (e.scope >= r_parts.scopes.size() || e.target >= n) {
+			return make_error("logic graph: entry out of range");
+		}
+	}
 
 	LogicGraph g;
 	g.side_ = r_parts.side;
@@ -594,6 +600,10 @@ Result<LogicGraph> LogicGraphBuild::finalize(GraphParts &&r_parts, const LogicGr
 	g.property_edges_ = std::move(r_parts.properties);
 	g.link_edges_ = std::move(r_parts.links);
 	g.networked_edges_ = std::move(r_parts.networked);
+	std::stable_sort(r_parts.entries.begin(), r_parts.entries.end(), [](const LogicEntry &a, const LogicEntry &b) {
+		return std::tie(a.scope, a.port) < std::tie(b.scope, b.port);
+	});
+	g.entries_ = std::move(r_parts.entries);
 
 	g.by_guid_.resize(n);
 	g.by_type_.resize(n);
@@ -713,6 +723,11 @@ void LogicGraph::Builder::add_link(uint32_t p_source, int32_t p_source_port, uin
 	parts_->add_edge(parts_->links, p_source, p_source_port, p_target, p_target_port, LogicEventTarget::Server, false, 0);
 }
 
+void LogicGraph::Builder::add_entry(
+		uint32_t p_scope, int32_t p_port, uint32_t p_target, int32_t p_target_port, LogicEventTarget p_target_type) {
+	parts_->entries.push_back(LogicEntry{ p_scope, p_port, p_target, p_target_port, p_target_type });
+}
+
 Result<LogicGraph> LogicGraph::Builder::finish(const LogicGraphOptions &p_caps) {
 	if (!parts_) {
 		return make_error("logic graph: builder already finished");
@@ -721,6 +736,26 @@ Result<LogicGraph> LogicGraph::Builder::finish(const LogicGraphOptions &p_caps) 
 	parts->stats.scopes = parts->scopes.size();
 	parts->stats.objects = parts->nodes.size();
 	return LogicGraphBuild::finalize(std::move(*parts), p_caps);
+}
+
+std::span<const LogicEntry> LogicGraph::entries_of(uint32_t p_scope, int32_t p_port) const {
+	const auto key = std::make_tuple(p_scope, p_port);
+	const auto lo = std::lower_bound(entries_.begin(), entries_.end(), key,
+			[](const LogicEntry &e, const auto &k) { return std::tie(e.scope, e.port) < k; });
+	auto hi = lo;
+	while (hi != entries_.end() && hi->scope == p_scope && hi->port == p_port) {
+		++hi;
+	}
+	return std::span<const LogicEntry>(lo, hi);
+}
+
+std::optional<uint32_t> LogicGraph::scope_named(std::string_view p_name) const {
+	for (uint32_t i = 0; i < scopes_.size(); ++i) {
+		if (text(scopes_[i].name) == p_name) {
+			return i;
+		}
+	}
+	return std::nullopt;
 }
 
 std::span<const LogicParam> LogicGraph::params_of(uint32_t p_node) const {
@@ -1008,6 +1043,7 @@ public:
 		for (int k = 0; k < 3; ++k) {
 			BF3_TRY(collapse(static_cast<EdgeKind>(k)));
 		}
+		BF3_TRY(entries());
 		BF3_TRY(constants());
 		BF3_TRY(budget_.status());
 		LogicGraphStats &st = parts_.stats;
@@ -1369,6 +1405,31 @@ private:
 			}
 			size_t fanout = 0;
 			BF3_TRY(walk(p_kind, kind, hop, hop.target.index, 1, fanout, [&](const Hop &p_last) { return emit(p_kind, hop, p_last); }));
+		}
+		return Status::success();
+	}
+
+	Status entries() {
+		KindGraph &kind = kinds_[static_cast<size_t>(EdgeKind::Event)];
+		for (uint32_t v = 0; v < kind.virtuals.size(); ++v) {
+			const Virtual &vn = kind.virtuals[v];
+			if (!vn.in || vn.out_count == 0) {
+				continue;
+			}
+			BF3_TRY(budget_.charge(1));
+			Hop first;
+			first.source = End{ EndKind::Virtual, v };
+			first.source_port = vn.port;
+			size_t fanout = 0;
+			const uint32_t scope = vn.scope;
+			const int32_t port = vn.port;
+			BF3_TRY(walk(EdgeKind::Event, kind, first, v, 1, fanout, [&](const Hop &p_last) {
+				if (p_last.target.kind == EndKind::Real) {
+					parts_.entries.push_back(
+							LogicEntry{ scope, port, p_last.target.index, p_last.target_port, p_last.target_type });
+				}
+				return Status::success();
+			}));
 		}
 		return Status::success();
 	}

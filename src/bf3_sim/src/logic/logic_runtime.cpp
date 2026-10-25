@@ -23,6 +23,17 @@ using T = LogicTypeId;
 
 namespace {
 
+int32_t platform_port(LogicPlatform p_platform) {
+	switch (p_platform) {
+		case LogicPlatform::Xenon:
+			return gp::logic_port_id("Platform_Xenon");
+		case LogicPlatform::Ps3:
+			return gp::logic_port_id("Platform_Ps3");
+		default:
+			return gp::logic_port_id("Platform_Win32");
+	}
+}
+
 namespace port {
 using namespace gp::logic_port;
 constexpr int32_t kImpulse = gp::logic_port_id("Impulse");
@@ -273,6 +284,7 @@ struct LogicRuntime::State {
 		uint32_t node = 0;
 		int32_t port = 0;
 		bool property = false;
+		bool deliver = false;
 		LogicContext context;
 		LogicValue value;
 	};
@@ -890,6 +902,13 @@ struct LogicRuntime::State {
 					unhandled_port(p_node, p_port, true);
 				}
 				return;
+			case T::PlatformSplitter:
+				if (p_port == port::kImpulse) {
+					fire(p_node, platform_port(options.platform), p_context);
+				} else {
+					unhandled_port(p_node, p_port, true);
+				}
+				return;
 			case T::EventSplitter:
 				if (p_port == port::kImpulse) {
 					const bool run_once = param_bool(p_node, port::kRunOnce, false);
@@ -1155,6 +1174,13 @@ struct LogicRuntime::State {
 				}
 				return;
 			}
+			case T::FloatHub: {
+				const int64_t sel = as_int(in(p_node, port::kInputSelect));
+				if (sel >= 0 && sel < static_cast<int64_t>(kMaxOutputs)) {
+					publish(p_node, port::kOut, v_float(as_float(in(p_node, kInN[sel]))));
+				}
+				return;
+			}
 			case T::MathOp:
 				publish(p_node, port::kOut, math_out(p_node));
 				return;
@@ -1201,6 +1227,7 @@ struct LogicRuntime::State {
 			case T::Or4:
 			case T::Compare:
 			case T::IntHub:
+			case T::FloatHub:
 			case T::MathOp:
 				recompute(p_node);
 				return;
@@ -1371,6 +1398,7 @@ struct LogicRuntime::State {
 			case T::Or4:
 			case T::Compare:
 			case T::IntHub:
+			case T::FloatHub:
 			case T::MathOp:
 				recompute(p_node);
 				return;
@@ -1538,6 +1566,23 @@ core::Status LogicRuntime::force_event(uint32_t p_node, int32_t p_port, LogicCon
 	return core::Status::success();
 }
 
+core::Status LogicRuntime::deliver_event(uint32_t p_node, int32_t p_port, LogicContext p_context) {
+	State &s = *state_;
+	if (p_node >= s.nodes.size()) {
+		return core::make_error("logic runtime: delivered event node " + std::to_string(p_node) + " out of range");
+	}
+	if (s.forced.size() >= s.options.max_queue) {
+		return core::make_error("logic runtime: more than " + std::to_string(s.options.max_queue) + " forced inputs");
+	}
+	State::Forced f;
+	f.node = p_node;
+	f.port = p_port;
+	f.deliver = true;
+	f.context = p_context;
+	s.forced.push_back(f);
+	return core::Status::success();
+}
+
 core::Status LogicRuntime::force_property(uint32_t p_node, int32_t p_port, const LogicValue &p_value) {
 	State &s = *state_;
 	if (p_node >= s.nodes.size()) {
@@ -1578,7 +1623,13 @@ core::Result<LogicTickStats> LogicRuntime::step() {
 		}
 		++s.stats.forced;
 		s.record(LogicTraceKind::Forced, f.node, f.port, kNoLogicIndex, 0, f.property ? gp::logic_value_hash(f.value) : 0, f.context.player);
-		if (f.property) {
+		if (f.deliver) {
+			Item it;
+			it.target = f.node;
+			it.target_port = f.port;
+			it.context = f.context;
+			s.enqueue(it);
+		} else if (f.property) {
 			s.publish(f.node, f.port, f.value);
 		} else {
 			s.fire(f.node, f.port, f.context);

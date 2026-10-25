@@ -128,7 +128,7 @@ TEST_SUITE("s4-contract") {
 		CHECK(by_class[static_cast<size_t>(gp::LogicTypeClass::Data)] == 5);
 		CHECK(by_class[static_cast<size_t>(gp::LogicTypeClass::Structural)] == 4);
 		CHECK(server_primitive == 48);
-		CHECK(s4_primitive == 34);
+		CHECK(s4_primitive == 36);
 		CHECK(s4_native == 25);
 	}
 

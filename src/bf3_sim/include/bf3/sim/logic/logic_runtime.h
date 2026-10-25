@@ -30,6 +30,8 @@ constexpr uint32_t logic_delay_ticks(double p_seconds, uint32_t p_hz = kSimHz) {
 	return double(whole) < x ? whole + 1 : whole;
 }
 
+enum class LogicPlatform : uint8_t { Win32 = 0, Xenon = 1, Ps3 = 2 };
+
 struct LogicRuntimeOptions {
 	uint64_t root_seed = 0;
 	uint32_t hz = kSimHz;
@@ -41,6 +43,7 @@ struct LogicRuntimeOptions {
 	size_t max_trace_records = 1u << 20;
 	size_t max_watches = 1024;
 	size_t max_watch_hits_per_tick = 65536;
+	LogicPlatform platform = LogicPlatform::Win32;
 };
 
 struct LogicContext {
@@ -165,6 +168,7 @@ public:
 
 	core::Status force_event(uint32_t p_node, int32_t p_port, LogicContext p_context = {});
 	core::Status force_property(uint32_t p_node, int32_t p_port, const LogicValue &p_value);
+	core::Status deliver_event(uint32_t p_node, int32_t p_port, LogicContext p_context = {});
 
 	core::Result<LogicTickStats> step();
 
