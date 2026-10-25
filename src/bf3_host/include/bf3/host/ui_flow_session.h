@@ -155,5 +155,5 @@ private:
 	UiFlowSessionStats stats_;
 };
 
-void ui_flow_tdm_pc_defaults(UiFlowSession &r_session);
+void ui_flow_tdm_pc_defaults(UiFlowSession &r_session, std::string_view p_mode);
 }

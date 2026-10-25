@@ -134,7 +134,9 @@ TEST_SUITE("ui-flow-session") {
 					"%zu, round over %zu\n",
 				st.ui_graph_nodes, st.graphs, st.watches, st.fades, st.end_of_round_nodes, st.pre_round_nodes,
 				st.round_over_nodes);
-		ui_flow_tdm_pc_defaults(s);
+		ui_flow_tdm_pc_defaults(s, "TeamDeathMatch0");
+		CHECK(s.data("ui/uicomponents/uisettingscomp", 1733092213) == "TeamDeathMatch0");
+		CHECK(s.data("ui/uicomponents/uisettingscomp", 1870459195) == "TeamDeathMatch");
 		Script sc{ s };
 		sc.state.phase = net::MatchPhase::PreRound;
 		sc.state.joined = true;
@@ -271,7 +273,7 @@ TEST_SUITE("ui-flow-session") {
 		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level, o);
 		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
 		UiFlowSession &s = **made;
-		ui_flow_tdm_pc_defaults(s);
+		ui_flow_tdm_pc_defaults(s, "TeamDeathMatch0");
 		UiGameState st;
 		st.phase = net::MatchPhase::PreRound;
 		st.joined = true;

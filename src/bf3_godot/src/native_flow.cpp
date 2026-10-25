@@ -53,7 +53,7 @@ void NativeFlow::start(std::shared_ptr<const bf3::core::Install> p_install, std:
 				out->error = s.error().message;
 			} else {
 				out->session = std::move(*s);
-				bf3::host::ui_flow_tdm_pc_defaults(*out->session);
+				bf3::host::ui_flow_tdm_pc_defaults(*out->session, mode);
 			}
 			bf3::core::Result<bf3::core::ui::UiInputBindings> b =
 					bf3::core::ui::read_ui_input_bindings(out->level->db());

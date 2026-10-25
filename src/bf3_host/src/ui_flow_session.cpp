@@ -518,10 +518,11 @@ void UiFlowSession::graph_output(std::string_view p_graph, std::string_view p_ou
 	}
 }
 
-void ui_flow_tdm_pc_defaults(UiFlowSession &r_session) {
+void ui_flow_tdm_pc_defaults(UiFlowSession &r_session, std::string_view p_mode) {
+	const std::string_view family = p_mode.substr(0, p_mode.find_last_not_of("0123456789") + 1);
 	r_session.set_data("ui/uicomponents/uisettingscomp", -668821714, "win32");
-	r_session.set_data("ui/uicomponents/uisettingscomp", 1733092213, "TeamDeathMatch0");
-	r_session.set_data("ui/uicomponents/uisettingscomp", 1870459195, "TeamDeathMatch");
+	r_session.set_data("ui/uicomponents/uisettingscomp", 1733092213, std::string(p_mode));
+	r_session.set_data("ui/uicomponents/uisettingscomp", 1870459195, std::string(family));
 	r_session.set_data("ui/uicomponents/uispawnpointcomp", -990983020, "True");
 	r_session.set_data("ui/uicomponents/uispawnpointcomp", -225037516, "True");
 	r_session.set_data("ui/uicomponents/uispectatorcomp", -366910738, "False");
