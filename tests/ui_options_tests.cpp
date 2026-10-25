@@ -5,6 +5,7 @@
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/ui/key_bindings.h"
 #include "bf3/core/ui/options.h"
+#include "bf3/core/ui/settings_store.h"
 #include "test_support.h"
 
 #include <cstdio>
@@ -206,6 +207,50 @@ KeyBindingTable sample_table() {
 	return std::move(*t);
 }
 
+ProfileOption numeric(
+		std::string_view p_id, ProfileOptionKind p_kind, double p_min, double p_max, double p_step, double p_value) {
+	ProfileOption o;
+	o.id = std::string(p_id);
+	o.kind = p_kind;
+	o.min = p_min;
+	o.max = p_max;
+	o.step = p_step;
+	o.value = p_value;
+	return o;
+}
+
+OptionsCatalog sample_catalog() {
+	OptionsCatalog c;
+	c.stored.push_back(numeric("Volume", ProfileOptionKind::Float, 0.0, 1.0, 0.01, 1.0));
+	c.stored.push_back(numeric("VSync", ProfileOptionKind::Bool, 0.0, 1.0, 1.0, 0.0));
+	ProfileOption map = numeric("MinimapType", ProfileOptionKind::Enum, 0.0, 2.0, 1.0, 0.0);
+	map.items = { { "ID_M_SATELLITE", true }, { "ID_M_HYBRID", false }, { "ID_M_DETAILTEXTURE", false } };
+	c.stored.push_back(map);
+	c.stored.push_back(numeric("FieldOfView", ProfileOptionKind::Float, 60.0, 90.0, 1.0, 70.0));
+	c.stored.push_back(numeric(kResolutionWidth, ProfileOptionKind::Int, 0.0, 100000.0, 1.0, 0.0));
+	c.stored.push_back(numeric(kResolutionHeight, ProfileOptionKind::Int, 0.0, 100000.0, 1.0, 0.0));
+	c.stored.push_back(numeric(kResolutionHertz, ProfileOptionKind::Int, 1.0, 10000.0, 1.0, 0.0));
+	c.stored.push_back(numeric("FullscreenEnabled", ProfileOptionKind::Bool, 0.0, 1.0, 1.0, 0.0));
+	c.stored.push_back(numeric("SoundSystemSize", ProfileOptionKind::Int, 5.0, 100.0, 5.0, 20.0));
+	ProfileOption award = numeric("TrackAward0", ProfileOptionKind::String, 0.0, 0.0, 0.0, 0.0);
+	award.max_length = 8;
+	c.stored.push_back(award);
+	const auto add = [&](std::string_view p_source, OptionKind p_kind, std::string_view p_option) {
+		OptionSetting s;
+		s.source = std::string(p_source);
+		s.kind = p_kind;
+		s.option_id = std::string(p_option);
+		c.settings.push_back(std::move(s));
+	};
+	add("MasterVolume", OptionKind::Number, "Volume");
+	add("VSync", OptionKind::Bool, "VSync");
+	add("MinimapType", OptionKind::Enum, "MinimapType");
+	add("FieldOfView", OptionKind::Number, "FieldOfView");
+	add("Resolution", OptionKind::DisplayMode, kResolutionWidth);
+	add("FullscreenEnabled", OptionKind::Bool, "FullscreenEnabled");
+	return c;
+}
+
 std::string cells(const KeyBindingRow &p_row) {
 	return p_row.label + "|" + p_row.inputs[0] + "|" + p_row.inputs[1] + "|" + p_row.inputs[2];
 }
@@ -308,6 +353,117 @@ TEST_SUITE("ui-settings-unit") {
 		back.reset();
 		CHECK(back.is_default());
 		CHECK(ui_input_bindings_with(base, back).bindings == base.bindings);
+	}
+
+	TEST_CASE("settings store: save, load, unknown keys and the version round-trip") {
+		const OptionsCatalog cat = sample_catalog();
+		SettingsStore s(cat, sample_table());
+		CHECK(s.value("Volume") == 1.0);
+		CHECK(s.value("FieldOfView") == 70.0);
+		CHECK_FALSE(s.settings_changed());
+		CHECK(s.change("MasterVolume", 0.25));
+		CHECK(s.change("MinimapType", 1.0));
+		CHECK(s.change("VSync", 1.0));
+		CHECK(s.set_value("SoundSystemSize", 35.0));
+		CHECK(s.set_text("TrackAward0", "medal"));
+		REQUIRE(s.key_bindings().set({ 0, 2, KeyColumn::Keyboard }, "IDK_J"));
+		CHECK_FALSE(s.change("MasterVolume", 1.5));
+		CHECK_FALSE(s.change("MinimapType", 3.0));
+		CHECK_FALSE(s.change("VSync", 0.5));
+		CHECK_FALSE(s.set_value("SoundSystemSize", 35.5));
+		CHECK_FALSE(s.set_text("TrackAward0", "far too long"));
+		CHECK_FALSE(s.set_text("TrackAward0", "a#b"));
+		CHECK_FALSE(s.change("Resolution", 1.0));
+		CHECK_FALSE(s.change("Nothing", 1.0));
+		CHECK(s.settings_changed());
+		s.save();
+		CHECK_FALSE(s.settings_changed());
+		const std::string text = s.saved_text();
+		CHECK(text ==
+				"version = 1\nVolume = 0.25\nVSync = true\nMinimapType = ID_M_HYBRID\nFieldOfView = "
+				"70\nResolutionWidth = 0\n"
+				"ResolutionHeight = 0\nResolutionHertz = 0\nFullscreenEnabled = false\nSoundSystemSize = "
+				"35\nTrackAward0 = medal\n"
+				"bind.infantry.ConceptJump.keyboard = IDK_J\n");
+		SettingsStore back(cat, sample_table());
+		Result<uint32_t> v =
+				back.load_text(text + "# a note\nFutureOption = 3 4\nbind.jet.ConceptGone.mouse = IDB_Button_4\n");
+		REQUIRE_MESSAGE(v.ok(), (v.ok() ? std::string() : v.error().message));
+		CHECK(*v == 1);
+		CHECK(back.value("Volume") == 0.25);
+		CHECK(back.value("MinimapType") == 1.0);
+		CHECK(back.text("TrackAward0") == "medal");
+		CHECK(back.key_bindings().input({ 0, 2, KeyColumn::Keyboard }) == "IDK_J");
+		CHECK_FALSE(back.settings_changed());
+		REQUIRE(back.unknown().size() == 2);
+		CHECK(back.unknown()[0] == std::pair<std::string, std::string>("FutureOption", "3 4"));
+		const std::string kept = back.saved_text();
+		CHECK(kept == text + "FutureOption = 3 4\nbind.jet.ConceptGone.mouse = IDB_Button_4\n");
+		SettingsStore again(cat, sample_table());
+		REQUIRE(again.load_text(kept).ok());
+		CHECK(again.saved_text() == kept);
+		SettingsStore older(cat, sample_table());
+		REQUIRE(older.load_text("version = 1\nVolume = 0.5\n").ok());
+		CHECK(older.value("Volume") == 0.5);
+		CHECK(older.value("FieldOfView") == 70.0);
+		CHECK(older.key_bindings().is_default());
+		const uint64_t r = older.revision();
+		CHECK_FALSE(older.load_text("Volume = 0.5\n").ok());
+		CHECK(older.load_text("version = 2\nVolume = 0.5\n").error().message == "settings: version 2 is newer than 1");
+		CHECK_FALSE(older.load_text("version = 1\nVolume = 2\n").ok());
+		CHECK_FALSE(older.load_text("version = 1\nMinimapType = ID_M_ROUND\n").ok());
+		CHECK_FALSE(older.load_text("version = 1\nVSync = maybe\n").ok());
+		CHECK_FALSE(older.load_text("version = 1\nSoundSystemSize = 7.5\n").ok());
+		CHECK_FALSE(older.load_text("version = 1\nVolume\n").ok());
+		CHECK(older.value("Volume") == 0.5);
+		CHECK(older.revision() == r);
+	}
+
+	TEST_CASE("settings store: changes apply at once, Save keeps them, revert and reset, video apply and revert") {
+		const OptionsCatalog cat = sample_catalog();
+		SettingsStore s(cat, sample_table());
+		const uint64_t r0 = s.revision();
+		CHECK(s.change("MasterVolume", 0.5));
+		CHECK(s.value("Volume") == 0.5);
+		CHECK(s.revision() > r0);
+		CHECK(s.settings_changed());
+		CHECK_FALSE(s.video_settings_changed());
+		s.revert();
+		CHECK(s.value("Volume") == 1.0);
+		CHECK_FALSE(s.settings_changed());
+		REQUIRE(s.key_bindings().set({ 0, 2, KeyColumn::Keyboard }, "IDK_J"));
+		CHECK(s.settings_changed());
+		s.revert();
+		CHECK(s.key_bindings().input({ 0, 2, KeyColumn::Keyboard }) == "IDK_Space");
+		CHECK(s.change("MasterVolume", 0.5));
+		s.save();
+		s.reset_to_defaults();
+		CHECK(s.value("Volume") == 1.0);
+		CHECK(s.settings_changed());
+		s.revert();
+		CHECK(s.value("Volume") == 0.5);
+		CHECK(s.set_display_mode(1280, 720, 60));
+		CHECK_FALSE(s.set_display_mode(1280, 720, 10001));
+		CHECK(s.set_display_mode(0, 0, 0));
+		CHECK(s.set_display_mode(1280, 720, 60));
+		CHECK(s.change("FullscreenEnabled", 1.0));
+		CHECK(s.video_settings_changed());
+		CHECK(s.settings_changed());
+		s.save();
+		s.apply_video();
+		CHECK_FALSE(s.video_settings_changed());
+		s.revert_video();
+		CHECK(s.value(kResolutionWidth) == 0.0);
+		CHECK(s.value("FullscreenEnabled") == 0.0);
+		CHECK_FALSE(s.video_settings_changed());
+		CHECK_FALSE(s.settings_changed());
+		CHECK(s.value("Volume") == 0.5);
+		CHECK(s.set_display_mode(1920, 1080, 144));
+		s.apply_video();
+		s.keep_video();
+		s.revert_video();
+		CHECK(s.value(kResolutionWidth) == 1920.0);
+		CHECK(s.setting_value("FullscreenEnabled") == 0.0);
 	}
 }
 
@@ -473,6 +629,37 @@ TEST_SUITE("ui-options") {
 		Result<UiInputBindings> ui = read_ui_input_bindings(*l->lib);
 		REQUIRE(ui.ok());
 		CHECK(ui_input_bindings_with(*ui, *t).bindings == ui->bindings);
+	}
+
+	TEST_CASE("settings store: the install's defaults round-trip through the text format") {
+		OptionsLevel *l = options_level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		Result<OptionsCatalog> c = read_options_catalog(*l->lib);
+		Result<KeyBindingMaps> maps = read_key_binding_maps(*l->lib);
+		Result<std::vector<std::string>> tabs = read_key_binding_tabs(*l->lib);
+		REQUIRE((c.ok() && maps.ok() && tabs.ok()));
+		Result<KeyBindingTable> t = KeyBindingTable::build(*maps, *tabs);
+		REQUIRE(t.ok());
+		SettingsStore s(*c, *t);
+		const std::string defaults = s.saved_text();
+		std::printf("ui.options settings text %zu bytes\n", defaults.size());
+		CHECK(defaults.size() < kMaxSettingsBytes);
+		CHECK(s.value("Volume") == 1.0);
+		CHECK(s.value("FieldOfView") == 70.0);
+		CHECK(s.value(kResolutionHertz) == 0.0);
+		SettingsStore back(*c, *t);
+		REQUIRE(back.load_text(defaults).ok());
+		CHECK(back.saved_text() == defaults);
+		CHECK_FALSE(back.settings_changed());
+		CHECK(back.change("MasterVolume", 0.3));
+		REQUIRE(back.key_bindings().set({ 0, 0, KeyColumn::Keyboard }, "IDK_ArrowUp"));
+		back.save();
+		SettingsStore again(*c, *t);
+		REQUIRE(again.load_text(back.saved_text()).ok());
+		CHECK(again.value("Volume") == doctest::Approx(0.3));
+		CHECK(again.key_bindings().input({ 0, 0, KeyColumn::Keyboard }) == "IDK_ArrowUp");
 	}
 
 	TEST_CASE("options: install unchanged") {

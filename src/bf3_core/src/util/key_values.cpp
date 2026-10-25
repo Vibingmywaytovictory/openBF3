@@ -6,6 +6,21 @@
 
 namespace bf3::core {
 
+namespace {
+
+template <class T> std::string number_text(T p_value) {
+	char buffer[64];
+	const std::to_chars_result r = std::to_chars(buffer, buffer + sizeof(buffer), p_value);
+	return std::string(buffer, r.ptr);
+}
+
+template <class T> bool parse_finite_number(std::string_view p_text, T &r_out) {
+	const std::from_chars_result r = std::from_chars(p_text.data(), p_text.data() + p_text.size(), r_out);
+	return !p_text.empty() && r.ec == std::errc() && r.ptr == p_text.data() + p_text.size() && std::isfinite(r_out);
+}
+
+}
+
 std::string shown_text(std::string_view p_text) {
 	std::string out;
 	for (size_t i = 0; i < p_text.size() && i < 40; ++i) {
@@ -19,9 +34,15 @@ std::string shown_text(std::string_view p_text) {
 }
 
 std::string float_text(float p_value) {
-	char buffer[64];
-	const std::to_chars_result r = std::to_chars(buffer, buffer + sizeof(buffer), p_value);
-	return std::string(buffer, r.ptr);
+	return number_text(p_value);
+}
+
+std::string float_text(double p_value) {
+	return number_text(p_value);
+}
+
+bool parse_finite(std::string_view p_text, double &r_out) {
+	return parse_finite_number(p_text, r_out);
 }
 
 std::string choice_list(
@@ -82,8 +103,7 @@ std::string key_fault_message(const KeyFaultInfo &p_info) {
 
 KeyOutcome parse_float_value(std::string_view p_value, double p_min, double p_max, float &r_out) {
 	float v = 0;
-	const std::from_chars_result r = std::from_chars(p_value.data(), p_value.data() + p_value.size(), v);
-	if (p_value.empty() || r.ec != std::errc() || r.ptr != p_value.data() + p_value.size() || !std::isfinite(v)) {
+	if (!parse_finite_number(p_value, v)) {
 		return { KeyFault::NotANumber };
 	}
 	if (!(double(v) >= p_min && double(v) <= p_max)) {

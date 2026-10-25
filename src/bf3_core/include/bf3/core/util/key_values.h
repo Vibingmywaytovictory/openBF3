@@ -63,6 +63,8 @@ std::string key_fault_message(const KeyFaultInfo &p_info);
 std::string key_fault_where(const KeyFaultInfo &p_info);
 std::string shown_text(std::string_view p_text);
 std::string float_text(float p_value);
+std::string float_text(double p_value);
+bool parse_finite(std::string_view p_text, double &r_out);
 std::string choice_list(std::span<const std::string_view> p_choices, std::string_view p_comma, std::string_view p_last);
 
 KeyOutcome parse_float_value(std::string_view p_value, double p_min, double p_max, float &r_out);
