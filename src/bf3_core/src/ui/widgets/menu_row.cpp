@@ -79,6 +79,9 @@ private:
 		label.set_x(dummy.x());
 		label.set_y(dummy.y());
 		if (HudListLabel *l = label_controller()) {
+			if (const std::optional<float> size = dummy.text_size()) {
+				l->set_text_size(*size);
+			}
 			l->set_interactive(true);
 			l->set_type("bold");
 			l->set_state_style("inactive", kInactiveColor, as2_glow_filter(kInactiveColor, 1.0, 8.0f, 8.0f, 0.75f, 1));

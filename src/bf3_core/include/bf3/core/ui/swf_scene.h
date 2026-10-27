@@ -112,6 +112,7 @@ struct SwfSceneNode {
 	SwfTextOptions text_options;
 	std::optional<SwfRect> text_bounds;
 	std::optional<SwfColor> text_color;
+	std::optional<float> text_size;
 
 	std::vector<SwfNodeId> children;
 
@@ -203,6 +204,7 @@ public:
 	Status set_text_options(std::string_view p_path, const SwfTextOptions &p_options);
 	Status set_text_bounds(std::string_view p_path, const SwfRect &p_bounds);
 	Status set_text_color(std::string_view p_path, SwfColor p_color);
+	Status set_text_size(std::string_view p_path, float p_size);
 	Status set_filters(std::string_view p_path, std::vector<SwfFilter> p_filters);
 	Status set_mask(std::string_view p_path, std::string_view p_mask_path);
 	Status clear_mask(std::string_view p_path);

@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -29,6 +30,7 @@ constexpr std::string_view kIngameMenu = "ui/flow/screen/ingamemenump";
 constexpr float kMenuListX = 96.0f;
 constexpr float kMenuListY = 96.0f;
 constexpr float kMenuRowPitch = 36.0f;
+constexpr float kMenuLabelTextSize = 30.0f;
 
 struct MenuRig {
 	ui_retail::RetailScreen s;
@@ -144,8 +146,12 @@ TEST_SUITE("ui-menu") {
 		CHECK_FALSE(b.clip("List_01.dummyTextField").exists());
 		CHECK(b.s.hud->stats().as2.missing_paths == 0);
 		CHECK_MESSAGE(b.s.hud->stats().as2.failed_ops == 0, b.s.hud->stats().as2.last_failure);
-		std::printf("ui.menu rows %zu, row 0 at %.1f,%.1f width %.1f\n", rows.size(), b.s.hud->clip(rows[0]).x(),
-				b.s.hud->clip(rows[0]).y(), b.s.hud->clip(rows[0] + ".bg").width());
+		const std::optional<float> label_size = b.s.hud->clip(rows[0] + ".Label.txtField").text_size();
+		REQUIRE(label_size.has_value());
+		CHECK(*label_size == kMenuLabelTextSize);
+		std::printf("ui.menu rows %zu, row 0 at %.1f,%.1f width %.1f, label text size %.1f\n", rows.size(),
+				b.s.hud->clip(rows[0]).x(), b.s.hud->clip(rows[0]).y(), b.s.hud->clip(rows[0] + ".bg").width(),
+				*label_size);
 	}
 
 	TEST_CASE("menu: keys step the highlight past the disabled row and Enter releases the label") {

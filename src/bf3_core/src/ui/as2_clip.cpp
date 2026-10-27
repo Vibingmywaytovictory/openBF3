@@ -503,6 +503,22 @@ void As2Clip::set_text_color(uint32_t p_rgb) const {
 	note(scene_->set_text_color(path_, SwfColor{ uint8_t((p_rgb >> 16) & 0xFFu), uint8_t((p_rgb >> 8) & 0xFFu), uint8_t(p_rgb & 0xFFu), 255 }));
 }
 
+std::optional<float> As2Clip::text_size() const {
+	const SwfSceneNode *n = node();
+	if (n == nullptr || n->kind != SwfNodeKind::EditText || n->edit_text == nullptr || !n->movie) {
+		return std::nullopt;
+	}
+	return n->text_size ? *n->text_size : swf_edit_text_format(*n->movie, *n->edit_text).size;
+}
+
+void As2Clip::set_text_size(float p_size) const {
+	const SwfSceneNode *n = mut();
+	if (n == nullptr || n->kind != SwfNodeKind::EditText) {
+		return;
+	}
+	note(scene_->set_text_size(path_, p_size));
+}
+
 void As2Clip::set_filters(std::vector<SwfFilter> p_filters) const {
 	if (mut() == nullptr) {
 		return;

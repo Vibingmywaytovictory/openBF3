@@ -22,6 +22,7 @@ inline constexpr uint32_t kSwfTextMaxChars = 1u << 16;
 inline constexpr uint32_t kSwfHtmlMaxNesting = 64;
 inline constexpr uint32_t kSwfTextFitSteps = 24;
 inline constexpr float kSwfTextFitMaxScale = 16.0f;
+inline constexpr float kSwfMaxTextSize = 1024.0f;
 inline constexpr size_t kSwfTextBudgetUnits = size_t(1) << 22;
 
 enum class SwfTextAutoSize : uint8_t {

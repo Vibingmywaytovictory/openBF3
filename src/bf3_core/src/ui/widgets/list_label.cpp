@@ -120,6 +120,11 @@ public:
 		set_text_glow_filter();
 	}
 
+	void set_text_size(float p_size) override {
+		text_size_ = p_size;
+		set_text_format();
+	}
+
 private:
 	struct Style {
 		uint32_t color = 0;
@@ -176,6 +181,9 @@ private:
 			return;
 		}
 		txt.set_alpha(100.0f);
+		if (text_size_) {
+			txt.set_text_size(*text_size_);
+		}
 		if (state_ == "standard") {
 			txt.set_text_color(standard_ ? standard_->color : kStandardColor);
 			txt.set_alpha(kStandardAlpha);
@@ -215,6 +223,7 @@ private:
 	std::string mask_;
 	std::optional<Style> standard_;
 	std::optional<Style> inactive_;
+	std::optional<float> text_size_;
 	float width_ = std::numeric_limits<float>::quiet_NaN();
 	float scroll_distance_ = 0.0f;
 	bool interactive_ = true;
