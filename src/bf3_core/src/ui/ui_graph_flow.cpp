@@ -208,7 +208,7 @@ std::vector<uint64_t> UiFlow::take_closing() {
 }
 
 std::optional<std::string> UiFlow::read(const UiDataRef &p_ref, const std::optional<std::string> &p_incoming) {
-	if (!p_ref.defined()) {
+	if (!p_ref.defined() || p_ref.category.empty()) {
 		return p_incoming;
 	}
 	return host_.data_get(p_ref);

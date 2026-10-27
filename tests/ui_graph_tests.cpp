@@ -655,6 +655,39 @@ TEST_SUITE("ui-graph") {
 		CHECK(run.flow.errors().empty());
 	}
 
+	TEST_CASE("ui graph: endofroundgraph STATS tab, TabLeft and TabRight") {
+		RetailGraphs *r = retail_graphs_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		Run run(*r);
+		REQUIRE(run.flow.fire_input(kEndOfRoundGraph, "EndOfRound"));
+		run.initialize_opened();
+		run.initialize_opened();
+		run.take("endofround.open");
+		const uint64_t board = run.screen_of("ui/flow/screen/eordetailsscoreboardscreen");
+		REQUIRE(run.flow.widget_fired(board, "TabBar_01", "UIWidgetEventID_OnItemReleased", "ID6"));
+		CHECK(run.take("endofround.STATS") ==
+				Lines{ "output eordetailsscoreboardscreen.TabReleased", "close scoreboardtwoteamsscreen",
+						"close eordetailsscoreboardscreen", "push eordetailsstatsscreen", "show eordetailsstatsscreen",
+						"focus eordetailsstatsscreen" });
+		run.initialize_opened();
+		run.take("endofround.stats.initialized");
+		REQUIRE(run.flow.input_action(input_action_of(*r->provider()(kEndOfRoundGraph), "UIInputAction_TabLeft")));
+		CHECK(run.take("endofround.TabLeft") ==
+				Lines{ "concept eordetailsstatsscreen UIInputAction_TabLeft", "close eordetailsstatsscreen",
+						"push eordetailsscoreboardscreen", "show eordetailsscoreboardscreen",
+						"focus eordetailsscoreboardscreen" });
+		run.initialize_opened();
+		run.take("endofround.left.initialized");
+		REQUIRE(run.flow.input_action(input_action_of(*r->provider()(kEndOfRoundGraph), "UIInputAction_TabRight")));
+		CHECK(run.take("endofround.TabRight") ==
+				Lines{ "concept scoreboardtwoteamsscreen UIInputAction_TabRight", "close scoreboardtwoteamsscreen",
+						"close eordetailsscoreboardscreen", "push eordetailsstatsscreen", "show eordetailsstatsscreen",
+						"focus eordetailsstatsscreen" });
+		CHECK(run.flow.errors().empty());
+	}
+
 	TEST_CASE("ui graph: ingamemenumpgraph EnterFromGame, resume and quit") {
 		RetailGraphs *r = retail_graphs_or_skip();
 		if (r == nullptr) {
