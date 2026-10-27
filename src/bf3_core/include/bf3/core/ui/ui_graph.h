@@ -156,7 +156,6 @@ struct UiFlowAction {
 	int32_t key = 0;
 	std::string name;
 	std::vector<std::string> params;
-	std::optional<std::string> incoming;
 };
 
 struct UiFlowScreen {

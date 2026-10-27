@@ -213,6 +213,42 @@ TEST_SUITE("ui-graph-unit") {
 		CHECK(flow.errors().empty());
 	}
 
+	TEST_CASE("ui graph: an ActionNode sends its Params, with the incoming value appended when AppendIncomingParams "
+			  "is set or Params is empty") {
+		auto g = std::make_shared<UiGraphAsset>();
+		g->partition = "test/actions";
+		g->type = "UIGraphAsset";
+		g->nodes.push_back(node_of(UiGraphNodeKind::InstanceInput, "Send", { port_of(UiGraphPortRole::Out, "") }));
+		for (const std::string_view name : { "GameInput", "PostProcessEffect", "SelectSpawnPoint" }) {
+			UiGraphNode a = node_of(UiGraphNodeKind::Action, std::string(name),
+					{ port_of(UiGraphPortRole::In, ""), port_of(UiGraphPortRole::Out, "") });
+			a.action_key = ui_action_key(name);
+			g->nodes.push_back(a);
+		}
+		g->nodes[1].params = { "All" };
+		g->nodes[1].append_params = true;
+		g->nodes[2].params = { "0.35" };
+		g->connections = { { 0, 0, 1, 0, 0 }, { 1, 1, 2, 0, 0 }, { 2, 1, 3, 0, 0 } };
+		SyntheticGraphs graphs;
+		graphs.by_name["test/actions"] = g;
+		const UiActionTable actions = UiActionTable::of({ "GameInput", "PostProcessEffect", "SelectSpawnPoint" });
+		GraphHost host;
+		UiFlow flow(host, graphs.provider(), &actions);
+		const auto sent = [&host] {
+			std::vector<std::vector<std::string>> out;
+			for (const UiFlowAction &a : host.actions) {
+				out.push_back(a.params);
+			}
+			host.actions.clear();
+			return out;
+		};
+		REQUIRE(flow.fire_input("test/actions", "Send", "hello"));
+		CHECK(sent() == std::vector<std::vector<std::string>>{ { "All", "hello" }, { "0.35" }, { "hello" } });
+		REQUIRE(flow.fire_input("test/actions", "Send"));
+		CHECK(sent() == std::vector<std::vector<std::string>>{ { "All" }, { "0.35" }, {} });
+		CHECK(flow.errors().empty());
+	}
+
 	TEST_CASE("ui graph: a concept on the focused screen follows its input-event port") {
 		SyntheticGraphs graphs;
 		graphs.by_name["test/flow"] = synthetic_flow();
@@ -460,6 +496,37 @@ TEST_SUITE("ui-graph") {
 		CHECK(run.take("spawngraphpc.Activate") ==
 				Lines{ "concept spawnscreenpc UIInputAction_Activate", "action OnFrontendCameraChanged(0.35) <0",
 						"action Spawn() <0" });
+		CHECK(run.flow.errors().empty());
+	}
+
+	TEST_CASE("ui graph: spawngraphpc's ReselectSpawn sends SelectSpawnPoint -1 and a List_01 highlight sends the "
+			  "highlighted row's id") {
+		RetailGraphs *r = retail_graphs_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		Run run(*r);
+		const auto selections = [&run] {
+			std::vector<std::vector<std::string>> out;
+			for (const UiFlowAction &a : run.host.actions) {
+				if (a.name == "SelectSpawnPoint") {
+					out.push_back(a.params);
+				}
+			}
+			run.host.actions.clear();
+			return out;
+		};
+		REQUIRE(run.flow.fire_input(kSpawnGraphPc, "EnterSpawn"));
+		run.take("spawngraphpc.EnterSpawn");
+		CHECK(selections() == std::vector<std::vector<std::string>>{ { "-1" } });
+		run.initialize_opened();
+		run.take("spawngraphpc.initialized");
+		run.host.actions.clear();
+		REQUIRE(run.flow.widget_fired(
+				run.screen_of("ui/flow/screen/spawnscreenpc"), "List_01", "UIWidgetEventID_OnItemHighlighted", "2"));
+		CHECK(run.take("spawnscreenpc.List_01 highlighted") ==
+				Lines{ "output spawnscreenpc.SpawnSelected", "action SelectSpawnPoint() <2" });
+		CHECK(selections() == std::vector<std::vector<std::string>>{ { "2" } });
 		CHECK(run.flow.errors().empty());
 	}
 

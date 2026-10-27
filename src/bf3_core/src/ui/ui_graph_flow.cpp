@@ -456,12 +456,14 @@ void UiFlow::enter(Instance &r_inst, uint32_t p_node, uint32_t p_port, const std
 					actions_ != nullptr ? actions_->name_of(n.action_key) : std::nullopt;
 			a.name = name ? std::string(*name) : std::to_string(n.action_key);
 			a.params = n.params;
-			a.incoming = p_value;
+			if (p_value && (n.append_params || n.params.empty())) {
+				a.params.push_back(*p_value);
+			}
 			if (!name) {
 				error("action key " + std::to_string(n.action_key) + " of " + n.name + " in " + r_inst.graph +
 						" is not in the action table");
 			}
-			note("action " + a.name + "(" + params_text(a.params) + ")" + (p_value ? " <" + *p_value : std::string()));
+			note("action " + a.name + "(" + params_text(n.params) + ")" + (p_value ? " <" + *p_value : std::string()));
 			host_.action(a);
 			first(UiGraphPortRole::Out);
 			break;
