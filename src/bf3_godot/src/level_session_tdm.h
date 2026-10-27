@@ -84,6 +84,7 @@ struct TdmState {
 	bool death_view_end = false;
 	bool was_alive = false;
 	bool deploy_click = false;
+	uint32_t loadout_requests_sent = 0;
 
 	bool native_screens = false;
 	bool native_screens_check = false;

@@ -283,6 +283,7 @@ void step_native_screens(GameState &r_game, TdmState &r_m, Node *p_parent, const
 	if (screens == nullptr || r_m.native_flow == nullptr) {
 		return;
 	}
+	r_m.deploy_screens.apply(r_game.hud_model);
 	screens->set_model(r_game.hud_model);
 	screens->step(r_m.native_delta_s);
 	r_m.deploy_screens.frame(*screens, r_game.native_hud, p_parent, p_level, r_m.windowed);
@@ -589,6 +590,19 @@ void Bf3LevelSession::tdm_presented(uint64_t p_now_ns) {
 	}
 	if (const uint32_t k = r_mapper.take_kit_presses(); k > 0) {
 		m.spawn_kit = uint8_t((m.spawn_kit + k) % host::kKitCount);
+	}
+	if (const std::optional<DeployPick> pick = m.deploy_screens.take_pick()) {
+		const std::shared_ptr<const host::SharedLevel> level = shared_level();
+		if (level != nullptr && level->gunplay != nullptr && r_game.gunplay != nullptr && pick->kit < host::kKitCount) {
+			bf3::core::Result<net::LoadoutRequest> q = deploy_loadout_request(
+					*pick, level->gunplay->loadouts, r_game.gunplay->kits, m.own_team, m.loadout_choices[pick->kit]);
+			if (q) {
+				client_->send_loadout_request(*q);
+				++m.loadout_requests_sent;
+			} else {
+				UtilityFunctions::print(to_godot("[tdm] loadout pick refused: " + q.error().message));
+			}
+		}
 	}
 	if (r_mapper.take_team_presses() > 0) {
 		UtilityFunctions::print("[tdm] T: the teams are AutoTeam's in TDM");

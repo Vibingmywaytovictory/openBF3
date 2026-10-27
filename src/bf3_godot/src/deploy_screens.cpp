@@ -12,10 +12,12 @@
 #include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/ui_post_process.h"
 #include "bf3/core/util/key_values.h"
+#include "bf3/host/hud_feed.h"
 #include "bf3/host/ui_flow_session.h"
 
 #include <godot_cpp/core/object.hpp>
 
+#include <algorithm>
 #include <limits>
 
 namespace bf3::godot_side {
@@ -47,6 +49,34 @@ std::optional<float> flow_power(const std::vector<std::string> &p_params) {
 
 }
 
+bf3::core::Result<bf3::net::LoadoutRequest> deploy_loadout_request(const DeployPick &p_pick,
+		const bf3::host::LoadoutCatalog &p_catalog, const bf3::host::KitTable &p_table, uint8_t p_team,
+		bf3::host::LoadoutChoice &r_choice) {
+	if (p_pick.slot >= bf3::host::kHudSpawnSlots.size()) {
+		return bf3::core::make_error("deploy pick: no slot " + std::to_string(p_pick.slot));
+	}
+	bf3::host::LoadoutChoice next = r_choice == bf3::host::LoadoutChoice{}
+			? bf3::host::default_loadout(p_catalog, p_table, p_team, p_pick.kit).choice
+			: r_choice;
+	const size_t slot = bf3::host::kHudSpawnSlots[p_pick.slot];
+	next.items[slot] = p_pick.item;
+	if (slot == bf3::host::kLoadoutAccessoryWeapon) {
+		next.accessories = {};
+	}
+	if (const bf3::core::Result<bf3::host::Loadout> r =
+					bf3::host::resolve_loadout(p_catalog, p_table, p_team, p_pick.kit, next);
+			!r) {
+		return r.error();
+	}
+	r_choice = next;
+	bf3::net::LoadoutRequest q;
+	q.kit = p_pick.kit;
+	std::copy(next.items.begin(), next.items.end(), q.items.begin());
+	q.accessories = next.accessories;
+	q.specialization = next.specialization;
+	return q;
+}
+
 void DeployScreens::draw(Bf3UiScreens &r_screens) {
 	for (const std::string_view p :
 			{ kSpawnScreenPcPartition, kSpawnButtonScreenPartition, kSpawnTicketCounterPartition }) {
@@ -63,6 +93,22 @@ std::optional<uint8_t> DeployScreens::feed(bf3::host::UiFlowSession &r_session, 
 			chosen = uint8_t(*k);
 			++stats_.kits_from_flow;
 		}
+	}
+	if (const std::optional<std::string> v =
+					r_session.data(kUiCustomizationCompPartition, kUiCustomizationSelectedSlotKey)) {
+		if (const std::optional<int32_t> s = flow_index(*v, bf3::core::ui::kHudSpawnKitItems)) {
+			slot_ = *s;
+		}
+	}
+	if (const std::optional<std::string> v =
+					r_session.data(kUiCustomizationCompPartition, kUiCustomizationSetWeaponKey);
+			v && !v->empty()) {
+		const bf3::core::ui::HudItemList &list = p_model.customization.kit_grid_data[size_t(slot_)];
+		if (const std::optional<int32_t> i = flow_index(*v, size_t(list.count))) {
+			pick_ = DeployPick{ uint8_t(chosen.value_or(p_spawn_kit)), uint8_t(slot_), list.items[size_t(*i)].item_id };
+			++stats_.picks_from_flow;
+		}
+		r_session.set_data(kUiCustomizationCompPartition, kUiCustomizationSetWeaponKey, std::string());
 	}
 	const std::string kit = std::to_string(chosen.value_or(p_spawn_kit));
 	r_session.set_data(kUiKitCompPartition, kUiKitSelectedKitKey, kit);
