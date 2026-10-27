@@ -124,6 +124,7 @@ public:
 	void scripted_ui_key(godot::Key p_key, bool p_pressed);
 
 	bool restart_client(const std::string &p_netsim, uint64_t p_seed, std::string *r_error);
+	bool join_extra_client(std::string *r_error);
 
 	bool save_screenshot(const std::string &p_path);
 
@@ -188,6 +189,7 @@ private:
 
 	std::unique_ptr<bf3::host::ServerHost> server_;
 	std::unique_ptr<bf3::host::ClientSession> client_;
+	std::unique_ptr<bf3::host::ClientSession> extra_client_;
 	std::unique_ptr<bf3::host::PresentationFrame> frame_;
 
 	LevelUpload upload_;

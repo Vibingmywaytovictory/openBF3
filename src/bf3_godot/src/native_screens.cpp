@@ -172,6 +172,13 @@ void Bf3UiScreens::follow(host::UiFlowSession *p_session) {
 	session_ = p_session;
 }
 
+void Bf3UiScreens::set_client(ui::HudClientState p_client) {
+	client_ = std::move(p_client);
+	client_.flow_data = [this](std::string_view p_category, int32_t p_key) -> std::optional<std::string> {
+		return session_ != nullptr ? session_->data(p_category, p_key) : std::nullopt;
+	};
+}
+
 void Bf3UiScreens::set_drawn(std::string_view p_partition, bool p_drawn) {
 	if (p_drawn) {
 		drawn_.emplace(p_partition);
@@ -382,6 +389,9 @@ void Bf3UiScreens::drop(size_t p_index) {
 	}
 	e.screen.reset();
 	if (e.view != nullptr) {
+		const std::string owner = view_owner(e);
+		bg_.forget(owner);
+		effects_seen_.erase(owner);
 		remove_child(e.view);
 		e.view->queue_free();
 		e.view = nullptr;
@@ -550,6 +560,11 @@ void Bf3UiScreens::sync_flow() {
 			apply_visibility(*e);
 		}
 	}
+	const ui::UiFlowScreen *focus = flow.focused() ? flow.screen(*flow.focused()) : nullptr;
+	const Entry *target = focus != nullptr ? find(focus->partition) : nullptr;
+	if (target != nullptr && !target->adopted && !target->focused && target->phase != UiScreenPhase::Exiting) {
+		focus_screen(focus->partition);
+	}
 }
 
 void Bf3UiScreens::deliver_widget_events() {
@@ -618,6 +633,15 @@ void Bf3UiScreens::step(double p_seconds) {
 		if (const bf3::core::Status st = scene->advance_seconds(dt); !st) {
 			error(e->partition + ": " + st.error().message);
 		}
+		if (e->view != nullptr) {
+			const std::string owner = view_owner(*e);
+			const uint64_t revision = e->screen->effects_revision();
+			if (const auto it = effects_seen_.find(owner); it == effects_seen_.end() || it->second != revision) {
+				effects_seen_[owner] = revision;
+				apply_hud_view_effects(*e->view, *e->screen);
+			}
+			bg_.paint_all(*e->view, owner);
+		}
 	}
 	report_protocol();
 }
@@ -639,6 +663,30 @@ Bf3UiScreens::Entry *Bf3UiScreens::input_target() {
 	return modal != nullptr ? modal : focused;
 }
 
+std::string Bf3UiScreens::view_owner(const Entry &p_entry) {
+	return p_entry.partition + "#" + std::to_string(p_entry.order);
+}
+
+Bf3UiScreens::Entry *Bf3UiScreens::background_listener(const Entry *p_target, int32_t p_concept, bool p_pressed) {
+	if (p_target != nullptr && (p_target->modal || !p_target->adopted)) {
+		return nullptr;
+	}
+	std::vector<Entry *> stack;
+	for (std::unique_ptr<Entry> &e : entries_) {
+		if (e.get() != p_target && !e->adopted && e->shown && e->phase != UiScreenPhase::Exiting) {
+			stack.push_back(e.get());
+		}
+	}
+	std::sort(stack.begin(), stack.end(), [](const Entry *a, const Entry *b) { return a->order > b->order; });
+	for (Entry *e : stack) {
+		ui::HudScreen *s = screen_of(*e);
+		if (s != nullptr && s->input_concept(p_concept, p_pressed)) {
+			return e;
+		}
+	}
+	return nullptr;
+}
+
 bool Bf3UiScreens::input_concept(int32_t p_concept, bool p_pressed) {
 	++stats_.concepts;
 	Entry *t = input_target();
@@ -647,6 +695,11 @@ bool Bf3UiScreens::input_concept(int32_t p_concept, bool p_pressed) {
 	if (taken) {
 		note("concept " + std::string(ui::ui_input_concept_name(ui::UiInputConcept(p_concept))) + " to " +
 				ui::ui_data_category_leaf(t->partition));
+	}
+	if (const Entry *b = background_listener(t, p_concept, p_pressed)) {
+		note("concept " + std::string(ui::ui_input_concept_name(ui::UiInputConcept(p_concept))) + " to " +
+				ui::ui_data_category_leaf(b->partition));
+		return true;
 	}
 	if (!p_pressed || session_ == nullptr) {
 		return taken;

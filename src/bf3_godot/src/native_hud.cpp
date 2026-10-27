@@ -100,37 +100,6 @@ constexpr std::string_view kBgRenderer = ui::kBgDrawRenderer;
 constexpr std::string_view kEkgRenderer = ui::kSoldierRenderer;
 constexpr const char *kMinimapClip = "Minimap_01";
 
-constexpr std::string_view kBgDrawShader = R"(shader_type canvas_item;
-render_mode blend_premul_alpha;
-)";
-
-struct BgAxis {
-	std::array<float, 10> at{};
-	std::array<float, 10> light{};
-	std::array<float, 10> coverage{};
-};
-
-BgAxis bg_axis(float p_min, float p_max, float p_fade_fraction, const ui::HudBgDrawLook &p_look) {
-	const float fade = p_fade_fraction * (p_max - p_min);
-	const float half = (p_max - p_min) / 2.0f;
-	std::array<float, 5> inward{ 0.0f, p_look.coverage_start_of_fade, p_look.coverage_full_of_fade, p_look.light_start_of_fade, p_look.light_full_of_fade };
-	for (float &d : inward) {
-		d = std::min(fade * d, half);
-	}
-	std::sort(inward.begin(), inward.end());
-	BgAxis a;
-	for (size_t i = 0; i < inward.size(); ++i) {
-		a.at[i] = p_min + inward[i];
-		a.at[a.at.size() - 1 - i] = p_max - inward[i];
-	}
-	for (size_t i = 0; i < a.at.size(); ++i) {
-		const float u = fade > 0.0f ? std::min(a.at[i] - p_min, p_max - a.at[i]) / fade : 1.0f;
-		a.light[i] = fade > 0.0f ? ui::hud_bg_light_ramp(p_look, u) : 1.0f;
-		a.coverage[i] = fade > 0.0f ? ui::hud_bg_coverage_ramp(p_look, u) : 1.0f;
-	}
-	return a;
-}
-
 std::vector<uint8_t> image_bytes(Ref<Image> p_image, int32_t &r_w, int32_t &r_h) {
 	r_w = r_h = 0;
 	if (p_image.is_null() || p_image->is_empty()) {
@@ -414,7 +383,7 @@ bool Bf3NativeHud::close_screen(std::string_view p_partition) {
 	drop_view(*i);
 	shown_[*i] = false;
 	effects_seen_[*i] = 0;
-	painted_bounds_.clear();
+	bg_.reset();
 	return true;
 }
 
@@ -617,7 +586,7 @@ void Bf3NativeHud::step(double p_seconds) {
 		}
 		if (s->effects_revision() != effects_seen_[i]) {
 			effects_seen_[i] = s->effects_revision();
-			apply_effects(i);
+			apply_hud_view_effects(*views_[i], *s);
 		}
 		paint(i);
 	}
@@ -767,23 +736,6 @@ std::optional<ui::SwfRect> Bf3NativeHud::window_bounds(size_t p_view, std::strin
 	return out;
 }
 
-void Bf3NativeHud::apply_effects(size_t p_index) {
-	Bf3SwfView *v = views_[p_index];
-	const ui::HudScreen &s = *screens_[p_index];
-	for (const ui::HudTilt &t : s.tilts()) {
-		const bf3::core::Status st = v->set_tilt(t.path, SwfTilt{ t.x_rotation, t.y_rotation, t.perspective_fov });
-		if (!st) {
-			UtilityFunctions::push_warning(to_godot("[hud] tilt " + t.path + ": " + st.error().message));
-		}
-	}
-	for (const ui::HudRendererString &r : s.renderer_strings()) {
-		const bf3::core::Status st = v->set_renderer_string(r.path, r.renderer);
-		if (!st) {
-			UtilityFunctions::push_warning(to_godot("[hud] renderer " + r.path + ": " + st.error().message));
-		}
-	}
-}
-
 namespace {
 
 ui::HudIconState relation_state(ui::TagRelation p_relation) {
@@ -817,13 +769,10 @@ void Bf3NativeHud::paint(size_t p_index) {
 			continue;
 		}
 		if (t.renderer == kBgRenderer) {
-			const auto it = painted_bounds_.find(t.path);
-			if (it != painted_bounds_.end() && it->second.first == t.local_bounds && it->second.second == t.size) {
-				continue;
+			if (bg_.paint(*v, t)) {
+				paint_.bg_panels++;
+				paint_.paints++;
 			}
-			painted_bounds_[t.path] = { t.local_bounds, t.size };
-			paint_bg(t);
-			note_status(v->redraw_engine_target(t.path), t.path);
 		} else if (t.renderer == kEkgRenderer) {
 			paint_ekg(t);
 			if (!t.live) {
@@ -839,44 +788,6 @@ void Bf3NativeHud::paint(size_t p_index) {
 			}
 		}
 	}
-}
-
-void Bf3NativeHud::paint_bg(const SwfEngineTarget &p_target) {
-	RenderingServer *rs = RenderingServer::get_singleton();
-	if (bg_material_.is_null()) {
-		Ref<Shader> shader;
-		shader.instantiate();
-		shader->set_code(String::utf8(kBgDrawShader.data(), int64_t(kBgDrawShader.size())));
-		bg_material_.instantiate();
-		bg_material_->set_shader(shader);
-	}
-	rs->canvas_item_clear(p_target.canvas_item);
-	rs->canvas_item_set_material(p_target.canvas_item, bg_material_->get_rid());
-	const ui::HudBgDrawLook &k = ui::kHudBgDrawLook;
-	const ui::SwfRect &b = p_target.local_bounds;
-	const BgAxis ax = bg_axis(b.x_min, b.x_max, float(ui::hud_bg_light_ramp_fraction_x()), k);
-	const BgAxis ay = bg_axis(b.y_min, b.y_max, float(ui::hud_bg_light_ramp_fraction_y()), k);
-	const auto colour_at = [&](size_t p_ix, size_t p_iy) {
-		const float l = ax.light[p_ix] * ay.light[p_iy];
-		return Color(k.premul_rgb255[0] / 255.0f * l, k.premul_rgb255[1] / 255.0f * l, k.premul_rgb255[2] / 255.0f * l, k.coverage * ax.coverage[p_ix] * ay.coverage[p_iy]);
-	};
-	for (size_t iy = 0; iy + 1 < ay.at.size(); ++iy) {
-		for (size_t ix = 0; ix + 1 < ax.at.size(); ++ix) {
-			if (!(ax.at[ix + 1] > ax.at[ix]) || !(ay.at[iy + 1] > ay.at[iy])) {
-				continue;
-			}
-			PackedVector2Array pts;
-			PackedColorArray cols;
-			const size_t corner[4][2] = { { ix, iy }, { ix + 1, iy }, { ix + 1, iy + 1 }, { ix, iy + 1 } };
-			for (const auto &c : corner) {
-				pts.push_back(Vector2(ax.at[c[0]], ay.at[c[1]]));
-				cols.push_back(colour_at(c[0], c[1]));
-			}
-			rs->canvas_item_add_polygon(p_target.canvas_item, pts, cols);
-		}
-	}
-	paint_.bg_panels++;
-	paint_.paints++;
 }
 
 void Bf3NativeHud::paint_ekg(const SwfEngineTarget &p_target) {

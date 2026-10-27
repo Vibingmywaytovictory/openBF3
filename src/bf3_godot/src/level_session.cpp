@@ -139,6 +139,9 @@ void Bf3LevelSession::shutdown() {
 		upload_.wait_tasks();
 	}
 	game_shutdown();
+	if (extra_client_ != nullptr) {
+		extra_client_->stop();
+	}
 	if (client_ != nullptr) {
 		client_->stop();
 	}
@@ -547,6 +550,23 @@ bool Bf3LevelSession::restart_client(const std::string &p_netsim, uint64_t p_see
 	mapper_.reset_life();
 	mapper_.release_all();
 	const bf3::core::Status s = client_->start(client_config(p_netsim, p_seed), shared_level());
+	if (!s.ok()) {
+		*r_error = s.error().message;
+		return false;
+	}
+	return true;
+}
+
+bool Bf3LevelSession::join_extra_client(std::string *r_error) {
+	if (server_ == nullptr || shared_level() == nullptr || extra_client_ != nullptr) {
+		*r_error = extra_client_ != nullptr ? "a second client already joined" : "no session";
+		return false;
+	}
+	host::ClientSessionConfig cc = client_config(netsim_, seed_ + 1);
+	cc.name = "player2";
+	cc.request_dev_commands = false;
+	extra_client_ = std::make_unique<host::ClientSession>();
+	const bf3::core::Status s = extra_client_->start(cc, shared_level());
 	if (!s.ok()) {
 		*r_error = s.error().message;
 		return false;

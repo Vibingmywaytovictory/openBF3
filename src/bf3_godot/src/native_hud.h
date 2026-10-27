@@ -1,5 +1,6 @@
 #pragma once
 
+#include "hud_view_paint.h"
 #include "native_tags.h"
 #include "swf_view.h"
 #include "ui_screen_host.h"
@@ -137,9 +138,7 @@ private:
 	bf3::core::Status open_view(size_t p_index);
 	void drop_view(size_t p_index);
 	void arrange();
-	void apply_effects(size_t p_index);
 	void paint(size_t p_index);
-	void paint_bg(const SwfEngineTarget &p_target);
 	void paint_ekg(const SwfEngineTarget &p_target);
 	void paint_minimap(const SwfEngineTarget &p_target, const bf3::core::ui::SwfScene &p_scene);
 	void paint_tags();
@@ -171,12 +170,11 @@ private:
 	double vfov_deg_ = 0.0;
 	NativeHudMinimapPose pose_;
 	double ekg_clock_ = 0.0;
-	std::map<std::string, std::pair<bf3::core::ui::SwfRect, godot::Vector2i>, std::less<>> painted_bounds_;
+	HudBgPainter bg_;
 	NativeHudPaintStats paint_;
 
 	Bf3MinimapHud *minimap_source_ = nullptr;
 	godot::Ref<godot::ShaderMaterial> minimap_material_;
-	godot::Ref<godot::ShaderMaterial> bg_material_;
 	godot::Ref<godot::ImageTexture> minimap_mask_;
 	godot::Ref<godot::ImageTexture> minimap_hatch_;
 	godot::RID minimap_map_item_;

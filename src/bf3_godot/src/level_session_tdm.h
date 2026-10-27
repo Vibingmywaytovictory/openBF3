@@ -24,6 +24,7 @@ class MenuCheck;
 class NativeScreensCheck;
 class DeployCheck;
 class LoadingScreenCheck;
+class OverlayCheck;
 
 struct TdmState {
 
@@ -108,6 +109,8 @@ struct TdmState {
 	std::unique_ptr<NativeScreensCheck, void (*)(NativeScreensCheck *)> native_check{ nullptr, nullptr };
 	std::unique_ptr<LoadingScreenCheck, void (*)(LoadingScreenCheck *)> loading_check{ nullptr, nullptr };
 	std::unique_ptr<DeployCheck, void (*)(DeployCheck *)> deploy_run{ nullptr, nullptr };
+	bool overlay_check = false;
+	std::unique_ptr<OverlayCheck, void (*)(OverlayCheck *)> overlay_run{ nullptr, nullptr };
 };
 
 Bf3UiScreens *tdm_ui_screens(const TdmState &p_m);

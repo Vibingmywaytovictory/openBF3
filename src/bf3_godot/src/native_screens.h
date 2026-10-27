@@ -1,5 +1,6 @@
 #pragma once
 
+#include "hud_view_paint.h"
 #include "ui_screen_host.h"
 #include "ui_screen_records.h"
 
@@ -13,6 +14,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -77,7 +79,7 @@ public:
 	void set_drawn(std::string_view p_partition, bool p_drawn);
 	void set_manual(bool p_manual) { manual_ = p_manual; }
 	void set_model(const bf3::core::ui::HudModel &p_model) { model_ = p_model; }
-	void set_client(bf3::core::ui::HudClientState p_client) { client_ = std::move(p_client); }
+	void set_client(bf3::core::ui::HudClientState p_client);
 	bf3::core::Status open_movie_screen(std::string_view p_movie, bf3::core::ui::HudRootData *p_data);
 	bf3::core::ui::HudScreen *hud_screen(std::string_view p_partition);
 	Bf3SwfView *screen_view(std::string_view p_partition);
@@ -122,6 +124,7 @@ private:
 	const Entry *find(std::string_view p_partition) const;
 	bf3::core::ui::HudScreen *screen_of(const Entry &p_entry) const;
 	Bf3SwfView *view_of(const Entry &p_entry) const;
+	static std::string view_owner(const Entry &p_entry);
 	bf3::core::Status open_entry(std::string_view p_partition, const bf3::core::ui::HudScreenAsset &p_asset,
 			bf3::core::ui::HudRootData *p_data);
 	void begin_close(Entry &r_entry);
@@ -133,6 +136,7 @@ private:
 	void apply_visibility(Entry &r_entry);
 	Entry *input_target();
 	std::vector<Entry *> mouse_screens();
+	Entry *background_listener(const Entry *p_target, int32_t p_concept, bool p_pressed);
 	std::optional<godot::Vector2> stage_point(const Entry &p_entry, godot::Vector2 p_viewport) const;
 	void note(std::string p_line);
 	void error(std::string p_message);
@@ -143,6 +147,8 @@ private:
 	bool manual_ = false;
 	std::vector<std::unique_ptr<Entry>> entries_;
 	std::set<std::string, std::less<>> drawn_;
+	HudBgPainter bg_;
+	std::map<std::string, uint64_t, std::less<>> effects_seen_;
 	int32_t next_order_ = kUiScreensFirstOwnOrder;
 	std::string pressed_screen_;
 	bf3::core::ui::HudModel model_{};

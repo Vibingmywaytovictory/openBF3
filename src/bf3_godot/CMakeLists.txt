@@ -164,6 +164,13 @@ target_sources(bf3_godot PRIVATE
 )
 
 target_sources(bf3_godot PRIVATE
+    src/overlay_screens.h
+    src/overlay_screens.cpp
+    src/hud_view_paint.h
+    src/hud_view_paint.cpp
+)
+
+target_sources(bf3_godot PRIVATE
     src/hud_tdm.cpp
     src/tdm_hud_records.cpp
     src/hud_tdm_screen.h
@@ -244,6 +251,8 @@ if(OPENBF3_BUILD_CHECKS)
         src/native_hud_moments.cpp
         src/native_screens_check.cpp
         src/native_screens_check.h
+        src/overlay_check.cpp
+        src/overlay_check.h
         src/s0_selftest.cpp
         src/s0_selftest.h
         src/swf_view_check.cpp

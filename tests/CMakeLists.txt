@@ -970,6 +970,9 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_godot_row(godot.loading_screen godot_loading_screen.cmake WINDOW TIMEOUT 240)
     set_tests_properties(godot.loading_screen PROPERTIES RUN_SERIAL TRUE)
     openbf3_cost(godot.loading_screen 1 45)
+    openbf3_godot_row(godot.overlays godot_overlays.cmake WINDOW TIMEOUT 240)
+    set_tests_properties(godot.overlays PROPERTIES RUN_SERIAL TRUE)
+    openbf3_cost(godot.overlays 1 45)
 endif()
 
 add_test(NAME audio.cuts.unit COMMAND test_audio_hdr --test-suite=audio-cuts)

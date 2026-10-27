@@ -12,12 +12,14 @@
 #include "native_flow.h"
 #include "native_hud.h"
 #include "native_screens.h"
+#include "overlay_screens.h"
 #include "ui_assets.h"
 #include "ui_post_process.h"
 #if OPENBF3_BUILD_CHECKS
 #include "deploy_check.h"
 #include "loading_screen_check.h"
 #include "native_screens_check.h"
+#include "overlay_check.h"
 #endif
 
 #include "bf3/core/ui/text_db.h"
@@ -199,6 +201,7 @@ void build_tdm_ui(
 		screens->set_manual(true);
 		screens->set_drawn(bf3::core::ui::kKillScreenPartition, true);
 		DeployScreens::draw(*screens);
+		OverlayScreens::draw(*screens);
 		r_game.layer->add_child(screens);
 		screens->adopt(r_game.native_hud);
 		r_m.screen_records.add(screens);
@@ -293,6 +296,7 @@ void step_native_screens(GameState &r_game, TdmState &r_m, Node *p_parent, const
 	}
 	r_m.deploy_screens.apply(r_game.hud_model);
 	screens->set_model(r_game.hud_model);
+	OverlayScreens::frame(*screens);
 	screens->step(r_m.native_delta_s);
 	r_m.deploy_screens.frame(*screens, r_game.native_hud, p_parent, p_level, r_m.windowed);
 	if (!r_m.native_screens_check && !r_m.loading_screen_check && !r_m.deploy_check) {
@@ -401,6 +405,10 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 		m.deploy_check = has_user_arg("deploy-check");
 		if ((m.native_screens_check || m.loading_screen_check || m.menu_check_on || m.deploy_check) &&
 				quit_after_ <= 0.0) {
+			quit_after_ = 1.0e9;
+		}
+		m.overlay_check = has_user_arg("overlay-check");
+		if (m.overlay_check && quit_after_ <= 0.0) {
 			quit_after_ = 1.0e9;
 		}
 		m.options.tdm_tuning_cfg = config_path("res://config/tdm_tuning.cfg");
@@ -847,6 +855,29 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			m.finished = true;
 			UtilityFunctions::print(to_godot(m.loading_check->report()));
 			finish(m.loading_check->exit_code());
+			return true;
+		}
+	}
+	if (m.overlay_check && screens != nullptr && m.native_following && !m.finished) {
+		if (m.overlay_run == nullptr) {
+			m.overlay_run = std::unique_ptr<OverlayCheck, void (*)(OverlayCheck *)>(
+					new OverlayCheck(user_arg_value("overlay-shots")), &delete_part<OverlayCheck>);
+		}
+		OverlayCheckIo io;
+		io.press = [this](Key p_key, bool p_pressed) {
+			Ref<InputEventKey> k;
+			k.instantiate();
+			k->set_keycode(p_key);
+			k->set_physical_keycode(p_key);
+			k->set_pressed(p_pressed);
+			tdm_ui_input(k);
+		};
+		io.join = [this](std::string *r_error) { return join_extra_client(r_error); };
+		io.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		if (m.overlay_run->frame(*screens, f, now_s, io)) {
+			m.finished = true;
+			UtilityFunctions::print(to_godot(m.overlay_run->report()));
+			finish(m.overlay_run->exit_code());
 			return true;
 		}
 	}
