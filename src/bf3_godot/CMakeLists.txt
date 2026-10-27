@@ -228,6 +228,8 @@ if(OPENBF3_BUILD_CHECKS)
         src/m2b_check.cpp
         src/m2b_check_rows.cpp
         src/m2b_check_rows.h
+        src/deploy_check.cpp
+        src/deploy_check.h
         src/loading_screen_check.cpp
         src/loading_screen_check.h
         src/m9_reload_check.cpp

@@ -12,7 +12,9 @@
 #include "native_hud.h"
 #include "native_screens.h"
 #include "ui_assets.h"
+#include "ui_post_process.h"
 #if OPENBF3_BUILD_CHECKS
+#include "deploy_check.h"
 #include "loading_screen_check.h"
 #include "native_screens_check.h"
 #endif
@@ -287,7 +289,7 @@ void step_native_screens(GameState &r_game, TdmState &r_m, Node *p_parent, const
 	screens->set_model(r_game.hud_model);
 	screens->step(r_m.native_delta_s);
 	r_m.deploy_screens.frame(*screens, r_game.native_hud, p_parent, p_level, r_m.windowed);
-	if (!r_m.native_screens_check && !r_m.loading_screen_check) {
+	if (!r_m.native_screens_check && !r_m.loading_screen_check && !r_m.deploy_check) {
 		screens->clear_log();
 	}
 }
@@ -388,7 +390,8 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 		m.native_screens_check = has_user_arg("native-screens-check");
 		m.loading_screen_check = has_user_arg("loading-screen-check");
 		m.native_screens = m.native_screens_check || m.loading_screen_check || user_arg_value("native-screens") != "0";
-		if ((m.native_screens_check || m.loading_screen_check) && quit_after_ <= 0.0) {
+		m.deploy_check = has_user_arg("deploy-check");
+		if ((m.native_screens_check || m.loading_screen_check || m.deploy_check) && quit_after_ <= 0.0) {
 			quit_after_ = 1.0e9;
 		}
 		m.options.tdm_tuning_cfg = config_path("res://config/tdm_tuning.cfg");
@@ -406,6 +409,9 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 			quit_after_ = 1.0e9;
 		}
 		mapper_.enable_tdm(true);
+		if (m.deploy_check) {
+			mapper_.set_scripted(true);
+		}
 		UtilityFunctions::print(to_godot(std::string("[tdm] ") + (m.playable ? "playable scene" : "check run") + ": TDM rules on, " +
 				(m.options.deploy_screen ? "spawn screen (Enter deploys, 1-4 kit, 3 defibrillator, Tab scoreboard)" : "no spawn screen (automatic respawn, K kit)") +
 				", " + std::to_string(m.options.bots) + " TDM bots, " + limits_text(m.options) + ", tuning " +
@@ -733,6 +739,80 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			m.finished = true;
 			UtilityFunctions::print(to_godot(m.native_check->report()));
 			finish(m.native_check->exit_code());
+			return true;
+		}
+	}
+	if (m.deploy_check && screens != nullptr && m.native_following && !m.finished) {
+		if (m.deploy_run == nullptr) {
+			m.deploy_run = std::unique_ptr<DeployCheck, void (*)(DeployCheck *)>(
+					new DeployCheck(user_arg_value("deploy-shots")), &delete_part<DeployCheck>);
+		}
+		DeployCheckIo io;
+		io.press = [this](Key p_key, bool p_pressed) { scripted_ui_key(p_key, p_pressed); };
+		io.move = [this](Vector2 p_at) {
+			Ref<InputEventMouseMotion> e;
+			e.instantiate();
+			e->set_position(p_at);
+			e->set_global_position(p_at);
+			tdm_ui_input(e);
+		};
+		io.click = [this](Vector2 p_at, bool p_pressed) {
+			Ref<InputEventMouseButton> e;
+			e.instantiate();
+			e->set_position(p_at);
+			e->set_global_position(p_at);
+			e->set_button_index(MOUSE_BUTTON_LEFT);
+			e->set_pressed(p_pressed);
+			tdm_ui_input(e);
+		};
+		io.suicide = [this] {
+			if (host::ClientSession *c = client()) {
+				c->send_suicide_request();
+			}
+		};
+		io.hold_scoreboard = [this](bool p_held) { mapper_.script_hold(InputMapper::TdmAction::Scoreboard, p_held); };
+		io.kit_key = [this](uint8_t p_kit) {
+			mapper_.script_press(InputMapper::TdmAction(uint8_t(InputMapper::TdmAction::Kit1) + p_kit));
+		};
+		io.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		io.state = [&r_game, &m, &f] {
+			DeployCheckState s;
+			s.alive = r_game.alive;
+			s.own_spawns = m.own_spawns;
+			s.own_deaths = m.own_deaths;
+			s.spawn_kit = m.spawn_kit;
+			s.own_kit = f.own_kit;
+			s.time_to_respawn = r_game.hud_model.spawn_logic.time_to_respawn;
+			s.spawn_actions = m.deploy_screens.stats().spawn_actions;
+			s.kits_from_flow = m.deploy_screens.stats().kits_from_flow;
+			s.glitches = m.deploy_screens.stats().glitches;
+			s.dim_outs = m.deploy_screens.stats().dim_outs;
+			s.picks_from_flow = m.deploy_screens.stats().picks_from_flow;
+			s.loadout_requests = m.loadout_requests_sent;
+			const bf3::core::ui::HudCustomization &c = r_game.hud_model.customization;
+			const bf3::core::ui::HudItemList &primaries = c.kit_grid_data[0];
+			s.primary_count = std::min<uint32_t>(primaries.count, uint32_t(s.primary_items.size()));
+			s.primary_selected = c.kit_grid_selected[0];
+			for (size_t i = 0; i < s.primary_count; ++i) {
+				s.primary_items[i] = primaries.items[i].item_id;
+			}
+			s.chosen_primary = c.kit_primary_weapon.item_id;
+			const size_t primary = size_t(bf3::core::gameplay::WeaponSlot::Primary);
+			if (const host::HudStaticRow *row = f.own_weapons_valid
+							? r_game.hud_static.row(f.own_weapons_curr.slots[primary].def)
+							: nullptr) {
+				s.spawned_primary = row->item_id;
+			}
+			if (const Bf3UiPostProcess *post = Bf3UiPostProcess::current()) {
+				s.glitch_triggers = post->stats().glitch_triggers;
+				s.glitch_power = post->stats().last_trigger_power;
+			}
+			return s;
+		};
+		if (m.deploy_run->frame(*screens, now_s, io)) {
+			m.finished = true;
+			UtilityFunctions::print(to_godot(m.deploy_run->report()));
+			finish(m.deploy_run->exit_code());
 			return true;
 		}
 	}
