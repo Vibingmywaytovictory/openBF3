@@ -46,4 +46,14 @@ public:
 	virtual void slot_clicked(int32_t p_slot) = 0;
 	virtual void kit_button_pressed(const std::string &p_name) = 0;
 };
+
+class HudGrid {
+public:
+	virtual ~HudGrid() = default;
+	virtual int32_t selected_index() const = 0;
+	virtual size_t cell_count() const = 0;
+	virtual int32_t columns() const = 0;
+	virtual bool closing() const = 0;
+	virtual std::string cell_name(size_t p_index) const = 0;
+};
 }

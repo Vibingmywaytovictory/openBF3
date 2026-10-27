@@ -526,6 +526,7 @@ struct HudCustomization {
 	std::array<int16_t, kHudAccessorySlots> accessory_selected{};
 	std::array<HudKitEntry, kHudKitCount> kits_data{};
 	int32_t customization_team = 0;
+	int32_t selected_slot = 0;
 };
 
 struct HudSettings {

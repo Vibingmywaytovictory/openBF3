@@ -334,4 +334,75 @@ TEST_SUITE("ui-deploy") {
 		CHECK(fired == close);
 		CHECK(s.hud->stats().as2.failed_ops == 0);
 	}
+	TEST_CASE("spawnscreenpc Grid_01: the SELECT ITEM picker draws one KitCell per item of the selected slot with the "
+			  "selected one highlighted, slides up on Show, and a cell click fires Released with its index") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudClientState c = retail_text_client(retail_text_db(*r));
+		c.localise_hash = [](uint32_t p_hash) {
+			return p_hash >= 0x300u && p_hash < 0x320u ? "GUN " + std::to_string(p_hash - 0x300u) : std::string();
+		};
+		RetailScreen s = open_retail_screen(*r, kSpawnScreenPc, c);
+		std::vector<std::string> fired;
+		s.hud->set_event_sink([&](const HudWidgetEvent &e) {
+			if (e.instance == "Grid_01" && !e.query.starts_with("UIWidgetEventID_PlaySound")) {
+				fired.push_back(e.query + " " + e.param.to_string());
+			}
+		});
+		HudModel m{};
+		HudItemList &list = m.customization.kit_grid_data[0];
+		list.count = 4;
+		for (uint32_t i = 0; i < list.count; ++i) {
+			list.items[i].item_id = 1000u + i;
+			list.items[i].name_sid_hash = 0x300u + i;
+		}
+		m.customization.kit_grid_selected[0] = 1;
+		m.customization.selected_slot = 0;
+		s.hud->initialize(m);
+		const std::string grid = "instance1.Grid_01";
+		auto *g = dynamic_cast<HudGrid *>(s.hud->controller(grid));
+		REQUIRE(g != nullptr);
+		CHECK(g->cell_count() == 4);
+		CHECK(g->selected_index() == 1);
+		CHECK(g->columns() >= 1);
+		const std::string cell1 = grid + ".gridItems." + g->cell_name(1);
+		s.hud->advance(0.1);
+		CHECK(s.hud->clip(grid + ".gridItems." + g->cell_name(0) + ".label.txt").text() == "GUN 0");
+		CHECK(s.at(cell1 + ".highlight").visible);
+		CHECK_FALSE(s.at(grid + ".gridItems." + g->cell_name(0) + ".highlight").visible);
+		const float hidden_y = s.hud->clip(grid + ".gridItems").y();
+		HudWidgetHost *host = s.hud->host(grid);
+		REQUIRE(host != nullptr);
+		s.hud->controller(grid)->in_event(*host, 10, As2Value::of(0));
+		s.hud->advance(1.0);
+		CHECK(s.at(grid).visible);
+		CHECK(s.hud->clip(grid + ".gridItems").y() < hidden_y);
+		CHECK(s.hud->clip(grid + ".gridItems").alpha() == doctest::Approx(75.0f));
+		fired.clear();
+		const As2Clip target = s.hud->clip(cell1 + ".bg").exists() ? s.hud->clip(cell1 + ".bg") : s.hud->clip(cell1);
+		const auto [x, y] = stage_centre(s, target.path());
+		CHECK(s.hud->hit_target(x, y) == target.path());
+		s.hud->mouse_move(x, y);
+		s.hud->mouse_button(x, y, 1, true);
+		s.hud->mouse_button(x, y, 1, false);
+		CHECK(std::find(fired.begin(), fired.end(), "UIWidgetEventID_OnItemReleased 1") != fired.end());
+		s.hud->controller(grid)->in_event(*host, 11, As2Value::of(0));
+		s.hud->advance(1.0);
+		CHECK_FALSE(s.at(grid).visible);
+		CHECK(s.hud->stats().as2.failed_ops == 0);
+	}
+	TEST_CASE("spawnscreenpc: every AS2 class on the screen has its controller") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		RetailScreen s = open_retail_screen(*r, kSpawnScreenPc, retail_text_client(retail_text_db(*r)));
+		std::string unknown;
+		for (const std::string &p : s.hud->stats().unknown_class_paths) {
+			unknown += p + " ";
+		}
+		CHECK_MESSAGE(s.hud->stats().unknown_class_paths.empty(), unknown);
+	}
 }
