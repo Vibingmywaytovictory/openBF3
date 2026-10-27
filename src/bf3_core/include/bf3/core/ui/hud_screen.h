@@ -79,6 +79,15 @@ struct HudListBinding {
 	bool use_3d_selection = false;
 };
 
+struct HudPageHeaderBinding {
+	HudDataSource header;
+	HudDataSource sub_header;
+	HudDataSource icon;
+	std::string static_header;
+	std::string static_sub_header;
+	std::string static_icon;
+};
+
 struct HudWidgetEventPort {
 	std::string name;
 	std::string query;
@@ -103,6 +112,7 @@ struct HudWidgetNode {
 	std::optional<HudDataSource> message_query;
 	std::optional<HudDataSource> widget_path_query;
 	std::optional<HudListBinding> list;
+	std::optional<HudPageHeaderBinding> page_header;
 	int32_t number_of_rows = 0;
 	std::optional<double> dispersion_base_offset;
 

@@ -43,6 +43,7 @@ public:
 	virtual void set_scrollable(bool p_scrollable) = 0;
 	virtual void set_interactive(bool p_interactive) = 0;
 	virtual const std::string &label_state() const = 0;
+	virtual void set_state_style(std::string_view p_state, uint32_t p_color, const SwfFilter &p_glow) = 0;
 };
 
 inline constexpr std::string_view kSpawnPointListCategory = "ui/uicomponents/uispawnpointcomp";
@@ -53,6 +54,7 @@ inline constexpr int32_t kDefaultSpawnPointKey = -233610778;
 std::optional<As2Value> hud_model_list_rows(
 		const HudDataSource &p_query, const HudModel &p_model, const HudClientState &p_client);
 std::optional<int32_t> hud_model_list_selection(const HudDataSource &p_query, const HudModel &p_model);
+std::optional<As2Value> hud_menu_list_rows(const HudDataSource &p_query, const HudModel &p_model);
 
 class RowBaseClass : public HudWidgetController {
 public:
@@ -94,6 +96,7 @@ public:
 
 protected:
 	void state_changed();
+	virtual void check_for_new_content() const;
 	virtual void on_state(const std::string &) {}
 	virtual void member(std::string_view p_name, const As2Value &p_value);
 	void register_direct_access_array(std::vector<ListAccessItem> p_items);
@@ -104,7 +107,6 @@ protected:
 
 private:
 	void check_states(const As2Value &p_data);
-	void check_for_new_content() const;
 	void setup_mouse_interaction();
 	void turn_off_mouse_interaction();
 	void handle_glow_size() const;

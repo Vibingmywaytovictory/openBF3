@@ -1000,6 +1000,11 @@ add_test(NAME ui.options.install COMMAND test_ui_options --test-suite=ui-options
 set_tests_properties(ui.options.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 add_test(NAME ui.settings.unit COMMAND test_ui_options --test-suite=ui-settings-unit)
 set_tests_properties(ui.settings.unit PROPERTIES TIMEOUT 60)
+openbf3_test(test_ui_menu test_main.cpp ui_menu_tests.cpp ui_retail_support.h test_support.h)
+target_link_libraries(test_ui_menu PRIVATE bf3_core)
+target_include_directories(test_ui_menu PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_core/src/ui/widgets)
+add_test(NAME ui.menu COMMAND test_ui_menu --test-suite=ui-menu)
+set_tests_properties(ui.menu PROPERTIES SKIP_RETURN_CODE 77)
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME hygiene.rules COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tools/check_hygiene.py" "${CMAKE_SOURCE_DIR}")

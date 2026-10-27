@@ -959,15 +959,18 @@ TEST_CASE("the loadout screens: kit and customization from the catalog and the o
 		CHECK(menu.entries[i].label_sid_hash == ui::text_hash(host::kHudMenuSids[i]));
 		CHECK(menu.entries[i].action == ui::HudMenuAction(i));
 	}
-	CHECK(menu.entries[0].enabled);
-	CHECK(menu.entries[1].enabled);
-	CHECK_FALSE(menu.entries[2].enabled);
-	CHECK_FALSE(menu.entries[3].enabled);
-	CHECK(menu.entries[4].enabled);
+	const auto entry = [&](ui::HudMenuAction p_action) { return menu.entries[size_t(p_action)]; };
+	CHECK(entry(ui::HudMenuAction::Resume).enabled);
+	CHECK(entry(ui::HudMenuAction::Scoreboard).enabled);
+	CHECK_FALSE(entry(ui::HudMenuAction::Squad).enabled);
+	CHECK_FALSE(entry(ui::HudMenuAction::Suicide).enabled);
+	CHECK(entry(ui::HudMenuAction::Options).enabled);
+	CHECK(entry(ui::HudMenuAction::Quit).enabled);
 	in.alive = true;
 	in.in_menu = true;
 	host::fill_hud_tdm(in, {}, st, state, m);
-	CHECK(menu.entries[2].enabled);
+	CHECK(entry(ui::HudMenuAction::Suicide).enabled);
+	CHECK_FALSE(entry(ui::HudMenuAction::Squad).enabled);
 	CHECK(m.user.is_in_menu);
 	CHECK(m.user.is_ingame);
 	CHECK(std::string(m.user.user_name.data()) == "Own");
@@ -978,12 +981,12 @@ TEST_CASE("the loadout screens: kit and customization from the catalog and the o
 	in.match.phase = net::MatchPhase::RoundOver;
 	in.in_menu = false;
 	host::fill_hud_tdm(in, {}, st, state, m);
-	CHECK_FALSE(menu.entries[2].enabled);
+	CHECK_FALSE(entry(ui::HudMenuAction::Suicide).enabled);
 	CHECK_FALSE(m.user.is_in_menu);
 	in.match_valid = false;
 	host::fill_hud_tdm(in, {}, st, state, m);
 	CHECK_FALSE(m.user.is_ingame);
-	CHECK_FALSE(menu.entries[2].enabled);
+	CHECK_FALSE(entry(ui::HudMenuAction::Suicide).enabled);
 	CHECK(state.bad_inputs == 1);
 	CHECK(state.rows_dropped == 0);
 	in.match_valid = true;
@@ -1175,9 +1178,10 @@ TEST_CASE("every string resolves to its recorded English") {
 	constexpr gs::TdmTextEntry kFeedTexts[] = {
 		{ gs::TdmText::Count, host::kHudMenuSids[0], "RESUME" },
 		{ gs::TdmText::Count, host::kHudMenuSids[1], "SCOREBOARD" },
-		{ gs::TdmText::Count, host::kHudMenuSids[2], "SUICIDE" },
-		{ gs::TdmText::Count, host::kHudMenuSids[3], "OPTIONS" },
-		{ gs::TdmText::Count, host::kHudMenuSids[4], "QUIT" },
+		{ gs::TdmText::Count, host::kHudMenuSids[2], "SQUAD & TEAM" },
+		{ gs::TdmText::Count, host::kHudMenuSids[3], "SUICIDE" },
+		{ gs::TdmText::Count, host::kHudMenuSids[4], "OPTIONS" },
+		{ gs::TdmText::Count, host::kHudMenuSids[5], "QUIT" },
 		{ gs::TdmText::Count, host::kHudTdmModeSid, "TEAM DEATHMATCH" },
 		{ gs::TdmText::Count, "ID_H_MP_DM_RANDOMSPAWN", "RANDOM SPAWN POINT" },
 		{ gs::TdmText::Count, "ID_M_LEVELNAME_MP_SUBWAY", "OPERATION M\xC3\x89TRO" },

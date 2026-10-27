@@ -115,6 +115,21 @@ void read_binding(const EbxResolver &p_db, const EbxPartition &p_part, const Ebx
 		r_widget.list = list_binding_of(p_db, p_part, b->data());
 		return;
 	}
+	if (b->is_a("UIPageHeaderBinding")) {
+		HudPageHeaderBinding h;
+		const auto query = [&](std::string_view p_field) {
+			const std::optional<EbxStruct> q = detail::sub(b->data(), p_field);
+			return q ? source_of(p_db, p_part, *q) : HudDataSource{};
+		};
+		h.header = query("Header");
+		h.sub_header = query("SubHeader");
+		h.icon = query("Icon");
+		h.static_header = text_of(b->get("StaticHeader"));
+		h.static_sub_header = text_of(b->get("StaticSubHeader"));
+		h.static_icon = text_of(b->get("StaticIcon"));
+		r_widget.page_header = std::move(h);
+		return;
+	}
 	if (b->is_a("UIWidgetPathBinding")) {
 		if (const std::optional<EbxStruct> q = detail::sub(b->data(), "WidgetPathQuery")) {
 			r_widget.widget_path_query = source_of(p_db, p_part, *q);

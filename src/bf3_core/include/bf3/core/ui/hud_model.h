@@ -540,7 +540,10 @@ struct HudLevel {
 	uint32_t current_level = 0;
 };
 
-enum class HudMenuAction : uint8_t { Resume, Scoreboard, Suicide, Options, Quit };
+enum class HudMenuAction : uint8_t { Resume, Scoreboard, Squad, Suicide, Options, Quit };
+
+inline constexpr std::array<std::string_view, 6> kHudMenuActionSids{ "ID_M_IGMMP_RESUME", "ID_M_IGMMP_SCOREBOARD",
+	"ID_M_IGMMP_SQUAD", "ID_M_IGMMP_SUICIDE", "ID_M_IGMMP_OPTIONS", "ID_M_IGMMP_QUIT" };
 
 struct HudMenuEntry {
 	uint32_t label_sid_hash = 0;

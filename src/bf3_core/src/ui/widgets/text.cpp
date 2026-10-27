@@ -100,6 +100,14 @@ private:
 
 class PageHeaderClass final : public HudWidgetController {
 public:
+	void attach_node(HudWidgetHost &, const HudWidgetNode &p_node) override { binding_ = p_node.page_header; }
+
+	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const override {
+		if (binding_) {
+			hud_page_header_data(*binding_, p_model, p_client, r_out);
+		}
+	}
+
 	void initialize(HudWidgetHost &r_host, const HudWidgetInit &p_init) override {
 		if (const std::string *c = p_init.property("HideOnConsole")) {
 			hide_on_console_ = *c == "true";
@@ -122,6 +130,7 @@ public:
 	}
 
 private:
+	std::optional<HudPageHeaderBinding> binding_;
 	bool hide_on_console_ = false;
 	bool hide_on_pc_ = false;
 };

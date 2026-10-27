@@ -201,6 +201,8 @@ public:
 					"ListAccess", As2Value::of(hud_list_access_handle(b.list_query)), b.list_query.on_initialize });
 		} else if (std::optional<As2Value> rows = hud_model_list_rows(b.list_query, p_model, p_client)) {
 			r_data.push_back(HudDataEntry{ "List", std::move(*rows), b.list_query.on_initialize });
+		} else if (std::optional<As2Value> menu = hud_menu_list_rows(b.list_query, p_model)) {
+			r_data.push_back(HudDataEntry{ "List", std::move(*menu), b.list_query.on_initialize });
 		}
 	}
 

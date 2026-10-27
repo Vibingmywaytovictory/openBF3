@@ -110,7 +110,22 @@ public:
 
 	const std::string &label_state() const override { return state_; }
 
+	void set_state_style(std::string_view p_state, uint32_t p_color, const SwfFilter &p_glow) override {
+		if (p_state == "standard") {
+			standard_ = Style{ p_color, p_glow };
+		} else if (p_state == "inactive") {
+			inactive_ = Style{ p_color, p_glow };
+		}
+		set_text_format();
+		set_text_glow_filter();
+	}
+
 private:
+	struct Style {
+		uint32_t color = 0;
+		SwfFilter glow;
+	};
+
 	As2Clip field() const { return host_->clip("txtField"); }
 
 	void set_label() {
@@ -162,13 +177,13 @@ private:
 		}
 		txt.set_alpha(100.0f);
 		if (state_ == "standard") {
-			txt.set_text_color(kStandardColor);
+			txt.set_text_color(standard_ ? standard_->color : kStandardColor);
 			txt.set_alpha(kStandardAlpha);
 		} else if (state_ == "inverted") {
 			txt.set_text_color(kInvertedColor);
 			txt.set_alpha(kInvertedAlpha);
 		} else if (state_ == "inactive") {
-			txt.set_text_color(kInactiveColor);
+			txt.set_text_color(inactive_ ? inactive_->color : kInactiveColor);
 			txt.set_alpha(kInactiveAlpha);
 		}
 		txt.set_height(txt.text_height());
@@ -180,14 +195,16 @@ private:
 			return;
 		}
 		if (state_ == "standard") {
-			txt.set_filters({ as2_glow_filter(
-					kStandardGlowColor, 1.0, kGlowBlur, kGlowBlur, kStandardGlowStrength, kGlowQuality) });
+			txt.set_filters({ standard_ ? standard_->glow
+										: as2_glow_filter(kStandardGlowColor, 1.0, kGlowBlur, kGlowBlur,
+												  kStandardGlowStrength, kGlowQuality) });
 		} else if (state_ == "inverted") {
 			txt.set_filters({ as2_glow_filter(
 					kInvertedGlowColor, 1.0, kGlowBlur, kGlowBlur, kInvertedGlowStrength, kGlowQuality) });
 		} else if (state_ == "inactive") {
-			txt.set_filters({ as2_glow_filter(
-					kInactiveGlowColor, 1.0, kGlowBlur, kGlowBlur, kInvertedGlowStrength, kGlowQuality) });
+			txt.set_filters({ inactive_ ? inactive_->glow
+										: as2_glow_filter(kInactiveGlowColor, 1.0, kGlowBlur, kGlowBlur,
+												  kInvertedGlowStrength, kGlowQuality) });
 		}
 	}
 
@@ -196,6 +213,8 @@ private:
 	std::string text_ = "LABEL";
 	std::string state_ = "standard";
 	std::string mask_;
+	std::optional<Style> standard_;
+	std::optional<Style> inactive_;
 	float width_ = std::numeric_limits<float>::quiet_NaN();
 	float scroll_distance_ = 0.0f;
 	bool interactive_ = true;

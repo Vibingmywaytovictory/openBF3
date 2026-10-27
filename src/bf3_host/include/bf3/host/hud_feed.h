@@ -172,8 +172,7 @@ inline constexpr std::string_view kDefaultAdvancedDogtag = "ui/art/persistence/d
 
 inline constexpr std::array<uint8_t, core::ui::kHudSpawnKitItems> kHudSpawnSlots{ 0, 1, 2, 6, 7 };
 
-inline constexpr std::array<std::string_view, 5> kHudMenuSids{ "ID_M_IGMMP_RESUME", "ID_M_IGMMP_SCOREBOARD",
-	"ID_M_IGMMP_SUICIDE", "ID_M_IGMMP_OPTIONS", "ID_M_IGMMP_QUIT" };
+inline constexpr const auto &kHudMenuSids = core::ui::kHudMenuActionSids;
 inline constexpr std::string_view kHudTdmModeSid = "ID_M_GAMEMODE_TEAMDEATHMATCH";
 
 struct HudTdmFeedState {

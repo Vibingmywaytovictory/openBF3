@@ -182,6 +182,9 @@ inline int32_t as2_int(const As2Value &p_v) {
 	return std::isfinite(n) ? int32_t(std::trunc(n)) : 0;
 }
 
+void hud_page_header_data(
+		const HudPageHeaderBinding &p_binding, const HudModel &p_model, const HudClientState &p_client, HudData &r_out);
+
 inline void goto_and_stop_number(const As2Clip &p_clip, double p_frame) {
 	if (std::isfinite(p_frame)) {
 		p_clip.goto_and_stop(int32_t(p_frame));
