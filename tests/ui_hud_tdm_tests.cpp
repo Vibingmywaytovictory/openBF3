@@ -964,13 +964,14 @@ TEST_CASE("the loadout screens: kit and customization from the catalog and the o
 	CHECK(entry(ui::HudMenuAction::Scoreboard).enabled);
 	CHECK_FALSE(entry(ui::HudMenuAction::Squad).enabled);
 	CHECK_FALSE(entry(ui::HudMenuAction::Suicide).enabled);
-	CHECK(entry(ui::HudMenuAction::Options).enabled);
+	CHECK_FALSE(entry(ui::HudMenuAction::Options).enabled);
 	CHECK(entry(ui::HudMenuAction::Quit).enabled);
 	in.alive = true;
 	in.in_menu = true;
 	host::fill_hud_tdm(in, {}, st, state, m);
 	CHECK(entry(ui::HudMenuAction::Suicide).enabled);
 	CHECK_FALSE(entry(ui::HudMenuAction::Squad).enabled);
+	CHECK_FALSE(entry(ui::HudMenuAction::Options).enabled);
 	CHECK(m.user.is_in_menu);
 	CHECK(m.user.is_ingame);
 	CHECK(std::string(m.user.user_name.data()) == "Own");

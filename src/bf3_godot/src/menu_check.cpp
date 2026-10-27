@@ -8,6 +8,7 @@
 #include "swf_view.h"
 
 #include "bf3/core/ui/hud_screen.h"
+#include "bf3/core/ui/options.h"
 #include "bf3/core/ui/swf_hit.h"
 #include "bf3/core/ui/swf_scene.h"
 
@@ -88,7 +89,7 @@ std::string MenuCheck::row_state(const Ctx &p_c, size_t p_row) {
 	return p_row < rows.size() ? frame_label(*rows[p_row]) : std::string("no row");
 }
 
-std::optional<godot::Vector2> MenuCheck::row_point(const Ctx &p_c, size_t p_row) {
+std::optional<godot::Vector2> MenuCheck::row_point(const Ctx &p_c, size_t p_row, bool p_hit) {
 	const UiScreenSlot slot = p_c.screens.find_screen(kIngameMenuPartition);
 	const ui::SwfScene *scene = menu_scene(slot);
 	if (scene == nullptr || slot.view == nullptr) {
@@ -101,7 +102,7 @@ std::optional<godot::Vector2> MenuCheck::row_point(const Ctx &p_c, size_t p_row)
 	const ui::SwfMatrix w = ui::swf_world_matrix(*scene, rows[p_row]->id);
 	const float sx = w.a * kMenuCheckRowHitX + w.c * kMenuCheckRowHitY + w.tx;
 	const float sy = w.b * kMenuCheckRowHitX + w.d * kMenuCheckRowHitY + w.ty;
-	if (slot.screen->hit_target(sx, sy) != rows[p_row]->path) {
+	if (p_hit && slot.screen->hit_target(sx, sy) != rows[p_row]->path) {
 		return std::nullopt;
 	}
 	const SwfStageFit fit = slot.view->stage_fit();
@@ -172,8 +173,8 @@ void MenuCheck::tap(const Ctx &p_c, godot::Key p_key) {
 	p_c.io.press(p_key, false);
 }
 
-void MenuCheck::click_row(const Ctx &p_c, size_t p_row) {
-	const std::optional<godot::Vector2> at = row_point(p_c, p_row);
+void MenuCheck::click_row(const Ctx &p_c, size_t p_row, bool p_hit) {
+	const std::optional<godot::Vector2> at = row_point(p_c, p_row, p_hit);
 	if (!at) {
 		failure_ = "menu row " + std::to_string(p_row) + " is not under its own hit point";
 		return;
@@ -222,14 +223,26 @@ std::vector<MenuCheck::Step> MenuCheck::steps() {
 	s.push_back({ "Down highlights SCOREBOARD", row_is(1, "selected"), press(K::KEY_DOWN) });
 	s.push_back({ "Down skips SQUAD & TEAM to SUICIDE",
 			[](MenuCheck &, const Ctx &c) { return row_state(c, 2) == "inactive" && row_state(c, 3) == "selected"; },
+			press(K::KEY_DOWN) });
+	s.push_back({ "Down skips the disabled OPTIONS to QUIT",
+			[](MenuCheck &, const Ctx &c) { return row_state(c, 4) == "inactive" && row_state(c, 5) == "selected"; },
+			[](MenuCheck &r_self, const Ctx &c) { r_self.click_row(c, 4, false); } });
+	s.push_back({ "a click on OPTIONS opens nothing",
+			[](MenuCheck &, const Ctx &c) { return shown(c, kIngameMenuPartition) && row_state(c, 4) == "inactive"; },
 			[](MenuCheck &r_self, const Ctx &c) {
-				if (const std::optional<godot::Vector2> at = row_point(c, 4)) {
+				const bool options = std::any_of(bf3::core::ui::kOptionsScreens.begin(),
+						bf3::core::ui::kOptionsScreens.end(), [&c](std::string_view p) { return shown(c, p); });
+				if (options || !shown(c, kIngameMenuPartition)) {
+					r_self.failure_ = "the disabled OPTIONS row left the menu";
+					return;
+				}
+				if (const std::optional<godot::Vector2> at = row_point(c, 1)) {
 					c.io.move(*at);
 				} else {
-					r_self.failure_ = "OPTIONS is not under its own hit point";
+					r_self.failure_ = "SCOREBOARD is not under its own hit point";
 				}
 			} });
-	s.push_back({ "hover turns OPTIONS over", row_is(4, "over"),
+	s.push_back({ "hover turns SCOREBOARD over", row_is(1, "over"),
 			[](MenuCheck &r_self, const Ctx &c) { r_self.click_row(c, 0); }, "hover" });
 	s.push_back({ "a click on RESUME returns to play with a glitch",
 			[in_play](MenuCheck &r_self, const Ctx &c) {

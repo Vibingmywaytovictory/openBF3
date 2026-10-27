@@ -73,11 +73,11 @@ private:
 	static std::string hud_screens_text(const Ctx &p_c);
 	static bool shown(const Ctx &p_c, std::string_view p_partition);
 	static std::string row_state(const Ctx &p_c, size_t p_row);
-	static std::optional<godot::Vector2> row_point(const Ctx &p_c, size_t p_row);
+	static std::optional<godot::Vector2> row_point(const Ctx &p_c, size_t p_row, bool p_hit = true);
 	static std::optional<godot::Rect2> overview_rect(const Ctx &p_c);
 	void check_overview_drawn(const Ctx &p_c);
 	static void tap(const Ctx &p_c, godot::Key p_key);
-	void click_row(const Ctx &p_c, size_t p_row);
+	void click_row(const Ctx &p_c, size_t p_row, bool p_hit = true);
 
 	std::string shot_dir_;
 	std::string overview_;

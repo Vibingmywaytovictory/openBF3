@@ -86,7 +86,8 @@ HudModel menu_model(bool p_suicide) {
 		HudMenuEntry &e = list.entries[list.count++];
 		e.label_sid_hash = text_hash(kHudMenuActionSids[i]);
 		e.action = HudMenuAction(i);
-		e.enabled = e.action != HudMenuAction::Squad && (e.action != HudMenuAction::Suicide || p_suicide);
+		e.enabled = e.action != HudMenuAction::Squad && e.action != HudMenuAction::Options &&
+				(e.action != HudMenuAction::Suicide || p_suicide);
 	}
 	m.user.is_in_menu = true;
 	constexpr std::string_view kMode = "TeamDeathMatch0";
@@ -182,6 +183,9 @@ TEST_SUITE("ui-menu") {
 		CHECK(b.frame_label(rows[0]) == "selected");
 		b.s.hud->input_concept(int32_t(UiInputConcept::NavigateUp), true);
 		CHECK(b.frame_label(rows[5]) == "selected");
+		b.s.hud->input_concept(int32_t(UiInputConcept::NavigateUp), true);
+		CHECK(b.frame_label(rows[4]) == "inactive");
+		CHECK(b.frame_label(rows[3]) == "selected");
 	}
 
 	TEST_CASE("menu: the mouse hovers a row grey and a click releases it") {
@@ -195,17 +199,19 @@ TEST_SUITE("ui-menu") {
 		REQUIRE(rows.size() == kHudMenuActionSids.size());
 		const float x = kMenuListX + 120.0f;
 		const auto y_of = [](size_t p_row) { return kMenuListY + kMenuRowPitch * float(p_row) + 17.0f; };
-		CHECK(b.s.hud->hit_target(x, y_of(4)) == rows[4]);
-		b.s.hud->mouse_move(x, y_of(4));
-		CHECK(b.frame_label(rows[4]) == "over");
-		CHECK(b.frame_label(rows[4] + ".bg") == "over");
-		CHECK(b.s.hud->clip(rows[4] + ".Label.txtField").text_color() == 0xFFFFFFu);
+		CHECK(b.s.hud->hit_target(x, y_of(1)) == rows[1]);
+		b.s.hud->mouse_move(x, y_of(1));
+		CHECK(b.frame_label(rows[1]) == "over");
+		CHECK(b.frame_label(rows[1] + ".bg") == "over");
+		CHECK(b.s.hud->clip(rows[1] + ".Label.txtField").text_color() == 0xFFFFFFu);
 		CHECK(b.frame_label(rows[0]) == "selected");
-		b.s.hud->mouse_move(x, y_of(2));
-		CHECK(b.frame_label(rows[2]) == "inactive");
 		b.events.clear();
-		b.s.hud->mouse_button(x, y_of(2), 1, true);
-		b.s.hud->mouse_button(x, y_of(2), 1, false);
+		for (const size_t disabled : { size_t(2), size_t(4) }) {
+			b.s.hud->mouse_move(x, y_of(disabled));
+			CHECK(b.frame_label(rows[disabled]) == "inactive");
+			b.s.hud->mouse_button(x, y_of(disabled), 1, true);
+			b.s.hud->mouse_button(x, y_of(disabled), 1, false);
+		}
 		CHECK(b.released().empty());
 		b.s.hud->mouse_move(x, y_of(5));
 		b.s.hud->mouse_button(x, y_of(5), 1, true);
