@@ -5,6 +5,8 @@
 #include "swf_view.h"
 #include "ui_assets.h"
 
+#include "bf3/core/ui/as2_clip.h"
+#include "bf3/core/ui/swf_hit.h"
 #include "bf3/core/ui/ui_graph.h"
 #include "bf3/core/ui/ui_input.h"
 #include "bf3/host/ui_flow_session.h"
@@ -649,20 +651,76 @@ std::optional<Vector2> Bf3UiScreens::stage_point(const Entry &p_entry, Vector2 p
 	return Vector2(float((local.x - fit.offset_x) / fit.scale_x), float((local.y - fit.offset_y) / fit.scale_y));
 }
 
+std::vector<Bf3UiScreens::Entry *> Bf3UiScreens::mouse_screens() {
+	Entry *t = input_target();
+	if (t != nullptr && t->modal) {
+		return { t };
+	}
+	std::vector<Entry *> out;
+	for (std::unique_ptr<Entry> &e : entries_) {
+		if (!e->adopted && e->phase != UiScreenPhase::Exiting && e->shown && e->view != nullptr) {
+			out.push_back(e.get());
+		}
+	}
+	std::sort(out.begin(), out.end(), [](const Entry *p_a, const Entry *p_b) { return p_a->order > p_b->order; });
+	if (t != nullptr && std::find(out.begin(), out.end(), t) == out.end()) {
+		out.push_back(t);
+	}
+	return out;
+}
+
 bool Bf3UiScreens::mouse_move(Vector2 p_viewport) {
 	++stats_.mouse;
-	Entry *t = input_target();
-	ui::HudScreen *s = t != nullptr ? screen_of(*t) : nullptr;
-	const std::optional<Vector2> at = t != nullptr ? stage_point(*t, p_viewport) : std::nullopt;
-	return s != nullptr && at && s->mouse_move(at->x, at->y);
+	bool any = false;
+	for (Entry *e : mouse_screens()) {
+		ui::HudScreen *s = screen_of(*e);
+		const std::optional<Vector2> at = stage_point(*e, p_viewport);
+		any = (s != nullptr && at && s->mouse_move(at->x, at->y)) || any;
+	}
+	return any;
 }
 
 bool Bf3UiScreens::mouse_button(Vector2 p_viewport, int32_t p_button, bool p_pressed) {
 	++stats_.mouse;
-	Entry *t = input_target();
-	ui::HudScreen *s = t != nullptr ? screen_of(*t) : nullptr;
-	const std::optional<Vector2> at = t != nullptr ? stage_point(*t, p_viewport) : std::nullopt;
+	Entry *target = nullptr;
+	if (!p_pressed && !pressed_screen_.empty()) {
+		target = find(pressed_screen_);
+	}
+	if (target == nullptr) {
+		const std::vector<Entry *> screens = mouse_screens();
+		for (Entry *e : screens) {
+			ui::HudScreen *s = screen_of(*e);
+			const std::optional<Vector2> at = stage_point(*e, p_viewport);
+			if (s != nullptr && at && !s->hit_target(at->x, at->y).empty()) {
+				target = e;
+				break;
+			}
+		}
+		if (target == nullptr) {
+			target = input_target();
+		}
+	}
+	pressed_screen_ = p_pressed && target != nullptr ? target->partition : std::string();
+	ui::HudScreen *s = target != nullptr ? screen_of(*target) : nullptr;
+	const std::optional<Vector2> at = target != nullptr ? stage_point(*target, p_viewport) : std::nullopt;
 	return s != nullptr && at && s->mouse_button(at->x, at->y, p_button, p_pressed);
+}
+
+std::optional<Vector2> Bf3UiScreens::clip_centre(std::string_view p_partition, std::string_view p_path) {
+	Entry *e = find(p_partition);
+	ui::HudScreen *s = e != nullptr ? screen_of(*e) : nullptr;
+	const Bf3SwfView *v = e != nullptr ? view_of(*e) : nullptr;
+	const ui::SwfSceneNode *n = s != nullptr ? s->scene().find_node(p_path) : nullptr;
+	if (n == nullptr || v == nullptr || !v->is_visible_in_tree()) {
+		return std::nullopt;
+	}
+	const ui::SwfRect b = ui::swf_node_local_bounds(s->scene(), *n);
+	const ui::SwfMatrix w = ui::swf_world_matrix(s->scene(), n->id);
+	const float x = w.tx + w.a * (b.x_min + b.x_max) * 0.5f;
+	const float y = w.ty + w.d * (b.y_min + b.y_max) * 0.5f;
+	const SwfStageFit fit = v->stage_fit();
+	const Vector2 local(float(x * fit.scale_x + fit.offset_x), float(y * fit.scale_y + fit.offset_y));
+	return v->get_global_transform().xform(local);
 }
 
 bool Bf3UiScreens::mouse_wheel(Vector2 p_viewport, float p_delta) {

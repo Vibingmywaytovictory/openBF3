@@ -87,6 +87,7 @@ public:
 	bool mouse_move(godot::Vector2 p_viewport);
 	bool mouse_button(godot::Vector2 p_viewport, int32_t p_button, bool p_pressed);
 	bool mouse_wheel(godot::Vector2 p_viewport, float p_delta);
+	std::optional<godot::Vector2> clip_centre(std::string_view p_partition, std::string_view p_path);
 
 	std::optional<UiScreenPhase> phase(std::string_view p_partition) const;
 	const UiScreensStats &stats() const { return stats_; }
@@ -130,6 +131,7 @@ private:
 	void deliver_widget_events();
 	void apply_visibility(Entry &r_entry);
 	Entry *input_target();
+	std::vector<Entry *> mouse_screens();
 	std::optional<godot::Vector2> stage_point(const Entry &p_entry, godot::Vector2 p_viewport) const;
 	void note(std::string p_line);
 	void error(std::string p_message);
@@ -141,6 +143,7 @@ private:
 	std::vector<std::unique_ptr<Entry>> entries_;
 	std::set<std::string, std::less<>> drawn_;
 	int32_t next_order_ = kUiScreensFirstOwnOrder;
+	std::string pressed_screen_;
 	bf3::core::ui::HudModel model_{};
 	bf3::core::ui::HudClientState client_;
 	UiScreensStats stats_;
