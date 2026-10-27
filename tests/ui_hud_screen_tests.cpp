@@ -310,7 +310,7 @@ TEST_SUITE("ui-hud-screen-unit") {
 			"Widget.Popup.PopupGenericWidget", "Widget.Popup.PopupButtonsManager", "Widget.Image.Dimmer",
 			"Widget.List.ListLabel", "Widget.Text.TextField", "Widget.Text.PageHeader", "Widget.Input.InputListener",
 			"Widget.Button.ConsoleButtonBar", "Screen.LoadingScreen", "Widget.Message.LoadingMessage",
-			"Widget.SpawnTimer.SpawnTimer" };
+			"Widget.SpawnTimer.SpawnTimer", "Widget.TicketCounter.TicketCounterSpawnScreen" };
 		const HudWidgetRegistry &installed = HudWidgetRegistry::installed();
 		std::vector<std::string> sorted = want;
 		std::sort(sorted.begin(), sorted.end());

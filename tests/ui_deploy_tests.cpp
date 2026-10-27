@@ -21,6 +21,10 @@ namespace {
 
 constexpr std::string_view kSpawnButtonScreen = "ui/flow/screen/spawnbuttonscreen";
 constexpr std::string_view kSpawnTimer = "instance1.SpawnTimer_01";
+constexpr std::string_view kTicketScreen = "ui/flow/screen/spawnscreenticketcountertdmscreen";
+constexpr std::string_view kTicket = "instance1.TicketCounterSpawnScreen_01.Ticket";
+constexpr uint32_t kUsHash = 0x5501u;
+constexpr uint32_t kRuHash = 0x5502u;
 
 std::pair<float, float> stage_centre(const RetailScreen &p_s, std::string_view p_path) {
 	const SwfSceneNode &n = p_s.at(p_path);
@@ -125,6 +129,41 @@ TEST_SUITE("ui-deploy") {
 		REQUIRE(fired.size() == 1);
 		CHECK(fired[0] == "UIWidgetEventID_OnItemReleased false");
 		CHECK(timer->deploys_fired() == 1);
+		CHECK(s.hud->stats().as2.failed_ops == 0);
+	}
+	TEST_CASE("TicketCounterSpawnScreen on spawnscreenticketcountertdmscreen: m_gamemode tdm, the friendly name and "
+			  "tickets on the left of the 769 x 97 bar, the enemy's on the right, as footage 18.57 shows US 5 | 8 RU") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudClientState c = retail_text_client(retail_text_db(*r));
+		c.localise_hash = [](uint32_t p_hash) {
+			return p_hash == kUsHash ? std::string("US") : p_hash == kRuHash ? std::string("RU") : std::string();
+		};
+		RetailScreen s = open_retail_screen(*r, kTicketScreen, c);
+		CHECK(s.hud->stats().unknown_class_paths.empty());
+		CHECK_FALSE(s.at("instance1.TicketCounterSpawnScreen_01").visible);
+		HudModel m{};
+		m.kill_counter.player_team = 1;
+		m.kill_counter.player_team_kills = 5;
+		m.kill_counter.enemy_team_kills = 8;
+		m.team.friendly_team_name = kUsHash;
+		m.team.enemy_team1_name = kRuHash;
+		s.hud->initialize(m);
+		CHECK(s.at("instance1.TicketCounterSpawnScreen_01").visible);
+		const std::string t(kTicket);
+		CHECK(s.at(t + ".txtTeam1Team").text == "US");
+		CHECK(s.at(t + ".txtTeam1Tickets").text == "5");
+		CHECK(s.at(t + ".txtTeam2Tickets").text == "8");
+		CHECK(s.at(t + ".txtTeam2Team").text == "RU");
+		const SwfMatrix w = swf_world_matrix(*s.scene, s.at(t).id);
+		CHECK(w.tx == doctest::Approx(769.0f));
+		CHECK(w.ty == doctest::Approx(97.0f));
+		m.kill_counter.enemy_team_kills = 9;
+		s.hud->refresh(m);
+		CHECK(s.at(t + ".txtTeam2Tickets").text == "9");
+		CHECK(s.at(t + ".txtTeam1Tickets").text == "5");
 		CHECK(s.hud->stats().as2.failed_ops == 0);
 	}
 }
