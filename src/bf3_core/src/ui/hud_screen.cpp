@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <unordered_map>
 
 namespace bf3::core::ui {
@@ -462,6 +463,8 @@ double hud_tween_ease(HudTweenEase p_ease, double p_t) {
 		case HudTweenEase::ExpoOut: return t == 1.0 ? 1.0 : 1.001 * (1.0 - std::pow(2.0, -10.0 * t));
 		case HudTweenEase::EaseOutQuad:
 			return t * (2.0 - t);
+		case HudTweenEase::EaseInOutSine:
+			return -(std::cos(std::numbers::pi * t) - 1.0) * 0.5;
 	}
 	return t;
 }
@@ -584,14 +587,18 @@ void HudWidgetHost::remove_tweens(const As2Clip &p_clip) {
 	list.erase(std::remove_if(list.begin(), list.end(), [&](const HudTween &t) { return t.path == p_clip.path(); }), list.end());
 }
 
-void HudWidgetHost::add_custom_tween(
-		std::string_view p_name, float p_to, double p_seconds, HudTweenEase p_ease, uint32_t p_on_complete) {
+void HudWidgetHost::remove_custom_tween(std::string_view p_name) {
 	std::vector<HudTween> &list = screen_.tweens_;
 	list.erase(std::remove_if(list.begin(), list.end(),
 					   [&](const HudTween &t) {
 						   return t.path == path_ && t.property == HudTweenProperty::Custom && t.name == p_name;
 					   }),
 			list.end());
+}
+
+void HudWidgetHost::add_custom_tween(
+		std::string_view p_name, float p_to, double p_seconds, HudTweenEase p_ease, uint32_t p_on_complete) {
+	remove_custom_tween(p_name);
 	HudTween t;
 	t.path = path_;
 	t.property = HudTweenProperty::Custom;
@@ -604,7 +611,7 @@ void HudWidgetHost::add_custom_tween(
 		screen_.apply_tween(t, p_to);
 		return;
 	}
-	list.push_back(std::move(t));
+	screen_.tweens_.push_back(std::move(t));
 }
 
 uint32_t HudWidgetHost::set_interval(double p_seconds) {

@@ -30,6 +30,7 @@ public:
 	virtual bool selected() = 0;
 	virtual void set_highlighted(bool p_highlighted) = 0;
 	virtual void set_active(bool p_active) = 0;
+	virtual void update_button_icon(const std::string &p_frame) = 0;
 	virtual void set_plus() = 0;
 	virtual void remove_plus() = 0;
 	virtual void press() = 0;

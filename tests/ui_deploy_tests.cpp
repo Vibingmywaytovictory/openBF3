@@ -6,12 +6,14 @@
 #include "bf3/core/ui/swf_hit.h"
 #include "bf3/core/ui/swf_scene.h"
 #include "bf3/core/ui/text_db.h"
+#include "button.h"
 #include "deploy_widgets.h"
 #include "list.h"
 #include "test_support.h"
 #include "ui_retail_support.h"
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <string>
 #include <utility>
@@ -248,6 +250,88 @@ TEST_SUITE("ui-deploy") {
 		REQUIRE(icon.timeline != nullptr);
 		CHECK(icon.timeline->label_frame(kSpawnRowNoVehicleIcon) == icon.frame);
 		CHECK(icon.children.empty());
+		CHECK(s.hud->stats().as2.failed_ops == 0);
+	}
+	TEST_CASE("spawnscreenpc KitBar: DEPLOY AS and the kit name, four kit buttons with the selected one lit, five slot "
+			  "items; a kitButton_2 click fires KitChanged 2 and relabels; a slot click opens the grid, "
+			  "DoneSelectingSlotItem closes it") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudClientState c = retail_text_client(retail_text_db(*r));
+		const std::array<std::string, 4> kit_names{ "ASSAULT", "ENGINEER", "SUPPORT", "RECON" };
+		c.localise_hash = [&](uint32_t p_hash) {
+			if (p_hash >= 0x100u && p_hash < 0x104u) {
+				return kit_names[p_hash - 0x100u];
+			}
+			return p_hash >= 0x200u && p_hash < 0x300u ? "ITEM " + std::to_string(p_hash - 0x200u) : std::string();
+		};
+		RetailScreen s = open_retail_screen(*r, kSpawnScreenPc, c);
+		std::vector<std::string> fired;
+		s.hud->set_event_sink([&](const HudWidgetEvent &e) {
+			if (e.instance == "KitBar_01" && !e.query.starts_with("UIWidgetEventID_PlaySound")) {
+				fired.push_back(e.query + " " + e.param.to_string());
+			}
+		});
+		HudModel m{};
+		for (uint32_t k = 0; k < 4; ++k) {
+			HudKitEntry &e = m.customization.kits_data[k];
+			e.name_sid_hash = 0x100u + k;
+			e.hud_icon = int32_t(k + 1);
+			for (uint32_t i = 0; i < kHudSpawnKitItems; ++i) {
+				e.items[i].name_sid_hash = 0x200u + k * 10u + i;
+			}
+		}
+		m.kit.selected_kit = 0;
+		s.hud->initialize(m);
+		const std::string bar = "instance1.KitBar_01";
+		auto *kit_bar = dynamic_cast<HudKitBar *>(s.hud->controller(bar));
+		REQUIRE(kit_bar != nullptr);
+		CHECK(s.at(bar).visible);
+		CHECK(kit_bar->current_kit() == 0);
+		const As2Clip deploy_as = s.hud->clip(bar + ".deployAs");
+		const As2Clip kit_name = s.hud->clip(bar + ".kitName");
+		CHECK(deploy_as.text() == "DEPLOY AS");
+		CHECK(kit_name.text() == "ASSAULT");
+		CHECK(kit_name.x() == doctest::Approx(deploy_as.x() + 10.0f + deploy_as.text_width()));
+		CHECK(s.hud->clip(bar + ".kitItem_0.txt").text() == "ITEM 0");
+		CHECK(s.hud->clip(bar + ".kitItem_4.txt").text() == "ITEM 4");
+		CHECK_FALSE(s.at(bar + ".progressBar").visible);
+		CHECK_FALSE(s.at(bar + ".changeItemText").visible);
+		auto *b0 = dynamic_cast<HudButton *>(s.hud->controller(bar + ".kitButton_0"));
+		auto *b2 = dynamic_cast<HudButton *>(s.hud->controller(bar + ".kitButton_2"));
+		REQUIRE(b0 != nullptr);
+		REQUIRE(b2 != nullptr);
+		CHECK(b0->selected());
+		REQUIRE(fired.size() >= 2);
+		CHECK(fired[0] == "UIWidgetEventID_OnItemReleased 0");
+		fired.clear();
+		const auto [kx, ky] = stage_centre(s, bar + ".kitButton_2");
+		s.hud->mouse_move(kx, ky);
+		s.hud->mouse_button(kx, ky, 1, true);
+		s.hud->mouse_button(kx, ky, 1, false);
+		CHECK(kit_bar->current_kit() == 2);
+		CHECK(b2->selected());
+		CHECK_FALSE(b0->selected());
+		CHECK(kit_name.text() == "SUPPORT");
+		CHECK(s.hud->clip(bar + ".kitItem_0.txt").text() == "ITEM 20");
+		REQUIRE_FALSE(fired.empty());
+		CHECK(fired[0] == "UIWidgetEventID_OnItemReleased 2");
+		fired.clear();
+		const auto [sx, sy] = stage_centre(s, bar + ".slotButton_1");
+		s.hud->mouse_move(sx, sy);
+		s.hud->mouse_button(sx, sy, 1, true);
+		s.hud->mouse_button(sx, sy, 1, false);
+		CHECK(kit_bar->changing_item());
+		CHECK(kit_bar->current_slot() == 1);
+		const std::vector<std::string> open{ "UIWidgetEventID_SetIndex 1", "UIWidgetEventID_OnShow 0" };
+		CHECK(fired == open);
+		fired.clear();
+		CHECK(s.hud->deliver_in_event("KitBar_01", "UIWidgetEventID_OnItemSelected"));
+		CHECK_FALSE(kit_bar->changing_item());
+		const std::vector<std::string> close{ "UIWidgetEventID_OnHide 0" };
+		CHECK(fired == close);
 		CHECK(s.hud->stats().as2.failed_ops == 0);
 	}
 }

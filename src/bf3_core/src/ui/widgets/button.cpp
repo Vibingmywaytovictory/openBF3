@@ -590,6 +590,8 @@ public:
 		}
 	}
 
+	void update_button_icon(const std::string &p_frame) override { update_icon(*host_, p_frame); }
+
 	void set_plus() override {
 		if (!plus_path_.empty()) {
 			return;

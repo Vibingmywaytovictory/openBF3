@@ -312,7 +312,7 @@ TEST_SUITE("ui-hud-screen-unit") {
 			"Widget.Button.ConsoleButtonBar", "Screen.LoadingScreen", "Widget.Message.LoadingMessage",
 			"Widget.SpawnTimer.SpawnTimer", "Widget.TicketCounter.TicketCounterSpawnScreen", "Widget.Image.OverviewMap",
 			"Widget.ScreenSpecific.SpawnPointsHeader", "Widget.List.Rows.TeamSpawn", "Widget.List.Rows.BaseSpawn",
-			"Widget.List.Rows.SpawnEmpty" };
+			"Widget.List.Rows.SpawnEmpty", "Widget.Bar.KitBar", "Widget.Bar.AdvancedBar" };
 		const HudWidgetRegistry &installed = HudWidgetRegistry::installed();
 		std::vector<std::string> sorted = want;
 		std::sort(sorted.begin(), sorted.end());

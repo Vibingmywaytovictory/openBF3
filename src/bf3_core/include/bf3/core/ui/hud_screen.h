@@ -250,6 +250,7 @@ enum class HudTweenEase : uint8_t {
 	EaseOutBack,
 	ExpoOut,
 	EaseOutQuad,
+	EaseInOutSine,
 };
 
 enum class HudTweenProperty : uint8_t {
@@ -339,6 +340,7 @@ public:
 	void remove_tweens(const As2Clip &p_clip);
 	void add_custom_tween(
 			std::string_view p_name, float p_to, double p_seconds, HudTweenEase p_ease, uint32_t p_on_complete = 0);
+	void remove_custom_tween(std::string_view p_name);
 	uint32_t set_interval(double p_seconds);
 	void clear_interval(uint32_t p_id);
 	void set_enter_frame(bool p_on);
