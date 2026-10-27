@@ -149,6 +149,8 @@ private:
 	std::set<std::string, std::less<>> drawn_;
 	HudBgPainter bg_;
 	std::map<std::string, uint64_t, std::less<>> effects_seen_;
+	std::map<std::string, uint64_t, std::less<>> closed_shown_;
+	uint64_t reloads_seen_ = 0;
 	int32_t next_order_ = kUiScreensFirstOwnOrder;
 	std::string pressed_screen_;
 	bf3::core::ui::HudModel model_{};

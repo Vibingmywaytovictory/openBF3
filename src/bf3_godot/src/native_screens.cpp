@@ -387,6 +387,7 @@ void Bf3UiScreens::drop(size_t p_index) {
 		e.phase = UiScreenPhase::Shown;
 		return;
 	}
+	closed_shown_[e.partition] += e.shown_count;
 	e.screen.reset();
 	if (e.view != nullptr) {
 		const std::string owner = view_owner(e);
@@ -461,13 +462,20 @@ bool Bf3UiScreens::reports(std::string_view p_partition) const {
 		const Bf3NativeHud *h = hud();
 		return h != nullptr && h->reports(p_partition);
 	}
-	return e != nullptr;
+	return e != nullptr || closed_shown_.find(p_partition) != closed_shown_.end();
 }
 
 std::optional<UiScreenRecord> Bf3UiScreens::screen_record(std::string_view p_partition) const {
 	const Entry *e = find(p_partition);
+	const auto closed = closed_shown_.find(p_partition);
+	const uint64_t shown_before = closed != closed_shown_.end() ? closed->second : 0;
 	if (e == nullptr) {
-		return std::nullopt;
+		if (closed == closed_shown_.end()) {
+			return std::nullopt;
+		}
+		UiScreenRecord r;
+		r.shown = shown_before;
+		return r;
 	}
 	if (e->adopted) {
 		const Bf3NativeHud *h = hud();
@@ -475,7 +483,7 @@ std::optional<UiScreenRecord> Bf3UiScreens::screen_record(std::string_view p_par
 	}
 	UiScreenRecord r;
 	r.visible = e->shown && e->phase != UiScreenPhase::Exiting && is_visible_in_tree();
-	r.shown = e->shown_count;
+	r.shown = shown_before + e->shown_count;
 	if (e->screen != nullptr) {
 		add_screen_widget_facts(*e->screen, r);
 	}
@@ -488,6 +496,19 @@ std::optional<UiScreenPhase> Bf3UiScreens::phase(std::string_view p_partition) c
 }
 
 void Bf3UiScreens::sync_flow() {
+	if (session_->stats().reloads != reloads_seen_) {
+		reloads_seen_ = session_->stats().reloads;
+		for (std::unique_ptr<Entry> &e : entries_) {
+			if (e->flow_id == 0) {
+				continue;
+			}
+			e->flow_id = 0;
+			if (!e->adopted) {
+				note("close " + ui::ui_data_category_leaf(e->partition) + " (flow reloaded)");
+				begin_close(*e);
+			}
+		}
+	}
 	ui::UiFlow &flow = session_->flow();
 	for (const uint64_t id : flow.take_closing()) {
 		bool hosted = false;
