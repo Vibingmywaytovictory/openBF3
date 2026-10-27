@@ -144,9 +144,9 @@ TEST_SUITE("ui-hud-unit") {
 		CHECK(r.ok());
 		CHECK(r.rows == 515);
 		CHECK(r.matched == 515);
-		CHECK(r.kinds[0] == 275);
+		CHECK(r.kinds[0] == 276);
 		CHECK(r.kinds[1] == 88);
-		CHECK(r.kinds[2] == 152);
+		CHECK(r.kinds[2] == 151);
 		REQUIRE(r.unbound_components.size() == 1);
 		CHECK(r.unbound_components[0] == "UIVehicleCompData");
 		CHECK(r.unbound_sources == 3);

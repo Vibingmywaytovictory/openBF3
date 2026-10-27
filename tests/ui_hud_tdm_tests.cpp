@@ -657,7 +657,9 @@ TEST_CASE("round stats: a replayed kill log gives the kill matrix, streaks, neme
 	CHECK(e.dogtags_taken == int32_t(dogtags));
 	CHECK(e.round_duration == doctest::Approx(300.0f));
 	CHECK(e.kills_per_minute == doctest::Approx(double(own_kills) / 5.0));
-	CHECK(e.score_per_minute == doctest::Approx(1500.0 / 5.0));
+	CHECK(e.total_playtime == 0.0f);
+	CHECK(e.score_per_minute == doctest::Approx(1500.0));
+	CHECK(e.best_vehicle_info.kills == 0);
 	CHECK(e.total_score == 1500);
 	CHECK(e.longest_streak == int32_t(longest));
 	CHECK(e.longest_nemesis_streak == int32_t(nemesis));

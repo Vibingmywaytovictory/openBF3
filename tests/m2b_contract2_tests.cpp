@@ -46,12 +46,12 @@ void pending(const char *p_key, const char *p_row, const char *p_reason) {
 }
 
 constexpr size_t kM2aHudModelSize = 9016;
-constexpr size_t kHudModelSize = 53920;
+constexpr size_t kHudModelSize = 54064;
 
 static_assert(sizeof(ui::HudKillCard) == 776 && offsetof(ui::HudKillCard, killer_name) == 32);
 static_assert(offsetof(ui::HudKillCard, killer) == 5 && offsetof(ui::HudKillCard, item_id) == 12 &&
 		offsetof(ui::HudKillCard, distance_m) == 20 && offsetof(ui::HudKillCard, seconds_left) == 28);
-static_assert(sizeof(ui::HudEndOfRound) == 284 && offsetof(ui::HudEndOfRound, stage) == 24);
+static_assert(sizeof(ui::HudEndOfRound) == 424 && offsetof(ui::HudEndOfRound, stage) == 24);
 static_assert(offsetof(ui::HudEndOfRound, team_kills) == 4 && offsetof(ui::HudEndOfRound, kill_limit) == 12 &&
 		offsetof(ui::HudEndOfRound, top_players) == 16 && offsetof(ui::HudEndOfRound, seconds_to_next_round) == 20);
 static_assert(sizeof(ui::HudSpawnScreen) == 96);

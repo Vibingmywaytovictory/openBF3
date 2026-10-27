@@ -74,7 +74,7 @@ void feed_eor_stats(Frame &r_frame, ui::HudEndOfRound &r_eor) {
 		r_eor.best_weapon_info.name_sid_hash = row->name_sid_hash;
 		r_eor.best_weapon_info.kills = best.kills;
 		if (const HudStaticItem *item = r_frame.statics.item(row->item_id)) {
-			r_eor.best_weapon_info.image_path = item->image_path;
+			r_eor.best_weapon_info.image_path = item->texture_path;
 		}
 	}
 	int32_t dogtags = 0;
@@ -84,9 +84,10 @@ void feed_eor_stats(Frame &r_frame, ui::HudEndOfRound &r_eor) {
 	}
 	r_eor.dogtags_taken = dogtags;
 	r_eor.round_duration = round_seconds(r_frame);
-	r_eor.total_playtime = r_eor.round_duration;
+	r_eor.total_playtime = 0.0f;
 	r_eor.kills_per_minute = round_stats_per_minute(double(st.own_kills), r_eor.round_duration);
-	r_eor.score_per_minute = round_stats_per_minute(double(r_eor.total_score), r_eor.round_duration);
+	r_eor.score_per_minute =
+			round_stats_per_minute(double(r_eor.total_score), std::max(60.0, double(r_eor.total_playtime)));
 	r_eor.longest_streak = int32_t(st.longest_streak);
 	r_eor.longest_nemesis_streak = int32_t(st.longest_nemesis_streak);
 	r_eor.longest_headshot = st.longest_headshot_m;

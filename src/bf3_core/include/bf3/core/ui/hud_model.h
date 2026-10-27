@@ -431,6 +431,7 @@ struct HudEndOfRound {
 	int32_t deaths = 0;
 	float kill_death_ratio = 0.0f;
 	HudBestWeapon best_weapon_info{};
+	HudBestWeapon best_vehicle_info{};
 	float round_duration = 0.0f;
 	float kills_per_minute = 0.0f;
 	int32_t longest_streak = 0;
@@ -978,7 +979,7 @@ inline constexpr HudBinding kHudBindings[] = {
 	{ "UIEndOfRoundCompData", "Deaths", HudBindKind::Model, HudWave::Screens, "deaths" },
 	{ "UIEndOfRoundCompData", "KillDeathRatio", HudBindKind::Model, HudWave::Screens, "kill_death_ratio" },
 	{ "UIEndOfRoundCompData", "BestWeaponInfo", HudBindKind::Model, HudWave::Screens, "best_weapon_info" },
-	{ "UIEndOfRoundCompData", "BestVehicleInfo", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIEndOfRoundCompData", "BestVehicleInfo", HudBindKind::Model, HudWave::Screens, "best_vehicle_info" },
 	{ "UIEndOfRoundCompData", "RoundDuration", HudBindKind::Model, HudWave::Screens, "round_duration" },
 	{ "UIEndOfRoundCompData", "KillsPerMinute", HudBindKind::Model, HudWave::Screens, "kills_per_minute" },
 	{ "UIEndOfRoundCompData", "LongestStreak", HudBindKind::Model, HudWave::Screens, "longest_streak" },

@@ -150,4 +150,6 @@ bool hud_list_set_direct_rows(HudScreen &r_screen, std::string_view p_instance, 
 
 int32_t hud_eor_place(const HudEndOfRound &p_eor);
 std::string hud_eor_round_duration(float p_seconds);
+std::string hud_eor_play_time(float p_seconds);
+std::string hud_eor_distance(float p_metres);
 }

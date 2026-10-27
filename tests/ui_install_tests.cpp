@@ -459,8 +459,8 @@ TEST_SUITE("ui-hud-sources") {
 						fmt(" (%.1f s)", seconds_since(start)));
 		CHECK(table_ok);
 		const HudBindingReport r = check_hud_bindings(*table);
-		const bool rows_ok = r.ok() && r.rows == 515 && r.matched == 515 && r.kinds[0] == 275 && r.kinds[1] == 88 &&
-				r.kinds[2] == 152 && r.unbound_components.size() == 37;
+		const bool rows_ok = r.ok() && r.rows == 515 && r.matched == 515 && r.kinds[0] == 276 && r.kinds[1] == 88 &&
+				r.kinds[2] == 151 && r.unbound_components.size() == 37;
 		std::string detail = std::to_string(r.rows) + " rows, " + std::to_string(r.matched) + " in the install, " +
 				std::to_string(r.not_in_install.size()) + " missing from the install, " +
 				std::to_string(r.not_in_rows.size()) +

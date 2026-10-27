@@ -12,6 +12,7 @@
 #include <cmath>
 #include <string>
 #include <string_view>
+#include <vector>
 
 using namespace bf3::core;
 using namespace bf3::core::ui;
@@ -20,6 +21,8 @@ using namespace ui_retail;
 namespace {
 
 constexpr std::string_view kEorDetailsScoreboard = "ui/flow/screen/eordetailsscoreboardscreen";
+constexpr std::string_view kEorDetailsStats = "ui/flow/screen/eordetailsstatsscreen";
+constexpr std::string_view kStats = "instance1.Stats_01";
 constexpr std::string_view kHeader = "instance1.EorHeader_01";
 constexpr uint32_t kFriendlyText = 0x73C3FFu;
 constexpr uint32_t kEnemyText = 0x963232u;
@@ -40,6 +43,25 @@ HudModel footage_round(bool p_won) {
 	e.player_team_index = 1;
 	e.round_duration = 266.4f;
 	return m;
+}
+
+HudModel footage_stats() {
+	HudModel m = footage_round(false);
+	HudEndOfRound &e = m.end_of_round;
+	e.total_score = 1642;
+	e.combat_score = 1642;
+	e.kills = 14;
+	e.deaths = 9;
+	e.kill_death_ratio = 14.0f / 9.0f;
+	e.kills_per_minute = 14.0f / (266.4f / 60.0f);
+	e.longest_streak = 5;
+	e.longest_headshot = 31.2f;
+	e.score_per_minute = 1642.0f;
+	return m;
+}
+
+std::string row(std::string_view p_row, std::string_view p_side) {
+	return std::string(kStats) + "." + std::string(p_row) + "." + std::string(p_side);
 }
 
 std::string clip(std::string_view p_path) {
@@ -126,6 +148,49 @@ TEST_SUITE("ui-eor") {
 		const As2Clip holder = s.hud->clip(clip("textHolder"));
 		const float width = right_of(ru.child("valueText"), ru.x()) - desc.x();
 		CHECK(holder.x() == doctest::Approx(std::floor(640.0f - width / 2.0f + 0.5f)));
+	}
+
+	TEST_CASE("Stats on eordetailsstatsscreen: the footage's end-of-round rows, the dimmed unset best vehicle and no "
+			  "rank "
+			  "bar off a ranked server") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		RetailScreen s = open_retail_screen(*r, kEorDetailsStats, retail_text_client(retail_text_db(*r)));
+		CHECK(s.hud->stats().unknown_class_paths.empty());
+		s.hud->initialize(footage_stats());
+		CHECK(s.at(kStats).visible);
+		const auto text = [&](std::string_view p_row, std::string_view p_side) {
+			return s.hud->clip(row(p_row, p_side)).text();
+		};
+		CHECK(text("totalPlayTime_field", "leftText") == "TOTAL PLAY TIME");
+		CHECK(text("totalPlayTime_field", "rightText") == "0:00:00");
+		CHECK(text("awardScore_field", "rightText") == "0");
+		CHECK(text("totalScore_field", "leftText") == "TOTAL SCORE");
+		CHECK(text("totalScore_field", "rightText") == "1642");
+		CHECK(text("SPM_field", "rightText") == "1642");
+		CHECK(text("kills_field", "rightText") == "14");
+		CHECK(text("deaths_field", "rightText") == "9");
+		CHECK(text("kdRatio_field", "rightText") == "1.56");
+		CHECK(text("KPM_field", "rightText") == "3.15");
+		CHECK(text("HighestStreak_field", "rightText") == "5");
+		CHECK(text("DogtagsTaken_field", "rightText") == "-");
+		CHECK(text("LongestHeadShot_field", "rightText") == "31m");
+		CHECK(text("VehicleKills", "rightText") == "0");
+		CHECK_FALSE(s.at(std::string(kStats) + ".statsSince_field").visible);
+		CHECK(s.hud->clip(std::string(kStats) + ".VehicleHeader").alpha() == doctest::Approx(50.0f));
+		CHECK(s.hud->clip(std::string(kStats) + ".VehicleKills").alpha() == doctest::Approx(50.0f));
+		CHECK_FALSE(s.at(std::string(kStats) + ".bar").visible);
+		CHECK_FALSE(s.at(std::string(kStats) + ".playerNameText").visible);
+	}
+
+	TEST_CASE("hud_eor_play_time and hud_eor_distance format the STATS values as the footage shows them") {
+		CHECK(hud_eor_play_time(0.0f) == "0:00:00");
+		CHECK(hud_eor_play_time(3725.9f) == "1:02:05");
+		CHECK(hud_eor_distance(0.0f) == "-");
+		CHECK(hud_eor_distance(31.2f) == "31m");
+		CHECK(hud_eor_distance(31.5f) == "32m");
 	}
 
 	TEST_CASE("EorHeader colours the RU pair friendly when the local team is RU") {
