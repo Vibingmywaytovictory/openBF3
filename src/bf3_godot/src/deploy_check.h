@@ -34,6 +34,7 @@ inline constexpr double kDeployCheckCleanSeconds = 0.5;
 inline constexpr std::string_view kDeployCheckOverviewMap = "instance1.OverviewMap_01";
 inline constexpr std::string_view kDeployCheckLightBars = "instance1.SpawnTimer_01.lightbars";
 inline constexpr std::string_view kDeployCheckDeployStatus = "instance1.SpawnTimer_01.deployStatus";
+inline constexpr std::string_view kDeployCheckTeamColourFrame = "blue";
 
 struct DeployCheckTab {
 	std::string_view name;
@@ -119,6 +120,7 @@ private:
 	static bool up(const Bf3UiScreens &p_screens, std::string_view p_partition);
 	static bool shown(const Bf3UiScreens &p_screens, std::string_view p_partition);
 	static std::string node_fact(Bf3UiScreens &r_screens, std::string_view p_partition, std::string_view p_path);
+	static bool spawn_row_drawn(Bf3UiScreens &r_screens, std::string &r_fact);
 
 	std::string shots_dir_;
 	Phase phase_ = Phase::Join;

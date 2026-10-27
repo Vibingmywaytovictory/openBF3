@@ -4,6 +4,7 @@
 #include "native_screens.h"
 
 #include "bf3/core/ui/hud_screen.h"
+#include "bf3/core/ui/hud_widgets.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -80,6 +81,43 @@ std::string DeployCheck::node_fact(Bf3UiScreens &r_screens, std::string_view p_p
 	return std::string(n->world_visible ? "shown" : "hidden") + " at frame " + std::to_string(n->frame);
 }
 
+bool DeployCheck::spawn_row_drawn(Bf3UiScreens &r_screens, std::string &r_fact) {
+	bf3::core::ui::HudScreen *s = r_screens.hud_screen(kSpawnScreenPcPartition);
+	if (s == nullptr) {
+		r_fact = "spawnscreenpc is not open";
+		return false;
+	}
+	for (const std::unique_ptr<bf3::core::ui::HudWidgetState> &w : s->widgets()) {
+		if (w->retired || w->class_name != bf3::core::ui::kSpawnRowClass) {
+			continue;
+		}
+		const bf3::core::ui::SwfSceneNode *row = s->scene().find_node(w->path);
+		const bf3::core::ui::SwfSceneNode *box = s->scene().find_node(w->path + ".icon_bg");
+		const bf3::core::ui::SwfSceneNode *icon = s->scene().find_node(w->path + ".vehicleIcon");
+		if (row == nullptr || row->timeline == nullptr || box == nullptr || box->timeline == nullptr ||
+				icon == nullptr || icon->timeline == nullptr) {
+			r_fact = "the spawn row has no timeline";
+			return false;
+		}
+		const std::optional<uint32_t> selected = row->timeline->label_frame("selected");
+		const std::optional<uint32_t> team = box->timeline->label_frame(kDeployCheckTeamColourFrame);
+		const std::optional<uint32_t> blank = icon->timeline->label_frame(bf3::core::ui::kSpawnRowNoVehicleIcon);
+		const std::string letter = s->clip(w->path + ".IconLabel.txtField").text();
+		r_fact = "baseSpawn row '" + s->clip(w->path + ".Label.txtField").text() + "' at frame " +
+				std::to_string(row->frame) + " (selected " + std::to_string(selected.value_or(0)) + "), icon_bg " +
+				(box->world_visible ? "shown" : "hidden") + " at frame " + std::to_string(box->frame) + " (" +
+				std::string(kDeployCheckTeamColourFrame) + " " + std::to_string(team.value_or(0)) + "), IconLabel '" +
+				letter + "', vehicleIcon at frame " + std::to_string(icon->frame) + " (" +
+				std::string(bf3::core::ui::kSpawnRowNoVehicleIcon) + " " + std::to_string(blank.value_or(0)) +
+				") with " + std::to_string(icon->children.size()) + " children, spawnscreenpc " +
+				(s->has_focus() ? "focused" : "not focused");
+		return selected == row->frame && box->world_visible && team == box->frame && letter.empty() &&
+				blank == icon->frame && icon->children.empty();
+	}
+	r_fact = "no baseSpawn row";
+	return false;
+}
+
 bool DeployCheck::click_clip(
 		Bf3UiScreens &r_screens, std::string_view p_partition, std::string_view p_path, const DeployCheckIo &p_io) {
 	if (sub_ == 0) {
@@ -148,6 +186,9 @@ void DeployCheck::step(
 				row("join.deploy_screen", !p_st.alive && p_st.time_to_respawn <= 0.0f,
 						"spawnscreenpc and spawnbuttonscreen shown, time to respawn " +
 								seconds_text(p_st.time_to_respawn));
+				std::string fact;
+				const bool drawn = spawn_row_drawn(r_screens, fact);
+				row("join.random_row_selected", drawn, fact);
 				tap(p_io, godot::KEY_ENTER);
 				enter(Phase::JoinDeploy, p_now_s, p_st);
 			}
@@ -352,6 +393,9 @@ void DeployCheck::step(
 			}
 			if (p_now_s - ready_s_ >= kDeployCheckSettleSeconds) {
 				shot(p_io, "ready", p_now_s);
+				std::string fact;
+				const bool drawn = spawn_row_drawn(r_screens, fact);
+				row("ready.random_row_selected", drawn, fact);
 				p_io.hold_scoreboard(true);
 				enter(Phase::TabHeld, p_now_s, p_st);
 			}
