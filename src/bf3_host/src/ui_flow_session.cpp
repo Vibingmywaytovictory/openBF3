@@ -260,7 +260,8 @@ core::Status UiFlowSession::update(const UiGameState &p_state) {
 		last_.own_deaths = p_state.own_deaths;
 		last_.own_spawns = p_state.own_spawns;
 	}
-	if (p_state.joined && !last_.joined) {
+	const bool joining = p_state.joined && !last_.joined;
+	if (joining) {
 		enter_scope_input("Spawn");
 	}
 	if (p_state.phase != last_.phase) {
@@ -283,13 +284,17 @@ core::Status UiFlowSession::update(const UiGameState &p_state) {
 	if (p_state.own_deaths > last_.own_deaths) {
 		enter_scope_input("Died");
 	}
-	if (p_state.own_spawns > last_.own_spawns && !round_over_) {
+	if (p_state.own_spawns > last_.own_spawns && !round_over_ && !joining) {
 		enter_scope_input("Playing");
 	}
 	if (p_state.unspawned && !last_.unspawned) {
 		enter_scope_input("EndOfRound");
 	}
+	const uint32_t spawns_seen = last_.own_spawns;
 	last_ = p_state;
+	if (joining) {
+		last_.own_spawns = spawns_seen;
+	}
 	return step();
 }
 

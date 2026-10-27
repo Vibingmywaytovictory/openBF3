@@ -277,6 +277,31 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(s.flow().errors().empty());
 	}
 
+	TEST_CASE("ui flow session: a spawn made before the flow joins enters Playing after the spawn screens") {
+		Level *l = level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level);
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		UiFlowSession &s = **made;
+		ui_flow_tdm_pc_defaults(s, "TeamDeathMatch0");
+		Script sc{ s };
+		sc.state.phase = net::MatchPhase::InRound;
+		sc.state.joined = true;
+		sc.state.own_spawns = 1;
+		sc.run_to(60);
+		const Lines joined = sc.phase("joined already spawned");
+		CHECK(sc.at("native Spawn", 0) == 1);
+		CHECK(sc.at("native Playing", 0) == 2);
+		CHECK(std::find(joined.begin(), joined.end(), "close spawnscreenpc") != joined.end());
+		CHECK(s.flow().find_screen("ui/flow/screen/spawnscreenpc") == nullptr);
+		CHECK(s.flow().find_screen("ui/flow/screen/hudmpscreen") != nullptr);
+		CHECK(s.data("ui/uicomponents/usercomp", -1093247625) == "False");
+		CHECK(s.errors().empty());
+		CHECK(s.flow().errors().empty());
+	}
+
 	TEST_CASE("ui flow session: a screen host reports enter and exit") {
 		Level *l = level_or_skip();
 		if (l == nullptr) {
