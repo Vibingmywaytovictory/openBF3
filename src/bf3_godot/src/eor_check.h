@@ -31,6 +31,7 @@ inline constexpr double kEorCheckDeployEveryS = 1.0;
 inline constexpr double kEorCheckBannerShotS = 1.5;
 inline constexpr double kEorCheckHud64ShotS = 2.75;
 inline constexpr double kEorCheckStatsShotS = 1.0;
+inline constexpr double kEorCheckPopupShotS = 1.0;
 inline constexpr size_t kEorCheckMaxLines = 4096;
 inline constexpr float kEorCheckStatsTabX = 346.0f;
 inline constexpr float kEorCheckStatsTabY = 112.0f;
@@ -66,6 +67,7 @@ private:
 		Banner2,
 		Page2,
 		QuitClicked,
+		PopupShown,
 		PopupActivated,
 		Done,
 	};
@@ -79,6 +81,7 @@ private:
 	void shot_later(const char *p_name, double p_at_s);
 	bool check_page(Bf3UiScreens &r_screens, const bf3::core::ui::HudModel &p_model, double p_left_s);
 	static double page_after_banner(const EorCheckIo &p_io);
+	bool click_popup_ok(Bf3UiScreens &r_screens);
 	static void click(Bf3UiScreens &r_screens, godot::Vector2 p_at);
 	static void press_concept(Bf3UiScreens &r_screens, int32_t p_concept);
 

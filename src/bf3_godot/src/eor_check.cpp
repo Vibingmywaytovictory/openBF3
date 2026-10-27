@@ -44,7 +44,7 @@ std::string text_field(Bf3UiScreens &r_screens, std::string_view p_widget) {
 	return s->clip(path + "." + row_type->to_string() + ".txtDisplay").text();
 }
 
-std::string seconds_text(double p_s) {
+std::string fixed_text(double p_s) {
 	char text[32];
 	std::snprintf(text, sizeof(text), "%.2f", p_s);
 	return text;
@@ -104,10 +104,10 @@ double EorCheck::page_after_banner(const EorCheckIo &p_io) {
 }
 
 bool EorCheck::timed(double p_took, double p_want, double p_tolerance, const char *p_what) {
-	note(std::string(p_what) + " " + seconds_text(p_took) + " s (install " + seconds_text(p_want) + " s)");
+	note(std::string(p_what) + " " + fixed_text(p_took) + " s (install " + fixed_text(p_want) + " s)");
 	if (std::fabs(p_took - p_want) > p_tolerance) {
-		fail(std::string(p_what) + " after " + seconds_text(p_took) + " s, the install's timeline says " +
-				seconds_text(p_want) + " s");
+		fail(std::string(p_what) + " after " + fixed_text(p_took) + " s, the install's timeline says " +
+				fixed_text(p_want) + " s");
 		return false;
 	}
 	return true;
@@ -173,6 +173,44 @@ bool EorCheck::check_page(Bf3UiScreens &r_screens, const ui::HudModel &p_model, 
 		fail("the two-team scoreboard is not up with rows");
 		return false;
 	}
+	return true;
+}
+
+bool EorCheck::click_popup_ok(Bf3UiScreens &r_screens) {
+	ui::HudScreen *s = r_screens.hud_screen(kEorPopupPartition);
+	if (s == nullptr) {
+		fail("popupgeneric has no screen");
+		return false;
+	}
+	const std::string root = std::string(ui::kHudScreenInstance);
+	const std::string title = text_at(r_screens, kEorPopupPartition, root + ".PopupGenericWidget_01.popupTitle");
+	const std::string text = text_at(r_screens, kEorPopupPartition, root + ".PopupGenericWidget_01.popupText");
+	const std::string ok_path = root + ".PopupButtonsManager_01.holder.btn0";
+	const std::string ok = text_at(r_screens, kEorPopupPartition, ok_path + ".button.label.txt");
+	const std::string cancel =
+			text_at(r_screens, kEorPopupPartition, root + ".PopupButtonsManager_01.holder.btn1.button.label.txt");
+	note("QuitPopup reads '" + title + "' / '" + text + "' / '" + ok + "' '" + cancel + "'");
+	if (title.empty() || text.empty() || ok.empty() || cancel.empty()) {
+		fail("the QuitPopup's title, text or buttons are empty");
+		return false;
+	}
+	const ui::As2Clip button = s->clip(ok_path);
+	const ui::SwfSceneNode *node = button.node();
+	if (node == nullptr || !node->world_visible) {
+		fail("the QuitPopup's OK button is not drawn");
+		return false;
+	}
+	const ui::SwfRect at = ui::swf_transform_bounds(button.local_bounds(), node->world);
+	const float x = (at.x_min + at.x_max) * 0.5f;
+	const float y = (at.y_min + at.y_max) * 0.5f;
+	const std::string hit = s->hit_target(x, y);
+	note("OK at " + fixed_text(x) + ", " + fixed_text(y) + " hits '" + hit + "'");
+	if (hit != ok_path) {
+		fail("the OK button's centre hits '" + hit + "'");
+		return false;
+	}
+	click(r_screens, godot::Vector2(x, y));
+	note("clicked OK");
 	return true;
 }
 
@@ -246,7 +284,7 @@ bool EorCheck::frame(Bf3UiScreens &r_screens, bf3::host::UiFlowSession *p_sessio
 				shot_later("eor_stats", p_now_s + kEorCheckStatsShotS);
 				go(Step::StatsShown, p_now_s);
 			} else if (p_now_s - step_s_ > kEorCheckStepWaitS) {
-				fail("eordetailsstatsscreen not up " + seconds_text(kEorCheckStepWaitS) + " s after the STATS click");
+				fail("eordetailsstatsscreen not up " + fixed_text(kEorCheckStepWaitS) + " s after the STATS click");
 			}
 			break;
 		case Step::StatsShown:
@@ -306,11 +344,15 @@ bool EorCheck::frame(Bf3UiScreens &r_screens, bf3::host::UiFlowSession *p_sessio
 		case Step::QuitClicked:
 			if (visible(r_screens, kEorPopupPartition)) {
 				note("QuitPopup up");
-				shot(p_io, "eor_quit_popup");
-				press_concept(r_screens, int32_t(ui::UiInputConcept::Activate));
-				go(Step::PopupActivated, p_now_s);
+				shot_later("eor_quit_popup", p_now_s + kEorCheckPopupShotS);
+				go(Step::PopupShown, p_now_s);
 			} else if (p_now_s - step_s_ > kEorCheckStepWaitS) {
 				fail("popupgeneric not up after the QUIT click");
+			}
+			break;
+		case Step::PopupShown:
+			if (shot_name_ == nullptr && click_popup_ok(r_screens)) {
+				go(Step::PopupActivated, p_now_s);
 			}
 			break;
 		case Step::PopupActivated:
@@ -320,7 +362,7 @@ bool EorCheck::frame(Bf3UiScreens &r_screens, bf3::host::UiFlowSession *p_sessio
 				done_ = true;
 				step_ = Step::Done;
 			} else if (p_now_s - step_s_ > kEorCheckStepWaitS) {
-				fail("Activate on the QuitPopup did not quit");
+				fail("the click on the QuitPopup's OK did not quit");
 			}
 			break;
 		case Step::Done:
