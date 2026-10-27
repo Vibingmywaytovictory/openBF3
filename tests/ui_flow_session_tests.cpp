@@ -302,6 +302,47 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(s.flow().errors().empty());
 	}
 
+	TEST_CASE("ui flow session: Restarting shows the pre-round box and the next pre-round reloads the logic") {
+		Level *l = level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level);
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		UiFlowSession &s = **made;
+		ui_flow_tdm_pc_defaults(s, "TeamDeathMatch0");
+		Script sc{ s };
+		sc.state.phase = net::MatchPhase::PreRound;
+		sc.state.joined = true;
+		sc.run_to(60);
+		sc.input(ui::UiInputConcept::Activate);
+		sc.run_to(100);
+		sc.state.own_spawns = 1;
+		sc.run_to(160);
+		sc.state.phase = net::MatchPhase::InRound;
+		sc.run_to(300);
+		sc.phase("playing");
+		sc.state.phase = net::MatchPhase::Restarting;
+		sc.run_to(360);
+		const Lines restarting = sc.phase("restarting");
+		CHECK(restarting ==
+				Lines{ "native PreRound.Restarting", "push preroundwaitingscreen", "close preroundwaitingscreen",
+						"push preroundwaitingscreen" });
+		CHECK(s.data("ui/uicomponents/uipreroundcomp", -566234449) == "ID_H_PREROUND_RESTARTING_TITLE");
+		CHECK(s.data("ui/uicomponents/uipreroundcomp", -1675254140) == "ID_H_PREROUND_RESTARTING");
+		CHECK(s.flow().find_screen(ui::kPreRoundWaitingScreenPartition) != nullptr);
+		sc.state.phase = net::MatchPhase::PreRound;
+		sc.state.own_spawns = 0;
+		sc.state.own_deaths = 0;
+		sc.run_to(420);
+		const Lines reload = sc.phase("pre-round after restarting");
+		REQUIRE_FALSE(reload.empty());
+		CHECK(reload.front() == "native Reload");
+		CHECK(s.stats().reloads == 1);
+		CHECK(s.errors().empty());
+		CHECK(s.flow().errors().empty());
+	}
+
 	TEST_CASE("ui flow session: a screen host reports enter and exit") {
 		Level *l = level_or_skip();
 		if (l == nullptr) {

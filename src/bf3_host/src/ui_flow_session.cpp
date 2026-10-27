@@ -250,7 +250,8 @@ void UiFlowSession::pre_round(UiPreRoundEvent p_event) {
 }
 
 core::Status UiFlowSession::update(const UiGameState &p_state) {
-	if (p_state.phase == net::MatchPhase::PreRound && last_.phase == net::MatchPhase::RoundOver) {
+	if (p_state.phase == net::MatchPhase::PreRound &&
+			(last_.phase == net::MatchPhase::RoundOver || last_.phase == net::MatchPhase::Restarting)) {
 		note("native Reload");
 		BF3_TRY(start_logic());
 		widget_events_.clear();
@@ -269,6 +270,8 @@ core::Status UiFlowSession::update(const UiGameState &p_state) {
 			pre_round(p_state.counting_down ? UiPreRoundEvent::Countdown : UiPreRoundEvent::Waiting);
 		} else if (p_state.phase == net::MatchPhase::InRound && last_.phase == net::MatchPhase::PreRound) {
 			pre_round(UiPreRoundEvent::RoundStarted);
+		} else if (p_state.phase == net::MatchPhase::Restarting) {
+			pre_round(UiPreRoundEvent::Restarting);
 		} else if (p_state.phase == net::MatchPhase::RoundOver) {
 			round_over_ = true;
 			note("native RoundOver.OnRoundOver " + std::to_string(p_state.winner));
