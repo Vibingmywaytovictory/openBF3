@@ -11,6 +11,8 @@
 
 #include <algorithm>
 #include <cstring>
+#include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -24,6 +26,11 @@ namespace {
 
 constexpr std::string_view kScoreboard32 = "ui/flow/screen/scoreboards/scoreboardtwoteamshud32screen";
 constexpr double kRowSpacing = 28.0;
+constexpr std::string_view kPreRoundCategory = "ui/uicomponents/uipreroundcomp";
+constexpr int32_t kPreRoundTitleKey = -566234449;
+constexpr int32_t kPreRoundDescriptionKey = -1675254140;
+constexpr std::string_view kAlert = "instance1.HudAlertMessage_03";
+constexpr std::string_view kShowQuery = "UIWidgetEventID_Show";
 
 struct Board {
 	ui_retail::RetailScreen s;
@@ -118,5 +125,73 @@ TEST_SUITE("ui-scoreboard") {
 		CHECK(b.text(foster, "KillsLabel") == "3");
 		CHECK(b.text(foster, "ScoreLabel") == "672");
 		CHECK(b.text(foster, "PingLabel") == "-");
+	}
+
+	TEST_CASE("scoreboard: preroundwaitingscreen's alert shows the flow's pre-round texts and CountLeft") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const TextDatabase &db = ui_retail::retail_text_db(*r);
+		std::map<int32_t, std::string> flow;
+		HudClientState client;
+		client.flow_data = [&flow](std::string_view p_category, int32_t p_key) -> std::optional<std::string> {
+			const auto it = flow.find(p_key);
+			return p_category == kPreRoundCategory && it != flow.end() ? std::optional(it->second) : std::nullopt;
+		};
+		flow[kPreRoundTitleKey] = "ID_H_PREROUND_WAITING_FOR_PLAYERS_TITLE";
+		flow[kPreRoundDescriptionKey] = "ID_H_PREROUND_WAITING_FOR_PLAYERS";
+		ui_retail::RetailScreen s = ui_retail::open_retail_screen(
+				*r, kPreRoundWaitingScreenPartition, ui_retail::retail_text_client(db, std::move(client)));
+		std::vector<HudWidgetEvent> events;
+		s.hud->set_event_sink([&events](const HudWidgetEvent &p_e) { events.push_back(p_e); });
+		HudModel m;
+		m.pre_round.count_left = 3;
+		s.hud->initialize(m);
+		s.hud->set_focus(true);
+		const std::string alert = std::string(kAlert) + ".alert";
+		const auto text = [&](std::string_view p_field) {
+			return s.at(alert + ".content." + std::string(p_field)).text;
+		};
+		CHECK_FALSE(s.at(alert).visible);
+		REQUIRE(s.hud->deliver_in_event("HudAlertMessage_03", kShowQuery, As2Value::of(0)));
+		s.hud->advance(1.0 / 30.0);
+		CHECK(s.at(kAlert).visible);
+		CHECK(s.at(alert).visible);
+		CHECK(text("title") == "WAITING FOR PLAYERS");
+		CHECK(text("description") == "PLAYERS NEEDED");
+		CHECK(text("timer") == "3");
+		const auto fired = [&](std::string_view p_query) {
+			return std::count_if(
+					events.begin(), events.end(), [&](const HudWidgetEvent &e) { return e.query == p_query; });
+		};
+		CHECK(fired("UIWidgetEventID_OnItemPressed") == 1);
+		CHECK(s.hud->stats().as2.missing_paths == 0);
+		CHECK_MESSAGE(s.hud->stats().as2.failed_ops == 0, s.hud->stats().as2.last_failure);
+
+		m.pre_round.count_left = 1;
+		s.hud->refresh(m);
+		CHECK(text("timer") == "1");
+
+		flow[kPreRoundTitleKey] = "ID_H_PREROUND_COUNTDOWN_TITLE";
+		flow[kPreRoundDescriptionKey] = "ID_H_PREROUND_COUNTDOWN";
+		m.pre_round.count_left = 10;
+		s.hud->refresh(m);
+		CHECK(text("title") == "GET READY");
+		CHECK(text("description") == "ROUND WILL START IN");
+		CHECK(text("timer") == "10");
+		CHECK(s.at(kAlert).visible);
+
+		m.pre_round.count_left = 0;
+		s.hud->refresh(m);
+		CHECK_FALSE(s.at(kAlert).visible);
+
+		flow[kPreRoundTitleKey] = "ID_H_PREROUND_RESTARTING_TITLE";
+		flow[kPreRoundDescriptionKey] = "ID_H_PREROUND_RESTARTING";
+		m.pre_round.count_left = 2;
+		s.hud->refresh(m);
+		CHECK(s.at(kAlert).visible);
+		CHECK(text("title") == "TOO FEW PLAYERS");
+		CHECK(text("description") == "RESTARTING ROUND");
 	}
 }

@@ -235,6 +235,7 @@ struct HudClientState {
 	std::function<std::optional<std::string>(std::string_view)> translate;
 	const HudPopup *popup = nullptr;
 	std::string vehicle_name;
+	std::function<std::optional<std::string>(std::string_view, int32_t)> flow_data;
 };
 
 class TextDatabase;

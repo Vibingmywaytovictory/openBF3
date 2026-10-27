@@ -14,6 +14,23 @@ public:
 		always_enabled_ = param_true(r_host, "m_alwaysEnabled");
 	}
 
+	void attach_node(HudWidgetHost &, const HudWidgetNode &p_node) override { sources_ = p_node.sources; }
+
+	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const override {
+		for (const HudDataSource &src : sources_) {
+			if (src.category != kPreRoundCategory) {
+				continue;
+			}
+			if (src.key == kPreRoundCountLeftKey) {
+				r_out.push_back({ src.name, As2Value::of(p_model.pre_round.count_left), src.on_initialize });
+			} else if (p_client.flow_data) {
+				if (std::optional<std::string> v = p_client.flow_data(src.category, src.key)) {
+					r_out.push_back({ src.name, As2Value::of(std::move(*v)), src.on_initialize });
+				}
+			}
+		}
+	}
+
 	void on_clip_load(HudWidgetHost &r_host) override {
 		for (const char *c : { "alert", "warning", "information" }) {
 			r_host.clip(c).set_visible(false);
@@ -56,11 +73,8 @@ public:
 			title_text_ = as2_text(p_value);
 			setup_message();
 		} else if (p_key == "Timer") {
-			const std::string v = p_value.to_string();
-			host_->self().set_visible(!(message_type_ == "waiting" && (v == "0" || v == "00:00")));
-			if (message_.exists()) {
-				message_.child("content").child("timer").set_text(p_value.defined() ? v : std::string());
-			}
+			timer_ = p_value;
+			update_timer();
 		}
 	}
 
@@ -74,6 +88,17 @@ public:
 		if (p_fs.calls("onHideComplete")) {
 			r_host.self().set_visible(false);
 			message_.set_visible(false);
+			r_host.fire_event(kOnShowCompleted);
+		}
+	}
+
+	void in_event(HudWidgetHost &, int32_t p_index, const As2Value &) override {
+		if (p_index == kShowAlert || p_index == kHideAlert) {
+			visible_ = p_index == kShowAlert;
+			setup_message();
+			if (visible_ && timer_.defined()) {
+				update_timer();
+			}
 		}
 	}
 
@@ -95,6 +120,21 @@ private:
 	static constexpr float kInformationTitleY = 4.0f;
 	static constexpr double kHideAlertSeconds = 5.0;
 	static constexpr int32_t kBackgroundShownFrame = 21;
+	static constexpr int32_t kShowAlert = 0;
+	static constexpr int32_t kHideAlert = 1;
+	static constexpr int32_t kOnShow = 16;
+	static constexpr int32_t kOnHide = 17;
+	static constexpr int32_t kOnShowCompleted = 18;
+	static constexpr std::string_view kPreRoundCategory = "ui/uicomponents/uipreroundcomp";
+	static constexpr int32_t kPreRoundCountLeftKey = -1933733975;
+	static constexpr std::array<std::pair<std::string_view, int32_t>, 6> kShowEvents{ {
+			{ "warning", 2 },
+			{ "revive", 4 },
+			{ "waiting", 6 },
+			{ "death", 8 },
+			{ "failed", 10 },
+			{ "information", 12 },
+	} };
 	static constexpr std::array<std::pair<std::string_view, std::string_view>, 6> kVisibilityKeys{ {
 			{ "WarningVisibility", "warning" },
 			{ "RevivedVisibility", "revive" },
@@ -139,6 +179,14 @@ private:
 	}
 
 	void set_text(const As2Clip &p_field, std::string_view p_text) const { p_field.set_text(host_->translate(p_text)); }
+
+	void update_timer() const {
+		const std::string v = timer_.to_string();
+		host_->self().set_visible(!(message_type_ == "waiting" && (v == "0" || v == "00:00")));
+		if (message_.exists()) {
+			message_.child("content").child("timer").set_text(timer_.defined() ? v : std::string());
+		}
+	}
 
 	void setup_message() {
 		timer_left_ = 0.0;
@@ -207,11 +255,18 @@ private:
 		}
 		update_size();
 		set_bracket_colour();
+		for (const auto &[type, show] : kShowEvents) {
+			if (message_type_ == type) {
+				host_->fire_event(visible_ ? show : show + 1);
+			}
+		}
 		if (visible_) {
+			host_->fire_event(kOnShow);
 			host_->self().set_visible(true);
 			message_.set_visible(true);
 			message_.goto_and_play("in");
 		} else {
+			host_->fire_event(kOnHide);
 			message_.goto_and_play("out");
 		}
 	}
@@ -272,6 +327,8 @@ private:
 	}
 
 	HudWidgetHost *host_ = nullptr;
+	std::vector<HudDataSource> sources_;
+	As2Value timer_;
 	As2Clip message_;
 	std::string message_type_;
 	std::string bracket_colour_;
