@@ -71,7 +71,9 @@ public:
 		}
 	}
 
-	void drive(HudWidgetHost &r_host, const HudModel &, const HudClientState &p_client) override { r_host.self().set_visible(p_client.minimap_small); }
+	void drive(HudWidgetHost &r_host, const HudModel &p_model, const HudClientState &p_client) override {
+		r_host.self().set_visible(p_client.minimap_small && !p_model.user.is_in_menu);
+	}
 
 	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const override {
 		const HudTeam &t = p_model.team;

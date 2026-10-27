@@ -52,6 +52,10 @@ public:
 		}
 	}
 
+	void bind(const HudModel &p_model, const HudClientState &, HudData &r_out) const override {
+		r_out.push_back({ "Visible", As2Value::of(!p_model.user.is_in_menu) });
+	}
+
 	void drive(HudWidgetHost &, const HudModel &p_model, const HudClientState &) override {
 		heading_.child("cps").goto_and_stop(hud_compass_frame(p_model.soldier.compass_angle) + 1);
 	}

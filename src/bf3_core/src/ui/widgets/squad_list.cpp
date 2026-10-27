@@ -91,6 +91,13 @@ public:
 		}
 	}
 
+	void drive(HudWidgetHost &r_host, const HudModel &p_model, const HudClientState &) override {
+		if (p_model.user.is_in_menu != in_menu_) {
+			in_menu_ = p_model.user.is_in_menu;
+			r_host.self().set_visible(!in_menu_);
+		}
+	}
+
 	void bind(const HudModel &p_model, const HudClientState &, HudData &r_out) const override {
 		const HudSquadMemberList &members = p_model.squad.local_squad_members;
 		As2Value list = As2Value::array();
@@ -114,6 +121,7 @@ public:
 
 private:
 	static constexpr int32_t kRows = 4;
+	bool in_menu_ = false;
 
 	static As2Clip row(HudWidgetHost &r_host, int32_t p_index) { return r_host.clip("squadMember" + std::to_string(p_index)); }
 

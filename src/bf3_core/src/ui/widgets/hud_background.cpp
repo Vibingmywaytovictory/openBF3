@@ -100,7 +100,7 @@ public:
 	}
 
 	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const override {
-		r_out.push_back({ "Visible", As2Value::of(p_client.minimap_small) });
+		r_out.push_back({ "Visible", As2Value::of(p_client.minimap_small && !p_model.user.is_in_menu) });
 		r_out.push_back({ "HideForHardcore", As2Value::of(p_client.hardcore) });
 		r_out.push_back({ "ShowAirRadar", As2Value::of(p_model.minimap.air_radar_mask_enabled || p_client.show_air_radar) });
 	}

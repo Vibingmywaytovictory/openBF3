@@ -28,6 +28,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using namespace bf3::core;
@@ -2434,6 +2435,32 @@ TEST_SUITE("ui-hud-screen") {
 		CHECK(s.hud->deliver_in_event("Button_03", hide_query));
 		CHECK_FALSE(self->visible);
 		CHECK(s.hud->hit_target(cx, cy).empty());
+	}
+
+	TEST_CASE("hud screen: the game menu hides the soldier widgets and keeps the kill feed") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudModel m = moment_m02();
+		Screen mp = initialized(*r, kHudMpScreenPartition, m);
+		Screen tdm = initialized(*r, kHudTdmScreenPartition, m);
+		Screen cross = initialized(*r, kCrosshairDefaultPartition, m);
+		const std::array<std::pair<Screen *, std::string_view>, 8> soldier{ { { &mp, "Ammo_01" }, { &mp, "Health_01" },
+				{ &tdm, "Minimap_01" }, { &tdm, "Compass_01" }, { &tdm, "TicketCounter_01" },
+				{ &tdm, "HudBackgroundWidget_01" }, { &tdm, "SquadList_00" }, { &cross, "Crosshair_01" } } };
+		const std::string feed = "instance1.HudMessage_02";
+		const bool feed_shown = mp.at(feed).visible;
+		for (const bool in_menu : { true, false }) {
+			m.user.is_in_menu = in_menu;
+			for (Screen *s : { &mp, &tdm, &cross }) {
+				s->hud->refresh(m);
+			}
+			for (const auto &[s, name] : soldier) {
+				CHECK_MESSAGE(s->at("instance1." + std::string(name)).visible == !in_menu, std::string(name));
+			}
+			CHECK(mp.at(feed).visible == feed_shown);
+		}
 	}
 
 	TEST_CASE("hud screen: install unchanged") {

@@ -447,7 +447,7 @@ foreach(_w IN ITEMS assets:*screen*assets* ticket_counter:*TicketCounter* ammo:*
         kill_feed_team_kill:*KillFeed*team*kill* kill_log:*KillLog
         score_popup:*ScorePopup score_aggregator:*ScoreAggregator damage_indicator:*DamageIndicator hud_alert:*HudAlertMessage
         shared_screen:*hudscreen*panels squad_list:*SquadList icon3d:*Icon3D* input_hooks:*input*hooks* hit_button:*hit*test* timers:*timers*enter*frames* direct_access:*DirectAccess*screen*clip*
-        movie_screen:*movie*screen*getData*)
+        movie_screen:*movie*screen*getData* in_menu:*game*menu*hides*soldier*)
     string(REPLACE ":" ";" _p "${_w}")
     list(GET _p 0 _name)
     list(GET _p 1 _case)

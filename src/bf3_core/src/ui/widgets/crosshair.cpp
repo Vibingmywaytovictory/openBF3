@@ -47,7 +47,8 @@ public:
 
 	void bind(const HudModel &p_model, const HudClientState &, HudData &r_out) const override {
 		const HudWeapon &w = p_model.weapon;
-		r_out.push_back({ "Visible", As2Value::of(p_model.soldier.is_alive && w.active_weapon_crosshair != 0) });
+		r_out.push_back({ "Visible",
+				As2Value::of(p_model.soldier.is_alive && w.active_weapon_crosshair != 0 && !p_model.user.is_in_menu) });
 		r_out.push_back({ "BaseValue", As2Value::of(base_offset_) });
 		r_out.push_back({ "Dispersion", As2Value::of(hud_crosshair_dispersion(w.dispersion)) });
 		r_out.push_back({ "Zoomed", As2Value::of(w.zoomed) });
