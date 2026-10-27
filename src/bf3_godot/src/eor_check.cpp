@@ -11,6 +11,7 @@
 
 #include <godot_cpp/classes/global_constants.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -135,15 +136,26 @@ void EorCheck::press_concept(Bf3UiScreens &r_screens, int32_t p_concept) {
 bool EorCheck::check_page(Bf3UiScreens &r_screens, const ui::HudModel &p_model) {
 	const std::string header = text_at(
 			r_screens, kEorScoreboardPartition, std::string(ui::kHudScreenInstance) + ".EorHeader_01.headerText");
-	const std::string want = p_model.end_of_round.local_player_in_winning_team ? "YOUR TEAM WON!" : "YOUR TEAM LOST!";
+	const uint8_t local = p_model.local_player;
+	const int8_t roster_team = local < p_model.players.size() ? p_model.players[local].team : int8_t(0);
+	const bool won = roster_team != 0 && roster_team == p_model.end_of_round.winner;
+	const std::string want = won ? "YOUR TEAM WON!" : "YOUR TEAM LOST!";
+	const ui::HudPlayerList &friendly = p_model.team.friendly_team_players;
+	const bool local_friendly = std::find(friendly.index.begin(), friendly.index.begin() + friendly.count, local) !=
+			friendly.index.begin() + friendly.count;
 	const std::string caption = text_field(r_screens, "TextField_02");
 	const std::string value = text_field(r_screens, "TextField_01");
 	const long seconds = std::strtol(value.c_str(), nullptr, 10);
-	note("EOR page: header '" + header + "', '" + caption + "' '" + value + "', team rows " +
-			std::to_string(p_model.team.friendly_team_players.count) + " + " +
+	note("EOR page: header '" + header + "', '" + caption + "' '" + value + "', own roster team " +
+			std::to_string(int(roster_team)) + ", winner " + std::to_string(int(p_model.end_of_round.winner)) +
+			", team rows " + std::to_string(friendly.count) + " + " +
 			std::to_string(p_model.team.enemy_team1_players.count));
 	if (header != want) {
-		fail("EorHeader reads '" + header + "', the round's result is '" + want + "'");
+		fail("EorHeader reads '" + header + "', the own roster team against the winner gives '" + want + "'");
+		return false;
+	}
+	if (!local_friendly) {
+		fail("the own row is not in the friendly list (List_01)");
 		return false;
 	}
 	if (caption != "NEXT ROUND STARTS IN:" || value.empty() || seconds < 44 || seconds > 48) {
@@ -272,6 +284,9 @@ bool EorCheck::frame(Bf3UiScreens &r_screens, bf3::host::UiFlowSession *p_sessio
 			break;
 		case Step::Page2:
 			if (page && p_now_s - banner_s_ >= double(p_io.eor.pre_eor_s) + kEorCheckSettleS) {
+				if (!check_page(r_screens, p_model)) {
+					break;
+				}
 				click(r_screens, godot::Vector2(kEorCheckQuitX, kEorCheckQuitY));
 				note("clicked QUIT");
 				go(Step::QuitClicked, p_now_s);

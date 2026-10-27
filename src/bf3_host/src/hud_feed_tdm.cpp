@@ -33,6 +33,15 @@ void hide_tdm(ui::HudModel &r_model) {
 	r_model.pre_round.visible = false;
 }
 
+uint8_t roster_team(const HudFeedInput &p_input, uint8_t p_own_slot, uint8_t p_spawned_team) {
+	for (const net::PlayerRow &row : p_input.players) {
+		if (row.slot == p_own_slot && (row.team == 1 || row.team == 2)) {
+			return row.team;
+		}
+	}
+	return p_spawned_team;
+}
+
 }
 
 void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_drained, const HudStatic &p_static, HudTdmFeedState &r_state,
@@ -60,6 +69,7 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 		++r_state.bad_inputs;
 		f.own_team = 0;
 	}
+	f.own_team = roster_team(p_input, f.own_slot, f.own_team);
 	f.my_team = f.own_team != 0 ? f.own_team : 1;
 	f.enemy_team = uint8_t(3 - f.my_team);
 	f.winner = f.match ? p_input.match.winner : 0;

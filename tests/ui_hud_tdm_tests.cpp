@@ -426,6 +426,41 @@ TEST_CASE("players by slot and the sorted team lists") {
 	CHECK(m.team.friendly_team_players.count == 0);
 }
 
+TEST_CASE("the own team is the own roster row's, so a rotated restart before the next spawn keeps the lists and the "
+		  "result together") {
+	const host::HudStatic st;
+	const std::vector<net::PlayerRow> rows{ player(1, 1, "Bot US", 310, 3), player(2, 2, "Bot RU", 200, 2),
+		player(3, 2, "Me", 0, 0, false) };
+	host::HudFeedInput in;
+	in.tdm = true;
+	in.match_valid = true;
+	in.match.phase = net::MatchPhase::RoundOver;
+	in.match.winner = 1;
+	in.match.kills = { 5, 3 };
+	in.players = rows;
+	in.own_slot = 3;
+	in.own_team = 1;
+	host::HudTdmFeedState state;
+	ui::HudModel m;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(m.local_team == 2);
+	CHECK(m.team.friendly_team == 2);
+	REQUIRE(m.team.friendly_team_players.count == 2);
+	CHECK(m.team.friendly_team_players.index[1] == 3);
+	REQUIRE(m.team.enemy_team1_players.count == 1);
+	CHECK(m.team.enemy_team1_players.index[0] == 1);
+	CHECK_FALSE(m.team.friendly_team_is_winner);
+	CHECK_FALSE(m.end_of_round.local_won);
+	CHECK_FALSE(m.end_of_round.local_player_in_winning_team);
+	CHECK(m.end_of_round.player_team_index == 2);
+	const std::vector<net::PlayerRow> without_own{ rows[0], rows[1] };
+	in.players = without_own;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(m.local_team == 1);
+	CHECK(m.end_of_round.local_won);
+	CHECK(state.bad_inputs == 0);
+}
+
 TEST_CASE("the kill-feed ring keeps the newest 8; unknown defs are counted") {
 	const host::HudStatic st = make_static();
 	host::HudFeedInput in;
@@ -785,6 +820,7 @@ TEST_CASE("the kit bar: the own team's loadouts in slots 0, 1, 2, 6, 7") {
 	CHECK(m.players[1].kit_icon == 77);
 	CHECK(m.players[4].kit_icon == 72);
 	CHECK(m.players[6].kit_icon == 0);
+	in.players = {};
 	in.own_team = 0;
 	host::fill_hud_tdm(in, {}, st, state, m);
 	CHECK(m.spawn_screen.kit_items[0][0] == 1000);
