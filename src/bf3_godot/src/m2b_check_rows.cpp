@@ -67,6 +67,12 @@ std::vector<M2bPlayRow> m2b_play_rows(const M2bPlayTally &p_t, bool p_have_ui, b
 	add(M2bTrack::Ui, "scoreboard_kills_mismatch", double(p_t.scoreboard_mismatch),
 			fmt("== 0 of %g Tab samples against MatchState", double(p_t.scoreboard_samples)),
 			p_t.scoreboard_samples >= 1 && p_t.scoreboard_mismatch == 0);
+	add(M2bTrack::Ui, "scoreboard_hidden_on_release", double(p_t.scoreboard_release_shown),
+			fmt("== 0 of %g samples half a hold after Tab is released", double(p_t.scoreboard_release_samples)),
+			p_t.scoreboard_release_samples >= 1 && p_t.scoreboard_release_shown == 0);
+	add(M2bTrack::Ui, "scoreboard_round_over", double(p_t.scoreboard_round_over_shown),
+			fmt("== 0 of %g Tab holds under the round-end banner show the scoreboard", double(p_t.scoreboard_round_over_samples)),
+			p_t.scoreboard_round_over_samples >= 1 && p_t.scoreboard_round_over_shown == 0, true);
 	add(M2bTrack::Ui, "kill_card_bad", double(p_t.kill_cards_bad),
 			fmt("== 0 of %g kill cards without the killer or the weapon", double(p_t.kill_cards_checked)),
 			p_t.kill_cards_checked >= 1 && p_t.kill_cards_bad == 0);

@@ -175,10 +175,6 @@ target_sources(bf3_godot PRIVATE
     src/tdm_hud_records.cpp
     src/hud_tdm_screen.h
     src/hud_tdm_text.h
-    src/hud_scoreboard.h
-    src/hud_scoreboard.cpp
-    src/pre_round.h
-    src/pre_round.cpp
     src/round_end.h
     src/round_end.cpp
 )

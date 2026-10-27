@@ -32,9 +32,9 @@ namespace ui = bf3::core::ui;
 
 namespace {
 
-constexpr int kStages = 4;
-const char *const kStageNames[kStages] = { "pre_round", "kill_feed", "scoreboard", "round_end" };
-constexpr int kStageModels[kStages] = { 0, 2, 4, 5 };
+constexpr int kStages = 2;
+const char *const kStageNames[kStages] = { "kill_feed", "round_end" };
+constexpr int kStageModels[kStages] = { 2, 5 };
 constexpr uint8_t kLocal = 0;
 constexpr uint8_t kPlayers = 24;
 constexpr uint8_t kKiller = 5;
@@ -169,7 +169,6 @@ ui::HudModel Bf3TdmHudDemo::stage_model(int p_stage) const {
 	fill_list(t.team2_players, m, 2);
 	t.friendly_team_players = t.team1_players;
 	t.enemy_team1_players = t.team2_players;
-	t.scoreboard_enabled = p_stage == 4;
 	ui::HudKillCounter &kc = m.kill_counter;
 	const bool in_round = p_stage >= 2;
 	kc.team1_kills = in_round ? (p_stage == 5 ? 100 : 23) : 0;
@@ -198,9 +197,6 @@ ui::HudModel Bf3TdmHudDemo::stage_model(int p_stage) const {
 				m.messages.local_kill_message.newest_serial = serial;
 			}
 		}
-	}
-	if (p_stage == 0) {
-		m.pre_round = { true, true, 7.4f, true };
 	}
 	if (p_stage == 5) {
 		ui::HudEndOfRound &e = m.end_of_round;
@@ -257,30 +253,16 @@ void Bf3TdmHudDemo::_process(double p_delta) {
 
 void Bf3TdmHudDemo::check_stage(int p_stage, const std::string &p_name) {
 	const UiScreenRecords &records = *hud_;
-	const UiScreenRecord pre_round =
-			records.screen_record(ui::kPreRoundWaitingScreenPartition).value_or(UiScreenRecord{});
-	const UiScreenRecord scoreboard = records.screen_record(ui::kScoreboardHud32ScreenPartition).value_or(UiScreenRecord{});
 	const UiScreenRecord round_end = records.screen_record(ui::kEorWinningTeamScreenPartition).value_or(UiScreenRecord{});
 	const UiLookupRecord lookups = records.lookup_record().value_or(UiLookupRecord{});
-	const int32_t rows = int32_t(scoreboard.number(kUiFactRows));
-	const int32_t team1_kills = int32_t(scoreboard.number(kUiFactTeam1Kills));
-	const int32_t team2_kills = int32_t(scoreboard.number(kUiFactTeam2Kills));
 	const std::string &name = p_name;
 	switch (p_stage) {
-		case 0:
-			row(name, pre_round.visible && !round_end.visible,
-					"pre_round_visible " + std::to_string(pre_round.visible));
-			break;
 		case 2:
 			row(name, lookups.model_serial == stage_model(2).serial,
 					"the kill feed is the native HUD's (HudMessage_02)");
 			break;
-		case 4:
-			row(name, scoreboard.visible && rows == kPlayers && team1_kills == 23 && team2_kills == 19,
-					std::to_string(rows) + " rows, " + std::to_string(team1_kills) + " : " + std::to_string(team2_kills));
-			break;
 		case 5:
-			row(name, round_end.visible && round_end.shown == 1 && !scoreboard.visible && hud_->wants_mouse(),
+			row(name, round_end.visible && round_end.shown == 1 && hud_->wants_mouse(),
 					"visible " + std::to_string(round_end.visible) + ", shown " + std::to_string(round_end.shown));
 			break;
 		default:

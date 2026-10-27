@@ -61,6 +61,8 @@ M2bPlayTally good_tally() {
 	t.deaths_received = 30;
 	t.feed_lines = 30;
 	t.scoreboard_samples = 5;
+	t.scoreboard_release_samples = 5;
+	t.scoreboard_round_over_samples = 1;
 	t.kill_cards_checked = 2;
 	t.spawn_screen_model_shown = 3;
 	t.round_end_shown = true;
@@ -188,12 +190,7 @@ TEST_CASE("m2b.gx.unit the spawn screen and Deploy") {
 	CHECK(!tdm_can_deploy(true, ms, 1000, 0));
 }
 
-TEST_CASE("m2b.gx.unit the scoreboard at RoundOver and the play script's helpers") {
-	CHECK(tdm_scoreboard_shown(true, true, net::MatchPhase::InRound));
-	CHECK(!tdm_scoreboard_shown(false, true, net::MatchPhase::InRound));
-	CHECK(!tdm_scoreboard_shown(true, true, net::MatchPhase::RoundOver));
-	CHECK(tdm_scoreboard_shown(true, false, net::MatchPhase::RoundOver));
-
+TEST_CASE("m2b.gx.unit the play script's helpers") {
 	CHECK(m2b_death_had_screen_time(10.0, 18.0, -1.0, 8.0));
 	CHECK(!m2b_death_had_screen_time(10.0, 17.9, -1.0, 8.0));
 	CHECK(!m2b_death_had_screen_time(30.0, 60.0, 32.0, 8.0));
@@ -248,7 +245,7 @@ TEST_CASE("m2b.gx.unit the play rows: gx verdicts, ui / cam skipped until built"
 		for (const M2bPlayRow &r : rows) {
 			CHECK_MESSAGE(r.state == M2bRowState::Pass, r.name);
 		}
-		CHECK(rows.size() == 15);
+		CHECK(rows.size() == 17);
 	}
 	{
 		const std::vector<M2bPlayRow> rows = m2b_play_rows(t, false, false);
@@ -264,7 +261,7 @@ TEST_CASE("m2b.gx.unit the play rows: gx verdicts, ui / cam skipped until built"
 			}
 		}
 		CHECK(gx == 7);
-		CHECK(skipped == 8);
+		CHECK(skipped == 10);
 	}
 	{
 		M2bPlayTally h = t;
@@ -314,6 +311,17 @@ TEST_CASE("m2b.gx.unit the play rows: gx verdicts, ui / cam skipped until built"
 	x = t;
 	x.scoreboard_mismatch = 1;
 	CHECK(row_named(m2b_play_rows(x, true, true), "scoreboard_kills_mismatch")->state == M2bRowState::Fail);
+	x = t;
+	x.scoreboard_release_shown = 1;
+	CHECK(row_named(m2b_play_rows(x, true, true), "scoreboard_hidden_on_release")->state == M2bRowState::Fail);
+	x = t;
+	x.scoreboard_release_samples = 0;
+	CHECK(row_named(m2b_play_rows(x, true, true), "scoreboard_hidden_on_release")->state == M2bRowState::Fail);
+	x = t;
+	x.scoreboard_round_over_shown = 1;
+	CHECK(row_named(m2b_play_rows(x, true, true), "scoreboard_round_over")->state == M2bRowState::Fail);
+	x.windowed = false;
+	CHECK(row_named(m2b_play_rows(x, true, true), "scoreboard_round_over")->state == M2bRowState::Skip);
 	x = t;
 	x.tag_icons_painted = 0;
 	CHECK(row_named(m2b_play_rows(x, true, true), "nametag_icons")->state == M2bRowState::Fail);

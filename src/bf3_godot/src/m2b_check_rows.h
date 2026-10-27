@@ -37,6 +37,8 @@ struct M2bPlayTally {
 
 	uint64_t feed_lines = 0;
 	uint32_t scoreboard_samples = 0, scoreboard_mismatch = 0;
+	uint32_t scoreboard_release_samples = 0, scoreboard_release_shown = 0;
+	uint32_t scoreboard_round_over_samples = 0, scoreboard_round_over_shown = 0;
 	uint32_t kill_cards_checked = 0, kill_cards_bad = 0;
 	uint32_t spawn_screen_model_shown = 0;
 	bool round_end_shown = false;

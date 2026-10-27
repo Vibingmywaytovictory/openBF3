@@ -672,7 +672,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		build_tdm_ui(r_game, m, headless_, level != nullptr ? level->death.get() : nullptr);
 	}
 	InputMapper &mapper = mapper_;
-	m.scoreboard_held = tdm_scoreboard_shown(mapper.scoreboard_held(), f.match_valid, f.match.phase);
+	m.scoreboard_held = mapper.scoreboard_held();
 
 	auto t0 = std::chrono::steady_clock::now();
 	tick_native_flow(r_game, m, f, level_id(), mode_id(), now_s);
@@ -864,14 +864,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 					new OverlayCheck(user_arg_value("overlay-shots")), &delete_part<OverlayCheck>);
 		}
 		OverlayCheckIo io;
-		io.press = [this](Key p_key, bool p_pressed) {
-			Ref<InputEventKey> k;
-			k.instantiate();
-			k->set_keycode(p_key);
-			k->set_physical_keycode(p_key);
-			k->set_pressed(p_pressed);
-			tdm_ui_input(k);
-		};
+		io.press = [this](Key p_key, bool p_pressed) { scripted_ui_key(p_key, p_pressed); };
 		io.join = [this](std::string *r_error) { return join_extra_client(r_error); };
 		io.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
 		if (m.overlay_run->frame(*screens, f, now_s, io)) {

@@ -121,8 +121,4 @@ void tdm_deploy_spawned(TdmDeploy &r_deploy) {
 	r_deploy.sent_tick = 0;
 }
 
-bool tdm_scoreboard_shown(bool p_held, bool p_match_valid, net::MatchPhase p_phase) {
-	return p_held && !(p_match_valid && p_phase == net::MatchPhase::RoundOver);
-}
-
 }

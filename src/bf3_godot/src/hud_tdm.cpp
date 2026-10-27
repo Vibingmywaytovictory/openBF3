@@ -1,9 +1,7 @@
 #include "hud_tdm.h"
 
 #include "hud_items.h"
-#include "hud_scoreboard.h"
 #include "hud_tdm_screen.h"
-#include "pre_round.h"
 #include "round_end.h"
 
 #include "bf3_localisation.h"
@@ -309,14 +307,12 @@ struct Bf3TdmHud::Impl {
 	TdmHudContext ctx;
 	uint64_t root_id = 0;
 	Control *root = nullptr;
-	Bf3TdmScoreboard *scoreboard = nullptr;
-	Bf3TdmPreRound *pre_round = nullptr;
 	Bf3TdmRoundEnd *round_end = nullptr;
 
 	bool alive() const { return root != nullptr && ObjectDB::get_instance(root_id) != nullptr; }
 	template <typename F>
 	void each(F &&p_f) {
-		Bf3TdmScreen *screens[] = { pre_round, round_end, scoreboard };
+		Bf3TdmScreen *screens[] = { round_end };
 		for (Bf3TdmScreen *s : screens) {
 			if (s != nullptr) {
 				p_f(*s);
@@ -348,10 +344,8 @@ bool Bf3TdmHud::build(Node *p_parent, Bf3Localisation *p_localisation, Bf3UiAsse
 	m.root->set_name("Bf3TdmHud");
 	m.root->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
 	m.root->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
-	m.pre_round = memnew(Bf3TdmPreRound);
 	m.round_end = memnew(Bf3TdmRoundEnd);
-	m.scoreboard = memnew(Bf3TdmScoreboard);
-	const char *names[] = { "PreRound", "RoundEnd", "Scoreboard" };
+	const char *names[] = { "RoundEnd" };
 	size_t i = 0;
 	m.each([&](Bf3TdmScreen &s) {
 		s.set_name(names[i++]);
@@ -365,7 +359,7 @@ bool Bf3TdmHud::build(Node *p_parent, Bf3Localisation *p_localisation, Bf3UiAsse
 	m.root_id = m.root->get_instance_id();
 	m.each([&](Bf3TdmScreen &s) { s.build_screen(); });
 	m.ctx.resolve(m.root);
-	UtilityFunctions::print("Bf3TdmHud: built (scoreboard, pre-round, round end)");
+	UtilityFunctions::print("Bf3TdmHud: built (round end)");
 	return true;
 }
 
@@ -416,8 +410,6 @@ void Bf3TdmHud::shutdown() {
 	}
 	m.root = nullptr;
 	m.root_id = 0;
-	m.scoreboard = nullptr;
-	m.pre_round = nullptr;
 	m.round_end = nullptr;
 }
 
@@ -425,7 +417,5 @@ void Bf3TdmHud::shutdown() {
 
 void openbf3_register_tdm_hud() {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmScreen);
-	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmScoreboard);
-	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmPreRound);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmRoundEnd);
 }

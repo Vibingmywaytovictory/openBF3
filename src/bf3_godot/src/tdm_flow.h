@@ -81,6 +81,4 @@ bool tdm_deploy_step(TdmDeploy &r_deploy, bool p_screen_up, bool p_can_deploy, s
 
 void tdm_deploy_spawned(TdmDeploy &r_deploy);
 
-bool tdm_scoreboard_shown(bool p_held, bool p_match_valid, net::MatchPhase p_phase);
-
 }

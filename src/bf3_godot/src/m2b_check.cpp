@@ -8,6 +8,7 @@
 #include "hud_items.h"
 #include "input_mapper.h"
 #include "native_hud.h"
+#include "native_screens.h"
 
 #include "bf3/core/util/format.h"
 #include "bf3/host/hud_feed.h"
@@ -19,6 +20,7 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <string_view>
 
 namespace bf3::godot_side {
 
@@ -44,6 +46,8 @@ constexpr double kM2bFallAfterS = 26.0;
 constexpr double kM2bScreenGraceS = 4.0;
 constexpr double kM2bRoundOverHoldS = 3.0;
 constexpr double kM2bHardEndAfterS = 45.0;
+constexpr std::string_view kM2bFriendlyHeaderKills = "ScoreboardHeader_01.Kills";
+constexpr std::string_view kM2bEnemyHeaderKills = "ScoreboardHeader_02.Kills";
 
 }
 
@@ -72,8 +76,8 @@ struct M2bCheck::State {
 	double next_seek = -1.0;
 	uint8_t last_sought = 0xFF;
 	bool dropped = false;
-	double tab_until = -1.0, next_tab = 0.0;
-	bool tab_shot = false;
+	double tab_until = -1.0, next_tab = 0.0, tab_released = -1.0, round_over_tab = -1.0;
+	bool tab_shot = false, round_over_tab_done = false;
 
 	uint32_t deaths_seen = 0;
 	bool death_pending = false;
@@ -96,6 +100,10 @@ struct M2bCheck::State {
 		return l != nullptr && l->death != nullptr ? *l->death : core::gameplay::DeathTimeline{};
 	}
 	InputMapper &mapper() { return s.mapper(); }
+	void hold_tab(bool p_down) {
+		mapper().script_hold(InputMapper::TdmAction::Scoreboard, p_down);
+		s.scripted_ui_key(godot::KEY_TAB, p_down);
+	}
 	void note(const std::string &p_line) { UtilityFunctions::print(to_godot("[m2b] " + p_line)); }
 	bool save_shot(const char *p_name) {
 		if (options.shots_dir.empty() || !tally.windowed) {
@@ -229,18 +237,32 @@ struct M2bCheck::State {
 		}
 
 		if (round_over && tab_until >= 0.0) {
-			mp.script_hold(InputMapper::TdmAction::Scoreboard, false);
+			hold_tab(false);
 			tab_until = -1.0;
+		}
+		if (round_over && tally.windowed && round_over_tab < 0.0 && round_end_banner_up()) {
+			round_over_tab = p_t;
+			hold_tab(true);
+		}
+		if (round_over_tab >= 0.0 && !round_over_tab_done && p_t - round_over_tab >= kM2bTabHoldS) {
+			round_over_tab_done = true;
+			sample_round_over_scoreboard();
+			hold_tab(false);
+		}
+		if (tab_released >= 0.0 && p_t - tab_released >= kM2bTabHoldS * 0.5) {
+			tab_released = -1.0;
+			sample_released_scoreboard();
 		}
 
 		if (g.alive && !round_over) {
 			if (tab_until < 0.0 && p_t >= next_tab) {
 				tab_until = p_t + kM2bTabHoldS;
-				mp.script_hold(InputMapper::TdmAction::Scoreboard, true);
+				hold_tab(true);
 			}
 			if (tab_until >= 0.0 && p_t >= tab_until) {
-				mp.script_hold(InputMapper::TdmAction::Scoreboard, false);
+				hold_tab(false);
 				tab_until = -1.0;
+				tab_released = p_t;
 				next_tab = p_t + kM2bTabEveryS;
 			}
 			if (tab_until >= 0.0 && p_t >= tab_until - kM2bTabHoldS * 0.5) {
@@ -319,10 +341,12 @@ struct M2bCheck::State {
 		}
 		int32_t k1 = g.hud_model.kill_counter.team1_kills, k2 = g.hud_model.kill_counter.team2_kills;
 		bool shown = g.hud_model.team.scoreboard_enabled;
-		if (const std::optional<UiScreenRecord> r = tally.windowed ? m.screen_records.screen_record(core::ui::kScoreboardHud32ScreenPartition) : std::nullopt) {
+		if (const std::optional<UiScreenRecord> r = board_record()) {
 			shown = r->visible;
-			k1 = int32_t(r->number(kUiFactTeam1Kills));
-			k2 = int32_t(r->number(kUiFactTeam2Kills));
+			const int32_t own = int32_t(r->number(kM2bFriendlyHeaderKills));
+			const int32_t enemy = int32_t(r->number(kM2bEnemyHeaderKills));
+			k1 = m.own_team == 2 ? enemy : own;
+			k2 = m.own_team == 2 ? own : enemy;
 		}
 		++tally.scoreboard_samples;
 
@@ -331,6 +355,39 @@ struct M2bCheck::State {
 			++tally.scoreboard_mismatch;
 			note(fmt("scoreboard %s: %d : %d, MatchState %d : %d", shown ? "shown" : "NOT shown", k1, k2,
 					fr.match.kills[0], fr.match.kills[1]));
+		}
+	}
+
+	bool round_end_banner_up() const {
+		const Bf3UiScreens *screens = s.screen_stack();
+		const std::optional<UiScreenPhase> phase =
+				screens != nullptr ? screens->phase(core::ui::kEorWinningTeamScreenPartition) : std::nullopt;
+		return phase == UiScreenPhase::Shown;
+	}
+
+	std::optional<UiScreenRecord> board_record() const {
+		return tally.windowed ? m.screen_records.screen_record(core::ui::kScoreboardHud32ScreenPartition)
+							  : std::nullopt;
+	}
+
+	bool board_shown() const {
+		const std::optional<UiScreenRecord> r = board_record();
+		return r ? r->visible : g.hud_model.team.scoreboard_enabled;
+	}
+
+	void sample_released_scoreboard() {
+		++tally.scoreboard_release_samples;
+		if (board_shown()) {
+			++tally.scoreboard_release_shown;
+			note("scoreboard still shown after Tab was released");
+		}
+	}
+
+	void sample_round_over_scoreboard() {
+		++tally.scoreboard_round_over_samples;
+		if (board_shown()) {
+			++tally.scoreboard_round_over_shown;
+			note("scoreboard shown by Tab under the round-end banner");
 		}
 	}
 
@@ -370,7 +427,7 @@ struct M2bCheck::State {
 	void finish_play(double p_t) {
 		resolve_death(false, p_t);
 		mapper().release_all();
-		mapper().script_hold(InputMapper::TdmAction::Scoreboard, false);
+		hold_tab(false);
 		tally.seconds = p_t;
 		tally.own_deaths = m.own_deaths;
 		tally.deploys = m.deploys;
@@ -466,7 +523,8 @@ bool M2bCheck::frame(uint64_t p_now_ns, double p_dt) {
 		case M2bCase::Play: {
 			st.play_frame(t, p_now_ns);
 			const bool settled = !st.death_pending || t - st.death_t >= st.death().spawn_screens_s + kM2bScreenGraceS;
-			const bool over_long_enough = st.round_over_t >= 0.0 && t - st.round_over_t >= kM2bRoundOverHoldS && (st.round_end_shot || !st.tally.windowed);
+			const bool over_long_enough = st.round_over_t >= 0.0 && t - st.round_over_t >= kM2bRoundOverHoldS &&
+					(st.round_end_shot || !st.tally.windowed) && (st.round_over_tab_done || !st.tally.windowed);
 			const bool enough = st.m.own_deaths >= 1 && st.m.deploys >= 2 && settled;
 			const bool end = (over_long_enough && (enough || t >= st.options.play_seconds)) || t >= st.options.play_seconds + kM2bHardEndAfterS ||
 					t >= st.options.case_timeout_s;

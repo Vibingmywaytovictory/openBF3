@@ -25,11 +25,6 @@ struct TdmHudRecords {
 	uint64_t model_serial = 0;
 	uint64_t draws = 0;
 
-	bool scoreboard_visible = false;
-	uint8_t scoreboard_rows = 0;
-	std::array<int32_t, 2> scoreboard_team_kills{};
-
-	bool pre_round_visible = false;
 	bool round_end_visible = false;
 	uint64_t round_end_shown = 0;
 
