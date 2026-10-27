@@ -340,7 +340,7 @@ TEST_CASE("a recorded round: pre-round, deploy, kills, own death, kill card, spa
 	in.match.players_needed = 0;
 	in.match.countdown_end_tick = 12600 + 600;
 	frame(12601, {});
-	CHECK(m.pre_round.count_left == 0);
+	CHECK(m.pre_round.count_left == 10);
 	CHECK(!m.end_of_round.visible);
 	CHECK(m.pre_round.visible);
 	CHECK(m.spawn_screen.visible);

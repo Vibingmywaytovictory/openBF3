@@ -1,6 +1,7 @@
 #include "hud_feed_tdm_parts.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace bf3::host::tdm_feed {
 
@@ -132,7 +133,7 @@ void feed_round_end(Frame &r_frame) {
 			pre.counting_down ? seconds_until(now_tick, in.match.countdown_end_tick, state.bad_inputs) : 0.0f;
 	pre.input_restricted = match && in.match.restrict_until_tick != 0 && now_tick < in.match.restrict_until_tick;
 	pre.players_needed = pre.visible && match ? int32_t(in.match.players_needed) : 0;
-	pre.count_left = pre.players_needed;
+	pre.count_left = pre.counting_down ? int32_t(std::ceil(pre.seconds_left)) : pre.players_needed;
 
 	ui::HudEndOfRound &eor = model.end_of_round;
 	eor.visible = r_frame.round_over;
