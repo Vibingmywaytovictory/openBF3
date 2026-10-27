@@ -250,6 +250,28 @@ TEST_SUITE("ui-eor") {
 		CHECK(hud_eor_seconds_left(std::nanf("")) == 0);
 	}
 
+	TEST_CASE("The EOR tabs: END OF ROUND over the page, and off a ranked server only SCOREBOARD and STATS") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		RetailScreen tabs = open_retail_screen(*r, kEorDetailsTabs, retail_text_client(retail_text_db(*r)));
+		tabs.hud->initialize(footage_round(false));
+		const std::string header = std::string(kHudScreenInstance) + ".PageHeader_01";
+		CHECK(tabs.hud->clip(header + ".subHeading").text() == "END OF ROUND");
+		CHECK(tabs.hud->clip(header + ".heading").text().empty());
+		const std::string holder = std::string(kHudScreenInstance) + ".TabBar_01.tabBarHolder";
+		for (const bool ranked : { false, true }) {
+			RetailScreen s = open_retail_screen(*r, kEorDetailsScoreboard, retail_text_client(retail_text_db(*r)));
+			HudModel m = footage_round(false);
+			m.end_of_round.is_ranked = ranked;
+			s.hud->initialize(m);
+			CHECK(s.hud->clip(holder + ".button_1").exists());
+			CHECK(s.hud->clip(holder + ".button_2").exists() == ranked);
+			CHECK(s.hud->clip(holder + ".button_6").exists() == ranked);
+		}
+	}
+
 	TEST_CASE("hud_scoreboard_rows: one row per listed player, bots without a ping, the local player marked") {
 		const HudModel m = scoreboard_round();
 		const std::vector<As2Value> us = hud_scoreboard_rows(m, m.team.friendly_team_players);

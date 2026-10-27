@@ -154,6 +154,10 @@ public:
 		}
 		r_host.clip("heading").set_auto_size(true);
 		r_host.clip("subHeading").set_auto_size(true);
+		if (binding_) {
+			update(r_host, "Header", As2Value::of(r_host.translate(binding_->static_header)));
+			update(r_host, "SubHeader", As2Value::of(r_host.translate(binding_->static_sub_header)));
+		}
 		setup_refresh_data(*this, r_host, p_init.data);
 		r_host.self().set_visible(hud_platform_win32(r_host.client()) ? !hide_on_pc_ : !hide_on_console_);
 	}

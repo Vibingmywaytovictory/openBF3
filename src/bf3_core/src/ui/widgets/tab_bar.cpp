@@ -1,6 +1,10 @@
 #include "button.h"
 #include "kit_icons.h"
 
+#include <optional>
+#include <string>
+#include <vector>
+
 namespace bf3::core::ui {
 
 namespace {
@@ -12,6 +16,9 @@ constexpr int32_t kUnhighlight = 3;
 constexpr int32_t kShow = 4;
 constexpr int32_t kHide = 5;
 constexpr float kShoulderIconRowHeight = 34.0f;
+constexpr std::string_view kEndOfRoundCategory = "ui/uicomponents/uiendofroundcomp";
+constexpr int32_t kEorTabsSetupKey = -995000405;
+constexpr std::array<std::string_view, 2> kUnrankedEorTabs{ "ID_M_SCOREBOARD", "ID_M_STATS" };
 
 const std::string *non_empty_property(const HudWidgetInit &p_init, std::string_view p_name) {
 	const std::string *v = p_init.property(p_name);
@@ -21,6 +28,36 @@ const std::string *non_empty_property(const HudWidgetInit &p_init, std::string_v
 class TabBarClass final : public HudWidgetController {
 public:
 	void construct(HudWidgetHost &r_host) override { host_ = &r_host; }
+
+	void attach_node(HudWidgetHost &, const HudWidgetNode &p_node) override {
+		eor_setup_.reset();
+		eor_tabs_.clear();
+		for (const HudDataSource &s : p_node.sources) {
+			if (s.category == kEndOfRoundCategory && s.key == kEorTabsSetupKey) {
+				eor_setup_ = s;
+			}
+		}
+		for (const HudWidgetProperty &p : p_node.properties) {
+			if (p.name == "Tabs") {
+				eor_tabs_ = as2_split(p.value, ";");
+			}
+		}
+	}
+
+	void bind(const HudModel &p_model, const HudClientState &, HudData &r_out) const override {
+		if (!eor_setup_) {
+			return;
+		}
+		As2Value enabled = As2Value::array();
+		for (const std::string &tab : eor_tabs_) {
+			const bool always =
+					std::find(kUnrankedEorTabs.begin(), kUnrankedEorTabs.end(), tab) != kUnrankedEorTabs.end();
+			enabled.push(As2Value::of(always || p_model.end_of_round.is_ranked));
+		}
+		As2Value setup = As2Value::object();
+		setup.set("EnabledTabs", std::move(enabled));
+		r_out.push_back({ eor_setup_->name, std::move(setup), eor_setup_->on_initialize });
+	}
 
 	void on_clip_load(HudWidgetHost &r_host) override {
 		r_host.clip("tabBarSize").set_visible(false);
@@ -120,6 +157,8 @@ public:
 	std::optional<double> selected_tab() const { return selected_tab_; }
 
 private:
+	std::optional<HudDataSource> eor_setup_;
+	std::vector<std::string> eor_tabs_;
 	struct Tab {
 		std::string id;
 		std::string path;
