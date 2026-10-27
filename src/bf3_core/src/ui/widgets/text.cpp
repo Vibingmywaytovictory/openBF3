@@ -1,6 +1,7 @@
 #include "hud_widget_support.h"
 
 #include <optional>
+#include <vector>
 
 namespace bf3::core::ui {
 
@@ -10,6 +11,24 @@ constexpr int32_t kTextFieldShow = 0;
 constexpr int32_t kTextFieldHide = 1;
 constexpr double kChatLogHideSeconds = 4.0;
 constexpr std::string_view kChatLogMode = "ChatLogMode";
+constexpr std::string_view kEndOfRoundCategory = "ui/uicomponents/uiendofroundcomp";
+constexpr int32_t kLevelChangeTimerTextKey = -463343046;
+constexpr int32_t kTimeUntilLevelChangeKey = 1475220671;
+constexpr std::string_view kNextRoundStartsInSid = "ID_M_EOR_NEXT_ROUND_STARTS_IN";
+
+std::optional<As2Value> text_field_source(
+		const HudModel &p_model, const HudClientState &p_client, const HudDataSource &p_source) {
+	if (p_source.category != kEndOfRoundCategory) {
+		return std::nullopt;
+	}
+	if (p_source.key == kTimeUntilLevelChangeKey) {
+		return As2Value::of(hud_eor_seconds_left(p_model.end_of_round.time_until_level_change));
+	}
+	if (p_source.key == kLevelChangeTimerTextKey && p_client.translate) {
+		return As2Value::of(p_client.translate(kNextRoundStartsInSid).value_or(std::string(kNextRoundStartsInSid)));
+	}
+	return std::nullopt;
+}
 
 class TextFieldClass final : public HudWidgetController {
 public:
@@ -44,6 +63,23 @@ public:
 			border.set_height(start_h_);
 			if (const std::optional<uint32_t> c = display.text_color()) {
 				border.set_rgb(*c);
+			}
+		}
+	}
+
+	void attach_node(HudWidgetHost &, const HudWidgetNode &p_node) override {
+		sources_.clear();
+		for (const HudDataSource &s : p_node.sources) {
+			if (!s.category.empty()) {
+				sources_.push_back(s);
+			}
+		}
+	}
+
+	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const override {
+		for (const HudDataSource &s : sources_) {
+			if (std::optional<As2Value> v = text_field_source(p_model, p_client, s)) {
+				r_out.push_back({ s.name, std::move(*v), s.on_initialize });
 			}
 		}
 	}
@@ -93,6 +129,7 @@ public:
 private:
 	std::string row_type_;
 	std::string text_field_;
+	std::vector<HudDataSource> sources_;
 	std::optional<double> hide_in_;
 	float start_w_ = 0.0f;
 	float start_h_ = 0.0f;

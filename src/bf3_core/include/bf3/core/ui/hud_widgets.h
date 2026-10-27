@@ -152,4 +152,6 @@ int32_t hud_eor_place(const HudEndOfRound &p_eor);
 std::string hud_eor_round_duration(float p_seconds);
 std::string hud_eor_play_time(float p_seconds);
 std::string hud_eor_distance(float p_metres);
+int32_t hud_eor_seconds_left(float p_seconds);
+std::vector<As2Value> hud_scoreboard_rows(const HudModel &p_model, const HudPlayerList &p_list);
 }

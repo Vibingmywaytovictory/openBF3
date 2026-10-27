@@ -735,7 +735,7 @@ TEST_SUITE("ui-widgets") {
 		CHECK(self.yscale() == 100.0f);
 		const As2Clip display = field.child("txtDisplay");
 		REQUIRE(display.exists());
-		CHECK(display.text().empty());
+		CHECK(display.text() == "NEXT ROUND STARTS IN:");
 		HudWidgetController *c = b.s.hud->controller(path);
 		HudWidgetHost *h = b.s.hud->host(path);
 		c->update(*h, "Text", As2Value::of("ROUND OVER"));

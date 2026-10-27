@@ -1,6 +1,7 @@
 #include "hud_widget_support.h"
 
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <map>
 #include <string>
@@ -236,6 +237,10 @@ std::string hud_eor_round_duration(float p_seconds) {
 	char text[32];
 	std::snprintf(text, sizeof(text), "%02lld:%02lld", static_cast<long long>(s / 60), static_cast<long long>(s % 60));
 	return text;
+}
+
+int32_t hud_eor_seconds_left(float p_seconds) {
+	return p_seconds > 0.0f && std::isfinite(p_seconds) ? int32_t(std::floor(p_seconds)) : 0;
 }
 
 void register_hud_widgets_eor_header(HudWidgetRegistry &r_registry) {

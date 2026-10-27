@@ -22,12 +22,15 @@ namespace {
 
 constexpr std::string_view kEorDetailsScoreboard = "ui/flow/screen/eordetailsscoreboardscreen";
 constexpr std::string_view kEorDetailsStats = "ui/flow/screen/eordetailsstatsscreen";
+constexpr std::string_view kEorDetailsTabs = "ui/flow/screen/eordetailstabsscreen";
+constexpr std::string_view kHud64 = "ui/flow/screen/scoreboards/scoreboardtwoteamshud64screen";
+constexpr std::string_view kTwoTeams = "ui/flow/screen/scoreboards/scoreboardtwoteamsscreen";
 constexpr std::string_view kStats = "instance1.Stats_01";
 constexpr std::string_view kHeader = "instance1.EorHeader_01";
 constexpr uint32_t kFriendlyText = 0x73C3FFu;
 constexpr uint32_t kEnemyText = 0x963232u;
 
-void set_text(std::array<char, kHudTextBytes> &r_out, std::string_view p_text) {
+template <size_t N> void set_text(std::array<char, N> &r_out, std::string_view p_text) {
 	r_out.fill('\0');
 	std::copy_n(p_text.data(), std::min(p_text.size(), r_out.size() - 1), r_out.data());
 }
@@ -62,6 +65,39 @@ HudModel footage_stats() {
 
 std::string row(std::string_view p_row, std::string_view p_side) {
 	return std::string(kStats) + "." + std::string(p_row) + "." + std::string(p_side);
+}
+
+std::string text_under(const RetailScreen &p_s, std::string_view p_widget) {
+	for (SwfNodeId id = 0; id < 200000; ++id) {
+		const SwfSceneNode *n = p_s.scene->node(id);
+		if (n != nullptr && n->path.find(p_widget) != std::string::npos && n->path.ends_with(".txtDisplay")) {
+			return p_s.hud->clip(n->path).text();
+		}
+	}
+	return "no txtDisplay under " + std::string(p_widget);
+}
+
+HudModel scoreboard_round() {
+	HudModel m = footage_round(false);
+	const char *names[] = { "BOT_Sgt. Foster", "BOT_Sgt. Morgan", "Maggy", "BOT_Capt. Zorin" };
+	const int16_t kills[] = { 6, 9, 7, 7 };
+	for (uint8_t i = 0; i < 4; ++i) {
+		HudPlayer &p = m.players[i];
+		set_text(p.name, names[i]);
+		p.team = i < 3 ? 1 : 2;
+		p.bot = i != 2;
+		p.local = i == 2;
+		p.kills = kills[i];
+		p.deaths = int16_t(i + 2);
+		p.score = 1040 - 50 * i;
+		p.ping_ms = 1;
+	}
+	m.local_player = 2;
+	m.team.friendly_team_players.count = 3;
+	m.team.friendly_team_players.index = { 0, 1, 2 };
+	m.team.enemy_team1_players.count = 1;
+	m.team.enemy_team1_players.index = { 3 };
+	return m;
 }
 
 std::string clip(std::string_view p_path) {
@@ -191,6 +227,74 @@ TEST_SUITE("ui-eor") {
 		CHECK(hud_eor_distance(0.0f) == "-");
 		CHECK(hud_eor_distance(31.2f) == "31m");
 		CHECK(hud_eor_distance(31.5f) == "32m");
+	}
+
+	TEST_CASE("eordetailstabsscreen: NEXT ROUND STARTS IN: and the whole seconds left until the level change") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		RetailScreen s = open_retail_screen(*r, kEorDetailsTabs, retail_text_client(retail_text_db(*r)));
+		for (const std::string &u : s.hud->stats().unknown_class_paths) {
+			CHECK_MESSAGE(false, u);
+		}
+		HudModel m = footage_round(false);
+		m.end_of_round.time_until_level_change = 47.6f;
+		s.hud->initialize(m);
+		CHECK(text_under(s, "TextField_02") == "NEXT ROUND STARTS IN:");
+		CHECK(text_under(s, "TextField_01") == "47");
+		m.end_of_round.time_until_level_change = 0.4f;
+		s.hud->refresh(m);
+		CHECK(text_under(s, "TextField_01") == "0");
+		CHECK(hud_eor_seconds_left(-1.0f) == 0);
+		CHECK(hud_eor_seconds_left(std::nanf("")) == 0);
+	}
+
+	TEST_CASE("hud_scoreboard_rows: one row per listed player, bots without a ping, the local player marked") {
+		const HudModel m = scoreboard_round();
+		const std::vector<As2Value> us = hud_scoreboard_rows(m, m.team.friendly_team_players);
+		REQUIRE(us.size() == 3);
+		CHECK(us[0].field("Label").to_string() == "BOT_Sgt. Foster");
+		CHECK(us[0].field("Ping").to_string() == "-");
+		CHECK(us[2].field("Label").to_string() == "Maggy");
+		CHECK(us[2].field("Ping").to_string() == "1");
+		CHECK(us[2].field("LocalPlayer").truthy());
+		CHECK_FALSE(us[0].field("LocalPlayer").truthy());
+		CHECK(us[1].field("Kills").to_string() == "9");
+		CHECK(us[1].field("Score").to_string() == "990");
+		CHECK(hud_scoreboard_rows(m, m.team.enemy_team1_players).size() == 1);
+	}
+
+	TEST_CASE("The EOR scoreboards take the team rows: hud64's 20 px rows and the EOR page's two 12-row lists") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const HudModel m = scoreboard_round();
+		for (const std::string_view partition : { kHud64, kTwoTeams }) {
+			RetailScreen s = open_retail_screen(*r, partition, retail_text_client(retail_text_db(*r)));
+			for (const std::string &u : s.hud->stats().unknown_class_paths) {
+				CHECK_MESSAGE(false, u);
+			}
+			s.hud->initialize(m);
+			REQUIRE(hud_list_set_direct_rows(*s.hud, "List_01", hud_scoreboard_rows(m, m.team.friendly_team_players)));
+			REQUIRE(hud_list_set_direct_rows(*s.hud, "List_02", hud_scoreboard_rows(m, m.team.enemy_team1_players)));
+			s.hud->refresh(m);
+			CHECK_MESSAGE(s.hud->stats().as2.failed_ops == 0, s.hud->stats().as2.last_failure);
+			bool foster = false;
+			bool zorin = false;
+			for (SwfNodeId id = 0; id < 200000; ++id) {
+				const SwfSceneNode *n = s.scene->node(id);
+				if (n == nullptr || !n->path.ends_with(".Label")) {
+					continue;
+				}
+				const std::string t = s.hud->clip(n->path).text();
+				foster = foster || (t == "BOT_Sgt. Foster" && n->path.find("List_01") != std::string::npos);
+				zorin = zorin || (t == "BOT_Capt. Zorin" && n->path.find("List_02") != std::string::npos);
+			}
+			CHECK_MESSAGE(foster, partition);
+			CHECK_MESSAGE(zorin, partition);
+		}
 	}
 
 	TEST_CASE("EorHeader colours the RU pair friendly when the local team is RU") {

@@ -130,6 +130,16 @@ void read_binding(const EbxResolver &p_db, const EbxPartition &p_part, const Ebx
 		r_widget.page_header = std::move(h);
 		return;
 	}
+	if (b->is_a("UITextDataBinding")) {
+		if (const std::optional<EbxStruct> q = detail::sub(b->data(), "TextData")) {
+			HudDataSource text = source_of(p_db, p_part, *q);
+			if (text.name.empty()) {
+				text.name = "Text";
+			}
+			r_widget.sources.push_back(std::move(text));
+		}
+		return;
+	}
 	if (b->is_a("UIWidgetPathBinding")) {
 		if (const std::optional<EbxStruct> q = detail::sub(b->data(), "WidgetPathQuery")) {
 			r_widget.widget_path_query = source_of(p_db, p_part, *q);

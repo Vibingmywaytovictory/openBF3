@@ -507,10 +507,15 @@ std::optional<std::vector<As2Value>> hud_model_direct_rows(const HudDataSource &
 	if (!friendly && p_query.key != kEnemyTeam1PlayersKey) {
 		return std::nullopt;
 	}
-	const HudPlayerList *list = friendly ? &p_model.team.friendly_team_players : &p_model.team.enemy_team1_players;
+	return hud_scoreboard_rows(p_model, friendly ? p_model.team.friendly_team_players : p_model.team.enemy_team1_players);
+}
+
+std::vector<As2Value> hud_scoreboard_rows(const HudModel &p_model, const HudPlayerList &p_list) {
 	std::vector<As2Value> rows;
-	for (size_t i = 0; i < std::min<size_t>(list->count, list->index.size()); ++i) {
-		const uint8_t slot = list->index[i];
+	const size_t count = std::min<size_t>(p_list.count, p_list.index.size());
+	rows.reserve(count);
+	for (size_t i = 0; i < count; ++i) {
+		const uint8_t slot = p_list.index[i];
 		if (slot < p_model.players.size()) {
 			rows.push_back(scoreboard_row(p_model, slot));
 		}
