@@ -2,6 +2,7 @@
 
 #include "level_session_menu.h"
 #include "native_flow.h"
+#include "native_hud.h"
 #include "native_screens.h"
 #include "overview_map.h"
 #include "swf_view.h"
@@ -61,8 +62,16 @@ std::string frame_label(const ui::SwfSceneNode &p_node) {
 std::string MenuCheck::state_text(const Ctx &p_c, bool p_menu) {
 	return std::string("menu ") + (p_menu ? "up" : "down") + ", game input " + (p_c.io.game_input ? "on" : "off") +
 			", cursor " + (p_c.io.cursor_shown ? "shown" : "hidden") + ", HUD " +
-			(p_c.io.hud_visible ? "shown" : "hidden") + ", soldier " + (p_c.io.alive ? "alive" : "dead") + ", " +
-			std::to_string(p_c.menu.stats().glitches) + " glitches";
+			(p_c.io.hud_visible ? "shown" : "hidden") + " (" + hud_screens_text(p_c) + "), soldier " +
+			(p_c.io.alive ? "alive" : "dead") + ", " + std::to_string(p_c.menu.stats().glitches) + " glitches";
+}
+
+std::string MenuCheck::hud_screens_text(const Ctx &p_c) {
+	std::string out;
+	for (const std::string_view p : kNativeHudPartitions) {
+		out += (out.empty() ? "" : " ") + ui::ui_data_category_leaf(p) + (shown(p_c, p) ? "+" : "-");
+	}
+	return out;
 }
 
 bool MenuCheck::shown(const Ctx &p_c, std::string_view p_partition) {
@@ -180,7 +189,10 @@ std::vector<MenuCheck::Step> MenuCheck::steps() {
 	const auto none = [](MenuCheck &, const Ctx &) {};
 	const auto menu_open = [](MenuCheck &r_self, const Ctx &c) {
 		const bool menu = shown(c, kIngameMenuPartition) && c.menu.in_menu();
-		const bool open = menu && !c.io.game_input && c.io.cursor_shown && !c.io.hud_visible &&
+		const bool hud_kept = c.io.hud_visible &&
+				std::all_of(kNativeHudPartitions.begin(), kNativeHudPartitions.end(),
+						[&c](std::string_view p_partition) { return shown(c, p_partition); });
+		const bool open = menu && !c.io.game_input && c.io.cursor_shown && hud_kept &&
 				c.menu.stats().glitches > r_self.glitches_at_open_;
 		r_self.waiting_ = state_text(c, menu);
 		if (open) {
@@ -201,7 +213,7 @@ std::vector<MenuCheck::Step> MenuCheck::steps() {
 			press(K::KEY_ENTER) });
 	s.push_back({ "deployed", [](MenuCheck &, const Ctx &c) { return c.io.alive && !shown(c, kSpawnScreenPartition); },
 			press(K::KEY_ESCAPE), nullptr, true });
-	s.push_back({ "Escape opens the menu: game input off, cursor on, glitch, overview map drawn", menu_open,
+	s.push_back({ "Escape opens the menu: game input off, cursor on, HUD kept, glitch, overview map drawn", menu_open,
 			[](MenuCheck &r_self, const Ctx &c) {
 				r_self.check_overview_drawn(c);
 				tap(c, K::KEY_DOWN);
@@ -255,7 +267,7 @@ std::vector<MenuCheck::Step> MenuCheck::steps() {
 	s.push_back({ "the spawn screen follows", [](MenuCheck &, const Ctx &c) { return shown(c, kSpawnScreenPartition); },
 			press(K::KEY_ENTER) });
 	s.push_back({ "deployed again",
-			[](MenuCheck &, const Ctx &c) { return c.io.alive && !shown(c, kSpawnScreenPartition); },
+			[](MenuCheck &, const Ctx &c) { return c.io.alive && c.io.game_input && !shown(c, kSpawnScreenPartition); },
 			press(K::KEY_ESCAPE), nullptr, true });
 	s.push_back({ "the menu opens a fourth time", menu_open, press(K::KEY_UP) });
 	s.push_back({ "Up loops to QUIT", row_is(5, "selected"), press(K::KEY_ENTER) });
@@ -294,7 +306,8 @@ bool MenuCheck::frame(Bf3UiScreens &r_screens, NativeFlow &r_flow, const NativeM
 		if (acted_ && failure_.empty() && p_now_s - step.seen_s >= kMenuCheckHoldSeconds) {
 			if (step.shot != nullptr && !shot_dir_.empty() && p_io.shot) {
 				const std::string path = shot_dir_ + "/menu_" + step.shot + ".png";
-				shots_.push_back(path + (p_io.shot(path) ? "" : " FAILED"));
+				shots_.push_back(path + (p_io.shot(path) ? "" : " FAILED") + ": " +
+						state_text(c, shown(c, kIngameMenuPartition)));
 			}
 			step.act(*this, c);
 			acted_ = false;

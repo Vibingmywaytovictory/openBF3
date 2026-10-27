@@ -70,6 +70,7 @@ private:
 	};
 	static std::vector<Step> steps();
 	static std::string state_text(const Ctx &p_c, bool p_menu);
+	static std::string hud_screens_text(const Ctx &p_c);
 	static bool shown(const Ctx &p_c, std::string_view p_partition);
 	static std::string row_state(const Ctx &p_c, size_t p_row);
 	static std::optional<godot::Vector2> row_point(const Ctx &p_c, size_t p_row);

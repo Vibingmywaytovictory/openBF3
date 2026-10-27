@@ -197,7 +197,6 @@ bool Bf3LevelSession::tdm_menu_frame(double p_now_s) {
 		}
 	};
 	m.native_menu->frame(*screens, m.native_flow->session(), io);
-	game_->menu_hides_hud = m.native_menu->in_menu();
 #if OPENBF3_BUILD_CHECKS
 	if (m.menu_check_on && m.menu_check == nullptr) {
 		m.menu_check = std::unique_ptr<MenuCheck, void (*)(MenuCheck *)>(
