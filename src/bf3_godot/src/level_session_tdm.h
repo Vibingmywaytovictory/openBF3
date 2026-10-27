@@ -1,6 +1,7 @@
 #pragma once
 
 #include "death_camera.h"
+#include "deploy_screens.h"
 #include "hud_tdm.h"
 #include "m2b_check.h"
 #include "tdm_flow.h"
@@ -95,6 +96,7 @@ struct TdmState {
 	uint32_t own_spawns = 0;
 	uint64_t ui_screens_id = 0;
 	std::unique_ptr<NativeFlow, void (*)(NativeFlow *)> native_flow{ nullptr, nullptr };
+	DeployScreens deploy_screens;
 	std::unique_ptr<NativeScreensCheck, void (*)(NativeScreensCheck *)> native_check{ nullptr, nullptr };
 	std::unique_ptr<LoadingScreenCheck, void (*)(LoadingScreenCheck *)> loading_check{ nullptr, nullptr };
 };

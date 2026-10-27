@@ -15,7 +15,4 @@ public:
 	virtual int32_t current_frame() const = 0;
 	virtual uint32_t deploys_fired() const = 0;
 };
-
-int32_t hud_spawn_timer_seconds(float p_time_to_respawn);
-
 }

@@ -121,6 +121,8 @@ inline constexpr double kHudCrosshairDispersionPerDegree = 0.2;
 
 int32_t hud_compass_frame(float p_heading_deg);
 
+int32_t hud_spawn_timer_seconds(float p_time_to_respawn);
+
 double hud_crosshair_dispersion(float p_spread_deg);
 double hud_crosshair_arm(float p_spread_deg, double p_base_offset);
 float hud_crosshair_spread_for_arm(double p_arm, double p_base_offset);

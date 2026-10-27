@@ -195,6 +195,7 @@ void build_tdm_ui(
 		screens->set_name("NativeScreens");
 		screens->set_manual(true);
 		screens->set_drawn(bf3::core::ui::kKillScreenPartition, true);
+		DeployScreens::draw(*screens);
 		r_game.layer->add_child(screens);
 		screens->adopt(r_game.native_hud);
 		r_m.screen_records.add(screens);
@@ -254,12 +255,16 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 	st.winner = p_f.match.winner;
 	st.unspawned = p_f.own_unspawned;
 	if (r_m.native_following) {
+		if (const std::optional<uint8_t> kit = r_m.deploy_screens.feed(
+					*flow.session(), r_game.hud_model, r_m.scoreboard_held, r_m.spawn_kit)) {
+			r_m.spawn_kit = *kit;
+		}
 		if (const bf3::core::Status s = flow.tick(st, r_m.native_delta_s); !s && !r_m.native_failure_printed) {
 			r_m.native_failure_printed = true;
 			UtilityFunctions::print(to_godot("[ui] ERROR native screens: " + s.error().message));
 		}
 		for (const bf3::core::ui::UiFlowAction &a : flow.take_actions()) {
-			if (a.name == kUiFlowSpawnAction) {
+			if (r_m.deploy_screens.take_action(a)) {
 				r_m.deploy_click = true;
 			}
 		}
@@ -273,13 +278,14 @@ std::optional<bool> native_kill_screen_up(TdmState &r_m) {
 	return r_m.native_flow->session()->flow().find_screen(bf3::core::ui::kKillScreenPartition) != nullptr;
 }
 
-void step_native_screens(GameState &r_game, TdmState &r_m) {
+void step_native_screens(GameState &r_game, TdmState &r_m, Node *p_parent, const std::string &p_level) {
 	Bf3UiScreens *screens = tdm_ui_screens(r_m);
 	if (screens == nullptr || r_m.native_flow == nullptr) {
 		return;
 	}
 	screens->set_model(r_game.hud_model);
 	screens->step(r_m.native_delta_s);
+	r_m.deploy_screens.frame(*screens, r_game.native_hud, p_parent, p_level, r_m.windowed);
 	if (!r_m.native_screens_check && !r_m.loading_screen_check) {
 		screens->clear_log();
 	}
@@ -689,7 +695,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		}
 	}
 	m.kill_card_source = host::HudKillCardSource();
-	step_native_screens(r_game, m);
+	step_native_screens(r_game, m, this, level_id());
 	m.ms_tdm_hud = ms_since(t0);
 #if OPENBF3_BUILD_CHECKS
 	Bf3UiScreens *screens = tdm_ui_screens(m);

@@ -193,6 +193,11 @@ ui::HudScreen *Bf3UiScreens::hud_screen(std::string_view p_partition) {
 	return e != nullptr ? screen_of(*e) : nullptr;
 }
 
+Bf3SwfView *Bf3UiScreens::screen_view(std::string_view p_partition) {
+	const Entry *e = find(p_partition);
+	return e != nullptr ? view_of(*e) : nullptr;
+}
+
 bf3::core::Status Bf3UiScreens::open_entry(
 		std::string_view p_partition, const ui::HudScreenAsset &p_asset, ui::HudRootData *p_data) {
 	if (entries_.size() >= kUiScreensMax) {

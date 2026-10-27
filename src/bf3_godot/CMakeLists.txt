@@ -108,6 +108,8 @@ target_sources(bf3_godot PRIVATE
     src/native_flow.h
     src/native_screens.cpp
     src/native_screens.h
+    src/deploy_screens.cpp
+    src/deploy_screens.h
     src/ui_screen_host.h
     src/ui_screen_records.cpp
     src/ui_screen_records.h
