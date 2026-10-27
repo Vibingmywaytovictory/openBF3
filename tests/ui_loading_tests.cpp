@@ -98,9 +98,10 @@ TEST_SUITE("ui-loading") {
 		const float upper_height = upper.text_layout_bounds().height();
 		const float top = f->hud->clip(root + ".bg.bgTop").height();
 		CHECK(upper_height > 0.0f);
-		CHECK(upper_height < upper.height());
+		CHECK(upper.height() == doctest::Approx(upper_height));
+		CHECK(upper_height < upper.local_bounds().height());
 		CHECK(top >= upper.y() + upper_height + 10.0f - 0.01f);
-		CHECK(top < upper.y() + upper.height() + 10.0f);
+		CHECK(top < upper.y() + upper.local_bounds().height() + 10.0f);
 		CHECK_FALSE(f->visible(root + ".rspServerInfo"));
 		CHECK_FALSE(f->visible(root + ".mcJoinSquad"));
 		CHECK(f->data->get_data("joinSquadHasShowed").truthy());

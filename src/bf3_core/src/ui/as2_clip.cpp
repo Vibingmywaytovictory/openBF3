@@ -72,6 +72,15 @@ void accumulate(const SwfScene &p_scene, const SwfSceneNode &p_node, const SwfMa
 	}
 }
 
+SwfRect field_bounds(const SwfSceneNode &p_node, const SwfFontSet *p_fonts) {
+	if (p_node.text_options.auto_size == SwfTextAutoSize::None || p_fonts == nullptr) {
+		return swf_node_text_bounds(p_node);
+	}
+	level::WorkBudget budget(kSwfTextBudgetUnits);
+	const Result<SwfTextLayout> layout = swf_layout_node_text(*p_fonts, p_node, budget);
+	return layout ? layout->bounds : swf_node_text_bounds(p_node);
+}
+
 int32_t clamp_frame(int32_t p_as2_frame, uint32_t p_total) {
 	if (p_total == 0) {
 		return -1;
@@ -146,7 +155,7 @@ float As2Clip::x() const {
 	if (n == nullptr) {
 		return std::numeric_limits<float>::quiet_NaN();
 	}
-	return n->kind == SwfNodeKind::EditText ? n->matrix.tx + swf_node_text_bounds(*n).x_min : n->matrix.tx;
+	return n->kind == SwfNodeKind::EditText ? n->matrix.tx + field_bounds(*n, fonts_).x_min : n->matrix.tx;
 }
 
 float As2Clip::y() const {
@@ -154,7 +163,7 @@ float As2Clip::y() const {
 	if (n == nullptr) {
 		return std::numeric_limits<float>::quiet_NaN();
 	}
-	return n->kind == SwfNodeKind::EditText ? n->matrix.ty + swf_node_text_bounds(*n).y_min : n->matrix.ty;
+	return n->kind == SwfNodeKind::EditText ? n->matrix.ty + field_bounds(*n, fonts_).y_min : n->matrix.ty;
 }
 
 void As2Clip::set_x(float p_x) const {
@@ -163,7 +172,7 @@ void As2Clip::set_x(float p_x) const {
 		return;
 	}
 	SwfMatrix m = n->matrix;
-	m.tx = n->kind == SwfNodeKind::EditText ? p_x - swf_node_text_bounds(*n).x_min : p_x;
+	m.tx = n->kind == SwfNodeKind::EditText ? p_x - field_bounds(*n, fonts_).x_min : p_x;
 	note(scene_->set_matrix(path_, m));
 }
 
@@ -173,7 +182,7 @@ void As2Clip::set_y(float p_y) const {
 		return;
 	}
 	SwfMatrix m = n->matrix;
-	m.ty = n->kind == SwfNodeKind::EditText ? p_y - swf_node_text_bounds(*n).y_min : p_y;
+	m.ty = n->kind == SwfNodeKind::EditText ? p_y - field_bounds(*n, fonts_).y_min : p_y;
 	note(scene_->set_matrix(path_, m));
 }
 
@@ -240,7 +249,8 @@ SwfRect As2Clip::parent_bounds() const {
 		return SwfRect{};
 	}
 	BoundsAcc acc;
-	acc.add(swf_node_local_bounds(*scene_, *n), n->matrix);
+	acc.add(n->kind == SwfNodeKind::EditText ? field_bounds(*n, fonts_) : swf_node_local_bounds(*scene_, *n),
+			n->matrix);
 	return acc.r;
 }
 

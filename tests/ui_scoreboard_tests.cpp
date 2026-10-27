@@ -161,6 +161,13 @@ TEST_SUITE("ui-scoreboard") {
 		CHECK(text("title") == "WAITING FOR PLAYERS");
 		CHECK(text("description") == "PLAYERS NEEDED");
 		CHECK(text("timer") == "3");
+		const As2Clip title = s.hud->clip(alert + ".content.title");
+		CHECK(title.width() == doctest::Approx(title.text_width() + 4.0f).epsilon(0.001));
+		CHECK(title.x() == doctest::Approx(-title.width() / 2.0f).epsilon(0.001));
+		const float left = std::min({ title.x(), s.hud->clip(alert + ".content.description").x(), -150.0f });
+		CHECK(left < -150.0f);
+		CHECK(s.hud->clip(alert + ".content.bracketLeft").x() == doctest::Approx(left - 25.0f));
+		CHECK(s.hud->clip(alert + ".content.bracketRight").x() == doctest::Approx(25.0f - left));
 		const auto fired = [&](std::string_view p_query) {
 			return std::count_if(
 					events.begin(), events.end(), [&](const HudWidgetEvent &e) { return e.query == p_query; });
@@ -180,6 +187,8 @@ TEST_SUITE("ui-scoreboard") {
 		CHECK(text("title") == "GET READY");
 		CHECK(text("description") == "ROUND WILL START IN");
 		CHECK(text("timer") == "10");
+		CHECK(s.hud->clip(alert + ".content.bracketLeft").x() == doctest::Approx(-175.0f));
+		CHECK(s.hud->clip(alert + ".content.bracketRight").x() == doctest::Approx(175.0f));
 		CHECK(s.at(kAlert).visible);
 
 		m.pre_round.count_left = 0;
