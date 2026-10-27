@@ -1,0 +1,18 @@
+cmake_minimum_required(VERSION 3.29)
+set(GODOT_WINDOWED TRUE)
+include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)
+set(cache_args "")
+if(DEFINED BUILD_DIR AND NOT BUILD_DIR STREQUAL "")
+    file(MAKE_DIRECTORY "${BUILD_DIR}/godot-cache/godot.eor")
+    set(cache_args "--bf3-cache=${BUILD_DIR}/godot-cache/godot.eor")
+endif()
+set(shots "$ENV{OPENBF3_EOR_SHOTS}")
+set(shot_args "")
+if(NOT shots STREQUAL "")
+    set(shot_args "--eor-shots=${shots}")
+endif()
+godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 460
+    ARGS --path "${PROJECT_DIR}" --resolution 1280x720 res://scenes/metro_tdm.tscn -- --bots=4 --deploy-screen=1 --preround=0
+        --min-players=1 --kill-limit=5 --eor-check ${shot_args} ${cache_args})
+godot_require_pass("EOR CHECK: PASS")
+godot_require_pass("\\[level\\] install unchanged: yes")

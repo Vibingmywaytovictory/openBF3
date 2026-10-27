@@ -9,6 +9,7 @@
 #include "hud_items.h"
 #include "input_mapper.h"
 #include "level_session_menu.h"
+#include "native_eor.h"
 #include "native_flow.h"
 #include "native_hud.h"
 #include "native_screens.h"
@@ -17,6 +18,7 @@
 #include "ui_post_process.h"
 #if OPENBF3_BUILD_CHECKS
 #include "deploy_check.h"
+#include "eor_check.h"
 #include "loading_screen_check.h"
 #include "native_screens_check.h"
 #include "overlay_check.h"
@@ -208,10 +210,12 @@ void build_tdm_ui(
 		r_m.ui_screens_id = screens->get_instance_id();
 		r_m.native_flow =
 				std::unique_ptr<NativeFlow, void (*)(NativeFlow *)>(new NativeFlow(), &delete_part<NativeFlow>);
-		r_m.native_flow->set_keep_log(r_m.native_screens_check || r_m.loading_screen_check);
+		r_m.native_flow->set_keep_log(r_m.native_screens_check || r_m.loading_screen_check || r_m.eor_check_on);
 		r_m.native_menu =
 				std::unique_ptr<NativeMenu, void (*)(NativeMenu *)>(new NativeMenu(), &delete_part<NativeMenu>);
 		r_m.native_menu->build(*screens);
+		r_m.native_eor = std::unique_ptr<NativeEor, void (*)(NativeEor *)>(new NativeEor(), &delete_part<NativeEor>);
+		r_m.native_eor->build(*screens);
 	}
 	r_m.death_camera = std::unique_ptr<Bf3DeathCamera, void (*)(Bf3DeathCamera *)>(
 			new Bf3DeathCamera(p_death != nullptr ? death_camera_params(*p_death) : DeathCameraParams{}),
@@ -275,8 +279,10 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 		for (const bf3::core::ui::UiFlowAction &a : flow.take_actions()) {
 			if (r_m.deploy_screens.take_action(a)) {
 				r_m.deploy_click = true;
-			} else if (r_m.native_menu != nullptr) {
-				r_m.native_menu->take(a);
+			} else if (r_m.native_eor == nullptr || !r_m.native_eor->take(a)) {
+				if (r_m.native_menu != nullptr) {
+					r_m.native_menu->take(a);
+				}
 			}
 		}
 	}
@@ -299,7 +305,10 @@ void step_native_screens(GameState &r_game, TdmState &r_m, Node *p_parent, const
 	OverlayScreens::frame(*screens);
 	screens->step(r_m.native_delta_s);
 	r_m.deploy_screens.frame(*screens, r_game.native_hud, p_parent, p_level, r_m.windowed);
-	if (!r_m.native_screens_check && !r_m.loading_screen_check && !r_m.deploy_check) {
+	if (r_m.native_eor != nullptr) {
+		r_m.native_eor->frame(*screens, r_game.hud_model, NativeEorIo{ r_game.layer, p_level });
+	}
+	if (!r_m.native_screens_check && !r_m.loading_screen_check && !r_m.deploy_check && !r_m.eor_check_on) {
 		screens->clear_log();
 	}
 }
@@ -400,10 +409,11 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 		m.native_screens_check = has_user_arg("native-screens-check");
 		m.loading_screen_check = has_user_arg("loading-screen-check");
 		m.menu_check_on = has_user_arg("menu-check");
-		m.native_screens = m.native_screens_check || m.loading_screen_check || m.menu_check_on ||
+		m.eor_check_on = has_user_arg("eor-check");
+		m.native_screens = m.native_screens_check || m.loading_screen_check || m.menu_check_on || m.eor_check_on ||
 				user_arg_value("native-screens") != "0";
 		m.deploy_check = has_user_arg("deploy-check");
-		if ((m.native_screens_check || m.loading_screen_check || m.menu_check_on || m.deploy_check) &&
+		if ((m.native_screens_check || m.loading_screen_check || m.menu_check_on || m.deploy_check || m.eor_check_on) &&
 				quit_after_ <= 0.0) {
 			quit_after_ = 1.0e9;
 		}
@@ -874,7 +884,32 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			return true;
 		}
 	}
+	if (m.eor_check_on && screens != nullptr && m.native_eor != nullptr && !m.finished) {
+		if (m.eor_check == nullptr) {
+			m.eor_check = std::unique_ptr<EorCheck, void (*)(EorCheck *)>(
+					new EorCheck(user_arg_value("eor-shots")), &delete_part<EorCheck>);
+		}
+		EorCheckIo io;
+		io.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		const std::shared_ptr<const host::SharedLevel> eor_level = shared_level();
+		io.eor = eor_level != nullptr && eor_level->eor != nullptr ? *eor_level->eor
+																   : bf3::core::gameplay::EorTimeline{};
+		io.press = [this](Key p_key, bool p_pressed) { scripted_ui_key(p_key, p_pressed); };
+		if (m.eor_check->frame(*screens, m.native_flow != nullptr ? m.native_flow->session() : nullptr, *m.native_eor,
+					r_game.hud_model, now_s, io)) {
+			m.finished = true;
+			UtilityFunctions::print(to_godot(m.eor_check->report()));
+			finish(m.eor_check->exit_code());
+			return true;
+		}
+	}
 #endif
+	if (m.native_eor != nullptr && m.native_eor->quit_requested() && !m.finished) {
+		m.finished = true;
+		UtilityFunctions::print("[ui] QuitGame from the end-of-round QuitPopup");
+		finish(0);
+		return true;
+	}
 
 	t0 = std::chrono::steady_clock::now();
 	const bool dead = !r_game.alive && m.spawned_this_round;
@@ -934,10 +969,8 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 	}
 	m.ms_death_camera = ms_since(t0);
 
-	bool wants_mouse = m.spawn_screen || (m.native_menu != nullptr && m.native_menu->wants_mouse());
-	if (m.tdm_hud != nullptr && m.tdm_hud->built()) {
-		wants_mouse = wants_mouse || m.tdm_hud->wants_mouse();
-	}
+	bool wants_mouse = m.spawn_screen || (m.native_menu != nullptr && m.native_menu->wants_mouse()) ||
+			(m.native_eor != nullptr && m.native_eor->wants_mouse());
 	if (!headless_ && !mapper.scripted()) {
 		if (wants_mouse && !m.mouse_released) {
 			mapper.set_capture(false);
@@ -991,6 +1024,7 @@ void Bf3LevelSession::tdm_shutdown() {
 	m.ui_screens_id = 0;
 	m.native_check.reset();
 	m.loading_check.reset();
+	m.native_eor.reset();
 	m.native_flow.reset();
 	if (m.tdm_hud != nullptr) {
 		m.screen_records.remove(m.tdm_hud.get());

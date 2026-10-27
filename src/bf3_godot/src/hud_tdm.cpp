@@ -2,7 +2,6 @@
 
 #include "hud_items.h"
 #include "hud_tdm_screen.h"
-#include "round_end.h"
 
 #include "bf3_localisation.h"
 #include "godot_util.h"
@@ -307,18 +306,8 @@ struct Bf3TdmHud::Impl {
 	TdmHudContext ctx;
 	uint64_t root_id = 0;
 	Control *root = nullptr;
-	Bf3TdmRoundEnd *round_end = nullptr;
 
 	bool alive() const { return root != nullptr && ObjectDB::get_instance(root_id) != nullptr; }
-	template <typename F>
-	void each(F &&p_f) {
-		Bf3TdmScreen *screens[] = { round_end };
-		for (Bf3TdmScreen *s : screens) {
-			if (s != nullptr) {
-				p_f(*s);
-			}
-		}
-	}
 };
 
 Bf3TdmHud::Bf3TdmHud() : impl_(std::make_unique<Impl>()) {}
@@ -344,22 +333,10 @@ bool Bf3TdmHud::build(Node *p_parent, Bf3Localisation *p_localisation, Bf3UiAsse
 	m.root->set_name("Bf3TdmHud");
 	m.root->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
 	m.root->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
-	m.round_end = memnew(Bf3TdmRoundEnd);
-	const char *names[] = { "RoundEnd" };
-	size_t i = 0;
-	m.each([&](Bf3TdmScreen &s) {
-		s.set_name(names[i++]);
-		s.set_context(&m.ctx);
-		s.set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
-		s.set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
-		s.set_visible(false);
-		m.root->add_child(&s);
-	});
 	p_parent->add_child(m.root);
 	m.root_id = m.root->get_instance_id();
-	m.each([&](Bf3TdmScreen &s) { s.build_screen(); });
 	m.ctx.resolve(m.root);
-	UtilityFunctions::print("Bf3TdmHud: built (round end)");
+	UtilityFunctions::print("Bf3TdmHud: built");
 	return true;
 }
 
@@ -376,12 +353,6 @@ void Bf3TdmHud::set_model(const ui::HudModel &p_model) {
 	m.ctx.resolve(m.root);
 	m.ctx.records.model_serial = p_model.serial;
 	++m.ctx.records.draws;
-	m.each([](Bf3TdmScreen &s) { s.update_screen(); });
-}
-
-bool Bf3TdmHud::wants_mouse() const {
-	const ui::HudModel &m = impl_->ctx.model;
-	return impl_->alive() && m.end_of_round.visible;
 }
 
 TdmHudRecords Bf3TdmHud::records() const {
@@ -410,12 +381,10 @@ void Bf3TdmHud::shutdown() {
 	}
 	m.root = nullptr;
 	m.root_id = 0;
-	m.round_end = nullptr;
 }
 
 }
 
 void openbf3_register_tdm_hud() {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmScreen);
-	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmRoundEnd);
 }

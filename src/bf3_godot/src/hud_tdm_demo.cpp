@@ -32,9 +32,9 @@ namespace ui = bf3::core::ui;
 
 namespace {
 
-constexpr int kStages = 2;
-const char *const kStageNames[kStages] = { "kill_feed", "round_end" };
-constexpr int kStageModels[kStages] = { 2, 5 };
+constexpr int kStages = 1;
+const char *const kStageNames[kStages] = { "kill_feed" };
+constexpr int kStageModels[kStages] = { 2 };
 constexpr uint8_t kLocal = 0;
 constexpr uint8_t kPlayers = 24;
 constexpr uint8_t kKiller = 5;
@@ -171,8 +171,8 @@ ui::HudModel Bf3TdmHudDemo::stage_model(int p_stage) const {
 	t.enemy_team1_players = t.team2_players;
 	ui::HudKillCounter &kc = m.kill_counter;
 	const bool in_round = p_stage >= 2;
-	kc.team1_kills = in_round ? (p_stage == 5 ? 100 : 23) : 0;
-	kc.team2_kills = in_round ? (p_stage == 5 ? 87 : 19) : 0;
+	kc.team1_kills = in_round ? 23 : 0;
+	kc.team2_kills = in_round ? 19 : 0;
 	kc.team1_max_kills = 100;
 	kc.team2_max_kills = 100;
 	kc.player_team = 1;
@@ -197,17 +197,6 @@ ui::HudModel Bf3TdmHudDemo::stage_model(int p_stage) const {
 				m.messages.local_kill_message.newest_serial = serial;
 			}
 		}
-	}
-	if (p_stage == 5) {
-		ui::HudEndOfRound &e = m.end_of_round;
-		e.visible = true;
-		e.winner = 1;
-		e.local_won = true;
-		e.team_kills = { kc.team1_kills, kc.team2_kills };
-		e.kill_limit = 100;
-		e.top_players = { t.sorted_players.index[0], t.sorted_players.index[1], t.sorted_players.index[2] };
-		e.seconds_to_next_round = 18.0f;
-		t.friendly_team_is_winner = true;
 	}
 	return m;
 }
@@ -253,17 +242,12 @@ void Bf3TdmHudDemo::_process(double p_delta) {
 
 void Bf3TdmHudDemo::check_stage(int p_stage, const std::string &p_name) {
 	const UiScreenRecords &records = *hud_;
-	const UiScreenRecord round_end = records.screen_record(ui::kEorWinningTeamScreenPartition).value_or(UiScreenRecord{});
 	const UiLookupRecord lookups = records.lookup_record().value_or(UiLookupRecord{});
 	const std::string &name = p_name;
 	switch (p_stage) {
 		case 2:
 			row(name, lookups.model_serial == stage_model(2).serial,
 					"the kill feed is the native HUD's (HudMessage_02)");
-			break;
-		case 5:
-			row(name, round_end.visible && round_end.shown == 1 && hud_->wants_mouse(),
-					"visible " + std::to_string(round_end.visible) + ", shown " + std::to_string(round_end.shown));
 			break;
 		default:
 			break;

@@ -45,6 +45,7 @@ constexpr float kM2bSeekFrontMetres = 6.0f;
 constexpr double kM2bFallAfterS = 26.0;
 constexpr double kM2bScreenGraceS = 4.0;
 constexpr double kM2bRoundOverHoldS = 3.0;
+constexpr double kM2bBannerShotS = 1.5;
 constexpr double kM2bHardEndAfterS = 45.0;
 constexpr std::string_view kM2bFriendlyHeaderKills = "ScoreboardHeader_01.Kills";
 constexpr std::string_view kM2bEnemyHeaderKills = "ScoreboardHeader_02.Kills";
@@ -87,6 +88,7 @@ struct M2bCheck::State {
 	bool killcard_checked = false;
 	bool killcard_shot = false, spawn_shot = false, join_shot = false, round_end_shot = false;
 	double round_over_t = -1.0;
+	double banner_t = -1.0;
 
 	bool model_spawn_visible = false;
 	uint32_t shots_saved = 0;
@@ -103,6 +105,11 @@ struct M2bCheck::State {
 	void hold_tab(bool p_down) {
 		mapper().script_hold(InputMapper::TdmAction::Scoreboard, p_down);
 		s.scripted_ui_key(godot::KEY_TAB, p_down);
+	}
+	bool round_end_banner_seen() const {
+		const std::optional<UiScreenRecord> r =
+				m.screen_records.screen_record(core::ui::kEorWinningTeamScreenPartition);
+		return r && r->shown > 0;
 	}
 	void note(const std::string &p_line) { UtilityFunctions::print(to_godot("[m2b] " + p_line)); }
 	bool save_shot(const char *p_name) {
@@ -289,7 +296,11 @@ struct M2bCheck::State {
 
 		ui_tally(now_s, p_t);
 
-		if (round_over_t >= 0.0 && !round_end_shot && p_t - round_over_t >= 1.0) {
+		if (banner_t < 0.0 && round_over_t >= 0.0 && round_end_banner_seen()) {
+			banner_t = p_t;
+		}
+		if (round_over_t >= 0.0 && !round_end_shot && p_t - round_over_t >= 1.0 &&
+				((banner_t >= 0.0 && p_t - banner_t >= kM2bBannerShotS) || !tally.windowed)) {
 			round_end_shot = save_shot("gx_m2b_round_end") || !tally.windowed;
 		}
 	}

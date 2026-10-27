@@ -171,7 +171,6 @@ TEST_SUITE("m2b-contract2") {
 		CHECK(r.missing_fonts == 0);
 		CHECK(r.missing_icons == 0);
 		CHECK(r.missing_strings == 0);
-		CHECK(!r.round_end_visible);
 
 		const gs::TdmOptions o{};
 		CHECK(o.deploy_screen);
@@ -205,22 +204,16 @@ TEST_SUITE("m2b-contract2") {
 		gs::TdmHudRecords r{};
 		r.model_serial = 9;
 		r.draws = 5;
-		r.round_end_visible = true;
-		r.round_end_shown = 1;
 		r.missing_fonts = 1;
 		r.missing_icons = 2;
 		r.missing_strings = 3;
 
-		CHECK(gs::tdm_hud_reports(ui::kEorWinningTeamScreenPartition));
-		CHECK(gs::tdm_hud_screen_record(r, ui::kEorWinningTeamScreenPartition).has_value());
 		for (std::string_view p : { ui::kHudMpScreenPartition, ui::kKillScreenPartition, ui::kSpawnScreenPcPartition,
-					 ui::kScoreboardHud32ScreenPartition, ui::kPreRoundWaitingScreenPartition }) {
+					 ui::kScoreboardHud32ScreenPartition, ui::kPreRoundWaitingScreenPartition,
+					 ui::kEorWinningTeamScreenPartition }) {
 			CHECK_MESSAGE(!gs::tdm_hud_reports(p), p);
 			CHECK_MESSAGE(!gs::tdm_hud_screen_record(r, p), p);
 		}
-		const gs::UiScreenRecord eor = *gs::tdm_hud_screen_record(r, ui::kEorWinningTeamScreenPartition);
-		CHECK(eor.visible);
-		CHECK(eor.shown == 1);
 		const gs::UiLookupRecord look = gs::tdm_hud_lookup_record(r);
 		CHECK(look.model_serial == 9);
 		CHECK(look.draws == 5);

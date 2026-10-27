@@ -25,8 +25,6 @@ struct TdmHudRecords {
 	uint64_t model_serial = 0;
 	uint64_t draws = 0;
 
-	bool round_end_visible = false;
-	uint64_t round_end_shown = 0;
 
 	uint64_t missing_fonts = 0;
 	uint64_t missing_icons = 0;
@@ -50,7 +48,6 @@ public:
 
 	void set_model(const core::ui::HudModel &p_model);
 
-	bool wants_mouse() const;
 	TdmHudRecords records() const;
 	bool reports(std::string_view p_partition) const override;
 	std::optional<UiScreenRecord> screen_record(std::string_view p_partition) const override;

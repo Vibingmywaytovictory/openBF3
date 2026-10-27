@@ -110,6 +110,8 @@ target_sources(bf3_godot PRIVATE
     src/native_screens.h
     src/deploy_screens.cpp
     src/deploy_screens.h
+    src/native_eor.cpp
+    src/native_eor.h
     src/ui_screen_host.h
     src/ui_screen_records.cpp
     src/ui_screen_records.h
@@ -175,8 +177,6 @@ target_sources(bf3_godot PRIVATE
     src/tdm_hud_records.cpp
     src/hud_tdm_screen.h
     src/hud_tdm_text.h
-    src/round_end.h
-    src/round_end.cpp
 )
 
 target_sources(bf3_godot PRIVATE
@@ -238,6 +238,8 @@ if(OPENBF3_BUILD_CHECKS)
         src/m2b_check_rows.h
         src/deploy_check.cpp
         src/deploy_check.h
+        src/eor_check.cpp
+        src/eor_check.h
         src/loading_screen_check.cpp
         src/loading_screen_check.h
         src/m9_reload_check.cpp

@@ -18,6 +18,8 @@
 namespace bf3::godot_side {
 
 class Bf3UiScreens;
+class EorCheck;
+class NativeEor;
 class NativeFlow;
 class NativeMenu;
 class MenuCheck;
@@ -95,6 +97,7 @@ struct TdmState {
 	bool menu_check_on = false;
 	bool loading_screen_check = false;
 	bool deploy_check = false;
+	bool eor_check_on = false;
 	bool native_following = false;
 	bool native_client_set = false;
 	bool native_failure_printed = false;
@@ -106,11 +109,13 @@ struct TdmState {
 	DeployScreens deploy_screens;
 	std::unique_ptr<NativeMenu, void (*)(NativeMenu *)> native_menu{ nullptr, nullptr };
 	std::unique_ptr<MenuCheck, void (*)(MenuCheck *)> menu_check{ nullptr, nullptr };
+	std::unique_ptr<NativeEor, void (*)(NativeEor *)> native_eor{ nullptr, nullptr };
 	std::unique_ptr<NativeScreensCheck, void (*)(NativeScreensCheck *)> native_check{ nullptr, nullptr };
 	std::unique_ptr<LoadingScreenCheck, void (*)(LoadingScreenCheck *)> loading_check{ nullptr, nullptr };
 	std::unique_ptr<DeployCheck, void (*)(DeployCheck *)> deploy_run{ nullptr, nullptr };
 	bool overlay_check = false;
 	std::unique_ptr<OverlayCheck, void (*)(OverlayCheck *)> overlay_run{ nullptr, nullptr };
+	std::unique_ptr<EorCheck, void (*)(EorCheck *)> eor_check{ nullptr, nullptr };
 };
 
 Bf3UiScreens *tdm_ui_screens(const TdmState &p_m);
