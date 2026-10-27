@@ -9,6 +9,7 @@
 #include "test_support.h"
 #include "ui_retail_support.h"
 
+#include <algorithm>
 #include <string>
 #include <utility>
 #include <vector>
@@ -21,6 +22,7 @@ namespace {
 
 constexpr std::string_view kSpawnButtonScreen = "ui/flow/screen/spawnbuttonscreen";
 constexpr std::string_view kSpawnTimer = "instance1.SpawnTimer_01";
+constexpr std::string_view kSpawnScreenPc = "ui/flow/screen/spawnscreenpc";
 constexpr std::string_view kTicketScreen = "ui/flow/screen/spawnscreenticketcountertdmscreen";
 constexpr std::string_view kTicket = "instance1.TicketCounterSpawnScreen_01.Ticket";
 constexpr uint32_t kUsHash = 0x5501u;
@@ -164,6 +166,36 @@ TEST_SUITE("ui-deploy") {
 		s.hud->refresh(m);
 		CHECK(s.at(t + ".txtTeam2Tickets").text == "9");
 		CHECK(s.at(t + ".txtTeam1Tickets").text == "5");
+		CHECK(s.hud->stats().as2.failed_ops == 0);
+	}
+	TEST_CASE("spawnscreenpc header and overview: SpawnPointsHeader reads US then DEPLOY POINTS 10 px after it, as "
+			  "footage 18.57 shows; OverviewMap_01 draws through the minimap renderer and Hide/Show toggle it") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudClientState c = retail_text_client(retail_text_db(*r));
+		c.localise_hash = [](uint32_t p_hash) { return p_hash == kUsHash ? std::string("US") : std::string(); };
+		RetailScreen s = open_retail_screen(*r, kSpawnScreenPc, c);
+		HudModel m{};
+		m.team.friendly_team_name = kUsHash;
+		m.team.friendly_team = 1;
+		s.hud->initialize(m);
+		const As2Clip t1 = s.hud->clip("instance1.SpawnPointsHeader_01.txt1");
+		const As2Clip t2 = s.hud->clip("instance1.SpawnPointsHeader_01.txt2");
+		CHECK(t1.text() == "US");
+		CHECK(t2.text() == "DEPLOY POINTS");
+		CHECK(t2.x() == doctest::Approx(t1.x() + t1.text_width() + 10.0f));
+		CHECK(s.hud->clip("instance1.SpawnPointsHeader_01").xscale() == doctest::Approx(100.0f));
+		const std::string map = "instance1.OverviewMap_01";
+		CHECK(s.at(map).visible);
+		const bool rendered = std::any_of(s.hud->renderer_strings().begin(), s.hud->renderer_strings().end(),
+				[&](const HudRendererString &p_r) { return p_r.path == map && p_r.renderer == kMinimapRenderer; });
+		CHECK(rendered);
+		CHECK(s.hud->deliver_in_event("OverviewMap_01", "UIWidgetEventID_Hide"));
+		CHECK_FALSE(s.at(map).visible);
+		CHECK(s.hud->deliver_in_event("OverviewMap_01", "UIWidgetEventID_Show"));
+		CHECK(s.at(map).visible);
 		CHECK(s.hud->stats().as2.failed_ops == 0);
 	}
 }
