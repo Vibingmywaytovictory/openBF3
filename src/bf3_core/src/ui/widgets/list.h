@@ -132,4 +132,6 @@ private:
 	std::string unfocus_mode_ = "normal";
 };
 
+std::optional<std::vector<As2Value>> hud_model_direct_rows(const HudDataSource &p_query, const HudModel &p_model);
+
 }

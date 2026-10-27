@@ -477,6 +477,49 @@ public:
 		r_host.self().set_visible(count > 0);
 	}
 };
+
+constexpr std::string_view kTeamCategory = "ui/uicomponents/uiteamcomp";
+constexpr int32_t kFriendlyTeamPlayersKey = 644095251;
+constexpr int32_t kEnemyTeam1PlayersKey = -163624481;
+constexpr int32_t kRankZeroFrame = 1;
+constexpr int32_t kVoipOffFrame = 2;
+constexpr const char *kNoPing = "-";
+
+As2Value scoreboard_row(const HudModel &p_model, uint8_t p_slot) {
+	const HudPlayer &p = p_model.players[p_slot];
+	As2Value r = As2Value::object();
+	r.set("Index", As2Value::of(int32_t(p_slot)));
+	r.set("Label", As2Value::of(hud_player_name(p_model, p_slot)));
+	r.set("Rank", As2Value::of(kRankZeroFrame));
+	r.set("Voip", As2Value::of(kVoipOffFrame));
+	r.set("Kills", As2Value::of(int32_t(p.kills)));
+	r.set("Deaths", As2Value::of(int32_t(p.deaths)));
+	r.set("Score", As2Value::of(p.score));
+	r.set("Ping", p.bot ? As2Value::of(kNoPing) : As2Value::of(int32_t(p.ping_ms)));
+	r.set("LocalSquad", As2Value::of(false));
+	r.set("LocalPlayer", As2Value::of(p_slot == p_model.local_player));
+	r.set("MatchReady", As2Value::of(false));
+	return r;
+}
+}
+
+std::optional<std::vector<As2Value>> hud_model_direct_rows(const HudDataSource &p_query, const HudModel &p_model) {
+	if (p_query.category != kTeamCategory) {
+		return std::nullopt;
+	}
+	const bool friendly = p_query.key == kFriendlyTeamPlayersKey;
+	if (!friendly && p_query.key != kEnemyTeam1PlayersKey) {
+		return std::nullopt;
+	}
+	const HudPlayerList *list = friendly ? &p_model.team.friendly_team_players : &p_model.team.enemy_team1_players;
+	std::vector<As2Value> rows;
+	for (size_t i = 0; i < std::min<size_t>(list->count, list->index.size()); ++i) {
+		const uint8_t slot = list->index[i];
+		if (slot < p_model.players.size()) {
+			rows.push_back(scoreboard_row(p_model, slot));
+		}
+	}
+	return rows;
 }
 
 void register_hud_widgets_scoreboard(HudWidgetRegistry &r_registry) {

@@ -1288,9 +1288,10 @@ void HudScreen::initialize(const HudModel &p_model) {
 			w.controller->focus_gained(*w.host);
 		}
 	}
-	for (const std::unique_ptr<HudWidgetState> &w : widgets_) {
-		if (w->initialized) {
-			w->controller->drive(*w->host, p_model, client_);
+	for (size_t i = 0; i < widgets_.size(); ++i) {
+		HudWidgetState &w = *widgets_[i];
+		if (w.initialized) {
+			w.controller->drive(*w.host, p_model, client_);
 		}
 	}
 }

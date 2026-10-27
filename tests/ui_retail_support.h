@@ -12,6 +12,7 @@
 #include "bf3/core/ui/ui_fonts.h"
 #include "test_support.h"
 
+#include <cmath>
 #include <memory>
 #include <optional>
 #include <string>
@@ -113,6 +114,31 @@ struct RetailScreen {
 		const bf3::core::ui::SwfSceneNode *n = scene->find_node(p_path);
 		REQUIRE_MESSAGE(n != nullptr, std::string(p_path));
 		return *n;
+	}
+
+	std::string row_at(std::string_view p_holder, double p_y) const {
+		for (const bf3::core::ui::SwfNodeId id : at(p_holder).children) {
+			const bf3::core::ui::SwfSceneNode *c = scene->node(id);
+			if (c != nullptr && c->visible && std::lround(c->matrix.ty) == std::lround(p_y)) {
+				return c->path;
+			}
+		}
+		return {};
+	}
+
+	size_t drawn(std::string_view p_path) const { return drawn(at(p_path)); }
+
+	size_t drawn(const bf3::core::ui::SwfSceneNode &p_node) const {
+		if (!p_node.visible) {
+			return 0u;
+		}
+		size_t out = p_node.shape != nullptr || p_node.drawing != nullptr || p_node.sub_image != nullptr ? 1u : 0u;
+		for (const bf3::core::ui::SwfNodeId id : p_node.children) {
+			if (const bf3::core::ui::SwfSceneNode *c = scene->node(id); c != nullptr) {
+				out += drawn(*c);
+			}
+		}
+		return out;
 	}
 };
 

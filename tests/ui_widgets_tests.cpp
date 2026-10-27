@@ -71,16 +71,7 @@ struct ScreenRig {
 		return s.hud->clip(std::string(kHudScreenInstance) + "." + std::string(p_path));
 	}
 	std::string row(int32_t p_index) const {
-		const As2Clip holder = clip("List_01.ListHolder");
-		const SwfSceneNode *n = holder.node();
-		REQUIRE(n != nullptr);
-		for (const SwfNodeId id : n->children) {
-			const SwfSceneNode *c = s.scene->node(id);
-			if (c != nullptr && c->visible && std::lround(c->matrix.ty) == std::lround(28.0 * p_index)) {
-				return c->path;
-			}
-		}
-		return {};
+		return s.row_at(std::string(kHudScreenInstance) + ".List_01.ListHolder", 28.0 * p_index);
 	}
 	size_t events_of(std::string_view p_instance) const {
 		return size_t(std::count_if(

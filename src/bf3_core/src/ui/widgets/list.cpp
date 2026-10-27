@@ -261,6 +261,18 @@ public:
 		update_data(p_key, p_value);
 	}
 
+	void drive(HudWidgetHost &r_host, const HudModel &p_model, const HudClientState &) override {
+		if (!binding_ || !binding_->list_query.use_direct_access) {
+			return;
+		}
+		std::optional<std::vector<As2Value>> rows = hud_model_direct_rows(binding_->list_query, p_model);
+		if (!rows || rows == direct_rows_) {
+			return;
+		}
+		direct_rows_ = *rows;
+		r_host.screen().direct_access().set_array(hud_list_access_handle(binding_->list_query), std::move(*rows));
+	}
+
 	void direct_access(HudWidgetHost &, const UiDirectAccessApply &p_apply) override {
 		if (p_apply.op == UiDirectAccessOp::ArrayLengthInvoke && p_apply.name == "updateList") {
 			update_list(p_apply.value.to_number());
@@ -978,6 +990,7 @@ private:
 
 	HudWidgetHost *host_ = nullptr;
 	std::optional<HudListBinding> binding_;
+	std::optional<std::vector<As2Value>> direct_rows_;
 	ListLogic logic_{ *this };
 	As2Clip empty_holder_;
 	As2Clip list_holder_;
