@@ -15,6 +15,7 @@
 #include "ui_cursor.h"
 #include "ui_post_process.h"
 
+#include "bf3/core/util/key_values.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/ui_flow_session.h"
 
@@ -25,7 +26,6 @@
 #include <godot_cpp/classes/viewport_texture.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include <charconv>
 #include <string>
 
 using namespace godot;
@@ -42,10 +42,8 @@ float param_float(const bf3::core::ui::UiFlowAction &p_action, float p_default) 
 	if (p_action.params.empty()) {
 		return p_default;
 	}
-	const std::string &s = p_action.params.front();
-	float v = p_default;
-	const auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
-	return ec == std::errc() ? v : p_default;
+	double v = 0.0;
+	return bf3::core::parse_finite(p_action.params.front(), v) ? float(v) : p_default;
 }
 
 }
