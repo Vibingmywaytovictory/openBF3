@@ -117,6 +117,9 @@ bool DeployCheck::frame(Bf3UiScreens &r_screens, double p_now_s, const DeployChe
 		if (transition && (l.find("spawn") != std::string::npos || l.find("killscreen") != std::string::npos)) {
 			lines_.push_back("[deploy] " + seconds_text(p_now_s - start_s_) + " " + l);
 		}
+		if (phase_ == Phase::TabProbe && l.starts_with("open ")) {
+			tab_opened_ += (tab_opened_.empty() ? "" : ", ") + l.substr(5);
+		}
 	}
 	const DeployCheckState st = p_io.state();
 	step(r_screens, p_now_s, p_io, st);
@@ -196,10 +199,13 @@ void DeployCheck::step(
 		case Phase::Counter:
 			if (sub_ == 0 && shown(r_screens, bf3::core::ui::kKillScreenPartition) &&
 					in >= kDeployCheckKillCardShotSeconds) {
-				shot(p_io, spawn_ends_ < 2 ? "kill_card" : "kill_card2", p_now_s);
+				shot(p_io, spawn_ends_ < 2 ? "kill_card" : "kill_card" + std::to_string(spawn_ends_), p_now_s);
 				sub_ = 1;
 			}
-			if (up(r_screens, kSpawnScreenPcPartition)) {
+			if (up(r_screens, kSpawnScreenPcPartition) && spawn_ends_ >= 3) {
+				probe_step_ = 0;
+				enter(Phase::TabProbe, p_now_s, p_st);
+			} else if (up(r_screens, kSpawnScreenPcPartition)) {
 				const bool second = spawn_ends_ >= 2;
 				row(second ? "death2.counter_with_deploy" : "death.counter_with_deploy",
 						up(r_screens, kSpawnTicketCounterPartition) &&
@@ -296,6 +302,42 @@ void DeployCheck::step(
 				enter(Phase::Ready, p_now_s, p_st);
 			}
 			break;
+		case Phase::TabProbe: {
+			const DeployCheckTab &tab = kDeployCheckTabs[tab_];
+			if (probe_step_ == 0) {
+				if (p_st.time_to_respawn > 0.0f || in < kDeployCheckSettleSeconds) {
+					break;
+				}
+				tab_opened_.clear();
+				probe_step_ = 1;
+			} else if (probe_step_ == 1) {
+				if (click_clip(r_screens, kSpawnScreenPcPartition, tab.button, p_io)) {
+					probe_s_ = p_now_s;
+					probe_step_ = 2;
+				}
+			} else if (probe_step_ == 2 && p_now_s - probe_s_ >= kDeployCheckTabSeconds) {
+				shot(p_io, std::string("tab_") + std::string(tab.name), p_now_s);
+				const bool deploy_up = shown(r_screens, kSpawnButtonScreenPartition);
+				row(std::string("tabs.") + std::string(tab.name) + ".way_out", deploy_up && !p_st.alive,
+						std::string(tab.name) + " click opened " + (tab_opened_.empty() ? "nothing" : tab_opened_) +
+								"; spawnscreenpc " + (up(r_screens, kSpawnScreenPcPartition) ? "up" : "closed") +
+								", spawnbuttonscreen's DEPLOY " + (deploy_up ? "up" : "gone"));
+				sub_ = 0;
+				probe_step_ = 3;
+			} else if (probe_step_ == 3) {
+				if (click_clip(r_screens, kSpawnButtonScreenPartition, kDeployCheckDeployButton, p_io)) {
+					probe_step_ = 4;
+				}
+			} else if (probe_step_ == 4 && p_st.alive && p_st.own_spawns > mark_.own_spawns) {
+				const Phase next = tab_ + 1 < kDeployCheckTabs.size() ? Phase::Suicide : Phase::Done;
+				spawned(std::string("tabs.") + std::string(tab.name) + ".deploys",
+						"btnDeploy click after the " + std::string(tab.name) + " tab", kDeployCheckClickKit, next,
+						p_now_s);
+				spawn_primary_ = picked_;
+				++tab_;
+			}
+			break;
+		}
 		case Phase::Ready:
 			if (p_st.alive) {
 				row("countdown.no_deploy", false, "spawned during the countdown");
@@ -365,12 +407,12 @@ void DeployCheck::step(
 			break;
 		case Phase::EnterDeploy:
 			if (p_st.alive && p_st.own_spawns > mark_.own_spawns) {
-				spawned("enter.deploys", "Enter at Time 0", kDeployCheckClickKit, Phase::Done, p_now_s);
+				spawned("enter.deploys", "Enter at Time 0", kDeployCheckClickKit, Phase::Suicide, p_now_s);
 				spawn_primary_ = picked_;
 			}
 			break;
 		case Phase::Done:
-			passed_ = failures_ == 0 && spawn_ends_ == 3;
+			passed_ = failures_ == 0 && spawn_ends_ == 3 + kDeployCheckTabs.size();
 			done_ = true;
 			break;
 	}

@@ -35,6 +35,17 @@ inline constexpr std::string_view kDeployCheckOverviewMap = "instance1.OverviewM
 inline constexpr std::string_view kDeployCheckLightBars = "instance1.SpawnTimer_01.lightbars";
 inline constexpr std::string_view kDeployCheckDeployStatus = "instance1.SpawnTimer_01.deployStatus";
 
+struct DeployCheckTab {
+	std::string_view name;
+	std::string_view button;
+};
+
+inline constexpr std::array<DeployCheckTab, 2> kDeployCheckTabs{ {
+		{ "customize", "instance1.TabBar_01.tabBarHolder.button_2" },
+		{ "squad", "instance1.TabBar_01.tabBarHolder.button_1" },
+} };
+inline constexpr double kDeployCheckTabSeconds = 1.5;
+
 struct DeployCheckState {
 	bool alive = false;
 	uint32_t own_spawns = 0;
@@ -89,6 +100,7 @@ private:
 		KitClick,
 		GridOpen,
 		GridPick,
+		TabProbe,
 		Ready,
 		TabHeld,
 		ClickDeploy,
@@ -132,6 +144,10 @@ private:
 	uint32_t spawn_primary_ = 0;
 	uint32_t picked_ = 0;
 	int32_t pick_index_ = -1;
+	size_t tab_ = 0;
+	uint32_t probe_step_ = 0;
+	double probe_s_ = 0.0;
+	std::string tab_opened_;
 };
 
 }
