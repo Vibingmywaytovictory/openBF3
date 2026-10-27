@@ -78,9 +78,10 @@ public:
 	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const override {
 		r_out.push_back({ "SelectedKit", As2Value::of(p_model.kit.selected_kit) });
 		As2Value kits = As2Value::array();
-		for (const HudKitEntry &k : p_model.customization.kits_data) {
+		for (size_t i = 0; i < p_model.customization.kits_data.size(); ++i) {
+			const HudKitEntry &k = p_model.customization.kits_data[i];
 			As2Value kit = As2Value::object();
-			kit.set("HeaderIcon", As2Value::of(k.hud_icon));
+			kit.set("HeaderIcon", As2Value::of(std::string(kGameUtilsKits[i].label)));
 			kit.set("Label", As2Value::of(localised(p_client, k.name_sid_hash)));
 			As2Value slots = As2Value::array();
 			for (const HudItem &item : k.items) {
