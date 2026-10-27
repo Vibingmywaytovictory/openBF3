@@ -311,6 +311,7 @@ target_sources(bf3_core PRIVATE
     src/ui/widgets/list.h
     src/ui/widgets/scroll_bar.h
     src/ui/widgets/button.h
+    src/ui/widgets/deploy_widgets.h
     include/bf3/core/ui/ui_graph.h
     src/ui/ui_graph.cpp
     src/ui/ui_graph_flow.cpp
