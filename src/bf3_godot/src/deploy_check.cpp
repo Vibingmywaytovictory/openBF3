@@ -71,6 +71,15 @@ void DeployCheck::shot(const DeployCheckIo &p_io, const std::string &p_name, dou
 	lines_.push_back("[deploy] shot " + path + " at " + seconds_text(p_now_s - start_s_) + (ok ? "" : " FAILED"));
 }
 
+std::string DeployCheck::node_fact(Bf3UiScreens &r_screens, std::string_view p_partition, std::string_view p_path) {
+	bf3::core::ui::HudScreen *s = r_screens.hud_screen(p_partition);
+	const bf3::core::ui::SwfSceneNode *n = s != nullptr ? s->scene().find_node(p_path) : nullptr;
+	if (n == nullptr) {
+		return "missing";
+	}
+	return std::string(n->world_visible ? "shown" : "hidden") + " at frame " + std::to_string(n->frame);
+}
+
 bool DeployCheck::click_clip(
 		Bf3UiScreens &r_screens, std::string_view p_partition, std::string_view p_path, const DeployCheckIo &p_io) {
 	if (sub_ == 0) {
@@ -197,16 +206,34 @@ void DeployCheck::step(
 								!up(r_screens, bf3::core::ui::kKillScreenPartition),
 						"the kill card closed and spawnscreenticketcountertdmscreen opened with spawnscreenpc, " +
 								seconds_text(in) + " after the death");
-				enter(second ? Phase::EnterCounting : Phase::Counting, p_now_s, p_st);
+				if (!second) {
+					row("death.deploy_screen_counting",
+							p_st.time_to_respawn > 0.0f && up(r_screens, kSpawnButtonScreenPartition) && !p_st.alive,
+							"spawnscreenpc and spawnbuttonscreen opened with " + seconds_text(p_st.time_to_respawn) +
+									" to respawn");
+					enter(Phase::Counting, p_now_s, p_st);
+					break;
+				}
+				tap(p_io, godot::KEY_ENTER);
+				const DeployCheckState after = p_io.state();
+				const bool fired = after.concepts_found > p_st.concepts_found;
+				row("countdown.enter_while_counting", p_st.time_to_respawn > 0.0f && fired,
+						"Enter on the frame spawnscreenpc opened, " + seconds_text(p_st.time_to_respawn) +
+								" to respawn; spawngraphpc's Activate port " + (fired ? "fired" : "did not fire"));
+				alive_while_counting_ = false;
+				ready_s_ = -1.0;
+				enter(Phase::EnterBlocked, p_now_s, after);
 			}
 			break;
 		case Phase::Counting:
-			if (in >= kDeployCheckInputSeconds && shown(r_screens, kSpawnScreenPcPartition)) {
-				shot(p_io, "counting", p_now_s);
-				row("death.deploy_screen_counting",
-						p_st.time_to_respawn > 0.0f && shown(r_screens, kSpawnButtonScreenPartition) && !p_st.alive,
-						"spawnscreenpc and spawnbuttonscreen up, time to respawn " +
-								seconds_text(p_st.time_to_respawn));
+			if (in >= kDeployCheckCleanSeconds) {
+				if (p_st.time_to_respawn > 0.0f) {
+					shot(p_io, "counting", p_now_s);
+				}
+				lines_.push_back("[deploy] " + seconds_text(in) + " after spawnscreenpc opened, " +
+						seconds_text(p_st.time_to_respawn) + " to respawn: lightbars " +
+						node_fact(r_screens, kSpawnButtonScreenPartition, kDeployCheckLightBars) + ", deployStatus " +
+						node_fact(r_screens, kSpawnButtonScreenPartition, kDeployCheckDeployStatus));
 				p_io.kit_key(kDeployCheckKeyKit);
 				enter(Phase::KitKey, p_now_s, p_st);
 			}
@@ -295,7 +322,8 @@ void DeployCheck::step(
 			} else if (sub_ == 1 && in >= kDeployCheckInputSeconds + kDeployCheckRefuseSeconds) {
 				row("tab.refuses_deploy", !p_st.alive && p_st.own_spawns == mark_.own_spawns,
 						"Enter with Tab held: alive " + std::to_string(p_st.alive) + ", flow Spawn actions " +
-								std::to_string(p_st.spawn_actions - mark_.spawn_actions));
+								std::to_string(p_st.spawn_actions - mark_.spawn_actions) + "; OverviewMap_01 " +
+								node_fact(r_screens, kSpawnScreenPcPartition, kDeployCheckOverviewMap));
 				p_io.hold_scoreboard(false);
 				sub_ = 2;
 			} else if (sub_ == 2 && in >= 2.0 * kDeployCheckInputSeconds + kDeployCheckRefuseSeconds) {
@@ -313,18 +341,15 @@ void DeployCheck::step(
 				spawn_primary_ = picked_;
 			}
 			break;
-		case Phase::EnterCounting:
-			if (in >= kDeployCheckInputSeconds && shown(r_screens, kSpawnButtonScreenPartition)) {
-				alive_while_counting_ = false;
-				tap(p_io, godot::KEY_ENTER);
-				ready_s_ = -1.0;
-				row("countdown.enter_while_counting", p_st.time_to_respawn > 0.0f,
-						"Enter pressed with " + seconds_text(p_st.time_to_respawn) + " to respawn");
-				enter(Phase::EnterBlocked, p_now_s, p_st);
-			}
-			break;
 		case Phase::EnterBlocked:
 			alive_while_counting_ = alive_while_counting_ || p_st.alive;
+			if (sub_ == 0 && in >= kDeployCheckCleanSeconds) {
+				shot(p_io, "enter_refused", p_now_s);
+				lines_.push_back("[deploy] " + seconds_text(in) + " after the refused Enter: OverviewMap_01 " +
+						node_fact(r_screens, kSpawnScreenPcPartition, kDeployCheckOverviewMap) + ", " +
+						seconds_text(p_st.time_to_respawn) + " to respawn");
+				sub_ = 1;
+			}
 			if (p_st.time_to_respawn > 0.0f) {
 				break;
 			}

@@ -628,7 +628,9 @@ bool Bf3UiScreens::input_concept(int32_t p_concept, bool p_pressed) {
 	}
 	++stats_.concepts_to_flow;
 	note("concept " + std::string(ui::ui_input_concept_name(ui::UiInputConcept(p_concept))) + " to the flow");
-	return session_->input_action(p_concept) || taken;
+	const bool found = session_->input_action(p_concept);
+	stats_.concepts_found += found ? 1u : 0u;
+	return found || taken;
 }
 
 bool Bf3UiScreens::key(int32_t p_code, bool p_pressed) {

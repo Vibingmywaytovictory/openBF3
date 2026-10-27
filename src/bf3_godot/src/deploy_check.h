@@ -30,6 +30,10 @@ inline constexpr std::string_view kDeployCheckPrimarySlot = "instance1.KitBar_01
 inline constexpr std::string_view kDeployCheckGridCell = "instance1.Grid_01.gridItems.cell-";
 inline constexpr double kDeployCheckGridSeconds = 0.8;
 inline constexpr double kDeployCheckKillCardShotSeconds = 2.5;
+inline constexpr double kDeployCheckCleanSeconds = 0.5;
+inline constexpr std::string_view kDeployCheckOverviewMap = "instance1.OverviewMap_01";
+inline constexpr std::string_view kDeployCheckLightBars = "instance1.SpawnTimer_01.lightbars";
+inline constexpr std::string_view kDeployCheckDeployStatus = "instance1.SpawnTimer_01.deployStatus";
 
 struct DeployCheckState {
 	bool alive = false;
@@ -51,6 +55,7 @@ struct DeployCheckState {
 	std::array<uint32_t, 32> primary_items{};
 	uint32_t chosen_primary = 0;
 	uint32_t spawned_primary = 0;
+	uint64_t concepts_found = 0;
 };
 
 struct DeployCheckIo {
@@ -87,7 +92,6 @@ private:
 		Ready,
 		TabHeld,
 		ClickDeploy,
-		EnterCounting,
 		EnterBlocked,
 		EnterDeploy,
 		Done,
@@ -102,6 +106,7 @@ private:
 	void shot(const DeployCheckIo &p_io, const std::string &p_name, double p_now_s);
 	static bool up(const Bf3UiScreens &p_screens, std::string_view p_partition);
 	static bool shown(const Bf3UiScreens &p_screens, std::string_view p_partition);
+	static std::string node_fact(Bf3UiScreens &r_screens, std::string_view p_partition, std::string_view p_path);
 
 	std::string shots_dir_;
 	Phase phase_ = Phase::Join;

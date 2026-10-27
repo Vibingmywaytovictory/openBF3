@@ -775,8 +775,9 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			mapper_.script_press(InputMapper::TdmAction(uint8_t(InputMapper::TdmAction::Kit1) + p_kit));
 		};
 		io.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
-		io.state = [&r_game, &m, &f] {
+		io.state = [&r_game, &m, &f, screens] {
 			DeployCheckState s;
+			s.concepts_found = screens->stats().concepts_found;
 			s.alive = r_game.alive;
 			s.own_spawns = m.own_spawns;
 			s.own_deaths = m.own_deaths;

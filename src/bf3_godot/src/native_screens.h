@@ -56,6 +56,7 @@ struct UiScreensStats {
 	uint64_t events_in = 0;
 	uint64_t concepts = 0;
 	uint64_t concepts_to_flow = 0;
+	uint64_t concepts_found = 0;
 	uint64_t keys = 0;
 	uint64_t mouse = 0;
 };
