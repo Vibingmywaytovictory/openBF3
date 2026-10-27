@@ -298,6 +298,11 @@ UiFlowScreen *UiFlow::ensure_screen(Instance &r_inst, uint32_t p_node, bool p_sh
 		made.dialog = n.kind == UiGraphNodeKind::Dialog;
 		made.modal = made.dialog || r_inst.asset->modal;
 		made.shown = false;
+		if (made.dialog) {
+			made.dialog_title = n.dialog_title;
+			made.dialog_text = n.dialog_text;
+			made.dialog_buttons = n.dialog_buttons;
+		}
 		const uint64_t id = made.id;
 		screens_.push_back(std::move(made));
 		opened_.push_back(id);

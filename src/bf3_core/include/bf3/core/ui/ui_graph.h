@@ -74,6 +74,12 @@ struct UiDataRef {
 
 std::string ui_data_category_leaf(std::string_view p_category);
 
+struct UiDialogButton {
+	std::string label;
+	int32_t input_concept = -1;
+	bool operator==(const UiDialogButton &) const = default;
+};
+
 struct UiGraphNode {
 	UiGraphNodeKind kind = UiGraphNodeKind::Unknown;
 	std::string type;
@@ -103,6 +109,7 @@ struct UiGraphNode {
 	bool destroy_graph = false;
 	std::string dialog_title;
 	std::string dialog_text;
+	std::vector<UiDialogButton> dialog_buttons;
 
 	std::optional<uint32_t> port(UiGraphPortRole p_role, std::string_view p_name = {}) const;
 };
@@ -171,6 +178,9 @@ struct UiFlowScreen {
 	bool initialized = false;
 	bool exiting = false;
 	uint64_t shown_count = 0;
+	std::string dialog_title;
+	std::string dialog_text;
+	std::vector<UiDialogButton> dialog_buttons;
 };
 
 class UiFlowHost {

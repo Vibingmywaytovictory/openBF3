@@ -49,9 +49,26 @@ struct Bf3UiScreens::Entry {
 	int32_t order = 0;
 	uint64_t shown_count = 1;
 	Bf3SwfView *view = nullptr;
+	std::unique_ptr<ui::HudPopup> popup;
 	std::unique_ptr<ui::SwfScene> scene;
 	std::unique_ptr<ui::HudScreen> screen;
 };
+
+namespace {
+
+constexpr std::string_view kPopupButtons = "PopupButtonsManager_01";
+
+std::unique_ptr<ui::HudPopup> popup_of(const ui::UiFlowScreen &p_screen) {
+	auto popup = std::make_unique<ui::HudPopup>();
+	popup->title = p_screen.dialog_title;
+	popup->text = p_screen.dialog_text;
+	for (const ui::UiDialogButton &b : p_screen.dialog_buttons) {
+		popup->buttons.push_back(ui::HudPopupButton{ b.label, b.input_concept });
+	}
+	return popup;
+}
+
+}
 
 Bf3UiScreens::Bf3UiScreens() = default;
 
@@ -494,9 +511,13 @@ void Bf3UiScreens::sync_flow() {
 				break;
 			}
 		}
-		if (const bf3::core::Status st = open_screen(partition); !st) {
+		std::unique_ptr<ui::HudPopup> popup = f->dialog ? popup_of(*f) : nullptr;
+		client_.popup = popup.get();
+		const bf3::core::Status opened = open_screen(partition);
+		client_.popup = nullptr;
+		if (!opened) {
 			++stats_.failed;
-			error(st.error().message);
+			error(opened.error().message);
 			session_->screen_initialized(id);
 			continue;
 		}
@@ -508,6 +529,10 @@ void Bf3UiScreens::sync_flow() {
 		if (e->adopted) {
 			e->phase = UiScreenPhase::Entering;
 			continue;
+		}
+		if (popup != nullptr && e->screen != nullptr && e->popup == nullptr) {
+			e->popup = std::move(popup);
+			e->screen->focus_widget(std::string(ui::kHudScreenInstance) + "." + std::string(kPopupButtons));
 		}
 		e->modal = modal;
 		if (focusable) {

@@ -5,6 +5,7 @@
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/ui_graph.h"
+#include "bf3/core/ui/ui_input.h"
 #include "test_support.h"
 
 #include <cstdio>
@@ -677,6 +678,11 @@ TEST_SUITE("ui-graph") {
 		REQUIRE(popup != nullptr);
 		CHECK(popup->dialog);
 		CHECK(popup->modal);
+		CHECK(popup->dialog_title == "ID_M_POPUP_QUIT_TO_WINDOWS");
+		CHECK(popup->dialog_text == "ID_M_POPUP_QUIT_TEXT");
+		CHECK(popup->dialog_buttons ==
+				std::vector<UiDialogButton>{ { "ID_M_POPUP_OK", int32_t(UiInputConcept::Activate) },
+						{ "ID_M_POPUP_CANCEL", int32_t(UiInputConcept::Deactivate) } });
 		run.flow.clear_log();
 		Run resume(*r);
 		REQUIRE(resume.flow.fire_input(kIngameMenuGraph, "EnterFromGame"));

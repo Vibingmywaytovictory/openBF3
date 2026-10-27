@@ -294,6 +294,23 @@ Result<UiGraphAsset> read_ui_graph_asset(const EbxResolver &p_db, std::string_vi
 			node.destroy_graph = flag_of(*n, "DestroyGraph");
 			node.dialog_title = text_of(n->get("DialogTitle"));
 			node.dialog_text = text_of(n->get("DialogText"));
+			if (const std::optional<EbxValue> buttons = n->get("Buttons")) {
+				if (const OptionalEbxArray arr = buttons->as_array()) {
+					if (arr->size() > kUiGraphMaxParams) {
+						return make_error("ui graph: " + std::string(p_partition) + ": dialog " + node.name + " has " +
+								std::to_string(arr->size()) + " buttons");
+					}
+					for (const EbxValue &b : *arr) {
+						const std::optional<EbxStruct> s = b.as_struct();
+						if (!s) {
+							continue;
+						}
+						const std::optional<EbxValue> c = s->get("InputConcept");
+						node.dialog_buttons.push_back(
+								UiDialogButton{ text_of(s->get("Label")), c ? c->enum_value().value_or(-1) : -1 });
+					}
+				}
+			}
 			node_of[n->index()] = index;
 			out.nodes.push_back(std::move(node));
 		}
