@@ -1129,7 +1129,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		g.native_hud->set_minimap_pose(pose);
 		g.native_hud->set_world(this, free_camera ? nullptr : camera, !free_camera && g.alive);
 		if (!g.native_hud->fixture()) {
-			g.native_hud->set_visible(!free_camera && g.alive);
+			g.native_hud->set_visible(!free_camera && g.alive && !g.menu_hides_hud);
 		}
 	}
 #if OPENBF3_BUILD_CHECKS

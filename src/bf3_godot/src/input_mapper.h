@@ -62,6 +62,8 @@ public:
 	void poll_devices();
 	void set_capture(bool p_capture);
 	bool captured() const { return captured_; }
+	void set_game_input(bool p_on);
+	bool game_input() const { return game_input_; }
 
 	void set_scripted(bool p_scripted);
 	bool scripted() const { return scripted_; }
@@ -108,6 +110,7 @@ private:
 	bool free_camera_ = false;
 	bool scripted_ = false;
 	bool captured_ = false;
+	bool game_input_ = true;
 	bool actions_installed_ = false;
 
 public:

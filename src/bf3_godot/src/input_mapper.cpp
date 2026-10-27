@@ -123,6 +123,14 @@ void InputMapper::set_capture(bool p_capture) {
 	Input::get_singleton()->set_mouse_mode(p_capture ? Input::MOUSE_MODE_CAPTURED : Input::MOUSE_MODE_VISIBLE);
 }
 
+void InputMapper::set_game_input(bool p_on) {
+	game_input_ = p_on;
+	if (!p_on && !scripted_) {
+		held_.fill(false);
+		set_capture(false);
+	}
+}
+
 void InputMapper::look(float p_dx, float p_dy) {
 	ViewAngles &v = free_camera_ ? free_view_ : view_;
 	v.yaw = wrap_yaw(v.yaw - p_dx * mouse_sensitivity);
@@ -134,7 +142,7 @@ void InputMapper::handle_event(const Ref<InputEvent> &p_event) {
 	if (scripted_ || p_event.is_null()) {
 		return;
 	}
-	if (tdm_handle_event(p_event)) {
+	if (tdm_handle_event(p_event) || !game_input_) {
 		return;
 	}
 	if (weapon_handle_event(p_event)) {
@@ -174,6 +182,10 @@ void InputMapper::handle_event(const Ref<InputEvent> &p_event) {
 
 void InputMapper::poll_devices() {
 	if (scripted_) {
+		return;
+	}
+	if (!game_input_) {
+		held_.fill(false);
 		return;
 	}
 	Input *in = Input::get_singleton();
@@ -273,6 +285,11 @@ bf3::host::InputSample InputMapper::sample() const {
 		s.held_buttons = held(InputAction::Sprint) ? sim::buttons::kSprint : 0u;
 	}
 	weapon_sample(s);
+	if (!game_input_) {
+		s.move_forward = 0.0f;
+		s.move_right = 0.0f;
+		s.held_buttons = 0;
+	}
 	return s;
 }
 

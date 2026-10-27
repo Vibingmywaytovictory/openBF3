@@ -182,6 +182,11 @@ target_sources(bf3_godot PRIVATE
 )
 
 target_sources(bf3_godot PRIVATE
+    src/level_session_menu.cpp
+    src/level_session_menu.h
+)
+
+target_sources(bf3_godot PRIVATE
     src/iff_frame.h
     src/iff_frame.cpp
 )
@@ -259,6 +264,10 @@ if(OPENBF3_BUILD_CHECKS)
     target_sources(bf3_godot PRIVATE
         src/settings_check.cpp
         src/settings_check.h
+    )
+    target_sources(bf3_godot PRIVATE
+        src/menu_check.cpp
+        src/menu_check.h
     )
     target_link_libraries(bf3_godot PRIVATE bf3_sim_harness)
     target_include_directories(bf3_godot PRIVATE ${PROJECT_SOURCE_DIR}/tests)

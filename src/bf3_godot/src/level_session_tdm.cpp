@@ -8,6 +8,7 @@
 #include "godot_util.h"
 #include "hud_items.h"
 #include "input_mapper.h"
+#include "level_session_menu.h"
 #include "native_flow.h"
 #include "native_hud.h"
 #include "native_screens.h"
@@ -205,6 +206,9 @@ void build_tdm_ui(
 		r_m.native_flow =
 				std::unique_ptr<NativeFlow, void (*)(NativeFlow *)>(new NativeFlow(), &delete_part<NativeFlow>);
 		r_m.native_flow->set_keep_log(r_m.native_screens_check || r_m.loading_screen_check);
+		r_m.native_menu =
+				std::unique_ptr<NativeMenu, void (*)(NativeMenu *)>(new NativeMenu(), &delete_part<NativeMenu>);
+		r_m.native_menu->build(*screens);
 	}
 	r_m.death_camera = std::unique_ptr<Bf3DeathCamera, void (*)(Bf3DeathCamera *)>(
 			new Bf3DeathCamera(p_death != nullptr ? death_camera_params(*p_death) : DeathCameraParams{}),
@@ -268,6 +272,8 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 		for (const bf3::core::ui::UiFlowAction &a : flow.take_actions()) {
 			if (r_m.deploy_screens.take_action(a)) {
 				r_m.deploy_click = true;
+			} else if (r_m.native_menu != nullptr) {
+				r_m.native_menu->take(a);
 			}
 		}
 	}
@@ -389,9 +395,12 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 		bots_ = m.options.bots;
 		m.native_screens_check = has_user_arg("native-screens-check");
 		m.loading_screen_check = has_user_arg("loading-screen-check");
-		m.native_screens = m.native_screens_check || m.loading_screen_check || user_arg_value("native-screens") != "0";
+		m.menu_check_on = has_user_arg("menu-check");
+		m.native_screens = m.native_screens_check || m.loading_screen_check || m.menu_check_on ||
+				user_arg_value("native-screens") != "0";
 		m.deploy_check = has_user_arg("deploy-check");
-		if ((m.native_screens_check || m.loading_screen_check || m.deploy_check) && quit_after_ <= 0.0) {
+		if ((m.native_screens_check || m.loading_screen_check || m.menu_check_on || m.deploy_check) &&
+				quit_after_ <= 0.0) {
 			quit_after_ = 1.0e9;
 		}
 		m.options.tdm_tuning_cfg = config_path("res://config/tdm_tuning.cfg");
@@ -659,9 +668,13 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 
 	auto t0 = std::chrono::steady_clock::now();
 	tick_native_flow(r_game, m, f, level_id(), mode_id(), now_s);
+	if (tdm_menu_frame(now_s)) {
+		return true;
+	}
 	{
 		host::HudFeedInput in;
 		in.kill_screen_up = native_kill_screen_up(m);
+		in.in_menu = m.native_menu != nullptr && m.native_menu->in_menu();
 		in.weapon = r_game.weapon;
 		in.alive = r_game.alive;
 		in.health = f.own_curr.health;
@@ -897,7 +910,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 	}
 	m.ms_death_camera = ms_since(t0);
 
-	bool wants_mouse = m.spawn_screen;
+	bool wants_mouse = m.spawn_screen || (m.native_menu != nullptr && m.native_menu->wants_mouse());
 	if (m.tdm_hud != nullptr && m.tdm_hud->built()) {
 		wants_mouse = wants_mouse || m.tdm_hud->wants_mouse();
 	}

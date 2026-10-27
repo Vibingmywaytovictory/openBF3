@@ -137,6 +137,7 @@ struct GameState {
 	Bf3UiAssets *ui_assets = nullptr;
 	Bf3HudItems *hud_items = nullptr;
 	Bf3NativeHud *native_hud = nullptr;
+	bool menu_hides_hud = false;
 	bool hud_names_applied = false;
 	std::array<Bf3Viewmodel *, 2> vm{ nullptr, nullptr };
 	godot::CanvasLayer *layer = nullptr;
