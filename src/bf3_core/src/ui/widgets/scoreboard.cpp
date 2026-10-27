@@ -184,20 +184,16 @@ constexpr uint32_t kSquadColour = 8429618u;
 constexpr uint32_t kEnemyColour = 9843250u;
 constexpr int32_t kHeaderRelease = 0;
 
-bool mode_starts_with(const As2Value &p_mode, std::string_view p_prefix) {
-	return p_mode.to_string().starts_with(p_prefix);
-}
-
 bool mode_rush(const As2Value &p_mode) {
-	return mode_starts_with(p_mode, "Rush");
+	return as2_game_mode_is(p_mode, "Rush");
 }
 
 bool mode_squad_rush(const As2Value &p_mode) {
-	return mode_starts_with(p_mode, "SquadRush");
+	return as2_game_mode_is(p_mode, "SquadRush");
 }
 
 bool mode_gun_master(const As2Value &p_mode) {
-	return mode_starts_with(p_mode, "GunMaster");
+	return as2_game_mode_is(p_mode, "GunMaster");
 }
 
 class ScoreboardHeaderClass final : public HudWidgetController {

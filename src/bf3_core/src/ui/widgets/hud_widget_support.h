@@ -97,6 +97,14 @@ inline bool as2_equals_false(const As2Value &p_v) {
 	return p_v.kind == As2Value::Kind::Bool ? !p_v.boolean : p_v.to_number() == 0.0;
 }
 
+inline bool as2_game_mode_is(const As2Value &p_mode, std::string_view p_prefix) {
+	return p_mode.to_string().starts_with(p_prefix);
+}
+
+inline float as2_autosized_width(const As2Clip &p_field) {
+	return p_field.text_width() + 4.0f;
+}
+
 inline std::string_view clip_leaf(std::string_view p_path) {
 	const size_t dot = p_path.rfind('.');
 	return dot == std::string_view::npos ? p_path : p_path.substr(dot + 1);

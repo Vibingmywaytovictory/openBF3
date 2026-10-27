@@ -148,4 +148,6 @@ std::string hud_list_access_handle(const HudDataSource &p_query);
 bool hud_list_set_rows(HudScreen &r_screen, std::string_view p_instance, const As2Value &p_rows);
 bool hud_list_set_direct_rows(HudScreen &r_screen, std::string_view p_instance, std::vector<As2Value> p_rows);
 
+int32_t hud_eor_place(const HudEndOfRound &p_eor);
+std::string hud_eor_round_duration(float p_seconds);
 }
