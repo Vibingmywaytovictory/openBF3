@@ -410,6 +410,29 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(s.flow().errors().empty());
 	}
 
+	TEST_CASE("ui flow session: a round that starts without a pre-round reloads the logic") {
+		Level *l = level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level, UiFlowSessionOptions{});
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		UiFlowSession &s = **made;
+		ui_flow_tdm_pc_defaults(s, "TeamDeathMatch0");
+		UiGameState st;
+		st.joined = true;
+		for (const net::MatchPhase p :
+				{ net::MatchPhase::InRound, net::MatchPhase::RoundOver, net::MatchPhase::InRound }) {
+			st.phase = p;
+			st.winner = p == net::MatchPhase::RoundOver ? 1 : 0;
+			for (int i = 0; i < 10; ++i) {
+				REQUIRE(s.update(st).ok());
+			}
+		}
+		CHECK(s.stats().reloads == 1);
+		CHECK(s.errors().empty());
+	}
+
 	TEST_CASE("ui flow session: install unchanged") {
 		Level *l = level_or_skip();
 		if (l == nullptr) {
