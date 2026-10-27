@@ -1233,9 +1233,10 @@ void HudScreen::initialize(const HudModel &p_model) {
 		}
 		w->screen_widget = true;
 		w->host->set_events(n.events);
-		if (n.focus_index > 0 && (focused_widget_.empty() || n.focus_index < focus_index_)) {
+		if (n.focus_index >= 0 && (focused_widget_.empty() || n.focus_index < focus_index_)) {
 			focused_widget_ = w->path;
 			focus_index_ = n.focus_index;
+			focus_group_ = true;
 		}
 		w->controller->attach_node(*w->host, n);
 		if (!w->controller->screen_initialized()) {
@@ -1255,6 +1256,12 @@ void HudScreen::initialize(const HudModel &p_model) {
 		w->controller->initialize(*w->host, init);
 		w->initialized = true;
 		stats_.widgets_initialized++;
+	}
+	for (size_t i = 0; i < widgets_.size(); ++i) {
+		HudWidgetState &w = *widgets_[i];
+		if (w.initialized && !w.retired && takes_focus(w)) {
+			w.controller->focus_gained(*w.host);
+		}
 	}
 	for (const std::unique_ptr<HudWidgetState> &w : widgets_) {
 		if (w->initialized) {
@@ -1405,22 +1412,15 @@ void HudScreen::apply_tween(const HudTween &p_tween, float p_value) {
 }
 
 void HudScreen::set_focus(bool p_focused) {
-	if (focused_ == p_focused) {
-		return;
-	}
 	focused_ = p_focused;
-	const ActionBlock block(*this);
-	for (size_t i = 0; i < widgets_.size(); ++i) {
-		HudWidgetState &w = *widgets_[i];
-		if (w.retired || w.controller == nullptr || w.host == nullptr || !takes_focus(w)) {
-			continue;
-		}
-		if (p_focused) {
-			w.controller->focus_gained(*w.host);
-		} else {
-			w.controller->focus_lost(*w.host);
-		}
+}
+
+const HudWidgetNode *HudScreen::screen_node(std::string_view p_path) const {
+	const std::string_view prefix = kHudScreenInstance;
+	if (p_path.size() <= prefix.size() + 1 || !p_path.starts_with(prefix) || p_path[prefix.size()] != '.') {
+		return nullptr;
 	}
+	return asset_.find(p_path.substr(prefix.size() + 1));
 }
 
 bool HudScreen::takes_focus(const HudWidgetState &p_widget) const {
@@ -1430,32 +1430,37 @@ bool HudScreen::takes_focus(const HudWidgetState &p_widget) const {
 	if (!p_widget.screen_widget) {
 		return false;
 	}
-	for (const HudWidgetNode &n : asset_.widgets) {
-		if (n.always_in_focus && p_widget.path == std::string(kHudScreenInstance) + "." + n.instance) {
-			return true;
-		}
-	}
-	return false;
+	const HudWidgetNode *n = screen_node(p_widget.path);
+	return n != nullptr && (n->always_in_focus || (focus_group_ && n->focus_index == focus_index_));
 }
 
 void HudScreen::focus_widget(std::string_view p_path) {
 	if (focused_widget_ == p_path) {
 		return;
 	}
-	const std::string was = focused_widget_;
+	std::vector<bool> before(widgets_.size());
+	for (size_t i = 0; i < widgets_.size(); ++i) {
+		before[i] = takes_focus(*widgets_[i]);
+	}
 	focused_widget_ = std::string(p_path);
-	if (!focused_) {
+	const HudWidgetNode *n = screen_node(p_path);
+	focus_group_ = n != nullptr && n->focus_index >= 0;
+	if (focus_group_) {
+		focus_index_ = n->focus_index;
+	}
+	if (!initialized_) {
 		return;
 	}
 	const ActionBlock block(*this);
-	for (size_t i = 0; i < widgets_.size(); ++i) {
+	for (size_t i = 0; i < std::min(before.size(), widgets_.size()); ++i) {
 		HudWidgetState &w = *widgets_[i];
 		if (w.retired || w.controller == nullptr || w.host == nullptr) {
 			continue;
 		}
-		if (w.path == was && !takes_focus(w)) {
+		const bool now = takes_focus(w);
+		if (before[i] && !now) {
 			w.controller->focus_lost(*w.host);
-		} else if (w.path == focused_widget_) {
+		} else if (!before[i] && now) {
 			w.controller->focus_gained(*w.host);
 		}
 	}

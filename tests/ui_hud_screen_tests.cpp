@@ -2381,9 +2381,12 @@ TEST_SUITE("ui-hud-screen") {
 				node->events[11].name.c_str(), hide_query.c_str());
 		std::vector<std::string> fired;
 		s.hud->set_event_sink([&](const HudWidgetEvent &e) {
-			fired.push_back(std::to_string(e.index) + " " + e.query + " " + e.param.to_string());
+			if (e.instance == "Button_03" || e.index < 0) {
+				fired.push_back(std::to_string(e.index) + " " + e.query + " " + e.param.to_string());
+			}
 		});
 		s.hud->initialize(HudModel{});
+		fired.clear();
 		const bool listed =
 				std::any_of(s.hud->mouse_targets().begin(), s.hud->mouse_targets().end(), [](const HudMouseTarget &t) {
 					return t.path == "instance1.Button_03" && t.widget == "instance1.Button_03";

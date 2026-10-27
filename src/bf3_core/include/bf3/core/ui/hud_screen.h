@@ -571,6 +571,7 @@ private:
 	float mouse_y_ = 0.0f;
 	std::string focused_widget_;
 	int32_t focus_index_ = 0;
+	bool focus_group_ = false;
 	struct Interval {
 		std::string path;
 		uint32_t id = 0;
@@ -596,6 +597,7 @@ private:
 
 	bool dispatch_mouse(const std::string &p_target, HudMouse p_mouse);
 	bool takes_focus(const HudWidgetState &p_widget) const;
+	const HudWidgetNode *screen_node(std::string_view p_path) const;
 };
 
 }

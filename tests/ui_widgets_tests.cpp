@@ -12,6 +12,7 @@
 #include "test_support.h"
 #include "ui_retail_support.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -80,6 +81,10 @@ struct ScreenRig {
 			}
 		}
 		return {};
+	}
+	size_t events_of(std::string_view p_instance) const {
+		return size_t(std::count_if(
+				events.begin(), events.end(), [&](const HudWidgetEvent &p_e) { return p_e.instance == p_instance; }));
 	}
 	std::string frame_label(const std::string &p_path) const {
 		const SwfSceneNode *n = s.scene->find_node(p_path);
@@ -356,8 +361,8 @@ TEST_SUITE("ui-widgets") {
 		CHECK(b.events.empty());
 		b.s.hud->input_concept(int32_t(UiInputConcept::Tab), false);
 		REQUIRE(b.events.size() == 1u);
-		CHECK(focused == std::string(kHudScreenInstance) + ".ScoreboardHeader_02");
-		CHECK(b.events[0].instance == "ScoreboardHeader_02");
+		CHECK(focused == std::string(kHudScreenInstance) + ".ScoreboardHeader_01");
+		CHECK(b.events[0].instance == "ScoreboardHeader_01");
 		CHECK(b.events[0].query == "UIWidgetEventID_OnItemReleased");
 	}
 
@@ -439,10 +444,10 @@ TEST_SUITE("ui-widgets") {
 		CHECK(b.clip("TabBar_01.tabBarHolder.button_2.button.bgHolder.selected_mc").visible());
 		CHECK_FALSE(b.clip("TabBar_01.tabBarHolder.button_0.button.bgHolder.selected_mc").visible());
 		CHECK(b.clip("TabBar_01.tabBarHolder.button_0.button.label").visible());
-		const size_t before = b.events.size();
+		const size_t before = b.events_of("TabBar_01");
 		b.s.hud->input_concept(int32_t(UiInputConcept::TabLeft), true);
 		b.s.hud->input_concept(int32_t(UiInputConcept::TabLeft), false);
-		CHECK(b.events.size() == before);
+		CHECK(b.events_of("TabBar_01") == before);
 		HudWidgetController *c = b.s.hud->controller(bar);
 		REQUIRE(c != nullptr);
 		c->update(*b.s.hud->host(bar), "SelectedTab", As2Value::of(1));
@@ -474,7 +479,7 @@ TEST_SUITE("ui-widgets") {
 		CHECK(b.clip("TabBar_01.tabBarHolder.button_0").x() > 0.0f);
 		b.events.clear();
 		b.s.hud->input_concept(int32_t(UiInputConcept::TabRight), true);
-		CHECK(b.events.empty());
+		CHECK(b.events_of("TabBar_01") == 0u);
 		b.s.hud->input_concept(int32_t(UiInputConcept::TabRight), false);
 		REQUIRE_FALSE(b.events.empty());
 		CHECK(b.events.back().index == 1);
@@ -823,6 +828,12 @@ TEST_SUITE("ui-widgets") {
 		CHECK_FALSE(bar.visible());
 		CHECK_FALSE(b.clip("ConsoleButtonBar_01.layoutGuide").visible());
 		b.s.hud->focus_widget(path);
+		CHECK(std::any_of(b.events.begin(), b.events.end(),
+				[](const HudWidgetEvent &e) { return e.query == "UIWidgetEventID_OnMapChanged"; }));
+		for (const HudWidgetEvent &e : b.events) {
+			CHECK(e.instance == "List_01");
+		}
+		b.events.clear();
 		b.s.hud->input_concept(int32_t(UiInputConcept::Activate), true);
 		CHECK(b.events.empty());
 		REQUIRE(b.s.hud->deliver_in_event("ConsoleButtonBar_01", "UIWidgetEventID_Update",
