@@ -21,6 +21,8 @@
 #include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/input_event_mouse_motion.hpp>
+#include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/viewport_texture.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <charconv>
@@ -159,9 +161,12 @@ void NativeMenu::attach_overview(Bf3UiScreens &r_screens, const NativeMenuIo &p_
 			++stats_.overview_attached;
 		}
 	}
-	if (p_io.tags != nullptr) {
-		overview->set_marks(overview_marks(p_io.tags->minimap()));
+	std::vector<OverviewMark> marks =
+			p_io.tags != nullptr ? overview_marks(p_io.tags->minimap()) : std::vector<OverviewMark>{};
+	if (p_io.local) {
+		marks.push_back(*p_io.local);
 	}
+	overview->set_marks(std::move(marks));
 }
 
 }
@@ -182,6 +187,10 @@ bool Bf3LevelSession::tdm_menu_frame(double p_now_s) {
 	io.level = level_id();
 	io.mapper = &mapper_;
 	io.tags = game_->native_hud != nullptr ? game_->native_hud->tags() : nullptr;
+	if (game_->native_hud != nullptr && game_->alive && game_->native_hud->minimap_pose().valid) {
+		const NativeHudMinimapPose &pose = game_->native_hud->minimap_pose();
+		io.local = OverviewMark{ OverviewMarkKind::Local, pose.x, pose.z, pose.yaw };
+	}
 	io.suicide = [this] {
 		if (host::ClientSession *c = client()) {
 			c->send_suicide_request();
@@ -219,6 +228,7 @@ bool Bf3LevelSession::tdm_menu_frame(double p_now_s) {
 			tdm_ui_input(e);
 		};
 		cio.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		cio.capture = [this] { return get_viewport()->get_texture()->get_image(); };
 		cio.alive = game_->alive;
 		cio.hud_visible = game_->native_hud != nullptr && game_->native_hud->is_visible();
 		cio.game_input = mapper_.game_input();
@@ -226,6 +236,7 @@ bool Bf3LevelSession::tdm_menu_frame(double p_now_s) {
 		cio.cursor_shown = cursor != nullptr && cursor->cursor_shown();
 		if (const Bf3OverviewMap *overview = Bf3OverviewMap::current()) {
 			const OverviewMapStats &st = overview->stats();
+			cio.overview_icons = st.icons;
 			cio.overview = "attached " + std::to_string(st.attached) + ", paints " + std::to_string(st.paints) +
 					", maps " + std::to_string(st.maps) + ", icons " + std::to_string(st.icons) + ", menu attaches " +
 					std::to_string(m.native_menu->stats().overview_attached);

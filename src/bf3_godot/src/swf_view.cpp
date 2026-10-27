@@ -2368,6 +2368,11 @@ struct Bf3SwfView::Impl {
 	}
 
 	void render_dirty() {
+		for (auto &[id, t] : targets) {
+			if (t.live && t.canvas != nullptr) {
+				mark(t.canvas);
+			}
+		}
 		for (Canvas *c : order) {
 			if (!c->render_dirty) {
 				continue;

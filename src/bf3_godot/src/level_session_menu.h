@@ -1,11 +1,14 @@
 #pragma once
 
+#include "overview_map.h"
+
 #include "bf3/core/ui/ui_graph.h"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -46,6 +49,7 @@ struct NativeMenuIo {
 	std::string level;
 	InputMapper *mapper = nullptr;
 	const NativeTags *tags = nullptr;
+	std::optional<OverviewMark> local;
 	std::function<void()> suicide;
 };
 
