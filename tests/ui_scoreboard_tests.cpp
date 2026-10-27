@@ -194,4 +194,44 @@ TEST_SUITE("ui-scoreboard") {
 		CHECK(text("title") == "TOO FEW PLAYERS");
 		CHECK(text("description") == "RESTARTING ROUND");
 	}
+
+	TEST_CASE("scoreboard: MatchPreroundInformation writes its PreroundStatus and shows on ShowInformation") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const TextDatabase &db = ui_retail::retail_text_db(*r);
+		ui_retail::RetailScreen s =
+				ui_retail::open_retail_screen(*r, kPreRoundWaitingScreenPartition, ui_retail::retail_text_client(db));
+		s.hud->initialize(HudModel{});
+		const std::string info = "instance1.MatchPreroundInformation_01";
+		CHECK_FALSE(s.at(info).visible);
+		As2Value status = As2Value::object();
+		status.set("PlayersReady", As2Value::of(3.7));
+		status.set("PlayersRequired", As2Value::of(8));
+		status.set("CountdownSeconds", As2Value::of(12));
+		status.set("IsSpectator", As2Value::of(false));
+		status.set("IsLocalPlayerReady", As2Value::of(true));
+		const HudWidgetState *w = s.hud->widget(info);
+		REQUIRE(w != nullptr);
+		w->controller->update(*w->host, "PreroundStatus", status);
+		CHECK(s.at(info + ".playersJoined").text == "3/8 PLAYERS READY");
+		CHECK(s.at(info + ".timer").text == "12");
+		CHECK(s.at(info + ".playerStatus").text ==
+				std::string(db.find_sid("ID_M_PREROUND_HUD_READYSTATE").value_or("?")));
+		status.set("IsLocalPlayerReady", As2Value::of(false));
+		w->controller->update(*w->host, "PreroundStatus", status);
+		CHECK(s.at(info + ".playerStatus").text ==
+				std::string(db.find_sid("ID_M_PREROUND_HUD_NOTREADYSTATE").value_or("?")));
+		status.set("IsSpectator", As2Value::of(true));
+		w->controller->update(*w->host, "PreroundStatus", status);
+		CHECK(s.at(info + ".playerStatus").text ==
+				std::string(db.find_sid("ID_M_PREROUND_HUD_SPECTATOR").value_or("?")));
+		REQUIRE(s.hud->deliver_in_event("MatchPreroundInformation_01", kShowQuery, As2Value::of(0)));
+		CHECK(s.at(info).visible);
+		REQUIRE(s.hud->deliver_in_event("MatchPreroundInformation_01", "UIWidgetEventID_Hide", As2Value::of(0)));
+		CHECK_FALSE(s.at(info).visible);
+		CHECK(s.hud->stats().as2.missing_paths == 0);
+		CHECK_MESSAGE(s.hud->stats().as2.failed_ops == 0, s.hud->stats().as2.last_failure);
+	}
 }
