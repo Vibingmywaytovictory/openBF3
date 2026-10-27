@@ -611,17 +611,17 @@ bool Bf3UiScreens::input_concept(int32_t p_concept, bool p_pressed) {
 	++stats_.concepts;
 	Entry *t = input_target();
 	ui::HudScreen *s = t != nullptr ? screen_of(*t) : nullptr;
-	if (s != nullptr && s->input_concept(p_concept, p_pressed)) {
+	const bool taken = s != nullptr && s->input_concept(p_concept, p_pressed);
+	if (taken) {
 		note("concept " + std::string(ui::ui_input_concept_name(ui::UiInputConcept(p_concept))) + " to " +
 				ui::ui_data_category_leaf(t->partition));
-		return true;
 	}
 	if (!p_pressed || session_ == nullptr) {
-		return false;
+		return taken;
 	}
 	++stats_.concepts_to_flow;
 	note("concept " + std::string(ui::ui_input_concept_name(ui::UiInputConcept(p_concept))) + " to the flow");
-	return session_->input_action(p_concept);
+	return session_->input_action(p_concept) || taken;
 }
 
 bool Bf3UiScreens::key(int32_t p_code, bool p_pressed) {

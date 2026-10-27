@@ -221,7 +221,8 @@ struct M2bCheck::State {
 				kit_pressed = true;
 			}
 			if (kit_pressed && !deploy_pressed && m.can_deploy && p_t - screen_up_t >= 2.0 * kM2bChooseDelayS) {
-				mp.script_press(InputMapper::TdmAction::Deploy);
+				s.scripted_ui_key(godot::KEY_ENTER, true);
+				s.scripted_ui_key(godot::KEY_ENTER, false);
 				deploy_pressed = true;
 				++deploy_index;
 			}

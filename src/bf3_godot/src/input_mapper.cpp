@@ -659,7 +659,6 @@ struct TdmActionKey {
 constexpr TdmActionKey kTdmActions[] = {
 	{ InputMapper::TdmAction::Gadget, "bf3_gadget", KEY_3, KEY_NONE },
 	{ InputMapper::TdmAction::Scoreboard, "bf3_scoreboard", KEY_TAB, KEY_NONE },
-	{ InputMapper::TdmAction::Deploy, "bf3_deploy", KEY_ENTER, KEY_KP_ENTER },
 	{ InputMapper::TdmAction::Kit1, "bf3_kit_1", KEY_1, KEY_NONE },
 	{ InputMapper::TdmAction::Kit2, "bf3_kit_2", KEY_2, KEY_NONE },
 	{ InputMapper::TdmAction::Kit3, "bf3_kit_3", KEY_3, KEY_NONE },
@@ -701,7 +700,6 @@ void InputMapper::enable_tdm(bool p_on) {
 void InputMapper::set_spawn_screen(bool p_up) {
 	if (p_up && !tdm_.spawn_screen) {
 		tdm_.kit = -1;
-		tdm_.deploy_presses = 0;
 	}
 	tdm_.spawn_screen = p_up;
 }
@@ -722,12 +720,6 @@ int InputMapper::take_kit() {
 	return k;
 }
 
-uint32_t InputMapper::take_deploy_presses() {
-	const uint32_t n = tdm_.deploy_presses;
-	tdm_.deploy_presses = 0;
-	return n;
-}
-
 void InputMapper::script_press(TdmAction p_action) {
 	switch (p_action) {
 		case TdmAction::Gadget:
@@ -735,11 +727,6 @@ void InputMapper::script_press(TdmAction p_action) {
 				select_weapon(2);
 			} else {
 				tdm_.kit = 2;
-			}
-			break;
-		case TdmAction::Deploy:
-			if (tdm_.spawn_screen) {
-				++tdm_.deploy_presses;
 			}
 			break;
 		case TdmAction::Kit1:
@@ -778,7 +765,7 @@ bool InputMapper::tdm_handle_event(const Ref<InputEvent> &p_event) {
 		if (Object::cast_to<InputEventMouseMotion>(p_event.ptr()) != nullptr) {
 			return true;
 		}
-		for (const TdmAction a : { TdmAction::Kit1, TdmAction::Kit2, TdmAction::Kit3, TdmAction::Kit4, TdmAction::Deploy }) {
+		for (const TdmAction a : { TdmAction::Kit1, TdmAction::Kit2, TdmAction::Kit3, TdmAction::Kit4 }) {
 			if (p_event->is_action_pressed(tdm_action_name(a), false, false)) {
 				script_press(a);
 				return true;

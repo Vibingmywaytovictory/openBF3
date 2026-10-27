@@ -329,6 +329,15 @@ void Bf3LevelSession::tdm_ui_input(const Ref<InputEvent> &p_event) {
 	}
 }
 
+void Bf3LevelSession::scripted_ui_key(Key p_key, bool p_pressed) {
+	Ref<InputEventKey> k;
+	k.instantiate();
+	k->set_keycode(p_key);
+	k->set_physical_keycode(p_key);
+	k->set_pressed(p_pressed);
+	tdm_ui_input(k);
+}
+
 void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 	GameState &g = *game_;
 	const bool scene_tdm = has_meta("openbf3_tdm") && bool(get_meta("openbf3_tdm"));
@@ -578,7 +587,7 @@ void Bf3LevelSession::tdm_presented(uint64_t p_now_ns) {
 	if (r_mapper.take_team_presses() > 0) {
 		UtilityFunctions::print("[tdm] T: the teams are AutoTeam's in TDM");
 	}
-	if (r_mapper.take_deploy_presses() > 0 || m.deploy_click) {
+	if (m.deploy_click) {
 		if (m.spawn_screen && m.can_deploy) {
 			m.deploy.armed = true;
 		}
@@ -690,14 +699,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 					new NativeScreensCheck(), &delete_part<NativeScreensCheck>);
 		}
 		NativeScreensCheckIo io;
-		io.press = [this](Key p_key, bool p_pressed) {
-			Ref<InputEventKey> k;
-			k.instantiate();
-			k->set_keycode(p_key);
-			k->set_physical_keycode(p_key);
-			k->set_pressed(p_pressed);
-			tdm_ui_input(k);
-		};
+		io.press = [this](Key p_key, bool p_pressed) { scripted_ui_key(p_key, p_pressed); };
 		io.suicide = [this] {
 			if (host::ClientSession *c = client()) {
 				c->send_suicide_request();
@@ -726,14 +728,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 					new LoadingScreenCheck(user_arg_value("loading-shots")), &delete_part<LoadingScreenCheck>);
 		}
 		LoadingScreenCheckIo io;
-		io.press = [this](Key p_key, bool p_pressed) {
-			Ref<InputEventKey> k;
-			k.instantiate();
-			k->set_keycode(p_key);
-			k->set_physical_keycode(p_key);
-			k->set_pressed(p_pressed);
-			tdm_ui_input(k);
-		};
+		io.press = [this](Key p_key, bool p_pressed) { scripted_ui_key(p_key, p_pressed); };
 		io.reopen = [this] { loading_.attach(this, level_, mode_, seed_); };
 		io.close = [this, now_s] { loading_.remove(now_s); };
 		io.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };

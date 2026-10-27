@@ -121,6 +121,7 @@ public:
 	Bf3UiAssets *ui_assets() const;
 	const Bf3UiScreens *screen_stack() const;
 	const UiScreenRecords *screen_records() const;
+	void scripted_ui_key(godot::Key p_key, bool p_pressed);
 
 	bool restart_client(const std::string &p_netsim, uint64_t p_seed, std::string *r_error);
 
