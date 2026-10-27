@@ -260,7 +260,7 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(banner - eor == int64_t(sim::logic::logic_delay_ticks(1.0)) + 2);
 		CHECK(sc.at("push scoreboardtwoteamshud64screen", 1701) - banner ==
 				int64_t(sim::logic::logic_delay_ticks(4.0)));
-		CHECK(sc.at("push eordetailstabsscreen", 1701) - banner == int64_t(sim::logic::logic_delay_ticks(12.0)) - 1);
+		CHECK(sc.at("push eordetailstabsscreen", 1701) - eor == int64_t(sim::logic::logic_delay_ticks(12.0)));
 		Lines restart_expected{ "native Reload" };
 		restart_expected.insert(restart_expected.end(), join_expected.begin(), join_expected.end());
 		CHECK(restart == restart_expected);

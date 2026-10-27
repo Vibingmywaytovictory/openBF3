@@ -99,6 +99,10 @@ void EorCheck::go(Step p_step, double p_now_s) {
 	step_s_ = p_now_s;
 }
 
+double EorCheck::page_after_banner(const EorCheckIo &p_io) {
+	return double(p_io.eor.pre_eor_s) - double(p_io.eor.fade_s);
+}
+
 bool EorCheck::timed(double p_took, double p_want, double p_tolerance, const char *p_what) {
 	note(std::string(p_what) + " " + seconds_text(p_took) + " s (install " + seconds_text(p_want) + " s)");
 	if (std::fabs(p_took - p_want) > p_tolerance) {
@@ -133,7 +137,7 @@ void EorCheck::press_concept(Bf3UiScreens &r_screens, int32_t p_concept) {
 	r_screens.input_concept(p_concept, false);
 }
 
-bool EorCheck::check_page(Bf3UiScreens &r_screens, const ui::HudModel &p_model) {
+bool EorCheck::check_page(Bf3UiScreens &r_screens, const ui::HudModel &p_model, double p_left_s) {
 	const std::string header = text_at(
 			r_screens, kEorScoreboardPartition, std::string(ui::kHudScreenInstance) + ".EorHeader_01.headerText");
 	const uint8_t local = p_model.local_player;
@@ -158,8 +162,11 @@ bool EorCheck::check_page(Bf3UiScreens &r_screens, const ui::HudModel &p_model) 
 		fail("the own row is not in the friendly list (List_01)");
 		return false;
 	}
-	if (caption != "NEXT ROUND STARTS IN:" || value.empty() || seconds < 44 || seconds > 48) {
-		fail("countdown reads '" + caption + "' '" + value + "', want NEXT ROUND STARTS IN: and 44..48");
+	const long lowest = long(std::floor(p_left_s - kEorCheckToleranceS));
+	const long highest = long(std::floor(p_left_s + kEorCheckToleranceS));
+	if (caption != "NEXT ROUND STARTS IN:" || value.empty() || seconds < lowest || seconds > highest) {
+		fail("countdown reads '" + caption + "' '" + value + "', want NEXT ROUND STARTS IN: and " +
+				std::to_string(lowest) + ".." + std::to_string(highest) + " (EorTime less the time on the page)");
 		return false;
 	}
 	if (!visible(r_screens, kEorTwoTeamsPartition) || p_model.team.friendly_team_players.count == 0) {
@@ -218,14 +225,14 @@ bool EorCheck::frame(Bf3UiScreens &r_screens, bf3::host::UiFlowSession *p_sessio
 		case Step::Page:
 			if (page) {
 				page_s_ = p_now_s;
-				if (timed(p_now_s - banner_s_, double(p_io.eor.pre_eor_s), kEorCheckToleranceS, "EOR page")) {
+				if (timed(p_now_s - banner_s_, page_after_banner(p_io), kEorCheckToleranceS, "EOR page")) {
 					go(Step::PageSettled, p_now_s);
 				}
 			}
 			break;
 		case Step::PageSettled:
 			if (p_now_s - step_s_ >= kEorCheckSettleS) {
-				if (check_page(r_screens, p_model)) {
+				if (check_page(r_screens, p_model, double(p_io.eor.eor_s) - (p_now_s - page_s_))) {
 					shot(p_io, "eor_scoreboard");
 					click(r_screens, godot::Vector2(kEorCheckStatsTabX, kEorCheckStatsTabY));
 					note("clicked STATS");
@@ -267,9 +274,7 @@ bool EorCheck::frame(Bf3UiScreens &r_screens, bf3::host::UiFlowSession *p_sessio
 			break;
 		case Step::Restart:
 			if (!visible(r_screens, kEorTabsPartition)) {
-				const double next =
-						double(p_io.eor.restart_delay_s) - double(p_io.eor.fade_s) - double(p_io.eor.pre_eor_s);
-				if (timed(p_now_s - page_s_, next, kEorCheckToleranceS, "next round")) {
+				if (timed(p_now_s - page_s_, double(p_io.eor.eor_s), kEorCheckToleranceS, "next round")) {
 					go(Step::Banner2, p_now_s);
 				}
 			}
@@ -283,8 +288,14 @@ bool EorCheck::frame(Bf3UiScreens &r_screens, bf3::host::UiFlowSession *p_sessio
 			}
 			break;
 		case Step::Page2:
-			if (page && p_now_s - banner_s_ >= double(p_io.eor.pre_eor_s) + kEorCheckSettleS) {
-				if (!check_page(r_screens, p_model)) {
+			if (page && page_s_ < banner_s_) {
+				page_s_ = p_now_s;
+				if (!timed(p_now_s - banner_s_, page_after_banner(p_io), kEorCheckToleranceS, "second EOR page")) {
+					break;
+				}
+			}
+			if (page && p_now_s - page_s_ >= kEorCheckSettleS) {
+				if (!check_page(r_screens, p_model, double(p_io.eor.eor_s) - (p_now_s - page_s_))) {
 					break;
 				}
 				click(r_screens, godot::Vector2(kEorCheckQuitX, kEorCheckQuitY));

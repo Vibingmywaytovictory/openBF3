@@ -77,7 +77,8 @@ private:
 	bool timed(double p_took, double p_want, double p_tolerance, const char *p_what);
 	void shot(const EorCheckIo &p_io, const char *p_name);
 	void shot_later(const char *p_name, double p_at_s);
-	bool check_page(Bf3UiScreens &r_screens, const bf3::core::ui::HudModel &p_model);
+	bool check_page(Bf3UiScreens &r_screens, const bf3::core::ui::HudModel &p_model, double p_left_s);
+	static double page_after_banner(const EorCheckIo &p_io);
 	static void click(Bf3UiScreens &r_screens, godot::Vector2 p_at);
 	static void press_concept(Bf3UiScreens &r_screens, int32_t p_concept);
 

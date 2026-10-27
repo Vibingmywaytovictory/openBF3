@@ -292,6 +292,13 @@ core::Status UiFlowSession::update(const UiGameState &p_state) {
 	}
 	if (p_state.unspawned && !last_.unspawned) {
 		enter_scope_input("EndOfRound");
+		const sim::Tick at = runtime_->tick() + 1;
+		for (const uint32_t n : end_of_round_nodes_) {
+			if (timers_.size() < kMaxTimers) {
+				timers_.push_back(Timer{ at + std::max<uint32_t>(lg::logic_delay_ticks(pre_eor_seconds_[n]), 1), n,
+						kEndOfRoundPreEorElapsed });
+			}
+		}
 	}
 	const uint32_t spawns_seen = last_.own_spawns;
 	last_ = p_state;
@@ -340,7 +347,6 @@ core::Status UiFlowSession::step() {
 				end_of_round_nodes_.end()) {
 			if (h.port == kEndOfRoundStart) {
 				raise(h.node, kEndOfRoundPreEor);
-				later(h.node, kEndOfRoundPreEorElapsed, lg::logic_delay_ticks(pre_eor_seconds_[h.node]));
 			} else if (h.port == kEndOfRoundRequest) {
 				raise(h.node, kEndOfRoundAnswer);
 			}
