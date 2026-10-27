@@ -171,7 +171,7 @@ TEST_SUITE("m2b-contract2") {
 		CHECK(r.missing_fonts == 0);
 		CHECK(r.missing_icons == 0);
 		CHECK(r.missing_strings == 0);
-		CHECK(!r.spawn_screen_visible);
+		CHECK(!r.round_end_visible);
 
 		const gs::TdmOptions o{};
 		CHECK(o.deploy_screen);
@@ -208,22 +208,19 @@ TEST_SUITE("m2b-contract2") {
 		r.scoreboard_visible = true;
 		r.scoreboard_rows = 24;
 		r.scoreboard_team_kills = { 23, 19 };
-		r.spawn_screen_visible = true;
-		r.deploy_enabled = true;
-		r.selected_kit = 2;
-		r.spawn_screen_shown = 3;
 		r.round_end_visible = true;
 		r.round_end_shown = 1;
 		r.missing_fonts = 1;
 		r.missing_icons = 2;
 		r.missing_strings = 3;
 
-		for (std::string_view p : { ui::kScoreboardHud32ScreenPartition, ui::kSpawnScreenPcPartition,
-					 ui::kPreRoundWaitingScreenPartition, ui::kEorWinningTeamScreenPartition }) {
+		for (std::string_view p : { ui::kScoreboardHud32ScreenPartition, ui::kPreRoundWaitingScreenPartition,
+					 ui::kEorWinningTeamScreenPartition }) {
 			CHECK_MESSAGE(gs::tdm_hud_reports(p), p);
 			CHECK_MESSAGE(gs::tdm_hud_screen_record(r, p).has_value(), p);
 		}
-		for (std::string_view p : { ui::kHudMpScreenPartition, ui::kKillScreenPartition }) {
+		for (std::string_view p :
+				{ ui::kHudMpScreenPartition, ui::kKillScreenPartition, ui::kSpawnScreenPcPartition }) {
 			CHECK_MESSAGE(!gs::tdm_hud_reports(p), p);
 			CHECK_MESSAGE(!gs::tdm_hud_screen_record(r, p), p);
 		}
@@ -232,13 +229,8 @@ TEST_SUITE("m2b-contract2") {
 		CHECK(board.number(gs::kUiFactRows) == 24.0);
 		CHECK(board.number(gs::kUiFactTeam1Kills) == 23.0);
 		CHECK(board.number(gs::kUiFactTeam2Kills) == 19.0);
-		const gs::UiScreenRecord spawn = *gs::tdm_hud_screen_record(r, ui::kSpawnScreenPcPartition);
-		CHECK(spawn.visible);
-		CHECK(spawn.shown == 3);
-		CHECK(spawn.number(gs::kUiFactDeployEnabled) == 1.0);
-		CHECK(spawn.number(gs::kUiFactSelectedKit) == 2.0);
-		CHECK(spawn.text("unknown").empty());
-		CHECK(spawn.number("unknown") == 0.0);
+		CHECK(board.text("unknown").empty());
+		CHECK(board.number("unknown") == 0.0);
 		CHECK(!gs::tdm_hud_screen_record(r, ui::kPreRoundWaitingScreenPartition)->visible);
 		const gs::UiScreenRecord eor = *gs::tdm_hud_screen_record(r, ui::kEorWinningTeamScreenPartition);
 		CHECK(eor.visible);

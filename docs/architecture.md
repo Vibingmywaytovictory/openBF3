@@ -154,9 +154,8 @@ These are structural, known, and listed so nobody mistakes them for design inten
   translation unit instead of once in `bf3_core`.
 * `bf3_core` is several libraries in one directory (containers, assets, gameplay tables, level, UI).
 * The build is Windows and MSVC only by policy; Win32 use is confined to about twenty files.
-* The scoreboard, spawn, pre-round and round-end screens (`src/bf3_godot/src/hud_scoreboard.cpp`,
-  `spawn_screen.cpp`, `pre_round.cpp`, `round_end.cpp`) are hand-built Godot
-  controls that only borrow the retail fonts and atlas regions; the in-round HUD is the retail movies (`Bf3NativeHud`). The rule is the retail SWF movies
+* The scoreboard, pre-round and round-end screens (`src/bf3_godot/src/hud_scoreboard.cpp`, `pre_round.cpp`,
+  `round_end.cpp`) are hand-built Godot controls that only borrow the retail fonts and atlas regions; the in-round HUD is the retail movies (`Bf3NativeHud`). The rule is the retail SWF movies
   rendered as they are (CLAUDE.md "Native Battlefield 3 UI only"); the SWF decoders in `bf3_core/ui/` give symbol
   tables, atlases, fonts, triangulated shapes, a live display tree (`SwfScene`), text layout and the AVM1 bytecode
   (`avm1.h`: every DoAction, DoInitAction and clip-action body, and the classes and `Object.registerClass` calls found

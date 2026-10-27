@@ -29,11 +29,6 @@ struct TdmHudRecords {
 	uint8_t scoreboard_rows = 0;
 	std::array<int32_t, 2> scoreboard_team_kills{};
 
-	bool spawn_screen_visible = false;
-	bool deploy_enabled = false;
-	uint8_t selected_kit = 0;
-	uint64_t spawn_screen_shown = 0;
-
 	bool pre_round_visible = false;
 	bool round_end_visible = false;
 	uint64_t round_end_shown = 0;
@@ -59,9 +54,6 @@ public:
 	bool built() const;
 
 	void set_model(const core::ui::HudModel &p_model);
-
-	int take_kit_click();
-	bool take_deploy_click();
 
 	bool wants_mouse() const;
 	TdmHudRecords records() const;

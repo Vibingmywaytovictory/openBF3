@@ -31,7 +31,7 @@ protected:
 private:
 	void pick_items();
 	core::ui::HudModel stage_model(int p_stage) const;
-	void check_stage(int p_stage);
+	void check_stage(int p_stage, const std::string &p_name);
 	void save_shot(const std::string &p_label);
 	void row(const std::string &p_name, bool p_pass, const std::string &p_detail);
 	void finish();

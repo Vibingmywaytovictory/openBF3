@@ -686,12 +686,6 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		}
 		if (m.tdm_hud != nullptr && m.tdm_hud->built()) {
 			m.tdm_hud->set_model(r_game.hud_model);
-			if (const int k = m.tdm_hud->take_kit_click(); k >= 0 && k < int(host::kKitCount)) {
-				m.spawn_kit = uint8_t(k);
-			}
-			if (m.tdm_hud->take_deploy_click()) {
-				m.deploy_click = true;
-			}
 		}
 	}
 	m.kill_card_source = host::HudKillCardSource();

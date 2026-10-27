@@ -11,8 +11,8 @@ namespace ui = bf3::core::ui;
 
 namespace {
 
-constexpr std::array<std::string_view, 4> kTdmHudPartitions{ ui::kScoreboardHud32ScreenPartition,
-	ui::kSpawnScreenPcPartition, ui::kPreRoundWaitingScreenPartition, ui::kEorWinningTeamScreenPartition };
+constexpr std::array<std::string_view, 3> kTdmHudPartitions{ ui::kScoreboardHud32ScreenPartition,
+	ui::kPreRoundWaitingScreenPartition, ui::kEorWinningTeamScreenPartition };
 }
 
 bool tdm_hud_reports(std::string_view p_partition) {
@@ -31,11 +31,6 @@ std::optional<UiScreenRecord> tdm_hud_screen_record(const TdmHudRecords &p_recor
 		r.numbers.emplace(kUiFactRows, double(p_records.scoreboard_rows));
 		r.numbers.emplace(kUiFactTeam1Kills, double(p_records.scoreboard_team_kills[0]));
 		r.numbers.emplace(kUiFactTeam2Kills, double(p_records.scoreboard_team_kills[1]));
-	} else if (p_partition == ui::kSpawnScreenPcPartition) {
-		r.visible = p_records.spawn_screen_visible;
-		r.shown = p_records.spawn_screen_shown;
-		r.numbers.emplace(kUiFactDeployEnabled, p_records.deploy_enabled ? 1.0 : 0.0);
-		r.numbers.emplace(kUiFactSelectedKit, double(p_records.selected_kit));
 	} else if (p_partition == ui::kPreRoundWaitingScreenPartition) {
 		r.visible = p_records.pre_round_visible;
 	} else if (p_partition == ui::kEorWinningTeamScreenPartition) {

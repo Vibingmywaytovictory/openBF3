@@ -32,9 +32,9 @@ namespace ui = bf3::core::ui;
 
 namespace {
 
-constexpr int kStages = 6;
-const char *const kStageNames[kStages] = { "pre_round", "spawn_join", "kill_feed", "spawn_dead", "scoreboard",
-	"round_end" };
+constexpr int kStages = 4;
+const char *const kStageNames[kStages] = { "pre_round", "kill_feed", "scoreboard", "round_end" };
+constexpr int kStageModels[kStages] = { 0, 2, 4, 5 };
 constexpr uint8_t kLocal = 0;
 constexpr uint8_t kPlayers = 24;
 constexpr uint8_t kKiller = 5;
@@ -202,21 +202,6 @@ ui::HudModel Bf3TdmHudDemo::stage_model(int p_stage) const {
 	if (p_stage == 0) {
 		m.pre_round = { true, true, 7.4f, true };
 	}
-	if (p_stage == 1 || p_stage == 3) {
-		ui::HudSpawnScreen &sp = m.spawn_screen;
-		sp.visible = true;
-		sp.at_join = p_stage == 1;
-		sp.selected_kit = p_stage == 1 ? 0 : 1;
-		sp.can_deploy = p_stage == 1;
-		sp.seconds_to_deploy = p_stage == 1 ? 0.0f : 4.2f;
-		sp.revive_possible = p_stage == 3;
-		sp.seconds_revive_left = p_stage == 3 ? 6.8f : 0.0f;
-		for (size_t k = 0; k < ui::kHudKitCount; ++k) {
-			for (size_t i = 0; i < ui::kHudSpawnKitItems; ++i) {
-				sp.kit_items[k][i] = i == 4 ? 0u : item(k * 4 + i);
-			}
-		}
-	}
 	if (p_stage == 5) {
 		ui::HudEndOfRound &e = m.end_of_round;
 		e.visible = true;
@@ -258,67 +243,38 @@ void Bf3TdmHudDemo::_process(double p_delta) {
 	if (frames_ == 0) {
 		++serial_;
 	}
-	hud_->set_model(stage_model(stage_));
+	hud_->set_model(stage_model(kStageModels[stage_]));
 	if (++frames_ < kTdmDemoStageFrames) {
 		return;
 	}
 	save_shot(kStageNames[stage_]);
-	check_stage(stage_);
+	check_stage(kStageModels[stage_], kStageNames[stage_]);
 	frames_ = 0;
 	if (++stage_ >= kStages) {
 		finish();
 	}
 }
 
-void Bf3TdmHudDemo::check_stage(int p_stage) {
+void Bf3TdmHudDemo::check_stage(int p_stage, const std::string &p_name) {
 	const UiScreenRecords &records = *hud_;
-	const UiScreenRecord pre_round = records.screen_record(ui::kPreRoundWaitingScreenPartition).value_or(UiScreenRecord{});
-	const UiScreenRecord spawn = records.screen_record(ui::kSpawnScreenPcPartition).value_or(UiScreenRecord{});
+	const UiScreenRecord pre_round =
+			records.screen_record(ui::kPreRoundWaitingScreenPartition).value_or(UiScreenRecord{});
 	const UiScreenRecord scoreboard = records.screen_record(ui::kScoreboardHud32ScreenPartition).value_or(UiScreenRecord{});
 	const UiScreenRecord round_end = records.screen_record(ui::kEorWinningTeamScreenPartition).value_or(UiScreenRecord{});
 	const UiLookupRecord lookups = records.lookup_record().value_or(UiLookupRecord{});
-	const bool deploy_enabled = spawn.number(kUiFactDeployEnabled) != 0.0;
 	const int32_t rows = int32_t(scoreboard.number(kUiFactRows));
 	const int32_t team1_kills = int32_t(scoreboard.number(kUiFactTeam1Kills));
 	const int32_t team2_kills = int32_t(scoreboard.number(kUiFactTeam2Kills));
-	const std::string name = kStageNames[p_stage];
+	const std::string &name = p_name;
 	switch (p_stage) {
 		case 0:
-			row(name, pre_round.visible && !spawn.visible && !round_end.visible, "pre_round_visible " + std::to_string(pre_round.visible));
+			row(name, pre_round.visible && !round_end.visible,
+					"pre_round_visible " + std::to_string(pre_round.visible));
 			break;
-		case 1: {
-			bool clicked = false;
-			BaseButton *kit = Object::cast_to<BaseButton>(get_node_or_null("Bf3TdmHud/SpawnScreen/Kit2"));
-			BaseButton *deploy = Object::cast_to<BaseButton>(get_node_or_null("Bf3TdmHud/SpawnScreen/Deploy"));
-			int kit_click = -2;
-			bool deploy_click = false;
-			if (kit != nullptr && deploy != nullptr) {
-				kit->emit_signal("pressed");
-				deploy->emit_signal("pressed");
-				kit_click = hud_->take_kit_click();
-				deploy_click = hud_->take_deploy_click();
-				clicked = kit_click == 2 && deploy_click && hud_->take_kit_click() == -1 && !hud_->take_deploy_click();
-			}
-			row(name, spawn.visible && deploy_enabled && hud_->wants_mouse() && clicked,
-					"visible " + std::to_string(spawn.visible) + ", deploy_enabled " + std::to_string(deploy_enabled) + ", kit click " +
-							std::to_string(kit_click) + ", deploy click " + std::to_string(deploy_click));
-			break;
-		}
 		case 2:
-			row(name, !spawn.visible && lookups.model_serial == stage_model(2).serial,
-					"spawn screen hidden; the kill feed is the native HUD's (HudMessage_02)");
+			row(name, lookups.model_serial == stage_model(2).serial,
+					"the kill feed is the native HUD's (HudMessage_02)");
 			break;
-		case 3: {
-			BaseButton *deploy = Object::cast_to<BaseButton>(get_node_or_null("Bf3TdmHud/SpawnScreen/Deploy"));
-			if (deploy != nullptr) {
-				deploy->emit_signal("pressed");
-			}
-			const bool taken = hud_->take_deploy_click();
-			row(name, spawn.visible && !deploy_enabled && spawn.number(kUiFactSelectedKit) == 1.0 && spawn.shown == 2 && !taken,
-					"deploy_enabled " + std::to_string(deploy_enabled) + ", shown " + std::to_string(spawn.shown) + ", early click taken " +
-							std::to_string(taken));
-			break;
-		}
 		case 4:
 			row(name, scoreboard.visible && rows == kPlayers && team1_kills == 23 && team2_kills == 19,
 					std::to_string(rows) + " rows, " + std::to_string(team1_kills) + " : " + std::to_string(team2_kills));

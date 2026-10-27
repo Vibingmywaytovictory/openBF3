@@ -16,8 +16,6 @@ namespace bf3::godot_side {
 inline constexpr std::string_view kUiFactRows = "rows";
 inline constexpr std::string_view kUiFactTeam1Kills = "team1_kills";
 inline constexpr std::string_view kUiFactTeam2Kills = "team2_kills";
-inline constexpr std::string_view kUiFactDeployEnabled = "deploy_enabled";
-inline constexpr std::string_view kUiFactSelectedKit = "selected_kit";
 inline constexpr std::string_view kUiFactKiller = "KillCam_01.Name";
 inline constexpr std::string_view kUiFactKillerWeapon = "KillCam_01.Weapon";
 inline constexpr std::string_view kUiFactKillerWeaponImage = "KillCam_01.WeaponImage";
