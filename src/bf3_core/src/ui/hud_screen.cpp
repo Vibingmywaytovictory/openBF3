@@ -74,6 +74,9 @@ HudListBinding list_binding_of(const EbxResolver &p_db, const EbxPartition &p_pa
 	l.row_spacing = detail::i32_or(p_b, "RowSpacing", 0);
 	if (const std::optional<EbxStruct> d = detail::sub(p_b, "DefaultHighlightedRow")) {
 		l.default_highlighted_row = detail::i32_or(*d, "DefaultSelectionIndex", -1);
+		if (const std::optional<EbxStruct> q = detail::sub(*d, "DefaultSelectionQuery")) {
+			l.default_selection_query = source_of(p_db, p_part, *q);
+		}
 	}
 	l.use_scroll_bar = detail::flag_or(p_b, "UseScrollBar", false);
 	l.high_light_on_update = detail::flag_or(p_b, "HighLightOnUpdate", false);

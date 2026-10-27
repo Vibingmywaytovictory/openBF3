@@ -45,6 +45,15 @@ public:
 	virtual const std::string &label_state() const = 0;
 };
 
+inline constexpr std::string_view kSpawnPointListCategory = "ui/uicomponents/uispawnpointcomp";
+inline constexpr int32_t kSpawnPointListKey = 1755421927;
+
+inline constexpr int32_t kDefaultSpawnPointKey = -233610778;
+
+std::optional<As2Value> hud_model_list_rows(
+		const HudDataSource &p_query, const HudModel &p_model, const HudClientState &p_client);
+std::optional<int32_t> hud_model_list_selection(const HudDataSource &p_query, const HudModel &p_model);
+
 class RowBaseClass : public HudWidgetController {
 public:
 	static constexpr double kNoId = -123456789.0;

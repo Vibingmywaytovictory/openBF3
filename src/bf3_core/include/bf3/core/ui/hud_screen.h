@@ -66,6 +66,7 @@ struct HudListBinding {
 	int32_t list_index = 0;
 	int32_t row_spacing = 0;
 	int32_t default_highlighted_row = -1;
+	HudDataSource default_selection_query;
 	bool use_scroll_bar = false;
 	bool high_light_on_update = false;
 	bool visible = true;

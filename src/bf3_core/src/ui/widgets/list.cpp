@@ -169,7 +169,7 @@ public:
 		r_host.self().set_visible(false);
 	}
 
-	void bind(const HudModel &, const HudClientState &, HudData &r_data) const override {
+	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_data) const override {
 		if (!binding_) {
 			return;
 		}
@@ -180,7 +180,8 @@ public:
 		put("ListIndex", As2Value::of(b.list_index));
 		put("RowType", As2Value::of(b.row_type));
 		put("RowSpacing", As2Value::of(b.row_spacing));
-		put("HighlightedRow", As2Value::of(b.default_highlighted_row));
+		const std::optional<int32_t> selected = hud_model_list_selection(b.default_selection_query, p_model);
+		put("HighlightedRow", As2Value::of(selected.value_or(b.default_highlighted_row)));
 		put("NavigationType", As2Value::of(b.navigation_type));
 		put("ClearListAtNavigationEvent", As2Value::of(b.clear_list_at_navigation_event));
 		put("UnFocusMode", As2Value::of(b.unfocus_mode));
@@ -198,6 +199,8 @@ public:
 		if (b.list_query.use_direct_access) {
 			r_data.push_back(HudDataEntry{
 					"ListAccess", As2Value::of(hud_list_access_handle(b.list_query)), b.list_query.on_initialize });
+		} else if (std::optional<As2Value> rows = hud_model_list_rows(b.list_query, p_model, p_client)) {
+			r_data.push_back(HudDataEntry{ "List", std::move(*rows), b.list_query.on_initialize });
 		}
 	}
 

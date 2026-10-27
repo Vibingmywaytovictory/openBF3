@@ -5,11 +5,14 @@
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/swf_hit.h"
 #include "bf3/core/ui/swf_scene.h"
+#include "bf3/core/ui/text_db.h"
 #include "deploy_widgets.h"
+#include "list.h"
 #include "test_support.h"
 #include "ui_retail_support.h"
 
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -196,6 +199,55 @@ TEST_SUITE("ui-deploy") {
 		CHECK_FALSE(s.at(map).visible);
 		CHECK(s.hud->deliver_in_event("OverviewMap_01", "UIWidgetEventID_Show"));
 		CHECK(s.at(map).visible);
+		CHECK(s.hud->stats().as2.failed_ops == 0);
+	}
+	TEST_CASE("spawnscreenpc List_01: the TDM random spawner's row is a baseSpawn row reading RANDOM SPAWN POINT, "
+			  "drawn selected beside the blue icon box with no letter and the blank vehicle icon, as footage 18.57 "
+			  "shows it") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		RetailScreen s = open_retail_screen(*r, kSpawnScreenPc, retail_text_client(retail_text_db(*r)));
+		HudModel m{};
+		HudSpawnPointList &list = m.spawn_points.spawn_points;
+		list.count = 1;
+		list.points[0].kind = HudSpawnKind::Hq;
+		list.points[0].team = 1;
+		list.points[0].available = true;
+		list.points[0].label_sid_hash = text_hash("ID_H_MP_DM_RANDOMSPAWN");
+		s.hud->initialize(m);
+		std::vector<std::string> rows;
+		for (const std::unique_ptr<HudWidgetState> &w : s.hud->widgets()) {
+			if (w->class_name == kSpawnRowClass && !w->retired) {
+				rows.push_back(w->path);
+			}
+		}
+		REQUIRE(rows.size() == 1);
+		const As2Clip label = s.hud->clip(rows[0] + ".Label.txtField");
+		CHECK(label.text() == "RANDOM SPAWN POINT");
+		CHECK(s.hud->clip(rows[0] + ".IconLabel.txtField").text().empty());
+		const SwfSceneNode &box = s.at(rows[0] + ".icon_bg");
+		REQUIRE(box.timeline != nullptr);
+		CHECK(box.visible);
+		CHECK(box.timeline->label_frame("blue") == box.frame);
+		CHECK(s.at(rows[0]).visible);
+		CHECK(s.at("instance1.List_01").visible);
+		auto *row = dynamic_cast<RowBaseClass *>(s.hud->controller(rows[0]));
+		REQUIRE(row != nullptr);
+		CHECK(row->highlighted());
+		CHECK(row->state() == "selected");
+		const SwfSceneNode &drawn = s.at(rows[0]);
+		REQUIRE(drawn.timeline != nullptr);
+		CHECK(drawn.timeline->label_frame("selected") == drawn.frame);
+		const SwfSceneNode &bg = s.at(rows[0] + ".bg");
+		REQUIRE(bg.timeline != nullptr);
+		CHECK(bg.timeline->label_frame("selected") == bg.frame);
+		CHECK(label.text_color() == 0x000000u);
+		const SwfSceneNode &icon = s.at(rows[0] + ".vehicleIcon");
+		REQUIRE(icon.timeline != nullptr);
+		CHECK(icon.timeline->label_frame(kSpawnRowNoVehicleIcon) == icon.frame);
+		CHECK(icon.children.empty());
 		CHECK(s.hud->stats().as2.failed_ops == 0);
 	}
 }
