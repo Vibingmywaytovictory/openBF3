@@ -1,5 +1,7 @@
 #include "list.h"
 
+#include "bf3/core/util/key_values.h"
+
 namespace bf3::core::ui {
 
 namespace {
@@ -170,6 +172,7 @@ std::optional<As2Value> hud_model_list_rows(
 		}
 		row.set("VehicleIcon", As2Value::of(std::string(kSpawnRowNoVehicleIcon)));
 		row.set("Index", As2Value::of(int32_t(i)));
+		row.set("id", As2Value::of(int32_t(i)));
 		if (!p.available) {
 			row.set("Disabled", As2Value::of(true));
 		}
@@ -183,18 +186,32 @@ std::optional<int32_t> hud_model_list_selection(const HudDataSource &p_query, co
 		return std::nullopt;
 	}
 	const HudSpawnPointList &list = p_model.spawn_points.spawn_points;
+	const int32_t selected = p_model.spawn_points.selected_point;
+	std::optional<int32_t> first;
 	int32_t row = 0;
 	for (size_t i = 0; i < std::min<size_t>(list.count, list.points.size()); ++i) {
 		const HudSpawnPoint &p = list.points[i];
 		if (p.kind != HudSpawnKind::Hq && p.kind != HudSpawnKind::Flag) {
 			continue;
 		}
-		if (p.available) {
+		if (p.available && int32_t(i) == selected) {
 			return row;
+		}
+		if (p.available && !first) {
+			first = row;
 		}
 		++row;
 	}
-	return std::nullopt;
+	return first;
+}
+
+std::optional<int32_t> hud_selected_spawn_point(std::span<const std::string> p_params) {
+	int32_t point = -1;
+	if (p_params.empty() ||
+			parse_i32_value(p_params.front(), -1.0, double(kHudMaxSpawnPoints) - 1.0, point).fault != KeyFault::None) {
+		return std::nullopt;
+	}
+	return point;
 }
 
 void register_hud_widgets_spawn_rows(HudWidgetRegistry &r_registry) {

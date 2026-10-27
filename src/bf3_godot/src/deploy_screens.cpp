@@ -129,11 +129,23 @@ bool DeployScreens::take_action(const bf3::core::ui::UiFlowAction &p_action) {
 		}
 		return false;
 	}
+	if (p_action.key == bf3::core::ui::kSelectSpawnPointActionKey) {
+		if (const std::optional<int32_t> point = bf3::core::ui::hud_selected_spawn_point(p_action.params)) {
+			spawn_point_ = *point;
+			++stats_.spawn_selections;
+		}
+		return false;
+	}
 	if (p_action.name == kUiFlowSpawnAction) {
 		++stats_.spawn_actions;
 		return true;
 	}
 	return false;
+}
+
+void DeployScreens::apply(bf3::core::ui::HudModel &r_model) const {
+	r_model.customization.selected_slot = slot_;
+	r_model.spawn_points.selected_point = int8_t(spawn_point_);
 }
 
 void DeployScreens::frame(Bf3UiScreens &r_screens, Bf3NativeHud *p_hud, godot::Node *p_parent,

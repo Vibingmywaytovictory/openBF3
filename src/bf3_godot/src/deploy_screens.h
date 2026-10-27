@@ -47,6 +47,7 @@ struct DeployScreensStats {
 	uint64_t glitches = 0;
 	uint64_t kits_from_flow = 0;
 	uint64_t picks_from_flow = 0;
+	uint64_t spawn_selections = 0;
 	uint64_t dim_ins = 0;
 	uint64_t dim_outs = 0;
 	uint64_t overview_attaches = 0;
@@ -71,7 +72,7 @@ public:
 	std::optional<uint8_t> feed(bf3::host::UiFlowSession &r_session, const bf3::core::ui::HudModel &p_model,
 			bool p_scoreboard_held, uint8_t p_spawn_kit);
 	bool take_action(const bf3::core::ui::UiFlowAction &p_action);
-	void apply(bf3::core::ui::HudModel &r_model) const { r_model.customization.selected_slot = slot_; }
+	void apply(bf3::core::ui::HudModel &r_model) const;
 	std::optional<DeployPick> take_pick() { return std::exchange(pick_, std::nullopt); }
 	void frame(Bf3UiScreens &r_screens, Bf3NativeHud *p_hud, godot::Node *p_parent, const std::string &p_level,
 			bool p_cursor);
@@ -84,6 +85,7 @@ private:
 	std::optional<float> glitch_;
 	std::optional<DeployPick> pick_;
 	int32_t slot_ = 0;
+	int32_t spawn_point_ = -1;
 	bool shown_ = false;
 	bool cursor_ = false;
 	uint64_t overview_view_ = 0;

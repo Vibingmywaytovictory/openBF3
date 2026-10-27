@@ -5,6 +5,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -125,6 +127,9 @@ inline constexpr double kHudCrosshairDispersionPerDegree = 0.2;
 int32_t hud_compass_frame(float p_heading_deg);
 
 int32_t hud_spawn_timer_seconds(float p_time_to_respawn);
+
+inline constexpr int32_t kSelectSpawnPointActionKey = -1239372646;
+std::optional<int32_t> hud_selected_spawn_point(std::span<const std::string> p_params);
 
 double hud_crosshair_dispersion(float p_spread_deg);
 double hud_crosshair_arm(float p_spread_deg, double p_base_offset);

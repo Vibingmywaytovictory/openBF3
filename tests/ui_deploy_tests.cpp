@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -250,6 +251,68 @@ TEST_SUITE("ui-deploy") {
 		REQUIRE(icon.timeline != nullptr);
 		CHECK(icon.timeline->label_frame(kSpawnRowNoVehicleIcon) == icon.frame);
 		CHECK(icon.children.empty());
+		CHECK(s.hud->stats().as2.failed_ops == 0);
+	}
+	TEST_CASE("spawnscreenpc List_01: a row's highlight and release send its point id, as SendIndexWithEvent asks; the "
+			  "selected point is the highlighted row, else the first available one") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudModel m{};
+		HudSpawnPointList &list = m.spawn_points.spawn_points;
+		list.count = 3;
+		for (size_t i = 0; i < 3; ++i) {
+			list.points[i].kind = i == 0 ? HudSpawnKind::Hq : HudSpawnKind::Flag;
+			list.points[i].team = 1;
+			list.points[i].available = i != 2;
+		}
+		const HudClientState client = retail_text_client(retail_text_db(*r));
+		HudDataSource list_query;
+		list_query.category = std::string(kSpawnPointListCategory);
+		list_query.key = kSpawnPointListKey;
+		const std::optional<As2Value> rows = hud_model_list_rows(list_query, m, client);
+		REQUIRE(rows.has_value());
+		REQUIRE(rows->size() == 3);
+		CHECK(rows->at(1).field("id").to_number() == doctest::Approx(1.0));
+		HudDataSource selection;
+		selection.category = std::string(kSpawnPointListCategory);
+		selection.key = kDefaultSpawnPointKey;
+		CHECK(hud_model_list_selection(selection, m) == 0);
+		m.spawn_points.selected_point = 1;
+		CHECK(hud_model_list_selection(selection, m) == 1);
+		m.spawn_points.selected_point = 2;
+		CHECK(hud_model_list_selection(selection, m) == 0);
+		m.spawn_points.selected_point = 0;
+		RetailScreen s = open_retail_screen(*r, kSpawnScreenPc, client);
+		std::vector<std::string> fired;
+		s.hud->set_event_sink([&](const HudWidgetEvent &e) {
+			if (e.instance == "List_01" && !e.query.starts_with("UIWidgetEventID_PlaySound")) {
+				fired.push_back(e.query + " " + e.param.to_string());
+			}
+		});
+		s.hud->initialize(m);
+		std::vector<std::string> base_rows;
+		std::string point_1;
+		for (const std::unique_ptr<HudWidgetState> &w : s.hud->widgets()) {
+			if (w->class_name == kSpawnRowClass && !w->retired) {
+				base_rows.push_back(w->path);
+				const auto *row = dynamic_cast<const RowBaseClass *>(s.hud->controller(w->path));
+				if (row != nullptr && row->row_index() == 1.0) {
+					point_1 = w->path;
+				}
+			}
+		}
+		REQUIRE(base_rows.size() == 3);
+		REQUIRE_FALSE(point_1.empty());
+		CHECK(std::find(fired.begin(), fired.end(), "UIWidgetEventID_OnItemHighlighted 0") != fired.end());
+		fired.clear();
+		const auto [x, y] = stage_centre(s, point_1);
+		s.hud->mouse_move(x, y);
+		s.hud->mouse_button(x, y, 1, true);
+		s.hud->mouse_button(x, y, 1, false);
+		CHECK(std::find(fired.begin(), fired.end(), "UIWidgetEventID_OnItemReleased 1") != fired.end());
+		CHECK(std::find(fired.begin(), fired.end(), "UIWidgetEventID_OnItemHighlighted 1") != fired.end());
 		CHECK(s.hud->stats().as2.failed_ops == 0);
 	}
 	TEST_CASE("spawnscreenpc KitBar: DEPLOY AS and the kit name, four kit buttons with the selected one lit, five slot "

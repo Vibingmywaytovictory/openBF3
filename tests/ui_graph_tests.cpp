@@ -3,6 +3,7 @@
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_snapshot.h"
+#include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/ui_graph.h"
 #include "test_support.h"
 
@@ -499,18 +500,18 @@ TEST_SUITE("ui-graph") {
 		CHECK(run.flow.errors().empty());
 	}
 
-	TEST_CASE("ui graph: spawngraphpc's ReselectSpawn sends SelectSpawnPoint -1 and a List_01 highlight sends the "
-			  "highlighted row's id") {
+	TEST_CASE("ui graph: spawngraphpc's ReselectSpawn selects no spawn point and a List_01 highlight selects the "
+			  "highlighted row's point") {
 		RetailGraphs *r = retail_graphs_or_skip();
 		if (r == nullptr) {
 			return;
 		}
 		Run run(*r);
 		const auto selections = [&run] {
-			std::vector<std::vector<std::string>> out;
+			std::vector<std::optional<int32_t>> out;
 			for (const UiFlowAction &a : run.host.actions) {
-				if (a.name == "SelectSpawnPoint") {
-					out.push_back(a.params);
+				if (a.key == kSelectSpawnPointActionKey) {
+					out.push_back(hud_selected_spawn_point(a.params));
 				}
 			}
 			run.host.actions.clear();
@@ -518,7 +519,7 @@ TEST_SUITE("ui-graph") {
 		};
 		REQUIRE(run.flow.fire_input(kSpawnGraphPc, "EnterSpawn"));
 		run.take("spawngraphpc.EnterSpawn");
-		CHECK(selections() == std::vector<std::vector<std::string>>{ { "-1" } });
+		CHECK(selections() == std::vector<std::optional<int32_t>>{ -1 });
 		run.initialize_opened();
 		run.take("spawngraphpc.initialized");
 		run.host.actions.clear();
@@ -526,7 +527,7 @@ TEST_SUITE("ui-graph") {
 				run.screen_of("ui/flow/screen/spawnscreenpc"), "List_01", "UIWidgetEventID_OnItemHighlighted", "2"));
 		CHECK(run.take("spawnscreenpc.List_01 highlighted") ==
 				Lines{ "output spawnscreenpc.SpawnSelected", "action SelectSpawnPoint() <2" });
-		CHECK(selections() == std::vector<std::vector<std::string>>{ { "2" } });
+		CHECK(selections() == std::vector<std::optional<int32_t>>{ 2 });
 		CHECK(run.flow.errors().empty());
 	}
 

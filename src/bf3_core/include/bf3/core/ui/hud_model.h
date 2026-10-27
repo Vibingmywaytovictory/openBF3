@@ -316,6 +316,7 @@ struct HudSpawnPoints {
 	HudSpawnPointList spawn_points{};
 	bool can_spawn = false;
 	bool has_valid_spawn = false;
+	int8_t selected_point = -1;
 };
 
 struct HudSpawnLogic {
