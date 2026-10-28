@@ -11,7 +11,7 @@ if(DEFINED BUILD_DIR AND NOT BUILD_DIR STREQUAL "")
     file(MAKE_DIRECTORY "${shots}")
     set(shot_args "--options-shots=${shots}")
 endif()
-godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 235
+godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 235 SETTINGS "version = 1" "FieldOfView = 80"
     ARGS --path "${PROJECT_DIR}" --resolution 1280x720 res://scenes/metro_tdm.tscn -- --bots=0 --deploy-screen=1 --preround=0 --min-players=1
         --options-check ${cache_args} ${shot_args})
 godot_require_pass("OPTIONS: PASS")

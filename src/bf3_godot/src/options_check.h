@@ -27,6 +27,7 @@ class NativeOptions;
 inline constexpr double kOptionsCheckSeconds = 150.0;
 inline constexpr double kOptionsCheckHoldSeconds = 1.0;
 inline constexpr int32_t kOptionsCheckSteps = 10;
+inline constexpr double kOptionsCheckSeededFov = 80.0;
 inline constexpr size_t kOptionsCheckFlowLog = 80;
 
 struct OptionsCheckIo {

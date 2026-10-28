@@ -539,6 +539,12 @@ std::vector<OptionsCheck::Step> OptionsCheck::steps() {
 			[](OptionsCheck &r_self, const Ctx &c) {
 				r_self.check_play(c);
 				r_self.fov_default_ = value(c, kFieldOfView);
+				if (!near(r_self.fov_default_, kOptionsCheckSeededFov)) {
+					r_self.failure_ = "FieldOfView reads " + std::to_string(r_self.fov_default_) +
+							" at the level load, not the " + std::to_string(kOptionsCheckSeededFov) +
+							" the row's settings file seeds, so ADS would not be read at a hip FOV other than the "
+							"default";
+				}
 			} });
 	s.push_back({ "the hip camera FOV is the FieldOfView setting",
 			[](OptionsCheck &r_self, const Ctx &c) { return hip_ready(c, r_self.fov_default_); },
