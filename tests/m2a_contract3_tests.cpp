@@ -97,7 +97,7 @@ static_assert(uint8_t(host::PresentTimeline::Predicted) == 0 && uint8_t(host::Pr
 static_assert(audio::kMaxWeaponVoices == 128 && audio::kMaxOneShotVoices == 128 && audio::kGameMixerInstances == 256);
 static_assert(fx::kMaxDecals == 256 && fx::kDecalFadeSeconds == 30.0f && fx::kTracerConvergeM == 30.0f);
 static_assert(audio::kGameCheckDistances == std::array<float, 6>{ 5.0f, 20.0f, 100.0f, 150.0f, 280.0f, 320.0f });
-static_assert(anim::kMaxCrowdWeapons == 8 && anim::kCrowdLanesListenMax == 4);
+static_assert(anim::kMaxCrowdWeapons == 254 && anim::kCrowdLanesListenMax == 4);
 
 static_assert(anim::kNoCrowdWeapon == 0xFF);
 static_assert(std::is_same_v<decltype(&anim::CrowdEvaluator::weapon_of), uint8_t (anim::CrowdEvaluator::*)(uint32_t) const>);
@@ -432,7 +432,7 @@ TEST_SUITE("m2a-contract3") {
 		}
 
 		render::CrowdWeaponSet set;
-		for (uint16_t d = 0; d < 10; ++d) {
+		for (uint16_t d = 0; d < anim::kMaxCrowdWeapons + 2; ++d) {
 			render::CrowdWeaponPart part;
 			part.spec.def = uint16_t(100 + d);
 			part.have_reload = (d % 2) == 0;
@@ -458,7 +458,9 @@ TEST_SUITE("m2a-contract3") {
 		CHECK(render::crowd_weapons_of(set, 2).empty());
 		CHECK(render::crowd_weapon_index(set, 0, 100) == 0);
 		CHECK(render::crowd_weapon_index(set, 0, 107) == 7);
-		CHECK(render::crowd_weapon_index(set, 0, 108) == -1);
+		CHECK(render::crowd_weapon_index(set, 0, uint16_t(100 + anim::kMaxCrowdWeapons - 1)) ==
+				int32_t(anim::kMaxCrowdWeapons - 1));
+		CHECK(render::crowd_weapon_index(set, 0, uint16_t(100 + anim::kMaxCrowdWeapons)) == -1);
 		CHECK(render::crowd_weapon_index(set, 1, 100) == -1);
 		CHECK(render::crowd_weapon_index(set, 5, 100) == -1);
 		CHECK(set.texture("none") == nullptr);

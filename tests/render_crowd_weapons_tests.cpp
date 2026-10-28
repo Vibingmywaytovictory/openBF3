@@ -61,7 +61,7 @@ TEST_SUITE("render-crowd-weapons") {
 			REQUIRE(!lists.teams[t].empty());
 			CHECK(lists.teams[t][0].weapon_def == spec.teams[t].weapon_def);
 			CHECK(lists.teams[t][0].def != sim::weapons::kNoWeapon);
-			CHECK(lists.teams[t].size() <= anim::kMaxCrowdWeapons);
+			CHECK(lists.teams[t].size() <= godot_side::kCrowdPreloadWeapons);
 			std::string line;
 			for (const render::CrowdWeaponSpec &s : lists.teams[t]) {
 				line += " " + std::to_string(s.def) + ":" + s.weapon_def;

@@ -12,6 +12,8 @@
 
 namespace bf3::godot_side {
 
+inline constexpr size_t kCrowdPreloadWeapons = 8;
+
 struct CrowdItemLists {
 	std::array<std::vector<render::CrowdWeaponSpec>, 2> teams;
 	std::vector<std::string> notes;
@@ -59,9 +61,10 @@ inline CrowdItemLists crowd_item_specs(const host::GunplayLevel *p_gunplay, cons
 				if (listed) {
 					continue;
 				}
-				if (items.size() >= anim::kMaxCrowdWeapons) {
-					out.notes.push_back("team " + std::to_string(t) + ": def " + std::to_string(d) + " (" + p_gunplay->defs[d].variant + ") past " +
-							std::to_string(anim::kMaxCrowdWeapons) + " items: drawn as item 0");
+				if (items.size() >= kCrowdPreloadWeapons) {
+					out.notes.push_back("team " + std::to_string(t) + ": def " + std::to_string(d) + " (" +
+							p_gunplay->defs[d].variant + ") past " + std::to_string(kCrowdPreloadWeapons) +
+							" preloaded items: loaded when first carried");
 					continue;
 				}
 				render::CrowdWeaponSpec s;

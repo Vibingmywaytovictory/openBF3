@@ -57,6 +57,9 @@ struct CrowdWeaponSet {
 
 core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::InstallReader &p_install, const SoldierSpec &p_spec,
 		const SoldierAssets &p_assets, const std::array<std::span<const CrowdWeaponSpec>, 2> &p_items, core::Cache *p_cache = nullptr);
+core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::EbxLibrary &p_library,
+		const SoldierSpec &p_spec, const SoldierAssets &p_assets,
+		const std::array<std::span<const CrowdWeaponSpec>, 2> &p_items, core::Cache *p_cache = nullptr);
 
 inline uint32_t strip_team_weapon_parts(SoldierAssets &r_assets) {
 	uint32_t removed = 0;

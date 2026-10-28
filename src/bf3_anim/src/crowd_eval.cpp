@@ -92,6 +92,9 @@ struct CrowdEvaluator::Impl {
 	};
 	std::unique_ptr<Combat, CombatDeleter> combat;
 	void evaluate_combat(uint32_t p_i);
+	static core::Status check_binds(const Skeleton &p_rig, const SkinBinds *p_binds, const std::string &p_where);
+	static core::Status check_layout(const Skeleton &p_rig, const BoneMask *p_joints, std::span<const Xform> p_local,
+			const std::string &p_where);
 };
 
 void CrowdEvaluator::Impl::prepare_job() {
@@ -459,6 +462,8 @@ struct CrowdEvaluator::Impl::Combat {
 	struct Team {
 		std::vector<Weapon> weapons;
 	};
+	static core::Status append_weapon(
+			const Skeleton &p_rig, const CrowdWeapon &p_in, const std::string &p_where, Team &r_team);
 
 	struct Stance {
 		const LocalPose *idle = nullptr;
@@ -521,6 +526,90 @@ void CrowdEvaluator::Impl::CombatDeleter::operator()(Combat *p_combat) const {
 	delete p_combat;
 }
 
+core::Status CrowdEvaluator::Impl::check_binds(
+		const Skeleton &p_rig, const SkinBinds *p_binds, const std::string &p_where) {
+	if (p_binds == nullptr || p_binds->size() == 0 || p_binds->size() > kMaxPaletteBinds) {
+		return core::make_error(p_where + ": " + std::to_string(p_binds == nullptr ? 0 : p_binds->size()) +
+				" binds (1.." + std::to_string(kMaxPaletteBinds) + ")");
+	}
+	for (const SkinBind &b : p_binds->binds()) {
+		if (b.bone < 0 || size_t(b.bone) >= p_rig.size()) {
+			return core::make_error(
+					p_where + ": bind " + b.name + " names bone " + std::to_string(b.bone) + " outside the rig");
+		}
+	}
+	return core::Status::success();
+}
+
+core::Status CrowdEvaluator::Impl::check_layout(
+		const Skeleton &p_rig, const BoneMask *p_joints, std::span<const Xform> p_local, const std::string &p_where) {
+	if (p_joints != nullptr || !p_local.empty()) {
+		if (p_joints == nullptr || p_joints->size() != p_rig.size() || p_local.size() != p_rig.size()) {
+			return core::make_error(
+					p_where + ": weapon layout mask / poses are not rig-sized (" + std::to_string(p_rig.size()) + ")");
+		}
+	}
+	return core::Status::success();
+}
+
+core::Status CrowdEvaluator::Impl::Combat::append_weapon(
+		const Skeleton &p_rig, const CrowdWeapon &p_in, const std::string &p_where, Team &r_team) {
+	if (core::Status st = check_binds(p_rig, p_in.binds, p_where); !st.ok()) {
+		return st;
+	}
+	Impl::Combat::Weapon mw;
+	mw.binds = p_in.binds;
+	if (p_in.throw_clips != nullptr) {
+		const CrowdThrowClips &tc = *p_in.throw_clips;
+		if (tc.in.mask.size() != p_rig.size() || tc.release.mask.size() != p_rig.size() ||
+				tc.moving.size() != p_rig.size() || tc.still.size() != p_rig.size()) {
+			return core::make_error(p_where + ": throw clip or mask is not rig-sized");
+		}
+		if (!(tc.in_seconds > 0.0f) || !(tc.release_seconds > 0.0f) || !std::isfinite(tc.in_seconds) ||
+				!std::isfinite(tc.release_seconds) || !(tc.release_length_seconds >= tc.release_seconds) ||
+				!std::isfinite(tc.release_length_seconds)) {
+			return core::make_error(p_where + ": throw clip lengths are not positive");
+		}
+		mw.throw_clips = p_in.throw_clips;
+		for (size_t c = 0; c < 2; ++c) {
+			for (size_t a = 0; a < 2; ++a) {
+				const BoneMask &clip_mask = c == 0 ? tc.in.mask : tc.release.mask;
+				const BoneMask &area = a == 0 ? tc.still : tc.moving;
+				BoneMask &dst = mw.throw_masks[c][a];
+				dst.weight.resize(p_rig.size());
+				for (size_t j = 0; j < p_rig.size(); ++j) {
+					dst.weight[j] = clip_mask.weight[j] * area.weight[j];
+				}
+			}
+		}
+	}
+	mw.reload = p_in.reload;
+	mw.reload_rate = std::isfinite(p_in.reload_rate) && p_in.reload_rate > 0.0f ? p_in.reload_rate : 1.0f;
+	if (p_in.reload != nullptr) {
+		if (p_in.reload->mask.size() != p_rig.size()) {
+			return core::make_error(p_where + ": reload mask is not rig-sized");
+		}
+		mw.reload_seconds = p_in.reload->tracks.duration_seconds() / mw.reload_rate;
+	}
+	if (core::Status st = check_layout(p_rig, p_in.weapon_joints, p_in.weapon_local, p_where); !st.ok()) {
+		return st;
+	}
+	if (p_in.weapon_joints != nullptr) {
+		mw.weapon_joints = p_in.weapon_joints;
+		mw.weapon_local.assign(p_in.weapon_local.begin(), p_in.weapon_local.end());
+	}
+	if (p_in.muzzle_joint < -1 || p_in.muzzle_joint >= int32_t(p_rig.size())) {
+		return core::make_error(p_where + ": muzzle joint " + std::to_string(p_in.muzzle_joint) + " outside the rig");
+	}
+	if (!finite_xform(p_in.muzzle_offset)) {
+		return core::make_error(p_where + ": the muzzle offset is not finite");
+	}
+	mw.muzzle_joint = p_in.muzzle_joint;
+	mw.muzzle_offset = p_in.muzzle_offset;
+	r_team.weapons.push_back(std::move(mw));
+	return core::Status::success();
+}
+
 core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdClipSet &p_clips, const CrowdStanceSet &p_stance, std::span<const CrowdTeam> p_teams,
 		uint32_t p_soldiers, const CrowdConfig &p_config) {
 
@@ -546,30 +635,11 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 	uint32_t max_binds = 0;
 	uint32_t max_weapon_binds = 0;
 	bool any_weapons = false;
-	auto check_binds = [&](const SkinBinds *p_binds, const std::string &p_where) -> core::Status {
-		if (p_binds == nullptr || p_binds->size() == 0 || p_binds->size() > kMaxPaletteBinds) {
-			return core::make_error(p_where + ": " + std::to_string(p_binds == nullptr ? 0 : p_binds->size()) + " binds (1.." + std::to_string(kMaxPaletteBinds) + ")");
-		}
-		for (const SkinBind &b : p_binds->binds()) {
-			if (b.bone < 0 || size_t(b.bone) >= rig.size()) {
-				return core::make_error(p_where + ": bind " + b.name + " names bone " + std::to_string(b.bone) + " outside the rig");
-			}
-		}
-		return core::Status::success();
-	};
-	auto check_layout = [&](const BoneMask *p_joints, std::span<const Xform> p_local, const std::string &p_where) -> core::Status {
-		if (p_joints != nullptr || !p_local.empty()) {
-			if (p_joints == nullptr || p_joints->size() != rig.size() || p_local.size() != rig.size()) {
-				return core::make_error(p_where + ": weapon layout mask / poses are not rig-sized (" + std::to_string(rig.size()) + ")");
-			}
-		}
-		return core::Status::success();
-	};
 	std::vector<Impl::Combat::Team> combat_teams(p_teams.size());
 	for (size_t t = 0; t < p_teams.size(); ++t) {
 		const CrowdTeam &in = p_teams[t];
 		const std::string where = "crowd team " + std::to_string(t);
-		if (core::Status st = check_binds(in.binds, where); !st.ok()) {
+		if (core::Status st = Impl::check_binds(rig, in.binds, where); !st.ok()) {
 			return st.error();
 		}
 		Impl::Team team;
@@ -582,7 +652,7 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 			}
 			team.reload_seconds = in.reload->tracks.duration_seconds() / team.reload_rate;
 		}
-		if (core::Status st = check_layout(in.weapon_joints, in.weapon_local, where); !st.ok()) {
+		if (core::Status st = Impl::check_layout(rig, in.weapon_joints, in.weapon_local, where); !st.ok()) {
 			return st.error();
 		}
 		if (in.weapon_joints != nullptr) {
@@ -597,61 +667,12 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 		}
 		for (size_t w = 0; w < in.weapons.size(); ++w) {
 			const CrowdWeapon &cw = in.weapons[w];
-			const std::string ww = where + " weapon " + std::to_string(w);
-			if (core::Status st = check_binds(cw.binds, ww); !st.ok()) {
+			if (core::Status st = Impl::Combat::append_weapon(
+						rig, cw, where + " weapon " + std::to_string(w), combat_teams[t]);
+					!st.ok()) {
 				return st.error();
 			}
-			Impl::Combat::Weapon mw;
-			mw.binds = cw.binds;
-			if (cw.throw_clips != nullptr) {
-				const CrowdThrowClips &tc = *cw.throw_clips;
-				if (tc.in.mask.size() != rig.size() || tc.release.mask.size() != rig.size() ||
-						tc.moving.size() != rig.size() || tc.still.size() != rig.size()) {
-					return core::make_error(ww + ": throw clip or mask is not rig-sized");
-				}
-				if (!(tc.in_seconds > 0.0f) || !(tc.release_seconds > 0.0f) || !std::isfinite(tc.in_seconds) ||
-						!std::isfinite(tc.release_seconds) || !(tc.release_length_seconds >= tc.release_seconds) ||
-						!std::isfinite(tc.release_length_seconds)) {
-					return core::make_error(ww + ": throw clip lengths are not positive");
-				}
-				mw.throw_clips = cw.throw_clips;
-				for (size_t c = 0; c < 2; ++c) {
-					for (size_t a = 0; a < 2; ++a) {
-						const BoneMask &clip_mask = c == 0 ? tc.in.mask : tc.release.mask;
-						const BoneMask &area = a == 0 ? tc.still : tc.moving;
-						BoneMask &dst = mw.throw_masks[c][a];
-						dst.weight.resize(rig.size());
-						for (size_t j = 0; j < rig.size(); ++j) {
-							dst.weight[j] = clip_mask.weight[j] * area.weight[j];
-						}
-					}
-				}
-			}
-			mw.reload = cw.reload;
-			mw.reload_rate = std::isfinite(cw.reload_rate) && cw.reload_rate > 0.0f ? cw.reload_rate : 1.0f;
-			if (cw.reload != nullptr) {
-				if (cw.reload->mask.size() != rig.size()) {
-					return core::make_error(ww + ": reload mask is not rig-sized");
-				}
-				mw.reload_seconds = cw.reload->tracks.duration_seconds() / mw.reload_rate;
-			}
-			if (core::Status st = check_layout(cw.weapon_joints, cw.weapon_local, ww); !st.ok()) {
-				return st.error();
-			}
-			if (cw.weapon_joints != nullptr) {
-				mw.weapon_joints = cw.weapon_joints;
-				mw.weapon_local.assign(cw.weapon_local.begin(), cw.weapon_local.end());
-			}
-			if (cw.muzzle_joint < -1 || cw.muzzle_joint >= int32_t(rig.size())) {
-				return core::make_error(ww + ": muzzle joint " + std::to_string(cw.muzzle_joint) + " outside the rig");
-			}
-			if (!finite_xform(cw.muzzle_offset)) {
-				return core::make_error(ww + ": the muzzle offset is not finite");
-			}
-			mw.muzzle_joint = cw.muzzle_joint;
-			mw.muzzle_offset = cw.muzzle_offset;
 			max_weapon_binds = std::max(max_weapon_binds, uint32_t(cw.binds->size()));
-			combat_teams[t].weapons.push_back(std::move(mw));
 			any_weapons = true;
 		}
 	}
@@ -1175,6 +1196,34 @@ bool CrowdEvaluator::muzzle_model(uint32_t p_i, Xform &r_model) const {
 	}
 	r_model = xs.muzzle[s.front];
 	return true;
+}
+
+core::Result<uint8_t> CrowdEvaluator::add_weapon(uint32_t p_team, const CrowdWeapon &p_weapon) {
+	Impl &m = *impl_;
+	if (m.job) {
+		return core::make_error("crowd: add_weapon while a pose job runs");
+	}
+	if (!m.combat || p_team >= m.combat->teams.size()) {
+		return core::make_error("crowd: add_weapon to team " + std::to_string(p_team) + ", which has no weapon list");
+	}
+	Impl::Combat::Team &team = m.combat->teams[p_team];
+	if (team.weapons.size() >= kMaxCrowdWeapons) {
+		return core::make_error("crowd team " + std::to_string(p_team) + ": " + std::to_string(team.weapons.size()) +
+				" weapons (cap " + std::to_string(kMaxCrowdWeapons) + ")");
+	}
+	const std::string where = "crowd team " + std::to_string(p_team) + " weapon " + std::to_string(team.weapons.size());
+	if (core::Status st = Impl::Combat::append_weapon(m.clips->rig, p_weapon, where, team); !st.ok()) {
+		return st.error();
+	}
+	const size_t binds = p_weapon.binds->size();
+	for (Impl::Combat::Soldier &xs : m.combat->soldiers) {
+		for (std::vector<Mat34> &palette : xs.weapon_palette) {
+			if (palette.size() < binds) {
+				palette.resize(binds, Mat34{});
+			}
+		}
+	}
+	return uint8_t(team.weapons.size() - 1);
 }
 
 uint8_t CrowdEvaluator::weapon_of(uint32_t p_i) const {

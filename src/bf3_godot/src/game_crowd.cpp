@@ -8,6 +8,7 @@
 #include "bf3/anim/server_pose.h"
 #include "bf3/core/ant/ant_install_source.h"
 #include "bf3/core/install.h"
+#include "bf3/core/job_queue.h"
 #include "bf3/core/worker_group.h"
 #include "bf3/net/protocol.h"
 #include "bf3/render/soldier_assets.h"
@@ -28,8 +29,12 @@
 #include <cstdio>
 #include <deque>
 #include <map>
+#include <mutex>
 #include <optional>
+#include <set>
 #include <thread>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace bf3::godot_side {
@@ -73,6 +78,13 @@ struct WeaponMesh {
 	int32_t binds = 0;
 };
 
+struct CatalogPart {
+	uint8_t team = 0;
+	uint16_t def = 0;
+	std::unique_ptr<render::CrowdWeaponSet> set;
+	std::string error;
+	double seconds = 0.0;
+};
 }
 
 struct Bf3GameCrowd::Impl {
@@ -169,7 +181,180 @@ struct Bf3GameCrowd::Impl {
 	void build_inputs(const GameFrame &p_frame);
 	void draw_weapons(const GameFrame &p_frame);
 	void clear_draw();
+
+	std::shared_ptr<const core::Install> catalog_install;
+	std::shared_ptr<const host::SharedLevel> catalog_level;
+	render::SoldierSpec catalog_spec;
+	std::function<std::shared_ptr<core::Cache>()> catalog_cache;
+	std::unique_ptr<core::EbxLibrary> catalog_ebx;
+	std::mutex catalog_mutex;
+	std::vector<CatalogPart> catalog_done;
+	std::set<std::pair<uint8_t, uint16_t>> catalog_requested;
+	std::vector<std::unique_ptr<render::CrowdWeaponSet>> catalog_sets;
+	std::array<std::unordered_map<uint16_t, uint8_t>, 2> weapon_index;
+	std::map<std::string, Ref<Texture2D>> textures;
+	uint32_t catalog_added = 0, catalog_failed = 0;
+	std::unique_ptr<core::JobQueue> catalog_jobs;
+
+	int32_t index_of(uint8_t p_team, uint16_t p_def);
+	void want(uint8_t p_team, uint16_t p_def);
+	void load_catalog(uint8_t p_team, const render::CrowdWeaponSpec &p_spec);
+	void adopt_catalog();
+	Ref<Texture2D> find_texture(const std::string &p_name);
+	WeaponMesh make_weapon_mesh(const render::CrowdWeaponPart &p_part);
 };
+
+int32_t Bf3GameCrowd::Impl::index_of(uint8_t p_team, uint16_t p_def) {
+	if (p_team >= weapon_index.size()) {
+		return -1;
+	}
+	const auto it = weapon_index[p_team].find(p_def);
+	if (it != weapon_index[p_team].end()) {
+		return it->second;
+	}
+	want(p_team, p_def);
+	return -1;
+}
+
+void Bf3GameCrowd::Impl::want(uint8_t p_team, uint16_t p_def) {
+	if (catalog_jobs == nullptr || p_team >= weapon_index.size() || p_def == sim::weapons::kNoWeapon ||
+			weapon_index[p_team].count(p_def) != 0) {
+		return;
+	}
+	const host::GunplayLevel *gunplay = catalog_level != nullptr ? catalog_level->gunplay.get() : nullptr;
+	if (gunplay == nullptr || p_def >= gunplay->defs.size() || !catalog_requested.insert({ p_team, p_def }).second) {
+		return;
+	}
+	render::CrowdWeaponSpec spec;
+	spec.def = p_def;
+	spec.weapon_unlock = gunplay->defs[p_def].blueprint;
+	spec.weapon_def = gunplay->defs[p_def].variant;
+	catalog_jobs->post([this, p_team, spec] { load_catalog(p_team, spec); });
+}
+
+void Bf3GameCrowd::Impl::load_catalog(uint8_t p_team, const render::CrowdWeaponSpec &p_spec) {
+	const auto t0 = std::chrono::steady_clock::now();
+	CatalogPart out;
+	out.team = p_team;
+	out.def = p_spec.def;
+	if (catalog_ebx == nullptr) {
+		core::Result<std::unique_ptr<core::EbxLibrary>> ebx =
+				core::EbxLibrary::open(catalog_install, { catalog_spec.superbundle });
+		if (ebx) {
+			catalog_ebx = std::move(*ebx);
+		} else {
+			out.error = catalog_spec.superbundle + ": " + ebx.error().message;
+		}
+	}
+	if (catalog_ebx != nullptr) {
+		const std::shared_ptr<core::Cache> cache = catalog_cache ? catalog_cache() : nullptr;
+		std::array<std::span<const render::CrowdWeaponSpec>, 2> items{};
+		items[p_team] = std::span<const render::CrowdWeaponSpec>(&p_spec, 1);
+		core::Result<std::unique_ptr<render::CrowdWeaponSet>> set =
+				render::load_crowd_weapons(*catalog_ebx, catalog_spec, *assets, items, cache.get());
+		if (!set) {
+			out.error = set.error().message;
+		} else if ((*set)->teams[p_team].size() != 1) {
+			out.error = std::to_string((*set)->teams[p_team].size()) + " parts";
+		} else {
+			out.set = std::move(*set);
+		}
+	}
+	out.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+	std::lock_guard lock(catalog_mutex);
+	catalog_done.push_back(std::move(out));
+}
+
+void Bf3GameCrowd::Impl::adopt_catalog() {
+	std::vector<CatalogPart> done;
+	{
+		std::lock_guard lock(catalog_mutex);
+		done.swap(catalog_done);
+	}
+	for (CatalogPart &c : done) {
+		const std::string what = "catalog weapon def " + std::to_string(c.def) + " team " + std::to_string(c.team);
+		if (c.set == nullptr || eval == nullptr) {
+			++catalog_failed;
+			log(what + ": " + (c.error.empty() ? std::string("the crowd is not built") : c.error));
+			continue;
+		}
+		const render::CrowdWeaponPart &part = c.set->teams[c.team][0];
+		const std::vector<anim::CrowdWeapon> view = render::crowd_weapons_of(*c.set, c.team);
+		core::Result<uint8_t> index = eval->add_weapon(c.team, view[0]);
+		if (!index || *index != weapon_meshes[c.team].size()) {
+			++catalog_failed;
+			log(what + ": " +
+					(index ? "index " + std::to_string(*index) + " is not the next mesh" : index.error().message));
+			continue;
+		}
+		catalog_sets.push_back(std::move(c.set));
+		weapon_meshes[c.team].push_back(make_weapon_mesh(part));
+		weapon_index[c.team].emplace(c.def, *index);
+		++catalog_added;
+		char line[256];
+		std::snprintf(line, sizeof(line), "%s (%s): item %u, %llu vertices, %zu binds, loaded in %.2f s", what.c_str(),
+				part.spec.weapon_def.c_str(), unsigned(*index), static_cast<unsigned long long>(part.prepared.vertices),
+				part.binds.size(), c.seconds);
+		log(line);
+	}
+}
+
+Ref<Texture2D> Bf3GameCrowd::Impl::find_texture(const std::string &p_name) {
+	const auto it = textures.find(p_name);
+	if (it != textures.end()) {
+		return it->second;
+	}
+	const render::PreparedTexture *t = assets->texture(p_name);
+	if (t == nullptr) {
+		t = weapons->texture(p_name);
+	}
+	for (size_t i = catalog_sets.size(); t == nullptr && i-- > 0;) {
+		t = catalog_sets[i]->texture(p_name);
+	}
+	Ref<Texture2D> tex;
+	if (t != nullptr) {
+		tex = make_texture(*t);
+	}
+	textures[p_name] = tex;
+	return tex;
+}
+
+WeaponMesh Bf3GameCrowd::Impl::make_weapon_mesh(const render::CrowdWeaponPart &p_part) {
+	WeaponMesh wm;
+	std::vector<Ref<Material>> materials;
+	bool have = false;
+	Vector3 lo, hi;
+	const auto texture = [this](const std::string &p_name) { return find_texture(p_name); };
+	for (const render::PreparedSurface &s : p_part.prepared.surfaces) {
+		Ref<Material> mat;
+		if (draw && s.material_index < p_part.materials.slots.size()) {
+			mat = make_standard_material(
+					p_part.materials.slots[s.material_index], !s.tangents.empty(), texture, MaterialOptions{});
+		}
+		materials.push_back(mat);
+		const Vector3 a(s.aabb_min[0], s.aabb_min[1], s.aabb_min[2]), b(s.aabb_max[0], s.aabb_max[1], s.aabb_max[2]);
+		lo = have ? lo.min(a) : a;
+		hi = have ? hi.max(b) : b;
+		have = true;
+	}
+	if (have && !draw) {
+		wm.binds = int32_t(p_part.binds.size());
+	} else if (have) {
+		const render::PreparedSurface *first = p_part.prepared.surfaces.data();
+		wm.mesh = make_array_mesh(p_part.prepared, [&](const render::PreparedSurface &p_s) -> Ref<Material> {
+			const size_t index = size_t(&p_s - first);
+			return index < materials.size() ? materials[index] : Ref<Material>();
+		});
+
+		const Vector3 grow(1.5f, 2.0f, 1.5f);
+		wm.aabb = AABB(lo - grow, (hi - lo) + grow * 2.0f);
+		wm.binds = int32_t(p_part.binds.size());
+	}
+	if (draw && wm.mesh.is_null()) {
+		log("item " + p_part.spec.weapon_def + ": no mesh created (not drawn)");
+	}
+	return wm;
+}
 
 void Bf3GameCrowd::Impl::apply(const Pending &p_e) {
 	if (p_e.slot >= kSlotsPerTeam) {
@@ -263,7 +448,7 @@ void Bf3GameCrowd::Impl::build_inputs(const GameFrame &p_frame) {
 		in.sprinting = (o.flags & sim::soldier_flags::kSprinting) != 0;
 		if (w != nullptr) {
 			if (w->def != sim::weapons::kNoWeapon) {
-				const int32_t idx = render::crowd_weapon_index(*weapons, team, w->def);
+				const int32_t idx = index_of(team, w->def);
 				if (idx < 0) {
 					++stats.unknown_weapons;
 					s.weapon = 0;
@@ -434,6 +619,7 @@ void Bf3GameCrowd::Impl::clear_draw() {
 	}
 	weapon_draws.clear();
 	weapon_meshes = {};
+	textures.clear();
 	if (uploader) {
 		uploader->clear();
 		uploader.reset();
@@ -583,7 +769,13 @@ core::Status Bf3GameCrowd::load(const GameLoadInputs &p_in) {
 		m.teams[t].weapon_joints = &team.weapon_joints;
 		m.teams[t].weapon_local = team.weapon_local;
 		m.teams[t].weapons = m.views[t];
+		for (size_t i = 0; i < m.views[t].size(); ++i) {
+			m.weapon_index[t].emplace(m.weapons->teams[t][i].spec.def, uint8_t(i));
+		}
 	}
+	m.catalog_install = p_in.db->install;
+	m.catalog_level = p_in.shared;
+	m.catalog_spec = spec;
 	m.loaded.store(true, std::memory_order_release);
 	return core::Status::success();
 }
@@ -657,57 +849,9 @@ bool Bf3GameCrowd::build(Node3D *p_parent, std::string *r_error) {
 		m.uploader->set_soldier_visible(i, false);
 	}
 
-	std::map<std::string, Ref<Texture2D>> textures;
-	auto find_texture = [&](const std::string &p_name) -> Ref<Texture2D> {
-		const auto it = textures.find(p_name);
-		if (it != textures.end()) {
-			return it->second;
-		}
-		const render::PreparedTexture *t = m.assets->texture(p_name);
-		if (t == nullptr) {
-			t = m.weapons->texture(p_name);
-		}
-		Ref<Texture2D> tex;
-		if (t != nullptr) {
-			tex = make_texture(*t);
-		}
-		textures[p_name] = tex;
-		return tex;
-	};
 	for (uint32_t t = 0; t < 2; ++t) {
 		for (const render::CrowdWeaponPart &part : m.weapons->teams[t]) {
-			WeaponMesh wm;
-			std::vector<Ref<Material>> materials;
-			bool have = false;
-			Vector3 lo, hi;
-			for (const render::PreparedSurface &s : part.prepared.surfaces) {
-				Ref<Material> mat;
-				if (m.draw && s.material_index < part.materials.slots.size()) {
-					mat = make_standard_material(part.materials.slots[s.material_index], !s.tangents.empty(), find_texture, MaterialOptions{});
-				}
-				materials.push_back(mat);
-				const Vector3 a(s.aabb_min[0], s.aabb_min[1], s.aabb_min[2]), b(s.aabb_max[0], s.aabb_max[1], s.aabb_max[2]);
-				lo = have ? lo.min(a) : a;
-				hi = have ? hi.max(b) : b;
-				have = true;
-			}
-			if (have && !m.draw) {
-				wm.binds = int32_t(part.binds.size());
-			} else if (have) {
-				const render::PreparedSurface *first = part.prepared.surfaces.data();
-				wm.mesh = make_array_mesh(part.prepared, [&](const render::PreparedSurface &p_s) -> Ref<Material> {
-					const size_t index = size_t(&p_s - first);
-					return index < materials.size() ? materials[index] : Ref<Material>();
-				});
-
-				const Vector3 grow(1.5f, 2.0f, 1.5f);
-				wm.aabb = AABB(lo - grow, (hi - lo) + grow * 2.0f);
-				wm.binds = int32_t(part.binds.size());
-			}
-			if (m.draw && wm.mesh.is_null()) {
-				log("item " + part.spec.weapon_def + ": no mesh created (not drawn)");
-			}
-			m.weapon_meshes[t].push_back(wm);
+			m.weapon_meshes[t].push_back(m.make_weapon_mesh(part));
 		}
 	}
 	m.weapon_draws.assign(kCrowdSoldiers, Impl::WeaponDraw{});
@@ -736,6 +880,7 @@ void Bf3GameCrowd::step(const GameFrame &p_frame) {
 	}
 	m.build_inputs(p_frame);
 	m.eval->wait_and_publish(*m.lanes);
+	m.adopt_catalog();
 	if (m.uploader) {
 		m.uploader->upload(*m.eval, m.roots, m.upload_stats);
 	}
@@ -752,7 +897,35 @@ std::span<const fx::MuzzleSample> Bf3GameCrowd::muzzles() const {
 }
 
 GameCrowdStats Bf3GameCrowd::stats() const {
-	return impl_->stats;
+	GameCrowdStats s = impl_->stats;
+	s.catalog_added = impl_->catalog_added;
+	s.catalog_failed = impl_->catalog_failed;
+	s.catalog_pending = impl_->catalog_jobs != nullptr ? impl_->catalog_jobs->stats().pending : 0;
+	return s;
+}
+
+void Bf3GameCrowd::enable_catalog(std::function<std::shared_ptr<core::Cache>()> p_cache) {
+	Impl &m = *impl_;
+	if (m.catalog_jobs != nullptr || !loaded() || m.shut_down) {
+		return;
+	}
+	m.catalog_cache = std::move(p_cache);
+	m.catalog_jobs = std::make_unique<core::JobQueue>("crowd catalog");
+}
+
+void Bf3GameCrowd::want_weapon(uint8_t p_wire_team, uint16_t p_def) {
+	impl_->want(anim::crowd_team_of_wire(p_wire_team), p_def);
+}
+
+bool Bf3GameCrowd::has_weapon_mesh(uint8_t p_wire_team, uint16_t p_def) const {
+	const Impl &m = *impl_;
+	const uint8_t team = anim::crowd_team_of_wire(p_wire_team);
+	const auto it = m.weapon_index[team].find(p_def);
+	if (it == m.weapon_index[team].end() || it->second >= m.weapon_meshes[team].size()) {
+		return false;
+	}
+	const WeaponMesh &wm = m.weapon_meshes[team][it->second];
+	return wm.binds > 0 && (!m.draw || wm.mesh.is_valid());
 }
 
 void Bf3GameCrowd::shutdown() {
@@ -761,6 +934,9 @@ void Bf3GameCrowd::shutdown() {
 		return;
 	}
 	m.shut_down = true;
+	if (m.catalog_jobs != nullptr) {
+		m.catalog_jobs->stop();
+	}
 	m.cam_log();
 	if (m.eval && m.lanes) {
 		m.eval->wait_and_publish(*m.lanes);
@@ -839,7 +1015,7 @@ bool Bf3GameCrowd::Impl::cam_event(const host::PresentEvent &p_e, const GameFram
 	c.input.weapon = 0;
 	if (f->own_weapons_valid && f->own_weapons_curr.active < f->own_weapons_curr.slots.size()) {
 		const uint16_t def = f->own_weapons_curr.slots[f->own_weapons_curr.active].def;
-		const int32_t idx = def != sim::weapons::kNoWeapon ? render::crowd_weapon_index(*weapons, team, def) : -1;
+		const int32_t idx = def != sim::weapons::kNoWeapon ? index_of(team, def) : -1;
 		c.input.weapon = idx >= 0 ? uint8_t(idx) : uint8_t(0);
 	}
 	c.index = uint32_t(team) * kSlotsPerTeam + own;

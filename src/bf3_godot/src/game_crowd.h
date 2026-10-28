@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -30,6 +31,9 @@ struct GameCrowdStats {
 	uint32_t throwing = 0;
 	uint64_t frames = 0;
 	uint64_t frozen_frames = 0;
+	uint32_t catalog_added = 0;
+	uint32_t catalog_failed = 0;
+	uint32_t catalog_pending = 0;
 };
 
 class Bf3GameCrowd {
@@ -48,6 +52,10 @@ public:
 	bool build(godot::Node3D *p_parent, std::string *r_error);
 	bool built() const;
 	void step(const GameFrame &p_frame);
+
+	void enable_catalog(std::function<std::shared_ptr<core::Cache>()> p_cache);
+	void want_weapon(uint8_t p_wire_team, uint16_t p_def);
+	bool has_weapon_mesh(uint8_t p_wire_team, uint16_t p_def) const;
 
 	std::span<const fx::MuzzleSample> muzzles() const;
 	GameCrowdStats stats() const;

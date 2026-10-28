@@ -761,6 +761,9 @@ void GameState::want_catalog_weapons(std::span<const uint16_t> p_defs) {
 		if (def == sw::kNoWeapon) {
 			continue;
 		}
+		if (crowd != nullptr && crowd->built()) {
+			crowd->want_weapon(team, def);
+		}
 		if (catalog == nullptr || item_of(team, def) >= 0) {
 			continue;
 		}
@@ -907,6 +910,7 @@ void step_game_parts(Node3D &r_parent, GameState &r_game, const host::Presentati
 			r_game.crowd.reset();
 		} else {
 			UtilityFunctions::print(to_godot("[game] crowd built: " + std::to_string(r_game.crowd->stats().lanes) + " pose lanes"));
+			r_game.crowd->enable_catalog(r_game.catalog_cache);
 		}
 	}
 	r_game.crowd_built = r_game.crowd != nullptr && r_game.crowd->built();

@@ -1166,6 +1166,26 @@ TEST_SUITE("anim-s3-unit") {
 			bad[0] = w.weapons[0];
 			CHECK(CrowdEvaluator::make(w.c.set, t, 2, config).ok());
 		}
+
+		{
+			bf3::core::Result<uint8_t> added = ev.add_weapon(1, w.weapons[1]);
+			REQUIRE_MESSAGE(added.ok(), (added.ok() ? "" : added.error().message));
+			CHECK(*added == 2);
+			in[3].weapon = *added;
+			ev.set_inputs(in, 1.0 / 60.0);
+			ev.evaluate_all_here();
+			CHECK(ev.weapon_of(3) == 2);
+			CHECK(ev.weapon_palette(3).size() == w.weapons[1].binds->size());
+			CrowdWeapon bad = w.weapons[1];
+			bad.binds = nullptr;
+			CHECK(!ev.add_weapon(1, bad).ok());
+			CHECK(!ev.add_weapon(7, w.weapons[1]).ok());
+			size_t filled = 0;
+			while (filled < 1000 && ev.add_weapon(0, w.weapons[0]).ok()) {
+				++filled;
+			}
+			CHECK(filled == kMaxCrowdWeapons - 2);
+		}
 	}
 
 	TEST_CASE("M2a tp stance set: stand bit for bit, stances, transitions, moves, fire, death, hostile values") {

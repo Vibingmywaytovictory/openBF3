@@ -332,6 +332,25 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::InstallReader &p_install, const SoldierSpec &p_spec, const SoldierAssets &p_assets,
 		const std::array<std::span<const CrowdWeaponSpec>, 2> &p_items, core::Cache *p_cache) {
 	const Clock::time_point start = Clock::now();
+	core::Result<std::shared_ptr<core::Install>> install = core::Install::open(p_install);
+	if (!install) {
+		return core::error_at("install", install.error());
+	}
+	core::Result<std::unique_ptr<core::EbxLibrary>> ebx = core::EbxLibrary::open(*install, { p_spec.superbundle });
+	if (!ebx) {
+		return core::error_at(p_spec.superbundle, ebx.error());
+	}
+	core::Result<std::unique_ptr<CrowdWeaponSet>> set = load_crowd_weapons(**ebx, p_spec, p_assets, p_items, p_cache);
+	if (set) {
+		(*set)->seconds = std::chrono::duration<double>(Clock::now() - start).count();
+	}
+	return set;
+}
+
+core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::EbxLibrary &p_library,
+		const SoldierSpec &p_spec, const SoldierAssets &p_assets,
+		const std::array<std::span<const CrowdWeaponSpec>, 2> &p_items, core::Cache *p_cache) {
+	const Clock::time_point start = Clock::now();
 	if (p_assets.library == nullptr || p_assets.clips.rig.size() == 0) {
 		return core::make_error("crowd weapons: the soldier assets have no clip library or rig");
 	}
@@ -342,15 +361,7 @@ core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::Ins
 		}
 	}
 	auto set = std::make_unique<CrowdWeaponSet>();
-	core::Result<std::shared_ptr<core::Install>> install = core::Install::open(p_install);
-	if (!install) {
-		return core::error_at("install", install.error());
-	}
-	core::Result<std::unique_ptr<core::EbxLibrary>> ebx = core::EbxLibrary::open(*install, { p_spec.superbundle });
-	if (!ebx) {
-		return core::error_at(p_spec.superbundle, ebx.error());
-	}
-	const core::EbxLibrary &lib = **ebx;
+	const core::EbxLibrary &lib = p_library;
 	const std::vector<std::string> databases = variation_database_names(lib);
 	for (size_t t = 0; t < p_items.size(); ++t) {
 		for (size_t i = 0; i < p_items[t].size(); ++i) {
@@ -419,5 +430,4 @@ core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::Ins
 	set->notes.push_back(line);
 	return set;
 }
-
 }
