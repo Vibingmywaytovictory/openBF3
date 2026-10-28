@@ -87,6 +87,8 @@ target_sources(bf3_godot PRIVATE
 )
 
 target_sources(bf3_godot PRIVATE
+    src/catalog_weapons.cpp
+    src/catalog_weapons.h
     src/viewmodel.cpp
     src/viewmodel.h
     src/vm_script.cpp

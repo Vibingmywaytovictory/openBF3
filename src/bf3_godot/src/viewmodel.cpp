@@ -125,11 +125,75 @@ Bf3Viewmodel::~Bf3Viewmodel() = default;
 void Bf3Viewmodel::_bind_methods() {}
 
 size_t Bf3Viewmodel::item_count() const {
-	return set_ ? set_->items.size() : 0;
+	return items_.size();
 }
 
 const bf3::render::ViewmodelItem *Bf3Viewmodel::current_item() const {
-	return set_ && item_ >= 0 && size_t(item_) < set_->items.size() ? &set_->items[size_t(item_)] : nullptr;
+	return item_ >= 0 && size_t(item_) < items_.size() ? items_[size_t(item_)].item : nullptr;
+}
+
+namespace {
+
+struct SetTextures {
+	const bf3::render::ViewmodelSet *set = nullptr;
+	std::map<std::string, Ref<Texture2D>> made;
+
+	Ref<Texture2D> find(const std::string &p_name) {
+		const auto it = made.find(p_name);
+		if (it != made.end()) {
+			return it->second;
+		}
+		const bf3::render::PreparedTexture *t = set->texture(p_name);
+		Ref<Texture2D> tex;
+		if (t != nullptr) {
+			tex = make_texture(*t);
+		}
+		made[p_name] = tex;
+		return tex;
+	}
+};
+
+MeshInstance3D *make_part_mesh(Skeleton3D *p_skeleton, const bf3::render::ViewmodelPart &p_part,
+		const std::vector<bf3::render::ViewmodelSlotLook> &p_looks, std::vector<Ref<StandardMaterial3D>> &r_materials,
+		SetTextures &r_textures) {
+	MaterialOptions options;
+	options.viewmodel = true;
+	options.fov_override = 55.0f;
+	const auto find_texture = [&](const std::string &p_name) { return r_textures.find(p_name); };
+	std::map<uint32_t, Ref<StandardMaterial3D>> materials;
+	const Ref<ArrayMesh> mesh =
+			make_array_mesh(p_part.prepared, [&](const bf3::render::PreparedSurface &p_s) -> Ref<Material> {
+				if (p_s.material_index >= p_part.materials.slots.size()) {
+					return Ref<Material>();
+				}
+				Ref<StandardMaterial3D> &m = materials[p_s.material_index];
+				if (m.is_null()) {
+					m = make_standard_material(
+							p_part.materials.slots[p_s.material_index], !p_s.tangents.empty(), find_texture, options);
+					if (p_s.material_index < p_looks.size()) {
+						const bf3::render::ViewmodelSlotLook &look = p_looks[p_s.material_index];
+						if (look.alpha_test) {
+							m->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
+							m->set_alpha_scissor_threshold(bf3::render::kViewmodelAlphaScissor);
+						}
+						if (look.double_sided) {
+							m->set_cull_mode(BaseMaterial3D::CULL_DISABLED);
+						}
+					}
+					r_materials.push_back(m);
+				}
+				return m;
+			});
+	MeshInstance3D *mi = memnew(MeshInstance3D);
+	mi->set_name(to_godot(p_part.mesh.substr(p_part.mesh.rfind('/') + 1)));
+	mi->set_mesh(mesh);
+	mi->set_custom_aabb(AABB(Vector3(-3, -1, -3), Vector3(6, 4, 6)));
+	mi->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+	p_skeleton->add_child(mi);
+	mi->set_skeleton_path(NodePath(".."));
+	return mi;
+}
+
 }
 
 bool Bf3Viewmodel::build(const bf3::render::ViewmodelSet &p_set, const bf3::anim::ViewmodelTuning &p_tuning) {
@@ -139,81 +203,12 @@ bool Bf3Viewmodel::build(const bf3::render::ViewmodelSet &p_set, const bf3::anim
 	set_ = &p_set;
 	tuning_ = p_tuning;
 	camera_joint_ = p_set.rig.find("CameraJoint");
-
-	std::map<std::string, Ref<Texture2D>> textures;
-	for (const bf3::render::PreparedTexture &t : p_set.textures) {
-		const Ref<ImageTexture> tex = make_texture(t);
-		if (tex.is_valid()) {
-			textures[t.name] = tex;
-		}
-	}
-	auto find_texture = [&](const std::string &p_name) -> Ref<Texture2D> {
-		const auto it = textures.find(p_name);
-		return it == textures.end() ? Ref<Texture2D>() : it->second;
-	};
 	skeleton_ = make_skeleton(p_set.rig);
 	skeleton_->set_name("ViewmodelRig");
 	add_child(skeleton_);
-
-	MaterialOptions options;
-	options.viewmodel = true;
-	options.fov_override = 55.0f;
-	auto make_mesh = [&](const bf3::render::ViewmodelPart &p_part, const std::vector<bf3::render::ViewmodelSlotLook> &p_looks,
-							 std::vector<Ref<StandardMaterial3D>> &r_materials) {
-		std::map<uint32_t, Ref<StandardMaterial3D>> materials;
-		const Ref<ArrayMesh> mesh = make_array_mesh(p_part.prepared, [&](const bf3::render::PreparedSurface &p_s) -> Ref<Material> {
-			if (p_s.material_index >= p_part.materials.slots.size()) {
-				return Ref<Material>();
-			}
-			Ref<StandardMaterial3D> &m = materials[p_s.material_index];
-			if (m.is_null()) {
-				m = make_standard_material(p_part.materials.slots[p_s.material_index], !p_s.tangents.empty(), find_texture, options);
-				if (p_s.material_index < p_looks.size()) {
-
-					const bf3::render::ViewmodelSlotLook &look = p_looks[p_s.material_index];
-					if (look.alpha_test) {
-						m->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
-						m->set_alpha_scissor_threshold(bf3::render::kViewmodelAlphaScissor);
-					}
-					if (look.double_sided) {
-						m->set_cull_mode(BaseMaterial3D::CULL_DISABLED);
-					}
-				}
-				r_materials.push_back(m);
-			}
-			return m;
-		});
-		MeshInstance3D *mi = memnew(MeshInstance3D);
-		mi->set_name(to_godot(p_part.mesh.substr(p_part.mesh.rfind('/') + 1)));
-		mi->set_mesh(mesh);
-
-		mi->set_custom_aabb(AABB(Vector3(-3, -1, -3), Vector3(6, 4, 6)));
-		mi->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
-		skeleton_->add_child(mi);
-		mi->set_skeleton_path(NodePath(".."));
-		return mi;
-	};
-	arms_ = make_mesh(p_set.arms, p_set.arms_looks, arms_materials_);
-	items_.resize(p_set.items.size());
-	for (size_t i = 0; i < p_set.items.size(); ++i) {
-		const bf3::render::ViewmodelItem &it = p_set.items[i];
-		ItemNodes &n = items_[i];
-		n.skin = make_skin(it.binds.binds());
-		n.weapon = make_mesh(it.weapon, it.weapon_looks, n.materials);
-		n.weapon->set_skin(n.skin);
-		n.weapon->set_visible(false);
-		n.refs = bf3::render::viewmodel_clip_refs(it);
-		for (const bf3::render::ViewmodelAttachment &a : it.attachments) {
-			ItemNodes::Attachment na;
-			na.mesh = make_mesh(a.part, a.looks, n.materials);
-			na.mesh->set_visible(false);
-			na.bone = a.rig_bone;
-			na.xform = to_godot(a.transform);
-			na.hip = a.hip;
-			na.zoom = a.zoom;
-			n.attachments.push_back(na);
-		}
-	}
+	SetTextures textures{ &p_set, {} };
+	arms_ = make_part_mesh(skeleton_, p_set.arms, p_set.arms_looks, arms_materials_, textures);
+	add_item_nodes(p_set);
 	arms_->set_visible(false);
 
 	vignette_layer_ = memnew(CanvasLayer);
@@ -233,6 +228,38 @@ bool Bf3Viewmodel::build(const bf3::render::ViewmodelSet &p_set, const bf3::anim
 	vignette_layer_->add_child(vignette_);
 	add_child(vignette_layer_);
 	return true;
+}
+
+int Bf3Viewmodel::add_items(const bf3::render::ViewmodelSet &p_set) {
+	if (!set_ || p_set.items.empty() || p_set.rig.size() != set_->rig.size() || p_set.arms.mesh != set_->arms.mesh) {
+		return -1;
+	}
+	const int first = int(items_.size());
+	add_item_nodes(p_set);
+	return first;
+}
+
+void Bf3Viewmodel::add_item_nodes(const bf3::render::ViewmodelSet &p_set) {
+	SetTextures textures{ &p_set, {} };
+	for (const bf3::render::ViewmodelItem &it : p_set.items) {
+		ItemNodes &n = items_.emplace_back();
+		n.item = &it;
+		n.skin = make_skin(it.binds.binds());
+		n.weapon = make_part_mesh(skeleton_, it.weapon, it.weapon_looks, n.materials, textures);
+		n.weapon->set_skin(n.skin);
+		n.weapon->set_visible(false);
+		n.refs = bf3::render::viewmodel_clip_refs(it);
+		for (const bf3::render::ViewmodelAttachment &a : it.attachments) {
+			ItemNodes::Attachment na;
+			na.mesh = make_part_mesh(skeleton_, a.part, a.looks, n.materials, textures);
+			na.mesh->set_visible(false);
+			na.bone = a.rig_bone;
+			na.xform = to_godot(a.transform);
+			na.hip = a.hip;
+			na.zoom = a.zoom;
+			n.attachments.push_back(na);
+		}
+	}
 }
 
 void Bf3Viewmodel::select_item(int p_index) {
@@ -260,10 +287,10 @@ void Bf3Viewmodel::select_item(int p_index) {
 	arms_->set_visible(true);
 	animator_ = std::make_unique<bf3::anim::ViewmodelAnimator>(set_->rig, n.refs, tuning_);
 	if (!has_user_arg("no-locomotion")) {
-		animator_->set_locomotion(bf3::render::viewmodel_locomotion(set_->items[size_t(item_)]));
+		animator_->set_locomotion(bf3::render::viewmodel_locomotion(*n.item));
 	}
-	animator_->set_throw_flow(set_->items[size_t(item_)].throw_flow);
-	ads_params_ = bf3::render::viewmodel_ads_params(set_->items[size_t(item_)], tuning_);
+	animator_->set_throw_flow(n.item->throw_flow);
+	ads_params_ = bf3::render::viewmodel_ads_params(*n.item, tuning_);
 	viewmodel_fov_ = -1;
 	set_viewmodel_fov(ads_params_.render_fov);
 }

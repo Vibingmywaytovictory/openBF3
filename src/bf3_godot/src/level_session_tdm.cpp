@@ -676,6 +676,10 @@ void Bf3LevelSession::tdm_presented(uint64_t p_now_ns) {
 			if (q) {
 				client_->send_loadout_request(*q);
 				++m.loadout_requests_sent;
+				if (const bf3::core::Result<host::Loadout> l = host::resolve_loadout(level->gunplay->loadouts,
+							r_game.gunplay->kits, m.own_team, pick->kit, m.loadout_choices[pick->kit])) {
+					r_game.want_catalog_weapons(l->defs);
+				}
 			} else {
 				UtilityFunctions::print(to_godot("[tdm] loadout pick refused: " + q.error().message));
 			}

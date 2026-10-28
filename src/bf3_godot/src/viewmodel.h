@@ -63,6 +63,7 @@ public:
 	~Bf3Viewmodel() override;
 
 	bool build(const bf3::render::ViewmodelSet &p_set, const bf3::anim::ViewmodelTuning &p_tuning);
+	int add_items(const bf3::render::ViewmodelSet &p_set);
 	bool built() const { return set_ != nullptr; }
 	size_t item_count() const;
 
@@ -100,6 +101,7 @@ protected:
 
 private:
 	struct ItemNodes {
+		const bf3::render::ViewmodelItem *item = nullptr;
 		godot::MeshInstance3D *weapon = nullptr;
 		godot::Ref<godot::Skin> skin;
 		std::vector<godot::Ref<godot::StandardMaterial3D>> materials;
@@ -114,6 +116,7 @@ private:
 	};
 
 	void set_viewmodel_fov(float p_fov);
+	void add_item_nodes(const bf3::render::ViewmodelSet &p_set);
 
 	const bf3::render::ViewmodelSet *set_ = nullptr;
 	bf3::anim::ViewmodelTuning tuning_;

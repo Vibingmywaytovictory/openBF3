@@ -19,6 +19,7 @@
 #include "bf3/core/util/text.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/kits.h"
+#include "bf3/host/loadout.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/weapons/sim_time.h"
 #include "bf3/sim/weapons/weapon_sim.h"
@@ -409,6 +410,7 @@ void Bf3LevelSession::game_load_options(host::SharedLoadOptions &r_options) {
 			}
 			g->vm_sets[size_t(team - 1)] = std::move(*set);
 		}
+		g->vm_sources = std::move(*sources);
 		g->vm_seconds = steady_s() - t0;
 		cache.reset();
 		g->vm_done.store(true, std::memory_order_release);
@@ -750,6 +752,25 @@ void Bf3LevelSession::game_presented(double p_delta, uint64_t p_now_ns) {
 	}
 }
 
+void GameState::want_catalog_weapons(std::span<const uint16_t> p_defs) {
+	const uint8_t team = own_team;
+	if (team != 1 && team != 2) {
+		return;
+	}
+	for (const uint16_t def : p_defs) {
+		if (def == sw::kNoWeapon) {
+			continue;
+		}
+		if (catalog == nullptr || item_of(team, def) >= 0) {
+			continue;
+		}
+		const auto it = vm_catalog[size_t(team - 1)].find(def);
+		if (it != vm_catalog[size_t(team - 1)].end()) {
+			catalog->request_viewmodel(team, def, it->second);
+		}
+	}
+}
+
 namespace {
 
 void build_game_ui(Node *p_parent, GameState &r_game, bool p_windowed) {
@@ -807,6 +828,50 @@ void map_viewmodel_items(GameState &r_game) {
 			}
 		}
 	}
+}
+
+void start_viewmodel_catalog(GameState &r_game, const host::GunplayLevel *p_gunplay) {
+	if (r_game.vm_sources == nullptr || p_gunplay == nullptr) {
+		return;
+	}
+	for (uint8_t team = 1; team <= 2; ++team) {
+		for (const host::LoadoutWeapon &w : host::loadout_weapons(p_gunplay->loadouts, team)) {
+			r_game.vm_catalog[size_t(team - 1)].emplace(w.def, w.unlock);
+		}
+	}
+	r_game.catalog = std::make_unique<CatalogWeapons>(std::move(r_game.vm_sources), r_game.catalog_cache);
+}
+
+void step_viewmodel_catalog(GameState &r_game, const host::PresentationFrame &p_frame) {
+	if (r_game.catalog == nullptr) {
+		return;
+	}
+	for (CatalogViewmodel &c : r_game.catalog->take_viewmodels()) {
+		Bf3Viewmodel *vm = r_game.vm[size_t(c.team - 1)];
+		const int index = c.set != nullptr && vm != nullptr ? vm->add_items(*c.set) : -1;
+		if (index < 0) {
+			UtilityFunctions::print(to_godot("[game] ERROR catalog viewmodel " + c.unlock + ": " +
+					(c.error.empty() ? std::string("the set does not fit the team's viewmodel") : c.error)));
+			continue;
+		}
+		r_game.def_items[size_t(c.team - 1)][c.def] = index;
+		char line[256];
+		std::snprintf(line, sizeof(line), "[game] catalog viewmodel %s (team %u, def %u): item %d in %.2f s",
+				c.unlock.c_str(), unsigned(c.team), unsigned(c.def), index, c.seconds);
+		UtilityFunctions::print(line);
+		r_game.vm_catalog_sets.push_back(std::move(c.set));
+	}
+	std::array<uint16_t, sw::kMaxWeaponSlots + 1> defs;
+	defs.fill(sw::kNoWeapon);
+	if (p_frame.own_weapons_valid) {
+		for (size_t s = 0; s < p_frame.own_weapons_curr.slots.size() && s < sw::kMaxWeaponSlots; ++s) {
+			defs[s] = p_frame.own_weapons_curr.slots[s].def;
+		}
+	}
+	if (r_game.weapon.valid) {
+		defs[sw::kMaxWeaponSlots] = r_game.weapon.def;
+	}
+	r_game.want_catalog_weapons(defs);
 }
 
 void step_game_parts(Node3D &r_parent, GameState &r_game, const host::PresentationFrame &p_frame, uint64_t p_now_ns, double p_delta, Camera3D *p_camera,
@@ -992,6 +1057,13 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		}
 	}
 	g.base_sensitivity = mapper_.base_sensitivity;
+	if (!g.catalog_cache) {
+		const std::filesystem::path cache_root = no_cache_ ? std::filesystem::path() : cache_root_;
+		const bf3::core::PathGuard guard = guard_;
+		g.catalog_cache = [cache_root, guard]() {
+			return cache_root.empty() ? std::shared_ptr<bf3::core::Cache>() : acquire_cache(cache_root, guard).cache;
+		};
+	}
 
 	if (!g.vm_built && g.vm_done.load(std::memory_order_acquire)) {
 		g.vm_built = true;
@@ -1002,6 +1074,8 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			UtilityFunctions::print(to_godot("[game] no viewmodel: " + g.vm_error));
 		} else {
 			map_viewmodel_items(g);
+			const std::shared_ptr<const host::SharedLevel> shared = shared_level();
+			start_viewmodel_catalog(g, shared != nullptr ? shared->gunplay.get() : nullptr);
 			for (size_t t = 0; t < 2; ++t) {
 				Bf3Viewmodel *vm = memnew(Bf3Viewmodel);
 				vm->set_name(t == 0 ? "ViewmodelUS" : "ViewmodelRU");
@@ -1047,6 +1121,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 	}
 	const bool free_camera = mapper_.free_camera();
 
+	step_viewmodel_catalog(g, f);
 	Camera3D *camera = cameras_.first_person();
 	Bf3Viewmodel *own_vm = g.own_viewmodel();
 	if (g.shown_team != g.own_team) {

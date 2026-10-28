@@ -1,6 +1,7 @@
 #pragma once
 
 #include "level_session.h"
+#include "catalog_weapons.h"
 #include "m2a_check.h"
 #include "crosshair_walk_check.h"
 #include "native_hud_moments.h"
@@ -24,6 +25,7 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -126,9 +128,13 @@ struct GameState {
 	std::string vm_tuning_source;
 
 	std::array<std::unordered_map<uint16_t, int>, 2> def_items;
+	std::unique_ptr<bf3::render::ViewmodelSources> vm_sources;
+	std::array<std::unordered_map<uint16_t, std::string>, 2> vm_catalog;
+	std::vector<std::unique_ptr<bf3::render::ViewmodelSet>> vm_catalog_sets;
 	std::vector<bool> def_switch_when_empty;
 	double vm_release_end_seen = -1;
 	bool slot_selectable(const bf3::net::WeaponSlotWire &p_slot) const;
+	void want_catalog_weapons(std::span<const uint16_t> p_defs);
 	std::unique_ptr<bf3::sim::CollisionWorld> world;
 	std::shared_ptr<ServerShotRecorder> recorder;
 
@@ -192,6 +198,8 @@ struct GameState {
 	std::unique_ptr<Bf3GameFx, void (*)(Bf3GameFx *)> fx{ nullptr, nullptr };
 	std::unique_ptr<Bf3GameAudio, void (*)(Bf3GameAudio *)> audio{ nullptr, nullptr };
 	std::unique_ptr<Bf3GameCrowd, void (*)(Bf3GameCrowd *)> crowd{ nullptr, nullptr };
+	std::unique_ptr<CatalogWeapons> catalog;
+	CatalogCacheSource catalog_cache;
 	std::unique_ptr<GameSettings> settings;
 	std::string settings_path;
 	bool settings_missed_printed = false;
