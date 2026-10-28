@@ -72,24 +72,4 @@ std::optional<UiScreenRecord> UiScreenRecordSet::screen_record(std::string_view 
 	}
 	return std::nullopt;
 }
-
-std::optional<UiLookupRecord> UiScreenRecordSet::lookup_record() const {
-	std::optional<UiLookupRecord> out;
-	for (const UiScreenRecords *s : sources_) {
-		const std::optional<UiLookupRecord> r = s->lookup_record();
-		if (!r) {
-			continue;
-		}
-		if (!out) {
-			out = UiLookupRecord{};
-		}
-		out->model_serial = std::max(out->model_serial, r->model_serial);
-		out->draws += r->draws;
-		out->missing_fonts += r->missing_fonts;
-		out->missing_icons += r->missing_icons;
-		out->missing_strings += r->missing_strings;
-	}
-	return out;
-}
-
 }

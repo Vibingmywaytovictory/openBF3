@@ -456,14 +456,10 @@ struct M2bCheck::State {
 			}
 		}
 		const std::optional<UiScreenRecord> round_end = m.screen_records.screen_record(core::ui::kEorWinningTeamScreenPartition);
-		const std::optional<UiLookupRecord> lookups = m.screen_records.lookup_record();
-		if (round_end && lookups && tally.windowed) {
+		if (round_end && tally.windowed) {
 			tally.spawn_screen_model_shown =
 					uint32_t(std::min<uint64_t>(m.deploy_screens.stats().spawn_screens_shown, 0xFFFFFFFFu));
 			tally.round_end_shown = tally.round_end_shown && round_end->shown > 0;
-			tally.missing_lookups = lookups->missing_fonts + lookups->missing_icons + lookups->missing_strings;
-		} else if (tally.windowed) {
-			tally.missing_lookups = 1;
 		}
 		if (m.death_camera != nullptr) {
 			tally.death_views = m.death_camera->stats().views;

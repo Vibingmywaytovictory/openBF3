@@ -84,7 +84,6 @@ std::vector<M2bPlayRow> m2b_play_rows(const M2bPlayTally &p_t, bool p_have_ui, b
 			fmt(">= 1 native nametag icon painted and >= 1 teammate on the minimap (%g teammate icons over %g frames)", double(p_t.minimap_friendly),
 					double(p_t.tag_frames)),
 			p_t.tag_frames >= 1 && p_t.tag_icons_painted >= 1 && p_t.minimap_friendly >= 1, true);
-	add(M2bTrack::Ui, "missing_lookups", double(p_t.missing_lookups), "== 0 missing fonts, icons and strings", p_t.missing_lookups == 0, true);
 
 	add(M2bTrack::Cam, "death_views", double(p_t.death_views),
 			fmt(">= the %g own deaths, %g bad inputs", double(p_t.own_deaths), double(p_t.death_view_bad_inputs)),

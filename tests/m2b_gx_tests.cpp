@@ -245,7 +245,7 @@ TEST_CASE("m2b.gx.unit the play rows: gx verdicts, ui / cam skipped until built"
 		for (const M2bPlayRow &r : rows) {
 			CHECK_MESSAGE(r.state == M2bRowState::Pass, r.name);
 		}
-		CHECK(rows.size() == 17);
+		CHECK(rows.size() == 16);
 	}
 	{
 		const std::vector<M2bPlayRow> rows = m2b_play_rows(t, false, false);
@@ -261,13 +261,13 @@ TEST_CASE("m2b.gx.unit the play rows: gx verdicts, ui / cam skipped until built"
 			}
 		}
 		CHECK(gx == 7);
-		CHECK(skipped == 10);
+		CHECK(skipped == 9);
 	}
 	{
 		M2bPlayTally h = t;
 		h.windowed = false;
 		const std::vector<M2bPlayRow> rows = m2b_play_rows(h, true, true);
-		const M2bPlayRow *r = row_named(rows, "missing_lookups");
+		const M2bPlayRow *r = row_named(rows, "nametag_icons");
 		REQUIRE(r != nullptr);
 		CHECK(r->state == M2bRowState::Skip);
 		CHECK(r->skip_reason == "headless: nothing is drawn");

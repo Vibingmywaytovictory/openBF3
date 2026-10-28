@@ -187,19 +187,6 @@ void build_tdm_ui(
 	if (r_m.options.deploy_screen) {
 		free_label(r_game.death_label);
 	}
-	if (r_m.windowed && r_game.layer != nullptr) {
-		r_m.tdm_hud = std::unique_ptr<Bf3TdmHud, void (*)(Bf3TdmHud *)>(new Bf3TdmHud(), &delete_part<Bf3TdmHud>);
-		std::string error;
-		Bf3Localisation *loc = r_game.localisation != nullptr ? r_game.localisation : Bf3Localisation::current();
-		Bf3UiAssets *assets = r_game.ui_assets != nullptr ? r_game.ui_assets : Bf3UiAssets::current();
-		if (!r_m.tdm_hud->build(r_game.layer, loc, assets, &error)) {
-			UtilityFunctions::print(to_godot("[tdm] ERROR TDM HUD build: " + error));
-			r_m.tdm_hud.reset();
-			++r_m.ui_build_failures;
-		} else {
-			r_m.screen_records.add(r_m.tdm_hud.get());
-		}
-	}
 	if (r_m.windowed && r_m.native_screens && r_game.layer != nullptr && r_game.native_hud != nullptr) {
 		Bf3UiScreens *screens = memnew(Bf3UiScreens);
 		screens->set_name("NativeScreens");
@@ -774,9 +761,6 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		if (r_game.native_hud != nullptr) {
 			r_game.native_hud->set_model(r_game.hud_model);
 		}
-		if (m.tdm_hud != nullptr && m.tdm_hud->built()) {
-			m.tdm_hud->set_model(r_game.hud_model);
-		}
 	}
 	m.kill_card_source = host::HudKillCardSource();
 	step_native_screens(r_game, m, this, level_id());
@@ -1086,10 +1070,6 @@ void Bf3LevelSession::tdm_shutdown() {
 	m.options_check.reset();
 	m.native_options.reset();
 	m.native_flow.reset();
-	if (m.tdm_hud != nullptr) {
-		m.screen_records.remove(m.tdm_hud.get());
-		m.tdm_hud->shutdown();
-	}
 	m.death_camera.reset();
 }
 

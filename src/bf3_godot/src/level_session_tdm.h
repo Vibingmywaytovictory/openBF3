@@ -2,9 +2,9 @@
 
 #include "death_camera.h"
 #include "deploy_screens.h"
-#include "hud_tdm.h"
 #include "m2b_check.h"
 #include "tdm_flow.h"
+#include "ui_screen_records.h"
 
 #include "bf3/host/hud_feed.h"
 #include "bf3/sim/sim_types.h"
@@ -39,7 +39,6 @@ struct TdmState {
 	M2bCheckOptions check_options;
 	bool checks() const { return !cases.empty(); }
 
-	std::unique_ptr<Bf3TdmHud, void (*)(Bf3TdmHud *)> tdm_hud{ nullptr, nullptr };
 	UiScreenRecordSet screen_records;
 	bf3::host::HudTdmFeedState tdm_state;
 	bf3::host::HudKillCardSource kill_card_source;
@@ -83,7 +82,6 @@ struct TdmState {
 	float view_origin[3] = { 0, 0, 0 };
 	float view_vfov_deg = 0.0f;
 	bool join_view_placed = false;
-	uint64_t ui_build_failures = 0;
 	float corpse_seconds = 0.0f;
 	double revive_seen_s = -1.0;
 	uint8_t kit_check_kit = 0xFF;

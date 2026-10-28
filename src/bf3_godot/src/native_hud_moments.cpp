@@ -433,8 +433,8 @@ void NativeHudMomentRun::check_host(Bf3NativeHud &r_hud) {
 	const UiScreenRecords &records = r_hud;
 	const std::optional<UiScreenRecord> crosshair_record = records.screen_record(crosshair);
 	const std::optional<UiScreenRecord> mp_record = records.screen_record(ui::kHudMpScreenPartition);
-	const bool recorded = crosshair_record && crosshair_record->visible && crosshair_record->shown == 3 && mp_record && mp_record->visible && mp_record->shown == 1 &&
-			!records.reports(ui::kKillScreenPartition) && !records.lookup_record();
+	const bool recorded = crosshair_record && crosshair_record->visible && crosshair_record->shown == 3 && mp_record &&
+			mp_record->visible && mp_record->shown == 1 && !records.reports(ui::kKillScreenPartition);
 	row("host.records", recorded,
 			"crosshairdefault shown " + (crosshair_record ? std::to_string(crosshair_record->shown) : std::string("unreported")) + " times (built, shown again, reopened), hudmpscreen " +
 					(mp_record ? std::to_string(mp_record->shown) : std::string("unreported")) + ", killscreen not reported");

@@ -23,7 +23,6 @@
 #include "fx_demo.h"
 #include "fx_ref.h"
 #include "hud_check.h"
-#include "hud_tdm_demo.h"
 #include "m2a_viewmodel_demo.h"
 #include "settings_check.h"
 #include "swf_view_check.h"
@@ -81,9 +80,6 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioStream);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioPlayback);
 
-	void openbf3_register_tdm_hud();
-	openbf3_register_tdm_hud();
-
 	void openbf3_register_ui_effects();
 	openbf3_register_ui_effects();
 
@@ -97,7 +93,6 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3FxRef);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3HudCheck);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioDemo);
-	GDREGISTER_CLASS(bf3::godot_side::Bf3TdmHudDemo);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3WidgetShotsCheck);
 
 	void openbf3_register_m2a_tp();

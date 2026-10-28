@@ -42,7 +42,6 @@ struct M2bPlayTally {
 	uint32_t kill_cards_checked = 0, kill_cards_bad = 0;
 	uint32_t spawn_screen_model_shown = 0;
 	bool round_end_shown = false;
-	uint64_t missing_lookups = 0;
 	uint64_t tag_frames = 0;
 	uint64_t tag_icons_painted = 0;
 	uint64_t minimap_friendly = 0;

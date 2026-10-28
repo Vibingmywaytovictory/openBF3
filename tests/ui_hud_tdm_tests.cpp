@@ -2,22 +2,15 @@
 
 #include "test_support.h"
 
-#include "hud_tdm_text.h"
-
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/death_timeline.h"
 #include "bf3/core/gameplay/eor_timeline.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
-#include "bf3/core/level/budget.h"
 #include "bf3/core/ui/hud_icons.h"
 #include "bf3/core/ui/hud_model.h"
-#include "bf3/core/ui/swf_atlas.h"
-#include "bf3/core/ui/swf_layout.h"
-#include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/text_db.h"
-#include "bf3/core/ui/ui_fonts.h"
 #include "bf3/host/hud_feed.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/presentation_events.h"
@@ -32,7 +25,6 @@
 #include <cstring>
 #include <limits>
 #include <memory>
-#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -42,7 +34,6 @@ namespace gp = bf3::core::gameplay;
 namespace sw = bf3::sim::weapons;
 namespace host = bf3::host;
 namespace net = bf3::net;
-namespace gs = bf3::godot_side;
 
 namespace {
 
@@ -1191,31 +1182,6 @@ TEST_CASE("m2b off: every M2b screen hidden and the M2a part of the model untouc
 	CHECK(std::memcmp(&m, before.data(), before.size()) == 0);
 	CHECK(state.deaths_fed == 0);
 }
-
-TEST_CASE("the lookup lists: SIDs, fonts, icons and placements are well formed") {
-	std::set<std::string_view> sids;
-	for (size_t i = 0; i < gs::kTdmTexts.size(); ++i) {
-		const gs::TdmTextEntry &e = gs::kTdmTexts[i];
-		CHECK(size_t(e.key) == i);
-		CHECK(e.sid.starts_with("ID_"));
-		CHECK(std::all_of(e.sid.begin(), e.sid.end(), [](char c) { return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'; }));
-		CHECK(!e.english.empty());
-		CHECK(sids.insert(e.sid).second);
-	}
-	CHECK(gs::tdm_text_sid(gs::TdmText::Deploy) == "ID_M_SPAWN_DEPLOY");
-	CHECK(gs::tdm_text_sid(gs::TdmText::Count).empty());
-	for (std::string_view f : gs::kTdmFonts) {
-		CHECK(f.starts_with("$"));
-	}
-	for (std::string_view r : gs::kTdmKitIcons) {
-		CHECK(r.starts_with("mc_iconsIngameSmall/Kit"));
-	}
-	for (const gs::TdmPlacement &p : gs::kTdmPlacements) {
-		CHECK(p.movie.starts_with("ui/assets/"));
-		CHECK(!p.instance.empty());
-	}
-}
-
 }
 
 namespace {
@@ -1277,50 +1243,27 @@ TEST_CASE("every string resolves to its recorded English") {
 	}
 	bf3::core::Result<ui::TextDatabase> text = ui::open_text_database(ti->install);
 	REQUIRE_MESSAGE(text.ok(), (text.ok() ? std::string() : text.error().message));
-	size_t ok = 0;
-	constexpr gs::TdmTextEntry kFeedTexts[] = {
-		{ gs::TdmText::Count, host::kHudMenuSids[0], "RESUME" },
-		{ gs::TdmText::Count, host::kHudMenuSids[1], "SCOREBOARD" },
-		{ gs::TdmText::Count, host::kHudMenuSids[2], "SQUAD & TEAM" },
-		{ gs::TdmText::Count, host::kHudMenuSids[3], "SUICIDE" },
-		{ gs::TdmText::Count, host::kHudMenuSids[4], "OPTIONS" },
-		{ gs::TdmText::Count, host::kHudMenuSids[5], "QUIT" },
-		{ gs::TdmText::Count, host::kHudTdmModeSid, "TEAM DEATHMATCH" },
-		{ gs::TdmText::Count, "ID_H_MP_DM_RANDOMSPAWN", "RANDOM SPAWN POINT" },
-		{ gs::TdmText::Count, "ID_M_LEVELNAME_MP_SUBWAY", "OPERATION M\xC3\x89TRO" },
+	struct FeedText {
+		std::string_view sid;
+		std::string_view english;
 	};
-	for (const gs::TdmTextEntry &e : kFeedTexts) {
+	constexpr FeedText kFeedTexts[] = {
+		{ host::kHudMenuSids[0], "RESUME" },
+		{ host::kHudMenuSids[1], "SCOREBOARD" },
+		{ host::kHudMenuSids[2], "SQUAD & TEAM" },
+		{ host::kHudMenuSids[3], "SUICIDE" },
+		{ host::kHudMenuSids[4], "OPTIONS" },
+		{ host::kHudMenuSids[5], "QUIT" },
+		{ host::kHudTdmModeSid, "TEAM DEATHMATCH" },
+		{ "ID_H_MP_DM_RANDOMSPAWN", "RANDOM SPAWN POINT" },
+		{ "ID_M_LEVELNAME_MP_SUBWAY", "OPERATION M\xC3\x89TRO" },
+	};
+	for (const FeedText &e : kFeedTexts) {
 		const std::optional<std::string_view> t = text->find_sid(e.sid);
 		const bool pass = t.has_value() && *t == e.english && text->resolves(e.sid);
 		row(std::string("text.") + std::string(e.sid), pass,
 				"'" + (t ? std::string(*t) : std::string("absent")) + "' (want '" + std::string(e.english) + "')");
 		CHECK_MESSAGE(pass, std::string(e.sid));
-	}
-	for (const gs::TdmTextEntry &e : gs::kTdmTexts) {
-		const std::optional<std::string_view> t = text->find_sid(e.sid);
-		const bool pass = t.has_value() && *t == e.english && text->resolves(e.sid);
-		ok += pass ? 1 : 0;
-		row(std::string("text.") + std::string(e.sid), pass, "'" + (t ? std::string(*t) : std::string("absent")) + "' (want '" + std::string(e.english) + "')");
-		CHECK_MESSAGE(pass, std::string(e.sid));
-	}
-	row("text.all", ok == gs::kTdmTexts.size(), std::to_string(ok) + "/" + std::to_string(gs::kTdmTexts.size()) + " strings");
-}
-
-TEST_CASE("every font resolves to a BF3 font of the en mapping") {
-	TdmInstall *ti = tdm_install();
-	if (ti == nullptr) {
-		return;
-	}
-	bf3::core::Result<std::unique_ptr<bf3::core::EbxLibrary>> ebx = bf3::core::EbxLibrary::open(ti->install, { "Win32/UI" });
-	REQUIRE_MESSAGE(ebx.ok(), (ebx.ok() ? std::string() : ebx.error().message));
-	bf3::core::Result<ui::FontMappingCollection> mapping = ui::font_mapping_for_text_database(**ebx, "localization/us_loc");
-	REQUIRE_MESSAGE(mapping.ok(), (mapping.ok() ? std::string() : mapping.error().message));
-	for (std::string_view f : gs::kTdmFonts) {
-		const ui::ResolvedFont r = ui::resolve_font_name(*mapping, f);
-		const bool pass = (r.how == ui::FontResolution::Exact || r.how == ui::FontResolution::CaseFolded || r.how == ui::FontResolution::Family) &&
-				!r.font_long_name.empty();
-		row(std::string("font.") + std::string(f), pass, std::string(ui::font_resolution_name(r.how)) + " -> '" + r.font_long_name + "' via " + r.via);
-		CHECK_MESSAGE(pass, std::string(f));
 	}
 }
 
@@ -1337,45 +1280,6 @@ TEST_CASE("the kill card's default dogtags are TextureAssets of Win32/UI") {
 		const std::string type = p != nullptr ? std::string(p->primary().type_name()) : std::string("absent");
 		row(std::string("dogtag.") + std::string(path), type == "TextureAsset", type);
 		CHECK_MESSAGE(type == "TextureAsset", std::string(path));
-	}
-}
-
-TEST_CASE("every atlas icon and placement resolves") {
-	TdmInstall *ti = tdm_install();
-	if (ti == nullptr) {
-		return;
-	}
-	bf3::core::Result<ui::SwfLibrary> lib = ui::SwfLibrary::open(ti->install);
-	REQUIRE_MESSAGE(lib.ok(), (lib.ok() ? std::string() : lib.error().message));
-	bf3::core::Result<std::shared_ptr<const ui::SwfMovie>> movie = lib->load(gs::kTdmIconMovie);
-	REQUIRE_MESSAGE(movie.ok(), (movie.ok() ? std::string() : movie.error().message));
-	bf3::core::level::WorkBudget budget(ui::kSwfAtlasBudgetUnits);
-	bf3::core::Result<ui::SwfAtlasMap> map = ui::build_atlas_map(**movie, gs::kTdmIconMovie, budget);
-	REQUIRE_MESSAGE(map.ok(), (map.ok() ? std::string() : map.error().message));
-	std::vector<std::string_view> regions(gs::kTdmKitIcons.begin(), gs::kTdmKitIcons.end());
-	regions.push_back(gs::kTdmDeadIcon);
-	for (std::string_view name : regions) {
-		const ui::SwfAtlasRegion *r = map->find(name);
-		const bool pass = r != nullptr && !r->pieces.empty();
-		row(std::string("icon.") + std::string(name), pass, r != nullptr ? std::to_string(r->pieces.size()) + " piece(s)" : std::string("no region"));
-		CHECK_MESSAGE(pass, std::string(name));
-	}
-	for (const gs::TdmPlacement &p : gs::kTdmPlacements) {
-		bf3::core::level::WorkBudget pb(ui::kSwfLayoutBudgetUnits);
-		bf3::core::Result<std::vector<ui::HudPlacement>> rows = ui::read_hud_placements(*lib, p.movie, pb);
-		REQUIRE_MESSAGE(rows.ok(), (rows.ok() ? std::string() : rows.error().message));
-		const ui::HudPlacement *found = nullptr;
-		for (const ui::HudPlacement &h : *rows) {
-			if (h.instance == p.instance) {
-				found = &h;
-			}
-		}
-		const bool pass = found != nullptr && std::abs(found->matrix.tx - p.x) < 0.5f && std::abs(found->matrix.ty - p.y) < 0.5f && found->anchor == p.anchor;
-		char detail[160];
-		std::snprintf(detail, sizeof(detail), "at (%.2f, %.2f) %s (fallback %.0f, %.0f %s)", found ? found->matrix.tx : -1.0f, found ? found->matrix.ty : -1.0f,
-				found ? ui::hud_anchor_name(found->anchor) : "-", p.x, p.y, ui::hud_anchor_name(p.anchor));
-		row("placement." + std::string(p.movie) + "/" + std::string(p.instance), pass, detail);
-		CHECK_MESSAGE(pass, std::string(p.instance));
 	}
 }
 

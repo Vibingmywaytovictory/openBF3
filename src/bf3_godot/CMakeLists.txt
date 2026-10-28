@@ -154,7 +154,6 @@ target_sources(bf3_godot PRIVATE
 )
 
 target_sources(bf3_godot PRIVATE
-    src/hud_tdm.h
     src/death_camera.h
     src/tdm_flow.h
     src/m2b_check.h
@@ -173,10 +172,6 @@ target_sources(bf3_godot PRIVATE
 )
 
 target_sources(bf3_godot PRIVATE
-    src/hud_tdm.cpp
-    src/tdm_hud_records.cpp
-    src/hud_tdm_screen.h
-    src/hud_tdm_text.h
 )
 
 target_sources(bf3_godot PRIVATE
@@ -228,8 +223,6 @@ if(OPENBF3_BUILD_CHECKS)
         src/fx_ref.h
         src/hud_check.cpp
         src/hud_check.h
-        src/hud_tdm_demo.cpp
-        src/hud_tdm_demo.h
         src/m0_inspector_check.cpp
         src/m0_inspector_check.h
         src/m1_check.cpp

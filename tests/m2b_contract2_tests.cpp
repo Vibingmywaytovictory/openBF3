@@ -10,7 +10,6 @@
 #include "bf3/net/protocol.h"
 #include "death_camera.h"
 #include "game_crowd.h"
-#include "hud_tdm.h"
 #include "level_session_tdm.h"
 #include "m2b_check.h"
 #include "tdm_flow.h"
@@ -78,12 +77,11 @@ static_assert(ui::kHudKitCount == host::kKitCount && ui::kHudTopPlayers == 3 && 
 
 static_assert(std::is_trivially_copyable_v<host::HudKillCardSource>);
 static_assert(std::is_trivially_copyable_v<host::HudTdmFeedState>);
-static_assert(std::is_trivially_copyable_v<gs::TdmHudRecords>);
 static_assert(std::is_trivially_copyable_v<gs::DeathCameraParams> && std::is_trivially_copyable_v<gs::DeathCameraStart> &&
 		std::is_trivially_copyable_v<gs::DeathCameraView> && std::is_trivially_copyable_v<gs::DeathCameraStats>);
 static_assert(std::is_trivially_copyable_v<anim::CrowdSoldierInput>);
 static_assert(std::is_trivially_copyable_v<gs::TdmFrame>);
-static_assert(!std::is_copy_constructible_v<gs::Bf3TdmHud> && !std::is_copy_constructible_v<gs::M2bCheck>);
+static_assert(!std::is_copy_constructible_v<gs::M2bCheck>);
 static_assert(std::is_same_v<decltype(&gs::Bf3GameCrowd::set_corpse_seconds), void (gs::Bf3GameCrowd::*)(float)>);
 static_assert(std::is_same_v<decltype(&host::fill_hud_tdm),
 		void (*)(const host::HudFeedInput &, std::span<const host::PresentEvent>, const host::HudStatic &, host::HudTdmFeedState &, ui::HudModel &)>);
@@ -167,11 +165,6 @@ TEST_SUITE("m2b-contract2") {
 		CHECK(!dv.active);
 		CHECK(!dv.finished);
 
-		const gs::TdmHudRecords r{};
-		CHECK(r.missing_fonts == 0);
-		CHECK(r.missing_icons == 0);
-		CHECK(r.missing_strings == 0);
-
 		const gs::TdmOptions o{};
 		CHECK(o.deploy_screen);
 		CHECK(o.kill_limit == 0);
@@ -180,7 +173,6 @@ TEST_SUITE("m2b-contract2") {
 		const gs::TdmState g{};
 		CHECK(!g.enabled);
 		CHECK(!g.checks());
-		CHECK(g.tdm_hud == nullptr);
 		CHECK(g.death_camera == nullptr);
 		CHECK(g.check == nullptr);
 		CHECK(g.frame.game == nullptr);
@@ -200,29 +192,10 @@ TEST_SUITE("m2b-contract2") {
 		}
 	}
 
-	TEST_CASE("m2b.contract2: the TDM screens report through UiScreenRecords, and a record set composes sources") {
-		gs::TdmHudRecords r{};
-		r.model_serial = 9;
-		r.draws = 5;
-		r.missing_fonts = 1;
-		r.missing_icons = 2;
-		r.missing_strings = 3;
-
-		for (std::string_view p : { ui::kHudMpScreenPartition, ui::kKillScreenPartition, ui::kSpawnScreenPcPartition,
-					 ui::kScoreboardHud32ScreenPartition, ui::kPreRoundWaitingScreenPartition,
-					 ui::kEorWinningTeamScreenPartition }) {
-			CHECK_MESSAGE(!gs::tdm_hud_reports(p), p);
-			CHECK_MESSAGE(!gs::tdm_hud_screen_record(r, p), p);
-		}
-		const gs::UiLookupRecord look = gs::tdm_hud_lookup_record(r);
-		CHECK(look.model_serial == 9);
-		CHECK(look.draws == 5);
-		CHECK(look.missing_fonts + look.missing_icons + look.missing_strings == 6);
-
+	TEST_CASE("m2b.contract2: a record set composes UiScreenRecords sources") {
 		class Source final : public gs::UiScreenRecords {
 		public:
-			Source(std::string_view p_partition, uint64_t p_shown, std::optional<gs::UiLookupRecord> p_lookup) :
-					partition_(p_partition), shown_(p_shown), lookup_(p_lookup) {}
+			Source(std::string_view p_partition, uint64_t p_shown) : partition_(p_partition), shown_(p_shown) {}
 			bool reports(std::string_view p_partition) const override { return p_partition == partition_; }
 			std::optional<gs::UiScreenRecord> screen_record(std::string_view p_partition) const override {
 				if (!reports(p_partition)) {
@@ -233,18 +206,15 @@ TEST_SUITE("m2b-contract2") {
 				out.shown = shown_;
 				return out;
 			}
-			std::optional<gs::UiLookupRecord> lookup_record() const override { return lookup_; }
 
 		private:
 			std::string_view partition_;
 			uint64_t shown_ = 0;
-			std::optional<gs::UiLookupRecord> lookup_;
 		};
-		const Source first(ui::kKillScreenPartition, 1, gs::UiLookupRecord{ 4, 10, 1, 0, 0 });
-		const Source second(ui::kKillScreenPartition, 2, std::nullopt);
-		const Source third(ui::kSpawnScreenPcPartition, 7, gs::UiLookupRecord{ 6, 5, 0, 2, 3 });
+		const Source first(ui::kKillScreenPartition, 1);
+		const Source second(ui::kKillScreenPartition, 2);
+		const Source third(ui::kSpawnScreenPcPartition, 7);
 		gs::UiScreenRecordSet set;
-		CHECK(!set.lookup_record());
 		CHECK(!set.screen_record(ui::kKillScreenPartition));
 		set.add(&first);
 		set.add(&second);
@@ -257,21 +227,13 @@ TEST_SUITE("m2b-contract2") {
 		CHECK(!set.reports(ui::kHudMpScreenPartition));
 		CHECK(set.screen_record(ui::kKillScreenPartition)->shown == 1);
 		CHECK(set.screen_record(ui::kSpawnScreenPcPartition)->shown == 7);
-		const gs::UiLookupRecord sum = *set.lookup_record();
-		CHECK(sum.model_serial == 6);
-		CHECK(sum.draws == 15);
-		CHECK(sum.missing_fonts == 1);
-		CHECK(sum.missing_icons == 2);
-		CHECK(sum.missing_strings == 3);
 		set.remove(&first);
 		CHECK(set.sources() == 2);
 		CHECK(set.screen_record(ui::kKillScreenPartition)->shown == 2);
-		CHECK(set.lookup_record()->draws == 5);
 		set.remove(&third);
-		CHECK(!set.lookup_record());
 		CHECK(!set.reports(ui::kSpawnScreenPcPartition));
 		{
-			const Source brief(ui::kHudMpScreenPartition, 3, std::nullopt);
+			const Source brief(ui::kHudMpScreenPartition, 3);
 			set.add(&brief);
 			CHECK(set.screen_record(ui::kHudMpScreenPartition)->shown == 3);
 		}

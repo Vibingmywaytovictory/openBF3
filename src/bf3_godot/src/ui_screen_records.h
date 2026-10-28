@@ -27,14 +27,6 @@ struct UiScreenRecord {
 	std::string text(std::string_view p_fact) const;
 };
 
-struct UiLookupRecord {
-	uint64_t model_serial = 0;
-	uint64_t draws = 0;
-	uint64_t missing_fonts = 0;
-	uint64_t missing_icons = 0;
-	uint64_t missing_strings = 0;
-};
-
 void add_screen_widget_facts(const bf3::core::ui::HudScreen &p_screen, UiScreenRecord &r_record);
 
 class UiScreenRecordSet;
@@ -47,7 +39,6 @@ public:
 	virtual ~UiScreenRecords();
 	virtual bool reports(std::string_view p_partition) const = 0;
 	virtual std::optional<UiScreenRecord> screen_record(std::string_view p_partition) const = 0;
-	virtual std::optional<UiLookupRecord> lookup_record() const { return std::nullopt; }
 
 private:
 	friend class UiScreenRecordSet;
@@ -64,7 +55,6 @@ public:
 
 	bool reports(std::string_view p_partition) const override;
 	std::optional<UiScreenRecord> screen_record(std::string_view p_partition) const override;
-	std::optional<UiLookupRecord> lookup_record() const override;
 
 private:
 	friend class UiScreenRecords;
