@@ -271,5 +271,7 @@ private:
 
 std::string ui_flow_value_text(const std::optional<std::string> &p_value);
 bool ui_flow_truthy(std::string_view p_value);
+bool ui_flow_action_truthy(const UiFlowAction &p_action);
+std::optional<float> ui_flow_action_float(const UiFlowAction &p_action);
 
 }

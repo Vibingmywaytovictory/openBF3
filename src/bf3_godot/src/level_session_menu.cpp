@@ -35,22 +35,6 @@ using namespace godot;
 
 namespace bf3::godot_side {
 
-namespace {
-
-bool param_truthy(const bf3::core::ui::UiFlowAction &p_action) {
-	return !p_action.params.empty() && bf3::core::ui::ui_flow_truthy(p_action.params.front());
-}
-
-float param_float(const bf3::core::ui::UiFlowAction &p_action, float p_default) {
-	if (p_action.params.empty()) {
-		return p_default;
-	}
-	double v = 0.0;
-	return bf3::core::parse_finite(p_action.params.front(), v) ? float(v) : p_default;
-}
-
-}
-
 void NativeMenu::build(Bf3UiScreens &r_screens) {
 	for (const std::string_view p : kMenuDrawnPartitions) {
 		r_screens.set_drawn(p, true);
@@ -101,18 +85,18 @@ void NativeMenu::frame(Bf3UiScreens &r_screens, const bf3::host::UiFlowSession *
 void NativeMenu::apply(const bf3::core::ui::UiFlowAction &p_action, const NativeMenuIo &p_io) {
 	const std::string_view n = p_action.name;
 	if (n == kUiGameInputAction) {
-		game_input_ = param_truthy(p_action);
+		game_input_ = bf3::core::ui::ui_flow_action_truthy(p_action);
 		++(game_input_ ? stats_.game_input_on : stats_.game_input_off);
 		if (p_io.mapper != nullptr) {
 			p_io.mapper->set_game_input(game_input_);
 		}
 	} else if (n == kUiMouseInputAction) {
-		mouse_input_ = param_truthy(p_action);
+		mouse_input_ = bf3::core::ui::ui_flow_action_truthy(p_action);
 	} else if (n == kUiMouseCursorAction) {
-		cursor_wanted_ = param_truthy(p_action);
+		cursor_wanted_ = bf3::core::ui::ui_flow_action_truthy(p_action);
 	} else if (n == kUiCameraChangedAction) {
 		if (Bf3UiPostProcess *post = Bf3UiPostProcess::ensure(p_io.parent, p_io.level)) {
-			post->trigger_glitch(param_float(p_action, 0.0f));
+			post->trigger_glitch(bf3::core::ui::ui_flow_action_float(p_action).value_or(0.0f));
 			++stats_.glitches;
 		}
 	} else if (n == kUiSuicideAction) {

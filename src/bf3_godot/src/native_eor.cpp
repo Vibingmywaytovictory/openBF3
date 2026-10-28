@@ -14,14 +14,6 @@ namespace ui = bf3::core::ui;
 
 namespace {
 
-bool param_truthy(const ui::UiFlowAction &p_action) {
-	return !p_action.params.empty() && ui::ui_flow_truthy(p_action.params.front());
-}
-
-float param_float(const ui::UiFlowAction &p_action) {
-	return p_action.params.empty() ? 0.0f : std::strtof(p_action.params.front().c_str(), nullptr);
-}
-
 std::string rows_signature(const std::vector<ui::As2Value> &p_rows) {
 	std::string out;
 	for (const ui::As2Value &r : p_rows) {
@@ -63,12 +55,12 @@ bool NativeEor::take(const ui::UiFlowAction &p_action) {
 void NativeEor::apply(const ui::UiFlowAction &p_action, const NativeEorIo &p_io) {
 	const std::string_view n = p_action.name;
 	if (n == kEorMouseInputAction) {
-		mouse_input_ = param_truthy(p_action);
+		mouse_input_ = ui::ui_flow_action_truthy(p_action);
 	} else if (n == kEorGameInputAction) {
-		game_input_ = param_truthy(p_action);
+		game_input_ = ui::ui_flow_action_truthy(p_action);
 	} else if (n == kEorCameraChangedAction) {
 		if (Bf3UiPostProcess *post = Bf3UiPostProcess::ensure(p_io.parent, p_io.level)) {
-			post->trigger_glitch(param_float(p_action));
+			post->trigger_glitch(ui::ui_flow_action_float(p_action).value_or(0.0f));
 			++stats_.glitches;
 		}
 	} else if (n == kEorQuitGameAction || n == kEorShutDownAction) {

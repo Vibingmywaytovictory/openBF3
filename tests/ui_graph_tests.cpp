@@ -172,7 +172,7 @@ TEST_SUITE("ui-graph-unit") {
 		CHECK_FALSE(t.name_of(1).has_value());
 	}
 
-	TEST_CASE("ui graph: truthy values") {
+	TEST_CASE("ui graph: truthy values, an action's truthy and float (a glitch power, finite and not negative) first param") {
 		CHECK(ui_flow_truthy("True"));
 		CHECK(ui_flow_truthy("1"));
 		CHECK(ui_flow_truthy("0.35"));
@@ -181,6 +181,18 @@ TEST_SUITE("ui-graph-unit") {
 		CHECK_FALSE(ui_flow_truthy("0"));
 		CHECK_FALSE(ui_flow_truthy(""));
 		CHECK(ui_data_category_leaf("ui/uicomponents/uisettingscomp") == "uisettingscomp");
+		UiFlowAction a;
+		CHECK_FALSE(ui_flow_action_truthy(a));
+		CHECK_FALSE(ui_flow_action_float(a).has_value());
+		a.params = { "0.35" };
+		CHECK(ui_flow_action_truthy(a));
+		CHECK(ui_flow_action_float(a) == std::optional<float>(0.35f));
+		a.params = { "-1" };
+		CHECK_FALSE(ui_flow_action_float(a).has_value());
+		a.params = { "nan" };
+		CHECK_FALSE(ui_flow_action_float(a).has_value());
+		a.params = { "False" };
+		CHECK_FALSE(ui_flow_action_truthy(a));
 	}
 
 	TEST_CASE("ui graph: a synthetic flow pushes, focuses, routes concepts and pops") {

@@ -1,11 +1,13 @@
 #include "bf3/core/ui/ui_graph.h"
 
+#include "bf3/core/util/key_values.h"
 #include "bf3/core/util/text.h"
 
 #include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <map>
 
 namespace bf3::core::ui {
@@ -75,6 +77,20 @@ bool operand_true(std::string_view p_op, double p_left, double p_right) {
 
 std::string ui_flow_value_text(const std::optional<std::string> &p_value) {
 	return p_value ? *p_value : std::string("-");
+}
+
+bool ui_flow_action_truthy(const UiFlowAction &p_action) {
+	return !p_action.params.empty() && ui_flow_truthy(p_action.params.front());
+}
+
+std::optional<float> ui_flow_action_float(const UiFlowAction &p_action) {
+	float v = 0.0f;
+	if (p_action.params.empty() ||
+			parse_float_value(p_action.params.front(), 0.0, std::numeric_limits<float>::max(), v).fault !=
+					KeyFault::None) {
+		return std::nullopt;
+	}
+	return v;
 }
 
 bool ui_flow_truthy(std::string_view p_value) {

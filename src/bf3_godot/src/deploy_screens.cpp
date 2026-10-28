@@ -37,16 +37,6 @@ std::optional<int32_t> flow_index(std::string_view p_text, size_t p_count) {
 	return index;
 }
 
-std::optional<float> flow_power(const std::vector<std::string> &p_params) {
-	float power = 0.0f;
-	if (p_params.empty() ||
-			bf3::core::parse_float_value(p_params.front(), 0.0, std::numeric_limits<float>::max(), power).fault !=
-					bf3::core::KeyFault::None) {
-		return std::nullopt;
-	}
-	return power;
-}
-
 }
 
 bf3::core::Result<bf3::net::LoadoutRequest> deploy_loadout_request(const DeployPick &p_pick,
@@ -157,7 +147,7 @@ std::optional<uint8_t> DeployScreens::feed(bf3::host::UiFlowSession &r_session, 
 
 bool DeployScreens::take_action(const bf3::core::ui::UiFlowAction &p_action) {
 	if (p_action.key == bf3::core::ui::kPostProcessEffectActionKey) {
-		if (const std::optional<float> p = flow_power(p_action.params)) {
+		if (const std::optional<float> p = bf3::core::ui::ui_flow_action_float(p_action)) {
 			glitch_ = *p;
 		}
 		return false;
