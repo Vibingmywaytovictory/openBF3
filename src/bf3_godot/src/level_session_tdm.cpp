@@ -553,8 +553,10 @@ void Bf3LevelSession::tdm_presented(uint64_t p_now_ns) {
 		}
 	}
 	const net::PlayerRow *own_row = m.own_slot != 0xFF ? player_row_of(f, m.own_slot) : nullptr;
-	m.own_team = f.own_team == 1 || f.own_team == 2 ? f.own_team : (own_row != nullptr && (own_row->team == 1 || own_row->team == 2) ? own_row->team : uint8_t(0));
-	if (!r_game.spawned && m.own_team != 0) {
+	const uint8_t roster_team =
+			own_row != nullptr && (own_row->team == 1 || own_row->team == 2) ? own_row->team : uint8_t(0);
+	m.own_team = roster_team != 0 ? roster_team : (f.own_team == 1 || f.own_team == 2 ? f.own_team : uint8_t(0));
+	if (m.own_team != 0) {
 		r_game.own_team = m.own_team;
 	}
 
