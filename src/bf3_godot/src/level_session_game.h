@@ -15,6 +15,7 @@
 #include "bf3/host/firefight_brain.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/hud_feed.h"
+#include "bf3/host/loadout.h"
 #include "bf3/host/presentation_weapon.h"
 #include "bf3/render/viewmodel_set.h"
 #include "bf3/sim/collision_world.h"
@@ -23,6 +24,7 @@
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -128,6 +130,13 @@ struct GameState {
 	std::string vm_tuning_source;
 
 	std::array<std::unordered_map<uint16_t, int>, 2> def_items;
+	std::array<std::map<std::pair<uint16_t, CatalogPicks>, int>, 2> gear_items;
+	const bf3::host::LoadoutCatalog *loadouts = nullptr;
+	bf3::net::SoldierGear own_gear;
+	uint8_t own_gear_team = 0;
+	CatalogPicks own_picks{};
+	int own_item(uint16_t p_def) const;
+	void want_own_gear(const bf3::net::SoldierGear &p_gear);
 	std::unique_ptr<bf3::render::ViewmodelSources> vm_sources;
 	std::array<std::unordered_map<uint16_t, std::string>, 2> vm_catalog;
 	std::vector<std::unique_ptr<bf3::render::ViewmodelSet>> vm_catalog_sets;

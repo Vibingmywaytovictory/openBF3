@@ -180,6 +180,37 @@ bool GameState::wants_case(M2aCase p_case) const {
 	return std::find(cases.begin(), cases.end(), p_case) != cases.end();
 }
 
+static_assert(std::tuple_size_v<CatalogPicks> == host::kLoadoutAccessories);
+
+int GameState::own_item(uint16_t p_def) const {
+	if (p_def != sw::kNoWeapon && p_def == own_gear.def && own_picks != CatalogPicks{} &&
+			(own_team == 1 || own_team == 2)) {
+		const auto it = gear_items[size_t(own_team - 1)].find({ p_def, own_picks });
+		if (it != gear_items[size_t(own_team - 1)].end()) {
+			return it->second;
+		}
+	}
+	return item_of(own_team, p_def);
+}
+
+void GameState::want_own_gear(const net::SoldierGear &p_gear) {
+	own_gear = p_gear;
+	own_gear_team = own_team;
+	own_picks = {};
+	const host::LoadoutItem *item =
+			loadouts != nullptr ? host::loadout_primary_item(*loadouts, own_team, p_gear.def) : nullptr;
+	if (item == nullptr) {
+		return;
+	}
+	const host::LoadoutAccessorySet set = host::loadout_accessory_set(*item, p_gear.accessories);
+	own_picks = set.picked;
+	if (own_picks == CatalogPicks{} || catalog == nullptr) {
+		return;
+	}
+	catalog->request_viewmodel(
+			own_team, p_gear.def, item->unlock, render::WeaponAccessories{ set.active, set.listed }, own_picks);
+}
+
 int GameState::item_of(uint8_t p_team, uint16_t p_def) const {
 	if (p_team < 1 || p_team > 2) {
 		return -1;
@@ -837,6 +868,7 @@ void start_viewmodel_catalog(GameState &r_game, const host::GunplayLevel *p_gunp
 	if (r_game.vm_sources == nullptr || p_gunplay == nullptr) {
 		return;
 	}
+	r_game.loadouts = &p_gunplay->loadouts;
 	for (uint8_t team = 1; team <= 2; ++team) {
 		for (const host::LoadoutWeapon &w : host::loadout_weapons(p_gunplay->loadouts, team)) {
 			r_game.vm_catalog[size_t(team - 1)].emplace(w.def, w.unlock);
@@ -857,10 +889,16 @@ void step_viewmodel_catalog(GameState &r_game, const host::PresentationFrame &p_
 					(c.error.empty() ? std::string("the set does not fit the team's viewmodel") : c.error)));
 			continue;
 		}
-		r_game.def_items[size_t(c.team - 1)][c.def] = index;
+		const bool picked = c.picks != CatalogPicks{};
+		if (picked) {
+			r_game.gear_items[size_t(c.team - 1)][{ c.def, c.picks }] = index;
+		} else {
+			r_game.def_items[size_t(c.team - 1)][c.def] = index;
+		}
 		char line[256];
-		std::snprintf(line, sizeof(line), "[game] catalog viewmodel %s (team %u, def %u): item %d in %.2f s",
-				c.unlock.c_str(), unsigned(c.team), unsigned(c.def), index, c.seconds);
+		std::snprintf(line, sizeof(line), "[game] catalog viewmodel %s (team %u, def %u%s): item %d in %.2f s",
+				c.unlock.c_str(), unsigned(c.team), unsigned(c.def), picked ? ", picked accessories" : "", index,
+				c.seconds);
 		UtilityFunctions::print(line);
 		r_game.vm_catalog_sets.push_back(std::move(c.set));
 	}
@@ -875,6 +913,10 @@ void step_viewmodel_catalog(GameState &r_game, const host::PresentationFrame &p_
 		defs[sw::kMaxWeaponSlots] = r_game.weapon.def;
 	}
 	r_game.want_catalog_weapons(defs);
+	if (r_game.own_slot < p_frame.gear.size() &&
+			(p_frame.gear[r_game.own_slot] != r_game.own_gear || r_game.own_team != r_game.own_gear_team)) {
+		r_game.want_own_gear(p_frame.gear[r_game.own_slot]);
+	}
 }
 
 void step_game_parts(Node3D &r_parent, GameState &r_game, const host::PresentationFrame &p_frame, uint64_t p_now_ns, double p_delta, Camera3D *p_camera,
@@ -1152,7 +1194,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 	if (own_vm != nullptr && camera != nullptr) {
 		const bool show = g.alive && g.weapon.valid && !free_camera;
 		if (show) {
-			const int item = g.item_of(g.own_team, g.weapon.def);
+			const int item = g.own_item(g.weapon.def);
 			if (item < 0) {
 				++g.vm_unmapped;
 			}
