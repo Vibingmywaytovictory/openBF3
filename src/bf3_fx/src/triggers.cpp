@@ -2,6 +2,7 @@
 
 #include "fx_ebx.h"
 
+#include "bf3/core/gameplay/weapon_resolver.h"
 #include "bf3/core/util/finite.h"
 #include "bf3/sim/weapons/sim_time.h"
 
@@ -330,6 +331,44 @@ core::Result<FireEffectTable> load_fire_effects(const core::EbxResolver &p_db, s
 		}
 	}
 	return t;
+}
+
+core::Status add_unlock_fire_effects(
+		FireEffectTable &r_table, const core::EbxResolver &p_db, uint16_t p_def, std::string_view p_weapon_unlock) {
+	if (p_def >= r_table.defs.size()) {
+		return core::make_error(
+				std::string(p_weapon_unlock) + ": def " + std::to_string(p_def) + " has no fire effects");
+	}
+	const core::Result<std::vector<gp::WeaponUnlockModifier>> mods =
+			gp::weapon_unlock_modifiers(p_db, p_weapon_unlock, "WeaponFiringEffectsModifier");
+	if (!mods) {
+		return mods.error();
+	}
+	for (const gp::WeaponUnlockModifier &m : *mods) {
+		gp::WorkBudget budget(kFireEffectsWork);
+		detail::Reader r(p_db, budget);
+		r.set_where(std::string(p_weapon_unlock) + " " + m.unlock);
+		WeaponFireEffects w = r_table.defs[p_def];
+		std::vector<FireEffect> first, third;
+		const core::EbxStruct f = m.modifier.data();
+		read_fire_list(r, f, "FireEffects1p", first);
+		read_fire_list(r, f, "FireEffects3p", third);
+		if (!r.ok()) {
+			return core::make_error(r.message());
+		}
+		if (first.empty() && third.empty()) {
+			continue;
+		}
+		if (!first.empty()) {
+			w.first_person = std::move(first);
+		}
+		if (!third.empty()) {
+			w.third_person = std::move(third);
+		}
+		r_table.variants.push_back(FireEffectVariant{ p_def, uint16_t(r_table.defs.size()), m.unlock });
+		r_table.defs.push_back(std::move(w));
+	}
+	return core::Status();
 }
 
 std::vector<std::string> impact_sound_names(const ImpactTable &p_table) {
@@ -792,6 +831,13 @@ struct FxTriggers::Impl {
 		return fire && p_def < fire->defs.size() ? &fire->defs[p_def] : nullptr;
 	}
 
+	std::array<std::pair<uint16_t, uint16_t>, 256> slot_effects{};
+
+	uint16_t effects_of(uint8_t p_slot, uint16_t p_def) const {
+		const std::pair<uint16_t, uint16_t> &e = slot_effects[p_slot];
+		return e.first == p_def && e.second != p_def ? e.second : p_def;
+	}
+
 	bool first_time(uint64_t p_key, bool p_count_double = true) {
 		if (seen.contains(p_key)) {
 			if (p_count_double) {
@@ -915,7 +961,8 @@ struct FxTriggers::Impl {
 	void on_shot(const present::PresentEvent &p_e, float p_age) {
 		const bool own = p_e.kind == present::PresentKind::OwnShot;
 		++(own ? stats.own_shots : stats.remote_shots);
-		const WeaponFireEffects *w = def_of(p_e.def);
+		const uint16_t effects = effects_of(p_e.slot, p_e.def);
+		const WeaponFireEffects *w = def_of(effects);
 		const Vec3 origin = from(p_e.pos);
 		const Vec3 dir = normalize_or(from(p_e.dir), { 0, 0, 1 });
 		remember_shot(p_e.slot, p_e.id, dir, p_e.def);
@@ -928,6 +975,9 @@ struct FxTriggers::Impl {
 		}
 		if (w->firearm) {
 			++stats.firearm_shots;
+		}
+		if (effects != p_e.def) {
+			++stats.accessory_effects;
 		}
 		MuzzleSample m;
 		if (const MuzzleSample *s = muzzle_for(p_e.slot, own)) {
@@ -961,7 +1011,7 @@ struct FxTriggers::Impl {
 				if (attached.size() >= kMaxAttached) {
 					attached.erase(attached.begin());
 				}
-				attached.push_back(Attached{ h, p_e.slot, first_person, p_e.def, uint32_t(i) });
+				attached.push_back(Attached{ h, p_e.slot, first_person, effects, uint32_t(i) });
 			}
 		}
 		if ((p_e.flags & present::flags::kTracer) != 0 && !w->tracer.empty()) {
@@ -1263,6 +1313,10 @@ FxTriggers::~FxTriggers() = default;
 
 void FxTriggers::set_config(const FxTriggerConfig &p_config) {
 	impl_->config = p_config;
+}
+
+void FxTriggers::set_slot_effects(uint8_t p_slot, uint16_t p_def, uint16_t p_effects) {
+	impl_->slot_effects[p_slot] = { p_def, p_effects };
 }
 
 void FxTriggers::on_muzzles(std::span<const MuzzleSample> p_muzzles) {

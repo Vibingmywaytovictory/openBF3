@@ -1351,6 +1351,7 @@ TEST_CASE("cells: Metro's fire effects, preload, the 1p flash fraction, in-game 
 		MESSAGE("fire effects note: " << n);
 	}
 	CHECK(fire->defs.size() == (*gl)->defs.size());
+	CHECK(fire->variants.empty());
 
 	auto def_of = [&](std::string_view p_variant) -> const WeaponFireEffects * {
 		for (size_t i = 0; i < (*gl)->defs.size(); ++i) {
@@ -1377,6 +1378,35 @@ TEST_CASE("cells: Metro's fire effects, preload, the 1p flash fraction, in-game 
 	CHECK(m16->firearm);
 	CHECK(m16->converge == doctest::Approx(30.0f));
 	CHECK(m16->tracer_speed > 500.0f);
+	const size_t m16_index = size_t(m16 - fire->defs.data());
+	const WeaponFireEffects m16_plain = *m16;
+	REQUIRE(add_unlock_fire_effects(*fire, *metro->sources->level, uint16_t(m16_index), "weapons/m16a4/u_m16a4").ok());
+	std::set<std::string> m16_variants;
+	for (const FireEffectVariant &v : fire->variants) {
+		REQUIRE(v.index < fire->defs.size());
+		CHECK(v.def == m16_index);
+		const WeaponFireEffects &w = fire->defs[v.index];
+		m16_variants.insert(v.unlock + ": " + leaf(w.first_person.front().blueprint) + " / " +
+				leaf(w.third_person.front().blueprint));
+		CHECK(w.tracer == m16_plain.tracer);
+	}
+	for (const std::string &v : m16_variants) {
+		MESSAGE("M16A4 accessory fire effects: " << v);
+	}
+	CHECK(m16_variants ==
+			std::set<std::string>{
+					"weapons/m16a4/u_m16a4_flashsuppressor: fx_muzz_generic_silencer_1p / fx_muzz_generic_silencer_3p",
+					"weapons/m16a4/u_m16a4_m26_buck: fx_muzz_generic_shotgun_1p / fx_muzz_generic_shotgun_3p",
+					"weapons/m16a4/u_m16a4_m26_flechette: fx_muzz_generic_shotgun_1p / fx_muzz_generic_shotgun_3p",
+					"weapons/m16a4/u_m16a4_m26_frag: fx_muzz_generic_shotgun_1p / fx_muzz_generic_shotgun_3p",
+					"weapons/m16a4/u_m16a4_m26_slug: fx_muzz_generic_shotgun_1p / fx_muzz_generic_shotgun_3p",
+					"weapons/m16a4/u_m16a4_m320_he: fx_muzz_grenadelauncher_1p / fx_muzz_grenadelauncher_3p",
+					"weapons/m16a4/u_m16a4_m320_lvg: fx_muzz_grenadelauncher_1p / fx_muzz_grenadelauncher_3p",
+					"weapons/m16a4/u_m16a4_m320_shg: fx_muzz_grenadelauncher_1p / fx_muzz_grenadelauncher_3p",
+					"weapons/m16a4/u_m16a4_m320_smk: fx_muzz_grenadelauncher_1p / fx_muzz_grenadelauncher_3p",
+					"weapons/m16a4/u_m16a4_sound_suppressor: fx_muzz_generic_silencer_1p / "
+					"fx_muzz_generic_silencer_3p" });
+	m16 = &fire->defs[m16_index];
 	const WeaponFireEffects *m67 = def_of("weapons/m67/u_m67");
 	REQUIRE(m67 != nullptr);
 	CHECK_FALSE(m67->firearm);

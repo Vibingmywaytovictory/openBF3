@@ -91,8 +91,15 @@ struct WeaponFireEffects {
 	float converge = kTracerConvergeM;
 };
 
+struct FireEffectVariant {
+	uint16_t def = 0;
+	uint16_t index = 0;
+	std::string unlock;
+};
+
 struct FireEffectTable {
 	std::vector<WeaponFireEffects> defs;
+	std::vector<FireEffectVariant> variants;
 	std::vector<std::string> notes;
 
 	std::vector<std::string> blueprints() const;
@@ -100,6 +107,9 @@ struct FireEffectTable {
 	std::string default_detonation;
 };
 core::Result<FireEffectTable> load_fire_effects(const core::EbxResolver &p_db, std::span<const core::gameplay::WeaponDef> p_defs);
+
+core::Status add_unlock_fire_effects(
+		FireEffectTable &r_table, const core::EbxResolver &p_db, uint16_t p_def, std::string_view p_weapon_unlock);
 
 std::vector<std::string> impact_sound_names(const ImpactTable &p_table);
 
@@ -250,6 +260,7 @@ struct FxTriggerStats {
 	uint64_t duds = 0;
 	uint64_t rejected = 0;
 	uint64_t unknown_defs = 0;
+	uint64_t accessory_effects = 0;
 	uint64_t tracer_steals = 0;
 	uint64_t attached_updates = 0;
 	uint64_t pending_now = 0;
@@ -283,6 +294,8 @@ public:
 	void set_config(const FxTriggerConfig &p_config);
 
 	void on_muzzles(std::span<const MuzzleSample> p_muzzles);
+
+	void set_slot_effects(uint8_t p_slot, uint16_t p_def, uint16_t p_effects);
 
 	void on_events(std::span<const present::PresentEvent> p_events, const present::PresentClock &p_now, const FxView &p_view);
 

@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <map>
 #include <optional>
+#include <tuple>
 
 namespace bf3::godot_side {
 
@@ -54,6 +55,7 @@ struct Bf3GameFx::Impl {
 	std::optional<fx::ImpactTable> impacts;
 	std::unique_ptr<fx::EffectLibrary> library;
 	std::shared_ptr<const fx::FireEffectTable> fire;
+	std::vector<std::tuple<uint16_t, uint32_t, uint16_t>> accessory_effects;
 	std::unique_ptr<fx::FxWorld> world;
 	std::unique_ptr<fx::FxTriggers> triggers;
 	fx::FxTriggerConfig config;
@@ -262,6 +264,37 @@ core::Status Bf3GameFx::load(const GameLoadInputs &p_in) {
 		if (!fire) {
 			return core::Error{ "Bf3GameFx::load: fire effects: " + fire.error().message };
 		}
+		m.accessory_effects.clear();
+		const host::GunplayLevel &g = *p_in.shared->gunplay;
+		std::vector<uint16_t> done;
+		for (const auto &team : g.loadouts.kits) {
+			for (const host::LoadoutKit &kit : team) {
+				for (const host::LoadoutItem &item : kit.slots[size_t(core::gameplay::WeaponSlot::Primary)]) {
+					if (std::find(done.begin(), done.end(), item.def) != done.end()) {
+						continue;
+					}
+					done.push_back(item.def);
+					const size_t first = fire->variants.size();
+					if (const core::Status st = fx::add_unlock_fire_effects(*fire, lib, item.def, item.unlock); !st) {
+						m.notes.push_back("accessory fire effects " + st.error().message);
+						continue;
+					}
+					for (size_t v = first; v < fire->variants.size(); ++v) {
+						for (size_t a = 0; a < host::kLoadoutAccessories; ++a) {
+							for (size_t i = 0; i < item.accessory_unlocks[a].size() && i < item.accessories[a].size();
+									++i) {
+								if (item.accessory_unlocks[a][i] == fire->variants[v].unlock) {
+									m.accessory_effects.emplace_back(
+											item.def, item.accessories[a][i], fire->variants[v].index);
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		m.notes.push_back(fmt("accessory fire effects: %zu variants, %zu (def, accessory) pairs", fire->variants.size(),
+				m.accessory_effects.size()));
 		m.fire = std::make_shared<const fx::FireEffectTable>(std::move(*fire));
 	} else {
 		m.fire = std::make_shared<const fx::FireEffectTable>();
@@ -387,6 +420,19 @@ void Bf3GameFx::step(const GameFrame &p_frame) {
 			continue;
 		}
 		m.muzzles.push_back(s);
+	}
+	if (p_frame.frame != nullptr) {
+		for (const net::SoldierGear &gear : p_frame.frame->gear) {
+			uint16_t effects = gear.def;
+			for (const auto &[def, accessory, index] : m.accessory_effects) {
+				if (def == gear.def && accessory != 0 &&
+						std::find(gear.accessories.begin(), gear.accessories.end(), accessory) !=
+								gear.accessories.end()) {
+					effects = index;
+				}
+			}
+			m.triggers->set_slot_effects(gear.slot, gear.def, effects);
+		}
 	}
 	m.triggers->on_muzzles(m.muzzles);
 	fx::FxView view;
