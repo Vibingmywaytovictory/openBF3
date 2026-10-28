@@ -986,6 +986,46 @@ TEST_SUITE("audio-patch") {
 		CHECK(again.left(100 + 480 - 512) == doctest::Approx(1000.0f / 32768.0f));
 	}
 
+	TEST_CASE("Sampler: a slot stepped twice within a block or across a block edge fades every old play out") {
+		const TestWave w = make_wave(5, 4800, 1, 3, 48000, true);
+		Builder b;
+		const uint16_t trig = b.input(1, true), step = b.input(2, true);
+		b.p.waves.push_back(SoundWaveRef{ w.partition, "test_wave" });
+		const uint32_t s = b.sampler(1, 0, SamplerLoop::Release);
+		b.set(s, cp::SmpTrigger, Builder::R(trig));
+		b.set(s, cp::SmpStep, Builder::R(step));
+		b.set(s, cp::SmpEnableStep, Builder::C(1.0f));
+		auto inst = instance(b.build(), w.bank);
+		Buses buses;
+		std::vector<float> out;
+		const auto block = [&](uint64_t p_first) {
+			buses.block(*inst, p_first);
+			out.insert(out.end(), buses.b.channels[size_t(MasterBus::GameMixMain)][0],
+					buses.b.channels[size_t(MasterBus::GameMixMain)][0] + 512);
+		};
+		inst->post_event(1, 0);
+		block(0);
+		inst->post_event(2, 100);
+		inst->post_event(2, 160);
+		block(512);
+		inst->post_event(2, 500);
+		block(1024);
+		inst->post_event(2, 20);
+		block(1536);
+		block(2048);
+		float largest = 0.0f, loudest = 0.0f;
+		for (size_t i = 1; i < out.size(); ++i) {
+			largest = std::max(largest, std::fabs(out[i] - out[i - 1]));
+			loudest = std::max(loudest, std::fabs(out[i]));
+		}
+		const float sine_step = 16000.0f / 32768.0f * float(2.0 * kPi * 1000.0 / 48000.0);
+		MESSAGE("largest sample step " << largest << ", sine step " << sine_step << ", peak " << loudest);
+		CHECK(loudest > 0.4f);
+		CHECK(largest < 2.5f * sine_step);
+		CHECK(inst->stats().slot_takeovers == 4);
+		CHECK(inst->stats().takeover_cuts == 0);
+	}
+
 	TEST_CASE("Sampler: unstepped LtRelease plays loop segments back to back; Trigger and Release together play intro then tail") {
 		const TestWave w = make_wave(5, 1000, 1, 3);
 		Builder b;

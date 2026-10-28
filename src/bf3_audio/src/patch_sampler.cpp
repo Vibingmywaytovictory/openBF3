@@ -504,6 +504,15 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 		}
 		push_history(play, l, r);
 	};
+	const auto render_pending_outgoing = [&] {
+		if (slot.outgoing.active) {
+			const uint32_t from = slot.outgoing_frame > p_first_frame
+					? uint32_t(std::min<uint64_t>(slot.outgoing_frame - p_first_frame, p_frames))
+					: 0u;
+			render_outgoing(slot, double(slot.outgoing.rate) / double(mix_rate) * double(s.pitch), r_left, r_right,
+					from, p_frames, stats.decode_errors);
+		}
+	};
 	const auto start_pending = [&](uint64_t p_frame) {
 		PendingStart pend = slot.pending;
 		slot.pending.armed = false;
@@ -511,6 +520,7 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 		if (takeover) {
 			++stats.slot_takeovers;
 			const float crossfade = tuning.step_crossfade_ms * 0.001f * float(mix_rate);
+			render_pending_outgoing();
 			const bool cut_outgoing = slot.outgoing.active;
 			const SlotPlay &cut_play = crossfade >= 1.0f ? slot.outgoing : play;
 			const float cut_gain = crossfade >= 1.0f ? slot.outgoing_gain : slot.fade;
@@ -646,13 +656,7 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 			}
 		}
 	}
-	if (slot.outgoing.active) {
-		const uint32_t from = slot.outgoing_frame > p_first_frame
-				? uint32_t(std::min<uint64_t>(slot.outgoing_frame - p_first_frame, p_frames))
-				: 0u;
-		render_outgoing(slot, double(slot.outgoing.rate) / double(mix_rate) * double(s.pitch), r_left, r_right, from,
-				p_frames, stats.decode_errors);
-	}
+	render_pending_outgoing();
 }
 
 }
