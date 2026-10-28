@@ -10,11 +10,7 @@
 #include "bf3/sim/weapons/weapon_sim.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
-#include <godot_cpp/classes/canvas_layer.hpp>
-#include <godot_cpp/classes/color_rect.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
-#include <godot_cpp/classes/shader.hpp>
-#include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -32,15 +28,6 @@ namespace sw = bf3::sim::weapons;
 static_assert(bf3::anim::kVmPhaseDeploying == uint8_t(sw::WeaponPhase::Deploying));
 
 namespace {
-
-const char *kVignetteShader = R"(shader_type canvas_item;
-uniform float strength = 0.0;
-void fragment() {
-	vec2 d = (UV - vec2(0.5)) * vec2(SCREEN_PIXEL_SIZE.y / SCREEN_PIXEL_SIZE.x, 1.0) * 2.0;
-	float r = length(d);
-	COLOR = vec4(0.0, 0.0, 0.0, strength * smoothstep(0.62, 0.98, r));
-}
-)";
 
 Transform3D xform_to_godot(const bf3::anim::Xform &p_x) {
 	return to_godot(p_x);
@@ -222,23 +209,6 @@ bool Bf3Viewmodel::build(const bf3::render::ViewmodelSet &p_set, const bf3::anim
 	arms_ = make_part_mesh(skeleton_, p_set.arms, p_set.arms_looks, arms_materials_, textures);
 	add_item_nodes(p_set);
 	arms_->set_visible(false);
-
-	vignette_layer_ = memnew(CanvasLayer);
-	vignette_layer_->set_name("OpticVignette");
-	vignette_layer_->set_layer(-1);
-	vignette_ = memnew(ColorRect);
-	vignette_->set_anchors_preset(Control::PRESET_FULL_RECT);
-	vignette_->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
-	Ref<Shader> shader;
-	shader.instantiate();
-	shader->set_code(kVignetteShader);
-	vignette_material_.instantiate();
-	vignette_material_->set_shader(shader);
-	vignette_material_->set_shader_parameter("strength", 0.0f);
-	vignette_->set_material(vignette_material_);
-	vignette_->set_visible(false);
-	vignette_layer_->add_child(vignette_);
-	add_child(vignette_layer_);
 	return true;
 }
 
@@ -406,13 +376,6 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 		}
 	}
 	set_viewmodel_fov(ads_frame_.viewmodel_fov);
-
-	const bool optic = ads_params_.can_zoom && ads_params_.zoom_fov <= bf3::render::kOpticVignetteMaxFov;
-	vignette_strength_ = optic ? bf3::anim::smoothstep01(ads_frame_.fov_progress) : 0.0f;
-	vignette_->set_visible(vignette_strength_ > 0.0f);
-	if (vignette_strength_ > 0.0f) {
-		vignette_material_->set_shader_parameter("strength", vignette_strength_);
-	}
 	last_present_us_ = double(Time::get_singleton()->get_ticks_usec() - t0);
 }
 

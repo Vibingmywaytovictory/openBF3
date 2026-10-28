@@ -97,8 +97,6 @@ inline constexpr float kZoomPathToleranceDeg = 2.0f;
 inline constexpr float kKnifeStandInSeconds = 0.5f;
 inline constexpr float kThrowStandInSeconds = 0.6f;
 
-inline constexpr float kOpticVignetteMaxFov = 30.0f;
-
 enum class ViewmodelItemKind : uint8_t { Gun, Grenade, Knife };
 const char *viewmodel_item_kind_name(ViewmodelItemKind p_kind);
 

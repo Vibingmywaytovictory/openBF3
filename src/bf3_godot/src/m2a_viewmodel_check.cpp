@@ -340,9 +340,11 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 					++r_acc.ads_bad;
 					r_acc.fov_bad += fmt(" ads %s %.3f", short_unlock(item->unlock).c_str(), double(cam_fov));
 				}
-				r_acc.ads_info[short_unlock(item->unlock)] = fmt("look scale %.2f (LookSpeedMultiplier %.2f), viewmodel FOV %.1f (RenderFov %.1f, ZoomRenderFov %.1f), vignette %.2f",
-						double(vm->look_scale()), double(params.look_speed_zoom), double(vm->applied_weapon_fov()), double(params.render_fov),
-						double(params.zoom_render_fov), double(vm->vignette_strength()));
+				r_acc.ads_info[short_unlock(item->unlock)] = fmt(
+						"look scale %.2f (LookSpeedMultiplier %.2f), viewmodel FOV %.1f (RenderFov %.1f, ZoomRenderFov "
+						"%.1f)",
+						double(vm->look_scale()), double(params.look_speed_zoom), double(vm->applied_weapon_fov()),
+						double(params.render_fov), double(params.zoom_render_fov));
 			} else if (m.label == "settle") {
 
 				later.push_back({ m.at + double(std::max(tuning.sway.settle_seconds, tuning.bob.settle_seconds)) + dt, m.slot, "settled" });
@@ -759,7 +761,7 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 		for (const auto &kv : all.ads_info) {
 			l += "    " + kv.first + ": " + kv.second + "\n";
 		}
-		print("[vm] info at full ADS (look scale, viewmodel FOV, optic vignette; iron sights draw no vignette, §16 Q6):\n" + l);
+		print("[vm] info at full ADS (look scale, viewmodel FOV):\n" + l);
 	}
 	if (!all.fov_bad.empty()) {
 		print("[vm] FOV misses:" + all.fov_bad);

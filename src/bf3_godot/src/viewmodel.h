@@ -16,11 +16,8 @@
 
 namespace godot {
 class Camera3D;
-class CanvasLayer;
-class ColorRect;
 class MeshInstance3D;
 class Skeleton3D;
-class ShaderMaterial;
 }
 
 namespace bf3::host {
@@ -89,7 +86,6 @@ public:
 
 	float applied_weapon_fov() const;
 	float applied_arms_fov() const;
-	float vignette_strength() const { return vignette_strength_; }
 	godot::Skeleton3D *skeleton() const { return skeleton_; }
 	int32_t camera_joint() const { return camera_joint_; }
 	const bf3::anim::ViewmodelAnimator *animator() const { return animator_.get(); }
@@ -138,10 +134,6 @@ private:
 	bf3::anim::LocalPose pose_;
 	std::vector<bf3::anim::Xform> model_;
 	float viewmodel_fov_ = -1;
-	godot::CanvasLayer *vignette_layer_ = nullptr;
-	godot::ColorRect *vignette_ = nullptr;
-	godot::Ref<godot::ShaderMaterial> vignette_material_;
-	float vignette_strength_ = 0;
 	float hip_fov_deg_ = 0.0f;
 	double last_present_us_ = 0;
 };
