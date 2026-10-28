@@ -247,7 +247,9 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 	}
 	if (!r_m.native_client_set && r_game.native_hud != nullptr && r_game.native_hud->is_ready() &&
 			!r_game.native_hud->has_failed()) {
-		screens->set_client(r_game.native_hud->client());
+		bf3::core::ui::HudClientState client = r_game.native_hud->client();
+		client.items = r_game.hud_items != nullptr ? r_game.hud_items->item_index() : nullptr;
+		screens->set_client(std::move(client));
 		r_m.native_client_set = true;
 	}
 	if (!r_m.native_following && r_m.native_client_set && flow.poll()) {
@@ -860,6 +862,19 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 				s.primary_items[i] = primaries.items[i].item_id;
 			}
 			s.chosen_primary = c.kit_primary_weapon.item_id;
+			const std::array<std::pair<const bf3::core::ui::HudItemList *, int16_t>, 2> lists{
+				{ { &c.kit_grid_data[3], c.kit_grid_selected[3] }, { &c.accessory_grid[0], c.accessory_selected[0] } }
+			};
+			const std::array<uint32_t, 2> chosen{ c.kit_gadget2.item_id, c.weapon_accessory1.item_id };
+			for (size_t l = 0; l < lists.size(); ++l) {
+				DeployCheckList &out = s.lists[l];
+				out.count = std::min<uint32_t>(lists[l].first->count, uint32_t(out.items.size()));
+				out.selected = lists[l].second;
+				for (size_t i = 0; i < out.count; ++i) {
+					out.items[i] = lists[l].first->items[i].item_id;
+				}
+				out.chosen = chosen[l];
+			}
 			const size_t primary = size_t(bf3::core::gameplay::WeaponSlot::Primary);
 			if (const host::HudStaticRow *row = f.own_weapons_valid
 							? r_game.hud_static.row(f.own_weapons_curr.slots[primary].def)

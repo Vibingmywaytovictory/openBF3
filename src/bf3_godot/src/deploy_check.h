@@ -46,6 +46,18 @@ inline constexpr std::array<DeployCheckTab, 2> kDeployCheckTabs{ {
 		{ "squad", "instance1.TabBar_01.tabBarHolder.button_1" },
 } };
 inline constexpr double kDeployCheckTabSeconds = 1.5;
+inline constexpr uint32_t kCustomizeFirstStep = 10;
+
+struct DeployCheckList {
+	uint32_t count = 0;
+	int32_t selected = -1;
+	std::array<uint32_t, 32> items{};
+	uint32_t chosen = 0;
+};
+
+inline constexpr size_t kDeployCheckGadget2List = 0;
+inline constexpr size_t kDeployCheckOpticList = 1;
+inline constexpr std::string_view kDeployCheckSelectorRight = ".mcContainer.Slot_0.buttonRight";
 
 struct DeployCheckState {
 	bool alive = false;
@@ -68,6 +80,7 @@ struct DeployCheckState {
 	uint32_t chosen_primary = 0;
 	uint32_t spawned_primary = 0;
 	uint64_t concepts_found = 0;
+	std::array<DeployCheckList, 2> lists{};
 };
 
 struct DeployCheckIo {
@@ -150,6 +163,9 @@ private:
 	uint32_t probe_step_ = 0;
 	double probe_s_ = 0.0;
 	std::string tab_opened_;
+	DeployCheckState cust_mark_;
+	uint32_t cust_expected_ = 0;
+	void customize(Bf3UiScreens &r_screens, double p_now_s, const DeployCheckIo &p_io, const DeployCheckState &p_st);
 };
 
 }

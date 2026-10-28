@@ -23,6 +23,20 @@ std::string kit_text(uint8_t p_kit) {
 	return "kit " + std::to_string(unsigned(p_kit));
 }
 
+uint32_t next_item(const DeployCheckList &p_list) {
+	if (p_list.count < 2) {
+		return 0;
+	}
+	return p_list.items[size_t((std::max(p_list.selected, 0) + 1) % int32_t(p_list.count))];
+}
+
+uint32_t next_primary(const DeployCheckState &p_st) {
+	if (p_st.primary_count < 2) {
+		return 0;
+	}
+	return p_st.primary_items[size_t((std::max(p_st.primary_selected, 0) + 1) % int32_t(p_st.primary_count))];
+}
+
 }
 
 bool DeployCheck::up(const Bf3UiScreens &p_screens, std::string_view p_partition) {
@@ -364,7 +378,9 @@ void DeployCheck::step(
 								"; spawnscreenpc " + (up(r_screens, kSpawnScreenPcPartition) ? "up" : "closed") +
 								", spawnbuttonscreen's DEPLOY " + (deploy_up ? "up" : "gone"));
 				sub_ = 0;
-				probe_step_ = 3;
+				probe_step_ = tab.name == "customize" ? kCustomizeFirstStep : 3;
+			} else if (probe_step_ >= kCustomizeFirstStep) {
+				customize(r_screens, p_now_s, p_io, p_st);
 			} else if (probe_step_ == 3) {
 				if (click_clip(r_screens, kSpawnButtonScreenPartition, kDeployCheckDeployButton, p_io)) {
 					probe_step_ = 4;
@@ -458,6 +474,99 @@ void DeployCheck::step(
 		case Phase::Done:
 			passed_ = failures_ == 0 && spawn_ends_ == 3 + kDeployCheckTabs.size();
 			done_ = true;
+			break;
+	}
+}
+
+void DeployCheck::customize(
+		Bf3UiScreens &r_screens, double p_now_s, const DeployCheckIo &p_io, const DeployCheckState &p_st) {
+	const std::string_view soldier = kCustomizeScreenPartitions[0];
+	const std::string_view sub = kCustomizeScreenPartitions[1];
+	const std::string_view accessories = kCustomizeScreenPartitions[2];
+	const bool waited = p_now_s - probe_s_ >= kDeployCheckGridSeconds;
+	const auto clicked = [&](std::string_view p_partition, const std::string &p_path) {
+		if (sub_ == 0) {
+			cust_mark_ = p_st;
+		}
+		if (click_clip(r_screens, p_partition, p_path, p_io)) {
+			probe_s_ = p_now_s;
+			sub_ = 0;
+			++probe_step_;
+		}
+	};
+	const auto picked = [&](const std::string &p_row, uint32_t p_chosen, uint32_t p_before) {
+		row(p_row,
+				cust_expected_ != 0 && p_chosen == cust_expected_ &&
+						p_st.picks_from_flow > cust_mark_.picks_from_flow &&
+						p_st.loadout_requests > cust_mark_.loadout_requests,
+				"item " + std::to_string(p_before) + " -> " + std::to_string(p_chosen) + " (expected " +
+						std::to_string(cust_expected_) + "), " +
+						std::to_string(p_st.picks_from_flow - cust_mark_.picks_from_flow) + " pick(s) from the flow, " +
+						std::to_string(p_st.loadout_requests - cust_mark_.loadout_requests) + " loadout request(s)");
+	};
+	switch (probe_step_ - kCustomizeFirstStep) {
+		case 0:
+			clicked(soldier,
+					"instance1.KitView_01.mcContainer.Slot_" + std::to_string(unsigned(p_st.spawn_kit)) + ".button1");
+			break;
+		case 1:
+			if (waited) {
+				shot(p_io, "customize_loadout", p_now_s);
+				row("tabs.customize.loadout", shown(r_screens, sub),
+						"LOADOUT of " + kit_text(p_st.spawn_kit) + ": customizesoldiersubscreen " +
+								(shown(r_screens, sub) ? "shown" : "not shown"));
+				cust_expected_ = next_primary(p_st);
+				++probe_step_;
+			}
+			break;
+		case 2:
+			clicked(sub, "instance1.KitSelector_01" + std::string(kDeployCheckSelectorRight));
+			break;
+		case 3:
+			if (waited) {
+				picked("tabs.customize.primary", p_st.chosen_primary, cust_mark_.chosen_primary);
+				picked_ = p_st.chosen_primary;
+				cust_expected_ = next_item(p_st.lists[kDeployCheckGadget2List]);
+				++probe_step_;
+			}
+			break;
+		case 4:
+			clicked(sub, "instance1.KitSelector_04" + std::string(kDeployCheckSelectorRight));
+			break;
+		case 5:
+			if (waited) {
+				shot(p_io, "customize_picked", p_now_s);
+				picked("tabs.customize.gadget", p_st.lists[kDeployCheckGadget2List].chosen,
+						cust_mark_.lists[kDeployCheckGadget2List].chosen);
+				++probe_step_;
+			}
+			break;
+		case 6:
+			clicked(sub, "instance1.KitSelector_01.mcContainer.Slot_0.button1");
+			break;
+		case 7:
+			if (waited) {
+				shot(p_io, "customize_accessories", p_now_s);
+				row("tabs.customize.accessories", shown(r_screens, accessories),
+						std::string("ACCESSORIES: customizeaccessoriesscreen ") +
+								(shown(r_screens, accessories) ? "shown" : "not shown"));
+				cust_expected_ = next_item(p_st.lists[kDeployCheckOpticList]);
+				++probe_step_;
+			}
+			break;
+		case 8:
+			clicked(accessories, "instance1.KitSelector_02" + std::string(kDeployCheckSelectorRight));
+			break;
+		case 9:
+			if (waited) {
+				shot(p_io, "customize_optic", p_now_s);
+				picked("tabs.customize.optic", p_st.lists[kDeployCheckOpticList].chosen,
+						cust_mark_.lists[kDeployCheckOpticList].chosen);
+				sub_ = 0;
+				probe_step_ = 3;
+			}
+			break;
+		default:
 			break;
 	}
 }

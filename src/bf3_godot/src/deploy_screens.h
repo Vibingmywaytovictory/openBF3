@@ -6,6 +6,7 @@
 #include "bf3/host/loadout.h"
 #include "bf3/net/protocol.h"
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -41,6 +42,13 @@ inline constexpr int32_t kUiSpawnLogicTimeKey = -1005581981;
 inline constexpr int32_t kUiTeamScoreboardEnabledKey = 1855620510;
 inline constexpr int32_t kUiCustomizationSelectedSlotKey = -1273291137;
 inline constexpr int32_t kUiCustomizationSetWeaponKey = 1330229422;
+inline constexpr int32_t kUiCustomizationIsFrontEndKey = 1169074106;
+inline constexpr std::array<int32_t, bf3::core::ui::kHudSpawnKitItems> kUiCustomizationItemKeys{ -852628010, -378770976,
+	305101192, 305127776, -1021374313 };
+inline constexpr std::array<int32_t, bf3::core::ui::kHudAccessorySlots> kUiCustomizationAccessoryKeys{ -991137952,
+	-991137949, -991137950, -991137947 };
+inline constexpr std::array<std::string_view, 3> kCustomizeScreenPartitions{ "ui/flow/screen/customizesoldierscreen",
+	"ui/flow/screen/customizesoldiersubscreen", "ui/flow/screen/customizeaccessoriesscreen" };
 
 struct DeployScreensStats {
 	uint64_t spawn_actions = 0;
@@ -59,6 +67,7 @@ struct DeployPick {
 	uint8_t kit = 0;
 	uint8_t slot = 0;
 	uint32_t item = 0;
+	int8_t accessory = -1;
 };
 
 bf3::core::Result<bf3::net::LoadoutRequest> deploy_loadout_request(const DeployPick &p_pick,

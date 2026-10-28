@@ -53,18 +53,20 @@ bf3::core::Result<bf3::net::LoadoutRequest> deploy_loadout_request(const DeployP
 		const bf3::host::LoadoutCatalog &p_catalog, const bf3::host::KitTable &p_table, uint8_t p_team,
 		bf3::host::LoadoutChoice &r_choice) {
 	const bf3::host::LoadoutKit *kit = p_catalog.kit(p_team, p_pick.kit);
-	if (p_pick.slot >= bf3::host::kLoadoutKitItems || kit == nullptr) {
+	if (p_pick.slot >= bf3::host::kLoadoutKitItems || kit == nullptr ||
+			p_pick.accessory >= int8_t(bf3::host::kLoadoutAccessories)) {
 		return bf3::core::make_error("deploy pick: no kit item " + std::to_string(p_pick.slot));
 	}
 	bf3::host::LoadoutChoice next = r_choice == bf3::host::LoadoutChoice{}
 			? bf3::host::default_loadout(p_catalog, p_table, p_team, p_pick.kit).choice
 			: r_choice;
 	const bf3::host::LoadoutKitItem item = bf3::host::LoadoutKitItem(p_pick.slot);
-	if (!bf3::host::set_loadout_item(*kit, item, p_pick.item, next)) {
+	if (p_pick.accessory >= 0) {
+		next.accessories[size_t(p_pick.accessory)] = p_pick.item;
+	} else if (!bf3::host::set_loadout_item(*kit, item, p_pick.item, next)) {
 		return bf3::core::make_error(
 				"deploy pick: kit item " + std::to_string(p_pick.slot) + " has no item " + std::to_string(p_pick.item));
-	}
-	if (item == bf3::host::LoadoutKitItem::Primary) {
+	} else if (item == bf3::host::LoadoutKitItem::Primary) {
 		next.accessories = {};
 	}
 	if (const bf3::core::Result<bf3::host::Loadout> r =
@@ -84,6 +86,9 @@ bf3::core::Result<bf3::net::LoadoutRequest> deploy_loadout_request(const DeployP
 void DeployScreens::draw(Bf3UiScreens &r_screens) {
 	for (const std::string_view p :
 			{ kSpawnScreenPcPartition, kSpawnButtonScreenPartition, kSpawnTicketCounterPartition }) {
+		r_screens.set_drawn(p, true);
+	}
+	for (const std::string_view p : kCustomizeScreenPartitions) {
 		r_screens.set_drawn(p, true);
 	}
 }
@@ -114,6 +119,31 @@ std::optional<uint8_t> DeployScreens::feed(bf3::host::UiFlowSession &r_session, 
 		}
 		r_session.set_data(kUiCustomizationCompPartition, kUiCustomizationSetWeaponKey, std::string());
 	}
+	const uint8_t pick_kit = chosen.value_or(p_spawn_kit);
+	const bf3::core::ui::HudCustomization &c = p_model.customization;
+	for (size_t i = 0; i < kUiCustomizationItemKeys.size(); ++i) {
+		if (const std::optional<std::string> v =
+						r_session.data(kUiCustomizationCompPartition, kUiCustomizationItemKeys[i]);
+				v && !v->empty()) {
+			if (const std::optional<int32_t> at = flow_index(*v, size_t(c.kit_grid_data[i].count))) {
+				pick_ = DeployPick{ pick_kit, uint8_t(i), c.kit_grid_data[i].items[size_t(*at)].item_id };
+				++stats_.picks_from_flow;
+			}
+			r_session.set_data(kUiCustomizationCompPartition, kUiCustomizationItemKeys[i], std::string());
+		}
+	}
+	for (size_t a = 0; a < kUiCustomizationAccessoryKeys.size(); ++a) {
+		if (const std::optional<std::string> v =
+						r_session.data(kUiCustomizationCompPartition, kUiCustomizationAccessoryKeys[a]);
+				v && !v->empty()) {
+			if (const std::optional<int32_t> at = flow_index(*v, size_t(c.accessory_grid[a].count))) {
+				pick_ = DeployPick{ pick_kit, 0, c.accessory_grid[a].items[size_t(*at)].item_id, int8_t(a) };
+				++stats_.picks_from_flow;
+			}
+			r_session.set_data(kUiCustomizationCompPartition, kUiCustomizationAccessoryKeys[a], std::string());
+		}
+	}
+	r_session.set_data(kUiCustomizationCompPartition, kUiCustomizationIsFrontEndKey, "False");
 	const std::string kit = std::to_string(chosen.value_or(p_spawn_kit));
 	r_session.set_data(kUiKitCompPartition, kUiKitSelectedKitKey, kit);
 	kit_written_ = kit;
