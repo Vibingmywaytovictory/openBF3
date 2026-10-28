@@ -273,7 +273,7 @@ TestWave make_wave(uint32_t p_segments, uint32_t p_frames, int16_t p_first_loop,
 	w.name = "test_wave";
 	static const uint8_t kPartition[16] = { 0x11, 0x11, 0x11, 0x11, 0x22, 0x22, 0x33, 0x33, 0x44, 0x44, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55 };
 	w.partition = Guid::from_bytes(kPartition);
-	w.channels = p_channels;
+	w.channels = uint8_t(p_channels);
 	std::vector<uint8_t> chunk;
 	WaveVariation var;
 	var.chunk_index = 0;
