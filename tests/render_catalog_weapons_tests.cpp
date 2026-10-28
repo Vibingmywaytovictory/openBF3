@@ -485,12 +485,15 @@ struct AccessoryRow {
 	std::string facts;
 };
 
+constexpr const char *kAccessoryGap = "an unlock that no SocketData, WeaponModifierData or GunSwayModifierData names";
+constexpr const char *kCamouflageGap = " (camouflage)";
+
 std::string accessory_gap(const AccessoryRow &p_row) {
-	if (p_row.sockets != 0 || p_row.modifiers != 0 || p_row.unlock.starts_with("weapons/common/")) {
+	if (p_row.sockets != 0 || p_row.modifiers != 0 ||
+			p_row.unlock.starts_with(core::gameplay::kNoAccessoryUnlockPrefix)) {
 		return {};
 	}
-	return "a weapon's own unlock that no SocketData, WeaponModifierData or GunSwayModifierData names" +
-			std::string(p_row.unlock.find("camo") != std::string::npos ? " (camouflage)" : "");
+	return std::string(kAccessoryGap) + (p_row.unlock.find("camo") != std::string::npos ? kCamouflageGap : "");
 }
 
 }
@@ -661,9 +664,8 @@ TEST_SUITE("render-catalog-accessories") {
 		}
 		CHECK(rows == listed);
 		CHECK(gaps ==
-				std::map<std::string, size_t>{ { "a weapon's own unlock that no SocketData, WeaponModifierData or "
-												 "GunSwayModifierData names (camouflage)",
-						76 } });
+				std::map<std::string, size_t>{
+						{ kAccessoryGap, 14 }, { std::string(kAccessoryGap) + kCamouflageGap, 104 } });
 		CHECK_MESSAGE(
 				failed.empty(), failed.size(), " fail, the first: ", failed.empty() ? std::string() : failed.front());
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
