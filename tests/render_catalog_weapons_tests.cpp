@@ -905,6 +905,7 @@ TEST_SUITE("render-catalog-accessories-1p") {
 		});
 		std::array<std::vector<float>, 3> ratios;
 		std::array<std::string, 3> lines;
+		std::set<std::string> dark_housings;
 		for (const OpticLoad &l : loads) {
 			const std::string &optic = l.item->accessory_unlocks[0][l.index];
 			REQUIRE_MESSAGE(l.set != nullptr, optic, ": ", l.error);
@@ -913,6 +914,9 @@ TEST_SUITE("render-catalog-accessories-1p") {
 			size_t textured = 0, sights = 0, roles = 0, single = 0, single_kept = 0;
 			for (const render::ViewmodelAttachment &a : vm.attachments) {
 				for (const render::ViewmodelSlotLook &look : a.looks) {
+					if (look.no_specular) {
+						dark_housings.insert(optic + " " + a.part.mesh);
+					}
 					if (!look.blend || !look.unlit) {
 						continue;
 					}
@@ -959,6 +963,13 @@ TEST_SUITE("render-catalog-accessories-1p") {
 			CHECK(r.front() > median * (1.0f - kSightRatioSpread));
 			CHECK(r.back() < median * (1.0f + kSightRatioSpread));
 		}
+		std::string housings;
+		for (const std::string &h : dark_housings) {
+			housings += " " + h;
+		}
+		MESSAGE(dark_housings.size(), " surfaces darkened to black with a black Specular texture:", housings);
+		CHECK(dark_housings.count("weapons/sv98/u_sv98_ballistic_scope "
+								  "weapons/accessories/ballistic_scope/ballisticscope_zoom_1p_mesh") == 1);
 		CHECK(loads.size() >= 30);
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
 		CHECK(diff.clean());

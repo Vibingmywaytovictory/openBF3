@@ -325,6 +325,50 @@ void clip_model(const anim::Skeleton &p_rig, const anim::LocalPose &p_base, cons
 	anim::model_pose(p_rig, pose, r_model);
 }
 
+constexpr float kBc1RedStep = 1.0f / 31.0f;
+
+bool specular_dark(const core::LevelMount &p_mount, const ViewmodelPart &p_part, uint32_t p_slot) {
+	const MaterialSlot &slot = p_part.materials.slots[p_slot];
+	const std::array<float, 4> *dark = slot.vector("DiffuseDarkening");
+	const std::string specular = slot.texture("Specular");
+	if (dark == nullptr || (*dark)[0] != 0.0f || (*dark)[1] != 0.0f || (*dark)[2] != 0.0f || specular.empty()) {
+		return false;
+	}
+	float u0 = 0, u1 = 0, v0 = 0, v1 = 0;
+	bool any = false;
+	for (const PreparedSurface &s : p_part.prepared.surfaces) {
+		for (size_t k = 0; s.material_index == p_slot && k + 1 < s.uv0.size(); k += 2) {
+			u0 = any ? std::min(u0, s.uv0[k]) : s.uv0[k];
+			u1 = any ? std::max(u1, s.uv0[k]) : s.uv0[k];
+			v0 = any ? std::min(v0, s.uv0[k + 1]) : s.uv0[k + 1];
+			v1 = any ? std::max(v1, s.uv0[k + 1]) : s.uv0[k + 1];
+			any = true;
+		}
+	}
+	if (!any) {
+		return false;
+	}
+	core::Result<core::res::LoadedTexture> t = core::res::load_texture(p_mount, specular);
+	std::vector<core::res::MipSlice> mips;
+	std::vector<std::array<float, 4>> texels;
+	if (!t || !t->mips(mips).ok() || mips.empty() || !mips.front().texels(t->texture.format, texels)) {
+		return false;
+	}
+	const int64_t w = mips.front().width, h = mips.front().height;
+	if (w <= 0 || h <= 0 || texels.size() < size_t(w * h) || (u1 - u0) > 1.0f || (v1 - v0) > 1.0f) {
+		return false;
+	}
+	for (int64_t y = int64_t(std::ceil(v0 * float(h) - 0.5f)); y <= int64_t(std::floor(v1 * float(h) - 0.5f)); ++y) {
+		for (int64_t x = int64_t(std::ceil(u0 * float(w) - 0.5f)); x <= int64_t(std::floor(u1 * float(w) - 0.5f));
+				++x) {
+			if (texels[size_t(((y % h + h) % h) * w + (x % w + w) % w)][0] > kBc1RedStep) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
 std::optional<ViewmodelSight> optic_sight(const anim::Skeleton &p_rig, const ViewmodelItem &p_item) {
 	const ViewmodelClip &zoom = p_item.clips[size_t(Role::ZoomIdle)];
 	const int32_t camera = p_rig.find("CameraJoint");
@@ -1007,6 +1051,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 				out[i].in_database = lm.shader_in_database;
 				const MaterialSlot &slot = p_part.materials.slots[i];
 				out[i].blend = lm.drawn && lm.blend == LookBlend::Blend;
+				out[i].no_specular = !out[i].blend && specular_dark(mount, p_part, uint32_t(i));
 				if (out[i].blend) {
 					const SurfaceShader *shader = look->shaders().by_name(
 							core::to_lower_ascii(slot.variation_shader.empty() ? slot.shader : slot.variation_shader));

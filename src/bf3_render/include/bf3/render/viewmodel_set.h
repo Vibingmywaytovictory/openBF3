@@ -123,6 +123,7 @@ struct ViewmodelSlotLook {
 	std::string color_texture;
 	TextureRole color_role = TextureRole::Color;
 	std::array<float, 4> tint{ 1.0f, 1.0f, 1.0f, 1.0f };
+	bool no_specular = false;
 };
 inline constexpr float kViewmodelAlphaScissor = 0.5f;
 

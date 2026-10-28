@@ -264,6 +264,9 @@ MeshInstance3D *make_part_mesh(Skeleton3D *p_skeleton, const bf3::render::Viewmo
 						if (look.blend) {
 							apply_blend_look(m, look, r_textures);
 						}
+						if (look.no_specular) {
+							m->set_specular(0.0f);
+						}
 					}
 					r_materials.push_back(m);
 				}
