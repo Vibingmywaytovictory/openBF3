@@ -1425,6 +1425,15 @@ template <class A, MaybeConst<LoadoutRequest> M> void serialize(A &r_a, M &r_m) 
 	r_a.check("kit out of range", [&] { return r_m.kit < kMaxKits; });
 }
 
+template <class A, MaybeConst<SoldierGear> M> void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.slot, 8);
+	r_a.bits(r_m.def, 16);
+	for (auto &accessory : r_m.accessories) {
+		r_a.bits(accessory, 32);
+	}
+	r_a.check("slot out of range", [&] { return r_m.slot < kMaxSlots; });
+}
+
 struct Framing {
 	MessageType type;
 	const char *what;
@@ -1487,6 +1496,7 @@ std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram) {
 		case MessageType::SpawnRequest:
 		case MessageType::SuicideRequest:
 		case MessageType::LoadoutRequest:
+		case MessageType::SoldierGear:
 			return MessageType(p_datagram[0]);
 	}
 	return std::nullopt;
@@ -1893,6 +1903,14 @@ std::vector<uint8_t> encode_loadout_request(const LoadoutRequest &p_message) {
 
 core::Result<LoadoutRequest> decode_loadout_request(std::span<const uint8_t> p_datagram) {
 	return decode_as<LoadoutRequest>(p_datagram, { MessageType::LoadoutRequest, "LoadoutRequest" });
+}
+
+std::vector<uint8_t> encode_soldier_gear(const SoldierGear &p_message) {
+	return encode_as(MessageType::SoldierGear, kMaxReliableBytes, p_message);
+}
+
+core::Result<SoldierGear> decode_soldier_gear(std::span<const uint8_t> p_datagram) {
+	return decode_as<SoldierGear>(p_datagram, { MessageType::SoldierGear, "SoldierGear" });
 }
 
 bool set_player_name(PlayerRow &r_row, std::string_view p_name) {

@@ -25,6 +25,16 @@ bool ClientMatch::datagram(net::MessageType p_type, const net::NetSim::Datagram 
 			++player_lists_;
 			return true;
 		}
+		case net::MessageType::SoldierGear: {
+			core::Result<net::SoldierGear> g = net::decode_soldier_gear(p_d.bytes);
+			if (!g) {
+				++bad_tdm_datagrams_;
+				return true;
+			}
+			gear_[g->slot] = *g;
+			++soldier_gears_;
+			return true;
+		}
 		default:
 			return false;
 	}
@@ -93,11 +103,13 @@ void ClientMatch::publish(PresentationFrame &r_frame, bool p_have_own, uint32_t 
 	r_frame.own_respawn_tick = dead_life ? respawn_tick_ : 0u;
 	r_frame.own_revive_until = dead_life ? revive_until_ : 0u;
 	r_frame.own_unspawned = unspawned_now_;
+	r_frame.gear = gear_;
 }
 
 void ClientMatch::stats(ClientStats &r_stats) const {
 	r_stats.match_states = match_states_;
 	r_stats.player_lists = player_lists_;
+	r_stats.soldier_gears = soldier_gears_;
 	r_stats.revives = revives_;
 	r_stats.bad_tdm_datagrams = bad_tdm_datagrams_;
 	r_stats.restricted_commands = restricted_commands_;

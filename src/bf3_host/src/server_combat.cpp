@@ -167,6 +167,18 @@ std::array<uint16_t, sim::weapons::kMaxWeaponSlots> Combat::spawned_defs(size_t 
 	return gunplay_->loadout(uint8_t(p_slot)).defs;
 }
 
+std::optional<net::SoldierGear> Combat::gear(size_t p_slot) const {
+	if (gunplay_ == nullptr || !gunplay_->armed(uint8_t(p_slot))) {
+		return std::nullopt;
+	}
+	const Loadout &l = gunplay_->loadout(uint8_t(p_slot));
+	net::SoldierGear g;
+	g.slot = uint8_t(p_slot);
+	g.def = l.defs[kLoadoutAccessoryWeapon];
+	g.accessories = l.choice.accessories;
+	return g;
+}
+
 void Combat::refuse_kit_select() {
 	if (gunplay_ != nullptr) {
 		gunplay_->count_kit_select(false, false);

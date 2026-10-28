@@ -31,6 +31,7 @@ private:
 	bool valid_ = false;
 	net::MatchState match_;
 	PlayerTable players_;
+	std::array<net::SoldierGear, net::kMaxSlots> gear_ = kNoGear;
 	bool death_valid_ = false;
 	uint32_t death_life_ = 0;
 	sim::Tick respawn_tick_ = 0;
@@ -39,6 +40,7 @@ private:
 
 	uint64_t match_states_ = 0;
 	uint64_t player_lists_ = 0;
+	uint64_t soldier_gears_ = 0;
 	uint64_t revives_ = 0;
 	uint64_t bad_tdm_datagrams_ = 0;
 	uint64_t bad_events_ = 0;

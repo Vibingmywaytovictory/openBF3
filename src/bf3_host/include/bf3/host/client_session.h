@@ -153,6 +153,7 @@ struct ClientStats {
 
 	uint64_t match_states = 0;
 	uint64_t player_lists = 0;
+	uint64_t soldier_gears = 0;
 	uint64_t revives = 0;
 	uint64_t bad_tdm_datagrams = 0;
 	uint64_t restricted_commands = 0;
@@ -171,6 +172,14 @@ struct OtherTrack {
 	std::array<OtherSample, kOtherSamples> samples{};
 	sim::Tick track_newest_tick = 0;
 };
+
+inline constexpr std::array<net::SoldierGear, net::kMaxSlots> kNoGear = [] {
+	std::array<net::SoldierGear, net::kMaxSlots> a{};
+	for (size_t i = 0; i < a.size(); ++i) {
+		a[i].slot = uint8_t(i);
+	}
+	return a;
+}();
 
 struct PresentationFrame {
 	uint64_t serial = 0;
@@ -219,6 +228,7 @@ struct PresentationFrame {
 	sim::Tick own_respawn_tick = 0;
 	sim::Tick own_revive_until = 0;
 	bool own_unspawned = false;
+	std::array<net::SoldierGear, net::kMaxSlots> gear = kNoGear;
 };
 static_assert(std::is_trivially_copyable_v<PresentationFrame>);
 

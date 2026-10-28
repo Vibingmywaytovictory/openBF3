@@ -63,6 +63,7 @@ private:
 	void unspawn(size_t p_slot);
 	void on_spawn(size_t p_slot, sim::Tick p_tick);
 	void describe_spawned(size_t p_slot, net::Spawned &r_message) const;
+	void announce_gear(size_t p_slot);
 	std::vector<sim::Vec3> live_positions(size_t p_except) const;
 
 	SlotTable &slots_;

@@ -1458,6 +1458,8 @@ TEST_SUITE("host-tdm-server") {
 		}
 		tdm::ScriptedPeer &p = m->join("picker");
 		p.ready();
+		tdm::ScriptedPeer &watcher = m->join("watcher");
+		watcher.ready();
 		REQUIRE(wait_in_round(*m));
 		const uint8_t team = m->rules().team_of(uint8_t(p.slot()));
 		REQUIRE((team == 1 || team == 2));
@@ -1523,6 +1525,28 @@ TEST_SUITE("host-tdm-server") {
 		REQUIRE(p.spawned.size() > spawned0);
 		CHECK(p.spawned.back().defs == carried.defs);
 		CHECK(p.spawned.back().defs[0] == primary->def);
+		const auto gear_of = [&](const tdm::ScriptedPeer &p_peer) {
+			std::optional<net::SoldierGear> out;
+			for (const net::SoldierGear &gr : p_peer.gear) {
+				out = gr.slot == uint8_t(p.slot()) ? std::optional<net::SoldierGear>(gr) : out;
+			}
+			return out;
+		};
+		const net::SoldierGear want{ uint8_t(p.slot()), primary->def, carried.choice.accessories };
+		CHECK(gear_of(p) == want);
+		CHECK(gear_of(watcher) == want);
+		tdm::ScriptedPeer &late = m->join("late");
+		late.ready();
+		m->ticks(2);
+		CHECK(gear_of(late) == want);
+		size_t bot_gears = 0;
+		for (const net::SoldierGear &gr : late.gear) {
+			bot_gears += std::find(bots.begin(), bots.end(), int(gr.slot)) != bots.end() &&
+							gr.accessories == std::array<uint32_t, net::kLoadoutAccessories>{}
+					? 1u
+					: 0u;
+		}
+		CHECK(bot_gears > 0);
 		size_t bots_checked = 0;
 		for (const int b : bots) {
 			if (!g.armed(uint8_t(b))) {

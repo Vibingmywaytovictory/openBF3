@@ -25,6 +25,15 @@ void Spawner::ready(size_t p_slot) {
 	if (!soldiers_[p_slot].spawned && !match_.waits_for_deploy(p_slot)) {
 		respawns_[p_slot].wanted = true;
 	}
+	const Seat &s = slots_[p_slot];
+	if (!s.remote) {
+		return;
+	}
+	for (size_t i = 0; i < slots_.size(); ++i) {
+		if (const std::optional<net::SoldierGear> g = soldiers_.alive(i) ? combat_.gear(i) : std::nullopt) {
+			outbox_.send(s.peer, net::kChannelReliable, net::encode_soldier_gear(*g));
+		}
+	}
 }
 
 void Spawner::died(size_t p_slot, sim::Tick p_tick) {
@@ -256,6 +265,21 @@ void Spawner::on_spawn(size_t p_slot, sim::Tick p_tick) {
 	}
 	if (!slots_[p_slot].dummy) {
 		combat_.arm(p_slot, uint8_t(std::clamp(slots_[p_slot].team, 0, 255)), p_tick);
+		announce_gear(p_slot);
+	}
+}
+
+void Spawner::announce_gear(size_t p_slot) {
+	const std::optional<net::SoldierGear> g = combat_.gear(p_slot);
+	if (!g) {
+		return;
+	}
+	const std::vector<uint8_t> bytes = net::encode_soldier_gear(*g);
+	for (size_t i = 0; i < slots_.size(); ++i) {
+		const Seat &s = slots_[i];
+		if (s.used && s.remote) {
+			outbox_.send(s.peer, net::kChannelReliable, bytes);
+		}
 	}
 }
 

@@ -71,6 +71,7 @@ enum class MessageType : uint8_t {
 	SpawnRequest = 27,
 	SuicideRequest = 28,
 	LoadoutRequest = 29,
+	SoldierGear = 32,
 };
 
 std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram);
@@ -508,6 +509,17 @@ struct LoadoutRequest {
 	std::array<uint32_t, kLoadoutAccessories> accessories{};
 	uint32_t specialization = 0;
 };
+
+struct SoldierGear {
+	uint8_t slot = 0;
+	uint16_t def = sim::weapons::kNoWeapon;
+	std::array<uint32_t, kLoadoutAccessories> accessories{};
+
+	bool operator==(const SoldierGear &) const = default;
+};
+
+std::vector<uint8_t> encode_soldier_gear(const SoldierGear &p_message);
+core::Result<SoldierGear> decode_soldier_gear(std::span<const uint8_t> p_datagram);
 
 std::vector<uint8_t> encode_match_state(const MatchState &p_message);
 core::Result<MatchState> decode_match_state(std::span<const uint8_t> p_datagram);

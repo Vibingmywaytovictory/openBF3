@@ -256,6 +256,7 @@ int decode_reencode(std::span<const uint8_t> p_bytes) {
 		case net::MessageType::SpawnRequest:
 		case net::MessageType::SuicideRequest:
 		case net::MessageType::LoadoutRequest:
+		case net::MessageType::SoldierGear:
 			return decode_reencode_v2(*type, p_bytes);
 	}
 	return -1;
@@ -623,7 +624,7 @@ TEST_SUITE("net-proto") {
 			const uint8_t b = uint8_t(t);
 			known += net::peek_type(std::span<const uint8_t>(&b, 1)).has_value() ? 1 : 0;
 		}
-		CHECK(known == 20);
+		CHECK(known == 21);
 		const uint8_t s = 1;
 		CHECK(net::peek_type(std::span<const uint8_t>(&s, 1)) == net::MessageType::Snapshot);
 	}
@@ -3184,6 +3185,14 @@ int decode_reencode_v3(net::MessageType p_type, std::span<const uint8_t> p_bytes
 					? 1
 					: 0;
 		}
+		case net::MessageType::SoldierGear: {
+			auto a = net::decode_soldier_gear(p_bytes);
+			if (!a) {
+				return -1;
+			}
+			auto b = net::decode_soldier_gear(net::encode_soldier_gear(*a));
+			return b && *b == *a ? 1 : 0;
+		}
 		default:
 			return -1;
 	}
@@ -3225,6 +3234,7 @@ void append_v3_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>>
 	sp.team = 1;
 	sp.revived = true;
 	r_out.emplace_back("Spawned (v3 revived)", net::encode_spawned(sp));
+	r_out.emplace_back("SoldierGear", net::encode_soldier_gear({ 7, 4, { 3011272554u, 0u, 975928659u, 0xFFFFFFFFu } }));
 }
 
 }
@@ -3461,6 +3471,14 @@ TEST_SUITE("net-proto") {
 		short_loadout.pop_back();
 		CHECK_FALSE(net::decode_loadout_request(short_loadout));
 		CHECK_FALSE(net::decode_loadout_request(net::encode_suicide_request()));
+		const net::SoldierGear gear{ 127, 93, { 1u, 0xFFFFFFFFu, 0u, 42u } };
+		const std::vector<uint8_t> gb = net::encode_soldier_gear(gear);
+		CHECK(gb.size() == 1 + 1 + 2 + 4 * net::kLoadoutAccessories);
+		auto dg = net::decode_soldier_gear(gb);
+		REQUIRE(dg);
+		CHECK(*dg == gear);
+		CHECK_FALSE(net::decode_soldier_gear(net::encode_soldier_gear({ uint8_t(net::kMaxSlots), 0, {} })));
+		CHECK_FALSE(net::decode_soldier_gear(net::encode_loadout_request(lr)));
 		Rng rng(333);
 		for (const bool revived : { false, true }) {
 			net::Spawned sp{ 7, 3, sample_state(rng, 500) };
@@ -3834,7 +3852,7 @@ TEST_SUITE("net-proto") {
 			types.insert(uint8_t(*type));
 			samples.push_back({ name, std::move(bytes) });
 		}
-		CHECK(types.size() == 20);
+		CHECK(types.size() == 21);
 		static constexpr GoldenPin kPins[] = {
 			{ "Snapshot", 367, 0xa435d4ace31cf825ull, 0 },
 			{ "Snapshot (no own)", 20, 0xa85c8a910ea8826bull, 0 },
@@ -3866,6 +3884,7 @@ TEST_SUITE("net-proto") {
 			{ "CombatEvents (v3)", 137, 0x40d29b14535383d7ull, 0 },
 			{ "MatchInfo (v3)", 82, 0x9f7d6df8af0ee7e8ull, 0 },
 			{ "Spawned (v3 revived)", 94, 0x185c920e1aff4290ull, 0 },
+			{ "SoldierGear", 20, 0xfa6162cd1bdf3cf3ull, 0 },
 		};
 		check_golden(samples, kPins);
 	}

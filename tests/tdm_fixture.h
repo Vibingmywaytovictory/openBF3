@@ -62,6 +62,7 @@ public:
 	std::vector<net::MatchState> match_states;
 	std::vector<net::PlayerRow> players;
 	std::vector<net::Spawned> spawned;
+	std::vector<net::SoldierGear> gear;
 	std::vector<net::CombatEvents> combat;
 	std::optional<net::Snapshot> last_snapshot;
 	std::optional<net::Kick> kick;
@@ -453,6 +454,13 @@ inline void ScriptedPeer::receive(std::span<const host::OutDatagram> p_out) {
 					}
 				}
 				std::sort(players.begin(), players.end(), [](const net::PlayerRow &a, const net::PlayerRow &b) { return a.slot < b.slot; });
+				break;
+			}
+			case net::MessageType::SoldierGear: {
+				core::Result<net::SoldierGear> m = net::decode_soldier_gear(d.bytes);
+				if (m) {
+					gear.push_back(*m);
+				}
 				break;
 			}
 			case net::MessageType::Spawned: {
