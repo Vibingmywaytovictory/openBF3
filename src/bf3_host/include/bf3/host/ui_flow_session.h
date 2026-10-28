@@ -75,6 +75,7 @@ struct UiFlowSessionStats {
 	uint64_t outputs_raised = 0;
 	uint64_t networked_delivered = 0;
 	uint64_t reloads = 0;
+	uint64_t graphs_popped = 0;
 };
 
 class UiFlowSession final : public core::ui::UiFlowHost {
@@ -119,6 +120,11 @@ private:
 		uint32_t node = 0;
 		uint32_t ticks = 0;
 	};
+	struct GraphEntity {
+		std::string graph;
+		std::string priority;
+		bool pop_previous = false;
+	};
 	struct Timer {
 		sim::Tick due = 0;
 		uint32_t node = 0;
@@ -132,6 +138,7 @@ private:
 	void raise(uint32_t p_node, int32_t p_port);
 	void deliver(uint32_t p_node, int32_t p_port);
 	void ui_graph_input(uint32_t p_node, int32_t p_port);
+	void push_graph(uint32_t p_node);
 	void pre_round(UiPreRoundEvent p_event);
 	void note(std::string p_line);
 	void drain_flow_log();
@@ -148,6 +155,8 @@ private:
 	uint32_t scope_ = 0;
 	std::map<uint32_t, std::string> ui_graph_of_;
 	std::map<std::string, uint32_t, std::less<>> graph_owner_;
+	std::map<uint32_t, GraphEntity> graph_entities_;
+	std::vector<GraphEntity> entered_;
 	std::map<uint32_t, Fade> fades_;
 	std::vector<uint32_t> end_of_round_nodes_;
 	std::vector<uint32_t> pre_round_nodes_;

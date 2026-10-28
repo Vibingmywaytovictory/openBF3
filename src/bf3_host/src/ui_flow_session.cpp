@@ -139,6 +139,14 @@ core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const 
 			continue;
 		}
 		ui_graph_of_[n] = std::string(*name);
+		GraphEntity entity;
+		entity.graph = std::string(*name);
+		const std::optional<core::EbxValue> pop = inst->get("PopPreviousGraph");
+		entity.pop_previous = pop && pop->as_bool().value_or(false);
+		const std::optional<core::EbxValue> priority = inst->get("GraphPriority");
+		const std::optional<std::string_view> priority_name = priority ? priority->enum_name() : std::nullopt;
+		entity.priority = std::string(priority_name.value_or(""));
+		graph_entities_[n] = std::move(entity);
 		provider_(*name);
 	}
 	for (const uint32_t n : graph_->nodes_of_type(gp::LogicTypeId::Fade)) {
@@ -191,6 +199,7 @@ core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const 
 core::Status UiFlowSession::start_logic() {
 	timers_.clear();
 	graph_owner_.clear();
+	entered_.clear();
 	flow_.reset();
 	runtime_.reset();
 	lg::LogicRuntimeOptions ro;
@@ -398,6 +407,7 @@ void UiFlowSession::ui_graph_input(uint32_t p_node, int32_t p_port) {
 	} else if (p_port == gp::logic_port_id(kUiGraphEnterPort)) {
 		graph_owner_[graph] = p_node;
 		note("logic " + leaf + " " + std::string(kUiGraphEnterPort));
+		push_graph(p_node);
 		if (asset) {
 			for (const ui::UiGraphNode &n : asset->nodes) {
 				if (n.kind == ui::UiGraphNodeKind::InstanceInput && n.root) {
@@ -422,6 +432,7 @@ void UiFlowSession::ui_graph_input(uint32_t p_node, int32_t p_port) {
 			++stats_.inputs_fired;
 			graph_owner_[graph] = p_node;
 			note("logic " + leaf + "." + input->name);
+			push_graph(p_node);
 			flow_->fire_input(graph, input->name);
 		}
 	}
@@ -429,6 +440,32 @@ void UiFlowSession::ui_graph_input(uint32_t p_node, int32_t p_port) {
 		note(l);
 	}
 	flow_->clear_log();
+}
+
+void UiFlowSession::push_graph(uint32_t p_node) {
+	const auto entity = graph_entities_.find(p_node);
+	if (entity == graph_entities_.end()) {
+		return;
+	}
+	const GraphEntity &e = entity->second;
+	std::erase_if(entered_, [&](const GraphEntity &g) { return !flow_->graph_live(g.graph); });
+	const auto top = std::find_if(
+			entered_.rbegin(), entered_.rend(), [&](const GraphEntity &g) { return g.priority == e.priority; });
+	if (top != entered_.rend() && top->graph == e.graph) {
+		return;
+	}
+	if (e.pop_previous && top != entered_.rend()) {
+		const std::string previous = top->graph;
+		const auto asset = graphs_.find(previous);
+		if (asset == graphs_.end() || asset->second == nullptr || !asset->second->protect_screens) {
+			note("pop graph " + ui::ui_data_category_leaf(previous) + " for " + ui::ui_data_category_leaf(e.graph));
+			++stats_.graphs_popped;
+			flow_->close_graph(previous);
+		}
+		std::erase_if(entered_, [&](const GraphEntity &g) { return g.graph == previous; });
+	}
+	std::erase_if(entered_, [&](const GraphEntity &g) { return g.graph == e.graph; });
+	entered_.push_back(e);
 }
 
 bool UiFlowSession::input_action(int32_t p_action) {

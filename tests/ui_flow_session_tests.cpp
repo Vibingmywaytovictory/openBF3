@@ -228,10 +228,10 @@ TEST_SUITE("ui-flow-session") {
 				Lines{ "native PreRound.Countdown", "close preroundwaitingscreen", "push preroundwaitingscreen" });
 		CHECK(started == Lines{ "native PreRound.RoundStarted", "close preroundwaitingscreen" });
 		const Lines death_expected{ "native Died", "push chatscreen", "close chatscreen",
-			"deploy NotifyMinimapZoomLevelHasChanged", "push killscreen", "deploy GameInput", "close killscreen",
-			"push spawnscreenticketcountertdmscreen", "push spawnbuttonscreen", "push spawnscreenpc",
-			"deploy DefragMemory", "deploy SelectSpawnPoint", "deploy GameInput", "deploy MouseInput",
-			"deploy OnFrontendCameraChanged" };
+			"deploy NotifyMinimapZoomLevelHasChanged", "close hudscreen", "close hudmpscreen", "close hudtdmscreen",
+			"push killscreen", "deploy GameInput", "close killscreen", "push spawnscreenticketcountertdmscreen",
+			"push spawnbuttonscreen", "push spawnscreenpc", "deploy DefragMemory", "deploy SelectSpawnPoint",
+			"deploy GameInput", "deploy MouseInput", "deploy OnFrontendCameraChanged" };
 		CHECK(death == death_expected);
 		const int64_t died = sc.at("native Died", 601);
 		CHECK(died == 601);
@@ -247,21 +247,24 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(sc.at("push killscreen", 601) - died == int64_t(sim::logic::logic_delay_ticks(timeline->kill_card_s)));
 		CHECK(sc.at("close killscreen", 601) - died ==
 				int64_t(sim::logic::logic_delay_ticks(timeline->spawn_screens_s)));
-		Lines deploy_expected{ "deploy OnFrontendCameraChanged", "deploy Spawn", "native Playing",
-			"close spawnscreenpc", "close spawnbuttonscreen", "close spawnscreenticketcountertdmscreen" };
+		Lines deploy_expected{ "deploy OnFrontendCameraChanged", "deploy Spawn", "native Playing", "push hudscreen",
+			"close spawnscreenpc", "close spawnbuttonscreen", "close spawnscreenticketcountertdmscreen",
+			"push hudmpscreen", "push hudtdmscreen" };
 		deploy_expected.insert(deploy_expected.end(), spawned_tail.begin(), spawned_tail.end());
 		CHECK(deploy == deploy_expected);
 		Lines revive_expected{ "native Died", "push chatscreen", "close chatscreen",
-			"deploy NotifyMinimapZoomLevelHasChanged", "push killscreen", "deploy GameInput", "native Playing",
-			"close killscreen" };
+			"deploy NotifyMinimapZoomLevelHasChanged", "close hudscreen", "close hudmpscreen", "close hudtdmscreen",
+			"push killscreen", "deploy GameInput", "native Playing", "close killscreen", "push hudscreen",
+			"push hudmpscreen", "push hudtdmscreen" };
 		revive_expected.insert(revive_expected.end(), spawned_tail.begin(), spawned_tail.end());
 		CHECK(revive == revive_expected);
-		const Lines round_over_expected{ "native RoundOver.OnRoundOver 2", "native EndOfRound",
-			"deploy UnSpawnCustomizationVehicle", "deploy UnSpawnCustomization", "deploy OnFrontendCameraChanged",
-			"push eorwinningteamscreen", "deploy OnFrontendCameraChanged", "push scoreboardtwoteamshud64screen",
-			"deploy OnFrontendCameraChanged", "push eordetailstabsscreen", "push eordetailsscoreboardscreen",
-			"push scoreboardtwoteamsscreen", "deploy OnFrontendCameraChanged", "deploy MouseInput", "deploy GameInput",
-			"deploy OnFrontendCameraChanged" };
+		const Lines round_over_expected{ "native RoundOver.OnRoundOver 2", "close hudscreen", "close hudmpscreen",
+			"close hudtdmscreen", "native EndOfRound", "deploy UnSpawnCustomizationVehicle",
+			"deploy UnSpawnCustomization", "deploy OnFrontendCameraChanged", "push eorwinningteamscreen",
+			"deploy OnFrontendCameraChanged", "push scoreboardtwoteamshud64screen", "deploy OnFrontendCameraChanged",
+			"close eorwinningteamscreen", "close scoreboardtwoteamshud64screen", "push eordetailstabsscreen",
+			"push eordetailsscoreboardscreen", "push scoreboardtwoteamsscreen", "deploy OnFrontendCameraChanged",
+			"deploy MouseInput", "deploy GameInput", "deploy OnFrontendCameraChanged" };
 		CHECK(round_over == round_over_expected);
 		const int64_t eor = sc.at("native EndOfRound", 1701);
 		const int64_t banner = sc.at("push eorwinningteamscreen", 1701);
@@ -305,7 +308,7 @@ TEST_SUITE("ui-flow-session") {
 		sc.state.own_deaths = 1;
 		sc.run_to(400);
 		sc.phase("spawned and died");
-		CHECK(s.flow().find_screen("ui/flow/screen/hudtdmscreen") != nullptr);
+		CHECK(s.flow().find_screen("ui/flow/screen/hudtdmscreen") == nullptr);
 		CHECK(s.widget_fired("ui/flow/screen/spawnscreenpc", "TabBar_01", "UIWidgetEventID_OnItemReleased", "ID2"));
 		sc.collect();
 		sc.run_to(420);
@@ -350,9 +353,10 @@ TEST_SUITE("ui-flow-session") {
 						"deploy MouseInput", "deploy OnFrontendCameraChanged" });
 		escape(540);
 		const Lines menu = sc.phase("Deactivate on the deploy screen");
-		REQUIRE(menu.size() >= 2);
+		REQUIRE(menu.size() >= 3);
 		CHECK(menu[0] == "close spawnscreenpc");
-		CHECK(menu[1] == "push ingamemenump");
+		CHECK(menu[1] == "close spawnbuttonscreen");
+		CHECK(menu[2] == "push ingamemenump");
 		CHECK(s.flow().find_screen("ui/flow/screen/ingamemenump") != nullptr);
 		CHECK(s.errors().empty());
 		CHECK(s.flow().errors().empty());
