@@ -249,6 +249,7 @@ std::string viewmodel_kits_difference(std::span<const ViewmodelKit> p_data, std:
 
 ViewmodelSetSpec team_viewmodel_set(std::span<const ViewmodelKit> p_kits, int p_team);
 
+ViewmodelSetSpec team_viewmodel_items(int p_team, std::span<const std::string> p_unlocks);
 }
 
 namespace bf3::render {

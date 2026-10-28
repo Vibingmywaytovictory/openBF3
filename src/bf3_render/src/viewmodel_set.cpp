@@ -215,14 +215,17 @@ ViewmodelAdsData read_ads(const core::EbxLibrary &p_lib, const std::string &p_co
 struct RoleRule {
 	Role role;
 	std::array<const char *, 3> names;
+	std::array<const char *, 3> controllers{};
 };
 const RoleRule kRoleRules[] = {
 	{ Role::Deploy, { "Deploy Anim", nullptr, nullptr } },
 	{ Role::Idle, { "IdlePose Anim", nullptr, nullptr } },
 	{ Role::Fire, { "Fire Anim", nullptr, nullptr } },
 	{ Role::FireSingle, { "FireSingle Anim", nullptr, nullptr } },
-	{ Role::Reload, { "ReloadClipFull Anim", "ReloadFull Anim", "Reload Anim" } },
-	{ Role::ReloadEmpty, { "ReloadClipEmpty Anim", "ReloadEmpty Anim", nullptr } },
+	{ Role::Reload, { "ReloadClipFull Anim", "ReloadFull Anim", "Reload Anim" },
+			{ "ReloadClipFull", "ReloadFull", "Reload" } },
+	{ Role::ReloadEmpty, { "ReloadClipEmpty Anim", "ReloadEmpty Anim", nullptr },
+			{ "ReloadClipEmpty", "ReloadEmpty", nullptr } },
 	{ Role::Bolt, { "BoltAction Anim", "Bolt Anim", "Pump Anim" } },
 	{ Role::ZoomIn, { "zoomInOut Anim", "ZoomIn Anim", "zoomIn Anim" } },
 	{ Role::ZoomOut, { "ZoomOut Anim", "zoomOut Anim", nullptr } },
@@ -231,6 +234,50 @@ const RoleRule kRoleRules[] = {
 	{ Role::Knife, { "Knife Anim", "Stab Anim", nullptr } },
 	{ Role::Sprint, { "SprintPose Anim", nullptr, nullptr } },
 };
+
+bool controller_is(const core::ant::AntLibrary &p_library, const core::ant::AntPackage &p_package,
+		const core::ant::GdStruct &p_clip, const std::array<const char *, 3> &p_controllers) {
+	core::ant::ClipBinding probe;
+	if (!p_library.bind(p_package, p_clip, probe).ok()) {
+		return false;
+	}
+	for (const char *c : p_controllers) {
+		if (c != nullptr && core::iequals_ascii(probe.controller_name, c)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+core::ant::GdStruct role_clip(const core::ant::AntLibrary &p_library, const core::ant::AntPackage &p_package,
+		const std::vector<std::string> &p_names, const std::array<const char *, 3> &p_controllers) {
+	const std::vector<uint32_t> clips = core::ant::AntLibrary::clips(p_package);
+	core::ant::GdStruct first;
+	for (const std::string &n : p_names) {
+		for (const uint32_t index : clips) {
+			const core::ant::GdStruct c = p_package.object(index);
+			if (!core::iequals_ascii(c.name(), n)) {
+				continue;
+			}
+			if (p_controllers[0] == nullptr || controller_is(p_library, p_package, c, p_controllers)) {
+				return c;
+			}
+			if (!first.valid()) {
+				first = c;
+			}
+		}
+	}
+	if (first.valid() || p_controllers[0] == nullptr) {
+		return first;
+	}
+	for (const uint32_t index : clips) {
+		const core::ant::GdStruct c = p_package.object(index);
+		if (controller_is(p_library, p_package, c, p_controllers)) {
+			return c;
+		}
+	}
+	return {};
+}
 
 std::string codec_of(const core::ant::GdStruct &p_clip) {
 	std::string t(p_clip.type_name());
@@ -689,11 +736,8 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 					}
 				}
 			}
-			for (const std::string &n : names) {
-				const core::ant::GdStruct c = core::ant::AntLibrary::find_clip(*pkg, n);
-				if (!c.valid()) {
-					continue;
-				}
+			if (const core::ant::GdStruct c = role_clip(ant, *pkg, names, rule.controllers); c.valid()) {
+				const std::string n(c.name());
 				bool unsupported = false;
 				const core::Status st = load_role_clip(ant, *pkg, c, set->rig, clip, unsupported);
 				if (!st.ok()) {
@@ -704,7 +748,6 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 					clip.source = unsupported && zoom ? Source::VbrStandIn : Source::Missing;
 					set->notes.push_back(spec.unlock + " " + viewmodel_clip_role_name(rule.role) + ": " + st.error().message);
 				}
-				break;
 			}
 		}
 
@@ -1255,15 +1298,24 @@ std::string viewmodel_kits_difference(std::span<const ViewmodelKit> p_data, std:
 	return {};
 }
 
-ViewmodelSetSpec team_viewmodel_set(std::span<const ViewmodelKit> p_kits, int p_team) {
+ViewmodelSetSpec team_viewmodel_items(int p_team, std::span<const std::string> p_unlocks) {
 	ViewmodelSetSpec spec;
-	const char *team = p_team == 2 ? "RU" : "US";
 	if (p_team == 2) {
-
 		spec.appearance = "persistence/unlocks/soldiers/visual/mp/ru/upperbody/mp_ru_assault_upperbody01";
 		spec.arms_mesh = "characters/arms/arms1p_ru/arms1p_rus_mesh";
 		spec.arms_variation = "characters/arms/arms1p_ru/arms1p_rus_default";
 	}
+	for (const std::string &u : p_unlocks) {
+		ViewmodelItemSpec item;
+		item.unlock = u;
+		spec.items.push_back(std::move(item));
+	}
+	return spec;
+}
+
+ViewmodelSetSpec team_viewmodel_set(std::span<const ViewmodelKit> p_kits, int p_team) {
+	ViewmodelSetSpec spec = team_viewmodel_items(p_team, {});
+	const char *team = p_team == 2 ? "RU" : "US";
 	std::set<std::string> seen;
 	for (const ViewmodelKit &k : p_kits) {
 		if (k.team != team) {
@@ -1284,7 +1336,6 @@ ViewmodelSetSpec team_viewmodel_set(std::span<const ViewmodelKit> p_kits, int p_
 	}
 	return spec;
 }
-
 }
 
 namespace bf3::render {

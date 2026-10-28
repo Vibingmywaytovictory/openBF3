@@ -95,6 +95,15 @@ core::Result<Loadout> resolve_loadout(const LoadoutCatalog &p_catalog, const Kit
 
 uint64_t loadout_catalog_hash(const LoadoutCatalog &p_catalog);
 
+struct LoadoutWeapon {
+	uint16_t def = sim::weapons::kNoWeapon;
+	std::string unlock;
+	uint8_t slot = 0;
+	uint8_t kits = 0;
+};
+
+std::vector<LoadoutWeapon> loadout_weapons(const LoadoutCatalog &p_catalog, uint8_t p_team);
+
 std::vector<uint8_t> loadout_item_slots(const LoadoutKit &p_kit, LoadoutKitItem p_item);
 
 std::vector<LoadoutOption> loadout_item_options(const LoadoutKit &p_kit, LoadoutKitItem p_item);

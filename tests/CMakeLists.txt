@@ -806,6 +806,11 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
 endif()
 openbf3_cost(render.crowd_weapons 1 5)
 openbf3_cost(godot.m2a_tp_crowd 1 10)
+openbf3_test(test_render_catalog_weapons test_main.cpp render_catalog_weapons_tests.cpp test_support.h)
+target_link_libraries(test_render_catalog_weapons PRIVATE bf3_render bf3_host)
+add_test(NAME render.catalog_weapons COMMAND test_render_catalog_weapons --test-suite=render-catalog-weapons)
+set_tests_properties(render.catalog_weapons PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+openbf3_cost(render.catalog_weapons 8 7)
 
 openbf3_test(test_audio_router test_main.cpp audio_router_tests.cpp test_support.h)
 target_link_libraries(test_audio_router PRIVATE bf3_audio bf3_client_audio bf3_host bf3_fx bf3_core)

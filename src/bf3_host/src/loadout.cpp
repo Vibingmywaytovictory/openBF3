@@ -53,6 +53,31 @@ const LoadoutKit *LoadoutCatalog::kit(uint8_t p_team, uint8_t p_kit) const {
 	return &kits[size_t(p_team - 1)][p_kit];
 }
 
+std::vector<LoadoutWeapon> loadout_weapons(const LoadoutCatalog &p_catalog, uint8_t p_team) {
+	std::vector<LoadoutWeapon> out;
+	for (uint8_t k = 0; k < kKitCount; ++k) {
+		const LoadoutKit *kit = p_catalog.kit(p_team, k);
+		if (kit == nullptr) {
+			return out;
+		}
+		for (const uint8_t s : kKitSlots) {
+			for (const LoadoutItem &item : kit->slots[s]) {
+				if (item.def == sim::weapons::kNoWeapon) {
+					continue;
+				}
+				const auto it =
+						std::find_if(out.begin(), out.end(), [&](const LoadoutWeapon &w) { return w.def == item.def; });
+				if (it != out.end()) {
+					it->kits = uint8_t(it->kits | (1u << k));
+					continue;
+				}
+				out.push_back(LoadoutWeapon{ item.def, item.unlock, s, uint8_t(1u << k) });
+			}
+		}
+	}
+	return out;
+}
+
 std::vector<std::string> loadout_variants(std::span<const gp::KitDef> p_kits) {
 	std::set<std::string> out;
 	for (const gp::KitDef &k : p_kits) {
