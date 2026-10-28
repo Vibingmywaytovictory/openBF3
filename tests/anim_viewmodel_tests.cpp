@@ -19,6 +19,7 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace bf3;
@@ -880,6 +881,48 @@ TEST_SUITE("anim-viewmodel-unit") {
 		}
 		CHECK(std::fabs(out.weapon_offset.t.y) < 1e-3f);
 		CHECK(out.action_clip == uint32_t(VmClip::Idle));
+	}
+
+	TEST_CASE("anim.viewmodel: a bolt cued with the shot that starts a Fire clip waits for that clip's end") {
+		const anim::ViewmodelTuning tuning = shipped_tuning();
+		Rig rig;
+		rig.skeleton = three_bones();
+		for (const auto &[role, a, b, frames] : { std::tuple{ VmClip::Idle, 0.0f, 0.0f, uint16_t(0) },
+					 std::tuple{ VmClip::Fire, 0.0f, 5.0f, uint16_t(6) },
+					 std::tuple{ VmClip::Bolt, 0.0f, 30.0f, uint16_t(20) } }) {
+			add_clip(rig, role, a, b, frames, false);
+		}
+		finish_rig(rig, { VmClip::Idle, VmClip::Fire, VmClip::Bolt });
+		anim::ViewmodelAnimator a(rig.skeleton, rig.refs, tuning);
+		anim::LocalPose pose;
+		anim::ViewmodelOutput out;
+		const float dt = 1.0f / 60.0f;
+		double now = 0;
+		auto frame = [&](std::vector<anim::VmCue> p_cues = {}) {
+			now += dt;
+			anim::ViewmodelFrameInput in;
+			in.time_s = now;
+			in.dt = dt;
+			a.step(in, p_cues, pose, out);
+		};
+		frame();
+		anim::VmCue shot, bolt;
+		shot.kind = anim::VmCue::Kind::Shot;
+		bolt.kind = anim::VmCue::Kind::BoltStarted;
+		shot.time_s = bolt.time_s = now + 0.5 * dt;
+		const double fire_end = shot.time_s + double(rig.refs[size_t(VmClip::Fire)].seconds);
+		frame({ shot, bolt });
+		CHECK(out.action_clip == uint32_t(VmClip::Fire));
+		uint32_t fire_frames = 1;
+		while (now + dt < fire_end) {
+			frame();
+			fire_frames += out.action_clip == uint32_t(VmClip::Fire) ? 1u : 0u;
+		}
+		frame();
+		CHECK(out.action_clip == uint32_t(VmClip::Bolt));
+		CHECK(out.action_start_s == doctest::Approx(fire_end));
+		MESSAGE("Fire held ", fire_frames, " frames of ", rig.refs[size_t(VmClip::Fire)].seconds, " s before the bolt");
+		CHECK(fire_frames >= uint32_t(rig.refs[size_t(VmClip::Fire)].seconds / dt) - 1);
 	}
 
 	TEST_CASE("anim.viewmodel: the hold-and-release flow: start, hold loop, release from its entry tick, redeploy or "

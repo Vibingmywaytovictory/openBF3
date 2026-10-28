@@ -459,6 +459,7 @@ struct ViewmodelAnimator::Impl {
 	VmThrowFlow flow;
 	bool has_flow = false;
 	bool next_pending = false;
+	double bolt_due = -1;
 	double release_due = -1;
 	double last_release_cue = -1;
 	bool switch_back = false;
@@ -533,6 +534,7 @@ struct ViewmodelAnimator::Impl {
 			}
 		}
 		cur = Action{};
+		bolt_due = -1;
 		cur.active = true;
 		cur.role = p_role;
 		cur.start = p_time;
@@ -774,7 +776,12 @@ struct ViewmodelAnimator::Impl {
 				}
 				break;
 			case VmCue::Kind::BoltStarted:
-				start_action(VmClip::Bolt, t, false);
+				if (cur.active && (cur.role == VmClip::Fire || cur.role == VmClip::FireSingle) && !cur.procedural &&
+						cur.seconds > 0.0f && t < cur.start + double(cur.seconds)) {
+					bolt_due = cur.start + double(cur.seconds);
+				} else {
+					start_action(VmClip::Bolt, t, false);
+				}
 				break;
 			case VmCue::Kind::Thrown:
 				if (!(cur.active && cur.role == VmClip::Throw && std::fabs(cur.start - t) < 1e-6)) {
@@ -795,6 +802,9 @@ struct ViewmodelAnimator::Impl {
 		switch_back = p_input.switch_back;
 		for (const VmCue &c : p_cues) {
 			on_cue(c, p_input);
+		}
+		if (bolt_due >= 0.0 && t >= bolt_due) {
+			start_action(VmClip::Bolt, bolt_due, false);
 		}
 		advance_flow(t);
 		time = t;
@@ -940,6 +950,7 @@ struct ViewmodelAnimator::Impl {
 		sway_x = sway_y = bob_amp = kick_back = kick_pitch = cam_pitch = cam_yaw = SpringState{};
 		sway_tx = sway_ty = bob_target = 0;
 		next_pending = false;
+		bolt_due = -1;
 		release_due = -1;
 		last_release_cue = -1;
 		release_end = -1;
