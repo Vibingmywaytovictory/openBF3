@@ -111,6 +111,7 @@ private:
 			int32_t bone = -1;
 			godot::Transform3D xform;
 			bool hip = true, zoom = true;
+			bool skinned = false;
 		};
 		std::vector<Attachment> attachments;
 	};

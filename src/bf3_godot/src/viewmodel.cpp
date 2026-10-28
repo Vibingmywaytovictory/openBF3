@@ -257,6 +257,10 @@ void Bf3Viewmodel::add_item_nodes(const bf3::render::ViewmodelSet &p_set) {
 			na.xform = to_godot(a.transform);
 			na.hip = a.hip;
 			na.zoom = a.zoom;
+			na.skinned = a.skinned;
+			if (a.skinned) {
+				na.mesh->set_skin(n.skin);
+			}
 			n.attachments.push_back(na);
 		}
 	}
@@ -382,9 +386,9 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 
 	const bool aimed = ads_frame_.blend >= 0.5f;
 	for (const ItemNodes::Attachment &a : items_[size_t(item_)].attachments) {
-		const bool on = (aimed ? a.zoom : a.hip) && a.bone >= 0 && size_t(a.bone) < model_.size();
+		const bool on = (aimed ? a.zoom : a.hip) && (a.skinned || (a.bone >= 0 && size_t(a.bone) < model_.size()));
 		a.mesh->set_visible(on);
-		if (on) {
+		if (on && !a.skinned) {
 			a.mesh->set_transform(xform_to_godot(model_[size_t(a.bone)]) * a.xform);
 		}
 	}

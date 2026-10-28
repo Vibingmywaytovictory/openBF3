@@ -4,6 +4,7 @@
 #include "bf3/anim/skinning.h"
 #include "bf3/core/ant/ant_library.h"
 #include "bf3/core/ebx_db.h"
+#include "bf3/core/gameplay/weapon_resolver.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
@@ -13,8 +14,10 @@
 #include "bf3/host/gunplay.h"
 #include "bf3/host/loadout.h"
 #include "bf3/render/crowd_weapons.h"
+#include "bf3/render/mesh_cache.h"
 #include "bf3/render/soldier_assets.h"
 #include "bf3/render/viewmodel_set.h"
+#include "bf3/render/weapon_sockets.h"
 #include "game_crowd_items.h"
 #include "test_support.h"
 
@@ -420,6 +423,292 @@ TEST_SUITE("render-catalog-weapons-3p") {
 		CHECK(ms.weapon_palettes == n);
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
 		std::printf("render.catalog_weapons_3p install.unchanged %s\n", diff.clean() ? "yes" : diff.summary().c_str());
+		CHECK(diff.clean());
+	}
+}
+
+namespace {
+
+struct AccessoryRow {
+	uint8_t team = 1;
+	std::string weapon;
+	size_t slot = 0;
+	std::string unlock;
+	std::vector<std::string> meshes;
+	size_t sockets = 0;
+	size_t modifiers = 0;
+	std::string error;
+	std::string facts;
+};
+
+std::string accessory_gap(const AccessoryRow &p_row) {
+	if (p_row.sockets != 0 || p_row.modifiers != 0 || p_row.unlock.starts_with("weapons/common/")) {
+		return {};
+	}
+	return "a weapon's own unlock that no SocketData, WeaponModifierData or GunSwayModifierData names" +
+			std::string(p_row.unlock.find("camo") != std::string::npos ? " (camouflage)" : "");
+}
+
+}
+
+TEST_SUITE("render-catalog-accessories") {
+	TEST_CASE(
+			"catalog accessories: every accessory of every primary of Metro TDM's loadout catalog, per team, resolves "
+			"the meshes of its sockets, their attachment bone and its weapon modifiers, or is a named data gap") {
+		core::InstallReader reader;
+		if (!reader.locate({})) {
+			test::skip_install_case(reader.describe().c_str());
+			return;
+		}
+		const core::InstallSnapshot before = reader.snapshot();
+		auto t0 = std::chrono::steady_clock::now();
+		core::Result<std::shared_ptr<core::Install>> install = core::Install::open(reader);
+		REQUIRE(install.ok());
+		auto gunplay = host::load_gunplay_level(
+				*install, "MP_Subway", "TeamDeathMatch0", host::GunplayLoadOptions{ true, true });
+		REQUIRE_MESSAGE(gunplay.ok(), (gunplay.ok() ? "" : gunplay.error().message));
+		const host::GunplayLevel &level = **gunplay;
+		core::Result<std::unique_ptr<core::EbxLibrary>> ebx = core::EbxLibrary::open(*install, { kLevel });
+		REQUIRE_MESSAGE(ebx.ok(), (ebx.ok() ? "" : ebx.error().message));
+		const core::EbxLibrary &lib = **ebx;
+		const render::ViewmodelSetSpec vm_spec;
+		const core::EbxPartition *ske = lib.partition_by_name(vm_spec.weapon_skeleton);
+		REQUIRE(ske != nullptr);
+		core::Result<anim::EbxSkeleton> weapon_skeleton = anim::read_ebx_skeleton(*ske, vm_spec.weapon_skeleton);
+		REQUIRE(weapon_skeleton.ok());
+		const double s_setup = seconds_since(t0);
+
+		struct Weapon {
+			uint8_t team = 1;
+			const host::LoadoutItem *item = nullptr;
+			std::vector<AccessoryRow> rows;
+			std::string error;
+		};
+		std::vector<Weapon> weapons;
+		size_t listed = 0;
+		for (uint8_t team = 1; team <= 2; ++team) {
+			std::set<uint16_t> seen;
+			for (uint8_t k = 0; k < host::kKitCount; ++k) {
+				for (const host::LoadoutItem &item :
+						level.loadouts.kit(team, k)->slots[host::kLoadoutAccessoryWeapon]) {
+					if (seen.insert(item.def).second) {
+						weapons.push_back(Weapon{ team, &item, {}, {} });
+						for (const std::vector<uint32_t> &a : item.accessories) {
+							listed += a.size();
+						}
+					}
+				}
+			}
+		}
+		REQUIRE(weapons.size() == 2 * 61);
+		t0 = std::chrono::steady_clock::now();
+		core::parallel_for(weapons.size(), [&](size_t i) {
+			Weapon &w = weapons[i];
+			core::Result<core::gameplay::WeaponDef> base = core::gameplay::resolve_weapon(lib, w.item->unlock);
+			const core::EbxPartition *bp = base ? lib.partition_by_name(base->blueprint) : nullptr;
+			const std::vector<core::EbxInstance> swd =
+					bp != nullptr ? bp->instances_of("SoldierWeaponData") : std::vector<core::EbxInstance>();
+			if (swd.empty()) {
+				w.error = base ? std::string("no SoldierWeaponData") : base.error().message;
+				return;
+			}
+			const std::vector<render::WeaponSocket> sockets = render::read_weapon_sockets(lib, swd.front());
+			for (size_t a = 0; a < host::kLoadoutAccessories; ++a) {
+				for (const std::string &unlock : w.item->accessory_unlocks[a]) {
+					AccessoryRow row;
+					row.team = w.team;
+					row.weapon = w.item->unlock;
+					row.slot = a;
+					row.unlock = unlock;
+					for (const render::WeaponSocket &s : sockets) {
+						if (s.unlock != unlock) {
+							continue;
+						}
+						++row.sockets;
+						for (const render::WeaponSocketObject &o : s.objects) {
+							if (!o.skinned && weapon_skeleton->find(s.bone) < 0) {
+								row.error = "socket bone `" + s.bone + "` is not a weapon skeleton bone";
+							}
+							for (const std::string *m : { &o.mesh_1p, &o.mesh_1p_zoom, &o.mesh_3p }) {
+								if (!m->empty() &&
+										std::find(row.meshes.begin(), row.meshes.end(), *m) == row.meshes.end()) {
+									row.meshes.push_back(*m);
+								}
+							}
+						}
+					}
+					core::gameplay::WeaponResolveOptions opt;
+					opt.unlocks = { unlock };
+					core::Result<core::gameplay::WeaponDef> d =
+							core::gameplay::resolve_weapon(lib, w.item->unlock, opt);
+					if (!d) {
+						row.error = "resolve with it: " + d.error().message;
+					} else {
+						for (const std::string &m : d->applied_modifiers) {
+							row.modifiers += core::to_lower_ascii(m).starts_with(unlock + ":") ? 1u : 0u;
+						}
+						for (const auto *list : { &d->sway.applied, &d->sway.conditional }) {
+							for (const core::gameplay::SwayGatedModifier &g : *list) {
+								row.modifiers += core::to_lower_ascii(g.unlock) == unlock ? 1u : 0u;
+							}
+						}
+						row.facts = "zoom fov " + std::to_string(int(d->zoom_render_fov)) + ", controller " +
+								d->aiming_controller + ", sound " + d->sound + (d->silenced ? ", silenced" : "");
+					}
+					w.rows.push_back(std::move(row));
+				}
+			}
+		});
+		std::vector<std::string> meshes;
+		for (const Weapon &w : weapons) {
+			for (const AccessoryRow &r : w.rows) {
+				meshes.insert(meshes.end(), r.meshes.begin(), r.meshes.end());
+			}
+		}
+		std::sort(meshes.begin(), meshes.end());
+		meshes.erase(std::unique(meshes.begin(), meshes.end()), meshes.end());
+		std::vector<std::string> mesh_errors(meshes.size());
+		core::parallel_for(meshes.size(), [&](size_t i) {
+			core::Result<render::MeshHead> head = render::read_mesh_head(lib.mount(0), meshes[i]);
+			if (!head) {
+				mesh_errors[i] = head.error().message;
+			} else if (head->mesh.lods.empty()) {
+				mesh_errors[i] = "no LODs";
+			}
+		});
+		const double s_rows = seconds_since(t0);
+		std::vector<std::string> failed;
+		std::map<std::string, size_t> gaps;
+		size_t rows = 0, with_mesh = 0, with_modifiers = 0;
+		for (const Weapon &w : weapons) {
+			if (!w.error.empty()) {
+				failed.push_back(w.item->unlock + ": " + w.error);
+			}
+			for (const AccessoryRow &r : w.rows) {
+				++rows;
+				std::string error = r.error;
+				for (const std::string &m : r.meshes) {
+					const size_t i = size_t(std::lower_bound(meshes.begin(), meshes.end(), m) - meshes.begin());
+					if (error.empty() && !mesh_errors[i].empty()) {
+						error = "mesh " + m + ": " + mesh_errors[i];
+					}
+				}
+				const std::string gap = accessory_gap(r);
+				with_mesh += r.meshes.empty() ? 0u : 1u;
+				with_modifiers += r.modifiers != 0 ? 1u : 0u;
+				const std::string verdict =
+						!error.empty() ? "FAIL " + error : (!gap.empty() ? "data gap: " + gap : std::string("ok"));
+				std::printf("render.catalog_accessories team %u %s slot %zu %s: %s; %zu sockets, %zu meshes, %zu "
+							"modifiers; %s\n",
+						unsigned(r.team), r.weapon.c_str(), r.slot + 1, r.unlock.c_str(), verdict.c_str(), r.sockets,
+						r.meshes.size(), r.modifiers, r.facts.c_str());
+				if (!error.empty()) {
+					failed.push_back(r.weapon + " " + r.unlock + ": " + error);
+				} else if (!gap.empty()) {
+					++gaps[gap];
+				}
+			}
+		}
+		MESSAGE(rows, " accessories of ", weapons.size(), " (team, primary) pairs: ", with_mesh,
+				" with socket meshes (", meshes.size(), " distinct), ", with_modifiers,
+				" with weapon modifiers; setup ", s_setup, " s, rows ", s_rows, " s");
+		for (const auto &[gap, n] : gaps) {
+			MESSAGE("data gap: ", n, " accessories: ", gap);
+		}
+		CHECK(rows == listed);
+		CHECK(gaps ==
+				std::map<std::string, size_t>{ { "a weapon's own unlock that no SocketData, WeaponModifierData or "
+												 "GunSwayModifierData names (camouflage)",
+						76 } });
+		CHECK_MESSAGE(
+				failed.empty(), failed.size(), " fail, the first: ", failed.empty() ? std::string() : failed.front());
+		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
+		std::printf("render.catalog_accessories install.unchanged %s\n", diff.clean() ? "yes" : diff.summary().c_str());
+		CHECK(diff.clean());
+	}
+}
+
+TEST_SUITE("render-catalog-accessories-1p") {
+	TEST_CASE("catalog accessories: a viewmodel with picked accessories draws their sockets' meshes in place of the "
+			  "no-accessory ones, the skinned ones on the weapon skin, and zooms at the optic's FOV") {
+		core::InstallReader reader;
+		if (!reader.locate({})) {
+			test::skip_install_case(reader.describe().c_str());
+			return;
+		}
+		const core::InstallSnapshot before = reader.snapshot();
+		core::Result<std::shared_ptr<core::Install>> install = core::Install::open(reader);
+		REQUIRE(install.ok());
+		auto gunplay = host::load_gunplay_level(
+				*install, "MP_Subway", "TeamDeathMatch0", host::GunplayLoadOptions{ true, true });
+		REQUIRE_MESSAGE(gunplay.ok(), (gunplay.ok() ? "" : gunplay.error().message));
+		const host::GunplayLevel &level = **gunplay;
+		core::Result<std::unique_ptr<render::ViewmodelSources>> sources =
+				render::open_viewmodel_sources(reader, kLevel, nullptr);
+		REQUIRE_MESSAGE(sources.ok(), (sources.ok() ? "" : sources.error().message));
+		const host::LoadoutItem *m16 = level.loadouts.kit(1, 0)->find(0, level.loadouts.kit(1, 0)->defaults[0]);
+		REQUIRE(m16 != nullptr);
+		const auto pick = [&](size_t p_slot, std::string_view p_suffix) {
+			for (size_t i = 0; i < m16->accessory_unlocks[p_slot].size(); ++i) {
+				if (m16->accessory_unlocks[p_slot][i].ends_with(p_suffix)) {
+					return m16->accessories[p_slot][i];
+				}
+			}
+			return 0u;
+		};
+		const std::array<uint32_t, host::kLoadoutAccessories> picks{ pick(0, "_acog"), pick(1, "_foregrip"),
+			pick(2, "_sound_suppressor"), 0 };
+		REQUIRE(picks[0] != 0);
+		REQUIRE(picks[1] != 0);
+		REQUIRE(picks[2] != 0);
+		const auto load = [&](const std::array<uint32_t, host::kLoadoutAccessories> &p_picks) {
+			render::ViewmodelSetSpec spec =
+					render::team_viewmodel_items(1, std::span<const std::string>(&m16->unlock, 1));
+			spec.superbundle = kLevel;
+			const host::LoadoutAccessorySet set = host::loadout_accessory_set(*m16, p_picks);
+			spec.items[0].accessories = render::WeaponAccessories{ set.active, set.listed };
+			return render::load_viewmodel_set(**sources, spec, nullptr);
+		};
+		core::Result<std::unique_ptr<render::ViewmodelSet>> plain = load({});
+		REQUIRE_MESSAGE(plain.ok(), (plain.ok() ? "" : plain.error().message));
+		core::Result<std::unique_ptr<render::ViewmodelSet>> picked = load(picks);
+		REQUIRE_MESSAGE(picked.ok(), (picked.ok() ? "" : picked.error().message));
+		const render::ViewmodelItem &a = (*plain)->items[0];
+		const render::ViewmodelItem &b = (*picked)->items[0];
+		const auto sockets_of = [](const render::ViewmodelItem &p_item) {
+			std::set<std::string> out;
+			for (const render::ViewmodelAttachment &at : p_item.attachments) {
+				out.insert(at.socket_unlock);
+			}
+			return out;
+		};
+		CHECK(sockets_of(a) == std::set<std::string>{ "weapons/common/nooptics" });
+		const std::set<std::string> drawn = sockets_of(b);
+		CHECK(drawn.count("weapons/common/nooptics") == 0);
+		CHECK(drawn ==
+				std::set<std::string>{ "weapons/m16a4/u_m16a4_acog", "weapons/m16a4/u_m16a4_foregrip",
+						"weapons/m16a4/u_m16a4_sound_suppressor" });
+		size_t skinned = 0, zoom_only = 0, prepared = 0;
+		for (const render::ViewmodelAttachment &at : b.attachments) {
+			skinned += at.skinned ? 1u : 0u;
+			zoom_only += at.zoom && !at.hip ? 1u : 0u;
+			prepared += at.part.prepared.vertices > 0 ? 1u : 0u;
+			MESSAGE("M16A4 picked attachment ", at.socket_unlock, ": ", at.part.mesh, " skinned ", at.skinned, " hip ",
+					at.hip, " zoom ", at.zoom, ", ", at.part.prepared.vertices, " vertices");
+		}
+		CHECK(skinned == 1);
+		CHECK(zoom_only == 1);
+		CHECK(std::all_of(a.attachments.begin(), a.attachments.end(),
+				[](const render::ViewmodelAttachment &p_a) { return p_a.hip && p_a.zoom; }));
+		CHECK(prepared == b.attachments.size());
+		CHECK(b.binds.size() > a.binds.size());
+		CHECK(b.binds.size() <= anim::kMaxPaletteBinds);
+		MESSAGE("M16A4 zoom: iron sights ", a.ads.controller, " ", a.ads.zoom_fov, " deg, render ", a.zoom_render_fov,
+				"; ACOG ", b.ads.controller, " ", b.ads.zoom_fov, " deg, render ", b.zoom_render_fov);
+		CHECK(b.ads.controller == "weapons/common/aimingcontrollers/aim_default_4x");
+		CHECK(b.ads.zoom_fov < a.ads.zoom_fov);
+		CHECK(b.zoom_render_fov == doctest::Approx(15.0f));
+		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
 		CHECK(diff.clean());
 	}
 }

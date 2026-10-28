@@ -353,42 +353,34 @@ std::string last_component(const std::string &p_path) {
 
 constexpr size_t kMaxAttachments = 16;
 
-void read_default_attachments(const core::EbxLibrary &p_lib, const core::EbxInstance &p_swd, const anim::Skeleton &p_rig, const std::string &p_unlock,
-		std::vector<ViewmodelAttachment> &r_out, std::vector<std::string> &r_notes) {
-	auto mat = [](const std::optional<core::EbxValue> &p_v) {
-		const std::optional<std::array<core::Vec3, 4>> rows = p_v ? p_v->as_transform() : std::nullopt;
-		return rows ? anim::mat_from_linear_transform(*rows) : anim::Mat34{};
-	};
-	for (const core::EbxInstance &socket : p_lib.follow_all(p_swd.data(), "Sockets")) {
-		if (!socket.is_a("SocketData")) {
+void read_attachments(const core::EbxLibrary &p_lib, const core::EbxInstance &p_swd, const anim::Skeleton &p_rig,
+		const std::string &p_unlock, const WeaponAccessories &p_accessories, std::vector<ViewmodelAttachment> &r_out,
+		std::vector<std::string> &r_notes) {
+	const std::vector<WeaponSocket> sockets = read_weapon_sockets(p_lib, p_swd);
+	bool zoom_mesh_transition = false;
+	for (const WeaponSocket &socket : sockets) {
+		for (const WeaponSocketObject &object : socket.objects) {
+			zoom_mesh_transition |= socket_drawn(socket.unlock, p_accessories) && !object.mesh_1p_zoom.empty() &&
+					object.mesh_1p_zoom != object.mesh_1p;
+		}
+	}
+	for (const WeaponSocket &socket : sockets) {
+		if (!socket_drawn(socket.unlock, p_accessories)) {
 			continue;
 		}
-		const std::optional<core::EbxInstance> unlock = p_lib.follow(socket.data(), "UnlockAsset");
-		const std::string unlock_name = unlock ? name_of(p_lib, *unlock).value_or("") : std::string();
-		if (unlock_name.rfind(kDefaultSocketUnlockPrefix, 0) != 0) {
-			continue;
+		for (const std::string &skipped : socket.skipped) {
+			r_notes.push_back(p_unlock + ": socket " + socket.unlock + ": " + skipped + " (no mesh drawn)");
 		}
-		const std::optional<core::EbxValue> bone_v = socket.get("BoneName");
-		const std::string bone(bone_v && bone_v->as_str() ? *bone_v->as_str() : std::string_view());
-		const int32_t rig_bone = bone.empty() ? -1 : p_rig.find(bone);
-		if (rig_bone < 0) {
-			r_notes.push_back(p_unlock + ": socket " + unlock_name + " on bone `" + bone + "` not on the rig (skipped)");
-			continue;
-		}
-		const anim::Mat34 socket_m = anim::mat_mul(mat(socket.get("BoneRigidTransform")), mat(socket.get("Transform")));
-		for (const core::EbxInstance &object : p_lib.follow_all(socket.data(), "AvailableObjects")) {
-			if (!object.is_a("WeaponRegularSocketObjectData")) {
-				r_notes.push_back(p_unlock + ": socket " + unlock_name + ": " + std::string(object.type_name()) + " skipped (rigid objects only)");
-				continue;
+		const int32_t rig_bone = socket.bone.empty() ? -1 : p_rig.find(socket.bone);
+		for (const WeaponSocketObject &object : socket.objects) {
+			if (!object.skinned && rig_bone < 0) {
+				r_notes.push_back(p_unlock + ": socket " + socket.unlock + " on bone `" + socket.bone +
+						"` not on the rig (skipped)");
+				break;
 			}
-			const std::optional<core::EbxInstance> hip = p_lib.follow(object.data(), "Asset1p");
-			const std::optional<core::EbxInstance> zoom = p_lib.follow(object.data(), "Asset1pzoom");
-			const std::string hip_name = hip ? name_of(p_lib, *hip).value_or("") : std::string();
-			const std::string zoom_name = zoom ? name_of(p_lib, *zoom).value_or("") : std::string();
-			const anim::Mat34 m = anim::mat_mul(socket_m, mat(object.get("Transform")));
 			for (int which = 0; which < 2; ++which) {
-				const std::string &mesh = which == 0 ? hip_name : zoom_name;
-				if (mesh.empty() || (which == 1 && mesh == hip_name)) {
+				const std::string &mesh = which == 0 ? object.mesh_1p : object.mesh_1p_zoom;
+				if (mesh.empty() || (which == 1 && mesh == object.mesh_1p)) {
 					continue;
 				}
 				if (r_out.size() >= kMaxAttachments) {
@@ -396,12 +388,13 @@ void read_default_attachments(const core::EbxLibrary &p_lib, const core::EbxInst
 					return;
 				}
 				ViewmodelAttachment a;
-				a.socket_unlock = unlock_name;
-				a.bone = bone;
-				a.rig_bone = rig_bone;
-				a.transform = m;
-				a.hip = mesh == hip_name;
-				a.zoom = mesh == zoom_name;
+				a.socket_unlock = socket.unlock;
+				a.bone = socket.bone;
+				a.rig_bone = object.skinned ? -1 : rig_bone;
+				a.skinned = object.skinned;
+				a.transform = object.transform;
+				a.hip = mesh == object.mesh_1p;
+				a.zoom = mesh == object.mesh_1p_zoom && !(socket.hide_by_zoom_transition && zoom_mesh_transition);
 				a.part.mesh = mesh;
 				r_out.push_back(std::move(a));
 			}
@@ -653,7 +646,10 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		progress("clips of " + spec.unlock, 4);
 		ViewmodelItem item;
 		item.unlock = spec.unlock;
-		core::Result<core::gameplay::WeaponDef> def = core::gameplay::resolve_weapon(lib, spec.unlock);
+		item.accessories = spec.accessories;
+		core::gameplay::WeaponResolveOptions resolve;
+		resolve.unlocks = weapon_modifier_unlocks(spec.accessories);
+		core::Result<core::gameplay::WeaponDef> def = core::gameplay::resolve_weapon(lib, spec.unlock, resolve);
 		if (!def) {
 			return core::error_at(spec.unlock, def.error());
 		}
@@ -678,7 +674,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 				if (const std::optional<core::EbxValue> id = swd->get_path("WeaponStates[0].Weapon.AssetId")) {
 					locomotion_ant_ref = id->as_i64();
 				}
-				read_default_attachments(lib, *swd, set->rig, spec.unlock, item.attachments, set->notes);
+				read_attachments(lib, *swd, set->rig, spec.unlock, spec.accessories, item.attachments, set->notes);
 				item.zoom_render_fov_data = sane(number(swd->get("ZoomRenderFov")), 0.0f, 0.0f, 170.0f, clamped);
 				if (mesh.empty()) {
 					if (const std::optional<core::EbxValue> states = swd->get("WeaponStates")) {
@@ -941,7 +937,10 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 			}
 		}
 		for (ViewmodelAttachment &a : item.attachments) {
-			if (core::Status st = prepare_rigid_part(mount, a.part, p_cache, set->notes); !st.ok()) {
+			const core::Status st = a.skinned
+					? prepare_part(mount, a.part, set->weapon_skeleton, set->rig, item.binds, p_cache, set->notes)
+					: prepare_rigid_part(mount, a.part, p_cache, set->notes);
+			if (!st.ok()) {
 				return core::error_at(item.unlock, st.error());
 			}
 		}

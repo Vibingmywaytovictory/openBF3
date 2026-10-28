@@ -13,6 +13,7 @@
 #include "bf3/core/math.h"
 #include "bf3/core/result.h"
 #include "bf3/render/viewmodel_assets.h"
+#include "bf3/render/weapon_sockets.h"
 
 #include <array>
 #include <cstddef>
@@ -58,6 +59,7 @@ struct ViewmodelItemSpec {
 	std::string mesh;
 	std::string ant_package;
 	std::array<std::string, kViewmodelClipRoles> clips;
+	WeaponAccessories accessories;
 };
 
 struct ViewmodelSetSpec {
@@ -125,15 +127,16 @@ struct ViewmodelAttachment {
 	anim::Mat34 transform;
 	bool hip = true;
 	bool zoom = true;
+	bool skinned = false;
 	ViewmodelPart part;
 	std::vector<ViewmodelSlotLook> looks;
 };
-inline constexpr std::string_view kDefaultSocketUnlockPrefix = "weapons/common/no";
 
 struct ViewmodelLocomotionClips;
 
 struct ViewmodelItem {
 	std::string unlock;
+	WeaponAccessories accessories;
 	ViewmodelPart weapon;
 	anim::SkinBinds binds;
 	std::array<ViewmodelClip, kViewmodelClipRoles> clips;
