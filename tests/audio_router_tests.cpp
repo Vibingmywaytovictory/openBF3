@@ -51,6 +51,7 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -1609,6 +1610,55 @@ TEST_SUITE("audio-game") {
 		REQUIRE(m1a2 != a.auditions.end());
 		CHECK(m1a2->second.source == ba::kAuditionSuperbundles);
 		CHECK(m1a2->second.bank != a.bank);
+		check_game_unchanged(*f);
+	}
+
+	TEST_CASE("catalog audio: every CUSTOMIZE weapon of Metro TDM's loadout catalog gets a weapon audio entry; a patch "
+			  "with no DefaultStartEvent fires its Fire event per shot (DAO-12, Jackhammer); five shotgun patches have "
+			  "neither") {
+		GameFixture *f = need_game_install();
+		if (f == nullptr) {
+			return;
+		}
+		const std::string id = f->metro->info.id.empty() ? f->metro->root_name : f->metro->info.id;
+		Result<std::shared_ptr<const host::GunplayLevel>> g =
+				host::load_gunplay_level(f->install, id, "TeamDeathMatch0", host::GunplayLoadOptions{ true, true });
+		REQUIRE_MESSAGE(g.ok(), (g.ok() ? std::string() : g.error().message));
+		const host::GunplayLevel &level = **g;
+		REQUIRE_FALSE(level.loadouts.empty());
+		Result<ba::GameAudioAssets> a = ba::load_game_audio_assets(f->install, *f->metro, level, f->impact_names, 0);
+		REQUIRE_MESSAGE(a.ok(), (a.ok() ? std::string() : a.error().message));
+		std::set<uint16_t> catalog;
+		for (const auto &team : level.loadouts.kits) {
+			for (const host::LoadoutKit &k : team) {
+				for (const uint8_t slot : host::kKitSlots) {
+					for (const host::LoadoutItem &item : k.slots[slot]) {
+						if (item.def < level.defs.size()) {
+							catalog.insert(item.def);
+						}
+					}
+				}
+			}
+		}
+		std::set<uint16_t> listed;
+		std::set<std::string> unbound;
+		for (const ba::KitAudioItem &item : a->kits.items) {
+			listed.insert(item.def);
+			if (a->table->defs[item.def].form == ba::WeaponAudioForm::None) {
+				unbound.insert(item.variant);
+			}
+		}
+		MESSAGE("catalog weapons ", catalog.size(), ", audio items ", a->kits.items.size(), ", unbound ",
+				unbound.size(), ", waves missing ", a->waves_missing);
+		CHECK(catalog.size() == 92);
+		for (const uint16_t d : catalog) {
+			CHECK_MESSAGE(listed.count(d) == 1, level.defs[d].variant);
+		}
+		CHECK(unbound ==
+				std::set<std::string>{ "weapons/m1014/u_m1014", "weapons/remington870/u_870",
+						"weapons/saiga20k/u_saiga_20k", "weapons/usas-12/u_usas-12", "weapons/xp2_spas12/u_spas12" });
+		CHECK(a->table->failed == unbound.size());
+		CHECK(a->waves_missing == 0);
 		check_game_unchanged(*f);
 	}
 

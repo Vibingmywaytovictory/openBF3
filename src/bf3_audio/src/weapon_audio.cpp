@@ -190,7 +190,7 @@ core::Result<WeaponAudioTable> load_weapon_audio(const core::EbxResolver &p_db, 
 				d.error = "explosion compile: " + ex.error().message;
 			}
 		}
-		if (src.one_shot) {
+		if (src.one_shot || d.program->start_event == 0) {
 			d.one_shot_event = one_shot_event_of(*d.program);
 			if (d.one_shot_event == 0) {
 				d.error = "one-shot patch has no start, Fire or Melee event";

@@ -53,6 +53,11 @@ KitAudioSources kit_audio_sources(const host::GunplayLevel &p_level) {
 				if (def < teams.size()) {
 					teams[def] = uint8_t(teams[def] | (1u << team));
 				}
+				for (const host::LoadoutItem &item : p_level.loadouts.kits[team][kit].slots[slot]) {
+					if (item.def < teams.size()) {
+						teams[item.def] = uint8_t(teams[item.def] | (1u << team));
+					}
+				}
 			}
 		}
 	}
