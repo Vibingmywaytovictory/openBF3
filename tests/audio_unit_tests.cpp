@@ -267,30 +267,32 @@ struct TestWave {
 	std::shared_ptr<const WaveBank> bank;
 	Guid partition;
 };
-TestWave make_wave(uint32_t p_segments, uint32_t p_frames, int16_t p_first_loop, int16_t p_last_loop, uint32_t p_rate = 48000, bool p_sine = false) {
+TestWave make_wave(uint32_t p_segments, uint32_t p_frames, int16_t p_first_loop, int16_t p_last_loop,
+		uint32_t p_rate = 48000, bool p_sine = false, uint32_t p_channels = 1, uint32_t p_sounding_channel = 0) {
 	SoundWaveInfo w;
 	w.name = "test_wave";
 	static const uint8_t kPartition[16] = { 0x11, 0x11, 0x11, 0x11, 0x22, 0x22, 0x33, 0x33, 0x44, 0x44, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55 };
 	w.partition = Guid::from_bytes(kPartition);
-	w.channels = 1;
+	w.channels = p_channels;
 	std::vector<uint8_t> chunk;
 	WaveVariation var;
 	var.chunk_index = 0;
 	var.first_loop_segment = p_first_loop;
 	var.last_loop_segment = p_last_loop;
 	for (uint32_t s = 0; s < p_segments; ++s) {
-		std::vector<int16_t> samples(p_frames, 0);
+		std::vector<int16_t> samples(size_t(p_frames) * p_channels, 0);
 		if (p_sine) {
 			for (uint32_t i = 0; i < p_frames; ++i) {
-				samples[i] = int16_t(std::lrint(16000.0 * std::sin(2.0 * kPi * 1000.0 * double(i) / double(p_rate))));
+				samples[size_t(i) * p_channels + p_sounding_channel] =
+						int16_t(std::lrint(16000.0 * std::sin(2.0 * kPi * 1000.0 * double(i) / double(p_rate))));
 			}
 		} else {
-			samples[0] = int16_t(1000 * (s + 1));
+			samples[p_sounding_channel] = int16_t(1000 * (s + 1));
 		}
 		WaveSegment seg;
 		seg.samples_offset = uint32_t(chunk.size());
 		seg.length_seconds = float(p_frames) / float(p_rate);
-		const std::vector<uint8_t> st = pcm_stream(samples, 1, p_rate);
+		const std::vector<uint8_t> st = pcm_stream(samples, p_channels, p_rate);
 		chunk.insert(chunk.end(), st.begin(), st.end());
 		var.segments.push_back(seg);
 	}
@@ -1670,6 +1672,39 @@ TEST_SUITE("audio-mixer") {
 		CHECK(outs[0] == outs[1]);
 		CHECK(std::any_of(outs[0].begin(), outs[0].end(), [](float v) { return v != 0.0f; }));
 	}
+	TEST_CASE("a stereo wave's first channel plays on the left output channel and its second on the right") {
+		for (uint32_t sounding = 0; sounding < 2; ++sounding) {
+			const TestWave w = make_wave(1, 3000, -1, -1, 48000, true, 2, sounding);
+			const std::shared_ptr<const SoundProgram> prog = one_shot_program(w);
+			ba::MixerCore mixer(ba::MixerConfig{});
+			auto inst = instance(prog, w.bank);
+			ba::MixerCommand start;
+			start.type = ba::MixerCommandType::Start;
+			start.handle = mixer.next_handle();
+			start.instance = inst.get();
+			start.at_frame = 600;
+			REQUIRE(mixer.push(start));
+			(void)inst.release();
+			ba::MixerCommand ev;
+			ev.type = ba::MixerCommandType::PostEvent;
+			ev.handle = start.handle;
+			ev.name_hash = 1;
+			ev.at_frame = 700;
+			REQUIRE(mixer.push(ev));
+			std::vector<float> buf(2 * 512);
+			double energy[2] = { 0.0, 0.0 };
+			for (int b = 0; b < 8; ++b) {
+				mixer.mix(buf.data(), 512);
+				for (size_t i = 0; i < 512; ++i) {
+					energy[0] += double(buf[i * 2]) * double(buf[i * 2]);
+					energy[1] += double(buf[i * 2 + 1]) * double(buf[i * 2 + 1]);
+				}
+			}
+			CHECK(energy[sounding] > 100.0);
+			CHECK(energy[1 - sounding] == 0.0);
+		}
+	}
+
 	TEST_CASE("a bus gain scales only that bus's share of the output and reads back once applied") {
 		const TestWave w = make_wave(1, 3000, -1, -1, 48000, true);
 		const std::shared_ptr<const SoundProgram> prog = one_shot_program(w);

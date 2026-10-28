@@ -1588,6 +1588,42 @@ bool gate_late_blocks() {
 	return env_value("OPENBF3_AU3_GATE_LATE") == "1";
 }
 
+struct GodotCameraBasis {
+	ba::Vec3 x, y, z;
+};
+
+GodotCameraBasis godot_view_basis(float p_yaw) {
+	const float a = p_yaw + 3.14159265358979323846f;
+	return { { std::cos(a), 0.0f, -std::sin(a) }, { 0.0f, 1.0f, 0.0f }, { std::sin(a), 0.0f, std::cos(a) } };
+}
+
+ba::ListenerState listener_of(const GodotCameraBasis &p_basis, const ba::Vec3 &p_eye) {
+	ba::ListenerState l;
+	l.position = p_eye;
+	l.forward = { -p_basis.z.x, -p_basis.z.y, -p_basis.z.z };
+	l.up = p_basis.y;
+	return l;
+}
+
+uint16_t yaw16_towards(const ba::Vec3 &p_from, const ba::Vec3 &p_to) {
+	const double a = std::atan2(double(p_to.x - p_from.x), double(p_to.z - p_from.z));
+	return uint16_t(int64_t(std::llround(a / (2.0 * 3.14159265358979323846) * 65536.0)) & 0xffff);
+}
+
+struct ChannelEnergy {
+	double left_db = -300.0, right_db = -300.0;
+};
+
+ChannelEnergy channel_energy(std::span<const float> p_mix, uint64_t p_first, uint64_t p_end) {
+	double l = 0.0, r = 0.0;
+	const uint64_t end = std::min<uint64_t>(p_end, p_mix.size() / 2);
+	for (uint64_t i = p_first; i < end; ++i) {
+		l += double(p_mix[size_t(i) * 2]) * double(p_mix[size_t(i) * 2]);
+		r += double(p_mix[size_t(i) * 2 + 1]) * double(p_mix[size_t(i) * 2 + 1]);
+	}
+	const double n = double(std::max<uint64_t>(end > p_first ? end - p_first : 0, 1));
+	return { 10.0 * std::log10(l / n + 1e-30), 10.0 * std::log10(r / n + 1e-30) };
+}
 }
 
 TEST_SUITE("audio-game") {
@@ -2087,6 +2123,112 @@ TEST_SUITE("audio-game") {
 				std::string(line) + "\n0-1 s silence; 1 s own burst (8); 2.2 s own reload; 4 / 7 / 10 s M16A3 at 15 / 80 / 250 m (10 rounds);"
 				" 13 s SVD at 40 m (3 shots); 16 s five impacts 3-8 m; 18 s own burst (8)\n");
 		rig.router->set_observer(nullptr);
+		check_game_unchanged(*f);
+	}
+
+	TEST_CASE("stereo: in the Godot camera's pose an M16A3 shooter and an impact on the camera's x side are louder on "
+			  "the right channel, on its -x side on the left") {
+		GameFixture *f = need_game_install();
+		if (f == nullptr) {
+			return;
+		}
+		const ba::WeaponAudioTable &table = *f->assets.table;
+		const uint16_t m16 = def_of_patch(table, kM16Patch);
+		REQUIRE(m16 != sw::kNoWeapon);
+		std::string impact;
+		for (const std::string &n : f->impact_names) {
+			if (f->assets.impacts->find(n)) {
+				impact = n;
+				break;
+			}
+		}
+		REQUIRE(!impact.empty());
+		struct Whole final : ba::MixTap {
+			std::vector<float> mix;
+			void on_block(const float *p, uint32_t n, uint64_t) override {
+				mix.insert(mix.end(), p, p + size_t(n) * 2);
+			}
+		};
+		const double t_start = 600.25;
+		const auto at = [&](double p_s) {
+			return sw::SimTime(std::llround((t_start + p_s * 60.0) * double(sw::kTimeUnitsPerTick)));
+		};
+		const sw::SimTime m16_iv =
+				sw::SimTime(std::llround(table.defs[m16].shot_interval_s * double(sw::kTimeUnitsPerSecond)));
+		const uint64_t shots_end = uint64_t(2.6 * ba::kMixRate), impact_first = uint64_t(2.8 * ba::kMixRate),
+					   impact_end = uint64_t(4.4 * ba::kMixRate);
+		for (const float yaw : { 0.0f, 1.1f, -2.4f }) {
+			const GodotCameraBasis cam = godot_view_basis(yaw);
+			for (const float side : { 1.0f, -1.0f }) {
+				Whole tap;
+				GameRig rig(*f, &tap);
+				const ba::Vec3 eye{ 0.0f, 1.6f, 0.0f };
+				rig.listener = listener_of(cam, eye);
+				std::vector<NetShooter> shooters(1);
+				NetShooter &s = shooters[0];
+				s.slot = 1;
+				s.def = m16;
+				s.state.life = 1;
+				const ba::Vec3 feet{ eye.x + side * 12.0f * cam.x.x, 0.0f, eye.z + side * 12.0f * cam.x.z };
+				s.state.position = { feet.x, feet.y, feet.z };
+				s.state.yaw = yaw16_towards(feet, eye);
+				s.burst(at(1.0), 6, m16_iv);
+				NetStream net;
+				std::vector<host::PresentEvent> events;
+				std::vector<ba::ImpactSoundRequest> impacts;
+				bool impact_sent = false;
+				for (uint64_t fi = 0; fi < uint64_t(4.5 * 60); ++fi) {
+					const double t = t_start + double(fi);
+					const uint64_t now_ns = uint64_t(std::llround(t * kNsPerTick));
+					events.clear();
+					impacts.clear();
+					net.advance(t, shooters, events);
+					net.publish(t, now_ns, shooters);
+					const host::PresentClock c = host::present_clock(*net.frame, now_ns);
+					if (!impact_sent && fi >= uint64_t(3.0 * 60)) {
+						ba::ImpactSoundRequest r;
+						r.patch = impact;
+						r.position = { eye.x + side * 5.0f * cam.x.x, 0.0f, eye.z + side * 5.0f * cam.x.z };
+						r.seed = 7;
+						r.time = c.render;
+						r.timeline = host::PresentTimeline::Render;
+						impacts.push_back(r);
+						impact_sent = true;
+					}
+					rig.frame(*net.frame, now_ns, events, 0, impacts);
+					net.trim(shooters);
+				}
+				CHECK(rig.router->stats().bursts == 1);
+				CHECK(rig.impacts->stats().impacts == 1);
+				const ChannelEnergy shots = channel_energy(tap.mix, 0, shots_end);
+				const ChannelEnergy hit = channel_energy(tap.mix, impact_first, impact_end);
+				const double shots_lean = shots.right_db - shots.left_db, hit_lean = hit.right_db - hit.left_db;
+				MESSAGE("yaw " << yaw << " side " << side << ": M16A3 at 12 m right - left " << shots_lean << " dB ("
+							   << shots.left_db << " / " << shots.right_db << "), " << impact << " at 5 m " << hit_lean
+							   << " dB");
+				CHECK(std::max(shots.left_db, shots.right_db) > -70.0);
+				CHECK(std::max(hit.left_db, hit.right_db) > -70.0);
+				CHECK(side * shots_lean > 6.0);
+				CHECK(side * hit_lean > 6.0);
+			}
+		}
+		const WaveBank &bank = *f->assets.bank;
+		std::map<uint32_t, size_t> by_channels;
+		for (WaveId w = 0; w < WaveId(bank.waves().size()); ++w) {
+			for (const WaveVariation &var : bank.waves()[w].variations) {
+				const std::span<const uint8_t> chunk = bank.chunk(w, var.chunk_index);
+				StreamDecoder d;
+				if (!chunk.empty() && !var.segments.empty() && d.open(chunk, var.segments[0].samples_offset).ok()) {
+					++by_channels[d.header().channels];
+					break;
+				}
+			}
+		}
+		std::string census;
+		for (const auto &[channels, n] : by_channels) {
+			census += " " + std::to_string(n) + " with " + std::to_string(channels);
+		}
+		MESSAGE("Metro TDM bank waves by channel count:" << census);
 		check_game_unchanged(*f);
 	}
 

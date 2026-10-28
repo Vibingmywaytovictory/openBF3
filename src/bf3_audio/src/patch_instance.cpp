@@ -305,7 +305,7 @@ void PatchInstance::set_geometry(const EmitterState &p_emitter, const ListenerSt
 	Geometry &g = st.geometry;
 	const Vec3 d = sub(p_emitter.position, p_listener.position);
 	g.distance = length(d);
-	const Vec3 right = cross(p_listener.up, p_listener.forward);
+	const Vec3 right = cross(p_listener.forward, p_listener.up);
 	if (g.distance > 1e-6f) {
 		const Vec3 n{ d.x / g.distance, d.y / g.distance, d.z / g.distance };
 		g.azimuth = std::atan2(dot(n, right), dot(n, p_listener.forward));
