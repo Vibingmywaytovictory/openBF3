@@ -46,6 +46,7 @@ core::Result<std::unique_ptr<GameSettings>> GameSettings::load(const core::EbxRe
 	s->catalog_ = std::move(*catalog);
 	s->session_ = std::make_unique<ui::OptionsSession>(s->catalog_, std::move(*table));
 	s->video_shown_ = ui::settings_effects(s->store()).video;
+	s->begin_level();
 	return s;
 }
 
@@ -95,6 +96,10 @@ core::Result<bool> GameSettings::save_if_changed(const std::string &p_path) {
 	return true;
 }
 
+void GameSettings::begin_level() {
+	level_hip_fov_deg_ = ui::settings_effects(store()).hip_fov_deg;
+}
+
 size_t GameSettings::apply_input(InputMapper &r_mapper) {
 	if (store().revision() == input_revision_) {
 		return missed_inputs_;
@@ -110,7 +115,6 @@ size_t GameSettings::apply_input(InputMapper &r_mapper) {
 	r_mapper.mouse_sensitivity = r_mapper.base_sensitivity;
 	r_mapper.invert_look = e.invert_look;
 	r_mapper.hold_to_zoom = e.hold_to_zoom;
-	hip_fov_deg_ = e.hip_fov_deg;
 	safe_area_ = { e.safe_width, e.safe_height };
 	return missed_inputs_;
 }

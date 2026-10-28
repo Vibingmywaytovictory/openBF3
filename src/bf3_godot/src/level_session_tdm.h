@@ -21,6 +21,7 @@ class Bf3UiScreens;
 class EorCameraView;
 class EorCheck;
 class EorFlash;
+class FovRoundCheck;
 class NativeEor;
 class NativeFlow;
 class NativeMenu;
@@ -124,6 +125,7 @@ struct TdmState {
 	bool overlay_check = false;
 	std::unique_ptr<OverlayCheck, void (*)(OverlayCheck *)> overlay_run{ nullptr, nullptr };
 	std::unique_ptr<EorCheck, void (*)(EorCheck *)> eor_check{ nullptr, nullptr };
+	std::unique_ptr<FovRoundCheck, void (*)(FovRoundCheck *)> fov_round{ nullptr, nullptr };
 };
 
 Bf3UiScreens *tdm_ui_screens(const TdmState &p_m);

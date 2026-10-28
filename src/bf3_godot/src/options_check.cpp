@@ -609,9 +609,10 @@ std::vector<OptionsCheck::Step> OptionsCheck::steps() {
 				r_self.check_file_value(c, kSafeHeight, value(c, kSafeHeight));
 				tap(c, K::KEY_ESCAPE);
 			} });
-	s.push_back({ "the hip camera FOV follows the new setting",
+	s.push_back({ "the hip camera FOV keeps the level's until the next level load",
 			[](OptionsCheck &r_self, const Ctx &c) {
-				return hip_ready(c, r_self.fov_default_ + double(kOptionsCheckSteps));
+				return near(value(c, kFieldOfView), r_self.fov_default_ + double(kOptionsCheckSteps)) &&
+						hip_ready(c, r_self.fov_default_);
 			},
 			[](OptionsCheck &r_self, const Ctx &c) {
 				r_self.note_fov(c, "hip");

@@ -24,9 +24,11 @@
 #if OPENBF3_BUILD_CHECKS
 #include "deploy_check.h"
 #include "eor_check.h"
+#include "fov_round_check.h"
 #include "loading_screen_check.h"
 #include "native_screens_check.h"
 #include "overlay_check.h"
+#include "viewmodel.h"
 #endif
 
 #include "bf3/core/ui/text_db.h"
@@ -628,6 +630,9 @@ void Bf3LevelSession::tdm_presented(uint64_t p_now_ns) {
 		if ((m.last_phase == net::MatchPhase::RoundOver || m.last_phase == net::MatchPhase::Restarting) && !over) {
 			m.spawned_this_round = false;
 			m.own_death_s = -1.0;
+			if (r_game.settings != nullptr) {
+				r_game.settings->begin_level();
+			}
 		}
 		if (f.match.phase != m.last_phase) {
 			print_match(f.match);
@@ -950,11 +955,30 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		io.eor_camera = m.eor_camera.get();
 		io.flash = m.eor_flash.get();
 		io.camera = p_camera;
+		if (r_game.settings != nullptr) {
+			FovRoundView view;
+			const Camera3D *eye = cameras_.first_person();
+			const Bf3Viewmodel *vm = r_game.own_viewmodel();
+			const bool play_camera = eye != nullptr && eye->is_current() && !p_free_camera &&
+					(m.eor_camera == nullptr || !m.eor_camera->active());
+			view.hip = play_camera && r_game.alive && vm != nullptr && vm->is_visible() && vm->item() >= 0 &&
+					vm->ads_params().can_zoom && vm->ads().fov_progress == 0.0f;
+			view.round_over = m.round_end;
+			view.camera_fov = eye != nullptr ? float(eye->get_fov()) : 0.0f;
+			if (m.fov_round == nullptr) {
+				m.fov_round = std::unique_ptr<FovRoundCheck, void (*)(FovRoundCheck *)>(
+						new FovRoundCheck(), &delete_part<FovRoundCheck>);
+			}
+			m.fov_round->frame(*r_game.settings, view);
+		}
 		if (m.eor_check->frame(*screens, m.native_flow != nullptr ? m.native_flow->session() : nullptr, *m.native_eor,
 					r_game.hud_model, now_s, io)) {
 			m.finished = true;
 			UtilityFunctions::print(to_godot(m.eor_check->report()));
-			finish(m.eor_check->exit_code());
+			const bool fov_passed = m.fov_round != nullptr && m.fov_round->passed();
+			UtilityFunctions::print(to_godot(
+					m.fov_round != nullptr ? m.fov_round->report() : std::string("[fov] FOV ROUND: FAIL no settings")));
+			finish(fov_passed ? m.eor_check->exit_code() : 1);
 			return true;
 		}
 	}

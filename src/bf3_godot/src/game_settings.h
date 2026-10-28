@@ -50,7 +50,8 @@ public:
 	void read_display();
 	core::Status frame(InputMapper &r_mapper, audio::MixerCore *p_mixer, const std::string &p_path);
 	size_t missed_inputs() const { return missed_inputs_; }
-	float hip_fov_deg() const { return hip_fov_deg_; }
+	void begin_level();
+	float hip_fov_deg() const { return level_hip_fov_deg_; }
 	bf3::core::ui::ScreenAdjustFractions safe_area() const { return safe_area_; }
 
 private:
@@ -64,7 +65,7 @@ private:
 	uint64_t written_revision_ = 0;
 	core::ui::VideoEffects video_shown_;
 	size_t missed_inputs_ = 0;
-	float hip_fov_deg_ = 70.0f;
+	float level_hip_fov_deg_ = 70.0f;
 	bf3::core::ui::ScreenAdjustFractions safe_area_;
 };
 

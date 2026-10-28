@@ -242,6 +242,8 @@ if(OPENBF3_BUILD_CHECKS)
         src/deploy_check.h
         src/eor_check.cpp
         src/eor_check.h
+        src/fov_round_check.cpp
+        src/fov_round_check.h
         src/loading_screen_check.cpp
         src/loading_screen_check.h
         src/m9_reload_check.cpp

@@ -976,6 +976,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			} else {
 				UtilityFunctions::print(to_godot("[game] settings: no " + path + ", the install's defaults"));
 			}
+			g.settings->begin_level();
 		}
 	}
 	if (g.settings != nullptr) {
