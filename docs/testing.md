@@ -55,7 +55,9 @@ a `timing` row, split first so its socket-free cases stay on branches (`host.ses
   `${CMAKE_BINARY_DIR}/shots/<row>`, never a fixed `%TEMP%` name; the documented ui1 shots path is the one exception.
 * Ports are 0. The install is read only through the readers.
 * Godot rows pass their own `--bf3-cache` root, never the shared `user://bf3cache`, and `godot_run` gives every run
-  a scratch `--settings-file`; a run naming `user://settings.cfg` fails. Files shared in a worktree get a RESOURCE_LOCK.
+  a scratch `--settings-file`; a run naming `user://settings.cfg` fails. A row seeds that file with `godot_run`'s
+  `SETTINGS` lines (`SETTINGS "version = 1" "FieldOfView = 80"`), and without them it starts from the install
+  defaults. Files shared in a worktree get a RESOURCE_LOCK.
 * RUN_SERIAL only on rows labelled `timing`, `realtime` (outside the lane), `window`, `bigmem` or
   `serial_wallclock`. The reason is a label because `ctest --show-only=json-v1` carries no CMake comments.
 * PROCESSORS = the measured cpu/wall, rounded, whenever it is 2 or more. COST = the measured serial seconds on every
