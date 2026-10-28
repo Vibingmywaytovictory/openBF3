@@ -283,6 +283,18 @@ void DeployCheck::fire_accessories(
 	const std::string_view sub = kCustomizeScreenPartitions[1];
 	const std::string_view accessories = kCustomizeScreenPartitions[2];
 	const DeployCheckList &barrel = p_st.lists[kDeployCheckBarrelList];
+	if (fire_class_ == size_t(DeployFireClass::Assault)) {
+		if (!fire_extra_requested_ && p_st.extra_pick_valid && p_io.extra_loadout) {
+			p_io.extra_loadout(p_st.extra_pick);
+			fire_extra_requested_ = true;
+			fire_extra_spawn_s_ = p_now_s - kDeployFireExtraSpawnSeconds;
+		}
+		if (fire_extra_requested_ && p_io.extra_spawn &&
+				p_now_s - fire_extra_spawn_s_ >= kDeployFireExtraSpawnSeconds) {
+			p_io.extra_spawn(p_st.extra_pick.kit);
+			fire_extra_spawn_s_ = p_now_s;
+		}
+	}
 	switch (fire_step_) {
 		case 30:
 			if (in >= kDeployCheckSettleSeconds &&
@@ -376,7 +388,9 @@ void DeployCheck::fire_accessories(
 			}
 			break;
 		case 41:
-			if ((p_st.vm_fov_progress >= 1.0f && in >= kDeployFireAfterSeconds) || in >= kDeployFireAdsSeconds) {
+			if ((p_st.vm_fov_progress >= 1.0f && in >= kDeployFireAfterSeconds && !p_st.vm_fire_action &&
+						!p_st.vm_bolt_action) ||
+					in >= kDeployFireAdsSeconds) {
 				fire_ads_ = p_st;
 				shot(p_io, "fire_" + cls + "_ads", p_now_s);
 				p_io.hold_zoom(false);
@@ -437,9 +451,20 @@ void DeployCheck::fire_accessory_rows(const DeployCheckState &p_st) {
 					std::abs(fire_ads_.camera_fov - fire_ads_.vm_zoom_fov) < kDeployFireFovTolerance,
 			fov);
 	const std::string optic = fire_hip_.picked_unlocks.empty() ? std::string() : fire_hip_.picked_unlocks[0];
-	row(name + ".sight_picture", !optic.empty() && drawn(fire_ads_.vm_attached, optic),
+	const SightSurfaces &surfaces = fire_ads_.vm_sight_surfaces;
+	char sight[256];
+	std::snprintf(sight, sizeof(sight),
+			"; sight centre %s (%.1f, %.1f) px from the screen centre, %zu of %zu unlit reticle surfaces textured, %zu "
+			"of %zu "
+			"lit lens surfaces see-through",
+			fire_ads_.vm_sight ? "at" : "not found,", double(fire_ads_.vm_sight_px.x), double(fire_ads_.vm_sight_px.y),
+			surfaces.reticles_textured, surfaces.reticles, surfaces.lenses_clear, surfaces.lenses);
+	row(name + ".sight_picture",
+			!optic.empty() && drawn(fire_ads_.vm_attached, optic) && fire_ads_.vm_sight &&
+					fire_ads_.vm_sight_px.length() <= kDeployFireSightPx && surfaces.reticles > 0 &&
+					surfaces.reticles_textured == surfaces.reticles && surfaces.lenses_clear == surfaces.lenses,
 			"optic " + (optic.empty() ? std::string("not picked") : optic) +
-					" at ADS: " + joined(fire_ads_.vm_attached));
+					" at ADS: " + joined(fire_ads_.vm_attached) + sight + "; " + fire_ads_.vm_pose);
 	if (fire_class_ == size_t(DeployFireClass::Assault)) {
 		const uint64_t sounds = fire_hip_.audio_accessory_sounds - fire_mark_.audio_accessory_sounds;
 		const uint64_t effects = fire_hip_.fx_accessory_effects - fire_mark_.fx_accessory_effects;
@@ -447,14 +472,22 @@ void DeployCheck::fire_accessory_rows(const DeployCheckState &p_st) {
 				std::to_string(sounds) + " shot sound(s) from the suppressor's WeaponSoundModifier entry, " +
 						std::to_string(effects) + " muzzle start(s) from its WeaponFiringEffectsModifier entry");
 	}
-	row(name + ".second_client_gear", p_st.extra_gear_match && p_st.crowd_gear_meshes > 0,
-			std::string("player2's gear for the own slot ") + (p_st.extra_gear_match ? "names" : "does not name") +
-					" the picks; the crowd part for (def, picks) carries " + std::to_string(p_st.crowd_gear_meshes) +
-					" accessory meshes");
+	const std::string seen = std::string("player2's gear for the own slot ") +
+			(p_st.extra_gear_match ? "names" : "does not name") + " the own picks";
+	if (fire_class_ != size_t(DeployFireClass::Assault)) {
+		row(name + ".second_client_sees_gear", p_st.extra_gear_match, seen);
+		return;
+	}
+	row(name + ".second_client_gear",
+			p_st.extra_gear_match && p_st.extra_pick_valid && p_st.extra_gear_named && p_st.crowd_extra_meshes > 0,
+			seen + "; player2 picked " + (p_st.extra_pick_valid ? p_st.extra_pick_unlock : std::string("nothing")) +
+					", which the own gear for its slot " + std::to_string(unsigned(p_st.extra_slot)) +
+					(p_st.extra_gear_named ? " names" : " does not name") + ", and the own crowd draws player2 with " +
+					std::to_string(p_st.crowd_extra_meshes) + " accessory meshes");
 }
 
 void fill_deploy_fire_state(DeployCheckState &r_state, GameState &r_game, const bf3::host::PresentationFrame &p_frame,
-		const bf3::host::SharedLevel *p_level, const bf3::host::ClientSession *p_extra) {
+		const bf3::host::SharedLevel *p_level, const bf3::host::ClientSession *p_extra, const godot::Camera3D *p_eye) {
 	const uint8_t team = r_game.own_team;
 	if (p_level != nullptr && p_level->gunplay != nullptr) {
 		for (size_t i = 0; i < r_state.primary_count; ++i) {
@@ -569,6 +602,51 @@ void fill_deploy_fire_state(DeployCheckState &r_state, GameState &r_game, const 
 		if (const bf3::render::ViewmodelItem *item = vm->current_item()) {
 			r_state.vm_zoom_controller = item->ads.controller;
 		}
+		if (const std::optional<godot::Vector2> px = vm->sight_offset_px(p_eye)) {
+			r_state.vm_sight = true;
+			r_state.vm_sight_px = *px;
+		}
+		char pose[160];
+		const bf3::anim::ViewmodelOutput &out = vm->output();
+		std::snprintf(pose, sizeof(pose),
+				"action clip %u at %.2f s weight %.2f, base clip %u, ADS blend %.2f, offset (%.3f, %.3f, %.3f)",
+				out.action_clip, double(out.action_time_s), double(out.action_weight), out.base_clip,
+				double(vm->ads().blend), double(out.weapon_offset.t.x), double(out.weapon_offset.t.y),
+				double(out.weapon_offset.t.z));
+		r_state.vm_pose = pose;
+		r_state.vm_sight_surfaces = vm->sight_surfaces();
+	}
+	if (catalog != nullptr && p_extra != nullptr) {
+		const auto other = std::make_unique<bf3::host::PresentationFrame>();
+		uint8_t extra_team = 0;
+		if (p_extra->read_presentation(*other) && other->stats.connected) {
+			r_state.extra_slot = other->stats.slot;
+			for (size_t i = 0; i < p_frame.player_count && i < p_frame.players.size(); ++i) {
+				if (p_frame.players[i].slot == r_state.extra_slot) {
+					extra_team = p_frame.players[i].team;
+				}
+			}
+		}
+		if (extra_team == 1 || extra_team == 2) {
+			const uint8_t kit_index = kDeployFireKits[size_t(DeployFireClass::Assault)];
+			const bf3::host::LoadoutKit *kit = catalog->kit(extra_team, kit_index);
+			const bf3::host::LoadoutItem *item = kit != nullptr ? kit->find(primary, kit->defaults[primary]) : nullptr;
+			for (size_t i = 0; item != nullptr && i < item->accessories[0].size() && !r_state.extra_pick_valid; ++i) {
+				if (item->accessories[0][i] != item->default_accessories[0] &&
+						!item->accessory_unlocks[0][i].starts_with(bf3::render::kDefaultSocketUnlockPrefix)) {
+					r_state.extra_pick.kit = kit_index;
+					r_state.extra_pick.accessories = { item->accessories[0][i], 0, 0, 0 };
+					r_state.extra_pick_unlock = item->accessory_unlocks[0][i];
+					r_state.extra_pick_valid = true;
+				}
+			}
+		}
+		if (r_state.extra_pick_valid && r_state.extra_slot < p_frame.gear.size()) {
+			r_state.extra_gear_named = p_frame.gear[r_state.extra_slot].accessories == r_state.extra_pick.accessories;
+		}
+		if (r_game.crowd != nullptr && r_state.extra_slot != 0xFF) {
+			r_state.crowd_extra_meshes = r_game.crowd->slot_accessory_meshes(r_state.extra_slot);
+		}
 	}
 	if (r_game.audio != nullptr) {
 		r_state.audio_accessory_sounds = r_game.audio->stats().router.accessory_sounds;
@@ -577,5 +655,4 @@ void fill_deploy_fire_state(DeployCheckState &r_state, GameState &r_game, const 
 		r_state.fx_accessory_effects = r_game.fx->stats().triggers.accessory_effects;
 	}
 }
-
 }

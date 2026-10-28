@@ -58,6 +58,7 @@ public:
 	bool has_weapon_mesh(uint8_t p_wire_team, uint16_t p_def) const;
 	void want_gear(uint8_t p_wire_team, const bf3::net::SoldierGear &p_gear);
 	size_t gear_accessory_meshes(uint8_t p_wire_team, const bf3::net::SoldierGear &p_gear) const;
+	size_t slot_accessory_meshes(uint8_t p_slot) const;
 
 	std::span<const fx::MuzzleSample> muzzles() const;
 	GameCrowdStats stats() const;

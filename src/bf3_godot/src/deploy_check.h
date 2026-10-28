@@ -2,6 +2,8 @@
 
 #include "bf3/core/gameplay/weapon_def.h"
 #include "bf3/host/loadout.h"
+#include "bf3/net/protocol.h"
+#include "viewmodel.h"
 
 #include <godot_cpp/classes/global_constants.hpp>
 #include <godot_cpp/variant/vector2.hpp>
@@ -13,6 +15,10 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+namespace godot {
+class Camera3D;
+}
 
 namespace bf3::host {
 class ClientSession;
@@ -72,8 +78,10 @@ inline constexpr std::string_view kDeployCheckOpticSelector = "instance1.KitSele
 inline constexpr std::string_view kDeployCheckBarrelSelector = "instance1.KitSelector_04";
 inline constexpr std::string_view kDeployCheckSoldierKitButton = "instance1.KitView_01.mcContainer.Slot_";
 inline constexpr std::string_view kDeployCheckAccessoriesButton = "instance1.KitSelector_01.mcContainer.Slot_0.button1";
-inline constexpr double kDeployFireAdsSeconds = 2.0;
+inline constexpr double kDeployFireAdsSeconds = 4.0;
 inline constexpr float kDeployFireFovTolerance = 1.0f;
+inline constexpr float kDeployFireSightPx = 16.0f;
+inline constexpr double kDeployFireExtraSpawnSeconds = 1.0;
 
 struct DeployCheckList {
 	uint32_t count = 0;
@@ -149,6 +157,16 @@ struct DeployCheckState {
 	uint64_t fx_accessory_effects = 0;
 	bool extra_gear_match = false;
 	size_t crowd_gear_meshes = 0;
+	bool vm_sight = false;
+	godot::Vector2 vm_sight_px;
+	SightSurfaces vm_sight_surfaces;
+	std::string vm_pose;
+	bool extra_pick_valid = false;
+	bf3::net::LoadoutRequest extra_pick;
+	std::string extra_pick_unlock;
+	uint8_t extra_slot = 0xFF;
+	bool extra_gear_named = false;
+	size_t crowd_extra_meshes = 0;
 };
 
 struct DeployCheckIo {
@@ -163,6 +181,8 @@ struct DeployCheckIo {
 	std::function<void(bool)> hold_fire;
 	std::function<bool(std::string *)> join;
 	std::function<void(bool)> hold_zoom;
+	std::function<void(const bf3::net::LoadoutRequest &)> extra_loadout;
+	std::function<void(uint8_t)> extra_spawn;
 };
 
 class DeployCheck {
@@ -260,6 +280,8 @@ private:
 	uint32_t fire_optic_expected_ = 0;
 	DeployCheckState fire_ads_;
 	DeployCheckState fire_hip_;
+	bool fire_extra_requested_ = false;
+	double fire_extra_spawn_s_ = 0.0;
 	void fire_accessories(
 			Bf3UiScreens &r_screens, double p_now_s, const DeployCheckIo &p_io, const DeployCheckState &p_st);
 	void fire_accessory_rows(const DeployCheckState &p_st);
@@ -269,7 +291,7 @@ private:
 };
 
 void fill_deploy_fire_state(DeployCheckState &r_state, GameState &r_game, const bf3::host::PresentationFrame &p_frame,
-		const bf3::host::SharedLevel *p_level, const bf3::host::ClientSession *p_extra);
+		const bf3::host::SharedLevel *p_level, const bf3::host::ClientSession *p_extra, const godot::Camera3D *p_eye);
 
 DeployFireClass deploy_fire_class(const bf3::host::LoadoutCatalog &p_catalog,
 		std::span<const bf3::core::gameplay::WeaponDef> p_defs, uint8_t p_team, uint32_t p_item);

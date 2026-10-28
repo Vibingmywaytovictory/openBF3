@@ -983,6 +983,19 @@ size_t Bf3GameCrowd::gear_accessory_meshes(uint8_t p_wire_team, const net::Soldi
 	return wm.binds > 0 && (!m.draw || wm.mesh.is_valid()) ? wm.accessory_meshes : 0;
 }
 
+size_t Bf3GameCrowd::slot_accessory_meshes(uint8_t p_slot) const {
+	const Impl &m = *impl_;
+	if (p_slot >= kSlotsPerTeam || !m.slots[p_slot].known) {
+		return 0;
+	}
+	const Impl::Slot &s = m.slots[p_slot];
+	const size_t index = size_t(s.team) * kSlotsPerTeam + p_slot + size_t(s.lane) * kCamLaneOffset;
+	if (index >= m.weapon_draws.size() || !m.weapon_draws[index].visible || s.team >= m.weapon_meshes.size() ||
+			m.weapon_draws[index].item >= m.weapon_meshes[s.team].size()) {
+		return 0;
+	}
+	return m.weapon_meshes[s.team][m.weapon_draws[index].item].accessory_meshes;
+}
 bool Bf3GameCrowd::has_weapon_mesh(uint8_t p_wire_team, uint16_t p_def) const {
 	const Impl &m = *impl_;
 	const uint8_t team = anim::crowd_team_of_wire(p_wire_team);

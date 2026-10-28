@@ -854,6 +854,16 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		io.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
 		io.hold_fire = [this](bool p_held) { mapper_.script_hold(InputMapper::WeaponAction::Fire, p_held); };
 		io.hold_zoom = [this](bool p_held) { mapper_.script_hold(InputMapper::WeaponAction::Ads, p_held); };
+		io.extra_loadout = [this](const bf3::net::LoadoutRequest &p_request) {
+			if (extra_client_ != nullptr) {
+				extra_client_->send_loadout_request(p_request);
+			}
+		};
+		io.extra_spawn = [this](uint8_t p_kit) {
+			if (extra_client_ != nullptr) {
+				extra_client_->send_spawn_request(p_kit);
+			}
+		};
 		io.join = [this](std::string *r_error) { return join_extra_client(r_error); };
 		io.state = [this, &r_game, &m, &f, screens] {
 			DeployCheckState s;
@@ -909,7 +919,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 				s.glitch_power = post->stats().last_trigger_power;
 			}
 			const std::shared_ptr<const host::SharedLevel> fire_level = shared_level();
-			fill_deploy_fire_state(s, r_game, f, fire_level.get(), extra_client_.get());
+			fill_deploy_fire_state(s, r_game, f, fire_level.get(), extra_client_.get(), cameras_.first_person());
 			if (const Camera3D *eye = cameras_.first_person()) {
 				s.camera_fov = float(eye->get_fov());
 			}
