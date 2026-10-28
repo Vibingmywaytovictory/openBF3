@@ -46,7 +46,7 @@ void pending(const char *p_key, const char *p_row, const char *p_reason) {
 }
 
 constexpr size_t kM2aHudModelSize = 9016;
-constexpr size_t kHudModelSize = 54064;
+constexpr size_t kHudModelSize = 54080;
 
 static_assert(sizeof(ui::HudKillCard) == 776 && offsetof(ui::HudKillCard, killer_name) == 32);
 static_assert(offsetof(ui::HudKillCard, killer) == 5 && offsetof(ui::HudKillCard, item_id) == 12 &&

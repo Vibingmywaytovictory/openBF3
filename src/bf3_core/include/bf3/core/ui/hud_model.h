@@ -529,6 +529,7 @@ struct HudCustomization {
 	std::array<HudKitEntry, kHudKitCount> kits_data{};
 	int32_t customization_team = 0;
 	int32_t selected_slot = 0;
+	std::array<uint32_t, kHudSpawnKitItems> kit_grid_category{};
 };
 
 struct HudSettings {

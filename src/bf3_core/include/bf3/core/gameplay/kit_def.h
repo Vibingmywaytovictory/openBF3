@@ -44,6 +44,8 @@ struct KitUnlock {
 struct KitSlot {
 	std::string ui_category_sid;
 	std::vector<KitUnlock> unlocks;
+
+	const KitUnlock *default_unlock() const;
 };
 
 struct KitDef {

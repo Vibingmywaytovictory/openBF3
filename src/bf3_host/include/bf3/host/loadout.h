@@ -28,6 +28,7 @@ struct LoadoutItem {
 	std::string unlock;
 	uint16_t def = sim::weapons::kNoWeapon;
 	std::array<std::vector<uint32_t>, kLoadoutAccessories> accessories;
+	std::array<uint32_t, kLoadoutAccessories> default_accessories{};
 };
 
 struct LoadoutKit {
@@ -46,6 +47,9 @@ inline constexpr size_t kLoadoutKitItems = 5;
 inline constexpr uint8_t kLoadoutSpecializationSlot = uint8_t(kLoadoutSlots);
 
 enum class LoadoutKitItem : uint8_t { Primary, Sidearm, Gadget1, Gadget2, Specialization };
+
+inline constexpr std::array<std::array<uint8_t, 2>, kLoadoutKitItems> kLoadoutItemCategorySlots{ { { 0, 0 }, { 1, 1 },
+		{ 2, 4 }, { 5, 2 }, { kLoadoutSpecializationSlot, kLoadoutSpecializationSlot } } };
 
 struct LoadoutOption {
 	uint8_t slot = 0;

@@ -878,7 +878,8 @@ TEST_CASE("the deploy list: one row per enabled spawner of the own team, labelle
 }
 
 TEST_CASE("kit items: GADGET 1 is the kit item slot when the kit has one, else gadget slot 1; GADGET 2 then also "
-		  "offers gadget slot 1; a pick clears the item's other slots") {
+		  "offers gadget slot 1; the labels are gadget slot 1's and 2's categories; a pick clears the item's other "
+		  "slots") {
 	host::LoadoutKit kit;
 	const auto item = [](uint32_t p_id) {
 		host::LoadoutItem i;
@@ -905,8 +906,11 @@ TEST_CASE("kit items: GADGET 1 is the kit item slot when the kit has one, else g
 			std::vector<uint8_t>{ host::kLoadoutSpecializationSlot });
 	CHECK(host::loadout_item_options(kit, LoadoutKitItem::Gadget2) ==
 			std::vector<LoadoutOption>{ { 2, 30 }, { 2, 31 }, { 5, 50 }, { 5, 51 } });
+	CHECK(host::loadout_item_category_sid(kit, LoadoutKitItem::Gadget1) == 0x2222u);
+	CHECK(host::loadout_item_category_sid(kit, LoadoutKitItem::Gadget2) == 0x5555u);
+	kit.category_sid_hashes[2] = 0;
 	CHECK(host::loadout_item_category_sid(kit, LoadoutKitItem::Gadget1) == 0x4444u);
-	CHECK(host::loadout_item_category_sid(kit, LoadoutKitItem::Gadget2) == 0x2222u);
+	kit.category_sid_hashes[2] = 0x2222u;
 	CHECK(host::loadout_item_category_sid(kit, LoadoutKitItem::Specialization) == 0x6666u);
 	host::LoadoutChoice choice;
 	CHECK(host::loadout_item_current(kit, choice, LoadoutKitItem::Gadget1) == LoadoutOption{ 4, 40 });
@@ -959,6 +963,7 @@ TEST_CASE("the loadout screens: kit and customization from the catalog and the o
 		return i;
 	};
 	assault.slots[0] = { item(1000, 0, { 201, 202 }), item(1001, 1, { 203 }) };
+	assault.slots[0][0].default_accessories[0] = 202;
 	assault.slots[1] = { item(1002, 2) };
 	assault.slots[2] = { item(401, sw::kNoWeapon), item(402, sw::kNoWeapon) };
 	assault.slots[5] = { item(501, sw::kNoWeapon) };
@@ -1014,7 +1019,9 @@ TEST_CASE("the loadout screens: kit and customization from the catalog and the o
 	CHECK(c.kit_grid_selected[4] == -1);
 	CHECK(c.accessory_grid[0].count == 2);
 	CHECK(c.accessory_grid[0].items[1].item_id == 202);
-	CHECK(c.accessory_selected[0] == -1);
+	CHECK(c.accessory_selected[0] == 1);
+	CHECK(c.weapon_accessory1.item_id == 202);
+	CHECK(c.weapon_accessory2.item_id == 0);
 	CHECK(c.accessory_grid[1].count == 0);
 	CHECK(state.bad_inputs == 0);
 

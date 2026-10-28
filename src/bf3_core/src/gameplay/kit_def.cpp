@@ -165,9 +165,13 @@ const KitUnlock *first_free(const std::vector<KitUnlock> &p_unlocks) {
 
 }
 
+const KitUnlock *KitSlot::default_unlock() const {
+	return first_free(unlocks);
+}
+
 const KitUnlock *KitDef::default_unlock(WeaponSlot p_slot) const {
 	const KitSlot *s = slot(p_slot);
-	return s != nullptr && progression_known ? first_free(s->unlocks) : nullptr;
+	return s != nullptr && progression_known ? s->default_unlock() : nullptr;
 }
 
 const KitUnlock *KitDef::default_specialization() const {

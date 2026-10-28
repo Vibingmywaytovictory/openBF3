@@ -80,7 +80,9 @@ core::Result<LoadoutCatalog> make_loadout_catalog(const core::EbxResolver &p_db,
 	for (size_t d = 0; d < p_defs.size() && d < size_t(sim::weapons::kNoWeapon); ++d) {
 		by_variant.emplace(to_lower_ascii(p_defs[d].variant), uint16_t(d));
 	}
-	std::map<std::string, std::array<std::vector<uint32_t>, kLoadoutAccessories>> parts_of;
+	using Accessories = std::pair<std::array<std::vector<uint32_t>, kLoadoutAccessories>,
+			std::array<uint32_t, kLoadoutAccessories>>;
+	std::map<std::string, Accessories> parts_of;
 	LoadoutCatalog out;
 	for (uint8_t t = 0; t < kKitTeams; ++t) {
 		for (uint8_t k = 0; k < kKitCount; ++k) {
@@ -138,17 +140,21 @@ core::Result<LoadoutCatalog> make_loadout_catalog(const core::EbxResolver &p_db,
 										std::to_string(parts->size()) + " customization parts (limit " +
 										std::to_string(kLoadoutAccessories) + ")");
 							}
-							std::array<std::vector<uint32_t>, kLoadoutAccessories> ids;
+							Accessories ids;
 							for (size_t p = 0; p < parts->size(); ++p) {
 								for (const gp::KitUnlock &a : (*parts)[p].unlocks) {
-									if (a.identifier != 0 && !contains(ids[p], a.identifier)) {
-										ids[p].push_back(a.identifier);
+									if (a.identifier != 0 && !contains(ids.first[p], a.identifier)) {
+										ids.first[p].push_back(a.identifier);
 									}
+								}
+								if (const gp::KitUnlock *d = (*parts)[p].default_unlock()) {
+									ids.second[p] = d->identifier;
 								}
 							}
 							cached = parts_of.emplace(item.unlock, std::move(ids)).first;
 						}
-						item.accessories = cached->second;
+						item.accessories = cached->second.first;
+						item.default_accessories = cached->second.second;
 					}
 					lk.slots[s].push_back(std::move(item));
 					++out.items;
@@ -167,6 +173,17 @@ core::Result<LoadoutCatalog> make_loadout_catalog(const core::EbxResolver &p_db,
 	}
 	if (const core::Status spent = budget.status(); !spent) {
 		return core::error_at("loadout catalog", spent.error());
+	}
+	for (std::array<LoadoutKit, kKitCount> &team : out.kits) {
+		for (size_t s = 0; s < kLoadoutSlots; ++s) {
+			uint32_t shared = 0;
+			for (const LoadoutKit &k : team) {
+				shared = shared != 0 ? shared : k.category_sid_hashes[s];
+			}
+			for (LoadoutKit &k : team) {
+				k.category_sid_hashes[s] = k.category_sid_hashes[s] != 0 ? k.category_sid_hashes[s] : shared;
+			}
+		}
 	}
 	out.hash = loadout_catalog_hash(out);
 	return out;
@@ -314,7 +331,7 @@ LoadoutOption loadout_item_current(const LoadoutKit &p_kit, const LoadoutChoice 
 }
 
 uint32_t loadout_item_category_sid(const LoadoutKit &p_kit, LoadoutKitItem p_item) {
-	for (const uint8_t s : loadout_item_slots(p_kit, p_item)) {
+	for (const uint8_t s : kLoadoutItemCategorySlots[size_t(p_item)]) {
 		const uint32_t sid =
 				s == kLoadoutSpecializationSlot ? p_kit.specialization_sid_hash : p_kit.category_sid_hashes[s];
 		if (sid != 0) {

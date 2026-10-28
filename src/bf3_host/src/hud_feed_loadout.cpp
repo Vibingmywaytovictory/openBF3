@@ -115,21 +115,22 @@ void feed_loadout(Frame &r_frame) {
 	c.kit_gadget2 = item_or_empty(st, current_of(LoadoutKitItem::Gadget2));
 	c.kit_specialization = item_or_empty(st, current_of(LoadoutKitItem::Specialization));
 	c.weapon_accessory_main = c.kit_primary_weapon;
-	c.weapon_accessory1 = item_or_empty(st, choice.accessories[0]);
-	c.weapon_accessory2 = item_or_empty(st, choice.accessories[1]);
-	c.weapon_accessory3 = item_or_empty(st, choice.accessories[2]);
-	c.weapon_accessory4 = item_or_empty(st, choice.accessories[3]);
 	for (size_t i = 0; i < kLoadoutKitItems; ++i) {
 		const std::vector<uint32_t> ids = ids_of(loadout_item_options(*selected, LoadoutKitItem(i)));
 		fill_list(st, ids, current_of(LoadoutKitItem(i)), c.kit_grid_data[i], c.kit_grid_selected[i],
 				r_frame.state.rows_dropped);
+		c.kit_grid_category[i] = loadout_item_category_sid(*selected, LoadoutKitItem(i));
 	}
-	const LoadoutItem *weapon = selected->find(kLoadoutAccessoryWeapon, choice.items[kLoadoutAccessoryWeapon]);
+	const LoadoutItem *weapon = selected->find(kLoadoutAccessoryWeapon, current_of(LoadoutKitItem::Primary));
+	const std::array<ui::HudItem *, kLoadoutAccessories> accessories{ &c.weapon_accessory1, &c.weapon_accessory2,
+		&c.weapon_accessory3, &c.weapon_accessory4 };
 	for (size_t a = 0; a < c.accessory_grid.size(); ++a) {
 		const std::span<const uint32_t> ids =
 				weapon != nullptr ? std::span<const uint32_t>(weapon->accessories[a]) : std::span<const uint32_t>();
-		fill_list(st, ids, choice.accessories[a], c.accessory_grid[a], c.accessory_selected[a],
-				r_frame.state.rows_dropped);
+		const uint32_t chosen = choice.accessories[a] != 0 ? choice.accessories[a]
+														   : (weapon != nullptr ? weapon->default_accessories[a] : 0u);
+		*accessories[a] = item_or_empty(st, chosen);
+		fill_list(st, ids, chosen, c.accessory_grid[a], c.accessory_selected[a], r_frame.state.rows_dropped);
 	}
 }
 

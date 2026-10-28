@@ -1309,11 +1309,12 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(m16->accessories[1].size() == 3);
 		CHECK(m16->accessories[2].size() == 6);
 		CHECK(m16->accessories[3].size() == 1);
+		CHECK(m16->default_accessories == std::array<uint32_t, 4>{ 3010458987u, 975928659u, 1580481064u, 2341043160u });
 		CHECK(us_assault->category_sid_hashes[0] == core::ui::text_hash("ID_M_SOLDIER_PRIMARY"));
 		CHECK(host::loadout_item_category_sid(*us_assault, host::LoadoutKitItem::Gadget1) ==
-				core::ui::text_hash("ID_WEAPON_CATEGORYGADGET1"));
-		CHECK(host::loadout_item_category_sid(*us_assault, host::LoadoutKitItem::Gadget2) ==
 				core::ui::text_hash("ID_M_SOLDIER_GADGET1"));
+		CHECK(host::loadout_item_category_sid(*us_assault, host::LoadoutKitItem::Gadget2) ==
+				core::ui::text_hash("ID_M_SOLDIER_GADGET2"));
 		CHECK(host::loadout_item_slots(*us_assault, host::LoadoutKitItem::Gadget2) == std::vector<uint8_t>{ 2, 5 });
 		CHECK(host::loadout_item_options(*us_assault, host::LoadoutKitItem::Gadget1).size() == 1);
 		CHECK(host::loadout_item_options(*us_assault, host::LoadoutKitItem::Gadget2).size() == 12);
@@ -1324,6 +1325,8 @@ TEST_SUITE("host-tdm-server") {
 		REQUIRE(us_support != nullptr);
 		CHECK(host::loadout_item_slots(*us_support, host::LoadoutKitItem::Gadget1) == std::vector<uint8_t>{ 4 });
 		CHECK(host::loadout_item_slots(*us_support, host::LoadoutKitItem::Gadget2) == std::vector<uint8_t>{ 2, 5 });
+		CHECK(host::loadout_item_category_sid(*us_support, host::LoadoutKitItem::Gadget1) ==
+				core::ui::text_hash("ID_M_SOLDIER_GADGET1"));
 		const host::LoadoutKit *us_engineer = gl.loadouts.kit(1, uint8_t(host::KitRole::Engineer));
 		REQUIRE(us_engineer != nullptr);
 		CHECK(host::loadout_item_slots(*us_engineer, host::LoadoutKitItem::Gadget1) == std::vector<uint8_t>{ 2 });
