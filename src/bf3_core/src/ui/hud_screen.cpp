@@ -1339,8 +1339,13 @@ void HudScreen::initialize(const HudModel &p_model) {
 	}
 	for (size_t i = 0; i < widgets_.size(); ++i) {
 		HudWidgetState &w = *widgets_[i];
-		if (w.initialized && !w.retired && takes_focus(w)) {
+		if (!w.initialized || w.retired) {
+			continue;
+		}
+		if (takes_focus(w)) {
 			w.controller->focus_gained(*w.host);
+		} else if (w.screen_widget) {
+			w.controller->focus_lost(*w.host);
 		}
 	}
 	for (size_t i = 0; i < widgets_.size(); ++i) {

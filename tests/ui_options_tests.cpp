@@ -1053,6 +1053,7 @@ constexpr int32_t kListSelectorChanged = 8;
 constexpr int32_t kListSelectorChangedKeyValue = 23;
 constexpr int32_t kMenuHintKey = 606381875;
 constexpr int32_t kKeyPressedKey = 1279028100;
+constexpr uint32_t kOptionsHighlightedSelector = 0x000000u;
 
 std::unique_ptr<OptionsSession> retail_options(ui_retail::Retail &r_r) {
 	static std::unique_ptr<OptionsCatalog> catalog;
@@ -1254,6 +1255,16 @@ TEST_SUITE("ui-options-screens") {
 			CAPTURE(want[i]->source);
 			CHECK(b.text(rows[i] + ".Label.txtField") == sid(*r, want[i]->label));
 		}
+		const std::vector<std::string> second = b.rows("List_02");
+		REQUIRE_FALSE(rows.empty());
+		REQUIRE_FALSE(second.empty());
+		const std::optional<uint32_t> focused = b.s.hud->clip(rows[0] + ".stHolder.selectorLabel").text_color();
+		const std::optional<uint32_t> other = b.s.hud->clip(second[0] + ".stHolder.selectorLabel").text_color();
+		std::printf("ui.options.screens video List_01 row 0 selector colour %06x, List_02 row 0 %06x\n",
+				unsigned(focused.value_or(0xFFFFFFFFu)), unsigned(other.value_or(0xFFFFFFFFu)));
+		CHECK(focused == kOptionsHighlightedSelector);
+		CHECK(other.has_value());
+		CHECK(other != kOptionsHighlightedSelector);
 	}
 
 	TEST_CASE("options screens: the key binding list shows the on-foot rows and Right moves the column") {
