@@ -1,5 +1,6 @@
 #include "menu_check.h"
 
+#include "deploy_screens.h"
 #include "level_session_menu.h"
 #include "native_flow.h"
 #include "native_hud.h"
@@ -210,7 +211,20 @@ std::vector<MenuCheck::Step> MenuCheck::steps() {
 	};
 	std::vector<Step> s;
 	s.push_back({ "spawn screen up", [](MenuCheck &, const Ctx &c) { return shown(c, kSpawnScreenPartition); },
-			press(K::KEY_ENTER) });
+			press(K::KEY_ESCAPE) });
+	s.push_back({ "Escape on the deploy screen opens the menu",
+			[](MenuCheck &, const Ctx &c) { return shown(c, kIngameMenuPartition) && c.menu.in_menu(); },
+			press(K::KEY_ENTER), "deploy_menu" });
+	s.push_back({ "RESUME brings the deploy screens back",
+			[](MenuCheck &r_self, const Ctx &c) {
+				const bool menu = shown(c, kIngameMenuPartition);
+				r_self.waiting_ = state_text(c, menu) + ", spawnscreenpc " +
+						(shown(c, kSpawnScreenPartition) ? "shown" : "hidden") + ", spawnbuttonscreen " +
+						(shown(c, kSpawnButtonScreenPartition) ? "shown" : "hidden");
+				return !menu && c.menu.in_menu() && shown(c, kSpawnScreenPartition) &&
+						shown(c, kSpawnButtonScreenPartition);
+			},
+			press(K::KEY_ENTER), "deploy_resumed" });
 	s.push_back({ "deployed", [](MenuCheck &, const Ctx &c) { return c.io.alive && !shown(c, kSpawnScreenPartition); },
 			press(K::KEY_ESCAPE), nullptr, true });
 	s.push_back({ "Escape opens the menu: game input off, cursor on, HUD kept, glitch, overview map drawn", menu_open,

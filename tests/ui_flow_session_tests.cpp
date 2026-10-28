@@ -789,6 +789,58 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(s.pending_data_writes() == 0);
 	}
 
+	TEST_CASE("ui flow session: RESUME in the menu opened on the deploy screen brings the deploy screens back") {
+		Level *l = level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level);
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		UiFlowSession &s = **made;
+		ui_flow_tdm_pc_defaults(s, "TeamDeathMatch0");
+		Script sc{ s };
+		sc.state.phase = net::MatchPhase::InRound;
+		sc.state.joined = true;
+		sc.run_to(60);
+		sc.phase("join");
+		const std::string menu = "ui/flow/screen/ingamemenump";
+		if (!s.input_action(int32_t(ui::UiInputConcept::Deactivate))) {
+			s.input_action(int32_t(ui::UiInputConcept::Menu));
+		}
+		sc.collect();
+		sc.run_to(sc.tick + 10);
+		const Lines opened = sc.phase("Escape on the deploy screen");
+		const ui::UiFlowScreen *m = s.flow().find_screen(menu);
+		REQUIRE(m != nullptr);
+		CHECK(m->shown);
+		sc.actions.clear();
+		CHECK(s.widget_fired(menu, "List_01", "UIWidgetEventID_OnItemReleased", std::string("ID_M_IGMMP_RESUME")));
+		sc.collect();
+		sc.run_to(sc.tick + 10);
+		const Lines resumed = sc.phase("RESUME");
+		for (const std::string &a : sc.actions) {
+			std::printf("  action %s\n", a.c_str());
+		}
+		const ui::UiFlowScreen *pc = s.flow().find_screen(ui::kSpawnScreenPcPartition);
+		const ui::UiFlowScreen *button = s.flow().find_screen("ui/flow/screen/spawnbuttonscreen");
+		CHECK(s.flow().find_screen(menu) == nullptr);
+		REQUIRE(pc != nullptr);
+		REQUIRE(button != nullptr);
+		CHECK(pc->shown);
+		CHECK(button->shown);
+		CHECK(s.flow().concept_screen(int32_t(ui::UiInputConcept::Activate)) == pc->id);
+		const auto has = [](const Lines &p_lines, std::string_view p_line) {
+			return std::find(p_lines.begin(), p_lines.end(), p_line) != p_lines.end();
+		};
+		CHECK(has(opened, "close spawnbuttonscreen"));
+		CHECK(has(opened, "push ingamemenump"));
+		CHECK(has(resumed, "close ingamemenump"));
+		CHECK(has(resumed, "push spawnbuttonscreen"));
+		CHECK(has(resumed, "push spawnscreenpc"));
+		constexpr int32_t kIsInMenu = -1093247625;
+		CHECK(s.data("usercomp", kIsInMenu) == "True");
+	}
+
 	TEST_CASE("ui flow session: install unchanged") {
 		Level *l = level_or_skip();
 		if (l == nullptr) {
