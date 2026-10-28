@@ -923,6 +923,7 @@ struct ViewmodelAnimator::Impl {
 		r_out.base_clip = base_clip;
 		r_out.sprint_weight = sprint_w;
 		r_out.shots = shots;
+		r_out.kick_back = kick_back.x;
 	}
 
 	void reset() {

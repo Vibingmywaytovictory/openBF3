@@ -242,6 +242,7 @@ if(OPENBF3_BUILD_CHECKS)
         src/m2b_check_rows.h
         src/deploy_check.cpp
         src/deploy_check.h
+        src/deploy_fire_check.cpp
         src/eor_check.cpp
         src/eor_check.h
         src/fov_round_check.cpp

@@ -11,7 +11,7 @@ if(DEFINED BUILD_DIR AND NOT BUILD_DIR STREQUAL "")
     file(MAKE_DIRECTORY "${shots}")
     set(shot_args "--deploy-shots=${shots}")
 endif()
-godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 290
+godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 470
     ARGS --path "${PROJECT_DIR}" --resolution 1280x720 res://scenes/metro_tdm.tscn -- --bots=0 --deploy-screen=1 --preround=0 --min-players=1
         --deploy-check ${cache_args} ${shot_args})
 godot_require_pass("DEPLOY: PASS")

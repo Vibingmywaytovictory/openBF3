@@ -483,8 +483,16 @@ void DeployCheck::step(
 				spawn_primary_ = picked_;
 			}
 			break;
+		case Phase::Fire:
+			fire(r_screens, p_now_s, p_io, p_st);
+			break;
 		case Phase::Done:
-			passed_ = failures_ == 0 && spawn_ends_ == 3 + kDeployCheckTabs.size();
+			if (fire_class_ == 0 && fire_step_ == 0 && failures_ == 0) {
+				enter(Phase::Fire, p_now_s, p_st);
+				break;
+			}
+			passed_ = failures_ == 0 && spawn_ends_ == 3 + kDeployCheckTabs.size() &&
+					fire_class_ == kDeployFireClassNames.size();
 			done_ = true;
 			break;
 	}

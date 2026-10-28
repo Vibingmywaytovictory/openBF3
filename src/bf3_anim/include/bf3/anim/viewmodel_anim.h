@@ -137,6 +137,7 @@ struct ViewmodelOutput {
 	uint32_t base_clip = uint32_t(VmClip::Idle);
 	float sprint_weight = 0;
 	uint32_t shots = 0;
+	float kick_back = 0;
 	float loco_run_weight = 0, loco_sprint_weight = 0;
 	float loco_run_frame = 0, loco_sprint_frame = 0;
 	double release_end_s = -1;

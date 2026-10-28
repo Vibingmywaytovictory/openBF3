@@ -1,20 +1,31 @@
 #pragma once
 
+#include "bf3/core/gameplay/weapon_def.h"
+#include "bf3/host/loadout.h"
+
 #include <godot_cpp/classes/global_constants.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
+namespace bf3::host {
+class ClientSession;
+struct PresentationFrame;
+struct SharedLevel;
+}
+
 namespace bf3::godot_side {
 
 class Bf3UiScreens;
+struct GameState;
 
-inline constexpr double kDeployCheckSeconds = 200.0;
+inline constexpr double kDeployCheckSeconds = 420.0;
 inline constexpr double kDeployCheckStepSeconds = 40.0;
 inline constexpr double kDeployCheckSettleSeconds = 1.0;
 inline constexpr double kDeployCheckInputSeconds = 0.3;
@@ -47,6 +58,15 @@ inline constexpr std::array<DeployCheckTab, 2> kDeployCheckTabs{ {
 } };
 inline constexpr double kDeployCheckTabSeconds = 1.5;
 inline constexpr uint32_t kCustomizeFirstStep = 10;
+
+enum class DeployFireClass : uint8_t { Assault, Lmg, Shotgun, Sniper, Pdw, Other };
+inline constexpr std::array<std::string_view, 5> kDeployFireClassNames{ "ar", "lmg", "shotgun", "sniper", "pdw" };
+inline constexpr std::array<uint8_t, 5> kDeployFireKits{ 0, 2, 1, 3, 1 };
+inline constexpr double kDeployFireViewmodelSeconds = 20.0;
+inline constexpr double kDeployFireHoldSeconds = 1.2;
+inline constexpr double kDeployFireShotSeconds = 1.0 / 30.0;
+inline constexpr double kDeployFireAfterSeconds = 0.8;
+inline constexpr float kDeployFireKickShare = 0.1f;
 
 struct DeployCheckList {
 	uint32_t count = 0;
@@ -83,6 +103,32 @@ struct DeployCheckState {
 	bool spawned_primary_audio = false;
 	uint64_t concepts_found = 0;
 	std::array<DeployCheckList, 2> lists{};
+	std::array<DeployFireClass, 32> primary_classes{};
+	uint16_t primary_def = 0xFFFF;
+	std::string primary_unlock;
+	std::string vm_unlock;
+	std::string vm_mesh;
+	int32_t vm_item = -1;
+	int32_t vm_preloaded = 0;
+	uint32_t vm_shots = 0;
+	bool vm_fire_action = false;
+	bool vm_fire_procedural = false;
+	float vm_kick_back = 0.0f;
+	float vm_kick_tuning = 0.0f;
+	std::string vm_fire_source;
+	bool vm_bolt_action = false;
+	std::string vm_bolt_source;
+	uint64_t audio_own_bursts = 0;
+	uint64_t audio_one_shots = 0;
+	uint64_t audio_unbound = 0;
+	uint64_t fx_own_shots = 0;
+	uint64_t fx_muzzle_starts = 0;
+	bool extra_valid = false;
+	uint16_t extra_def = 0xFFFF;
+	bool extra_firing = false;
+	uint8_t extra_burst_seq = 0;
+	bool crowd_mesh = false;
+	std::string extra_fact;
 };
 
 struct DeployCheckIo {
@@ -94,6 +140,8 @@ struct DeployCheckIo {
 	std::function<void(uint8_t)> kit_key;
 	std::function<bool(const std::string &)> shot;
 	std::function<DeployCheckState()> state;
+	std::function<void(bool)> hold_fire;
+	std::function<bool(std::string *)> join;
 };
 
 class DeployCheck {
@@ -122,6 +170,7 @@ private:
 		ClickDeploy,
 		EnterBlocked,
 		EnterDeploy,
+		Fire,
 		Done,
 	};
 	void step(Bf3UiScreens &r_screens, double p_now_s, const DeployCheckIo &p_io, const DeployCheckState &p_st);
@@ -168,6 +217,32 @@ private:
 	DeployCheckState cust_mark_;
 	uint32_t cust_expected_ = 0;
 	void customize(Bf3UiScreens &r_screens, double p_now_s, const DeployCheckIo &p_io, const DeployCheckState &p_st);
+
+	size_t fire_class_ = 0;
+	uint32_t fire_step_ = 0;
+	double fire_s_ = 0.0;
+	bool fire_joined_ = false;
+	bool fire_shot_taken_ = false;
+	double fire_first_shot_s_ = -1.0;
+	bool fire_bolt_seen_ = false;
+	uint32_t fire_item_ = 0;
+	int32_t fire_cell_ = -1;
+	double fire_vm_wait_s_ = 0.0;
+	bool fire_action_seen_ = false;
+	bool fire_procedural_seen_ = false;
+	float fire_kick_peak_ = 0.0f;
+	std::string fire_extra_fact_;
+	bool fire_extra_seen_ = false;
+	uint16_t fire_extra_def_ = 0xFFFF;
+	DeployCheckState fire_mark_;
+	void fire(Bf3UiScreens &r_screens, double p_now_s, const DeployCheckIo &p_io, const DeployCheckState &p_st);
+	void fire_next(uint32_t p_step, double p_now_s);
+	void fire_rows(const DeployCheckState &p_st);
 };
 
+void fill_deploy_fire_state(DeployCheckState &r_state, GameState &r_game, const bf3::host::PresentationFrame &p_frame,
+		const bf3::host::SharedLevel *p_level, const bf3::host::ClientSession *p_extra);
+
+DeployFireClass deploy_fire_class(const bf3::host::LoadoutCatalog &p_catalog,
+		std::span<const bf3::core::gameplay::WeaponDef> p_defs, uint8_t p_team, uint32_t p_item);
 }
