@@ -126,7 +126,7 @@ public:
 
 	void set_parameter(uint32_t p_name_hash, float p_value);
 	void post_event(uint32_t p_name_hash, uint32_t p_frame_in_block);
-	uint32_t queued_events() const;
+	uint32_t coalesce_events();
 	void set_mixer_value(uint32_t p_name_hash, float p_value);
 	void set_geometry(const EmitterState &p_emitter, const ListenerState &p_listener);
 

@@ -656,7 +656,7 @@ void MixerCore::Impl::a3_block(MixerStats &stats, uint64_t p_first) {
 		switch (cull_verdicts[k]) {
 			case CullVerdict::Keep:
 				if (s.pending) {
-					cut_stats.stale_events.fetch_add(s.instance->queued_events(), std::memory_order_relaxed);
+					cut_stats.stale_events.fetch_add(s.instance->coalesce_events(), std::memory_order_relaxed);
 				}
 				if (s.pending && config.cut_fade_frames > 0) {
 					s.instance->set_fade(0.0f);
@@ -956,8 +956,8 @@ std::string format_mixer_cuts(const MixerCutStats &p_stats) {
 			(unsigned long long)p_stats.overs_in.load(), (unsigned long long)p_stats.overs_out.load());
 	out += part;
 	std::snprintf(part, sizeof(part),
-			"; sampler slot takeovers %llu, %llu cut a sound above -60 dBFS, max step %.4f; %llu events queued at a "
-			"resume",
+			"; sampler slot takeovers %llu, %llu cut a sound above -60 dBFS, max step %.4f; %llu stale events dropped "
+			"at resume",
 			(unsigned long long)p_stats.slot_takeovers.load(), (unsigned long long)p_stats.takeover_cuts.load(),
 			double(p_stats.takeover_cut_max.load()), (unsigned long long)p_stats.stale_events.load());
 	out += part;

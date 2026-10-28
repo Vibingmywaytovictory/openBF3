@@ -290,8 +290,33 @@ void PatchInstance::post_event(uint32_t p_name_hash, uint32_t p_frame_in_block) 
 	++st.stats.unknown_inputs;
 }
 
-uint32_t PatchInstance::queued_events() const {
-	return state_->event_count + state_->deferred_count;
+uint32_t PatchInstance::coalesce_events() {
+	State &st = *state_;
+	std::array<PendingEvent, kMaxEventsPerBlock> kept{};
+	uint32_t n = 0;
+	const auto keep_last = [&](const PendingEvent &p_event) {
+		if (n == kMaxEventsPerBlock) {
+			return;
+		}
+		for (uint32_t i = 0; i < n; ++i) {
+			if (kept[i].reg == p_event.reg) {
+				return;
+			}
+		}
+		kept[n++] = PendingEvent{ p_event.reg, 0, false };
+	};
+	const uint32_t queued = st.event_count + st.deferred_count;
+	for (uint32_t i = st.deferred_count; i-- > 0;) {
+		keep_last(st.deferred[i]);
+	}
+	for (uint32_t i = st.event_count; i-- > 0;) {
+		keep_last(st.events[i]);
+	}
+	std::reverse(kept.begin(), kept.begin() + n);
+	st.events = kept;
+	st.event_count = n;
+	st.deferred_count = 0;
+	return queued - n;
 }
 
 void PatchInstance::set_mixer_value(uint32_t p_name_hash, float p_value) {
