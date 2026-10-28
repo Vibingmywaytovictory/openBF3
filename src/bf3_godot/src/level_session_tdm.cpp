@@ -1124,6 +1124,9 @@ void Bf3LevelSession::tdm_shutdown() {
 	m.loading_check.reset();
 	m.native_eor.reset();
 	m.options_check.reset();
+	if (m.native_options != nullptr && m.native_flow != nullptr && m.native_flow->session() != nullptr) {
+		m.native_options->disconnect(*m.native_flow->session());
+	}
 	m.native_options.reset();
 	m.native_flow.reset();
 	m.death_camera.reset();

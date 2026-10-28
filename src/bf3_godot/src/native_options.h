@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string_view>
 
 namespace bf3::host {
@@ -53,6 +54,7 @@ public:
 	void build(Bf3UiScreens &r_screens);
 	void feed(bf3::host::UiFlowSession &r_session, const bf3::core::ui::OptionsSession &p_options);
 	void connect(bf3::host::UiFlowSession &r_session, bf3::core::ui::OptionsSession &r_options);
+	void disconnect(bf3::host::UiFlowSession &r_session);
 	void apply_write(const bf3::host::UiFlowDataWrite &p_write, bf3::core::ui::OptionsSession &r_options);
 	bool take(const bf3::core::ui::UiFlowAction &p_action, bf3::host::UiFlowSession &r_session,
 			bf3::core::ui::OptionsSession &r_options);
@@ -70,6 +72,7 @@ private:
 	NativeOptionsStats stats_;
 	double pending_value_ = std::numeric_limits<double>::quiet_NaN();
 	uint16_t row_ = 0;
+	std::optional<uint32_t> sink_;
 	bool capturing_ = false;
 	bool inside_ = false;
 };

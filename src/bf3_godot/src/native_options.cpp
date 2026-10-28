@@ -67,8 +67,16 @@ void NativeOptions::feed(bf3::host::UiFlowSession &r_session, const ui::OptionsS
 }
 
 void NativeOptions::connect(bf3::host::UiFlowSession &r_session, ui::OptionsSession &r_options) {
-	r_session.add_data_sink(std::string(kOptionsSettingsLeaf),
+	disconnect(r_session);
+	sink_ = r_session.add_data_sink(std::string(kOptionsSettingsLeaf),
 			[this, &r_options](const bf3::host::UiFlowDataWrite &p_write) { apply_write(p_write, r_options); });
+}
+
+void NativeOptions::disconnect(bf3::host::UiFlowSession &r_session) {
+	if (sink_) {
+		r_session.remove_data_sink(*sink_);
+		sink_.reset();
+	}
 }
 
 void NativeOptions::apply_write(const bf3::host::UiFlowDataWrite &p_write, ui::OptionsSession &r_options) {
