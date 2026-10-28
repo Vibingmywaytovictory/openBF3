@@ -486,9 +486,9 @@ TEST_SUITE("ui-graph") {
 		Run run(*r);
 		REQUIRE(run.flow.fire_input(kSpawnGraphPc, "EnterSpawn"));
 		CHECK(run.take("spawngraphpc.EnterSpawn") ==
-				Lines{ "action SelectSpawnPoint(-1) <0", "action GameInput(False) <0", "action MouseInput(True) <0",
-						"action OnFrontendCameraChanged(0.35) <0", "push spawnscreenpc", "show spawnscreenpc",
-						"focus spawnscreenpc" });
+				Lines{ "action SelectSpawnPoint(-1) <True", "action GameInput(False) <True",
+						"action MouseInput(True) <True", "action OnFrontendCameraChanged(0.35) <True",
+						"push spawnscreenpc", "show spawnscreenpc", "focus spawnscreenpc" });
 		run.initialize_opened();
 		run.take("spawngraphpc.initialized");
 		const int32_t activate = input_action_of(*r->provider()(kSpawnGraphPc), "UIInputAction_Activate");
@@ -508,11 +508,12 @@ TEST_SUITE("ui-graph") {
 			return;
 		}
 		Run run(*r);
+		using Selections = std::vector<std::pair<std::optional<int32_t>, std::vector<std::string>>>;
 		const auto selections = [&run] {
-			std::vector<std::optional<int32_t>> out;
+			Selections out;
 			for (const UiFlowAction &a : run.host.actions) {
 				if (a.key == kSelectSpawnPointActionKey) {
-					out.push_back(hud_selected_spawn_point(a.params));
+					out.emplace_back(hud_selected_spawn_point(a.params), a.params);
 				}
 			}
 			run.host.actions.clear();
@@ -520,7 +521,7 @@ TEST_SUITE("ui-graph") {
 		};
 		REQUIRE(run.flow.fire_input(kSpawnGraphPc, "EnterSpawn"));
 		run.take("spawngraphpc.EnterSpawn");
-		CHECK(selections() == std::vector<std::optional<int32_t>>{ -1 });
+		CHECK(selections() == Selections{ { -1, { "-1" } } });
 		run.initialize_opened();
 		run.take("spawngraphpc.initialized");
 		run.host.actions.clear();
@@ -528,7 +529,7 @@ TEST_SUITE("ui-graph") {
 				run.screen_of("ui/flow/screen/spawnscreenpc"), "List_01", "UIWidgetEventID_OnItemHighlighted", "2"));
 		CHECK(run.take("spawnscreenpc.List_01 highlighted") ==
 				Lines{ "output spawnscreenpc.SpawnSelected", "action SelectSpawnPoint() <2" });
-		CHECK(selections() == std::vector<std::optional<int32_t>>{ 2 });
+		CHECK(selections() == Selections{ { 2, { "2" } } });
 		CHECK(run.flow.errors().empty());
 	}
 
@@ -624,7 +625,7 @@ TEST_SUITE("ui-graph") {
 						"show eorwinningteamscreen", "focus eorwinningteamscreen" });
 		REQUIRE(run.flow.fire_input(kPreEndOfRoundGraph, "Scoreboard"));
 		CHECK(run.take("preendofround.Scoreboard") ==
-				Lines{ "action OnFrontendCameraChanged(0.2) <-1", "push scoreboardtwoteamshud64screen",
+				Lines{ "action OnFrontendCameraChanged(0.2) <1", "push scoreboardtwoteamshud64screen",
 						"show scoreboardtwoteamshud64screen", "focus scoreboardtwoteamshud64screen" });
 		CHECK(run.flow.errors().empty());
 	}
@@ -696,10 +697,10 @@ TEST_SUITE("ui-graph") {
 		Run run(*r);
 		REQUIRE(run.flow.fire_input(kIngameMenuGraph, "EnterFromGame"));
 		CHECK(run.take("ingamemenu.EnterFromGame") ==
-				Lines{ "action MouseInput(False) <1", "action ActivateCommoRose(False) <1",
-						"action GameInput(False) <1", "action MouseCursor(1) <1", "action MouseInput(True) <1",
+				Lines{ "action MouseInput(False) <0", "action ActivateCommoRose(False) <0",
+						"action GameInput(False) <0", "action MouseCursor(1) <0", "action MouseInput(True) <0",
 						"push ingamemenump", "show ingamemenump", "focus ingamemenump", "action SetSelectedLevel()",
-						"action RestrictMouse(False) <1" });
+						"action RestrictMouse(False) <0" });
 		run.initialize_opened();
 		run.take("ingamemenu.initialized");
 		const uint64_t menu = run.screen_of("ui/flow/screen/ingamemenump");
@@ -729,6 +730,34 @@ TEST_SUITE("ui-graph") {
 						"output ingamemenumpgraph.exitIngameMenuMP", "close ingamemenump" });
 		CHECK(resume.host.outputs == Lines{ "ingamemenumpgraph.exitIngameMenuMP destroy" });
 		CHECK(resume.flow.errors().empty());
+	}
+
+	TEST_CASE("ui graph: customizationgraph's DataSet nodes with a Param pass the incoming value on") {
+		RetailGraphs *r = retail_graphs_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		constexpr std::string_view graph = "ui/flow/graph/spawn/customizationgraph";
+		Run run(*r);
+		REQUIRE(run.flow.fire_input(graph, "EnterCustomization"));
+		run.take("customization.EnterCustomization");
+		run.initialize_opened();
+		run.take("customization.initialized");
+		REQUIRE(run.flow.widget_fired(run.screen_of("ui/flow/screen/customizesoldierscreen"), "KitView_01",
+				"UIWidgetEventID_OnItemReleased", "1"));
+		run.take("customization.GotoCustomize");
+		run.initialize_opened();
+		run.take("customization.sub initialized");
+		const uint64_t sub = run.screen_of("ui/flow/screen/customizesoldiersubscreen");
+		REQUIRE(run.flow.widget_fired(sub, "KitSelector_02", "UIWidgetEventID_SetIndex", "3"));
+		run.take("customization.SidearmChanged");
+		CHECK(run.host.data["uicustomizationcomp#832223043"] == "1");
+		CHECK(run.host.data["uicustomizationcomp#-378770976"] == "3");
+		REQUIRE(run.flow.widget_fired(sub, "KitSelector_05", "UIWidgetEventID_SetIndex", "7"));
+		run.take("customization.SpecializationChanged");
+		CHECK(run.host.data["uicustomizationcomp#832223043"] == "6");
+		CHECK(run.host.data["uicustomizationcomp#-1021374313"] == "7");
+		CHECK(run.flow.errors().empty());
 	}
 
 	TEST_CASE("ui graph: install unchanged") {

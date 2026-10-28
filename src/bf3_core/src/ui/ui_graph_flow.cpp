@@ -478,7 +478,7 @@ void UiFlow::enter(Instance &r_inst, uint32_t p_node, uint32_t p_port, const std
 			note("set " + data_text(n.data) + "=" + value);
 			host_.data_set(n.data, value, n.force_update);
 			if (const std::optional<uint32_t> o = n.port(UiGraphPortRole::Out)) {
-				follow(r_inst, p_node, *o, value);
+				follow(r_inst, p_node, *o, p_value ? *p_value : value);
 			}
 			break;
 		}
