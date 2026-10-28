@@ -19,6 +19,8 @@ bool mode_matches(std::string_view p_mode, std::string_view p_option);
 
 std::string_view level_display_name(std::string_view p_level_id);
 
+std::vector<std::string_view> shipped_level_ids();
+
 std::string zone_name(std::string_view p_level_id);
 
 struct Minimap {

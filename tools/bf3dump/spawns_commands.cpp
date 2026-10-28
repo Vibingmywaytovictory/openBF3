@@ -1,5 +1,6 @@
 #include "spawns_commands.h"
 
+#include "bf3/core/level/eor_camera.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/spawn_points.h"
 #include "bf3/core/level/world.h"
@@ -62,6 +63,39 @@ int cmd_spawns(const std::shared_ptr<Install> &p_install, const std::string &p_l
 	}
 	std::fprintf(stderr, "spawns %s %s: %zu points, %zu spawners in %.3f s\n", p_level.c_str(), p_mode.c_str(), spawns->points.size(),
 			spawns->spawners.size(), seconds_since(start));
+	return 0;
+}
+
+int cmd_eor_camera(const std::shared_ptr<Install> &p_install, const std::string &p_level, const std::string &p_mode) {
+	const auto start = std::chrono::steady_clock::now();
+	Result<std::unique_ptr<LoadedLevel>> loaded = load_level(p_install, p_level, p_mode);
+	if (!loaded) {
+		std::fprintf(stderr, "eorcamera %s %s: %s\n", p_level.c_str(), p_mode.c_str(), loaded.error().message.c_str());
+		return 1;
+	}
+	const LoadedLevel &level = **loaded;
+	Result<std::unique_ptr<World>> world = World::traverse(level);
+	if (!world) {
+		std::fprintf(stderr, "eorcamera %s %s: traverse: %s\n", p_level.c_str(), p_mode.c_str(),
+				world.error().message.c_str());
+		return 1;
+	}
+	const Result<std::optional<EorCamera>> camera = read_eor_camera(level.db(), **world);
+	if (!camera) {
+		std::fprintf(stderr, "eorcamera %s %s: %s\n", p_level.c_str(), p_mode.c_str(), camera.error().message.c_str());
+		return 1;
+	}
+	if (!camera->has_value()) {
+		std::printf("eor_camera\t%s\t%s\tnone\n", p_level.c_str(), p_mode.c_str());
+	} else {
+		const EorCamera &c = **camera;
+		std::printf("eor_camera\t%s\t%s\t%u\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%g\t%d\t%s\n", p_level.c_str(),
+				p_mode.c_str(), c.object, c.transform.trans[0], c.transform.trans[1], c.transform.trans[2],
+				c.transform.forward[0], c.transform.forward[1], c.transform.forward[2], double(c.fov_deg), c.priority,
+				partition_of(level.db(), (*world)->objects[c.object].entity).c_str());
+	}
+	std::fprintf(stderr, "eorcamera %s %s: %zu objects in %.3f s\n", p_level.c_str(), p_mode.c_str(),
+			(*world)->objects.size(), seconds_since(start));
 	return 0;
 }
 

@@ -274,6 +274,14 @@ std::string_view level_display_name(std::string_view p_level_id) {
 	return p_level_id;
 }
 
+std::vector<std::string_view> shipped_level_ids() {
+	std::vector<std::string_view> out;
+	for (const DisplayName &d : kDisplayNames) {
+		out.push_back(d.id);
+	}
+	return out;
+}
+
 std::string zone_name(std::string_view p_level_id) {
 	const std::string lower = to_lower_ascii(p_level_id);
 	return lower.rfind("mp_", 0) == 0 ? lower : "mp_" + lower;

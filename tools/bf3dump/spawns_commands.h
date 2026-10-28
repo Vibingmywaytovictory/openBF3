@@ -9,4 +9,7 @@ namespace bf3dump {
 
 int cmd_spawns(const std::shared_ptr<bf3::core::Install> &p_install, const std::string &p_level, const std::string &p_mode);
 
+int cmd_eor_camera(
+		const std::shared_ptr<bf3::core::Install> &p_install, const std::string &p_level, const std::string &p_mode);
+
 }

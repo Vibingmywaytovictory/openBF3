@@ -462,6 +462,7 @@ void usage() {
 			"  shapes <LEVEL> <MODE> [--cache=<dir> | --no-cache] [--threads=N] [--no-raycast] [--tiles]\n");
 	std::fprintf(stderr, "%s", bf3dump::gameplay_usage());
 	std::fprintf(stderr, "  spawns <LEVEL> <MODE>\n");
+	std::fprintf(stderr, "  eorcamera <LEVEL> <MODE>\n");
 	std::fprintf(stderr, "%s", bf3dump::logic_usage());
 	std::fprintf(stderr, "  looks <LEVEL> <MODE> [--materials] [--shader NAME]...\n");
 	std::fprintf(stderr, "%s", bf3dump::vehicle_usage());
@@ -586,6 +587,10 @@ int wmain(int argc, wchar_t **argv) {
 
 	if (cmd == "spawns" && rest.size() == 2) {
 		return bf3dump::cmd_spawns(ctx.install, rest[0], rest[1]);
+	}
+
+	if (cmd == "eorcamera" && rest.size() == 2) {
+		return bf3dump::cmd_eor_camera(ctx.install, rest[0], rest[1]);
 	}
 
 	if (cmd == "logic") {

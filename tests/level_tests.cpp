@@ -5,9 +5,11 @@
 #include "bf3/core/install_reader.h"
 #include "bf3/core/level/census.h"
 #include "bf3/core/level/connections.h"
+#include "bf3/core/level/eor_camera.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
 #include "bf3/core/superbundle_mount.h"
+#include "bf3/core/thread_pool.h"
 #include "test_support.h"
 
 #include <algorithm>
@@ -18,10 +20,13 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <random>
 #include <set>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <vector>
 
 using namespace bf3::core;
 using namespace bf3::core::level;
@@ -1769,5 +1774,77 @@ TEST_SUITE("level") {
 		Result<std::unique_ptr<LoadedLevel>> none = load_level(install, "MP_Subway", "NoSuchMode0");
 		REQUIRE(none.ok());
 		CHECK((*none)->bundles.subworlds.empty());
+	}
+}
+
+TEST_SUITE("level_eor") {
+	TEST_CASE("level_eor: the showroom's ShowTopPlayers camera in every shipped TDM mode") {
+		const std::shared_ptr<Install> install = shared_install_or_skip();
+		if (!install) {
+			return;
+		}
+		struct Job {
+			std::string level;
+			std::string mode;
+		};
+		std::vector<Job> jobs;
+		for (std::string_view id : shipped_level_ids()) {
+			Result<LevelInfo> info = level_info(*install, id);
+			REQUIRE_MESSAGE(info.ok(), (info.ok() ? std::string() : info.error().message));
+			for (const std::string &mode : info->modes) {
+				if (mode.find("TeamDeathMatch") != std::string::npos) {
+					jobs.push_back({ std::string(id), mode });
+				}
+			}
+		}
+		struct Found {
+			std::string error;
+			std::optional<EorCamera> camera;
+			std::string partition;
+		};
+		const std::vector<Found> found = parallel_map<Found>(
+				jobs.size(),
+				[&](size_t p_i) {
+					Found f;
+					Result<std::unique_ptr<LoadedLevel>> loaded = load_level(install, jobs[p_i].level, jobs[p_i].mode);
+					if (!loaded) {
+						f.error = loaded.error().message;
+						return f;
+					}
+					Result<std::unique_ptr<World>> world = World::traverse(**loaded);
+					if (!world) {
+						f.error = world.error().message;
+						return f;
+					}
+					Result<std::optional<EorCamera>> camera = read_eor_camera((*loaded)->db(), **world);
+					if (!camera) {
+						f.error = camera.error().message;
+						return f;
+					}
+					f.camera = *camera;
+					if (f.camera) {
+						const EbxInstance &entity = (*world)->objects[f.camera->object].entity;
+						f.partition = std::string((*loaded)->db().name_of(entity.partition().guid()).value_or(""));
+					}
+					return f;
+				},
+				4);
+		CHECK(shipped_level_ids().size() == 29);
+		CHECK(jobs.size() == 62);
+		std::vector<std::string> without;
+		for (size_t i = 0; i < jobs.size(); ++i) {
+			const std::string name = jobs[i].level + " " + jobs[i].mode;
+			REQUIRE_MESSAGE(found[i].error.empty(), name << ": " << found[i].error);
+			if (!found[i].camera) {
+				without.push_back(name);
+				continue;
+			}
+			const EorCamera &c = *found[i].camera;
+			CHECK_MESSAGE(found[i].partition == "gameplay/logic/showroom", name);
+			CHECK_MESSAGE(c.fov_deg == 23.0f, name);
+			CHECK_MESSAGE(c.priority == 3, name);
+			CHECK_MESSAGE(std::abs(c.transform.forward[1] - (-0.0699f)) < 0.0001f, name);
+		}
+		CHECK(without == std::vector<std::string>{ "XP2_Factory CQTeamDeathMatch0", "XP2_Office CQTeamDeathMatch0" });
 	}
 }
