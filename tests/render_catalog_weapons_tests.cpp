@@ -910,7 +910,7 @@ TEST_SUITE("render-catalog-accessories-1p") {
 			REQUIRE_MESSAGE(l.set != nullptr, optic, ": ", l.error);
 			const render::ViewmodelItem &vm = l.set->items[0];
 			CHECK_MESSAGE(vm.sight.has_value(), optic, " has no sight picture");
-			size_t textured = 0, sights = 0, roles = 0;
+			size_t textured = 0, sights = 0, roles = 0, single = 0, single_kept = 0;
 			for (const render::ViewmodelAttachment &a : vm.attachments) {
 				for (const render::ViewmodelSlotLook &look : a.looks) {
 					if (!look.blend || !look.unlit) {
@@ -923,12 +923,17 @@ TEST_SUITE("render-catalog-accessories-1p") {
 									(look.color_role == render::TextureRole::Color)
 							? 1u
 							: 0u;
+					single += t != nullptr && t->stored_levels == 1 ? 1u : 0u;
+					single_kept += t != nullptr && t->stored_levels == 1 && t->levels == 1 ? 1u : 0u;
 				}
 			}
 			CHECK_MESSAGE(sights > 0, optic);
 			CHECK_MESSAGE(textured == sights, optic, ": ", textured, " of ", sights, " sight surfaces textured");
 			CHECK_MESSAGE(roles == sights, optic, ": ", roles, " of ", sights,
 					" sight surfaces sample their texture as colour exactly when they multiply");
+			CHECK_MESSAGE(single > 0, optic, ": no sight texture stored with one level");
+			CHECK_MESSAGE(single_kept == single, optic, ": ", single_kept, " of ", single,
+					" sight textures stored with one level are drawn from it alone");
 			const auto offset = offsets[l.weapon].find(optic);
 			if (!vm.sight || offset == offsets[l.weapon].end()) {
 				continue;

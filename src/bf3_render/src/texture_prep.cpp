@@ -316,7 +316,7 @@ core::Result<PreparedTexture> prepare_texture(const LoadedTexture &p_texture, Te
 		return core::make_error(where + ": no mips");
 	}
 	out.stored_levels = uint32_t(levels.size());
-	out.levels = godot_mip_levels(out.format, out.width, out.height);
+	out.levels = levels.size() == 1 ? 1u : godot_mip_levels(out.format, out.width, out.height);
 
 	uint32_t lw = std::max(w, 1u), lh = std::max(h, 1u);
 	while (levels.size() < out.levels) {
