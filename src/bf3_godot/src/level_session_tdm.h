@@ -41,6 +41,9 @@ struct TdmState {
 	std::vector<M2bCase> cases;
 	M2bCheckOptions check_options;
 	bool checks() const { return !cases.empty(); }
+	std::array<bf3::host::LoadoutChoice, bf3::host::kKitCount> &own_loadout_choices() {
+		return loadout_choices[own_team == 2 ? 1 : 0];
+	}
 
 	UiScreenRecordSet screen_records;
 	bf3::host::HudTdmFeedState tdm_state;
@@ -51,7 +54,7 @@ struct TdmState {
 	std::unique_ptr<EorFlash, void (*)(EorFlash *)> eor_flash{ nullptr, nullptr };
 
 	uint8_t spawn_kit = 0;
-	std::array<bf3::host::LoadoutChoice, bf3::host::kKitCount> loadout_choices{};
+	std::array<std::array<bf3::host::LoadoutChoice, bf3::host::kKitCount>, bf3::host::kKitTeams> loadout_choices{};
 	bool scoreboard_held = false;
 	bool spawned_this_round = false;
 	uint64_t spawn_requests_sent = 0;

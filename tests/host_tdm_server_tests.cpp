@@ -1618,7 +1618,7 @@ TEST_SUITE("host-tdm-server") {
 	}
 
 	TEST_CASE("restart: the in-place restart unspawns the deploy-screen peer's old life until it deploys on its "
-			  "rotated team's kit; the bots respawn on theirs") {
+			  "rotated team's kit, not its old team's pick; the bots respawn on theirs") {
 		tdm::TdmLevel *level = tdm::load_tdm_level_once();
 		if (level == nullptr) {
 			return;
@@ -1631,9 +1631,32 @@ TEST_SUITE("host-tdm-server") {
 		tdm::ScriptedPeer &p = o->join("rotated");
 		p.ready();
 		REQUIRE(wait_in_round(*o));
+		const uint8_t team1 = o->rules().team_of(uint8_t(p.slot()));
+		REQUIRE((team1 == 1 || team1 == 2));
+		const host::LoadoutKit *own_kit = gl.loadouts.kit(team1, 0);
+		const host::LoadoutKit *other_kit = gl.loadouts.kit(uint8_t(3 - team1), 0);
+		REQUIRE(own_kit != nullptr);
+		REQUIRE(other_kit != nullptr);
+		const host::LoadoutItem *shared = nullptr;
+		for (const host::LoadoutItem &i : own_kit->slots[0]) {
+			const bool on_both = std::any_of(other_kit->slots[0].begin(), other_kit->slots[0].end(),
+					[&](const host::LoadoutItem &p_o) { return p_o.identifier == i.identifier; });
+			if (shared == nullptr && on_both && i.def != gl.kits.loadout(team1, 0).defs[0] &&
+					i.def != gl.kits.loadout(uint8_t(3 - team1), 0).defs[0]) {
+				shared = &i;
+			}
+		}
+		REQUIRE(shared != nullptr);
+		net::LoadoutRequest pick;
+		pick.kit = 0;
+		pick.items[0] = shared->identifier;
+		o->server.on_receive(p.peer(), net::kChannelReliable, net::encode_loadout_request(pick));
+		o->ticks(1);
 		p.spawn_request(0);
 		REQUIRE(o->until([&] { return !p.spawned.empty() && is_alive(o->state(p.slot())); }, 240));
 		const net::Spawned first = p.spawned.back();
+		CHECK(first.defs[0] == shared->def);
+		const uint64_t dropped0 = o->server.stats().gunplay.loadout_dropped;
 		const std::array<int, 3> bots{ killer->slot, target->slot, third };
 		o->ticks(130);
 		const std::optional<Patch> patch = find_patch(*o, 3.0f);
@@ -1692,6 +1715,11 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(next.team == o->rules().team_of(uint8_t(p.slot())));
 		CHECK(g.weapons(uint8_t(p.slot())).slots[0].def == kit.defs[0]);
 		CHECK(next.defs[0] == kit.defs[0]);
+		std::printf("restart: the round-1 pick %s (def %u, on both teams' lists) %s on team %u\n",
+				shared->unlock.c_str(), unsigned(shared->def),
+				g.loadout(uint8_t(p.slot())).chosen ? "carried over" : "stays with its team", unsigned(next.team));
+		CHECK_FALSE(g.loadout(uint8_t(p.slot())).chosen);
+		CHECK(o->server.stats().gunplay.loadout_dropped == dropped0);
 		CHECK_FALSE(host::own_unspawned_at(true, *p.match_state, next.state.tick, o->now()));
 		CHECK(o->rules().stats().runtime_faults == 0u);
 	}

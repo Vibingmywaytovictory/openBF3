@@ -671,13 +671,13 @@ void Bf3LevelSession::tdm_presented(uint64_t p_now_ns) {
 	if (const std::optional<DeployPick> pick = m.deploy_screens.take_pick()) {
 		const std::shared_ptr<const host::SharedLevel> level = shared_level();
 		if (level != nullptr && level->gunplay != nullptr && r_game.gunplay != nullptr && pick->kit < host::kKitCount) {
-			bf3::core::Result<net::LoadoutRequest> q = deploy_loadout_request(
-					*pick, level->gunplay->loadouts, r_game.gunplay->kits, m.own_team, m.loadout_choices[pick->kit]);
+			bf3::core::Result<net::LoadoutRequest> q = deploy_loadout_request(*pick, level->gunplay->loadouts,
+					r_game.gunplay->kits, m.own_team, m.own_loadout_choices()[pick->kit]);
 			if (q) {
 				client_->send_loadout_request(*q);
 				++m.loadout_requests_sent;
 				if (const bf3::core::Result<host::Loadout> l = host::resolve_loadout(level->gunplay->loadouts,
-							r_game.gunplay->kits, m.own_team, pick->kit, m.loadout_choices[pick->kit])) {
+							r_game.gunplay->kits, m.own_team, pick->kit, m.own_loadout_choices()[pick->kit])) {
 					r_game.want_catalog_weapons(l->defs);
 				}
 			} else {
@@ -769,7 +769,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		in.eor = level != nullptr ? level->eor.get() : nullptr;
 		in.death = level != nullptr ? level->death.get() : nullptr;
 		in.loadouts = level != nullptr && level->gunplay != nullptr ? &level->gunplay->loadouts : nullptr;
-		in.loadout_choices = m.loadout_choices;
+		in.loadout_choices = m.own_loadout_choices();
 		in.game_mode = level != nullptr ? std::string_view(level->mode) : std::string_view();
 		in.level_name_sid_hash = level != nullptr && !level->level_name_sid.empty()
 				? bf3::core::ui::text_hash(level->level_name_sid)

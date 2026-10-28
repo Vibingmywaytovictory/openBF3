@@ -383,7 +383,7 @@ struct Gunplay::Impl {
 		uint32_t reload_count = 0;
 		uint32_t burst_count = 0;
 		std::array<AckEntry, kAckRing> acks{};
-		std::array<std::optional<LoadoutChoice>, kKitCount> choices{};
+		std::array<std::array<std::optional<LoadoutChoice>, kKitCount>, kKitTeams> choices{};
 		Loadout loadout;
 	};
 	struct TickDeath {
@@ -492,7 +492,7 @@ void Gunplay::on_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_team, uint32_t p
 	}
 	const KitLoadout &l = m.level->kits.loadout(p_team, s.kit);
 	s.loadout = default_loadout(m.level->loadouts, m.level->kits, p_team, s.kit);
-	if (const std::optional<LoadoutChoice> &choice = s.choices[s.kit]) {
+	if (const std::optional<LoadoutChoice> &choice = s.choices[p_team - 1][s.kit]) {
 		if (core::Result<Loadout> chosen = resolve_loadout(m.level->loadouts, m.level->kits, p_team, s.kit, *choice)) {
 			s.loadout = std::move(*chosen);
 		} else {
@@ -800,12 +800,12 @@ uint8_t Gunplay::team(uint8_t p_slot) const {
 
 bool Gunplay::select_loadout(uint8_t p_slot, uint8_t p_team, uint8_t p_kit, const LoadoutChoice &p_choice) {
 	Impl &m = *impl_;
-	if (p_slot >= m.slots.size() || p_kit >= kKitCount ||
+	if (p_slot >= m.slots.size() || p_team < 1 || p_team > kKitTeams || p_kit >= kKitCount ||
 			!resolve_loadout(m.level->loadouts, m.level->kits, p_team, p_kit, p_choice)) {
 		++m.stats.loadout_refused;
 		return false;
 	}
-	m.slots[p_slot].choices[p_kit] = p_choice;
+	m.slots[p_slot].choices[p_team - 1][p_kit] = p_choice;
 	++m.stats.loadout_select;
 	return true;
 }
