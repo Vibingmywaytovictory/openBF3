@@ -18,6 +18,8 @@ constexpr int32_t kHide = 5;
 constexpr float kShoulderIconRowHeight = 34.0f;
 constexpr std::string_view kEndOfRoundCategory = "ui/uicomponents/uiendofroundcomp";
 constexpr int32_t kEorTabsSetupKey = -995000405;
+constexpr std::string_view kCustomizationCategory = "ui/uicomponents/uicustomizationcomp";
+constexpr int32_t kCustomizeSubTabsSetupKey = -1696904176;
 constexpr std::array<std::string_view, 2> kUnrankedEorTabs{ "ID_M_SCOREBOARD", "ID_M_STATS" };
 
 const std::string *non_empty_property(const HudWidgetInit &p_init, std::string_view p_name) {
@@ -27,14 +29,23 @@ const std::string *non_empty_property(const HudWidgetInit &p_init, std::string_v
 
 class TabBarClass final : public HudWidgetController {
 public:
-	void construct(HudWidgetHost &r_host) override { host_ = &r_host; }
+	void construct(HudWidgetHost &r_host) override {
+		host_ = &r_host;
+		if (const As2Value *v = r_host.construct_param("m_tabsDataStr")) {
+			tabs_text_ = v->to_string();
+		}
+	}
 
 	void attach_node(HudWidgetHost &, const HudWidgetNode &p_node) override {
 		eor_setup_.reset();
+		kits_setup_.reset();
 		eor_tabs_.clear();
 		for (const HudDataSource &s : p_node.sources) {
 			if (s.category == kEndOfRoundCategory && s.key == kEorTabsSetupKey) {
 				eor_setup_ = s;
+			}
+			if (s.category == kCustomizationCategory && s.key == kCustomizeSubTabsSetupKey) {
+				kits_setup_ = s;
 			}
 		}
 		for (const HudWidgetProperty &p : p_node.properties) {
@@ -45,6 +56,16 @@ public:
 	}
 
 	void bind(const HudModel &p_model, const HudClientState &, HudData &r_out) const override {
+		if (kits_setup_) {
+			As2Value enabled = As2Value::array();
+			const size_t tabs = as2_split(tabs_text_, ";").size();
+			for (size_t i = 0; i < tabs; ++i) {
+				enabled.push(As2Value::of(i == 0));
+			}
+			As2Value setup = As2Value::object();
+			setup.set("EnabledTabs", std::move(enabled));
+			r_out.push_back({ kits_setup_->name, std::move(setup), kits_setup_->on_initialize });
+		}
 		if (!eor_setup_) {
 			return;
 		}
@@ -170,6 +191,7 @@ public:
 
 private:
 	std::optional<HudDataSource> eor_setup_;
+	std::optional<HudDataSource> kits_setup_;
 	std::vector<std::string> eor_tabs_;
 	struct Tab {
 		std::string id;

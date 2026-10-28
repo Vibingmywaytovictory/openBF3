@@ -196,7 +196,7 @@ private:
 		r_host.clip("consoleLeftBtn").set_visible(false);
 		r_host.clip("consoleRightBtn").set_visible(false);
 		for (int32_t i = 0; i < kSlotCount; ++i) {
-			if (HudButton *b = initialized_button(r_host, "slotButton_" + std::to_string(i))) {
+			if (HudButton *b = hud_initialized_button(r_host, r_host.clip("slotButton_" + std::to_string(i)))) {
 				HudButtonCallbacks c;
 				c.over = [this, i](const std::string &) { on_slot_mouse_over(i); };
 				c.out = [this](const std::string &) { on_slot_mouse_over(-1); };
@@ -206,22 +206,9 @@ private:
 		}
 	}
 
-	static HudButton *initialized_button(HudWidgetHost &r_host, const std::string &p_name) {
-		HudScreen &screen = r_host.screen();
-		const As2Clip mc = r_host.clip(p_name);
-		HudWidgetController *controller = screen.controller(mc.path());
-		HudWidgetHost *mc_host = screen.host(mc.path());
-		HudButton *b = dynamic_cast<HudButton *>(controller);
-		if (controller == nullptr || mc_host == nullptr || b == nullptr) {
-			return nullptr;
-		}
-		controller->initialize(*mc_host, HudWidgetInit{});
-		return b;
-	}
-
 	void setup_buttons(HudWidgetHost &r_host) {
 		for (int32_t i = 0; i < kKitCount; ++i) {
-			HudButton *b = initialized_button(r_host, "kitButton_" + std::to_string(i));
+			HudButton *b = hud_initialized_button(r_host, r_host.clip("kitButton_" + std::to_string(i)));
 			if (b == nullptr) {
 				continue;
 			}

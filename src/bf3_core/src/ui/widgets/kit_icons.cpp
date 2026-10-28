@@ -94,6 +94,27 @@ As2Value game_utils_string2object(std::string_view p_text) {
 	return obj;
 }
 
+std::string game_utils_object2string(const As2Value &p_object) {
+	std::string out;
+	for (size_t i = 0; i < p_object.names.size() && i < p_object.items.size(); ++i) {
+		if (i > 0) {
+			out += ";;";
+		}
+		const As2Value &v = p_object.items[i];
+		out += p_object.names[i] + ";;";
+		if (v.kind == As2Value::Kind::List) {
+			out += "[[";
+			for (size_t j = 0; j < v.items.size(); ++j) {
+				out += (j > 0 ? ",," : "") + v.items[j].to_string();
+			}
+			out += "]]";
+		} else {
+			out += v.to_string();
+		}
+	}
+	return out;
+}
+
 std::optional<As2Value> ui_base_object_to_array(const As2Value &p_object) {
 	As2Value out = As2Value::array();
 	switch (p_object.kind) {

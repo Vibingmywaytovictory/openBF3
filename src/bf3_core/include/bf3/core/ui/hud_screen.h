@@ -212,6 +212,7 @@ struct HudStageRects {
 float hud_align_axis(HudAxisAlign p_align, float p_original, float p_visible_min, float p_visible_size, float p_original_size, float p_safe);
 
 class HudDamageIndicatorComp;
+class ItemIconIndex;
 class HudMessageComp;
 struct HudWorldTags;
 struct OptionsModel;
@@ -248,6 +249,7 @@ struct HudClientState {
 	std::string vehicle_name;
 	std::function<std::optional<std::string>(std::string_view, int32_t)> flow_data;
 	const OptionsModel *options = nullptr;
+	const ItemIconIndex *items = nullptr;
 };
 
 class TextDatabase;

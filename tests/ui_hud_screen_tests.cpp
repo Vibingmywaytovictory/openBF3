@@ -319,7 +319,8 @@ TEST_SUITE("ui-hud-screen-unit") {
 			"Widget.Grid.Cell.KitCell", "Widget.Grid.Cell.TextCell", "Widget.List.Rows.MenuRow",
 			"Widget.List.Rows.TextSelectorRow", "Widget.List.Rows.BarSelectorRow", "Widget.List.Rows.KeyBindingRow",
 			"Widget.Text.MenuHint", "Widget.Listener.ChangeListener", "Widget.MissionHeader.MissionHeaderMP",
-			"Widget.Info.GamemodeInfo" };
+			"Widget.Info.GamemodeInfo", "Widget.CustomizeKit.KitView", "Widget.CustomizeKit.KitViewSlot",
+			"Widget.CustomizeKit.KitSelectorSlot", "Widget.CustomizeKit.KitInfoBox", "Widget.Info.SquadBoosterInfo" };
 		const HudWidgetRegistry &installed = HudWidgetRegistry::installed();
 		std::vector<std::string> sorted = want;
 		std::sort(sorted.begin(), sorted.end());

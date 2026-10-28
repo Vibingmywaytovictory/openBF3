@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "bf3/core/ui/as2_clip.h"
+#include "bf3/core/ui/hud_icons.h"
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/swf_hit.h"
@@ -14,6 +15,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <cstdio>
 #include <memory>
 #include <optional>
 #include <string>
@@ -52,9 +55,182 @@ std::string clip(std::string_view p_leaf) {
 	return std::string(kSpawnTimer) + "." + std::string(p_leaf);
 }
 
+constexpr std::string_view kCustomizeSub = "ui/flow/screen/customizesoldiersubscreen";
+constexpr std::string_view kCustomizeSoldier = "ui/flow/screen/customizesoldierscreen";
+constexpr std::string_view kCustomizeAccessories = "ui/flow/screen/customizeaccessoriesscreen";
+
+uint32_t item_name_hash(size_t p_list, size_t p_item) {
+	return 0x7000u + uint32_t(p_list) * 0x10u + uint32_t(p_item);
+}
+
+HudClientState customize_client(Retail &r_r) {
+	HudClientState c = retail_text_client(retail_text_db(r_r));
+	static const std::optional<ItemIconIndex> items = [&]() -> std::optional<ItemIconIndex> {
+		Result<ItemIconIndex> read = ItemIconIndex::read(*r_r.ui);
+		REQUIRE_MESSAGE(read.ok(), (read.ok() ? std::string() : read.error().message));
+		return std::move(*read);
+	}();
+	c.items = &*items;
+	c.localise_hash = [base = c.localise_hash](uint32_t p_hash) {
+		if (p_hash == 0x6000u) {
+			return std::string("ASSAULT");
+		}
+		if (p_hash >= 0x6100u && p_hash < 0x6110u) {
+			return "CATEGORY " + std::to_string(p_hash - 0x6100u);
+		}
+		if (p_hash >= 0x7000u && p_hash < 0x8000u) {
+			return "ITEM " + std::to_string((p_hash - 0x7000u) / 0x10u) + "." + std::to_string(p_hash % 0x10u);
+		}
+		return base ? base(p_hash) : std::string();
+	};
+	return c;
+}
+
+HudModel customize_model() {
+	HudModel m{};
+	m.kit.selected_kit_name = 0x6000u;
+	HudCustomization &c = m.customization;
+	for (size_t l = 0; l < kHudSpawnKitItems; ++l) {
+		c.kit_grid_data[l].count = 3;
+		for (size_t i = 0; i < 3; ++i) {
+			c.kit_grid_data[l].items[i].item_id = uint32_t(100 * (l + 1) + i);
+			c.kit_grid_data[l].items[i].name_sid_hash = item_name_hash(l, i);
+		}
+		c.kit_grid_selected[l] = 1;
+		c.kit_grid_category[l] = 0x6100u + uint32_t(l);
+	}
+	c.kit_grid_data[0].items[1].item_id = 2580429694u;
+	for (size_t a = 0; a < kHudAccessorySlots; ++a) {
+		c.accessory_grid[a].count = 2;
+		for (size_t i = 0; i < 2; ++i) {
+			c.accessory_grid[a].items[i].item_id = uint32_t(900 + 10 * a + i);
+			c.accessory_grid[a].items[i].name_sid_hash = item_name_hash(5 + a, i);
+		}
+		c.accessory_selected[a] = 0;
+	}
+	for (size_t k = 0; k < kHudKitCount; ++k) {
+		c.kits_data[k].name_sid_hash = k == 0 ? 0x6000u : 0u;
+		for (size_t i = 0; i < kHudSpawnKitItems; ++i) {
+			c.kits_data[k].items[i].name_sid_hash = item_name_hash(i, 1);
+		}
+	}
+	return m;
+}
+
+std::string slot_path(std::string_view p_widget, int p_slot) {
+	return "instance1." + std::string(p_widget) + ".mcContainer.Slot_" + std::to_string(p_slot);
+}
+
 }
 
 TEST_SUITE("ui-deploy") {
+	TEST_CASE("customizesoldierscreen KitView_01: four kit slots 111 px apart as 18.57 draws them (the slot's shown "
+			  "bounds plus SLOT_PADDING), with the kit's name, the five items' names and the LOADOUT and APPEARANCE "
+			  "buttons; customizeaccessoriesscreen: the primary and its four accessory "
+			  "selectors") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		{
+			RetailScreen s = open_retail_screen(*r, kCustomizeSoldier, customize_client(*r));
+			CHECK(s.hud->stats().unknown_class_paths.empty());
+			std::vector<std::string> fired;
+			s.hud->set_event_sink([&](const HudWidgetEvent &e) {
+				fired.push_back(e.instance + " " + e.query + " " + e.param.to_string());
+			});
+			s.hud->initialize(customize_model());
+			s.hud->advance(1.0 / 30.0);
+			for (int k = 0; k < 4; ++k) {
+				CHECK(s.at(slot_path("KitView_01", k)).visible);
+			}
+			const std::string first = slot_path("KitView_01", 0);
+			CHECK(std::fabs(s.at(slot_path("KitView_01", 1)).matrix.ty - 111.0f) <= 1.0f);
+			CHECK(s.hud->clip(first + ".header.txt").text() == "ASSAULT");
+			CHECK(s.hud->clip(first + ".slotLabel1.txt").text() == "ITEM 0.1");
+			CHECK(s.hud->clip(first + ".slotLabel5.txt").text() == "ITEM 4.1");
+			CHECK(s.at(first + ".headerIcon").visible);
+			CHECK(s.at(first + ".button1").visible);
+			CHECK(s.at(first + ".button2").visible);
+			CHECK(s.hud->clip(first + ".button1.button.label.txt").text() == "LOADOUT");
+			CHECK(s.hud->clip(first + ".button2.button.label.txt").text() == "APPEARANCE");
+			const auto [x, y] = stage_centre(s, first + ".button1");
+			fired.clear();
+			s.hud->mouse_move(x, y);
+			s.hud->mouse_button(x, y, 1, true);
+			s.hud->mouse_button(x, y, 1, false);
+			CHECK(std::find(fired.begin(), fired.end(), "KitView_01 UIWidgetEventID_OnItemReleased 0") != fired.end());
+			CHECK(s.hud->stats().as2.failed_ops == 0);
+		}
+		RetailScreen s = open_retail_screen(*r, kCustomizeAccessories, customize_client(*r));
+		CHECK(s.hud->stats().unknown_class_paths.empty());
+		s.hud->initialize(customize_model());
+		s.hud->advance(1.0 / 30.0);
+		CHECK(s.hud->clip(slot_path("KitSelector_01", 0) + ".header.txt").text() == "ITEM 0.1");
+		for (int a = 0; a < 4; ++a) {
+			CHECK(s.hud->clip(slot_path("KitSelector_0" + std::to_string(a + 2), 0) + ".header.txt").text() ==
+					"ITEM " + std::to_string(5 + a) + ".0");
+		}
+		CHECK(s.hud->stats().as2.failed_ops == 0);
+	}
+	TEST_CASE(
+			"customizesoldiersubscreen: the five KitSelectors draw the kit's items, the selected one in the header "
+			"with its category, the kit name in TextField_01, and an arrow click steps the item and sends its index") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		RetailScreen s = open_retail_screen(*r, kCustomizeSub, customize_client(*r));
+		CHECK(s.hud->stats().unknown_class_paths.empty());
+		std::vector<std::string> fired;
+		s.hud->set_event_sink([&](const HudWidgetEvent &e) {
+			fired.push_back(e.instance + " " + e.query + " " + e.param.to_string());
+		});
+		s.hud->initialize(customize_model());
+		s.hud->advance(1.0 / 30.0);
+		for (int w = 1; w <= 5; ++w) {
+			const std::string widget = "KitSelector_0" + std::to_string(w);
+			const std::string slot = slot_path(widget, 0);
+			CHECK(s.at("instance1." + widget).visible);
+			CHECK(s.at(slot).visible);
+			CHECK(s.hud->clip(slot + ".header.txt").text() == "ITEM " + std::to_string(w - 1) + ".1");
+			CHECK(s.hud->clip(slot + ".category").text() == "CATEGORY " + std::to_string(w - 1));
+		}
+		CHECK(s.hud->clip(slot_path("KitSelector_01", 0) + ".headerIcon.txt").text() == "0");
+		CHECK(s.hud->clip(slot_path("KitSelector_01", 0) + ".button1.button.label.txt").text() == "ACCESSORIES");
+		CHECK(s.hud->clip("instance1.TextField_01").exists());
+		std::vector<HudWidgetEvent> routed;
+		s.hud->set_event_sink([&](const HudWidgetEvent &e) { routed.push_back(e); });
+		const auto [ix, iy] = stage_centre(s, slot_path("KitSelector_01", 0) + ".mouseArea");
+		s.hud->mouse_move(ix, iy);
+		for (const HudWidgetEvent &e : routed) {
+			if (e.instance == "KitSelector_01" && e.query == "UIWidgetEventID_OnItemOver") {
+				CHECK(s.hud->deliver_in_event("KitInfoBox_01", "UIWidgetEventID_OnShow"));
+			} else if (e.instance == "KitSelector_01" && e.query == "UIWidgetEventID_Update") {
+				CHECK(s.hud->deliver_in_event("KitInfoBox_01", "UIWidgetEventID_Update", e.param));
+			}
+		}
+		s.hud->advance(1.0 / 30.0);
+		const std::string box = "instance1.KitInfoBox_01";
+		CHECK(s.at(box).visible);
+		CHECK(s.hud->clip(box + ".ammoValue").text() == "30 [5.56x45mm NATO]");
+		CHECK(s.hud->clip(box + ".rofValue").text() == "800");
+		CHECK(s.hud->clip(box + ".rangeValue").text() == "LONG");
+		CHECK(s.hud->clip(box + ".fireMode1").current_frame() == 1);
+		CHECK(s.hud->clip(box + ".fireMode0").current_frame() == 3);
+		CHECK_FALSE(s.at(box + ".fireMode2").visible);
+		s.hud->set_event_sink([&](const HudWidgetEvent &e) {
+			fired.push_back(e.instance + " " + e.query + " " + e.param.to_string());
+		});
+		fired.clear();
+		const auto [x, y] = stage_centre(s, slot_path("KitSelector_02", 0) + ".buttonRight");
+		s.hud->mouse_move(x, y);
+		s.hud->mouse_button(x, y, 1, true);
+		s.hud->mouse_button(x, y, 1, false);
+		CHECK(s.hud->clip(slot_path("KitSelector_02", 0) + ".header.txt").text() == "ITEM 1.2");
+		CHECK(std::find(fired.begin(), fired.end(), "KitSelector_02 UIWidgetEventID_SetIndex 2") != fired.end());
+		CHECK(s.hud->stats().as2.failed_ops == 0);
+	}
 	TEST_CASE("SpawnTimer: the countdown dims the widget to 20 and shows TIME TO DEPLOY with the light bars at "
 			  "Time + 2; a click while counting arms the deploy, which fires the Deploy port when Time reaches 0") {
 		Retail *r = retail_or_skip();

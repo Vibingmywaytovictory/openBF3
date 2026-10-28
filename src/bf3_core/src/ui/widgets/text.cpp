@@ -15,9 +15,15 @@ constexpr std::string_view kEndOfRoundCategory = "ui/uicomponents/uiendofroundco
 constexpr int32_t kLevelChangeTimerTextKey = -463343046;
 constexpr int32_t kTimeUntilLevelChangeKey = 1475220671;
 constexpr std::string_view kNextRoundStartsInSid = "ID_M_EOR_NEXT_ROUND_STARTS_IN";
+constexpr std::string_view kKitCategory = "ui/uicomponents/uikitcomp";
+constexpr int32_t kKitNameTextKey = 1978414970;
 
 std::optional<As2Value> text_field_source(
 		const HudModel &p_model, const HudClientState &p_client, const HudDataSource &p_source) {
+	if (p_source.category == kKitCategory && p_source.key == kKitNameTextKey) {
+		const uint32_t name = p_model.kit.selected_kit_name;
+		return As2Value::of(name != 0 && p_client.localise_hash ? p_client.localise_hash(name) : std::string());
+	}
 	if (p_source.category != kEndOfRoundCategory) {
 		return std::nullopt;
 	}

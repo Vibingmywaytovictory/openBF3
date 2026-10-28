@@ -541,6 +541,7 @@ public:
 
 	void set_button_type(std::string p_type) override { button_type_ = std::move(p_type); }
 	void set_button_text(std::string p_text) override { button_text_ = std::move(p_text); }
+	void update_button_text(const std::string &p_text) override { update_text(*host_, p_text); }
 	void set_align_text(std::string p_align) override { align_text_ = std::move(p_align); }
 	void set_resize_if_too_wide(bool p_resize) override { resize_if_too_wide_ = p_resize; }
 	void set_callbacks(HudButtonCallbacks p_callbacks) override { callbacks_ = std::move(p_callbacks); }

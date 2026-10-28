@@ -55,6 +55,7 @@ inline constexpr std::array<GameUtilsKit, kHudKitCount> kGameUtilsKits{ {
 std::string game_utils_kit_frame_label(std::string_view p_kit);
 bool game_utils_is_image_path(const As2Value &p_path);
 As2Value game_utils_string2object(std::string_view p_text);
+std::string game_utils_object2string(const As2Value &p_object);
 std::optional<As2Value> ui_base_object_to_array(const As2Value &p_object);
 
 }

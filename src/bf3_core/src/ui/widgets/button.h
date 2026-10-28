@@ -20,6 +20,7 @@ public:
 	virtual ~HudButton() = default;
 	virtual void set_button_type(std::string p_type) = 0;
 	virtual void set_button_text(std::string p_text) = 0;
+	virtual void update_button_text(const std::string &p_text) = 0;
 	virtual void set_align_text(std::string p_align) = 0;
 	virtual void set_resize_if_too_wide(bool p_resize) = 0;
 	virtual void set_callbacks(HudButtonCallbacks p_callbacks) = 0;
@@ -36,5 +37,17 @@ public:
 	virtual void press() = 0;
 	virtual const std::string &current_label() const = 0;
 };
+
+inline HudButton *hud_initialized_button(HudWidgetHost &r_host, const As2Clip &p_clip) {
+	HudScreen &screen = r_host.screen();
+	HudWidgetController *controller = screen.controller(p_clip.path());
+	HudWidgetHost *host = screen.host(p_clip.path());
+	HudButton *b = dynamic_cast<HudButton *>(controller);
+	if (controller == nullptr || host == nullptr || b == nullptr) {
+		return nullptr;
+	}
+	controller->initialize(*host, HudWidgetInit{});
+	return b;
+}
 
 }
