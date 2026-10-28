@@ -281,6 +281,10 @@ if(OPENBF3_BUILD_CHECKS)
         src/menu_check.cpp
         src/menu_check.h
     )
+    target_sources(bf3_godot PRIVATE
+        src/options_check.cpp
+        src/options_check.h
+    )
     target_link_libraries(bf3_godot PRIVATE bf3_sim_harness)
     target_include_directories(bf3_godot PRIVATE ${PROJECT_SOURCE_DIR}/tests)
     target_include_directories(bf3_godot PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

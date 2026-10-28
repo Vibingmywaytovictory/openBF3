@@ -211,7 +211,8 @@ void build_tdm_ui(
 		r_m.ui_screens_id = screens->get_instance_id();
 		r_m.native_flow =
 				std::unique_ptr<NativeFlow, void (*)(NativeFlow *)>(new NativeFlow(), &delete_part<NativeFlow>);
-		r_m.native_flow->set_keep_log(r_m.native_screens_check || r_m.loading_screen_check || r_m.eor_check_on);
+		r_m.native_flow->set_keep_log(
+				r_m.native_screens_check || r_m.loading_screen_check || r_m.eor_check_on || r_m.options_check_on);
 		r_m.native_menu =
 				std::unique_ptr<NativeMenu, void (*)(NativeMenu *)>(new NativeMenu(), &delete_part<NativeMenu>);
 		r_m.native_menu->build(*screens);
@@ -445,6 +446,10 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 		}
 		m.overlay_check = has_user_arg("overlay-check");
 		if (m.overlay_check && quit_after_ <= 0.0) {
+			quit_after_ = 1.0e9;
+		}
+		m.options_check_on = has_user_arg("options-check");
+		if (m.options_check_on && quit_after_ <= 0.0) {
 			quit_after_ = 1.0e9;
 		}
 		m.options.tdm_tuning_cfg = config_path("res://config/tdm_tuning.cfg");
@@ -1052,6 +1057,7 @@ void Bf3LevelSession::tdm_shutdown() {
 	m.native_check.reset();
 	m.loading_check.reset();
 	m.native_eor.reset();
+	m.options_check.reset();
 	m.native_options.reset();
 	m.native_flow.reset();
 	if (m.tdm_hud != nullptr) {

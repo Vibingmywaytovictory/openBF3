@@ -1026,6 +1026,9 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_godot_row(godot.ingame_menu godot_ingame_menu.cmake WINDOW TIMEOUT 240)
     set_tests_properties(godot.ingame_menu PROPERTIES RUN_SERIAL TRUE)
     openbf3_cost(godot.ingame_menu 1 35)
+    openbf3_godot_row(godot.options godot_options.cmake WINDOW TIMEOUT 240)
+    set_tests_properties(godot.options PROPERTIES RUN_SERIAL TRUE)
+    openbf3_cost(godot.options 1 45)
 endif()
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)

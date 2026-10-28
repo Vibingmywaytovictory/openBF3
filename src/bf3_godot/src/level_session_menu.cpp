@@ -1,5 +1,6 @@
 #include "level_session_menu.h"
 
+#include "game_audio.h"
 #include "godot_util.h"
 #include "input_mapper.h"
 #include "level_session.h"
@@ -8,8 +9,10 @@
 #include "menu_check.h"
 #include "native_flow.h"
 #include "native_hud.h"
+#include "native_options.h"
 #include "native_screens.h"
 #include "native_tags.h"
+#include "options_check.h"
 #include "overview_map.h"
 #include "swf_view.h"
 #include "ui_cursor.h"
@@ -245,9 +248,50 @@ bool Bf3LevelSession::tdm_menu_frame(double p_now_s) {
 			return true;
 		}
 	}
+	if (m.options_check_on && m.options_check == nullptr && m.native_options != nullptr) {
+		m.options_check = std::unique_ptr<OptionsCheck, void (*)(OptionsCheck *)>(
+				new OptionsCheck(user_arg_value("options-shots")), &delete_part<OptionsCheck>);
+	}
+	if (m.options_check != nullptr && !m.finished && !m.options_check_reported) {
+		OptionsCheckIo oio;
+		oio.press = [this](Key p_key, bool p_pressed) { scripted_ui_key(p_key, p_pressed); };
+		oio.move = [this](Vector2 p_at) {
+			Ref<InputEventMouseMotion> e;
+			e.instantiate();
+			e->set_position(p_at);
+			tdm_ui_input(e);
+		};
+		oio.click = [this](Vector2 p_at, bool p_pressed) {
+			Ref<InputEventMouseButton> e;
+			e.instantiate();
+			e->set_position(p_at);
+			e->set_button_index(MOUSE_BUTTON_LEFT);
+			e->set_pressed(p_pressed);
+			tdm_ui_input(e);
+		};
+		oio.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		oio.settings = game_->settings.get();
+		oio.settings_path = game_->settings_path;
+		oio.alive = game_->alive;
+		oio.game_input = mapper_.game_input();
+		oio.look_sensitivity = mapper_.base_sensitivity;
+		if (game_->audio != nullptr && game_->audio->mixer() != nullptr) {
+			oio.master_gain = game_->audio->mixer()->bus_gain(bf3::core::audio::MasterBus::GameMixMain);
+		}
+		if (m.options_check->frame(*screens, *m.native_flow, *m.native_menu, *m.native_options, p_now_s, oio)) {
+			m.options_check_reported = true;
+			UtilityFunctions::print(to_godot(m.options_check->report()));
+			if (!m.options_check->passed()) {
+				m.finished = true;
+				finish(1);
+				return true;
+			}
+		}
+	}
 #endif
 	if (m.native_menu->quit_requested() && !m.menu_check_on) {
 		m.finished = true;
+		UtilityFunctions::print("[ui] QuitGame from the in-game menu QuitPopup");
 		finish(0);
 		return true;
 	}
