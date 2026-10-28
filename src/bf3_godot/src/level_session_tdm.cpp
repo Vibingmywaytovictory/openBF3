@@ -1044,8 +1044,8 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			if (m.view_vfov_deg > 0.0f) {
 				p_camera->set_fov(m.view_vfov_deg);
 			}
-		} else if (!m.spawned_this_round && !f.valid && !m.join_view_placed) {
-
+		} else if (!m.spawned_this_round && !f.valid && !m.join_view_placed &&
+				(m.eor_camera == nullptr || !m.eor_camera->active())) {
 			const std::shared_ptr<const host::SharedLevel> shared = shared_level();
 			if (shared != nullptr && !shared->spawns.empty()) {
 				const sim::SpawnPoint &sp = shared->spawns.front();
