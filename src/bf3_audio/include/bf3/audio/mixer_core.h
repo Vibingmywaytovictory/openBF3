@@ -141,7 +141,12 @@ struct MixerCutStats {
 	std::atomic<uint64_t> overs_in{ 0 }, overs_out{ 0 };
 	std::atomic<uint64_t> limit_blocks{ 0 };
 	std::atomic<uint64_t> limit_edge_steps{ 0 };
+	std::atomic<float> limit_edge_step_max{ 0.0f };
 	std::atomic<float> limit_min_gain{ 1.0f };
+	std::atomic<uint64_t> slot_takeovers{ 0 };
+	std::atomic<uint64_t> takeover_cuts{ 0 };
+	std::atomic<float> takeover_cut_max{ 0.0f };
+	std::atomic<uint64_t> stale_events{ 0 };
 };
 inline constexpr std::array<double, 7> kGapEdgesMs = { 5.0, 10.0, 15.0, 20.0, 30.0, 50.0, 100.0 };
 const char *mixer_cut_kind_name(MixerCutKind p_kind);

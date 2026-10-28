@@ -118,6 +118,11 @@ bool resample_buffered(SlotPlay &r_play, uint32_t p_count, double p_ratio, float
 	return slow;
 }
 
+float history_at(const SlotPlay &p_play, int p_channel, float p_t) {
+	return catmull_rom(p_play.history[0][p_channel], p_play.history[1][p_channel], p_play.history[2][p_channel],
+			p_play.history[3][p_channel], p_t);
+}
+
 struct NextSegment {
 	bool play = false;
 	uint16_t segment = 0;
@@ -461,6 +466,15 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 		PendingStart pend = slot.pending;
 		slot.pending.armed = false;
 		const bool takeover = play.active;
+		if (takeover) {
+			++stats.slot_takeovers;
+			if (slot.voice < voice_cut.size()) {
+				const float t = float(play.frac);
+				const float cut =
+						slot.fade * std::max(std::fabs(history_at(play, 0, t)), std::fabs(history_at(play, 1, t)));
+				voice_cut[slot.voice] = std::max(voice_cut[slot.voice], cut);
+			}
+		}
 		play.active = false;
 		if (!open_segment(*this, s, play, pend.segment)) {
 			++stats.starved_slots;

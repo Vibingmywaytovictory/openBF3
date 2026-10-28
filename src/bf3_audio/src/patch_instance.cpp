@@ -1,5 +1,7 @@
 #include "bf3/audio/patch_instance.h"
 
+#include "bf3/audio/mixer_core.h"
+
 #include "bf3/core/audio/sound_wave.h"
 #include "bf3/core/util/finite.h"
 #include "patch_state.h"
@@ -245,6 +247,7 @@ Result<std::unique_ptr<PatchInstance>> PatchInstance::create(std::shared_ptr<con
 	st.voice_buffers.assign(p.voices.size() * 2 * kMaxSubBlock, 0.0f);
 	st.voice_tapped.assign(p.voices.size(), 0);
 	st.voice_live.assign(p.voices.size(), 0);
+	st.voice_cut.assign(p.voices.size(), 0.0f);
 	if (p.outputs.size() <= 64) {
 		const std::vector<uint64_t> masks = voice_output_masks(p);
 		for (SlotState &sl : st.slots) {
@@ -285,6 +288,10 @@ void PatchInstance::post_event(uint32_t p_name_hash, uint32_t p_frame_in_block) 
 		}
 	}
 	++st.stats.unknown_inputs;
+}
+
+uint32_t PatchInstance::queued_events() const {
+	return state_->event_count + state_->deferred_count;
 }
 
 void PatchInstance::set_mixer_value(uint32_t p_name_hash, float p_value) {
@@ -500,6 +507,7 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 					apply_gain_ramp(ch[0], p_frames, ps.gain_prev, target);
 					apply_gain_ramp(ch[1], p_frames, ps.gain_prev, target);
 					ps.gain_prev = target;
+					st.voice_cut[v] *= target;
 					break;
 				}
 				case PluginRole::HighPass:
@@ -573,6 +581,13 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 					if (c.to_bus && c.bus == ca::MasterBus::Lfe) {
 						target *= db_to_gain(st.tuning.lfe_fold_db);
 					}
+					if (!c.to_bus && c.voice != v && c.voice < st.voice_cut.size()) {
+						st.voice_cut[c.voice] = std::max(st.voice_cut[c.voice], st.voice_cut[v] * target);
+					}
+					if (c.to_bus && st.voice_cut[v] * target > kAudibleStep) {
+						++st.stats.takeover_cuts;
+						st.stats.takeover_cut_max = std::max(st.stats.takeover_cut_max, st.voice_cut[v] * target);
+					}
 					if (!ps.gain_started) {
 						ps.gain_prev = target;
 						ps.gain_started = true;
@@ -626,6 +641,7 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 					break;
 			}
 		}
+		st.voice_cut[v] = 0.0f;
 		tap_now();
 	}
 	for (uint32_t t = 0; t < st.tap_count; ++t) {

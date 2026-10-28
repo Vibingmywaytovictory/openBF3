@@ -87,6 +87,9 @@ struct PatchInstanceStats {
 	uint64_t decode_errors = 0;
 	uint64_t sampler_triggers = 0;
 	uint64_t unknown_inputs = 0;
+	uint64_t slot_takeovers = 0;
+	uint64_t takeover_cuts = 0;
+	float takeover_cut_max = 0.0f;
 };
 
 struct HdrVoiceWindow {
@@ -123,6 +126,7 @@ public:
 
 	void set_parameter(uint32_t p_name_hash, float p_value);
 	void post_event(uint32_t p_name_hash, uint32_t p_frame_in_block);
+	uint32_t queued_events() const;
 	void set_mixer_value(uint32_t p_name_hash, float p_value);
 	void set_geometry(const EmitterState &p_emitter, const ListenerState &p_listener);
 

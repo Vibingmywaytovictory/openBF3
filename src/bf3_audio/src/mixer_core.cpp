@@ -441,6 +441,11 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 		stats.starved_voices.fetch_add(after.starved_slots - before.starved_slots, std::memory_order_relaxed);
 		stats.decode_errors.fetch_add(after.decode_errors - before.decode_errors, std::memory_order_relaxed);
 		stats.deferred_events.fetch_add(after.deferred_events - before.deferred_events, std::memory_order_relaxed);
+		m.cut_stats.slot_takeovers.fetch_add(after.slot_takeovers - before.slot_takeovers, std::memory_order_relaxed);
+		m.cut_stats.takeover_cuts.fetch_add(after.takeover_cuts - before.takeover_cuts, std::memory_order_relaxed);
+		if (after.takeover_cut_max > m.cut_stats.takeover_cut_max.load(std::memory_order_relaxed)) {
+			m.cut_stats.takeover_cut_max.store(after.takeover_cut_max, std::memory_order_relaxed);
+		}
 		if (s.fade_mode != 0 && s.instance->fade_done()) {
 			m.note_cut(s.fade_kind, s, s.instance->edge().edge);
 			if (s.fade_mode == kFadePark) {
@@ -650,6 +655,9 @@ void MixerCore::Impl::a3_block(MixerStats &stats, uint64_t p_first) {
 		InstanceSlot &s = instances[cull_slots[k]];
 		switch (cull_verdicts[k]) {
 			case CullVerdict::Keep:
+				if (s.pending) {
+					cut_stats.stale_events.fetch_add(s.instance->queued_events(), std::memory_order_relaxed);
+				}
 				if (s.pending && config.cut_fade_frames > 0) {
 					s.instance->set_fade(0.0f);
 					s.instance->fade_to(1.0f, config.cut_fade_frames);
@@ -882,6 +890,10 @@ void MixerCore::Impl::apply_limiter() {
 	uint64_t over_out = 0;
 	if (limit_g[0] < h - attack) {
 		cut_stats.limit_edge_steps.fetch_add(1, std::memory_order_relaxed);
+		const float jump = (h - limit_g[0]) * std::max(std::fabs(x[0]), std::fabs(x[1]));
+		if (jump > cut_stats.limit_edge_step_max.load(std::memory_order_relaxed)) {
+			cut_stats.limit_edge_step_max.store(jump, std::memory_order_relaxed);
+		}
 	}
 	for (uint32_t i = 0; i < kBlockFrames; ++i) {
 		h = std::min(limit_g[i], h + (1.0f - h) * k);
@@ -936,9 +948,18 @@ std::string format_mixer_cuts(const MixerCutStats &p_stats) {
 			double(p_stats.step_max[lb].load()), (unsigned long long)p_stats.event_drops.load());
 	out += part;
 	const float lg = p_stats.limit_min_gain.load();
-	std::snprintf(part, sizeof(part), "; limiter: %llu blocks below -0.1 dB, down to %.1f dB, %llu edge steps; frames over 0 dBFS %llu before it, %llu after",
-			(unsigned long long)p_stats.limit_blocks.load(), lg > 0.0f ? 20.0 * std::log10(double(lg)) : -999.0, (unsigned long long)p_stats.limit_edge_steps.load(),
+	std::snprintf(part, sizeof(part),
+			"; limiter: %llu blocks below -0.1 dB, down to %.1f dB, %llu edge steps (max %.4f); frames over 0 dBFS "
+			"%llu before it, %llu after",
+			(unsigned long long)p_stats.limit_blocks.load(), lg > 0.0f ? 20.0 * std::log10(double(lg)) : -999.0,
+			(unsigned long long)p_stats.limit_edge_steps.load(), double(p_stats.limit_edge_step_max.load()),
 			(unsigned long long)p_stats.overs_in.load(), (unsigned long long)p_stats.overs_out.load());
+	out += part;
+	std::snprintf(part, sizeof(part),
+			"; sampler slot takeovers %llu, %llu cut a sound above -60 dBFS, max step %.4f; %llu events queued at a "
+			"resume",
+			(unsigned long long)p_stats.slot_takeovers.load(), (unsigned long long)p_stats.takeover_cuts.load(),
+			double(p_stats.takeover_cut_max.load()), (unsigned long long)p_stats.stale_events.load());
 	out += part;
 	return out;
 }

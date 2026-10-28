@@ -206,6 +206,7 @@ struct PatchInstance::State {
 	std::vector<float> delay_pool;
 	std::vector<uint8_t> voice_tapped;
 	std::vector<uint8_t> voice_live;
+	std::vector<float> voice_cut;
 	std::array<std::array<float, detail::kMaxSubBlock>, kMaxVoiceTaps> tap_buffers{};
 	std::array<VoiceTap *, kMaxVoiceTaps> taps{};
 	uint32_t tap_count = 0;
