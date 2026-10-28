@@ -44,6 +44,10 @@ struct OptionsCheckIo {
 	uint32_t jump_presses = 0;
 	uint16_t air_ticks = 0;
 	float camera_fov = 0.0f;
+	std::optional<float> hud_safe_x;
+	std::optional<float> hud_safe_y;
+	float hud_visible_width = 0.0f;
+	float hud_visible_height = 0.0f;
 	float zoom_fov = 0.0f;
 	float fov_progress = 0.0f;
 	bool can_zoom = false;
@@ -83,7 +87,8 @@ private:
 	static void tap(const Ctx &p_c, godot::Key p_key, int32_t p_times = 1);
 	void click_clip(const Ctx &p_c, std::string_view p_partition, const std::string &p_path);
 	void click_tab(const Ctx &p_c, std::string_view p_partition, size_t p_tab);
-	std::optional<std::string> list_row(const Ctx &p_c, std::string_view p_partition, size_t p_row);
+	std::optional<std::string> list_row(
+			const Ctx &p_c, std::string_view p_partition, size_t p_row, std::string_view p_list = "List_01");
 	static double value(const Ctx &p_c, std::string_view p_option);
 	static double applied(const Ctx &p_c, std::string_view p_option);
 	void click_row(const Ctx &p_c, bf3::core::ui::OptionsTab p_tab, std::string_view p_source);
@@ -96,6 +101,7 @@ private:
 	static bool hip_ready(const Ctx &p_c, double p_fov);
 	static bool ads_ready(const Ctx &p_c);
 	void note_fov(const Ctx &p_c, const char *p_what);
+	void check_hud_safe(const Ctx &p_c);
 
 	std::string shot_dir_;
 	std::string waiting_;

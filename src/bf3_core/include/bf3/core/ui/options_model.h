@@ -26,6 +26,8 @@ inline constexpr int32_t kOptionsKeyBoundKey = 1279028100;
 inline constexpr int32_t kOptionsExitingKey = 1855787041;
 inline constexpr int32_t kOptionsCanSaveKey = -1955263736;
 inline constexpr int32_t kOptionsMenuHintKey = 606381875;
+inline constexpr int32_t kOptionsSafeWidthKey = 1758844605;
+inline constexpr int32_t kOptionsSafeHeightKey = -1649763324;
 
 struct DisplayModeChoice {
 	uint32_t width = 0;

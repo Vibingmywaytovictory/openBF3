@@ -630,6 +630,20 @@ TEST_SUITE("ui-flow-session") {
 		}
 		s.set_data(kSettings, ui::kOptionsFullscreenKey, "False");
 		writes();
+		const std::string adjust = "ui/flow/screen/screenadjustscreen";
+		fire(screens[3], "List_03", "UIWidgetEventID_OnItemReleased", "0");
+		const Lines opened = steps(sc.phase("options: OPEN SCREEN ADJUST"));
+		CHECK(has(opened, "push screenadjustscreen"));
+		REQUIRE(s.flow().find_screen(adjust) != nullptr);
+		fire(adjust, "ScreenAdjust_01", "UIWidgetEventID_OnNavigateLeft", "0.96");
+		fire(adjust, "ScreenAdjust_01", "UIWidgetEventID_OnReachedBottom", "0.94");
+		CHECK(writes() == Lines{ "1758844605=0.96", "-1649763324=0.94" });
+		fire(adjust, "Button_01", "UIWidgetEventID_OnItemReleased", "");
+		const Lines left = steps(sc.phase("options: leave SCREEN ADJUST"));
+		CHECK(has(left, "close screenadjustscreen"));
+		CHECK(s.flow().find_screen(adjust) == nullptr);
+		CHECK(s.flow().find_screen(screens[3]) != nullptr);
+		writes();
 		fire(screens[3], "TabBar_01", tab, "ID4");
 		sc.phase("options: KEY BINDINGS tab");
 		CHECK(writes() == Lines{ "968900879=ID4", "70081798=ID0" });

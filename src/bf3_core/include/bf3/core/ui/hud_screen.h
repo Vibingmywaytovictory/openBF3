@@ -68,6 +68,7 @@ struct HudNestedList {
 struct HudListBinding {
 	HudDataSource list_query;
 	std::vector<HudNestedList> nested;
+	std::vector<std::string> static_items;
 	std::string row_type;
 	std::string empty_row_type;
 	std::string navigation_type;

@@ -56,6 +56,8 @@ SettingsEffects settings_effects(const SettingsStore &p_store) {
 	const double fov = p_store.value(kFieldOfViewOption);
 	const double fov_default = p_store.default_value(kFieldOfViewOption);
 	e.hip_fov_deg = float(std::isfinite(fov) && fov > 0.0 ? fov : fov_default > 0.0 ? fov_default : e.hip_fov_deg);
+	e.safe_width = p_store.value(kSafeAreaWidthOption);
+	e.safe_height = p_store.value(kSafeAreaHeightOption);
 	e.invert_look = p_store.value(kFlipLookOption) != 0.0;
 	e.hold_to_zoom = p_store.value(kHoldToZoomOption) != 0.0;
 	e.video.fullscreen = p_store.applied_value(kFullscreenOption) != 0.0;

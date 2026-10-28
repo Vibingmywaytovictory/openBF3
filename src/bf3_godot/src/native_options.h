@@ -19,6 +19,7 @@ class Bf3UiScreens;
 
 inline constexpr std::string_view kPopupBindKeyPartition = "ui/flow/screen/popups/popupbindkey";
 inline constexpr std::string_view kPopupDelayPartition = "ui/flow/screen/popups/popupdelay";
+inline constexpr std::string_view kScreenAdjustPartition = "ui/flow/screen/screenadjustscreen";
 inline constexpr std::string_view kOptionsSettingsCategory = "ui/uicomponents/uisettingscomp";
 inline constexpr std::string_view kOptionsMemCardCategory = "ui/uicomponents/uimemcardcomp";
 inline constexpr std::string_view kOptionsSettingsLeaf = "uisettingscomp";
@@ -44,6 +45,7 @@ struct NativeOptionsStats {
 	uint64_t resolution_timers = 0;
 	uint64_t resolutions_kept = 0;
 	uint64_t resolution_timeouts = 0;
+	uint64_t safe_area_writes = 0;
 };
 
 class NativeOptions {

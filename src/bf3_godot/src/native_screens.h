@@ -7,6 +7,7 @@
 #include "bf3/core/result.h"
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/core/ui/hud_screen.h"
+#include "bf3/core/ui/screen_adjust.h"
 #include "bf3/core/ui/swf_scene.h"
 
 #include <godot_cpp/classes/node2d.hpp>
@@ -79,6 +80,7 @@ public:
 	void set_drawn(std::string_view p_partition, bool p_drawn);
 	void set_manual(bool p_manual) { manual_ = p_manual; }
 	void set_model(const bf3::core::ui::HudModel &p_model) { model_ = p_model; }
+	void set_safe_area(const bf3::core::ui::ScreenAdjustFractions &p_safe) { safe_area_ = p_safe; }
 	void set_client(bf3::core::ui::HudClientState p_client);
 	void set_options(const bf3::core::ui::OptionsModel *p_options);
 	bf3::core::Status open_movie_screen(std::string_view p_movie, bf3::core::ui::HudRootData *p_data);
@@ -155,6 +157,7 @@ private:
 	int32_t next_order_ = kUiScreensFirstOwnOrder;
 	std::string pressed_screen_;
 	bf3::core::ui::HudModel model_{};
+	bf3::core::ui::ScreenAdjustFractions safe_area_;
 	bf3::core::ui::HudClientState client_;
 	const bf3::core::ui::OptionsModel *options_ = nullptr;
 	UiScreensStats stats_;

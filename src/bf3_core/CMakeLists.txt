@@ -408,3 +408,8 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/eor_fading.h
     src/gameplay/eor_fading.cpp
 )
+
+target_sources(bf3_core PRIVATE
+    include/bf3/core/ui/screen_adjust.h
+    src/ui/screen_adjust.cpp
+)

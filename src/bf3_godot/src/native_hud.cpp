@@ -180,6 +180,15 @@ void Bf3NativeHud::set_model(const ui::HudModel &p_model) {
 	}
 }
 
+std::optional<ui::HudStageRects> Bf3NativeHud::stage_rects() const {
+	for (const std::unique_ptr<ui::HudScreen> &s : screens_) {
+		if (s != nullptr) {
+			return s->stage_rects();
+		}
+	}
+	return std::nullopt;
+}
+
 void Bf3NativeHud::set_vfov_deg(double p_deg) {
 	vfov_deg_ = p_deg;
 }
@@ -302,6 +311,8 @@ bf3::core::Status Bf3NativeHud::open_view(size_t p_index) {
 	ui::HudStageRects rects;
 	rects.visible = v->visible_rect();
 	rects.original = v->scene()->stage();
+	rects.safe_x = ui::hud_safe_offset(ui::kHudFootageSafeX, rects.visible.width(), safe_area_.width);
+	rects.safe_y = ui::hud_safe_offset(ui::kHudFootageSafeY, rects.visible.height(), safe_area_.height);
 	bf3::core::Result<std::unique_ptr<ui::HudScreen>> s = ui::HudScreen::open(*v->scene(), *assets->movies(), asset, assets->swf_fonts(), client_, rects);
 	if (!s) {
 		drop_view(p_index);
@@ -570,6 +581,8 @@ void Bf3NativeHud::step(double p_seconds) {
 		ui::HudStageRects rects = s->stage_rects();
 		rects.visible = v->visible_rect();
 		rects.original = v->scene()->stage();
+		rects.safe_x = ui::hud_safe_offset(ui::kHudFootageSafeX, rects.visible.width(), safe_area_.width);
+		rects.safe_y = ui::hud_safe_offset(ui::kHudFootageSafeY, rects.visible.height(), safe_area_.height);
 		s->set_stage_rects(rects);
 		const float stage_h = rects.visible.height();
 		if (client_changed || s->client().vertical_fov_deg != float(vfov_deg_) || s->client().stage_height != stage_h) {

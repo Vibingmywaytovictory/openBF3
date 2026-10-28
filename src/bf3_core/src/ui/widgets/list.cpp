@@ -210,6 +210,12 @@ public:
 			r_data.push_back(HudDataEntry{ "List", std::move(*rows), b.list_query.on_initialize });
 		} else if (std::optional<As2Value> menu = hud_menu_list_rows(b.list_query, p_model)) {
 			r_data.push_back(HudDataEntry{ "List", std::move(*menu), b.list_query.on_initialize });
+		} else if (!b.static_items.empty()) {
+			As2Value rows = As2Value::array();
+			for (const std::string &item : b.static_items) {
+				rows.push(As2Value::of(item));
+			}
+			r_data.push_back(HudDataEntry{ "List", std::move(rows), true });
 		}
 	}
 

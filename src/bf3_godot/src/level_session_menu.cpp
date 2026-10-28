@@ -279,6 +279,13 @@ bool Bf3LevelSession::tdm_menu_frame(double p_now_s) {
 			}
 		};
 		oio.jump_presses = mapper_.sample().jump_presses;
+		if (const std::optional<bf3::core::ui::HudStageRects> rects =
+						game_->native_hud != nullptr ? game_->native_hud->stage_rects() : std::nullopt) {
+			oio.hud_safe_x = rects->safe_x;
+			oio.hud_safe_y = rects->safe_y;
+			oio.hud_visible_width = rects->visible.width();
+			oio.hud_visible_height = rects->visible.height();
+		}
 		if (const Camera3D *camera = cameras_.first_person()) {
 			oio.camera_fov = float(camera->get_fov());
 		}

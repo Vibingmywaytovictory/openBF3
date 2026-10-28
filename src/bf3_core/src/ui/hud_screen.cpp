@@ -89,6 +89,16 @@ HudListBinding list_binding_of(const EbxResolver &p_db, const EbxPartition &p_pa
 	l.send_index_with_event = detail::flag_or(p_b, "SendIndexWithEvent", false);
 	l.spinner_enabled = detail::flag_or(p_b, "SpinnerEnabled", false);
 	l.use_3d_selection = detail::flag_or(p_b, "Use3DSelection", false);
+	const std::optional<EbxValue> items = p_b.get("StaticItems");
+	const OptionalEbxArray arr = items ? items->as_array() : OptionalEbxArray();
+	if (arr) {
+		for (const EbxValue &v : *arr) {
+			const std::optional<EbxStruct> item = v.as_struct();
+			if (item && !detail::flag_or(*item, "ExcludeInRetail", false)) {
+				l.static_items.push_back(text_of(item->get("ItemName")));
+			}
+		}
+	}
 	return l;
 }
 

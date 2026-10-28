@@ -49,6 +49,7 @@ void NativeOptions::build(Bf3UiScreens &r_screens) {
 	}
 	r_screens.set_drawn(kPopupBindKeyPartition, true);
 	r_screens.set_drawn(kPopupDelayPartition, true);
+	r_screens.set_drawn(kScreenAdjustPartition, true);
 	r_screens.set_options(&model_);
 }
 
@@ -59,6 +60,10 @@ void NativeOptions::feed(bf3::host::UiFlowSession &r_session, const ui::OptionsS
 	r_session.set_data(
 			kOptionsSettingsCategory, ui::kOptionsFullscreenKey, flag(s.value(ui::kFullscreenOption) != 0.0));
 	r_session.set_data(kOptionsMemCardCategory, ui::kOptionsCanSaveKey, flag(true));
+	r_session.set_data(kOptionsSettingsCategory, ui::kOptionsSafeWidthKey,
+			bf3::core::float_text(s.value(ui::kSafeAreaWidthOption)));
+	r_session.set_data(kOptionsSettingsCategory, ui::kOptionsSafeHeightKey,
+			bf3::core::float_text(s.value(ui::kSafeAreaHeightOption)));
 }
 
 void NativeOptions::connect(bf3::host::UiFlowSession &r_session, ui::OptionsSession &r_options) {
@@ -97,6 +102,15 @@ void NativeOptions::apply_write(const bf3::host::UiFlowDataWrite &p_write, ui::O
 		case ui::kOptionsDataKeyKey:
 			if (const std::optional<double> k = number_of(p_write.value); k && std::isfinite(pending_value_)) {
 				++(r_options.set_option_value(int32_t(*k), pending_value_) ? stats_.values : stats_.refused_values);
+			}
+			break;
+		case ui::kOptionsSafeWidthKey:
+		case ui::kOptionsSafeHeightKey:
+			if (const std::optional<double> v = number_of(p_write.value); v &&
+					r_options.store().set_value(p_write.key == ui::kOptionsSafeWidthKey ? ui::kSafeAreaWidthOption
+																						: ui::kSafeAreaHeightOption,
+							*v)) {
+				++stats_.safe_area_writes;
 			}
 			break;
 		case ui::kOptionsExitingKey:

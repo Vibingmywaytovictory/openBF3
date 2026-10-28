@@ -111,6 +111,7 @@ size_t GameSettings::apply_input(InputMapper &r_mapper) {
 	r_mapper.invert_look = e.invert_look;
 	r_mapper.hold_to_zoom = e.hold_to_zoom;
 	hip_fov_deg_ = e.hip_fov_deg;
+	safe_area_ = { e.safe_width, e.safe_height };
 	return missed_inputs_;
 }
 

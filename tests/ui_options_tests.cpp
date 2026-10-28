@@ -7,6 +7,7 @@
 #include "bf3/core/ui/key_bindings.h"
 #include "bf3/core/ui/options.h"
 #include "bf3/core/ui/options_model.h"
+#include "bf3/core/ui/screen_adjust.h"
 #include "bf3/core/ui/settings_effects.h"
 #include "bf3/core/ui/settings_store.h"
 #include "bf3/core/ui/ui_graph.h"
@@ -304,6 +305,32 @@ std::string cells(const KeyBindingRow &p_row) {
 }
 
 TEST_SUITE("ui-settings-unit") {
+	TEST_CASE("screen adjust: the ScreenAdjust widget's steps, bounds and field rectangles") {
+		CHECK(screen_adjust_step(0.95, true) == doctest::Approx(0.96));
+		CHECK(screen_adjust_step(0.95, false) == doctest::Approx(0.94));
+		CHECK(screen_adjust_step(0.995, true) == kScreenAdjustMax);
+		CHECK(screen_adjust_step(0.855, false) == kScreenAdjustMin);
+		CHECK(screen_safe_margin(1280.0, 0.95) == 32.0);
+		CHECK(screen_safe_margin(720.0, 0.95) == 18.0);
+		const ScreenAdjustFields f = screen_adjust_fields(1280.0, 720.0, {});
+		CHECK(f.left.x == 32.0);
+		CHECK(f.left.y == 360.0);
+		CHECK(f.left.red_width == 32.0);
+		CHECK(f.left.red_height == 684.0);
+		CHECK(f.right.x == 1248.0);
+		CHECK(f.top.x == 640.0);
+		CHECK(f.top.y == 18.0);
+		CHECK(f.top.red_width == 18.0);
+		CHECK(f.top.red_height == 1280.0);
+		CHECK(f.bottom.y == 702.0);
+		const ScreenAdjustFields full = screen_adjust_fields(1280.0, 720.0, { 1.0, 0.85 });
+		CHECK(full.left.red_width == 0.0);
+		CHECK(full.top.y == 54.0);
+		CHECK(hud_safe_offset(49.806f, 1280.0f, kScreenAdjustDefault) == 49.806f);
+		CHECK(hud_safe_offset(49.806f, 1280.0f, 0.9) == doctest::Approx(81.806f));
+		CHECK(hud_safe_offset(28.195f, 720.0f, 1.0) == doctest::Approx(10.195f));
+	}
+
 	TEST_CASE("key bindings: rows per concept, a negative row for an axis, hidden concepts left out") {
 		const KeyBindingTable t = sample_table();
 		REQUIRE(t.tabs().size() == 5);
@@ -909,6 +936,14 @@ TEST_SUITE("ui-options") {
 		CHECK_FALSE(e.invert_look);
 		CHECK(e.hold_to_zoom);
 		CHECK(e.video == VideoEffects{});
+		CHECK(c->option(kSafeAreaWidthOption)->default_number() == double(0.95f));
+		CHECK(c->option(kSafeAreaHeightOption)->default_number() == double(0.95f));
+		CHECK(e.safe_width == double(0.95f));
+		CHECK(e.safe_height == double(0.95f));
+		CHECK(s.set_value(kSafeAreaWidthOption, 0.9));
+		CHECK_FALSE(s.set_value(kSafeAreaWidthOption, 1.5));
+		CHECK(settings_effects(s).safe_width == 0.9);
+		CHECK(s.settings_changed());
 	}
 
 	TEST_CASE("settings store: the install's defaults round-trip through the text format") {

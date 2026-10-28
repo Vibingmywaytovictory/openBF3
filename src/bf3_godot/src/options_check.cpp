@@ -10,6 +10,7 @@
 
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/options.h"
+#include "bf3/core/ui/screen_adjust.h"
 #include "bf3/core/ui/settings_effects.h"
 #include "bf3/core/ui/swf_scene.h"
 
@@ -30,6 +31,9 @@ constexpr std::string_view kSensitivity = ui::kMouseSensitivityOption;
 constexpr std::string_view kFullscreen = ui::kFullscreenOption;
 constexpr std::string_view kFieldOfView = ui::kFieldOfViewOption;
 constexpr float kFovTolerance = 0.01f;
+constexpr std::string_view kSafeWidth = ui::kSafeAreaWidthOption;
+constexpr std::string_view kSafeHeight = ui::kSafeAreaHeightOption;
+constexpr int32_t kScreenAdjustSteps = 5;
 constexpr godot::Key kCandidateKeys[] = { godot::KEY_K, godot::KEY_L, godot::KEY_O, godot::KEY_P, godot::KEY_U,
 	godot::KEY_I, godot::KEY_H, godot::KEY_N, godot::KEY_J, godot::KEY_Y };
 
@@ -128,12 +132,14 @@ void OptionsCheck::click_tab(const Ctx &p_c, std::string_view p_partition, size_
 	click_clip(p_c, p_partition, in_screen("TabBar_01.tabBarHolder.button_" + std::to_string(p_tab)));
 }
 
-std::optional<std::string> OptionsCheck::list_row(const Ctx &p_c, std::string_view p_partition, size_t p_row) {
+std::optional<std::string> OptionsCheck::list_row(
+		const Ctx &p_c, std::string_view p_partition, size_t p_row, std::string_view p_list) {
 	const UiScreenSlot slot = p_c.screens.find_screen(p_partition);
-	const ui::SwfSceneNode *holder =
-			slot.screen != nullptr ? slot.screen->scene().find_node(in_screen("List_01.ListHolder")) : nullptr;
+	const ui::SwfSceneNode *holder = slot.screen != nullptr
+			? slot.screen->scene().find_node(in_screen(std::string(p_list) + ".ListHolder"))
+			: nullptr;
 	if (holder == nullptr) {
-		failure_ = "no List_01 in " + ui::ui_data_category_leaf(p_partition);
+		failure_ = "no " + std::string(p_list) + " in " + ui::ui_data_category_leaf(p_partition);
 		return std::nullopt;
 	}
 	std::vector<const ui::SwfSceneNode *> rows;
@@ -279,6 +285,21 @@ void OptionsCheck::note_fov(const Ctx &p_c, const char *p_what) {
 	notes_.push_back(std::string(p_what) + ": FieldOfView " + std::to_string(value(p_c, kFieldOfView)) + ", camera " +
 			std::to_string(p_c.io.camera_fov) + " deg, the weapon's zoom level " + std::to_string(p_c.io.zoom_fov) +
 			" deg");
+}
+
+void OptionsCheck::check_hud_safe(const Ctx &p_c) {
+	const float want_x = ui::hud_safe_offset(ui::kHudFootageSafeX, p_c.io.hud_visible_width, value(p_c, kSafeWidth));
+	const float want_y = ui::hud_safe_offset(ui::kHudFootageSafeY, p_c.io.hud_visible_height, value(p_c, kSafeHeight));
+	notes_.push_back("HUD safe offset " +
+			(p_c.io.hud_safe_x ? std::to_string(*p_c.io.hud_safe_x) : std::string("none")) + " x " +
+			(p_c.io.hud_safe_y ? std::to_string(*p_c.io.hud_safe_y) : std::string("none")) + " (" +
+			std::to_string(want_x) + " x " + std::to_string(want_y) + " wanted, the footage's " +
+			std::to_string(ui::kHudFootageSafeX) + " x " + std::to_string(ui::kHudFootageSafeY) + " at 0.95)");
+	if (!p_c.io.hud_safe_x || !p_c.io.hud_safe_y || std::abs(*p_c.io.hud_safe_x - want_x) > 1e-3f ||
+			std::abs(*p_c.io.hud_safe_y - want_y) > 1e-3f || !(want_x < ui::kHudFootageSafeX) ||
+			!(want_y > ui::kHudFootageSafeY)) {
+		failure_ = "the screen adjust safe area is not the HUD's: " + notes_.back();
+	}
 }
 
 void OptionsCheck::check_play(const Ctx &p_c) {
@@ -544,7 +565,38 @@ std::vector<OptionsCheck::Step> OptionsCheck::steps() {
 			[](OptionsCheck &r_self, const Ctx &c) {
 				return near(value(c, kFieldOfView), r_self.fov_default_ + double(kOptionsCheckSteps));
 			},
-			[](OptionsCheck &, const Ctx &c) { tap(c, K::KEY_ESCAPE); }, "field_of_view" });
+			[](OptionsCheck &r_self, const Ctx &c) {
+				if (const std::optional<std::string> path =
+								r_self.list_row(c, screen(ui::OptionsTab::Video), 0, "List_03")) {
+					r_self.click_clip(c, screen(ui::OptionsTab::Video), *path);
+				}
+			},
+			"field_of_view" });
+	s.push_back({ "OPEN SCREEN ADJUST shows the screen adjust frame",
+			[](OptionsCheck &, const Ctx &c) {
+				return shown(c, kScreenAdjustPartition) && near(value(c, kSafeWidth), ui::kScreenAdjustDefault) &&
+						near(value(c, kSafeHeight), ui::kScreenAdjustDefault);
+			},
+			[](OptionsCheck &, const Ctx &c) {
+				tap(c, K::KEY_RIGHT, kScreenAdjustSteps);
+				tap(c, K::KEY_DOWN, kScreenAdjustSteps);
+			},
+			"screen_adjust" });
+	s.push_back({ "Right widens and Down lowers the safe area",
+			[](OptionsCheck &, const Ctx &c) {
+				return near(value(c, kSafeWidth), ui::kScreenAdjustMax) &&
+						near(value(c, kSafeHeight), ui::kScreenAdjustDefault - 0.05) &&
+						c.options.stats().safe_area_writes == 2 * uint64_t(kScreenAdjustSteps);
+			},
+			[](OptionsCheck &r_self, const Ctx &c) {
+				r_self.click_clip(c, kScreenAdjustPartition, in_screen("Button_01"));
+			},
+			"screen_adjusted" });
+	s.push_back({ "BACK returns to VIDEO",
+			[](OptionsCheck &, const Ctx &c) {
+				return !shown(c, kScreenAdjustPartition) && shown(c, screen(ui::OptionsTab::Video));
+			},
+			[](OptionsCheck &, const Ctx &c) { tap(c, K::KEY_ESCAPE); } });
 	s.push_back({ "leaving asks Save settings? for the field of view", popup,
 			[](OptionsCheck &, const Ctx &c) { tap(c, K::KEY_ENTER); } });
 	s.push_back({ "YES saves the field of view to the scratch settings file",
@@ -553,6 +605,8 @@ std::vector<OptionsCheck::Step> OptionsCheck::steps() {
 			},
 			[](OptionsCheck &r_self, const Ctx &c) {
 				r_self.check_file_value(c, kFieldOfView, r_self.fov_default_ + double(kOptionsCheckSteps));
+				r_self.check_file_value(c, kSafeWidth, ui::kScreenAdjustMax);
+				r_self.check_file_value(c, kSafeHeight, value(c, kSafeHeight));
 				tap(c, K::KEY_ESCAPE);
 			} });
 	s.push_back({ "the hip camera FOV follows the new setting",
@@ -561,6 +615,7 @@ std::vector<OptionsCheck::Step> OptionsCheck::steps() {
 			},
 			[](OptionsCheck &r_self, const Ctx &c) {
 				r_self.note_fov(c, "hip");
+				r_self.check_hud_safe(c);
 				c.io.hold_zoom(true);
 			} });
 	s.push_back({ "the ADS camera FOV stays the weapon's zoom level",

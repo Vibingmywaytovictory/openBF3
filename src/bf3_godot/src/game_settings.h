@@ -3,6 +3,7 @@
 #include "bf3/core/result.h"
 #include "bf3/core/ui/options.h"
 #include "bf3/core/ui/options_model.h"
+#include "bf3/core/ui/screen_adjust.h"
 #include "bf3/core/ui/settings_effects.h"
 
 #include <cstddef>
@@ -50,6 +51,7 @@ public:
 	core::Status frame(InputMapper &r_mapper, audio::MixerCore *p_mixer, const std::string &p_path);
 	size_t missed_inputs() const { return missed_inputs_; }
 	float hip_fov_deg() const { return hip_fov_deg_; }
+	bf3::core::ui::ScreenAdjustFractions safe_area() const { return safe_area_; }
 
 private:
 	GameSettings() = default;
@@ -63,6 +65,7 @@ private:
 	core::ui::VideoEffects video_shown_;
 	size_t missed_inputs_ = 0;
 	float hip_fov_deg_ = 70.0f;
+	bf3::core::ui::ScreenAdjustFractions safe_area_;
 };
 
 }

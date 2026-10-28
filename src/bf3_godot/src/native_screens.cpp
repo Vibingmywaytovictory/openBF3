@@ -268,6 +268,8 @@ bf3::core::Status Bf3UiScreens::open_entry(
 		rects.visible = scene->stage();
 	}
 	rects.original = scene->stage();
+	rects.safe_x = ui::hud_safe_offset(ui::kHudFootageSafeX, rects.visible.width(), safe_area_.width);
+	rects.safe_y = ui::hud_safe_offset(ui::kHudFootageSafeY, rects.visible.height(), safe_area_.height);
 	bf3::core::Result<std::unique_ptr<ui::HudScreen>> s =
 			ui::HudScreen::open(*scene, *assets->movies(), p_asset, assets->swf_fonts(), client_, rects, p_data);
 	if (!s) {
@@ -658,6 +660,8 @@ void Bf3UiScreens::step(double p_seconds) {
 			ui::HudStageRects rects = e->screen->stage_rects();
 			rects.visible = e->view->visible_rect();
 			rects.original = scene->stage();
+			rects.safe_x = ui::hud_safe_offset(ui::kHudFootageSafeX, rects.visible.width(), safe_area_.width);
+			rects.safe_y = ui::hud_safe_offset(ui::kHudFootageSafeY, rects.visible.height(), safe_area_.height);
 			e->screen->set_stage_rects(rects);
 		}
 		e->screen->refresh(model_);

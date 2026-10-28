@@ -10,6 +10,7 @@
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/minimap.h"
+#include "bf3/core/ui/screen_adjust.h"
 
 #include <godot_cpp/classes/font.hpp>
 #include <godot_cpp/classes/image.hpp>
@@ -83,6 +84,8 @@ public:
 	void set_level(const std::string &p_level);
 	void set_model(const bf3::core::ui::HudModel &p_model);
 	void set_vfov_deg(double p_deg);
+	void set_safe_area(const bf3::core::ui::ScreenAdjustFractions &p_safe) { safe_area_ = p_safe; }
+	std::optional<bf3::core::ui::HudStageRects> stage_rects() const;
 	void set_minimap_pose(const NativeHudMinimapPose &p_pose);
 	void set_manual(bool p_manual);
 	void set_world(Bf3LevelSession *p_session, const godot::Camera3D *p_camera, bool p_show);
@@ -168,6 +171,7 @@ private:
 	std::unique_ptr<bf3::core::ui::HudDamageIndicatorComp> damage_;
 	double message_clock_ = 0.0;
 	double vfov_deg_ = 0.0;
+	bf3::core::ui::ScreenAdjustFractions safe_area_;
 	NativeHudMinimapPose pose_;
 	double ekg_clock_ = 0.0;
 	HudBgPainter bg_;

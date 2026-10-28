@@ -56,6 +56,8 @@ inline constexpr std::string_view kFullscreenOption = "FullscreenEnabled";
 inline constexpr std::string_view kMonitorOption = "FullscreenScreen";
 inline constexpr std::string_view kVSyncOption = "VSync";
 inline constexpr std::string_view kFieldOfViewOption = "FieldOfView";
+inline constexpr std::string_view kSafeAreaWidthOption = "ScreenSafeAreaWidth";
+inline constexpr std::string_view kSafeAreaHeightOption = "ScreenSafeAreaHeight";
 
 inline constexpr size_t kMasterBusCount = size_t(audio::MasterBus::Unknown);
 
@@ -72,6 +74,8 @@ struct SettingsEffects {
 	std::array<float, kMasterBusCount> bus_gains{};
 	float look_scale = 1.0f;
 	float hip_fov_deg = 70.0f;
+	double safe_width = 0.95;
+	double safe_height = 0.95;
 	bool invert_look = false;
 	bool hold_to_zoom = true;
 	VideoEffects video;
