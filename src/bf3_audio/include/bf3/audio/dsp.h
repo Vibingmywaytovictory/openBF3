@@ -23,6 +23,9 @@ struct Biquad {
 	void reset() { z1 = z2 = 0.0f; }
 };
 
+void process_biquad_pair(
+		Biquad (&r_bq)[2], float *r_left, float *r_right, uint32_t p_frames, const BiquadCoefficients &p_target);
+
 struct OnePoleLowPass {
 	float a = 1.0f, y = 0.0f;
 	void set_cutoff(float p_rate, float p_frequency);

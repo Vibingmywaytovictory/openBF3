@@ -13,6 +13,9 @@ bool identity(const BiquadCoefficients &c) {
 	return c.b0 == 1.0f && c.b1 == 0.0f && c.b2 == 0.0f && c.a1 == 0.0f && c.a2 == 0.0f;
 }
 
+bool same_coefficients(const BiquadCoefficients &p_a, const BiquadCoefficients &p_b) {
+	return p_a.b0 == p_b.b0 && p_a.b1 == p_b.b1 && p_a.b2 == p_b.b2 && p_a.a1 == p_b.a1 && p_a.a2 == p_b.a2;
+}
 }
 
 float db_to_gain(float p_db) {
@@ -106,14 +109,15 @@ void Biquad::process(float *r_samples, uint32_t p_frames, const BiquadCoefficien
 	float s1 = z1, s2 = z2;
 	if (ramp) {
 		const float inv = 1.0f / float(p_frames);
-		const float db0 = (p_target.b0 - b0) * inv, db1 = (p_target.b1 - b1) * inv, db2 = (p_target.b2 - b2) * inv;
-		const float da1 = (p_target.a1 - a1) * inv, da2 = (p_target.a2 - a2) * inv;
+		const float db0 = p_target.b0 - c.b0, db1 = p_target.b1 - c.b1, db2 = p_target.b2 - c.b2;
+		const float da1 = p_target.a1 - c.a1, da2 = p_target.a2 - c.a2;
 		for (uint32_t i = 0; i < p_frames; ++i) {
-			b0 += db0;
-			b1 += db1;
-			b2 += db2;
-			a1 += da1;
-			a2 += da2;
+			const float along = float(i + 1) * inv;
+			b0 = c.b0 + db0 * along;
+			b1 = c.b1 + db1 * along;
+			b2 = c.b2 + db2 * along;
+			a1 = c.a1 + da1 * along;
+			a2 = c.a2 + da2 * along;
 			const float x = r_samples[i];
 			const float y = b0 * x + s1;
 			s1 = b1 * x - a1 * y + s2;
@@ -135,6 +139,68 @@ void Biquad::process(float *r_samples, uint32_t p_frames, const BiquadCoefficien
 	z1 = s1;
 	z2 = s2;
 	c = p_target;
+}
+
+void process_biquad_pair(
+		Biquad (&r_bq)[2], float *r_left, float *r_right, uint32_t p_frames, const BiquadCoefficients &p_target) {
+	if (p_frames == 0 || !same_coefficients(r_bq[0].c, r_bq[1].c)) {
+		r_bq[0].process(r_left, p_frames, p_target);
+		r_bq[1].process(r_right, p_frames, p_target);
+		return;
+	}
+	const BiquadCoefficients identity;
+	if (same_coefficients(r_bq[0].c, identity) && same_coefficients(p_target, identity)) {
+		r_bq[0].z1 = r_bq[0].z2 = r_bq[1].z1 = r_bq[1].z2 = 0.0f;
+		return;
+	}
+	const BiquadCoefficients &c = r_bq[0].c;
+	const bool ramp = !same_coefficients(c, p_target);
+	float b0 = c.b0, b1 = c.b1, b2 = c.b2, a1 = c.a1, a2 = c.a2;
+	float l1 = r_bq[0].z1, l2 = r_bq[0].z2, q1 = r_bq[1].z1, q2 = r_bq[1].z2;
+	if (ramp) {
+		const float inv = 1.0f / float(p_frames);
+		const float db0 = p_target.b0 - c.b0, db1 = p_target.b1 - c.b1, db2 = p_target.b2 - c.b2;
+		const float da1 = p_target.a1 - c.a1, da2 = p_target.a2 - c.a2;
+		for (uint32_t i = 0; i < p_frames; ++i) {
+			const float along = float(i + 1) * inv;
+			b0 = c.b0 + db0 * along;
+			b1 = c.b1 + db1 * along;
+			b2 = c.b2 + db2 * along;
+			a1 = c.a1 + da1 * along;
+			a2 = c.a2 + da2 * along;
+			const float x = r_left[i], u = r_right[i];
+			const float y = b0 * x + l1, w = b0 * u + q1;
+			l1 = b1 * x - a1 * y + l2;
+			q1 = b1 * u - a1 * w + q2;
+			l2 = b2 * x - a2 * y;
+			q2 = b2 * u - a2 * w;
+			r_left[i] = y;
+			r_right[i] = w;
+		}
+	} else {
+		for (uint32_t i = 0; i < p_frames; ++i) {
+			const float x = r_left[i], u = r_right[i];
+			const float y = b0 * x + l1, w = b0 * u + q1;
+			l1 = b1 * x - a1 * y + l2;
+			q1 = b1 * u - a1 * w + q2;
+			l2 = b2 * x - a2 * y;
+			q2 = b2 * u - a2 * w;
+			r_left[i] = y;
+			r_right[i] = w;
+		}
+	}
+	if (!std::isfinite(l1) || !std::isfinite(l2)) {
+		l1 = l2 = 0.0f;
+	}
+	if (!std::isfinite(q1) || !std::isfinite(q2)) {
+		q1 = q2 = 0.0f;
+	}
+	r_bq[0].z1 = l1;
+	r_bq[0].z2 = l2;
+	r_bq[1].z1 = q1;
+	r_bq[1].z2 = q2;
+	r_bq[0].c = p_target;
+	r_bq[1].c = p_target;
 }
 
 void OnePoleLowPass::set_cutoff(float p_rate, float p_frequency) {

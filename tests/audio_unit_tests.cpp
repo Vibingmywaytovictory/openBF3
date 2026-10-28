@@ -1457,6 +1457,40 @@ TEST_SUITE("audio-dsp") {
 		}
 		CHECK(worst < 0.45f);
 	}
+
+	TEST_CASE("a high-pass whose cutoff moves near 10 Hz block after block stays stable, single and paired") {
+		const std::pair<float, float> cutoffs[] = { { 10.174751f, 7.6397793f }, { 10.484704f, 9.2802942f },
+			{ 10.5f, 10.0f } };
+		for (const auto &[fa, fb] : cutoffs) {
+			const ba::BiquadCoefficients a =
+					ba::BiquadCoefficients::design(ba::BiquadShape::HighPass, 48000, fa, 0.70710678f, 0);
+			const ba::BiquadCoefficients b =
+					ba::BiquadCoefficients::design(ba::BiquadShape::HighPass, 48000, fb, 0.70710678f, 0);
+			ba::Biquad single;
+			ba::Biquad pair[2];
+			single.c = pair[0].c = pair[1].c = a;
+			float peak_single = 0.0f, peak_pair = 0.0f;
+			std::vector<float> x(512), l(512), r(512);
+			for (int k = 0; k < 60; ++k) {
+				for (uint32_t i = 0; i < 512; ++i) {
+					x[i] = (i / 64) % 2 == 0 ? 0.5f : -0.5f;
+				}
+				l = x;
+				r = x;
+				const ba::BiquadCoefficients &target = k % 2 == 0 ? b : a;
+				single.process(x.data(), 512, target);
+				ba::process_biquad_pair(pair, l.data(), r.data(), 512, target);
+				for (uint32_t i = 0; i < 512; ++i) {
+					peak_single = std::max(peak_single, std::fabs(x[i]));
+					peak_pair = std::max(peak_pair, std::max(std::fabs(l[i]), std::fabs(r[i])));
+				}
+			}
+			MESSAGE("high-pass " << fa << " / " << fb << " Hz: peak " << peak_single << " single, " << peak_pair
+								 << " paired");
+			CHECK(peak_single < 1.0f);
+			CHECK(peak_pair < 1.0f);
+		}
+	}
 	TEST_CASE("one-pole cutoff, gain ramp, pan law") {
 		ba::OnePoleLowPass lp;
 		lp.set_cutoff(48000, 1000);
