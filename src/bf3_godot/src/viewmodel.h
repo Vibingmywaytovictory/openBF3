@@ -7,10 +7,12 @@
 #include <godot_cpp/classes/skin.hpp>
 #include <godot_cpp/classes/standard_material3d.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
+#include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <array>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -47,6 +49,13 @@ struct ViewmodelFrame {
 	bool switch_back = false;
 };
 
+struct SightSurfaces {
+	size_t reticles = 0;
+	size_t reticles_textured = 0;
+	size_t lenses = 0;
+	size_t lenses_clear = 0;
+};
+
 ViewmodelFrame viewmodel_frame_from(const bf3::host::PresentedWeapon &p_weapon, const godot::Vector3 &p_eye, double p_yaw, double p_pitch, float p_dt,
 		bool p_sprinting, float p_speed, float p_view_yaw_rate, float p_view_pitch_rate);
 
@@ -71,6 +80,8 @@ public:
 	const bf3::anim::ViewmodelTuning &tuning() const { return tuning_; }
 	const bf3::render::ViewmodelItem *current_item() const;
 	std::vector<std::string> visible_attachments() const;
+	std::optional<godot::Vector2> sight_offset_px(const godot::Camera3D *p_camera) const;
+	SightSurfaces sight_surfaces() const;
 
 	void present(const ViewmodelFrame &p_frame, std::span<const bf3::anim::VmCue> p_cues, godot::Camera3D *p_camera);
 

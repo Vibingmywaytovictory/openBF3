@@ -819,6 +819,7 @@ add_test(NAME render.catalog_accessories COMMAND test_render_catalog_weapons --t
 set_tests_properties(render.catalog_accessories PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 add_test(NAME render.catalog_accessories_1p COMMAND test_render_catalog_weapons --test-suite=render-catalog-accessories-1p)
 set_tests_properties(render.catalog_accessories_1p PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+openbf3_cost(render.catalog_accessories_1p 2 11)
 add_test(NAME render.catalog_accessories_3p COMMAND test_render_catalog_weapons --test-suite=render-catalog-accessories-3p)
 set_tests_properties(render.catalog_accessories_3p PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 openbf3_cost(render.catalog_accessories_3p 1 6)

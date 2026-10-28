@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -139,6 +140,12 @@ struct ViewmodelAttachment {
 	std::vector<ViewmodelSlotLook> looks;
 };
 
+struct ViewmodelSight {
+	size_t attachment = 0;
+	anim::Vec3 local{};
+	anim::Vec3 at_zoom_pose{};
+};
+
 struct ViewmodelLocomotionClips;
 
 struct ViewmodelItem {
@@ -164,6 +171,7 @@ struct ViewmodelItem {
 	std::vector<std::unique_ptr<core::ant::AntPackage>> packages;
 	std::vector<ViewmodelAttachment> attachments;
 	std::vector<ViewmodelSlotLook> weapon_looks;
+	std::optional<ViewmodelSight> sight;
 	uint32_t hidden_surfaces = 0;
 	std::shared_ptr<const ViewmodelLocomotionClips> locomotion;
 	anim::VmThrowFlow throw_flow;

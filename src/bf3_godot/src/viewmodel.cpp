@@ -13,6 +13,7 @@
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/classes/time.hpp>
+#include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/math.hpp>
 
@@ -129,6 +130,55 @@ std::vector<std::string> Bf3Viewmodel::visible_attachments() const {
 		}
 	}
 	return out;
+}
+
+SightSurfaces Bf3Viewmodel::sight_surfaces() const {
+	SightSurfaces out;
+	if (item_ < 0 || size_t(item_) >= items_.size()) {
+		return out;
+	}
+	const ItemNodes &n = items_[size_t(item_)];
+	const std::optional<bf3::render::ViewmodelSight> &s = n.item->sight;
+	for (size_t a = 0; a < n.attachments.size(); ++a) {
+		const MeshInstance3D *mesh = n.attachments[a].mesh;
+		if (!mesh->is_visible() || mesh->get_mesh().is_null()) {
+			continue;
+		}
+		for (int32_t i = 0; i < mesh->get_mesh()->get_surface_count(); ++i) {
+			const Ref<StandardMaterial3D> m = mesh->get_active_material(i);
+			if (m.is_null() || m->get_transparency() != BaseMaterial3D::TRANSPARENCY_ALPHA) {
+				continue;
+			}
+			const bool textured = m->get_texture(BaseMaterial3D::TEXTURE_ALBEDO).is_valid();
+			if (m->get_shading_mode() != BaseMaterial3D::SHADING_MODE_UNSHADED) {
+				++out.lenses;
+				out.lenses_clear += !textured && m->get_albedo().a < 1.0f ? 1u : 0u;
+			} else if (s && s->attachment == a) {
+				++out.reticles;
+				out.reticles_textured += textured ? 1u : 0u;
+			}
+		}
+	}
+	return out;
+}
+
+std::optional<Vector2> Bf3Viewmodel::sight_offset_px(const Camera3D *p_camera) const {
+	if (p_camera == nullptr || item_ < 0 || size_t(item_) >= items_.size()) {
+		return std::nullopt;
+	}
+	const ItemNodes &n = items_[size_t(item_)];
+	const std::optional<bf3::render::ViewmodelSight> &s = n.item->sight;
+	if (!s || s->attachment >= n.attachments.size() || !n.attachments[s->attachment].mesh->is_visible()) {
+		return std::nullopt;
+	}
+	const Vector3 world = n.attachments[s->attachment].mesh->get_global_transform().xform(to_godot(s->local));
+	const Vector3 eye = p_camera->get_global_transform().affine_inverse().xform(world);
+	if (eye.z >= 0.0f || viewmodel_fov_ <= 0.0f) {
+		return std::nullopt;
+	}
+	const real_t height = p_camera->get_viewport()->get_visible_rect().size.y;
+	const real_t focal = height * 0.5f / real_t(std::tan(Math::deg_to_rad(double(viewmodel_fov_)) * 0.5));
+	return Vector2(eye.x / -eye.z * focal, -eye.y / -eye.z * focal);
 }
 
 namespace {
@@ -397,7 +447,12 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 	const Transform3D cam = p_camera ? p_camera->get_global_transform() : Transform3D();
 	const Transform3D joint = xform_to_godot(model_[size_t(camera_joint_)]);
 	const Transform3D turn(Basis(Vector3(0, 1, 0), real_t(Math::PI)), Vector3());
-	skeleton_->set_global_transform(cam * xform_to_godot(output_.weapon_offset) * turn * joint.affine_inverse());
+	Transform3D sight;
+	if (const std::optional<bf3::render::ViewmodelSight> &s = items_[size_t(item_)].item->sight) {
+		sight.origin = Vector3(-s->at_zoom_pose.x, -s->at_zoom_pose.y, 0.0f) * ads_frame_.blend;
+	}
+	skeleton_->set_global_transform(
+			cam * xform_to_godot(output_.weapon_offset) * turn * sight * joint.affine_inverse());
 	for (size_t b = 0; b < pose_.joints.size() && b < size_t(skeleton_->get_bone_count()); ++b) {
 		skeleton_->set_bone_pose_rotation(int32_t(b), to_godot(pose_.joints[b].q));
 		skeleton_->set_bone_pose_position(int32_t(b), to_godot(pose_.joints[b].t));

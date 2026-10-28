@@ -325,6 +325,43 @@ void clip_model(const anim::Skeleton &p_rig, const anim::LocalPose &p_base, cons
 	anim::model_pose(p_rig, pose, r_model);
 }
 
+std::optional<ViewmodelSight> optic_sight(const anim::Skeleton &p_rig, const ViewmodelItem &p_item) {
+	const ViewmodelClip &zoom = p_item.clips[size_t(Role::ZoomIdle)];
+	const int32_t camera = p_rig.find("CameraJoint");
+	if (zoom.source != Source::Clip || camera < 0) {
+		return std::nullopt;
+	}
+	std::vector<anim::Xform> model;
+	clip_model(p_rig, anim::rest_pose(p_rig), zoom, 0.0f, model);
+	const anim::Xform eye = anim::xform_inverse(model[size_t(camera)]);
+	std::optional<ViewmodelSight> out;
+	float widest = 0.0f;
+	for (size_t i = 0; i < p_item.attachments.size(); ++i) {
+		const ViewmodelAttachment &a = p_item.attachments[i];
+		if (!a.zoom || a.skinned || a.rig_bone < 0 || size_t(a.rig_bone) >= model.size() ||
+				a.socket_unlock.starts_with(kDefaultSocketUnlockPrefix)) {
+			continue;
+		}
+		const anim::Mat34 m =
+				anim::mat_mul(anim::mat_from_xform(anim::xform_mul(eye, model[size_t(a.rig_bone)])), a.transform);
+		for (const PreparedSurface &s : a.part.prepared.surfaces) {
+			if (s.material_index >= a.looks.size() || !a.looks[s.material_index].blend ||
+					!a.looks[s.material_index].unlit) {
+				continue;
+			}
+			const float width = (s.aabb_max.x - s.aabb_min.x) + (s.aabb_max.y - s.aabb_min.y);
+			if (width <= widest) {
+				continue;
+			}
+			widest = width;
+			const anim::Vec3 centre{ (s.aabb_min.x + s.aabb_max.x) * 0.5f, (s.aabb_min.y + s.aabb_max.y) * 0.5f,
+				(s.aabb_min.z + s.aabb_max.z) * 0.5f };
+			out = ViewmodelSight{ i, centre, anim::mat_point(m, centre) };
+		}
+	}
+	return out;
+}
+
 double driven_diff(const std::vector<anim::Xform> &p_a, const std::vector<anim::Xform> &p_b, const anim::ClipTracks &p_tracks) {
 	std::vector<bool> mask(p_a.size(), false);
 	for (const int32_t b : p_tracks.rotation_bone) {
@@ -1016,6 +1053,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 			for (ViewmodelAttachment &a : item.attachments) {
 				a.looks = looks_of(a.part);
 			}
+			item.sight = optic_sight(set->rig, item);
 		}
 	}
 

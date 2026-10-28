@@ -43,6 +43,10 @@ using Source = render::ViewmodelClipSource;
 
 constexpr const char *kLevel = "Win32/Levels/MP_Subway/MP_Subway";
 
+constexpr float kSightOffsetMeasured = 0.06f;
+constexpr float kSightMeasuredMetres = 0.001f;
+constexpr float kSightRatioSpread = 0.3f;
+
 const std::set<std::string> kCurveFireWeapons{ "weapons/m40a5/u_m40a5", "weapons/model98b/u_m98b",
 	"weapons/sv98/u_sv98", "weapons/xp1_l96/u_l96", "weapons/xp2_jng90/u_jng90" };
 
@@ -176,6 +180,35 @@ std::string crowd_part_error(const render::SoldierAssets &p_assets, const render
 	return {};
 }
 
+uint32_t accessory_ending(const host::LoadoutItem &p_item, size_t p_slot, std::string_view p_suffix) {
+	for (size_t i = 0; i < p_item.accessory_unlocks[p_slot].size(); ++i) {
+		if (p_item.accessory_unlocks[p_slot][i].ends_with(p_suffix)) {
+			return p_item.accessories[p_slot][i];
+		}
+	}
+	return 0;
+}
+
+std::array<uint32_t, host::kLoadoutAccessories> m16_acog_foregrip_suppressor(const host::LoadoutItem &p_m16) {
+	return { accessory_ending(p_m16, 0, "_acog"), accessory_ending(p_m16, 1, "_foregrip"),
+		accessory_ending(p_m16, 2, "_sound_suppressor"), 0 };
+}
+
+const host::LoadoutItem *catalog_primary(
+		const host::LoadoutCatalog &p_catalog, std::string_view p_unlock, uint8_t &r_team) {
+	for (uint8_t team = 1; team <= 2; ++team) {
+		for (uint8_t k = 0; k < host::kKitCount; ++k) {
+			const host::LoadoutKit *kit = p_catalog.kit(team, k);
+			for (size_t i = 0; kit != nullptr && i < kit->slots[0].size(); ++i) {
+				if (kit->slots[0][i].unlock == p_unlock) {
+					r_team = team;
+					return &kit->slots[0][i];
+				}
+			}
+		}
+	}
+	return nullptr;
+}
 }
 
 TEST_SUITE("render-catalog-weapons") {
@@ -659,16 +692,7 @@ TEST_SUITE("render-catalog-accessories-1p") {
 		REQUIRE_MESSAGE(sources.ok(), (sources.ok() ? "" : sources.error().message));
 		const host::LoadoutItem *m16 = level.loadouts.kit(1, 0)->find(0, level.loadouts.kit(1, 0)->defaults[0]);
 		REQUIRE(m16 != nullptr);
-		const auto pick = [&](size_t p_slot, std::string_view p_suffix) {
-			for (size_t i = 0; i < m16->accessory_unlocks[p_slot].size(); ++i) {
-				if (m16->accessory_unlocks[p_slot][i].ends_with(p_suffix)) {
-					return m16->accessories[p_slot][i];
-				}
-			}
-			return 0u;
-		};
-		const std::array<uint32_t, host::kLoadoutAccessories> picks{ pick(0, "_acog"), pick(1, "_foregrip"),
-			pick(2, "_sound_suppressor"), 0 };
+		const std::array<uint32_t, host::kLoadoutAccessories> picks = m16_acog_foregrip_suppressor(*m16);
 		REQUIRE(picks[0] != 0);
 		REQUIRE(picks[1] != 0);
 		REQUIRE(picks[2] != 0);
@@ -747,16 +771,7 @@ TEST_SUITE("render-catalog-accessories-3p") {
 		REQUIRE_MESSAGE(ebx.ok(), (ebx.ok() ? "" : ebx.error().message));
 		const host::LoadoutItem *m16 = level.loadouts.kit(1, 0)->find(0, level.loadouts.kit(1, 0)->defaults[0]);
 		REQUIRE(m16 != nullptr);
-		const auto pick = [&](size_t p_slot, std::string_view p_suffix) {
-			for (size_t i = 0; i < m16->accessory_unlocks[p_slot].size(); ++i) {
-				if (m16->accessory_unlocks[p_slot][i].ends_with(p_suffix)) {
-					return m16->accessories[p_slot][i];
-				}
-			}
-			return 0u;
-		};
-		const std::array<uint32_t, host::kLoadoutAccessories> picks{ pick(0, "_acog"), pick(1, "_foregrip"),
-			pick(2, "_sound_suppressor"), 0 };
+		const std::array<uint32_t, host::kLoadoutAccessories> picks = m16_acog_foregrip_suppressor(*m16);
 		const auto load = [&](const std::array<uint32_t, host::kLoadoutAccessories> &p_picks) {
 			render::CrowdWeaponSpec item = godot_side::catalog_crowd_spec(level, m16->def);
 			const host::LoadoutAccessorySet set = host::loadout_accessory_set(*m16, p_picks);
@@ -809,6 +824,135 @@ TEST_SUITE("render-catalog-accessories-3p") {
 			CHECK(s.material_index < b.materials.slots.size());
 			CHECK(s.bones.size() == s.vertex_count() * 4);
 		}
+		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
+		CHECK(diff.clean());
+	}
+}
+
+TEST_SUITE("render-catalog-accessories-1p") {
+	TEST_CASE("catalog accessories: every optic of the M416, SV98 and M16A4 has a sight picture, an unlit blended "
+			  "surface "
+			  "with its shader's colour texture, which the viewmodel centres at the ZoomPose; the optic's "
+			  "WeaponZoomedOffsetY has the sign of that move and a fixed ratio to it per weapon") {
+		core::InstallReader reader;
+		if (!reader.locate({})) {
+			test::skip_install_case(reader.describe().c_str());
+			return;
+		}
+		const core::InstallSnapshot before = reader.snapshot();
+		core::Result<std::shared_ptr<core::Install>> install = core::Install::open(reader);
+		REQUIRE(install.ok());
+		auto gunplay = host::load_gunplay_level(
+				*install, "MP_Subway", "TeamDeathMatch0", host::GunplayLoadOptions{ true, true });
+		REQUIRE_MESSAGE(gunplay.ok(), (gunplay.ok() ? "" : gunplay.error().message));
+		const host::GunplayLevel &level = **gunplay;
+		core::Result<std::unique_ptr<render::ViewmodelSources>> sources =
+				render::open_viewmodel_sources(reader, kLevel, nullptr);
+		REQUIRE_MESSAGE(sources.ok(), (sources.ok() ? "" : sources.error().message));
+		const core::EbxLibrary &lib = *(*sources)->ebx;
+		struct OpticLoad {
+			size_t weapon = 0;
+			uint8_t team = 0;
+			const host::LoadoutItem *item = nullptr;
+			size_t index = 0;
+			std::unique_ptr<render::ViewmodelSet> set;
+			std::string error;
+		};
+		const std::array<std::string_view, 3> weapons{ "weapons/m416/u_m416", "weapons/sv98/u_sv98",
+			"weapons/m16a4/u_m16a4" };
+		std::array<std::map<std::string, float>, 3> offsets;
+		std::vector<OpticLoad> loads;
+		for (size_t w = 0; w < weapons.size(); ++w) {
+			uint8_t team = 0;
+			const host::LoadoutItem *item = catalog_primary(level.loadouts, weapons[w], team);
+			REQUIRE(item != nullptr);
+			core::Result<std::vector<core::gameplay::WeaponUnlockModifier>> mods =
+					core::gameplay::weapon_unlock_modifiers(lib, item->unlock, "WeaponAnimationConfigurationModifier");
+			REQUIRE(mods.ok());
+			for (const core::gameplay::WeaponUnlockModifier &m : *mods) {
+				const std::optional<core::EbxValue> config = m.modifier.get("AnimationConfiguration");
+				const std::optional<core::EbxStruct> s = config ? config->as_struct() : std::nullopt;
+				const std::optional<core::EbxInstance> offset =
+						s ? lib.follow(*s, "WeaponOffsetModuleData") : std::nullopt;
+				const std::optional<core::EbxValue> y = offset ? offset->get("WeaponZoomedOffsetY") : std::nullopt;
+				if (y && y->as_f32()) {
+					offsets[w][m.unlock] = *y->as_f32();
+				}
+			}
+			for (size_t i = 0; i < item->accessories[0].size(); ++i) {
+				if (!item->accessory_unlocks[0][i].starts_with(render::kDefaultSocketUnlockPrefix)) {
+					loads.push_back(OpticLoad{ w, team, item, i, {}, {} });
+				}
+			}
+		}
+		core::parallel_for(loads.size(), [&](size_t i) {
+			OpticLoad &l = loads[i];
+			render::ViewmodelSetSpec spec =
+					render::team_viewmodel_items(l.team, std::span<const std::string>(&l.item->unlock, 1));
+			spec.superbundle = kLevel;
+			const host::LoadoutAccessorySet set =
+					host::loadout_accessory_set(*l.item, { l.item->accessories[0][l.index], 0, 0, 0 });
+			spec.items[0].accessories = render::WeaponAccessories{ set.active, set.listed };
+			core::Result<std::unique_ptr<render::ViewmodelSet>> vs =
+					render::load_viewmodel_set(**sources, spec, nullptr);
+			if (vs) {
+				l.set = std::move(*vs);
+			} else {
+				l.error = vs.error().message;
+			}
+		});
+		std::array<std::vector<float>, 3> ratios;
+		std::array<std::string, 3> lines;
+		for (const OpticLoad &l : loads) {
+			const std::string &optic = l.item->accessory_unlocks[0][l.index];
+			REQUIRE_MESSAGE(l.set != nullptr, optic, ": ", l.error);
+			const render::ViewmodelItem &vm = l.set->items[0];
+			CHECK_MESSAGE(vm.sight.has_value(), optic, " has no sight picture");
+			size_t textured = 0, sights = 0, roles = 0;
+			for (const render::ViewmodelAttachment &a : vm.attachments) {
+				for (const render::ViewmodelSlotLook &look : a.looks) {
+					if (!look.blend || !look.unlit) {
+						continue;
+					}
+					++sights;
+					const render::PreparedTexture *t = l.set->texture(look.color_texture, look.color_role);
+					textured += !look.color_texture.empty() && t != nullptr ? 1u : 0u;
+					roles += (look.blend_mode == render::ViewmodelBlend::Multiply) ==
+									(look.color_role == render::TextureRole::Color)
+							? 1u
+							: 0u;
+				}
+			}
+			CHECK_MESSAGE(sights > 0, optic);
+			CHECK_MESSAGE(textured == sights, optic, ": ", textured, " of ", sights, " sight surfaces textured");
+			CHECK_MESSAGE(roles == sights, optic, ": ", roles, " of ", sights,
+					" sight surfaces sample their texture as colour exactly when they multiply");
+			const auto offset = offsets[l.weapon].find(optic);
+			if (!vm.sight || offset == offsets[l.weapon].end()) {
+				continue;
+			}
+			char b[160];
+			std::snprintf(b, sizeof(b), " %s y %.4f at z %.3f, offset %.3f;",
+					optic.substr(optic.rfind('/') + 1).c_str(), double(vm.sight->at_zoom_pose.y),
+					double(vm.sight->at_zoom_pose.z), double(offset->second));
+			lines[l.weapon] += b;
+			if (std::fabs(offset->second) >= kSightOffsetMeasured &&
+					std::fabs(vm.sight->at_zoom_pose.y) >= kSightMeasuredMetres) {
+				CHECK_MESSAGE((vm.sight->at_zoom_pose.y > 0.0f) == (offset->second < 0.0f), optic);
+				ratios[l.weapon].push_back(vm.sight->at_zoom_pose.y / -offset->second);
+			}
+		}
+		for (size_t w = 0; w < weapons.size(); ++w) {
+			std::vector<float> &r = ratios[w];
+			REQUIRE(r.size() >= 5);
+			std::sort(r.begin(), r.end());
+			const float median = r[r.size() / 2];
+			MESSAGE(weapons[w], ": sight centre over -WeaponZoomedOffsetY, median ", median, " of ", r.size(),
+					", from ", r.front(), " to ", r.back(), ";", lines[w]);
+			CHECK(r.front() > median * (1.0f - kSightRatioSpread));
+			CHECK(r.back() < median * (1.0f + kSightRatioSpread));
+		}
+		CHECK(loads.size() >= 30);
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
 		CHECK(diff.clean());
 	}
