@@ -68,6 +68,18 @@ public:
 	}
 
 	void initialize(HudWidgetHost &r_host, const HudWidgetInit &p_init) override {
+		if (const As2Value *v = r_host.construct_param("m_tabsDataStr")) {
+			tabs_text_ = v->to_string();
+		}
+		if (const As2Value *v = r_host.construct_param("m_selectedTab")) {
+			default_selected_ = v->to_number();
+		}
+		if (const As2Value *v = r_host.construct_param("m_tabSpacing")) {
+			tab_spacing_ = v->to_number();
+		}
+		if (const As2Value *v = r_host.construct_param("m_textSize")) {
+			text_size_ = v->to_string();
+		}
 		if (const std::string *v = non_empty_property(p_init, "HideOnConsole")) {
 			hide_on_console_ = *v == "true";
 		}
