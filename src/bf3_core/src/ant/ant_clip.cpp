@@ -456,19 +456,6 @@ bool copy_ints(const GdArray &p_array, std::vector<int64_t> &r_out) {
 	return true;
 }
 
-bool copy_floats(const GdArray &p_array, std::vector<float> &r_out) {
-	if (!p_array.valid()) {
-		return false;
-	}
-	r_out.resize(p_array.size());
-	for (uint32_t i = 0; i < p_array.size(); ++i) {
-		if (!p_array.read_float(i, r_out[i])) {
-			return false;
-		}
-	}
-	return true;
-}
-
 AntResult decode_curve_object(const GdStruct &p_clip, DecodedClip &r_out) {
 	uint32_t nq = 0, nv = 0, nf = 0;
 	if (!read_count(p_clip, "NumRotations", nq) || !read_count(p_clip, "NumVectors", nv) ||
@@ -480,8 +467,11 @@ AntResult decode_curve_object(const GdStruct &p_clip, DecodedClip &r_out) {
 	}
 	std::vector<float> values, consts;
 	std::vector<int64_t> keys, const_offsets, channel_offsets;
-	if (!copy_floats(p_clip.array("Values"), values) || !copy_floats(p_clip.array("Consts"), consts) ||
-			!copy_ints(p_clip.array("Keys"), keys) || !copy_ints(p_clip.array("ConstOffsets"), const_offsets) ||
+	const GdArray value_array = p_clip.array("Values");
+	const GdArray const_array = p_clip.array("Consts");
+	if (!value_array.valid() || !const_array.valid() || !value_array.copy_f32(values) ||
+			!const_array.copy_f32(consts) || !copy_ints(p_clip.array("Keys"), keys) ||
+			!copy_ints(p_clip.array("ConstOffsets"), const_offsets) ||
 			!copy_ints(p_clip.array("ChannelOffsets"), channel_offsets)) {
 		return AntResult::fail(AntStatus::Malformed, "Curve: bad array field");
 	}
