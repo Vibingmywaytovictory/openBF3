@@ -1613,9 +1613,10 @@ TEST_SUITE("audio-game") {
 		check_game_unchanged(*f);
 	}
 
-	TEST_CASE("catalog audio: every CUSTOMIZE weapon of Metro TDM's loadout catalog gets a weapon audio entry; a patch "
-			  "with no DefaultStartEvent fires its Fire event per shot (DAO-12, Jackhammer); five shotgun patches have "
-			  "neither") {
+	TEST_CASE(
+			"catalog audio: every CUSTOMIZE weapon of Metro TDM's loadout catalog gets a weapon audio entry; a weapon "
+			"patch with no DefaultStartEvent plays the first of Fire, Step and Melee its graph receives once per shot, "
+			"Step for the seven shotguns, and that shot is heard") {
 		GameFixture *f = need_game_install();
 		if (f == nullptr) {
 			return;
@@ -1654,11 +1655,45 @@ TEST_SUITE("audio-game") {
 		for (const uint16_t d : catalog) {
 			CHECK_MESSAGE(listed.count(d) == 1, level.defs[d].variant);
 		}
-		CHECK(unbound ==
-				std::set<std::string>{ "weapons/m1014/u_m1014", "weapons/remington870/u_870",
-						"weapons/saiga20k/u_saiga_20k", "weapons/usas-12/u_usas-12", "weapons/xp2_spas12/u_spas12" });
-		CHECK(a->table->failed == unbound.size());
+		CHECK(unbound.empty());
+		CHECK(a->table->failed == 0);
 		CHECK(a->waves_missing == 0);
+		std::set<std::string> stepped;
+		ba::MixerConfig mc;
+		mc.max_instances = 4;
+		for (const ba::KitAudioItem &item : a->kits.items) {
+			const ba::WeaponAudioDef &d = a->table->defs[item.def];
+			if (d.form != ba::WeaponAudioForm::OneShot || d.program->start_event != 0 || item.one_shot) {
+				continue;
+			}
+			CHECK_MESSAGE(ba::event_reaches_graph(*d.program, d.one_shot_event), item.variant);
+			if (d.one_shot_event != ba::kHashStep) {
+				continue;
+			}
+			stepped.insert(item.variant);
+			CHECK_MESSAGE(!ba::event_reaches_graph(*d.program, ba::kHashFire), item.variant);
+			ba::MixerCore mixer(mc);
+			ba::OneShotPool pool(1);
+			ba::OneShotOptions o;
+			o.event = d.one_shot_event;
+			o.set_first_person = true;
+			o.first_person = true;
+			REQUIRE(pool.start(mixer, d.program, a->bank, f->tuning, 7, ba::EmitterState{}, ba::ListenerState{}, 0, o));
+			std::vector<float> block(2 * ba::kBlockFrames);
+			float peak = 0.0f;
+			for (uint32_t b = 0; b < ba::kMixRate / 2 / ba::kBlockFrames; ++b) {
+				mixer.mix(block.data(), ba::kBlockFrames);
+				for (const float v : block) {
+					peak = std::max(peak, std::fabs(v));
+				}
+			}
+			MESSAGE(item.variant, " Step shot peak ", peak);
+			CHECK_MESSAGE(peak > 1e-3f, item.variant);
+		}
+		CHECK(stepped ==
+				std::set<std::string>{ "weapons/m1014/u_m1014", "weapons/remington870/u_870",
+						"weapons/saiga20k/u_saiga_20k", "weapons/usas-12/u_usas-12", "weapons/xp2_spas12/u_spas12",
+						"weapons/dao-12/u_dao-12", "weapons/xp1_jackhammer/u_jackhammer" });
 		check_game_unchanged(*f);
 	}
 

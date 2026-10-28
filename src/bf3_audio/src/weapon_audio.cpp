@@ -1,6 +1,7 @@
 #include "bf3/audio/weapon_audio.h"
 
 #include "bf3/audio/audio_load.h"
+#include "bf3/core/audio/sound_ports.h"
 #include "bf3/core/util/finite.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
@@ -13,6 +14,7 @@
 namespace bf3::audio {
 
 namespace ca = core::audio;
+namespace cp = core::audio::port;
 namespace sw = sim::weapons;
 
 namespace {
@@ -35,11 +37,45 @@ bool has_event(const ca::SoundProgram &p_program, uint32_t p_hash) {
 	return false;
 }
 
+bool register_read(const ca::SoundProgram &p_program, const ca::SoundNode &p_node, uint16_t p_reg) {
+	if (p_node.type == ca::SoundNodeType::ReceiveEntry) {
+		return p_program.ports[p_node.ports_begin + cp::ReceiveSource].reg == p_reg &&
+				p_program.ports[p_node.ports_begin + cp::ReceiveOut].reg != ca::kNoRegister;
+	}
+	for (uint32_t i = 0; i < p_node.ports_count; ++i) {
+		if (p_program.ports[p_node.ports_begin + i].reg == p_reg) {
+			return true;
+		}
+	}
+	return false;
+}
+
+}
+
+bool event_reaches_graph(const ca::SoundProgram &p_program, uint32_t p_hash) {
+	for (const ca::SoundInput &in : p_program.inputs) {
+		if (!in.event || in.name_hash != p_hash) {
+			continue;
+		}
+		for (const std::vector<ca::SoundNode> *nodes : { &p_program.nodes, &p_program.child_nodes }) {
+			for (const ca::SoundNode &n : *nodes) {
+				if (register_read(p_program, n, in.reg)) {
+					return true;
+				}
+			}
+		}
+	}
+	return false;
 }
 
 uint32_t one_shot_event_of(const ca::SoundProgram &p_program) {
 	if (p_program.start_event != 0) {
 		return p_program.start_event;
+	}
+	for (const uint32_t hash : kOneShotEvents) {
+		if (event_reaches_graph(p_program, hash)) {
+			return hash;
+		}
 	}
 	if (has_event(p_program, kHashFire)) {
 		return kHashFire;

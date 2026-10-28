@@ -95,7 +95,10 @@ std::vector<std::string> kit_audio_report(const KitAudioSources &p_sources, cons
 				break;
 			case WeaponAudioForm::OneShot:
 				std::snprintf(buf, sizeof(buf), "one-shot (event %u%s)", d.one_shot_event,
-						d.one_shot_event == kHashFire ? " Fire" : (d.one_shot_event == kHashMelee ? " Melee" : ""));
+						d.one_shot_event == kHashFire			 ? " Fire"
+								: d.one_shot_event == kHashStep	 ? " Step"
+								: d.one_shot_event == kHashMelee ? " Melee"
+																 : "");
 				line += buf;
 				break;
 			default:

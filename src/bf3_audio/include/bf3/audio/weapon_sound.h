@@ -10,6 +10,7 @@
 namespace bf3::audio {
 
 inline constexpr uint32_t kHashFire = 2088671869u;
+inline constexpr uint32_t kHashStep = 1968287961u;
 inline constexpr uint32_t kHashIsFirstPerson = 824639024u;
 inline constexpr uint32_t kHashReload = 3294210644u;
 inline constexpr uint32_t kHashAreaType = 3772263626u;

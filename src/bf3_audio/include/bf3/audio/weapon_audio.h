@@ -14,6 +14,7 @@
 #include "bf3/sim/weapons/sim_time.h"
 #include "bf3/sim/weapons/weapon_rng.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -108,6 +109,10 @@ struct WeaponSoundSource {
 };
 
 core::Result<WeaponAudioTable> load_weapon_audio(const core::EbxResolver &p_db, std::span<const WeaponSoundSource> p_defs, uint32_t p_mix_rate);
+
+inline constexpr std::array<uint32_t, 3> kOneShotEvents{ kHashFire, kHashStep, kHashMelee };
+
+bool event_reaches_graph(const core::audio::SoundProgram &p_program, uint32_t p_hash);
 
 uint32_t one_shot_event_of(const core::audio::SoundProgram &p_program);
 
