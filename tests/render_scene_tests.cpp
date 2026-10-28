@@ -10,6 +10,7 @@
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
 #include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/text.h"
 #include "bf3/render/level_scene.h"
 #include "test_support.h"
 
@@ -550,8 +551,8 @@ TEST_SUITE("render-scene") {
 		REQUIRE(census.ok());
 		const double seconds_census = seconds_since(t0);
 		CHECK(census->placements == 10873);
-		CHECK(census->scene_meshes == 842);
-		CHECK(census->scene_instances == 10571);
+		CHECK(census->scene_meshes == 843);
+		CHECK(census->scene_instances == 10572);
 
 		Result<LevelScenePlan> plan = plan_level_scene(lvl, **world, *census);
 		REQUIRE(plan.ok());
@@ -559,7 +560,7 @@ TEST_SUITE("render-scene") {
 		std::printf("render.scene plan: load + traverse %.3f s, census %.3f s, plan %.3f s\n", seconds_load, seconds_census, p.seconds);
 
 		check_requests_match_m0(*census, p.requests);
-		CHECK(p.requests.size() == 619);
+		CHECK(p.requests.size() == 620);
 
 		size_t kept = 0, start_hidden = 0;
 		std::vector<size_t> shown(census->meshes.size(), 0);
@@ -583,11 +584,11 @@ TEST_SUITE("render-scene") {
 					"start-hidden), %zu materials, %zu textures, %zu terrains, %zu failures\n",
 				p.requests.size(), p.meshes.size(), kept, expected_meshes, p.instances.size(), census->instances.size(), start_hidden, p.materials.size(),
 				p.textures.size(), p.terrains.size(), p.failures.size());
-		CHECK(kept == 840);
-		CHECK(census->instances.size() == 10569);
+		CHECK(kept == 841);
+		CHECK(census->instances.size() == 10570);
 		CHECK(start_hidden == 64);
 		CHECK(p.meshes.size() == expected_meshes);
-		CHECK(p.meshes.size() <= 840);
+		CHECK(p.meshes.size() <= 841);
 		CHECK(p.instances.size() == census->instances.size() - start_hidden);
 		CHECK(p.terrains.size() == 1);
 		for (const auto &[item, error] : p.failures) {
@@ -647,6 +648,30 @@ TEST_SUITE("render-scene") {
 				CHECK(p.textures[size_t(m.normal)].role == TextureRole::Normal);
 			}
 		}
+		size_t backdrop_slots = 0, lightcone_slots = 0;
+		for (const SceneMeshPlan &m : p.meshes) {
+			for (uint32_t s : m.surface_materials) {
+				if (s == kSceneUndrawnMaterial) {
+					continue;
+				}
+				const SceneMaterialPlan &mat = p.materials[s];
+				const std::string shader = to_lower_ascii(mat.slot.shader);
+				const std::string albedo =
+						to_lower_ascii(mat.albedo >= 0 ? p.textures[size_t(mat.albedo)].name : std::string());
+				if (shader == "objects/ui_characterbackdrop/shaders/charbackdrop_01") {
+					std::printf("render.scene plan: backdrop slot albedo %s, blend %d, shader in the database %d\n",
+							albedo.c_str(), int(mat.blend), int(mat.look && mat.look->shader_in_database));
+					CHECK(albedo.find("characterbackdrop") != std::string::npos);
+					CHECK(!mat.blend);
+					CHECK((mat.look && mat.look->shader_in_database));
+					backdrop_slots += m.instances;
+				} else if (shader == "objects/ui_characterbackdrop/shaders/lightcone_particles_01") {
+					lightcone_slots += m.instances;
+				}
+			}
+		}
+		CHECK(backdrop_slots >= 1);
+		CHECK(lightcone_slots == 0);
 		size_t no_textures = 0;
 		std::map<std::string, size_t> unlit_sets;
 		for (const SceneMaterialPlan &m : p.materials) {

@@ -20,7 +20,8 @@ constexpr size_t kWorldMaxPlacements = 4;
 constexpr size_t kMaxComponents = 4096;
 
 constexpr size_t kMaxResName = 1024;
-constexpr std::string_view kUndrawnShaders[5] = { "invisible", "occluder", "shadowmesh", "ui_characterbackdrop", "ui_menu" };
+constexpr std::string_view kUndrawnShaders[5] = { "invisible", "occluder", "shadowmesh", "lightcone_particles",
+	"ui_menu" };
 
 using Vec3f = core::Vec3;
 using Mat3 = std::array<Vec3f, 3>;

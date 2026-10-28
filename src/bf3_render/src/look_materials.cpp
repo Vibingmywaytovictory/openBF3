@@ -48,7 +48,8 @@ constexpr std::string_view kOverlayWords[] = { "puddle", "waterpuddle" };
 constexpr std::string_view kFoliageWords[] = { "vegetation", "foliage", "leaf", "leaves", "bush", "grass", "ivy", "vine" };
 constexpr std::string_view kBackdropWords[] = { "backdrop" };
 constexpr std::string_view kGlassWords[] = { "glass", "window" };
-constexpr std::string_view kUndrawnShaders[] = { "invisible", "occluder", "shadowmesh", "ui_characterbackdrop", "ui_menu" };
+constexpr std::string_view kUndrawnShaders[] = { "invisible", "occluder", "shadowmesh", "lightcone_particles",
+	"ui_menu" };
 
 constexpr std::string_view kNameAlphaWords[] = { "foliage", "vegetation", "alphatest", "alpha_test", "fence", "decal", "grass", "leaf", "leaves",
 	"tree", "bush", "ivy", "hair", "cutout", "masked" };

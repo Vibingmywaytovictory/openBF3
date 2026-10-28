@@ -42,7 +42,8 @@ using Clock = std::chrono::steady_clock;
 using scene_internal::Mat3;
 using Vec3 = core::Vec3;
 
-constexpr std::string_view kUndrawnShaders[5] = { "invisible", "occluder", "shadowmesh", "ui_characterbackdrop", "ui_menu" };
+constexpr std::string_view kUndrawnShaders[5] = { "invisible", "occluder", "shadowmesh", "lightcone_particles",
+	"ui_menu" };
 
 constexpr std::string_view kAlphaTestWords[] = { "foliage", "vegetation", "alphatest", "alpha_test", "fence", "decal", "grass", "leaf", "leaves",
 	"tree", "bush", "ivy", "hair", "cutout", "masked" };
