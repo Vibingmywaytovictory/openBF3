@@ -283,6 +283,9 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 			r_m.native_failure_printed = true;
 			UtilityFunctions::print(to_godot("[ui] ERROR native screens: " + s.error().message));
 		}
+		if (const std::optional<std::string> overflow = flow.take_journal_overflow()) {
+			UtilityFunctions::print(to_godot("[ui] ERROR " + *overflow));
+		}
 		for (const bf3::core::ui::UiFlowAction &a : flow.take_actions()) {
 			if (options != nullptr && options->take(a, *flow.session(), r_game.settings->session())) {
 				continue;

@@ -128,11 +128,6 @@ bf3::core::Status NativeFlow::tick(const bf3::host::UiGameState &p_state, double
 		BF3_TRY(session_->update(p_state));
 		++ticks_;
 	}
-	if (const uint64_t dropped = session_->stats().data_writes_dropped; dropped > 0 && !journal_overflow_reported_) {
-		journal_overflow_reported_ = true;
-		return bf3::core::make_error(
-				"the UI flow data-write journal dropped " + std::to_string(dropped) + " writes past its cap");
-	}
 	for (bf3::core::ui::UiFlowAction &a : session_->take_actions()) {
 		++actions_;
 		if (pending_.size() < kNativeFlowMaxActions) {
@@ -140,6 +135,15 @@ bf3::core::Status NativeFlow::tick(const bf3::host::UiGameState &p_state, double
 		}
 	}
 	return bf3::core::Status::success();
+}
+
+std::optional<std::string> NativeFlow::take_journal_overflow() {
+	const uint64_t dropped = session_ != nullptr ? session_->stats().data_writes_dropped : 0;
+	if (dropped == 0 || journal_overflow_reported_) {
+		return std::nullopt;
+	}
+	journal_overflow_reported_ = true;
+	return "the UI flow data-write journal dropped " + std::to_string(dropped) + " writes past its cap";
 }
 
 std::vector<bf3::core::ui::UiFlowAction> NativeFlow::take_actions() {

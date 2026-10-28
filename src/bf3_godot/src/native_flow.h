@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -51,6 +52,7 @@ public:
 
 	bf3::core::Status tick(const bf3::host::UiGameState &p_state, double p_seconds);
 	std::vector<bf3::core::ui::UiFlowAction> take_actions();
+	std::optional<std::string> take_journal_overflow();
 	void set_keep_log(bool p_keep) { keep_log_ = p_keep; }
 	uint64_t ticks() const { return ticks_; }
 	uint64_t actions() const { return actions_; }
