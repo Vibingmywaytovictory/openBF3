@@ -1053,6 +1053,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 				const Basis b = Basis(Vector3(0, 1, 0), yaw + float(sim::kPi)) * Basis(Vector3(1, 0, 0), -0.25f);
 				p_camera->set_global_transform(Transform3D(b, Vector3(sp.position[0], sp.position[1] + 3.0f, sp.position[2])));
 				m.join_view_placed = true;
+				look_.cut();
 			}
 		}
 	}

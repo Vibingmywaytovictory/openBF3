@@ -19,6 +19,7 @@ class Environment;
 class ImageTexture3D;
 class Node;
 class ShaderMaterial;
+class Sky;
 class WorldEnvironment;
 }
 
@@ -37,6 +38,7 @@ public:
 	bool built() const { return plan_ != nullptr; }
 
 	void update(const LevelUpload &p_upload, const godot::Vector3 &p_camera);
+	void cut();
 
 	std::string describe() const;
 
@@ -48,11 +50,14 @@ private:
 	godot::WorldEnvironment *world_ = nullptr;
 	godot::Ref<godot::Environment> environment_;
 	godot::Ref<godot::ShaderMaterial> sky_material_;
+	godot::Ref<godot::Sky> sky_;
 	godot::Ref<godot::CameraAttributesPractical> attributes_;
 	std::vector<godot::Ref<godot::ImageTexture3D>> luts_;
 	std::array<bool, 3> sky_bound_{};
 	std::optional<bf3::render::LookFrame> applied_;
 	std::optional<bf3::render::LookFrame> sent_;
+	bool cut_pending_ = false;
+	bool sky_full_ = false;
 };
 
 }

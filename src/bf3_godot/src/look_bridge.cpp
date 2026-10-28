@@ -108,15 +108,14 @@ void LookBridge::build(Node *p_parent, std::shared_ptr<const render::LevelSceneP
 	shader->set_code(to_godot(kSkyShader));
 	sky_material_.instantiate();
 	sky_material_->set_shader(shader);
-	Ref<Sky> sky;
-	sky.instantiate();
-	sky->set_material(sky_material_);
-	sky->set_radiance_size(Sky::RADIANCE_SIZE_64);
-	sky->set_process_mode(Sky::PROCESS_MODE_INCREMENTAL);
+	sky_.instantiate();
+	sky_->set_material(sky_material_);
+	sky_->set_radiance_size(Sky::RADIANCE_SIZE_64);
+	sky_->set_process_mode(Sky::PROCESS_MODE_INCREMENTAL);
 
 	environment_.instantiate();
 	environment_->set_background(Environment::BG_SKY);
-	environment_->set_sky(sky);
+	environment_->set_sky(sky_);
 	environment_->set_ambient_source(Environment::AMBIENT_SOURCE_SKY);
 	environment_->set_ambient_light_energy(1.0f);
 	environment_->set_ambient_light_sky_contribution(1.0f);
@@ -184,6 +183,18 @@ void LookBridge::update(const LevelUpload &p_upload, const Vector3 &p_camera) {
 		}
 	}
 	apply(render::look_frame(plan_->look_environment, { float(p_camera.x), float(p_camera.y), float(p_camera.z) }), false);
+	if (cut_pending_) {
+		cut_pending_ = false;
+		sky_full_ = true;
+		sky_->set_process_mode(Sky::PROCESS_MODE_QUALITY);
+		if (attributes_->is_auto_exposure_enabled()) {
+			attributes_->set_auto_exposure_enabled(false);
+			attributes_->set_auto_exposure_enabled(true);
+		}
+	} else if (sky_full_) {
+		sky_full_ = false;
+		sky_->set_process_mode(Sky::PROCESS_MODE_INCREMENTAL);
+	}
 }
 
 void LookBridge::apply(const render::LookFrame &p_f, bool p_force) {
@@ -282,6 +293,10 @@ void LookBridge::apply(const render::LookFrame &p_f, bool p_force) {
 		s.lut = p_f.lut;
 	}
 	applied_ = p_f;
+}
+
+void LookBridge::cut() {
+	cut_pending_ = plan_ != nullptr;
 }
 
 std::string LookBridge::describe() const {
