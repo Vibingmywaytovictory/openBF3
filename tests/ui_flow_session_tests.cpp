@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -974,6 +975,90 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(has(resumed, "push spawnscreenpc"));
 		constexpr int32_t kIsInMenu = -1093247625;
 		CHECK(s.data("usercomp", kIsInMenu) == "True");
+	}
+
+	TEST_CASE("ui flow session: a hidden screen takes no input concept") {
+		Level *l = level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level);
+		REQUIRE(made.ok());
+		UiFlowSession &s = **made;
+		const core::EbxResolver &db = l->level->db();
+		const core::gameplay::LogicGraph &g = s.runtime().graph();
+		std::set<std::string> graphs;
+		for (const uint32_t n : g.nodes_of_type(core::gameplay::LogicTypeId::UIGraph)) {
+			const std::optional<core::EbxInstance> inst = logic_node_instance(db, g, n);
+			const std::optional<core::EbxInstance> asset = inst ? db.follow(inst->data(), "GraphAsset") : std::nullopt;
+			if (const std::optional<std::string_view> name =
+							asset ? db.name_of(asset->partition().guid()) : std::nullopt) {
+				graphs.insert(std::string(*name));
+			}
+		}
+		std::vector<std::string> pending(graphs.begin(), graphs.end());
+		size_t hide_targets = 0;
+		size_t hide_targets_with_concepts = 0;
+		size_t concept_states = 0;
+		while (!pending.empty()) {
+			const std::string name = pending.back();
+			pending.pop_back();
+			core::Result<ui::UiGraphAsset> a = ui::read_ui_graph_asset(db, name);
+			if (!a) {
+				continue;
+			}
+			for (const ui::UiGraphNode &n : a->nodes) {
+				if (!n.screen.empty() && graphs.insert(n.screen).second) {
+					pending.push_back(n.screen);
+				}
+				const bool takes = std::any_of(n.ports.begin(), n.ports.end(), [](const ui::UiGraphPort &p_port) {
+					return p_port.role == ui::UiGraphPortRole::Output && p_port.input_action >= 0;
+				});
+				concept_states += takes ? 1 : 0;
+			}
+			for (const ui::UiGraphConnection &c : a->connections) {
+				const ui::UiGraphNode &t = a->nodes[c.target_node];
+				if (c.target_port >= t.ports.size() || t.ports[c.target_port].role != ui::UiGraphPortRole::Hide) {
+					continue;
+				}
+				++hide_targets;
+				hide_targets_with_concepts +=
+						std::any_of(t.ports.begin(), t.ports.end(), [](const ui::UiGraphPort &p_port) {
+							return p_port.role == ui::UiGraphPortRole::Output && p_port.input_action >= 0;
+						});
+			}
+		}
+		std::printf("ui.flow.session concepts: %zu graphs, %zu states take one, %zu Hide edges, %zu reach one\n",
+				graphs.size(), concept_states, hide_targets, hide_targets_with_concepts);
+		CHECK(concept_states > 0);
+		CHECK(hide_targets > 0);
+		CHECK(hide_targets_with_concepts == 0);
+		ui_flow_tdm_pc_defaults(s, "TeamDeathMatch0");
+		Script sc{ s };
+		sc.state.phase = net::MatchPhase::InRound;
+		sc.state.joined = true;
+		size_t hidden_seen = 0;
+		const auto no_hidden_target = [&] {
+			for (const ui::UiFlowScreen &screen : s.flow().screens()) {
+				hidden_seen += !screen.shown && !screen.exiting ? 1 : 0;
+			}
+			for (int32_t c = 0; c < ui::kUiInputConceptCount; ++c) {
+				if (const std::optional<uint64_t> target = s.flow().concept_screen(c)) {
+					REQUIRE(s.flow().screen(*target) != nullptr);
+					CHECK(s.flow().screen(*target)->shown);
+				}
+			}
+		};
+		sc.run_to(60);
+		no_hidden_target();
+		sc.input(ui::UiInputConcept::Tab);
+		sc.run_to(90);
+		no_hidden_target();
+		sc.input(ui::UiInputConcept::Menu);
+		sc.run_to(120);
+		no_hidden_target();
+		std::printf("ui.flow.session hidden screens seen %zu\n", hidden_seen);
+		CHECK(hidden_seen > 0);
 	}
 
 	TEST_CASE("ui flow session: install unchanged") {

@@ -668,7 +668,7 @@ bool UiFlow::widget_fired(
 
 std::optional<uint64_t> UiFlow::concept_screen(int32_t p_action) const {
 	std::vector<uint64_t> order;
-	if (focus_) {
+	if (const UiFlowScreen *focused = focus_ ? screen(*focus_) : nullptr; focused != nullptr && focused->shown) {
 		order.push_back(*focus_);
 	}
 	for (auto it = screens_.rbegin(); it != screens_.rend(); ++it) {
