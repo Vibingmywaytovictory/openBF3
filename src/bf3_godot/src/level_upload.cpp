@@ -165,11 +165,6 @@ void fragment() {
 	code += "}\n";
 	return code;
 }
-
-constexpr float kGlassOpacity = 0.3f;
-
-constexpr float kGlassTint = 0.25f;
-
 }
 
 Transform3D instance_transform(const bf3::core::level::LevelTransform &p_t) {
@@ -513,7 +508,7 @@ void LevelUpload::create_materials(double p_deadline_us) {
 				rs->material_set_param(m, "normal_uv", int64_t(mp.normal_uv == render::kLookUvOverlay ? render::kLookUv0 : mp.normal_uv));
 				rs->material_set_param(m, "normal_scale", mp.normal_scale);
 				if (mp.glass) {
-					rs->material_set_param(m, "glass_opacity", kGlassOpacity);
+					rs->material_set_param(m, "glass_opacity", render::kLookGlassOpacity);
 				}
 			} else {
 				rs->material_set_shader(m, shaders_[(mp.alpha_test ? 2 : 0) + (mp.double_sided ? 1 : 0)]);
@@ -530,7 +525,7 @@ void LevelUpload::create_materials(double p_deadline_us) {
 			if (plan.look == render::SceneLook::L1 && mp.glass) {
 				roughness = 0.1f;
 				if (mp.albedo < 0) {
-					tint = Color(kGlassTint, kGlassTint, kGlassTint);
+					tint = Color(render::kLookGlassTint, render::kLookGlassTint, render::kLookGlassTint);
 				}
 			}
 			rs->material_set_param(m, "albedo_tint", tint);

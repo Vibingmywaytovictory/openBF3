@@ -30,6 +30,7 @@ enum class TextureRole : uint8_t {
 	Color,
 	Normal,
 	Data,
+	Mask,
 };
 
 struct PreparedTexture {
@@ -40,6 +41,7 @@ struct PreparedTexture {
 	uint32_t levels = 0;
 	uint32_t stored_levels = 0;
 	bool srgb = false;
+	TextureRole role = TextureRole::Color;
 	core::res::TextureFormat source_format = core::res::TextureFormat::Dxt1;
 	std::vector<uint8_t> data;
 };
@@ -51,6 +53,10 @@ uint64_t level_bytes(GpuFormat p_format, uint32_t p_width, uint32_t p_height);
 core::Result<PreparedTexture> prepare_texture(const core::res::LoadedTexture &p_texture, TextureRole p_role);
 
 std::array<uint8_t, 16> bc3_normal_to_bc5(const uint8_t *p_bc3_block);
+
+std::array<uint8_t, 16> bc1_luminance(const uint8_t *p_block);
+
+std::array<uint8_t, 16> bc1_mask_to_bc3(const uint8_t *p_bc1_block);
 
 std::array<uint8_t, 16> bc_color_green(const uint8_t *p_color_block);
 

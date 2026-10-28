@@ -145,6 +145,33 @@ std::array<uint8_t, 8> bc4_encode(const std::array<uint8_t, 16> &p_values) {
 	return out;
 }
 
+std::array<uint8_t, 16> bc1_luminance(const uint8_t *p_block) {
+	const uint16_t c0 = uint16_t(p_block[0] | (p_block[1] << 8));
+	const uint16_t c1 = uint16_t(p_block[2] | (p_block[3] << 8));
+	const auto brightest = [](uint16_t p_c) {
+		const int r = (p_c >> 11) & 31, g = (p_c >> 5) & 63, b = p_c & 31;
+		return std::max({ (r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2) });
+	};
+	const int e0 = brightest(c0), e1 = brightest(c1);
+	const int palette[4] = { e0, e1, c0 > c1 ? (2 * e0 + e1 + 1) / 3 : (e0 + e1) / 2,
+		c0 > c1 ? (e0 + 2 * e1 + 1) / 3 : 0 };
+	const uint32_t bits = uint32_t(p_block[4]) | (uint32_t(p_block[5]) << 8) | (uint32_t(p_block[6]) << 16) |
+			(uint32_t(p_block[7]) << 24);
+	std::array<uint8_t, 16> out{};
+	for (int i = 0; i < 16; ++i) {
+		out[size_t(i)] = uint8_t(palette[(bits >> (2 * i)) & 3]);
+	}
+	return out;
+}
+
+std::array<uint8_t, 16> bc1_mask_to_bc3(const uint8_t *p_bc1_block) {
+	std::array<uint8_t, 16> out{};
+	const std::array<uint8_t, 8> alpha = bc4_encode(bc1_luminance(p_bc1_block));
+	std::memcpy(out.data(), alpha.data(), 8);
+	out[8] = out[9] = out[10] = out[11] = 0xFF;
+	return out;
+}
+
 std::array<uint8_t, 16> bc3_normal_to_bc5(const uint8_t *p_bc3_block) {
 	std::array<uint8_t, 16> out{};
 	std::memcpy(out.data(), p_bc3_block, 8);
@@ -235,6 +262,7 @@ core::Result<PreparedTexture> prepare_texture(const LoadedTexture &p_texture, Te
 	out.name = p_texture.res.name;
 	out.source_format = tex.format;
 	out.srgb = tex.is_srgb();
+	out.role = p_role;
 	out.width = tex.width;
 	out.height = tex.height;
 	GpuFormat stored;
@@ -243,7 +271,8 @@ core::Result<PreparedTexture> prepare_texture(const LoadedTexture &p_texture, Te
 	}
 
 	const bool transcode = p_role == TextureRole::Normal && tex.format == TextureFormat::NormalDxt5;
-	out.format = transcode ? GpuFormat::Bc5 : stored;
+	const bool mask = p_role == TextureRole::Mask && stored == GpuFormat::Bc1;
+	out.format = transcode ? GpuFormat::Bc5 : mask ? GpuFormat::Bc3 : stored;
 
 	std::vector<MipSlice> mips;
 	const core::res::ResError e = p_texture.mips(mips);
@@ -270,6 +299,14 @@ core::Result<PreparedTexture> prepare_texture(const LoadedTexture &p_texture, Te
 				std::memcpy(bc5.data() + at, b.data(), 16);
 			}
 			bytes = std::move(bc5);
+		}
+		if (mask) {
+			std::vector<uint8_t> bc3(bytes.size() * 2);
+			for (size_t at = 0; at + 8 <= bytes.size(); at += 8) {
+				const std::array<uint8_t, 16> b = bc1_mask_to_bc3(bytes.data() + at);
+				std::memcpy(bc3.data() + at * 2, b.data(), 16);
+			}
+			bytes = std::move(bc3);
 		}
 		levels.push_back(std::move(bytes));
 		w = m.width;

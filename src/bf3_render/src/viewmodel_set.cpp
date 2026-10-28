@@ -491,6 +491,15 @@ const PreparedTexture *ViewmodelSet::texture(const std::string &p_name) const {
 	return nullptr;
 }
 
+const PreparedTexture *ViewmodelSet::texture(const std::string &p_name, TextureRole p_role) const {
+	for (const PreparedTexture &t : textures) {
+		if (t.name == p_name && t.role == p_role) {
+			return &t;
+		}
+	}
+	return nullptr;
+}
+
 std::array<anim::VmClipRef, anim::kVmClips> viewmodel_clip_refs(const ViewmodelItem &p_item) {
 	std::array<anim::VmClipRef, anim::kVmClips> refs{};
 	for (size_t r = 0; r < kViewmodelClipRoles; ++r) {
@@ -959,6 +968,39 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 				out[i].alpha_test = lm.blend == LookBlend::AlphaTest;
 				out[i].double_sided = lm.double_sided;
 				out[i].in_database = lm.shader_in_database;
+				const MaterialSlot &slot = p_part.materials.slots[i];
+				out[i].blend = lm.drawn && lm.blend == LookBlend::Blend;
+				if (out[i].blend) {
+					const SurfaceShader *shader = look->shaders().by_name(
+							core::to_lower_ascii(slot.variation_shader.empty() ? slot.shader : slot.variation_shader));
+					if (shader != nullptr && !shader->solutions.empty()) {
+						out[i].blend_mode = viewmodel_blend_of(shader->solutions.front().blend_mode);
+					}
+					if (slot.texture("Diffuse").empty() && lm.color && !lm.glass) {
+						out[i].color_texture = lm.color->name;
+					}
+					out[i].unlit = !lm.normal.has_value();
+					out[i].color_role = out[i].unlit && out[i].blend_mode != ViewmodelBlend::Multiply
+							? TextureRole::Mask
+							: TextureRole::Color;
+					if (lm.glass) {
+						out[i].tint = { kLookGlassTint, kLookGlassTint, kLookGlassTint, kLookGlassOpacity };
+						continue;
+					}
+					const auto value = [&](std::string_view p_name) -> const std::array<float, 4> * {
+						if (const std::array<float, 4> *v = slot.vector(p_name)) {
+							return v;
+						}
+						const ShaderValue *sv = shader != nullptr ? shader->value(p_name) : nullptr;
+						return sv != nullptr ? &sv->value : nullptr;
+					};
+					if (const std::array<float, 4> *color = value("Color")) {
+						out[i].tint = { (*color)[0], (*color)[1], (*color)[2], 1.0f };
+					}
+					if (const std::array<float, 4> *opacity = value("OpacityMod")) {
+						out[i].tint[3] = (*opacity)[0];
+					}
+				}
 				if (out[i].alpha_test) {
 					set->notes.push_back("alpha test: " + p_part.mesh + " slot " + std::to_string(i) + " (" + p_part.materials.slots[i].shader + ")");
 				}
@@ -979,7 +1021,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 
 	progress("decoding textures", 7);
 	std::vector<std::pair<std::string, TextureRole>> wanted;
-	std::set<std::string> seen;
+	std::set<std::pair<std::string, TextureRole>> seen;
 	std::vector<const ViewmodelPart *> parts = { &set->arms };
 	for (const ViewmodelItem &item : set->items) {
 		parts.push_back(&item.weapon);
@@ -995,9 +1037,23 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 			const MaterialSlot &slot = part->materials.slots[s.material_index];
 			for (auto [param, role] : { std::pair{ "Diffuse", TextureRole::Color }, std::pair{ "Normal", TextureRole::Normal } }) {
 				const std::string name = slot.texture(param);
-				if (!name.empty() && seen.insert(name).second) {
+				if (!name.empty() && seen.insert({ name, role }).second) {
 					wanted.emplace_back(name, role);
 				}
+			}
+		}
+	}
+	std::vector<const std::vector<ViewmodelSlotLook> *> looks = { &set->arms_looks };
+	for (const ViewmodelItem &item : set->items) {
+		looks.push_back(&item.weapon_looks);
+		for (const ViewmodelAttachment &a : item.attachments) {
+			looks.push_back(&a.looks);
+		}
+	}
+	for (const std::vector<ViewmodelSlotLook> *list : looks) {
+		for (const ViewmodelSlotLook &l : *list) {
+			if (!l.color_texture.empty() && seen.insert({ l.color_texture, l.color_role }).second) {
+				wanted.emplace_back(l.color_texture, l.color_role);
 			}
 		}
 	}
@@ -1031,6 +1087,18 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 	set->seconds_total = seconds_since(start);
 	progress("uploading", LoadProgress::kSteps - 1);
 	return set;
+}
+
+ViewmodelBlend viewmodel_blend_of(uint8_t p_solution_blend_mode) {
+	switch (p_solution_blend_mode) {
+		case 1:
+		case 3:
+			return ViewmodelBlend::Add;
+		case 2:
+			return ViewmodelBlend::Multiply;
+		default:
+			return ViewmodelBlend::Mix;
+	}
 }
 
 const char *viewmodel_clip_source_name(ViewmodelClipSource p_source) {

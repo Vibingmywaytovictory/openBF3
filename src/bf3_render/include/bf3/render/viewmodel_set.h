@@ -109,10 +109,19 @@ struct ViewmodelAdsData {
 	float fov_in = -1, fov_out = -1, zoom_in = -1, zoom_out = -1;
 };
 
+enum class ViewmodelBlend : uint8_t { Mix, Add, Multiply };
+ViewmodelBlend viewmodel_blend_of(uint8_t p_solution_blend_mode);
+
 struct ViewmodelSlotLook {
 	bool alpha_test = false;
 	bool double_sided = false;
 	bool in_database = false;
+	bool blend = false;
+	ViewmodelBlend blend_mode = ViewmodelBlend::Mix;
+	bool unlit = false;
+	std::string color_texture;
+	TextureRole color_role = TextureRole::Color;
+	std::array<float, 4> tint{ 1.0f, 1.0f, 1.0f, 1.0f };
 };
 inline constexpr float kViewmodelAlphaScissor = 0.5f;
 
@@ -178,6 +187,7 @@ struct ViewmodelSet {
 	double seconds_total = 0;
 
 	const PreparedTexture *texture(const std::string &p_name) const;
+	const PreparedTexture *texture(const std::string &p_name, TextureRole p_role) const;
 };
 
 core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(const core::InstallReader &p_install, const ViewmodelSetSpec &p_spec,

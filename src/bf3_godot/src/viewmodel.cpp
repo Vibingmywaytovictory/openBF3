@@ -136,6 +136,7 @@ namespace {
 struct SetTextures {
 	const bf3::render::ViewmodelSet *set = nullptr;
 	std::map<std::string, Ref<Texture2D>> made;
+	std::map<std::pair<std::string, bf3::render::TextureRole>, Ref<Texture2D>> made_roles;
 
 	Ref<Texture2D> find(const std::string &p_name) {
 		const auto it = made.find(p_name);
@@ -150,7 +151,39 @@ struct SetTextures {
 		made[p_name] = tex;
 		return tex;
 	}
+
+	Ref<Texture2D> find(const std::string &p_name, bf3::render::TextureRole p_role) {
+		const auto it = made_roles.find({ p_name, p_role });
+		if (it != made_roles.end()) {
+			return it->second;
+		}
+		const bf3::render::PreparedTexture *t = set->texture(p_name, p_role);
+		Ref<Texture2D> tex;
+		if (t != nullptr) {
+			tex = make_texture(*t);
+		}
+		made_roles[{ p_name, p_role }] = tex;
+		return tex;
+	}
 };
+
+void apply_blend_look(
+		const Ref<StandardMaterial3D> &p_m, const bf3::render::ViewmodelSlotLook &p_look, SetTextures &r_textures) {
+	using bf3::render::ViewmodelBlend;
+	if (!p_look.color_texture.empty()) {
+		if (const Ref<Texture2D> t = r_textures.find(p_look.color_texture, p_look.color_role); t.is_valid()) {
+			p_m->set_texture(BaseMaterial3D::TEXTURE_ALBEDO, t);
+		}
+	}
+	p_m->set_albedo(Color(p_look.tint[0], p_look.tint[1], p_look.tint[2], p_look.tint[3]));
+	p_m->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA);
+	p_m->set_blend_mode(p_look.blend_mode == ViewmodelBlend::Add	? BaseMaterial3D::BLEND_MODE_ADD
+					: p_look.blend_mode == ViewmodelBlend::Multiply ? BaseMaterial3D::BLEND_MODE_MUL
+																	: BaseMaterial3D::BLEND_MODE_MIX);
+	if (p_look.unlit) {
+		p_m->set_shading_mode(BaseMaterial3D::SHADING_MODE_UNSHADED);
+	}
+}
 
 MeshInstance3D *make_part_mesh(Skeleton3D *p_skeleton, const bf3::render::ViewmodelPart &p_part,
 		const std::vector<bf3::render::ViewmodelSlotLook> &p_looks, std::vector<Ref<StandardMaterial3D>> &r_materials,
@@ -177,6 +210,9 @@ MeshInstance3D *make_part_mesh(Skeleton3D *p_skeleton, const bf3::render::Viewmo
 						}
 						if (look.double_sided) {
 							m->set_cull_mode(BaseMaterial3D::CULL_DISABLED);
+						}
+						if (look.blend) {
+							apply_blend_look(m, look, r_textures);
 						}
 					}
 					r_materials.push_back(m);

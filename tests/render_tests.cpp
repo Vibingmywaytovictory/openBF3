@@ -66,6 +66,32 @@ TEST_SUITE("render-unit") {
 			CHECK(std::abs(int(y[size_t(i)]) - int(green[size_t(i)])) <= 19);
 		}
 	}
+
+	TEST_CASE("render: a BC1 mask becomes a white BC3 whose alpha is the mask's brightness, in both BC1 modes") {
+		const uint8_t four[8] = { 0xFF, 0xFF, 0x00, 0x00, 0b11100100, 0b11100100, 0b11100100, 0b11100100 };
+		const std::array<uint8_t, 16> a = bc1_luminance(four);
+		CHECK(a[0] == 255);
+		CHECK(a[1] == 0);
+		CHECK(a[2] == 170);
+		CHECK(a[3] == 85);
+		const uint8_t three[8] = { 0x00, 0x00, 0xFF, 0xFF, 0b11100100, 0b11100100, 0b11100100, 0b11100100 };
+		const std::array<uint8_t, 16> b = bc1_luminance(three);
+		CHECK(b[0] == 0);
+		CHECK(b[1] == 255);
+		CHECK(b[2] == 127);
+		CHECK(b[3] == 0);
+		const std::array<uint8_t, 16> bc3 = bc1_mask_to_bc3(four);
+		const std::array<uint8_t, 16> alpha = bc4_values(bc3.data());
+		for (int i = 0; i < 16; ++i) {
+			CHECK(std::abs(int(alpha[size_t(i)]) - int(a[size_t(i)])) <= 19);
+		}
+		CHECK(bc3[8] == 0xFF);
+		CHECK(bc3[9] == 0xFF);
+		CHECK(bc3[10] == 0xFF);
+		CHECK(bc3[11] == 0xFF);
+		CHECK(bc3[12] == 0);
+		CHECK(bc3[15] == 0);
+	}
 }
 
 TEST_SUITE("render") {

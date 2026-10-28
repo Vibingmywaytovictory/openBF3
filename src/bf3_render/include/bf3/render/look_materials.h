@@ -33,6 +33,9 @@ inline constexpr uint8_t kLookUv1 = 1;
 inline constexpr uint8_t kLookUvOverlay = 2;
 inline constexpr uint8_t kLookUvProjected = 3;
 
+inline constexpr float kLookGlassOpacity = 0.3f;
+inline constexpr float kLookGlassTint = 0.25f;
+
 struct LookTexture {
 	std::string name;
 	std::string parameter;
