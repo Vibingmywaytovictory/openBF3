@@ -32,6 +32,8 @@ constexpr int32_t kAllowKeyNavigation = 22;
 constexpr int32_t kShowList = 25;
 constexpr int32_t kHideList = 26;
 constexpr int32_t kInvalidSelection = 27;
+constexpr int32_t kSelectorChangedKeyValue = 23;
+constexpr int32_t kSelectorStepped = 24;
 
 constexpr double kTiltListIndex = 22.0;
 constexpr std::string_view kSelectorRows =
@@ -91,6 +93,9 @@ public:
 	void row_pressed(double p_index);
 	void mouse_over_row(double p_index, bool p_value);
 	void row_highlighted(double p_index, bool p_value);
+	void row_selector_changed(double p_index, const As2Value &p_arg);
+	void shift_selector(double p_dir, const As2Value &p_used_mouse);
+	As2Value current_selector_value() const;
 
 	double scroll_percentage() const { return current_scroll_percentage_ * 100.0; }
 	bool active() const { return active_; }
@@ -199,6 +204,8 @@ public:
 		if (b.list_query.use_direct_access) {
 			r_data.push_back(HudDataEntry{
 					"ListAccess", As2Value::of(hud_list_access_handle(b.list_query)), b.list_query.on_initialize });
+		} else if (std::optional<As2Value> options = hud_options_list_rows(b, p_client)) {
+			r_data.push_back(HudDataEntry{ "List", std::move(*options), true });
 		} else if (std::optional<As2Value> rows = hud_model_list_rows(b.list_query, p_model, p_client)) {
 			r_data.push_back(HudDataEntry{ "List", std::move(*rows), b.list_query.on_initialize });
 		} else if (std::optional<As2Value> menu = hud_menu_list_rows(b.list_query, p_model)) {
@@ -261,11 +268,14 @@ public:
 		update_data(p_key, p_value);
 	}
 
-	void drive(HudWidgetHost &r_host, const HudModel &p_model, const HudClientState &) override {
+	void drive(HudWidgetHost &r_host, const HudModel &p_model, const HudClientState &p_client) override {
 		if (!binding_ || !binding_->list_query.use_direct_access) {
 			return;
 		}
 		std::optional<std::vector<As2Value>> rows = hud_model_direct_rows(binding_->list_query, p_model);
+		if (!rows) {
+			rows = hud_options_direct_rows(binding_->list_query, p_client);
+		}
 		if (!rows || rows == direct_rows_) {
 			return;
 		}
@@ -341,17 +351,23 @@ public:
 				}
 				return false;
 			case UiInputConcept::NavigateLeft:
-				if (!info_selector(highlighted_index_)) {
+				if (info_selector(highlighted_index_)) {
+					logic_.shift_selector(-1.0, As2Value::of(false));
+				} else {
 					r_host.fire_event(kNavigateLeft, As2Value::of(0));
 				}
 				return false;
 			case UiInputConcept::NavigateRight:
-				if (!info_selector(highlighted_index_)) {
+				if (info_selector(highlighted_index_)) {
+					logic_.shift_selector(1.0, As2Value());
+				} else {
 					r_host.fire_event(kNavigateRight, As2Value::of(0));
 				}
 				return false;
 			case UiInputConcept::Activate:
-				if (!info_toggable(highlighted_index_)) {
+				if (info_toggable(highlighted_index_)) {
+					logic_.shift_selector(0.0, As2Value());
+				} else {
 					fire_press_event(highlighted_index_, true);
 					fire_release_event(highlighted_index_, true);
 				}
@@ -424,6 +440,27 @@ public:
 	void row_pressed(double p_index) override { logic_.row_pressed(p_index); }
 	void row_mouse_over(double p_index, bool p_value) override { logic_.mouse_over_row(p_index, p_value); }
 	void row_highlighted(double p_index, bool p_value) override { logic_.row_highlighted(p_index, p_value); }
+	void row_selector_changed(double p_index, const As2Value &p_arg) override {
+		logic_.row_selector_changed(p_index, p_arg);
+	}
+
+	void selector_handler(double p_index, const As2Value &p_used_mouse) {
+		if (row_count_ == 0.0) {
+			return;
+		}
+		if (p_used_mouse.truthy()) {
+			logic_.set_highlighted(p_index, true, true);
+		}
+		host_->fire_event(kSelectorChanged, logic_.current_selector_value());
+		host_->fire_event(kSelectorStepped, logic_.current_selector_value());
+		if (!use_direct_access_) {
+			const As2Value &key = data_row(p_index).field("key");
+			if (!is_null(key)) {
+				host_->fire_event(kSelectorChangedKeyValue, key);
+			}
+		}
+		host_->fire_query(kSoundSelect, As2Value::of(false));
+	}
 
 	void on_row_released(double p_index, bool p_selected) {
 		if (!use_direct_access_) {
@@ -475,6 +512,9 @@ public:
 		fire_highlight_event(highlighted_index_, true);
 		fire_menu_hint_event(highlighted_index_, true);
 		button_row_handler(logic_.current_button_layout());
+		if (info_selector(highlighted_index_)) {
+			host_->fire_event(kSelectorChanged, logic_.current_selector_value());
+		}
 		update_scroll_bar();
 	}
 
@@ -1227,6 +1267,9 @@ void ListLogic::handle_row(std::optional<RowRequest> p_request) {
 		r->set_row_index(p_request->data.field("Index").to_number());
 		r->set_width(list_width_);
 		r->set_list(list_.host_->path());
+		if (list_.info_selector(p_request->index)) {
+			r->set_selector_callback(true);
+		}
 		if (navigation_type == "none") {
 			r->set_mouse_enabled(false);
 		}
@@ -1344,6 +1387,21 @@ void ListLogic::row_highlighted(double p_index, bool p_value) {
 		current_highlighted_ = p_index;
 	}
 	list_.on_row_highlighted(p_index, p_value);
+}
+
+void ListLogic::row_selector_changed(double p_index, const As2Value &p_arg) {
+	list_.selector_handler(p_index, p_arg);
+}
+
+void ListLogic::shift_selector(double p_dir, const As2Value &p_used_mouse) {
+	if (RowBaseClass *r = row(current_highlighted_)) {
+		r->step_selection(p_dir, p_used_mouse);
+	}
+}
+
+As2Value ListLogic::current_selector_value() const {
+	const RowBaseClass *r = row(current_highlighted_);
+	return r != nullptr ? r->selector_value() : As2Value();
 }
 
 void ListLogic::highlight_logic(double p_index, bool p_value) {
@@ -1753,16 +1811,61 @@ void RowBaseClass::turn_off_mouse_interaction() {
 	has_mouse_listeners_ = false;
 }
 
+void RowBaseClass::mouse_over() {
+	set_mouse_over_row(true);
+}
+
+void RowBaseClass::mouse_out() {
+	set_mouse_over_row(false);
+}
+
+void RowBaseClass::mouse_pressed() {
+	if (disabled_) {
+		return;
+	}
+	if (ListOwner *o = owner()) {
+		o->row_pressed(index_);
+	}
+	pressed_ = true;
+	state_changed();
+}
+
+void RowBaseClass::mouse_released() {
+	if (disabled_) {
+		return;
+	}
+	if (ListOwner *o = owner()) {
+		o->row_released(index_, true);
+	}
+	pressed_ = false;
+	state_changed();
+}
+
+void RowBaseClass::mouse_release_outside() {
+	set_mouse_over_row(false);
+	pressed_ = false;
+	state_changed();
+}
+
+void RowBaseClass::selector_changed(const As2Value &p_arg) {
+	if (!selector_callback_) {
+		return;
+	}
+	if (ListOwner *o = owner()) {
+		o->row_selector_changed(index_, p_arg);
+	}
+}
+
 bool RowBaseClass::mouse_move(HudWidgetHost &r_host, const HudMouse &p_mouse) {
 	if (p_mouse.target != r_host.path() || !has_mouse_listeners_) {
 		return false;
 	}
 	if (p_mouse.kind == HudMouseKind::RollOver) {
-		set_mouse_over_row(true);
+		mouse_over();
 		return true;
 	}
 	if (p_mouse.kind == HudMouseKind::RollOut) {
-		set_mouse_over_row(false);
+		mouse_out();
 		return true;
 	}
 	return false;
@@ -1772,11 +1875,7 @@ bool RowBaseClass::mouse_press(HudWidgetHost &r_host, const HudMouse &p_mouse) {
 	if (p_mouse.target != r_host.path() || !has_mouse_listeners_ || disabled_) {
 		return false;
 	}
-	if (ListOwner *o = owner()) {
-		o->row_pressed(index_);
-	}
-	pressed_ = true;
-	state_changed();
+	mouse_pressed();
 	return true;
 }
 
@@ -1785,19 +1884,13 @@ bool RowBaseClass::mouse_release(HudWidgetHost &r_host, const HudMouse &p_mouse)
 		return false;
 	}
 	if (p_mouse.kind == HudMouseKind::ReleaseOutside) {
-		set_mouse_over_row(false);
-		pressed_ = false;
-		state_changed();
+		mouse_release_outside();
 		return true;
 	}
 	if (disabled_) {
 		return false;
 	}
-	if (ListOwner *o = owner()) {
-		o->row_released(index_, true);
-	}
-	pressed_ = false;
-	state_changed();
+	mouse_released();
 	return true;
 }
 

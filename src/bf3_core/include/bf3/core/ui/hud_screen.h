@@ -32,6 +32,7 @@ inline constexpr std::string_view kEorWinningTeamScreenPartition = "ui/flow/scre
 inline constexpr std::string_view kHudScreenInstance = "instance1";
 inline constexpr size_t kHudMaxScreenWidgets = 64;
 inline constexpr size_t kHudMaxWidgetProperties = 32;
+inline constexpr size_t kHudMaxNestedLists = 64;
 
 inline constexpr float kHudFootageSafeX = 49.806f;
 inline constexpr float kHudFootageSafeY = 28.195f;
@@ -56,8 +57,17 @@ struct HudDataSource {
 	bool use_direct_access = false;
 };
 
+struct HudNestedList {
+	std::string label;
+	std::string row_type;
+	HudDataSource source;
+	HudDataSource show;
+	bool hidden_on_pc = false;
+};
+
 struct HudListBinding {
 	HudDataSource list_query;
+	std::vector<HudNestedList> nested;
 	std::string row_type;
 	std::string empty_row_type;
 	std::string navigation_type;
@@ -204,6 +214,7 @@ float hud_align_axis(HudAxisAlign p_align, float p_original, float p_visible_min
 class HudDamageIndicatorComp;
 class HudMessageComp;
 struct HudWorldTags;
+struct OptionsModel;
 
 struct HudPopupButton {
 	std::string label;
@@ -236,6 +247,7 @@ struct HudClientState {
 	const HudPopup *popup = nullptr;
 	std::string vehicle_name;
 	std::function<std::optional<std::string>(std::string_view, int32_t)> flow_data;
+	const OptionsModel *options = nullptr;
 };
 
 class TextDatabase;

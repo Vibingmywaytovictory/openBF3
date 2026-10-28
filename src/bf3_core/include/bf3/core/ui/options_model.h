@@ -61,6 +61,7 @@ struct OptionsModel {
 	std::vector<std::vector<KeyBindingRowData>> key_bindings;
 	uint8_t selected_tab = 0;
 	uint8_t key_tab = 0;
+	uint8_t key_column = 0;
 	int32_t key_bindings_row = -1;
 	int32_t key_bindings_column = -1;
 	bool key_binding_mode = false;
@@ -115,6 +116,7 @@ public:
 	bool exiting() const { return exiting_; }
 	void select_tab(uint8_t p_tab);
 	void select_key_tab(uint8_t p_tab);
+	void select_key_column(uint8_t p_column);
 
 	bool set_option_value(int32_t p_data_key, double p_value);
 	bool change(std::string_view p_source, double p_value);
@@ -137,6 +139,7 @@ private:
 	KeyBindCapture capture_;
 	uint8_t selected_tab_ = 0;
 	uint8_t key_tab_ = 0;
+	uint8_t key_column_ = 0;
 	bool exiting_ = false;
 };
 

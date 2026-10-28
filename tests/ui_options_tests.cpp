@@ -10,9 +10,14 @@
 #include "bf3/core/ui/settings_effects.h"
 #include "bf3/core/ui/settings_store.h"
 #include "bf3/core/ui/ui_graph.h"
+#include "bf3/core/ui/ui_input.h"
 #include "test_support.h"
+#include "ui_retail_support.h"
 
+#include <algorithm>
+#include <array>
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -295,7 +300,6 @@ int32_t key_of(std::string_view p_source) {
 std::string cells(const KeyBindingRow &p_row) {
 	return p_row.label + "|" + p_row.inputs[0] + "|" + p_row.inputs[1] + "|" + p_row.inputs[2];
 }
-
 }
 
 TEST_SUITE("ui-settings-unit") {
@@ -969,5 +973,254 @@ TEST_SUITE("ui-options") {
 		const SnapshotDiff diff = diff_snapshots(l->mount->before, l->mount->reader.snapshot());
 		std::printf("ui.options install.unchanged %s\n", diff.clean() ? "yes" : diff.summary().c_str());
 		CHECK(diff.clean());
+	}
+}
+
+namespace {
+
+constexpr std::string_view kOptionsGameplayScreen = "ui/flow/screen/optionsgameplayscreen";
+constexpr std::string_view kOptionsAudioScreen = "ui/flow/screen/optionsaudioscreen";
+constexpr std::string_view kOptionsVideoScreen = "ui/flow/screen/optionsvideoscreen";
+constexpr std::string_view kOptionsKeyBindingScreen = "ui/flow/screen/optionskeybindingscreen";
+constexpr std::string_view kEnterTop = "UIWidgetEventID_EnterTop";
+constexpr int32_t kListHighlighted = 0;
+constexpr int32_t kListSelectorChanged = 8;
+constexpr int32_t kListSelectorChangedKeyValue = 23;
+
+std::unique_ptr<OptionsSession> retail_options(ui_retail::Retail &r_r) {
+	static std::unique_ptr<OptionsCatalog> catalog;
+	if (catalog == nullptr) {
+		Result<OptionsCatalog> c = read_options_catalog(*r_r.level);
+		REQUIRE_MESSAGE(c.ok(), (c.ok() ? std::string() : c.error().message));
+		catalog = std::make_unique<OptionsCatalog>(std::move(*c));
+	}
+	Result<KeyBindingMaps> maps = read_key_binding_maps(*r_r.level);
+	Result<std::vector<std::string>> tabs = read_key_binding_tabs(*r_r.level);
+	REQUIRE((maps.ok() && tabs.ok()));
+	Result<KeyBindingTable> t = KeyBindingTable::build(*maps, *tabs);
+	REQUIRE(t.ok());
+	return std::make_unique<OptionsSession>(*catalog, *t);
+}
+
+struct OptionsRig {
+	std::vector<HudWidgetEvent> events;
+	OptionsModel model;
+	std::map<int32_t, std::string> flow;
+	ui_retail::RetailScreen s;
+
+	As2Clip clip(std::string_view p_path) const {
+		return s.hud->clip(std::string(kHudScreenInstance) + "." + std::string(p_path));
+	}
+	std::vector<std::string> rows(std::string_view p_list) const {
+		std::vector<std::pair<float, std::string>> found;
+		const SwfSceneNode *n = clip(std::string(p_list) + ".ListHolder").node();
+		REQUIRE(n != nullptr);
+		for (const SwfNodeId id : n->children) {
+			const SwfSceneNode *c = s.scene->node(id);
+			if (c != nullptr && c->visible && c->kind == SwfNodeKind::Sprite) {
+				found.emplace_back(c->matrix.ty, c->path);
+			}
+		}
+		std::sort(found.begin(), found.end());
+		std::vector<std::string> out;
+		for (const auto &f : found) {
+			out.push_back(f.second);
+		}
+		return out;
+	}
+	std::vector<HudWidgetEvent> fired(std::string_view p_instance, int32_t p_index) const {
+		std::vector<HudWidgetEvent> out;
+		for (const HudWidgetEvent &e : events) {
+			if (e.instance == p_instance && e.index == p_index) {
+				out.push_back(e);
+			}
+		}
+		return out;
+	}
+	std::string text(const std::string &p_path) const { return s.hud->clip(p_path).text(); }
+};
+
+void open_options(ui_retail::Retail &r_r, OptionsRig &r_b, std::string_view p_partition, OptionsModel p_model) {
+	r_b.model = std::move(p_model);
+	HudClientState client = ui_retail::retail_text_client(ui_retail::retail_text_db(r_r));
+	client.options = &r_b.model;
+	client.flow_data = [&r_b](std::string_view, int32_t p_key) -> std::optional<std::string> {
+		const auto it = r_b.flow.find(p_key);
+		return it == r_b.flow.end() ? std::nullopt : std::optional<std::string>(it->second);
+	};
+	r_b.s = ui_retail::open_retail_screen(r_r, p_partition, std::move(client));
+	r_b.s.hud->set_event_sink([&r_b](const HudWidgetEvent &p_e) { r_b.events.push_back(p_e); });
+	const HudModel m;
+	r_b.s.hud->initialize(m);
+	r_b.s.hud->set_focus(true);
+	r_b.s.hud->refresh(m);
+}
+
+void step(OptionsRig &r_b, UiInputConcept p_concept) {
+	r_b.s.hud->input_concept(int32_t(p_concept), true);
+	r_b.s.hud->input_concept(int32_t(p_concept), false);
+}
+
+std::vector<const OptionRowData *> tab_rows(const OptionsModel &p_model, OptionsTab p_tab, std::string_view p_list) {
+	std::vector<const OptionRowData *> out;
+	for (const OptionRowData &r : p_model.rows) {
+		if (r.tab == p_tab && r.list == p_list) {
+			out.push_back(&r);
+		}
+	}
+	return out;
+}
+
+std::string sid(ui_retail::Retail &r_r, std::string_view p_sid) {
+	return std::string(ui_retail::retail_text_db(r_r).find_sid(p_sid).value_or("?"));
+}
+}
+
+TEST_SUITE("ui-options-screens") {
+	TEST_CASE("options screens: the tab bar names the five tabs and the gameplay rows bind the options model") {
+		ui_retail::Retail *r = ui_retail::retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		std::unique_ptr<OptionsSession> o = retail_options(*r);
+		OptionsRig b;
+		open_options(*r, b, kOptionsGameplayScreen, o->model());
+		const std::string holder = "TabBar_01.tabBarHolder.button_";
+		const std::array<std::string_view, 5> tabs{ "ID_M_CONTROLS", "ID_M_GAMEPLAY", "ID_M_AUDIO", "ID_M_VIDEO",
+			"ID_M_OPTIONS_KEY_BINDINGS" };
+		for (size_t i = 0; i < tabs.size(); ++i) {
+			CAPTURE(i);
+			REQUIRE(b.clip(holder + std::to_string(i)).exists());
+			CHECK(b.clip(holder + std::to_string(i) + ".button.label.txt").text() == sid(*r, tabs[i]));
+		}
+		CHECK_FALSE(b.clip(holder + "5").exists());
+		CHECK(b.clip(holder + "1.button.bgHolder.selected_mc").visible());
+		CHECK_FALSE(b.clip(holder + "0.button.bgHolder.selected_mc").visible());
+		const std::vector<const OptionRowData *> want = tab_rows(b.model, OptionsTab::Gameplay, "List_01");
+		const std::vector<std::string> rows = b.rows("List_01");
+		REQUIRE(rows.size() == want.size());
+		for (size_t i = 0; i < rows.size(); ++i) {
+			CAPTURE(want[i]->source);
+			CHECK(b.text(rows[i] + ".Label.txtField") == sid(*r, want[i]->label));
+			if (want[i]->row == OptionRowType::TextSelector) {
+				CHECK(b.text(rows[i] + ".stHolder.selectorLabel") ==
+						sid(*r, want[i]->choices[size_t(want[i]->highlighted)].label));
+			}
+		}
+	}
+
+	TEST_CASE("options screens: Right steps a text selector, fires the new value and the row's DataKey") {
+		ui_retail::Retail *r = ui_retail::retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		std::unique_ptr<OptionsSession> o = retail_options(*r);
+		OptionsRig b;
+		open_options(*r, b, kOptionsGameplayScreen, o->model());
+		const std::vector<const OptionRowData *> want = tab_rows(b.model, OptionsTab::Gameplay, "List_01");
+		REQUIRE_FALSE(want.empty());
+		REQUIRE(want[0]->row == OptionRowType::TextSelector);
+		REQUIRE(b.s.hud->deliver_in_event("List_01", kEnterTop));
+		b.events.clear();
+		step(b, UiInputConcept::NavigateRight);
+		const std::vector<HudWidgetEvent> changed = b.fired("List_01", kListSelectorChanged);
+		const std::vector<HudWidgetEvent> keyed = b.fired("List_01", kListSelectorChangedKeyValue);
+		REQUIRE(changed.size() == 1);
+		REQUIRE(keyed.size() == 1);
+		const size_t next = (size_t(want[0]->highlighted) + 1) % want[0]->choices.size();
+		CHECK(changed[0].param.to_number() == doctest::Approx(want[0]->choices[next].index));
+		CHECK(keyed[0].param.to_number() == doctest::Approx(want[0]->data_key));
+		CHECK(b.text(b.rows("List_01")[0] + ".stHolder.selectorLabel") == sid(*r, want[0]->choices[next].label));
+		const int32_t key = want[0]->data_key;
+		const double value = want[0]->choices[next].index;
+		const std::string label = want[0]->choices[next].label;
+		REQUIRE(o->set_option_value(key, value));
+		b.model = o->model();
+		b.s.hud->refresh(HudModel{});
+		CHECK(b.text(b.rows("List_01")[0] + ".stHolder.selectorLabel") == sid(*r, label));
+	}
+
+	TEST_CASE("options screens: a bar selector steps by its step size and draws the inner bar") {
+		ui_retail::Retail *r = ui_retail::retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		std::unique_ptr<OptionsSession> o = retail_options(*r);
+		OptionsRig b;
+		open_options(*r, b, kOptionsAudioScreen, o->model());
+		const std::vector<const OptionRowData *> want = tab_rows(b.model, OptionsTab::Audio, "List_01");
+		const std::vector<std::string> rows = b.rows("List_01");
+		REQUIRE(rows.size() == want.size());
+		REQUIRE(want[0]->row == OptionRowType::BarSelector);
+		const float border = b.s.hud->clip(rows[0] + ".bar.border").width();
+		const auto ratio = [&](double p_v) { return float((p_v - want[0]->from) / (want[0]->to - want[0]->from)); };
+		CHECK(b.s.hud->clip(rows[0] + ".bar.innerBar").width() ==
+				doctest::Approx((border - 8.0f) * ratio(want[0]->value)));
+		REQUIRE(b.s.hud->deliver_in_event("List_01", kEnterTop));
+		b.events.clear();
+		step(b, UiInputConcept::NavigateLeft);
+		const std::vector<HudWidgetEvent> changed = b.fired("List_01", kListSelectorChanged);
+		REQUIRE(changed.size() == 2);
+		const double v = std::max(want[0]->from, want[0]->value - want[0]->step);
+		CHECK(changed[0].param.to_number() == doctest::Approx(v));
+		CHECK(changed[1].param.to_number() == doctest::Approx(v));
+		CHECK(b.fired("List_01", kListHighlighted).size() == 1);
+		const std::vector<HudWidgetEvent> keyed = b.fired("List_01", kListSelectorChangedKeyValue);
+		REQUIRE(keyed.size() == 1);
+		CHECK(keyed[0].param.to_number() == doctest::Approx(want[0]->data_key));
+		CHECK(b.s.hud->clip(rows[0] + ".bar.innerBar").width() == doctest::Approx((border - 8.0f) * ratio(v)));
+	}
+
+	TEST_CASE("options screens: the video screen lists its nested rows") {
+		ui_retail::Retail *r = ui_retail::retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		std::unique_ptr<OptionsSession> o = retail_options(*r);
+		OptionsRig b;
+		open_options(*r, b, kOptionsVideoScreen, o->model());
+		const std::vector<std::string> rows = b.rows("List_01");
+		const std::vector<const OptionRowData *> want = tab_rows(b.model, OptionsTab::Video, "List_01");
+		std::printf("ui.options.screens video rows %zu of %zu\n", rows.size(), want.size());
+		REQUIRE(rows.size() == want.size());
+		for (size_t i = 0; i < rows.size(); ++i) {
+			CAPTURE(want[i]->source);
+			CHECK(b.text(rows[i] + ".Label.txtField") == sid(*r, want[i]->label));
+		}
+	}
+
+	TEST_CASE("options screens: the key binding list shows the on-foot rows and Right moves the column") {
+		ui_retail::Retail *r = ui_retail::retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		std::unique_ptr<OptionsSession> o = retail_options(*r);
+		OptionsRig b;
+		open_options(*r, b, kOptionsKeyBindingScreen, o->model());
+		REQUIRE_FALSE(b.model.key_bindings.empty());
+		const std::vector<KeyBindingRowData> foot = b.model.key_bindings[0];
+		const std::vector<std::string> rows = b.rows("List_01");
+		REQUIRE_FALSE(rows.empty());
+		CHECK(rows.size() <= foot.size());
+		const auto shown = [&](const std::string &p_sid) { return p_sid.empty() ? p_sid : sid(*r, p_sid); };
+		CHECK(b.text(rows[0] + ".Label_0.txtField") == shown(foot[0].label));
+		CHECK(b.text(rows[0] + ".Label_1.txtField") == shown(foot[0].inputs[0]));
+		CHECK(b.s.hud->clip(rows[0] + ".col_0").visible());
+		CHECK_FALSE(b.s.hud->clip(rows[0] + ".col_1").visible());
+		REQUIRE(b.s.hud->deliver_in_event("List_01", kEnterTop));
+		b.events.clear();
+		step(b, UiInputConcept::NavigateRight);
+		const std::vector<HudWidgetEvent> changed = b.fired("List_01", kListSelectorChanged);
+		REQUIRE(changed.size() == 2);
+		CHECK(changed[0].param.to_number() == doctest::Approx(1.0));
+		CHECK(changed[1].param.to_number() == doctest::Approx(1.0));
+		CHECK(b.fired("List_01", kListSelectorChangedKeyValue).empty());
+		CHECK(b.s.hud->clip(rows[0] + ".col_0").visible());
+		o->select_key_column(1);
+		b.model = o->model();
+		b.s.hud->refresh(HudModel{});
+		CHECK(b.s.hud->clip(rows[0] + ".col_1").visible());
+		CHECK_FALSE(b.s.hud->clip(rows[0] + ".col_0").visible());
+		CHECK(b.text(rows[0] + ".Label_0.txtField") == shown(foot[0].label));
 	}
 }

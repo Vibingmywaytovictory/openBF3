@@ -92,6 +92,33 @@ HudListBinding list_binding_of(const EbxResolver &p_db, const EbxPartition &p_pa
 	return l;
 }
 
+std::vector<HudNestedList> nested_lists_of(const EbxResolver &p_db, const EbxPartition &p_part, const EbxStruct &p_b) {
+	std::vector<HudNestedList> out;
+	const std::optional<EbxValue> lists = p_b.get("NestedLists");
+	const OptionalEbxArray arr = lists ? lists->as_array() : OptionalEbxArray();
+	if (!arr) {
+		return out;
+	}
+	for (const EbxValue &v : *arr) {
+		const std::optional<EbxStruct> n = v.as_struct();
+		if (!n || out.size() >= kHudMaxNestedLists) {
+			continue;
+		}
+		HudNestedList l;
+		l.label = text_of(n->get("Label"));
+		l.row_type = text_of(n->get("RowType"));
+		if (const std::optional<EbxStruct> q = detail::sub(*n, "ListDataSource")) {
+			l.source = source_of(p_db, p_part, *q);
+		}
+		if (const std::optional<EbxStruct> q = detail::sub(*n, "DynamicShowList")) {
+			l.show = source_of(p_db, p_part, *q);
+		}
+		l.hidden_on_pc = detail::flag_or(*n, "HiddenOnPC", false);
+		out.push_back(std::move(l));
+	}
+	return out;
+}
+
 void read_binding(const EbxResolver &p_db, const EbxPartition &p_part, const EbxInstance &p_node, HudWidgetNode &r_widget) {
 	const std::optional<EbxInstance> b = p_db.follow(p_node.data(), "DataBinding");
 	if (!b) {
@@ -113,6 +140,11 @@ void read_binding(const EbxResolver &p_db, const EbxPartition &p_part, const Ebx
 	}
 	if (b->is_a("UIListDataBinding")) {
 		r_widget.list = list_binding_of(p_db, p_part, b->data());
+		return;
+	}
+	if (b->is_a("UINestedListDataBinding")) {
+		r_widget.list = list_binding_of(p_db, p_part, b->data());
+		r_widget.list->nested = nested_lists_of(p_db, p_part, b->data());
 		return;
 	}
 	if (b->is_a("UIPageHeaderBinding")) {

@@ -22,6 +22,7 @@ public:
 	virtual void row_pressed(double p_index) = 0;
 	virtual void row_mouse_over(double p_index, bool p_value) = 0;
 	virtual void row_highlighted(double p_index, bool p_value) = 0;
+	virtual void row_selector_changed(double p_index, const As2Value &p_arg) = 0;
 };
 
 class RowStateListener {
@@ -94,6 +95,9 @@ public:
 	virtual void reset(bool p_destroy);
 	void register_state_callback(std::string p_listener_path);
 	const std::string &state() const { return state_; }
+	virtual void step_selection(double, const As2Value &) {}
+	virtual As2Value selector_value() const { return As2Value(); }
+	void set_selector_callback(bool p_on) { selector_callback_ = p_on; }
 
 protected:
 	void state_changed();
@@ -103,13 +107,22 @@ protected:
 	void register_direct_access_array(std::vector<ListAccessItem> p_items);
 	ListOwner *owner() const;
 	void set_bg_state(const std::string &p_state) const;
+	void selector_changed(const As2Value &p_arg);
+	virtual void setup_mouse_interaction();
+	virtual void turn_off_mouse_interaction();
+	bool mouse_listening() const { return has_mouse_listeners_; }
+	void set_mouse_listening(bool p_on) { has_mouse_listeners_ = p_on; }
+	void mouse_over();
+	void mouse_out();
+	void mouse_pressed();
+	void mouse_released();
+	void mouse_release_outside();
 
 	HudWidgetHost *host_ = nullptr;
 
-private:
 	void check_states(const As2Value &p_data);
-	void setup_mouse_interaction();
-	void turn_off_mouse_interaction();
+
+private:
 	void handle_glow_size() const;
 
 	As2Value data_;
@@ -129,9 +142,12 @@ private:
 	bool use_mouse_ = false;
 	bool has_mouse_listeners_ = false;
 	bool use_3d_ = false;
+	bool selector_callback_ = false;
 	std::string unfocus_mode_ = "normal";
 };
 
 std::optional<std::vector<As2Value>> hud_model_direct_rows(const HudDataSource &p_query, const HudModel &p_model);
-
+std::optional<As2Value> hud_options_list_rows(const HudListBinding &p_binding, const HudClientState &p_client);
+std::optional<std::vector<As2Value>> hud_options_direct_rows(
+		const HudDataSource &p_query, const HudClientState &p_client);
 }

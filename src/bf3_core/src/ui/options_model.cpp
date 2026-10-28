@@ -94,6 +94,12 @@ void OptionsSession::select_key_tab(uint8_t p_tab) {
 	}
 }
 
+void OptionsSession::select_key_column(uint8_t p_column) {
+	if (p_column < kKeyColumnCount) {
+		key_column_ = p_column;
+	}
+}
+
 bool OptionsSession::set_option_value(int32_t p_data_key, double p_value) {
 	const OptionSource *src = option_source_of_key(p_data_key);
 	const OptionSetting *s =
@@ -270,6 +276,7 @@ OptionsModel OptionsSession::model() const {
 	}
 	m.selected_tab = selected_tab_;
 	m.key_tab = key_tab_;
+	m.key_column = key_column_;
 	const bool capturing = capture_.waiting() || capture_.conflict_pending();
 	m.key_binding_mode = capture_.waiting();
 	m.key_bind_conflict = capture_.conflict_pending();
