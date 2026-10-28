@@ -16,6 +16,7 @@
 #include "bf3/core/ui/text_db.h"
 #include "bf3/core/ui/ui_direct_access.h"
 #include "bf3/core/ui/ui_fonts.h"
+#include "bf3/core/ui/ui_stage.h"
 #include "test_support.h"
 #include "ui_retail_support.h"
 
@@ -584,6 +585,41 @@ TEST_SUITE("ui-hud-screen-unit") {
 		CHECK(hud_relation(m, kHudNoPlayer) == kHudRelationEnemy);
 	}
 
+	TEST_CASE("hud screen unit: the UI stage fits the screens' stage into the window as showAll, Stage.visibleRect "
+			  "beyond it") {
+		const UiStage wide = ui_stage_show_all(1280.0f, 720.0f);
+		CHECK(wide.scale == 1.0);
+		CHECK(wide.offset_x == 0.0);
+		CHECK(wide.visible == kUiScreenStage);
+		const UiStage big = ui_stage_show_all(2560.0f, 1440.0f);
+		CHECK(big.scale == 2.0);
+		CHECK(big.visible == kUiScreenStage);
+		const UiStage four_three = ui_stage_show_all(1024.0f, 768.0f);
+		CHECK(four_three.scale == doctest::Approx(0.8));
+		CHECK(four_three.offset_x == doctest::Approx(0.0));
+		CHECK(four_three.offset_y == doctest::Approx(96.0));
+		CHECK(four_three.visible.x_min == doctest::Approx(0.0f));
+		CHECK(four_three.visible.y_min == doctest::Approx(-120.0f));
+		CHECK(four_three.visible.y_max == doctest::Approx(840.0f));
+		const UiStage cinema = ui_stage_show_all(2560.0f, 1080.0f);
+		CHECK(cinema.scale == doctest::Approx(1.5));
+		CHECK(cinema.offset_x == doctest::Approx(320.0));
+		CHECK(cinema.visible.x_min == doctest::Approx(-213.333f));
+		CHECK(cinema.visible.x_max == doctest::Approx(1493.333f));
+		CHECK(cinema.visible.y_min == doctest::Approx(0.0f));
+		const SwfPoint at = ui_stage_to_window(cinema, SwfPoint{ 640.0f, 360.0f });
+		CHECK(at.x == doctest::Approx(1280.0f));
+		CHECK(at.y == doctest::Approx(540.0f));
+		const SwfPoint back = ui_window_to_stage(cinema, SwfPoint{ 0.0f, 1080.0f });
+		CHECK(back.x == doctest::Approx(cinema.visible.x_min));
+		CHECK(back.y == doctest::Approx(720.0f));
+		CHECK(hud_align_axis(HudAxisAlign::Near, -2.8f, cinema.visible.x_min, cinema.visible.width(), 1280.0f,
+					  kHudFootageSafeX) == std::round(cinema.visible.x_min + kHudFootageSafeX - 2.8f));
+		const UiStage degenerate = ui_stage_show_all(0.0f, std::nanf(""));
+		CHECK(degenerate.width_px == 1.0f);
+		CHECK(std::isfinite(degenerate.scale));
+	}
+
 	TEST_CASE("hud screen unit: message queue rows, expiry, overflow and RemoveFlag") {
 		HudMessageCompData d;
 		HudMessageInfo &k = d.info[size_t(HudMessageSource::Kill)];
@@ -908,8 +944,11 @@ TEST_SUITE("ui-hud-screen") {
 			Result<HudScreenAsset> a = read_hud_screen_asset(*r->level, partition);
 			CHECK_MESSAGE(a.ok(), partition);
 			CHECK_MESSAGE((a.ok() && !a->movie.empty()), partition);
+			Result<SwfScene> movie = a.ok() ? SwfScene::open(*r->lib, a->movie) : Result<SwfScene>(a.error());
+			CHECK_MESSAGE((movie.ok() && movie->stage() == kUiScreenStage), partition);
 		}
 		Screen s = open_screen(*r, kHudMpScreenPartition);
+		CHECK(s.scene->stage() == kUiScreenStage);
 		CHECK(s.hud->stats().unknown_classes == 0);
 		CHECK(std::count_if(s.hud->widgets().begin(), s.hud->widgets().end(),
 					  [](const auto &w) { return w->class_name == "Widget.Image.ImageManager"; }) == 4);

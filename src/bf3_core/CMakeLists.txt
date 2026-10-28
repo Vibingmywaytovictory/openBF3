@@ -415,3 +415,8 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/ui/screen_adjust.h
     src/ui/screen_adjust.cpp
 )
+
+target_sources(bf3_core PRIVATE
+    include/bf3/core/ui/ui_stage.h
+    src/ui/ui_stage.cpp
+)
