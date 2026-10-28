@@ -15,6 +15,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -123,6 +124,20 @@ inline void setup_refresh_data(HudWidgetController &r_ctl, HudWidgetHost &r_host
 	for (const HudDataEntry &e : p_data) {
 		if (e.value.defined()) {
 			r_ctl.update(r_host, e.key, e.value);
+		}
+	}
+}
+
+inline void hud_flow_sources(std::span<const HudDataSource> p_sources, const HudClientState &p_client, HudData &r_out) {
+	if (!p_client.flow_data) {
+		return;
+	}
+	for (const HudDataSource &src : p_sources) {
+		if (src.category.empty()) {
+			continue;
+		}
+		if (std::optional<std::string> v = p_client.flow_data(src.category, src.key)) {
+			r_out.push_back({ src.name, As2Value::of(std::move(*v)), src.on_initialize });
 		}
 	}
 }

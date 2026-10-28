@@ -982,10 +982,13 @@ constexpr std::string_view kOptionsGameplayScreen = "ui/flow/screen/optionsgamep
 constexpr std::string_view kOptionsAudioScreen = "ui/flow/screen/optionsaudioscreen";
 constexpr std::string_view kOptionsVideoScreen = "ui/flow/screen/optionsvideoscreen";
 constexpr std::string_view kOptionsKeyBindingScreen = "ui/flow/screen/optionskeybindingscreen";
+constexpr std::string_view kPopupBindKey = "ui/flow/screen/popups/popupbindkey";
 constexpr std::string_view kEnterTop = "UIWidgetEventID_EnterTop";
 constexpr int32_t kListHighlighted = 0;
 constexpr int32_t kListSelectorChanged = 8;
 constexpr int32_t kListSelectorChangedKeyValue = 23;
+constexpr int32_t kMenuHintKey = 606381875;
+constexpr int32_t kKeyPressedKey = 1279028100;
 
 std::unique_ptr<OptionsSession> retail_options(ui_retail::Retail &r_r) {
 	static std::unique_ptr<OptionsCatalog> catalog;
@@ -1222,5 +1225,37 @@ TEST_SUITE("ui-options-screens") {
 		CHECK(b.s.hud->clip(rows[0] + ".col_1").visible());
 		CHECK_FALSE(b.s.hud->clip(rows[0] + ".col_0").visible());
 		CHECK(b.text(rows[0] + ".Label_0.txtField") == shown(foot[0].label));
+	}
+
+	TEST_CASE("options screens: the menu hint shows the flow's hint SID") {
+		ui_retail::Retail *r = ui_retail::retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		std::unique_ptr<OptionsSession> o = retail_options(*r);
+		OptionsRig b;
+		open_options(*r, b, kOptionsGameplayScreen, o->model());
+		CHECK(b.clip("MenuHint_01.hint.text.txt").text().empty());
+		b.flow[kMenuHintKey] = "ID_M_MINIMAPTYPE_HINT";
+		b.s.hud->refresh(HudModel{});
+		CHECK(b.clip("MenuHint_01.hint.text.txt").text() == sid(*r, "ID_M_MINIMAPTYPE_HINT"));
+		CHECK(b.clip("MenuHint_01.hint.bg").width() > b.clip("MenuHint_01.hint.text.txt").text_width());
+	}
+
+	TEST_CASE("options screens: the bind-key popup's change listener fires KeyChanged when the key arrives") {
+		ui_retail::Retail *r = ui_retail::retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		std::unique_ptr<OptionsSession> o = retail_options(*r);
+		OptionsRig b;
+		open_options(*r, b, kPopupBindKey, o->model());
+		CHECK_FALSE(b.clip("ChangeListener_01").visible());
+		CHECK(b.fired("ChangeListener_01", 0).empty());
+		b.flow[kKeyPressedKey] = "False";
+		b.s.hud->refresh(HudModel{});
+		const std::vector<HudWidgetEvent> pressed = b.fired("ChangeListener_01", 0);
+		REQUIRE(pressed.size() == 1);
+		CHECK(pressed[0].param.to_string() == "False");
 	}
 }
