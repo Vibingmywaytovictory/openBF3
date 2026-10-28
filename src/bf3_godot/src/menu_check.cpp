@@ -80,8 +80,8 @@ bool MenuCheck::shown(const Ctx &p_c, std::string_view p_partition) {
 	return s.screen != nullptr && s.shown;
 }
 
-std::string MenuCheck::row_state(const Ctx &p_c, size_t p_row) {
-	const ui::SwfScene *scene = menu_scene(p_c.screens.find_screen(kIngameMenuPartition));
+std::string menu_row_label(const UiScreenSlot &p_slot, size_t p_row) {
+	const ui::SwfScene *scene = menu_scene(p_slot);
 	if (scene == nullptr) {
 		return "no menu";
 	}
@@ -89,10 +89,9 @@ std::string MenuCheck::row_state(const Ctx &p_c, size_t p_row) {
 	return p_row < rows.size() ? frame_label(*rows[p_row]) : std::string("no row");
 }
 
-std::optional<godot::Vector2> MenuCheck::row_point(const Ctx &p_c, size_t p_row, bool p_hit) {
-	const UiScreenSlot slot = p_c.screens.find_screen(kIngameMenuPartition);
-	const ui::SwfScene *scene = menu_scene(slot);
-	if (scene == nullptr || slot.view == nullptr) {
+std::optional<ui::SwfPoint> menu_row_stage_point(const UiScreenSlot &p_slot, size_t p_row, bool p_hit) {
+	const ui::SwfScene *scene = menu_scene(p_slot);
+	if (scene == nullptr || p_slot.view == nullptr) {
 		return std::nullopt;
 	}
 	const std::vector<const ui::SwfSceneNode *> rows = menu_rows(*scene);
@@ -102,9 +101,24 @@ std::optional<godot::Vector2> MenuCheck::row_point(const Ctx &p_c, size_t p_row,
 	const ui::SwfMatrix w = ui::swf_world_matrix(*scene, rows[p_row]->id);
 	const float sx = w.a * kMenuCheckRowHitX + w.c * kMenuCheckRowHitY + w.tx;
 	const float sy = w.b * kMenuCheckRowHitX + w.d * kMenuCheckRowHitY + w.ty;
-	if (p_hit && slot.screen->hit_target(sx, sy) != rows[p_row]->path) {
+	if (p_hit && p_slot.screen->hit_target(sx, sy) != rows[p_row]->path) {
 		return std::nullopt;
 	}
+	return ui::SwfPoint{ sx, sy };
+}
+
+std::string MenuCheck::row_state(const Ctx &p_c, size_t p_row) {
+	return menu_row_label(p_c.screens.find_screen(kIngameMenuPartition), p_row);
+}
+
+std::optional<godot::Vector2> MenuCheck::row_point(const Ctx &p_c, size_t p_row, bool p_hit) {
+	const UiScreenSlot slot = p_c.screens.find_screen(kIngameMenuPartition);
+	const std::optional<ui::SwfPoint> at = menu_row_stage_point(slot, p_row, p_hit);
+	if (!at) {
+		return std::nullopt;
+	}
+	const float sx = at->x;
+	const float sy = at->y;
 	const SwfStageFit fit = slot.view->stage_fit();
 	const godot::Vector2 local(float(fit.offset_x + sx * fit.scale_x), float(fit.offset_y + sy * fit.scale_y));
 	return slot.view->get_global_transform().xform(local);

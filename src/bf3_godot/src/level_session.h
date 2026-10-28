@@ -122,6 +122,7 @@ public:
 	const Bf3UiScreens *screen_stack() const;
 	const UiScreenRecords *screen_records() const;
 	void scripted_ui_key(godot::Key p_key, bool p_pressed);
+	void push_window_mouse(godot::Vector2 p_window_px, int32_t p_button, bool p_pressed);
 
 	bool restart_client(const std::string &p_netsim, uint64_t p_seed, std::string *r_error);
 	bool join_extra_client(std::string *r_error);

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "bf3/core/ui/swf_movie.h"
+
 #include <godot_cpp/classes/global_constants.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/ref.hpp>
@@ -20,6 +22,7 @@ namespace bf3::godot_side {
 class Bf3UiScreens;
 class NativeFlow;
 class NativeMenu;
+struct UiScreenSlot;
 
 inline constexpr double kMenuCheckSeconds = 150.0;
 inline constexpr double kMenuCheckHoldSeconds = 1.0;
@@ -29,6 +32,10 @@ inline constexpr float kMenuCheckRowHitY = 17.0f;
 inline constexpr float kMenuCheckBrightLevel = 110.0f / 255.0f;
 inline constexpr float kMenuCheckOverviewBright = 0.2f;
 inline constexpr int32_t kMenuCheckSampleStep = 2;
+
+std::string menu_row_label(const UiScreenSlot &p_slot, size_t p_row);
+std::optional<bf3::core::ui::SwfPoint> menu_row_stage_point(
+		const UiScreenSlot &p_slot, size_t p_row, bool p_hit = true);
 
 struct MenuCheckIo {
 	std::function<void(godot::Key, bool)> press;

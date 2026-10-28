@@ -17,6 +17,7 @@
 #include "swf_view.h"
 #include "ui_cursor.h"
 #include "ui_post_process.h"
+#include "ui_sizes_check.h"
 #include "viewmodel.h"
 
 #include "bf3/core/util/key_values.h"
@@ -24,11 +25,13 @@
 #include "bf3/host/ui_flow_session.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/input_event_mouse_motion.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/classes/viewport_texture.hpp>
+#include <godot_cpp/classes/window.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <string>
@@ -36,6 +39,28 @@
 using namespace godot;
 
 namespace bf3::godot_side {
+
+void Bf3LevelSession::push_window_mouse(Vector2 p_window_px, int32_t p_button, bool p_pressed) {
+	Viewport *vp = get_viewport();
+	if (vp == nullptr) {
+		return;
+	}
+	if (p_button == 0) {
+		Ref<InputEventMouseMotion> e;
+		e.instantiate();
+		e->set_position(p_window_px);
+		e->set_global_position(p_window_px);
+		vp->push_input(e);
+		return;
+	}
+	Ref<InputEventMouseButton> e;
+	e.instantiate();
+	e->set_position(p_window_px);
+	e->set_global_position(p_window_px);
+	e->set_button_index(MouseButton(p_button));
+	e->set_pressed(p_pressed);
+	vp->push_input(e);
+}
 
 void NativeMenu::build(Bf3UiScreens &r_screens) {
 	for (const std::string_view p : kMenuDrawnPartitions) {
@@ -306,6 +331,47 @@ bool Bf3LevelSession::tdm_menu_frame(double p_now_s) {
 				finish(1);
 				return true;
 			}
+		}
+	}
+	if (m.ui_sizes_check_on && m.ui_sizes_check == nullptr) {
+		m.ui_sizes_check = std::unique_ptr<UiSizesCheck, void (*)(UiSizesCheck *)>(
+				new UiSizesCheck(user_arg_value("ui-sizes-shots")), &delete_part<UiSizesCheck>);
+	}
+	if (m.ui_sizes_check != nullptr && !m.finished) {
+		Window *window = get_window();
+		UiSizesCheckIo uio;
+		uio.press = [this](Key p_key, bool p_pressed) { scripted_ui_key(p_key, p_pressed); };
+		uio.mouse = [this](Vector2 p_window_px, int32_t p_button, bool p_pressed) {
+			push_window_mouse(p_window_px, p_button, p_pressed);
+		};
+		uio.set_window = [window](Vector2i p_size, bool p_fullscreen) {
+			if (window == nullptr) {
+				return;
+			}
+			window->set_mode(p_fullscreen ? Window::MODE_FULLSCREEN : Window::MODE_WINDOWED);
+			if (!p_fullscreen) {
+				window->set_size(p_size);
+				window->move_to_center();
+			}
+		};
+		uio.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		uio.window_size = window != nullptr ? window->get_size() : Vector2i();
+		uio.fullscreen = window != nullptr && window->get_mode() == Window::MODE_FULLSCREEN;
+		uio.screen_size = window != nullptr
+				? DisplayServer::get_singleton()->screen_get_size(window->get_current_screen())
+				: Vector2i();
+		uio.canvas_size = get_viewport()->get_visible_rect().size;
+		const Bf3UiCursor *cursor = Bf3UiCursor::current();
+		uio.cursor_shown = cursor != nullptr && cursor->cursor_shown();
+		uio.cursor_scale = cursor != nullptr ? cursor->cursor_scale() : 0.0f;
+		uio.alive = game_->alive;
+		uio.game_input = mapper_.game_input();
+		uio.hud_visible = game_->native_hud != nullptr && game_->native_hud->is_visible();
+		if (m.ui_sizes_check->frame(*screens, *m.native_flow, *m.native_menu, m.native_options.get(), p_now_s, uio)) {
+			m.finished = true;
+			UtilityFunctions::print(to_godot(m.ui_sizes_check->report()));
+			finish(m.ui_sizes_check->exit_code());
+			return true;
 		}
 	}
 #endif

@@ -32,6 +32,7 @@ class NativeScreensCheck;
 class DeployCheck;
 class LoadingScreenCheck;
 class OverlayCheck;
+class UiSizesCheck;
 
 struct TdmState {
 
@@ -122,6 +123,8 @@ struct TdmState {
 	bool options_check_on = false;
 	bool options_check_reported = false;
 	std::unique_ptr<OptionsCheck, void (*)(OptionsCheck *)> options_check{ nullptr, nullptr };
+	bool ui_sizes_check_on = false;
+	std::unique_ptr<UiSizesCheck, void (*)(UiSizesCheck *)> ui_sizes_check{ nullptr, nullptr };
 	std::unique_ptr<NativeScreensCheck, void (*)(NativeScreensCheck *)> native_check{ nullptr, nullptr };
 	std::unique_ptr<LoadingScreenCheck, void (*)(LoadingScreenCheck *)> loading_check{ nullptr, nullptr };
 	std::unique_ptr<DeployCheck, void (*)(DeployCheck *)> deploy_run{ nullptr, nullptr };

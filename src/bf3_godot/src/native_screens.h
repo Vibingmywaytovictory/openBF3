@@ -93,6 +93,7 @@ public:
 	bool mouse_move(godot::Vector2 p_viewport);
 	bool mouse_button(godot::Vector2 p_viewport, int32_t p_button, bool p_pressed);
 	bool mouse_wheel(godot::Vector2 p_viewport, float p_delta);
+	std::optional<bf3::core::ui::SwfPoint> clip_stage_centre(std::string_view p_partition, std::string_view p_path);
 	std::optional<godot::Vector2> clip_centre(std::string_view p_partition, std::string_view p_path);
 
 	std::optional<UiScreenPhase> phase(std::string_view p_partition) const;

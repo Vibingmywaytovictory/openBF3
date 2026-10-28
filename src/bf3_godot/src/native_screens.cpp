@@ -822,7 +822,7 @@ bool Bf3UiScreens::mouse_button(Vector2 p_viewport, int32_t p_button, bool p_pre
 	return s != nullptr && at && s->mouse_button(at->x, at->y, p_button, p_pressed);
 }
 
-std::optional<Vector2> Bf3UiScreens::clip_centre(std::string_view p_partition, std::string_view p_path) {
+std::optional<ui::SwfPoint> Bf3UiScreens::clip_stage_centre(std::string_view p_partition, std::string_view p_path) {
 	Entry *e = find(p_partition);
 	ui::HudScreen *s = e != nullptr ? screen_of(*e) : nullptr;
 	const Bf3SwfView *v = e != nullptr ? view_of(*e) : nullptr;
@@ -832,10 +832,18 @@ std::optional<Vector2> Bf3UiScreens::clip_centre(std::string_view p_partition, s
 	}
 	const ui::SwfRect b = ui::swf_node_local_bounds(s->scene(), *n);
 	const ui::SwfMatrix w = ui::swf_world_matrix(s->scene(), n->id);
-	const float x = w.tx + w.a * (b.x_min + b.x_max) * 0.5f;
-	const float y = w.ty + w.d * (b.y_min + b.y_max) * 0.5f;
+	return ui::SwfPoint{ w.tx + w.a * (b.x_min + b.x_max) * 0.5f, w.ty + w.d * (b.y_min + b.y_max) * 0.5f };
+}
+
+std::optional<Vector2> Bf3UiScreens::clip_centre(std::string_view p_partition, std::string_view p_path) {
+	const std::optional<ui::SwfPoint> at = clip_stage_centre(p_partition, p_path);
+	const Entry *e = at ? find(p_partition) : nullptr;
+	const Bf3SwfView *v = e != nullptr ? view_of(*e) : nullptr;
+	if (v == nullptr) {
+		return std::nullopt;
+	}
 	const SwfStageFit fit = v->stage_fit();
-	const Vector2 local(float(x * fit.scale_x + fit.offset_x), float(y * fit.scale_y + fit.offset_y));
+	const Vector2 local(float(at->x * fit.scale_x + fit.offset_x), float(at->y * fit.scale_y + fit.offset_y));
 	return v->get_global_transform().xform(local);
 }
 

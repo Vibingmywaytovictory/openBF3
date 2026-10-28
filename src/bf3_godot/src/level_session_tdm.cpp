@@ -458,7 +458,8 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 			quit_after_ = 1.0e9;
 		}
 		m.options_check_on = has_user_arg("options-check");
-		if (m.options_check_on && quit_after_ <= 0.0) {
+		m.ui_sizes_check_on = has_user_arg("ui-sizes-check");
+		if ((m.options_check_on || m.ui_sizes_check_on) && quit_after_ <= 0.0) {
 			quit_after_ = 1.0e9;
 		}
 		m.options.tdm_tuning_cfg = config_path("res://config/tdm_tuning.cfg");
