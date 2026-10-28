@@ -322,7 +322,21 @@ bool EorCheck::frame(Bf3UiScreens &r_screens, bf3::host::UiFlowSession *p_sessio
 			}
 			break;
 		case Step::Page:
+			if (!banner_under_hud64_checked_ && visible(r_screens, kEorHud64Partition) &&
+					p_now_s - step_s_ >= kEorCheckSettleS) {
+				banner_under_hud64_checked_ = true;
+				if (banner) {
+					fail("eorwinningteamscreen is still up under hud64; 18.57 at 327.2 s drops it on the frame hud64 "
+						 "opens");
+					break;
+				}
+				note("eorwinningteamscreen closed when hud64 opened");
+			}
 			if (page) {
+				if (!banner_under_hud64_checked_) {
+					fail("the END OF ROUND page opened before the banner was checked under hud64");
+					break;
+				}
 				page_s_ = p_now_s;
 				if (timed(p_now_s - banner_s_, page_after_banner(p_io), kEorCheckToleranceS, "EOR page")) {
 					go(Step::PageSettled, p_now_s);

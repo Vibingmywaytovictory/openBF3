@@ -117,6 +117,7 @@ private:
 	double shot_at_s_ = -1.0;
 	const char *shot_name_ = nullptr;
 	bool flash_shot_ = false;
+	bool banner_under_hud64_checked_ = false;
 	bool player_view_checked_ = false;
 	bool done_ = false;
 	bool passed_ = false;

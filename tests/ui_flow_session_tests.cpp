@@ -261,8 +261,8 @@ TEST_SUITE("ui-flow-session") {
 		const Lines round_over_expected{ "native RoundOver.OnRoundOver 2", "close hudscreen", "close hudmpscreen",
 			"close hudtdmscreen", "native EndOfRound", "deploy UnSpawnCustomizationVehicle",
 			"deploy UnSpawnCustomization", "deploy OnFrontendCameraChanged", "push eorwinningteamscreen",
-			"deploy OnFrontendCameraChanged", "push scoreboardtwoteamshud64screen", "deploy OnFrontendCameraChanged",
-			"close eorwinningteamscreen", "close scoreboardtwoteamshud64screen", "push eordetailstabsscreen",
+			"deploy OnFrontendCameraChanged", "close eorwinningteamscreen", "push scoreboardtwoteamshud64screen",
+			"deploy OnFrontendCameraChanged", "close scoreboardtwoteamshud64screen", "push eordetailstabsscreen",
 			"push eordetailsscoreboardscreen", "push scoreboardtwoteamsscreen", "deploy OnFrontendCameraChanged",
 			"deploy MouseInput", "deploy GameInput", "deploy OnFrontendCameraChanged" };
 		CHECK(round_over == round_over_expected);

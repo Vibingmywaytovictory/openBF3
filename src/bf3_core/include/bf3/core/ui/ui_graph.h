@@ -260,6 +260,8 @@ private:
 	std::vector<uint64_t> closing_;
 	std::optional<uint64_t> focus_;
 	uint64_t next_screen_ = 1;
+	std::string input_graph_;
+	uint64_t input_first_screen_ = 0;
 	size_t depth_ = 0;
 	size_t calls_ = 0;
 	size_t budget_ = 0;

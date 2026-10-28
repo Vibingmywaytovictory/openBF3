@@ -367,6 +367,7 @@ constexpr std::string_view kPreRoundWaitingGraph = "ui/flow/graph/preround/prero
 constexpr std::string_view kPreEndOfRoundGraph = "ui/flow/graph/endofround/preendofroundgraph";
 constexpr std::string_view kEndOfRoundGraph = "ui/flow/graph/endofround/endofroundgraph";
 constexpr std::string_view kIngameMenuGraph = "ui/flow/graph/ingame/mp/ingamemenumpgraph";
+constexpr std::string_view kVehicleCommonGraph = "ui/flow/graph/vehicle/vehiclecommongraph";
 
 constexpr std::string_view kRetailGraphs[] = { kKilledGraph, kSpawnGraphPc, kSpawnButtonGraph, kScoreboardGraph,
 	kPreRoundWaitingGraph, kPreEndOfRoundGraph, kEndOfRoundGraph, kIngameMenuGraph };
@@ -637,8 +638,23 @@ TEST_SUITE("ui-graph") {
 						"show eorwinningteamscreen", "focus eorwinningteamscreen" });
 		REQUIRE(run.flow.fire_input(kPreEndOfRoundGraph, "Scoreboard"));
 		CHECK(run.take("preendofround.Scoreboard") ==
-				Lines{ "action OnFrontendCameraChanged(0.2) <1", "push scoreboardtwoteamshud64screen",
-						"show scoreboardtwoteamshud64screen", "focus scoreboardtwoteamshud64screen" });
+				Lines{ "action OnFrontendCameraChanged(0.2) <1", "close eorwinningteamscreen",
+						"push scoreboardtwoteamshud64screen", "show scoreboardtwoteamshud64screen",
+						"focus scoreboardtwoteamshud64screen" });
+		CHECK(run.flow.errors().empty());
+	}
+
+	TEST_CASE("ui graph: vehiclecommongraph has ProtectScreens, so its inputs stack their screens") {
+		RetailGraphs *r = retail_graphs_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		Run run(*r);
+		REQUIRE(run.flow.fire_input(kVehicleCommonGraph, "Dot"));
+		CHECK(run.take("vehiclecommon.Dot") == Lines{ "push crosshairdot", "show crosshairdot", "focus crosshairdot" });
+		REQUIRE(run.flow.fire_input(kVehicleCommonGraph, "DefaultWeapon"));
+		CHECK(run.take("vehiclecommon.DefaultWeapon") ==
+				Lines{ "push defaultweapon", "show defaultweapon", "focus defaultweapon" });
 		CHECK(run.flow.errors().empty());
 	}
 

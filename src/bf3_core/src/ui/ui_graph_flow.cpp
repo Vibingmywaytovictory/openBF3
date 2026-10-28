@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <limits>
 #include <map>
+#include <utility>
 
 namespace bf3::core::ui {
 
@@ -301,6 +302,13 @@ UiFlowScreen *UiFlow::ensure_screen(Instance &r_inst, uint32_t p_node, bool p_sh
 		}
 	}
 	if (s == nullptr) {
+		if (p_focus && r_inst.graph == input_graph_ && !r_inst.asset->protect_screens) {
+			for (size_t i = 0; i < screens_.size(); ++i) {
+				if (screens_[i].graph == r_inst.graph && screens_[i].id < input_first_screen_) {
+					begin_close(i);
+				}
+			}
+		}
 		if (screens_.size() >= kUiFlowMaxScreens) {
 			error("more than " + std::to_string(kUiFlowMaxScreens) + " screens");
 			return nullptr;
@@ -614,7 +622,11 @@ bool UiFlow::fire_input(std::string_view p_graph, std::string_view p_input, std:
 		if (const std::optional<uint32_t> n = inst->asset->find(UiGraphNodeKind::InstanceInput, p_input)) {
 			note("input " + leaf(p_graph) + "." + std::string(p_input));
 			found = true;
+			std::string outer_graph = std::exchange(input_graph_, inst->graph);
+			const uint64_t outer_first = std::exchange(input_first_screen_, next_screen_);
 			enter(*inst, *n, 0, p_value);
+			input_graph_ = std::move(outer_graph);
+			input_first_screen_ = outer_first;
 		} else {
 			error("graph " + std::string(p_graph) + " has no input " + std::string(p_input));
 		}
