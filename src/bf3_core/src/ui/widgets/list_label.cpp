@@ -77,6 +77,12 @@ public:
 		set_label();
 	}
 
+	void direct_access(HudWidgetHost &, const UiDirectAccessApply &p_apply) override {
+		if (p_apply.op == UiDirectAccessOp::Text) {
+			set_text(p_apply.value.to_string());
+		}
+	}
+
 	const std::string &text() const override { return text_; }
 
 	void set_label_width(float p_width) override {

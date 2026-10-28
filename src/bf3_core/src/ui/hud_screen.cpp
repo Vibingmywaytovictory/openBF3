@@ -808,8 +808,11 @@ struct HudScreen::DirectAccessTarget : UiDirectAccessTarget {
 		const float f = float(v.to_number());
 		switch (p_apply.op) {
 			case UiDirectAccessOp::Text:
-				c.set_text(v.to_string());
-				return;
+				if (const SwfSceneNode *n = c.node(); n == nullptr || n->kind == SwfNodeKind::EditText) {
+					c.set_text(v.to_string());
+					return;
+				}
+				break;
 			case UiDirectAccessOp::GotoAndStop:
 			case UiDirectAccessOp::GotoAndPlay: {
 				const bool play = p_apply.op == UiDirectAccessOp::GotoAndPlay;
