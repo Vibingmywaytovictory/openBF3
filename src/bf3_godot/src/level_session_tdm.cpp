@@ -47,6 +47,7 @@
 #include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/viewport_texture.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -958,6 +959,11 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		}
 		EorCheckIo io;
 		io.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		io.capture = [this] { return get_viewport()->get_texture()->get_image(); };
+		if (const Bf3UiPostProcess *post = Bf3UiPostProcess::current()) {
+			io.ui_dim = post->dim_visibility();
+			io.ui_glitch = post->glitch_power();
+		}
 		const std::shared_ptr<const host::SharedLevel> eor_level = shared_level();
 		io.eor = eor_level != nullptr && eor_level->eor != nullptr ? *eor_level->eor
 																   : bf3::core::gameplay::EorTimeline{};

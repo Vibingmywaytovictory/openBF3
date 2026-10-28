@@ -53,6 +53,68 @@ std::string fixed_text(double p_s) {
 	return text;
 }
 
+double mean_of(const std::vector<EorGradeSample> &p_samples, double EorGradeSample::*p_field) {
+	double sum = 0.0;
+	for (const EorGradeSample &s : p_samples) {
+		sum += s.*p_field;
+	}
+	return p_samples.empty() ? 0.0 : sum / double(p_samples.size());
+}
+
+double sigma_of(const std::vector<EorGradeSample> &p_samples, double EorGradeSample::*p_field) {
+	const double mean = mean_of(p_samples, p_field);
+	double sum = 0.0;
+	for (const EorGradeSample &s : p_samples) {
+		sum += (s.*p_field - mean) * (s.*p_field - mean);
+	}
+	return p_samples.size() < 2 ? 0.0 : std::sqrt(sum / double(p_samples.size() - 1));
+}
+
+}
+
+EorGradeSample eor_grade_sample(const godot::Ref<godot::Image> &p_image) {
+	EorGradeSample out;
+	if (p_image.is_null() || p_image->is_empty()) {
+		return out;
+	}
+	godot::Ref<godot::Image> image = p_image;
+	if (image->get_format() != godot::Image::FORMAT_RGBA8) {
+		image = p_image->duplicate();
+		image->convert(godot::Image::FORMAT_RGBA8);
+	}
+	const int32_t width = image->get_width();
+	const int32_t height = image->get_height();
+	const float sx = float(width) / kEorCheckStageWidth;
+	const float sy = float(height) / kEorCheckStageHeight;
+	const godot::PackedByteArray data = image->get_data();
+	const uint8_t *px = data.ptr();
+	double luma = 0.0;
+	double saturation = 0.0;
+	size_t count = 0;
+	for (const EorCheckStageRect &r : kEorCheckGradeView) {
+		const int32_t x0 = std::clamp(int32_t(std::lround(r.x * sx)), 0, width);
+		const int32_t x1 = std::clamp(int32_t(std::lround((r.x + r.width) * sx)), x0, width);
+		const int32_t y0 = std::clamp(int32_t(std::lround(r.y * sy)), 0, height);
+		const int32_t y1 = std::clamp(int32_t(std::lround((r.y + r.height) * sy)), y0, height);
+		for (int32_t y = y0; y < y1; ++y) {
+			for (int32_t x = x0; x < x1; ++x) {
+				const size_t i = (size_t(y) * size_t(width) + size_t(x)) * 4;
+				const double red = px[i] / 255.0;
+				const double green = px[i + 1] / 255.0;
+				const double blue = px[i + 2] / 255.0;
+				const double hi = std::max({ red, green, blue });
+				const double lo = std::min({ red, green, blue });
+				luma += 0.299 * red + 0.587 * green + 0.114 * blue;
+				saturation += hi > 0.0 ? (hi - lo) / hi : 0.0;
+				++count;
+			}
+		}
+	}
+	if (count > 0) {
+		out.luma = luma / double(count);
+		out.saturation = saturation / double(count);
+	}
+	return out;
 }
 
 void EorCheck::note(std::string p_line) {
@@ -233,6 +295,80 @@ bool EorCheck::check_player_view(const EorCheckIo &p_io) {
 	return true;
 }
 
+bool EorCheck::graded(const Bf3UiScreens &p_screens, double p_now_s, const EorCheckIo &p_io, size_t p_round) {
+	std::vector<EorGradeSample> &samples = grade_[p_round];
+	if (samples.size() >= kEorCheckGradeSamples) {
+		return true;
+	}
+	if (!visible(p_screens, ui::kSpawnScreenPcPartition)) {
+		deploy_up_s_ = -1.0;
+		grade_at_s_ = -1.0;
+		return false;
+	}
+	if (deploy_up_s_ < 0.0) {
+		deploy_up_s_ = p_now_s;
+	}
+	if (!p_io.capture) {
+		return true;
+	}
+	if (grade_at_s_ < 0.0) {
+		if (p_io.ui_dim < 1.0f || p_io.ui_glitch != 0.0f) {
+			return false;
+		}
+		grade_at_s_ = p_now_s;
+		note("round " + std::to_string(p_round + 1) + " join view settled " + fixed_text(p_now_s - deploy_up_s_) +
+				" s after the deploy screen (dim " + fixed_text(p_io.ui_dim) + ", glitch " +
+				fixed_text(p_io.ui_glitch) + ")");
+	}
+	if (p_now_s < grade_at_s_) {
+		return false;
+	}
+	if (samples.empty()) {
+		shot(p_io, p_round == 0 ? "eor_r1_join" : "eor_r2_join");
+	}
+	samples.push_back(eor_grade_sample(p_io.capture()));
+	grade_at_s_ = p_now_s + kEorCheckGradeEveryS;
+	if (samples.size() < kEorCheckGradeSamples) {
+		return false;
+	}
+	note("round " + std::to_string(p_round + 1) + " join view grade: luma " +
+			std::to_string(mean_of(samples, &EorGradeSample::luma)) + " (sigma " +
+			std::to_string(sigma_of(samples, &EorGradeSample::luma)) + "), saturation " +
+			std::to_string(mean_of(samples, &EorGradeSample::saturation)) + " (sigma " +
+			std::to_string(sigma_of(samples, &EorGradeSample::saturation)) + ") over " +
+			std::to_string(samples.size()) + " frames");
+	std::string frames;
+	for (const EorGradeSample &s : samples) {
+		frames += " " + std::to_string(s.luma) + "/" + std::to_string(s.saturation);
+	}
+	note("round " + std::to_string(p_round + 1) + " join view frames (luma/saturation):" + frames);
+	deploy_up_s_ = -1.0;
+	grade_at_s_ = -1.0;
+	return true;
+}
+
+bool EorCheck::check_grade() {
+	if (grade_[0].size() < kEorCheckGradeSamples || grade_[1].size() < kEorCheckGradeSamples) {
+		fail("the join view's grade was not sampled in both rounds");
+		return false;
+	}
+	for (double EorGradeSample::*field : { &EorGradeSample::luma, &EorGradeSample::saturation }) {
+		const char *name = field == &EorGradeSample::luma ? "luma" : "saturation";
+		const double first = mean_of(grade_[0], field);
+		const double second = mean_of(grade_[1], field);
+		const double tolerance = kEorCheckGradeSigmas * sigma_of(grade_[0], field);
+		note(std::string("grade ") + name + ": round 2 " + std::to_string(second) + " against round 1 " +
+				std::to_string(first) + ", tolerance " + std::to_string(tolerance) + " (" +
+				fixed_text(kEorCheckGradeSigmas) + " sigma of round 1's frames)");
+		if (std::fabs(second - first) > tolerance) {
+			fail(std::string("round 2's join view ") + name + " " + std::to_string(second) + " is not round 1's " +
+					std::to_string(first) + " within " + std::to_string(tolerance));
+			return false;
+		}
+	}
+	return true;
+}
+
 bool EorCheck::click_popup_ok(Bf3UiScreens &r_screens) {
 	ui::HudScreen *s = r_screens.hud_screen(kEorPopupPartition);
 	if (s == nullptr) {
@@ -294,7 +430,13 @@ bool EorCheck::frame(Bf3UiScreens &r_screens, bf3::host::UiFlowSession *p_sessio
 	const bool page = visible(r_screens, kEorTabsPartition) && visible(r_screens, kEorScoreboardPartition);
 	switch (step_) {
 		case Step::Banner:
-			deploy(r_screens, p_now_s, p_io);
+			if (graded(r_screens, p_now_s, p_io, 0)) {
+				deploy(r_screens, p_now_s, p_io);
+			}
+			if (p_model.soldier.is_alive && !alive_seen_ && shot_name_ == nullptr) {
+				alive_seen_ = true;
+				shot_later("eor_r1_play", p_now_s + kEorCheckPlayShotS);
+			}
 			if (!flash_shot_ && p_io.flash != nullptr && p_io.flash->stats().last_visibility >= 0.5f) {
 				flash_shot_ = true;
 				shot(p_io, "eor_flash");
@@ -390,12 +532,26 @@ bool EorCheck::frame(Bf3UiScreens &r_screens, bf3::host::UiFlowSession *p_sessio
 		case Step::Restart:
 			if (!visible(r_screens, kEorTabsPartition)) {
 				if (timed(p_now_s - page_s_, double(p_io.eor.eor_s), kEorCheckToleranceS, "next round")) {
+					alive_seen_ = false;
 					go(Step::Banner2, p_now_s);
 				}
 			}
 			break;
 		case Step::Banner2:
+			if (!graded(r_screens, p_now_s, p_io, 1)) {
+				break;
+			}
+			if (!grade_checked_) {
+				grade_checked_ = true;
+				if (!check_grade()) {
+					break;
+				}
+			}
 			deploy(r_screens, p_now_s, p_io);
+			if (p_model.soldier.is_alive && !alive_seen_ && shot_name_ == nullptr) {
+				alive_seen_ = true;
+				shot_later("eor_r2_play", p_now_s + kEorCheckPlayShotS);
+			}
 			if (!player_view_checked_ && p_now_s - step_s_ >= kEorCheckSettleS) {
 				player_view_checked_ = true;
 				if (!check_player_view(p_io)) {

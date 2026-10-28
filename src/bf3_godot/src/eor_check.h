@@ -4,8 +4,10 @@
 #include "bf3/core/level/eor_camera.h"
 
 #include <godot_cpp/classes/global_constants.hpp>
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -48,13 +50,39 @@ inline constexpr float kEorCheckQuitY = 647.0f;
 inline constexpr double kEorCheckCameraM = 0.01;
 inline constexpr double kEorCheckFovDeg = 0.01;
 inline constexpr float kEorCheckFlashPeak = 0.9f;
+inline constexpr size_t kEorCheckGradeSamples = 10;
+inline constexpr double kEorCheckGradeEveryS = 0.1;
+inline constexpr double kEorCheckGradeSigmas = 3.0;
+inline constexpr double kEorCheckPlayShotS = 3.0;
+inline constexpr float kEorCheckStageWidth = 1280.0f;
+inline constexpr float kEorCheckStageHeight = 720.0f;
+
+struct EorCheckStageRect {
+	float x = 0.0f;
+	float y = 0.0f;
+	float width = 0.0f;
+	float height = 0.0f;
+};
+
+inline constexpr std::array<EorCheckStageRect, 3> kEorCheckGradeView = { EorCheckStageRect{ 0.0f, 0.0f, 90.0f, 720.0f },
+	EorCheckStageRect{ 1190.0f, 0.0f, 90.0f, 720.0f }, EorCheckStageRect{ 90.0f, 0.0f, 1100.0f, 48.0f } };
 inline constexpr const char *kEorQuitTitle = "QUIT TO WINDOWS";
 inline constexpr const char *kEorQuitText = "Are you sure you want to quit? Any unsaved progress will be lost.";
 inline constexpr const char *kEorQuitOk = "OK";
 inline constexpr const char *kEorQuitCancel = "CANCEL";
 
+struct EorGradeSample {
+	double luma = 0.0;
+	double saturation = 0.0;
+};
+
+EorGradeSample eor_grade_sample(const godot::Ref<godot::Image> &p_image);
+
 struct EorCheckIo {
 	std::function<bool(const std::string &)> shot;
+	std::function<godot::Ref<godot::Image>()> capture;
+	float ui_dim = -1.0f;
+	float ui_glitch = -1.0f;
 	std::function<void(godot::Key, bool)> press;
 	bf3::core::gameplay::EorTimeline eor;
 	std::optional<bf3::core::level::EorCamera> camera_data;
@@ -102,6 +130,8 @@ private:
 	bool check_page(Bf3UiScreens &r_screens, const bf3::core::ui::HudModel &p_model, double p_left_s);
 	bool check_eor_view(Bf3UiScreens &r_screens, const EorCheckIo &p_io);
 	bool check_player_view(const EorCheckIo &p_io);
+	bool graded(const Bf3UiScreens &p_screens, double p_now_s, const EorCheckIo &p_io, size_t p_round);
+	bool check_grade();
 	static double page_after_banner(const EorCheckIo &p_io);
 	bool click_popup_ok(Bf3UiScreens &r_screens);
 	static void click(Bf3UiScreens &r_screens, godot::Vector2 p_at);
@@ -117,6 +147,11 @@ private:
 	double deploy_s_ = -1.0;
 	double shot_at_s_ = -1.0;
 	uint32_t round2_viewmodel_frames_ = 0;
+	std::vector<EorGradeSample> grade_[2];
+	double deploy_up_s_ = -1.0;
+	double grade_at_s_ = -1.0;
+	bool alive_seen_ = false;
+	bool grade_checked_ = false;
 	const char *shot_name_ = nullptr;
 	bool flash_shot_ = false;
 	bool banner_under_hud64_checked_ = false;
