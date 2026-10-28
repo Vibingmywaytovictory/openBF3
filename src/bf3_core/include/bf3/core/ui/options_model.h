@@ -13,6 +13,20 @@
 
 namespace bf3::core::ui {
 
+inline constexpr int32_t kOptionsTabKey = 968900879;
+inline constexpr int32_t kOptionsKeyTabKey = 70081798;
+inline constexpr int32_t kOptionsKeyColumnKey = -668488254;
+inline constexpr int32_t kOptionsKeyRowKey = 1279238654;
+inline constexpr int32_t kOptionsValueKey = -812298789;
+inline constexpr int32_t kOptionsDataKeyKey = -1996364377;
+inline constexpr int32_t kOptionsSettingsChangedKey = -1679144554;
+inline constexpr int32_t kOptionsVideoChangedKey = -895994233;
+inline constexpr int32_t kOptionsFullscreenKey = -363768699;
+inline constexpr int32_t kOptionsKeyBoundKey = 1279028100;
+inline constexpr int32_t kOptionsExitingKey = 1855787041;
+inline constexpr int32_t kOptionsCanSaveKey = -1955263736;
+inline constexpr int32_t kOptionsMenuHintKey = 606381875;
+
 struct DisplayModeChoice {
 	uint32_t width = 0;
 	uint32_t height = 0;

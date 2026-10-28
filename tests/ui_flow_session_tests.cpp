@@ -4,13 +4,16 @@
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/ui/hud_screen.h"
+#include "bf3/core/ui/options_model.h"
 #include "bf3/core/ui/ui_input.h"
 #include "bf3/host/ui_flow_session.h"
 #include "test_support.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -72,6 +75,7 @@ struct Script {
 	std::vector<std::pair<sim::Tick, std::string>> timeline;
 	size_t printed = 0;
 	Lines widget_events;
+	Lines actions;
 
 	void collect() {
 		for (const std::string &l : session.log()) {
@@ -82,6 +86,11 @@ struct Script {
 		session.clear_log();
 		for (const ui::UiFlowAction &a : session.take_actions()) {
 			timeline.emplace_back(tick, "deploy " + a.name);
+			std::string line = a.name;
+			for (const std::string &p : a.params) {
+				line += " " + p;
+			}
+			actions.push_back(std::move(line));
 		}
 		for (const UiFlowWidgetEvent &e : session.take_widget_events()) {
 			widget_events.push_back(ui::ui_data_category_leaf(e.partition) + "." + e.instance + " " + e.query);
@@ -431,6 +440,165 @@ TEST_SUITE("ui-flow-session") {
 		}
 		CHECK(s.stats().reloads == 1);
 		CHECK(s.errors().empty());
+	}
+
+	TEST_CASE("ui flow session: OPTIONS walks optionsgraph: tabs, values, key binding, reset, Save settings?") {
+		Level *l = level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level);
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		UiFlowSession &s = **made;
+		ui_flow_tdm_pc_defaults(s, "TeamDeathMatch0");
+		constexpr std::string_view kSettings = "ui/uicomponents/uisettingscomp";
+		s.set_data(kSettings, ui::kOptionsSettingsChangedKey, "False");
+		s.set_data(kSettings, ui::kOptionsVideoChangedKey, "False");
+		s.set_data(kSettings, ui::kOptionsFullscreenKey, "False");
+		s.set_data("ui/uicomponents/uimemcardcomp", ui::kOptionsCanSaveKey, "True");
+		Script sc{ s };
+		sc.state.phase = net::MatchPhase::InRound;
+		sc.state.joined = true;
+		sc.run_to(60);
+		sc.input(ui::UiInputConcept::Activate);
+		sc.state.own_spawns = 1;
+		sc.run_to(200);
+		sc.phase("options: spawned");
+		const auto fire = [&](std::string_view p_partition, std::string_view p_instance, std::string_view p_query,
+								  const std::string &p_value) {
+			CHECK_MESSAGE(s.widget_fired(p_partition, p_instance, p_query, p_value), std::string(p_instance));
+			sc.collect();
+			sc.run_to(sc.tick + 10);
+		};
+		const auto press = [&](ui::UiInputConcept p_concept) {
+			sc.input(p_concept);
+			sc.run_to(sc.tick + 10);
+		};
+		const auto writes = [&] {
+			Lines out;
+			for (const UiFlowDataWrite &w : s.take_data_writes()) {
+				if (w.category == "uisettingscomp") {
+					out.push_back(std::to_string(w.key) + "=" + w.value);
+				}
+			}
+			for (const std::string &w : out) {
+				std::printf("ui.flow.session options write %s\n", w.c_str());
+			}
+			return out;
+		};
+		const auto steps = [](const Lines &p_lines) {
+			Lines out;
+			for (const std::string &line : p_lines) {
+				if (line.starts_with("push ") || line.starts_with("close ") || line.starts_with("deploy ")) {
+					out.push_back(line);
+				}
+			}
+			return out;
+		};
+		s.take_data_writes();
+		press(ui::UiInputConcept::Menu);
+		sc.phase("options: menu");
+		const std::string menu = "ui/flow/screen/ingamemenump";
+		const std::string tab = "UIWidgetEventID_OnItemReleased";
+		fire(menu, "List_01", tab, "ID_M_IGMMP_OPTIONS");
+		CHECK(steps(sc.phase("options: OPTIONS")) ==
+				Lines{ "close ingamemenump", "push optionscontrolsscreen", "deploy OnFrontendCameraChanged" });
+		CHECK(writes() == Lines{ "1855787041=False", "968900879=ID0" });
+		const std::array<std::string, 5> screens{ std::string(ui::kOptionsScreens[0]),
+			std::string(ui::kOptionsScreens[1]), std::string(ui::kOptionsScreens[2]),
+			std::string(ui::kOptionsScreens[3]), std::string(ui::kOptionsScreens[4]) };
+		for (size_t i : { size_t(1), size_t(2), size_t(3) }) {
+			fire(screens[i - 1], "TabBar_01", tab, "ID" + std::to_string(i));
+			CHECK(steps(sc.phase("options: tab")) ==
+					Lines{ "close " + ui::ui_data_category_leaf(screens[i - 1]),
+							"push " + ui::ui_data_category_leaf(screens[i]), "deploy OnFrontendCameraChanged" });
+			CHECK(writes() == Lines{ "968900879=ID" + std::to_string(i) });
+		}
+		fire(screens[3], "List_01", "UIWidgetEventID_OnChanged", "1");
+		fire(screens[3], "List_01", "UIWidgetEventID_RThumb", "-1726867587");
+		CHECK(writes() == Lines{ "-812298789=1", "-1996364377=-1726867587" });
+		fire(screens[3], "TabBar_01", tab, "ID4");
+		sc.phase("options: KEY BINDINGS tab");
+		CHECK(writes() == Lines{ "968900879=ID4", "70081798=ID0" });
+		fire(screens[4], "TabBar_02", tab, "ID1");
+		CHECK(writes() == Lines{ "70081798=ID1" });
+		fire(screens[4], "List_01", "UIWidgetEventID_OnChanged", "0");
+		fire(screens[4], "List_01", "UIWidgetEventID_OnItemReleased", "3");
+		CHECK(steps(sc.phase("options: bind key")) ==
+				Lines{ "push popupbindkey", "deploy EnterBindKeyMode", "deploy MouseInput" });
+		CHECK(std::count(sc.actions.begin(), sc.actions.end(), "MouseInput False True") == 1);
+		CHECK(writes() == Lines{ "-668488254=0", "1279238654=3" });
+		s.set_data(kSettings, ui::kOptionsKeyBoundKey, "False");
+		fire("ui/flow/screen/popups/popupbindkey", "ChangeListener_01", "UIWidgetEventID_OnChanged", "False");
+		CHECK(steps(sc.phase("options: key pressed")) ==
+				Lines{ "close popupbindkey", "deploy MouseInput", "deploy ConfirmKeyBind" });
+		const std::string popup = "ui/flow/screen/popups/popupgeneric";
+		const auto dialog = [&](const char *p_title, const char *p_text) {
+			const ui::UiFlowScreen *f = s.flow().find_screen(popup);
+			REQUIRE(f != nullptr);
+			CHECK(f->dialog_title == p_title);
+			CHECK(f->dialog_text == p_text);
+			Lines out;
+			for (const ui::UiDialogButton &b : f->dialog_buttons) {
+				out.push_back(b.label + "=" + std::to_string(b.input_concept));
+			}
+			std::printf("ui.flow.session options dialog %s:", p_title);
+			for (const std::string &b : out) {
+				std::printf(" %s", b.c_str());
+			}
+			std::printf("\n");
+			return f->dialog_buttons;
+		};
+		s.set_data(kSettings, ui::kOptionsSettingsChangedKey, "True");
+		press(ui::UiInputConcept::Deactivate);
+		CHECK(steps(sc.phase("options: leave")) == Lines{ "push popupgeneric" });
+		std::vector<ui::UiDialogButton> buttons = dialog("ID_M_OPTIONS_OPTIONS", "ID_M_OPTIONS_SAVE_SETTINGS");
+		REQUIRE(buttons.size() == 2);
+		CHECK(buttons[0].label == "ID_M_OPTIONS_YES");
+		CHECK(buttons[1].label == "ID_M_OPTIONS_NO");
+		sc.actions.clear();
+		fire(popup, "PopupButtonsManager_01", tab, buttons[0].label);
+		const Lines yes = steps(sc.phase("options: YES"));
+		CHECK(std::find(yes.begin(), yes.end(), "push ingamemenump") != yes.end());
+		CHECK(std::count(sc.actions.begin(), sc.actions.end(), "OptionsBack SAVE") == 1);
+		CHECK(std::count(sc.actions.begin(), sc.actions.end(), "OptionsBack REVERT") == 0);
+		CHECK(writes() == Lines{ "1855787041=True" });
+		fire(menu, "List_01", tab, "ID_M_IGMMP_OPTIONS");
+		sc.phase("options: OPTIONS again");
+		writes();
+		press(ui::UiInputConcept::Deactivate);
+		CHECK(steps(sc.phase("options: leave again")) == Lines{ "push popupgeneric" });
+		buttons = dialog("ID_M_OPTIONS_OPTIONS", "ID_M_OPTIONS_SAVE_SETTINGS");
+		REQUIRE(buttons.size() == 2);
+		sc.actions.clear();
+		fire(popup, "PopupButtonsManager_01", tab, buttons[1].label);
+		const Lines no = steps(sc.phase("options: NO"));
+		CHECK(std::find(no.begin(), no.end(), "push ingamemenump") != no.end());
+		CHECK(std::count(sc.actions.begin(), sc.actions.end(), "OptionsBack REVERT") == 1);
+		CHECK(std::count(sc.actions.begin(), sc.actions.end(), "OptionsBack SAVE") == 0);
+		writes();
+		s.set_data(kSettings, ui::kOptionsSettingsChangedKey, "False");
+		fire(menu, "List_01", tab, "ID_M_IGMMP_OPTIONS");
+		sc.phase("options: OPTIONS a third time");
+		fire(screens[0], "Button_02", tab, "");
+		CHECK(steps(sc.phase("options: reset")) == Lines{ "push popupgeneric" });
+		buttons = dialog("ID_M_OPTIONS_RESET_TITLE", "ID_M_OPTIONS_RESET_DESC");
+		REQUIRE_FALSE(buttons.empty());
+		sc.actions.clear();
+		fire(popup, "PopupButtonsManager_01", tab, buttons[0].label);
+		CHECK(steps(sc.phase("options: reset YES")) ==
+				Lines{ "close popupgeneric", "close optionscontrolsscreen", "push optionscontrolsscreen",
+						"deploy ResetOptions", "deploy OnFrontendCameraChanged" });
+		writes();
+		sc.actions.clear();
+		press(ui::UiInputConcept::Deactivate);
+		const Lines unchanged = steps(sc.phase("options: leave unchanged"));
+		CHECK(std::find(unchanged.begin(), unchanged.end(), "push popupgeneric") == unchanged.end());
+		CHECK(std::find(unchanged.begin(), unchanged.end(), "push ingamemenump") != unchanged.end());
+		CHECK(std::none_of(sc.actions.begin(), sc.actions.end(),
+				[](const std::string &p_a) { return p_a.starts_with("OptionsBack"); }));
+		CHECK(s.errors().empty());
+		CHECK(s.flow().errors().empty());
 	}
 
 	TEST_CASE("ui flow session: install unchanged") {

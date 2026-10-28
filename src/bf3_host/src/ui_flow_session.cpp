@@ -476,6 +476,10 @@ void UiFlowSession::set_data(std::string_view p_category, int32_t p_key, std::st
 	data_[leaf_key(p_category, p_key)] = std::move(p_value);
 }
 
+void UiFlowSession::erase_data(std::string_view p_category, int32_t p_key) {
+	data_.erase(leaf_key(p_category, p_key));
+}
+
 std::optional<std::string> UiFlowSession::data(std::string_view p_category, int32_t p_key) const {
 	const auto it = data_.find(leaf_key(p_category, p_key));
 	if (it == data_.end()) {
@@ -502,6 +506,16 @@ std::optional<std::string> UiFlowSession::data_get(const ui::UiDataRef &p_ref) {
 
 void UiFlowSession::data_set(const ui::UiDataRef &p_ref, std::string_view p_value, bool) {
 	data_[leaf_key(p_ref.category, p_ref.key)] = std::string(p_value);
+	if (data_writes_.size() < kUiFlowSessionMaxDataWrites) {
+		data_writes_.push_back(
+				UiFlowDataWrite{ ui::ui_data_category_leaf(p_ref.category), p_ref.key, std::string(p_value) });
+	}
+}
+
+std::vector<UiFlowDataWrite> UiFlowSession::take_data_writes() {
+	std::vector<UiFlowDataWrite> out;
+	out.swap(data_writes_);
+	return out;
 }
 
 void UiFlowSession::widget_event(const ui::UiFlowScreen &p_screen, std::string_view p_instance,

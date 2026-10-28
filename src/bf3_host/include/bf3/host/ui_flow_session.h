@@ -27,6 +27,7 @@ inline constexpr std::string_view kUiGraphExitPort = "ExitUIGraph";
 inline constexpr size_t kUiFlowSessionMaxLog = 1u << 16;
 inline constexpr size_t kUiFlowSessionMaxActions = 4096;
 inline constexpr size_t kUiFlowSessionMaxWidgetEvents = 4096;
+inline constexpr size_t kUiFlowSessionMaxDataWrites = 4096;
 
 enum class UiPreRoundEvent : uint8_t { Waiting, Countdown, RoundStarted, Restarting };
 int32_t ui_preround_event_id(UiPreRoundEvent p_event);
@@ -53,6 +54,12 @@ struct UiFlowWidgetEvent {
 	std::string instance;
 	std::string query;
 	std::optional<std::string> value;
+};
+
+struct UiFlowDataWrite {
+	std::string category;
+	int32_t key = 0;
+	std::string value;
 };
 
 struct UiFlowSessionStats {
@@ -84,6 +91,7 @@ public:
 	bool widget_fired(std::string_view p_partition, std::string_view p_instance, std::string_view p_query,
 			std::optional<std::string> p_value = std::nullopt);
 	void set_data(std::string_view p_category, int32_t p_key, std::string p_value);
+	void erase_data(std::string_view p_category, int32_t p_key);
 	void screen_initialized(uint64_t p_screen);
 	void screen_exited(uint64_t p_screen);
 
@@ -94,6 +102,7 @@ public:
 	void clear_log() { log_.clear(); }
 	std::vector<core::ui::UiFlowAction> take_actions();
 	std::vector<UiFlowWidgetEvent> take_widget_events();
+	std::vector<UiFlowDataWrite> take_data_writes();
 	const UiFlowSessionStats &stats() const { return stats_; }
 	const std::vector<std::string> &errors() const { return errors_; }
 	std::optional<std::string> data(std::string_view p_category, int32_t p_key) const;
@@ -148,6 +157,7 @@ private:
 	std::map<std::string, std::string, std::less<>> data_;
 	std::vector<core::ui::UiFlowAction> actions_;
 	std::vector<UiFlowWidgetEvent> widget_events_;
+	std::vector<UiFlowDataWrite> data_writes_;
 	std::vector<std::string> log_;
 	std::vector<std::string> errors_;
 	UiGameState last_;
