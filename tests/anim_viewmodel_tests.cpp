@@ -1057,4 +1057,31 @@ TEST_SUITE("anim-viewmodel-unit") {
 					double(fps), rest_at - stop, double(settle));
 		}
 	}
+
+	TEST_CASE("anim.viewmodel: the FieldOfView setting replaces the hip FOV, the zoom level keeps its own") {
+		anim::AdsParams p;
+		p.hip_fov = 55.0f;
+		p.zoom_fov = 40.0f;
+		p.can_zoom = true;
+		const anim::AdsParams set = anim::with_hip_fov(p, 80.0f);
+		CHECK(set.hip_fov == 80.0f);
+		CHECK(set.zoom_fov == 40.0f);
+		CHECK(anim::with_hip_fov(p, 0.0f).hip_fov == 55.0f);
+		CHECK(anim::with_hip_fov(p, std::nanf("")).hip_fov == 55.0f);
+		p.can_zoom = false;
+		p.zoom_fov = 55.0f;
+		const anim::AdsParams hip_only = anim::with_hip_fov(p, 75.0f);
+		CHECK(hip_only.hip_fov == 75.0f);
+		CHECK(hip_only.zoom_fov == 75.0f);
+		anim::AdsCamera cam;
+		anim::AdsFrame f;
+		for (int i = 0; i < 120; ++i) {
+			f = cam.step(set, true, 1.0f / 60.0f);
+		}
+		CHECK(f.world_fov == doctest::Approx(40.0f));
+		for (int i = 0; i < 120; ++i) {
+			f = cam.step(set, false, 1.0f / 60.0f);
+		}
+		CHECK(f.world_fov == doctest::Approx(80.0f));
+	}
 }

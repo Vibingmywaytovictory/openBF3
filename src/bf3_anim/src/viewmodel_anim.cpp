@@ -368,6 +368,17 @@ float advance_progress(float p_progress, bool p_target, float p_in_seconds, floa
 
 }
 
+AdsParams with_hip_fov(const AdsParams &p_params, float p_hip_fov_deg) {
+	AdsParams p = p_params;
+	if (std::isfinite(p_hip_fov_deg) && p_hip_fov_deg > 0.0f) {
+		p.hip_fov = p_hip_fov_deg;
+		if (!p.can_zoom) {
+			p.zoom_fov = p_hip_fov_deg;
+		}
+	}
+	return p;
+}
+
 AdsFrame AdsCamera::step(const AdsParams &p_params, bool p_zoomed, float p_dt) {
 	const float dt = std::clamp(finite_or(p_dt, 0.0f), 0.0f, kMaxFrameSeconds);
 	const bool zoomed = p_zoomed && p_params.can_zoom;

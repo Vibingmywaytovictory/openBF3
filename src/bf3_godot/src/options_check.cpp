@@ -28,6 +28,8 @@ constexpr std::string_view kSpawnScreenPartition = "ui/flow/screen/spawnscreenpc
 constexpr std::string_view kVolume = ui::kVolumeOption;
 constexpr std::string_view kSensitivity = ui::kMouseSensitivityOption;
 constexpr std::string_view kFullscreen = ui::kFullscreenOption;
+constexpr std::string_view kFieldOfView = ui::kFieldOfViewOption;
+constexpr float kFovTolerance = 0.01f;
 constexpr godot::Key kCandidateKeys[] = { godot::KEY_K, godot::KEY_L, godot::KEY_O, godot::KEY_P, godot::KEY_U,
 	godot::KEY_I, godot::KEY_H, godot::KEY_N, godot::KEY_J, godot::KEY_Y };
 
@@ -259,6 +261,24 @@ void OptionsCheck::check_file(const Ctx &p_c) {
 void OptionsCheck::game_tap(const Ctx &p_c, godot::Key p_key) {
 	p_c.io.game_key(p_key, true);
 	p_c.io.game_key(p_key, false);
+}
+
+bool OptionsCheck::hip_ready(const Ctx &p_c, double p_fov) {
+	return !shown(p_c, kIngameMenuPartition) && !p_c.menu.in_menu() && p_c.io.game_input && p_c.io.alive &&
+			p_c.io.air_ticks == 0 && p_c.io.fov_progress == 0.0f && p_c.io.can_zoom &&
+			double(p_c.io.zoom_fov) < p_fov - 1.0 &&
+			std::abs(double(p_c.io.camera_fov) - p_fov) < double(kFovTolerance);
+}
+
+bool OptionsCheck::ads_ready(const Ctx &p_c) {
+	return p_c.io.can_zoom && p_c.io.fov_progress >= 1.0f &&
+			std::abs(p_c.io.camera_fov - p_c.io.zoom_fov) < kFovTolerance;
+}
+
+void OptionsCheck::note_fov(const Ctx &p_c, const char *p_what) {
+	notes_.push_back(std::string(p_what) + ": FieldOfView " + std::to_string(value(p_c, kFieldOfView)) + ", camera " +
+			std::to_string(p_c.io.camera_fov) + " deg, the weapon's zoom level " + std::to_string(p_c.io.zoom_fov) +
+			" deg");
 }
 
 void OptionsCheck::check_play(const Ctx &p_c) {
@@ -497,6 +517,59 @@ std::vector<OptionsCheck::Step> OptionsCheck::steps() {
 			},
 			[](OptionsCheck &r_self, const Ctx &c) {
 				r_self.check_play(c);
+				r_self.fov_default_ = value(c, kFieldOfView);
+			} });
+	s.push_back({ "the hip camera FOV is the FieldOfView setting",
+			[](OptionsCheck &r_self, const Ctx &c) { return hip_ready(c, r_self.fov_default_); },
+			[](OptionsCheck &r_self, const Ctx &c) {
+				r_self.note_fov(c, "hip");
+				c.io.hold_zoom(true);
+			} });
+	s.push_back({ "the ADS camera FOV is the weapon's zoom level",
+			[](OptionsCheck &, const Ctx &c) { return ads_ready(c); },
+			[](OptionsCheck &r_self, const Ctx &c) {
+				r_self.note_fov(c, "ADS");
+				r_self.ads_fov_ = c.io.zoom_fov;
+				c.io.hold_zoom(false);
+				tap(c, K::KEY_ESCAPE);
+			} });
+	open_options(s, "the menu is up for FIELD OF VIEW");
+	s.push_back(
+			{ "OPTIONS for FIELD OF VIEW", tab_shown(ui::OptionsTab::Controls), to_tab(ui::OptionsTab::Controls, 3) });
+	s.push_back({ "VIDEO for FIELD OF VIEW", tab_shown(ui::OptionsTab::Video), [](OptionsCheck &r_self, const Ctx &c) {
+					 r_self.click_row(c, ui::OptionsTab::Video, kFieldOfView);
+					 tap(c, K::KEY_RIGHT, kOptionsCheckSteps);
+				 } });
+	s.push_back({ "Right widens the field of view",
+			[](OptionsCheck &r_self, const Ctx &c) {
+				return near(value(c, kFieldOfView), r_self.fov_default_ + double(kOptionsCheckSteps));
+			},
+			[](OptionsCheck &, const Ctx &c) { tap(c, K::KEY_ESCAPE); }, "field_of_view" });
+	s.push_back({ "leaving asks Save settings? for the field of view", popup,
+			[](OptionsCheck &, const Ctx &c) { tap(c, K::KEY_ENTER); } });
+	s.push_back({ "YES saves the field of view to the scratch settings file",
+			[menu_up](OptionsCheck &r_self, const Ctx &c) {
+				return menu_up(r_self, c) && c.options.stats().saves == 3 && r_self.file_is_saved(c);
+			},
+			[](OptionsCheck &r_self, const Ctx &c) {
+				r_self.check_file_value(c, kFieldOfView, r_self.fov_default_ + double(kOptionsCheckSteps));
+				tap(c, K::KEY_ESCAPE);
+			} });
+	s.push_back({ "the hip camera FOV follows the new setting",
+			[](OptionsCheck &r_self, const Ctx &c) {
+				return hip_ready(c, r_self.fov_default_ + double(kOptionsCheckSteps));
+			},
+			[](OptionsCheck &r_self, const Ctx &c) {
+				r_self.note_fov(c, "hip");
+				c.io.hold_zoom(true);
+			} });
+	s.push_back({ "the ADS camera FOV stays the weapon's zoom level",
+			[](OptionsCheck &r_self, const Ctx &c) {
+				return ads_ready(c) && std::abs(c.io.zoom_fov - r_self.ads_fov_) < kFovTolerance;
+			},
+			[](OptionsCheck &r_self, const Ctx &c) {
+				r_self.note_fov(c, "ADS");
+				c.io.hold_zoom(false);
 				tap(c, K::KEY_ESCAPE);
 			} });
 	s.push_back({ "the menu opens for QUIT", menu_up, [](OptionsCheck &, const Ctx &c) {

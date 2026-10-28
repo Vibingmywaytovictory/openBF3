@@ -317,7 +317,8 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 	const uint64_t t0 = Time::get_singleton()->get_ticks_usec();
 
 	ads_allowed_ = bf3::anim::ads_allowed(p_frame.phase, p_frame.sprinting);
-	ads_frame_ = ads_.step(ads_params_, p_frame.zoomed && ads_allowed_, p_frame.dt);
+	ads_frame_ =
+			ads_.step(bf3::anim::with_hip_fov(ads_params_, hip_fov_deg_), p_frame.zoomed && ads_allowed_, p_frame.dt);
 
 	bf3::anim::ViewmodelFrameInput in;
 	in.time_s = p_frame.time_s;

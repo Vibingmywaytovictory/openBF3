@@ -17,11 +17,13 @@
 #include "swf_view.h"
 #include "ui_cursor.h"
 #include "ui_post_process.h"
+#include "viewmodel.h"
 
 #include "bf3/core/util/key_values.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/ui_flow_session.h"
 
+#include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/input_event_mouse_motion.hpp>
@@ -267,7 +269,24 @@ bool Bf3LevelSession::tdm_menu_frame(double p_now_s) {
 			e->set_pressed(p_pressed);
 			_unhandled_input(e);
 		};
+		oio.hold_zoom = [this](bool p_held) {
+			if (p_held) {
+				mapper_.set_scripted(true);
+			}
+			mapper_.script_hold(InputMapper::WeaponAction::Ads, p_held);
+			if (!p_held) {
+				mapper_.set_scripted(false);
+			}
+		};
 		oio.jump_presses = mapper_.sample().jump_presses;
+		if (const Camera3D *camera = cameras_.first_person()) {
+			oio.camera_fov = float(camera->get_fov());
+		}
+		if (const Bf3Viewmodel *vm = game_->own_viewmodel()) {
+			oio.zoom_fov = vm->ads_params().zoom_fov;
+			oio.can_zoom = vm->ads_params().can_zoom;
+			oio.fov_progress = vm->ads().fov_progress;
+		}
 		oio.air_ticks = frame_ != nullptr && frame_->valid ? frame_->own_curr.air_ticks : uint16_t(0);
 		if (game_->audio != nullptr && game_->audio->mixer() != nullptr) {
 			oio.master_gain = game_->audio->mixer()->bus_gain(bf3::core::audio::MasterBus::GameMixMain);

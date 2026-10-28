@@ -658,7 +658,7 @@ TEST_SUITE("ui-settings-unit") {
 			CHECK(g == 1.0f);
 		}
 		CHECK(e.look_scale == 1.0f);
-		CHECK(e.fov_scale == 1.0f);
+		CHECK(e.hip_fov_deg == 70.0f);
 		CHECK_FALSE(e.invert_look);
 		CHECK(e.hold_to_zoom);
 		CHECK(e.video == VideoEffects{});
@@ -680,7 +680,7 @@ TEST_SUITE("ui-settings-unit") {
 		CHECK(e.bus_gains[size_t(audio::MasterBus::Dialog)] == 0.0f);
 		CHECK(e.bus_gains[size_t(audio::MasterBus::NarrVoice)] == 0.0f);
 		CHECK(e.look_scale == 2.0f);
-		CHECK(e.fov_scale == doctest::Approx(1.2f));
+		CHECK(e.hip_fov_deg == 84.0f);
 		CHECK(e.invert_look);
 		CHECK_FALSE(e.hold_to_zoom);
 		CHECK(e.video.vsync);

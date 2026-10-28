@@ -71,7 +71,7 @@ struct VideoEffects {
 struct SettingsEffects {
 	std::array<float, kMasterBusCount> bus_gains{};
 	float look_scale = 1.0f;
-	float fov_scale = 1.0f;
+	float hip_fov_deg = 70.0f;
 	bool invert_look = false;
 	bool hold_to_zoom = true;
 	VideoEffects video;

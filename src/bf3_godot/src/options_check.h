@@ -35,6 +35,7 @@ struct OptionsCheckIo {
 	std::function<void(godot::Vector2, bool)> click;
 	std::function<bool(const std::string &)> shot;
 	std::function<void(godot::Key, bool)> game_key;
+	std::function<void(bool)> hold_zoom;
 	GameSettings *settings = nullptr;
 	std::string settings_path;
 	bool alive = false;
@@ -42,6 +43,10 @@ struct OptionsCheckIo {
 	float look_sensitivity = 0.0f;
 	uint32_t jump_presses = 0;
 	uint16_t air_ticks = 0;
+	float camera_fov = 0.0f;
+	float zoom_fov = 0.0f;
+	float fov_progress = 0.0f;
+	bool can_zoom = false;
 	std::optional<float> master_gain;
 };
 
@@ -88,6 +93,9 @@ private:
 	void check_file(const Ctx &p_c);
 	void check_play(const Ctx &p_c);
 	void game_tap(const Ctx &p_c, godot::Key p_key);
+	static bool hip_ready(const Ctx &p_c, double p_fov);
+	static bool ads_ready(const Ctx &p_c);
+	void note_fov(const Ctx &p_c, const char *p_what);
 
 	std::string shot_dir_;
 	std::string waiting_;
@@ -111,6 +119,8 @@ private:
 	std::string saved_text_;
 	uint32_t jumps_before_ = 0;
 	uint16_t max_air_ticks_ = 0;
+	double fov_default_ = 0.0;
+	float ads_fov_ = 0.0f;
 	bool done_ = false;
 	bool passed_ = false;
 	std::string failure_;

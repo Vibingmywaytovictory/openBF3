@@ -184,6 +184,8 @@ struct AdsParams {
 	bool operator==(const AdsParams &) const = default;
 };
 
+AdsParams with_hip_fov(const AdsParams &p_params, float p_hip_fov_deg);
+
 struct AdsFrame {
 	bool zoomed = false;
 	float fov_progress = 0;

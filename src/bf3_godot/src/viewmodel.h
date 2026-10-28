@@ -82,8 +82,8 @@ public:
 	const bf3::anim::LocalPose &pose() const { return pose_; }
 	const std::vector<bf3::anim::Xform> &model() const { return model_; }
 	float look_scale() const { return ads_frame_.look_scale; }
-	void set_fov_scale(float p_scale) { fov_scale_ = p_scale; }
-	float world_fov() const { return ads_frame_.world_fov * fov_scale_; }
+	void set_hip_fov(float p_hip_fov_deg) { hip_fov_deg_ = p_hip_fov_deg; }
+	float world_fov() const { return ads_frame_.world_fov; }
 
 	float applied_weapon_fov() const;
 	float applied_arms_fov() const;
@@ -136,7 +136,7 @@ private:
 	godot::ColorRect *vignette_ = nullptr;
 	godot::Ref<godot::ShaderMaterial> vignette_material_;
 	float vignette_strength_ = 0;
-	float fov_scale_ = 1.0f;
+	float hip_fov_deg_ = 0.0f;
 	double last_present_us_ = 0;
 };
 

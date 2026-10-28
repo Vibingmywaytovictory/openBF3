@@ -110,7 +110,7 @@ size_t GameSettings::apply_input(InputMapper &r_mapper) {
 	r_mapper.mouse_sensitivity = r_mapper.base_sensitivity;
 	r_mapper.invert_look = e.invert_look;
 	r_mapper.hold_to_zoom = e.hold_to_zoom;
-	fov_scale_ = e.fov_scale;
+	hip_fov_deg_ = e.hip_fov_deg;
 	return missed_inputs_;
 }
 
