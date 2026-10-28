@@ -16,8 +16,6 @@ namespace ui = core::ui;
 
 namespace {
 
-constexpr int32_t kFadeIn = gp::logic_port_id("FadeIn");
-constexpr int32_t kFadeOut = gp::logic_port_id("FadeOut");
 constexpr int32_t kFadeDone = gp::logic_port_id("OnDone");
 constexpr int32_t kOnRoundOver = gp::logic_port_id("OnRoundOver");
 constexpr int32_t kTeamField = gp::logic_port_id("Team");
@@ -32,31 +30,6 @@ constexpr size_t kMaxTimers = 4096;
 std::string leaf_key(std::string_view p_category, int32_t p_key) {
 	return ui::ui_data_category_leaf(p_category) + "#" + std::to_string(p_key);
 }
-
-std::optional<core::EbxInstance> instance_of(
-		const core::EbxResolver &p_db, const gp::LogicGraph &p_graph, uint32_t p_node) {
-	const gp::LogicNode &n = p_graph.nodes()[p_node];
-	if (n.scope >= p_graph.scopes().size()) {
-		return std::nullopt;
-	}
-	const core::EbxPartition *part = p_db.partition_by_name(p_graph.text(p_graph.scopes()[n.scope].name));
-	if (part == nullptr) {
-		return std::nullopt;
-	}
-	return part->instance_by_guid(n.guid);
-}
-
-std::optional<double> float_field(const core::EbxInstance &p_instance, std::string_view p_field) {
-	const std::optional<core::EbxValue> v = p_instance.get(p_field);
-	if (!v) {
-		return std::nullopt;
-	}
-	if (const std::optional<float> f = v->as_f32()) {
-		return double(*f);
-	}
-	return std::nullopt;
-}
-
 }
 
 int32_t ui_preround_event_id(UiPreRoundEvent p_event) {
@@ -132,7 +105,7 @@ core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const 
 		return made;
 	};
 	for (const uint32_t n : graph_->nodes_of_type(gp::LogicTypeId::UIGraph)) {
-		const std::optional<core::EbxInstance> inst = instance_of(db, *graph_, n);
+		const std::optional<core::EbxInstance> inst = logic_node_instance(db, *graph_, n);
 		const std::optional<core::EbxInstance> asset = inst ? db.follow(inst->data(), "GraphAsset") : std::nullopt;
 		const std::optional<std::string_view> name = asset ? db.name_of(asset->partition().guid()) : std::nullopt;
 		if (!name) {
@@ -149,14 +122,14 @@ core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const 
 		graph_entities_[n] = std::move(entity);
 		provider_(*name);
 	}
-	for (const uint32_t n : graph_->nodes_of_type(gp::LogicTypeId::Fade)) {
-		const std::optional<core::EbxInstance> inst = instance_of(db, *graph_, n);
-		const std::optional<double> seconds = inst ? float_field(*inst, "FadeTime") : std::nullopt;
-		fades_[n] = Fade{ n, lg::logic_delay_ticks(seconds.value_or(0.0)) };
+	core::Result<LogicScreenEffects> effects = LogicScreenEffects::bind(db, *graph_);
+	if (!effects) {
+		return core::error_at("ui flow session", effects.error());
 	}
+	effects_ = std::make_unique<LogicScreenEffects>(std::move(*effects));
 	for (const uint32_t n : graph_->nodes_of_type(gp::LogicTypeId::UIEndOfRound)) {
-		const std::optional<core::EbxInstance> inst = instance_of(db, *graph_, n);
-		const std::optional<double> seconds = inst ? float_field(*inst, "PreEorTime") : std::nullopt;
+		const std::optional<core::EbxInstance> inst = logic_node_instance(db, *graph_, n);
+		const std::optional<double> seconds = inst ? logic_node_float(*inst, "PreEorTime") : std::nullopt;
 		end_of_round_nodes_.push_back(n);
 		pre_eor_seconds_[n] = float(seconds.value_or(0.0));
 	}
@@ -169,7 +142,7 @@ core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const 
 	}
 
 	const auto watched = [&](uint32_t p_node) {
-		return ui_graph_of_.count(p_node) != 0 || fades_.count(p_node) != 0 ||
+		return ui_graph_of_.count(p_node) != 0 ||
 				std::find(end_of_round_nodes_.begin(), end_of_round_nodes_.end(), p_node) != end_of_round_nodes_.end();
 	};
 	std::set<std::pair<uint32_t, int32_t>> ports;
@@ -185,11 +158,14 @@ core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const 
 			ports.emplace(e.target, e.target_port);
 		}
 	}
+	for (const std::pair<uint32_t, int32_t> &p : effects_->watch_ports()) {
+		ports.insert(p);
+	}
 	watch_ports_.assign(ports.begin(), ports.end());
 	stats_.ui_graph_nodes = ui_graph_of_.size();
 	stats_.graphs = graphs_.size();
 	stats_.watches = watch_ports_.size();
-	stats_.fades = fades_.size();
+	stats_.fades = effects_->stats().fades;
 	stats_.end_of_round_nodes = end_of_round_nodes_.size();
 	stats_.pre_round_nodes = pre_round_nodes_.size();
 	stats_.round_over_nodes = round_over_nodes_.size();
@@ -198,6 +174,7 @@ core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const 
 
 core::Status UiFlowSession::start_logic() {
 	timers_.clear();
+	effects_->reset();
 	graph_owner_.clear();
 	entered_.clear();
 	flow_.reset();
@@ -349,12 +326,11 @@ core::Status UiFlowSession::step() {
 		if (h.kind != lg::LogicWatchKind::EventIn) {
 			continue;
 		}
+		if (const std::optional<uint32_t> done = effects_->event(h.node, h.port, h.tick)) {
+			later(h.node, kFadeDone, *done);
+		}
 		if (ui_graph_of_.count(h.node) != 0) {
 			ui_graph_input(h.node, h.port);
-		} else if (const auto f = fades_.find(h.node); f != fades_.end()) {
-			if (h.port == kFadeIn || h.port == kFadeOut) {
-				later(h.node, kFadeDone, f->second.ticks);
-			}
 		} else if (std::find(end_of_round_nodes_.begin(), end_of_round_nodes_.end(), h.node) !=
 				end_of_round_nodes_.end()) {
 			if (h.port == kEndOfRoundStart) {

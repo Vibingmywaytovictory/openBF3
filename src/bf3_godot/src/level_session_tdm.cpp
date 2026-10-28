@@ -1067,11 +1067,12 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			}
 			m.eor_camera->frame(p_camera, eor_level->eor_camera, r_game.hud_model.end_of_round);
 		}
-		if (m.windowed && eor_level->eor_fading != nullptr && eor_level->eor != nullptr) {
+		const host::UiFlowSession *flow = m.native_flow != nullptr ? m.native_flow->session() : nullptr;
+		if (m.windowed && eor_level->eor_fading != nullptr && flow != nullptr) {
 			if (m.eor_flash == nullptr) {
 				m.eor_flash = std::unique_ptr<EorFlash, void (*)(EorFlash *)>(new EorFlash(), &delete_part<EorFlash>);
 			}
-			m.eor_flash->frame(this, *eor_level->eor_fading, *eor_level->eor, r_game.hud_model.end_of_round, now_s);
+			m.eor_flash->frame(this, r_game.layer, *eor_level->eor_fading, flow->screen_effects());
 		}
 	}
 	m.ms_death_camera = ms_since(t0);

@@ -3,6 +3,7 @@
 #include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/result.h"
 #include "bf3/core/ui/ui_graph.h"
+#include "bf3/host/logic_screen_effects.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/logic/logic_runtime.h"
 
@@ -114,6 +115,8 @@ public:
 	size_t dispatch_data_writes();
 	size_t pending_data_writes() const { return data_writes_.size(); }
 	const UiFlowSessionStats &stats() const { return stats_; }
+	LogicScreenEffectsFrame screen_effects() const { return effects_->frame(runtime_->tick(), runtime_.get()); }
+	const LogicScreenEffects &effects() const { return *effects_; }
 	const std::vector<std::string> &errors() const { return errors_; }
 	std::optional<std::string> data(std::string_view p_category, int32_t p_key) const;
 
@@ -125,10 +128,6 @@ public:
 	void graph_output(std::string_view p_graph, std::string_view p_output, int32_t p_id, bool p_destroy) override;
 
 private:
-	struct Fade {
-		uint32_t node = 0;
-		uint32_t ticks = 0;
-	};
 	struct GraphEntity {
 		std::string graph;
 		std::string priority;
@@ -171,7 +170,7 @@ private:
 	std::map<std::string, uint32_t, std::less<>> graph_owner_;
 	std::map<uint32_t, GraphEntity> graph_entities_;
 	std::vector<GraphEntity> entered_;
-	std::map<uint32_t, Fade> fades_;
+	std::unique_ptr<LogicScreenEffects> effects_;
 	std::vector<uint32_t> end_of_round_nodes_;
 	std::vector<uint32_t> pre_round_nodes_;
 	std::vector<std::pair<uint32_t, int64_t>> round_over_nodes_;

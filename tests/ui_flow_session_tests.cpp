@@ -6,6 +6,7 @@
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/options_model.h"
 #include "bf3/core/ui/ui_input.h"
+#include "bf3/host/logic_screen_effects.h"
 #include "bf3/host/ui_flow_session.h"
 #include "test_support.h"
 
@@ -403,6 +404,110 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(has("close spawnbuttonscreen"));
 		CHECK(has("push eorwinningteamscreen"));
 		CHECK(has("push eordetailstabsscreen"));
+		CHECK(s.errors().empty());
+	}
+
+	TEST_CASE("ui flow session: mp_eor_fading's flash and fades follow the logic's Sequence, LVE and Fade events") {
+		Level *l = level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level);
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		UiFlowSession &s = **made;
+		ui_flow_tdm_pc_defaults(s, "TeamDeathMatch0");
+		const LogicScreenEffectsStats &es = s.effects().stats();
+		std::printf("ui.flow.session screen effects: %zu fades (%zu timed by a property), %zu visual environments (%zu "
+					"by a sequence track)\n",
+				es.fades, es.fade_times_from_properties, es.environments, es.tracked_visibilities);
+		CHECK(es.fade_times_from_properties >= 1);
+		CHECK(es.tracked_visibilities >= 1);
+		CHECK(es.linked_visibilities >= 1);
+		const std::string white = "fx/visualenviroments/fullscreen/ve_whitescreen";
+		Script sc{ s };
+		sc.state.phase = net::MatchPhase::InRound;
+		sc.state.joined = true;
+		sc.run_to(60);
+		size_t from_runtime = 0;
+		size_t unresolved = 0;
+		for (const LogicEnvironmentState &e : s.screen_effects().environments) {
+			from_runtime += e.source == LogicVisibilitySource::Runtime ? 1 : 0;
+			unresolved += e.source == LogicVisibilitySource::Unresolved ? 1 : 0;
+			if (e.visual_environment == "levels/frontend/lighting/visualenvironment_frontendcustomize") {
+				CHECK(e.source != LogicVisibilitySource::Instance);
+			}
+		}
+		std::printf("ui.flow.session linked visibilities: %zu, %zu read from the runtime, %zu unresolved\n",
+				es.linked_visibilities, from_runtime, unresolved);
+		CHECK(from_runtime + unresolved == es.linked_visibilities);
+		sc.state.own_spawns = 1;
+		sc.run_to(120);
+		CHECK(s.screen_effects().environment(white) == nullptr);
+		CHECK(s.screen_effects().screen_faded == 0.0f);
+		sc.state.phase = net::MatchPhase::RoundOver;
+		sc.state.winner = 1;
+		const auto ticks = [](double p_s) { return sim::logic::logic_delay_ticks(p_s); };
+		const sim::Tick over = 121;
+		struct At {
+			sim::Tick tick;
+			LogicScreenEffectsFrame frame;
+		};
+		std::vector<At> seen;
+		while (sc.tick < over + ticks(1.8)) {
+			sc.run_to(sc.tick + 1);
+			seen.push_back(At{ sc.tick, s.screen_effects() });
+		}
+		const auto at = [&](sim::Tick p_tick) -> const LogicScreenEffectsFrame & {
+			for (const At &a : seen) {
+				if (a.tick == p_tick) {
+					return a.frame;
+				}
+			}
+			FAIL("no frame at tick " << p_tick);
+			return seen.front().frame;
+		};
+		sim::Tick enabled = 0;
+		sim::Tick disabled = 0;
+		for (const At &a : seen) {
+			const bool on = a.frame.environment(white) != nullptr;
+			if (on && enabled == 0) {
+				enabled = a.tick;
+			}
+			if (!on && enabled != 0 && disabled == 0) {
+				disabled = a.tick;
+			}
+		}
+		std::printf("ui.flow.session ve_whitescreen enabled at %u, disabled at %u (round over at %u)\n",
+				unsigned(enabled), unsigned(disabled), unsigned(over));
+		REQUIRE(enabled != 0);
+		REQUIRE(disabled != 0);
+		const LogicEnvironmentState *half = at(enabled + ticks(0.375)).environment(white);
+		REQUIRE(half != nullptr);
+		CHECK(half->visibility == doctest::Approx(0.5).epsilon(0.05));
+		CHECK(at(enabled + ticks(0.33)).ui_faded == doctest::Approx(1.0));
+		CHECK(at(enabled + ticks(0.16)).ui_faded == doctest::Approx(0.5).epsilon(0.1));
+		CHECK(at(enabled + ticks(0.75)).screen_faded == 0.0f);
+		CHECK(at(enabled + ticks(1.0)).screen_faded == doctest::Approx(0.5).epsilon(0.1));
+		CHECK(disabled - enabled == ticks(0.75) + ticks(0.5));
+		CHECK(at(disabled).screen_faded == 1.0f);
+		sc.state.end_of_round = true;
+		const sim::Tick eor = sc.tick + 1;
+		sc.run_to(eor + ticks(0.5));
+		const float half_in = s.screen_effects().screen_faded;
+		sc.run_to(eor + ticks(1.5));
+		std::printf("ui.flow.session EndOfRound fade-in: %.2f after 0.5 s, %.2f after 1.5 s\n", double(half_in),
+				double(s.screen_effects().screen_faded));
+		CHECK(half_in > 0.0f);
+		CHECK(half_in < 1.0f);
+		CHECK(s.screen_effects().screen_faded == 0.0f);
+		CHECK(s.screen_effects().ui_faded == 0.0f);
+		sc.state.phase = net::MatchPhase::PreRound;
+		sc.state.end_of_round = false;
+		sc.run_to(sc.tick + 10);
+		CHECK(s.stats().reloads == 1);
+		CHECK(s.screen_effects().environment(white) == nullptr);
+		CHECK(s.screen_effects().screen_faded == 0.0f);
+		CHECK(s.screen_effects().ui_faded == 0.0f);
 		CHECK(s.errors().empty());
 	}
 

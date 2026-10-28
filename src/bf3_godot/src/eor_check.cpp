@@ -205,10 +205,11 @@ bool EorCheck::check_eor_view(Bf3UiScreens &r_screens, const EorCheckIo &p_io) {
 	const EorFlashStats &f = p_io.flash->stats();
 	note("flash: " + std::to_string(f.round_overs) + " round over, " + std::to_string(f.white_frames) +
 			" white frames, peak visibility " + fixed_text(f.peak_visibility) + ", " + std::to_string(f.black_frames) +
-			" black frames, " + std::to_string(f.fade_in_frames) + " fade-in frames");
+			" black frames, " + std::to_string(f.fade_in_frames) + " fade-in frames, UI faded on " +
+			std::to_string(f.ui_faded_frames) + " frames to " + fixed_text(f.peak_ui_faded));
 	if (f.round_overs < 1 || f.white_frames == 0 || f.peak_visibility < kEorCheckFlashPeak || f.black_frames == 0 ||
-			f.fade_in_frames == 0) {
-		fail("mp_eor_fading's white flash, screen fade and EndOfRound fade-in did not all play");
+			f.fade_in_frames == 0 || f.peak_ui_faded < 1.0f) {
+		fail("mp_eor_fading's white flash, UI fade and screen fade and EndOfRound's fade-in did not all play");
 		return false;
 	}
 	return true;

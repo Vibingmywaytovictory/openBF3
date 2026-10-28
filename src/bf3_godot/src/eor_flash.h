@@ -1,8 +1,7 @@
 #pragma once
 
 #include "bf3/core/gameplay/eor_fading.h"
-#include "bf3/core/gameplay/eor_timeline.h"
-#include "bf3/core/ui/hud_model.h"
+#include "bf3/host/logic_screen_effects.h"
 
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/variant/rid.hpp>
@@ -25,8 +24,11 @@ struct EorFlashStats {
 	float peak_visibility = 0.0f;
 	uint64_t black_frames = 0;
 	uint64_t fade_in_frames = 0;
+	uint64_t ui_faded_frames = 0;
+	float peak_ui_faded = 0.0f;
 	float last_black = 0.0f;
 	float last_visibility = 0.0f;
+	float last_ui_faded = 0.0f;
 };
 
 class EorFlash {
@@ -36,14 +38,14 @@ public:
 	EorFlash(const EorFlash &) = delete;
 	EorFlash &operator=(const EorFlash &) = delete;
 
-	void frame(godot::Node *p_parent, const core::gameplay::EorFading &p_fading,
-			const core::gameplay::EorTimeline &p_timeline, const core::ui::HudEndOfRound &p_end_of_round,
-			double p_now_s);
+	void frame(godot::Node *p_parent, godot::CanvasLayer *p_ui, const core::gameplay::EorFading &p_fading,
+			const host::LogicScreenEffectsFrame &p_effects);
 	const EorFlashStats &stats() const { return stats_; }
 
 private:
 	void build(godot::Node *p_parent);
 	void cover(godot::Node *p_parent);
+	void fade_ui(godot::CanvasLayer *p_ui, float p_alpha);
 
 	godot::CanvasLayer *white_layer_ = nullptr;
 	godot::CanvasLayer *fade_layer_ = nullptr;
@@ -53,7 +55,7 @@ private:
 	float covered_w_ = 0.0f;
 	float covered_h_ = 0.0f;
 	float drawn_black_ = -1.0f;
-	double over_s_ = -1.0;
+	bool white_enabled_ = false;
 	EorFlashStats stats_;
 };
 

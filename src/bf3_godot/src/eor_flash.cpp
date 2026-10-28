@@ -2,6 +2,7 @@
 
 #include "ui_post_process.h"
 
+#include <godot_cpp/classes/canvas_item.hpp>
 #include <godot_cpp/classes/canvas_layer.hpp>
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -12,7 +13,6 @@
 namespace bf3::godot_side {
 
 using namespace godot;
-namespace ui = bf3::core::ui;
 
 namespace {
 
@@ -63,8 +63,22 @@ void EorFlash::cover(Node *p_parent) {
 	rs->canvas_item_add_rect(white_item_, Rect2(Vector2(), size), Color(1, 1, 1, 1));
 }
 
-void EorFlash::frame(Node *p_parent, const core::gameplay::EorFading &p_fading,
-		const core::gameplay::EorTimeline &p_timeline, const ui::HudEndOfRound &p_end_of_round, double p_now_s) {
+void EorFlash::fade_ui(CanvasLayer *p_ui, float p_alpha) {
+	if (p_ui == nullptr) {
+		return;
+	}
+	for (int32_t i = 0; i < p_ui->get_child_count(); ++i) {
+		CanvasItem *item = Object::cast_to<CanvasItem>(p_ui->get_child(i));
+		if (item != nullptr && item->get_modulate().a != p_alpha) {
+			Color c = item->get_modulate();
+			c.a = p_alpha;
+			item->set_modulate(c);
+		}
+	}
+}
+
+void EorFlash::frame(Node *p_parent, CanvasLayer *p_ui, const core::gameplay::EorFading &p_fading,
+		const host::LogicScreenEffectsFrame &p_effects) {
 	if (p_parent == nullptr) {
 		return;
 	}
@@ -72,32 +86,30 @@ void EorFlash::frame(Node *p_parent, const core::gameplay::EorFading &p_fading,
 		build(p_parent);
 	}
 	cover(p_parent);
-	if (!p_end_of_round.visible) {
-		over_s_ = -1.0;
-	} else if (over_s_ < 0.0) {
-		over_s_ = p_now_s;
+	const host::LogicEnvironmentState *white = p_effects.environment(p_fading.visual_environment);
+	if (white != nullptr && !white_enabled_) {
 		++stats_.round_overs;
 	}
-	float visibility = 0.0f;
-	float black = 0.0f;
-	if (over_s_ >= 0.0) {
-		const float since = float(p_now_s - over_s_);
-		if (p_end_of_round.stage == ui::HudEorStage::None) {
-			visibility = p_fading.visibility_at(since);
-			black = p_fading.screen_black_at(since);
-		} else if (p_end_of_round.stage == ui::HudEorStage::Fade && p_timeline.fade_s > 0.0f) {
-			black = 1.0f - std::clamp(p_end_of_round.stage_seconds / p_timeline.fade_s, 0.0f, 1.0f);
-			++stats_.fade_in_frames;
-		}
+	white_enabled_ = white != nullptr;
+	const float visibility = white != nullptr ? std::clamp(white->visibility, 0.0f, 1.0f) : 0.0f;
+	const float black = std::clamp(p_effects.screen_faded, 0.0f, 1.0f);
+	const float ui_faded = std::clamp(p_effects.ui_faded, 0.0f, 1.0f);
+	if (black > 0.0f && black < 1.0f && black < stats_.last_black) {
+		++stats_.fade_in_frames;
 	}
 	stats_.last_visibility = visibility;
 	stats_.last_black = black;
+	stats_.last_ui_faded = ui_faded;
 	if (visibility > 0.0f) {
 		++stats_.white_frames;
 		stats_.peak_visibility = std::max(stats_.peak_visibility, visibility);
 	}
 	if (black >= 1.0f) {
 		++stats_.black_frames;
+	}
+	if (ui_faded > 0.0f) {
+		++stats_.ui_faded_frames;
+		stats_.peak_ui_faded = std::max(stats_.peak_ui_faded, ui_faded);
 	}
 	RenderingServer *rs = RenderingServer::get_singleton();
 	white_layer_->set_visible(visibility > 0.0f);
@@ -115,6 +127,6 @@ void EorFlash::frame(Node *p_parent, const core::gameplay::EorFading &p_fading,
 		rs->canvas_item_add_rect(fade_item_, Rect2(Vector2(), Vector2(covered_w_, covered_h_)), Color(0, 0, 0, black));
 		drawn_black_ = black;
 	}
+	fade_ui(p_ui, 1.0f - ui_faded);
 }
-
 }
