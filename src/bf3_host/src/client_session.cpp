@@ -393,6 +393,12 @@ uint32_t OwnShotIds::lookup(uint32_t p_shot_index) const {
 	return p_shot_index;
 }
 
+bool present_own_alive(const PresentationFrame &p_frame) {
+	const sim::SoldierState &s = p_frame.own_curr;
+	return p_frame.valid && p_frame.stats.spawned && !p_frame.own_unspawned && s.mode != sim::MoveMode::Dead &&
+			(s.flags & sim::soldier_flags::kAlive) != 0 && s.life > 0;
+}
+
 bool present_own_shot_id(OwnShotIds &r_ids, uint8_t p_own_slot, PresentEvent &r_event) {
 	if (r_event.slot != p_own_slot) {
 		return false;

@@ -269,7 +269,7 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 	st.own_deaths = r_m.own_deaths;
 	st.own_spawns = r_m.own_spawns;
 	st.winner = p_f.match.winner;
-	st.unspawned = p_f.own_unspawned;
+	st.end_of_round = host::match_end_of_round_at(p_f.match_valid, p_f.match, p_f.newest_tick);
 	if (r_m.native_following) {
 		if (const std::optional<uint8_t> kit = r_m.deploy_screens.feed(
 					*flow.session(), r_game.hud_model, r_m.scoreboard_held, r_m.spawn_kit)) {

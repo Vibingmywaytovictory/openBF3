@@ -269,7 +269,7 @@ core::Status UiFlowSession::update(const UiGameState &p_state) {
 		last_ = UiGameState{};
 		last_.own_deaths = p_state.own_deaths;
 		last_.own_spawns = p_state.own_spawns;
-		last_.unspawned = p_state.unspawned;
+		last_.end_of_round = p_state.end_of_round;
 	}
 	const bool joining = p_state.joined && !last_.joined;
 	if (joining) {
@@ -300,7 +300,7 @@ core::Status UiFlowSession::update(const UiGameState &p_state) {
 	if (p_state.own_spawns > last_.own_spawns && !round_over_ && !joining) {
 		enter_scope_input("Playing");
 	}
-	if (p_state.unspawned && !last_.unspawned) {
+	if (p_state.end_of_round && !last_.end_of_round) {
 		enter_scope_input("EndOfRound");
 		const sim::Tick at = runtime_->tick() + 1;
 		for (const uint32_t n : end_of_round_nodes_) {

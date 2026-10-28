@@ -350,6 +350,13 @@ constexpr bool own_unspawned_at(bool p_match_valid, const net::MatchState &p_mat
 	return p_match_valid && p_match.unspawn_tick != 0 && p_life_spawn_tick < p_match.unspawn_tick && p_tick >= p_match.unspawn_tick;
 }
 
+constexpr bool match_end_of_round_at(bool p_match_valid, const net::MatchState &p_match, sim::Tick p_tick) {
+	return p_match_valid && p_match.round_end_tick != 0 && p_match.unspawn_tick >= p_match.round_end_tick &&
+			p_tick >= p_match.unspawn_tick;
+}
+
+bool present_own_alive(const PresentationFrame &p_frame);
+
 const char *rules_refusal(const net::MatchInfo &p_match, bool p_has_logic, uint64_t p_logic_digest);
 
 }

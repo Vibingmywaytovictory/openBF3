@@ -40,7 +40,7 @@ struct UiGameState {
 	uint32_t own_deaths = 0;
 	uint32_t own_spawns = 0;
 	uint8_t winner = 0;
-	bool unspawned = false;
+	bool end_of_round = false;
 };
 
 struct UiFlowSessionOptions {

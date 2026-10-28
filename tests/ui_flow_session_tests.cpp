@@ -198,7 +198,7 @@ TEST_SUITE("ui-flow-session") {
 		sc.state.phase = net::MatchPhase::RoundOver;
 		sc.state.winner = 2;
 		sc.run_to(1800);
-		sc.state.unspawned = true;
+		sc.state.end_of_round = true;
 		sc.run_to(3400);
 		const Lines round_over = sc.phase("round over");
 		sc.state.phase = net::MatchPhase::PreRound;
@@ -207,7 +207,7 @@ TEST_SUITE("ui-flow-session") {
 		const Lines restart = sc.phase("restart");
 		sc.input(ui::UiInputConcept::Activate);
 		sc.run_to(3540);
-		sc.state.unspawned = false;
+		sc.state.end_of_round = false;
 		sc.state.own_spawns = 4;
 		sc.run_to(3600);
 		const Lines restart_spawn = sc.phase("deploy after the restart");
@@ -374,6 +374,36 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(s.flow().find_screen("ui/flow/screen/ingamemenump") != nullptr);
 		CHECK(s.errors().empty());
 		CHECK(s.flow().errors().empty());
+	}
+
+	TEST_CASE("ui flow session: a client that never deploys gets EndOfRound from the match's round-end unspawn") {
+		Level *l = level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level);
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		UiFlowSession &s = **made;
+		ui_flow_tdm_pc_defaults(s, "TeamDeathMatch0");
+		Script sc{ s };
+		sc.state.phase = net::MatchPhase::InRound;
+		sc.state.joined = true;
+		sc.run_to(120);
+		sc.phase("join, never deployed");
+		sc.state.phase = net::MatchPhase::RoundOver;
+		sc.state.winner = 1;
+		sc.run_to(180);
+		sc.state.end_of_round = true;
+		sc.run_to(180 + sim::logic::logic_delay_ticks(13.0));
+		const Lines over = sc.phase("round over without a spawn");
+		const auto has = [&](std::string_view p_line) {
+			return std::find(over.begin(), over.end(), p_line) != over.end();
+		};
+		CHECK(sc.at("native EndOfRound", 121) == 181);
+		CHECK(has("close spawnbuttonscreen"));
+		CHECK(has("push eorwinningteamscreen"));
+		CHECK(has("push eordetailstabsscreen"));
+		CHECK(s.errors().empty());
 	}
 
 	TEST_CASE("ui flow session: a spawn made before the flow joins enters Playing after the spawn screens") {

@@ -650,7 +650,7 @@ void Bf3LevelSession::game_presented(double p_delta, uint64_t p_now_ns) {
 	g.own_slot = g.spawned ? f.stats.slot : uint8_t(0xFF);
 	g.own_team = f.own_team == 1 || f.own_team == 2 ? f.own_team : g.team;
 	const bool state_dead = g.spawned && (f.own_curr.mode == sim::MoveMode::Dead || (f.own_curr.flags & sim::soldier_flags::kAlive) == 0);
-	g.alive = g.spawned && !state_dead && f.own_curr.life > 0;
+	g.alive = host::present_own_alive(f);
 	if (g.recorder != nullptr && g.spawned) {
 		g.recorder->watch_slot(int(f.stats.slot));
 	}

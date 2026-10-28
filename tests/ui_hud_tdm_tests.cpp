@@ -12,6 +12,7 @@
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/text_db.h"
+#include "bf3/host/client_session.h"
 #include "bf3/host/hud_feed.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/presentation_events.h"
@@ -784,6 +785,39 @@ TEST_CASE("the EOR page opens with EorTime left: PreEorTime + EorTime is the ser
 	CHECK(m.end_of_round.stage == ui::HudEorStage::Eor);
 	CHECK(m.end_of_round.stage_seconds == doctest::Approx(double(timeline.eor_s)));
 	CHECK(m.end_of_round.time_until_level_change == doctest::Approx(0.0));
+}
+
+TEST_CASE("the end of round is the match's round-end unspawn; the own soldier reads alive only on a predicted frame") {
+	net::MatchState ms;
+	ms.phase = net::MatchPhase::RoundOver;
+	ms.round_end_tick = 900;
+	CHECK_FALSE(host::match_end_of_round_at(true, ms, 1000));
+	ms.unspawn_tick = 960;
+	CHECK_FALSE(host::match_end_of_round_at(true, ms, 959));
+	CHECK(host::match_end_of_round_at(true, ms, 960));
+	CHECK_FALSE(host::match_end_of_round_at(false, ms, 960));
+	ms.unspawn_tick = 400;
+	CHECK_FALSE(host::match_end_of_round_at(true, ms, 1000));
+	net::MatchState restarted;
+	restarted.phase = net::MatchPhase::PreRound;
+	restarted.unspawn_tick = 4600;
+	CHECK_FALSE(host::match_end_of_round_at(true, restarted, 4700));
+
+	host::PresentationFrame f;
+	f.valid = true;
+	f.stats.spawned = true;
+	f.own_curr.life = 3;
+	f.own_curr.flags = bf3::sim::soldier_flags::kAlive;
+	CHECK(host::present_own_alive(f));
+	f.own_curr.mode = bf3::sim::MoveMode::Dead;
+	CHECK_FALSE(host::present_own_alive(f));
+	f.own_curr.mode = bf3::sim::MoveMode{};
+	CHECK(host::present_own_alive(f));
+	f.valid = false;
+	CHECK_FALSE(host::present_own_alive(f));
+	f.valid = true;
+	f.own_unspawned = true;
+	CHECK_FALSE(host::present_own_alive(f));
 }
 
 TEST_CASE("own kills raise the scoring table's kill and headshot score messages") {
