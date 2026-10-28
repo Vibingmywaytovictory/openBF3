@@ -247,6 +247,9 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 		screens->set_resolver(flow.resolver());
 		screens->follow(flow.session());
 		r_m.native_following = true;
+		if (r_game.settings != nullptr && r_m.native_options != nullptr) {
+			r_m.native_options->connect(*flow.session(), r_game.settings->session());
+		}
 		UtilityFunctions::print(to_godot("[ui] native screens follow the client UI flow of " + p_level + " " + p_mode +
 				" (loaded in " + std::to_string(flow.load_seconds()) + " s)"));
 	}
@@ -277,9 +280,6 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 		if (const bf3::core::Status s = flow.tick(st, r_m.native_delta_s); !s && !r_m.native_failure_printed) {
 			r_m.native_failure_printed = true;
 			UtilityFunctions::print(to_godot("[ui] ERROR native screens: " + s.error().message));
-		}
-		if (options != nullptr) {
-			options->apply_writes(*flow.session(), r_game.settings->session());
 		}
 		for (const bf3::core::ui::UiFlowAction &a : flow.take_actions()) {
 			if (options != nullptr && options->take(a, *flow.session(), r_game.settings->session())) {

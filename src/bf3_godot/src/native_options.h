@@ -10,6 +10,7 @@
 
 namespace bf3::host {
 class UiFlowSession;
+struct UiFlowDataWrite;
 }
 
 namespace bf3::godot_side {
@@ -45,7 +46,8 @@ class NativeOptions {
 public:
 	void build(Bf3UiScreens &r_screens);
 	void feed(bf3::host::UiFlowSession &r_session, const bf3::core::ui::OptionsSession &p_options);
-	void apply_writes(bf3::host::UiFlowSession &r_session, bf3::core::ui::OptionsSession &r_options);
+	void connect(bf3::host::UiFlowSession &r_session, bf3::core::ui::OptionsSession &r_options);
+	void apply_write(const bf3::host::UiFlowDataWrite &p_write, bf3::core::ui::OptionsSession &r_options);
 	bool take(const bf3::core::ui::UiFlowAction &p_action, bf3::host::UiFlowSession &r_session,
 			bf3::core::ui::OptionsSession &r_options);
 	bool key(std::string_view p_input, bf3::host::UiFlowSession &r_session, bf3::core::ui::OptionsSession &r_options);

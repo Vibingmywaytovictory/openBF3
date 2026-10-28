@@ -59,58 +59,58 @@ void NativeOptions::feed(bf3::host::UiFlowSession &r_session, const ui::OptionsS
 	r_session.set_data(kOptionsMemCardCategory, ui::kOptionsCanSaveKey, flag(true));
 }
 
-void NativeOptions::apply_writes(bf3::host::UiFlowSession &r_session, ui::OptionsSession &r_options) {
-	for (const bf3::host::UiFlowDataWrite &w : r_session.take_data_writes()) {
-		if (w.category != kOptionsSettingsLeaf) {
-			continue;
-		}
-		switch (w.key) {
-			case ui::kOptionsTabKey:
-				if (const std::optional<uint8_t> t = index_of(w.value, double(ui::kOptionsTabCount))) {
-					r_options.select_tab(*t);
-					++stats_.tabs;
-				}
-				break;
-			case ui::kOptionsKeyTabKey:
-				if (const std::optional<uint8_t> t =
-								index_of(w.value, double(r_options.store().key_bindings().tabs().size()))) {
-					r_options.select_key_tab(*t);
-					++stats_.key_tabs;
-				}
-				break;
-			case ui::kOptionsKeyColumnKey:
-				if (const std::optional<uint8_t> c = index_of(w.value, double(ui::kKeyColumnCount))) {
-					r_options.select_key_column(*c);
-				}
-				break;
-			case ui::kOptionsKeyRowKey:
-				if (const std::optional<double> r = number_of(w.value); r && *r >= 0.0 && *r < 65536.0) {
-					row_ = uint16_t(*r);
-				}
-				break;
-			case ui::kOptionsValueKey:
-				pending_value_ = number_of(w.value).value_or(std::numeric_limits<double>::quiet_NaN());
-				break;
-			case ui::kOptionsDataKeyKey:
-				if (const std::optional<double> k = number_of(w.value); k && std::isfinite(pending_value_)) {
-					++(r_options.set_option_value(int32_t(*k), pending_value_) ? stats_.values : stats_.refused_values);
-				}
-				break;
-			case ui::kOptionsExitingKey:
-				if (ui::ui_flow_truthy(w.value)) {
-					r_options.exit();
-					inside_ = false;
-					capturing_ = false;
-					++stats_.exited;
-				} else {
-					r_options.enter();
-					inside_ = true;
-					++stats_.entered;
-				}
-				break;
-			default:
-				break;
-		}
+void NativeOptions::connect(bf3::host::UiFlowSession &r_session, ui::OptionsSession &r_options) {
+	r_session.add_data_sink(std::string(kOptionsSettingsLeaf),
+			[this, &r_options](const bf3::host::UiFlowDataWrite &p_write) { apply_write(p_write, r_options); });
+}
+
+void NativeOptions::apply_write(const bf3::host::UiFlowDataWrite &p_write, ui::OptionsSession &r_options) {
+	switch (p_write.key) {
+		case ui::kOptionsTabKey:
+			if (const std::optional<uint8_t> t = index_of(p_write.value, double(ui::kOptionsTabCount))) {
+				r_options.select_tab(*t);
+				++stats_.tabs;
+			}
+			break;
+		case ui::kOptionsKeyTabKey:
+			if (const std::optional<uint8_t> t =
+							index_of(p_write.value, double(r_options.store().key_bindings().tabs().size()))) {
+				r_options.select_key_tab(*t);
+				++stats_.key_tabs;
+			}
+			break;
+		case ui::kOptionsKeyColumnKey:
+			if (const std::optional<uint8_t> c = index_of(p_write.value, double(ui::kKeyColumnCount))) {
+				r_options.select_key_column(*c);
+			}
+			break;
+		case ui::kOptionsKeyRowKey:
+			if (const std::optional<double> r = number_of(p_write.value); r && *r >= 0.0 && *r < 65536.0) {
+				row_ = uint16_t(*r);
+			}
+			break;
+		case ui::kOptionsValueKey:
+			pending_value_ = number_of(p_write.value).value_or(std::numeric_limits<double>::quiet_NaN());
+			break;
+		case ui::kOptionsDataKeyKey:
+			if (const std::optional<double> k = number_of(p_write.value); k && std::isfinite(pending_value_)) {
+				++(r_options.set_option_value(int32_t(*k), pending_value_) ? stats_.values : stats_.refused_values);
+			}
+			break;
+		case ui::kOptionsExitingKey:
+			if (ui::ui_flow_truthy(p_write.value)) {
+				r_options.exit();
+				inside_ = false;
+				capturing_ = false;
+				++stats_.exited;
+			} else {
+				r_options.enter();
+				inside_ = true;
+				++stats_.entered;
+			}
+			break;
+		default:
+			break;
 	}
 }
 

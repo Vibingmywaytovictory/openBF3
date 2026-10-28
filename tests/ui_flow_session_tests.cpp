@@ -532,6 +532,8 @@ TEST_SUITE("ui-flow-session") {
 		s.set_data(kSettings, ui::kOptionsVideoChangedKey, "False");
 		s.set_data(kSettings, ui::kOptionsFullscreenKey, "False");
 		s.set_data("ui/uicomponents/uimemcardcomp", ui::kOptionsCanSaveKey, "True");
+		std::vector<UiFlowDataWrite> settings_writes;
+		s.add_data_sink("uisettingscomp", [&](const UiFlowDataWrite &p_write) { settings_writes.push_back(p_write); });
 		Script sc{ s };
 		sc.state.phase = net::MatchPhase::InRound;
 		sc.state.joined = true;
@@ -552,10 +554,9 @@ TEST_SUITE("ui-flow-session") {
 		};
 		const auto writes = [&] {
 			Lines out;
-			for (const UiFlowDataWrite &w : s.take_data_writes()) {
-				if (w.category == "uisettingscomp") {
-					out.push_back(std::to_string(w.key) + "=" + w.value);
-				}
+			s.dispatch_data_writes();
+			for (const UiFlowDataWrite &w : std::exchange(settings_writes, {})) {
+				out.push_back(std::to_string(w.key) + "=" + w.value);
 			}
 			for (const std::string &w : out) {
 				std::printf("ui.flow.session options write %s\n", w.c_str());
@@ -571,7 +572,8 @@ TEST_SUITE("ui-flow-session") {
 			}
 			return out;
 		};
-		s.take_data_writes();
+		s.dispatch_data_writes();
+		settings_writes.clear();
 		press(ui::UiInputConcept::Menu);
 		sc.phase("options: menu");
 		const std::string menu = "ui/flow/screen/ingamemenump";
@@ -675,6 +677,53 @@ TEST_SUITE("ui-flow-session") {
 				[](const std::string &p_a) { return p_a.starts_with("OptionsBack"); }));
 		CHECK(s.errors().empty());
 		CHECK(s.flow().errors().empty());
+		CHECK(s.stats().data_writes_dropped == 0);
+	}
+
+	TEST_CASE("ui flow session: every update drains the data-write journal, with or without a sink") {
+		Level *l = level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level);
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		UiFlowSession &s = **made;
+		ui_flow_tdm_pc_defaults(s, "TeamDeathMatch0");
+		s.set_data("ui/uicomponents/uisettingscomp", ui::kOptionsSettingsChangedKey, "False");
+		s.set_data("ui/uicomponents/uisettingscomp", ui::kOptionsVideoChangedKey, "False");
+		Script sc{ s };
+		sc.state.phase = net::MatchPhase::InRound;
+		sc.state.joined = true;
+		sc.run_to(60);
+		sc.input(ui::UiInputConcept::Activate);
+		sc.state.own_spawns = 1;
+		sc.run_to(200);
+		const std::string menu = "ui/flow/screen/ingamemenump";
+		sc.input(ui::UiInputConcept::Menu);
+		sc.run_to(sc.tick + 10);
+		for (int i = 0; i < 3; ++i) {
+			const uint64_t dispatched = s.stats().data_writes_dispatched;
+			CHECK(s.widget_fired(menu, "List_01", "UIWidgetEventID_OnItemReleased", std::string("ID_M_IGMMP_OPTIONS")));
+			sc.run_to(sc.tick + 1);
+			CHECK(s.stats().data_writes_dispatched >= dispatched + 2);
+			CHECK(s.pending_data_writes() == 0);
+			sc.input(ui::UiInputConcept::Deactivate);
+			sc.run_to(sc.tick + 10);
+		}
+		CHECK(s.stats().data_writes_dispatched >= 6);
+		CHECK(s.stats().data_writes_peak < kUiFlowSessionMaxDataWrites);
+		CHECK(s.stats().data_writes_dropped == 0);
+		uint64_t heard = 0;
+		const uint32_t sink = s.add_data_sink("uisettingscomp", [&](const UiFlowDataWrite &) { ++heard; });
+		CHECK(s.widget_fired(menu, "List_01", "UIWidgetEventID_OnItemReleased", std::string("ID_M_IGMMP_OPTIONS")));
+		sc.run_to(sc.tick + 1);
+		CHECK(heard >= 2);
+		s.remove_data_sink(sink);
+		const uint64_t before = heard;
+		sc.input(ui::UiInputConcept::Deactivate);
+		sc.run_to(sc.tick + 10);
+		CHECK(heard == before);
+		CHECK(s.pending_data_writes() == 0);
 	}
 
 	TEST_CASE("ui flow session: install unchanged") {

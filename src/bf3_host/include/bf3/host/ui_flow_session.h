@@ -7,6 +7,7 @@
 #include "bf3/sim/logic/logic_runtime.h"
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -62,6 +63,8 @@ struct UiFlowDataWrite {
 	std::string value;
 };
 
+using UiFlowDataSink = std::function<void(const UiFlowDataWrite &)>;
+
 struct UiFlowSessionStats {
 	size_t ui_graph_nodes = 0;
 	size_t graphs = 0;
@@ -76,6 +79,9 @@ struct UiFlowSessionStats {
 	uint64_t networked_delivered = 0;
 	uint64_t reloads = 0;
 	uint64_t graphs_popped = 0;
+	uint64_t data_writes_dispatched = 0;
+	uint64_t data_writes_dropped = 0;
+	size_t data_writes_peak = 0;
 };
 
 class UiFlowSession final : public core::ui::UiFlowHost {
@@ -103,7 +109,10 @@ public:
 	void clear_log() { log_.clear(); }
 	std::vector<core::ui::UiFlowAction> take_actions();
 	std::vector<UiFlowWidgetEvent> take_widget_events();
-	std::vector<UiFlowDataWrite> take_data_writes();
+	uint32_t add_data_sink(std::string p_category_leaf, UiFlowDataSink p_sink);
+	void remove_data_sink(uint32_t p_id);
+	size_t dispatch_data_writes();
+	size_t pending_data_writes() const { return data_writes_.size(); }
 	const UiFlowSessionStats &stats() const { return stats_; }
 	const std::vector<std::string> &errors() const { return errors_; }
 	std::optional<std::string> data(std::string_view p_category, int32_t p_key) const;
@@ -129,6 +138,11 @@ private:
 		sim::Tick due = 0;
 		uint32_t node = 0;
 		int32_t port = 0;
+	};
+	struct DataSink {
+		uint32_t id = 0;
+		std::string category;
+		UiFlowDataSink sink;
 	};
 
 	UiFlowSession() = default;
@@ -167,6 +181,8 @@ private:
 	std::vector<core::ui::UiFlowAction> actions_;
 	std::vector<UiFlowWidgetEvent> widget_events_;
 	std::vector<UiFlowDataWrite> data_writes_;
+	std::vector<DataSink> data_sinks_;
+	uint32_t next_data_sink_ = 1;
 	std::vector<std::string> log_;
 	std::vector<std::string> errors_;
 	UiGameState last_;

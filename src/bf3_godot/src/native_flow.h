@@ -72,6 +72,7 @@ private:
 	double load_seconds_ = 0.0;
 	double clock_ = 0.0;
 	bool keep_log_ = false;
+	bool journal_overflow_reported_ = false;
 	uint64_t ticks_ = 0;
 	uint64_t actions_ = 0;
 	std::vector<bf3::core::ui::UiFlowAction> pending_;

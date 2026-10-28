@@ -314,7 +314,9 @@ core::Status UiFlowSession::update(const UiGameState &p_state) {
 	if (joining) {
 		last_.own_spawns = spawns_seen;
 	}
-	return step();
+	const core::Status stepped = step();
+	dispatch_data_writes();
+	return stepped;
 }
 
 core::Status UiFlowSession::step() {
@@ -543,16 +545,36 @@ std::optional<std::string> UiFlowSession::data_get(const ui::UiDataRef &p_ref) {
 
 void UiFlowSession::data_set(const ui::UiDataRef &p_ref, std::string_view p_value, bool) {
 	data_[leaf_key(p_ref.category, p_ref.key)] = std::string(p_value);
-	if (data_writes_.size() < kUiFlowSessionMaxDataWrites) {
-		data_writes_.push_back(
-				UiFlowDataWrite{ ui::ui_data_category_leaf(p_ref.category), p_ref.key, std::string(p_value) });
+	if (data_writes_.size() >= kUiFlowSessionMaxDataWrites) {
+		++stats_.data_writes_dropped;
+		return;
 	}
+	data_writes_.push_back(
+			UiFlowDataWrite{ ui::ui_data_category_leaf(p_ref.category), p_ref.key, std::string(p_value) });
+	stats_.data_writes_peak = std::max(stats_.data_writes_peak, data_writes_.size());
 }
 
-std::vector<UiFlowDataWrite> UiFlowSession::take_data_writes() {
-	std::vector<UiFlowDataWrite> out;
-	out.swap(data_writes_);
-	return out;
+uint32_t UiFlowSession::add_data_sink(std::string p_category_leaf, UiFlowDataSink p_sink) {
+	const uint32_t id = next_data_sink_++;
+	data_sinks_.push_back(DataSink{ id, std::move(p_category_leaf), std::move(p_sink) });
+	return id;
+}
+
+void UiFlowSession::remove_data_sink(uint32_t p_id) {
+	std::erase_if(data_sinks_, [&](const DataSink &p_s) { return p_s.id == p_id; });
+}
+
+size_t UiFlowSession::dispatch_data_writes() {
+	const std::vector<UiFlowDataWrite> writes = std::exchange(data_writes_, {});
+	for (const UiFlowDataWrite &w : writes) {
+		for (const DataSink &s : data_sinks_) {
+			if (s.category == w.category) {
+				s.sink(w);
+			}
+		}
+	}
+	stats_.data_writes_dispatched += writes.size();
+	return writes.size();
 }
 
 void UiFlowSession::widget_event(const ui::UiFlowScreen &p_screen, std::string_view p_instance,
