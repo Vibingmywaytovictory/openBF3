@@ -342,6 +342,11 @@ audio::MixerCore *Bf3GameAudio::mixer() const {
 	return impl_->mixer.get();
 }
 
+bool Bf3GameAudio::weapon_bound(uint16_t p_def) const {
+	const Impl &m = *impl_;
+	return m.table != nullptr && p_def < m.table->defs.size() && m.table->defs[p_def].form != ba::WeaponAudioForm::None;
+}
+
 GameAudioStats Bf3GameAudio::stats() const {
 	const Impl &m = *impl_;
 	GameAudioStats s;

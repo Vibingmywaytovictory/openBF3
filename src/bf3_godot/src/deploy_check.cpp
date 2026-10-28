@@ -234,6 +234,14 @@ void DeployCheck::step(
 						spawn_how_ + ": " + std::to_string(p_st.spawn_actions - mark_.spawn_actions) +
 								" flow Spawn action(s), spawned as " + kit_text(p_st.own_kit) + " with primary item " +
 								std::to_string(p_st.spawned_primary));
+				if (spawn_primary_ != 0) {
+					row(spawn_row_ + ".fire_fx", p_st.spawned_primary_fire_fx,
+							"primary item " + std::to_string(p_st.spawned_primary) + " first-person fire effects " +
+									(p_st.spawned_primary_fire_fx ? "resolved" : "missing"));
+					row(spawn_row_ + ".audio", p_st.spawned_primary_audio,
+							"primary item " + std::to_string(p_st.spawned_primary) + " weapon audio " +
+									(p_st.spawned_primary_audio ? "bound" : "unbound"));
+				}
 				const bool hud = shown(r_screens, bf3::core::ui::kHudMpScreenPartition);
 				const bool gone =
 						!up(r_screens, kSpawnScreenPcPartition) && !up(r_screens, kSpawnButtonScreenPartition);

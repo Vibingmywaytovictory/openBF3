@@ -79,6 +79,8 @@ struct DeployCheckState {
 	std::array<uint32_t, 32> primary_items{};
 	uint32_t chosen_primary = 0;
 	uint32_t spawned_primary = 0;
+	bool spawned_primary_fire_fx = false;
+	bool spawned_primary_audio = false;
 	uint64_t concepts_found = 0;
 	std::array<DeployCheckList, 2> lists{};
 };

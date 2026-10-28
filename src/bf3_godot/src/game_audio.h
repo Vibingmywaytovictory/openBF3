@@ -64,6 +64,7 @@ public:
 
 	void set_check(audio::GameAudioCheck *p_check);
 	audio::MixerCore *mixer() const;
+	bool weapon_bound(uint16_t p_def) const;
 	GameAudioStats stats() const;
 	std::vector<std::string> load_report() const;
 	void shutdown();

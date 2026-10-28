@@ -4,7 +4,9 @@
 
 #include "bf3_localisation.h"
 #include "fp_camera.h"
+#include "game_audio.h"
 #include "game_crowd.h"
+#include "game_fx.h"
 #include "godot_util.h"
 #include "hud_items.h"
 #include "input_mapper.h"
@@ -884,6 +886,11 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 							? r_game.hud_static.row(f.own_weapons_curr.slots[primary].def)
 							: nullptr) {
 				s.spawned_primary = row->item_id;
+				const uint16_t def = f.own_weapons_curr.slots[primary].def;
+				const bf3::fx::FireEffectTable *fire = r_game.fx != nullptr ? r_game.fx->fire_effects() : nullptr;
+				s.spawned_primary_fire_fx =
+						fire != nullptr && def < fire->defs.size() && !fire->defs[def].first_person.empty();
+				s.spawned_primary_audio = r_game.audio != nullptr && r_game.audio->weapon_bound(def);
 			}
 			if (const Bf3UiPostProcess *post = Bf3UiPostProcess::current()) {
 				s.glitch_triggers = post->stats().glitch_triggers;
