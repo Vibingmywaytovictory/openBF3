@@ -6,7 +6,6 @@
 
 #include <array>
 #include <cmath>
-#include <map>
 #include <string>
 #include <vector>
 
@@ -24,10 +23,7 @@ constexpr std::string_view kKillCamBadLuckSid = "ID_M_BAD_LUCK";
 class KillCamClass final : public HudWidgetController {
 public:
 	void attach_node(HudWidgetHost &, const HudWidgetNode &p_node) override {
-		sources_.clear();
-		for (const HudDataSource &s : p_node.sources) {
-			sources_[s.name] = s.on_initialize;
-		}
+		sources_.attach(p_node, false, HudSourceFeed::Unlisted::FeedWhenNoneListed);
 	}
 
 	void on_clip_load(HudWidgetHost &r_host) override {
@@ -170,10 +166,7 @@ public:
 	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const override {
 		const HudKillCard &k = p_model.kill_card;
 		const auto feed = [&](std::string_view p_key, As2Value p_value) {
-			const auto it = sources_.find(p_key);
-			if (sources_.empty() || it != sources_.end()) {
-				r_out.push_back({ std::string(p_key), std::move(p_value), it == sources_.end() || it->second });
-			}
+			sources_.feed(r_out, p_key, std::move(p_value));
 		};
 		const std::string killer = hud_string(k.killer_name);
 		const auto localised = [&](uint32_t p_hash) {
@@ -301,7 +294,7 @@ private:
 				float(as2_round(kKillCamScoreRight - (double(score_holder_.width()) + double(kKillCamGap)))));
 	}
 
-	std::map<std::string, bool, std::less<>> sources_;
+	HudSourceFeed sources_;
 	As2Clip killed_;
 	As2Clip kit_icon_;
 	As2Clip weapon_;

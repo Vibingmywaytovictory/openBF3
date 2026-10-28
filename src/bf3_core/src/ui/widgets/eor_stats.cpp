@@ -4,7 +4,6 @@
 
 #include <cmath>
 #include <cstdio>
-#include <map>
 #include <string>
 
 namespace bf3::core::ui {
@@ -29,12 +28,7 @@ std::string format_hundredths(const As2Value &p_value) {
 class StatsClass final : public HudWidgetController {
 public:
 	void attach_node(HudWidgetHost &, const HudWidgetNode &p_node) override {
-		sources_.clear();
-		for (const HudDataSource &s : p_node.sources) {
-			if (!s.category.empty()) {
-				sources_[s.name] = s.on_initialize;
-			}
-		}
+		sources_.attach(p_node, true, HudSourceFeed::Unlisted::Drop);
 	}
 
 	void on_clip_load(HudWidgetHost &r_host) override { r_host.self().set_visible(false); }
@@ -42,9 +36,7 @@ public:
 	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const override {
 		const HudEndOfRound &e = p_model.end_of_round;
 		const auto feed = [&](std::string_view p_key, As2Value p_value) {
-			if (const auto it = sources_.find(p_key); it != sources_.end()) {
-				r_out.push_back({ std::string(p_key), std::move(p_value), it->second });
-			}
+			sources_.feed(r_out, p_key, std::move(p_value));
 		};
 		const auto best = [&](const HudBestWeapon &p_best) {
 			As2Value v = As2Value::object();
@@ -81,10 +73,7 @@ public:
 	}
 
 	void initialize(HudWidgetHost &r_host, const HudWidgetInit &p_init) override {
-		const auto value = [&](std::string_view p_key) {
-			const As2Value *v = p_init.value(p_key);
-			return v != nullptr ? *v : As2Value();
-		};
+		const auto value = [&](std::string_view p_key) { return hud_init_value(p_init, p_key); };
 		const bool end_of_round = param_true(r_host, "endOfRoundMode");
 		const As2Value weapon = value("BestWeaponInfo");
 		const As2Value vehicle = value("BestVehicleInfo");
@@ -206,7 +195,7 @@ private:
 		}
 	}
 
-	std::map<std::string, bool, std::less<>> sources_;
+	HudSourceFeed sources_;
 };
 
 }

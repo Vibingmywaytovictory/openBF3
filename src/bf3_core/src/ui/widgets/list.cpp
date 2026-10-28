@@ -216,10 +216,7 @@ public:
 	void initialize(HudWidgetHost &r_host, const HudWidgetInit &p_init) override {
 		selected_index_ = -1.0;
 		highlighted_index_ = -1.0;
-		const auto value = [&](std::string_view p_key) {
-			const As2Value *v = p_init.value(p_key);
-			return v != nullptr ? *v : As2Value();
-		};
+		const auto value = [&](std::string_view p_key) { return hud_init_value(p_init, p_key); };
 		list_index_ = value("ListIndex");
 		p_row_type_ = value("RowType");
 		p_row_spacing_ = value("RowSpacing");

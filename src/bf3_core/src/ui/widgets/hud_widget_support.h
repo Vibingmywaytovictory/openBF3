@@ -120,6 +120,39 @@ inline std::string param_string(const HudWidgetHost &p_host, std::string_view p_
 	return v != nullptr ? v->to_string() : std::string("undefined");
 }
 
+inline As2Value hud_init_value(const HudWidgetInit &p_init, std::string_view p_key) {
+	const As2Value *v = p_init.value(p_key);
+	return v != nullptr ? *v : As2Value();
+}
+
+class HudSourceFeed {
+public:
+	enum class Unlisted : uint8_t { Drop, FeedWhenNoneListed };
+
+	void attach(const HudWidgetNode &p_node, bool p_categorised_only, Unlisted p_unlisted) {
+		sources_.clear();
+		unlisted_ = p_unlisted;
+		for (const HudDataSource &s : p_node.sources) {
+			if (!p_categorised_only || !s.category.empty()) {
+				sources_[s.name] = s.on_initialize;
+			}
+		}
+	}
+
+	void feed(HudData &r_out, std::string_view p_key, As2Value p_value) const {
+		const auto it = sources_.find(p_key);
+		if (it != sources_.end()) {
+			r_out.push_back({ std::string(p_key), std::move(p_value), it->second });
+		} else if (unlisted_ == Unlisted::FeedWhenNoneListed && sources_.empty()) {
+			r_out.push_back({ std::string(p_key), std::move(p_value), true });
+		}
+	}
+
+private:
+	std::map<std::string, bool, std::less<>> sources_;
+	Unlisted unlisted_ = Unlisted::Drop;
+};
+
 inline void setup_refresh_data(HudWidgetController &r_ctl, HudWidgetHost &r_host, const HudData &p_data) {
 	for (const HudDataEntry &e : p_data) {
 		if (e.value.defined()) {

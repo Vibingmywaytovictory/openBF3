@@ -266,10 +266,8 @@ public:
 	}
 
 	void initialize(HudWidgetHost &r_host, const HudWidgetInit &p_init) override {
-		const As2Value *mode = p_init.value("GameMode");
-		game_mode_ = mode != nullptr ? *mode : As2Value();
-		const As2Value *attacker = p_init.value("RushIsAttacker");
-		update_rush_is_attacker(attacker != nullptr ? *attacker : As2Value());
+		game_mode_ = hud_init_value(p_init, "GameMode");
+		update_rush_is_attacker(hud_init_value(p_init, "RushIsAttacker"));
 		setup_refresh_data(*this, r_host, p_init.data);
 		r_host.self().set_visible(true);
 	}

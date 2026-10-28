@@ -3,7 +3,6 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
-#include <map>
 #include <string>
 #include <vector>
 
@@ -64,12 +63,7 @@ private:
 class EorHeaderClass final : public HudWidgetController {
 public:
 	void attach_node(HudWidgetHost &, const HudWidgetNode &p_node) override {
-		sources_.clear();
-		for (const HudDataSource &s : p_node.sources) {
-			if (!s.category.empty()) {
-				sources_[s.name] = s.on_initialize;
-			}
-		}
+		sources_.attach(p_node, true, HudSourceFeed::Unlisted::Drop);
 	}
 
 	void on_clip_load(HudWidgetHost &r_host) override {
@@ -84,9 +78,7 @@ public:
 	void bind(const HudModel &p_model, const HudClientState &, HudData &r_out) const override {
 		const HudEndOfRound &e = p_model.end_of_round;
 		const auto feed = [&](std::string_view p_key, As2Value p_value) {
-			if (const auto it = sources_.find(p_key); it != sources_.end()) {
-				r_out.push_back({ std::string(p_key), std::move(p_value), it->second });
-			}
+			sources_.feed(r_out, p_key, std::move(p_value));
 		};
 		feed("GameMode", As2Value::of(hud_string(p_model.settings.current_game_mode)));
 		feed("IsWinner", As2Value::of(hud_eor_place(e)));
@@ -103,10 +95,7 @@ public:
 	}
 
 	void initialize(HudWidgetHost &r_host, const HudWidgetInit &p_init) override {
-		const auto value = [&](std::string_view p_key) {
-			const As2Value *v = p_init.value(p_key);
-			return v != nullptr ? *v : As2Value();
-		};
+		const auto value = [&](std::string_view p_key) { return hud_init_value(p_init, p_key); };
 		const As2Value mode = value("GameMode");
 		const As2Value is_winner = value("IsWinner");
 		const bool won = as2_loose_equals(is_winner, As2Value::of(0));
@@ -216,7 +205,7 @@ private:
 		}
 	}
 
-	std::map<std::string, bool, std::less<>> sources_;
+	HudSourceFeed sources_;
 	As2Clip text_holder_;
 	As2Clip duration_desc_;
 	As2Clip duration_;

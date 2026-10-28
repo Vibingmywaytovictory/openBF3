@@ -151,8 +151,7 @@ public:
 		setup_refresh_data(*this, r_host, p_init.data);
 		add_shoulder_icons();
 		update_tabs(start_tabs);
-		const As2Value *setup = p_init.value("Setup");
-		update_setup(setup != nullptr ? *setup : As2Value());
+		update_setup(hud_init_value(p_init, "Setup"));
 	}
 
 	void update(HudWidgetHost &, std::string_view p_key, const As2Value &p_value) override {
