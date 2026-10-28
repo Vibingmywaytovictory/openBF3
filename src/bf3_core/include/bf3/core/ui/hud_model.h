@@ -150,6 +150,7 @@ struct HudSpawnPoint {
 	float yaw = 0.0f;
 	uint32_t label_sid_hash = 0;
 	uint8_t player = kHudNoPlayer;
+	char flag_letter = 0;
 };
 
 struct HudSpawnPointList {

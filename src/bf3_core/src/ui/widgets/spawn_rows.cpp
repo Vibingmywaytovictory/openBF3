@@ -164,12 +164,10 @@ std::optional<As2Value> hud_model_list_rows(
 		const std::string label = p_client.localise_hash ? p_client.localise_hash(p.label_sid_hash) : std::string();
 		As2Value row = As2Value::object();
 		row.set("Type", As2Value::of(std::string(kSpawnRowType)));
-		if (p.kind == HudSpawnKind::Hq) {
-			row.set("Text", As2Value::of(label));
-			row.set("Label", As2Value::of(std::string()));
-		} else {
-			row.set("Label", As2Value::of(label));
-		}
+		row.set("Text", As2Value::of(label));
+		row.set("Label",
+				As2Value::of(p.kind == HudSpawnKind::Flag && p.flag_letter != 0 ? std::string(1, p.flag_letter)
+																				: std::string()));
 		row.set("VehicleIcon", As2Value::of(std::string(kSpawnRowNoVehicleIcon)));
 		row.set("Index", As2Value::of(int32_t(i)));
 		row.set("id", As2Value::of(int32_t(i)));

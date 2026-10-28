@@ -445,6 +445,7 @@ TEST_SUITE("ui-deploy") {
 			list.points[i].kind = i == 0 ? HudSpawnKind::Hq : HudSpawnKind::Flag;
 			list.points[i].team = 1;
 			list.points[i].available = i != 2;
+			list.points[i].flag_letter = i == 0 ? char(0) : char('A' + i);
 		}
 		const HudClientState client = retail_text_client(retail_text_db(*r));
 		HudDataSource list_query;
@@ -454,6 +455,9 @@ TEST_SUITE("ui-deploy") {
 		REQUIRE(rows.has_value());
 		REQUIRE(rows->size() == 3);
 		CHECK(rows->at(1).field("id").to_number() == doctest::Approx(1.0));
+		CHECK(rows->at(0).field("Label").to_string() == "");
+		CHECK(rows->at(1).field("Label").to_string() == "B");
+		CHECK(rows->at(1).field("Text").to_string() == client.localise_hash(list.points[1].label_sid_hash));
 		HudDataSource selection;
 		selection.category = std::string(kSpawnPointListCategory);
 		selection.key = kDefaultSpawnPointKey;
