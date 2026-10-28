@@ -11,6 +11,7 @@
 #include "test_support.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -652,20 +653,22 @@ TEST_SUITE("ant") {
 		CHECK(c.raw_exact == 1490);
 		CHECK(c.frame_exact == 659);
 
-		CHECK(c.clips_with_controller == 5592);
+		CHECK(c.clips_with_controller == 5627);
 		CHECK(c.clips_without_controller == 1);
-		CHECK(c.clips_kind_consistent == 5592);
-		CHECK(c.channels_total == 684459);
-		CHECK(c.channels_ok == 684459);
+		CHECK(c.clips_kind_consistent == 5627);
+		CHECK(c.channels_total == 691388);
+		CHECK(c.channels_ok == 691388);
 		CHECK(c.channels_on_delta_traj == 0);
 		CHECK(c.bind_errors == 0);
 		CHECK(c.codecs["DctAnimationAsset"].mapped_perfect == 3297);
 		CHECK(c.codecs["RawAnimationAsset"].mapped_perfect == 1490);
 		CHECK(c.codecs["FrameAnimationAsset"].mapped_perfect == 659);
 		CHECK(c.codecs["VbrAnimationAsset"].mapped_perfect == 146);
+		CHECK(c.codecs["CurveAnimationAsset"].mapped_perfect == 35);
 
 		CHECK(c.codecs["VbrAnimationAsset"].unsupported == 146);
-		CHECK(c.codecs["CurveAnimationAsset"].unsupported == 35);
+		CHECK(c.codecs["CurveAnimationAsset"].decoded == 35);
+		CHECK(c.codecs["CurveAnimationAsset"].unsupported == 0);
 		for (const auto &[name, cc] : c.codecs) {
 			CAPTURE(name);
 			CHECK(cc.errors == 0);
@@ -690,6 +693,9 @@ TEST_SUITE("ant") {
 		CHECK(c.codecs["RawAnimationAsset"].clips == 1534);
 		CHECK(c.codecs["CurveAnimationAsset"].clips == 775);
 		CHECK(c.codecs["FrameAnimationAsset"].clips == 660);
+		CHECK(c.codecs["CurveAnimationAsset"].decoded == 697);
+		CHECK(c.codecs["CurveAnimationAsset"].unsupported == 78);
+		CHECK(c.codecs["CurveAnimationAsset"].mapped_perfect == 775);
 		CHECK(c.dct_ok == 3778);
 		CHECK(c.dct_overruns == 0);
 		CHECK(c.dct_q_off == 9);
@@ -755,6 +761,106 @@ TEST_SUITE("ant") {
 		CHECK(b.fps == 30.0f);
 		CHECK(b.tracks.size() == 135);
 		CHECK(b.kind_mismatches == 0);
+	}
+
+	TEST_CASE("ant: CurveAnimationAsset channels are Euler angle and vector triples on a 4-float stride; the angle "
+			  "order is "
+			  "measured on the M40A5 Fire's constant channels against its IdlePose") {
+		AntData *d = data_or_skip();
+		if (!d) {
+			return;
+		}
+		const AntPackageInfo *info = d->source().find("m40a5");
+		REQUIRE(info != nullptr);
+		std::string error;
+		auto pkg = antdump::load_package(d->source(), *info, error);
+		REQUIRE_MESSAGE(pkg, error);
+		const GdStruct fire = AntLibrary::find_clip(*pkg, "Fire Anim");
+		REQUIRE(fire.valid());
+		CHECK(clip_codec(fire) == ClipCodec::Curve);
+		DecodedClip idle;
+		REQUIRE(decode_clip(AntLibrary::find_clip(*pkg, "IdlePose Anim"), idle).ok());
+		std::vector<float> consts;
+		std::vector<int64_t> offsets;
+		const GdArray ca = fire.array("Consts"), oa = fire.array("ConstOffsets");
+		REQUIRE(ca.valid());
+		REQUIRE(oa.valid());
+		REQUIRE(ca.size() == oa.size());
+		std::map<int64_t, float> constant;
+		for (uint32_t i = 0; i < ca.size(); ++i) {
+			float v = 0.0f;
+			int64_t o = 0;
+			REQUIRE(ca.read_float(i, v));
+			REQUIRE(oa.read_int(i, o));
+			constant[o] = v;
+		}
+		uint32_t nq = 0, nv = 0;
+		REQUIRE(fire.read_u32("NumRotations", nq));
+		REQUIRE(fire.read_u32("NumVectors", nv));
+		REQUIRE(nq == idle.num_quats);
+		REQUIRE(nv == idle.num_vec3s);
+		std::array<uint32_t, kEulerOrders.size()> matched{};
+		uint32_t const_rotations = 0, const_vectors = 0, vectors_matched = 0;
+		for (uint32_t r = 0; r < nq; ++r) {
+			float e[3];
+			bool all = true;
+			for (uint32_t c = 0; c < 3; ++c) {
+				const auto it = constant.find(int64_t(4 * r + c));
+				all = all && it != constant.end();
+				e[c] = all ? it->second : 0.0f;
+			}
+			if (!all) {
+				continue;
+			}
+			++const_rotations;
+			for (uint32_t o = 0; o < kEulerOrders.size(); ++o) {
+				matched[o] += quat_angle_deg(euler_quat(e, o), idle.quat(0, r)) < 0.05 ? 1u : 0u;
+			}
+		}
+		for (uint32_t v = 0; v < nv; ++v) {
+			float e[3];
+			bool all = true;
+			for (uint32_t c = 0; c < 3; ++c) {
+				const auto it = constant.find(int64_t(4 * nq + 4 * v + c));
+				all = all && it != constant.end();
+				e[c] = all ? it->second : 0.0f;
+			}
+			if (!all) {
+				continue;
+			}
+			++const_vectors;
+			const Vec3 &b = idle.vec3(0, v);
+			vectors_matched +=
+					std::fabs(e[0] - b.x) < 1e-4f && std::fabs(e[1] - b.y) < 1e-4f && std::fabs(e[2] - b.z) < 1e-4f
+					? 1u
+					: 0u;
+		}
+		std::string line;
+		for (uint32_t o = 0; o < kEulerOrders.size(); ++o) {
+			line += " " + std::to_string(kEulerOrders[o][0]) + std::to_string(kEulerOrders[o][1]) +
+					std::to_string(kEulerOrders[o][2]) + ": " + std::to_string(matched[o]);
+		}
+		MESSAGE("M40A5 Fire: " << const_rotations
+							   << " constant rotations, IdlePose matches by order (q = q[a] q[b] q[c])" << line << "; "
+							   << vectors_matched << " of " << const_vectors << " constant vectors equal IdlePose's");
+		CHECK(const_rotations > 0);
+		CHECK(*std::max_element(matched.begin(), matched.end()) == matched[kCurveEulerOrder]);
+		CHECK(matched[kCurveEulerOrder] * 2 > const_rotations);
+		CHECK(vectors_matched * 2 > const_vectors);
+
+		DecodedClip c;
+		REQUIRE(decode_clip(fire, c).ok());
+		CHECK(c.codec == ClipCodec::Curve);
+		CHECK(c.num_quats == nq);
+		CHECK(c.num_keys == 24);
+		CHECK(c.key_times.front() == 0);
+		CHECK(c.key_times.back() == 23);
+		CHECK(c.consistent());
+		double max_deg = 0.0;
+		for (uint32_t q = 0; q < nq; ++q) {
+			max_deg = std::max(max_deg, quat_angle_deg(c.quat(0, q), idle.quat(0, q)));
+		}
+		MESSAGE("M40A5 Fire frame 0 vs IdlePose: max " << max_deg << " deg");
 	}
 
 	TEST_CASE("ant: decoded clips equal the probe's clip JSON within 1e-5") {

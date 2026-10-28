@@ -772,6 +772,10 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		}
 		if (locomotion_ant_ref && *locomotion_ant_ref >= 0 && *locomotion_ant_ref <= int64_t(UINT32_MAX)) {
 			load_viewmodel_locomotion(ant, set->rig, uint32_t(*locomotion_ant_ref), item, set->notes);
+			if (item.kind == ViewmodelItemKind::Gun && item.clips[size_t(Role::Fire)].source == Source::Missing &&
+					item.clips[size_t(Role::FireSingle)].source == Source::Missing) {
+				load_viewmodel_chooser_fire(ant, set->rig, uint32_t(*locomotion_ant_ref), item, set->notes);
+			}
 			if (item.kind == ViewmodelItemKind::Grenade) {
 				load_viewmodel_throw_flow(ant, set->rig, uint32_t(*locomotion_ant_ref), item, set->notes);
 			}
@@ -1468,6 +1472,35 @@ void load_viewmodel_locomotion(const core::ant::AntLibrary &p_library, const ani
 		return;
 	}
 	r_item.locomotion = std::move(l);
+}
+
+void load_viewmodel_chooser_fire(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig,
+		uint32_t p_ant_ref, ViewmodelItem &r_item, std::vector<std::string> &r_notes) {
+	const std::string where = r_item.unlock + " 1p Fire";
+	core::Result<uint32_t> type = anim::weapon_type_index(p_library, p_ant_ref);
+	core::Result<uint32_t> specific = anim::weapon_choice_index(p_library, p_ant_ref);
+	if (!type || !specific) {
+		r_notes.push_back(
+				where + ": " + (!type ? type.error().message : specific.error().message) + " (the procedural kick)");
+		return;
+	}
+	anim::ChooserIndices idx;
+	idx.weapon_type = *type;
+	idx.specific_weapon = int64_t(*specific);
+	core::Result<anim::AntClipRoute> route =
+			anim::route_ant_controller(p_library, "IndexChooserControllerAsset", kVmShotgunFireChooser, idx);
+	if (!route) {
+		r_notes.push_back(where + " " + std::string(kVmShotgunFireChooser) + " at specific weapon " +
+				std::to_string(*specific) + ": " + route.error().message + " (the procedural kick)");
+		return;
+	}
+	ViewmodelClip clip;
+	if (const core::Status st = load_route_clip(p_library, p_rig, *route, clip); !st.ok()) {
+		r_notes.push_back(where + " " + route_path(*route) + ": " + st.error().message + " (the procedural kick)");
+		return;
+	}
+	r_notes.push_back(where + ": " + route_path(*route) + " -> " + clip.name);
+	r_item.clips[size_t(Role::Fire)] = std::move(clip);
 }
 
 void load_viewmodel_throw_flow(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, uint32_t p_ant_ref,

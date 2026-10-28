@@ -43,15 +43,8 @@ using Source = render::ViewmodelClipSource;
 
 constexpr const char *kLevel = "Win32/Levels/MP_Subway/MP_Subway";
 
-constexpr const char *kCurveFire = "Fire Anim is a CurveAnimationAsset, which no reader decodes (the kick stand-in)";
-
-const std::map<std::string, std::string> kCatalogViewmodelGaps{
-	{ "weapons/m40a5/u_m40a5", kCurveFire },
-	{ "weapons/model98b/u_m98b", kCurveFire },
-	{ "weapons/sv98/u_sv98", kCurveFire },
-	{ "weapons/xp1_l96/u_l96", kCurveFire },
-	{ "weapons/xp2_jng90/u_jng90", kCurveFire },
-};
+const std::set<std::string> kCurveFireWeapons{ "weapons/m40a5/u_m40a5", "weapons/model98b/u_m98b",
+	"weapons/sv98/u_sv98", "weapons/xp1_l96/u_l96", "weapons/xp2_jng90/u_jng90" };
 
 struct CatalogEntry {
 	uint8_t team = 1;
@@ -59,6 +52,7 @@ struct CatalogEntry {
 	std::string error;
 	std::string gap;
 	std::string facts;
+	std::string fire;
 };
 
 std::string role_facts(const render::ViewmodelItem &p_item) {
@@ -121,10 +115,7 @@ ItemVerdict check_item(const render::ViewmodelSet &p_set, const render::Viewmode
 	const bool fire_clip = p_item.clips[size_t(Role::Fire)].source == Source::Clip ||
 			p_item.clips[size_t(Role::FireSingle)].source == Source::Clip;
 	if (!fire_clip && package_has_controller(p_set, p_item, { "Fire", "FireSingle" })) {
-		if (p_item.clips[size_t(Role::Fire)].codec != "Curve") {
-			return { "a Fire clip in the package is not resolved", {} };
-		}
-		v.gap = kCurveFire;
+		return { "a Fire clip in the package is not resolved", {} };
 	}
 	if (p_item.clips[size_t(Role::Reload)].source != Source::Clip) {
 		if (package_has_controller(p_set, p_item, { "ReloadClipFull", "ReloadFull", "Reload" })) {
@@ -242,6 +233,13 @@ TEST_SUITE("render-catalog-weapons") {
 					" binds, zoom " + std::to_string(int(item.ads.hip_fov)) + " -> " +
 					std::to_string(int(item.ads.zoom_fov)) + " (" + std::to_string(item.ads.zoom_levels) + " levels)" +
 					role_facts(item);
+			for (const std::string &n : (*set)->notes) {
+				if (n.find(" 1p Fire:") != std::string::npos) {
+					e.facts += "; " + n;
+				}
+			}
+			const render::ViewmodelClip &fire = item.clips[size_t(Role::Fire)];
+			e.fire = fire.source == Source::Clip ? fire.codec + " " + fire.controller : std::string();
 		});
 		const double s_load = seconds_since(t0);
 		std::vector<std::string> failed;
@@ -265,7 +263,18 @@ TEST_SUITE("render-catalog-weapons") {
 		for (const auto &[unlock, gap] : gaps) {
 			MESSAGE("data gap: ", unlock, ": ", gap);
 		}
-		CHECK(gaps == kCatalogViewmodelGaps);
+		CHECK(gaps.empty());
+		std::set<std::string> curve_fire, chooser_fire;
+		for (const CatalogEntry &e : entries) {
+			if (e.fire.starts_with("Curve ")) {
+				curve_fire.insert(e.weapon.unlock);
+			}
+			if (e.facts.find("Wep_ShotgunFireChooser") != std::string::npos) {
+				chooser_fire.insert(e.weapon.unlock + " " + e.fire);
+			}
+		}
+		CHECK(curve_fire == kCurveFireWeapons);
+		CHECK(chooser_fire == std::set<std::string>{ "weapons/remington870/u_870 Dct 1P_MasterShotgunFire" });
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
 		std::printf("render.catalog_weapons install.unchanged %s\n", diff.clean() ? "yes" : diff.summary().c_str());
 		CHECK(diff.clean());

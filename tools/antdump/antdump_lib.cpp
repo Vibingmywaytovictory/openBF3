@@ -72,6 +72,10 @@ uint32_t header_key_count(const GdStruct &p_clip, ClipCodec p_codec) {
 	if (p_codec == ClipCodec::Frame) {
 		return 1;
 	}
+	if (p_codec == ClipCodec::Curve) {
+		const GdArray k = p_clip.array("Keys");
+		return k.valid() && k.size() > 0 ? k.size() : 1;
+	}
 	p_clip.read_u32("NumKeys", keys);
 	return keys;
 }
@@ -142,7 +146,8 @@ bool run_censuses(const AntPackageSource &p_source, const AntLibrary &p_library,
 			const Clock::time_point t0 = Clock::now();
 			const AntResult r = decode_clip(clip, decoded, &stats);
 			const double decode_seconds = seconds_since(t0);
-			const bool mapped_codec = codec == ClipCodec::Dct || codec == ClipCodec::Raw || codec == ClipCodec::Frame || codec == ClipCodec::Vbr;
+			const bool mapped_codec = codec == ClipCodec::Dct || codec == ClipCodec::Raw || codec == ClipCodec::Frame ||
+					codec == ClipCodec::Vbr || codec == ClipCodec::Curve;
 			ClipBinding b;
 			const AntResult br = mapped_codec ? p_library.bind(p_package, clip, b) : AntResult{};
 			for (Census *target : targets) {

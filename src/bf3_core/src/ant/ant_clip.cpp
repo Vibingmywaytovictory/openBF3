@@ -159,6 +159,9 @@ bool clip_channel_counts(const GdStruct &p_clip, uint32_t &r_quats, uint32_t &r_
 			r_floats = f + cf;
 			return true;
 		}
+		case ClipCodec::Curve:
+			return read_count(p_clip, "NumRotations", r_quats) && read_count(p_clip, "NumVectors", r_vec3s) &&
+					read_count(p_clip, "NumFloats", r_floats);
 		default:
 			return false;
 	}
@@ -422,6 +425,174 @@ AntResult decode_float_object(const GdStruct &p_clip, ClipCodec p_codec, Decoded
 
 }
 
+Quat euler_quat(const float p_angles[3], uint32_t p_order) {
+	const std::array<uint8_t, 3> &order = kEulerOrders[p_order % kEulerOrders.size()];
+	double q[4] = { 0.0, 0.0, 0.0, 1.0 };
+	for (const uint8_t axis : order) {
+		const double h = 0.5 * double(p_angles[axis]);
+		double a[4] = { 0.0, 0.0, 0.0, std::cos(h) };
+		a[axis] = std::sin(h);
+		const double r[4] = { q[3] * a[0] + q[0] * a[3] + q[1] * a[2] - q[2] * a[1],
+			q[3] * a[1] - q[0] * a[2] + q[1] * a[3] + q[2] * a[0],
+			q[3] * a[2] + q[0] * a[1] - q[1] * a[0] + q[2] * a[3],
+			q[3] * a[3] - q[0] * a[0] - q[1] * a[1] - q[2] * a[2] };
+		std::copy(std::begin(r), std::end(r), std::begin(q));
+	}
+	return Quat{ float(q[0]), float(q[1]), float(q[2]), float(q[3]) };
+}
+
+namespace {
+
+bool copy_ints(const GdArray &p_array, std::vector<int64_t> &r_out) {
+	if (!p_array.valid()) {
+		return false;
+	}
+	r_out.resize(p_array.size());
+	for (uint32_t i = 0; i < p_array.size(); ++i) {
+		if (!p_array.read_int(i, r_out[i])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool copy_floats(const GdArray &p_array, std::vector<float> &r_out) {
+	if (!p_array.valid()) {
+		return false;
+	}
+	r_out.resize(p_array.size());
+	for (uint32_t i = 0; i < p_array.size(); ++i) {
+		if (!p_array.read_float(i, r_out[i])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+AntResult decode_curve_object(const GdStruct &p_clip, DecodedClip &r_out) {
+	uint32_t nq = 0, nv = 0, nf = 0;
+	if (!read_count(p_clip, "NumRotations", nq) || !read_count(p_clip, "NumVectors", nv) ||
+			!read_count(p_clip, "NumFloats", nf)) {
+		return AntResult::fail(AntStatus::Malformed, "Curve: missing channel counts");
+	}
+	if (nq > kMaxKeys || nv > kMaxKeys || nf > kMaxKeys) {
+		return AntResult::fail(AntStatus::Malformed, "Curve: bad channel count");
+	}
+	std::vector<float> values, consts;
+	std::vector<int64_t> keys, const_offsets, channel_offsets;
+	if (!copy_floats(p_clip.array("Values"), values) || !copy_floats(p_clip.array("Consts"), consts) ||
+			!copy_ints(p_clip.array("Keys"), keys) || !copy_ints(p_clip.array("ConstOffsets"), const_offsets) ||
+			!copy_ints(p_clip.array("ChannelOffsets"), channel_offsets)) {
+		return AntResult::fail(AntStatus::Malformed, "Curve: bad array field");
+	}
+	const GdArray blocks = p_clip.array("KeysBlocks");
+	const GdArray groups = p_clip.array("ChannelGroups");
+	if (!blocks.valid() || !groups.valid() || const_offsets.size() != consts.size()) {
+		return AntResult::fail(AntStatus::Malformed, "Curve: bad block, group or constant arrays");
+	}
+	const uint64_t slots = 4ull * nq + 4ull * nv + nf;
+	uint32_t key_count = 0;
+	for (uint32_t b = 0; b < blocks.size(); ++b) {
+		uint32_t n = 0;
+		if (!blocks.element(b).read_u32("KeysCount", n)) {
+			return AntResult::fail(AntStatus::Malformed, "Curve: KeysBlock without KeysCount");
+		}
+		key_count += n;
+	}
+	if (blocks.size() > 1) {
+		return AntResult::fail(AntStatus::Unsupported, "Curve: " + std::to_string(blocks.size()) + " key blocks");
+	}
+	const bool constant = key_count == 0 && keys.empty() && values.empty() && channel_offsets.empty();
+	if (constant) {
+		key_count = 1;
+		keys.assign(1, 0);
+	}
+	if (key_count != keys.size() || key_count == 0 || key_count > kMaxKeys ||
+			uint64_t(key_count) * slots > kMaxChannelKeys) {
+		return AntResult::fail(AntStatus::Malformed,
+				"Curve: KeysCount total " + std::to_string(key_count) + " for " + std::to_string(keys.size()) +
+						" keys");
+	}
+	std::vector<float> scalars(size_t(key_count) * slots, 0.0f);
+	for (size_t c = 0; c < consts.size(); ++c) {
+		if (const_offsets[c] < 0 || uint64_t(const_offsets[c]) >= slots) {
+			return AntResult::fail(AntStatus::Malformed, "Curve: constant offset " + std::to_string(const_offsets[c]));
+		}
+		for (uint32_t k = 0; k < key_count; ++k) {
+			scalars[size_t(k) * slots + size_t(const_offsets[c])] = consts[c];
+		}
+	}
+	size_t channel = 0, value = 0;
+	for (uint32_t g = 0; g < groups.size(); ++g) {
+		uint32_t group_keys = 0, group_channels = 0;
+		if (!groups.element(g).read_u32("NumKeys", group_keys) ||
+				!groups.element(g).read_u32("NumChannels", group_channels)) {
+			return AntResult::fail(AntStatus::Malformed, "Curve: ChannelGroup without NumKeys or NumChannels");
+		}
+		if (group_keys != key_count && !(constant && group_keys == 0 && group_channels == 0)) {
+			return AntResult::fail(AntStatus::Unsupported,
+					"Curve: a channel group of " + std::to_string(group_keys) + " keys in a block of " +
+							std::to_string(key_count));
+		}
+		if (channel + group_channels > channel_offsets.size() ||
+				value + size_t(group_keys) * group_channels > values.size()) {
+			return AntResult::fail(AntStatus::Malformed, "Curve: channel group past ChannelOffsets or Values");
+		}
+		for (uint32_t k = 0; k < group_keys && !constant; ++k) {
+			for (uint32_t c = 0; c < group_channels; ++c) {
+				const int64_t at = channel_offsets[channel + c];
+				if (at < 0 || uint64_t(at) >= slots) {
+					return AntResult::fail(AntStatus::Malformed, "Curve: channel offset " + std::to_string(at));
+				}
+				scalars[size_t(k) * slots + size_t(at)] = values[value + size_t(k) * group_channels + c];
+			}
+		}
+		channel += group_channels;
+		value += size_t(group_keys) * group_channels;
+	}
+	if (channel != channel_offsets.size() || value != values.size()) {
+		return AntResult::fail(AntStatus::Malformed,
+				"Curve: channel groups cover " + std::to_string(channel) + " of " +
+						std::to_string(channel_offsets.size()) + " channels and " + std::to_string(value) + " of " +
+						std::to_string(values.size()) + " values");
+	}
+	r_out = {};
+	r_out.codec = ClipCodec::Curve;
+	r_out.num_keys = key_count;
+	r_out.num_quats = nq;
+	r_out.num_vec3s = nv;
+	r_out.num_floats = nf;
+	r_out.key_times.resize(key_count);
+	for (uint32_t k = 0; k < key_count; ++k) {
+		if (keys[k] < 0 || keys[k] > int64_t(kMaxFrame) || (k > 0 && keys[k] < keys[k - 1])) {
+			return AntResult::fail(AntStatus::Malformed, "Curve: Keys not ascending frames");
+		}
+		r_out.key_times[k] = uint16_t(keys[k]);
+	}
+	r_out.quats.resize(size_t(key_count) * nq);
+	r_out.vec3s.resize(size_t(key_count) * nv);
+	r_out.floats.resize(size_t(key_count) * nf);
+	for (uint32_t k = 0; k < key_count; ++k) {
+		const float *src = scalars.data() + size_t(k) * slots;
+		for (uint32_t q = 0; q < nq; ++q) {
+			r_out.quats[size_t(k) * nq + q] = euler_quat(src + 4 * size_t(q), kCurveEulerOrder);
+		}
+		for (uint32_t v = 0; v < nv; ++v) {
+			const float *e = src + 4 * size_t(nq) + 4 * size_t(v);
+			r_out.vec3s[size_t(k) * nv + v] = Vec3{ e[0], e[1], e[2] };
+		}
+		for (uint32_t i = 0; i < nf; ++i) {
+			r_out.floats[size_t(k) * nf + i] = src[4 * size_t(nq) + 4 * size_t(nv) + i];
+		}
+	}
+	bool cycle = false;
+	p_clip.read_bool("Cycle", cycle);
+	r_out.cycle = cycle;
+	return {};
+}
+
+}
+
 AntResult decode_clip(const GdStruct &p_clip, DecodedClip &r_out, DecodeStats *r_stats) {
 	if (r_stats) {
 		*r_stats = {};
@@ -445,7 +616,8 @@ AntResult decode_clip(const GdStruct &p_clip, DecodedClip &r_out, DecodeStats *r
 		case ClipCodec::Vbr:
 			return AntResult::fail(AntStatus::Unsupported, "VbrAnimationAsset: animated VBR channels are not decoded (probe §6.1)");
 		case ClipCodec::Curve:
-			return AntResult::fail(AntStatus::Unsupported, "CurveAnimationAsset is not decoded (probe §6.2)");
+			r = decode_curve_object(p_clip, r_out);
+			break;
 		case ClipCodec::Unknown:
 			return AntResult::fail(AntStatus::Unsupported, "unknown codec " + std::string(p_clip.type_name()));
 	}

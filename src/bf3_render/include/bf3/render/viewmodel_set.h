@@ -266,6 +266,7 @@ size_t add_assault_gadget(std::span<ViewmodelKit> r_kits, std::string_view p_unl
 namespace bf3::render {
 
 inline constexpr std::string_view kVmRunDeltaChooser = "1P_RunLoopChooser";
+inline constexpr std::string_view kVmShotgunFireChooser = "Wep_ShotgunFireChooser";
 inline constexpr std::string_view kVmSprintDeltaChooser = "Wep_SprintDeltaChooser";
 
 struct ViewmodelLocomotionClips {
@@ -279,6 +280,9 @@ void load_viewmodel_locomotion(const core::ant::AntLibrary &p_library, const ani
 		std::vector<std::string> &r_notes);
 
 anim::VmLocomotion viewmodel_locomotion(const ViewmodelItem &p_item);
+
+void load_viewmodel_chooser_fire(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig,
+		uint32_t p_ant_ref, ViewmodelItem &r_item, std::vector<std::string> &r_notes);
 
 void load_viewmodel_throw_flow(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, uint32_t p_ant_ref,
 		ViewmodelItem &r_item, std::vector<std::string> &r_notes);

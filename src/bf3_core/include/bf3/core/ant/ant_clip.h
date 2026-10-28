@@ -3,6 +3,7 @@
 #include "bf3/core/ant/gd_archive.h"
 #include "bf3/core/math.h"
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -98,6 +99,12 @@ struct DecodeStats {
 };
 
 AntResult decode_clip(const GdStruct &p_clip, DecodedClip &r_out, DecodeStats *r_stats = nullptr);
+
+inline constexpr std::array<std::array<uint8_t, 3>, 6> kEulerOrders{ { { 0, 1, 2 }, { 0, 2, 1 }, { 1, 0, 2 },
+		{ 1, 2, 0 }, { 2, 0, 1 }, { 2, 1, 0 } } };
+inline constexpr uint32_t kCurveEulerOrder = 5;
+
+Quat euler_quat(const float p_angles[3], uint32_t p_order);
 
 struct DctInput {
 	uint32_t num_keys = 0;
