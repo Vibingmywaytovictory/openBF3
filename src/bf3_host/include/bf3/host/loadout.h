@@ -28,6 +28,7 @@ struct LoadoutItem {
 	std::string unlock;
 	uint16_t def = sim::weapons::kNoWeapon;
 	std::array<std::vector<uint32_t>, kLoadoutAccessories> accessories;
+	std::array<std::vector<std::string>, kLoadoutAccessories> accessory_unlocks;
 	std::array<uint32_t, kLoadoutAccessories> default_accessories{};
 };
 
@@ -103,6 +104,19 @@ struct LoadoutWeapon {
 };
 
 std::vector<LoadoutWeapon> loadout_weapons(const LoadoutCatalog &p_catalog, uint8_t p_team);
+
+const LoadoutItem *loadout_primary_item(const LoadoutCatalog &p_catalog, uint8_t p_team, uint16_t p_def);
+
+struct LoadoutAccessorySet {
+	std::vector<std::string> active;
+	std::vector<std::string> listed;
+	std::array<uint32_t, kLoadoutAccessories> picked{};
+
+	bool operator==(const LoadoutAccessorySet &) const = default;
+};
+
+LoadoutAccessorySet loadout_accessory_set(
+		const LoadoutItem &p_item, const std::array<uint32_t, kLoadoutAccessories> &p_accessories);
 
 std::vector<uint8_t> loadout_item_slots(const LoadoutKit &p_kit, LoadoutKitItem p_item);
 

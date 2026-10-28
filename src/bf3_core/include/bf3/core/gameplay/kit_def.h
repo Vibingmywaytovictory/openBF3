@@ -18,6 +18,8 @@ enum class WeaponSlot : uint8_t { Primary = 0, Sidearm = 1, Gadget1 = 2, Unused3
 inline constexpr size_t kWeaponSlotCount = 8;
 const char *weapon_slot_name(WeaponSlot p_slot);
 
+inline constexpr std::string_view kNoAccessoryUnlockPrefix = "weapons/common/no";
+
 enum class UnlockGate : uint8_t { Free, Rank, Licence, Award, ScoringBucket };
 const char *unlock_gate_name(UnlockGate p_gate);
 

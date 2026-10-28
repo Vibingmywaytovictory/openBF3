@@ -78,6 +78,47 @@ std::vector<LoadoutWeapon> loadout_weapons(const LoadoutCatalog &p_catalog, uint
 	return out;
 }
 
+const LoadoutItem *loadout_primary_item(const LoadoutCatalog &p_catalog, uint8_t p_team, uint16_t p_def) {
+	if (p_def == sim::weapons::kNoWeapon) {
+		return nullptr;
+	}
+	for (uint8_t k = 0; k < kKitCount; ++k) {
+		const LoadoutKit *kit = p_catalog.kit(p_team, k);
+		if (kit == nullptr) {
+			return nullptr;
+		}
+		for (const LoadoutItem &item : kit->slots[kLoadoutAccessoryWeapon]) {
+			if (item.def == p_def) {
+				return &item;
+			}
+		}
+	}
+	return nullptr;
+}
+
+LoadoutAccessorySet loadout_accessory_set(
+		const LoadoutItem &p_item, const std::array<uint32_t, kLoadoutAccessories> &p_accessories) {
+	LoadoutAccessorySet out;
+	for (size_t a = 0; a < kLoadoutAccessories; ++a) {
+		const std::vector<uint32_t> &ids = p_item.accessories[a];
+		const std::vector<std::string> &names = p_item.accessory_unlocks[a];
+		out.listed.insert(out.listed.end(), names.begin(), names.end());
+		const auto it = std::find(ids.begin(), ids.end(), p_accessories[a]);
+		if (p_accessories[a] != 0 && it != ids.end()) {
+			out.picked[a] = p_accessories[a];
+			out.active.push_back(names[size_t(it - ids.begin())]);
+			continue;
+		}
+		for (const std::string &n : names) {
+			if (n.starts_with(gp::kNoAccessoryUnlockPrefix)) {
+				out.active.push_back(n);
+				break;
+			}
+		}
+	}
+	return out;
+}
+
 std::vector<std::string> loadout_variants(std::span<const gp::KitDef> p_kits) {
 	std::set<std::string> out;
 	for (const gp::KitDef &k : p_kits) {
@@ -105,8 +146,11 @@ core::Result<LoadoutCatalog> make_loadout_catalog(const core::EbxResolver &p_db,
 	for (size_t d = 0; d < p_defs.size() && d < size_t(sim::weapons::kNoWeapon); ++d) {
 		by_variant.emplace(to_lower_ascii(p_defs[d].variant), uint16_t(d));
 	}
-	using Accessories = std::pair<std::array<std::vector<uint32_t>, kLoadoutAccessories>,
-			std::array<uint32_t, kLoadoutAccessories>>;
+	struct Accessories {
+		std::array<std::vector<uint32_t>, kLoadoutAccessories> ids;
+		std::array<std::vector<std::string>, kLoadoutAccessories> unlocks;
+		std::array<uint32_t, kLoadoutAccessories> defaults{};
+	};
 	std::map<std::string, Accessories> parts_of;
 	LoadoutCatalog out;
 	for (uint8_t t = 0; t < kKitTeams; ++t) {
@@ -168,18 +212,20 @@ core::Result<LoadoutCatalog> make_loadout_catalog(const core::EbxResolver &p_db,
 							Accessories ids;
 							for (size_t p = 0; p < parts->size(); ++p) {
 								for (const gp::KitUnlock &a : (*parts)[p].unlocks) {
-									if (a.identifier != 0 && !contains(ids.first[p], a.identifier)) {
-										ids.first[p].push_back(a.identifier);
+									if (a.identifier != 0 && !contains(ids.ids[p], a.identifier)) {
+										ids.ids[p].push_back(a.identifier);
+										ids.unlocks[p].push_back(to_lower_ascii(a.unlock));
 									}
 								}
 								if (const gp::KitUnlock *d = (*parts)[p].default_unlock()) {
-									ids.second[p] = d->identifier;
+									ids.defaults[p] = d->identifier;
 								}
 							}
 							cached = parts_of.emplace(item.unlock, std::move(ids)).first;
 						}
-						item.accessories = cached->second.first;
-						item.default_accessories = cached->second.second;
+						item.accessories = cached->second.ids;
+						item.accessory_unlocks = cached->second.unlocks;
+						item.default_accessories = cached->second.defaults;
 					}
 					lk.slots[s].push_back(std::move(item));
 					++out.items;

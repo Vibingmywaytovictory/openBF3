@@ -1357,6 +1357,25 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(m16->accessories[2].size() == 6);
 		CHECK(m16->accessories[3].size() == 1);
 		CHECK(m16->default_accessories == std::array<uint32_t, 4>{ 3010458987u, 975928659u, 1580481064u, 2341043160u });
+		for (size_t a = 0; a < host::kLoadoutAccessories; ++a) {
+			CHECK(m16->accessory_unlocks[a].size() == m16->accessories[a].size());
+		}
+		CHECK(host::loadout_primary_item(gl.loadouts, 1, m16->def) == m16);
+		CHECK(host::loadout_primary_item(gl.loadouts, 1, sw::kNoWeapon) == nullptr);
+		const host::LoadoutAccessorySet m16_plain = host::loadout_accessory_set(*m16, {});
+		CHECK(m16_plain.listed.size() == 23);
+		CHECK(m16_plain.active ==
+				std::vector<std::string>{ "weapons/common/nooptics", "weapons/common/nosecondaryrail",
+						"weapons/common/nosecondaryaccessory", "weapons/common/nocamo" });
+		CHECK(m16_plain.picked == std::array<uint32_t, 4>{});
+		CHECK(host::loadout_accessory_set(*m16, m16->default_accessories).active ==
+				std::vector<std::string>{ "weapons/m16a4/u_m16a4_acog", "weapons/m16a4/u_m16a4_foregrip",
+						"weapons/m16a4/u_m16a4_heavybarrel", "weapons/common/nocamo" });
+		const host::LoadoutAccessorySet m16_optic =
+				host::loadout_accessory_set(*m16, { m16->accessories[0].front(), 0, 12345u, 0 });
+		CHECK(m16_optic.active.front() == m16->accessory_unlocks[0].front());
+		CHECK(m16_optic.active.size() == 4);
+		CHECK(m16_optic.picked == std::array<uint32_t, 4>{ m16->accessories[0].front(), 0, 0, 0 });
 		CHECK(us_assault->category_sid_hashes[0] == core::ui::text_hash("ID_M_SOLDIER_PRIMARY"));
 		CHECK(host::loadout_item_category_sid(*us_assault, host::LoadoutKitItem::Gadget1) ==
 				core::ui::text_hash("ID_M_SOLDIER_GADGET1"));
