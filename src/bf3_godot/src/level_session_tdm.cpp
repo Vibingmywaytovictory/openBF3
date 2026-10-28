@@ -961,6 +961,8 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		const std::shared_ptr<const host::SharedLevel> eor_level = shared_level();
 		io.eor = eor_level != nullptr && eor_level->eor != nullptr ? *eor_level->eor
 																   : bf3::core::gameplay::EorTimeline{};
+		const Bf3Viewmodel *presented_vm = r_game.own_viewmodel();
+		io.own_viewmodel_presented = presented_vm != nullptr && presented_vm->is_visible() && presented_vm->item() >= 0;
 		io.press = [this](Key p_key, bool p_pressed) { scripted_ui_key(p_key, p_pressed); };
 		io.camera_data = eor_level != nullptr ? eor_level->eor_camera : std::nullopt;
 		io.eor_camera = m.eor_camera.get();

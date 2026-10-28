@@ -401,9 +401,15 @@ bool EorCheck::frame(Bf3UiScreens &r_screens, bf3::host::UiFlowSession *p_sessio
 					break;
 				}
 			}
+			round2_viewmodel_frames_ += p_io.own_viewmodel_presented ? 1u : 0u;
 			if (banner) {
 				banner_s_ = p_now_s;
-				note("second round over");
+				note("second round over; the own viewmodel was presented on " +
+						std::to_string(round2_viewmodel_frames_) + " frames of the second round");
+				if (round2_viewmodel_frames_ == 0) {
+					fail("the own viewmodel was never presented in the second round");
+					break;
+				}
 				go(Step::Page2, p_now_s);
 			}
 			break;

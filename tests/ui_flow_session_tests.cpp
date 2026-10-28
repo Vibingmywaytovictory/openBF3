@@ -194,10 +194,15 @@ TEST_SUITE("ui-flow-session") {
 		sc.run_to(3400);
 		const Lines round_over = sc.phase("round over");
 		sc.state.phase = net::MatchPhase::PreRound;
-		sc.state.unspawned = false;
 		sc.state.winner = 0;
 		sc.run_to(3500);
 		const Lines restart = sc.phase("restart");
+		sc.input(ui::UiInputConcept::Activate);
+		sc.run_to(3540);
+		sc.state.unspawned = false;
+		sc.state.own_spawns = 4;
+		sc.run_to(3600);
+		const Lines restart_spawn = sc.phase("deploy after the restart");
 		const Lines spawn_screens{ "push spawnscreenticketcountertdmscreen", "push spawnbuttonscreen",
 			"push spawnscreenpc" };
 		const Lines join_expected{ "native Spawn", "native PreRound.Waiting", "push chatlogscreen",
@@ -276,9 +281,10 @@ TEST_SUITE("ui-flow-session") {
 		Lines restart_expected{ "native Reload" };
 		restart_expected.insert(restart_expected.end(), join_expected.begin(), join_expected.end());
 		CHECK(restart == restart_expected);
+		CHECK(restart_spawn == first_spawn_expected);
 		CHECK(s.stats().reloads == 1);
 		CHECK(std::count(sc.widget_events.begin(), sc.widget_events.end(),
-					  "preroundwaitingscreen.HudAlertMessage_03 UIWidgetEventID_Show") == 2);
+					  "preroundwaitingscreen.HudAlertMessage_03 UIWidgetEventID_Show") == 3);
 		for (const std::string &e : s.errors()) {
 			std::printf("ui.flow.session error %s\n", e.c_str());
 		}

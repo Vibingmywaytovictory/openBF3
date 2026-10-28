@@ -728,6 +728,12 @@ TEST_CASE("round stats: a replayed kill log gives the kill matrix, streaks, neme
 	in.server_tick = in.match.unspawn_tick - 1;
 	host::fill_hud_tdm(in, {}, st, state, m);
 	CHECK(m.end_of_round.stage == ui::HudEorStage::None);
+	const bf3::sim::Tick unspawn = in.match.unspawn_tick;
+	in.match.unspawn_tick = in.match.round_end_tick - 1;
+	in.server_tick = in.match.round_end_tick + 60 * 30;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(m.end_of_round.stage == ui::HudEorStage::None);
+	in.match.unspawn_tick = unspawn;
 	in.eor = nullptr;
 
 	in.match.phase = net::MatchPhase::PreRound;

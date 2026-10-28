@@ -31,7 +31,8 @@ void feed_eor_stage(const Frame &p_frame, ui::HudEndOfRound &r_eor) {
 	r_eor.stage_seconds = 0.0f;
 	const core::gameplay::EorTimeline *t = p_frame.input.eor;
 	const sim::Tick unspawn = p_frame.input.match.unspawn_tick;
-	if (!p_frame.round_over || !p_frame.match || t == nullptr || unspawn == 0 || p_frame.now_tick < unspawn) {
+	if (!p_frame.round_over || !p_frame.match || t == nullptr || unspawn == 0 || p_frame.now_tick < unspawn ||
+			unspawn < p_frame.input.match.round_end_tick) {
 		return;
 	}
 	const double since = double(std::min<sim::Tick>(p_frame.now_tick - unspawn, kMaxAheadTicks)) / double(sim::kSimHz);

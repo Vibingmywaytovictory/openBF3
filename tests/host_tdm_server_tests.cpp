@@ -8,6 +8,7 @@
 #include "bf3/core/gameplay/mode_def.h"
 #include "bf3/core/level/eor_camera.h"
 #include "bf3/core/ui/text_db.h"
+#include "bf3/host/client_session.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/loadout.h"
 #include "bf3/sim/collision_world.h"
@@ -1614,6 +1615,85 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(m->state(p.slot())->life == back.life);
 		CHECK(m->rules().stats().revives == s0.revives + 1u);
 		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+
+	TEST_CASE("restart: the in-place restart unspawns the deploy-screen peer's old life until it deploys on its "
+			  "rotated team's kit; the bots respawn on theirs") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		std::unique_ptr<Match> o = start_match(*level, true, 31u, 1);
+		Script *killer = o->bot();
+		Script *target = o->bot();
+		const int third = o->bot()->slot;
+		tdm::ScriptedPeer &p = o->join("rotated");
+		p.ready();
+		REQUIRE(wait_in_round(*o));
+		p.spawn_request(0);
+		REQUIRE(o->until([&] { return !p.spawned.empty() && is_alive(o->state(p.slot())); }, 240));
+		const net::Spawned first = p.spawned.back();
+		const std::array<int, 3> bots{ killer->slot, target->slot, third };
+		o->ticks(130);
+		const std::optional<Patch> patch = find_patch(*o, 3.0f);
+		REQUIRE(patch.has_value());
+		o->place(target->slot, add(patch->victim, 0.0f, 0.05f, 0.0f));
+		o->place(killer->slot, add(patch->shooter, 0.0f, 0.05f, 0.0f));
+		killer->fn = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			const sim::SoldierState *v = o->state(target->slot);
+			const sim::Vec3 chest = v != nullptr ? add(v->position, 0.0f, 1.2f, 0.0f) : patch->victim;
+			return aim_command(*o, p_tick, p_state, chest, sim::Pose::Stand, select_and_fire(0, (p_tick % 6u) < 3u));
+		};
+		REQUIRE(o->until([&] { return o->rules().phase() == net::MatchPhase::RoundOver; }, 900));
+		killer->fn = nullptr;
+		std::array<uint8_t, 3> bot_teams{};
+		for (size_t i = 0; i < bots.size(); ++i) {
+			bot_teams[i] = o->rules().team_of(uint8_t(bots[i]));
+		}
+		REQUIRE(o->until(
+				[&] {
+					const net::MatchPhase ph = o->rules().phase();
+					return ph != net::MatchPhase::RoundOver && ph != net::MatchPhase::Restarting;
+				},
+				6000));
+		const sim::Tick restart = o->now();
+		o->ticks(30);
+		REQUIRE(p.match_state.has_value());
+		const bool old_unspawned = host::own_unspawned_at(true, *p.match_state, first.state.tick, o->now());
+		std::printf("restart: at tick %u, unspawn_tick %u, the peer's old life (spawned at %u on team %u) %s, the "
+					"server soldier %s\n",
+				unsigned(restart), unsigned(p.match_state->unspawn_tick), unsigned(first.state.tick),
+				unsigned(first.team), old_unspawned ? "unspawned" : "still alive on the client",
+				is_alive(o->state(p.slot())) ? "alive" : "not spawned");
+		CHECK(old_unspawned);
+		CHECK_FALSE(is_alive(o->state(p.slot())));
+		const host::Gunplay &g = *o->server.gunplay();
+		size_t bots_checked = 0;
+		for (size_t i = 0; i < bots.size(); ++i) {
+			const uint8_t b = uint8_t(bots[i]);
+			if (!is_alive(o->state(b))) {
+				continue;
+			}
+			++bots_checked;
+			CHECK(g.team(b) == uint8_t(3 - bot_teams[i]));
+			CHECK(g.weapons(b).slots[0].def == gl.kits.loadout(g.team(b), g.kit(b)).defs[0]);
+		}
+		CHECK(bots_checked > 0);
+		const size_t spawned0 = p.spawned.size();
+		p.spawn_request(0);
+		REQUIRE(o->until([&] { return p.spawned.size() > spawned0 && is_alive(o->state(p.slot())); }, 240));
+		const net::Spawned next = p.spawned.back();
+		const host::KitLoadout &kit = gl.kits.loadout(next.team, next.kit);
+		std::printf("restart: the peer deployed on team %u (round 1: %u), defs %u %u %u, the kit's %u %u %u\n",
+				unsigned(next.team), unsigned(first.team), unsigned(next.defs[0]), unsigned(next.defs[1]),
+				unsigned(next.defs[2]), unsigned(kit.defs[0]), unsigned(kit.defs[1]), unsigned(kit.defs[2]));
+		CHECK(next.team == uint8_t(3 - first.team));
+		CHECK(next.team == o->rules().team_of(uint8_t(p.slot())));
+		CHECK(g.weapons(uint8_t(p.slot())).slots[0].def == kit.defs[0]);
+		CHECK(next.defs[0] == kit.defs[0]);
+		CHECK_FALSE(host::own_unspawned_at(true, *p.match_state, next.state.tick, o->now()));
+		CHECK(o->rules().stats().runtime_faults == 0u);
 	}
 
 	TEST_CASE("install unchanged") {

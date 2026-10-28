@@ -269,6 +269,7 @@ core::Status UiFlowSession::update(const UiGameState &p_state) {
 		last_ = UiGameState{};
 		last_.own_deaths = p_state.own_deaths;
 		last_.own_spawns = p_state.own_spawns;
+		last_.unspawned = p_state.unspawned;
 	}
 	const bool joining = p_state.joined && !last_.joined;
 	if (joining) {

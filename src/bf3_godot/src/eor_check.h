@@ -61,6 +61,7 @@ struct EorCheckIo {
 	const EorCameraView *eor_camera = nullptr;
 	const EorFlash *flash = nullptr;
 	godot::Camera3D *camera = nullptr;
+	bool own_viewmodel_presented = false;
 };
 
 class EorCheck {
@@ -115,6 +116,7 @@ private:
 	double over_s_ = -1.0;
 	double deploy_s_ = -1.0;
 	double shot_at_s_ = -1.0;
+	uint32_t round2_viewmodel_frames_ = 0;
 	const char *shot_name_ = nullptr;
 	bool flash_shot_ = false;
 	bool banner_under_hud64_checked_ = false;

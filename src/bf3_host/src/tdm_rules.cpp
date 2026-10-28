@@ -465,6 +465,7 @@ struct TdmRules::Impl {
 		downed.clear();
 		death_ring.clear();
 		state = net::MatchState();
+		state.unspawn_tick = p_tick;
 		state.phase = net::MatchPhase::PreRound;
 		state.kill_limit = natives->kill_limit();
 		state.killer_camera = natives->killer_camera();
