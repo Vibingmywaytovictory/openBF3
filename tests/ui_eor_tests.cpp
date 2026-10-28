@@ -346,6 +346,14 @@ TEST_SUITE("ui-eor") {
 			}
 			CHECK_MESSAGE(foster, partition);
 			CHECK_MESSAGE(zorin, partition);
+			if (partition == kHud64) {
+				for (const std::string_view header : { "ScoreboardHeader_01", "ScoreboardHeader_02" }) {
+					const As2Clip tickets =
+							s.hud->clip(std::string(kHudScreenInstance) + "." + std::string(header) + ".ticketText");
+					CHECK_MESSAGE(tickets.exists(), header);
+					CHECK_MESSAGE(!tickets.visible(), header);
+				}
+			}
 		}
 	}
 

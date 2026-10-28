@@ -246,6 +246,10 @@ public:
 					break;
 				}
 				case HeaderField::Tickets:
+					if ((friendly ? p_model.tickets.friendly_team_max_tickets
+								  : p_model.tickets.enemy_team_max_tickets) <= 0) {
+						continue;
+					}
 					v = As2Value::of(
 							friendly ? p_model.tickets.friendly_team_tickets : p_model.tickets.enemy_team_tickets);
 					break;
