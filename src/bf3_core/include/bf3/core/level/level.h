@@ -17,6 +17,10 @@ namespace bf3::core::level {
 
 bool mode_matches(std::string_view p_mode, std::string_view p_option);
 
+std::vector<std::string_view> mode_alias_ids(std::string_view p_mode);
+
+Result<std::string> resolve_level_mode(const std::vector<std::string> &p_level_modes, std::string_view p_mode);
+
 std::string_view level_display_name(std::string_view p_level_id);
 
 std::vector<std::string_view> shipped_level_ids();
@@ -116,6 +120,8 @@ Result<LevelInfo> level_info(const LevelMount &p_mount, std::string_view p_level
 Result<std::vector<std::string>> level_hints(const LevelMount &p_mount, const EbxRef &p_asset);
 
 Status read_game_tips(const EbxInstance &p_asset, WorkBudget &r_budget, std::vector<std::string> &r_out);
+
+Status read_description_modes(const EbxInstance &p_asset, WorkBudget &r_budget, std::vector<std::string> &r_out);
 
 Result<bool> includes(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode, WorkBudget &r_budget);
 

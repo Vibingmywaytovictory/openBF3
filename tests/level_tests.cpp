@@ -1772,8 +1772,44 @@ TEST_SUITE("level") {
 		CHECK_FALSE(load_level(install, "MP_999", "ConquestLarge0").ok());
 
 		Result<std::unique_ptr<LoadedLevel>> none = load_level(install, "MP_Subway", "NoSuchMode0");
-		REQUIRE(none.ok());
-		CHECK((*none)->bundles.subworlds.empty());
+		REQUIRE_FALSE(none.ok());
+		CHECK(none.error().message.find("no game mode `NoSuchMode0`") != std::string::npos);
+	}
+}
+
+TEST_SUITE("level_modes") {
+	TEST_CASE("level_modes: every shipped level's TDM is a mode it lists; XP2_Office TDM loads its mode layer") {
+		const std::shared_ptr<Install> install = shared_install_or_skip();
+		if (!install) {
+			return;
+		}
+		const std::vector<std::string_view> ids = shipped_level_ids();
+		CHECK(ids.size() == 29);
+		size_t c_only = 0;
+		for (const std::string_view id : ids) {
+			CAPTURE(id);
+			Result<LevelInfo> info = level_info(*install, id);
+			REQUIRE(info.ok());
+			Result<std::string> tdm = resolve_level_mode(info->modes, "TDM");
+			REQUIRE_MESSAGE(tdm.ok(), (tdm.ok() ? std::string() : tdm.error().message));
+			CHECK(std::find(info->modes.begin(), info->modes.end(), *tdm) != info->modes.end());
+			c_only += *tdm == "TeamDeathMatchC0" ? 1 : 0;
+			std::printf("core.level.modes %s TDM %s\n", std::string(id).c_str(), tdm->c_str());
+		}
+		CHECK(c_only == 4);
+
+		Result<std::unique_ptr<LoadedLevel>> office = load_level(install, "XP2_Office", "TDM");
+		REQUIRE_MESSAGE(office.ok(), (office.ok() ? std::string() : office.error().message));
+		CHECK((*office)->mode == "TeamDeathMatchC0");
+		std::vector<std::string> keys;
+		for (const std::string &b : (*office)->bundles.subworlds) {
+			keys.push_back(bundle_key(b));
+		}
+		CHECK(std::find(keys.begin(), keys.end(), "levels/xp2_office/teamdeathmatch") != keys.end());
+
+		Result<std::unique_ptr<LoadedLevel>> absent = load_level(install, "XP2_Office", "TeamDeathMatch0");
+		REQUIRE_FALSE(absent.ok());
+		CHECK(absent.error().message.find("no game mode `TeamDeathMatch0`") != std::string::npos);
 	}
 }
 

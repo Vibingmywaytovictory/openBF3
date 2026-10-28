@@ -2,6 +2,7 @@
 
 #include "bf3/core/gameplay/logic_world.h"
 #include "bf3/core/ids.h"
+#include "bf3/core/level/level.h"
 #include "gameplay_read.h"
 
 #include <algorithm>
@@ -16,31 +17,6 @@ namespace bf3::core::gameplay {
 using namespace detail;
 
 namespace {
-
-struct ModeAlias {
-	const char *alias;
-	const char *id;
-};
-
-constexpr ModeAlias kModeAliases[] = {
-	{ "CQL", "ConquestLarge0" },
-	{ "CQS", "ConquestSmall0" },
-	{ "CQAL", "ConquestAssaultLarge0" },
-	{ "CQAS", "ConquestAssaultSmall0" },
-	{ "RL", "RushLarge0" },
-	{ "SR", "SquadRush0" },
-	{ "SQR", "SquadRush0" },
-	{ "TDM", "TeamDeathMatch0" },
-	{ "TDMC", "TeamDeathMatchC0" },
-	{ "SDM", "SquadDeathMatch0" },
-	{ "SQDM", "SquadDeathMatch0" },
-	{ "DOM", "Domination0" },
-	{ "GM", "GunMaster0" },
-	{ "TS", "TankSuperiority0" },
-	{ "SCV", "Scavenger0" },
-	{ "CTF", "CaptureTheFlag0" },
-	{ "AS", "AirSuperiority0" },
-};
 
 constexpr size_t kMaxInterfaceConstants = 65536;
 
@@ -365,15 +341,6 @@ std::optional<double> ModeDef::flag_area_value() const {
 	return out;
 }
 
-std::string canonical_mode_id(std::string_view p_mode) {
-	for (const ModeAlias &a : kModeAliases) {
-		if (iequals_ascii(p_mode, a.alias)) {
-			return a.id;
-		}
-	}
-	return std::string(p_mode);
-}
-
 Result<std::vector<std::string>> level_modes(const EbxResolver &p_db, std::string_view p_level_id, WorkBudget *p_budget) {
 	WorkBudget own;
 	WorkBudget &budget = p_budget != nullptr ? *p_budget : own;
@@ -407,16 +374,15 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 	WorkBudget own;
 	WorkBudget &budget = p_budget != nullptr ? *p_budget : own;
 	const std::string id = to_lower_ascii(p_level_id);
-	std::string mode = canonical_mode_id(p_mode);
 	Result<std::vector<std::string>> listed_modes = level_modes(p_db, id, &budget);
 	if (!listed_modes) {
 		return error_at("mode " + id, listed_modes.error());
 	}
-	for (const std::string &listed : *listed_modes) {
-		if (iequals_ascii(listed, mode)) {
-			mode = listed;
-		}
+	Result<std::string> resolved = level::resolve_level_mode(*listed_modes, p_mode);
+	if (!resolved) {
+		return error_at("mode " + id, resolved.error());
 	}
+	const std::string mode = std::move(*resolved);
 	const std::string root_name = "levels/" + id + "/" + id;
 	const EbxPartition *root = p_db.partition_by_name(root_name);
 	if (!root) {

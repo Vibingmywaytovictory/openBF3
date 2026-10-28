@@ -134,8 +134,6 @@ struct ModeDef {
 	std::optional<double> flag_area_value() const;
 };
 
-std::string canonical_mode_id(std::string_view p_mode);
-
 Result<std::vector<std::string>> level_modes(const EbxResolver &p_db, std::string_view p_level_id, WorkBudget *p_budget = nullptr);
 
 Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_id, std::string_view p_mode, WorkBudget *p_budget = nullptr);

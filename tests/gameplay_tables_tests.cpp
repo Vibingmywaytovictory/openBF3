@@ -10,6 +10,7 @@
 #include "bf3/core/gameplay/weapon_switching.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
+#include "bf3/core/level/level.h"
 #include "bf3/core/util/elapsed.h"
 #include "test_support.h"
 
@@ -588,6 +589,23 @@ bool budget_error(const Error &p_error) {
 	return p_error.message.find("work budget of") != std::string::npos;
 }
 
+void insert_syn_modes(EbxDb &r_db, const char *p_name, const std::vector<std::string> &p_modes) {
+	SynPartition d;
+	d.seed = 9;
+	d.types = { { "LevelDescriptionInclusionCategory", { { "Category", 's' }, { "Mode", 'w' } }, true },
+		{ "LevelDescriptionAsset", { { "Categories", 'v', "LevelDescriptionInclusionCategory" } } } };
+	SynArray modes{ SynArray::kStrings, {}, {} };
+	for (const std::string &m : p_modes) {
+		modes.refs.push_back(d.add_string(m));
+	}
+	const uint32_t mode_array = d.add_array(std::move(modes));
+	const uint32_t game_mode = d.add_string("GameMode");
+	const uint32_t categories = d.add_array(SynArray{
+			"LevelDescriptionInclusionCategory", {}, { { { "Category", game_mode }, { "Mode", mode_array } } } });
+	d.add({ "LevelDescriptionAsset", { { "Categories", categories } } });
+	insert_syn(r_db, p_name, d);
+}
+
 std::vector<SynType> world_types() {
 	return {
 		{ "WorldPartData", { { "Objects", 'a' } } },
@@ -954,6 +972,7 @@ TEST_SUITE("tables-unit") {
 			if (insert_syn(db, "levels/syn/syn", level) == nullptr || insert_syn(db, "levels/syn/sub", sub) == nullptr) {
 				return;
 			}
+			insert_syn_modes(db, "levels/syn/syn/description_win32", { "ConquestLarge0" });
 			const auto start = std::chrono::steady_clock::now();
 			Result<ModeDef> mode = read_mode_def(db, "Syn", "CQL");
 			REQUIRE_FALSE(mode.ok());
@@ -1752,12 +1771,27 @@ TEST_SUITE("tables-unit") {
 	}
 
 	TEST_CASE("gameplay: mode aliases") {
-		CHECK(canonical_mode_id("CQS") == "ConquestSmall0");
-		CHECK(canonical_mode_id("cql") == "ConquestLarge0");
-		CHECK(canonical_mode_id("RL") == "RushLarge0");
-		CHECK(canonical_mode_id("SQDM") == "SquadDeathMatch0");
-		CHECK(canonical_mode_id("TDM") == "TeamDeathMatch0");
-		CHECK(canonical_mode_id("Domination0") == "Domination0");
+		const std::vector<std::string> base{ "ConquestLarge0", "ConquestSmall0", "RushLarge0", "SquadDeathMatch0",
+			"SquadRush0", "TeamDeathMatch0", "TeamDeathMatchC0" };
+		const std::vector<std::string> xp2{ "CQTeamDeathMatch0", "Domination0", "GunMaster0", "SquadDeathMatch0",
+			"TeamDeathMatchC0", "TeamDeathMatchCQ0" };
+		const auto resolved = [](const std::vector<std::string> &p_modes, std::string_view p_mode) {
+			const Result<std::string> r = level::resolve_level_mode(p_modes, p_mode);
+			return r.ok() ? *r : "error: " + r.error().message;
+		};
+		CHECK(resolved(base, "CQS") == "ConquestSmall0");
+		CHECK(resolved(base, "cql") == "ConquestLarge0");
+		CHECK(resolved(base, "RL") == "RushLarge0");
+		CHECK(resolved(base, "SQDM") == "SquadDeathMatch0");
+		CHECK(resolved(base, "TDM") == "TeamDeathMatch0");
+		CHECK(resolved(base, "teamdeathmatch0") == "TeamDeathMatch0");
+		CHECK(resolved(xp2, "TDM") == "TeamDeathMatchC0");
+		CHECK(resolved(xp2, "Domination0") == "Domination0");
+		CHECK(resolved(xp2, "DOM") == "Domination0");
+		CHECK(resolved(xp2, "TeamDeathMatch0") ==
+				"error: no game mode `TeamDeathMatch0` (the level lists CQTeamDeathMatch0, Domination0, GunMaster0, "
+				"SquadDeathMatch0, TeamDeathMatchC0, TeamDeathMatchCQ0)");
+		CHECK(resolved({}, "TDM") == "error: no game mode `TDM` (the level lists none)");
 		CHECK(soldier_pose_from_name("CharacterPoseType_Prone") == SoldierPose::Prone);
 		CHECK(!soldier_pose_from_name("CharacterPoseType_Lie").has_value());
 	}

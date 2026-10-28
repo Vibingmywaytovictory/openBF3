@@ -87,6 +87,9 @@ void NativeLoading::start_worker(std::shared_ptr<const bf3::core::Install> p_ins
 				p->error = info.error().message;
 			} else if (info->loading.movie.empty()) {
 				p->error = level_ + " names no MPLoadingAssetPath";
+			} else if (bf3::core::Result<std::string> mode = bf3::core::level::resolve_level_mode(info->modes, mode_);
+					!mode) {
+				p->error = level_ + ": " + mode.error().message;
 			} else if (bf3::core::Result<std::vector<std::string>> hints =
 							   bf3::core::level::level_hints(*mount, info->loading.hint_asset);
 					!hints) {
@@ -94,7 +97,7 @@ void NativeLoading::start_worker(std::shared_ptr<const bf3::core::Install> p_ins
 			} else {
 				p->movie = ui::loading_screen_movie(info->loading.movie);
 				p->source = ui::loading_screen_source(
-						*info, mode_, std::move(*hints), std::string(kNativeLoadingPlatform), seed_);
+						*info, *mode, std::move(*hints), std::string(kNativeLoadingPlatform), seed_);
 				p->mount = std::make_shared<const bf3::core::LevelMount>(std::move(*mount));
 			}
 		}

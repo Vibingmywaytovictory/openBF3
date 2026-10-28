@@ -23,6 +23,31 @@ struct DisplayName {
 	std::string_view name;
 };
 
+struct ModeAlias {
+	std::string_view alias;
+	std::array<std::string_view, 2> ids;
+};
+
+constexpr ModeAlias kModeAliases[] = {
+	{ "CQL", { "ConquestLarge0" } },
+	{ "CQS", { "ConquestSmall0" } },
+	{ "CQAL", { "ConquestAssaultLarge0" } },
+	{ "CQAS", { "ConquestAssaultSmall0" } },
+	{ "RL", { "RushLarge0" } },
+	{ "SR", { "SquadRush0" } },
+	{ "SQR", { "SquadRush0" } },
+	{ "TDM", { "TeamDeathMatch0", "TeamDeathMatchC0" } },
+	{ "TDMC", { "TeamDeathMatchC0" } },
+	{ "SDM", { "SquadDeathMatch0" } },
+	{ "SQDM", { "SquadDeathMatch0" } },
+	{ "DOM", { "Domination0" } },
+	{ "GM", { "GunMaster0" } },
+	{ "TS", { "TankSuperiority0" } },
+	{ "SCV", { "Scavenger0" } },
+	{ "CTF", { "CaptureTheFlag0" } },
+	{ "AS", { "AirSuperiority0" } },
+};
+
 constexpr DisplayName kDisplayNames[29] = {
 	{ "MP_001", "Grand Bazaar" },
 	{ "MP_003", "Tehran Highway" },
@@ -265,6 +290,75 @@ bool mode_matches(std::string_view p_mode, std::string_view p_option) {
 	return iequals_ascii(p_mode, p_option);
 }
 
+std::vector<std::string_view> mode_alias_ids(std::string_view p_mode) {
+	for (const ModeAlias &a : kModeAliases) {
+		if (iequals_ascii(p_mode, a.alias)) {
+			std::vector<std::string_view> out;
+			for (const std::string_view id : a.ids) {
+				if (!id.empty()) {
+					out.push_back(id);
+				}
+			}
+			return out;
+		}
+	}
+	return { p_mode };
+}
+
+Result<std::string> resolve_level_mode(const std::vector<std::string> &p_level_modes, std::string_view p_mode) {
+	for (const std::string_view wanted : mode_alias_ids(p_mode)) {
+		for (const std::string &listed : p_level_modes) {
+			if (iequals_ascii(listed, wanted)) {
+				return listed;
+			}
+		}
+	}
+	std::string listed;
+	for (const std::string &m : p_level_modes) {
+		listed += (listed.empty() ? "" : ", ") + m;
+	}
+	return make_error("no game mode `" + std::string(p_mode) + "` (the level lists " +
+			(listed.empty() ? std::string("none") : listed) + ")");
+}
+
+Status read_description_modes(const EbxInstance &p_asset, WorkBudget &r_budget, std::vector<std::string> &r_out) {
+	const std::optional<EbxValue> categories = p_asset.get("Categories");
+	const OptionalEbxArray array = categories ? categories->as_array() : OptionalEbxArray();
+	if (!array) {
+		return Status::success();
+	}
+	BF3_TRY(r_budget.charge(array->size()));
+	for (const EbxValue category : *array) {
+		const Result<std::optional<std::string_view>> kind_name = charged_str(category.get("Category"), r_budget);
+		if (!kind_name) {
+			return kind_name.error();
+		}
+		if (!*kind_name || !iequals_ascii(**kind_name, "GameMode")) {
+			continue;
+		}
+		const std::optional<EbxValue> modes = category.get("Mode");
+		const OptionalEbxArray mode_array = modes ? modes->as_array() : OptionalEbxArray();
+		if (!mode_array) {
+			continue;
+		}
+		BF3_TRY(r_budget.charge(mode_array->size()));
+		for (const EbxValue mode : *mode_array) {
+			const Result<std::optional<std::string_view>> m = charged_str(mode, r_budget);
+			if (!m) {
+				return m.error();
+			}
+			if (!*m) {
+				continue;
+			}
+			if (r_out.size() >= kMaxModes) {
+				return make_error("level description lists more than " + std::to_string(kMaxModes) + " game modes");
+			}
+			r_out.emplace_back(**m);
+		}
+	}
+	return Status::success();
+}
+
 std::string_view level_display_name(std::string_view p_level_id) {
 	for (const DisplayName &d : kDisplayNames) {
 		if (iequals_ascii(d.id, p_level_id)) {
@@ -373,40 +467,7 @@ Result<LevelInfo> read_level_info(const EbxResolver &p_db, const EbxInstance &p_
 	const EbxPartition *asset_partition = p_db.partition_by_name(std::string(p_root_name) + "/description_win32");
 	const std::optional<EbxInstance> asset = asset_partition ? std::optional<EbxInstance>(asset_partition->primary()) : std::nullopt;
 	if (asset) {
-		const std::optional<EbxValue> categories = asset->get("Categories");
-		const OptionalEbxArray array = categories ? categories->as_array() : OptionalEbxArray();
-		if (array) {
-			BF3_TRY(r_budget.charge(array->size()));
-			for (const EbxValue category : *array) {
-				const Result<std::optional<std::string_view>> kind_name = charged_str(category.get("Category"), r_budget);
-				if (!kind_name) {
-					return kind_name.error();
-				}
-				if (!*kind_name || !iequals_ascii(**kind_name, "GameMode")) {
-					continue;
-				}
-				const std::optional<EbxValue> modes = category.get("Mode");
-				const OptionalEbxArray mode_array = modes ? modes->as_array() : OptionalEbxArray();
-				if (!mode_array) {
-					continue;
-				}
-				BF3_TRY(r_budget.charge(mode_array->size()));
-				for (const EbxValue mode : *mode_array) {
-
-					const Result<std::optional<std::string_view>> m = charged_str(mode, r_budget);
-					if (!m) {
-						return m.error();
-					}
-					if (!*m) {
-						continue;
-					}
-					if (info.modes.size() >= kMaxModes) {
-						return make_error("level description lists more than " + std::to_string(kMaxModes) + " game modes");
-					}
-					info.modes.emplace_back(**m);
-				}
-			}
-		}
+		BF3_TRY(read_description_modes(*asset, r_budget, info.modes));
 	}
 
 	std::vector<EbxInstance> components;
@@ -461,7 +522,6 @@ Result<std::unique_ptr<LoadedLevel>> load_level(std::shared_ptr<const Install> p
 		return error_at("mount " + std::string(p_level_id), mount.error());
 	}
 	auto loaded = std::make_unique<LoadedLevel>(std::move(*mount));
-	loaded->mode = std::string(p_mode);
 	const BundleIndex names(loaded->mount_.bundle_names());
 	const std::string id = to_lower_ascii(p_level_id);
 	loaded->root_name = "levels/" + id + "/" + id;
@@ -491,6 +551,15 @@ Result<std::unique_ptr<LoadedLevel>> load_level(std::shared_ptr<const Install> p
 	BF3_TRY(loader.load(bundles.settings));
 
 	WorkBudget &budget = *loaded->budget;
+	std::vector<std::string> listed_modes;
+	if (const EbxPartition *description = loaded->db_.partition_by_name(root_name + "/description_win32")) {
+		BF3_TRY(read_description_modes(description->primary(), budget, listed_modes));
+	}
+	Result<std::string> mode = resolve_level_mode(listed_modes, p_mode);
+	if (!mode) {
+		return error_at("load " + std::string(p_level_id), mode.error());
+	}
+	loaded->mode = std::move(*mode);
 	std::unordered_set<std::string> seen;
 	std::deque<std::string> pending{ root_name };
 	while (!pending.empty()) {
@@ -505,7 +574,7 @@ Result<std::unique_ptr<LoadedLevel>> load_level(std::shared_ptr<const Install> p
 
 		std::vector<std::string> batch;
 		for (const EbxInstance &reference : references) {
-			Result<bool> included = includes(loaded->db_, reference, p_mode, budget);
+			Result<bool> included = includes(loaded->db_, reference, loaded->mode, budget);
 			if (!included) {
 				return included.error();
 			}
