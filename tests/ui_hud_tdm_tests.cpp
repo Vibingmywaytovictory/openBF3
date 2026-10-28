@@ -10,6 +10,7 @@
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/ui/hud_icons.h"
 #include "bf3/core/ui/hud_model.h"
+#include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/text_db.h"
 #include "bf3/host/hud_feed.h"
 #include "bf3/host/kits.h"
@@ -738,6 +739,45 @@ TEST_CASE("round stats: a replayed kill log gives the kill matrix, streaks, neme
 			std::to_string(log.size()) + " deaths replayed, " + std::to_string(own_kills) + " own kills, " +
 					std::to_string(own_deaths) + " own deaths, streak " + std::to_string(longest) + ", nemesis " +
 					std::to_string(nemesis) + ", best def " + std::to_string(best_def));
+}
+
+TEST_CASE("the EOR page opens with EorTime left: PreEorTime + EorTime is the server's restart delay") {
+	const host::HudStatic st = make_static();
+	std::vector<net::PlayerRow> rows{ player(1, 2, "Bot RU 1"), player(2, 1, "Me", 0, 0, false) };
+	gp::EorTimeline timeline;
+	timeline.fade_s = 1.0f;
+	timeline.scoreboard_delay_s = 4.0f;
+	timeline.request_eor_delay_s = 9.0f;
+	timeline.pre_eor_s = 12.0f;
+	timeline.eor_s = 48.0f;
+	timeline.restart_delay_s = 60.0f;
+	host::HudFeedInput in;
+	in.tdm = true;
+	in.match_valid = true;
+	in.players = rows;
+	in.own_slot = 2;
+	in.own_team = 1;
+	in.eor = &timeline;
+	in.match.phase = net::MatchPhase::RoundOver;
+	in.match.round_start_tick = 600;
+	in.match.round_end_tick = 600 + 60 * 120;
+	in.match.winner = 2;
+	in.match.unspawn_tick = in.match.round_end_tick + 60;
+	in.match.restart_tick =
+			in.match.unspawn_tick + bf3::sim::Tick(std::lround(double(timeline.restart_delay_s) * 60.0));
+	host::HudTdmFeedState state;
+	ui::HudModel m;
+	in.server_tick = in.match.unspawn_tick + bf3::sim::Tick(std::lround(double(timeline.pre_eor_s) * 60.0));
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(m.end_of_round.stage == ui::HudEorStage::Eor);
+	CHECK(m.end_of_round.stage_seconds == doctest::Approx(0.0));
+	CHECK(m.end_of_round.time_until_level_change == doctest::Approx(double(timeline.eor_s)));
+	CHECK(ui::hud_eor_seconds_left(m.end_of_round.time_until_level_change) == int32_t(timeline.eor_s));
+	in.server_tick = in.match.restart_tick;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(m.end_of_round.stage == ui::HudEorStage::Eor);
+	CHECK(m.end_of_round.stage_seconds == doctest::Approx(double(timeline.eor_s)));
+	CHECK(m.end_of_round.time_until_level_change == doctest::Approx(0.0));
 }
 
 TEST_CASE("own kills raise the scoring table's kill and headshot score messages") {
