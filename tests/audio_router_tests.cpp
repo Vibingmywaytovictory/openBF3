@@ -1576,6 +1576,56 @@ struct GameRig {
 	}
 };
 
+void use_game_mixer(GameRig &r_rig, ba::MixTap *p_tap) {
+	const GameFixture &fx = r_rig.fx;
+	std::vector<std::shared_ptr<const SoundProgram>> programs;
+	for (const ba::WeaponAudioDef &d : fx.assets.table->defs) {
+		programs.push_back(d.program);
+		programs.push_back(d.explosion);
+	}
+	const std::vector<std::shared_ptr<const SoundProgram>> more = fx.assets.impacts->programs();
+	programs.insert(programs.end(), more.begin(), more.end());
+	const ba::MixerA3Assets a3 = ba::load_mixer_a3(fx.metro->db(), programs);
+	REQUIRE_MESSAGE(a3.hdr.has_value(), a3.notes);
+	REQUIRE_MESSAGE(a3.scopes != nullptr, a3.notes);
+	MESSAGE("A3: " << a3.scopes->scopes.size() << " scopes, " << a3.scoped_patches << " of " << programs.size()
+				   << " programs scoped");
+	r_rig.router.reset();
+	r_rig.impacts.reset();
+	r_rig.clock.reset();
+	r_rig.pool.reset();
+	ba::MixerConfig mc;
+	mc.max_instances = ba::kGameMixerInstances;
+	mc.command_capacity = 8192;
+	mc.schedule_lead_blocks = uint32_t(std::max(1.0f, fx.tuning.schedule_lead_blocks));
+	mc.max_voices = ba::kGameMixerVoices;
+	ba::apply_mixer_a3(a3, mc);
+	if (const std::string fade = env_value("OPENBF3_PT1_CUT_FADE"); !fade.empty()) {
+		mc.cut_fade_frames = uint32_t(std::clamp(std::atoi(fade.c_str()), 0, 4800));
+	}
+	if (env_value("OPENBF3_PT1_CAP_HOLD") == "0") {
+		mc.cap_hold_db = 0.0f;
+		mc.voice_hold_blocks = 0;
+		mc.resume_margin = 0;
+	}
+	if (env_value("OPENBF3_PT1_LIMIT") == "0") {
+		mc.limit_ceiling = 0.0f;
+	}
+	if (const std::string m = env_value("OPENBF3_PT1_RESUME_MARGIN"); !m.empty()) {
+		mc.resume_margin = uint32_t(std::clamp(std::atoi(m.c_str()), 0, 128));
+	}
+	r_rig.mixer = std::make_unique<ba::MixerCore>(mc);
+	r_rig.mixer->set_tap(p_tap);
+	r_rig.pool = std::make_unique<ba::OneShotPool>(ba::kMaxOneShotVoices);
+	ba::SimMixerClockConfig cc;
+	cc.bias_frames = int64_t(mc.schedule_lead_blocks) * int64_t(ba::kBlockFrames) + 2 * int64_t(ba::kBlockFrames) + 800;
+	r_rig.clock = std::make_unique<ba::SimMixerClock>(*r_rig.mixer, cc);
+	r_rig.router = std::make_unique<ba::WeaponAudioRouter>(
+			*r_rig.mixer, fx.assets.table, fx.assets.bank, fx.tuning, *r_rig.pool);
+	r_rig.impacts =
+			std::make_unique<ba::ImpactAudio>(*r_rig.mixer, fx.assets.impacts, fx.assets.bank, fx.tuning, *r_rig.pool);
+}
+
 ba::Vec3 standin_muzzle(const host::PresentedSoldier &p_s) {
 	const float cp = std::cos(p_s.pitch), spi = std::sin(p_s.pitch), cy = std::cos(p_s.yaw), sy = std::sin(p_s.yaw);
 	const float f = ba::WeaponAudioConfig{}.standin_muzzle_forward_m;
@@ -2235,6 +2285,172 @@ TEST_SUITE("audio-game") {
 		check_game_unchanged(*f);
 	}
 
+	TEST_CASE("a burst: twelve shooters with eight weapons 4 to 30 m around the listener and the own M16A3 fire "
+			  "together in quick succession; no click, clip or late block") {
+		GameFixture *f = need_game_install();
+		if (f == nullptr) {
+			return;
+		}
+		const ba::WeaponAudioTable &table = *f->assets.table;
+		const uint16_t m16 = def_of_patch(table, kM16Patch);
+		REQUIRE(m16 != sw::kNoWeapon);
+		std::vector<uint16_t> automatic, other;
+		for (const ba::KitAudioItem &item : f->assets.kits.items) {
+			const ba::WeaponAudioDef &d = table.defs[item.def];
+			if (item.one_shot || d.form == ba::WeaponAudioForm::None || item.def == m16) {
+				continue;
+			}
+			std::vector<uint16_t> &to =
+					d.form == ba::WeaponAudioForm::Driver && d.fire_mode != ba::WeaponFireMode::Single ? automatic
+																									   : other;
+			if (std::find(to.begin(), to.end(), item.def) == to.end()) {
+				to.push_back(item.def);
+			}
+		}
+		REQUIRE(automatic.size() >= 5);
+		REQUIRE(other.size() >= 3);
+		std::vector<uint16_t> weapons(automatic.begin(), automatic.begin() + 5);
+		weapons.insert(weapons.end(), other.begin(), other.begin() + 3);
+		struct Whole final : ba::MixTap {
+			std::vector<float> mix;
+			void on_block(const float *p, uint32_t n, uint64_t) override {
+				mix.insert(mix.end(), p, p + size_t(n) * 2);
+			}
+		} tap;
+		GameRig rig(*f, &tap);
+		use_game_mixer(rig, &tap);
+		const ba::Vec3 eye{ 0.0f, 1.6f, 0.0f };
+		rig.listener = listener_of(godot_view_basis(0.3f), eye);
+		const double t_start = 600.25;
+		const auto at = [&](double p_s) {
+			return sw::SimTime(std::llround((t_start + p_s * 60.0) * double(sw::kTimeUnitsPerTick)));
+		};
+		constexpr uint32_t kShooters = 12;
+		const float dist[kShooters] = { 4.0f, 6.0f, 8.0f, 10.0f, 12.0f, 15.0f, 18.0f, 21.0f, 24.0f, 27.0f, 30.0f,
+			5.0f };
+		std::vector<NetShooter> shooters(kShooters);
+		for (uint32_t i = 0; i < kShooters; ++i) {
+			NetShooter &s = shooters[i];
+			s.slot = uint8_t(1 + i);
+			s.def = weapons[i % weapons.size()];
+			s.state.life = 1;
+			const float a = 6.2831853f * float(i) / float(kShooters);
+			const ba::Vec3 feet{ dist[i] * std::sin(a), 0.0f, dist[i] * std::cos(a) };
+			s.state.position = { feet.x, feet.y, feet.z };
+			s.state.yaw = yaw16_towards(feet, eye);
+			const ba::WeaponAudioDef &d = table.defs[s.def];
+			const bool automatic_fire =
+					d.form == ba::WeaponAudioForm::Driver && d.fire_mode != ba::WeaponFireMode::Single;
+			const double iv = automatic_fire ? std::max(0.05, d.shot_interval_s) : std::max(0.15, d.shot_interval_s);
+			const sw::SimTime interval = sw::SimTime(std::llround(iv * double(sw::kTimeUnitsPerSecond)));
+			for (const double volley : { 1.0, 4.0, 7.0 }) {
+				s.burst(at(volley + 0.04 * double(i)), automatic_fire ? 25u : 6u, interval);
+			}
+		}
+		const sw::SimTime m16_iv =
+				sw::SimTime(std::llround(table.defs[m16].shot_interval_s * double(sw::kTimeUnitsPerSecond)));
+		std::vector<sw::SimTime> own;
+		for (const double volley : { 1.5, 4.5, 7.5 }) {
+			for (int k = 0; k < 20; ++k) {
+				own.push_back(at(volley) + sw::SimTime(k) * m16_iv);
+			}
+		}
+		rig.mixer->record_cuts(true);
+		std::vector<ba::MixerCutEvent> cuts;
+		const auto drain_cuts = [&] {
+			std::array<ba::MixerCutEvent, 512> batch;
+			for (size_t n = rig.mixer->poll_cuts(batch); n > 0; n = rig.mixer->poll_cuts(batch)) {
+				cuts.insert(cuts.end(), batch.begin(), batch.begin() + std::ptrdiff_t(n));
+			}
+		};
+		NetStream net;
+		std::vector<host::PresentEvent> events;
+		size_t own_next = 0;
+		uint32_t own_id = 1;
+		const auto t0 = std::chrono::steady_clock::now();
+		for (uint64_t fi = 0; fi < uint64_t(12 * 60); ++fi) {
+			const double t = t_start + double(fi);
+			const uint64_t now_ns = uint64_t(std::llround(t * kNsPerTick));
+			events.clear();
+			net.advance(t, shooters, events);
+			net.publish(t, now_ns, shooters);
+			const host::PresentClock c = host::present_clock(*net.frame, now_ns);
+			while (own_next < own.size() && own[own_next] <= c.predicted) {
+				host::PresentEvent e;
+				e.kind = host::PresentKind::OwnShot;
+				e.timeline = host::PresentTimeline::Predicted;
+				e.def = m16;
+				e.id = own_id++;
+				e.time = own[own_next++];
+				events.push_back(e);
+			}
+			const bool trigger = own_next > 0 && own_next < own.size() && own[own_next] - own[own_next - 1] <= m16_iv;
+			net.frame->own_weapons_valid = true;
+			net.frame->own_weapons_curr.timers[0].flags = trigger ? sw::slot_flags::kTriggerDown : 0;
+			rig.frame(*net.frame, now_ns, events, 0);
+			drain_cuts();
+			net.trim(shooters);
+		}
+		const double wall_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+		const ba::MixerStats &ms = rig.mixer->stats();
+		const ba::MixerCutStats &cs = rig.mixer->cut_stats();
+		const ba::WeaponAudioStats &ws = rig.router->stats();
+		uint64_t non_finite = 0, overs = 0;
+		float peak = 0.0f;
+		for (const float x : tap.mix) {
+			if (!std::isfinite(x)) {
+				++non_finite;
+				continue;
+			}
+			peak = std::max(peak, std::fabs(x));
+			overs += std::fabs(x) > 1.0f ? 1u : 0u;
+		}
+		std::map<std::string, uint64_t> audible_by_kind;
+		for (const ba::MixerCutEvent &e : cuts) {
+			if (e.step > ba::kAudibleStep && e.kind != ba::MixerCutKind::Start && e.kind != ba::MixerCutKind::Fade &&
+					e.kind != ba::MixerCutKind::LateBlock && e.kind != ba::MixerCutKind::CallGap) {
+				++audible_by_kind[std::string(ba::mixer_cut_kind_name(e.kind)) + " " + e.program];
+			}
+		}
+		MESSAGE("burst: " << kShooters << " shooters, " << weapons.size() << " weapons, own M16A3, 12 s mixed in "
+						  << wall_s << " s; mix peak " << peak << ", samples over 0 dBFS " << overs << ", non-finite "
+						  << non_finite);
+		MESSAGE("burst mixer: " << ba::format_mixer_profile(ba::read_mixer_profile(ms)) << "; late blocks "
+								<< ms.late_blocks.load() << ", max block " << double(ms.max_block_ns.load()) / 1e6
+								<< " ms of " << 1000.0 * double(ba::kBlockFrames) / double(ba::kMixRate)
+								<< " ms; peak instances " << ms.peak_instances.load() << ", starved "
+								<< ms.starved_voices.load());
+		MESSAGE("burst router: bursts " << ws.bursts << ", own bursts " << ws.own_bursts << ", rounds "
+										<< ws.event_rounds << ", culled " << ws.culled << ", stolen " << ws.stolen
+										<< ", refusals " << ws.mixer_refusals << ", peak weapon voices "
+										<< ws.peak_weapon_voices << "; pool peak " << rig.pool->peak() << ", stolen "
+										<< rig.pool->stolen());
+		MESSAGE("burst " << ba::format_mixer_cuts(cs));
+		for (const auto &[what, n] : audible_by_kind) {
+			MESSAGE("burst audible cut: " << what << " x" << n);
+		}
+		CHECK(non_finite == 0);
+		CHECK(overs == 0);
+		CHECK(cs.overs_out.load() == 0);
+		CHECK(cs.limit_edge_steps.load() == 0);
+		CHECK(cs.abrupt_gain.load() == 0);
+		CHECK(cs.takeover_cuts.load() == 0);
+		CHECK(cs.event_drops.load() == 0);
+		CHECK(audible_by_kind.empty());
+		CHECK(ws.bursts >= kShooters * 3);
+		CHECK(ws.own_bursts == 3);
+		CHECK(ws.mixer_refusals == 0);
+		CHECK(ms.starved_voices.load() == 0);
+		CHECK(ms.ring_overflows.load() == 0);
+		CHECK(ms.late_commands.load() == 0);
+		CHECK(rig.pool->failed() == 0);
+		if (gate_late_blocks()) {
+			CHECK(ms.late_blocks.load() == 0);
+			CHECK(ba::mix_share_quantile(ms, 0.99) <= 0.10);
+		}
+		check_game_unchanged(*f);
+	}
+
 	TEST_CASE("64 shooters for 60 s: the voice limit, the one-shot pool and impacts under load, no refusal or overflow") {
 		GameFixture *f = need_game_install();
 		if (f == nullptr) {
@@ -2272,52 +2488,7 @@ TEST_SUITE("audio-game") {
 			}
 		} tap;
 		GameRig rig(*f, &tap);
-
-		{
-			std::vector<std::shared_ptr<const SoundProgram>> programs;
-			for (const ba::WeaponAudioDef &d : table.defs) {
-				programs.push_back(d.program);
-				programs.push_back(d.explosion);
-			}
-			const std::vector<std::shared_ptr<const SoundProgram>> more = f->assets.impacts->programs();
-			programs.insert(programs.end(), more.begin(), more.end());
-			const ba::MixerA3Assets a3 = ba::load_mixer_a3(f->metro->db(), programs);
-			REQUIRE_MESSAGE(a3.hdr.has_value(), a3.notes);
-			REQUIRE_MESSAGE(a3.scopes != nullptr, a3.notes);
-			MESSAGE("A3: " << a3.scopes->scopes.size() << " scopes, " << a3.scoped_patches << " of " << programs.size() << " programs scoped");
-			rig.router.reset();
-			rig.impacts.reset();
-			rig.clock.reset();
-			rig.pool.reset();
-			ba::MixerConfig mc;
-			mc.max_instances = ba::kGameMixerInstances;
-			mc.command_capacity = 8192;
-			mc.schedule_lead_blocks = uint32_t(std::max(1.0f, f->tuning.schedule_lead_blocks));
-			mc.max_voices = ba::kGameMixerVoices;
-			ba::apply_mixer_a3(a3, mc);
-			if (const std::string fade = env_value("OPENBF3_PT1_CUT_FADE"); !fade.empty()) {
-				mc.cut_fade_frames = uint32_t(std::clamp(std::atoi(fade.c_str()), 0, 4800));
-			}
-			if (env_value("OPENBF3_PT1_CAP_HOLD") == "0") {
-				mc.cap_hold_db = 0.0f;
-				mc.voice_hold_blocks = 0;
-				mc.resume_margin = 0;
-			}
-			if (env_value("OPENBF3_PT1_LIMIT") == "0") {
-				mc.limit_ceiling = 0.0f;
-			}
-			if (const std::string m = env_value("OPENBF3_PT1_RESUME_MARGIN"); !m.empty()) {
-				mc.resume_margin = uint32_t(std::clamp(std::atoi(m.c_str()), 0, 128));
-			}
-			rig.mixer = std::make_unique<ba::MixerCore>(mc);
-			rig.mixer->set_tap(&tap);
-			rig.pool = std::make_unique<ba::OneShotPool>(ba::kMaxOneShotVoices);
-			ba::SimMixerClockConfig cc;
-			cc.bias_frames = int64_t(mc.schedule_lead_blocks) * int64_t(ba::kBlockFrames) + 2 * int64_t(ba::kBlockFrames) + 800;
-			rig.clock = std::make_unique<ba::SimMixerClock>(*rig.mixer, cc);
-			rig.router = std::make_unique<ba::WeaponAudioRouter>(*rig.mixer, f->assets.table, f->assets.bank, f->tuning, *rig.pool);
-			rig.impacts = std::make_unique<ba::ImpactAudio>(*rig.mixer, f->assets.impacts, f->assets.bank, f->tuning, *rig.pool);
-		}
+		use_game_mixer(rig, &tap);
 		rig.listener.position = { 0.0f, 1.6f, 0.0f };
 		std::mt19937_64 rng(0xA03u);
 		std::uniform_real_distribution<float> unit(0.0f, 1.0f);
