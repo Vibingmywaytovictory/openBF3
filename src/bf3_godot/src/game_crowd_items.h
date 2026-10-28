@@ -19,6 +19,14 @@ struct CrowdItemLists {
 	std::vector<std::string> notes;
 };
 
+inline render::CrowdWeaponSpec catalog_crowd_spec(const host::GunplayLevel &p_gunplay, uint16_t p_def) {
+	render::CrowdWeaponSpec s;
+	s.def = p_def;
+	s.weapon_unlock = p_gunplay.defs[p_def].blueprint;
+	s.weapon_def = p_gunplay.defs[p_def].variant;
+	return s;
+}
+
 inline CrowdItemLists crowd_item_specs(const host::GunplayLevel *p_gunplay, const render::SoldierSpec &p_spec) {
 	CrowdItemLists out;
 	for (size_t t = 0; t < out.teams.size(); ++t) {
@@ -67,11 +75,7 @@ inline CrowdItemLists crowd_item_specs(const host::GunplayLevel *p_gunplay, cons
 							" preloaded items: loaded when first carried");
 					continue;
 				}
-				render::CrowdWeaponSpec s;
-				s.def = d;
-				s.weapon_unlock = p_gunplay->defs[d].blueprint;
-				s.weapon_def = p_gunplay->defs[d].variant;
-				items.push_back(std::move(s));
+				items.push_back(catalog_crowd_spec(*p_gunplay, d));
 			}
 		}
 	}

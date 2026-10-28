@@ -225,10 +225,7 @@ void Bf3GameCrowd::Impl::want(uint8_t p_team, uint16_t p_def) {
 	if (gunplay == nullptr || p_def >= gunplay->defs.size() || !catalog_requested.insert({ p_team, p_def }).second) {
 		return;
 	}
-	render::CrowdWeaponSpec spec;
-	spec.def = p_def;
-	spec.weapon_unlock = gunplay->defs[p_def].blueprint;
-	spec.weapon_def = gunplay->defs[p_def].variant;
+	const render::CrowdWeaponSpec spec = catalog_crowd_spec(*gunplay, p_def);
 	catalog_jobs->post([this, p_team, spec] { load_catalog(p_team, spec); });
 }
 
