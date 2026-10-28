@@ -556,10 +556,15 @@ void Bf3UiScreens::sync_flow() {
 		if (e == nullptr) {
 			continue;
 		}
+		const bool reopened = e->flow_id != 0 && e->flow_id != id && e->phase == UiScreenPhase::Shown;
 		e->flow_id = id;
 		if (e->adopted) {
 			e->phase = UiScreenPhase::Entering;
 			continue;
+		}
+		if (reopened) {
+			note("reopened " + ui::ui_data_category_leaf(partition));
+			session_->screen_initialized(id);
 		}
 		if (popup != nullptr && e->screen != nullptr && e->popup == nullptr) {
 			e->popup = std::move(popup);
