@@ -1,5 +1,6 @@
 #include "bf3/core/ui/hud_icons.h"
 
+#include "bf3/core/gameplay/weapon_def.h"
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/superbundle_mount.h"
 #include "ui_ebx.h"
@@ -13,6 +14,12 @@ namespace {
 
 constexpr size_t kMaxItemIconPath = 512;
 
+constexpr std::pair<std::string_view, gameplay::FireLogic> kFireModeFields[] = {
+	{ "FireModeSingle", gameplay::FireLogic::Single },
+	{ "FireModeBurst", gameplay::FireLogic::Burst },
+	{ "FireModeAuto", gameplay::FireLogic::Automatic },
+};
+
 struct Source {
 	std::string_view partition;
 	ItemIconSource kind;
@@ -23,6 +30,8 @@ constexpr Source kSources[] = {
 	{ kWeaponMetadataPartition, ItemIconSource::Weapon, "IconTexturePath" },
 	{ kKitItemMetadataPartition, ItemIconSource::KitItem, "IconTexturePath" },
 	{ kVehicleMetadataPartition, ItemIconSource::Vehicle, "TexturePath" },
+	{ kSpecializationMetadataPartition, ItemIconSource::Specialization, "IconTexturePath" },
+	{ kWeaponAccessoryMetadataPartition, ItemIconSource::WeaponAccessory, "IconTexturePath" },
 };
 
 }
@@ -69,16 +78,30 @@ Result<ItemIconIndex> ItemIconIndex::read(const EbxResolver &p_ui, gameplay::Wor
 				continue;
 			}
 			BF3_TRY(budget.charge(ids->size()));
-			const std::string_view path = item->get(source.path_field) ? item->get(source.path_field)->as_str().value_or("") : std::string_view();
-			const std::string_view texture =
-					item->get("TexturePath") ? item->get("TexturePath")->as_str().value_or("") : std::string_view();
-			const std::string_view name = item->get("Name") ? item->get("Name")->as_str().value_or("") : std::string_view();
+			const auto field = [&](std::string_view p_name) {
+				const std::optional<EbxValue> v = item->get(p_name);
+				return v ? v->as_str().value_or("") : std::string_view();
+			};
+			const std::string_view path = field(source.path_field);
+			const std::string_view texture = field("TexturePath");
+			const std::string_view name = field("Name");
+			const std::array<std::string_view, 4> info{ field("Description"), field("Ammo"), field("RateOfFire"),
+				field("Range") };
+			uint8_t fire_modes = 0;
+			for (const auto &[flag, logic] : kFireModeFields) {
+				const std::optional<EbxValue> v = item->get(flag);
+				if (v && v->as_bool().value_or(false)) {
+					fire_modes |= uint8_t(1u << uint32_t(logic));
+				}
+			}
 			std::string_view hud_icon;
 			if (const std::optional<EbxValue> h = item->get("HudIcon")) {
 				hud_icon = h->enum_name().value_or(h->as_str().value_or(""));
 			}
 			if (path.size() > kMaxItemIconPath || texture.size() > kMaxItemIconPath || name.size() > kMaxItemIconPath ||
-					hud_icon.size() > kMaxItemIconPath) {
+					hud_icon.size() > kMaxItemIconPath || std::any_of(info.begin(), info.end(), [](std::string_view t) {
+						return t.size() > kMaxItemIconPath;
+					})) {
 				return make_error(std::string(source.partition) + ": a description's text is longer than " + std::to_string(kMaxItemIconPath) + " bytes");
 			}
 			for (const EbxValue id_value : *ids) {
@@ -93,7 +116,8 @@ Result<ItemIconIndex> ItemIconIndex::read(const EbxResolver &p_ui, gameplay::Wor
 				if (out.icons_.size() >= kMaxItemIcons) {
 					return make_error("item icon index: more than " + std::to_string(kMaxItemIcons) + " ids");
 				}
-				BF3_TRY(budget.charge_bytes(2 * path.size() + texture.size() + name.size() + hud_icon.size()));
+				BF3_TRY(budget.charge_bytes(2 * path.size() + texture.size() + name.size() + hud_icon.size() +
+						info[0].size() + info[1].size() + info[2].size() + info[3].size()));
 				ItemIcon icon;
 				icon.item_id = *id;
 				icon.source = source.kind;
@@ -102,6 +126,11 @@ Result<ItemIconIndex> ItemIconIndex::read(const EbxResolver &p_ui, gameplay::Wor
 				icon.res_name = item_res_name(path);
 				icon.hud_icon = std::string(hud_icon);
 				icon.texture_path = std::string(texture);
+				icon.description_sid = std::string(info[0]);
+				icon.ammo = std::string(info[1]);
+				icon.rate_of_fire = std::string(info[2]);
+				icon.range_sid = std::string(info[3]);
+				icon.fire_modes = fire_modes;
 				out.icons_.push_back(std::move(icon));
 			}
 		}

@@ -144,7 +144,8 @@ void Bf3HudItems::start_loader() {
 				out->index = std::make_unique<ui::ItemIconIndex>(std::move(*items));
 				std::map<std::string, size_t> by_res;
 				for (const ui::ItemIcon &icon : out->index->icons()) {
-					if (icon.source == ui::ItemIconSource::Vehicle || icon.res_name.empty()) {
+					if ((icon.source != ui::ItemIconSource::Weapon && icon.source != ui::ItemIconSource::KitItem) ||
+							icon.res_name.empty()) {
 						continue;
 					}
 					auto it = by_res.find(icon.res_name);

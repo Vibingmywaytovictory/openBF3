@@ -22,12 +22,14 @@ inline constexpr std::string_view kHudIconAtlasPartition = "ui/static/hud3dicons
 inline constexpr std::string_view kWeaponMetadataPartition = "ui/uiweaponmetadata";
 inline constexpr std::string_view kKitItemMetadataPartition = "ui/uikititemmetadata";
 inline constexpr std::string_view kVehicleMetadataPartition = "ui/uivehiclemetadata";
+inline constexpr std::string_view kSpecializationMetadataPartition = "ui/uispecializationmetadata";
+inline constexpr std::string_view kWeaponAccessoryMetadataPartition = "ui/uiweaponaccessorymetadata";
 
 inline constexpr size_t kMaxHudIcons = 1024;
 inline constexpr size_t kMaxHudIconStates = 16;
 inline constexpr size_t kMaxHudIconFrames = 64;
 inline constexpr uint32_t kMaxHudIconImageSide = 4096;
-inline constexpr size_t kMaxItemIcons = 4096;
+inline constexpr size_t kMaxItemIcons = 16384;
 
 enum class HudIconState : uint8_t {
 	Default,
@@ -157,6 +159,8 @@ enum class ItemIconSource : uint8_t {
 	Weapon,
 	KitItem,
 	Vehicle,
+	Specialization,
+	WeaponAccessory,
 };
 
 struct ItemIcon {
@@ -167,6 +171,11 @@ struct ItemIcon {
 	std::string res_name;
 	std::string hud_icon;
 	std::string texture_path;
+	std::string description_sid;
+	std::string ammo;
+	std::string rate_of_fire;
+	std::string range_sid;
+	uint8_t fire_modes = 0;
 };
 
 class ItemIconIndex {

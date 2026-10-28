@@ -405,7 +405,7 @@ TEST_SUITE("ui-hud-icons") {
 				++kit;
 			}
 		}
-		const bool pass = variants.size() == 172 && misses.empty() && sorted && index->duplicate_ids() == 2;
+		const bool pass = variants.size() == 172 && misses.empty() && sorted && index->duplicate_ids() == 14;
 		std::string detail = std::to_string(weapon + kit) + "/" + std::to_string(variants.size()) + " variants resolve by unlock identifier to a decoded _small icon (" +
 				std::to_string(weapon) + " weapon metadata, " + std::to_string(kit) + " kit-item metadata; weapon name SID equal on " + std::to_string(name_matches) +
 				"); index " + std::to_string(index->icons().size()) + " ids, " + std::to_string(index->duplicate_ids()) + " duplicate; formats (code wxh):";
