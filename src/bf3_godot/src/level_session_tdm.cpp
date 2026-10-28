@@ -360,7 +360,11 @@ void Bf3LevelSession::tdm_ui_input(const Ref<InputEvent> &p_event) {
 		}
 		screens->key(bf3::core::ui::ui_flash_key_code(idk), k->is_pressed());
 		for (const bf3::core::ui::UiInputConcept c : router.concepts_of_key(idk)) {
+			const uint64_t found = screens->stats().concepts_found;
 			screens->input_concept(int32_t(c), k->is_pressed());
+			if (k->is_pressed() && screens->stats().concepts_found > found) {
+				break;
+			}
 		}
 	} else if (const InputEventMouseButton *mb = Object::cast_to<InputEventMouseButton>(p_event.ptr())) {
 		const MouseButton b = mb->get_button_index();

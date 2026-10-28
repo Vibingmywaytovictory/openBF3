@@ -1,6 +1,7 @@
 #include "deploy_check.h"
 
 #include "deploy_screens.h"
+#include "level_session_menu.h"
 #include "native_screens.h"
 
 #include "bf3/core/ui/hud_screen.h"
@@ -166,7 +167,10 @@ bool DeployCheck::frame(Bf3UiScreens &r_screens, double p_now_s, const DeployChe
 		const std::string &l = log[log_seen_];
 		const bool transition = l.starts_with("open ") || l.starts_with("close ") || l.starts_with("entered ") ||
 				l.starts_with("exited ");
-		if (transition && (l.find("spawn") != std::string::npos || l.find("killscreen") != std::string::npos)) {
+		if ((transition &&
+					(l.find("spawn") != std::string::npos || l.find("killscreen") != std::string::npos ||
+							l.find("custom") != std::string::npos || l.find("menu") != std::string::npos)) ||
+				l.starts_with("concept ")) {
 			lines_.push_back("[deploy] " + seconds_text(p_now_s - start_s_) + " " + l);
 		}
 		if (phase_ == Phase::TabProbe && l.starts_with("open ")) {
@@ -504,6 +508,11 @@ void DeployCheck::customize(
 						std::to_string(p_st.picks_from_flow - cust_mark_.picks_from_flow) + " pick(s) from the flow, " +
 						std::to_string(p_st.loadout_requests - cust_mark_.loadout_requests) + " loadout request(s)");
 	};
+	const auto escaped = [&]() {
+		tap(p_io, godot::KEY_ESCAPE);
+		probe_s_ = p_now_s;
+		++probe_step_;
+	};
 	switch (probe_step_ - kCustomizeFirstStep) {
 		case 0:
 			clicked(soldier,
@@ -562,6 +571,49 @@ void DeployCheck::customize(
 				shot(p_io, "customize_optic", p_now_s);
 				picked("tabs.customize.optic", p_st.lists[kDeployCheckOpticList].chosen,
 						cust_mark_.lists[kDeployCheckOpticList].chosen);
+				escaped();
+			}
+			break;
+		case 10:
+			if (waited) {
+				row("tabs.customize.escape_accessories", shown(r_screens, sub) && !up(r_screens, accessories),
+						std::string("Escape in ACCESSORIES: customizesoldiersubscreen ") +
+								(shown(r_screens, sub) ? "shown" : "not shown"));
+				escaped();
+			}
+			break;
+		case 11:
+			if (waited) {
+				row("tabs.customize.escape_loadout", shown(r_screens, soldier) && !up(r_screens, sub),
+						std::string("Escape in LOADOUT: customizesoldierscreen ") +
+								(shown(r_screens, soldier) ? "shown" : "not shown"));
+				escaped();
+			}
+			break;
+		case 12:
+			if (waited) {
+				row("tabs.customize.escape_kits", shown(r_screens, kSpawnScreenPcPartition) && !up(r_screens, soldier),
+						std::string("Escape in KITS: spawnscreenpc ") +
+								(shown(r_screens, kSpawnScreenPcPartition) ? "shown" : "not shown"));
+				escaped();
+			}
+			break;
+		case 13:
+			if (waited) {
+				shot(p_io, "customize_menu", p_now_s);
+				row("tabs.customize.menu",
+						shown(r_screens, kIngameMenuPartition) && !up(r_screens, kSpawnScreenPcPartition),
+						std::string("Escape on the deploy screen: ingamemenump ") +
+								(shown(r_screens, kIngameMenuPartition) ? "drawn" : "not drawn"));
+				escaped();
+			}
+			break;
+		case 14:
+			if (waited) {
+				row("tabs.customize.menu_back",
+						shown(r_screens, kSpawnScreenPcPartition) && !up(r_screens, kIngameMenuPartition),
+						std::string("Escape in the menu: spawnscreenpc ") +
+								(shown(r_screens, kSpawnScreenPcPartition) ? "shown" : "not shown"));
 				sub_ = 0;
 				probe_step_ = 3;
 			}

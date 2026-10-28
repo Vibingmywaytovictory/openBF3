@@ -140,7 +140,10 @@ TEST_SUITE("ui-deploy") {
 				fired.push_back(e.instance + " " + e.query + " " + e.param.to_string());
 			});
 			s.hud->initialize(customize_model());
+			CHECK(s.hud->deliver_in_event("KitView_01", "UIWidgetEventID_OnItemHighlighted", As2Value::of("2")));
 			s.hud->advance(1.0 / 30.0);
+			CHECK(std::find(fired.begin(), fired.end(), "KitView_01 UIWidgetEventID_OnItemSelected 2") != fired.end());
+			CHECK(std::find(fired.begin(), fired.end(), "KitView_01 UIWidgetEventID_OnItemSelected 0") == fired.end());
 			for (int k = 0; k < 4; ++k) {
 				CHECK(s.at(slot_path("KitView_01", k)).visible);
 			}

@@ -42,7 +42,6 @@ inline constexpr int32_t kUiSpawnLogicTimeKey = -1005581981;
 inline constexpr int32_t kUiTeamScoreboardEnabledKey = 1855620510;
 inline constexpr int32_t kUiCustomizationSelectedSlotKey = -1273291137;
 inline constexpr int32_t kUiCustomizationSetWeaponKey = 1330229422;
-inline constexpr int32_t kUiCustomizationIsFrontEndKey = 1169074106;
 inline constexpr std::array<int32_t, bf3::core::ui::kHudSpawnKitItems> kUiCustomizationItemKeys{ -852628010, -378770976,
 	305101192, 305127776, -1021374313 };
 inline constexpr std::array<int32_t, bf3::core::ui::kHudAccessorySlots> kUiCustomizationAccessoryKeys{ -991137952,

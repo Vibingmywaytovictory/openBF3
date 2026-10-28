@@ -286,6 +286,78 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(s.flow().errors().empty());
 	}
 
+	TEST_CASE("ui flow session: after a death, Deactivate in CUSTOMIZE goes back by the graphs (ACCESSORIES to "
+			  "LOADOUT to KITS to the deploy screen) and on the deploy screen opens ingamemenump") {
+		Level *l = level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level);
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		UiFlowSession &s = **made;
+		ui_flow_tdm_pc_defaults(s, "TeamDeathMatch0");
+		Script sc{ s };
+		sc.state.phase = net::MatchPhase::InRound;
+		sc.state.joined = true;
+		sc.run_to(60);
+		sc.state.own_spawns = 1;
+		sc.run_to(120);
+		sc.state.own_deaths = 1;
+		sc.run_to(400);
+		sc.phase("spawned and died");
+		CHECK(s.flow().find_screen("ui/flow/screen/hudtdmscreen") != nullptr);
+		CHECK(s.widget_fired("ui/flow/screen/spawnscreenpc", "TabBar_01", "UIWidgetEventID_OnItemReleased", "ID2"));
+		sc.collect();
+		sc.run_to(420);
+		CHECK(sc.phase("customize tab") ==
+				Lines{ "close spawnscreenpc", "push customizesoldierscreen", "close spawnscreenticketcountertdmscreen",
+						"deploy GameInput", "deploy MouseInput", "deploy RequestWeaponStats",
+						"deploy SpawnCustomization", "deploy OnFrontendCameraChanged" });
+		CHECK(s.widget_fired(
+				"ui/flow/screen/customizesoldierscreen", "KitView_01", "UIWidgetEventID_OnItemReleased", "0"));
+		sc.collect();
+		sc.run_to(440);
+		CHECK(sc.phase("loadout") ==
+				Lines{ "close customizesoldierscreen", "push customizesoldiersubscreen",
+						"deploy SetWeaponCustomization", "deploy OnFrontendCameraChanged" });
+		CHECK(s.widget_fired(
+				"ui/flow/screen/customizesoldiersubscreen", "KitSelector_01", "UIWidgetEventID_OnItemReleased", "1"));
+		sc.collect();
+		sc.run_to(460);
+		CHECK(sc.phase("accessories") ==
+				Lines{ "close customizesoldiersubscreen", "push customizeaccessoriesscreen",
+						"deploy OnFrontendCameraChanged" });
+		const auto escape = [&](sim::Tick p_to) {
+			CHECK(s.input_action(int32_t(ui::UiInputConcept::Deactivate)));
+			sc.collect();
+			sc.run_to(p_to);
+		};
+		escape(480);
+		CHECK(sc.phase("Deactivate in ACCESSORIES") ==
+				Lines{ "close customizeaccessoriesscreen", "push customizesoldiersubscreen",
+						"deploy StorePrimaryWeaponAccessories", "deploy OnFrontendCameraChanged" });
+		escape(500);
+		CHECK(sc.phase("Deactivate in LOADOUT") ==
+				Lines{ "close customizesoldiersubscreen", "push customizesoldierscreen",
+						"deploy SetWeaponCustomization", "deploy OnFrontendCameraChanged" });
+		CHECK(std::count(sc.widget_events.begin(), sc.widget_events.end(),
+					  "customizesoldierscreen.KitView_01 UIWidgetEventID_OnItemHighlighted") == 2);
+		escape(520);
+		CHECK(sc.phase("Deactivate in KITS") ==
+				Lines{ "close customizesoldierscreen", "close spawnbuttonscreen", "deploy UnSpawnCustomizationVehicle",
+						"deploy UnSpawnCustomization", "push spawnscreenticketcountertdmscreen",
+						"push spawnbuttonscreen", "push spawnscreenpc", "deploy SelectSpawnPoint", "deploy GameInput",
+						"deploy MouseInput", "deploy OnFrontendCameraChanged" });
+		escape(540);
+		const Lines menu = sc.phase("Deactivate on the deploy screen");
+		REQUIRE(menu.size() >= 2);
+		CHECK(menu[0] == "close spawnscreenpc");
+		CHECK(menu[1] == "push ingamemenump");
+		CHECK(s.flow().find_screen("ui/flow/screen/ingamemenump") != nullptr);
+		CHECK(s.errors().empty());
+		CHECK(s.flow().errors().empty());
+	}
+
 	TEST_CASE("ui flow session: a spawn made before the flow joins enters Playing after the spawn screens") {
 		Level *l = level_or_skip();
 		if (l == nullptr) {

@@ -143,7 +143,6 @@ std::optional<uint8_t> DeployScreens::feed(bf3::host::UiFlowSession &r_session, 
 			r_session.set_data(kUiCustomizationCompPartition, kUiCustomizationAccessoryKeys[a], std::string());
 		}
 	}
-	r_session.set_data(kUiCustomizationCompPartition, kUiCustomizationIsFrontEndKey, "False");
 	const std::string kit = std::to_string(chosen.value_or(p_spawn_kit));
 	r_session.set_data(kUiKitCompPartition, kUiKitSelectedKitKey, kit);
 	kit_written_ = kit;

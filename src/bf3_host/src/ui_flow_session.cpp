@@ -558,6 +558,10 @@ void ui_flow_tdm_pc_defaults(UiFlowSession &r_session, std::string_view p_mode) 
 	r_session.set_data("ui/uicomponents/uiendofroundcomp", 1450248605, "False");
 	r_session.set_data("ui/uicomponents/uisoldiercomp", 347110003, "True");
 	r_session.set_data("ui/uicomponents/uikitcomp", 1985842909, "0");
+	r_session.set_data("ui/uicomponents/uicustomizationcomp", -493868347, "True");
+	r_session.set_data("ui/uicomponents/uicustomizationcomp", 197143691, "True");
+	r_session.set_data("ui/uicomponents/uicustomizationcomp", 975152979, "True");
+	r_session.set_data("ui/uicomponents/uicustomizationcomp", 1324149331, "True");
 	r_session.set_data("ui/uicomponents/uispawnlogiccomp", -1005581981, "0");
 }
 }
