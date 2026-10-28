@@ -5,6 +5,7 @@
 #include "bf3/audio/impact_audio.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/weapon_audio.h"
+#include "bf3/core/job_queue.h"
 #include "bf3/fx/triggers.h"
 #include "bf3/host/client_projectiles.h"
 #include "bf3/host/client_session.h"
@@ -26,10 +27,15 @@
 #include "test_support.h"
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <future>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <vector>
 
@@ -493,5 +499,52 @@ TEST_SUITE("m2a-contract3") {
 		} else {
 			pending("tp", "CrowdEvaluator::muzzle_model, weapon_of, weapon_palette; load_crowd_weapons", "crowd_eval.cpp's bodies and crowd_weapons.cpp are tp's");
 		}
+	}
+
+	TEST_CASE("m2a contract3: a JobQueue runs its jobs in order on one worker thread; stop drops the queued rest and "
+			  "refuses new jobs") {
+		core::JobQueue q("contract3 jobs");
+		std::mutex mutex;
+		std::vector<int> order;
+		std::set<std::thread::id> threads;
+		for (int i = 0; i < 16; ++i) {
+			CHECK(q.post([&, i] {
+				std::lock_guard lock(mutex);
+				order.push_back(i);
+				threads.insert(std::this_thread::get_id());
+			}));
+		}
+		std::promise<void> drained;
+		CHECK(q.post([&] { drained.set_value(); }));
+		REQUIRE(drained.get_future().wait_for(std::chrono::seconds(10)) == std::future_status::ready);
+		std::vector<int> expect(16);
+		for (int i = 0; i < 16; ++i) {
+			expect[size_t(i)] = i;
+		}
+		CHECK(order == expect);
+		CHECK(threads.size() == 1);
+		CHECK(threads.count(std::this_thread::get_id()) == 0);
+		CHECK(!q.post(nullptr));
+
+		std::promise<void> gate;
+		std::shared_future<void> opened = gate.get_future().share();
+		int ran = 0;
+		CHECK(q.post([opened] { opened.wait(); }));
+		for (int i = 0; i < 3; ++i) {
+			CHECK(q.post([&ran] { ++ran; }));
+		}
+		std::thread opener([&gate] {
+			std::this_thread::sleep_for(std::chrono::milliseconds(50));
+			gate.set_value();
+		});
+		q.stop();
+		opener.join();
+		CHECK(ran == 0);
+		CHECK(!q.post([&ran] { ++ran; }));
+		const core::JobQueueStats st = q.stats();
+		CHECK(st.posted == 21);
+		CHECK(st.pending == 0);
+		CHECK(st.done >= 17);
+		CHECK(st.done <= 18);
 	}
 }

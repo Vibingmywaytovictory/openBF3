@@ -218,6 +218,8 @@ target_sources(bf3_core PRIVATE
 )
 
 target_sources(bf3_core PRIVATE
+    include/bf3/core/job_queue.h
+    src/job_queue.cpp
     include/bf3/core/worker_group.h
     src/worker_group.cpp
 )
