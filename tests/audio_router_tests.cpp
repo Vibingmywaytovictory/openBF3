@@ -1677,6 +1677,71 @@ ChannelEnergy channel_energy(std::span<const float> p_mix, uint64_t p_first, uin
 	const double n = double(std::max<uint64_t>(end > p_first ? end - p_first : 0, 1));
 	return { 10.0 * std::log10(l / n + 1e-30), 10.0 * std::log10(r / n + 1e-30) };
 }
+
+struct WholeMix final : ba::MixTap {
+	std::vector<float> mix;
+	void on_block(const float *p, uint32_t n, uint64_t) override { mix.insert(mix.end(), p, p + size_t(n) * 2); }
+};
+
+void drain_cuts(ba::MixerCore &r_mixer, std::vector<ba::MixerCutEvent> &r_cuts) {
+	std::array<ba::MixerCutEvent, 512> batch;
+	for (size_t n = r_mixer.poll_cuts(batch); n > 0; n = r_mixer.poll_cuts(batch)) {
+		r_cuts.insert(r_cuts.end(), batch.begin(), batch.begin() + std::ptrdiff_t(n));
+	}
+}
+
+void check_clean_mix(const std::string &p_what, GameRig &r_rig, const WholeMix &p_tap,
+		std::span<const ba::MixerCutEvent> p_cuts, double p_wall_s) {
+	INFO(p_what);
+	const ba::MixerStats &ms = r_rig.mixer->stats();
+	const ba::MixerCutStats &cs = r_rig.mixer->cut_stats();
+	uint64_t non_finite = 0, overs = 0;
+	float peak = 0.0f;
+	for (const float x : p_tap.mix) {
+		if (!std::isfinite(x)) {
+			++non_finite;
+			continue;
+		}
+		peak = std::max(peak, std::fabs(x));
+		overs += std::fabs(x) > 1.0f ? 1u : 0u;
+	}
+	std::map<std::string, uint64_t> audible_by_kind;
+	for (const ba::MixerCutEvent &e : p_cuts) {
+		if (e.step > ba::kAudibleStep && e.kind != ba::MixerCutKind::Start && e.kind != ba::MixerCutKind::Fade &&
+				e.kind != ba::MixerCutKind::LateBlock && e.kind != ba::MixerCutKind::CallGap) {
+			++audible_by_kind[std::string(ba::mixer_cut_kind_name(e.kind)) + " " + e.program];
+		}
+	}
+	MESSAGE(p_what << ": " << double(p_tap.mix.size() / 2) / double(ba::kMixRate) << " s mixed in " << p_wall_s
+				   << " s; mix peak " << peak << ", samples over 0 dBFS " << overs << ", non-finite " << non_finite);
+	MESSAGE(p_what << " mixer: " << ba::format_mixer_profile(ba::read_mixer_profile(ms)) << "; late blocks "
+				   << ms.late_blocks.load() << ", max block " << double(ms.max_block_ns.load()) / 1e6 << " ms of "
+				   << 1000.0 * double(ba::kBlockFrames) / double(ba::kMixRate) << " ms; peak instances "
+				   << ms.peak_instances.load() << ", starved " << ms.starved_voices.load() << "; pool peak "
+				   << r_rig.pool->peak() << ", started " << r_rig.pool->started() << ", stolen "
+				   << r_rig.pool->stolen());
+	MESSAGE(p_what << " " << ba::format_mixer_cuts(cs));
+	for (const auto &[what, n] : audible_by_kind) {
+		MESSAGE(p_what << " audible cut: " << what << " x" << n);
+	}
+	CHECK(non_finite == 0);
+	CHECK(overs == 0);
+	CHECK(cs.overs_out.load() == 0);
+	CHECK(cs.limit_edge_steps.load() == 0);
+	CHECK(cs.abrupt_gain.load() == 0);
+	CHECK(cs.takeover_cuts.load() == 0);
+	CHECK(cs.event_drops.load() == 0);
+	CHECK(audible_by_kind.empty());
+	CHECK(ms.starved_voices.load() == 0);
+	CHECK(ms.ring_overflows.load() == 0);
+	CHECK(ms.late_commands.load() == 0);
+	CHECK(ms.decode_errors.load() == 0);
+	CHECK(r_rig.pool->failed() == 0);
+	if (gate_late_blocks()) {
+		CHECK(ms.late_blocks.load() == 0);
+		CHECK(ba::mix_share_quantile(ms, 0.99) <= 0.10);
+	}
+}
 }
 
 TEST_SUITE("audio-game") {
@@ -2196,12 +2261,6 @@ TEST_SUITE("audio-game") {
 			}
 		}
 		REQUIRE(!impact.empty());
-		struct Whole final : ba::MixTap {
-			std::vector<float> mix;
-			void on_block(const float *p, uint32_t n, uint64_t) override {
-				mix.insert(mix.end(), p, p + size_t(n) * 2);
-			}
-		};
 		const double t_start = 600.25;
 		const auto at = [&](double p_s) {
 			return sw::SimTime(std::llround((t_start + p_s * 60.0) * double(sw::kTimeUnitsPerTick)));
@@ -2213,7 +2272,7 @@ TEST_SUITE("audio-game") {
 		for (const float yaw : { 0.0f, 1.1f, -2.4f }) {
 			const GodotCameraBasis cam = godot_view_basis(yaw);
 			for (const float side : { 1.0f, -1.0f }) {
-				Whole tap;
+				WholeMix tap;
 				GameRig rig(*f, &tap);
 				const ba::Vec3 eye{ 0.0f, 1.6f, 0.0f };
 				rig.listener = listener_of(cam, eye);
@@ -2311,12 +2370,7 @@ TEST_SUITE("audio-game") {
 		REQUIRE(other.size() >= 3);
 		std::vector<uint16_t> weapons(automatic.begin(), automatic.begin() + 5);
 		weapons.insert(weapons.end(), other.begin(), other.begin() + 3);
-		struct Whole final : ba::MixTap {
-			std::vector<float> mix;
-			void on_block(const float *p, uint32_t n, uint64_t) override {
-				mix.insert(mix.end(), p, p + size_t(n) * 2);
-			}
-		} tap;
+		WholeMix tap;
 		GameRig rig(*f, &tap);
 		use_game_mixer(rig, &tap);
 		const ba::Vec3 eye{ 0.0f, 1.6f, 0.0f };
@@ -2357,12 +2411,6 @@ TEST_SUITE("audio-game") {
 		}
 		rig.mixer->record_cuts(true);
 		std::vector<ba::MixerCutEvent> cuts;
-		const auto drain_cuts = [&] {
-			std::array<ba::MixerCutEvent, 512> batch;
-			for (size_t n = rig.mixer->poll_cuts(batch); n > 0; n = rig.mixer->poll_cuts(batch)) {
-				cuts.insert(cuts.end(), batch.begin(), batch.begin() + std::ptrdiff_t(n));
-			}
-		};
 		NetStream net;
 		std::vector<host::PresentEvent> events;
 		size_t own_next = 0;
@@ -2388,66 +2436,141 @@ TEST_SUITE("audio-game") {
 			net.frame->own_weapons_valid = true;
 			net.frame->own_weapons_curr.timers[0].flags = trigger ? sw::slot_flags::kTriggerDown : 0;
 			rig.frame(*net.frame, now_ns, events, 0);
-			drain_cuts();
+			drain_cuts(*rig.mixer, cuts);
 			net.trim(shooters);
 		}
 		const double wall_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-		const ba::MixerStats &ms = rig.mixer->stats();
-		const ba::MixerCutStats &cs = rig.mixer->cut_stats();
 		const ba::WeaponAudioStats &ws = rig.router->stats();
-		uint64_t non_finite = 0, overs = 0;
-		float peak = 0.0f;
-		for (const float x : tap.mix) {
-			if (!std::isfinite(x)) {
-				++non_finite;
-				continue;
-			}
-			peak = std::max(peak, std::fabs(x));
-			overs += std::fabs(x) > 1.0f ? 1u : 0u;
-		}
-		std::map<std::string, uint64_t> audible_by_kind;
-		for (const ba::MixerCutEvent &e : cuts) {
-			if (e.step > ba::kAudibleStep && e.kind != ba::MixerCutKind::Start && e.kind != ba::MixerCutKind::Fade &&
-					e.kind != ba::MixerCutKind::LateBlock && e.kind != ba::MixerCutKind::CallGap) {
-				++audible_by_kind[std::string(ba::mixer_cut_kind_name(e.kind)) + " " + e.program];
-			}
-		}
-		MESSAGE("burst: " << kShooters << " shooters, " << weapons.size() << " weapons, own M16A3, 12 s mixed in "
-						  << wall_s << " s; mix peak " << peak << ", samples over 0 dBFS " << overs << ", non-finite "
-						  << non_finite);
-		MESSAGE("burst mixer: " << ba::format_mixer_profile(ba::read_mixer_profile(ms)) << "; late blocks "
-								<< ms.late_blocks.load() << ", max block " << double(ms.max_block_ns.load()) / 1e6
-								<< " ms of " << 1000.0 * double(ba::kBlockFrames) / double(ba::kMixRate)
-								<< " ms; peak instances " << ms.peak_instances.load() << ", starved "
-								<< ms.starved_voices.load());
+		MESSAGE("burst: " << kShooters << " shooters, " << weapons.size() << " weapons, own M16A3");
 		MESSAGE("burst router: bursts " << ws.bursts << ", own bursts " << ws.own_bursts << ", rounds "
 										<< ws.event_rounds << ", culled " << ws.culled << ", stolen " << ws.stolen
 										<< ", refusals " << ws.mixer_refusals << ", peak weapon voices "
-										<< ws.peak_weapon_voices << "; pool peak " << rig.pool->peak() << ", stolen "
-										<< rig.pool->stolen());
-		MESSAGE("burst " << ba::format_mixer_cuts(cs));
-		for (const auto &[what, n] : audible_by_kind) {
-			MESSAGE("burst audible cut: " << what << " x" << n);
-		}
-		CHECK(non_finite == 0);
-		CHECK(overs == 0);
-		CHECK(cs.overs_out.load() == 0);
-		CHECK(cs.limit_edge_steps.load() == 0);
-		CHECK(cs.abrupt_gain.load() == 0);
-		CHECK(cs.takeover_cuts.load() == 0);
-		CHECK(cs.event_drops.load() == 0);
-		CHECK(audible_by_kind.empty());
+										<< ws.peak_weapon_voices);
+		check_clean_mix("burst", rig, tap, cuts, wall_s);
 		CHECK(ws.bursts >= kShooters * 3);
 		CHECK(ws.own_bursts == 3);
 		CHECK(ws.mixer_refusals == 0);
-		CHECK(ms.starved_voices.load() == 0);
-		CHECK(ms.ring_overflows.load() == 0);
-		CHECK(ms.late_commands.load() == 0);
-		CHECK(rig.pool->failed() == 0);
-		if (gate_late_blocks()) {
-			CHECK(ms.late_blocks.load() == 0);
-			CHECK(ba::mix_share_quantile(ms, 0.99) <= 0.10);
+		check_game_unchanged(*f);
+	}
+
+	TEST_CASE("a burst of surface impacts: every material's impact sound 1 to 15 m round a still, then a turning "
+			  "listener, and bots' misses landing round it; no click, clip or late block") {
+		GameFixture *f = need_game_install();
+		if (f == nullptr) {
+			return;
 		}
+		std::vector<std::string_view> patches;
+		for (const std::string &n : f->impact_names) {
+			if (f->assets.impacts->find(n)) {
+				patches.push_back(n);
+			}
+		}
+		REQUIRE(!patches.empty());
+		const ba::WeaponAudioTable &table = *f->assets.table;
+		std::vector<uint16_t> automatic;
+		for (const ba::KitAudioItem &item : f->assets.kits.items) {
+			const ba::WeaponAudioDef &d = table.defs[item.def];
+			if (!item.one_shot && d.form == ba::WeaponAudioForm::Driver && d.fire_mode != ba::WeaponFireMode::Single &&
+					std::find(automatic.begin(), automatic.end(), item.def) == automatic.end()) {
+				automatic.push_back(item.def);
+			}
+		}
+		REQUIRE(automatic.size() >= 3);
+		const ba::Vec3 eye{ 0.0f, 1.6f, 0.0f };
+		const double t_start = 600.25;
+		const auto at = [&](double p_s) {
+			return sw::SimTime(std::llround((t_start + p_s * 60.0) * double(sw::kTimeUnitsPerTick)));
+		};
+		std::mt19937_64 rng(0x1A9ACu);
+		std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+		std::vector<uint64_t> played(patches.size(), 0);
+		size_t next_patch = 0;
+		const auto request = [&](float p_near, float p_far, float p_height, sw::SimTime p_time) {
+			ba::ImpactSoundRequest r;
+			r.patch = patches[next_patch];
+			++played[next_patch];
+			next_patch = (next_patch + 1) % patches.size();
+			const float a = 6.2831853f * unit(rng), d = p_near + (p_far - p_near) * unit(rng);
+			r.position = { eye.x + d * std::sin(a), p_height * unit(rng), eye.z + d * std::cos(a) };
+			r.seed = rng();
+			r.time = p_time;
+			r.timeline = host::PresentTimeline::Render;
+			return r;
+		};
+		for (const bool misses : { false, true }) {
+			const std::string what = misses ? "misses" : "surfaces";
+			WholeMix tap;
+			GameRig rig(*f, &tap);
+			use_game_mixer(rig, &tap);
+			rig.listener = listener_of(godot_view_basis(0.3f), eye);
+			std::vector<NetShooter> shooters(misses ? 10 : 0);
+			for (uint32_t i = 0; i < shooters.size(); ++i) {
+				NetShooter &s = shooters[i];
+				s.slot = uint8_t(1 + i);
+				s.def = automatic[i % automatic.size()];
+				s.state.life = 1;
+				const float a = 6.2831853f * float(i) / float(shooters.size()), r = 8.0f + 3.0f * float(i);
+				const ba::Vec3 feet{ r * std::sin(a), 0.0f, r * std::cos(a) };
+				s.state.position = { feet.x, feet.y, feet.z };
+				s.state.yaw = yaw16_towards(feet, eye);
+				const double iv = std::max(0.05, table.defs[s.def].shot_interval_s);
+				const sw::SimTime interval = sw::SimTime(std::llround(iv * double(sw::kTimeUnitsPerSecond)));
+				for (const double volley : { 1.0, 4.0, 7.0, 10.0 }) {
+					s.burst(at(volley + 0.07 * double(i)), 25u, interval);
+				}
+			}
+			rig.mixer->record_cuts(true);
+			std::vector<ba::MixerCutEvent> cuts;
+			NetStream net;
+			std::vector<host::PresentEvent> events;
+			std::vector<ba::ImpactSoundRequest> impacts;
+			uint64_t sent = 0;
+			const auto t0 = std::chrono::steady_clock::now();
+			for (uint64_t fi = 0; fi < uint64_t(14 * 60); ++fi) {
+				const double t = t_start + double(fi);
+				const uint64_t now_ns = uint64_t(std::llround(t * kNsPerTick));
+				events.clear();
+				impacts.clear();
+				net.advance(t, shooters, events);
+				net.publish(t, now_ns, shooters);
+				const host::PresentClock c = host::present_clock(*net.frame, now_ns);
+				if (fi >= 5 * 60) {
+					rig.listener =
+							listener_of(godot_view_basis(0.3f + 0.9f * float(std::sin(double(fi) / 60.0 * 1.3))), eye);
+				}
+				if (misses) {
+					for (const host::PresentEvent &e : events) {
+						if (e.kind == host::PresentKind::RemoteShot) {
+							impacts.push_back(request(0.5f, 4.0f, 2.5f, e.time));
+						}
+					}
+				} else if ((fi >= 60 && fi < 4 * 60) || (fi >= 5 * 60 && fi < 9 * 60) ||
+						(fi >= 10 * 60 && fi < 13 * 60)) {
+					const uint32_t per_frame = fi < 5 * 60 ? 1u : (fi < 10 * 60 ? 2u : 4u);
+					for (uint32_t k = 0; k < per_frame; ++k) {
+						impacts.push_back(request(1.0f, 15.0f, 3.0f, c.render));
+					}
+				}
+				sent += impacts.size();
+				rig.frame(*net.frame, now_ns, events, 0, impacts);
+				drain_cuts(*rig.mixer, cuts);
+				net.trim(shooters);
+			}
+			const double wall_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+			const ba::ImpactAudioStats &is = rig.impacts->stats();
+			const ba::WeaponAudioStats &ws = rig.router->stats();
+			MESSAGE(what << ": " << patches.size() << " impact patches, " << sent << " impacts sent, " << is.impacts
+						 << " played, refused " << is.refused << ", unknown " << is.unknown_patches << "; bursts "
+						 << ws.bursts << ", rounds " << ws.event_rounds << ", refusals " << ws.mixer_refusals);
+			check_clean_mix(what, rig, tap, cuts, wall_s);
+			CHECK(sent > 0);
+			CHECK(is.impacts == sent);
+			CHECK(is.refused == 0);
+			CHECK(is.unknown_patches == 0);
+			CHECK(ws.mixer_refusals == 0);
+			CHECK(ws.bursts >= shooters.size() * 4);
+		}
+		CHECK(std::count(played.begin(), played.end(), uint64_t(0)) == 0);
 		check_game_unchanged(*f);
 	}
 
