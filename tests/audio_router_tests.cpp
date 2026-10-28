@@ -598,32 +598,35 @@ TEST_SUITE("audio-router") {
 		now.predicted = 100 * kTick;
 		now.render = 90 * kTick;
 		clock.set_now(now);
-		CHECK(clock.heard_frame() == 4096);
+		const uint64_t heard = 4096 - mixer.output_delay_frames();
+		CHECK(clock.heard_frame() == heard);
 		CHECK(clock.frame_of(0, host::PresentTimeline::Immediate) == mixer.earliest_frame());
 		CHECK(clock.late() == 0);
 
-		CHECK(clock.frame_of(now.render + sw::kTimeUnitsPerSecond / 2, host::PresentTimeline::Render) == 4096 + 24000);
-		CHECK(clock.frame_of(now.predicted + sw::kTimeUnitsPerSecond / 2, host::PresentTimeline::Predicted) == 4096 + 24000);
+		CHECK(clock.frame_of(now.render + sw::kTimeUnitsPerSecond / 2, host::PresentTimeline::Render) == heard + 24000);
+		CHECK(clock.frame_of(now.predicted + sw::kTimeUnitsPerSecond / 2, host::PresentTimeline::Predicted) ==
+				heard + 24000);
 
 		CHECK(clock.frame_of(100 * kTick + sw::kTimeUnitsPerSecond, host::PresentTimeline::Render) -
 						clock.frame_of(100 * kTick + sw::kTimeUnitsPerSecond, host::PresentTimeline::Predicted) ==
 				8000);
 
 		clock.set_output_latency_frames(1000);
-		CHECK(clock.heard_frame() == 3096);
-		CHECK(clock.frame_of(now.render + sw::kTimeUnitsPerSecond, host::PresentTimeline::Render) == 3096 + 48000);
+		CHECK(clock.heard_frame() == heard - 1000);
+		CHECK(clock.frame_of(now.render + sw::kTimeUnitsPerSecond, host::PresentTimeline::Render) ==
+				heard - 1000 + 48000);
 		clock.set_output_latency_frames(100000);
 		CHECK(clock.heard_frame() == 0);
 		clock.set_output_latency_frames(0);
 
 		clock.set_bias_frames(2048);
 		CHECK(clock.bias_frames() == 2048);
-		CHECK(clock.frame_of(now.predicted, host::PresentTimeline::Predicted) == 4096 + 2048);
+		CHECK(clock.frame_of(now.predicted, host::PresentTimeline::Predicted) == heard + 2048);
 		clock.set_bias_frames(0);
 
 		CHECK(clock.frame_of(now.predicted - sw::kTimeUnitsPerSecond, host::PresentTimeline::Predicted) == mixer.earliest_frame());
 		CHECK(clock.late() == 1);
-		CHECK(clock.max_late_frames() == mixer.earliest_frame() + 48000 - 4096);
+		CHECK(clock.max_late_frames() == mixer.earliest_frame() + 48000 - heard);
 
 		host::PresentClock half = now;
 		half.render_valid = false;

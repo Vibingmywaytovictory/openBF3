@@ -134,7 +134,11 @@ struct MixerCore::Impl {
 
 	bool begin_fade(InstanceSlot &r_slot, uint8_t p_mode, MixerCutKind p_kind);
 	float limit_gain = 1.0f;
-	std::array<float, kBlockFrames> limit_g{};
+	std::array<float, 2 * kBlockFrames> limit_g{};
+	std::array<float, 4 * kBlockFrames> limit_ext{};
+	uint32_t limit_lookahead_frames() const {
+		return std::clamp<uint32_t>(config.limit_attack_frames, 1, kBlockFrames);
+	}
 	void apply_limiter();
 
 	explicit Impl(const MixerConfig &p_config) :
@@ -218,6 +222,10 @@ bool MixerCore::push(const MixerCommand &p_command) {
 
 uint64_t MixerCore::clock() const {
 	return impl_->rendered.load(std::memory_order_acquire);
+}
+
+uint32_t MixerCore::output_delay_frames() const {
+	return impl_->limit_lookahead_frames();
 }
 
 uint64_t MixerCore::earliest_frame() const {
@@ -860,29 +868,35 @@ void MixerCore::Impl::apply_limiter() {
 	float *x = block.data();
 	const float c = config.limit_ceiling;
 	const bool on = std::isfinite(c) && c > 0.0f;
+	const uint32_t look = limit_lookahead_frames();
+	const uint32_t n = kBlockFrames + look;
+	float *e = limit_ext.data();
+	std::memcpy(e + size_t(look) * 2, x, size_t(kBlockFrames) * 2 * sizeof(float));
 	uint64_t over_in = 0;
 	bool any = false;
-	for (uint32_t i = 0; i < kBlockFrames; ++i) {
-		const float p = std::max(std::fabs(x[size_t(i) * 2]), std::fabs(x[size_t(i) * 2 + 1]));
-		over_in += p > 1.0f ? 1u : 0u;
+	for (uint32_t i = 0; i < n; ++i) {
+		const float p = std::max(std::fabs(e[size_t(i) * 2]), std::fabs(e[size_t(i) * 2 + 1]));
+		over_in += i >= look && p > 1.0f ? 1u : 0u;
 		any = any || (on && p > c);
 		limit_g[i] = on && p > c ? c / p : 1.0f;
 	}
 	if (over_in > 0) {
 		cut_stats.overs_in.fetch_add(over_in, std::memory_order_relaxed);
 	}
+	std::memcpy(x, e, size_t(kBlockFrames) * 2 * sizeof(float));
+	std::memmove(e, e + size_t(kBlockFrames) * 2, size_t(look) * 2 * sizeof(float));
 	if (!on || (!any && limit_gain >= 1.0f)) {
 		if (!on) {
 			cut_stats.overs_out.fetch_add(over_in, std::memory_order_relaxed);
 		}
 		return;
 	}
-	const float attack = 1.0f / float(std::clamp<uint32_t>(config.limit_attack_frames, 1, kBlockFrames));
+	const float attack = 1.0f / float(look);
 	const double release_frames = std::clamp(std::isfinite(config.limit_release_ms) ? double(config.limit_release_ms) : 80.0, 1.0, 10000.0) *
 			double(config.mix_rate) / 1000.0;
 	const float k = float(1.0 - std::exp(-1.0 / release_frames));
 
-	for (uint32_t i = kBlockFrames - 1; i-- > 0;) {
+	for (uint32_t i = n - 1; i-- > 0;) {
 		limit_g[i] = std::min(limit_g[i], limit_g[i + 1] + attack);
 	}
 

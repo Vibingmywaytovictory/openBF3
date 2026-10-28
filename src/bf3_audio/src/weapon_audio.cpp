@@ -120,7 +120,8 @@ void SimMixerClock::set_now(const present::PresentClock &p_now) {
 
 uint64_t SimMixerClock::heard_frame() const {
 	const uint64_t c = mixer_->clock();
-	return c > latency_frames_ ? c - latency_frames_ : 0;
+	const uint64_t behind = latency_frames_ + mixer_->output_delay_frames();
+	return c > behind ? c - behind : 0;
 }
 
 uint64_t SimMixerClock::frame_of(sw::SimTime p_time, present::PresentTimeline p_timeline) {

@@ -597,10 +597,12 @@ void capture_end(Impl &r_m) {
 		result += std::string(" ") + p_name + (f.good() ? "" : " (write failed)");
 	};
 	std::string csv = "frame,time_s,kind,handle,step,loudness_db,distance_m,program\n";
+	const uint64_t delay = r_m.mixer->output_delay_frames();
 	for (const ba::MixerCutEvent &e : c->events) {
 		char row[160];
-		std::snprintf(row, sizeof(row), "%llu,%.5f,%s,%u,%.6g,%.2f,%.2f,", (unsigned long long)e.frame, double(e.frame) / double(ba::kMixRate),
-				ba::mixer_cut_kind_name(e.kind), unsigned(e.handle), double(e.step), double(e.loudness_db), double(e.distance_m));
+		std::snprintf(row, sizeof(row), "%llu,%.5f,%s,%u,%.6g,%.2f,%.2f,", (unsigned long long)(e.frame + delay),
+				double(e.frame + delay) / double(ba::kMixRate), ba::mixer_cut_kind_name(e.kind), unsigned(e.handle),
+				double(e.step), double(e.loudness_db), double(e.distance_m));
 		csv += row;
 		csv += e.program;
 		csv += '\n';

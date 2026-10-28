@@ -502,7 +502,8 @@ TEST_SUITE("audio-hdr") {
 		const double foot_db = foot.rec.rms_db(last, last + 480);
 		CHECK(shot_db - foot_db == doctest::Approx(9.0).epsilon(0.002));
 
-		const double first_db = alone.rec.rms_db(32, 32 + 480);
+		const size_t delay = alone.mixer->output_delay_frames();
+		const double first_db = alone.rec.rms_db(32 + delay, 32 + delay + 480);
 		MESSAGE("shot: first block " << first_db << " dBFS, steady " << shot_db << " dBFS; footstep " << foot_db << " dBFS");
 		CHECK(first_db - shot_db == doctest::Approx(3.0).epsilon(0.01));
 	}

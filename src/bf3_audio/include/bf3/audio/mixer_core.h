@@ -160,6 +160,7 @@ public:
 	bool push(const MixerCommand &p_command);
 	uint64_t clock() const;
 	uint64_t earliest_frame() const;
+	uint32_t output_delay_frames() const;
 	void reclaim();
 	size_t poll_feedback(std::span<MixerFeedback> r_out);
 	const MixerStats &stats() const { return stats_; }
