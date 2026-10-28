@@ -877,6 +877,59 @@ TEST_CASE("the deploy list: one row per enabled spawner of the own team, labelle
 	CHECK(state.bad_inputs == 0);
 }
 
+TEST_CASE("kit items: GADGET 1 is the kit item slot when the kit has one, else gadget slot 1; GADGET 2 then also "
+		  "offers gadget slot 1; a pick clears the item's other slots") {
+	host::LoadoutKit kit;
+	const auto item = [](uint32_t p_id) {
+		host::LoadoutItem i;
+		i.identifier = p_id;
+		return i;
+	};
+	kit.slots[0] = { item(10), item(11) };
+	kit.slots[1] = { item(20) };
+	kit.slots[2] = { item(30), item(31) };
+	kit.slots[4] = { item(40) };
+	kit.slots[5] = { item(50), item(51) };
+	kit.defaults = { 10, 20, 0, 0, 40, 51, 0, 0 };
+	kit.category_sid_hashes[2] = 0x2222u;
+	kit.category_sid_hashes[4] = 0x4444u;
+	kit.category_sid_hashes[5] = 0x5555u;
+	kit.specializations = { 60, 61 };
+	kit.default_specialization = 61;
+	kit.specialization_sid_hash = 0x6666u;
+	using host::LoadoutKitItem;
+	using host::LoadoutOption;
+	CHECK(host::loadout_item_slots(kit, LoadoutKitItem::Gadget1) == std::vector<uint8_t>{ 4 });
+	CHECK(host::loadout_item_slots(kit, LoadoutKitItem::Gadget2) == std::vector<uint8_t>{ 2, 5 });
+	CHECK(host::loadout_item_slots(kit, LoadoutKitItem::Specialization) ==
+			std::vector<uint8_t>{ host::kLoadoutSpecializationSlot });
+	CHECK(host::loadout_item_options(kit, LoadoutKitItem::Gadget2) ==
+			std::vector<LoadoutOption>{ { 2, 30 }, { 2, 31 }, { 5, 50 }, { 5, 51 } });
+	CHECK(host::loadout_item_category_sid(kit, LoadoutKitItem::Gadget1) == 0x4444u);
+	CHECK(host::loadout_item_category_sid(kit, LoadoutKitItem::Gadget2) == 0x2222u);
+	CHECK(host::loadout_item_category_sid(kit, LoadoutKitItem::Specialization) == 0x6666u);
+	host::LoadoutChoice choice;
+	CHECK(host::loadout_item_current(kit, choice, LoadoutKitItem::Gadget1) == LoadoutOption{ 4, 40 });
+	CHECK(host::loadout_item_current(kit, choice, LoadoutKitItem::Gadget2) == LoadoutOption{ 5, 51 });
+	CHECK(host::loadout_item_current(kit, choice, LoadoutKitItem::Specialization) ==
+			LoadoutOption{ host::kLoadoutSpecializationSlot, 61 });
+	REQUIRE(host::set_loadout_item(kit, LoadoutKitItem::Gadget2, 31, choice));
+	CHECK(choice.items[2] == 31);
+	CHECK(choice.items[5] == 0);
+	CHECK(host::loadout_item_current(kit, choice, LoadoutKitItem::Gadget2) == LoadoutOption{ 2, 31 });
+	REQUIRE(host::set_loadout_item(kit, LoadoutKitItem::Gadget2, 50, choice));
+	CHECK(choice.items[2] == 0);
+	CHECK(choice.items[5] == 50);
+	CHECK(host::loadout_item_current(kit, choice, LoadoutKitItem::Gadget2) == LoadoutOption{ 5, 50 });
+	REQUIRE(host::set_loadout_item(kit, LoadoutKitItem::Specialization, 60, choice));
+	CHECK(choice.specialization == 60);
+	CHECK_FALSE(host::set_loadout_item(kit, LoadoutKitItem::Gadget1, 30, choice));
+	CHECK_FALSE(host::set_loadout_item(kit, LoadoutKitItem::Primary, 20, choice));
+	kit.slots[4].clear();
+	CHECK(host::loadout_item_slots(kit, LoadoutKitItem::Gadget1) == std::vector<uint8_t>{ 2 });
+	CHECK(host::loadout_item_slots(kit, LoadoutKitItem::Gadget2) == std::vector<uint8_t>{ 5 });
+}
+
 TEST_CASE("the loadout screens: kit and customization from the catalog and the own choices; the menu, user, settings "
 		  "and level") {
 	const host::HudStatic st = make_static();
@@ -953,8 +1006,12 @@ TEST_CASE("the loadout screens: kit and customization from the catalog and the o
 	CHECK(c.kit_grid_selected[0] == 0);
 	CHECK(c.kit_grid_data[2].count == 2);
 	CHECK(c.kit_grid_selected[2] == -1);
-	CHECK(c.kit_grid_data[4].count == 1);
-	CHECK(c.kit_grid_selected[4] == 0);
+	CHECK(c.kit_grid_data[3].count == 1);
+	CHECK(c.kit_grid_data[3].items[0].item_id == 501);
+	CHECK(c.kit_grid_selected[3] == -1);
+	CHECK(c.kit_grid_data[4].count == 2);
+	CHECK(c.kit_grid_data[4].items[1].item_id == 302);
+	CHECK(c.kit_grid_selected[4] == -1);
 	CHECK(c.accessory_grid[0].count == 2);
 	CHECK(c.accessory_grid[0].items[1].item_id == 202);
 	CHECK(c.accessory_selected[0] == -1);

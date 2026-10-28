@@ -23,6 +23,10 @@ bool contains(const std::vector<uint32_t> &p_ids, uint32_t p_id) {
 	return std::find(p_ids.begin(), p_ids.end(), p_id) != p_ids.end();
 }
 
+uint32_t sid_hash(const std::string &p_sid) {
+	return p_sid.empty() ? 0u : core::ui::text_hash(p_sid);
+}
+
 std::string where_of(uint8_t p_team, uint8_t p_kit) {
 	return "loadout team " + std::to_string(p_team) + " kit " +
 			std::string(kit_role_name(KitRole(p_kit < kKitCount ? p_kit : 0)));
@@ -93,7 +97,7 @@ core::Result<LoadoutCatalog> make_loadout_catalog(const core::EbxResolver &p_db,
 				return core::make_error(where + ": the kit " + l.asset + " was not read");
 			}
 			LoadoutKit &lk = out.kits[t][k];
-			lk.label_sid_hash = kit->label_sid.empty() ? 0u : core::ui::text_hash(kit->label_sid);
+			lk.label_sid_hash = sid_hash(kit->label_sid);
 			for (size_t s = 0; s < kLoadoutSlots; ++s) {
 				const uint16_t def = l.defs[s];
 				if (def != sim::weapons::kNoWeapon && def < p_defs.size()) {
@@ -105,6 +109,7 @@ core::Result<LoadoutCatalog> make_loadout_catalog(const core::EbxResolver &p_db,
 				if (slot == nullptr) {
 					continue;
 				}
+				lk.category_sid_hashes[s] = sid_hash(slot->ui_category_sid);
 				for (const gp::KitUnlock &u : slot->unlocks) {
 					if (u.identifier == 0 || lk.find(s, u.identifier) != nullptr) {
 						continue;
@@ -154,6 +159,10 @@ core::Result<LoadoutCatalog> make_loadout_catalog(const core::EbxResolver &p_db,
 					lk.specializations.push_back(u.identifier);
 				}
 			}
+			if (const gp::KitUnlock *u = kit->default_specialization()) {
+				lk.default_specialization = u->identifier;
+			}
+			lk.specialization_sid_hash = sid_hash(kit->specialization_category_sid);
 		}
 	}
 	if (const core::Status spent = budget.status(); !spent) {
@@ -242,6 +251,95 @@ uint64_t loadout_catalog_hash(const LoadoutCatalog &p_catalog) {
 		}
 	}
 	return h;
+}
+
+std::vector<uint8_t> loadout_item_slots(const LoadoutKit &p_kit, LoadoutKitItem p_item) {
+	const bool kit_item = !p_kit.slots[size_t(gp::WeaponSlot::KitItem)].empty();
+	switch (p_item) {
+		case LoadoutKitItem::Primary:
+			return { uint8_t(gp::WeaponSlot::Primary) };
+		case LoadoutKitItem::Sidearm:
+			return { uint8_t(gp::WeaponSlot::Sidearm) };
+		case LoadoutKitItem::Gadget1:
+			return { uint8_t(kit_item ? gp::WeaponSlot::KitItem : gp::WeaponSlot::Gadget1) };
+		case LoadoutKitItem::Gadget2:
+			if (kit_item) {
+				return { uint8_t(gp::WeaponSlot::Gadget1), uint8_t(gp::WeaponSlot::Gadget2) };
+			}
+			return { uint8_t(gp::WeaponSlot::Gadget2) };
+		case LoadoutKitItem::Specialization:
+			return { kLoadoutSpecializationSlot };
+	}
+	return {};
+}
+
+std::vector<LoadoutOption> loadout_item_options(const LoadoutKit &p_kit, LoadoutKitItem p_item) {
+	std::vector<LoadoutOption> out;
+	for (const uint8_t s : loadout_item_slots(p_kit, p_item)) {
+		if (s == kLoadoutSpecializationSlot) {
+			for (const uint32_t id : p_kit.specializations) {
+				out.push_back({ s, id });
+			}
+			continue;
+		}
+		for (const LoadoutItem &i : p_kit.slots[s]) {
+			out.push_back({ s, i.identifier });
+		}
+	}
+	return out;
+}
+
+LoadoutOption loadout_item_current(const LoadoutKit &p_kit, const LoadoutChoice &p_choice, LoadoutKitItem p_item) {
+	const auto chosen = [&](uint8_t p_slot) {
+		if (p_slot == kLoadoutSpecializationSlot) {
+			return p_choice.specialization != 0 ? p_choice.specialization : p_kit.default_specialization;
+		}
+		return p_choice.items[p_slot] != 0 ? p_choice.items[p_slot] : p_kit.defaults[p_slot];
+	};
+	const auto fallback = [&](uint8_t p_slot) {
+		return p_slot == kLoadoutSpecializationSlot ? p_kit.default_specialization : p_kit.defaults[p_slot];
+	};
+	const std::vector<uint8_t> slots = loadout_item_slots(p_kit, p_item);
+	for (const uint8_t s : slots) {
+		if (const uint32_t id = chosen(s); id != 0 && id != fallback(s)) {
+			return { s, id };
+		}
+	}
+	for (const uint8_t s : slots) {
+		if (const uint32_t id = chosen(s); id != 0) {
+			return { s, id };
+		}
+	}
+	return { slots.empty() ? uint8_t(0) : slots.front(), 0 };
+}
+
+uint32_t loadout_item_category_sid(const LoadoutKit &p_kit, LoadoutKitItem p_item) {
+	for (const uint8_t s : loadout_item_slots(p_kit, p_item)) {
+		const uint32_t sid =
+				s == kLoadoutSpecializationSlot ? p_kit.specialization_sid_hash : p_kit.category_sid_hashes[s];
+		if (sid != 0) {
+			return sid;
+		}
+	}
+	return 0;
+}
+
+bool set_loadout_item(const LoadoutKit &p_kit, LoadoutKitItem p_item, uint32_t p_identifier, LoadoutChoice &r_choice) {
+	const std::vector<LoadoutOption> options = loadout_item_options(p_kit, p_item);
+	const auto hit = std::find_if(options.begin(), options.end(),
+			[&](const LoadoutOption &p_option) { return p_option.identifier == p_identifier; });
+	if (hit == options.end()) {
+		return false;
+	}
+	for (const uint8_t s : loadout_item_slots(p_kit, p_item)) {
+		const uint32_t id = s == hit->slot ? p_identifier : 0u;
+		if (s == kLoadoutSpecializationSlot) {
+			r_choice.specialization = id;
+		} else {
+			r_choice.items[s] = id;
+		}
+	}
+	return true;
 }
 
 }

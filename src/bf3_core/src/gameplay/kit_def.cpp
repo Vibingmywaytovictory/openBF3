@@ -152,17 +152,26 @@ Result<UnlockProgression> read_unlock_progression(const EbxResolver &p_db, WorkB
 	return out;
 }
 
-const KitUnlock *KitDef::default_unlock(WeaponSlot p_slot) const {
-	const KitSlot *s = slot(p_slot);
-	if (!s || !progression_known) {
-		return nullptr;
-	}
-	for (const KitUnlock &u : s->unlocks) {
+namespace {
+
+const KitUnlock *first_free(const std::vector<KitUnlock> &p_unlocks) {
+	for (const KitUnlock &u : p_unlocks) {
 		if (u.gate == UnlockGate::Free && !u.variant) {
 			return &u;
 		}
 	}
 	return nullptr;
+}
+
+}
+
+const KitUnlock *KitDef::default_unlock(WeaponSlot p_slot) const {
+	const KitSlot *s = slot(p_slot);
+	return s != nullptr && progression_known ? first_free(s->unlocks) : nullptr;
+}
+
+const KitUnlock *KitDef::default_specialization() const {
+	return progression_known ? first_free(specializations) : nullptr;
 }
 
 Result<KitDef> read_kit_def(const EbxResolver &p_db, std::string_view p_asset, const UnlockProgression *p_progression, WorkBudget *p_budget) {
@@ -197,6 +206,9 @@ Result<KitDef> read_kit_def(const EbxResolver &p_db, std::string_view p_asset, c
 	out.progression_known = p_progression->known();
 	out.weapon_slots = read_table(budget, p_db, kit.data(), "WeaponTable", *p_progression);
 	for (KitSlot &slot : read_table(budget, p_db, kit.data(), "SpecializationTable", *p_progression)) {
+		if (out.specialization_category_sid.empty()) {
+			out.specialization_category_sid = slot.ui_category_sid;
+		}
 		for (KitUnlock &u : slot.unlocks) {
 			out.specializations.push_back(std::move(u));
 		}

@@ -53,12 +53,14 @@ struct KitDef {
 	int32_t hud_icon_value = 0;
 	std::vector<KitSlot> weapon_slots;
 	std::vector<KitUnlock> specializations;
+	std::string specialization_category_sid;
 	size_t visual_unlocks = 0;
 	bool progression_known = false;
 
 	const KitSlot *slot(WeaponSlot p_slot) const;
 
 	const KitUnlock *default_unlock(WeaponSlot p_slot) const;
+	const KitUnlock *default_specialization() const;
 };
 
 struct TeamDef {

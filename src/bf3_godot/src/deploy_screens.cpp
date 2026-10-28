@@ -52,15 +52,19 @@ std::optional<float> flow_power(const std::vector<std::string> &p_params) {
 bf3::core::Result<bf3::net::LoadoutRequest> deploy_loadout_request(const DeployPick &p_pick,
 		const bf3::host::LoadoutCatalog &p_catalog, const bf3::host::KitTable &p_table, uint8_t p_team,
 		bf3::host::LoadoutChoice &r_choice) {
-	if (p_pick.slot >= bf3::host::kHudSpawnSlots.size()) {
-		return bf3::core::make_error("deploy pick: no slot " + std::to_string(p_pick.slot));
+	const bf3::host::LoadoutKit *kit = p_catalog.kit(p_team, p_pick.kit);
+	if (p_pick.slot >= bf3::host::kLoadoutKitItems || kit == nullptr) {
+		return bf3::core::make_error("deploy pick: no kit item " + std::to_string(p_pick.slot));
 	}
 	bf3::host::LoadoutChoice next = r_choice == bf3::host::LoadoutChoice{}
 			? bf3::host::default_loadout(p_catalog, p_table, p_team, p_pick.kit).choice
 			: r_choice;
-	const size_t slot = bf3::host::kHudSpawnSlots[p_pick.slot];
-	next.items[slot] = p_pick.item;
-	if (slot == bf3::host::kLoadoutAccessoryWeapon) {
+	const bf3::host::LoadoutKitItem item = bf3::host::LoadoutKitItem(p_pick.slot);
+	if (!bf3::host::set_loadout_item(*kit, item, p_pick.item, next)) {
+		return bf3::core::make_error(
+				"deploy pick: kit item " + std::to_string(p_pick.slot) + " has no item " + std::to_string(p_pick.item));
+	}
+	if (item == bf3::host::LoadoutKitItem::Primary) {
 		next.accessories = {};
 	}
 	if (const bf3::core::Result<bf3::host::Loadout> r =

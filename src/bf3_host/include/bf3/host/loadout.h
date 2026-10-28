@@ -33,10 +33,25 @@ struct LoadoutItem {
 struct LoadoutKit {
 	std::array<std::vector<LoadoutItem>, kLoadoutSlots> slots;
 	std::array<uint32_t, kLoadoutSlots> defaults{};
+	std::array<uint32_t, kLoadoutSlots> category_sid_hashes{};
 	std::vector<uint32_t> specializations;
+	uint32_t default_specialization = 0;
+	uint32_t specialization_sid_hash = 0;
 	uint32_t label_sid_hash = 0;
 
 	const LoadoutItem *find(size_t p_slot, uint32_t p_identifier) const;
+};
+
+inline constexpr size_t kLoadoutKitItems = 5;
+inline constexpr uint8_t kLoadoutSpecializationSlot = uint8_t(kLoadoutSlots);
+
+enum class LoadoutKitItem : uint8_t { Primary, Sidearm, Gadget1, Gadget2, Specialization };
+
+struct LoadoutOption {
+	uint8_t slot = 0;
+	uint32_t identifier = 0;
+
+	bool operator==(const LoadoutOption &) const = default;
 };
 
 struct LoadoutCatalog {
@@ -75,5 +90,15 @@ core::Result<Loadout> resolve_loadout(const LoadoutCatalog &p_catalog, const Kit
 		uint8_t p_kit, const LoadoutChoice &p_choice);
 
 uint64_t loadout_catalog_hash(const LoadoutCatalog &p_catalog);
+
+std::vector<uint8_t> loadout_item_slots(const LoadoutKit &p_kit, LoadoutKitItem p_item);
+
+std::vector<LoadoutOption> loadout_item_options(const LoadoutKit &p_kit, LoadoutKitItem p_item);
+
+LoadoutOption loadout_item_current(const LoadoutKit &p_kit, const LoadoutChoice &p_choice, LoadoutKitItem p_item);
+
+uint32_t loadout_item_category_sid(const LoadoutKit &p_kit, LoadoutKitItem p_item);
+
+bool set_loadout_item(const LoadoutKit &p_kit, LoadoutKitItem p_item, uint32_t p_identifier, LoadoutChoice &r_choice);
 
 }

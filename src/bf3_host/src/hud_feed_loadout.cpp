@@ -8,6 +8,8 @@ namespace bf3::host::tdm_feed {
 
 namespace ui = bf3::core::ui;
 
+static_assert(kLoadoutKitItems == ui::kHudSpawnKitItems);
+
 namespace {
 
 void fill_list(const HudStatic &p_static, std::span<const uint32_t> p_ids, uint32_t p_selected, ui::HudItemList &r_list,
@@ -31,6 +33,15 @@ std::vector<uint32_t> ids_of(const std::vector<LoadoutItem> &p_items) {
 	out.reserve(p_items.size());
 	for (const LoadoutItem &i : p_items) {
 		out.push_back(i.identifier);
+	}
+	return out;
+}
+
+std::vector<uint32_t> ids_of(const std::vector<LoadoutOption> &p_options) {
+	std::vector<uint32_t> out;
+	out.reserve(p_options.size());
+	for (const LoadoutOption &o : p_options) {
+		out.push_back(o.identifier);
 	}
 	return out;
 }
@@ -87,27 +98,30 @@ void feed_loadout(Frame &r_frame) {
 		ui::HudKitEntry &e = c.kits_data[k];
 		e.name_sid_hash = lk != nullptr ? lk->label_sid_hash : 0u;
 		e.hud_icon = in.kits->loadout(r_frame.my_team, k).hud_icon;
-		for (size_t i = 0; i < kHudSpawnSlots.size(); ++i) {
-			e.items[i] = item_or_empty(st, l.choice.items[kHudSpawnSlots[i]]);
+		for (size_t i = 0; i < kLoadoutKitItems && lk != nullptr; ++i) {
+			e.items[i] = item_or_empty(st, loadout_item_current(*lk, l.choice, LoadoutKitItem(i)).identifier);
 		}
 		if (k == kit) {
 			current = l;
 		}
 	}
 	const LoadoutChoice &choice = current.choice;
-	c.kit_primary_weapon = item_or_empty(st, choice.items[size_t(core::gameplay::WeaponSlot::Primary)]);
-	c.kit_secondary_weapon = item_or_empty(st, choice.items[size_t(core::gameplay::WeaponSlot::Sidearm)]);
-	c.kit_gadget1 = item_or_empty(st, choice.items[size_t(core::gameplay::WeaponSlot::Gadget1)]);
-	c.kit_gadget2 = item_or_empty(st, choice.items[size_t(core::gameplay::WeaponSlot::Gadget2)]);
-	c.kit_specialization = item_or_empty(st, choice.specialization);
+	const auto current_of = [&](LoadoutKitItem p_item) {
+		return loadout_item_current(*selected, choice, p_item).identifier;
+	};
+	c.kit_primary_weapon = item_or_empty(st, current_of(LoadoutKitItem::Primary));
+	c.kit_secondary_weapon = item_or_empty(st, current_of(LoadoutKitItem::Sidearm));
+	c.kit_gadget1 = item_or_empty(st, current_of(LoadoutKitItem::Gadget1));
+	c.kit_gadget2 = item_or_empty(st, current_of(LoadoutKitItem::Gadget2));
+	c.kit_specialization = item_or_empty(st, current_of(LoadoutKitItem::Specialization));
 	c.weapon_accessory_main = c.kit_primary_weapon;
 	c.weapon_accessory1 = item_or_empty(st, choice.accessories[0]);
 	c.weapon_accessory2 = item_or_empty(st, choice.accessories[1]);
 	c.weapon_accessory3 = item_or_empty(st, choice.accessories[2]);
 	c.weapon_accessory4 = item_or_empty(st, choice.accessories[3]);
-	for (size_t i = 0; i < kHudSpawnSlots.size(); ++i) {
-		const std::vector<uint32_t> ids = ids_of(selected->slots[kHudSpawnSlots[i]]);
-		fill_list(st, ids, choice.items[kHudSpawnSlots[i]], c.kit_grid_data[i], c.kit_grid_selected[i],
+	for (size_t i = 0; i < kLoadoutKitItems; ++i) {
+		const std::vector<uint32_t> ids = ids_of(loadout_item_options(*selected, LoadoutKitItem(i)));
+		fill_list(st, ids, current_of(LoadoutKitItem(i)), c.kit_grid_data[i], c.kit_grid_selected[i],
 				r_frame.state.rows_dropped);
 	}
 	const LoadoutItem *weapon = selected->find(kLoadoutAccessoryWeapon, choice.items[kLoadoutAccessoryWeapon]);
