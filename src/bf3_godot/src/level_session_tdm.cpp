@@ -865,6 +865,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			}
 		};
 		io.join = [this](std::string *r_error) { return join_extra_client(r_error); };
+		io.frame = [this] { return get_viewport()->get_texture()->get_image(); };
 		io.state = [this, &r_game, &m, &f, screens] {
 			DeployCheckState s;
 			s.concepts_found = screens->stats().concepts_found;

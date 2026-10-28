@@ -6,6 +6,7 @@
 #include "viewmodel.h"
 
 #include <godot_cpp/classes/global_constants.hpp>
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 
 #include <array>
@@ -82,6 +83,25 @@ inline constexpr double kDeployFireAdsSeconds = 4.0;
 inline constexpr float kDeployFireFovTolerance = 1.0f;
 inline constexpr float kDeployFireSightPx = 16.0f;
 inline constexpr double kDeployFireExtraSpawnSeconds = 1.0;
+inline constexpr size_t kDeployFireReticlePixels = 3;
+inline constexpr float kDeployFireTintFloor = 0.25f;
+inline constexpr float kDeployFireTintDominance = 1.5f;
+inline constexpr float kDeployFireDarkMax = 0.1f;
+inline constexpr float kDeployFireDarkShare = 0.95f;
+inline constexpr float kDeployFireEdgePx = 2.0f;
+inline constexpr float kDeployFireRingPx = 60.0f;
+inline constexpr float kDeployFireSteadyPx = 0.5f;
+
+struct SightPixels {
+	std::string reticle_mesh;
+	float reticle_px = 0.0f;
+	size_t disc = 0, tinted = 0;
+	bool surround = false;
+	float inner_px = 0.0f, outer_px = 0.0f;
+	size_t band = 0, band_dark = 0;
+	size_t ring = 0, ring_dark = 0;
+	size_t inside = 0, inside_dark = 0;
+};
 
 struct DeployCheckList {
 	uint32_t count = 0;
@@ -160,6 +180,7 @@ struct DeployCheckState {
 	bool vm_sight = false;
 	godot::Vector2 vm_sight_px;
 	SightSurfaces vm_sight_surfaces;
+	std::vector<SightMark> vm_sight_marks;
 	std::string vm_pose;
 	bool extra_pick_valid = false;
 	bf3::net::LoadoutRequest extra_pick;
@@ -183,6 +204,7 @@ struct DeployCheckIo {
 	std::function<void(bool)> hold_zoom;
 	std::function<void(const bf3::net::LoadoutRequest &)> extra_loadout;
 	std::function<void(uint8_t)> extra_spawn;
+	std::function<godot::Ref<godot::Image>()> frame;
 };
 
 class DeployCheck {
@@ -280,6 +302,8 @@ private:
 	uint32_t fire_optic_expected_ = 0;
 	DeployCheckState fire_ads_;
 	DeployCheckState fire_hip_;
+	SightPixels fire_sight_pixels_;
+	bool fire_steady_ = false;
 	bool fire_extra_requested_ = false;
 	double fire_extra_spawn_s_ = 0.0;
 	void fire_accessories(
@@ -292,6 +316,8 @@ private:
 
 void fill_deploy_fire_state(DeployCheckState &r_state, GameState &r_game, const bf3::host::PresentationFrame &p_frame,
 		const bf3::host::SharedLevel *p_level, const bf3::host::ClientSession *p_extra, const godot::Camera3D *p_eye);
+
+SightPixels sight_pixels(const godot::Image &p_frame, std::span<const SightMark> p_marks);
 
 DeployFireClass deploy_fire_class(const bf3::host::LoadoutCatalog &p_catalog,
 		std::span<const bf3::core::gameplay::WeaponDef> p_defs, uint8_t p_team, uint32_t p_item);

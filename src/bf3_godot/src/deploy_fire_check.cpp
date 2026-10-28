@@ -12,6 +12,7 @@
 #include "bf3/host/client_wiring.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <memory>
 
@@ -27,6 +28,72 @@ std::string fire_seconds(double p_seconds) {
 	return b;
 }
 
+}
+
+SightPixels sight_pixels(const godot::Image &p_frame, std::span<const SightMark> p_marks) {
+	SightPixels out;
+	const int32_t w = p_frame.get_width(), h = p_frame.get_height();
+	const auto dark = [](const godot::Color &p_c) { return std::max({ p_c.r, p_c.g, p_c.b }) <= kDeployFireDarkMax; };
+	const auto visit = [&](const SightMark &p_m, float p_reach, int32_t p_stride, const auto &p_at) {
+		const float cx = float(w) * 0.5f + p_m.centre.x, cy = float(h) * 0.5f + p_m.centre.y;
+		for (int32_t y = std::max(0, int32_t(cy - p_reach)); y <= std::min(h - 1, int32_t(cy + p_reach));
+				y += p_stride) {
+			for (int32_t x = std::max(0, int32_t(cx - p_reach)); x <= std::min(w - 1, int32_t(cx + p_reach));
+					x += p_stride) {
+				p_at(std::hypot(float(x) + 0.5f - cx, float(y) + 0.5f - cy), p_frame.get_pixel(x, y));
+			}
+		}
+	};
+	for (const SightMark &m : p_marks) {
+		const float strongest = std::max({ m.tint[0], m.tint[1], m.tint[2] });
+		if (m.blend == bf3::render::ViewmodelBlend::Multiply) {
+			if (out.surround && m.outer_px <= out.outer_px) {
+				continue;
+			}
+			out.surround = true;
+			out.inner_px = m.inner_px;
+			out.outer_px = m.outer_px;
+			out.band = out.band_dark = out.ring = out.ring_dark = out.inside = out.inside_dark = 0;
+			visit(m, m.outer_px + kDeployFireRingPx, 2, [&](float p_d, const godot::Color &p_c) {
+				if (p_d < m.inner_px - kDeployFireEdgePx) {
+					++out.inside;
+					out.inside_dark += dark(p_c) ? 1u : 0u;
+				} else if (p_d > (m.inner_px + m.outer_px) * 0.5f + kDeployFireEdgePx &&
+						p_d < m.outer_px - kDeployFireEdgePx) {
+					++out.band;
+					out.band_dark += dark(p_c) ? 1u : 0u;
+				} else if (p_d > m.outer_px + kDeployFireEdgePx && p_d < m.outer_px + kDeployFireRingPx) {
+					++out.ring;
+					out.ring_dark += dark(p_c) ? 1u : 0u;
+				}
+			});
+			continue;
+		}
+		if (strongest <= 0.0f) {
+			continue;
+		}
+		const size_t k = m.tint[0] == strongest ? 0 : m.tint[1] == strongest ? 1 : 2;
+		size_t disc = 0, tinted = 0;
+		visit(m, m.outer_px + 1.0f, 1, [&](float p_d, const godot::Color &p_c) {
+			if (p_d > m.outer_px + 1.0f) {
+				return;
+			}
+			const std::array<float, 3> c{ p_c.r, p_c.g, p_c.b };
+			++disc;
+			tinted += c[k] >= kDeployFireTintFloor &&
+							c[k] >= kDeployFireTintDominance * std::max(c[(k + 1) % 3], c[(k + 2) % 3])
+					? 1u
+					: 0u;
+		});
+		if (out.reticle_mesh.empty() || tinted > out.tinted ||
+				(tinted == out.tinted && 2.0f * m.outer_px < out.reticle_px)) {
+			out.reticle_mesh = m.mesh;
+			out.reticle_px = 2.0f * m.outer_px;
+			out.disc = disc;
+			out.tinted = tinted;
+		}
+	}
+	return out;
 }
 
 DeployFireClass deploy_fire_class(const bf3::host::LoadoutCatalog &p_catalog,
@@ -392,11 +459,22 @@ void DeployCheck::fire_accessories(
 						!p_st.vm_bolt_action) ||
 					in >= kDeployFireAdsSeconds) {
 				fire_ads_ = p_st;
+				fire_next(43, p_now_s);
+			}
+			break;
+		case 43: {
+			const float moved = (p_st.vm_sight_px - fire_ads_.vm_sight_px).length();
+			fire_steady_ = p_st.vm_sight && fire_ads_.vm_sight && moved <= kDeployFireSteadyPx;
+			fire_ads_ = p_st;
+			if (fire_steady_ || in >= kDeployFireAdsSeconds) {
+				const godot::Ref<godot::Image> frame = p_io.frame ? p_io.frame() : godot::Ref<godot::Image>();
+				fire_sight_pixels_ = frame.is_valid() ? sight_pixels(**frame, p_st.vm_sight_marks) : SightPixels{};
 				shot(p_io, "fire_" + cls + "_ads", p_now_s);
 				p_io.hold_zoom(false);
 				fire_next(42, p_now_s);
 			}
 			break;
+		}
 		case 42:
 			if (in >= kDeployFireAfterSeconds) {
 				fire_rows(p_st);
@@ -459,12 +537,27 @@ void DeployCheck::fire_accessory_rows(const DeployCheckState &p_st) {
 			"lit lens surfaces see-through",
 			fire_ads_.vm_sight ? "at" : "not found,", double(fire_ads_.vm_sight_px.x), double(fire_ads_.vm_sight_px.y),
 			surfaces.reticles_textured, surfaces.reticles, surfaces.lenses_clear, surfaces.lenses);
+	const SightPixels &px = fire_sight_pixels_;
+	const auto share = [](size_t p_n, size_t p_of) { return p_of == 0 ? 0.0f : float(p_n) / float(p_of); };
+	const bool reticle_drawn = px.reticle_mesh.empty() || px.tinted >= kDeployFireReticlePixels;
+	const bool surround_drawn = !px.surround ||
+			(share(px.band_dark, px.band) >= kDeployFireDarkShare &&
+					share(px.ring_dark, px.ring) >= kDeployFireDarkShare && share(px.inside_dark, px.inside) < 0.5f);
+	char drawn_px[512];
+	std::snprintf(drawn_px, sizeof(drawn_px),
+			"; drawn (%s): reticle %s %zu tinted of %zu px within its %.1f px disc; surround %s r %.1f..%.1f px: "
+			"outer half %zu of %zu dark, ring outside %zu of %zu dark, inside %zu of %zu dark",
+			fire_steady_ ? "steady sight" : "sight still moving",
+			px.reticle_mesh.empty() ? "none" : px.reticle_mesh.c_str(), px.tinted, px.disc, double(px.reticle_px),
+			px.surround ? "multiply" : "none", double(px.inner_px), double(px.outer_px), px.band_dark, px.band,
+			px.ring_dark, px.ring, px.inside_dark, px.inside);
 	row(name + ".sight_picture",
 			!optic.empty() && drawn(fire_ads_.vm_attached, optic) && fire_ads_.vm_sight &&
 					fire_ads_.vm_sight_px.length() <= kDeployFireSightPx && surfaces.reticles > 0 &&
-					surfaces.reticles_textured == surfaces.reticles && surfaces.lenses_clear == surfaces.lenses,
+					surfaces.reticles_textured == surfaces.reticles && surfaces.lenses_clear == surfaces.lenses &&
+					(!px.reticle_mesh.empty() || px.surround) && reticle_drawn && surround_drawn,
 			"optic " + (optic.empty() ? std::string("not picked") : optic) +
-					" at ADS: " + joined(fire_ads_.vm_attached) + sight + "; " + fire_ads_.vm_pose);
+					" at ADS: " + joined(fire_ads_.vm_attached) + sight + drawn_px + "; " + fire_ads_.vm_pose);
 	if (fire_class_ == size_t(DeployFireClass::Assault)) {
 		const uint64_t sounds = fire_hip_.audio_accessory_sounds - fire_mark_.audio_accessory_sounds;
 		const uint64_t effects = fire_hip_.fx_accessory_effects - fire_mark_.fx_accessory_effects;
@@ -615,6 +708,7 @@ void fill_deploy_fire_state(DeployCheckState &r_state, GameState &r_game, const 
 				double(out.weapon_offset.t.z));
 		r_state.vm_pose = pose;
 		r_state.vm_sight_surfaces = vm->sight_surfaces();
+		r_state.vm_sight_marks = vm->sight_marks(p_eye);
 	}
 	if (catalog != nullptr && p_extra != nullptr) {
 		const auto other = std::make_unique<bf3::host::PresentationFrame>();

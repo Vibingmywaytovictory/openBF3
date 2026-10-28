@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 
 namespace bf3::godot_side {
@@ -162,6 +163,20 @@ SightSurfaces Bf3Viewmodel::sight_surfaces() const {
 	return out;
 }
 
+namespace {
+
+std::optional<Vector3> project_px(const Camera3D *p_camera, float p_fov_deg, const Vector3 &p_world) {
+	const Vector3 eye = p_camera->get_global_transform().affine_inverse().xform(p_world);
+	if (eye.z >= 0.0f || p_fov_deg <= 0.0f) {
+		return std::nullopt;
+	}
+	const real_t height = p_camera->get_viewport()->get_visible_rect().size.y;
+	const real_t focal = height * 0.5f / real_t(std::tan(Math::deg_to_rad(double(p_fov_deg)) * 0.5));
+	return Vector3(eye.x / -eye.z * focal, -eye.y / -eye.z * focal, focal / -eye.z);
+}
+
+}
+
 std::optional<Vector2> Bf3Viewmodel::sight_offset_px(const Camera3D *p_camera) const {
 	if (p_camera == nullptr || item_ < 0 || size_t(item_) >= items_.size()) {
 		return std::nullopt;
@@ -171,14 +186,56 @@ std::optional<Vector2> Bf3Viewmodel::sight_offset_px(const Camera3D *p_camera) c
 	if (!s || s->attachment >= n.attachments.size() || !n.attachments[s->attachment].mesh->is_visible()) {
 		return std::nullopt;
 	}
-	const Vector3 world = n.attachments[s->attachment].mesh->get_global_transform().xform(to_godot(s->local));
-	const Vector3 eye = p_camera->get_global_transform().affine_inverse().xform(world);
-	if (eye.z >= 0.0f || viewmodel_fov_ <= 0.0f) {
-		return std::nullopt;
+	const std::optional<Vector3> px = project_px(p_camera, viewmodel_fov_,
+			n.attachments[s->attachment].mesh->get_global_transform().xform(to_godot(s->local)));
+	return px ? std::optional<Vector2>(Vector2(px->x, px->y)) : std::nullopt;
+}
+
+std::vector<SightMark> Bf3Viewmodel::sight_marks(const Camera3D *p_camera) const {
+	std::vector<SightMark> out;
+	if (p_camera == nullptr || item_ < 0 || size_t(item_) >= items_.size()) {
+		return out;
 	}
-	const real_t height = p_camera->get_viewport()->get_visible_rect().size.y;
-	const real_t focal = height * 0.5f / real_t(std::tan(Math::deg_to_rad(double(viewmodel_fov_)) * 0.5));
-	return Vector2(eye.x / -eye.z * focal, -eye.y / -eye.z * focal);
+	const ItemNodes &n = items_[size_t(item_)];
+	const std::optional<bf3::render::ViewmodelSight> &s = n.item->sight;
+	if (!s || s->attachment >= n.item->attachments.size()) {
+		return out;
+	}
+	const std::string &socket = n.item->attachments[s->attachment].socket_unlock;
+	for (size_t a = 0; a < n.attachments.size() && a < n.item->attachments.size(); ++a) {
+		const bf3::render::ViewmodelAttachment &at = n.item->attachments[a];
+		if (at.socket_unlock != socket || !n.attachments[a].mesh->is_visible()) {
+			continue;
+		}
+		const Transform3D xform = n.attachments[a].mesh->get_global_transform();
+		for (const bf3::render::PreparedSurface &sf : at.part.prepared.surfaces) {
+			if (sf.material_index >= at.looks.size() || !at.looks[sf.material_index].blend ||
+					!at.looks[sf.material_index].unlit || sf.vertex_count() == 0) {
+				continue;
+			}
+			const Vector3 centre = xform.xform(Vector3((sf.aabb_min.x + sf.aabb_max.x) * 0.5f,
+					(sf.aabb_min.y + sf.aabb_max.y) * 0.5f, (sf.aabb_min.z + sf.aabb_max.z) * 0.5f));
+			const std::optional<Vector3> px = project_px(p_camera, viewmodel_fov_, centre);
+			if (!px) {
+				continue;
+			}
+			SightMark m;
+			m.mesh = at.part.mesh;
+			m.centre = Vector2(px->x, px->y);
+			m.tint = at.looks[sf.material_index].tint;
+			m.blend = at.looks[sf.material_index].blend_mode;
+			m.inner_px = std::numeric_limits<float>::max();
+			for (size_t k = 0; k < sf.vertex_count(); ++k) {
+				const Vector3 v =
+						xform.xform(Vector3(sf.positions[3 * k], sf.positions[3 * k + 1], sf.positions[3 * k + 2]));
+				const float r = float((v - centre).length() * px->z);
+				m.inner_px = std::min(m.inner_px, r);
+				m.outer_px = std::max(m.outer_px, r);
+			}
+			out.push_back(m);
+		}
+	}
+	return out;
 }
 
 namespace {

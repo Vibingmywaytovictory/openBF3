@@ -56,6 +56,14 @@ struct SightSurfaces {
 	size_t lenses_clear = 0;
 };
 
+struct SightMark {
+	std::string mesh;
+	godot::Vector2 centre;
+	float inner_px = 0, outer_px = 0;
+	std::array<float, 4> tint{};
+	bf3::render::ViewmodelBlend blend = bf3::render::ViewmodelBlend::Mix;
+};
+
 ViewmodelFrame viewmodel_frame_from(const bf3::host::PresentedWeapon &p_weapon, const godot::Vector3 &p_eye, double p_yaw, double p_pitch, float p_dt,
 		bool p_sprinting, float p_speed, float p_view_yaw_rate, float p_view_pitch_rate);
 
@@ -82,6 +90,7 @@ public:
 	std::vector<std::string> visible_attachments() const;
 	std::optional<godot::Vector2> sight_offset_px(const godot::Camera3D *p_camera) const;
 	SightSurfaces sight_surfaces() const;
+	std::vector<SightMark> sight_marks(const godot::Camera3D *p_camera) const;
 
 	void present(const ViewmodelFrame &p_frame, std::span<const bf3::anim::VmCue> p_cues, godot::Camera3D *p_camera);
 
