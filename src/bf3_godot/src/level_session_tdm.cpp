@@ -294,6 +294,7 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 			}
 		}
 		if (options != nullptr) {
+			options->step(r_m.native_delta_s, *flow.session(), r_game.settings->session());
 			options->update_model(r_game.settings->session());
 		}
 	}

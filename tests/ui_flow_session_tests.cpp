@@ -595,6 +595,41 @@ TEST_SUITE("ui-flow-session") {
 		fire(screens[3], "List_01", "UIWidgetEventID_OnChanged", "1");
 		fire(screens[3], "List_01", "UIWidgetEventID_RThumb", "-1726867587");
 		CHECK(writes() == Lines{ "-812298789=1", "-1996364377=-1726867587" });
+		const auto has = [](const Lines &p_lines, const std::string &p_line) {
+			return std::find(p_lines.begin(), p_lines.end(), p_line) != p_lines.end();
+		};
+		const std::string delay = "ui/flow/screen/popups/popupdelay";
+		s.set_data(kSettings, ui::kOptionsFullscreenKey, "True");
+		for (const bool keep : { false, true }) {
+			CAPTURE(keep);
+			sc.actions.clear();
+			fire(screens[3], "Button_02", tab, "");
+			const Lines applied = steps(sc.phase("options: APPLY FULLSCREEN RESOLUTION"));
+			CHECK(has(applied, "push popupdelay"));
+			CHECK(has(sc.actions, "ApplyVideoSettings APPLY"));
+			CHECK(has(sc.actions, "StartChangeResolutionTimer"));
+			const ui::UiFlowScreen *f = s.flow().find_screen(delay);
+			REQUIRE(f != nullptr);
+			CHECK(f->modal);
+			CHECK(f->dialog_title == "ID_M_POPUP_KEEPRESOLUTION_TITLE");
+			CHECK(f->dialog_text == "ID_M_POPUP_KEEPRESOLUTION_DESC");
+			REQUIRE(f->dialog_buttons.size() == 2);
+			CHECK(f->dialog_buttons[0].label == "ID_M_OPTIONS_YES");
+			CHECK(f->dialog_buttons[1].label == "ID_M_OPTIONS_NO");
+			sc.actions.clear();
+			if (keep) {
+				fire(delay, "PopupButtonsManager_01", tab, "ID_M_OPTIONS_YES");
+			} else {
+				press(ui::UiInputConcept::Cancel);
+			}
+			const Lines closed = steps(sc.phase(keep ? "options: keep the resolution" : "options: resolution timeout"));
+			CHECK(has(closed, "close popupdelay"));
+			CHECK(has(sc.actions, "ApplyVideoSettings REVERT") == !keep);
+			CHECK(s.flow().find_screen(delay) == nullptr);
+			CHECK(s.flow().find_screen(screens[3]) != nullptr);
+		}
+		s.set_data(kSettings, ui::kOptionsFullscreenKey, "False");
+		writes();
 		fire(screens[3], "TabBar_01", tab, "ID4");
 		sc.phase("options: KEY BINDINGS tab");
 		CHECK(writes() == Lines{ "968900879=ID4", "70081798=ID0" });

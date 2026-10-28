@@ -109,8 +109,11 @@ enum class OptionsAction : uint8_t {
 	Reset,
 	BindKey,
 	ConfirmBind,
-	RevertBind
+	RevertBind,
+	StartResolutionTimer
 };
+
+inline constexpr double kResolutionKeepSeconds = 15.0;
 
 OptionsAction options_action_of(int32_t p_action_key, std::span<const std::string> p_params);
 
@@ -138,6 +141,10 @@ public:
 	bool reset_to_default(std::string_view p_source);
 	bool run(OptionsAction p_action);
 
+	bool resolution_timer_running() const { return resolution_timer_s_ >= 0.0; }
+	bool step_resolution_timer(double p_seconds);
+	void keep_resolution();
+
 	bool bind_key(uint16_t p_row, KeyColumn p_column);
 	KeyBindResult key_pressed(std::string_view p_input);
 	KeyBindResult confirm_bind(bool p_bind_anyway);
@@ -156,6 +163,7 @@ private:
 	uint8_t key_tab_ = 0;
 	uint8_t key_column_ = 0;
 	bool exiting_ = false;
+	double resolution_timer_s_ = -1.0;
 };
 
 }

@@ -28,6 +28,7 @@ namespace ui = bf3::core::ui;
 constexpr std::string_view kSpawnScreenPartition = "ui/flow/screen/spawnscreenpc";
 constexpr std::string_view kVolume = ui::kVolumeOption;
 constexpr std::string_view kSensitivity = ui::kMouseSensitivityOption;
+constexpr std::string_view kFullscreen = ui::kFullscreenOption;
 constexpr godot::Key kCandidateKeys[] = { godot::KEY_K, godot::KEY_L, godot::KEY_O, godot::KEY_P, godot::KEY_U,
 	godot::KEY_I, godot::KEY_H, godot::KEY_N, godot::KEY_J, godot::KEY_Y };
 
@@ -167,6 +168,48 @@ double OptionsCheck::value(const Ctx &p_c, std::string_view p_option) {
 	return p_c.io.settings != nullptr ? p_c.io.settings->store().value(p_option) : std::nan("");
 }
 
+double OptionsCheck::applied(const Ctx &p_c, std::string_view p_option) {
+	return p_c.io.settings != nullptr ? p_c.io.settings->store().applied_value(p_option) : std::nan("");
+}
+
+void OptionsCheck::click_row(const Ctx &p_c, ui::OptionsTab p_tab, std::string_view p_source) {
+	size_t row = 0;
+	size_t at = 0;
+	bool found = false;
+	for (const ui::OptionRowData &d : p_c.options.model().rows) {
+		if (d.tab == p_tab && d.list == "List_01") {
+			if (d.source == p_source) {
+				row = at;
+				found = true;
+			}
+			++at;
+		}
+	}
+	if (!found) {
+		failure_ = "no " + std::string(p_source) + " row in List_01 of " + ui::ui_data_category_leaf(screen(p_tab));
+		return;
+	}
+	if (const std::optional<std::string> path = list_row(p_c, screen(p_tab), row)) {
+		click_clip(p_c, screen(p_tab), *path + ".hit");
+	}
+}
+
+void OptionsCheck::check_file_value(const Ctx &p_c, std::string_view p_option, double p_want) {
+	ui::SettingsStore probe = p_c.io.settings->store();
+	probe.reset_to_defaults();
+	const std::string text = to_std(godot::FileAccess::get_file_as_string(to_godot(p_c.io.settings_path)));
+	if (bf3::core::Result<uint32_t> r = probe.load_text(text); !r) {
+		failure_ = "the saved settings file does not load: " + r.error().message;
+		return;
+	}
+	notes_.push_back("file " + p_c.io.settings_path + " read back: " + std::string(p_option) + " " +
+			std::to_string(probe.value(p_option)));
+	if (!near(probe.value(p_option), p_want)) {
+		failure_ = "the saved file reads back " + std::string(p_option) + " " + std::to_string(probe.value(p_option)) +
+				", not " + std::to_string(p_want);
+	}
+}
+
 void OptionsCheck::pick_key(const Ctx &p_c) {
 	const ui::KeyBindingTable &t = p_c.io.settings->store().key_bindings();
 	const ui::KeyBindingTab *tab = t.tab_of_map("infantry");
@@ -280,21 +323,8 @@ std::vector<OptionsCheck::Step> OptionsCheck::steps() {
 			[](OptionsCheck &r_self, const Ctx &c) { return value(c, kVolume) < r_self.volume_default_; },
 			to_tab(ui::OptionsTab::Audio, 0) });
 	s.push_back({ "CONTROLS again", tab_shown(ui::OptionsTab::Controls), [](OptionsCheck &r_self, const Ctx &c) {
-					 size_t row = 0;
-					 size_t at = 0;
-					 for (const ui::OptionRowData &d : c.options.model().rows) {
-						 if (d.tab == ui::OptionsTab::Controls && d.list == "List_01") {
-							 if (d.source == "MouseSensitivity") {
-								 row = at;
-							 }
-							 ++at;
-						 }
-					 }
-					 if (const std::optional<std::string> path =
-									 r_self.list_row(c, screen(ui::OptionsTab::Controls), row)) {
-						 r_self.click_clip(c, screen(ui::OptionsTab::Controls), *path + ".hit");
-						 tap(c, K::KEY_RIGHT, kOptionsCheckSteps);
-					 }
+					 r_self.click_row(c, ui::OptionsTab::Controls, kSensitivity);
+					 tap(c, K::KEY_RIGHT, kOptionsCheckSteps);
 				 } });
 	s.push_back({ "Right raises the mouse sensitivity",
 			[](OptionsCheck &r_self, const Ctx &c) { return value(c, kSensitivity) > r_self.sensitivity_default_; },
@@ -381,7 +411,67 @@ std::vector<OptionsCheck::Step> OptionsCheck::steps() {
 						near(value(c, kVolume), r_self.saved_volume_) &&
 						near(value(c, kSensitivity), r_self.saved_sensitivity_) && text == r_self.saved_text_;
 			},
-			[](OptionsCheck &, const Ctx &c) { tap(c, K::KEY_ESCAPE); } });
+			none });
+	const auto fullscreen_on = [](OptionsCheck &r_self, const Ctx &c) {
+		r_self.click_row(c, ui::OptionsTab::Video, kFullscreen);
+		tap(c, K::KEY_RIGHT);
+	};
+	const auto apply = [](OptionsCheck &r_self, const Ctx &c) {
+		r_self.click_clip(c, screen(ui::OptionsTab::Video), in_screen("Button_02"));
+	};
+	open_options(s, "the menu is up for APPLY");
+	s.push_back({ "OPTIONS for APPLY", tab_shown(ui::OptionsTab::Controls), to_tab(ui::OptionsTab::Controls, 3) });
+	s.push_back({ "VIDEO for APPLY", tab_shown(ui::OptionsTab::Video), fullscreen_on });
+	s.push_back({ "Right selects fullscreen",
+			[](OptionsCheck &, const Ctx &c) {
+				return near(value(c, kFullscreen), 1.0) && near(applied(c, kFullscreen), 0.0);
+			},
+			apply });
+	s.push_back({ "APPLY goes fullscreen and asks to keep it",
+			[](OptionsCheck &, const Ctx &c) {
+				return shown(c, kPopupDelayPartition) && near(applied(c, kFullscreen), 1.0) &&
+						c.options.stats().resolution_timers == 1;
+			},
+			none, "keep_resolution" });
+	s.push_back({ "the timer runs out, the window goes back and the file is unchanged",
+			[](OptionsCheck &r_self, const Ctx &c) {
+				const std::string text = to_std(godot::FileAccess::get_file_as_string(to_godot(c.io.settings_path)));
+				return !shown(c, kPopupDelayPartition) && c.options.stats().resolution_timeouts == 1 &&
+						c.options.stats().video_reverts == 1 && near(applied(c, kFullscreen), 0.0) &&
+						near(value(c, kFullscreen), 0.0) && shown(c, screen(ui::OptionsTab::Video)) &&
+						text == r_self.saved_text_;
+			},
+			fullscreen_on });
+	s.push_back({ "Right selects fullscreen again",
+			[](OptionsCheck &, const Ctx &c) {
+				return near(value(c, kFullscreen), 1.0) && near(applied(c, kFullscreen), 0.0);
+			},
+			apply });
+	s.push_back({ "APPLY asks again",
+			[](OptionsCheck &, const Ctx &c) {
+				return shown(c, kPopupDelayPartition) && near(applied(c, kFullscreen), 1.0) &&
+						c.options.stats().resolution_timers == 2;
+			},
+			[](OptionsCheck &r_self, const Ctx &c) {
+				r_self.click_clip(c, kPopupDelayPartition, in_screen("PopupButtonsManager_01.holder.btn0"));
+			} });
+	s.push_back({ "YES keeps fullscreen",
+			[](OptionsCheck &, const Ctx &c) {
+				return !shown(c, kPopupDelayPartition) && c.options.stats().resolutions_kept == 1 &&
+						c.options.stats().resolution_timeouts == 1 && c.options.stats().video_reverts == 1 &&
+						near(applied(c, kFullscreen), 1.0) && shown(c, screen(ui::OptionsTab::Video));
+			},
+			[](OptionsCheck &, const Ctx &c) { tap(c, K::KEY_ESCAPE); }, "kept_resolution" });
+	s.push_back({ "leaving asks Save settings? for fullscreen", popup,
+			[](OptionsCheck &, const Ctx &c) { tap(c, K::KEY_ENTER); } });
+	s.push_back({ "YES saves fullscreen to the scratch settings file",
+			[menu_up](OptionsCheck &r_self, const Ctx &c) {
+				return menu_up(r_self, c) && c.options.stats().saves == 2 && r_self.file_is_saved(c);
+			},
+			[](OptionsCheck &r_self, const Ctx &c) {
+				r_self.check_file_value(c, kFullscreen, 1.0);
+				tap(c, K::KEY_ESCAPE);
+			} });
 	s.push_back({ "in play the new key jumps, the old does not, sensitivity and volume applied",
 			[](OptionsCheck &, const Ctx &c) {
 				return !shown(c, kIngameMenuPartition) && !c.menu.in_menu() && c.io.game_input && c.io.alive;

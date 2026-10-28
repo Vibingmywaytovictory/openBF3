@@ -12,6 +12,10 @@
 #include <utility>
 #include <vector>
 
+namespace bf3::core::ui {
+enum class OptionsTab : uint8_t;
+}
+
 namespace bf3::godot_side {
 
 class Bf3UiScreens;
@@ -73,6 +77,9 @@ private:
 	void click_tab(const Ctx &p_c, std::string_view p_partition, size_t p_tab);
 	std::optional<std::string> list_row(const Ctx &p_c, std::string_view p_partition, size_t p_row);
 	static double value(const Ctx &p_c, std::string_view p_option);
+	static double applied(const Ctx &p_c, std::string_view p_option);
+	void click_row(const Ctx &p_c, bf3::core::ui::OptionsTab p_tab, std::string_view p_source);
+	void check_file_value(const Ctx &p_c, std::string_view p_option, double p_want);
 	void pick_key(const Ctx &p_c);
 	bool file_is_saved(const Ctx &p_c);
 	void check_file(const Ctx &p_c);

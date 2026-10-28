@@ -607,6 +607,31 @@ TEST_SUITE("ui-settings-unit") {
 		CHECK(options_action_of(1887665057, zero) == OptionsAction::RevertBind);
 		CHECK(options_action_of(-2113864226, one) == OptionsAction::None);
 		CHECK(options_action_of(7, {}) == OptionsAction::None);
+		CHECK(options_action_of(-317184342, {}) == OptionsAction::StartResolutionTimer);
+
+		REQUIRE(o.store().set_display_mode(1280, 720, 60));
+		REQUIRE(o.run(OptionsAction::ApplyVideo));
+		REQUIRE(o.store().set_display_mode(1920, 1080, 60));
+		REQUIRE(o.run(OptionsAction::ApplyVideo));
+		CHECK_FALSE(o.resolution_timer_running());
+		CHECK_FALSE(o.step_resolution_timer(100.0));
+		CHECK(o.run(OptionsAction::StartResolutionTimer));
+		CHECK(o.resolution_timer_running());
+		CHECK_FALSE(o.step_resolution_timer(kResolutionKeepSeconds - 0.5));
+		CHECK(o.step_resolution_timer(0.5));
+		CHECK_FALSE(o.resolution_timer_running());
+		CHECK(o.run(OptionsAction::RevertVideo));
+		CHECK(o.store().applied_value(kResolutionWidth) == 1280.0);
+		REQUIRE(o.store().set_display_mode(1920, 1080, 60));
+		REQUIRE(o.run(OptionsAction::ApplyVideo));
+		CHECK(o.run(OptionsAction::StartResolutionTimer));
+		o.keep_resolution();
+		CHECK_FALSE(o.resolution_timer_running());
+		CHECK(o.run(OptionsAction::RevertVideo));
+		CHECK(o.store().applied_value(kResolutionWidth) == 1920.0);
+		CHECK(o.run(OptionsAction::StartResolutionTimer));
+		CHECK(o.run(OptionsAction::RevertVideo));
+		CHECK_FALSE(o.resolution_timer_running());
 	}
 
 	TEST_CASE("settings effects: the bindings feed the game actions; volumes, look and video follow the store") {
@@ -966,7 +991,7 @@ TEST_SUITE("ui-options") {
 		CHECK(actions ==
 				"SaveOptions=1 RevertResolution=4 RevertOptions=2 Reset Options=5 ApplyVideoSettings=3 BindKey=6 "
 				"ConfirmBindKey=7 RevertBindKey=8 "
-				"Reset Options=5 ");
+				"Reset Options=5 StartChangeResolution Timer=9 ");
 	}
 
 	TEST_CASE("options: install unchanged") {

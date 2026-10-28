@@ -4,6 +4,7 @@
 
 #include "bf3/core/ui/options.h"
 #include "bf3/core/ui/settings_effects.h"
+#include "bf3/core/ui/ui_input.h"
 #include "bf3/core/util/key_values.h"
 #include "bf3/host/ui_flow_session.h"
 
@@ -47,6 +48,7 @@ void NativeOptions::build(Bf3UiScreens &r_screens) {
 		r_screens.set_drawn(p, true);
 	}
 	r_screens.set_drawn(kPopupBindKeyPartition, true);
+	r_screens.set_drawn(kPopupDelayPartition, true);
 	r_screens.set_options(&model_);
 }
 
@@ -55,7 +57,7 @@ void NativeOptions::feed(bf3::host::UiFlowSession &r_session, const ui::OptionsS
 	r_session.set_data(kOptionsSettingsCategory, ui::kOptionsSettingsChangedKey, flag(s.settings_changed()));
 	r_session.set_data(kOptionsSettingsCategory, ui::kOptionsVideoChangedKey, flag(s.video_settings_changed()));
 	r_session.set_data(
-			kOptionsSettingsCategory, ui::kOptionsFullscreenKey, flag(s.applied_value(ui::kFullscreenOption) != 0.0));
+			kOptionsSettingsCategory, ui::kOptionsFullscreenKey, flag(s.value(ui::kFullscreenOption) != 0.0));
 	r_session.set_data(kOptionsMemCardCategory, ui::kOptionsCanSaveKey, flag(true));
 }
 
@@ -145,6 +147,9 @@ bool NativeOptions::take(
 		case ui::OptionsAction::RevertVideo:
 			++stats_.video_reverts;
 			break;
+		case ui::OptionsAction::StartResolutionTimer:
+			++stats_.resolution_timers;
+			break;
 	}
 	r_options.run(a);
 	return true;
@@ -182,4 +187,18 @@ void NativeOptions::update_model(const ui::OptionsSession &p_options) {
 	model_ = p_options.model();
 }
 
+void NativeOptions::step(double p_seconds, bf3::host::UiFlowSession &r_session, ui::OptionsSession &r_options) {
+	if (!r_options.resolution_timer_running()) {
+		return;
+	}
+	if (r_session.flow().find_screen(kPopupDelayPartition) == nullptr) {
+		r_options.keep_resolution();
+		++stats_.resolutions_kept;
+		return;
+	}
+	if (r_options.step_resolution_timer(p_seconds)) {
+		++stats_.resolution_timeouts;
+		r_session.input_action(int32_t(ui::UiInputConcept::Cancel));
+	}
+}
 }

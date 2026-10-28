@@ -64,6 +64,9 @@ OptionsAction options_action_of(int32_t p_action_key, std::span<const std::strin
 	if (p_action_key == kBindKeyKey) {
 		return OptionsAction::BindKey;
 	}
+	if (p_action_key == ui_action_key("StartChangeResolutionTimer")) {
+		return OptionsAction::StartResolutionTimer;
+	}
 	if (p_action_key == ui_action_key("ConfirmKeyBind")) {
 		return p == "1" ? OptionsAction::ConfirmBind : p == "0" ? OptionsAction::RevertBind : OptionsAction::None;
 	}
@@ -154,6 +157,10 @@ bool OptionsSession::run(OptionsAction p_action) {
 			return true;
 		case OptionsAction::RevertVideo:
 			store_.revert_video();
+			resolution_timer_s_ = -1.0;
+			return true;
+		case OptionsAction::StartResolutionTimer:
+			resolution_timer_s_ = kResolutionKeepSeconds;
 			return true;
 		case OptionsAction::Reset:
 			store_.reset_to_defaults();
@@ -167,6 +174,25 @@ bool OptionsSession::run(OptionsAction p_action) {
 			return false;
 	}
 	return false;
+}
+
+bool OptionsSession::step_resolution_timer(double p_seconds) {
+	if (resolution_timer_s_ < 0.0) {
+		return false;
+	}
+	resolution_timer_s_ -= std::isfinite(p_seconds) && p_seconds > 0.0 ? p_seconds : 0.0;
+	if (resolution_timer_s_ > 0.0) {
+		return false;
+	}
+	resolution_timer_s_ = -1.0;
+	return true;
+}
+
+void OptionsSession::keep_resolution() {
+	if (resolution_timer_s_ >= 0.0) {
+		store_.keep_video();
+		resolution_timer_s_ = -1.0;
+	}
 }
 
 bool OptionsSession::bind_key(uint16_t p_row, KeyColumn p_column) {
