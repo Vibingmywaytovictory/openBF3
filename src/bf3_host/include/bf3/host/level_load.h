@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/core/cache/digest.h"
+#include "bf3/core/level/eor_camera.h"
 #include "bf3/core/level/spawn_points.h"
 #include "bf3/core/result.h"
 #include "bf3/sim/soldier_motor.h"
@@ -28,6 +29,7 @@ namespace bf3::core::gameplay {
 class LogicGraph;
 struct ScoringTable;
 struct DeathTimeline;
+struct EorFading;
 struct EorTimeline;
 }
 namespace bf3::sim::logic {
@@ -98,6 +100,7 @@ struct SharedLevel {
 	std::shared_ptr<const sim::StaticWorldShapes> static_world;
 	std::vector<sim::SpawnPoint> spawns;
 	std::vector<core::level::CharacterSpawnerDef> spawners;
+	std::optional<core::level::EorCamera> eor_camera;
 	float spawn_protection_radius = 10.0f;
 	sim::MotorParams motor;
 	double seconds_shapes = 0.0;
@@ -114,6 +117,7 @@ struct SharedLevel {
 	std::shared_ptr<const TdmTuning> tdm_tuning;
 	std::shared_ptr<const core::gameplay::ScoringTable> scoring;
 	std::shared_ptr<const core::gameplay::EorTimeline> eor;
+	std::shared_ptr<const core::gameplay::EorFading> eor_fading;
 	std::shared_ptr<const core::gameplay::DeathTimeline> death;
 	std::vector<std::string> tdm_notes;
 };

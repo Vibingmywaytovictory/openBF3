@@ -398,3 +398,13 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/ui/settings_effects.h
     src/ui/settings_effects.cpp
 )
+
+target_sources(bf3_core PRIVATE
+    include/bf3/core/level/eor_camera.h
+    src/level/eor_camera.cpp
+)
+
+target_sources(bf3_core PRIVATE
+    include/bf3/core/gameplay/eor_fading.h
+    src/gameplay/eor_fading.cpp
+)

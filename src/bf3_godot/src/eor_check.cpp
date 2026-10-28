@@ -1,5 +1,7 @@
 #include "eor_check.h"
 
+#include "eor_camera.h"
+#include "eor_flash.h"
 #include "native_eor.h"
 #include "native_screens.h"
 
@@ -9,6 +11,7 @@
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/ui_input.h"
 
+#include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/global_constants.hpp>
 
 #include <algorithm>
@@ -176,6 +179,59 @@ bool EorCheck::check_page(Bf3UiScreens &r_screens, const ui::HudModel &p_model, 
 	return true;
 }
 
+bool EorCheck::check_eor_view(Bf3UiScreens &r_screens, const EorCheckIo &p_io) {
+	if (visible(r_screens, kEorHud64Partition) || visible(r_screens, ui::kEorWinningTeamScreenPartition)) {
+		fail("hud64 or the banner is still up under the END OF ROUND page");
+		return false;
+	}
+	note("hud64 and the banner are closed under the page");
+	if (!p_io.camera_data || p_io.eor_camera == nullptr || p_io.camera == nullptr || p_io.flash == nullptr) {
+		fail("no EOR camera in the level data, or no camera or flash to check");
+		return false;
+	}
+	const godot::Vector3 at = p_io.camera->get_global_transform().origin;
+	const bf3::core::level::Vec3 &want = p_io.camera_data->transform.trans;
+	const double off = double((at - godot::Vector3(want[0], want[1], want[2])).length());
+	const double fov = p_io.camera->get_fov();
+	note("camera at " + fixed_text(at.x) + ", " + fixed_text(at.y) + ", " + fixed_text(at.z) + " fov " +
+			fixed_text(fov) + "; the level's EOR camera (ShowTopPlayers) at " + fixed_text(want[0]) + ", " +
+			fixed_text(want[1]) + ", " + fixed_text(want[2]) + " fov " + fixed_text(p_io.camera_data->fov_deg) + ", " +
+			fixed_text(off) + " m off");
+	if (!p_io.eor_camera->active() || off > kEorCheckCameraM ||
+			std::abs(fov - double(p_io.camera_data->fov_deg)) > kEorCheckFovDeg) {
+		fail("the camera is not the level's EOR camera during the END OF ROUND page");
+		return false;
+	}
+	const EorFlashStats &f = p_io.flash->stats();
+	note("flash: " + std::to_string(f.round_overs) + " round over, " + std::to_string(f.white_frames) +
+			" white frames, peak visibility " + fixed_text(f.peak_visibility) + ", " + std::to_string(f.black_frames) +
+			" black frames, " + std::to_string(f.fade_in_frames) + " fade-in frames");
+	if (f.round_overs < 1 || f.white_frames == 0 || f.peak_visibility < kEorCheckFlashPeak || f.black_frames == 0 ||
+			f.fade_in_frames == 0) {
+		fail("mp_eor_fading's white flash, screen fade and EndOfRound fade-in did not all play");
+		return false;
+	}
+	return true;
+}
+
+bool EorCheck::check_player_view(const EorCheckIo &p_io) {
+	if (!p_io.camera_data || p_io.eor_camera == nullptr || p_io.camera == nullptr) {
+		fail("no EOR camera or camera to check after the restart");
+		return false;
+	}
+	const godot::Vector3 at = p_io.camera->get_global_transform().origin;
+	const bf3::core::level::Vec3 &eor = p_io.camera_data->transform.trans;
+	const double off = double((at - godot::Vector3(eor[0], eor[1], eor[2])).length());
+	note("after the restart the camera is at " + fixed_text(at.x) + ", " + fixed_text(at.y) + ", " + fixed_text(at.z) +
+			" fov " + fixed_text(p_io.camera->get_fov()) + ", " + fixed_text(off) +
+			" m from the EOR camera, released " + std::to_string(p_io.eor_camera->stats().released) + " time(s)");
+	if (p_io.eor_camera->active() || p_io.eor_camera->stats().released < 1 || off <= kEorCheckCameraM) {
+		fail("the player's camera did not come back at the in-place restart");
+		return false;
+	}
+	return true;
+}
+
 bool EorCheck::click_popup_ok(Bf3UiScreens &r_screens) {
 	ui::HudScreen *s = r_screens.hud_screen(kEorPopupPartition);
 	if (s == nullptr) {
@@ -190,8 +246,9 @@ bool EorCheck::click_popup_ok(Bf3UiScreens &r_screens) {
 	const std::string cancel =
 			text_at(r_screens, kEorPopupPartition, root + ".PopupButtonsManager_01.holder.btn1.button.label.txt");
 	note("QuitPopup reads '" + title + "' / '" + text + "' / '" + ok + "' '" + cancel + "'");
-	if (title.empty() || text.empty() || ok.empty() || cancel.empty()) {
-		fail("the QuitPopup's title, text or buttons are empty");
+	if (title != kEorQuitTitle || text != kEorQuitText || ok != kEorQuitOk || cancel != kEorQuitCancel) {
+		fail(std::string("the QuitPopup does not read '") + kEorQuitTitle + "' / '" + kEorQuitText + "' / '" +
+				kEorQuitOk + "' '" + kEorQuitCancel + "'");
 		return false;
 	}
 	const ui::As2Clip button = s->clip(ok_path);
@@ -237,6 +294,10 @@ bool EorCheck::frame(Bf3UiScreens &r_screens, bf3::host::UiFlowSession *p_sessio
 	switch (step_) {
 		case Step::Banner:
 			deploy(r_screens, p_now_s, p_io);
+			if (!flash_shot_ && p_io.flash != nullptr && p_io.flash->stats().last_visibility >= 0.5f) {
+				flash_shot_ = true;
+				shot(p_io, "eor_flash");
+			}
 			if (over_s_ < 0.0 && p_model.end_of_round.visible) {
 				over_s_ = p_now_s;
 				note("round over in the HUD model");
@@ -270,7 +331,8 @@ bool EorCheck::frame(Bf3UiScreens &r_screens, bf3::host::UiFlowSession *p_sessio
 			break;
 		case Step::PageSettled:
 			if (p_now_s - step_s_ >= kEorCheckSettleS) {
-				if (check_page(r_screens, p_model, double(p_io.eor.eor_s) - (p_now_s - page_s_))) {
+				if (check_eor_view(r_screens, p_io) &&
+						check_page(r_screens, p_model, double(p_io.eor.eor_s) - (p_now_s - page_s_))) {
 					shot(p_io, "eor_scoreboard");
 					click(r_screens, godot::Vector2(kEorCheckStatsTabX, kEorCheckStatsTabY));
 					note("clicked STATS");
@@ -319,6 +381,12 @@ bool EorCheck::frame(Bf3UiScreens &r_screens, bf3::host::UiFlowSession *p_sessio
 			break;
 		case Step::Banner2:
 			deploy(r_screens, p_now_s, p_io);
+			if (!player_view_checked_ && p_now_s - step_s_ >= kEorCheckSettleS) {
+				player_view_checked_ = true;
+				if (!check_player_view(p_io)) {
+					break;
+				}
+			}
 			if (banner) {
 				banner_s_ = p_now_s;
 				note("second round over");

@@ -1,11 +1,13 @@
 #pragma once
 
+#include "bf3/core/level/level_transform.h"
 #include "bf3/host/level_load.h"
 #include "bf3/render/level_scene.h"
 
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/rid.hpp>
+#include <godot_cpp/variant/transform3d.hpp>
 
 #include <atomic>
 #include <cstdint>
@@ -16,6 +18,8 @@
 #include <vector>
 
 namespace bf3::godot_side {
+
+godot::Transform3D instance_transform(const bf3::core::level::LevelTransform &p_t);
 
 godot::Dictionary encode_rs_surface(const bf3::render::PreparedSurface &p_surface, const godot::RID &p_material);
 

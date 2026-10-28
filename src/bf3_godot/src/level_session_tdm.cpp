@@ -3,6 +3,8 @@
 #include "level_session_game.h"
 
 #include "bf3_localisation.h"
+#include "eor_camera.h"
+#include "eor_flash.h"
 #include "fp_camera.h"
 #include "game_audio.h"
 #include "game_crowd.h"
@@ -937,6 +939,10 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		io.eor = eor_level != nullptr && eor_level->eor != nullptr ? *eor_level->eor
 																   : bf3::core::gameplay::EorTimeline{};
 		io.press = [this](Key p_key, bool p_pressed) { scripted_ui_key(p_key, p_pressed); };
+		io.camera_data = eor_level != nullptr ? eor_level->eor_camera : std::nullopt;
+		io.eor_camera = m.eor_camera.get();
+		io.flash = m.eor_flash.get();
+		io.camera = p_camera;
 		if (m.eor_check->frame(*screens, m.native_flow != nullptr ? m.native_flow->session() : nullptr, *m.native_eor,
 					r_game.hud_model, now_s, io)) {
 			m.finished = true;
@@ -1009,6 +1015,21 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 	if (r_game.alive) {
 		m.join_view_placed = false;
 	}
+	if (const std::shared_ptr<const host::SharedLevel> eor_level = shared_level()) {
+		if (p_camera != nullptr && !p_free_camera) {
+			if (m.eor_camera == nullptr) {
+				m.eor_camera = std::unique_ptr<EorCameraView, void (*)(EorCameraView *)>(
+						new EorCameraView(), &delete_part<EorCameraView>);
+			}
+			m.eor_camera->frame(p_camera, eor_level->eor_camera, r_game.hud_model.end_of_round);
+		}
+		if (m.windowed && eor_level->eor_fading != nullptr && eor_level->eor != nullptr) {
+			if (m.eor_flash == nullptr) {
+				m.eor_flash = std::unique_ptr<EorFlash, void (*)(EorFlash *)>(new EorFlash(), &delete_part<EorFlash>);
+			}
+			m.eor_flash->frame(this, *eor_level->eor_fading, *eor_level->eor, r_game.hud_model.end_of_round, now_s);
+		}
+	}
 	m.ms_death_camera = ms_since(t0);
 
 	bool wants_mouse = m.spawn_screen || (m.native_menu != nullptr && m.native_menu->wants_mouse()) ||
@@ -1072,6 +1093,7 @@ void Bf3LevelSession::tdm_shutdown() {
 	m.native_options.reset();
 	m.native_flow.reset();
 	m.death_camera.reset();
+	m.eor_flash.reset();
 }
 
 const Bf3UiScreens *Bf3LevelSession::screen_stack() const {

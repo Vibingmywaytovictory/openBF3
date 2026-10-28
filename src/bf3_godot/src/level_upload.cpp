@@ -170,14 +170,14 @@ constexpr float kGlassOpacity = 0.3f;
 
 constexpr float kGlassTint = 0.25f;
 
+}
+
 Transform3D instance_transform(const bf3::core::level::LevelTransform &p_t) {
 
 	const float s = p_t.scale;
 	return Transform3D(Basis(p_t.right[0] * s, p_t.up[0] * s, p_t.forward[0] * s, p_t.right[1] * s, p_t.up[1] * s, p_t.forward[1] * s, p_t.right[2] * s,
 							   p_t.up[2] * s, p_t.forward[2] * s),
 			Vector3(p_t.trans[0], p_t.trans[1], p_t.trans[2]));
-}
-
 }
 
 Dictionary encode_rs_surface(const render::PreparedSurface &p_surface, const RID &p_material) {

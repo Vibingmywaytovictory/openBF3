@@ -118,10 +118,14 @@ Ref<ShaderMaterial> make_material(std::string_view p_code) {
 	return m;
 }
 
+}
+
 Vector3 vec3_of(const std::array<float, 3> &p_v) {
 	return Vector3(p_v[0], p_v[1], p_v[2]);
 }
 
+Ref<ShaderMaterial> make_grade_material() {
+	return make_material(kGradeShader);
 }
 
 struct Bf3UiPostProcess::Loaded {

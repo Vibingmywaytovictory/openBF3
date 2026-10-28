@@ -162,6 +162,10 @@ target_sources(bf3_godot PRIVATE
 
 target_sources(bf3_godot PRIVATE
     src/death_camera.cpp
+    src/eor_camera.cpp
+    src/eor_camera.h
+    src/eor_flash.cpp
+    src/eor_flash.h
 )
 
 target_sources(bf3_godot PRIVATE

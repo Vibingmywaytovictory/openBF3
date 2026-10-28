@@ -879,6 +879,7 @@ target_compile_definitions(test_host_tdm PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${C
     "OPENBF3_TDM_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/tdm_tuning.cfg\"")
 add_test(NAME host.tdm.server COMMAND test_host_tdm --test-suite=host-tdm-server)
 set_tests_properties(host.tdm.server PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+openbf3_cost(host.tdm.server 3 8)
 add_test(NAME host.tdm.client COMMAND test_host_tdm --test-suite=host-tdm-client)
 set_tests_properties(host.tdm.client PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300 RUN_SERIAL TRUE)
 openbf3_label(timing host.tdm.client)

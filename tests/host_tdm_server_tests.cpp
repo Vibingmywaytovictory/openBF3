@@ -3,8 +3,10 @@
 #include "gunplay_fixture.h"
 #include "tdm_fixture.h"
 
+#include "bf3/core/gameplay/eor_fading.h"
 #include "bf3/core/gameplay/eor_timeline.h"
 #include "bf3/core/gameplay/mode_def.h"
+#include "bf3/core/level/eor_camera.h"
 #include "bf3/core/ui/text_db.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/loadout.h"
@@ -15,6 +17,7 @@
 #include "bf3/sim/weapons/weapon_rng.h"
 
 #include <algorithm>
+#include <array>
 #include <cinttypes>
 #include <cmath>
 #include <cstdio>
@@ -1110,6 +1113,48 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(t.restart_delay_s == 60.0f);
 		CHECK(t.pre_eor_s + t.eor_s == t.restart_delay_s);
 		CHECK(t.fade_s + t.request_eor_delay_s <= t.pre_eor_s);
+	}
+
+	TEST_CASE("end of round: mp_eor_fading's white flash and screen fade, and the showroom's ShowTopPlayers camera") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		REQUIRE(level->shared->eor_fading != nullptr);
+		const core::gameplay::EorFading &f = *level->shared->eor_fading;
+		std::printf("eor fading: flash %.2f s, UI fade %.2f s, screen fade %.2f s, brightness %.1f, saturation %.1f\n",
+				double(f.flash_s), double(f.ui_fade_s), double(f.screen_fade_s), double(f.brightness[0]),
+				double(f.saturation[0]));
+		CHECK(f.flash_s == 0.75f);
+		REQUIRE(f.visibility.size() == 2);
+		CHECK(f.visibility[0].seconds == 0.0f);
+		CHECK(f.visibility[0].value == 0.0f);
+		CHECK(f.visibility[1].seconds == 0.75f);
+		CHECK(f.visibility[1].value == 1.0f);
+		CHECK(f.ui_fade_s == 0.33f);
+		CHECK(f.screen_fade_s == 0.5f);
+		CHECK(f.brightness == std::array<float, 3>{ 20.0f, 20.0f, 20.0f });
+		CHECK(f.contrast == std::array<float, 3>{ 1.0f, 1.0f, 1.0f });
+		CHECK(f.saturation == std::array<float, 3>{ 0.0f, 0.0f, 0.0f });
+		CHECK(f.visibility_at(0.375f) == doctest::Approx(0.5f));
+		CHECK(f.visibility_at(1.0f) == 1.0f);
+		CHECK(f.visibility_at(1.25f) == 0.0f);
+		CHECK(f.screen_black_at(0.5f) == 0.0f);
+		CHECK(f.screen_black_at(1.0f) == doctest::Approx(0.5f));
+		CHECK(f.screen_black_at(2.0f) == 1.0f);
+		CHECK(f.ui_alpha_at(0.33f) == 0.0f);
+
+		REQUIRE(level->shared->eor_camera.has_value());
+		const core::level::EorCamera &c = *level->shared->eor_camera;
+		std::printf("eor camera: object %u at %.4f %.4f %.4f, forward %.3f %.3f %.3f, fov %.1f, priority %d\n",
+				unsigned(c.object), double(c.transform.trans[0]), double(c.transform.trans[1]),
+				double(c.transform.trans[2]), double(c.transform.forward[0]), double(c.transform.forward[1]),
+				double(c.transform.forward[2]), double(c.fov_deg), int(c.priority));
+		CHECK(c.fov_deg == 23.0f);
+		CHECK(c.priority == 3);
+		CHECK(std::abs(c.transform.trans[0] - (-15.04f)) < 0.005f);
+		CHECK(std::abs(c.transform.trans[1] - (-277.07f)) < 0.005f);
+		CHECK(std::abs(c.transform.trans[2] - (-7.28f)) < 0.005f);
 	}
 
 	TEST_CASE("deploy list: the TDM setup's two character spawners, one per team, both RANDOM SPAWN POINT") {

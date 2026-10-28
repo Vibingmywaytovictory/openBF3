@@ -18,7 +18,9 @@
 namespace bf3::godot_side {
 
 class Bf3UiScreens;
+class EorCameraView;
 class EorCheck;
+class EorFlash;
 class NativeEor;
 class NativeFlow;
 class NativeMenu;
@@ -44,6 +46,8 @@ struct TdmState {
 	bf3::host::HudKillCardSource kill_card_source;
 
 	std::unique_ptr<Bf3DeathCamera, void (*)(Bf3DeathCamera *)> death_camera{ nullptr, nullptr };
+	std::unique_ptr<EorCameraView, void (*)(EorCameraView *)> eor_camera{ nullptr, nullptr };
+	std::unique_ptr<EorFlash, void (*)(EorFlash *)> eor_flash{ nullptr, nullptr };
 
 	uint8_t spawn_kit = 0;
 	std::array<bf3::host::LoadoutChoice, bf3::host::kKitCount> loadout_choices{};

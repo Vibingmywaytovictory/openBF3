@@ -1,12 +1,14 @@
 #pragma once
 
 #include "bf3/core/gameplay/eor_timeline.h"
+#include "bf3/core/level/eor_camera.h"
 
 #include <godot_cpp/classes/global_constants.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -18,9 +20,15 @@ namespace bf3::host {
 class UiFlowSession;
 }
 
+namespace godot {
+class Camera3D;
+}
+
 namespace bf3::godot_side {
 
 class Bf3UiScreens;
+class EorCameraView;
+class EorFlash;
 class NativeEor;
 
 inline constexpr double kEorCheckSeconds = 420.0;
@@ -37,11 +45,22 @@ inline constexpr float kEorCheckStatsTabX = 346.0f;
 inline constexpr float kEorCheckStatsTabY = 112.0f;
 inline constexpr float kEorCheckQuitX = 145.0f;
 inline constexpr float kEorCheckQuitY = 647.0f;
+inline constexpr double kEorCheckCameraM = 0.01;
+inline constexpr double kEorCheckFovDeg = 0.01;
+inline constexpr float kEorCheckFlashPeak = 0.9f;
+inline constexpr const char *kEorQuitTitle = "QUIT TO WINDOWS";
+inline constexpr const char *kEorQuitText = "Are you sure you want to quit? Any unsaved progress will be lost.";
+inline constexpr const char *kEorQuitOk = "OK";
+inline constexpr const char *kEorQuitCancel = "CANCEL";
 
 struct EorCheckIo {
 	std::function<bool(const std::string &)> shot;
 	std::function<void(godot::Key, bool)> press;
 	bf3::core::gameplay::EorTimeline eor;
+	std::optional<bf3::core::level::EorCamera> camera_data;
+	const EorCameraView *eor_camera = nullptr;
+	const EorFlash *flash = nullptr;
+	godot::Camera3D *camera = nullptr;
 };
 
 class EorCheck {
@@ -80,6 +99,8 @@ private:
 	void shot(const EorCheckIo &p_io, const char *p_name);
 	void shot_later(const char *p_name, double p_at_s);
 	bool check_page(Bf3UiScreens &r_screens, const bf3::core::ui::HudModel &p_model, double p_left_s);
+	bool check_eor_view(Bf3UiScreens &r_screens, const EorCheckIo &p_io);
+	bool check_player_view(const EorCheckIo &p_io);
 	static double page_after_banner(const EorCheckIo &p_io);
 	bool click_popup_ok(Bf3UiScreens &r_screens);
 	static void click(Bf3UiScreens &r_screens, godot::Vector2 p_at);
@@ -95,6 +116,8 @@ private:
 	double deploy_s_ = -1.0;
 	double shot_at_s_ = -1.0;
 	const char *shot_name_ = nullptr;
+	bool flash_shot_ = false;
+	bool player_view_checked_ = false;
 	bool done_ = false;
 	bool passed_ = false;
 	std::string failure_;

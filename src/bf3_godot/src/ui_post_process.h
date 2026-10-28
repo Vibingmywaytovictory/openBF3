@@ -8,7 +8,9 @@
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/variant/rid.hpp>
+#include <godot_cpp/variant/vector3.hpp>
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -22,6 +24,10 @@ inline constexpr int32_t kUiGradeLayer = 0;
 inline constexpr int32_t kUiGlitchLayer = 100;
 inline constexpr int32_t kUiCursorLayer = 101;
 inline constexpr float kUiStageHeight = 720.0f;
+
+godot::Vector3 vec3_of(const std::array<float, 3> &p_v);
+
+godot::Ref<godot::ShaderMaterial> make_grade_material();
 
 struct UiPostProcessStats {
 	uint32_t glitch_triggers = 0;

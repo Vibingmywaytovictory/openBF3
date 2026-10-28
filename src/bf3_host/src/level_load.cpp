@@ -2,6 +2,7 @@
 
 #include "bf3/core/gameplay/soldier_def.h"
 #include "bf3/core/install.h"
+#include "bf3/core/level/eor_camera.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/source_digest.h"
 #include "bf3/core/level/spawn_points.h"
@@ -9,6 +10,7 @@
 #include "bf3/sim/static_world.h"
 
 #include "bf3/core/gameplay/death_timeline.h"
+#include "bf3/core/gameplay/eor_fading.h"
 #include "bf3/core/gameplay/eor_timeline.h"
 #include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/gameplay/logic_world.h"
@@ -267,6 +269,11 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 		return core::make_error("load_shared_level: the mode has no spawn points");
 	}
 	shared->spawners = spawns->spawners;
+	core::Result<std::optional<core::level::EorCamera>> eor_camera = core::level::read_eor_camera(level.db(), world);
+	if (!eor_camera) {
+		return core::error_at("load_shared_level: EOR camera", eor_camera.error());
+	}
+	shared->eor_camera = *eor_camera;
 	for (const core::level::CharacterSpawnerDef &s : spawns->spawners) {
 		if (s.enabled && std::isfinite(s.protection_radius) && s.protection_radius > 0.0f) {
 			shared->spawn_protection_radius = s.protection_radius;
@@ -586,6 +593,12 @@ core::Status load_shared_tdm(const LevelDatabase &p_db, const SharedLoadOptions 
 		return core::error_at("tdm", eor.error());
 	}
 	r_level.eor = std::make_shared<const gp::EorTimeline>(*eor);
+	core::level::WorkBudget fading_budget;
+	core::Result<gp::EorFading> fading = gp::read_eor_fading(level.db(), fading_budget);
+	if (!fading) {
+		return core::error_at("tdm", fading.error());
+	}
+	r_level.eor_fading = std::make_shared<const gp::EorFading>(std::move(*fading));
 	gp::LogicGraphOptions client = go;
 	client.side = gp::LogicSide::Client;
 	core::Result<gp::LogicGraph> client_graph = gp::build_logic_graph(*world, client);
