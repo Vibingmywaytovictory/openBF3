@@ -311,7 +311,6 @@ void step_native_screens(GameState &r_game, TdmState &r_m, Node *p_parent, const
 	}
 	r_m.deploy_screens.apply(r_game.hud_model);
 	screens->set_model(r_game.hud_model);
-	OverlayScreens::frame(*screens);
 	screens->step(r_m.native_delta_s);
 	r_m.deploy_screens.frame(*screens, r_game.native_hud, p_parent, p_level, r_m.windowed);
 	if (r_m.native_eor != nullptr) {
