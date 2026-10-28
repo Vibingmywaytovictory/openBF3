@@ -819,6 +819,9 @@ add_test(NAME render.catalog_accessories COMMAND test_render_catalog_weapons --t
 set_tests_properties(render.catalog_accessories PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 add_test(NAME render.catalog_accessories_1p COMMAND test_render_catalog_weapons --test-suite=render-catalog-accessories-1p)
 set_tests_properties(render.catalog_accessories_1p PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+add_test(NAME render.catalog_accessories_3p COMMAND test_render_catalog_weapons --test-suite=render-catalog-accessories-3p)
+set_tests_properties(render.catalog_accessories_3p PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+openbf3_cost(render.catalog_accessories_3p 1 6)
 
 openbf3_test(test_audio_router test_main.cpp audio_router_tests.cpp test_support.h)
 target_link_libraries(test_audio_router PRIVATE bf3_audio bf3_client_audio bf3_host bf3_fx bf3_core)

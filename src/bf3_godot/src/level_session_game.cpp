@@ -916,6 +916,9 @@ void step_viewmodel_catalog(GameState &r_game, const host::PresentationFrame &p_
 	if (r_game.own_slot < p_frame.gear.size() &&
 			(p_frame.gear[r_game.own_slot] != r_game.own_gear || r_game.own_team != r_game.own_gear_team)) {
 		r_game.want_own_gear(p_frame.gear[r_game.own_slot]);
+		if (r_game.crowd != nullptr && r_game.crowd->built()) {
+			r_game.crowd->want_gear(r_game.own_team, r_game.own_gear);
+		}
 	}
 }
 

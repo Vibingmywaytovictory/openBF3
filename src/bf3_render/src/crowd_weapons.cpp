@@ -100,6 +100,126 @@ std::optional<anim::Vec3> vec3_field(const core::EbxStruct &p_s, std::string_vie
 	return anim::Vec3{ (*a)[0], (*a)[1], (*a)[2] };
 }
 
+void place_rigid(PreparedSurface &r_s, const anim::Mat34 &p_m, int32_t p_bind) {
+	const size_t n = r_s.vertex_count();
+	for (size_t i = 0; i < n; ++i) {
+		const anim::Vec3 p =
+				anim::mat_point(p_m, { r_s.positions[i * 3], r_s.positions[i * 3 + 1], r_s.positions[i * 3 + 2] });
+		r_s.positions[i * 3] = p.x;
+		r_s.positions[i * 3 + 1] = p.y;
+		r_s.positions[i * 3 + 2] = p.z;
+		const core::Vec3 lo{ i == 0 ? p.x : std::min(r_s.aabb_min[0], p.x),
+			i == 0 ? p.y : std::min(r_s.aabb_min[1], p.y), i == 0 ? p.z : std::min(r_s.aabb_min[2], p.z) };
+		const core::Vec3 hi{ i == 0 ? p.x : std::max(r_s.aabb_max[0], p.x),
+			i == 0 ? p.y : std::max(r_s.aabb_max[1], p.y), i == 0 ? p.z : std::max(r_s.aabb_max[2], p.z) };
+		r_s.aabb_min = lo;
+		r_s.aabb_max = hi;
+		if (r_s.normals.size() >= (i + 1) * 3) {
+			const anim::Vec3 v =
+					anim::mat_vector(p_m, { r_s.normals[i * 3], r_s.normals[i * 3 + 1], r_s.normals[i * 3 + 2] });
+			r_s.normals[i * 3] = v.x;
+			r_s.normals[i * 3 + 1] = v.y;
+			r_s.normals[i * 3 + 2] = v.z;
+		}
+		if (r_s.tangents.size() >= (i + 1) * 4) {
+			const anim::Vec3 v =
+					anim::mat_vector(p_m, { r_s.tangents[i * 4], r_s.tangents[i * 4 + 1], r_s.tangents[i * 4 + 2] });
+			r_s.tangents[i * 4] = v.x;
+			r_s.tangents[i * 4 + 1] = v.y;
+			r_s.tangents[i * 4 + 2] = v.z;
+		}
+	}
+	r_s.bones.assign(n * 4, 0);
+	r_s.weights.assign(n * 4, 0.0f);
+	for (size_t i = 0; i < n; ++i) {
+		r_s.bones[i * 4] = p_bind;
+		r_s.weights[i * 4] = 1.0f;
+	}
+}
+
+core::Status attach_accessories(const core::EbxLibrary &p_lib, const SoldierSpec &p_spec, const SoldierAssets &p_assets,
+		const core::EbxInstance &p_data, const std::vector<std::string> &p_databases, core::Cache *p_cache,
+		CrowdWeaponPart &r_part) {
+	const core::LevelMount &mount = p_lib.mount(0);
+	const anim::EbxSkeleton &skeleton = p_assets.weapon_skeleton;
+	for (const WeaponSocket &socket : read_weapon_sockets(p_lib, p_data)) {
+		if (!socket_drawn(socket.unlock, r_part.spec.accessories)) {
+			continue;
+		}
+		for (const WeaponSocketObject &o : socket.objects) {
+			if (o.mesh_3p.empty()) {
+				continue;
+			}
+			core::Result<MeshHead> head = read_mesh_head(mount, o.mesh_3p);
+			if (!head) {
+				return core::error_at(o.mesh_3p, head.error());
+			}
+			if (head->mesh.lods.empty()) {
+				return core::make_error(o.mesh_3p + ": no LODs");
+			}
+			const uint32_t lod = uint32_t(std::min<size_t>(p_spec.lod, head->mesh.lods.size() - 1));
+			MeshRequest request;
+			request.lods = { lod };
+			request.filter = core::res::SubsetFilter::Drawn;
+			std::vector<std::vector<int32_t>> lanes;
+			int32_t bind = -1;
+			anim::Mat34 place;
+			if (o.skinned) {
+				core::Result<std::vector<std::vector<int32_t>>> l =
+						r_part.binds.bind_lod(head->mesh.lods[lod], skeleton, p_assets.clips.rig);
+				if (!l) {
+					return core::error_at(o.mesh_3p, l.error());
+				}
+				lanes = std::move(*l);
+				request.lane_binds = &lanes;
+			} else {
+				const int32_t bone = skeleton.find(socket.bone);
+				if (bone < 0) {
+					return core::make_error(
+							o.mesh_3p + ": socket bone `" + socket.bone + "` is not a weapon skeleton bone");
+				}
+				core::Result<int32_t> b = r_part.binds.bind(skeleton, uint32_t(bone), p_assets.clips.rig);
+				if (!b) {
+					return core::error_at(o.mesh_3p, b.error());
+				}
+				bind = *b;
+				place = anim::mat_mul(skeleton.model_pose[size_t(bone)], o.transform_3p.value_or(o.transform));
+			}
+			core::Result<CachedMesh> mesh = load_mesh_cached(p_cache, mount, *head, request);
+			if (!mesh) {
+				return mesh.error();
+			}
+			if (mesh->mesh.meshes.size() != 1) {
+				return core::make_error(o.mesh_3p + ": LOD " + std::to_string(lod) + " not prepared");
+			}
+			core::Result<MeshMaterials> materials = mesh_materials(p_lib, o.mesh_3p, 0, p_databases);
+			if (!materials) {
+				return core::error_at(o.mesh_3p, materials.error());
+			}
+			const uint32_t offset = uint32_t(r_part.materials.slots.size());
+			r_part.materials.slots.insert(
+					r_part.materials.slots.end(), materials->slots.begin(), materials->slots.end());
+			PreparedMesh &m = mesh->mesh.meshes[0];
+			for (PreparedSurface &surface : m.surfaces) {
+				surface.material_index += offset;
+				if (!o.skinned) {
+					place_rigid(surface, place, bind);
+				}
+				r_part.prepared.surfaces.push_back(std::move(surface));
+			}
+			r_part.prepared.vertices += m.vertices;
+			r_part.accessory_vertices += m.vertices;
+			r_part.prepared.triangles += m.triangles;
+			r_part.accessory_meshes.push_back(o.mesh_3p);
+		}
+	}
+	if (r_part.binds.size() > anim::kMaxPaletteBinds) {
+		return core::make_error(r_part.spec.mesh + " with its accessories: " + std::to_string(r_part.binds.size()) +
+				" binds (cap " + std::to_string(anim::kMaxPaletteBinds) + ")");
+	}
+	return core::Status::success();
+}
+
 struct MuzzleEntry {
 	anim::Vec3 offset{};
 	anim::Vec3 rotation_deg{};
@@ -222,6 +342,12 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 	}
 	r_part.prepared = std::move(mesh->mesh.meshes[0]);
 	r_part.cache = mesh->item;
+	if (data) {
+		if (const core::Status st = attach_accessories(p_lib, p_spec, p_assets, *data, p_databases, p_cache, r_part);
+				!st.ok()) {
+			return st;
+		}
+	}
 	r_part.vertices = r_part.prepared.vertices;
 	r_part.triangles = r_part.prepared.triangles;
 
@@ -319,9 +445,10 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 		muzzle_line = "no muzzle (no Wep_Root)";
 	}
 	char line[512];
-	std::snprintf(line, sizeof(line), "item def %u %s: mesh %s, %zu binds, %llu vertices, %llu triangles; %s; %s",
-			unsigned(spec.def), spec.weapon_def.c_str(), spec.mesh.c_str(), r_part.binds.size(),
-			(unsigned long long)r_part.vertices, (unsigned long long)r_part.triangles,
+	std::snprintf(line, sizeof(line),
+			"item def %u %s: mesh %s and %zu accessory meshes, %zu binds, %llu vertices, %llu triangles; %s; %s",
+			unsigned(spec.def), spec.weapon_def.c_str(), spec.mesh.c_str(), r_part.accessory_meshes.size(),
+			r_part.binds.size(), (unsigned long long)r_part.vertices, (unsigned long long)r_part.triangles,
 			(reload_line + throw_line).c_str(), muzzle_line.c_str());
 	r_notes.push_back(line);
 	return core::Status::success();

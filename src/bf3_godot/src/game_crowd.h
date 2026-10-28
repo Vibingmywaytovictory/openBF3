@@ -56,6 +56,8 @@ public:
 	void enable_catalog(std::function<std::shared_ptr<core::Cache>()> p_cache);
 	void want_weapon(uint8_t p_wire_team, uint16_t p_def);
 	bool has_weapon_mesh(uint8_t p_wire_team, uint16_t p_def) const;
+	void want_gear(uint8_t p_wire_team, const bf3::net::SoldierGear &p_gear);
+	size_t gear_accessory_meshes(uint8_t p_wire_team, const bf3::net::SoldierGear &p_gear) const;
 
 	std::span<const fx::MuzzleSample> muzzles() const;
 	GameCrowdStats stats() const;

@@ -10,6 +10,7 @@
 #include "bf3/core/install.h"
 #include "bf3/core/job_queue.h"
 #include "bf3/core/worker_group.h"
+#include "bf3/host/loadout.h"
 #include "bf3/net/protocol.h"
 #include "bf3/render/soldier_assets.h"
 
@@ -33,6 +34,7 @@
 #include <optional>
 #include <set>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -76,11 +78,15 @@ struct WeaponMesh {
 	Ref<ArrayMesh> mesh;
 	AABB aabb;
 	int32_t binds = 0;
+	size_t accessory_meshes = 0;
 };
+
+using GearPicks = std::array<uint32_t, host::kLoadoutAccessories>;
 
 struct CatalogPart {
 	uint8_t team = 0;
 	uint16_t def = 0;
+	GearPicks picks{};
 	std::unique_ptr<render::CrowdWeaponSet> set;
 	std::string error;
 	double seconds = 0.0;
@@ -192,13 +198,17 @@ struct Bf3GameCrowd::Impl {
 	std::set<std::pair<uint8_t, uint16_t>> catalog_requested;
 	std::vector<std::unique_ptr<render::CrowdWeaponSet>> catalog_sets;
 	std::array<std::unordered_map<uint16_t, uint8_t>, 2> weapon_index;
+	std::array<std::map<std::pair<uint16_t, GearPicks>, uint8_t>, 2> gear_index;
+	std::set<std::tuple<uint8_t, uint16_t, GearPicks>> gear_requested;
 	std::map<std::string, Ref<Texture2D>> textures;
 	uint32_t catalog_added = 0, catalog_failed = 0;
 	std::unique_ptr<core::JobQueue> catalog_jobs;
 
 	int32_t index_of(uint8_t p_team, uint16_t p_def);
+	int32_t gear_index_of(uint8_t p_team, const net::SoldierGear &p_gear);
 	void want(uint8_t p_team, uint16_t p_def);
-	void load_catalog(uint8_t p_team, const render::CrowdWeaponSpec &p_spec);
+	void want_gear(uint8_t p_team, const net::SoldierGear &p_gear);
+	void load_catalog(uint8_t p_team, const render::CrowdWeaponSpec &p_spec, const GearPicks &p_picks = {});
 	void adopt_catalog();
 	Ref<Texture2D> find_texture(const std::string &p_name);
 	WeaponMesh make_weapon_mesh(const render::CrowdWeaponPart &p_part);
@@ -216,6 +226,38 @@ int32_t Bf3GameCrowd::Impl::index_of(uint8_t p_team, uint16_t p_def) {
 	return -1;
 }
 
+int32_t Bf3GameCrowd::Impl::gear_index_of(uint8_t p_team, const net::SoldierGear &p_gear) {
+	if (p_team < gear_index.size()) {
+		const auto it = gear_index[p_team].find({ p_gear.def, p_gear.accessories });
+		if (it != gear_index[p_team].end()) {
+			return it->second;
+		}
+		want_gear(p_team, p_gear);
+	}
+	return index_of(p_team, p_gear.def);
+}
+
+void Bf3GameCrowd::Impl::want_gear(uint8_t p_team, const net::SoldierGear &p_gear) {
+	const host::GunplayLevel *gunplay = catalog_level != nullptr ? catalog_level->gunplay.get() : nullptr;
+	if (catalog_jobs == nullptr || p_team >= gear_index.size() || gunplay == nullptr ||
+			p_gear.def >= gunplay->defs.size() || p_gear.accessories == GearPicks{} ||
+			!gear_requested.insert({ p_team, p_gear.def, p_gear.accessories }).second) {
+		return;
+	}
+	const host::LoadoutItem *item = host::loadout_primary_item(gunplay->loadouts, uint8_t(p_team + 1), p_gear.def);
+	if (item == nullptr) {
+		return;
+	}
+	const host::LoadoutAccessorySet set = host::loadout_accessory_set(*item, p_gear.accessories);
+	if (set.picked == GearPicks{}) {
+		return;
+	}
+	render::CrowdWeaponSpec spec = catalog_crowd_spec(*gunplay, p_gear.def);
+	spec.accessories = render::WeaponAccessories{ set.active, set.listed };
+	const GearPicks picks = p_gear.accessories;
+	catalog_jobs->post([this, p_team, spec, picks] { load_catalog(p_team, spec, picks); });
+}
+
 void Bf3GameCrowd::Impl::want(uint8_t p_team, uint16_t p_def) {
 	if (catalog_jobs == nullptr || p_team >= weapon_index.size() || p_def == sim::weapons::kNoWeapon ||
 			weapon_index[p_team].count(p_def) != 0) {
@@ -229,11 +271,12 @@ void Bf3GameCrowd::Impl::want(uint8_t p_team, uint16_t p_def) {
 	catalog_jobs->post([this, p_team, spec] { load_catalog(p_team, spec); });
 }
 
-void Bf3GameCrowd::Impl::load_catalog(uint8_t p_team, const render::CrowdWeaponSpec &p_spec) {
+void Bf3GameCrowd::Impl::load_catalog(uint8_t p_team, const render::CrowdWeaponSpec &p_spec, const GearPicks &p_picks) {
 	const auto t0 = std::chrono::steady_clock::now();
 	CatalogPart out;
 	out.team = p_team;
 	out.def = p_spec.def;
+	out.picks = p_picks;
 	if (catalog_ebx == nullptr) {
 		core::Result<std::unique_ptr<core::EbxLibrary>> ebx =
 				core::EbxLibrary::open(catalog_install, { catalog_spec.superbundle });
@@ -286,11 +329,17 @@ void Bf3GameCrowd::Impl::adopt_catalog() {
 		}
 		catalog_sets.push_back(std::move(c.set));
 		weapon_meshes[c.team].push_back(make_weapon_mesh(part));
-		weapon_index[c.team].emplace(c.def, *index);
+		if (c.picks != GearPicks{}) {
+			gear_index[c.team].emplace(std::pair{ c.def, c.picks }, *index);
+		} else {
+			weapon_index[c.team].emplace(c.def, *index);
+		}
 		++catalog_added;
-		char line[256];
-		std::snprintf(line, sizeof(line), "%s (%s): item %u, %llu vertices, %zu binds, loaded in %.2f s", what.c_str(),
-				part.spec.weapon_def.c_str(), unsigned(*index), static_cast<unsigned long long>(part.prepared.vertices),
+		char line[320];
+		std::snprintf(line, sizeof(line),
+				"%s (%s%s): item %u, %llu vertices, %zu accessory meshes, %zu binds, loaded in %.2f s", what.c_str(),
+				part.spec.weapon_def.c_str(), c.picks != GearPicks{} ? ", picked accessories" : "", unsigned(*index),
+				static_cast<unsigned long long>(part.prepared.vertices), part.accessory_meshes.size(),
 				part.binds.size(), c.seconds);
 		log(line);
 	}
@@ -318,6 +367,7 @@ Ref<Texture2D> Bf3GameCrowd::Impl::find_texture(const std::string &p_name) {
 
 WeaponMesh Bf3GameCrowd::Impl::make_weapon_mesh(const render::CrowdWeaponPart &p_part) {
 	WeaponMesh wm;
+	wm.accessory_meshes = p_part.accessory_meshes.size();
 	std::vector<Ref<Material>> materials;
 	bool have = false;
 	Vector3 lo, hi;
@@ -445,7 +495,11 @@ void Bf3GameCrowd::Impl::build_inputs(const GameFrame &p_frame) {
 		in.sprinting = (o.flags & sim::soldier_flags::kSprinting) != 0;
 		if (w != nullptr) {
 			if (w->def != sim::weapons::kNoWeapon) {
-				const int32_t idx = index_of(team, w->def);
+				const net::SoldierGear *gear = p_frame.frame != nullptr && o.slot < p_frame.frame->gear.size() &&
+								p_frame.frame->gear[o.slot].def == w->def
+						? &p_frame.frame->gear[o.slot]
+						: nullptr;
+				const int32_t idx = gear != nullptr ? gear_index_of(team, *gear) : index_of(team, w->def);
 				if (idx < 0) {
 					++stats.unknown_weapons;
 					s.weapon = 0;
@@ -912,6 +966,21 @@ void Bf3GameCrowd::enable_catalog(std::function<std::shared_ptr<core::Cache>()> 
 
 void Bf3GameCrowd::want_weapon(uint8_t p_wire_team, uint16_t p_def) {
 	impl_->want(anim::crowd_team_of_wire(p_wire_team), p_def);
+}
+
+void Bf3GameCrowd::want_gear(uint8_t p_wire_team, const net::SoldierGear &p_gear) {
+	impl_->want_gear(anim::crowd_team_of_wire(p_wire_team), p_gear);
+}
+
+size_t Bf3GameCrowd::gear_accessory_meshes(uint8_t p_wire_team, const net::SoldierGear &p_gear) const {
+	const Impl &m = *impl_;
+	const uint8_t team = anim::crowd_team_of_wire(p_wire_team);
+	const auto it = m.gear_index[team].find({ p_gear.def, p_gear.accessories });
+	if (it == m.gear_index[team].end() || it->second >= m.weapon_meshes[team].size()) {
+		return 0;
+	}
+	const WeaponMesh &wm = m.weapon_meshes[team][it->second];
+	return wm.binds > 0 && (!m.draw || wm.mesh.is_valid()) ? wm.accessory_meshes : 0;
 }
 
 bool Bf3GameCrowd::has_weapon_mesh(uint8_t p_wire_team, uint16_t p_def) const {

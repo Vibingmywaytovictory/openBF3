@@ -2,6 +2,7 @@
 
 #include "bf3/anim/crowd_eval.h"
 #include "bf3/render/soldier_assets.h"
+#include "bf3/render/weapon_sockets.h"
 
 #include <algorithm>
 #include <array>
@@ -19,6 +20,7 @@ struct CrowdWeaponSpec {
 	std::string mesh;
 	std::string weapon_unlock;
 	std::string weapon_def;
+	WeaponAccessories accessories;
 };
 
 struct CrowdWeaponPart {
@@ -37,6 +39,8 @@ struct CrowdWeaponPart {
 	int32_t muzzle_joint = -1;
 	anim::Xform muzzle_offset = anim::xform_identity();
 	uint64_t vertices = 0, triangles = 0;
+	std::vector<std::string> accessory_meshes;
+	uint64_t accessory_vertices = 0;
 };
 
 struct CrowdWeaponSet {

@@ -326,7 +326,9 @@ TEST_SUITE("render-catalog-weapons-3p") {
 				const render::CrowdWeaponPart &p = (*set)->teams[e.team][0];
 				e.facts = p.spec.mesh + ", " + std::to_string(p.prepared.vertices) + " vertices, " +
 						std::to_string(p.binds.size()) + " binds, reload " + (p.have_reload ? "clip" : "none") +
-						", muzzle " + (p.muzzle_joint >= 0 ? "yes" : "no") + ", throw " + (p.have_throw ? "yes" : "no");
+						", muzzle " + (p.muzzle_joint >= 0 ? "yes" : "no") + ", throw " +
+						(p.have_throw ? "yes" : "no") + ", " + std::to_string(p.accessory_meshes.size()) +
+						" default accessory meshes";
 			}
 			e.set = std::move(*set);
 		});
@@ -708,6 +710,96 @@ TEST_SUITE("render-catalog-accessories-1p") {
 		CHECK(b.ads.controller == "weapons/common/aimingcontrollers/aim_default_4x");
 		CHECK(b.ads.zoom_fov < a.ads.zoom_fov);
 		CHECK(b.zoom_render_fov == doctest::Approx(15.0f));
+		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
+		CHECK(diff.clean());
+	}
+}
+
+TEST_SUITE("render-catalog-accessories-3p") {
+	TEST_CASE("catalog accessories 3p: a carried M16A4 with picked accessories loads their sockets' 3p meshes into its "
+			  "crowd part, rigid on the socket bone and skinned to the weapon skeleton, within the palette cap") {
+		core::InstallReader reader;
+		if (!reader.locate({})) {
+			test::skip_install_case(reader.describe().c_str());
+			return;
+		}
+		const core::InstallSnapshot before = reader.snapshot();
+		core::Result<std::shared_ptr<core::Install>> install = core::Install::open(reader);
+		REQUIRE(install.ok());
+		auto gunplay = host::load_gunplay_level(
+				*install, "MP_Subway", "TeamDeathMatch0", host::GunplayLoadOptions{ true, true });
+		REQUIRE_MESSAGE(gunplay.ok(), (gunplay.ok() ? "" : gunplay.error().message));
+		const host::GunplayLevel &level = **gunplay;
+		render::SoldierSpec spec;
+		core::Result<std::unique_ptr<render::SoldierAssets>> assets =
+				render::load_soldier_assets(reader, spec, nullptr, nullptr);
+		REQUIRE_MESSAGE(assets.ok(), (assets.ok() ? "" : assets.error().message));
+		core::Result<std::unique_ptr<core::EbxLibrary>> ebx = core::EbxLibrary::open(*install, { spec.superbundle });
+		REQUIRE_MESSAGE(ebx.ok(), (ebx.ok() ? "" : ebx.error().message));
+		const host::LoadoutItem *m16 = level.loadouts.kit(1, 0)->find(0, level.loadouts.kit(1, 0)->defaults[0]);
+		REQUIRE(m16 != nullptr);
+		const auto pick = [&](size_t p_slot, std::string_view p_suffix) {
+			for (size_t i = 0; i < m16->accessory_unlocks[p_slot].size(); ++i) {
+				if (m16->accessory_unlocks[p_slot][i].ends_with(p_suffix)) {
+					return m16->accessories[p_slot][i];
+				}
+			}
+			return 0u;
+		};
+		const std::array<uint32_t, host::kLoadoutAccessories> picks{ pick(0, "_acog"), pick(1, "_foregrip"),
+			pick(2, "_sound_suppressor"), 0 };
+		const auto load = [&](const std::array<uint32_t, host::kLoadoutAccessories> &p_picks) {
+			render::CrowdWeaponSpec item = godot_side::catalog_crowd_spec(level, m16->def);
+			const host::LoadoutAccessorySet set = host::loadout_accessory_set(*m16, p_picks);
+			item.accessories = render::WeaponAccessories{ set.active, set.listed };
+			std::array<std::span<const render::CrowdWeaponSpec>, 2> items{};
+			items[0] = std::span<const render::CrowdWeaponSpec>(&item, 1);
+			return render::load_crowd_weapons(**ebx, spec, **assets, items, nullptr);
+		};
+		core::Result<std::unique_ptr<render::CrowdWeaponSet>> plain = load({});
+		REQUIRE_MESSAGE(plain.ok(), (plain.ok() ? "" : plain.error().message));
+		core::Result<std::unique_ptr<render::CrowdWeaponSet>> picked = load(picks);
+		REQUIRE_MESSAGE(picked.ok(), (picked.ok() ? "" : picked.error().message));
+		REQUIRE((*plain)->teams[0].size() == 1);
+		REQUIRE((*picked)->teams[0].size() == 1);
+		const render::CrowdWeaponPart &a = (*plain)->teams[0][0];
+		const render::CrowdWeaponPart &b = (*picked)->teams[0][0];
+		std::string plain_meshes, picked_meshes;
+		for (const std::string &m : a.accessory_meshes) {
+			plain_meshes += " " + m;
+		}
+		for (const std::string &m : b.accessory_meshes) {
+			picked_meshes += " " + m;
+		}
+		MESSAGE("M16A4 3p plain:", plain_meshes, " (", a.prepared.vertices, " vertices, ", a.binds.size(),
+				" binds); ACOG, foregrip, suppressor:", picked_meshes, " (", b.prepared.vertices, " vertices, ",
+				b.binds.size(), " binds)");
+		std::set<std::string> expected;
+		const core::EbxPartition *bp =
+				(*ebx)->partition_by_name(core::gameplay::resolve_weapon(**ebx, m16->unlock)->blueprint);
+		REQUIRE(bp != nullptr);
+		const std::vector<render::WeaponSocket> sockets =
+				render::read_weapon_sockets(**ebx, bp->instances_of("SoldierWeaponData").front());
+		for (const render::WeaponSocket &s : sockets) {
+			if (s.unlock.ends_with("_acog") || s.unlock.ends_with("_foregrip") ||
+					s.unlock.ends_with("_sound_suppressor")) {
+				for (const render::WeaponSocketObject &o : s.objects) {
+					if (!o.mesh_3p.empty()) {
+						expected.insert(o.mesh_3p);
+					}
+				}
+			}
+		}
+		CHECK(expected.size() >= 2);
+		CHECK(std::set<std::string>(b.accessory_meshes.begin(), b.accessory_meshes.end()) == expected);
+		CHECK_FALSE(a.accessory_meshes.empty());
+		CHECK(b.prepared.vertices > a.prepared.vertices);
+		CHECK(b.binds.size() <= anim::kMaxPaletteBinds);
+		CHECK(b.materials.slots.size() > a.materials.slots.size());
+		for (const render::PreparedSurface &s : b.prepared.surfaces) {
+			CHECK(s.material_index < b.materials.slots.size());
+			CHECK(s.bones.size() == s.vertex_count() * 4);
+		}
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
 		CHECK(diff.clean());
 	}

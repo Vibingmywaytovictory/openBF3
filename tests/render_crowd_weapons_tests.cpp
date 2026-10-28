@@ -194,7 +194,11 @@ TEST_SUITE("render-crowd-weapons") {
 				CHECK(!p.weapon);
 			}
 			CHECK(a.teams[t].vertices < before_vertices[t]);
-			CHECK(a.teams[t].vertices + (*set)->teams[t][0].vertices == before_vertices[t]);
+			const render::CrowdWeaponPart &item0 = (*set)->teams[t][0];
+			std::printf("render.crowd_weapons team %zu item 0 %s: %zu default accessory meshes, %llu vertices\n", t,
+					item0.spec.weapon_def.c_str(), item0.accessory_meshes.size(),
+					static_cast<unsigned long long>(item0.accessory_vertices));
+			CHECK(a.teams[t].vertices + item0.vertices - item0.accessory_vertices == before_vertices[t]);
 		}
 		std::array<std::vector<anim::CrowdWeapon>, 2> views{ render::crowd_weapons_of(**set, 0), render::crowd_weapons_of(**set, 1) };
 		std::vector<anim::CrowdTeam> teams(2);
