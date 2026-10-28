@@ -343,6 +343,10 @@ audio::MixerCore *Bf3GameAudio::mixer() const {
 	return impl_->mixer.get();
 }
 
+std::span<const audio::KitAudioVariant> Bf3GameAudio::sound_variants() const {
+	return impl_->kits.variants;
+}
+
 bool Bf3GameAudio::weapon_bound(uint16_t p_def) const {
 	const Impl &m = *impl_;
 	return m.table != nullptr && p_def < m.table->defs.size() && m.table->defs[p_def].form != ba::WeaponAudioForm::None;

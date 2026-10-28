@@ -853,6 +853,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		};
 		io.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
 		io.hold_fire = [this](bool p_held) { mapper_.script_hold(InputMapper::WeaponAction::Fire, p_held); };
+		io.hold_zoom = [this](bool p_held) { mapper_.script_hold(InputMapper::WeaponAction::Ads, p_held); };
 		io.join = [this](std::string *r_error) { return join_extra_client(r_error); };
 		io.state = [this, &r_game, &m, &f, screens] {
 			DeployCheckState s;
@@ -877,10 +878,12 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 				s.primary_items[i] = primaries.items[i].item_id;
 			}
 			s.chosen_primary = c.kit_primary_weapon.item_id;
-			const std::array<std::pair<const bf3::core::ui::HudItemList *, int16_t>, 2> lists{
-				{ { &c.kit_grid_data[3], c.kit_grid_selected[3] }, { &c.accessory_grid[0], c.accessory_selected[0] } }
+			const std::array<std::pair<const bf3::core::ui::HudItemList *, int16_t>, 3> lists{
+				{ { &c.kit_grid_data[3], c.kit_grid_selected[3] }, { &c.accessory_grid[0], c.accessory_selected[0] },
+						{ &c.accessory_grid[2], c.accessory_selected[2] } }
 			};
-			const std::array<uint32_t, 2> chosen{ c.kit_gadget2.item_id, c.weapon_accessory1.item_id };
+			const std::array<uint32_t, 3> chosen{ c.kit_gadget2.item_id, c.weapon_accessory1.item_id,
+				c.weapon_accessory3.item_id };
 			for (size_t l = 0; l < lists.size(); ++l) {
 				DeployCheckList &out = s.lists[l];
 				out.count = std::min<uint32_t>(lists[l].first->count, uint32_t(out.items.size()));
@@ -907,6 +910,9 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			}
 			const std::shared_ptr<const host::SharedLevel> fire_level = shared_level();
 			fill_deploy_fire_state(s, r_game, f, fire_level.get(), extra_client_.get());
+			if (const Camera3D *eye = cameras_.first_person()) {
+				s.camera_fov = float(eye->get_fov());
+			}
 			return s;
 		};
 		if (m.deploy_run->frame(*screens, now_s, io)) {

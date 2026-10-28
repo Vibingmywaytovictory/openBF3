@@ -194,7 +194,7 @@ void DeployCheck::fire(
 						"kit " + std::to_string(unsigned(kit)) + " cell " + std::to_string(fire_cell_) + ": item " +
 								std::to_string(fire_item_) + ", kit bar primary " +
 								std::to_string(p_st.chosen_primary));
-				fire_next(8, p_now_s);
+				fire_next(kDeployFireAccessories[fire_class_] ? 30 : 8, p_now_s);
 			}
 			break;
 		case 8:
@@ -251,6 +251,10 @@ void DeployCheck::fire(
 			if (fire_step_ == 11 && in >= kDeployFireHoldSeconds) {
 				p_io.hold_fire(false);
 				fire_next(12, p_now_s);
+			} else if (fire_step_ == 12 && in >= kDeployFireAfterSeconds && kDeployFireAccessories[fire_class_]) {
+				fire_hip_ = p_st;
+				p_io.hold_zoom(true);
+				fire_next(41, p_now_s);
 			} else if (fire_step_ == 12 && in >= kDeployFireAfterSeconds) {
 				fire_rows(p_st);
 				++fire_class_;
@@ -262,8 +266,191 @@ void DeployCheck::fire(
 			}
 			break;
 		default:
+			if (fire_step_ >= 30) {
+				fire_accessories(r_screens, p_now_s, p_io, p_st);
+			}
 			break;
 	}
+}
+
+void DeployCheck::fire_accessories(
+		Bf3UiScreens &r_screens, double p_now_s, const DeployCheckIo &p_io, const DeployCheckState &p_st) {
+	const double in = p_now_s - fire_s_;
+	const std::string cls(kDeployFireClassNames[fire_class_]);
+	const std::string name = "fire." + cls;
+	const uint8_t kit = kDeployFireKits[fire_class_];
+	const std::string_view soldier = kCustomizeScreenPartitions[0];
+	const std::string_view sub = kCustomizeScreenPartitions[1];
+	const std::string_view accessories = kCustomizeScreenPartitions[2];
+	const DeployCheckList &barrel = p_st.lists[kDeployCheckBarrelList];
+	switch (fire_step_) {
+		case 30:
+			if (in >= kDeployCheckSettleSeconds &&
+					click_clip(r_screens, kSpawnScreenPcPartition, kDeployCheckTabs[0].button, p_io)) {
+				fire_next(31, p_now_s);
+			}
+			break;
+		case 31:
+			if (in >= kDeployCheckTabSeconds &&
+					click_clip(r_screens, soldier,
+							std::string(kDeployCheckSoldierKitButton) + std::to_string(unsigned(kit)) + ".button1",
+							p_io)) {
+				fire_next(32, p_now_s);
+			}
+			break;
+		case 32:
+			if (in >= kDeployCheckGridSeconds &&
+					click_clip(r_screens, sub, std::string(kDeployCheckAccessoriesButton), p_io)) {
+				fire_next(33, p_now_s);
+			}
+			break;
+		case 33:
+			if (in >= kDeployCheckGridSeconds) {
+				const DeployCheckList &optic = p_st.lists[kDeployCheckOpticList];
+				fire_optic_expected_ = optic.count < 2
+						? 0
+						: optic.items[size_t((std::max(optic.selected, 0) + 1) % int32_t(optic.count))];
+				fire_mark_ = p_st;
+				if (click_clip(r_screens, accessories,
+							std::string(kDeployCheckOpticSelector) + std::string(kDeployCheckSelectorRight), p_io)) {
+					fire_next(34, p_now_s);
+				}
+			}
+			break;
+		case 34:
+			if (in >= kDeployCheckGridSeconds) {
+				shot(p_io, "fire_" + cls + "_optic", p_now_s);
+				const uint32_t chosen = p_st.lists[kDeployCheckOpticList].chosen;
+				row(name + ".pick_optic",
+						fire_optic_expected_ != 0 && chosen == fire_optic_expected_ &&
+								p_st.loadout_requests > fire_mark_.loadout_requests,
+						"ACCESSORIES optic " + std::to_string(fire_mark_.lists[kDeployCheckOpticList].chosen) + " -> " +
+								std::to_string(chosen) + " (expected " + std::to_string(fire_optic_expected_) + "), " +
+								std::to_string(p_st.loadout_requests - fire_mark_.loadout_requests) +
+								" loadout request(s)");
+				fire_clicks_ = 0;
+				fire_next(fire_class_ == size_t(DeployFireClass::Assault) ? 35 : 37, p_now_s);
+			}
+			break;
+		case 35:
+			if (p_st.suppressor_item != 0 && barrel.chosen == p_st.suppressor_item) {
+				shot(p_io, "fire_" + cls + "_suppressor", p_now_s);
+				row(name + ".pick_suppressor", true,
+						"ACCESSORIES barrel item " + std::to_string(barrel.chosen) +
+								" (the accessory with a WeaponSoundModifier) after " + std::to_string(fire_clicks_) +
+								" click(s)");
+				fire_next(37, p_now_s);
+			} else if (p_st.suppressor_item == 0 || fire_clicks_ > barrel.count) {
+				row(name + ".pick_suppressor", false,
+						"suppressor item " + std::to_string(p_st.suppressor_item) + ", barrel list of " +
+								std::to_string(barrel.count) + " at " + std::to_string(barrel.chosen) + " after " +
+								std::to_string(fire_clicks_) + " click(s)");
+				fire_next(37, p_now_s);
+			} else if (click_clip(r_screens, accessories,
+							   std::string(kDeployCheckBarrelSelector) + std::string(kDeployCheckSelectorRight),
+							   p_io)) {
+				++fire_clicks_;
+				fire_next(36, p_now_s);
+			}
+			break;
+		case 36:
+			if (in >= kDeployCheckGridSeconds) {
+				fire_next(35, p_now_s);
+			}
+			break;
+		case 37:
+		case 38:
+		case 39:
+			if (in >= kDeployCheckGridSeconds) {
+				tap(p_io, godot::KEY_ESCAPE);
+				fire_next(fire_step_ + 1, p_now_s);
+			}
+			break;
+		case 40:
+			if (in >= kDeployCheckGridSeconds) {
+				row(name + ".customize_back", shown(r_screens, kSpawnScreenPcPartition) && !up(r_screens, soldier),
+						std::string("three Escapes from ACCESSORIES: spawnscreenpc ") +
+								(shown(r_screens, kSpawnScreenPcPartition) ? "shown" : "not shown"));
+				fire_mark_ = p_st;
+				fire_next(8, p_now_s);
+			}
+			break;
+		case 41:
+			if ((p_st.vm_fov_progress >= 1.0f && in >= kDeployFireAfterSeconds) || in >= kDeployFireAdsSeconds) {
+				fire_ads_ = p_st;
+				shot(p_io, "fire_" + cls + "_ads", p_now_s);
+				p_io.hold_zoom(false);
+				fire_next(42, p_now_s);
+			}
+			break;
+		case 42:
+			if (in >= kDeployFireAfterSeconds) {
+				fire_rows(p_st);
+				fire_accessory_rows(p_st);
+				++fire_class_;
+				if (fire_class_ >= kDeployFireClassNames.size()) {
+					enter(Phase::Done, p_now_s, p_st);
+				} else {
+					fire_next(1, p_now_s);
+				}
+			}
+			break;
+		default:
+			break;
+	}
+}
+
+void DeployCheck::fire_accessory_rows(const DeployCheckState &p_st) {
+	const std::string name = "fire." + std::string(kDeployFireClassNames[fire_class_]);
+	const auto joined = [](const std::vector<std::string> &p_list) {
+		std::string out;
+		for (const std::string &s : p_list) {
+			if (!s.empty()) {
+				out += (out.empty() ? "" : ", ") + s;
+			}
+		}
+		return out.empty() ? std::string("none") : out;
+	};
+	const auto drawn = [](const std::vector<std::string> &p_list, const std::string &p_unlock) {
+		return std::any_of(
+				p_list.begin(), p_list.end(), [&](const std::string &s) { return s.starts_with(p_unlock + " "); });
+	};
+	bool all = false;
+	for (const std::string &u : fire_hip_.picked_unlocks) {
+		if (u.empty()) {
+			continue;
+		}
+		all = drawn(fire_hip_.vm_attached, u) || drawn(fire_ads_.vm_attached, u);
+		if (!all) {
+			break;
+		}
+	}
+	row(name + ".attachments", all,
+			"picked " + joined(fire_hip_.picked_unlocks) + "; drawn at hip: " + joined(fire_hip_.vm_attached) +
+					"; drawn at ADS: " + joined(fire_ads_.vm_attached));
+	char fov[256];
+	std::snprintf(fov, sizeof(fov), "ADS camera FOV %.2f deg, the picked set's zoom level %.2f deg (%s), progress %.2f",
+			double(fire_ads_.camera_fov), double(fire_ads_.vm_zoom_fov), fire_ads_.vm_zoom_controller.c_str(),
+			double(fire_ads_.vm_fov_progress));
+	row(name + ".ads_fov",
+			fire_ads_.vm_zoom_fov > 0.0f && fire_ads_.vm_fov_progress >= 1.0f &&
+					std::abs(fire_ads_.camera_fov - fire_ads_.vm_zoom_fov) < kDeployFireFovTolerance,
+			fov);
+	const std::string optic = fire_hip_.picked_unlocks.empty() ? std::string() : fire_hip_.picked_unlocks[0];
+	row(name + ".sight_picture", !optic.empty() && drawn(fire_ads_.vm_attached, optic),
+			"optic " + (optic.empty() ? std::string("not picked") : optic) +
+					" at ADS: " + joined(fire_ads_.vm_attached));
+	if (fire_class_ == size_t(DeployFireClass::Assault)) {
+		const uint64_t sounds = fire_hip_.audio_accessory_sounds - fire_mark_.audio_accessory_sounds;
+		const uint64_t effects = fire_hip_.fx_accessory_effects - fire_mark_.fx_accessory_effects;
+		row(name + ".suppressed", sounds > 0 && effects > 0,
+				std::to_string(sounds) + " shot sound(s) from the suppressor's WeaponSoundModifier entry, " +
+						std::to_string(effects) + " muzzle start(s) from its WeaponFiringEffectsModifier entry");
+	}
+	row(name + ".second_client_gear", p_st.extra_gear_match && p_st.crowd_gear_meshes > 0,
+			std::string("player2's gear for the own slot ") + (p_st.extra_gear_match ? "names" : "does not name") +
+					" the picks; the crowd part for (def, picks) carries " + std::to_string(p_st.crowd_gear_meshes) +
+					" accessory meshes");
 }
 
 void fill_deploy_fire_state(DeployCheckState &r_state, GameState &r_game, const bf3::host::PresentationFrame &p_frame,
@@ -337,6 +524,57 @@ void fill_deploy_fire_state(DeployCheckState &r_state, GameState &r_game, const 
 	}
 	if (r_game.crowd != nullptr && r_state.primary_def != 0xFFFF) {
 		r_state.crowd_mesh = r_game.crowd->has_weapon_mesh(team, r_state.primary_def);
+	}
+	const bf3::host::LoadoutCatalog *catalog =
+			p_level != nullptr && p_level->gunplay != nullptr ? &p_level->gunplay->loadouts : nullptr;
+	if (catalog != nullptr && team_ok && r_game.audio != nullptr) {
+		const bf3::host::LoadoutKit *kit = catalog->kit(team, r_state.spawn_kit);
+		const bf3::host::LoadoutItem *item = kit != nullptr ? kit->find(primary, r_state.chosen_primary) : nullptr;
+		for (size_t i = 0; item != nullptr && i < item->accessories[2].size() && r_state.suppressor_item == 0; ++i) {
+			for (const bf3::audio::KitAudioVariant &v : r_game.audio->sound_variants()) {
+				if (v.def == item->def && v.accessory == item->accessories[2][i]) {
+					r_state.suppressor_item = v.accessory;
+				}
+			}
+		}
+	}
+	if (catalog != nullptr && team_ok && r_game.own_slot < p_frame.gear.size()) {
+		const bf3::net::SoldierGear &gear = p_frame.gear[r_game.own_slot];
+		r_state.own_picks = gear.accessories;
+		if (const bf3::host::LoadoutItem *item = bf3::host::loadout_primary_item(*catalog, team, gear.def)) {
+			const bf3::host::LoadoutAccessorySet set = bf3::host::loadout_accessory_set(*item, gear.accessories);
+			r_state.picked_unlocks.assign(bf3::host::kLoadoutAccessories, std::string());
+			for (size_t a = 0; a < bf3::host::kLoadoutAccessories; ++a) {
+				for (size_t i = 0; set.picked[a] != 0 && i < item->accessories[a].size(); ++i) {
+					if (item->accessories[a][i] == set.picked[a] && i < item->accessory_unlocks[a].size()) {
+						r_state.picked_unlocks[a] = item->accessory_unlocks[a][i];
+					}
+				}
+			}
+		}
+		if (r_game.crowd != nullptr) {
+			r_state.crowd_gear_meshes = r_game.crowd->gear_accessory_meshes(team, gear);
+		}
+		if (p_extra != nullptr) {
+			const auto other = std::make_unique<bf3::host::PresentationFrame>();
+			r_state.extra_gear_match = p_extra->read_presentation(*other) &&
+					gear.accessories != std::array<uint32_t, bf3::host::kLoadoutAccessories>{} &&
+					other->gear[r_game.own_slot] == gear;
+		}
+	}
+	if (const Bf3Viewmodel *vm = r_game.own_viewmodel()) {
+		r_state.vm_attached = vm->visible_attachments();
+		r_state.vm_zoom_fov = vm->ads_params().zoom_fov;
+		r_state.vm_fov_progress = vm->ads().fov_progress;
+		if (const bf3::render::ViewmodelItem *item = vm->current_item()) {
+			r_state.vm_zoom_controller = item->ads.controller;
+		}
+	}
+	if (r_game.audio != nullptr) {
+		r_state.audio_accessory_sounds = r_game.audio->stats().router.accessory_sounds;
+	}
+	if (r_game.fx != nullptr) {
+		r_state.fx_accessory_effects = r_game.fx->stats().triggers.accessory_effects;
 	}
 }
 

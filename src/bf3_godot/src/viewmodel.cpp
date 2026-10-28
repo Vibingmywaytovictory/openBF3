@@ -132,6 +132,18 @@ const bf3::render::ViewmodelItem *Bf3Viewmodel::current_item() const {
 	return item_ >= 0 && size_t(item_) < items_.size() ? items_[size_t(item_)].item : nullptr;
 }
 
+std::vector<std::string> Bf3Viewmodel::visible_attachments() const {
+	std::vector<std::string> out;
+	if (item_ >= 0 && size_t(item_) < items_.size()) {
+		for (const ItemNodes::Attachment &a : items_[size_t(item_)].attachments) {
+			if (a.mesh != nullptr && a.mesh->is_visible()) {
+				out.push_back(a.name);
+			}
+		}
+	}
+	return out;
+}
+
 namespace {
 
 struct SetTextures {
@@ -258,6 +270,7 @@ void Bf3Viewmodel::add_item_nodes(const bf3::render::ViewmodelSet &p_set) {
 			na.hip = a.hip;
 			na.zoom = a.zoom;
 			na.skinned = a.skinned;
+			na.name = a.socket_unlock + " " + a.part.mesh;
 			if (a.skinned) {
 				na.mesh->set_skin(n.skin);
 			}

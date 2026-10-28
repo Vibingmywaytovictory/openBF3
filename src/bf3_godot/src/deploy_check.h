@@ -67,6 +67,13 @@ inline constexpr double kDeployFireHoldSeconds = 1.2;
 inline constexpr double kDeployFireShotSeconds = 1.0 / 30.0;
 inline constexpr double kDeployFireAfterSeconds = 0.8;
 inline constexpr float kDeployFireKickShare = 0.1f;
+inline constexpr std::array<bool, 5> kDeployFireAccessories{ true, false, false, true, false };
+inline constexpr std::string_view kDeployCheckOpticSelector = "instance1.KitSelector_02";
+inline constexpr std::string_view kDeployCheckBarrelSelector = "instance1.KitSelector_04";
+inline constexpr std::string_view kDeployCheckSoldierKitButton = "instance1.KitView_01.mcContainer.Slot_";
+inline constexpr std::string_view kDeployCheckAccessoriesButton = "instance1.KitSelector_01.mcContainer.Slot_0.button1";
+inline constexpr double kDeployFireAdsSeconds = 2.0;
+inline constexpr float kDeployFireFovTolerance = 1.0f;
 
 struct DeployCheckList {
 	uint32_t count = 0;
@@ -77,6 +84,7 @@ struct DeployCheckList {
 
 inline constexpr size_t kDeployCheckGadget2List = 0;
 inline constexpr size_t kDeployCheckOpticList = 1;
+inline constexpr size_t kDeployCheckBarrelList = 2;
 inline constexpr std::string_view kDeployCheckSelectorRight = ".mcContainer.Slot_0.buttonRight";
 
 struct DeployCheckState {
@@ -102,7 +110,7 @@ struct DeployCheckState {
 	bool spawned_primary_fire_fx = false;
 	bool spawned_primary_audio = false;
 	uint64_t concepts_found = 0;
-	std::array<DeployCheckList, 2> lists{};
+	std::array<DeployCheckList, 3> lists{};
 	std::array<DeployFireClass, 32> primary_classes{};
 	uint16_t primary_def = 0xFFFF;
 	std::string primary_unlock;
@@ -129,6 +137,18 @@ struct DeployCheckState {
 	uint8_t extra_burst_seq = 0;
 	bool crowd_mesh = false;
 	std::string extra_fact;
+	uint32_t suppressor_item = 0;
+	std::array<uint32_t, bf3::host::kLoadoutAccessories> own_picks{};
+	std::vector<std::string> picked_unlocks;
+	std::vector<std::string> vm_attached;
+	float camera_fov = 0.0f;
+	float vm_zoom_fov = 0.0f;
+	float vm_fov_progress = 0.0f;
+	std::string vm_zoom_controller;
+	uint64_t audio_accessory_sounds = 0;
+	uint64_t fx_accessory_effects = 0;
+	bool extra_gear_match = false;
+	size_t crowd_gear_meshes = 0;
 };
 
 struct DeployCheckIo {
@@ -142,6 +162,7 @@ struct DeployCheckIo {
 	std::function<DeployCheckState()> state;
 	std::function<void(bool)> hold_fire;
 	std::function<bool(std::string *)> join;
+	std::function<void(bool)> hold_zoom;
 };
 
 class DeployCheck {
@@ -235,6 +256,13 @@ private:
 	bool fire_extra_seen_ = false;
 	uint16_t fire_extra_def_ = 0xFFFF;
 	DeployCheckState fire_mark_;
+	uint32_t fire_clicks_ = 0;
+	uint32_t fire_optic_expected_ = 0;
+	DeployCheckState fire_ads_;
+	DeployCheckState fire_hip_;
+	void fire_accessories(
+			Bf3UiScreens &r_screens, double p_now_s, const DeployCheckIo &p_io, const DeployCheckState &p_st);
+	void fire_accessory_rows(const DeployCheckState &p_st);
 	void fire(Bf3UiScreens &r_screens, double p_now_s, const DeployCheckIo &p_io, const DeployCheckState &p_st);
 	void fire_next(uint32_t p_step, double p_now_s);
 	void fire_rows(const DeployCheckState &p_st);

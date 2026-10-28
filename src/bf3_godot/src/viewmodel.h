@@ -73,6 +73,7 @@ public:
 	void set_tuning(const bf3::anim::ViewmodelTuning &p_tuning);
 	const bf3::anim::ViewmodelTuning &tuning() const { return tuning_; }
 	const bf3::render::ViewmodelItem *current_item() const;
+	std::vector<std::string> visible_attachments() const;
 
 	void present(const ViewmodelFrame &p_frame, std::span<const bf3::anim::VmCue> p_cues, godot::Camera3D *p_camera);
 
@@ -112,6 +113,7 @@ private:
 			godot::Transform3D xform;
 			bool hip = true, zoom = true;
 			bool skinned = false;
+			std::string name;
 		};
 		std::vector<Attachment> attachments;
 	};
