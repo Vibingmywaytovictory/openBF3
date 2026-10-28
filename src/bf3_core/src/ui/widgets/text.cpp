@@ -62,6 +62,9 @@ public:
 		const As2Clip display = field.child("txtDisplay");
 		display.set_width(w);
 		display.set_height(h);
+		if (const As2Value *align = r_host.construct_param("m_align"); align != nullptr && align->defined()) {
+			display.set_text_align(align->to_string());
+		}
 		display.set_text(param_true(r_host, "showInitializedText") ? "NO DATA" : "");
 		if (param_true(r_host, "m_useBorder")) {
 			const As2Clip border = r_host.attach_movie(self, "BorderMc", "border", self.next_highest_depth());

@@ -1,10 +1,12 @@
 #include <doctest/doctest.h>
 
+#include "bf3/core/level/budget.h"
 #include "bf3/core/ui/as2_clip.h"
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/swf_scene.h"
+#include "bf3/core/ui/swf_text.h"
 #include "test_support.h"
 #include "ui_retail_support.h"
 
@@ -12,6 +14,7 @@
 #include <cmath>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using namespace bf3::core;
@@ -75,6 +78,24 @@ std::string text_under(const RetailScreen &p_s, std::string_view p_widget) {
 		}
 	}
 	return "no txtDisplay under " + std::string(p_widget);
+}
+
+std::pair<float, float> stage_text_span(const Retail &p_r, const RetailScreen &p_s, std::string_view p_widget) {
+	for (SwfNodeId id = 0; id < 200000; ++id) {
+		const SwfSceneNode *n = p_s.scene->node(id);
+		if (n != nullptr && n->path.find(p_widget) != std::string::npos && n->path.ends_with(".txtDisplay")) {
+			level::WorkBudget budget(kSwfTextBudgetUnits);
+			const Result<SwfTextLayout> l = swf_layout_node_text(*p_r.fonts, *n, budget);
+			if (!l || l->lines.empty()) {
+				return { 0.0f, 0.0f };
+			}
+			const SwfTextLine &line = l->lines.front();
+			const SwfMatrix &w = n->world;
+			const float y = line.baseline;
+			return { w.a * line.x + w.c * y + w.tx, w.a * (line.x + line.width) + w.c * y + w.tx };
+		}
+	}
+	return { 0.0f, 0.0f };
 }
 
 HudModel scoreboard_round() {
@@ -243,6 +264,15 @@ TEST_SUITE("ui-eor") {
 		s.hud->initialize(m);
 		CHECK(text_under(s, "TextField_02") == "NEXT ROUND STARTS IN:");
 		CHECK(text_under(s, "TextField_01") == "47");
+		s.scene->take_changes();
+		const std::pair<float, float> caption = stage_text_span(*r, s, "TextField_02");
+		const std::pair<float, float> value = stage_text_span(*r, s, "TextField_01");
+		MESSAGE("caption " << caption.first << ".." << caption.second << ", value " << value.first << ".."
+						   << value.second);
+		CHECK(caption.first > 700.0f);
+		CHECK(caption.second < value.first);
+		CHECK(value.second > 1150.0f);
+		CHECK(value.second < 1190.0f);
 		m.end_of_round.time_until_level_change = 0.4f;
 		s.hud->refresh(m);
 		CHECK(text_under(s, "TextField_01") == "0");
