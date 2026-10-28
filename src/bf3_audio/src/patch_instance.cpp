@@ -489,7 +489,8 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 			}
 			if (ps.role != PluginRole::Slot) {
 				touch(v);
-			} else if (const SlotState &sl = st.slots[ps.index]; sl.play.active || sl.pending.armed) {
+			} else if (const SlotState &sl = st.slots[ps.index];
+					sl.play.active || sl.pending.armed || sl.outgoing.active) {
 				touch(v);
 			}
 			switch (ps.role) {

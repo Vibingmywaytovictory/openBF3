@@ -118,9 +118,69 @@ bool resample_buffered(SlotPlay &r_play, uint32_t p_count, double p_ratio, float
 	return slow;
 }
 
+bool take_input_frame(SlotPlay &r_play, float &r_left, float &r_right) {
+	if (r_play.input_pos >= r_play.input_count) {
+		return false;
+	}
+	const float *x = r_play.input.data() + size_t(r_play.input_pos) * r_play.channels;
+	++r_play.input_pos;
+	if (r_play.channels == 1) {
+		r_left = r_right = x[0];
+	} else {
+		r_left = x[0];
+		r_right = x[1];
+		for (uint32_t c = 2; c < r_play.channels; ++c) {
+			(c & 1 ? r_right : r_left) += 0.5f * x[c];
+		}
+	}
+	return true;
+}
+
+void push_history(SlotPlay &r_play, float p_left, float p_right) {
+	for (int k = 0; k < 3; ++k) {
+		r_play.history[k][0] = r_play.history[k + 1][0];
+		r_play.history[k][1] = r_play.history[k + 1][1];
+	}
+	r_play.history[3][0] = p_left;
+	r_play.history[3][1] = p_right;
+}
+
 float history_at(const SlotPlay &p_play, int p_channel, float p_t) {
 	return catmull_rom(p_play.history[0][p_channel], p_play.history[1][p_channel], p_play.history[2][p_channel],
 			p_play.history[3][p_channel], p_t);
+}
+
+void render_outgoing(SlotState &r_slot, double p_ratio, float *r_left, float *r_right, uint32_t p_from,
+		uint32_t p_frames, uint64_t &r_decode_errors) {
+	SlotPlay &o = r_slot.outgoing;
+	for (uint32_t i = p_from; i < p_frames && o.active; ++i) {
+		r_slot.outgoing_gain += r_slot.outgoing_step;
+		if (r_slot.outgoing_gain <= 0.0f) {
+			o.active = false;
+			break;
+		}
+		const float t = float(o.frac);
+		r_left[i] += history_at(o, 0, t) * r_slot.outgoing_gain;
+		r_right[i] += history_at(o, 1, t) * r_slot.outgoing_gain;
+		o.frac += p_ratio;
+		while (o.frac >= 1.0) {
+			o.frac -= 1.0;
+			float l = 0.0f, r = 0.0f;
+			while (!o.source_done && !take_input_frame(o, l, r)) {
+				core::Result<uint32_t> got = o.decoder.read(o.input.data(), kSlotInputFrames);
+				if (!got) {
+					++r_decode_errors;
+				}
+				if (!got || *got == 0) {
+					o.source_done = true;
+					break;
+				}
+				o.input_count = *got;
+				o.input_pos = 0;
+			}
+			push_history(o, l, r);
+		}
+	}
 }
 
 struct NextSegment {
@@ -410,18 +470,7 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 				++play.flush;
 				break;
 			}
-			if (play.input_pos < play.input_count) {
-				const float *x = play.input.data() + size_t(play.input_pos) * play.channels;
-				++play.input_pos;
-				if (play.channels == 1) {
-					l = r = x[0];
-				} else {
-					l = x[0];
-					r = x[1];
-					for (uint32_t c = 2; c < play.channels; ++c) {
-						(c & 1 ? r : l) += 0.5f * x[c];
-					}
-				}
+			if (take_input_frame(play, l, r)) {
 				break;
 			}
 			core::Result<uint32_t> got = play.decoder.read(play.input.data(), kSlotInputFrames);
@@ -453,14 +502,7 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 			}
 			play.source_done = true;
 		}
-		play.history[0][0] = play.history[1][0];
-		play.history[0][1] = play.history[1][1];
-		play.history[1][0] = play.history[2][0];
-		play.history[1][1] = play.history[2][1];
-		play.history[2][0] = play.history[3][0];
-		play.history[2][1] = play.history[3][1];
-		play.history[3][0] = l;
-		play.history[3][1] = r;
+		push_history(play, l, r);
 	};
 	const auto start_pending = [&](uint64_t p_frame) {
 		PendingStart pend = slot.pending;
@@ -468,11 +510,21 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 		const bool takeover = play.active;
 		if (takeover) {
 			++stats.slot_takeovers;
-			if (slot.voice < voice_cut.size()) {
-				const float t = float(play.frac);
-				const float cut =
-						slot.fade * std::max(std::fabs(history_at(play, 0, t)), std::fabs(history_at(play, 1, t)));
+			const float crossfade = tuning.step_crossfade_ms * 0.001f * float(mix_rate);
+			const bool cut_outgoing = slot.outgoing.active;
+			const SlotPlay &cut_play = crossfade >= 1.0f ? slot.outgoing : play;
+			const float cut_gain = crossfade >= 1.0f ? slot.outgoing_gain : slot.fade;
+			if ((crossfade < 1.0f || cut_outgoing) && slot.voice < voice_cut.size()) {
+				const float t = float(cut_play.frac);
+				const float cut = cut_gain *
+						std::max(std::fabs(history_at(cut_play, 0, t)), std::fabs(history_at(cut_play, 1, t)));
 				voice_cut[slot.voice] = std::max(voice_cut[slot.voice], cut);
+			}
+			if (crossfade >= 1.0f) {
+				slot.outgoing = play;
+				slot.outgoing_gain = slot.fade;
+				slot.outgoing_step = -1.0f / crossfade;
+				slot.outgoing_frame = p_frame;
 			}
 		}
 		play.active = false;
@@ -593,6 +645,13 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 				break;
 			}
 		}
+	}
+	if (slot.outgoing.active) {
+		const uint32_t from = slot.outgoing_frame > p_first_frame
+				? uint32_t(std::min<uint64_t>(slot.outgoing_frame - p_first_frame, p_frames))
+				: 0u;
+		render_outgoing(slot, double(slot.outgoing.rate) / double(mix_rate) * double(s.pitch), r_left, r_right, from,
+				p_frames, stats.decode_errors);
 	}
 }
 

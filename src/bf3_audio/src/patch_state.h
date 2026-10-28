@@ -76,6 +76,10 @@ struct SlotState {
 	float fade = 1.0f;
 	float fade_step = 0.0f;
 	bool fade_kill = false;
+	SlotPlay outgoing;
+	float outgoing_gain = 0.0f;
+	float outgoing_step = 0.0f;
+	uint64_t outgoing_frame = 0;
 	uint16_t voice = 0xffff;
 	uint32_t gain_plugin = UINT32_MAX;
 	uint64_t outputs_mask = ~uint64_t(0);
