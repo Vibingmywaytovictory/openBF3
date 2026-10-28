@@ -14,7 +14,6 @@
 #include "bf3/core/ui/swf_scene.h"
 
 #include <godot_cpp/classes/file_access.hpp>
-#include <godot_cpp/classes/input_event_key.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -38,18 +37,6 @@ std::string_view screen(ui::OptionsTab p_tab) {
 
 std::string in_screen(std::string_view p_path) {
 	return std::string(ui::kHudScreenInstance) + "." + std::string(p_path);
-}
-
-uint32_t jumps_after(godot::Key p_key) {
-	InputMapper m;
-	m.install_actions();
-	godot::Ref<godot::InputEventKey> ev;
-	ev.instantiate();
-	ev->set_keycode(p_key);
-	ev->set_physical_keycode(p_key);
-	ev->set_pressed(true);
-	m.handle_event(ev);
-	return m.sample().jump_presses;
 }
 
 bool near(double p_a, double p_b) {
@@ -223,9 +210,16 @@ void OptionsCheck::pick_key(const Ctx &p_c) {
 			old_idk_ = tab->rows[i].inputs[size_t(ui::KeyColumn::Keyboard)];
 		}
 	}
+	const ui::KeyBindingTab *all = t.tab_of_map("default");
+	if (all == nullptr) {
+		failure_ = "no key bindings tab holds the default map";
+		return;
+	}
+	const size_t all_tab = size_t(all - t.tabs().data());
 	for (const godot::Key k : kCandidateKeys) {
 		const std::string idk = ui_idk_of_key(k);
-		if (!idk.empty() && t.holders(0, ui::KeyColumn::Keyboard, idk).empty()) {
+		if (!idk.empty() && t.holders(0, ui::KeyColumn::Keyboard, idk).empty() &&
+				t.holders(uint8_t(all_tab), ui::KeyColumn::Keyboard, idk).empty()) {
 			new_key_ = k;
 			new_idk_ = idk;
 			break;
@@ -262,17 +256,22 @@ void OptionsCheck::check_file(const Ctx &p_c) {
 	}
 }
 
+void OptionsCheck::game_tap(const Ctx &p_c, godot::Key p_key) {
+	p_c.io.game_key(p_key, true);
+	p_c.io.game_key(p_key, false);
+}
+
 void OptionsCheck::check_play(const Ctx &p_c) {
-	const uint32_t with_new = jumps_after(new_key_);
-	const uint32_t with_old = jumps_after(godot::KEY_SPACE);
+	const uint32_t with_new = p_c.io.jump_presses - jumps_before_;
 	const ui::SettingsEffects e = ui::settings_effects(p_c.io.settings->store());
 	const float look = kBaseLookRadiansPerCount * e.look_scale;
-	notes_.push_back("in play: " + new_idk_ + " jumps " + std::to_string(with_new) + ", " + old_idk_ + " jumps " +
-			std::to_string(with_old) + ", look " + std::to_string(p_c.io.look_sensitivity) + " rad/count (" +
-			std::to_string(look) + " wanted), master gain " +
+	notes_.push_back("in play through the session's mapper: " + old_idk_ + " then " + new_idk_ + " give " +
+			std::to_string(with_new) + " jump, the soldier airborne " + std::to_string(max_air_ticks_) +
+			" ticks, look " + std::to_string(p_c.io.look_sensitivity) + " rad/count (" + std::to_string(look) +
+			" wanted), master gain " +
 			(p_c.io.master_gain ? std::to_string(*p_c.io.master_gain) : std::string("none")) + " (" +
 			std::to_string(e.bus_gains[size_t(bf3::core::audio::MasterBus::GameMixMain)]) + " wanted)");
-	if (with_new != 1 || with_old != 0) {
+	if (with_new != 1 || max_air_ticks_ == 0) {
 		failure_ = "the rebound jump key does not act in play: " + notes_.back();
 	} else if (std::abs(p_c.io.look_sensitivity - look) > 1e-7f || !(e.look_scale > 1.0f)) {
 		failure_ = "the mouse sensitivity is not applied: " + notes_.back();
@@ -472,9 +471,29 @@ std::vector<OptionsCheck::Step> OptionsCheck::steps() {
 				r_self.check_file_value(c, kFullscreen, 1.0);
 				tap(c, K::KEY_ESCAPE);
 			} });
-	s.push_back({ "in play the new key jumps, the old does not, sensitivity and volume applied",
+	s.push_back({ "in play on the ground",
 			[](OptionsCheck &, const Ctx &c) {
-				return !shown(c, kIngameMenuPartition) && !c.menu.in_menu() && c.io.game_input && c.io.alive;
+				return !shown(c, kIngameMenuPartition) && !c.menu.in_menu() && c.io.game_input && c.io.alive &&
+						c.io.air_ticks == 0;
+			},
+			[](OptionsCheck &r_self, const Ctx &c) {
+				r_self.jumps_before_ = c.io.jump_presses;
+				r_self.max_air_ticks_ = 0;
+				r_self.game_tap(c, K::KEY_SPACE);
+			} });
+	s.push_back({ "the old jump key does not jump", [](OptionsCheck &, const Ctx &) { return true; },
+			[](OptionsCheck &r_self, const Ctx &c) {
+				if (c.io.jump_presses != r_self.jumps_before_ || r_self.max_air_ticks_ != 0) {
+					r_self.failure_ = r_self.old_idk_ + " still jumps through the session's mapper (" +
+							std::to_string(c.io.jump_presses - r_self.jumps_before_) + " presses, airborne " +
+							std::to_string(r_self.max_air_ticks_) + " ticks)";
+					return;
+				}
+				r_self.game_tap(c, r_self.new_key_);
+			} });
+	s.push_back({ "the new key jumps the soldier, sensitivity and volume applied",
+			[](OptionsCheck &r_self, const Ctx &c) {
+				return c.io.jump_presses == r_self.jumps_before_ + 1 && r_self.max_air_ticks_ > 0;
 			},
 			[](OptionsCheck &r_self, const Ctx &c) {
 				r_self.check_play(c);
@@ -498,6 +517,7 @@ bool OptionsCheck::frame(Bf3UiScreens &r_screens, NativeFlow &r_flow, const Nati
 		last_s_ = p_now_s;
 	}
 	const Ctx c{ r_screens, r_flow, p_menu, p_options, p_io };
+	max_air_ticks_ = std::max(max_air_ticks_, p_io.air_ticks);
 	if (p_io.settings == nullptr) {
 		failure_ = "the session has no GameSettings";
 	}

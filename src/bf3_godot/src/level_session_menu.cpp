@@ -259,6 +259,16 @@ bool Bf3LevelSession::tdm_menu_frame(double p_now_s) {
 		oio.alive = game_->alive;
 		oio.game_input = mapper_.game_input();
 		oio.look_sensitivity = mapper_.base_sensitivity;
+		oio.game_key = [this](Key p_key, bool p_pressed) {
+			Ref<InputEventKey> e;
+			e.instantiate();
+			e->set_keycode(p_key);
+			e->set_physical_keycode(p_key);
+			e->set_pressed(p_pressed);
+			_unhandled_input(e);
+		};
+		oio.jump_presses = mapper_.sample().jump_presses;
+		oio.air_ticks = frame_ != nullptr && frame_->valid ? frame_->own_curr.air_ticks : uint16_t(0);
 		if (game_->audio != nullptr && game_->audio->mixer() != nullptr) {
 			oio.master_gain = game_->audio->mixer()->bus_gain(bf3::core::audio::MasterBus::GameMixMain);
 		}

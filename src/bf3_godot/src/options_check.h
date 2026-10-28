@@ -34,11 +34,14 @@ struct OptionsCheckIo {
 	std::function<void(godot::Vector2)> move;
 	std::function<void(godot::Vector2, bool)> click;
 	std::function<bool(const std::string &)> shot;
+	std::function<void(godot::Key, bool)> game_key;
 	GameSettings *settings = nullptr;
 	std::string settings_path;
 	bool alive = false;
 	bool game_input = true;
 	float look_sensitivity = 0.0f;
+	uint32_t jump_presses = 0;
+	uint16_t air_ticks = 0;
 	std::optional<float> master_gain;
 };
 
@@ -84,6 +87,7 @@ private:
 	bool file_is_saved(const Ctx &p_c);
 	void check_file(const Ctx &p_c);
 	void check_play(const Ctx &p_c);
+	void game_tap(const Ctx &p_c, godot::Key p_key);
 
 	std::string shot_dir_;
 	std::string waiting_;
@@ -105,6 +109,8 @@ private:
 	double saved_volume_ = 0.0;
 	double saved_sensitivity_ = 0.0;
 	std::string saved_text_;
+	uint32_t jumps_before_ = 0;
+	uint16_t max_air_ticks_ = 0;
 	bool done_ = false;
 	bool passed_ = false;
 	std::string failure_;
