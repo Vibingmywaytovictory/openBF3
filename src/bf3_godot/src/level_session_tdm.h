@@ -22,6 +22,7 @@ class EorCheck;
 class NativeEor;
 class NativeFlow;
 class NativeMenu;
+class NativeOptions;
 class MenuCheck;
 class NativeScreensCheck;
 class DeployCheck;
@@ -110,6 +111,7 @@ struct TdmState {
 	std::unique_ptr<NativeMenu, void (*)(NativeMenu *)> native_menu{ nullptr, nullptr };
 	std::unique_ptr<MenuCheck, void (*)(MenuCheck *)> menu_check{ nullptr, nullptr };
 	std::unique_ptr<NativeEor, void (*)(NativeEor *)> native_eor{ nullptr, nullptr };
+	std::unique_ptr<NativeOptions, void (*)(NativeOptions *)> native_options{ nullptr, nullptr };
 	std::unique_ptr<NativeScreensCheck, void (*)(NativeScreensCheck *)> native_check{ nullptr, nullptr };
 	std::unique_ptr<LoadingScreenCheck, void (*)(LoadingScreenCheck *)> loading_check{ nullptr, nullptr };
 	std::unique_ptr<DeployCheck, void (*)(DeployCheck *)> deploy_run{ nullptr, nullptr };

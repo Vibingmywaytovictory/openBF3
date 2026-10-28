@@ -172,8 +172,14 @@ void Bf3UiScreens::follow(host::UiFlowSession *p_session) {
 	session_ = p_session;
 }
 
+void Bf3UiScreens::set_options(const ui::OptionsModel *p_options) {
+	options_ = p_options;
+	client_.options = p_options;
+}
+
 void Bf3UiScreens::set_client(ui::HudClientState p_client) {
 	client_ = std::move(p_client);
+	client_.options = options_;
 	client_.flow_data = [this](std::string_view p_category, int32_t p_key) -> std::optional<std::string> {
 		return session_ != nullptr ? session_->data(p_category, p_key) : std::nullopt;
 	};

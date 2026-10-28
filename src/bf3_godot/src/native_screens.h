@@ -80,6 +80,7 @@ public:
 	void set_manual(bool p_manual) { manual_ = p_manual; }
 	void set_model(const bf3::core::ui::HudModel &p_model) { model_ = p_model; }
 	void set_client(bf3::core::ui::HudClientState p_client);
+	void set_options(const bf3::core::ui::OptionsModel *p_options);
 	bf3::core::Status open_movie_screen(std::string_view p_movie, bf3::core::ui::HudRootData *p_data);
 	bf3::core::ui::HudScreen *hud_screen(std::string_view p_partition);
 	Bf3SwfView *screen_view(std::string_view p_partition);
@@ -155,6 +156,7 @@ private:
 	std::string pressed_screen_;
 	bf3::core::ui::HudModel model_{};
 	bf3::core::ui::HudClientState client_;
+	const bf3::core::ui::OptionsModel *options_ = nullptr;
 	UiScreensStats stats_;
 	std::vector<std::string> errors_;
 	std::vector<std::string> log_;

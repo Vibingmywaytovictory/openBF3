@@ -190,6 +190,11 @@ target_sources(bf3_godot PRIVATE
 )
 
 target_sources(bf3_godot PRIVATE
+    src/native_options.cpp
+    src/native_options.h
+)
+
+target_sources(bf3_godot PRIVATE
     src/iff_frame.h
     src/iff_frame.cpp
 )

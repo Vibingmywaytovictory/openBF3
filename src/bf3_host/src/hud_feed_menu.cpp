@@ -26,7 +26,6 @@ void feed_menu(Frame &r_frame) {
 				e.enabled = r_frame.match && alive && fighting;
 				break;
 			case ui::HudMenuAction::Squad:
-			case ui::HudMenuAction::Options:
 				e.enabled = false;
 				break;
 			default:

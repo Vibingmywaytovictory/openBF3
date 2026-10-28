@@ -131,6 +131,7 @@ public:
 	void select_tab(uint8_t p_tab);
 	void select_key_tab(uint8_t p_tab);
 	void select_key_column(uint8_t p_column);
+	uint8_t key_column() const { return key_column_; }
 
 	bool set_option_value(int32_t p_data_key, double p_value);
 	bool change(std::string_view p_source, double p_value);

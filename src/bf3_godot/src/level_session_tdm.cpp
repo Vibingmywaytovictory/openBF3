@@ -12,6 +12,7 @@
 #include "native_eor.h"
 #include "native_flow.h"
 #include "native_hud.h"
+#include "native_options.h"
 #include "native_screens.h"
 #include "overlay_screens.h"
 #include "ui_assets.h"
@@ -216,6 +217,9 @@ void build_tdm_ui(
 		r_m.native_menu->build(*screens);
 		r_m.native_eor = std::unique_ptr<NativeEor, void (*)(NativeEor *)>(new NativeEor(), &delete_part<NativeEor>);
 		r_m.native_eor->build(*screens);
+		r_m.native_options = std::unique_ptr<NativeOptions, void (*)(NativeOptions *)>(
+				new NativeOptions(), &delete_part<NativeOptions>);
+		r_m.native_options->build(*screens);
 	}
 	r_m.death_camera = std::unique_ptr<Bf3DeathCamera, void (*)(Bf3DeathCamera *)>(
 			new Bf3DeathCamera(p_death != nullptr ? death_camera_params(*p_death) : DeathCameraParams{}),
@@ -272,11 +276,21 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 					*flow.session(), r_game.hud_model, r_m.scoreboard_held, r_m.spawn_kit)) {
 			r_m.spawn_kit = *kit;
 		}
+		NativeOptions *options = r_game.settings != nullptr ? r_m.native_options.get() : nullptr;
+		if (options != nullptr) {
+			options->feed(*flow.session(), r_game.settings->session());
+		}
 		if (const bf3::core::Status s = flow.tick(st, r_m.native_delta_s); !s && !r_m.native_failure_printed) {
 			r_m.native_failure_printed = true;
 			UtilityFunctions::print(to_godot("[ui] ERROR native screens: " + s.error().message));
 		}
+		if (options != nullptr) {
+			options->apply_writes(*flow.session(), r_game.settings->session());
+		}
 		for (const bf3::core::ui::UiFlowAction &a : flow.take_actions()) {
+			if (options != nullptr && options->take(a, *flow.session(), r_game.settings->session())) {
+				continue;
+			}
 			if (r_m.deploy_screens.take_action(a)) {
 				r_m.deploy_click = true;
 			} else if (r_m.native_eor == nullptr || !r_m.native_eor->take(a)) {
@@ -284,6 +298,9 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 					r_m.native_menu->take(a);
 				}
 			}
+		}
+		if (options != nullptr) {
+			options->update_model(r_game.settings->session());
 		}
 	}
 }
@@ -324,6 +341,8 @@ void Bf3LevelSession::tdm_ui_input(const Ref<InputEvent> &p_event) {
 		return;
 	}
 	const bf3::core::ui::UiInputRouter &router = m.native_flow->router();
+	NativeOptions *options = game_->settings != nullptr ? m.native_options.get() : nullptr;
+	const bool capturing = options != nullptr && options->capturing() && m.native_flow->session() != nullptr;
 	if (const InputEventKey *k = Object::cast_to<InputEventKey>(p_event.ptr())) {
 		if (k->is_echo()) {
 			return;
@@ -331,6 +350,9 @@ void Bf3LevelSession::tdm_ui_input(const Ref<InputEvent> &p_event) {
 		const Key code = k->get_physical_keycode() != KEY_NONE ? k->get_physical_keycode() : k->get_keycode();
 		const std::string idk = ui_idk_of_key(code, k->get_location());
 		if (idk.empty()) {
+			return;
+		}
+		if (capturing && k->is_pressed() && options->key(idk, *m.native_flow->session(), game_->settings->session())) {
 			return;
 		}
 		screens->key(bf3::core::ui::ui_flash_key_code(idk), k->is_pressed());
@@ -344,6 +366,10 @@ void Bf3LevelSession::tdm_ui_input(const Ref<InputEvent> &p_event) {
 				screens->mouse_wheel(mb->get_position(),
 						b == MOUSE_BUTTON_WHEEL_UP ? kUiWheelLinesPerNotch : -kUiWheelLinesPerNotch);
 			}
+			return;
+		}
+		if (const std::string_view idb = ui_idb_of_button(b); capturing && mb->is_pressed() && !idb.empty() &&
+				options->key(idb, *m.native_flow->session(), game_->settings->session())) {
 			return;
 		}
 		screens->mouse_button(mb->get_position(), int32_t(b), mb->is_pressed());
@@ -1020,11 +1046,13 @@ void Bf3LevelSession::tdm_shutdown() {
 		screens->follow(nullptr);
 		screens->set_resolver(nullptr);
 		screens->adopt(nullptr);
+		screens->set_options(nullptr);
 	}
 	m.ui_screens_id = 0;
 	m.native_check.reset();
 	m.loading_check.reset();
 	m.native_eor.reset();
+	m.native_options.reset();
 	m.native_flow.reset();
 	if (m.tdm_hud != nullptr) {
 		m.screen_records.remove(m.tdm_hud.get());

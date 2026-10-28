@@ -8,7 +8,6 @@
 #include "swf_view.h"
 
 #include "bf3/core/ui/hud_screen.h"
-#include "bf3/core/ui/options.h"
 #include "bf3/core/ui/swf_hit.h"
 #include "bf3/core/ui/swf_scene.h"
 
@@ -224,18 +223,10 @@ std::vector<MenuCheck::Step> MenuCheck::steps() {
 	s.push_back({ "Down skips SQUAD & TEAM to SUICIDE",
 			[](MenuCheck &, const Ctx &c) { return row_state(c, 2) == "inactive" && row_state(c, 3) == "selected"; },
 			press(K::KEY_DOWN) });
-	s.push_back({ "Down skips the disabled OPTIONS to QUIT",
-			[](MenuCheck &, const Ctx &c) { return row_state(c, 4) == "inactive" && row_state(c, 5) == "selected"; },
-			[](MenuCheck &r_self, const Ctx &c) { r_self.click_row(c, 4, false); } });
-	s.push_back({ "a click on OPTIONS opens nothing",
-			[](MenuCheck &, const Ctx &c) { return shown(c, kIngameMenuPartition) && row_state(c, 4) == "inactive"; },
+	s.push_back({ "Down highlights OPTIONS", row_is(4, "selected"), press(K::KEY_DOWN) });
+	s.push_back({ "Down highlights QUIT",
+			[](MenuCheck &, const Ctx &c) { return shown(c, kIngameMenuPartition) && row_state(c, 5) == "selected"; },
 			[](MenuCheck &r_self, const Ctx &c) {
-				const bool options = std::any_of(bf3::core::ui::kOptionsScreens.begin(),
-						bf3::core::ui::kOptionsScreens.end(), [&c](std::string_view p) { return shown(c, p); });
-				if (options || !shown(c, kIngameMenuPartition)) {
-					r_self.failure_ = "the disabled OPTIONS row left the menu";
-					return;
-				}
 				if (const std::optional<godot::Vector2> at = row_point(c, 1)) {
 					c.io.move(*at);
 				} else {
