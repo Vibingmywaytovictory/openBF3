@@ -24,6 +24,7 @@ CanvasLayer *make_layer(Node *p_parent, const char *p_name, int32_t p_layer, RID
 	p_parent->add_child(layer);
 	r_item = RenderingServer::get_singleton()->canvas_item_create();
 	RenderingServer::get_singleton()->canvas_item_set_parent(r_item, layer->get_canvas());
+	RenderingServer::get_singleton()->canvas_item_set_visible(r_item, false);
 	return layer;
 }
 
@@ -98,16 +99,18 @@ void EorFlash::frame(Node *p_parent, const core::gameplay::EorFading &p_fading,
 	if (black >= 1.0f) {
 		++stats_.black_frames;
 	}
+	RenderingServer *rs = RenderingServer::get_singleton();
 	white_layer_->set_visible(visibility > 0.0f);
+	rs->canvas_item_set_visible(white_item_, visibility > 0.0f);
+	white_material_->set_shader_parameter("visibility", visibility);
 	if (visibility > 0.0f) {
-		white_material_->set_shader_parameter("visibility", visibility);
 		white_material_->set_shader_parameter("brightness", vec3_of(p_fading.brightness));
 		white_material_->set_shader_parameter("contrast", vec3_of(p_fading.contrast));
 		white_material_->set_shader_parameter("saturation", vec3_of(p_fading.saturation));
 	}
 	fade_layer_->set_visible(black > 0.0f);
+	rs->canvas_item_set_visible(fade_item_, black > 0.0f);
 	if (black > 0.0f && black != drawn_black_) {
-		RenderingServer *rs = RenderingServer::get_singleton();
 		rs->canvas_item_clear(fade_item_);
 		rs->canvas_item_add_rect(fade_item_, Rect2(Vector2(), Vector2(covered_w_, covered_h_)), Color(0, 0, 0, black));
 		drawn_black_ = black;
