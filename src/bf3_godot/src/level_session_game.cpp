@@ -11,6 +11,7 @@
 #include "hud_items.h"
 #include "native_hud.h"
 #include "ui_assets.h"
+#include "ui_stage.h"
 #include "viewmodel.h"
 #include "viewmodel_muzzle.h"
 
@@ -1317,7 +1318,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 				", others in the snapshot " + std::to_string(shown)));
 	}
 
-	const Vector2 vp = get_viewport() != nullptr ? get_viewport()->get_visible_rect().size : Vector2(1280, 720);
+	const Vector2 vp = ui_window_rect(this).size;
 	if (g.score_label != nullptr) {
 		char line[256];
 		std::snprintf(line, sizeof(line), "kills %u   deaths %u      US %u : RU %u", g.kills, g.deaths, g.team_kills[1], g.team_kills[2]);

@@ -117,11 +117,7 @@ std::optional<godot::Vector2> MenuCheck::row_point(const Ctx &p_c, size_t p_row,
 	if (!at) {
 		return std::nullopt;
 	}
-	const float sx = at->x;
-	const float sy = at->y;
-	const SwfStageFit fit = slot.view->stage_fit();
-	const godot::Vector2 local(float(fit.offset_x + sx * fit.scale_x), float(fit.offset_y + sy * fit.scale_y));
-	return slot.view->get_global_transform().xform(local);
+	return slot.view->stage_to_canvas(*at);
 }
 
 std::optional<godot::Rect2> MenuCheck::overview_rect(const Ctx &p_c) {
@@ -136,15 +132,13 @@ std::optional<godot::Rect2> MenuCheck::overview_rect(const Ctx &p_c) {
 	}
 	const ui::SwfRect &b = targets.front().local_bounds;
 	const ui::SwfMatrix w = ui::swf_world_matrix(*scene, targets.front().node);
-	const SwfStageFit fit = slot.view->stage_fit();
 	godot::Rect2 out;
 	bool first = true;
 	for (const auto &[x, y] : { std::pair{ b.x_min, b.y_min }, std::pair{ b.x_max, b.y_min },
 				 std::pair{ b.x_min, b.y_max }, std::pair{ b.x_max, b.y_max } }) {
 		const float sx = w.a * x + w.c * y + w.tx;
 		const float sy = w.b * x + w.d * y + w.ty;
-		const godot::Vector2 at = slot.view->get_global_transform().xform(
-				godot::Vector2(float(fit.offset_x + sx * fit.scale_x), float(fit.offset_y + sy * fit.scale_y)));
+		const godot::Vector2 at = slot.view->stage_to_canvas(ui::SwfPoint{ sx, sy });
 		out = first ? godot::Rect2(at, godot::Vector2()) : out.expand(at);
 		first = false;
 	}

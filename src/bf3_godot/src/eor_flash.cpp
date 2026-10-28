@@ -1,6 +1,7 @@
 #include "eor_flash.h"
 
 #include "ui_post_process.h"
+#include "ui_stage.h"
 
 #include <godot_cpp/classes/canvas_item.hpp>
 #include <godot_cpp/classes/canvas_layer.hpp>
@@ -51,7 +52,7 @@ void EorFlash::build(Node *p_parent) {
 }
 
 void EorFlash::cover(Node *p_parent) {
-	const Vector2 size = p_parent->get_viewport()->get_visible_rect().size;
+	const Vector2 size = ui_window_rect(p_parent).size;
 	if (size.x == covered_w_ && size.y == covered_h_) {
 		return;
 	}

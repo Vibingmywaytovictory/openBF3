@@ -6,6 +6,7 @@
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/kit_def.h"
 #include "bf3/core/install.h"
+#include "bf3/core/ui/ui_stage.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/text.h"
 #include "bf3/net/loopback_ping.h"
@@ -206,7 +207,7 @@ void NativeTags::update(const Camera3D *p_camera, bool p_show, Vector2 p_viewpor
 
 	const bool show = p_show && p_camera != nullptr && p_camera->is_inside_tree() && viewer.team != 0 && p_viewport_size.y > 0.0f;
 	if (show) {
-		canvas_scale_ = p_viewport_size.y / ui::kNametagStageHeight;
+		canvas_scale_ = float(ui::ui_stage_show_all(p_viewport_size.x, p_viewport_size.y).scale);
 		const Vector2 centre = p_viewport_size * 0.5f;
 		const Vector3 eye = p_camera->get_global_transform().origin;
 		const sim::CollisionWorld *world = session_->collision_world();

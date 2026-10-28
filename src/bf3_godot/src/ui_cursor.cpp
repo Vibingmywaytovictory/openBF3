@@ -1,6 +1,7 @@
 #include "ui_cursor.h"
 
 #include "ui_post_process.h"
+#include "ui_stage.h"
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -85,8 +86,7 @@ void Bf3UiCursor::_ready() {
 }
 
 float Bf3UiCursor::cursor_scale() const {
-	const Viewport *vp = get_viewport();
-	return vp != nullptr ? std::max(1e-3f, vp->get_visible_rect().size.y / kUiStageHeight) : 1.0f;
+	return std::max(1e-3f, float(ui_stage(this).scale));
 }
 
 void Bf3UiCursor::redraw() {

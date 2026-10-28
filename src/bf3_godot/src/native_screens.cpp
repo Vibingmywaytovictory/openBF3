@@ -4,6 +4,7 @@
 #include "native_hud.h"
 #include "swf_view.h"
 #include "ui_assets.h"
+#include "ui_stage.h"
 
 #include "bf3/core/ui/as2_clip.h"
 #include "bf3/core/ui/swf_hit.h"
@@ -257,7 +258,7 @@ bf3::core::Status Bf3UiScreens::open_entry(
 			return bf3::core::make_error(p_asset.movie + ": " + st.error().message);
 		}
 		scene = v->scene();
-		rects.visible = v->visible_rect();
+		rects.visible = ui_stage(this).visible;
 	} else {
 		bf3::core::Result<ui::SwfScene> made = ui::SwfScene::open(*assets->movies(), p_asset.movie);
 		if (!made) {
@@ -658,7 +659,7 @@ void Bf3UiScreens::step(double p_seconds) {
 		ui::SwfScene *scene = e->view != nullptr ? e->view->scene() : e->scene.get();
 		if (e->view != nullptr) {
 			ui::HudStageRects rects = e->screen->stage_rects();
-			rects.visible = e->view->visible_rect();
+			rects.visible = ui_stage(this).visible;
 			rects.original = scene->stage();
 			rects.safe_x = ui::hud_safe_offset(ui::kHudFootageSafeX, rects.visible.width(), safe_area_.width);
 			rects.safe_y = ui::hud_safe_offset(ui::kHudFootageSafeY, rects.visible.height(), safe_area_.height);
@@ -759,12 +760,8 @@ std::optional<Vector2> Bf3UiScreens::stage_point(const Entry &p_entry, Vector2 p
 	if (v == nullptr || !v->is_visible_in_tree()) {
 		return std::nullopt;
 	}
-	const Vector2 local = v->get_global_transform().affine_inverse().xform(p_viewport);
-	const SwfStageFit fit = v->stage_fit();
-	if (fit.scale_x == 0.0 || fit.scale_y == 0.0) {
-		return std::nullopt;
-	}
-	return Vector2(float((local.x - fit.offset_x) / fit.scale_x), float((local.y - fit.offset_y) / fit.scale_y));
+	const std::optional<ui::SwfPoint> at = v->canvas_to_stage(p_viewport);
+	return at ? std::optional<Vector2>(Vector2(at->x, at->y)) : std::nullopt;
 }
 
 std::vector<Bf3UiScreens::Entry *> Bf3UiScreens::mouse_screens() {
@@ -842,9 +839,7 @@ std::optional<Vector2> Bf3UiScreens::clip_centre(std::string_view p_partition, s
 	if (v == nullptr) {
 		return std::nullopt;
 	}
-	const SwfStageFit fit = v->stage_fit();
-	const Vector2 local(float(at->x * fit.scale_x + fit.offset_x), float(at->y * fit.scale_y + fit.offset_y));
-	return v->get_global_transform().xform(local);
+	return v->stage_to_canvas(*at);
 }
 
 bool Bf3UiScreens::mouse_wheel(Vector2 p_viewport, float p_delta) {

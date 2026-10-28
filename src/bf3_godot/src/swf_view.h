@@ -10,8 +10,11 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
+#include <godot_cpp/variant/rect2.hpp>
+
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -126,6 +129,9 @@ public:
 	godot::Vector2i target_size() const;
 	SwfStageFit stage_fit() const;
 	bf3::core::ui::SwfRect visible_rect() const;
+	godot::Rect2 present_rect() const;
+	std::optional<bf3::core::ui::SwfPoint> canvas_to_stage(godot::Vector2 p_canvas) const;
+	godot::Vector2 stage_to_canvas(bf3::core::ui::SwfPoint p_stage) const;
 	void set_msaa(godot::RenderingServer::ViewportMSAA p_msaa);
 
 	bf3::core::Status set_isolated(std::string_view p_path);

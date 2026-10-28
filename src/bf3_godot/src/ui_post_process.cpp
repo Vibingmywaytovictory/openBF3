@@ -4,6 +4,7 @@
 #include "godot_util.h"
 #include "overview_map.h"
 #include "ui_cursor.h"
+#include "ui_stage.h"
 
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/install.h"
@@ -283,7 +284,7 @@ CanvasLayer *Bf3UiPostProcess::make_layer(
 
 void Bf3UiPostProcess::cover(RID p_item) {
 	RenderingServer *rs = RenderingServer::get_singleton();
-	const Vector2 size = get_viewport()->get_visible_rect().size;
+	const Vector2 size = ui_window_rect(this).size;
 	rs->canvas_item_clear(p_item);
 	rs->canvas_item_add_rect(p_item, Rect2(Vector2(), size), Color(1, 1, 1, 1));
 }
@@ -430,13 +431,13 @@ void Bf3UiPostProcess::apply() {
 	if (!built_ || failed_) {
 		return;
 	}
-	const Vector2 size = get_viewport()->get_visible_rect().size;
+	const Vector2 size = ui_window_rect(this).size;
 	if (size != covered_) {
 		cover(grade_item_);
 		cover(glitch_item_);
 		covered_ = size;
 	}
-	const float scale = std::max(1e-3f, size.y / kUiStageHeight);
+	const float scale = std::max(1e-3f, float(ui_stage(this).scale));
 	const float power = glitch_power();
 	glitch_layer_->set_visible(power > 0.0f);
 	glitch_material_->set_shader_parameter("power", power);

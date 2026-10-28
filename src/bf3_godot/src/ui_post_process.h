@@ -23,7 +23,6 @@ namespace bf3::godot_side {
 inline constexpr int32_t kUiGradeLayer = 0;
 inline constexpr int32_t kUiGlitchLayer = 100;
 inline constexpr int32_t kUiCursorLayer = 101;
-inline constexpr float kUiStageHeight = 720.0f;
 
 godot::Vector3 vec3_of(const std::array<float, 3> &p_v);
 

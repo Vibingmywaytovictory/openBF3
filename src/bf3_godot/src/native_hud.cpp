@@ -6,6 +6,7 @@
 #include "minimap_hud.h"
 #include "swf_view.h"
 #include "ui_assets.h"
+#include "ui_stage.h"
 
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/install.h"
@@ -309,7 +310,7 @@ bf3::core::Status Bf3NativeHud::open_view(size_t p_index) {
 		return bf3::core::make_error(asset.movie + ": " + st.error().message);
 	}
 	ui::HudStageRects rects;
-	rects.visible = v->visible_rect();
+	rects.visible = ui_stage(this).visible;
 	rects.original = v->scene()->stage();
 	rects.safe_x = ui::hud_safe_offset(ui::kHudFootageSafeX, rects.visible.width(), safe_area_.width);
 	rects.safe_y = ui::hud_safe_offset(ui::kHudFootageSafeY, rects.visible.height(), safe_area_.height);
@@ -579,7 +580,7 @@ void Bf3NativeHud::step(double p_seconds) {
 			continue;
 		}
 		ui::HudStageRects rects = s->stage_rects();
-		rects.visible = v->visible_rect();
+		rects.visible = ui_stage(this).visible;
 		rects.original = v->scene()->stage();
 		rects.safe_x = ui::hud_safe_offset(ui::kHudFootageSafeX, rects.visible.width(), safe_area_.width);
 		rects.safe_y = ui::hud_safe_offset(ui::kHudFootageSafeY, rects.visible.height(), safe_area_.height);
@@ -604,7 +605,7 @@ void Bf3NativeHud::step(double p_seconds) {
 		paint(i);
 	}
 	if (tags_ != nullptr) {
-		tags_->update(world_camera_, world_show_ && is_visible_in_tree(), get_viewport_rect().size);
+		tags_->update(world_camera_, world_show_ && is_visible_in_tree(), ui_window_rect(this).size);
 		paint_tags();
 	}
 }
@@ -689,13 +690,6 @@ std::optional<ui::SwfRect> Bf3NativeHud::window_bounds(size_t p_view, std::strin
 	if (root == nullptr || !root->world_visible) {
 		return std::nullopt;
 	}
-	const ui::SwfRect vis = v->visible_rect();
-	const Rect2 win = v->get_viewport() != nullptr ? v->get_viewport()->get_visible_rect() : Rect2();
-	if (!(vis.width() > 0.0f) || !(vis.height() > 0.0f) || !(win.size.x > 0.0f)) {
-		return std::nullopt;
-	}
-	const float sx = win.size.x / vis.width();
-	const float sy = win.size.y / vis.height();
 	std::optional<ui::SwfRect> out;
 	std::vector<const ui::SwfSceneNode *> stack{ root };
 	while (!stack.empty()) {
@@ -729,8 +723,10 @@ std::optional<ui::SwfRect> Bf3NativeHud::window_bounds(size_t p_view, std::strin
 		}
 		const ui::SwfMatrix &m = n->world;
 		for (const ui::SwfPoint &q : local) {
-			const float wx = win.position.x + (m.a * q.x + m.c * q.y + m.tx - vis.x_min) * sx;
-			const float wy = win.position.y + (m.b * q.x + m.d * q.y + m.ty - vis.y_min) * sy;
+			const Vector2 at =
+					v->stage_to_canvas(ui::SwfPoint{ m.a * q.x + m.c * q.y + m.tx, m.b * q.x + m.d * q.y + m.ty });
+			const float wx = at.x;
+			const float wy = at.y;
 			if (!out) {
 				out = ui::SwfRect{ wx, wx, wy, wy };
 			} else {

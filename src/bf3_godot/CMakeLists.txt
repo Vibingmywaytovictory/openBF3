@@ -214,6 +214,11 @@ target_sources(bf3_godot PRIVATE
     src/overview_map.h
 )
 
+target_sources(bf3_godot PRIVATE
+    src/ui_stage.cpp
+    src/ui_stage.h
+)
+
 if(OPENBF3_BUILD_CHECKS)
     target_sources(bf3_godot PRIVATE
         src/audio_demo.cpp

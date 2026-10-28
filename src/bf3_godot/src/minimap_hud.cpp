@@ -5,6 +5,7 @@
 #include "input_mapper.h"
 #include "level_session.h"
 #include "minimap_control.h"
+#include "ui_stage.h"
 #include "world_icons.h"
 
 #if OPENBF3_BUILD_CHECKS
@@ -466,7 +467,7 @@ void Bf3MinimapHud::build_godot_side() {
 }
 
 void Bf3MinimapHud::layout_controls() {
-	const Rect2 vis = get_viewport()->get_visible_rect();
+	const Rect2 vis = ui_window_rect(this);
 	if (control_ != nullptr) {
 		const float scale = std::max(1e-3f, std::fabs(get_viewport()->get_final_transform().get_scale().y));
 		const float side = size_px_ > 0 ? float(size_px_) / scale : kDefaultSidePer1080 / 1080.0f * vis.size.y;

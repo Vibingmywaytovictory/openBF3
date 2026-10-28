@@ -2,6 +2,7 @@
 
 #include "godot_util.h"
 #include "ui_assets.h"
+#include "ui_stage.h"
 #include "ui_textures.h"
 
 #include "bf3/core/level/budget.h"
@@ -1008,9 +1009,12 @@ struct Bf3SwfView::Impl {
 		double kx = tw / w;
 		double ky = th / h;
 		switch (scale_mode) {
-			case SwfScaleMode::ShowAll:
-				kx = ky = std::min(kx, ky);
-				break;
+			case SwfScaleMode::ShowAll: {
+				const ui::UiStage s = ui::ui_stage_show_all(st, float(tw), float(th));
+				fit = SwfStageFit{ s.scale, s.scale, s.offset_x, s.offset_y };
+				stage_to_window = ui::SwfAffine{ s.scale, 0.0, 0.0, s.scale, s.offset_x, s.offset_y };
+				return;
+			}
 			case SwfScaleMode::NoBorder:
 				kx = ky = std::max(kx, ky);
 				break;
@@ -2422,10 +2426,8 @@ struct Bf3SwfView::Impl {
 		}
 		const auto t0 = std::chrono::steady_clock::now();
 		if (!explicit_size && owner->is_inside_tree() && owner->get_viewport() != nullptr) {
-			Viewport *vp = owner->get_viewport();
-			const Rect2 vis = vp->get_visible_rect();
-			const Vector2 k = vp->get_final_transform().get_scale();
-			const Vector2i s(std::max(1, int32_t(std::lround(vis.size.x * std::fabs(k.x)))), std::max(1, int32_t(std::lround(vis.size.y * std::fabs(k.y)))));
+			const Rect2 vis = ui_window_rect(owner);
+			const Vector2i s = ui_window_pixels(owner);
 			if (vis != present_rect) {
 				present_rect = vis;
 				structure_dirty = true;
@@ -2712,6 +2714,33 @@ Vector2i Bf3SwfView::target_size() const {
 
 SwfStageFit Bf3SwfView::stage_fit() const {
 	return impl_->fit;
+}
+
+Rect2 Bf3SwfView::present_rect() const {
+	return impl_->explicit_size ? Rect2(0.0f, 0.0f, real_t(impl_->target_size.x), real_t(impl_->target_size.y))
+								: impl_->present_rect;
+}
+
+std::optional<ui::SwfPoint> Bf3SwfView::canvas_to_stage(Vector2 p_canvas) const {
+	const SwfStageFit &f = impl_->fit;
+	const Rect2 at = present_rect();
+	if (f.scale_x == 0.0 || f.scale_y == 0.0 || !(at.size.x > 0.0f) || !(at.size.y > 0.0f)) {
+		return std::nullopt;
+	}
+	const Vector2 local = p_canvas - at.position;
+	const double px = double(local.x) * double(impl_->target_size.x) / double(at.size.x);
+	const double py = double(local.y) * double(impl_->target_size.y) / double(at.size.y);
+	return ui::SwfPoint{ float((px - f.offset_x) / f.scale_x), float((py - f.offset_y) / f.scale_y) };
+}
+
+Vector2 Bf3SwfView::stage_to_canvas(ui::SwfPoint p_stage) const {
+	const SwfStageFit &f = impl_->fit;
+	const Rect2 at = present_rect();
+	const double px = double(p_stage.x) * f.scale_x + f.offset_x;
+	const double py = double(p_stage.y) * f.scale_y + f.offset_y;
+	const Vector2 local(float(px * double(at.size.x) / double(std::max(1, impl_->target_size.x))),
+			float(py * double(at.size.y) / double(std::max(1, impl_->target_size.y))));
+	return local + at.position;
 }
 
 ui::SwfRect Bf3SwfView::visible_rect() const {

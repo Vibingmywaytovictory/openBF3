@@ -13,7 +13,6 @@ namespace bf3::core::ui {
 
 inline constexpr std::string_view kNametagCompPartition = "ui/uicomponents/uinametagcomp";
 inline constexpr std::string_view kSoldierBlueprintPartition = "characters/soldiers/mpsoldier";
-inline constexpr float kNametagStageHeight = 720.0f;
 
 struct NametagStyle {
 	std::array<float, 4> friendly_tint{ 0.0f, 0.8f, 0.8f, 1.0f };
