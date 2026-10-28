@@ -216,6 +216,7 @@ public:
 	bool widget_fired(uint64_t p_screen, std::string_view p_instance, std::string_view p_query,
 			std::optional<std::string> p_value = std::nullopt);
 	bool input_action(int32_t p_action);
+	std::optional<uint64_t> concept_screen(int32_t p_action) const;
 	void screen_initialized(uint64_t p_screen);
 	void screen_exited(uint64_t p_screen);
 	bool close_graph(std::string_view p_graph);
@@ -236,6 +237,7 @@ public:
 
 private:
 	struct Instance;
+	Instance *live_instance(std::string_view p_graph) const;
 	Instance *instance_of(std::string_view p_graph, bool p_create);
 	Instance *screen_instance(uint64_t p_screen);
 	void begin_call();

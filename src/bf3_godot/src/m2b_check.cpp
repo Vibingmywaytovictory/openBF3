@@ -117,22 +117,10 @@ struct M2bCheck::State {
 		if (!can_spawn || *can_spawn != "True" || deploy == nullptr || !deploy->initialized || !deploy->shown) {
 			return std::nullopt;
 		}
-		std::vector<const bf3::core::ui::UiFlowScreen *> order;
-		if (const std::optional<uint64_t> f = flow.focused()) {
-			order.push_back(flow.screen(*f));
-		}
-		for (auto it = flow.screens().rbegin(); it != flow.screens().rend(); ++it) {
-			order.push_back(&*it);
-		}
-		for (const bf3::core::ui::UiFlowScreen *sc : order) {
-			if (sc == nullptr || sc->exiting || !sc->shown) {
-				continue;
-			}
-			if (sc->id == deploy->id) {
-				return deploy->id;
-			}
-			if (sc->modal) {
-				return std::nullopt;
+		for (const bf3::core::ui::UiInputConcept c :
+				m.native_flow->router().concepts_of_key(ui_idk_of_key(godot::KEY_ENTER))) {
+			if (const std::optional<uint64_t> reached = flow.concept_screen(int32_t(c))) {
+				return *reached == deploy->id ? reached : std::nullopt;
 			}
 		}
 		return std::nullopt;

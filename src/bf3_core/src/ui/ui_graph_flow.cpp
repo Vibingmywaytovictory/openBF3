@@ -133,11 +133,18 @@ void UiFlow::error(std::string p_line) {
 	}
 }
 
-UiFlow::Instance *UiFlow::instance_of(std::string_view p_graph, bool p_create) {
+UiFlow::Instance *UiFlow::live_instance(std::string_view p_graph) const {
 	for (const std::unique_ptr<Instance> &i : instances_) {
 		if (!i->dead && i->screen == 0 && i->graph == p_graph) {
 			return i.get();
 		}
+	}
+	return nullptr;
+}
+
+UiFlow::Instance *UiFlow::instance_of(std::string_view p_graph, bool p_create) {
+	if (Instance *live = live_instance(p_graph)) {
+		return live;
 	}
 	if (!p_create) {
 		return nullptr;
@@ -659,8 +666,7 @@ bool UiFlow::widget_fired(
 	return found;
 }
 
-bool UiFlow::input_action(int32_t p_action) {
-	begin_call();
+std::optional<uint64_t> UiFlow::concept_screen(int32_t p_action) const {
 	std::vector<uint64_t> order;
 	if (focus_) {
 		order.push_back(*focus_);
@@ -670,35 +676,49 @@ bool UiFlow::input_action(int32_t p_action) {
 			order.push_back(it->id);
 		}
 	}
-	bool found = false;
 	for (const uint64_t target : order) {
 		const UiFlowScreen *s = screen(target);
 		if (s == nullptr || s->exiting) {
 			continue;
 		}
-		const bool modal = s->modal;
-		Instance *owner = instance_of(s->graph, false);
+		const Instance *owner = live_instance(s->graph);
 		if (owner != nullptr && s->state_node < owner->asset->nodes.size()) {
-			const std::shared_ptr<const UiGraphAsset> asset = owner->asset;
-			const uint32_t node = s->state_node;
-			const UiGraphNode &n = asset->nodes[node];
-			const std::string where = leaf(s->partition);
-			for (uint32_t p = 0; p < n.ports.size() && !owner->dead; ++p) {
-				if (n.ports[p].role == UiGraphPortRole::Output && n.ports[p].input_action == p_action) {
-					if (!found) {
-						note("concept " + where + " " + n.ports[p].input_event);
-					}
-					found = true;
-					follow(*owner, node, p, std::nullopt);
+			for (const UiGraphPort &port : owner->asset->nodes[s->state_node].ports) {
+				if (port.role == UiGraphPortRole::Output && port.input_action == p_action) {
+					return target;
 				}
 			}
 		}
-		if (found || modal) {
-			break;
+		if (s->modal) {
+			return std::nullopt;
+		}
+	}
+	return std::nullopt;
+}
+
+bool UiFlow::input_action(int32_t p_action) {
+	begin_call();
+	const std::optional<uint64_t> target = concept_screen(p_action);
+	if (target) {
+		const UiFlowScreen &s = *screen(*target);
+		Instance &owner = *live_instance(s.graph);
+		const std::shared_ptr<const UiGraphAsset> asset = owner.asset;
+		const uint32_t node = s.state_node;
+		const std::string where = leaf(s.partition);
+		const UiGraphNode &n = asset->nodes[node];
+		bool noted = false;
+		for (uint32_t p = 0; p < n.ports.size() && !owner.dead; ++p) {
+			if (n.ports[p].role == UiGraphPortRole::Output && n.ports[p].input_action == p_action) {
+				if (!noted) {
+					note("concept " + where + " " + n.ports[p].input_event);
+					noted = true;
+				}
+				follow(owner, node, p, std::nullopt);
+			}
 		}
 	}
 	end_call();
-	return found;
+	return target.has_value();
 }
 
 void UiFlow::screen_initialized(uint64_t p_screen) {

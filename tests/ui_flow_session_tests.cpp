@@ -153,6 +153,10 @@ TEST_SUITE("ui-flow-session") {
 		sc.state.joined = true;
 		sc.run_to(60);
 		const Lines join = sc.phase("join");
+		const ui::UiFlowScreen *deploy_screen = s.flow().find_screen(ui::kSpawnScreenPcPartition);
+		REQUIRE(deploy_screen != nullptr);
+		CHECK(s.flow().focused() != deploy_screen->id);
+		CHECK(s.flow().concept_screen(int32_t(ui::UiInputConcept::Activate)) == deploy_screen->id);
 		sc.input(ui::UiInputConcept::Activate);
 		sc.run_to(100);
 		sc.state.own_spawns = 1;
@@ -168,6 +172,10 @@ TEST_SUITE("ui-flow-session") {
 		sc.input(ui::UiInputConcept::Menu);
 		sc.run_to(540);
 		const Lines menu = sc.phase("menu");
+		const std::optional<uint64_t> menu_target = s.flow().concept_screen(int32_t(ui::UiInputConcept::Deactivate));
+		REQUIRE(menu_target.has_value());
+		CHECK(ui::ui_data_category_leaf(s.flow().screen(*menu_target)->partition) == "ingamemenump");
+		CHECK_FALSE(s.flow().concept_screen(int32_t(ui::UiInputConcept::Tab)).has_value());
 		sc.input(ui::UiInputConcept::Deactivate);
 		sc.run_to(600);
 		const Lines resume = sc.phase("resume");
