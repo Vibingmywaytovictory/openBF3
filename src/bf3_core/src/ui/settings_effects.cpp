@@ -53,6 +53,9 @@ SettingsEffects settings_effects(const SettingsStore &p_store) {
 	e.look_scale = sensitivity_default > 0.0
 			? float(std::max(0.0, p_store.value(kMouseSensitivityOption)) / sensitivity_default)
 			: 1.0f;
+	const double fov_default = p_store.default_value(kFieldOfViewOption);
+	const double fov = p_store.value(kFieldOfViewOption);
+	e.fov_scale = fov_default > 0.0 && fov > 0.0 ? float(fov / fov_default) : 1.0f;
 	e.invert_look = p_store.value(kFlipLookOption) != 0.0;
 	e.hold_to_zoom = p_store.value(kHoldToZoomOption) != 0.0;
 	e.video.fullscreen = p_store.applied_value(kFullscreenOption) != 0.0;

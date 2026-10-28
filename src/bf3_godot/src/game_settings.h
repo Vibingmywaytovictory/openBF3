@@ -49,6 +49,7 @@ public:
 	void read_display();
 	core::Status frame(InputMapper &r_mapper, audio::MixerCore *p_mixer, const std::string &p_path);
 	size_t missed_inputs() const { return missed_inputs_; }
+	float fov_scale() const { return fov_scale_; }
 
 private:
 	GameSettings() = default;
@@ -61,6 +62,7 @@ private:
 	uint64_t written_revision_ = 0;
 	core::ui::VideoEffects video_shown_;
 	size_t missed_inputs_ = 0;
+	float fov_scale_ = 1.0f;
 };
 
 }

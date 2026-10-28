@@ -55,6 +55,7 @@ inline constexpr std::string_view kHoldToZoomOption = "HoldButtonToZoom";
 inline constexpr std::string_view kFullscreenOption = "FullscreenEnabled";
 inline constexpr std::string_view kMonitorOption = "FullscreenScreen";
 inline constexpr std::string_view kVSyncOption = "VSync";
+inline constexpr std::string_view kFieldOfViewOption = "FieldOfView";
 
 inline constexpr size_t kMasterBusCount = size_t(audio::MasterBus::Unknown);
 
@@ -70,6 +71,7 @@ struct VideoEffects {
 struct SettingsEffects {
 	std::array<float, kMasterBusCount> bus_gains{};
 	float look_scale = 1.0f;
+	float fov_scale = 1.0f;
 	bool invert_look = false;
 	bool hold_to_zoom = true;
 	VideoEffects video;

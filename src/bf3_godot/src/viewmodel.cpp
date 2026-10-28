@@ -336,7 +336,7 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 	bf3::anim::model_pose(set_->rig, pose_, model_);
 
 	ViewEffects fx;
-	fx.world_fov_deg = ads_frame_.world_fov;
+	fx.world_fov_deg = world_fov();
 	fx.recoil_pitch_deg = p_frame.recoil_pitch_deg;
 	fx.recoil_yaw_deg = p_frame.recoil_yaw_deg;
 	fx.kick_pitch_deg = output_.camera_recoil_pitch_deg;

@@ -284,6 +284,7 @@ OptionsCatalog effects_catalog() {
 	c.stored.push_back(numeric("MouseSensitivity", ProfileOptionKind::Float, 0.0, 1.5, 0.01, 0.5));
 	c.stored.push_back(numeric("Scheme0FlipY", ProfileOptionKind::Bool, 0.0, 1.0, 1.0, 0.0));
 	c.stored.push_back(numeric("HoldButtonToZoom", ProfileOptionKind::Bool, 0.0, 1.0, 1.0, 1.0));
+	c.stored.push_back(numeric("FieldOfView", ProfileOptionKind::Int, 60.0, 90.0, 1.0, 70.0));
 	c.stored.push_back(numeric("VSync", ProfileOptionKind::Bool, 0.0, 1.0, 1.0, 0.0));
 	c.stored.push_back(numeric(kResolutionWidth, ProfileOptionKind::Int, 0.0, 100000.0, 1.0, 0.0));
 	c.stored.push_back(numeric(kResolutionHeight, ProfileOptionKind::Int, 0.0, 100000.0, 1.0, 0.0));
@@ -632,6 +633,7 @@ TEST_SUITE("ui-settings-unit") {
 			CHECK(g == 1.0f);
 		}
 		CHECK(e.look_scale == 1.0f);
+		CHECK(e.fov_scale == 1.0f);
 		CHECK_FALSE(e.invert_look);
 		CHECK(e.hold_to_zoom);
 		CHECK(e.video == VideoEffects{});
@@ -641,6 +643,7 @@ TEST_SUITE("ui-settings-unit") {
 		REQUIRE(s.set_value("MouseSensitivity", 1.0));
 		REQUIRE(s.set_value("Scheme0FlipY", 1.0));
 		REQUIRE(s.set_value("HoldButtonToZoom", 0.0));
+		REQUIRE(s.set_value("FieldOfView", 84.0));
 		REQUIRE(s.set_value("VSync", 1.0));
 		REQUIRE(s.set_value("FullscreenEnabled", 1.0));
 		REQUIRE(s.set_display_mode(1280, 720, 60));
@@ -652,6 +655,7 @@ TEST_SUITE("ui-settings-unit") {
 		CHECK(e.bus_gains[size_t(audio::MasterBus::Dialog)] == 0.0f);
 		CHECK(e.bus_gains[size_t(audio::MasterBus::NarrVoice)] == 0.0f);
 		CHECK(e.look_scale == 2.0f);
+		CHECK(e.fov_scale == doctest::Approx(1.2f));
 		CHECK(e.invert_look);
 		CHECK_FALSE(e.hold_to_zoom);
 		CHECK(e.video.vsync);

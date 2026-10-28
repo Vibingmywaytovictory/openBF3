@@ -1066,6 +1066,9 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 	g.prev_yaw = view.yaw;
 	g.prev_pitch = view.pitch;
 	g.prev_view_valid = true;
+	if (own_vm != nullptr && g.settings != nullptr) {
+		own_vm->set_fov_scale(g.settings->fov_scale());
+	}
 	if (own_vm != nullptr && camera != nullptr) {
 		const bool show = g.alive && g.weapon.valid && !free_camera;
 		if (show) {
