@@ -1137,6 +1137,7 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(f.brightness == std::array<float, 3>{ 20.0f, 20.0f, 20.0f });
 		CHECK(f.contrast == std::array<float, 3>{ 1.0f, 1.0f, 1.0f });
 		CHECK(f.saturation == std::array<float, 3>{ 0.0f, 0.0f, 0.0f });
+		CHECK(f.visual_environment == "fx/visualenviroments/fullscreen/ve_whitescreen");
 		CHECK(f.visibility_at(0.375f) == doctest::Approx(0.5f));
 		CHECK(f.visibility_at(1.0f) == 1.0f);
 		CHECK(f.visibility_at(1.25f) == 0.0f);

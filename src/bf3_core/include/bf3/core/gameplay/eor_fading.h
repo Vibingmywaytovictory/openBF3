@@ -5,6 +5,9 @@
 #include "bf3/core/result.h"
 
 #include <array>
+#include <cstdint>
+#include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -26,6 +29,7 @@ struct EorFading {
 	std::array<float, 3> brightness{ 1.0f, 1.0f, 1.0f };
 	std::array<float, 3> contrast{ 1.0f, 1.0f, 1.0f };
 	std::array<float, 3> saturation{ 1.0f, 1.0f, 1.0f };
+	std::string visual_environment;
 
 	float visibility_at(float p_seconds) const;
 	float screen_black_at(float p_seconds) const;
@@ -34,4 +38,7 @@ struct EorFading {
 
 Result<EorFading> read_eor_fading(const EbxResolver &p_db, level::WorkBudget &r_budget);
 
+Result<std::vector<EorFadingKey>> read_sequence_float_track(
+		const EbxResolver &p_db, const EbxInstance &p_sequence, int32_t p_track);
+float eor_fading_key_at(std::span<const EorFadingKey> p_keys, float p_seconds);
 }

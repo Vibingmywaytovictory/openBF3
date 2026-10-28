@@ -66,12 +66,14 @@ std::optional<EbxInstance> ref_of(const EbxResolver &p_db, const EbxInstance &p_
 	return r ? p_db.resolve(p_from.partition(), *r) : std::nullopt;
 }
 
-Status read_visibility(const EbxResolver &p_db, const EbxInstance &p_sequence, int32_t p_track,
-		const std::string &p_where, EorFading &r_out) {
+}
+
+Result<std::vector<EorFadingKey>> read_sequence_float_track(
+		const EbxResolver &p_db, const EbxInstance &p_sequence, int32_t p_track) {
 	const std::optional<EbxValue> tracks = p_sequence.get("PropertyTracks");
 	const OptionalEbxArray list = tracks ? tracks->as_array() : OptionalEbxArray();
 	if (!list) {
-		return make_error(p_where + ": the sequence has no PropertyTracks");
+		return make_error("the sequence has no PropertyTracks");
 	}
 	for (const EbxValue v : *list) {
 		const std::optional<EbxRef> r = v.as_ref();
@@ -88,23 +90,45 @@ Status read_visibility(const EbxResolver &p_db, const EbxInstance &p_sequence, i
 		const OptionalEbxArray ta = times ? times->as_array() : OptionalEbxArray();
 		const OptionalEbxArray va = values ? values->as_array() : OptionalEbxArray();
 		if (!ta || !va || ta->size() != va->size() || ta->size() == 0) {
-			return make_error(p_where + ": the Visibility track's times and values differ");
+			return make_error("the float track's times and values differ");
 		}
+		std::vector<EorFadingKey> keys;
 		for (size_t i = 0; i < ta->size(); ++i) {
 			const std::optional<EbxValue> t = ta->get(i);
 			const std::optional<EbxValue> value = va->get(i);
 			const std::optional<double> ms = t ? number(*t) : std::nullopt;
 			const std::optional<double> x = value ? number(*value) : std::nullopt;
 			if (!ms || !x || !std::isfinite(*ms) || !std::isfinite(*x) ||
-					(!r_out.visibility.empty() && float(*ms / 1000.0) < r_out.visibility.back().seconds)) {
-				return make_error(p_where + ": a Visibility key is not an increasing number");
+					(!keys.empty() && float(*ms / 1000.0) < keys.back().seconds)) {
+				return make_error("a float track key is not an increasing number");
 			}
-			r_out.visibility.push_back(EorFadingKey{ float(*ms / 1000.0), float(*x) });
+			keys.push_back(EorFadingKey{ float(*ms / 1000.0), float(*x) });
 		}
-		return Status::success();
+		return keys;
 	}
-	return make_error(p_where + ": no Visibility track " + std::to_string(p_track));
+	return make_error("no float track " + std::to_string(p_track));
 }
+
+float eor_fading_key_at(std::span<const EorFadingKey> p_keys, float p_seconds) {
+	if (p_keys.empty()) {
+		return 0.0f;
+	}
+	if (p_seconds <= p_keys.front().seconds) {
+		return p_keys.front().value;
+	}
+	for (size_t i = 1; i < p_keys.size(); ++i) {
+		const EorFadingKey &a = p_keys[i - 1];
+		const EorFadingKey &b = p_keys[i];
+		if (p_seconds <= b.seconds) {
+			const float span = b.seconds - a.seconds;
+			const float t = span > 0.0f ? (p_seconds - a.seconds) / span : 1.0f;
+			return a.value + (b.value - a.value) * t;
+		}
+	}
+	return p_keys.back().value;
+}
+
+namespace {
 
 Status read_grade(
 		const EbxResolver &p_db, const EbxInstance &p_environment, const std::string &p_where, EorFading &r_out) {
@@ -130,6 +154,7 @@ Status read_grade(
 		r_out.brightness = *b;
 		r_out.contrast = *k;
 		r_out.saturation = *s;
+		r_out.visual_environment = std::string(p_db.name_of(blueprint->partition().guid()).value_or(""));
 		return Status::success();
 	}
 	return make_error(p_where + ": the visual environment has no colour correction");
@@ -141,19 +166,7 @@ float EorFading::visibility_at(float p_seconds) const {
 	if (visibility.empty() || p_seconds < 0.0f || p_seconds >= flash_s + screen_fade_s) {
 		return 0.0f;
 	}
-	if (p_seconds <= visibility.front().seconds) {
-		return visibility.front().value;
-	}
-	for (size_t i = 1; i < visibility.size(); ++i) {
-		const EorFadingKey &a = visibility[i - 1];
-		const EorFadingKey &b = visibility[i];
-		if (p_seconds <= b.seconds) {
-			const float span = b.seconds - a.seconds;
-			const float t = span > 0.0f ? (p_seconds - a.seconds) / span : 1.0f;
-			return a.value + (b.value - a.value) * t;
-		}
-	}
-	return visibility.back().value;
+	return eor_fading_key_at(visibility, p_seconds);
 }
 
 float EorFading::screen_black_at(float p_seconds) const {
@@ -216,7 +229,11 @@ Result<EorFading> read_eor_fading(const EbxResolver &p_db, level::WorkBudget &r_
 	if (!environment) {
 		return make_error(where + ": the sequence drives no visual environment's Visibility");
 	}
-	BF3_TRY(read_visibility(p_db, *sequence, track, where, out));
+	Result<std::vector<EorFadingKey>> keys = read_sequence_float_track(p_db, *sequence, track);
+	if (!keys) {
+		return make_error(where + ": " + keys.error().message);
+	}
+	out.visibility = std::move(*keys);
 	BF3_TRY(read_grade(p_db, *environment, where, out));
 	const std::optional<EbxInstance> ui_fade = event_target(c, *sequence, kOnStarted, kFadeOut, "FadeEntityData");
 	const std::optional<EbxInstance> screen_fade = event_target(c, *sequence, kOnFinished, kFadeOut, "FadeEntityData");
