@@ -529,6 +529,16 @@ void As2Clip::set_text_size(float p_size) const {
 	note(scene_->set_text_size(path_, p_size));
 }
 
+void As2Clip::set_text_align(std::string_view p_align) const {
+	const SwfSceneNode *n = mut();
+	if (n == nullptr || n->kind != SwfNodeKind::EditText) {
+		return;
+	}
+	if (const std::optional<uint8_t> a = swf_parse_align(p_align)) {
+		note(scene_->set_text_align(path_, *a));
+	}
+}
+
 void As2Clip::set_filters(std::vector<SwfFilter> p_filters) const {
 	if (mut() == nullptr) {
 		return;

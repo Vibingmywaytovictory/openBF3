@@ -409,6 +409,13 @@ TEST_SUITE("ui-deploy") {
 		const As2Clip label = s.hud->clip(rows[0] + ".Label.txtField");
 		CHECK(label.text() == "RANDOM SPAWN POINT");
 		CHECK(s.hud->clip(rows[0] + ".IconLabel.txtField").text().empty());
+		REQUIRE(s.at(rows[0] + ".Label.txtField").text_size.has_value());
+		CHECK(label.text_size() == s.hud->clip(rows[0] + ".dummyTextField").text_size());
+		REQUIRE(s.at(rows[0] + ".IconLabel.txtField").text_size.has_value());
+		CHECK(s.hud->clip(rows[0] + ".IconLabel.txtField").text_size() ==
+				s.hud->clip(rows[0] + ".DummyIconLabel").text_size());
+		CHECK(s.at(rows[0] + ".IconLabel.txtField").text_align == swf_align::kCenter);
+		CHECK(!s.at(rows[0] + ".Label.txtField").text_align.has_value());
 		const SwfSceneNode &box = s.at(rows[0] + ".icon_bg");
 		REQUIRE(box.timeline != nullptr);
 		CHECK(box.visible);

@@ -46,6 +46,7 @@ public:
 	virtual const std::string &label_state() const = 0;
 	virtual void set_state_style(std::string_view p_state, uint32_t p_color, const SwfFilter &p_glow) = 0;
 	virtual void set_text_size(float p_size) = 0;
+	virtual void set_text_align(std::string p_align) = 0;
 };
 
 inline constexpr std::string_view kSpawnPointListCategory = "ui/uicomponents/uispawnpointcomp";

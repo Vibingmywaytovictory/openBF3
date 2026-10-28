@@ -59,6 +59,9 @@ protected:
 		}
 		attach_label(r_host, dummy, kLabel);
 		if (HudListLabel *l = label_field()) {
+			if (const std::optional<float> size = dummy.text_size()) {
+				l->set_text_size(*size);
+			}
 			l->set_interactive(true);
 			l->set_type("bold");
 		}
@@ -117,6 +120,10 @@ private:
 		const As2Clip icon_label = attach_label(r_host, dummy, kIconLabel);
 		if (HudListLabel *l = controller_at<HudListLabel>(r_host, icon_label)) {
 			l->set_label_width(dummy.width() - kIconLabelInset);
+			if (const std::optional<float> size = dummy.text_size()) {
+				l->set_text_size(*size);
+			}
+			l->set_text_align("center");
 			l->set_interactive(false);
 			l->set_type("bold");
 		}

@@ -131,6 +131,11 @@ public:
 		set_text_format();
 	}
 
+	void set_text_align(std::string p_align) override {
+		text_align_ = std::move(p_align);
+		set_text_format();
+	}
+
 private:
 	struct Style {
 		uint32_t color = 0;
@@ -190,6 +195,9 @@ private:
 		if (text_size_) {
 			txt.set_text_size(*text_size_);
 		}
+		if (text_align_) {
+			txt.set_text_align(*text_align_);
+		}
 		if (state_ == "standard") {
 			txt.set_text_color(standard_ ? standard_->color : kStandardColor);
 			txt.set_alpha(kStandardAlpha);
@@ -230,6 +238,7 @@ private:
 	std::optional<Style> standard_;
 	std::optional<Style> inactive_;
 	std::optional<float> text_size_;
+	std::optional<std::string> text_align_;
 	float width_ = std::numeric_limits<float>::quiet_NaN();
 	float scroll_distance_ = 0.0f;
 	bool interactive_ = true;

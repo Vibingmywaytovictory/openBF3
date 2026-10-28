@@ -61,7 +61,9 @@ std::optional<SwfColor> parse_color(std::string_view p_text) {
 	return c;
 }
 
-std::optional<uint8_t> parse_align(std::string_view p_text) {
+}
+
+std::optional<uint8_t> swf_parse_align(std::string_view p_text) {
 	const std::string v = to_lower_ascii(p_text);
 	if (v == "left") {
 		return swf_align::kLeft;
@@ -77,6 +79,8 @@ std::optional<uint8_t> parse_align(std::string_view p_text) {
 	}
 	return std::nullopt;
 }
+
+namespace {
 
 struct Attribute {
 	std::string name;
@@ -301,7 +305,7 @@ private:
 			start_paragraph();
 			for (const Attribute &a : attrs) {
 				if (a.name == "align") {
-					if (const std::optional<uint8_t> v = parse_align(a.value)) {
+					if (const std::optional<uint8_t> v = swf_parse_align(a.value)) {
 						f.align = *v;
 						continue;
 					}

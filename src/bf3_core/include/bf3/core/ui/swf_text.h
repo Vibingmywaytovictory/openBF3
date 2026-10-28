@@ -70,6 +70,8 @@ std::string swf_edit_text_font_name(const SwfMovie &p_movie, const SwfEditText &
 
 SwfTextFormat swf_edit_text_format(const SwfMovie &p_movie, const SwfEditText &p_text);
 
+std::optional<uint8_t> swf_parse_align(std::string_view p_text);
+
 struct SwfTextRun {
 	uint32_t begin = 0;
 	uint32_t end = 0;

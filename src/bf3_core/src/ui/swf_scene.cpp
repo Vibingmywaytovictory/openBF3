@@ -1236,6 +1236,25 @@ Status SwfScene::set_text_size(std::string_view p_path, float p_size) {
 	return Status::success();
 }
 
+Status SwfScene::set_text_align(std::string_view p_path, uint8_t p_align) {
+	Result<SwfSceneNode *> n = impl_->at(p_path);
+	if (!n) {
+		return n.error();
+	}
+	if ((*n)->kind != SwfNodeKind::EditText) {
+		return make_error("swf scene " + impl_->movie_name + ": " + std::string(p_path) + " is not a text field");
+	}
+	if (p_align > swf_align::kJustify) {
+		return make_error("swf scene " + impl_->movie_name + ": text align " + std::to_string(p_align) + " for " +
+				std::string(p_path));
+	}
+	if ((*n)->text_align != p_align) {
+		(*n)->text_align = p_align;
+		(*n)->text_revision++;
+	}
+	return Status::success();
+}
+
 Status SwfScene::set_filters(std::string_view p_path, std::vector<SwfFilter> p_filters) {
 	for (const SwfFilter &f : p_filters) {
 		for (const float v : { f.blur_x, f.blur_y, f.angle, f.distance, f.strength }) {
@@ -1418,6 +1437,9 @@ Result<SwfRichText> swf_node_rich_text(const SwfSceneNode &p_node, WorkBudget &r
 	}
 	if (p_node.text_size) {
 		base.size = *p_node.text_size;
+	}
+	if (p_node.text_align) {
+		base.align = *p_node.text_align;
 	}
 	if (p_node.html) {
 		return swf_parse_html(p_node.text, base, r_budget);
