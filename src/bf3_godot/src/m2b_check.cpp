@@ -7,6 +7,7 @@
 #include "godot_util.h"
 #include "hud_items.h"
 #include "input_mapper.h"
+#include "native_flow.h"
 #include "native_hud.h"
 #include "native_screens.h"
 
@@ -20,7 +21,9 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace bf3::godot_side {
 
@@ -68,7 +71,8 @@ struct M2bCheck::State {
 	bool join_counted = false;
 	double screen_up_t = -1.0;
 	bool screen_was_up = false;
-	bool kit_pressed = false, deploy_pressed = false;
+	bool kit_pressed = false;
+	uint64_t deploy_screen = 0;
 	uint32_t deploy_index = 0;
 	uint32_t lives_seen = 0;
 	uint32_t life_seen = 0;
@@ -102,6 +106,43 @@ struct M2bCheck::State {
 		return l != nullptr && l->death != nullptr ? *l->death : core::gameplay::DeathTimeline{};
 	}
 	InputMapper &mapper() { return s.mapper(); }
+	std::optional<uint64_t> deploy_screen_reached() const {
+		if (!m.native_following || m.native_flow == nullptr || m.native_flow->session() == nullptr) {
+			return std::nullopt;
+		}
+		const host::UiFlowSession &session = *m.native_flow->session();
+		const std::optional<std::string> can_spawn = session.data(kUiSpawnPointCompPartition, kUiSpawnPointCanSpawnKey);
+		const bf3::core::ui::UiFlow &flow = session.flow();
+		const bf3::core::ui::UiFlowScreen *deploy = flow.find_screen(bf3::core::ui::kSpawnScreenPcPartition);
+		if (!can_spawn || *can_spawn != "True" || deploy == nullptr || !deploy->initialized || !deploy->shown) {
+			return std::nullopt;
+		}
+		std::vector<const bf3::core::ui::UiFlowScreen *> order;
+		if (const std::optional<uint64_t> f = flow.focused()) {
+			order.push_back(flow.screen(*f));
+		}
+		for (auto it = flow.screens().rbegin(); it != flow.screens().rend(); ++it) {
+			order.push_back(&*it);
+		}
+		for (const bf3::core::ui::UiFlowScreen *sc : order) {
+			if (sc == nullptr || sc->exiting || !sc->shown) {
+				continue;
+			}
+			if (sc->id == deploy->id) {
+				return deploy->id;
+			}
+			if (sc->modal) {
+				return std::nullopt;
+			}
+		}
+		return std::nullopt;
+	}
+	std::string flow_focus_leaf() const {
+		const bf3::core::ui::UiFlow &flow = m.native_flow->session()->flow();
+		const std::optional<uint64_t> f = flow.focused();
+		const bf3::core::ui::UiFlowScreen *sc = f ? flow.screen(*f) : nullptr;
+		return sc != nullptr ? bf3::core::ui::ui_data_category_leaf(sc->partition) : std::string("none");
+	}
 	void hold_tab(bool p_down) {
 		mapper().script_hold(InputMapper::TdmAction::Scoreboard, p_down);
 		s.scripted_ui_key(godot::KEY_TAB, p_down);
@@ -221,7 +262,7 @@ struct M2bCheck::State {
 
 		if (m.spawn_screen && !screen_was_up) {
 			screen_up_t = p_t;
-			kit_pressed = deploy_pressed = false;
+			kit_pressed = false;
 		}
 		screen_was_up = m.spawn_screen;
 		const bool round_over = fr.match_valid && fr.match.phase == net::MatchPhase::RoundOver;
@@ -235,11 +276,15 @@ struct M2bCheck::State {
 				mp.script_press(InputMapper::TdmAction(uint8_t(InputMapper::TdmAction::Kit1) + kit));
 				kit_pressed = true;
 			}
-			if (kit_pressed && !deploy_pressed && m.can_deploy && p_t - screen_up_t >= 2.0 * kM2bChooseDelayS) {
+			const std::optional<uint64_t> reached = deploy_screen_reached();
+			if (kit_pressed && reached && *reached != deploy_screen && m.can_deploy &&
+					p_t - screen_up_t >= 2.0 * kM2bChooseDelayS) {
 				s.scripted_ui_key(godot::KEY_ENTER, true);
 				s.scripted_ui_key(godot::KEY_ENTER, false);
-				deploy_pressed = true;
+				deploy_screen = *reached;
 				++deploy_index;
+				note(fmt("Enter at %.1f s: spawnscreenpc %llu initialized and reached from the flow focus (%s)", p_t,
+						static_cast<unsigned long long>(*reached), flow_focus_leaf().c_str()));
 			}
 		}
 
