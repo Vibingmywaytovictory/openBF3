@@ -280,6 +280,68 @@ Result<WeaponDef> resolve_weapon(const EbxResolver &p_db, std::string_view p_par
 	return w;
 }
 
+Result<std::vector<WeaponUnlockModifier>> weapon_unlock_modifiers(
+		const EbxResolver &p_db, std::string_view p_partition, std::string_view p_type) {
+	Fields f(p_db);
+	const EbxPartition *root = p_db.partition_by_name(p_partition);
+	if (root == nullptr) {
+		return make_error(std::string(p_partition) + ": partition not found");
+	}
+	if (!root->primary().is_a("SoldierWeaponUnlockAsset")) {
+		return make_error(std::string(p_partition) + ": not a SoldierWeaponUnlockAsset");
+	}
+	const std::optional<EbxInstance> blueprint =
+			f.follow(root->primary().data(), "Weapon", "SoldierWeaponBlueprint", true);
+	const std::optional<EbxInstance> swd =
+			blueprint ? f.follow(blueprint->data(), "Object", "SoldierWeaponData", true) : std::nullopt;
+	if (!swd) {
+		return f.error();
+	}
+	std::vector<WeaponUnlockModifier> out;
+	const OptionalEbxArray entries = f.array(swd->data(), "WeaponModifierData");
+	if (!entries) {
+		return out;
+	}
+	for (const EbxValue element : *entries) {
+		const std::optional<EbxStruct> e = element.as_struct();
+		const std::optional<EbxRef> unlock = e ? f.ref(*e, "UnlockAsset") : std::nullopt;
+		const OptionalEbxArray mods = unlock && !unlock->is_null() ? f.array(*e, "Modifiers") : OptionalEbxArray();
+		if (!mods) {
+			continue;
+		}
+		for (const EbxValue m : *mods) {
+			const std::optional<EbxRef> r = m.as_ref();
+			const std::optional<EbxInstance> mod =
+					r && !r->is_null() ? f.follow_ref(e->partition(), *r, "", f.where(*e, "Modifiers")) : std::nullopt;
+			if (mod && mod->is_a(p_type)) {
+				out.push_back(
+						WeaponUnlockModifier{ to_lower_ascii(f.target_partition(e->partition(), *unlock)), *mod });
+			}
+		}
+	}
+	if (!f.ok()) {
+		return f.error();
+	}
+	return out;
+}
+
+Result<std::vector<WeaponUnlockSound>> weapon_unlock_sounds(const EbxResolver &p_db, std::string_view p_partition) {
+	const Result<std::vector<WeaponUnlockModifier>> mods =
+			weapon_unlock_modifiers(p_db, p_partition, "WeaponSoundModifier");
+	if (!mods) {
+		return mods.error();
+	}
+	Fields f(p_db);
+	std::vector<WeaponUnlockSound> out;
+	for (const WeaponUnlockModifier &m : *mods) {
+		out.push_back(WeaponUnlockSound{ m.unlock, ref_partition(f, m.modifier.data(), "Sound") });
+	}
+	if (!f.ok()) {
+		return f.error();
+	}
+	return out;
+}
+
 std::vector<std::string> list_weapon_variants(const EbxLibrary &p_library) {
 	std::vector<std::string> out;
 	for (const EbxLibrary::Entry &e : p_library.entries()) {

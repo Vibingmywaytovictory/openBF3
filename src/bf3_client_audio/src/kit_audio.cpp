@@ -1,8 +1,10 @@
 #include "bf3/client_audio/kit_audio.h"
 
 #include "bf3/core/gameplay/weapon_def.h"
+#include "bf3/core/gameplay/weapon_resolver.h"
 #include "bf3/host/kits.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -75,6 +77,58 @@ KitAudioSources kit_audio_sources(const host::GunplayLevel &p_level) {
 		out.items.push_back(KitAudioItem{ uint16_t(i), d.variant, d.sound, teams[i], s.one_shot });
 	}
 	return out;
+}
+
+std::vector<std::string> add_accessory_sounds(
+		KitAudioSources &r_sources, const core::EbxResolver &p_db, const host::GunplayLevel &p_level) {
+	std::vector<std::string> notes;
+	std::vector<uint16_t> done;
+	const size_t primary = size_t(gp::WeaponSlot::Primary);
+	for (const auto &team : p_level.loadouts.kits) {
+		for (const host::LoadoutKit &kit : team) {
+			for (const host::LoadoutItem &item : kit.slots[primary]) {
+				if (item.def >= r_sources.sources.size() || r_sources.sources[item.def].sound.empty() ||
+						std::find(done.begin(), done.end(), item.def) != done.end()) {
+					continue;
+				}
+				done.push_back(item.def);
+				const core::Result<std::vector<gp::WeaponUnlockSound>> sounds =
+						gp::weapon_unlock_sounds(p_db, item.unlock);
+				if (!sounds) {
+					notes.push_back(item.unlock + ": " + sounds.error().message);
+					continue;
+				}
+				for (const gp::WeaponUnlockSound &s : *sounds) {
+					for (size_t a = 0; a < host::kLoadoutAccessories; ++a) {
+						for (size_t i = 0; i < item.accessory_unlocks[a].size() && i < item.accessories[a].size();
+								++i) {
+							if (item.accessory_unlocks[a][i] != s.unlock || s.sound.empty() ||
+									s.sound == r_sources.sources[item.def].sound) {
+								continue;
+							}
+							WeaponSoundSource source = r_sources.sources[item.def];
+							source.sound = s.sound;
+							r_sources.variants.push_back(KitAudioVariant{ item.def, item.accessories[a][i],
+									uint16_t(r_sources.sources.size()), s.unlock, s.sound });
+							r_sources.sources.push_back(std::move(source));
+						}
+					}
+				}
+			}
+		}
+	}
+	return notes;
+}
+
+uint16_t accessory_sound_source(std::span<const KitAudioVariant> p_variants, const net::SoldierGear &p_gear) {
+	for (const KitAudioVariant &v : p_variants) {
+		if (v.def == p_gear.def && v.accessory != 0 &&
+				std::find(p_gear.accessories.begin(), p_gear.accessories.end(), v.accessory) !=
+						p_gear.accessories.end()) {
+			return v.source;
+		}
+	}
+	return p_gear.def;
 }
 
 std::vector<std::string> kit_audio_report(const KitAudioSources &p_sources, const WeaponAudioTable &p_table) {

@@ -430,6 +430,7 @@ struct WeaponAudioRouter::Impl {
 	WeaponAudioStats stats;
 	WeaponAudioObserver *observer = nullptr;
 	uint8_t own_slot = 0xFF;
+	std::array<std::pair<uint16_t, uint16_t>, 256> slot_sounds{};
 	bool own_first_person = true;
 	bool own_trigger_known = false;
 	bool own_trigger_down = false;
@@ -521,6 +522,19 @@ struct WeaponAudioRouter::Impl {
 			return nullptr;
 		}
 		return &table->defs[p_def];
+	}
+
+	uint16_t fire_sound(uint8_t p_slot, uint16_t p_def) const {
+		const std::pair<uint16_t, uint16_t> &s = slot_sounds[p_slot];
+		return s.first == p_def && s.second != p_def ? s.second : p_def;
+	}
+
+	const WeaponAudioDef *fire_def_of(uint8_t p_slot, uint16_t p_def) {
+		const uint16_t sound = fire_sound(p_slot, p_def);
+		if (sound != p_def) {
+			++stats.accessory_sounds;
+		}
+		return def_of(sound);
 	}
 
 	Voice *voice(InstanceHandle p_handle) {
@@ -615,7 +629,7 @@ struct WeaponAudioRouter::Impl {
 
 	Voice *start_burst(Track &r_track, bool p_own, uint8_t p_slot, uint16_t p_def, uint64_t p_seed, uint64_t p_frame, sw::SimTime p_time,
 			present::PresentTimeline p_timeline, const EmitterState &p_emitter, float p_distance, bool p_first_person) {
-		const WeaponAudioDef *d = def_of(p_def);
+		const WeaponAudioDef *d = fire_def_of(p_slot, p_def);
 		if (d == nullptr || d->form != WeaponAudioForm::Driver || !d->program) {
 			++stats.unbound_defs;
 			return nullptr;
@@ -768,7 +782,7 @@ struct WeaponAudioRouter::Impl {
 	}
 
 	void own_shot(const present::PresentEvent &p_e, SimMixerClock &r_clock) {
-		const WeaponAudioDef *d = def_of(p_e.def);
+		const WeaponAudioDef *d = def_of(fire_sound(own_slot, p_e.def));
 		if (d == nullptr || d->form == WeaponAudioForm::None) {
 			++stats.unbound_defs;
 			return;
@@ -777,6 +791,7 @@ struct WeaponAudioRouter::Impl {
 		const uint64_t frame = r_clock.frame_of(p_e.time, present::PresentTimeline::Predicted);
 		if (d->form == WeaponAudioForm::OneShot) {
 			end_track(own);
+			(void)fire_def_of(own_slot, p_e.def);
 			(void)one_shot(d->program, d->one_shot_event, sound_seed(own_slot, own_burst_counter++), em, frame, own_first_person);
 			return;
 		}
@@ -817,7 +832,7 @@ struct WeaponAudioRouter::Impl {
 			return;
 		}
 		Track &t = tracks[p_e.slot];
-		const WeaponAudioDef *d = def_of(p_e.def);
+		const WeaponAudioDef *d = def_of(fire_sound(p_e.slot, p_e.def));
 		if (d == nullptr || d->form == WeaponAudioForm::None) {
 			++stats.unbound_defs;
 			return;
@@ -831,6 +846,7 @@ struct WeaponAudioRouter::Impl {
 		const uint64_t frame = r_clock.frame_of(p_e.time, present::PresentTimeline::Render);
 		if (d->form == WeaponAudioForm::OneShot) {
 			if (dist <= config.max_weapon_distance_m) {
+				(void)fire_def_of(p_e.slot, p_e.def);
 				(void)one_shot(d->program, d->one_shot_event, sound_seed(p_e.slot, p_e.id), em, frame, false);
 			}
 			return;
@@ -981,7 +997,7 @@ struct WeaponAudioRouter::Impl {
 	}
 
 	void start_other_from_state(Track &r_t, uint8_t p_slot, uint16_t p_def, uint8_t p_burst_seq, sw::SimTime p_evidence, SimMixerClock &r_clock) {
-		const WeaponAudioDef *d = def_of(p_def);
+		const WeaponAudioDef *d = def_of(fire_sound(p_slot, p_def));
 		if (d == nullptr || d->form != WeaponAudioForm::Driver) {
 			if (d == nullptr || d->form == WeaponAudioForm::None) {
 				++stats.unbound_defs;
@@ -1516,6 +1532,10 @@ void WeaponAudioRouter::set_own_slot(uint8_t p_slot) {
 		impl_->end_track(impl_->tracks[p_slot]);
 	}
 	impl_->own_slot = p_slot;
+}
+
+void WeaponAudioRouter::set_slot_sound(uint8_t p_slot, uint16_t p_def, uint16_t p_sound) {
+	impl_->slot_sounds[p_slot] = { p_def, p_sound };
 }
 
 void WeaponAudioRouter::set_own_first_person(bool p_first_person) {

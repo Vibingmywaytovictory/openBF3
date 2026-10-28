@@ -40,6 +40,7 @@ struct GameAudioInputs {
 	ListenerState listener;
 	uint8_t own_slot = 0xFF;
 	bool own_first_person = true;
+	std::span<const KitAudioVariant> sound_variants;
 };
 
 class GameAudioDriver {

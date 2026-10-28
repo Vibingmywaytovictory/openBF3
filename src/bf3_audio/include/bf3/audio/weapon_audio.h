@@ -218,6 +218,7 @@ struct WeaponAudioStats {
 	uint64_t foley = 0;
 	uint64_t foley_releases = 0;
 	uint64_t foley_out_of_reach = 0;
+	uint64_t accessory_sounds = 0;
 };
 static_assert(std::is_trivially_copyable_v<WeaponAudioStats>);
 
@@ -239,6 +240,8 @@ public:
 	WeaponAudioRouter &operator=(const WeaponAudioRouter &) = delete;
 
 	void set_own_slot(uint8_t p_slot);
+
+	void set_slot_sound(uint8_t p_slot, uint16_t p_def, uint16_t p_sound);
 
 	void set_own_first_person(bool p_first_person);
 	void set_own_trigger(bool p_down);

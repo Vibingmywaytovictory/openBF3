@@ -32,6 +32,11 @@ void GameAudioDriver::step(WeaponAudioRouter &r_router, ImpactAudio *r_impacts, 
 		r_router.set_others_newest(std::span<const host::PresentedOtherWeapon>(newest_.data(), n),
 				sw::SimTime(p_in.frame->newest_tick + 1) * sw::kTimeUnitsPerTick);
 	}
+	if (p_in.frame != nullptr) {
+		for (const net::SoldierGear &g : p_in.frame->gear) {
+			r_router.set_slot_sound(g.slot, g.def, accessory_sound_source(p_in.sound_variants, g));
+		}
+	}
 	r_router.set_own_weapons(own_weapons_.present(p_in.frame));
 	r_router.on_events(p_in.events, r_clock);
 	r_router.on_others(p_in.others, p_in.other_weapons, p_in.muzzles, r_clock);
@@ -108,12 +113,16 @@ core::Result<GameAudioAssets> load_game_audio_assets(const std::shared_ptr<const
 	GameAudioAssets a;
 
 	a.kits = kit_audio_sources(p_gunplay);
+	for (const std::string &note : add_accessory_sounds(a.kits, db, p_gunplay)) {
+		a.report.push_back("accessory sounds " + note);
+	}
 	core::Result<WeaponAudioTable> table = load_weapon_audio(db, a.kits.sources, kMixRate);
 	if (!table) {
 		return table.error();
 	}
 	auto shared_table = std::make_shared<WeaponAudioTable>(std::move(*table));
-	a.report = kit_audio_report(a.kits, *shared_table);
+	std::vector<std::string> kit_report = kit_audio_report(a.kits, *shared_table);
+	a.report.insert(a.report.end(), kit_report.begin(), kit_report.end());
 	a.programs += shared_table->compiled;
 	a.program_failures += shared_table->failed;
 	a.table = shared_table;

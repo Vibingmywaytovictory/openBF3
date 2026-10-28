@@ -753,6 +753,39 @@ TEST_SUITE("audio-router") {
 		CHECK(r.router->stats().weapon_voices == 0);
 	}
 
+	TEST_CASE(
+			"slot sounds: a slot's accessory sound plays its def's shots with that entry's patch and binding, and only "
+			"for that def") {
+		Rig r;
+		r.router->set_slot_sound(0, kAuto, kSingle);
+		std::vector<host::PresentEvent> plan;
+		for (uint32_t k = 0; k < 3; ++k) {
+			plan.push_back(own_shot(kAuto, 7 + k, r.predicted + sw::SimTime(k) * 12 * kTick));
+		}
+		plan.push_back(own_shot(kAuto2, 10, r.predicted + 40 * kTick));
+		size_t i = 0;
+		for (int f = 0; f < 100; ++f) {
+			std::vector<host::PresentEvent> ev;
+			while (i < plan.size() && plan[i].time <= r.predicted) {
+				ev.push_back(plan[i++]);
+			}
+			r.frame(ev);
+		}
+		REQUIRE(r.recorder.seen.size() == 4);
+		for (size_t k = 0; k < 3; ++k) {
+			CHECK(r.recorder.seen[k].enable_step == 0.0f);
+			CHECK(r.recorder.seen[k].stop == r.recorder.seen[k].first + 1);
+		}
+		CHECK(r.recorder.seen[3].enable_step == 1.0f);
+		CHECK(r.router->stats().accessory_sounds == 3);
+		r.router->set_slot_sound(0, kAuto, kAuto);
+		r.frame(std::vector<host::PresentEvent>{ own_shot(kAuto, 20, r.predicted) });
+		r.idle(20);
+		REQUIRE(r.recorder.seen.size() == 5);
+		CHECK(r.recorder.seen[4].enable_step == 1.0f);
+		CHECK(r.router->stats().accessory_sounds == 3);
+	}
+
 	TEST_CASE("others: RemoteShots start the burst on its frame and place its rounds, the records keep it, the hold ends it") {
 		Rig r;
 		std::vector<Shooter> shooters(1);
@@ -1658,6 +1691,41 @@ TEST_SUITE("audio-game") {
 		CHECK(unbound.empty());
 		CHECK(a->table->failed == 0);
 		CHECK(a->waves_missing == 0);
+		std::set<std::string> variant_sounds, other_form;
+		const ba::KitAudioVariant *m16_suppressor = nullptr;
+		for (const ba::KitAudioVariant &v : a->kits.variants) {
+			REQUIRE(v.source < a->table->defs.size());
+			REQUIRE(v.def < level.defs.size());
+			const ba::WeaponAudioDef &d = a->table->defs[v.source];
+			CHECK_MESSAGE(d.form != ba::WeaponAudioForm::None, v.unlock, " [", v.sound, "]: ", d.error);
+			if (d.form != a->table->defs[v.def].form) {
+				other_form.insert(v.unlock);
+			}
+			CHECK(d.program);
+			CHECK(v.sound != level.defs[v.def].sound);
+			variant_sounds.insert(v.sound);
+			if (v.unlock.ends_with("/u_m16a4_sound_suppressor")) {
+				m16_suppressor = &v;
+			}
+			bf3::net::SoldierGear gear;
+			gear.def = v.def;
+			gear.accessories = { 0, 0, v.accessory, 0 };
+			CHECK(ba::accessory_sound_source(a->kits.variants, gear) != v.def);
+		}
+		MESSAGE("accessory sounds: ", a->kits.variants.size(), " (def, accessory) variants, ", variant_sounds.size(),
+				" distinct patches",
+				m16_suppressor != nullptr ? ", M16A4 suppressor " + m16_suppressor->sound : std::string());
+		CHECK(a->kits.variants.size() == 68);
+		CHECK(other_form ==
+				std::set<std::string>{ "weapons/m1014/u_m1014_silencer", "weapons/remington870/u_870_silencer",
+						"weapons/saiga20k/u_saiga_20k_silencer", "weapons/usas-12/u_usas-12_silencer",
+						"weapons/xp2_spas12/u_spas12_silencer", "weapons/dao-12/u_dao-12_silencer",
+						"weapons/xp1_jackhammer/u_jackhammer_silencer" });
+		REQUIRE(m16_suppressor != nullptr);
+		CHECK(m16_suppressor->sound.find("silenced") != std::string::npos);
+		bf3::net::SoldierGear plain;
+		plain.def = m16_suppressor->def;
+		CHECK(ba::accessory_sound_source(a->kits.variants, plain) == plain.def);
 		std::set<std::string> stepped;
 		ba::MixerConfig mc;
 		mc.max_instances = 4;

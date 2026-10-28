@@ -250,6 +250,7 @@ void Bf3GameAudio::step(const GameFrame &p_frame, std::span<const fx::ImpactSoun
 	in.listener.velocity = p_frame.camera_velocity;
 	in.own_slot = p_frame.own_slot;
 	in.own_first_person = p_frame.own_alive && !p_frame.free_camera;
+	in.sound_variants = m.kits.variants;
 	m.listener = in.listener;
 
 	m.muzzles.assign(p_frame.others.size(), ba::MuzzlePoint{});
