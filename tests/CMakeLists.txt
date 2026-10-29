@@ -245,8 +245,9 @@ target_link_libraries(test_host_session PRIVATE bf3_host)
 target_include_directories(test_host_session PRIVATE ${PROJECT_SOURCE_DIR}/src/bf3_host/src)
 target_compile_definitions(test_host_session PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
 set(_openbf3_session_pure *judge_rest*synthetic* *present_others* *GameServer*without*sockets* *GameServer*SpawnSweep*batches*
-    *NetThread*fake*Host*stalled* *ClientSession*started*with*no*level* *kicked*in*the*lobby*)
-openbf3_case_row(NAME host.session.unit.pure EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 9
+    *NetThread*fake*Host*stalled* *ClientSession*started*with*no*level* *kicked*in*the*lobby*
+    *inbound*queue*overflows*)
+openbf3_case_row(NAME host.session.unit.pure EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 10
     CASES ${_openbf3_session_pure})
 openbf3_case_row(NAME host.session.unit EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 5
     EXCLUDE ${_openbf3_session_pure})

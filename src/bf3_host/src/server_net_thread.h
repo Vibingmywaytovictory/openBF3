@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <span>
 #include <thread>
 #include <vector>
@@ -71,6 +72,7 @@ private:
 	void run();
 	void send_all(std::vector<NetOut> &r_out);
 	void service_all(std::vector<net::Host::Event> &r_events);
+	void queue_inbound(net::Host::Event &&p_event, std::vector<uint32_t> &r_overflowed);
 	void publish();
 
 	std::shared_ptr<ServerNetPort> port_;
@@ -85,6 +87,7 @@ private:
 	uint64_t pump_done_ = 0;
 	std::vector<net::Host::Event> inbound_;
 	std::vector<NetOut> outbound_;
+	std::set<uint32_t> severed_;
 
 	mutable std::mutex counters_mutex_;
 	std::vector<net::PeerCounters> counters_;

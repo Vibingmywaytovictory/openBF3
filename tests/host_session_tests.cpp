@@ -2129,6 +2129,54 @@ TEST_SUITE("host-session-unit") {
 		client.stop();
 		server.stop();
 	}
+
+	TEST_CASE("host.session: a NetThread whose inbound queue overflows ends the peer whose reliable datagram it "
+			  "dropped") {
+		auto pipe = std::make_shared<Pipe>();
+		ServerConfig sc;
+		sc.game = pipe_game();
+		sc.transport = std::make_shared<PipeServerPort>(pipe);
+		ServerHost server;
+		std::string err;
+		REQUIRE_MESSAGE(server.start(sc, &err), err);
+		pipe->connect(0);
+		pipe->connect(1);
+		net::Hello hello;
+		hello.name = "kept";
+		pipe->client_send(0, net::kChannelReliable, net::encode_hello(hello));
+		REQUIRE(wait_until([&] { return pipe->count_sent(0, net::MessageType::MatchInfo) == 1; }, 10s, 16ms));
+		{
+			std::lock_guard lock(pipe->mutex);
+			net::Host::Event e;
+			e.type = net::Host::EventType::Receive;
+			e.peer = 1;
+			e.channel = net::kChannelUnreliable;
+			e.data = { 0xff };
+			for (size_t k = 0; k < ServerNetThread::kMaxInbound; ++k) {
+				pipe->to_server.push_back(e);
+			}
+			e.channel = net::kChannelReliable;
+			pipe->to_server.push_back(e);
+			e.channel = net::kChannelUnreliable;
+			pipe->to_server.push_back(e);
+		}
+		REQUIRE(wait_until(
+				[&] {
+					std::lock_guard lock(pipe->mutex);
+					return !pipe->disconnects.empty();
+				},
+				10s, 16ms));
+		{
+			std::lock_guard lock(pipe->mutex);
+			REQUIRE(pipe->disconnects.size() == 1);
+			CHECK(pipe->disconnects[0].first == 1);
+		}
+		CHECK(wait_until([&] { return server.stats().peers == 1; }, 10s, 16ms));
+		CHECK(server.stats().step_errors >= 2);
+		CHECK(server.game_stats().clients == 1);
+		CHECK(server.game_stats().slots.at(0).used);
+		server.stop();
+	}
 }
 
 namespace {

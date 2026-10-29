@@ -1,5 +1,7 @@
 #include "server_net_thread.h"
 
+#include "bf3/net/protocol.h"
+
 #include <utility>
 
 namespace bf3::host {
@@ -156,9 +158,28 @@ void ServerNetThread::publish() {
 	}
 }
 
+void ServerNetThread::queue_inbound(net::Host::Event &&p_event, std::vector<uint32_t> &r_overflowed) {
+	if (p_event.type == net::Host::EventType::Connect) {
+		severed_.erase(p_event.peer);
+	}
+	if (p_event.type != net::Host::EventType::Receive) {
+		inbound_.push_back(std::move(p_event));
+		return;
+	}
+	if (severed_.count(p_event.peer) == 0 && inbound_.size() < kMaxInbound) {
+		inbound_.push_back(std::move(p_event));
+		return;
+	}
+	inbound_dropped_.fetch_add(1, std::memory_order_relaxed);
+	if (p_event.channel != net::kChannelUnreliable && severed_.insert(p_event.peer).second) {
+		r_overflowed.push_back(p_event.peer);
+	}
+}
+
 void ServerNetThread::run() {
 	std::vector<NetOut> out;
 	std::vector<net::Host::Event> in;
+	std::vector<uint32_t> overflowed;
 	for (;;) {
 		uint64_t pump_seq = 0;
 		{
@@ -176,15 +197,15 @@ void ServerNetThread::run() {
 		{
 			std::lock_guard lock(mutex_);
 			for (net::Host::Event &e : in) {
-				if (inbound_.size() < kMaxInbound || e.type != net::Host::EventType::Receive) {
-					inbound_.push_back(std::move(e));
-				} else {
-					inbound_dropped_.fetch_add(1, std::memory_order_relaxed);
-				}
+				queue_inbound(std::move(e), overflowed);
 			}
 			pump_done_ = pump_seq;
 		}
 		pumped_.notify_all();
+		for (const uint32_t peer : overflowed) {
+			port_->disconnect_later(peer);
+		}
+		overflowed.clear();
 		publish();
 	}
 }
