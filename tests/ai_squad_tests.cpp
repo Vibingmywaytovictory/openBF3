@@ -1,9 +1,12 @@
 #include <doctest/doctest.h>
 
 #include "bf3/ai/knowledge/information_factory.h"
+#include "bf3/ai/knowledge/information_grid.h"
+#include "bf3/ai/main/ai_random.h"
 #include "bf3/ai/path/cluster_graph.h"
 #include "bf3/ai/path/map_properties.h"
 #include "bf3/ai/squad/squad_manager.h"
+#include "bf3/ai/strategic/bot_spawner.h"
 #include "bf3/ai/vehicle/aerial_height_map.h"
 #include "bf3/ai/vehicle/landing_zone_manager.h"
 #include "bf3/ai/vehicle/vehicle_occupancy.h"
@@ -289,6 +292,111 @@ void join_bots(World &r_world, SquadCoordinator &r_squad, std::initializer_list<
 		r_squad.update_squad_leader();
 	}
 }
+
+struct Objective final : SpawnObjective {
+	int area = 0;
+	Vec2 where{};
+	Vec2 middle{};
+	float value = 1.0f;
+	int index() const override { return area; }
+	Vec2 position(int) const override { return where; }
+	float strategic_value(int) const override { return value; }
+	Vec2 centre() const override { return middle; }
+};
+
+struct HeldGroup final : SquadPlayer {
+	const Player *inner = nullptr;
+	int id() const override { return inner->id(); }
+	bool is_ai() const override { return true; }
+	bool is_alive() const override { return true; }
+	bool is_man_down() const override { return false; }
+	int side() const override { return 1; }
+	int spawn_group() const override { return 4; }
+	int spawn_kit() const override { return 0; }
+	AiObject *soldier() const override { return inner->soldier(); }
+	AiObject *current_vehicle() const override { return inner->current_vehicle(); }
+};
+
+struct Spawnee final : SpawnBot {
+	uint32_t id = 0;
+	int team = 1;
+	const SquadPlayer *body = nullptr;
+	const SquadMember *member = nullptr;
+	int point = -1;
+	int heading_to = -1;
+	int target_area = -2;
+	int target_group = -2;
+	int target_kit = -2;
+	uint32_t bot_id() const override { return id; }
+	int side() const override { return team; }
+	const SquadPlayer &player() const override { return *body; }
+	int spawn_point() const override { return point; }
+	const SquadMember *squad_member() const override { return member; }
+	int spawn_to_strategic_area_id() const override { return heading_to; }
+	void set_spawn_target(int p_group, int p_kit) override {
+		target_group = p_group;
+		target_kit = p_kit;
+	}
+	void set_spawn_target(int p_area, int p_group, int p_kit) override {
+		target_area = p_area;
+		target_group = p_group;
+		target_kit = p_kit;
+	}
+};
+
+struct SpawnField final : SpawnGame {
+	std::vector<int> groups;
+	std::map<int, Vec3> positions;
+	std::map<int, int> control_points;
+	std::vector<int> invalid;
+	std::vector<int> kits = { 0, 1, 2, 3, 4, 5, 6 };
+	std::map<int, const Objective *> objectives;
+	std::vector<int> spawns_added;
+	std::map<int, std::pair<int, int>> dead;
+	std::map<uint32_t, const Spawnee *> roster;
+	const AIInformationGrid *grid = nullptr;
+
+	const std::vector<int> &spawn_point_list(int) const override { return groups; }
+	Vec3 spawn_point_position(int p_group) const override { return positions.at(p_group); }
+	bool is_eligible_spawnpoint(int, int p_group) const override { return positions.count(p_group) != 0; }
+	int control_point_id(int p_group) const override {
+		const auto found = control_points.find(p_group);
+		return found != control_points.end() ? found->second : -1;
+	}
+	const std::vector<int> &kit_templates() const override { return kits; }
+	bool is_valid_position(const Vec3 &p_position) const override {
+		for (const int group : invalid) {
+			if (positions.at(group) == p_position) {
+				return false;
+			}
+		}
+		return true;
+	}
+	const SpawnObjective *strategic_object(int p_id) const override {
+		const auto found = objectives.find(p_id);
+		return found != objectives.end() ? found->second : nullptr;
+	}
+	const SpawnObjective *closest_object(const Vec3 &p_position, int) const override {
+		const SpawnObjective *best = nullptr;
+		float nearest = 1.0e30f;
+		for (const auto &[id, objective] : objectives) {
+			const float dx = objective->where.x - p_position.x;
+			const float dz = objective->where.y - p_position.z;
+			if (dx * dx + dz * dz < nearest) {
+				nearest = dx * dx + dz * dz;
+				best = objective;
+			}
+		}
+		return best;
+	}
+	void add_spawn_to_point(int, int p_group) override { spawns_added.push_back(p_group); }
+	const std::map<int, std::pair<int, int>> &dead_bots(int) const override { return dead; }
+	const SpawnBot *bot_from_id(uint32_t p_id) const override {
+		const auto found = roster.find(p_id);
+		return found != roster.end() ? found->second : nullptr;
+	}
+	const AIInformationGrid *information_grid(int) const override { return grid; }
+};
 
 }
 
@@ -751,5 +859,186 @@ TEST_SUITE("ai-squad") {
 		CHECK(zones.number_of_landing_zones() == 0);
 		CHECK(zones.landing_zone("north") == nullptr);
 		CHECK(zones.active_zone_name() == std::string(kNoActiveLandingZone));
+	}
+
+	TEST_CASE("BotSpawner: a held spawn group stays, an empty side refuses, a squad mate spawns at the nearest valid "
+			  "point") {
+		World world;
+		SquadManager squads(world.services());
+		AIRandom random(AIRandom::seed_for(0xB07ull, 1));
+		random.init();
+		SpawnField field;
+		BotSpawner spawner({ &field, &squads, &random, nullptr });
+
+		Player &held = world.add(1, true, {});
+		HeldGroup holder;
+		holder.inner = &held;
+		Spawnee keeper;
+		keeper.body = &holder;
+		CHECK(spawner.find_suitable_spawn_group(0, keeper));
+		CHECK(keeper.target_group == -2);
+		Spawnee bot;
+		bot.body = &held;
+		CHECK_FALSE(spawner.find_suitable_spawn_group(0, bot));
+		CHECK(bot.target_group == -1);
+		CHECK(bot.target_kit == kKitNone);
+
+		field.groups = { 1, 2, 3 };
+		field.positions = { { 1, { 100.0f, 0.0f, 0.0f } }, { 2, { 10.0f, 0.0f, 0.0f } }, { 3, { 20.0f, 0.0f, 0.0f } } };
+		field.invalid = { 2 };
+		Player &leader = world.add(2, false, { 0.5f, 0.0f, 0.0f });
+		SquadCoordinator &squad = squads.coordinator(1, 1);
+		world.join_squad(1, leader);
+		squad.add_squad_member(leader);
+		world.join_squad(1, held);
+		squad.add_squad_member(held);
+		squad.update_squad_leader();
+		squad.update(++world.tick);
+		bot.member = squads.squad_member(1, 1);
+		REQUIRE(bot.member != nullptr);
+		const SpawnObjective *object = nullptr;
+		CHECK(spawner.find_suitable_spawn_group(1, object, bot) == 3);
+		CHECK(object == nullptr);
+		CHECK(field.spawns_added == std::vector<int>{ 3 });
+		leader.alive = false;
+		CHECK(spawner.find_suitable_spawn_group(1, object, bot) == -1);
+	}
+
+	TEST_CASE("BotSpawner: control-point groups are weighted by strategic value, free strength and squad distance") {
+		World world;
+		SquadManager squads(world.services());
+		AIRandom random(AIRandom::seed_for(0xB07ull, 2));
+		random.init();
+		SpawnField field;
+		BotSpawner spawner({ &field, &squads, &random, nullptr });
+		Objective rich;
+		rich.area = 7;
+		rich.where = { 0.0f, 100.0f };
+		rich.value = 60.0f;
+		Objective poor;
+		poor.area = 8;
+		poor.where = { 300.0f, 0.0f };
+		poor.value = 2.0f;
+		field.objectives = { { 7, &rich }, { 8, &poor } };
+		field.groups = { 1, 2, 3 };
+		field.positions = { { 1, { 0.0f, 0.0f, 90.0f } }, { 2, { 290.0f, 0.0f, 0.0f } },
+			{ 3, { 50.0f, 0.0f, 50.0f } } };
+		field.control_points = { { 1, 0 }, { 2, 1 } };
+		Player &body = world.add(1, true, {});
+		Spawnee bot;
+		bot.body = &body;
+		int rich_picks = 0;
+		for (int i = 0; i < 200; ++i) {
+			const SpawnObjective *object = nullptr;
+			const int group = spawner.find_suitable_spawn_group(1, object, bot);
+			REQUIRE((group == 1 || group == 2));
+			CHECK(object == (group == 1 ? static_cast<const SpawnObjective *>(&rich) : &poor));
+			CHECK(field.spawns_added.back() == group);
+			rich_picks += group == 1 ? 1 : 0;
+		}
+		REQUIRE(spawner.point_weights().size() == 2);
+		CHECK(spawner.point_weights()[0].weight == doctest::Approx(60.0f - 10.0f));
+		CHECK(spawner.point_weights()[1].weight == 1.0f);
+		CHECK(rich_picks > 180);
+		CHECK(rich_picks < 200);
+	}
+
+	TEST_CASE("BotSpawner: kits follow the squad's medic, enemy armour, infantry pressure and damaged friendly "
+			  "vehicles") {
+		World world;
+		SquadManager squads(world.services());
+		AIRandom random(AIRandom::seed_for(0xB07ull, 3));
+		random.init();
+		Knowledge knowledge;
+		AIInformationGrid grid(knowledge.information, 1, 8, 8, { -64.0f, -64.0f }, { 64.0f, 64.0f });
+		SpawnField field;
+		field.grid = &grid;
+		BotSpawner spawner({ &field, &squads, &random, &knowledge.information });
+
+		for (int i = 0; i < 300; ++i) {
+			const int kit = spawner.random_kit();
+			CHECK(kit != kKitMedic);
+			CHECK((kit >= 0 && kit <= kKitAntiTank));
+		}
+		field.kits = { -1, -1, -1, -1, -1, 5 };
+		CHECK(spawner.random_kit() == kKitNone);
+		field.kits = { 0, 1, 2, 3, 4, 5, 6 };
+
+		Player &leader = world.add(1, true, {});
+		Player &member = world.add(2, true, {});
+		squads.add_squad_member(1, 1);
+		squads.add_squad_member(2, 1);
+		Spawnee bot;
+		bot.id = 2;
+		bot.body = &member;
+		bot.member = squads.squad_member(2, 1);
+		REQUIRE(bot.member != nullptr);
+		REQUIRE_FALSE(bot.member->is_squad_leader());
+		CHECK(spawner.find_suitable_kit(nullptr, 1, bot) == kKitMedic);
+		leader.kit = kKitMedic;
+		CHECK(spawner.find_suitable_kit(nullptr, 1, bot) != kKitMedic);
+		member.kit = kKitMedic;
+		CHECK(spawner.find_suitable_kit(nullptr, 1, bot) == kKitMedic);
+		member.kit = 0;
+
+		Objective area;
+		area.area = 4;
+		area.where = { 10.0f, 10.0f };
+		Soldier tank;
+		tank.with_unit = true;
+		tank.occupied = true;
+		tank.strength_class = 1;
+		tank.team = 2;
+		grid.add_info(knowledge.record(tank, 1));
+		CHECK(spawner.find_suitable_kit(&area, 1, bot) == kKitAntiTank);
+		Spawnee rocket;
+		rocket.id = 9;
+		rocket.heading_to = 4;
+		field.roster[9] = &rocket;
+		field.dead[9] = { 0, kKitAntiTank };
+		int anti_tank = 0;
+		for (int i = 0; i < 120; ++i) {
+			anti_tank += spawner.find_suitable_kit(&area, 1, bot) == kKitAntiTank ? 1 : 0;
+		}
+		CHECK(anti_tank < 50);
+
+		Soldier jeep;
+		jeep.with_unit = true;
+		jeep.occupied = true;
+		jeep.strength_class = 2;
+		jeep.team = 1;
+		jeep.hp = 30.0f;
+		grid.add_info(knowledge.record(jeep, 1));
+		CHECK(spawner.find_suitable_kit(&area, 1, bot) == kKitEngineer);
+		Spawnee wrench;
+		wrench.id = 10;
+		wrench.heading_to = 4;
+		field.roster[10] = &wrench;
+		field.dead[10] = { 0, kKitEngineer };
+		std::map<int, int> relieved;
+		for (int i = 0; i < 100; ++i) {
+			++relieved[spawner.find_suitable_kit(&area, 1, bot)];
+		}
+		CHECK(relieved.count(kKitMedic) == 0);
+		CHECK(relieved[kKitEngineer] < 50);
+
+		std::vector<std::unique_ptr<Soldier>> infantry;
+		for (int i = 0; i < 2; ++i) {
+			auto enemy = std::make_unique<Soldier>();
+			enemy->with_unit = true;
+			enemy->occupied = true;
+			enemy->team = 2;
+			enemy->where = { float(i), 0.0f, -float(i) };
+			grid.add_info(knowledge.record(*enemy, 1));
+			infantry.push_back(std::move(enemy));
+		}
+		std::map<int, int> pressure;
+		for (int i = 0; i < 400; ++i) {
+			++pressure[spawner.find_suitable_kit(&area, 1, bot)];
+		}
+		CHECK(pressure.size() == 4);
+		for (const int kit : { 0, 2, 3, kKitEngineer }) {
+			CHECK(pressure[kit] > 40);
+		}
 	}
 }

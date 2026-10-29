@@ -73,3 +73,8 @@ target_sources(bf3_ai PRIVATE
     src/vehicle/aerial_height_map.cpp
     src/vehicle/landing_zone_manager.cpp
 )
+
+target_sources(bf3_ai PRIVATE
+    include/bf3/ai/strategic/bot_spawner.h
+    src/strategic/bot_spawner.cpp
+)
