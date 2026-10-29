@@ -1066,6 +1066,9 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
 endif()
 
 target_sources(test_host_tdm PRIVATE host_server_level_tests.cpp)
+target_compile_definitions(test_host_tdm PRIVATE "OPENBF3_MAPLIST_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/maplist.cfg\"")
+add_test(NAME host.map_list.unit COMMAND test_host_tdm --test-suite=host-map-list-unit)
+set_tests_properties(host.map_list.unit PROPERTIES TIMEOUT 60)
 add_test(NAME host.server.level COMMAND test_host_tdm --test-suite=host-server-level)
 set_tests_properties(host.server.level PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 openbf3_cost(host.server.level 1 17)

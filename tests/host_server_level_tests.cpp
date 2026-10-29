@@ -5,6 +5,7 @@
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/mode_areas.h"
 #include "bf3/host/bot_fill.h"
+#include "bf3/host/map_list.h"
 #include "bf3/host/server_level.h"
 #include "bf3/sim/nav.h"
 
@@ -131,6 +132,75 @@ void check_listen_config(const host::GameServerConfig &p_c, const host::ServerLe
 	CHECK(p_c.tdm_bots->observer == nullptr);
 }
 
+}
+
+TEST_SUITE("host-map-list-unit") {
+	TEST_CASE("map list: rows of level, mode and rounds; comments; format round trip; the shipped maplist.cfg") {
+		core::Result<host::MapList> list = host::parse_map_list(
+				"MP_Subway TeamDeathMatch0 1\n# rotation\n\nMP_011 TeamDeathMatch0\n  MP_003\tTeamDeathMatch0  2  \n");
+		REQUIRE_MESSAGE(list.ok(), (list.ok() ? std::string() : list.error().message));
+		REQUIRE(list->entries.size() == 3u);
+		CHECK(list->entries[0] == host::LevelEntry{ "MP_Subway", "TeamDeathMatch0", 1 });
+		CHECK(list->entries[1] == host::LevelEntry{ "MP_011", "TeamDeathMatch0", 1 });
+		CHECK(list->entries[2] == host::LevelEntry{ "MP_003", "TeamDeathMatch0", 2 });
+		core::Result<host::MapList> again = host::parse_map_list(host::format_map_list(*list));
+		REQUIRE(again.ok());
+		CHECK(*again == *list);
+
+		core::Result<host::MapList> shipped = host::load_map_list(OPENBF3_MAPLIST_CFG);
+		REQUIRE_MESSAGE(shipped.ok(), (shipped.ok() ? std::string() : shipped.error().message));
+		REQUIRE(shipped->entries.size() == 3u);
+		CHECK(shipped->entries[0] == host::LevelEntry{ "MP_Subway", "TeamDeathMatch0", 1 });
+		CHECK(shipped->entries[1] == host::LevelEntry{ "MP_011", "TeamDeathMatch0", 1 });
+		CHECK(shipped->entries[2] == host::LevelEntry{ "MP_003", "TeamDeathMatch0", 1 });
+	}
+	TEST_CASE("map list: every malformed file fails with its line") {
+		const auto error_of = [](const std::string &p_text) {
+			core::Result<host::MapList> r = host::parse_map_list(p_text);
+			return r.ok() ? std::string() : r.error().message;
+		};
+		CHECK(error_of("MP_Subway") == "map list line 1: expected `level mode [rounds]`");
+		CHECK(error_of("MP_Subway TeamDeathMatch0\nMP_011 TeamDeathMatch0 1 2") ==
+				"map list line 2: expected `level mode [rounds]`, got more words");
+		CHECK(error_of("MP_Subway TeamDeathMatch0 0") == "map list line 1: rounds is not a whole number 1..100");
+		CHECK(error_of("MP_Subway TeamDeathMatch0 101") == "map list line 1: rounds is not a whole number 1..100");
+		CHECK(error_of("MP_Subway TeamDeathMatch0 1.5") == "map list line 1: rounds is not a whole number 1..100");
+		CHECK(error_of("MP-Subway TeamDeathMatch0") ==
+				"map list line 1: a level or mode name is not 1..64 letters, digits or underscores");
+		CHECK(error_of("level = MP_Subway") == "map list line 1: unknown key `level`");
+		CHECK(error_of("# nothing\n\n") == "map list: no entry (each line is `level mode [rounds]`)");
+		std::string many;
+		for (int i = 0; i < 65; ++i) {
+			many += "MP_Subway TeamDeathMatch0\n";
+		}
+		CHECK(error_of(many) == "map list line 65: more than 64 entries");
+		CHECK(error_of(std::string(host::kMaxMapListBytes + 1, ' ')) == "map list: 16385 bytes (limit 16384)");
+		CHECK(error_of(std::string(300, 'a') + " b") == "map list line 1: longer than 256 bytes");
+		const core::Result<host::MapList> missing = host::load_map_list("no/such/maplist.cfg");
+		CHECK_FALSE(missing.ok());
+	}
+	TEST_CASE("map list cursor: rounds per entry, the wrap, and a one-entry list that restarts in place") {
+		core::Result<host::MapList> list =
+				host::parse_map_list("MP_Subway TeamDeathMatch0 2\nMP_011 TeamDeathMatch0 1\n");
+		REQUIRE(list.ok());
+		host::MapListCursor c(*list);
+		CHECK(c.current().level == "MP_Subway");
+		CHECK(c.next_level().level == "MP_Subway");
+		CHECK_FALSE(c.round_over());
+		CHECK(c.current().level == "MP_Subway");
+		CHECK(c.next_level().level == "MP_011");
+		CHECK(c.round_over());
+		CHECK(c.current().level == "MP_011");
+		CHECK(c.index() == 1u);
+		CHECK(c.round_over());
+		CHECK(c.current().level == "MP_Subway");
+		core::Result<host::MapList> one = host::parse_map_list("MP_Subway TeamDeathMatch0\n");
+		REQUIRE(one.ok());
+		host::MapListCursor o(*one);
+		CHECK_FALSE(o.round_over());
+		CHECK_FALSE(o.round_over());
+		CHECK(o.index() == 0u);
+	}
 }
 
 TEST_SUITE("host-server-level") {
