@@ -28,4 +28,17 @@ std::string narrow(std::wstring_view p_wide) {
 	return out;
 }
 
+std::string env_value(const char *p_name) {
+	const std::wstring name = widen(p_name);
+	std::wstring value(256, L'\0');
+	for (;;) {
+		const DWORD n = GetEnvironmentVariableW(name.c_str(), value.data(), static_cast<DWORD>(value.size()));
+		if (n < value.size()) {
+			value.resize(n);
+			return narrow(value);
+		}
+		value.resize(n);
+	}
+}
+
 }

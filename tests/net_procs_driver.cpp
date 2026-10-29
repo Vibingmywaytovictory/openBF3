@@ -16,27 +16,13 @@ namespace bf3::test::procs {
 
 namespace {
 
+using core::detail::env_value;
 using core::detail::path_utf8;
 using core::detail::widen;
 
 constexpr std::chrono::milliseconds kSettleTimeout{ 2000 };
 constexpr std::chrono::milliseconds kKillTimeout{ 10000 };
 constexpr std::chrono::milliseconds kJobPoll{ 1 };
-
-std::wstring env_value(const wchar_t *p_name) {
-	std::wstring value(1024, L'\0');
-	for (;;) {
-		const DWORD n = GetEnvironmentVariableW(p_name, value.data(), static_cast<DWORD>(value.size()));
-		if (n == 0) {
-			return {};
-		}
-		if (n < value.size()) {
-			value.resize(n);
-			return value;
-		}
-		value.resize(n);
-	}
-}
 
 std::wstring quote_arg(const std::wstring &p_arg) {
 	if (!p_arg.empty() && p_arg.find_first_of(L" \t\n\v\"") == std::wstring::npos) {
@@ -195,17 +181,17 @@ struct ProcDriver::Child {
 
 DriverConfig driver_config_from_env() {
 	DriverConfig c;
-	c.row = core::detail::narrow(env_value(L"OPENBF3_PROC_ROW"));
-	c.root = env_value(L"OPENBF3_PROC_ROOT");
-	c.godot_exe = env_value(L"OPENBF3_GODOT");
+	c.row = env_value("OPENBF3_PROC_ROW");
+	c.root = widen(env_value("OPENBF3_PROC_ROOT"));
+	c.godot_exe = widen(env_value("OPENBF3_GODOT"));
 	if (c.godot_exe.empty()) {
-		c.godot_exe = env_value(L"OPENBF3_PROC_GODOT_EXE");
+		c.godot_exe = widen(env_value("OPENBF3_PROC_GODOT_EXE"));
 	}
-	c.godot_project = env_value(L"OPENBF3_PROC_GODOT_PROJECT");
-	c.bf3dump = env_value(L"OPENBF3_PROC_BF3DUMP");
-	c.window_row = env_value(L"OPENBF3_PROC_WINDOW_ROW") == L"1";
-	c.windowed_allowed = env_value(L"OPENBF3_GODOT_WINDOWED") == L"1";
-	c.user_active_flag = env_value(L"OPENBF3_USER_ACTIVE_FLAG");
+	c.godot_project = widen(env_value("OPENBF3_PROC_GODOT_PROJECT"));
+	c.bf3dump = widen(env_value("OPENBF3_PROC_BF3DUMP"));
+	c.window_row = env_value("OPENBF3_PROC_WINDOW_ROW") == "1";
+	c.windowed_allowed = env_value("OPENBF3_GODOT_WINDOWED") == "1";
+	c.user_active_flag = widen(env_value("OPENBF3_USER_ACTIVE_FLAG"));
 	for (std::filesystem::path *p : { &c.root, &c.godot_exe, &c.godot_project, &c.bf3dump, &c.user_active_flag }) {
 		p->make_preferred();
 	}

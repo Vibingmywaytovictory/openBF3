@@ -16,18 +16,6 @@ bool is_dir(const std::filesystem::path &p_path) {
 	return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-std::string env_value(const char *p_name) {
-	const std::wstring wname = detail::widen(p_name);
-	DWORD need = GetEnvironmentVariableW(wname.c_str(), nullptr, 0);
-	if (need == 0) {
-		return {};
-	}
-	std::wstring v(need, L'\0');
-	DWORD got = GetEnvironmentVariableW(wname.c_str(), v.data(), need);
-	v.resize(got < need ? got : 0);
-	return detail::narrow(std::wstring_view(v));
-}
-
 int to_int(const std::string &p_s) {
 	char *end = nullptr;
 	const long v = std::strtol(p_s.c_str(), &end, 10);
@@ -46,7 +34,7 @@ bool InstallReader::locate(const InstallLocateOptions &p_options) {
 		candidates.push_back({ p_options.cmdline_path, "cmdline" });
 	}
 	if (p_options.use_environment) {
-		std::string env = env_value(kEnvVar);
+		std::string env = detail::env_value(kEnvVar);
 		if (!env.empty()) {
 			candidates.push_back({ env, "env" });
 		}
