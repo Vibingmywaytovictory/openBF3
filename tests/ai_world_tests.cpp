@@ -5,15 +5,26 @@
 #include "bf3/ai/nav/nav_clusters.h"
 #include "bf3/ai/strategic/sai.h"
 #include "bf3/ai/strategic/strategic_object.h"
+#include "bf3/core/cache/disk_cache.h"
+#include "bf3/core/level/mode_areas.h"
+#include "bf3/host/bot_fill.h"
+#include "bf3/host/gunplay.h"
+#include "bf3/host/level_load.h"
 #include "bf3/sim/nav.h"
 #include "bf3/sim/static_world.h"
+#include "tdm_fixture.h"
+#include "test_support.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <future>
 #include <memory>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace bf3;
@@ -386,5 +397,158 @@ TEST_SUITE("ai-world-unit") {
 		CHECK(statistics.strength(1) == doctest::Approx(3.0f));
 		CHECK(statistics.count(1) == doctest::Approx(1.0f));
 		CHECK(statistics.samples() == 2);
+	}
+
+}
+
+namespace {
+
+struct ModeLevel {
+	std::shared_ptr<const host::SharedLevel> shared;
+	std::shared_ptr<const host::BotLevel> bots;
+	std::vector<core::level::ModeObjectiveDef> objectives;
+	double seconds = 0.0;
+	std::string error;
+};
+
+ModeLevel load_mode_level(
+		std::shared_ptr<core::Install> p_install, const core::InstallReader &p_reader, const std::string &p_mode) {
+	ModeLevel out;
+	const auto start = std::chrono::steady_clock::now();
+	const std::filesystem::path root = std::filesystem::temp_directory_path() /
+			("openbf3-ai-world-" + p_mode + "-" +
+					std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
+	core::Cache cache;
+	core::CacheOptions co;
+	co.root = root;
+	co.guard = p_reader.write_guard();
+	std::string detail;
+	if (cache.open(std::move(co), &detail) != core::CacheStatus::Ok) {
+		out.error = detail;
+		return out;
+	}
+	core::Result<host::LevelDatabase> db = host::open_level_database(p_install, "MP_Subway", p_mode, 0, nullptr);
+	if (!db) {
+		out.error = db.error().message;
+		return out;
+	}
+	host::SharedLoadOptions so;
+	so.cache = &cache;
+	so.tuning = bf3::test::gunplay::shipped_motor_tuning();
+	core::Result<std::shared_ptr<const host::SharedLevel>> shared = host::load_shared_level(*db, so, nullptr);
+	if (!shared) {
+		out.error = shared.error().message;
+		return out;
+	}
+	out.shared = *shared;
+	host::BotLoadOptions bo;
+	bo.cache = &cache;
+	bo.threads = std::max(1u, std::thread::hardware_concurrency() / 4u);
+	core::Result<std::shared_ptr<const host::BotLevel>> bots = host::load_bot_level(*db, *out.shared, bo, nullptr);
+	if (!bots) {
+		out.error = bots.error().message;
+		return out;
+	}
+	out.bots = *bots;
+	core::Result<core::level::ModeAreas> areas = core::level::read_mode_areas(*db->world);
+	if (areas) {
+		out.objectives = areas->objectives;
+	}
+	cache.close();
+	std::error_code ec;
+	std::filesystem::remove_all(root, ec);
+	out.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+	return out;
+}
+
+void check_pathable(const host::BotLevel &p_level) {
+	const ai::MaterialManager materials;
+	ai::ClusterNodeManager nodes;
+	std::vector<uint32_t> path;
+	size_t pairs = 0;
+	for (size_t i = 0; i < p_level.areas.size(); ++i) {
+		const host::BotStrategicArea &a = p_level.areas[i];
+		REQUIRE(a.cluster != ai::kNoCluster);
+		CHECK_MESSAGE(sim::nav_poly_component(*p_level.nav, p_level.components, a.poly) == p_level.main_component,
+				a.name << " is off the main component");
+		for (size_t j = i + 1; j < p_level.areas.size(); ++j) {
+			const float cost =
+					p_level.clusters->graph.shortest_path(a.cluster, p_level.areas[j].cluster, materials, nodes, path);
+			CHECK_MESSAGE(cost >= 0.0f, a.name << " to " << p_level.areas[j].name << " has no cluster path");
+			const float back =
+					p_level.clusters->graph.shortest_path(p_level.areas[j].cluster, a.cluster, materials, nodes, path);
+			CHECK_MESSAGE(back >= 0.0f, p_level.areas[j].name << " to " << a.name << " has no cluster path");
+			++pairs;
+		}
+	}
+	std::printf("ai world: %s %s: %zu areas, %zu pairs pathable over %u clusters (%u portals, %zu polygons)\n",
+			p_level.level.c_str(), p_level.mode.c_str(), p_level.areas.size(), pairs, p_level.clusters->cluster_count(),
+			p_level.clusters->graph.number_of_portals(), p_level.clusters->poly_cluster.size());
+}
+
+}
+
+TEST_SUITE("ai-world-install") {
+	TEST_CASE("ai world: Metro TDM areas and Metro CQL control points") {
+		test::tdm::TdmLevel *level = test::tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		std::future<ModeLevel> cql = std::async(
+				std::launch::async, [&] { return load_mode_level(level->install, *level->reader, "ConquestLarge0"); });
+
+		const host::BotLevel &tdm = *level->bots;
+		REQUIRE(tdm.clusters != nullptr);
+		std::set<uint32_t> covered;
+		size_t spawn_rows = 0;
+		for (const host::BotPointRow &row : tdm.points) {
+			spawn_rows += row.kind == host::BotPointRow::Kind::Spawn ? 1 : 0;
+		}
+		for (const host::BotStrategicArea &area : tdm.areas) {
+			CHECK(area.kind == host::BotStrategicArea::Kind::TdmCluster);
+			CHECK_FALSE(area.takeable);
+			CHECK(area.team == 0);
+			for (const uint32_t s : area.spawns) {
+				CHECK_MESSAGE(covered.insert(s).second, "spawn " << s << " is in two areas");
+			}
+		}
+		CHECK(spawn_rows == 102);
+		CHECK(covered.size() == spawn_rows);
+		CHECK(tdm.areas.size() >= 4);
+		CHECK(tdm.areas.size() <= 12);
+		check_pathable(tdm);
+		std::printf("ai world: Metro TDM strategic map built in %.3f s\n", tdm.seconds_strategic);
+
+		ModeLevel conquest = cql.get();
+		REQUIRE_MESSAGE(conquest.error.empty(), conquest.error);
+		const host::BotLevel &cq = *conquest.bots;
+		size_t flags = 0, hqs = 0;
+		for (const core::level::ModeObjectiveDef &o : conquest.objectives) {
+			flags += o.kind == core::level::ModeObjectiveDef::Kind::Flag ? 1 : 0;
+			hqs += o.kind == core::level::ModeObjectiveDef::Kind::Hq ? 1 : 0;
+		}
+		CHECK(flags > 0);
+		CHECK(hqs == 2);
+		size_t area_flags = 0, area_hqs = 0;
+		std::set<int> hq_teams;
+		for (const host::BotStrategicArea &area : cq.areas) {
+			REQUIRE(area.objective < conquest.objectives.size());
+			CHECK(area.team == conquest.objectives[area.objective].team);
+			if (area.kind == host::BotStrategicArea::Kind::Flag) {
+				++area_flags;
+				CHECK(area.takeable);
+			} else if (area.kind == host::BotStrategicArea::Kind::Hq) {
+				++area_hqs;
+				CHECK_FALSE(area.takeable);
+				hq_teams.insert(area.team);
+			}
+		}
+		CHECK(area_flags == flags);
+		CHECK(area_hqs == hqs);
+		CHECK(hq_teams == std::set<int>{ 1, 2 });
+		check_pathable(cq);
+		std::printf("ai world: Metro CQL %zu flags and %zu HQs (loaded in %.1f s), TDM fixture %.1f s\n", area_flags,
+				area_hqs, conquest.seconds, level->seconds_load);
+		test::tdm::check_install_unchanged(*level);
 	}
 }

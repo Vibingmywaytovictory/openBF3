@@ -1147,10 +1147,16 @@ target_link_libraries(test_ai_squad PRIVATE bf3_ai)
 add_test(NAME ai.squad.unit COMMAND test_ai_squad --test-suite=ai-squad)
 set_tests_properties(ai.squad.unit PROPERTIES TIMEOUT 60 LABELS "unit")
 
-openbf3_test(test_ai_world test_main.cpp ai_world_tests.cpp)
-target_link_libraries(test_ai_world PRIVATE bf3_ai)
+openbf3_test(test_ai_world test_main.cpp ai_world_tests.cpp tdm_fixture.h gunplay_fixture.h test_support.h)
+target_link_libraries(test_ai_world PRIVATE bf3_host)
+target_compile_definitions(test_ai_world PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""
+    "OPENBF3_MECHANICS_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/weapon_mechanics.cfg\""
+    "OPENBF3_TDM_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/tdm_tuning.cfg\"")
 add_test(NAME ai.world.unit COMMAND test_ai_world --test-suite=ai-world-unit)
 set_tests_properties(ai.world.unit PROPERTIES TIMEOUT 60 LABELS "unit")
+add_test(NAME ai.world.install COMMAND test_ai_world --test-suite=ai-world-install)
+set_tests_properties(ai.world.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+openbf3_cost(ai.world.install 2 15)
 
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)

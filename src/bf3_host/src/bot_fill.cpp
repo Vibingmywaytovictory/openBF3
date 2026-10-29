@@ -1,6 +1,7 @@
 #include "bf3/host/bot_fill.h"
 
 #include "bot_director.h"
+#include "strategic_map.h"
 
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/mode_areas.h"
@@ -188,6 +189,9 @@ core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase
 	}
 	out->spawns = make_bot_spawns(out->points, p_shared.spawns, out->components, out->main_component, **query, motor, **world, p_options.synthetic_spawns,
 			p_options.seed);
+	clock = Clock::now();
+	BF3_TRY(build_strategic_map(*out, areas->objectives));
+	out->seconds_strategic = seconds_since(clock);
 	return std::shared_ptr<const BotLevel>(std::move(out));
 }
 

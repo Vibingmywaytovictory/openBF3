@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/ai/nav/nav_clusters.h"
 #include "bf3/core/result.h"
 #include "bf3/host/bot_fill_stats.h"
 #include "bf3/sim/bots/walker_brain.h"
@@ -57,6 +58,20 @@ struct BotSpawns {
 	uint32_t synthetic = 0;
 };
 
+struct BotStrategicArea {
+	enum class Kind : uint8_t { Flag = 0, Hq = 1, Mcom = 2, TdmCluster = 3 };
+	Kind kind = Kind::TdmCluster;
+	std::string name;
+	sim::Vec3 centre{};
+	sim::NavPolyRef poly = 0;
+	float radius = 0.0f;
+	int team = 0;
+	bool takeable = false;
+	uint32_t objective = UINT32_MAX;
+	uint32_t cluster = UINT32_MAX;
+	std::vector<uint32_t> spawns;
+};
+
 struct BotLevel {
 	std::string level;
 	std::string mode;
@@ -68,9 +83,12 @@ struct BotLevel {
 	std::vector<BotPointRow> points;
 	BotSpawns spawns;
 	std::vector<sim::NavTileKey> region;
+	std::shared_ptr<const ai::NavClusterMap> clusters;
+	std::vector<BotStrategicArea> areas;
 	double seconds_areas = 0.0;
 	double seconds_nav = 0.0;
 	double seconds_components = 0.0;
+	double seconds_strategic = 0.0;
 };
 
 struct BotLoadOptions {

@@ -204,3 +204,8 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/squads.h
     src/squads.cpp
 )
+
+target_sources(bf3_host PRIVATE
+    src/strategic_map.h
+    src/strategic_map.cpp
+)
