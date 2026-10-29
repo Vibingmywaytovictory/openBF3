@@ -106,6 +106,7 @@ struct SamplerState {
 	float amplitude = 0.0f, amplitude_prev = 0.0f;
 	float pitch = 1.0f;
 	bool instant_release = false;
+	bool trigger_was_on = false;
 };
 
 enum class PluginRole : uint8_t {

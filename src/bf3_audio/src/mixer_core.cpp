@@ -123,6 +123,7 @@ struct MixerCore::Impl {
 	std::vector<CullVoice> cull_voices;
 	std::vector<CullVerdict> cull_verdicts;
 	std::vector<uint32_t> cull_slots;
+	std::vector<CullVerdict> cull_park;
 	void a3_init();
 	void a3_block(MixerStats &stats, uint64_t p_first);
 	MixerCutStats cut_stats;
@@ -130,7 +131,8 @@ struct MixerCore::Impl {
 	std::atomic<bool> cut_record{ false };
 	uint64_t block_first = 0;
 	void note_cut(MixerCutKind p_kind, const InstanceSlot &p_slot, float p_step);
-	void note_event(MixerCutKind p_kind, InstanceHandle p_handle, float p_step, const PatchInstance *p_instance);
+	void note_event(MixerCutKind p_kind, InstanceHandle p_handle, float p_step, const PatchInstance *p_instance,
+			uint8_t p_reason = 0, uint16_t p_scope = core::audio::kNoScope, uint32_t p_count = 0);
 
 	bool begin_fade(InstanceSlot &r_slot, uint8_t p_mode, MixerCutKind p_kind);
 	float limit_gain = 1.0f;
@@ -325,6 +327,9 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 					}
 				}
 				if (free == nullptr || cmd.instance == nullptr) {
+					if (cmd.instance != nullptr) {
+						m.note_event(MixerCutKind::Refused, cmd.handle, 0.0f, cmd.instance);
+					}
 					stats.starved_voices.fetch_add(cmd.instance ? 1 : 0, std::memory_order_relaxed);
 					m.give_back(cmd.instance);
 					break;
@@ -336,6 +341,7 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 				free->pending = false;
 				free->start_frame = first + offset;
 				free->scope = m.config.scopes ? m.config.scopes->scope_of(cmd.instance->program().partition) : core::audio::kNoScope;
+				m.note_event(MixerCutKind::Request, cmd.handle, 0.0f, cmd.instance, 0, free->scope);
 				for (size_t k = 0; k < m.mixer_value_count; ++k) {
 					cmd.instance->set_mixer_value(m.mixer_values[k].first, m.mixer_values[k].second);
 				}
@@ -451,6 +457,7 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 		stats.deferred_events.fetch_add(after.deferred_events - before.deferred_events, std::memory_order_relaxed);
 		m.cut_stats.slot_takeovers.fetch_add(after.slot_takeovers - before.slot_takeovers, std::memory_order_relaxed);
 		m.cut_stats.takeover_cuts.fetch_add(after.takeover_cuts - before.takeover_cuts, std::memory_order_relaxed);
+		m.cut_stats.held_triggers.fetch_add(after.held_triggers - before.held_triggers, std::memory_order_relaxed);
 		if (after.takeover_cut_max > m.cut_stats.takeover_cut_max.load(std::memory_order_relaxed)) {
 			m.cut_stats.takeover_cut_max.store(after.takeover_cut_max, std::memory_order_relaxed);
 		}
@@ -581,6 +588,7 @@ void MixerCore::Impl::a3_init() {
 		cull_voices.resize(instances.size());
 		cull_verdicts.resize(instances.size());
 		cull_slots.resize(instances.size());
+		cull_park.resize(instances.size());
 	}
 }
 
@@ -619,6 +627,7 @@ void MixerCore::Impl::a3_block(MixerStats &stats, uint64_t p_first) {
 			continue;
 		}
 		if (s.pending && s.stop_requested) {
+			note_event(MixerCutKind::Cull, s.handle, 0.0f, s.instance, uint8_t(CullVerdict::Pending), s.scope);
 			drop(s);
 			continue;
 		}
@@ -655,8 +664,9 @@ void MixerCore::Impl::a3_block(MixerStats &stats, uint64_t p_first) {
 	CullCounts counts;
 	const float precull = hdr_on ? window.precull_db() : -std::numeric_limits<float>::infinity();
 	const uint32_t voice_cap = config.max_voices > reserved ? config.max_voices - reserved : 0u;
-	audio::cull_voices(std::span<const CullVoice>(cull_voices.data(), n), config.scopes.get(), precull, voice_cap, p_first, config.mix_rate,
-			std::span<CullVerdict>(cull_verdicts.data(), n), counts);
+	audio::cull_voices(std::span<const CullVoice>(cull_voices.data(), n), config.scopes.get(), precull, voice_cap,
+			p_first, config.mix_rate, std::span<CullVerdict>(cull_verdicts.data(), n), counts,
+			std::span<CullVerdict>(cull_park.data(), n));
 	float loudest = -std::numeric_limits<float>::infinity();
 	uint32_t live = reserved;
 	for (size_t k = 0; k < n; ++k) {
@@ -664,7 +674,11 @@ void MixerCore::Impl::a3_block(MixerStats &stats, uint64_t p_first) {
 		switch (cull_verdicts[k]) {
 			case CullVerdict::Keep:
 				if (s.pending) {
-					cut_stats.stale_events.fetch_add(s.instance->coalesce_events(), std::memory_order_relaxed);
+					const uint32_t stale = s.instance->coalesce_events();
+					cut_stats.stale_events.fetch_add(stale, std::memory_order_relaxed);
+					if (stale > 0) {
+						note_event(MixerCutKind::Coalesce, s.handle, 0.0f, s.instance, 0, s.scope, stale);
+					}
 				}
 				if (s.pending && config.cut_fade_frames > 0) {
 					s.instance->set_fade(0.0f);
@@ -678,6 +692,9 @@ void MixerCore::Impl::a3_block(MixerStats &stats, uint64_t p_first) {
 				}
 				break;
 			case CullVerdict::Pending:
+				if (!s.pending) {
+					note_event(MixerCutKind::Park, s.handle, 0.0f, s.instance, uint8_t(cull_park[k]), s.scope);
+				}
 				if (!s.pending && begin_fade(s, kFadePark, MixerCutKind::Pend)) {
 					break;
 				}
@@ -687,6 +704,7 @@ void MixerCore::Impl::a3_block(MixerStats &stats, uint64_t p_first) {
 				s.pending = true;
 				break;
 			default:
+				note_event(MixerCutKind::Cull, s.handle, 0.0f, s.instance, uint8_t(cull_verdicts[k]), s.scope);
 				drop(s);
 				break;
 		}
@@ -800,7 +818,8 @@ void MixerCore::Impl::note_cut(MixerCutKind p_kind, const InstanceSlot &p_slot, 
 	note_event(p_kind, p_slot.handle, p_step, p_slot.instance);
 }
 
-void MixerCore::Impl::note_event(MixerCutKind p_kind, InstanceHandle p_handle, float p_step, const PatchInstance *p_instance) {
+void MixerCore::Impl::note_event(MixerCutKind p_kind, InstanceHandle p_handle, float p_step,
+		const PatchInstance *p_instance, uint8_t p_reason, uint16_t p_scope, uint32_t p_count) {
 	const size_t k = std::min(size_t(p_kind), kMixerCutKinds - 1);
 	const float step = std::isfinite(p_step) ? std::fabs(p_step) : 0.0f;
 	cut_stats.events[k].fetch_add(1, std::memory_order_relaxed);
@@ -823,6 +842,9 @@ void MixerCore::Impl::note_event(MixerCutKind p_kind, InstanceHandle p_handle, f
 	e.handle = p_handle;
 	e.kind = p_kind;
 	e.step = step;
+	e.reason = p_reason;
+	e.scope = p_scope;
+	e.count = p_count;
 	if (p_instance != nullptr) {
 		const VoiceCullInfo info = p_instance->cull_info();
 		e.loudness_db = info.loudness_db;
@@ -930,7 +952,8 @@ void MixerCore::Impl::apply_limiter() {
 }
 
 const char *mixer_cut_kind_name(MixerCutKind p_kind) {
-	static const char *const kNames[kMixerCutKinds] = { "drop", "pend", "kill", "finish", "start", "resume", "suspend", "unsuspend", "fade", "callgap", "lateblock" };
+	static const char *const kNames[kMixerCutKinds] = { "drop", "pend", "kill", "finish", "start", "resume", "suspend",
+		"unsuspend", "fade", "callgap", "lateblock", "request", "refused", "cull", "park", "coalesce" };
 	return size_t(p_kind) < kMixerCutKinds ? kNames[size_t(p_kind)] : "?";
 }
 
@@ -974,6 +997,10 @@ std::string format_mixer_cuts(const MixerCutStats &p_stats) {
 			"at resume",
 			(unsigned long long)p_stats.slot_takeovers.load(), (unsigned long long)p_stats.takeover_cuts.load(),
 			double(p_stats.takeover_cut_max.load()), (unsigned long long)p_stats.stale_events.load());
+	out += part;
+	std::snprintf(part, sizeof(part),
+			"; %llu sampler triggers from a trigger input already on at the previous evaluation",
+			(unsigned long long)p_stats.held_triggers.load());
 	out += part;
 	return out;
 }

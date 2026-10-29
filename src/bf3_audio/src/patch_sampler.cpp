@@ -307,8 +307,11 @@ void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode
 	const bool release = on(read(port(n, cp::SmpRelease)));
 	const auto delay_frames = [&](float p_seconds) { return uint64_t(std::llround(double(p_seconds) * double(mix_rate))); };
 
+	const bool held_trigger = trigger && s.trigger_was_on;
+	s.trigger_was_on = trigger;
 	if (trigger && s.slots_count > 0) {
 		++stats.sampler_triggers;
+		stats.held_triggers += held_trigger ? 1u : 0u;
 		uint32_t wave_index = UINT32_MAX;
 		const ca::SoundPort &external = port(n, cp::SmpExternalWave);
 		if (external.connected()) {

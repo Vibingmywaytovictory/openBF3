@@ -22,6 +22,7 @@
 #include "ui_assets.h"
 #include "ui_post_process.h"
 #if OPENBF3_BUILD_CHECKS
+#include "audio_ingame_check.h"
 #include "deploy_check.h"
 #include "eor_check.h"
 #include "fov_round_check.h"
@@ -479,7 +480,11 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 			quit_after_ = 1.0e9;
 		}
 		mapper_.enable_tdm(true);
-		if (m.deploy_check) {
+		m.audio_ingame_on = has_user_arg("audio-ingame-check");
+		if (m.audio_ingame_on && quit_after_ <= 0.0) {
+			quit_after_ = 1.0e9;
+		}
+		if (m.deploy_check || m.audio_ingame_on) {
 			mapper_.set_scripted(true);
 		}
 		UtilityFunctions::print(to_godot(std::string("[tdm] ") + (m.playable ? "playable scene" : "check run") + ": TDM rules on, " +
@@ -933,6 +938,31 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			m.finished = true;
 			UtilityFunctions::print(to_godot(m.deploy_run->report()));
 			finish(m.deploy_run->exit_code());
+			return true;
+		}
+	}
+	if (m.audio_ingame_on && r_game.audio != nullptr && !m.finished) {
+		if (m.audio_ingame == nullptr) {
+			m.audio_ingame = std::unique_ptr<AudioIngameCheck, void (*)(AudioIngameCheck *)>(
+					new AudioIngameCheck(user_arg_value("audio-ingame-check"),
+							std::atof(user_arg_value("audio-ingame-seconds").c_str())),
+					&delete_part<AudioIngameCheck>);
+		}
+		AudioIngameIo io;
+		io.alive = r_game.alive;
+		io.time_to_respawn = r_game.hud_model.spawn_logic.time_to_respawn;
+		io.hold_fire = [this](bool p_held) { mapper_.script_hold(InputMapper::WeaponAction::Fire, p_held); };
+		io.reload = [this] { mapper_.script_press(InputMapper::WeaponAction::Reload); };
+		io.deploy = [this] {
+			scripted_ui_key(KEY_ENTER, true);
+			scripted_ui_key(KEY_ENTER, false);
+		};
+		io.view = [this](float p_yaw, float p_pitch) { mapper_.script_view(p_yaw, p_pitch); };
+		io.yaw = [this] { return mapper_.view().yaw; };
+		if (m.audio_ingame->frame(now_s, *r_game.audio, io)) {
+			m.finished = true;
+			UtilityFunctions::print(to_godot(m.audio_ingame->report()));
+			finish(m.audio_ingame->exit_code());
 			return true;
 		}
 	}

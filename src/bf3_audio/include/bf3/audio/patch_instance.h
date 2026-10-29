@@ -90,6 +90,7 @@ struct PatchInstanceStats {
 	uint64_t slot_takeovers = 0;
 	uint64_t takeover_cuts = 0;
 	float takeover_cut_max = 0.0f;
+	uint64_t held_triggers = 0;
 };
 
 struct HdrVoiceWindow {

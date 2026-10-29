@@ -223,6 +223,8 @@ if(OPENBF3_BUILD_CHECKS)
     target_sources(bf3_godot PRIVATE
         src/audio_demo.cpp
         src/audio_demo.h
+        src/audio_ingame_check.cpp
+        src/audio_ingame_check.h
         src/collision_check.cpp
         src/collision_check.h
         src/crosshair_walk_check.cpp

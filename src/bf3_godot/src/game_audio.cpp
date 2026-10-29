@@ -329,14 +329,28 @@ void Bf3GameAudio::set_check(audio::GameAudioCheck *p_check) {
 	if (m.router) {
 		m.router->set_observer(p_check);
 	}
+	set_mix_tap(p_check);
+}
 
+void Bf3GameAudio::set_mix_tap(audio::MixTap *p_tap) {
+	Impl &m = *impl_;
 	if (m.built) {
 		AudioServer::get_singleton()->lock();
-		m.tap.set(p_check);
+		m.tap.set(p_tap);
 		AudioServer::get_singleton()->unlock();
 	} else {
-		m.tap.set(p_check);
+		m.tap.set(p_tap);
 	}
+}
+
+std::string_view Bf3GameAudio::scope_name(uint16_t p_scope) const {
+	const Impl &m = *impl_;
+	return m.a3.scopes && p_scope < m.a3.scopes->scopes.size() ? std::string_view(m.a3.scopes->scopes[p_scope].name)
+															   : std::string_view();
+}
+
+const core::PathGuard &Bf3GameAudio::write_guard() const {
+	return impl_->capture_guard;
 }
 
 audio::MixerCore *Bf3GameAudio::mixer() const {
@@ -379,6 +393,7 @@ GameAudioStats Bf3GameAudio::stats() const {
 	s.one_shots_peak = m.pool->peak();
 	s.one_shots_stolen = m.pool->stolen();
 	s.one_shots_failed = m.pool->failed();
+	s.one_shots_forgotten = m.pool->forgotten();
 	s.auditions = m.auditions_started;
 	return s;
 }

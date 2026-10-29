@@ -40,8 +40,9 @@ struct CullCounts {
 	uint32_t precull = 0, scope = 0, cap = 0, pending = 0;
 };
 
-void cull_voices(std::span<const CullVoice> p_voices, const core::audio::ScopeTable *p_scopes, float p_precull_db, uint32_t p_max_voices,
-		uint64_t p_frame, uint32_t p_mix_rate, std::span<CullVerdict> r_verdicts, CullCounts &r_counts);
+void cull_voices(std::span<const CullVoice> p_voices, const core::audio::ScopeTable *p_scopes, float p_precull_db,
+		uint32_t p_max_voices, uint64_t p_frame, uint32_t p_mix_rate, std::span<CullVerdict> r_verdicts,
+		CullCounts &r_counts, std::span<CullVerdict> r_park_reasons = {});
 
 struct MixerA3Assets {
 	std::optional<core::audio::HdrSetting> hdr;

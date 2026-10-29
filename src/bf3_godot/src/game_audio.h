@@ -8,6 +8,7 @@
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/weapon_audio.h"
 #include "bf3/client_audio/game_audio_frame.h"
+#include "bf3/core/path_guard.h"
 #include "bf3/core/result.h"
 #include "bf3/fx/triggers.h"
 
@@ -35,7 +36,7 @@ struct GameAudioStats {
 	uint32_t programs = 0, program_failures = 0;
 
 	uint32_t one_shots_live = 0, one_shots_peak = 0;
-	uint64_t one_shots_stolen = 0, one_shots_failed = 0;
+	uint64_t one_shots_stolen = 0, one_shots_failed = 0, one_shots_forgotten = 0;
 	uint64_t starved_voices = 0, feedback_drops = 0, max_block_ns = 0;
 	int64_t bias_frames = 0;
 	uint64_t auditions = 0;
@@ -63,6 +64,9 @@ public:
 	bool audition(std::string_view p_patch, const fx::Vec3 &p_position, std::string *r_error);
 
 	void set_check(audio::GameAudioCheck *p_check);
+	void set_mix_tap(audio::MixTap *p_tap);
+	std::string_view scope_name(uint16_t p_scope) const;
+	const core::PathGuard &write_guard() const;
 	audio::MixerCore *mixer() const;
 	bool weapon_bound(uint16_t p_def) const;
 	std::span<const audio::KitAudioVariant> sound_variants() const;

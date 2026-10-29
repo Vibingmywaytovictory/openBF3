@@ -1231,6 +1231,35 @@ TEST_SUITE("audio-cuts") {
 		CHECK(peak_of(rig2.rec.left, 0, rig2.frames()) <= 0.5 + 1e-6);
 	}
 
+	TEST_CASE("sound fates: the event ring names each request, why the cap parks or culls it, and a refused start") {
+		Rig rig(cut_config(512, 1, false));
+		rig.mixer->record_cuts(true);
+		const ba::InstanceHandle a = rig.start(Source{ 90.0f, false, true, 1, 1.0f }, 1.0f);
+		rig.step(2);
+		const ba::InstanceHandle b = rig.start(Source{ 91.0f, false, true, 2, 1.0f }, 1.0f);
+		const ba::InstanceHandle d = rig.start(Source{ 80.0f, false, false, 3, 1.0f }, 1.0f);
+		rig.step(2);
+		for (uint8_t i = 0; i < 8; ++i) {
+			rig.start(Source{ 70.0f, false, false, uint8_t(4 + i), 1.0f }, 1.0f);
+		}
+		rig.step(1);
+		std::array<ba::MixerCutEvent, 64> ev{};
+		const size_t n = rig.mixer->poll_cuts(ev);
+		const auto has = [&](ba::MixerCutKind p_kind, ba::InstanceHandle p_handle, ba::CullVerdict p_reason) {
+			return std::any_of(ev.begin(), ev.begin() + std::ptrdiff_t(n), [&](const ba::MixerCutEvent &e) {
+				return e.kind == p_kind && e.handle == p_handle &&
+						(p_kind == ba::MixerCutKind::Request || e.reason == uint8_t(p_reason));
+			});
+		};
+		CHECK(has(ba::MixerCutKind::Request, a, ba::CullVerdict::Keep));
+		CHECK(has(ba::MixerCutKind::Request, b, ba::CullVerdict::Keep));
+		CHECK(has(ba::MixerCutKind::Park, a, ba::CullVerdict::Cap));
+		CHECK(has(ba::MixerCutKind::Cull, d, ba::CullVerdict::Cap));
+		CHECK(std::count_if(ev.begin(), ev.begin() + std::ptrdiff_t(n),
+					  [](const ba::MixerCutEvent &e) { return e.kind == ba::MixerCutKind::Refused; }) == 2);
+		CHECK(rig.mixer->stats().starved_voices.load() == 2);
+	}
+
 	TEST_CASE("PT1 snd: the cut readout, the event ring and hostile fades") {
 		Rig rig(cut_config(512, 128));
 		rig.mixer->record_cuts(true);
@@ -1241,12 +1270,14 @@ TEST_SUITE("audio-cuts") {
 		rig.step(2);
 		std::array<ba::MixerCutEvent, 16> ev{};
 		const size_t n = rig.mixer->poll_cuts(ev);
-		REQUIRE(n == 3);
-		CHECK(ev[0].kind == ba::MixerCutKind::Start);
-		CHECK(ev[1].kind == ba::MixerCutKind::Fade);
-		CHECK(ev[2].kind == ba::MixerCutKind::Kill);
-		CHECK(ev[2].frame == ev[1].frame);
-		CHECK(std::string(ev[1].program) == "a3_source");
+		REQUIRE(n == 4);
+		CHECK(ev[0].kind == ba::MixerCutKind::Request);
+		CHECK(ev[0].handle == h);
+		CHECK(ev[1].kind == ba::MixerCutKind::Start);
+		CHECK(ev[2].kind == ba::MixerCutKind::Fade);
+		CHECK(ev[3].kind == ba::MixerCutKind::Kill);
+		CHECK(ev[3].frame == ev[2].frame);
+		CHECK(std::string(ev[2].program) == "a3_source");
 		const std::string line = ba::format_mixer_cuts(rig.mixer->cut_stats());
 		MESSAGE(line);
 		CHECK(line.find("kill 1/0/0/") != std::string::npos);

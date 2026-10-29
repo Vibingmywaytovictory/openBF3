@@ -33,6 +33,7 @@ class NativeScreensCheck;
 class DeployCheck;
 class LoadingScreenCheck;
 class OverlayCheck;
+class AudioIngameCheck;
 class UiSizesCheck;
 
 struct TdmState {
@@ -135,6 +136,8 @@ struct TdmState {
 	std::unique_ptr<OverlayCheck, void (*)(OverlayCheck *)> overlay_run{ nullptr, nullptr };
 	std::unique_ptr<EorCheck, void (*)(EorCheck *)> eor_check{ nullptr, nullptr };
 	std::unique_ptr<FovRoundCheck, void (*)(FovRoundCheck *)> fov_round{ nullptr, nullptr };
+	bool audio_ingame_on = false;
+	std::unique_ptr<AudioIngameCheck, void (*)(AudioIngameCheck *)> audio_ingame{ nullptr, nullptr };
 };
 
 Bf3UiScreens *tdm_ui_screens(const TdmState &p_m);

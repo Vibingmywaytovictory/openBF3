@@ -29,12 +29,16 @@ struct Culler {
 	std::span<const CullVoice> v;
 	std::span<CullVerdict> out;
 	CullCounts &counts;
+	std::span<CullVerdict> park;
 	std::array<uint8_t, kMaxCullVoices> mark{};
 
 	bool kept(size_t i) const { return out[i] == CullVerdict::Keep; }
 
 	void cull(size_t i, CullVerdict p_drop) {
 		if (v[i].looping) {
+			if (i < park.size()) {
+				park[i] = p_drop;
+			}
 			out[i] = CullVerdict::Pending;
 			++counts.pending;
 			return;
@@ -116,8 +120,9 @@ struct Culler {
 
 }
 
-void cull_voices(std::span<const CullVoice> p_voices, const ScopeTable *p_scopes, float p_precull_db, uint32_t p_max_voices, uint64_t p_frame, uint32_t p_mix_rate,
-		std::span<CullVerdict> r_verdicts, CullCounts &r_counts) {
+void cull_voices(std::span<const CullVoice> p_voices, const ScopeTable *p_scopes, float p_precull_db,
+		uint32_t p_max_voices, uint64_t p_frame, uint32_t p_mix_rate, std::span<CullVerdict> r_verdicts,
+		CullCounts &r_counts, std::span<CullVerdict> r_park_reasons) {
 	(void)p_frame;
 	const size_t n = std::min(p_voices.size(), r_verdicts.size());
 	for (size_t i = 0; i < n; ++i) {
@@ -126,7 +131,7 @@ void cull_voices(std::span<const CullVoice> p_voices, const ScopeTable *p_scopes
 	if (p_voices.size() != r_verdicts.size() || n > kMaxCullVoices) {
 		return;
 	}
-	Culler c{ p_voices, r_verdicts, r_counts };
+	Culler c{ p_voices, r_verdicts, r_counts, r_park_reasons };
 
 	for (size_t i = 0; i < n; ++i) {
 		const CullVoice &v = p_voices[i];

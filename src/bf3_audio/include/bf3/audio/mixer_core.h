@@ -113,7 +113,25 @@ public:
 	virtual void on_block(const float *p_interleaved_stereo, uint32_t p_frames, uint64_t p_first_frame) = 0;
 };
 
-enum class MixerCutKind : uint8_t { Drop = 0, Pend, Kill, Finish, Start, Resume, Suspend, Unsuspend, Fade, CallGap, LateBlock, Count };
+enum class MixerCutKind : uint8_t {
+	Drop = 0,
+	Pend,
+	Kill,
+	Finish,
+	Start,
+	Resume,
+	Suspend,
+	Unsuspend,
+	Fade,
+	CallGap,
+	LateBlock,
+	Request,
+	Refused,
+	Cull,
+	Park,
+	Coalesce,
+	Count
+};
 inline constexpr size_t kMixerCutKinds = size_t(MixerCutKind::Count);
 inline constexpr float kAudibleStep = 1.0e-3f;
 inline constexpr float kLoudStep = 1.0e-2f;
@@ -125,7 +143,10 @@ struct MixerCutEvent {
 	float step = 0.0f;
 	float loudness_db = 0.0f;
 	float distance_m = 0.0f;
-	char program[48] = {};
+	uint8_t reason = 0;
+	uint16_t scope = core::audio::kNoScope;
+	uint32_t count = 0;
+	char program[96] = {};
 };
 struct MixerCutStats {
 	std::atomic<uint64_t> events[kMixerCutKinds]{};
@@ -147,6 +168,7 @@ struct MixerCutStats {
 	std::atomic<uint64_t> takeover_cuts{ 0 };
 	std::atomic<float> takeover_cut_max{ 0.0f };
 	std::atomic<uint64_t> stale_events{ 0 };
+	std::atomic<uint64_t> held_triggers{ 0 };
 };
 inline constexpr std::array<double, 7> kGapEdgesMs = { 5.0, 10.0, 15.0, 20.0, 30.0, 50.0, 100.0 };
 const char *mixer_cut_kind_name(MixerCutKind p_kind);
