@@ -113,13 +113,17 @@ bool WeaponSoundDriver::round_fired(MixerCore &r_mixer, uint32_t p_round) {
 	if (p_round == 0) {
 		return true;
 	}
-	const uint32_t hash = (mode_ == WeaponFireMode::Single || !binding_.step_event) ? binding_.start_event : *binding_.step_event;
-	return r_mixer.push(event_command(instance_, hash, round_frame(p_round)));
+	return r_mixer.push(event_command(instance_, round_event(), round_frame(p_round)));
+}
+
+uint32_t WeaponSoundDriver::round_event() const {
+	return (mode_ == WeaponFireMode::Single || !binding_.step_event) ? binding_.start_event : *binding_.step_event;
 }
 
 bool WeaponSoundDriver::trigger_up(MixerCore &r_mixer, uint64_t p_frame) {
 	held_ = false;
-	if (binding_.stop_event == 0) {
+	if (binding_.stop_event == 0 || binding_.stop_event == binding_.start_event ||
+			binding_.stop_event == round_event()) {
 		return true;
 	}
 	return r_mixer.push(event_command(instance_, binding_.stop_event, p_frame));

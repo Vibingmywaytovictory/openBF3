@@ -41,6 +41,7 @@ public:
 	bool round_fired(MixerCore &r_mixer, uint32_t p_round);
 	bool trigger_up(MixerCore &r_mixer, uint64_t p_frame);
 	uint64_t round_frame(uint32_t p_round) const;
+	uint32_t round_event() const;
 
 private:
 	WeaponSoundBinding binding_;
