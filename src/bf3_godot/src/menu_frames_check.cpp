@@ -179,8 +179,11 @@ void MenuFramesCheck::record(const Ctx &p_c) {
 	MenuFrameSample f;
 	f.step = uint16_t(std::min(next_, steps_.size() - 1));
 	f.wall_ms = last_frame_ ? float(std::chrono::duration<double, std::milli>(now - *last_frame_).count()) : 0.0f;
-	f.process_ms = float(p_c.io.process_ms);
+	f.session_ms = float(p_c.io.session_ms);
 	f.ui_ms = float(p_c.io.ui_ms);
+	f.views_ms = views_seen_s_ < 0.0 ? 0.0f : float((p_c.io.views_seconds_total - views_seen_s_) * 1000.0);
+	views_seen_s_ = p_c.io.views_seconds_total;
+	f.setup_ms = float(p_c.io.setup_ms);
 	f.render_cpu_ms = float(p_c.io.render_cpu_ms);
 	f.render_gpu_ms = float(p_c.io.render_gpu_ms);
 	f.opened = uint16_t(std::min<uint64_t>(opened - opened_seen_, 0xFFFF));
@@ -345,25 +348,32 @@ std::string MenuFramesCheck::report() const {
 	std::string out = "[ui] menu frames check:\n";
 	for (const Phase ph : { Phase::Play, Phase::First, Phase::Deploy, Phase::Customize, Phase::Menu, Phase::Options }) {
 		std::vector<double> wall;
-		std::vector<double> process;
+		std::vector<double> session;
 		std::vector<double> ui_ms;
+		std::vector<double> views;
+		std::vector<double> setup;
 		std::vector<double> gpu;
 		for (const MenuFrameSample &f : frames_) {
 			if (steps_[f.step].phase == ph && counted(f)) {
 				wall.push_back(f.wall_ms);
-				process.push_back(f.process_ms);
+				session.push_back(f.session_ms);
 				ui_ms.push_back(f.ui_ms);
+				views.push_back(f.views_ms);
+				setup.push_back(f.setup_ms);
 				gpu.push_back(f.render_gpu_ms);
 			}
 		}
 		if (wall.empty()) {
 			continue;
 		}
-		out += bf3::core::fmt("[ui]   %-13s %5zu frames: wall p50 %.2f p99 %.2f max %.2f ms; process p50 %.2f; "
-							  "session UI p50 %.2f max %.2f; root viewport GPU p50 %.2f\n",
+		out += bf3::core::fmt("[ui]   %-13s %5zu frames: wall p50 %.2f p99 %.2f max %.2f ms; session p50 %.2f max %.2f "
+							  "(UI p50 %.2f max %.2f); views sync p50 %.2f max %.2f; render setup p50 %.2f; root "
+							  "viewport GPU p50 %.2f\n",
 				phase_name(ph), wall.size(), interpolated_percentile(wall, 0.5), interpolated_percentile(wall, 0.99),
-				*std::max_element(wall.begin(), wall.end()), interpolated_percentile(process, 0.5),
-				interpolated_percentile(ui_ms, 0.5), *std::max_element(ui_ms.begin(), ui_ms.end()),
+				*std::max_element(wall.begin(), wall.end()), interpolated_percentile(session, 0.5),
+				*std::max_element(session.begin(), session.end()), interpolated_percentile(ui_ms, 0.5),
+				*std::max_element(ui_ms.begin(), ui_ms.end()), interpolated_percentile(views, 0.5),
+				*std::max_element(views.begin(), views.end()), interpolated_percentile(setup, 0.5),
 				interpolated_percentile(gpu, 0.5));
 	}
 	std::vector<size_t> order(frames_.size());
@@ -379,10 +389,12 @@ std::string MenuFramesCheck::report() const {
 		if (listed++ == kMenuFramesReportFrames) {
 			break;
 		}
-		out += bf3::core::fmt("[ui]   slow frame %zu (%s, %s): wall %.2f ms, process %.2f, session UI %.2f, "
-							  "%u screen(s) opened, %u glitch(es) triggered, glitch %s\n",
-				i, phase_name(steps_[f.step].phase), steps_[f.step].name.c_str(), f.wall_ms, f.process_ms, f.ui_ms,
-				unsigned(f.opened), unsigned(f.glitches), f.glitch_drawn ? "drawn" : "off");
+		out += bf3::core::fmt("[ui]   slow frame %zu (%s, %s): wall %.2f ms, session %.2f (UI %.2f), views sync "
+							  "%.2f, render setup %.2f, root viewport CPU %.2f GPU %.2f, %u screen(s) opened, %u "
+							  "glitch(es) triggered, glitch %s\n",
+				i, phase_name(steps_[f.step].phase), steps_[f.step].name.c_str(), f.wall_ms, f.session_ms, f.ui_ms,
+				f.views_ms, f.setup_ms, f.render_cpu_ms, f.render_gpu_ms, unsigned(f.opened), unsigned(f.glitches),
+				f.glitch_drawn ? "drawn" : "off");
 	}
 	out += "[ui]   " + std::to_string(glitches_seen_) + " glitch triggers seen, " + std::to_string(glitch_frames_) +
 			" frames drawn with the glitch\n";

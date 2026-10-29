@@ -42,8 +42,10 @@ struct MenuFramesIo {
 	std::function<bool(const std::string &)> shot;
 	bool alive = false;
 	bool game_input = true;
-	double process_ms = 0.0;
+	double session_ms = 0.0;
 	double ui_ms = 0.0;
+	double views_seconds_total = 0.0;
+	double setup_ms = 0.0;
 	double render_cpu_ms = 0.0;
 	double render_gpu_ms = 0.0;
 	double video_mb = 0.0;
@@ -54,8 +56,10 @@ struct MenuFramesIo {
 struct MenuFrameSample {
 	uint16_t step = 0;
 	float wall_ms = 0.0f;
-	float process_ms = 0.0f;
+	float session_ms = 0.0f;
 	float ui_ms = 0.0f;
+	float views_ms = 0.0f;
+	float setup_ms = 0.0f;
 	float render_cpu_ms = 0.0f;
 	float render_gpu_ms = 0.0f;
 	uint16_t opened = 0;
@@ -117,6 +121,7 @@ private:
 	uint64_t opened_seen_ = 0;
 	uint64_t glitches_seen_ = 0;
 	uint64_t glitch_frames_ = 0;
+	double views_seen_s_ = -1.0;
 	uint32_t repeats_ = 0;
 	bool recovering_ = false;
 	size_t resume_ = 0;

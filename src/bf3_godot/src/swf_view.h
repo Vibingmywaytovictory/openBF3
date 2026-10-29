@@ -115,6 +115,7 @@ public:
 	void release_root_target();
 	uint32_t instance_items() const;
 	uint64_t open_serial() const;
+	static double sync_seconds_total();
 	bool is_open() const;
 	const std::string &error() const;
 

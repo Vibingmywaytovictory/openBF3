@@ -79,8 +79,9 @@ a `timing` row, split first so its socket-free cases stay on branches (`host.ses
   `godot.menu_frames` (1280x720) and `godot.menu_frames.fullscreen` play Metro TDM with 31 bots, visit every menu
   screen once (reported, not gated: a first open builds the screen), measure 5 s of play with no menu, then fail on
   any frame of the second visits (deploy screen, CUSTOMIZE, the Escape menu, Options tabs) over max(50 ms, 3 x the
-  no-menu median) or on a median of those frames over 1.25 x the no-menu median + 2 ms; glitch screenshots are taken
-  on first visits only, and the frames from a death in play or a menu, until the check has deployed again and
+  no-menu median) or on a median of those frames over 1.25 x the no-menu median + 2 ms; per frame they report the
+  session's main-thread time, the views' sync and the render setup CPU of the frame before; glitch screenshots are
+  taken on first visits only, and the frames from a death in play or a menu, until the check has deployed again and
   restarted that block, are not counted.
 * The project is set up by the `godot.project_setup` fixture, which writes `.godot/extension_list.cfg` and never runs
   `--import` (the first `--import` of a never-opened project exits 0xC0000005, README "Run").

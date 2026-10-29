@@ -187,6 +187,7 @@ struct SharedShaders {
 
 std::unique_ptr<SharedShaders> g_shaders;
 uint64_t g_open_serial = 0;
+double g_sync_seconds = 0.0;
 
 const SharedShaders &acquire_shaders(RenderingServer *p_rs) {
 	if (g_shaders == nullptr) {
@@ -3026,6 +3027,7 @@ struct Bf3SwfView::Impl {
 			trim_dormant();
 		}
 		stats.sync_seconds = bf3::core::seconds_since(t0);
+		g_sync_seconds += stats.sync_seconds;
 	}
 };
 
@@ -3155,6 +3157,10 @@ uint32_t Bf3SwfView::instance_items() const {
 
 uint64_t Bf3SwfView::open_serial() const {
 	return impl_->open_serial;
+}
+
+double Bf3SwfView::sync_seconds_total() {
+	return g_sync_seconds;
 }
 
 void Bf3SwfView::release_root_target() {

@@ -288,7 +288,9 @@ bool Bf3LevelSession::tdm_menu_frame(double p_now_s) {
 		fio.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
 		fio.alive = game_->alive;
 		fio.game_input = mapper_.game_input();
-		fio.process_ms = Performance::get_singleton()->get_monitor(Performance::TIME_PROCESS) * 1000.0;
+		fio.session_ms = game_->ms_total;
+		fio.views_seconds_total = Bf3SwfView::sync_seconds_total();
+		fio.setup_ms = RenderingServer::get_singleton()->get_frame_setup_time_cpu();
 		fio.ui_ms = m.ms_tdm_hud;
 		fio.video_mb =
 				Performance::get_singleton()->get_monitor(Performance::RENDER_VIDEO_MEM_USED) / (1024.0 * 1024.0);
