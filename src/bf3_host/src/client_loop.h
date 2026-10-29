@@ -44,6 +44,7 @@ public:
 	void shift_clock(int32_t p_ticks);
 	PresentationEvents &events();
 	void take_predicted(std::vector<PredictedShot> &r_shots, std::vector<PredictedTimed> &r_timed);
+	void take_logic(ClientLogicFeed &r_feed) { match.take_logic(r_feed); }
 	void take_own_test_samples(std::vector<OwnTestSample> &r_samples);
 	void send_kit_select(const net::KitSelect &p_select);
 	void send_spawn_request(uint8_t p_kit);

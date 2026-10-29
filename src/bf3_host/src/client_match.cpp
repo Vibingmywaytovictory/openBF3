@@ -35,6 +35,11 @@ bool ClientMatch::datagram(net::MessageType p_type, const net::NetSim::Datagram 
 			++soldier_gears_;
 			return true;
 		}
+		case net::MessageType::LogicEvents:
+		case net::MessageType::FullSync:
+		case net::MessageType::LogicDelta:
+			logic_.datagram(p_type, p_d.bytes);
+			return true;
 		default:
 			return false;
 	}
@@ -115,6 +120,7 @@ void ClientMatch::stats(ClientStats &r_stats) const {
 	r_stats.restricted_commands = restricted_commands_;
 	r_stats.unspawned_ticks = unspawned_ticks_;
 	r_stats.rules_mismatch = rules_mismatch_;
+	logic_.stats(r_stats);
 }
 
 }

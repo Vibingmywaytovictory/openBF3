@@ -776,6 +776,12 @@ TEST_SUITE("host-client-stream") {
 		CHECK(cs.kicked);
 		CHECK(cs.kick_reason == net::KickReason::Weapon);
 		CHECK(cs.mismatch_components == net::mismatch_bits::kWeapon);
+		for (const host::ClientStats *st : { &as, &bs }) {
+			CHECK(st->logic_full_syncs >= 1u);
+			CHECK(st->logic_events > 0u);
+			CHECK(st->logic_early_events == 0u);
+			CHECK(st->bad_logic_datagrams == 0u);
+		}
 		check_hashes(a, kAlpha);
 		check_hashes(b, kBravo);
 		check_hashes(c, kCharlie);

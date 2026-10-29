@@ -194,4 +194,6 @@ target_sources(bf3_host PRIVATE
 target_sources(bf3_host PRIVATE
     src/server_logic_sync.cpp
     src/server_logic_sync.h
+    src/client_logic_sync.cpp
+    src/client_logic_sync.h
 )

@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -169,6 +170,13 @@ struct ClientStats {
 	uint64_t spawn_requests = 0;
 	uint64_t own_shot_id_resets = 0;
 	bool rules_mismatch = false;
+	uint64_t logic_full_syncs = 0;
+	uint64_t logic_deltas = 0;
+	uint64_t logic_events = 0;
+	uint64_t logic_stale = 0;
+	uint64_t logic_early_events = 0;
+	uint64_t logic_dropped_events = 0;
+	uint64_t bad_logic_datagrams = 0;
 
 	bool kicked = false;
 	net::KickReason kick_reason = net::KickReason::Protocol;
@@ -176,6 +184,12 @@ struct ClientStats {
 	uint8_t mismatch_components = 0;
 };
 static_assert(std::is_trivially_copyable_v<ClientStats>);
+
+struct ClientLogicFeed {
+	uint64_t ghost_revision = 0;
+	std::optional<sim::logic::LogicGhost> ghost;
+	std::vector<sim::logic::LogicNetworkedEvent> events;
+};
 
 inline constexpr size_t kOtherSamples = 3;
 using OtherSample = net::TimedOther;
@@ -278,6 +292,7 @@ public:
 	PresentationEvents &events();
 	void take_predicted(std::vector<struct PredictedShot> &r_shots, std::vector<struct PredictedTimed> &r_timed);
 	void take_own_test_samples(std::vector<OwnTestSample> &r_samples);
+	void take_logic(ClientLogicFeed &r_feed);
 
 	void send_kit_select(const net::KitSelect &p_select);
 

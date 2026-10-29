@@ -5,6 +5,7 @@
 #include "bf3/net/protocol.h"
 #include "bf3/sim/command.h"
 #include "client_events.h"
+#include "client_logic_sync.h"
 
 #include <cstdint>
 
@@ -21,6 +22,7 @@ public:
 	void restrict(sim::Command &r_command);
 	bool unspawned(sim::Tick p_tick, bool p_have_own, sim::Tick p_life_spawn_tick);
 	void publish(PresentationFrame &r_frame, bool p_have_own, uint32_t p_own_life) const;
+	void take_logic(ClientLogicFeed &r_feed) { logic_.take(r_feed); }
 
 	uint64_t bad_events() const { return bad_events_; }
 	void stats(ClientStats &r_stats) const;
@@ -47,6 +49,7 @@ private:
 	uint64_t restricted_commands_ = 0;
 	uint64_t unspawned_ticks_ = 0;
 	bool rules_mismatch_ = false;
+	ClientLogicSync logic_;
 };
 
 }

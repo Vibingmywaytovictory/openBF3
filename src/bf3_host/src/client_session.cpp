@@ -230,6 +230,10 @@ void ClientSession::take_own_test_samples(std::vector<OwnTestSample> &r_samples)
 	impl_->loop.take_own_test_samples(r_samples);
 }
 
+void ClientSession::take_logic(ClientLogicFeed &r_feed) {
+	impl_->loop.take_logic(r_feed);
+}
+
 void ClientSession::send_kit_select(const net::KitSelect &p_select) {
 	impl_->loop.send_kit_select(p_select);
 }

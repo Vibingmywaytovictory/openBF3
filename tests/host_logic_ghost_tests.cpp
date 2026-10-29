@@ -1,13 +1,17 @@
 #include <doctest/doctest.h>
 
+#include "bf3/host/client_session.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/tdm_rules.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/logic/logic_runtime.h"
 
+#include "client_logic_sync.h"
 #include "tdm_fixture.h"
 #include "test_support.h"
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <map>
@@ -60,11 +64,16 @@ struct LogicPeer {
 	std::vector<Received> events;
 	uint64_t deltas = 0, resyncs = 0, wrong_channel = 0, decode_errors = 0, early_deltas = 0, mirror_mismatches = 0;
 	uint64_t mirror_checks = 0;
+	host::ClientLogicSync client;
 
 	void receive(const host::OutDatagram &p_d) {
 		const std::optional<net::MessageType> type = net::peek_type(p_d.bytes);
 		if (!type) {
 			return;
+		}
+		if (*type == net::MessageType::FullSync || *type == net::MessageType::LogicDelta ||
+				*type == net::MessageType::LogicEvents) {
+			client.datagram(*type, p_d.bytes);
 		}
 		switch (*type) {
 			case net::MessageType::FullSync: {
@@ -266,6 +275,31 @@ TEST_SUITE("host-logic-ghost") {
 						p.events[i].event.tick == p.events[i].message_tick);
 			}
 			CHECK(wrong == 0);
+			host::ClientLogicFeed feed;
+			p.client.take(feed);
+			host::ClientStats cs;
+			p.client.stats(cs);
+			CHECK(cs.logic_full_syncs == 1 + p.resyncs);
+			CHECK(cs.logic_deltas == p.deltas);
+			CHECK(cs.logic_events == expected.size());
+			CHECK(cs.logic_early_events == 0);
+			CHECK(cs.logic_stale == 0);
+			CHECK(cs.logic_dropped_events == 0);
+			CHECK(cs.bad_logic_datagrams == 0);
+			REQUIRE(feed.ghost.has_value());
+			CHECK(state_of(*feed.ghost) == *last_ghost);
+			REQUIRE(feed.events.size() == expected.size());
+			size_t fed_wrong = 0;
+			for (size_t i = 0; i < expected.size(); ++i) {
+				fed_wrong += !same_event(feed.events[i], expected[i].event);
+			}
+			CHECK(fed_wrong == 0);
+			host::ClientLogicFeed again = feed;
+			again.events.clear();
+			again.ghost.reset();
+			p.client.take(again);
+			CHECK(again.events.empty());
+			CHECK_FALSE(again.ghost.has_value());
 			std::printf("host.logic.ghost: %s: hello at %u, FullSync of tick %u on channel %u, %zu events, %llu "
 						"deltas, %llu resyncs\n",
 					p.name.c_str(), p.hello_tick, sync_tick, unsigned(p.join_channel), p.events.size(),
