@@ -4,6 +4,7 @@
 #include "bf3/core/level/eor_camera.h"
 #include "bf3/core/level/spawn_points.h"
 #include "bf3/core/result.h"
+#include "bf3/net/protocol.h"
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/spawn.h"
 #include "bf3/sim/static_world.h"
@@ -98,6 +99,7 @@ struct SharedLevel {
 	std::string level_name_sid;
 	std::optional<core::Sha256Digest> source_digest;
 	std::shared_ptr<const sim::StaticWorldShapes> static_world;
+	uint64_t collision_digest = 0;
 	std::vector<sim::SpawnPoint> spawns;
 	std::vector<core::level::CharacterSpawnerDef> spawners;
 	std::optional<core::level::EorCamera> eor_camera;
@@ -139,6 +141,10 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 
 std::shared_ptr<const SharedLevel> synthetic_shared_level(std::shared_ptr<const sim::StaticWorldShapes> p_world, std::vector<sim::SpawnPoint> p_spawns,
 		const sim::MotorParams &p_motor);
+
+uint64_t static_world_digest(const sim::StaticWorldShapes &p_world);
+
+uint64_t sim_digest(uint64_t p_collision_digest, const net::ComponentDigests &p_components);
 
 core::Status load_shared_gunplay(const LevelDatabase &p_db, SharedLevel &r_level);
 

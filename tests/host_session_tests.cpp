@@ -2282,3 +2282,41 @@ TEST_SUITE("host-server-netthread") {
 		server.stop();
 	}
 }
+
+TEST_SUITE("host-session-unit") {
+	TEST_CASE(
+			"host.session: the collision digest follows the static world's shapes; sim_digest covers every component") {
+		const auto shapes = [](float p_box_height) {
+			std::vector<StaticTriangle> t;
+			add_floor(t, -120, -120, 120, 120, 0);
+			add_box(t, { 10, 0, 10 }, { 12, p_box_height, 14 });
+			core::Result<std::shared_ptr<const StaticWorldShapes>> w =
+					build_static_world(std::span<const StaticTriangle>(t));
+			REQUIRE_MESSAGE(w.ok(), (w.ok() ? std::string() : w.error().message));
+			return *w;
+		};
+		const std::shared_ptr<const StaticWorldShapes> a = shapes(2.5f);
+		const std::shared_ptr<const StaticWorldShapes> same = shapes(2.5f);
+		const std::shared_ptr<const StaticWorldShapes> taller = shapes(2.75f);
+		const uint64_t digest = static_world_digest(*a);
+		CHECK(digest != 0);
+		CHECK(static_world_digest(*same) == digest);
+		CHECK(static_world_digest(*taller) != digest);
+		CHECK(synthetic_level()->collision_digest == static_world_digest(*synthetic_level()->static_world));
+		CHECK(synthetic_shared_level(a, {}, synthetic_params())->collision_digest == digest);
+
+		net::ComponentDigests c{ 0, 1, 2, 3, 4, 5 };
+		const uint64_t base = sim_digest(digest, c);
+		CHECK(sim_digest(digest, c) == base);
+		CHECK(sim_digest(static_world_digest(*taller), c) != base);
+		for (const auto field : { &net::ComponentDigests::motor, &net::ComponentDigests::weapon,
+					 &net::ComponentDigests::kit, &net::ComponentDigests::logic, &net::ComponentDigests::rules }) {
+			net::ComponentDigests d = c;
+			d.*field ^= 0x100;
+			CHECK(sim_digest(digest, d) != base);
+		}
+		net::ComponentDigests with_sim = c;
+		with_sim.sim = 0xABCDu;
+		CHECK(sim_digest(digest, with_sim) == base);
+	}
+}

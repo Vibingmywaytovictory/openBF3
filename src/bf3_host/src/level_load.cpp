@@ -16,6 +16,7 @@
 #include "bf3/core/gameplay/logic_world.h"
 #include "bf3/core/gameplay/mode_def.h"
 #include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/fnv.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/tdm_rules.h"
 #include "bf3/net/protocol.h"
@@ -306,6 +307,7 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 		return core::error_at("load_shared_level: static world", shapes.error());
 	}
 	shared->static_world = std::move(*shapes);
+	shared->collision_digest = static_world_digest(*shared->static_world);
 	shared->seconds_shapes = seconds_since(clock);
 	if (p_progress != nullptr) {
 		const sim::StaticWorldStats &s = shared->static_world->stats();
@@ -335,12 +337,58 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 	return std::shared_ptr<const SharedLevel>(std::move(shared));
 }
 
+uint64_t static_world_digest(const sim::StaticWorldShapes &p_world) {
+	std::vector<const sim::StaticTileInfo *> tiles;
+	tiles.reserve(p_world.tile_count());
+	for (size_t i = 0; i < p_world.tile_count(); ++i) {
+		tiles.push_back(&p_world.tile(i));
+	}
+	std::sort(tiles.begin(), tiles.end(), [](const sim::StaticTileInfo *p_a, const sim::StaticTileInfo *p_b) {
+		return p_a->x != p_b->x ? p_a->x < p_b->x : p_a->z < p_b->z;
+	});
+	uint64_t h = core::kFnv1aOffset;
+	core::fnv1a_value(h, uint64_t(tiles.size()));
+	for (const sim::StaticTileInfo *t : tiles) {
+		core::fnv1a_value(h, t->x);
+		core::fnv1a_value(h, t->z);
+		core::fnv1a_value(h, t->triangles);
+		core::fnv1a_value(h, t->tags);
+		core::fnv1a(h, t->content.bytes.data(), t->content.bytes.size());
+	}
+	std::vector<const sim::StaticTerrainInfo *> terrains;
+	for (size_t i = 0; i < p_world.terrain_count(); ++i) {
+		terrains.push_back(&p_world.terrain(i));
+	}
+	std::sort(
+			terrains.begin(), terrains.end(), [](const sim::StaticTerrainInfo *p_a, const sim::StaticTerrainInfo *p_b) {
+				return p_a->object < p_b->object;
+			});
+	core::fnv1a_value(h, uint64_t(terrains.size()));
+	for (const sim::StaticTerrainInfo *t : terrains) {
+		core::fnv1a_value(h, t->object);
+		core::fnv1a_value(h, t->width);
+		core::fnv1a_value(h, t->height);
+		core::fnv1a(h, t->content.bytes.data(), t->content.bytes.size());
+	}
+	return h;
+}
+
+uint64_t sim_digest(uint64_t p_collision_digest, const net::ComponentDigests &p_components) {
+	uint64_t h = core::kFnv1aOffset;
+	for (const uint64_t v : { p_collision_digest, p_components.motor, p_components.weapon, p_components.kit,
+				 p_components.logic, p_components.rules }) {
+		core::fnv1a_value(h, v);
+	}
+	return h;
+}
+
 std::shared_ptr<const SharedLevel> synthetic_shared_level(std::shared_ptr<const sim::StaticWorldShapes> p_world, std::vector<sim::SpawnPoint> p_spawns,
 		const sim::MotorParams &p_motor) {
 	auto shared = std::make_shared<SharedLevel>();
 	shared->level = "synthetic";
 	shared->mode = "synthetic";
 	shared->static_world = std::move(p_world);
+	shared->collision_digest = shared->static_world != nullptr ? static_world_digest(*shared->static_world) : 0;
 	shared->spawns = std::move(p_spawns);
 	shared->motor = p_motor;
 	return shared;

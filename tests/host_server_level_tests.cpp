@@ -291,6 +291,21 @@ TEST_SUITE("host-server-level") {
 		CHECK(warm->shared->logic_digest == cold->shared->logic_digest);
 		CHECK(warm->bots->region == cold->bots->region);
 		CHECK(warm->seconds.combat < cold->seconds.combat);
+		CHECK(cold->shared->collision_digest != 0);
+		CHECK(warm->shared->collision_digest == cold->shared->collision_digest);
+		core::Result<host::ServerLevel> client =
+				host::load_server_level(m.install, metro, server_options(false), cache.get(), nullptr);
+		REQUIRE_MESSAGE(client.ok(), (client.ok() ? std::string() : client.error().message));
+		if (!client.ok()) {
+			return;
+		}
+		CHECK(client->bots == nullptr);
+		CHECK(client->shared->collision_digest == warm->shared->collision_digest);
+		std::printf(
+				"host.server.level: collision digest %016llx with bots, %016llx without (%zu tiles, %zu terrains)\n",
+				(unsigned long long)warm->shared->collision_digest,
+				(unsigned long long)client->shared->collision_digest, client->shared->static_world->tile_count(),
+				client->shared->static_world->terrain_count());
 
 		const float margin = sim::NavParams().region_margin;
 		core::Result<core::level::LevelCombatTiles> direct =
