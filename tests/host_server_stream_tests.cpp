@@ -4,6 +4,7 @@
 #include "bf3/host/game_server.h"
 #include "bf3/host/tdm_brain.h"
 #include "bf3/host/tdm_rules.h"
+#include "bf3/net/bit_stream.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/soldier_state.h"
@@ -24,9 +25,9 @@ namespace tt = bf3::test::tdm;
 
 namespace {
 
-constexpr uint64_t kTdmStreamHash = 0xf5c2b63621bb83c3ull;
+constexpr uint64_t kTdmStreamHash = 0xd10d0fdfffff0e21ull;
 constexpr uint64_t kTdmStateHash = 0x801d84e3f1ae9e0full;
-constexpr uint64_t kDevStreamHash = 0xf838fa588bf9cb4bull;
+constexpr uint64_t kDevStreamHash = 0x98cfb24a09301947ull;
 constexpr uint64_t kDevStateHash = 0xbb55f06d887305ceull;
 
 struct StreamRecorder {
@@ -354,10 +355,14 @@ TEST_SUITE("host-server-stream") {
 			a.sequence = ++seq;
 			send_packet(server, alpha, std::span<const sim::Command>(&a, 1));
 			if (next == 2u) {
-				net::Hello h;
-				h.protocol = uint16_t(net::kProtocolVersion + 1u);
-				h.name = "old";
-				server.on_receive(30u, net::kChannelReliable, net::encode_hello(h));
+				net::BitWriter v3(64);
+				v3.write_bits(uint8_t(net::MessageType::Hello), 8);
+				v3.write_bits(3, 16);
+				v3.write_varint(3);
+				for (const char c : { 'o', 'l', 'd' }) {
+					v3.write_bits(uint8_t(c), 8);
+				}
+				server.on_receive(30u, net::kChannelReliable, v3.take());
 			}
 			if (next == 3u) {
 				net::Hello h;

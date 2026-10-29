@@ -737,7 +737,20 @@ constexpr size_t kGunplayTickMinBits = count_bits([](auto &r_a) {
 template <class A, MaybeConst<Hello> M>
 void serialize(A &r_a, M &r_m) {
 	r_a.bits(r_m.protocol, 16);
+	if (r_m.protocol != kProtocolVersion) {
+		return;
+	}
+	r_a.bits(r_m.game_build, 64);
 	text(r_a, r_m.name, kMaxNameBytes, "bad name");
+}
+
+constexpr uint8_t kLastPhase = uint8_t(MatchPhase::LevelChange);
+
+template <class A, MaybeConst<NextLevel> N> void serialize(A &r_a, N &r_n) {
+	text(r_a, r_n.level, kMaxIdentBytes, "bad level or mode name");
+	text(r_a, r_n.mode, kMaxIdentBytes, "bad level or mode name");
+	digest(r_a, r_n.source_digest);
+	r_a.bits(r_n.logic_digest, 64);
 }
 
 template <class A, MaybeConst<MatchInfo> M>
@@ -759,16 +772,29 @@ void serialize(A &r_a, M &r_m) {
 	r_a.bits(r_m.max_rewind_ticks, 8);
 	r_a.bits(r_m.logic_digest, 64);
 	r_a.bits(r_m.rules_flags, 8);
+	r_a.bits(r_m.sim_digest, 64);
+	r_a.bits(r_m.round_id, 32);
+	r_a.optional(r_m.next, [&](auto &r_next) { serialize(r_a, r_next); });
 	r_a.check("unknown weapon flags", [&] { return (r_m.weapon_flags & ~kKnownWeaponFlags) == 0; });
 	r_a.check("unknown rules flags", [&] { return (r_m.rules_flags & ~kKnownRulesFlags) == 0; });
 	r_a.check("zero tick rate or snapshot divisor", [&] { return r_m.sim_hz != 0 && r_m.snapshot_divisor != 0; });
 	r_a.check("slot out of range", [&] { return r_m.slot < kMaxSlots; });
-	r_a.check("unknown phase", [&] { return uint8_t(r_m.phase) <= uint8_t(MatchPhase::Restarting); });
+	r_a.check("unknown phase", [&] { return uint8_t(r_m.phase) <= kLastPhase; });
+}
+
+template <class A, MaybeConst<ComponentDigests> D> constexpr void serialize(A &r_a, D &r_d) {
+	r_a.bits(r_d.sim, 64);
+	r_a.bits(r_d.motor, 64);
+	r_a.bits(r_d.weapon, 64);
+	r_a.bits(r_d.kit, 64);
+	r_a.bits(r_d.logic, 64);
+	r_a.bits(r_d.rules, 64);
 }
 
 template <class A, MaybeConst<Ready> M>
 void serialize(A &r_a, M &r_m) {
 	digest(r_a, r_m.source_digest);
+	r_a.optional(r_m.digests, [&](auto &r_digests) { serialize(r_a, r_digests); });
 }
 
 template <class A, MaybeConst<Spawned> M>
@@ -791,14 +817,28 @@ void serialize(A &r_a, M &r_m) {
 
 template <class A, MaybeConst<Loading> M>
 void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.round_id, 32);
 	r_a.bits(r_m.stage, 8);
 	r_a.bits(r_m.permille, 16);
+	r_a.bits(r_m.warmth, 8);
+	r_a.bits(r_m.eta_s, 16);
 	r_a.check("progress above 1000 permille", [&] { return r_m.permille <= 1000; });
+	r_a.check("unknown warmth", [&] { return uint8_t(r_m.warmth) <= uint8_t(LoadWarmth::Cold); });
 }
 
 template <class A, MaybeConst<Kick> M>
 void serialize(A &r_a, M &r_m) {
 	text(r_a, r_m.reason, kMaxTextBytes, "bad reason text");
+	bool coded = r_m.code != KickReason::Protocol;
+	if constexpr (A::kReading) {
+		coded = r_a.fits(1);
+	}
+	if (coded) {
+		r_a.bits(r_m.code, 8);
+		r_a.check("unknown kick reason", [&] {
+			return r_m.code != KickReason::Protocol && uint8_t(r_m.code) <= uint8_t(KickReason::LoadStalled);
+		});
+	}
 }
 
 template <class A, MaybeConst<DebugRequest> M>
@@ -1268,6 +1308,8 @@ constexpr unsigned kRowSlotBits = 6;
 constexpr unsigned kRowCountBits = 7;
 constexpr unsigned kNameBytesBits = 5;
 constexpr unsigned kRestrictMaskBits = 13;
+constexpr unsigned kSquadBits = 6;
+static_assert(kMaxSquads < (1u << kSquadBits));
 static_assert((size_t(1) << kRowSlotBits) == kMaxPlayerRows && (size_t(1) << (kRowCountBits - 1)) == kMaxPlayerRows);
 static_assert(kMaxPlayerNameBytes < (size_t(1) << kNameBytesBits));
 static_assert(restrict_bits::kAll == (1u << kRestrictMaskBits) - 1u);
@@ -1289,14 +1331,14 @@ void serialize(A &r_a, M &r_m) {
 	r_a.bits(r_m.restrict_until_tick, 32);
 	r_a.bits(r_m.restrict_mask, kRestrictMaskBits);
 	r_a.bits(r_m.players_needed, 16);
-	r_a.check("unknown phase", [&] { return uint8_t(r_m.phase) <= uint8_t(MatchPhase::Restarting); });
+	r_a.check("unknown phase", [&] { return uint8_t(r_m.phase) <= kLastPhase; });
 	r_a.check("winner out of range", [&] { return r_m.winner <= kMaxTeam; });
 	r_a.check("negative kill limit", [&] { return r_m.kill_limit >= 0; });
 }
 
 MatchState canonical_match_state(const MatchState &p_message) {
 	MatchState m = p_message;
-	m.phase = MatchPhase(std::min<uint8_t>(uint8_t(m.phase), uint8_t(MatchPhase::Restarting)));
+	m.phase = MatchPhase(std::min<uint8_t>(uint8_t(m.phase), kLastPhase));
 	m.kill_limit = std::max<int32_t>(m.kill_limit, 0);
 	m.winner = std::min<uint8_t>(m.winner, kMaxTeam);
 	m.restrict_mask &= restrict_bits::kAll;
@@ -1310,6 +1352,8 @@ constexpr void serialize(A &r_a, R &r_row, int p_previous_slot) {
 	r_a.bits(r_row.kit, 2);
 	r_a.bits(r_row.bot, 1);
 	r_a.bits(r_row.alive, 1);
+	r_a.bits(r_row.squad, kSquadBits);
+	r_a.bits(r_row.leader, 1);
 	r_a.bits(r_row.name_bytes, kNameBytesBits);
 	r_a.bits(r_row.ping_ms, 16);
 	r_a.bits(r_row.kills, 16);
@@ -1317,6 +1361,8 @@ constexpr void serialize(A &r_a, R &r_row, int p_previous_slot) {
 	r_a.bits(r_row.score, 32);
 	r_a.check("rows not in ascending slot order", [&] { return int(r_row.slot) > p_previous_slot; });
 	r_a.check("team out of range", [&] { return r_row.team <= kMaxTeam; });
+	r_a.check("squad out of range or a leader without one",
+			[&] { return r_row.squad <= kMaxSquads && (!r_row.leader || r_row.squad != 0); });
 	r_a.check("bad name length", [&] { return r_row.name_bytes <= kMaxPlayerNameBytes && r_a.fits(size_t(r_row.name_bytes) * 8); });
 	for (size_t k = 0; k < r_row.name_bytes && r_a.ok(); ++k) {
 		r_a.bits(r_row.name[k], 8);
@@ -1394,8 +1440,13 @@ PlayerList canonical_player_list(const PlayerList &p_message, size_t &r_clamped)
 		if (row.team > kMaxTeam || row.kit >= kMaxKits) {
 			++r_clamped;
 		}
+		if (row.squad > kMaxSquads || (row.leader && row.squad == 0)) {
+			++r_clamped;
+		}
 		row.team = row.team <= kMaxTeam ? row.team : uint8_t(0);
 		row.kit = std::min<uint8_t>(row.kit, kMaxKits - 1);
+		row.squad = row.squad <= kMaxSquads ? row.squad : uint8_t(0);
+		row.leader = row.leader && row.squad != 0;
 		row.name_bytes = uint8_t(name_bytes);
 		m.rows.push_back(row);
 	}
@@ -1440,13 +1491,6 @@ template <class A, MaybeConst<Mismatch> M> void serialize(A &r_a, M &r_m) {
 	r_a.bits(r_m.components, 8);
 	r_a.check("no or unknown mismatch components",
 			[&] { return r_m.components != 0 && (r_m.components & ~mismatch_bits::kAll) == 0; });
-}
-
-template <class A, MaybeConst<NextLevel> N> void serialize(A &r_a, N &r_n) {
-	text(r_a, r_n.level, kMaxIdentBytes, "bad level or mode name");
-	text(r_a, r_n.mode, kMaxIdentBytes, "bad level or mode name");
-	digest(r_a, r_n.source_digest);
-	r_a.bits(r_n.logic_digest, 64);
 }
 
 template <class A, MaybeConst<RoundOverInfo> M> void serialize(A &r_a, M &r_m) {
@@ -1668,6 +1712,15 @@ std::vector<uint8_t> encode_hello(const Hello &p_message) {
 }
 
 core::Result<Hello> decode_hello(std::span<const uint8_t> p_datagram) {
+	BitReader r(p_datagram);
+	if (open(r, MessageType::Hello)) {
+		const uint16_t protocol = uint16_t(r.read_bits(16));
+		if (!r.failed() && protocol != kProtocolVersion) {
+			Hello foreign;
+			foreign.protocol = protocol;
+			return foreign;
+		}
+	}
 	return decode_as<Hello>(p_datagram, { MessageType::Hello, "Hello" });
 }
 
@@ -1711,6 +1764,13 @@ std::vector<uint8_t> encode_kick(const Kick &p_message) {
 
 core::Result<Kick> decode_kick(std::span<const uint8_t> p_datagram) {
 	return decode_as<Kick>(p_datagram, { MessageType::Kick, "Kick" });
+}
+
+Kick protocol_kick(uint16_t p_peer_protocol) {
+	Kick k;
+	k.reason = "protocol " + std::to_string(p_peer_protocol) + " (server " + std::to_string(kProtocolVersion) + ")";
+	k.code = KickReason::Protocol;
+	return k;
 }
 
 std::vector<uint8_t> encode_bye() {

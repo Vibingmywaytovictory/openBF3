@@ -452,7 +452,7 @@ TEST_SUITE("m2a-contract") {
 		CHECK(sv.main_bits == 0);
 		CHECK(sv.others_bits == 0);
 		if constexpr (kNtLanded) {
-			CHECK(net::kProtocolVersion == 3);
+			CHECK(net::kProtocolVersion == 4);
 		} else {
 			CHECK(net::kProtocolVersion == 1);
 			pending("nt", "kProtocolVersion == 2", "nt bumps the version with the v2 codecs");

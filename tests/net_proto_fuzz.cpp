@@ -446,7 +446,8 @@ std::vector<Sample> samples() {
 		}
 		out.push_back({ net::MessageType::ShotEvents, "ShotEvents", net::encode_shot_events(se, kFrame, {}) });
 	}
-	out.push_back({ net::MessageType::Hello, "Hello", net::encode_hello({ net::kProtocolVersion, "fuzz\xC3\xA9" }) });
+	out.push_back({ net::MessageType::Hello, "Hello",
+			net::encode_hello({ net::kProtocolVersion, 0x5EED5EED5EED5EEDull, "fuzz\xC3\xA9" }) });
 	{
 		net::MatchInfo mi;
 		mi.level = "MP_Subway";
@@ -465,6 +466,13 @@ std::vector<Sample> samples() {
 		mi.rules_flags = net::rules_flags::kTdm | net::rules_flags::kDeployScreen | net::rules_flags::kRevive;
 		out.push_back({ net::MessageType::MatchInfo, "MatchInfo (v3 rules)", net::encode_match_info(mi) });
 		out.push_back({ net::MessageType::Ready, "Ready", net::encode_ready({ mi.source_digest }) });
+		mi.phase = net::MatchPhase::LevelChange;
+		mi.sim_digest = 0x0123456789ABCDEFull;
+		mi.round_id = 9;
+		mi.next = net::NextLevel{ "MP_011", "TeamDeathMatch0", mi.source_digest, 0xFEDCBA9876543210ull };
+		out.push_back({ net::MessageType::MatchInfo, "MatchInfo (v4 next)", net::encode_match_info(mi) });
+		out.push_back({ net::MessageType::Ready, "Ready (v4 digests)",
+				net::encode_ready({ mi.source_digest, net::ComponentDigests{ 11, 12, 13, 14, 15, 16 } }) });
 	}
 	{
 		net::Spawned sp{ 5, 17, sample_state(rng, tick) };
@@ -474,8 +482,11 @@ std::vector<Sample> samples() {
 		sp.revived = true;
 		out.push_back({ net::MessageType::Spawned, "Spawned (revived)", net::encode_spawned(sp) });
 	}
-	out.push_back({ net::MessageType::Loading, "Loading", net::encode_loading({ 4, 500 }) });
-	out.push_back({ net::MessageType::Kick, "Kick", net::encode_kick({ "weapon table mismatch" }) });
+	out.push_back(
+			{ net::MessageType::Loading, "Loading", net::encode_loading({ 2, 4, 500, net::LoadWarmth::Cold, 40 }) });
+	out.push_back({ net::MessageType::Kick, "Kick", net::encode_kick({ "protocol 3 (server 4)" }) });
+	out.push_back({ net::MessageType::Kick, "Kick (v4 reason)",
+			net::encode_kick({ "weapon table mismatch", net::KickReason::Weapon }) });
 	out.push_back({ net::MessageType::Bye, "Bye", net::encode_bye() });
 	{
 		net::CombatEvents c;
@@ -585,6 +596,8 @@ std::vector<Sample> samples() {
 			row.kit = uint8_t(s % 4);
 			row.bot = s % 5 != 0;
 			row.alive = s % 3 != 0;
+			row.squad = uint8_t(s % 7 == 0 ? 0 : 1 + s % 5);
+			row.leader = row.squad != 0 && s % 2 == 0;
 			row.ping_ms = uint16_t(rng.below(400));
 			row.kills = uint16_t(rng.below(50));
 			row.deaths = uint16_t(rng.below(50));
@@ -690,8 +703,14 @@ TEST_SUITE("net-proto-fuzz") {
 		for (const Sample &s : all) {
 			INFO(s.name);
 			size_t here = 0, here_refused = 0;
+			const bool reasoned_kick =
+					s.type == net::MessageType::Kick && net::decode_kick(s.bytes)->code != net::KickReason::Protocol;
 
 			for (size_t n = 0; n < s.bytes.size(); ++n) {
+				if (reasoned_kick && n + 1 == s.bytes.size()) {
+					CHECK(decode_as(s.type, std::span<const uint8_t>(s.bytes.data(), n)) == Verdict::Stable);
+					continue;
+				}
 				++here;
 				here_refused += decode_as(s.type, std::span<const uint8_t>(s.bytes.data(), n)) == Verdict::Refused ? 1 : 0;
 			}

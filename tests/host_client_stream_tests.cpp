@@ -44,16 +44,17 @@ struct StreamHashes {
 	uint64_t stats = 0;
 };
 
-constexpr StreamHashes kAlpha{ 0x123f96308bbec944ull, 0xdae3ec8430c2b8e1ull, 0x97474eb739de6a3cull,
+constexpr StreamHashes kAlpha{ 0xe28468700f15ad47ull, 0xdae3ec8430c2b8e1ull, 0x97474eb739de6a3cull,
 	0xb73f61df4bb738deull, 0x3b5b89dbcf3e9361ull, 0xb3245018f0e2427aull };
-constexpr StreamHashes kBravo{ 0x355603a0d16e4539ull, 0xa1a022d1caaa692cull, 0xb1cc020bf1735062ull,
+constexpr StreamHashes kBravo{ 0xf0ca9e5d20fbc424ull, 0xa1a022d1caaa692cull, 0xb1cc020bf1735062ull,
 	0xc2fd7573643e66b5ull, 0x844be2b8836c91a5ull, 0xe5bd0d2a90980d48ull };
-constexpr StreamHashes kCharlie{ 0xe725154fbc396869ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0x7018103a93ee23afull };
-constexpr StreamHashes kDelta{ 0xda50c24242a75360ull, 0x230fef91e68d4c3cull, 0x1696f56b23947cb4ull,
+constexpr StreamHashes kCharlie{ 0xdf71355501b0f4ecull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0x7018103a93ee23afull };
+constexpr StreamHashes kDelta{ 0x67f919b5f5578855ull, 0x230fef91e68d4c3cull, 0x1696f56b23947cb4ull,
 	0xccd97b8938eeaf83ull, 0xa2311db0a78ab8b8ull, 0x1fb6ed8cb484b7d8ull };
 
 constexpr uint32_t kTdmTicks = 1500;
 constexpr uint32_t kDevTicks = 600;
+constexpr uint64_t kStreamGameBuild = 0x0B3F0B3F0B3F0B3Full;
 constexpr uint32_t kStepsPerTick = 8;
 constexpr uint64_t kStepNs = 2'083'333;
 
@@ -624,6 +625,7 @@ public:
 		c->kit = p_kit;
 		p_config.port = 1;
 		p_config.name = p_name;
+		p_config.game_build = kStreamGameBuild;
 		p_config.mechanics_cfg = OPENBF3_MECHANICS_CFG;
 		const core::Status init = c->loop.init(p_config, level_);
 		REQUIRE_MESSAGE(init.ok(), (init.ok() ? std::string() : init.error().message));

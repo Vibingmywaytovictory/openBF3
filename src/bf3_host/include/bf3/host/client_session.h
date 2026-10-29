@@ -54,6 +54,7 @@ struct ClientSessionConfig {
 	std::string host = "127.0.0.1";
 	uint16_t port = 0;
 	std::string name = "player";
+	std::optional<uint64_t> game_build;
 	net::NetSimConfig netsim;
 	float interp_min_ms = 75.0f;
 	float interp_max_ms = 150.0f;

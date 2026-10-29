@@ -23,7 +23,7 @@
 
 namespace bf3::net {
 
-inline constexpr uint16_t kProtocolVersion = 3;
+inline constexpr uint16_t kProtocolVersion = 4;
 inline constexpr uint8_t kChannelUnreliable = 0;
 inline constexpr uint8_t kChannelReliable = 1;
 inline constexpr uint8_t kChannelBulk = 2;
@@ -91,10 +91,27 @@ uint64_t game_build();
 
 struct Hello {
 	uint16_t protocol = kProtocolVersion;
+	uint64_t game_build = 0;
 	std::string name;
 };
 
-enum class MatchPhase : uint8_t { Loading = 0, PreRound = 1, InRound = 2, RoundOver = 3, Restarting = 4 };
+enum class MatchPhase : uint8_t {
+	Loading = 0,
+	PreRound = 1,
+	InRound = 2,
+	RoundOver = 3,
+	Restarting = 4,
+	LevelChange = 5
+};
+
+struct NextLevel {
+	std::string level;
+	std::string mode;
+	std::optional<core::Sha256Digest> source_digest;
+	uint64_t logic_digest = 0;
+
+	bool operator==(const NextLevel &) const = default;
+};
 
 struct MatchInfo {
 	uint16_t protocol = kProtocolVersion;
@@ -117,6 +134,10 @@ struct MatchInfo {
 
 	uint64_t logic_digest = 0;
 	uint8_t rules_flags = 0;
+
+	uint64_t sim_digest = 0;
+	uint32_t round_id = 0;
+	std::optional<NextLevel> next;
 };
 
 namespace weapon_flags {
@@ -124,8 +145,20 @@ inline constexpr uint8_t kExactAim = 1u << 0;
 inline constexpr uint8_t kInfiniteMagazine = 1u << 1;
 }
 
+struct ComponentDigests {
+	uint64_t sim = 0;
+	uint64_t motor = 0;
+	uint64_t weapon = 0;
+	uint64_t kit = 0;
+	uint64_t logic = 0;
+	uint64_t rules = 0;
+
+	bool operator==(const ComponentDigests &) const = default;
+};
+
 struct Ready {
 	std::optional<core::Sha256Digest> source_digest;
+	std::optional<ComponentDigests> digests;
 };
 
 struct Spawned {
@@ -140,14 +173,37 @@ struct Spawned {
 	std::array<uint16_t, sim::weapons::kMaxWeaponSlots> defs = kNoSpawnDefs;
 };
 
+enum class LoadWarmth : uint8_t { Warm = 0, Cold = 1 };
+
 struct Loading {
+	uint32_t round_id = 0;
 	uint8_t stage = 0;
 	uint16_t permille = 0;
+	LoadWarmth warmth = LoadWarmth::Warm;
+	uint16_t eta_s = 0;
+};
+
+enum class KickReason : uint8_t {
+	Protocol = 0,
+	Build = 1,
+	Full = 2,
+	Source = 3,
+	Collision = 4,
+	Motor = 5,
+	Weapon = 6,
+	Kit = 7,
+	Logic = 8,
+	Rules = 9,
+	LoadTimeout = 10,
+	LoadStalled = 11,
 };
 
 struct Kick {
 	std::string reason;
+	KickReason code = KickReason::Protocol;
 };
+
+Kick protocol_kick(uint16_t p_peer_protocol);
 
 enum class DebugKind : uint8_t {
 
@@ -500,6 +556,8 @@ struct PlayerRow {
 	uint16_t deaths = 0;
 	int32_t score = 0;
 	std::array<char, kMaxPlayerNameBytes> name{};
+	uint8_t squad = 0;
+	bool leader = false;
 };
 static_assert(std::is_trivially_copyable_v<PlayerRow>);
 struct PlayerList {
@@ -562,15 +620,6 @@ inline constexpr uint8_t kAll = (1u << 7) - 1;
 
 struct Mismatch {
 	uint8_t components = 0;
-};
-
-struct NextLevel {
-	std::string level;
-	std::string mode;
-	std::optional<core::Sha256Digest> source_digest;
-	uint64_t logic_digest = 0;
-
-	bool operator==(const NextLevel &) const = default;
 };
 
 struct RoundOverInfo {

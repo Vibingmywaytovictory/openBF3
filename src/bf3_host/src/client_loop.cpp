@@ -232,6 +232,7 @@ void ClientLoop::begin(std::unique_ptr<ClientTransport> p_transport, MonotonicCl
 	stats_.connected = true;
 	const uint64_t now = now_ns();
 	net::Hello hello;
+	hello.game_build = config.game_build.value_or(net::game_build());
 	hello.name = config.name;
 	clock.hello_sent(now);
 	link.submit(net::kChannelReliable, net::encode_hello(hello), now);

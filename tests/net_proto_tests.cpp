@@ -178,7 +178,7 @@ int decode_reencode(std::span<const uint8_t> p_bytes) {
 				return -1;
 			}
 			auto b = net::decode_hello(net::encode_hello(*a));
-			return b && b->protocol == a->protocol && b->name == a->name ? 1 : 0;
+			return b && b->protocol == a->protocol && b->game_build == a->game_build && b->name == a->name ? 1 : 0;
 		}
 		case net::MessageType::MatchInfo: {
 			auto a = net::decode_match_info(p_bytes);
@@ -186,11 +186,14 @@ int decode_reencode(std::span<const uint8_t> p_bytes) {
 				return -1;
 			}
 			auto b = net::decode_match_info(net::encode_match_info(*a));
-			return b && b->protocol == a->protocol && b->level == a->level && b->mode == a->mode && b->sim_hz == a->sim_hz &&
-							b->snapshot_divisor == a->snapshot_divisor && b->slot == a->slot && b->server_tick == a->server_tick &&
-							b->phase == a->phase && b->source_digest == a->source_digest && b->motor_hash == a->motor_hash &&
-							b->match_seed == a->match_seed && b->weapon_hash == a->weapon_hash && b->weapon_flags == a->weapon_flags &&
-							b->kit_hash == a->kit_hash && b->max_rewind_ticks == a->max_rewind_ticks
+			return b && b->protocol == a->protocol && b->level == a->level && b->mode == a->mode &&
+							b->sim_hz == a->sim_hz && b->snapshot_divisor == a->snapshot_divisor &&
+							b->slot == a->slot && b->server_tick == a->server_tick && b->phase == a->phase &&
+							b->source_digest == a->source_digest && b->motor_hash == a->motor_hash &&
+							b->match_seed == a->match_seed && b->weapon_hash == a->weapon_hash &&
+							b->weapon_flags == a->weapon_flags && b->kit_hash == a->kit_hash &&
+							b->max_rewind_ticks == a->max_rewind_ticks && b->sim_digest == a->sim_digest &&
+							b->round_id == a->round_id && b->next == a->next
 					? 1
 					: 0;
 		}
@@ -200,7 +203,7 @@ int decode_reencode(std::span<const uint8_t> p_bytes) {
 				return -1;
 			}
 			auto b = net::decode_ready(net::encode_ready(*a));
-			return b && b->source_digest == a->source_digest ? 1 : 0;
+			return b && b->source_digest == a->source_digest && b->digests == a->digests ? 1 : 0;
 		}
 		case net::MessageType::Spawned: {
 			auto a = net::decode_spawned(p_bytes);
@@ -219,7 +222,10 @@ int decode_reencode(std::span<const uint8_t> p_bytes) {
 				return -1;
 			}
 			auto b = net::decode_loading(net::encode_loading(*a));
-			return b && b->stage == a->stage && b->permille == a->permille ? 1 : 0;
+			return b && b->round_id == a->round_id && b->stage == a->stage && b->permille == a->permille &&
+							b->warmth == a->warmth && b->eta_s == a->eta_s
+					? 1
+					: 0;
 		}
 		case net::MessageType::Kick: {
 			auto a = net::decode_kick(p_bytes);
@@ -227,7 +233,7 @@ int decode_reencode(std::span<const uint8_t> p_bytes) {
 				return -1;
 			}
 			auto b = net::decode_kick(net::encode_kick(*a));
-			return b && b->reason == a->reason ? 1 : 0;
+			return b && b->reason == a->reason && b->code == a->code ? 1 : 0;
 		}
 		case net::MessageType::Bye:
 			return p_bytes.size() == 1 ? 1 : -1;
@@ -292,7 +298,7 @@ std::vector<std::pair<std::string, std::vector<uint8_t>>> sample_datagrams() {
 	p.commands[2].tick = 4998;
 	p.commands[2].sequence = 898;
 	out.emplace_back("CommandPacket", net::encode_command_packet(p));
-	out.emplace_back("Hello", net::encode_hello({ net::kProtocolVersion, "player\xC3\xA9" }));
+	out.emplace_back("Hello", net::encode_hello({ net::kProtocolVersion, 0x0123456789ABCDEFull, "player\xC3\xA9" }));
 	net::MatchInfo mi;
 	mi.level = "MP_Subway";
 	mi.mode = "TeamDeathMatch0";
@@ -304,7 +310,7 @@ std::vector<std::pair<std::string, std::vector<uint8_t>>> sample_datagrams() {
 	out.emplace_back("MatchInfo", net::encode_match_info(mi));
 	out.emplace_back("Ready", net::encode_ready({ mi.source_digest }));
 	out.emplace_back("Spawned", net::encode_spawned({ 3, 17, sample_state(rng, 4000) }));
-	out.emplace_back("Loading", net::encode_loading({ 4, 500 }));
+	out.emplace_back("Loading", net::encode_loading({ 11, 4, 500, net::LoadWarmth::Cold, 25 }));
 	out.emplace_back("Kick", net::encode_kick({ "motor hash differs" }));
 	out.emplace_back("Bye", net::encode_bye());
 	net::DebugRequest dr;
@@ -645,10 +651,11 @@ TEST_SUITE("net-proto") {
 	TEST_CASE("proto: every control message round trips") {
 		Rng rng(3);
 		{
-			const net::Hello h{ 7, "Soldier \xE2\x82\xAC" };
+			const net::Hello h{ net::kProtocolVersion, 0xFEDCBA9876543210ull, "Soldier \xE2\x82\xAC" };
 			auto d = net::decode_hello(net::encode_hello(h));
 			REQUIRE(d);
-			CHECK(d->protocol == 7);
+			CHECK(d->protocol == net::kProtocolVersion);
+			CHECK(d->game_build == h.game_build);
 			CHECK(d->name == h.name);
 		}
 		{
@@ -709,11 +716,11 @@ TEST_SUITE("net-proto") {
 			CHECK(net::decode_spawned(net::encode_spawned(net::Spawned{}))->defs == net::kNoSpawnDefs);
 		}
 		{
-			auto d = net::decode_loading(net::encode_loading({ 9, 1000 }));
+			auto d = net::decode_loading(net::encode_loading({ 0, 9, 1000 }));
 			REQUIRE(d);
 			CHECK(d->stage == 9);
 			CHECK(d->permille == 1000);
-			auto clamped = net::decode_loading(net::encode_loading({ 1, 5000 }));
+			auto clamped = net::decode_loading(net::encode_loading({ 0, 1, 5000 }));
 			REQUIRE(clamped);
 			CHECK(clamped->permille == 1000);
 		}
@@ -1070,13 +1077,14 @@ TEST_SUITE("net-proto") {
 			name += "\xC3\xA9";
 		}
 		name = "x" + name;
-		auto d = net::decode_hello(net::encode_hello({ 1, name }));
+		auto d = net::decode_hello(net::encode_hello({ net::kProtocolVersion, 0, name }));
 		REQUIRE(d);
 		CHECK(d->name.size() == 31);
 		CHECK(d->name == name.substr(0, 31));
 		const auto hello = [](std::string_view p_bytes, uint64_t p_len) {
 			return craft(net::MessageType::Hello, [&](net::BitWriter &w) {
-				w.write_bits(1, 16);
+				w.write_bits(net::kProtocolVersion, 16);
+				w.write_bits(0, 64);
 				w.write_varint(p_len);
 				for (const char c : p_bytes) {
 					w.write_bits(uint8_t(c), 8);
@@ -1166,23 +1174,27 @@ TEST_SUITE("net-proto") {
 				w.write_bits(p_phase, 8);
 				w.write_bool(false);
 				w.write_bits(0, 64);
-				for (const unsigned bits : { 64u, 64u, 8u, 64u, 8u, 64u, 8u }) {
+				for (const unsigned bits : { 64u, 64u, 8u, 64u, 8u, 64u, 8u, 64u, 32u }) {
 					w.write_bits(0, bits);
 				}
+				w.write_bool(false);
 			});
 		};
 		CHECK(net::decode_match_info(match(60, 2, 0, 2)));
 		CHECK_FALSE(net::decode_match_info(match(0, 2, 0, 2)));
 		CHECK_FALSE(net::decode_match_info(match(60, 0, 0, 2)));
 		CHECK_FALSE(net::decode_match_info(match(60, 2, 128, 2)));
-		CHECK(net::decode_match_info(match(60, 2, 0, 4)));
-		CHECK_FALSE(net::decode_match_info(match(60, 2, 0, 5)));
+		CHECK(net::decode_match_info(match(60, 2, 0, 5)));
+		CHECK_FALSE(net::decode_match_info(match(60, 2, 0, 6)));
 		CHECK_FALSE(net::decode_loading(craft(net::MessageType::Loading, [](net::BitWriter &w) {
+			w.write_bits(0, 32);
 			w.write_bits(1, 8);
 			w.write_bits(1001, 16);
+			w.write_bits(0, 8);
+			w.write_bits(0, 16);
 		})));
 
-		const std::vector<uint8_t> hello = net::encode_hello({ 1, "x" });
+		const std::vector<uint8_t> hello = net::encode_hello({ net::kProtocolVersion, 0, "x" });
 		CHECK_FALSE(net::decode_match_info(hello));
 		CHECK_FALSE(net::decode_snapshot(hello));
 		CHECK_FALSE(net::decode_command_packet(hello));
@@ -1195,12 +1207,22 @@ TEST_SUITE("net-proto") {
 		CHECK_FALSE(net::decode_hello(net::encode_bye()));
 	}
 
-	TEST_CASE("proto: every truncation and every extension of every message is refused") {
+	TEST_CASE("proto: every truncation and every extension of every message is refused, but a reasoned Kick cut before "
+			  "its reason, which is the frozen Protocol Kick") {
 		for (const auto &[name, bytes] : sample_datagrams()) {
 			INFO(name);
 			REQUIRE(decode_reencode(bytes) == 1);
+			const bool reasoned_kick = net::peek_type(bytes) == net::MessageType::Kick &&
+					net::decode_kick(bytes)->code != net::KickReason::Protocol;
 			for (size_t n = 0; n < bytes.size(); ++n) {
 				const std::span<const uint8_t> prefix(bytes.data(), n);
+				if (reasoned_kick && n + 1 == bytes.size()) {
+					auto frozen = net::decode_kick(prefix);
+					REQUIRE(frozen);
+					CHECK(frozen->code == net::KickReason::Protocol);
+					CHECK(frozen->reason == net::decode_kick(bytes)->reason);
+					continue;
+				}
 				REQUIRE(decode_reencode(prefix) == -1);
 			}
 			for (const uint8_t extra : { uint8_t(0), uint8_t(0xFF) }) {
@@ -2061,12 +2083,12 @@ void append_v2_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>>
 
 TEST_SUITE("net-proto") {
 	TEST_CASE("proto v2: version, message types and the bounds") {
-		CHECK(net::kProtocolVersion == 3);
+		CHECK(net::kProtocolVersion == 4);
 		for (const uint8_t t : { uint8_t(3), uint8_t(4), uint8_t(23), uint8_t(24) }) {
 			CHECK(net::peek_type(std::span<const uint8_t>(&t, 1)).has_value());
 		}
-		CHECK(net::Hello{}.protocol == 3);
-		CHECK(net::MatchInfo{}.protocol == 3);
+		CHECK(net::Hello{}.protocol == 4);
+		CHECK(net::MatchInfo{}.protocol == 4);
 	}
 
 	TEST_CASE("proto v2: MatchInfo, Spawned, KitSelect and the new Debug kinds round trip; out-of-range values are refused") {
@@ -3125,9 +3147,10 @@ bool same_match_state(const net::MatchState &p_a, const net::MatchState &p_b) {
 }
 
 bool same_row(const net::PlayerRow &p_a, const net::PlayerRow &p_b) {
-	return p_a.slot == p_b.slot && p_a.team == p_b.team && p_a.kit == p_b.kit && p_a.bot == p_b.bot && p_a.alive == p_b.alive &&
-			p_a.name_bytes == p_b.name_bytes && p_a.ping_ms == p_b.ping_ms && p_a.kills == p_b.kills && p_a.deaths == p_b.deaths &&
-			p_a.score == p_b.score && p_a.name == p_b.name;
+	return p_a.slot == p_b.slot && p_a.team == p_b.team && p_a.kit == p_b.kit && p_a.bot == p_b.bot &&
+			p_a.alive == p_b.alive && p_a.name_bytes == p_b.name_bytes && p_a.ping_ms == p_b.ping_ms &&
+			p_a.kills == p_b.kills && p_a.deaths == p_b.deaths && p_a.score == p_b.score && p_a.name == p_b.name &&
+			p_a.squad == p_b.squad && p_a.leader == p_b.leader;
 }
 
 bool same_player_list(const net::PlayerList &p_a, const net::PlayerList &p_b) {
@@ -3271,7 +3294,7 @@ TEST_SUITE("net-proto") {
 		m.kill_limit = -3;
 		auto dm = net::decode_match_state(net::encode_match_state(m));
 		REQUIRE(dm);
-		CHECK(dm->phase == net::MatchPhase::Restarting);
+		CHECK(dm->phase == net::MatchPhase::LevelChange);
 		CHECK(dm->winner == 2);
 		CHECK(dm->kill_limit == 0);
 		const auto state = [](uint32_t p_phase, uint32_t p_winner, int32_t p_limit) {
@@ -3292,8 +3315,8 @@ TEST_SUITE("net-proto") {
 			});
 		};
 		CHECK(net::decode_match_state(state(3, 2, 100)));
-		CHECK(net::decode_match_state(state(4, 0, 100))->players_needed == 7);
-		CHECK_FALSE(net::decode_match_state(state(5, 0, 100)));
+		CHECK(net::decode_match_state(state(5, 0, 100))->players_needed == 7);
+		CHECK_FALSE(net::decode_match_state(state(6, 0, 100)));
 		CHECK_FALSE(net::decode_match_state(state(0, 3, 100)));
 		CHECK_FALSE(net::decode_match_state(state(0, 0, -1)));
 		std::vector<uint8_t> extra = state(1, 1, 5);
@@ -3375,6 +3398,8 @@ TEST_SUITE("net-proto") {
 			w.write_bits(1, 2);
 			w.write_bool(false);
 			w.write_bool(true);
+			w.write_bits(0, 6);
+			w.write_bool(false);
 			w.write_bits(p_name_bytes, 5);
 			w.write_bits(30, 16);
 			w.write_bits(1, 16);
@@ -3814,8 +3839,57 @@ void append_v4_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>>
 	r_out.emplace_back("SquadRequest", net::encode_squad_request({ net::SquadOp::Kick, 4, 17 }));
 	r_out.emplace_back("SquadOrder",
 			net::encode_squad_order({ 2, 3, net::SquadOrderKind::Defend, 12, { 10.5f, 64.0f, -220.25f } }));
+	net::MatchInfo mi;
+	mi.level = "MP_Subway";
+	mi.mode = "TeamDeathMatch0";
+	mi.phase = net::MatchPhase::LevelChange;
+	mi.sim_digest = 0x0F1E2D3C4B5A6978ull;
+	mi.round_id = 3;
+	mi.next = sample_next(true);
+	r_out.emplace_back("MatchInfo (v4)", net::encode_match_info(mi));
+	r_out.emplace_back("Ready (v4 digests)",
+			net::encode_ready({ sample_next(true).source_digest, net::ComponentDigests{ 1, 2, 3, 4, 5, 6 } }));
+	r_out.emplace_back("Kick (v4 reason)", net::encode_kick({ "install differs: motor", net::KickReason::Motor }));
+	net::PlayerList pl;
+	pl.server_tick = 91000;
+	pl.full = true;
+	for (uint8_t s = 0; s < 4; ++s) {
+		net::PlayerRow row = sample_row(rng, uint8_t(s * 9));
+		row.squad = uint8_t(s == 3 ? 0 : 1 + s * 15);
+		row.leader = s == 1;
+		pl.rows.push_back(row);
+	}
+	r_out.emplace_back("PlayerList (v4 squads)", net::encode_player_list(pl));
 }
 
+std::optional<std::string> decode_kick_v3(std::span<const uint8_t> p_bytes) {
+	net::BitReader r(p_bytes);
+	if (r.read_bits(8) != uint8_t(net::MessageType::Kick)) {
+		return std::nullopt;
+	}
+	const uint64_t length = r.read_varint();
+	if (r.failed() || length > 2048 || length * 8 > r.bits_left()) {
+		return std::nullopt;
+	}
+	std::string text;
+	for (uint64_t i = 0; i < length; ++i) {
+		text.push_back(char(r.read_bits(8)));
+	}
+	if (r.failed() || !r.at_end()) {
+		return std::nullopt;
+	}
+	return text;
+}
+
+std::vector<uint8_t> hello_v3(uint16_t p_protocol, std::string_view p_name) {
+	return craft(net::MessageType::Hello, [&](net::BitWriter &w) {
+		w.write_bits(p_protocol, 16);
+		w.write_varint(p_name.size());
+		for (const char c : p_name) {
+			w.write_bits(uint8_t(c), 8);
+		}
+	});
+}
 }
 
 TEST_SUITE("net-proto") {
@@ -4076,6 +4150,173 @@ TEST_SUITE("net-proto") {
 		CHECK_FALSE(net::decode_squad_order(order(1, 1, 0, 2.0e6f)));
 		CHECK_FALSE(net::decode_squad_order(order(1, 1, 0, std::numeric_limits<float>::infinity())));
 	}
+
+	TEST_CASE("proto v4: Hello carries the build after its frozen protocol; a Hello of another protocol decodes to "
+			  "that protocol alone") {
+		const net::Hello h{ net::kProtocolVersion, 0x8000000000000001ull, "v4" };
+		const std::vector<uint8_t> b = net::encode_hello(h);
+		CHECK(b.size() == 1 + 2 + 8 + 1 + 2);
+		CHECK((b[1] | (b[2] << 8)) == net::kProtocolVersion);
+		auto d = net::decode_hello(b);
+		REQUIRE(d);
+		CHECK(d->game_build == h.game_build);
+		CHECK(d->name == "v4");
+		for (const uint16_t other : { uint16_t(1), uint16_t(2), uint16_t(3), uint16_t(5), uint16_t(0xFFFF) }) {
+			auto old = net::decode_hello(hello_v3(other, "anyone"));
+			REQUIRE(old);
+			CHECK(old->protocol == other);
+			CHECK(old->game_build == 0);
+			CHECK(old->name.empty());
+			CHECK(net::encode_hello(*old).size() == 3);
+		}
+		CHECK_FALSE(net::decode_hello(std::vector<uint8_t>{ uint8_t(net::MessageType::Hello), 3 }));
+		std::vector<uint8_t> cut = b;
+		cut.resize(3 + 4);
+		CHECK_FALSE(net::decode_hello(cut));
+	}
+
+	TEST_CASE("proto v4: a v3 Hello is kicked with reason Protocol and the reply decodes as a v3 Kick") {
+		auto hello = net::decode_hello(hello_v3(3, "veteran"));
+		REQUIRE(hello);
+		REQUIRE(hello->protocol != net::kProtocolVersion);
+		const net::Kick kick = net::protocol_kick(hello->protocol);
+		CHECK(kick.code == net::KickReason::Protocol);
+		const std::vector<uint8_t> bytes = net::encode_kick(kick);
+		const std::optional<std::string> v3 = decode_kick_v3(bytes);
+		REQUIRE(v3.has_value());
+		CHECK(*v3 == "protocol 3 (server 4)");
+		auto v4 = net::decode_kick(bytes);
+		REQUIRE(v4);
+		CHECK(v4->code == net::KickReason::Protocol);
+		CHECK(v4->reason == *v3);
+	}
+
+	TEST_CASE("proto v4: every other kick reason is one byte after the detail; hostile reason bytes are refused") {
+		for (uint8_t code = 1; code <= uint8_t(net::KickReason::LoadStalled); ++code) {
+			const net::Kick k{ "detail", net::KickReason(code) };
+			const std::vector<uint8_t> b = net::encode_kick(k);
+			CHECK(b.size() == 1 + 1 + 6 + 1);
+			CHECK(b.back() == code);
+			auto d = net::decode_kick(b);
+			REQUIRE(d);
+			CHECK(d->code == k.code);
+			CHECK(d->reason == "detail");
+			CHECK_FALSE(decode_kick_v3(b).has_value());
+		}
+		const auto kick = [](std::initializer_list<uint8_t> p_tail) {
+			std::vector<uint8_t> b = net::encode_kick({ "x", net::KickReason::Protocol });
+			b.insert(b.end(), p_tail.begin(), p_tail.end());
+			return b;
+		};
+		CHECK(net::decode_kick(kick({})));
+		CHECK_FALSE(net::decode_kick(kick({ 0 })));
+		CHECK_FALSE(net::decode_kick(kick({ 12 })));
+		CHECK_FALSE(net::decode_kick(kick({ 0xFF })));
+		CHECK_FALSE(net::decode_kick(kick({ 5, 0 })));
+		CHECK(net::decode_kick(kick({ 11 }))->code == net::KickReason::LoadStalled);
+	}
+
+	TEST_CASE("proto v4: MatchInfo, Ready, Loading and PlayerRow carry their v4 fields; hostile values are refused") {
+		Rng rng(442);
+		net::MatchInfo mi;
+		mi.phase = net::MatchPhase::LevelChange;
+		mi.sim_digest = ~0ull;
+		mi.round_id = 0xFFFFFFFFu;
+		for (const bool with_next : { false, true }) {
+			mi.next.reset();
+			if (with_next) {
+				mi.next = sample_next(true);
+			}
+			auto d = net::decode_match_info(net::encode_match_info(mi));
+			REQUIRE(d);
+			CHECK(d->phase == net::MatchPhase::LevelChange);
+			CHECK(d->sim_digest == mi.sim_digest);
+			CHECK(d->round_id == mi.round_id);
+			CHECK(d->next == mi.next);
+		}
+		mi.phase = net::MatchPhase(6);
+		CHECK_FALSE(net::decode_match_info(net::encode_match_info(mi)));
+
+		const net::Ready plain{ sample_next(true).source_digest, std::nullopt };
+		auto dp = net::decode_ready(net::encode_ready(plain));
+		REQUIRE(dp);
+		CHECK_FALSE(dp->digests.has_value());
+		const net::ComponentDigests all{ ~0ull, 1, 2, 3, 4, 0x8000000000000000ull };
+		auto dr = net::decode_ready(net::encode_ready({ std::nullopt, all }));
+		REQUIRE(dr);
+		CHECK_FALSE(dr->source_digest.has_value());
+		REQUIRE(dr->digests.has_value());
+		CHECK(*dr->digests == all);
+		CHECK(net::encode_ready({ std::nullopt, all }).size() == 1 + 1 + 48);
+
+		const net::Loading l{ 0xABCDEF01u, 7, 999, net::LoadWarmth::Cold, 300 };
+		const std::vector<uint8_t> lb = net::encode_loading(l);
+		CHECK(lb.size() == 1 + 4 + 1 + 2 + 1 + 2);
+		auto dl = net::decode_loading(lb);
+		REQUIRE(dl);
+		CHECK(dl->round_id == l.round_id);
+		CHECK(dl->stage == 7);
+		CHECK(dl->permille == 999);
+		CHECK(dl->warmth == net::LoadWarmth::Cold);
+		CHECK(dl->eta_s == 300);
+		std::vector<uint8_t> warm = lb;
+		warm[1 + 4 + 1 + 2] = 2;
+		CHECK_FALSE(net::decode_loading(warm));
+
+		net::PlayerList pl;
+		pl.server_tick = 5;
+		for (uint8_t s = 0; s < 6; ++s) {
+			pl.rows.push_back(sample_row(rng, s));
+		}
+		pl.rows[0].squad = net::kMaxSquads;
+		pl.rows[0].leader = true;
+		pl.rows[1].squad = 1;
+		pl.rows[2].squad = net::kMaxSquads + 1;
+		pl.rows[3].leader = true;
+		pl.rows[4].squad = 63;
+		pl.rows[4].leader = true;
+		size_t clamped = 0;
+		auto dpl = net::decode_player_list(net::encode_player_list(pl, &clamped));
+		REQUIRE(dpl);
+		CHECK(clamped == 3);
+		CHECK(dpl->rows[0].squad == net::kMaxSquads);
+		CHECK(dpl->rows[0].leader);
+		CHECK(dpl->rows[1].squad == 1);
+		CHECK_FALSE(dpl->rows[1].leader);
+		CHECK(dpl->rows[2].squad == 0);
+		CHECK_FALSE(dpl->rows[3].leader);
+		CHECK(dpl->rows[4].squad == 0);
+		CHECK_FALSE(dpl->rows[4].leader);
+		CHECK(dpl->rows[5].squad == 0);
+
+		const auto row_list = [](uint32_t p_squad, bool p_leader) {
+			return craft(net::MessageType::PlayerList, [&](net::BitWriter &w) {
+				w.write_bits(7, 32);
+				w.write_bool(false);
+				w.write_bits(1, 7);
+				w.write_bits(0, 7);
+				w.write_bits(3, 6);
+				w.write_bits(1, 2);
+				w.write_bits(1, 2);
+				w.write_bool(false);
+				w.write_bool(true);
+				w.write_bits(p_squad, 6);
+				w.write_bool(p_leader);
+				w.write_bits(0, 5);
+				w.write_bits(30, 16);
+				w.write_bits(1, 16);
+				w.write_bits(2, 16);
+				w.write_signed(-100, 32);
+			});
+		};
+		auto ok = net::decode_player_list(row_list(32, true));
+		REQUIRE(ok);
+		CHECK(ok->rows[0].squad == 32);
+		CHECK(ok->rows[0].leader);
+		CHECK(net::decode_player_list(row_list(0, false)));
+		CHECK_FALSE(net::decode_player_list(row_list(33, false)));
+		CHECK_FALSE(net::decode_player_list(row_list(0, true)));
+	}
 }
 
 namespace {
@@ -4105,9 +4346,10 @@ std::vector<GoldenDatagram> encoder_edge_datagrams() {
 	Rng rng(0x601D);
 	std::vector<GoldenDatagram> out;
 
-	out.push_back({ "Hello (name cut inside a code point)", net::encode_hello({ 7, std::string(31, 'n') + "\xC3\xA9" }) });
+	out.push_back({ "Hello (name cut inside a code point)",
+			net::encode_hello({ net::kProtocolVersion, 7, std::string(31, 'n') + "\xC3\xA9" }) });
 	out.push_back({ "Kick (reason cut at 2048 bytes)", net::encode_kick({ std::string(2100, 'k') }) });
-	out.push_back({ "Loading (permille above 1000)", net::encode_loading({ 7, 4000 }) });
+	out.push_back({ "Loading (permille above 1000)", net::encode_loading({ 0, 7, 4000 }) });
 	out.push_back({ "Bye", net::encode_bye() });
 
 	net::MatchInfo mi;
@@ -4335,11 +4577,11 @@ TEST_SUITE("net-proto") {
 			{ "Snapshot", 367, 0xa435d4ace31cf825ull, 0 },
 			{ "Snapshot (no own)", 20, 0xa85c8a910ea8826bull, 0 },
 			{ "CommandPacket", 58, 0x0561e87f8ae9a655ull, 0 },
-			{ "Hello", 12, 0xb36010aca7922bd5ull, 0 },
-			{ "MatchInfo", 114, 0x1e0a24458af5f0feull, 0 },
+			{ "Hello", 20, 0x4b3c210b6d750b94ull, 0 },
+			{ "MatchInfo", 126, 0xfd220c8a3ed9a6fbull, 0 },
 			{ "Ready", 34, 0x50302cdf0f51bcb5ull, 0 },
 			{ "Spawned", 94, 0x1af4b750393b4270ull, 0 },
-			{ "Loading", 4, 0xee6df9e3bb005a46ull, 0 },
+			{ "Loading", 11, 0x6d0d37720d72edd7ull, 0 },
 			{ "Kick", 20, 0x24730a3e43ab6c1aull, 0 },
 			{ "Bye", 1, 0xaf63cb4c8601cfa9ull, 0 },
 			{ "Debug", 30, 0x3f09a8f270a73a7dull, 0 },
@@ -4351,16 +4593,16 @@ TEST_SUITE("net-proto") {
 			{ "KitSelect", 3, 0xa9266a18e1c669aaull, 0 },
 			{ "Debug (SpawnTarget)", 30, 0xbf53c23636c9b9efull, 0 },
 			{ "DebugReport (v2)", 916, 0xe73adddf5cc1ab3dull, 0 },
-			{ "MatchInfo (v2)", 82, 0x38ba6d216efb3d54ull, 0 },
+			{ "MatchInfo (v2)", 94, 0x818d2041dffe0989ull, 0 },
 			{ "Spawned (v2)", 94, 0x9785ca9dec6fc2bbull, 0 },
 			{ "MatchState", 42, 0x6e8a7b2bfcb229a0ull, 0 },
-			{ "PlayerList (full)", 207, 0x68dd8ae5402d6955ull, 0 },
-			{ "PlayerList (delta)", 49, 0x4693a47620178101ull, 0 },
+			{ "PlayerList (full)", 217, 0x8ad8a19f7b621f12ull, 0 },
+			{ "PlayerList (delta)", 51, 0x94d11dcdb2a83842ull, 0 },
 			{ "SpawnRequest", 3, 0xb1d34918e6b14818ull, 0 },
 			{ "SuicideRequest", 1, 0xaf63d14c8601d9dbull, 0 },
 			{ "LoadoutRequest", 54, 0xbff00e287a388828ull, 0 },
 			{ "CombatEvents (v3)", 137, 0x40d29b14535383d7ull, 0 },
-			{ "MatchInfo (v3)", 82, 0x9f7d6df8af0ee7e8ull, 0 },
+			{ "MatchInfo (v3)", 94, 0x9489081d6d158415ull, 0 },
 			{ "Spawned (v3 revived)", 94, 0x185c920e1aff4290ull, 0 },
 			{ "SoldierGear", 20, 0xfa6162cd1bdf3cf3ull, 0 },
 			{ "Mismatch", 2, 0x07c26e07b48c3c08ull, 0 },
@@ -4372,22 +4614,26 @@ TEST_SUITE("net-proto") {
 			{ "LogicDelta", 13, 0xb406185960cdf447ull, 0 },
 			{ "SquadRequest", 4, 0x339b5db77a00fa9bull, 0 },
 			{ "SquadOrder", 18, 0x786f0a82bee37cb8ull, 0 },
+			{ "MatchInfo (v4)", 157, 0xd2294e3814c9e96full, 0 },
+			{ "Ready (v4 digests)", 82, 0x52d9ba4d4bfcaf1eull, 0 },
+			{ "Kick (v4 reason)", 25, 0xc256cbdc95a2f23cull, 0 },
+			{ "PlayerList (v4 squads)", 89, 0x1f220dc607e2158aull, 0 },
 		};
 		check_golden(samples, kPins);
 	}
 
 	TEST_CASE("proto: golden bytes of the encoders' clamp, cut and drop paths") {
 		static constexpr GoldenPin kPins[] = {
-			{ "Hello (name cut inside a code point)", 35, 0xa6c3b5c496ea8fd8ull, 0 },
+			{ "Hello (name cut inside a code point)", 43, 0x14b6f5bcd86cd2d4ull, 0 },
 			{ "Kick (reason cut at 2048 bytes)", 2051, 0x028412f145ceb5d9ull, 0 },
-			{ "Loading (permille above 1000)", 4, 0xd50714e3acc7701dull, 0 },
+			{ "Loading (permille above 1000)", 11, 0xd2694e25edbe818full, 0 },
 			{ "Bye", 1, 0xaf63cb4c8601cfa9ull, 0 },
-			{ "MatchInfo (out-of-range fields travel as given)", 187, 0xd223af85467b08d5ull, 0 },
+			{ "MatchInfo (out-of-range fields travel as given)", 199, 0x5c40fecca265b345ull, 0 },
 			{ "Spawned (out-of-range fields travel as given)", 94, 0x282e0ad5f170e1e8ull, 0 },
 			{ "Debug (out-of-range fields travel as given)", 30, 0x8236dbe05bdccf42ull, 0 },
-			{ "MatchState (clamped)", 42, 0x4b5c4a4eee33f13eull, 0 },
-			{ "PlayerList (canonicalised)", 48, 0x1f62d52eea86fb3cull, 8 },
-			{ "PlayerList (full drops removed)", 26, 0x8fda9f79ddcc06baull, 1 },
+			{ "MatchState (clamped)", 42, 0x06f49c6520c2a109ull, 0 },
+			{ "PlayerList (canonicalised)", 50, 0xe2b018756621270eull, 8 },
+			{ "PlayerList (full drops removed)", 27, 0x47ea6ae9e75df6d4ull, 1 },
 			{ "CommandPacket (clamped, chain cut at a gap)", 57, 0x54a8e4154ecc6c70ull, 0 },
 			{ "CommandPacket (no commands)", 0, 0xcbf29ce484222325ull, 0 },
 			{ "Snapshot (others over the datagram)", 1189, 0x25fef71d07948c6full, 24 },

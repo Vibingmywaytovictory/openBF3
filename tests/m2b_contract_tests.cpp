@@ -54,7 +54,7 @@ constexpr uint64_t kDefaultMotorParamsHash = 0x346282435cd97947ull;
 constexpr uint64_t kDefaultKitTableHash = 0xa23fb7a00909ad6dull;
 
 static_assert(sizeof(host::PresentEvent) == 64);
-static_assert(sizeof(net::PlayerRow) == 32);
+static_assert(sizeof(net::PlayerRow) == 36);
 static_assert(offsetof(net::PlayerRow, ping_ms) == 6 && offsetof(net::PlayerRow, score) == 12 && offsetof(net::PlayerRow, name) == 16);
 static_assert(std::is_trivially_copyable_v<net::PlayerRow>);
 static_assert(std::is_trivially_copyable_v<net::MatchState>);
@@ -272,7 +272,7 @@ TEST_SUITE("m2b-contract") {
 		list.rows.push_back(row);
 		const net::SpawnRequest request{ 2, 0 };
 		if constexpr (kNtLanded) {
-			CHECK(net::kProtocolVersion == 3);
+			CHECK(net::kProtocolVersion == 4);
 			const std::vector<uint8_t> m = net::encode_match_state(match);
 			CHECK(net::peek_type(m) == net::MessageType::MatchState);
 			core::Result<net::MatchState> md = net::decode_match_state(m);

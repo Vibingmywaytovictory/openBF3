@@ -112,16 +112,12 @@ struct GameServer::Impl {
 			return;
 		}
 		if (p_hello.protocol != net::kProtocolVersion) {
-			net::Kick k;
-			k.reason = "protocol " + std::to_string(p_hello.protocol) + " (server " + std::to_string(net::kProtocolVersion) + ")";
-			outbox.send(p_peer, net::kChannelReliable, net::encode_kick(k));
+			outbox.send(p_peer, net::kChannelReliable, net::encode_kick(net::protocol_kick(p_hello.protocol)));
 			return;
 		}
 		const int at = slots.free_slot();
 		if (at < 0) {
-			net::Kick k;
-			k.reason = "server full";
-			outbox.send(p_peer, net::kChannelReliable, net::encode_kick(k));
+			outbox.send(p_peer, net::kChannelReliable, net::encode_kick({ "server full", net::KickReason::Full }));
 			return;
 		}
 		reset_slot(size_t(at));
@@ -422,9 +418,7 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 				return;
 			}
 			if (r->source_digest && m.config.level->source_digest && *r->source_digest != *m.config.level->source_digest) {
-
-				net::Kick k;
-				k.reason = "level data differs from the server's (source digest)";
+				const net::Kick k{ "level data differs from the server's (source digest)", net::KickReason::Source };
 				m.outbox.send(p_peer, net::kChannelReliable, net::encode_kick(k));
 				++m.level_mismatch_kicks;
 				on_disconnect(p_peer);
