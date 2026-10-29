@@ -18,6 +18,7 @@
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/spawn.h"
 #include "bf3/sim/static_world.h"
+#include "client_transport.h"
 #include "server_net_thread.h"
 #include "test_support.h"
 
@@ -1932,6 +1933,37 @@ private:
 	std::shared_ptr<Pipe> pipe_;
 };
 
+class PipeClientTransport final : public ClientTransport {
+public:
+	PipeClientTransport(std::shared_ptr<Pipe> p_pipe, uint32_t p_peer) : pipe_(std::move(p_pipe)), peer_(p_peer) {}
+
+	int service(uint32_t p_wait_ms, net::Host::Event &r_event) override {
+		std::unique_lock lock(pipe_->mutex);
+		std::deque<Pipe::Sent> &in = pipe_->to_client[peer_];
+		pipe_->to_client_ready.wait_for(lock, std::chrono::milliseconds(p_wait_ms), [&] { return !in.empty(); });
+		if (in.empty()) {
+			return 0;
+		}
+		r_event = net::Host::Event();
+		r_event.type = net::Host::EventType::Receive;
+		r_event.peer = peer_;
+		r_event.channel = in.front().channel;
+		r_event.data = std::move(in.front().bytes);
+		in.pop_front();
+		return 1;
+	}
+	void send(uint8_t p_channel, std::span<const uint8_t> p_bytes, net::Host::SendMode) override {
+		pipe_->client_send(peer_, p_channel, std::vector<uint8_t>(p_bytes.begin(), p_bytes.end()));
+	}
+	void flush() override {}
+	void disconnect_all() override {}
+	uint32_t rtt_ms() const override { return 0; }
+
+private:
+	std::shared_ptr<Pipe> pipe_;
+	uint32_t peer_ = 0;
+};
+
 bool wait_until(const std::function<bool()> &p_done) {
 	const auto start = std::chrono::steady_clock::now();
 	while (!p_done()) {
@@ -2003,6 +2035,62 @@ TEST_SUITE("host-session-unit") {
 		CHECK(wait_until([&] { return server.stats().peers == 1; }));
 		CHECK(server.game_stats().clients == 1);
 		CHECK(server.stats().step_errors == 0);
+		server.stop();
+	}
+
+	TEST_CASE("host.session: a ClientSession started with no level connects, attaches a level, then plays") {
+		auto pipe = std::make_shared<Pipe>();
+		ServerConfig sc;
+		sc.game = pipe_game();
+		sc.transport = std::make_shared<PipeServerPort>(pipe);
+		ServerHost server;
+		std::string err;
+		REQUIRE_MESSAGE(server.start(sc, &err), err);
+		pipe->connect(0);
+
+		ClientSession client;
+		ClientSessionConfig cc;
+		cc.name = "lobby";
+		const core::Status started = client.start(cc, nullptr, std::make_unique<PipeClientTransport>(pipe, 0));
+		REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
+		net::MatchInfo held;
+		REQUIRE(wait_until([&] { return client.lobby_match(held); }));
+		CHECK(held.slot == 0);
+		CHECK(held.level == synthetic_level()->level);
+		CHECK(held.motor_hash == motor_params_hash(synthetic_level()->motor));
+		REQUIRE(wait_until([&] { return pipe->count_sent(0, net::MessageType::Snapshot) >= 3; }));
+		auto frame = std::make_unique<PresentationFrame>();
+		CHECK_FALSE(client.read_presentation(*frame));
+		CHECK(client.stats().connected);
+		CHECK(server.game_stats().slots.at(0).used);
+		CHECK(server.game_stats().slots.at(0).life == 0);
+
+		const core::Status attached = client.attach_level(synthetic_level());
+		REQUIRE_MESSAGE(attached.ok(), (attached.ok() ? std::string() : attached.error().message));
+		CHECK_FALSE(client.attach_level(synthetic_level()).ok());
+
+		InputSample input;
+		REQUIRE(wait_until([&] {
+			client.read_presentation(*frame);
+			return frame->valid && frame->own_curr.life > 0;
+		}));
+		const SoldierState spawn = frame->own_curr;
+		input.life = spawn.life;
+		input.yaw = yaw_radians(spawn.yaw);
+		input.move_forward = 1.0f;
+		REQUIRE(wait_until([&] {
+			client.set_input(input);
+			client.read_presentation(*frame);
+			return frame->server_own_valid && dist(frame->server_own.position, spawn.position) > 1.0f &&
+					dist(frame->own_curr.position, spawn.position) > 1.0f;
+		}));
+		const ClientStats stats = client.stats();
+		CHECK(stats.connected);
+		CHECK(stats.slot == 0);
+		CHECK(stats.spawns == 1);
+		CHECK(stats.commands_sent > 0);
+		CHECK(server.game_stats().slots.at(0).commands_applied > 0);
+		client.stop();
 		server.stop();
 	}
 }

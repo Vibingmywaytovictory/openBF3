@@ -26,6 +26,8 @@
 
 namespace bf3::host {
 
+class ClientTransport;
+
 enum class PoseRequest : uint8_t {
 	Keep = 0,
 	Set = 1,
@@ -249,6 +251,10 @@ public:
 	ClientSession &operator=(const ClientSession &) = delete;
 
 	core::Status start(const ClientSessionConfig &p_config, std::shared_ptr<const SharedLevel> p_level);
+	core::Status start(const ClientSessionConfig &p_config, std::shared_ptr<const SharedLevel> p_level,
+			std::unique_ptr<ClientTransport> p_transport);
+	core::Status attach_level(std::shared_ptr<const SharedLevel> p_level);
+	bool lobby_match(net::MatchInfo &r_match) const;
 	void stop();
 	bool running() const;
 

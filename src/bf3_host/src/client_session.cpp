@@ -12,7 +12,9 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <thread>
@@ -67,14 +69,43 @@ struct ClientSession::Impl {
 	std::atomic<uint32_t> stall_request_ms{ 0 };
 	ClientLoop loop;
 
+	std::mutex attach_mutex;
+	std::condition_variable attach_done;
+	std::atomic<bool> attach_requested{ false };
+	std::shared_ptr<const SharedLevel> attach_pending;
+	std::optional<core::Status> attach_result;
+
+	void serve_attach(core::Status p_refusal) {
+		std::lock_guard lock(attach_mutex);
+		attach_result = p_refusal.ok() ? loop.attach_level(std::move(attach_pending)) : std::move(p_refusal);
+		attach_pending.reset();
+		attach_requested.store(false, std::memory_order_release);
+		attach_done.notify_all();
+	}
+
 	void run() {
 		while (!stop_requested.load(std::memory_order_acquire)) {
+			if (attach_requested.load(std::memory_order_acquire)) {
+				serve_attach(core::Status::success());
+			}
 			if (const uint32_t stall = stall_request_ms.exchange(0); stall > 0) {
 				std::this_thread::sleep_for(std::chrono::milliseconds(stall));
 			}
 			loop.iterate();
 		}
 		loop.shutdown();
+		if (attach_requested.load(std::memory_order_acquire)) {
+			serve_attach(core::make_error("ClientSession: stopped before the level was attached"));
+		}
+	}
+
+	void launch(ClientSession *p_session, std::unique_ptr<ClientTransport> p_transport) {
+		stop_requested = false;
+		loop.begin(std::move(p_transport), net::monotonic_ns);
+		running = true;
+		started = true;
+		thread = std::thread([this] { run(); });
+		g_registry.add(p_session);
 	}
 };
 
@@ -86,20 +117,44 @@ ClientSession::~ClientSession() {
 	stop();
 }
 
-core::Status ClientSession::start(const ClientSessionConfig &p_config, std::shared_ptr<const SharedLevel> p_level) {
-	std::lock_guard lock(impl_->lifecycle_mutex);
-	if (impl_->thread.joinable() || impl_->started) {
+namespace {
+
+core::Status startable(bool p_started, const SharedLevel *p_level) {
+	if (p_started) {
 		return core::make_error("ClientSession: already started (one connection per session)");
 	}
-	if (p_level == nullptr || p_level->static_world == nullptr) {
+	if (p_level != nullptr && p_level->static_world == nullptr) {
 		return core::make_error("ClientSession: no level");
 	}
+	return core::Status::success();
+}
+
+}
+
+core::Status ClientSession::start(const ClientSessionConfig &p_config, std::shared_ptr<const SharedLevel> p_level,
+		std::unique_ptr<ClientTransport> p_transport) {
+	std::lock_guard lock(impl_->lifecycle_mutex);
+	Impl &m = *impl_;
+	BF3_TRY(startable(m.thread.joinable() || m.started, p_level.get()));
+	if (p_transport == nullptr) {
+		return core::make_error("ClientSession: no transport");
+	}
+	m.loop.configure(p_config);
+	if (p_level != nullptr) {
+		BF3_TRY(m.loop.attach_level(std::move(p_level)));
+	}
+	m.launch(this, std::move(p_transport));
+	return core::Status::success();
+}
+
+core::Status ClientSession::start(const ClientSessionConfig &p_config, std::shared_ptr<const SharedLevel> p_level) {
+	std::lock_guard lock(impl_->lifecycle_mutex);
+	Impl &m = *impl_;
+	BF3_TRY(startable(m.thread.joinable() || m.started, p_level.get()));
 	if (p_config.port == 0) {
 		return core::make_error("ClientSession: no server port");
 	}
 
-	Impl &m = *impl_;
-	BF3_TRY(m.loop.init(p_config, p_level));
 	std::string err;
 	std::unique_ptr<net::Host> host = net::Host::create_client(net::kChannelCount, &err);
 	if (host == nullptr) {
@@ -126,13 +181,36 @@ core::Status ClientSession::start(const ClientSessionConfig &p_config, std::shar
 		return core::make_error("ClientSession: no connection to " + p_config.host + ":" + std::to_string(p_config.port) + " within " +
 				std::to_string(p_config.connect_timeout_ms) + " ms");
 	}
-	m.stop_requested = false;
-	m.loop.begin(std::make_unique<EnetTransport>(std::move(host), uint32_t(peer)), net::monotonic_ns);
-	m.running = true;
-	m.started = true;
-	m.thread = std::thread([this] { impl_->run(); });
-	g_registry.add(this);
+	m.loop.configure(p_config);
+	if (p_level != nullptr) {
+		if (const core::Status s = m.loop.attach_level(std::move(p_level)); !s.ok()) {
+			host->disconnect_all();
+			return s;
+		}
+	}
+	m.launch(this, std::make_unique<EnetTransport>(std::move(host), uint32_t(peer)));
 	return core::Status::success();
+}
+
+core::Status ClientSession::attach_level(std::shared_ptr<const SharedLevel> p_level) {
+	std::lock_guard lock(impl_->lifecycle_mutex);
+	Impl &m = *impl_;
+	if (!m.thread.joinable()) {
+		return core::make_error("ClientSession: not running");
+	}
+	if (p_level == nullptr || p_level->static_world == nullptr) {
+		return core::make_error("ClientSession: no level");
+	}
+	std::unique_lock attach(m.attach_mutex);
+	m.attach_pending = std::move(p_level);
+	m.attach_result.reset();
+	m.attach_requested.store(true, std::memory_order_release);
+	m.attach_done.wait(attach, [&] { return m.attach_result.has_value(); });
+	return *m.attach_result;
+}
+
+bool ClientSession::lobby_match(net::MatchInfo &r_match) const {
+	return impl_->loop.lobby_match(r_match);
 }
 
 void ClientSession::stop() {

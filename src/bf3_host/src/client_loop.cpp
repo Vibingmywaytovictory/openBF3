@@ -197,10 +197,18 @@ void ClientLoop::iterate() {
 	now = now_ns();
 	net::NetSim::Datagram d;
 	while (link.poll(now, d)) {
-		handle_datagram(d, now);
+		if (level != nullptr) {
+			handle_datagram(d, now);
+		} else {
+			hold(std::move(d), now);
+		}
 	}
 	link.send_requests(now);
 	link.release(now);
+	if (level == nullptr) {
+		publish_lobby();
+		return;
+	}
 	if (clock.running() && link.connected() && clock.due(now)) {
 		client_tick(now);
 	}
@@ -211,18 +219,77 @@ void ClientLoop::shutdown() {
 }
 
 core::Status ClientLoop::init(const ClientSessionConfig &p_config, std::shared_ptr<const SharedLevel> p_level) {
+	configure(p_config);
+	return attach_level(std::move(p_level));
+}
+
+void ClientLoop::configure(const ClientSessionConfig &p_config) {
 	config = p_config;
-	level = p_level;
 	config.prediction_ring = std::clamp<uint32_t>(p_config.prediction_ring, 16u, 4096u);
 	config.max_buffer_ticks = std::max(p_config.max_buffer_ticks, p_config.target_buffer_ticks);
+	link.configure(p_config.netsim);
+}
+
+core::Status ClientLoop::attach_level(std::shared_ptr<const SharedLevel> p_level) {
+	if (level != nullptr) {
+		return core::make_error("ClientSession: a level is already attached");
+	}
+	if (p_level == nullptr || p_level->static_world == nullptr) {
+		return core::make_error("ClientSession: no level");
+	}
 	core::Result<std::unique_ptr<sim::CollisionWorld>> created = sim::CollisionWorld::create(p_level->static_world);
 	if (!created) {
 		return core::error_at("ClientSession", created.error());
 	}
 	world = std::move(*created);
 	BF3_TRY(prediction.init(*world, p_level->motor));
-	link.configure(p_config.netsim);
+	level = std::move(p_level);
+	std::vector<HeldDatagram> replay;
+	replay.swap(held);
+	for (const HeldDatagram &h : replay) {
+		handle_datagram(h.datagram, h.at);
+	}
 	return core::Status::success();
+}
+
+void ClientLoop::hold(net::NetSim::Datagram &&p_d, uint64_t p_now) {
+	const std::optional<net::MessageType> type = net::peek_type(p_d.bytes);
+	if (type == net::MessageType::Kick || type == net::MessageType::Bye) {
+		handle_datagram(p_d, p_now);
+		return;
+	}
+	if (!p_d.reliable) {
+		return;
+	}
+	if (held.size() >= kMaxHeldDatagrams) {
+		link.drop("more than " + std::to_string(kMaxHeldDatagrams) + " reliable datagrams before a level was attached");
+		return;
+	}
+	if (type == net::MessageType::MatchInfo) {
+		if (core::Result<net::MatchInfo> m = net::decode_match_info(p_d.bytes)) {
+			std::lock_guard lock(lobby_mutex);
+			if (!lobby_info) {
+				lobby_info = *m;
+			}
+		}
+	}
+	held.push_back({ std::move(p_d), p_now });
+}
+
+void ClientLoop::publish_lobby() {
+	stats_.connected = link.connected();
+	link.stats(stats_);
+	std::lock_guard lock(frame_mutex);
+	shared_frame->stats = stats_;
+}
+
+bool ClientLoop::lobby_match(net::MatchInfo &r_match) const {
+	std::lock_guard lock(lobby_mutex);
+	if (!lobby_info) {
+		return false;
+	}
+	r_match = *lobby_info;
+	return true;
 }
 
 void ClientLoop::begin(std::unique_ptr<ClientTransport> p_transport, MonotonicClock p_clock) {

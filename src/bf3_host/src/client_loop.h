@@ -18,13 +18,19 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 namespace bf3::host {
 
 class ClientLoop {
 public:
+	static constexpr size_t kMaxHeldDatagrams = 16384;
+
 	core::Status init(const ClientSessionConfig &p_config, std::shared_ptr<const SharedLevel> p_level);
+	void configure(const ClientSessionConfig &p_config);
+	core::Status attach_level(std::shared_ptr<const SharedLevel> p_level);
+	bool lobby_match(net::MatchInfo &r_match) const;
 	void begin(std::unique_ptr<ClientTransport> p_transport, MonotonicClock p_clock);
 	void iterate();
 	void shutdown();
@@ -67,6 +73,14 @@ private:
 	net::Snapshot pending_snapshot;
 	std::vector<sim::SoldierState> pending_spawned;
 
+	struct HeldDatagram {
+		net::NetSim::Datagram datagram;
+		uint64_t at = 0;
+	};
+	std::vector<HeldDatagram> held;
+	mutable std::mutex lobby_mutex;
+	std::optional<net::MatchInfo> lobby_info;
+
 	RemoteTracks tracks{ config };
 	ClientEvents feed{ slot };
 	ClientMatch match{ feed, slot };
@@ -77,6 +91,8 @@ private:
 	bool accept_match(const net::MatchInfo &p_match, uint64_t p_now);
 	void gunplay_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d, uint64_t p_now);
 	void handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_now);
+	void hold(net::NetSim::Datagram &&p_d, uint64_t p_now);
+	void publish_lobby();
 	void client_tick(uint64_t p_now);
 	void publish(uint64_t p_now, const sim::PredictionEntry *p_made, const sim::Command &p_cmd);
 	void collect_stats();
