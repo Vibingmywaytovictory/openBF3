@@ -2091,6 +2091,44 @@ TEST_SUITE("host-session-unit") {
 		client.stop();
 		server.stop();
 	}
+
+	TEST_CASE(
+			"host.session: a client kicked in the lobby keeps the kick reason when the level it attaches is refused") {
+		auto pipe = std::make_shared<Pipe>();
+		ServerConfig sc;
+		sc.game = pipe_game();
+		sc.transport = std::make_shared<PipeServerPort>(pipe);
+		ServerHost server;
+		std::string err;
+		REQUIRE_MESSAGE(server.start(sc, &err), err);
+		pipe->connect(0);
+
+		ClientSession client;
+		ClientSessionConfig cc;
+		cc.name = "lobby";
+		const core::Status started = client.start(cc, nullptr, std::make_unique<PipeClientTransport>(pipe, 0));
+		REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
+		net::MatchInfo held;
+		REQUIRE(wait_until([&] { return client.lobby_match(held); }, 10s, 16ms));
+		{
+			std::lock_guard lock(pipe->mutex);
+			pipe->to_client[0].push_back(
+					{ 0, net::kChannelReliable, net::encode_kick({ "load timeout", net::KickReason::LoadTimeout }) });
+			pipe->to_client_ready.notify_all();
+		}
+		REQUIRE(wait_until([&] { return !client.stats().connected; }, 10s, 16ms));
+		CHECK(std::string(client.stats().last_error.data()) == "kicked: load timeout");
+
+		auto other = std::make_shared<SharedLevel>(*synthetic_level());
+		other->level = "Levels/Other/Other";
+		CHECK(client.attach_level(other).ok());
+		const ClientStats stats = client.stats();
+		CHECK_FALSE(stats.connected);
+		CHECK_FALSE(stats.refused);
+		CHECK(std::string(stats.last_error.data()) == "kicked: load timeout");
+		client.stop();
+		server.stop();
+	}
 }
 
 namespace {

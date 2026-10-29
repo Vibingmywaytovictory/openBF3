@@ -36,10 +36,13 @@ void ClientLink::drop(const std::string &p_reason) {
 }
 
 void ClientLink::refuse(const char *p_reason) {
+	if (!connected_) {
+		return;
+	}
 	refused_ = true;
 	fail(p_reason);
 
-	if (transport_ != nullptr && connected_) {
+	if (transport_ != nullptr) {
 		const std::vector<uint8_t> bye = net::encode_bye();
 		transport_->send(net::kChannelReliable, bye, net::Host::SendMode::Reliable);
 		transport_->flush();
