@@ -185,3 +185,8 @@ target_sources(bf3_host PRIVATE
     src/client_handshake.cpp
     src/client_handshake.h
 )
+
+target_sources(bf3_host PRIVATE
+    include/bf3/host/load_bots.h
+    src/load_bots.cpp
+)

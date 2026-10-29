@@ -2,6 +2,7 @@
 
 #include "bf3/core/util/elapsed.h"
 #include "bf3/host/firefight_brain.h"
+#include "bf3/host/load_bots.h"
 #include "bf3/host/target_bots.h"
 #include "bf3/host/tdm_brain.h"
 #include "bot_director.h"
@@ -36,32 +37,6 @@ namespace bf3::host {
 namespace {
 
 using bf3::core::ms_since;
-
-class Walker final : public CommandSource {
-public:
-	explicit Walker(uint32_t p_phase) :
-			phase_(p_phase) {}
-	sim::Command command(sim::Tick p_tick, const sim::SoldierState &p_state) override {
-		if (!started_) {
-			started_ = true;
-			base_yaw_ = p_state.yaw;
-			start_ = p_tick;
-		}
-		sim::Command c;
-		c.tick = p_tick;
-		c.move_forward = sim::kAxisMax;
-		const uint32_t leg = ((p_tick - start_) / (2u * sim::kSimHz) + phase_) & 3u;
-		c.yaw = uint16_t(base_yaw_ + leg * 16384u);
-		c.pose = sim::Pose::Stand;
-		return c;
-	}
-
-private:
-	uint32_t phase_ = 0;
-	bool started_ = false;
-	uint16_t base_yaw_ = 0;
-	sim::Tick start_ = 0;
-};
 
 }
 
@@ -357,7 +332,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	}
 	BF3_TRY(m.init_gameplay());
 	for (uint32_t i = 0; i < p_config.walkers; ++i) {
-		if (add_local_soldier(std::make_unique<Walker>(i), 2) < 0) {
+		if (add_local_soldier(std::make_unique<LegWalker>(i), 2) < 0) {
 			return core::make_error("GameServer: no slot for walker " + std::to_string(i));
 		}
 	}
