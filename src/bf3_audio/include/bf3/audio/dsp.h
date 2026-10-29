@@ -7,7 +7,7 @@ namespace bf3::audio {
 float db_to_gain(float p_db);
 float gain_to_db(float p_gain);
 
-enum class BiquadShape : uint8_t { LowPass, HighPass, BandPass, Peaking, Bypass };
+enum class BiquadShape : uint8_t { LowPass, HighPass, BandPass, Peaking, LowShelf, HighShelf, Bypass };
 
 struct BiquadCoefficients {
 	float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;

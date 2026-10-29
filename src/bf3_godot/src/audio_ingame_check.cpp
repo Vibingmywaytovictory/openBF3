@@ -689,6 +689,18 @@ void AudioIngameCheck::analyse_mix(Bf3GameAudio &r_audio) {
 	} else {
 		lines_.push_back("[audio-ingame] limiter: " + limit_text);
 	}
+	const uint64_t samples_out = blocks * ba::kBlockFrames * 2;
+	const std::string master_text = l.master_preset < 0
+			? std::string("no master mix (the buses are summed)")
+			: core::fmt("master preset %d at %u speakers: its compressor down to %.1f dB, %llu of %llu samples cut by "
+						"its output clip",
+					  l.master_preset, l.master_speakers, double(l.master_compressor_min_db),
+					  (unsigned long long)l.master_ceiling_clipped_samples, (unsigned long long)samples_out);
+	mix_row("the master mix",
+			l.master_preset >= 0 &&
+					double(l.master_ceiling_clipped_samples) <=
+							kAudioIngameLimitedBlocksShare * double(std::max<uint64_t>(samples_out, 1)),
+			master_text);
 	const double lufs = ba::integrated_loudness_lufs(mix_tap_->samples());
 	std::array<std::vector<double>, size_t(ba::SoundCategory::Count)> peaks;
 	for (const auto &[h, p] : sound_peaks_) {

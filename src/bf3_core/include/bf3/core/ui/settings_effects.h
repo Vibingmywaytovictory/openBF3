@@ -49,6 +49,8 @@ std::vector<std::string> action_inputs(const KeyBindingTable &p_table, const Act
 inline constexpr std::string_view kVolumeOption = "Volume";
 inline constexpr std::string_view kMusicVolumeOption = "MusicVolume";
 inline constexpr std::string_view kDialogueVolumeOption = "DialogueVolume";
+constexpr std::string_view kSoundSystemOption = "YourSoundSystem";
+constexpr std::string_view kStereoModeOption = "StereoMode";
 inline constexpr std::string_view kMouseSensitivityOption = "MouseSensitivity";
 inline constexpr std::string_view kFlipLookOption = "Scheme0FlipY";
 inline constexpr std::string_view kHoldToZoomOption = "HoldButtonToZoom";
@@ -72,6 +74,8 @@ struct VideoEffects {
 
 struct SettingsEffects {
 	std::array<float, kMasterBusCount> bus_gains{};
+	uint32_t sound_system = 0;
+	uint32_t stereo_mode = 0;
 	float look_scale = 1.0f;
 	float hip_fov_deg = 70.0f;
 	double safe_width = 0.95;

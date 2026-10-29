@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/audio/master_mix.h"
 #include "bf3/audio/patch_instance.h"
 #include "bf3/core/audio/hdr_setting.h"
 #include "bf3/core/audio/sound_scope.h"
@@ -37,6 +38,9 @@ struct MixerConfig {
 
 	uint32_t resume_margin = 8;
 
+	std::shared_ptr<const core::audio::MasterMixData> master;
+	float master_iir2_q = 0.70710678f;
+
 	float limit_ceiling = 0.966f;
 	uint32_t limit_attack_frames = 48;
 	float limit_release_ms = 80.0f;
@@ -56,6 +60,7 @@ enum class MixerCommandType : uint8_t {
 	SetListener,
 	SetBank,
 	SetBusGain,
+	SetMasterPreset,
 };
 
 struct MixerCommand {
@@ -186,6 +191,10 @@ struct MixerLevels {
 	float pre_limit_peak = 0.0f;
 	double pre_limit_energy = 0.0;
 	std::array<uint64_t, kLimitEdgesDb.size() + 1> limit_blocks{};
+	uint64_t master_ceiling_clipped_samples = 0;
+	float master_compressor_min_db = 0.0f;
+	int32_t master_preset = -1;
+	uint32_t master_speakers = 0;
 };
 const char *mixer_cut_kind_name(MixerCutKind p_kind);
 

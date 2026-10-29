@@ -137,6 +137,13 @@ struct MixerCore::Impl {
 	std::atomic<float> level_pre_peak{ 0.0f };
 	std::atomic<double> level_pre_energy{ 0.0 };
 	std::array<std::atomic<uint64_t>, kLimitEdgesDb.size() + 1> level_limit_blocks{};
+	std::atomic<uint64_t> level_master_clipped{ 0 };
+	std::atomic<float> level_master_compressor{ 0.0f };
+	MasterMixer master;
+	std::atomic<bool> master_stats_reset{ false };
+	std::atomic<int32_t> master_preset{ -1 };
+	std::atomic<uint32_t> master_speakers{ 0 };
+	void publish_master();
 	void meter_block(const BusBuffers &p_buses);
 	uint64_t block_first = 0;
 	void note_cut(MixerCutKind p_kind, const InstanceSlot &p_slot, float p_step);
@@ -170,6 +177,8 @@ struct MixerCore::Impl {
 		block.assign(size_t(kBlockFrames) * 2, 0.0f);
 		mixer_values.resize(64);
 		output_gain = db_to_gain(p_config.output_gain_db);
+		master.configure(p_config.master, p_config.mix_rate, p_config.master_iir2_q);
+		publish_master();
 		bus_gain.fill(1.0f);
 		for (std::atomic<float> &g : bus_gain_seen) {
 			g.store(1.0f, std::memory_order_relaxed);
@@ -458,6 +467,11 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 			case MixerCommandType::SetBank:
 				stats.acked_epoch.store(cmd.epoch, std::memory_order_release);
 				break;
+			case MixerCommandType::SetMasterPreset:
+				if (m.master.select(uint32_t(std::max(0.0f, cmd.value)), cmd.name_hash)) {
+					m.publish_master();
+				}
+				break;
 			case MixerCommandType::SetBusGain:
 				if (cmd.name_hash < m.bus_gain.size() && std::isfinite(cmd.value) && cmd.value >= 0.0f) {
 					m.bus_gain[cmd.name_hash] = cmd.value;
@@ -552,14 +566,24 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 		stats.peak_instances.store(active, std::memory_order_relaxed);
 	}
 
-	for (uint32_t i = 0; i < kBlockFrames; ++i) {
-		float l = 0.0f, r = 0.0f;
-		for (size_t b = 0; b < size_t(core::audio::MasterBus::Unknown); ++b) {
-			l += m.buses.channels[b][0][i] * m.bus_gain[b];
-			r += m.buses.channels[b][1][i] * m.bus_gain[b];
+	if (m.master_stats_reset.exchange(false, std::memory_order_relaxed)) {
+		m.master.reset_stats();
+	}
+	if (m.master.active()) {
+		m.master.process(m.buses, m.bus_gain.data(), m.block.data(), kBlockFrames);
+		for (float &x : m.block) {
+			x *= m.output_gain;
 		}
-		m.block[size_t(i) * 2] = l * m.output_gain;
-		m.block[size_t(i) * 2 + 1] = r * m.output_gain;
+	} else {
+		for (uint32_t i = 0; i < kBlockFrames; ++i) {
+			float l = 0.0f, r = 0.0f;
+			for (size_t b = 0; b < size_t(core::audio::MasterBus::Unknown); ++b) {
+				l += m.buses.channels[b][0][i] * m.bus_gain[b];
+				r += m.buses.channels[b][1][i] * m.bus_gain[b];
+			}
+			m.block[size_t(i) * 2] = l * m.output_gain;
+			m.block[size_t(i) * 2 + 1] = r * m.output_gain;
+		}
 	}
 	if (m.metering.load(std::memory_order_relaxed)) {
 		m.meter_block(m.buses);
@@ -1045,10 +1069,27 @@ void MixerCore::Impl::meter_block(const BusBuffers &p_buses) {
 		level_pre_peak.store(peak, std::memory_order_relaxed);
 	}
 	level_pre_energy.store(level_pre_energy.load(std::memory_order_relaxed) + energy, std::memory_order_relaxed);
+	level_master_clipped.store(master.stats().ceiling_clipped_samples, std::memory_order_relaxed);
+	level_master_compressor.store(master.stats().compressor_min_db, std::memory_order_relaxed);
 	level_blocks.fetch_add(1, std::memory_order_release);
 }
 
+void MixerCore::Impl::publish_master() {
+	const core::audio::MasterMixPlan *p = master.plan();
+	int32_t index = -1;
+	if (p != nullptr && config.master) {
+		for (const std::vector<core::audio::MasterMixPlan> &plans : config.master->plans) {
+			for (size_t k = 0; k < plans.size(); ++k) {
+				index = &plans[k] == p ? int32_t(k) : index;
+			}
+		}
+	}
+	master_preset.store(index, std::memory_order_relaxed);
+	master_speakers.store(p != nullptr ? p->speakers : 0u, std::memory_order_relaxed);
+}
+
 void MixerCore::meter(bool p_on) {
+	impl_->master_stats_reset.store(p_on, std::memory_order_relaxed);
 	impl_->metering.store(p_on, std::memory_order_relaxed);
 }
 
@@ -1068,6 +1109,10 @@ MixerLevels MixerCore::levels() const {
 		limited += l.limit_blocks[k];
 	}
 	l.limit_blocks[0] = l.blocks > limited ? l.blocks - limited : 0;
+	l.master_ceiling_clipped_samples = m.level_master_clipped.load(std::memory_order_relaxed);
+	l.master_compressor_min_db = m.level_master_compressor.load(std::memory_order_relaxed);
+	l.master_preset = m.master_preset.load(std::memory_order_relaxed);
+	l.master_speakers = m.master_speakers.load(std::memory_order_relaxed);
 	return l;
 }
 

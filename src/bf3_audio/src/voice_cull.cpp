@@ -1,5 +1,8 @@
 #include "bf3/audio/voice_cull.h"
 
+#include "bf3/core/audio/master_patch.h"
+#include "bf3/core/ui/options.h"
+
 #include "bf3/core/audio/hdr_setting.h"
 
 #include <algorithm>
@@ -226,6 +229,22 @@ MixerA3Assets load_mixer_a3(const core::EbxResolver &p_db, std::span<const std::
 	} else {
 		out.notes += "A3: no HDR window (fixed window kept): " + hdr.error().message + "\n";
 	}
+	const core::Result<float> low_pass = core::audio::read_sound_state_low_pass(p_db, "Default");
+	const core::Result<core::ui::ProfileOptions> options = core::ui::read_profile_options(p_db);
+	const core::ui::ProfileOption *system = options ? options->find("YourSoundSystem") : nullptr;
+	const core::ui::ProfileOption *stereo = options ? options->find("StereoMode") : nullptr;
+	if (!low_pass || system == nullptr || stereo == nullptr) {
+		out.notes += "A3: no master mix: " +
+				(low_pass ? std::string("the YourSoundSystem or StereoMode profile option is missing")
+						  : low_pass.error().message) +
+				"\n";
+	} else if (core::Result<core::audio::MasterMixData> master =
+					   core::audio::read_master_mix(p_db, *low_pass, uint32_t(std::max(0.0, system->default_number())),
+							   uint32_t(std::max(0.0, stereo->default_number())))) {
+		out.master = std::make_shared<const core::audio::MasterMixData>(std::move(*master));
+	} else {
+		out.notes += "A3: no master mix: " + master.error().message + "\n";
+	}
 	core::Result<core::audio::ScopeTable> scopes = core::audio::read_scopes(p_db);
 	if (scopes) {
 		std::vector<core::Guid> patches;
@@ -253,6 +272,7 @@ MixerA3Assets load_mixer_a3(const core::EbxResolver &p_db, std::span<const std::
 void apply_mixer_a3(const MixerA3Assets &p_assets, MixerConfig &r_config) {
 	r_config.hdr = p_assets.hdr;
 	r_config.scopes = p_assets.scopes;
+	r_config.master = p_assets.master;
 }
 
 }

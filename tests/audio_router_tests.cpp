@@ -1757,6 +1757,7 @@ void use_game_mixer(GameRig &r_rig, ba::MixTap *p_tap, const ba::AudioTuning *p_
 	const ba::MixerA3Assets a3 = ba::load_mixer_a3(fx.metro->db(), programs);
 	REQUIRE_MESSAGE(a3.hdr.has_value(), a3.notes);
 	REQUIRE_MESSAGE(a3.scopes != nullptr, a3.notes);
+	REQUIRE_MESSAGE(a3.master != nullptr, a3.notes);
 	MESSAGE("A3: " << a3.scopes->scopes.size() << " scopes, " << a3.scoped_patches << " of " << programs.size()
 				   << " programs scoped");
 	r_rig.router.reset();

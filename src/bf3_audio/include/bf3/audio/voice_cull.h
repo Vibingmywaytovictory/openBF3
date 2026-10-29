@@ -49,6 +49,7 @@ void cull_voices(std::span<const CullVoice> p_voices, const core::audio::ScopeTa
 struct MixerA3Assets {
 	std::optional<core::audio::HdrSetting> hdr;
 	std::shared_ptr<const core::audio::ScopeTable> scopes;
+	std::shared_ptr<const core::audio::MasterMixData> master;
 	size_t scoped_patches = 0;
 	size_t skipped_patches = 0;
 	std::string notes;

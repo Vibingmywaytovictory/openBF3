@@ -41,7 +41,8 @@ BiquadCoefficients BiquadCoefficients::design(BiquadShape p_shape, float p_rate,
 	if (p_shape == BiquadShape::HighPass && !(p_frequency > 0.0f)) {
 		return c;
 	}
-	if (p_shape == BiquadShape::Peaking && p_gain_db == 0.0f) {
+	if ((p_shape == BiquadShape::Peaking || p_shape == BiquadShape::LowShelf || p_shape == BiquadShape::HighShelf) &&
+			p_gain_db == 0.0f) {
 		return c;
 	}
 	const float f = std::clamp(std::isfinite(p_frequency) ? p_frequency : 10.0f, 10.0f, 0.45f * p_rate);
@@ -83,6 +84,19 @@ BiquadCoefficients BiquadCoefficients::design(BiquadShape p_shape, float p_rate,
 			a0 = 1.0 + alpha / a;
 			a1 = -2.0 * cw;
 			a2 = 1.0 - alpha / a;
+			break;
+		}
+		case BiquadShape::LowShelf:
+		case BiquadShape::HighShelf: {
+			const double a = std::pow(10.0, double(std::clamp(p_gain_db, -96.0f, 48.0f)) / 40.0);
+			const double sa = 2.0 * std::sqrt(a) * std::sin(w0) / 2.0 * std::sqrt(2.0);
+			const double s = p_shape == BiquadShape::LowShelf ? 1.0 : -1.0;
+			b0 = a * ((a + 1.0) - s * (a - 1.0) * cw + sa);
+			b1 = s * 2.0 * a * ((a - 1.0) - s * (a + 1.0) * cw);
+			b2 = a * ((a + 1.0) - s * (a - 1.0) * cw - sa);
+			a0 = (a + 1.0) + s * (a - 1.0) * cw + sa;
+			a1 = -s * 2.0 * ((a - 1.0) + s * (a + 1.0) * cw);
+			a2 = (a + 1.0) + s * (a - 1.0) * cw - sa;
 			break;
 		}
 		case BiquadShape::Bypass:

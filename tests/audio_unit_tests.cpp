@@ -2,9 +2,11 @@
 
 #include "bf3/audio/audio_analysis.h"
 #include "bf3/audio/dsp.h"
+#include "bf3/audio/master_mix.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/patch_instance.h"
 #include "bf3/audio/weapon_audio.h"
+#include "bf3/core/audio/master_patch.h"
 #include "bf3/core/audio/sound_ports.h"
 #include "bf3/core/audio/sound_program.h"
 #include "bf3/core/audio/sound_stream.h"
@@ -1884,6 +1886,90 @@ TEST_SUITE("audio-mixer") {
 		CHECK(peak > 0.1f);
 		CHECK(std::all_of(muted.begin(), muted.end(), [](float v) { return v == 0.0f; }));
 		CHECK(other == full);
+	}
+
+	TEST_CASE("a master mix replaces the bus sum, and SetMasterPreset picks its preset at a block edge") {
+		auto data = std::make_shared<MasterMixData>();
+		data->presets = { "loud", "quiet" };
+		for (uint32_t stereo = 0; stereo < 2; ++stereo) {
+			for (const float gain : { 0.5f, 0.25f }) {
+				MasterMixPlan plan;
+				plan.speakers = 2;
+				plan.voices.resize(2);
+				plan.voices[0].stage = -2;
+				plan.voices[0].bus = MasterBus::GameMixMain;
+				plan.voices[0].channels = 2;
+				MasterStep pass;
+				MasterStep g;
+				g.kind = MasterStepKind::Gain;
+				g.values[0] = gain;
+				MasterStep send;
+				send.kind = MasterStepKind::Send;
+				send.values[0] = 1.0f;
+				send.to_voice = 1;
+				send.map.fill(-1);
+				send.map[size_t(SpeakerRole::L)] = int8_t(SpeakerRole::L);
+				send.map[size_t(SpeakerRole::R)] = int8_t(SpeakerRole::R);
+				plan.voices[0].steps = { pass, g, send };
+				plan.voices[1].stage = -1;
+				plan.voices[1].channels = 2;
+				plan.voices[1].steps = { pass };
+				plan.order = { 0, 1 };
+				plan.output_voice = 1;
+				data->plans[stereo].push_back(plan);
+			}
+		}
+		const TestWave w = make_wave(1, 48000, -1, -1, 48000, true);
+		const std::shared_ptr<const SoundProgram> prog = one_shot_program(w);
+		const auto render = [&](std::shared_ptr<const MasterMixData> p_data, int p_preset, uint32_t &r_seen) {
+			ba::MixerConfig cfg;
+			cfg.master = p_data;
+			ba::MixerCore mixer(cfg);
+			if (p_preset >= 0) {
+				ba::MixerCommand c;
+				c.type = ba::MixerCommandType::SetMasterPreset;
+				c.name_hash = uint32_t(p_preset);
+				c.value = 1.0f;
+				REQUIRE(mixer.push(c));
+			}
+			auto inst = instance(prog, w.bank);
+			ba::MixerCommand start;
+			start.type = ba::MixerCommandType::Start;
+			start.handle = mixer.next_handle();
+			start.instance = inst.get();
+			start.at_frame = 600;
+			REQUIRE(mixer.push(start));
+			(void)inst.release();
+			ba::MixerCommand ev;
+			ev.type = ba::MixerCommandType::PostEvent;
+			ev.handle = start.handle;
+			ev.name_hash = 1;
+			ev.at_frame = 700;
+			REQUIRE(mixer.push(ev));
+			mixer.meter(true);
+			std::vector<float> all, buf(2 * 512);
+			while (all.size() < 2 * 4096) {
+				mixer.mix(buf.data(), 512);
+				all.insert(all.end(), buf.begin(), buf.end());
+			}
+			r_seen = uint32_t(mixer.levels().master_preset);
+			return all;
+		};
+		uint32_t seen = 0;
+		const std::vector<float> plain = render(nullptr, -1, seen);
+		CHECK(seen == uint32_t(-1));
+		const std::vector<float> loud = render(data, -1, seen);
+		CHECK(seen == 0);
+		const std::vector<float> quiet = render(data, 1, seen);
+		CHECK(seen == 1);
+		REQUIRE(plain.size() == loud.size());
+		float peak = 0.0f;
+		for (size_t i = 0; i < plain.size(); ++i) {
+			peak = std::max(peak, std::fabs(plain[i]));
+			CHECK(loud[i] == doctest::Approx(plain[i] * 0.5f).epsilon(1e-5));
+			CHECK(quiet[i] == doctest::Approx(plain[i] * 0.25f).epsilon(1e-5));
+		}
+		CHECK(peak > 0.1f);
 	}
 
 	TEST_CASE("a Start refused with every instance slot full yields one finished feedback") {

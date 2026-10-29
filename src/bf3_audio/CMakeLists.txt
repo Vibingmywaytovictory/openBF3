@@ -4,6 +4,7 @@ add_library(bf3_audio STATIC
     src/audio_config.cpp
     src/audio_load.cpp
     src/dsp.cpp
+    src/master_mix.cpp
     src/mixer_core.cpp
     src/patch_instance.cpp
     src/patch_nodes.cpp
@@ -16,6 +17,7 @@ add_library(bf3_audio STATIC
     include/bf3/audio/audio_check.h
     include/bf3/audio/audio_load.h
     include/bf3/audio/dsp.h
+    include/bf3/audio/master_mix.h
     include/bf3/audio/mixer_core.h
     include/bf3/audio/patch_instance.h
     include/bf3/audio/wav_io.h

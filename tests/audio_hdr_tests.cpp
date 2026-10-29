@@ -3,10 +3,12 @@
 #include "bf3/audio/audio_load.h"
 #include "bf3/audio/dsp.h"
 #include "bf3/audio/hdr_window.h"
+#include "bf3/audio/master_mix.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/patch_instance.h"
 #include "bf3/audio/voice_cull.h"
 #include "bf3/core/audio/hdr_setting.h"
+#include "bf3/core/audio/master_patch.h"
 #include "bf3/core/audio/sound_ports.h"
 #include "bf3/core/audio/sound_program.h"
 #include "bf3/core/audio/sound_scope.h"
@@ -22,6 +24,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -911,6 +914,157 @@ TEST_SUITE("audio-hdr-install") {
 
 		gameplay::WorkBudget tiny(3);
 		CHECK_FALSE(read_hdr_setting(*f->subway, &tiny).ok());
+		const SnapshotDiff diff = diff_snapshots(*f->before, f->reader.snapshot());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+	}
+
+	TEST_CASE("the retail master mix (sound/master): presets, the HiFi chain's numbers and its output on tones") {
+		InstallFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		const Result<float> low_pass = read_sound_state_low_pass(*f->subway, "Default");
+		REQUIRE(low_pass.ok());
+		CHECK(*low_pass == 24000.0f);
+		const Result<MasterMixData> m = read_master_mix(*f->subway, *low_pass, 2, 0);
+		REQUIRE_MESSAGE(m.ok(), (m.ok() ? std::string() : m.error().message));
+		CHECK(m->presets ==
+				std::vector<std::string>{ "Wartapes", "TV", "HiFi (default)", "Home Cinema (flat)", "Headphones" });
+		CHECK(m->default_preset == 2);
+		CHECK(m->default_stereo_mode == 0);
+		const MasterMixPlan *surround = m->plan(0, 2);
+		const MasterMixPlan *stereo = m->plan(1, 2);
+		REQUIRE(surround != nullptr);
+		REQUIRE(stereo != nullptr);
+		CHECK(surround->speakers == 6);
+		CHECK(stereo->speakers == 2);
+		const auto steps_of = [](const MasterMixPlan &p_plan, MasterStepKind p_kind) {
+			std::vector<const MasterStep *> out;
+			for (const MasterVoice &v : p_plan.voices) {
+				for (const MasterStep &s : v.steps) {
+					if (s.kind == p_kind) {
+						out.push_back(&s);
+					}
+				}
+			}
+			return out;
+		};
+		const std::vector<const MasterStep *> comps = steps_of(*stereo, MasterStepKind::Compressor);
+		REQUIRE(comps.size() == 1);
+		CHECK(comps[0]->values[0] == doctest::Approx(-12.259f));
+		CHECK(comps[0]->values[1] == doctest::Approx(11.875f));
+		CHECK(comps[0]->values[2] == doctest::Approx(30.0f));
+		CHECK(comps[0]->values[3] == doctest::Approx(50.0f));
+		const std::vector<const MasterStep *> clips = steps_of(*stereo, MasterStepKind::Clip);
+		REQUIRE(clips.size() == 2);
+		std::vector<float> clip_levels{ clips[0]->values[0], clips[1]->values[0] };
+		std::sort(clip_levels.begin(), clip_levels.end());
+		CHECK(clip_levels[0] == doctest::Approx(0.25f));
+		CHECK(clip_levels[1] == doctest::Approx(2.0f));
+		std::vector<float> gains;
+		for (const MasterStep *s : steps_of(*stereo, MasterStepKind::Gain)) {
+			gains.push_back(s->values[0]);
+		}
+		const auto has_gain = [&](float p_gain) {
+			return std::any_of(gains.begin(), gains.end(), [&](float g) { return std::fabs(g - p_gain) < 1.0e-4f; });
+		};
+		CHECK(has_gain(std::pow(10.0f, -2.0f / 20.0f)));
+		CHECK(has_gain(std::pow(10.0f, -4.0f / 20.0f)));
+		CHECK(has_gain(std::pow(10.0f, -10.0f / 20.0f)));
+		CHECK(has_gain(0.6f));
+		CHECK(std::none_of(gains.begin(), gains.end(), [](float g) { return std::fabs(g - 0.55f) < 1.0e-4f; }));
+		const std::vector<const MasterStep *> shelves = steps_of(*stereo, MasterStepKind::HighShelf);
+		CHECK(std::any_of(shelves.begin(), shelves.end(), [](const MasterStep *s) {
+			return s->values[0] == 1200.0f && std::fabs(s->values[1] - std::pow(10.0f, 1.5f / 20.0f)) < 1.0e-4f;
+		}));
+
+		const auto render = [&](uint32_t p_stereo, MasterBus p_bus, float p_amp, float p_hz,
+									std::vector<float> &r_out) {
+			auto data = std::make_shared<const MasterMixData>(*m);
+			ba::MasterMixer mixer;
+			mixer.configure(data, 48000, 0.70710678f);
+			REQUIRE(mixer.select(p_stereo, 2));
+			std::vector<float> storage(size_t(MasterBus::Unknown) * ba::kMaxBusChannels * 512, 0.0f);
+			ba::BusBuffers buses;
+			for (size_t b = 0; b < size_t(MasterBus::Unknown); ++b) {
+				for (size_t c = 0; c < ba::kMaxBusChannels; ++c) {
+					buses.channels[b][c] = storage.data() + (b * ba::kMaxBusChannels + c) * 512;
+				}
+			}
+			buses.frames = 512;
+			const std::array<float, size_t(MasterBus::Unknown)> gain = [] {
+				std::array<float, size_t(MasterBus::Unknown)> g{};
+				g.fill(1.0f);
+				return g;
+			}();
+			r_out.clear();
+			std::vector<float> block(1024);
+			for (uint32_t k = 0; k < 200; ++k) {
+				for (uint32_t i = 0; i < 512; ++i) {
+					const float x = p_amp *
+							float(std::sin(
+									2.0 * 3.14159265358979323846 * double(p_hz) * double(k * 512 + i) / 48000.0));
+					buses.channels[size_t(p_bus)][0][i] = x;
+					buses.channels[size_t(p_bus)][1][i] = x;
+				}
+				mixer.process(buses, gain.data(), block.data(), 512);
+				r_out.insert(r_out.end(), block.begin(), block.end());
+			}
+			return mixer.stats();
+		};
+		const auto rms_tail = [](const std::vector<float> &p_x) {
+			double e = 0.0;
+			const size_t from = p_x.size() / 2;
+			for (size_t i = from; i < p_x.size(); ++i) {
+				e += double(p_x[i]) * double(p_x[i]);
+			}
+			return std::sqrt(e / double(p_x.size() - from));
+		};
+		const auto response = [](const ba::BiquadCoefficients &p_c, double p_hz) {
+			const std::complex<double> z1 = std::polar(1.0, -2.0 * 3.14159265358979323846 * p_hz / 48000.0);
+			return (double(p_c.b0) + double(p_c.b1) * z1 + double(p_c.b2) * z1 * z1) /
+					(1.0 + double(p_c.a1) * z1 + double(p_c.a2) * z1 * z1);
+		};
+		const double hz = 1000.0;
+		const std::complex<double> dist =
+				response(ba::BiquadCoefficients::design(ba::BiquadShape::LowPass, 48000.0f, 4000.0f, 0.70710678f, 0.0f),
+						hz) *
+				response(ba::BiquadCoefficients::design(ba::BiquadShape::HighPass, 48000.0f, 50.0f, 0.70710678f, 0.0f),
+						hz) *
+				response(ba::BiquadCoefficients::design(
+								 ba::BiquadShape::Peaking, 48000.0f, 1400.0f, 0.5f, ba::gain_to_db(2.0f)),
+						hz) *
+				std::pow(10.0, -10.0 / 20.0);
+		const std::complex<double> shelf = response(
+				ba::BiquadCoefficients::design(ba::BiquadShape::HighShelf, 48000.0f, 1200.0f, 0.70710678f, 1.5f), hz);
+		const double expected =
+				std::abs((2.0 + dist) * shelf) * std::pow(10.0, -2.0 / 20.0) * std::pow(10.0, -4.0 / 20.0) * 0.6;
+		std::vector<float> out;
+		const float quiet = 0.01f;
+		const ba::MasterMixStats q = render(1, MasterBus::GameMixMain, quiet, float(hz), out);
+		MESSAGE("HiFi stereo: a -40 dBFS 1 kHz tone comes out at "
+				<< 20.0 * std::log10(rms_tail(out) / (quiet / std::sqrt(2.0))) << " dB, the data's chain predicts "
+				<< 20.0 * std::log10(expected) << " dB");
+		CHECK(rms_tail(out) / (double(quiet) / std::sqrt(2.0)) == doctest::Approx(expected).epsilon(0.01));
+		CHECK(q.compressor_min_db > -0.01f);
+		CHECK(q.ceiling_clipped_samples == 0);
+		CHECK(q.other_clipped_samples == 0);
+		const ba::MasterMixStats loud = render(1, MasterBus::GameMixMain, 4.0f, 200.0f, out);
+		float peak = 0.0f;
+		for (const float x : out) {
+			peak = std::max(peak, std::fabs(x));
+		}
+		MESSAGE("HiFi stereo: a +12 dBFS tone peaks at " << peak << ", compressor down to " << loud.compressor_min_db
+														 << " dB");
+		CHECK(peak <= 2.0f * std::pow(10.0f, -4.0f / 20.0f) * 0.6f * 1.0001f);
+		CHECK(peak >= 2.0f * std::pow(10.0f, -4.0f / 20.0f) * 0.6f * 0.99f);
+		CHECK(loud.ceiling_clipped_samples > 0);
+		CHECK(loud.other_clipped_samples > 0);
+		CHECK(loud.compressor_min_db < -15.0f);
+		render(1, MasterBus::Lfe, 0.5f, 60.0f, out);
+		CHECK(std::all_of(out.begin(), out.end(), [](float x) { return x == 0.0f; }));
+		render(0, MasterBus::GameMixMain, quiet, float(hz), out);
+		CHECK(rms_tail(out) / (double(quiet) / std::sqrt(2.0)) == doctest::Approx(expected * 0.55 / 0.6).epsilon(0.01));
 		const SnapshotDiff diff = diff_snapshots(*f->before, f->reader.snapshot());
 		CHECK_MESSAGE(diff.clean(), diff.summary());
 	}

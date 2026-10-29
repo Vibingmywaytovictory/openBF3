@@ -133,6 +133,13 @@ bool GameSettings::apply_audio(audio::MixerCore &r_mixer) {
 			return false;
 		}
 	}
+	audio::MixerCommand preset;
+	preset.type = audio::MixerCommandType::SetMasterPreset;
+	preset.name_hash = e.sound_system;
+	preset.value = float(e.stereo_mode);
+	if (!r_mixer.push(preset)) {
+		return false;
+	}
 	audio_mixer_ = &r_mixer;
 	audio_revision_ = store().revision();
 	return true;

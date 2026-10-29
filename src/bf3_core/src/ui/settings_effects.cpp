@@ -49,6 +49,8 @@ SettingsEffects settings_effects(const SettingsStore &p_store) {
 	for (const audio::MasterBus b : { audio::MasterBus::Dialog, audio::MasterBus::NarrVoice }) {
 		e.bus_gains[size_t(b)] = master * dialogue;
 	}
+	e.sound_system = uint32_t(std::clamp(std::lround(p_store.value(kSoundSystemOption)), 0L, 255L));
+	e.stereo_mode = p_store.value(kStereoModeOption) >= 0.5 ? 1u : 0u;
 	const double sensitivity_default = p_store.default_value(kMouseSensitivityOption);
 	e.look_scale = sensitivity_default > 0.0
 			? float(std::max(0.0, p_store.value(kMouseSensitivityOption)) / sensitivity_default)

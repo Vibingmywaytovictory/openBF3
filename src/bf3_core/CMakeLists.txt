@@ -363,11 +363,13 @@ target_sources(bf3_core PRIVATE
 
 target_sources(bf3_core PRIVATE
     include/bf3/core/audio/hdr_setting.h
+    include/bf3/core/audio/master_patch.h
     include/bf3/core/audio/sound_scope.h
 )
 
 target_sources(bf3_core PRIVATE
     src/audio/hdr_setting.cpp
+    src/audio/master_patch.cpp
     src/audio/sound_scope.cpp
 )
 
