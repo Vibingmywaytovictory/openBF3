@@ -1806,6 +1806,7 @@ TEST_SUITE("host-tdm-server") {
 		for (size_t i = 0; i < bots.size(); ++i) {
 			bot_teams[i] = o->rules().team_of(uint8_t(bots[i]));
 		}
+		const std::vector<net::PlayerRow> round1(o->rules().players().begin(), o->rules().players().end());
 		REQUIRE(o->until(
 				[&] {
 					const net::MatchPhase ph = o->rules().phase();
@@ -1814,6 +1815,18 @@ TEST_SUITE("host-tdm-server") {
 				6000));
 		const sim::Tick restart = o->now();
 		o->ticks(30);
+		size_t kept = 0;
+		for (const net::PlayerRow &was : round1) {
+			const net::PlayerRow *now = o->row(was.slot);
+			REQUIRE(now != nullptr);
+			CAPTURE(int(was.slot));
+			CHECK(was.squad != 0);
+			CHECK(now->team == uint8_t(3 - was.team));
+			CHECK(now->squad == was.squad);
+			CHECK(now->leader == was.leader);
+			kept += now->squad == was.squad && now->leader == was.leader && was.squad != 0 ? 1u : 0u;
+		}
+		std::printf("restart: %zu of %zu players keep their squad and lead on the rotated team\n", kept, round1.size());
 		REQUIRE(p.match_state.has_value());
 		const bool old_unspawned = host::own_unspawned_at(true, *p.match_state, first.state.tick, o->now());
 		std::printf("restart: at tick %u, unspawn_tick %u, the peer's old life (spawned at %u on team %u) %s, the "
