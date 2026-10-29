@@ -94,7 +94,7 @@ static_assert(gs::m2a_case_track(gs::M2aCase::Audio) == gs::M2aTrack::Au3 && gs:
 static_assert(uint8_t(host::PresentTimeline::Predicted) == 0 && uint8_t(host::PresentTimeline::Render) == 1 &&
 		uint8_t(host::PresentTimeline::Immediate) == 2);
 
-static_assert(audio::kMaxWeaponVoices == 128 && audio::kMaxOneShotVoices == 128 && audio::kGameMixerInstances == 256);
+static_assert(audio::GameMixerSizes{} == audio::GameMixerSizes{ 128, 128, 128, 256 });
 static_assert(fx::kMaxDecals == 256 && fx::kDecalFadeSeconds == 30.0f && fx::kTracerConvergeM == 30.0f);
 static_assert(audio::kGameCheckDistances == std::array<float, 6>{ 5.0f, 20.0f, 100.0f, 150.0f, 280.0f, 320.0f });
 static_assert(anim::kMaxCrowdWeapons == 254 && anim::kCrowdLanesListenMax == 4);
@@ -196,7 +196,7 @@ TEST_SUITE("m2a-contract3") {
 		CHECK(team.weapons.empty());
 
 		const audio::WeaponAudioConfig wc;
-		CHECK(wc.max_weapon_voices == audio::kMaxWeaponVoices);
+		CHECK(wc.max_weapon_voices == audio::GameMixerSizes{}.weapon_voices);
 		const audio::SimMixerClockConfig cc;
 		CHECK(cc.rate == audio::kMixRate);
 		CHECK(cc.bias_frames == 0);

@@ -14,8 +14,6 @@ namespace {
 
 constexpr size_t kMaxImpactPatches = 4096;
 
-constexpr size_t kMaxEffectSounds = kMaxOneShotVoices * 2;
-
 constexpr float kMaxImpactDistanceM = 400.0f;
 
 using bf3::core::finite;
@@ -130,7 +128,7 @@ struct ImpactAudio::Impl {
 	Impl(MixerCore &r_mixer, std::shared_ptr<const ImpactSoundCache> p_cache, std::shared_ptr<const ca::WaveBank> p_bank, const AudioTuning &p_tuning,
 			OneShotPool &r_pool) :
 			mixer(r_mixer), cache(std::move(p_cache)), bank(std::move(p_bank)), tuning(p_tuning), pool(r_pool) {
-		effect_sounds.reserve(kMaxEffectSounds);
+		effect_sounds.reserve(max_effect_sounds());
 	}
 
 	bool start(const std::shared_ptr<const ca::SoundProgram> &p_program, uint64_t p_seed, const Vec3 &p_position, uint64_t p_frame) {
@@ -142,6 +140,8 @@ struct ImpactAudio::Impl {
 		}
 		return true;
 	}
+
+	size_t max_effect_sounds() const { return size_t(pool.limit()) * 2; }
 
 	void prune() {
 		effect_sounds.erase(std::remove_if(effect_sounds.begin(), effect_sounds.end(), [&](const EffectSound &e) { return !pool.contains(e.handle); }),
@@ -202,7 +202,7 @@ void ImpactAudio::on_effect_sound(const EffectSoundRequest &p_request, SimMixerC
 		return;
 	}
 	++m.stats.effect_sounds;
-	if (m.effect_sounds.size() >= kMaxEffectSounds) {
+	if (m.effect_sounds.size() >= m.max_effect_sounds()) {
 		m.effect_sounds.erase(m.effect_sounds.begin());
 	}
 	m.effect_sounds.push_back(Impl::EffectSound{ p_request.effect, p_request.component, m.pool.last_handle() });

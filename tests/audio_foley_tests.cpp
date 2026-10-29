@@ -148,15 +148,12 @@ struct Rig {
 	host::OwnWeaponsPresenter own_weapons;
 
 	explicit Rig(const FoleyFixture &p_f) {
-		ba::MixerConfig mc;
-		mc.max_instances = ba::kGameMixerInstances;
-		mc.command_capacity = 8192;
-		mc.schedule_lead_blocks = uint32_t(std::max(1.0f, p_f.tuning.schedule_lead_blocks));
-		mc.max_voices = ba::kGameMixerVoices;
+		const ba::GameMixerSizes sizes = ba::game_mixer_sizes(p_f.tuning);
+		ba::MixerConfig mc = ba::game_mixer_config(p_f.tuning, sizes, 8192);
 		ba::apply_mixer_a3(p_f.a3, mc);
 		mixer = std::make_unique<ba::MixerCore>(mc);
 		mixer->set_tap(&tap);
-		pool = std::make_unique<ba::OneShotPool>(ba::kMaxOneShotVoices);
+		pool = std::make_unique<ba::OneShotPool>(sizes.one_shots);
 		ba::SimMixerClockConfig cc;
 		cc.bias_frames = int64_t(mc.schedule_lead_blocks) * int64_t(ba::kBlockFrames) + 2 * int64_t(ba::kBlockFrames) + 800;
 		clock = std::make_unique<ba::SimMixerClock>(*mixer, cc);

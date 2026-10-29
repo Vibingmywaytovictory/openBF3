@@ -394,10 +394,10 @@ struct Rig {
 	uint64_t clock_at_events = 0;
 	std::vector<float> buffer = std::vector<float>(size_t(kFramesPerTick) * 2);
 
-	explicit Rig(ba::WeaponAudioConfig p_config = {}, uint32_t p_pool = ba::kMaxOneShotVoices) {
+	explicit Rig(ba::WeaponAudioConfig p_config = {}, uint32_t p_pool = ba::GameMixerSizes{}.one_shots) {
 		recorder.weapon = weapon;
 		ba::MixerConfig mc;
-		mc.max_instances = ba::kGameMixerInstances;
+		mc.max_instances = ba::GameMixerSizes{}.instances;
 		mc.command_capacity = 8192;
 		mixer = std::make_unique<ba::MixerCore>(mc);
 		mixer->set_tap(&capture);
@@ -1539,13 +1539,11 @@ struct GameRig {
 
 	GameRig(const GameFixture &p_fx, ba::MixTap *p_tap) :
 			fx(p_fx) {
-		ba::MixerConfig mc;
-		mc.max_instances = ba::kGameMixerInstances;
-		mc.command_capacity = 8192;
-		mc.schedule_lead_blocks = uint32_t(std::max(1.0f, p_fx.tuning.schedule_lead_blocks));
+		const ba::GameMixerSizes sizes = ba::game_mixer_sizes(p_fx.tuning);
+		ba::MixerConfig mc = ba::game_mixer_config(p_fx.tuning, sizes, 8192);
 		mixer = std::make_unique<ba::MixerCore>(mc);
 		mixer->set_tap(p_tap);
-		pool = std::make_unique<ba::OneShotPool>(ba::kMaxOneShotVoices);
+		pool = std::make_unique<ba::OneShotPool>(sizes.one_shots);
 		ba::SimMixerClockConfig cc;
 		cc.bias_frames = int64_t(mc.schedule_lead_blocks) * int64_t(ba::kBlockFrames) + 2 * int64_t(ba::kBlockFrames) + 800;
 		clock = std::make_unique<ba::SimMixerClock>(*mixer, cc);
@@ -1585,8 +1583,9 @@ struct GameRig {
 	}
 };
 
-void use_game_mixer(GameRig &r_rig, ba::MixTap *p_tap) {
+void use_game_mixer(GameRig &r_rig, ba::MixTap *p_tap, const ba::AudioTuning *p_tuning = nullptr) {
 	const GameFixture &fx = r_rig.fx;
+	const ba::AudioTuning &tuning = p_tuning != nullptr ? *p_tuning : fx.tuning;
 	std::vector<std::shared_ptr<const SoundProgram>> programs;
 	for (const ba::WeaponAudioDef &d : fx.assets.table->defs) {
 		programs.push_back(d.program);
@@ -1603,11 +1602,8 @@ void use_game_mixer(GameRig &r_rig, ba::MixTap *p_tap) {
 	r_rig.impacts.reset();
 	r_rig.clock.reset();
 	r_rig.pool.reset();
-	ba::MixerConfig mc;
-	mc.max_instances = ba::kGameMixerInstances;
-	mc.command_capacity = 8192;
-	mc.schedule_lead_blocks = uint32_t(std::max(1.0f, fx.tuning.schedule_lead_blocks));
-	mc.max_voices = ba::kGameMixerVoices;
+	const ba::GameMixerSizes sizes = ba::game_mixer_sizes(tuning);
+	ba::MixerConfig mc = ba::game_mixer_config(tuning, sizes, 8192);
 	ba::apply_mixer_a3(a3, mc);
 	if (const std::string fade = env_value("OPENBF3_PT1_CUT_FADE"); !fade.empty()) {
 		mc.cut_fade_frames = uint32_t(std::clamp(std::atoi(fade.c_str()), 0, 4800));
@@ -1625,12 +1621,14 @@ void use_game_mixer(GameRig &r_rig, ba::MixTap *p_tap) {
 	}
 	r_rig.mixer = std::make_unique<ba::MixerCore>(mc);
 	r_rig.mixer->set_tap(p_tap);
-	r_rig.pool = std::make_unique<ba::OneShotPool>(ba::kMaxOneShotVoices);
+	r_rig.pool = std::make_unique<ba::OneShotPool>(sizes.one_shots);
 	ba::SimMixerClockConfig cc;
 	cc.bias_frames = int64_t(mc.schedule_lead_blocks) * int64_t(ba::kBlockFrames) + 2 * int64_t(ba::kBlockFrames) + 800;
 	r_rig.clock = std::make_unique<ba::SimMixerClock>(*r_rig.mixer, cc);
+	ba::WeaponAudioConfig wc;
+	wc.max_weapon_voices = sizes.weapon_voices;
 	r_rig.router = std::make_unique<ba::WeaponAudioRouter>(
-			*r_rig.mixer, fx.assets.table, fx.assets.bank, fx.tuning, *r_rig.pool);
+			*r_rig.mixer, fx.assets.table, fx.assets.bank, fx.tuning, *r_rig.pool, wc);
 	r_rig.impacts =
 			std::make_unique<ba::ImpactAudio>(*r_rig.mixer, fx.assets.impacts, fx.assets.bank, fx.tuning, *r_rig.pool);
 }
@@ -2355,6 +2353,91 @@ TEST_SUITE("audio-game") {
 		check_game_unchanged(*f);
 	}
 
+	TEST_CASE("tuning max_voices 64 caps the cull at 64") {
+		GameFixture *f = need_game_install();
+		if (f == nullptr) {
+			return;
+		}
+		std::ifstream cfg(OPENBF3_AUDIO_TUNING_CFG, std::ios::binary);
+		REQUIRE(cfg.good());
+		std::stringstream text;
+		text << cfg.rdbuf();
+		std::string edited = text.str();
+		const size_t key = edited.find("max_voices = 128");
+		REQUIRE(key != std::string::npos);
+		edited.replace(key, std::strlen("max_voices = 128"), "max_voices = 64");
+		const Result<ba::AudioTuning> tuned = ba::parse_audio_tuning(edited);
+		REQUIRE(tuned.ok());
+		const ba::GameMixerSizes sizes = ba::game_mixer_sizes(*tuned);
+		CHECK(sizes == ba::GameMixerSizes{ 64, 64, 64, 128 });
+		CHECK(ba::game_mixer_sizes(*tuned, 8, 48) == ba::GameMixerSizes{ 8, 8, 8, 48 });
+		CHECK(ba::game_mixer_config(*tuned, sizes, 8192).max_voices == 64);
+		CHECK(ba::game_mixer_config(*tuned, sizes, 8192).max_instances == 128);
+		const ba::WeaponAudioTable &table = *f->assets.table;
+		std::vector<uint16_t> automatic;
+		for (const ba::KitAudioItem &item : f->assets.kits.items) {
+			const ba::WeaponAudioDef &d = table.defs[item.def];
+			if (!item.one_shot && d.form == ba::WeaponAudioForm::Driver && d.fire_mode != ba::WeaponFireMode::Single &&
+					std::find(automatic.begin(), automatic.end(), item.def) == automatic.end()) {
+				automatic.push_back(item.def);
+			}
+		}
+		REQUIRE(automatic.size() >= 4);
+		const auto crowd = [&](const ba::AudioTuning &p_tuning) {
+			WholeMix tap;
+			GameRig rig(*f, &tap);
+			use_game_mixer(rig, &tap, &p_tuning);
+			const ba::Vec3 eye{ 0.0f, 1.6f, 0.0f };
+			rig.listener = listener_of(godot_view_basis(0.0f), eye);
+			const double t_start = 600.25;
+			constexpr uint32_t kShooters = 40;
+			std::vector<NetShooter> shooters(kShooters);
+			for (uint32_t i = 0; i < kShooters; ++i) {
+				NetShooter &s = shooters[i];
+				s.slot = uint8_t(1 + i);
+				s.def = automatic[i % automatic.size()];
+				s.state.life = 1;
+				const float a = 6.2831853f * float(i) / float(kShooters);
+				const float r = 4.0f + 1.5f * float(i);
+				const ba::Vec3 feet{ r * std::sin(a), 0.0f, r * std::cos(a) };
+				s.state.position = { feet.x, feet.y, feet.z };
+				s.state.yaw = yaw16_towards(feet, eye);
+				const double iv = std::max(0.05, table.defs[s.def].shot_interval_s);
+				s.burst(sw::SimTime(std::llround((t_start + 30.0 + double(i)) * double(sw::kTimeUnitsPerTick))), 30u,
+						sw::SimTime(std::llround(iv * double(sw::kTimeUnitsPerSecond))));
+			}
+			rig.mixer->record_cuts(true);
+			std::vector<ba::MixerCutEvent> cuts;
+			NetStream net;
+			std::vector<host::PresentEvent> events;
+			for (uint64_t fi = 0; fi < uint64_t(4 * 60); ++fi) {
+				const double t = t_start + double(fi);
+				const uint64_t now_ns = uint64_t(std::llround(t * kNsPerTick));
+				events.clear();
+				net.advance(t, shooters, events);
+				net.publish(t, now_ns, shooters);
+				rig.frame(*net.frame, now_ns, events, 0);
+				drain_cuts(*rig.mixer, cuts);
+				net.trim(shooters);
+			}
+			const ba::MixerProfile prof = ba::read_mixer_profile(rig.mixer->stats());
+			const uint64_t cap =
+					prof.culled_cap + uint64_t(std::count_if(cuts.begin(), cuts.end(), [](const ba::MixerCutEvent &e) {
+						return e.kind == ba::MixerCutKind::Park && e.reason == uint8_t(ba::CullVerdict::Cap);
+					}));
+			MESSAGE("max_voices " << p_tuning.max_voices << ": live voices max " << prof.live_voices_max << ", " << cap
+								  << " cap culls and parks, " << prof.culled_precull << " below the window");
+			return std::pair{ prof.live_voices_max, cap };
+		};
+		const auto [live64, cap64] = crowd(*tuned);
+		const auto [live128, cap128] = crowd(f->tuning);
+		CHECK(live64 <= 64);
+		CHECK(cap64 > 0);
+		CHECK(live128 > 64);
+		CHECK(cap128 < cap64);
+		check_game_unchanged(*f);
+	}
+
 	TEST_CASE("a burst: twelve shooters with eight weapons 4 to 30 m around the listener and the own M16A3 fire "
 			  "together in quick succession; no click, clip or late block") {
 		GameFixture *f = need_game_install();
@@ -2819,7 +2902,7 @@ TEST_SUITE("audio-game") {
 		CHECK(ms.starved_voices.load() == 0);
 		CHECK(ms.decode_errors.load() == 0);
 		CHECK(ms.feedback_drops.load() == 0);
-		CHECK(ms.peak_instances.load() <= ba::kGameMixerInstances);
+		CHECK(ms.peak_instances.load() <= ba::game_mixer_sizes(f->tuning).instances);
 		CHECK(ws.mixer_refusals == 0);
 		CHECK(ws.bursts > 100);
 
@@ -2849,7 +2932,7 @@ TEST_SUITE("audio-game") {
 					(unsigned long long)prof.culled_scope, (unsigned long long)prof.culled_cap, double(prof.window_bottom_db), double(prof.window_top_db));
 			MESSAGE(a3line);
 			CHECK(hist_blocks == prof.blocks);
-			CHECK(prof.live_voices_max <= ba::kGameMixerVoices);
+			CHECK(prof.live_voices_max <= ba::game_mixer_sizes(f->tuning).voices);
 			CHECK(prof.live_voices_max > 0);
 			CHECK(prof.culled_precull > 0);
 			if (gate_late_blocks()) {

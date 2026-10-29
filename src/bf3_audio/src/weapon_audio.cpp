@@ -253,6 +253,26 @@ core::Result<WeaponAudioTable> load_weapon_audio(const core::EbxResolver &p_db, 
 	return table;
 }
 
+GameMixerSizes game_mixer_sizes(const AudioTuning &p_tuning, uint32_t p_max_voices, uint32_t p_max_instances) {
+	GameMixerSizes s;
+	const float tuned =
+			std::isfinite(p_tuning.max_voices) ? std::clamp(p_tuning.max_voices, 1.0f, 1024.0f) : float(kTuningVoices);
+	s.voices = p_max_voices > 0 ? p_max_voices : uint32_t(tuned);
+	s.weapon_voices = s.voices;
+	s.one_shots = s.voices;
+	s.instances = p_max_instances > 0 ? p_max_instances : s.weapon_voices + s.one_shots;
+	return s;
+}
+
+MixerConfig game_mixer_config(const AudioTuning &p_tuning, const GameMixerSizes &p_sizes, uint32_t p_command_capacity) {
+	MixerConfig mc;
+	mc.max_instances = p_sizes.instances;
+	mc.max_voices = p_sizes.voices;
+	mc.command_capacity = p_command_capacity;
+	mc.schedule_lead_blocks = uint32_t(std::max(1.0f, p_tuning.schedule_lead_blocks));
+	return mc;
+}
+
 OneShotPool::OneShotPool(uint32_t p_limit) :
 		limit_(std::max<uint32_t>(p_limit, 1)) {
 	live_.reserve(limit_);

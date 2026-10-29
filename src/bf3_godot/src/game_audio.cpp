@@ -95,6 +95,7 @@ struct Bf3GameAudio::Impl {
 	std::atomic<bool> loaded{ false };
 
 	ba::AudioTuning tuning;
+	ba::GameMixerSizes sizes;
 	std::shared_ptr<ba::MixerCore> mixer;
 	std::unique_ptr<ba::OneShotPool> pool;
 	std::unique_ptr<ba::SimMixerClock> clock;
@@ -179,11 +180,12 @@ bool Bf3GameAudio::build(godot::Node *p_parent, std::string *r_error) {
 		return fail("res://config/audio_tuning.cfg: " + tuning.error().message);
 	}
 	m.tuning = *tuning;
-	ba::MixerConfig mc;
-	mc.max_instances = ba::kGameMixerInstances;
-	mc.command_capacity = kCommandCapacity;
-	mc.schedule_lead_blocks = uint32_t(std::max(1.0f, m.tuning.schedule_lead_blocks));
-	mc.max_voices = ba::kGameMixerVoices;
+	const auto count_arg = [](const char *p_name) {
+		const std::string v = user_arg_value(p_name);
+		return v.empty() ? 0u : uint32_t(std::clamp(std::atoi(v.c_str()), 1, 4096));
+	};
+	m.sizes = ba::game_mixer_sizes(m.tuning, count_arg("audio-max-voices"), count_arg("audio-max-instances"));
+	ba::MixerConfig mc = ba::game_mixer_config(m.tuning, m.sizes, kCommandCapacity);
 	ba::apply_mixer_a3(m.a3, mc);
 	if (const std::string fade = user_arg_value("audio-cut-fade"); !fade.empty()) {
 		mc.cut_fade_frames = uint32_t(std::clamp(std::atoi(fade.c_str()), 0, 4800));
@@ -199,11 +201,13 @@ bool Bf3GameAudio::build(godot::Node *p_parent, std::string *r_error) {
 	m.lead_frames = int64_t(mc.schedule_lead_blocks) * int64_t(ba::kBlockFrames);
 	m.mixer = std::make_shared<ba::MixerCore>(mc);
 	m.mixer->set_tap(&m.tap);
-	m.pool = std::make_unique<ba::OneShotPool>(ba::kMaxOneShotVoices);
+	m.pool = std::make_unique<ba::OneShotPool>(m.sizes.one_shots);
 	ba::SimMixerClockConfig cc;
 	cc.bias_frames = m.lead_frames + kBiasMarginFrames;
 	m.clock = std::make_unique<ba::SimMixerClock>(*m.mixer, cc);
-	m.router = std::make_unique<ba::WeaponAudioRouter>(*m.mixer, m.table, m.bank, m.tuning, *m.pool);
+	ba::WeaponAudioConfig wc;
+	wc.max_weapon_voices = m.sizes.weapon_voices;
+	m.router = std::make_unique<ba::WeaponAudioRouter>(*m.mixer, m.table, m.bank, m.tuning, *m.pool, wc);
 	m.impacts = std::make_unique<ba::ImpactAudio>(*m.mixer, m.impacts_cache, m.bank, m.tuning, *m.pool);
 	m.stream.instantiate();
 	m.stream->set_mixer(m.mixer);

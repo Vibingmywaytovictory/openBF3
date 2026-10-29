@@ -27,11 +27,19 @@
 
 namespace bf3::audio {
 
-inline constexpr uint32_t kGameMixerVoices = 128;
-inline constexpr uint32_t kMaxWeaponVoices = kGameMixerVoices;
-inline constexpr uint32_t kMaxOneShotVoices = kGameMixerVoices;
-inline constexpr uint32_t kGameMixerInstances = kMaxWeaponVoices + kMaxOneShotVoices;
-static_assert(kMaxWeaponVoices + kMaxOneShotVoices <= kGameMixerInstances);
+inline constexpr uint32_t kTuningVoices = uint32_t(AudioTuning{}.max_voices);
+
+struct GameMixerSizes {
+	uint32_t voices = kTuningVoices;
+	uint32_t weapon_voices = kTuningVoices;
+	uint32_t one_shots = kTuningVoices;
+	uint32_t instances = 2 * kTuningVoices;
+	bool operator==(const GameMixerSizes &) const = default;
+};
+
+GameMixerSizes game_mixer_sizes(const AudioTuning &p_tuning, uint32_t p_max_voices = 0, uint32_t p_max_instances = 0);
+
+MixerConfig game_mixer_config(const AudioTuning &p_tuning, const GameMixerSizes &p_sizes, uint32_t p_command_capacity);
 
 inline constexpr uint32_t kHashMelee = 210357473u;
 
@@ -129,7 +137,7 @@ inline constexpr double kOneShotForgetSeconds = 20.0;
 
 class OneShotPool {
 public:
-	explicit OneShotPool(uint32_t p_limit = kMaxOneShotVoices);
+	explicit OneShotPool(uint32_t p_limit = kTuningVoices);
 
 	bool start(MixerCore &r_mixer, std::shared_ptr<const core::audio::SoundProgram> p_program, std::shared_ptr<const core::audio::WaveBank> p_bank,
 			const AudioTuning &p_tuning, uint64_t p_seed, const EmitterState &p_emitter, const ListenerState &p_listener, uint64_t p_frame);
@@ -139,6 +147,7 @@ public:
 			const OneShotOptions &p_options);
 
 	void on_finished(InstanceHandle p_handle);
+	uint32_t limit() const { return limit_; }
 	uint32_t live() const;
 	uint32_t peak() const;
 	uint64_t started() const;
@@ -164,7 +173,7 @@ private:
 		EmitterState emitter;
 		bool stopped = false;
 	};
-	uint32_t limit_ = kMaxOneShotVoices;
+	uint32_t limit_ = kTuningVoices;
 	std::vector<Entry> live_;
 	uint32_t peak_ = 0;
 	uint64_t started_ = 0, stolen_ = 0, failed_ = 0, forgotten_ = 0;
@@ -179,7 +188,7 @@ struct MuzzlePoint {
 static_assert(std::is_trivially_copyable_v<MuzzlePoint>);
 
 struct WeaponAudioConfig {
-	uint32_t max_weapon_voices = kMaxWeaponVoices;
+	uint32_t max_weapon_voices = kTuningVoices;
 	float max_weapon_distance_m = 1000.0f;
 	uint32_t own_slot_unknown = 0xFF;
 
