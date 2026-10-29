@@ -1553,6 +1553,31 @@ TEST_SUITE("net-netsim") {
 		CHECK(zero.next_release_ns() == 1);
 	}
 
+	TEST_CASE("netsim: last_reliable_release_ns is the latest release of a peer's queued reliable datagrams") {
+		auto config = net::parse_netsim("lat=40");
+		REQUIRE(config);
+		constexpr uint64_t kMs = 1'000'000;
+		net::NetSim sim(*config);
+		CHECK(sim.last_reliable_release_ns(0) == 0);
+		sim.submit({ 0, 1, true, id_bytes(0) }, 0);
+		sim.submit({ 0, 2, true, id_bytes(1) }, 5 * kMs);
+		sim.submit({ 0, 0, false, id_bytes(2) }, 10 * kMs);
+		sim.submit({ 1, 1, true, id_bytes(3) }, 20 * kMs);
+		CHECK(sim.last_reliable_release_ns(0) == 45 * kMs);
+		CHECK(sim.last_reliable_release_ns(1) == 60 * kMs);
+		CHECK(sim.last_reliable_release_ns(2) == 0);
+		net::NetSim::Datagram d;
+		while (sim.poll(45 * kMs, d)) {
+		}
+		CHECK(sim.pending() == 2);
+		CHECK(sim.last_reliable_release_ns(0) == 0);
+		CHECK(sim.last_reliable_release_ns(1) == 60 * kMs);
+		net::NetSim off;
+		off.submit({ 0, 1, true, id_bytes(4) }, 7);
+		off.submit({ 0, 0, false, id_bytes(5) }, 9);
+		CHECK(off.last_reliable_release_ns(0) == 7);
+	}
+
 	TEST_CASE("netsim: \"150/2\" gives 2 % loss and a uniform 67.5-82.5 ms delay") {
 		auto config = net::parse_netsim("150/2");
 		REQUIRE(config);
