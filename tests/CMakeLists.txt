@@ -1098,6 +1098,11 @@ find_path(OPENBF3_OPENBF2_AI NAMES AIDLL/AI/Main/BF2AI.cpp HINTS "${CMAKE_SOURCE
 add_test(NAME ai.port.provenance COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tests/ai_provenance_check.py" "${CMAKE_SOURCE_DIR}" "${OPENBF3_OPENBF2_AI}")
 set_tests_properties(ai.port.provenance PROPERTIES TIMEOUT 60 LABELS "unit" SKIP_RETURN_CODE 77)
 
+openbf3_test(test_ai_squad test_main.cpp ai_squad_tests.cpp)
+target_link_libraries(test_ai_squad PRIVATE bf3_ai)
+add_test(NAME ai.squad.unit COMMAND test_ai_squad --test-suite=ai-squad)
+set_tests_properties(ai.squad.unit PROPERTIES TIMEOUT 60 LABELS "unit")
+
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     get_property(_openbf3_asan_rows DIRECTORY PROPERTY TESTS)

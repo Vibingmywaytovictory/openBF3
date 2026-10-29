@@ -43,3 +43,15 @@ add_library(bf3_ai STATIC
 target_include_directories(bf3_ai PUBLIC include)
 target_link_libraries(bf3_ai PUBLIC bf3_sim bf3_core)
 openbf3_module(bf3_ai)
+
+target_sources(bf3_ai PRIVATE
+    include/bf3/ai/squad/squad_world.h
+    include/bf3/ai/squad/squad_member.h
+    include/bf3/ai/squad/squad_formation.h
+    include/bf3/ai/squad/squad_coordinator.h
+    include/bf3/ai/squad/squad_manager.h
+    src/squad/squad_member.cpp
+    src/squad/squad_formation.cpp
+    src/squad/squad_coordinator.cpp
+    src/squad/squad_manager.cpp
+)
