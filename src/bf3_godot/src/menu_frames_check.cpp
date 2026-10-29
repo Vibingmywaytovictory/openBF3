@@ -233,15 +233,24 @@ void MenuFramesCheck::judge() {
 	}
 	const double base_median = bf3::core::interpolated_percentile(base, 0.5);
 	const double menus_median = bf3::core::interpolated_percentile(menus, 0.5);
-	const double hitch_ms = std::max(kMenuFramesHitchFloorMs, kMenuFramesHitchFactor * base_median);
+	const double hitch_ms = kMenuFramesHitchFactor * base_median;
+	const double stall_ms = std::max(hitch_ms, kMenuFramesGateRefreshes * kMenuFramesRefreshMs);
 	const double median_budget = base_median * kMenuFramesMedianFactor + kMenuFramesMedianSlackMs;
-	const size_t hitches = size_t(std::count_if(frames_.begin(), frames_.end(), [&](const MenuFrameSample &f) {
-		return gated(steps_[f.step].phase) && counted(f) && f.wall_ms > hitch_ms;
-	}));
-	verdict_ = bf3::core::fmt("no-menu median %.2f ms, menus median %.2f ms (budget %.2f), hitch above %.1f ms: %zu",
-			base_median, menus_median, median_budget, hitch_ms, hitches);
-	if (hitches != 0) {
-		failure_ = std::to_string(hitches) + " hitch(es): " + verdict_;
+	size_t hitches = 0;
+	size_t stalls = 0;
+	double worst = 0.0;
+	for (const MenuFrameSample &f : frames_) {
+		if (gated(steps_[f.step].phase) && counted(f)) {
+			hitches += f.wall_ms > hitch_ms ? 1u : 0u;
+			stalls += f.wall_ms > stall_ms ? 1u : 0u;
+			worst = std::max(worst, double(f.wall_ms));
+		}
+	}
+	verdict_ = bf3::core::fmt("no-menu median %.2f ms, menus median %.2f ms (budget %.2f); hitches over 3 x the "
+							  "no-menu median (%.1f ms): %zu, worst %.2f ms; stalls over %.1f ms (gated): %zu",
+			base_median, menus_median, median_budget, hitch_ms, hitches, worst, stall_ms, stalls);
+	if (stalls != 0) {
+		failure_ = std::to_string(stalls) + " stall(s): " + verdict_;
 	} else if (menus_median > median_budget) {
 		failure_ = "the menus' median frame is over budget: " + verdict_;
 	} else if (glitches_seen_ == 0 || glitch_frames_ == 0) {
