@@ -58,6 +58,7 @@ target_sources(bf3_sim PRIVATE
     src/nav_cache.cpp
     src/nav_validate.cpp
     src/nav_components.cpp
+    src/nav_graph.cpp
     src/nav_query.cpp
     src/bots/path_service.cpp
     src/bots/walker_brain.cpp

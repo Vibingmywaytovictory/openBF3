@@ -2,6 +2,7 @@
 
 #include "bf3/ai/knowledge/ai_object.h"
 
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -15,6 +16,9 @@ inline float distance_sq(const Vec3 &p_a, const Vec3 &p_b) {
 	const float dy = p_a.y - p_b.y;
 	const float dz = p_a.z - p_b.z;
 	return dx * dx + dy * dy + dz * dz;
+}
+inline float distance(const Vec3 &p_a, const Vec3 &p_b) {
+	return std::sqrt(distance_sq(p_a, p_b));
 }
 
 class SquadPlayer {

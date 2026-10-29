@@ -78,3 +78,10 @@ target_sources(bf3_ai PRIVATE
     include/bf3/ai/strategic/bot_spawner.h
     src/strategic/bot_spawner.cpp
 )
+
+target_sources(bf3_ai PRIVATE
+    include/bf3/ai/nav/nav_clusters.h
+    include/bf3/ai/nav/bot_navigation.h
+    src/nav/nav_clusters.cpp
+    src/nav/bot_navigation.cpp
+)

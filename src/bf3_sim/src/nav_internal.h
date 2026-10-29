@@ -119,6 +119,8 @@ struct NavQuery::Impl {
 
 bool nav_closest_point(NavQuery &p_query, NavPolyRef p_poly, const Vec3 &p_point, Vec3 *r_point);
 
+double poly_area(const dtMeshTile &p_tile, const dtPoly &p_poly);
+
 void nav_poly_area_flags(const NavWorld &p_world, NavPolyRef p_poly, uint8_t *r_area, uint16_t *r_flags);
 
 bool nav_offmesh_end(const NavWorld &p_world, NavPolyRef p_poly, Vec3 *r_start, Vec3 *r_end);

@@ -1147,6 +1147,11 @@ target_link_libraries(test_ai_squad PRIVATE bf3_ai)
 add_test(NAME ai.squad.unit COMMAND test_ai_squad --test-suite=ai-squad)
 set_tests_properties(ai.squad.unit PROPERTIES TIMEOUT 60 LABELS "unit")
 
+openbf3_test(test_ai_world test_main.cpp ai_world_tests.cpp)
+target_link_libraries(test_ai_world PRIVATE bf3_ai)
+add_test(NAME ai.world.unit COMMAND test_ai_world --test-suite=ai-world-unit)
+set_tests_properties(ai.world.unit PROPERTIES TIMEOUT 60 LABELS "unit")
+
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     get_property(_openbf3_asan_rows DIRECTORY PROPERTY TESTS)

@@ -257,4 +257,25 @@ struct NavDebugMesh {
 };
 NavDebugMesh nav_debug_mesh(const NavWorld &p_world, const NavComponents *p_components);
 
+struct NavGraphPoly {
+	NavPolyRef ref = 0;
+	Vec3 centre{};
+	float area_m2 = 0.0f;
+	uint8_t area = 0;
+	bool ground = true;
+};
+
+struct NavGraphLink {
+	uint32_t to = UINT32_MAX;
+	Vec3 portal{};
+};
+
+struct NavPolyGraph {
+	std::vector<NavGraphPoly> polys;
+	std::vector<uint32_t> first_link;
+	std::vector<NavGraphLink> links;
+};
+NavPolyGraph nav_poly_graph(const NavWorld &p_world);
+
+uint32_t nav_poly_index(const NavWorld &p_world, NavPolyRef p_poly);
 }

@@ -7,8 +7,6 @@
 
 namespace bf3::sim {
 
-namespace {
-
 double poly_area(const dtMeshTile &p_tile, const dtPoly &p_poly) {
 	double a = 0.0;
 	for (int i = 0; i < p_poly.vertCount; ++i) {
@@ -18,6 +16,8 @@ double poly_area(const dtMeshTile &p_tile, const dtPoly &p_poly) {
 	}
 	return 0.5 * std::fabs(a);
 }
+
+namespace {
 
 uint32_t find(std::vector<uint32_t> &r_parent, uint32_t p_x) {
 	while (r_parent[p_x] != p_x) {
