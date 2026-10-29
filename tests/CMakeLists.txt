@@ -263,6 +263,8 @@ openbf3_split_cover(NAME host.session.split_cover EXE test_host_session SUITE ho
 set_tests_properties(host.session.unit.pure host.session.unit PROPERTIES TIMEOUT 300)
 set_tests_properties(host.session.unit PROPERTIES RUN_SERIAL TRUE)
 set_tests_properties(host.session.gate host.session.stress host.session.e3 PROPERTIES TIMEOUT 400)
+add_test(NAME host.session.kick COMMAND test_host_session --test-suite=host-session-kick)
+set_tests_properties(host.session.kick PROPERTIES TIMEOUT 120)
 
 openbf3_test(test_render_scene test_main.cpp render_scene_tests.cpp test_support.h)
 target_link_libraries(test_render_scene PRIVATE bf3_render psapi)

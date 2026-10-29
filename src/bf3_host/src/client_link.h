@@ -68,6 +68,7 @@ private:
 	bool connected_ = true;
 	std::array<char, 128> last_error_{};
 	bool refused_ = false;
+	bool server_disconnected_ = false;
 
 	bool have_snapshot_ = false;
 	uint16_t newest_seq_ = 0;

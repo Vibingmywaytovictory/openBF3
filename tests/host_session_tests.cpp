@@ -2093,6 +2093,42 @@ TEST_SUITE("host-session-unit") {
 	}
 }
 
+TEST_SUITE("host-session-kick") {
+	TEST_CASE("host.session: a client kicked over ENet keeps the kick reason after the server ends its connection") {
+		std::shared_ptr<GameServerConfig> game = pipe_game();
+		game->max_slots = 1;
+		ServerConfig sc;
+		sc.game = game;
+		ServerHost server;
+		std::string err;
+		REQUIRE_MESSAGE(server.start(sc, &err), err);
+		ClientSessionConfig cc;
+		cc.port = server.port();
+		cc.name = "first";
+		ClientSession first;
+		const core::Status first_started = first.start(cc, nullptr);
+		REQUIRE_MESSAGE(first_started.ok(), (first_started.ok() ? std::string() : first_started.error().message));
+		net::MatchInfo held;
+		REQUIRE(wait_until([&] { return first.lobby_match(held); }, 10s, 16ms));
+
+		cc.name = "second";
+		ClientSession second;
+		const core::Status second_started = second.start(cc, nullptr);
+		REQUIRE_MESSAGE(second_started.ok(), (second_started.ok() ? std::string() : second_started.error().message));
+		REQUIRE(wait_until([&] { return second.stats().server_disconnected; }, 10s, 16ms));
+		const ClientStats kicked = second.stats();
+		CHECK_FALSE(kicked.connected);
+		CHECK(std::string(kicked.last_error.data()) == "kicked: server full");
+		CHECK_FALSE(second.lobby_match(held));
+		CHECK(first.stats().connected);
+		CHECK_FALSE(first.stats().server_disconnected);
+		CHECK(server.game_stats().clients == 1);
+		second.stop();
+		first.stop();
+		server.stop();
+	}
+}
+
 TEST_SUITE("host-server-netthread") {
 	TEST_CASE("host.server: the tick thread blocked 6 s with peer timeouts of 2-4 s: the client stays connected and "
 			  "the next snapshot arrives") {

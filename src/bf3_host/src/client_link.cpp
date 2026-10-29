@@ -29,7 +29,9 @@ void ClientLink::fail(const std::string &p_reason) {
 }
 
 void ClientLink::drop(const std::string &p_reason) {
-	fail(p_reason);
+	if (connected_) {
+		fail(p_reason);
+	}
 	connected_ = false;
 }
 
@@ -107,6 +109,7 @@ void ClientLink::receive(uint32_t p_wait_ms) {
 			in_.submit(std::move(d), at);
 		} else if (ev.type == net::Host::EventType::Disconnect) {
 			drop("disconnected by the server");
+			server_disconnected_ = true;
 		}
 		got = transport_->service(0, ev);
 	}
@@ -263,6 +266,7 @@ double ClientLink::transport_rtt_ms() const {
 void ClientLink::stats(ClientStats &r_stats) const {
 	r_stats.last_error = last_error_;
 	r_stats.refused = refused_;
+	r_stats.server_disconnected = server_disconnected_;
 	r_stats.snapshots_received = snapshots_received_;
 	r_stats.snapshots_lost = snapshots_lost_;
 	r_stats.snapshots_late = snapshots_late_;
