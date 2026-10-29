@@ -1998,7 +1998,7 @@ TEST_SUITE("host-session-unit") {
 		pipe->connect(0);
 		REQUIRE(wait_until([&] { return server.stats().ticks >= 5 && pipe->to_server_empty(); }));
 
-		server.debug_stall(1000);
+		server.debug_stall(500);
 		REQUIRE(wait_until([&] { return server.stats().tick_stalls == 1; }));
 		const uint64_t stalled_tick = server.stats().ticks;
 		const uint64_t services = pipe->services.load();
