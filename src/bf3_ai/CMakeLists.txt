@@ -55,3 +55,12 @@ target_sources(bf3_ai PRIVATE
     src/squad/squad_coordinator.cpp
     src/squad/squad_manager.cpp
 )
+
+target_sources(bf3_ai PRIVATE
+    include/bf3/ai/path/material.h
+    include/bf3/ai/path/map_properties.h
+    include/bf3/ai/path/cluster_graph.h
+    src/path/material.cpp
+    src/path/map_properties.cpp
+    src/path/cluster_graph.cpp
+)

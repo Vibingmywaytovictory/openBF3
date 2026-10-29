@@ -1,9 +1,12 @@
 #include <doctest/doctest.h>
 
 #include "bf3/ai/knowledge/information_factory.h"
+#include "bf3/ai/path/cluster_graph.h"
+#include "bf3/ai/path/map_properties.h"
 #include "bf3/ai/squad/squad_manager.h"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <map>
 #include <memory>
@@ -549,5 +552,111 @@ TEST_SUITE("ai-squad") {
 		world.players[2]->down = true;
 		CHECK(strong.strategic_strength(1) == 8);
 		CHECK(strong.strategic_strength(kStrategicStrengthCount) == 0);
+	}
+
+	TEST_CASE("MaterialManager and MapProperties: OpenBF2's default costs, material names and slope limits") {
+		MaterialManager materials;
+		CHECK_FALSE(materials.is_valid_material(kMaterialInvalid));
+		CHECK(materials.material_cost(kMaterialInvalid) == -1.0f);
+		CHECK(materials.is_valid_material(kMaterialGround));
+		CHECK(materials.material_cost(kMaterialRoad) == 1.0f);
+		CHECK(materials.material_cost(kMaterialDangerObject) == 1000.0f);
+		CHECK(materials.material_cost(kMaterialOtherDangerObject) == 1.0f);
+		CHECK(materials.material_cost(kMaterialBothDangerObject) == 1000.0f);
+		CHECK_FALSE(materials.is_valid_material(kMaterialCount));
+		materials.set_material_cost(kMaterialShallows, -1.0f);
+		CHECK_FALSE(materials.is_valid_material(kMaterialShallows));
+		CHECK(parse_material("deepwater") == kMaterialDeepWater);
+		CHECK(parse_material("BothDangerObject") == kMaterialBothDangerObject);
+		CHECK(parse_material("NumberOfMaterials") == kMaterialCount);
+		CHECK_FALSE(parse_material("Lava").has_value());
+
+		MapProperties map;
+		CHECK(map.head_clearance() == 2.0f);
+		CHECK(map.allowed_height_diff() == 2.5f);
+		CHECK(map.is_valid_ground_mesh({ 0.0f, 0.01f, 1.0f }, kMaterialGround));
+		map.set_max_slope(0.5f);
+		CHECK(map.max_slope() == doctest::Approx(0.5f));
+		CHECK(map.is_valid_ground_mesh({ 0.0f, std::cos(0.4f), std::sin(0.4f) }, kMaterialGround));
+		CHECK_FALSE(map.is_valid_ground_mesh({ 0.0f, std::cos(0.6f), std::sin(0.6f) }, kMaterialGround));
+	}
+
+	TEST_CASE("ClusterGraph: the cheapest cluster path weighs portal costs by the entered cluster's material") {
+		std::vector<Cluster> clusters(5);
+		clusters[0] = { 0, 1, 0, 2, kMaterialGround };
+		clusters[1] = { 1, 1, 2, 2, kMaterialGround };
+		clusters[2] = { 2, 1, 4, 2, kMaterialDangerObject };
+		clusters[3] = { 3, 1, 6, 2, kMaterialRoad };
+		clusters[4] = { 4, 1, 8, 0, kMaterialGround };
+		std::vector<ClusterPortal> portals = {
+			{ { 1, 0, 0 }, 1 },
+			{ { 0, 0, 1 }, 2 },
+			{ { 1, 0, 0 }, 0 },
+			{ { 2, 0, 0 }, 3 },
+			{ { 0, 0, 1 }, 0 },
+			{ { 0, 0, 2 }, 3 },
+			{ { 2, 0, 0 }, 1 },
+			{ { 0, 0, 2 }, 2 },
+		};
+		std::vector<float> costs = { 10.0f, 4.0f, 10.0f, 10.0f, 4.0f, 4.0f, 10.0f, 4.0f };
+		ClusterGraph graph;
+		CHECK_FALSE(graph.assign(clusters, { 0, 1, 2, 3, 4 }, portals, { 1.0f }).ok());
+		std::vector<ClusterPortal> stray = portals;
+		stray[3].to_cluster = 9;
+		CHECK_FALSE(graph.assign(clusters, { 0, 1, 2, 3, 4 }, stray, costs).ok());
+		CHECK_FALSE(graph.assign(clusters, { 0, 1, 2 }, portals, costs).ok());
+		REQUIRE(graph.assign(clusters, { 0, 1, 2, 3, 4 }, portals, costs).ok());
+		CHECK(graph.number_of_clusters() == 5);
+		CHECK(graph.cluster_portal(1, 1).to_cluster == 3);
+		CHECK(graph.portal_cost(2, 1) == 4.0f);
+
+		MaterialManager materials;
+		ClusterNodeManager nodes;
+		std::vector<uint32_t> path;
+		CHECK(graph.shortest_path(0, 3, materials, nodes, path) == doctest::Approx(20.0f));
+		CHECK(path == std::vector<uint32_t>{ 0, 1, 3 });
+		materials.set_material_cost(kMaterialDangerObject, 1.0f);
+		CHECK(graph.shortest_path(0, 3, materials, nodes, path) == doctest::Approx(8.0f));
+		CHECK(path == std::vector<uint32_t>{ 0, 2, 3 });
+		materials.set_material_cost(kMaterialRoad, 3.0f);
+		CHECK(graph.shortest_path(0, 3, materials, nodes, path) == doctest::Approx(16.0f));
+		CHECK(path == std::vector<uint32_t>{ 0, 2, 3 });
+		CHECK(graph.shortest_path(3, 0, materials, nodes, path) == doctest::Approx(8.0f));
+		CHECK(path == std::vector<uint32_t>{ 3, 2, 0 });
+		CHECK(graph.shortest_path(0, 4, materials, nodes, path) == -1.0f);
+		CHECK(path.empty());
+		CHECK(graph.shortest_path(2, 2, materials, nodes, path) == 0.0f);
+		CHECK(path == std::vector<uint32_t>{ 2 });
+		materials.set_material_cost(kMaterialDangerObject, -1.0f);
+		CHECK(graph.shortest_path(0, 3, materials, nodes, path) == doctest::Approx(40.0f));
+		CHECK(path == std::vector<uint32_t>{ 0, 1, 3 });
+		CHECK(graph.shortest_path(0, 2, materials, nodes, path) == -1.0f);
+		graph.clean();
+		CHECK(graph.number_of_clusters() == 0);
+	}
+
+	TEST_CASE("ClusterNodeManager: open and closed records hash by cluster and recycle through the free list") {
+		ClusterNodeManager nodes;
+		const int32_t a = nodes.new_oc_data(7);
+		const int32_t b = nodes.new_oc_data(7 + int(ClusterNodeManager::kOCDataBuckets));
+		const int32_t c = nodes.new_oc_data(8);
+		CHECK(nodes.live_count() == 3);
+		CHECK(nodes.find(7) == a);
+		CHECK(nodes.find(7 + int(ClusterNodeManager::kOCDataBuckets)) == b);
+		CHECK(nodes.find(8) == c);
+		CHECK(nodes.find(9) == -1);
+		nodes.recycle_oc_data(a);
+		CHECK(nodes.find(7) == -1);
+		CHECK(nodes.find(7 + int(ClusterNodeManager::kOCDataBuckets)) == b);
+		CHECK(nodes.live_count() == 2);
+		CHECK(nodes.new_oc_data(11) == a);
+		CHECK(nodes.capacity() == 3);
+		nodes.reset();
+		CHECK(nodes.live_count() == 0);
+		CHECK(nodes.find(8) == -1);
+		nodes.new_oc_data(1);
+		nodes.new_oc_data(2);
+		nodes.new_oc_data(3);
+		CHECK(nodes.capacity() == 3);
 	}
 }
