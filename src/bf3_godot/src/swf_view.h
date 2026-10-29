@@ -97,6 +97,9 @@ public:
 	static constexpr int32_t kMaxLayerSide = 4096;
 	static constexpr uint64_t kSpareSurfaceBytes = uint64_t(64) << 20;
 	static constexpr size_t kSpareSurfaces = 256;
+	static constexpr uint64_t kDormantSurfaceBytes = uint64_t(64) << 20;
+	static constexpr size_t kDormantItems = 2048;
+	static constexpr uint32_t kDormantSettleSyncs = 60;
 	static constexpr int32_t kMaxKernelTaps = 63;
 
 	Bf3SwfView();

@@ -30,11 +30,13 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <set>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace bf3::godot_side {
 
@@ -212,12 +214,68 @@ void release_shaders(RenderingServer *p_rs) {
 
 constexpr ui::SwfAffine kSingularAffine{ 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
 
+template <class T> void fnv1a_items(uint64_t &r_hash, const std::vector<T> &p_items) {
+	bf3::core::fnv1a_value(r_hash, p_items.size());
+	bf3::core::fnv1a(r_hash, p_items.data(), p_items.size() * sizeof(T));
+}
+
+void fnv1a_fill(uint64_t &r_hash, const ui::SwfFillStyle &p_f) {
+	bf3::core::fnv1a_value(r_hash, p_f.type);
+	bf3::core::fnv1a_value(r_hash, p_f.kind);
+	bf3::core::fnv1a_value(r_hash, p_f.color);
+	bf3::core::fnv1a_value(r_hash, p_f.bitmap_id);
+	bf3::core::fnv1a_value(r_hash, p_f.matrix);
+	bf3::core::fnv1a_value(r_hash, p_f.spread);
+	bf3::core::fnv1a_value(r_hash, p_f.interpolation);
+	bf3::core::fnv1a_value(r_hash, p_f.focal);
+	fnv1a_items(r_hash, p_f.stops);
+}
+
+void fnv1a_drawing(uint64_t &r_hash, const ui::SwfShape &p_s) {
+	bf3::core::fnv1a_value(r_hash, p_s.bounds);
+	for (const ui::SwfFillStyle &f : p_s.fills) {
+		fnv1a_fill(r_hash, f);
+	}
+	for (const ui::SwfLineStyle &l : p_s.lines) {
+		bf3::core::fnv1a_value(r_hash, l.width);
+		bf3::core::fnv1a_value(r_hash, l.color);
+		for (const bool b : { l.no_hscale, l.no_vscale, l.pixel_hinting, l.no_close, l.has_fill }) {
+			bf3::core::fnv1a_value(r_hash, b);
+		}
+		bf3::core::fnv1a_value(r_hash, l.start_cap);
+		bf3::core::fnv1a_value(r_hash, l.end_cap);
+		bf3::core::fnv1a_value(r_hash, l.join);
+		bf3::core::fnv1a_value(r_hash, l.miter_limit);
+		fnv1a_fill(r_hash, l.fill);
+	}
+	for (const ui::SwfFillMesh &m : p_s.meshes) {
+		bf3::core::fnv1a_value(r_hash, m.fill);
+		bf3::core::fnv1a_value(r_hash, m.open_contours);
+		fnv1a_items(r_hash, m.outline);
+		fnv1a_items(r_hash, m.contour_ends);
+		fnv1a_items(r_hash, m.vertices);
+		fnv1a_items(r_hash, m.indices);
+	}
+	for (const ui::SwfStroke &st : p_s.strokes) {
+		bf3::core::fnv1a_value(r_hash, st.line);
+		fnv1a_items(r_hash, st.points);
+		fnv1a_items(r_hash, st.path_ends);
+		for (const bool c : st.closed) {
+			bf3::core::fnv1a_value(r_hash, c);
+		}
+	}
+}
+
 uint64_t content_fingerprint(const ui::SwfSceneNode &p_n) {
 	uint64_t h = bf3::core::kFnv1aOffset;
 	bf3::core::fnv1a_value(h, p_n.kind);
 	for (const void *p : { static_cast<const void *>(p_n.shape), static_cast<const void *>(p_n.edit_text),
-				 static_cast<const void *>(p_n.sub_image), static_cast<const void *>(p_n.drawing.get()) }) {
+				 static_cast<const void *>(p_n.sub_image) }) {
 		bf3::core::fnv1a_value(h, reinterpret_cast<uintptr_t>(p));
+	}
+	bf3::core::fnv1a_value(h, p_n.drawing != nullptr);
+	if (p_n.drawing != nullptr) {
+		fnv1a_drawing(h, *p_n.drawing);
 	}
 	bf3::core::fnv1a(h, p_n.image.data(), p_n.image.size());
 	bf3::core::fnv1a_value(h, p_n.image_width);
@@ -891,6 +949,9 @@ struct Canvas {
 	Vector2i quad_size{ -1, -1 };
 	RID quad_texture;
 	int32_t quad_filter = -1;
+	uint64_t owner_path = 0;
+	uint64_t parked = 0;
+	bool hidden = false;
 
 	const Surface &final_surface() const { return stages.empty() ? content : stages.back().surface; }
 };
@@ -925,6 +986,10 @@ struct NodeRec {
 	bool scale_dependent = false;
 	bool content_dirty = true;
 	Canvas *layer = nullptr;
+	uint64_t path_hash = 0;
+	uint64_t parked = 0;
+	ui::SwfNodeId id = ui::kSwfNoNode;
+	bool hidden = false;
 };
 
 struct Target {
@@ -954,6 +1019,18 @@ struct GlyphMesh {
 
 uint64_t canvas_key(CanvasKind p_kind, ui::SwfNodeId p_owner) {
 	return (uint64_t(p_kind) << 32) | uint64_t(p_owner);
+}
+
+uint64_t path_hash(const ui::SwfSceneNode &p_n) {
+	uint64_t h = bf3::core::kFnv1aOffset;
+	bf3::core::fnv1a(h, p_n.path.data(), p_n.path.size());
+	return h;
+}
+
+uint64_t dormant_key(CanvasKind p_kind, uint64_t p_path) {
+	uint64_t h = p_path;
+	bf3::core::fnv1a_value(h, p_kind);
+	return h;
 }
 
 }
@@ -987,6 +1064,11 @@ struct Bf3SwfView::Impl {
 	std::unordered_map<ui::SwfNodeId, std::string> renderers;
 	std::unordered_map<ui::SwfNodeId, NodeRec> recs;
 	std::map<uint64_t, Canvas> canvases;
+	std::unordered_multimap<uint64_t, NodeRec> dormant_recs;
+	std::multimap<uint64_t, Canvas> dormant_canvases;
+	uint64_t dormant_serial = 0;
+	std::unordered_map<ui::SwfNodeId, ui::SwfNodeId> adopted_ids;
+	uint32_t settle_syncs = 0;
 	std::vector<Canvas *> order;
 	std::map<ui::SwfNodeId, Target> targets;
 	std::map<std::pair<const ui::SwfFontFace *, uint16_t>, GlyphMesh> glyphs;
@@ -1155,11 +1237,188 @@ struct Bf3SwfView::Impl {
 		r_rec.pieces.clear();
 	}
 
+	uint64_t canvas_bytes(const Canvas &p_c) const {
+		uint64_t out = p_c.content.bytes(msaa) + p_c.alpha.bytes(msaa);
+		for (const Stage &s : p_c.stages) {
+			out += s.surface.bytes(RenderingServer::VIEWPORT_MSAA_DISABLED);
+		}
+		return out;
+	}
+
+	void park_rec(NodeRec &&r_rec) {
+		if (r_rec.path_hash == 0) {
+			free_rec(r_rec);
+			return;
+		}
+		r_rec.hidden = false;
+		r_rec.canvas = nullptr;
+		r_rec.layer = nullptr;
+		r_rec.drawn = false;
+		r_rec.seen = false;
+		r_rec.parked = ++dormant_serial;
+		dormant_recs.emplace(r_rec.path_hash, std::move(r_rec));
+	}
+
+	std::map<uint64_t, Canvas>::iterator park_canvas(std::map<uint64_t, Canvas>::iterator p_it) {
+		const auto next = std::next(p_it);
+		if (p_it->second.kind == CanvasKind::Root || p_it->second.owner_path == 0) {
+			free_canvas(p_it->second);
+			canvases.erase(p_it);
+			return next;
+		}
+		auto handle = canvases.extract(p_it);
+		Canvas &c = handle.mapped();
+		for (const RID vp : { c.content.viewport, c.alpha.viewport }) {
+			if (vp.is_valid()) {
+				rs->viewport_set_parent_viewport(vp, RID());
+			}
+		}
+		for (const Stage &s : c.stages) {
+			rs->viewport_set_parent_viewport(s.surface.viewport, RID());
+		}
+		c.linked_parent = RID();
+		c.linked_stages = size_t(-1);
+		c.used = false;
+		c.hidden = false;
+		c.parked = ++dormant_serial;
+		handle.key() = dormant_key(c.kind, c.owner_path);
+		dormant_canvases.insert(std::move(handle));
+		return next;
+	}
+
+	void hide_dormant() {
+		for (auto &[k, c] : dormant_canvases) {
+			if (!c.hidden && c.quad.is_valid()) {
+				rs->canvas_item_set_visible(c.quad, false);
+				c.quad_applied.visible = false;
+			}
+			c.hidden = true;
+		}
+		for (auto &[k, r] : dormant_recs) {
+			if (!r.hidden) {
+				for (Piece &p : r.pieces) {
+					rs->canvas_item_set_visible(p.item, false);
+					p.applied.visible = false;
+				}
+			}
+			r.hidden = true;
+		}
+	}
+
+	bool same_ids(const std::vector<ui::SwfNodeId> &p_now, const std::vector<ui::SwfNodeId> &p_before) const {
+		if (p_now.size() != p_before.size()) {
+			return false;
+		}
+		for (size_t i = 0; i < p_now.size(); ++i) {
+			const auto t = adopted_ids.find(p_before[i]);
+			if ((t != adopted_ids.end() ? t->second : p_before[i]) != p_now[i]) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	void trim_dormant() {
+		if (settle_syncs < Bf3SwfView::kDormantSettleSyncs) {
+			return;
+		}
+		uint64_t bytes = 0;
+		size_t items = dormant_canvases.size() + dormant_recs.size();
+		for (const auto &[k, c] : dormant_canvases) {
+			bytes += canvas_bytes(c);
+		}
+		for (const auto &[k, r] : dormant_recs) {
+			items += r.pieces.size();
+		}
+		if (bytes <= Bf3SwfView::kDormantSurfaceBytes && items <= Bf3SwfView::kDormantItems) {
+			return;
+		}
+		std::vector<std::multimap<uint64_t, Canvas>::iterator> old_canvases;
+		for (auto it = dormant_canvases.begin(); it != dormant_canvases.end(); ++it) {
+			old_canvases.push_back(it);
+		}
+		std::vector<std::unordered_multimap<uint64_t, NodeRec>::iterator> old_recs;
+		for (auto it = dormant_recs.begin(); it != dormant_recs.end(); ++it) {
+			old_recs.push_back(it);
+		}
+		std::sort(old_canvases.begin(), old_canvases.end(),
+				[](const auto &p_a, const auto &p_b) { return p_a->second.parked < p_b->second.parked; });
+		std::sort(old_recs.begin(), old_recs.end(),
+				[](const auto &p_a, const auto &p_b) { return p_a->second.parked < p_b->second.parked; });
+		size_t ci = 0;
+		size_t ri = 0;
+		while ((bytes > Bf3SwfView::kDormantSurfaceBytes || items > Bf3SwfView::kDormantItems) &&
+				(ci < old_canvases.size() || ri < old_recs.size())) {
+			const bool canvas_first = ri == old_recs.size() ||
+					(ci < old_canvases.size() && old_canvases[ci]->second.parked < old_recs[ri]->second.parked);
+			if (canvas_first) {
+				const auto it = old_canvases[ci++];
+				bytes -= canvas_bytes(it->second);
+				items -= 1;
+				free_canvas(it->second);
+				dormant_canvases.erase(it);
+			} else {
+				const auto it = old_recs[ri++];
+				items -= it->second.pieces.size() + 1;
+				free_rec(it->second);
+				dormant_recs.erase(it);
+			}
+		}
+	}
+
+	void recycle_dormant(CanvasKind p_kind) {
+		auto pick = dormant_canvases.end();
+		for (auto it = dormant_canvases.begin(); it != dormant_canvases.end(); ++it) {
+			if (it->second.kind == p_kind &&
+					(pick == dormant_canvases.end() || it->second.parked < pick->second.parked)) {
+				pick = it;
+			}
+		}
+		if (pick != dormant_canvases.end()) {
+			free_canvas(pick->second);
+			dormant_canvases.erase(pick);
+		}
+	}
+
+	void free_dormant() {
+		for (auto &[k, r] : dormant_recs) {
+			free_rec(r);
+		}
+		dormant_recs.clear();
+		for (auto &[k, c] : dormant_canvases) {
+			free_canvas(c);
+		}
+		dormant_canvases.clear();
+	}
+
+	NodeRec &rec_for(ui::SwfNodeId p_id) {
+		const auto it = recs.find(p_id);
+		if (it != recs.end()) {
+			return it->second;
+		}
+		NodeRec &rec = recs[p_id];
+		if (const ui::SwfSceneNode *n = node(p_id)) {
+			rec.path_hash = path_hash(*n);
+			const auto d = dormant_recs.find(rec.path_hash);
+			if (d != dormant_recs.end()) {
+				rec = std::move(d->second);
+				dormant_recs.erase(d);
+				rec.reopened = true;
+				if (const auto t = adopted_ids.find(rec.id); t != adopted_ids.end()) {
+					t->second = p_id;
+				}
+			}
+		}
+		rec.id = p_id;
+		return rec;
+	}
+
 	void release() {
 		for (auto &[id, rec] : recs) {
 			free_rec(rec);
 		}
 		recs.clear();
+		free_dormant();
 		for (auto &[id, t] : targets) {
 			free_target(t);
 		}
@@ -1180,9 +1439,27 @@ struct Bf3SwfView::Impl {
 	}
 
 	void retire_scene() {
+		adopted_ids.clear();
 		for (auto &[id, rec] : recs) {
-			rec.reopened = true;
+			if (const ui::SwfSceneNode *n = node(id)) {
+				rec.path_hash = path_hash(*n);
+			}
+			rec.id = id;
+			adopted_ids.emplace(id, ui::kSwfNoNode);
+			park_rec(std::move(rec));
 		}
+		recs.clear();
+		for (auto it = canvases.begin(); it != canvases.end();) {
+			if (it->second.kind == CanvasKind::Root) {
+				++it;
+			} else {
+				if (const ui::SwfSceneNode *n = node(it->second.owner)) {
+					it->second.owner_path = path_hash(*n);
+				}
+				it = park_canvas(it);
+			}
+		}
+		order.clear();
 		tilt_paths.clear();
 		renderer_paths.clear();
 		scene.reset();
@@ -1752,7 +2029,7 @@ struct Bf3SwfView::Impl {
 		if (n == nullptr) {
 			return 0;
 		}
-		NodeRec &rec = recs[p_id];
+		NodeRec &rec = rec_for(p_id);
 		build(p_id, rec);
 		uint32_t count = 0;
 		for (const Piece &p : rec.pieces) {
@@ -1771,7 +2048,21 @@ struct Bf3SwfView::Impl {
 	}
 
 	Canvas &canvas_for(CanvasKind p_kind, ui::SwfNodeId p_owner, Canvas *p_parent) {
-		Canvas &c = canvases[canvas_key(p_kind, p_owner)];
+		const uint64_t key = canvas_key(p_kind, p_owner);
+		const ui::SwfSceneNode *owner_node = p_kind == CanvasKind::Root ? nullptr : node(p_owner);
+		const uint64_t owner_path = owner_node != nullptr ? path_hash(*owner_node) : 0;
+		if (owner_path != 0 && !dormant_canvases.empty() && canvases.find(key) == canvases.end()) {
+			const auto d = dormant_canvases.find(dormant_key(p_kind, owner_path));
+			if (d != dormant_canvases.end()) {
+				auto handle = dormant_canvases.extract(d);
+				handle.key() = key;
+				canvases.insert(std::move(handle));
+			} else {
+				recycle_dormant(p_kind);
+			}
+		}
+		Canvas &c = canvases[key];
+		c.owner_path = owner_path;
 		const bool fresh = !c.content.viewport.is_valid();
 		c.changed = fresh || c.parent != p_parent || c.kind != p_kind;
 		c.kind = p_kind;
@@ -1877,7 +2168,7 @@ struct Bf3SwfView::Impl {
 		const double ky = fit.scale_y;
 		for (const ui::SwfFilter &f : p_filters) {
 			Stage s;
-			s.surface.create(rs, r_c.size, RID(), RenderingServer::VIEWPORT_MSAA_DISABLED);
+			s.surface.create(rs, Vector2i(), RID(), RenderingServer::VIEWPORT_MSAA_DISABLED);
 			s.item = rs->canvas_item_create();
 			rs->canvas_item_set_parent(s.item, s.surface.canvas);
 			rs->canvas_item_set_default_texture_filter(s.item, RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR);
@@ -1969,7 +2260,7 @@ struct Bf3SwfView::Impl {
 		if (n == nullptr) {
 			return;
 		}
-		NodeRec &rec = recs[p_id];
+		NodeRec &rec = rec_for(p_id);
 		rec.seen = true;
 		rec.layer = nullptr;
 		bool own = true;
@@ -2087,7 +2378,7 @@ struct Bf3SwfView::Impl {
 				++j;
 			}
 			if (p_ctx.alpha) {
-				recs[p_kids[i]].seen = true;
+				rec_for(p_kids[i]).seen = true;
 				plan_range(p_kids, i + 1, j, r_canvas, p_ctx);
 				i = j - 1;
 				continue;
@@ -2125,7 +2416,7 @@ struct Bf3SwfView::Impl {
 			if (k == nullptr) {
 				continue;
 			}
-			NodeRec &rec = recs[id];
+			NodeRec &rec = rec_for(id);
 			rec.seen = true;
 			build(id, rec);
 			const ui::SwfAffine m = ui::swf_concat(to_local, ui::swf_affine(k->world));
@@ -2231,7 +2522,9 @@ struct Bf3SwfView::Impl {
 		}
 		order.clear();
 		Canvas &root = canvas_for(CanvasKind::Root, 0, nullptr);
-		root.content.resize(rs, target_size);
+		if (root.content.resize(rs, target_size)) {
+			root.changed = true;
+		}
 		rs->viewport_set_parent_viewport(root.content.viewport, owner_viewport);
 		root.origin = Vector2i();
 		root.size = target_size;
@@ -2240,7 +2533,7 @@ struct Bf3SwfView::Impl {
 		plan_node(scene->root(), root, ctx);
 		for (auto it = recs.begin(); it != recs.end();) {
 			if (node(it->first) == nullptr) {
-				free_rec(it->second);
+				park_rec(std::move(it->second));
 				it = recs.erase(it);
 				continue;
 			}
@@ -2261,19 +2554,18 @@ struct Bf3SwfView::Impl {
 			}
 		}
 		for (auto it = canvases.begin(); it != canvases.end();) {
-			if (!it->second.used) {
-				free_canvas(it->second);
-				it = canvases.erase(it);
-			} else {
-				++it;
-			}
+			it = it->second.used ? std::next(it) : park_canvas(it);
 		}
+		trim_dormant();
+		hide_dormant();
 		for (Canvas *c : order) {
-			if (c->changed || c->nodes != c->old_nodes || c->alpha_nodes != c->old_alpha_nodes || c->children != c->old_children || c->targets != c->old_targets) {
+			if (c->changed || !same_ids(c->nodes, c->old_nodes) || !same_ids(c->alpha_nodes, c->old_alpha_nodes) ||
+					c->children != c->old_children || !same_ids(c->targets, c->old_targets)) {
 				mark(c);
 			}
 			c->changed = false;
 		}
+		adopted_ids.clear();
 		for (auto &[id, rec] : recs) {
 			if (!rec.drawn) {
 				continue;
@@ -2730,6 +3022,9 @@ struct Bf3SwfView::Impl {
 		render_dirty();
 		present();
 		stats.changes = changes_count;
+		if (settle_syncs < Bf3SwfView::kDormantSettleSyncs && ++settle_syncs == Bf3SwfView::kDormantSettleSyncs) {
+			trim_dormant();
+		}
 		stats.sync_seconds = bf3::core::seconds_since(t0);
 	}
 };
@@ -2797,6 +3092,7 @@ Status Bf3SwfView::open(std::string_view p_movie) {
 	impl_->structure_dirty = true;
 	impl_->update_fit();
 	impl_->open_serial = ++g_open_serial;
+	impl_->settle_syncs = 0;
 	return Status::success();
 }
 
@@ -2821,6 +3117,7 @@ Status Bf3SwfView::open(std::shared_ptr<const ui::SwfLibrary> p_library, std::st
 	impl_->structure_dirty = true;
 	impl_->update_fit();
 	impl_->open_serial = ++g_open_serial;
+	impl_->settle_syncs = 0;
 	return Status::success();
 }
 
@@ -2831,10 +3128,10 @@ void Bf3SwfView::close() {
 uint64_t Bf3SwfView::surface_bytes() const {
 	uint64_t out = 0;
 	for (const auto &[k, c] : impl_->canvases) {
-		out += c.content.bytes(impl_->msaa) + c.alpha.bytes(impl_->msaa);
-		for (const Stage &s : c.stages) {
-			out += s.surface.bytes(RenderingServer::VIEWPORT_MSAA_DISABLED);
-		}
+		out += impl_->canvas_bytes(c);
+	}
+	for (const auto &[k, c] : impl_->dormant_canvases) {
+		out += impl_->canvas_bytes(c);
 	}
 	for (const auto &[id, t] : impl_->targets) {
 		out += t.surface.bytes(impl_->msaa);
@@ -2846,8 +3143,11 @@ uint64_t Bf3SwfView::surface_bytes() const {
 }
 
 uint32_t Bf3SwfView::instance_items() const {
-	size_t out = impl_->canvases.size() + impl_->targets.size();
+	size_t out = impl_->canvases.size() + impl_->dormant_canvases.size() + impl_->targets.size();
 	for (const auto &[id, rec] : impl_->recs) {
+		out += rec.pieces.size();
+	}
+	for (const auto &[k, rec] : impl_->dormant_recs) {
 		out += rec.pieces.size();
 	}
 	return uint32_t(out);
