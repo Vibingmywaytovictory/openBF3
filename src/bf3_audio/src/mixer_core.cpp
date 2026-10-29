@@ -654,7 +654,8 @@ void MixerCore::Impl::a3_block(MixerStats &stats, uint64_t p_first) {
 				--s.hold_left;
 			}
 		}
-		v.voices = std::max(v.voices, s.voices_held);
+		v.held_voices = std::max(v.voices, s.voices_held);
+		v.parked = s.pending;
 		v.hold_db = !s.starting && !s.pending && s.has_rendered ? config.cap_hold_db : 0.0f;
 		v.resume_margin = s.pending ? std::min(config.resume_margin, config.max_voices / 16) : 0u;
 		cull_slots[n] = uint32_t(i);

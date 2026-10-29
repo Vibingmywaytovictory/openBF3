@@ -177,10 +177,13 @@ void cull_voices(std::span<const CullVoice> p_voices, const ScopeTable *p_scopes
 	}
 
 	const auto weight = [&](size_t k) { return uint64_t(std::clamp<uint32_t>(p_voices[k].voices, 1, kMaxCullVoices)); };
+	const auto held = [&](size_t k) {
+		return std::max(weight(k), uint64_t(std::min<uint32_t>(p_voices[k].held_voices, kMaxCullVoices)));
+	};
 	uint64_t total = 0;
 	uint64_t margin = 0;
 	for (size_t i = 0; i < n; ++i) {
-		total += c.kept(i) ? weight(i) : 0;
+		total += c.kept(i) ? held(i) : 0;
 		margin = std::max<uint64_t>(margin, c.kept(i) ? std::min<uint32_t>(p_voices[i].resume_margin, kMaxCullVoices) : 0u);
 	}
 	if (total + margin > p_max_voices) {
@@ -197,10 +200,12 @@ void cull_voices(std::span<const CullVoice> p_voices, const ScopeTable *p_scopes
 			if (!c.kept(a)) {
 				continue;
 			}
-			uint64_t before = weight(a) + std::min<uint32_t>(p_voices[a].resume_margin, kMaxCullVoices);
+			const bool resume = p_voices[a].parked;
+			uint64_t before =
+					(resume ? held(a) : weight(a)) + std::min<uint32_t>(p_voices[a].resume_margin, kMaxCullVoices);
 			for (size_t b = 0; b < n && before <= p_max_voices; ++b) {
 				if (b != a && c.kept(b) && better(b, a)) {
-					before += weight(b);
+					before += resume ? held(b) : weight(b);
 				}
 			}
 			c.mark[a] = before > p_max_voices ? 1 : 0;

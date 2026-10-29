@@ -1172,6 +1172,35 @@ TEST_SUITE("audio-cuts") {
 		CHECK(count(r, ba::CullVerdict::Keep) == 3);
 	}
 
+	TEST_CASE("the cap counts busy slots now; a held peak only gates a parked loop's resume") {
+		std::vector<ba::CullVoice> v(3);
+		for (size_t i = 0; i < v.size(); ++i) {
+			v[i].handle = ba::InstanceHandle(i + 1);
+			v[i].loudness_db = 80.0f - float(i);
+			v[i].hdr = false;
+			v[i].looping = true;
+			v[i].start_frame = i;
+		}
+		v[0].voices = 2;
+		v[0].held_voices = 8;
+		v[0].hold_db = 3.0f;
+		v[1].voices = 7;
+		v[1].starting = true;
+		v[2].voices = 1;
+		v[2].parked = true;
+		v[2].held_voices = 1;
+		ba::CullCounts c;
+		std::vector<ba::CullVerdict> r = cull(v, nullptr, 0.0f, 10, c);
+		CHECK(r[0] == ba::CullVerdict::Keep);
+		CHECK(r[1] == ba::CullVerdict::Keep);
+		CHECK(r[2] == ba::CullVerdict::Pending);
+		r = cull(v, nullptr, 0.0f, 16, c);
+		CHECK(count(r, ba::CullVerdict::Keep) == 3);
+		v[2].parked = false;
+		r = cull(v, nullptr, 0.0f, 10, c);
+		CHECK(count(r, ba::CullVerdict::Keep) == 3);
+	}
+
 	TEST_CASE("PT1 snd: the output limiter keeps the mix under its ceiling and leaves a quiet mix untouched") {
 
 		for (const float ceiling : { 0.0f, 0.966f }) {

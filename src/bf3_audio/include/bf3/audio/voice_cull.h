@@ -28,6 +28,8 @@ struct CullVoice {
 	bool starting = false;
 	bool hdr = true;
 	uint32_t voices = 1;
+	uint32_t held_voices = 0;
+	bool parked = false;
 
 	float hold_db = 0.0f;
 
