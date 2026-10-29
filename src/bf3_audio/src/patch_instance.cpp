@@ -521,17 +521,18 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 					const float spread = ps.output != UINT32_MAX ? p.outputs[ps.output].pan_size : 0.0f;
 					const StereoGains pan = equal_power_pan(st.geometry.azimuth, spread);
 					const float gl = pan.left * pan_scale, gr = pan.right * pan_scale;
-					const float step = ps.pan_started
-							? std::max(std::fabs(gl - ps.pan_prev[0]), std::fabs(gr - ps.pan_prev[1]))
-							: 0.0f;
+					const float l0 = ps.pan_started ? ps.pan_prev[0] : gl, r0 = ps.pan_started ? ps.pan_prev[1] : gr;
+					const float dl = gl - l0, dr = gr - r0;
 					float peak = 0.0f;
 					for (uint32_t i = 0; i < p_frames; ++i) {
 						const float m = 0.5f * (ch[0][i] + ch[1][i]);
+						const float t = float(i + 1) / float(p_frames);
 						peak = std::max(peak, std::fabs(m));
-						ch[0][i] = m * gl;
-						ch[1][i] = m * gr;
+						ch[0][i] = m * (l0 + dl * t);
+						ch[1][i] = m * (r0 + dr * t);
 					}
-					st.voice_pan_step[v] = std::max(st.voice_pan_step[v], peak * step);
+					st.voice_pan_step[v] = std::max(
+							st.voice_pan_step[v], peak * std::max(std::fabs(dl), std::fabs(dr)) / float(p_frames));
 					ps.pan_prev[0] = gl;
 					ps.pan_prev[1] = gr;
 					ps.pan_started = true;

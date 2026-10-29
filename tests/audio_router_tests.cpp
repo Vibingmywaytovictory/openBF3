@@ -1732,6 +1732,7 @@ void check_clean_mix(const std::string &p_what, GameRig &r_rig, const WholeMix &
 	CHECK(cs.abrupt_gain.load() == 0);
 	CHECK(cs.takeover_cuts.load() == 0);
 	CHECK(cs.held_triggers.load() == 0);
+	CHECK(cs.pan_steps.load() == 0);
 	CHECK(cs.event_drops.load() == 0);
 	CHECK(audible_by_kind.empty());
 	CHECK(ms.starved_voices.load() == 0);
