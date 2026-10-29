@@ -334,6 +334,7 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 					m.give_back(cmd.instance);
 					break;
 				}
+				*free = InstanceSlot{};
 				free->handle = cmd.handle;
 				free->instance = cmd.instance;
 				free->stop_requested = false;
@@ -369,8 +370,7 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 						m.note_cut(MixerCutKind::Kill, *s, s->instance->edge().edge);
 					}
 					m.give_back(s->instance);
-					s->instance = nullptr;
-					s->handle = kNoInstance;
+					*s = InstanceSlot{};
 				}
 				break;
 			case MixerCommandType::SetParameter:
@@ -490,8 +490,7 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 		if (done) {
 			m.note_cut(MixerCutKind::Finish, s, s.instance->edge().edge);
 			m.give_back(s.instance);
-			s.instance = nullptr;
-			s.handle = kNoInstance;
+			s = InstanceSlot{};
 		} else {
 			++active;
 		}

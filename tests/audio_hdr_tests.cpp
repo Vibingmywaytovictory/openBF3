@@ -1231,6 +1231,35 @@ TEST_SUITE("audio-cuts") {
 		CHECK(peak_of(rig2.rec.left, 0, rig2.frames()) <= 0.5 + 1e-6);
 	}
 
+	TEST_CASE("a slot freed by a finished voice starts clean: a voice culled at its start there renders nothing") {
+		Rig rig(cut_config(512, 1, false));
+		rig.mixer->record_cuts(true);
+		const ba::InstanceHandle a = rig.start(Source{ 90.0f, false, false, 1, 1.0f }, 1.0f);
+		ba::MixerCommand stop;
+		stop.type = ba::MixerCommandType::Stop;
+		stop.handle = a;
+		REQUIRE(rig.mixer->push(stop));
+		for (int i = 0; i < 40 && !rig.was_finished(a); ++i) {
+			rig.step(1);
+		}
+		REQUIRE(rig.was_finished(a));
+		rig.step(1);
+		const ba::InstanceHandle c = rig.start(Source{ 80.0f, false, false, 3, 1.0f }, 1.0f);
+		const ba::InstanceHandle b = rig.start(Source{ 91.0f, false, true, 2, 1.0f }, 1.0f);
+		rig.step(3);
+		std::array<ba::MixerCutEvent, 64> ev{};
+		const size_t n = rig.mixer->poll_cuts(ev);
+		const auto count = [&](ba::MixerCutKind p_kind, ba::InstanceHandle p_handle) {
+			return std::count_if(ev.begin(), ev.begin() + std::ptrdiff_t(n),
+					[&](const ba::MixerCutEvent &e) { return e.kind == p_kind && e.handle == p_handle; });
+		};
+		CHECK(count(ba::MixerCutKind::Cull, c) == 1);
+		CHECK(count(ba::MixerCutKind::Fade, c) == 0);
+		CHECK(count(ba::MixerCutKind::Start, c) == 0);
+		CHECK(count(ba::MixerCutKind::Start, b) == 1);
+		CHECK(rig.was_finished(c));
+	}
+
 	TEST_CASE("sound fates: the event ring names each request, why the cap parks or culls it, and a refused start") {
 		Rig rig(cut_config(512, 1, false));
 		rig.mixer->record_cuts(true);
