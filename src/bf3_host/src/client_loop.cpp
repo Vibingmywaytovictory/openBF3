@@ -284,6 +284,10 @@ void ClientLoop::refuse(const char *p_reason) {
 
 bool ClientLoop::accept_match(const net::MatchInfo &p_match, uint64_t p_now) {
 	stats_.slot = p_match.slot;
+	if (const std::string refusal = level_refusal(p_match, level->level, level->mode); !refusal.empty()) {
+		refuse(refusal.c_str());
+		return false;
+	}
 	if (const char *refusal = match.check_rules(p_match, *level)) {
 		refuse(refusal);
 		return false;

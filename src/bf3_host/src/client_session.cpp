@@ -5,6 +5,7 @@
 #include "client_transport.h"
 #include "instance_registry.h"
 
+#include "bf3/core/util/text.h"
 #include "bf3/net/enet_host.h"
 #include "bf3/net/loopback_ping.h"
 
@@ -468,6 +469,14 @@ uint8_t player_rows(const PlayerTable &p_table, std::array<net::PlayerRow, net::
 		r_rows[k] = net::PlayerRow{};
 	}
 	return n;
+}
+
+std::string level_refusal(const net::MatchInfo &p_match, std::string_view p_level, std::string_view p_mode) {
+	if (core::iequals_ascii(p_match.level, p_level) && core::iequals_ascii(p_match.mode, p_mode)) {
+		return {};
+	}
+	return "level mismatch: the server runs " + p_match.level + " " + p_match.mode + ", this client loaded " +
+			std::string(p_level) + " " + std::string(p_mode);
 }
 
 const char *rules_refusal(const net::MatchInfo &p_match, bool p_has_logic, uint64_t p_logic_digest) {

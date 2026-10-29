@@ -272,6 +272,19 @@ TEST_SUITE("host-client-m2b") {
 		CHECK(host::player_rows(table, rows) == 1);
 	}
 
+	TEST_CASE("host.client.m2b: a MatchInfo naming another level or mode is refused with both names, case aside") {
+		net::MatchInfo mi;
+		mi.level = "MP_Subway";
+		mi.mode = "TeamDeathMatch0";
+		CHECK(host::level_refusal(mi, "MP_Subway", "TeamDeathMatch0").empty());
+		CHECK(host::level_refusal(mi, "mp_subway", "teamdeathmatch0").empty());
+		CHECK(host::level_refusal(mi, "MP_011", "TeamDeathMatch0") ==
+				"level mismatch: the server runs MP_Subway TeamDeathMatch0, this client loaded MP_011 TeamDeathMatch0");
+		CHECK(host::level_refusal(mi, "MP_Subway", "ConquestLarge0") ==
+				"level mismatch: the server runs MP_Subway TeamDeathMatch0, this client loaded MP_Subway "
+				"ConquestLarge0");
+	}
+
 	TEST_CASE("host.client.m2b: own_unspawned_at, rules_refusal and the restriction on predicted commands") {
 		net::MatchState m;
 		CHECK_FALSE(host::own_unspawned_at(true, m, 10, 500));

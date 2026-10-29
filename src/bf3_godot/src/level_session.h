@@ -231,6 +231,10 @@ private:
 	void report_bots(uint64_t p_now_ns);
 	uint32_t bots_ = 0;
 	bool nav_overlay_ = false;
+	std::string connect_host_;
+	uint16_t connect_port_ = 0;
+	bool refusal_reported_ = false;
+	void parse_connect();
 	double shot_delay_ = 0.0;
 	std::shared_ptr<const bf3::host::BotLevel> bot_level_;
 	std::unique_ptr<bf3::host::ServerLevel> server_level_;

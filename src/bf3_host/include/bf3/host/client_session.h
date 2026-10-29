@@ -14,12 +14,13 @@
 #include "bf3/net/weapons_wire.h"
 #include "bf3/present/presented.h"
 
+#include <array>
 #include <cstdint>
 #include <functional>
-#include <array>
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -369,5 +370,5 @@ constexpr bool match_end_of_round_at(bool p_match_valid, const net::MatchState &
 bool present_own_alive(const PresentationFrame &p_frame);
 
 const char *rules_refusal(const net::MatchInfo &p_match, bool p_has_logic, uint64_t p_logic_digest);
-
+std::string level_refusal(const net::MatchInfo &p_match, std::string_view p_level, std::string_view p_mode);
 }

@@ -15,6 +15,7 @@ echo  %* | findstr /c:" --firefight " /c:" --tdm " >nul && (
     set "BOTS=--bots=24"
 )
 echo %* | findstr /c:"--bots=" >nul && set "BOTS="
+echo %* | findstr /c:"--connect=" >nul && set "BOTS="
 "%OPENBF3_GODOT%" --path "%ROOT%\bf3-opensource" %SCENE% -- %BOTS% %*
 exit /b %ERRORLEVEL%
 :help
@@ -27,5 +28,7 @@ echo   --firefight   the firefight scene instead: --kit=0..3 --team=1^|2 --bots=
 echo   --tdm   TDM rules on the firefight scene without the spawn screen; the bots are the TDM bots
 echo           ^(config\bot_tuning.cfg^), at most 31; try: tools\play.cmd --tdm --bots=31
 echo   --kill-limit=0..100000 --preround=0..600   with --tdm: the kill limit ^(data: 100^) and the pre-round seconds ^(data: 10^)
+echo   --connect=host:port   join a running server ^(tools\server.cmd^) instead of starting one; no local bots,
+echo           --level and --mode must name the level the server runs
 echo With --tdm the match state prints as "[tdm] match: ..." console lines ^(no TDM HUD in the firefight scene^).
 exit /b 0

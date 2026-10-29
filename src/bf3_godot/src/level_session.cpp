@@ -12,6 +12,7 @@
 #include "bf3/core/level/census.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
+#include "bf3/core/util/key_values.h"
 #include "bf3/host/game_server.h"
 #include "bf3/net/loopback_ping.h"
 #include "bf3/net/netsim.h"
@@ -206,6 +207,30 @@ void Bf3LevelSession::parse_args() {
 	const std::string shot_delay = user_arg_value("shot-delay");
 	shot_delay_ = shot_delay.empty() ? 0.0 : std::clamp(std::atof(shot_delay.c_str()), 0.0, 600.0);
 	game_parse_args();
+	parse_connect();
+}
+
+void Bf3LevelSession::parse_connect() {
+	if (!has_user_arg("connect")) {
+		return;
+	}
+	const std::string text = user_arg_value("connect");
+	const size_t colon = text.rfind(':');
+	uint32_t port = 0;
+	if (colon == std::string::npos || colon == 0 ||
+			bf3::core::parse_u32_value(std::string_view(text).substr(colon + 1), 1.0, 65535.0, port).fault !=
+					bf3::core::KeyFault::None) {
+		std::lock_guard lock(loader_mutex_);
+		load_error_ = "--connect=" + text + ": expected host:port with a port 1..65535";
+		load_failed_.store(true, std::memory_order_release);
+		return;
+	}
+	connect_host_ = text.substr(0, colon);
+	connect_port_ = uint16_t(port);
+	bots_ = 0;
+	nav_overlay_ = false;
+	UtilityFunctions::print(to_godot("[level] --connect=" + connect_host_ + ":" + std::to_string(connect_port_) +
+			": no local ServerHost, bots 0, level " + level_ + " and mode " + mode_ + " from the command line"));
 }
 
 void Bf3LevelSession::_ready() {
@@ -471,6 +496,10 @@ bf3::core::Status Bf3LevelSession::start_scene(
 host::ClientSessionConfig Bf3LevelSession::client_config(const std::string &p_netsim, uint64_t p_seed) const {
 	host::ClientSessionConfig cc;
 	cc.port = server_ != nullptr ? server_->port() : 0;
+	if (!connect_host_.empty()) {
+		cc.host = connect_host_;
+		cc.port = connect_port_;
+	}
 	cc.name = "player";
 	bf3::core::Result<bf3::net::NetSimConfig> ns = bf3::net::parse_netsim(p_netsim);
 	if (ns) {
@@ -510,14 +539,16 @@ bool Bf3LevelSession::start_session(std::string *r_error) {
 		}
 	}
 	game_server_config(*game);
-	host::ServerConfig sc;
-	sc.tick_hz = int(sim::kSimHz);
-	sc.game = game;
-	server_ = std::make_unique<host::ServerHost>();
-	std::string err;
-	if (!server_->start(sc, &err)) {
-		*r_error = "server: " + err;
-		return false;
+	if (connect_host_.empty()) {
+		host::ServerConfig sc;
+		sc.tick_hz = int(sim::kSimHz);
+		sc.game = game;
+		server_ = std::make_unique<host::ServerHost>();
+		std::string err;
+		if (!server_->start(sc, &err)) {
+			*r_error = "server: " + err;
+			return false;
+		}
 	}
 	client_ = std::make_unique<host::ClientSession>();
 	const bf3::core::Status s = client_->start(client_config(netsim_, seed_), shared_);
@@ -898,6 +929,11 @@ void Bf3LevelSession::_process(double p_delta) {
 	}
 	if (session_ready_.load(std::memory_order_acquire) && client_ != nullptr) {
 		client_->read_presentation(*frame_);
+		if (frame_->stats.refused && !refusal_reported_) {
+			refusal_reported_ = true;
+			UtilityFunctions::print(
+					to_godot(std::string("[level] the server refused the join: ") + frame_->stats.last_error.data()));
+		}
 		mapper_.adopt(*frame_);
 		mapper_.poll_devices();
 		mapper_.weapon_frame(*frame_, now_ns);
