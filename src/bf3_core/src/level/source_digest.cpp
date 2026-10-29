@@ -134,37 +134,20 @@ Result<BundleDigest> digest_bundle(std::string p_key, const BundleManifest &p_ma
 	return out;
 }
 
-}
-
-Result<SourceDigest> level_source_digest(const LoadedLevel &p_level) {
-	const auto start = std::chrono::steady_clock::now();
-	const LevelMount &mount = p_level.mount();
-	std::unordered_map<std::string, size_t> index;
-	for (size_t i = 0; i < mount.bundle_count(); ++i) {
-		index.emplace(mount.bundle_name(i), i);
-	}
-	std::vector<std::string> names;
-	names.push_back(p_level.bundles.level);
-	names.insert(names.end(), p_level.bundles.settings.begin(), p_level.bundles.settings.end());
-	names.insert(names.end(), p_level.bundles.subworlds.begin(), p_level.bundles.subworlds.end());
-	std::vector<size_t> at;
-	for (const std::string &name : names) {
-		const auto it = index.find(name);
-		if (it == index.end()) {
-			return make_error("source digest: bundle " + name + " is not in the level's superbundle");
-		}
-		at.push_back(it->second);
-	}
+Result<SourceDigest> digest_bundles(
+		const LevelMount &p_mount, std::vector<size_t> p_at, std::chrono::steady_clock::time_point p_start) {
+	std::vector<size_t> &at = p_at;
 	std::sort(at.begin(), at.end());
 	at.erase(std::unique(at.begin(), at.end()), at.end());
 
-	std::vector<Result<BundleDigest>> bundles = parallel_map<Result<BundleDigest>>(at.size(), [&](size_t i) -> Result<BundleDigest> {
-		Result<BundleManifest> manifest = mount.read_manifest(at[i]);
-		if (!manifest) {
-			return error_at("source digest: bundle " + mount.bundle_name(at[i]), manifest.error());
-		}
-		return digest_bundle(bundle_key(mount.bundle_name(at[i])), *manifest);
-	});
+	std::vector<Result<BundleDigest>> bundles =
+			parallel_map<Result<BundleDigest>>(at.size(), [&](size_t i) -> Result<BundleDigest> {
+				Result<BundleManifest> manifest = p_mount.read_manifest(at[i]);
+				if (!manifest) {
+					return error_at("source digest: bundle " + p_mount.bundle_name(at[i]), manifest.error());
+				}
+				return digest_bundle(bundle_key(p_mount.bundle_name(at[i])), *manifest);
+			});
 
 	SourceDigest out;
 	std::vector<std::pair<std::string, Sha256Digest>> sorted;
@@ -195,8 +178,41 @@ Result<SourceDigest> level_source_digest(const LoadedLevel &p_level) {
 		}
 		out.digest = digest;
 	}
-	out.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+	out.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - p_start).count();
 	return out;
+}
+}
+
+Result<SourceDigest> level_source_digest(const LoadedLevel &p_level) {
+	const auto start = std::chrono::steady_clock::now();
+	const LevelMount &mount = p_level.mount();
+	std::unordered_map<std::string, size_t> index;
+	for (size_t i = 0; i < mount.bundle_count(); ++i) {
+		index.emplace(mount.bundle_name(i), i);
+	}
+	std::vector<std::string> names;
+	names.push_back(p_level.bundles.level);
+	names.insert(names.end(), p_level.bundles.settings.begin(), p_level.bundles.settings.end());
+	names.insert(names.end(), p_level.bundles.subworlds.begin(), p_level.bundles.subworlds.end());
+	std::vector<size_t> at;
+	for (const std::string &name : names) {
+		const auto it = index.find(name);
+		if (it == index.end()) {
+			return make_error("source digest: bundle " + name + " is not in the level's superbundle");
+		}
+		at.push_back(it->second);
+	}
+	return digest_bundles(mount, std::move(at), start);
+}
+
+Result<SourceDigest> level_mount_digest(const LoadedLevel &p_level) {
+	const auto start = std::chrono::steady_clock::now();
+	const LevelMount &mount = p_level.mount();
+	std::vector<size_t> at(mount.bundle_count());
+	for (size_t i = 0; i < at.size(); ++i) {
+		at[i] = i;
+	}
+	return digest_bundles(mount, std::move(at), start);
 }
 
 }

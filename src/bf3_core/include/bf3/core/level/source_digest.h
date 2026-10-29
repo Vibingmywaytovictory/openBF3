@@ -19,4 +19,5 @@ struct SourceDigest {
 
 Result<SourceDigest> level_source_digest(const LoadedLevel &p_level);
 
+Result<SourceDigest> level_mount_digest(const LoadedLevel &p_level);
 }

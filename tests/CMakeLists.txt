@@ -1065,6 +1065,14 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_cost(godot.menu_frames.fullscreen 1 73)
 endif()
 
+target_sources(test_host_tdm PRIVATE host_server_level_tests.cpp)
+add_test(NAME host.server.level COMMAND test_host_tdm --test-suite=host-server-level)
+set_tests_properties(host.server.level PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+openbf3_cost(host.server.level 1 17)
+if(OPENBF3_ASAN)
+    set_tests_properties(host.server.level PROPERTIES TIMEOUT 1800)
+endif()
+
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME hygiene.rules COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tools/check_hygiene.py" "${CMAKE_SOURCE_DIR}")
 set_tests_properties(hygiene.rules PROPERTIES TIMEOUT 120 LABELS "unit")

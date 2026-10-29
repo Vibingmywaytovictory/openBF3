@@ -163,3 +163,8 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/logic_screen_effects.h
     src/logic_screen_effects.cpp
 )
+
+target_sources(bf3_host PRIVATE
+    include/bf3/host/server_level.h
+    src/server_level.cpp
+)

@@ -1,0 +1,221 @@
+#include <doctest/doctest.h>
+
+#include "bf3/core/cache/disk_cache.h"
+#include "bf3/core/level/combat_tiles_cache.h"
+#include "bf3/core/level/level.h"
+#include "bf3/core/level/mode_areas.h"
+#include "bf3/host/bot_fill.h"
+#include "bf3/host/server_level.h"
+#include "bf3/sim/nav.h"
+
+#include "gunplay_fixture.h"
+#include "tdm_fixture.h"
+#include "test_support.h"
+
+#include <chrono>
+#include <cstdio>
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <thread>
+#include <vector>
+
+using namespace bf3;
+
+namespace {
+
+std::filesystem::path scratch_cache(const char *p_tag) {
+	const std::filesystem::path root = std::filesystem::temp_directory_path() /
+			(std::string("openbf3-") + p_tag + "-" +
+					std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
+	std::error_code ec;
+	std::filesystem::remove_all(root, ec);
+	return root;
+}
+
+std::shared_ptr<core::Cache> open_cache(const std::filesystem::path &p_root, const core::InstallReader &p_reader) {
+	auto cache = std::make_shared<core::Cache>();
+	core::CacheOptions co;
+	co.root = p_root;
+	co.guard = p_reader.write_guard();
+	std::string detail;
+	REQUIRE_MESSAGE(cache->open(std::move(co), &detail) == core::CacheStatus::Ok, detail);
+	return cache;
+}
+
+host::ServerLevelOptions server_options(bool p_bots) {
+	host::ServerLevelOptions o;
+	o.shared.tuning = bf3::test::gunplay::shipped_motor_tuning();
+	o.shared.gunplay = true;
+	o.shared.tdm = true;
+	o.shared.tdm_tuning_cfg = OPENBF3_TDM_TUNING_CFG;
+	o.shared.threads = std::max(1u, std::thread::hardware_concurrency() / 2u);
+	o.bots = p_bots;
+	return o;
+}
+
+void print_level(const char *p_what, const host::ServerLevel &p_level) {
+	std::printf(
+			"%s %s %s: database %.2f s, combat areas %.2f s (%s), shared %.2f s, bots %.2f s (nav %s), total %.2f s\n",
+			p_what, p_level.entry.level.c_str(), p_level.entry.mode.c_str(), p_level.seconds.database,
+			p_level.seconds.combat, p_level.combat_cache_hit ? "cache hit" : "baked", p_level.seconds.shared,
+			p_level.seconds.bots, p_level.nav_cache_hit ? "cache hit" : "baked", p_level.seconds.total);
+}
+
+void check_tiles_equal(const core::level::LevelCombatTiles &p_a, const core::level::LevelCombatTiles &p_b) {
+	CHECK(p_a.modes == p_b.modes);
+	CHECK(p_a.tiles == p_b.tiles);
+	CHECK(p_a.water == p_b.water);
+	CHECK(p_a.polygon_tiles == p_b.polygon_tiles);
+	CHECK(p_a.point_only_tiles == p_b.point_only_tiles);
+	CHECK(p_a.points == p_b.points);
+	CHECK(p_a.points_outside_areas == p_b.points_outside_areas);
+	REQUIRE(p_a.areas.size() == p_b.areas.size());
+	for (size_t i = 0; i < p_a.areas.size(); ++i) {
+		const core::level::ModeAreas &x = p_a.areas[i], &y = p_b.areas[i];
+		REQUIRE(x.combat_areas.size() == y.combat_areas.size());
+		for (size_t k = 0; k < x.combat_areas.size(); ++k) {
+			CHECK(x.combat_areas[k].trigger == y.combat_areas[k].trigger);
+			CHECK(x.combat_areas[k].shape == y.combat_areas[k].shape);
+			CHECK(x.combat_areas[k].team == y.combat_areas[k].team);
+			CHECK(x.combat_areas[k].polygon == y.combat_areas[k].polygon);
+			CHECK(x.combat_areas[k].height == y.combat_areas[k].height);
+		}
+		REQUIRE(x.objectives.size() == y.objectives.size());
+		for (size_t k = 0; k < x.objectives.size(); ++k) {
+			CHECK(x.objectives[k].kind == y.objectives[k].kind);
+			CHECK(x.objectives[k].object == y.objectives[k].object);
+			CHECK(x.objectives[k].position == y.objectives[k].position);
+			CHECK(x.objectives[k].team == y.objectives[k].team);
+			CHECK(x.objectives[k].scope_label == y.objectives[k].scope_label);
+		}
+		CHECK(x.unwired_triggers == y.unwired_triggers);
+	}
+}
+
+void check_listen_config(const host::GameServerConfig &p_c, const host::ServerLevel &p_level) {
+	const host::GameServerConfig d;
+	CHECK(p_c.level == p_level.shared);
+	CHECK(p_c.snapshot_divisor == d.snapshot_divisor);
+	CHECK(p_c.max_slots == 64u);
+	CHECK(p_c.jitter_buffer_ticks == d.jitter_buffer_ticks);
+	CHECK(p_c.respawn_ticks == 300u);
+	CHECK(p_c.walkers == 0u);
+	CHECK(p_c.dev_commands == false);
+	CHECK(p_c.seed == 1u);
+	REQUIRE(p_c.bots != nullptr);
+	CHECK(p_c.bots->level == p_level.bots);
+	CHECK(p_c.bots->count == 0u);
+	CHECK(p_c.bots->spawn_in_main);
+	CHECK(p_c.gunplay.mechanics_cfg == d.gunplay.mechanics_cfg);
+	CHECK(p_c.gunplay.match_seed == d.gunplay.match_seed);
+	CHECK(p_c.gunplay.exact_aim == false);
+	CHECK(p_c.gunplay.infinite_magazine == false);
+	CHECK(p_c.gunplay.friendly_fire == false);
+	CHECK(p_c.gunplay.target_bots == 0u);
+	CHECK(p_c.gunplay.player_kit == 0u);
+	CHECK(p_c.gunplay.player_team == 0u);
+	CHECK(p_c.gunplay.observer == nullptr);
+	CHECK(p_c.firefight == nullptr);
+	CHECK(p_c.rules.mode == host::MatchRulesConfig::Mode::Tdm);
+	CHECK(p_c.rules.deploy_screen);
+	CHECK(p_c.rules.revive);
+	CHECK(p_c.rules.kill_limit_override == 0);
+	CHECK(p_c.rules.preround_override_s == -1.0f);
+	CHECK(p_c.rules.min_players_override == -1);
+	CHECK(p_c.rules.max_players == 32u);
+	REQUIRE(p_c.tdm_bots != nullptr);
+	CHECK(p_c.tdm_bots->count == 31u);
+	CHECK(p_c.tdm_bots->tuning_cfg == OPENBF3_BOT_TUNING_CFG);
+	CHECK(p_c.tdm_bots->stats == nullptr);
+	CHECK(p_c.tdm_bots->observer == nullptr);
+}
+
+}
+
+TEST_SUITE("host-server-level") {
+	TEST_CASE("load_server_level: Metro TDM cold then warm on a scratch cache, combat tiles cached by the mount "
+			  "digest, the listen config field for field") {
+		bf3::test::Mounted m;
+		if (!bf3::test::open_or_skip(m)) {
+			return;
+		}
+		const std::filesystem::path root = scratch_cache("server-level");
+		std::shared_ptr<core::Cache> cache = open_cache(root, m.reader);
+		const host::LevelEntry metro{ "MP_Subway", "TeamDeathMatch0", 1 };
+		host::ServerLevelOptions options = server_options(true);
+		options.keep_database = true;
+		core::Result<host::ServerLevel> cold = host::load_server_level(m.install, metro, options, cache.get(), nullptr);
+		REQUIRE_MESSAGE(cold.ok(), (cold.ok() ? std::string() : cold.error().message));
+		print_level("host.server.level cold", *cold);
+		CHECK_FALSE(cold->combat_cache_hit);
+		CHECK_FALSE(cold->nav_cache_hit);
+		REQUIRE(cold->shared != nullptr);
+		REQUIRE(cold->bots != nullptr);
+		CHECK(cold->shared->level == "MP_Subway");
+		CHECK(cold->shared->logic != nullptr);
+		CHECK(cold->shared->gunplay != nullptr);
+		REQUIRE(cold->database.level != nullptr);
+
+		core::Result<host::ServerLevel> warm = host::load_server_level(m.install, metro, options, cache.get(), nullptr);
+		REQUIRE_MESSAGE(warm.ok(), (warm.ok() ? std::string() : warm.error().message));
+		print_level("host.server.level warm", *warm);
+		CHECK(warm->combat_cache_hit);
+		CHECK(warm->nav_cache_hit);
+		CHECK(warm->shared->source_digest == cold->shared->source_digest);
+		CHECK(warm->shared->logic_digest == cold->shared->logic_digest);
+		CHECK(warm->bots->region == cold->bots->region);
+		CHECK(warm->seconds.combat < cold->seconds.combat);
+
+		const float margin = sim::NavParams().region_margin;
+		core::Result<core::level::LevelCombatTiles> direct =
+				core::level::level_combat_tiles(m.install, "MP_Subway", margin);
+		REQUIRE(direct.ok());
+		core::Result<core::level::CombatTilesLoad> hit =
+				core::level::load_level_combat_tiles(cache.get(), m.install, *cold->database.level, margin);
+		REQUIRE(hit.ok());
+		CHECK(hit->cache_hit);
+		std::printf("host.server.level: combat tiles %zu tiles over %zu modes, direct %.2f s, cache hit %.3f s (mount "
+					"digest %.3f s)\n",
+				direct->tiles.size(), direct->modes.size(), direct->seconds, hit->seconds, hit->seconds_key);
+		check_tiles_equal(*direct, hit->tiles);
+		CHECK_FALSE(direct->tiles.empty());
+		core::Result<core::level::LevelCombatTiles> decoded =
+				core::level::decode_combat_tiles(core::level::encode_combat_tiles(*direct));
+		REQUIRE(decoded.ok());
+		check_tiles_equal(*direct, *decoded);
+		std::vector<uint8_t> bytes = core::level::encode_combat_tiles(*direct);
+		bytes.pop_back();
+		CHECK_FALSE(core::level::decode_combat_tiles(bytes).ok());
+		bytes = core::level::encode_combat_tiles(*direct);
+		bytes.push_back(0);
+		CHECK_FALSE(core::level::decode_combat_tiles(bytes).ok());
+		core::Result<core::level::CombatTilesLoad> other_margin =
+				core::level::load_level_combat_tiles(cache.get(), m.install, *cold->database.level, margin + 1.0f);
+		REQUIRE(other_margin.ok());
+		CHECK_FALSE(other_margin->cache_hit);
+
+		host::ServerRules rules;
+		rules.bot_tuning_cfg = OPENBF3_BOT_TUNING_CFG;
+		check_listen_config(host::tdm_game_server_config(*cold, rules), *cold);
+		rules.max_players = 64;
+		rules.bots = 63;
+		const host::GameServerConfig big = host::tdm_game_server_config(*cold, rules);
+		CHECK(big.max_slots == 64u);
+		CHECK(big.rules.max_players == 64u);
+		REQUIRE(big.tdm_bots != nullptr);
+		CHECK(big.tdm_bots->count == 63u);
+		rules.max_players = 200;
+		CHECK(host::tdm_game_server_config(*cold, rules).rules.max_players == host::kServerMaxPlayers);
+		rules.bots = 0;
+		CHECK(host::tdm_game_server_config(*cold, rules).tdm_bots == nullptr);
+
+		cache->close();
+		std::error_code ec;
+		std::filesystem::remove_all(root, ec);
+		const core::SnapshotDiff diff = core::diff_snapshots(m.before, m.reader.snapshot());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+		std::printf("install.unchanged: %s (%zu files)\n", diff.clean() ? "clean" : diff.summary().c_str(),
+				m.before.files.size());
+	}
+}

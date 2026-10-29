@@ -227,6 +227,8 @@ target_sources(bf3_core PRIVATE
 target_sources(bf3_core PRIVATE
     include/bf3/core/level/mode_areas.h
     src/level/mode_areas.cpp
+    include/bf3/core/level/combat_tiles_cache.h
+    src/level/combat_tiles_cache.cpp
 )
 
 target_sources(bf3_core PRIVATE
