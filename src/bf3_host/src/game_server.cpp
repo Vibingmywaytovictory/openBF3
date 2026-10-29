@@ -84,6 +84,8 @@ struct GameServer::Impl {
 		[this](size_t p_slot) { reset_slot(p_slot); } };
 	uint64_t bad_datagrams = 0;
 	uint64_t level_mismatch_kicks = 0;
+	uint64_t protocol_kicks = 0;
+	uint64_t full_kicks = 0;
 	uint64_t step_precondition_failures = 0;
 	double last_step_ms = 0;
 
@@ -113,11 +115,13 @@ struct GameServer::Impl {
 		}
 		if (p_hello.protocol != net::kProtocolVersion) {
 			outbox.send(p_peer, net::kChannelReliable, net::encode_kick(net::protocol_kick(p_hello.protocol)));
+			++protocol_kicks;
 			return;
 		}
 		const int at = slots.free_slot();
 		if (at < 0) {
 			outbox.send(p_peer, net::kChannelReliable, net::encode_kick({ "server full", net::KickReason::Full }));
+			++full_kicks;
 			return;
 		}
 		reset_slot(size_t(at));
@@ -493,6 +497,13 @@ GameServerStats GameServer::stats() const {
 	g.bad_datagrams = m.bad_datagrams;
 	g.spawn_failures = m.spawner.failures();
 	g.level_mismatch_kicks = m.level_mismatch_kicks;
+	g.protocol_kicks = m.protocol_kicks;
+	g.full_kicks = m.full_kicks;
+	if (const TdmRules *rules = m.match.rules(); rules != nullptr) {
+		g.rules_active = true;
+		g.match = rules->match_state();
+		g.rules = rules->stats();
+	}
 	g.rules_step_failures = m.match.step_failures();
 	g.step_precondition_failures = m.step_precondition_failures;
 	g.last_step_ms = m.last_step_ms;

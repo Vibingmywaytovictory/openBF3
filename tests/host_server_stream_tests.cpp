@@ -454,6 +454,9 @@ TEST_SUITE("host-server-stream") {
 		CHECK(rec.count(net::MessageType::DebugReport) >= 7u);
 		CHECK(rec.count(net::MessageType::Spawned) > 0u);
 		CHECK(server.stats().level_mismatch_kicks == 1u);
+		CHECK(server.stats().protocol_kicks == 1u);
+		CHECK(server.stats().full_kicks + server.stats().protocol_kicks + server.stats().level_mismatch_kicks ==
+				rec.count(net::MessageType::Kick));
 		CHECK(server.stats().bad_datagrams >= 2u);
 		CHECK(rec.stream.h == kDevStreamHash);
 		CHECK(rec.states.h == kDevStateHash);

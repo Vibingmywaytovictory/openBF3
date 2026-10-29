@@ -7,6 +7,7 @@
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/map_list.h"
 #include "bf3/host/server_level.h"
+#include "bf3/host/server_session.h"
 #include "bf3/sim/nav.h"
 
 #include "gunplay_fixture.h"
@@ -72,9 +73,15 @@ void check_tiles_equal(const core::level::LevelCombatTiles &p_a, const core::lev
 	CHECK(p_a.points == p_b.points);
 	CHECK(p_a.points_outside_areas == p_b.points_outside_areas);
 	REQUIRE(p_a.areas.size() == p_b.areas.size());
+	if (p_a.areas.size() != p_b.areas.size()) {
+		return;
+	}
 	for (size_t i = 0; i < p_a.areas.size(); ++i) {
 		const core::level::ModeAreas &x = p_a.areas[i], &y = p_b.areas[i];
 		REQUIRE(x.combat_areas.size() == y.combat_areas.size());
+		if (x.combat_areas.size() != y.combat_areas.size()) {
+			return;
+		}
 		for (size_t k = 0; k < x.combat_areas.size(); ++k) {
 			CHECK(x.combat_areas[k].trigger == y.combat_areas[k].trigger);
 			CHECK(x.combat_areas[k].shape == y.combat_areas[k].shape);
@@ -83,6 +90,9 @@ void check_tiles_equal(const core::level::LevelCombatTiles &p_a, const core::lev
 			CHECK(x.combat_areas[k].height == y.combat_areas[k].height);
 		}
 		REQUIRE(x.objectives.size() == y.objectives.size());
+		if (x.objectives.size() != y.objectives.size()) {
+			return;
+		}
 		for (size_t k = 0; k < x.objectives.size(); ++k) {
 			CHECK(x.objectives[k].kind == y.objectives[k].kind);
 			CHECK(x.objectives[k].object == y.objectives[k].object);
@@ -105,6 +115,9 @@ void check_listen_config(const host::GameServerConfig &p_c, const host::ServerLe
 	CHECK(p_c.dev_commands == false);
 	CHECK(p_c.seed == 1u);
 	REQUIRE(p_c.bots != nullptr);
+	if (p_c.bots == nullptr) {
+		return;
+	}
 	CHECK(p_c.bots->level == p_level.bots);
 	CHECK(p_c.bots->count == 0u);
 	CHECK(p_c.bots->spawn_in_main);
@@ -126,6 +139,9 @@ void check_listen_config(const host::GameServerConfig &p_c, const host::ServerLe
 	CHECK(p_c.rules.min_players_override == -1);
 	CHECK(p_c.rules.max_players == 32u);
 	REQUIRE(p_c.tdm_bots != nullptr);
+	if (p_c.tdm_bots == nullptr) {
+		return;
+	}
 	CHECK(p_c.tdm_bots->count == 31u);
 	CHECK(p_c.tdm_bots->tuning_cfg == OPENBF3_BOT_TUNING_CFG);
 	CHECK(p_c.tdm_bots->stats == nullptr);
@@ -139,17 +155,32 @@ TEST_SUITE("host-map-list-unit") {
 		core::Result<host::MapList> list = host::parse_map_list(
 				"MP_Subway TeamDeathMatch0 1\n# rotation\n\nMP_011 TeamDeathMatch0\n  MP_003\tTeamDeathMatch0  2  \n");
 		REQUIRE_MESSAGE(list.ok(), (list.ok() ? std::string() : list.error().message));
+		if (!list.ok()) {
+			return;
+		}
 		REQUIRE(list->entries.size() == 3u);
+		if (list->entries.size() != 3u) {
+			return;
+		}
 		CHECK(list->entries[0] == host::LevelEntry{ "MP_Subway", "TeamDeathMatch0", 1 });
 		CHECK(list->entries[1] == host::LevelEntry{ "MP_011", "TeamDeathMatch0", 1 });
 		CHECK(list->entries[2] == host::LevelEntry{ "MP_003", "TeamDeathMatch0", 2 });
 		core::Result<host::MapList> again = host::parse_map_list(host::format_map_list(*list));
 		REQUIRE(again.ok());
+		if (!again.ok()) {
+			return;
+		}
 		CHECK(*again == *list);
 
 		core::Result<host::MapList> shipped = host::load_map_list(OPENBF3_MAPLIST_CFG);
 		REQUIRE_MESSAGE(shipped.ok(), (shipped.ok() ? std::string() : shipped.error().message));
+		if (!shipped.ok()) {
+			return;
+		}
 		REQUIRE(shipped->entries.size() == 3u);
+		if (shipped->entries.size() != 3u) {
+			return;
+		}
 		CHECK(shipped->entries[0] == host::LevelEntry{ "MP_Subway", "TeamDeathMatch0", 1 });
 		CHECK(shipped->entries[1] == host::LevelEntry{ "MP_011", "TeamDeathMatch0", 1 });
 		CHECK(shipped->entries[2] == host::LevelEntry{ "MP_003", "TeamDeathMatch0", 1 });
@@ -183,6 +214,9 @@ TEST_SUITE("host-map-list-unit") {
 		core::Result<host::MapList> list =
 				host::parse_map_list("MP_Subway TeamDeathMatch0 2\nMP_011 TeamDeathMatch0 1\n");
 		REQUIRE(list.ok());
+		if (!list.ok()) {
+			return;
+		}
 		host::MapListCursor c(*list);
 		CHECK(c.current().level == "MP_Subway");
 		CHECK(c.next_level().level == "MP_Subway");
@@ -196,6 +230,9 @@ TEST_SUITE("host-map-list-unit") {
 		CHECK(c.current().level == "MP_Subway");
 		core::Result<host::MapList> one = host::parse_map_list("MP_Subway TeamDeathMatch0\n");
 		REQUIRE(one.ok());
+		if (!one.ok()) {
+			return;
+		}
 		host::MapListCursor o(*one);
 		CHECK_FALSE(o.round_over());
 		CHECK_FALSE(o.round_over());
@@ -217,18 +254,33 @@ TEST_SUITE("host-server-level") {
 		options.keep_database = true;
 		core::Result<host::ServerLevel> cold = host::load_server_level(m.install, metro, options, cache.get(), nullptr);
 		REQUIRE_MESSAGE(cold.ok(), (cold.ok() ? std::string() : cold.error().message));
+		if (!cold.ok()) {
+			return;
+		}
 		print_level("host.server.level cold", *cold);
 		CHECK_FALSE(cold->combat_cache_hit);
 		CHECK_FALSE(cold->nav_cache_hit);
 		REQUIRE(cold->shared != nullptr);
+		if (cold->shared == nullptr) {
+			return;
+		}
 		REQUIRE(cold->bots != nullptr);
+		if (cold->bots == nullptr) {
+			return;
+		}
 		CHECK(cold->shared->level == "MP_Subway");
 		CHECK(cold->shared->logic != nullptr);
 		CHECK(cold->shared->gunplay != nullptr);
 		REQUIRE(cold->database.level != nullptr);
+		if (cold->database.level == nullptr) {
+			return;
+		}
 
 		core::Result<host::ServerLevel> warm = host::load_server_level(m.install, metro, options, cache.get(), nullptr);
 		REQUIRE_MESSAGE(warm.ok(), (warm.ok() ? std::string() : warm.error().message));
+		if (!warm.ok()) {
+			return;
+		}
 		print_level("host.server.level warm", *warm);
 		CHECK(warm->combat_cache_hit);
 		CHECK(warm->nav_cache_hit);
@@ -241,9 +293,15 @@ TEST_SUITE("host-server-level") {
 		core::Result<core::level::LevelCombatTiles> direct =
 				core::level::level_combat_tiles(m.install, "MP_Subway", margin);
 		REQUIRE(direct.ok());
+		if (!direct.ok()) {
+			return;
+		}
 		core::Result<core::level::CombatTilesLoad> hit =
 				core::level::load_level_combat_tiles(cache.get(), m.install, *cold->database.level, margin);
 		REQUIRE(hit.ok());
+		if (!hit.ok()) {
+			return;
+		}
 		CHECK(hit->cache_hit);
 		std::printf("host.server.level: combat tiles %zu tiles over %zu modes, direct %.2f s, cache hit %.3f s (mount "
 					"digest %.3f s)\n",
@@ -253,6 +311,9 @@ TEST_SUITE("host-server-level") {
 		core::Result<core::level::LevelCombatTiles> decoded =
 				core::level::decode_combat_tiles(core::level::encode_combat_tiles(*direct));
 		REQUIRE(decoded.ok());
+		if (!decoded.ok()) {
+			return;
+		}
 		check_tiles_equal(*direct, *decoded);
 		std::vector<uint8_t> bytes = core::level::encode_combat_tiles(*direct);
 		bytes.pop_back();
@@ -263,6 +324,9 @@ TEST_SUITE("host-server-level") {
 		core::Result<core::level::CombatTilesLoad> other_margin =
 				core::level::load_level_combat_tiles(cache.get(), m.install, *cold->database.level, margin + 1.0f);
 		REQUIRE(other_margin.ok());
+		if (!other_margin.ok()) {
+			return;
+		}
 		CHECK_FALSE(other_margin->cache_hit);
 
 		host::ServerRules rules;
@@ -274,6 +338,9 @@ TEST_SUITE("host-server-level") {
 		CHECK(big.max_slots == 64u);
 		CHECK(big.rules.max_players == 64u);
 		REQUIRE(big.tdm_bots != nullptr);
+		if (big.tdm_bots == nullptr) {
+			return;
+		}
 		CHECK(big.tdm_bots->count == 63u);
 		rules.max_players = 200;
 		CHECK(host::tdm_game_server_config(*cold, rules).rules.max_players == host::kServerMaxPlayers);
@@ -281,6 +348,85 @@ TEST_SUITE("host-server-level") {
 		CHECK(host::tdm_game_server_config(*cold, rules).tdm_bots == nullptr);
 
 		cache->close();
+		std::error_code ec;
+		std::filesystem::remove_all(root, ec);
+		const core::SnapshotDiff diff = core::diff_snapshots(m.before, m.reader.snapshot());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+		std::printf("install.unchanged: %s (%zu files)\n", diff.clean() ? "clean" : diff.summary().c_str(),
+				m.before.files.size());
+	}
+}
+
+TEST_SUITE("host-server-level-prebake") {
+	TEST_CASE("ServerSession: Metro first, then a below-normal pre-bake makes MP_011 and MP_003 load as cache hits") {
+		bf3::test::Mounted m;
+		if (!bf3::test::open_or_skip(m)) {
+			return;
+		}
+		const std::filesystem::path root = scratch_cache("server-prebake");
+		host::ServerSessionConfig config;
+		config.install = m.install;
+		config.cache = open_cache(root, m.reader);
+		core::Result<host::MapList> maps = host::load_map_list(OPENBF3_MAPLIST_CFG);
+		REQUIRE(maps.ok());
+		if (!maps.ok()) {
+			return;
+		}
+		config.maps = *maps;
+		config.level = server_options(true);
+		config.rules.bot_tuning_cfg = OPENBF3_BOT_TUNING_CFG;
+		config.rules.mechanics_cfg = OPENBF3_MECHANICS_CFG;
+		config.rules.bots = 31;
+		host::ServerSession session;
+		const auto start = std::chrono::steady_clock::now();
+		const core::Status started = session.start(config);
+		REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
+		if (!started.ok()) {
+			return;
+		}
+		const double seconds_first = core::seconds_since(start);
+		print_level("host.server.level.prebake first", session.level());
+		CHECK(session.port() != 0u);
+		CHECK(session.level().entry.level == "MP_Subway");
+		CHECK(session.game_config().tdm_bots != nullptr);
+		REQUIRE(session.wait_prebake(std::chrono::seconds(240)));
+		if (!session.wait_prebake(std::chrono::seconds(240))) {
+			return;
+		}
+		const std::vector<host::PrebakeEntry> baked = session.prebake();
+		REQUIRE(baked.size() == 2u);
+		if (baked.size() != 2u) {
+			return;
+		}
+		for (const host::PrebakeEntry &e : baked) {
+			std::printf("host.server.level.prebake: %s %s %s in %.2f s (database %.2f, combat %.2f, shared %.2f, bots "
+						"%.2f)%s%s\n",
+					e.entry.level.c_str(), e.entry.mode.c_str(), host::prebake_state_name(e.state), e.seconds.total,
+					e.seconds.database, e.seconds.combat, e.seconds.shared, e.seconds.bots, e.error.empty() ? "" : ": ",
+					e.error.c_str());
+			CHECK(e.state == host::PrebakeEntry::State::Done);
+			CHECK_FALSE(e.combat_cache_hit);
+			CHECK_FALSE(e.nav_cache_hit);
+		}
+		const host::ServerSessionStats running = session.stats();
+		CHECK(running.server.ticks > 0u);
+		CHECK(running.private_bytes > 0u);
+		CHECK(running.game.rules_active);
+		for (size_t i = 1; i < maps->entries.size(); ++i) {
+			core::Result<host::ServerLevel> warm =
+					host::load_server_level(m.install, maps->entries[i], config.level, config.cache.get(), nullptr);
+			REQUIRE_MESSAGE(warm.ok(), (warm.ok() ? std::string() : warm.error().message));
+			if (!warm.ok()) {
+				return;
+			}
+			print_level("host.server.level.prebake warm", *warm);
+			CHECK(warm->combat_cache_hit);
+			CHECK(warm->nav_cache_hit);
+		}
+		session.stop();
+		CHECK_FALSE(session.running());
+		std::printf("host.server.level.prebake: first level and port in %.2f s\n", seconds_first);
+		config.cache->close();
 		std::error_code ec;
 		std::filesystem::remove_all(root, ec);
 		const core::SnapshotDiff diff = core::diff_snapshots(m.before, m.reader.snapshot());

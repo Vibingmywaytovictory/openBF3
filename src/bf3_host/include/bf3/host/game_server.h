@@ -90,6 +90,11 @@ struct GameServerStats {
 	uint64_t spawn_failures = 0;
 	uint64_t level_mismatch_kicks = 0;
 	uint64_t rules_step_failures = 0;
+	uint64_t protocol_kicks = 0;
+	uint64_t full_kicks = 0;
+	bool rules_active = false;
+	net::MatchState match;
+	RulesStats rules;
 
 	uint64_t step_precondition_failures = 0;
 	double last_step_ms = 0;
