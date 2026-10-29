@@ -49,6 +49,12 @@ a `timing` row, split first so its socket-free cases stay on branches (`host.ses
 `host.gunplay.client.unit.pure`). `host.gunplay.server` (1 failure in 3 such runs) and `host.gunplay.client.unit`
 (1 in 10) are timing rows for this reason.
 
+A multi-process row (`openbf3_proc_row`) whose processes talk over sockets or wait on wall-clock windows is a `timing`
+row unless it gives 10 clean runs beside a `-j16` branch pass, and each such row has a socket-free twin on branches
+that makes the same checks without processes (scripted peers through `GameServer::on_receive`, a fake transport). A
+row whose children only print and exit, waited on by line and exit with a timeout each (`net.procs.harness`), is
+functional.
+
 ## 2. Parallel-safe by default
 
 * Scratch goes to per-PID or `string(RANDOM)` roots, preferably under `${CMAKE_BINARY_DIR}/scratch`. Outputs go to
@@ -110,6 +116,11 @@ Dev preset, a row measured alone on a quiet machine; asan is about 10x.
 * Timing, real-time and window rows: at most 120 s each unless the gate defines the length (G8's 30 s recording,
   E2's 90 s, M2a cl's E15 10 min loopback in `host.gunplay.client`, about 990 s in all; `host.gunplay.server`'s
   60 Hz play, about 127 s; `godot.fx_ref`'s alternating G1b windows, about 182 s); the design doc then states it.
+* M3's long rows, each as long as its gate: `godot.rotation` (a dedicated server and two clients over three levels,
+  each round end keeping the data's 60 s intermission, about 8 min), `godot.level_change` (the same three levels in a
+  listen game), `net.procs.scale32` and `net.procs.scale64` (the processes' start-up plus 120 s of 32 and 64 real
+  connections, timing); `godot.audio_ingame` and `godot.deploy` run as phase rows (`--audio-ingame-phase`, the deploy
+  phases), each phase within 120 s.
 * Asan: a row over 600 s gets `asan_sweep`. Its full tier runs at acceptance for branches touching what it links,
   and on the latest main after merges.
 
