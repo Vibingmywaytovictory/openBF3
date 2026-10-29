@@ -14,6 +14,7 @@
 #include "bf3/host/loadout.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/logic/round_natives.h"
+#include "bf3/sim/nav_query.h"
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/weapons/weapon_input.h"
 #include "bf3/sim/weapons/weapon_rng.h"
@@ -386,6 +387,21 @@ SquadCensus squad_census(std::span<const net::PlayerRow> p_rows) {
 		}
 	}
 	return c;
+}
+int squad_index(const tdm::ScriptedPeer &p_peer, int p_of, int p_mate) {
+	const net::PlayerRow *own = seen_row(p_peer, p_of);
+	if (own == nullptr || own->squad == 0) {
+		return -1;
+	}
+	std::vector<int> slots;
+	for (const net::PlayerRow &r : p_peer.players) {
+		if (r.team == own->team && r.squad == own->squad) {
+			slots.push_back(r.slot);
+		}
+	}
+	std::sort(slots.begin(), slots.end());
+	const auto at = std::find(slots.begin(), slots.end(), p_mate);
+	return at != slots.end() ? int(at - slots.begin()) : -1;
 }
 }
 
@@ -1279,7 +1295,7 @@ TEST_SUITE("host-tdm-server") {
 			CHECK((team == 1 || team == 2));
 			CHECK(r.on_connect(1, true, "") != 0);
 			CHECK(r.request_spawn(0, host::kKitCount, 0, 10) == SpawnRefusal::BadKit);
-			CHECK(r.request_spawn(0, 0, 1, 11) == SpawnRefusal::BadKit);
+			CHECK(r.request_spawn(0, 0, 1, 11) == SpawnRefusal::SquadMate);
 			CHECK(r.request_spawn(0, 1, 0, 12) == SpawnRefusal::None);
 			CHECK(r.request_spawn(0, 1, 0, 12) == SpawnRefusal::RateLimited);
 			CHECK(r.request_spawn(0, 1, 0, 13) == SpawnRefusal::Alive);
@@ -1305,7 +1321,8 @@ TEST_SUITE("host-tdm-server") {
 			CHECK(st.spawns_accepted == 2u);
 			CHECK(st.refused[size_t(SpawnRefusal::Alive)] == 2u);
 			CHECK(st.refused[size_t(SpawnRefusal::TooEarly)] == 1u);
-			CHECK(st.refused[size_t(SpawnRefusal::BadKit)] == 2u);
+			CHECK(st.refused[size_t(SpawnRefusal::BadKit)] == 1u);
+			CHECK(st.refused[size_t(SpawnRefusal::SquadMate)] == 1u);
 			CHECK(st.refused[size_t(SpawnRefusal::Phase)] == 1u);
 			CHECK(st.refused[size_t(SpawnRefusal::RateLimited)] == 1u);
 			CHECK(st.refused[size_t(SpawnRefusal::Spectator)] == 1u);
@@ -1959,6 +1976,100 @@ TEST_SUITE("host-tdm-server") {
 				squad_of(alpha), heir, unsigned(bravo_seen->team), unsigned(bravo_seen->squad), after.team[1],
 				after.team[2]);
 		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+
+	TEST_CASE("squads: a SpawnRequest on a living squad mate deploys at the mate's nav position and scores SPAWN_SQUAD "
+			  "for the mate; the "
+			  "requester itself, a missing index and a dead mate are refused") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		REQUIRE(level->bots != nullptr);
+		REQUIRE(level->bots->nav != nullptr);
+		REQUIRE(level->shared->scoring != nullptr);
+		CHECK(level->shared->scoring->score("ID_SCORE_SPAWN_SQUAD") == std::optional<double>(10.0));
+		std::unique_ptr<Match> m = start_match(*level, true, 53u, 0, -1, squad_server(*level));
+		tdm::ScriptedPeer &alpha = m->join("alpha");
+		tdm::ScriptedPeer &bravo = m->join("bravo");
+		tdm::ScriptedPeer &charlie = m->join("charlie");
+		alpha.ready();
+		bravo.ready();
+		charlie.ready();
+		m->bot();
+		REQUIRE(wait_in_round(*m));
+		REQUIRE(m->rules().team_of(uint8_t(alpha.slot())) == 1);
+		REQUIRE(m->rules().team_of(uint8_t(charlie.slot())) == 1);
+		charlie.spawn_request(1);
+		REQUIRE(m->until([&] { return is_alive(m->state(charlie.slot())); }, 240));
+		m->ticks(net::kPlayerListIntervalTicks + 2u);
+		const int mate_index = squad_index(alpha, alpha.slot(), charlie.slot());
+		const int self_index = squad_index(alpha, alpha.slot(), alpha.slot());
+		std::printf("squad spawn: alpha slot %d squad %d, charlie slot %d at index %d, alpha at index %d\n",
+				alpha.slot(), seen_row(alpha, alpha.slot()) != nullptr ? int(seen_row(alpha, alpha.slot())->squad) : -1,
+				charlie.slot(), mate_index, self_index);
+		CHECK(self_index == 0);
+		CHECK(mate_index == 1);
+		const uint8_t self_choice = 1, mate_choice = 2;
+		REQUIRE(m->row(charlie.slot()) != nullptr);
+		const int32_t mate_score = m->row(charlie.slot())->score;
+
+		alpha.spawn_request(0, self_choice);
+		m->ticks(2);
+		alpha.spawn_request(0, uint8_t(1 + 4));
+		m->ticks(2);
+		CHECK_FALSE(is_alive(m->state(alpha.slot())));
+		CHECK(alpha.spawned.empty());
+
+		core::Result<std::unique_ptr<sim::NavQuery>> nav = sim::NavQuery::create(level->bots->nav);
+		REQUIRE_MESSAGE(nav.ok(), (nav.ok() ? std::string() : nav.error().message));
+		const sim::Vec3 mate_at = m->state(charlie.slot())->position;
+		sim::NavPolyRef poly = 0;
+		sim::Vec3 nav_at{};
+		REQUIRE((*nav)->nearest(mate_at, sim::Vec3{ 1.0f, 2.0f, 1.0f }, &poly, &nav_at));
+		alpha.spawn_request(0, mate_choice);
+		REQUIRE(m->until([&] { return is_alive(m->state(alpha.slot())); }, 10));
+		REQUIRE(alpha.spawned.size() == 1u);
+		if (alpha.spawned.size() != 1u) {
+			return;
+		}
+		const sim::Vec3 deployed = alpha.spawned.back().state.position;
+		std::printf("squad spawn: the mate at (%.2f %.2f %.2f), its nav point (%.2f %.2f %.2f), alpha deployed at "
+					"(%.2f %.2f %.2f): %.3f m from the nav "
+					"point\n",
+				mate_at[0], mate_at[1], mate_at[2], nav_at[0], nav_at[1], nav_at[2], deployed[0], deployed[1],
+				deployed[2], distance(deployed, nav_at));
+		CHECK(distance(deployed, nav_at) <= 1.0f);
+		m->ticks(net::kPlayerListIntervalTicks + 2u);
+		REQUIRE(m->row(charlie.slot()) != nullptr);
+		CHECK(m->row(charlie.slot())->score == mate_score + 10);
+		REQUIRE(seen_row(alpha, charlie.slot()) != nullptr);
+		CHECK(seen_row(alpha, charlie.slot())->score == mate_score + 10);
+
+		const std::vector<uint8_t> suicide = net::encode_suicide_request();
+		m->server.on_receive(charlie.peer(), net::kChannelReliable, suicide);
+		m->server.on_receive(alpha.peer(), net::kChannelReliable, suicide);
+		m->ticks(3);
+		REQUIRE_FALSE(is_alive(m->state(charlie.slot())));
+		REQUIRE_FALSE(is_alive(m->state(alpha.slot())));
+		const uint32_t earliest = m->rules().earliest_respawn(uint8_t(alpha.slot()));
+		REQUIRE(m->until([&] { return m->now() + 1u >= earliest; }, 900));
+		m->ticks(2);
+		alpha.spawn_request(0, mate_choice);
+		m->ticks(3);
+		CHECK_FALSE(is_alive(m->state(alpha.slot())));
+		CHECK(alpha.spawned.size() == 1u);
+		alpha.spawn_request(0, 0);
+		CHECK(m->until([&] { return is_alive(m->state(alpha.slot())); }, 10));
+		CHECK(alpha.spawned.size() == 2u);
+		const host::RulesStats &st = m->rules().stats();
+		std::printf("squad spawn: %llu squad spawns (%llu on the nav mesh), %llu refused for the mate\n",
+				(unsigned long long)st.squad_spawns, (unsigned long long)st.squad_spawns_on_nav,
+				(unsigned long long)st.refused[size_t(host::SpawnRefusal::SquadMate)]);
+		CHECK(st.squad_spawns == 1u);
+		CHECK(st.squad_spawns_on_nav == 1u);
+		CHECK(st.refused[size_t(host::SpawnRefusal::SquadMate)] == 3u);
+		CHECK(st.runtime_faults == 0u);
 	}
 
 	TEST_CASE("install unchanged") {

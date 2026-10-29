@@ -62,6 +62,7 @@ private:
 		sim::Tick at = 0;
 	};
 
+	void enter_at(size_t p_slot, const sim::SpawnPoint &p_point, sim::Tick p_tick);
 	core::Status revive(size_t p_slot, const sim::Vec3 &p_position, uint16_t p_yaw, float p_health, sim::Tick p_tick);
 	void unspawn(size_t p_slot);
 	void on_spawn(size_t p_slot, sim::Tick p_tick);

@@ -103,10 +103,17 @@ bool Spawner::spawn(size_t p_slot, size_t p_point, sim::Tick p_tick) {
 		++failures_;
 		return false;
 	}
-	const sim::SettleResult r = sim::settle_spawn(motor_, *world_, points[index], soldiers_[p_slot].state.life + 1u, p_tick);
+	enter_at(p_slot, points[index], p_tick);
+	return true;
+}
+
+void Spawner::enter_at(size_t p_slot, const sim::SpawnPoint &p_point, sim::Tick p_tick) {
+	const Seat &s = slots_[p_slot];
+	const sim::SettleResult r = sim::settle_spawn(motor_, *world_, p_point, soldiers_[p_slot].state.life + 1u, p_tick);
 	++tick_spawns_;
 	if (!r.ok) {
-		std::fprintf(stderr, "GameServer: spawn point %u did not settle: %s (spawning there anyway)\n", points[index].index, r.failure.c_str());
+		std::fprintf(stderr, "GameServer: spawn point %u did not settle: %s (spawning there anyway)\n", p_point.index,
+				r.failure.c_str());
 	}
 	soldiers_.enter(p_slot, r.state);
 	respawns_[p_slot].wanted = false;
@@ -114,12 +121,11 @@ bool Spawner::spawn(size_t p_slot, size_t p_point, sim::Tick p_tick) {
 	if (s.remote) {
 		net::Spawned m;
 		m.slot = uint8_t(p_slot);
-		m.spawn_index = points[index].index;
+		m.spawn_index = p_point.index;
 		m.state = soldiers_[p_slot].state;
 		describe_spawned(p_slot, m);
 		outbox_.send(s.peer, net::kChannelReliable, net::encode_spawned(m));
 	}
-	return true;
 }
 
 core::Status Spawner::place(size_t p_slot, const sim::Vec3 &p_position, uint16_t p_yaw, sim::Pose p_pose, sim::Tick p_tick) {
@@ -187,6 +193,16 @@ void Spawner::apply_orders(sim::Tick p_tick, std::span<const RulesOrder> p_order
 			case RulesOrder::Kind::Spawn:
 				if (!soldiers_.alive(o.slot)) {
 					spawn(o.slot, SIZE_MAX, p_tick);
+				}
+				break;
+			case RulesOrder::Kind::SpawnAt:
+				if (!soldiers_.alive(o.slot) && std::isfinite(o.position[0]) && std::isfinite(o.position[1]) &&
+						std::isfinite(o.position[2])) {
+					sim::SpawnPoint point;
+					point.position = o.position;
+					point.yaw = o.yaw;
+					point.team = slots_[o.slot].team;
+					enter_at(o.slot, point, p_tick);
 				}
 				break;
 			case RulesOrder::Kind::Revive: {

@@ -50,6 +50,7 @@ struct TdmTuning {
 	int32_t score_kill = 100;
 	int32_t score_headshot = 10;
 	int32_t score_revive = 100;
+	int32_t score_spawn_squad = 10;
 
 	std::array<uint32_t, 4> bot_kit_weights{ 40, 20, 20, 20 };
 
@@ -84,7 +85,7 @@ struct MatchRulesConfig {
 };
 
 struct RulesOrder {
-	enum class Kind : uint8_t { Spawn = 0, Revive = 1, Unspawn = 2 };
+	enum class Kind : uint8_t { Spawn = 0, Revive = 1, Unspawn = 2, SpawnAt = 3 };
 	Kind kind = Kind::Spawn;
 	uint8_t slot = 0;
 	sim::Vec3 position{};
@@ -93,8 +94,18 @@ struct RulesOrder {
 	uint8_t reviver = 0;
 };
 
-enum class SpawnRefusal : uint8_t { None = 0, Alive = 1, TooEarly = 2, BadKit = 3, Phase = 4, RateLimited = 5, Spectator = 6 };
-inline constexpr size_t kSpawnRefusalCount = 7;
+enum class SpawnRefusal : uint8_t {
+	None = 0,
+	Alive = 1,
+	TooEarly = 2,
+	BadKit = 3,
+	Phase = 4,
+	RateLimited = 5,
+	Spectator = 6,
+	SquadMate = 7
+};
+inline constexpr size_t kSpawnRefusalCount = 8;
+inline constexpr sim::Vec3 kSquadSpawnNavExtents{ 1.0f, 2.0f, 1.0f };
 
 inline constexpr uint8_t kKeepKit = 0xFF;
 
@@ -121,6 +132,7 @@ struct RulesStats {
 	uint64_t suicides = 0, suicides_refused = 0;
 	uint64_t squad_requests = 0, squad_refused = 0;
 	uint64_t team_switches = 0, team_switches_refused = 0;
+	uint64_t squad_spawns = 0, squad_spawns_on_nav = 0;
 };
 static_assert(std::is_trivially_copyable_v<RulesStats>);
 

@@ -86,11 +86,13 @@ static_assert(uint8_t(host::PresentKind::Spawn) == 8 && uint8_t(host::PresentKin
 
 static_assert(uint8_t(sl::RoundPhase::PreRound) == 0 && uint8_t(sl::RoundPhase::InRound) == 1 && uint8_t(sl::RoundPhase::RoundOver) == 2 &&
 		uint8_t(sl::RoundPhase::Restarting) == 3);
-static_assert(uint8_t(host::SpawnRefusal::None) == 0 && uint8_t(host::SpawnRefusal::Alive) == 1 && uint8_t(host::SpawnRefusal::TooEarly) == 2 &&
-		uint8_t(host::SpawnRefusal::BadKit) == 3 && uint8_t(host::SpawnRefusal::Phase) == 4 && uint8_t(host::SpawnRefusal::RateLimited) == 5 &&
-		uint8_t(host::SpawnRefusal::Spectator) == 6 && host::kSpawnRefusalCount == 7);
+static_assert(uint8_t(host::SpawnRefusal::None) == 0 && uint8_t(host::SpawnRefusal::Alive) == 1 &&
+		uint8_t(host::SpawnRefusal::TooEarly) == 2 && uint8_t(host::SpawnRefusal::BadKit) == 3 &&
+		uint8_t(host::SpawnRefusal::Phase) == 4 && uint8_t(host::SpawnRefusal::RateLimited) == 5 &&
+		uint8_t(host::SpawnRefusal::Spectator) == 6 && uint8_t(host::SpawnRefusal::SquadMate) == 7 &&
+		host::kSpawnRefusalCount == 8);
 static_assert(uint8_t(host::RulesOrder::Kind::Spawn) == 0 && uint8_t(host::RulesOrder::Kind::Revive) == 1 &&
-		uint8_t(host::RulesOrder::Kind::Unspawn) == 2);
+		uint8_t(host::RulesOrder::Kind::Unspawn) == 2 && uint8_t(host::RulesOrder::Kind::SpawnAt) == 3);
 static_assert(uint8_t(host::MatchRulesConfig::Mode::None) == 0 && uint8_t(host::MatchRulesConfig::Mode::Tdm) == 1);
 static_assert(uint8_t(net::MatchPhase::Loading) == 0 && uint8_t(net::MatchPhase::PreRound) == 1 &&
 		uint8_t(net::MatchPhase::InRound) == 2 && uint8_t(net::MatchPhase::RoundOver) == 3 &&
