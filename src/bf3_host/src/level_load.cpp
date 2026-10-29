@@ -636,6 +636,12 @@ core::Status load_shared_tdm(const LevelDatabase &p_db, const SharedLoadOptions 
 	} else {
 		r_level.tdm_notes.push_back("scoring: " + scoring.error().message + " (the defaults)");
 	}
+	const std::optional<gp::GameModeSizeDef> size = gp::read_mode_size(level.db(), r_level.level, level.mode);
+	if (size && size->squad_size() > 0 && size->squad_size() <= 255) {
+		r_level.squad_size = uint8_t(size->squad_size());
+	} else {
+		r_level.tdm_notes.push_back("mode size: no SquadSize (the default squad size)");
+	}
 	core::Result<gp::EorTimeline> eor = gp::read_eor_timeline(level.db());
 	if (!eor) {
 		return core::error_at("tdm", eor.error());

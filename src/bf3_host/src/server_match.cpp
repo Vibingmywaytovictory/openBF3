@@ -68,6 +68,10 @@ void MatchControl::request_spawn(size_t p_slot, uint8_t p_kit, uint8_t p_spawn_c
 	(void)rules_->request_spawn(uint8_t(p_slot), p_kit, p_spawn_choice, p_tick);
 }
 
+void MatchControl::request_squad(size_t p_slot, const net::SquadRequest &p_request) {
+	(void)rules_->request_squad(uint8_t(p_slot), p_request);
+}
+
 void MatchControl::request_suicide(size_t p_slot) {
 	(void)rules_->request_suicide(uint8_t(p_slot));
 }

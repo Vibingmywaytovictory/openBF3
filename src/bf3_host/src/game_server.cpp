@@ -296,6 +296,15 @@ struct GameServer::Impl {
 		combat.select_loadout(size_t(p_slot), team, *r);
 	}
 
+	void receive_squad_request(int p_slot, std::span<const uint8_t> p_datagram) {
+		core::Result<net::SquadRequest> r = net::decode_squad_request(p_datagram);
+		if (!r || p_slot < 0 || size_t(p_slot) >= slots.size() || !match.on()) {
+			++bad_datagrams;
+			return;
+		}
+		match.request_squad(size_t(p_slot), *r);
+	}
+
 	void receive_suicide_request(int p_slot, std::span<const uint8_t> p_datagram) {
 		if (!net::decode_suicide_request(p_datagram) || p_slot < 0 || size_t(p_slot) >= slots.size() || !match.on()) {
 			++bad_datagrams;
@@ -458,6 +467,9 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 			return;
 		case net::MessageType::LoadoutRequest:
 			m.receive_loadout_request(at, p_datagram);
+			return;
+		case net::MessageType::SquadRequest:
+			m.receive_squad_request(at, p_datagram);
 			return;
 		default:
 			++m.bad_datagrams;

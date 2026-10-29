@@ -4,6 +4,7 @@
 #include "bf3/host/gunplay.h"
 #include "bf3/host/level_load.h"
 #include "bf3/host/server_view.h"
+#include "bf3/host/squads.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/logic/logic_runtime.h"
 #include "bf3/sim/logic/round_natives.h"
@@ -118,6 +119,8 @@ struct RulesStats {
 	uint64_t spawns_enemy_within_10m = 0;
 	uint64_t runtime_faults = 0;
 	uint64_t suicides = 0, suicides_refused = 0;
+	uint64_t squad_requests = 0, squad_refused = 0;
+	uint64_t team_switches = 0, team_switches_refused = 0;
 };
 static_assert(std::is_trivially_copyable_v<RulesStats>);
 
@@ -147,6 +150,8 @@ public:
 	bool request_suicide(uint8_t p_slot);
 	bool request_revive(uint8_t p_slot);
 	bool take_suicide(uint8_t p_slot);
+	SquadRefusal request_squad(uint8_t p_slot, const net::SquadRequest &p_request);
+	const SquadTable &squads() const;
 
 	core::Status step(uint32_t p_tick, const ServerView &p_view, const Gunplay &p_gunplay, std::span<sim::SoldierState> r_states,
 			std::vector<RulesOrder> &r_orders);

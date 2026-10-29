@@ -17,6 +17,7 @@
 #include "tdm_fixture.h"
 #include "test_support.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -44,9 +45,9 @@ struct StreamHashes {
 	uint64_t stats = 0;
 };
 
-constexpr StreamHashes kAlpha{ 0x03878685a23e9720ull, 0xef3857fca8175f79ull, 0x1d75e972f36e7d9bull,
+constexpr StreamHashes kAlpha{ 0x03878685a23e9720ull, 0x3b02d218f409212dull, 0x1d75e972f36e7d9bull,
 	0x5d420787cf4f7b84ull, 0x024f20a8ea28a659ull, 0xd5f4a43cf666841full };
-constexpr StreamHashes kBravo{ 0xefa667b8fae82456ull, 0x77d914ce43e6a72aull, 0x986e31d1cc72a233ull,
+constexpr StreamHashes kBravo{ 0xefa667b8fae82456ull, 0x15905ffe07d7b48eull, 0x986e31d1cc72a233ull,
 	0x7e580f66b9c41f78ull, 0xcf35ec403217df9cull, 0x4fab240676276cbdull };
 constexpr StreamHashes kCharlie{ 0x34a31e04bc0cdd63ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0xd4bbb61a31c1220aull };
 constexpr StreamHashes kDelta{ 0x871136e24f45fd28ull, 0x230fef91e68d4c3cull, 0x1696f56b23947cb4ull,
@@ -136,6 +137,8 @@ void add_row(Fnv &r_h, const net::PlayerRow &p_r) {
 	r_h.add(p_r.deaths);
 	r_h.add(p_r.score);
 	r_h.bytes(p_r.name.data(), p_r.name.size());
+	r_h.add(p_r.squad);
+	r_h.add(p_r.leader);
 }
 
 void add_netsim(Fnv &r_h, const net::NetSimStats &p_s) {
@@ -781,6 +784,30 @@ TEST_SUITE("host-client-stream") {
 			CHECK(st->logic_events > 0u);
 			CHECK(st->logic_early_events == 0u);
 			CHECK(st->bad_logic_datagrams == 0u);
+		}
+		const std::span<const net::PlayerRow> want = server.rules()->players();
+		for (const StreamClient *sc : { &a, &b }) {
+			const host::PresentationFrame &f = *sc->frame;
+			const std::span<const net::PlayerRow> got(
+					f.players.data(), std::min<size_t>(f.player_count, f.players.size()));
+			size_t in_squads = 0, leaders = 0, differ = 0;
+			for (const net::PlayerRow &w : want) {
+				const auto at =
+						std::find_if(got.begin(), got.end(), [&](const net::PlayerRow &r) { return r.slot == w.slot; });
+				if (at == got.end() || at->team != w.team || at->squad != w.squad || at->leader != w.leader) {
+					++differ;
+					continue;
+				}
+				in_squads += at->squad != 0 ? 1u : 0u;
+				leaders += at->leader ? 1u : 0u;
+			}
+			std::printf("host.client.stream %s: PlayerList rows %zu of %zu, %zu differ from the server's, %zu in a "
+						"squad, %zu leaders\n",
+					sc->name, got.size(), want.size(), differ, in_squads, leaders);
+			CHECK(got.size() == want.size());
+			CHECK(differ == 0u);
+			CHECK(in_squads == want.size());
+			CHECK(leaders >= 2u);
 		}
 		check_hashes(a, kAlpha);
 		check_hashes(b, kBravo);

@@ -138,6 +138,9 @@ Result<std::vector<std::string>> level_modes(const EbxResolver &p_db, std::strin
 
 Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_id, std::string_view p_mode, WorkBudget *p_budget = nullptr);
 
+std::optional<GameModeSizeDef> read_mode_size(
+		const EbxResolver &p_db, std::string_view p_level_id, std::string_view p_mode, WorkBudget *p_budget = nullptr);
+
 struct ScoringEntryDef {
 	std::string sid;
 	double score = 0;

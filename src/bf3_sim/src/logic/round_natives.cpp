@@ -443,6 +443,22 @@ core::Status RoundNatives::player_enter_team(uint8_t p_slot, bool p_bot, uint8_t
 	return core::Status::success();
 }
 
+core::Status RoundNatives::player_switch_team(uint8_t p_slot, uint8_t p_team) {
+	State &s = *state_;
+	if (!s.entered[p_slot] || (p_team != 1 && p_team != 2)) {
+		return core::make_error(
+				"round natives: slot " + std::to_string(p_slot) + " cannot switch to team " + std::to_string(p_team));
+	}
+	s.team[p_slot] = p_team;
+	if (s.balance_candidate == int(p_slot)) {
+		s.balance_candidate = -1;
+	}
+	if (s.balance_candidate < 0) {
+		s.pick_balance_candidate();
+	}
+	return core::Status::success();
+}
+
 core::Status RoundNatives::player_leave(uint8_t p_slot, LogicRuntime &r_runtime) {
 	(void)r_runtime;
 	State &s = *state_;

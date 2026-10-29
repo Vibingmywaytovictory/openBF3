@@ -13,6 +13,7 @@
 #include "tdm_fixture.h"
 #include "test_support.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -25,7 +26,7 @@ namespace tt = bf3::test::tdm;
 
 namespace {
 
-constexpr uint64_t kTdmStreamHash = 0x232d1b8abf05e777ull;
+constexpr uint64_t kTdmStreamHash = 0x6ee990a2a32b1c03ull;
 constexpr uint64_t kTdmStateHash = 0x801d84e3f1ae9e0full;
 constexpr uint64_t kDevStreamHash = 0x56fe24b8016be2f5ull;
 constexpr uint64_t kDevStateHash = 0xbb55f06d887305ceull;
@@ -217,6 +218,7 @@ TEST_SUITE("host-server-stream") {
 		bravo.spawn_request(2);
 		uint32_t alpha_seq = 0, bravo_seq = 0;
 		bool bravo_connected = true;
+		std::vector<net::PlayerRow> late_rows, late_want;
 		for (sim::Tick i = 0; i < 1200; ++i) {
 			const sim::Tick next = server.current_tick() + 1u;
 			for (tt::ScriptedPeer *p : { &alpha, &bravo }) {
@@ -284,12 +286,16 @@ TEST_SUITE("host-server-stream") {
 				bravo_connected = false;
 			}
 			if (next == 960u) {
+				late_want.assign(server.rules()->players().begin(), server.rules()->players().end());
 				bravo.hello();
 				bravo.ready();
 				bravo.spawn_request(3);
 				bravo_connected = true;
 			}
 			step();
+			if (next == 960u) {
+				late_rows = bravo.players;
+			}
 		}
 		rec.finish(server);
 		rec.print("host.server.stream TDM");
@@ -303,6 +309,38 @@ TEST_SUITE("host-server-stream") {
 		CHECK(rec.count(net::MessageType::MatchState) > 0u);
 		CHECK(rec.count(net::MessageType::PlayerList) > 0u);
 		CHECK(server.stats().bad_datagrams >= 1u);
+		size_t in_squads = 0, differ = 0;
+		std::array<std::array<uint32_t, net::kMaxSquads + 1>, 3> members{}, leaders{};
+		for (const net::PlayerRow &w : late_want) {
+			const auto at = std::find_if(
+					late_rows.begin(), late_rows.end(), [&](const net::PlayerRow &r) { return r.slot == w.slot; });
+			if (at == late_rows.end() || at->team != w.team || at->squad != w.squad || at->leader != w.leader) {
+				++differ;
+				continue;
+			}
+			if (at->team >= 1 && at->team <= 2 && at->squad != 0 && at->squad <= net::kMaxSquads) {
+				++in_squads;
+				++members[at->team][at->squad];
+				leaders[at->team][at->squad] += at->leader ? 1u : 0u;
+			}
+		}
+		size_t squads = 0, one_leader = 0;
+		for (uint8_t t = 1; t <= 2; ++t) {
+			for (uint8_t q = 1; q <= net::kMaxSquads; ++q) {
+				squads += members[t][q] != 0 ? 1u : 0u;
+				one_leader += members[t][q] != 0 && leaders[t][q] == 1u ? 1u : 0u;
+			}
+		}
+		std::printf("host.server.stream TDM: the late joiner's PlayerList: %zu rows of %zu, %zu differ from the "
+					"server's, %zu in %zu squads, %zu with one "
+					"leader\n",
+				late_rows.size(), late_want.size(), differ, in_squads, squads, one_leader);
+		CHECK(late_want.size() == 31u);
+		CHECK(late_rows.size() == late_want.size());
+		CHECK(differ == 0u);
+		CHECK(in_squads == late_want.size());
+		CHECK(squads == 8u);
+		CHECK(one_leader == squads);
 		CHECK(rec.stream.h == kTdmStreamHash);
 		CHECK(rec.states.h == kTdmStateHash);
 	}

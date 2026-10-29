@@ -8,6 +8,7 @@
 #include "bf3/core/gameplay/mode_def.h"
 #include "bf3/core/level/eor_camera.h"
 #include "bf3/core/ui/text_db.h"
+#include "bf3/host/bot_fill.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/loadout.h"
@@ -25,6 +26,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -161,7 +163,9 @@ host::MatchRulesConfig tdm_rules_config(bool p_deploy) {
 	return c;
 }
 
-std::unique_ptr<Match> start_match(const tdm::TdmLevel &p_level, bool p_deploy, uint64_t p_seed = 7, int p_kill_limit = 0, int p_min_players = -1) {
+std::unique_ptr<Match> start_match(const tdm::TdmLevel &p_level, bool p_deploy, uint64_t p_seed = 7,
+		int p_kill_limit = 0, int p_min_players = -1,
+		const std::function<void(host::GameServerConfig &)> &p_configure = {}) {
 	auto m = std::make_unique<Match>();
 	m->level = p_level.shared;
 	host::GameServerConfig cfg;
@@ -174,6 +178,9 @@ std::unique_ptr<Match> start_match(const tdm::TdmLevel &p_level, bool p_deploy, 
 	cfg.rules = tdm_rules_config(p_deploy);
 	cfg.rules.kill_limit_override = p_kill_limit;
 	cfg.rules.min_players_override = p_min_players;
+	if (p_configure) {
+		p_configure(cfg);
+	}
 	const core::Status st = m->server.init(cfg);
 	REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
 	REQUIRE(m->server.rules() != nullptr);
@@ -324,6 +331,62 @@ size_t player_rows_differ(const tdm::ScriptedPeer &p_peer, const host::TdmRules 
 	return differ;
 }
 
+std::function<void(host::GameServerConfig &)> squad_server(const tdm::TdmLevel &p_level) {
+	return [&p_level](host::GameServerConfig &r_cfg) {
+		r_cfg.max_slots = 40;
+		r_cfg.dev_commands = false;
+		r_cfg.rules.max_players = 32;
+		auto fill = std::make_shared<host::BotFillConfig>();
+		fill->level = p_level.bots;
+		fill->count = 0;
+		r_cfg.bots = fill;
+	};
+}
+
+void squad_request(
+		Match &r_match, const tdm::ScriptedPeer &p_peer, net::SquadOp p_op, uint8_t p_squad = 0, uint8_t p_target = 0) {
+	net::SquadRequest q;
+	q.op = p_op;
+	q.squad = p_squad;
+	q.target = p_target;
+	r_match.server.on_receive(p_peer.peer(), net::kChannelReliable, net::encode_squad_request(q));
+	r_match.ticks(net::kPlayerListIntervalTicks + 2u);
+}
+
+const net::PlayerRow *seen_row(const tdm::ScriptedPeer &p_peer, int p_slot) {
+	for (const net::PlayerRow &r : p_peer.players) {
+		if (int(r.slot) == p_slot) {
+			return &r;
+		}
+	}
+	return nullptr;
+}
+
+struct SquadCensus {
+	std::array<std::array<uint32_t, net::kMaxSquads + 1>, 3> members{};
+	std::array<std::array<uint32_t, net::kMaxSquads + 1>, 3> leaders{};
+	std::array<std::array<int, net::kMaxSquads + 1>, 3> leader_slot{};
+	std::array<uint32_t, 3> team{};
+};
+
+SquadCensus squad_census(std::span<const net::PlayerRow> p_rows) {
+	SquadCensus c;
+	for (auto &t : c.leader_slot) {
+		t.fill(-1);
+	}
+	for (const net::PlayerRow &r : p_rows) {
+		if (r.team > 2 || r.squad > net::kMaxSquads) {
+			continue;
+		}
+		++c.team[r.team];
+		++c.members[r.team][r.squad];
+		if (r.leader) {
+			++c.leaders[r.team][r.squad];
+			c.leader_slot[r.team][r.squad] = r.slot;
+		}
+	}
+	return c;
+}
 }
 
 TEST_SUITE("host-tdm-server") {
@@ -1766,6 +1829,136 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(o->server.stats().gunplay.loadout_dropped == dropped0);
 		CHECK_FALSE(host::own_unspawned_at(true, *p.match_state, next.state.tick, o->now()));
 		CHECK(o->rules().stats().runtime_faults == 0u);
+	}
+
+	TEST_CASE("squads: 32 players make four squads of four per team with the first joiner leading; a full squad "
+			  "refuses a join; kick, "
+			  "leave and create; the longest-serving member takes over; SwitchTeam only keeps the teams within 1 (dev "
+			  "commands off)") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		std::printf("squads: %s %s squad size %u\n", level->shared->level.c_str(), level->shared->mode.c_str(),
+				unsigned(level->shared->squad_size));
+		CHECK(level->shared->squad_size == 4);
+		std::unique_ptr<Match> m = start_match(*level, false, 51u, 0, -1, squad_server(*level));
+		tdm::ScriptedPeer &alpha = m->join("alpha");
+		tdm::ScriptedPeer &bravo = m->join("bravo");
+		tdm::ScriptedPeer &charlie = m->join("charlie");
+		alpha.ready();
+		bravo.ready();
+		charlie.ready();
+		for (int i = 0; i < 29; ++i) {
+			m->bot();
+		}
+		m->ticks(net::kPlayerListIntervalTicks + 2u);
+		REQUIRE(m->rules().players().size() == 32u);
+		REQUIRE(m->rules().team_of(uint8_t(alpha.slot())) == 1);
+		REQUIRE(m->rules().team_of(uint8_t(bravo.slot())) == 2);
+		REQUIRE(m->rules().team_of(uint8_t(charlie.slot())) == 1);
+
+		const SquadCensus server = squad_census(m->rules().players());
+		const SquadCensus wire = squad_census(alpha.players);
+		for (uint8_t t = 1; t <= 2; ++t) {
+			std::printf("squads: team %u: %u players, squads 1-4 hold %u %u %u %u, no squad %u, leaders %d %d %d %d\n",
+					unsigned(t), server.team[t], server.members[t][1], server.members[t][2], server.members[t][3],
+					server.members[t][4], server.members[t][0], server.leader_slot[t][1], server.leader_slot[t][2],
+					server.leader_slot[t][3], server.leader_slot[t][4]);
+			CHECK(server.team[t] == 16u);
+			CHECK(server.members[t][0] == 0u);
+			for (uint8_t q = 1; q <= net::kMaxSquads; ++q) {
+				CAPTURE(q);
+				CHECK(server.members[t][q] == (q <= 4 ? 4u : 0u));
+				CHECK(server.leaders[t][q] == (q <= 4 ? 1u : 0u));
+				CHECK(wire.members[t][q] == server.members[t][q]);
+				CHECK(wire.leader_slot[t][q] == server.leader_slot[t][q]);
+			}
+			for (uint8_t q = 1; q <= 4; ++q) {
+				int first = -1;
+				for (const net::PlayerRow &r : m->rules().players()) {
+					if (r.team == t && r.squad == q && (first < 0 || int(r.slot) < first)) {
+						first = int(r.slot);
+					}
+				}
+				CHECK(server.leader_slot[t][q] == first);
+			}
+		}
+		const auto squad_of = [&](const tdm::ScriptedPeer &p_peer) {
+			return m->row(p_peer.slot()) != nullptr ? int(m->row(p_peer.slot())->squad) : -1;
+		};
+		const auto leads = [&](const tdm::ScriptedPeer &p_peer) {
+			return m->row(p_peer.slot()) != nullptr && m->row(p_peer.slot())->leader;
+		};
+		REQUIRE(squad_of(alpha) == 1);
+		REQUIRE(squad_of(charlie) == 1);
+		if (squad_of(alpha) != 1 || squad_of(charlie) != 1) {
+			return;
+		}
+		CHECK(leads(alpha));
+
+		squad_request(*m, charlie, net::SquadOp::Join, 2);
+		CHECK(squad_of(charlie) == 1);
+		squad_request(*m, charlie, net::SquadOp::Kick, 0, uint8_t(alpha.slot()));
+		CHECK(squad_of(alpha) == 1);
+		CHECK(leads(alpha));
+		squad_request(*m, alpha, net::SquadOp::Kick, 0, uint8_t(charlie.slot()));
+		CHECK(squad_of(charlie) == 0);
+		CHECK_FALSE(leads(charlie));
+		squad_request(*m, charlie, net::SquadOp::Join, 1);
+		CHECK(squad_of(charlie) == 1);
+		CHECK_FALSE(leads(charlie));
+
+		int heir = -1;
+		for (const net::PlayerRow &r : m->rules().players()) {
+			if (r.team == 1 && r.squad == 1 && int(r.slot) != alpha.slot() && int(r.slot) != charlie.slot() &&
+					(heir < 0 || int(r.slot) < heir)) {
+				heir = int(r.slot);
+			}
+		}
+		REQUIRE(heir > charlie.slot());
+		if (heir <= charlie.slot()) {
+			return;
+		}
+		squad_request(*m, alpha, net::SquadOp::Leave);
+		CHECK(squad_of(alpha) == 0);
+		CHECK_FALSE(leads(alpha));
+		CHECK_FALSE(leads(charlie));
+		REQUIRE(m->row(heir) != nullptr);
+		CHECK(m->row(heir)->leader);
+		REQUIRE(seen_row(alpha, heir) != nullptr);
+		CHECK(seen_row(alpha, heir)->leader);
+		squad_request(*m, alpha, net::SquadOp::Create);
+		CHECK(squad_of(alpha) == 5);
+		CHECK(leads(alpha));
+
+		squad_request(*m, bravo, net::SquadOp::SwitchTeam);
+		CHECK(m->rules().team_of(uint8_t(bravo.slot())) == 2);
+		CHECK(squad_census(m->rules().players()).team[1] == 16u);
+		m->server.on_receive(charlie.peer(), net::kChannelReliable, net::encode_bye());
+		m->ticks(net::kPlayerListIntervalTicks + 2u);
+		CHECK(squad_census(m->rules().players()).members[1][1] == 2u);
+		REQUIRE(m->row(heir) != nullptr);
+		CHECK(m->row(heir)->leader);
+		squad_request(*m, bravo, net::SquadOp::SwitchTeam);
+		CHECK(m->rules().team_of(uint8_t(bravo.slot())) == 1);
+		CHECK(squad_of(bravo) == 1);
+		CHECK_FALSE(leads(bravo));
+		const SquadCensus after = squad_census(m->rules().players());
+		CHECK(after.team[1] == 16u);
+		CHECK(after.team[2] == 15u);
+		CHECK(m->until(
+				[&] { return is_alive(m->state(bravo.slot())) && m->server.view().team(uint8_t(bravo.slot())) == 1; },
+				600));
+		const net::PlayerRow *bravo_seen = seen_row(alpha, bravo.slot());
+		REQUIRE(bravo_seen != nullptr);
+		CHECK(bravo_seen->team == 1);
+		CHECK(bravo_seen->squad == 1);
+		std::printf("squads: after the requests alpha leads squad %d, slot %d took over squad 1, bravo switched to "
+					"team %u squad %u (teams %u / %u)\n",
+				squad_of(alpha), heir, unsigned(bravo_seen->team), unsigned(bravo_seen->squad), after.team[1],
+				after.team[2]);
+		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 
 	TEST_CASE("install unchanged") {

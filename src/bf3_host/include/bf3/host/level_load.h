@@ -118,6 +118,7 @@ struct SharedLevel {
 	std::shared_ptr<const sim::logic::RoundNativeParams> logic_natives;
 	std::shared_ptr<const TdmTuning> tdm_tuning;
 	std::shared_ptr<const core::gameplay::ScoringTable> scoring;
+	uint8_t squad_size = 0;
 	std::shared_ptr<const core::gameplay::EorTimeline> eor;
 	std::shared_ptr<const core::gameplay::EorFading> eor_fading;
 	std::shared_ptr<const core::gameplay::DeathTimeline> death;

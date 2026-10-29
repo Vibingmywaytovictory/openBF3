@@ -593,6 +593,12 @@ Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_
 	return out;
 }
 
+std::optional<GameModeSizeDef> read_mode_size(
+		const EbxResolver &p_db, std::string_view p_level_id, std::string_view p_mode, WorkBudget *p_budget) {
+	WorkBudget own;
+	return read_size(p_db, to_lower_ascii(p_level_id), p_mode, p_budget != nullptr ? *p_budget : own);
+}
+
 std::optional<double> ScoringTable::score(std::string_view p_sid) const {
 	for (const ScoringEntryDef &e : entries) {
 		if (e.sid == p_sid) {

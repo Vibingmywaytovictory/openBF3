@@ -315,6 +315,8 @@ struct TdmRules::Impl {
 	bool state_sent = false;
 	std::vector<net::PlayerRow> rows;
 	std::vector<net::PlayerRow> sent_rows;
+	SquadTable squads;
+	std::vector<uint8_t> switch_requests;
 	lg::RoundPhase last_phase = lg::RoundPhase::PreRound;
 	bool was_restricted = false;
 	mutable RulesStats stats;
@@ -421,6 +423,60 @@ struct TdmRules::Impl {
 		target.corpse_valid = false;
 	}
 
+	uint32_t team_count(uint8_t p_team) const {
+		uint32_t n = 0;
+		for (size_t i = 0; i < slots.size() && i < net::kMaxPlayerRows; ++i) {
+			n += slots[i].connected && team_of(i) == p_team ? 1u : 0u;
+		}
+		return n;
+	}
+
+	SquadRefusal switch_refusal(uint8_t p_slot) const {
+		const uint8_t from = team_of(p_slot);
+		if (p_slot >= net::kMaxPlayerRows || from == 0) {
+			return SquadRefusal::NoTeam;
+		}
+		const lg::RoundPhase phase = natives ? natives->phase() : lg::RoundPhase::Restarting;
+		if (faulted || !runtime || (phase != lg::RoundPhase::PreRound && phase != lg::RoundPhase::InRound)) {
+			return SquadRefusal::Phase;
+		}
+		const uint32_t cap = std::max<uint32_t>(1u, uint32_t(config.max_players) / 2u);
+		const uint32_t leaving = team_count(from), joining = team_count(uint8_t(3u - from));
+		if (joining + 1u > cap || joining + 1u > leaving) {
+			return SquadRefusal::Balance;
+		}
+		return SquadRefusal::None;
+	}
+
+	void apply_switches(std::span<const sim::SoldierState> p_states, std::vector<RulesOrder> &r_orders) {
+		for (const uint8_t slot : std::exchange(switch_requests, {})) {
+			if (switch_refusal(slot) != SquadRefusal::None) {
+				++stats.team_switches_refused;
+				continue;
+			}
+			const uint8_t to = uint8_t(3u - team_of(slot));
+			const core::Status st = natives->player_switch_team(slot, to);
+			if (!st.ok()) {
+				fault(st.error());
+				return;
+			}
+			Slot &s = slots[slot];
+			remove_downed(slot);
+			s.corpse_valid = false;
+			s.revive_until = 0;
+			s.pending_spawn = false;
+			if (s.alive || (slot < p_states.size() && state_alive(p_states[slot]))) {
+				r_orders.push_back(RulesOrder{ RulesOrder::Kind::Unspawn, slot });
+				s.alive = false;
+				if (!s.deploy) {
+					r_orders.push_back(RulesOrder{ RulesOrder::Kind::Spawn, slot });
+				}
+			}
+			squads.follow_team(slot, to);
+			++stats.team_switches;
+		}
+	}
+
 	void remove_downed(uint8_t p_slot) {
 		std::erase_if(downed, [&](const DownedSoldier &d) { return d.slot == p_slot; });
 	}
@@ -437,6 +493,10 @@ struct TdmRules::Impl {
 			fault(st.error());
 			return;
 		}
+		if (rotate) {
+			squads.swap_teams();
+		}
+		switch_requests.clear();
 		base = p_tick;
 		based = true;
 		for (size_t i = 0; i < slots.size(); ++i) {
@@ -520,6 +580,7 @@ core::Result<std::unique_ptr<TdmRules>> TdmRules::create(const SharedLevel &p_le
 	BF3_TRY(m.start_runtime());
 	m.slots.resize(p_max_slots);
 	m.last_states.assign(p_max_slots, sim::SoldierState());
+	m.squads.configure(std::min<size_t>(p_max_slots, net::kMaxPlayerRows), p_level.squad_size);
 	const core::gameplay::SoldierDef &soldier = p_level.gunplay->soldier;
 	m.delay_ticks = ticks_of(m.natives->player_killed_delay_s());
 	m.man_down_ticks = soldier.man_down_time > 0.0f ? ticks_of(soldier.man_down_time) : 780u;
@@ -698,7 +759,9 @@ uint8_t TdmRules::on_connect(uint8_t p_slot, bool p_bot, std::string_view p_name
 			m.fault(st.error());
 		}
 	}
-	return m.natives->team_of(p_slot);
+	const uint8_t team = m.natives->team_of(p_slot);
+	m.squads.assign(p_slot, team);
+	return team;
 }
 
 void TdmRules::on_disconnect(uint8_t p_slot) {
@@ -713,6 +776,8 @@ void TdmRules::on_disconnect(uint8_t p_slot) {
 		}
 	}
 	m.remove_downed(p_slot);
+	m.squads.remove(p_slot);
+	std::erase(m.switch_requests, p_slot);
 	m.slots[p_slot] = Impl::Slot();
 }
 
@@ -778,6 +843,48 @@ bool TdmRules::take_suicide(uint8_t p_slot) {
 	}
 	++m.stats.suicides;
 	return true;
+}
+
+SquadRefusal TdmRules::request_squad(uint8_t p_slot, const net::SquadRequest &p_request) {
+	Impl &m = *impl_;
+	++m.stats.squad_requests;
+	const bool player = p_slot < m.slots.size() && p_slot < net::kMaxPlayerRows && m.slots[p_slot].connected;
+	const uint8_t team = player ? m.team_of(p_slot) : 0;
+	SquadRefusal why = SquadRefusal::NoTeam;
+	if (player && p_request.op == net::SquadOp::SwitchTeam) {
+		why = m.switch_refusal(p_slot);
+		if (why == SquadRefusal::None) {
+			if (std::find(m.switch_requests.begin(), m.switch_requests.end(), p_slot) == m.switch_requests.end()) {
+				m.switch_requests.push_back(p_slot);
+			}
+		} else {
+			++m.stats.team_switches_refused;
+		}
+		return why;
+	}
+	if (player) {
+		switch (p_request.op) {
+			case net::SquadOp::Join:
+				why = m.squads.join(p_slot, team, p_request.squad);
+				break;
+			case net::SquadOp::Create:
+				why = m.squads.create(p_slot, team);
+				break;
+			case net::SquadOp::Leave:
+				why = m.squads.leave(p_slot);
+				break;
+			case net::SquadOp::Kick:
+				why = m.squads.kick(p_slot, p_request.target);
+				break;
+			default:
+				why = SquadRefusal::BadSquad;
+				break;
+		}
+	}
+	if (why != SquadRefusal::None) {
+		++m.stats.squad_refused;
+	}
+	return why;
 }
 
 SpawnRefusal TdmRules::request_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_spawn_choice, uint32_t p_tick) {
@@ -991,6 +1098,10 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		}
 	}
 
+	if (m.natives && !m.faulted) {
+		m.apply_switches(std::span<const sim::SoldierState>(r_states.data(), n), r_orders);
+	}
+
 	const lg::RoundPhase phase = m.natives ? m.natives->phase() : lg::RoundPhase::Restarting;
 	for (size_t i = 0; i < m.slots.size(); ++i) {
 		Impl::Slot &s = m.slots[i];
@@ -1034,6 +1145,7 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		if (!s.connected) {
 			continue;
 		}
+		m.squads.follow_team(uint8_t(i), m.team_of(i));
 		net::PlayerRow r;
 		r.slot = uint8_t(i);
 		r.team = m.team_of(i);
@@ -1045,6 +1157,8 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		r.deaths = s.deaths;
 		r.score = s.score;
 		r.name = s.name;
+		r.squad = m.squads.squad_of(uint8_t(i));
+		r.leader = r.squad != 0 && m.squads.leader(uint8_t(i));
 		m.rows.push_back(r);
 	}
 	for (size_t i = 0; i < n && i < m.last_states.size(); ++i) {
@@ -1196,6 +1310,10 @@ net::PlayerList TdmRules::player_list(sim::Tick p_server_tick, bool p_full) cons
 		l.removed.push_back(m.sent_rows[j].slot);
 	}
 	return l;
+}
+
+const SquadTable &TdmRules::squads() const {
+	return impl_->squads;
 }
 
 uint8_t TdmRules::team_of(uint8_t p_slot) const {

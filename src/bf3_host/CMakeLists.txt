@@ -197,3 +197,8 @@ target_sources(bf3_host PRIVATE
     src/client_logic_sync.cpp
     src/client_logic_sync.h
 )
+
+target_sources(bf3_host PRIVATE
+    include/bf3/host/squads.h
+    src/squads.cpp
+)

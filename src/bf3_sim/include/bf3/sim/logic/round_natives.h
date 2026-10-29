@@ -74,6 +74,7 @@ public:
 	core::Status tick_round(Tick p_tick, LogicRuntime &r_runtime);
 
 	core::Status player_enter_team(uint8_t p_slot, bool p_bot, uint8_t p_team, LogicRuntime &r_runtime);
+	core::Status player_switch_team(uint8_t p_slot, uint8_t p_team);
 
 	RoundPhase phase() const;
 	uint8_t winner() const;
