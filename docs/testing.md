@@ -66,10 +66,17 @@ a `timing` row, split first so its socket-free cases stay on branches (`host.ses
 ## 3. Godot rows
 
 * Godot rows exist only when `OPENBF3_BUILD_CHECKS` is ON (the `dev` preset): they drive the checks it compiles in.
-* Every `godot.*` row is registered through `openbf3_godot_row(HEADLESS|WINDOW)`. Anything else, or a windowed row
-  without the label `window`, is a configure error. `openbf3_check_rows()` checks it after every registration: it is
-  the line before `find_package(Python3)` in `tests/CMakeLists.txt`, new rows go above it, and a row below it fails
-  configure.
+* Every `godot.*` row is registered through `openbf3_godot_row(HEADLESS|WINDOW)` or `openbf3_proc_row`, every
+  `net.procs.*` row through `openbf3_proc_row`. Anything else, or a windowed row without the label `window`, is a
+  configure error. `openbf3_check_rows()` checks it after every registration: it is the line before
+  `find_package(Python3)` in `tests/CMakeLists.txt`, new rows go above it, and a row below it fails configure.
+* A row of several processes is `openbf3_proc_row(<name> <exe> [LABEL timing|realtime|window] [TIMEOUT s] [ARGS ...])`.
+  Its exe links `test_proc_driver` and starts every child through `ProcDriver` (`tests/net_procs_driver.h`); an exe
+  source that starts a process itself is a configure error. Each child runs in its own kill-on-close job, so a
+  failed or killed row leaves no process behind, with `${BUILD_DIR}/godot-cache/<row>-<role>` as its working
+  directory; a Godot child needs its own `--settings-file`, `--log-file` and `--bf3-cache` there
+  (`ProcDriver::godot_child`) and is refused without them, a windowed one also needs the label `window`, and it
+  skips as `godot_common.cmake` does.
 * Headless rows find the Godot console executable at configure time (`OPENBF3_GODOT_EXE`, next to the checkout) and
   run on every branch; `OPENBF3_GODOT` overrides it.
 * Windowed rows run only with `OPENBF3_GODOT_WINDOWED=1` and exit 77 while `OPENBF3_USER_ACTIVE_FLAG` names a file

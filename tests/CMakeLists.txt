@@ -1080,6 +1080,10 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_label(timing godot.dedicated.timing)
 endif()
 
+openbf3_test(test_net_procs_harness test_main.cpp net_procs_harness_tests.cpp test_support.h)
+target_link_libraries(test_net_procs_harness PRIVATE test_proc_driver)
+openbf3_proc_row(net.procs.harness test_net_procs_harness TIMEOUT 120 ARGS --test-suite=net-procs-harness)
+
 openbf3_check_rows()
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME hygiene.rules COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tools/check_hygiene.py" "${CMAKE_SOURCE_DIR}")
