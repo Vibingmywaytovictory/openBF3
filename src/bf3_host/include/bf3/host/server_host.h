@@ -2,6 +2,7 @@
 
 #include "bf3/host/game_server.h"
 #include "bf3/host/tick_clock.h"
+#include "bf3/net/enet_host.h"
 #include "bf3/sim/physics_world.h"
 
 #include <atomic>
@@ -14,7 +15,8 @@
 
 namespace bf3::host {
 
-class NetEndpoint;
+class ServerNetPort;
+class ServerNetThread;
 
 struct ServerConfig {
 	int tick_hz = sim::PhysicsWorld::kTickHz;
@@ -22,10 +24,13 @@ struct ServerConfig {
 	const char *bind_ip = "127.0.0.1";
 	uint16_t port = 0;
 	size_t max_peers = 64;
+	uint32_t peer_timeout_min_ms = 0;
+	uint32_t peer_timeout_max_ms = 0;
 	sim::WorldConfig world;
 
 	std::shared_ptr<const GameServerConfig> game;
 	std::shared_ptr<TickClock> clock;
+	std::shared_ptr<ServerNetPort> transport;
 };
 
 struct ServerStats {
@@ -45,6 +50,7 @@ struct ServerStats {
 	uint32_t peers = 0;
 	uint64_t pings_echoed = 0;
 	uint64_t step_errors = 0;
+	uint64_t tick_stalls = 0;
 };
 
 class ServerHost {
@@ -63,23 +69,28 @@ public:
 	void copy_body_transforms(std::vector<sim::BodyTransform> &r_out) const;
 
 	GameServerStats game_stats() const;
+	std::vector<net::PeerCounters> peer_counters() const;
+
+	void debug_stall(uint32_t p_ms);
 
 	static size_t stop_all();
 	static size_t live_count();
 
 private:
 	void run();
+	bool start_net(size_t p_channels, std::string *r_error);
+	void stall_if_requested();
 
 	ServerConfig config_;
 	std::atomic<std::shared_ptr<TickClock>> clock_;
 	std::thread thread_;
-	std::mutex lifecycle_mutex_;
+	mutable std::mutex lifecycle_mutex_;
 	std::atomic<bool> stop_requested_{ false };
 	std::atomic<bool> running_{ false };
 	std::atomic<uint16_t> port_{ 0 };
 
 	std::unique_ptr<sim::PhysicsWorld> world_;
-	std::unique_ptr<NetEndpoint> net_;
+	std::unique_ptr<ServerNetThread> net_;
 
 	std::atomic<uint64_t> ticks_{ 0 };
 	std::atomic<uint32_t> last_step_us_{ 0 };
@@ -95,6 +106,9 @@ private:
 	std::atomic<uint64_t> step_errors_{ 0 };
 	std::atomic<int64_t> start_ns_{ 0 };
 	std::atomic<int> dynamic_bodies_{ 0 };
+	std::atomic<uint32_t> stall_request_ms_{ 0 };
+	std::atomic<uint64_t> tick_stalls_{ 0 };
+	std::atomic<uint64_t> net_errors_{ 0 };
 
 	mutable std::mutex transforms_mutex_;
 	std::vector<sim::BodyTransform> transforms_;

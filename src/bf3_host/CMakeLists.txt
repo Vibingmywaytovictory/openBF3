@@ -171,4 +171,6 @@ target_sources(bf3_host PRIVATE
     src/map_list.cpp
     include/bf3/host/server_session.h
     src/server_session.cpp
+    src/server_net_thread.cpp
+    src/server_net_thread.h
 )

@@ -242,9 +242,11 @@ set_tests_properties(net.bits.unit net.proto.unit net.netsim.unit PROPERTIES TIM
 
 openbf3_test(test_host_session test_main.cpp host_session_tests.cpp test_support.h)
 target_link_libraries(test_host_session PRIVATE bf3_host)
+target_include_directories(test_host_session PRIVATE ${PROJECT_SOURCE_DIR}/src/bf3_host/src)
 target_compile_definitions(test_host_session PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
-set(_openbf3_session_pure *judge_rest*synthetic* *present_others* *GameServer*without*sockets* *GameServer*SpawnSweep*batches*)
-openbf3_case_row(NAME host.session.unit.pure EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 6
+set(_openbf3_session_pure *judge_rest*synthetic* *present_others* *GameServer*without*sockets* *GameServer*SpawnSweep*batches*
+    *NetThread*fake*Host*stalled*)
+openbf3_case_row(NAME host.session.unit.pure EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 7
     CASES ${_openbf3_session_pure})
 openbf3_case_row(NAME host.session.unit EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 5
     EXCLUDE ${_openbf3_session_pure})
@@ -1083,6 +1085,11 @@ endif()
 openbf3_test(test_net_procs_harness test_main.cpp net_procs_harness_tests.cpp test_support.h)
 target_link_libraries(test_net_procs_harness PRIVATE test_proc_driver)
 openbf3_proc_row(net.procs.harness test_net_procs_harness TIMEOUT 120 ARGS --test-suite=net-procs-harness)
+
+add_test(NAME host.server.netthread COMMAND test_host_session --test-suite=host-server-netthread)
+set_tests_properties(host.server.netthread PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
+openbf3_label(timing host.server.netthread)
+openbf3_cost(host.server.netthread 1 10)
 
 openbf3_check_rows()
 find_package(Python3 COMPONENTS Interpreter REQUIRED)

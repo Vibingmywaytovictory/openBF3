@@ -89,6 +89,9 @@ struct ClientSessionConfig {
 	bool record_predicted = false;
 	bool send_kit_select = false;
 	net::KitSelect kit_select;
+
+	uint32_t peer_timeout_min_ms = 0;
+	uint32_t peer_timeout_max_ms = 0;
 };
 
 using present::PresentedSoldier;

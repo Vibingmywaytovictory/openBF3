@@ -109,6 +109,9 @@ core::Status ClientSession::start(const ClientSessionConfig &p_config, std::shar
 	if (peer < 0) {
 		return core::make_error("ClientSession: cannot connect to " + p_config.host);
 	}
+	if (p_config.peer_timeout_min_ms != 0 || p_config.peer_timeout_max_ms != 0) {
+		host->set_peer_timeout(uint32_t(peer), 0, p_config.peer_timeout_min_ms, p_config.peer_timeout_max_ms);
+	}
 	const uint64_t t0 = net::monotonic_ns();
 	bool connected = false;
 	while (!connected && net::monotonic_ns() - t0 < uint64_t(p_config.connect_timeout_ms) * 1'000'000ull) {

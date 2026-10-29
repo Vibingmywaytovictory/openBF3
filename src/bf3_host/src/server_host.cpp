@@ -1,19 +1,16 @@
 #include "bf3/host/server_host.h"
 
 #include "instance_registry.h"
+#include "server_net_thread.h"
 
 #include "bf3/net/enet_host.h"
 #include "bf3/net/loopback_ping.h"
 #include "bf3/net/protocol.h"
 
 #include <algorithm>
+#include <chrono>
 
 namespace bf3::host {
-
-class NetEndpoint {
-public:
-	std::unique_ptr<net::Host> host;
-};
 
 namespace {
 
@@ -27,6 +24,17 @@ void registry_remove(ServerHost *p_host) {
 	g_registry.remove(p_host);
 }
 
+net::Host::SendMode send_mode(const OutDatagram &p_datagram) {
+	if (p_datagram.reliable) {
+		return net::Host::SendMode::Reliable;
+	}
+	return p_datagram.channel == net::kChannelUnreliable ? net::Host::SendMode::Unsequenced
+														 : net::Host::SendMode::Sequenced;
+}
+
+bool is_kick(std::span<const uint8_t> p_bytes) {
+	return net::peek_type(p_bytes) == net::MessageType::Kick;
+}
 }
 
 ServerHost::ServerHost() = default;
@@ -63,23 +71,13 @@ bool ServerHost::start(const ServerConfig &p_config, std::string *r_error) {
 			return false;
 		}
 		dynamic_bodies_ = 0;
-		net_ = std::make_unique<NetEndpoint>();
-		if (config_.enable_net) {
-			std::string err;
-			net_->host = net::Host::create_server(config_.bind_ip, config_.port, config_.max_peers, net::kChannelCount, &err);
-			if (!net_->host) {
-				game_.reset();
-				net_.reset();
-				if (r_error) {
-					*r_error = err;
-				}
-				return false;
-			}
-			port_.store(net_->host->bound_port(), std::memory_order_release);
+		if (!start_net(net::kChannelCount, r_error)) {
+			game_.reset();
+			return false;
 		}
 		ticks_ = 0;
 		last_step_us_ = p99_step_us_ = max_step_us_ = last_tick_us_ = 0;
-		overruns_ = pings_echoed_ = step_errors_ = 0;
+		overruns_ = pings_echoed_ = step_errors_ = tick_stalls_ = net_errors_ = 0;
 		peers_ = 0;
 		state_hash_ = 0;
 		{
@@ -103,24 +101,14 @@ bool ServerHost::start(const ServerConfig &p_config, std::string *r_error) {
 		return false;
 	}
 	dynamic_bodies_ = world_->dynamic_body_count();
-	net_ = std::make_unique<NetEndpoint>();
-	if (config_.enable_net) {
-		std::string err;
-		net_->host = net::Host::create_server(config_.bind_ip, config_.port, config_.max_peers, 2, &err);
-		if (!net_->host) {
-			world_.reset();
-			net_.reset();
-			if (r_error) {
-				*r_error = err;
-			}
-			return false;
-		}
-		port_.store(net_->host->bound_port(), std::memory_order_release);
+	if (!start_net(2, r_error)) {
+		world_.reset();
+		return false;
 	}
 
 	ticks_ = 0;
 	last_step_us_ = p99_step_us_ = max_step_us_ = last_tick_us_ = 0;
-	overruns_ = pings_echoed_ = step_errors_ = 0;
+	overruns_ = pings_echoed_ = step_errors_ = tick_stalls_ = net_errors_ = 0;
 	peers_ = 0;
 	state_hash_ = world_->state_hash();
 	{
@@ -135,6 +123,30 @@ bool ServerHost::start(const ServerConfig &p_config, std::string *r_error) {
 	return true;
 }
 
+bool ServerHost::start_net(size_t p_channels, std::string *r_error) {
+	std::shared_ptr<ServerNetPort> port = config_.transport;
+	if (port == nullptr && config_.enable_net) {
+		std::string err;
+		std::unique_ptr<net::Host> host =
+				net::Host::create_server(config_.bind_ip, config_.port, config_.max_peers, p_channels, &err);
+		if (!host) {
+			if (r_error) {
+				*r_error = err;
+			}
+			return false;
+		}
+		port = make_enet_port(std::move(host), { config_.peer_timeout_min_ms, config_.peer_timeout_max_ms });
+	}
+	if (port == nullptr) {
+		net_.reset();
+		return true;
+	}
+	net_ = std::make_unique<ServerNetThread>(std::move(port));
+	port_.store(net_->bound_port(), std::memory_order_release);
+	net_->start();
+	return true;
+}
+
 void ServerHost::stop() {
 	std::lock_guard lock(lifecycle_mutex_);
 	if (!thread_.joinable()) {
@@ -143,8 +155,8 @@ void ServerHost::stop() {
 	stop_requested_.store(true, std::memory_order_release);
 	thread_.join();
 	registry_remove(this);
-	if (net_ && net_->host) {
-		net_->host->disconnect_all();
+	if (net_) {
+		net_->stop();
 	}
 	net_.reset();
 	world_.reset();
@@ -177,7 +189,8 @@ ServerStats ServerHost::stats() const {
 	s.port = port();
 	s.peers = peers_.load(std::memory_order_relaxed);
 	s.pings_echoed = pings_echoed_.load(std::memory_order_relaxed);
-	s.step_errors = step_errors_.load(std::memory_order_relaxed);
+	s.step_errors = step_errors_.load(std::memory_order_relaxed) + net_errors_.load(std::memory_order_relaxed);
+	s.tick_stalls = tick_stalls_.load(std::memory_order_relaxed);
 	const std::shared_ptr<TickClock> clock = clock_.load(std::memory_order_acquire);
 	const int64_t start = start_ns_.load(std::memory_order_relaxed);
 	const double secs = clock ? static_cast<double>(clock->now_ns() - start) / 1e9 : 0.0;
@@ -195,6 +208,22 @@ GameServerStats ServerHost::game_stats() const {
 	return game_stats_;
 }
 
+std::vector<net::PeerCounters> ServerHost::peer_counters() const {
+	std::lock_guard lock(lifecycle_mutex_);
+	return net_ ? net_->peer_counters() : std::vector<net::PeerCounters>();
+}
+
+void ServerHost::debug_stall(uint32_t p_ms) {
+	stall_request_ms_.store(p_ms, std::memory_order_release);
+}
+
+void ServerHost::stall_if_requested() {
+	if (const uint32_t stall = stall_request_ms_.exchange(0, std::memory_order_acq_rel); stall > 0) {
+		tick_stalls_.fetch_add(1, std::memory_order_release);
+		std::this_thread::sleep_for(std::chrono::milliseconds(stall));
+	}
+}
+
 void ServerHost::run() {
 	TickClock &tick_clock = *config_.clock;
 	const int64_t period_ns = 1'000'000'000LL / config_.tick_hz;
@@ -204,41 +233,39 @@ void ServerHost::run() {
 	uint32_t max_us = 0;
 	std::vector<sim::BodyTransform> scratch;
 	int64_t next = tick_clock.now_ns();
+	std::vector<net::Host::Event> events;
+	std::vector<NetOut> sends;
 
 	while (!stop_requested_.load(std::memory_order_acquire)) {
+		stall_if_requested();
 		const int64_t tick_start = tick_clock.now_ns();
+		if (net_) {
+			net_->pump();
+			net_->take_events(events);
+			net_errors_.store(net_->errors() + net_->inbound_dropped(), std::memory_order_relaxed);
+		}
 
 		if (game_) {
-			if (net_ && net_->host) {
-				net::Host::Event ev;
-				int got = 0;
-				while ((got = net_->host->service(0, ev)) > 0) {
-					if (ev.type == net::Host::EventType::Connect) {
-						game_->on_connect(ev.peer);
-					} else if (ev.type == net::Host::EventType::Disconnect) {
-						game_->on_disconnect(ev.peer);
-					} else if (ev.type == net::Host::EventType::Receive) {
-						game_->on_receive(ev.peer, ev.channel, ev.data);
-					}
-				}
-				if (got < 0) {
-					step_errors_.fetch_add(1, std::memory_order_relaxed);
+			for (const net::Host::Event &ev : events) {
+				if (ev.type == net::Host::EventType::Connect) {
+					game_->on_connect(ev.peer);
+				} else if (ev.type == net::Host::EventType::Disconnect) {
+					game_->on_disconnect(ev.peer);
+				} else if (ev.type == net::Host::EventType::Receive) {
+					game_->on_receive(ev.peer, ev.channel, ev.data);
 				}
 			}
 			const int64_t step_start = tick_clock.now_ns();
 			std::vector<OutDatagram> out;
 			game_->tick(out);
 			const uint32_t step_us = static_cast<uint32_t>((tick_clock.now_ns() - step_start) / 1000);
-			if (net_ && net_->host) {
-				for (const OutDatagram &d : out) {
-					const net::Host::SendMode mode = d.reliable ? net::Host::SendMode::Reliable
-																: (d.channel == net::kChannelUnreliable ? net::Host::SendMode::Unsequenced : net::Host::SendMode::Sequenced);
-					if (!net_->host->send(d.peer, d.channel, d.bytes.data(), d.bytes.size(), mode)) {
-						step_errors_.fetch_add(1, std::memory_order_relaxed);
-					}
+			if (net_) {
+				for (OutDatagram &d : out) {
+					const bool kick = is_kick(d.bytes);
+					sends.push_back({ d.peer, d.channel, send_mode(d), kick, std::move(d.bytes) });
 				}
-				net_->host->flush();
-				peers_.store(static_cast<uint32_t>(net_->host->connected_peers()), std::memory_order_relaxed);
+				net_->send(sends);
+				peers_.store(net_->connected_peers(), std::memory_order_relaxed);
 			}
 			{
 				GameServerStats g = game_->stats();
@@ -270,16 +297,15 @@ void ServerHost::run() {
 			continue;
 		}
 
-		if (net_ && net_->host) {
-			net::Host::Event ev;
-			while (net_->host->service(0, ev) > 0) {
+		if (net_) {
+			for (net::Host::Event &ev : events) {
 				if (ev.type == net::Host::EventType::Receive && net::ping_to_pong(ev.data)) {
-					net_->host->send(ev.peer, ev.channel, ev.data.data(), ev.data.size(), false);
+					sends.push_back({ ev.peer, ev.channel, net::Host::SendMode::Sequenced, false, std::move(ev.data) });
 					pings_echoed_.fetch_add(1, std::memory_order_relaxed);
 				}
 			}
-			net_->host->flush();
-			peers_.store(static_cast<uint32_t>(net_->host->connected_peers()), std::memory_order_relaxed);
+			net_->send(sends);
+			peers_.store(net_->connected_peers(), std::memory_order_relaxed);
 		}
 
 		const int64_t step_start = tick_clock.now_ns();

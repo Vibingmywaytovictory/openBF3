@@ -18,17 +18,22 @@
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/spawn.h"
 #include "bf3/sim/static_world.h"
+#include "server_net_thread.h"
 #include "test_support.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <random>
 #include <set>
@@ -1814,5 +1819,239 @@ TEST_SUITE("host-session-unit") {
 		std::printf("R1: %zu soldiers drawn, %zu equal to M1's body in every M1 field (bracketed %zu, before the oldest %zu, extrapolated %zu of which "
 					"held past 250 ms %zu)\n",
 				cases, equal, bracketed, before, extrapolated, held);
+	}
+}
+
+namespace {
+
+struct Pipe {
+	struct Sent {
+		uint32_t peer = 0;
+		uint8_t channel = 0;
+		std::vector<uint8_t> bytes;
+	};
+
+	mutable std::mutex mutex;
+	std::condition_variable to_client_ready;
+	std::deque<net::Host::Event> to_server;
+	std::map<uint32_t, std::deque<Sent>> to_client;
+	std::vector<Sent> sent;
+	std::vector<std::pair<uint32_t, size_t>> disconnects;
+	std::set<uint32_t> connected;
+	std::atomic<uint64_t> services{ 0 };
+
+	void connect(uint32_t p_peer) {
+		std::lock_guard lock(mutex);
+		connected.insert(p_peer);
+		net::Host::Event e;
+		e.type = net::Host::EventType::Connect;
+		e.peer = p_peer;
+		to_server.push_back(std::move(e));
+	}
+	void client_send(uint32_t p_peer, uint8_t p_channel, std::vector<uint8_t> p_bytes) {
+		std::lock_guard lock(mutex);
+		net::Host::Event e;
+		e.type = net::Host::EventType::Receive;
+		e.peer = p_peer;
+		e.channel = p_channel;
+		e.data = std::move(p_bytes);
+		to_server.push_back(std::move(e));
+	}
+	bool to_server_empty() const {
+		std::lock_guard lock(mutex);
+		return to_server.empty();
+	}
+	size_t count_sent(uint32_t p_peer, net::MessageType p_type) const {
+		std::lock_guard lock(mutex);
+		size_t n = 0;
+		for (const Sent &s : sent) {
+			n += s.peer == p_peer && net::peek_type(s.bytes) == p_type ? 1 : 0;
+		}
+		return n;
+	}
+	std::optional<net::MatchInfo> match_info(uint32_t p_peer) const {
+		std::lock_guard lock(mutex);
+		for (const Sent &s : sent) {
+			if (s.peer == p_peer && net::peek_type(s.bytes) == net::MessageType::MatchInfo) {
+				core::Result<net::MatchInfo> m = net::decode_match_info(s.bytes);
+				return m.ok() ? std::optional<net::MatchInfo>(*m) : std::nullopt;
+			}
+		}
+		return std::nullopt;
+	}
+};
+
+class PipeServerPort final : public ServerNetPort {
+public:
+	explicit PipeServerPort(std::shared_ptr<Pipe> p_pipe) : pipe_(std::move(p_pipe)) {}
+
+	int service(net::Host::Event &r_event) override {
+		pipe_->services.fetch_add(1);
+		std::lock_guard lock(pipe_->mutex);
+		if (pipe_->to_server.empty()) {
+			return 0;
+		}
+		r_event = std::move(pipe_->to_server.front());
+		pipe_->to_server.pop_front();
+		return 1;
+	}
+	bool send(uint32_t p_peer, uint8_t p_channel, std::span<const uint8_t> p_bytes, net::Host::SendMode) override {
+		std::lock_guard lock(pipe_->mutex);
+		if (pipe_->connected.count(p_peer) == 0) {
+			return false;
+		}
+		Pipe::Sent s{ p_peer, p_channel, std::vector<uint8_t>(p_bytes.begin(), p_bytes.end()) };
+		pipe_->sent.push_back(s);
+		pipe_->to_client[p_peer].push_back(std::move(s));
+		pipe_->to_client_ready.notify_all();
+		return true;
+	}
+	void disconnect_later(uint32_t p_peer) override {
+		std::lock_guard lock(pipe_->mutex);
+		pipe_->disconnects.push_back({ p_peer, pipe_->sent.size() });
+		pipe_->connected.erase(p_peer);
+		net::Host::Event e;
+		e.type = net::Host::EventType::Disconnect;
+		e.peer = p_peer;
+		pipe_->to_server.push_back(std::move(e));
+	}
+	void flush() override {}
+	void disconnect_all() override {
+		std::lock_guard lock(pipe_->mutex);
+		pipe_->connected.clear();
+	}
+	size_t connected_peers() const override {
+		std::lock_guard lock(pipe_->mutex);
+		return pipe_->connected.size();
+	}
+	uint16_t bound_port() const override { return 0; }
+	net::PeerCounters peer_counters(uint32_t) const override { return {}; }
+	size_t peer_capacity() const override { return 0; }
+
+private:
+	std::shared_ptr<Pipe> pipe_;
+};
+
+bool wait_until(const std::function<bool()> &p_done) {
+	const auto start = std::chrono::steady_clock::now();
+	while (!p_done()) {
+		if (seconds_since(start) > 10.0) {
+			return false;
+		}
+		std::this_thread::sleep_for(16ms);
+	}
+	return true;
+}
+
+std::shared_ptr<GameServerConfig> pipe_game() {
+	auto game = std::make_shared<GameServerConfig>();
+	game->level = synthetic_level();
+	game->max_slots = 8;
+	return game;
+}
+
+}
+
+TEST_SUITE("host-session-unit") {
+	TEST_CASE("host.session: a GameServer whose NetThread is fed by a fake Host keeps answering while the tick is "
+			  "stalled") {
+		auto pipe = std::make_shared<Pipe>();
+		ServerConfig sc;
+		sc.game = pipe_game();
+		sc.transport = std::make_shared<PipeServerPort>(pipe);
+		ServerHost server;
+		std::string err;
+		REQUIRE_MESSAGE(server.start(sc, &err), err);
+		CHECK(server.port() == 0);
+		pipe->connect(0);
+		REQUIRE(wait_until([&] { return server.stats().ticks >= 5 && pipe->to_server_empty(); }));
+
+		server.debug_stall(1000);
+		REQUIRE(wait_until([&] { return server.stats().tick_stalls == 1; }));
+		const uint64_t stalled_tick = server.stats().ticks;
+		const uint64_t services = pipe->services.load();
+		net::Hello hello;
+		hello.name = "stalled";
+		pipe->client_send(0, net::kChannelReliable, net::encode_hello(hello));
+		REQUIRE(wait_until([&] { return pipe->services.load() >= services + 3 && pipe->to_server_empty(); }));
+		CHECK(server.stats().ticks == stalled_tick);
+		CHECK(pipe->count_sent(0, net::MessageType::MatchInfo) == 0);
+
+		REQUIRE(wait_until([&] { return pipe->count_sent(0, net::MessageType::MatchInfo) == 1; }));
+		CHECK(server.stats().ticks > stalled_tick);
+		const std::optional<net::MatchInfo> match = pipe->match_info(0);
+		REQUIRE(match.has_value());
+		CHECK(match->slot == 0);
+
+		pipe->connect(1);
+		net::Hello stranger;
+		stranger.protocol = net::kProtocolVersion + 1;
+		pipe->client_send(1, net::kChannelReliable, net::encode_hello(stranger));
+		REQUIRE(wait_until([&] {
+			std::lock_guard lock(pipe->mutex);
+			return !pipe->disconnects.empty();
+		}));
+		{
+			std::lock_guard lock(pipe->mutex);
+			REQUIRE(pipe->disconnects.size() == 1);
+			CHECK(pipe->disconnects[0].first == 1);
+			const size_t at = pipe->disconnects[0].second;
+			REQUIRE(at >= 1);
+			CHECK(pipe->sent[at - 1].peer == 1);
+			CHECK(net::peek_type(pipe->sent[at - 1].bytes) == net::MessageType::Kick);
+		}
+		CHECK(wait_until([&] { return server.stats().peers == 1; }));
+		CHECK(server.game_stats().clients == 1);
+		CHECK(server.stats().step_errors == 0);
+		server.stop();
+	}
+}
+
+TEST_SUITE("host-server-netthread") {
+	TEST_CASE("host.server: the tick thread blocked 6 s with peer timeouts of 2-4 s: the client stays connected and "
+			  "the next snapshot arrives") {
+		ServerConfig sc;
+		sc.game = pipe_game();
+		sc.peer_timeout_min_ms = 2000;
+		sc.peer_timeout_max_ms = 4000;
+		ServerHost server;
+		std::string err;
+		REQUIRE_MESSAGE(server.start(sc, &err), err);
+		ClientSessionConfig cc;
+		cc.port = server.port();
+		cc.peer_timeout_min_ms = 2000;
+		cc.peer_timeout_max_ms = 4000;
+		ClientSession client;
+		const core::Status started = client.start(cc, synthetic_level());
+		REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
+		auto frame = std::make_unique<PresentationFrame>();
+		REQUIRE(wait_until([&] {
+			client.read_presentation(*frame);
+			return frame->valid && frame->own_curr.life > 0;
+		}));
+
+		server.debug_stall(6000);
+		REQUIRE(wait_until([&] { return server.stats().tick_stalls == 1; }));
+		const auto stall_start = std::chrono::steady_clock::now();
+		bool stayed = true;
+		uint64_t early = 0, late = 0;
+		while (seconds_since(stall_start) < 5.5) {
+			const ClientStats s = client.stats();
+			stayed = stayed && s.connected;
+			if (early == 0 && seconds_since(stall_start) > 0.5) {
+				early = s.snapshots_received;
+			}
+			late = s.snapshots_received;
+			std::this_thread::sleep_for(16ms);
+		}
+		CHECK(stayed);
+		CHECK(early > 0);
+		CHECK(late == early);
+		REQUIRE(wait_until([&] { return client.stats().snapshots_received > late; }));
+		CHECK(client.stats().connected);
+		CHECK(server.stats().peers == 1);
+		CHECK(server.game_stats().clients == 1);
+		client.stop();
+		server.stop();
 	}
 }
