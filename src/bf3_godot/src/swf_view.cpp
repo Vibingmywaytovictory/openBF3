@@ -1071,17 +1071,6 @@ struct Bf3SwfView::Impl {
 		spares.clear();
 	}
 
-	Vector2i spare_fit(Vector2i p_need) const {
-		Vector2i best(-1, -1);
-		for (const SpareSurface &sp : spares) {
-			if (sp.msaa == msaa && layer_fits(sp.size, p_need) &&
-					(best.x < 0 || int64_t(sp.size.x) * sp.size.y < int64_t(best.x) * best.y)) {
-				best = sp.size;
-			}
-		}
-		return best.x < 0 ? Vector2i(layer_alloc(p_need.x), layer_alloc(p_need.y)) : best;
-	}
-
 	bool take(Surface &r_s, Vector2i p_size, RenderingServer::ViewportMSAA p_msaa) {
 		if (r_s.viewport.is_valid() && r_s.size == p_size) {
 			return false;
@@ -2546,7 +2535,7 @@ struct Bf3SwfView::Impl {
 			const bool realloc = !fits || final_texture != c.quad_texture;
 			if (realloc) {
 				if (!fits) {
-					c.size = spare_fit(size);
+					c.size = Vector2i(layer_alloc(size.x), layer_alloc(size.y));
 				}
 				bool swapped = take(c.content, c.size, msaa);
 				if (c.alpha.viewport.is_valid() && take(c.alpha, c.size, msaa)) {
