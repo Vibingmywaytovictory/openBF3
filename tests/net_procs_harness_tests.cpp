@@ -22,6 +22,7 @@ namespace {
 using namespace std::chrono_literals;
 using bf3::test::procs::ChildEnd;
 using bf3::test::procs::ChildSpec;
+using bf3::test::procs::contains;
 using bf3::test::procs::driver_config_from_env;
 using bf3::test::procs::kKilledExitCode;
 using bf3::test::procs::ProcDriver;
@@ -42,10 +43,6 @@ std::filesystem::path self_exe() {
 
 std::vector<std::string> child_case(const char *p_case) {
 	return { "--test-suite=net-procs-harness-children", std::string("--test-case=") + p_case, "--no-skip" };
-}
-
-bool contains(std::string_view p_text, std::string_view p_needle) {
-	return p_text.find(p_needle) != std::string_view::npos;
 }
 
 uint32_t grandchild_pid(ProcDriver &r_driver, size_t p_child) {

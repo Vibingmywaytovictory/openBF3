@@ -16,6 +16,10 @@ namespace bf3::test::procs {
 
 constexpr uint32_t kKilledExitCode = 124;
 
+inline bool contains(std::string_view p_text, std::string_view p_needle) {
+	return p_text.find(p_needle) != std::string_view::npos;
+}
+
 enum class ChildKind : uint8_t {
 	Tool,
 	Godot,

@@ -44,6 +44,8 @@
 
 #include "export_commands.h"
 
+#include "net_commands.h"
+
 #include <fcntl.h>
 #include <io.h>
 #include <windows.h>
@@ -473,6 +475,7 @@ void usage() {
 	std::fprintf(stderr, "%s", bf3dump::vm_usage());
 	std::fprintf(stderr, "%s", bf3dump::firefight_usage());
 	std::fprintf(stderr, "%s", bf3dump::export_usage());
+	std::fprintf(stderr, "%s", bf3dump::net_usage());
 }
 
 }
@@ -499,6 +502,9 @@ int wmain(int argc, wchar_t **argv) {
 		const int failed = bf3dump::json_number_selfcheck();
 		std::fprintf(stderr, "numcheck: %s\n", failed == 0 ? "PASS" : "FAIL");
 		return failed == 0 ? 0 : 1;
+	}
+	if (args[0] == "loadbots") {
+		return bf3dump::cmd_loadbots(std::vector<std::string>(args.begin() + 1, args.end()));
 	}
 	const auto start = std::chrono::steady_clock::now();
 	Context ctx;
@@ -654,6 +660,10 @@ int wmain(int argc, wchar_t **argv) {
 
 	if (cmd == "export") {
 		return bf3dump::cmd_export(ctx.reader, ctx.install, rest);
+	}
+
+	if (cmd == "client") {
+		return bf3dump::cmd_client(ctx.reader, ctx.install, rest);
 	}
 	usage();
 	return 2;
