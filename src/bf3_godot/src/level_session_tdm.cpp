@@ -445,11 +445,13 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 		m.native_screens_check = has_user_arg("native-screens-check");
 		m.loading_screen_check = has_user_arg("loading-screen-check");
 		m.menu_check_on = has_user_arg("menu-check");
+		m.menu_frames_check_on = has_user_arg("menu-frames-check");
 		m.eor_check_on = has_user_arg("eor-check");
-		m.native_screens = m.native_screens_check || m.loading_screen_check || m.menu_check_on || m.eor_check_on ||
-				user_arg_value("native-screens") != "0";
+		m.native_screens = m.native_screens_check || m.loading_screen_check || m.menu_check_on ||
+				m.menu_frames_check_on || m.eor_check_on || user_arg_value("native-screens") != "0";
 		m.deploy_check = has_user_arg("deploy-check");
-		if ((m.native_screens_check || m.loading_screen_check || m.menu_check_on || m.deploy_check || m.eor_check_on) &&
+		if ((m.native_screens_check || m.loading_screen_check || m.menu_check_on || m.menu_frames_check_on ||
+					m.deploy_check || m.eor_check_on) &&
 				quit_after_ <= 0.0) {
 			quit_after_ = 1.0e9;
 		}

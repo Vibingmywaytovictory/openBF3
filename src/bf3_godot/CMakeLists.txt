@@ -289,6 +289,10 @@ if(OPENBF3_BUILD_CHECKS)
         src/menu_check.h
     )
     target_sources(bf3_godot PRIVATE
+        src/menu_frames_check.cpp
+        src/menu_frames_check.h
+    )
+    target_sources(bf3_godot PRIVATE
         src/options_check.cpp
         src/options_check.h
     )

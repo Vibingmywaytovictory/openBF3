@@ -28,6 +28,7 @@ class NativeMenu;
 class NativeOptions;
 class OptionsCheck;
 class MenuCheck;
+class MenuFramesCheck;
 class NativeScreensCheck;
 class DeployCheck;
 class LoadingScreenCheck;
@@ -118,6 +119,8 @@ struct TdmState {
 	DeployScreens deploy_screens;
 	std::unique_ptr<NativeMenu, void (*)(NativeMenu *)> native_menu{ nullptr, nullptr };
 	std::unique_ptr<MenuCheck, void (*)(MenuCheck *)> menu_check{ nullptr, nullptr };
+	bool menu_frames_check_on = false;
+	std::unique_ptr<MenuFramesCheck, void (*)(MenuFramesCheck *)> menu_frames_check{ nullptr, nullptr };
 	std::unique_ptr<NativeEor, void (*)(NativeEor *)> native_eor{ nullptr, nullptr };
 	std::unique_ptr<NativeOptions, void (*)(NativeOptions *)> native_options{ nullptr, nullptr };
 	bool options_check_on = false;

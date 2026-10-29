@@ -1055,6 +1055,11 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_godot_row(godot.ui_sizes godot_ui_sizes.cmake WINDOW TIMEOUT 180)
     set_tests_properties(godot.ui_sizes PROPERTIES RUN_SERIAL TRUE)
     openbf3_cost(godot.ui_sizes 1 90)
+    openbf3_godot_row(godot.menu_frames godot_menu_frames.cmake WINDOW TIMEOUT 300)
+    openbf3_godot_row(godot.menu_frames.fullscreen godot_menu_frames.cmake WINDOW TIMEOUT 300 ARGS -DFULLSCREEN=1)
+    set_tests_properties(godot.menu_frames godot.menu_frames.fullscreen PROPERTIES RUN_SERIAL TRUE)
+    openbf3_cost(godot.menu_frames 1 70)
+    openbf3_cost(godot.menu_frames.fullscreen 1 73)
 endif()
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)

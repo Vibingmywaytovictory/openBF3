@@ -7,6 +7,7 @@
 #include "level_session_game.h"
 #include "level_session_tdm.h"
 #include "menu_check.h"
+#include "menu_frames_check.h"
 #include "native_flow.h"
 #include "native_hud.h"
 #include "native_options.h"
@@ -29,6 +30,8 @@
 #include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/input_event_mouse_motion.hpp>
+#include <godot_cpp/classes/performance.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/classes/viewport_texture.hpp>
 #include <godot_cpp/classes/window.hpp>
@@ -257,6 +260,49 @@ bool Bf3LevelSession::tdm_menu_frame(double p_now_s) {
 			m.finished = true;
 			UtilityFunctions::print(to_godot(m.menu_check->report()));
 			finish(m.menu_check->exit_code());
+			return true;
+		}
+	}
+	if (m.menu_frames_check_on && m.menu_frames_check == nullptr) {
+		m.menu_frames_check = std::unique_ptr<MenuFramesCheck, void (*)(MenuFramesCheck *)>(
+				new MenuFramesCheck(user_arg_value("menu-frames-shots")), &delete_part<MenuFramesCheck>);
+		RenderingServer::get_singleton()->viewport_set_measure_render_time(get_viewport()->get_viewport_rid(), true);
+	}
+	if (m.menu_frames_check != nullptr && !m.finished) {
+		MenuFramesIo fio;
+		fio.press = [this](Key p_key, bool p_pressed) { scripted_ui_key(p_key, p_pressed); };
+		fio.move = [this](Vector2 p_at) {
+			Ref<InputEventMouseMotion> e;
+			e.instantiate();
+			e->set_position(p_at);
+			tdm_ui_input(e);
+		};
+		fio.click = [this](Vector2 p_at, bool p_pressed) {
+			Ref<InputEventMouseButton> e;
+			e.instantiate();
+			e->set_position(p_at);
+			e->set_button_index(MOUSE_BUTTON_LEFT);
+			e->set_pressed(p_pressed);
+			tdm_ui_input(e);
+		};
+		fio.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		fio.alive = game_->alive;
+		fio.game_input = mapper_.game_input();
+		fio.process_ms = Performance::get_singleton()->get_monitor(Performance::TIME_PROCESS) * 1000.0;
+		fio.ui_ms = m.ms_tdm_hud;
+		fio.video_mb =
+				Performance::get_singleton()->get_monitor(Performance::RENDER_VIDEO_MEM_USED) / (1024.0 * 1024.0);
+		const RID viewport = get_viewport()->get_viewport_rid();
+		fio.render_cpu_ms = RenderingServer::get_singleton()->viewport_get_measured_render_time_cpu(viewport);
+		fio.render_gpu_ms = RenderingServer::get_singleton()->viewport_get_measured_render_time_gpu(viewport);
+		if (const Bf3UiPostProcess *post = Bf3UiPostProcess::current()) {
+			fio.glitch_triggers = post->stats().glitch_triggers;
+			fio.glitch_drawn = post->glitch_drawn();
+		}
+		if (m.menu_frames_check->frame(*screens, *m.native_flow, *m.native_menu, p_now_s, fio)) {
+			m.finished = true;
+			UtilityFunctions::print(to_godot(m.menu_frames_check->report()));
+			finish(m.menu_frames_check->exit_code());
 			return true;
 		}
 	}
