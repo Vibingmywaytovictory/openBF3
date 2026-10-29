@@ -25,24 +25,6 @@ namespace {
 
 detail::InstanceRegistry<ClientSession> g_registry;
 
-class EnetTransport final : public ClientTransport {
-public:
-	EnetTransport(std::unique_ptr<net::Host> p_host, uint32_t p_peer) :
-			host_(std::move(p_host)), peer_(p_peer) {}
-
-	int service(uint32_t p_wait_ms, net::Host::Event &r_event) override { return host_->service(p_wait_ms, r_event); }
-	void send(uint8_t p_channel, std::span<const uint8_t> p_bytes, net::Host::SendMode p_mode) override {
-		host_->send(peer_, p_channel, p_bytes.data(), p_bytes.size(), p_mode);
-	}
-	void flush() override { host_->flush(); }
-	void disconnect_all() override { host_->disconnect_all(); }
-	uint32_t rtt_ms() const override { return host_->peer_rtt_ms(peer_); }
-
-private:
-	std::unique_ptr<net::Host> host_;
-	uint32_t peer_ = 0;
-};
-
 }
 
 size_t present_others(const PresentationFrame &p_frame, uint64_t p_now_ns, std::span<PresentedSoldier> r_out, uint64_t *r_extrapolated) {
@@ -155,40 +137,19 @@ core::Status ClientSession::start(const ClientSessionConfig &p_config, std::shar
 		return core::make_error("ClientSession: no server port");
 	}
 
-	std::string err;
-	std::unique_ptr<net::Host> host = net::Host::create_client(net::kChannelCount, &err);
-	if (host == nullptr) {
-		return core::make_error("ClientSession: " + err);
-	}
-	const int peer = host->connect(p_config.host.c_str(), p_config.port);
-	if (peer < 0) {
-		return core::make_error("ClientSession: cannot connect to " + p_config.host);
-	}
-	if (p_config.peer_timeout_min_ms != 0 || p_config.peer_timeout_max_ms != 0) {
-		host->set_peer_timeout(uint32_t(peer), 0, p_config.peer_timeout_min_ms, p_config.peer_timeout_max_ms);
-	}
-	const uint64_t t0 = net::monotonic_ns();
-	bool connected = false;
-	while (!connected && net::monotonic_ns() - t0 < uint64_t(p_config.connect_timeout_ms) * 1'000'000ull) {
-		net::Host::Event ev;
-		const int r = host->service(10, ev);
-		if (r < 0) {
-			break;
-		}
-		connected = r > 0 && ev.type == net::Host::EventType::Connect;
-	}
-	if (!connected) {
-		return core::make_error("ClientSession: no connection to " + p_config.host + ":" + std::to_string(p_config.port) + " within " +
-				std::to_string(p_config.connect_timeout_ms) + " ms");
+	core::Result<std::unique_ptr<ClientTransport>> transport = connect_enet_transport(EnetConnect{ p_config.host,
+			p_config.port, p_config.connect_timeout_ms, p_config.peer_timeout_min_ms, p_config.peer_timeout_max_ms });
+	if (!transport) {
+		return core::make_error("ClientSession: " + transport.error().message);
 	}
 	m.loop.configure(p_config);
 	if (p_level != nullptr) {
 		if (const core::Status s = m.loop.attach_level(std::move(p_level)); !s.ok()) {
-			host->disconnect_all();
+			(*transport)->disconnect_all();
 			return s;
 		}
 	}
-	m.launch(this, std::make_unique<EnetTransport>(std::move(host), uint32_t(peer)));
+	m.launch(this, std::move(*transport));
 	return core::Status::success();
 }
 

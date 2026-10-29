@@ -1,10 +1,13 @@
 #pragma once
 
+#include "bf3/core/result.h"
 #include "bf3/net/enet_host.h"
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <span>
+#include <string>
 
 namespace bf3::host {
 
@@ -19,5 +22,15 @@ public:
 };
 
 using MonotonicClock = std::function<uint64_t()>;
+
+struct EnetConnect {
+	std::string host = "127.0.0.1";
+	uint16_t port = 0;
+	uint32_t timeout_ms = 5000;
+	uint32_t peer_timeout_min_ms = 0;
+	uint32_t peer_timeout_max_ms = 0;
+};
+
+core::Result<std::unique_ptr<ClientTransport>> connect_enet_transport(const EnetConnect &p_connect);
 
 }
