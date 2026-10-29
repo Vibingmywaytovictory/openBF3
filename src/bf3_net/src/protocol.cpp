@@ -27,7 +27,7 @@ constexpr size_t kMaxSweepRows = 1024;
 
 constexpr size_t kMaxReliableBytes = 256 * 1024;
 constexpr size_t kDatagramBits = kMaxDatagramBytes * 8;
-constexpr float kMaxDebugCoordinate = 1.0e6f;
+constexpr float kMaxWorldCoordinate = 1.0e6f;
 
 constexpr uint8_t kKnownWeaponFlags = weapon_flags::kExactAim | weapon_flags::kInfiniteMagazine;
 constexpr uint8_t kKnownRulesFlags = rules_flags::kTdm | rules_flags::kDeployScreen | rules_flags::kRevive;
@@ -46,6 +46,11 @@ core::Error fail(const char *p_what, const char *p_why) {
 
 constexpr bool valid_pose(uint64_t p_value) {
 	return p_value < sim::kPoseCount;
+}
+
+bool in_world(const sim::Vec3 &p_position) {
+	return finite(p_position) && std::fabs(p_position[0]) <= kMaxWorldCoordinate &&
+			std::fabs(p_position[1]) <= kMaxWorldCoordinate && std::fabs(p_position[2]) <= kMaxWorldCoordinate;
 }
 
 bool valid_utf8(std::string_view p_text) {
@@ -810,10 +815,7 @@ void serialize(A &r_a, M &r_m) {
 		return uint8_t(r_m.kind) >= uint8_t(DebugKind::Teleport) && uint8_t(r_m.kind) <= uint8_t(DebugKind::Revive);
 	});
 	r_a.check("slot or pose out of range", [&] { return r_m.slot < kMaxSlots && valid_pose(uint8_t(r_m.pose)); });
-	r_a.check("position out of range", [&] {
-		return finite(r_m.position) && std::fabs(r_m.position[0]) <= kMaxDebugCoordinate && std::fabs(r_m.position[1]) <= kMaxDebugCoordinate &&
-				std::fabs(r_m.position[2]) <= kMaxDebugCoordinate;
-	});
+	r_a.check("position out of range", [&] { return in_world(r_m.position); });
 	r_a.check("tick count above kMaxTraceTicks", [&] { return r_m.ticks <= kMaxTraceTicks; });
 }
 
@@ -1434,6 +1436,156 @@ template <class A, MaybeConst<SoldierGear> M> void serialize(A &r_a, M &r_m) {
 	r_a.check("slot out of range", [&] { return r_m.slot < kMaxSlots; });
 }
 
+template <class A, MaybeConst<Mismatch> M> void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.components, 8);
+	r_a.check("no or unknown mismatch components",
+			[&] { return r_m.components != 0 && (r_m.components & ~mismatch_bits::kAll) == 0; });
+}
+
+template <class A, MaybeConst<NextLevel> N> void serialize(A &r_a, N &r_n) {
+	text(r_a, r_n.level, kMaxIdentBytes, "bad level or mode name");
+	text(r_a, r_n.mode, kMaxIdentBytes, "bad level or mode name");
+	digest(r_a, r_n.source_digest);
+	r_a.bits(r_n.logic_digest, 64);
+}
+
+template <class A, MaybeConst<RoundOverInfo> M> void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.winner, 8);
+	serialize(r_a, r_m.next);
+	r_a.bits(r_m.intermission_s, 16);
+	r_a.check("winner out of range", [&] { return r_m.winner <= kMaxTeam; });
+}
+
+template <class A, MaybeConst<Prepare> M> void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.round_id, 32);
+	digest(r_a, r_m.next_source_digest);
+	r_a.bits(r_m.state, 8);
+	r_a.bits(r_m.permille, 16);
+	r_a.check("unknown prepare state", [&] { return uint8_t(r_m.state) <= uint8_t(PrepareState::MissingXpack); });
+	r_a.check("progress above 1000 permille", [&] { return r_m.permille <= 1000; });
+}
+
+template <class A, MaybeConst<LevelChange> M> void serialize(A &r_a, M &r_m) {
+	text(r_a, r_m.level, kMaxIdentBytes, "bad level or mode name");
+	text(r_a, r_m.mode, kMaxIdentBytes, "bad level or mode name");
+	r_a.bits(r_m.round_id, 32);
+	r_a.bits(r_m.load_deadline_s, 16);
+}
+
+template <class A, MaybeConst<sim::logic::LogicNetworkedEvent> E>
+constexpr void serialize(A &r_a, E &r_e, sim::Tick p_server_tick) {
+	uint64_t back = r_a.encode([&] { return uint64_t(sim::Tick(p_server_tick - r_e.tick)); });
+	r_a.varint(back);
+	r_a.check("logic event after the message tick", [&] { return back <= p_server_tick; });
+	r_a.store(r_e.tick, [&] { return sim::Tick(p_server_tick - back); });
+	r_a.bits(r_e.connection, 64);
+	r_a.bits(r_e.source, 32);
+	r_a.bits(r_e.source_port, 32);
+	r_a.coded(
+			r_e.context.player, 8, [](int32_t p_player) { return uint32_t(p_player + 1); },
+			[](uint32_t p_code) { return int32_t(p_code) - 1; });
+	r_a.bits(r_e.context.team, 8);
+	r_a.check("logic event context out of range",
+			[&] { return r_e.context.player < int32_t(kMaxSlots) && r_e.context.team <= kMaxTeam; });
+}
+
+constexpr size_t kLogicEventMinBits = count_bits([](auto &r_a) {
+	sim::logic::LogicNetworkedEvent event{};
+	serialize(r_a, event, sim::Tick(0));
+});
+
+template <class A, MaybeConst<LogicEvents> M> void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.server_tick, 32);
+	uint64_t count = r_m.events.size();
+	r_a.varint(count);
+	r_a.check("logic event count out of range",
+			[&] { return count <= kMaxLogicEventsPerMessage && r_a.fits(count * kLogicEventMinBits); });
+	count = r_a.resize(r_m.events, size_t(count));
+	for (size_t i = 0; i < count && r_a.ok(); ++i) {
+		serialize(r_a, r_m.events[i], r_m.server_tick);
+	}
+}
+
+constexpr size_t kGhostBoolsPerWord = 64;
+constexpr size_t kGhostTransformFloats = 12;
+
+constexpr size_t ghost_words(uint64_t p_bools) {
+	return size_t((p_bools + kGhostBoolsPerWord - 1) / kGhostBoolsPerWord);
+}
+
+template <class A, MaybeConst<FullSync> M> void serialize(A &r_a, M &r_m) {
+	auto &g = r_m.ghost;
+	r_a.bits(g.tick, 32);
+	uint64_t bools = g.bool_count;
+	r_a.varint(bools);
+	r_a.check(
+			"ghost bool count out of range", [&] { return bools <= sim::logic::kMaxGhostEntries && r_a.fits(bools); });
+	r_a.store(g.bool_count, [&] { return r_a.ok() ? size_t(bools) : size_t(0); });
+	const size_t words = r_a.resize(g.bool_bits, ghost_words(bools));
+	for (size_t w = 0; w < words && r_a.ok(); ++w) {
+		r_a.bits(g.bool_bits[w], unsigned(std::min<uint64_t>(kGhostBoolsPerWord, bools - w * kGhostBoolsPerWord)));
+	}
+	uint64_t transforms = g.transforms.size();
+	r_a.varint(transforms);
+	r_a.check("ghost transform count out of range", [&] {
+		return transforms <= sim::logic::kMaxGhostEntries && r_a.fits(transforms * kGhostTransformFloats * 32);
+	});
+	transforms = r_a.resize(g.transforms, size_t(transforms));
+	for (size_t i = 0; i < transforms && r_a.ok(); ++i) {
+		for (auto &f : g.transforms[i]) {
+			r_a.f32(f);
+		}
+		r_a.check("non-finite ghost transform", [&] { return finite(std::span<const float>(g.transforms[i])); });
+	}
+	uint64_t sequences = g.sequence_start.size();
+	r_a.varint(sequences);
+	r_a.check("ghost sequence count out of range",
+			[&] { return sequences <= sim::logic::kMaxGhostEntries && r_a.fits(sequences * 32); });
+	sequences = r_a.resize(g.sequence_start, size_t(sequences));
+	for (size_t i = 0; i < sequences && r_a.ok(); ++i) {
+		r_a.bits(g.sequence_start[i], 32);
+	}
+}
+
+constexpr unsigned kGhostIndexBits = 12;
+static_assert((size_t(1) << kGhostIndexBits) == sim::logic::kMaxGhostEntries);
+constexpr size_t kGhostDeltaRowBits = kGhostIndexBits + 1;
+
+template <class A, MaybeConst<LogicDelta> M> void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.tick, 32);
+	uint64_t rows = r_m.rows.size();
+	r_a.varint(rows);
+	r_a.check("ghost delta row count out of range",
+			[&] { return rows <= sim::logic::kMaxGhostEntries && r_a.fits(rows * kGhostDeltaRowBits); });
+	rows = r_a.resize(r_m.rows, size_t(rows));
+	for (size_t i = 0; i < rows && r_a.ok(); ++i) {
+		r_a.bits(r_m.rows[i].index, kGhostIndexBits);
+		r_a.bits(r_m.rows[i].value, 1);
+		r_a.check(
+				"ghost delta rows not ascending", [&] { return i == 0 || r_m.rows[i].index > r_m.rows[i - 1].index; });
+	}
+}
+
+template <class A, MaybeConst<SquadRequest> M> void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.op, 8);
+	r_a.bits(r_m.squad, 8);
+	r_a.bits(r_m.target, 8);
+	r_a.check("unknown squad op", [&] { return uint8_t(r_m.op) <= uint8_t(SquadOp::SwitchTeam); });
+	r_a.check("squad or target out of range", [&] { return r_m.squad <= kMaxSquads && r_m.target < kMaxSlots; });
+}
+
+template <class A, MaybeConst<SquadOrder> M> void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.team, 8);
+	r_a.bits(r_m.squad, 8);
+	r_a.bits(r_m.kind, 8);
+	r_a.bits(r_m.area, 16);
+	vec3(r_a, r_m.position);
+	r_a.check("team or squad out of range",
+			[&] { return r_m.team >= 1 && r_m.team <= kMaxTeam && r_m.squad >= 1 && r_m.squad <= kMaxSquads; });
+	r_a.check("unknown order kind", [&] { return uint8_t(r_m.kind) <= uint8_t(SquadOrderKind::Defend); });
+	r_a.check("position out of range", [&] { return in_world(r_m.position); });
+}
+
 struct Framing {
 	MessageType type;
 	const char *what;
@@ -1497,6 +1649,15 @@ std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram) {
 		case MessageType::SuicideRequest:
 		case MessageType::LoadoutRequest:
 		case MessageType::SoldierGear:
+		case MessageType::Mismatch:
+		case MessageType::RoundOverInfo:
+		case MessageType::Prepare:
+		case MessageType::LevelChange:
+		case MessageType::LogicEvents:
+		case MessageType::FullSync:
+		case MessageType::LogicDelta:
+		case MessageType::SquadRequest:
+		case MessageType::SquadOrder:
 			return MessageType(p_datagram[0]);
 	}
 	return std::nullopt;
@@ -1911,6 +2072,111 @@ std::vector<uint8_t> encode_soldier_gear(const SoldierGear &p_message) {
 
 core::Result<SoldierGear> decode_soldier_gear(std::span<const uint8_t> p_datagram) {
 	return decode_as<SoldierGear>(p_datagram, { MessageType::SoldierGear, "SoldierGear" });
+}
+
+std::vector<uint8_t> encode_mismatch(const Mismatch &p_message) {
+	return encode_as(MessageType::Mismatch, kMaxReliableBytes, p_message);
+}
+
+core::Result<Mismatch> decode_mismatch(std::span<const uint8_t> p_datagram) {
+	return decode_as<Mismatch>(p_datagram, { MessageType::Mismatch, "Mismatch" });
+}
+
+std::vector<uint8_t> encode_round_over_info(const RoundOverInfo &p_message) {
+	return encode_as(MessageType::RoundOverInfo, kMaxReliableBytes, p_message);
+}
+
+core::Result<RoundOverInfo> decode_round_over_info(std::span<const uint8_t> p_datagram) {
+	return decode_as<RoundOverInfo>(p_datagram, { MessageType::RoundOverInfo, "RoundOverInfo" });
+}
+
+std::vector<uint8_t> encode_prepare(const Prepare &p_message) {
+	Prepare m = p_message;
+	m.permille = std::min<uint16_t>(m.permille, 1000);
+	return encode_as(MessageType::Prepare, kMaxReliableBytes, m);
+}
+
+core::Result<Prepare> decode_prepare(std::span<const uint8_t> p_datagram) {
+	return decode_as<Prepare>(p_datagram, { MessageType::Prepare, "Prepare" });
+}
+
+std::vector<uint8_t> encode_level_change(const LevelChange &p_message) {
+	return encode_as(MessageType::LevelChange, kMaxReliableBytes, p_message);
+}
+
+core::Result<LevelChange> decode_level_change(std::span<const uint8_t> p_datagram) {
+	return decode_as<LevelChange>(p_datagram, { MessageType::LevelChange, "LevelChange" });
+}
+
+std::vector<uint8_t> encode_logic_events(const LogicEvents &p_message, size_t *r_dropped) {
+	LogicEvents kept;
+	kept.server_tick = p_message.server_tick;
+	for (const sim::logic::LogicNetworkedEvent &e : p_message.events) {
+		const bool valid = e.tick <= p_message.server_tick && e.context.player >= -1 &&
+				e.context.player < int32_t(kMaxSlots) && e.context.team <= kMaxTeam;
+		if (valid && kept.events.size() < kMaxLogicEventsPerMessage) {
+			kept.events.push_back(e);
+		}
+	}
+	if (r_dropped) {
+		*r_dropped = p_message.events.size() - kept.events.size();
+	}
+	return encode_as(MessageType::LogicEvents, kMaxReliableBytes, kept);
+}
+
+core::Result<LogicEvents> decode_logic_events(std::span<const uint8_t> p_datagram) {
+	return decode_as<LogicEvents>(p_datagram, { MessageType::LogicEvents, "LogicEvents" });
+}
+
+std::vector<uint8_t> encode_full_sync(const FullSync &p_message) {
+	FullSync m = p_message;
+	sim::logic::LogicGhost &g = m.ghost;
+	g.bool_count = std::min(g.bool_count, sim::logic::kMaxGhostEntries);
+	g.bool_bits.resize(ghost_words(g.bool_count));
+	if (const size_t tail = g.bool_count % kGhostBoolsPerWord; tail != 0) {
+		g.bool_bits.back() &= (uint64_t(1) << tail) - 1;
+	}
+	g.transforms.resize(std::min(g.transforms.size(), sim::logic::kMaxGhostEntries));
+	g.sequence_start.resize(std::min(g.sequence_start.size(), sim::logic::kMaxGhostEntries));
+	return encode_as(MessageType::FullSync, kMaxReliableBytes, m);
+}
+
+core::Result<FullSync> decode_full_sync(std::span<const uint8_t> p_datagram) {
+	return decode_as<FullSync>(p_datagram, { MessageType::FullSync, "FullSync" });
+}
+
+std::vector<uint8_t> encode_logic_delta(const LogicDelta &p_message, size_t *r_dropped) {
+	LogicDelta kept;
+	kept.tick = p_message.tick;
+	for (const sim::logic::LogicGhost::BoolDelta &row : p_message.rows) {
+		if (row.index < sim::logic::kMaxGhostEntries && (kept.rows.empty() || row.index > kept.rows.back().index)) {
+			kept.rows.push_back(row);
+		}
+	}
+	if (r_dropped) {
+		*r_dropped = p_message.rows.size() - kept.rows.size();
+	}
+	return encode_as(MessageType::LogicDelta, kMaxReliableBytes, kept);
+}
+
+core::Result<LogicDelta> decode_logic_delta(std::span<const uint8_t> p_datagram) {
+	return decode_as<LogicDelta>(p_datagram, { MessageType::LogicDelta, "LogicDelta" });
+}
+
+std::vector<uint8_t> encode_squad_request(const SquadRequest &p_message) {
+	return encode_as(MessageType::SquadRequest, kMaxReliableBytes, p_message);
+}
+
+core::Result<SquadRequest> decode_squad_request(std::span<const uint8_t> p_datagram) {
+	return decode_as<SquadRequest>(p_datagram, { MessageType::SquadRequest, "SquadRequest" });
+}
+
+std::vector<uint8_t> encode_squad_order(const SquadOrder &p_message) {
+	return encode_as(MessageType::SquadOrder, kMaxReliableBytes, p_message);
+}
+
+core::Result<SquadOrder> decode_squad_order(std::span<const uint8_t> p_datagram) {
+	return decode_as<SquadOrder>(p_datagram, { MessageType::SquadOrder, "SquadOrder" });
 }
 
 bool set_player_name(PlayerRow &r_row, std::string_view p_name) {

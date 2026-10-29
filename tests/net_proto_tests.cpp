@@ -31,6 +31,9 @@ void append_v2_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>>
 int decode_reencode_v3(net::MessageType p_type, std::span<const uint8_t> p_bytes);
 void append_v3_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>> &r_out);
 
+int decode_reencode_v4(net::MessageType p_type, std::span<const uint8_t> p_bytes);
+void append_v4_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>> &r_out);
+
 struct Rng {
 	uint64_t s;
 	explicit Rng(uint64_t p_seed) :
@@ -257,6 +260,15 @@ int decode_reencode(std::span<const uint8_t> p_bytes) {
 		case net::MessageType::SuicideRequest:
 		case net::MessageType::LoadoutRequest:
 		case net::MessageType::SoldierGear:
+		case net::MessageType::Mismatch:
+		case net::MessageType::RoundOverInfo:
+		case net::MessageType::Prepare:
+		case net::MessageType::LevelChange:
+		case net::MessageType::LogicEvents:
+		case net::MessageType::FullSync:
+		case net::MessageType::LogicDelta:
+		case net::MessageType::SquadRequest:
+		case net::MessageType::SquadOrder:
 			return decode_reencode_v2(*type, p_bytes);
 	}
 	return -1;
@@ -313,6 +325,7 @@ std::vector<std::pair<std::string, std::vector<uint8_t>>> sample_datagrams() {
 	out.emplace_back("DebugReport", net::encode_debug_report(rep));
 	append_v2_samples(out);
 	append_v3_samples(out);
+	append_v4_samples(out);
 	return out;
 }
 
@@ -624,7 +637,7 @@ TEST_SUITE("net-proto") {
 			const uint8_t b = uint8_t(t);
 			known += net::peek_type(std::span<const uint8_t>(&b, 1)).has_value() ? 1 : 0;
 		}
-		CHECK(known == 21);
+		CHECK(known == 30);
 		const uint8_t s = 1;
 		CHECK(net::peek_type(std::span<const uint8_t>(&s, 1)) == net::MessageType::Snapshot);
 	}
@@ -3194,7 +3207,7 @@ int decode_reencode_v3(net::MessageType p_type, std::span<const uint8_t> p_bytes
 			return b && *b == *a ? 1 : 0;
 		}
 		default:
-			return -1;
+			return decode_reencode_v4(p_type, p_bytes);
 	}
 }
 
@@ -3602,6 +3615,471 @@ TEST_SUITE("net-proto") {
 
 namespace {
 
+namespace lg = bf3::sim::logic;
+
+bool same_event(const lg::LogicNetworkedEvent &p_a, const lg::LogicNetworkedEvent &p_b) {
+	return p_a.tick == p_b.tick && p_a.connection == p_b.connection && p_a.source == p_b.source &&
+			p_a.source_port == p_b.source_port && p_a.context.player == p_b.context.player &&
+			p_a.context.team == p_b.context.team;
+}
+
+bool same_events(const net::LogicEvents &p_a, const net::LogicEvents &p_b) {
+	if (p_a.server_tick != p_b.server_tick || p_a.events.size() != p_b.events.size()) {
+		return false;
+	}
+	for (size_t i = 0; i < p_a.events.size(); ++i) {
+		if (!same_event(p_a.events[i], p_b.events[i])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool same_delta(const net::LogicDelta &p_a, const net::LogicDelta &p_b) {
+	if (p_a.tick != p_b.tick || p_a.rows.size() != p_b.rows.size()) {
+		return false;
+	}
+	for (size_t i = 0; i < p_a.rows.size(); ++i) {
+		if (p_a.rows[i].index != p_b.rows[i].index || p_a.rows[i].value != p_b.rows[i].value) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool same_order(const net::SquadOrder &p_a, const net::SquadOrder &p_b) {
+	return p_a.team == p_b.team && p_a.squad == p_b.squad && p_a.kind == p_b.kind && p_a.area == p_b.area &&
+			p_a.position == p_b.position;
+}
+
+net::NextLevel sample_next(bool p_digest) {
+	net::NextLevel n;
+	n.level = "MP_011";
+	n.mode = "TeamDeathMatch0";
+	if (p_digest) {
+		bf3::core::Sha256Digest d{};
+		for (size_t i = 0; i < d.bytes.size(); ++i) {
+			d.bytes[i] = uint8_t(0xA0 + i);
+		}
+		n.source_digest = d;
+	}
+	n.logic_digest = 0x1122334455667788ull;
+	return n;
+}
+
+net::LogicEvents sample_logic_events(Rng &r_rng, sim::Tick p_tick, size_t p_count) {
+	net::LogicEvents m;
+	m.server_tick = p_tick;
+	for (size_t i = 0; i < p_count; ++i) {
+		lg::LogicNetworkedEvent e;
+		e.tick = p_tick - r_rng.below(30);
+		e.connection = r_rng.next();
+		e.source = uint32_t(r_rng.next());
+		e.source_port = int32_t(uint32_t(r_rng.next()));
+		e.context.player = int32_t(r_rng.below(129)) - 1;
+		e.context.team = uint8_t(r_rng.below(3));
+		m.events.push_back(e);
+	}
+	return m;
+}
+
+net::FullSync sample_full_sync(Rng &r_rng, size_t p_bools, size_t p_transforms, size_t p_sequences) {
+	net::FullSync m;
+	m.ghost.tick = 61234;
+	m.ghost.bool_count = p_bools;
+	m.ghost.bool_bits.resize((p_bools + 63) / 64);
+	for (uint64_t &w : m.ghost.bool_bits) {
+		w = r_rng.next();
+	}
+	if (p_bools % 64 != 0) {
+		m.ghost.bool_bits.back() &= (uint64_t(1) << (p_bools % 64)) - 1;
+	}
+	for (size_t i = 0; i < p_transforms; ++i) {
+		std::array<float, 12> t{};
+		for (float &f : t) {
+			f = r_rng.uniform(-500, 500);
+		}
+		m.ghost.transforms.push_back(t);
+	}
+	for (size_t i = 0; i < p_sequences; ++i) {
+		m.ghost.sequence_start.push_back(i % 3 == 0 ? lg::LogicGhost::kNoStart : 60000 + uint32_t(i));
+	}
+	return m;
+}
+
+int decode_reencode_v4(net::MessageType p_type, std::span<const uint8_t> p_bytes) {
+	switch (p_type) {
+		case net::MessageType::Mismatch: {
+			auto a = net::decode_mismatch(p_bytes);
+			if (!a) {
+				return -1;
+			}
+			auto b = net::decode_mismatch(net::encode_mismatch(*a));
+			return b && b->components == a->components ? 1 : 0;
+		}
+		case net::MessageType::RoundOverInfo: {
+			auto a = net::decode_round_over_info(p_bytes);
+			if (!a) {
+				return -1;
+			}
+			auto b = net::decode_round_over_info(net::encode_round_over_info(*a));
+			return b && b->winner == a->winner && b->next == a->next && b->intermission_s == a->intermission_s ? 1 : 0;
+		}
+		case net::MessageType::Prepare: {
+			auto a = net::decode_prepare(p_bytes);
+			if (!a) {
+				return -1;
+			}
+			auto b = net::decode_prepare(net::encode_prepare(*a));
+			return b && b->round_id == a->round_id && b->next_source_digest == a->next_source_digest &&
+							b->state == a->state && b->permille == a->permille
+					? 1
+					: 0;
+		}
+		case net::MessageType::LevelChange: {
+			auto a = net::decode_level_change(p_bytes);
+			if (!a) {
+				return -1;
+			}
+			auto b = net::decode_level_change(net::encode_level_change(*a));
+			return b && b->level == a->level && b->mode == a->mode && b->round_id == a->round_id &&
+							b->load_deadline_s == a->load_deadline_s
+					? 1
+					: 0;
+		}
+		case net::MessageType::LogicEvents: {
+			auto a = net::decode_logic_events(p_bytes);
+			if (!a) {
+				return -1;
+			}
+			size_t dropped = 0;
+			auto b = net::decode_logic_events(net::encode_logic_events(*a, &dropped));
+			return b && dropped == 0 && same_events(*a, *b) ? 1 : 0;
+		}
+		case net::MessageType::FullSync: {
+			auto a = net::decode_full_sync(p_bytes);
+			if (!a) {
+				return -1;
+			}
+			auto b = net::decode_full_sync(net::encode_full_sync(*a));
+			return b && b->ghost == a->ghost ? 1 : 0;
+		}
+		case net::MessageType::LogicDelta: {
+			auto a = net::decode_logic_delta(p_bytes);
+			if (!a) {
+				return -1;
+			}
+			size_t dropped = 0;
+			auto b = net::decode_logic_delta(net::encode_logic_delta(*a, &dropped));
+			return b && dropped == 0 && same_delta(*a, *b) ? 1 : 0;
+		}
+		case net::MessageType::SquadRequest: {
+			auto a = net::decode_squad_request(p_bytes);
+			if (!a) {
+				return -1;
+			}
+			auto b = net::decode_squad_request(net::encode_squad_request(*a));
+			return b && b->op == a->op && b->squad == a->squad && b->target == a->target ? 1 : 0;
+		}
+		case net::MessageType::SquadOrder: {
+			auto a = net::decode_squad_order(p_bytes);
+			if (!a) {
+				return -1;
+			}
+			auto b = net::decode_squad_order(net::encode_squad_order(*a));
+			return b && same_order(*a, *b) ? 1 : 0;
+		}
+		default:
+			return -1;
+	}
+}
+
+void append_v4_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>> &r_out) {
+	Rng rng(0x4004);
+	r_out.emplace_back("Mismatch", net::encode_mismatch({ net::mismatch_bits::kMotor | net::mismatch_bits::kKit }));
+	r_out.emplace_back("RoundOverInfo", net::encode_round_over_info({ 2, sample_next(true), 45 }));
+	net::Prepare pr;
+	pr.round_id = 7;
+	pr.next_source_digest = sample_next(true).source_digest;
+	pr.state = net::PrepareState::Preparing;
+	pr.permille = 420;
+	r_out.emplace_back("Prepare", net::encode_prepare(pr));
+	r_out.emplace_back("LevelChange", net::encode_level_change({ "MP_011", "TeamDeathMatch0", 8, 120 }));
+	r_out.emplace_back("LogicEvents", net::encode_logic_events(sample_logic_events(rng, 90000, 5)));
+	r_out.emplace_back("FullSync", net::encode_full_sync(sample_full_sync(rng, 70, 2, 4)));
+	net::LogicDelta ld;
+	ld.tick = 90100;
+	ld.rows = { { 0, true }, { 3, false }, { 69, true }, { 4095, true } };
+	r_out.emplace_back("LogicDelta", net::encode_logic_delta(ld));
+	r_out.emplace_back("SquadRequest", net::encode_squad_request({ net::SquadOp::Kick, 4, 17 }));
+	r_out.emplace_back("SquadOrder",
+			net::encode_squad_order({ 2, 3, net::SquadOrderKind::Defend, 12, { 10.5f, 64.0f, -220.25f } }));
+}
+
+}
+
+TEST_SUITE("net-proto") {
+	TEST_CASE("proto v4: the nine new messages round trip every field") {
+		Rng rng(441);
+		for (uint8_t mask = 1; mask <= net::mismatch_bits::kAll; mask = uint8_t(mask * 2 + 1)) {
+			auto d = net::decode_mismatch(net::encode_mismatch({ mask }));
+			REQUIRE(d);
+			CHECK(d->components == mask);
+		}
+		for (const bool with_digest : { false, true }) {
+			const net::RoundOverInfo r{ 1, sample_next(with_digest), 0xFFFF };
+			auto d = net::decode_round_over_info(net::encode_round_over_info(r));
+			REQUIRE(d);
+			CHECK(d->winner == 1);
+			CHECK(d->next == r.next);
+			CHECK(d->intermission_s == 0xFFFF);
+		}
+		for (uint8_t state = 0; state <= uint8_t(net::PrepareState::MissingXpack); ++state) {
+			net::Prepare p;
+			p.round_id = 0xFFFFFFFFu;
+			p.state = net::PrepareState(state);
+			p.permille = 1000;
+			if (state % 2 == 0) {
+				p.next_source_digest = sample_next(true).source_digest;
+			}
+			auto d = net::decode_prepare(net::encode_prepare(p));
+			REQUIRE(d);
+			CHECK(d->round_id == p.round_id);
+			CHECK(d->state == p.state);
+			CHECK(d->permille == 1000);
+			CHECK(d->next_source_digest == p.next_source_digest);
+		}
+		net::Prepare over;
+		over.permille = 5000;
+		CHECK(net::decode_prepare(net::encode_prepare(over))->permille == 1000);
+		const net::LevelChange lc{ "XP2_Factory", "TeamDeathMatchC0", 12345, 300 };
+		auto dlc = net::decode_level_change(net::encode_level_change(lc));
+		REQUIRE(dlc);
+		CHECK(dlc->level == lc.level);
+		CHECK(dlc->mode == lc.mode);
+		CHECK(dlc->round_id == 12345);
+		CHECK(dlc->load_deadline_s == 300);
+
+		const net::LogicEvents ev = sample_logic_events(rng, 70000, 41);
+		size_t dropped = 99;
+		auto dev = net::decode_logic_events(net::encode_logic_events(ev, &dropped));
+		REQUIRE(dev);
+		CHECK(dropped == 0);
+		CHECK(same_events(ev, *dev));
+		net::LogicEvents bad = sample_logic_events(rng, 500, 4);
+		bad.events[0].tick = 501;
+		bad.events[1].context.player = 128;
+		bad.events[2].context.team = 3;
+		bad.events[3].context.player = -1;
+		auto dbad = net::decode_logic_events(net::encode_logic_events(bad, &dropped));
+		REQUIRE(dbad);
+		CHECK(dropped == 3);
+		REQUIRE(dbad->events.size() == 1);
+		CHECK(same_event(dbad->events[0], bad.events[3]));
+		net::LogicEvents many = sample_logic_events(rng, 70000, net::kMaxLogicEventsPerMessage + 5);
+		CHECK(net::decode_logic_events(net::encode_logic_events(many, &dropped))->events.size() ==
+				net::kMaxLogicEventsPerMessage);
+		CHECK(dropped == 5);
+
+		const net::FullSync full =
+				sample_full_sync(rng, lg::kMaxGhostEntries, lg::kMaxGhostEntries, lg::kMaxGhostEntries);
+		const std::vector<uint8_t> fb = net::encode_full_sync(full);
+		MESSAGE("FullSync with 4096 bools, transforms and sequences: ", fb.size(), " B");
+		auto dfull = net::decode_full_sync(fb);
+		REQUIRE(dfull);
+		CHECK(dfull->ghost == full.ghost);
+		net::FullSync loose = sample_full_sync(rng, 65, 1, 0);
+		const net::FullSync canonical = loose;
+		loose.ghost.bool_bits.back() |= ~uint64_t(1);
+		loose.ghost.bool_bits.push_back(~uint64_t(0));
+		auto dloose = net::decode_full_sync(net::encode_full_sync(loose));
+		REQUIRE(dloose);
+		CHECK(dloose->ghost.bool_bits.size() == 2);
+		CHECK(dloose->ghost.bool_bits[1] == (loose.ghost.bool_bits[1] & 1u));
+		CHECK(dloose->ghost.bool_bits[0] == canonical.ghost.bool_bits[0]);
+		net::FullSync empty;
+		auto dempty = net::decode_full_sync(net::encode_full_sync(empty));
+		REQUIRE(dempty);
+		CHECK(dempty->ghost == empty.ghost);
+
+		net::LogicDelta ld;
+		ld.tick = 4;
+		ld.rows = { { 9, true }, { 2, true }, { 9, false }, { 10, false }, { 4096, true }, { 4095, false } };
+		auto dld = net::decode_logic_delta(net::encode_logic_delta(ld, &dropped));
+		REQUIRE(dld);
+		CHECK(dropped == 3);
+		REQUIRE(dld->rows.size() == 3);
+		CHECK(dld->rows[0].index == 9);
+		CHECK(dld->rows[1].index == 10);
+		CHECK(dld->rows[2].index == 4095);
+		CHECK_FALSE(dld->rows[2].value);
+
+		for (uint8_t op = 0; op <= uint8_t(net::SquadOp::SwitchTeam); ++op) {
+			const net::SquadRequest q{ net::SquadOp(op), uint8_t(op * 8), uint8_t(127 - op) };
+			auto d = net::decode_squad_request(net::encode_squad_request(q));
+			REQUIRE(d);
+			CHECK(d->op == q.op);
+			CHECK(d->squad == q.squad);
+			CHECK(d->target == q.target);
+		}
+		for (uint8_t kind = 0; kind <= uint8_t(net::SquadOrderKind::Defend); ++kind) {
+			const net::SquadOrder o{ uint8_t(1 + kind % 2), uint8_t(1 + kind * 10), net::SquadOrderKind(kind),
+				uint16_t(kind * 1000), { -1.0e6f, 0.0f, 1.0e6f } };
+			auto d = net::decode_squad_order(net::encode_squad_order(o));
+			REQUIRE(d);
+			CHECK(same_order(*d, o));
+		}
+	}
+
+	TEST_CASE("proto v4: hostile counts and enums of the new messages are refused") {
+		CHECK_FALSE(net::decode_mismatch(net::encode_mismatch({ 0 })));
+		CHECK_FALSE(net::decode_mismatch(net::encode_mismatch({ 0x80 })));
+		CHECK(net::decode_mismatch(net::encode_mismatch({ net::mismatch_bits::kAll })));
+		CHECK_FALSE(net::decode_round_over_info(net::encode_round_over_info({ 3, sample_next(false), 1 })));
+		net::NextLevel bad_name = sample_next(false);
+		bad_name.level = std::string(net::kMaxNameBytes * 4 + 1, 'L');
+		auto cut = net::decode_round_over_info(net::encode_round_over_info({ 1, bad_name, 1 }));
+		REQUIRE(cut);
+		CHECK(cut->next.level.size() == 128);
+		CHECK_FALSE(net::decode_round_over_info(craft(net::MessageType::RoundOverInfo, [](net::BitWriter &w) {
+			w.write_bits(1, 8);
+			w.write_varint(1);
+			w.write_bits(0xFF, 8);
+			w.write_varint(0);
+			w.write_bool(false);
+			w.write_bits(0, 64);
+			w.write_bits(5, 16);
+		})));
+		const auto prepare = [](uint32_t p_state, uint32_t p_permille) {
+			return craft(net::MessageType::Prepare, [&](net::BitWriter &w) {
+				w.write_bits(1, 32);
+				w.write_bool(false);
+				w.write_bits(p_state, 8);
+				w.write_bits(p_permille, 16);
+			});
+		};
+		CHECK(net::decode_prepare(prepare(4, 1000)));
+		CHECK_FALSE(net::decode_prepare(prepare(5, 0)));
+		CHECK_FALSE(net::decode_prepare(prepare(0, 1001)));
+		CHECK_FALSE(net::decode_level_change(craft(net::MessageType::LevelChange, [](net::BitWriter &w) {
+			w.write_varint(129);
+			for (int i = 0; i < 129; ++i) {
+				w.write_bits('a', 8);
+			}
+			w.write_varint(0);
+			w.write_bits(0, 32);
+			w.write_bits(0, 16);
+		})));
+
+		const auto events = [](uint32_t p_tick, uint64_t p_count, auto &&p_body) {
+			return craft(net::MessageType::LogicEvents, [&](net::BitWriter &w) {
+				w.write_bits(p_tick, 32);
+				w.write_varint(p_count);
+				p_body(w);
+			});
+		};
+		const auto event = [](net::BitWriter &w, uint64_t p_back, uint32_t p_player_code, uint32_t p_team) {
+			w.write_varint(p_back);
+			w.write_bits(0x0102030405060708ull, 64);
+			w.write_bits(77, 32);
+			w.write_signed(-3, 32);
+			w.write_bits(p_player_code, 8);
+			w.write_bits(p_team, 8);
+		};
+		auto one = net::decode_logic_events(events(100, 1, [&](net::BitWriter &w) { event(w, 100, 128, 2); }));
+		REQUIRE(one);
+		CHECK(one->events[0].tick == 0);
+		CHECK(one->events[0].source_port == -3);
+		CHECK(one->events[0].context.player == 127);
+		CHECK_FALSE(net::decode_logic_events(events(100, 1, [&](net::BitWriter &w) { event(w, 101, 0, 0); })));
+		CHECK_FALSE(net::decode_logic_events(events(100, 1, [&](net::BitWriter &w) { event(w, 0, 129, 0); })));
+		CHECK_FALSE(net::decode_logic_events(events(100, 1, [&](net::BitWriter &w) { event(w, 0, 0, 3); })));
+		CHECK_FALSE(net::decode_logic_events(events(100, net::kMaxLogicEventsPerMessage + 1, [](net::BitWriter &) {})));
+		CHECK_FALSE(net::decode_logic_events(events(100, ~0ull, [](net::BitWriter &) {})));
+		CHECK_FALSE(net::decode_logic_events(events(100, 2, [&](net::BitWriter &w) { event(w, 0, 0, 0); })));
+
+		const auto sync = [](uint64_t p_bools, uint64_t p_transforms, uint64_t p_sequences, float p_value) {
+			return craft(net::MessageType::FullSync, [&](net::BitWriter &w) {
+				w.write_bits(5, 32);
+				w.write_varint(p_bools);
+				for (uint64_t i = 0; i < std::min<uint64_t>(p_bools, lg::kMaxGhostEntries + 1); ++i) {
+					w.write_bool(true);
+				}
+				w.write_varint(p_transforms);
+				for (uint64_t i = 0; i < std::min<uint64_t>(p_transforms, lg::kMaxGhostEntries + 1) * 12; ++i) {
+					w.write_f32(p_value);
+				}
+				w.write_varint(p_sequences);
+				for (uint64_t i = 0; i < std::min<uint64_t>(p_sequences, lg::kMaxGhostEntries + 1); ++i) {
+					w.write_bits(9, 32);
+				}
+			});
+		};
+		auto ds = net::decode_full_sync(sync(65, 1, 2, 1.5f));
+		REQUIRE(ds);
+		CHECK(ds->ghost.bool_count == 65);
+		CHECK(ds->ghost.bool_bits == std::vector<uint64_t>{ ~uint64_t(0), 1u });
+		CHECK(ds->ghost.transforms[0][11] == 1.5f);
+		CHECK(ds->ghost.sequence_start == std::vector<sim::Tick>{ 9, 9 });
+		CHECK_FALSE(net::decode_full_sync(sync(lg::kMaxGhostEntries + 1, 0, 0, 0.0f)));
+		CHECK_FALSE(net::decode_full_sync(sync(0, lg::kMaxGhostEntries + 1, 0, 0.0f)));
+		CHECK_FALSE(net::decode_full_sync(sync(0, 0, lg::kMaxGhostEntries + 1, 0.0f)));
+		CHECK_FALSE(net::decode_full_sync(sync(0, 1, 0, std::numeric_limits<float>::quiet_NaN())));
+		CHECK_FALSE(net::decode_full_sync(sync(~0ull, 0, 0, 0.0f)));
+
+		const auto delta = [](std::initializer_list<uint32_t> p_indices) {
+			return craft(net::MessageType::LogicDelta, [&](net::BitWriter &w) {
+				w.write_bits(5, 32);
+				w.write_varint(p_indices.size());
+				for (const uint32_t index : p_indices) {
+					w.write_bits(index, 12);
+					w.write_bool(true);
+				}
+			});
+		};
+		CHECK(net::decode_logic_delta(delta({ 0, 1, 4095 })));
+		CHECK_FALSE(net::decode_logic_delta(delta({ 3, 3 })));
+		CHECK_FALSE(net::decode_logic_delta(delta({ 4, 3 })));
+		CHECK_FALSE(net::decode_logic_delta(craft(net::MessageType::LogicDelta, [](net::BitWriter &w) {
+			w.write_bits(5, 32);
+			w.write_varint(lg::kMaxGhostEntries + 1);
+		})));
+
+		const auto request = [](uint32_t p_op, uint32_t p_squad, uint32_t p_target) {
+			return craft(net::MessageType::SquadRequest, [&](net::BitWriter &w) {
+				w.write_bits(p_op, 8);
+				w.write_bits(p_squad, 8);
+				w.write_bits(p_target, 8);
+			});
+		};
+		CHECK(net::decode_squad_request(request(4, 32, 127)));
+		CHECK_FALSE(net::decode_squad_request(request(5, 0, 0)));
+		CHECK_FALSE(net::decode_squad_request(request(0, 33, 0)));
+		CHECK_FALSE(net::decode_squad_request(request(0, 0, 128)));
+		const auto order = [](uint32_t p_team, uint32_t p_squad, uint32_t p_kind, float p_x) {
+			return craft(net::MessageType::SquadOrder, [&](net::BitWriter &w) {
+				w.write_bits(p_team, 8);
+				w.write_bits(p_squad, 8);
+				w.write_bits(p_kind, 8);
+				w.write_bits(0xFFFF, 16);
+				w.write_f32(p_x);
+				w.write_f32(0.0f);
+				w.write_f32(0.0f);
+			});
+		};
+		CHECK(net::decode_squad_order(order(2, 32, 3, 1.0f)));
+		CHECK_FALSE(net::decode_squad_order(order(0, 1, 0, 1.0f)));
+		CHECK_FALSE(net::decode_squad_order(order(3, 1, 0, 1.0f)));
+		CHECK_FALSE(net::decode_squad_order(order(1, 0, 0, 1.0f)));
+		CHECK_FALSE(net::decode_squad_order(order(1, 33, 0, 1.0f)));
+		CHECK_FALSE(net::decode_squad_order(order(1, 1, 4, 1.0f)));
+		CHECK_FALSE(net::decode_squad_order(order(1, 1, 0, 2.0e6f)));
+		CHECK_FALSE(net::decode_squad_order(order(1, 1, 0, std::numeric_limits<float>::infinity())));
+	}
+}
+
+namespace {
+
 uint64_t fnv1a64(std::span<const uint8_t> p_bytes) {
 	uint64_t h = 0xcbf29ce484222325ull;
 	for (const uint8_t b : p_bytes) {
@@ -3852,7 +4330,7 @@ TEST_SUITE("net-proto") {
 			types.insert(uint8_t(*type));
 			samples.push_back({ name, std::move(bytes) });
 		}
-		CHECK(types.size() == 21);
+		CHECK(types.size() == 30);
 		static constexpr GoldenPin kPins[] = {
 			{ "Snapshot", 367, 0xa435d4ace31cf825ull, 0 },
 			{ "Snapshot (no own)", 20, 0xa85c8a910ea8826bull, 0 },
@@ -3885,6 +4363,15 @@ TEST_SUITE("net-proto") {
 			{ "MatchInfo (v3)", 82, 0x9f7d6df8af0ee7e8ull, 0 },
 			{ "Spawned (v3 revived)", 94, 0x185c920e1aff4290ull, 0 },
 			{ "SoldierGear", 20, 0xfa6162cd1bdf3cf3ull, 0 },
+			{ "Mismatch", 2, 0x07c26e07b48c3c08ull, 0 },
+			{ "RoundOverInfo", 68, 0x00a78cf9ae380179ull, 0 },
+			{ "Prepare", 41, 0x41aca99dd41f23d5ull, 0 },
+			{ "LevelChange", 30, 0x1b11e526977e4a1dull, 0 },
+			{ "LogicEvents", 101, 0xb0dc642ad154e5fbull, 0 },
+			{ "FullSync", 129, 0xc9f3e9c460978184ull, 0 },
+			{ "LogicDelta", 13, 0xb406185960cdf447ull, 0 },
+			{ "SquadRequest", 4, 0x339b5db77a00fa9bull, 0 },
+			{ "SquadOrder", 18, 0x786f0a82bee37cb8ull, 0 },
 		};
 		check_golden(samples, kPins);
 	}

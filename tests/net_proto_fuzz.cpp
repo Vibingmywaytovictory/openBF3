@@ -31,7 +31,7 @@ struct Rng {
 
 const net::ShotQuantization kFrame{ { -2048.0f, -512.0f, -2048.0f } };
 
-constexpr std::array<net::MessageType, 20> kTypes = {
+constexpr std::array<net::MessageType, 30> kTypes = {
 	net::MessageType::Snapshot,
 	net::MessageType::CommandPacket,
 	net::MessageType::SnapshotOthers,
@@ -52,6 +52,16 @@ constexpr std::array<net::MessageType, 20> kTypes = {
 	net::MessageType::SpawnRequest,
 	net::MessageType::SuicideRequest,
 	net::MessageType::LoadoutRequest,
+	net::MessageType::SoldierGear,
+	net::MessageType::Mismatch,
+	net::MessageType::RoundOverInfo,
+	net::MessageType::Prepare,
+	net::MessageType::LevelChange,
+	net::MessageType::LogicEvents,
+	net::MessageType::FullSync,
+	net::MessageType::LogicDelta,
+	net::MessageType::SquadRequest,
+	net::MessageType::SquadOrder,
 };
 
 const char *type_name(net::MessageType p_type) {
@@ -96,6 +106,26 @@ const char *type_name(net::MessageType p_type) {
 			return "SuicideRequest";
 		case net::MessageType::LoadoutRequest:
 			return "LoadoutRequest";
+		case net::MessageType::SoldierGear:
+			return "SoldierGear";
+		case net::MessageType::Mismatch:
+			return "Mismatch";
+		case net::MessageType::RoundOverInfo:
+			return "RoundOverInfo";
+		case net::MessageType::Prepare:
+			return "Prepare";
+		case net::MessageType::LevelChange:
+			return "LevelChange";
+		case net::MessageType::LogicEvents:
+			return "LogicEvents";
+		case net::MessageType::FullSync:
+			return "FullSync";
+		case net::MessageType::LogicDelta:
+			return "LogicDelta";
+		case net::MessageType::SquadRequest:
+			return "SquadRequest";
+		case net::MessageType::SquadOrder:
+			return "SquadOrder";
 	}
 	return "?";
 }
@@ -218,6 +248,56 @@ Verdict decode_as(net::MessageType p_type, std::span<const uint8_t> p_bytes) {
 			return check(
 					p_bytes, [](std::span<const uint8_t> p) { return net::decode_loadout_request(p); },
 					[](const net::LoadoutRequest &p_m, bool &) { return net::encode_loadout_request(p_m); });
+		case net::MessageType::SoldierGear:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_soldier_gear(p); },
+					[](const net::SoldierGear &p_m, bool &) { return net::encode_soldier_gear(p_m); });
+		case net::MessageType::Mismatch:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_mismatch(p); },
+					[](const net::Mismatch &p_m, bool &) { return net::encode_mismatch(p_m); });
+		case net::MessageType::RoundOverInfo:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_round_over_info(p); },
+					[](const net::RoundOverInfo &p_m, bool &) { return net::encode_round_over_info(p_m); });
+		case net::MessageType::Prepare:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_prepare(p); },
+					[](const net::Prepare &p_m, bool &) { return net::encode_prepare(p_m); });
+		case net::MessageType::LevelChange:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_level_change(p); },
+					[](const net::LevelChange &p_m, bool &) { return net::encode_level_change(p_m); });
+		case net::MessageType::LogicEvents:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_logic_events(p); },
+					[](const net::LogicEvents &p_m, bool &r_lossless) {
+						size_t dropped = 0;
+						std::vector<uint8_t> e = net::encode_logic_events(p_m, &dropped);
+						r_lossless = dropped == 0;
+						return e;
+					});
+		case net::MessageType::FullSync:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_full_sync(p); },
+					[](const net::FullSync &p_m, bool &) { return net::encode_full_sync(p_m); });
+		case net::MessageType::LogicDelta:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_logic_delta(p); },
+					[](const net::LogicDelta &p_m, bool &r_lossless) {
+						size_t dropped = 0;
+						std::vector<uint8_t> e = net::encode_logic_delta(p_m, &dropped);
+						r_lossless = dropped == 0;
+						return e;
+					});
+		case net::MessageType::SquadRequest:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_squad_request(p); },
+					[](const net::SquadRequest &p_m, bool &) { return net::encode_squad_request(p_m); });
+		case net::MessageType::SquadOrder:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_squad_order(p); },
+					[](const net::SquadOrder &p_m, bool &) { return net::encode_squad_order(p_m); });
 	}
 	return Verdict::Refused;
 }
@@ -524,7 +604,58 @@ std::vector<Sample> samples() {
 		loadout.items[0] = 2580429694u;
 		loadout.accessories[0] = 3011272554u;
 		out.push_back({ net::MessageType::LoadoutRequest, "LoadoutRequest", net::encode_loadout_request(loadout) });
-	}	return out;
+	}
+	out.push_back({ net::MessageType::SoldierGear, "SoldierGear",
+			net::encode_soldier_gear({ 9, 31, { 3011272554u, 0u, 7u, 0u } }) });
+	{
+		out.push_back({ net::MessageType::Mismatch, "Mismatch",
+				net::encode_mismatch({ net::mismatch_bits::kSource | net::mismatch_bits::kRules }) });
+		net::NextLevel next;
+		next.level = "MP_Subway";
+		next.mode = "TeamDeathMatch0";
+		next.source_digest = bf3::core::Sha256Digest{};
+		next.source_digest->bytes[9] = 0x77;
+		next.logic_digest = rng.next();
+		out.push_back(
+				{ net::MessageType::RoundOverInfo, "RoundOverInfo", net::encode_round_over_info({ 1, next, 30 }) });
+		net::Prepare prepare;
+		prepare.round_id = 3;
+		prepare.next_source_digest = next.source_digest;
+		prepare.state = net::PrepareState::Ready;
+		prepare.permille = 1000;
+		out.push_back({ net::MessageType::Prepare, "Prepare", net::encode_prepare(prepare) });
+		out.push_back({ net::MessageType::LevelChange, "LevelChange",
+				net::encode_level_change({ "MP_Subway", "TeamDeathMatch0", 4, 120 }) });
+		net::LogicEvents events;
+		events.server_tick = tick;
+		for (uint32_t i = 0; i < 6; ++i) {
+			bf3::sim::logic::LogicNetworkedEvent e;
+			e.tick = tick - i * 3;
+			e.connection = rng.next();
+			e.source = uint32_t(rng.below(5000));
+			e.source_port = int32_t(uint32_t(rng.next()));
+			e.context.player = int32_t(rng.below(40)) - 1;
+			e.context.team = uint8_t(rng.below(3));
+			events.events.push_back(e);
+		}
+		out.push_back({ net::MessageType::LogicEvents, "LogicEvents", net::encode_logic_events(events) });
+		net::FullSync sync;
+		sync.ghost.tick = tick;
+		sync.ghost.bool_count = 41;
+		sync.ghost.bool_bits = { rng.next() & ((uint64_t(1) << 41) - 1) };
+		sync.ghost.transforms.push_back({ 1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 20, 30 });
+		sync.ghost.sequence_start = { bf3::sim::logic::LogicGhost::kNoStart, tick - 100 };
+		out.push_back({ net::MessageType::FullSync, "FullSync", net::encode_full_sync(sync) });
+		net::LogicDelta delta;
+		delta.tick = tick;
+		delta.rows = { { 1, true }, { 7, false }, { 40, true } };
+		out.push_back({ net::MessageType::LogicDelta, "LogicDelta", net::encode_logic_delta(delta) });
+		out.push_back({ net::MessageType::SquadRequest, "SquadRequest",
+				net::encode_squad_request({ net::SquadOp::Join, 5, 0 }) });
+		out.push_back({ net::MessageType::SquadOrder, "SquadOrder",
+				net::encode_squad_order({ 1, 5, net::SquadOrderKind::Attack, 3, { -120.0f, 66.5f, 48.0f } }) });
+	}
+	return out;
 }
 
 struct Tally {

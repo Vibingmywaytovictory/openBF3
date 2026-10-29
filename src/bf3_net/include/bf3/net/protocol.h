@@ -4,6 +4,7 @@
 #include "bf3/core/result.h"
 #include "bf3/net/weapons_wire.h"
 #include "bf3/sim/command.h"
+#include "bf3/sim/logic/logic_runtime.h"
 #include "bf3/sim/soldier_state.h"
 #include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/damage.h"
@@ -72,6 +73,16 @@ enum class MessageType : uint8_t {
 	SuicideRequest = 28,
 	LoadoutRequest = 29,
 	SoldierGear = 32,
+
+	Mismatch = 33,
+	RoundOverInfo = 34,
+	Prepare = 35,
+	LevelChange = 36,
+	LogicEvents = 37,
+	FullSync = 38,
+	LogicDelta = 39,
+	SquadRequest = 40,
+	SquadOrder = 41,
 };
 
 std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram);
@@ -538,4 +549,104 @@ core::Result<LoadoutRequest> decode_loadout_request(std::span<const uint8_t> p_d
 bool set_player_name(PlayerRow &r_row, std::string_view p_name);
 std::string_view player_name(const PlayerRow &p_row);
 
+namespace mismatch_bits {
+inline constexpr uint8_t kSource = 1u << 0;
+inline constexpr uint8_t kCollision = 1u << 1;
+inline constexpr uint8_t kMotor = 1u << 2;
+inline constexpr uint8_t kWeapon = 1u << 3;
+inline constexpr uint8_t kKit = 1u << 4;
+inline constexpr uint8_t kLogic = 1u << 5;
+inline constexpr uint8_t kRules = 1u << 6;
+inline constexpr uint8_t kAll = (1u << 7) - 1;
+}
+
+struct Mismatch {
+	uint8_t components = 0;
+};
+
+struct NextLevel {
+	std::string level;
+	std::string mode;
+	std::optional<core::Sha256Digest> source_digest;
+	uint64_t logic_digest = 0;
+
+	bool operator==(const NextLevel &) const = default;
+};
+
+struct RoundOverInfo {
+	uint8_t winner = 0;
+	NextLevel next;
+	uint16_t intermission_s = 0;
+};
+
+enum class PrepareState : uint8_t { None = 0, Preparing = 1, Ready = 2, Mismatch = 3, MissingXpack = 4 };
+
+struct Prepare {
+	uint32_t round_id = 0;
+	std::optional<core::Sha256Digest> next_source_digest;
+	PrepareState state = PrepareState::None;
+	uint16_t permille = 0;
+};
+
+struct LevelChange {
+	std::string level;
+	std::string mode;
+	uint32_t round_id = 0;
+	uint16_t load_deadline_s = 0;
+};
+
+inline constexpr size_t kMaxLogicEventsPerMessage = 1024;
+struct LogicEvents {
+	sim::Tick server_tick = 0;
+	std::vector<sim::logic::LogicNetworkedEvent> events;
+};
+
+struct FullSync {
+	sim::logic::LogicGhost ghost;
+};
+
+struct LogicDelta {
+	sim::Tick tick = 0;
+	std::vector<sim::logic::LogicGhost::BoolDelta> rows;
+};
+
+inline constexpr uint8_t kMaxSquads = 32;
+
+enum class SquadOp : uint8_t { Join = 0, Create = 1, Leave = 2, Kick = 3, SwitchTeam = 4 };
+
+struct SquadRequest {
+	SquadOp op = SquadOp::Join;
+	uint8_t squad = 0;
+	uint8_t target = 0;
+};
+
+enum class SquadOrderKind : uint8_t { None = 0, Move = 1, Attack = 2, Defend = 3 };
+inline constexpr uint16_t kNoSquadArea = 0xFFFF;
+
+struct SquadOrder {
+	uint8_t team = 1;
+	uint8_t squad = 1;
+	SquadOrderKind kind = SquadOrderKind::None;
+	uint16_t area = kNoSquadArea;
+	sim::Vec3 position{};
+};
+
+std::vector<uint8_t> encode_mismatch(const Mismatch &p_message);
+core::Result<Mismatch> decode_mismatch(std::span<const uint8_t> p_datagram);
+std::vector<uint8_t> encode_round_over_info(const RoundOverInfo &p_message);
+core::Result<RoundOverInfo> decode_round_over_info(std::span<const uint8_t> p_datagram);
+std::vector<uint8_t> encode_prepare(const Prepare &p_message);
+core::Result<Prepare> decode_prepare(std::span<const uint8_t> p_datagram);
+std::vector<uint8_t> encode_level_change(const LevelChange &p_message);
+core::Result<LevelChange> decode_level_change(std::span<const uint8_t> p_datagram);
+std::vector<uint8_t> encode_logic_events(const LogicEvents &p_message, size_t *r_dropped = nullptr);
+core::Result<LogicEvents> decode_logic_events(std::span<const uint8_t> p_datagram);
+std::vector<uint8_t> encode_full_sync(const FullSync &p_message);
+core::Result<FullSync> decode_full_sync(std::span<const uint8_t> p_datagram);
+std::vector<uint8_t> encode_logic_delta(const LogicDelta &p_message, size_t *r_dropped = nullptr);
+core::Result<LogicDelta> decode_logic_delta(std::span<const uint8_t> p_datagram);
+std::vector<uint8_t> encode_squad_request(const SquadRequest &p_message);
+core::Result<SquadRequest> decode_squad_request(std::span<const uint8_t> p_datagram);
+std::vector<uint8_t> encode_squad_order(const SquadOrder &p_message);
+core::Result<SquadOrder> decode_squad_order(std::span<const uint8_t> p_datagram);
 }
