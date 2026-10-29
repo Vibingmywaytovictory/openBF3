@@ -36,6 +36,7 @@ bool silent_kind(ba::MixerCutKind p_kind) {
 		case ba::MixerCutKind::Cull:
 		case ba::MixerCutKind::Park:
 		case ba::MixerCutKind::Coalesce:
+		case ba::MixerCutKind::Join:
 			return true;
 		default:
 			return false;
@@ -194,6 +195,12 @@ void AudioIngameCheck::note(const ba::MixerCutEvent &p_event, double p_now_s, Bf
 	if (p_event.handle == ba::kNoInstance) {
 		return;
 	}
+	if (p_event.kind == ba::MixerCutKind::Join) {
+		const auto next = fates_.find(ba::InstanceHandle(p_event.count));
+		if (next != fates_.end()) {
+			next->second.started = true;
+		}
+	}
 	const auto it = fates_.find(p_event.handle);
 	if (it == fates_.end()) {
 		++unknown_handles_;
@@ -224,6 +231,9 @@ void AudioIngameCheck::note(const ba::MixerCutEvent &p_event, double p_now_s, Bf
 			break;
 		case ba::MixerCutKind::Coalesce:
 			f.coalesced += p_event.count;
+			break;
+		case ba::MixerCutKind::Join:
+			f.joined = true;
 			break;
 		default:
 			break;
@@ -481,12 +491,13 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 
 	std::array<AudioCategoryCounts, size_t(AudioSoundCategory::Count)> cats;
 	std::string fates_csv = "handle,category,request_s,distance_m,scope,started,finished,cull,park,parks,refused,"
-							"killed,coalesced,program\n";
+							"killed,joined,coalesced,program\n";
 	for (const auto &[h, f] : fates_) {
 		AudioCategoryCounts &c = cats[size_t(f.category)];
 		++c.requested;
 		c.started += f.started ? 1u : 0u;
 		c.finished += f.finished ? 1u : 0u;
+		c.joined += f.joined ? 1u : 0u;
 		if (!f.started && f.cull == 0 && f.parks == 0 && !f.refused && !f.killed) {
 			++c.other_drops;
 			++c.reasons["requested, never started or dropped"];
@@ -517,10 +528,10 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 			++c.other_drops;
 			c.reasons["events dropped at a resume"] += f.coalesced;
 		}
-		fates_csv += core::fmt("%u,%s,%.3f,%.2f,%s,%d,%d,%u,%u,%u,%d,%d,%u,", unsigned(h),
+		fates_csv += core::fmt("%u,%s,%.3f,%.2f,%s,%d,%d,%u,%u,%u,%d,%d,%d,%u,", unsigned(h),
 				std::string(kAudioSoundCategoryNames[size_t(f.category)]).c_str(), f.request_s, double(f.distance_m),
 				scope.c_str(), int(f.started), int(f.finished), unsigned(f.cull), unsigned(f.park), f.parks,
-				int(f.refused), int(f.killed), f.coalesced);
+				int(f.refused), int(f.killed), int(f.joined), f.coalesced);
 		fates_csv += f.program + "\n";
 	}
 	uint64_t other_drops = 0;
@@ -531,11 +542,12 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 		for (const auto &[why, n] : c.reasons) {
 			reasons += ", " + why + " " + std::to_string(n);
 		}
-		lines_.push_back(core::fmt("[audio-ingame] sounds %s: %llu requested, %llu started, %llu finished, %llu "
-								   "dropped by the data's rules, %llu dropped otherwise",
-								 std::string(kAudioSoundCategoryNames[k]).c_str(), (unsigned long long)c.requested,
-								 (unsigned long long)c.started, (unsigned long long)c.finished,
-								 (unsigned long long)c.data_drops, (unsigned long long)c.other_drops) +
+		lines_.push_back(
+				core::fmt("[audio-ingame] sounds %s: %llu requested, %llu started, %llu finished, %llu joined "
+						  "the next burst's instance, %llu dropped by the data's rules, %llu dropped otherwise",
+						std::string(kAudioSoundCategoryNames[k]).c_str(), (unsigned long long)c.requested,
+						(unsigned long long)c.started, (unsigned long long)c.finished, (unsigned long long)c.joined,
+						(unsigned long long)c.data_drops, (unsigned long long)c.other_drops) +
 				reasons);
 	}
 	const uint64_t lost_counters = delta(&Snapshot::pool_stolen) + delta(&Snapshot::router_stolen) +

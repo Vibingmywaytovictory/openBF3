@@ -225,7 +225,12 @@ struct Rig {
 	~Rig() { mixer.reset(); }
 
 	ba::InstanceHandle start(const Source &p_src, float p_distance = 1.0f, float p_x = 0.0f) {
-		Result<std::unique_ptr<ba::PatchInstance>> inst = ba::PatchInstance::create(source_program(wave, p_src), wave.bank, ba::AudioTuning{}, 7, ba::kMixRate);
+		return start_program(source_program(wave, p_src), ba::kNoInstance, p_distance, p_x);
+	}
+	ba::InstanceHandle start_program(std::shared_ptr<const SoundProgram> p_program, ba::InstanceHandle p_join,
+			float p_distance = 1.0f, float p_x = 0.0f) {
+		Result<std::unique_ptr<ba::PatchInstance>> inst =
+				ba::PatchInstance::create(std::move(p_program), wave.bank, ba::AudioTuning{}, 7, ba::kMixRate);
 		REQUIRE_MESSAGE(inst.ok(), (inst.ok() ? std::string() : inst.error().message));
 		ba::EmitterState e;
 		e.position = { p_x, 0.0f, p_distance };
@@ -234,6 +239,7 @@ struct Rig {
 		c.type = ba::MixerCommandType::Start;
 		c.handle = mixer->next_handle();
 		c.instance = inst->get();
+		c.join = p_join;
 		REQUIRE(mixer->push(c));
 		(void)inst->release();
 		ba::MixerCommand ev;
@@ -1316,6 +1322,52 @@ TEST_SUITE("audio-cuts") {
 		CHECK(std::count_if(ev.begin(), ev.begin() + std::ptrdiff_t(n),
 					  [](const ba::MixerCutEvent &e) { return e.kind == ba::MixerCutKind::Refused; }) == 2);
 		CHECK(rig.mixer->stats().starved_voices.load() == 2);
+	}
+
+	TEST_CASE("a start that names a sounding instance of its program joins it: the old handle finishes, the new one "
+			  "owns it") {
+		Rig rig(cut_config(512, 128));
+		rig.mixer->record_cuts(true);
+		const std::shared_ptr<const SoundProgram> gun = source_program(rig.wave, Source{ 90.0f, false, true, 1 });
+		const ba::InstanceHandle a = rig.start_program(gun, ba::kNoInstance);
+		rig.step(2);
+		const ba::InstanceHandle b = rig.start_program(gun, a);
+		rig.step(1);
+		CHECK(rig.was_finished(a));
+		CHECK_FALSE(rig.was_finished(b));
+		rig.kill(a);
+		ba::MixerCommand stop;
+		stop.type = ba::MixerCommandType::Stop;
+		stop.handle = a;
+		REQUIRE(rig.mixer->push(stop));
+		rig.step(2);
+		CHECK_FALSE(rig.was_finished(b));
+		CHECK(rig.mixer->stats().active_instances.load() == 1);
+		const ba::InstanceHandle c = rig.start_program(source_program(rig.wave, Source{ 90.0f, false, true, 1 }), b);
+		rig.step(1);
+		CHECK(rig.mixer->stats().active_instances.load() == 2);
+		rig.kill(b);
+		rig.kill(c);
+		rig.step(3);
+		const ba::InstanceHandle d = rig.start_program(gun, b);
+		rig.step(1);
+		CHECK(rig.mixer->stats().active_instances.load() == 1);
+		std::array<ba::MixerCutEvent, 64> ev{};
+		const size_t n = rig.mixer->poll_cuts(ev);
+		const auto count = [&](ba::MixerCutKind p_kind, ba::InstanceHandle p_handle) {
+			return std::count_if(ev.begin(), ev.begin() + std::ptrdiff_t(n),
+					[&](const ba::MixerCutEvent &e) { return e.kind == p_kind && e.handle == p_handle; });
+		};
+		CHECK(count(ba::MixerCutKind::Request, b) == 1);
+		CHECK(count(ba::MixerCutKind::Join, a) == 1);
+		CHECK(std::any_of(ev.begin(), ev.begin() + std::ptrdiff_t(n), [&](const ba::MixerCutEvent &e) {
+			return e.kind == ba::MixerCutKind::Join && e.handle == a && e.count == b;
+		}));
+		CHECK(count(ba::MixerCutKind::Kill, a) == 0);
+		CHECK(count(ba::MixerCutKind::Join, b) == 0);
+		CHECK(count(ba::MixerCutKind::Start, c) == 1);
+		CHECK(count(ba::MixerCutKind::Start, d) == 1);
+		CHECK(count(ba::MixerCutKind::Join, ba::kNoInstance) == 0);
 	}
 
 	TEST_CASE("PT1 snd: the cut readout, the event ring and hostile fades") {

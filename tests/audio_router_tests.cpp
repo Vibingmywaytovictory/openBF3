@@ -732,7 +732,8 @@ TEST_SUITE("audio-router") {
 		CHECK(fc.recorder.seen[0].first_person == 0.0f);
 	}
 
-	TEST_CASE("own single fire: one instance per shot, released at once, EnableStep 0") {
+	TEST_CASE("own single fire: one burst per shot, released at once, EnableStep 0, each shot joining the instance the "
+			  "last one still sounds on") {
 		Rig r;
 		std::vector<host::PresentEvent> plan;
 		for (uint32_t k = 0; k < 3; ++k) {
@@ -751,8 +752,15 @@ TEST_SUITE("audio-router") {
 			CHECK(s.up);
 			CHECK(s.enable_step == 0.0f);
 			CHECK(s.stop == s.first + 1);
-			CHECK(frames_of(s.trace, SamplerTraceKind::Trigger).size() == 1);
 		}
+		const std::vector<uint64_t> triggers = frames_of(r.recorder.seen[0].trace, SamplerTraceKind::Trigger);
+		REQUIRE(triggers.size() == 3);
+		for (size_t k = 0; k < 3; ++k) {
+			CHECK(triggers[k] == r.recorder.seen[k].first);
+		}
+		CHECK(frames_of(r.recorder.seen[1].trace, SamplerTraceKind::Trigger).empty());
+		CHECK(frames_of(r.recorder.seen[2].trace, SamplerTraceKind::Trigger).empty());
+		CHECK(r.router->stats().joins == 2);
 		CHECK(r.router->stats().rounds == 0);
 		CHECK(r.router->stats().weapon_voices == 0);
 	}

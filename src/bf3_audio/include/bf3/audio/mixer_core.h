@@ -65,6 +65,7 @@ struct MixerCommand {
 	float value = 0.0f;
 	uint64_t at_frame = 0;
 	PatchInstance *instance = nullptr;
+	InstanceHandle join = kNoInstance;
 	const core::audio::WaveBank *bank = nullptr;
 	uint64_t epoch = 0;
 	EmitterState emitter;
@@ -130,6 +131,7 @@ enum class MixerCutKind : uint8_t {
 	Cull,
 	Park,
 	Coalesce,
+	Join,
 	Count
 };
 inline constexpr size_t kMixerCutKinds = size_t(MixerCutKind::Count);

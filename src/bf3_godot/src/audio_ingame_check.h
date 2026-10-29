@@ -66,6 +66,7 @@ struct AudioSoundFate {
 	bool finished = false;
 	bool refused = false;
 	bool killed = false;
+	bool joined = false;
 	bool dropped_while_parked = false;
 	uint8_t cull = 0;
 	uint8_t park = 0;
@@ -74,7 +75,7 @@ struct AudioSoundFate {
 };
 
 struct AudioCategoryCounts {
-	uint64_t requested = 0, started = 0, finished = 0;
+	uint64_t requested = 0, started = 0, finished = 0, joined = 0;
 	uint64_t data_drops = 0, other_drops = 0;
 	std::map<std::string, uint64_t> reasons;
 };

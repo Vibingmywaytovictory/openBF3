@@ -219,6 +219,7 @@ struct WeaponAudioStats {
 	uint64_t foley_releases = 0;
 	uint64_t foley_out_of_reach = 0;
 	uint64_t accessory_sounds = 0;
+	uint64_t joins = 0;
 };
 static_assert(std::is_trivially_copyable_v<WeaponAudioStats>);
 

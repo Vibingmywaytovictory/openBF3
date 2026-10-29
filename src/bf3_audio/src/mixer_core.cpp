@@ -77,6 +77,7 @@ struct InstanceSlot {
 	MixerCutKind fade_kind = MixerCutKind::Drop;
 	uint32_t voices_held = 0;
 	uint32_t hold_left = 0;
+	bool awaiting_event = false;
 };
 constexpr uint8_t kFadeRelease = 1;
 constexpr uint8_t kFadePark = 2;
@@ -135,6 +136,7 @@ struct MixerCore::Impl {
 			uint8_t p_reason = 0, uint16_t p_scope = core::audio::kNoScope, uint32_t p_count = 0);
 
 	bool begin_fade(InstanceSlot &r_slot, uint8_t p_mode, MixerCutKind p_kind);
+	bool join(const MixerCommand &p_start, uint64_t p_frame, MixerStats &stats);
 	float limit_gain = 1.0f;
 	std::array<float, 2 * kBlockFrames> limit_g{};
 	std::array<float, 4 * kBlockFrames> limit_ext{};
@@ -269,6 +271,30 @@ InstanceSlot *find_slot(std::vector<InstanceSlot> &r_slots, InstanceHandle p_han
 
 }
 
+bool MixerCore::Impl::join(const MixerCommand &p_start, uint64_t p_frame, MixerStats &stats) {
+	InstanceSlot *s = find_slot(instances, p_start.join);
+	if (s == nullptr || s->pending || s->fade_mode != 0 || &s->instance->program() != &p_start.instance->program()) {
+		return false;
+	}
+	const InstanceHandle previous = s->handle;
+	note_event(MixerCutKind::Request, p_start.handle, 0.0f, p_start.instance, 0, s->scope);
+	note_event(MixerCutKind::Join, previous, 0.0f, s->instance, 0, s->scope, p_start.handle);
+	MixerFeedback fb;
+	fb.handle = previous;
+	fb.frame = block_first;
+	fb.finished = true;
+	if (!feedback.push(fb)) {
+		stats.feedback_drops.fetch_add(1, std::memory_order_relaxed);
+	}
+	s->handle = p_start.handle;
+	s->stop_requested = false;
+	s->starting = true;
+	s->awaiting_event = true;
+	s->start_frame = p_frame;
+	give_back(p_start.instance);
+	return true;
+}
+
 void MixerCore::Impl::render_block(MixerStats &stats) {
 	Impl &m = *this;
 	const auto t0 = std::chrono::steady_clock::now();
@@ -326,6 +352,9 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 						break;
 					}
 				}
+				if (cmd.instance != nullptr && m.join(cmd, first + offset, stats)) {
+					break;
+				}
 				if (free == nullptr || cmd.instance == nullptr) {
 					if (cmd.instance != nullptr) {
 						m.note_event(MixerCutKind::Refused, cmd.handle, 0.0f, cmd.instance);
@@ -380,6 +409,7 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 				break;
 			case MixerCommandType::PostEvent:
 				if (InstanceSlot *s = find_slot(m.instances, cmd.handle)) {
+					s->awaiting_event = false;
 					s->instance->post_event(cmd.name_hash, offset);
 				}
 				break;
@@ -478,7 +508,8 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 			s = InstanceSlot{};
 			continue;
 		}
-		const bool done = s.instance->finished() && (s.stop_requested || s.instance->stats().sampler_triggers > 0);
+		const bool done = s.instance->finished() &&
+				(s.stop_requested || (s.instance->stats().sampler_triggers > 0 && !s.awaiting_event));
 		const PatchHaptics h = s.instance->haptics();
 		const bool haptic = h.shake_pitch != 0.0f || h.shake_roll != 0.0f || h.shake_yaw != 0.0f || h.rumble_low != 0.0f || h.rumble_high != 0.0f;
 		if ((done || haptic) && s.fade_mode != kFadeRelease) {
@@ -957,7 +988,7 @@ void MixerCore::Impl::apply_limiter() {
 
 const char *mixer_cut_kind_name(MixerCutKind p_kind) {
 	static const char *const kNames[kMixerCutKinds] = { "drop", "pend", "kill", "finish", "start", "resume", "suspend",
-		"unsuspend", "fade", "callgap", "lateblock", "request", "refused", "cull", "park", "coalesce" };
+		"unsuspend", "fade", "callgap", "lateblock", "request", "refused", "cull", "park", "coalesce", "join" };
 	return size_t(p_kind) < kMixerCutKinds ? kNames[size_t(p_kind)] : "?";
 }
 

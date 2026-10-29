@@ -454,6 +454,8 @@ struct WeaponAudioRouter::Impl {
 		uint8_t slot = 0;
 		bool own = false;
 		uint16_t def = sw::kNoWeapon;
+		const WeaponAudioDef *sound = nullptr;
+		bool first_person = false;
 		uint64_t seed = 0;
 		double interval_s = 0.075;
 		uint32_t rate = kMixRate;
@@ -628,6 +630,24 @@ struct WeaponAudioRouter::Impl {
 		return true;
 	}
 
+	InstanceHandle sounding(
+			bool p_own, uint8_t p_slot, const WeaponAudioDef *p_sound, bool p_first_person, uint64_t p_frame) const {
+		const Voice *best = nullptr;
+		for (const Voice &v : voices) {
+			if (v.own != p_own || v.slot != p_slot || v.sound != p_sound || v.first_person != p_first_person ||
+					v.held || v.stop_frame > p_frame) {
+				continue;
+			}
+			if (std::any_of(v.ops.begin(), v.ops.end(), [](const Op &o) { return o.kind != OpKind::Stop; })) {
+				continue;
+			}
+			if (best == nullptr || v.first_frame > best->first_frame) {
+				best = &v;
+			}
+		}
+		return best != nullptr ? best->handle : kNoInstance;
+	}
+
 	Voice *start_burst(Track &r_track, bool p_own, uint8_t p_slot, uint16_t p_def, uint64_t p_seed, uint64_t p_frame, sw::SimTime p_time,
 			present::PresentTimeline p_timeline, const EmitterState &p_emitter, float p_distance, bool p_first_person) {
 		const WeaponAudioDef *d = fire_def_of(p_slot, p_def);
@@ -646,11 +666,15 @@ struct WeaponAudioRouter::Impl {
 		}
 		PatchInstance &pi = **inst;
 		const InstanceHandle handle = mixer.next_handle();
+		const InstanceHandle join = sounding(p_own, p_slot, d, p_first_person, p_frame);
 		voices.emplace_back(d->binding, d->fire_mode, handle);
 		Voice &v = voices.back();
 		v.slot = p_slot;
 		v.own = p_own;
 		v.def = p_def;
+		v.sound = d;
+		v.first_person = p_first_person;
+		v.emitter_dirty = join != kNoInstance;
 		v.seed = p_seed;
 		v.single = d->fire_mode == WeaponFireMode::Single;
 		v.timeline = p_timeline;
@@ -670,6 +694,7 @@ struct WeaponAudioRouter::Impl {
 		start.handle = handle;
 		start.at_frame = p_frame;
 		start.instance = &pi;
+		start.join = join;
 		if (!mixer.push(start)) {
 			++stats.mixer_refusals;
 			voices.pop_back();
@@ -680,6 +705,7 @@ struct WeaponAudioRouter::Impl {
 		flush(v);
 		r_track.held = handle;
 		++stats.bursts;
+		stats.joins += join != kNoInstance ? 1u : 0u;
 		if (p_own) {
 			++stats.own_bursts;
 		}
