@@ -175,6 +175,39 @@ void fragment() {
 }
 )";
 
+struct SharedShaders {
+	RID item;
+	RID filter;
+	RID present;
+	uint32_t users = 0;
+};
+
+std::unique_ptr<SharedShaders> g_shaders;
+
+const SharedShaders &acquire_shaders(RenderingServer *p_rs) {
+	if (g_shaders == nullptr) {
+		g_shaders = std::make_unique<SharedShaders>();
+		g_shaders->item = p_rs->shader_create();
+		p_rs->shader_set_code(g_shaders->item, kItemShader);
+		g_shaders->filter = p_rs->shader_create();
+		p_rs->shader_set_code(g_shaders->filter, kFilterShader);
+		g_shaders->present = p_rs->shader_create();
+		p_rs->shader_set_code(g_shaders->present, kPresentShader);
+	}
+	++g_shaders->users;
+	return *g_shaders;
+}
+
+void release_shaders(RenderingServer *p_rs) {
+	if (g_shaders == nullptr || --g_shaders->users != 0) {
+		return;
+	}
+	for (const RID &r : { g_shaders->item, g_shaders->filter, g_shaders->present }) {
+		p_rs->free_rid(r);
+	}
+	g_shaders.reset();
+}
+
 constexpr ui::SwfAffine kSingularAffine{ 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
 
 Transform2D xform_of(const ui::SwfAffine &p_m) {
@@ -904,14 +937,12 @@ struct Bf3SwfView::Impl {
 
 	Impl() {
 		rs = RenderingServer::get_singleton();
-		item_shader = rs->shader_create();
-		rs->shader_set_code(item_shader, kItemShader);
+		const SharedShaders &shaders = acquire_shaders(rs);
+		item_shader = shaders.item;
+		filter_shader = shaders.filter;
+		present_shader = shaders.present;
 		item_material = rs->material_create();
 		rs->material_set_shader(item_material, item_shader);
-		filter_shader = rs->shader_create();
-		rs->shader_set_code(filter_shader, kFilterShader);
-		present_shader = rs->shader_create();
-		rs->shader_set_code(present_shader, kPresentShader);
 		present_material = rs->material_create();
 		rs->material_set_shader(present_material, present_shader);
 	}
@@ -919,10 +950,8 @@ struct Bf3SwfView::Impl {
 	~Impl() {
 		release();
 		rs->free_rid(present_material);
-		rs->free_rid(present_shader);
-		rs->free_rid(filter_shader);
 		rs->free_rid(item_material);
-		rs->free_rid(item_shader);
+		release_shaders(rs);
 	}
 
 	void warn_once(const std::string &p_message) {
