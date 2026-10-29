@@ -2,6 +2,7 @@
 
 #include "bf3/core/gameplay/logic_types.h"
 #include "bf3/core/ids.h"
+#include "bf3/core/util/finite.h"
 
 #include <algorithm>
 #include <chrono>
@@ -302,6 +303,7 @@ struct LogicRuntime::State {
 	std::vector<LogicNetworkedEvent> networked;
 	std::vector<LogicWatchHit> hits;
 	std::vector<LogicUnhandledPort> unhandled;
+	std::optional<LogicGhost> pending_ghost;
 	LogicTrace trace;
 	Tick tick = 0;
 	uint32_t seq = 0;
@@ -716,6 +718,69 @@ struct LogicRuntime::State {
 		const uint32_t length = logic_delay_ticks(as_float(in(p_node, port::kSequenceLength)) / 1000.0, options.hz);
 
 		arm(p_node, length, TimerWhat::SequenceEnd, static_cast<int32_t>(std::min<uint32_t>(length, 0x7fffffff)), p_context);
+	}
+
+	void sequence_resume(uint32_t p_node, Tick p_start) {
+		cancel(p_node);
+		NodeState &st = nodes[p_node];
+		st.flag = true;
+		st.start = p_start;
+		const Tick elapsed = tick - p_start;
+		const size_t events = std::min<size_t>(param_count(p_node, port::kTime), gp::kMaxParamElements);
+		for (size_t k = 0; k < events && !fault; ++k) {
+			const std::optional<LogicValue> time = param(p_node, port::kTime, static_cast<uint16_t>(k));
+			const uint32_t at = logic_delay_ticks((time ? as_float(*time) : 0.0) / 1000.0, options.hz);
+			if (at >= elapsed) {
+				arm(p_node, at - elapsed, TimerWhat::SequenceEvent, static_cast<int32_t>(k), LogicContext{});
+			}
+		}
+		const uint32_t length = logic_delay_ticks(as_float(in(p_node, port::kSequenceLength)) / 1000.0, options.hz);
+		arm(p_node, length > elapsed ? length - elapsed : 0, TimerWhat::SequenceEnd,
+				static_cast<int32_t>(std::min<uint32_t>(length, 0x7fffffff)), LogicContext{});
+	}
+
+	void apply_ghost(const LogicGhost &p_ghost) {
+		for (size_t i = 0; i < layout.bools.size() && !fault; ++i) {
+			const uint32_t node = layout.bools[i];
+			const bool want = ((p_ghost.bool_bits[i / 64] >> (i % 64)) & 1u) != 0;
+			NodeState &st = nodes[node];
+			if (st.value.kind == K::Bool && st.value.b == want) {
+				continue;
+			}
+			st.value = v_bool(want);
+			publish(node, port::kOut, st.value);
+			++stats.ghost_changes;
+		}
+		for (size_t i = 0; i < layout.transforms.size() && !fault; ++i) {
+			const uint32_t node = layout.transforms[i];
+			LogicValue v;
+			v.kind = K::Transform;
+			v.m = p_ghost.transforms[i];
+			const PortValue *out = find_port(outputs[node], port::kOut);
+			if (out != nullptr && out->value.same_as(v)) {
+				continue;
+			}
+			publish(node, port::kOut, v);
+			++stats.ghost_changes;
+		}
+		for (size_t i = 0; i < layout.sequences.size() && !fault; ++i) {
+			const uint32_t node = layout.sequences[i];
+			NodeState &st = nodes[node];
+			const Tick start = p_ghost.sequence_start[i];
+			if (start == LogicGhost::kNoStart) {
+				if (st.flag) {
+					sequence_stop(node, false, LogicContext{});
+					++stats.ghost_changes;
+				}
+				continue;
+			}
+			const Tick local = tick - 1u - (p_ghost.tick - start);
+			if (st.flag && st.start == local) {
+				continue;
+			}
+			sequence_resume(node, local);
+			++stats.ghost_changes;
+		}
 	}
 
 	void sequence_stop(uint32_t p_node, bool p_notify, const LogicContext &p_context) {
@@ -1595,6 +1660,28 @@ core::Status LogicRuntime::deliver_event(uint32_t p_node, int32_t p_port, LogicC
 	return core::Status::success();
 }
 
+core::Status LogicRuntime::apply_ghost(const LogicGhost &p_ghost) {
+	State &s = *state_;
+	const LogicGhostLayout &l = s.layout;
+	if (p_ghost.bool_count != l.bools.size() || p_ghost.bool_bits.size() < (l.bools.size() + 63) / 64 ||
+			p_ghost.transforms.size() != l.transforms.size() || p_ghost.sequence_start.size() != l.sequences.size()) {
+		return core::make_error("logic ghost: counts " + std::to_string(p_ghost.bool_count) + "/" +
+				std::to_string(p_ghost.transforms.size()) + "/" + std::to_string(p_ghost.sequence_start.size()) +
+				" differ from the layout's " + std::to_string(l.bools.size()) + "/" +
+				std::to_string(l.transforms.size()) + "/" + std::to_string(l.sequences.size()));
+	}
+	for (const std::array<float, 12> &m : p_ghost.transforms) {
+		if (!core::finite(std::span<const float>(m))) {
+			return core::make_error("logic ghost: a non-finite transform");
+		}
+	}
+	if (!s.started) {
+		return core::make_error("logic runtime: apply_ghost() before start()");
+	}
+	s.pending_ghost = p_ghost;
+	return core::Status::success();
+}
+
 core::Status LogicRuntime::force_property(uint32_t p_node, int32_t p_port, const LogicValue &p_value) {
 	State &s = *state_;
 	if (p_node >= s.nodes.size()) {
@@ -1626,6 +1713,11 @@ core::Result<LogicTickStats> LogicRuntime::step() {
 	}
 	++s.tick;
 	s.begin_tick();
+	if (s.pending_ghost) {
+		const LogicGhost ghost = std::move(*s.pending_ghost);
+		s.pending_ghost.reset();
+		s.apply_ghost(ghost);
+	}
 	s.run_due_timers();
 	std::vector<State::Forced> forced;
 	forced.swap(s.forced);

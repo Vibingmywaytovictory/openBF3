@@ -1054,6 +1054,143 @@ TEST_SUITE("logic-unit") {
 		no_unhandled(rt);
 	}
 
+	TEST_CASE("logic: apply_ghost - bools, transforms and sequence starts round trip; a layout mismatch is refused; an "
+			  "equal ghost is a no-op") {
+		G g;
+		const int32_t kE0 = logic_port_id("SeqE0"), kE1 = logic_port_id("SeqE1");
+		const uint32_t b0 = g.node(LogicTypeId::SyncedBool, LogicRealm::ClientAndServer);
+		const uint32_t b1 = g.node(LogicTypeId::SyncedBool, LogicRealm::ClientAndServer);
+		g.b.add_param(b1, port::kIn, v_bool(true));
+		const uint32_t b0_set = driver(g, b0, port::kSetTrue), b1_clear = driver(g, b1, port::kSetFalse);
+		const uint32_t b0_on_true = event_sink(g, b0, port::kOnTrue);
+		const uint32_t b0_value = property_sink(g, b0, port::kOut);
+		const uint32_t t = g.node(LogicTypeId::SyncedTransform, LogicRealm::ClientAndServer);
+		const uint32_t t_value = property_sink(g, t, port::kOut);
+		const uint32_t q = g.node(LogicTypeId::SyncedSequence, LogicRealm::ClientAndServer);
+		g.b.add_param(q, logic_port_id("SequenceLength"), v_float(1000));
+		g.b.add_param(q, logic_port_id("Time"), v_float(200), 0);
+		g.b.add_param(q, logic_port_id("Event.Id"), v_int(kE0), 0);
+		g.b.add_param(q, logic_port_id("Time"), v_float(600), 1);
+		g.b.add_param(q, logic_port_id("Event.Id"), v_int(kE1), 1);
+		const uint32_t q_start = driver(g, q, port::kStart);
+		const uint32_t q_started = event_sink(g, q, logic_port_id("OnStarted"));
+		const uint32_t q_e0 = event_sink(g, q, kE0), q_e1 = event_sink(g, q, kE1),
+					   q_finished = event_sink(g, q, port::kOnFinished);
+		const uint32_t r = g.node(LogicTypeId::Sequence, LogicRealm::ClientAndServer);
+		g.b.add_param(r, logic_port_id("SequenceLength"), v_float(500));
+		const uint32_t r_start = driver(g, r, port::kStart);
+		const uint32_t r_stopped = event_sink(g, r, port::kOnStopped);
+		const std::shared_ptr<const LogicGraph> graph = g.finish();
+		LogicRuntime server = make_runtime(graph);
+		LogicRuntime client = make_runtime(graph);
+		start(server);
+		start(client);
+		REQUIRE(server.ghost_layout().bools.size() == 2);
+		REQUIRE(server.ghost_layout().transforms.size() == 1);
+		REQUIRE(server.ghost_layout().sequences.size() == 2);
+		for (Tick k = 1; k <= 30; ++k) {
+			if (k == 2) {
+				force(client, r_start);
+			}
+			step(client);
+		}
+		for (Tick k = 1; k <= 20; ++k) {
+			if (k == 2) {
+				force(server, b0_set);
+				force(server, b1_clear);
+				force(server, q_start);
+			}
+			if (k == 3) {
+				REQUIRE(server.force_property(t, port::kOut, v_transform(1, 2, 3)).ok());
+			}
+			step(server);
+		}
+		CHECK(hits(server, q_e0) == std::vector<Tick>{ 14 });
+		const LogicGhost sent = server.ghost();
+		REQUIRE(sent.sequence_start[0] == 2);
+		REQUIRE(client.ghost().sequence_start[1] == 2);
+		REQUIRE(client.apply_ghost(sent).ok());
+		const LogicTickStats applied = step(client);
+		CHECK(applied.ghost_changes == 5);
+		step(server);
+		const LogicGhost a = server.ghost(), b = client.ghost();
+		CHECK(b.bool_bits == a.bool_bits);
+		CHECK(b.transforms == a.transforms);
+		CHECK(b.sequence_start[1] == LogicGhost::kNoStart);
+		CHECK(b.tick - b.sequence_start[0] == a.tick - a.sequence_start[0]);
+		CHECK(out_bool(client, b0));
+		CHECK_FALSE(out_bool(client, b1));
+		CHECK(property_ticks(client, b0_value).back() == 31);
+		CHECK(property_ticks(client, t_value).back() == 31);
+		CHECK(hits(client, b0_on_true).empty());
+		CHECK(hits(client, q_started).empty());
+		CHECK(hits(client, r_stopped).empty());
+		CHECK(hits(client, q_e0).empty());
+		for (Tick k = 0; k < 30; ++k) {
+			step(server);
+			step(client);
+		}
+		CHECK(hits(server, q_e1) == std::vector<Tick>{ 38 });
+		CHECK(hits(client, q_e1) == std::vector<Tick>{ 38 - 21 + 31 });
+		CHECK(hits(server, q_finished).empty());
+		CHECK(hits(client, q_finished).empty());
+		for (Tick k = 0; k < 15; ++k) {
+			step(server);
+			step(client);
+		}
+		CHECK(hits(server, q_finished) == std::vector<Tick>{ 62 });
+		CHECK(hits(client, q_finished) == std::vector<Tick>{ 62 - 21 + 31 });
+		CHECK(client.ghost().sequence_start[0] == LogicGhost::kNoStart);
+
+		const size_t records = client.trace().records.size();
+		REQUIRE(client.apply_ghost(client.ghost()).ok());
+		CHECK(step(client).ghost_changes == 0);
+		size_t after = 0;
+		for (size_t k = records; k < client.trace().records.size(); ++k) {
+			after += client.trace().records[k].kind != LogicTraceKind::TimerFired;
+		}
+		CHECK(after == 0);
+
+		LogicRuntime late = make_runtime(graph);
+		start(late);
+		step(late);
+		REQUIRE(late.apply_ghost(sent).ok());
+		CHECK(step(late).ghost_changes == 4);
+		const LogicGhost l = late.ghost();
+		CHECK(l.tick - l.sequence_start[0] == sent.tick - sent.sequence_start[0] + 1);
+		REQUIRE(late.apply_ghost(l).ok());
+		CHECK(step(late).ghost_changes == 0);
+		for (Tick k = 0; k < 17; ++k) {
+			step(late);
+		}
+		CHECK(hits(late, q_e1) == std::vector<Tick>{ 2 + 17 });
+
+		LogicGhost fewer = sent;
+		fewer.bool_count = 1;
+		CHECK_FALSE(client.apply_ghost(fewer).ok());
+		LogicGhost more = sent;
+		more.transforms.push_back(more.transforms[0]);
+		CHECK_FALSE(client.apply_ghost(more).ok());
+		LogicGhost shorter = sent;
+		shorter.sequence_start.pop_back();
+		CHECK_FALSE(client.apply_ghost(shorter).ok());
+		LogicGhost words = sent;
+		words.bool_bits.clear();
+		CHECK_FALSE(client.apply_ghost(words).ok());
+		LogicGhost nan = sent;
+		nan.transforms[0][0] = std::numeric_limits<float>::quiet_NaN();
+		CHECK_FALSE(client.apply_ghost(nan).ok());
+		CHECK(step(client).ghost_changes == 0);
+
+		G other;
+		other.node(LogicTypeId::SyncedBool);
+		LogicRuntime mismatched = make_runtime(other.finish());
+		start(mismatched);
+		CHECK_FALSE(mismatched.apply_ghost(sent).ok());
+		LogicRuntime unstarted = make_runtime(graph);
+		CHECK_FALSE(unstarted.apply_ghost(sent).ok());
+	}
+
 	TEST_CASE("logic: EventSwitch - AutoIncrement, NextOut / PreviousOut wrap, Reset, OutEvents clamped to 1..10") {
 		G g;
 		const auto make = [&](int64_t p_outs, bool p_auto) {

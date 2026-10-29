@@ -115,6 +115,7 @@ struct LogicTickStats {
 	size_t effects = 0;
 	size_t networked = 0;
 	size_t watch_hits = 0;
+	size_t ghost_changes = 0;
 
 	uint64_t drain_ns = 0;
 };
@@ -170,6 +171,7 @@ public:
 	core::Status force_event(uint32_t p_node, int32_t p_port, LogicContext p_context = {});
 	core::Status force_property(uint32_t p_node, int32_t p_port, const LogicValue &p_value);
 	core::Status deliver_event(uint32_t p_node, int32_t p_port, LogicContext p_context = {});
+	core::Status apply_ghost(const LogicGhost &p_ghost);
 
 	core::Result<LogicTickStats> step();
 
