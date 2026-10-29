@@ -23,6 +23,7 @@ namespace bf3::godot_side {
 inline constexpr int32_t kUiGradeLayer = 0;
 inline constexpr int32_t kUiGlitchLayer = 100;
 inline constexpr int32_t kUiCursorLayer = 101;
+inline constexpr uint32_t kUiPostProcessWarmFrames = 2;
 
 godot::Vector3 vec3_of(const std::array<float, 3> &p_v);
 
@@ -36,6 +37,7 @@ struct UiPostProcessStats {
 	uint32_t dim_ins = 0;
 	uint32_t dim_outs = 0;
 	uint32_t pending_applied = 0;
+	uint32_t warm_frames = 0;
 };
 
 class Bf3UiPostProcess : public godot::Node {
@@ -113,6 +115,7 @@ private:
 	float glitch_start_ = 0.0f;
 	std::optional<float> pending_glitch_;
 	int32_t pending_dim_ = 0;
+	uint32_t warm_frames_ = 0;
 	UiPostProcessStats stats_;
 
 	godot::CanvasLayer *grade_layer_ = nullptr;

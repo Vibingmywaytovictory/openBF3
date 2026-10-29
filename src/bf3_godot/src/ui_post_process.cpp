@@ -353,6 +353,7 @@ void Bf3UiPostProcess::build() {
 			std::to_string(noise_.width) + "x" + std::to_string(noise_.height) + ", dimmer " +
 			std::to_string(int(dimmer_->ramp().in.length_ms)) + " ms over " + dimmer_->ramp().visual_environment));
 	loaded_.reset();
+	warm_frames_ = kUiPostProcessWarmFrames;
 	apply();
 }
 
@@ -420,11 +421,11 @@ const ui::L8Image *Bf3UiPostProcess::noise() const {
 }
 
 bool Bf3UiPostProcess::glitch_drawn() const {
-	return glitch_layer_ != nullptr && glitch_layer_->is_visible();
+	return glitch_layer_ != nullptr && glitch_layer_->is_visible() && glitch_power() > 0.0f;
 }
 
 bool Bf3UiPostProcess::grade_drawn() const {
-	return grade_layer_ != nullptr && grade_layer_->is_visible();
+	return grade_layer_ != nullptr && grade_layer_->is_visible() && dim_visibility() > 0.0f;
 }
 
 void Bf3UiPostProcess::apply() {
@@ -439,12 +440,12 @@ void Bf3UiPostProcess::apply() {
 	}
 	const float scale = std::max(1e-3f, float(ui_stage(this).scale));
 	const float power = glitch_power();
-	glitch_layer_->set_visible(power > 0.0f);
+	glitch_layer_->set_visible(power > 0.0f || warm_frames_ > 0);
 	glitch_material_->set_shader_parameter("power", power);
 	glitch_material_->set_shader_parameter("time", float(clock_));
 	glitch_material_->set_shader_parameter("stage_scale", scale);
 	const float v = dim_visibility();
-	grade_layer_->set_visible(v > 0.0f);
+	grade_layer_->set_visible(v > 0.0f || warm_frames_ > 0);
 	grade_material_->set_shader_parameter("visibility", v);
 	grade_material_->set_shader_parameter("stage_scale", scale);
 }
@@ -457,6 +458,10 @@ void Bf3UiPostProcess::step(double p_seconds) {
 		clock_ += p_seconds;
 	}
 	apply();
+	if (warm_frames_ > 0) {
+		--warm_frames_;
+		stats_.warm_frames++;
+	}
 	if (glitch_drawn()) {
 		stats_.glitch_frames++;
 	}
