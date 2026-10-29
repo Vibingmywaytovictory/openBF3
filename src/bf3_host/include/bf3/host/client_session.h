@@ -169,6 +169,11 @@ struct ClientStats {
 	uint64_t spawn_requests = 0;
 	uint64_t own_shot_id_resets = 0;
 	bool rules_mismatch = false;
+
+	bool kicked = false;
+	net::KickReason kick_reason = net::KickReason::Protocol;
+	std::array<char, 128> kick_detail{};
+	uint8_t mismatch_components = 0;
 };
 static_assert(std::is_trivially_copyable_v<ClientStats>);
 

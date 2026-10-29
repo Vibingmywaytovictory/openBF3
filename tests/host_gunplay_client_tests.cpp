@@ -1455,7 +1455,8 @@ TEST_SUITE("host-gunplay-client-unit") {
 		CHECK(out1[0].target_pose == out[0].target_pose);
 	}
 
-	TEST_CASE("host.gunplay.client: E6: a client whose weapon table differs is refused on MatchInfo, never sends Ready, never predicts") {
+	TEST_CASE("host.gunplay.client: E6: a client whose weapon table differs answers MatchInfo with a Mismatch, is "
+			  "kicked by its reason, never predicts") {
 		const std::string variant = cfg_with("variant.cfg", "disc", "uniform_radius");
 		const std::string missing = (scratch_dir() / "missing.cfg").string();
 		core::Result<std::shared_ptr<const host::ClientGunplayInputs>> own = host::client_gunplay_inputs(*gunplay_floor());
@@ -1468,12 +1469,17 @@ TEST_SUITE("host-gunplay-client-unit") {
 			bool kits_differ;
 			bool no_inputs;
 			const char *reason;
+			net::KickReason code;
 		};
 		const Row rows[] = {
-			{ "mechanics differ (variant.cfg: disc = uniform_radius)", variant, false, false, "weapon table mismatch" },
-			{ "cfg unreadable (missing.cfg)", missing, false, false, "weapon table mismatch" },
-			{ "no weapon table (gunplay_from_level off, no inputs)", mechanics_cfg_path(), false, true, "weapon table mismatch" },
-			{ "kit table differs", mechanics_cfg_path(), true, false, "kit table mismatch" },
+			{ "mechanics differ (variant.cfg: disc = uniform_radius)", variant, false, false,
+					"kicked: install differs: weapon", net::KickReason::Weapon },
+			{ "cfg unreadable (missing.cfg)", missing, false, false, "kicked: install differs: weapon",
+					net::KickReason::Weapon },
+			{ "no weapon table (gunplay_from_level off, no inputs)", mechanics_cfg_path(), false, true,
+					"kicked: install differs: weapon", net::KickReason::Weapon },
+			{ "kit table differs", mechanics_cfg_path(), true, false, "kicked: install differs: kit",
+					net::KickReason::Kit },
 		};
 		for (const Row &row : rows) {
 			Server server;
@@ -1493,15 +1499,22 @@ TEST_SUITE("host-gunplay-client-unit") {
 			const host::ClientStats s = p.client.stats();
 			const size_t spawned = server.spawned_clients();
 			const std::string error(s.last_error.data());
-			CHECK_MESSAGE(s.refused, row.label);
-			CHECK_MESSAGE(error.find(row.reason) != std::string::npos, row.label << ": " << error);
+			const host::GameServerStats gs = server.stats();
+			CHECK_MESSAGE(!s.refused, row.label);
+			CHECK_MESSAGE(error == row.reason, row.label << ": " << error);
+			CHECK_MESSAGE(s.kicked, row.label);
+			CHECK_MESSAGE(s.kick_reason == row.code, row.label);
+			CHECK_MESSAGE(gs.kicks[size_t(row.code)] == 1, row.label);
+			CHECK_MESSAGE(gs.bad_datagrams == 0, row.label);
 			CHECK_MESSAGE((row.kits_differ ? s.kit_hash_mismatch : s.weapon_hash_mismatch) == 1, row.label);
 			CHECK_MESSAGE(spawned == 0, row.label);
 			CHECK_MESSAGE(s.commands_sent == 0, row.label);
 			CHECK_MESSAGE(!p.frame->valid, row.label);
 			CHECK_MESSAGE(!s.connected, row.label);
-			std::printf("E6 %s: refused \"%s\", weapon_hash_mismatch %" PRIu64 ", kit_hash_mismatch %" PRIu64 ", spawned on the server %zu, commands %" PRIu64 "\n",
-					row.label, error.c_str(), s.weapon_hash_mismatch, s.kit_hash_mismatch, spawned, s.commands_sent);
+			std::printf("E6 %s: kicked \"%s\" (server kicks %s), weapon_hash_mismatch %" PRIu64
+						", kit_hash_mismatch %" PRIu64 ", spawned on the server %zu, commands %" PRIu64 "\n",
+					row.label, error.c_str(), host::kick_counts_text(gs.kicks).c_str(), s.weapon_hash_mismatch,
+					s.kit_hash_mismatch, spawned, s.commands_sent);
 		}
 
 		for (const bool gunplay : { true, false }) {

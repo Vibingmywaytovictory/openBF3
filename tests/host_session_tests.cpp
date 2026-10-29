@@ -2491,3 +2491,84 @@ TEST_SUITE("host-session-unit") {
 				"install differs: source, collision, motor, weapon, kit, logic, rules");
 	}
 }
+
+namespace {
+
+ClientStats join_with_level(std::shared_ptr<const SharedLevel> p_level, GameServerStats &r_server, size_t &r_spawned) {
+	auto pipe = std::make_shared<Pipe>();
+	ServerConfig sc;
+	sc.game = pipe_game();
+	sc.transport = std::make_shared<PipeServerPort>(pipe);
+	ServerHost server;
+	std::string err;
+	REQUIRE_MESSAGE(server.start(sc, &err), err);
+	pipe->connect(0);
+	ClientSession client;
+	ClientSessionConfig cc;
+	cc.name = "edited install";
+	const core::Status started = client.start(cc, std::move(p_level), std::make_unique<PipeClientTransport>(pipe, 0));
+	REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
+	CHECK(wait_until(
+			[&] {
+				const ClientStats s = client.stats();
+				return !s.connected && s.last_error[0] != '\0';
+			},
+			10s, 16ms));
+	CHECK(wait_until(
+			[&] { return server.game_stats().clients == 0 && pipe->count_sent(0, net::MessageType::Kick) == 1; }, 10s,
+			16ms));
+	const ClientStats s = client.stats();
+	r_server = server.game_stats();
+	r_spawned = pipe->count_sent(0, net::MessageType::Spawned);
+	client.stop();
+	server.stop();
+	return s;
+}
+
+}
+
+TEST_SUITE("host-session-unit") {
+	TEST_CASE("host.session: a client whose motor_hash differs is kicked Motor before it spawns") {
+		auto edited = std::make_shared<SharedLevel>(*synthetic_level());
+		edited->motor.jump_height += 0.25f;
+		REQUIRE(motor_params_hash(edited->motor) != motor_params_hash(synthetic_level()->motor));
+		GameServerStats g;
+		size_t spawned = 0;
+		const ClientStats s = join_with_level(edited, g, spawned);
+		CHECK_FALSE(s.connected);
+		CHECK_FALSE(s.refused);
+		CHECK(std::string(s.last_error.data()) == "kicked: install differs: motor");
+		CHECK(s.kicked);
+		CHECK(s.kick_reason == net::KickReason::Motor);
+		CHECK(std::string(s.kick_detail.data()) == "install differs: motor");
+		CHECK(s.mismatch_components == net::mismatch_bits::kMotor);
+		CHECK(s.motor_hash_mismatch == 1);
+		CHECK(s.spawns == 0);
+		CHECK(s.commands_sent == 0);
+		CHECK(spawned == 0);
+		CHECK(g.kicks[size_t(net::KickReason::Motor)] == 1);
+		CHECK(g.bad_datagrams == 0);
+	}
+
+	TEST_CASE("host.session: a client whose static world differs is kicked Collision before it spawns") {
+		std::vector<StaticTriangle> t;
+		add_floor(t, -120, -120, 120, 120, 0);
+		add_box(t, { 10, 0, 10 }, { 12, 2.5f, 14 });
+		core::Result<std::shared_ptr<const StaticWorldShapes>> shapes =
+				build_static_world(std::span<const StaticTriangle>(t));
+		REQUIRE(shapes.ok());
+		auto edited = std::make_shared<SharedLevel>(*synthetic_level());
+		edited->static_world = *shapes;
+		edited->collision_digest = static_world_digest(**shapes);
+		REQUIRE(edited->collision_digest != synthetic_level()->collision_digest);
+		GameServerStats g;
+		size_t spawned = 0;
+		const ClientStats s = join_with_level(edited, g, spawned);
+		CHECK(std::string(s.last_error.data()) == "kicked: install differs: collision");
+		CHECK(s.kick_reason == net::KickReason::Collision);
+		CHECK(s.mismatch_components == net::mismatch_bits::kCollision);
+		CHECK(s.motor_hash_mismatch == 0);
+		CHECK(spawned == 0);
+		CHECK(g.kicks[size_t(net::KickReason::Collision)] == 1);
+	}
+}

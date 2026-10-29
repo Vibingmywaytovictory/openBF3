@@ -80,6 +80,7 @@ private:
 	std::vector<HeldDatagram> held;
 	mutable std::mutex lobby_mutex;
 	std::optional<net::MatchInfo> lobby_info;
+	std::optional<uint64_t> mismatch_deadline;
 
 	RemoteTracks tracks{ config };
 	ClientEvents feed{ slot };
@@ -88,11 +89,13 @@ private:
 	OwnPrediction prediction{ config, clock, input, gunplay };
 
 	void refuse(const char *p_reason);
+	void send_mismatch(uint8_t p_components, uint64_t p_now);
+	void note_kick(const net::Kick &p_kick);
 	bool accept_match(const net::MatchInfo &p_match, uint64_t p_now);
 	void gunplay_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d, uint64_t p_now);
 	void handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_now);
 	void hold(net::NetSim::Datagram &&p_d, uint64_t p_now);
-	void publish_lobby();
+	void publish_link_stats();
 	void client_tick(uint64_t p_now);
 	void publish(uint64_t p_now, const sim::PredictionEntry *p_made, const sim::Command &p_cmd);
 	void collect_stats();

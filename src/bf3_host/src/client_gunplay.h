@@ -22,6 +22,11 @@
 
 namespace bf3::host {
 
+struct GunplayRefusal {
+	uint8_t component = 0;
+	std::string detail;
+};
+
 class ClientGunplay {
 public:
 	ClientGunplay(const ClientSessionConfig &p_config, ClientEvents &r_events, const uint8_t &p_own_slot, const MonotonicClock &p_clock) :
@@ -33,7 +38,7 @@ public:
 	bool wants_poses() const { return projectiles_ != nullptr; }
 	sim::Tick newest_tick() const { return newest_tick_; }
 
-	std::optional<std::string> match_info(const net::MatchInfo &p_match, const SharedLevel &p_level);
+	std::optional<GunplayRefusal> match_info(const net::MatchInfo &p_match, const SharedLevel &p_level);
 	void spawned(const net::Spawned &p_spawned, bool p_have_own, uint32_t p_own_life);
 	void note_arrival(uint16_t p_seq, uint64_t p_now);
 	void snapshot(const net::Snapshot &p_snapshot, bool p_newer);

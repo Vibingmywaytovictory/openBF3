@@ -1,5 +1,8 @@
 #include "client_loop.h"
 
+#include "bf3/host/game_server.h"
+#include "client_handshake.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
@@ -27,7 +30,7 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 			slot = m->slot;
 			stats_.slot = m->slot;
 			tracks.set_divisor(std::max<uint8_t>(m->snapshot_divisor, 1));
-			prediction.match_started(m->motor_hash, p_now);
+			prediction.match_started(p_now);
 			clock.start(m->server_tick, p_now, input.next_sequence());
 			return;
 		}
@@ -77,6 +80,9 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 		}
 		case net::MessageType::Kick: {
 			core::Result<net::Kick> k = net::decode_kick(p_d.bytes);
+			if (k) {
+				note_kick(*k);
+			}
 			link.drop("kicked: " + (k ? k->reason : std::string("(bad kick)")));
 			return;
 		}
@@ -205,13 +211,23 @@ void ClientLoop::iterate() {
 	}
 	link.send_requests(now);
 	link.release(now);
+	if (mismatch_deadline && now >= *mismatch_deadline) {
+		mismatch_deadline.reset();
+		if (link.connected()) {
+			refuse((install_difference_text(stats_.mismatch_components) + " (the server sent no kick)").c_str());
+		}
+	}
 	if (level == nullptr) {
-		publish_lobby();
+		publish_link_stats();
 		return;
 	}
-	if (clock.running() && link.connected() && clock.due(now)) {
-		client_tick(now);
+	if (clock.running() && link.connected()) {
+		if (clock.due(now)) {
+			client_tick(now);
+		}
+		return;
 	}
+	publish_link_stats();
 }
 
 void ClientLoop::shutdown() {
@@ -276,7 +292,7 @@ void ClientLoop::hold(net::NetSim::Datagram &&p_d, uint64_t p_now) {
 	held.push_back({ std::move(p_d), p_now });
 }
 
-void ClientLoop::publish_lobby() {
+void ClientLoop::publish_link_stats() {
 	stats_.connected = link.connected();
 	link.stats(stats_);
 	std::lock_guard lock(frame_mutex);
@@ -349,22 +365,45 @@ void ClientLoop::refuse(const char *p_reason) {
 	shared_frame->stats = stats_;
 }
 
+void ClientLoop::send_mismatch(uint8_t p_components, uint64_t p_now) {
+	have_match = true;
+	stats_.mismatch_components = p_components;
+	link.submit(net::kChannelReliable, net::encode_mismatch({ p_components }), p_now);
+	mismatch_deadline = p_now + uint64_t(config.connect_timeout_ms) * 1'000'000ull;
+	collect_stats();
+}
+
+void ClientLoop::note_kick(const net::Kick &p_kick) {
+	if (stats_.kicked || !link.connected()) {
+		return;
+	}
+	stats_.kicked = true;
+	stats_.kick_reason = p_kick.code;
+	const size_t n = std::min(p_kick.reason.size(), stats_.kick_detail.size() - 1);
+	std::memcpy(stats_.kick_detail.data(), p_kick.reason.data(), n);
+	stats_.kick_detail[n] = '\0';
+}
+
 bool ClientLoop::accept_match(const net::MatchInfo &p_match, uint64_t p_now) {
 	stats_.slot = p_match.slot;
-	if (const std::string refusal = level_refusal(p_match, level->level, level->mode); !refusal.empty()) {
+	if (const std::string refusal = match_refusal(p_match, *level); !refusal.empty()) {
 		refuse(refusal.c_str());
 		return false;
 	}
-	if (const char *refusal = match.check_rules(p_match, *level)) {
-		refuse(refusal);
-		return false;
+	uint8_t refused = prediction.motor_matches(p_match.motor_hash) ? 0 : net::mismatch_bits::kMotor;
+	if (match.check_rules(p_match, *level) != nullptr) {
+		refused |= net::mismatch_bits::kLogic;
 	}
-	const std::optional<std::string> refusal = gunplay.match_info(p_match, *level);
+	const std::optional<GunplayRefusal> gunplay_refusal = gunplay.match_info(p_match, *level);
 	if (gunplay.lane() != nullptr) {
 		prediction.attach_weapons(gunplay.lane());
 	}
-	if (refusal) {
-		refuse(refusal->c_str());
+	if (gunplay_refusal) {
+		refused |= gunplay_refusal->component;
+	}
+	const net::ComponentDigests own = client_digests(p_match, *level, prediction.motor_hash());
+	if (const uint8_t mismatch = client_mismatch(p_match, *level, own, refused); mismatch != 0) {
+		send_mismatch(mismatch, p_now);
 		return false;
 	}
 	if (config.send_kit_select) {
@@ -372,6 +411,7 @@ bool ClientLoop::accept_match(const net::MatchInfo &p_match, uint64_t p_now) {
 	}
 	net::Ready ready;
 	ready.source_digest = level->source_digest;
+	ready.digests = own;
 	link.submit(net::kChannelReliable, net::encode_ready(ready), p_now);
 	return true;
 }

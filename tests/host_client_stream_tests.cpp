@@ -44,12 +44,12 @@ struct StreamHashes {
 	uint64_t stats = 0;
 };
 
-constexpr StreamHashes kAlpha{ 0xe28468700f15ad47ull, 0xdae3ec8430c2b8e1ull, 0x97474eb739de6a3cull,
+constexpr StreamHashes kAlpha{ 0xfd61034bfb023c3eull, 0xdae3ec8430c2b8e1ull, 0x97474eb739de6a3cull,
 	0xb73f61df4bb738deull, 0x3b5b89dbcf3e9361ull, 0xb3245018f0e2427aull };
-constexpr StreamHashes kBravo{ 0xf0ca9e5d20fbc424ull, 0xa1a022d1caaa692cull, 0xb1cc020bf1735062ull,
+constexpr StreamHashes kBravo{ 0xf880642af7a2b8bdull, 0xa1a022d1caaa692cull, 0xb1cc020bf1735062ull,
 	0xc2fd7573643e66b5ull, 0x844be2b8836c91a5ull, 0xe5bd0d2a90980d48ull };
-constexpr StreamHashes kCharlie{ 0xdf71355501b0f4ecull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0x7018103a93ee23afull };
-constexpr StreamHashes kDelta{ 0x67f919b5f5578855ull, 0x230fef91e68d4c3cull, 0x1696f56b23947cb4ull,
+constexpr StreamHashes kCharlie{ 0x34a31e04bc0cdd63ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0xd4bbb61a31c1220aull };
+constexpr StreamHashes kDelta{ 0x871136e24f45fd28ull, 0x230fef91e68d4c3cull, 0x1696f56b23947cb4ull,
 	0xccd97b8938eeaf83ull, 0xa2311db0a78ab8b8ull, 0x1fb6ed8cb484b7d8ull };
 
 constexpr uint32_t kTdmTicks = 1500;
@@ -772,7 +772,10 @@ TEST_SUITE("host-client-stream") {
 		CHECK(a.shot_count > 0u);
 		CHECK(a.sample_count > 0u);
 		CHECK(a.reports >= 2u);
-		CHECK(cs.refused);
+		CHECK_FALSE(cs.refused);
+		CHECK(cs.kicked);
+		CHECK(cs.kick_reason == net::KickReason::Weapon);
+		CHECK(cs.mismatch_components == net::mismatch_bits::kWeapon);
 		check_hashes(a, kAlpha);
 		check_hashes(b, kBravo);
 		check_hashes(c, kCharlie);

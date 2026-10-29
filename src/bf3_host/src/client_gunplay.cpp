@@ -178,7 +178,7 @@ void ClientGunplay::Emit::emitted(const sim::Command &p_command, const sim::weap
 	}
 }
 
-std::optional<std::string> ClientGunplay::match_info(const net::MatchInfo &p_match, const SharedLevel &p_level) {
+std::optional<GunplayRefusal> ClientGunplay::match_info(const net::MatchInfo &p_match, const SharedLevel &p_level) {
 	if (p_match.weapon_hash == 0) {
 		return std::nullopt;
 	}
@@ -187,27 +187,27 @@ std::optional<std::string> ClientGunplay::match_info(const net::MatchInfo &p_mat
 		core::Result<std::shared_ptr<const ClientGunplayInputs>> own = client_gunplay_inputs(p_level);
 		if (!own) {
 			++weapon_hash_mismatch_;
-			return "weapon table mismatch (" + own.error().message + ")";
+			return GunplayRefusal{ net::mismatch_bits::kWeapon, "weapon table mismatch (" + own.error().message + ")" };
 		}
 		inputs_ = *own;
 	}
 	const ClientGunplayInputs *gp = inputs_.get();
 	if (gp == nullptr || gp->table == nullptr || gp->capsules == nullptr || !core::gameplay::capsule_pose_table_valid(*gp->capsules)) {
 		++weapon_hash_mismatch_;
-		return "weapon table mismatch (this client has no weapon table)";
+		return GunplayRefusal{ net::mismatch_bits::kWeapon, "weapon table mismatch (this client has no weapon table)" };
 	}
 	core::Result<std::shared_ptr<const sim::weapons::WeaponTable>> table = build_client_weapon_table(*gp, config_.mechanics_cfg, p_match.weapon_flags);
 	if (!table) {
 		++weapon_hash_mismatch_;
-		return "weapon table mismatch (" + table.error().message + ")";
+		return GunplayRefusal{ net::mismatch_bits::kWeapon, "weapon table mismatch (" + table.error().message + ")" };
 	}
 	if (client_weapon_hash(**table, *gp->capsules) != p_match.weapon_hash) {
 		++weapon_hash_mismatch_;
-		return "weapon table mismatch";
+		return GunplayRefusal{ net::mismatch_bits::kWeapon, "weapon table mismatch" };
 	}
 	if (p_match.kit_hash != 0 && p_match.kit_hash != gp->kits.hash) {
 		++kit_hash_mismatch_;
-		return "kit table mismatch";
+		return GunplayRefusal{ net::mismatch_bits::kKit, "kit table mismatch" };
 	}
 	table_ = *table;
 	match_seed_ = p_match.match_seed;
@@ -224,7 +224,7 @@ std::optional<std::string> ClientGunplay::match_info(const net::MatchInfo &p_mat
 	pc.extrapolate_max_ms = config_.extrapolate_max_ms;
 	core::Result<std::unique_ptr<ClientProjectiles>> p = ClientProjectiles::create(table_, gp->capsules, match_seed_, pc);
 	if (!p) {
-		return "weapon table mismatch (" + p.error().message + ")";
+		return GunplayRefusal{ net::mismatch_bits::kWeapon, "weapon table mismatch (" + p.error().message + ")" };
 	}
 	projectiles_ = std::move(*p);
 	on_ = true;

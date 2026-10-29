@@ -43,10 +43,15 @@ core::Status OwnPrediction::init(const sim::CollisionWorld &p_world, const sim::
 	return core::Status::success();
 }
 
-void OwnPrediction::match_started(uint64_t p_server_motor_hash, uint64_t p_now) {
+bool OwnPrediction::motor_matches(uint64_t p_server_motor_hash) {
 	if (p_server_motor_hash != motor_hash_) {
 		++motor_hash_mismatch_;
+		return false;
 	}
+	return true;
+}
+
+void OwnPrediction::match_started(uint64_t p_now) {
 	last_tick_ns_ = p_now;
 }
 

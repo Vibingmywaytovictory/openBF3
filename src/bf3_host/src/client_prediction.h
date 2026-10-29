@@ -22,7 +22,9 @@ public:
 			config_(p_config), clock_(r_clock), input_(r_input), gunplay_(r_gunplay) {}
 
 	core::Status init(const sim::CollisionWorld &p_world, const sim::MotorParams &p_motor);
-	void match_started(uint64_t p_server_motor_hash, uint64_t p_now);
+	uint64_t motor_hash() const { return motor_hash_; }
+	bool motor_matches(uint64_t p_server_motor_hash);
+	void match_started(uint64_t p_now);
 	void attach_weapons(sim::WeaponLane *p_lane) { ring_->attach_weapons(p_lane); }
 	void discard_after(sim::Tick p_tick) { ring_->discard_after(p_tick); }
 
