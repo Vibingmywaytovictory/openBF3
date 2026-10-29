@@ -135,7 +135,7 @@ struct ClientStats {
 	std::array<char, 128> last_error{};
 
 	bool refused = false;
-	bool server_disconnected = false;
+	bool transport_disconnected = false;
 	bool gunplay = false;
 	uint64_t weapon_hash_mismatch = 0;
 	uint64_t kit_hash_mismatch = 0;

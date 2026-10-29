@@ -128,8 +128,8 @@ bool ClientLink::poll(uint64_t p_now, net::NetSim::Datagram &r_datagram) {
 	const uint64_t next = in_.next_release_ns();
 	if (disconnect_pending_ && p_now >= disconnect_at_ && (next == 0 || next > disconnect_at_)) {
 		disconnect_pending_ = false;
-		drop("disconnected by the server");
-		server_disconnected_ = true;
+		drop("the connection to the server ended (a disconnect or a timeout)");
+		transport_disconnected_ = true;
 	}
 	return in_.poll(p_now, r_datagram);
 }
@@ -278,7 +278,7 @@ double ClientLink::transport_rtt_ms() const {
 void ClientLink::stats(ClientStats &r_stats) const {
 	r_stats.last_error = last_error_;
 	r_stats.refused = refused_;
-	r_stats.server_disconnected = server_disconnected_;
+	r_stats.transport_disconnected = transport_disconnected_;
 	r_stats.snapshots_received = snapshots_received_;
 	r_stats.snapshots_lost = snapshots_lost_;
 	r_stats.snapshots_late = snapshots_late_;

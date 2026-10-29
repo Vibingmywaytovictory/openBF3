@@ -2157,13 +2157,13 @@ void kicked_client_keeps_reason(std::string_view p_netsim) {
 	ClientSession second;
 	const core::Status second_started = second.start(cc, nullptr);
 	REQUIRE_MESSAGE(second_started.ok(), (second_started.ok() ? std::string() : second_started.error().message));
-	REQUIRE(wait_until([&] { return second.stats().server_disconnected; }, 10s, 16ms));
+	REQUIRE(wait_until([&] { return second.stats().transport_disconnected; }, 10s, 16ms));
 	const ClientStats kicked = second.stats();
 	CHECK_FALSE(kicked.connected);
 	CHECK(std::string(kicked.last_error.data()) == "kicked: server full");
 	CHECK_FALSE(second.lobby_match(held));
 	CHECK(first.stats().connected);
-	CHECK_FALSE(first.stats().server_disconnected);
+	CHECK_FALSE(first.stats().transport_disconnected);
 	CHECK(server.game_stats().clients == 1);
 	second.stop();
 	first.stop();

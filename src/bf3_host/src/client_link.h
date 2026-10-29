@@ -68,7 +68,7 @@ private:
 	bool connected_ = true;
 	std::array<char, 128> last_error_{};
 	bool refused_ = false;
-	bool server_disconnected_ = false;
+	bool transport_disconnected_ = false;
 	bool disconnect_pending_ = false;
 	uint64_t disconnect_at_ = 0;
 
