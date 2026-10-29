@@ -597,6 +597,13 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 								dst[i] += ch[chn][i] * g * st.cut_fade_at(i);
 							}
 						}
+						if (dst != nullptr && c.to_bus && st.metering) {
+							float peak = 0.0f;
+							for (uint32_t i = 0; i < p_frames; ++i) {
+								peak = std::max(peak, std::fabs(ch[chn][i]));
+							}
+							st.stats.out_peak = std::max(st.stats.out_peak, peak * std::max(ps.gain_prev, target));
+						}
 						if (dst != nullptr && c.to_bus) {
 							const float g0 = (ps.gain_prev + (target - ps.gain_prev) / float(p_frames)) * st.cut_fade_at(0);
 							st.edge[chn] += ch[chn][p_frames - 1] * target * st.cut_fade_at(p_frames - 1);
@@ -857,6 +864,14 @@ const PatchInstanceStats &PatchInstance::stats() const {
 
 void PatchInstance::set_hdr_window(const HdrVoiceWindow &p_window) {
 	state_->hdr = p_window;
+}
+
+void PatchInstance::set_metering(bool p_on) {
+	state_->metering = p_on;
+}
+
+void PatchInstance::reset_out_peak() {
+	state_->stats.out_peak = 0.0f;
 }
 
 VoiceCullInfo PatchInstance::cull_info() const {

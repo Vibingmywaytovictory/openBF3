@@ -145,6 +145,7 @@ struct MixerCutEvent {
 	float step = 0.0f;
 	float loudness_db = 0.0f;
 	float distance_m = 0.0f;
+	float peak = 0.0f;
 	uint8_t reason = 0;
 	uint16_t scope = core::audio::kNoScope;
 	uint32_t count = 0;
@@ -175,6 +176,17 @@ struct MixerCutStats {
 	std::atomic<float> pan_step_max{ 0.0f };
 };
 inline constexpr std::array<double, 7> kGapEdgesMs = { 5.0, 10.0, 15.0, 20.0, 30.0, 50.0, 100.0 };
+inline constexpr std::array<float, 6> kLimitEdgesDb = { -0.1f, -1.0f, -3.0f, -6.0f, -10.0f, -20.0f };
+inline constexpr size_t kMeteredBuses = size_t(core::audio::MasterBus::Unknown);
+
+struct MixerLevels {
+	uint64_t blocks = 0;
+	std::array<float, kMeteredBuses> bus_peak{};
+	std::array<double, kMeteredBuses> bus_energy{};
+	float pre_limit_peak = 0.0f;
+	double pre_limit_energy = 0.0;
+	std::array<uint64_t, kLimitEdgesDb.size() + 1> limit_blocks{};
+};
 const char *mixer_cut_kind_name(MixerCutKind p_kind);
 
 class MixerCore {
@@ -198,6 +210,9 @@ public:
 	const MixerCutStats &cut_stats() const;
 	void record_cuts(bool p_on);
 	size_t poll_cuts(std::span<MixerCutEvent> r_out);
+
+	void meter(bool p_on);
+	MixerLevels levels() const;
 
 	MixerCore(const MixerCore &) = delete;
 	MixerCore &operator=(const MixerCore &) = delete;

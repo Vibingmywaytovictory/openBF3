@@ -37,4 +37,7 @@ struct OnsetSpacing {
 };
 OnsetSpacing onset_spacing(std::span<const uint64_t> p_onsets, BurstWindow p_window, double p_expected_frames);
 
+inline constexpr double kNoLoudness = -200.0;
+
+double integrated_loudness_lufs(std::span<const float> p_interleaved_stereo);
 }

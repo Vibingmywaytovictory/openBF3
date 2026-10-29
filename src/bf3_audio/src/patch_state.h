@@ -201,6 +201,7 @@ struct PatchInstance::State {
 	PatchHaptics haptics;
 	uint16_t stop_register = core::audio::kNoRegister;
 	bool stop_seen = false;
+	bool metering = false;
 	bool any_event = false;
 
 	std::array<detail::PendingEvent, kMaxEventsPerBlock> events{};

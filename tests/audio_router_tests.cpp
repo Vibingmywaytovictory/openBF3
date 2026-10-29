@@ -1007,6 +1007,9 @@ TEST_SUITE("audio-router") {
 		CHECK(std::count_if(cuts.begin(), cuts.end(),
 					  [](const ba::MixerCutEvent &e) { return e.kind == ba::MixerCutKind::Join; }) == 4);
 		CHECK(r.mixer->stats().starved_voices.load() == 0);
+		r.idle(int(ba::kOneShotForgetSeconds * 60.0) + 60);
+		CHECK(r.pool->live() == 0);
+		CHECK(r.pool->forgotten() == 0);
 	}
 
 	TEST_CASE("sound fate ledger: categories from the weapon table, every fate and drop reason, a full table") {

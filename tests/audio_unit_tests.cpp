@@ -1576,6 +1576,28 @@ TEST_SUITE("audio-dsp") {
 		CHECK(sp.count == clicks.size());
 		CHECK(sp.max_deviation_frames <= 4.0);
 	}
+	TEST_CASE("integrated loudness (BS.1770): a -20 dBFS 997 Hz sine reads -23.0 LUFS on one channel, -20.0 on two") {
+		const auto sine = [](float p_amp, bool p_left, bool p_right, double p_seconds) {
+			std::vector<float> x(size_t(p_seconds * 48000.0) * 2);
+			for (size_t i = 0; i < x.size() / 2; ++i) {
+				const float v = p_amp * float(std::sin(2.0 * 3.14159265358979323846 * 997.0 * double(i) / 48000.0));
+				x[i * 2] = p_left ? v : 0.0f;
+				x[i * 2 + 1] = p_right ? v : 0.0f;
+			}
+			return x;
+		};
+		CHECK(ba::integrated_loudness_lufs(sine(0.1f, true, false, 5.0)) == doctest::Approx(-23.01).epsilon(0.004));
+		CHECK(ba::integrated_loudness_lufs(sine(0.1f, true, true, 5.0)) == doctest::Approx(-20.0).epsilon(0.005));
+		std::vector<float> gated = sine(0.1f, true, false, 5.0);
+		const std::vector<float> quiet = sine(0.001f, true, false, 5.0);
+		gated.insert(gated.end(), quiet.begin(), quiet.end());
+		const double with_quiet = ba::integrated_loudness_lufs(gated);
+		CHECK(with_quiet > -23.3);
+		CHECK(with_quiet < -23.0);
+		CHECK(ba::integrated_loudness_lufs(std::vector<float>(48000 * 2, 0.0f)) == ba::kNoLoudness);
+		CHECK(ba::integrated_loudness_lufs(std::vector<float>(100, 0.5f)) == ba::kNoLoudness);
+	}
+
 	TEST_CASE("band energy of sines and the high-pass prediction on white noise") {
 		std::vector<float> lo(48000), hi(48000);
 		for (size_t i = 0; i < lo.size(); ++i) {

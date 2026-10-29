@@ -222,4 +222,58 @@ OnsetSpacing onset_spacing(std::span<const uint64_t> p_onsets, BurstWindow p_win
 	return out;
 }
 
+double integrated_loudness_lufs(std::span<const float> p_interleaved_stereo) {
+	constexpr double kShelfB[3] = { 1.53512485958697, -2.69169618940638, 1.19839281085285 };
+	constexpr double kShelfA[2] = { -1.69065929318241, 0.73248077421585 };
+	constexpr double kHighB[3] = { 1.0, -2.0, 1.0 };
+	constexpr double kHighA[2] = { -1.99004745483398, 0.99007225036621 };
+	constexpr size_t kBlock = 19200;
+	constexpr size_t kHop = 4800;
+	const size_t frames = p_interleaved_stereo.size() / 2;
+	if (frames < kBlock) {
+		return kNoLoudness;
+	}
+	std::vector<double> power(frames, 0.0);
+	for (size_t c = 0; c < 2; ++c) {
+		double s1 = 0.0, s2 = 0.0, h1 = 0.0, h2 = 0.0;
+		for (size_t i = 0; i < frames; ++i) {
+			const double x = double(p_interleaved_stereo[i * 2 + c]);
+			const double y = kShelfB[0] * x + s1;
+			s1 = kShelfB[1] * x - kShelfA[0] * y + s2;
+			s2 = kShelfB[2] * x - kShelfA[1] * y;
+			const double z = kHighB[0] * y + h1;
+			h1 = kHighB[1] * y - kHighA[0] * z + h2;
+			h2 = kHighB[2] * y - kHighA[1] * z;
+			power[i] += z * z;
+		}
+	}
+	std::vector<double> prefix(frames + 1, 0.0);
+	for (size_t i = 0; i < frames; ++i) {
+		prefix[i + 1] = prefix[i] + power[i];
+	}
+	std::vector<double> blocks;
+	for (size_t b = 0; b + kBlock <= frames; b += kHop) {
+		blocks.push_back((prefix[b + kBlock] - prefix[b]) / double(kBlock));
+	}
+	const auto lufs = [](double p_mean_square) {
+		return p_mean_square > 0.0 ? -0.691 + 10.0 * std::log10(p_mean_square) : kNoLoudness;
+	};
+	const auto gated_mean = [&](double p_gate) {
+		double sum = 0.0;
+		size_t n = 0;
+		for (const double z : blocks) {
+			if (lufs(z) > p_gate) {
+				sum += z;
+				++n;
+			}
+		}
+		return n > 0 ? sum / double(n) : 0.0;
+	};
+	const double absolute = gated_mean(-70.0);
+	if (!(absolute > 0.0)) {
+		return kNoLoudness;
+	}
+	const double relative = gated_mean(lufs(absolute) - 10.0);
+	return relative > 0.0 ? lufs(relative) : kNoLoudness;
+}
 }

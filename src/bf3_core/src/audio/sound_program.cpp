@@ -291,30 +291,13 @@ struct Compiler {
 			return MasterBus::Unknown;
 		}
 		std::optional<EbxInstance> bus = ref->kind == EbxRef::Kind::Internal ? part.resolve(*ref) : db.resolve(part, *ref);
-		static constexpr std::pair<std::string_view, MasterBus> kNames[] = {
-			{ "GameMixMain", MasterBus::GameMixMain },
-			{ "Reverb", MasterBus::Reverb },
-			{ "GameMixAlt", MasterBus::GameMixAlt },
-			{ "DirectOut", MasterBus::DirectOut },
-			{ "Dialog", MasterBus::Dialog },
-			{ "LFE", MasterBus::Lfe },
-			{ "Music", MasterBus::Music },
-			{ "Movies", MasterBus::Movies },
-			{ "LoadingMusic", MasterBus::LoadingMusic },
-			{ "NarrVoice", MasterBus::NarrVoice },
-		};
 		if (bus) {
 			if (ref->kind == EbxRef::Kind::External) {
 				note_dependency(ref->partition);
 			}
 			BF3_TRY(budget.charge_type(bus->data()));
 			const std::string_view name = bus->get("BusName") ? bus->get("BusName")->as_str().value_or("") : std::string_view();
-			for (const auto &[n, b] : kNames) {
-				if (n == name) {
-					return b;
-				}
-			}
-			return MasterBus::Unknown;
+			return master_bus_of_name(name);
 		}
 
 		static constexpr std::pair<std::string_view, MasterBus> kGuids[] = {

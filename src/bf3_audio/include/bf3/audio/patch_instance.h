@@ -93,6 +93,7 @@ struct PatchInstanceStats {
 	uint64_t held_triggers = 0;
 	uint64_t pan_steps = 0;
 	float pan_step_max = 0.0f;
+	float out_peak = 0.0f;
 };
 
 struct HdrVoiceWindow {
@@ -159,6 +160,8 @@ public:
 	const core::audio::SoundProgram &program() const;
 	const PatchInstanceStats &stats() const;
 	void set_hdr_window(const HdrVoiceWindow &p_window);
+	void set_metering(bool p_on);
+	void reset_out_peak();
 	VoiceCullInfo cull_info() const;
 
 	InstanceEdge edge() const;

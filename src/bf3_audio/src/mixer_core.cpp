@@ -130,6 +130,14 @@ struct MixerCore::Impl {
 	MixerCutStats cut_stats;
 	SpscRing<MixerCutEvent> cut_ring{ 4096 };
 	std::atomic<bool> cut_record{ false };
+	std::atomic<bool> metering{ false };
+	std::atomic<uint64_t> level_blocks{ 0 };
+	std::array<std::atomic<float>, kMeteredBuses> level_bus_peak{};
+	std::array<std::atomic<double>, kMeteredBuses> level_bus_energy{};
+	std::atomic<float> level_pre_peak{ 0.0f };
+	std::atomic<double> level_pre_energy{ 0.0 };
+	std::array<std::atomic<uint64_t>, kLimitEdgesDb.size() + 1> level_limit_blocks{};
+	void meter_block(const BusBuffers &p_buses);
 	uint64_t block_first = 0;
 	void note_cut(MixerCutKind p_kind, const InstanceSlot &p_slot, float p_step);
 	void note_event(MixerCutKind p_kind, InstanceHandle p_handle, float p_step, const PatchInstance *p_instance,
@@ -279,6 +287,7 @@ bool MixerCore::Impl::join(const MixerCommand &p_start, uint64_t p_frame, MixerS
 	const InstanceHandle previous = s->handle;
 	note_event(MixerCutKind::Request, p_start.handle, 0.0f, p_start.instance, 0, s->scope);
 	note_event(MixerCutKind::Join, previous, 0.0f, s->instance, 0, s->scope, p_start.handle);
+	s->instance->reset_out_peak();
 	MixerFeedback fb;
 	fb.handle = previous;
 	fb.frame = block_first;
@@ -473,6 +482,7 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 			continue;
 		}
 		const PatchInstanceStats before = s.instance->stats();
+		s.instance->set_metering(m.metering.load(std::memory_order_relaxed));
 		s.instance->process_block(m.buses);
 		const PatchInstanceStats &after = s.instance->stats();
 		{
@@ -550,6 +560,9 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 		}
 		m.block[size_t(i) * 2] = l * m.output_gain;
 		m.block[size_t(i) * 2 + 1] = r * m.output_gain;
+	}
+	if (m.metering.load(std::memory_order_relaxed)) {
+		m.meter_block(m.buses);
 	}
 	m.apply_limiter();
 	if (m.tap != nullptr) {
@@ -891,6 +904,7 @@ void MixerCore::Impl::note_event(MixerCutKind p_kind, InstanceHandle p_handle, f
 		const VoiceCullInfo info = p_instance->cull_info();
 		e.loudness_db = info.loudness_db;
 		e.distance_m = info.distance_m;
+		e.peak = p_instance->stats().out_peak;
 		const std::string &name = p_instance->program().name;
 		const size_t n = std::min(name.size(), sizeof(e.program) - 1);
 		std::memcpy(e.program, name.data(), n);
@@ -985,12 +999,76 @@ void MixerCore::Impl::apply_limiter() {
 	if (lowest < 0.98855f) {
 		cut_stats.limit_blocks.fetch_add(1, std::memory_order_relaxed);
 	}
+	if (metering.load(std::memory_order_relaxed)) {
+		const float db = lowest > 0.0f ? 20.0f * std::log10(lowest) : -200.0f;
+		size_t bucket = 0;
+		while (bucket < kLimitEdgesDb.size() && db < kLimitEdgesDb[bucket]) {
+			++bucket;
+		}
+		if (bucket > 0) {
+			level_limit_blocks[bucket].fetch_add(1, std::memory_order_relaxed);
+		}
+	}
 	if (lowest < cut_stats.limit_min_gain.load(std::memory_order_relaxed)) {
 		cut_stats.limit_min_gain.store(lowest, std::memory_order_relaxed);
 	}
 	if (over_out > 0) {
 		cut_stats.overs_out.fetch_add(over_out, std::memory_order_relaxed);
 	}
+}
+
+void MixerCore::Impl::meter_block(const BusBuffers &p_buses) {
+	for (size_t b = 0; b < kMeteredBuses; ++b) {
+		float peak = 0.0f;
+		double energy = 0.0;
+		for (size_t c = 0; c < 2; ++c) {
+			const float *x = p_buses.channels[b][c];
+			for (uint32_t i = 0; i < kBlockFrames; ++i) {
+				const float v = x[i] * bus_gain[b];
+				peak = std::max(peak, std::fabs(v));
+				energy += double(v) * double(v);
+			}
+		}
+		if (peak > level_bus_peak[b].load(std::memory_order_relaxed)) {
+			level_bus_peak[b].store(peak, std::memory_order_relaxed);
+		}
+		level_bus_energy[b].store(
+				level_bus_energy[b].load(std::memory_order_relaxed) + energy, std::memory_order_relaxed);
+	}
+	float peak = 0.0f;
+	double energy = 0.0;
+	for (size_t i = 0; i < size_t(kBlockFrames) * 2; ++i) {
+		peak = std::max(peak, std::fabs(block[i]));
+		energy += double(block[i]) * double(block[i]);
+	}
+	if (peak > level_pre_peak.load(std::memory_order_relaxed)) {
+		level_pre_peak.store(peak, std::memory_order_relaxed);
+	}
+	level_pre_energy.store(level_pre_energy.load(std::memory_order_relaxed) + energy, std::memory_order_relaxed);
+	level_blocks.fetch_add(1, std::memory_order_release);
+}
+
+void MixerCore::meter(bool p_on) {
+	impl_->metering.store(p_on, std::memory_order_relaxed);
+}
+
+MixerLevels MixerCore::levels() const {
+	const Impl &m = *impl_;
+	MixerLevels l;
+	l.blocks = m.level_blocks.load(std::memory_order_acquire);
+	for (size_t b = 0; b < kMeteredBuses; ++b) {
+		l.bus_peak[b] = m.level_bus_peak[b].load(std::memory_order_relaxed);
+		l.bus_energy[b] = m.level_bus_energy[b].load(std::memory_order_relaxed);
+	}
+	l.pre_limit_peak = m.level_pre_peak.load(std::memory_order_relaxed);
+	l.pre_limit_energy = m.level_pre_energy.load(std::memory_order_relaxed);
+	uint64_t limited = 0;
+	for (size_t k = 1; k < l.limit_blocks.size(); ++k) {
+		l.limit_blocks[k] = m.level_limit_blocks[k].load(std::memory_order_relaxed);
+		limited += l.limit_blocks[k];
+	}
+	l.limit_blocks[0] = l.blocks > limited ? l.blocks - limited : 0;
+	return l;
 }
 
 const char *mixer_cut_kind_name(MixerCutKind p_kind) {

@@ -390,6 +390,29 @@ audio::SoundFateTotals Bf3GameAudio::sound_fates() const {
 	return impl_->ledger.totals();
 }
 
+bool Bf3GameAudio::one_shot_tracked(audio::InstanceHandle p_handle) const {
+	return impl_->pool != nullptr && impl_->pool->contains(p_handle);
+}
+
+uint64_t Bf3GameAudio::one_shot_join_requests() const {
+	return impl_->pool != nullptr ? impl_->pool->join_requests() : 0;
+}
+
+std::vector<std::string> Bf3GameAudio::weapon_patches(bool p_explosive, uint32_t p_one_shot_event) const {
+	std::vector<std::string> out;
+	if (!impl_->table) {
+		return out;
+	}
+	for (const ba::WeaponAudioDef &d : impl_->table->defs) {
+		if (d.program && d.explosive == p_explosive &&
+				(p_one_shot_event == 0 || d.one_shot_event == p_one_shot_event) &&
+				std::find(out.begin(), out.end(), d.program->name) == out.end()) {
+			out.push_back(d.program->name);
+		}
+	}
+	return out;
+}
+
 std::string_view Bf3GameAudio::scope_name(uint16_t p_scope) const {
 	const Impl &m = *impl_;
 	return m.a3.scopes && p_scope < m.a3.scopes->scopes.size() ? std::string_view(m.a3.scopes->scopes[p_scope].name)

@@ -943,9 +943,17 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 	}
 	if (m.audio_ingame_on && r_game.audio != nullptr && !m.finished) {
 		if (m.audio_ingame == nullptr) {
+			AudioIngamePhase phase = AudioIngamePhase::Mix;
+			if (!parse_audio_ingame_phase(user_arg_value("audio-ingame-phase"), phase)) {
+				UtilityFunctions::print(to_godot("[audio-ingame] bad --audio-ingame-phase=" +
+						user_arg_value("audio-ingame-phase") + ": mix or pool"));
+				m.finished = true;
+				finish(2);
+				return true;
+			}
 			m.audio_ingame = std::unique_ptr<AudioIngameCheck, void (*)(AudioIngameCheck *)>(
 					new AudioIngameCheck(user_arg_value("audio-ingame-check"),
-							std::atof(user_arg_value("audio-ingame-seconds").c_str())),
+							std::atof(user_arg_value("audio-ingame-seconds").c_str()), phase),
 					&delete_part<AudioIngameCheck>);
 		}
 		AudioIngameIo io;
@@ -953,6 +961,40 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		io.time_to_respawn = r_game.hud_model.spawn_logic.time_to_respawn;
 		io.hold_fire = [this](bool p_held) { mapper_.script_hold(InputMapper::WeaponAction::Fire, p_held); };
 		io.reload = [this] { mapper_.script_press(InputMapper::WeaponAction::Reload); };
+		io.grenade = [this] { mapper_.script_press(InputMapper::WeaponAction::Grenade); };
+		io.pick_primary = [this, &r_game, &m](std::span<const std::string> p_sounds) {
+			const std::shared_ptr<const host::SharedLevel> level = shared_level();
+			const host::LoadoutKit *kit = level != nullptr && level->gunplay != nullptr
+					? level->gunplay->loadouts.kit(m.own_team, m.spawn_kit)
+					: nullptr;
+			if (kit == nullptr || r_game.gunplay == nullptr) {
+				return false;
+			}
+			for (const host::LoadoutItem &item : kit->slots[size_t(core::gameplay::WeaponSlot::Primary)]) {
+				if (item.def >= level->gunplay->defs.size() ||
+						std::find(p_sounds.begin(), p_sounds.end(), level->gunplay->defs[item.def].sound) ==
+								p_sounds.end()) {
+					continue;
+				}
+				DeployPick pick;
+				pick.kit = m.spawn_kit;
+				pick.slot = uint8_t(host::LoadoutKitItem::Primary);
+				pick.item = item.identifier;
+				const bf3::core::Result<net::LoadoutRequest> q = deploy_loadout_request(pick, level->gunplay->loadouts,
+						r_game.gunplay->kits, m.own_team, m.own_loadout_choices()[pick.kit]);
+				if (!q) {
+					continue;
+				}
+				client_->send_loadout_request(*q);
+				if (const bf3::core::Result<host::Loadout> l = host::resolve_loadout(level->gunplay->loadouts,
+							r_game.gunplay->kits, m.own_team, pick.kit, m.own_loadout_choices()[pick.kit])) {
+					r_game.want_catalog_weapons(l->defs);
+				}
+				UtilityFunctions::print(to_godot("[audio-ingame] own primary: " + item.unlock));
+				return true;
+			}
+			return false;
+		};
 		io.deploy = [this] {
 			scripted_ui_key(KEY_ENTER, true);
 			scripted_ui_key(KEY_ENTER, false);

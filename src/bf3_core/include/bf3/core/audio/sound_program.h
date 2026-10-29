@@ -9,6 +9,7 @@
 #include "bf3/core/ids.h"
 #include "bf3/core/result.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -91,6 +92,22 @@ enum class MasterBus : uint8_t {
 	NarrVoice,
 	Unknown,
 };
+
+inline constexpr std::string_view kMasterBusNames[] = { "GameMixMain", "Reverb", "GameMixAlt", "DirectOut", "Dialog",
+	"LFE", "Music", "Movies", "LoadingMusic", "NarrVoice", "Unknown" };
+
+constexpr std::string_view master_bus_name(MasterBus p_bus) {
+	return kMasterBusNames[std::min<size_t>(size_t(p_bus), size_t(MasterBus::Unknown))];
+}
+
+constexpr MasterBus master_bus_of_name(std::string_view p_name) {
+	for (size_t b = 0; b < size_t(MasterBus::Unknown); ++b) {
+		if (kMasterBusNames[b] == p_name) {
+			return MasterBus(b);
+		}
+	}
+	return MasterBus::Unknown;
+}
 
 constexpr uint32_t fourcc(const char (&p_text)[5]) {
 	return (uint32_t(uint8_t(p_text[0])) << 24) | (uint32_t(uint8_t(p_text[1])) << 16) | (uint32_t(uint8_t(p_text[2])) << 8) |

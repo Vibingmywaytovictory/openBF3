@@ -11,6 +11,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -40,11 +41,21 @@ struct AudioIngameAim {
 inline constexpr std::array<AudioIngameAim, 10> kAudioIngameAims{ { { 0, -70 }, { 0, -35 }, { 0, -5 }, { 90, -5 },
 		{ 180, -5 }, { 270, -5 }, { 45, -20 }, { 135, -50 }, { 225, 15 }, { 315, -10 } } };
 
+enum class AudioIngamePhase : uint8_t { Mix, Pool };
+
+bool parse_audio_ingame_phase(std::string_view p_text, AudioIngamePhase &r_phase);
+
+inline constexpr double kAudioIngameGhostSeconds = 1.0;
+inline constexpr double kAudioIngameLimitedBlocksShare = 0.01;
+inline constexpr float kAudioIngameLimitFloorDb = -1.0f;
+
 struct AudioIngameIo {
 	bool alive = false;
 	float time_to_respawn = 0.0f;
 	std::function<void(bool)> hold_fire;
 	std::function<void()> reload;
+	std::function<void()> grenade;
+	std::function<bool(std::span<const std::string>)> pick_primary;
 	std::function<void()> deploy;
 	std::function<void(float, float)> view;
 	std::function<float()> yaw;
@@ -76,7 +87,7 @@ struct AudioCategoryCounts {
 
 class AudioIngameCheck {
 public:
-	AudioIngameCheck(std::string p_out_dir, double p_seconds);
+	AudioIngameCheck(std::string p_out_dir, double p_seconds, AudioIngamePhase p_phase);
 	~AudioIngameCheck();
 	AudioIngameCheck(const AudioIngameCheck &) = delete;
 	AudioIngameCheck &operator=(const AudioIngameCheck &) = delete;
@@ -94,10 +105,22 @@ private:
 	void note(const audio::MixerCutEvent &p_event, Bf3GameAudio &r_audio);
 	void script(double p_now_s, const AudioIngameIo &p_io);
 	void analyse(Bf3GameAudio &r_audio);
+	void analyse_mix(Bf3GameAudio &r_audio);
+	void analyse_pool(Bf3GameAudio &r_audio);
 	void row(const std::string &p_name, bool p_pass, const std::string &p_detail);
+	void mix_row(const std::string &p_name, bool p_pass, const std::string &p_detail);
 
 	std::string out_dir_;
 	double seconds_ = kAudioIngameSeconds;
+	AudioIngamePhase kind_ = AudioIngamePhase::Mix;
+	audio::MixerLevels levels_at_start_;
+	std::map<audio::InstanceHandle, double> refused_;
+	std::map<audio::InstanceHandle, float> sound_peaks_;
+	uint64_t pool_joins_at_start_ = 0;
+	uint32_t last_step_ = UINT32_MAX;
+	uint32_t grenades_ = 0;
+	bool primary_picked_ = false;
+	std::vector<std::string> step_patches_;
 	Phase phase_ = Phase::WaitSpawn;
 	double first_s_ = -1.0, spawn_s_ = -1.0, record_s_ = -1.0;
 	godot::Ref<godot::AudioEffectCapture> capture_;
