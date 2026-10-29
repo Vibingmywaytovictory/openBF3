@@ -3,6 +3,13 @@
 #include "bf3/net/enet_host.h"
 #include "bf3/net/loopback_ping.h"
 
+#include <chrono>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <numeric>
+#include <vector>
+
 TEST_CASE("net: ENet version is the pinned 1.3.18") {
 	CHECK(bf3::net::enet_version() == "1.3.18");
 }
@@ -37,3 +44,97 @@ TEST_CASE("net: two servers get distinct free ports") {
 	CHECK(a->bound_port() != 0);
 	CHECK(a->bound_port() != b->bound_port());
 }
+
+namespace {
+
+using bf3::net::Host;
+
+struct HostPair {
+	std::unique_ptr<Host> server;
+	std::unique_ptr<Host> client;
+	uint32_t server_peer = 0;
+	uint32_t client_peer = 0;
+	std::vector<Host::Event> server_events;
+	std::vector<Host::Event> client_events;
+
+	void service() {
+		Host::Event ev;
+		while (server->service(1, ev) > 0) {
+			server_events.push_back(std::move(ev));
+		}
+		while (client->service(1, ev) > 0) {
+			client_events.push_back(std::move(ev));
+		}
+	}
+
+	bool until(const std::function<bool()> &p_done) {
+		const auto start = std::chrono::steady_clock::now();
+		while (!p_done()) {
+			if (std::chrono::steady_clock::now() - start > std::chrono::seconds(10)) {
+				return false;
+			}
+			service();
+		}
+		return true;
+	}
+
+	static size_t count(const std::vector<Host::Event> &p_events, Host::EventType p_type) {
+		size_t n = 0;
+		for (const Host::Event &e : p_events) {
+			n += e.type == p_type ? 1 : 0;
+		}
+		return n;
+	}
+};
+
+void connect_pair(HostPair &r_pair) {
+	std::string err;
+	r_pair.server = Host::create_server("127.0.0.1", 0, 4, 3, &err);
+	REQUIRE_MESSAGE(r_pair.server, err);
+	r_pair.client = Host::create_client(3, &err);
+	REQUIRE_MESSAGE(r_pair.client, err);
+	const int peer = r_pair.client->connect("127.0.0.1", r_pair.server->bound_port());
+	REQUIRE(peer >= 0);
+	r_pair.client_peer = uint32_t(peer);
+	REQUIRE(r_pair.until([&] {
+		return HostPair::count(r_pair.server_events, Host::EventType::Connect) == 1 &&
+				HostPair::count(r_pair.client_events, Host::EventType::Connect) == 1;
+	}));
+	for (const Host::Event &e : r_pair.server_events) {
+		if (e.type == Host::EventType::Connect) {
+			r_pair.server_peer = e.peer;
+		}
+	}
+	r_pair.server_events.clear();
+	r_pair.client_events.clear();
+}
+
+std::vector<uint8_t> payload(size_t p_size, uint8_t p_seed) {
+	std::vector<uint8_t> v(p_size);
+	std::iota(v.begin(), v.end(), p_seed);
+	return v;
+}
+
+}
+
+TEST_CASE("net: the server disconnects a kicked peer") {
+	HostPair pair;
+	connect_pair(pair);
+	const std::vector<uint8_t> kick = payload(40, 7);
+	REQUIRE(pair.server->send(pair.server_peer, 1, kick.data(), kick.size(), Host::SendMode::Reliable));
+	REQUIRE(pair.server->disconnect_later(pair.server_peer));
+	CHECK_FALSE(pair.server->peer_connected(pair.server_peer));
+	CHECK_FALSE(pair.server->send(pair.server_peer, 1, kick.data(), kick.size(), Host::SendMode::Reliable));
+	CHECK_FALSE(pair.server->disconnect_later(pair.server_peer));
+	REQUIRE(pair.until([&] {
+		return HostPair::count(pair.client_events, Host::EventType::Disconnect) == 1 &&
+				HostPair::count(pair.server_events, Host::EventType::Disconnect) == 1;
+	}));
+	REQUIRE(pair.client_events.size() == 2);
+	CHECK(pair.client_events[0].type == Host::EventType::Receive);
+	CHECK(pair.client_events[0].data == kick);
+	CHECK(pair.client_events[1].type == Host::EventType::Disconnect);
+	CHECK(pair.server->connected_peers() == 0);
+	CHECK(pair.client->connected_peers() == 0);
+}
+

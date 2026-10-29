@@ -190,6 +190,29 @@ void Host::disconnect_all() {
 	enet_host_flush(h);
 }
 
+bool Host::disconnect_later(uint32_t p_peer) {
+	ENetHost *h = static_cast<ENetHost *>(host_);
+	if (p_peer >= h->peerCount || h->peers[p_peer].state != ENET_PEER_STATE_CONNECTED) {
+		return false;
+	}
+	enet_peer_disconnect_later(&h->peers[p_peer], 0);
+	return true;
+}
+
+bool Host::set_peer_timeout(uint32_t p_peer, uint32_t p_limit, uint32_t p_minimum_ms, uint32_t p_maximum_ms) {
+	ENetHost *h = static_cast<ENetHost *>(host_);
+	if (p_peer >= h->peerCount) {
+		return false;
+	}
+	enet_peer_timeout(&h->peers[p_peer], p_limit, p_minimum_ms, p_maximum_ms);
+	return true;
+}
+
+bool Host::peer_connected(uint32_t p_peer) const {
+	const ENetHost *h = static_cast<const ENetHost *>(host_);
+	return p_peer < h->peerCount && h->peers[p_peer].state == ENET_PEER_STATE_CONNECTED;
+}
+
 uint32_t Host::peer_rtt_ms(uint32_t p_peer) const {
 	const ENetHost *h = static_cast<const ENetHost *>(host_);
 	return p_peer < h->peerCount ? h->peers[p_peer].roundTripTime : 0;

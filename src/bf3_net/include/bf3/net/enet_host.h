@@ -42,8 +42,11 @@ public:
 	size_t max_unfragmented_bytes(uint32_t p_peer) const;
 	void flush();
 	void disconnect_all();
+	bool disconnect_later(uint32_t p_peer);
+	bool set_peer_timeout(uint32_t p_peer, uint32_t p_limit, uint32_t p_minimum_ms, uint32_t p_maximum_ms);
 	uint32_t peer_rtt_ms(uint32_t p_peer) const;
 	size_t connected_peers() const;
+	bool peer_connected(uint32_t p_peer) const;
 
 private:
 	Host() = default;
