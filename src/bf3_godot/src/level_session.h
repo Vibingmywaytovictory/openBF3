@@ -13,6 +13,7 @@
 #include "bf3/host/client_session.h"
 #include "bf3/host/level_load.h"
 #include "bf3/host/server_host.h"
+#include "bf3/host/server_level.h"
 #include "bf3/render/level_scene.h"
 
 #include <godot_cpp/classes/input_event.hpp>
@@ -140,6 +141,7 @@ protected:
 private:
 	void parse_args();
 	void run_loader();
+	bf3::core::Status start_scene(const bf3::host::LevelDatabase &p_db, bf3::core::Cache *p_cache, unsigned p_half);
 	void shutdown();
 	void on_plan_ready();
 	void build_environment(const bf3::render::SceneEnvironment &p_env);
@@ -231,6 +233,7 @@ private:
 	bool nav_overlay_ = false;
 	double shot_delay_ = 0.0;
 	std::shared_ptr<const bf3::host::BotLevel> bot_level_;
+	std::unique_ptr<bf3::host::ServerLevel> server_level_;
 	NavOverlayArrays nav_arrays_;
 	std::atomic<bool> nav_ready_{ false };
 	NavOverlay nav_draw_;
@@ -252,6 +255,7 @@ private:
 
 	void tdm_parse_args(std::string &r_error);
 	void tdm_load_options(bf3::host::SharedLoadOptions &r_options);
+	bool tdm_rules(bf3::host::ServerRules &r_rules) const;
 	void tdm_server_config(bf3::host::GameServerConfig &r_config);
 	void tdm_presented(uint64_t p_now_ns);
 	bool tdm_frame(uint64_t p_now_ns, double p_delta, godot::Camera3D *p_camera, bool p_free_camera);

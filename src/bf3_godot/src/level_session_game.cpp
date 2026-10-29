@@ -601,7 +601,7 @@ void Bf3LevelSession::game_server_config(host::GameServerConfig &r_game) {
 		}
 	}
 
-	if (bots_ > 0 && r_game.bots != nullptr) {
+	if (bots_ > 0 && r_game.bots != nullptr && r_game.rules.mode != host::MatchRulesConfig::Mode::Tdm) {
 		auto fill = std::make_shared<host::BotFillConfig>(*r_game.bots);
 		fill->count = 0;
 		r_game.bots = fill;

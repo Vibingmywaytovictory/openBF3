@@ -512,26 +512,32 @@ void Bf3LevelSession::tdm_load_options(host::SharedLoadOptions &r_options) {
 	}
 }
 
-void Bf3LevelSession::tdm_server_config(host::GameServerConfig &r_config) {
-	GameState &g = *game_;
+bool Bf3LevelSession::tdm_rules(host::ServerRules &r_rules) const {
+	if (!game_) {
+		return false;
+	}
+	const GameState &g = *game_;
 	const TdmOptions *options = g.tdm ? &g.tdm->options : (g.tdm_preview.on ? &g.tdm_preview.options : nullptr);
 	if (options == nullptr) {
-		return;
+		return false;
 	}
-	r_config.rules.mode = host::MatchRulesConfig::Mode::Tdm;
-	r_config.rules.deploy_screen = options->deploy_screen;
-	r_config.rules.revive = true;
-	r_config.rules.kill_limit_override = options->kill_limit;
-	r_config.rules.preround_override_s = options->preround_s;
-	r_config.rules.min_players_override = options->min_players;
-	r_config.rules.max_players = 32;
-	r_config.firefight = nullptr;
-	r_config.tdm_bots = nullptr;
-	if (bots_ > 0) {
-		auto bots = std::make_shared<host::TdmBotConfig>();
-		bots->count = std::min<uint32_t>(bots_, kTdmMaxBots);
-		bots->tuning_cfg = options->bot_tuning_cfg;
-		r_config.tdm_bots = bots;
+	r_rules.deploy_screen = options->deploy_screen;
+	r_rules.kill_limit = options->kill_limit;
+	r_rules.preround_s = options->preround_s;
+	r_rules.min_players = options->min_players;
+	r_rules.max_players = host::kListenMaxPlayers;
+	r_rules.bots = std::min<uint32_t>(bots_, kTdmMaxBots);
+	r_rules.bot_tuning_cfg = options->bot_tuning_cfg;
+	r_rules.respawn_s = g.respawn_s;
+	r_rules.dev_commands = true;
+	r_rules.seed = seed_;
+	return true;
+}
+
+void Bf3LevelSession::tdm_server_config(host::GameServerConfig &r_config) {
+	GameState &g = *game_;
+	if (r_config.rules.mode != host::MatchRulesConfig::Mode::Tdm) {
+		return;
 	}
 	if (!g.tdm) {
 		g.part_notes.push_back("[tdm] --tdm preview: " + std::to_string(r_config.tdm_bots != nullptr ? r_config.tdm_bots->count : 0u) +

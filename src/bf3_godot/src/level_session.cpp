@@ -340,104 +340,61 @@ void Bf3LevelSession::run_loader() {
 	const unsigned cores = std::max(2u, std::thread::hardware_concurrency());
 
 	const unsigned half = std::max(1u, cores / 2);
-	bf3::core::Result<host::LevelDatabase> db = host::open_level_database(*install, level_, mode_, 0, &progress_);
-	if (!db) {
-		fail(db.error().message);
-		return;
-	}
-	if (stop_.load(std::memory_order_acquire)) {
-		return;
-	}
-	if (scene_) {
-		progress_.begin(host::LoadStage::Meshes);
-		uint64_t t0 = now_us();
-		bf3::core::Result<lvl::MeshCensus> census = lvl::mesh_census(*db->level, *db->world);
-		if (!census) {
-			fail("census: " + census.error().message);
-			return;
-		}
-		timings_.seconds_census = double(now_us() - t0) / 1e6;
-		t0 = now_us();
-		render::ScenePlanOptions plan_options;
-		plan_options.look = look_mode_;
-		bf3::core::Result<render::LevelScenePlan> plan = render::plan_level_scene(*db->level, *db->world, *census, plan_options);
-		if (!plan) {
-			fail("scene plan: " + plan.error().message);
-			return;
-		}
-		timings_.seconds_plan = double(now_us() - t0) / 1e6;
-		auto shared_plan = std::make_shared<const render::LevelScenePlan>(std::move(*plan));
-		{
-			std::lock_guard lock(loader_mutex_);
-			plan_ = shared_plan;
-		}
-		timings_.plan_us = now_us();
-		plan_ready_.store(true, std::memory_order_release);
-		render::SceneLaneOptions lane_options;
-		lane_options.lanes = std::min(8u, half);
-		lane_options.texture_lanes = std::min(6u, std::max(1u, lane_options.lanes - std::min(2u, lane_options.lanes / 4)));
-		const bf3::core::Status started = lanes_->start(*shared_plan, db->level->mount(), cache.get(), lane_options, upload_);
-		if (!started.ok()) {
-			fail("scene lanes: " + started.error().message);
-			return;
-		}
-	}
-	host::SharedLoadOptions shared_options;
-	shared_options.cache = cache.get();
-	shared_options.threads = scene_ ? std::min(8u, half) : 0;
+	host::ServerLevelOptions level_options;
+	level_options.shared.threads = scene_ ? std::min(8u, half) : 0;
 	if (!motor_tuning_text_.empty()) {
 		bf3::core::Result<sim::MotorTuning> tuning = sim::parse_motor_tuning(motor_tuning_text_);
 		if (!tuning) {
 			fail(motor_tuning_source_ + ": " + tuning.error().message);
 			return;
 		}
-		shared_options.tuning = *tuning;
+		level_options.shared.tuning = *tuning;
 	}
-
-	std::optional<lvl::LevelCombatTiles> combat_tiles;
-	if (bots_ > 0) {
-		bf3::core::Result<lvl::LevelCombatTiles> combat = lvl::level_combat_tiles(*install, level_, sim::NavParams().region_margin);
-		if (!combat) {
-			fail("combat areas: " + combat.error().message);
-			return;
+	level_options.bots = bots_ > 0;
+	level_options.synthetic_spawns = bots_;
+	level_options.seed = seed_;
+	level_options.keep_database = true;
+	level_options.stop = &stop_;
+	level_options.after_database = [&](const host::LevelDatabase &p_db,
+										   host::SharedLoadOptions &r_shared) -> bf3::core::Status {
+		if (scene_) {
+			BF3_TRY(start_scene(p_db, cache.get(), half));
 		}
-		combat_tiles = std::move(*combat);
-	}
-	game_load_options(shared_options);
-	bf3::core::Result<std::shared_ptr<const host::SharedLevel>> shared = host::load_shared_level(*db, shared_options, &progress_);
-	if (!shared) {
-		fail(shared.error().message);
+		game_load_options(r_shared);
+		return {};
+	};
+	level_options.after_shared = [this](const std::shared_ptr<const host::SharedLevel> &p_shared) {
+		{
+			std::lock_guard lock(loader_mutex_);
+			shared_ = p_shared;
+		}
+		timings_.shared_us = now_us();
+		shared_ready_.store(true, std::memory_order_release);
+	};
+	bf3::core::Result<host::ServerLevel> loaded = host::load_server_level(
+			*install, host::LevelEntry{ level_, mode_, 1 }, level_options, cache.get(), &progress_);
+	if (!loaded) {
+		if (!stop_.load(std::memory_order_acquire)) {
+			fail(loaded.error().message);
+		}
 		return;
 	}
-	{
-		std::lock_guard lock(loader_mutex_);
-		shared_ = *shared;
-	}
-	timings_.shared_us = now_us();
-	shared_ready_.store(true, std::memory_order_release);
+	server_level_ = std::make_unique<host::ServerLevel>(std::move(*loaded));
 	if (stop_.load(std::memory_order_acquire)) {
 		return;
 	}
 
-	if (bots_ > 0) {
-		host::BotLoadOptions bot_options;
-		bot_options.cache = cache.get();
-		bot_options.threads = scene_ ? std::min(8u, half) : 0;
-		bot_options.combat = &*combat_tiles;
-		bot_options.seed = seed_;
-		bot_options.synthetic_spawns = bots_;
-		const uint64_t t0 = now_us();
-		bf3::core::Result<std::shared_ptr<const host::BotLevel>> bots = host::load_bot_level(*db, **shared, bot_options, &progress_);
-		if (!bots) {
-			fail("bots: " + bots.error().message);
-			return;
-		}
-		bot_level_ = *bots;
+	if (server_level_->bots != nullptr) {
+		bot_level_ = server_level_->bots;
 		const sim::NavStats &ns = bot_level_->nav->stats();
 		char line[512];
-		std::snprintf(line, sizeof(line), "[bots] bot level %.2f s: nav %zu polys (%s), main component %u, %zu goals, spawns %u of %u in main%s",
-				double(now_us() - t0) / 1e6, ns.polys, ns.world_hit ? "cache hit" : "baked", bot_level_->main_component, bot_level_->objectives.size(),
-				bot_level_->spawns.in_main, bot_level_->spawns.level_points, bot_level_->spawns.synthetic > 0 ? " (synthetic spawns)" : "");
+		std::snprintf(line, sizeof(line),
+				"[bots] bot level %.2f s: nav %zu polys (%s), main component %u, %zu goals, spawns %u of %u in main%s; "
+				"combat areas %.2f s (%s)",
+				server_level_->seconds.bots, ns.polys, ns.world_hit ? "cache hit" : "baked", bot_level_->main_component,
+				bot_level_->objectives.size(), bot_level_->spawns.in_main, bot_level_->spawns.level_points,
+				bot_level_->spawns.synthetic > 0 ? " (synthetic spawns)" : "", server_level_->seconds.combat,
+				server_level_->combat_cache_hit ? "cache hit" : "baked");
 		bots_line_ = line;
 		if (nav_overlay_ && scene_) {
 			nav_arrays_ = prepare_nav_overlay(sim::nav_debug_mesh(*bot_level_->nav, &bot_level_->components), bot_level_->main_component);
@@ -445,7 +402,8 @@ void Bf3LevelSession::run_loader() {
 		}
 	}
 
-	if (std::string game_error; !game_load_assets(*db, cache.get(), scene_ ? std::min(8u, half) : 0u, &game_error)) {
+	if (std::string game_error;
+			!game_load_assets(server_level_->database, cache.get(), scene_ ? std::min(8u, half) : 0u, &game_error)) {
 		fail(game_error);
 		return;
 	}
@@ -470,9 +428,44 @@ void Bf3LevelSession::run_loader() {
 		lane_stats_ = *stats;
 	}
 
-	db = host::LevelDatabase();
+	server_level_->database = host::LevelDatabase();
 	cache.reset();
 	loader_done_.store(true, std::memory_order_release);
+}
+
+bf3::core::Status Bf3LevelSession::start_scene(
+		const host::LevelDatabase &p_db, bf3::core::Cache *p_cache, unsigned p_half) {
+	progress_.begin(host::LoadStage::Meshes);
+	uint64_t t0 = now_us();
+	bf3::core::Result<lvl::MeshCensus> census = lvl::mesh_census(*p_db.level, *p_db.world);
+	if (!census) {
+		return bf3::core::make_error("census: " + census.error().message);
+	}
+	timings_.seconds_census = double(now_us() - t0) / 1e6;
+	t0 = now_us();
+	render::ScenePlanOptions plan_options;
+	plan_options.look = look_mode_;
+	bf3::core::Result<render::LevelScenePlan> plan =
+			render::plan_level_scene(*p_db.level, *p_db.world, *census, plan_options);
+	if (!plan) {
+		return bf3::core::make_error("scene plan: " + plan.error().message);
+	}
+	timings_.seconds_plan = double(now_us() - t0) / 1e6;
+	auto shared_plan = std::make_shared<const render::LevelScenePlan>(std::move(*plan));
+	{
+		std::lock_guard lock(loader_mutex_);
+		plan_ = shared_plan;
+	}
+	timings_.plan_us = now_us();
+	plan_ready_.store(true, std::memory_order_release);
+	render::SceneLaneOptions lane_options;
+	lane_options.lanes = std::min(8u, p_half);
+	lane_options.texture_lanes = std::min(6u, std::max(1u, lane_options.lanes - std::min(2u, lane_options.lanes / 4)));
+	const bf3::core::Status started = lanes_->start(*shared_plan, p_db.level->mount(), p_cache, lane_options, upload_);
+	if (!started.ok()) {
+		return bf3::core::make_error("scene lanes: " + started.error().message);
+	}
+	return {};
 }
 
 host::ClientSessionConfig Bf3LevelSession::client_config(const std::string &p_netsim, uint64_t p_seed) const {
@@ -498,18 +491,23 @@ bool Bf3LevelSession::start_session(std::string *r_error) {
 		return false;
 	}
 	auto game = std::make_shared<host::GameServerConfig>();
-	game->level = shared_;
-	game->max_slots = m1_check_ ? uint32_t(bf3::net::kMaxSlots) : 64u;
-	game->walkers = walkers_;
-	game->dev_commands = true;
-	game->seed = seed_;
-	if (bot_level_ != nullptr) {
-		auto fill = std::make_shared<host::BotFillConfig>();
-		fill->level = bot_level_;
-		fill->count = bots_;
-		fill->spawn_in_main = true;
-		game->bots = fill;
-		game->max_slots = uint32_t(bf3::net::kMaxSlots);
+	if (host::ServerRules rules; server_level_ != nullptr && tdm_rules(rules)) {
+		*game = host::tdm_game_server_config(*server_level_, rules);
+		game->walkers = walkers_;
+	} else {
+		game->level = shared_;
+		game->max_slots = m1_check_ ? uint32_t(bf3::net::kMaxSlots) : 64u;
+		game->walkers = walkers_;
+		game->dev_commands = true;
+		game->seed = seed_;
+		if (bot_level_ != nullptr) {
+			auto fill = std::make_shared<host::BotFillConfig>();
+			fill->level = bot_level_;
+			fill->count = bots_;
+			fill->spawn_in_main = true;
+			game->bots = fill;
+			game->max_slots = uint32_t(bf3::net::kMaxSlots);
+		}
 	}
 	game_server_config(*game);
 	host::ServerConfig sc;
