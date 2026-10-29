@@ -57,6 +57,7 @@ public:
 	bool poll(uint64_t p_now_ns, Datagram &r_datagram);
 
 	uint64_t next_release_ns() const;
+	uint64_t last_reliable_release_ns(uint32_t p_peer) const;
 	size_t pending() const;
 	const NetSimConfig &config() const { return config_; }
 	const NetSimStats &stats() const { return stats_; }

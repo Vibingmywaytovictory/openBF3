@@ -92,6 +92,9 @@ uint64_t ClientLink::wait_deadline(uint64_t p_deadline) const {
 	if (const uint64_t r = out_.next_release_ns(); r != 0) {
 		deadline = std::min(deadline, r);
 	}
+	if (disconnect_pending_) {
+		deadline = std::min(deadline, disconnect_at_);
+	}
 	return deadline;
 }
 
@@ -107,9 +110,9 @@ void ClientLink::receive(uint32_t p_wait_ms) {
 			d.reliable = ev.channel != net::kChannelUnreliable;
 			d.bytes = std::move(ev.data);
 			in_.submit(std::move(d), at);
-		} else if (ev.type == net::Host::EventType::Disconnect) {
-			drop("disconnected by the server");
-			server_disconnected_ = true;
+		} else if (ev.type == net::Host::EventType::Disconnect && !disconnect_pending_) {
+			disconnect_pending_ = true;
+			disconnect_at_ = std::max(at, in_.last_reliable_release_ns(ev.peer));
 		}
 		got = transport_->service(0, ev);
 	}
@@ -119,6 +122,12 @@ void ClientLink::receive(uint32_t p_wait_ms) {
 }
 
 bool ClientLink::poll(uint64_t p_now, net::NetSim::Datagram &r_datagram) {
+	const uint64_t next = in_.next_release_ns();
+	if (disconnect_pending_ && p_now >= disconnect_at_ && (next == 0 || next > disconnect_at_)) {
+		disconnect_pending_ = false;
+		drop("disconnected by the server");
+		server_disconnected_ = true;
+	}
 	return in_.poll(p_now, r_datagram);
 }
 

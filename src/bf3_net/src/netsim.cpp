@@ -307,6 +307,16 @@ uint64_t NetSim::next_release_ns() const {
 	return queue_.empty() ? 0 : std::max<uint64_t>(queue_.front().release_ns, 1);
 }
 
+uint64_t NetSim::last_reliable_release_ns(uint32_t p_peer) const {
+	uint64_t last = 0;
+	for (const Pending &p : queue_) {
+		if (p.datagram.reliable && p.datagram.peer == p_peer) {
+			last = std::max(last, p.release_ns);
+		}
+	}
+	return last;
+}
+
 size_t NetSim::pending() const {
 	return queue_.size();
 }

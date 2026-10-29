@@ -69,6 +69,8 @@ private:
 	std::array<char, 128> last_error_{};
 	bool refused_ = false;
 	bool server_disconnected_ = false;
+	bool disconnect_pending_ = false;
+	uint64_t disconnect_at_ = 0;
 
 	bool have_snapshot_ = false;
 	uint16_t newest_seq_ = 0;
