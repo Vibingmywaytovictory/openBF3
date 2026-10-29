@@ -4,6 +4,9 @@
 #include "bf3/ai/path/cluster_graph.h"
 #include "bf3/ai/path/map_properties.h"
 #include "bf3/ai/squad/squad_manager.h"
+#include "bf3/ai/vehicle/aerial_height_map.h"
+#include "bf3/ai/vehicle/landing_zone_manager.h"
+#include "bf3/ai/vehicle/vehicle_occupancy.h"
 
 #include <algorithm>
 #include <cmath>
@@ -658,5 +661,95 @@ TEST_SUITE("ai-squad") {
 		nodes.new_oc_data(2);
 		nodes.new_oc_data(3);
 		CHECK(nodes.capacity() == 3);
+	}
+
+	TEST_CASE("VehicleOccupancy: a vehicle is occupied when its primary or any seat is, resolved from a seat") {
+		Knowledge knowledge;
+		Soldier vehicle;
+		Soldier driver;
+		Soldier gunner;
+		for (Soldier *part : { &vehicle, &driver, &gunner }) {
+			part->with_unit = true;
+		}
+		vehicle.seats = { &driver, &gunner };
+		driver.primary = false;
+		driver.owner = &vehicle;
+		const uint32_t hull = knowledge.record(vehicle, 1);
+		const uint32_t seat = knowledge.record(driver, 1);
+		knowledge.record(gunner, 1);
+		const InformationManager &information = knowledge.information;
+		CHECK_FALSE(vehicle_occupied(information, hull, 1));
+		gunner.occupied = true;
+		CHECK(vehicle_occupied(information, hull, 1));
+		CHECK(vehicle_occupied(information, seat, 1));
+		gunner.occupied = false;
+		vehicle.occupied = true;
+		CHECK(vehicle_occupied(information, seat, 1));
+		CHECK_FALSE(vehicle_occupied(information, kNoHandle, 1));
+		CHECK_FALSE(vehicle_occupied(information, 0, 1));
+		Soldier wreck;
+		const uint32_t bare = knowledge.record(wreck, 1);
+		CHECK_FALSE(vehicle_occupied(information, bare, 1));
+	}
+
+	TEST_CASE("AerialHeightMap: every 16 m cell holds the ceiling of the field's maximum and survives a round trip") {
+		struct Field final : AerialHeightSource {
+			float height(float p_x, float p_z) const override {
+				const float spike = (p_x == 5.0f && p_z == 21.0f) ? 50.2f : 0.0f;
+				return 0.25f * (p_x + 32.0f) + 0.1f * p_z + spike;
+			}
+		};
+		AerialHeightMap map;
+		CHECK(map.empty());
+		CHECK(map.ground_height(0.0f, 0.0f) == kMissingGroundHeight);
+		map.create_height_map({ -32.0f, 0.0f, 64.0f, 48.0f }, Field{}, 17);
+		REQUIRE(map.width() == 4);
+		REQUIRE(map.height() == 3);
+		CHECK(map.cell_size() == 16.0f);
+		for (int cz = 0; cz < 3; ++cz) {
+			for (int cx = 0; cx < 4; ++cx) {
+				float highest = 0.25f * (16.0f * float(cx) + 16.0f) + 0.1f * (16.0f * float(cz) + 16.0f);
+				if (cx == 2 && cz == 1) {
+					highest = std::max(highest, 0.25f * 37.0f + 2.1f + 50.2f);
+				}
+				const float x = -32.0f + 16.0f * float(cx) + 8.0f;
+				const float z = 16.0f * float(cz) + 8.0f;
+				CHECK(map.ground_height(x, z) == std::ceil(highest));
+			}
+		}
+		CHECK(map.ground_height(5.0f, 21.0f) == 62.0f);
+		CHECK(map.altitude({ 5.0f, 100.0f, 21.0f }) == 38.0f);
+		CHECK(map.ground_height(-40.0f, 8.0f) == kMissingGroundHeight);
+		CHECK(map.ground_height(8.0f, 48.5f) == kMissingGroundHeight);
+
+		const std::vector<uint8_t> bytes = map.serialize();
+		AerialHeightMap loaded;
+		REQUIRE(loaded.deserialize(bytes).ok());
+		CHECK(loaded.serialize() == bytes);
+		CHECK(loaded.ground_height(5.0f, 21.0f) == 62.0f);
+		CHECK(loaded.origin().x == -32.0f);
+		const std::vector<uint8_t> cut(bytes.begin(), bytes.end() - 1);
+		CHECK_FALSE(loaded.deserialize(cut).ok());
+		CHECK_FALSE(loaded.deserialize(std::vector<uint8_t>(4, 0)).ok());
+		CHECK(loaded.ground_height(5.0f, 21.0f) == 62.0f);
+	}
+
+	TEST_CASE("AILandingZoneManager: zones by name, one active zone, and a reset back to none") {
+		AILandingZoneManager zones;
+		CHECK(zones.number_of_landing_zones() == 0);
+		CHECK(zones.active_zone_name() == std::string(kNoActiveLandingZone));
+		REQUIRE(zones.create_landing_zone("north", { 1.0f, 2.0f, 3.0f }, 1) != nullptr);
+		CHECK(zones.create_landing_zone("north", {}, 0) == nullptr);
+		REQUIRE(zones.create_landing_zone("south", { 4.0f, 5.0f, 6.0f }, 2) != nullptr);
+		CHECK(zones.number_of_landing_zones() == 2);
+		CHECK(zones.landing_zone("south")->position.y == 5.0f);
+		CHECK(zones.landing_zone("east") == nullptr);
+		CHECK_FALSE(zones.set_active_zone("east"));
+		CHECK(zones.set_active_zone("south"));
+		CHECK(zones.active_zone_name() == "south");
+		zones.reset();
+		CHECK(zones.number_of_landing_zones() == 0);
+		CHECK(zones.landing_zone("north") == nullptr);
+		CHECK(zones.active_zone_name() == std::string(kNoActiveLandingZone));
 	}
 }

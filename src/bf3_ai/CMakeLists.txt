@@ -64,3 +64,12 @@ target_sources(bf3_ai PRIVATE
     src/path/map_properties.cpp
     src/path/cluster_graph.cpp
 )
+
+target_sources(bf3_ai PRIVATE
+    include/bf3/ai/vehicle/vehicle_occupancy.h
+    include/bf3/ai/vehicle/aerial_height_map.h
+    include/bf3/ai/vehicle/landing_zone_manager.h
+    src/vehicle/vehicle_occupancy.cpp
+    src/vehicle/aerial_height_map.cpp
+    src/vehicle/landing_zone_manager.cpp
+)
