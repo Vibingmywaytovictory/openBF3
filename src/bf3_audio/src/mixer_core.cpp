@@ -458,6 +458,10 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 		m.cut_stats.slot_takeovers.fetch_add(after.slot_takeovers - before.slot_takeovers, std::memory_order_relaxed);
 		m.cut_stats.takeover_cuts.fetch_add(after.takeover_cuts - before.takeover_cuts, std::memory_order_relaxed);
 		m.cut_stats.held_triggers.fetch_add(after.held_triggers - before.held_triggers, std::memory_order_relaxed);
+		m.cut_stats.pan_steps.fetch_add(after.pan_steps - before.pan_steps, std::memory_order_relaxed);
+		if (after.pan_step_max > m.cut_stats.pan_step_max.load(std::memory_order_relaxed)) {
+			m.cut_stats.pan_step_max.store(after.pan_step_max, std::memory_order_relaxed);
+		}
 		if (after.takeover_cut_max > m.cut_stats.takeover_cut_max.load(std::memory_order_relaxed)) {
 			m.cut_stats.takeover_cut_max.store(after.takeover_cut_max, std::memory_order_relaxed);
 		}
@@ -999,8 +1003,11 @@ std::string format_mixer_cuts(const MixerCutStats &p_stats) {
 			double(p_stats.takeover_cut_max.load()), (unsigned long long)p_stats.stale_events.load());
 	out += part;
 	std::snprintf(part, sizeof(part),
-			"; %llu sampler triggers from a trigger input already on at the previous evaluation",
-			(unsigned long long)p_stats.held_triggers.load());
+			"; %llu sampler triggers from a trigger input already on at the previous evaluation; %llu pan gain steps "
+			"above "
+			"-60 dBFS, max %.4f",
+			(unsigned long long)p_stats.held_triggers.load(), (unsigned long long)p_stats.pan_steps.load(),
+			double(p_stats.pan_step_max.load()));
 	out += part;
 	return out;
 }

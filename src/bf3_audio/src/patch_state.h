@@ -136,6 +136,8 @@ struct PluginState {
 	OnePoleLowPass damping[2];
 	float gain_prev = 0.0f;
 	bool gain_started = false;
+	float pan_prev[2] = { 0.0f, 0.0f };
+	bool pan_started = false;
 	uint32_t delay_begin = 0, delay_frames = 0, delay_write = 0;
 	float attribute(uint8_t p_attribute) const {
 		return (override_mask >> p_attribute) & 1u ? overrides[p_attribute] : attributes[p_attribute];
@@ -214,6 +216,7 @@ struct PatchInstance::State {
 	std::vector<uint8_t> voice_tapped;
 	std::vector<uint8_t> voice_live;
 	std::vector<float> voice_cut;
+	std::vector<float> voice_pan_step;
 	std::array<std::array<float, detail::kMaxSubBlock>, kMaxVoiceTaps> tap_buffers{};
 	std::array<VoiceTap *, kMaxVoiceTaps> taps{};
 	uint32_t tap_count = 0;

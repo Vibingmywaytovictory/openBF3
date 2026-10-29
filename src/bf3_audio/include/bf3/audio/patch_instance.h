@@ -91,6 +91,8 @@ struct PatchInstanceStats {
 	uint64_t takeover_cuts = 0;
 	float takeover_cut_max = 0.0f;
 	uint64_t held_triggers = 0;
+	uint64_t pan_steps = 0;
+	float pan_step_max = 0.0f;
 };
 
 struct HdrVoiceWindow {

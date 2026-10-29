@@ -115,7 +115,7 @@ private:
 
 	struct Snapshot {
 		uint64_t takeover_cuts = 0, abrupt_gain = 0, limit_edge_steps = 0, overs_out = 0, held_triggers = 0,
-				 event_drops = 0;
+				 event_drops = 0, pan_steps = 0;
 		uint64_t late_blocks = 0, late_commands = 0, ring_overflows = 0, feedback_drops = 0, decode_errors = 0,
 				 deferred_events = 0;
 		uint64_t pool_stolen = 0, pool_forgotten = 0, pool_failed = 0, router_stolen = 0, router_forgotten = 0,

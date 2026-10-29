@@ -169,6 +169,8 @@ struct MixerCutStats {
 	std::atomic<float> takeover_cut_max{ 0.0f };
 	std::atomic<uint64_t> stale_events{ 0 };
 	std::atomic<uint64_t> held_triggers{ 0 };
+	std::atomic<uint64_t> pan_steps{ 0 };
+	std::atomic<float> pan_step_max{ 0.0f };
 };
 inline constexpr std::array<double, 7> kGapEdgesMs = { 5.0, 10.0, 15.0, 20.0, 30.0, 50.0, 100.0 };
 const char *mixer_cut_kind_name(MixerCutKind p_kind);

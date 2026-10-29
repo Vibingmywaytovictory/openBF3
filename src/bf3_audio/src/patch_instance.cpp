@@ -249,6 +249,7 @@ Result<std::unique_ptr<PatchInstance>> PatchInstance::create(std::shared_ptr<con
 	st.voice_tapped.assign(p.voices.size(), 0);
 	st.voice_live.assign(p.voices.size(), 0);
 	st.voice_cut.assign(p.voices.size(), 0.0f);
+	st.voice_pan_step.assign(p.voices.size(), 0.0f);
 	if (p.outputs.size() <= 64) {
 		const std::vector<uint64_t> masks = voice_output_masks(p);
 		for (SlotState &sl : st.slots) {
@@ -471,6 +472,7 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 					apply_gain_ramp(ch[1], p_frames, ps.gain_prev, target);
 					ps.gain_prev = target;
 					st.voice_cut[v] *= target;
+					st.voice_pan_step[v] *= target;
 					break;
 				}
 				case PluginRole::HighPass:
@@ -519,11 +521,20 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 					const float spread = ps.output != UINT32_MAX ? p.outputs[ps.output].pan_size : 0.0f;
 					const StereoGains pan = equal_power_pan(st.geometry.azimuth, spread);
 					const float gl = pan.left * pan_scale, gr = pan.right * pan_scale;
+					const float step = ps.pan_started
+							? std::max(std::fabs(gl - ps.pan_prev[0]), std::fabs(gr - ps.pan_prev[1]))
+							: 0.0f;
+					float peak = 0.0f;
 					for (uint32_t i = 0; i < p_frames; ++i) {
 						const float m = 0.5f * (ch[0][i] + ch[1][i]);
+						peak = std::max(peak, std::fabs(m));
 						ch[0][i] = m * gl;
 						ch[1][i] = m * gr;
 					}
+					st.voice_pan_step[v] = std::max(st.voice_pan_step[v], peak * step);
+					ps.pan_prev[0] = gl;
+					ps.pan_prev[1] = gr;
+					ps.pan_started = true;
 					break;
 				}
 				case PluginRole::Send: {
@@ -546,6 +557,14 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 					}
 					if (!c.to_bus && c.voice != v && c.voice < st.voice_cut.size()) {
 						st.voice_cut[c.voice] = std::max(st.voice_cut[c.voice], st.voice_cut[v] * target);
+					}
+					if (!c.to_bus && c.voice != v && c.voice < st.voice_pan_step.size()) {
+						st.voice_pan_step[c.voice] =
+								std::max(st.voice_pan_step[c.voice], st.voice_pan_step[v] * target);
+					}
+					if (c.to_bus && st.voice_pan_step[v] * target > kAudibleStep) {
+						++st.stats.pan_steps;
+						st.stats.pan_step_max = std::max(st.stats.pan_step_max, st.voice_pan_step[v] * target);
 					}
 					if (c.to_bus && st.voice_cut[v] * target > kAudibleStep) {
 						++st.stats.takeover_cuts;
@@ -605,6 +624,7 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 			}
 		}
 		st.voice_cut[v] = 0.0f;
+		st.voice_pan_step[v] = 0.0f;
 		tap_now();
 	}
 	for (uint32_t t = 0; t < st.tap_count; ++t) {

@@ -108,6 +108,7 @@ AudioIngameCheck::Snapshot AudioIngameCheck::snapshot(const Bf3GameAudio &p_audi
 	s.limit_edge_steps = c.limit_edge_steps.load();
 	s.overs_out = c.overs_out.load();
 	s.held_triggers = c.held_triggers.load();
+	s.pan_steps = c.pan_steps.load();
 	s.event_drops = c.event_drops.load();
 	s.stale_events = c.stale_events.load();
 	s.late_blocks = m.late_blocks.load();
@@ -462,11 +463,13 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 	}
 	row("no hard cut",
 			audible_total == 0 && delta(&Snapshot::takeover_cuts) == 0 && delta(&Snapshot::abrupt_gain) == 0 &&
-					delta(&Snapshot::limit_edge_steps) == 0,
-			core::fmt("%llu audible cuts, %llu takeover cuts, %llu abrupt gain steps, %llu limiter edge steps",
+					delta(&Snapshot::limit_edge_steps) == 0 && delta(&Snapshot::pan_steps) == 0,
+			core::fmt("%llu audible cuts, %llu takeover cuts, %llu abrupt gain steps, %llu limiter edge steps, %llu "
+					  "pan gain steps",
 					(unsigned long long)audible_total, (unsigned long long)delta(&Snapshot::takeover_cuts),
 					(unsigned long long)delta(&Snapshot::abrupt_gain),
-					(unsigned long long)delta(&Snapshot::limit_edge_steps)) +
+					(unsigned long long)delta(&Snapshot::limit_edge_steps),
+					(unsigned long long)delta(&Snapshot::pan_steps)) +
 					audible_text);
 	row("no retrigger", delta(&Snapshot::held_triggers) == 0,
 			core::fmt("%llu sampler triggers from a trigger input still on since the previous evaluation",
