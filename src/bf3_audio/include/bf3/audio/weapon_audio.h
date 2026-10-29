@@ -130,7 +130,12 @@ struct OneShotOptions {
 	bool first_person = false;
 	uint32_t mix_rate = kMixRate;
 	std::function<void(PatchInstance &, InstanceHandle)> before_start;
+	uint64_t join_key = 0;
 };
+
+constexpr uint64_t one_shot_join_key(uint8_t p_slot, bool p_first_person) {
+	return (uint64_t(p_first_person) << 8) | uint64_t(p_slot) | (uint64_t(1) << 63);
+}
 
 inline constexpr double kOneShotStopAfterSeconds = 3.0;
 inline constexpr double kOneShotForgetSeconds = 20.0;
@@ -163,6 +168,7 @@ public:
 
 	bool stop(MixerCore &r_mixer, InstanceHandle p_handle);
 	uint64_t forgotten() const;
+	uint64_t join_requests() const { return join_requests_; }
 
 	bool set_emitter(MixerCore &r_mixer, InstanceHandle p_handle, const EmitterState &p_emitter);
 
@@ -172,11 +178,13 @@ private:
 		uint64_t start_frame = 0;
 		EmitterState emitter;
 		bool stopped = false;
+		uint64_t join_key = 0;
+		const core::audio::SoundProgram *program = nullptr;
 	};
 	uint32_t limit_ = kTuningVoices;
 	std::vector<Entry> live_;
 	uint32_t peak_ = 0;
-	uint64_t started_ = 0, stolen_ = 0, failed_ = 0, forgotten_ = 0;
+	uint64_t started_ = 0, stolen_ = 0, failed_ = 0, forgotten_ = 0, join_requests_ = 0;
 	InstanceHandle last_ = kNoInstance;
 };
 

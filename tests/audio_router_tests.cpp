@@ -962,6 +962,52 @@ TEST_SUITE("audio-router") {
 		CHECK(r.pool->live() == 0);
 	}
 
+	TEST_CASE("one-shots of one emitter join its sounding instance of the patch; detonations never join") {
+		Rig r;
+		r.mixer->record_cuts(true);
+		std::vector<host::PresentEvent> plan;
+		for (uint32_t k = 0; k < 3; ++k) {
+			plan.push_back(own_shot(kKnife, 30 + k, r.predicted + sw::SimTime(k) * 6 * kTick));
+			plan.push_back(
+					remote_shot(6, kKnife, 40 + k, r.render + sw::SimTime(3 + 6 * k) * kTick, { 0.0f, 1.6f, 5.0f }));
+			host::PresentEvent boom;
+			boom.kind = host::PresentKind::Detonation;
+			boom.timeline = host::PresentTimeline::Render;
+			boom.def = kGrenade;
+			boom.slot = 6;
+			boom.id = 50 + k;
+			boom.time = r.render + sw::SimTime(2 + 6 * k) * kTick;
+			boom.pos[2] = 20.0f;
+			plan.push_back(boom);
+		}
+		std::vector<ba::MixerCutEvent> cuts;
+		size_t i = 0;
+		for (int f = 0; f < 40; ++f) {
+			std::vector<host::PresentEvent> ev;
+			while (i < plan.size()) {
+				const host::PresentEvent &e = plan[i];
+				const sw::SimTime now = e.timeline == host::PresentTimeline::Predicted ? r.predicted : r.render;
+				if (e.time > now + 2 * kTick) {
+					break;
+				}
+				ev.push_back(plan[i++]);
+			}
+			r.frame(ev);
+			std::array<ba::MixerCutEvent, 256> batch;
+			for (size_t n = r.mixer->poll_cuts(batch); n > 0; n = r.mixer->poll_cuts(batch)) {
+				cuts.insert(cuts.end(), batch.begin(), batch.begin() + std::ptrdiff_t(n));
+			}
+		}
+		REQUIRE(i == plan.size());
+		const ba::WeaponAudioStats &st = r.router->stats();
+		CHECK(st.one_shots == 9);
+		CHECK(st.detonations == 3);
+		CHECK(r.pool->join_requests() == 4);
+		CHECK(std::count_if(cuts.begin(), cuts.end(),
+					  [](const ba::MixerCutEvent &e) { return e.kind == ba::MixerCutKind::Join; }) == 4);
+		CHECK(r.mixer->stats().starved_voices.load() == 0);
+	}
+
 	TEST_CASE("voice limit: running bursts are never stolen, the farthest released tail is, the rest are culled") {
 		ba::WeaponAudioConfig cfg;
 		cfg.max_weapon_voices = 3;

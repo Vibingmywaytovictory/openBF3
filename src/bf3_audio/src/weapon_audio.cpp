@@ -322,11 +322,22 @@ bool OneShotPool::start(MixerCore &r_mixer, std::shared_ptr<const ca::SoundProgr
 	start.handle = handle;
 	start.at_frame = p_frame;
 	start.instance = &pi;
+	if (p_options.join_key != 0) {
+		const Entry *newest = nullptr;
+		for (const Entry &e : live_) {
+			if (e.join_key == p_options.join_key && e.program == p_program.get() && !e.stopped &&
+					e.start_frame <= p_frame && (newest == nullptr || e.start_frame >= newest->start_frame)) {
+				newest = &e;
+			}
+		}
+		start.join = newest != nullptr ? newest->handle : kNoInstance;
+	}
 	if (!r_mixer.push(start)) {
 		++failed_;
 		return false;
 	}
 	(void)inst->release();
+	join_requests_ += start.join != kNoInstance ? 1u : 0u;
 	const uint32_t event = p_options.event != 0 ? p_options.event : p_program->start_event;
 	if (event != 0) {
 		MixerCommand ev;
@@ -342,6 +353,8 @@ bool OneShotPool::start(MixerCore &r_mixer, std::shared_ptr<const ca::SoundProgr
 	e.handle = handle;
 	e.start_frame = p_frame;
 	e.emitter = p_emitter;
+	e.join_key = p_options.join_key;
+	e.program = p_program.get();
 	live_.push_back(e);
 	peak_ = std::max<uint32_t>(peak_, uint32_t(live_.size()));
 	++started_;
@@ -811,13 +824,14 @@ struct WeaponAudioRouter::Impl {
 		return e;
 	}
 
-	bool one_shot(const std::shared_ptr<const ca::SoundProgram> &p_program, uint32_t p_event, uint64_t p_seed, const EmitterState &p_emitter,
-			uint64_t p_frame, bool p_first_person) {
+	bool one_shot(const std::shared_ptr<const ca::SoundProgram> &p_program, uint32_t p_event, uint64_t p_seed,
+			const EmitterState &p_emitter, uint64_t p_frame, bool p_first_person, uint64_t p_join_key) {
 		if (!p_program) {
 			return false;
 		}
 		OneShotOptions o;
 		o.event = p_event;
+		o.join_key = p_join_key;
 		o.set_first_person = true;
 		o.first_person = p_first_person;
 		o.mix_rate = config.mix_rate;
@@ -839,7 +853,8 @@ struct WeaponAudioRouter::Impl {
 		if (d->form == WeaponAudioForm::OneShot) {
 			end_track(own);
 			(void)fire_def_of(own_slot, p_e.def);
-			(void)one_shot(d->program, d->one_shot_event, sound_seed(own_slot, own_burst_counter++), em, frame, own_first_person);
+			(void)one_shot(d->program, d->one_shot_event, sound_seed(own_slot, own_burst_counter++), em, frame,
+					own_first_person, one_shot_join_key(own_slot, own_first_person));
 			return;
 		}
 		Voice *v = own.held != kNoInstance ? voice(own.held) : nullptr;
@@ -894,7 +909,8 @@ struct WeaponAudioRouter::Impl {
 		if (d->form == WeaponAudioForm::OneShot) {
 			if (dist <= config.max_weapon_distance_m) {
 				(void)fire_def_of(p_e.slot, p_e.def);
-				(void)one_shot(d->program, d->one_shot_event, sound_seed(p_e.slot, p_e.id), em, frame, false);
+				(void)one_shot(d->program, d->one_shot_event, sound_seed(p_e.slot, p_e.id), em, frame, false,
+						one_shot_join_key(p_e.slot, false));
 			}
 			return;
 		}
@@ -960,8 +976,8 @@ struct WeaponAudioRouter::Impl {
 				case present::PresentKind::Detonation: {
 					const WeaponAudioDef *d = def_of(e.def);
 					if (d != nullptr && d->explosion) {
-						if (one_shot(d->explosion, 0, sound_seed(e.slot, 0x40000000u | (e.id & 0x3FFFFFFFu)), event_emitter(e),
-									r_clock.frame_of(e.time, e.timeline), false)) {
+						if (one_shot(d->explosion, 0, sound_seed(e.slot, 0x40000000u | (e.id & 0x3FFFFFFFu)),
+									event_emitter(e), r_clock.frame_of(e.time, e.timeline), false, 0)) {
 							++stats.detonations;
 						}
 					}
