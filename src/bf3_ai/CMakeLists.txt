@@ -85,3 +85,11 @@ target_sources(bf3_ai PRIVATE
     src/nav/nav_clusters.cpp
     src/nav/bot_navigation.cpp
 )
+
+target_sources(bf3_ai PRIVATE
+    include/bf3/ai/strategic/strategic_object.h
+    include/bf3/ai/strategic/sai.h
+    src/strategic/strategic_object.cpp
+    src/strategic/strategic_area.cpp
+    src/strategic/sai.cpp
+)

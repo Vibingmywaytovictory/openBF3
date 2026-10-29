@@ -1,7 +1,10 @@
 #include <doctest/doctest.h>
 
+#include "bf3/ai/main/ai_settings.h"
 #include "bf3/ai/nav/bot_navigation.h"
 #include "bf3/ai/nav/nav_clusters.h"
+#include "bf3/ai/strategic/sai.h"
+#include "bf3/ai/strategic/strategic_object.h"
 #include "bf3/sim/nav.h"
 #include "bf3/sim/static_world.h"
 
@@ -50,6 +53,61 @@ std::shared_ptr<const sim::NavWorld> walled_nav() {
 	}();
 	return s_nav;
 }
+
+class FakeTimer final : public ai::AiTimer {
+public:
+	sim::Tick game_tick() const override { return tick; }
+	double tick_seconds() const override { return double(sim::kTickSeconds); }
+	double update_time() const override { return clock += step; }
+	sim::Tick tick = 0;
+	double step = 0.0;
+	mutable double clock = 0.0;
+};
+
+class FakeStrategicGame final : public ai::StrategicGame {
+public:
+	bool control_point_info(uint32_t p_id, ai::Vec3 &r_position, float &r_radius, bool &r_active) const override {
+		if (p_id >= points.size()) {
+			return false;
+		}
+		r_position = points[p_id];
+		r_radius = 10.0f;
+		r_active = true;
+		return true;
+	}
+	int owner_of_control_point(uint32_t p_id) const override { return p_id < owners.size() ? owners[p_id] : 0; }
+	bool control_point_takeable(uint32_t p_id) const override { return p_id < takeable.size() && takeable[p_id]; }
+	float control_point_take_over_counter(uint32_t) const override { return 1.0f; }
+	float terrain_altitude(float, float) const override { return 2.0f; }
+	int number_of_maps() const override { return 1; }
+	bool polygon(
+			const ai::Vec3 &p_position, int, uint32_t &r_polygon, uint32_t &r_island, ai::Vec3 &r_on) const override {
+		r_polygon = 7;
+		r_island = 3;
+		r_on = { p_position.x, p_position.y + 0.5f, p_position.z };
+		return true;
+	}
+	std::vector<ai::Vec3> points;
+	std::vector<int> owners;
+	std::vector<bool> takeable;
+};
+
+class RecordingDecisions final : public ai::SaiDecisions {
+public:
+	void choose_strategy(ai::Sai &) override { calls.push_back("choose_strategy"); }
+	void modify_strategic_objects_temperatures(ai::Sai &) override { calls.push_back("temperatures"); }
+	void update_bot_positions(ai::Sai &) override { calls.push_back("bot_positions"); }
+	void update_distribution(ai::Sai &) override { calls.push_back("distribution"); }
+	void distribute_resources(ai::Sai &) override { calls.push_back("resources"); }
+	void distribute_defence(ai::Sai &) override { calls.push_back("defence"); }
+	void distribute_attack(ai::Sai &) override { calls.push_back("attack"); }
+	void distribute_with_no_areas(ai::Sai &) override { calls.push_back("no_areas"); }
+	int release_squads_from_object(ai::Sai &, int, int) override {
+		calls.push_back("release");
+		return 0;
+	}
+	std::vector<std::string> calls;
+};
 
 }
 
@@ -186,5 +244,147 @@ TEST_SUITE("ai-world-unit") {
 		}
 		CHECK(stuck.is_stuck());
 		CHECK_FALSE(ai::BotNavigation(5).init_pathfinding(world, { 500.0f, 0.0f, 500.0f }, { 50.0f, 0.0f, 10.0f }, 0));
+	}
+
+	TEST_CASE("strategic objects: control-point areas take their owner, extents, gravity and neighbours") {
+		FakeStrategicGame game;
+		game.points = { { 100.0f, 5.0f, 40.0f }, { -60.0f, 1.0f, 0.0f } };
+		game.owners = { 1, 0 };
+		game.takeable = { false, true };
+		ai::StrategicServices services;
+		services.game = &game;
+		ai::AIStrategicObjectManager manager(services);
+		REQUIRE(manager.create_from_control_point("hq", 0, 10.0f, ""));
+		REQUIRE(manager.create_from_control_point("flag", 1, 12.0f, ""));
+		CHECK_FALSE(manager.create_from_control_point("flag", 1, 12.0f, ""));
+		REQUIRE(manager.create("free", { 0.0f, 0.0f }, { 20.0f, 20.0f }, 3.0f, 20.0f, ""));
+		REQUIRE(manager.add_two_way_neighbour("hq", "flag"));
+		manager.add_way_point({ 1.0f, 2.0f, 3.0f }, 0, "hq", "flag");
+		manager.post_load_init_areas();
+		REQUIRE(manager.number_of_strategic_objects() == 3);
+		ai::AIStrategicArea *hq = manager.strategic_area("hq");
+		ai::AIStrategicArea *flag = manager.strategic_area("flag");
+		ai::AIStrategicArea *free = manager.strategic_area("free");
+		CHECK(hq->index() == 0);
+		CHECK(hq->position(1).x == doctest::Approx(100.0f));
+		CHECK(hq->position(2).y == doctest::Approx(40.0f));
+		CHECK(hq->x_extent(1) == doctest::Approx(20.0f));
+		CHECK(hq->height() == doctest::Approx(5.0f));
+		const ai::Vec3 order = hq->order_position(0);
+		CHECK(order.x == doctest::Approx(100.0f));
+		CHECK(order.y == doctest::Approx(5.5f));
+		CHECK(hq->map_data()[0].island == 3u);
+		CHECK(free->height() == doctest::Approx(3.0f));
+		CHECK(free->order_position(-1).x == doctest::Approx(20.0f));
+		CHECK_FALSE(hq->is_area_takeable());
+		CHECK(flag->is_area_takeable());
+		CHECK_FALSE(free->is_area_takeable());
+		const std::vector<std::unique_ptr<ai::SAWayPoint>> *points = manager.way_points(1, 0);
+		REQUIRE(points != nullptr);
+		REQUIRE(points->size() == 1);
+		CHECK((*points)[0]->polygon() == 7u);
+		CHECK(hq->gravity(ai::Vec3{ 100.0f, 0.0f, 40.0f }, 1) == doctest::Approx(hq->gravity(0.5f, 1)));
+		CHECK(hq->gravity(ai::Vec3{ 110.0f, 0.0f, 40.0f }, 1) == doctest::Approx(hq->gravity(0.5f, 1) / 100.0f));
+		CHECK(manager.closest_object({ 99.0f, 0.0f, 40.0f }, 1) == hq);
+
+		FakeTimer timer;
+		ai::AiSettings settings;
+		ai::SaiServices sai_services;
+		sai_services.timer = &timer;
+		sai_services.settings = &settings;
+		sai_services.objects = &manager;
+		for (int side = 1; side <= 2; ++side) {
+			ai::Sai sai(side, sai_services);
+			for (ai::AIStrategicObject *object : manager.strategic_objects()) {
+				bool changed = false;
+				object->update(side, sai, changed);
+			}
+			CHECK(hq->status(side) == (side == 1 ? ai::StrategicStatus::Owned : ai::StrategicStatus::Hostile));
+			CHECK(flag->status(side) == ai::StrategicStatus::Neutral);
+			CHECK(flag->has_neighbour_with_status(
+					side == 1 ? ai::StrategicStatus::Owned : ai::StrategicStatus::Hostile, side));
+			CHECK(sai.have_any_owned_control_points(side) == (side == 1));
+			CHECK_FALSE(sai.have_any_owned_and_takeable_control_points(side));
+			CHECK_FALSE(sai.own_all_takeable_control_points(side));
+		}
+		game.owners[1] = 2;
+		ai::Sai sai2(2, sai_services);
+		bool changed = false;
+		flag->update(2, sai2, changed);
+		CHECK(changed);
+		CHECK(flag->status(2) == ai::StrategicStatus::Owned);
+		CHECK(sai2.own_all_takeable_control_points(2));
+	}
+
+	TEST_CASE("sai: the staged update runs its stages in order within the budget and routes to the no-area stage") {
+		FakeStrategicGame game;
+		game.points = { { 0.0f, 0.0f, 0.0f } };
+		game.owners = { 2 };
+		ai::StrategicServices services;
+		services.game = &game;
+		ai::AIStrategicObjectManager manager(services);
+		REQUIRE(manager.create_from_control_point("a", 0, 10.0f, ""));
+		REQUIRE(manager.create("b", { 0.0f, 0.0f }, { 50.0f, 0.0f }, 0.0f, 10.0f, ""));
+		manager.post_load_init_areas();
+		FakeTimer timer;
+		timer.tick = 60 * 60;
+		ai::AiSettings settings;
+		RecordingDecisions decisions;
+		ai::SaiServices sai_services;
+		sai_services.timer = &timer;
+		sai_services.settings = &settings;
+		sai_services.objects = &manager;
+		sai_services.decisions = &decisions;
+		ai::Sai sai(1, sai_services);
+		CHECK(sai.is_friend(1));
+		CHECK(sai.is_enemy(2));
+		CHECK_FALSE(sai.is_enemy(1));
+		sai.update(1.0);
+		CHECK(sai.stage() == ai::SaiStage::StrategicObjects);
+		CHECK(sai.own_state()[20] == doctest::Approx(2.0f));
+		sai.update(1.0);
+		CHECK(sai.stage() == ai::SaiStage::NoAreas);
+		CHECK(sai.completed_updates() == 0);
+		sai.update(1.0);
+		CHECK(sai.stage() == ai::SaiStage::Done);
+		CHECK(sai.completed_updates() == 1);
+		const std::vector<std::string> expected{ "choose_strategy", "temperatures", "bot_positions", "distribution",
+			"resources", "no_areas" };
+		CHECK(decisions.calls == expected);
+		sai.update(1.0);
+		CHECK(sai.stage() == ai::SaiStage::StrategicObjects);
+		CHECK(sai.completed_updates() == 1);
+		CHECK(sai.own_state()[15] == doctest::Approx(60.0f));
+		CHECK(sai.own_state()[21] == doctest::Approx(1.0f));
+		CHECK(sai.own_state()[20] == doctest::Approx(1.0f));
+		CHECK(sai.enemy_state()[19] == doctest::Approx(1.0f));
+		CHECK(sai.own_state()[ai::kSaiStateCount - 1] == doctest::Approx(1.0f));
+
+		decisions.calls.clear();
+		game.owners = { 1 };
+		timer.step = 1.0;
+		ai::Sai sliced(1, sai_services);
+		uint32_t calls = 0;
+		while (sliced.completed_updates() == 0 && calls < 64) {
+			sliced.update(0.5);
+			++calls;
+		}
+		CHECK(sliced.completed_updates() == 1);
+		CHECK(calls > 10);
+		const std::vector<std::string> owned{ "release", "release", "choose_strategy", "temperatures", "bot_positions",
+			"distribution", "resources", "defence", "attack" };
+		CHECK(decisions.calls == owned);
+
+		ai::EnemyStatistics statistics(2, 1.0f);
+		const float strength[2] = { 4.0f, 2.0f };
+		const int count[2] = { 2, 0 };
+		statistics.sample(strength, count);
+		const float half[2] = { 0.0f, 4.0f };
+		const int none[2] = { 0, 2 };
+		statistics.sample(half, none);
+		CHECK(statistics.strength(0) == doctest::Approx(2.0f));
+		CHECK(statistics.strength(1) == doctest::Approx(3.0f));
+		CHECK(statistics.count(1) == doctest::Approx(1.0f));
+		CHECK(statistics.samples() == 2);
 	}
 }
