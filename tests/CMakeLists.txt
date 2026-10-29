@@ -67,6 +67,7 @@ function(openbf3_godot_row name script mode)
     endif()
     set_property(GLOBAL APPEND PROPERTY OPENBF3_GODOT_ROWS ${name})
 endfunction()
+include(${CMAKE_CURRENT_SOURCE_DIR}/proc_row.cmake)
 if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     add_test(NAME godot.project_setup COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT}
         "-DDLL=$<TARGET_FILE:bf3_godot>" -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_project_setup.cmake)
@@ -759,15 +760,6 @@ openbf3_cost(host.gunplay.client.unit 1 91)
 openbf3_cost(godot.fx_ref 1 182)
 openbf3_cost(godot.fx_demo 1 27)
 
-get_property(_openbf3_all_tests DIRECTORY PROPERTY TESTS)
-get_property(_openbf3_godot_rows GLOBAL PROPERTY OPENBF3_GODOT_ROWS)
-foreach(_openbf3_row IN LISTS _openbf3_all_tests)
-    if(_openbf3_row MATCHES "^godot[.]" AND NOT _openbf3_row STREQUAL "godot.project_setup"
-            AND NOT _openbf3_row IN_LIST _openbf3_godot_rows)
-        message(FATAL_ERROR "${_openbf3_row}: register godot.* rows with openbf3_godot_row(HEADLESS|WINDOW) (docs/testing.md)")
-    endif()
-endforeach()
-
 openbf3_test(test_m2a_contract3 test_main.cpp m2a_contract3_tests.cpp gunplay_fixture.h test_support.h)
 target_link_libraries(test_m2a_contract3 PRIVATE bf3_host bf3_anim bf3_fx bf3_audio bf3_client_audio bf3_render)
 target_include_directories(test_m2a_contract3 PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_godot/src)
@@ -1088,6 +1080,7 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_label(timing godot.dedicated.timing)
 endif()
 
+openbf3_check_rows()
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME hygiene.rules COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tools/check_hygiene.py" "${CMAKE_SOURCE_DIR}")
 set_tests_properties(hygiene.rules PROPERTIES TIMEOUT 120 LABELS "unit")
