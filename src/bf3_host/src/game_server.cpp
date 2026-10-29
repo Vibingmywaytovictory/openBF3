@@ -137,6 +137,7 @@ struct GameServer::Impl {
 		}
 		slots.admit_client(size_t(at), p_peer, team);
 		match.describe(m);
+		handshake.describe(size_t(at), m);
 		outbox.send(p_peer, net::kChannelReliable, net::encode_match_info(m));
 		const MatchBroadcast join = match.join_messages(tick);
 		if (!join.state.empty()) {
@@ -350,7 +351,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	m.commands.configure(p_config.max_slots, p_config.jitter_buffer_ticks);
 	m.snapshots.configure(p_config.max_slots);
 	m.dev.configure(m.config, *m.world, p_config.max_slots);
-	m.handshake.configure(p_config.game_build.value_or(net::game_build()));
+	m.handshake.configure(p_config.game_build.value_or(net::game_build()), *p_config.level, p_config.max_slots);
 	for (size_t i = 0; i < m.slots.size(); ++i) {
 		m.reset_slot(i);
 	}
@@ -419,14 +420,22 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 				++m.bad_datagrams;
 				return;
 			}
-			if (r->source_digest && m.config.level->source_digest && *r->source_digest != *m.config.level->source_digest) {
-				const net::Kick k = m.handshake.kick(
-						net::KickReason::Source, "level data differs from the server's (source digest)");
-				m.outbox.send(p_peer, net::kChannelReliable, net::encode_kick(k));
+			if (const std::optional<net::Kick> refused = m.handshake.ready(size_t(at), *r)) {
+				m.outbox.send(p_peer, net::kChannelReliable, net::encode_kick(*refused));
 				on_disconnect(p_peer);
 				return;
 			}
 			m.spawner.ready(size_t(at));
+			return;
+		}
+		case net::MessageType::Mismatch: {
+			core::Result<net::Mismatch> x = net::decode_mismatch(p_datagram);
+			if (!x || at < 0) {
+				++m.bad_datagrams;
+				return;
+			}
+			m.outbox.send(p_peer, net::kChannelReliable, net::encode_kick(m.handshake.mismatch(x->components)));
+			on_disconnect(p_peer);
 			return;
 		}
 		case net::MessageType::CommandPacket: {

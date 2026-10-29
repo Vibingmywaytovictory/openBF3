@@ -26,6 +26,7 @@ inline constexpr size_t kKickReasonCount = size_t(net::KickReason::LoadStalled) 
 using KickCounts = std::array<uint64_t, kKickReasonCount>;
 const char *kick_reason_name(net::KickReason p_code);
 std::string kick_counts_text(const KickCounts &p_kicks);
+std::string install_difference_text(uint8_t p_components);
 
 struct GameServerTickTimes {
 	sim::Tick tick = 0;

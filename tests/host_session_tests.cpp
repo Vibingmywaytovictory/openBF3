@@ -2377,3 +2377,117 @@ TEST_SUITE("host-session-unit") {
 				"LoadStalled=0");
 	}
 }
+
+TEST_SUITE("host-session-unit") {
+	TEST_CASE("host.session: GameServer kicks a Ready whose component digests differ and a Mismatch, each by its "
+			  "reason") {
+		GameServerConfig cfg;
+		cfg.level = synthetic_level();
+		cfg.max_slots = 8;
+		struct Outcome {
+			std::optional<net::Kick> kick;
+			size_t spawned = 0;
+			GameServerStats stats;
+		};
+		const auto join = [&](const std::function<std::vector<uint8_t>(const net::MatchInfo &)> &p_answer) {
+			Direct d;
+			REQUIRE(d.server.init(cfg).ok());
+			d.server.on_connect(0);
+			net::Hello hello;
+			hello.name = "digests";
+			hello.game_build = net::game_build();
+			d.receive(net::encode_hello(hello));
+			d.tick();
+			REQUIRE(d.match.has_value());
+			const net::MatchInfo &m = *d.match;
+			CHECK(m.sim_digest ==
+					sim_digest(cfg.level->collision_digest,
+							{ 0, m.motor_hash, m.weapon_hash, m.kit_hash, m.logic_digest, m.rules_flags }));
+			d.receive(p_answer(m));
+			Outcome o;
+			for (int i = 0; i < 4; ++i) {
+				d.tick();
+				for (const OutDatagram &out : d.out) {
+					if (net::peek_type(out.bytes) == net::MessageType::Kick) {
+						core::Result<net::Kick> k = net::decode_kick(out.bytes);
+						REQUIRE(k.ok());
+						CHECK_FALSE(o.kick.has_value());
+						o.kick = *k;
+					}
+				}
+			}
+			o.spawned = d.spawned.size();
+			o.stats = d.server.stats();
+			return o;
+		};
+		const auto own = [](const net::MatchInfo &p_m) {
+			return net::ComponentDigests{ p_m.sim_digest, p_m.motor_hash, p_m.weapon_hash, p_m.kit_hash,
+				p_m.logic_digest, p_m.rules_flags };
+		};
+		const auto ready_with = [&](decltype(&net::ComponentDigests::motor) p_field) {
+			return [=](const net::MatchInfo &p_m) {
+				net::Ready r;
+				r.source_digest = p_m.source_digest;
+				r.digests = own(p_m);
+				if (p_field != nullptr) {
+					(*r.digests).*p_field ^= 0x40;
+				}
+				return net::encode_ready(r);
+			};
+		};
+
+		Outcome o = join(ready_with(nullptr));
+		CHECK_FALSE(o.kick.has_value());
+		CHECK(o.spawned == 1);
+		CHECK(o.stats.clients == 1);
+
+		struct Row {
+			decltype(&net::ComponentDigests::motor) field;
+			net::KickReason reason;
+			const char *detail;
+		};
+		const Row rows[] = {
+			{ &net::ComponentDigests::motor, net::KickReason::Motor, "install differs: motor" },
+			{ &net::ComponentDigests::weapon, net::KickReason::Weapon, "install differs: weapon" },
+			{ &net::ComponentDigests::kit, net::KickReason::Kit, "install differs: kit" },
+			{ &net::ComponentDigests::logic, net::KickReason::Logic, "install differs: logic" },
+			{ &net::ComponentDigests::rules, net::KickReason::Rules, "install differs: rules" },
+			{ &net::ComponentDigests::sim, net::KickReason::Collision, "install differs: collision" },
+		};
+		for (const Row &row : rows) {
+			o = join(ready_with(row.field));
+			REQUIRE_MESSAGE(o.kick.has_value(), row.detail);
+			CHECK(o.kick->code == row.reason);
+			CHECK(o.kick->reason == row.detail);
+			CHECK(o.spawned == 0);
+			CHECK(o.stats.clients == 0);
+			KickCounts want{};
+			want[size_t(row.reason)] = 1;
+			CHECK(o.stats.kicks == want);
+		}
+
+		o = join([](const net::MatchInfo &) {
+			return net::encode_mismatch({ net::mismatch_bits::kWeapon | net::mismatch_bits::kMotor });
+		});
+		REQUIRE(o.kick.has_value());
+		CHECK(o.kick->code == net::KickReason::Motor);
+		CHECK(o.kick->reason == "install differs: motor, weapon");
+		CHECK(o.spawned == 0);
+		CHECK(o.stats.clients == 0);
+		CHECK(o.stats.kicks[size_t(net::KickReason::Motor)] == 1);
+
+		o = join([](const net::MatchInfo &) {
+			return net::encode_mismatch({ net::mismatch_bits::kSource | net::mismatch_bits::kKit });
+		});
+		REQUIRE(o.kick.has_value());
+		CHECK(o.kick->code == net::KickReason::Source);
+		CHECK(o.kick->reason == "level data differs from the server's (source digest)");
+		CHECK(o.stats.kicks[size_t(net::KickReason::Source)] == 1);
+
+		o = join([](const net::MatchInfo &) { return net::encode_ready({}); });
+		CHECK_FALSE(o.kick.has_value());
+		CHECK(o.spawned == 1);
+		CHECK(install_difference_text(net::mismatch_bits::kAll) ==
+				"install differs: source, collision, motor, weapon, kit, logic, rules");
+	}
+}
