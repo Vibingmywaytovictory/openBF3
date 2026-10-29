@@ -50,17 +50,16 @@ std::unique_ptr<Host> Host::create_server(const char *p_bind_ip, uint16_t p_port
 		return nullptr;
 	}
 	addr.port = p_port;
-	ENetHost *h = enet_host_create(&addr, p_max_peers, p_channels, 0, 0);
+	ENetHost *h = p_channels <= kCountedChannels ? enet_host_create(&addr, p_max_peers, p_channels, 0, 0) : nullptr;
 	if (h == nullptr) {
 		runtime_release();
 		if (r_error) {
-			*r_error = "enet_host_create (server) failed; port in use?";
+			*r_error = p_channels <= kCountedChannels ? "enet_host_create (server) failed; port in use?"
+													  : "more channels than are counted";
 		}
 		return nullptr;
 	}
-	std::unique_ptr<Host> host(new Host());
-	host->host_ = h;
-	host->channels_ = p_channels;
+	std::unique_ptr<Host> host = wrap(h, p_channels);
 	host->port_ = h->address.port;
 	return host;
 }
@@ -72,17 +71,23 @@ std::unique_ptr<Host> Host::create_client(size_t p_channels, std::string *r_erro
 		}
 		return nullptr;
 	}
-	ENetHost *h = enet_host_create(nullptr, 1, p_channels, 0, 0);
+	ENetHost *h = p_channels <= kCountedChannels ? enet_host_create(nullptr, 1, p_channels, 0, 0) : nullptr;
 	if (h == nullptr) {
 		runtime_release();
 		if (r_error) {
-			*r_error = "enet_host_create (client) failed";
+			*r_error = p_channels <= kCountedChannels ? "enet_host_create (client) failed"
+													  : "more channels than are counted";
 		}
 		return nullptr;
 	}
+	return wrap(h, p_channels);
+}
+
+std::unique_ptr<Host> Host::wrap(void *p_host, size_t p_channels) {
 	std::unique_ptr<Host> host(new Host());
-	host->host_ = h;
+	host->host_ = p_host;
 	host->channels_ = p_channels;
+	host->counters_.resize(static_cast<ENetHost *>(p_host)->peerCount);
 	return host;
 }
 
@@ -118,6 +123,9 @@ int Host::service(uint32_t p_timeout_ms, Event &r_event) {
 	switch (ev.type) {
 		case ENET_EVENT_TYPE_CONNECT:
 			r_event.type = EventType::Connect;
+			if (r_event.peer < counters_.size()) {
+				counters_[r_event.peer] = PeerCounters();
+			}
 			break;
 		case ENET_EVENT_TYPE_DISCONNECT:
 			r_event.type = EventType::Disconnect;
@@ -125,6 +133,11 @@ int Host::service(uint32_t p_timeout_ms, Event &r_event) {
 		case ENET_EVENT_TYPE_RECEIVE:
 			r_event.type = EventType::Receive;
 			r_event.data.assign(ev.packet->data, ev.packet->data + ev.packet->dataLength);
+			if (r_event.peer < counters_.size() && ev.channelID < kCountedChannels) {
+				ChannelCounters &c = counters_[r_event.peer].received[ev.channelID];
+				c.packets++;
+				c.bytes += command_bytes(r_event.peer, ev.packet->dataLength, ev.packet->flags);
+			}
 			enet_packet_destroy(ev.packet);
 			break;
 		default:
@@ -143,7 +156,11 @@ size_t Host::max_unfragmented_bytes(uint32_t p_peer) const {
 	if (p_peer >= h->peerCount || h->peers[p_peer].state != ENET_PEER_STATE_CONNECTED) {
 		return 0;
 	}
+	return fragment_bytes(p_peer);
+}
 
+size_t Host::fragment_bytes(uint32_t p_peer) const {
+	const ENetHost *h = static_cast<const ENetHost *>(host_);
 	size_t n = h->peers[p_peer].mtu - sizeof(ENetProtocolHeader) - sizeof(ENetProtocolSendFragment);
 	if (h->checksum != nullptr) {
 		n -= sizeof(enet_uint32);
@@ -173,7 +190,26 @@ bool Host::send(uint32_t p_peer, uint8_t p_channel, const void *p_data, size_t p
 		enet_packet_destroy(pkt);
 		return false;
 	}
+	if (p_channel < kCountedChannels) {
+		ChannelCounters &c = counters_[p_peer].sent[p_channel];
+		c.packets++;
+		c.bytes += command_bytes(p_peer, p_size, flags);
+	}
 	return true;
+}
+
+size_t Host::command_bytes(uint32_t p_peer, size_t p_size, uint32_t p_packet_flags) const {
+	const size_t fragment = fragment_bytes(p_peer);
+	if (p_size > fragment) {
+		return p_size + ((p_size + fragment - 1) / fragment) * sizeof(ENetProtocolSendFragment);
+	}
+	if ((p_packet_flags & ENET_PACKET_FLAG_RELIABLE) != 0) {
+		return p_size + sizeof(ENetProtocolSendReliable);
+	}
+	if ((p_packet_flags & ENET_PACKET_FLAG_UNSEQUENCED) != 0) {
+		return p_size + sizeof(ENetProtocolSendUnsequenced);
+	}
+	return p_size + sizeof(ENetProtocolSendUnreliable);
 }
 
 void Host::flush() {
@@ -211,6 +247,20 @@ bool Host::set_peer_timeout(uint32_t p_peer, uint32_t p_limit, uint32_t p_minimu
 bool Host::peer_connected(uint32_t p_peer) const {
 	const ENetHost *h = static_cast<const ENetHost *>(host_);
 	return p_peer < h->peerCount && h->peers[p_peer].state == ENET_PEER_STATE_CONNECTED;
+}
+
+PeerCounters Host::peer_counters(uint32_t p_peer) const {
+	return p_peer < counters_.size() ? counters_[p_peer] : PeerCounters();
+}
+
+WireTotals Host::wire_totals() const {
+	const ENetHost *h = static_cast<const ENetHost *>(host_);
+	WireTotals t;
+	t.sent_bytes = h->totalSentData;
+	t.sent_datagrams = h->totalSentPackets;
+	t.received_bytes = h->totalReceivedData;
+	t.received_datagrams = h->totalReceivedPackets;
+	return t;
 }
 
 uint32_t Host::peer_rtt_ms(uint32_t p_peer) const {

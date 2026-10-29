@@ -3,6 +3,7 @@
 #include "bf3/net/enet_host.h"
 #include "bf3/net/loopback_ping.h"
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -138,3 +139,86 @@ TEST_CASE("net: the server disconnects a kicked peer") {
 	CHECK(pair.client->connected_peers() == 0);
 }
 
+TEST_CASE("net: per-peer counters equal the bytes sent and received on each channel") {
+	constexpr uint64_t kSendReliable = 6;
+	constexpr uint64_t kSendUnreliable = 8;
+	constexpr uint64_t kSendUnsequenced = 8;
+	constexpr uint64_t kSendFragment = 24;
+	HostPair pair;
+	connect_pair(pair);
+	const uint64_t fragment = pair.client->max_unfragmented_bytes(pair.client_peer);
+	REQUIRE(fragment == 1392 - 4 - kSendFragment);
+	REQUIRE(pair.server->max_unfragmented_bytes(pair.server_peer) == fragment);
+
+	struct Sent {
+		bool from_client = true;
+		uint8_t channel = 0;
+		size_t size = 0;
+		Host::SendMode mode = Host::SendMode::Unsequenced;
+	};
+	const Sent sends[] = {
+		{ true, 0, 33, Host::SendMode::Unsequenced },
+		{ true, 0, 70, Host::SendMode::Unsequenced },
+		{ true, 1, 200, Host::SendMode::Reliable },
+		{ true, 1, 5000, Host::SendMode::Reliable },
+		{ true, 2, 90, Host::SendMode::Sequenced },
+		{ false, 0, size_t(fragment), Host::SendMode::Unsequenced },
+		{ false, 1, 12, Host::SendMode::Reliable },
+		{ false, 1, 3000, Host::SendMode::Reliable },
+		{ false, 2, 2800, Host::SendMode::Sequenced },
+	};
+	std::array<uint64_t, 3> from_client_bytes{}, from_server_bytes{}, from_client_packets{}, from_server_packets{};
+	size_t to_server = 0, to_client = 0;
+	for (size_t i = 0; i < std::size(sends); ++i) {
+		const Sent &s = sends[i];
+		const std::vector<uint8_t> bytes = payload(s.size, uint8_t(i));
+		Host &from = s.from_client ? *pair.client : *pair.server;
+		const uint32_t peer = s.from_client ? pair.client_peer : pair.server_peer;
+		REQUIRE(from.send(peer, s.channel, bytes.data(), bytes.size(), s.mode));
+		uint64_t wire = 0;
+		if (s.size > fragment) {
+			wire = s.size + ((s.size + fragment - 1) / fragment) * kSendFragment;
+		} else if (s.mode == Host::SendMode::Reliable) {
+			wire = s.size + kSendReliable;
+		} else if (s.mode == Host::SendMode::Unsequenced) {
+			wire = s.size + kSendUnsequenced;
+		} else {
+			wire = s.size + kSendUnreliable;
+		}
+		(s.from_client ? from_client_bytes : from_server_bytes)[s.channel] += wire;
+		(s.from_client ? from_client_packets : from_server_packets)[s.channel] += 1;
+		(s.from_client ? to_server : to_client) += 1;
+	}
+	pair.client->flush();
+	pair.server->flush();
+	REQUIRE(pair.until([&] {
+		return HostPair::count(pair.server_events, Host::EventType::Receive) == to_server &&
+				HostPair::count(pair.client_events, Host::EventType::Receive) == to_client;
+	}));
+
+	const bf3::net::PeerCounters client = pair.client->peer_counters(pair.client_peer);
+	const bf3::net::PeerCounters server = pair.server->peer_counters(pair.server_peer);
+	uint64_t client_sent_sum = 0, server_sent_sum = 0;
+	for (size_t c = 0; c < 3; ++c) {
+		CAPTURE(c);
+		CHECK(client.sent[c].bytes == from_client_bytes[c]);
+		CHECK(client.sent[c].packets == from_client_packets[c]);
+		CHECK(server.received[c].bytes == from_client_bytes[c]);
+		CHECK(server.received[c].packets == from_client_packets[c]);
+		CHECK(server.sent[c].bytes == from_server_bytes[c]);
+		CHECK(server.sent[c].packets == from_server_packets[c]);
+		CHECK(client.received[c].bytes == from_server_bytes[c]);
+		CHECK(client.received[c].packets == from_server_packets[c]);
+		client_sent_sum += client.sent[c].bytes;
+		server_sent_sum += server.sent[c].bytes;
+	}
+	CHECK(client.sent[3].packets == 0);
+	CHECK(server.received[3].packets == 0);
+	const bf3::net::WireTotals client_wire = pair.client->wire_totals();
+	const bf3::net::WireTotals server_wire = pair.server->wire_totals();
+	CHECK(client_wire.sent_bytes >= client_sent_sum + 2 * client_wire.sent_datagrams);
+	CHECK(server_wire.sent_bytes >= server_sent_sum + 2 * server_wire.sent_datagrams);
+	CHECK(server_wire.received_bytes > client_sent_sum);
+	CHECK(server_wire.received_bytes <= client_wire.sent_bytes);
+	CHECK(client_wire.received_bytes > server_sent_sum);
+}

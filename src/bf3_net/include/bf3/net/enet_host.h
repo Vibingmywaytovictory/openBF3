@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -11,6 +12,25 @@ namespace bf3::net {
 bool runtime_acquire();
 void runtime_release();
 std::string enet_version();
+
+inline constexpr size_t kCountedChannels = 4;
+
+struct ChannelCounters {
+	uint64_t packets = 0;
+	uint64_t bytes = 0;
+};
+
+struct PeerCounters {
+	std::array<ChannelCounters, kCountedChannels> sent{};
+	std::array<ChannelCounters, kCountedChannels> received{};
+};
+
+struct WireTotals {
+	uint64_t sent_bytes = 0;
+	uint64_t sent_datagrams = 0;
+	uint64_t received_bytes = 0;
+	uint64_t received_datagrams = 0;
+};
 
 class Host {
 public:
@@ -48,11 +68,19 @@ public:
 	size_t connected_peers() const;
 	bool peer_connected(uint32_t p_peer) const;
 
+	PeerCounters peer_counters(uint32_t p_peer) const;
+	size_t peer_capacity() const { return counters_.size(); }
+	WireTotals wire_totals() const;
+
 private:
 	Host() = default;
+	static std::unique_ptr<Host> wrap(void *p_host, size_t p_channels);
+	size_t fragment_bytes(uint32_t p_peer) const;
+	size_t command_bytes(uint32_t p_peer, size_t p_size, uint32_t p_packet_flags) const;
 	void *host_ = nullptr;
 	size_t channels_ = 0;
 	uint16_t port_ = 0;
+	std::vector<PeerCounters> counters_;
 };
 
 }
