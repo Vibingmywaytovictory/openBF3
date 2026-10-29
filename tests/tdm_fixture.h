@@ -361,6 +361,7 @@ inline ScriptedPeer::ScriptedPeer(host::GameServer &r_server, uint32_t p_peer, s
 inline void ScriptedPeer::hello() {
 	net::Hello h;
 	h.name = name_;
+	h.game_build = net::game_build();
 	server_->on_receive(peer_, net::kChannelReliable, net::encode_hello(h));
 }
 

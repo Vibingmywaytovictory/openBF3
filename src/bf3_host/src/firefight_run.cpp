@@ -295,6 +295,7 @@ core::Result<FirefightReport> run_firefight(std::shared_ptr<const SharedLevel> p
 		server.on_connect(peer);
 		net::Hello hello;
 		hello.name = "observer" + std::to_string(i);
+		hello.game_build = net::game_build();
 		const std::vector<uint8_t> h = net::encode_hello(hello);
 		server.on_receive(peer, net::kChannelReliable, h);
 		net::Ready ready;

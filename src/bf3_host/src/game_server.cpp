@@ -9,6 +9,7 @@
 #include "server_combat_log.h"
 #include "server_commands.h"
 #include "server_dev.h"
+#include "server_handshake.h"
 #include "server_match.h"
 #include "server_outbox.h"
 #include "server_slot_view.h"
@@ -82,10 +83,8 @@ struct GameServer::Impl {
 	SnapshotWriter snapshots{ slots, soldiers, commands, combat, combat_log, motor, outbox };
 	DevCommands dev{ slots, soldiers, spawner, combat, match, motor, outbox,
 		[this](size_t p_slot) { reset_slot(p_slot); } };
+	ServerHandshake handshake;
 	uint64_t bad_datagrams = 0;
-	uint64_t level_mismatch_kicks = 0;
-	uint64_t protocol_kicks = 0;
-	uint64_t full_kicks = 0;
 	uint64_t step_precondition_failures = 0;
 	double last_step_ms = 0;
 
@@ -113,15 +112,13 @@ struct GameServer::Impl {
 		if (slots.slot_of_peer(p_peer) >= 0) {
 			return;
 		}
-		if (p_hello.protocol != net::kProtocolVersion) {
-			outbox.send(p_peer, net::kChannelReliable, net::encode_kick(net::protocol_kick(p_hello.protocol)));
-			++protocol_kicks;
+		if (const std::optional<net::Kick> refused = handshake.hello(p_hello)) {
+			outbox.send(p_peer, net::kChannelReliable, net::encode_kick(*refused));
 			return;
 		}
 		const int at = slots.free_slot();
 		if (at < 0) {
-			outbox.send(p_peer, net::kChannelReliable, net::encode_kick({ "server full", net::KickReason::Full }));
-			++full_kicks;
+			outbox.send(p_peer, net::kChannelReliable, net::encode_kick(handshake.full()));
 			return;
 		}
 		reset_slot(size_t(at));
@@ -353,6 +350,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	m.commands.configure(p_config.max_slots, p_config.jitter_buffer_ticks);
 	m.snapshots.configure(p_config.max_slots);
 	m.dev.configure(m.config, *m.world, p_config.max_slots);
+	m.handshake.configure(p_config.game_build.value_or(net::game_build()));
 	for (size_t i = 0; i < m.slots.size(); ++i) {
 		m.reset_slot(i);
 	}
@@ -422,9 +420,9 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 				return;
 			}
 			if (r->source_digest && m.config.level->source_digest && *r->source_digest != *m.config.level->source_digest) {
-				const net::Kick k{ "level data differs from the server's (source digest)", net::KickReason::Source };
+				const net::Kick k = m.handshake.kick(
+						net::KickReason::Source, "level data differs from the server's (source digest)");
 				m.outbox.send(p_peer, net::kChannelReliable, net::encode_kick(k));
-				++m.level_mismatch_kicks;
 				on_disconnect(p_peer);
 				return;
 			}
@@ -496,9 +494,7 @@ GameServerStats GameServer::stats() const {
 	g.tick = m.tick;
 	g.bad_datagrams = m.bad_datagrams;
 	g.spawn_failures = m.spawner.failures();
-	g.level_mismatch_kicks = m.level_mismatch_kicks;
-	g.protocol_kicks = m.protocol_kicks;
-	g.full_kicks = m.full_kicks;
+	g.kicks = m.handshake.kicks();
 	if (const TdmRules *rules = m.match.rules(); rules != nullptr) {
 		g.rules_active = true;
 		g.match = rules->match_state();

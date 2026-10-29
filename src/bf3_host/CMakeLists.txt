@@ -174,3 +174,8 @@ target_sources(bf3_host PRIVATE
     src/server_net_thread.cpp
     src/server_net_thread.h
 )
+
+target_sources(bf3_host PRIVATE
+    src/server_handshake.cpp
+    src/server_handshake.h
+)

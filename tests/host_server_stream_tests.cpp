@@ -87,7 +87,7 @@ struct StreamRecorder {
 		states.add(uint64_t(g.max_snapshot_bytes));
 		states.add(g.bad_datagrams);
 		states.add(g.spawn_failures);
-		states.add(g.level_mismatch_kicks);
+		states.add(g.kicks[size_t(net::KickReason::Source)]);
 		states.add(g.rules_step_failures);
 		states.add(g.step_precondition_failures);
 		states.add(g.motor_steps);
@@ -367,6 +367,7 @@ TEST_SUITE("host-server-stream") {
 			if (next == 3u) {
 				net::Hello h;
 				h.name = "other level";
+				h.game_build = net::game_build();
 				server.on_receive(31u, net::kChannelReliable, net::encode_hello(h));
 				net::Ready r;
 				core::Sha256Digest digest{};
@@ -453,10 +454,14 @@ TEST_SUITE("host-server-stream") {
 		CHECK(rec.count(net::MessageType::SnapshotOthers) > 0u);
 		CHECK(rec.count(net::MessageType::DebugReport) >= 7u);
 		CHECK(rec.count(net::MessageType::Spawned) > 0u);
-		CHECK(server.stats().level_mismatch_kicks == 1u);
-		CHECK(server.stats().protocol_kicks == 1u);
-		CHECK(server.stats().full_kicks + server.stats().protocol_kicks + server.stats().level_mismatch_kicks ==
-				rec.count(net::MessageType::Kick));
+		const host::KickCounts kicks = server.stats().kicks;
+		CHECK(kicks[size_t(net::KickReason::Source)] == 1u);
+		CHECK(kicks[size_t(net::KickReason::Protocol)] == 1u);
+		uint64_t all_kicks = 0;
+		for (const uint64_t k : kicks) {
+			all_kicks += k;
+		}
+		CHECK(all_kicks == rec.count(net::MessageType::Kick));
 		CHECK(server.stats().bad_datagrams >= 2u);
 		CHECK(rec.stream.h == kDevStreamHash);
 		CHECK(rec.states.h == kDevStateHash);

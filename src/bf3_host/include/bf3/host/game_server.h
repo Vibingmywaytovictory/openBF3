@@ -3,14 +3,17 @@
 #include "bf3/core/result.h"
 #include "bf3/host/bot_fill_stats.h"
 #include "bf3/host/gunplay.h"
+#include "bf3/host/level_load.h"
 #include "bf3/host/server_view.h"
 #include "bf3/host/tdm_rules.h"
-#include "bf3/host/level_load.h"
+#include "bf3/net/protocol.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/soldier_state.h"
 
+#include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -18,6 +21,11 @@
 namespace bf3::host {
 
 struct BotFillConfig;
+
+inline constexpr size_t kKickReasonCount = size_t(net::KickReason::LoadStalled) + 1;
+using KickCounts = std::array<uint64_t, kKickReasonCount>;
+const char *kick_reason_name(net::KickReason p_code);
+std::string kick_counts_text(const KickCounts &p_kicks);
 
 struct GameServerTickTimes {
 	sim::Tick tick = 0;
@@ -45,6 +53,7 @@ struct GameServerConfig {
 	uint32_t walkers = 0;
 	bool dev_commands = false;
 	uint64_t seed = 1;
+	std::optional<uint64_t> game_build;
 
 	std::shared_ptr<const BotFillConfig> bots;
 
@@ -88,10 +97,8 @@ struct GameServerStats {
 	size_t max_snapshot_bytes = 0;
 	uint64_t bad_datagrams = 0;
 	uint64_t spawn_failures = 0;
-	uint64_t level_mismatch_kicks = 0;
+	KickCounts kicks{};
 	uint64_t rules_step_failures = 0;
-	uint64_t protocol_kicks = 0;
-	uint64_t full_kicks = 0;
 	bool rules_active = false;
 	net::MatchState match;
 	RulesStats rules;

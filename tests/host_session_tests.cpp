@@ -762,6 +762,7 @@ TEST_SUITE("host-session-unit") {
 		d.server.on_connect(0);
 		net::Hello hello;
 		hello.name = "test";
+		hello.game_build = net::game_build();
 		d.receive(net::encode_hello(hello));
 		d.tick();
 		REQUIRE(d.match.has_value());
@@ -965,6 +966,7 @@ TEST_SUITE("host-session-unit") {
 		cfg.max_slots = 8;
 		net::Hello hello;
 		hello.name = "test";
+		hello.game_build = net::game_build();
 
 		const auto run = [&](std::optional<core::Sha256Digest> p_digest, size_t &r_kicks, size_t &r_spawned) {
 			Direct d;
@@ -996,7 +998,7 @@ TEST_SUITE("host-session-unit") {
 		GameServerStats g = run(other, kicks, spawned);
 		CHECK(kicks == 1);
 		CHECK(spawned == 0);
-		CHECK(g.level_mismatch_kicks == 1);
+		CHECK(g.kicks[size_t(net::KickReason::Source)] == 1);
 		CHECK(g.clients == 0);
 		CHECK(g.soldiers == 0);
 		CHECK(g.bad_datagrams == 0);
@@ -1004,13 +1006,13 @@ TEST_SUITE("host-session-unit") {
 		g = run(digested->source_digest, kicks, spawned);
 		CHECK(kicks == 0);
 		CHECK(spawned == 1);
-		CHECK(g.level_mismatch_kicks == 0);
+		CHECK(g.kicks[size_t(net::KickReason::Source)] == 0);
 		CHECK(g.clients == 1);
 
 		g = run(std::nullopt, kicks, spawned);
 		CHECK(kicks == 0);
 		CHECK(spawned == 1);
-		CHECK(g.level_mismatch_kicks == 0);
+		CHECK(g.kicks[size_t(net::KickReason::Source)] == 0);
 		CHECK(g.clients == 1);
 	}
 
@@ -1023,7 +1025,7 @@ TEST_SUITE("host-session-unit") {
 		cfg.dev_commands = true;
 		REQUIRE(d.server.init(cfg).ok());
 		d.server.on_connect(0);
-		d.receive(net::encode_hello({}));
+		d.receive(net::encode_hello({ net::kProtocolVersion, net::game_build(), "" }));
 		d.receive(net::encode_ready({}));
 		d.tick();
 		net::DebugRequest q;
@@ -1995,6 +1997,7 @@ TEST_SUITE("host-session-unit") {
 		const uint64_t services = pipe->services.load();
 		net::Hello hello;
 		hello.name = "stalled";
+		hello.game_build = net::game_build();
 		pipe->client_send(0, net::kChannelReliable, net::encode_hello(hello));
 		REQUIRE(wait_until(
 				[&] { return pipe->services.load() >= services + 3 && pipe->to_server_empty(); }, 10s, 16ms));
@@ -2143,6 +2146,7 @@ TEST_SUITE("host-session-unit") {
 		pipe->connect(1);
 		net::Hello hello;
 		hello.name = "kept";
+		hello.game_build = net::game_build();
 		pipe->client_send(0, net::kChannelReliable, net::encode_hello(hello));
 		REQUIRE(wait_until([&] { return pipe->count_sent(0, net::MessageType::MatchInfo) == 1; }, 10s, 16ms));
 		{
@@ -2318,5 +2322,58 @@ TEST_SUITE("host-session-unit") {
 		net::ComponentDigests with_sim = c;
 		with_sim.sim = 0xABCDu;
 		CHECK(sim_digest(digest, with_sim) == base);
+	}
+}
+
+TEST_SUITE("host-session-unit") {
+	TEST_CASE("host.session: a Hello with another game_build is kicked Build, the server's own build is admitted") {
+		GameServerConfig cfg;
+		cfg.level = synthetic_level();
+		cfg.max_slots = 8;
+		const auto join = [&](uint64_t p_build, size_t &r_kicks) {
+			Direct d;
+			REQUIRE(d.server.init(cfg).ok());
+			d.server.on_connect(0);
+			net::Hello hello;
+			hello.name = "build";
+			hello.game_build = p_build;
+			d.receive(net::encode_hello(hello));
+			d.tick();
+			r_kicks = 0;
+			for (const OutDatagram &o : d.out) {
+				if (net::peek_type(o.bytes) == net::MessageType::Kick) {
+					core::Result<net::Kick> k = net::decode_kick(o.bytes);
+					REQUIRE(k.ok());
+					CHECK(k->code == net::KickReason::Build);
+					CHECK(k->reason.find("game build") != std::string::npos);
+					CHECK(o.reliable);
+					++r_kicks;
+				}
+			}
+			CHECK(d.match.has_value() == (r_kicks == 0));
+			return d.server.stats();
+		};
+		size_t kicks = 0;
+		GameServerStats g = join(net::game_build() ^ 0x5A5A5A5A5A5A5A5Aull, kicks);
+		CHECK(kicks == 1);
+		CHECK(g.clients == 0);
+		CHECK(g.kicks[size_t(net::KickReason::Build)] == 1);
+		g = join(0, kicks);
+		CHECK(kicks == 1);
+		CHECK(g.kicks[size_t(net::KickReason::Build)] == 1);
+		g = join(net::game_build(), kicks);
+		CHECK(kicks == 0);
+		CHECK(g.clients == 1);
+		CHECK(g.kicks == KickCounts{});
+
+		cfg.game_build = 0x0B3F0B3F0B3F0B3Full;
+		g = join(net::game_build(), kicks);
+		CHECK(kicks == (net::game_build() != *cfg.game_build ? 1u : 0u));
+		g = join(*cfg.game_build, kicks);
+		CHECK(kicks == 0);
+		CHECK(g.clients == 1);
+		CHECK(kick_counts_text(g.kicks) ==
+				"Protocol=0 Build=0 Full=0 Source=0 Collision=0 Motor=0 Weapon=0 Kit=0 Logic=0 Rules=0 LoadTimeout=0 "
+				"LoadStalled=0");
 	}
 }

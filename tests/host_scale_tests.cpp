@@ -281,6 +281,7 @@ void connect_observer(GameServer &r_server, uint32_t p_peer, const SharedLevel &
 	r_server.on_connect(p_peer);
 	net::Hello hello;
 	hello.name = "observer";
+	hello.game_build = net::game_build();
 	const std::vector<uint8_t> h = net::encode_hello(hello);
 	r_server.on_receive(p_peer, net::kChannelReliable, h);
 	net::Ready ready;

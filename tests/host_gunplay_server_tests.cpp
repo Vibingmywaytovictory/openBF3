@@ -1026,6 +1026,7 @@ TEST_SUITE("host-gunplay-server") {
 			r_d.server.on_connect(1);
 			net::Hello hello;
 			hello.name = "sv-hostile";
+			hello.game_build = net::game_build();
 			r_d.receive(net::encode_hello(hello), net::kChannelReliable);
 			r_d.tick();
 			r_d.receive(net::encode_ready({}), net::kChannelReliable);

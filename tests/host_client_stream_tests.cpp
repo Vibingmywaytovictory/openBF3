@@ -690,6 +690,7 @@ TEST_SUITE("host-client-stream") {
 		host::GameServerConfig cfg;
 		cfg.level = level->shared;
 		cfg.max_slots = 40;
+		cfg.game_build = kStreamGameBuild;
 		cfg.dev_commands = true;
 		cfg.seed = 33;
 		cfg.gunplay.mechanics_cfg = OPENBF3_MECHANICS_CFG;
@@ -785,6 +786,7 @@ TEST_SUITE("host-client-stream") {
 		host::GameServerConfig cfg;
 		cfg.level = level->shared;
 		cfg.max_slots = 56;
+		cfg.game_build = kStreamGameBuild;
 		cfg.dev_commands = true;
 		cfg.seed = 5;
 		cfg.walkers = 44;

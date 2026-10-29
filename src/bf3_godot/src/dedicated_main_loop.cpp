@@ -266,16 +266,15 @@ void DedicatedMainLoop::report(const host::ServerSessionStats &p_stats) {
 			? core::fmt("%s US %d - RU %d of %d", host::match_phase_name(g.match.phase), g.match.kills[0],
 					  g.match.kills[1], g.match.kill_limit)
 			: std::string("no rules");
-	say(core::fmt("t=%.1f s tick %llu (%.2f Hz) p99 %.3f ms max %.3f ms overruns %llu | stages ms commands %.3f "
-				  "sources %.3f rules %.3f tick %.3f | peers %u "
-				  "clients %u bots %u | %s | stuck %u | private %.1f MiB (peak %.1f) | kicks protocol %llu full %llu "
-				  "level %llu | godot nodes %lld resources "
-				  "%lld textures %lld B video %lld B | prebake%s",
+	say(core::fmt(
+			"t=%.1f s tick %llu (%.2f Hz) p99 %.3f ms max %.3f ms overruns %llu | stages ms commands %.3f "
+			"sources %.3f rules %.3f tick %.3f | peers %u "
+			"clients %u bots %u | %s | stuck %u | private %.1f MiB (peak %.1f) | kicks %s | godot nodes %lld resources "
+			"%lld textures %lld B video %lld B | prebake%s",
 			elapsed_, (unsigned long long)s.ticks, s.measured_hz, s.p99_step_ms, s.max_step_ms,
 			(unsigned long long)s.overruns, g.last_commands_ms, g.last_sources_ms, g.last_rules_ms, g.last_tick_ms,
 			s.peers, g.clients, p_stats.bots, match.c_str(), p_stats.stuck_bots, double(p_stats.private_bytes) / kMiB,
-			double(p_stats.peak_private_bytes) / kMiB, (unsigned long long)g.protocol_kicks,
-			(unsigned long long)g.full_kicks, (unsigned long long)g.level_mismatch_kicks,
+			double(p_stats.peak_private_bytes) / kMiB, host::kick_counts_text(g.kicks).c_str(),
 			(long long)monitor(Performance::OBJECT_NODE_COUNT), (long long)monitor(Performance::OBJECT_RESOURCE_COUNT),
 			(long long)monitor(Performance::RENDER_TEXTURE_MEM_USED),
 			(long long)monitor(Performance::RENDER_VIDEO_MEM_USED), prebake.empty() ? " none" : prebake.c_str()));
