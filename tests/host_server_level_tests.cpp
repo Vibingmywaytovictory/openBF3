@@ -4,10 +4,12 @@
 #include "bf3/core/level/combat_tiles_cache.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/mode_areas.h"
+#include "bf3/core/thread_pool.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/map_list.h"
 #include "bf3/host/server_level.h"
 #include "bf3/host/server_session.h"
+#include "bf3/host/tdm_brain.h"
 #include "bf3/sim/nav.h"
 
 #include "gunplay_fixture.h"
@@ -23,6 +25,7 @@
 #include <vector>
 
 using namespace bf3;
+namespace tt = bf3::test::tdm;
 
 namespace {
 
@@ -427,6 +430,91 @@ TEST_SUITE("host-server-level-prebake") {
 		CHECK_FALSE(session.running());
 		std::printf("host.server.level.prebake: first level and port in %.2f s\n", seconds_first);
 		config.cache->close();
+		std::error_code ec;
+		std::filesystem::remove_all(root, ec);
+		const core::SnapshotDiff diff = core::diff_snapshots(m.before, m.reader.snapshot());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+		std::printf("install.unchanged: %s (%zu files)\n", diff.clean() ? "clean" : diff.summary().c_str(),
+				m.before.files.size());
+	}
+}
+
+TEST_SUITE("host-tdm-levels") {
+	TEST_CASE("bots-only TDM rounds to 20 kills on MP_011 and MP_003: round over, no stuck bot, no sight through "
+			  "walls, no runtime fault") {
+		bf3::test::Mounted m;
+		if (!bf3::test::open_or_skip(m)) {
+			return;
+		}
+		const std::filesystem::path root = scratch_cache("tdm-levels");
+		std::shared_ptr<core::Cache> cache = open_cache(root, m.reader);
+		const std::vector<host::LevelEntry> levels{ { "MP_011", "TeamDeathMatch0", 1 },
+			{ "MP_003", "TeamDeathMatch0", 1 } };
+		struct Run {
+			std::string error;
+			tt::TdmRunResult result;
+			uint32_t stuck_m2a = 0;
+		};
+		const std::vector<Run> runs = core::parallel_map<Run>(
+				levels.size(),
+				[&](size_t i) {
+					Run run;
+					core::Result<host::ServerLevel> loaded =
+							host::load_server_level(m.install, levels[i], server_options(true), cache.get(), nullptr);
+					if (!loaded) {
+						run.error = loaded.error().message;
+						return run;
+					}
+					print_level("host.tdm.levels", *loaded);
+					tt::TdmLevel level;
+					level.install = m.install;
+					level.shared = loaded->shared;
+					level.bots = loaded->bots;
+					tt::TdmRunConfig c;
+					c.seed = 1;
+					c.bots = 32;
+					c.peer = false;
+					c.rules.mode = host::MatchRulesConfig::Mode::Tdm;
+					c.rules.deploy_screen = false;
+					c.rules.revive = true;
+					c.rules.kill_limit_override = 20;
+					c.rules.preround_override_s = 0.0f;
+					c.rules.max_players = 32;
+					c.after_round_ticks = 0;
+					c.configure_bots = [](host::TdmBotConfig &r_bots) { r_bots.tuning_cfg = OPENBF3_BOT_TUNING_CFG; };
+					const std::shared_ptr<tt::BotChecks> checks = tt::attach_bot_checks(c, &level);
+					core::Result<tt::TdmRunResult> r = tt::run_tdm(level, c);
+					if (!r) {
+						run.error = r.error().message;
+						return run;
+					}
+					run.result = std::move(*r);
+					tt::apply_bot_checks(*checks, run.result, &run.stuck_m2a);
+					return run;
+				},
+				2);
+		for (size_t i = 0; i < runs.size(); ++i) {
+			CHECK_MESSAGE(runs[i].error.empty(), (levels[i].level + ": " + runs[i].error));
+			if (!runs[i].error.empty()) {
+				continue;
+			}
+			const tt::TdmRunResult &r = runs[i].result;
+			std::printf("host.tdm.levels %s: ticks %u, round over %d, winner %u, kills %d / %d, revives %u, stuck %u "
+						"(run_tdm's own %u), sight %u, stale aim %u, "
+						"spawns enemy within 10 m %u, runtime faults %llu, run %.2f s\n",
+					levels[i].level.c_str(), r.ticks, int(r.round_over), unsigned(r.winner), r.kills[1], r.kills[2],
+					r.revives, r.stuck_bots, runs[i].stuck_m2a, r.sight_violations, r.stale_aim_shots,
+					r.spawns_enemy_within_10m, (unsigned long long)r.rules.runtime_faults, r.seconds_run);
+			CHECK_MESSAGE(r.failure.empty(), r.failure);
+			CHECK(r.round_over);
+			CHECK(std::max(r.kills[1], r.kills[2]) >= 20);
+			CHECK_FALSE(r.runtime_faulted);
+			CHECK(r.rules.runtime_faults == 0u);
+			CHECK(r.stuck_bots == 0u);
+			CHECK(r.sight_violations == 0u);
+			CHECK(r.stale_aim_shots == 0u);
+		}
+		cache->close();
 		std::error_code ec;
 		std::filesystem::remove_all(root, ec);
 		const core::SnapshotDiff diff = core::diff_snapshots(m.before, m.reader.snapshot());
