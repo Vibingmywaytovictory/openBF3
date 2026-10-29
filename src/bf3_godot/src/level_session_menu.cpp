@@ -166,10 +166,11 @@ void NativeMenu::attach_overview(Bf3UiScreens &r_screens, const NativeMenuIo &p_
 	if (overview == nullptr) {
 		return;
 	}
-	const uint64_t view_id = slot.view->get_instance_id();
-	if (overview_view_ != view_id) {
+	const uint64_t view_open = slot.view->open_serial();
+	if (overview_view_ != view_open) {
+		overview->detach(slot.view);
 		if (overview->attach(slot.view)) {
-			overview_view_ = view_id;
+			overview_view_ = view_open;
 			++stats_.overview_attached;
 		}
 	}

@@ -83,6 +83,7 @@ struct SwfViewStats {
 	uint32_t kernels_clamped = 0;
 	uint32_t structure_passes = 0;
 	uint32_t content_builds = 0;
+	uint32_t reopens = 0;
 	uint32_t nodes_refreshed = 0;
 	uint32_t viewports_updated = 0;
 	uint32_t changes = 0;
@@ -105,6 +106,10 @@ public:
 	bf3::core::Status open(std::string_view p_movie);
 	bf3::core::Status open(std::shared_ptr<const bf3::core::ui::SwfLibrary> p_library, std::string_view p_movie);
 	void close();
+	uint64_t surface_bytes() const;
+	void release_root_target();
+	uint32_t instance_items() const;
+	uint64_t open_serial() const;
 	bool is_open() const;
 	const std::string &error() const;
 

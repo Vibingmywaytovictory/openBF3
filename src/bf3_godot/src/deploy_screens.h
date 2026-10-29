@@ -97,6 +97,7 @@ private:
 	bool shown_ = false;
 	bool cursor_ = false;
 	uint64_t overview_view_ = 0;
+	uint64_t overview_open_ = 0;
 	DeployScreensStats stats_;
 };
 

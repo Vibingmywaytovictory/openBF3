@@ -198,14 +198,17 @@ void DeployScreens::frame(Bf3UiScreens &r_screens, Bf3NativeHud *p_hud, godot::N
 	}
 	Bf3OverviewMap *overview = p_parent != nullptr ? Bf3OverviewMap::ensure(p_parent) : nullptr;
 	const uint64_t view_id = view != nullptr ? uint64_t(view->get_instance_id()) : 0;
-	if (overview != nullptr && view_id != overview_view_) {
+	const uint64_t view_open = view != nullptr ? view->open_serial() : 0;
+	if (overview != nullptr && (view_id != overview_view_ || view_open != overview_open_)) {
 		if (godot::Object *old = godot::ObjectDB::get_instance(godot::ObjectID(overview_view_))) {
 			overview->detach(godot::Object::cast_to<Bf3SwfView>(old));
 		}
 		overview_view_ = 0;
+		overview_open_ = 0;
 		if (view != nullptr) {
 			if (const bf3::core::Status st = overview->attach(view, kSpawnScreenOverviewPath); st) {
 				overview_view_ = view_id;
+				overview_open_ = view_open;
 				++stats_.overview_attaches;
 			} else {
 				stats_.last_error = st.error().message;

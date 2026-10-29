@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 
 using namespace godot;
 namespace ui = bf3::core::ui;
@@ -221,6 +222,61 @@ bf3::core::Status Bf3UiScreens::open_movie_screen(std::string_view p_movie, ui::
 	return bf3::core::Status::success();
 }
 
+void Bf3UiScreens::free_view(Bf3SwfView *p_view) {
+	remove_child(p_view);
+	p_view->queue_free();
+}
+
+Bf3SwfView *Bf3UiScreens::take_idle_view(std::string_view p_partition) {
+	const auto it = std::find_if(idle_views_.begin(), idle_views_.end(),
+			[p_partition](const std::pair<std::string, uint64_t> &p_idle) { return p_idle.first == p_partition; });
+	if (it == idle_views_.end()) {
+		return nullptr;
+	}
+	Bf3SwfView *v = Object::cast_to<Bf3SwfView>(ObjectDB::get_instance(it->second));
+	idle_views_.erase(it);
+	if (v != nullptr) {
+		v->set_visible(true);
+		v->set_process(true);
+		++stats_.views_reused;
+	}
+	return v;
+}
+
+void Bf3UiScreens::keep_idle_view(const std::string &p_partition, Bf3SwfView *p_view) {
+	const auto same = std::find_if(idle_views_.begin(), idle_views_.end(),
+			[&p_partition](const std::pair<std::string, uint64_t> &p_idle) { return p_idle.first == p_partition; });
+	if (same != idle_views_.end()) {
+		if (Bf3SwfView *old = Object::cast_to<Bf3SwfView>(ObjectDB::get_instance(same->second))) {
+			free_view(old);
+		}
+		idle_views_.erase(same);
+	}
+	p_view->set_visible(false);
+	p_view->set_process(false);
+	p_view->release_root_target();
+	idle_views_.emplace_back(p_partition, p_view->get_instance_id());
+	uint64_t bytes = 0;
+	uint32_t items = 0;
+	for (auto it = idle_views_.rbegin(); it != idle_views_.rend();) {
+		Bf3SwfView *v = Object::cast_to<Bf3SwfView>(ObjectDB::get_instance(it->second));
+		const uint64_t view_bytes = v != nullptr ? v->surface_bytes() : 0;
+		const uint32_t view_items = v != nullptr ? v->instance_items() : 0;
+		if (v == nullptr || bytes + view_bytes > kUiScreensIdleViewBytes ||
+				items + view_items > kUiScreensIdleViewItems) {
+			if (v != nullptr) {
+				free_view(v);
+				++stats_.views_dropped;
+			}
+			it = std::make_reverse_iterator(idle_views_.erase(std::next(it).base()));
+		} else {
+			bytes += view_bytes;
+			items += view_items;
+			++it;
+		}
+	}
+}
+
 ui::HudScreen *Bf3UiScreens::hud_screen(std::string_view p_partition) {
 	const Entry *e = find(p_partition);
 	return e != nullptr ? screen_of(*e) : nullptr;
@@ -247,14 +303,16 @@ bf3::core::Status Bf3UiScreens::open_entry(
 	ui::HudStageRects rects;
 	ui::SwfScene *scene = nullptr;
 	if (drawn_.count(p_partition) != 0) {
-		Bf3SwfView *v = memnew(Bf3SwfView);
-		v->set_name(to_godot(ui::ui_data_category_leaf(p_partition)));
-		v->set_playing(false);
-		add_child(v);
+		Bf3SwfView *v = take_idle_view(p_partition);
+		if (v == nullptr) {
+			v = memnew(Bf3SwfView);
+			v->set_name(to_godot(ui::ui_data_category_leaf(p_partition)));
+			v->set_playing(false);
+			add_child(v);
+		}
 		e->view = v;
 		if (const bf3::core::Status st = v->open(p_asset.movie); !st) {
-			remove_child(v);
-			v->queue_free();
+			free_view(v);
 			return bf3::core::make_error(p_asset.movie + ": " + st.error().message);
 		}
 		scene = v->scene();
@@ -275,8 +333,7 @@ bf3::core::Status Bf3UiScreens::open_entry(
 			ui::HudScreen::open(*scene, *assets->movies(), p_asset, assets->swf_fonts(), client_, rects, p_data);
 	if (!s) {
 		if (e->view != nullptr) {
-			remove_child(e->view);
-			e->view->queue_free();
+			free_view(e->view);
 		}
 		return bf3::core::make_error(p_asset.name + ": " + s.error().message);
 	}
@@ -402,8 +459,7 @@ void Bf3UiScreens::drop(size_t p_index) {
 		const std::string owner = view_owner(e);
 		bg_.forget(owner);
 		effects_seen_.erase(owner);
-		remove_child(e.view);
-		e.view->queue_free();
+		keep_idle_view(e.partition, e.view);
 		e.view = nullptr;
 	}
 	entries_.erase(entries_.begin() + std::ptrdiff_t(p_index));

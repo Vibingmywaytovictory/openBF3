@@ -37,6 +37,8 @@ class Bf3NativeHud;
 class Bf3SwfView;
 
 inline constexpr size_t kUiScreensMax = 64;
+inline constexpr uint64_t kUiScreensIdleViewBytes = uint64_t(1024) << 20;
+inline constexpr uint32_t kUiScreensIdleViewItems = 12000;
 inline constexpr size_t kUiScreensMaxLog = 4096;
 inline constexpr size_t kUiScreensMaxErrors = 64;
 inline constexpr int32_t kUiScreensFirstOwnOrder = 4;
@@ -62,6 +64,8 @@ struct UiScreensStats {
 	uint64_t concepts_found = 0;
 	uint64_t keys = 0;
 	uint64_t mouse = 0;
+	uint64_t views_reused = 0;
+	uint64_t views_dropped = 0;
 };
 
 class Bf3UiScreens : public godot::Node2D, public UiScreenHost, public UiScreenRecords {
@@ -144,6 +148,9 @@ private:
 	std::optional<godot::Vector2> stage_point(const Entry &p_entry, godot::Vector2 p_viewport) const;
 	void note(std::string p_line);
 	void error(std::string p_message);
+	Bf3SwfView *take_idle_view(std::string_view p_partition);
+	void keep_idle_view(const std::string &p_partition, Bf3SwfView *p_view);
+	void free_view(Bf3SwfView *p_view);
 
 	const bf3::core::EbxResolver *db_ = nullptr;
 	uint64_t hud_id_ = 0;
@@ -154,6 +161,7 @@ private:
 	HudBgPainter bg_;
 	std::map<std::string, uint64_t, std::less<>> effects_seen_;
 	std::map<std::string, uint64_t, std::less<>> closed_shown_;
+	std::vector<std::pair<std::string, uint64_t>> idle_views_;
 	uint64_t reloads_seen_ = 0;
 	int32_t next_order_ = kUiScreensFirstOwnOrder;
 	std::string pressed_screen_;

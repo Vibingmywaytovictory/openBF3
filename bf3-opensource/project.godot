@@ -31,6 +31,7 @@ joypads/ignore_joypad_on_unfocused_application=true
 
 rendering_device/driver.windows="d3d12"
 lights_and_shadows/multi_bounce_occlusion/enabled=true
+limits/global_shader_variables/buffer_size=262144
 
 [threading]
 

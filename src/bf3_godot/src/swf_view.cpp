@@ -10,6 +10,7 @@
 #include "bf3/core/ui/swf_geometry.h"
 #include "bf3/core/ui/swf_text.h"
 #include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/fnv.h"
 
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/classes/viewport.hpp>
@@ -183,6 +184,7 @@ struct SharedShaders {
 };
 
 std::unique_ptr<SharedShaders> g_shaders;
+uint64_t g_open_serial = 0;
 
 const SharedShaders &acquire_shaders(RenderingServer *p_rs) {
 	if (g_shaders == nullptr) {
@@ -209,6 +211,33 @@ void release_shaders(RenderingServer *p_rs) {
 }
 
 constexpr ui::SwfAffine kSingularAffine{ 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
+
+uint64_t content_fingerprint(const ui::SwfSceneNode &p_n) {
+	uint64_t h = bf3::core::kFnv1aOffset;
+	bf3::core::fnv1a_value(h, p_n.kind);
+	for (const void *p : { static_cast<const void *>(p_n.shape), static_cast<const void *>(p_n.edit_text),
+				 static_cast<const void *>(p_n.sub_image), static_cast<const void *>(p_n.drawing.get()) }) {
+		bf3::core::fnv1a_value(h, reinterpret_cast<uintptr_t>(p));
+	}
+	bf3::core::fnv1a(h, p_n.image.data(), p_n.image.size());
+	bf3::core::fnv1a_value(h, p_n.image_width);
+	bf3::core::fnv1a_value(h, p_n.image_height);
+	bf3::core::fnv1a(h, p_n.text.data(), p_n.text.size());
+	bf3::core::fnv1a_value(h, p_n.html);
+	bf3::core::fnv1a_value(h, p_n.text_options.auto_size);
+	bf3::core::fnv1a_value(h, p_n.text_options.fit);
+	bf3::core::fnv1a_value(h, p_n.text_bounds.has_value());
+	if (p_n.text_bounds) {
+		bf3::core::fnv1a_value(h, *p_n.text_bounds);
+	}
+	bf3::core::fnv1a_value(h, p_n.text_color.has_value());
+	if (p_n.text_color) {
+		bf3::core::fnv1a_value(h, *p_n.text_color);
+	}
+	bf3::core::fnv1a_value(h, p_n.text_size.value_or(-1.0f));
+	bf3::core::fnv1a_value(h, int32_t(p_n.text_align.value_or(0xFF)));
+	return h;
+}
 
 Transform2D xform_of(const ui::SwfAffine &p_m) {
 	return Transform2D(real_t(p_m.a), real_t(p_m.b), real_t(p_m.c), real_t(p_m.d), real_t(p_m.tx), real_t(p_m.ty));
@@ -688,6 +717,18 @@ struct Geometry {
 	}
 };
 
+uint64_t target_bytes(Vector2i p_size, RenderingServer::ViewportMSAA p_msaa) {
+	uint64_t samples = 1;
+	if (p_msaa == RenderingServer::VIEWPORT_MSAA_2X) {
+		samples = 3;
+	} else if (p_msaa == RenderingServer::VIEWPORT_MSAA_4X) {
+		samples = 5;
+	} else if (p_msaa == RenderingServer::VIEWPORT_MSAA_8X) {
+		samples = 9;
+	}
+	return uint64_t(std::max(0, p_size.x)) * uint64_t(std::max(0, p_size.y)) * 4u * samples;
+}
+
 RID make_viewport(RenderingServer *p_rs, RenderingServer::ViewportMSAA p_msaa) {
 	const RID viewport = p_rs->viewport_create();
 	p_rs->viewport_set_disable_3d(viewport, true);
@@ -729,6 +770,8 @@ struct Surface {
 		p_rs->viewport_set_size(viewport, size.x, size.y);
 		return true;
 	}
+
+	uint64_t bytes(RenderingServer::ViewportMSAA p_msaa) const { return target_bytes(size, p_msaa); }
 
 	void render(RenderingServer *p_rs) const {
 		if (viewport.is_valid()) {
@@ -852,6 +895,8 @@ struct NodeRec {
 	std::vector<Piece> pieces;
 	BuildCounts counts;
 	bool built = false;
+	bool reopened = false;
+	uint64_t fingerprint = 0;
 	uint32_t text_revision = 0;
 	uint32_t character_revision = 0;
 	const void *content = nullptr;
@@ -915,6 +960,7 @@ struct Bf3SwfView::Impl {
 	Rect2 present_rect{ 0.0f, 0.0f, 1280.0f, 720.0f };
 	Vector2i target_size{ 1280, 720 };
 	RenderingServer::ViewportMSAA msaa = RenderingServer::VIEWPORT_MSAA_4X;
+	uint64_t open_serial = 0;
 	SwfStageFit fit;
 	ui::SwfAffine stage_to_window;
 	bool filters_enabled = true;
@@ -1031,6 +1077,16 @@ struct Bf3SwfView::Impl {
 		}
 		scene.reset();
 		library.reset();
+		structure_dirty = true;
+	}
+
+	void retire_scene() {
+		for (auto &[id, rec] : recs) {
+			rec.reopened = true;
+		}
+		tilt_paths.clear();
+		renderer_paths.clear();
+		scene.reset();
 		structure_dirty = true;
 	}
 
@@ -1553,16 +1609,24 @@ struct Bf3SwfView::Impl {
 				: n.drawing != nullptr			 ? static_cast<const void *>(n.drawing.get())
 				: !n.image.empty()				 ? static_cast<const void *>(&n.image)
 												 : nullptr;
-		if (r_rec.built && r_rec.content == content && r_rec.text_revision == n.text_revision && r_rec.character_revision == n.character_revision) {
+		const bool reopened = r_rec.reopened;
+		r_rec.reopened = false;
+		if (r_rec.built && !reopened && r_rec.content == content && r_rec.text_revision == n.text_revision &&
+				r_rec.character_revision == n.character_revision) {
+			return;
+		}
+		const uint64_t fingerprint = content_fingerprint(n);
+		r_rec.content = content;
+		r_rec.text_revision = n.text_revision;
+		r_rec.character_revision = n.character_revision;
+		if (r_rec.built && reopened && r_rec.fingerprint == fingerprint) {
 			return;
 		}
 		stats.content_builds++;
 		r_rec.built = true;
+		r_rec.fingerprint = fingerprint;
 		r_rec.content_dirty = true;
 		r_rec.counts = BuildCounts();
-		r_rec.content = content;
-		r_rec.text_revision = n.text_revision;
-		r_rec.character_revision = n.character_revision;
 		if (n.kind == ui::SwfNodeKind::Shape && n.shape != nullptr) {
 			build_shape(r_rec, n, *n.shape, grid_for(n));
 		} else if (!n.image.empty()) {
@@ -2052,6 +2116,7 @@ struct Bf3SwfView::Impl {
 		stats = SwfViewStats();
 		stats.structure_passes = keep.structure_passes;
 		stats.content_builds = keep.content_builds;
+		stats.reopens = keep.reopens;
 		resolve_paths();
 		for (auto &[k, c] : canvases) {
 			c.used = false;
@@ -2580,16 +2645,23 @@ void Bf3SwfView::_process(double p_delta) {
 }
 
 Status Bf3SwfView::open(std::string_view p_movie) {
-	close();
 	Bf3UiAssets *assets = Bf3UiAssets::current();
 	if (assets == nullptr || !assets->is_loaded() || assets->movies() == nullptr) {
+		close();
 		impl_->error = "Bf3UiAssets is not loaded";
 		return make_error(impl_->error);
 	}
 	bf3::core::Result<ui::SwfScene> scene = ui::SwfScene::open(*assets->movies(), p_movie);
 	if (!scene) {
+		close();
 		impl_->error = scene.error().message;
 		return scene.error();
+	}
+	if (impl_->scene && impl_->assets == assets && impl_->movie == scene->movie_name()) {
+		impl_->retire_scene();
+		impl_->stats.reopens++;
+	} else {
+		close();
 	}
 	impl_->assets = assets;
 	impl_->scene.emplace(std::move(*scene));
@@ -2599,6 +2671,7 @@ Status Bf3SwfView::open(std::string_view p_movie) {
 	impl_->error.clear();
 	impl_->structure_dirty = true;
 	impl_->update_fit();
+	impl_->open_serial = ++g_open_serial;
 	return Status::success();
 }
 
@@ -2622,11 +2695,45 @@ Status Bf3SwfView::open(std::shared_ptr<const ui::SwfLibrary> p_library, std::st
 	impl_->error.clear();
 	impl_->structure_dirty = true;
 	impl_->update_fit();
+	impl_->open_serial = ++g_open_serial;
 	return Status::success();
 }
 
 void Bf3SwfView::close() {
 	impl_->release();
+}
+
+uint64_t Bf3SwfView::surface_bytes() const {
+	uint64_t out = 0;
+	for (const auto &[k, c] : impl_->canvases) {
+		out += c.content.bytes(impl_->msaa) + c.alpha.bytes(impl_->msaa);
+		for (const Stage &s : c.stages) {
+			out += s.surface.bytes(RenderingServer::VIEWPORT_MSAA_DISABLED);
+		}
+	}
+	for (const auto &[id, t] : impl_->targets) {
+		out += t.surface.bytes(impl_->msaa);
+	}
+	return out;
+}
+
+uint32_t Bf3SwfView::instance_items() const {
+	size_t out = impl_->canvases.size() + impl_->targets.size();
+	for (const auto &[id, rec] : impl_->recs) {
+		out += rec.pieces.size();
+	}
+	return uint32_t(out);
+}
+
+uint64_t Bf3SwfView::open_serial() const {
+	return impl_->open_serial;
+}
+
+void Bf3SwfView::release_root_target() {
+	const auto it = impl_->canvases.find(canvas_key(CanvasKind::Root, 0));
+	if (it != impl_->canvases.end() && it->second.content.resize(impl_->rs, Vector2i(1, 1))) {
+		impl_->structure_dirty = true;
+	}
 }
 
 bool Bf3SwfView::is_open() const {
