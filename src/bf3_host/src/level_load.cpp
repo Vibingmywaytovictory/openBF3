@@ -633,6 +633,8 @@ core::Status load_shared_tdm(const LevelDatabase &p_db, const SharedLoadOptions 
 		row("ID_SCORE_HEADSHOT", tuning->score_headshot);
 		row("ID_SCORE_REVIVE", tuning->score_revive);
 		row("ID_SCORE_SPAWN_SQUAD", tuning->score_spawn_squad);
+		row("ID_SCORE_REVIVE_SQUAD", tuning->score_revive_squad);
+		row("ID_SCORE_SQUAD_WIPE", tuning->score_squad_wipe);
 		r_level.scoring = std::make_shared<const gp::ScoringTable>(std::move(*scoring));
 	} else {
 		r_level.tdm_notes.push_back("scoring: " + scoring.error().message + " (the defaults)");

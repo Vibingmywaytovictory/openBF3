@@ -851,6 +851,11 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(revive_health == doctest::Approx(20.0f));
 		const uint16_t defib = level->shared->gunplay->kits.defib_def;
 		REQUIRE(defib != sw::kNoWeapon);
+		REQUIRE(level->shared->scoring != nullptr);
+		CHECK(level->shared->scoring->score("ID_SCORE_REVIVE_SQUAD") == std::optional<double>(110.0));
+		CHECK(level->shared->tdm_tuning->score_revive_squad == 110);
+		CHECK(level->shared->tdm_tuning->score_squad_wipe == 10);
+		CHECK(level->shared->tdm_tuning->score_spawn_squad == 10);
 		for (int victim_peer = 0; victim_peer < 2; ++victim_peer) {
 			CAPTURE(victim_peer);
 			std::unique_ptr<Match> m = start_match(*level, false, 11u + uint64_t(victim_peer));
@@ -989,7 +994,10 @@ TEST_SUITE("host-tdm-server") {
 			CHECK(revived < respawn_at);
 			CHECK(m->rules().match_state().kills[1] == team2_kill - 1);
 			REQUIRE(m->row(medic.slot()) != nullptr);
-			CHECK(m->row(medic.slot())->score == medic_score + 100);
+			REQUIRE(m->row(victim) != nullptr);
+			CHECK(m->row(medic.slot())->squad != 0);
+			CHECK(m->row(medic.slot())->squad == m->row(victim)->squad);
+			CHECK(m->row(medic.slot())->score == medic_score + 110);
 			CHECK(m->rules().downed().empty());
 
 			std::printf("E5 (%s victim): kit %u -> %u (next-life draw while down %u), team %u -> %u\n", victim_peer ? "peer" : "bot",
@@ -2070,6 +2078,76 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(st.squad_spawns_on_nav == 1u);
 		CHECK(st.refused[size_t(host::SpawnRefusal::SquadMate)] == 3u);
 		CHECK(st.runtime_faults == 0u);
+	}
+
+	TEST_CASE("squads: the kill that leaves an enemy squad of two with no living member scores SQUAD_WIPE; a kill with "
+			  "a living mate does "
+			  "not") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		REQUIRE(level->shared->scoring != nullptr);
+		CHECK(level->shared->scoring->score("ID_SCORE_SQUAD_WIPE") == std::optional<double>(10.0));
+		const int32_t kill_score = level->shared->tdm_tuning->score_kill;
+		const int32_t headshot_score = level->shared->tdm_tuning->score_headshot;
+		std::unique_ptr<Match> m = start_match(*level, true, 57u, 0, -1, squad_server(*level));
+		tdm::ScriptedPeer &lone = m->join("lone");
+		lone.ready();
+		Script *killer = m->bot();
+		Script *target = m->bot();
+		m->bot();
+		REQUIRE(wait_in_round(*m));
+		REQUIRE(m->rules().team_of(uint8_t(lone.slot())) == 1);
+		REQUIRE(m->rules().team_of(uint8_t(target->slot)) == 1);
+		REQUIRE(m->rules().team_of(uint8_t(killer->slot)) == 2);
+		lone.spawn_request(0);
+		REQUIRE(m->until([&] { return is_alive(m->state(lone.slot())); }, 240));
+		m->ticks(net::kPlayerListIntervalTicks + 2u);
+		REQUIRE(m->row(lone.slot()) != nullptr);
+		REQUIRE(m->row(target->slot) != nullptr);
+		CHECK(m->row(lone.slot())->squad != 0);
+		CHECK(m->row(lone.slot())->squad == m->row(target->slot)->squad);
+		const std::optional<Patch> patch = find_patch(*m, 3.0f);
+		REQUIRE(patch.has_value());
+		bool fire = false;
+		killer->fn = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			const sim::SoldierState *v = m->state(target->slot);
+			const sim::Vec3 chest = v != nullptr ? add(v->position, 0.0f, 1.2f, 0.0f) : patch->victim;
+			return aim_command(
+					*m, p_tick, p_state, chest, sim::Pose::Stand, select_and_fire(0, fire && (p_tick % 6u) < 3u));
+		};
+		const auto kill_target = [&](int32_t &r_delta, bool &r_headshot) {
+			if (!m->until([&] { return is_alive(m->state(target->slot)); }, 1200)) {
+				return false;
+			}
+			m->place(target->slot, add(patch->victim, 0.0f, 0.05f, 0.0f));
+			m->place(killer->slot, add(patch->shooter, 0.0f, 0.05f, 0.0f));
+			m->ticks(30);
+			const int32_t before = m->row(killer->slot)->score;
+			fire = true;
+			const bool died = m->until([&] { return !is_alive(m->state(target->slot)); }, 900);
+			fire = false;
+			m->ticks(2);
+			const net::DeathEvent *d = last_death(lone, target->slot);
+			r_delta = m->row(killer->slot)->score - before;
+			r_headshot = d != nullptr && d->headshot;
+			return died && d != nullptr && int(d->killer) == killer->slot;
+		};
+		int32_t delta = 0;
+		bool headshot = false;
+		REQUIRE(kill_target(delta, headshot));
+		std::printf("squad wipe: a kill while the mate lives scores %d (headshot %d)\n", int(delta), int(headshot));
+		CHECK(delta == kill_score + (headshot ? headshot_score : 0));
+		m->server.on_receive(lone.peer(), net::kChannelReliable, net::encode_suicide_request());
+		m->ticks(3);
+		REQUIRE_FALSE(is_alive(m->state(lone.slot())));
+		REQUIRE(kill_target(delta, headshot));
+		std::printf(
+				"squad wipe: the kill of the last living member scores %d (headshot %d)\n", int(delta), int(headshot));
+		CHECK(delta == kill_score + (headshot ? headshot_score : 0) + 10);
+		CHECK(m->rules().stats().squad_wipes == 1u);
+		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 
 	TEST_CASE("install unchanged") {

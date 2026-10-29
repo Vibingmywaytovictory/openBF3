@@ -189,6 +189,8 @@ const Key kKeys[] = {
 	{ "score_headshot", KeyKind::I32, -100000, 100000, BF3_TDM_FIELD(score_headshot) },
 	{ "score_revive", KeyKind::I32, -100000, 100000, BF3_TDM_FIELD(score_revive) },
 	{ "score_spawn_squad", KeyKind::I32, -100000, 100000, BF3_TDM_FIELD(score_spawn_squad) },
+	{ "score_revive_squad", KeyKind::I32, -100000, 100000, BF3_TDM_FIELD(score_revive_squad) },
+	{ "score_squad_wipe", KeyKind::I32, -100000, 100000, BF3_TDM_FIELD(score_squad_wipe) },
 	{ "bot_kit_weights", KeyKind::Custom, 0, 0, nullptr, {}, parse_kit_weights },
 	{ "spawn_safe_distance_m", KeyKind::Float, 0.0f, 10000.0f, BF3_TDM_FIELD(spawn_safe_distance_m) },
 	{ "friendly_block_radius_m", KeyKind::Float, 0.0f, 10000.0f, BF3_TDM_FIELD(friendly_block_radius_m) },
@@ -507,6 +509,19 @@ struct TdmRules::Impl {
 		return p_mate;
 	}
 
+	bool squad_wiped(uint8_t p_victim) const {
+		const std::span<const uint8_t> members = squads.members(squads.team_of(p_victim), squads.squad_of(p_victim));
+		if (members.size() < 2) {
+			return false;
+		}
+		for (const uint8_t slot : members) {
+			if (slot < slots.size() && slots[slot].alive) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	void remove_downed(uint8_t p_slot) {
 		std::erase_if(downed, [&](const DownedSoldier &d) { return d.slot == p_slot; });
 	}
@@ -717,6 +732,10 @@ void TdmRules::death(const net::DeathEvent &p_event) {
 	}
 	s.alive = false;
 	s.team_at_death = vteam;
+	if (s.last_killer >= 0 && m.squad_wiped(v)) {
+		m.slots[size_t(s.last_killer)].score += m.tuning->score_squad_wipe;
+		++m.stats.squad_wipes;
+	}
 	s.pending_spawn = false;
 	s.corpse_valid = true;
 	s.corpse_fresh = true;
@@ -758,7 +777,9 @@ void TdmRules::revive(const net::ReviveEvent &p_event) {
 	Impl::Slot &d = m.slots[p_event.revived];
 	++m.stats.revives;
 	if (r.connected && p_event.reviver != p_event.revived) {
-		r.score += m.tuning->score_revive;
+		const bool mates = m.squads.same_squad(p_event.reviver, p_event.revived);
+		r.score += mates ? m.tuning->score_revive_squad : m.tuning->score_revive;
+		m.stats.squad_revives += mates ? 1u : 0u;
 	}
 	if (d.deaths > 0) {
 		--d.deaths;

@@ -51,6 +51,8 @@ struct TdmTuning {
 	int32_t score_headshot = 10;
 	int32_t score_revive = 100;
 	int32_t score_spawn_squad = 10;
+	int32_t score_revive_squad = 110;
+	int32_t score_squad_wipe = 10;
 
 	std::array<uint32_t, 4> bot_kit_weights{ 40, 20, 20, 20 };
 
@@ -133,6 +135,7 @@ struct RulesStats {
 	uint64_t squad_requests = 0, squad_refused = 0;
 	uint64_t team_switches = 0, team_switches_refused = 0;
 	uint64_t squad_spawns = 0, squad_spawns_on_nav = 0;
+	uint64_t squad_revives = 0, squad_wipes = 0;
 };
 static_assert(std::is_trivially_copyable_v<RulesStats>);
 
