@@ -688,6 +688,17 @@ struct Geometry {
 	}
 };
 
+RID make_viewport(RenderingServer *p_rs, RenderingServer::ViewportMSAA p_msaa) {
+	const RID viewport = p_rs->viewport_create();
+	p_rs->viewport_set_disable_3d(viewport, true);
+	p_rs->viewport_set_transparent_background(viewport, true);
+	p_rs->viewport_set_clear_mode(viewport, RenderingServer::VIEWPORT_CLEAR_ALWAYS);
+	p_rs->viewport_set_update_mode(viewport, RenderingServer::VIEWPORT_UPDATE_ONCE);
+	p_rs->viewport_set_msaa_2d(viewport, p_msaa);
+	p_rs->viewport_set_use_hdr_2d(viewport, false);
+	return viewport;
+}
+
 struct Surface {
 	RID viewport;
 	RID canvas;
@@ -695,21 +706,17 @@ struct Surface {
 	Vector2i size;
 
 	void create(RenderingServer *p_rs, Vector2i p_size, RID p_parent, RenderingServer::ViewportMSAA p_msaa) {
-		size = Vector2i(std::max(1, p_size.x), std::max(1, p_size.y));
-		viewport = p_rs->viewport_create();
-		p_rs->viewport_set_size(viewport, size.x, size.y);
-		p_rs->viewport_set_disable_3d(viewport, true);
-		p_rs->viewport_set_transparent_background(viewport, true);
-		p_rs->viewport_set_clear_mode(viewport, RenderingServer::VIEWPORT_CLEAR_ALWAYS);
-		p_rs->viewport_set_update_mode(viewport, RenderingServer::VIEWPORT_UPDATE_ONCE);
-		p_rs->viewport_set_msaa_2d(viewport, p_msaa);
-		p_rs->viewport_set_use_hdr_2d(viewport, false);
+		viewport = make_viewport(p_rs, p_msaa);
 		if (p_parent.is_valid()) {
 			p_rs->viewport_set_parent_viewport(viewport, p_parent);
 		}
 		p_rs->viewport_set_active(viewport, true);
 		canvas = p_rs->canvas_create();
 		p_rs->viewport_attach_canvas(viewport, canvas);
+		size = Vector2i();
+		if (p_size.x > 0 && p_size.y > 0) {
+			resize(p_rs, p_size);
+		}
 		texture = p_rs->viewport_get_texture(viewport);
 	}
 
@@ -1629,9 +1636,9 @@ struct Bf3SwfView::Impl {
 			if (p_kind == CanvasKind::Root) {
 				c.content.create(rs, target_size, owner_viewport, msaa);
 			} else {
-				c.content.create(rs, Vector2i(1, 1), RID(), msaa);
+				c.content.create(rs, Vector2i(), RID(), msaa);
 				if (p_kind == CanvasKind::Mask) {
-					c.alpha.create(rs, Vector2i(1, 1), RID(), msaa);
+					c.alpha.create(rs, Vector2i(), RID(), msaa);
 				}
 				c.quad = rs->canvas_item_create();
 				++items_created;
