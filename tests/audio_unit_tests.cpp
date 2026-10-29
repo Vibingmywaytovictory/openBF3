@@ -1234,7 +1234,7 @@ TEST_SUITE("audio-patch") {
 		inst->post_event(1, 37);
 		inst->post_event(1, 411);
 		buses.block(*inst, 1024);
-		CHECK(inst->stats().evaluations == 3);
+		CHECK(inst->stats().evaluations == 4);
 		CHECK(inst->value(trig) == 1.0f);
 		buses.block(*inst, 1536);
 		CHECK(inst->value(trig) == 0.0f);
@@ -1243,6 +1243,36 @@ TEST_SUITE("audio-patch") {
 		CHECK(e[0].frame == 1024 + 37);
 		CHECK(e[1].frame == 1024 + 411);
 		CHECK(e[0].slot != e[1].slot);
+	}
+
+	TEST_CASE("trigger inputs fire on a rising edge: a Condition held true by a drawn number starts its sampler once") {
+		const TestWave w = make_wave(1, 4000, -1, -1);
+		Builder b;
+		const uint16_t trig = b.input(1, true);
+		const uint16_t drawn = b.reg(), held = b.reg();
+		b.p.waves.push_back(SoundWaveRef{ w.partition, "test_wave" });
+		uint32_t n = b.node(SoundNodeType::NumberGenerator);
+		b.setf(n, cp::NumMin, 0.9f);
+		b.setf(n, cp::NumMax, 0.9f);
+		b.set(n, cp::NumTrigger, Builder::R(trig));
+		b.set(n, cp::NumY, Builder::R(drawn));
+		const uint32_t c = b.child(SoundNodeType::ConditionGroup, uint8_t(ConditionOp::GreaterOrEqual));
+		b.cset(c, cp::CondX, Builder::R(drawn));
+		b.cset(c, cp::CondY, Builder::C(0.6f));
+		b.cset(c, cp::CondTrue, Builder::R(held));
+		b.node(SoundNodeType::Condition, 0, 0, { c });
+		const uint32_t s = b.sampler(2, 0, SamplerLoop::None);
+		b.set(s, cp::SmpTrigger, Builder::R(held));
+		auto inst = instance(b.build(), w.bank);
+		Buses buses;
+		inst->post_event(1, 0);
+		for (uint64_t f = 0; f < 40 * 512; f += 512) {
+			buses.block(*inst, f);
+		}
+		CHECK(inst->value(held) == 1.0f);
+		CHECK(inst->stats().sampler_triggers == 1);
+		CHECK(inst->stats().held_triggers == 0);
+		CHECK(inst->finished());
 	}
 
 	TEST_CASE("Sampler: Release without a tail ends with the playing segment; LtNone stops after its segment") {

@@ -68,6 +68,7 @@ Result<std::unique_ptr<PatchInstance>> PatchInstance::create(std::shared_ptr<con
 	st.mix_rate = p_mix_rate;
 
 	st.registers.assign(p.registers, 0.0f);
+	st.previous.assign(p.registers, 0.0f);
 	for (const ca::SoundInput &in : p.inputs) {
 		if (in.event) {
 			st.event_registers.push_back(in.reg);
@@ -632,6 +633,10 @@ void PatchInstance::process_block(BusBuffers &r_buses) {
 		for (uint16_t r : st.event_registers) {
 			st.registers[r] = 0.0f;
 		}
+		if (st.events_repeat(ei, pos)) {
+			st.evaluate_program(first + pos);
+			++st.stats.evaluations;
+		}
 		while (ei < st.event_count && std::min(st.events[ei].frame, n - 1) <= pos) {
 			st.registers[st.events[ei].reg] = 1.0f;
 			st.any_event = true;
@@ -658,6 +663,10 @@ void PatchInstance::evaluate(double p_seconds) {
 	for (uint16_t r : st.event_registers) {
 		st.registers[r] = 0.0f;
 	}
+	if (st.events_repeat(0, UINT32_MAX)) {
+		st.evaluate_program(st.clock);
+		++st.stats.evaluations;
+	}
 	for (uint32_t i = 0; i < st.event_count; ++i) {
 		st.registers[st.events[i].reg] = 1.0f;
 		st.any_event = true;
@@ -672,6 +681,18 @@ void PatchInstance::evaluate(double p_seconds) {
 		st.events[st.event_count++] = st.deferred[i];
 	}
 	st.deferred_count = 0;
+}
+
+bool PatchInstance::State::events_repeat(uint32_t p_from, uint32_t p_until_frame) const {
+	if (!evaluated || p_from >= event_count || events[p_from].frame > p_until_frame) {
+		return false;
+	}
+	for (const uint16_t r : event_registers) {
+		if (previous[r] >= 0.5f) {
+			return true;
+		}
+	}
+	return false;
 }
 
 bool PatchInstance::finished() const {

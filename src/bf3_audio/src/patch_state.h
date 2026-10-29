@@ -185,6 +185,8 @@ struct PatchInstance::State {
 	bool clock_set = false;
 
 	std::vector<float> registers;
+	std::vector<float> previous;
+	bool evaluated = false;
 	std::vector<uint16_t> event_registers;
 	std::vector<detail::NodeState> nodes;
 	std::vector<detail::GroupState> groups;
@@ -241,6 +243,16 @@ struct PatchInstance::State {
 
 	float *voice(uint16_t p_voice, uint32_t p_channel) { return voice_buffers.data() + (size_t(p_voice) * 2 + p_channel) * detail::kMaxSubBlock; }
 	float read(const core::audio::SoundPort &p_port) const { return p_port.reg == core::audio::kNoRegister ? p_port.constant : registers[p_port.reg]; }
+	float read_previous(const core::audio::SoundPort &p_port) const {
+		if (!evaluated) {
+			return 0.0f;
+		}
+		return p_port.reg == core::audio::kNoRegister ? p_port.constant : previous[p_port.reg];
+	}
+	bool rose(const core::audio::SoundPort &p_port) const {
+		return read(p_port) >= 0.5f && !(read_previous(p_port) >= 0.5f);
+	}
+	bool events_repeat(uint32_t p_from, uint32_t p_until_frame) const;
 	void write(const core::audio::SoundPort &p_port, float p_value) {
 		if (p_port.reg != core::audio::kNoRegister) {
 			registers[p_port.reg] = std::isfinite(p_value) ? p_value : 0.0f;

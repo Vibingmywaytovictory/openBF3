@@ -25,6 +25,7 @@
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/path_guard.h"
+#include "bf3/core/util/text.h"
 #include "bf3/fx/effect_compiler.h"
 #include "bf3/fx/impact_table.h"
 #include "bf3/fx/triggers.h"
@@ -1730,6 +1731,7 @@ void check_clean_mix(const std::string &p_what, GameRig &r_rig, const WholeMix &
 	CHECK(cs.limit_edge_steps.load() == 0);
 	CHECK(cs.abrupt_gain.load() == 0);
 	CHECK(cs.takeover_cuts.load() == 0);
+	CHECK(cs.held_triggers.load() == 0);
 	CHECK(cs.event_drops.load() == 0);
 	CHECK(audible_by_kind.empty());
 	CHECK(ms.starved_voices.load() == 0);
@@ -2563,6 +2565,23 @@ TEST_SUITE("audio-game") {
 						 << " played, refused " << is.refused << ", unknown " << is.unknown_patches << "; bursts "
 						 << ws.bursts << ", rounds " << ws.event_rounds << ", refusals " << ws.mixer_refusals);
 			check_clean_mix(what, rig, tap, cuts, wall_s);
+			std::map<ba::InstanceHandle, std::string> sounding;
+			for (const ba::MixerCutEvent &e : cuts) {
+				if (e.kind == ba::MixerCutKind::Start &&
+						e.frame + uint64_t(2 * ba::kMixRate) < uint64_t(tap.mix.size() / 2) &&
+						bf3::core::to_lower_ascii(e.program).find("bullet_impacts") != std::string::npos) {
+					sounding[e.handle] = e.program;
+				} else if (e.kind == ba::MixerCutKind::Finish || e.kind == ba::MixerCutKind::Drop ||
+						e.kind == ba::MixerCutKind::Kill || e.kind == ba::MixerCutKind::Fade ||
+						e.kind == ba::MixerCutKind::Cull) {
+					sounding.erase(e.handle);
+				}
+			}
+			for (const auto &[h, program] : sounding) {
+				MESSAGE(what << ": impact " << h << " " << program
+							 << " started more than 2 s before the end and still sounds");
+			}
+			CHECK(sounding.empty());
 			CHECK(sent > 0);
 			CHECK(is.impacts == sent);
 			CHECK(is.refused == 0);

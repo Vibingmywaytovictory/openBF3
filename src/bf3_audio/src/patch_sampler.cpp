@@ -302,13 +302,13 @@ void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode
 	}();
 	const float amp = read(port(n, cp::SmpAmplitude));
 	s.amplitude = std::isfinite(amp) ? std::clamp(amp, 0.0f, 16.0f) : 0.0f;
-	const bool trigger = on(read(port(n, cp::SmpTrigger)));
-	const bool step = on(read(port(n, cp::SmpStep)));
+	const bool trigger = rose(port(n, cp::SmpTrigger));
+	const bool step = rose(port(n, cp::SmpStep));
 	const bool release = on(read(port(n, cp::SmpRelease)));
 	const auto delay_frames = [&](float p_seconds) { return uint64_t(std::llround(double(p_seconds) * double(mix_rate))); };
 
 	const bool held_trigger = trigger && s.trigger_was_on;
-	s.trigger_was_on = trigger;
+	s.trigger_was_on = on(read(port(n, cp::SmpTrigger)));
 	if (trigger && s.slots_count > 0) {
 		++stats.sampler_triggers;
 		stats.held_triggers += held_trigger ? 1u : 0u;

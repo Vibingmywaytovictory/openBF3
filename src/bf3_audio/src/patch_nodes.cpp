@@ -169,7 +169,7 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				write(port(n, cp::PhysRelativeVelocity), geometry.relative_velocity);
 				break;
 			case SoundNodeType::MultiCrossfader: {
-				const bool start = on(read(port(n, cp::McfStart)));
+				const bool start = rose(port(n, cp::McfStart));
 				const bool stop = on(read(port(n, cp::McfStop)));
 				const float live = read(port(n, cp::McfControl));
 				const bool lock = (n.flags & ca::kFlagLockControlValue) != 0;
@@ -211,7 +211,7 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				const float r = read(port(n, cp::AdsrR));
 				float finished = s.pulse ? 1.0f : 0.0f;
 				s.pulse = 0;
-				if (on(read(port(n, cp::AdsrTrigger)))) {
+				if (rose(port(n, cp::AdsrTrigger))) {
 					s.mode = uint8_t(AdsrPhase::Attack);
 					if (!(a > 0.0f)) {
 						s.value = 1.0f;
@@ -244,7 +244,7 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				break;
 			}
 			case SoundNodeType::NumberGenerator:
-				if (on(read(port(n, cp::NumTrigger)))) {
+				if (rose(port(n, cp::NumTrigger))) {
 					const float mn = flt(n, cp::NumMin), mx = flt(n, cp::NumMax);
 					s.value = finite_or_zero(mn + (double(mx) - mn) * uniform01(seed, ni, s.draws++));
 				}
@@ -262,7 +262,7 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 			case SoundNodeType::Timer: {
 				float tick = s.pulse ? 1.0f : 0.0f;
 				s.pulse = 0;
-				if (on(read(port(n, cp::TimerStart)))) {
+				if (rose(port(n, cp::TimerStart))) {
 					s.mode = 1;
 					s.value = 0.0f;
 				}
@@ -276,7 +276,7 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 			}
 			case SoundNodeType::EventGate: {
 				bool out = false;
-				if (on(read(port(n, cp::GateIn))) && on(read(port(n, cp::GateEnable))) && s.value <= 0.0f) {
+				if (rose(port(n, cp::GateIn)) && on(read(port(n, cp::GateEnable))) && s.value <= 0.0f) {
 					out = true;
 					s.value = std::max(0.0f, read(port(n, cp::GateCoolDown)));
 				}
@@ -308,7 +308,7 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				break;
 			}
 			case SoundNodeType::Switcher: {
-				const bool trigger = on(read(port(n, cp::SwTrigger)));
+				const bool trigger = rose(port(n, cp::SwTrigger));
 				const float value = read(port(n, cp::SwValue));
 				int32_t hit = -1;
 				if (trigger) {
@@ -346,7 +346,7 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				break;
 			}
 			case SoundNodeType::DeMux: {
-				const bool trigger = on(read(port(n, cp::DeMuxTrigger)));
+				const bool trigger = rose(port(n, cp::DeMuxTrigger));
 				int64_t hit = -1;
 				if (trigger && n.children_count > 0) {
 					const double v = std::floor(double(read(port(n, cp::DeMuxValue))));
@@ -405,7 +405,7 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 					if (index_port.connected()) {
 						const float v = std::floor(read(index_port));
 						idx = v <= 0.0f ? 0u : (v >= float(count - 1) ? count - 1 : uint32_t(v));
-					} else if (on(read(port(n, cp::WsAdvance)))) {
+					} else if (rose(port(n, cp::WsAdvance))) {
 						if ((n.flags & ca::kFlagIsRandom) && count > 1) {
 							idx = (idx + 1 + uint32_t(uniform01(seed, ni, s.draws++) * double(count - 1))) % count;
 						} else {
@@ -441,6 +441,8 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 	for (const AttributeDrive &d : drives) {
 		plugins[d.plugin].attributes[d.attribute] = read(d.port);
 	}
+	std::copy(registers.begin(), registers.end(), previous.begin());
+	evaluated = true;
 
 	for (size_t o = 0; o < p.outputs.size(); ++o) {
 		const ca::SoundOutput &out = p.outputs[o];
