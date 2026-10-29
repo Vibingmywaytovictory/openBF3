@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "bf3/ai/knowledge/information_factory.h"
 #include "bf3/ai/main/ai_settings.h"
 #include "bf3/ai/nav/bot_navigation.h"
 #include "bf3/ai/nav/nav_clusters.h"
@@ -7,23 +8,24 @@
 #include "bf3/ai/strategic/strategic_object.h"
 #include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/level/mode_areas.h"
-#include "bf3/host/bot_fill.h"
+#include "bf3/host/ai_world.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/level_load.h"
 #include "bf3/sim/nav.h"
 #include "bf3/sim/static_world.h"
+#include "bf3/sim/weapons/weapon_sim.h"
 #include "tdm_fixture.h"
 #include "test_support.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <future>
-#include <memory>
+#include <map>
 #include <set>
-#include <string>
 #include <thread>
 #include <vector>
 
@@ -399,6 +401,17 @@ TEST_SUITE("ai-world-unit") {
 		CHECK(statistics.samples() == 2);
 	}
 
+	TEST_CASE("area heat: an area takes the heat of the cells whose centres lie within its radius") {
+		std::vector<float> heat(8 * 8, 0.0f);
+		heat[size_t(2 * 8 + 3)] = 2.0f;
+		heat[size_t(2 * 8 + 4)] = 1.0f;
+		heat[size_t(7 * 8 + 7)] = 5.0f;
+		const sim::Vec3 origin{ 0.0f, 0.0f, 0.0f };
+		CHECK(host::area_heat(heat, 8, origin, 16.0f, { 56.0f, 0.0f, 40.0f }, 1.0f) == doctest::Approx(2.0f));
+		CHECK(host::area_heat(heat, 8, origin, 16.0f, { 64.0f, 0.0f, 40.0f }, 8.0f) == doctest::Approx(3.0f));
+		CHECK(host::area_heat(heat, 8, origin, 16.0f, { 64.0f, 0.0f, 40.0f }, 200.0f) == doctest::Approx(8.0f));
+		CHECK(host::area_heat(heat, 8, origin, 0.0f, { 64.0f, 0.0f, 40.0f }, 8.0f) == 0.0f);
+	}
 }
 
 namespace {
@@ -489,7 +502,7 @@ void check_pathable(const host::BotLevel &p_level) {
 }
 
 TEST_SUITE("ai-world-install") {
-	TEST_CASE("ai world: Metro TDM areas and Metro CQL control points") {
+	TEST_CASE("ai world: Metro TDM areas, Metro CQL control points and the perception courier for 32 bots") {
 		test::tdm::TdmLevel *level = test::tdm::load_tdm_level_once();
 		if (level == nullptr) {
 			return;
@@ -519,6 +532,128 @@ TEST_SUITE("ai-world-install") {
 		check_pathable(tdm);
 		std::printf("ai world: Metro TDM strategic map built in %.3f s\n", tdm.seconds_strategic);
 
+		host::AiWorldConfig config;
+		config.level = level->bots;
+		config.static_world = level->shared->static_world;
+		config.seed = 7;
+		std::unique_ptr<host::HostAiWorld> world;
+		std::array<uint32_t, 64> cursor{};
+		std::array<sim::Tick, 64> fired{};
+		std::vector<sim::bots::HeardShot> heard;
+		size_t compared = 0, detections = 0, partial = 0, live_facings = 0;
+		bool mismatch = false;
+		test::tdm::TdmRunConfig run;
+		run.peer = false;
+		run.bots = 32;
+		run.max_ticks = 60 * 40;
+		run.hashes = false;
+		run.on_tick = [&](sim::Tick p_tick, host::GameServer &r_server, test::tdm::ScriptedPeer *) {
+			const host::ServerView &view = r_server.view();
+			if (world == nullptr) {
+				core::Result<std::unique_ptr<host::HostAiWorld>> made = host::HostAiWorld::create(config);
+				REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+				world = std::move(*made);
+				for (uint8_t s = 0; s < 32; ++s) {
+					world->add_bot(s);
+				}
+				REQUIRE(world->strategic().number_of_strategic_objects() == int(tdm.areas.size()));
+			}
+			if (r_server.gunplay() != nullptr) {
+				for (const sim::weapons::ShotEvent &shot : r_server.gunplay()->interval_shots()) {
+					if (shot.player_slot < 64 && shot.shot_index >= cursor[shot.player_slot]) {
+						cursor[shot.player_slot] = shot.shot_index + 1;
+						fired[shot.player_slot] = p_tick;
+						heard.push_back({ uint8_t(shot.player_slot), shot.origin, p_tick });
+					}
+				}
+			}
+			heard.erase(std::remove_if(heard.begin(), heard.end(),
+								[&](const sim::bots::HeardShot &p_s) { return p_s.tick + 30 < p_tick; }),
+					heard.end());
+			std::array<uint8_t, 64> firing{};
+			for (size_t s = 0; s < 64; ++s) {
+				firing[s] = fired[s] != 0 && p_tick - fired[s] <= 30 ? 1 : 0;
+			}
+			world->step(view, heard, firing, p_tick);
+			if (p_tick % 6 != 0) {
+				return;
+			}
+			const size_t slots = std::min<size_t>(view.states().size(), 64);
+			for (int side = 1; side <= 2; ++side) {
+				std::map<uint8_t, const sim::bots::PerceivedEnemy *> detected;
+				size_t enemies_alive = 0;
+				for (size_t s = 0; s < slots; ++s) {
+					enemies_alive +=
+							view.alive(uint8_t(s)) && view.team(uint8_t(s)) != side && view.team(uint8_t(s)) != 0 ? 1
+																												  : 0;
+				}
+				for (const uint8_t bot : world->bots()) {
+					if (bot >= slots || view.team(bot) != side) {
+						continue;
+					}
+					for (const sim::bots::PerceivedEnemy &e : world->perception(bot)->enemies()) {
+						if (e.detected && (detected[e.slot] == nullptr || e.last_seen > detected[e.slot]->last_seen)) {
+							detected[e.slot] = &e;
+						}
+					}
+				}
+				size_t known_enemies = 0;
+				for (size_t s = 0; s < slots; ++s) {
+					const uint32_t handle = world->information_of(side, uint8_t(s));
+					const bool enemy = view.team(uint8_t(s)) != side;
+					if (!enemy) {
+						const bool own = view.alive(uint8_t(s)) && view.team(uint8_t(s)) == side;
+						if (own != (handle != ai::kNoHandle)) {
+							mismatch = true;
+						}
+						continue;
+					}
+					const auto found = detected.find(uint8_t(s));
+					if ((found != detected.end()) != (handle != ai::kNoHandle)) {
+						mismatch = true;
+						continue;
+					}
+					if (handle == ai::kNoHandle) {
+						continue;
+					}
+					++known_enemies;
+					const ai::Information *information = world->information().information(handle);
+					REQUIRE(information != nullptr);
+					const sim::Vec3 at = information->position();
+					const sim::Vec3 want = found->second->last_position;
+					if (at.x != want.x || at.y != want.y || at.z != want.z ||
+							information->side() != int(view.team(uint8_t(s)))) {
+						mismatch = true;
+					}
+					const ai::Vec3 facing = information->facing();
+					if (facing.x != 0.0f || facing.y != 0.0f || facing.z != 1.0f) {
+						++live_facings;
+					}
+				}
+				std::vector<uint32_t> in_grid;
+				world->grid(side).all_information(in_grid, nullptr);
+				size_t own_alive = 0;
+				for (size_t s = 0; s < slots; ++s) {
+					own_alive += view.alive(uint8_t(s)) && view.team(uint8_t(s)) == side ? 1 : 0;
+				}
+				CHECK(in_grid.size() == own_alive + known_enemies);
+				detections += known_enemies;
+				partial += known_enemies < enemies_alive ? 1 : 0;
+				++compared;
+			}
+		};
+		core::Result<test::tdm::TdmRunResult> result = test::tdm::run_tdm(*level, run);
+		REQUIRE_MESSAGE(result.ok(), (result.ok() ? std::string() : result.error().message));
+		CHECK_FALSE(mismatch);
+		CHECK(live_facings == 0);
+		CHECK(compared > 600);
+		CHECK(detections > 0);
+		CHECK(partial > 0);
+		CHECK(world->perception_ticks() > 0);
+		std::printf("ai world: courier compared %zu side ticks, %zu perceived enemy records, %zu partial views, %u "
+					"perception updates\n",
+				compared, detections, partial, world->perception_ticks());
+
 		ModeLevel conquest = cql.get();
 		REQUIRE_MESSAGE(conquest.error.empty(), conquest.error);
 		const host::BotLevel &cq = *conquest.bots;
@@ -547,6 +682,34 @@ TEST_SUITE("ai-world-install") {
 		CHECK(area_hqs == hqs);
 		CHECK(hq_teams == std::set<int>{ 1, 2 });
 		check_pathable(cq);
+		host::AiWorldConfig cq_config;
+		cq_config.level = conquest.bots;
+		cq_config.static_world = conquest.shared->static_world;
+		core::Result<std::unique_ptr<host::HostAiWorld>> cq_world = host::HostAiWorld::create(cq_config);
+		REQUIRE_MESSAGE(cq_world.ok(), (cq_world.ok() ? std::string() : cq_world.error().message));
+		ai::AiSettings settings;
+		for (int side = 1; side <= 2; ++side) {
+			ai::SaiServices services;
+			services.objects = &(*cq_world)->strategic();
+			services.settings = &settings;
+			ai::Sai sai(side, services);
+			for (size_t i = 0; i < cq.areas.size(); ++i) {
+				ai::AIStrategicArea *area = (*cq_world)->area(i);
+				REQUIRE(area != nullptr);
+				bool changed = false;
+				area->update(side, sai, changed);
+				const int team = cq.areas[i].team;
+				const ai::StrategicStatus want = team == 0 ? ai::StrategicStatus::Neutral
+						: team == side					   ? ai::StrategicStatus::Owned
+														   : ai::StrategicStatus::Hostile;
+				CHECK_MESSAGE(area->status(side) == want, cq.areas[i].name);
+				CHECK(area->is_area_takeable() == cq.areas[i].takeable);
+				CHECK(area->order_positions_initialised());
+				const ai::Vec3 order = area->order_position(0);
+				CHECK(std::fabs(order.x - cq.areas[i].centre.x) < 2.5f);
+				CHECK(std::fabs(order.z - cq.areas[i].centre.z) < 2.5f);
+			}
+		}
 		std::printf("ai world: Metro CQL %zu flags and %zu HQs (loaded in %.1f s), TDM fixture %.1f s\n", area_flags,
 				area_hqs, conquest.seconds, level->seconds_load);
 		test::tdm::check_install_unchanged(*level);

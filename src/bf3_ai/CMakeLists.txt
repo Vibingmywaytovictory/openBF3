@@ -80,6 +80,7 @@ target_sources(bf3_ai PRIVATE
 )
 
 target_sources(bf3_ai PRIVATE
+    include/bf3/ai/ai_world.h
     include/bf3/ai/nav/nav_clusters.h
     include/bf3/ai/nav/bot_navigation.h
     src/nav/nav_clusters.cpp

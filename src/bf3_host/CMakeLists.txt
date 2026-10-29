@@ -208,4 +208,7 @@ target_sources(bf3_host PRIVATE
 target_sources(bf3_host PRIVATE
     src/strategic_map.h
     src/strategic_map.cpp
+    include/bf3/host/ai_world.h
+    src/ai_world.h
+    src/ai_world.cpp
 )
