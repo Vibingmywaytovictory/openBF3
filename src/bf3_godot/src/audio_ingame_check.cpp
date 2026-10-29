@@ -487,6 +487,10 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 		++c.requested;
 		c.started += f.started ? 1u : 0u;
 		c.finished += f.finished ? 1u : 0u;
+		if (!f.started && f.cull == 0 && f.parks == 0 && !f.refused && !f.killed) {
+			++c.other_drops;
+			++c.reasons["requested, never started or dropped"];
+		}
 		const std::string scope(r_audio.scope_name(f.scope));
 		if (f.cull != 0 && !f.dropped_while_parked) {
 			(data_reason(f.cull) ? c.data_drops : c.other_drops) += 1;
