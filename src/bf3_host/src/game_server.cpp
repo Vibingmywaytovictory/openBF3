@@ -117,12 +117,15 @@ struct GameServer::Impl {
 		match.describe(m);
 		handshake.describe(size_t(at), m);
 		outbox.send(p_peer, net::kChannelReliable, net::encode_match_info(m));
-		const MatchBroadcast join = match.join_messages(tick);
+		const MatchBroadcast join = match.join_messages(tick, uint8_t(std::clamp(team, 0, int(net::kMaxTeam))));
 		if (!join.state.empty()) {
 			outbox.send(p_peer, net::kChannelReliable, join.state);
 		}
 		if (!join.players.empty()) {
 			outbox.send(p_peer, net::kChannelReliable, join.players);
+		}
+		for (const SquadOrderMessage &o : join.orders) {
+			outbox.send(p_peer, net::kChannelReliable, o.bytes);
 		}
 	}
 
@@ -248,7 +251,7 @@ struct GameServer::Impl {
 
 	void send_rules(sim::Tick p_tick) {
 		const MatchBroadcast b = match.take_broadcast(p_tick);
-		if (b.state.empty() && b.players.empty()) {
+		if (b.state.empty() && b.players.empty() && b.orders.empty()) {
 			return;
 		}
 		for (size_t i = 0; i < slots.size(); ++i) {
@@ -261,6 +264,12 @@ struct GameServer::Impl {
 			}
 			if (!b.players.empty()) {
 				outbox.send(s.peer, net::kChannelReliable, b.players);
+			}
+			const uint8_t team = match.rules()->team_of(uint8_t(i));
+			for (const SquadOrderMessage &o : b.orders) {
+				if (o.team == team) {
+					outbox.send(s.peer, net::kChannelReliable, o.bytes);
+				}
 			}
 		}
 	}
@@ -624,6 +633,11 @@ const Gunplay *GameServer::gunplay() const {
 
 const TdmRules *GameServer::rules() const {
 	return impl_->match.rules();
+}
+
+bool GameServer::set_squad_order(uint8_t p_team, uint8_t p_squad, const SquadOrderState &p_order) {
+	TdmRules *rules = impl_->match.rules();
+	return rules != nullptr && rules->set_squad_order(p_team, p_squad, p_order);
 }
 
 int GameServer::add_local_bot(std::unique_ptr<CommandSource> p_source, int p_team) {

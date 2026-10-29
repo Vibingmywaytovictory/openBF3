@@ -80,6 +80,24 @@ bool MatchControl::take_suicide(size_t p_slot) {
 	return on() && rules_->take_suicide(uint8_t(p_slot));
 }
 
+namespace {
+
+bool same_order(const SquadOrderState &p_a, const SquadOrderState &p_b) {
+	return p_a.kind == p_b.kind && p_a.area == p_b.area && p_a.position == p_b.position;
+}
+
+SquadOrderMessage order_message(uint8_t p_team, uint8_t p_squad, const SquadOrderState &p_order) {
+	net::SquadOrder o;
+	o.team = p_team;
+	o.squad = p_squad;
+	o.kind = p_order.kind;
+	o.area = p_order.area;
+	o.position = p_order.position;
+	return SquadOrderMessage{ p_team, net::encode_squad_order(o) };
+}
+
+}
+
 void MatchControl::describe(net::MatchInfo &r_message) const {
 	if (!on()) {
 		return;
@@ -89,7 +107,7 @@ void MatchControl::describe(net::MatchInfo &r_message) const {
 	r_message.rules_flags = rules_flags_;
 }
 
-MatchBroadcast MatchControl::join_messages(sim::Tick p_tick) const {
+MatchBroadcast MatchControl::join_messages(sim::Tick p_tick, uint8_t p_team) const {
 	MatchBroadcast b;
 	if (!on()) {
 		return b;
@@ -97,6 +115,12 @@ MatchBroadcast MatchControl::join_messages(sim::Tick p_tick) const {
 	b.state = net::encode_match_state(rules_->match_state());
 	size_t clamped = 0;
 	b.players = net::encode_player_list(rules_->player_list(p_tick, true), &clamped);
+	for (uint8_t q = 1; p_team >= 1 && p_team <= kSquadTeams && q <= net::kMaxSquads; ++q) {
+		const SquadOrderState &o = rules_->squads().order(p_team, q);
+		if (o.kind != net::SquadOrderKind::None) {
+			b.orders.push_back(order_message(p_team, q, o));
+		}
+	}
 	return b;
 }
 
@@ -104,6 +128,19 @@ MatchBroadcast MatchControl::take_broadcast(sim::Tick p_tick) {
 	MatchBroadcast b;
 	if (!on()) {
 		return b;
+	}
+	if (rules_->squads().revision() != orders_revision_) {
+		orders_revision_ = rules_->squads().revision();
+		for (uint8_t t = 1; t <= kSquadTeams; ++t) {
+			for (uint8_t q = 1; q <= net::kMaxSquads; ++q) {
+				const SquadOrderState &o = rules_->squads().order(t, q);
+				SquadOrderState &sent = sent_orders_[t - 1u][q - 1u];
+				if (!same_order(o, sent)) {
+					sent = o;
+					b.orders.push_back(order_message(t, q, o));
+				}
+			}
+		}
 	}
 	const bool state_changed = rules_->match_state_changed();
 	const bool list_due = rules_->players_changed() && (!player_list_sent_ || p_tick - player_list_tick_ >= net::kPlayerListIntervalTicks);

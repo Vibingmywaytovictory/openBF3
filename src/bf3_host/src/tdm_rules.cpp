@@ -1388,6 +1388,10 @@ net::PlayerList TdmRules::player_list(sim::Tick p_server_tick, bool p_full) cons
 	return l;
 }
 
+bool TdmRules::set_squad_order(uint8_t p_team, uint8_t p_squad, const SquadOrderState &p_order) {
+	return finite(p_order.position) && impl_->squads.set_order(p_team, p_squad, p_order);
+}
+
 const SquadTable &TdmRules::squads() const {
 	return impl_->squads;
 }

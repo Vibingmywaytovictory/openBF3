@@ -157,6 +157,8 @@ public:
 
 	const TdmRules *rules() const;
 
+	bool set_squad_order(uint8_t p_team, uint8_t p_squad, const SquadOrderState &p_order);
+
 private:
 	struct Impl;
 	std::unique_ptr<Impl> impl_;

@@ -166,6 +166,7 @@ public:
 	bool request_revive(uint8_t p_slot);
 	bool take_suicide(uint8_t p_slot);
 	SquadRefusal request_squad(uint8_t p_slot, const net::SquadRequest &p_request);
+	bool set_squad_order(uint8_t p_team, uint8_t p_squad, const SquadOrderState &p_order);
 	const SquadTable &squads() const;
 
 	core::Status step(uint32_t p_tick, const ServerView &p_view, const Gunplay &p_gunplay, std::span<sim::SoldierState> r_states,

@@ -2150,6 +2150,61 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 
+	TEST_CASE("squads: a squad order goes to its team's peers as a SquadOrder event, a late joiner of that team gets "
+			  "the standing order, "
+			  "the other team gets none; an empty squad takes no order") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		std::unique_ptr<Match> m = start_match(*level, false, 59u, 0, -1, squad_server(*level));
+		tdm::ScriptedPeer &alpha = m->join("alpha");
+		tdm::ScriptedPeer &bravo = m->join("bravo");
+		alpha.ready();
+		bravo.ready();
+		m->bot();
+		m->bot();
+		m->ticks(2);
+		REQUIRE(m->rules().team_of(uint8_t(alpha.slot())) == 1);
+		REQUIRE(m->rules().team_of(uint8_t(bravo.slot())) == 2);
+		host::SquadOrderState attack;
+		attack.kind = net::SquadOrderKind::Attack;
+		attack.area = 3;
+		attack.position = { 12.5f, 1.0f, -40.25f };
+		CHECK_FALSE(m->server.set_squad_order(1, 7, attack));
+		CHECK_FALSE(m->server.set_squad_order(3, 1, attack));
+		host::SquadOrderState bad = attack;
+		bad.position[0] = std::nanf("");
+		CHECK_FALSE(m->server.set_squad_order(1, 1, bad));
+		REQUIRE(m->server.set_squad_order(1, 1, attack));
+		m->ticks(2);
+		REQUIRE(alpha.squad_orders.size() == 1u);
+		const net::SquadOrder &got = alpha.squad_orders.back();
+		CHECK(got.team == 1);
+		CHECK(got.squad == 1);
+		CHECK(got.kind == net::SquadOrderKind::Attack);
+		CHECK(got.area == 3);
+		CHECK(got.position == attack.position);
+		CHECK(bravo.squad_orders.empty());
+		m->ticks(30);
+		CHECK(alpha.squad_orders.size() == 1u);
+
+		tdm::ScriptedPeer &charlie = m->join("charlie");
+		REQUIRE(m->rules().team_of(uint8_t(charlie.slot())) == 1);
+		REQUIRE(charlie.squad_orders.size() == 1u);
+		CHECK(charlie.squad_orders.back().kind == net::SquadOrderKind::Attack);
+		CHECK(charlie.squad_orders.back().squad == 1);
+
+		REQUIRE(m->server.set_squad_order(1, 1, host::SquadOrderState()));
+		m->ticks(2);
+		REQUIRE(alpha.squad_orders.size() == 2u);
+		CHECK(alpha.squad_orders.back().kind == net::SquadOrderKind::None);
+		CHECK(alpha.squad_orders.back().area == net::kNoSquadArea);
+		CHECK(bravo.squad_orders.empty());
+		std::printf("squad orders: alpha %zu, bravo %zu, the late joiner %zu\n", alpha.squad_orders.size(),
+				bravo.squad_orders.size(), charlie.squad_orders.size());
+	}
+
 	TEST_CASE("install unchanged") {
 		tdm::TdmLevel *level = tdm::load_tdm_level_once();
 		if (level == nullptr) {

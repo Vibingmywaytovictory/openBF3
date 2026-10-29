@@ -10,6 +10,7 @@
 #include "bf3/sim/soldier_state.h"
 #include "bf3/sim/spawn.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -20,9 +21,15 @@
 
 namespace bf3::host {
 
+struct SquadOrderMessage {
+	uint8_t team = 0;
+	std::vector<uint8_t> bytes;
+};
+
 struct MatchBroadcast {
 	std::vector<uint8_t> state;
 	std::vector<uint8_t> players;
+	std::vector<SquadOrderMessage> orders;
 };
 
 class MatchControl {
@@ -46,7 +53,7 @@ public:
 	bool take_suicide(size_t p_slot);
 
 	void describe(net::MatchInfo &r_message) const;
-	MatchBroadcast join_messages(sim::Tick p_tick) const;
+	MatchBroadcast join_messages(sim::Tick p_tick, uint8_t p_team) const;
 	MatchBroadcast take_broadcast(sim::Tick p_tick);
 
 	void step(sim::Tick p_tick, const ServerView &p_view, const Gunplay &p_gunplay, std::span<sim::SoldierState> r_states);
@@ -70,6 +77,8 @@ private:
 	sim::Tick player_list_tick_ = 0;
 	bool player_list_sent_ = false;
 	uint64_t step_failures_ = 0;
+	uint64_t orders_revision_ = 0;
+	std::array<std::array<SquadOrderState, net::kMaxSquads>, kSquadTeams> sent_orders_{};
 };
 
 }
