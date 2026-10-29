@@ -1964,16 +1964,7 @@ private:
 	uint32_t peer_ = 0;
 };
 
-bool wait_until(const std::function<bool()> &p_done) {
-	const auto start = std::chrono::steady_clock::now();
-	while (!p_done()) {
-		if (seconds_since(start) > 10.0) {
-			return false;
-		}
-		std::this_thread::sleep_for(16ms);
-	}
-	return true;
-}
+using bf3::test::wait_until;
 
 std::shared_ptr<GameServerConfig> pipe_game() {
 	auto game = std::make_shared<GameServerConfig>();
@@ -1996,20 +1987,21 @@ TEST_SUITE("host-session-unit") {
 		REQUIRE_MESSAGE(server.start(sc, &err), err);
 		CHECK(server.port() == 0);
 		pipe->connect(0);
-		REQUIRE(wait_until([&] { return server.stats().ticks >= 5 && pipe->to_server_empty(); }));
+		REQUIRE(wait_until([&] { return server.stats().ticks >= 5 && pipe->to_server_empty(); }, 10s, 16ms));
 
 		server.debug_stall(500);
-		REQUIRE(wait_until([&] { return server.stats().tick_stalls == 1; }));
+		REQUIRE(wait_until([&] { return server.stats().tick_stalls == 1; }, 10s, 16ms));
 		const uint64_t stalled_tick = server.stats().ticks;
 		const uint64_t services = pipe->services.load();
 		net::Hello hello;
 		hello.name = "stalled";
 		pipe->client_send(0, net::kChannelReliable, net::encode_hello(hello));
-		REQUIRE(wait_until([&] { return pipe->services.load() >= services + 3 && pipe->to_server_empty(); }));
+		REQUIRE(wait_until(
+				[&] { return pipe->services.load() >= services + 3 && pipe->to_server_empty(); }, 10s, 16ms));
 		CHECK(server.stats().ticks == stalled_tick);
 		CHECK(pipe->count_sent(0, net::MessageType::MatchInfo) == 0);
 
-		REQUIRE(wait_until([&] { return pipe->count_sent(0, net::MessageType::MatchInfo) == 1; }));
+		REQUIRE(wait_until([&] { return pipe->count_sent(0, net::MessageType::MatchInfo) == 1; }, 10s, 16ms));
 		CHECK(server.stats().ticks > stalled_tick);
 		const std::optional<net::MatchInfo> match = pipe->match_info(0);
 		REQUIRE(match.has_value());
@@ -2019,10 +2011,12 @@ TEST_SUITE("host-session-unit") {
 		net::Hello stranger;
 		stranger.protocol = net::kProtocolVersion + 1;
 		pipe->client_send(1, net::kChannelReliable, net::encode_hello(stranger));
-		REQUIRE(wait_until([&] {
-			std::lock_guard lock(pipe->mutex);
-			return !pipe->disconnects.empty();
-		}));
+		REQUIRE(wait_until(
+				[&] {
+					std::lock_guard lock(pipe->mutex);
+					return !pipe->disconnects.empty();
+				},
+				10s, 16ms));
 		{
 			std::lock_guard lock(pipe->mutex);
 			REQUIRE(pipe->disconnects.size() == 1);
@@ -2032,7 +2026,7 @@ TEST_SUITE("host-session-unit") {
 			CHECK(pipe->sent[at - 1].peer == 1);
 			CHECK(net::peek_type(pipe->sent[at - 1].bytes) == net::MessageType::Kick);
 		}
-		CHECK(wait_until([&] { return server.stats().peers == 1; }));
+		CHECK(wait_until([&] { return server.stats().peers == 1; }, 10s, 16ms));
 		CHECK(server.game_stats().clients == 1);
 		CHECK(server.stats().step_errors == 0);
 		server.stop();
@@ -2054,11 +2048,11 @@ TEST_SUITE("host-session-unit") {
 		const core::Status started = client.start(cc, nullptr, std::make_unique<PipeClientTransport>(pipe, 0));
 		REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
 		net::MatchInfo held;
-		REQUIRE(wait_until([&] { return client.lobby_match(held); }));
+		REQUIRE(wait_until([&] { return client.lobby_match(held); }, 10s, 16ms));
 		CHECK(held.slot == 0);
 		CHECK(held.level == synthetic_level()->level);
 		CHECK(held.motor_hash == motor_params_hash(synthetic_level()->motor));
-		REQUIRE(wait_until([&] { return pipe->count_sent(0, net::MessageType::Snapshot) >= 3; }));
+		REQUIRE(wait_until([&] { return pipe->count_sent(0, net::MessageType::Snapshot) >= 3; }, 10s, 16ms));
 		auto frame = std::make_unique<PresentationFrame>();
 		CHECK_FALSE(client.read_presentation(*frame));
 		CHECK(client.stats().connected);
@@ -2070,20 +2064,24 @@ TEST_SUITE("host-session-unit") {
 		CHECK_FALSE(client.attach_level(synthetic_level()).ok());
 
 		InputSample input;
-		REQUIRE(wait_until([&] {
-			client.read_presentation(*frame);
-			return frame->valid && frame->own_curr.life > 0;
-		}));
+		REQUIRE(wait_until(
+				[&] {
+					client.read_presentation(*frame);
+					return frame->valid && frame->own_curr.life > 0;
+				},
+				10s, 16ms));
 		const SoldierState spawn = frame->own_curr;
 		input.life = spawn.life;
 		input.yaw = yaw_radians(spawn.yaw);
 		input.move_forward = 1.0f;
-		REQUIRE(wait_until([&] {
-			client.set_input(input);
-			client.read_presentation(*frame);
-			return frame->server_own_valid && dist(frame->server_own.position, spawn.position) > 1.0f &&
-					dist(frame->own_curr.position, spawn.position) > 1.0f;
-		}));
+		REQUIRE(wait_until(
+				[&] {
+					client.set_input(input);
+					client.read_presentation(*frame);
+					return frame->server_own_valid && dist(frame->server_own.position, spawn.position) > 1.0f &&
+							dist(frame->own_curr.position, spawn.position) > 1.0f;
+				},
+				10s, 16ms));
 		const ClientStats stats = client.stats();
 		CHECK(stats.connected);
 		CHECK(stats.slot == 0);
@@ -2113,13 +2111,15 @@ TEST_SUITE("host-server-netthread") {
 		const core::Status started = client.start(cc, synthetic_level());
 		REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
 		auto frame = std::make_unique<PresentationFrame>();
-		REQUIRE(wait_until([&] {
-			client.read_presentation(*frame);
-			return frame->valid && frame->own_curr.life > 0;
-		}));
+		REQUIRE(wait_until(
+				[&] {
+					client.read_presentation(*frame);
+					return frame->valid && frame->own_curr.life > 0;
+				},
+				10s, 16ms));
 
 		server.debug_stall(6000);
-		REQUIRE(wait_until([&] { return server.stats().tick_stalls == 1; }));
+		REQUIRE(wait_until([&] { return server.stats().tick_stalls == 1; }, 10s, 16ms));
 		const auto stall_start = std::chrono::steady_clock::now();
 		bool stayed = true;
 		uint64_t early = 0, late = 0;
@@ -2135,7 +2135,7 @@ TEST_SUITE("host-server-netthread") {
 		CHECK(stayed);
 		CHECK(early > 0);
 		CHECK(late == early);
-		REQUIRE(wait_until([&] { return client.stats().snapshots_received > late; }));
+		REQUIRE(wait_until([&] { return client.stats().snapshots_received > late; }, 10s, 16ms));
 		CHECK(client.stats().connected);
 		CHECK(server.stats().peers == 1);
 		CHECK(server.game_stats().clients == 1);
