@@ -2,6 +2,7 @@
 
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/wav_io.h"
+#include "bf3/client_audio/sound_fate_ledger.h"
 
 #include <godot_cpp/classes/audio_effect_capture.hpp>
 
@@ -30,7 +31,6 @@ inline constexpr uint32_t kAudioIngameAlignWindowFrames = 4096;
 inline constexpr float kAudioIngameSameSample = 1.0e-6f;
 inline constexpr uint32_t kAudioIngameZeroRunFrames = 64;
 inline constexpr float kAudioIngameSoundLevel = 1.0e-3f;
-inline constexpr float kAudioIngameOwnMetres = 1.0f;
 
 struct AudioIngameAim {
 	float yaw_deg = 0.0f;
@@ -39,12 +39,6 @@ struct AudioIngameAim {
 
 inline constexpr std::array<AudioIngameAim, 10> kAudioIngameAims{ { { 0, -70 }, { 0, -35 }, { 0, -5 }, { 90, -5 },
 		{ 180, -5 }, { 270, -5 }, { 45, -20 }, { 135, -50 }, { 225, 15 }, { 315, -10 } } };
-
-enum class AudioSoundCategory : uint8_t { OwnGun, BotGun, ImpactSurface, ImpactSoldier, Explosion, Other, Count };
-inline constexpr std::array<std::string_view, size_t(AudioSoundCategory::Count)> kAudioSoundCategoryNames{ "own gun",
-	"bot gun", "surface impact", "soldier impact", "explosion", "other" };
-
-AudioSoundCategory audio_sound_category(std::string_view p_program, std::string_view p_scope, float p_distance_m);
 
 struct AudioIngameIo {
 	bool alive = false;
@@ -57,7 +51,7 @@ struct AudioIngameIo {
 };
 
 struct AudioSoundFate {
-	AudioSoundCategory category = AudioSoundCategory::Other;
+	audio::SoundCategory category = audio::SoundCategory::Other;
 	std::string program;
 	double request_s = 0.0;
 	float distance_m = 0.0f;
@@ -96,8 +90,8 @@ private:
 	void begin(double p_now_s, Bf3GameAudio &r_audio);
 	void end(Bf3GameAudio &r_audio);
 	void pull();
-	void drain(Bf3GameAudio &r_audio, double p_now_s);
-	void note(const audio::MixerCutEvent &p_event, double p_now_s, Bf3GameAudio &r_audio);
+	void take(Bf3GameAudio &r_audio);
+	void note(const audio::MixerCutEvent &p_event, Bf3GameAudio &r_audio);
 	void script(double p_now_s, const AudioIngameIo &p_io);
 	void analyse(Bf3GameAudio &r_audio);
 	void row(const std::string &p_name, bool p_pass, const std::string &p_detail);
@@ -113,6 +107,9 @@ private:
 	std::vector<audio::MixerCutEvent> events_;
 	std::map<audio::InstanceHandle, AudioSoundFate> fates_;
 	uint64_t unknown_handles_ = 0;
+	audio::SoundFateLedger ledger_;
+	std::vector<audio::MixerCutEvent> forwarded_;
+	double now_s_ = 0.0;
 
 	struct Snapshot {
 		uint64_t takeover_cuts = 0, abrupt_gain = 0, limit_edge_steps = 0, overs_out = 0, held_triggers = 0,

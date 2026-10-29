@@ -8,6 +8,7 @@
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/weapon_audio.h"
 #include "bf3/client_audio/game_audio_frame.h"
+#include "bf3/client_audio/sound_fate_ledger.h"
 #include "bf3/core/path_guard.h"
 #include "bf3/core/result.h"
 #include "bf3/fx/triggers.h"
@@ -65,6 +66,11 @@ public:
 
 	void set_check(audio::GameAudioCheck *p_check);
 	void set_mix_tap(audio::MixTap *p_tap);
+	void forward_cuts(bool p_on);
+	void take_cuts(std::vector<audio::MixerCutEvent> &r_out);
+	void drain_events();
+	const audio::SoundCategoryTable &sound_categories() const;
+	audio::SoundFateTotals sound_fates() const;
 	std::string_view scope_name(uint16_t p_scope) const;
 	const core::PathGuard &write_guard() const;
 	audio::MixerCore *mixer() const;

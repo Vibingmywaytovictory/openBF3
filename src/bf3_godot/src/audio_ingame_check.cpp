@@ -23,8 +23,6 @@ namespace ba = bf3::audio;
 
 namespace {
 
-constexpr size_t kCutBatch = 256;
-
 bool silent_kind(ba::MixerCutKind p_kind) {
 	switch (p_kind) {
 		case ba::MixerCutKind::Start:
@@ -60,23 +58,6 @@ std::string reason_text(uint8_t p_reason, std::string_view p_scope) {
 	}
 }
 
-}
-
-AudioSoundCategory audio_sound_category(std::string_view p_program, std::string_view p_scope, float p_distance_m) {
-	const std::string program = core::to_lower_ascii(p_program);
-	const std::string scope = core::to_lower_ascii(p_scope);
-	if (program.find("bullet_impacts") != std::string::npos) {
-		return program.find("soldier") != std::string::npos || scope.find("soldier") != std::string::npos
-				? AudioSoundCategory::ImpactSoldier
-				: AudioSoundCategory::ImpactSurface;
-	}
-	if (program.find("explosion") != std::string::npos || program.find("grenade") != std::string::npos) {
-		return AudioSoundCategory::Explosion;
-	}
-	if (program.find("weapons/") != std::string::npos && program.find("foley") == std::string::npos) {
-		return p_distance_m < kAudioIngameOwnMetres ? AudioSoundCategory::OwnGun : AudioSoundCategory::BotGun;
-	}
-	return AudioSoundCategory::Other;
 }
 
 AudioIngameCheck::AudioIngameCheck(std::string p_out_dir, double p_seconds) :
@@ -140,10 +121,8 @@ void AudioIngameCheck::begin(double p_now_s, Bf3GameAudio &r_audio) {
 	mix_tap_ = std::make_unique<ba::WavRecorder>(ba::kMixRate, seconds_ + 5.0);
 	heard_.reserve(size_t((seconds_ + 5.0) * double(ba::kMixRate)) * 2);
 	events_.reserve(size_t(1) << 16);
-	r_audio.mixer()->record_cuts(true);
-	std::array<ba::MixerCutEvent, kCutBatch> batch;
-	while (r_audio.mixer()->poll_cuts(batch) == batch.size()) {
-	}
+	ledger_.set_categories(&r_audio.sound_categories());
+	r_audio.forward_cuts(true);
 	at_start_ = snapshot(r_audio);
 	as->add_bus_effect(0, capture_, -1);
 	r_audio.set_mix_tap(mix_tap_.get());
@@ -159,7 +138,6 @@ void AudioIngameCheck::end(Bf3GameAudio &r_audio) {
 			as->remove_bus_effect(0, i);
 		}
 	}
-	r_audio.mixer()->record_cuts(false);
 }
 
 void AudioIngameCheck::pull() {
@@ -180,15 +158,25 @@ void AudioIngameCheck::pull() {
 	discarded_ = capture_->get_discarded_frames();
 }
 
-void AudioIngameCheck::note(const ba::MixerCutEvent &p_event, double p_now_s, Bf3GameAudio &r_audio) {
+void AudioIngameCheck::take(Bf3GameAudio &r_audio) {
+	forwarded_.clear();
+	r_audio.take_cuts(forwarded_);
+	for (const ba::MixerCutEvent &e : forwarded_) {
+		note(e, r_audio);
+	}
+}
+
+void AudioIngameCheck::note(const ba::MixerCutEvent &p_event, Bf3GameAudio &r_audio) {
 	events_.push_back(p_event);
+	ledger_.note(p_event, r_audio.scope_name(p_event.scope));
 	if (p_event.kind == ba::MixerCutKind::Request) {
 		AudioSoundFate f;
 		f.program = p_event.program;
-		f.request_s = p_now_s - record_s_;
+		f.request_s = now_s_ - record_s_;
 		f.distance_m = p_event.distance_m;
 		f.scope = p_event.scope;
-		f.category = audio_sound_category(f.program, r_audio.scope_name(p_event.scope), p_event.distance_m);
+		f.category =
+				r_audio.sound_categories().category(f.program, r_audio.scope_name(p_event.scope), p_event.distance_m);
 		fates_[p_event.handle] = std::move(f);
 		return;
 	}
@@ -237,19 +225,6 @@ void AudioIngameCheck::note(const ba::MixerCutEvent &p_event, double p_now_s, Bf
 			break;
 		default:
 			break;
-	}
-}
-
-void AudioIngameCheck::drain(Bf3GameAudio &r_audio, double p_now_s) {
-	std::array<ba::MixerCutEvent, kCutBatch> batch;
-	for (;;) {
-		const size_t n = r_audio.mixer()->poll_cuts(batch);
-		for (size_t i = 0; i < n; ++i) {
-			note(batch[i], p_now_s, r_audio);
-		}
-		if (n < batch.size()) {
-			return;
-		}
 	}
 }
 
@@ -322,6 +297,7 @@ bool AudioIngameCheck::frame(double p_now_s, Bf3GameAudio &r_audio, const AudioI
 	if (!r_audio.built() || r_audio.mixer() == nullptr) {
 		return false;
 	}
+	now_s_ = p_now_s;
 	if (first_s_ < 0.0) {
 		first_s_ = p_now_s;
 	}
@@ -349,7 +325,7 @@ bool AudioIngameCheck::frame(double p_now_s, Bf3GameAudio &r_audio, const AudioI
 		case Phase::Record:
 			script(p_now_s, p_io);
 			pull();
-			drain(r_audio, p_now_s);
+			take(r_audio);
 			if (p_now_s - record_s_ < seconds_) {
 				return false;
 			}
@@ -358,7 +334,9 @@ bool AudioIngameCheck::frame(double p_now_s, Bf3GameAudio &r_audio, const AudioI
 				firing_ = false;
 			}
 			end(r_audio);
-			drain(r_audio, p_now_s);
+			r_audio.drain_events();
+			take(r_audio);
+			r_audio.forward_cuts(false);
 			analyse(r_audio);
 			phase_ = Phase::Done;
 			done_ = true;
@@ -489,7 +467,7 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 					(unsigned long long)delta(&Snapshot::pool_forgotten),
 					(unsigned long long)delta(&Snapshot::router_forgotten)));
 
-	std::array<AudioCategoryCounts, size_t(AudioSoundCategory::Count)> cats;
+	std::array<AudioCategoryCounts, size_t(ba::SoundCategory::Count)> cats;
 	std::string fates_csv = "handle,category,request_s,distance_m,scope,started,finished,cull,park,parks,refused,"
 							"killed,joined,coalesced,program\n";
 	for (const auto &[h, f] : fates_) {
@@ -529,7 +507,7 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 			c.reasons["events dropped at a resume"] += f.coalesced;
 		}
 		fates_csv += core::fmt("%u,%s,%.3f,%.2f,%s,%d,%d,%u,%u,%u,%d,%d,%d,%u,", unsigned(h),
-				std::string(kAudioSoundCategoryNames[size_t(f.category)]).c_str(), f.request_s, double(f.distance_m),
+				std::string(ba::kSoundCategoryNames[size_t(f.category)]).c_str(), f.request_s, double(f.distance_m),
 				scope.c_str(), int(f.started), int(f.finished), unsigned(f.cull), unsigned(f.park), f.parks,
 				int(f.refused), int(f.killed), int(f.joined), f.coalesced);
 		fates_csv += f.program + "\n";
@@ -545,7 +523,7 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 		lines_.push_back(
 				core::fmt("[audio-ingame] sounds %s: %llu requested, %llu started, %llu finished, %llu joined "
 						  "the next burst's instance, %llu dropped by the data's rules, %llu dropped otherwise",
-						std::string(kAudioSoundCategoryNames[k]).c_str(), (unsigned long long)c.requested,
+						std::string(ba::kSoundCategoryNames[k]).c_str(), (unsigned long long)c.requested,
 						(unsigned long long)c.started, (unsigned long long)c.finished, (unsigned long long)c.joined,
 						(unsigned long long)c.data_drops, (unsigned long long)c.other_drops) +
 				reasons);
@@ -566,9 +544,27 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 					(unsigned long long)delta(&Snapshot::ring_overflows),
 					(unsigned long long)delta(&Snapshot::feedback_drops),
 					(unsigned long long)delta(&Snapshot::stale_events), (unsigned long long)unknown_handles_));
-	const AudioCategoryCounts &own = cats[size_t(AudioSoundCategory::OwnGun)];
-	const AudioCategoryCounts &bots = cats[size_t(AudioSoundCategory::BotGun)];
-	const AudioCategoryCounts &surface = cats[size_t(AudioSoundCategory::ImpactSurface)];
+	const ba::SoundFateTotals ledger = ledger_.totals();
+	bool ledger_same = ledger_.overflows() == 0;
+	std::string ledger_text;
+	for (size_t k = 0; k < cats.size(); ++k) {
+		const ba::SoundFateCounts &l = ledger.categories[k];
+		const AudioCategoryCounts &c = cats[k];
+		ledger_same = ledger_same && l.requested == c.requested && l.data_drops == c.data_drops &&
+				l.other_drops == c.other_drops && l.started == c.started && l.joined == c.joined;
+		ledger_text += core::fmt("; %s %llu/%llu/%llu requested/data/other (check %llu/%llu/%llu)",
+				std::string(ba::kSoundCategoryNames[k]).c_str(), (unsigned long long)l.requested,
+				(unsigned long long)l.data_drops, (unsigned long long)l.other_drops, (unsigned long long)c.requested,
+				(unsigned long long)c.data_drops, (unsigned long long)c.other_drops);
+	}
+	row("the in-game ledger counts what the check counts", ledger_same,
+			core::fmt("SoundFateLedger %llu outside / %llu by the data's rules, %llu over capacity",
+					(unsigned long long)ledger.other_drops(), (unsigned long long)ledger.data_drops(),
+					(unsigned long long)ledger_.overflows()) +
+					ledger_text);
+	const AudioCategoryCounts &own = cats[size_t(ba::SoundCategory::OwnGun)];
+	const AudioCategoryCounts &bots = cats[size_t(ba::SoundCategory::BotGun)];
+	const AudioCategoryCounts &surface = cats[size_t(ba::SoundCategory::ImpactSurface)];
 	row("the scenario ran", bursts_ >= 6 && own.requested >= 1 && bots.requested >= 10 && surface.requested >= 20,
 			core::fmt("%.1f s recorded, %u own bursts, %u own deaths, %llu own gun, %llu bot gun and %llu surface "
 					  "impact sounds requested",

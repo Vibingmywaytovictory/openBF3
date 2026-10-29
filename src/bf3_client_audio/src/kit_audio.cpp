@@ -71,6 +71,7 @@ KitAudioSources kit_audio_sources(const host::GunplayLevel &p_level) {
 		WeaponSoundSource &s = out.sources[i];
 		s.sound = d.sound;
 		s.one_shot = is_one_shot(d);
+		s.explosive = d.projectile.kind == gp::ProjectileKind::Grenade && d.fire.logic == gp::FireLogic::HoldAndRelease;
 		s.fire_mode = fire_mode_of(d.fire.logic);
 		const double interval = gp::shot_interval(d.fire);
 		s.shot_interval_s = std::isfinite(interval) && interval > 0.0 ? interval : 0.1;

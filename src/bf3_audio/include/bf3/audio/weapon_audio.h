@@ -100,6 +100,7 @@ struct WeaponAudioDef {
 	bool has_reload = false;
 	double shot_interval_s = 0.0;
 	WeaponFoley foley;
+	bool explosive = false;
 };
 
 struct WeaponAudioTable {
@@ -114,6 +115,7 @@ struct WeaponSoundSource {
 	double shot_interval_s = 0.0;
 	WeaponFireMode fire_mode = WeaponFireMode::Automatic;
 	bool one_shot = false;
+	bool explosive = false;
 };
 
 core::Result<WeaponAudioTable> load_weapon_audio(const core::EbxResolver &p_db, std::span<const WeaponSoundSource> p_defs, uint32_t p_mix_rate);

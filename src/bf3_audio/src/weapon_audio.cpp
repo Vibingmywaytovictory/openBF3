@@ -206,6 +206,7 @@ core::Result<WeaponAudioTable> load_weapon_audio(const core::EbxResolver &p_db, 
 		d.patch = src.sound;
 		d.fire_mode = src.fire_mode;
 		d.shot_interval_s = src.shot_interval_s;
+		d.explosive = src.explosive;
 		if (src.sound.empty()) {
 			d.error = "no sound partition";
 			continue;

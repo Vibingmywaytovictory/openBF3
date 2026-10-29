@@ -14,6 +14,7 @@
 #include "bf3/audio/weapon_sound.h"
 #include "bf3/client_audio/game_audio_frame.h"
 #include "bf3/client_audio/kit_audio.h"
+#include "bf3/client_audio/sound_fate_ledger.h"
 #include "bf3/core/audio/sound_ports.h"
 #include "bf3/core/audio/sound_program.h"
 #include "bf3/core/audio/sound_stream.h"
@@ -1006,6 +1007,117 @@ TEST_SUITE("audio-router") {
 		CHECK(std::count_if(cuts.begin(), cuts.end(),
 					  [](const ba::MixerCutEvent &e) { return e.kind == ba::MixerCutKind::Join; }) == 4);
 		CHECK(r.mixer->stats().starved_voices.load() == 0);
+	}
+
+	TEST_CASE("sound fate ledger: categories from the weapon table, every fate and drop reason, a full table") {
+		auto table = std::make_shared<ba::WeaponAudioTable>();
+		table->defs.resize(2);
+		auto named = [](std::string p_name) {
+			auto p = std::make_shared<SoundProgram>();
+			p->name = std::move(p_name);
+			return std::shared_ptr<const SoundProgram>(p);
+		};
+		table->defs[0].program = named("sound/weapons/handheld/m16a3/weapon_assaultrifle_m16a4_02");
+		table->defs[1].program = named("sound/weapons/handheld/m67/m67");
+		table->defs[1].explosion = named("sound/explosions/handgrenade/explosion_handgrenade");
+		ba::SoundCategoryTable cats;
+		cats.add_weapons(*table);
+		CHECK(cats.category("sound/weapons/handheld/m67/m67", "", 20.0f) == ba::SoundCategory::Explosion);
+		CHECK(cats.category("sound/explosions/handgrenade/explosion_handgrenade", "", 20.0f) ==
+				ba::SoundCategory::Explosion);
+		CHECK(cats.category("sound/weapons/handheld/m16a3/weapon_assaultrifle_m16a4_02", "", 20.0f) ==
+				ba::SoundCategory::BotGun);
+		CHECK(cats.category("sound/weapons/handheld/m16a3/weapon_assaultrifle_m16a4_02", "", 0.0f) ==
+				ba::SoundCategory::OwnGun);
+		CHECK(cats.category("sound/bullet_craft/bullet_impacts/concrete", "", 3.0f) ==
+				ba::SoundCategory::ImpactSurface);
+		CHECK(cats.category("sound/bullet_craft/bullet_impacts/soldier_body", "", 3.0f) ==
+				ba::SoundCategory::ImpactSoldier);
+		CHECK(cats.category("sound/weapons/handheld/other/unknown", "", 3.0f) == ba::SoundCategory::Other);
+
+		ba::SoundFateLedger ledger(64);
+		ledger.set_categories(&cats);
+		const auto ev = [&](ba::MixerCutKind p_kind, ba::InstanceHandle p_handle, uint8_t p_reason = 0,
+								uint32_t p_count = 0) {
+			ba::MixerCutEvent e;
+			e.kind = p_kind;
+			e.handle = p_handle;
+			e.reason = p_reason;
+			e.count = p_count;
+			e.distance_m = 20.0f;
+			std::snprintf(
+					e.program, sizeof(e.program), "%s", "sound/weapons/handheld/m16a3/weapon_assaultrifle_m16a4_02");
+			ledger.note(e, "");
+		};
+		using K = ba::MixerCutKind;
+		const uint8_t cap = uint8_t(ba::CullVerdict::Cap), pre = uint8_t(ba::CullVerdict::Precull),
+					  scope = uint8_t(ba::CullVerdict::Scope), pending = uint8_t(ba::CullVerdict::Pending);
+		for (ba::InstanceHandle h = 1; h <= 12; ++h) {
+			ev(K::Request, h);
+		}
+		ev(K::Start, 1);
+		ev(K::Finish, 1);
+		ev(K::Cull, 2, pre);
+		ev(K::Cull, 3, cap);
+		ev(K::Park, 4, cap);
+		ev(K::Resume, 4);
+		ev(K::Finish, 4);
+		ev(K::Refused, 5);
+		ev(K::Start, 6);
+		ev(K::Kill, 6);
+		ev(K::Start, 8);
+		ev(K::Join, 8, 0, 9);
+		ev(K::Park, 10, scope);
+		ev(K::Cull, 10, pending);
+		ev(K::Start, 11);
+		ev(K::Coalesce, 11, 0, 3);
+		ev(K::Coalesce, 11, 0, 2);
+		ev(K::Cull, 12, scope);
+		ev(K::Finish, 99);
+		const ba::SoundFateTotals t = ledger.totals();
+		const ba::SoundFateCounts &c = t.categories[size_t(ba::SoundCategory::BotGun)];
+		CHECK(c.requested == 12);
+		CHECK(c.started == 6);
+		CHECK(c.finished == 2);
+		CHECK(c.joined == 1);
+		CHECK(c.data_drops == 3);
+		CHECK(c.other_drops == 6);
+		CHECK(c.reasons[size_t(ba::SoundDropReason::BelowWindow)] == 1);
+		CHECK(c.reasons[size_t(ba::SoundDropReason::Scope)] == 1);
+		CHECK(c.reasons[size_t(ba::SoundDropReason::VoiceCap)] == 1);
+		CHECK(c.reasons[size_t(ba::SoundDropReason::ParkedAtVoiceCap)] == 1);
+		CHECK(c.reasons[size_t(ba::SoundDropReason::StoppedParkedByData)] == 1);
+		CHECK(c.reasons[size_t(ba::SoundDropReason::Refused)] == 1);
+		CHECK(c.reasons[size_t(ba::SoundDropReason::Killed)] == 1);
+		CHECK(c.reasons[size_t(ba::SoundDropReason::CoalescedEvents)] == 5);
+		CHECK(c.reasons[size_t(ba::SoundDropReason::NeverStarted)] == 1);
+		CHECK(t.other_drops() == 6);
+		CHECK(t.data_drops() == 3);
+		CHECK(ledger.untracked() == 1);
+		CHECK(ledger.format(t).find("6 outside the data's rules, 3 by the data's rules, of 12 requested") !=
+				std::string::npos);
+
+		ba::SoundFateLedger small(1);
+		small.set_categories(&cats);
+		for (ba::InstanceHandle h = 16; h <= 16 * 9; h += 16) {
+			ba::MixerCutEvent e;
+			e.kind = K::Request;
+			e.handle = h;
+			small.note(e, "");
+		}
+		CHECK(small.overflows() == 1);
+		ba::MixerCutEvent fin;
+		fin.kind = K::Finish;
+		fin.handle = 32;
+		small.note(fin, "");
+		for (ba::InstanceHandle h : { 48u, 64u, 128u }) {
+			ba::MixerCutEvent s;
+			s.kind = K::Start;
+			s.handle = h;
+			small.note(s, "");
+		}
+		CHECK(small.untracked() == 0);
+		CHECK(small.totals().categories[size_t(ba::SoundCategory::Other)].started == 3);
 	}
 
 	TEST_CASE("voice limit: running bursts are never stolen, the farthest released tail is, the rest are culled") {
@@ -2397,6 +2509,32 @@ TEST_SUITE("audio-game") {
 		}
 		MESSAGE("Metro TDM bank waves by channel count:" << census);
 		check_game_unchanged(*f);
+	}
+
+	TEST_CASE("sound categories from Metro's weapon table: the M67 is an explosive, the M16A3 a gun") {
+		GameFixture *f = need_game_install();
+		if (f == nullptr) {
+			return;
+		}
+		ba::SoundCategoryTable cats;
+		cats.add_weapons(*f->assets.table);
+		const ba::WeaponAudioDef *m67 = nullptr;
+		for (const ba::WeaponAudioDef &d : f->assets.table->defs) {
+			if (d.program && d.program->name == "sound/weapons/handheld/m67/m67") {
+				m67 = &d;
+			}
+		}
+		REQUIRE(m67 != nullptr);
+		CHECK(m67->explosive);
+		CHECK(cats.category(m67->program->name, "", 25.0f) == ba::SoundCategory::Explosion);
+		CHECK(cats.category(kM16Patch, "", 25.0f) == ba::SoundCategory::BotGun);
+		CHECK(cats.category(kM16Patch, "", 0.0f) == ba::SoundCategory::OwnGun);
+		size_t explosives = 0;
+		for (const ba::WeaponAudioDef &d : f->assets.table->defs) {
+			explosives += d.explosive ? 1u : 0u;
+		}
+		MESSAGE(explosives << " explosive defs in Metro TDM's weapon audio table");
+		CHECK(explosives >= 1);
 	}
 
 	TEST_CASE("tuning max_voices 64 caps the cull at 64") {

@@ -79,6 +79,8 @@ template <class Impl>
 void capture_step(Impl &r_m);
 template <class Impl>
 void capture_end(Impl &r_m);
+template <class Impl> void drain_mixer_events(Impl &r_m, const Bf3GameAudio &p_audio);
+template <class Impl> void print_sound_fates(Impl &r_m, bool p_always);
 
 struct Bf3GameAudio::Impl {
 
@@ -115,6 +117,14 @@ struct Bf3GameAudio::Impl {
 	int64_t lead_frames = 2 * int64_t(ba::kBlockFrames);
 	std::unique_ptr<AudioCapture, void (*)(AudioCapture *)> capture{ nullptr, &delete_capture };
 	core::PathGuard capture_guard;
+
+	ba::SoundCategoryTable categories;
+	ba::SoundFateLedger ledger;
+	std::array<ba::MixerCutEvent, 256> cut_batch;
+	bool forwarding = false;
+	std::vector<ba::MixerCutEvent> forwarded;
+	std::chrono::steady_clock::time_point fate_line_at{};
+	uint64_t fate_line_drops = 0;
 };
 
 Bf3GameAudio::Bf3GameAudio() :
@@ -147,6 +157,10 @@ core::Status Bf3GameAudio::load(const GameLoadInputs &p_in, std::span<const std:
 	m.report = std::move(a->report);
 	m.programs = a->programs;
 	m.program_failures = a->program_failures;
+	m.categories = ba::SoundCategoryTable{};
+	if (m.table) {
+		m.categories.add_weapons(*m.table);
+	}
 	m.a3 = load_a3(p_in.db->level->db(), m);
 	m.loaded.store(true, std::memory_order_release);
 	return core::Status::success();
@@ -201,6 +215,11 @@ bool Bf3GameAudio::build(godot::Node *p_parent, std::string *r_error) {
 	m.lead_frames = int64_t(mc.schedule_lead_blocks) * int64_t(ba::kBlockFrames);
 	m.mixer = std::make_shared<ba::MixerCore>(mc);
 	m.mixer->set_tap(&m.tap);
+	m.ledger = ba::SoundFateLedger{};
+	m.ledger.set_categories(&m.categories);
+	m.mixer->record_cuts(true);
+	m.fate_line_at = std::chrono::steady_clock::now();
+	m.fate_line_drops = 0;
 	m.pool = std::make_unique<ba::OneShotPool>(m.sizes.one_shots);
 	ba::SimMixerClockConfig cc;
 	cc.bias_frames = m.lead_frames + kBiasMarginFrames;
@@ -282,6 +301,8 @@ void Bf3GameAudio::step(const GameFrame &p_frame, std::span<const fx::ImpactSoun
 	}
 	m.driver.step(*m.router, m.impacts.get(), *m.clock, in, m.impact_requests, p_effect_sounds);
 	capture_step(m);
+	drain_mixer_events(m, *this);
+	print_sound_fates(m, false);
 }
 
 bool Bf3GameAudio::audition(std::string_view p_patch, const fx::Vec3 &p_position, std::string *r_error) {
@@ -345,6 +366,28 @@ void Bf3GameAudio::set_mix_tap(audio::MixTap *p_tap) {
 	} else {
 		m.tap.set(p_tap);
 	}
+}
+
+void Bf3GameAudio::forward_cuts(bool p_on) {
+	impl_->forwarding = p_on;
+	impl_->forwarded.clear();
+}
+
+void Bf3GameAudio::take_cuts(std::vector<audio::MixerCutEvent> &r_out) {
+	r_out.insert(r_out.end(), impl_->forwarded.begin(), impl_->forwarded.end());
+	impl_->forwarded.clear();
+}
+
+void Bf3GameAudio::drain_events() {
+	drain_mixer_events(*impl_, *this);
+}
+
+const audio::SoundCategoryTable &Bf3GameAudio::sound_categories() const {
+	return impl_->categories;
+}
+
+audio::SoundFateTotals Bf3GameAudio::sound_fates() const {
+	return impl_->ledger.totals();
 }
 
 std::string_view Bf3GameAudio::scope_name(uint16_t p_scope) const {
@@ -419,6 +462,7 @@ void Bf3GameAudio::shutdown() {
 		m.tap.set(nullptr);
 		m.tap.set_capture(nullptr);
 		AudioServer::get_singleton()->unlock();
+		drain_mixer_events(m, *this);
 		capture_end(m);
 		if (Node *parent = m.player->get_parent()) {
 			parent->remove_child(m.player);
@@ -436,6 +480,8 @@ void Bf3GameAudio::shutdown() {
 	m.mixer.reset();
 	m.pool.reset();
 	m.check = nullptr;
+	m.forwarding = false;
+	m.forwarded.clear();
 	m.built = false;
 }
 
@@ -497,23 +543,51 @@ constexpr double kHitchMs = 50.0;
 constexpr int kAudioThreadPriority = 2;
 constexpr size_t kMaxCaptureEvents = size_t(1) << 20;
 
-void drain_cuts(ba::MixerCore &r_mixer, AudioCapture &r_c) {
-	std::array<ba::MixerCutEvent, 256> batch;
+constexpr double kSoundFateLineSeconds = 10.0;
+
+}
+
+template <class Impl> void drain_mixer_events(Impl &r_m, const Bf3GameAudio &p_audio) {
+	if (r_m.mixer == nullptr) {
+		return;
+	}
+	AudioCapture *c = r_m.capture.get();
+	const bool keep = c != nullptr && !c->dir.empty();
 	for (;;) {
-		const size_t n = r_mixer.poll_cuts(batch);
+		const size_t n = r_m.mixer->poll_cuts(r_m.cut_batch);
 		for (size_t i = 0; i < n; ++i) {
-			if (r_c.events.size() < kMaxCaptureEvents) {
-				r_c.events.push_back(batch[i]);
-			} else {
-				++r_c.events_lost;
+			const ba::MixerCutEvent &e = r_m.cut_batch[i];
+			r_m.ledger.note(e, p_audio.scope_name(e.scope));
+			if (keep) {
+				if (c->events.size() < kMaxCaptureEvents) {
+					c->events.push_back(e);
+				} else {
+					++c->events_lost;
+				}
+			}
+			if (r_m.forwarding && r_m.forwarded.size() < kMaxCaptureEvents) {
+				r_m.forwarded.push_back(e);
 			}
 		}
-		if (n < batch.size()) {
+		if (n < r_m.cut_batch.size()) {
 			return;
 		}
 	}
 }
 
+template <class Impl> void print_sound_fates(Impl &r_m, bool p_always) {
+	const auto now = std::chrono::steady_clock::now();
+	if (!p_always && std::chrono::duration<double>(now - r_m.fate_line_at).count() < kSoundFateLineSeconds) {
+		return;
+	}
+	r_m.fate_line_at = now;
+	const ba::SoundFateTotals t = r_m.ledger.totals();
+	const uint64_t drops = t.other_drops() + t.data_drops();
+	if (!p_always && drops == r_m.fate_line_drops) {
+		return;
+	}
+	r_m.fate_line_drops = drops;
+	UtilityFunctions::print(String::utf8(("[audio] " + r_m.ledger.format(t)).c_str()));
 }
 
 template <class Impl>
@@ -537,7 +611,6 @@ void capture_begin(Impl &r_m) {
 	r_m.capture->guard = r_m.capture_guard;
 	r_m.capture->wav = std::make_unique<ba::WavRecorder>(ba::kMixRate, seconds);
 	r_m.capture->events.reserve(size_t(1) << 16);
-	r_m.mixer->record_cuts(true);
 	r_m.tap.set_capture(r_m.capture->wav.get());
 }
 
@@ -560,9 +633,6 @@ void capture_step(Impl &r_m) {
 	}
 	c->last_step = now;
 	c->have_step = true;
-	if (!c->dir.empty()) {
-		drain_cuts(*r_m.mixer, *c);
-	}
 }
 
 template <class Impl>
@@ -583,7 +653,9 @@ void capture_end(Impl &r_m) {
 			double(ms.max_call_gap_ns.load()) / 1e6, (unsigned long long)(r_m.clock ? r_m.clock->output_latency_frames() : 0),
 			prio == kNoThreadPriority ? "unknown " : "", prio == kNoThreadPriority ? 0 : prio, prio_set == kNoThreadPriority ? "unchanged " : "",
 			prio_set == kNoThreadPriority ? 0 : prio_set, kHitchMs, (unsigned long long)c->hitch_count, c->hitch_max_ms);
-	UtilityFunctions::print(String::utf8(("[audio] audio health: " + ba::format_mixer_cuts(r_m.mixer->cut_stats()) + line).c_str()));
+	UtilityFunctions::print(String::utf8(("[audio] audio health: " + ba::format_mixer_cuts(r_m.mixer->cut_stats()) +
+			line + "; " + r_m.ledger.format(r_m.ledger.totals()))
+					.c_str()));
 	if (r_m.router) {
 		const ba::WeaponAudioStats &rs = r_m.router->stats();
 		UtilityFunctions::print(String::utf8(("[audio] weapon foley: " + std::to_string(rs.reloads) + " reloads, " + std::to_string(rs.foley) + " foley one-shots, " +
@@ -592,7 +664,6 @@ void capture_end(Impl &r_m) {
 	if (c->dir.empty()) {
 		return;
 	}
-	drain_cuts(*r_m.mixer, *c);
 	const core::PathGuard &guard = c->guard;
 	std::error_code ec;
 	std::filesystem::create_directories(c->dir, ec);
