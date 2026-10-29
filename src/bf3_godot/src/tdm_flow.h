@@ -57,6 +57,8 @@ struct TdmArgText {
 };
 
 core::Status parse_tdm_options(const TdmArgText &p_args, TdmOptions &r_options);
+TdmArgText tdm_arg_text();
+std::string config_path(const char *p_res);
 
 struct TdmScreenInput {
 	bool match_valid = false;

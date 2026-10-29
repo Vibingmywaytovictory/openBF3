@@ -36,6 +36,7 @@
 #include "bf3/core/util/elapsed.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/kits.h"
+#include "bf3/host/server_session.h"
 #include "bf3/host/tdm_brain.h"
 #include "bf3/host/tdm_rules.h"
 #include "bf3/net/protocol.h"
@@ -69,35 +70,10 @@ Bf3UiScreens *tdm_ui_screens(const TdmState &p_m) {
 	return p_m.ui_screens_id != 0 ? Object::cast_to<Bf3UiScreens>(ObjectDB::get_instance(p_m.ui_screens_id)) : nullptr;
 }
 
-namespace {
-
-const char *phase_name(net::MatchPhase p_phase) {
-	switch (p_phase) {
-		case net::MatchPhase::Loading:
-			return "loading";
-		case net::MatchPhase::PreRound:
-			return "pre-round";
-		case net::MatchPhase::InRound:
-			return "in round";
-		case net::MatchPhase::RoundOver:
-			return "round over";
-		case net::MatchPhase::Restarting:
-			return "restarting";
-	}
-	return "?";
-}
-
 std::string config_path(const char *p_res) {
 	const std::string path = to_std(ProjectSettings::get_singleton()->globalize_path(p_res));
 	std::error_code ec;
 	return std::filesystem::exists(utf8_path(path), ec) ? path : std::string();
-}
-
-void print_match(const net::MatchState &p_match) {
-	char line[192];
-	std::snprintf(line, sizeof(line), "[tdm] match: %s, US %d - RU %d of %d%s", phase_name(p_match.phase), p_match.kills[0], p_match.kills[1], p_match.kill_limit,
-			p_match.winner == 1 ? ", US wins" : (p_match.winner == 2 ? ", RU wins" : ""));
-	UtilityFunctions::print(line);
 }
 
 TdmArgText tdm_arg_text() {
@@ -113,6 +89,16 @@ TdmArgText tdm_arg_text() {
 	a.has_deploy_screen = has_user_arg("deploy-screen");
 	a.deploy_screen = user_arg_value("deploy-screen");
 	return a;
+}
+
+namespace {
+
+void print_match(const net::MatchState &p_match) {
+	char line[192];
+	std::snprintf(line, sizeof(line), "[tdm] match: %s, US %d - RU %d of %d%s", host::match_phase_name(p_match.phase),
+			p_match.kills[0], p_match.kills[1], p_match.kill_limit,
+			p_match.winner == 1 ? ", US wins" : (p_match.winner == 2 ? ", RU wins" : ""));
+	UtilityFunctions::print(line);
 }
 
 std::string limits_text(const TdmOptions &p_options) {
