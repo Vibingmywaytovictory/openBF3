@@ -1,0 +1,12 @@
+set(commit "unknown")
+if(GIT)
+    execute_process(COMMAND "${GIT}" -C "${SOURCE_DIR}" rev-parse HEAD
+        OUTPUT_VARIABLE head OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE status)
+    if(status EQUAL 0 AND NOT head STREQUAL "")
+        set(commit "${head}")
+    endif()
+endif()
+string(SHA256 digest "${commit}|${COMPILER}")
+string(SUBSTRING "${digest}" 0 16 source_hash)
+set(text "\#pragma once\n\n\#include <cstdint>\n\nnamespace bf3::net {\n\ninline constexpr uint64_t kBuildSourceHash = 0x${source_hash}ull;\n\n}\n")
+file(CONFIGURE OUTPUT "${OUT}" CONTENT "${text}" @ONLY)

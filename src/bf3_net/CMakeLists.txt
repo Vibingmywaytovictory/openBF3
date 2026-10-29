@@ -35,3 +35,15 @@ target_sources(bf3_net PRIVATE
 target_sources(bf3_net PRIVATE
     src/other_sample.cpp
 )
+
+find_package(Git QUIET)
+set(OPENBF3_BUILD_ID_DIR "${CMAKE_CURRENT_BINARY_DIR}/build_id")
+add_custom_target(bf3_build_id
+    COMMAND "${CMAKE_COMMAND}" "-DGIT=${GIT_EXECUTABLE}" "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
+        "-DCOMPILER=${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}" "-DOUT=${OPENBF3_BUILD_ID_DIR}/build_id.h"
+        -P "${PROJECT_SOURCE_DIR}/cmake/build_id.cmake"
+    BYPRODUCTS "${OPENBF3_BUILD_ID_DIR}/build_id.h"
+    VERBATIM)
+add_dependencies(bf3_net bf3_build_id)
+target_include_directories(bf3_net PRIVATE "${OPENBF3_BUILD_ID_DIR}")
+target_sources(bf3_net PRIVATE src/build_id.cpp)

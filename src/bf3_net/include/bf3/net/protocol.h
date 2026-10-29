@@ -76,6 +76,8 @@ enum class MessageType : uint8_t {
 
 std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram);
 
+uint64_t game_build();
+
 struct Hello {
 	uint16_t protocol = kProtocolVersion;
 	std::string name;

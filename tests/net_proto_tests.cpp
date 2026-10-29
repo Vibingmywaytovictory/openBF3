@@ -3911,4 +3911,11 @@ TEST_SUITE("net-proto") {
 		};
 		check_golden(encoder_edge_datagrams(), kPins);
 	}
+
+	TEST_CASE("proto: game_build is one nonzero id per binary") {
+		const uint64_t build = net::game_build();
+		MESSAGE("game_build ", build);
+		CHECK(build != 0);
+		CHECK(net::game_build() == build);
+	}
 }
