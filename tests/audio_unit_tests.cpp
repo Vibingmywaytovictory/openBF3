@@ -4,6 +4,7 @@
 #include "bf3/audio/dsp.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/patch_instance.h"
+#include "bf3/audio/weapon_audio.h"
 #include "bf3/core/audio/sound_ports.h"
 #include "bf3/core/audio/sound_program.h"
 #include "bf3/core/audio/sound_stream.h"
@@ -1861,5 +1862,44 @@ TEST_SUITE("audio-mixer") {
 		CHECK(peak > 0.1f);
 		CHECK(std::all_of(muted.begin(), muted.end(), [](float v) { return v == 0.0f; }));
 		CHECK(other == full);
+	}
+
+	TEST_CASE("a Start refused with every instance slot full yields one finished feedback") {
+		const TestWave w = make_wave(1, 48000, -1, -1, 48000, true);
+		const std::shared_ptr<const SoundProgram> prog = one_shot_program(w);
+		ba::MixerConfig cfg;
+		cfg.max_instances = 1;
+		ba::MixerCore mixer(cfg);
+		ba::OneShotPool pool(8);
+		ba::EmitterState emitter;
+		ba::ListenerState listener;
+		REQUIRE(pool.start(mixer, prog, w.bank, ba::AudioTuning{}, 1, emitter, listener, 600));
+		const ba::InstanceHandle sounding = pool.last_handle();
+		REQUIRE(pool.start(mixer, prog, w.bank, ba::AudioTuning{}, 2, emitter, listener, 700));
+		const ba::InstanceHandle refused = pool.last_handle();
+		CHECK(pool.live() == 2);
+		std::vector<float> buf(2 * 512);
+		std::vector<ba::MixerFeedback> feedback;
+		for (int b = 0; b < 4; ++b) {
+			mixer.mix(buf.data(), 512);
+			mixer.reclaim();
+			std::array<ba::MixerFeedback, 16> fb{};
+			const size_t n = mixer.poll_feedback(fb);
+			for (size_t i = 0; i < n; ++i) {
+				feedback.push_back(fb[i]);
+				if (fb[i].finished) {
+					pool.on_finished(fb[i].handle);
+				}
+			}
+		}
+		CHECK(mixer.stats().starved_voices.load() == 1);
+		CHECK(std::count_if(feedback.begin(), feedback.end(),
+					  [&](const ba::MixerFeedback &f) { return f.handle == refused && f.finished; }) == 1);
+		CHECK(std::none_of(feedback.begin(), feedback.end(),
+				[&](const ba::MixerFeedback &f) { return f.handle == sounding && f.finished; }));
+		CHECK(pool.live() == 1);
+		CHECK(pool.contains(sounding));
+		CHECK_FALSE(pool.contains(refused));
+		CHECK(mixer.stats().active_instances.load() == 1);
 	}
 }

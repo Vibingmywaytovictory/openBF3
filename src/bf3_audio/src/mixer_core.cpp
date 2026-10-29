@@ -358,6 +358,13 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 				if (free == nullptr || cmd.instance == nullptr) {
 					if (cmd.instance != nullptr) {
 						m.note_event(MixerCutKind::Refused, cmd.handle, 0.0f, cmd.instance);
+						MixerFeedback fb;
+						fb.handle = cmd.handle;
+						fb.frame = first;
+						fb.finished = true;
+						if (!m.feedback.push(fb)) {
+							stats.feedback_drops.fetch_add(1, std::memory_order_relaxed);
+						}
 					}
 					stats.starved_voices.fetch_add(cmd.instance ? 1 : 0, std::memory_order_relaxed);
 					m.give_back(cmd.instance);
