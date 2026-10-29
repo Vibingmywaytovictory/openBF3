@@ -2,6 +2,7 @@
 
 #include "bf3/net/enet_host.h"
 #include "bf3/net/loopback_ping.h"
+#include "test_support.h"
 
 #include <array>
 #include <chrono>
@@ -69,14 +70,12 @@ struct HostPair {
 	}
 
 	bool until(const std::function<bool()> &p_done) {
-		const auto start = std::chrono::steady_clock::now();
-		while (!p_done()) {
-			if (std::chrono::steady_clock::now() - start > std::chrono::seconds(10)) {
-				return false;
-			}
-			service();
-		}
-		return true;
+		return bf3::test::wait_until(
+				[&] {
+					service();
+					return p_done();
+				},
+				std::chrono::seconds(10));
 	}
 
 	static size_t count(const std::vector<Host::Event> &p_events, Host::EventType p_type) {
