@@ -207,6 +207,11 @@ struct Bf3UiEffectsCheck::State {
 	Ref<Image> deploy;
 	double dim_diff = 0.0;
 
+	UiPostProcessStats post_before;
+	uint32_t cursor_shows_before = 0;
+	uint32_t cursor_hides_before = 0;
+	uint32_t overview_attached_before = 0;
+
 	Bf3UiCursor *cursor = nullptr;
 	Vector2 cursor_at;
 	float cursor_pixels = 1.0f;
@@ -367,6 +372,14 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			}
 			s.post->set_manual(true);
 			s.post->step(0.0);
+			s.post_before = s.post->stats();
+			if (const Bf3UiCursor *c = Bf3UiCursor::ensure(get_parent())) {
+				s.cursor_shows_before = c->stats().shows;
+				s.cursor_hides_before = c->stats().hides;
+			}
+			if (const Bf3OverviewMap *o = Bf3OverviewMap::ensure(get_parent())) {
+				s.overview_attached_before = o->stats().attached;
+			}
 			s.phase = 1;
 			s.wait = kCaptureFrames;
 			return;
@@ -410,7 +423,8 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			s.post->step(0.126);
 			row("dim out",
 					near(half, 0.5, 1e-3) && s.post->dim_visibility() == 0.0f && !s.post->grade_drawn() &&
-							!s.post->dim_enabled() && s.post->stats().dim_ins == 1 && s.post->stats().dim_outs == 1,
+							!s.post->dim_enabled() && s.post->stats().dim_ins - s.post_before.dim_ins == 1 &&
+							s.post->stats().dim_outs - s.post_before.dim_outs == 1,
 					bf3::core::fmt("visibility %.3f at 125 ms, %.3f at 251 ms, grade drawn %d", double(half),
 							double(s.post->dim_visibility()), int(s.post->grade_drawn())));
 			s.phase = 3;
@@ -513,7 +527,7 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 					near(off.b, off_before.b, 2.0 / 255.0);
 			row("cursor shown",
 					s.cursor->cursor_shown() && s.cursor->get_layer() > kUiGlitchLayer && fill_ok && off_ok &&
-							s.cursor->stats().shows == 1,
+							s.cursor->stats().shows - s.cursor_shows_before == 1,
 					bf3::core::fmt("layer %d over %d, scale %.3f, fill at (%.0f, %.0f) %.0f %.0f %.0f (art %u %u %u), "
 								   "beside the arrow unchanged %d",
 							int(s.cursor->get_layer()), int(kUiGlitchLayer), double(s.cursor->cursor_scale()),
@@ -536,7 +550,8 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 			const float shown_diff = std::max({ std::fabs(s.cursor_fill.r - now.r), std::fabs(s.cursor_fill.g - now.g),
 					std::fabs(s.cursor_fill.b - now.b) });
 			row("cursor hidden",
-					!s.cursor->cursor_shown() && gone && shown_diff > 0.25f && s.cursor->stats().hides == 1,
+					!s.cursor->cursor_shown() && gone && shown_diff > 0.25f &&
+							s.cursor->stats().hides - s.cursor_hides_before == 1,
 					bf3::core::fmt("pixel under the arrow %.0f %.0f %.0f, before the cursor %.0f %.0f %.0f, while "
 								   "shown %.0f %.0f %.0f",
 							double(now.r) * 255.0, double(now.g) * 255.0, double(now.b) * 255.0,
@@ -578,7 +593,9 @@ void Bf3UiEffectsCheck::_process(double p_delta) {
 					detail += " " + st->error().message;
 				}
 			}
-			row("overview attach", opened && placed && attached && s.overview->stats().attached == 1, detail);
+			row("overview attach",
+					opened && placed && attached && s.overview->stats().attached - s.overview_attached_before == 1,
+					detail);
 			if (s.failed) {
 				finish();
 				return;
