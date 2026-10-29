@@ -173,6 +173,8 @@ public:
 	net::PlayerList player_list(sim::Tick p_server_tick, bool p_full) const;
 	bool faulted() const;
 	const sim::logic::RoundNatives &natives() const;
+	std::span<const sim::logic::LogicNetworkedEvent> networked() const;
+	std::optional<sim::logic::LogicGhost> ghost() const;
 
 private:
 	TdmRules();

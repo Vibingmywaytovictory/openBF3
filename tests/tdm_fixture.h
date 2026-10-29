@@ -94,6 +94,7 @@ struct TdmRunConfig {
 	std::function<void(host::TdmBotConfig &)> configure_bots;
 
 	std::function<void(sim::Tick, host::GameServer &, ScriptedPeer *)> on_tick;
+	std::function<void(const host::GameServer &, std::span<const host::OutDatagram>)> on_out;
 };
 
 struct TdmRunResult {
@@ -561,6 +562,9 @@ inline core::Result<TdmRunResult> run_tdm(const TdmLevel &p_level, const TdmRunC
 	const auto step = [&] {
 		out.clear();
 		server->tick(out);
+		if (p_config.on_out) {
+			p_config.on_out(*server, out);
+		}
 		if (peer != nullptr) {
 			peer->receive(out);
 			for (const host::OutDatagram &d : out) {

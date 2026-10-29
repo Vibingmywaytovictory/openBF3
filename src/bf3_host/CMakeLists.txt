@@ -190,3 +190,8 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/load_bots.h
     src/load_bots.cpp
 )
+
+target_sources(bf3_host PRIVATE
+    src/server_logic_sync.cpp
+    src/server_logic_sync.h
+)

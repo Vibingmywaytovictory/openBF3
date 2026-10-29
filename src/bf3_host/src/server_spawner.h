@@ -9,6 +9,7 @@
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/soldier_motor.h"
 #include "server_combat.h"
+#include "server_logic_sync.h"
 #include "server_match.h"
 #include "server_outbox.h"
 #include "server_slots.h"
@@ -23,8 +24,10 @@ namespace bf3::host {
 
 class Spawner {
 public:
-	Spawner(SlotTable &r_slots, Soldiers &r_soldiers, MatchControl &r_match, Combat &r_combat, const sim::SoldierMotor &p_motor, Outbox &r_outbox) :
-			slots_(r_slots), soldiers_(r_soldiers), match_(r_match), combat_(r_combat), motor_(p_motor), outbox_(r_outbox) {}
+	Spawner(SlotTable &r_slots, Soldiers &r_soldiers, MatchControl &r_match, Combat &r_combat,
+			const sim::SoldierMotor &p_motor, Outbox &r_outbox, ServerLogicSync &r_logic) :
+			slots_(r_slots), soldiers_(r_soldiers), match_(r_match), combat_(r_combat), motor_(p_motor),
+			outbox_(r_outbox), logic_(r_logic) {}
 
 	void configure(const GameServerConfig &p_config, const sim::CollisionWorld &p_world, const ServerView &p_view);
 	void resize(size_t p_slots) { respawns_.assign(p_slots, Respawn()); }
@@ -72,6 +75,7 @@ private:
 	Combat &combat_;
 	const sim::SoldierMotor &motor_;
 	Outbox &outbox_;
+	ServerLogicSync &logic_;
 	const GameServerConfig *config_ = nullptr;
 	const sim::CollisionWorld *world_ = nullptr;
 	const ServerView *view_ = nullptr;

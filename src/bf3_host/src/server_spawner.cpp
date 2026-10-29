@@ -34,6 +34,7 @@ void Spawner::ready(size_t p_slot) {
 			outbox_.send(s.peer, net::kChannelReliable, net::encode_soldier_gear(*g));
 		}
 	}
+	logic_.ready(p_slot);
 }
 
 void Spawner::died(size_t p_slot, sim::Tick p_tick) {

@@ -300,6 +300,7 @@ struct TdmRules::Impl {
 	lg::RoundNativeConfig native_config;
 	std::optional<lg::LogicRuntime> runtime;
 	std::optional<lg::RoundNatives> natives;
+	std::vector<lg::LogicNetworkedEvent> networked;
 	uint32_t base = 0;
 	bool based = false;
 	uint32_t tick = 0;
@@ -836,6 +837,7 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		}
 	}
 
+	m.networked.clear();
 	if (!m.faulted && m.runtime && m.natives) {
 		if (!m.based) {
 			m.base = p_tick - 1u - m.runtime->tick();
@@ -860,7 +862,14 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		if (!st.ok()) {
 			m.fault(st.error());
 		} else {
-			m.stats.networked_dropped += m.runtime->networked().size();
+			for (lg::LogicNetworkedEvent e : m.runtime->networked()) {
+				if (m.networked.size() >= net::kMaxLogicEventsPerMessage) {
+					++m.stats.networked_dropped;
+					continue;
+				}
+				e.tick += m.base;
+				m.networked.push_back(e);
+			}
 		}
 	}
 
@@ -1224,4 +1233,22 @@ const sim::logic::RoundNatives &TdmRules::natives() const {
 	return *impl_->natives;
 }
 
+std::span<const sim::logic::LogicNetworkedEvent> TdmRules::networked() const {
+	return impl_->networked;
+}
+
+std::optional<sim::logic::LogicGhost> TdmRules::ghost() const {
+	const Impl &m = *impl_;
+	if (m.faulted || !m.runtime) {
+		return std::nullopt;
+	}
+	sim::logic::LogicGhost g = m.runtime->ghost();
+	g.tick += m.base;
+	for (sim::Tick &start : g.sequence_start) {
+		if (start != sim::logic::LogicGhost::kNoStart) {
+			start += m.base;
+		}
+	}
+	return g;
+}
 }

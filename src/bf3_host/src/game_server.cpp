@@ -11,6 +11,7 @@
 #include "server_commands.h"
 #include "server_dev.h"
 #include "server_handshake.h"
+#include "server_logic_sync.h"
 #include "server_match.h"
 #include "server_outbox.h"
 #include "server_slot_view.h"
@@ -53,7 +54,8 @@ struct GameServer::Impl {
 	MatchControl match;
 	Combat combat;
 	SlotView view{ slots, soldiers, match, combat, tick };
-	Spawner spawner{ slots, soldiers, match, combat, motor, outbox };
+	ServerLogicSync logic{ slots, match, outbox };
+	Spawner spawner{ slots, soldiers, match, combat, motor, outbox, logic };
 	CombatLog combat_log{ spawner, match, combat };
 	SnapshotWriter snapshots{ slots, soldiers, commands, combat, combat_log, motor, outbox };
 	DevCommands dev{ slots, soldiers, spawner, combat, match, motor, outbox,
@@ -71,6 +73,7 @@ struct GameServer::Impl {
 		slots.clear(i);
 		soldiers.clear(i);
 		spawner.reset(i);
+		logic.reset(i);
 		commands.reset(i);
 		snapshots.reset(i);
 		dev.reset(i);
@@ -212,6 +215,7 @@ struct GameServer::Impl {
 			snapshots.send(n, net::monotonic_ns(), times);
 		}
 		send_rules(n);
+		logic.send(n);
 		outbox.drain(r_out);
 		times.collision_queries = world->query_count() - queries_before;
 		times.tick_ms = ms_since(tick_start);
@@ -323,6 +327,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	m.slots.resize(p_config.max_slots);
 	m.soldiers.resize(p_config.max_slots);
 	m.spawner.resize(p_config.max_slots);
+	m.logic.resize(p_config.max_slots);
 	m.commands.configure(p_config.max_slots, p_config.jitter_buffer_ticks);
 	m.snapshots.configure(p_config.max_slots);
 	m.dev.configure(m.config, *m.world, p_config.max_slots);
