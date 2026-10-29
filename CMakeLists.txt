@@ -143,3 +143,5 @@ add_subdirectory(src/bf3_fx)
 
 add_subdirectory(src/bf3_audio)
 add_subdirectory(src/bf3_client_audio)
+
+add_subdirectory(src/bf3_ai)

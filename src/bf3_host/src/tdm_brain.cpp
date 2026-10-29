@@ -1,5 +1,6 @@
 #include "bf3/host/tdm_brain.h"
 
+#include "bf3/ai/main/ai_settings.h"
 #include "bf3/core/util/finite.h"
 #include "bf3/core/util/key_values.h"
 #include "bf3/host/bot_fill.h"
@@ -701,8 +702,12 @@ std::string bot_fault(const core::KeyFaultInfo &p_info) {
 	}
 }
 
+core::KeyOutcome ai_setting(std::string_view p_key, std::string_view p_value, TdmBotConfig &) {
+	return ai::check_ai_setting(p_key, p_value);
+}
+
 const core::KeyValueGrammar<TdmBotConfig> kGrammar{ "bot_tuning", kKeys, kMaxBotTuningBytes, kMaxBotTuningLines,
-	SIZE_MAX, false, '\n', true, true, bot_fault };
+	SIZE_MAX, false, '\n', true, true, bot_fault, nullptr, ai_setting };
 
 }
 

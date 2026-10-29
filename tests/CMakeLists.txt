@@ -1089,6 +1089,12 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME hygiene.rules COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tools/check_hygiene.py" "${CMAKE_SOURCE_DIR}")
 set_tests_properties(hygiene.rules PROPERTIES TIMEOUT 120 LABELS "unit")
 
+openbf3_test(test_ai_port test_main.cpp ai_port_tests.cpp test_support.h)
+target_link_libraries(test_ai_port PRIVATE bf3_ai)
+target_compile_definitions(test_ai_port PRIVATE "OPENBF3_BOT_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/bot_tuning.cfg\"")
+add_test(NAME ai.port.unit COMMAND test_ai_port --test-suite=ai-port)
+set_tests_properties(ai.port.unit PROPERTIES TIMEOUT 60 LABELS "unit")
+
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     get_property(_openbf3_asan_rows DIRECTORY PROPERTY TESTS)
