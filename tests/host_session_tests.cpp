@@ -9,6 +9,7 @@
 #include "bf3/host/client_session.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/level_load.h"
+#include "bf3/host/load_bots.h"
 #include "bf3/host/rest_check.h"
 #include "bf3/host/server_host.h"
 #include "bf3/net/loopback_ping.h"
@@ -2570,5 +2571,96 @@ TEST_SUITE("host-session-unit") {
 		CHECK(s.motor_hash_mismatch == 0);
 		CHECK(spawned == 0);
 		CHECK(g.kicks[size_t(net::KickReason::Collision)] == 1);
+	}
+
+	TEST_CASE("host.session: LoadBotFleet of 4 against a socket-free GameServer decodes every snapshot") {
+		auto pipe = std::make_shared<Pipe>();
+		ServerConfig sc;
+		sc.game = pipe_game();
+		sc.transport = std::make_shared<PipeServerPort>(pipe);
+		ServerHost server;
+		std::string err;
+		REQUIRE_MESSAGE(server.start(sc, &err), err);
+
+		constexpr uint32_t kBots = 4;
+		std::vector<std::unique_ptr<ClientTransport>> transports;
+		for (uint32_t i = 0; i < kBots; ++i) {
+			pipe->connect(i);
+			transports.push_back(std::make_unique<PipeClientTransport>(pipe, i));
+		}
+		LoadBotFleetConfig fc;
+		fc.count = kBots;
+		fc.bot.level = synthetic_level()->level;
+		fc.bot.mode = synthetic_level()->mode;
+		LoadBotFleet fleet;
+		const core::Status started = fleet.start(fc, std::move(transports), net::monotonic_ns);
+		REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
+		REQUIRE(wait_until(
+				[&] {
+					const LoadBotFleetStats f = fleet.stats();
+					return f.spawned == kBots && std::all_of(f.bots.begin(), f.bots.end(), [](const LoadBotStats &b) {
+						return b.max_walk_m > 1.0f;
+					});
+				},
+				10s, 16ms));
+		pipe->connect(kBots);
+		std::vector<std::unique_ptr<ClientTransport>> one;
+		one.push_back(std::make_unique<PipeClientTransport>(pipe, kBots));
+		LoadBotFleetConfig wrong = fc;
+		wrong.count = 1;
+		wrong.bot.level = "MP_Other";
+		LoadBotFleet refused;
+		REQUIRE(refused.start(wrong, std::move(one), net::monotonic_ns).ok());
+		REQUIRE(wait_until([&] { return refused.stats().refused == 1; }, 10s, 16ms));
+		CHECK(wait_until([&] { return server.game_stats().clients == kBots; }, 10s, 16ms));
+		refused.stop();
+		const LoadBotFleetStats r = refused.stats();
+		CHECK_FALSE(r.bots.at(0).disconnected);
+		CHECK(std::string(r.bots.at(0).last_error.data()).find("level mismatch") != std::string::npos);
+		CHECK(r.bots.at(0).lives == 0);
+		const GameServerStats game = server.game_stats();
+		server.stop();
+		std::array<size_t, kBots> sent{};
+		for (uint32_t i = 0; i < kBots; ++i) {
+			sent[i] = pipe->count_sent(i, net::MessageType::Snapshot);
+		}
+		REQUIRE(wait_until(
+				[&] {
+					const LoadBotFleetStats f = fleet.stats();
+					for (uint32_t i = 0; i < kBots; ++i) {
+						if (f.bots[i].snapshots != sent[i]) {
+							return false;
+						}
+					}
+					return true;
+				},
+				10s, 16ms));
+		fleet.stop();
+		CHECK_FALSE(fleet.running());
+
+		const LoadBotFleetStats f = fleet.stats();
+		REQUIRE(f.bots.size() == kBots);
+		std::set<uint8_t> slots;
+		for (uint32_t i = 0; i < kBots; ++i) {
+			const LoadBotStats &b = f.bots[i];
+			CHECK(b.matched);
+			CHECK_FALSE(b.refused);
+			CHECK_FALSE(b.disconnected);
+			CHECK(b.lives == 1);
+			CHECK(b.snapshots == sent[i]);
+			CHECK(b.snapshots >= 10);
+			CHECK(b.snapshots_lost == 0);
+			CHECK(b.decode_errors == 0);
+			CHECK(b.commands_sent >= 20);
+			CHECK(b.bytes_in > 0);
+			CHECK(b.bytes_out > 0);
+			CHECK(game.slots.at(b.slot).commands_applied > 0);
+			slots.insert(b.slot);
+		}
+		CHECK(slots.size() == kBots);
+		CHECK(f.decode_errors == 0);
+		CHECK(f.bytes_in_per_s > 0.0);
+		std::printf("LoadBotFleet x%u: %llu snapshots, %.0f B/s in, %.0f B/s out per fleet over %.2f s\n", kBots,
+				(unsigned long long)f.snapshots, f.bytes_in_per_s, f.bytes_out_per_s, f.seconds);
 	}
 }

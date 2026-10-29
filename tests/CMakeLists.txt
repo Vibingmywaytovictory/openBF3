@@ -250,8 +250,10 @@ set(_openbf3_session_pure *judge_rest*synthetic* *present_others* *GameServer*wi
     *component*digests*differ* *client*whose*differs*kicked*)
 openbf3_case_row(NAME host.session.unit.pure EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 15
     CASES ${_openbf3_session_pure})
+openbf3_case_row(NAME host.session.loadbots EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 1
+    CASES *LoadBotFleet*socket-free*)
 openbf3_case_row(NAME host.session.unit EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 5
-    EXCLUDE ${_openbf3_session_pure})
+    EXCLUDE ${_openbf3_session_pure} *LoadBotFleet*socket-free*)
 openbf3_split_cover(NAME host.session.unit.split_cover EXE test_host_session SUITE host-session-unit GROUP host-session-unit)
 set(_openbf3_session_install "*Metro*install*unchanged*")
 openbf3_case_row(NAME host.session.gate EXE test_host_session SUITE host-session GROUP host-session COUNT 3
