@@ -215,4 +215,6 @@ target_sources(bf3_host PRIVATE
     src/server_ghosts.cpp
     src/server_seats.cpp
     src/server_seats.h
+    include/bf3/host/rotation.h
+    src/rotation.cpp
 )

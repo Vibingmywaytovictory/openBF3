@@ -2,6 +2,9 @@
 
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/game_server.h"
+#include "bf3/host/map_list.h"
+#include "bf3/host/rotation.h"
+#include "bf3/host/server_session.h"
 #include "bf3/host/tdm_brain.h"
 #include "bf3/host/tdm_rules.h"
 #include "bf3/net/protocol.h"
@@ -12,6 +15,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <functional>
@@ -19,6 +23,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace bf3;
@@ -104,6 +109,65 @@ const host::SlotStats &slot_stats(const host::GameServerStats &p_stats, const tt
 	REQUIRE(size_t(p_peer.slot()) < p_stats.slots.size());
 	return p_stats.slots[size_t(p_peer.slot())];
 }
+
+struct Rotated {
+	std::unique_ptr<host::GameServer> server;
+	std::vector<std::unique_ptr<tt::ScriptedPeer>> peers;
+	std::vector<host::OutDatagram> out;
+	std::vector<net::MatchPhase> phases;
+	std::vector<std::string> levels;
+	uint32_t next_peer = 1;
+	std::map<uint32_t, uint32_t> awaiting_sync;
+	std::map<uint32_t, std::vector<std::pair<uint32_t, bool>>> synced_after_ready;
+
+	void readied(const tt::ScriptedPeer &p_peer, uint32_t p_round) { awaiting_sync[p_peer.peer()] = p_round; }
+
+	void note_syncs() {
+		for (const auto &[peer, round] : awaiting_sync) {
+			const bool sent = std::any_of(out.begin(), out.end(), [&](const host::OutDatagram &d) {
+				return d.peer == peer && d.channel == net::kChannelBulk &&
+						net::peek_type(d.bytes) == net::MessageType::FullSync;
+			});
+			synced_after_ready[peer].push_back({ round, sent });
+		}
+		awaiting_sync.clear();
+	}
+
+	tt::ScriptedPeer &join(const std::string &p_name) {
+		peers.push_back(std::make_unique<tt::ScriptedPeer>(*server, next_peer++, p_name));
+		peers.back()->hello();
+		return *peers.back();
+	}
+
+	void note_phase() {
+		const net::MatchPhase p = phase_of(*server);
+		if (phases.empty() || phases.back() != p) {
+			phases.push_back(p);
+		}
+	}
+
+	void tick(host::Rotation &r_rotation, const std::function<void(tt::ScriptedPeer &)> &p_answer) {
+		out.clear();
+		server->tick(out);
+		note_syncs();
+		for (auto &p : peers) {
+			p->receive(out);
+		}
+		note_phase();
+		if (std::unique_ptr<host::GameServer> next = r_rotation.after_tick(*server)) {
+			out.clear();
+			server = std::move(next);
+			levels.push_back(r_rotation.current().level);
+			for (auto &p : peers) {
+				p->rebind(*server);
+			}
+			phases.push_back(net::MatchPhase::Loading);
+		}
+		for (auto &p : peers) {
+			p_answer(*p);
+		}
+	}
+};
 
 }
 
@@ -355,6 +419,194 @@ TEST_SUITE("host-rotation") {
 			REQUIRE(step_until(server, [&] { return phase_of(server) == net::MatchPhase::InRound; }, 600));
 			CHECK(server.rules()->stats().runtime_faults == 0u);
 		}
+	}
+
+	TEST_CASE(
+			"rotation: three entries of Metro's data walk PreRound, InRound, RoundOver (RoundOverInfo names the next "
+			"entry), LevelChange, the next server's load, PreRound; two peers keep slot, team and squad; the FullSync "
+			"comes again after each Ready; a Hello during LevelChange gets the next entry's MatchInfo; a 1-entry "
+			"MapList restarts in place") {
+		tt::TdmLevel *level = tt::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const std::vector<std::string> names{ level->shared->level, level->shared->level + "-two",
+			level->shared->level + "-three" };
+		std::map<std::string, std::shared_ptr<const host::SharedLevel>> levels;
+		host::MapList maps;
+		for (const std::string &n : names) {
+			levels[n] = n == names[0] ? level->shared : renamed(level->shared, n);
+			maps.entries.push_back(host::LevelEntry{ n, level->shared->mode, 1 });
+		}
+		auto first = std::make_shared<const host::GameServerConfig>(metro_config(levels[names[0]], *level, true));
+		host::RotationConfig rc;
+		rc.maps = maps;
+		rc.first = first;
+		std::atomic<bool> gate{ false };
+		std::atomic<uint32_t> loads{ 0 };
+		rc.load = [&](const host::LevelEntry &p_entry) -> core::Result<std::shared_ptr<const host::GameServerConfig>> {
+			if (loads.load() == 0) {
+				gate.wait(false);
+			}
+			++loads;
+			return std::make_shared<const host::GameServerConfig>(metro_config(levels.at(p_entry.level), *level, true));
+		};
+		host::Rotation rotation(rc);
+		Rotated r;
+		r.server = std::make_unique<host::GameServer>();
+		REQUIRE(r.server->init(*first).ok());
+		tt::ScriptedPeer &alpha = r.join("alpha");
+		tt::ScriptedPeer &bravo = r.join("bravo");
+		alpha.ready();
+		bravo.ready();
+		tt::ScriptedPeer *held = nullptr;
+		std::map<uint32_t, uint32_t> answered;
+		const auto answer = [&](tt::ScriptedPeer &p) {
+			if (!p.match_info || p.match_info->phase == net::MatchPhase::LevelChange || p.match_info->round_id == 0) {
+				return;
+			}
+			uint32_t &done = answered[p.peer()];
+			if (done == p.match_info->round_id) {
+				return;
+			}
+			done = p.match_info->round_id;
+			p.loading(loading(done, 400));
+			p.ready();
+			r.readied(p, done);
+		};
+		struct Seen {
+			int slot = -1;
+			uint8_t team = 0;
+			uint8_t squad = 0;
+		};
+		std::vector<std::map<uint32_t, Seen>> per_level;
+		const auto snapshot = [&] {
+			std::map<uint32_t, Seen> s;
+			for (auto &p : r.peers) {
+				Seen &e = s[p->peer()];
+				e.slot = p->slot();
+				e.team = e.slot >= 0 ? r.server->rules()->team_of(uint8_t(e.slot)) : uint8_t(0);
+				e.squad = e.slot >= 0 ? r.server->rules()->squads().squad_of(uint8_t(e.slot)) : uint8_t(0);
+			}
+			per_level.push_back(std::move(s));
+		};
+		for (uint32_t played = 0; played < 3; ++played) {
+			CAPTURE(played);
+			bool in_round = false;
+			for (uint32_t i = 0; i < kRoundTicks && !in_round; ++i) {
+				r.tick(rotation, answer);
+				in_round = phase_of(*r.server) == net::MatchPhase::InRound;
+			}
+			REQUIRE(in_round);
+			snapshot();
+			bool changed = false;
+			const uint64_t changes = rotation.stats().level_changes;
+			for (uint32_t i = 0; i < kRoundTicks + kIntermissionTicks && !changed; ++i) {
+				r.tick(rotation, answer);
+				if (held == nullptr && r.server->level_changing()) {
+					held = &r.join("held");
+					gate.store(true);
+					gate.notify_all();
+				}
+				changed = rotation.stats().level_changes > changes;
+			}
+			REQUIRE(changed);
+		}
+		for (uint32_t i = 0; i < kSecond && r.synced_after_ready[alpha.peer()].size() < 3u; ++i) {
+			r.tick(rotation, answer);
+		}
+		const host::RotationStats rs = rotation.stats();
+		std::printf("rotation: %llu level changes, %llu in place, %u loads, round id %u, levels",
+				(unsigned long long)rs.level_changes, (unsigned long long)rs.in_place, unsigned(loads.load()),
+				rs.round_id);
+		for (const std::string &l : r.levels) {
+			std::printf(" %s", l.c_str());
+		}
+		std::printf("\nrotation: phases");
+		for (const net::MatchPhase p : r.phases) {
+			std::printf(" %s", host::match_phase_name(p));
+		}
+		std::printf("\n");
+		CHECK(rs.level_changes == 3u);
+		CHECK(rs.in_place == 0u);
+		CHECK(rs.load_failures == 0u);
+		CHECK(loads.load() == 3u);
+		CHECK(r.levels == std::vector<std::string>{ names[1], names[2], names[0] });
+		const std::vector<net::MatchPhase> cycle{ net::MatchPhase::PreRound, net::MatchPhase::InRound,
+			net::MatchPhase::RoundOver, net::MatchPhase::LevelChange, net::MatchPhase::Loading };
+		std::vector<net::MatchPhase> want;
+		for (int i = 0; i < 3; ++i) {
+			want.insert(want.end(), cycle.begin(), cycle.end());
+		}
+		std::vector<net::MatchPhase> seen;
+		for (const net::MatchPhase p : r.phases) {
+			if (p != net::MatchPhase::Restarting) {
+				seen.push_back(p);
+			}
+		}
+		seen.resize(std::min(seen.size(), want.size()));
+		CHECK(seen == want);
+		REQUIRE(held != nullptr);
+		REQUIRE(held->match_infos.size() >= 2u);
+		CHECK(held->match_infos.front().phase == net::MatchPhase::LevelChange);
+		CHECK(held->match_infos.front().level == names[1]);
+		CHECK(held->match_infos[1].level == names[1]);
+		CHECK(held->match_infos[1].phase != net::MatchPhase::LevelChange);
+		for (tt::ScriptedPeer *p : { &alpha, &bravo }) {
+			CAPTURE(p->peer());
+			CHECK_FALSE(p->kick.has_value());
+			REQUIRE(p->round_overs.size() == 3u);
+			CHECK(p->round_overs[0].next.level == names[1]);
+			CHECK(p->round_overs[1].next.level == names[2]);
+			CHECK(p->round_overs[2].next.level == names[0]);
+			CHECK(p->round_overs[0].intermission_s == 60u);
+			REQUIRE(p->level_changes.size() == 3u);
+			CHECK(p->level_changes[0].level == names[1]);
+			CHECK(p->level_changes[0].round_id == 1u);
+			CHECK(p->level_changes[2].round_id == 3u);
+			const std::vector<std::pair<uint32_t, bool>> want_syncs{ { 1u, true }, { 2u, true }, { 3u, true } };
+			CHECK(r.synced_after_ready[p->peer()] == want_syncs);
+		}
+		REQUIRE(per_level.size() == 3u);
+		for (size_t l = 1; l < per_level.size(); ++l) {
+			CAPTURE(l);
+			for (tt::ScriptedPeer *p : { &alpha, &bravo }) {
+				const Seen &was = per_level[0].at(p->peer());
+				const Seen &now = per_level[l].at(p->peer());
+				CHECK(now.slot == was.slot);
+				CHECK(now.team == was.team);
+				CHECK(now.squad != 0u);
+			}
+			const bool mates0 = per_level[0].at(alpha.peer()).team == per_level[0].at(bravo.peer()).team &&
+					per_level[0].at(alpha.peer()).squad == per_level[0].at(bravo.peer()).squad;
+			const bool mates = per_level[l].at(alpha.peer()).team == per_level[l].at(bravo.peer()).team &&
+					per_level[l].at(alpha.peer()).squad == per_level[l].at(bravo.peer()).squad;
+			CHECK(mates == mates0);
+		}
+
+		host::RotationConfig single;
+		single.maps.entries = { maps.entries[0] };
+		single.first = first;
+		single.background = false;
+		single.load =
+				[&](const host::LevelEntry &p_entry) -> core::Result<std::shared_ptr<const host::GameServerConfig>> {
+			return std::make_shared<const host::GameServerConfig>(metro_config(levels.at(p_entry.level), *level, true));
+		};
+		host::Rotation one(single);
+		host::GameServer server;
+		REQUIRE(server.init(*first).ok());
+		std::vector<host::OutDatagram> out;
+		bool restarted = false;
+		for (uint32_t i = 0; i < kRoundTicks + kIntermissionTicks && !restarted; ++i) {
+			out.clear();
+			server.tick(out);
+			CHECK(one.after_tick(server) == nullptr);
+			restarted = one.stats().in_place > 0;
+		}
+		CHECK(restarted);
+		CHECK(one.stats().level_changes == 0u);
+		CHECK_FALSE(server.level_ended());
+		CHECK(server.rules()->stats().restarts == 1u);
 	}
 
 	TEST_CASE("install unchanged") {

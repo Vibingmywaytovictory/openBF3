@@ -15,6 +15,7 @@
 
 namespace bf3::host {
 
+class Rotation;
 class ServerNetPort;
 class ServerNetThread;
 
@@ -31,6 +32,7 @@ struct ServerConfig {
 	std::shared_ptr<const GameServerConfig> game;
 	std::shared_ptr<TickClock> clock;
 	std::shared_ptr<ServerNetPort> transport;
+	std::shared_ptr<Rotation> rotation;
 };
 
 struct ServerStats {
@@ -51,6 +53,7 @@ struct ServerStats {
 	uint64_t pings_echoed = 0;
 	uint64_t step_errors = 0;
 	uint64_t tick_stalls = 0;
+	uint64_t level_changes = 0;
 };
 
 class ServerHost {
@@ -80,6 +83,7 @@ private:
 	void run();
 	bool start_net(size_t p_channels, std::string *r_error);
 	void stall_if_requested();
+	void change_level(std::unique_ptr<GameServer> p_next);
 
 	ServerConfig config_;
 	std::atomic<std::shared_ptr<TickClock>> clock_;
@@ -109,6 +113,7 @@ private:
 	std::atomic<uint32_t> stall_request_ms_{ 0 };
 	std::atomic<uint64_t> tick_stalls_{ 0 };
 	std::atomic<uint64_t> net_errors_{ 0 };
+	std::atomic<uint64_t> level_changes_{ 0 };
 
 	mutable std::mutex transforms_mutex_;
 	std::vector<sim::BodyTransform> transforms_;

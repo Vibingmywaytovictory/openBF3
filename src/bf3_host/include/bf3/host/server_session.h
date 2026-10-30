@@ -3,6 +3,7 @@
 #include "bf3/core/result.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/map_list.h"
+#include "bf3/host/rotation.h"
 #include "bf3/host/server_host.h"
 #include "bf3/host/server_level.h"
 
@@ -32,6 +33,7 @@ struct ServerSessionConfig {
 	std::string bind_ip = "127.0.0.1";
 	uint16_t port = 0;
 	bool prebake = true;
+	LoadDeadlines load;
 	std::shared_ptr<TickClock> clock;
 };
 
@@ -59,6 +61,7 @@ struct ServerSessionStats {
 	uint32_t stuck_bots = 0;
 	uint32_t bots = 0;
 	int32_t kills = 0;
+	RotationStats rotation;
 };
 
 uint64_t process_private_bytes();
@@ -87,6 +90,7 @@ public:
 
 private:
 	void run_prebake();
+	GameServerConfig rotation_config(const ServerLevel &p_level) const;
 	void track_stuck(const GameServerStats &p_game);
 
 	struct StuckTrack {
@@ -101,6 +105,7 @@ private:
 	std::unique_ptr<ServerLevel> level_;
 	std::unique_ptr<MapListCursor> cursor_;
 	std::shared_ptr<const GameServerConfig> game_;
+	std::shared_ptr<Rotation> rotation_;
 	ServerHost host_;
 
 	std::thread prebake_thread_;

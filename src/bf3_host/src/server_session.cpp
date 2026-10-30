@@ -68,6 +68,8 @@ const char *match_phase_name(net::MatchPhase p_phase) {
 			return "round over";
 		case net::MatchPhase::Restarting:
 			return "restarting";
+		case net::MatchPhase::LevelChange:
+			return "level change";
 	}
 	return "?";
 }
@@ -106,7 +108,19 @@ core::Status ServerSession::start(ServerSessionConfig p_config, LoadProgress *p_
 				level.error());
 	}
 	level_ = std::make_unique<ServerLevel>(std::move(*level));
-	game_ = std::make_shared<const GameServerConfig>(tdm_game_server_config(*level_, config_.rules));
+	game_ = std::make_shared<const GameServerConfig>(rotation_config(*level_));
+	RotationConfig rc;
+	rc.maps = config_.maps;
+	rc.first = game_;
+	rc.load = [this](const LevelEntry &p_entry) -> core::Result<std::shared_ptr<const GameServerConfig>> {
+		core::Result<ServerLevel> next =
+				load_server_level(config_.install, p_entry, config_.level, config_.cache.get(), nullptr);
+		if (!next) {
+			return next.error();
+		}
+		return std::make_shared<const GameServerConfig>(rotation_config(*next));
+	};
+	rotation_ = std::make_shared<Rotation>(std::move(rc));
 
 	ServerConfig sc;
 	sc.tick_hz = int(sim::kSimHz);
@@ -114,10 +128,12 @@ core::Status ServerSession::start(ServerSessionConfig p_config, LoadProgress *p_
 	sc.port = config_.port;
 	sc.game = game_;
 	sc.clock = config_.clock;
+	sc.rotation = rotation_;
 	std::string error;
 	if (!host_.start(sc, &error)) {
 		level_.reset();
 		game_.reset();
+		rotation_.reset();
 		cursor_.reset();
 		return core::make_error("server session: " + error);
 	}
@@ -136,6 +152,13 @@ core::Status ServerSession::start(ServerSessionConfig p_config, LoadProgress *p_
 		prebake_thread_ = std::thread([this] { run_prebake(); });
 	}
 	return {};
+}
+
+GameServerConfig ServerSession::rotation_config(const ServerLevel &p_level) const {
+	GameServerConfig c = tdm_game_server_config(p_level, config_.rules);
+	c.rules.hold_level_end = true;
+	c.load = config_.load;
+	return c;
 }
 
 void ServerSession::run_prebake() {
@@ -180,6 +203,7 @@ void ServerSession::stop() {
 		prebake_thread_.join();
 	}
 	host_.stop();
+	rotation_.reset();
 }
 
 bool ServerSession::running() const {
@@ -231,6 +255,9 @@ ServerSessionStats ServerSession::stats() {
 	ServerSessionStats out;
 	out.server = host_.stats();
 	out.game = host_.game_stats();
+	if (rotation_ != nullptr) {
+		out.rotation = rotation_->stats();
+	}
 	out.prebake = prebake();
 	out.private_bytes = process_private_bytes();
 	out.peak_private_bytes = process_peak_private_bytes();

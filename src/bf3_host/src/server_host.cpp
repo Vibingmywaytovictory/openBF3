@@ -1,5 +1,7 @@
 #include "bf3/host/server_host.h"
 
+#include "bf3/host/rotation.h"
+
 #include "instance_registry.h"
 #include "server_net_thread.h"
 
@@ -78,6 +80,7 @@ bool ServerHost::start(const ServerConfig &p_config, std::string *r_error) {
 		ticks_ = 0;
 		last_step_us_ = p99_step_us_ = max_step_us_ = last_tick_us_ = 0;
 		overruns_ = pings_echoed_ = step_errors_ = tick_stalls_ = net_errors_ = 0;
+		level_changes_ = 0;
 		peers_ = 0;
 		state_hash_ = 0;
 		{
@@ -191,6 +194,7 @@ ServerStats ServerHost::stats() const {
 	s.pings_echoed = pings_echoed_.load(std::memory_order_relaxed);
 	s.step_errors = step_errors_.load(std::memory_order_relaxed) + net_errors_.load(std::memory_order_relaxed);
 	s.tick_stalls = tick_stalls_.load(std::memory_order_relaxed);
+	s.level_changes = level_changes_.load(std::memory_order_relaxed);
 	const std::shared_ptr<TickClock> clock = clock_.load(std::memory_order_acquire);
 	const int64_t start = start_ns_.load(std::memory_order_relaxed);
 	const double secs = clock ? static_cast<double>(clock->now_ns() - start) / 1e9 : 0.0;
@@ -222,6 +226,11 @@ void ServerHost::stall_if_requested() {
 		tick_stalls_.fetch_add(1, std::memory_order_release);
 		std::this_thread::sleep_for(std::chrono::milliseconds(stall));
 	}
+}
+
+void ServerHost::change_level(std::unique_ptr<GameServer> p_next) {
+	game_ = std::move(p_next);
+	level_changes_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void ServerHost::run() {
@@ -266,6 +275,11 @@ void ServerHost::run() {
 				}
 				net_->send(sends);
 				peers_.store(net_->connected_peers(), std::memory_order_relaxed);
+			}
+			if (config_.rotation) {
+				if (std::unique_ptr<GameServer> next = config_.rotation->after_tick(*game_)) {
+					change_level(std::move(next));
+				}
 			}
 			{
 				GameServerStats g = game_->stats();
