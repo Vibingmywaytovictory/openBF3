@@ -44,6 +44,23 @@ public:
 	virtual sim::Command command(sim::Tick p_tick, const sim::SoldierState &p_state) = 0;
 };
 
+struct LoadDeadlines {
+	float stall_s = 30.0f;
+	float warm_s = 120.0f;
+	float cold_s = 300.0f;
+};
+
+struct SeatLoad {
+	bool loading = false;
+	bool reported = false;
+	bool cold = false;
+	sim::Tick since = 0;
+	sim::Tick last_progress = 0;
+	uint8_t stage = 0;
+	uint16_t permille = 0;
+	uint32_t reports = 0;
+};
+
 struct GameServerConfig {
 	std::shared_ptr<const SharedLevel> level;
 	uint8_t snapshot_divisor = 2;
@@ -56,6 +73,8 @@ struct GameServerConfig {
 	bool dev_commands = false;
 	uint64_t seed = 1;
 	std::optional<uint64_t> game_build;
+	LoadDeadlines load;
+	uint32_t round_id = 0;
 
 	std::shared_ptr<const BotFillConfig> bots;
 
@@ -86,6 +105,8 @@ struct SlotStats {
 	uint64_t commands_replaced = 0;
 
 	int32_t buffer_ticks = 0;
+
+	SeatLoad load;
 
 	sim::SoldierState state;
 };
@@ -124,6 +145,9 @@ struct GameServerStats {
 	uint64_t weapon_hash = 0;
 	uint64_t kit_hash = 0;
 	uint8_t weapon_flags = 0;
+
+	uint32_t round_id = 0;
+	uint64_t stale_loading = 0;
 };
 
 class GameServer {

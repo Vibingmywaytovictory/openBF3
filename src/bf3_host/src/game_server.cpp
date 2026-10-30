@@ -12,6 +12,7 @@
 #include "server_dev.h"
 #include "server_handshake.h"
 #include "server_logic_sync.h"
+#include "server_seats.h"
 #include "server_match.h"
 #include "server_outbox.h"
 #include "server_slot_view.h"
@@ -61,6 +62,7 @@ struct GameServer::Impl {
 	DevCommands dev{ slots, soldiers, spawner, combat, match, motor, outbox,
 		[this](size_t p_slot) { reset_slot(p_slot); } };
 	ServerHandshake handshake;
+	SeatLoads loads;
 	uint64_t bad_datagrams = 0;
 	uint64_t step_precondition_failures = 0;
 	double last_step_ms = 0;
@@ -77,6 +79,25 @@ struct GameServer::Impl {
 		commands.reset(i);
 		snapshots.reset(i);
 		dev.reset(i);
+		loads.reset(i);
+	}
+
+	void drop_client(size_t p_slot) {
+		dev.client_left(p_slot);
+		combat.client_left(p_slot);
+		match.leave(p_slot);
+		reset_slot(p_slot);
+	}
+
+	void kick_stalled_loads(sim::Tick p_tick) {
+		for (const SeatLoads::Due &d : loads.due(p_tick)) {
+			const Seat &s = slots[d.slot];
+			if (!s.used || !s.remote) {
+				continue;
+			}
+			outbox.send(s.peer, net::kChannelReliable, net::encode_kick(handshake.kick(d.reason, d.detail)));
+			drop_client(d.slot);
+		}
 	}
 
 	void receive_commands(size_t p_slot, const net::CommandPacket &p_packet, uint64_t p_now_ns) {
@@ -111,10 +132,12 @@ struct GameServer::Impl {
 		m.phase = net::MatchPhase::InRound;
 		m.source_digest = config.level->source_digest;
 		m.motor_hash = motor_hash;
+		m.round_id = config.round_id;
 		if (const std::optional<uint8_t> chosen = combat.client_joined(size_t(at), config.dev_commands, m)) {
 			team = *chosen;
 		}
 		slots.admit_client(size_t(at), p_peer, team);
+		loads.begin(size_t(at), tick);
 		match.describe(m);
 		handshake.describe(size_t(at), m);
 		outbox.send(p_peer, net::kChannelReliable, net::encode_match_info(m));
@@ -136,6 +159,7 @@ struct GameServer::Impl {
 		times = GameServerTickTimes();
 		times.tick = n;
 		spawner.begin_tick();
+		kick_stalled_loads(n);
 		const uint64_t queries_before = world->query_count();
 		const double paths_before = bots != nullptr ? bots->paths_ms_total() : 0.0;
 
@@ -355,6 +379,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	m.snapshots.configure(p_config.max_slots, p_config.snapshot_budget_bytes);
 	m.dev.configure(m.config, *m.world, p_config.max_slots);
 	m.handshake.configure(p_config.game_build.value_or(net::game_build()), *p_config.level, p_config.max_slots);
+	m.loads.configure(p_config.max_slots, p_config.load, p_config.round_id);
 	for (size_t i = 0; i < m.slots.size(); ++i) {
 		m.reset_slot(i);
 	}
@@ -392,10 +417,7 @@ void GameServer::on_disconnect(uint32_t p_peer) {
 	Impl &m = *impl_;
 	const int at = m.slots.slot_of_peer(p_peer);
 	if (at >= 0) {
-		m.dev.client_left(size_t(at));
-		m.combat.client_left(size_t(at));
-		m.match.leave(size_t(at));
-		m.reset_slot(size_t(at));
+		m.drop_client(size_t(at));
 	}
 }
 
@@ -428,6 +450,7 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 				on_disconnect(p_peer);
 				return;
 			}
+			m.loads.done(size_t(at));
 			m.spawner.ready(size_t(at));
 			return;
 		}
@@ -451,9 +474,12 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 			return;
 		}
 		case net::MessageType::Loading: {
-			if (!net::decode_loading(p_datagram) || at < 0) {
+			core::Result<net::Loading> l = net::decode_loading(p_datagram);
+			if (!l || at < 0) {
 				++m.bad_datagrams;
+				return;
 			}
+			m.loads.progress(size_t(at), *l, m.tick);
 			return;
 		}
 		case net::MessageType::Bye:
@@ -510,6 +536,8 @@ GameServerStats GameServer::stats() const {
 	g.bad_datagrams = m.bad_datagrams;
 	g.spawn_failures = m.spawner.failures();
 	g.kicks = m.handshake.kicks();
+	g.round_id = m.config.round_id;
+	g.stale_loading = m.loads.stale_reports();
 	if (const TdmRules *rules = m.match.rules(); rules != nullptr) {
 		g.rules_active = true;
 		g.match = rules->match_state();
@@ -541,6 +569,7 @@ GameServerStats GameServer::stats() const {
 		o.life = body.state.life;
 		o.alive = m.soldiers.alive(i);
 		o.state = body.state;
+		o.load = m.loads[i];
 		g.clients += (s.used && s.remote) ? 1u : 0u;
 		g.soldiers += o.alive ? 1u : 0u;
 	}

@@ -6,6 +6,7 @@
 #include "bf3/host/tdm_rules.h"
 #include "bf3/net/protocol.h"
 
+#include "gunplay_fixture.h"
 #include "tdm_fixture.h"
 #include "test_support.h"
 
@@ -22,6 +23,7 @@
 
 using namespace bf3;
 namespace tt = bf3::test::tdm;
+namespace tg = bf3::test::gunplay;
 
 namespace {
 
@@ -75,6 +77,102 @@ net::MatchPhase phase_of(const host::GameServer &p_server) {
 	return p_server.rules()->phase();
 }
 
+net::Loading loading(uint32_t p_round, uint16_t p_permille, net::LoadWarmth p_warmth = net::LoadWarmth::Warm) {
+	net::Loading l;
+	l.round_id = p_round;
+	l.stage = 1;
+	l.permille = p_permille;
+	l.warmth = p_warmth;
+	return l;
+}
+
+struct Watched {
+	std::unique_ptr<tt::ScriptedPeer> peer;
+	sim::Tick joined = 0;
+	std::optional<sim::Tick> kicked;
+};
+
+const host::SlotStats &slot_stats(const host::GameServerStats &p_stats, const tt::ScriptedPeer &p_peer) {
+	REQUIRE(p_peer.slot() >= 0);
+	REQUIRE(size_t(p_peer.slot()) < p_stats.slots.size());
+	return p_stats.slots[size_t(p_peer.slot())];
+}
+
+}
+
+TEST_SUITE("host-rotation-unit") {
+	TEST_CASE("load deadlines: no progress for 30.0 s kicks LoadStalled; a warm load 120.0 s and a cold one 300.0 s "
+			  "after it began kick LoadTimeout; a Ready ends the load; a Loading of another round is stale") {
+		const std::shared_ptr<const host::SharedLevel> floor = tg::synthetic_floor();
+		REQUIRE(floor != nullptr);
+		host::GameServer server;
+		host::GameServerConfig c;
+		c.level = floor;
+		c.max_slots = 8;
+		c.round_id = 7;
+		REQUIRE(server.init(c).ok());
+		std::map<std::string, Watched> peers;
+		uint32_t id = 1;
+		for (const char *name : { "stalled", "warm", "cold", "ready", "silent" }) {
+			Watched &w = peers[name];
+			w.peer = std::make_unique<tt::ScriptedPeer>(server, id++, name);
+			w.peer->hello();
+			w.joined = server.current_tick();
+		}
+		peers["ready"].peer->ready();
+		peers["stalled"].peer->loading(loading(7, 10));
+		peers["stalled"].peer->loading(loading(7, 10));
+		peers["stalled"].peer->loading(loading(6, 900));
+		std::vector<host::OutDatagram> out;
+		for (sim::Tick t = 1; t <= 300u * kSecond + 2u; ++t) {
+			if (t % kSecond == 0) {
+				const uint16_t permille = uint16_t(std::min<sim::Tick>(t / kSecond, 999u));
+				if (!peers["warm"].kicked) {
+					peers["warm"].peer->loading(loading(7, permille));
+				}
+				if (!peers["cold"].kicked) {
+					peers["cold"].peer->loading(loading(7, permille, net::LoadWarmth::Cold));
+				}
+			}
+			out.clear();
+			server.tick(out);
+			for (auto &[name, w] : peers) {
+				w.peer->receive(out);
+				if (w.peer->kick && !w.kicked) {
+					w.kicked = server.current_tick();
+				}
+			}
+		}
+		const auto seconds = [&](const char *p_name) {
+			const Watched &w = peers[p_name];
+			return w.kicked ? double(*w.kicked - w.joined) / double(kSecond) : -1.0;
+		};
+		for (auto &[name, w] : peers) {
+			std::printf("load deadlines: %-8s %s after %.2f s%s%s\n", name.c_str(), w.kicked ? "kicked" : "kept",
+					w.kicked ? double(*w.kicked - w.joined) / double(kSecond)
+							 : double(server.current_tick() - w.joined) / double(kSecond),
+					w.peer->kick ? ": " : "", w.peer->kick ? w.peer->kick->reason.c_str() : "");
+		}
+		REQUIRE(peers["stalled"].peer->kick.has_value());
+		CHECK(peers["stalled"].peer->kick->code == net::KickReason::LoadStalled);
+		CHECK(seconds("stalled") == doctest::Approx(30.0));
+		REQUIRE(peers["warm"].peer->kick.has_value());
+		CHECK(peers["warm"].peer->kick->code == net::KickReason::LoadTimeout);
+		CHECK(seconds("warm") == doctest::Approx(120.0));
+		REQUIRE(peers["cold"].peer->kick.has_value());
+		CHECK(peers["cold"].peer->kick->code == net::KickReason::LoadTimeout);
+		CHECK(seconds("cold") == doctest::Approx(300.0));
+		REQUIRE(peers["silent"].peer->kick.has_value());
+		CHECK(peers["silent"].peer->kick->code == net::KickReason::LoadTimeout);
+		CHECK(seconds("silent") == doctest::Approx(120.0));
+		CHECK_FALSE(peers["ready"].peer->kick.has_value());
+		const host::GameServerStats st = server.stats();
+		CHECK(st.kicks[size_t(net::KickReason::LoadStalled)] == 1u);
+		CHECK(st.kicks[size_t(net::KickReason::LoadTimeout)] == 3u);
+		CHECK(st.stale_loading == 1u);
+		CHECK(st.clients == 1u);
+		CHECK_FALSE(slot_stats(st, *peers["ready"].peer).load.loading);
+	}
 }
 
 TEST_SUITE("host-rotation") {

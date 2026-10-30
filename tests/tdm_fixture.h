@@ -49,6 +49,7 @@ public:
 	void spawn_request(uint8_t p_kit, uint8_t p_spawn_choice = 0);
 	void kit_select(const net::KitSelect &p_select);
 	void debug(const net::DebugRequest &p_request);
+	void loading(const net::Loading &p_message);
 
 	void command(sim::Command p_command);
 
@@ -370,6 +371,10 @@ inline void ScriptedPeer::hello() {
 
 inline void ScriptedPeer::ready() {
 	server_->on_receive(peer_, net::kChannelReliable, net::encode_ready({}));
+}
+
+inline void ScriptedPeer::loading(const net::Loading &p_message) {
+	server_->on_receive(peer_, net::kChannelReliable, net::encode_loading(p_message));
 }
 
 inline void ScriptedPeer::spawn_request(uint8_t p_kit, uint8_t p_spawn_choice) {

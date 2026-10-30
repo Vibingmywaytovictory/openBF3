@@ -940,6 +940,8 @@ add_test(NAME host.logic.ghost COMMAND test_host_tdm --test-suite=host-logic-gho
 set_tests_properties(host.logic.ghost PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 add_test(NAME host.rotation COMMAND test_host_tdm --test-suite=host-rotation)
 set_tests_properties(host.rotation PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+add_test(NAME host.rotation.unit COMMAND test_host_tdm --test-suite=host-rotation-unit)
+set_tests_properties(host.rotation.unit PROPERTIES TIMEOUT 60)
 set_tests_properties(host.tdm.bots.unit PROPERTIES TIMEOUT 60)
 set_tests_properties(host.tdm.round host.tdm.bots host.tdm.replay PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 set_tests_properties(host.tdm.perf PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE)

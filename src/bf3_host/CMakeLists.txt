@@ -213,4 +213,6 @@ target_sources(bf3_host PRIVATE
     src/ai_world.cpp
     src/server_ghosts.h
     src/server_ghosts.cpp
+    src/server_seats.cpp
+    src/server_seats.h
 )
