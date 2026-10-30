@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "bf3/ai/bot/bot_main.h"
+#include "bf3/ai/squad/bot_squad.h"
 #include "bf3/core/thread_pool.h"
 #include "bf3/core/util/percentile.h"
 #include "bf3/host/game_server.h"
@@ -111,7 +112,8 @@ Cohesion run_cohesion(const tt::TdmLevel &p_level, uint64_t p_seed) {
 					origin_life[leader] = lead->life + 1u;
 					origin[leader] = lead->position;
 				}
-				if (tt::distance(lead->position, origin[leader]) <= host::kSquadNearMetres) {
+				if (tt::distance(lead->position, origin[leader]) <=
+						ai::kCohesionLeaderWalkedNears * host::kSquadNearMetres) {
 					continue;
 				}
 				for (size_t i = 1; i < members.size(); ++i) {
@@ -408,8 +410,8 @@ TEST_SUITE("host-tdm-hold") {
 }
 
 TEST_SUITE("host-tdm-orders") {
-	TEST_CASE("bots-only TDM, seeds 4-6: members of a squad given a mission reach its arrive radius within 60 s or die "
-			  "trying") {
+	TEST_CASE("bots-only TDM, seeds 4-6: members of a squad given a mission who live to a verdict reach its arrive "
+			  "radius within 60 s") {
 		tt::TdmLevel *level = tt::load_tdm_level_once();
 		if (level == nullptr) {
 			return;
@@ -432,17 +434,17 @@ TEST_SUITE("host-tdm-orders") {
 				late += m.late ? 1u : 0u;
 				open += m.open ? 1u : 0u;
 			}
-			const uint64_t judged = reached + died + late;
-			const double share = judged > 0 ? double(reached + died) / double(judged) : 0.0;
+			const uint64_t judged = reached + late;
+			const double share = judged > 0 ? double(reached) / double(judged) : 0.0;
 			pooled_judged += judged;
-			pooled_kept += reached + died;
+			pooled_kept += reached;
 			std::printf("host.tdm.orders seed %zu: %llu orders passed down, %zu member missions: %llu reached %.0f m, "
-						"%llu died trying, %llu late, "
-						"%llu superseded before 60 s, %llu open at the end; %.1f %% reached or died; "
+						"%llu late, %llu died with no verdict, "
+						"%llu superseded before 60 s, %llu open at the end; %.1f %% of the verdicts reached; "
 						"MoveTo above Idle and Random in %llu of %llu decisions %.0f m or more from the target; kills "
 						"%d / %d\n",
 					i + 4, (unsigned long long)run.orders, run.missions.size(), (unsigned long long)reached, arrive,
-					(unsigned long long)died, (unsigned long long)late, (unsigned long long)superseded,
+					(unsigned long long)late, (unsigned long long)died, (unsigned long long)superseded,
 					(unsigned long long)open, 100.0 * share, (unsigned long long)run.move_to_first,
 					(unsigned long long)run.urgency_samples, far, run.result.kills[1], run.result.kills[2]);
 			CHECK(run.result.failure.empty());
@@ -452,7 +454,7 @@ TEST_SUITE("host-tdm-orders") {
 			CHECK(run.move_to_first == run.urgency_samples);
 		}
 		const double pooled = pooled_judged > 0 ? double(pooled_kept) / double(pooled_judged) : 0.0;
-		std::printf("host.tdm.orders pooled: %llu of %llu judged member missions reached or died trying, %.1f %%\n",
+		std::printf("host.tdm.orders pooled: %llu of %llu member missions with a verdict reached, %.1f %%\n",
 				(unsigned long long)pooled_kept, (unsigned long long)pooled_judged, 100.0 * pooled);
 		CHECK(pooled >= kReachShare);
 	}

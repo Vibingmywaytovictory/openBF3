@@ -276,7 +276,7 @@ void SquadOrders::sample(const SquadCoordinator &p_squad, float p_near_m, SquadC
 	}
 	Vec3 lead{};
 	if (leader == nullptr || !leader->player().is_alive() || !live_position(leader->player(), lead) ||
-			!left_origin(leader->player_id(), lead, p_near_m)) {
+			!left_origin(leader->player_id(), lead, kCohesionLeaderWalkedNears * p_near_m)) {
 		return;
 	}
 	for (int i = 0; i < p_squad.number_of_squad_members(); ++i) {

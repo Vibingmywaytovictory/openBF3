@@ -71,6 +71,7 @@ private:
 };
 
 inline constexpr size_t kCohesionBins = 128;
+inline constexpr float kCohesionLeaderWalkedNears = 2.0f;
 
 struct SquadCohesion {
 	uint64_t samples = 0;
