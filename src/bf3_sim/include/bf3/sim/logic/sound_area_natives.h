@@ -16,7 +16,7 @@
 
 namespace bf3::sim::logic {
 
-inline constexpr uint32_t kMixerAreaType = 3772263626u;
+using core::audio::kMixerAreaType;
 
 struct SoundAreaValue {
 	uint32_t node = core::gameplay::kNoLogicIndex;

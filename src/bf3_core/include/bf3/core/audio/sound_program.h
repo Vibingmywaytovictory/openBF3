@@ -34,6 +34,7 @@ inline constexpr size_t kMaxProgramConnections = 4096;
 inline constexpr size_t kMaxProgramWaves = 4096;
 inline constexpr size_t kMaxCurvePoints = 64;
 inline constexpr uint16_t kNoRegister = 0xffff;
+inline constexpr uint32_t kMixerAreaType = 3772263626u;
 
 struct SoundPort {
 	uint16_t reg = kNoRegister;
