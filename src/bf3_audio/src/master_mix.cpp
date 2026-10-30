@@ -154,15 +154,20 @@ void MasterMixer::process(
 					const float threshold = s.values[0];
 					const float slope = 1.0f - 1.0f / std::max(1.0f, s.values[1]);
 					const float attack = smoothing(s.values[2], rate_), release = smoothing(s.values[3], rate_);
+					const float threshold_gain = std::pow(10.0f, threshold / 20.0f);
 					float gr = st.compressor_db;
 					for (uint32_t i = 0; i < frames; ++i) {
 						float peak = 0.0f;
 						for (size_t r = 0; r < ca::kSpeakerRoles; ++r) {
 							peak = live[r] ? std::max(peak, std::fabs(b[r][i])) : peak;
 						}
-						const float level = peak > 1.0e-9f ? 20.0f * std::log10(peak) : -180.0f;
-						const float target = level > threshold ? (threshold - level) * slope : 0.0f;
+						const float target =
+								peak > threshold_gain ? (threshold - 20.0f * std::log10(peak)) * slope : 0.0f;
 						gr += (target - gr) * (target < gr ? attack : release);
+						gr = gr > -1.0e-5f ? 0.0f : gr;
+						if (gr == 0.0f) {
+							continue;
+						}
 						const float g = std::pow(10.0f, gr / 20.0f);
 						for (size_t r = 0; r < ca::kSpeakerRoles; ++r) {
 							if (live[r]) {

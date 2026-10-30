@@ -271,6 +271,7 @@ MixerConfig game_mixer_config(const AudioTuning &p_tuning, const GameMixerSizes 
 	mc.max_voices = p_sizes.voices;
 	mc.command_capacity = p_command_capacity;
 	mc.schedule_lead_blocks = uint32_t(std::max(1.0f, p_tuning.schedule_lead_blocks));
+	mc.master_iir2_q = p_tuning.iir2_q;
 	return mc;
 }
 

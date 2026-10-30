@@ -49,8 +49,8 @@ std::vector<std::string> action_inputs(const KeyBindingTable &p_table, const Act
 inline constexpr std::string_view kVolumeOption = "Volume";
 inline constexpr std::string_view kMusicVolumeOption = "MusicVolume";
 inline constexpr std::string_view kDialogueVolumeOption = "DialogueVolume";
-constexpr std::string_view kSoundSystemOption = "YourSoundSystem";
-constexpr std::string_view kStereoModeOption = "StereoMode";
+inline constexpr std::string_view kSoundSystemOption = "YourSoundSystem";
+inline constexpr std::string_view kStereoModeOption = "StereoMode";
 inline constexpr std::string_view kMouseSensitivityOption = "MouseSensitivity";
 inline constexpr std::string_view kFlipLookOption = "Scheme0FlipY";
 inline constexpr std::string_view kHoldToZoomOption = "HoldButtonToZoom";
