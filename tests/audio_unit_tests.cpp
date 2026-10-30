@@ -1919,6 +1919,7 @@ TEST_SUITE("audio-mixer") {
 		mixer.mix(buf.data(), 512);
 		CHECK(mixer.mixer_value(ba::kHashAreaType) == std::optional<float>(0.0f));
 	}
+
 	TEST_CASE("a master mix replaces the bus sum, and SetMasterPreset picks its preset at a block edge") {
 		auto data = std::make_shared<MasterMixData>();
 		data->presets = { "loud", "quiet" };

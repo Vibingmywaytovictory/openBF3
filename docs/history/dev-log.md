@@ -2830,3 +2830,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * M3 present-a4, one ground distance: `core::vec::horizontal_distance` replaces six per-file copies (the sound area check, spawn, the crosshair walk check, the walker brain, the firefight run and the TDM bots), and an unused one in the firefight brain goes
 * M3 present-a4, Seine alley point: core.audio.areas and godot.audio_areas.seine stand at (-15.00, 1.27, 81.00), area 788, where AreaType is 3 and the M16A3 plays `reflections_close_urban_alley_wave`; Metro's Urban_Alley has no input, Seine's sums five areas
 * M3 present-a4, check code out of the DLL: `SoundAreaProbe` moves to bf3_sim_harness, `observe_area_waves` to its own object and behind OPENBF3_BUILD_CHECKS on the Godot side; the unused `AreaFeed::reset` goes
+* M3 present-a4, spacing: blank lines in audio_unit_tests.cpp and sound_types.cpp match their neighbours; branch pass 242 passed and 2 skipped of 244

@@ -294,4 +294,5 @@ float scale_clamp(float p_in, float p_in_min, float p_in_max, float p_out_min, f
 	const double t = std::clamp((double(p_in) - p_in_min) / (double(p_in_max) - p_in_min), 0.0, 1.0);
 	return finite_or_zero(p_out_min + t * (double(p_out_max) - p_out_min));
 }
+
 }
