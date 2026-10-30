@@ -234,6 +234,7 @@ private:
 	std::string connect_host_;
 	uint16_t connect_port_ = 0;
 	bool refusal_reported_ = false;
+	bool disconnect_reported_ = false;
 	void parse_connect();
 	double shot_delay_ = 0.0;
 	std::shared_ptr<const bf3::host::BotLevel> bot_level_;

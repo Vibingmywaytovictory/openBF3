@@ -943,6 +943,16 @@ void Bf3LevelSession::_process(double p_delta) {
 			UtilityFunctions::print(
 					to_godot(std::string("[level] the server refused the join: ") + frame_->stats.last_error.data()));
 		}
+		if (!connect_host_.empty() && !disconnect_reported_) {
+			const host::ClientStats link = client_->stats();
+			if (!link.connected && link.last_error[0] != '\0') {
+				disconnect_reported_ = true;
+				UtilityFunctions::print(to_godot("[level] the connection to " + connect_host_ + ":" +
+						std::to_string(connect_port_) + " ended: " + link.last_error.data()));
+				finish(1);
+				return;
+			}
+		}
 		mapper_.adopt(*frame_);
 		mapper_.poll_devices();
 		mapper_.weapon_frame(*frame_, now_ns);
