@@ -82,6 +82,7 @@ class BotHunt {
 public:
 	void new_life() { searched_ = since_ = block_until_ = 0; }
 	bool wanted(sim::Tick p_tick, const sim::bots::Perception &p_perception, const sim::SoldierState &p_self) const;
+	bool enemy_within(const sim::bots::Perception &p_perception, const sim::SoldierState &p_self, float p_metres) const;
 	void begin(sim::Tick p_tick) { since_ = p_tick; }
 	void step(TdmShared &r_shared, BotNavigation &r_navigation, const sim::bots::Perception &p_perception, sim::Tick p_tick, const sim::SoldierState &p_self);
 

@@ -225,6 +225,13 @@ bool BotHunt::wanted(sim::Tick p_tick, const sim::bots::Perception &p_perception
 	return p_tick >= block_until_ && known_enemy(p_perception, p_self) >= 0;
 }
 
+bool BotHunt::enemy_within(
+		const sim::bots::Perception &p_perception, const sim::SoldierState &p_self, float p_metres) const {
+	const int k = known_enemy(p_perception, p_self);
+	const sim::bots::PerceivedEnemy *const e = k >= 0 ? p_perception.find(uint8_t(k)) : nullptr;
+	return e != nullptr && horizontal(p_self.position, e->last_position) <= p_metres;
+}
+
 void BotHunt::step(TdmShared &r_shared, BotNavigation &r_navigation, const sim::bots::Perception &p_perception, sim::Tick p_tick, const sim::SoldierState &p_self) {
 	if (p_tick - since_ > kHuntGiveUpTicks) {
 		searched_ = p_tick;

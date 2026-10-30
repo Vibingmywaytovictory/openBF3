@@ -132,6 +132,7 @@ private:
 	bool led_by_bot(const SquadCoordinator &p_squad) const;
 	bool squad_position(const SquadCoordinator &p_squad, Vec3 &r_position) const;
 	int nearest_area(const Vec3 &p_position, const std::vector<uint8_t> *p_skip) const;
+	int least_visited_area(int p_side, const Vec3 &p_position, const std::vector<uint8_t> &p_skip) const;
 	void send(SquadCoordinator &r_squad, size_t p_area, SquadOrder p_order);
 	float heat(int p_side, size_t p_area) const;
 
@@ -143,6 +144,8 @@ private:
 	std::vector<AIStrategicArea *> objects_;
 	std::array<std::vector<int>, 2> squad_areas_;
 	std::array<std::vector<uint8_t>, 2> assigned_;
+	std::array<std::vector<uint32_t>, 2> visited_;
+	std::array<uint32_t, 2> visit_cycle_{};
 	std::array<int, 2> hunted_{ -1, -1 };
 	StrategyStats stats_;
 };

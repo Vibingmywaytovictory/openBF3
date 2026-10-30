@@ -36,6 +36,7 @@ struct BehaviourTuning {
 	float squad_far_m = 15.0f;
 	float squad_arrive_m = 3.0f;
 	float mission_arrive_m = 10.0f;
+	float hunt_near_m = 30.0f;
 
 	bool operator==(const BehaviourTuning &) const = default;
 };

@@ -20,6 +20,7 @@ struct InfantrySenses {
 	bool revive_target = false;
 	bool grenade_running = false;
 	bool hunt_target = false;
+	bool hunt_near = false;
 	bool navigable = false;
 
 	bool operator==(const InfantrySenses &) const = default;

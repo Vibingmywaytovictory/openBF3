@@ -34,6 +34,8 @@ constexpr double kReachShare = 0.90;
 constexpr sim::Tick kReachTicks = 60 * 60;
 constexpr uint32_t kHoldSettledTicks = 60;
 constexpr float kHoldStillMps = 0.5f;
+constexpr int kPaceKillLimit = 5;
+constexpr uint32_t kPaceTicks = 420 * 60;
 
 struct ActivityLog final : host::TdmBotObserver {
 	std::array<host::TdmBotActivity, kSlots> activity{};
@@ -368,6 +370,53 @@ TEST_SUITE("host-tdm-squads") {
 		}
 	}
 	TEST_CASE("host-tdm-squads: install unchanged") {
+		tt::TdmLevel *level = tt::load_tdm_level_once();
+		if (level != nullptr) {
+			tt::check_install_unchanged(*level);
+		}
+	}
+}
+
+TEST_SUITE("host-tdm-pace") {
+	TEST_CASE("TDM with 4 bots and an idle player, seeds 1-6: a round to 5 kills ends inside 420 s") {
+		tt::TdmLevel *level = tt::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		struct Pace {
+			tt::TdmRunResult result;
+			std::string error;
+		};
+		const std::vector<Pace> runs = core::parallel_map<Pace>(
+				6,
+				[&](size_t i) {
+					Pace pace;
+					tt::TdmRunConfig c = bots_only(uint64_t(i + 1), kPaceKillLimit);
+					c.bots = 4;
+					c.peer = true;
+					c.rules.deploy_screen = true;
+					c.rules.min_players_override = 1;
+					c.max_ticks = kPaceTicks;
+					c.configure_bots = [](host::TdmBotConfig &r_bots) { r_bots.tuning_cfg = OPENBF3_BOT_TUNING_CFG; };
+					core::Result<tt::TdmRunResult> r = tt::run_tdm(*level, c);
+					if (r) {
+						pace.result = std::move(*r);
+					} else {
+						pace.error = r.error().message;
+					}
+					return pace;
+				},
+				3);
+		for (size_t i = 0; i < runs.size(); ++i) {
+			REQUIRE_MESSAGE(runs[i].error.empty(), runs[i].error);
+			const tt::TdmRunResult &r = runs[i].result;
+			std::printf("host.tdm.pace seed %zu: kills %d / %d in %.0f s, round over %d\n", i + 1, r.kills[1],
+					r.kills[2], double(r.ticks) * sim::kTickSeconds, int(r.round_over));
+			CHECK(r.failure.empty());
+			CHECK(r.round_over);
+		}
+	}
+	TEST_CASE("host-tdm-pace: install unchanged") {
 		tt::TdmLevel *level = tt::load_tdm_level_once();
 		if (level != nullptr) {
 			tt::check_install_unchanged(*level);

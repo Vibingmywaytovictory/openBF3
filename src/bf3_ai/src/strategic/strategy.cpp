@@ -121,6 +121,7 @@ StrategyDecisions::StrategyDecisions(StrategyManager &r_manager, SquadManager &r
 	for (int side = 1; side <= 2; ++side) {
 		squad_areas_[size_t(side - 1)].assign(size_t(squads_.coordinator_count(side)), -1);
 		assigned_[size_t(side - 1)].assign(areas_.size(), 0);
+		visited_[size_t(side - 1)].assign(areas_.size(), 0u);
 	}
 	manager_.create_strategy(std::string(kStrategyHunt));
 	manager_.create_strategy(std::string(kStrategySpread));
@@ -173,14 +174,39 @@ int StrategyDecisions::nearest_area(const Vec3 &p_position, const std::vector<ui
 	return best;
 }
 
+int StrategyDecisions::least_visited_area(
+		int p_side, const Vec3 &p_position, const std::vector<uint8_t> &p_skip) const {
+	const std::vector<uint32_t> &visited = visited_[size_t(p_side - 1)];
+	int best = -1;
+	uint32_t best_visit = UINT32_MAX;
+	float best_d = FLT_MAX;
+	for (size_t i = 0; i < areas_.size(); ++i) {
+		if (p_skip[i] != 0) {
+			continue;
+		}
+		const float d = distance_sq(p_position, areas_[i].area().order_position(0));
+		if (visited[i] < best_visit || (visited[i] == best_visit && d < best_d)) {
+			best_visit = visited[i];
+			best_d = d;
+			best = int(i);
+		}
+	}
+	return best;
+}
+
 void StrategyDecisions::update_bot_positions(Sai &r_sai) {
 	const int side = r_sai.side();
+	std::vector<uint32_t> &visited = visited_[size_t(side - 1)];
+	const uint32_t cycle = ++visit_cycle_[size_t(side - 1)];
 	std::vector<int> &where = squad_areas_[size_t(side - 1)];
 	for (int q = 1; q <= squads_.coordinator_count(side); ++q) {
 		const SquadCoordinator &squad = squads_.coordinator(side, q);
 		Vec3 at{};
 		where[size_t(q - 1)] =
 				squad.number_of_squad_members() > 0 && squad_position(squad, at) ? nearest_area(at, nullptr) : -1;
+		if (where[size_t(q - 1)] >= 0) {
+			visited[size_t(where[size_t(q - 1)])] = cycle;
+		}
 	}
 }
 
@@ -339,13 +365,13 @@ void StrategyDecisions::distribute_with_no_areas(Sai &r_sai) {
 		if (here >= 0) {
 			skip[size_t(here)] = 1;
 		}
-		int next = nearest_area(at, &skip);
+		int next = least_visited_area(side, at, skip);
 		if (next < 0) {
 			std::fill(skip.begin(), skip.end(), uint8_t(0));
 			if (here >= 0) {
 				skip[size_t(here)] = 1;
 			}
-			next = nearest_area(at, &skip);
+			next = least_visited_area(side, at, skip);
 		}
 		if (next >= 0) {
 			send(squad, size_t(next), SquadOrder::Move);

@@ -49,6 +49,7 @@ const KeyDef<BehaviourTuning> kKeys[] = {
 	{ "bb.squad_far_m", KeyKind::Float, 1.0, 1000.0, BF3_BB_FIELD(squad_far_m) },
 	{ "bb.squad_arrive_m", KeyKind::Float, 0.1, 100.0, BF3_BB_FIELD(squad_arrive_m) },
 	{ "bb.mission_arrive_m", KeyKind::Float, 0.1, 1000.0, BF3_BB_FIELD(mission_arrive_m) },
+	{ "bb.hunt_near_m", KeyKind::Float, 0.0, 1000.0, BF3_BB_FIELD(hunt_near_m) },
 };
 
 #undef BF3_BB_FIELD
@@ -298,6 +299,11 @@ float BBMoveTo::situation() {
 	const bool goal =
 			goal_.kind != SquadGoalKind::None && std::isfinite(goal_.position.x) && std::isfinite(goal_.position.z);
 	const bool waiting = goal_.kind == SquadGoalKind::SquadTarget && goal_.wait_for_members;
+	const bool in_formation = goal_.kind != SquadGoalKind::Slot ||
+			(goal && distance(body_.position(), goal_.position) <= tuning_.squad_far_m);
+	if (body_.senses().hunt_near && in_formation) {
+		return x;
+	}
 	if (ordered_ == int(InfantryBehaviour::MoveTo)) {
 		hold_ = !goal || waiting || distance(body_.position(), goal_.position) <= tuning_.squad_arrive_m;
 		squad_ = true;

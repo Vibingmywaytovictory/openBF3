@@ -65,6 +65,8 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 		sensed.revive_target = fr.revive != nullptr;
 		sensed.grenade_running = body.grenade.active();
 		sensed.hunt_target = body.hunt.wanted(now, body.awareness.perception(), fr.self);
+		sensed.hunt_near = sensed.hunt_target &&
+				body.hunt.enemy_within(body.awareness.perception(), fr.self, body.cfg().behaviours.hunt_near_m);
 		sensed.navigable = sh.nav != nullptr;
 	}
 

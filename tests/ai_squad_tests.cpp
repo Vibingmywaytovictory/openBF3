@@ -1195,6 +1195,47 @@ TEST_SUITE("ai-strategy") {
 		CHECK(second.mission_status() == SquadMissionStatus::None);
 	}
 
+	TEST_CASE(
+			"StrategyDecisions, Spread: a squad walks on to the area it saw least recently, not back to the nearest") {
+		World world;
+		world.squads = 4;
+		SquadManager squads(world.services());
+		AIStrategicObjectManager objects{ StrategicServices{} };
+		const Vec2 centres[] = { { 0.0f, 0.0f }, { 100.0f, 0.0f }, { 0.0f, 100.0f }, { 200.0f, 200.0f } };
+		for (size_t i = 0; i < 4; ++i) {
+			REQUIRE(objects.create("a" + std::to_string(i), { centres[i].x - 40.0f, centres[i].y - 40.0f }, centres[i],
+					0.0f, 40.0f, std::string()));
+		}
+		objects.post_load_init_areas();
+		form_squad(world, squads, 1, { 1, 2 }, { 1.0f, 0.0f, 0.0f });
+		SquadCoordinator &squad = squads.coordinator(1, 1);
+		squad.update(++world.tick);
+		StrategyManager manager;
+		AreaHeat heat;
+		StrategyTuning tuning;
+		StrategyDecisions decisions(manager, squads, objects, &heat, tuning);
+		SaiServices services;
+		services.objects = &objects;
+		services.squads = &squads;
+		services.decisions = &decisions;
+		Sai sai(1, services);
+		const auto next_from = [&](const Vec3 &p_at) {
+			squad.un_assign_squad();
+			place_squad(world, squads, 1, p_at);
+			decisions.choose_strategy(sai);
+			decisions.update_bot_positions(sai);
+			decisions.update_distribution(sai);
+			decisions.distribute_with_no_areas(sai);
+			const SquadArea *const area = squad.squad_strategic_area_assignment();
+			return area != nullptr ? area->index() : -1;
+		};
+		CHECK(next_from({ 1.0f, 0.0f, 0.0f }) == 1);
+		CHECK(next_from({ 100.0f, 0.0f, 0.0f }) == 2);
+		CHECK(next_from({ 0.0f, 0.0f, 100.0f }) == 3);
+		CHECK(next_from({ 200.0f, 0.0f, 200.0f }) == 0);
+		CHECK(next_from({ 1.0f, 0.0f, 0.0f }) == 1);
+	}
+
 	TEST_CASE("StrategyDecisions with areas to take: a free squad defends a contested owned area, the next attacks the "
 			  "nearest") {
 		World world;
