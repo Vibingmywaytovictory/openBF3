@@ -32,7 +32,6 @@ namespace {
 
 constexpr const char *kDefaultCacheRoot = "user://bf3cache-server";
 constexpr const char *kConfigDirSetting = "openbf3/config/dir";
-constexpr const char *kDefaultConfigDir = "res://config";
 constexpr double kMiB = 1024.0 * 1024.0;
 constexpr int32_t kMainLoopFps = 30;
 
@@ -49,8 +48,7 @@ void say(const std::string &p_line) {
 
 std::string config_dir() {
 	ProjectSettings *ps = ProjectSettings::get_singleton();
-	return ps->has_setting(kConfigDirSetting) ? to_std(String(ps->get_setting(kConfigDirSetting)))
-											  : std::string(kDefaultConfigDir);
+	return ps->has_setting(kConfigDirSetting) ? to_std(String(ps->get_setting(kConfigDirSetting))) : std::string();
 }
 
 std::string config_file(const char *p_name) {
@@ -186,7 +184,7 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 	install_.locate(opts);
 	say("engine " + engine_summary());
 	const String configs = to_godot(godot_path(config_dir())).simplify_path();
-	if (!DirAccess::dir_exists_absolute(configs)) {
+	if (configs.is_empty() || !DirAccess::dir_exists_absolute(configs)) {
 		r_error = std::string("the config directory ") + kConfigDirSetting + " = " + config_dir() + " (" +
 				to_std(configs) + ") does not exist";
 		return false;

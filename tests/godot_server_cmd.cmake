@@ -33,6 +33,14 @@ if(NOT out MATCHES "\\[dedicated\\] failed: the config directory openbf3/config/
     message(FATAL_ERROR "${ROW}: a missing config directory is not a start-up failure")
 endif()
 
+file(READ "${project}/project.godot" settings)
+string(REGEX REPLACE "config/dir=[^\n]*\n" "" settings "${settings}")
+file(WRITE "${project}/project.godot" "${settings}")
+godot_run(TIMEOUT 30 HEADER "no config directory setting" ARGS -- --dedicated-seconds=1)
+if(NOT out MATCHES "\\[dedicated\\] failed: the config directory openbf3/config/dir =  \\(\\) does not exist")
+    message(FATAL_ERROR "${ROW}: a project without the config directory setting is not a start-up failure")
+endif()
+
 file(GLOB server_dlls "${project}/bin/*.dll")
 file(REMOVE ${server_dlls})
 godot_run(TIMEOUT 30 HEADER "no server DLL" ARGS -- --dedicated-seconds=1)
