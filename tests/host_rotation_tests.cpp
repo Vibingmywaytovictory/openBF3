@@ -56,6 +56,13 @@ host::GameServerConfig metro_config(
 	return c;
 }
 
+std::shared_ptr<const host::SharedLevel> renamed(
+		const std::shared_ptr<const host::SharedLevel> &p_level, const std::string &p_name) {
+	auto copy = std::make_shared<host::SharedLevel>(*p_level);
+	copy->level = p_name;
+	return copy;
+}
+
 template <typename F>
 bool step_until(host::GameServer &r_server, F p_done, uint32_t p_max,
 		const std::function<void(std::span<const host::OutDatagram>)> &p_out = {}) {
@@ -172,6 +179,135 @@ TEST_SUITE("host-rotation-unit") {
 		CHECK(st.stale_loading == 1u);
 		CHECK(st.clients == 1u);
 		CHECK_FALSE(slot_stats(st, *peers["ready"].peer).load.loading);
+	}
+
+	TEST_CASE(
+			"level change: the seats keep their slot ids, names and teams through two swaps; a Hello during the change "
+			"gets the next level's MatchInfo in phase LevelChange and is held; a Ready then is ignored; each carried "
+			"seat loads on the next server until its Ready") {
+		const std::shared_ptr<const host::SharedLevel> one = tg::synthetic_floor();
+		REQUIRE(one != nullptr);
+		const std::array<std::shared_ptr<const host::SharedLevel>, 3> levels{ one, renamed(one, "SyntheticTwo"),
+			renamed(one, "SyntheticThree") };
+		auto server = std::make_unique<host::GameServer>();
+		host::GameServerConfig c;
+		c.level = levels[0];
+		c.max_slots = 8;
+		REQUIRE(server->init(c).ok());
+		std::vector<std::unique_ptr<tt::ScriptedPeer>> peers;
+		for (const char *name : { "alpha", "gone", "bravo" }) {
+			peers.push_back(std::make_unique<tt::ScriptedPeer>(*server, uint32_t(peers.size() + 1u), name));
+			peers.back()->hello();
+			peers.back()->ready();
+		}
+		std::vector<host::OutDatagram> out;
+		const auto tick = [&] {
+			out.clear();
+			server->tick(out);
+			for (auto &p : peers) {
+				p->receive(out);
+			}
+		};
+		tick();
+		server->on_receive(peers[1]->peer(), net::kChannelReliable, net::encode_bye());
+		peers.erase(peers.begin() + 1);
+		tick();
+		REQUIRE(peers[0]->slot() == 0);
+		REQUIRE(peers[1]->slot() == 2);
+		for (uint32_t level = 1; level < 3; ++level) {
+			CAPTURE(level);
+			net::LevelChange change;
+			change.level = levels[level]->level;
+			change.mode = levels[level]->mode;
+			change.round_id = level;
+			change.load_deadline_s = 120;
+			net::NextLevel next;
+			next.level = change.level;
+			next.mode = change.mode;
+			next.source_digest = levels[level]->source_digest;
+			server->begin_level_change(change, next);
+			CHECK(server->level_changing());
+			tick();
+			for (auto &p : peers) {
+				REQUIRE_FALSE(p->level_changes.empty());
+				CHECK(p->level_changes.back().level == change.level);
+				CHECK(p->level_changes.back().round_id == level);
+			}
+			if (level == 1) {
+				peers.push_back(std::make_unique<tt::ScriptedPeer>(*server, 9u, "held"));
+				peers.back()->hello();
+				tick();
+				tt::ScriptedPeer &held = *peers.back();
+				REQUIRE(held.match_info.has_value());
+				CHECK(held.match_info->phase == net::MatchPhase::LevelChange);
+				CHECK(held.match_info->level == change.level);
+				CHECK(held.match_info->round_id == level);
+				CHECK(held.slot() == 1);
+				REQUIRE_FALSE(held.level_changes.empty());
+				held.ready();
+				CHECK(server->stats().held_readies == 1u);
+				CHECK(server->stats().held_joins == 1u);
+			}
+			const std::vector<host::CarriedSeat> seats = server->seats_to_carry();
+			host::GameServerConfig n;
+			n.level = levels[level];
+			n.max_slots = 8;
+			n.round_id = level;
+			n.carried_seats = server->release_seats();
+			CHECK(n.carried_seats.size() == seats.size());
+			CHECK(server->stats().clients == 0u);
+			auto swapped = std::make_unique<host::GameServer>();
+			const core::Status st = swapped->init(n);
+			REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
+			server = std::move(swapped);
+			for (auto &p : peers) {
+				p->rebind(*server);
+			}
+			tick();
+			const host::GameServerStats g = server->stats();
+			CHECK(g.carried_seats == seats.size());
+			CHECK(g.clients == seats.size());
+			for (const host::CarriedSeat &s : seats) {
+				CAPTURE(s.name);
+				const host::SlotStats &slot = g.slots[s.slot];
+				CHECK(slot.used);
+				CHECK(slot.remote);
+				CHECK(slot.peer == s.peer);
+				CHECK(slot.load.loading);
+			}
+			for (auto &p : peers) {
+				CAPTURE(p->peer());
+				REQUIRE(p->match_info.has_value());
+				CHECK(p->match_info->level == levels[level]->level);
+				CHECK(p->match_info->phase != net::MatchPhase::LevelChange);
+				CHECK(p->match_info->round_id == level);
+				p->loading(loading(level, 500));
+				p->ready();
+			}
+			tick();
+			const host::GameServerStats r = server->stats();
+			for (auto &p : peers) {
+				CHECK_FALSE(slot_stats(r, *p).load.loading);
+				CHECK(slot_stats(r, *p).load.reports == 1u);
+				CHECK_FALSE(p->kick.has_value());
+			}
+			const std::vector<host::CarriedSeat> after = server->seats_to_carry();
+			REQUIRE(after.size() == seats.size());
+			for (size_t i = 0; i < seats.size(); ++i) {
+				CHECK(after[i].slot == seats[i].slot);
+				CHECK(after[i].peer == seats[i].peer);
+				CHECK(after[i].name == seats[i].name);
+				CHECK(after[i].team == seats[i].team);
+			}
+		}
+		CHECK(peers[0]->slot() == 0);
+		CHECK(peers[1]->slot() == 2);
+		CHECK(peers[2]->slot() == 1);
+		size_t kicks = 0;
+		for (const uint64_t k : server->stats().kicks) {
+			kicks += size_t(k);
+		}
+		CHECK(kicks == 0u);
 	}
 }
 

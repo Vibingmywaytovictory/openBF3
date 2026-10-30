@@ -161,6 +161,7 @@ public:
 	void revive(const net::ReviveEvent &p_event) override;
 
 	uint8_t on_connect(uint8_t p_slot, bool p_bot, std::string_view p_name);
+	uint8_t on_carry(uint8_t p_slot, std::string_view p_name, uint8_t p_team, int p_squad_mate);
 	void on_disconnect(uint8_t p_slot);
 	bool level_ended() const;
 	void restart_in_place(uint32_t p_tick, std::vector<RulesOrder> &r_orders);

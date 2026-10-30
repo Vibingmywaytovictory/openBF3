@@ -20,6 +20,7 @@
 #include "bf3/sim/weapons/surface_materials.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -163,6 +164,8 @@ uint8_t match_weapon_flags(bool p_exact_aim, bool p_infinite_magazine);
 inline constexpr float kShotFrameMargin = 64.0f;
 net::ShotQuantization shot_frame(const sim::StaticWorldShapes &p_world);
 
+using LoadoutChoices = std::array<std::array<std::optional<LoadoutChoice>, kKitCount>, kKitTeams>;
+
 class Gunplay {
 public:
 	static core::Result<std::unique_ptr<Gunplay>> create(const SharedLevel &p_level, const GunplayConfig &p_config);
@@ -175,6 +178,7 @@ public:
 	void refuse_loadout();
 	void forget_loadouts(uint8_t p_slot);
 	const Loadout &loadout(uint8_t p_slot) const;
+	LoadoutChoices loadout_choices(uint8_t p_slot) const;
 	void step_soldier(uint8_t p_slot, const sim::Command &p_command, const sim::SoldierState &p_before, const sim::SoldierState &p_after);
 	void step_projectiles(uint32_t p_tick, std::span<const sim::SoldierState> p_states);
 	void apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states, CombatEventSink &r_sink);

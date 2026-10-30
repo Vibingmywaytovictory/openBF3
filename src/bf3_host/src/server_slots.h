@@ -7,6 +7,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -23,6 +25,7 @@ struct Seat {
 	bool bot = false;
 	uint32_t peer = 0;
 	int team = 1;
+	std::string name;
 };
 
 class SlotTable {
@@ -58,6 +61,7 @@ public:
 	}
 
 	void assign_team(size_t p_slot, int p_team) { seats_[p_slot].team = p_team; }
+	void name(size_t p_slot, std::string_view p_name) { seats_[p_slot].name = std::string(p_name); }
 
 	void clear(size_t p_slot) {
 		seats_[p_slot] = Seat();

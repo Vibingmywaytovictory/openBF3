@@ -12,9 +12,9 @@
 #include "server_dev.h"
 #include "server_handshake.h"
 #include "server_logic_sync.h"
-#include "server_seats.h"
 #include "server_match.h"
 #include "server_outbox.h"
+#include "server_seats.h"
 #include "server_slot_view.h"
 #include "server_slots.h"
 #include "server_soldiers.h"
@@ -70,6 +70,12 @@ struct GameServer::Impl {
 	GameServerTickTimes times;
 	std::unique_ptr<BotDirector> bots;
 	uint64_t motor_steps = 0;
+	bool changing = false;
+	net::LevelChange level_change;
+	net::NextLevel next_level;
+	uint32_t carried = 0;
+	uint64_t held_joins = 0;
+	uint64_t held_readies = 0;
 
 	void reset_slot(size_t i) {
 		slots.clear(i);
@@ -90,6 +96,9 @@ struct GameServer::Impl {
 	}
 
 	void kick_stalled_loads(sim::Tick p_tick) {
+		if (changing) {
+			return;
+		}
 		for (const SeatLoads::Due &d : loads.due(p_tick)) {
 			const Seat &s = slots[d.slot];
 			if (!s.used || !s.remote) {
@@ -121,35 +130,96 @@ struct GameServer::Impl {
 			outbox.send(p_peer, net::kChannelReliable, net::encode_kick(handshake.full()));
 			return;
 		}
-		reset_slot(size_t(at));
-		int team = match.on() ? int(match.connect(size_t(at), false, p_hello.name)) : 1;
+		if (changing) {
+			hold_join(size_t(at), p_peer, p_hello.name);
+			return;
+		}
+		join(size_t(at), p_peer, p_hello.name, nullptr, -1);
+	}
+
+	void join(size_t p_slot, uint32_t p_peer, std::string_view p_name, const CarriedSeat *p_carry, int p_squad_mate) {
+		reset_slot(p_slot);
+		int team = 1;
+		if (p_carry != nullptr) {
+			team = match.on() ? int(match.carry(p_slot, p_name, p_carry->team, p_squad_mate)) : int(p_carry->team);
+		} else if (match.on()) {
+			team = int(match.connect(p_slot, false, p_name));
+		}
 		net::MatchInfo m;
 		m.level = config.level->level;
 		m.mode = config.level->mode;
 		m.snapshot_divisor = config.snapshot_divisor;
-		m.slot = uint8_t(at);
+		m.slot = uint8_t(p_slot);
 		m.server_tick = tick;
 		m.phase = net::MatchPhase::InRound;
 		m.source_digest = config.level->source_digest;
 		m.motor_hash = motor_hash;
 		m.round_id = config.round_id;
-		if (const std::optional<uint8_t> chosen = combat.client_joined(size_t(at), config.dev_commands, m)) {
+		if (const std::optional<uint8_t> chosen = combat.client_joined(p_slot, config.dev_commands, m);
+				chosen && p_carry == nullptr) {
 			team = *chosen;
 		}
-		slots.admit_client(size_t(at), p_peer, team);
-		loads.begin(size_t(at), tick);
+		if (p_carry != nullptr) {
+			carry_gear(p_slot, *p_carry);
+		}
+		slots.admit_client(p_slot, p_peer, team);
+		slots.name(p_slot, p_name);
+		loads.begin(p_slot, tick);
 		match.describe(m);
-		handshake.describe(size_t(at), m);
+		handshake.describe(p_slot, m);
 		outbox.send(p_peer, net::kChannelReliable, net::encode_match_info(m));
-		const MatchBroadcast join = match.join_messages(tick, uint8_t(std::clamp(team, 0, int(net::kMaxTeam))));
-		if (!join.state.empty()) {
-			outbox.send(p_peer, net::kChannelReliable, join.state);
+		const MatchBroadcast joined = match.join_messages(tick, uint8_t(std::clamp(team, 0, int(net::kMaxTeam))));
+		if (!joined.state.empty()) {
+			outbox.send(p_peer, net::kChannelReliable, joined.state);
 		}
-		if (!join.players.empty()) {
-			outbox.send(p_peer, net::kChannelReliable, join.players);
+		if (!joined.players.empty()) {
+			outbox.send(p_peer, net::kChannelReliable, joined.players);
 		}
-		for (const SquadOrderMessage &o : join.orders) {
+		for (const SquadOrderMessage &o : joined.orders) {
 			outbox.send(p_peer, net::kChannelReliable, o.bytes);
+		}
+	}
+
+	void carry_gear(size_t p_slot, const CarriedSeat &p_carry) {
+		combat.set_kit(p_slot, p_carry.kit < kKitCount ? p_carry.kit : uint8_t(0));
+		for (uint8_t t = 0; t < kKitTeams; ++t) {
+			for (uint8_t k = 0; k < kKitCount; ++k) {
+				if (const std::optional<LoadoutChoice> &c = p_carry.loadouts[t][k]) {
+					net::LoadoutRequest r;
+					r.kit = k;
+					r.items = c->items;
+					r.accessories = c->accessories;
+					r.specialization = c->specialization;
+					combat.select_loadout(p_slot, uint8_t(t + 1u), r);
+				}
+			}
+		}
+	}
+
+	void hold_join(size_t p_slot, uint32_t p_peer, std::string_view p_name) {
+		reset_slot(p_slot);
+		net::MatchInfo m;
+		m.level = next_level.level;
+		m.mode = next_level.mode;
+		m.snapshot_divisor = config.snapshot_divisor;
+		m.slot = uint8_t(p_slot);
+		m.server_tick = tick;
+		m.phase = net::MatchPhase::LevelChange;
+		m.source_digest = next_level.source_digest;
+		m.logic_digest = next_level.logic_digest;
+		m.round_id = level_change.round_id;
+		slots.admit_client(p_slot, p_peer, 0);
+		slots.name(p_slot, p_name);
+		outbox.send(p_peer, net::kChannelReliable, net::encode_match_info(m));
+		outbox.send(p_peer, net::kChannelReliable, net::encode_level_change(level_change));
+		++held_joins;
+	}
+
+	void broadcast(const std::vector<uint8_t> &p_bytes) {
+		for (size_t i = 0; i < slots.size(); ++i) {
+			if (slots[i].used && slots[i].remote) {
+				outbox.send(slots[i].peer, net::kChannelReliable, p_bytes);
+			}
 		}
 	}
 
@@ -272,6 +342,41 @@ struct GameServer::Impl {
 	}
 
 	core::Status init_gameplay();
+
+	core::Status admit_carried() {
+		std::vector<CarriedSeat> seats = config.carried_seats;
+		std::sort(
+				seats.begin(), seats.end(), [](const CarriedSeat &a, const CarriedSeat &b) { return a.slot < b.slot; });
+		for (size_t i = 0; i < seats.size(); ++i) {
+			const CarriedSeat &c = seats[i];
+			if (c.slot >= slots.size() || slots[c.slot].used || slots.slot_of_peer(c.peer) >= 0) {
+				return core::make_error(
+						"GameServer: carried seat " + std::to_string(c.slot) + " is taken or out of range");
+			}
+			int mate = -1;
+			for (size_t j = 0; j < i && c.squad != 0; ++j) {
+				if (seats[j].team == c.team && seats[j].squad == c.squad) {
+					mate = int(seats[j].slot);
+					break;
+				}
+			}
+			join(c.slot, c.peer, c.name, &c, mate);
+			++carried;
+		}
+		return core::Status::success();
+	}
+
+	GameServerConfig bot_fill_config() const {
+		if (carried == 0 || config.tdm_bots == nullptr || !match.on()) {
+			return config;
+		}
+		GameServerConfig c = config;
+		auto bots = std::make_shared<TdmBotConfig>(*config.tdm_bots);
+		const uint32_t room = config.rules.max_players > carried ? uint32_t(config.rules.max_players) - carried : 0u;
+		bots->count = std::min(bots->count, room);
+		c.tdm_bots = bots;
+		return c;
+	}
 	void step_rules(sim::Tick p_tick);
 
 	void send_rules(sim::Tick p_tick) {
@@ -384,6 +489,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 		m.reset_slot(i);
 	}
 	BF3_TRY(m.init_gameplay());
+	BF3_TRY(m.admit_carried());
 	for (uint32_t i = 0; i < p_config.walkers; ++i) {
 		if (add_local_soldier(std::make_unique<LegWalker>(i), 2) < 0) {
 			return core::make_error("GameServer: no slot for walker " + std::to_string(i));
@@ -404,7 +510,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	}
 	BF3_TRY(add_firefight_bots(*this, p_config));
 	if (p_config.tdm_bots != nullptr) {
-		BF3_TRY(add_tdm_bots(*this, p_config));
+		BF3_TRY(add_tdm_bots(*this, m.bot_fill_config()));
 	}
 	return core::Status::success();
 }
@@ -443,6 +549,10 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 			core::Result<net::Ready> r = net::decode_ready(p_datagram);
 			if (!r || at < 0) {
 				++m.bad_datagrams;
+				return;
+			}
+			if (m.changing) {
+				++m.held_readies;
 				return;
 			}
 			if (const std::optional<net::Kick> refused = m.handshake.ready(size_t(at), *r)) {
@@ -537,6 +647,10 @@ GameServerStats GameServer::stats() const {
 	g.spawn_failures = m.spawner.failures();
 	g.kicks = m.handshake.kicks();
 	g.round_id = m.config.round_id;
+	g.carried_seats = m.carried;
+	g.level_changing = m.changing;
+	g.held_joins = m.held_joins;
+	g.held_readies = m.held_readies;
 	g.stale_loading = m.loads.stale_reports();
 	if (const TdmRules *rules = m.match.rules(); rules != nullptr) {
 		g.rules_active = true;
@@ -695,6 +809,55 @@ void GameServer::restart_round() {
 	if (!orders.empty()) {
 		m.spawner.apply_orders(m.tick, orders, m.combat_log);
 	}
+}
+
+void GameServer::announce_round_over(const net::RoundOverInfo &p_info) {
+	impl_->broadcast(net::encode_round_over_info(p_info));
+}
+
+void GameServer::begin_level_change(const net::LevelChange &p_change, const net::NextLevel &p_next) {
+	Impl &m = *impl_;
+	m.changing = true;
+	m.level_change = p_change;
+	m.next_level = p_next;
+	m.broadcast(net::encode_level_change(p_change));
+}
+
+bool GameServer::level_changing() const {
+	return impl_->changing;
+}
+
+std::vector<CarriedSeat> GameServer::seats_to_carry() const {
+	const Impl &m = *impl_;
+	std::vector<CarriedSeat> out;
+	const TdmRules *rules = m.match.rules();
+	const Gunplay *gunplay = m.combat.gunplay();
+	for (size_t i = 0; i < m.slots.size(); ++i) {
+		const Seat &s = m.slots[i];
+		if (!s.used || !s.remote) {
+			continue;
+		}
+		CarriedSeat c;
+		c.slot = uint8_t(i);
+		c.peer = s.peer;
+		c.name = s.name;
+		c.team = rules != nullptr ? rules->team_of(uint8_t(i)) : uint8_t(std::clamp(s.team, 0, int(net::kMaxTeam)));
+		c.squad = rules != nullptr ? rules->squads().squad_of(uint8_t(i)) : uint8_t(0);
+		c.kit = m.combat.kit(i);
+		if (gunplay != nullptr) {
+			c.loadouts = gunplay->loadout_choices(uint8_t(i));
+		}
+		out.push_back(std::move(c));
+	}
+	return out;
+}
+
+std::vector<CarriedSeat> GameServer::release_seats() {
+	std::vector<CarriedSeat> out = seats_to_carry();
+	for (const CarriedSeat &c : out) {
+		impl_->reset_slot(c.slot);
+	}
+	return out;
 }
 
 int GameServer::add_local_bot(std::unique_ptr<CommandSource> p_source, int p_team) {

@@ -50,6 +50,7 @@ public:
 	void kit_select(const net::KitSelect &p_select);
 	void debug(const net::DebugRequest &p_request);
 	void loading(const net::Loading &p_message);
+	void rebind(host::GameServer &r_server) { server_ = &r_server; }
 
 	void command(sim::Command p_command);
 
@@ -69,6 +70,10 @@ public:
 	std::optional<net::Snapshot> last_snapshot;
 	net::SnapshotBaselines baselines;
 	std::optional<net::Kick> kick;
+	std::vector<net::MatchInfo> match_infos;
+	std::vector<net::LevelChange> level_changes;
+	std::vector<net::RoundOverInfo> round_overs;
+	uint32_t full_syncs = 0;
 	uint64_t decode_errors = 0;
 
 private:
@@ -427,6 +432,7 @@ inline void ScriptedPeer::receive(std::span<const host::OutDatagram> p_out) {
 				ok = m.ok();
 				if (ok) {
 					match_info = *m;
+					match_infos.push_back(*m);
 				}
 				break;
 			}
@@ -511,6 +517,25 @@ inline void ScriptedPeer::receive(std::span<const host::OutDatagram> p_out) {
 				}
 				break;
 			}
+			case net::MessageType::LevelChange: {
+				core::Result<net::LevelChange> m = net::decode_level_change(d.bytes);
+				ok = m.ok();
+				if (ok) {
+					level_changes.push_back(*m);
+				}
+				break;
+			}
+			case net::MessageType::RoundOverInfo: {
+				core::Result<net::RoundOverInfo> m = net::decode_round_over_info(d.bytes);
+				ok = m.ok();
+				if (ok) {
+					round_overs.push_back(*m);
+				}
+				break;
+			}
+			case net::MessageType::FullSync:
+				full_syncs += 1u;
+				break;
 			case net::MessageType::Kick: {
 				core::Result<net::Kick> m = net::decode_kick(d.bytes);
 				ok = m.ok();

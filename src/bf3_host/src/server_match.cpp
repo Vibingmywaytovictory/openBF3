@@ -40,6 +40,13 @@ uint8_t MatchControl::connect(size_t p_slot, bool p_bot, std::string_view p_name
 	return rules_->on_connect(uint8_t(p_slot), p_bot, p_name);
 }
 
+uint8_t MatchControl::carry(size_t p_slot, std::string_view p_name, uint8_t p_team, int p_squad_mate) {
+	if (!on() || p_slot >= slots_) {
+		return p_team;
+	}
+	return rules_->on_carry(uint8_t(p_slot), p_name, p_team, p_squad_mate);
+}
+
 void MatchControl::leave(size_t p_slot) {
 	if (on() && p_slot < slots_) {
 		rules_->on_disconnect(uint8_t(p_slot));

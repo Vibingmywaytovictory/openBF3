@@ -61,6 +61,16 @@ struct SeatLoad {
 	uint32_t reports = 0;
 };
 
+struct CarriedSeat {
+	uint8_t slot = 0;
+	uint32_t peer = 0;
+	std::string name;
+	uint8_t team = 0;
+	uint8_t squad = 0;
+	uint8_t kit = 0;
+	LoadoutChoices loadouts{};
+};
+
 struct GameServerConfig {
 	std::shared_ptr<const SharedLevel> level;
 	uint8_t snapshot_divisor = 2;
@@ -75,6 +85,7 @@ struct GameServerConfig {
 	std::optional<uint64_t> game_build;
 	LoadDeadlines load;
 	uint32_t round_id = 0;
+	std::vector<CarriedSeat> carried_seats;
 
 	std::shared_ptr<const BotFillConfig> bots;
 
@@ -147,6 +158,10 @@ struct GameServerStats {
 	uint8_t weapon_flags = 0;
 
 	uint32_t round_id = 0;
+	uint32_t carried_seats = 0;
+	bool level_changing = false;
+	uint64_t held_joins = 0;
+	uint64_t held_readies = 0;
 	uint64_t stale_loading = 0;
 };
 
@@ -186,6 +201,11 @@ public:
 
 	bool level_ended() const;
 	void restart_round();
+	void announce_round_over(const net::RoundOverInfo &p_info);
+	void begin_level_change(const net::LevelChange &p_change, const net::NextLevel &p_next);
+	bool level_changing() const;
+	std::vector<CarriedSeat> seats_to_carry() const;
+	std::vector<CarriedSeat> release_seats();
 
 private:
 	struct Impl;

@@ -826,6 +826,10 @@ const Loadout &Gunplay::loadout(uint8_t p_slot) const {
 	return p_slot < impl_->slots.size() ? impl_->slots[p_slot].loadout : kNone;
 }
 
+LoadoutChoices Gunplay::loadout_choices(uint8_t p_slot) const {
+	return p_slot < impl_->slots.size() ? impl_->slots[p_slot].choices : LoadoutChoices{};
+}
+
 uint8_t Gunplay::kit(uint8_t p_slot) const {
 	return p_slot < impl_->slots.size() ? impl_->slots[p_slot].kit : uint8_t(0);
 }

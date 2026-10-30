@@ -43,6 +43,7 @@ public:
 	RespawnPolicy &policy();
 
 	uint8_t connect(size_t p_slot, bool p_bot, std::string_view p_name);
+	uint8_t carry(size_t p_slot, std::string_view p_name, uint8_t p_team, int p_squad_mate);
 	void leave(size_t p_slot);
 	bool waits_for_deploy(size_t p_slot) const;
 	sim::Command restrict(const sim::Command &p_command) const;

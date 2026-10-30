@@ -824,6 +824,38 @@ uint8_t TdmRules::on_connect(uint8_t p_slot, bool p_bot, std::string_view p_name
 	return team;
 }
 
+uint8_t TdmRules::on_carry(uint8_t p_slot, std::string_view p_name, uint8_t p_team, int p_squad_mate) {
+	Impl &m = *impl_;
+	if (p_team != 1 && p_team != 2) {
+		return on_connect(p_slot, false, p_name);
+	}
+	if (p_slot >= m.slots.size() || p_slot >= net::kMaxPlayerRows || !m.natives || !m.runtime) {
+		return 0;
+	}
+	Impl::Slot &s = m.slots[p_slot];
+	s = Impl::Slot();
+	s.connected = true;
+	s.deploy = m.config.deploy_screen;
+	s.name_bytes = uint8_t(cut_name(p_name, s.name));
+	if (!m.faulted) {
+		const core::Status st = m.natives->player_enter_team(p_slot, false, p_team, *m.runtime);
+		if (!st.ok()) {
+			m.fault(st.error());
+		}
+	}
+	const uint8_t team = m.natives->team_of(p_slot);
+	const uint8_t mate_squad = p_squad_mate >= 0 && size_t(p_squad_mate) < m.slots.size() &&
+					m.squads.team_of(uint8_t(p_squad_mate)) == team
+			? m.squads.squad_of(uint8_t(p_squad_mate))
+			: uint8_t(0);
+	if (mate_squad == 0 || m.squads.join(p_slot, team, mate_squad) != SquadRefusal::None) {
+		if (p_squad_mate >= 0 || m.squads.create(p_slot, team) != SquadRefusal::None) {
+			m.squads.assign(p_slot, team);
+		}
+	}
+	return team;
+}
+
 void TdmRules::on_disconnect(uint8_t p_slot) {
 	Impl &m = *impl_;
 	if (p_slot >= m.slots.size() || !m.slots[p_slot].connected) {
