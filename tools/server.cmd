@@ -35,8 +35,8 @@ exit /b %ERRORLEVEL%
 :help
 echo Usage: tools\server.cmd [level [mode]] [user args]
 echo A headless dedicated server: TDM rules and bots, no window, its own cache user://bf3cache-server.
-echo   level mode   one level, e.g. MP_Subway TeamDeathMatch0; without them the first entry of config\maplist.cfg, restarted in place
-echo   --maplist=PATH   rotate through a map list ^(one "level mode rounds" line per entry, e.g. bf3-opensource\config\maplist.cfg^); load bots follow its level changes, the game client cannot yet
+echo   level mode   one level, e.g. MP_Subway TeamDeathMatch0; without them the first entry of bf3-opensource\config\maplist.cfg, restarted in place
+echo   --maplist=PATH   rotate through a map list ^(one "level mode rounds" line per entry; PATH is absolute or relative to bf3-opensource-server, e.g. ..\bf3-opensource\config\maplist.cfg^); load bots follow its level changes, the game client cannot yet
 echo   --bots=0..64 ^(default 31^) --max-players=1..64 ^(default 32^) --kill-limit=N ^(data: 100^) --preround=S ^(data: 10^) --min-players=N
 echo   --port=N ^(default 0: any free port, printed^) --port-file=PATH --bind=IP ^(default 127.0.0.1^) --bf3-cache=PATH --seed=N --dev
 echo   --dedicated-seconds=S --stop-after-kills=N   stop after S seconds or N kills
