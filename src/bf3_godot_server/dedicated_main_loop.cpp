@@ -11,8 +11,11 @@
 #include "bf3/host/map_list.h"
 #include "bf3/sim/soldier_motor.h"
 
+#include <godot_cpp/classes/class_db_singleton.hpp>
+#include <godot_cpp/classes/dir_access.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/gd_extension_manager.hpp>
 #include <godot_cpp/classes/performance.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -28,7 +31,8 @@ namespace host = bf3::host;
 namespace {
 
 constexpr const char *kDefaultCacheRoot = "user://bf3cache-server";
-constexpr const char *kDefaultMapList = "res://config/maplist.cfg";
+constexpr const char *kConfigDirSetting = "openbf3/config/dir";
+constexpr const char *kDefaultConfigDir = "res://config";
 constexpr double kMiB = 1024.0 * 1024.0;
 constexpr int32_t kMainLoopFps = 30;
 
@@ -41,6 +45,33 @@ std::string godot_path(const std::string &p_path) {
 
 void say(const std::string &p_line) {
 	UtilityFunctions::print(to_godot("[dedicated] " + p_line));
+}
+
+std::string config_dir() {
+	ProjectSettings *ps = ProjectSettings::get_singleton();
+	return ps->has_setting(kConfigDirSetting) ? to_std(String(ps->get_setting(kConfigDirSetting)))
+											  : std::string(kDefaultConfigDir);
+}
+
+std::string config_file(const char *p_name) {
+	return to_std(to_godot(godot_path(config_dir() + "/" + p_name)).simplify_path());
+}
+
+std::string extensions_text() {
+	const PackedStringArray loaded = GDExtensionManager::get_singleton()->get_loaded_extensions();
+	std::string text;
+	for (int64_t i = 0; i < loaded.size(); ++i) {
+		text += (text.empty() ? "" : ", ") + to_std(loaded[i]);
+	}
+	std::string classes;
+	const PackedStringArray all = ClassDB::get_class_list();
+	for (int64_t i = 0; i < all.size(); ++i) {
+		if (ClassDB::class_get_api_type(all[i]) == ClassDB::API_EXTENSION) {
+			classes += (classes.empty() ? "" : ", ") + to_std(all[i]);
+		}
+	}
+	return (text.empty() ? std::string("none") : text) + ", classes " +
+			(classes.empty() ? std::string("none") : classes);
 }
 
 bool u32_arg(const char *p_name, double p_min, double p_max, uint32_t &r_value, std::string &r_error) {
@@ -138,8 +169,8 @@ bool DedicatedMainLoop::parse_args(std::string &r_error) {
 	a.rules.preround_s = tdm.preround_s;
 	a.rules.min_players = tdm.min_players;
 	a.rules.dev_commands = has_user_arg("dev");
-	a.rules.bot_tuning_cfg = config_path("res://config/bot_tuning.cfg");
-	if (const std::string mechanics = config_path("res://config/weapon_mechanics.cfg"); !mechanics.empty()) {
+	a.rules.bot_tuning_cfg = config_path(config_file("bot_tuning.cfg").c_str());
+	if (const std::string mechanics = config_path(config_file("weapon_mechanics.cfg").c_str()); !mechanics.empty()) {
 		a.rules.mechanics_cfg = mechanics;
 	}
 	return r_error.empty();
@@ -154,6 +185,13 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 	}
 	install_.locate(opts);
 	say("engine " + engine_summary());
+	const String configs = to_godot(godot_path(config_dir())).simplify_path();
+	if (!DirAccess::dir_exists_absolute(configs)) {
+		r_error = std::string("the config directory ") + kConfigDirSetting + " = " + config_dir() + " (" +
+				to_std(configs) + ") does not exist";
+		return false;
+	}
+	say("config " + to_std(configs));
 	say("install " + install_.describe());
 	if (!install_.is_mounted()) {
 		r_error = "no usable install: " + install_.describe();
@@ -172,7 +210,7 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 		config.maps.entries.push_back(
 				host::LevelEntry{ args_.level, args_.mode.empty() ? std::string("TeamDeathMatch0") : args_.mode, 1 });
 	} else {
-		const std::string path = godot_path(args_.maplist.empty() ? std::string(kDefaultMapList) : args_.maplist);
+		const std::string path = godot_path(args_.maplist.empty() ? config_file("maplist.cfg") : args_.maplist);
 		core::Result<host::MapList> maps = host::load_map_list(path);
 		if (!maps) {
 			r_error = maps.error().message;
@@ -189,7 +227,7 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 		rotation += (rotation.empty() ? "" : ", ") + e.level + " " + e.mode + " x" + std::to_string(e.rounds);
 	}
 	say("map list " + rotation +
-			(first_only ? std::string(" (the first entry of ") + kDefaultMapList +
+			(first_only ? std::string(" (the first entry of ") + config_file("maplist.cfg") +
 									" in place: the game client cannot follow a level change yet; --maplist rotates)"
 						: std::string()));
 
@@ -207,12 +245,12 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 
 	config.level.shared.gunplay = true;
 	config.level.shared.tdm = true;
-	config.level.shared.tdm_tuning_cfg = config_path("res://config/tdm_tuning.cfg");
-	const String motor = "res://config/motor_tuning.cfg";
-	if (FileAccess::file_exists(motor)) {
-		core::Result<sim::MotorTuning> tuning = sim::parse_motor_tuning(to_std(FileAccess::get_file_as_string(motor)));
+	config.level.shared.tdm_tuning_cfg = config_path(config_file("tdm_tuning.cfg").c_str());
+	if (const std::string motor = config_path(config_file("motor_tuning.cfg").c_str()); !motor.empty()) {
+		core::Result<sim::MotorTuning> tuning =
+				sim::parse_motor_tuning(to_std(FileAccess::get_file_as_string(to_godot(motor))));
 		if (!tuning) {
-			r_error = "res://config/motor_tuning.cfg: " + tuning.error().message;
+			r_error = motor + ": " + tuning.error().message;
 			return false;
 		}
 		config.level.shared.tuning = *tuning;
@@ -271,6 +309,7 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 
 void DedicatedMainLoop::_initialize() {
 	Engine::get_singleton()->set_max_fps(kMainLoopFps);
+	say("extensions " + extensions_text());
 	std::string error;
 	if (!parse_args(error) || !start(error)) {
 		say("failed: " + error);

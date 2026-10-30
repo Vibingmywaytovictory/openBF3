@@ -2,7 +2,6 @@
 
 #include "audio_stream.h"
 #include "collision_overlay.h"
-#include "dedicated_main_loop.h"
 #include "game_session.h"
 #include "level_session.h"
 #include "minimap_control.h"
@@ -48,7 +47,6 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 		return;
 	}
 	GDREGISTER_CLASS(bf3::godot_side::GameSession);
-	GDREGISTER_CLASS(bf3::godot_side::DedicatedMainLoop);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3Translation);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3Localisation);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3WeaponInspector);

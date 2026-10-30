@@ -21,7 +21,7 @@ if "%A2:~0,2%"=="--" goto run
 set "ARGS=%ARGS% --mode=%A2%"
 set "ALL=!ALL:* %A2%=!"
 :run
-"%OPENBF3_GODOT%" --headless --path "%ROOT%\bf3-opensource" --main-loop DedicatedMainLoop -- %ARGS% !ALL! --bf3-cache=user://bf3cache-server
+"%OPENBF3_GODOT%" --headless --path "%ROOT%\bf3-opensource-server" --main-loop DedicatedMainLoop -- %ARGS% !ALL! --bf3-cache=user://bf3cache-server
 exit /b %ERRORLEVEL%
 :help
 echo Usage: tools\server.cmd [level [mode]] [user args]

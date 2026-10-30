@@ -12,6 +12,8 @@ set(OPENBF3_ENGINE_API "${CMAKE_SOURCE_DIR}/engine-api/4.8.dev7.c971f93e7" CACHE
     "Folder with extension_api.json + gdextension_interface.json dumped from the exact Godot build")
 set(OPENBF3_GODOT_PROJECT "${CMAKE_SOURCE_DIR}/bf3-opensource" CACHE PATH
     "Godot project; the extension DLL is written to its bin/ folder")
+set(OPENBF3_GODOT_SERVER_PROJECT "${CMAKE_SOURCE_DIR}/bf3-opensource-server" CACHE PATH
+    "Godot project of the dedicated server; the server extension DLL is written to its bin/ folder")
 if(OPENBF3_BUILD_GODOT)
     find_program(OPENBF3_GODOT_EXE NAMES Godot_v4.8-dev7_win64_console.exe
         HINTS "${CMAKE_SOURCE_DIR}/.." "${CMAKE_SOURCE_DIR}/../.." NO_DEFAULT_PATH
@@ -145,3 +147,7 @@ add_subdirectory(src/bf3_audio)
 add_subdirectory(src/bf3_client_audio)
 
 add_subdirectory(src/bf3_ai)
+
+if(OPENBF3_BUILD_GODOT)
+    add_subdirectory(src/bf3_godot_server)
+endif()

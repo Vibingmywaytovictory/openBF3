@@ -135,6 +135,28 @@ TEST_SUITE("net-procs-harness") {
 		}
 	}
 
+	TEST_CASE("a dedicated server child runs the server project, which loads only the server extension") {
+		ProcDriver driver(driver_config_from_env());
+		const ChildSpec spec = driver.server_child("server", { "--port=none" });
+		if (const std::string why = driver.skip_reason(spec); !why.empty()) {
+			bf3::test::skip_install_case(why.c_str());
+			return;
+		}
+		bf3::core::Result<size_t> server = driver.start(spec);
+		REQUIRE_MESSAGE(server.ok(), (server.ok() ? std::string() : server.error().message));
+		std::string extensions;
+		CHECK(driver.wait_line(
+				*server, [](std::string_view l) { return l.rfind("[dedicated] extensions ", 0) == 0; }, 60s,
+				&extensions));
+		CHECK(extensions == "[dedicated] extensions res://openbf3_server.gdextension, classes DedicatedMainLoop");
+		CHECK(driver.wait_line(
+				*server, [](std::string_view l) { return l.rfind("[dedicated] failed: --port=none", 0) == 0; }, 60s));
+		const ChildEnd end = driver.finish(*server, 60s);
+		CHECK(end.exited);
+		CHECK(end.stragglers == 0);
+		CHECK(driver.job_processes(*server) == 0);
+	}
+
 	TEST_CASE("a hung child is killed at its timeout with its grandchild and leaves no process in its job") {
 		ProcDriver driver(driver_config_from_env());
 		bf3::core::Result<size_t> hung = driver.start(driver.tool_child("hung", self_exe(), child_case("hung child")));

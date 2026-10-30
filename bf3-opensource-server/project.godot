@@ -1,0 +1,10 @@
+config_version=5
+
+[application]
+
+config/name="bf3-opensource-server"
+run/main_scene="res://server.tscn"
+
+[openbf3]
+
+config/dir="res://../bf3-opensource/config"

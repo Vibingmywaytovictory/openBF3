@@ -50,8 +50,7 @@ std::optional<Server> start_server(ProcDriver &r_driver, uint32_t p_bots, uint32
 		std::vector<std::string> p_args = { "--level=" + std::string(kLevel), "--mode=" + std::string(kMode) }) {
 	p_args.insert(p_args.end(),
 			{ "--bots=" + std::to_string(p_bots), "--preround=0", "--dedicated-seconds=" + std::to_string(p_seconds) });
-	const ChildSpec spec =
-			r_driver.godot_child("server", { "--headless", "--main-loop", "DedicatedMainLoop" }, std::move(p_args));
+	const ChildSpec spec = r_driver.server_child("server", std::move(p_args));
 	if (const std::string why = r_driver.skip_reason(spec); !why.empty()) {
 		bf3::test::skip_install_case(why.c_str());
 		return std::nullopt;

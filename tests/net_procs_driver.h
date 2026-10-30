@@ -54,6 +54,7 @@ struct DriverConfig {
 	std::filesystem::path root;
 	std::filesystem::path godot_exe;
 	std::filesystem::path godot_project;
+	std::filesystem::path godot_server_project;
 	std::filesystem::path bf3dump;
 	bool window_row = false;
 	bool windowed_allowed = false;
@@ -74,6 +75,7 @@ public:
 	ChildRoots roots(std::string_view p_role) const;
 	ChildSpec godot_child(std::string_view p_role, std::vector<std::string> p_engine_args,
 			std::vector<std::string> p_user_args) const;
+	ChildSpec server_child(std::string_view p_role, std::vector<std::string> p_user_args) const;
 	ChildSpec tool_child(std::string_view p_role, std::filesystem::path p_exe, std::vector<std::string> p_args) const;
 	std::string skip_reason(const ChildSpec &p_spec) const;
 	core::Result<size_t> start(const ChildSpec &p_spec);
@@ -88,6 +90,9 @@ public:
 private:
 	struct Child;
 	core::Status check_spec(const ChildSpec &p_spec) const;
+	ChildSpec project_child(const std::filesystem::path &p_project, std::string_view p_role,
+			std::vector<std::string> p_engine_args, std::vector<std::string> p_user_args) const;
+	const std::filesystem::path *spec_project(const ChildSpec &p_spec) const;
 
 	DriverConfig config_;
 	std::vector<std::unique_ptr<Child>> children_;

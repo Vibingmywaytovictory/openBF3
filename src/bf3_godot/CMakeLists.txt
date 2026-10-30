@@ -2,8 +2,6 @@ add_library(bf3_godot SHARED
     src/register_types.cpp
     src/game_session.cpp
     src/game_session.h
-    src/dedicated_main_loop.cpp
-    src/dedicated_main_loop.h
     src/godot_util.cpp
     src/godot_util.h
     src/render_bridge.cpp

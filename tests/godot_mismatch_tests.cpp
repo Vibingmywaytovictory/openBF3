@@ -52,7 +52,7 @@ TEST_SUITE("godot-mismatch") {
 			return;
 		}
 		ProcDriver driver(driver_config_from_env());
-		const ChildSpec server_spec = driver.godot_child("server", { "--headless", "--main-loop", "DedicatedMainLoop" },
+		const ChildSpec server_spec = driver.server_child("server",
 				{ "--level=MP_Subway", "--mode=TeamDeathMatch0", "--bots=0", "--port=0", "--dedicated-seconds=600" });
 		if (const std::string why = driver.skip_reason(server_spec); !why.empty()) {
 			bf3::test::skip_install_case(why.c_str());

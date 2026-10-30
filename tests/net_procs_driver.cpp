@@ -188,11 +188,13 @@ DriverConfig driver_config_from_env() {
 		c.godot_exe = widen(env_value("OPENBF3_PROC_GODOT_EXE"));
 	}
 	c.godot_project = widen(env_value("OPENBF3_PROC_GODOT_PROJECT"));
+	c.godot_server_project = widen(env_value("OPENBF3_PROC_GODOT_SERVER_PROJECT"));
 	c.bf3dump = widen(env_value("OPENBF3_PROC_BF3DUMP"));
 	c.window_row = env_value("OPENBF3_PROC_WINDOW_ROW") == "1";
 	c.windowed_allowed = env_value("OPENBF3_GODOT_WINDOWED") == "1";
 	c.user_active_flag = widen(env_value("OPENBF3_USER_ACTIVE_FLAG"));
-	for (std::filesystem::path *p : { &c.root, &c.godot_exe, &c.godot_project, &c.bf3dump, &c.user_active_flag }) {
+	for (std::filesystem::path *p :
+			{ &c.root, &c.godot_exe, &c.godot_project, &c.godot_server_project, &c.bf3dump, &c.user_active_flag }) {
 		p->make_preferred();
 	}
 	return c;
@@ -222,12 +224,32 @@ ChildRoots ProcDriver::roots(std::string_view p_role) const {
 
 ChildSpec ProcDriver::godot_child(
 		std::string_view p_role, std::vector<std::string> p_engine_args, std::vector<std::string> p_user_args) const {
+	return project_child(config_.godot_project, p_role, std::move(p_engine_args), std::move(p_user_args));
+}
+
+ChildSpec ProcDriver::server_child(std::string_view p_role, std::vector<std::string> p_user_args) const {
+	return project_child(config_.godot_server_project, p_role, { "--headless", "--main-loop", "DedicatedMainLoop" },
+			std::move(p_user_args));
+}
+
+const std::filesystem::path *ProcDriver::spec_project(const ChildSpec &p_spec) const {
+	const GodotArgs split = split_godot_args(p_spec.args);
+	for (const std::filesystem::path *project : { &config_.godot_project, &config_.godot_server_project }) {
+		if (!project->empty() && has_pair(split.engine, "--path", path_utf8(*project))) {
+			return project;
+		}
+	}
+	return nullptr;
+}
+
+ChildSpec ProcDriver::project_child(const std::filesystem::path &p_project, std::string_view p_role,
+		std::vector<std::string> p_engine_args, std::vector<std::string> p_user_args) const {
 	const ChildRoots r = roots(p_role);
 	ChildSpec spec;
 	spec.role = std::string(p_role);
 	spec.kind = ChildKind::Godot;
 	spec.exe = config_.godot_exe;
-	spec.args = { "--path", path_utf8(config_.godot_project) };
+	spec.args = { "--path", path_utf8(p_project) };
 	spec.args.insert(spec.args.end(), p_engine_args.begin(), p_engine_args.end());
 	spec.args.insert(spec.args.end(), { "--log-file", path_utf8(r.log_file), "--" });
 	spec.args.insert(spec.args.end(), p_user_args.begin(), p_user_args.end());
@@ -255,7 +277,8 @@ std::string ProcDriver::skip_reason(const ChildSpec &p_spec) const {
 		return "no Godot console executable (OPENBF3_GODOT unset and none found next to the checkout at configure "
 			   "time)";
 	}
-	if (config_.godot_project.empty() || !std::filesystem::exists(config_.godot_project / L"project.godot", ec)) {
+	const std::filesystem::path *project = spec_project(p_spec);
+	if (project == nullptr || !std::filesystem::exists(*project / L"project.godot", ec)) {
 		return "no Godot project: the Godot rows are off in this configuration";
 	}
 	if (godot_windowed(p_spec)) {
@@ -301,7 +324,7 @@ core::Status ProcDriver::check_spec(const ChildSpec &p_spec) const {
 		return core::Status::success();
 	}
 	const GodotArgs split = split_godot_args(p_spec.args);
-	const bool own_roots = has_pair(split.engine, "--path", path_utf8(config_.godot_project)) &&
+	const bool own_roots = spec_project(p_spec) != nullptr &&
 			has_pair(split.engine, "--log-file", path_utf8(r.log_file)) &&
 			has_exactly(split.user, "--bf3-cache=", "--bf3-cache=" + path_utf8(r.cache)) &&
 			has_exactly(split.user, "--settings-file=", "--settings-file=" + path_utf8(r.settings_file)) &&
@@ -309,8 +332,9 @@ core::Status ProcDriver::check_spec(const ChildSpec &p_spec) const {
 			count_prefixed(split.engine, "--settings-file") == 0;
 	if (!own_roots) {
 		return core::make_error(p_spec.role + ": a Godot child needs --path " + path_utf8(config_.godot_project) +
+				" or " + path_utf8(config_.godot_server_project) +
 				" and its own --log-file, --bf3-cache and --settings-file under " + path_utf8(r.dir) +
-				" (ProcDriver::godot_child)");
+				" (ProcDriver::godot_child, ProcDriver::server_child)");
 	}
 	if (godot_windowed(p_spec) && !config_.window_row) {
 		return core::make_error(
