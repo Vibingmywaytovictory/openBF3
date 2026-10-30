@@ -172,6 +172,9 @@ public:
 	bool take_suicide(uint8_t p_slot);
 	SquadRefusal request_squad(uint8_t p_slot, const net::SquadRequest &p_request);
 	bool set_squad_order(uint8_t p_team, uint8_t p_squad, const SquadOrderState &p_order);
+	void set_spawn_choice(uint8_t p_slot, uint8_t p_choice);
+	bool take_squad_spawn(
+			uint8_t p_slot, std::span<const sim::SoldierState> p_live, sim::Vec3 &r_position, uint16_t &r_yaw);
 	const SquadTable &squads() const;
 
 	core::Status step(uint32_t p_tick, const ServerView &p_view, const Gunplay &p_gunplay, std::span<sim::SoldierState> r_states,

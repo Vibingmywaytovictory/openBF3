@@ -14,13 +14,16 @@
 namespace bf3::host::tdm_bot {
 
 inline constexpr float kHuntArriveMetres = 3.0f;
+inline constexpr float kGoalMoveMetres = 8.0f;
+inline constexpr float kSquadGoalMoveMetres = 2.0f;
 
 class BotNavigation {
 public:
 	void set_slot(uint8_t p_slot, uint64_t p_seed);
 	void new_life();
 
-	bool set_goal(TdmShared &r_shared, sim::Tick p_tick, const sim::Vec3 &p_at, float p_arrive, bool p_force);
+	bool set_goal(TdmShared &r_shared, sim::Tick p_tick, const sim::Vec3 &p_at, float p_arrive, bool p_force,
+			float p_move_m = kGoalMoveMetres);
 	void clear_goal();
 	void pick_roam_goal(TdmShared &r_shared, sim::Tick p_tick, const sim::Vec3 &p_at, uint64_t &r_rng);
 

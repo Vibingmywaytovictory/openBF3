@@ -334,6 +334,13 @@ void BotBody::trigger_target(const BotFrame &p_frame, BotIntent &r_intent) {
 	i.zoom = i.target_distance > kZoomBeyondMetres && i.trigger == Trigger::Aimed;
 }
 
+bool BotBody::hold_window(sim::Tick p_tick) {
+	if (p_tick - hold_from >= 2u * kHoldTicks) {
+		hold_from = p_tick;
+	}
+	return p_tick - hold_from < kHoldTicks;
+}
+
 void BotBody::move_fight(const BotFrame &p_frame, BotIntent &r_intent) {
 	TdmShared &sh = *shared;
 	const TdmBotConfig &c = cfg();
@@ -343,7 +350,7 @@ void BotBody::move_fight(const BotFrame &p_frame, BotIntent &r_intent) {
 	if (i.target_distance < c.engage_strafe_m) {
 		strafe.step(c, slot, f.tick, f.world, f.self, view_yaw, rng, i.move_dx, i.move_dz);
 	} else if (i.target_distance > c.crouch_beyond_m && skill > 0.5f &&
-			f.tick - targeting.target_since() < kHoldTicks) {
+			f.tick - targeting.target_since() < kHoldTicks && hold_window(f.tick)) {
 		strafe.stop();
 		i.pose = sim::Pose::Crouch;
 	} else if (navigation.set_goal(sh, f.tick, ts.position, kHuntArriveMetres, false) && walk(f, i)) {

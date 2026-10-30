@@ -71,6 +71,7 @@ struct BotBody {
 
 	uint32_t life = UINT32_MAX;
 	sim::Tick life_tick = 0;
+	sim::Tick hold_from = 0;
 	uint8_t kit = 0;
 	float skill = 0.5f, skill01 = 0.5f;
 	float view_yaw = 0.0f, view_pitch = 0.0f;
@@ -118,6 +119,7 @@ struct BotBody {
 	void aim_target(const BotFrame &p_frame, BotIntent &r_intent);
 	void trigger_target(const BotFrame &p_frame, BotIntent &r_intent);
 	void move_fight(const BotFrame &p_frame, BotIntent &r_intent);
+	bool hold_window(sim::Tick p_tick);
 
 	bool revive_approach(const BotFrame &p_frame, BotIntent &r_intent);
 	void revive_pose(const BotFrame &p_frame, BotIntent &r_intent);

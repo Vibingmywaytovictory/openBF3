@@ -17,6 +17,8 @@
 
 namespace bf3::host {
 
+class TdmStrategy;
+
 namespace tdm_bot {
 
 inline constexpr int kHeatCells = 64;
@@ -37,6 +39,7 @@ struct TdmShared {
 	TdmBotObserver *observer = nullptr;
 	std::unique_ptr<BotNav> nav;
 	sim::bots::WalkerParams walker;
+	std::shared_ptr<TdmStrategy> strategy;
 
 	sim::Tick scan_tick = UINT32_MAX;
 	std::vector<uint8_t> teams, alive, was_alive, firing;

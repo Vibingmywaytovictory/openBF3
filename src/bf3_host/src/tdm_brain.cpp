@@ -20,6 +20,7 @@
 #include "bf3/sim/weapons/weapon_sim_def.h"
 #include "tdm_bot_common.h"
 #include "tdm_bot_shared.h"
+#include "tdm_strategy.h"
 
 #include <algorithm>
 #include <array>
@@ -202,6 +203,9 @@ core::KeyOutcome ai_setting(std::string_view p_key, std::string_view p_value, Td
 	if (ai::is_behaviour_key(p_key)) {
 		return ai::parse_behaviour_setting(p_key, p_value, r_config.behaviours);
 	}
+	if (ai::is_strategy_key(p_key)) {
+		return ai::parse_strategy_setting(p_key, p_value, r_config.strategy);
+	}
 	return ai::check_ai_setting(p_key, p_value);
 }
 
@@ -292,6 +296,7 @@ core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config
 		free_below = std::min<uint32_t>(p_config.max_slots, uint32_t(net::kMaxPlayerRows));
 	}
 	const uint32_t count = std::min(config->count, free_below);
+	std::vector<std::pair<uint8_t, AiBotSource *>> made_bots;
 	for (uint32_t i = 0; i < count; ++i) {
 		auto brain = std::make_unique<AiBotSource>(shared, i);
 		AiBotSource *raw = brain.get();
@@ -302,8 +307,20 @@ core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config
 			return core::make_error("tdm bots: no slot for bot " + std::to_string(i) + " of " + std::to_string(count));
 		}
 		raw->set_slot(uint8_t(slot));
+		made_bots.push_back({ uint8_t(slot), raw });
 		if (shared->stats != nullptr) {
 			shared->stats->bots.fetch_add(1, std::memory_order_relaxed);
+		}
+	}
+	if (host.rules && host.nav != nullptr && host.nav->nav != nullptr && host.nav->clusters != nullptr &&
+			r_server.rules() != nullptr) {
+		core::Result<std::unique_ptr<TdmStrategy>> strategy = TdmStrategy::create(r_server, *shared);
+		if (!strategy) {
+			return strategy.error();
+		}
+		shared->strategy = std::shared_ptr<TdmStrategy>(std::move(*strategy));
+		for (const auto &[slot, bot] : made_bots) {
+			shared->strategy->add_bot(slot, bot->bot());
 		}
 	}
 	return core::Status::success();

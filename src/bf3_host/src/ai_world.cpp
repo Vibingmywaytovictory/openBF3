@@ -158,7 +158,8 @@ private:
 
 struct HostAiWorld::Impl {
 	AiWorldConfig config;
-	std::unique_ptr<sim::CollisionWorld> collision;
+	std::unique_ptr<sim::CollisionWorld> owned_collision;
+	const sim::CollisionWorld *collision = nullptr;
 	std::unique_ptr<sim::NavQuery> query;
 	ai::InformationManager information;
 	std::unique_ptr<ai::InformationFactory> factory;
@@ -210,16 +211,22 @@ core::Result<std::unique_ptr<HostAiWorld>> HostAiWorld::create(const AiWorldConf
 	if (p_config.level == nullptr || p_config.level->nav == nullptr || p_config.level->clusters == nullptr) {
 		return core::make_error("ai world: no bot level with nav and clusters");
 	}
-	if (p_config.static_world == nullptr) {
+	if (p_config.static_world == nullptr && p_config.world == nullptr) {
 		return core::make_error("ai world: no static world");
 	}
 	auto impl = std::make_unique<Impl>();
 	impl->config = p_config;
-	core::Result<std::unique_ptr<sim::CollisionWorld>> collision = sim::CollisionWorld::create(p_config.static_world);
-	if (!collision) {
-		return core::error_at("ai world: collision", collision.error());
+	if (p_config.world != nullptr) {
+		impl->collision = p_config.world;
+	} else {
+		core::Result<std::unique_ptr<sim::CollisionWorld>> collision =
+				sim::CollisionWorld::create(p_config.static_world);
+		if (!collision) {
+			return core::error_at("ai world: collision", collision.error());
+		}
+		impl->owned_collision = std::move(*collision);
+		impl->collision = impl->owned_collision.get();
 	}
-	impl->collision = std::move(*collision);
 	core::Result<std::unique_ptr<sim::NavQuery>> query = sim::NavQuery::create(p_config.level->nav);
 	if (!query) {
 		return core::error_at("ai world: nav query", query.error());
@@ -297,12 +304,15 @@ ai::AiWorld HostAiWorld::world() {
 	return w;
 }
 
-void HostAiWorld::add_bot(uint8_t p_slot) {
+void HostAiWorld::add_bot(uint8_t p_slot, bool p_perceive) {
 	Impl &m = *impl_;
-	if (p_slot >= kMaxAiSlots || m.perceptions[p_slot] != nullptr) {
+	if (p_slot >= kMaxAiSlots || m.perceptions[p_slot] != nullptr ||
+			std::find(m.bots.begin(), m.bots.end(), p_slot) != m.bots.end()) {
 		return;
 	}
-	m.perceptions[p_slot] = std::make_unique<sim::bots::Perception>(m.config.perception);
+	if (p_perceive) {
+		m.perceptions[p_slot] = std::make_unique<sim::bots::Perception>(m.config.perception);
+	}
 	m.players[p_slot].set_ai(true);
 	m.bots.push_back(p_slot);
 	std::sort(m.bots.begin(), m.bots.end());
@@ -349,7 +359,7 @@ void HostAiWorld::step(const ServerView &p_view, std::span<const sim::bots::Hear
 		m.shots.push_back({ int(shot.shooter), shot.origin, shot.tick });
 	}
 	for (const uint8_t bot : m.bots) {
-		if (bot >= n || m.alive[bot] == 0 ||
+		if (bot >= n || m.alive[bot] == 0 || m.perceptions[bot] == nullptr ||
 				!sim::bots::perception_tick(bot, p_tick, m.config.perception.update_ticks)) {
 			continue;
 		}

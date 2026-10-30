@@ -28,6 +28,8 @@ namespace {
 constexpr size_t kMaxRuleSlots = 256;
 constexpr size_t kMaxDeathRing = 256;
 constexpr uint32_t kNoTick = 0;
+constexpr uint32_t kBotSquadSpawnCalmTicks = 300;
+constexpr float kBotSquadSpawnClearMetres = 20.0f;
 
 uint32_t ticks_of(float p_seconds) {
 	return lg::logic_delay_ticks(std::isfinite(p_seconds) ? std::clamp(double(p_seconds), 0.0, 3600.0) : 0.0);
@@ -279,6 +281,7 @@ struct TdmRules::Impl {
 		bool damaged = false;
 		bool pending_spawn = false;
 		int16_t spawn_mate = kNoSquadMate;
+		uint8_t bot_spawn_choice = 0;
 		bool suicide = false;
 		uint32_t last_request = UINT32_MAX;
 		int64_t shot_cursor = -1;
@@ -1284,6 +1287,58 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		m.last_states[i] = r_states[i];
 	}
 	return core::Status::success();
+}
+
+void TdmRules::set_spawn_choice(uint8_t p_slot, uint8_t p_choice) {
+	if (p_slot < impl_->slots.size()) {
+		impl_->slots[p_slot].bot_spawn_choice = p_choice;
+	}
+}
+
+bool TdmRules::take_squad_spawn(
+		uint8_t p_slot, std::span<const sim::SoldierState> p_live, sim::Vec3 &r_position, uint16_t &r_yaw) {
+	Impl &m = *impl_;
+	if (p_slot >= m.slots.size()) {
+		return false;
+	}
+	Impl::Slot &s = m.slots[p_slot];
+	const uint8_t choice = s.bot_spawn_choice;
+	s.bot_spawn_choice = 0;
+	const lg::RoundPhase phase = m.natives ? m.natives->phase() : lg::RoundPhase::Restarting;
+	if (choice == 0 || m.faulted || (phase != lg::RoundPhase::PreRound && phase != lg::RoundPhase::InRound)) {
+		return false;
+	}
+	const auto calm = [&](int p_mate) {
+		const Impl::Slot &o = m.slots[size_t(p_mate)];
+		if (o.damaged && m.tick - o.last_damage < kBotSquadSpawnCalmTicks) {
+			return false;
+		}
+		const sim::Vec3 &at = p_live[size_t(p_mate)].position;
+		for (size_t i = 0; i < p_live.size() && i < m.slots.size(); ++i) {
+			if (m.slots[i].alive && m.team_of(i) != 0 && m.team_of(i) != m.team_of(p_slot) && state_alive(p_live[i]) &&
+					dist2(p_live[i].position, at) < kBotSquadSpawnClearMetres * kBotSquadSpawnClearMetres) {
+				return false;
+			}
+		}
+		return true;
+	};
+	const auto ready = [&](uint8_t p_choice) {
+		const int mate = p_choice != 0 ? m.squads.mate(p_slot, uint8_t(p_choice - 1u)) : kNoSquadMate;
+		return m.mate_ready(p_slot, mate, p_live) && calm(mate) ? mate : kNoSquadMate;
+	};
+	int mate = ready(choice);
+	for (uint8_t other = 1; mate == kNoSquadMate && other <= m.squads.squad_size(); ++other) {
+		mate = ready(other);
+	}
+	if (mate == kNoSquadMate) {
+		return false;
+	}
+	const sim::SoldierState &st = p_live[size_t(mate)];
+	r_position = m.squad_spawn_point(st.position);
+	r_yaw = st.yaw;
+	m.slots[size_t(mate)].score += m.tuning->score_spawn_squad;
+	++m.stats.squad_spawns;
+	return true;
 }
 
 size_t TdmRules::choose_spawn(uint8_t p_slot, std::span<const sim::SpawnPoint> p_points, const ServerView &p_view, uint32_t p_tick) const {

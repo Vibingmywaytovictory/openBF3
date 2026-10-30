@@ -238,6 +238,11 @@ bool SquadTable::set_order(uint8_t p_team, uint8_t p_squad, const SquadOrderStat
 	if (s == nullptr || s->members.empty() || uint8_t(p_order.kind) > uint8_t(net::SquadOrderKind::Defend)) {
 		return false;
 	}
+	const SquadOrderState &was = s->order;
+	if (was.kind == p_order.kind && was.area == p_order.area && was.position[0] == p_order.position[0] &&
+			was.position[1] == p_order.position[1] && was.position[2] == p_order.position[2]) {
+		return true;
+	}
 	s->order = p_order;
 	++revision_;
 	return true;

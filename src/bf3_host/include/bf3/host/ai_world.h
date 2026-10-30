@@ -28,6 +28,7 @@ struct AiWorldConfig {
 	uint8_t squad_size = kDefaultSquadSize;
 	uint64_t seed = 1;
 	std::shared_ptr<const sim::StaticWorldShapes> static_world;
+	const sim::CollisionWorld *world = nullptr;
 };
 
 float area_heat(std::span<const float> p_heat, int p_cells, const sim::Vec3 &p_origin, float p_cell_m,
@@ -49,7 +50,7 @@ public:
 
 	ai::AiWorld world();
 
-	void add_bot(uint8_t p_slot);
+	void add_bot(uint8_t p_slot, bool p_perceive = true);
 	void step(const ServerView &p_view, std::span<const sim::bots::HeardShot> p_shots,
 			std::span<const uint8_t> p_firing, sim::Tick p_tick);
 	void set_area_temperature(size_t p_area, float p_temperature);

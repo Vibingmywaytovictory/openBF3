@@ -196,6 +196,7 @@ public:
 	const Gunplay *gunplay() const;
 
 	const TdmRules *rules() const;
+	TdmRules *rules();
 
 	bool set_squad_order(uint8_t p_team, uint8_t p_squad, const SquadOrderState &p_order);
 

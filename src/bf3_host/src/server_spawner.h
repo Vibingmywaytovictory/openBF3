@@ -69,6 +69,7 @@ private:
 	void describe_spawned(size_t p_slot, net::Spawned &r_message) const;
 	void announce_gear(size_t p_slot);
 	std::vector<sim::Vec3> live_positions(size_t p_except) const;
+	std::span<const sim::SoldierState> live_states();
 
 	SlotTable &slots_;
 	Soldiers &soldiers_;
@@ -84,6 +85,7 @@ private:
 	uint64_t rng_ = 1;
 	std::vector<Respawn> respawns_;
 	std::vector<Placement> placements_;
+	std::vector<sim::SoldierState> live_;
 	uint64_t failures_ = 0;
 	uint32_t tick_spawns_ = 0;
 };

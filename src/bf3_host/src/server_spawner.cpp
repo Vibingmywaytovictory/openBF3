@@ -66,6 +66,16 @@ void Spawner::spawn_due(sim::Tick p_tick) {
 	}
 }
 
+std::span<const sim::SoldierState> Spawner::live_states() {
+	live_.assign(slots_.size(), sim::SoldierState());
+	for (size_t i = 0; i < slots_.size(); ++i) {
+		if (slots_[i].used && !slots_[i].dummy && soldiers_[i].spawned) {
+			live_[i] = soldiers_[i].state;
+		}
+	}
+	return live_;
+}
+
 std::vector<sim::Vec3> Spawner::live_positions(size_t p_except) const {
 	std::vector<sim::Vec3> out;
 	for (size_t i = 0; i < slots_.size(); ++i) {
@@ -81,6 +91,13 @@ bool Spawner::spawn(size_t p_slot, size_t p_point, sim::Tick p_tick) {
 	const GameServerConfig &config = *config_;
 	const Seat &s = slots_[p_slot];
 
+	sim::SpawnPoint squad_point;
+	if (p_point == SIZE_MAX && s.bot &&
+			match_.squad_spawn(p_slot, live_states(), squad_point.position, squad_point.yaw)) {
+		squad_point.team = s.team;
+		enter_at(p_slot, squad_point, p_tick);
+		return true;
+	}
 	const std::vector<sim::SpawnPoint> &points =
 			s.bot && config.bots != nullptr && config.bots->spawn_in_main && config.bots->level != nullptr ? config.bots->level->spawns.points
 																											 : config.level->spawns;

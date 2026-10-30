@@ -5,6 +5,7 @@
 #include "tdm_bot_body.h"
 #include "tdm_bot_common.h"
 #include "tdm_bot_shared.h"
+#include "tdm_strategy.h"
 
 #include <optional>
 
@@ -118,8 +119,15 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 				body.walk_facing(f(), intent);
 				break;
 			case ai::MoveGoal::Squad:
-				body.navigation.set_goal(*body.shared, now, p_point, kHuntArriveMetres, false);
+				body.navigation.set_goal(
+						*body.shared, now, p_point, body.cfg().behaviours.squad_arrive_m, false, kSquadGoalMoveMetres);
 				body.walk_facing(f(), intent);
+				if (bot->squad_goal().kind != ai::SquadGoalKind::SquadTarget &&
+						std::hypot(p_point.x - f().self.position[0], p_point.z - f().self.position[2]) >
+								body.cfg().behaviours.squad_far_m) {
+					intent.sprint = true;
+					intent.pose = sim::Pose::Stand;
+				}
 				break;
 		}
 		return false;
@@ -127,6 +135,19 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 
 	bool move_to_object(ai::ObjectGoal p_object) override {
 		if (p_object == ai::ObjectGoal::Target) {
+			const ai::SquadGoal &goal = bot->squad_goal();
+			const bool advance = bot->ordered_behaviour() == int(ai::InfantryBehaviour::MoveTo) &&
+					goal.kind != ai::SquadGoalKind::None && !goal.wait_for_members &&
+					intent.target_distance >= body.cfg().engage_strafe_m &&
+					std::hypot(goal.position.x - f().self.position[0], goal.position.z - f().self.position[2]) >
+							body.cfg().behaviours.squad_arrive_m;
+			if (advance &&
+					body.navigation.set_goal(*body.shared, now, goal.position, body.cfg().behaviours.squad_arrive_m,
+							false, kSquadGoalMoveMetres) &&
+					body.walk(f(), intent)) {
+				intent.pose = sim::Pose::Stand;
+				return true;
+			}
 			body.move_fight(f(), intent);
 			return true;
 		}
@@ -220,6 +241,7 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 			}
 			if (sh.observer != nullptr) {
 				sh.observer->decided(p_tick, body.slot, bot->behaviour(), bot->activity());
+				sh.observer->urgencies(p_tick, body.slot, *bot);
 			}
 		}
 		bot->plan_execution(dt);
@@ -240,7 +262,11 @@ AiBotSource::AiBotSource(std::shared_ptr<TdmShared> p_shared, uint32_t p_index) 
 	}
 }
 
-AiBotSource::~AiBotSource() = default;
+AiBotSource::~AiBotSource() {
+	if (impl_->body.shared != nullptr && impl_->body.shared->strategy != nullptr) {
+		impl_->body.shared->strategy->remove_bot(impl_->body.slot);
+	}
+}
 
 sim::Command AiBotSource::command(sim::Tick p_tick, const sim::SoldierState &p_state) {
 	Impl &m = *impl_;
@@ -250,6 +276,9 @@ sim::Command AiBotSource::command(sim::Tick p_tick, const sim::SoldierState &p_s
 	TdmShared &sh = *m.body.shared;
 	const uint64_t t0 = now_ns();
 	sh.begin_tick(p_tick);
+	if (sh.strategy != nullptr) {
+		sh.strategy->step(p_tick);
+	}
 	const sim::Command c = m.run(p_tick, p_state);
 	sh.brains_ns += now_ns() - t0;
 	if (sh.stats != nullptr) {
@@ -268,6 +297,10 @@ void AiBotSource::set_slot(uint8_t p_slot) {
 }
 
 const ai::BotMain &AiBotSource::bot() const {
+	return *impl_->bot;
+}
+
+ai::BotMain &AiBotSource::bot() {
 	return *impl_->bot;
 }
 

@@ -26,8 +26,8 @@ namespace tt = bf3::test::tdm;
 
 namespace {
 
-constexpr uint64_t kTdmStreamHash = 0x21c5c7beded9aaecull;
-constexpr uint64_t kTdmStateHash = 0xc51322032d9dbbaaull;
+constexpr uint64_t kTdmStreamHash = 0x36ad6c4803ae25b7ull;
+constexpr uint64_t kTdmStateHash = 0xfed074d22cd3649dull;
 constexpr uint64_t kDevStreamHash = 0x7f55b16044de088full;
 constexpr uint64_t kDevStateHash = 0x2de471aa0c948bbeull;
 
@@ -296,6 +296,7 @@ TEST_SUITE("host-server-stream") {
 			step();
 			if (next == 960u) {
 				late_rows = bravo.players;
+				std::erase_if(late_rows, [&](const net::PlayerRow &r) { return int(r.slot) == bravo.slot(); });
 			}
 		}
 		rec.finish(server);

@@ -2,6 +2,8 @@
 
 #include "bf3/ai/behaviour/behaviours.h"
 #include "bf3/ai/bot/infantry.h"
+#include "bf3/ai/squad/bot_squad.h"
+#include "bf3/ai/strategic/strategy.h"
 #include "bf3/core/result.h"
 #include "bf3/host/game_server.h"
 #include "bf3/sim/bots/aim_model.h"
@@ -15,6 +17,10 @@
 #include <string>
 #include <string_view>
 
+namespace bf3::ai {
+class BotMain;
+}
+
 namespace bf3::host {
 
 struct BotLevel;
@@ -23,6 +29,7 @@ class ServerView;
 
 enum class TdmBotActivity : uint8_t { Dead = 0, Restricted = 1, Roam = 2, Hunt = 3, Fight = 4, Retreat = 5, RegenWait = 6, Revive = 7, Grenade = 8 };
 inline constexpr size_t kTdmBotActivityCount = 9;
+inline constexpr float kSquadNearMetres = 30.0f;
 const char *tdm_bot_activity_name(TdmBotActivity p_activity);
 
 class TdmBotObserver {
@@ -45,6 +52,9 @@ public:
 	virtual void decided(
 			sim::Tick p_tick, uint8_t p_bot, ai::InfantryBehaviour p_winner, ai::InfantryActivity p_activity) {
 		(void)p_tick, (void)p_bot, (void)p_winner, (void)p_activity;
+	}
+	virtual void urgencies(sim::Tick p_tick, uint8_t p_bot, const ai::BotMain &p_bot_main) {
+		(void)p_tick, (void)p_bot, (void)p_bot_main;
 	}
 };
 
@@ -76,6 +86,11 @@ struct TdmBotStats {
 	std::atomic<uint64_t> off_main_ticks{ 0 };
 	std::atomic<uint64_t> hunts_given_up{ 0 };
 	std::atomic<uint64_t> activity_ticks[kTdmBotActivityCount]{};
+
+	std::atomic<uint64_t> squad_orders{ 0 };
+	std::atomic<uint64_t> squad_samples{ 0 };
+	std::atomic<uint64_t> squad_near{ 0 };
+	std::atomic<uint64_t> squad_metres[ai::kCohesionBins]{};
 
 	std::atomic<uint64_t> last_perception_ns{ 0 };
 	std::atomic<uint64_t> last_brains_ns{ 0 };
@@ -115,6 +130,7 @@ struct TdmBotConfig {
 	float regen_until_hp = 90.0f;
 
 	ai::BehaviourTuning behaviours;
+	ai::StrategyTuning strategy;
 
 	std::string tuning_cfg;
 	std::shared_ptr<TdmBotStats> stats;

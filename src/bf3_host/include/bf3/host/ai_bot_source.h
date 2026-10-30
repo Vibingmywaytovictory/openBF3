@@ -25,6 +25,7 @@ public:
 	void set_slot(uint8_t p_slot);
 
 	const ai::BotMain &bot() const;
+	ai::BotMain &bot();
 	ai::SquadBot &squad_bot();
 
 private:

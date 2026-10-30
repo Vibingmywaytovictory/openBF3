@@ -40,8 +40,8 @@ constexpr bool kRuNtLanded = true;
 
 constexpr float kDeg = sim::kPi / 180.0f;
 
-constexpr uint64_t kReplayDecisionHash = 0x28711c0a9174859bull;
-constexpr uint64_t kReplayWorldHash = 0x37ad02897a79e6b8ull;
+constexpr uint64_t kReplayDecisionHash = 0xd563c3c95444420cull;
+constexpr uint64_t kReplayWorldHash = 0xb5eaa19be777d419ull;
 
 void pending_skip(const char *p_row) {
 	std::printf("%s: PENDING (ru, nt): needs run_tdm and the v3 codecs on the branch\n", p_row);
@@ -391,6 +391,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(parsed.revive_radius_m == def.revive_radius_m);
 		CHECK(parsed.regen_until_hp == def.regen_until_hp);
 		CHECK(parsed.behaviours == def.behaviours);
+		CHECK(parsed.strategy == def.strategy);
 
 		host::TdmBotConfig one;
 		REQUIRE(host::parse_bot_tuning("# c\n  aim.e0_deg = 2.5 # trailing\n\nperception.update_ticks=3\n", one).ok());
@@ -405,7 +406,8 @@ TEST_SUITE("host-tdm-bots-unit") {
 		for (const char *bad : { "nope = 1\n", "skill_min = nan\n", "skill_min = 2\n", "skill_min\n",
 					 "skill_min = 1x\n", "perception.update_ticks = 0\n", "aim.tau_s = 1e40\n", "count = 65\n", "= 3\n",
 					 "ai.nope = 1\n", "ai.max_bots = 65\n", "ai.enable_air_ai = 1\n", "bb.nope = 1\n",
-					 "bb.decision_ticks = 0\n", "bb.idle.weight = -1\n" }) {
+					 "bb.decision_ticks = 0\n", "bb.idle.weight = -1\n", "sai.nope = 1\n", "sai.period_ticks = 0\n",
+					 "sai.order.random = -1\n", "bb.mission_arrive_m = 0\n" }) {
 			host::TdmBotConfig c;
 			c.skill_min = 0.42f;
 			const core::Status r = host::parse_bot_tuning(bad, c);

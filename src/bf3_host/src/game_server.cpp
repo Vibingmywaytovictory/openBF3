@@ -788,6 +788,10 @@ const TdmRules *GameServer::rules() const {
 	return impl_->match.rules();
 }
 
+TdmRules *GameServer::rules() {
+	return impl_->match.rules();
+}
+
 bool GameServer::set_squad_order(uint8_t p_team, uint8_t p_squad, const SquadOrderState &p_order) {
 	TdmRules *rules = impl_->match.rules();
 	return rules != nullptr && rules->set_squad_order(p_team, p_squad, p_order);
