@@ -179,11 +179,18 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 		}
 		config.maps = std::move(*maps);
 	}
+	const bool first_only = args_.level.empty() && args_.maplist.empty() && config.maps.entries.size() > 1;
+	if (first_only) {
+		config.maps.entries.resize(1);
+	}
 	std::string rotation;
 	for (const host::LevelEntry &e : config.maps.entries) {
 		rotation += (rotation.empty() ? "" : ", ") + e.level + " " + e.mode + " x" + std::to_string(e.rounds);
 	}
-	say("map list " + rotation);
+	say("map list " + rotation +
+			(first_only ? std::string(" (the first entry of ") + kDefaultMapList +
+									" in place: the game client cannot follow a level change yet; --maplist rotates)"
+						: std::string()));
 
 	const std::string root_text = godot_path(args_.cache_root);
 	AcquiredCache acquired = acquire_cache(
