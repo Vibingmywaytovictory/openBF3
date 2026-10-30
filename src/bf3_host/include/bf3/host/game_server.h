@@ -42,6 +42,7 @@ class CommandSource {
 public:
 	virtual ~CommandSource() = default;
 	virtual sim::Command command(sim::Tick p_tick, const sim::SoldierState &p_state) = 0;
+	virtual void admitted(uint8_t) {}
 };
 
 struct LoadDeadlines {

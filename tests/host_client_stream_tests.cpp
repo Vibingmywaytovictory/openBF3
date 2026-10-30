@@ -45,10 +45,10 @@ struct StreamHashes {
 	uint64_t stats = 0;
 };
 
-constexpr StreamHashes kAlpha{ 0x698d842395cd6602ull, 0xc2ab8340c751b9c6ull, 0x45bff1fc01c251c0ull,
-	0xdfa2803491418ce1ull, 0xf0f8b84cb5322744ull, 0x67a1e915f9e967bfull };
-constexpr StreamHashes kBravo{ 0xca502103baf23f4eull, 0x67821107d9695412ull, 0x80e1f3b13d7f4560ull,
-	0x2c0a70b36b090b3dull, 0x970c14baeed195c0ull, 0xf5d4d910adb35db4ull };
+constexpr StreamHashes kAlpha{ 0x101f5905f0348a25ull, 0x578f0b05895f2699ull, 0x2c9843318f710131ull,
+	0xcdb13e85acf5381full, 0x0e9496ef2c9c54bcull, 0x886abeef5c35b468ull };
+constexpr StreamHashes kBravo{ 0xe57237c71eca27f1ull, 0xa65d621e862a0149ull, 0x1a6287a6010432c7ull,
+	0x6023815d8393ab0dull, 0x4f656e9e0e4e609bull, 0x86b4be344f995583ull };
 constexpr StreamHashes kCharlie{ 0x28d0d02de2b48fb8ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull,
 	0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0xd4bbb61a31c1220aull };
 constexpr StreamHashes kDelta{ 0x752b7c9186daa8c6ull, 0x0889f03b39aef612ull, 0xbb797920590e895full,

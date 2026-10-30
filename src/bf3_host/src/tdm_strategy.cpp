@@ -100,6 +100,9 @@ void TdmStrategy::add_bot(uint8_t p_slot, ai::BotMain &r_bot) {
 	world_->set_squad_bot(p_slot, &r_bot);
 	bots_[p_slot] = std::make_unique<ai::BotSquad>(r_bot, *world_, service_.get(), tuning_);
 	orders_->add_bot(p_slot, *bots_[p_slot]);
+	world_->step(server_.view(), shared_.heard, shared_.firing, server_.current_tick());
+	sync_squads();
+	draw_spawn(p_slot);
 }
 
 void TdmStrategy::remove_bot(uint8_t p_slot) {
@@ -195,29 +198,35 @@ void TdmStrategy::sync_squads() {
 	}
 }
 
-void TdmStrategy::choose_spawns() {
-	const ServerView &view = server_.view();
-	const std::span<const sim::SoldierState> states = view.states();
+void TdmStrategy::draw_spawn(uint8_t p_slot) {
+	const std::span<const sim::SoldierState> states = server_.view().states();
+	if (p_slot >= states.size()) {
+		return;
+	}
+	spawn_life_[p_slot] = states[p_slot].life + 1u;
 	const SquadTable &table = rules_->squads();
-	for (size_t slot = 0; slot < bots_.size() && slot < states.size(); ++slot) {
-		if (bots_[slot] == nullptr || view.alive(uint8_t(slot)) || spawn_life_[slot] == states[slot].life + 1u) {
-			continue;
-		}
-		spawn_life_[slot] = states[slot].life + 1u;
-		const uint8_t team = table.team_of(uint8_t(slot));
-		const ai::SquadMember *const member = team != 0 ? squads_->squad_member(int(slot), team) : nullptr;
-		uint8_t choice = 0;
-		if (spawner_->follows_squad(member, tuning_.squad_spawn_draw)) {
-			const ai::SquadMember *const mate = spawner_->squad_mate_to_follow(member);
-			choice = 1;
-			for (uint8_t i = 0; mate != nullptr && i < table.squad_size(); ++i) {
-				if (table.mate(uint8_t(slot), i) == mate->player_id()) {
-					choice = uint8_t(i + 1u);
-					break;
-				}
+	const uint8_t team = table.team_of(p_slot);
+	const ai::SquadMember *const member = team != 0 ? squads_->squad_member(int(p_slot), team) : nullptr;
+	uint8_t choice = 0;
+	if (spawner_->follows_squad(member, tuning_.squad_spawn_draw)) {
+		const ai::SquadMember *const mate = spawner_->squad_mate_to_follow(member);
+		choice = 1;
+		for (uint8_t i = 0; mate != nullptr && i < table.squad_size(); ++i) {
+			if (table.mate(p_slot, i) == mate->player_id()) {
+				choice = uint8_t(i + 1u);
+				break;
 			}
 		}
-		rules_->set_spawn_choice(uint8_t(slot), choice);
+	}
+	rules_->set_spawn_choice(p_slot, choice);
+}
+
+void TdmStrategy::choose_spawns() {
+	const std::span<const sim::SoldierState> states = server_.view().states();
+	for (size_t slot = 0; slot < bots_.size() && slot < states.size(); ++slot) {
+		if (bots_[slot] != nullptr && spawn_life_[slot] != states[slot].life + 1u) {
+			draw_spawn(uint8_t(slot));
+		}
 	}
 }
 

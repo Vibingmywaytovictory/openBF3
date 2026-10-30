@@ -22,7 +22,7 @@ public:
 	AiBotSource &operator=(const AiBotSource &) = delete;
 
 	sim::Command command(sim::Tick p_tick, const sim::SoldierState &p_state) override;
-	void set_slot(uint8_t p_slot);
+	void admitted(uint8_t p_slot) override;
 
 	const ai::BotMain &bot() const;
 	ai::BotMain &bot();

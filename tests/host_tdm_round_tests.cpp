@@ -40,8 +40,8 @@ constexpr bool kRuNtLanded = true;
 
 constexpr float kDeg = sim::kPi / 180.0f;
 
-constexpr uint64_t kReplayDecisionHash = 0xd563c3c95444420cull;
-constexpr uint64_t kReplayWorldHash = 0xb5eaa19be777d419ull;
+constexpr uint64_t kReplayDecisionHash = 0xf02880db4231ee07ull;
+constexpr uint64_t kReplayWorldHash = 0x89d71173b371ca38ull;
 
 void pending_skip(const char *p_row) {
 	std::printf("%s: PENDING (ru, nt): needs run_tdm and the v3 codecs on the branch\n", p_row);
@@ -444,7 +444,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		REQUIRE(shared.ok());
 		CHECK(cfg->stats->walk_unavailable.load() == 1u);
 		host::AiBotSource brain(*shared, 0);
-		brain.set_slot(0);
+		brain.admitted(0);
 
 		view.restricted = true;
 		view.phase_ = net::MatchPhase::PreRound;
@@ -485,8 +485,8 @@ TEST_SUITE("host-tdm-bots-unit") {
 		core::Result<std::shared_ptr<host::TdmShared>> shared2 = host::make_tdm_shared(h, cfg2);
 		REQUIRE(shared2.ok());
 		host::AiBotSource a(*shared2, 0), b(*host::make_tdm_shared(h, cfg2), 0);
-		a.set_slot(0);
-		b.set_slot(0);
+		a.admitted(0);
+		b.admitted(0);
 		view.slots[0] = soldier_at({ 0, 0, 0 }, 0.0f);
 		uint64_t ha = 1469598103934665603ull, hb = ha;
 		for (sim::Tick t = 200; t <= 320; ++t) {

@@ -58,6 +58,7 @@ public:
 private:
 	TdmStrategy(GameServer &r_server, TdmShared &r_shared);
 	void sync_squads();
+	void draw_spawn(uint8_t p_slot);
 	void choose_spawns();
 
 	GameServer &server_;

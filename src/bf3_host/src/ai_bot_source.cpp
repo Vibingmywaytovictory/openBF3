@@ -138,7 +138,6 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 			const ai::SquadGoal &goal = bot->squad_goal();
 			const bool advance = bot->ordered_behaviour() == int(ai::InfantryBehaviour::MoveTo) &&
 					goal.kind != ai::SquadGoalKind::None && !goal.wait_for_members &&
-					intent.target_distance >= body.cfg().engage_strafe_m &&
 					std::hypot(goal.position.x - f().self.position[0], goal.position.z - f().self.position[2]) >
 							body.cfg().behaviours.squad_arrive_m;
 			if (advance &&
@@ -291,9 +290,12 @@ sim::Command AiBotSource::command(sim::Tick p_tick, const sim::SoldierState &p_s
 	return c;
 }
 
-void AiBotSource::set_slot(uint8_t p_slot) {
+void AiBotSource::admitted(uint8_t p_slot) {
 	impl_->body.set_slot(p_slot);
 	impl_->bot->set_player(p_slot);
+	if (impl_->body.shared != nullptr && impl_->body.shared->strategy != nullptr) {
+		impl_->body.shared->strategy->add_bot(p_slot, *impl_->bot);
+	}
 }
 
 const ai::BotMain &AiBotSource::bot() const {

@@ -296,22 +296,6 @@ core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config
 		free_below = std::min<uint32_t>(p_config.max_slots, uint32_t(net::kMaxPlayerRows));
 	}
 	const uint32_t count = std::min(config->count, free_below);
-	std::vector<std::pair<uint8_t, AiBotSource *>> made_bots;
-	for (uint32_t i = 0; i < count; ++i) {
-		auto brain = std::make_unique<AiBotSource>(shared, i);
-		AiBotSource *raw = brain.get();
-
-		const int team = host.rules ? 0 : 1 + int((i + i / 4u) % 2u);
-		const int slot = r_server.add_local_bot(std::move(brain), team);
-		if (slot < 0) {
-			return core::make_error("tdm bots: no slot for bot " + std::to_string(i) + " of " + std::to_string(count));
-		}
-		raw->set_slot(uint8_t(slot));
-		made_bots.push_back({ uint8_t(slot), raw });
-		if (shared->stats != nullptr) {
-			shared->stats->bots.fetch_add(1, std::memory_order_relaxed);
-		}
-	}
 	if (host.rules && host.nav != nullptr && host.nav->nav != nullptr && host.nav->clusters != nullptr &&
 			r_server.rules() != nullptr) {
 		core::Result<std::unique_ptr<TdmStrategy>> strategy = TdmStrategy::create(r_server, *shared);
@@ -319,8 +303,14 @@ core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config
 			return strategy.error();
 		}
 		shared->strategy = std::shared_ptr<TdmStrategy>(std::move(*strategy));
-		for (const auto &[slot, bot] : made_bots) {
-			shared->strategy->add_bot(slot, bot->bot());
+	}
+	for (uint32_t i = 0; i < count; ++i) {
+		const int team = host.rules ? 0 : 1 + int((i + i / 4u) % 2u);
+		if (r_server.add_local_bot(std::make_unique<AiBotSource>(shared, i), team) < 0) {
+			return core::make_error("tdm bots: no slot for bot " + std::to_string(i) + " of " + std::to_string(count));
+		}
+		if (shared->stats != nullptr) {
+			shared->stats->bots.fetch_add(1, std::memory_order_relaxed);
 		}
 	}
 	return core::Status::success();

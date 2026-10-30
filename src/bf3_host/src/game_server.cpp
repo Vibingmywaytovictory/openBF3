@@ -333,7 +333,9 @@ struct GameServer::Impl {
 				return -1;
 			}
 		}
+		CommandSource &source = *p_source;
 		slots.admit_local(size_t(at), std::move(p_source), team, p_bot);
+		source.admitted(uint8_t(at));
 		if (!spawner.spawn(size_t(at), SIZE_MAX, tick)) {
 			reset_slot(size_t(at));
 			return -1;
