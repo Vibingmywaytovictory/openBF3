@@ -121,6 +121,39 @@ private:
 	std::array<uint32_t, 2> handles_{ ai::kNoHandle, ai::kNoHandle };
 };
 
+class SlotPlayer final : public ai::SquadPlayer {
+public:
+	void bind(uint8_t p_slot, SlotObject *p_soldier) {
+		slot_ = p_slot;
+		soldier_ = p_soldier;
+	}
+	void set(int p_side, bool p_alive, bool p_down, int p_kit) {
+		side_ = p_side;
+		alive_ = p_alive;
+		down_ = p_down;
+		kit_ = p_kit;
+	}
+	void set_ai(bool p_ai) { ai_ = p_ai; }
+
+	int id() const override { return slot_; }
+	bool is_ai() const override { return ai_; }
+	bool is_alive() const override { return alive_; }
+	bool is_man_down() const override { return down_; }
+	int side() const override { return side_; }
+	int spawn_group() const override { return 0; }
+	int spawn_kit() const override { return kit_; }
+	ai::AiObject *soldier() const override { return alive_ ? soldier_ : nullptr; }
+	ai::AiObject *current_vehicle() const override { return soldier(); }
+
+private:
+	uint8_t slot_ = 0;
+	SlotObject *soldier_ = nullptr;
+	int side_ = 0;
+	bool alive_ = false;
+	bool down_ = false;
+	bool ai_ = false;
+	int kit_ = 0;
+};
 }
 
 struct HostAiWorld::Impl {
@@ -132,6 +165,9 @@ struct HostAiWorld::Impl {
 	std::array<std::unique_ptr<ai::AIInformationGrid>, 2> grids;
 	std::array<SlotObject, kMaxAiSlots> soldiers;
 	std::array<std::array<SlotObject, kMaxAiSlots>, 2> perceived;
+	std::array<SlotPlayer, kMaxAiSlots> players;
+	std::array<ai::SquadBot *, kMaxAiSlots> squad_bots{};
+	size_t slots = 0;
 	std::array<uint8_t, kMaxAiSlots> alive{};
 	std::array<uint8_t, kMaxAiSlots> teams{};
 	std::vector<uint8_t> bots;
@@ -207,6 +243,7 @@ core::Result<std::unique_ptr<HostAiWorld>> HostAiWorld::create(const AiWorldConf
 		m.soldiers[s].set_slot(s, false);
 		m.perceived[0][s].set_slot(s, true);
 		m.perceived[1][s].set_slot(s, true);
+		m.players[s].bind(s, &m.soldiers[s]);
 	}
 	ai::StrategicServices services;
 	services.game = world.get();
@@ -256,6 +293,7 @@ ai::AiWorld HostAiWorld::world() {
 	w.collisions = this;
 	w.graphs = this;
 	w.strategic = this;
+	w.squads = this;
 	return w;
 }
 
@@ -265,6 +303,7 @@ void HostAiWorld::add_bot(uint8_t p_slot) {
 		return;
 	}
 	m.perceptions[p_slot] = std::make_unique<sim::bots::Perception>(m.config.perception);
+	m.players[p_slot].set_ai(true);
 	m.bots.push_back(p_slot);
 	std::sort(m.bots.begin(), m.bots.end());
 }
@@ -275,6 +314,13 @@ void HostAiWorld::step(const ServerView &p_view, std::span<const sim::bots::Hear
 	m.tick = p_tick;
 	const std::span<const sim::SoldierState> states = p_view.states();
 	const size_t n = std::min(states.size(), kMaxAiSlots);
+	m.slots = n;
+	std::array<uint8_t, kMaxAiSlots> down{};
+	for (const DownedSoldier &d : p_view.downed()) {
+		if (d.slot < kMaxAiSlots) {
+			down[d.slot] = 1;
+		}
+	}
 	for (size_t s = 0; s < n; ++s) {
 		const uint8_t slot = uint8_t(s);
 		m.alive[s] = p_view.alive(slot) && std::isfinite(states[s].position.x) ? 1 : 0;
@@ -289,6 +335,7 @@ void HostAiWorld::step(const ServerView &p_view, std::span<const sim::bots::Hear
 		own.set_side(team);
 		own.set_kit(p_view.kit(slot));
 		own.place(states[s].position, states[s].yaw, states[s].pose);
+		m.players[s].set(team, m.alive[s] != 0, down[s] != 0, p_view.kit(slot));
 		for (int side = 1; side <= 2; ++side) {
 			if (m.alive[s] != 0 && team == side) {
 				m.know(side, own);
@@ -549,6 +596,45 @@ int HostAiWorld::number_of_control_points(int p_side) const {
 				: 0;
 	}
 	return count;
+}
+
+int HostAiWorld::max_number_of_squads() const {
+	return int(net::kMaxSquads) + 1;
+}
+
+int HostAiWorld::max_number_of_squad_members() const {
+	return impl_->config.squad_size != 0 ? int(impl_->config.squad_size) : int(kDefaultSquadSize);
+}
+
+ai::SquadPlayer *HostAiWorld::player(int p_player_id) const {
+	if (p_player_id < 0 || size_t(p_player_id) >= impl_->slots || impl_->teams[size_t(p_player_id)] == 0) {
+		return nullptr;
+	}
+	return &impl_->players[size_t(p_player_id)];
+}
+
+std::vector<ai::SquadPlayer *> HostAiWorld::all_players() const {
+	std::vector<ai::SquadPlayer *> out;
+	for (size_t s = 0; s < impl_->slots; ++s) {
+		if (impl_->teams[s] != 0) {
+			out.push_back(&impl_->players[s]);
+		}
+	}
+	return out;
+}
+
+ai::SquadBot *HostAiWorld::bot_from_player_id(int p_player_id) const {
+	return p_player_id >= 0 && size_t(p_player_id) < kMaxAiSlots ? impl_->squad_bots[size_t(p_player_id)] : nullptr;
+}
+
+bool HostAiWorld::is_valid_position(const ai::Vec3 &p_position) const {
+	return inside_combat_area(p_position);
+}
+
+void HostAiWorld::set_squad_bot(uint8_t p_slot, ai::SquadBot *p_bot) {
+	if (p_slot < kMaxAiSlots) {
+		impl_->squad_bots[p_slot] = p_bot;
+	}
 }
 
 namespace {

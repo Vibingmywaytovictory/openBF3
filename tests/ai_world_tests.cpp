@@ -552,7 +552,9 @@ TEST_SUITE("ai-world-install") {
 		config.level = level->bots;
 		config.static_world = level->shared->static_world;
 		config.seed = 7;
+		config.squad_size = level->shared->squad_size;
 		std::unique_ptr<host::HostAiWorld> world;
+		size_t player_mismatches = 0, players_seen = 0, downed_seen = 0;
 		std::array<uint32_t, 64> cursor{};
 		std::array<sim::Tick, 64> fired{};
 		std::vector<sim::bots::HeardShot> heard;
@@ -595,6 +597,29 @@ TEST_SUITE("ai-world-install") {
 				return;
 			}
 			const size_t slots = std::min<size_t>(view.states().size(), 64);
+			const ai::SquadWorld &squad_world = *world->world().squads;
+			size_t teamed = 0;
+			for (size_t s = 0; s < slots; ++s) {
+				const uint8_t slot = uint8_t(s);
+				const ai::SquadPlayer *p = squad_world.player(int(s));
+				const bool down = std::any_of(view.downed().begin(), view.downed().end(),
+						[&](const host::DownedSoldier &p_d) { return p_d.slot == slot; });
+				if (view.team(slot) == 0) {
+					player_mismatches += p != nullptr ? 1 : 0;
+					continue;
+				}
+				++teamed;
+				if (p == nullptr || p->id() != int(s) || p->side() != int(view.team(slot)) ||
+						p->is_alive() != view.alive(slot) || p->is_man_down() != down || p->is_ai() != (s < 32) ||
+						p->spawn_kit() != int(view.kit(slot)) || p->current_vehicle() != p->soldier() ||
+						(p->soldier() == nullptr) == view.alive(slot) ||
+						(p->soldier() != nullptr && p->soldier()->position() != view.states()[s].position)) {
+					++player_mismatches;
+				}
+				++players_seen;
+				downed_seen += down ? 1 : 0;
+			}
+			player_mismatches += squad_world.all_players().size() != teamed ? 1 : 0;
 			for (int side = 1; side <= 2; ++side) {
 				std::map<uint8_t, const sim::bots::PerceivedEnemy *> detected;
 				size_t enemies_alive = 0;
@@ -669,6 +694,13 @@ TEST_SUITE("ai-world-install") {
 		std::printf("ai world: courier compared %zu side ticks, %zu perceived enemy records, %zu partial views, %u "
 					"perception updates\n",
 				compared, detections, partial, world->perception_ticks());
+		CHECK(player_mismatches == 0);
+		CHECK(players_seen > 0);
+		CHECK(downed_seen > 0);
+		CHECK(world->max_number_of_squads() == 33);
+		CHECK(world->max_number_of_squad_members() == 4);
+		CHECK(world->bot_from_player_id(0) == nullptr);
+		std::printf("ai world: squad world matched %zu player samples, %zu of them down\n", players_seen, downed_seen);
 
 		ModeLevel conquest = cql.get();
 		REQUIRE_MESSAGE(conquest.error.empty(), conquest.error);

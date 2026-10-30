@@ -5,6 +5,7 @@
 #include "bf3/ai/knowledge/information_grid.h"
 #include "bf3/core/result.h"
 #include "bf3/host/bot_fill.h"
+#include "bf3/host/squads.h"
 #include "bf3/sim/bots/perception.h"
 
 #include <array>
@@ -24,6 +25,7 @@ struct AiWorldConfig {
 	float eye_heights[3] = { 1.6f, 1.0f, 0.3f };
 	float gravity = 9.81f;
 	uint32_t grid_dimension = 32;
+	uint8_t squad_size = kDefaultSquadSize;
 	uint64_t seed = 1;
 	std::shared_ptr<const sim::StaticWorldShapes> static_world;
 };
@@ -37,7 +39,8 @@ class HostAiWorld final : public ai::AiTimer,
 						  public ai::AiObjectEnvironment,
 						  public ai::AiCollisionHandler,
 						  public ai::AiGraphCreator,
-						  public ai::StrategicGame {
+						  public ai::StrategicGame,
+						  public ai::SquadWorld {
 public:
 	static core::Result<std::unique_ptr<HostAiWorld>> create(const AiWorldConfig &p_config);
 	~HostAiWorld() override;
@@ -84,6 +87,13 @@ public:
 	bool polygon(const ai::Vec3 &p_position, int p_map, uint32_t &r_polygon, uint32_t &r_island,
 			ai::Vec3 &r_on) const override;
 	int number_of_control_points(int p_side) const;
+	int max_number_of_squads() const override;
+	int max_number_of_squad_members() const override;
+	ai::SquadPlayer *player(int p_player_id) const override;
+	std::vector<ai::SquadPlayer *> all_players() const override;
+	ai::SquadBot *bot_from_player_id(int p_player_id) const override;
+	bool is_valid_position(const ai::Vec3 &p_position) const override;
+	void set_squad_bot(uint8_t p_slot, ai::SquadBot *p_bot);
 
 	struct Impl;
 
