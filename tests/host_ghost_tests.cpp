@@ -3,9 +3,11 @@
 #include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/math.h"
 #include "bf3/host/firefight_run.h"
+#include "bf3/host/gunplay.h"
 #include "bf3/net/enet_host.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/soldier_motor.h"
+#include "bf3/sim/weapons/spread_recoil.h"
 #include "client_tracks.h"
 #include "server_ghosts.h"
 #include "test_support.h"
@@ -42,6 +44,8 @@ inline constexpr uint32_t kShooters = 32;
 inline constexpr sim::Tick kRunTicks = 20 * sim::kSimHz;
 inline constexpr size_t kIntervalBytes = 1200;
 inline constexpr double kBytesPerSecond = 36000.0;
+inline constexpr sim::Tick kAttackerTicks = 5 * sim::kSimHz;
+inline constexpr float kConeMarginCos = 0.99026807f;
 
 std::string read_text(const std::filesystem::path &p_path) {
 	std::ifstream in(p_path, std::ios::binary);
@@ -163,6 +167,18 @@ public:
 				if (const core::Result<net::MatchInfo> m = net::decode_match_info(d.bytes)) {
 					slot = m->slot;
 				}
+			} else if (type == net::MessageType::CombatEvents) {
+				const core::Result<net::CombatEvents> c = net::decode_combat_events(d.bytes, frame);
+				if (!c) {
+					++decode_failures;
+					continue;
+				}
+				for (const net::HitEvent &h : c->hits) {
+					if (slot >= 0 && h.victim == uint8_t(slot) && h.shooter < net::kMaxSlots) {
+						attacked_until[h.shooter] =
+								std::max(attacked_until[h.shooter], c->server_tick + kAttackerTicks);
+					}
+				}
 			} else if (type == net::MessageType::Snapshot) {
 				const core::Result<net::Snapshot> s = net::decode_snapshot(d.bytes, &baselines_);
 				if (!s) {
@@ -207,7 +223,9 @@ public:
 		have_interval_ = false;
 	}
 
-	void command(sim::Tick p_next) {
+	static bool zooming(sim::Tick p_next) { return (p_next / 90) % 4 == 1; }
+
+	void command(sim::Tick p_next, const std::optional<sim::Vec3> &p_look = std::nullopt) {
 		sim::Command c;
 		c.tick = p_next;
 		c.sequence = ++sequence_;
@@ -215,7 +233,14 @@ public:
 		c.move_right = int8_t((p_next / 120) % 3 == 0 ? 64 : 0);
 		c.yaw = uint16_t(p_next * 97u);
 		c.pitch = int16_t(int32_t(p_next % 200) - 100);
-		c.buttons = (p_next / 90) % 4 == 1 ? sim::buttons::kZoom : 0u;
+		if (p_look && zooming(p_next)) {
+			const sim::Vec3 &d = *p_look;
+			c.yaw = sim::quantize_yaw(std::atan2(d[0], d[2]));
+			c.pitch = sim::quantize_pitch(std::atan2(d[1], std::hypot(d[0], d[2])));
+			c.move_forward = 0;
+			c.move_right = 0;
+		}
+		c.buttons = zooming(p_next) ? sim::buttons::kZoom : 0u;
 		net::CommandPacket p;
 		p.count = 1;
 		p.commands[0] = c;
@@ -232,6 +257,8 @@ public:
 	}
 
 	int slot = -1;
+	net::ShotQuantization frame;
+	std::array<sim::Tick, net::kMaxSlots> attacked_until{};
 	uint64_t total_bytes = 0;
 	uint64_t decode_failures = 0;
 	uint64_t overflow = 0;
@@ -265,6 +292,84 @@ private:
 	bool have_interval_ = false;
 };
 
+host::GhostViewer test_viewer(bool p_zoomed) {
+	host::GhostViewer v;
+	v.slot = 0;
+	v.team = 1;
+	v.spawned = true;
+	v.zoomed = p_zoomed;
+	v.eye = { 0.0f, 1.6f, 0.0f };
+	v.aim = { 0.0f, 0.0f, 1.0f };
+	return v;
+}
+
+host::GhostCandidate candidate(uint8_t p_slot, uint8_t p_team, float p_metres, float p_degrees, bool p_squad_mate) {
+	host::GhostCandidate c;
+	c.slot = p_slot;
+	c.team = p_team;
+	c.squad_mate = p_squad_mate;
+	const float a = p_degrees * 3.14159265f / 180.0f;
+	c.position = { p_metres * std::sin(a), 1.6f, p_metres * std::cos(a) };
+	c.record.slot = p_slot;
+	c.record.generation = 1;
+	return c;
+}
+
+class Schedule {
+public:
+	Schedule() { scheduler.configure(8, 1200); }
+
+	std::vector<uint8_t> step(
+			const host::GhostViewer &p_viewer, std::span<const host::GhostCandidate> p_cands, bool p_ack = true) {
+		scheduler.open_interval(0, 0);
+		scheduler.plan(0, p_viewer, p_cands, seq, tick, plan);
+		net::Snapshot snap;
+		snap.seq = seq;
+		snap.server_tick = tick;
+		snap.others = plan.others;
+		snap.removed = plan.removed;
+		scheduler.sent(0, snap, plan.others, {});
+		if (p_ack) {
+			net::CommandPacket p;
+			p.newest_snapshot = seq;
+			scheduler.ack(0, p);
+		}
+		++seq;
+		tick += 2;
+		std::vector<uint8_t> carried;
+		for (const net::OtherSoldier &o : plan.others) {
+			carried.push_back(o.slot);
+		}
+		return carried;
+	}
+
+	std::vector<uint32_t> gaps(const host::GhostViewer &p_viewer, std::span<const host::GhostCandidate> p_cands,
+			uint8_t p_slot, uint32_t p_steps) {
+		std::vector<uint32_t> out;
+		std::optional<uint32_t> last;
+		for (uint32_t i = 0; i < p_steps; ++i) {
+			const std::vector<uint8_t> carried = step(p_viewer, p_cands);
+			if (std::find(carried.begin(), carried.end(), p_slot) == carried.end()) {
+				continue;
+			}
+			if (last) {
+				out.push_back(i - *last);
+			}
+			last = i;
+		}
+		return out;
+	}
+
+	host::GhostScheduler scheduler;
+	host::GhostPlan plan;
+	uint16_t seq = 0;
+	sim::Tick tick = 1000;
+};
+
+bool all_equal(const std::vector<uint32_t> &p_gaps, uint32_t p_gap) {
+	return !p_gaps.empty() && std::all_of(p_gaps.begin(), p_gaps.end(), [&](uint32_t g) { return g == p_gap; });
+}
+
 }
 
 TEST_SUITE("host-ghost") {
@@ -296,6 +401,7 @@ TEST_SUITE("host-ghost") {
 		REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
 
 		Peer peer(server);
+		peer.frame = host::shot_frame(*f->level.shared->static_world);
 		std::vector<host::OutDatagram> out;
 		const auto step = [&] {
 			out.clear();
@@ -317,19 +423,74 @@ TEST_SUITE("host-ghost") {
 		const sim::Tick start_tick = server.current_tick();
 		std::array<Ghost, net::kMaxSlots> ghosts{};
 		uint64_t enemy_near_checks = 0, enemy_near_missing = 0, rate_checks = 0, rate_misses = 0;
+		uint64_t attacker_checks = 0, attacker_misses = 0, cone_checks = 0, cone_misses = 0;
 		std::array<uint64_t, 4> enemy_tier_checks{};
 		uint64_t worst_rate_slot = 0;
 		std::array<uint64_t, 25> misses_by_every{};
+		int target = -1;
+		const auto look = [&]() -> std::optional<sim::Vec3> {
+			const sim::SoldierState *me = server.soldier(own);
+			if (me == nullptr) {
+				return std::nullopt;
+			}
+			const auto usable = [&](int p_slot) {
+				const sim::SoldierState *s = p_slot >= 0 ? server.soldier(uint32_t(p_slot)) : nullptr;
+				if (s == nullptr || !server.view().alive(uint8_t(p_slot)) ||
+						server.view().team(uint8_t(p_slot)) == server.view().team(own)) {
+					return false;
+				}
+				const float metres = core::vec::length(core::vec::sub(s->position, me->position));
+				return metres > 320.0f && metres < 780.0f;
+			};
+			for (uint32_t j = 0; !usable(target) && j < cfg.max_slots; ++j) {
+				target = j != own && usable(int(j)) ? int(j) : -1;
+			}
+			if (!usable(target)) {
+				return std::nullopt;
+			}
+			const sim::Vec3 eye = core::vec::add(me->position, { 0.0f, 1.6f, 0.0f });
+			return core::vec::sub(
+					core::vec::add(server.soldier(uint32_t(target))->position, { 0.0f, 1.0f, 0.0f }), eye);
+		};
+		std::array<bool, net::kMaxSlots> moved{};
+		uint32_t relocated = 0;
+		const auto relocate_attacker = [&] {
+			const sim::SoldierState *me = server.soldier(own);
+			for (uint32_t j = 0; me != nullptr && relocated < 1 && j < cfg.max_slots; ++j) {
+				if (moved[j] || j == own || peer.attacked_until[j] <= server.current_tick() ||
+						!server.view().alive(uint8_t(j)) || server.view().team(uint8_t(j)) == server.view().team(own)) {
+					continue;
+				}
+				for (const sim::SpawnPoint &sp : f->level.shared->spawns) {
+					const float metres = core::vec::length(core::vec::sub(sp.position, me->position));
+					if (metres > 150.0f && metres < 280.0f) {
+						REQUIRE(server.place_soldier(j, sp.position, sp.yaw, sim::Pose::Stand).ok());
+						moved[j] = true;
+						++relocated;
+						return;
+					}
+				}
+			}
+		};
+		uint64_t cone_intervals = 0;
 		const auto wall = std::chrono::steady_clock::now();
 		for (sim::Tick i = 0; i < kRunTicks; ++i) {
-			peer.command(server.current_tick() + 1u);
+			peer.command(server.current_tick() + 1u, look());
 			const size_t before = peer.intervals.size();
 			step();
+			relocate_attacker();
 			if (peer.intervals.size() == before) {
 				continue;
 			}
 			const Interval &iv = peer.intervals.back();
 			const sim::SoldierState *me = server.soldier(own);
+			const bool zoomed = me != nullptr && server.gunplay()->other_record(own, *me).ads;
+			sim::Vec3 eye{};
+			sim::Vec3 aim{};
+			if (me != nullptr) {
+				eye = core::vec::add(me->position, { 0.0f, 1.6f, 0.0f });
+				aim = sim::weapons::aim_direction(me->yaw, me->pitch, {});
+			}
 			for (uint32_t j = 0; j < cfg.max_slots; ++j) {
 				Ghost &g = ghosts[j];
 				const sim::SoldierState *s = server.soldier(j);
@@ -340,8 +501,17 @@ TEST_SUITE("host-ghost") {
 				}
 				const float metres = core::vec::length(core::vec::sub(s->position, me->position));
 				const bool enemy = server.view().team(uint8_t(j)) != server.view().team(own);
-				const std::optional<uint32_t> every =
+				const bool attacker = enemy && peer.attacked_until[j] > iv.tick;
+				const sim::Vec3 to = core::vec::sub(s->position, eye);
+				const bool in_cone = enemy && zoomed && metres > 100.0f &&
+						core::vec::dot(to, aim) >= kConeMarginCos * core::vec::length(to);
+				std::optional<uint32_t> every =
 						enemy ? floor_of(kEnemyFloor, metres) : floor_of(kTeammateFloor, metres);
+				if (attacker) {
+					every = 1u;
+				} else if (in_cone && every) {
+					every = std::min<uint32_t>(*every, 2u);
+				}
 				if (!every) {
 					g = Ghost();
 					continue;
@@ -366,6 +536,15 @@ TEST_SUITE("host-ghost") {
 				if (enemy && metres <= 100.0f) {
 					++enemy_near_checks;
 					enemy_near_missing += iv.carried[j] ? 0u : 1u;
+				}
+				if (due && attacker && metres > 100.0f) {
+					++attacker_checks;
+					attacker_misses += iv.carried[j] ? 0u : 1u;
+				}
+				cone_intervals += in_cone ? 1u : 0u;
+				if (due && in_cone && !attacker) {
+					++cone_checks;
+					cone_misses += iv.carried[j] ? 0u : 1u;
 				}
 				if (due) {
 					++rate_checks;
@@ -414,6 +593,10 @@ TEST_SUITE("host-ghost") {
 				(unsigned long long)enemy_tier_checks[2], (unsigned long long)enemy_tier_checks[3], stats.soldiers,
 				(unsigned long long)stats.gunplay.shots, (unsigned long long)stats.gunplay.hits,
 				(unsigned long long)stats.gunplay.shot_events_dropped);
+		std::printf("host.ghost: recent attackers beyond 100 m: %llu due, %llu missed; enemies in the zoomed aim cone "
+					"beyond 100 m: %llu intervals, %llu due, %llu missed\n",
+				(unsigned long long)attacker_checks, (unsigned long long)attacker_misses,
+				(unsigned long long)cone_intervals, (unsigned long long)cone_checks, (unsigned long long)cone_misses);
 		for (size_t e = 0; e < misses_by_every.size(); ++e) {
 			if (misses_by_every[e] != 0) {
 				std::printf("host.ghost: %llu misses of a ghost due every %zu intervals\n",
@@ -425,12 +608,16 @@ TEST_SUITE("host-ghost") {
 		CHECK(std::count_if(stats.slots.begin(), stats.slots.end(),
 					  [](const host::SlotStats &p_s) { return p_s.used; }) == 64);
 		CHECK(stats.gunplay.shots > 0);
-		CHECK(enemy_near_checks > 1000);
+		CHECK(enemy_near_checks > 800);
 		CHECK(enemy_tier_checks[1] + enemy_tier_checks[2] > 1000);
 		CHECK(worst_unreliable <= kIntervalBytes);
 		CHECK(per_second <= kBytesPerSecond);
 		CHECK(enemy_near_missing == 0);
 		CHECK(rate_misses == 0);
+		CHECK(attacker_checks > 0);
+		CHECK(attacker_misses == 0);
+		CHECK(cone_checks > 0);
+		CHECK(cone_misses == 0);
 	}
 
 	TEST_CASE("a shot is relevant to a receiver its path passes within the fly-by radius of, up to the round's range; "
@@ -468,6 +655,97 @@ TEST_SUITE("host-ghost") {
 				f->level.shared->gunplay->defs.size(), rifle);
 		CHECK(rifle > 0);
 		CHECK(with > rifle);
+	}
+
+	TEST_CASE("ghost tiers: distance tables, enemy scope to 1.5 km, attackers at any range, the zoomed 10 degree aim "
+			  "cone, squad mates on the enemy table") {
+		const auto tier = [](const host::GhostCandidate &p_c, bool p_attacker, bool p_zoomed) {
+			return host::ghost_tier(test_viewer(p_zoomed), p_c, p_attacker);
+		};
+		const auto is = [](const std::optional<host::GhostTier> &p_t, uint32_t p_target, uint32_t p_required) {
+			return p_t && p_t->target == p_target && p_t->required == p_required;
+		};
+		CHECK(is(tier(candidate(1, 2, 50.0f, 90.0f, false), false, false), 1, 1));
+		CHECK(is(tier(candidate(1, 2, 250.0f, 90.0f, false), false, false), 2, 3));
+		CHECK(is(tier(candidate(1, 2, 500.0f, 90.0f, false), false, false), 5, 6));
+		CHECK(is(tier(candidate(1, 2, 1200.0f, 90.0f, false), false, false), 15, 24));
+		CHECK_FALSE(tier(candidate(1, 2, 1600.0f, 90.0f, false), false, false));
+
+		CHECK(is(tier(candidate(1, 2, 250.0f, 90.0f, false), true, false), 1, 1));
+		CHECK(is(tier(candidate(1, 2, 1600.0f, 90.0f, false), true, false), 1, 1));
+		CHECK(is(tier(candidate(1, 2, 20000.0f, 90.0f, false), true, false), 1, 1));
+
+		CHECK(is(tier(candidate(1, 2, 500.0f, 0.0f, false), false, true), 1, 2));
+		CHECK(is(tier(candidate(1, 2, 500.0f, 9.0f, false), false, true), 1, 2));
+		CHECK(is(tier(candidate(1, 2, 1200.0f, -9.0f, false), false, true), 1, 2));
+		CHECK(is(tier(candidate(1, 2, 500.0f, 11.0f, false), false, true), 5, 6));
+		CHECK(is(tier(candidate(1, 2, 500.0f, 0.0f, false), false, false), 5, 6));
+		CHECK(is(tier(candidate(1, 2, 50.0f, 0.0f, false), false, true), 1, 1));
+		CHECK_FALSE(tier(candidate(1, 2, 1600.0f, 0.0f, false), false, true));
+
+		CHECK(is(tier(candidate(1, 1, 50.0f, 90.0f, false), false, false), 2, 3));
+		CHECK(is(tier(candidate(1, 1, 250.0f, 90.0f, false), false, false), 6, 8));
+		CHECK(is(tier(candidate(1, 1, 5000.0f, 90.0f, false), false, false), 15, 24));
+		CHECK(is(tier(candidate(1, 1, 250.0f, 90.0f, false), true, false), 6, 8));
+		CHECK(is(tier(candidate(1, 1, 500.0f, 0.0f, false), false, true), 15, 24));
+
+		CHECK(is(tier(candidate(1, 1, 50.0f, 90.0f, true), false, false), 1, 1));
+		CHECK(is(tier(candidate(1, 1, 250.0f, 90.0f, true), false, false), 2, 3));
+		CHECK(is(tier(candidate(1, 1, 500.0f, 90.0f, true), false, false), 5, 6));
+		CHECK(is(tier(candidate(1, 1, 5000.0f, 90.0f, true), false, false), 15, 24));
+	}
+
+	TEST_CASE(
+			"the scheduler sends each ghost at its tier's rate, an attacker every snapshot for 5 s, a zoomed-on enemy "
+			"every snapshot, a squad mate at the enemy rate, and repeats a scope-out until it is acked") {
+		Schedule s;
+		const host::GhostViewer plain = test_viewer(false);
+		const std::array<host::GhostCandidate, 4> cands{ candidate(1, 2, 250.0f, 90.0f, false),
+			candidate(2, 2, 1200.0f, 90.0f, false), candidate(3, 2, 500.0f, 5.0f, false),
+			candidate(4, 1, 250.0f, -90.0f, false) };
+		s.step(plain, cands);
+		CHECK(all_equal(s.gaps(plain, cands, 1, 60), 2));
+		CHECK(all_equal(s.gaps(plain, cands, 2, 90), 15));
+		CHECK(all_equal(s.gaps(plain, cands, 3, 60), 5));
+		CHECK(all_equal(s.gaps(plain, cands, 4, 60), 6));
+
+		s.scheduler.attacked(0, 1, s.tick);
+		s.scheduler.attacked(0, 2, s.tick);
+		const sim::Tick attack_end = s.tick + 5 * sim::kSimHz;
+		uint32_t boosted = 0, carried_1 = 0, carried_2 = 0;
+		while (s.tick < attack_end) {
+			const std::vector<uint8_t> c = s.step(plain, cands);
+			++boosted;
+			carried_1 += std::count(c.begin(), c.end(), uint8_t(1)) != 0 ? 1u : 0u;
+			carried_2 += std::count(c.begin(), c.end(), uint8_t(2)) != 0 ? 1u : 0u;
+		}
+		CHECK(boosted == 5 * sim::kSimHz / 2);
+		CHECK(carried_1 == boosted);
+		CHECK(carried_2 == boosted);
+		CHECK(all_equal(s.gaps(plain, cands, 1, 60), 2));
+
+		const host::GhostViewer zoomed = test_viewer(true);
+		CHECK(all_equal(s.gaps(zoomed, cands, 3, 60), 1));
+		CHECK(all_equal(s.gaps(zoomed, cands, 2, 90), 15));
+		CHECK(all_equal(s.gaps(plain, cands, 3, 60), 5));
+
+		std::array<host::GhostCandidate, 4> squad = cands;
+		squad[3].squad_mate = true;
+		CHECK(all_equal(s.gaps(plain, squad, 4, 60), 2));
+		CHECK(all_equal(s.gaps(plain, cands, 4, 60), 6));
+
+		std::array<host::GhostCandidate, 4> gone = cands;
+		gone[1] = candidate(2, 2, 1600.0f, 90.0f, false);
+		s.step(plain, gone, false);
+		CHECK(std::count(s.plan.removed.begin(), s.plan.removed.end(), uint8_t(2)) == 1);
+		CHECK(std::count(s.plan.in_scope.begin(), s.plan.in_scope.end(), uint8_t(2)) == 0);
+		s.step(plain, gone, true);
+		CHECK(std::count(s.plan.removed.begin(), s.plan.removed.end(), uint8_t(2)) == 1);
+		s.step(plain, gone);
+		CHECK(s.plan.removed.empty());
+		s.scheduler.attacked(0, 2, s.tick);
+		const std::vector<uint8_t> back = s.step(plain, gone);
+		CHECK(std::count(back.begin(), back.end(), uint8_t(2)) == 1);
 	}
 
 	TEST_CASE("a remote track lasts three of its own sample gaps, at least 1 s, and a removal ends it") {
