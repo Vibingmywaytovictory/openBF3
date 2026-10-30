@@ -31,5 +31,6 @@ echo   --maplist=PATH   another rotation file ^(one "level mode rounds" line per
 echo   --bots=0..64 ^(default 31^) --max-players=1..64 ^(default 32^) --kill-limit=N ^(data: 100^) --preround=S ^(data: 10^) --min-players=N
 echo   --port=N ^(default 0: any free port, printed^) --port-file=PATH --bind=IP ^(default 127.0.0.1^) --bf3-cache=PATH --seed=N --dev
 echo   --dedicated-seconds=S --stop-after-kills=N   stop after S seconds or N kills
+echo   --intermission-s=S --load-stall-s=S   dev overrides: S seconds from round over to the next round ^(data: 60^), and of no load progress before a LoadStalled kick ^(30^)
 echo Join it with: tools\play.cmd --connect=127.0.0.1:PORT
 exit /b 0

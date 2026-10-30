@@ -34,6 +34,7 @@ struct ServerSessionConfig {
 	uint16_t port = 0;
 	bool prebake = true;
 	LoadDeadlines load;
+	float intermission_s = -1.0f;
 	std::shared_ptr<TickClock> clock;
 };
 

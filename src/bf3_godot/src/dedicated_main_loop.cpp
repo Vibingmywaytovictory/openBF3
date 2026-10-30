@@ -57,6 +57,20 @@ bool u32_arg(const char *p_name, double p_min, double p_max, uint32_t &r_value, 
 	return true;
 }
 
+bool seconds_arg(const char *p_name, double p_min, double p_max, float &r_value, std::string &r_error) {
+	if (!has_user_arg(p_name)) {
+		return true;
+	}
+	const std::string text = user_arg_value(p_name);
+	if (core::parse_float_value(text, p_min, p_max, r_value).fault != core::KeyFault::None) {
+		if (r_error.empty()) {
+			r_error = core::fmt("--%s=%s: not %.0f..%.0f seconds", p_name, text.c_str(), p_min, p_max);
+		}
+		return false;
+	}
+	return true;
+}
+
 int64_t monitor(Performance::Monitor p_monitor) {
 	return int64_t(Performance::get_singleton()->get_monitor(p_monitor));
 }
@@ -90,6 +104,8 @@ bool DedicatedMainLoop::parse_args(std::string &r_error) {
 	a.port_file = user_arg_value("port-file");
 	u32_arg("port", 0.0, 65535.0, a.port, r_error);
 	u32_arg("stop-after-kills", 0.0, 100000.0, a.stop_after_kills, r_error);
+	seconds_arg("intermission-s", 0.0, 3600.0, a.intermission_s, r_error);
+	seconds_arg("load-stall-s", 1.0, 3600.0, a.load_stall_s, r_error);
 	if (has_user_arg("dedicated-seconds")) {
 		float seconds = 0.0f;
 		if (core::parse_float_value(user_arg_value("dedicated-seconds"), 0.0, 1.0e7, seconds).fault !=
@@ -197,6 +213,10 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 	config.rules = args_.rules;
 	config.bind_ip = args_.bind_ip;
 	config.port = uint16_t(args_.port);
+	config.intermission_s = args_.intermission_s;
+	if (args_.load_stall_s > 0.0f) {
+		config.load.stall_s = args_.load_stall_s;
+	}
 
 	const host::ServerRules &r = config.rules;
 	say(core::fmt("rules TDM: %u bots, max players %u%s, kill limit %s, pre-round %s, min players %s, dev commands %s",
@@ -206,6 +226,10 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 			r.preround_s >= 0.0f ? core::fmt("%.1f s", r.preround_s).c_str() : "data",
 			r.min_players >= 0 ? std::to_string(r.min_players).c_str() : "data",
 			r.dev_commands ? "on (--dev)" : "off"));
+	say(core::fmt("rotation: intermission %s, load deadlines: stalled %.1f s, warm %.1f s, cold %.1f s",
+			config.intermission_s >= 0.0f ? core::fmt("%.1f s (--intermission-s)", config.intermission_s).c_str()
+										  : "data",
+			config.load.stall_s, config.load.warm_s, config.load.cold_s));
 
 	session_ = std::make_unique<host::ServerSession>();
 	const auto t0 = std::chrono::steady_clock::now();
@@ -263,6 +287,12 @@ void DedicatedMainLoop::report(const host::ServerSessionStats &p_stats) {
 		}
 	}
 	const host::RotationStats &rot = p_stats.rotation;
+	if (rot.level_changes > level_changes_seen_) {
+		level_changes_seen_ = rot.level_changes;
+		say(core::fmt("level change %llu: %s %s round %u, loaded in %.2f s, carried %u clients",
+				(unsigned long long)rot.level_changes, rot.current.level.c_str(), rot.current.mode.c_str(),
+				unsigned(rot.round_id), rot.last_load_s, g.carried_seats));
+	}
 	const std::string match = g.rules_active
 			? core::fmt("%s %s round %u: %s US %d - RU %d of %d", rot.current.level.c_str(), rot.current.mode.c_str(),
 					  unsigned(g.round_id), host::match_phase_name(g.match.phase), g.match.kills[0], g.match.kills[1],

@@ -22,6 +22,8 @@ struct DedicatedArgs {
 	std::string port_file;
 	double run_seconds = 0.0;
 	uint32_t stop_after_kills = 0;
+	float intermission_s = -1.0f;
+	float load_stall_s = -1.0f;
 	bf3::host::ServerRules rules;
 };
 
@@ -58,6 +60,7 @@ private:
 	uint64_t private_bytes_ = 0;
 	uint64_t peak_private_bytes_ = 0;
 	int64_t resources_after_load_ = 0;
+	uint64_t level_changes_seen_ = 0;
 	const char *stopped_by_ = "the process";
 	bool failed_ = false;
 };

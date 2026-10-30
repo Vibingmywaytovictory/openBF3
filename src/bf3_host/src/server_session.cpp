@@ -112,6 +112,7 @@ core::Status ServerSession::start(ServerSessionConfig p_config, LoadProgress *p_
 	RotationConfig rc;
 	rc.maps = config_.maps;
 	rc.first = game_;
+	rc.intermission_override_s = config_.intermission_s;
 	rc.load = [this](const LevelEntry &p_entry) -> core::Result<std::shared_ptr<const GameServerConfig>> {
 		core::Result<ServerLevel> next =
 				load_server_level(config_.install, p_entry, config_.level, config_.cache.get(), nullptr);

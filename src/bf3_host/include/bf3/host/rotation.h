@@ -24,6 +24,7 @@ struct RotationConfig {
 	RotationLoader load;
 	bool background = true;
 	uint16_t intermission_s = 60;
+	float intermission_override_s = -1.0f;
 };
 
 struct RotationStats {
@@ -36,6 +37,7 @@ struct RotationStats {
 	uint64_t load_failures = 0;
 	bool changing = false;
 	bool loading = false;
+	double last_load_s = 0.0;
 	std::string last_error;
 };
 
@@ -65,6 +67,7 @@ private:
 	std::optional<core::Result<std::shared_ptr<const GameServerConfig>>> take_load(const LevelEntry &p_entry);
 	net::NextLevel next_identity(const LevelEntry &p_entry) const;
 	uint16_t intermission_s() const;
+	bool level_over(const GameServer &p_server) const;
 	void join_loader();
 
 	RotationConfig config_;
@@ -72,6 +75,7 @@ private:
 	bool announced_ = false;
 	bool changing_ = false;
 	uint32_t round_id_ = 0;
+	sim::Tick round_over_tick_ = 0;
 	std::shared_ptr<const GameServerConfig> current_config_;
 
 	mutable std::mutex mutex_;

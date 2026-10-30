@@ -609,6 +609,51 @@ TEST_SUITE("host-rotation") {
 		CHECK(server.rules()->stats().restarts == 1u);
 	}
 
+	TEST_CASE("intermission override: --intermission-s=5 restarts a 1-entry MapList in place 5.00 s after the round "
+			  "over, before the data's 60 s level end, and the RoundOverInfo says 5 s") {
+		tt::TdmLevel *level = tt::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		auto first = std::make_shared<const host::GameServerConfig>(metro_config(level->shared, *level, true));
+		host::RotationConfig rc;
+		rc.maps.entries = { host::LevelEntry{ level->shared->level, level->shared->mode, 1 } };
+		rc.first = first;
+		rc.background = false;
+		rc.intermission_override_s = 5.0f;
+		host::Rotation rotation(rc);
+		host::GameServer server;
+		REQUIRE(server.init(*first).ok());
+		tt::ScriptedPeer peer(server, 1, "watcher");
+		peer.hello();
+		peer.ready();
+		std::vector<host::OutDatagram> out;
+		std::optional<sim::Tick> round_over;
+		std::optional<sim::Tick> restarted;
+		for (uint32_t i = 0; i < kRoundTicks + kIntermissionTicks && !restarted; ++i) {
+			out.clear();
+			server.tick(out);
+			peer.receive(out);
+			if (!round_over && phase_of(server) == net::MatchPhase::RoundOver) {
+				round_over = server.current_tick();
+			}
+			CHECK(rotation.after_tick(server) == nullptr);
+			if (rotation.stats().in_place > 0) {
+				restarted = server.current_tick();
+			}
+		}
+		REQUIRE(round_over.has_value());
+		REQUIRE(restarted.has_value());
+		std::printf("intermission override: round over at tick %u, restarted in place %.2f s later\n",
+				unsigned(*round_over), double(*restarted - *round_over) / double(kSecond));
+		CHECK(*restarted - *round_over == 5u * kSecond);
+		CHECK(server.rules()->stats().level_ends == 0u);
+		CHECK(server.rules()->stats().restarts == 1u);
+		REQUIRE(peer.round_overs.size() == 1u);
+		CHECK(peer.round_overs[0].intermission_s == 5u);
+		CHECK(peer.round_overs[0].next.level == level->shared->level);
+	}
+
 	TEST_CASE("install unchanged") {
 		tt::TdmLevel *level = tt::load_tdm_level_once();
 		if (level == nullptr) {

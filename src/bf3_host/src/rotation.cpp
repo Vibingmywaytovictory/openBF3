@@ -1,9 +1,11 @@
 #include "bf3/host/rotation.h"
 
 #include "bf3/core/gameplay/eor_timeline.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/text.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <utility>
 
@@ -54,9 +56,12 @@ void Rotation::start_load(const LevelEntry &p_entry) {
 		stats_.loading = true;
 	}
 	const auto run = [this, pending] {
+		const auto t0 = std::chrono::steady_clock::now();
 		core::Result<std::shared_ptr<const GameServerConfig>> r =
 				config_.load ? config_.load(pending->entry) : core::make_error("rotation: no level loader");
+		const double seconds = core::seconds_since(t0);
 		std::lock_guard lock(mutex_);
+		stats_.last_load_s = seconds;
 		pending->result = std::move(r);
 		pending->done = true;
 		stats_.loading = false;
@@ -100,6 +105,9 @@ net::NextLevel Rotation::next_identity(const LevelEntry &p_entry) const {
 }
 
 uint16_t Rotation::intermission_s() const {
+	if (config_.intermission_override_s >= 0.0f) {
+		return uint16_t(std::min(std::lround(config_.intermission_override_s), 65535l));
+	}
 	if (current_config_ != nullptr && current_config_->level != nullptr && current_config_->level->eor != nullptr) {
 		const float s = current_config_->level->eor->restart_delay_s;
 		if (std::isfinite(s) && s >= 0.0f) {
@@ -109,6 +117,14 @@ uint16_t Rotation::intermission_s() const {
 	return config_.intermission_s;
 }
 
+bool Rotation::level_over(const GameServer &p_server) const {
+	if (config_.intermission_override_s < 0.0f) {
+		return p_server.level_ended();
+	}
+	return announced_ &&
+			p_server.current_tick() - round_over_tick_ >= sim::seconds_to_ticks(config_.intermission_override_s);
+}
+
 std::unique_ptr<GameServer> Rotation::after_tick(GameServer &r_server) {
 	const TdmRules *rules = r_server.rules();
 	if (rules == nullptr) {
@@ -116,6 +132,7 @@ std::unique_ptr<GameServer> Rotation::after_tick(GameServer &r_server) {
 	}
 	if (!announced_ && !changing_ && rules->phase() == net::MatchPhase::RoundOver) {
 		announced_ = true;
+		round_over_tick_ = r_server.current_tick();
 		const LevelEntry next = cursor_.next_level();
 		if (!same_level(next, cursor_.current())) {
 			start_load(next);
@@ -128,7 +145,7 @@ std::unique_ptr<GameServer> Rotation::after_tick(GameServer &r_server) {
 		std::lock_guard lock(mutex_);
 		++stats_.round_overs;
 	}
-	if (!changing_ && r_server.level_ended()) {
+	if (!changing_ && level_over(r_server)) {
 		announced_ = false;
 		const bool changes = cursor_.round_over();
 		if (!changes) {
