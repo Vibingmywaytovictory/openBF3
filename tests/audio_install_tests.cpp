@@ -908,14 +908,14 @@ constexpr std::array<AreaPoint, 4> kMetroPoints{ {
 				"reflections_close_indoor_garage_wave" },
 		{ "street", { -280.845f, 60.062f, -567.190f }, 1, "shellcasings_762_outdoor_tarmac",
 				"reflections_close_urban_wave" },
-		{ "open ground", { -230.993f, 64.407f, -483.038f }, 0, "shellcasings_762_outdoor_wave",
+		{ "open ground", { -232.100f, 64.400f, -484.950f }, 0, "shellcasings_762_outdoor_wave",
 				"reflections_close_openfield" },
-		{ "room", { -212.344f, 64.781f, -476.156f }, 6, "shellcasings_762_indoor_wave",
+		{ "room", { -212.340f, 64.750f, -479.360f }, 6, "shellcasings_762_indoor_wave",
 				"reflections_close_indoor_small_wave" },
 } };
 
 constexpr std::array<AreaPoint, 2> kSeinePoints{ {
-		{ "room", { 39.100f, 1.280f, -47.979f }, 6, "shellcasings_762_indoor_wave",
+		{ "room", { 39.100f, 1.250f, -49.670f }, 6, "shellcasings_762_indoor_wave",
 				"reflections_close_indoor_small_wave" },
 		{ "open ground", { 159.301f, 5.120f, -115.258f }, 0, "shellcasings_762_outdoor_wave",
 				"reflections_close_openfield" },

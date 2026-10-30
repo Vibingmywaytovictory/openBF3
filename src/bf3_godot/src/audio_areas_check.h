@@ -43,7 +43,7 @@ private:
 
 	void teleport(Bf3LevelSession &r_session);
 	void row(const std::string &p_name, bool p_pass, const std::string &p_detail);
-	void measure(const AudioAreasInputs &p_in);
+	void measure(const AudioAreasInputs &p_in, const bf3::sim::Vec3 &p_soldier);
 
 	std::vector<AudioAreasPoint> points_;
 	size_t next_ = 0;

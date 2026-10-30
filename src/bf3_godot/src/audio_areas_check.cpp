@@ -100,9 +100,13 @@ void AudioAreasCheck::teleport(Bf3LevelSession &r_session) {
 	client->send_debug(q);
 }
 
-void AudioAreasCheck::measure(const AudioAreasInputs &p_in) {
+void AudioAreasCheck::measure(const AudioAreasInputs &p_in, const sim::Vec3 &p_soldier) {
 	const AudioAreasPoint &p = points_[next_];
 	const std::string name = "point" + std::to_string(next_);
+	const float off = horizontal_distance(p_soldier, p.feet);
+	row(name + ".place", off <= kArriveXz && std::fabs(p_soldier[1] - p.feet[1]) <= kArriveY,
+			fmt("the soldier stands at (%.2f, %.2f, %.2f), %.2f m from the point", double(p_soldier[0]),
+					double(p_soldier[1]), double(p_soldier[2]), double(off)));
 	const sim::logic::SoundAreaNatives *areas = p_in.flow != nullptr ? p_in.flow->sound_areas() : nullptr;
 	if (areas == nullptr || p_in.audio == nullptr) {
 		row(name + ".evaluator", false, "no sound area natives or no game audio");
@@ -192,7 +196,7 @@ bool AudioAreasCheck::step(Bf3LevelSession &r_session, const AudioAreasInputs &p
 			if (t_ < kSettleSeconds) {
 				return false;
 			}
-			measure(p_in);
+			measure(p_in, f.own_curr.position);
 			++next_;
 			if (next_ < points_.size()) {
 				teleport(r_session);
