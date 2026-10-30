@@ -1,7 +1,5 @@
 #pragma once
 
-#include "game_frame.h"
-
 #include "bf3/core/result.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/sim_types.h"
@@ -11,6 +9,8 @@
 #include <string>
 
 namespace bf3::godot_side {
+
+struct GameFrame;
 
 inline constexpr uint32_t kTdmDefaultBots = 31;
 
