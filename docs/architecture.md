@@ -144,7 +144,7 @@ tables over one grammar (`bf3/core/util/key_values.h`, byte and line caps on eve
 
 These are structural, known, and listed so nobody mistakes them for design intent.
 
-* `bf3_host` holds both the server and the client. A `bf3_client` split would make the dependency picture honest.
+* `bf3_host` holds both the server and the client, so the dedicated server's DLL, whose link closure the configure guard (`cmake/server_deps_guard.cmake`) and whose link map `build.server_deps` hold to `bf3_host` and its libraries, still carries `client_session.cpp`, `client_loop.cpp` and the other client parts. A `bf3_client` split would make the dependency picture honest.
 * Gate code still sits in three libraries: `bf3_audio` (`audio_check`, `game_audio_check`, which `game_audio` and
   `bf3_client_audio` call), `bf3_fx` (`fx_harness`) and `bf3_host` (`rest_check`).
 * Milestone names (M1, M2a, M2b, S0, S3, PT1) remain in the gated checks, demos and selftest (`m1_check`,
