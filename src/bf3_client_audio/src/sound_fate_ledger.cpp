@@ -11,10 +11,6 @@ namespace bf3::audio {
 
 namespace {
 
-bool contains_ascii(std::string_view p_text, std::string_view p_needle) {
-	return core::to_lower_ascii(p_text).find(p_needle) != std::string::npos;
-}
-
 size_t table_size(size_t p_capacity) {
 	size_t n = 16;
 	while (n < p_capacity * 2) {
@@ -27,7 +23,7 @@ size_t table_size(size_t p_capacity) {
 
 void SoundCategoryTable::add_weapons(const WeaponAudioTable &p_table) {
 	for (const WeaponAudioDef &d : p_table.defs) {
-		const SoundPatchClass c = d.explosive || d.explosion ? SoundPatchClass::Explosive : SoundPatchClass::Weapon;
+		const SoundPatchClass c = d.explosive ? SoundPatchClass::Explosive : SoundPatchClass::Weapon;
 		if (d.program) {
 			add(d.program->name, c);
 		}
@@ -67,9 +63,10 @@ SoundCategory SoundCategoryTable::category(
 		case SoundPatchClass::Other:
 			break;
 	}
-	if (contains_ascii(p_patch, "bullet_impacts")) {
-		return contains_ascii(p_patch, "soldier") || contains_ascii(p_scope, "soldier") ? SoundCategory::ImpactSoldier
-																						: SoundCategory::ImpactSurface;
+	if (core::icontains_ascii(p_patch, "bullet_impacts")) {
+		return core::icontains_ascii(p_patch, "soldier") || core::icontains_ascii(p_scope, "soldier")
+				? SoundCategory::ImpactSoldier
+				: SoundCategory::ImpactSurface;
 	}
 	return SoundCategory::Other;
 }
@@ -175,6 +172,7 @@ void SoundFateLedger::note(const MixerCutEvent &p_event, std::string_view p_scop
 				: SoundCategory::Other;
 		if (Entry *e = insert(p_event.handle)) {
 			e->category = category;
+			e->request_frame = p_event.frame;
 			++totals_.categories[size_t(category)].requested;
 		}
 		return;
@@ -262,7 +260,7 @@ void SoundFateLedger::note(const MixerCutEvent &p_event, std::string_view p_scop
 	}
 }
 
-SoundFateTotals SoundFateLedger::totals() const {
+SoundFateTotals SoundFateLedger::totals(uint64_t p_now_frame, uint64_t p_grace_frames) const {
 	SoundFateTotals t = totals_;
 	for (const Entry &e : table_) {
 		if (e.handle == kNoInstance || e.fated) {
@@ -274,7 +272,7 @@ SoundFateTotals SoundFateLedger::totals() const {
 																		  : SoundDropReason::ParkedByData;
 			(sound_drop_by_data(r) ? c.data_drops : c.other_drops) += 1;
 			++c.reasons[size_t(r)];
-		} else if (!e.started) {
+		} else if (!e.started && e.request_frame + p_grace_frames <= p_now_frame) {
 			++c.other_drops;
 			++c.reasons[size_t(SoundDropReason::NeverStarted)];
 		}

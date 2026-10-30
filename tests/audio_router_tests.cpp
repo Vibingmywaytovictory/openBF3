@@ -1014,7 +1014,7 @@ TEST_SUITE("audio-router") {
 
 	TEST_CASE("sound fate ledger: categories from the weapon table, every fate and drop reason, a full table") {
 		auto table = std::make_shared<ba::WeaponAudioTable>();
-		table->defs.resize(2);
+		table->defs.resize(3);
 		auto named = [](std::string p_name) {
 			auto p = std::make_shared<SoundProgram>();
 			p->name = std::move(p_name);
@@ -1023,6 +1023,9 @@ TEST_SUITE("audio-router") {
 		table->defs[0].program = named("sound/weapons/handheld/m16a3/weapon_assaultrifle_m16a4_02");
 		table->defs[1].program = named("sound/weapons/handheld/m67/m67");
 		table->defs[1].explosion = named("sound/explosions/handgrenade/explosion_handgrenade");
+		table->defs[1].explosive = true;
+		table->defs[2].program = named("sound/weapons/handheld/m320/weapon_m320");
+		table->defs[2].explosion = named("sound/explosions/m320/explosion_m320");
 		ba::SoundCategoryTable cats;
 		cats.add_weapons(*table);
 		CHECK(cats.category("sound/weapons/handheld/m67/m67", "", 20.0f) == ba::SoundCategory::Explosion);
@@ -1037,6 +1040,10 @@ TEST_SUITE("audio-router") {
 		CHECK(cats.category("sound/bullet_craft/bullet_impacts/soldier_body", "", 3.0f) ==
 				ba::SoundCategory::ImpactSoldier);
 		CHECK(cats.category("sound/weapons/handheld/other/unknown", "", 3.0f) == ba::SoundCategory::Other);
+		CHECK(cats.category("sound/weapons/handheld/m320/weapon_m320", "", 20.0f) == ba::SoundCategory::BotGun);
+		CHECK(cats.category("sound/explosions/m320/explosion_m320", "", 20.0f) == ba::SoundCategory::Explosion);
+		CHECK(cats.category("SOUND/BULLET_CRAFT/BULLET_IMPACTS/SOLDIER_BODY", "", 3.0f) ==
+				ba::SoundCategory::ImpactSoldier);
 
 		ba::SoundFateLedger ledger(64);
 		ledger.set_categories(&cats);
@@ -1099,6 +1106,14 @@ TEST_SUITE("audio-router") {
 		CHECK(ledger.untracked() == 1);
 		CHECK(ledger.format(t).find("6 outside the data's rules, 3 by the data's rules, of 12 requested") !=
 				std::string::npos);
+		ba::MixerCutEvent late;
+		late.kind = K::Request;
+		late.handle = 50;
+		late.frame = 1000;
+		ledger.note(late, "");
+		CHECK(ledger.totals(1500, 1000).other_drops() == 6);
+		CHECK(ledger.totals(2000, 1000).other_drops() == 7);
+		CHECK(ledger.totals().other_drops() == 7);
 
 		ba::SoundFateLedger small(1);
 		small.set_categories(&cats);

@@ -16,6 +16,7 @@ constexpr char to_upper_ascii(char p_c) {
 std::string to_lower_ascii(std::string_view p_text);
 std::string to_upper_ascii(std::string_view p_text);
 bool iequals_ascii(std::string_view p_a, std::string_view p_b);
+bool icontains_ascii(std::string_view p_text, std::string_view p_needle);
 std::string_view trim(std::string_view p_text);
 
 }

@@ -75,7 +75,7 @@ public:
 	void set_categories(const SoundCategoryTable *p_table);
 	void note(const MixerCutEvent &p_event, std::string_view p_scope);
 
-	SoundFateTotals totals() const;
+	SoundFateTotals totals(uint64_t p_now_frame = UINT64_MAX, uint64_t p_grace_frames = 0) const;
 	uint64_t untracked() const { return untracked_; }
 	uint64_t overflows() const { return overflows_; }
 	std::string format(const SoundFateTotals &p_totals) const;
@@ -87,6 +87,7 @@ private:
 		bool started = false;
 		bool fated = false;
 		bool coalesced = false;
+		uint64_t request_frame = 0;
 		uint8_t park = 0;
 		uint32_t parks = 0;
 	};

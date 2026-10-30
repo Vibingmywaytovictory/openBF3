@@ -131,6 +131,10 @@ TEST_SUITE("core-util-unit") {
 		CHECK(to_lower_ascii("\xC4X") == "\xC4x");
 		CHECK(iequals_ascii("SoldierBody", "soldierBODY"));
 		CHECK_FALSE(iequals_ascii("Soldier", "Soldiers"));
+		CHECK(icontains_ascii("sound/Bullet_Craft/BULLET_IMPACTS/soldier", "bullet_impacts"));
+		CHECK(icontains_ascii("abc", ""));
+		CHECK_FALSE(icontains_ascii("bullet_impact", "bullet_impacts"));
+		CHECK_FALSE(icontains_ascii("", "a"));
 		CHECK(trim(" \t\r\n\f\vkey = 1 \t\r\n") == "key = 1");
 		CHECK(trim(" \t ").empty());
 		CHECK(trim("") == "");

@@ -26,6 +26,18 @@ std::string to_upper_ascii(std::string_view p_text) {
 	return out;
 }
 
+bool icontains_ascii(std::string_view p_text, std::string_view p_needle) {
+	if (p_needle.size() > p_text.size()) {
+		return false;
+	}
+	for (size_t i = 0; i + p_needle.size() <= p_text.size(); ++i) {
+		if (iequals_ascii(p_text.substr(i, p_needle.size()), p_needle)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 bool iequals_ascii(std::string_view p_a, std::string_view p_b) {
 	if (p_a.size() != p_b.size()) {
 		return false;
