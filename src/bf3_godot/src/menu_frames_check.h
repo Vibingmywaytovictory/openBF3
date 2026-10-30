@@ -50,6 +50,7 @@ struct MenuFramesIo {
 	double render_cpu_ms = 0.0;
 	double render_gpu_ms = 0.0;
 	double video_mb = 0.0;
+	std::optional<uint64_t> local_video_bytes;
 	uint64_t glitch_triggers = 0;
 	bool glitch_drawn = false;
 };
@@ -130,6 +131,8 @@ private:
 	uint64_t recovery_frames_ = 0;
 	double video_play_mb_ = 0.0;
 	double video_peak_mb_ = 0.0;
+	std::optional<uint64_t> local_play_bytes_;
+	uint64_t local_peak_bytes_ = 0;
 	std::string shot_dir_;
 	std::vector<std::string> shots_;
 	std::vector<uint32_t> step_shots_ = std::vector<uint32_t>(steps_.size(), 0u);

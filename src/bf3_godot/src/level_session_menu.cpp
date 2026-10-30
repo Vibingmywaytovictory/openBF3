@@ -19,6 +19,7 @@
 #include "ui_cursor.h"
 #include "ui_post_process.h"
 #include "ui_sizes_check.h"
+#include "video_memory.h"
 #include "viewmodel.h"
 
 #include "bf3/core/util/key_values.h"
@@ -298,6 +299,9 @@ bool Bf3LevelSession::tdm_menu_frame(double p_now_s) {
 		fio.ui_ms = m.ms_tdm_hud;
 		fio.video_mb =
 				Performance::get_singleton()->get_monitor(Performance::RENDER_VIDEO_MEM_USED) / (1024.0 * 1024.0);
+		if (const std::optional<ProcessVideoMemory> local = process_video_memory()) {
+			fio.local_video_bytes = local->local_bytes;
+		}
 		const RID viewport = get_viewport()->get_viewport_rid();
 		fio.render_cpu_ms = RenderingServer::get_singleton()->viewport_get_measured_render_time_cpu(viewport);
 		fio.render_gpu_ms = RenderingServer::get_singleton()->viewport_get_measured_render_time_gpu(viewport);

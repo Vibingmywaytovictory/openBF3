@@ -315,3 +315,8 @@ if(OPENBF3_BUILD_CHECKS)
     openbf3_registry(bf3_godot src/moments native_hud_moments.h NativeHudMomentGroups bf3::godot_side register_native_hud_moments_ register_native_hud_moment_files)
 endif()
 target_compile_definitions(bf3_godot PRIVATE OPENBF3_BUILD_CHECKS=$<BOOL:${OPENBF3_BUILD_CHECKS}>)
+target_sources(bf3_godot PRIVATE
+    src/video_memory.cpp
+    src/video_memory.h
+)
+target_link_libraries(bf3_godot PRIVATE dxgi)

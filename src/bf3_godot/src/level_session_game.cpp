@@ -13,6 +13,7 @@
 #include "native_hud.h"
 #include "ui_assets.h"
 #include "ui_stage.h"
+#include "video_memory.h"
 #include "viewmodel.h"
 #include "viewmodel_muzzle.h"
 
@@ -1177,7 +1178,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 					static_cast<unsigned long long>(g.frames), double(rs_info->get_rendering_info(RenderingServer::RENDERING_INFO_VIDEO_MEM_USED)) * to_mib,
 					double(rs_info->get_rendering_info(RenderingServer::RENDERING_INFO_TEXTURE_MEM_USED)) * to_mib,
 					double(rs_info->get_rendering_info(RenderingServer::RENDERING_INFO_BUFFER_MEM_USED)) * to_mib);
-			UtilityFunctions::print(line);
+			UtilityFunctions::print(to_godot(std::string(line) + "; " + process_video_memory_text()));
 		}
 	}
 	if (g.hud_items != nullptr && g.hud_items->is_loaded() && !g.hud_names_applied) {

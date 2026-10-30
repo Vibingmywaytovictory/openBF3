@@ -6,6 +6,7 @@
 #include "native_flow.h"
 #include "native_screens.h"
 #include "swf_view.h"
+#include "video_memory.h"
 
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/options.h"
@@ -199,6 +200,12 @@ void MenuFramesCheck::record(const Ctx &p_c) {
 	video_peak_mb_ = std::max(video_peak_mb_, p_c.io.video_mb);
 	if (steps_[f.step].phase == Phase::Play && video_play_mb_ == 0.0) {
 		video_play_mb_ = p_c.io.video_mb;
+	}
+	if (p_c.io.local_video_bytes) {
+		local_peak_bytes_ = std::max(local_peak_bytes_, *p_c.io.local_video_bytes);
+		if (steps_[f.step].phase == Phase::Play && !local_play_bytes_) {
+			local_play_bytes_ = p_c.io.local_video_bytes;
+		}
 	}
 	if (!shot_dir_.empty() && p_c.io.shot && (f.glitch_drawn || f.glitches != 0) && !gated(steps_[f.step].phase) &&
 			shots_.size() < kMenuFramesShots && step_shots_[f.step] < kMenuFramesShotsPerStep) {
@@ -408,6 +415,9 @@ std::string MenuFramesCheck::report() const {
 	out += "[ui]   " + std::to_string(glitches_seen_) + " glitch triggers seen, " + std::to_string(glitch_frames_) +
 			" frames drawn with the glitch\n";
 	out += bf3::core::fmt("[ui]   video memory %.1f MB in play, peak %.1f MB\n", video_play_mb_, video_peak_mb_);
+	out += local_play_bytes_ ? bf3::core::fmt("[ui]   DXGI local video memory %.1f MiB in play, peak %.1f MiB\n",
+									   video_memory_mib(*local_play_bytes_), video_memory_mib(local_peak_bytes_))
+							 : "[ui]   DXGI local video memory: no reading\n";
 	out += "[ui]   " + std::to_string(repeats_) + " key press(es) repeated after 3 s without the expected screen\n";
 	out += "[ui]   " + std::to_string(deaths_) + " death(s) in play or a menu, " + std::to_string(recovery_frames_) +
 			" frames until back in play not counted\n";
