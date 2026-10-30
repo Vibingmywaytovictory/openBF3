@@ -102,6 +102,7 @@ struct RoundNatives::State {
 	Tick countdown_end = 0;
 	bool unspawn_flag = false;
 	bool restart_flag = false;
+	bool level_end_flag = false;
 	bool published = false;
 	Tick tick = 0;
 
@@ -385,7 +386,7 @@ core::Status RoundNatives::apply(Tick p_tick, std::span<const LogicEffect> p_eff
 			default:
 
 				if (type == T::LevelControl && dir == D::EventIn) {
-					s.restart_flag = true;
+					s.level_end_flag = true;
 					s.phase = RoundPhase::Restarting;
 					s.note(e.node, NativeTimelineEntry::What::Input, e.port);
 				} else if ((type == T::CharacterSpawn || type == T::AlternateSpawn) && dir == D::PropertyIn &&
@@ -599,6 +600,12 @@ bool RoundNatives::take_unspawn_all() {
 bool RoundNatives::take_restart() {
 	const bool f = state_->restart_flag;
 	state_->restart_flag = false;
+	return f;
+}
+
+bool RoundNatives::take_level_end() {
+	const bool f = state_->level_end_flag;
+	state_->level_end_flag = false;
 	return f;
 }
 

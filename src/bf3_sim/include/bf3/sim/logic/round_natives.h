@@ -86,6 +86,7 @@ public:
 	uint8_t team_of(uint8_t p_slot) const;
 	bool take_unspawn_all();
 	bool take_restart();
+	bool take_level_end();
 	float player_killed_delay_s() const;
 	bool killer_camera() const;
 	std::span<const NativeTimelineEntry> timeline() const;

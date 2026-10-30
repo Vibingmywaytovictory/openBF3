@@ -325,6 +325,7 @@ struct TdmRules::Impl {
 	std::unique_ptr<sim::NavQuery> nav;
 	lg::RoundPhase last_phase = lg::RoundPhase::PreRound;
 	bool was_restricted = false;
+	bool level_ended = false;
 	mutable RulesStats stats;
 	uint32_t delay_ticks = 300;
 	uint32_t man_down_ticks = 780;
@@ -577,6 +578,7 @@ struct TdmRules::Impl {
 		state.killer_camera = natives->killer_camera();
 		last_phase = lg::RoundPhase::PreRound;
 		was_restricted = false;
+		level_ended = false;
 		++stats.restarts;
 	}
 };
@@ -1070,6 +1072,14 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		if (m.natives->take_restart()) {
 			m.restart_round(p_tick, r_orders);
 		}
+		if (m.natives->take_level_end()) {
+			++m.stats.level_ends;
+			if (m.config.hold_level_end) {
+				m.level_ended = true;
+			} else {
+				m.restart_round(p_tick, r_orders);
+			}
+		}
 	}
 
 	for (size_t i = 0; i < n; ++i) {
@@ -1192,7 +1202,8 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 	if (m.natives) {
 		const lg::RoundNatives &nat = *m.natives;
 		net::MatchState &ms = m.state;
-		ms.phase = phase == lg::RoundPhase::PreRound ? net::MatchPhase::PreRound
+		ms.phase = m.level_ended					 ? net::MatchPhase::LevelChange
+				: phase == lg::RoundPhase::PreRound	 ? net::MatchPhase::PreRound
 				: phase == lg::RoundPhase::InRound	 ? net::MatchPhase::InRound
 				: phase == lg::RoundPhase::RoundOver ? net::MatchPhase::RoundOver
 													 : net::MatchPhase::Restarting;
@@ -1304,6 +1315,17 @@ sim::Command TdmRules::apply_input_restriction(const sim::Command &p_command) co
 
 std::span<const DownedSoldier> TdmRules::downed() const {
 	return impl_->downed;
+}
+
+bool TdmRules::level_ended() const {
+	return impl_->level_ended;
+}
+
+void TdmRules::restart_in_place(uint32_t p_tick, std::vector<RulesOrder> &r_orders) {
+	Impl &m = *impl_;
+	if (m.natives && m.runtime && !m.faulted) {
+		m.restart_round(p_tick, r_orders);
+	}
 }
 
 net::MatchPhase TdmRules::phase() const {

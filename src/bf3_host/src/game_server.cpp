@@ -650,6 +650,24 @@ bool GameServer::set_squad_order(uint8_t p_team, uint8_t p_squad, const SquadOrd
 	return rules != nullptr && rules->set_squad_order(p_team, p_squad, p_order);
 }
 
+bool GameServer::level_ended() const {
+	const TdmRules *rules = impl_->match.rules();
+	return rules != nullptr && rules->level_ended();
+}
+
+void GameServer::restart_round() {
+	Impl &m = *impl_;
+	TdmRules *rules = m.match.rules();
+	if (rules == nullptr) {
+		return;
+	}
+	std::vector<RulesOrder> orders;
+	rules->restart_in_place(m.tick, orders);
+	if (!orders.empty()) {
+		m.spawner.apply_orders(m.tick, orders, m.combat_log);
+	}
+}
+
 int GameServer::add_local_bot(std::unique_ptr<CommandSource> p_source, int p_team) {
 	return impl_->add_local(std::move(p_source), p_team, true);
 }

@@ -84,6 +84,7 @@ struct MatchRulesConfig {
 	float preround_override_s = -1.0f;
 	int min_players_override = -1;
 	uint8_t max_players = 32;
+	bool hold_level_end = false;
 };
 
 struct RulesOrder {
@@ -136,6 +137,7 @@ struct RulesStats {
 	uint64_t team_switches = 0, team_switches_refused = 0;
 	uint64_t squad_spawns = 0, squad_spawns_on_nav = 0;
 	uint64_t squad_revives = 0, squad_wipes = 0;
+	uint64_t level_ends = 0;
 };
 static_assert(std::is_trivially_copyable_v<RulesStats>);
 
@@ -160,6 +162,8 @@ public:
 
 	uint8_t on_connect(uint8_t p_slot, bool p_bot, std::string_view p_name);
 	void on_disconnect(uint8_t p_slot);
+	bool level_ended() const;
+	void restart_in_place(uint32_t p_tick, std::vector<RulesOrder> &r_orders);
 	void on_spawned(uint8_t p_slot, uint32_t p_tick);
 	SpawnRefusal request_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_spawn_choice, uint32_t p_tick);
 	bool request_suicide(uint8_t p_slot);
