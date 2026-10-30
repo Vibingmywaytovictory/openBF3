@@ -139,7 +139,9 @@ TEST_SUITE("ui-flow-session") {
 		if (l == nullptr) {
 			return;
 		}
-		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level);
+		UiFlowSessionOptions echo;
+		echo.echo_networked = true;
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level, echo);
 		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
 		UiFlowSession &s = **made;
 		const UiFlowSessionStats &st = s.stats();
@@ -383,7 +385,9 @@ TEST_SUITE("ui-flow-session") {
 		if (l == nullptr) {
 			return;
 		}
-		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level);
+		UiFlowSessionOptions echo;
+		echo.echo_networked = true;
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level, echo);
 		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
 		UiFlowSession &s = **made;
 		ui_flow_tdm_pc_defaults(s, "TeamDeathMatch0");
@@ -408,12 +412,103 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(s.errors().empty());
 	}
 
+	TEST_CASE("ui flow session: networked edges are delivered only from received events, as the echo of them would be; "
+			  "the server's "
+			  "ghost applies") {
+		Level *l = level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		UiFlowSessionOptions echo;
+		echo.echo_networked = true;
+		core::Result<std::unique_ptr<UiFlowSession>> made_echo = UiFlowSession::create(*l->level, echo);
+		core::Result<std::unique_ptr<UiFlowSession>> made_fed = UiFlowSession::create(*l->level);
+		core::Result<std::unique_ptr<UiFlowSession>> made_alone = UiFlowSession::create(*l->level);
+		REQUIRE(made_echo.ok());
+		REQUIRE(made_fed.ok());
+		REQUIRE(made_alone.ok());
+		Script a{ **made_echo }, b{ **made_fed }, c{ **made_alone };
+		for (Script *sc : { &a, &b, &c }) {
+			ui_flow_tdm_pc_defaults(sc->session, "TeamDeathMatch0");
+		}
+		uint64_t forwarded = 0;
+		const auto run_to = [&](sim::Tick p_tick) {
+			while (a.tick < p_tick) {
+				for (Script *sc : { &a, &b, &c }) {
+					++sc->tick;
+				}
+				REQUIRE(a.session.update(a.state).ok());
+				a.collect();
+				const std::vector<sim::logic::LogicNetworkedEvent> sent(
+						a.session.runtime().networked().begin(), a.session.runtime().networked().end());
+				forwarded += sent.size();
+				b.session.receive_networked(sent);
+				REQUIRE(b.session.update(b.state).ok());
+				b.collect();
+				REQUIRE(c.session.update(c.state).ok());
+				c.collect();
+			}
+		};
+		const auto set = [&](auto p_change) {
+			for (Script *sc : { &a, &b, &c }) {
+				p_change(sc->state);
+			}
+		};
+		set([](UiGameState &r_s) {
+			r_s.phase = net::MatchPhase::InRound;
+			r_s.joined = true;
+		});
+		run_to(120);
+		set([](UiGameState &r_s) {
+			r_s.phase = net::MatchPhase::RoundOver;
+			r_s.winner = 1;
+		});
+		run_to(180);
+		set([](UiGameState &r_s) { r_s.end_of_round = true; });
+		run_to(180 + sim::logic::logic_delay_ticks(13.0));
+		const Lines over_echo = a.phase("networked by the echo");
+		const Lines over_fed = b.phase("networked from received events");
+		const Lines over_alone = c.phase("networked from nothing");
+		CHECK(over_fed == over_echo);
+		CHECK(b.timeline == a.timeline);
+		CHECK(a.at("push eorwinningteamscreen", 121) > 0);
+		CHECK(b.at("push eorwinningteamscreen", 121) == a.at("push eorwinningteamscreen", 121));
+		CHECK(c.at("push eorwinningteamscreen", 121) < 0);
+		const UiFlowSessionStats &sa = a.session.stats(), &sb = b.session.stats(), &sc = c.session.stats();
+		std::printf("ui.flow.session networked: %llu fired, %llu echoed; fed %llu received, %llu delivered, %llu "
+					"unmatched, %llu "
+					"fired locally and not delivered\n",
+				(unsigned long long)sa.networked_local, (unsigned long long)sa.networked_echoed,
+				(unsigned long long)sb.networked_received, (unsigned long long)sb.networked_delivered,
+				(unsigned long long)sb.networked_unmatched, (unsigned long long)sb.networked_local);
+		CHECK(forwarded > 0);
+		CHECK(sa.networked_echoed > 0);
+		CHECK(sb.networked_received == forwarded);
+		CHECK(sb.networked_delivered == sa.networked_echoed);
+		CHECK(sb.networked_echoed == 0);
+		CHECK(sb.networked_local == sa.networked_local);
+		CHECK(sc.networked_echoed == 0);
+		CHECK(sc.networked_delivered == 0);
+		CHECK(sc.networked_local > 0);
+
+		const sim::logic::LogicGhost ghost = a.session.runtime().ghost();
+		CHECK(b.session.apply_ghost(ghost).ok());
+		sim::logic::LogicGhost wrong = ghost;
+		wrong.sequence_start.push_back(sim::logic::LogicGhost::kNoStart);
+		CHECK_FALSE(b.session.apply_ghost(wrong).ok());
+		CHECK(sb.ghosts_applied == 1);
+		CHECK(sb.ghosts_refused == 1);
+		CHECK(b.session.errors().empty());
+	}
+
 	TEST_CASE("ui flow session: mp_eor_fading's flash and fades follow the logic's Sequence, LVE and Fade events") {
 		Level *l = level_or_skip();
 		if (l == nullptr) {
 			return;
 		}
-		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level);
+		UiFlowSessionOptions echo;
+		echo.echo_networked = true;
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level, echo);
 		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
 		UiFlowSession &s = **made;
 		ui_flow_tdm_pc_defaults(s, "TeamDeathMatch0");

@@ -6,6 +6,7 @@
 #include "tdm_flow.h"
 #include "ui_screen_records.h"
 
+#include "bf3/host/client_session.h"
 #include "bf3/host/hud_feed.h"
 #include "bf3/sim/sim_types.h"
 
@@ -114,6 +115,7 @@ struct TdmState {
 	bool native_failure_printed = false;
 	double native_clock_s = -1.0;
 	double native_delta_s = 0.0;
+	bf3::host::ClientLogicFeed logic_feed;
 	uint32_t own_spawns = 0;
 	uint64_t ui_screens_id = 0;
 	std::unique_ptr<NativeFlow, void (*)(NativeFlow *)> native_flow{ nullptr, nullptr };

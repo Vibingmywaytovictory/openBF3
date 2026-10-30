@@ -1,8 +1,10 @@
 #include <doctest/doctest.h>
 
+#include "bf3/core/level/level.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/tdm_rules.h"
+#include "bf3/host/ui_flow_session.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/logic/logic_runtime.h"
 
@@ -307,6 +309,68 @@ TEST_SUITE("host-logic-ghost") {
 		}
 		CHECK(peers[0].events.size() > peers[1].events.size());
 		CHECK(peers[1].events.size() > 0);
+
+		core::Result<std::unique_ptr<core::level::LoadedLevel>> client_level =
+				core::level::load_level(level->install, "MP_Subway", "TeamDeathMatch0");
+		REQUIRE_MESSAGE(client_level.ok(), (client_level.ok() ? std::string() : client_level.error().message));
+		core::Result<std::unique_ptr<host::UiFlowSession>> made = host::UiFlowSession::create(**client_level);
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		host::UiFlowSession &flow = **made;
+		host::ui_flow_tdm_pc_defaults(flow, "TeamDeathMatch0");
+		host::UiGameState st;
+		st.joined = true;
+		st.phase = net::MatchPhase::InRound;
+		REQUIRE(flow.update(st).ok());
+		REQUIRE(flow.apply_ghost(*peers[0].join_sync).ok());
+		std::vector<lg::LogicNetworkedEvent> received;
+		for (const Received &r : peers[0].events) {
+			received.push_back(r.event);
+		}
+		for (size_t at = 0; at < received.size(); at += 64) {
+			flow.receive_networked(std::span<const lg::LogicNetworkedEvent>(received).subspan(
+					at, std::min<size_t>(64, received.size() - at)));
+			REQUIRE(flow.update(st).ok());
+		}
+		REQUIRE(flow.apply_ghost(*peers[0].mirror).ok());
+		REQUIRE(flow.update(st).ok());
+		const host::UiFlowSessionStats &fs = flow.stats();
+		std::printf("host.logic.ghost: the client UI flow: %llu received, %llu deliveries, %llu unmatched, %llu fired "
+					"locally, %llu "
+					"delivered locally, ghosts %llu applied, %llu refused\n",
+				(unsigned long long)fs.networked_received, (unsigned long long)fs.networked_delivered,
+				(unsigned long long)fs.networked_unmatched, (unsigned long long)fs.networked_local,
+				(unsigned long long)fs.networked_echoed, (unsigned long long)fs.ghosts_applied,
+				(unsigned long long)fs.ghosts_refused);
+		const core::gameplay::LogicGraph &client_graph = flow.runtime().graph();
+		std::map<uint64_t, std::set<std::pair<uint32_t, int32_t>>> client_targets;
+		std::set<uint64_t> round_over_cues;
+		for (const core::gameplay::LogicEdge &e : client_graph.networked_edges()) {
+			if (e.target != core::gameplay::kNoLogicIndex) {
+				client_targets[e.connection].emplace(e.target, e.target_port);
+				if (client_graph.nodes()[e.source].type == core::gameplay::LogicTypeId::RoundOver) {
+					round_over_cues.insert(e.connection);
+				}
+			}
+		}
+		size_t matched = 0, deliveries = 0, cues = 0;
+		for (const lg::LogicNetworkedEvent &e : received) {
+			if (const auto at = client_targets.find(e.connection); at != client_targets.end()) {
+				++matched;
+				deliveries += at->second.size();
+			}
+			cues += round_over_cues.count(e.connection);
+		}
+		std::printf("host.logic.ghost: the client graph has a networked edge for %zu of the %zu events (%zu round-over "
+					"cues)\n",
+				matched, received.size(), cues);
+		CHECK(fs.networked_received == received.size());
+		CHECK(fs.networked_unmatched == received.size() - matched);
+		CHECK(fs.networked_delivered == deliveries);
+		CHECK(cues == 1);
+		CHECK(fs.networked_echoed == 0);
+		CHECK(fs.ghosts_applied == 2);
+		CHECK(fs.ghosts_refused == 0);
+		CHECK(flow.errors().empty());
 	}
 
 	TEST_CASE("host-logic-ghost: install unchanged") {

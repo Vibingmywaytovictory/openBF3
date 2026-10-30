@@ -3,6 +3,7 @@
 #include "bf3/core/ui/key_bindings.h"
 #include "bf3/core/ui/ui_graph.h"
 #include "bf3/core/ui/ui_input.h"
+#include "bf3/host/client_session.h"
 #include "bf3/host/ui_flow_session.h"
 
 #include <atomic>
@@ -51,6 +52,7 @@ public:
 	bool apply_key_bindings(const bf3::core::ui::KeyBindingTable &p_table, uint64_t p_revision);
 
 	bf3::core::Status tick(const bf3::host::UiGameState &p_state, double p_seconds);
+	bf3::core::Status receive(bf3::host::ClientLogicFeed &r_feed);
 	std::vector<bf3::core::ui::UiFlowAction> take_actions();
 	std::optional<std::string> take_journal_overflow();
 	void set_keep_log(bool p_keep) { keep_log_ = p_keep; }
@@ -78,6 +80,8 @@ private:
 	uint64_t ticks_ = 0;
 	uint64_t actions_ = 0;
 	std::vector<bf3::core::ui::UiFlowAction> pending_;
+	std::optional<bf3::sim::logic::LogicGhost> ghost_;
+	bool ghost_pending_ = false;
 };
 
 }

@@ -137,6 +137,25 @@ bf3::core::Status NativeFlow::tick(const bf3::host::UiGameState &p_state, double
 	return bf3::core::Status::success();
 }
 
+bf3::core::Status NativeFlow::receive(bf3::host::ClientLogicFeed &r_feed) {
+	if (r_feed.ghost) {
+		ghost_ = std::move(*r_feed.ghost);
+		r_feed.ghost.reset();
+		ghost_pending_ = true;
+	}
+	if (session_ == nullptr) {
+		r_feed.events.clear();
+		return bf3::core::Status::success();
+	}
+	session_->receive_networked(r_feed.events);
+	r_feed.events.clear();
+	if (!ghost_pending_) {
+		return bf3::core::Status::success();
+	}
+	ghost_pending_ = false;
+	return session_->apply_ghost(*ghost_);
+}
+
 std::optional<std::string> NativeFlow::take_journal_overflow() {
 	const uint64_t dropped = session_ != nullptr ? session_->stats().data_writes_dropped : 0;
 	if (dropped == 0 || journal_overflow_reported_) {

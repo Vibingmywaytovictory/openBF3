@@ -12,6 +12,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -30,6 +31,7 @@ inline constexpr size_t kUiFlowSessionMaxLog = 1u << 16;
 inline constexpr size_t kUiFlowSessionMaxActions = 4096;
 inline constexpr size_t kUiFlowSessionMaxWidgetEvents = 4096;
 inline constexpr size_t kUiFlowSessionMaxDataWrites = 4096;
+inline constexpr size_t kUiFlowSessionMaxReceived = 4096;
 
 enum class UiPreRoundEvent : uint8_t { Waiting, Countdown, RoundStarted, Restarting };
 int32_t ui_preround_event_id(UiPreRoundEvent p_event);
@@ -48,6 +50,7 @@ struct UiFlowSessionOptions {
 	std::string scope = std::string(kUiGameLogicTdm);
 	sim::logic::LogicPlatform platform = sim::logic::LogicPlatform::Win32;
 	bool initialize_screens = true;
+	bool echo_networked = false;
 };
 
 struct UiFlowWidgetEvent {
@@ -78,6 +81,13 @@ struct UiFlowSessionStats {
 	uint64_t unknown_inputs = 0;
 	uint64_t outputs_raised = 0;
 	uint64_t networked_delivered = 0;
+	uint64_t networked_received = 0;
+	uint64_t networked_unmatched = 0;
+	uint64_t networked_dropped = 0;
+	uint64_t networked_local = 0;
+	uint64_t networked_echoed = 0;
+	uint64_t ghosts_applied = 0;
+	uint64_t ghosts_refused = 0;
 	uint64_t reloads = 0;
 	uint64_t graphs_popped = 0;
 	uint64_t data_writes_dispatched = 0;
@@ -102,6 +112,8 @@ public:
 	void erase_data(std::string_view p_category, int32_t p_key);
 	void screen_initialized(uint64_t p_screen);
 	void screen_exited(uint64_t p_screen);
+	void receive_networked(std::span<const sim::logic::LogicNetworkedEvent> p_events);
+	core::Status apply_ghost(const sim::logic::LogicGhost &p_ghost);
 
 	core::ui::UiFlow &flow() { return *flow_; }
 	const core::ui::UiFlow &flow() const { return *flow_; }
@@ -156,6 +168,7 @@ private:
 	void note(std::string p_line);
 	void drain_flow_log();
 	void initialize_opened();
+	void deliver_networked();
 
 	UiFlowSessionOptions options_;
 	std::shared_ptr<const core::gameplay::LogicGraph> graph_;
@@ -164,6 +177,9 @@ private:
 	std::map<std::string, std::shared_ptr<const core::ui::UiGraphAsset>, std::less<>> graphs_;
 	core::ui::UiGraphProvider provider_;
 	std::vector<std::pair<uint32_t, int32_t>> watch_ports_;
+	std::map<uint64_t, std::vector<std::pair<uint32_t, int32_t>>> networked_targets_;
+	std::vector<sim::logic::LogicNetworkedEvent> received_;
+	std::optional<sim::logic::LogicGhost> ghost_;
 	std::unique_ptr<core::ui::UiFlow> flow_;
 	uint32_t scope_ = 0;
 	std::map<uint32_t, std::string> ui_graph_of_;

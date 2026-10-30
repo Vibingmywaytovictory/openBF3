@@ -603,6 +603,19 @@ bool EorCheck::frame(Bf3UiScreens &r_screens, bf3::host::UiFlowSession *p_sessio
 		case Step::PopupActivated:
 			if (p_eor.quit_requested()) {
 				note("OK: QuitGame requested");
+				const bf3::host::UiFlowSessionStats &ns =
+						p_session != nullptr ? p_session->stats() : bf3::host::UiFlowSessionStats{};
+				note("networked events: " + std::to_string(ns.networked_received) + " received from the server, " +
+						std::to_string(ns.networked_delivered) + " deliveries, " +
+						std::to_string(ns.networked_unmatched) + " unmatched, " + std::to_string(ns.networked_local) +
+						" fired locally, " + std::to_string(ns.networked_echoed) + " delivered locally; ghosts " +
+						std::to_string(ns.ghosts_applied) + " applied, " + std::to_string(ns.ghosts_refused) +
+						" refused");
+				if (ns.networked_received == 0 || ns.networked_delivered == 0 || ns.networked_echoed != 0 ||
+						ns.ghosts_applied == 0 || ns.ghosts_refused != 0) {
+					fail("the round-over cue did not come over the network alone");
+					break;
+				}
 				passed_ = true;
 				done_ = true;
 				step_ = Step::Done;

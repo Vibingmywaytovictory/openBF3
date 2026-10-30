@@ -267,6 +267,10 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 		if (options != nullptr) {
 			options->feed(*flow.session(), r_game.settings->session());
 		}
+		if (const bf3::core::Status s = flow.receive(r_m.logic_feed); !s && !r_m.native_failure_printed) {
+			r_m.native_failure_printed = true;
+			UtilityFunctions::print(to_godot("[ui] ERROR native screens: " + s.error().message));
+		}
 		if (const bf3::core::Status s = flow.tick(st, r_m.native_delta_s); !s && !r_m.native_failure_printed) {
 			r_m.native_failure_printed = true;
 			UtilityFunctions::print(to_godot("[ui] ERROR native screens: " + s.error().message));
@@ -734,7 +738,11 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 	m.scoreboard_held = mapper.scoreboard_held();
 
 	auto t0 = std::chrono::steady_clock::now();
+	if (client_ != nullptr) {
+		client_->take_logic(m.logic_feed);
+	}
 	tick_native_flow(r_game, m, f, level_id(), mode_id(), now_s);
+	m.logic_feed.events.clear();
 	if (tdm_menu_frame(now_s)) {
 		return true;
 	}

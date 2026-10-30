@@ -162,6 +162,15 @@ core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const 
 		ports.insert(p);
 	}
 	watch_ports_.assign(ports.begin(), ports.end());
+	for (const gp::LogicEdge &e : graph_->networked_edges()) {
+		if (e.target == gp::kNoLogicIndex) {
+			continue;
+		}
+		std::vector<std::pair<uint32_t, int32_t>> &targets = networked_targets_[e.connection];
+		if (std::find(targets.begin(), targets.end(), std::make_pair(e.target, e.target_port)) == targets.end()) {
+			targets.emplace_back(e.target, e.target_port);
+		}
+	}
 	stats_.ui_graph_nodes = ui_graph_of_.size();
 	stats_.graphs = graphs_.size();
 	stats_.watches = watch_ports_.size();
@@ -196,7 +205,65 @@ core::Status UiFlowSession::start_logic() {
 	if (!started) {
 		return core::error_at("ui flow session: runtime start", started.error());
 	}
+	if (ghost_) {
+		if (const core::Status applied = apply_ghost(*ghost_); !applied.ok()) {
+			errors_.push_back(applied.error().message);
+		}
+	}
 	return core::Status::success();
+}
+
+void UiFlowSession::receive_networked(std::span<const lg::LogicNetworkedEvent> p_events) {
+	for (const lg::LogicNetworkedEvent &e : p_events) {
+		++stats_.networked_received;
+		if (received_.size() >= kUiFlowSessionMaxReceived) {
+			++stats_.networked_dropped;
+			continue;
+		}
+		received_.push_back(e);
+	}
+}
+
+core::Status UiFlowSession::apply_ghost(const lg::LogicGhost &p_ghost) {
+	ghost_ = p_ghost;
+	const core::Status s = runtime_->apply_ghost(p_ghost);
+	if (!s.ok()) {
+		++stats_.ghosts_refused;
+		return core::error_at("ui flow session: server ghost", s.error());
+	}
+	++stats_.ghosts_applied;
+	return core::Status::success();
+}
+
+void UiFlowSession::deliver_networked() {
+	const std::vector<lg::LogicNetworkedEvent> received = std::exchange(received_, {});
+	for (const lg::LogicNetworkedEvent &ev : received) {
+		const auto targets = networked_targets_.find(ev.connection);
+		if (targets == networked_targets_.end()) {
+			++stats_.networked_unmatched;
+			continue;
+		}
+		for (const auto &[node, port] : targets->second) {
+			const core::Status s = runtime_->deliver_event(node, port, ev.context);
+			if (!s.ok()) {
+				errors_.push_back(s.error().message);
+			}
+			++stats_.networked_delivered;
+		}
+	}
+	for (const lg::LogicNetworkedEvent &ev : runtime_->networked()) {
+		++stats_.networked_local;
+		if (!options_.echo_networked) {
+			continue;
+		}
+		for (const gp::LogicEdge &e : graph_->networked_edges()) {
+			if (e.source == ev.source && e.source_port == ev.source_port && e.connection == ev.connection &&
+					e.target != gp::kNoLogicIndex) {
+				deliver(e.target, e.target_port);
+				++stats_.networked_echoed;
+			}
+		}
+	}
 }
 
 void UiFlowSession::note(std::string p_line) {
@@ -340,15 +407,7 @@ core::Status UiFlowSession::step() {
 			}
 		}
 	}
-	for (const lg::LogicNetworkedEvent &ev : runtime_->networked()) {
-		for (const gp::LogicEdge &e : graph_->networked_edges()) {
-			if (e.source == ev.source && e.source_port == ev.source_port && e.connection == ev.connection &&
-					e.target != gp::kNoLogicIndex) {
-				deliver(e.target, e.target_port);
-				++stats_.networked_delivered;
-			}
-		}
-	}
+	deliver_networked();
 	initialize_opened();
 	return core::Status::success();
 }
