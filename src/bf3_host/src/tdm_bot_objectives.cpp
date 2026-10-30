@@ -86,13 +86,15 @@ void BotRevive::fired_defib(sim::Tick p_tick) {
 	defib_next_ = p_tick + kDefibRetryTicks;
 }
 
-bool BotGrenade::start(TdmShared &r_shared, BotTargeting &r_targeting, const sim::bots::Perception &p_perception, sim::Tick p_tick,
-		const sim::SoldierState &p_self, std::span<const sim::SoldierState> p_states, bool p_have) {
-	const TdmBotConfig &c = *r_shared.config;
-	if (!p_have || r_targeting.lost_target() < 0 || p_tick < next_ || size_t(r_targeting.lost_target()) >= p_states.size()) {
+bool BotGrenade::can_start(const TdmShared &p_shared, const BotTargeting &p_targeting,
+		const sim::bots::Perception &p_perception, sim::Tick p_tick, const sim::SoldierState &p_self,
+		std::span<const sim::SoldierState> p_states, bool p_have, sim::Vec3 *r_at) const {
+	const TdmBotConfig &c = *p_shared.config;
+	if (!p_have || p_targeting.lost_target() < 0 || p_tick < next_ ||
+			size_t(p_targeting.lost_target()) >= p_states.size()) {
 		return false;
 	}
-	const sim::bots::PerceivedEnemy *e = p_perception.find(uint8_t(r_targeting.lost_target()));
+	const sim::bots::PerceivedEnemy *e = p_perception.find(uint8_t(p_targeting.lost_target()));
 	if (e == nullptr || !e->ever_visible) {
 		return false;
 	}
@@ -104,10 +106,23 @@ bool BotGrenade::start(TdmShared &r_shared, BotTargeting &r_targeting, const sim
 	if (d < c.grenade_min_m || d > c.grenade_max_m) {
 		return false;
 	}
+	if (r_at != nullptr) {
+		*r_at = e->last_position;
+	}
+	return true;
+}
+
+bool BotGrenade::start(TdmShared &r_shared, BotTargeting &r_targeting, const sim::bots::Perception &p_perception,
+		sim::Tick p_tick, const sim::SoldierState &p_self, std::span<const sim::SoldierState> p_states, bool p_have) {
+	const TdmBotConfig &c = *r_shared.config;
+	sim::Vec3 at{};
+	if (!can_start(r_shared, r_targeting, p_perception, p_tick, p_self, p_states, p_have, &at)) {
+		return false;
+	}
 	next_ = p_tick + sim::seconds_to_ticks(std::max(c.grenade_every_s, 1.0f));
 	phase_ = 1;
 	phase_tick_ = p_tick;
-	at_ = e->last_position;
+	at_ = at;
 	r_targeting.forget_lost();
 	r_shared.count(&TdmBotStats::grenades, uint64_t(1));
 	return true;

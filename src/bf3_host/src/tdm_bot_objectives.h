@@ -47,6 +47,9 @@ public:
 	bool active() const { return phase_ != 0; }
 	bool throw_ready() const { return phase_ == 2; }
 
+	bool can_start(const TdmShared &p_shared, const BotTargeting &p_targeting,
+			const sim::bots::Perception &p_perception, sim::Tick p_tick, const sim::SoldierState &p_self,
+			std::span<const sim::SoldierState> p_states, bool p_have, sim::Vec3 *r_at = nullptr) const;
 	bool start(TdmShared &r_shared, BotTargeting &r_targeting, const sim::bots::Perception &p_perception, sim::Tick p_tick, const sim::SoldierState &p_self,
 			std::span<const sim::SoldierState> p_states, bool p_have);
 	void step(const BotArms &p_arms, sim::Tick p_tick, const sim::Vec3 &p_eye, uint8_t &r_slot, Trigger &r_trigger, float &r_yaw, float &r_pitch, bool &r_aim);

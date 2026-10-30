@@ -218,3 +218,8 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/rotation.h
     src/rotation.cpp
 )
+
+target_sources(bf3_host PRIVATE
+    src/tdm_bot_body.h
+    src/tdm_bot_body.cpp
+)
