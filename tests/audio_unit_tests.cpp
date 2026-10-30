@@ -1978,6 +1978,7 @@ TEST_SUITE("audio-mixer") {
 		ba::MixerConfig cfg;
 		cfg.max_instances = 1;
 		ba::MixerCore mixer(cfg);
+		mixer.record_cuts(true);
 		ba::OneShotPool pool(8);
 		ba::EmitterState emitter;
 		ba::ListenerState listener;
@@ -2001,6 +2002,14 @@ TEST_SUITE("audio-mixer") {
 			}
 		}
 		CHECK(mixer.stats().starved_voices.load() == 1);
+		std::array<ba::MixerCutEvent, 64> cuts{};
+		const size_t nc = mixer.poll_cuts(cuts);
+		const auto cut_count = [&](ba::MixerCutKind p_kind) {
+			return std::count_if(cuts.begin(), cuts.begin() + std::ptrdiff_t(nc),
+					[&](const ba::MixerCutEvent &e) { return e.kind == p_kind && e.handle == refused; });
+		};
+		CHECK(cut_count(ba::MixerCutKind::Request) == 1);
+		CHECK(cut_count(ba::MixerCutKind::Refused) == 1);
 		CHECK(std::count_if(feedback.begin(), feedback.end(),
 					  [&](const ba::MixerFeedback &f) { return f.handle == refused && f.finished; }) == 1);
 		CHECK(std::none_of(feedback.begin(), feedback.end(),

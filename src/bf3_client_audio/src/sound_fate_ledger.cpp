@@ -117,7 +117,22 @@ SoundFateLedger::Entry *SoundFateLedger::find(InstanceHandle p_handle) {
 	return nullptr;
 }
 
-SoundFateLedger::Entry *SoundFateLedger::insert(InstanceHandle p_handle) {
+void SoundFateLedger::expire(uint64_t p_now_frame) {
+	for (size_t i = 0; i < table_.size();) {
+		Entry &e = table_[i];
+		if (e.handle != kNoInstance && e.request_frame + kSoundFateForgetFrames < p_now_frame) {
+			++expired_;
+			erase(e);
+			continue;
+		}
+		++i;
+	}
+}
+
+SoundFateLedger::Entry *SoundFateLedger::insert(InstanceHandle p_handle, uint64_t p_frame) {
+	if (p_handle != kNoInstance && live_ * 2 >= table_.size()) {
+		expire(p_frame);
+	}
 	if (p_handle == kNoInstance || live_ * 2 >= table_.size()) {
 		++overflows_;
 		return nullptr;
@@ -170,7 +185,7 @@ void SoundFateLedger::note(const MixerCutEvent &p_event, std::string_view p_scop
 		const SoundCategory category = categories_ != nullptr
 				? categories_->category(program, p_scope, p_event.distance_m)
 				: SoundCategory::Other;
-		if (Entry *e = insert(p_event.handle)) {
+		if (Entry *e = insert(p_event.handle, p_event.frame)) {
 			e->category = category;
 			e->request_frame = p_event.frame;
 			++totals_.categories[size_t(category)].requested;
@@ -298,6 +313,10 @@ std::string SoundFateLedger::format(const SoundFateTotals &p_totals) const {
 						", %s %llu", std::string(kSoundDropReasonNames[r]).c_str(), (unsigned long long)c.reasons[r]);
 			}
 		}
+	}
+	if (expired_ > 0) {
+		out += core::fmt("; %llu requests forgotten with no fate after %.0f s", (unsigned long long)expired_,
+				double(kSoundFateForgetFrames) / double(kMixRate));
 	}
 	if (untracked_ + overflows_ > 0) {
 		out += core::fmt("; %llu events of untracked sounds, %llu requests over the ledger's capacity",

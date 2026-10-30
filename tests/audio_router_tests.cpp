@@ -1136,6 +1136,22 @@ TEST_SUITE("audio-router") {
 		}
 		CHECK(small.untracked() == 0);
 		CHECK(small.totals().categories[size_t(ba::SoundCategory::Other)].started == 3);
+		ba::SoundFateLedger aging(1);
+		for (ba::InstanceHandle h = 1; h <= 8; ++h) {
+			ba::MixerCutEvent e;
+			e.kind = K::Request;
+			e.handle = h;
+			aging.note(e, "");
+		}
+		ba::MixerCutEvent fresh;
+		fresh.kind = K::Request;
+		fresh.handle = 9;
+		fresh.frame = ba::kSoundFateForgetFrames + 1;
+		aging.note(fresh, "");
+		CHECK(aging.expired() == 8);
+		CHECK(aging.overflows() == 0);
+		CHECK(aging.totals().requested() == 9);
+		CHECK(aging.format(aging.totals()).find("8 requests forgotten") != std::string::npos);
 	}
 
 	TEST_CASE("voice limit: running bursts are never stolen, the farthest released tail is, the rest are culled") {

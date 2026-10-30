@@ -16,6 +16,7 @@ enum class SoundCategory : uint8_t { OwnGun, BotGun, ImpactSurface, ImpactSoldie
 inline constexpr std::array<std::string_view, size_t(SoundCategory::Count)> kSoundCategoryNames{ "own gun", "bot gun",
 	"surface impact", "soldier impact", "explosion", "other" };
 inline constexpr float kOwnSoundMetres = 1.0f;
+inline constexpr uint64_t kSoundFateForgetFrames = uint64_t(60) * kMixRate;
 
 enum class SoundPatchClass : uint8_t { Weapon, Explosive, Other };
 
@@ -78,6 +79,7 @@ public:
 	SoundFateTotals totals(uint64_t p_now_frame = UINT64_MAX, uint64_t p_grace_frames = 0) const;
 	uint64_t untracked() const { return untracked_; }
 	uint64_t overflows() const { return overflows_; }
+	uint64_t expired() const { return expired_; }
 	std::string format(const SoundFateTotals &p_totals) const;
 
 private:
@@ -92,7 +94,8 @@ private:
 		uint32_t parks = 0;
 	};
 	Entry *find(InstanceHandle p_handle);
-	Entry *insert(InstanceHandle p_handle);
+	Entry *insert(InstanceHandle p_handle, uint64_t p_frame);
+	void expire(uint64_t p_now_frame);
 	void erase(Entry &r_entry);
 	void drop(SoundCategory p_category, SoundDropReason p_reason, uint64_t p_count = 1);
 	void resolve_parks(const Entry &p_entry);
@@ -101,7 +104,7 @@ private:
 	size_t live_ = 0;
 	const SoundCategoryTable *categories_ = nullptr;
 	SoundFateTotals totals_;
-	uint64_t untracked_ = 0, overflows_ = 0;
+	uint64_t untracked_ = 0, overflows_ = 0, expired_ = 0;
 };
 
 }

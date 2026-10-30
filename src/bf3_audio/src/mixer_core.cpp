@@ -382,6 +382,9 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 				}
 				if (free == nullptr || cmd.instance == nullptr) {
 					if (cmd.instance != nullptr) {
+						m.note_event(MixerCutKind::Request, cmd.handle, 0.0f, cmd.instance, 0,
+								m.config.scopes ? m.config.scopes->scope_of(cmd.instance->program().partition)
+												: core::audio::kNoScope);
 						m.note_event(MixerCutKind::Refused, cmd.handle, 0.0f, cmd.instance);
 						MixerFeedback fb;
 						fb.handle = cmd.handle;

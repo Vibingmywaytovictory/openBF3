@@ -164,7 +164,7 @@ void MasterMixer::process(
 						const float target =
 								peak > threshold_gain ? (threshold - 20.0f * std::log10(peak)) * slope : 0.0f;
 						gr += (target - gr) * (target < gr ? attack : release);
-						gr = gr > -1.0e-5f ? 0.0f : gr;
+						gr = target == 0.0f && gr > -1.0e-5f ? 0.0f : gr;
 						if (gr == 0.0f) {
 							continue;
 						}
