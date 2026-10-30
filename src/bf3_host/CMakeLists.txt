@@ -86,6 +86,7 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/presentation_events.h
     include/bf3/host/presentation_weapon.h
     include/bf3/host/client_projectiles.h
+    include/bf3/host/downed_mates.h
     include/bf3/host/hud_feed.h
 )
 
@@ -107,6 +108,7 @@ target_sources(bf3_host PRIVATE
 target_link_libraries(bf3_host PUBLIC bf3_anim)
 
 target_sources(bf3_host PRIVATE
+    src/downed_mates.cpp
     src/hud_feed.cpp
 )
 

@@ -13,6 +13,7 @@
 #include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/text_db.h"
 #include "bf3/core/util/format.h"
+#include "bf3/host/downed_mates.h"
 #include "bf3/host/hud_feed.h"
 #include "bf3/host/presentation_weapon.h"
 #include "bf3/net/weapons_wire.h"
@@ -36,6 +37,7 @@ namespace sw = bf3::sim::weapons;
 namespace host = bf3::host;
 namespace tw = bf3::test::weapons;
 namespace net = bf3::net;
+namespace present = bf3::present;
 
 namespace {
 
@@ -270,6 +272,49 @@ double arm_at(const std::vector<XhairFrame> &p_frames, size_t p_index) {
 }
 
 TEST_SUITE("ui-hud-feed-unit") {
+	TEST_CASE(
+			"downed team-mates: a death opens the revive window; a revive, a match phase change or its end closes it; "
+			"the living and foes never count") {
+		host::DownedMates d;
+		const auto ev = [](present::PresentKind p_kind, uint8_t p_slot, uint8_t p_aux, uint64_t p_seed) {
+			present::PresentEvent e;
+			e.kind = p_kind;
+			e.slot = p_slot;
+			e.aux = p_aux;
+			e.seed = p_seed;
+			return e;
+		};
+		std::vector<net::PlayerRow> rows(5);
+		for (uint8_t i = 0; i < rows.size(); ++i) {
+			rows[i].slot = i;
+			rows[i].team = i % 2 == 0 ? 1 : 2;
+			rows[i].alive = true;
+		}
+		d.on_phase(net::MatchPhase::InRound);
+		const std::vector<present::PresentEvent> deaths{ ev(present::PresentKind::Death, 1, 2, 1000),
+			ev(present::PresentKind::Death, 2, 3, 1000), ev(present::PresentKind::Death, 3, 4, 900) };
+		d.on_events(deaths);
+		rows[2].alive = rows[3].alive = rows[4].alive = false;
+		CHECK(d.downed(500, 1, 0, rows) == std::vector<uint8_t>{ 2, 4 });
+		CHECK(d.downed(950, 1, 0, rows) == std::vector<uint8_t>{ 2 });
+		CHECK(d.downed(500, 1, 2, rows) == std::vector<uint8_t>{ 4 });
+		CHECK(d.downed(500, 0, 0, rows).empty());
+		const std::vector<present::PresentEvent> revive{ ev(present::PresentKind::Revive, 0, 2, 0) };
+		d.on_events(revive);
+		CHECK(d.downed(500, 1, 0, rows) == std::vector<uint8_t>{ 4 });
+		rows[4].alive = true;
+		CHECK(d.downed(500, 1, 0, rows).empty());
+		CHECK(d.revive_until(3) == 1000);
+		rows[3].alive = true;
+		CHECK(d.downed(500, 2, 0, rows).empty());
+		d.on_events(deaths);
+		rows[4].alive = false;
+		d.on_phase(net::MatchPhase::InRound);
+		CHECK(d.downed(500, 1, 0, rows) == std::vector<uint8_t>{ 2, 4 });
+		d.on_phase(net::MatchPhase::RoundOver);
+		CHECK(d.downed(500, 1, 0, rows).empty());
+		CHECK(d.revive_until(2) == 0);
+	}
 
 TEST_CASE("static rows from the table and its defs") {
 	const SyntheticKit k = synthetic_kit();
