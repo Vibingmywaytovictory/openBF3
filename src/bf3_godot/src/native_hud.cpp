@@ -607,6 +607,15 @@ void Bf3NativeHud::step(double p_seconds) {
 		minimap_client_dirty_ = false;
 		client_changed = true;
 	}
+	if (tags_ != nullptr && !fixture_) {
+		tags_->update_alerts(world_camera_, world_show_ && is_visible_in_tree(), ui_stage(this), world_tags_);
+	} else {
+		world_tags_.tags.clear();
+	}
+	if (client_.world_tags != &world_tags_) {
+		client_.world_tags = &world_tags_;
+		client_changed = true;
+	}
 	for (size_t i = 0; i < kNativeHudViews; ++i) {
 		Bf3SwfView *v = views_[i];
 		ui::HudScreen *s = screens_[i].get();
@@ -715,6 +724,18 @@ NativeHudReadout Bf3NativeHud::readout() const {
 		r.hit_shown = shown(mp, hit) && h->frame > 0;
 	}
 	return r;
+}
+
+std::optional<NativeHudClipState> Bf3NativeHud::clip_state(size_t p_view, std::string_view p_path) {
+	ui::HudScreen *s = p_view < kNativeHudViews ? screens_[p_view].get() : nullptr;
+	if (s == nullptr) {
+		return std::nullopt;
+	}
+	const ui::As2Clip c = s->clip(p_path);
+	if (!c.exists()) {
+		return std::nullopt;
+	}
+	return NativeHudClipState{ c.x(), c.y(), c.xscale(), c.alpha(), c.visible(), c.current_frame() };
 }
 
 std::optional<ui::SwfRect> Bf3NativeHud::window_bounds(size_t p_view, std::string_view p_path) const {

@@ -263,6 +263,8 @@ if(OPENBF3_BUILD_CHECKS)
         src/minimap_check.h
         src/minimap_modes_check.cpp
         src/minimap_modes_check.h
+        src/icons3d_check.cpp
+        src/icons3d_check.h
         src/native_hud_moments.cpp
         src/native_screens_check.cpp
         src/native_screens_check.h

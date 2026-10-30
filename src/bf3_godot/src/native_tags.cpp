@@ -6,6 +6,8 @@
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/kit_def.h"
 #include "bf3/core/install.h"
+#include "bf3/core/ui/hud_widgets.h"
+#include "bf3/core/ui/icon3d_placement.h"
 #include "bf3/core/ui/ui_stage.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/text.h"
@@ -53,6 +55,7 @@ Vector3 vec(const sim::Vec3 &p_v) {
 struct NativeTags::Loaded {
 	ui::NametagStyle style;
 	ui::SpottingRules spotting;
+	ui::Icon3dStyle alert_style;
 	std::array<std::string, 4> kit_icons;
 	std::string notes;
 	double seconds = 0.0;
@@ -92,6 +95,11 @@ void NativeTags::run_loader() {
 				out->spotting = *s;
 			} else {
 				notes += " spotting: " + s.error().message + " (retail defaults);";
+			}
+			if (core::Result<ui::Icon3dStyle> s = ui::read_icon3d_style(**lib, ui::kAlerttagCompPartition, &budget)) {
+				out->alert_style = *s;
+			} else {
+				notes += " alert tag style: " + s.error().message + " (retail defaults);";
 			}
 			if (const core::EbxPartition *team = (*lib)->partition_by_name("gameplay/teams/us")) {
 				if (core::Result<core::gameplay::TeamDef> td = core::gameplay::read_team_data(**lib, team->primary(), &budget)) {
@@ -147,6 +155,7 @@ void NativeTags::apply_loaded() {
 	}
 	style_ = l->style;
 	spotting_ = l->spotting;
+	alert_style_ = l->alert_style;
 	kit_icons_ = l->kit_icons;
 	char line[512];
 	std::snprintf(line, sizeof(line),
@@ -173,6 +182,59 @@ void NativeTags::log_summary() const {
 			(unsigned long long)stats_.los_blocked, (unsigned long long)stats_.unknown_team, style_.from_data ? "from data" : "defaults",
 			double(spotting_.fire_reveal_seconds()), double(stats_.frame_ns) / n * 1e-3, double(stats_.frame_max_ns) * 1e-3);
 	UtilityFunctions::print(line);
+}
+
+void NativeTags::update_alerts(
+		const Camera3D *p_camera, bool p_show, const ui::UiStage &p_stage, ui::HudWorldTags &r_tags) {
+	r_tags.tags.clear();
+	alerts_.clear();
+	if (session_ == nullptr) {
+		return;
+	}
+	apply_loaded();
+	if (!applied_ || !p_show || p_camera == nullptr || !p_camera->is_inside_tree() || !(p_stage.scale > 0.0f)) {
+		return;
+	}
+	const host::PresentationFrame &f = session_->frame();
+	if (!f.valid) {
+		return;
+	}
+	const Transform3D view = p_camera->get_global_transform();
+	const Transform3D to_camera = view.affine_inverse();
+	const Vector3 eye = view.origin;
+	const size_t n = std::min<size_t>(f.grenade_count, f.grenades.size());
+	for (size_t i = 0; i < n; ++i) {
+		const host::PresentedGrenade &g = f.grenades[i];
+		const Vector3 at(g.position[0], g.position[1] + alert_style_.vertical_offset, g.position[2]);
+		const float distance = eye.distance_to(at);
+		const Vector3 local = to_camera.xform(at);
+		const bool in_front = local.z < 0.0f;
+		ui::SwfPoint stage;
+		if (in_front) {
+			const Vector2 w = p_camera->unproject_position(at);
+			stage = ui::ui_window_to_stage(p_stage, ui::SwfPoint{ w.x, w.y });
+		} else {
+			const ui::SwfPoint o = ui::icon3d_snap_origin(alert_style_, p_stage.visible);
+			stage = ui::SwfPoint{ o.x + local.x * kAlertBehindReach, o.y - local.y * kAlertBehindReach };
+		}
+		const ui::Icon3dPlacement p = ui::place_icon3d(alert_style_, distance, in_front, stage, p_stage.visible);
+		++stats_.alert_candidates;
+		if (!p.shown) {
+			continue;
+		}
+		ui::HudWorldTag tag;
+		tag.id = ((uint32_t(g.slot) << 24) ^ g.shot_index) + 1u;
+		tag.component = ui::HudTagComponent::Alert;
+		tag.x = p.x;
+		tag.y = p.y;
+		tag.scale = p.scale;
+		tag.alpha = p.alpha;
+		tag.data.push_back(ui::HudDataEntry{ "Snap", ui::As2Value::of(p.snapped), true });
+		r_tags.tags.push_back(std::move(tag));
+		alerts_.push_back(NativeAlert{
+				r_tags.tags.back().id, g.slot, g.shot_index, { at.x, at.y, at.z }, distance, in_front, p });
+		++stats_.alert_tags;
+	}
 }
 
 void NativeTags::update(const Camera3D *p_camera, bool p_show, Vector2 p_viewport_size) {

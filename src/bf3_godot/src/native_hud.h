@@ -37,6 +37,16 @@ class Bf3LevelSession;
 class Bf3MinimapHud;
 
 inline constexpr size_t kNativeHudViews = 4;
+inline constexpr size_t kNativeHudSharedView = 3;
+
+struct NativeHudClipState {
+	float x = 0.0f;
+	float y = 0.0f;
+	float xscale = 100.0f;
+	float alpha = 100.0f;
+	bool visible = false;
+	uint32_t frame = 0;
+};
 inline constexpr std::array<std::string_view, kNativeHudViews> kNativeHudPartitions{ bf3::core::ui::kHudMpScreenPartition,
 	bf3::core::ui::kHudTdmScreenPartition, bf3::core::ui::kCrosshairDefaultPartition, bf3::core::ui::kHudSharedScreenPartition };
 
@@ -121,6 +131,7 @@ public:
 	void set_manual(bool p_manual);
 	void set_world(Bf3LevelSession *p_session, const godot::Camera3D *p_camera, bool p_show);
 	NativeTags *tags() const { return tags_.get(); }
+	const godot::Camera3D *world_camera() const { return world_camera_; }
 	void set_fixture(const bf3::core::ui::HudModel &p_model, const NativeHudMinimapPose &p_pose);
 	bool fixture() const { return fixture_; }
 	void step(double p_seconds);
@@ -145,6 +156,8 @@ public:
 	const NativeHudPaintStats &paint_stats() const { return paint_; }
 	NativeHudReadout readout() const;
 	std::optional<bf3::core::ui::SwfRect> window_bounds(size_t p_view, std::string_view p_path) const;
+	std::optional<NativeHudClipState> clip_state(size_t p_view, std::string_view p_path);
+	const bf3::core::ui::HudWorldTags &world_tags() const { return world_tags_; }
 	double ekg_clock() const { return ekg_clock_; }
 	std::optional<bf3::core::ui::MinimapLevel> minimap_level();
 	uint32_t minimap_combat_area_side();
@@ -197,6 +210,7 @@ private:
 	bf3::core::ui::HudModel model_{};
 	uint64_t stepped_serial_ = 0;
 	bf3::core::ui::HudClientState client_;
+	bf3::core::ui::HudWorldTags world_tags_;
 	bool minimap_profile_applied_ = false;
 	std::unique_ptr<bf3::core::ui::HudMessageComp> messages_;
 	std::unique_ptr<bf3::core::ui::HudDamageIndicatorComp> damage_;

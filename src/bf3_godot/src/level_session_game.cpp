@@ -300,6 +300,10 @@ void Bf3LevelSession::game_parse_args() {
 	if (has_check_arg("minimap-modes")) {
 		g.minimap_modes = std::make_unique<MinimapModesCheck>(user_arg_value("level"), user_arg_value("minimap-mode"));
 	}
+	if (has_check_arg("icons3d-check")) {
+		g.icons3d = std::make_unique<Icons3dCheck>();
+		mapper_.set_scripted(true);
+	}
 #endif
 	if (has_user_arg("m2a-play-seconds")) {
 		g.check_options.play_seconds = std::clamp(std::atof(user_arg_value("m2a-play-seconds").c_str()), 5.0, 3600.0);
@@ -1289,6 +1293,28 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		UtilityFunctions::print(to_godot(std::string("NATIVE HUD MOMENTS: ") + (g.hud_moments->exit_code() == 0 ? "PASS" : "FAIL")));
 		finish(g.hud_moments->exit_code());
 		return true;
+	}
+	if (g.icons3d != nullptr && g.native_hud != nullptr && !g.finished) {
+		Icons3dIo io;
+		io.alive = g.alive;
+		io.yaw = mapper_.view().yaw;
+		io.view = [this](float p_yaw, float p_pitch) { mapper_.script_view(p_yaw, p_pitch); };
+		io.throw_grenade = [this] { mapper_.script_press(InputMapper::WeaponAction::Grenade); };
+		io.grenade_live = [this](uint8_t p_slot, uint32_t p_shot) {
+			const host::PresentationFrame &pf = frame();
+			for (size_t i = 0; i < std::min<size_t>(pf.grenade_count, pf.grenades.size()); ++i) {
+				if (pf.grenades[i].slot == p_slot && pf.grenades[i].shot_index == p_shot) {
+					return true;
+				}
+			}
+			return false;
+		};
+		if (g.icons3d->step(*g.native_hud, io, p_delta)) {
+			g.finished = true;
+			UtilityFunctions::print(to_godot(g.icons3d->report()));
+			finish(g.icons3d->exit_code());
+			return true;
+		}
 	}
 	if (g.minimap_modes != nullptr && g.native_hud != nullptr && !g.finished) {
 		MinimapModesIo io;

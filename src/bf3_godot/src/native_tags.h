@@ -2,7 +2,9 @@
 
 #include "iff_frame.h"
 
+#include "bf3/core/ui/icon3d_placement.h"
 #include "bf3/core/ui/nametags.h"
+#include "bf3/core/ui/ui_stage.h"
 
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2.hpp>
@@ -20,12 +22,27 @@ namespace godot {
 class Camera3D;
 }
 
+namespace bf3::core::ui {
+struct HudWorldTags;
+}
+
 namespace bf3::godot_side {
 
 class Bf3LevelSession;
 
 inline constexpr uint32_t kMaxLosRaysPerFrame = 4;
 inline constexpr double kNativeTagsSummaryEveryS = 30.0;
+inline constexpr float kAlertBehindReach = 4096.0f;
+
+struct NativeAlert {
+	uint32_t id = 0;
+	uint8_t slot = 0;
+	uint32_t shot_index = 0;
+	std::array<float, 3> position{};
+	float distance_m = 0.0f;
+	bool in_front = false;
+	core::ui::Icon3dPlacement placement;
+};
 
 struct NativeTag {
 	uint8_t slot = 0;
@@ -53,6 +70,8 @@ struct NativeTagStats {
 	uint64_t unknown_team = 0;
 	uint64_t frame_ns = 0;
 	uint64_t frame_max_ns = 0;
+	uint64_t alert_candidates = 0;
+	uint64_t alert_tags = 0;
 };
 
 class NativeTags {
@@ -63,6 +82,10 @@ public:
 	NativeTags &operator=(const NativeTags &) = delete;
 
 	void update(const godot::Camera3D *p_camera, bool p_show, godot::Vector2 p_viewport_size);
+	void update_alerts(const godot::Camera3D *p_camera, bool p_show, const core::ui::UiStage &p_stage,
+			core::ui::HudWorldTags &r_tags);
+	const core::ui::Icon3dStyle &alert_style() const { return alert_style_; }
+	const std::vector<NativeAlert> &alerts() const { return alerts_; }
 
 	bool loaded() const { return applied_; }
 	const core::ui::NametagStyle &style() const { return style_; }
@@ -87,6 +110,8 @@ private:
 	bool applied_ = false;
 	core::ui::NametagStyle style_;
 	core::ui::SpottingRules spotting_;
+	core::ui::Icon3dStyle alert_style_;
+	std::vector<NativeAlert> alerts_;
 	std::array<std::string, 4> kit_icons_;
 	IffReveal reveal_;
 	NativeTagStats stats_;

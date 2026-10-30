@@ -177,8 +177,10 @@ These are structural, known, and listed so nobody mistakes them for design inten
   (the hit's damage) and Angle (clockwise from the view, checked against the sprite's rotation) are inferred, and the
   in-round HudAlertMessage and LogMessage widgets have no source in TDM (no combat area, squads or log lines in the model); preroundwaitingscreen's HudAlertMessage takes Title and Description from the flow's data (`HudClientState::flow_data`), Timer from CountLeft, and shows the Timer it holds when ShowAlert arrives, as 18.57's stale '1' under GET READY shows.
   The Icon3D managers (SupportIconManager, MapmarkerManager, AlertManager) run their AS2 and create, update and remove
-  their tags from `HudClientState::world_tags` at stage positions; nothing in TDM fills it (no requests, markers, spotting
-  or grenade alerts in the model), and the engine component's placement (UI3dIconCompData snap, fade and scale) is not done.
+  their tags from `HudClientState::world_tags` at stage positions. TDM fills only grenade alerts: the client's live timed grenades
+  (`PresentationFrame::grenades`) placed by `ui::place_icon3d` from UIAlerttagComp's UI3dIconCompData (draw, fade and scale by distance, the
+  ray from the centre shifted down by SnapCenterYOffset snapping to the SnapSafeZone box edge; the formulas are inferred), each tag's _xscale and _alpha set from it
+  (`godot.native_hud.icons3d`); requests, markers and spotting have no source, and the in-game row reaches about 7.4 m, not the 8-15 m fade.
   The moment fixture's fading kill rows sit on the nearest timeline frame with the row still present (0.20 for 0.00 and 0.06, 0.50 for 0.28 and 0.43 fading in).
 * The in-round HUD does not pass the strict 1280x720 screenshot gate (the 16 footage moments against the moment
   fixture's captures); there is no gate row, because the owner deferred pixel-exact HUD work on 2026-10-24. The main

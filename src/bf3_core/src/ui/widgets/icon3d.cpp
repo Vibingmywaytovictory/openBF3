@@ -330,6 +330,9 @@ private:
 		}
 		h->self().set_x(p_tag.x - r_host.self().x());
 		h->self().set_y(p_tag.y - r_host.self().y());
+		h->self().set_xscale(100.0f * p_tag.scale);
+		h->self().set_yscale(100.0f * p_tag.scale);
+		h->self().set_alpha(100.0f * p_tag.alpha);
 		if (!tag->created()) {
 			tag->create3d_icon(*h);
 		}

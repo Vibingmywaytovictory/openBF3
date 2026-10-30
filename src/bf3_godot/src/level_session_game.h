@@ -4,6 +4,7 @@
 #include "crosshair_walk_check.h"
 #include "game_frame.h"
 #include "game_settings.h"
+#include "icons3d_check.h"
 #include "level_session.h"
 #include "m2a_check.h"
 #include "minimap_modes_check.h"
@@ -256,6 +257,7 @@ struct Bf3LevelSession::Game : GameState {
 	std::unique_ptr<M2aCheck> check;
 	std::unique_ptr<NativeHudMomentRun> hud_moments;
 	std::unique_ptr<MinimapModesCheck> minimap_modes;
+	std::unique_ptr<Icons3dCheck> icons3d;
 	std::unique_ptr<CrosshairWalkRun> crosshair_walk;
 #endif
 	bool finished = false;
