@@ -426,3 +426,10 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/ui/ui_stage.h
     src/ui/ui_stage.cpp
 )
+
+target_sources(bf3_core PRIVATE
+    include/bf3/core/audio/mixer_asset.h
+    src/audio/mixer_asset.cpp
+    include/bf3/core/gameplay/sound_area.h
+    src/gameplay/sound_area.cpp
+)

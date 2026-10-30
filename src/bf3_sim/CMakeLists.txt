@@ -135,3 +135,8 @@ target_sources(bf3_sim PRIVATE
     src/bots/perception.cpp
     src/bots/aim_model.cpp
 )
+
+target_sources(bf3_sim PRIVATE
+    include/bf3/sim/logic/sound_area_natives.h
+    src/logic/sound_area_natives.cpp
+)

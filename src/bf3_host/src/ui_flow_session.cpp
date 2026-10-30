@@ -3,6 +3,7 @@
 #include "bf3/core/gameplay/logic_types.h"
 #include "bf3/core/gameplay/logic_world.h"
 #include "bf3/core/level/level.h"
+#include "bf3/core/util/finite.h"
 
 #include <algorithm>
 #include <cmath>
@@ -55,9 +56,7 @@ core::Result<std::unique_ptr<UiFlowSession>> UiFlowSession::create(
 
 UiFlowSession::~UiFlowSession() = default;
 
-core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const UiFlowSessionOptions &p_options) {
-	options_ = p_options;
-	const core::EbxResolver &db = p_level.db();
+core::Result<ClientLogicWorld> build_client_logic(const core::level::LoadedLevel &p_level) {
 	gp::LogicGraphOptions go;
 	go.mode = p_level.mode;
 	go.side = gp::LogicSide::Client;
@@ -70,7 +69,7 @@ core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const 
 	wo.max_walk_steps = go.max_walk_steps;
 	wo.max_query_steps = go.max_query_steps;
 	wo.max_work = go.max_work;
-	core::Result<gp::LogicWorld> world = gp::LogicWorld::build(db, p_level.root(), wo);
+	core::Result<gp::LogicWorld> world = gp::LogicWorld::build(p_level.db(), p_level.root(), wo);
 	if (!world) {
 		return core::error_at("ui flow session: logic walk", world.error());
 	}
@@ -78,7 +77,22 @@ core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const 
 	if (!graph) {
 		return core::error_at("ui flow session: client logic graph", graph.error());
 	}
-	graph_ = std::make_shared<const gp::LogicGraph>(std::move(*graph));
+	return ClientLogicWorld{ std::move(*world), std::make_shared<const gp::LogicGraph>(std::move(*graph)) };
+}
+
+core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const UiFlowSessionOptions &p_options) {
+	options_ = p_options;
+	const core::EbxResolver &db = p_level.db();
+	core::Result<ClientLogicWorld> logic = build_client_logic(p_level);
+	if (!logic) {
+		return logic.error();
+	}
+	graph_ = logic->graph;
+	if (core::Result<lg::SoundAreaNatives> areas = lg::SoundAreaNatives::create(logic->world, graph_)) {
+		sound_areas_ = std::make_unique<lg::SoundAreaNatives>(std::move(*areas));
+	} else {
+		errors_.push_back("ui flow session: " + areas.error().message);
+	}
 	const std::optional<uint32_t> scope = graph_->scope_named(options_.scope);
 	if (!scope) {
 		return core::make_error(
@@ -197,6 +211,9 @@ core::Status UiFlowSession::start_logic() {
 		return core::error_at("ui flow session: runtime", rt.error());
 	}
 	runtime_ = std::make_unique<lg::LogicRuntime>(std::move(*rt));
+	if (sound_areas_ != nullptr) {
+		sound_areas_->reset();
+	}
 	for (const auto &[node, port] : watch_ports_) {
 		BF3_TRY(runtime_->watch(node, port, lg::LogicWatchKind::EventIn));
 	}
@@ -211,6 +228,12 @@ core::Status UiFlowSession::start_logic() {
 		}
 	}
 	return core::Status::success();
+}
+
+void UiFlowSession::set_listener(const core::Vec3 &p_position) {
+	if (core::finite(p_position)) {
+		listener_ = p_position;
+	}
 }
 
 void UiFlowSession::receive_networked(std::span<const lg::LogicNetworkedEvent> p_events) {
@@ -379,9 +402,16 @@ core::Status UiFlowSession::step() {
 	for (const Timer &t : due) {
 		raise(t.node, t.port);
 	}
+	const bool areas = sound_areas_ != nullptr && listener_.has_value();
+	if (areas) {
+		BF3_TRY(sound_areas_->listen(*listener_, *runtime_));
+	}
 	core::Result<lg::LogicTickStats> stepped = runtime_->step();
 	if (!stepped) {
 		return stepped.error();
+	}
+	if (areas) {
+		BF3_TRY(sound_areas_->settle(*runtime_));
 	}
 	const sim::Tick now = runtime_->tick();
 	const auto later = [&](uint32_t p_node, int32_t p_port, uint32_t p_ticks) {

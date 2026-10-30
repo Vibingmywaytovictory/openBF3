@@ -7,6 +7,8 @@
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/ui/text_db.h"
+#include "bf3/host/ui_flow_session.h"
+#include "bf3/sim/logic/sound_area_natives.h"
 
 #include <windows.h>
 
@@ -14,6 +16,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <string>
 #include <unordered_map>
@@ -318,6 +321,139 @@ int cmd_audio_loc(const InstallReader &p_reader, std::shared_ptr<Install> p_inst
 	return (errors == 0 && mismatches == 0 && unchanged) ? 0 : 1;
 }
 
+bool parse_point(const std::string &p_text, Vec3 &r_point) {
+	float v[3] = {};
+	size_t at = 0;
+	for (int i = 0; i < 3; ++i) {
+		const size_t comma = i < 2 ? p_text.find(',', at) : p_text.size();
+		if (comma == std::string::npos) {
+			return false;
+		}
+		char *end = nullptr;
+		const std::string part = p_text.substr(at, comma - at);
+		v[i] = std::strtof(part.c_str(), &end);
+		if (part.empty() || end != part.c_str() + part.size() || !std::isfinite(v[i])) {
+			return false;
+		}
+		at = comma + 1;
+	}
+	r_point = Vec3{ v[0], v[1], v[2] };
+	return true;
+}
+
+std::string area_target(const gameplay::LogicGraph &p_graph, uint32_t p_node, int32_t p_port) {
+	std::string out;
+	for (const gameplay::LogicEdge &e : p_graph.properties_from(p_node)) {
+		if (e.source_port != p_port || e.target >= p_graph.nodes().size()) {
+			continue;
+		}
+		out += (out.empty() ? "" : ",") +
+				std::string(gameplay::logic_type_info(p_graph.nodes()[e.target].type).ebx_type) + ":" +
+				std::to_string(e.target) + "#" + std::to_string(e.target_port);
+	}
+	return out.empty() ? "-" : out;
+}
+
+Vec3 shape_centre(const gameplay::AreaShape &p_shape) {
+	if (p_shape.kind == gameplay::AreaShape::Kind::Box) {
+		return p_shape.box.trans;
+	}
+	Vec3 c{};
+	for (const Vec3 &p : p_shape.polygon) {
+		c = vec::add(c, p);
+	}
+	return vec::scale(c, 1.0f / float(std::max<size_t>(1, p_shape.polygon.size())));
+}
+
+int cmd_audio_areas(
+		const InstallReader &p_reader, std::shared_ptr<Install> p_install, const std::vector<std::string> &p_args) {
+	if (p_args.size() < 2) {
+		std::fprintf(stderr, "audio areas <LEVEL> <MODE> [--at x,y,z]... [--list]\n");
+		return 2;
+	}
+	std::vector<Vec3> points;
+	bool list = false;
+	for (size_t i = 2; i < p_args.size(); ++i) {
+		Vec3 p;
+		if (p_args[i] == "--at" && i + 1 < p_args.size() && parse_point(p_args[i + 1], p)) {
+			points.push_back(p);
+			++i;
+		} else if (p_args[i] == "--list") {
+			list = true;
+		} else {
+			std::fprintf(stderr, "audio areas: bad option %s\n", p_args[i].c_str());
+			return 2;
+		}
+	}
+	const InstallSnapshot before = p_reader.snapshot();
+	Result<std::unique_ptr<level::LoadedLevel>> lvl = level::load_level(p_install, p_args[0], p_args[1]);
+	if (!lvl) {
+		std::fprintf(stderr, "load_level: %s\n", lvl.error().message.c_str());
+		return 1;
+	}
+	Result<bf3::host::ClientLogicWorld> logic = bf3::host::build_client_logic(**lvl);
+	if (!logic) {
+		std::fprintf(stderr, "%s\n", logic.error().message.c_str());
+		return 1;
+	}
+	Result<bf3::sim::logic::SoundAreaProbe> probe = bf3::sim::logic::SoundAreaProbe::create(logic->world, logic->graph);
+	if (!probe) {
+		std::fprintf(stderr, "%s\n", probe.error().message.c_str());
+		return 1;
+	}
+	const gameplay::LogicGraph &g = *logic->graph;
+	const gameplay::SoundAreaData &data = probe->natives().data();
+	std::printf("audio areas %s %s: areas=%zu unshaped=%zu mixers=%zu mixer_entities=%zu open_paths=%zu "
+				"curved_paths=%zu tilted_normals=%zu "
+				"mixers_without_asset=%zu\n",
+			p_args[0].c_str(), p_args[1].c_str(), data.areas.size(), data.unshaped, data.mixers.size(),
+			data.mixer_entities.size(), data.open_paths, data.curved_paths, data.tilted_normals,
+			data.mixers_without_asset);
+	for (const audio::MixerAsset &m : data.mixers) {
+		std::printf("mixer %s inputs=%zu outputs=%zu nodes=%zu\n", m.name.c_str(), m.inputs.size(), m.outputs.size(),
+				m.nodes.size());
+	}
+	if (list) {
+		for (const gameplay::AreaDef &a : data.areas) {
+			const Vec3 c = shape_centre(a.shape);
+			std::printf(
+					"area %u %s %s centre=(%.2f, %.2f, %.2f) height=%.2f fade=%.2f curve=%d multiplier=%.3f -> %s\n",
+					a.node, std::string(gameplay::logic_type_info(a.type).ebx_type).c_str(),
+					a.shape.kind == gameplay::AreaShape::Kind::Box ? "box" : "prism", double(c.x), double(c.y),
+					double(c.z), double(a.shape.height), double(a.fade_width), int(a.curve),
+					double(a.proximity_multiplier), area_target(g, a.node, a.out_port).c_str());
+		}
+	}
+	for (const Vec3 &p : points) {
+		if (const Status s = probe->at(p); !s.ok()) {
+			std::fprintf(stderr, "audio areas: %s\n", s.error().message.c_str());
+			return 1;
+		}
+		const bf3::sim::logic::SoundAreaNatives &n = probe->natives();
+		std::printf("at (%.3f, %.3f, %.3f):\n", double(p.x), double(p.y), double(p.z));
+		for (size_t i = 0; i < n.areas().size(); ++i) {
+			const bf3::sim::logic::SoundAreaValue &v = n.areas()[i];
+			if (v.proximity != 0.0f) {
+				std::printf("  area %u proximity=%.4f multiplier=%.4f distance=%.3f -> %s\n", v.node,
+						double(v.proximity), double(v.multiplier), double(data.areas[i].shape.distance(p)),
+						area_target(g, v.node, data.areas[i].out_port).c_str());
+			}
+		}
+		for (size_t m = 0; m < data.mixers.size(); ++m) {
+			const audio::MixerAsset &a = data.mixers[m];
+			for (size_t i = 0; i < a.inputs.size(); ++i) {
+				std::printf(
+						"  %s input %u = %.4f\n", a.name.c_str(), a.inputs[i].name_hash, double(n.mixer_inputs(m)[i]));
+			}
+			for (size_t i = 0; i < a.outputs.size(); ++i) {
+				std::printf("  %s output %u = %.4f\n", a.name.c_str(), a.outputs[i].name_hash,
+						double(n.mixer_outputs(m)[i]));
+			}
+		}
+		std::printf("  AreaType=%g\n", double(n.area_type()));
+	}
+	return print_install_unchanged(p_reader, before) ? 0 : 1;
+}
 }
 
 const char *audio_usage() {
@@ -327,7 +463,8 @@ const char *audio_usage() {
 		   "  audio render <LEVEL> <MODE> <patch> --distance <m> [--rounds N] [--seed S] [--first-person] --out <wav>\n"
 		   "  audio check [<LEVEL> <MODE>] [--g7] [--out-dir <dir>]\n"
 		   "  audio bank <LEVEL> <MODE> [--loads N]\n"
-		   "  audio wave <LEVEL> <MODE> <wave partition> [--envelope]\n";
+		   "  audio wave <LEVEL> <MODE> <wave partition> [--envelope]\n"
+		   "  audio areas <LEVEL> <MODE> [--at x,y,z]... [--list]\n";
 }
 
 int cmd_audio(const InstallReader &p_reader, std::shared_ptr<Install> p_install, const std::vector<std::string> &p_args) {
@@ -356,6 +493,9 @@ int cmd_audio(const InstallReader &p_reader, std::shared_ptr<Install> p_install,
 	}
 	if (p_args[0] == "wave") {
 		return cmd_audio_wave(p_reader, p_install, rest);
+	}
+	if (p_args[0] == "areas") {
+		return cmd_audio_areas(p_reader, p_install, rest);
 	}
 	std::fprintf(stderr, "%s", audio_usage());
 	return 2;

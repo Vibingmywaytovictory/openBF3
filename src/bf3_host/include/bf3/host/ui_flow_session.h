@@ -6,6 +6,7 @@
 #include "bf3/host/logic_screen_effects.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/logic/logic_runtime.h"
+#include "bf3/sim/logic/sound_area_natives.h"
 
 #include <cstdint>
 #include <functional>
@@ -35,6 +36,12 @@ inline constexpr size_t kUiFlowSessionMaxReceived = 4096;
 
 enum class UiPreRoundEvent : uint8_t { Waiting, Countdown, RoundStarted, Restarting };
 int32_t ui_preround_event_id(UiPreRoundEvent p_event);
+
+struct ClientLogicWorld {
+	core::gameplay::LogicWorld world;
+	std::shared_ptr<const core::gameplay::LogicGraph> graph;
+};
+core::Result<ClientLogicWorld> build_client_logic(const core::level::LoadedLevel &p_level);
 
 struct UiGameState {
 	bool joined = false;
@@ -114,6 +121,8 @@ public:
 	void screen_exited(uint64_t p_screen);
 	void receive_networked(std::span<const sim::logic::LogicNetworkedEvent> p_events);
 	core::Status apply_ghost(const sim::logic::LogicGhost &p_ghost);
+	void set_listener(const core::Vec3 &p_position);
+	const sim::logic::SoundAreaNatives *sound_areas() const { return sound_areas_.get(); }
 
 	core::ui::UiFlow &flow() { return *flow_; }
 	const core::ui::UiFlow &flow() const { return *flow_; }
@@ -173,6 +182,8 @@ private:
 	UiFlowSessionOptions options_;
 	std::shared_ptr<const core::gameplay::LogicGraph> graph_;
 	std::unique_ptr<sim::logic::LogicRuntime> runtime_;
+	std::unique_ptr<sim::logic::SoundAreaNatives> sound_areas_;
+	std::optional<core::Vec3> listener_;
 	std::optional<core::ui::UiActionTable> actions_table_;
 	std::map<std::string, std::shared_ptr<const core::ui::UiGraphAsset>, std::less<>> graphs_;
 	core::ui::UiGraphProvider provider_;

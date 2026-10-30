@@ -2,6 +2,8 @@
 
 #include "bf3/audio/audio_load.h"
 #include "bf3/audio/patch_instance.h"
+#include "bf3/client_audio/area_feed.h"
+#include "bf3/core/audio/mixer_asset.h"
 #include "bf3/core/audio/sound_ports.h"
 #include "bf3/core/audio/sound_program.h"
 #include "bf3/core/audio/sound_stream.h"
@@ -10,18 +12,22 @@
 #include "bf3/core/cache/cached_convert.h"
 #include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/ebx_db.h"
+#include "bf3/core/gameplay/sound_area.h"
 #include "bf3/core/gameplay/weapon_blob.h"
 #include "bf3/core/gameplay/work_budget.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/level.h"
+#include "bf3/host/ui_flow_session.h"
+#include "bf3/sim/logic/sound_area_natives.h"
 
 #include <doctest/doctest.h>
 
 #include <windows.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
@@ -32,6 +38,7 @@
 #include <optional>
 #include <random>
 #include <set>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -56,6 +63,30 @@ constexpr uint32_t kStop = 1920007028u;
 constexpr uint32_t kStep = 1968287961u;
 constexpr uint32_t kIsFirstPerson = 824639024u;
 constexpr uint32_t kEnableStep = 4198762218u;
+
+struct PatchWithBank {
+	std::shared_ptr<const SoundProgram> program;
+	std::vector<SoundWaveInfo> waves;
+	std::shared_ptr<const WaveBank> bank;
+};
+
+PatchWithBank patch_with_bank(const Install &p_install, const level::LoadedLevel &p_level, const char *p_patch) {
+	PatchWithBank out;
+	Result<std::shared_ptr<const SoundProgram>> prog = ba::compile_patch(p_level.db(), p_patch);
+	REQUIRE_MESSAGE(prog.ok(), (prog.ok() ? std::string() : prog.error().message));
+	out.program = *prog;
+	size_t missing = 0;
+	Result<std::vector<SoundWaveInfo>> waves = ba::read_program_waves(
+			p_level.db(), std::span<const std::shared_ptr<const SoundProgram>>(&out.program, 1), &missing);
+	REQUIRE(waves.ok());
+	REQUIRE(missing == 0);
+	out.waves = *waves;
+	Result<std::shared_ptr<const WaveBank>> bank =
+			WaveBank::load(p_install, p_level.mount(), *waves, WaveBankOptions{});
+	REQUIRE_MESSAGE(bank.ok(), (bank.ok() ? std::string() : bank.error().message));
+	out.bank = *bank;
+	return out;
+}
 
 struct Fixture {
 	InstallReader reader;
@@ -86,18 +117,10 @@ Fixture *fixture() {
 	Result<std::unique_ptr<level::LoadedLevel>> lvl = level::load_level(made->install, "MP_Subway", "TeamDeathMatch0");
 	REQUIRE_MESSAGE(lvl.ok(), (lvl.ok() ? std::string() : lvl.error().message));
 	made->metro = std::move(*lvl);
-	Result<std::shared_ptr<const SoundProgram>> prog = ba::compile_patch(made->metro->db(), kM16);
-	REQUIRE_MESSAGE(prog.ok(), (prog.ok() ? std::string() : prog.error().message));
-	made->m16 = *prog;
-	size_t missing = 0;
-	Result<std::vector<SoundWaveInfo>> waves =
-			ba::read_program_waves(made->metro->db(), std::span<const std::shared_ptr<const SoundProgram>>(&made->m16, 1), &missing);
-	REQUIRE(waves.ok());
-	REQUIRE(missing == 0);
-	made->m16_waves = *waves;
-	Result<std::shared_ptr<const WaveBank>> bank = WaveBank::load(*made->install, made->metro->mount(), *waves, WaveBankOptions{});
-	REQUIRE_MESSAGE(bank.ok(), (bank.ok() ? std::string() : bank.error().message));
-	made->m16_bank = *bank;
+	PatchWithBank m16 = patch_with_bank(*made->install, *made->metro, kM16);
+	made->m16 = m16.program;
+	made->m16_waves = m16.waves;
+	made->m16_bank = m16.bank;
 	Result<std::unique_ptr<EbxLibrary>> lib = EbxLibrary::open(made->install, expand_superbundles(*made->install, "@all-mp"));
 	REQUIRE_MESSAGE(lib.ok(), (lib.ok() ? std::string() : lib.error().message));
 	made->all_mp = std::move(*lib);
@@ -113,9 +136,13 @@ Fixture *need_install() {
 	return f;
 }
 
-void check_unchanged(const Fixture &p_fixture) {
-	const SnapshotDiff diff = diff_snapshots(p_fixture.before, p_fixture.reader.snapshot());
+void check_unchanged_snapshot(const InstallSnapshot &p_before, const InstallReader &p_reader) {
+	const SnapshotDiff diff = diff_snapshots(p_before, p_reader.snapshot());
 	CHECK_MESSAGE(diff.clean(), diff.summary());
+}
+
+void check_unchanged(const Fixture &p_fixture) {
+	check_unchanged_snapshot(p_fixture.before, p_fixture.reader);
 }
 
 std::unique_ptr<ba::PatchInstance> instance(std::shared_ptr<const SoundProgram> p_prog, std::shared_ptr<const WaveBank> p_bank, uint64_t p_seed) {
@@ -840,5 +867,314 @@ TEST_SUITE("audio-fuzz") {
 		}
 		MESSAGE("blob: ", iters * 4, " mutants of ", blob.size(), " bytes: ", decoded, " decoded and ran");
 		check_unchanged(*f);
+	}
+}
+
+namespace {
+
+namespace gp = bf3::core::gameplay;
+namespace lg = bf3::sim::logic;
+namespace ca = bf3::core::audio;
+
+constexpr const char *kAreaTypeMixer = "sound/mixers/areatype_mixer";
+constexpr float kOpenFieldFloor = 0.7f;
+constexpr std::array<float, 2> kListenerLifts{ 0.3f, 1.8f };
+
+struct AreaWeight {
+	uint32_t input;
+	const char *name;
+	float weight;
+};
+
+constexpr std::array<AreaWeight, 6> kAreaWeights{ {
+		{ 219107215u, "Urban", 1.3f },
+		{ 1980168092u, "Indoor_Garage", 1.5f },
+		{ 112616077u, "Urban_Alley", 1.4f },
+		{ 2594707284u, "Desert", 1.2f },
+		{ 2533070940u, "Forest", 1.1f },
+		{ 2174540754u, "input 2174540754", 1.6f },
+} };
+
+struct AreaPoint {
+	const char *name;
+	bf3::core::Vec3 feet;
+	int area_type;
+	const char *shellcasings;
+	const char *reflections;
+};
+
+constexpr std::array<AreaPoint, 4> kMetroPoints{ {
+		{ "garage", { -167.966f, 64.625f, -465.812f }, 2, "shellcasings_762_indoor_wave",
+				"reflections_close_indoor_garage_wave" },
+		{ "street", { -280.845f, 60.062f, -567.190f }, 1, "shellcasings_762_outdoor_tarmac",
+				"reflections_close_urban_wave" },
+		{ "open ground", { -230.993f, 64.407f, -483.038f }, 0, "shellcasings_762_outdoor_wave",
+				"reflections_close_openfield" },
+		{ "room", { -212.344f, 64.781f, -476.156f }, 6, "shellcasings_762_indoor_wave",
+				"reflections_close_indoor_small_wave" },
+} };
+
+constexpr std::array<AreaPoint, 2> kSeinePoints{ {
+		{ "room", { 39.100f, 1.280f, -47.979f }, 6, "shellcasings_762_indoor_wave",
+				"reflections_close_indoor_small_wave" },
+		{ "open ground", { 159.301f, 5.120f, -115.258f }, 0, "shellcasings_762_outdoor_wave",
+				"reflections_close_openfield" },
+} };
+
+struct AreaLevel {
+	std::unique_ptr<level::LoadedLevel> level;
+	std::unique_ptr<bf3::host::ClientLogicWorld> logic;
+	std::unique_ptr<lg::SoundAreaProbe> probe;
+};
+
+struct AreasFixture {
+	InstallReader reader;
+	InstallSnapshot before;
+	std::shared_ptr<Install> install;
+	AreaLevel metro;
+	AreaLevel seine;
+	PatchWithBank m16;
+};
+
+AreaLevel area_level(const std::shared_ptr<Install> &p_install, const char *p_level) {
+	AreaLevel out;
+	Result<std::unique_ptr<level::LoadedLevel>> lvl = level::load_level(p_install, p_level, "TeamDeathMatch0");
+	REQUIRE_MESSAGE(lvl.ok(), (lvl.ok() ? std::string() : lvl.error().message));
+	out.level = std::move(*lvl);
+	Result<bf3::host::ClientLogicWorld> logic = bf3::host::build_client_logic(*out.level);
+	REQUIRE_MESSAGE(logic.ok(), (logic.ok() ? std::string() : logic.error().message));
+	out.logic = std::make_unique<bf3::host::ClientLogicWorld>(std::move(*logic));
+	Result<lg::SoundAreaProbe> probe = lg::SoundAreaProbe::create(out.logic->world, out.logic->graph);
+	REQUIRE_MESSAGE(probe.ok(), (probe.ok() ? std::string() : probe.error().message));
+	out.probe = std::make_unique<lg::SoundAreaProbe>(std::move(*probe));
+	return out;
+}
+
+AreasFixture *areas_fixture() {
+	static std::unique_ptr<AreasFixture> f;
+	static bool tried = false;
+	if (tried) {
+		if (f == nullptr) {
+			bf3::test::skip_install_case("no BF3 install found");
+		}
+		return f.get();
+	}
+	tried = true;
+	auto made = std::make_unique<AreasFixture>();
+	if (!made->reader.locate({})) {
+		bf3::test::skip_install_case("no BF3 install found");
+		return nullptr;
+	}
+	made->before = made->reader.snapshot();
+	Result<std::shared_ptr<Install>> install = Install::open(made->reader);
+	REQUIRE_MESSAGE(install.ok(), (install.ok() ? std::string() : install.error().message));
+	made->install = *install;
+	made->metro = area_level(made->install, "MP_Subway");
+	made->seine = area_level(made->install, "MP_011");
+	made->m16 = patch_with_bank(*made->install, *made->metro.level, kM16);
+	f = std::move(made);
+	return f.get();
+}
+
+size_t mixer_index(const gp::SoundAreaData &p_data, const char *p_name) {
+	for (size_t m = 0; m < p_data.mixers.size(); ++m) {
+		if (p_data.mixers[m].name == p_name) {
+			return m;
+		}
+	}
+	FAIL("no mixer ", p_name);
+	return 0;
+}
+
+std::optional<float> logic_number(const std::optional<gp::LogicValue> &p_v) {
+	if (!p_v || p_v->kind != gp::LogicValue::Kind::Float) {
+		return std::nullopt;
+	}
+	return float(p_v->f);
+}
+
+float area_type_formula(std::span<const float> p_inputs, const AreaLevel &p_level) {
+	const gp::SoundAreaData &data = p_level.probe->natives().data();
+	const ca::MixerAsset &asset = data.mixers[mixer_index(data, kAreaTypeMixer)];
+	float best = kOpenFieldFloor;
+	int index = 0;
+	for (size_t k = 0; k < kAreaWeights.size(); ++k) {
+		const std::optional<size_t> in = asset.input_of(kAreaWeights[k].input);
+		REQUIRE(in.has_value());
+		const float v = p_inputs[*in] * kAreaWeights[k].weight;
+		if (v > best) {
+			best = v;
+			index = int(k + 1);
+		}
+	}
+	return float(index);
+}
+
+std::vector<float> oracle_inputs(const AreaLevel &p_level) {
+	const lg::SoundAreaNatives &n = p_level.probe->natives();
+	const lg::LogicRuntime &rt = p_level.probe->runtime();
+	const gp::LogicGraph &g = *p_level.logic->graph;
+	const gp::SoundAreaData &data = n.data();
+	const size_t m = mixer_index(data, kAreaTypeMixer);
+	const ca::MixerAsset &asset = data.mixers[m];
+	std::vector<std::vector<float>> contributions(asset.inputs.size());
+	for (const gp::MixerEntityDef &e : data.mixer_entities) {
+		if (e.mixer != m) {
+			continue;
+		}
+		for (const gp::LogicEdge &edge : g.property_edges()) {
+			const std::optional<size_t> in =
+					edge.target == e.node ? asset.input_of(uint32_t(edge.target_port)) : std::nullopt;
+			const std::optional<float> v = in ? logic_number(rt.output(edge.source, edge.source_port)) : std::nullopt;
+			if (!v) {
+				continue;
+			}
+			contributions[*in].push_back(*v);
+			if (g.nodes()[edge.source].type != gp::LogicTypeId::MathOp) {
+				continue;
+			}
+			float sum = 0.0f;
+			for (const gp::LogicEdge &into : g.property_edges()) {
+				if (into.target == edge.source) {
+					sum += logic_number(rt.output(into.source, into.source_port)).value_or(0.0f);
+				}
+			}
+			CHECK_MESSAGE(*v == doctest::Approx(sum).epsilon(1e-5), "MathOp ", edge.source, " is ", *v,
+					", the sum of its inputs is ", sum);
+		}
+	}
+	std::vector<float> out(asset.inputs.size());
+	for (size_t i = 0; i < out.size(); ++i) {
+		out[i] = asset.inputs[i].default_value;
+		for (size_t c = 0; c < contributions[i].size(); ++c) {
+			out[i] = c == 0 ? contributions[i][c] : std::max(out[i], contributions[i][c]);
+		}
+	}
+	return out;
+}
+
+void check_points(const AreasFixture &p_f, const AreaLevel &p_level, const char *p_level_name,
+		std::span<const AreaPoint> p_points) {
+	lg::SoundAreaProbe &probe = *p_level.probe;
+	for (const AreaPoint &p : p_points) {
+		for (const float lift : kListenerLifts) {
+			const bf3::core::Vec3 at{ p.feet.x, p.feet.y + lift, p.feet.z };
+			const std::string level_name = p_level_name;
+			const std::string point_name = p.name;
+			CAPTURE(level_name);
+			CAPTURE(point_name);
+			CAPTURE(lift);
+			REQUIRE(probe.at(at).ok());
+			const std::vector<float> inputs = oracle_inputs(p_level);
+			const gp::SoundAreaData &data = probe.natives().data();
+			const std::span<const float> natives_inputs =
+					probe.natives().mixer_inputs(mixer_index(data, kAreaTypeMixer));
+			REQUIRE(natives_inputs.size() == inputs.size());
+			for (size_t i = 0; i < inputs.size(); ++i) {
+				CHECK(natives_inputs[i] == inputs[i]);
+			}
+			const float formula = area_type_formula(inputs, p_level);
+			CHECK(formula == float(p.area_type));
+			CHECK(probe.natives().area_type() == formula);
+			MESSAGE(std::string(p_level_name), " ", std::string(p.name), " +", lift, " m: AreaType ",
+					probe.natives().area_type());
+		}
+		Result<std::vector<std::string>> waves =
+				ba::observe_area_waves(p_f.m16.program, p_f.m16.bank, ba::AudioTuning{}, float(p.area_type), kFire);
+		REQUIRE_MESSAGE(waves.ok(), (waves.ok() ? std::string() : waves.error().message));
+		std::string list;
+		for (const std::string &w : *waves) {
+			list += " " + w;
+		}
+		MESSAGE(std::string(p_level_name), " ", std::string(p.name), " AreaType ", p.area_type, " M16A3 Fire plays",
+				list);
+		CHECK_MESSAGE(list.find(std::string("/") + p.shellcasings) != std::string::npos, "want ",
+				std::string(p.shellcasings));
+		CHECK_MESSAGE(
+				list.find(std::string("/") + p.reflections) != std::string::npos, "want ", std::string(p.reflections));
+	}
+}
+
+}
+
+TEST_SUITE("audio-areas") {
+	TEST_CASE("census: shaped areas, mixer assets and mixer entities on Metro and Seine TDM") {
+		AreasFixture *f = areas_fixture();
+		const lg::SoundAreaNativeStats &metro = f->metro.probe->natives().stats();
+		const lg::SoundAreaNativeStats &seine = f->seine.probe->natives().stats();
+		MESSAGE("Metro: ", metro.areas, " areas, ", metro.unshaped, " unshaped, ", metro.mixers, " mixers, ",
+				metro.mixer_entities, " mixer entities");
+		MESSAGE("Seine: ", seine.areas, " areas, ", seine.unshaped, " unshaped, ", seine.mixers, " mixers, ",
+				seine.mixer_entities, " mixer entities");
+		CHECK(metro.areas == 65);
+		CHECK(metro.unshaped == 0);
+		CHECK(metro.mixers == 2);
+		CHECK(metro.mixer_entities == 23);
+		CHECK(seine.areas == 151);
+		CHECK(seine.unshaped == 1);
+		CHECK(seine.mixers == 2);
+		CHECK(seine.mixer_entities == 66);
+		for (const AreaLevel *l : { &f->metro, &f->seine }) {
+			const gp::SoundAreaData &d = l->probe->natives().data();
+			CHECK(d.open_paths == 0);
+			CHECK(d.curved_paths == 0);
+			CHECK(d.tilted_normals == 0);
+			CHECK(d.mixers_without_asset == 0);
+		}
+		check_unchanged_snapshot(f->before, f->reader);
+	}
+
+	TEST_CASE("areatype_mixer: inputs weighted by the data's Multiply constants, arg-max against 0.7 open field") {
+		AreasFixture *f = areas_fixture();
+		const gp::SoundAreaData &data = f->metro.probe->natives().data();
+		const ca::MixerAsset &asset = data.mixers[mixer_index(data, kAreaTypeMixer)];
+		REQUIRE(asset.inputs.size() == kAreaWeights.size());
+		REQUIRE(asset.outputs.size() == 1);
+		CHECK(asset.outputs[0].name_hash == lg::kMixerAreaType);
+		const ca::MixerAssetNode *selector = nullptr;
+		for (const ca::MixerAssetNode &n : asset.nodes) {
+			if (n.kind == ca::MixerNodeKind::MinMaxValueSelector) {
+				selector = &n;
+			}
+		}
+		REQUIRE(selector != nullptr);
+		REQUIRE(selector->entries_count == kAreaWeights.size() + 1);
+		const std::span<const SoundPort> choices(
+				asset.entries.data() + selector->entries_begin, selector->entries_count);
+		CHECK_FALSE(choices[0].connected());
+		CHECK(choices[0].constant == kOpenFieldFloor);
+		CHECK(asset.outputs[0].value.reg == selector->out[0]);
+		for (size_t k = 0; k < kAreaWeights.size(); ++k) {
+			const std::string input_name = kAreaWeights[k].name;
+			CAPTURE(input_name);
+			const std::optional<size_t> in = asset.input_of(kAreaWeights[k].input);
+			REQUIRE(in.has_value());
+			CHECK(asset.inputs[*in].accumulate == ca::MixerAccumulate::Max);
+			CHECK(asset.inputs[*in].default_value == 0.0f);
+			const ca::MixerAssetNode *scale = nullptr;
+			for (const ca::MixerAssetNode &n : asset.nodes) {
+				if (n.kind == ca::MixerNodeKind::SimpleTransform && n.in[0].reg == asset.inputs[*in].out) {
+					scale = &n;
+				}
+			}
+			REQUIRE(scale != nullptr);
+			CHECK(scale->option == uint8_t(SimpleTransformOp::Multiply));
+			CHECK_FALSE(scale->in[1].connected());
+			CHECK(scale->in[1].constant == kAreaWeights[k].weight);
+			CHECK(choices[k + 1].reg == scale->out[0]);
+		}
+		for (const AreaLevel *l : { &f->metro, &f->seine }) {
+			const gp::SoundAreaData &d = l->probe->natives().data();
+			const ca::MixerAsset &other = d.mixers[mixer_index(d, kAreaTypeMixer)];
+			CHECK(other.partition == asset.partition);
+			CHECK(other.nodes.size() == asset.nodes.size());
+		}
+	}
+
+	TEST_CASE("fixed points: Metro TDM garage, street, open ground, room; Seine TDM room and open ground") {
+		AreasFixture *f = areas_fixture();
+		check_points(*f, f->metro, "Metro", kMetroPoints);
+		check_points(*f, f->seine, "Seine", kSeinePoints);
+		check_unchanged_snapshot(f->before, f->reader);
 	}
 }
