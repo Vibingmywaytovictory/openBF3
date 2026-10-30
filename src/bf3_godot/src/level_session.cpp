@@ -208,6 +208,8 @@ void Bf3LevelSession::parse_args() {
 	shot_delay_ = shot_delay.empty() ? 0.0 : std::clamp(std::atof(shot_delay.c_str()), 0.0, 600.0);
 	game_parse_args();
 	parse_connect();
+	motor_tuning_source_ = has_user_arg("motor-tuning") ? user_arg_value("motor-tuning")
+														: std::string("res://config/motor_tuning.cfg");
 }
 
 void Bf3LevelSession::parse_connect() {
@@ -261,13 +263,20 @@ void Bf3LevelSession::_ready() {
 	UtilityFunctions::print(to_godot(std::string("[level] ") + level_ + " " + mode_ + (scene_ ? ", scene on" : ", scene off (headless skip, docs 11.1)") +
 			", netsim " + netsim_ + ", walkers " + std::to_string(walkers_) + ", cache " + (no_cache_ ? std::string("off") : std::string(root8.begin(), root8.end()))));
 
-	motor_tuning_source_ = "res://config/motor_tuning.cfg";
+	const std::string motor_tuning_path =
+			to_std(ProjectSettings::get_singleton()->globalize_path(to_godot(motor_tuning_source_)));
 	if (FileAccess::file_exists(to_godot(motor_tuning_source_))) {
 		motor_tuning_text_ = to_std(FileAccess::get_file_as_string(to_godot(motor_tuning_source_)));
+		UtilityFunctions::print(to_godot("[level] motor tuning read from " + motor_tuning_path));
+	} else if (has_user_arg("motor-tuning")) {
+		std::lock_guard lock(loader_mutex_);
+		load_error_ = "--motor-tuning=" + motor_tuning_source_ + ": no such file (" + motor_tuning_path + ")";
+		load_failed_.store(true, std::memory_order_release);
 	} else {
+		UtilityFunctions::print(
+				to_godot("[level] motor tuning: " + motor_tuning_path + " is missing, the built-in defaults are used"));
 		motor_tuning_source_ = "(missing: built-in defaults)";
 	}
-	UtilityFunctions::print(to_godot("[level] motor tuning " + motor_tuning_source_));
 	if (bots_ > 0) {
 		UtilityFunctions::print(to_godot("[bots] bots " + std::to_string(bots_) + (nav_overlay_ ? ", nav overlay on (F7)" : "")));
 	}
