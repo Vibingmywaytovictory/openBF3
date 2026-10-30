@@ -216,7 +216,7 @@ void DeployScreens::frame(Bf3UiScreens &r_screens, Bf3NativeHud *p_hud, godot::N
 		}
 	}
 	if (overview != nullptr && overview_view_ != 0 && p_hud != nullptr && p_hud->tags() != nullptr) {
-		overview->set_marks(overview_marks(p_hud->tags()->minimap()));
+		overview->set_marks(overview_marks(p_hud->tags()->minimap(), p_hud->downed_marks()));
 	}
 	const bool cursor = up && p_cursor;
 	if (cursor != cursor_ && p_parent != nullptr) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "iff_frame.h"
+#include "minimap_debug.h"
 #include "swf_view.h"
 
 #include "bf3/core/result.h"
@@ -42,7 +43,8 @@ struct OverviewMark {
 	float yaw = 0.0f;
 };
 
-std::vector<OverviewMark> overview_marks(std::span<const IffMinimapEntry> p_entries);
+std::vector<OverviewMark> overview_marks(
+		std::span<const IffMinimapEntry> p_entries, std::span<const OverviewMark> p_extra = {});
 
 struct OverviewMapStats {
 	uint32_t attached = 0;
@@ -78,6 +80,9 @@ public:
 	bool source_ready();
 	std::optional<bf3::core::ui::MinimapWorldRect> area();
 	const OverviewMapStats &stats() const { return stats_; }
+	void set_debug_uv(bool p_on) { debug_uv_ = p_on; }
+	void set_debug_record(bool p_on) { debug_record_ = p_on; }
+	std::vector<MinimapDebugFrame> debug_frames() const;
 
 protected:
 	static void _bind_methods();
@@ -89,6 +94,7 @@ private:
 		godot::RID map_item;
 		godot::RID icon_item;
 		godot::Ref<godot::ShaderMaterial> material;
+		MinimapDebugFrame debug;
 	};
 	struct Attached {
 		godot::ObjectID view;
@@ -103,9 +109,9 @@ private:
 	std::vector<OverviewMark> marks_;
 	Bf3MinimapHud *source_ = nullptr;
 	godot::Ref<godot::ShaderMaterial> material_;
-	std::optional<bf3::core::ui::MinimapWorldRect> area_;
-	bool area_tried_ = false;
 	OverviewMapStats stats_;
+	bool debug_uv_ = false;
+	bool debug_record_ = false;
 };
 
 }

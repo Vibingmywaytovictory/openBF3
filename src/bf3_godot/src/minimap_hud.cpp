@@ -172,6 +172,36 @@ std::shared_ptr<const MinimapAssets> Bf3MinimapHud::assets() const {
 	return assets_;
 }
 
+std::optional<ui::L8Image> Bf3MinimapHud::combat_area_field() const {
+	Ref<Image> img = combat_area_.is_valid() ? combat_area_->get_image() : Ref<Image>();
+	if (img.is_null() || img->is_empty()) {
+		return std::nullopt;
+	}
+	if (img->get_format() != Image::FORMAT_R8 && img->get_format() != Image::FORMAT_L8) {
+		img->convert(Image::FORMAT_R8);
+	}
+	ui::L8Image l8;
+	l8.width = uint32_t(img->get_width());
+	l8.height = uint32_t(img->get_height());
+	const PackedByteArray bytes = img->get_data();
+	l8.texels.assign(bytes.ptr(), bytes.ptr() + bytes.size());
+	return l8;
+}
+
+std::optional<ui::MinimapWorldRect> Bf3MinimapHud::combat_area_rect() {
+	if (area_tried_ || !drawn_) {
+		return area_;
+	}
+	area_tried_ = true;
+	const std::shared_ptr<const MinimapAssets> a = assets();
+	const std::optional<ui::L8Image> l8 = combat_area_field();
+	if (a != nullptr && l8) {
+		area_ = ui::combat_area_bounds(
+				*l8, a->level.data.combat_area_alpha_threshold, ui::minimap_mapping(a->level.data));
+	}
+	return area_;
+}
+
 void Bf3MinimapHud::set_north_up(bool p_on) {
 	north_up_ = p_on;
 	update_view();

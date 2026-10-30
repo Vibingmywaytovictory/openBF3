@@ -297,6 +297,9 @@ void Bf3LevelSession::game_parse_args() {
 	if (has_check_arg("crosshair-walk")) {
 		g.crosshair_walk = std::make_unique<CrosshairWalkRun>();
 	}
+	if (has_check_arg("minimap-modes")) {
+		g.minimap_modes = std::make_unique<MinimapModesCheck>(user_arg_value("level"), user_arg_value("minimap-mode"));
+	}
 #endif
 	if (has_user_arg("m2a-play-seconds")) {
 		g.check_options.play_seconds = std::clamp(std::atof(user_arg_value("m2a-play-seconds").c_str()), 5.0, 3600.0);
@@ -1256,6 +1259,23 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		pose.yaw = view.yaw;
 		pose.valid = true;
 		g.native_hud->set_minimap_pose(pose);
+		if (f.valid && f.match_valid) {
+			g.downed.on_phase(f.match.phase);
+		}
+		g.downed.on_events(g.events);
+		std::vector<NativeHudDownedMate> mates;
+		if (f.valid) {
+			for (const uint8_t slot : g.downed.downed(f.newest_tick, f.own_team, g.own_slot,
+						 std::span<const bf3::net::PlayerRow>(f.players.data(), f.player_count))) {
+				for (size_t i = 0; i < hud_other_count; ++i) {
+					if (hud_others[i].slot == slot) {
+						mates.push_back(
+								NativeHudDownedMate{ slot, hud_others[i].position.x, hud_others[i].position.z });
+					}
+				}
+			}
+		}
+		g.native_hud->set_downed_mates(std::move(mates));
 		g.native_hud->set_world(this, free_camera ? nullptr : camera, !free_camera && g.alive);
 		if (!g.native_hud->fixture()) {
 			g.native_hud->set_visible(!free_camera && g.alive);
@@ -1267,6 +1287,22 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		UtilityFunctions::print(to_godot(std::string("NATIVE HUD MOMENTS: ") + (g.hud_moments->exit_code() == 0 ? "PASS" : "FAIL")));
 		finish(g.hud_moments->exit_code());
 		return true;
+	}
+	if (g.minimap_modes != nullptr && g.native_hud != nullptr && !g.finished) {
+		MinimapModesIo io;
+		io.alive = g.alive;
+		io.spawn_screen = tdm_spawn_screen_shown();
+		io.deploy = [this] {
+			scripted_ui_key(KEY_ENTER, true);
+			scripted_ui_key(KEY_ENTER, false);
+		};
+		io.concept_press = [this](int32_t p_concept) { return tdm_concept_key(p_concept); };
+		if (g.minimap_modes->step(*g.native_hud, io, p_delta)) {
+			g.finished = true;
+			UtilityFunctions::print(to_godot(g.minimap_modes->report()));
+			finish(g.minimap_modes->exit_code());
+			return true;
+		}
 	}
 	if (g.crosshair_walk != nullptr && g.native_hud != nullptr && !g.finished) {
 		CrosshairWalkInputs in;

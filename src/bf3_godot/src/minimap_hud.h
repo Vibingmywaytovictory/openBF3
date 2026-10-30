@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -83,6 +84,8 @@ public:
 	godot::Ref<godot::ImageTexture> hatch_texture() const { return hatch_; }
 	bool has_detail() const { return has_detail_; }
 	const std::vector<MinimapIconDraw> &icon_draws() const { return icon_draws_; }
+	std::optional<bf3::core::ui::L8Image> combat_area_field() const;
+	std::optional<bf3::core::ui::MinimapWorldRect> combat_area_rect();
 	void set_north_up(bool p_on);
 
 	void set_center_override(float p_x, float p_z);
@@ -132,6 +135,8 @@ private:
 	godot::Ref<godot::ImageTexture> mask_;
 	godot::Ref<godot::ImageTexture> hatch_;
 	bool has_detail_ = false;
+	std::optional<bf3::core::ui::MinimapWorldRect> area_;
+	bool area_tried_ = false;
 	std::vector<MinimapIconDraw> icon_draws_;
 	Bf3MinimapControl *control_ = nullptr;
 	Bf3WorldIcons *icons_ = nullptr;

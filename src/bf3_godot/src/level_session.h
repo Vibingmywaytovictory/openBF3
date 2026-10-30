@@ -268,6 +268,8 @@ private:
 	void tdm_ui_input(const godot::Ref<godot::InputEvent> &p_event);
 	bool tdm_menu_frame(double p_now_s);
 	bool tdm_join_ready() const;
+	bool tdm_spawn_screen_shown() const;
+	std::string tdm_concept_key(int32_t p_concept);
 	std::unique_ptr<Game, GameDeleter> game_;
 };
 

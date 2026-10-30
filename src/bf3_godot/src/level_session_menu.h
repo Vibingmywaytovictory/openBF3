@@ -50,6 +50,7 @@ struct NativeMenuIo {
 	InputMapper *mapper = nullptr;
 	const NativeTags *tags = nullptr;
 	std::optional<OverviewMark> local;
+	std::vector<OverviewMark> downed;
 	std::function<void()> suicide;
 };
 

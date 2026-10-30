@@ -632,6 +632,53 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(s.flow().errors().empty());
 	}
 
+	TEST_CASE("ui flow session: MapSize toggles uiminimapcomp IsSmall and MapZoom steps the zoom of the current size") {
+		Level *l = level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level);
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		UiFlowSession &s = **made;
+		ui_flow_tdm_pc_defaults(s, "TeamDeathMatch0");
+		Script sc{ s };
+		sc.state.phase = net::MatchPhase::InRound;
+		sc.state.joined = true;
+		sc.state.own_spawns = 1;
+		sc.run_to(120);
+		constexpr std::string_view comp = "ui/uicomponents/uiminimapcomp";
+		constexpr int32_t is_small = -1358262034;
+		constexpr int32_t small_zoom = -1127323954;
+		constexpr int32_t large_zoom = -1095821268;
+		const auto read = [&](int32_t p_key) { return s.data(comp, p_key).value_or("<none>"); };
+		std::printf("ui.flow.session minimap before: IsSmall %s, small zoom %s, large zoom %s\n",
+				read(is_small).c_str(), read(small_zoom).c_str(), read(large_zoom).c_str());
+		CHECK(read(is_small) == "True");
+		CHECK(read(small_zoom) == "<none>");
+		CHECK(read(large_zoom) == "<none>");
+		CHECK(s.flow().concept_screen(int32_t(ui::UiInputConcept::MapSize)).has_value());
+		CHECK(s.flow().concept_screen(int32_t(ui::UiInputConcept::MapZoom)).has_value());
+		const auto press = [&](ui::UiInputConcept p_concept, const char *p_label) {
+			sc.input(p_concept);
+			sc.run_to(sc.tick + 10);
+			std::printf("ui.flow.session minimap after %s: IsSmall %s, small zoom %s, large zoom %s\n", p_label,
+					read(is_small).c_str(), read(small_zoom).c_str(), read(large_zoom).c_str());
+		};
+		press(ui::UiInputConcept::MapZoom, "MapZoom on the small map");
+		CHECK(read(is_small) == "True");
+		CHECK(read(small_zoom) == "1");
+		CHECK(read(large_zoom) == "<none>");
+		press(ui::UiInputConcept::MapSize, "MapSize");
+		CHECK(read(is_small) == "False");
+		press(ui::UiInputConcept::MapZoom, "MapZoom on the large map");
+		CHECK(read(small_zoom) == "1");
+		CHECK(read(large_zoom) == "1");
+		press(ui::UiInputConcept::MapSize, "MapSize again");
+		CHECK(read(is_small) == "True");
+		CHECK(s.errors().empty());
+		CHECK(s.flow().errors().empty());
+	}
+
 	TEST_CASE("ui flow session: Restarting shows the pre-round box and the next pre-round reloads the logic") {
 		Level *l = level_or_skip();
 		if (l == nullptr) {

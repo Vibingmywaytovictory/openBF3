@@ -177,8 +177,9 @@ void NativeMenu::attach_overview(Bf3UiScreens &r_screens, const NativeMenuIo &p_
 			++stats_.overview_attached;
 		}
 	}
-	std::vector<OverviewMark> marks =
-			p_io.tags != nullptr ? overview_marks(p_io.tags->minimap()) : std::vector<OverviewMark>{};
+	std::vector<OverviewMark> marks = p_io.tags != nullptr
+			? overview_marks(p_io.tags->minimap(), p_io.downed)
+			: std::vector<OverviewMark>(p_io.downed.begin(), p_io.downed.end());
 	if (p_io.local) {
 		marks.push_back(*p_io.local);
 	}
@@ -203,6 +204,9 @@ bool Bf3LevelSession::tdm_menu_frame(double p_now_s) {
 	io.level = level_id();
 	io.mapper = &mapper_;
 	io.tags = game_->native_hud != nullptr ? game_->native_hud->tags() : nullptr;
+	if (game_->native_hud != nullptr) {
+		io.downed = game_->native_hud->downed_marks();
+	}
 	if (game_->native_hud != nullptr && game_->alive && game_->native_hud->minimap_pose().valid) {
 		const NativeHudMinimapPose &pose = game_->native_hud->minimap_pose();
 		io.local = OverviewMark{ OverviewMarkKind::Local, pose.x, pose.z, pose.yaw };

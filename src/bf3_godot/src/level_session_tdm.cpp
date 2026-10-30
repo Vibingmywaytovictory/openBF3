@@ -295,6 +295,15 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 			options->step(r_m.native_delta_s, *flow.session(), r_game.settings->session());
 			options->update_model(r_game.settings->session());
 		}
+		if (const std::optional<std::string> small =
+						flow.session()->data(kUiMinimapCompPartition, kUiMinimapIsSmallKey);
+				small && r_game.native_hud != nullptr) {
+			const bool is_small = *small == "True";
+			const std::optional<std::string> step = flow.session()->data(
+					kUiMinimapCompPartition, is_small ? kUiMinimapSmallZoomKey : kUiMinimapLargeZoomKey);
+			r_game.native_hud->set_minimap_flow(
+					is_small, step ? std::optional<int32_t>(int32_t(std::atoi(step->c_str()))) : std::nullopt);
+		}
 	}
 }
 
@@ -1258,6 +1267,38 @@ const Bf3UiScreens *Bf3LevelSession::screen_stack() const {
 
 const UiScreenRecords *Bf3LevelSession::screen_records() const {
 	return game_ && game_->tdm ? &game_->tdm->screen_records : nullptr;
+}
+
+bool Bf3LevelSession::tdm_spawn_screen_shown() const {
+	return game_ != nullptr && game_->tdm != nullptr && game_->tdm->spawn_screen;
+}
+
+std::string Bf3LevelSession::tdm_concept_key(int32_t p_concept) {
+	if (game_ == nullptr || game_->tdm == nullptr || game_->tdm->native_flow == nullptr) {
+		return {};
+	}
+	const bf3::core::ui::UiInputRouter &router = game_->tdm->native_flow->router();
+	std::vector<Key> keys;
+	for (int64_t k = KEY_SPACE; k <= KEY_ASCIITILDE; ++k) {
+		keys.push_back(Key(k));
+	}
+	for (int64_t k = KEY_F1; k <= KEY_F12; ++k) {
+		keys.push_back(Key(k));
+	}
+	for (const Key key : keys) {
+		const std::string idk = ui_idk_of_key(key);
+		if (idk.empty()) {
+			continue;
+		}
+		for (const bf3::core::ui::UiInputConcept c : router.concepts_of_key(idk)) {
+			if (int32_t(c) == p_concept) {
+				scripted_ui_key(key, true);
+				scripted_ui_key(key, false);
+				return idk;
+			}
+		}
+	}
+	return {};
 }
 
 bool Bf3LevelSession::tdm_join_ready() const {

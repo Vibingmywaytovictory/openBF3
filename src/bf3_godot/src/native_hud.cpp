@@ -3,6 +3,7 @@
 #include "bf3_localisation.h"
 #include "godot_util.h"
 #include "minimap_control.h"
+#include "minimap_debug.h"
 #include "minimap_hud.h"
 #include "swf_view.h"
 #include "ui_assets.h"
@@ -69,6 +70,7 @@ uniform float metres_per_unit = 1.375;
 uniform vec2 world_center = vec2(0.0);
 uniform float world_size = 1024.0;
 uniform vec2 hatch_wrap = vec2(70.0, 70.0);
+uniform bool debug_uv = false;
 void fragment() {
 	vec2 p = local_rect.xy + UV * local_rect.zw;
 	vec2 d = p - centre_local;
@@ -93,7 +95,7 @@ void fragment() {
 		a = 0.0;
 	}
 	COLOR = vec4(acc.rgb / max(acc.a, 1e-6), acc.a * a);
-}
+	float debug_alpha = m.x < 0.0 || m.y < 0.0 || m.x > 1.0 || m.y > 1.0 ? 0.0 : 1.0;
 )";
 
 constexpr std::string_view kMinimapRenderer = ui::kMinimapRenderer;
@@ -204,6 +206,28 @@ void Bf3NativeHud::set_fixture(const ui::HudModel &p_model, const NativeHudMinim
 	fixture_ = true;
 	model_ = p_model;
 	pose_ = p_pose;
+}
+
+void Bf3NativeHud::set_minimap_flow(bool p_small, std::optional<int32_t> p_step) {
+	const std::shared_ptr<const MinimapAssets> a = minimap_ready() ? minimap_source_->assets() : nullptr;
+	if (a == nullptr) {
+		return;
+	}
+	const ui::MinimapZoom z = p_step ? ui::minimap_zoom_at(a->level.profile, p_small, *p_step)
+									 : ui::minimap_zoom(a->level.profile, p_small);
+	if (minimap_state_.from_flow && minimap_state_.small == p_small && minimap_state_.step == z.step) {
+		return;
+	}
+	minimap_state_ = NativeHudMinimapState{ p_small, z.step, z.zoom, z.player_is_center, true };
+	minimap_client_dirty_ = true;
+}
+
+std::vector<OverviewMark> Bf3NativeHud::downed_marks() const {
+	std::vector<OverviewMark> out;
+	for (const NativeHudDownedMate &d : downed_) {
+		out.push_back(OverviewMark{ OverviewMarkKind::Dead, d.x, d.z, 0.0f });
+	}
+	return out;
 }
 
 void Bf3NativeHud::set_manual(bool p_manual) {
@@ -487,7 +511,8 @@ bool Bf3NativeHud::minimap_ready() {
 		}
 		Ref<Shader> shader;
 		shader.instantiate();
-		shader->set_code(String::utf8(kMinimapMapShader.data(), int64_t(kMinimapMapShader.size())));
+		const std::string code = std::string(kMinimapMapShader) + std::string(kMinimapDebugUvGlsl) + "}\n";
+		shader->set_code(String::utf8(code.c_str()));
 		minimap_material_.instantiate();
 		minimap_material_->set_shader(shader);
 		const ui::MinimapData &d = a->level.data;
@@ -568,9 +593,18 @@ void Bf3NativeHud::step(double p_seconds) {
 	}
 	bool client_changed = false;
 	if (const std::shared_ptr<const MinimapAssets> a = !minimap_profile_applied_ && minimap_ready() ? minimap_source_->assets() : nullptr) {
-		client_.minimap_small = a->level.profile.init_small;
-		client_.minimap_zoom = ui::minimap_zoom(a->level.profile, a->level.profile.init_small).zoom;
+		const ui::MinimapZoom z = ui::minimap_zoom(a->level.profile, a->level.profile.init_small);
+		if (!minimap_state_.from_flow) {
+			minimap_state_ =
+					NativeHudMinimapState{ a->level.profile.init_small, z.step, z.zoom, z.player_is_center, false };
+		}
 		minimap_profile_applied_ = true;
+		minimap_client_dirty_ = true;
+	}
+	if (minimap_client_dirty_) {
+		client_.minimap_small = minimap_state_.small;
+		client_.minimap_zoom = minimap_state_.zoom;
+		minimap_client_dirty_ = false;
 		client_changed = true;
 	}
 	for (size_t i = 0; i < kNativeHudViews; ++i) {
@@ -856,18 +890,49 @@ void Bf3NativeHud::paint_minimap(const SwfEngineTarget &p_target, const ui::SwfS
 	const Vector2 sq0(std::min(q0.x, q1.x), std::min(q0.y, q1.y));
 	const Vector2 sq1(std::max(q0.x, q1.x), std::max(q0.y, q1.y));
 	const Vector2 centre = (sq0 + sq1) * 0.5f;
-	const float mpu = ui::kMinimapMetresPerLocalUnit;
+	const NativeHudMinimapPose pose = pose_override_ ? *pose_override_ : pose_;
+	const float mpu = ui::minimap_metres_per_unit(minimap_state_.zoom);
 	const float unit = std::max(1e-6f, (sq1.x - sq0.x) / ui::kMinimapSquareLocal);
+	ui::MinimapView view;
+	view.center_x = centre.x;
+	view.center_y = centre.y;
+	view.pixels_per_metre = unit / mpu;
+	view.player_x = pose.x;
+	view.player_z = pose.z;
+	view.heading = pose.yaw;
+	view.rotate = true;
+	if (!minimap_state_.player_is_center) {
+		view.heading = 0.0f;
+		view.rotate = false;
+		if (const std::optional<ui::MinimapWorldRect> area = minimap_source_->combat_area_rect()) {
+			const ui::MinimapView fit = ui::minimap_overview_view(
+					*area, ui::kMinimapOverviewMargin, sq0.x, sq0.y, sq1.x - sq0.x, sq1.y - sq0.y);
+			if (fit.pixels_per_metre > 0.0f) {
+				view = fit;
+			}
+		}
+	}
 	minimap_material_->set_shader_parameter("local_rect", Vector4(b.x_min, b.y_min, b.width(), b.height()));
 	minimap_material_->set_shader_parameter("square_rect", Vector4(sq0.x, sq0.y, sq1.x - sq0.x, sq1.y - sq0.y));
 	minimap_material_->set_shader_parameter("centre_local", centre);
-	minimap_material_->set_shader_parameter("player_xz", Vector2(pose_.x, pose_.z));
-	minimap_material_->set_shader_parameter("heading", pose_.yaw);
-	minimap_material_->set_shader_parameter("metres_per_unit", mpu / unit);
+	minimap_material_->set_shader_parameter("player_xz", Vector2(view.player_x, view.player_z));
+	minimap_material_->set_shader_parameter("heading", view.heading);
+	minimap_material_->set_shader_parameter("metres_per_unit", 1.0f / view.pixels_per_metre);
+	minimap_material_->set_shader_parameter("debug_uv", minimap_debug_uv_);
 	rs->canvas_item_clear(minimap_map_item_);
 	rs->canvas_item_add_rect(minimap_map_item_, Rect2(b.x_min, b.y_min, b.width(), b.height()), Color(1, 1, 1, 1));
 	paint_.minimap_maps++;
 	paint_.paints++;
+	minimap_debug_.path = p_target.path;
+	minimap_debug_.texture = p_target.texture;
+	minimap_debug_.local_bounds = b;
+	minimap_debug_.size = p_target.size;
+	minimap_debug_.view = view;
+	minimap_debug_.metres_per_unit = unit / view.pixels_per_metre;
+	minimap_debug_.local_per_unit = unit;
+	minimap_debug_.hits.clear();
+	minimap_debug_.paints++;
+	minimap_debug_.frame = Engine::get_singleton()->get_process_frames();
 
 	rs->canvas_item_clear(minimap_icon_item_);
 	std::shared_ptr<const MinimapAssets> a = minimap_source_->assets();
@@ -875,21 +940,25 @@ void Bf3NativeHud::paint_minimap(const SwfEngineTarget &p_target, const ui::SwfS
 	if (a == nullptr || atlas.is_null()) {
 		return;
 	}
-	ui::MinimapView view;
-	view.center_x = centre.x;
-	view.center_y = centre.y;
-	view.pixels_per_metre = unit / mpu;
-	view.player_x = pose_.x;
-	view.player_z = pose_.z;
-	view.heading = pose_.yaw;
-	view.rotate = true;
-	const auto draw = [&](const ui::HudIcon *p_icon, ui::HudIconState p_state, Vector2 p_at, float p_angle) {
+	const auto state_of = [](const ui::HudIcon *p_icon, ui::HudIconState p_state) -> const ui::HudIconStateFrames * {
 		const ui::HudIconStateFrames *st = p_icon != nullptr ? p_icon->state(p_state) : nullptr;
+		return st == nullptr && p_icon != nullptr ? p_icon->state(ui::HudIconState::Default) : st;
+	};
+	const auto draw = [&](const ui::HudIcon *p_icon, ui::HudIconState p_state, Vector2 p_at, float p_angle,
+							  MinimapDebugKind p_kind, float p_world_x, float p_world_z) {
+		const ui::HudIconStateFrames *st = state_of(p_icon, p_state);
 		if (st == nullptr || st->frames.empty()) {
 			return;
 		}
 		const ui::HudIconRect r = ui::hud_icon_rect(st->frames.front(), uint32_t(atlas->get_width()), uint32_t(atlas->get_height()));
 		if (r.width <= 0 || r.height <= 0) {
+			return;
+		}
+		if (minimap_debug_record_) {
+			minimap_debug_.hits.push_back(
+					MinimapDebugHit{ p_kind, p_world_x, p_world_z, p_at.x, p_at.y, p_icon->type });
+		}
+		if (minimap_debug_uv_) {
 			return;
 		}
 		const float w = float(r.width) * unit;
@@ -899,28 +968,50 @@ void Bf3NativeHud::paint_minimap(const SwfEngineTarget &p_target, const ui::SwfS
 				atlas->get_rid(), Rect2(float(r.x), float(r.y), float(r.width), float(r.height)));
 		paint_.minimap_icons++;
 	};
+	const auto on_map = [&](const ui::ScreenPoint &p) {
+		return std::isfinite(p.x) && std::isfinite(p.y) && p.x >= sq0.x && p.y >= sq0.y && p.x <= sq1.x && p.y <= sq1.y;
+	};
+	const auto icon_angle = [&](const ui::HudIcon *p_icon, ui::HudIconState p_state, float p_yaw) {
+		const ui::HudIconStateFrames *st = state_of(p_icon, p_state);
+		return st != nullptr && st->should_rotate ? view.heading - p_yaw : 0.0f;
+	};
 	for (const MinimapIconDraw &ic : minimap_source_->icon_draws()) {
 		const ui::ScreenPoint p = ui::minimap_project(view, ic.world_x, ic.world_z);
-		if (!std::isfinite(p.x) || !std::isfinite(p.y) || p.x < sq0.x || p.y < sq0.y || p.x > sq1.x || p.y > sq1.y) {
-			continue;
+		if (on_map(p)) {
+			draw(ic.icon, ic.state, Vector2(p.x, p.y), icon_angle(ic.icon, ic.state, ic.yaw),
+					ic.objective ? MinimapDebugKind::Objective : MinimapDebugKind::Friendly, ic.world_x, ic.world_z);
 		}
-		const ui::HudIconStateFrames *st = ic.icon != nullptr ? ic.icon->state(ic.state) : nullptr;
-		draw(ic.icon, ic.state, Vector2(p.x, p.y), st != nullptr && st->should_rotate ? view.heading - ic.yaw : 0.0f);
+	}
+	const ui::HudIcon *dead = a->atlas.find(ui::kHudIconPlayerDead);
+	for (const NativeHudDownedMate &d : downed_) {
+		const ui::ScreenPoint p = ui::minimap_project(view, d.x, d.z);
+		if (on_map(p)) {
+			draw(dead, ui::HudIconState::Friendly, Vector2(p.x, p.y), 0.0f, MinimapDebugKind::Downed, d.x, d.z);
+			paint_.minimap_downed++;
+		}
 	}
 	if (tags_ != nullptr) {
 		const ui::HudIcon *player = a->atlas.find(kPlayerIcon);
 		for (const IffMinimapEntry &e : tags_->minimap()) {
 			const ui::ScreenPoint p = ui::minimap_project(view, e.feet[0], e.feet[2]);
-			if (!std::isfinite(p.x) || !std::isfinite(p.y) || p.x < sq0.x || p.y < sq0.y || p.x > sq1.x || p.y > sq1.y) {
+			if (!on_map(p)) {
 				continue;
 			}
 			const ui::HudIconState state = relation_state(e.relation);
-			const ui::HudIconStateFrames *st = player != nullptr ? player->state(state) : nullptr;
-			draw(player, state, Vector2(p.x, p.y), st != nullptr && st->should_rotate ? view.heading - e.yaw : 0.0f);
+			const MinimapDebugKind kind = e.relation == ui::TagRelation::Enemy ? MinimapDebugKind::Enemy
+					: e.relation == ui::TagRelation::Squad					   ? MinimapDebugKind::Squad
+																			   : MinimapDebugKind::Friendly;
+			draw(player, state, Vector2(p.x, p.y), icon_angle(player, state, e.yaw), kind, e.feet[0], e.feet[2]);
 		}
 	}
 	const ui::HudIconChoice me = ui::local_player_icon(model_.squad.local_player_has_squad || model_.squad.local_squad_members.count > 0);
-	draw(a->atlas.find(me.icon), me.state, centre, ui::minimap_marker_angle(view));
+	const ui::ScreenPoint mine =
+			view.rotate ? ui::ScreenPoint{ centre.x, centre.y } : ui::minimap_project(view, pose.x, pose.z);
+	if (on_map(mine)) {
+		draw(a->atlas.find(me.icon), me.state, Vector2(mine.x, mine.y),
+				ui::minimap_marker_angle(ui::MinimapView{ 0, 0, 1, 0, 0, pose.yaw, view.rotate }),
+				MinimapDebugKind::Local, pose.x, pose.z);
+	}
 	rs->canvas_item_add_set_transform(minimap_icon_item_, Transform2D());
 }
 

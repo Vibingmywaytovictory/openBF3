@@ -1,17 +1,19 @@
 #pragma once
 
-#include "level_session.h"
 #include "catalog_weapons.h"
-#include "m2a_check.h"
 #include "crosshair_walk_check.h"
-#include "native_hud_moments.h"
 #include "game_frame.h"
 #include "game_settings.h"
+#include "level_session.h"
+#include "m2a_check.h"
+#include "minimap_modes_check.h"
+#include "native_hud_moments.h"
 #include "tdm_flow.h"
 
 #include "bf3/anim/viewmodel_anim.h"
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/host/client_wiring.h"
+#include "bf3/host/downed_mates.h"
 #include "bf3/host/firefight_brain.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/hud_feed.h"
@@ -170,6 +172,7 @@ struct GameState {
 	uint8_t own_team = 0;
 	uint32_t own_life = 0;
 	bf3::host::HudFeedState hud_state;
+	bf3::host::DownedMates downed;
 	bf3::core::ui::HudModel hud_model{};
 	std::vector<bf3::anim::VmCue> cues;
 	uint64_t vm_shot_cues = 0;
@@ -252,6 +255,7 @@ struct Bf3LevelSession::Game : GameState {
 #if OPENBF3_BUILD_CHECKS
 	std::unique_ptr<M2aCheck> check;
 	std::unique_ptr<NativeHudMomentRun> hud_moments;
+	std::unique_ptr<MinimapModesCheck> minimap_modes;
 	std::unique_ptr<CrosshairWalkRun> crosshair_walk;
 #endif
 	bool finished = false;

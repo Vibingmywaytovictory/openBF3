@@ -212,6 +212,7 @@ target_sources(bf3_godot PRIVATE
     src/ui_cursor.h
     src/overview_map.cpp
     src/overview_map.h
+    src/minimap_debug.h
 )
 
 target_sources(bf3_godot PRIVATE
@@ -260,6 +261,8 @@ if(OPENBF3_BUILD_CHECKS)
         src/m9_reload_check.h
         src/minimap_check.cpp
         src/minimap_check.h
+        src/minimap_modes_check.cpp
+        src/minimap_modes_check.h
         src/native_hud_moments.cpp
         src/native_screens_check.cpp
         src/native_screens_check.h

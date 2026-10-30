@@ -1,7 +1,9 @@
 #pragma once
 
 #include "hud_view_paint.h"
+#include "minimap_debug.h"
 #include "native_tags.h"
+#include "overview_map.h"
 #include "swf_view.h"
 #include "ui_screen_host.h"
 #include "ui_screen_records.h"
@@ -38,6 +40,11 @@ inline constexpr size_t kNativeHudViews = 4;
 inline constexpr std::array<std::string_view, kNativeHudViews> kNativeHudPartitions{ bf3::core::ui::kHudMpScreenPartition,
 	bf3::core::ui::kHudTdmScreenPartition, bf3::core::ui::kCrosshairDefaultPartition, bf3::core::ui::kHudSharedScreenPartition };
 
+inline constexpr std::string_view kUiMinimapCompPartition = "ui/uicomponents/uiminimapcomp";
+inline constexpr int32_t kUiMinimapIsSmallKey = -1358262034;
+inline constexpr int32_t kUiMinimapSmallZoomKey = -1127323954;
+inline constexpr int32_t kUiMinimapLargeZoomKey = -1095821268;
+
 struct NativeHudMinimapPose {
 	float x = 0.0f;
 	float z = 0.0f;
@@ -45,11 +52,26 @@ struct NativeHudMinimapPose {
 	bool valid = false;
 };
 
+struct NativeHudDownedMate {
+	uint8_t slot = 0;
+	float x = 0.0f;
+	float z = 0.0f;
+};
+
+struct NativeHudMinimapState {
+	bool small = true;
+	int32_t step = 0;
+	float zoom = 0.0f;
+	bool player_is_center = true;
+	bool from_flow = false;
+};
+
 struct NativeHudPaintStats {
 	uint32_t bg_panels = 0;
 	uint32_t ekg_traces = 0;
 	uint32_t minimap_maps = 0;
 	uint32_t minimap_icons = 0;
+	uint32_t minimap_downed = 0;
 	uint32_t tag_icons = 0;
 	uint32_t tag_names = 0;
 	uint32_t paints = 0;
@@ -87,6 +109,15 @@ public:
 	void set_safe_area(const bf3::core::ui::ScreenAdjustFractions &p_safe) { safe_area_ = p_safe; }
 	std::optional<bf3::core::ui::HudStageRects> stage_rects() const;
 	void set_minimap_pose(const NativeHudMinimapPose &p_pose);
+	void set_minimap_pose_override(std::optional<NativeHudMinimapPose> p_pose) { pose_override_ = p_pose; }
+	void set_minimap_debug_uv(bool p_on) { minimap_debug_uv_ = p_on; }
+	void set_minimap_debug_record(bool p_on) { minimap_debug_record_ = p_on; }
+	const MinimapDebugFrame &minimap_debug() const { return minimap_debug_; }
+	void set_downed_mates(std::vector<NativeHudDownedMate> p_mates) { downed_ = std::move(p_mates); }
+	const std::vector<NativeHudDownedMate> &downed_mates() const { return downed_; }
+	std::vector<OverviewMark> downed_marks() const;
+	void set_minimap_flow(bool p_small, std::optional<int32_t> p_step);
+	const NativeHudMinimapState &minimap_state() const { return minimap_state_; }
 	void set_manual(bool p_manual);
 	void set_world(Bf3LevelSession *p_session, const godot::Camera3D *p_camera, bool p_show);
 	NativeTags *tags() const { return tags_.get(); }
@@ -173,6 +204,13 @@ private:
 	double vfov_deg_ = 0.0;
 	bf3::core::ui::ScreenAdjustFractions safe_area_;
 	NativeHudMinimapPose pose_;
+	std::optional<NativeHudMinimapPose> pose_override_;
+	bool minimap_debug_uv_ = false;
+	bool minimap_debug_record_ = false;
+	MinimapDebugFrame minimap_debug_;
+	std::vector<NativeHudDownedMate> downed_;
+	NativeHudMinimapState minimap_state_;
+	bool minimap_client_dirty_ = false;
 	double ekg_clock_ = 0.0;
 	HudBgPainter bg_;
 	NativeHudPaintStats paint_;

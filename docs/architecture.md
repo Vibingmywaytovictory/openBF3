@@ -162,7 +162,7 @@ These are structural, known, and listed so nobody mistakes them for design inten
   unconditional stop/play/goto and hands every other frame script to the HUD controller that owns the clip; the movies'
   AS2 classes, `onClipEvent` handlers and conditional frame code are not executed outside the HUD controllers. `Bf3SwfView` draws no gradients, static text, Bevel or ColorMatrix filters,
   or blend modes other than normal, layer and add. The HUD does not sway with camera motion, the minimap draws at
-  1.375 m per local unit, measured at MapZoom 0 (the small map InitSmall starts with); the large map's zoom 1.2 reaches the HUD's Zoom binding but not the drawn scale, and nothing toggles the map size, the Reward rows (HudMessage_04) get no image URLs, and the engine's UI
+  1.375 (1 + MapZoom) m per local unit (1.375 measured at MapZoom 0, the small map InitSmall starts with; the (1 + MapZoom) factor is inferred, not measured); MapSize and MapZoom step playingminimapinit's uiminimapcomp IsSmall and per-size ZoomLevel, which the HUD follows through the bound keys (`godot.minimap_modes.*`), but the flow writes no ZoomLevel before the first MapZoom, so until then the HUD uses the level profile's step; the large map at a step that does not centre the player (IsMaxZoom) fits the combat area rect north-up as the overview does, an inference, the Reward rows (HudMessage_04) get no image URLs, and the engine's UI
   colour table behind `Util.ColorTinting` is read from hudmessage's kill-row name sprite (slot 0 its squad frame, 1 friendly,
   3 enemy, slot 2 none), which the footage's kill log killer and victim colours match. The engine message
   queue (`HudMessageComp`) takes queue sizes and times from `UIMessageCompData`, but its expiry, overflow and
@@ -182,8 +182,8 @@ These are structural, known, and listed so nobody mistakes them for design inten
   The moment fixture's fading kill rows sit on the nearest timeline frame with the row still present (0.20 for 0.00 and 0.06, 0.50 for 0.28 and 0.43 fading in).
 * The in-round HUD does not pass the strict 1280x720 screenshot gate (the 16 footage moments against the moment
   fixture's captures); there is no gate row, because the owner deferred pixel-exact HUD work on 2026-10-24. The main
-  visible differences: the kill feed rows sit larger and higher than the footage's, the minimap has no team-mate,
-  squad-mate or revive icons and a flatter interior, and the footage's glowing friendly markers over soldiers are not reproduced.
+  visible differences: the kill feed rows sit larger and higher than the footage's, the minimap's interior is
+  flatter and its revive icon (UIHudIcon_PlayerDead on a dead team-mate until its Death's revive_until, a revive or a match phase change; a mate waiting to redeploy keeps it) is inferred, not seen in footage, and the footage's glowing friendly markers over soldiers are not reproduced.
 * The crosshair arm is `round(100 (0.2 x spread deg + DispersionBaseOffset))` stage px; the 0.2 per degree is measured on
   the 18.57 footage at FOV 100 (`ui.hud.feed.install` footage rows) and its dependence on the field of view is not known.
   The stance's Base dispersion blends into its Moving one by horizontal speed / the motor's `walk_speed` for the pose and

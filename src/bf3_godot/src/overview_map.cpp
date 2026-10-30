@@ -1,6 +1,7 @@
 #include "overview_map.h"
 
 #include "godot_util.h"
+#include "minimap_debug.h"
 #include "minimap_hud.h"
 
 #include "bf3/core/ui/hud_icons.h"
@@ -50,6 +51,7 @@ uniform float metres_per_unit = 1.0;
 uniform vec2 world_center = vec2(0.0);
 uniform float world_size = 1024.0;
 uniform vec2 hatch_wrap = vec2(70.0, 70.0);
+uniform bool debug_uv = false;
 void fragment() {
 	vec2 p = local_rect.xy + UV * local_rect.zw;
 	vec2 world = area_centre - (p - centre_local) * metres_per_unit;
@@ -65,11 +67,10 @@ void fragment() {
 	float ca = outside * area_color.a * h;
 	acc = vec4(area_color.rgb * ca, ca) + acc * (1.0 - ca);
 	COLOR = vec4(acc.rgb / max(acc.a, 1e-6), acc.a);
-}
+	float debug_alpha = 1.0;
 )";
 
 constexpr std::string_view kPlayerIcon = ui::soldier_icon(false, 1, 1).icon;
-constexpr std::string_view kDeadIcon = "UIHudIcon_PlayerDead";
 
 ui::HudIconChoice mark_icon(OverviewMarkKind p_kind) {
 	switch (p_kind) {
@@ -82,9 +83,25 @@ ui::HudIconChoice mark_icon(OverviewMarkKind p_kind) {
 		case OverviewMarkKind::Enemy:
 			return { kPlayerIcon, ui::HudIconState::Enemy };
 		case OverviewMarkKind::Dead:
-			return { kDeadIcon, ui::HudIconState::Friendly };
+			return { ui::kHudIconPlayerDead, ui::HudIconState::Friendly };
 	}
 	return { kPlayerIcon, ui::HudIconState::Neutral };
+}
+
+MinimapDebugKind debug_kind(OverviewMarkKind p_kind) {
+	switch (p_kind) {
+		case OverviewMarkKind::Local:
+			return MinimapDebugKind::Local;
+		case OverviewMarkKind::Squad:
+			return MinimapDebugKind::Squad;
+		case OverviewMarkKind::Enemy:
+			return MinimapDebugKind::Enemy;
+		case OverviewMarkKind::Dead:
+			return MinimapDebugKind::Downed;
+		case OverviewMarkKind::Friendly:
+			break;
+	}
+	return MinimapDebugKind::Friendly;
 }
 
 bool is_overview_clip(const ui::SwfSceneNode &p_node) {
@@ -93,9 +110,10 @@ bool is_overview_clip(const ui::SwfSceneNode &p_node) {
 
 }
 
-std::vector<OverviewMark> overview_marks(std::span<const IffMinimapEntry> p_entries) {
-	std::vector<OverviewMark> out;
-	out.reserve(p_entries.size());
+std::vector<OverviewMark> overview_marks(
+		std::span<const IffMinimapEntry> p_entries, std::span<const OverviewMark> p_extra) {
+	std::vector<OverviewMark> out(p_extra.begin(), p_extra.end());
+	out.reserve(p_entries.size() + p_extra.size());
 	for (const IffMinimapEntry &e : p_entries) {
 		OverviewMark m;
 		m.x = e.feet[0];
@@ -222,6 +240,24 @@ bf3::core::Status Bf3OverviewMap::attach(Bf3SwfView *p_view, std::string_view p_
 	return bf3::core::Status::success();
 }
 
+std::vector<MinimapDebugFrame> Bf3OverviewMap::debug_frames() const {
+	uint64_t latest = 0;
+	for (const Attached &a : attached_) {
+		for (const Target &t : a.targets) {
+			latest = t.debug.paints > 0 ? std::max(latest, t.debug.frame) : latest;
+		}
+	}
+	std::vector<MinimapDebugFrame> out;
+	for (const Attached &a : attached_) {
+		for (const Target &t : a.targets) {
+			if (t.debug.paints > 0 && t.debug.frame == latest) {
+				out.push_back(t.debug);
+			}
+		}
+	}
+	return out;
+}
+
 void Bf3OverviewMap::detach(Bf3SwfView *p_view) {
 	if (p_view == nullptr) {
 		return;
@@ -253,7 +289,8 @@ bool Bf3OverviewMap::source_ready() {
 		std::shared_ptr<const MinimapAssets> a = source_->assets();
 		Ref<Shader> shader;
 		shader.instantiate();
-		shader->set_code(String::utf8(kOverviewShader.data(), int64_t(kOverviewShader.size())));
+		const std::string code = std::string(kOverviewShader) + std::string(kMinimapDebugUvGlsl) + "}\n";
+		shader->set_code(String::utf8(code.c_str()));
 		material_.instantiate();
 		material_->set_shader(shader);
 		const ui::MinimapData &d = a->level.data;
@@ -283,29 +320,14 @@ bool Bf3OverviewMap::source_ready() {
 }
 
 std::optional<ui::MinimapWorldRect> Bf3OverviewMap::area() {
-	if (area_tried_ || !source_ready()) {
-		return area_;
+	if (!source_ready()) {
+		return std::nullopt;
 	}
-	area_tried_ = true;
-	const Ref<ImageTexture> field = source_->combat_area_texture();
-	std::shared_ptr<const MinimapAssets> a = source_->assets();
-	Ref<Image> img = field.is_valid() ? field->get_image() : Ref<Image>();
-	if (img.is_null() || img->is_empty()) {
-		return area_;
+	const std::optional<ui::MinimapWorldRect> r = source_->combat_area_rect();
+	if (r) {
+		stats_.area = *r;
 	}
-	if (img->get_format() != Image::FORMAT_R8 && img->get_format() != Image::FORMAT_L8) {
-		img->convert(Image::FORMAT_R8);
-	}
-	ui::L8Image l8;
-	l8.width = uint32_t(img->get_width());
-	l8.height = uint32_t(img->get_height());
-	const PackedByteArray bytes = img->get_data();
-	l8.texels.assign(bytes.ptr(), bytes.ptr() + bytes.size());
-	area_ = ui::combat_area_bounds(l8, a->level.data.combat_area_alpha_threshold, ui::minimap_mapping(a->level.data));
-	if (area_) {
-		stats_.area = *area_;
-	}
-	return area_;
+	return r;
 }
 
 void Bf3OverviewMap::paint_target(const SwfEngineTarget &p_target, const ui::SwfScene &p_scene, Target &r_target) {
@@ -339,6 +361,16 @@ void Bf3OverviewMap::paint_target(const SwfEngineTarget &p_target, const ui::Swf
 	r_target.material->set_shader_parameter("centre_local", Vector2(view.center_x, view.center_y));
 	r_target.material->set_shader_parameter("area_centre", Vector2(view.player_x, view.player_z));
 	r_target.material->set_shader_parameter("metres_per_unit", 1.0f / view.pixels_per_metre);
+	r_target.material->set_shader_parameter("debug_uv", debug_uv_);
+	r_target.debug.path = p_target.path;
+	r_target.debug.texture = p_target.texture;
+	r_target.debug.local_bounds = b;
+	r_target.debug.size = p_target.size;
+	r_target.debug.view = view;
+	r_target.debug.metres_per_unit = 1.0f / view.pixels_per_metre;
+	r_target.debug.hits.clear();
+	r_target.debug.paints++;
+	r_target.debug.frame = Engine::get_singleton()->get_process_frames();
 	rs->canvas_item_clear(r_target.map_item);
 	rs->canvas_item_add_rect(r_target.map_item, Rect2(b.x_min, b.y_min, b.width(), b.height()), Color(1, 1, 1, 1));
 	stats_.maps++;
@@ -357,8 +389,8 @@ void Bf3OverviewMap::paint_target(const SwfEngineTarget &p_target, const ui::Swf
 		return std::isfinite(p.x) && std::isfinite(p.y) && p.x >= b.x_min && p.y >= b.y_min && p.x <= b.x_max &&
 				p.y <= b.y_max;
 	};
-	const auto draw = [&](const ui::HudIcon *p_icon, ui::HudIconState p_state, const ui::ScreenPoint &p_at,
-							  float p_yaw) -> bool {
+	const auto draw = [&](const ui::HudIcon *p_icon, ui::HudIconState p_state, const ui::ScreenPoint &p_at, float p_yaw,
+							  MinimapDebugKind p_kind, float p_world_x, float p_world_z) -> bool {
 		const ui::HudIconStateFrames *st = p_icon != nullptr ? p_icon->state(p_state) : nullptr;
 		if (st == nullptr && p_icon != nullptr) {
 			st = p_icon->state(ui::HudIconState::Default);
@@ -370,6 +402,14 @@ void Bf3OverviewMap::paint_target(const SwfEngineTarget &p_target, const ui::Swf
 				ui::hud_icon_rect(st->frames.front(), uint32_t(atlas->get_width()), uint32_t(atlas->get_height()));
 		if (r.width <= 0 || r.height <= 0) {
 			return false;
+		}
+		if (debug_record_) {
+			r_target.debug.hits.push_back(
+					MinimapDebugHit{ p_kind, p_world_x, p_world_z, p_at.x, p_at.y, p_icon->type });
+		}
+		if (debug_uv_) {
+			stats_.icons++;
+			return true;
 		}
 		const float w = float(r.width) * unit;
 		const float h = float(r.height) * unit;
@@ -387,7 +427,7 @@ void Bf3OverviewMap::paint_target(const SwfEngineTarget &p_target, const ui::Swf
 			continue;
 		}
 		const ui::ScreenPoint p = ui::minimap_project(view, ic.world_x, ic.world_z);
-		if (inside(p) && draw(ic.icon, ic.state, p, ic.yaw)) {
+		if (inside(p) && draw(ic.icon, ic.state, p, ic.yaw, MinimapDebugKind::Objective, ic.world_x, ic.world_z)) {
 			stats_.objectives++;
 		}
 	}
@@ -400,7 +440,8 @@ void Bf3OverviewMap::paint_target(const SwfEngineTarget &p_target, const ui::Swf
 			}
 			const ui::ScreenPoint p = ui::minimap_project(view, mk.x, mk.z);
 			const ui::HudIconChoice c = mark_icon(mk.kind);
-			if (inside(p) && draw(a->atlas.find(c.icon), c.state, p, mk.yaw) && kind == OverviewMarkKind::Dead) {
+			if (inside(p) && draw(a->atlas.find(c.icon), c.state, p, mk.yaw, debug_kind(mk.kind), mk.x, mk.z) &&
+					kind == OverviewMarkKind::Dead) {
 				stats_.skulls++;
 			}
 		}
