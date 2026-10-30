@@ -63,6 +63,8 @@ struct ServerSessionStats {
 	uint32_t bots = 0;
 	int32_t kills = 0;
 	RotationStats rotation;
+	const char *brain = "none";
+	uint64_t bot_decisions = 0;
 };
 
 uint64_t process_private_bytes();

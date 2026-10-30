@@ -3,6 +3,7 @@
 #include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/install.h"
 #include "bf3/host/bot_fill.h"
+#include "bf3/host/tdm_brain.h"
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/soldier_state.h"
 
@@ -269,6 +270,13 @@ ServerSessionStats ServerSession::stats() {
 	}
 	if (out.game.rules_active) {
 		out.kills = out.game.match.kills[0] + out.game.match.kills[1];
+	}
+	if (game_ != nullptr && game_->tdm_bots != nullptr && game_->tdm_bots->stats != nullptr) {
+		const TdmBotStats &b = *game_->tdm_bots->stats;
+		const uint32_t made = b.bots.load(std::memory_order_relaxed);
+		const uint32_t bf2 = b.bf2_bots.load(std::memory_order_relaxed);
+		out.brain = made == 0 ? "none" : bf2 == made ? "bf2" : "mixed";
+		out.bot_decisions = b.decisions.load(std::memory_order_relaxed);
 	}
 	return out;
 }

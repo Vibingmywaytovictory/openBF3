@@ -119,6 +119,7 @@ GameServerConfig tdm_game_server_config(const ServerLevel &p_level, const Server
 		auto bots = std::make_shared<TdmBotConfig>();
 		bots->count = std::min<uint32_t>(p_rules.bots, max_players);
 		bots->tuning_cfg = p_rules.bot_tuning_cfg;
+		bots->stats = std::make_shared<TdmBotStats>();
 		c.tdm_bots = bots;
 	}
 	return c;

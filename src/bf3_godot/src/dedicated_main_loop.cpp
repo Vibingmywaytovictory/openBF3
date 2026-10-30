@@ -368,14 +368,14 @@ void DedicatedMainLoop::_finalize() {
 	const core::SnapshotDiff diff = core::diff_snapshots(install_before_, install_.snapshot());
 	const host::ServerLevel &l = session_->level();
 	say(core::fmt("summary: %s %s loaded in %.2f s, played %.1f s, %llu ticks (%.2f Hz), tick p99 %.3f ms, overruns "
-				  "%llu, kills %d, stuck %u, private %.1f MiB "
+				  "%llu, kills %d, stuck %u, brain %s, decisions %llu, private %.1f MiB "
 				  "(peak %.1f MiB), godot nodes %lld, resources %+lld since the load, textures %lld B, dev commands "
 				  "%s, install %s, stopped by %s",
 			l.entry.level.c_str(), l.entry.mode.c_str(), load_seconds_, elapsed_,
 			(unsigned long long)stats.server.ticks, stats.server.measured_hz, stats.server.p99_step_ms,
-			(unsigned long long)stats.server.overruns, stats.kills, stats.stuck_bots,
-			double(stats.private_bytes) / kMiB, double(stats.peak_private_bytes) / kMiB,
-			(long long)monitor(Performance::OBJECT_NODE_COUNT),
+			(unsigned long long)stats.server.overruns, stats.kills, stats.stuck_bots, stats.brain,
+			(unsigned long long)stats.bot_decisions, double(stats.private_bytes) / kMiB,
+			double(stats.peak_private_bytes) / kMiB, (long long)monitor(Performance::OBJECT_NODE_COUNT),
 			(long long)(monitor(Performance::OBJECT_RESOURCE_COUNT) - resources_after_load_),
 			(long long)monitor(Performance::RENDER_TEXTURE_MEM_USED), args_.rules.dev_commands ? "on" : "off",
 			diff.clean() ? "unchanged" : diff.summary().c_str(), stopped_by_));

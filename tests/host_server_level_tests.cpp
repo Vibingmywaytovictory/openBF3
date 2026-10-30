@@ -147,7 +147,9 @@ void check_listen_config(const host::GameServerConfig &p_c, const host::ServerLe
 	}
 	CHECK(p_c.tdm_bots->count == 31u);
 	CHECK(p_c.tdm_bots->tuning_cfg == OPENBF3_BOT_TUNING_CFG);
-	CHECK(p_c.tdm_bots->stats == nullptr);
+	REQUIRE(p_c.tdm_bots->stats != nullptr);
+	CHECK(p_c.tdm_bots->stats->bots.load() == 0u);
+	CHECK(p_c.tdm_bots->stats->bf2_bots.load() == 0u);
 	CHECK(p_c.tdm_bots->observer == nullptr);
 }
 
