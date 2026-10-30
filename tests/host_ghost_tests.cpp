@@ -7,11 +7,13 @@
 #include "bf3/net/protocol.h"
 #include "bf3/sim/soldier_motor.h"
 #include "client_tracks.h"
+#include "server_ghosts.h"
 #include "test_support.h"
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -429,6 +431,43 @@ TEST_SUITE("host-ghost") {
 		CHECK(per_second <= kBytesPerSecond);
 		CHECK(enemy_near_missing == 0);
 		CHECK(rate_misses == 0);
+	}
+
+	TEST_CASE("a shot is relevant to a receiver its path passes within the fly-by radius of, up to the round's range; "
+			  "Metro's 5.56 rounds carry radius 15") {
+		const host::FlyBy r{ 15.0f, 1000.0f };
+		const sim::Vec3 o{ 0.0f, 0.0f, 0.0f };
+		const sim::Vec3 x{ 1.0f, 0.0f, 0.0f };
+		CHECK(host::shot_passes_by(o, x, r, { 50.0f, 10.0f, 0.0f }));
+		CHECK(host::shot_passes_by(o, { 2.0f, 0.0f, 0.0f }, r, { 50.0f, 0.0f, 14.9f }));
+		CHECK_FALSE(host::shot_passes_by(o, x, r, { 50.0f, 20.0f, 0.0f }));
+		CHECK(host::shot_passes_by(o, x, r, { -10.0f, 5.0f, 0.0f }));
+		CHECK_FALSE(host::shot_passes_by(o, x, r, { -14.0f, 6.0f, 0.0f }));
+		CHECK(host::shot_passes_by(o, x, r, { 1010.0f, 5.0f, 0.0f }));
+		CHECK_FALSE(host::shot_passes_by(o, x, r, { 1100.0f, 5.0f, 0.0f }));
+		CHECK_FALSE(host::shot_passes_by(o, x, { 0.0f, 1000.0f }, { 50.0f, 1.0f, 0.0f }));
+		CHECK_FALSE(host::shot_passes_by(o, x, { 15.0f, 0.0f }, { 5.0f, 1.0f, 0.0f }));
+		CHECK_FALSE(host::shot_passes_by(o, { 0.0f, 0.0f, 0.0f }, r, { 1.0f, 0.0f, 0.0f }));
+		CHECK_FALSE(host::shot_passes_by(o, { std::nanf(""), 0.0f, 0.0f }, r, { 1.0f, 0.0f, 0.0f }));
+
+		Fixture *f = fixture();
+		if (f == nullptr) {
+			return;
+		}
+		REQUIRE(f->level.shared->gunplay != nullptr);
+		size_t with = 0, rifle = 0;
+		for (const core::gameplay::WeaponDef &d : f->level.shared->gunplay->defs) {
+			with += d.projectile.fly_by_radius > 0.0f ? 1u : 0u;
+			if (d.projectile.fly_by_sound == "sound/bullet_craft/bullet_flybys/bullet_flyby_556") {
+				++rifle;
+				CHECK(d.projectile.fly_by_radius == 15.0f);
+				CHECK(d.projectile.fly_by_speed == 20.0f);
+			}
+		}
+		std::printf("host.ghost: %zu of %zu weapon defs carry a fly-by radius, %zu fire 5.56 rounds\n", with,
+				f->level.shared->gunplay->defs.size(), rifle);
+		CHECK(rifle > 0);
+		CHECK(with > rifle);
 	}
 
 	TEST_CASE("a remote track lasts three of its own sample gaps, at least 1 s, and a removal ends it") {

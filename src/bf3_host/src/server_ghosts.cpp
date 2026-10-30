@@ -54,6 +54,19 @@ std::optional<GhostTier> ghost_tier(const GhostViewer &p_viewer, const GhostCand
 	return t;
 }
 
+bool shot_passes_by(
+		const sim::Vec3 &p_origin, const sim::Vec3 &p_direction, const FlyBy &p_fly_by, const sim::Vec3 &p_eye) {
+	const float length = core::vec::length(p_direction);
+	if (!(p_fly_by.radius > 0.0f) || !(p_fly_by.range > 0.0f) || !(length > 0.0f) || !std::isfinite(length)) {
+		return false;
+	}
+	const sim::Vec3 dir = core::vec::scale(p_direction, 1.0f / length);
+	const sim::Vec3 to = core::vec::sub(p_eye, p_origin);
+	const float along = std::clamp(core::vec::dot(to, dir), 0.0f, p_fly_by.range);
+	const sim::Vec3 closest = core::vec::add(p_origin, core::vec::scale(dir, along));
+	return distance2(closest, p_eye) <= p_fly_by.radius * p_fly_by.radius;
+}
+
 void GhostScheduler::configure(size_t p_slots, int64_t p_budget_bytes) {
 	clients_.assign(p_slots, Client());
 	budget_ = p_budget_bytes;

@@ -55,6 +55,14 @@ struct GhostPlan {
 
 std::optional<GhostTier> ghost_tier(const GhostViewer &p_viewer, const GhostCandidate &p_ghost, bool p_attacker);
 
+struct FlyBy {
+	float radius = 0;
+	float range = 0;
+};
+
+bool shot_passes_by(
+		const sim::Vec3 &p_origin, const sim::Vec3 &p_direction, const FlyBy &p_fly_by, const sim::Vec3 &p_eye);
+
 class GhostScheduler {
 public:
 	void configure(size_t p_slots, int64_t p_budget_bytes);

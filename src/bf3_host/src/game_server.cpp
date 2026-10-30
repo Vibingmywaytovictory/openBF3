@@ -588,6 +588,11 @@ core::Status GameServer::Impl::init_gameplay() {
 		return core::make_error("GameServer: " + std::to_string(g.target_bots) + " target bots for " + std::to_string(slots.size()) + " slots");
 	}
 	BF3_TRY(combat.create(*config.level, g, config.seed, *world));
+	std::vector<FlyBy> fly_by;
+	for (const core::gameplay::WeaponDef &d : config.level->gunplay->defs) {
+		fly_by.push_back({ d.projectile.fly_by_radius, float(core::gameplay::max_range(d)) });
+	}
+	snapshots.set_fly_by(std::move(fly_by));
 	if (tdm) {
 		BF3_TRY(match.create_rules(config, combat.gunplay()->match_seed()));
 	}

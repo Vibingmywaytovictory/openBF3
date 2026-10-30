@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace bf3::host {
@@ -34,6 +35,7 @@ public:
 		ghosts_.reset(p_slot);
 	}
 	void ack(size_t p_slot, const net::CommandPacket &p_packet) { ghosts_.ack(p_slot, p_packet); }
+	void set_fly_by(std::vector<FlyBy> p_fly_by) { fly_by_ = std::move(p_fly_by); }
 
 	void send(sim::Tick p_tick, uint64_t p_now_ns, GameServerTickTimes &r_times);
 	void stats(GameServerStats &r_stats) const;
@@ -64,6 +66,7 @@ private:
 	std::vector<GhostCandidate> candidates_;
 	std::vector<int> candidate_of_;
 	GhostPlan plan_;
+	std::vector<FlyBy> fly_by_;
 	std::vector<net::RemoteShot> remote_;
 
 	uint64_t sent_ = 0;

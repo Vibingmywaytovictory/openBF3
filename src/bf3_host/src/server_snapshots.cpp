@@ -200,7 +200,10 @@ std::vector<uint8_t> SnapshotWriter::shot_events(
 		if (e.player_slot == p_slot) {
 			continue;
 		}
-		if (e.player_slot < scoped.size() && scoped[e.player_slot]) {
+		const bool in_scope = e.player_slot < scoped.size() && scoped[e.player_slot];
+		const bool passes =
+				v.spawned && e.def < fly_by_.size() && shot_passes_by(e.origin, e.direction, fly_by_[e.def], v.eye);
+		if (in_scope || passes) {
 			ev.shots.push_back(net::remote_shot_of(e));
 		}
 	}
