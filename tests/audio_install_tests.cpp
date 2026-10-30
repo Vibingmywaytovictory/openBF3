@@ -914,11 +914,13 @@ constexpr std::array<AreaPoint, 4> kMetroPoints{ {
 				"reflections_close_indoor_small_wave" },
 } };
 
-constexpr std::array<AreaPoint, 2> kSeinePoints{ {
+constexpr std::array<AreaPoint, 3> kSeinePoints{ {
 		{ "room", { 39.100f, 1.250f, -49.670f }, 6, "shellcasings_762_indoor_wave",
 				"reflections_close_indoor_small_wave" },
 		{ "open ground", { 159.301f, 5.120f, -115.258f }, 0, "shellcasings_762_outdoor_wave",
 				"reflections_close_openfield" },
+		{ "alley", { -15.000f, 1.270f, 81.000f }, 3, "shellcasings_762_outdoor_tarmac",
+				"reflections_close_urban_alley_wave" },
 } };
 
 struct AreaLevel {
@@ -1171,7 +1173,7 @@ TEST_SUITE("audio-areas") {
 		}
 	}
 
-	TEST_CASE("fixed points: Metro TDM garage, street, open ground, room; Seine TDM room and open ground") {
+	TEST_CASE("fixed points: Metro TDM garage, street, open ground, room; Seine TDM room, open ground, alley") {
 		AreasFixture *f = areas_fixture();
 		check_points(*f, f->metro, "Metro", kMetroPoints);
 		check_points(*f, f->seine, "Seine", kSeinePoints);
