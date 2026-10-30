@@ -49,6 +49,13 @@ void read_projectile(Fields &r_f, const EbxInstance &p_projectile, ProjectileDef
 	r_projectile.server_projectile_disabled = r_f.flag_or(p, "ServerProjectileDisabled", false);
 	r_projectile.ammunition_type = r_f.text_or(p, "AmmunitionType");
 	r_projectile.material = r_f.material_pair(p, "MaterialPair");
+	if (p.get("FlyBySound")) {
+		if (const std::optional<EbxRef> s = r_f.ref(p, "FlyBySound"); s && !s->is_null()) {
+			r_projectile.fly_by_sound = r_f.target_partition(p_projectile.partition(), *s);
+		}
+	}
+	r_projectile.fly_by_radius = r_f.f32_or(p, "FlyBySoundRadius", 0);
+	r_projectile.fly_by_speed = r_f.f32_or(p, "FlyBySoundSpeed", 0);
 	if (const std::optional<EbxInstance> e = r_f.follow(p, "Explosion", "ExplosionEntityData", false)) {
 		read_explosion(r_f, *e, r_projectile.explosion);
 	}

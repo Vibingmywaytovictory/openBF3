@@ -283,6 +283,9 @@ void io_projectile(IO &io, ProjectileDef &p) {
 	io.v(p.impact_impulse);
 	io.v(p.detonate_on_timeout);
 	io.v(p.server_projectile_disabled);
+	io.v(p.fly_by_sound);
+	io.v(p.fly_by_radius);
+	io.v(p.fly_by_speed);
 	io.v(p.start_damage);
 	io.v(p.end_damage);
 	io.v(p.damage_falloff_start);

@@ -225,6 +225,9 @@ struct ProjectileDef {
 	float impact_impulse = 0;
 	bool detonate_on_timeout = false;
 	bool server_projectile_disabled = false;
+	std::string fly_by_sound;
+	float fly_by_radius = 0;
+	float fly_by_speed = 0;
 
 	float start_damage = 0;
 	float end_damage = 0;

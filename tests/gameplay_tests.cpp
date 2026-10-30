@@ -175,6 +175,9 @@ TEST_SUITE("gameplay") {
 		CHECK(a3.projectile.gravity == -15.0f);
 		CHECK(a3.projectile.record_initial_speed == 350.0f);
 		CHECK(a3.projectile.suppression.max_multiplier == 7.0f);
+		CHECK(a3.projectile.fly_by_sound == "sound/bullet_craft/bullet_flybys/bullet_flyby_556");
+		CHECK(a3.projectile.fly_by_radius == 15.0f);
+		CHECK(a3.projectile.fly_by_speed == 20.0f);
 		CHECK(near(max_range(a3), 975.0));
 		CHECK(near(drop_at(muzzle_speed(a3), a3.projectile.gravity, 300), 1.60, 0.005));
 		CHECK(near(drop_at(muzzle_speed(a3), a3.projectile.gravity, 100), 0.178, 0.0005));

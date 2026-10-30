@@ -19,9 +19,9 @@ class LevelMount;
 
 namespace bf3::core::gameplay {
 
-inline constexpr uint32_t kWeaponBlobFormatVersion = 3;
+inline constexpr uint32_t kWeaponBlobFormatVersion = 4;
 
-inline constexpr uint32_t kWeaponConverterVersion = 3;
+inline constexpr uint32_t kWeaponConverterVersion = 4;
 inline constexpr const char *kWeaponCacheKind = "weapon";
 inline constexpr const char *kWeaponDepsCacheKind = "weapon-deps";
 
