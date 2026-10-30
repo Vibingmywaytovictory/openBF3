@@ -251,10 +251,32 @@ void SquadOrders::gather(const SquadCoordinator &p_squad) const {
 	}
 }
 
-void SquadOrders::sample(const SquadCoordinator &p_squad, float p_near_m, SquadCohesion &r_cohesion) const {
+void SquadOrders::deployed(int p_player_id) {
+	if (p_player_id >= 0 && size_t(p_player_id) < origin_known_.size()) {
+		origin_known_[size_t(p_player_id)] = false;
+	}
+}
+
+bool SquadOrders::left_origin(int p_player_id, const Vec3 &p_position, float p_metres) {
+	if (p_player_id < 0 || size_t(p_player_id) >= origin_known_.size()) {
+		return false;
+	}
+	const size_t id = size_t(p_player_id);
+	if (!origin_known_[id]) {
+		origin_known_[id] = true;
+		origin_[id] = p_position;
+	}
+	return distance_sq(p_position, origin_[id]) > p_metres * p_metres;
+}
+
+void SquadOrders::sample(const SquadCoordinator &p_squad, float p_near_m, SquadCohesion &r_cohesion) {
 	const SquadMember *const leader = p_squad.squad_leader();
+	if (leader != nullptr && !leader->player().is_alive()) {
+		deployed(leader->player_id());
+	}
 	Vec3 lead{};
-	if (leader == nullptr || !leader->player().is_alive() || !live_position(leader->player(), lead)) {
+	if (leader == nullptr || !leader->player().is_alive() || !live_position(leader->player(), lead) ||
+			!left_origin(leader->player_id(), lead, p_near_m)) {
 		return;
 	}
 	for (int i = 0; i < p_squad.number_of_squad_members(); ++i) {

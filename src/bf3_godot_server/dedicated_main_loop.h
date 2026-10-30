@@ -22,6 +22,7 @@ struct DedicatedArgs {
 	std::string port_file;
 	double run_seconds = 0.0;
 	uint32_t stop_after_kills = 0;
+	uint32_t stop_after_squad_samples = 0;
 	uint32_t stop_after_levels = 0;
 	float intermission_s = -1.0f;
 	float load_stall_s = -1.0f;
@@ -57,6 +58,7 @@ private:
 	double report_timer_ = 0.0;
 	double load_seconds_ = 0.0;
 	int32_t kills_ = 0;
+	uint64_t squad_samples_ = 0;
 	uint32_t stuck_ = 0;
 	uint64_t private_bytes_ = 0;
 	uint64_t peak_private_bytes_ = 0;

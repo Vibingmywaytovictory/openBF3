@@ -133,6 +133,7 @@ bool DedicatedMainLoop::parse_args(std::string &r_error) {
 	a.port_file = user_arg_value("port-file");
 	u32_arg("port", 0.0, 65535.0, a.port, r_error);
 	u32_arg("stop-after-kills", 0.0, 100000.0, a.stop_after_kills, r_error);
+	u32_arg("stop-after-squad-samples", 0.0, 100000000.0, a.stop_after_squad_samples, r_error);
 	u32_arg("stop-after-levels", 0.0, 1000.0, a.stop_after_levels, r_error);
 	seconds_arg("intermission-s", 0.0, 3600.0, a.intermission_s, r_error);
 	seconds_arg("load-stall-s", 1.0, 3600.0, a.load_stall_s, r_error);
@@ -377,6 +378,7 @@ bool DedicatedMainLoop::_process(double p_delta) {
 		levels_played = levels_due && stats.rotation.level_changes + 1u >= args_.stop_after_levels &&
 				!stats.rotation.changing && stats.game.clients == 0;
 		kills_ = stats.kills;
+		squad_samples_ = stats.squad_samples;
 		stuck_ = stats.stuck_bots;
 		private_bytes_ = stats.private_bytes;
 		peak_private_bytes_ = stats.peak_private_bytes;
@@ -385,7 +387,7 @@ bool DedicatedMainLoop::_process(double p_delta) {
 			report(stats);
 		}
 	}
-	if (kills_due && kills_ >= int32_t(args_.stop_after_kills)) {
+	if (kills_due && kills_ >= int32_t(args_.stop_after_kills) && squad_samples_ >= args_.stop_after_squad_samples) {
 		stopped_by_ = "--stop-after-kills";
 		return true;
 	}

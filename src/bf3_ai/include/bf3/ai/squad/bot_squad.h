@@ -94,6 +94,7 @@ public:
 
 	void add_bot(int p_player_id, BotSquad &r_squad);
 	void remove_bot(int p_player_id);
+	void deployed(int p_player_id);
 	void update(sim::Tick p_tick, float p_near_m, SquadCohesion &r_cohesion);
 	BotSquad *bot_squad(int p_player_id) const;
 	const SquadOrderStats &stats() const { return stats_; }
@@ -102,12 +103,15 @@ private:
 	void pass_down(const SquadCoordinator &p_squad, SquadOrder p_order);
 	void gather(const SquadCoordinator &p_squad) const;
 	bool arrived(const SquadCoordinator &p_squad, sim::Tick p_tick, sim::Tick &r_since) const;
-	void sample(const SquadCoordinator &p_squad, float p_near_m, SquadCohesion &r_cohesion) const;
+	bool left_origin(int p_player_id, const Vec3 &p_position, float p_metres);
+	void sample(const SquadCoordinator &p_squad, float p_near_m, SquadCohesion &r_cohesion);
 
 	SquadManager &squads_;
 	SquadOrderSink *sink_ = nullptr;
 	const BehaviourTuning &behaviour_;
 	std::array<BotSquad *, 256> bots_{};
+	std::array<Vec3, 256> origin_{};
+	std::array<bool, 256> origin_known_{};
 	sim::Tick wait_ticks_ = 0;
 	std::array<std::vector<SquadOrder>, 2> sent_;
 	std::array<std::vector<sim::Tick>, 2> arrived_;

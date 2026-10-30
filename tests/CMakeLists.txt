@@ -1139,6 +1139,7 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_label(timing godot.dedicated.timing)
     openbf3_godot_row(godot.server_cmd godot_server_cmd.cmake HEADLESS SERVER NO_PROJECT_LOCK TIMEOUT 120 ARGS
         "-DSERVER_CMD=${PROJECT_SOURCE_DIR}/tools/server.cmd" "-DSERVER_DLL=$<TARGET_FILE:bf3_godot_server>")
+    openbf3_cost(godot.dedicated 1 22)
 endif()
 
 openbf3_test(test_net_procs_harness test_main.cpp net_procs_harness_tests.cpp test_support.h)

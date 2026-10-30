@@ -86,6 +86,8 @@ Cohesion run_cohesion(const tt::TdmLevel &p_level, uint64_t p_seed) {
 		r_bots.observer = log;
 	};
 	std::array<uint8_t, kSlots> seen{};
+	std::array<uint32_t, kSlots> origin_life{};
+	std::array<sim::Vec3, kSlots> origin{};
 	c.on_tick = [&](sim::Tick, host::GameServer &r_server, tt::ScriptedPeer *) {
 		const host::TdmRules *rules = r_server.rules();
 		if (rules == nullptr || rules->phase() != net::MatchPhase::InRound) {
@@ -108,8 +110,16 @@ Cohesion run_cohesion(const tt::TdmLevel &p_level, uint64_t p_seed) {
 				if (members.size() < 2) {
 					continue;
 				}
-				const sim::SoldierState *lead = r_server.soldier(members.front());
+				const uint8_t leader = members.front();
+				const sim::SoldierState *lead = r_server.soldier(leader);
 				if (!alive(lead)) {
+					continue;
+				}
+				if (origin_life[leader] != lead->life + 1u) {
+					origin_life[leader] = lead->life + 1u;
+					origin[leader] = lead->position;
+				}
+				if (metres(lead->position, origin[leader]) <= kNearMetres) {
 					continue;
 				}
 				for (size_t i = 1; i < members.size(); ++i) {
@@ -266,8 +276,8 @@ Orders run_orders(const tt::TdmLevel &p_level, uint64_t p_seed, float p_arrive_m
 }
 
 TEST_SUITE("host-tdm-squads") {
-	TEST_CASE("bots-only TDM, seeds 1-3: every bot in a squad, members keep to their leader outside a fight, bots "
-			  "spawn on squad mates") {
+	TEST_CASE("bots-only TDM, seeds 1-3: every bot in a squad, members keep up with a leader who left its deploy "
+			  "point, outside a fight, bots spawn on squad mates") {
 		tt::TdmLevel *level = tt::load_tdm_level_once();
 		if (level == nullptr) {
 			return;
@@ -280,7 +290,7 @@ TEST_SUITE("host-tdm-squads") {
 			const float median = core::nearest_rank(run.distances, 0.5);
 			const double near = run.samples > 0 ? double(run.near) / double(run.samples) : 0.0;
 			std::printf("host.tdm.squads seed %zu: %u bots, %u without a squad, %u in an oversized squad; %llu member "
-						"ticks outside a fight, "
+						"ticks outside a fight with the leader away from where it deployed, "
 						"median %.1f m to the leader, %.1f %% within %.0f m; spawns %llu, on a squad mate %llu; kills "
 						"%d / %d in %u ticks\n",
 					i + 1, run.bots, run.unsquadded, run.oversized, (unsigned long long)run.samples, median,

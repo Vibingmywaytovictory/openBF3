@@ -204,6 +204,7 @@ void TdmStrategy::draw_spawn(uint8_t p_slot) {
 		return;
 	}
 	spawn_life_[p_slot] = states[p_slot].life + 1u;
+	orders_->deployed(p_slot);
 	const SquadTable &table = rules_->squads();
 	const uint8_t team = table.team_of(p_slot);
 	const ai::SquadMember *const member = team != 0 ? squads_->squad_member(int(p_slot), team) : nullptr;
