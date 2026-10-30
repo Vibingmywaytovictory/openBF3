@@ -3,6 +3,7 @@
 #include "tdm_bot_shared.h"
 
 #include "bf3/host/server_view.h"
+#include "bf3/host/tdm_rules.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/command.h"
 
@@ -548,6 +549,74 @@ int HostAiWorld::number_of_control_points(int p_side) const {
 				: 0;
 	}
 	return count;
+}
+
+namespace {
+
+bool squad_slot(const TdmRules &p_rules, int p_squad, const ai::SquadPlayer &p_player, uint8_t &r_slot) {
+	const int id = p_player.id();
+	if (id < 0 || id >= int(net::kMaxPlayerRows) || p_squad < 1 || p_squad > int(net::kMaxSquads)) {
+		return false;
+	}
+	r_slot = uint8_t(id);
+	return p_player.side() == int(p_rules.team_of(r_slot));
+}
+
+bool lands_in_created(const SquadTable &p_squads, uint8_t p_slot, uint8_t p_team, uint8_t p_squad) {
+	if (!p_squads.members(p_team, p_squad).empty()) {
+		return false;
+	}
+	for (uint8_t q = 1; q < p_squad; ++q) {
+		const std::span<const uint8_t> members = p_squads.members(p_team, q);
+		if (members.empty() || (members.size() == 1 && members.front() == p_slot)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+}
+
+bool RulesSquadService::join_squad(int p_squad, const ai::SquadPlayer &p_player) {
+	uint8_t slot = 0;
+	if (!squad_slot(rules_, p_squad, p_player, slot)) {
+		return false;
+	}
+	const SquadTable &squads = rules_.squads();
+	const uint8_t squad = uint8_t(p_squad);
+	if (squads.squad_of(slot) == squad) {
+		return true;
+	}
+	net::SquadRequest request;
+	request.squad = squad;
+	if (squads.members(squads.team_of(slot), squad).empty()) {
+		if (!lands_in_created(squads, slot, squads.team_of(slot), squad)) {
+			return false;
+		}
+		request.op = net::SquadOp::Create;
+	}
+	return rules_.request_squad(slot, request) == SquadRefusal::None && squads.squad_of(slot) == squad;
+}
+
+bool RulesSquadService::exit_squad(int p_squad, const ai::SquadPlayer &p_player) {
+	uint8_t slot = 0;
+	if (!squad_slot(rules_, p_squad, p_player, slot) || rules_.squads().squad_of(slot) != uint8_t(p_squad)) {
+		return false;
+	}
+	net::SquadRequest request;
+	request.op = net::SquadOp::Leave;
+	return rules_.request_squad(slot, request) == SquadRefusal::None;
+}
+
+bool RulesSquadService::is_squad_leader(int p_squad, const ai::SquadPlayer &p_player) const {
+	uint8_t slot = 0;
+	return squad_slot(rules_, p_squad, p_player, slot) && rules_.squads().squad_of(slot) == uint8_t(p_squad) &&
+			rules_.squads().leader(slot);
+}
+
+void RulesSquadService::request_new_commander_order(int p_squad, const ai::SquadPlayer &p_player) {
+	(void)p_squad;
+	(void)p_player;
 }
 
 }

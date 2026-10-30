@@ -11,6 +11,7 @@
 #include "bf3/host/ai_world.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/level_load.h"
+#include "bf3/host/tdm_rules.h"
 #include "bf3/sim/nav.h"
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/weapon_sim.h"
@@ -20,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cinttypes>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -32,6 +34,20 @@
 using namespace bf3;
 
 namespace {
+
+struct SquadPlayerStub final : ai::SquadPlayer {
+	int slot = 0;
+	int team = 0;
+	int id() const override { return slot; }
+	bool is_ai() const override { return true; }
+	bool is_alive() const override { return true; }
+	bool is_man_down() const override { return false; }
+	int side() const override { return team; }
+	int spawn_group() const override { return 0; }
+	int spawn_kit() const override { return 0; }
+	ai::AiObject *soldier() const override { return nullptr; }
+	ai::AiObject *current_vehicle() const override { return nullptr; }
+};
 
 struct Quad {
 	sim::Vec3 a, b, c, d;
@@ -713,5 +729,82 @@ TEST_SUITE("ai-world-install") {
 		std::printf("ai world: Metro CQL %zu flags and %zu HQs (loaded in %.1f s), TDM fixture %.1f s\n", area_flags,
 				area_hqs, conquest.seconds, level->seconds_load);
 		test::tdm::check_install_unchanged(*level);
+	}
+
+	TEST_CASE("ai world: the squad service joins, leaves and leads through the server's SquadTable") {
+		test::tdm::TdmLevel *level = test::tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		host::MatchRulesConfig config;
+		config.mode = host::MatchRulesConfig::Mode::Tdm;
+		config.preround_override_s = 0.0f;
+		core::Result<std::unique_ptr<host::TdmRules>> created =
+				host::TdmRules::create(*level->shared, level->bots, config, 3, 64);
+		REQUIRE_MESSAGE(created.ok(), (created.ok() ? std::string() : created.error().message));
+		host::TdmRules &rules = **created;
+		for (uint8_t s = 0; s < 32; ++s) {
+			REQUIRE(rules.on_connect(s, true, "") != 0);
+		}
+		const host::SquadTable &table = rules.squads();
+		host::RulesSquadService service(rules);
+		std::array<SquadPlayerStub, 32> players;
+		size_t leaders = 0;
+		for (uint8_t s = 0; s < 32; ++s) {
+			players[s].slot = s;
+			players[s].team = rules.team_of(s);
+			REQUIRE(table.squad_of(s) != 0);
+			CHECK(service.is_squad_leader(table.squad_of(s), players[s]) == table.leader(s));
+			CHECK_FALSE(service.is_squad_leader(table.squad_of(s) % 32 + 1, players[s]));
+			leaders += table.leader(s) ? 1 : 0;
+			SquadPlayerStub other_side = players[s];
+			other_side.team = 3 - other_side.team;
+			CHECK_FALSE(service.is_squad_leader(table.squad_of(s), other_side));
+			CHECK_FALSE(service.join_squad(table.squad_of(s), other_side));
+		}
+		CHECK(leaders == 8);
+
+		const uint8_t team = rules.team_of(0);
+		const uint8_t home = table.squad_of(0);
+		const std::vector<uint8_t> before(table.members(team, home).begin(), table.members(team, home).end());
+		REQUIRE(before.size() == 4);
+		const uint8_t lead = before.front();
+		const uint8_t heir = before[1];
+		CHECK(service.join_squad(home, players[lead]));
+		CHECK(table.squad_of(lead) == home);
+		CHECK(service.exit_squad(home, players[lead]));
+		CHECK(table.squad_of(lead) == 0);
+		CHECK_FALSE(service.exit_squad(home, players[lead]));
+		CHECK(service.is_squad_leader(home, players[heir]));
+		CHECK_FALSE(service.is_squad_leader(home, players[lead]));
+
+		uint8_t full = 0;
+		for (uint8_t q = 1; q <= 32 && full == 0; ++q) {
+			full = q != home && table.members(team, q).size() == table.squad_size() ? q : 0;
+		}
+		REQUIRE(full != 0);
+		CHECK_FALSE(service.join_squad(full, players[lead]));
+		CHECK(table.squad_of(lead) == 0);
+
+		uint8_t empty = 0;
+		for (uint8_t q = 1; q <= 32 && empty == 0; ++q) {
+			empty = table.members(team, q).empty() ? q : 0;
+		}
+		REQUIRE(empty != 0);
+		REQUIRE(empty < 32);
+		const uint64_t revision = table.revision();
+		CHECK_FALSE(service.join_squad(empty + 1, players[lead]));
+		CHECK(table.revision() == revision);
+		CHECK(service.join_squad(empty, players[lead]));
+		CHECK(table.squad_of(lead) == empty);
+		CHECK(service.is_squad_leader(empty, players[lead]));
+
+		CHECK(service.exit_squad(empty, players[lead]));
+		CHECK(service.join_squad(home, players[lead]));
+		CHECK(table.squad_of(lead) == home);
+		CHECK_FALSE(service.is_squad_leader(home, players[lead]));
+		CHECK(table.members(team, home).size() == 4);
+		std::printf("ai world: squad service over %zu leaders, %" PRIu64 " squad requests, %" PRIu64 " refused\n",
+				leaders, rules.stats().squad_requests, rules.stats().squad_refused);
 	}
 }

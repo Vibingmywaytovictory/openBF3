@@ -16,6 +16,7 @@
 namespace bf3::host {
 
 class ServerView;
+class TdmRules;
 
 struct AiWorldConfig {
 	std::shared_ptr<const BotLevel> level;
@@ -89,6 +90,19 @@ public:
 private:
 	explicit HostAiWorld(std::unique_ptr<Impl> p_impl);
 	std::unique_ptr<Impl> impl_;
+};
+
+class RulesSquadService final : public ai::SquadService {
+public:
+	explicit RulesSquadService(TdmRules &r_rules) : rules_(r_rules) {}
+
+	bool join_squad(int p_squad, const ai::SquadPlayer &p_player) override;
+	bool exit_squad(int p_squad, const ai::SquadPlayer &p_player) override;
+	bool is_squad_leader(int p_squad, const ai::SquadPlayer &p_player) const override;
+	void request_new_commander_order(int p_squad, const ai::SquadPlayer &p_player) override;
+
+private:
+	TdmRules &rules_;
 };
 
 }
