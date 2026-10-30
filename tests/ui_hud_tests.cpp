@@ -5,8 +5,10 @@
 #include "bf3/core/ui/hud_icons.h"
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/core/ui/hud_sources.h"
+#include "bf3/core/ui/icon3d_placement.h"
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -59,6 +61,91 @@ ui::HudSourceTable table_from_rows() {
 }
 
 TEST_SUITE("ui-hud-unit") {
+	TEST_CASE("icon3d placement: UIAlerttagComp's distance fade and scale, the rectangular edge snap at SnapSafeZone "
+			  "round SnapCenterYOffset, "
+			  "the circular snap on the tracker radii") {
+		ui::Icon3dStyle s;
+		s.draw_distance = 15.0f;
+		s.fade_distance = 8.0f;
+		s.fade_end_distance = 15.0f;
+		s.max_far_fade = 0.0f;
+		s.scale_distance = 15.0f;
+		s.max_scale_mod = 0.85f;
+		s.snap_icons = true;
+		s.circular_snap = false;
+		s.snap_safe_zone = 0.95f;
+		s.snap_center_y_offset = 0.15f;
+		s.tracker_radius_x = 0.85f;
+		s.tracker_radius_y = 0.6f;
+		const ui::SwfRect visible{ 0.0f, 1280.0f, 0.0f, 720.0f };
+		CHECK(ui::icon3d_scale(s, 4.0f) == doctest::Approx(1.0 - 0.85 * 4.0 / 15.0));
+		CHECK(ui::icon3d_alpha(s, 4.0f) == doctest::Approx(1.0));
+		CHECK(ui::icon3d_alpha(s, 11.5f) == doctest::Approx(0.5));
+		CHECK(ui::icon3d_scale(s, 11.5f) == doctest::Approx(1.0 - 0.85 * 11.5 / 15.0));
+		CHECK(ui::icon3d_alpha(s, 15.0f) == doctest::Approx(0.0));
+		CHECK(ui::icon3d_scale(s, 30.0f) == doctest::Approx(0.15));
+		CHECK_FALSE(ui::place_icon3d(s, 15.5f, true, { 700.0f, 300.0f }, visible).shown);
+		const ui::SwfRect box = ui::icon3d_snap_box(s, visible);
+		CHECK(box.x_min == doctest::Approx(32.0));
+		CHECK(box.x_max == doctest::Approx(1248.0));
+		CHECK(box.y_min == doctest::Approx(18.0));
+		CHECK(box.y_max == doctest::Approx(702.0));
+		const ui::SwfPoint origin = ui::icon3d_snap_origin(s, visible);
+		CHECK(origin.x == doctest::Approx(640.0));
+		CHECK(origin.y == doctest::Approx(414.0));
+		const ui::Icon3dPlacement on = ui::place_icon3d(s, 4.0f, true, { 700.0f, 300.0f }, visible);
+		CHECK(on.shown);
+		CHECK_FALSE(on.snapped);
+		CHECK(on.x == doctest::Approx(700.0));
+		CHECK(on.y == doctest::Approx(300.0));
+		CHECK(on.scale == doctest::Approx(1.0 - 0.85 * 4.0 / 15.0));
+		const ui::Icon3dPlacement right = ui::place_icon3d(s, 11.5f, true, { 1400.0f, 414.0f }, visible);
+		CHECK(right.snapped);
+		CHECK(right.x == doctest::Approx(1248.0));
+		CHECK(right.y == doctest::Approx(414.0));
+		CHECK(right.alpha == doctest::Approx(0.5));
+		const ui::Icon3dPlacement corner =
+				ui::place_icon3d(s, 4.0f, true, { 640.0f + 2.0f * 608.0f, 414.0f - 2.0f * 396.0f }, visible);
+		CHECK(corner.snapped);
+		CHECK(corner.x == doctest::Approx(1248.0));
+		CHECK(corner.y == doctest::Approx(18.0));
+		const ui::Icon3dPlacement behind = ui::place_icon3d(s, 4.0f, false, { 640.0f, 514.0f }, visible);
+		CHECK(behind.snapped);
+		CHECK(behind.x == doctest::Approx(640.0));
+		CHECK(behind.y == doctest::Approx(702.0));
+		const ui::Icon3dPlacement dead_behind = ui::place_icon3d(s, 4.0f, false, origin, visible);
+		CHECK(dead_behind.snapped);
+		CHECK(dead_behind.y == doctest::Approx(702.0));
+		ui::Icon3dStyle round = s;
+		round.circular_snap = true;
+		const ui::Icon3dPlacement ring = ui::place_icon3d(round, 4.0f, true, { 1400.0f, 414.0f }, visible);
+		CHECK(ring.snapped);
+		CHECK(ring.x == doctest::Approx(640.0 + 0.85 * 640.0));
+		CHECK(ring.y == doctest::Approx(414.0));
+		ui::Icon3dStyle flat = round;
+		flat.tracker_radius_x = 0.0f;
+		const ui::Icon3dPlacement flat_ring = ui::place_icon3d(flat, 4.0f, true, { 1400.0f, 414.0f }, visible);
+		CHECK(flat_ring.x == doctest::Approx(1248.0));
+		CHECK(std::isfinite(flat_ring.y));
+		ui::Icon3dStyle low = s;
+		low.snap_center_y_offset = 1.0f;
+		low.snap_safe_zone = 0.5f;
+		const ui::Icon3dPlacement low_up = ui::place_icon3d(low, 4.0f, true, { 640.0f, -100.0f }, visible);
+		CHECK(low_up.snapped);
+		CHECK(low_up.y == doctest::Approx(180.0));
+		ui::Icon3dStyle no_snap = s;
+		no_snap.snap_icons = false;
+		CHECK_FALSE(ui::place_icon3d(no_snap, 4.0f, true, { 1400.0f, 414.0f }, visible).shown);
+		ui::Icon3dStyle only = s;
+		only.only_show_snapped = true;
+		CHECK_FALSE(ui::place_icon3d(only, 4.0f, true, { 700.0f, 300.0f }, visible).shown);
+		CHECK(ui::place_icon3d(only, 4.0f, false, { 700.0f, 300.0f }, visible).shown);
+		ui::Icon3dStyle close = s;
+		close.minimum_fade_distance = 2.0f;
+		close.max_close_fade = 0.2f;
+		CHECK(ui::icon3d_alpha(close, 1.0f) == doctest::Approx(0.6));
+		CHECK_FALSE(ui::place_icon3d(s, std::nanf(""), true, { 700.0f, 300.0f }, visible).shown);
+	}
 	TEST_CASE("icon state names round-trip; unknown names are Unknown") {
 		for (ui::HudIconState s : { ui::HudIconState::Default, ui::HudIconState::Friendly, ui::HudIconState::Enemy, ui::HudIconState::Squad,
 					 ui::HudIconState::Neutral, ui::HudIconState::Blink }) {

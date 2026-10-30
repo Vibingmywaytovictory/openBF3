@@ -376,6 +376,8 @@ target_sources(bf3_core PRIVATE
 target_sources(bf3_core PRIVATE
     src/ui/nametags.cpp
     include/bf3/core/ui/nametags.h
+    src/ui/icon3d_placement.cpp
+    include/bf3/core/ui/icon3d_placement.h
     src/gameplay/kit_appearance.cpp
     include/bf3/core/gameplay/kit_appearance.h
 )

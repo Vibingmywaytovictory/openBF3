@@ -8,6 +8,7 @@
 #include "bf3/core/ui/hud_icons.h"
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/core/ui/hud_sources.h"
+#include "bf3/core/ui/icon3d_placement.h"
 #include "bf3/core/ui/minimap.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/format.h"
@@ -307,6 +308,43 @@ TEST_SUITE("ui-minimap") {
 }
 
 TEST_SUITE("ui-hud-icons") {
+	TEST_CASE("icons3d.style: UIAlerttagComp, UITeamSupportTagComp and UIMapmarkertagComp read as UI3dIconCompData "
+			  "from Metro") {
+		const std::shared_ptr<Install> install = install_or_skip();
+		if (!install) {
+			return;
+		}
+		Result<std::unique_ptr<EbxLibrary>> lib = EbxLibrary::open(install, { "Win32/Levels/MP_Subway/MP_Subway" }, 2);
+		REQUIRE(lib.ok());
+		Result<Icon3dStyle> alert = read_icon3d_style(**lib, kAlerttagCompPartition);
+		REQUIRE_MESSAGE(alert.ok(), (alert.ok() ? std::string() : alert.error().message));
+		CHECK(alert->from_data);
+		CHECK(alert->clamped == 0);
+		CHECK(alert->draw_distance == 15.0f);
+		CHECK(alert->fade_distance == 8.0f);
+		CHECK(alert->fade_end_distance == 15.0f);
+		CHECK(alert->max_far_fade == 0.0f);
+		CHECK(alert->scale_distance == 15.0f);
+		CHECK(alert->max_scale_mod == doctest::Approx(0.85));
+		CHECK(alert->snap_icons);
+		CHECK_FALSE(alert->circular_snap);
+		CHECK(alert->snap_safe_zone == doctest::Approx(0.95));
+		CHECK(alert->snap_center_y_offset == doctest::Approx(0.15));
+		for (const std::string_view p : { kTeamSupportTagCompPartition, kMapmarkerTagCompPartition }) {
+			Result<Icon3dStyle> other = read_icon3d_style(**lib, p);
+			CHECK_MESSAGE(other.ok(), std::string(p));
+		}
+		Result<Icon3dStyle> not_icon = read_icon3d_style(**lib, "ui/uicomponents/uikillcardcomp");
+		REQUIRE_FALSE(not_icon.ok());
+		CHECK(not_icon.error().message.find("not a UI3dIconCompData") != std::string::npos);
+		t2::row("icons3d.style", alert.ok(),
+				fmt("UIAlerttagComp: draw %.0f m, fade %.0f..%.0f m to %.2f, scale %.2f off over %.0f m, snap %s %s "
+					"safe zone %.2f, centre y %+.2f",
+						double(alert->draw_distance), double(alert->fade_distance), double(alert->fade_end_distance),
+						double(alert->max_far_fade), double(alert->max_scale_mod), double(alert->scale_distance),
+						alert->snap_icons ? "on" : "off", alert->circular_snap ? "circular" : "rectangular",
+						double(alert->snap_safe_zone), double(alert->snap_center_y_offset)));
+	}
 	TEST_CASE("G6 icons.atlas: hud3dicons entries, states, rects, pixels") {
 		const std::shared_ptr<Install> install = install_or_skip();
 		if (!install) {
