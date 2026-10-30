@@ -26,10 +26,10 @@ namespace tt = bf3::test::tdm;
 
 namespace {
 
-constexpr uint64_t kTdmStreamHash = 0x6ee990a2a32b1c03ull;
-constexpr uint64_t kTdmStateHash = 0x801d84e3f1ae9e0full;
-constexpr uint64_t kDevStreamHash = 0x56fe24b8016be2f5ull;
-constexpr uint64_t kDevStateHash = 0xbb55f06d887305ceull;
+constexpr uint64_t kTdmStreamHash = 0xb538cc19a3101c54ull;
+constexpr uint64_t kTdmStateHash = 0x1ab275eac8800b25ull;
+constexpr uint64_t kDevStreamHash = 0x7f55b16044de088full;
+constexpr uint64_t kDevStateHash = 0x2de471aa0c948bbeull;
 
 struct StreamRecorder {
 	std::vector<uint8_t> hold_mask = tt::detail::echo_hold_mask();
@@ -152,6 +152,7 @@ void send_packet(host::GameServer &r_server, const tt::ScriptedPeer &p_peer, std
 	for (size_t i = 0; i < p_commands.size(); ++i) {
 		p.commands[i] = p_commands[i];
 	}
+	p.newest_snapshot = 0xFFFF;
 	if (p_peer.last_snapshot) {
 		p.newest_snapshot = p_peer.last_snapshot->seq;
 		p.snapshot_ack_bits = 0xFFFFFFFFu;
@@ -357,6 +358,7 @@ TEST_SUITE("host-server-stream") {
 		cfg.seed = 5;
 		cfg.walkers = 44;
 		cfg.respawn_ticks = 45;
+		cfg.snapshot_budget_bytes = 3 * uint32_t(net::kMaxDatagramBytes);
 		cfg.gunplay.mechanics_cfg = OPENBF3_MECHANICS_CFG;
 		cfg.gunplay.target_bots = 2;
 		auto fill = std::make_shared<host::BotFillConfig>();

@@ -917,8 +917,11 @@ private:
 		++forwarded_;
 		const std::optional<net::MessageType> type = net::peek_type(p_bytes);
 		if (type == net::MessageType::Snapshot) {
+			core::Result<net::Snapshot> s = net::decode_snapshot(p_bytes, &baselines_);
+			if (s) {
+				baselines_.keep(s->seq, s->server_tick, s->own, s->own_weapons, s->others);
+			}
 			if (++snapshots_ % 20u == 0) {
-				core::Result<net::Snapshot> s = net::decode_snapshot(p_bytes);
 				if (s && s->own_weapons.has_value()) {
 					s->own_weapons->slots[s->own_weapons->active % s->own_weapons->slots.size()].def = 0xFFF0;
 					to_client(p_channel, net::encode_snapshot(*s));
@@ -931,6 +934,11 @@ private:
 			}
 			to_client(p_channel, p_bytes);
 			return;
+		}
+		if (type == net::MessageType::SnapshotOthers) {
+			if (core::Result<net::SnapshotOthers> o = net::decode_snapshot_others(p_bytes, &baselines_)) {
+				baselines_.keep(o->seq, o->server_tick, std::nullopt, std::nullopt, o->others);
+			}
 		}
 		to_client(p_channel, p_bytes);
 		if (type == net::MessageType::SnapshotOthers || type == net::MessageType::ShotEvents || type == net::MessageType::CombatEvents) {
@@ -994,6 +1002,7 @@ private:
 	uint32_t front_peer_ = 0;
 	int back_peer_ = -1;
 	uint64_t snapshots_ = 0;
+	net::SnapshotBaselines baselines_;
 	std::mt19937_64 rng_{ 0xB0B5EED };
 	uint16_t port_ = 0;
 	std::thread thread_;

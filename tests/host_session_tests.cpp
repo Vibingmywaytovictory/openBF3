@@ -566,6 +566,7 @@ struct Direct {
 	void receive(const std::vector<uint8_t> &p_bytes, uint8_t p_channel = net::kChannelReliable) { server.on_receive(0, p_channel, p_bytes); }
 	void commands(std::initializer_list<Command> p_newest_first) {
 		net::CommandPacket p;
+		p.newest_snapshot = 0xFFFF;
 		p.count = uint8_t(p_newest_first.size());
 		size_t i = 0;
 		for (const Command &c : p_newest_first) {

@@ -23,7 +23,7 @@
 
 namespace bf3::net {
 
-inline constexpr uint16_t kProtocolVersion = 4;
+inline constexpr uint16_t kProtocolVersion = 5;
 inline constexpr uint8_t kChannelUnreliable = 0;
 inline constexpr uint8_t kChannelReliable = 1;
 inline constexpr uint8_t kChannelBulk = 2;
@@ -361,22 +361,85 @@ struct Snapshot {
 	std::vector<OtherSoldier> others;
 
 	std::optional<WeaponsWire> own_weapons;
+	std::vector<uint8_t> removed;
 };
 
-std::vector<uint8_t> encode_snapshot(const Snapshot &p_snapshot, size_t *r_dropped = nullptr);
+inline constexpr uint8_t kMaxBaselineBack = 31;
+inline constexpr size_t kBaselineRing = 64;
+
+struct OtherBaseline {
+	uint8_t back = 0;
+	sim::Tick tick = 0;
+	OtherSoldier record;
+};
+
+struct OwnBaseline {
+	uint8_t back = 0;
+	sim::Tick tick = 0;
+	sim::SoldierState state;
+	std::optional<WeaponsWire> weapons;
+};
+
+struct SnapshotBases {
+	OwnBaseline own;
+	std::vector<OtherBaseline> others;
+	size_t required = 0;
+};
+
+struct SnapshotSize {
+	size_t bytes = 0;
+	size_t carried = 0;
+	size_t delta_others = 0;
+	bool own_delta = false;
+};
+
+class SnapshotBaselines {
+public:
+	SnapshotBaselines();
+	void clear();
+	void keep(uint16_t p_seq, sim::Tick p_tick, const std::optional<sim::SoldierState> &p_own,
+			const std::optional<WeaponsWire> &p_weapons, std::span<const OtherSoldier> p_others);
+	const OtherSoldier *other(uint8_t p_slot, uint16_t p_seq, sim::Tick &r_tick) const;
+	const sim::SoldierState *own(uint16_t p_seq, sim::Tick &r_tick, const WeaponsWire *&r_weapons) const;
+
+private:
+	struct OtherEntry {
+		bool valid = false;
+		uint16_t seq = 0;
+		sim::Tick tick = 0;
+		OtherSoldier record;
+	};
+	struct OwnEntry {
+		bool valid = false;
+		uint16_t seq = 0;
+		sim::Tick tick = 0;
+		sim::SoldierState state;
+		bool has_weapons = false;
+		WeaponsWire weapons;
+	};
+	std::vector<OtherEntry> others_;
+	std::vector<OwnEntry> own_;
+};
+
+std::vector<uint8_t> encode_snapshot(const Snapshot &p_snapshot, size_t *r_dropped = nullptr,
+		const SnapshotBases *p_bases = nullptr, size_t p_max_bytes = kMaxDatagramBytes, SnapshotSize *r_size = nullptr);
 
 constexpr bool seq_newer(uint16_t p_a, uint16_t p_b) {
 	return p_a != p_b && uint16_t(p_a - p_b) < 0x8000u;
 }
-core::Result<Snapshot> decode_snapshot(std::span<const uint8_t> p_datagram);
+core::Result<Snapshot> decode_snapshot(
+		std::span<const uint8_t> p_datagram, const SnapshotBaselines *p_baselines = nullptr);
 
 struct SnapshotOthers {
 	uint16_t seq = 0;
 	sim::Tick server_tick = 0;
 	std::vector<OtherSoldier> others;
 };
-std::vector<uint8_t> encode_snapshot_others(const SnapshotOthers &p_message, size_t *r_dropped = nullptr);
-core::Result<SnapshotOthers> decode_snapshot_others(std::span<const uint8_t> p_datagram);
+std::vector<uint8_t> encode_snapshot_others(const SnapshotOthers &p_message, size_t *r_dropped = nullptr,
+		std::span<const OtherBaseline> p_bases = {}, SnapshotSize *r_size = nullptr,
+		size_t p_max_bytes = kMaxDatagramBytes, size_t p_required = 0);
+core::Result<SnapshotOthers> decode_snapshot_others(
+		std::span<const uint8_t> p_datagram, const SnapshotBaselines *p_baselines = nullptr);
 
 struct RemoteShot {
 	uint8_t slot = 0;
@@ -402,8 +465,8 @@ struct ShotQuantization {
 };
 
 inline constexpr uint32_t kMaxShotTicksBack = 7;
-std::vector<uint8_t> encode_shot_events(const ShotEvents &p_message, const ShotQuantization &p_frame, const sim::Vec3 &p_receiver_eye,
-		size_t *r_dropped = nullptr);
+std::vector<uint8_t> encode_shot_events(const ShotEvents &p_message, const ShotQuantization &p_frame,
+		const sim::Vec3 &p_receiver_eye, size_t *r_dropped = nullptr, size_t p_max_bytes = kMaxDatagramBytes);
 core::Result<ShotEvents> decode_shot_events(std::span<const uint8_t> p_datagram, const ShotQuantization &p_frame);
 
 std::optional<RemoteShot> quantize_remote_shot(const RemoteShot &p_shot, const ShotQuantization &p_frame, sim::Tick p_server_tick);

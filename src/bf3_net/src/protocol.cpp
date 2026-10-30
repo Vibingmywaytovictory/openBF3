@@ -4,6 +4,7 @@
 #include "bf3/net/bit_stream.h"
 #include "bf3/net/weapons_wire.h"
 #include "bit_archive.h"
+#include "ghost_delta.h"
 #include "weapons_wire_layout.h"
 
 #include <algorithm>
@@ -37,7 +38,6 @@ constexpr uint32_t kNoWireDef = 0xFF;
 static_assert(kNoWireDef == kMaxWireDefs);
 static_assert((size_t(1) << kWireSlotBits) == kMaxSlots);
 constexpr unsigned kOthersCountBits = 8;
-constexpr int32_t kOtherPitchMaxCode = (1 << (quant::kSoldierPitchBits - 1)) - 1;
 constexpr WeaponsWireFaults kOwnWeaponsFaults{ "own weapons field out of range", "own weapons field out of range" };
 
 core::Error fail(const char *p_what, const char *p_why) {
@@ -154,6 +154,13 @@ bool open(BitReader &r_r, MessageType p_type) {
 	return uint8_t(r_r.read_bits(kTypeBits)) == uint8_t(p_type) && !r_r.failed();
 }
 
+bool state_in_range(const sim::SoldierState &p_s) {
+	return finite(p_s.position) && finite(p_s.velocity) && finite(p_s.ground_normal) && valid_pose(uint8_t(p_s.pose)) &&
+			valid_pose(uint8_t(p_s.target_pose)) && uint8_t(p_s.mode) < sim::kMoveModeCount &&
+			p_s.pitch >= -sim::kPitchLimit && p_s.pitch <= sim::kPitchLimit && finite(p_s.health) &&
+			finite(p_s.impact_speed) && finite(p_s.damage);
+}
+
 template <class A, MaybeConst<sim::SoldierState> S>
 constexpr bool serialize(A &r_a, S &r_s) {
 	r_a.bits(r_s.tick, 32);
@@ -176,11 +183,7 @@ constexpr bool serialize(A &r_a, S &r_s) {
 	r_a.f32(r_s.health);
 	r_a.f32(r_s.impact_speed);
 	r_a.f32(r_s.damage);
-	return r_a.valid([&] {
-		return finite(r_s.position) && finite(r_s.velocity) && finite(r_s.ground_normal) && valid_pose(uint8_t(r_s.pose)) &&
-				valid_pose(uint8_t(r_s.target_pose)) && uint8_t(r_s.mode) < sim::kMoveModeCount && r_s.pitch >= -sim::kPitchLimit &&
-				r_s.pitch <= sim::kPitchLimit && finite(r_s.health) && finite(r_s.impact_speed) && finite(r_s.damage);
-	});
+	return r_a.valid([&] { return state_in_range(r_s); });
 }
 
 constexpr size_t kOwnStateBits = count_bits([](auto &r_a) {
@@ -296,15 +299,6 @@ void serialize(A &r_a, P &r_p) {
 	}
 }
 
-constexpr uint32_t other_yaw_code(uint16_t p_yaw) {
-	return ((uint32_t(p_yaw) + 2u) >> 2) & ((1u << quant::kSoldierYawBits) - 1u);
-}
-
-constexpr int32_t other_pitch_code(int16_t p_pitch) {
-	const int32_t code = (int32_t(p_pitch) + 2) >> 2;
-	return std::clamp(code, -kOtherPitchMaxCode, kOtherPitchMaxCode);
-}
-
 uint8_t transition_progress(const sim::SoldierState &p_s) {
 	if (p_s.transition_ticks == 0 || p_s.transition_total == 0) {
 		return 255;
@@ -316,39 +310,19 @@ uint8_t transition_progress(const sim::SoldierState &p_s) {
 	return uint8_t((done * 255u + p_s.transition_total / 2u) / p_s.transition_total);
 }
 
-template <class A, MaybeConst<float> F>
-constexpr void quantized(A &r_a, F &r_value, const Quantizer &p_q) {
-	r_a.coded(r_value, p_q.bits, [&](float p_v) { return p_q.encode(p_v); }, [&](uint32_t p_code) { return p_q.decode(p_code); });
+constexpr bool other_in_range(const OtherSoldier &p_o) {
+	return p_o.team <= kMaxTeam && p_o.slot < kMaxSlots && p_o.pitch >= -kOtherPitchMaxCode * 4 &&
+			p_o.pitch <= kOtherPitchMaxCode * 4 && valid_pose(uint8_t(p_o.pose)) &&
+			valid_pose(uint8_t(p_o.target_pose)) && uint8_t(p_o.mode) < sim::kMoveModeCount;
 }
 
 template <class A, MaybeConst<OtherSoldier> O>
 constexpr bool serialize(A &r_a, O &r_o) {
 	r_a.bits(r_o.slot, 8);
-	r_a.bits(r_o.generation, 8);
-	quantized(r_a, r_o.position[0], quant::kPositionXZ);
-	quantized(r_a, r_o.position[1], quant::kPositionY);
-	quantized(r_a, r_o.position[2], quant::kPositionXZ);
-	for (auto &v : r_o.velocity) {
-		quantized(r_a, v, quant::kSoldierVelocity);
-	}
-	r_a.coded(r_o.yaw, quant::kSoldierYawBits, other_yaw_code, [](uint32_t p_code) { return uint16_t(p_code << 2); });
-	r_a.coded(r_o.pitch, quant::kSoldierPitchBits, other_pitch_code, [](int32_t p_code) { return int16_t(p_code * 4); });
-	r_a.bits(r_o.pose, 2);
-	r_a.bits(r_o.target_pose, 2);
-	r_a.bits(r_o.transition, 8);
-	r_a.bits(r_o.mode, 4);
-	r_a.bits(r_o.flags, 8);
-	r_a.bits(r_o.weapon, 8);
-	r_a.bits(r_o.weapon_phase, 3);
-	r_a.bits(r_o.firing, 1);
-	r_a.bits(r_o.ads, 1);
-	r_a.bits(r_o.reload_seq, 2);
-	r_a.bits(r_o.burst_seq, 4);
-	r_a.bits(r_o.team, 2);
-	return r_a.valid([&] {
-		return r_o.team <= kMaxTeam && r_o.slot < kMaxSlots && r_o.pitch >= -kOtherPitchMaxCode * 4 && r_o.pitch <= kOtherPitchMaxCode * 4 &&
-				valid_pose(uint8_t(r_o.pose)) && valid_pose(uint8_t(r_o.target_pose)) && uint8_t(r_o.mode) < sim::kMoveModeCount;
-	});
+	OtherCodes c = r_a.encode([&] { return other_codes(r_o); });
+	serialize(r_a, c);
+	r_a.store(r_o, [&] { return other_of_codes(r_o.slot, c); });
+	return r_a.valid([&] { return other_in_range(r_o); });
 }
 
 constexpr size_t kOtherBits = count_bits([](auto &r_a) {
@@ -356,11 +330,6 @@ constexpr size_t kOtherBits = count_bits([](auto &r_a) {
 	serialize(r_a, o);
 });
 static_assert(kOtherBits == 180);
-
-constexpr size_t others_room(size_t p_used_bits) {
-	const size_t used = p_used_bits + kOthersCountBits;
-	return used < kDatagramBits ? (kDatagramBits - used) / kOtherBits : 0;
-}
 
 class SlotSet {
 public:
@@ -374,19 +343,133 @@ private:
 	std::array<bool, size_t(std::numeric_limits<uint8_t>::max()) + 1> seen_{};
 };
 
-template <class A, MaybeConst<std::vector<OtherSoldier>> V>
-size_t others(A &r_a, V &r_others, size_t p_cap) {
-	size_t count = std::min({ r_others.size(), others_room(r_a.bit_count()), p_cap });
-	r_a.bits(count, kOthersCountBits);
-	r_a.check("others count out of range", [&] { return count <= p_cap && r_a.fits(count * kOtherBits); });
-	count = r_a.resize(r_others, count);
-	SlotSet seen;
-	for (size_t i = 0; i < count && r_a.ok(); ++i) {
-		const bool valid = serialize(r_a, r_others[i]);
-		r_a.check("other soldier field out of range", [&] { return valid; });
-		r_a.check("slot named twice", [&] { return seen.insert(r_others[i].slot); });
+enum class GhostForm : uint8_t { Absolute, Delta, Removed };
+
+struct GhostEntry {
+	GhostForm form = GhostForm::Absolute;
+	uint8_t back = 0;
+	sim::Tick base_tick = 0;
+	const OtherSoldier *base = nullptr;
+};
+
+constexpr size_t kRemovedEntryBits = 8 + kGhostBackBits;
+
+template <class A, MaybeConst<OtherSoldier> O>
+void ghost_entry(A &r_a, O &r_o, GhostEntry &r_e, uint16_t p_seq, sim::Tick p_tick, const SnapshotBaselines *p_store) {
+	uint8_t head = uint8_t(r_o.slot | (r_e.form == GhostForm::Absolute ? 0u : kGhostSpecialSlot));
+	r_a.bits(head, 8);
+	if constexpr (A::kReading) {
+		r_o.slot = uint8_t(head & ~kGhostSpecialSlot);
 	}
-	return count;
+	if ((head & kGhostSpecialSlot) == 0) {
+		r_a.store(r_e.form, [] { return GhostForm::Absolute; });
+		OtherCodes c = r_a.encode([&] { return other_codes(r_o); });
+		serialize(r_a, c);
+		r_a.store(r_o, [&] { return other_of_codes(r_o.slot, c); });
+		r_a.check("other soldier field out of range", [&] { return other_in_range(r_o); });
+		return;
+	}
+	r_a.bits(r_e.back, kGhostBackBits);
+	r_a.store(r_e.form, [&] { return r_e.back == 0 ? GhostForm::Removed : GhostForm::Delta; });
+	if (r_e.form == GhostForm::Removed) {
+		return;
+	}
+	if constexpr (A::kReading) {
+		sim::Tick tick = 0;
+		r_e.base = p_store != nullptr ? p_store->other(r_o.slot, uint16_t(p_seq - r_e.back), tick) : nullptr;
+		r_e.base_tick = tick;
+		r_a.check("missing ghost baseline", [&] { return r_e.base != nullptr; });
+		r_a.check("stale ghost baseline",
+				[&] { return r_e.base_tick < p_tick && p_tick - r_e.base_tick <= kMaxDeltaTicks; });
+		if (!r_a.ok()) {
+			return;
+		}
+	}
+	const OtherCodes base = other_codes(*r_e.base);
+	OtherCodes c = r_a.encode([&] { return other_codes(r_o); });
+	bool in_range = true;
+	delta(r_a, c, base, p_tick - r_e.base_tick, in_range);
+	r_a.check("ghost delta out of range", [&] { return in_range; });
+	r_a.store(r_o, [&] { return other_of_codes(r_o.slot, c); });
+	r_a.check("other soldier field out of range", [&] { return other_in_range(r_o); });
+}
+
+bool usable_base(const OtherBaseline &p_base, const OtherSoldier &p_other, sim::Tick p_tick) {
+	return p_base.back >= 1 && p_base.back <= kMaxBaselineBack && p_base.record.slot == p_other.slot &&
+			p_base.record.generation == p_other.generation && p_base.tick < p_tick &&
+			p_tick - p_base.tick <= kMaxDeltaTicks;
+}
+
+GhostEntry choose_form(const OtherSoldier &p_other, std::span<const OtherBaseline> p_bases, size_t p_index,
+		uint16_t p_seq, sim::Tick p_tick, size_t &r_bits) {
+	GhostEntry e;
+	r_bits = kOtherBits;
+	if (p_index >= p_bases.size() || !usable_base(p_bases[p_index], p_other, p_tick)) {
+		return e;
+	}
+	GhostEntry d;
+	d.form = GhostForm::Delta;
+	d.back = p_bases[p_index].back;
+	d.base_tick = p_bases[p_index].tick;
+	d.base = &p_bases[p_index].record;
+	const size_t bits = count_bits([&](auto &r_a) { ghost_entry(r_a, p_other, d, p_seq, p_tick, nullptr); });
+	if (bits < kOtherBits) {
+		r_bits = bits;
+		return d;
+	}
+	return e;
+}
+
+struct GhostListContext {
+	const SnapshotBaselines *store = nullptr;
+	size_t cap = kMaxSlots;
+	bool allow_removed = true;
+	size_t count = 0;
+	std::vector<GhostEntry> forms;
+	size_t carried = 0;
+	size_t delta_others = 0;
+};
+
+template <class A, MaybeConst<std::vector<OtherSoldier>> V, MaybeConst<std::vector<uint8_t>> R>
+void ghost_list(A &r_a, V &r_others, R &r_removed, uint16_t p_seq, sim::Tick p_tick, GhostListContext &r_ctx) {
+	size_t count = r_removed.size() + std::min(r_ctx.count, r_others.size());
+	r_a.bits(count, kOthersCountBits);
+	r_a.check("others count out of range", [&] { return count <= r_ctx.cap && r_a.fits(count * kRemovedEntryBits); });
+	SlotSet seen;
+	if constexpr (A::kReading) {
+		for (size_t i = 0; i < count && r_a.ok(); ++i) {
+			OtherSoldier o;
+			GhostEntry e;
+			ghost_entry(r_a, o, e, p_seq, p_tick, r_ctx.store);
+			r_a.check("slot named twice", [&] { return seen.insert(o.slot); });
+			r_a.check("removed ghost outside a Snapshot",
+					[&] { return r_ctx.allow_removed || e.form != GhostForm::Removed; });
+			if (!r_a.ok()) {
+				break;
+			}
+			if (e.form == GhostForm::Removed) {
+				r_removed.push_back(o.slot);
+				continue;
+			}
+			r_ctx.delta_others += e.form == GhostForm::Delta ? 1u : 0u;
+			r_others.push_back(o);
+		}
+		r_ctx.carried = r_others.size();
+	} else {
+		for (const uint8_t slot : r_removed) {
+			OtherSoldier o;
+			o.slot = slot;
+			GhostEntry e;
+			e.form = GhostForm::Removed;
+			ghost_entry(r_a, o, e, p_seq, p_tick, nullptr);
+		}
+		const size_t n = std::min(r_ctx.count, r_others.size());
+		for (size_t i = 0; i < n; ++i) {
+			GhostEntry e = i < r_ctx.forms.size() ? r_ctx.forms[i] : GhostEntry();
+			ghost_entry(r_a, r_others[i], e, p_seq, p_tick, nullptr);
+		}
+		r_ctx.carried = n;
+	}
 }
 
 struct Octa {
@@ -906,8 +989,15 @@ void serialize(A &r_a, M &r_m) {
 	r_a.store(r_m.trace_dropped, [&] { return sent_dropped; });
 }
 
-template <class A, MaybeConst<Snapshot> M>
-void serialize(A &r_a, M &r_m, size_t &r_others) {
+struct SnapshotContext {
+	const SnapshotBases *bases = nullptr;
+	const SnapshotBaselines *store = nullptr;
+	bool own_delta = false;
+	bool weapons_delta = false;
+	GhostListContext list;
+};
+
+template <class A, MaybeConst<Snapshot> M> void serialize(A &r_a, M &r_m, SnapshotContext &r_ctx) {
 	r_a.bits(r_m.seq, 16);
 	r_a.bits(r_m.server_tick, 32);
 	r_a.bits(r_m.applied_sequence, 32);
@@ -917,19 +1007,155 @@ void serialize(A &r_a, M &r_m, size_t &r_others) {
 	r_a.bits(r_m.echo_hold_100us, 16);
 	r_a.bits(r_m.own_events, 16);
 	r_a.optional(r_m.own, [&](auto &r_own) {
-		const bool valid = serialize(r_a, r_own);
-		r_a.check("own state field out of range", [&] { return valid; });
+		bool own_delta = r_ctx.own_delta;
+		r_a.bits(own_delta, 1);
+		const sim::SoldierState *base = nullptr;
+		const WeaponsWire *base_weapons = nullptr;
+		sim::Tick base_tick = 0;
+		if (!own_delta) {
+			const bool valid = serialize(r_a, r_own);
+			r_a.check("own state field out of range", [&] { return valid; });
+		} else {
+			uint8_t back = r_ctx.bases != nullptr ? r_ctx.bases->own.back : uint8_t(0);
+			r_a.bits(back, kGhostBackBits);
+			if constexpr (A::kReading) {
+				base = r_ctx.store != nullptr && back != 0
+						? r_ctx.store->own(uint16_t(r_m.seq - back), base_tick, base_weapons)
+						: nullptr;
+				r_a.check("missing own baseline", [&] { return base != nullptr; });
+				r_a.check("stale own baseline",
+						[&] { return base_tick < r_m.server_tick && r_m.server_tick - base_tick <= kMaxDeltaTicks; });
+				if (!r_a.ok()) {
+					return;
+				}
+			} else {
+				base = &r_ctx.bases->own.state;
+				base_weapons = r_ctx.bases->own.weapons ? &*r_ctx.bases->own.weapons : nullptr;
+				base_tick = r_ctx.bases->own.tick;
+			}
+			delta(r_a, r_own, *base, r_m.server_tick);
+			r_a.check("own state field out of range", [&] { return state_in_range(r_own); });
+		}
 		r_a.check("own state tick differs from the server tick", [&] { return r_own.tick == r_m.server_tick; });
-		r_a.optional(r_m.own_weapons, [&](auto &r_weapons) { serialize(r_a, r_weapons, kOwnWeaponsFaults); });
+		r_a.optional(r_m.own_weapons, [&](auto &r_weapons) {
+			bool weapons_delta = r_ctx.weapons_delta;
+			if (own_delta) {
+				r_a.bits(weapons_delta, 1);
+			} else {
+				r_a.store(weapons_delta, [] { return false; });
+			}
+			if (!weapons_delta) {
+				serialize(r_a, r_weapons, kOwnWeaponsFaults);
+				return;
+			}
+			r_a.check("missing own weapons baseline", [&] { return base_weapons != nullptr; });
+			if (!r_a.ok()) {
+				return;
+			}
+			const int64_t shift = sw::tick_start(r_m.server_tick) - sw::tick_start(base_tick);
+			delta(r_a, r_weapons, *base_weapons, shift);
+			r_a.check("own weapons delta not canonical", [&] {
+				WeaponsWire canonical;
+				return canonical_weapons(r_weapons, canonical) && canonical == r_weapons;
+			});
+		});
 	});
-	r_others = others(r_a, r_m.others, kMaxSlots);
+	r_ctx.list.cap = kMaxSlots;
+	r_ctx.list.allow_removed = true;
+	ghost_list(r_a, r_m.others, r_m.removed, r_m.seq, r_m.server_tick, r_ctx.list);
 }
 
-template <class A, MaybeConst<SnapshotOthers> M>
-void serialize(A &r_a, M &r_m, size_t &r_others) {
+template <class A, MaybeConst<SnapshotOthers> M> void serialize(A &r_a, M &r_m, GhostListContext &r_ctx) {
 	r_a.bits(r_m.seq, 16);
 	r_a.bits(r_m.server_tick, 32);
-	r_others = others(r_a, r_m.others, kMaxSlots - 1);
+	r_ctx.cap = kMaxSlots - 1;
+	r_ctx.allow_removed = false;
+	std::vector<uint8_t> none;
+	ghost_list(r_a, r_m.others, none, r_m.seq, r_m.server_tick, r_ctx);
+}
+
+size_t own_state_delta_bits(const sim::SoldierState &p_own, const sim::SoldierState &p_base, sim::Tick p_tick) {
+	return count_bits([&](auto &r_a) { delta(r_a, p_own, p_base, p_tick); });
+}
+
+size_t weapons_bits(const WeaponsWire &p_wire) {
+	BitWriter w(kMaxDatagramBytes * 4);
+	write_weapons_wire(w, p_wire);
+	return w.bit_count();
+}
+
+void choose_own(const Snapshot &p_snapshot, const SnapshotBases &p_bases, SnapshotContext &r_ctx) {
+	const OwnBaseline &b = p_bases.own;
+	if (!p_snapshot.own || p_snapshot.own->tick != p_snapshot.server_tick || b.back < 1 || b.back > kMaxBaselineBack ||
+			b.tick >= p_snapshot.server_tick || p_snapshot.server_tick - b.tick > kMaxDeltaTicks) {
+		return;
+	}
+	const size_t state_delta = own_state_delta_bits(*p_snapshot.own, b.state, p_snapshot.server_tick);
+	size_t weapons_absolute = 0;
+	size_t weapons_delta = 0;
+	bool weapons_usable = false;
+	if (p_snapshot.own_weapons) {
+		weapons_absolute = weapons_bits(*p_snapshot.own_weapons);
+		WeaponsWire canonical;
+		if (b.weapons && canonical_weapons(*p_snapshot.own_weapons, canonical) &&
+				canonical == *p_snapshot.own_weapons) {
+			const int64_t shift = sw::tick_start(p_snapshot.server_tick) - sw::tick_start(b.tick);
+			weapons_delta = count_bits([&](auto &r_a) { delta(r_a, *p_snapshot.own_weapons, *b.weapons, shift); });
+			weapons_usable = weapons_delta < weapons_absolute;
+		}
+	}
+	const size_t absolute = kOwnStateBits + weapons_absolute;
+	const size_t with_delta = kGhostBackBits + state_delta +
+			(p_snapshot.own_weapons ? 1u + (weapons_usable ? weapons_delta : weapons_absolute) : 0u);
+	if (with_delta < absolute) {
+		r_ctx.own_delta = true;
+		r_ctx.weapons_delta = weapons_usable;
+	}
+}
+
+bool slots_in_range(const std::vector<OtherSoldier> &p_others, const std::vector<uint8_t> &p_removed) {
+	for (const OtherSoldier &o : p_others) {
+		if (o.slot >= kMaxSlots) {
+			return false;
+		}
+	}
+	for (const uint8_t r : p_removed) {
+		if (r >= kMaxSlots) {
+			return false;
+		}
+	}
+	return true;
+}
+
+template <class M, class Context> size_t written_bits(const M &p_message, Context p_context) {
+	BitWriter w(kMaxReliableBytes);
+	BitWriteArchive archive(w);
+	serialize(archive, p_message, p_context);
+	return w.overflowed() ? std::numeric_limits<size_t>::max() : kTypeBits + w.bit_count();
+}
+
+template <class M, class Context>
+size_t plan_list(const M &p_message, Context &r_ctx, GhostListContext &r_list, std::span<const OtherBaseline> p_bases,
+		size_t p_max_bytes, size_t p_required) {
+	r_list.count = 0;
+	size_t bits = written_bits(p_message, r_ctx);
+	const size_t datagram = kDatagramBits;
+	const size_t budget = std::min(p_max_bytes, kMaxDatagramBytes) * 8;
+	r_list.forms.clear();
+	r_list.delta_others = 0;
+	for (size_t i = 0; i < p_message.others.size(); ++i) {
+		size_t entry = 0;
+		const GhostEntry e = choose_form(p_message.others[i], p_bases, i, p_message.seq, p_message.server_tick, entry);
+		const size_t cap = i < p_required ? datagram : budget;
+		if (bits > cap || entry > cap - bits) {
+			break;
+		}
+		bits += entry;
+		r_list.forms.push_back(e);
+		r_list.delta_others += e.form == GhostForm::Delta ? 1u : 0u;
+	}
+	r_list.count = r_list.forms.size();
+	return r_list.count;
 }
 
 constexpr unsigned kShotDirBits = 16;
@@ -1857,18 +2083,38 @@ OtherSoldier quantize_other(uint8_t p_slot, const sim::SoldierState &p_state) {
 	return o;
 }
 
-std::vector<uint8_t> encode_snapshot(const Snapshot &p_snapshot, size_t *r_dropped) {
+std::vector<uint8_t> encode_snapshot(const Snapshot &p_snapshot, size_t *r_dropped, const SnapshotBases *p_bases,
+		size_t p_max_bytes, SnapshotSize *r_size) {
+	SnapshotContext ctx;
+	ctx.bases = p_bases;
+	std::vector<uint8_t> bytes;
 	size_t carried = 0;
-	std::vector<uint8_t> bytes = encode_as(MessageType::Snapshot, kMaxDatagramBytes, p_snapshot, carried);
+	if (slots_in_range(p_snapshot.others, p_snapshot.removed)) {
+		std::span<const OtherBaseline> bases;
+		if (p_bases != nullptr) {
+			choose_own(p_snapshot, *p_bases, ctx);
+			bases = p_bases->others;
+		}
+		carried = plan_list(p_snapshot, ctx, ctx.list, bases, p_max_bytes, p_bases != nullptr ? p_bases->required : 0);
+		bytes = encode_as(MessageType::Snapshot, kMaxDatagramBytes, p_snapshot, ctx);
+	}
 	if (r_dropped) {
 		*r_dropped = p_snapshot.others.size() - carried;
+	}
+	if (r_size) {
+		r_size->bytes = bytes.size();
+		r_size->carried = carried;
+		r_size->delta_others = ctx.list.delta_others;
+		r_size->own_delta = ctx.own_delta;
 	}
 	return bytes;
 }
 
-core::Result<Snapshot> decode_snapshot(std::span<const uint8_t> p_datagram) {
-	size_t carried = 0;
-	return decode_as<Snapshot>(p_datagram, { MessageType::Snapshot, "Snapshot" }, carried);
+core::Result<Snapshot> decode_snapshot(std::span<const uint8_t> p_datagram, const SnapshotBaselines *p_baselines) {
+	SnapshotContext ctx;
+	ctx.store = p_baselines;
+	ctx.list.store = p_baselines;
+	return decode_as<Snapshot>(p_datagram, { MessageType::Snapshot, "Snapshot" }, ctx);
 }
 
 void set_other_weapon(OtherSoldier &r_other, uint16_t p_def, sim::weapons::WeaponPhase p_phase, bool p_firing, bool p_ads, uint32_t p_reload_count,
@@ -1904,18 +2150,32 @@ bool others_acked(const CommandPacket &p_packet, uint16_t p_seq) {
 	return back < 32 && ((p_packet.others_ack_bits >> back) & 1u) != 0;
 }
 
-std::vector<uint8_t> encode_snapshot_others(const SnapshotOthers &p_message, size_t *r_dropped) {
+std::vector<uint8_t> encode_snapshot_others(const SnapshotOthers &p_message, size_t *r_dropped,
+		std::span<const OtherBaseline> p_bases, SnapshotSize *r_size, size_t p_max_bytes, size_t p_required) {
+	GhostListContext ctx;
+	std::vector<uint8_t> bytes;
 	size_t carried = 0;
-	std::vector<uint8_t> bytes = encode_as(MessageType::SnapshotOthers, kMaxDatagramBytes, p_message, carried);
+	if (slots_in_range(p_message.others, {})) {
+		carried = plan_list(p_message, ctx, ctx, p_bases, p_max_bytes, p_required);
+		bytes = encode_as(MessageType::SnapshotOthers, kMaxDatagramBytes, p_message, ctx);
+	}
 	if (r_dropped) {
 		*r_dropped = p_message.others.size() - carried;
+	}
+	if (r_size) {
+		r_size->bytes = bytes.size();
+		r_size->carried = carried;
+		r_size->delta_others = ctx.delta_others;
 	}
 	return bytes;
 }
 
-core::Result<SnapshotOthers> decode_snapshot_others(std::span<const uint8_t> p_datagram) {
-	size_t carried = 0;
-	return decode_as<SnapshotOthers>(p_datagram, { MessageType::SnapshotOthers, "SnapshotOthers", kMaxDatagramBytes }, carried);
+core::Result<SnapshotOthers> decode_snapshot_others(
+		std::span<const uint8_t> p_datagram, const SnapshotBaselines *p_baselines) {
+	GhostListContext ctx;
+	ctx.store = p_baselines;
+	return decode_as<SnapshotOthers>(
+			p_datagram, { MessageType::SnapshotOthers, "SnapshotOthers", kMaxDatagramBytes }, ctx);
 }
 
 RemoteShot remote_shot_of(const sim::weapons::ShotEvent &p_shot) {
@@ -1942,7 +2202,8 @@ std::optional<RemoteShot> quantize_remote_shot(const RemoteShot &p_shot, const S
 	return shot_from_codes(*c, p_frame, p_server_tick);
 }
 
-std::vector<uint8_t> encode_shot_events(const ShotEvents &p_message, const ShotQuantization &p_frame, const sim::Vec3 &p_receiver_eye, size_t *r_dropped) {
+std::vector<uint8_t> encode_shot_events(const ShotEvents &p_message, const ShotQuantization &p_frame,
+		const sim::Vec3 &p_receiver_eye, size_t *r_dropped, size_t p_max_bytes) {
 	size_t dropped = 0;
 	struct Item {
 		ShotCodes codes;
@@ -1996,7 +2257,7 @@ std::vector<uint8_t> encode_shot_events(const ShotEvents &p_message, const ShotQ
 			break;
 		}
 		const size_t b = shot_bits(it.codes, chain);
-		if (bits + b > kDatagramBits) {
+		if (bits + b > std::min(p_max_bytes, kMaxDatagramBytes) * 8) {
 			break;
 		}
 		bits += b;

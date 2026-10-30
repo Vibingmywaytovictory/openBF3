@@ -66,6 +66,7 @@ public:
 	std::vector<net::CombatEvents> combat;
 	std::vector<net::SquadOrder> squad_orders;
 	std::optional<net::Snapshot> last_snapshot;
+	net::SnapshotBaselines baselines;
 	std::optional<net::Kick> kick;
 	uint64_t decode_errors = 0;
 
@@ -396,9 +397,7 @@ inline void ScriptedPeer::command(sim::Command p_command) {
 	net::CommandPacket p;
 	p.count = 1;
 	p.commands[0] = p_command;
-	if (last_snapshot) {
-		p.newest_snapshot = last_snapshot->seq;
-	}
+	p.newest_snapshot = last_snapshot ? last_snapshot->seq : uint16_t(0xFFFF);
 	server_->on_receive(peer_, net::kChannelUnreliable, net::encode_command_packet(p));
 }
 
@@ -491,10 +490,19 @@ inline void ScriptedPeer::receive(std::span<const host::OutDatagram> p_out) {
 				break;
 			}
 			case net::MessageType::Snapshot: {
-				core::Result<net::Snapshot> m = net::decode_snapshot(d.bytes);
+				core::Result<net::Snapshot> m = net::decode_snapshot(d.bytes, &baselines);
 				ok = m.ok();
 				if (ok) {
+					baselines.keep(m->seq, m->server_tick, m->own, m->own_weapons, m->others);
 					last_snapshot = std::move(*m);
+				}
+				break;
+			}
+			case net::MessageType::SnapshotOthers: {
+				core::Result<net::SnapshotOthers> m = net::decode_snapshot_others(d.bytes, &baselines);
+				ok = m.ok();
+				if (ok) {
+					baselines.keep(m->seq, m->server_tick, std::nullopt, std::nullopt, m->others);
 				}
 				break;
 			}

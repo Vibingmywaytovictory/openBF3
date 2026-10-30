@@ -407,6 +407,8 @@ std::vector<Sample> samples() {
 		s.own.reset();
 		s.own_weapons.reset();
 		out.push_back({ net::MessageType::Snapshot, "Snapshot (no own)", net::encode_snapshot(s) });
+		s.removed = { 11, 40, 127 };
+		out.push_back({ net::MessageType::Snapshot, "Snapshot (v5 removed)", net::encode_snapshot(s) });
 	}
 	{
 		net::CommandPacket p;
@@ -828,5 +830,126 @@ TEST_SUITE("net-proto-fuzz") {
 		std::printf("net.proto.fuzz: total %zu decoded+stable, %zu refused, %zu unstable\n", stable, refused, unstable);
 		CHECK(unstable == 0);
 		CHECK(stable > 0);
+	}
+
+	TEST_CASE("net.proto.fuzz: v5 deltas against a baseline store: mutations never crash; whatever decodes re-encodes "
+			  "absolute to the same message") {
+		Rng rng(0xDE17A5EEDull);
+		const uint16_t seq = 9000;
+		const sim::Tick tick = 700000;
+		net::SnapshotBaselines store;
+		net::SnapshotBases bases;
+		std::vector<net::OtherSoldier> others;
+		for (uint8_t slot = 1; slot < 40; ++slot) {
+			net::OtherBaseline b;
+			b.back = uint8_t(1 + rng.below(net::kMaxBaselineBack));
+			b.tick = tick - 2u * b.back;
+			b.record = sample_other(rng, slot, b.tick);
+			net::SnapshotOthers canon{ 1, b.tick, { b.record } };
+			b.record = net::decode_snapshot_others(net::encode_snapshot_others(canon))->others[0];
+			store.keep(uint16_t(seq - b.back), b.tick, std::nullopt, std::nullopt,
+					std::span<const net::OtherSoldier>(&b.record, 1));
+			net::OtherSoldier cur = b.record;
+			cur.position[0] += rng.uniform(-0.2f, 0.2f);
+			cur.yaw = uint16_t(cur.yaw + rng.below(200));
+			others.push_back(cur);
+			bases.others.push_back(b);
+		}
+		net::Snapshot base_snap;
+		base_snap.server_tick = tick - 2;
+		base_snap.own = sample_state(rng, tick - 2);
+		base_snap.own_weapons = sample_weapons(rng);
+		const bf3::core::Result<net::Snapshot> own_base = net::decode_snapshot(net::encode_snapshot(base_snap));
+		REQUIRE(own_base);
+		bases.own = { 1, tick - 2, *own_base->own, own_base->own_weapons };
+		store.keep(uint16_t(seq - 1), tick - 2, own_base->own, own_base->own_weapons, {});
+
+		net::Snapshot snap;
+		snap.seq = seq;
+		snap.server_tick = tick;
+		snap.own = *own_base->own;
+		snap.own->tick = tick;
+		snap.own->position[1] += 0.5f;
+		snap.own_weapons = own_base->own_weapons;
+		snap.own_weapons->next_shot_index += 3;
+		snap.others = others;
+		snap.removed = { 50, 51, 99 };
+		net::SnapshotSize size;
+		const std::vector<uint8_t> main = net::encode_snapshot(snap, nullptr, &bases, net::kMaxDatagramBytes, &size);
+		REQUIRE(size.own_delta);
+		REQUIRE(size.delta_others == others.size());
+		net::SnapshotOthers so{ seq, tick, others };
+		net::SnapshotSize so_size;
+		const std::vector<uint8_t> extra = net::encode_snapshot_others(so, nullptr, bases.others, &so_size);
+		REQUIRE(so_size.delta_others == others.size());
+
+		Tally main_tally, extra_tally;
+		const auto same = [](const net::Snapshot &p_a, const net::Snapshot &p_b) {
+			return p_a.seq == p_b.seq && p_a.server_tick == p_b.server_tick &&
+					p_a.applied_sequence == p_b.applied_sequence && p_a.applied_repeated == p_b.applied_repeated &&
+					p_a.command_buffer_ticks == p_b.command_buffer_ticks && p_a.sequence_echo == p_b.sequence_echo &&
+					p_a.echo_hold_100us == p_b.echo_hold_100us && p_a.own_events == p_b.own_events &&
+					p_a.own == p_b.own && p_a.others == p_b.others && p_a.own_weapons == p_b.own_weapons &&
+					p_a.removed == p_b.removed;
+		};
+		const auto run = [&](const std::vector<uint8_t> &p_bytes) {
+			const std::optional<net::MessageType> type = net::peek_type(p_bytes);
+			if (type == net::MessageType::Snapshot) {
+				const bf3::core::Result<net::Snapshot> d = net::decode_snapshot(p_bytes, &store);
+				if (!d) {
+					++main_tally.refused;
+					return;
+				}
+				size_t dropped = 0;
+				const bf3::core::Result<net::Snapshot> again = net::decode_snapshot(net::encode_snapshot(*d, &dropped));
+				(again && dropped == 0 && same(*d, *again) ? main_tally.stable : main_tally.unstable)++;
+			} else if (type == net::MessageType::SnapshotOthers) {
+				const bf3::core::Result<net::SnapshotOthers> d = net::decode_snapshot_others(p_bytes, &store);
+				if (!d) {
+					++extra_tally.refused;
+					return;
+				}
+				size_t dropped = 0;
+				const bf3::core::Result<net::SnapshotOthers> again =
+						net::decode_snapshot_others(net::encode_snapshot_others(*d, &dropped));
+				(again && dropped == 0 && again->seq == d->seq && again->server_tick == d->server_tick &&
+										again->others == d->others
+								? extra_tally.stable
+								: extra_tally.unstable)++;
+			}
+		};
+		run(main);
+		run(extra);
+		REQUIRE(main_tally.stable == 1);
+		REQUIRE(extra_tally.stable == 1);
+		for (size_t i = 0; i < kMutations / 4; ++i) {
+			std::vector<uint8_t> b = (i & 1) != 0 ? main : extra;
+			const uint32_t edits = 1 + rng.below(4);
+			for (uint32_t e = 0; e < edits && !b.empty(); ++e) {
+				switch (rng.below(4)) {
+					case 0:
+					case 1:
+						b[1 + rng.below(uint32_t(b.size() - 1))] ^= uint8_t(1u << rng.below(8));
+						break;
+					case 2:
+						b[1 + rng.below(uint32_t(b.size() - 1))] = uint8_t(rng.next());
+						break;
+					default:
+						b.resize(1 + rng.below(uint32_t(b.size())));
+						break;
+				}
+			}
+			run(b);
+		}
+		std::printf("net.proto.fuzz: v5 deltas: Snapshot %zu stable %zu refused %zu unstable; SnapshotOthers %zu "
+					"stable %zu refused %zu unstable\n",
+				main_tally.stable, main_tally.refused, main_tally.unstable, extra_tally.stable, extra_tally.refused,
+				extra_tally.unstable);
+		CHECK(main_tally.unstable == 0);
+		CHECK(extra_tally.unstable == 0);
+		CHECK(main_tally.stable > 1);
+		CHECK(extra_tally.stable > 1);
+		CHECK(main_tally.refused > 0);
+		CHECK(extra_tally.refused > 0);
 	}
 }

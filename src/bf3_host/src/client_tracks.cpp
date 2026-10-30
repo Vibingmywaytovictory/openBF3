@@ -11,6 +11,7 @@ namespace {
 
 constexpr size_t kTrackSamples = 8;
 constexpr uint64_t kTrackTimeoutNs = 1'000'000'000ull;
+constexpr uint64_t kTrackTimeoutGaps = 3;
 
 double local_ticks(uint64_t p_ns) {
 	return double(p_ns) / kNsPerTick;
@@ -41,7 +42,8 @@ void RemoteTracks::arrival(sim::Tick p_server_tick, uint64_t p_now) {
 
 void RemoteTracks::add(sim::Tick p_server_tick, std::span<const net::OtherSoldier> p_others, uint8_t p_own_slot, uint64_t p_now) {
 	for (const net::OtherSoldier &o : p_others) {
-		if (o.slot >= tracks_.size() || o.slot == p_own_slot) {
+		if (o.slot >= tracks_.size() || o.slot == p_own_slot ||
+				(removed_at_[o.slot] != 0 && p_server_tick <= removed_at_[o.slot])) {
 			continue;
 		}
 		Track &t = tracks_[o.slot];
@@ -78,9 +80,28 @@ void RemoteTracks::reorder(sim::Tick p_tick, std::span<const net::OtherSoldier> 
 	}
 }
 
+void RemoteTracks::remove(uint8_t p_slot, sim::Tick p_server_tick) {
+	if (p_slot >= tracks_.size()) {
+		return;
+	}
+	removed_at_[p_slot] = std::max(removed_at_[p_slot], p_server_tick);
+	Track &t = tracks_[p_slot];
+	if (t.used && (t.samples.empty() || t.samples.back().server_tick <= p_server_tick)) {
+		t = Track();
+	}
+}
+
+uint64_t RemoteTracks::timeout_ns(const Track &p_track) {
+	if (p_track.samples.size() < 2) {
+		return kTrackTimeoutNs;
+	}
+	const sim::Tick gap = p_track.samples.back().server_tick - p_track.samples[p_track.samples.size() - 2].server_tick;
+	return std::max(kTrackTimeoutNs, uint64_t(double(kTrackTimeoutGaps * gap) * kNsPerTick));
+}
+
 void RemoteTracks::count_timeouts(uint64_t p_now) {
 	for (const Track &t : tracks_) {
-		if (t.used && !t.samples.empty() && p_now > t.last_seen_ns + kTrackTimeoutNs) {
+		if (t.used && !t.samples.empty() && p_now > t.last_seen_ns + timeout_ns(t)) {
 			++track_timeout_;
 		}
 	}
@@ -110,7 +131,7 @@ void RemoteTracks::publish(PresentationFrame &r_frame, uint64_t p_now) {
 		if (!t.used) {
 			continue;
 		}
-		if (p_now > t.last_seen_ns + kTrackTimeoutNs || t.samples.empty()) {
+		if (p_now > t.last_seen_ns + timeout_ns(t) || t.samples.empty()) {
 			t = Track();
 			continue;
 		}

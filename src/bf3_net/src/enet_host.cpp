@@ -199,14 +199,27 @@ bool Host::send(uint32_t p_peer, uint8_t p_channel, const void *p_data, size_t p
 }
 
 size_t Host::command_bytes(uint32_t p_peer, size_t p_size, uint32_t p_packet_flags) const {
-	const size_t fragment = fragment_bytes(p_peer);
-	if (p_size > fragment) {
-		return p_size + ((p_size + fragment - 1) / fragment) * sizeof(ENetProtocolSendFragment);
-	}
+	SendMode mode = SendMode::Sequenced;
 	if ((p_packet_flags & ENET_PACKET_FLAG_RELIABLE) != 0) {
+		mode = SendMode::Reliable;
+	} else if ((p_packet_flags & ENET_PACKET_FLAG_UNSEQUENCED) != 0) {
+		mode = SendMode::Unsequenced;
+	}
+	return enet_command_bytes(p_size, mode, fragment_bytes(p_peer));
+}
+
+size_t enet_default_fragment_bytes() {
+	return ENET_HOST_DEFAULT_MTU - sizeof(ENetProtocolHeader) - sizeof(ENetProtocolSendFragment);
+}
+
+size_t enet_command_bytes(size_t p_size, Host::SendMode p_mode, size_t p_fragment) {
+	if (p_fragment > 0 && p_size > p_fragment) {
+		return p_size + ((p_size + p_fragment - 1) / p_fragment) * sizeof(ENetProtocolSendFragment);
+	}
+	if (p_mode == Host::SendMode::Reliable) {
 		return p_size + sizeof(ENetProtocolSendReliable);
 	}
-	if ((p_packet_flags & ENET_PACKET_FLAG_UNSEQUENCED) != 0) {
+	if (p_mode == Host::SendMode::Unsequenced) {
 		return p_size + sizeof(ENetProtocolSendUnsequenced);
 	}
 	return p_size + sizeof(ENetProtocolSendUnreliable);

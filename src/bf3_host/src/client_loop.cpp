@@ -45,9 +45,13 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 			return;
 		}
 		case net::MessageType::Snapshot: {
-			core::Result<net::Snapshot> s = net::decode_snapshot(p_d.bytes);
+			core::Result<net::Snapshot> s = net::decode_snapshot(p_d.bytes, &baselines);
 			if (!s) {
 				return;
+			}
+			baselines.keep(s->seq, s->server_tick, s->own, s->own_weapons, s->others);
+			for (const uint8_t r : s->removed) {
+				tracks.remove(r, s->server_tick);
 			}
 			const bool newer = !link.have_snapshot() || net::seq_newer(s->seq, link.newest_seq());
 			gunplay.note_arrival(s->seq, p_now);
@@ -419,11 +423,12 @@ bool ClientLoop::accept_match(const net::MatchInfo &p_match, uint64_t p_now) {
 void ClientLoop::gunplay_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d, uint64_t p_now) {
 	switch (p_type) {
 		case net::MessageType::SnapshotOthers: {
-			core::Result<net::SnapshotOthers> o = net::decode_snapshot_others(p_d.bytes);
+			core::Result<net::SnapshotOthers> o = net::decode_snapshot_others(p_d.bytes, &baselines);
 			if (!o) {
 				gunplay.bad_datagram();
 				return;
 			}
+			baselines.keep(o->seq, o->server_tick, std::nullopt, std::nullopt, o->others);
 			gunplay.others(*o, p_now);
 			tracks.reorder(o->server_tick, o->others, slot);
 			tracks.add(o->server_tick, o->others, slot, p_now);

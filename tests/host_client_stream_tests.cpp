@@ -45,13 +45,14 @@ struct StreamHashes {
 	uint64_t stats = 0;
 };
 
-constexpr StreamHashes kAlpha{ 0x03878685a23e9720ull, 0x3b02d218f409212dull, 0x1d75e972f36e7d9bull,
-	0x5d420787cf4f7b84ull, 0x024f20a8ea28a659ull, 0xd5f4a43cf666841full };
-constexpr StreamHashes kBravo{ 0xefa667b8fae82456ull, 0x15905ffe07d7b48eull, 0x986e31d1cc72a233ull,
-	0x7e580f66b9c41f78ull, 0xcf35ec403217df9cull, 0x4fab240676276cbdull };
-constexpr StreamHashes kCharlie{ 0x34a31e04bc0cdd63ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0xd4bbb61a31c1220aull };
-constexpr StreamHashes kDelta{ 0x871136e24f45fd28ull, 0x230fef91e68d4c3cull, 0x1696f56b23947cb4ull,
-	0xccd97b8938eeaf83ull, 0xa2311db0a78ab8b8ull, 0x1fb6ed8cb484b7d8ull };
+constexpr StreamHashes kAlpha{ 0x6f6b9f831ecbbe0eull, 0x3d972929697aacc7ull, 0x69a66335405d486full,
+	0xdd6350d6866e6133ull, 0xd027e092e72e3da2ull, 0x2dfa676234cdac4eull };
+constexpr StreamHashes kBravo{ 0xe59da6e518536720ull, 0x5206fda01f77780cull, 0xb52f000669ee886full,
+	0xd036426c70944eebull, 0x37064bfe1fddf818ull, 0x445a21bd6f98401eull };
+constexpr StreamHashes kCharlie{ 0x28d0d02de2b48fb8ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull,
+	0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0xd4bbb61a31c1220aull };
+constexpr StreamHashes kDelta{ 0x752b7c9186daa8c6ull, 0x0889f03b39aef612ull, 0xbb797920590e895full,
+	0xccd97b8938eeaf83ull, 0xdff0ad8c528c54c9ull, 0x1dc383c71f3037bfull };
 
 constexpr uint32_t kTdmTicks = 1500;
 constexpr uint32_t kDevTicks = 600;
@@ -827,6 +828,7 @@ TEST_SUITE("host-client-stream") {
 		cfg.seed = 5;
 		cfg.walkers = 44;
 		cfg.respawn_ticks = 45;
+		cfg.snapshot_budget_bytes = 3 * uint32_t(net::kMaxDatagramBytes);
 		cfg.gunplay.mechanics_cfg = OPENBF3_MECHANICS_CFG;
 		cfg.gunplay.target_bots = 2;
 		auto fill = std::make_shared<host::BotFillConfig>();

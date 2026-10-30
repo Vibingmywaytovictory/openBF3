@@ -72,6 +72,7 @@ private:
 
 	bool pending_snapshot_valid = false;
 	net::Snapshot pending_snapshot;
+	net::SnapshotBaselines baselines;
 	std::vector<sim::SoldierState> pending_spawned;
 
 	struct HeldDatagram {

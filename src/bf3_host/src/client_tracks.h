@@ -23,6 +23,7 @@ public:
 	void add(sim::Tick p_server_tick, std::span<const net::OtherSoldier> p_others, uint8_t p_own_slot, uint64_t p_now);
 	void arrival(sim::Tick p_server_tick, uint64_t p_now);
 	void reorder(sim::Tick p_tick, std::span<const net::OtherSoldier> p_records, uint8_t p_own_slot);
+	void remove(uint8_t p_slot, sim::Tick p_server_tick);
 
 	void count_timeouts(uint64_t p_now);
 	void publish(PresentationFrame &r_frame, uint64_t p_now);
@@ -39,9 +40,12 @@ private:
 		std::deque<OtherSample> samples;
 	};
 
+	static uint64_t timeout_ns(const Track &p_track);
+
 	const ClientSessionConfig &config_;
 	uint8_t divisor_ = 2;
 	std::array<Track, net::kMaxSlots> tracks_;
+	std::array<sim::Tick, net::kMaxSlots> removed_at_{};
 	bool recv_valid_ = false;
 	double recv_offset_ = 0;
 	std::deque<std::pair<uint64_t, double>> offsets_;

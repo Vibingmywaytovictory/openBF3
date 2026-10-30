@@ -121,6 +121,7 @@ struct LoadBotFleet::Impl {
 		ClientSessionConfig session;
 		ClientClock clock;
 		ClientLink link;
+		net::SnapshotBaselines baselines;
 		uint32_t index = 0;
 		LoadBotStats stats;
 		bool deploy_screen = false;
@@ -169,11 +170,12 @@ struct LoadBotFleet::Impl {
 		}
 
 		void snapshot(std::span<const uint8_t> p_bytes, uint64_t p_now) {
-			core::Result<net::Snapshot> s = net::decode_snapshot(p_bytes);
+			core::Result<net::Snapshot> s = net::decode_snapshot(p_bytes, &baselines);
 			if (!s) {
 				++stats.decode_errors;
 				return;
 			}
+			baselines.keep(s->seq, s->server_tick, s->own, s->own_weapons, s->others);
 			++stats.snapshots;
 			if (!stats.matched) {
 				return;
@@ -214,7 +216,9 @@ struct LoadBotFleet::Impl {
 					snapshot(p_d.bytes, p_now);
 					return;
 				case net::MessageType::SnapshotOthers:
-					if (net::decode_snapshot_others(p_d.bytes)) {
+					if (const core::Result<net::SnapshotOthers> o =
+									net::decode_snapshot_others(p_d.bytes, &baselines)) {
+						baselines.keep(o->seq, o->server_tick, std::nullopt, std::nullopt, o->others);
 						++stats.snapshot_others;
 					} else {
 						++stats.decode_errors;

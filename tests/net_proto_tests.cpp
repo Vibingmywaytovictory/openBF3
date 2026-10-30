@@ -980,6 +980,7 @@ TEST_SUITE("net-proto") {
 				w.write_bits(0, 16);
 				w.write_bits(0, 16);
 				w.write_bool(true);
+				w.write_bool(false);
 				write_state_raw(w, own, p_pose, p_mode);
 				w.write_bits(0, 8);
 			});
@@ -2108,12 +2109,12 @@ void append_v2_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>>
 
 TEST_SUITE("net-proto") {
 	TEST_CASE("proto v2: version, message types and the bounds") {
-		CHECK(net::kProtocolVersion == 4);
+		CHECK(net::kProtocolVersion == 5);
 		for (const uint8_t t : { uint8_t(3), uint8_t(4), uint8_t(23), uint8_t(24) }) {
 			CHECK(net::peek_type(std::span<const uint8_t>(&t, 1)).has_value());
 		}
-		CHECK(net::Hello{}.protocol == 4);
-		CHECK(net::MatchInfo{}.protocol == 4);
+		CHECK(net::Hello{}.protocol == 5);
+		CHECK(net::MatchInfo{}.protocol == 5);
 	}
 
 	TEST_CASE("proto v2: MatchInfo, Spawned, KitSelect and the new Debug kinds round trip; out-of-range values are refused") {
@@ -2477,9 +2478,9 @@ TEST_SUITE("net-proto") {
 
 		MESSAGE("64 players: Snapshot ", once.size(), " B with ", keep, " others, fnv1a ", fnv1a(once), "; SnapshotOthers ", tail.size(), " B with ",
 				rest.others.size(), " others, fnv1a ", fnv1a(tail));
-		CHECK(once.size() == 1182);
+		CHECK(once.size() == 1183);
 		CHECK(keep == 41);
-		CHECK(fnv1a(once) == 0xc1857be9c1ddfa9aull);
+		CHECK(fnv1a(once) == 0xef3a0d8716bdae03ull);
 		CHECK(tail.size() == 503);
 		CHECK(fnv1a(tail) == 0x3b763f9c38937cabull);
 	}
@@ -4186,7 +4187,8 @@ TEST_SUITE("net-proto") {
 		REQUIRE(d);
 		CHECK(d->game_build == h.game_build);
 		CHECK(d->name == "v4");
-		for (const uint16_t other : { uint16_t(1), uint16_t(2), uint16_t(3), uint16_t(5), uint16_t(0xFFFF) }) {
+		for (const uint16_t other :
+				{ uint16_t(1), uint16_t(2), uint16_t(3), uint16_t(4), uint16_t(6), uint16_t(0xFFFF) }) {
 			auto old = net::decode_hello(hello_v3(other, "anyone"));
 			REQUIRE(old);
 			CHECK(old->protocol == other);
@@ -4209,7 +4211,7 @@ TEST_SUITE("net-proto") {
 		const std::vector<uint8_t> bytes = net::encode_kick(kick);
 		const std::optional<std::string> v3 = decode_kick_v3(bytes);
 		REQUIRE(v3.has_value());
-		CHECK(*v3 == "protocol 3 (server 4)");
+		CHECK(*v3 == "protocol 3 (server 5)");
 		auto v4 = net::decode_kick(bytes);
 		REQUIRE(v4);
 		CHECK(v4->code == net::KickReason::Protocol);
@@ -4599,11 +4601,11 @@ TEST_SUITE("net-proto") {
 		}
 		CHECK(types.size() == 30);
 		static constexpr GoldenPin kPins[] = {
-			{ "Snapshot", 367, 0xa435d4ace31cf825ull, 0 },
+			{ "Snapshot", 367, 0x5a3ed6545076d226ull, 0 },
 			{ "Snapshot (no own)", 20, 0xa85c8a910ea8826bull, 0 },
 			{ "CommandPacket", 58, 0x0561e87f8ae9a655ull, 0 },
-			{ "Hello", 20, 0x4b3c210b6d750b94ull, 0 },
-			{ "MatchInfo", 126, 0xfd220c8a3ed9a6fbull, 0 },
+			{ "Hello", 20, 0x85c41cfbc42c519full, 0 },
+			{ "MatchInfo", 126, 0x5aa8fe325c5ed5d4ull, 0 },
 			{ "Ready", 34, 0x50302cdf0f51bcb5ull, 0 },
 			{ "Spawned", 94, 0x1af4b750393b4270ull, 0 },
 			{ "Loading", 11, 0x6d0d37720d72edd7ull, 0 },
@@ -4611,14 +4613,14 @@ TEST_SUITE("net-proto") {
 			{ "Bye", 1, 0xaf63cb4c8601cfa9ull, 0 },
 			{ "Debug", 30, 0x3f09a8f270a73a7dull, 0 },
 			{ "DebugReport", 492, 0x74b3a36917721e73ull, 0 },
-			{ "Snapshot (v2 own weapons)", 522, 0xa817181e7f1b7bdcull, 0 },
+			{ "Snapshot (v2 own weapons)", 522, 0xb98e1708c7189610ull, 0 },
 			{ "SnapshotOthers", 121, 0x49f12d8715464b47ull, 0 },
 			{ "ShotEvents", 190, 0x1ee136123af4ddfaull, 0 },
 			{ "CombatEvents", 124, 0x7f963139bc7ca784ull, 0 },
 			{ "KitSelect", 3, 0xa9266a18e1c669aaull, 0 },
 			{ "Debug (SpawnTarget)", 30, 0xbf53c23636c9b9efull, 0 },
 			{ "DebugReport (v2)", 916, 0xe73adddf5cc1ab3dull, 0 },
-			{ "MatchInfo (v2)", 94, 0x818d2041dffe0989ull, 0 },
+			{ "MatchInfo (v2)", 94, 0xe6bc94a39861d6f6ull, 0 },
 			{ "Spawned (v2)", 94, 0x9785ca9dec6fc2bbull, 0 },
 			{ "MatchState", 42, 0x6e8a7b2bfcb229a0ull, 0 },
 			{ "PlayerList (full)", 217, 0x8ad8a19f7b621f12ull, 0 },
@@ -4627,7 +4629,7 @@ TEST_SUITE("net-proto") {
 			{ "SuicideRequest", 1, 0xaf63d14c8601d9dbull, 0 },
 			{ "LoadoutRequest", 54, 0xbff00e287a388828ull, 0 },
 			{ "CombatEvents (v3)", 137, 0x40d29b14535383d7ull, 0 },
-			{ "MatchInfo (v3)", 94, 0x9489081d6d158415ull, 0 },
+			{ "MatchInfo (v3)", 94, 0x160994d5d355cbb6ull, 0 },
 			{ "Spawned (v3 revived)", 94, 0x185c920e1aff4290ull, 0 },
 			{ "SoldierGear", 20, 0xfa6162cd1bdf3cf3ull, 0 },
 			{ "Mismatch", 2, 0x07c26e07b48c3c08ull, 0 },
@@ -4639,7 +4641,7 @@ TEST_SUITE("net-proto") {
 			{ "LogicDelta", 13, 0xb406185960cdf447ull, 0 },
 			{ "SquadRequest", 4, 0x339b5db77a00fa9bull, 0 },
 			{ "SquadOrder", 18, 0x786f0a82bee37cb8ull, 0 },
-			{ "MatchInfo (v4)", 157, 0xd2294e3814c9e96full, 0 },
+			{ "MatchInfo (v4)", 157, 0x1cfc7888cbb9efe6ull, 0 },
 			{ "Ready (v4 digests)", 82, 0x52d9ba4d4bfcaf1eull, 0 },
 			{ "Kick (v4 reason)", 25, 0xc256cbdc95a2f23cull, 0 },
 			{ "PlayerList (v4 squads)", 89, 0x1f220dc607e2158aull, 0 },
@@ -4649,7 +4651,7 @@ TEST_SUITE("net-proto") {
 
 	TEST_CASE("proto: golden bytes of the encoders' clamp, cut and drop paths") {
 		static constexpr GoldenPin kPins[] = {
-			{ "Hello (name cut inside a code point)", 43, 0x14b6f5bcd86cd2d4ull, 0 },
+			{ "Hello (name cut inside a code point)", 43, 0x3c0e394e4c5084edull, 0 },
 			{ "Kick (reason cut at 2048 bytes)", 2051, 0x028412f145ceb5d9ull, 0 },
 			{ "Loading (permille above 1000)", 11, 0xd2694e25edbe818full, 0 },
 			{ "Bye", 1, 0xaf63cb4c8601cfa9ull, 0 },
@@ -4661,7 +4663,7 @@ TEST_SUITE("net-proto") {
 			{ "PlayerList (full drops removed)", 27, 0x47ea6ae9e75df6d4ull, 1 },
 			{ "CommandPacket (clamped, chain cut at a gap)", 57, 0x54a8e4154ecc6c70ull, 0 },
 			{ "CommandPacket (no commands)", 0, 0xcbf29ce484222325ull, 0 },
-			{ "Snapshot (others over the datagram)", 1189, 0x25fef71d07948c6full, 24 },
+			{ "Snapshot (others over the datagram)", 1189, 0xbcb65a9961d4638full, 24 },
 			{ "SnapshotOthers (others over the datagram)", 1178, 0x82aafe2e191acf87ull, 78 },
 			{ "ShotEvents (dropped, clamped, one datagram)", 1195, 0x3ed13adbc383dac9ull, 82 },
 			{ "CombatEvents (budget, clamps)", 5309, 0x83759aa16ad8fd11ull, 61 },
@@ -4675,5 +4677,370 @@ TEST_SUITE("net-proto") {
 		MESSAGE("game_build ", build);
 		CHECK(build != 0);
 		CHECK(net::game_build() == build);
+	}
+}
+
+namespace {
+
+net::OtherSoldier canonical_other(const net::OtherSoldier &p_other, sim::Tick p_tick) {
+	net::SnapshotOthers m;
+	m.seq = 1;
+	m.server_tick = p_tick;
+	m.others.push_back(p_other);
+	const bf3::core::Result<net::SnapshotOthers> d = net::decode_snapshot_others(net::encode_snapshot_others(m));
+	REQUIRE(d);
+	REQUIRE(d->others.size() == 1);
+	return d->others[0];
+}
+
+net::OtherSoldier nudged_other(Rng &r_rng, const net::OtherSoldier &p_base, sim::Tick p_dt) {
+	net::OtherSoldier o = p_base;
+	if (r_rng.below(3) == 0) {
+		for (float &v : o.velocity) {
+			v += r_rng.uniform(-0.5f, 0.5f);
+		}
+	}
+	for (size_t k = 0; k < 3; ++k) {
+		o.position[k] += 0.5f * (o.velocity[k] + p_base.velocity[k]) * float(p_dt) / float(sim::kSimHz) +
+				r_rng.uniform(-0.05f, 0.05f);
+	}
+	if (r_rng.below(2) == 0) {
+		o.yaw = uint16_t(o.yaw + int32_t(r_rng.below(801)) - 400);
+		o.pitch = int16_t(std::clamp(int32_t(o.pitch) + int32_t(r_rng.below(201)) - 100, -8191, 8191));
+	}
+	if (r_rng.below(8) == 0) {
+		o.pose = sim::Pose(r_rng.below(3));
+		o.transition = uint8_t(r_rng.below(256));
+	}
+	if (r_rng.below(8) == 0) {
+		o.firing = !o.firing;
+		o.burst_seq = uint8_t((o.burst_seq + 1) & 15);
+	}
+	return o;
+}
+
+sim::SoldierState nudged_state(Rng &r_rng, const sim::SoldierState &p_base, sim::Tick p_tick) {
+	sim::SoldierState s = p_base;
+	const float dt = float(p_tick - p_base.tick) / float(sim::kSimHz);
+	s.tick = p_tick;
+	for (size_t k = 0; k < 3; ++k) {
+		s.position[k] += s.velocity[k] * dt;
+	}
+	if (r_rng.below(2) == 0) {
+		s.velocity[0] += r_rng.uniform(-0.3f, 0.3f);
+		s.velocity[2] += r_rng.uniform(-0.3f, 0.3f);
+	}
+	s.yaw = uint16_t(s.yaw + r_rng.below(300));
+	s.air_ticks = uint16_t(s.air_ticks + (r_rng.below(2) == 0 ? 1 : 0));
+	if (r_rng.below(5) == 0) {
+		s.health = std::max(0.0f, s.health - r_rng.uniform(0, 20));
+	}
+	return s;
+}
+
+net::WeaponsWire nudged_weapons(Rng &r_rng, const net::WeaponsWire &p_base) {
+	net::WeaponsWire w = p_base;
+	if (r_rng.below(2) == 0) {
+		++w.next_shot_index;
+		w.slots[w.active].magazine -= 1;
+	}
+	if (r_rng.below(4) == 0) {
+		w.events = uint32_t(r_rng.below(1u << 16));
+	}
+	return w;
+}
+
+struct DeltaPairs {
+	uint64_t pairs = 0;
+	uint64_t delta = 0;
+	uint64_t absolute = 0;
+	uint64_t own_pairs = 0;
+	uint64_t own_delta = 0;
+	uint64_t mismatches = 0;
+	uint64_t decode_failures = 0;
+	uint64_t unusable_delta = 0;
+	uint64_t larger = 0;
+};
+
+void count_others(DeltaPairs &r_n, const std::vector<net::OtherSoldier> &p_delta,
+		const std::vector<net::OtherSoldier> &p_absolute) {
+	r_n.mismatches += p_delta.size() == p_absolute.size() ? 0u : 1u;
+	for (size_t i = 0; i < std::min(p_delta.size(), p_absolute.size()); ++i) {
+		r_n.mismatches += same_other(p_delta[i], p_absolute[i]) ? 0u : 1u;
+	}
+	r_n.pairs += p_delta.size();
+}
+
+}
+
+TEST_SUITE("net-proto") {
+	TEST_CASE("proto v5: 200000 random (baseline, state) pairs: every delta decodes to the absolute record") {
+		Rng rng(0x6057D17Aull);
+		DeltaPairs n;
+		uint16_t seq = 40000;
+		sim::Tick tick = 2'000'000;
+		net::SnapshotBaselines store;
+		while (n.pairs < 200000) {
+			seq = uint16_t(seq + 1);
+			tick += 2;
+			const bool main = (rng.next() & 1) != 0;
+			std::vector<uint8_t> slots;
+			for (uint32_t s = 1; s < net::kMaxSlots && slots.size() < 24; ++s) {
+				if (rng.below(4) == 0) {
+					slots.push_back(uint8_t(s));
+				}
+			}
+			std::vector<net::OtherSoldier> others;
+			std::vector<net::OtherBaseline> bases;
+			size_t usable = 0;
+			for (const uint8_t slot : slots) {
+				net::OtherBaseline b;
+				const uint32_t kind = rng.below(16);
+				b.back = uint8_t(1 + rng.below(net::kMaxBaselineBack));
+				b.tick = tick - 2u * b.back;
+				if (kind == 0) {
+					b.back = 0;
+				} else if (kind == 1) {
+					b.tick = tick - 4097u - rng.below(1000);
+				}
+				const net::OtherSoldier base = canonical_other(sample_other_v2(rng, slot, b.tick), b.tick);
+				net::OtherSoldier cur =
+						rng.below(4) == 0 ? sample_other_v2(rng, slot, tick) : nudged_other(rng, base, tick - b.tick);
+				cur.generation = kind == 2 ? uint8_t(base.generation + 1) : base.generation;
+				b.record = base;
+				if (b.back != 0) {
+					store.keep(uint16_t(seq - b.back), b.tick, std::nullopt, std::nullopt,
+							std::span<const net::OtherSoldier>(&base, 1));
+				}
+				usable += kind > 2 ? 1u : 0u;
+				others.push_back(cur);
+				bases.push_back(b);
+			}
+
+			net::SnapshotSize size;
+			std::vector<uint8_t> with_delta, absolute;
+			if (main) {
+				net::Snapshot snap = sample_snapshot(rng, 0);
+				snap.seq = seq;
+				snap.server_tick = tick;
+				snap.others = others;
+				for (uint32_t s = 1 + rng.below(40); s < net::kMaxSlots && snap.removed.size() < 3;
+						s += 1 + rng.below(40)) {
+					if (std::find(slots.begin(), slots.end(), uint8_t(s)) == slots.end()) {
+						snap.removed.push_back(uint8_t(s));
+					}
+				}
+				net::SnapshotBases sb;
+				sb.others = bases;
+				sb.own.back = uint8_t(rng.below(net::kMaxBaselineBack + 1));
+				sb.own.tick = tick - 2u * std::max<uint8_t>(sb.own.back, 1);
+				sb.own.state = sample_state(rng, sb.own.tick);
+				sb.own.weapons = sample_weapons_wire(rng);
+				net::Snapshot base_snap;
+				base_snap.server_tick = sb.own.tick;
+				base_snap.own = sb.own.state;
+				base_snap.own_weapons = sb.own.weapons;
+				const bf3::core::Result<net::Snapshot> base_canon =
+						net::decode_snapshot(net::encode_snapshot(base_snap));
+				REQUIRE(base_canon);
+				sb.own.state = *base_canon->own;
+				sb.own.weapons = base_canon->own_weapons;
+				snap.own = rng.below(4) == 0 ? sample_state(rng, tick) : nudged_state(rng, sb.own.state, tick);
+				snap.own_weapons = rng.below(4) == 0 ? sample_weapons_wire(rng) : nudged_weapons(rng, *sb.own.weapons);
+				if (sb.own.back != 0) {
+					store.keep(uint16_t(seq - sb.own.back), sb.own.tick, sb.own.state, sb.own.weapons, {});
+				}
+				with_delta = net::encode_snapshot(snap, nullptr, &sb, net::kMaxDatagramBytes, &size);
+				absolute = net::encode_snapshot(snap);
+				const bf3::core::Result<net::Snapshot> d = net::decode_snapshot(with_delta, &store);
+				const bf3::core::Result<net::Snapshot> a = net::decode_snapshot(absolute);
+				if (!d || !a) {
+					++n.decode_failures;
+					continue;
+				}
+				++n.own_pairs;
+				n.own_delta += size.own_delta ? 1u : 0u;
+				n.mismatches +=
+						d->own == a->own && d->own_weapons == a->own_weapons && d->removed == a->removed ? 0u : 1u;
+				count_others(n, d->others, a->others);
+			} else {
+				net::SnapshotOthers m;
+				m.seq = seq;
+				m.server_tick = tick;
+				m.others = others;
+				with_delta = net::encode_snapshot_others(m, nullptr, bases, &size);
+				absolute = net::encode_snapshot_others(m);
+				const bf3::core::Result<net::SnapshotOthers> d = net::decode_snapshot_others(with_delta, &store);
+				const bf3::core::Result<net::SnapshotOthers> a = net::decode_snapshot_others(absolute);
+				if (!d || !a) {
+					++n.decode_failures;
+					continue;
+				}
+				count_others(n, d->others, a->others);
+			}
+			n.delta += size.delta_others;
+			n.absolute += size.carried - size.delta_others;
+			n.unusable_delta += size.delta_others > usable ? 1u : 0u;
+			n.larger += with_delta.size() > absolute.size() ? 1u : 0u;
+		}
+		MESSAGE("pairs ", n.pairs, ": ", n.delta, " as deltas, ", n.absolute, " absolute; own ", n.own_delta,
+				" deltas of ", n.own_pairs);
+		CHECK(n.decode_failures == 0);
+		CHECK(n.mismatches == 0);
+		CHECK(n.unusable_delta == 0);
+		CHECK(n.larger == 0);
+		CHECK(n.delta * 2 > n.pairs);
+		CHECK(n.own_delta * 2 > n.own_pairs);
+	}
+
+	TEST_CASE("proto v5: a moving soldier's delta against the previous snapshot is at most 14 bytes") {
+		sim::SoldierState s;
+		s.tick = 300000;
+		s.life = 4;
+		s.position = { 120.0f, 64.0f, -40.0f };
+		s.ground_normal = { 0.0f, 1.0f, 0.0f };
+		s.flags = sim::soldier_flags::kAlive;
+		s.health = 100.0f;
+		net::SnapshotBaselines store;
+		std::optional<net::OtherSoldier> prev;
+		sim::Tick prev_tick = 0;
+		size_t worst = 0, total = 0, count = 0;
+		for (uint32_t step = 0; step < 600; ++step) {
+			const float heading = 0.02f * float(step) + 0.6f * std::sin(0.05f * float(step));
+			const float speed = step % 150 < 100 ? 5.6f : 2.1f;
+			s.velocity = { speed * std::sin(heading), 0.0f, speed * std::cos(heading) };
+			for (int t = 0; t < 2; ++t) {
+				for (size_t k = 0; k < 3; ++k) {
+					s.position[k] += s.velocity[k] / float(sim::kSimHz);
+				}
+				++s.tick;
+			}
+			s.yaw = uint16_t(s.yaw + 37 * (step % 7));
+			s.pitch = int16_t(int32_t(step % 40) * 10 - 200);
+			const uint16_t seq = uint16_t(1000 + step);
+			const net::OtherSoldier cur = canonical_other(net::quantize_other(5, s), s.tick);
+			if (prev) {
+				net::SnapshotOthers m;
+				m.seq = seq;
+				m.server_tick = s.tick;
+				m.others.push_back(cur);
+				const net::OtherBaseline b{ 1, prev_tick, *prev };
+				net::SnapshotSize size;
+				const std::vector<uint8_t> bytes =
+						net::encode_snapshot_others(m, nullptr, std::span<const net::OtherBaseline>(&b, 1), &size);
+				const std::vector<uint8_t> empty = net::encode_snapshot_others({ seq, s.tick, {} });
+				REQUIRE(size.delta_others == 1);
+				const bf3::core::Result<net::SnapshotOthers> d = net::decode_snapshot_others(bytes, &store);
+				REQUIRE(d);
+				REQUIRE(d->others.size() == 1);
+				CHECK(same_other(d->others[0], cur));
+				const size_t entry = bytes.size() - empty.size();
+				worst = std::max(worst, entry);
+				total += entry;
+				++count;
+			}
+			store.keep(seq, s.tick, std::nullopt, std::nullopt, std::span<const net::OtherSoldier>(&cur, 1));
+			prev = cur;
+			prev_tick = s.tick;
+		}
+		MESSAGE("moving soldier: ", count, " deltas, worst ", worst, " B, mean ", double(total) / double(count), " B");
+		CHECK(worst <= 14);
+	}
+
+	TEST_CASE("proto v5: a missing or stale baseline is sent absolute; a delta whose baseline the receiver lacks does "
+			  "not decode") {
+		Rng rng(0xBA5E);
+		const sim::Tick tick = 500000;
+		const net::OtherSoldier base = canonical_other(sample_other_v2(rng, 9, tick - 2), tick - 2);
+		net::OtherSoldier cur = nudged_other(rng, base, 2);
+		cur.generation = base.generation;
+		const net::SnapshotOthers m{ 77, tick, { cur } };
+		const std::vector<uint8_t> absolute = net::encode_snapshot_others(m);
+		const auto sent = [&](const net::OtherBaseline &p_base, size_t &r_deltas) {
+			net::SnapshotSize size;
+			std::vector<uint8_t> b =
+					net::encode_snapshot_others(m, nullptr, std::span<const net::OtherBaseline>(&p_base, 1), &size);
+			r_deltas = size.delta_others;
+			return b;
+		};
+		net::OtherSoldier other_generation = base;
+		other_generation.generation = uint8_t(base.generation + 1);
+		net::OtherSoldier other_slot = base;
+		other_slot.slot = 10;
+		for (const net::OtherBaseline &b :
+				{ net::OtherBaseline{ 0, tick - 2, base }, net::OtherBaseline{ 1, tick - 4097, base },
+						net::OtherBaseline{ 1, tick, base }, net::OtherBaseline{ 1, tick - 2, other_generation },
+						net::OtherBaseline{ 1, tick - 2, other_slot }, net::OtherBaseline{ 32, tick - 2, base } }) {
+			size_t deltas = 1;
+			CHECK(sent(b, deltas) == absolute);
+			CHECK(deltas == 0);
+		}
+
+		size_t deltas = 0;
+		const std::vector<uint8_t> delta = sent({ 1, tick - 2, base }, deltas);
+		REQUIRE(deltas == 1);
+		CHECK(delta.size() < absolute.size());
+		CHECK_FALSE(net::decode_snapshot_others(delta));
+		net::SnapshotBaselines store;
+		CHECK_FALSE(net::decode_snapshot_others(delta, &store));
+		store.keep(75, tick - 2, std::nullopt, std::nullopt, std::span<const net::OtherSoldier>(&base, 1));
+		CHECK_FALSE(net::decode_snapshot_others(delta, &store));
+		net::SnapshotBaselines stale;
+		stale.keep(76, tick - 5000, std::nullopt, std::nullopt, std::span<const net::OtherSoldier>(&base, 1));
+		CHECK_FALSE(net::decode_snapshot_others(delta, &stale));
+		store.keep(76, tick - 2, std::nullopt, std::nullopt, std::span<const net::OtherSoldier>(&base, 1));
+		const bf3::core::Result<net::SnapshotOthers> ok = net::decode_snapshot_others(delta, &store);
+		REQUIRE(ok);
+		REQUIRE(ok->others.size() == 1);
+		CHECK(same_other(ok->others[0], net::decode_snapshot_others(absolute)->others[0]));
+
+		net::Snapshot snap = sample_snapshot(rng, 0);
+		snap.seq = 200;
+		snap.server_tick = tick;
+		snap.own->tick = tick;
+		snap.own_weapons = sample_weapons_wire(rng);
+		const bf3::core::Result<net::Snapshot> canon = net::decode_snapshot(net::encode_snapshot(snap));
+		REQUIRE(canon);
+		snap = *canon;
+		sim::SoldierState own_base = *snap.own;
+		own_base.tick = tick - 2;
+		own_base.position[0] -= 0.25f;
+		net::SnapshotBases bases;
+		bases.own = { 1, tick - 2, own_base, snap.own_weapons };
+		const std::vector<uint8_t> own_absolute = net::encode_snapshot(snap);
+		net::SnapshotSize size;
+		const std::vector<uint8_t> own_delta =
+				net::encode_snapshot(snap, nullptr, &bases, net::kMaxDatagramBytes, &size);
+		CHECK(size.own_delta);
+		CHECK(own_delta.size() < own_absolute.size());
+		CHECK_FALSE(net::decode_snapshot(own_delta));
+		net::SnapshotBaselines own_store;
+		CHECK_FALSE(net::decode_snapshot(own_delta, &own_store));
+		own_store.keep(199, tick - 2, own_base, snap.own_weapons, {});
+		const bf3::core::Result<net::Snapshot> own_ok = net::decode_snapshot(own_delta, &own_store);
+		REQUIRE(own_ok);
+		CHECK(own_ok->own == snap.own);
+		CHECK(own_ok->own_weapons == snap.own_weapons);
+		for (const net::OwnBaseline &b : { net::OwnBaseline{ 0, tick - 2, own_base, snap.own_weapons },
+					 net::OwnBaseline{ 1, tick - 4097, own_base, snap.own_weapons },
+					 net::OwnBaseline{ 32, tick - 2, own_base, snap.own_weapons },
+					 net::OwnBaseline{ 1, tick, own_base, snap.own_weapons } }) {
+			net::SnapshotBases bb;
+			bb.own = b;
+			net::SnapshotSize s2;
+			CHECK(net::encode_snapshot(snap, nullptr, &bb, net::kMaxDatagramBytes, &s2) == own_absolute);
+			CHECK_FALSE(s2.own_delta);
+		}
+
+		net::Snapshot removed = snap;
+		removed.removed = { 3, 17 };
+		const bf3::core::Result<net::Snapshot> rd = net::decode_snapshot(net::encode_snapshot(removed));
+		REQUIRE(rd);
+		CHECK(rd->removed == removed.removed);
+		removed.removed = { 3, 3 };
+		CHECK_FALSE(net::decode_snapshot(net::encode_snapshot(removed)));
+		removed.removed = { 3 };
+		removed.others.push_back(net::quantize_other(3, *snap.own));
+		CHECK_FALSE(net::decode_snapshot(net::encode_snapshot(removed)));
 	}
 }

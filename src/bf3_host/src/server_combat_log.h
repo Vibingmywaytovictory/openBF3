@@ -26,6 +26,7 @@ public:
 
 	void send(uint32_t p_peer, sim::Tick p_server_tick, Gunplay &r_gunplay, Outbox &r_outbox) const;
 	void clear() { events_ = net::CombatEvents(); }
+	const net::CombatEvents &events() const { return events_; }
 
 private:
 	Spawner &spawner_;

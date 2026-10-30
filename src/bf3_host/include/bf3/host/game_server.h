@@ -47,6 +47,7 @@ public:
 struct GameServerConfig {
 	std::shared_ptr<const SharedLevel> level;
 	uint8_t snapshot_divisor = 2;
+	uint32_t snapshot_budget_bytes = uint32_t(net::kMaxDatagramBytes);
 
 	uint32_t max_slots = 64;
 	uint32_t jitter_buffer_ticks = 32;

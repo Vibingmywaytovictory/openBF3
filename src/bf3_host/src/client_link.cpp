@@ -163,7 +163,7 @@ void ClientLink::send_commands(const sim::Command &p_command, uint32_t p_others_
 		history_.pop_front();
 	}
 	net::CommandPacket p;
-	p.newest_snapshot = newest_seq_;
+	p.newest_snapshot = have_snapshot_ ? newest_seq_ : uint16_t(0xFFFF);
 	p.snapshot_ack_bits = ack_bits_;
 	p.others_ack_bits = p_others_ack_bits;
 	p.count = uint8_t(history_.size());

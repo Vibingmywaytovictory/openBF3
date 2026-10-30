@@ -83,4 +83,6 @@ private:
 	std::vector<PeerCounters> counters_;
 };
 
+size_t enet_default_fragment_bytes();
+size_t enet_command_bytes(size_t p_size, Host::SendMode p_mode, size_t p_fragment = enet_default_fragment_bytes());
 }

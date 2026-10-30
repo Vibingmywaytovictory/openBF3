@@ -57,7 +57,7 @@ struct GameServer::Impl {
 	ServerLogicSync logic{ slots, match, outbox };
 	Spawner spawner{ slots, soldiers, match, combat, motor, outbox, logic };
 	CombatLog combat_log{ spawner, match, combat };
-	SnapshotWriter snapshots{ slots, soldiers, commands, combat, combat_log, motor, outbox };
+	SnapshotWriter snapshots{ slots, soldiers, commands, combat, combat_log, motor, outbox, match };
 	DevCommands dev{ slots, soldiers, spawner, combat, match, motor, outbox,
 		[this](size_t p_slot) { reset_slot(p_slot); } };
 	ServerHandshake handshake;
@@ -81,6 +81,7 @@ struct GameServer::Impl {
 
 	void receive_commands(size_t p_slot, const net::CommandPacket &p_packet, uint64_t p_now_ns) {
 		combat.ack(p_slot, p_packet);
+		snapshots.ack(p_slot, p_packet);
 		for (const sim::Command &c : commands.receive(p_slot, p_packet, p_now_ns, tick)) {
 			combat.note_command(p_slot, c);
 		}
@@ -334,6 +335,10 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	if (p_config.snapshot_divisor == 0) {
 		return core::make_error("GameServer: snapshot_divisor 0");
 	}
+	if (p_config.snapshot_budget_bytes < 256) {
+		return core::make_error("GameServer: snapshot_budget_bytes " + std::to_string(p_config.snapshot_budget_bytes) +
+				" is under 256");
+	}
 	m.config = p_config;
 	core::Result<std::unique_ptr<sim::CollisionWorld>> world = sim::CollisionWorld::create(p_config.level->static_world);
 	if (!world) {
@@ -347,7 +352,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	m.spawner.resize(p_config.max_slots);
 	m.logic.resize(p_config.max_slots);
 	m.commands.configure(p_config.max_slots, p_config.jitter_buffer_ticks);
-	m.snapshots.configure(p_config.max_slots);
+	m.snapshots.configure(p_config.max_slots, p_config.snapshot_budget_bytes);
 	m.dev.configure(m.config, *m.world, p_config.max_slots);
 	m.handshake.configure(p_config.game_build.value_or(net::game_build()), *p_config.level, p_config.max_slots);
 	for (size_t i = 0; i < m.slots.size(); ++i) {

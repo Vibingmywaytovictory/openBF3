@@ -211,4 +211,6 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/ai_world.h
     src/ai_world.h
     src/ai_world.cpp
+    src/server_ghosts.h
+    src/server_ghosts.cpp
 )

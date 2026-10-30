@@ -47,3 +47,8 @@ add_custom_target(bf3_build_id
 add_dependencies(bf3_net bf3_build_id)
 target_include_directories(bf3_net PRIVATE "${OPENBF3_BUILD_ID_DIR}")
 target_sources(bf3_net PRIVATE src/build_id.cpp)
+
+target_sources(bf3_net PRIVATE
+    src/ghost_delta.h
+    src/ghost_delta.cpp
+)
