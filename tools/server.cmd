@@ -8,6 +8,15 @@ if not exist "%OPENBF3_GODOT%" (
     echo server.cmd: Godot not found at "%OPENBF3_GODOT%" ^(set OPENBF3_GODOT^)
     exit /b 2
 )
+set "PROJECT=%ROOT%\bf3-opensource-server"
+if not exist "%PROJECT%\bin\libopenbf3_server.*.dll" (
+    echo server.cmd: no server extension in "%PROJECT%\bin" ^(build it: tools\build.cmd dev --no-test^)
+    exit /b 2
+)
+if not exist "%PROJECT%\.godot\extension_list.cfg" (
+    mkdir "%PROJECT%\.godot" 2>nul
+    >"%PROJECT%\.godot\extension_list.cfg" echo res://openbf3_server.gdextension
+)
 set "ALL= %*"
 set "ARGS="
 set "A1=%~1"
@@ -21,7 +30,7 @@ if "%A2:~0,2%"=="--" goto run
 set "ARGS=%ARGS% --mode=%A2%"
 set "ALL=!ALL:* %A2%=!"
 :run
-"%OPENBF3_GODOT%" --headless --path "%ROOT%\bf3-opensource-server" --main-loop DedicatedMainLoop -- %ARGS% !ALL! --bf3-cache=user://bf3cache-server
+"%OPENBF3_GODOT%" --headless --path "%PROJECT%" --main-loop DedicatedMainLoop -- %ARGS% !ALL! --bf3-cache=user://bf3cache-server
 exit /b %ERRORLEVEL%
 :help
 echo Usage: tools\server.cmd [level [mode]] [user args]
