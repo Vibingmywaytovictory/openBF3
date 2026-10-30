@@ -157,6 +157,13 @@ SnapshotOrder ClientLink::arrive(uint16_t p_seq) {
 	return SnapshotOrder::Newest;
 }
 
+void ClientLink::new_level() {
+	have_snapshot_ = false;
+	newest_seq_ = 0;
+	ack_bits_ = 0;
+	history_.clear();
+}
+
 void ClientLink::send_commands(const sim::Command &p_command, uint32_t p_others_ack_bits, uint64_t p_now) {
 	history_.push_back(p_command);
 	while (history_.size() > net::kCommandsPerPacket) {

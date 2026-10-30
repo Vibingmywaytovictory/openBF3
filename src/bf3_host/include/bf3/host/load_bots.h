@@ -40,6 +40,7 @@ struct LoadBotConfig {
 	net::NetSimConfig netsim;
 	uint8_t kit = 0;
 	uint32_t spawn_retry_ms = 1000;
+	uint32_t stall_level = 0;
 };
 
 struct LoadBotFleetConfig {
@@ -55,7 +56,13 @@ struct LoadBotStats {
 	bool matched = false;
 	bool refused = false;
 	bool disconnected = false;
+	bool stalled = false;
+	bool kicked = false;
+	net::KickReason kick_reason = net::KickReason::Protocol;
 	uint8_t slot = 0;
+	uint32_t levels = 0;
+	uint32_t level_changes = 0;
+	uint32_t round_id = 0;
 	uint32_t lives = 0;
 	uint64_t datagrams_in = 0;
 	uint64_t bytes_in = 0;
@@ -83,6 +90,9 @@ struct LoadBotFleetStats {
 	uint32_t spawned = 0;
 	uint32_t disconnected = 0;
 	uint32_t refused = 0;
+	uint32_t stalled = 0;
+	uint32_t kicked = 0;
+	uint32_t level_changes = 0;
 	uint64_t snapshots = 0;
 	uint64_t decode_errors = 0;
 	uint64_t bytes_in = 0;

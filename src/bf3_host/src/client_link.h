@@ -42,6 +42,7 @@ public:
 	bool have_snapshot() const { return have_snapshot_; }
 	uint16_t newest_seq() const { return newest_seq_; }
 	SnapshotOrder arrive(uint16_t p_seq);
+	void new_level();
 	void send_commands(const sim::Command &p_command, uint32_t p_others_ack_bits, uint64_t p_now);
 
 	void queue_debug(const net::DebugRequest &p_request);

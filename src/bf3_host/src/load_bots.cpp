@@ -132,6 +132,9 @@ struct LoadBotFleet::Impl {
 		std::unique_ptr<LegWalker> walker;
 		uint64_t last_spawn_request_ns = 0;
 		bool ended = false;
+		bool checked = false;
+		bool changing = false;
+		uint32_t change_round = 0;
 
 		void begin(std::unique_ptr<ClientTransport> p_transport, uint64_t p_now) {
 			link.attach(std::make_unique<CountingTransport>(std::move(p_transport), stats));
@@ -152,21 +155,64 @@ struct LoadBotFleet::Impl {
 				return;
 			}
 			++stats.reliable_messages;
-			if (stats.matched || stats.refused) {
+			if (stats.refused || stats.stalled) {
 				return;
 			}
-			stats.slot = m->slot;
-			if (!config.level.empty()) {
+			if (!checked && !config.level.empty()) {
 				if (const std::string refusal = level_refusal(*m, config.level, config.mode); !refusal.empty()) {
 					link.refuse(refusal.c_str());
 					stats.refused = true;
 					return;
 				}
 			}
+			checked = true;
+			stats.slot = m->slot;
+			if (m->phase == net::MatchPhase::LevelChange) {
+				changing = true;
+				return;
+			}
+			if (stats.matched && !changing && m->round_id == stats.round_id) {
+				return;
+			}
+			stats.round_id = m->round_id;
+			++stats.levels;
+			if (stats.matched) {
+				link.new_level();
+				own.reset();
+				own_life = 0;
+				walker.reset();
+				last_spawn_request_ns = 0;
+			}
+			net::Loading l;
+			l.round_id = m->round_id;
+			l.stage = 1;
+			if (config.stall_level != 0 && stats.levels >= config.stall_level) {
+				l.permille = 100;
+				link.submit(net::kChannelReliable, net::encode_loading(l), p_now);
+				stats.stalled = true;
+				return;
+			}
+			l.permille = 1000;
+			link.submit(net::kChannelReliable, net::encode_loading(l), p_now);
+			changing = false;
 			stats.matched = true;
 			deploy_screen = (m->rules_flags & net::rules_flags::kDeployScreen) != 0;
 			clock.start(m->server_tick, p_now, next_sequence);
 			link.submit(net::kChannelReliable, net::encode_ready({}), p_now);
+		}
+
+		void level_change(std::span<const uint8_t> p_bytes) {
+			core::Result<net::LevelChange> c = net::decode_level_change(p_bytes);
+			if (!c) {
+				++stats.decode_errors;
+				return;
+			}
+			++stats.reliable_messages;
+			if (c->round_id != change_round) {
+				change_round = c->round_id;
+				++stats.level_changes;
+			}
+			changing = true;
 		}
 
 		void snapshot(std::span<const uint8_t> p_bytes, uint64_t p_now) {
@@ -215,6 +261,9 @@ struct LoadBotFleet::Impl {
 				case net::MessageType::Snapshot:
 					snapshot(p_d.bytes, p_now);
 					return;
+				case net::MessageType::LevelChange:
+					level_change(p_d.bytes);
+					return;
 				case net::MessageType::SnapshotOthers:
 					if (const core::Result<net::SnapshotOthers> o =
 									net::decode_snapshot_others(p_d.bytes, &baselines)) {
@@ -239,6 +288,10 @@ struct LoadBotFleet::Impl {
 				case net::MessageType::Kick: {
 					core::Result<net::Kick> k = net::decode_kick(p_d.bytes);
 					stats.decode_errors += k ? 0u : 1u;
+					if (k) {
+						stats.kicked = true;
+						stats.kick_reason = k->code;
+					}
 					link.drop("kicked: " + (k ? k->reason : std::string("(bad kick)")));
 					return;
 				}
@@ -260,7 +313,7 @@ struct LoadBotFleet::Impl {
 		}
 
 		void command(uint64_t p_now) {
-			if (!stats.matched || !link.connected() || !clock.running() || !clock.due(p_now)) {
+			if (!stats.matched || changing || !link.connected() || !clock.running() || !clock.due(p_now)) {
 				return;
 			}
 			const sim::Tick c = clock.next_tick();
@@ -274,7 +327,8 @@ struct LoadBotFleet::Impl {
 		}
 
 		void request_spawn(uint64_t p_now) {
-			if (!stats.matched || !deploy_screen || !link.connected() || (own.has_value() && soldier_alive(*own))) {
+			if (!stats.matched || changing || !deploy_screen || !link.connected() ||
+					(own.has_value() && soldier_alive(*own))) {
 				return;
 			}
 			if (last_spawn_request_ns != 0 &&
@@ -464,6 +518,9 @@ LoadBotFleetStats LoadBotFleet::stats() const {
 		f.spawned += b.lives > 0 ? 1u : 0u;
 		f.disconnected += b.disconnected ? 1u : 0u;
 		f.refused += b.refused ? 1u : 0u;
+		f.stalled += b.stalled ? 1u : 0u;
+		f.kicked += b.kicked ? 1u : 0u;
+		f.level_changes = std::max(f.level_changes, b.level_changes);
 		f.snapshots += b.snapshots;
 		f.decode_errors += b.decode_errors;
 		f.bytes_in += b.bytes_in;

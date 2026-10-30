@@ -9,13 +9,20 @@
 #include "bf3/host/tdm_rules.h"
 #include "bf3/net/protocol.h"
 
+#include "bf3/host/load_bots.h"
+#include "bf3/host/server_host.h"
+#include "bf3/host/tick_clock.h"
+#include "bf3/net/loopback_ping.h"
+
 #include "gunplay_fixture.h"
+#include "pipe_transport.h"
 #include "tdm_fixture.h"
 #include "test_support.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <functional>
@@ -27,10 +34,27 @@
 #include <vector>
 
 using namespace bf3;
+using namespace std::chrono_literals;
 namespace tt = bf3::test::tdm;
 namespace tg = bf3::test::gunplay;
+namespace tp = bf3::test::pipe;
 
 namespace {
+
+class RacingClock final : public host::TickClock {
+public:
+	int64_t now_ns() override { return now_.load(std::memory_order_acquire); }
+
+	void sleep_until_ns(int64_t p_deadline_ns) override {
+		int64_t now = now_.load(std::memory_order_acquire);
+		while (now < p_deadline_ns && !now_.compare_exchange_weak(now, p_deadline_ns, std::memory_order_acq_rel)) {
+		}
+		std::this_thread::yield();
+	}
+
+private:
+	std::atomic<int64_t> now_{ 0 };
+};
 
 constexpr uint32_t kRoundTicks = 36000;
 constexpr uint32_t kIntermissionTicks = 6000;
@@ -607,6 +631,115 @@ TEST_SUITE("host-rotation") {
 		CHECK(one.stats().level_changes == 0u);
 		CHECK_FALSE(server.level_ended());
 		CHECK(server.rules()->stats().restarts == 1u);
+	}
+
+	TEST_CASE(
+			"ServerHost plays the rotation: after each tick its Rotation swaps the GameServer "
+			"(ServerHost::change_level) "
+			"while the net thread keeps the peers; two LoadBotFleet bots follow both level changes with a Loading and "
+			"a Ready on their slots, and a bot that stalls on level 2 is kicked LoadStalled (a 2 s limit)") {
+		tt::TdmLevel *level = tt::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const std::vector<std::string> names{ level->shared->level, level->shared->level + "-two",
+			level->shared->level + "-three" };
+		std::map<std::string, std::shared_ptr<const host::SharedLevel>> levels;
+		host::RotationConfig rc;
+		for (const std::string &n : names) {
+			levels[n] = n == names[0] ? level->shared : renamed(level->shared, n);
+			rc.maps.entries.push_back(host::LevelEntry{ n, level->shared->mode, 1 });
+		}
+		const auto config = [&](const std::string &p_name) {
+			host::GameServerConfig c = metro_config(levels.at(p_name), *level, true);
+			c.load.stall_s = 2.0f;
+			return std::make_shared<const host::GameServerConfig>(std::move(c));
+		};
+		const std::shared_ptr<const host::GameServerConfig> first = config(names[0]);
+		rc.first = first;
+		rc.intermission_override_s = 5.0f;
+		rc.load = [&](const host::LevelEntry &p_entry) -> core::Result<std::shared_ptr<const host::GameServerConfig>> {
+			return config(p_entry.level);
+		};
+		auto rotation = std::make_shared<host::Rotation>(rc);
+		auto pipe = std::make_shared<tp::Pipe>();
+		host::ServerConfig sc;
+		sc.game = first;
+		sc.transport = std::make_shared<tp::PipeServerPort>(pipe);
+		sc.clock = std::make_shared<RacingClock>();
+		sc.rotation = rotation;
+		host::ServerHost server;
+		std::string err;
+		REQUIRE_MESSAGE(server.start(sc, &err), err);
+
+		std::vector<std::unique_ptr<host::ClientTransport>> steady_links;
+		for (uint32_t i = 0; i < 2; ++i) {
+			pipe->connect(i);
+			steady_links.push_back(std::make_unique<tp::PipeClientTransport>(pipe, i));
+		}
+		pipe->connect(2);
+		std::vector<std::unique_ptr<host::ClientTransport>> stall_links;
+		stall_links.push_back(std::make_unique<tp::PipeClientTransport>(pipe, 2));
+		host::LoadBotFleetConfig fc;
+		fc.count = 2;
+		fc.bot.level = names[0];
+		fc.bot.mode = level->shared->mode;
+		host::LoadBotFleetConfig sfc = fc;
+		sfc.count = 1;
+		sfc.bot.name = "staller";
+		sfc.bot.stall_level = 2;
+		host::LoadBotFleet steady;
+		host::LoadBotFleet staller;
+		REQUIRE(steady.start(fc, std::move(steady_links), net::monotonic_ns).ok());
+		REQUIRE(staller.start(sfc, std::move(stall_links), net::monotonic_ns).ok());
+		REQUIRE(bf3::test::wait_until(
+				[&] { return steady.stats().matched == 2u && staller.stats().matched == 1u; }, 10s, 16ms));
+		const host::LoadBotFleetStats joined = steady.stats();
+		const bool done = bf3::test::wait_until(
+				[&] {
+					const host::LoadBotFleetStats f = steady.stats();
+					return f.bots.size() == 2u && f.bots[0].levels >= 3u && f.bots[1].levels >= 3u &&
+							staller.stats().kicked == 1u;
+				},
+				120s, 16ms);
+		const host::LoadBotFleetStats f = steady.stats();
+		const host::LoadBotFleetStats s = staller.stats();
+		const host::RotationStats rs = rotation->stats();
+		const host::ServerStats hs = server.stats();
+		const host::GameServerStats game = server.game_stats();
+		server.stop();
+		steady.stop();
+		staller.stop();
+		std::printf("server host rotation: %llu ticks, %llu level changes (host %llu), last load %.2f s, round id %u, "
+					"carried %u; steady levels %u and %u; staller levels %u, kicked %s\n",
+				(unsigned long long)hs.ticks, (unsigned long long)rs.level_changes,
+				(unsigned long long)hs.level_changes, rs.last_load_s, unsigned(rs.round_id),
+				unsigned(game.carried_seats), f.bots.at(0).levels, f.bots.at(1).levels, s.bots.at(0).levels,
+				s.bots.at(0).kicked ? host::kick_reason_name(s.bots.at(0).kick_reason) : "no");
+		REQUIRE(done);
+		CHECK(rs.level_changes >= 2u);
+		CHECK(hs.level_changes == rs.level_changes);
+		CHECK(rs.load_failures == 0u);
+		CHECK(hs.step_errors == 0u);
+		for (size_t i = 0; i < 2; ++i) {
+			CAPTURE(i);
+			const host::LoadBotStats &b = f.bots[i];
+			CHECK(b.slot == joined.bots[i].slot);
+			CHECK(b.level_changes >= 2u);
+			CHECK(b.round_id >= 2u);
+			CHECK(b.matched);
+			CHECK_FALSE(b.kicked);
+			CHECK_FALSE(b.disconnected);
+			CHECK_FALSE(b.stalled);
+			CHECK(b.decode_errors == 0u);
+		}
+		CHECK(game.carried_seats == 2u);
+		const host::LoadBotStats &st = s.bots.at(0);
+		CHECK(st.stalled);
+		CHECK(st.kicked);
+		CHECK(st.kick_reason == net::KickReason::LoadStalled);
+		CHECK(st.levels == 2u);
+		CHECK(st.disconnected);
 	}
 
 	TEST_CASE("intermission override: --intermission-s=5 restarts a 1-entry MapList in place 5.00 s after the round "
