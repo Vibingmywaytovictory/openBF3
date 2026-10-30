@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/core/ebx_db.h"
+#include "bf3/core/level/area_volume.h"
 #include "bf3/core/math.h"
 #include "bf3/core/result.h"
 
@@ -23,7 +24,6 @@ using LookVec3 = core::Vec3;
 using LookCubic = std::array<float, 4>;
 
 inline constexpr size_t kMaxVisualEnvironments = 64;
-inline constexpr size_t kMaxAreaPoints = 256;
 inline constexpr uint32_t kGradeLutSide = 32;
 inline constexpr uint32_t kHorizonWidth = 256;
 inline constexpr float kBounceAlbedo = 0.25f;
@@ -65,12 +65,7 @@ struct LookEnvState {
 struct LookArea {
 	std::string name;
 	int64_t priority = 0;
-	bool box = false;
-
-	std::vector<std::array<float, 2>> outline;
-	float floor = 0.0f, height = 0.0f;
-	std::array<LookVec3, 3> box_axes{};
-	LookVec3 box_center{}, box_half{};
+	core::level::AreaVolume volume;
 	float fade = 0.0f;
 	LookEnvState state;
 };

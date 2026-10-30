@@ -1177,4 +1177,17 @@ TEST_SUITE("audio-areas") {
 		check_points(*f, f->seine, "Seine", kSeinePoints);
 		check_unchanged_snapshot(f->before, f->reader);
 	}
+
+	TEST_CASE("prism: Height rises from the lowest point, the volume the look's areas measure") {
+		const std::array<Vec3, 4> uneven{ Vec3{ 0, 0, 0 }, Vec3{ 10, 2, 0 }, Vec3{ 10, 2, 10 }, Vec3{ 0, 0, 10 } };
+		gp::AreaDef a;
+		a.shape = gp::AreaVolume::prism(uneven, Vec3{ 0, 1, 0 }, 5.0f);
+		a.curve = gp::AreaFadeCurve::LinearAmplitude;
+		a.fade_width = 4.0f;
+		CHECK(a.proximity(Vec3{ 5, 4, 5 }, 1.0f) == 1.0f);
+		CHECK(a.proximity(Vec3{ 5, 7, 5 }, 1.0f) == doctest::Approx(0.5f));
+		CHECK(a.proximity(Vec3{ 5, -2, 5 }, 1.0f) == doctest::Approx(0.5f));
+		CHECK(a.proximity(Vec3{ 12, 4, 5 }, 1.0f) == doctest::Approx(0.5f));
+		CHECK(a.proximity(Vec3{ 5, 4, 5 }, 0.5f) == 0.5f);
+	}
 }

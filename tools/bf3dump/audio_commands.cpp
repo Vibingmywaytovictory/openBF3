@@ -354,17 +354,6 @@ std::string area_target(const gameplay::LogicGraph &p_graph, uint32_t p_node, in
 	return out.empty() ? "-" : out;
 }
 
-Vec3 shape_centre(const gameplay::AreaShape &p_shape) {
-	if (p_shape.kind == gameplay::AreaShape::Kind::Box) {
-		return p_shape.box.trans;
-	}
-	Vec3 c{};
-	for (const Vec3 &p : p_shape.polygon) {
-		c = vec::add(c, p);
-	}
-	return vec::scale(c, 1.0f / float(std::max<size_t>(1, p_shape.polygon.size())));
-}
-
 int cmd_audio_areas(
 		const InstallReader &p_reader, std::shared_ptr<Install> p_install, const std::vector<std::string> &p_args) {
 	if (p_args.size() < 2) {
@@ -415,11 +404,11 @@ int cmd_audio_areas(
 	}
 	if (list) {
 		for (const gameplay::AreaDef &a : data.areas) {
-			const Vec3 c = shape_centre(a.shape);
+			const Vec3 c = a.shape.centre();
 			std::printf(
 					"area %u %s %s centre=(%.2f, %.2f, %.2f) height=%.2f fade=%.2f curve=%d multiplier=%.3f -> %s\n",
 					a.node, std::string(gameplay::logic_type_info(a.type).ebx_type).c_str(),
-					a.shape.kind == gameplay::AreaShape::Kind::Box ? "box" : "prism", double(c.x), double(c.y),
+					a.shape.kind == gameplay::AreaVolume::Kind::Box ? "box" : "prism", double(c.x), double(c.y),
 					double(c.z), double(a.shape.height), double(a.fade_width), int(a.curve),
 					double(a.proximity_multiplier), area_target(g, a.node, a.out_port).c_str());
 		}

@@ -432,10 +432,9 @@ TEST_SUITE("render-look-unit") {
 
 	TEST_CASE("render.look.unit: area weights") {
 		LookArea box;
-		box.box = true;
-		box.box_axes = { LookVec3{ 1, 0, 0 }, LookVec3{ 0, 1, 0 }, LookVec3{ 0, 0, 1 } };
-		box.box_center = { 10, 0, 0 };
-		box.box_half = { 1, 1, 1 };
+		box.volume.kind = bf3::core::level::AreaVolume::Kind::Box;
+		box.volume.center = { 10, 0, 0 };
+		box.volume.half = { 1, 1, 1 };
 		box.fade = 2.0f;
 		CHECK(look_area_weight(box, { 10, 0, 0 }) == 1.0f);
 		CHECK(near(look_area_weight(box, { 12, 0, 0 }), 0.5f));
@@ -447,19 +446,27 @@ TEST_SUITE("render-look-unit") {
 		CHECK(look_area_weight(box, { 11.5f, 0, 0 }) == 0.0f);
 
 		LookArea poly;
-		poly.outline = { { 0, 0 }, { 10, 0 }, { 10, 10 }, { 0, 10 } };
-		poly.floor = 0.0f;
-		poly.height = 5.0f;
+		poly.volume.outline = { { 0, 0 }, { 10, 0 }, { 10, 10 }, { 0, 10 } };
+		poly.volume.floor = 0.0f;
+		poly.volume.height = 5.0f;
 		poly.fade = 4.0f;
 		CHECK(look_area_weight(poly, { 5, 2, 5 }) == 1.0f);
 		CHECK(near(look_area_weight(poly, { 5, 7, 5 }), 0.5f));
 		CHECK(near(look_area_weight(poly, { 12, 2, 5 }), 0.5f));
 		CHECK(look_area_weight(poly, { 30, 2, 5 }) == 0.0f);
 		CHECK(look_area_weight(poly, { nan, nan, nan }) == 0.0f);
-		poly.outline.resize(2);
+		poly.volume.outline.resize(2);
 		CHECK(look_area_weight(poly, { 5, 2, 5 }) == 0.0f);
-		poly.outline.clear();
+		poly.volume.outline.clear();
 		CHECK(look_area_weight(poly, { 5, 2, 5 }) == 0.0f);
+
+		const std::array<Vec3, 4> uneven{ Vec3{ 0, 0, 0 }, Vec3{ 10, 2, 0 }, Vec3{ 10, 2, 10 }, Vec3{ 0, 0, 10 } };
+		LookArea slope;
+		slope.volume = bf3::core::level::AreaVolume::prism(uneven, Vec3{ 0, 1, 0 }, 5.0f);
+		slope.fade = 4.0f;
+		CHECK(look_area_weight(slope, { 5, 4, 5 }) == 1.0f);
+		CHECK(near(look_area_weight(slope, { 5, 7, 5 }), 0.5f));
+		CHECK(near(look_area_weight(slope, { 12, 2, 5 }), 0.5f));
 	}
 
 	TEST_CASE("render.look.unit: look_frame base and area blend") {
@@ -477,9 +484,8 @@ TEST_SUITE("render-look-unit") {
 		env.base.min_exposure = 0.5f;
 		env.base.max_exposure = 4.0f;
 		LookArea area;
-		area.box = true;
-		area.box_axes = { LookVec3{ 1, 0, 0 }, LookVec3{ 0, 1, 0 }, LookVec3{ 0, 0, 1 } };
-		area.box_half = { 1, 1, 1 };
+		area.volume.kind = bf3::core::level::AreaVolume::Kind::Box;
+		area.volume.half = { 1, 1, 1 };
 		area.fade = 2.0f;
 		area.state.light = true;
 		area.state.sun_color = { 8.0f, 6.0f, 4.0f };
@@ -608,7 +614,8 @@ TEST_SUITE("render-look") {
 		std::printf("render.look environment: from_data %d, base %s, %zu areas, %zu LUTs, horizon decoded %d\n", int(env->from_data),
 				env->base.source.c_str(), env->areas.size(), env->luts.size(), int(env->base.horizon_decoded));
 		for (const LookArea &a : env->areas) {
-			std::printf("render.look area %s: priority %lld, %s, fade %.1f\n", a.name.c_str(), (long long)a.priority, a.box ? "box" : "polygon", double(a.fade));
+			std::printf("render.look area %s: priority %lld, %s, fade %.1f\n", a.name.c_str(), (long long)a.priority,
+					a.volume.kind == bf3::core::level::AreaVolume::Kind::Box ? "box" : "polygon", double(a.fade));
 		}
 		for (const std::string &note : env->notes) {
 			std::printf("render.look note: %s\n", note.c_str());

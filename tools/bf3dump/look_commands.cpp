@@ -272,12 +272,14 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 				env.base.gradient.c_str(), l1->sky_panorama, l1->sky_panorama_alpha, l1->sky_gradient);
 		frame_line("base", render::look_frame_of(env.base));
 		for (const render::LookArea &a : env.areas) {
-			std::printf("  area %s priority %lld %s fade %.1f m: %s\n", a.name.c_str(), (long long)a.priority, a.box ? "box" : "polygon",
-					double(a.fade), a.state.source.c_str());
-			if (a.box) {
-				std::printf("    box centre %s half %s\n", v3(a.box_center).c_str(), v3(a.box_half).c_str());
+			const bool box = a.volume.kind == bf3::core::level::AreaVolume::Kind::Box;
+			std::printf("  area %s priority %lld %s fade %.1f m: %s\n", a.name.c_str(), (long long)a.priority,
+					box ? "box" : "polygon", double(a.fade), a.state.source.c_str());
+			if (box) {
+				std::printf("    box centre %s half %s\n", v3(a.volume.center).c_str(), v3(a.volume.half).c_str());
 			} else {
-				std::printf("    polygon %zu points, floor %.2f height %.2f\n", a.outline.size(), double(a.floor), double(a.height));
+				std::printf("    polygon %zu points, floor %.2f height %.2f\n", a.volume.outline.size(),
+						double(a.volume.floor), double(a.volume.height));
 			}
 		}
 		for (size_t i = 0; i < env.luts.size(); ++i) {

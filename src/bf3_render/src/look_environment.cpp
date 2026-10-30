@@ -219,31 +219,12 @@ std::optional<LookArea> area_shape(const World &p_world, uint32_t p_scope, const
 	out.fade = std::clamp(number(p_proximity, "ProximityDistance").value_or(0.0f), 0.0f, 1000.0f);
 	if (polygon) {
 		const PlacedObject *placed = p_world.placed(p_scope, *polygon);
-		const LevelTransform t = placed != nullptr ? placed->transform : LevelTransform::identity();
-		const std::optional<EbxValue> points = polygon->get("Points");
-		if (points) {
-			size_t n = 0;
-			for (const EbxValue p : *points->as_array()) {
-				if (++n > kMaxAreaPoints) {
-					break;
-				}
-				const std::optional<core::Vec3> local = p.as_vec3();
-				if (!local || !finite(*local)) {
-					continue;
-				}
-				const LookVec3 world = t.transform_point(*local);
-				if (out.outline.empty()) {
-					out.floor = world[1];
-				}
-				out.floor = std::fmin(out.floor, world[1]);
-				out.outline.push_back({ world[0], world[2] });
-			}
-		}
-		out.height = std::clamp(number(*polygon, "Height").value_or(0.0f) * t.scale, 0.0f, 100000.0f);
-		if (out.outline.size() >= 3 && out.height > 0.0f) {
+		core::Result<core::level::AreaVolume> v = core::level::read_area_volume(
+				*polygon, placed != nullptr ? placed->transform : LevelTransform::identity());
+		if (v && v->height > 0.0f) {
+			out.volume = std::move(*v);
 			return out;
 		}
-		out.outline.clear();
 	}
 	if (box) {
 		const PlacedObject *placed = p_world.placed(p_scope, *box);
@@ -253,21 +234,11 @@ std::optional<LookArea> area_shape(const World &p_world, uint32_t p_scope, const
 		} else if (const std::optional<EbxValue> rows = box->get("Transform"); rows && rows->as_transform()) {
 			t = LevelTransform::from_rows(*rows->as_transform());
 		}
-		const std::optional<LookVec3> half = vec3(*box, "HalfExtents");
-		if (!half || !((*half)[0] > 0.0f && (*half)[1] > 0.0f && (*half)[2] > 0.0f)) {
+		core::Result<core::level::AreaVolume> v = core::level::read_area_volume(*box, t);
+		if (!v || !(v->half[0] > 0.0f && v->half[1] > 0.0f && v->half[2] > 0.0f)) {
 			return std::nullopt;
 		}
-		out.box = true;
-		out.box_center = t.trans;
-		const LookVec3 axes[3] = { t.right, t.up, t.forward };
-		for (size_t a = 0; a < 3; ++a) {
-			const float len = std::sqrt(axes[a][0] * axes[a][0] + axes[a][1] * axes[a][1] + axes[a][2] * axes[a][2]);
-			if (!(len > 1e-6f) || !std::isfinite(len)) {
-				return std::nullopt;
-			}
-			out.box_axes[a] = scaled(axes[a], 1.0f / len);
-			out.box_half[a] = (*half)[a] * len * t.scale;
-		}
+		out.volume = std::move(*v);
 		return out;
 	}
 	return std::nullopt;
@@ -345,29 +316,6 @@ std::vector<uint8_t> grade_cube_of(const core::LevelMount &p_mount, const std::s
 		std::copy_n(m.data.data() + r * pitch, row, out.data() + r * row);
 	}
 	return out;
-}
-
-bool point_in_polygon(const std::vector<std::array<float, 2>> &p_outline, float p_x, float p_z) {
-	bool inside = false;
-	for (size_t i = 0, j = p_outline.size() - 1; i < p_outline.size(); j = i++) {
-		const auto &a = p_outline[i], &b = p_outline[j];
-		if ((a[1] > p_z) != (b[1] > p_z)) {
-			const float x = (b[0] - a[0]) * (p_z - a[1]) / (b[1] - a[1]) + a[0];
-			if (p_x < x) {
-				inside = !inside;
-			}
-		}
-	}
-	return inside;
-}
-
-float segment_distance(const std::array<float, 2> &p_a, const std::array<float, 2> &p_b, float p_x, float p_z) {
-	const float dx = p_b[0] - p_a[0], dz = p_b[1] - p_a[1];
-	const float len2 = dx * dx + dz * dz;
-	float t = len2 > 0.0f ? ((p_x - p_a[0]) * dx + (p_z - p_a[1]) * dz) / len2 : 0.0f;
-	t = std::clamp(t, 0.0f, 1.0f);
-	const float ex = p_a[0] + dx * t - p_x, ez = p_a[1] + dz * t - p_z;
-	return std::sqrt(ex * ex + ez * ez);
 }
 
 void blend_state(LookEnvState &r_state, const LookEnvState &p_a, float p_w) {
@@ -726,41 +674,8 @@ void decode_look_textures(const core::LevelMount &p_mount, LookEnvironment &r_en
 }
 
 float look_area_weight(const LookArea &p_area, const LookVec3 &p_position) {
-	if (!finite(p_position)) {
-		return 0.0f;
-	}
-	float distance = 0.0f;
-	if (p_area.box) {
-		const LookVec3 d = { p_position[0] - p_area.box_center[0], p_position[1] - p_area.box_center[1], p_position[2] - p_area.box_center[2] };
-		float sum = 0.0f;
-		for (size_t a = 0; a < 3; ++a) {
-			const LookVec3 &axis = p_area.box_axes[a];
-			const float local = d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2];
-			const float out = std::fmax(std::fabs(local) - p_area.box_half[a], 0.0f);
-			sum += out * out;
-		}
-		distance = std::sqrt(sum);
-	} else {
-		if (p_area.outline.size() < 3) {
-			return 0.0f;
-		}
-		float horizontal = 0.0f;
-		if (!point_in_polygon(p_area.outline, p_position[0], p_position[2])) {
-			horizontal = INFINITY;
-			for (size_t i = 0, j = p_area.outline.size() - 1; i < p_area.outline.size(); j = i++) {
-				horizontal = std::fmin(horizontal, segment_distance(p_area.outline[j], p_area.outline[i], p_position[0], p_position[2]));
-			}
-		}
-		const float vertical = std::fmax(std::fmax(p_area.floor - p_position[1], p_position[1] - (p_area.floor + p_area.height)), 0.0f);
-		distance = std::sqrt(horizontal * horizontal + vertical * vertical);
-	}
-	if (!(distance > 0.0f)) {
-		return std::isfinite(distance) ? 1.0f : 0.0f;
-	}
-	if (!(p_area.fade > 0.0f) || !std::isfinite(distance)) {
-		return 0.0f;
-	}
-	return std::fmax(0.0f, 1.0f - distance / p_area.fade);
+	return core::level::area_fade(
+			core::level::AreaFadeCurve::LinearAmplitude, p_area.volume.distance(p_position), p_area.fade);
 }
 
 LookFrame look_frame_of(const LookEnvState &p_s) {
