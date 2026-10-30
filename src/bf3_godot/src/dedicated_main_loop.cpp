@@ -104,6 +104,7 @@ bool DedicatedMainLoop::parse_args(std::string &r_error) {
 	a.port_file = user_arg_value("port-file");
 	u32_arg("port", 0.0, 65535.0, a.port, r_error);
 	u32_arg("stop-after-kills", 0.0, 100000.0, a.stop_after_kills, r_error);
+	u32_arg("stop-after-levels", 0.0, 1000.0, a.stop_after_levels, r_error);
 	seconds_arg("intermission-s", 0.0, 3600.0, a.intermission_s, r_error);
 	seconds_arg("load-stall-s", 1.0, 3600.0, a.load_stall_s, r_error);
 	if (has_user_arg("dedicated-seconds")) {
@@ -327,8 +328,12 @@ bool DedicatedMainLoop::_process(double p_delta) {
 	elapsed_ += p_delta;
 	report_timer_ += p_delta;
 	const bool kills_due = args_.stop_after_kills > 0;
-	if (report_timer_ >= 1.0 || kills_due) {
+	const bool levels_due = args_.stop_after_levels > 0;
+	bool levels_played = false;
+	if (report_timer_ >= 1.0 || kills_due || levels_due) {
 		const host::ServerSessionStats stats = session_->stats();
+		levels_played = levels_due && stats.rotation.level_changes + 1u >= args_.stop_after_levels &&
+				!stats.rotation.changing && stats.game.clients == 0;
 		kills_ = stats.kills;
 		stuck_ = stats.stuck_bots;
 		private_bytes_ = stats.private_bytes;
@@ -340,6 +345,10 @@ bool DedicatedMainLoop::_process(double p_delta) {
 	}
 	if (kills_due && kills_ >= int32_t(args_.stop_after_kills)) {
 		stopped_by_ = "--stop-after-kills";
+		return true;
+	}
+	if (levels_played) {
+		stopped_by_ = "--stop-after-levels";
 		return true;
 	}
 	if (args_.run_seconds > 0.0 && elapsed_ >= args_.run_seconds) {

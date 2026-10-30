@@ -165,6 +165,7 @@ struct LoadBotFleet::Impl {
 					return;
 				}
 			}
+			stats.slot_changes += checked && m->slot != stats.slot ? 1u : 0u;
 			checked = true;
 			stats.slot = m->slot;
 			if (m->phase == net::MatchPhase::LevelChange) {
@@ -176,6 +177,7 @@ struct LoadBotFleet::Impl {
 			}
 			stats.round_id = m->round_id;
 			++stats.levels;
+			stats.level_snapshots = 0;
 			if (stats.matched) {
 				link.new_level();
 				own.reset();
@@ -223,9 +225,10 @@ struct LoadBotFleet::Impl {
 			}
 			baselines.keep(s->seq, s->server_tick, s->own, s->own_weapons, s->others);
 			++stats.snapshots;
-			if (!stats.matched) {
+			if (!stats.matched || changing) {
 				return;
 			}
+			++stats.level_snapshots;
 			clock.rtt_sample(*s, p_now, next_sequence);
 			if (link.arrive(s->seq) != SnapshotOrder::Newest) {
 				return;

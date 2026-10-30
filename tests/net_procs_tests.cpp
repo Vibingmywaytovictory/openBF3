@@ -10,6 +10,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -45,10 +46,12 @@ struct Server {
 	uint16_t port = 0;
 };
 
-std::optional<Server> start_server(ProcDriver &r_driver, uint32_t p_bots, uint32_t p_seconds) {
-	const ChildSpec spec = r_driver.godot_child("server", { "--headless", "--main-loop", "DedicatedMainLoop" },
-			{ "--level=" + std::string(kLevel), "--mode=" + std::string(kMode), "--bots=" + std::to_string(p_bots),
-					"--preround=0", "--dedicated-seconds=" + std::to_string(p_seconds) });
+std::optional<Server> start_server(ProcDriver &r_driver, uint32_t p_bots, uint32_t p_seconds,
+		std::vector<std::string> p_args = { "--level=" + std::string(kLevel), "--mode=" + std::string(kMode) }) {
+	p_args.insert(p_args.end(),
+			{ "--bots=" + std::to_string(p_bots), "--preround=0", "--dedicated-seconds=" + std::to_string(p_seconds) });
+	const ChildSpec spec =
+			r_driver.godot_child("server", { "--headless", "--main-loop", "DedicatedMainLoop" }, std::move(p_args));
 	if (const std::string why = r_driver.skip_reason(spec); !why.empty()) {
 		bf3::test::skip_install_case(why.c_str());
 		return std::nullopt;
@@ -337,5 +340,101 @@ TEST_SUITE("net-procs-two-clients") {
 							  << from_bravo << " of bravo's (" << from_bravo_owned << " with bravo's own seed)\n"
 							  << alpha_summary << "\n"
 							  << bravo_summary);
+	}
+}
+
+namespace {
+
+double level_change_load_s(std::string_view p_line) {
+	const size_t at = p_line.find("loaded in ");
+	if (at == std::string_view::npos) {
+		return -1.0;
+	}
+	const std::string tail(p_line.substr(at + 10));
+	return std::strtod(tail.c_str(), nullptr);
+}
+
+}
+
+TEST_SUITE("net-procs-rotation") {
+	TEST_CASE("a dedicated server walks MP_Subway, MP_011, MP_003 and back to MP_Subway with two loadbots processes: "
+			  "the one that stalls on level 2 is kicked LoadStalled, the other follows every change on its slot, and "
+			  "the warm return to MP_Subway loads in 2 s or less") {
+		ProcDriver driver(driver_config_from_env());
+		const std::filesystem::path maplist = driver.roots("server").dir / L"maplist.cfg";
+		std::error_code ec;
+		std::filesystem::create_directories(maplist.parent_path(), ec);
+		{
+			std::ofstream out(maplist, std::ios::binary);
+			out << "MP_Subway TeamDeathMatch0 1\nMP_011 TeamDeathMatch0 1\nMP_003 TeamDeathMatch0 1\n";
+		}
+		const std::optional<Server> server = start_server(driver, 8, 1700,
+				{ "--maplist=" + path_utf8(maplist), "--kill-limit=5", "--intermission-s=5", "--load-stall-s=5",
+						"--stop-after-levels=4" });
+		if (!server) {
+			return;
+		}
+		const std::string at = "127.0.0.1:" + std::to_string(server->port);
+		const std::optional<size_t> steady_started = start_tool(driver, "steady",
+				{ "loadbots", at, std::string(kLevel), std::string(kMode), "--count=1", "--levels=4", "--name=steady",
+						"--seconds=1650" });
+		const std::optional<size_t> staller_started = start_tool(driver, "staller",
+				{ "loadbots", at, std::string(kLevel), std::string(kMode), "--count=1", "--stall-level=2",
+						"--name=staller", "--seconds=1650" });
+		if (!steady_started || !staller_started) {
+			return;
+		}
+		const size_t steady = *steady_started;
+		const size_t staller = *staller_started;
+		std::string staller_summary;
+		CHECK_MESSAGE(
+				line_starts(driver, staller, "loadbots: summary", 1200s, &staller_summary), driver.output(staller));
+		const ChildEnd staller_end = driver.finish(staller, 30s);
+		std::string steady_summary;
+		CHECK_MESSAGE(line_starts(driver, steady, "loadbots: summary", 1500s, &steady_summary), driver.output(steady));
+		const ChildEnd steady_end = driver.finish(steady, 30s);
+		std::string server_summary;
+		CHECK(driver.wait_line(
+				server->id, [](std::string_view l) { return contains(l, "[dedicated] summary: "); }, 300s,
+				&server_summary));
+		const ChildEnd server_end = driver.finish(server->id, 60s);
+		require_clean_exit(driver, staller, staller_end, "staller");
+		require_clean_exit(driver, steady, steady_end, "steady");
+		require_clean_exit(driver, server->id, server_end, "server");
+
+		const std::string staller_out = driver.output(staller);
+		const std::string steady_out = driver.output(steady);
+		const std::string server_out = driver.output(server->id);
+		CHECK(contains(staller_out, "levels 2, level changes 1, slot changes 0, round 1, stalled, kicked LoadStalled"));
+		CHECK(contains(staller_summary, "stalled 1, kicked 1"));
+		CHECK(contains(steady_out, "levels 4, level changes 3, slot changes 0, round 3"));
+		CHECK(contains(steady_summary, "decode errors 0, disconnected 0, refused 0"));
+		CHECK(contains(steady_summary, "level changes 3, stalled 0, kicked 0"));
+		std::vector<std::string> changes;
+		std::istringstream lines(server_out);
+		for (std::string line; std::getline(lines, line);) {
+			if (contains(line, "[dedicated] level change ")) {
+				changes.push_back(line);
+			}
+		}
+		REQUIRE(changes.size() >= 3u);
+		CHECK(contains(changes[0], "level change 1: MP_011 TeamDeathMatch0 round 1,"));
+		CHECK(contains(changes[0], "carried 2 clients"));
+		CHECK(contains(changes[1], "level change 2: MP_003 TeamDeathMatch0 round 2,"));
+		CHECK(contains(changes[1], "carried 1 clients"));
+		CHECK(contains(changes[2], "level change 3: MP_Subway TeamDeathMatch0 round 3,"));
+		CHECK(contains(changes[2], "carried 1 clients"));
+		const double warm_s = level_change_load_s(changes[2]);
+		CHECK(warm_s >= 0.0);
+		CHECK(warm_s <= 2.0);
+		CHECK(contains(server_out, "LoadStalled=1"));
+		CHECK(contains(server_summary, "install unchanged"));
+		CHECK(contains(server_summary, "stopped by --stop-after-levels"));
+		MESSAGE(changes[0] << "\n"
+						   << changes[1] << "\n"
+						   << changes[2] << "\n"
+						   << staller_summary << "\n"
+						   << steady_summary << "\n"
+						   << server_summary);
 	}
 }

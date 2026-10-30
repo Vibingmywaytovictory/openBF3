@@ -68,6 +68,7 @@ struct NetArgs {
 	uint32_t kit = 0;
 	uint32_t count = 1;
 	uint32_t stall_level = 0;
+	uint32_t levels = 0;
 	uint32_t threads = 0;
 	uint32_t seed = 1;
 };
@@ -136,6 +137,8 @@ std::string parse_net_args(const std::vector<std::string> &p_args, bool p_client
 			ok = ok &&
 					core::parse_u32_value(value, 1.0, double(net::kMaxSlots), r_args.count).fault ==
 							core::KeyFault::None;
+		} else if (!p_client && key == "--levels") {
+			ok = ok && core::parse_u32_value(value, 1.0, 1000.0, r_args.levels).fault == core::KeyFault::None;
 		} else if (!p_client && key == "--stall-level") {
 			ok = ok && core::parse_u32_value(value, 0.0, 1000.0, r_args.stall_level).fault == core::KeyFault::None;
 		} else {
@@ -223,7 +226,7 @@ const char *net_usage() {
 		   "[--motor-tuning=<cfg>]\n"
 		   "      [--name=N] [--kit=K] [--seed=N] [--threads=N]\n"
 		   "  loadbots <host:port> <LEVEL> <MODE> [--count=N] [--seconds=S] [--netsim=<profile>] [--build-override=N]\n"
-		   "      [--name=N] [--kit=K] [--seed=N] [--stall-level=N]\n";
+		   "      [--name=N] [--kit=K] [--seed=N] [--stall-level=N] [--levels=N]\n";
 }
 
 int cmd_client(const core::InstallReader &p_reader, const std::shared_ptr<core::Install> &p_install,
@@ -441,6 +444,13 @@ int cmd_loadbots(const std::vector<std::string> &p_args) {
 		if (f.disconnected + f.refused == a.count) {
 			break;
 		}
+		if (a.levels > 0 && f.bots.size() == a.count &&
+				std::all_of(f.bots.begin(), f.bots.end(), [&](const host::LoadBotStats &b) {
+					return b.disconnected || b.refused ||
+							(b.levels >= a.levels && b.matched && b.level_snapshots >= 60);
+				})) {
+			break;
+		}
 		if (std::chrono::steady_clock::now() - last_status >= 1s) {
 			last_status = std::chrono::steady_clock::now();
 			say(core::fmt("loadbots: t=%.1f s matched %u spawned %u snapshots %llu decode errors %llu disconnected %u "
@@ -460,13 +470,13 @@ int cmd_loadbots(const std::vector<std::string> &p_args) {
 		say(core::fmt(
 				"loadbot %zu: slot %u, lives %u, snapshots %llu (lost %llu), others %llu, shots %llu, combat %llu, "
 				"reliable %llu, decode errors %llu, commands %llu, spawn requests %llu, max walk %.1f m, in %.0f B/s, "
-				"out %.0f B/s, levels %u, level changes %u, round %u%s%s%s%s%s",
+				"out %.0f B/s, levels %u, level changes %u, slot changes %u, round %u%s%s%s%s%s",
 				i, unsigned(b.slot), b.lives, (unsigned long long)b.snapshots, (unsigned long long)b.snapshots_lost,
 				(unsigned long long)b.snapshot_others, (unsigned long long)b.shot_events,
 				(unsigned long long)b.combat_events, (unsigned long long)b.reliable_messages,
 				(unsigned long long)b.decode_errors, (unsigned long long)b.commands_sent,
 				(unsigned long long)b.spawn_requests, double(b.max_walk_m), s > 0.0 ? double(b.bytes_in) / s : 0.0,
-				s > 0.0 ? double(b.bytes_out) / s : 0.0, b.levels, b.level_changes, b.round_id,
+				s > 0.0 ? double(b.bytes_out) / s : 0.0, b.levels, b.level_changes, b.slot_changes, b.round_id,
 				b.stalled ? ", stalled" : "", b.kicked ? ", kicked " : "",
 				b.kicked ? host::kick_reason_name(b.kick_reason) : "", b.disconnected ? ", disconnected" : "",
 				error.empty() ? "" : ": ", error.c_str()));

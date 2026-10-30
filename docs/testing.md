@@ -119,8 +119,9 @@ Dev preset, a row measured alone on a quiet machine; asan is about 10x.
 * M3's long rows, each as long as its gate: `godot.rotation` (a dedicated server and two clients over three levels,
   each round end keeping the data's 60 s intermission, about 8 min), `godot.level_change` (the same three levels in a
   listen game), `net.procs.scale32` and `net.procs.scale64` (the processes' start-up plus 120 s of 32 and 64 real
-  connections, timing); `godot.audio_ingame` and `godot.deploy` run as phase rows (`--audio-ingame-phase`, the deploy
-  phases), each phase within 120 s.
+  connections, timing), `net.procs.rotation` (a dedicated server over four map-list levels, MP_011 and MP_003
+  loaded cold on a fresh cache root, with two loadbots processes, timing); `godot.audio_ingame` and `godot.deploy`
+  run as phase rows (`--audio-ingame-phase`, the deploy phases), each phase within 120 s.
 * Asan: a row over 600 s gets `asan_sweep`. Its full tier runs at acceptance for branches touching what it links,
   and on the latest main after merges.
 

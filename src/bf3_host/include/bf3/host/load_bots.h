@@ -62,6 +62,8 @@ struct LoadBotStats {
 	uint8_t slot = 0;
 	uint32_t levels = 0;
 	uint32_t level_changes = 0;
+	uint32_t slot_changes = 0;
+	uint64_t level_snapshots = 0;
 	uint32_t round_id = 0;
 	uint32_t lives = 0;
 	uint64_t datagrams_in = 0;
