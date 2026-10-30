@@ -4,6 +4,7 @@
 #include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/thread_pool.h"
 #include "bf3/core/util/percentile.h"
+#include "bf3/host/ai_bot_source.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/server_view.h"
 #include "bf3/host/tdm_brain.h"
@@ -39,8 +40,8 @@ constexpr bool kRuNtLanded = true;
 
 constexpr float kDeg = sim::kPi / 180.0f;
 
-constexpr uint64_t kReplayDecisionHash = 0x500050e8936e1f85ull;
-constexpr uint64_t kReplayWorldHash = 0xb7b6075c34795409ull;
+constexpr uint64_t kReplayDecisionHash = 0x28711c0a9174859bull;
+constexpr uint64_t kReplayWorldHash = 0x37ad02897a79e6b8ull;
 
 void pending_skip(const char *p_row) {
 	std::printf("%s: PENDING (ru, nt): needs run_tdm and the v3 codecs on the branch\n", p_row);
@@ -389,6 +390,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(parsed.aim.skill_scale == def.aim.skill_scale);
 		CHECK(parsed.revive_radius_m == def.revive_radius_m);
 		CHECK(parsed.regen_until_hp == def.regen_until_hp);
+		CHECK(parsed.behaviours == def.behaviours);
 
 		host::TdmBotConfig one;
 		REQUIRE(host::parse_bot_tuning("# c\n  aim.e0_deg = 2.5 # trailing\n\nperception.update_ticks=3\n", one).ok());
@@ -396,10 +398,14 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(one.perception.update_ticks == 3);
 		CHECK(one.aim.e_inf_deg == def.aim.e_inf_deg);
 		CHECK(host::parse_bot_tuning("ai.max_bots = 12\nai.enable_vehicle_ai = true\nskill_min = 0.3\n", one).ok());
+		REQUIRE(host::parse_bot_tuning("bb.random.weight = 2.5\nbb.decision_ticks = 3\n", one).ok());
+		CHECK(one.behaviours.curves[size_t(ai::InfantryBehaviour::Random)].weight == doctest::Approx(2.5f));
+		CHECK(one.behaviours.decision_ticks == 3u);
 
 		for (const char *bad : { "nope = 1\n", "skill_min = nan\n", "skill_min = 2\n", "skill_min\n",
 					 "skill_min = 1x\n", "perception.update_ticks = 0\n", "aim.tau_s = 1e40\n", "count = 65\n", "= 3\n",
-					 "ai.nope = 1\n", "ai.max_bots = 65\n", "ai.enable_air_ai = 1\n" }) {
+					 "ai.nope = 1\n", "ai.max_bots = 65\n", "ai.enable_air_ai = 1\n", "bb.nope = 1\n",
+					 "bb.decision_ticks = 0\n", "bb.idle.weight = -1\n" }) {
 			host::TdmBotConfig c;
 			c.skill_min = 0.42f;
 			const core::Status r = host::parse_bot_tuning(bad, c);
@@ -435,7 +441,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		core::Result<std::shared_ptr<host::TdmShared>> shared = host::make_tdm_shared(h, cfg);
 		REQUIRE(shared.ok());
 		CHECK(cfg->stats->walk_unavailable.load() == 1u);
-		host::TdmBrain brain(*shared, 0);
+		host::AiBotSource brain(*shared, 0);
 		brain.set_slot(0);
 
 		view.restricted = true;
@@ -476,7 +482,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		auto cfg2 = std::make_shared<host::TdmBotConfig>();
 		core::Result<std::shared_ptr<host::TdmShared>> shared2 = host::make_tdm_shared(h, cfg2);
 		REQUIRE(shared2.ok());
-		host::TdmBrain a(*shared2, 0), b(*host::make_tdm_shared(h, cfg2), 0);
+		host::AiBotSource a(*shared2, 0), b(*host::make_tdm_shared(h, cfg2), 0);
 		a.set_slot(0);
 		b.set_slot(0);
 		view.slots[0] = soldier_at({ 0, 0, 0 }, 0.0f);
@@ -629,6 +635,8 @@ namespace {
 					"aborts %llu, retreats %llu, reloads %llu, sidearm %llu, knife %llu, walker resets %llu, heat goals %llu, heard %llu, hunts given up %llu, off-main bot-ticks %llu\n",
 				p_row, v(s.walk_unavailable), v(s.retargets), v(s.bursts), v(s.blind_fire), v(s.grenades), v(s.revive_attempts), v(s.revive_shots),
 				v(s.revive_aborts), v(s.retreats), v(s.reloads), v(s.sidearm_switches), v(s.knife_attacks), v(s.walker_resets), v(s.heat_goals), v(s.heard), v(s.hunts_given_up), v(s.off_main_ticks));
+		std::printf("%s: brain: %llu of %llu bots on AiBotSource, %llu decisions, %llu of them on a sense change\n",
+				p_row, v(s.bf2_bots), v(s.bots), v(s.decisions), v(s.unplanned_decisions));
 	}
 }
 

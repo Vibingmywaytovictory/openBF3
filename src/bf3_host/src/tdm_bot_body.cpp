@@ -131,11 +131,6 @@ BotFrame BotBody::sense_revive(
 		shot_recent, arms, revive };
 }
 
-BotFrame BotBody::sense(sim::Tick p_tick, const sim::SoldierState &p_state, const ServerView &p_view) {
-	const Sighting sighting = see(p_tick, p_state, p_view.states());
-	return sense_revive(p_tick, p_state, p_view, sighting);
-}
-
 BotIntent BotBody::begin_plan(TdmBotActivity p_activity) {
 	BotIntent i;
 	i.want_yaw = view_yaw;
@@ -257,11 +252,6 @@ void BotBody::hunt_step(const BotFrame &p_frame, BotIntent &r_intent) {
 	walk_facing(p_frame, r_intent);
 }
 
-void BotBody::wait_in_cover(const BotFrame &p_frame, BotIntent &r_intent) {
-	crouch(r_intent);
-	face_threat(p_frame, r_intent);
-}
-
 void BotBody::crouch(BotIntent &r_intent) {
 	r_intent.pose = sim::Pose::Crouch;
 }
@@ -271,15 +261,10 @@ void BotBody::face_threat(const BotFrame &p_frame, BotIntent &r_intent) {
 			yaw_of(retreat.threat()[0] - p_frame.self.position[0], retreat.threat()[2] - p_frame.self.position[2]);
 }
 
-void BotBody::fight(const BotFrame &p_frame, BotIntent &r_intent) {
-	if (!p_frame.visible) {
-		aim_blind(p_frame, r_intent);
-		trigger_blind(r_intent);
-		return;
-	}
-	aim_target(p_frame, r_intent);
-	trigger_target(p_frame, r_intent);
-	move_fight(p_frame, r_intent);
+void BotBody::look_around(const BotFrame &p_frame, BotIntent &r_intent) {
+	r_intent.walk_yaw = look.look(p_frame.tick, awareness.perception(), view_yaw, rng);
+	r_intent.want_yaw = r_intent.walk_yaw;
+	r_intent.sprint = r_intent.walk_sprint;
 }
 
 void BotBody::aim_blind(const BotFrame &p_frame, BotIntent &r_intent) {
@@ -367,14 +352,6 @@ void BotBody::move_fight(const BotFrame &p_frame, BotIntent &r_intent) {
 	} else {
 		strafe.step(c, slot, f.tick, f.world, f.self, view_yaw, rng, i.move_dx, i.move_dz);
 	}
-}
-
-void BotBody::approach_revive(const BotFrame &p_frame, BotIntent &r_intent) {
-	if (!revive_approach(p_frame, r_intent)) {
-		return;
-	}
-	revive_pose(p_frame, r_intent);
-	revive_trigger(p_frame, r_intent);
 }
 
 bool BotBody::revive_approach(const BotFrame &p_frame, BotIntent &r_intent) {

@@ -98,7 +98,6 @@ struct BotBody {
 	Sighting see(sim::Tick p_tick, const sim::SoldierState &p_state, std::span<const sim::SoldierState> p_states);
 	BotFrame sense_revive(
 			sim::Tick p_tick, const sim::SoldierState &p_state, const ServerView &p_view, const Sighting &p_sighting);
-	BotFrame sense(sim::Tick p_tick, const sim::SoldierState &p_state, const ServerView &p_view);
 
 	BotIntent begin_plan(TdmBotActivity p_activity);
 	void face_shots(const BotFrame &p_frame, TdmBotActivity p_activity, BotIntent &r_intent);
@@ -110,18 +109,16 @@ struct BotBody {
 	void walk_facing(const BotFrame &p_frame, BotIntent &r_intent);
 	void roam(const BotFrame &p_frame, BotIntent &r_intent);
 	void hunt_step(const BotFrame &p_frame, BotIntent &r_intent);
-	void wait_in_cover(const BotFrame &p_frame, BotIntent &r_intent);
 	void crouch(BotIntent &r_intent);
 	void face_threat(const BotFrame &p_frame, BotIntent &r_intent);
+	void look_around(const BotFrame &p_frame, BotIntent &r_intent);
 
-	void fight(const BotFrame &p_frame, BotIntent &r_intent);
 	void aim_blind(const BotFrame &p_frame, BotIntent &r_intent);
 	void trigger_blind(BotIntent &r_intent);
 	void aim_target(const BotFrame &p_frame, BotIntent &r_intent);
 	void trigger_target(const BotFrame &p_frame, BotIntent &r_intent);
 	void move_fight(const BotFrame &p_frame, BotIntent &r_intent);
 
-	void approach_revive(const BotFrame &p_frame, BotIntent &r_intent);
 	bool revive_approach(const BotFrame &p_frame, BotIntent &r_intent);
 	void revive_pose(const BotFrame &p_frame, BotIntent &r_intent);
 	void revive_trigger(const BotFrame &p_frame, BotIntent &r_intent);

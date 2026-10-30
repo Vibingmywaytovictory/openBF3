@@ -1,8 +1,10 @@
 #include "bf3/host/tdm_brain.h"
 
+#include "bf3/ai/behaviour/behaviours.h"
 #include "bf3/ai/main/ai_settings.h"
 #include "bf3/core/util/finite.h"
 #include "bf3/core/util/key_values.h"
+#include "bf3/host/ai_bot_source.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
@@ -16,7 +18,6 @@
 #include "bf3/sim/weapons/weapon_input.h"
 #include "bf3/sim/weapons/weapon_rng.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"
-#include "tdm_bot_body.h"
 #include "tdm_bot_common.h"
 #include "tdm_bot_shared.h"
 
@@ -59,143 +60,6 @@ const char *tdm_bot_activity_name(TdmBotActivity p_activity) {
 			return "grenade";
 	}
 	return "?";
-}
-
-struct TdmBrain::Impl : BotBody {
-	sim::Command command(sim::Tick p_tick, const sim::SoldierState &p_state) {
-		TdmShared &sh = *shared;
-		const uint64_t t0 = now_ns();
-		sh.begin_tick(p_tick);
-		sim::Command c = run(p_tick, p_state);
-		sh.brains_ns += now_ns() - t0;
-		if (sh.stats != nullptr) {
-			sh.stats->last_perception_ns.store(sh.perception_ns, std::memory_order_relaxed);
-			sh.stats->last_brains_ns.store(sh.brains_ns, std::memory_order_relaxed);
-		}
-		if (sh.observer != nullptr) {
-			sh.observer->commanded(p_tick, slot, activity, c);
-		}
-		return c;
-	}
-
-	sim::Command run(sim::Tick p_tick, const sim::SoldierState &p_state) {
-		TdmShared &sh = *shared;
-		sim::Command cmd = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
-		cmd.flags = 0;
-		if (slot == 0xFF || !is_alive(p_state)) {
-			targeting.drop();
-			set_activity(p_tick, TdmBotActivity::Dead);
-			return cmd;
-		}
-		if (p_state.life != life) {
-			new_life(p_tick, p_state);
-		}
-		const ServerView &view = *sh.host.view;
-		if (view.input_restricted() || view.phase() != net::MatchPhase::InRound) {
-			restricted(p_tick, cmd);
-			return cmd;
-		}
-		const BotFrame frame = sense(p_tick, p_state, view);
-		const TdmBotActivity act = choose_activity(frame);
-		set_activity(p_tick, act);
-
-		BotIntent intent = plan(frame, act);
-		const bool aligned = turn(frame, intent);
-		compose(frame, act, intent, aligned, cmd);
-		return cmd;
-	}
-
-	TdmBotActivity choose_activity(const BotFrame &p_frame) {
-		TdmShared &sh = *shared;
-		const TdmBotConfig &c = cfg();
-		const BotFrame &f = p_frame;
-		if (activity == TdmBotActivity::Retreat || activity == TdmBotActivity::RegenWait) {
-			if (retreat.recovered(c, activity == TdmBotActivity::RegenWait, f.tick, f.self.health)) {
-				activity = TdmBotActivity::Roam;
-			}
-		}
-		const bool low = f.self.health < c.retreat_below_hp;
-		TdmBotActivity act = TdmBotActivity::Roam;
-		if (f.revive != nullptr) {
-			act = TdmBotActivity::Revive;
-		} else if (grenade.active()) {
-			act = TdmBotActivity::Grenade;
-		} else if (activity == TdmBotActivity::Retreat && !f.visible && retreat.cleared(f.tick)) {
-			act = TdmBotActivity::RegenWait;
-			retreat.begin_wait(f.tick);
-		} else if (activity == TdmBotActivity::Retreat && retreat.running(f.tick) && low) {
-			act = TdmBotActivity::Retreat;
-		} else if (activity == TdmBotActivity::RegenWait && !f.visible && !f.shot_recent) {
-			act = TdmBotActivity::RegenWait;
-		} else if (low && (f.visible || f.shot_recent) && sh.nav != nullptr && activity != TdmBotActivity::Retreat && activity != TdmBotActivity::RegenWait &&
-				retreat.start(sh, navigation, f.tick, f.self, f.visible ? f.states[size_t(f.target)].position : awareness.shot_from(), rng)) {
-			act = TdmBotActivity::Retreat;
-		} else if (f.visible) {
-			act = TdmBotActivity::Fight;
-		} else if (grenade.start(sh, targeting, awareness.perception(), f.tick, f.self, f.states, f.arms.rounds(kSlotGrenade) > 0)) {
-			act = TdmBotActivity::Grenade;
-		} else if (targeting.blind_until() > f.tick) {
-			act = TdmBotActivity::Fight;
-		} else {
-			act = hunt.wanted(f.tick, awareness.perception(), f.self) ? TdmBotActivity::Hunt : TdmBotActivity::Roam;
-		}
-		if (act == TdmBotActivity::Retreat && f.visible) {
-			retreat.seen(f.tick);
-		}
-		if (act == TdmBotActivity::Hunt && activity != TdmBotActivity::Hunt) {
-			hunt.begin(f.tick);
-		}
-		return act;
-	}
-
-	BotIntent plan(const BotFrame &p_frame, TdmBotActivity p_activity) {
-		const BotFrame &f = p_frame;
-		BotIntent i = begin_plan(p_activity);
-		switch (p_activity) {
-			case TdmBotActivity::Fight:
-				fight(f, i);
-				break;
-			case TdmBotActivity::Revive:
-				approach_revive(f, i);
-				break;
-			case TdmBotActivity::Retreat:
-				walk_facing(f, i);
-				break;
-			case TdmBotActivity::RegenWait:
-				wait_in_cover(f, i);
-				break;
-			case TdmBotActivity::Grenade:
-				throw_step(f, i);
-				break;
-			case TdmBotActivity::Hunt:
-				hunt_step(f, i);
-				break;
-			case TdmBotActivity::Roam:
-			default:
-				roam(f, i);
-				break;
-		}
-		face_shots(f, p_activity, i);
-		return i;
-	}
-};
-
-TdmBrain::TdmBrain(std::shared_ptr<TdmShared> p_shared, uint32_t p_index) :
-		impl_(std::make_unique<Impl>()) {
-	impl_->attach(std::move(p_shared), p_index);
-}
-
-TdmBrain::~TdmBrain() = default;
-
-sim::Command TdmBrain::command(sim::Tick p_tick, const sim::SoldierState &p_state) {
-	if (impl_->shared == nullptr) {
-		return sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
-	}
-	return impl_->command(p_tick, p_state);
-}
-
-void TdmBrain::set_slot(uint8_t p_slot) {
-	impl_->BotBody::set_slot(p_slot);
 }
 
 namespace {
@@ -334,7 +198,10 @@ std::string bot_fault(const core::KeyFaultInfo &p_info) {
 	}
 }
 
-core::KeyOutcome ai_setting(std::string_view p_key, std::string_view p_value, TdmBotConfig &) {
+core::KeyOutcome ai_setting(std::string_view p_key, std::string_view p_value, TdmBotConfig &r_config) {
+	if (ai::is_behaviour_key(p_key)) {
+		return ai::parse_behaviour_setting(p_key, p_value, r_config.behaviours);
+	}
 	return ai::check_ai_setting(p_key, p_value);
 }
 
@@ -426,8 +293,8 @@ core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config
 	}
 	const uint32_t count = std::min(config->count, free_below);
 	for (uint32_t i = 0; i < count; ++i) {
-		auto brain = std::make_unique<TdmBrain>(shared, i);
-		TdmBrain *raw = brain.get();
+		auto brain = std::make_unique<AiBotSource>(shared, i);
+		AiBotSource *raw = brain.get();
 
 		const int team = host.rules ? 0 : 1 + int((i + i / 4u) % 2u);
 		const int slot = r_server.add_local_bot(std::move(brain), team);

@@ -5,6 +5,7 @@
 #include "bf3/audio/voice_cull.h"
 #include "bf3/core/audio/hdr_setting.h"
 #include "bf3/core/audio/sound_scope.h"
+#include "bf3/host/ai_bot_source.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/gunplay.h"
@@ -68,7 +69,7 @@ static_assert(std::is_trivially_copyable_v<sim::MotorParams>);
 static_assert(std::is_trivially_copyable_v<sim::FriendlyDeath>);
 static_assert(std::is_abstract_v<host::ServerView>);
 static_assert(std::is_base_of_v<host::RespawnPolicy, host::TdmRules> && std::is_base_of_v<host::CombatEventSink, host::TdmRules>);
-static_assert(std::is_base_of_v<host::CommandSource, host::TdmBrain>);
+static_assert(std::is_base_of_v<host::CommandSource, host::AiBotSource>);
 static_assert(std::tuple_size_v<decltype(host::PresentationFrame::players)> == net::kMaxPlayerRows);
 
 using M = sl::NativePortMeaning;

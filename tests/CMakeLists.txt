@@ -1174,8 +1174,10 @@ add_test(NAME ai.world.install COMMAND test_ai_world --test-suite=ai-world-insta
 set_tests_properties(ai.world.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 openbf3_cost(ai.world.install 2 15)
 
-openbf3_test(test_ai_bot test_main.cpp ai_bot_tests.cpp)
-target_link_libraries(test_ai_bot PRIVATE bf3_ai)
+openbf3_test(test_ai_bot test_main.cpp ai_bot_tests.cpp gunplay_fixture.h test_support.h)
+target_link_libraries(test_ai_bot PRIVATE bf3_host)
+target_compile_definitions(test_ai_bot PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""
+    "OPENBF3_MECHANICS_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/weapon_mechanics.cfg\"")
 add_test(NAME ai.bot.unit COMMAND test_ai_bot --test-suite=ai-bot)
 set_tests_properties(ai.bot.unit PROPERTIES TIMEOUT 60 LABELS "unit")
 

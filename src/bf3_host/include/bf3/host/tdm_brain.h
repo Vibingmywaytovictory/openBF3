@@ -1,5 +1,7 @@
 #pragma once
 
+#include "bf3/ai/behaviour/behaviours.h"
+#include "bf3/ai/bot/infantry.h"
 #include "bf3/core/result.h"
 #include "bf3/host/game_server.h"
 #include "bf3/sim/bots/aim_model.h"
@@ -40,10 +42,17 @@ public:
 	virtual void commanded(sim::Tick p_tick, uint8_t p_bot, TdmBotActivity p_activity, const sim::Command &p_command) {
 		(void)p_tick, (void)p_bot, (void)p_activity, (void)p_command;
 	}
+	virtual void decided(
+			sim::Tick p_tick, uint8_t p_bot, ai::InfantryBehaviour p_winner, ai::InfantryActivity p_activity) {
+		(void)p_tick, (void)p_bot, (void)p_winner, (void)p_activity;
+	}
 };
 
 struct TdmBotStats {
 	std::atomic<uint32_t> bots{ 0 };
+	std::atomic<uint32_t> bf2_bots{ 0 };
+	std::atomic<uint64_t> decisions{ 0 };
+	std::atomic<uint64_t> unplanned_decisions{ 0 };
 	std::atomic<uint64_t> perception_updates{ 0 };
 	std::atomic<uint64_t> rays{ 0 };
 	std::atomic<uint64_t> detections{ 0 };
@@ -105,6 +114,8 @@ struct TdmBotConfig {
 	float regen_wait_s = 15.0f;
 	float regen_until_hp = 90.0f;
 
+	ai::BehaviourTuning behaviours;
+
 	std::string tuning_cfg;
 	std::shared_ptr<TdmBotStats> stats;
 	std::shared_ptr<TdmBotObserver> observer;
@@ -116,18 +127,6 @@ core::Status parse_bot_tuning(std::string_view p_text, TdmBotConfig &r_config);
 core::Status load_bot_tuning(const std::string &p_path, TdmBotConfig &r_config);
 
 struct TdmShared;
-
-class TdmBrain final : public CommandSource {
-public:
-	TdmBrain(std::shared_ptr<TdmShared> p_shared, uint32_t p_index);
-	~TdmBrain() override;
-	sim::Command command(sim::Tick p_tick, const sim::SoldierState &p_state) override;
-	void set_slot(uint8_t p_slot);
-
-private:
-	struct Impl;
-	std::unique_ptr<Impl> impl_;
-};
 
 core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config);
 

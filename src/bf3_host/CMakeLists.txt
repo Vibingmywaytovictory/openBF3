@@ -222,4 +222,6 @@ target_sources(bf3_host PRIVATE
 target_sources(bf3_host PRIVATE
     src/tdm_bot_body.h
     src/tdm_bot_body.cpp
+    include/bf3/host/ai_bot_source.h
+    src/ai_bot_source.cpp
 )

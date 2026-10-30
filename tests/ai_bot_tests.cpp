@@ -4,6 +4,12 @@
 #include "bf3/ai/bot/bot_main.h"
 #include "bf3/ai/plan/infantry_entries.h"
 #include "bf3/ai/plan/plan_entries.h"
+#include "bf3/host/ai_bot_source.h"
+#include "bf3/host/game_server.h"
+#include "bf3/host/server_view.h"
+#include "bf3/host/tdm_brain.h"
+
+#include "gunplay_fixture.h"
 
 #include <algorithm>
 #include <array>
@@ -385,5 +391,59 @@ TEST_SUITE("ai-bot") {
 		CHECK(script.execute(nullptr));
 		CHECK(body.calls == std::vector<std::string>{ "sense 0", "trigger 0", "move_to_object 0", "move_to 2" });
 		CHECK(script.done_steps() == 3u);
+	}
+
+	TEST_CASE("add_tdm_bots gives every bot an AiBotSource, and every activity is its last decision's winner") {
+		struct DecisionCheck final : host::TdmBotObserver {
+			std::array<InfantryActivity, 64> last{};
+			std::array<bool, 64> seen{};
+			uint64_t decisions = 0, activities = 0, mismatches = 0, undecided = 0, fights = 0;
+			void decided(sim::Tick, uint8_t p_bot, InfantryBehaviour p_winner, InfantryActivity p_activity) override {
+				last[p_bot] = p_activity;
+				seen[p_bot] = true;
+				++decisions;
+				fights += p_winner == InfantryBehaviour::FireInfantery ? 1u : 0u;
+			}
+			void activity(sim::Tick, uint8_t p_bot, host::TdmBotActivity p_activity) override {
+				if (p_activity == host::TdmBotActivity::Dead || p_activity == host::TdmBotActivity::Restricted) {
+					return;
+				}
+				++activities;
+				if (!seen[p_bot]) {
+					++undecided;
+				} else if (host::tdm_activity(last[p_bot]) != p_activity) {
+					++mismatches;
+				}
+			}
+		};
+		const std::shared_ptr<const host::SharedLevel> level = bf3::test::gunplay::synthetic_floor();
+		REQUIRE(level != nullptr);
+		host::GameServer server;
+		host::GameServerConfig cfg;
+		cfg.level = level;
+		cfg.max_slots = 16;
+		auto bots = std::make_shared<host::TdmBotConfig>();
+		bots->count = 8;
+		bots->stats = std::make_shared<host::TdmBotStats>();
+		auto check = std::make_shared<DecisionCheck>();
+		bots->observer = check;
+		cfg.tdm_bots = bots;
+		REQUIRE(server.init(cfg).ok());
+		CHECK(bots->stats->bots.load() == 8u);
+		CHECK(bots->stats->bf2_bots.load() == 8u);
+		std::vector<host::OutDatagram> out;
+		for (int i = 0; i < 600; ++i) {
+			out.clear();
+			server.tick(out);
+		}
+		CHECK(check->activities > 8u * 500u);
+		CHECK(check->undecided == 0u);
+		CHECK(check->mismatches == 0u);
+		CHECK(check->fights > 0u);
+		CHECK(check->decisions == bots->stats->decisions.load());
+		CHECK(check->decisions < check->activities / 3u);
+		CHECK(bots->stats->unplanned_decisions.load() < check->decisions);
+		MESSAGE("8 bots, 600 ticks: " << check->decisions << " decisions (" << bots->stats->unplanned_decisions.load()
+									  << " on a sense change) over " << check->activities << " bot-ticks");
 	}
 }
