@@ -28,19 +28,9 @@ namespace {
 
 constexpr size_t kSlots = 64;
 constexpr float kMedianMetres = 20.0f;
-constexpr float kNearMetres = 30.0f;
 constexpr double kNearShare = 0.70;
 constexpr double kReachShare = 0.90;
 constexpr sim::Tick kReachTicks = 60 * 60;
-
-bool alive(const sim::SoldierState *p_state) {
-	return p_state != nullptr && (p_state->flags & sim::soldier_flags::kAlive) != 0;
-}
-
-float metres(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
-	const float dx = p_a[0] - p_b[0], dy = p_a[1] - p_b[1], dz = p_a[2] - p_b[2];
-	return std::sqrt(dx * dx + dy * dy + dz * dz);
-}
 
 struct ActivityLog final : host::TdmBotObserver {
 	std::array<host::TdmBotActivity, kSlots> activity{};
@@ -112,25 +102,25 @@ Cohesion run_cohesion(const tt::TdmLevel &p_level, uint64_t p_seed) {
 				}
 				const uint8_t leader = members.front();
 				const sim::SoldierState *lead = r_server.soldier(leader);
-				if (!alive(lead)) {
+				if (!tt::is_alive(lead)) {
 					continue;
 				}
 				if (origin_life[leader] != lead->life + 1u) {
 					origin_life[leader] = lead->life + 1u;
 					origin[leader] = lead->position;
 				}
-				if (metres(lead->position, origin[leader]) <= kNearMetres) {
+				if (tt::distance(lead->position, origin[leader]) <= host::kSquadNearMetres) {
 					continue;
 				}
 				for (size_t i = 1; i < members.size(); ++i) {
 					const sim::SoldierState *member = r_server.soldier(members[i]);
-					if (!alive(member) || log->activity[members[i]] == host::TdmBotActivity::Fight) {
+					if (!tt::is_alive(member) || log->activity[members[i]] == host::TdmBotActivity::Fight) {
 						continue;
 					}
-					const float d = metres(member->position, lead->position);
+					const float d = tt::distance(member->position, lead->position);
 					out.distances.push_back(d);
 					++out.samples;
-					out.near += d <= kNearMetres ? 1u : 0u;
+					out.near += d <= host::kSquadNearMetres ? 1u : 0u;
 				}
 			}
 		}
@@ -160,7 +150,7 @@ struct UrgencyLog final : host::TdmBotObserver {
 	}
 	void urgencies(sim::Tick, uint8_t p_bot, const ai::BotMain &p_bot_main) override {
 		if (p_bot >= kSlots || !holding[p_bot] || activity[p_bot] == host::TdmBotActivity::Fight ||
-				metres(position[p_bot], target[p_bot]) < far_m) {
+				tt::distance(position[p_bot], target[p_bot]) < far_m) {
 			return;
 		}
 		const float move_to = p_bot_main.weighted_urgency(ai::InfantryBehaviour::MoveTo);
@@ -216,9 +206,9 @@ Orders run_orders(const tt::TdmLevel &p_level, uint64_t p_seed, float p_arrive_m
 			}
 			const sim::SoldierState *s = r_server.soldier(m.slot);
 			const host::SquadOrderState &now = squads.order(m.team, m.squad);
-			if (!alive(s) || s->life != m.life || squads.squad_of(m.slot) != m.squad) {
+			if (!tt::is_alive(s) || s->life != m.life || squads.squad_of(m.slot) != m.squad) {
 				m.died = true;
-			} else if (metres(s->position, m.order.position) <= p_arrive_m) {
+			} else if (tt::distance(s->position, m.order.position) <= p_arrive_m) {
 				m.reached = true;
 			} else if (now.kind != net::SquadOrderKind::None && !same_order(now, m.order)) {
 				m.superseded = true;
@@ -247,7 +237,7 @@ Orders run_orders(const tt::TdmLevel &p_level, uint64_t p_seed, float p_arrive_m
 				const std::span<const uint8_t> members = squads.members(team, q);
 				for (size_t i = 1; i < members.size(); ++i) {
 					const sim::SoldierState *s = r_server.soldier(members[i]);
-					if (!alive(s)) {
+					if (!tt::is_alive(s)) {
 						continue;
 					}
 					Mission m;
@@ -294,8 +284,8 @@ TEST_SUITE("host-tdm-squads") {
 						"median %.1f m to the leader, %.1f %% within %.0f m; spawns %llu, on a squad mate %llu; kills "
 						"%d / %d in %u ticks\n",
 					i + 1, run.bots, run.unsquadded, run.oversized, (unsigned long long)run.samples, median,
-					100.0 * near, kNearMetres, (unsigned long long)run.spawns, (unsigned long long)run.squad_spawns,
-					run.result.kills[1], run.result.kills[2], run.result.ticks);
+					100.0 * near, host::kSquadNearMetres, (unsigned long long)run.spawns,
+					(unsigned long long)run.squad_spawns, run.result.kills[1], run.result.kills[2], run.result.ticks);
 			CHECK(run.result.failure.empty());
 			CHECK(run.result.round_over);
 			CHECK(run.bots == 32u);

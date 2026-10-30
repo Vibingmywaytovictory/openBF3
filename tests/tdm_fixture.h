@@ -15,6 +15,7 @@
 #include "bf3/sim/sim_types.h"
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -35,6 +36,15 @@ struct TdmLevel {
 	std::filesystem::path cache_root;
 	double seconds_load = 0;
 };
+
+inline bool is_alive(const sim::SoldierState *p_state) {
+	return p_state != nullptr && (p_state->flags & sim::soldier_flags::kAlive) != 0;
+}
+
+inline float distance(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
+	const float dx = p_a[0] - p_b[0], dy = p_a[1] - p_b[1], dz = p_a[2] - p_b[2];
+	return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
 
 TdmLevel *load_tdm_level_once();
 

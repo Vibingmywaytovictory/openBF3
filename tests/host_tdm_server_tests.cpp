@@ -42,14 +42,8 @@ constexpr uint64_t kM2aKitHash = 0x31b45dc7cc3f4271ull;
 constexpr uint64_t kM2aWeaponHash = 0xb8fd23d8ccfc4c63ull;
 constexpr uint64_t kM2aMotorHash = 0x6d75dd5f51d95090ull;
 
-bool is_alive(const sim::SoldierState *p_state) {
-	return p_state != nullptr && (p_state->flags & sim::soldier_flags::kAlive) != 0;
-}
-
-float distance(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
-	const float dx = p_a[0] - p_b[0], dy = p_a[1] - p_b[1], dz = p_a[2] - p_b[2];
-	return std::sqrt(dx * dx + dy * dy + dz * dz);
-}
+using tdm::distance;
+using tdm::is_alive;
 
 sim::Vec3 add(const sim::Vec3 &p_a, float p_x, float p_y, float p_z) {
 	return { p_a[0] + p_x, p_a[1] + p_y, p_a[2] + p_z };
