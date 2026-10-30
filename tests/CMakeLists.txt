@@ -974,7 +974,7 @@ openbf3_cost(host.logic.ghost 1 10)
 openbf3_cost(host.rotation 1 11)
 openbf3_cost(host.tdm.perf 1 20)
 if(OPENBF3_ASAN)
-    set_tests_properties(host.tdm.bots.unit host.tdm.round host.tdm.bots host.tdm.replay host.tdm.perf host.server.stream host.client.stream PROPERTIES TIMEOUT 1800)
+    set_tests_properties(host.tdm.bots.unit host.tdm.round host.tdm.bots host.tdm.replay host.tdm.squads host.tdm.orders host.tdm.hold host.tdm.pace host.tdm.perf host.server.stream host.client.stream PROPERTIES TIMEOUT 1800)
 endif()
 
 openbf3_test(test_m2b_contract2 test_main.cpp m2b_contract2_tests.cpp test_support.h)
