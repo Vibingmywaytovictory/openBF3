@@ -509,14 +509,14 @@ TEST_SUITE("ai-port") {
 		CHECK(walk->target_id() == PlanTarget::MoveToDirection);
 		CHECK(walk->execute(nullptr, nullptr, first, second));
 		CHECK(create_plan_entry("EntryCarMoveToDirection", settings) == nullptr);
-		CHECK(create_plan_entry("EntryInfanteryMoveTo", settings) == nullptr);
+		CHECK(create_plan_entry("EntryInfanteryMoveTo", settings)->target_id() == PlanTarget::MoveTo);
 		CHECK(create_plan_entry("EntryHeliMoveTo", settings) == nullptr);
 		CHECK(plan_entry_kinds().size() == 42);
 		size_t bodies = 0;
 		for (const PlanEntryKind &kind : plan_entry_kinds()) {
 			bodies += kind.has_body ? 1 : 0;
 		}
-		CHECK(bodies == 2);
+		CHECK(bodies == 7);
 		CHECK(find_plan_entry_kind("EntryHeliMoveAwayFromObject")->target == PlanTarget::MoveAwayFromObject);
 		CHECK(find_plan_entry_kind("EntryPlaneAimAt")->domain == AiDomain::Air);
 		settings.enable_vehicle_ai = true;

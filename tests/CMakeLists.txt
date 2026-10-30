@@ -1174,6 +1174,11 @@ add_test(NAME ai.world.install COMMAND test_ai_world --test-suite=ai-world-insta
 set_tests_properties(ai.world.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 openbf3_cost(ai.world.install 2 15)
 
+openbf3_test(test_ai_bot test_main.cpp ai_bot_tests.cpp)
+target_link_libraries(test_ai_bot PRIVATE bf3_ai)
+add_test(NAME ai.bot.unit COMMAND test_ai_bot --test-suite=ai-bot)
+set_tests_properties(ai.bot.unit PROPERTIES TIMEOUT 60 LABELS "unit")
+
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     get_property(_openbf3_asan_rows DIRECTORY PROPERTY TESTS)

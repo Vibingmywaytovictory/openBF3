@@ -94,3 +94,13 @@ target_sources(bf3_ai PRIVATE
     src/strategic/strategic_area.cpp
     src/strategic/sai.cpp
 )
+
+target_sources(bf3_ai PRIVATE
+    include/bf3/ai/bot/infantry.h
+    include/bf3/ai/bot/bot_main.h
+    include/bf3/ai/behaviour/behaviours.h
+    include/bf3/ai/plan/infantry_entries.h
+    src/bot/bot_main.cpp
+    src/behaviour/behaviours.cpp
+    src/plan/infantry_entries.cpp
+)

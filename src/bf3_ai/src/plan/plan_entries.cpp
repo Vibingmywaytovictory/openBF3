@@ -1,5 +1,7 @@
 #include "bf3/ai/plan/plan_entries.h"
 
+#include "bf3/ai/plan/infantry_entries.h"
+
 #include <algorithm>
 
 namespace bf3::ai {
@@ -28,17 +30,17 @@ constexpr PlanEntryKind kKinds[] = {
 	{ "EntryBoatMoveToObject", T::MoveToObject, D::Vehicle },
 	{ "EntryBoatMoveToDirection", T::MoveToDirection, D::Vehicle },
 	{ "EntryBoatResetControls", T::ResetControls, D::Vehicle },
-	{ "EntryInfanteryMoveTo", T::MoveTo, D::Infantry },
-	{ "EntryInfanteryMoveToObject", T::MoveToObject, D::Infantry },
+	{ "EntryInfanteryMoveTo", T::MoveTo, D::Infantry, true },
+	{ "EntryInfanteryMoveToObject", T::MoveToObject, D::Infantry, true },
 	{ "EntryInfanteryMoveToDirection", T::MoveToDirection, D::Infantry, true },
 	{ "EntryInfanteryResetControls", T::ResetControls, D::Infantry },
-	{ "EntryTrigger", T::Trigger, D::Any },
+	{ "EntryTrigger", T::Trigger, D::Any, true },
 	{ "EntryTriggerContinously", T::TriggerContinously, D::Any },
 	{ "EntryKeyTurretAimAt", T::AimAt, D::Vehicle },
 	{ "EntryMouseTurretAimAt", T::AimAt, D::Vehicle },
 	{ "EntryMouseTurretLookAt", T::LookAt, D::Vehicle },
-	{ "EntrySense", T::Sense, D::Any },
-	{ "EntrySoldierPose", T::SoldierPose, D::Infantry },
+	{ "EntrySense", T::Sense, D::Any, true },
+	{ "EntrySoldierPose", T::SoldierPose, D::Infantry, true },
 	{ "EntryMoveToMedium", T::MoveTo, D::Any },
 	{ "EntryMoveToMediumBoat", T::MoveTo, D::Vehicle },
 	{ "EntryMoveToMediumSoldier", T::MoveTo, D::Infantry },
@@ -85,7 +87,7 @@ std::unique_ptr<BAPEntry> create_plan_entry(std::string_view p_name, const AiSet
 	if (kind->name == "EntryCarMoveToDirection") {
 		return std::make_unique<EntryCarMoveToDirection>();
 	}
-	return nullptr;
+	return create_infantry_entry(kind->name);
 }
 
 }
