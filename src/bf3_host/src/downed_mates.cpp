@@ -28,6 +28,22 @@ void DownedMates::on_phase(net::MatchPhase p_phase) {
 	}
 }
 
+void DownedMates::note_position(uint8_t p_slot, float p_x, float p_z) {
+	if (p_slot < position_.size()) {
+		position_[p_slot] = { p_x, p_z };
+		seen_[p_slot] = true;
+	}
+}
+
+bool DownedMates::last_position(uint8_t p_slot, float &r_x, float &r_z) const {
+	if (p_slot >= position_.size() || !seen_[p_slot]) {
+		return false;
+	}
+	r_x = position_[p_slot][0];
+	r_z = position_[p_slot][1];
+	return true;
+}
+
 std::vector<uint8_t> DownedMates::downed(
 		uint64_t p_now_tick, uint8_t p_own_team, uint8_t p_own_slot, std::span<const net::PlayerRow> p_players) const {
 	std::vector<uint8_t> out;

@@ -316,6 +316,24 @@ TEST_SUITE("ui-hud-feed-unit") {
 		CHECK(d.revive_until(2) == 0);
 	}
 
+	TEST_CASE("downed team-mates: a mate keeps its last presented position after its ghost is removed") {
+		host::DownedMates d;
+		float x = 0.0f;
+		float z = 0.0f;
+		CHECK_FALSE(d.last_position(2, x, z));
+		d.note_position(2, 10.0f, -4.0f);
+		d.note_position(2, 12.5f, -3.0f);
+		REQUIRE(d.last_position(2, x, z));
+		CHECK(x == 12.5f);
+		CHECK(z == -3.0f);
+		CHECK_FALSE(d.last_position(3, x, z));
+		CHECK_FALSE(d.last_position(200, x, z));
+		d.note_position(200, 1.0f, 1.0f);
+		d.on_phase(net::MatchPhase::InRound);
+		d.on_phase(net::MatchPhase::RoundOver);
+		CHECK_FALSE(d.last_position(2, x, z));
+	}
+
 TEST_CASE("static rows from the table and its defs") {
 	const SyntheticKit k = synthetic_kit();
 	const host::HudStatic st = synthetic_static(k);

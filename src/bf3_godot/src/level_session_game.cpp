@@ -1263,15 +1263,17 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			g.downed.on_phase(f.match.phase);
 		}
 		g.downed.on_events(g.events);
+		for (size_t i = 0; i < hud_other_count; ++i) {
+			g.downed.note_position(hud_others[i].slot, hud_others[i].position.x, hud_others[i].position.z);
+		}
 		std::vector<NativeHudDownedMate> mates;
 		if (f.valid) {
 			for (const uint8_t slot : g.downed.downed(f.newest_tick, f.own_team, g.own_slot,
 						 std::span<const bf3::net::PlayerRow>(f.players.data(), f.player_count))) {
-				for (size_t i = 0; i < hud_other_count; ++i) {
-					if (hud_others[i].slot == slot) {
-						mates.push_back(
-								NativeHudDownedMate{ slot, hud_others[i].position.x, hud_others[i].position.z });
-					}
+				float x = 0.0f;
+				float z = 0.0f;
+				if (g.downed.last_position(slot, x, z)) {
+					mates.push_back(NativeHudDownedMate{ slot, x, z });
 				}
 			}
 		}
