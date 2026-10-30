@@ -45,9 +45,9 @@ struct StreamHashes {
 	uint64_t stats = 0;
 };
 
-constexpr StreamHashes kAlpha{ 0x101f5905f0348a25ull, 0x578f0b05895f2699ull, 0x2c9843318f710131ull,
+constexpr StreamHashes kAlpha{ 0x101f5905f0348a25ull, 0xefd67e09f7bb00edull, 0x2c9843318f710131ull,
 	0xcdb13e85acf5381full, 0x0e9496ef2c9c54bcull, 0x886abeef5c35b468ull };
-constexpr StreamHashes kBravo{ 0xe57237c71eca27f1ull, 0xa65d621e862a0149ull, 0x1a6287a6010432c7ull,
+constexpr StreamHashes kBravo{ 0xe57237c71eca27f1ull, 0xcf94ef69141293a9ull, 0x1a6287a6010432c7ull,
 	0x6023815d8393ab0dull, 0x4f656e9e0e4e609bull, 0x86b4be344f995583ull };
 constexpr StreamHashes kCharlie{ 0x28d0d02de2b48fb8ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull,
 	0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0xd4bbb61a31c1220aull };

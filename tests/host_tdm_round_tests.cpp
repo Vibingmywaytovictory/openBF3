@@ -668,8 +668,24 @@ TEST_SUITE("host-tdm-round") {
 			sim::Tick unspawn_seen = 0;
 			sim::Tick restart_seen = 0;
 			sim::Tick restart_announced = 0;
+			sim::Tick first_tick = 0;
+			std::optional<int32_t> score_at_start, score_after_restart;
 			c.on_tick = [&](sim::Tick p_tick, host::GameServer &r_server, tt::ScriptedPeer *p_peer) {
 				if (const host::TdmRules *rules = r_server.rules(); rules != nullptr) {
+					const auto all_scores = [&] {
+						int32_t sum = 0;
+						for (const net::PlayerRow &row : rules->players()) {
+							sum += row.score;
+						}
+						return sum;
+					};
+					first_tick = first_tick == 0 ? p_tick : first_tick;
+					if (!score_at_start && p_tick >= first_tick + 2u) {
+						score_at_start = all_scores();
+					}
+					if (!score_after_restart && restart_seen != 0 && p_tick >= restart_seen + 2u) {
+						score_after_restart = all_scores();
+					}
 					if (unspawn_seen == 0 && rules->match_state().unspawn_tick != 0) {
 						unspawn_seen = rules->match_state().unspawn_tick;
 						restart_announced = rules->match_state().restart_tick;
@@ -706,6 +722,12 @@ TEST_SUITE("host-tdm-round") {
 				return;
 			}
 			tt::apply_bot_checks(*checks, *r);
+			REQUIRE(score_at_start.has_value());
+			REQUIRE(score_after_restart.has_value());
+			std::printf("host.tdm.round: scores %d two ticks into the round, %d two ticks after the restart\n",
+					*score_at_start, *score_after_restart);
+			CHECK(*score_at_start == 0);
+			CHECK(*score_after_restart == 0);
 			print_result("host.tdm.round", *r);
 			print_checks("host.tdm.round", *checks, false);
 			CHECK(r->failure.empty());

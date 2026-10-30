@@ -1336,7 +1336,9 @@ bool TdmRules::take_squad_spawn(
 	const sim::SoldierState &st = p_live[size_t(mate)];
 	r_position = m.squad_spawn_point(st.position);
 	r_yaw = st.yaw;
-	m.slots[size_t(mate)].score += m.tuning->score_spawn_squad;
+	if (phase == lg::RoundPhase::InRound) {
+		m.slots[size_t(mate)].score += m.tuning->score_spawn_squad;
+	}
 	++m.stats.squad_spawns;
 	return true;
 }
