@@ -31,6 +31,8 @@ constexpr float kMedianMetres = 20.0f;
 constexpr double kNearShare = 0.70;
 constexpr double kReachShare = 0.90;
 constexpr sim::Tick kReachTicks = 60 * 60;
+constexpr uint32_t kHoldSettledTicks = 60;
+constexpr float kHoldStillMps = 0.5f;
 
 struct ActivityLog final : host::TdmBotObserver {
 	std::array<host::TdmBotActivity, kSlots> activity{};
@@ -263,6 +265,72 @@ Orders run_orders(const tt::TdmLevel &p_level, uint64_t p_seed, float p_arrive_m
 	return out;
 }
 
+struct HoldLog final : host::TdmBotObserver {
+	std::array<bool, kSlots> holding{};
+	std::array<uint32_t, kSlots> held_for{};
+	uint64_t hold_ticks = 0, hold_moving = 0;
+
+	void urgencies(sim::Tick, uint8_t p_bot, const ai::BotMain &p_bot_main) override {
+		if (p_bot < kSlots) {
+			const auto &move_to =
+					static_cast<const ai::BBMoveTo &>(p_bot_main.behaviour_of(ai::InfantryBehaviour::MoveTo));
+			holding[p_bot] = p_bot_main.behaviour() == ai::InfantryBehaviour::MoveTo && move_to.holding();
+		}
+	}
+	void commanded(sim::Tick, uint8_t p_bot, host::TdmBotActivity p_activity, const sim::Command &p_command) override {
+		if (p_bot >= kSlots) {
+			return;
+		}
+		if (!holding[p_bot] || p_activity == host::TdmBotActivity::Dead ||
+				p_activity == host::TdmBotActivity::Restricted) {
+			held_for[p_bot] = 0;
+			return;
+		}
+		++held_for[p_bot];
+		++hold_ticks;
+		hold_moving += p_command.move_forward != 0 || p_command.move_right != 0 ||
+						(p_command.buttons & sim::buttons::kSprint) != 0
+				? 1u
+				: 0u;
+	}
+};
+
+struct Holds {
+	uint64_t hold_ticks = 0, hold_moving = 0;
+	uint64_t settled_ticks = 0;
+	double settled_speed = 0.0;
+	tt::TdmRunResult result;
+	std::string error;
+};
+
+Holds run_holds(const tt::TdmLevel &p_level, uint64_t p_seed) {
+	Holds out;
+	tt::TdmRunConfig c = bots_only(p_seed, 50);
+	c.max_ticks = 90 * 60;
+	const auto log = std::make_shared<HoldLog>();
+	c.configure_bots = [log](host::TdmBotConfig &r_bots) {
+		r_bots.tuning_cfg = OPENBF3_BOT_TUNING_CFG;
+		r_bots.observer = log;
+	};
+	c.on_tick = [&](sim::Tick, host::GameServer &r_server, tt::ScriptedPeer *) {
+		for (uint8_t slot = 0; slot < kSlots; ++slot) {
+			const sim::SoldierState *s = r_server.soldier(slot);
+			if (log->held_for[slot] >= kHoldSettledTicks && tt::is_alive(s)) {
+				++out.settled_ticks;
+				out.settled_speed += std::hypot(s->velocity[0], s->velocity[2]);
+			}
+		}
+	};
+	core::Result<tt::TdmRunResult> r = tt::run_tdm(p_level, c);
+	if (!r) {
+		out.error = r.error().message;
+		return out;
+	}
+	out.result = std::move(*r);
+	out.hold_ticks = log->hold_ticks;
+	out.hold_moving = log->hold_moving;
+	return out;
+}
 }
 
 TEST_SUITE("host-tdm-squads") {
@@ -298,6 +366,40 @@ TEST_SUITE("host-tdm-squads") {
 		}
 	}
 	TEST_CASE("host-tdm-squads: install unchanged") {
+		tt::TdmLevel *level = tt::load_tdm_level_once();
+		if (level != nullptr) {
+			tt::check_install_unchanged(*level);
+		}
+	}
+}
+
+TEST_SUITE("host-tdm-hold") {
+	TEST_CASE("bots-only TDM through AiBotSource, seeds 1-3, 90 s: a bot holding under a squad order sends no move "
+			  "intent and stands still") {
+		tt::TdmLevel *level = tt::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const std::vector<Holds> runs =
+				core::parallel_map<Holds>(3, [&](size_t i) { return run_holds(*level, uint64_t(i + 1)); }, 3);
+		for (size_t i = 0; i < runs.size(); ++i) {
+			const Holds &run = runs[i];
+			REQUIRE_MESSAGE(run.error.empty(), run.error);
+			const double speed = run.settled_ticks > 0 ? run.settled_speed / double(run.settled_ticks) : 0.0;
+			std::printf(
+					"host.tdm.hold seed %zu: %llu hold ticks, %llu with a move intent; %llu ticks held over %u ticks "
+					"in a row, mean speed %.2f m/s; kills %d / %d\n",
+					i + 1, (unsigned long long)run.hold_ticks, (unsigned long long)run.hold_moving,
+					(unsigned long long)run.settled_ticks, kHoldSettledTicks, speed, run.result.kills[1],
+					run.result.kills[2]);
+			CHECK(run.result.failure.empty());
+			CHECK(run.hold_ticks > 0u);
+			CHECK(run.hold_moving == 0u);
+			CHECK(run.settled_ticks > 0u);
+			CHECK(speed <= kHoldStillMps);
+		}
+	}
+	TEST_CASE("host-tdm-hold: install unchanged") {
 		tt::TdmLevel *level = tt::load_tdm_level_once();
 		if (level != nullptr) {
 			tt::check_install_unchanged(*level);

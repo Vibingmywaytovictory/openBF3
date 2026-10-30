@@ -139,6 +139,7 @@ public:
 			ordered_(p_ordered) {}
 	bool plan(BotScript &r_script, bool p_was_active) override;
 	bool following_squad() const { return squad_; }
+	bool holding() const { return squad_ && hold_; }
 
 protected:
 	float situation() override;

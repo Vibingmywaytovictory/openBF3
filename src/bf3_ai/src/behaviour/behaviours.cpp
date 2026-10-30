@@ -317,9 +317,15 @@ float BBMoveTo::situation() {
 }
 
 bool BBMoveTo::plan(BotScript &r_script, bool) {
+	if (holding()) {
+		r_script.clear(InfantryActivity::Idle);
+		r_script.add(PlanTarget::Sense, sense_args(SenseFocus::Around));
+		r_script.add(PlanTarget::Sense, sense_args(SenseFocus::ShotOrigin));
+		return true;
+	}
 	if (squad_) {
 		r_script.clear(InfantryActivity::Roam);
-		r_script.add(PlanTarget::MoveTo, move_args(MoveGoal::Squad, hold_ ? body_.position() : goal_.position));
+		r_script.add(PlanTarget::MoveTo, move_args(MoveGoal::Squad, goal_.position));
 		return true;
 	}
 	r_script.clear(InfantryActivity::Hunt);
