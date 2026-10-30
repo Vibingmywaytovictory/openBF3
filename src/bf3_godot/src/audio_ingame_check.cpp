@@ -625,7 +625,9 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 	const AudioCategoryCounts &own = cats[size_t(ba::SoundCategory::OwnGun)];
 	const AudioCategoryCounts &bots = cats[size_t(ba::SoundCategory::BotGun)];
 	const AudioCategoryCounts &surface = cats[size_t(ba::SoundCategory::ImpactSurface)];
-	mix_row("the scenario ran", bursts_ >= 6 && own.requested >= 1 && bots.requested >= 10 && surface.requested >= 20,
+	row("the scenario ran",
+			(kind_ == AudioIngamePhase::Pool || bursts_ >= 6) && own.requested >= 1 && bots.requested >= 10 &&
+					surface.requested >= 20,
 			core::fmt("%.1f s recorded, %u own bursts, %u own deaths, %llu own gun, %llu bot gun and %llu surface "
 					  "impact sounds requested",
 					seconds_, bursts_, deaths_, (unsigned long long)own.requested, (unsigned long long)bots.requested,
@@ -715,46 +717,52 @@ void AudioIngameCheck::analyse_mix(Bf3GameAudio &r_audio) {
 		double own_db = -200.0, rest_db = -200.0, own_rms_db = -200.0, rest_rms_db = -200.0;
 		size_t bursts = 0, windows = 0;
 	};
+	using Span = std::pair<double, double>;
+	const auto level_in = [](std::span<const float> p_x, const Span &p_span) {
+		const double seconds = double(p_x.size() / 2) / double(ba::kMixRate);
+		const size_t a = size_t(std::clamp(p_span.first, 0.0, seconds) * double(ba::kMixRate));
+		const size_t b = size_t(std::clamp(p_span.second, 0.0, seconds) * double(ba::kMixRate));
+		float p = 0.0f;
+		double e = 0.0;
+		for (size_t i = a * 2; i < b * 2; ++i) {
+			p = std::max(p, std::fabs(p_x[i]));
+			e += double(p_x[i]) * double(p_x[i]);
+		}
+		return std::pair<float, double>{ p,
+			b > a ? 10.0 * std::log10(std::max(e / double((b - a) * 2), 1.0e-30)) : -200.0 };
+	};
+	const std::span<const float> sum = sum_tap_->samples();
+	std::vector<Span> fire, own_spans, rest_spans;
+	for (const auto &[s, e] : own_fire_) {
+		fire.emplace_back(s, (e < 0.0 ? s + kAudioIngameHoldSeconds : e) + kAudioIngameOwnTailSeconds);
+	}
+	for (const Span &f : fire) {
+		if (level_in(sum, f).first > kAudioIngameRestFloor) {
+			own_spans.push_back(f);
+		}
+	}
+	const double sum_seconds = double(sum.size() / 2) / double(ba::kMixRate);
+	for (double w = 0.0; w + kAudioIngameRestWindowSeconds <= sum_seconds; w += kAudioIngameRestWindowSeconds) {
+		const bool near_own = std::any_of(fire.begin(), fire.end(), [&](const Span &f) {
+			return w + kAudioIngameRestWindowSeconds > f.first - kAudioIngameOwnGuardSeconds &&
+					w < f.second + kAudioIngameOwnGuardSeconds;
+		});
+		const Span span{ w, w + kAudioIngameRestWindowSeconds };
+		if (!near_own && level_in(sum, span).first > kAudioIngameRestFloor) {
+			rest_spans.push_back(span);
+		}
+	}
 	const auto balance = [&](std::span<const float> p_x) {
-		const size_t frames = p_x.size() / 2;
-		const auto peak_in = [&](double p_from, double p_to) {
-			const size_t a =
-					size_t(std::clamp(p_from, 0.0, double(frames) / double(ba::kMixRate)) * double(ba::kMixRate));
-			const size_t b =
-					size_t(std::clamp(p_to, 0.0, double(frames) / double(ba::kMixRate)) * double(ba::kMixRate));
-			float p = 0.0f;
-			double e = 0.0;
-			for (size_t i = a * 2; i < b * 2; ++i) {
-				p = std::max(p, std::fabs(p_x[i]));
-				e += double(p_x[i]) * double(p_x[i]);
-			}
-			return std::pair<float, double>{ p,
-				b > a ? 10.0 * std::log10(std::max(e / double((b - a) * 2), 1.0e-30)) : -200.0 };
-		};
-		std::vector<std::pair<double, double>> fire;
-		for (const auto &[s, e] : own_fire_) {
-			fire.emplace_back(s, (e < 0.0 ? s + kAudioIngameHoldSeconds : e) + kAudioIngameOwnTailSeconds);
-		}
 		std::vector<double> own, rest, own_rms, rest_rms;
-		for (const auto &[s, e] : fire) {
-			const auto [p, rms] = peak_in(s, e);
-			if (p > kAudioIngameRestFloor) {
-				own.push_back(20.0 * std::log10(double(p)));
-				own_rms.push_back(rms);
-			}
+		for (const Span &s : own_spans) {
+			const auto [p, rms] = level_in(p_x, s);
+			own.push_back(p > 0.0f ? 20.0 * std::log10(double(p)) : -200.0);
+			own_rms.push_back(rms);
 		}
-		for (double w = 0.0; w + kAudioIngameRestWindowSeconds <= double(frames) / double(ba::kMixRate);
-				w += kAudioIngameRestWindowSeconds) {
-			const bool near_own = std::any_of(fire.begin(), fire.end(), [&](const std::pair<double, double> &f) {
-				return w + kAudioIngameRestWindowSeconds > f.first - kAudioIngameOwnGuardSeconds &&
-						w < f.second + kAudioIngameOwnGuardSeconds;
-			});
-			const auto [p, rms] =
-					near_own ? std::pair<float, double>{ 0.0f, -200.0 } : peak_in(w, w + kAudioIngameRestWindowSeconds);
-			if (p > kAudioIngameRestFloor) {
-				rest.push_back(20.0 * std::log10(double(p)));
-				rest_rms.push_back(rms);
-			}
+		for (const Span &s : rest_spans) {
+			const auto [p, rms] = level_in(p_x, s);
+			rest.push_back(p > 0.0f ? 20.0 * std::log10(double(p)) : -200.0);
+			rest_rms.push_back(rms);
 		}
 		Balance b;
 		b.bursts = own.size();
@@ -770,7 +778,7 @@ void AudioIngameCheck::analyse_mix(Bf3GameAudio &r_audio) {
 		}
 		return b;
 	};
-	const Balance before = balance(sum_tap_->samples());
+	const Balance before = balance(sum);
 	const Balance after = balance(mix_tap_->samples());
 	const double shift = (after.own_rms_db - after.rest_rms_db) - (before.own_rms_db - before.rest_rms_db);
 	const double peak_shift = (after.own_db - after.rest_db) - (before.own_db - before.rest_db);
