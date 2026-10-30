@@ -13,6 +13,10 @@ inline bool finite(double p_v) {
 	return std::isfinite(p_v);
 }
 
+inline float finite_or_zero(double p_v) {
+	return std::isfinite(p_v) ? float(p_v) : 0.0f;
+}
+
 inline bool finite(std::span<const float> p_values) {
 	for (const float v : p_values) {
 		if (!std::isfinite(v)) {

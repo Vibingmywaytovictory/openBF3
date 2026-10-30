@@ -1,6 +1,11 @@
 #include "bf3/core/audio/sound_types.h"
 
+#include "bf3/core/audio/sound_ports.h"
+#include "bf3/core/util/finite.h"
+
+#include <algorithm>
 #include <array>
+#include <cmath>
 
 namespace bf3::core::audio {
 
@@ -222,4 +227,71 @@ SimpleTransformOp simple_transform_op(std::string_view p_enumerator) {
 	return SimpleTransformOp::Unknown;
 }
 
+float simple_transform(uint8_t p_option, float p_x, float p_y) {
+	constexpr float kPi = 3.14159265358979323846f;
+	const bool degrees = (p_option & port::kSimpleTransformDegrees) != 0;
+	const auto op = SimpleTransformOp(p_option & 0x7f);
+	const double to_rad = degrees ? double(kPi) / 180.0 : 1.0;
+	const double from_rad = degrees ? 180.0 / double(kPi) : 1.0;
+	const double X = p_x, Y = p_y;
+	switch (op) {
+		case SimpleTransformOp::Add:
+			return finite_or_zero(X + Y);
+		case SimpleTransformOp::Subtract:
+			return finite_or_zero(X - Y);
+		case SimpleTransformOp::Multiply:
+			return finite_or_zero(X * Y);
+		case SimpleTransformOp::Divide:
+			return Y == 0.0 ? 0.0f : finite_or_zero(X / Y);
+		case SimpleTransformOp::Sine:
+			return finite_or_zero(std::sin(X * to_rad));
+		case SimpleTransformOp::Cosine:
+			return finite_or_zero(std::cos(X * to_rad));
+		case SimpleTransformOp::Tangent:
+			return finite_or_zero(std::tan(X * to_rad));
+		case SimpleTransformOp::ArcSine:
+			return (X < -1.0 || X > 1.0) ? 0.0f : finite_or_zero(std::asin(X) * from_rad);
+		case SimpleTransformOp::ArcCosine:
+			return (X < -1.0 || X > 1.0) ? 0.0f : finite_or_zero(std::acos(X) * from_rad);
+		case SimpleTransformOp::ArcTangent:
+			return finite_or_zero(std::atan(X) * from_rad);
+		case SimpleTransformOp::Modulus:
+			return Y == 0.0 ? 0.0f : finite_or_zero(std::fmod(X, Y));
+		case SimpleTransformOp::Round:
+			return finite_or_zero(std::round(X));
+		case SimpleTransformOp::Floor:
+			return finite_or_zero(std::floor(X));
+		case SimpleTransformOp::Ceiling:
+			return finite_or_zero(std::ceil(X));
+		case SimpleTransformOp::Power:
+			if (X < 0.0 && Y != std::floor(Y)) {
+				return 0.0f;
+			}
+			if (X == 0.0 && Y < 0.0) {
+				return 0.0f;
+			}
+			return finite_or_zero(std::pow(X, Y));
+		case SimpleTransformOp::SquareRoot:
+			return X < 0.0 ? 0.0f : finite_or_zero(std::sqrt(X));
+		case SimpleTransformOp::Absolute:
+			return finite_or_zero(std::fabs(X));
+		case SimpleTransformOp::Exp:
+			return finite_or_zero(std::exp(X));
+		case SimpleTransformOp::Log:
+			return X <= 0.0 ? 0.0f : finite_or_zero(std::log(X));
+		case SimpleTransformOp::Log10:
+			return X <= 0.0 ? 0.0f : finite_or_zero(std::log10(X));
+		case SimpleTransformOp::Unknown:
+			return 0.0f;
+	}
+	return 0.0f;
+}
+
+float scale_clamp(float p_in, float p_in_min, float p_in_max, float p_out_min, float p_out_max) {
+	if (p_in_min == p_in_max) {
+		return p_in < p_in_min ? p_out_min : p_out_max;
+	}
+	const double t = std::clamp((double(p_in) - p_in_min) / (double(p_in_max) - p_in_min), 0.0, 1.0);
+	return finite_or_zero(p_out_min + t * (double(p_out_max) - p_out_min));
+}
 }

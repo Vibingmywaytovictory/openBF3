@@ -56,24 +56,12 @@ struct Compiler {
 	}
 
 	Result<SoundPort> read_port(const EbxStruct &p_s, std::string_view p_field) {
-		const std::optional<EbxValue> v = p_s.get(p_field);
-		const std::optional<EbxStruct> s = v ? v->as_struct() : std::nullopt;
-		if (!s) {
-			return error(std::string(p_s.type_name()) + " has no port " + std::string(p_field));
+		Result<SoundPort> port = read_graph_port(p_s, p_field);
+		if (!port) {
+			return error(port.error().message);
 		}
-		SoundPort port;
-		const bool connected = s->get("IsConnected") && s->get("IsConnected")->as_bool().value_or(false);
-		port.constant = s->get("UnconnectedValue") ? s->get("UnconnectedValue")->as_f32().value_or(0.0f) : 0.0f;
-		if (!std::isfinite(port.constant)) {
-			port.constant = 0.0f;
-		}
-		if (connected) {
-			const int64_t index = s->get("ValueIndex") ? s->get("ValueIndex")->as_i64().value_or(-1) : -1;
-			if (index < 0 || index >= int64_t(kMaxProgramValues)) {
-				return error(std::string(p_s.type_name()) + "." + std::string(p_field) + ": ValueIndex " + std::to_string(index) + " out of range");
-			}
-			port.reg = uint16_t(index);
-			max_register = std::max(max_register, uint32_t(index));
+		if (port->connected()) {
+			max_register = std::max(max_register, uint32_t(port->reg));
 		}
 		return port;
 	}
@@ -1000,6 +988,29 @@ std::optional<uint16_t> SoundProgram::input_register(uint32_t p_name_hash) const
 		}
 	}
 	return std::nullopt;
+}
+
+Result<SoundPort> read_graph_port(const EbxStruct &p_node, std::string_view p_field) {
+	const std::optional<EbxValue> v = p_node.get(p_field);
+	const std::optional<EbxStruct> s = v ? v->as_struct() : std::nullopt;
+	if (!s) {
+		return make_error(std::string(p_node.type_name()) + " has no port " + std::string(p_field));
+	}
+	SoundPort port;
+	const bool connected = s->get("IsConnected") && s->get("IsConnected")->as_bool().value_or(false);
+	port.constant = s->get("UnconnectedValue") ? s->get("UnconnectedValue")->as_f32().value_or(0.0f) : 0.0f;
+	if (!std::isfinite(port.constant)) {
+		port.constant = 0.0f;
+	}
+	if (connected) {
+		const int64_t index = s->get("ValueIndex") ? s->get("ValueIndex")->as_i64().value_or(-1) : -1;
+		if (index < 0 || index >= int64_t(kMaxProgramValues)) {
+			return make_error(std::string(p_node.type_name()) + "." + std::string(p_field) + ": ValueIndex " +
+					std::to_string(index) + " out of range");
+		}
+		port.reg = uint16_t(index);
+	}
+	return port;
 }
 
 Result<std::vector<uint32_t>> order_by_register_dependencies(std::span<const std::vector<uint16_t>> p_reads,

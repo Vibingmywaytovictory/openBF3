@@ -1,5 +1,7 @@
 #include "patch_state.h"
 
+#include "bf3/core/util/finite.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -8,6 +10,7 @@ namespace bf3::audio {
 using namespace detail;
 using ca::SoundNode;
 using ca::SoundNodeType;
+using core::finite_or_zero;
 
 namespace detail {
 
@@ -25,77 +28,6 @@ constexpr float kCaseTolerance = 0.001f;
 
 bool on(float p_v) {
 	return p_v >= 0.5f;
-}
-
-float finite_or_zero(double p_v) {
-	return std::isfinite(p_v) ? float(p_v) : 0.0f;
-}
-
-float simple_transform(uint8_t p_option, float x, float y) {
-	const bool degrees = (p_option & cp::kSimpleTransformDegrees) != 0;
-	const auto op = ca::SimpleTransformOp(p_option & 0x7f);
-	const double to_rad = degrees ? double(kPi) / 180.0 : 1.0;
-	const double from_rad = degrees ? 180.0 / double(kPi) : 1.0;
-	const double X = x, Y = y;
-	switch (op) {
-		case ca::SimpleTransformOp::Add:
-			return finite_or_zero(X + Y);
-		case ca::SimpleTransformOp::Subtract:
-			return finite_or_zero(X - Y);
-		case ca::SimpleTransformOp::Multiply:
-			return finite_or_zero(X * Y);
-		case ca::SimpleTransformOp::Divide:
-			return Y == 0.0 ? 0.0f : finite_or_zero(X / Y);
-		case ca::SimpleTransformOp::Sine:
-			return finite_or_zero(std::sin(X * to_rad));
-		case ca::SimpleTransformOp::Cosine:
-			return finite_or_zero(std::cos(X * to_rad));
-		case ca::SimpleTransformOp::Tangent:
-			return finite_or_zero(std::tan(X * to_rad));
-		case ca::SimpleTransformOp::ArcSine:
-			return (X < -1.0 || X > 1.0) ? 0.0f : finite_or_zero(std::asin(X) * from_rad);
-		case ca::SimpleTransformOp::ArcCosine:
-			return (X < -1.0 || X > 1.0) ? 0.0f : finite_or_zero(std::acos(X) * from_rad);
-		case ca::SimpleTransformOp::ArcTangent:
-			return finite_or_zero(std::atan(X) * from_rad);
-		case ca::SimpleTransformOp::Modulus:
-			return Y == 0.0 ? 0.0f : finite_or_zero(std::fmod(X, Y));
-		case ca::SimpleTransformOp::Round:
-			return finite_or_zero(std::round(X));
-		case ca::SimpleTransformOp::Floor:
-			return finite_or_zero(std::floor(X));
-		case ca::SimpleTransformOp::Ceiling:
-			return finite_or_zero(std::ceil(X));
-		case ca::SimpleTransformOp::Power:
-			if (X < 0.0 && Y != std::floor(Y)) {
-				return 0.0f;
-			}
-			if (X == 0.0 && Y < 0.0) {
-				return 0.0f;
-			}
-			return finite_or_zero(std::pow(X, Y));
-		case ca::SimpleTransformOp::SquareRoot:
-			return X < 0.0 ? 0.0f : finite_or_zero(std::sqrt(X));
-		case ca::SimpleTransformOp::Absolute:
-			return finite_or_zero(std::fabs(X));
-		case ca::SimpleTransformOp::Exp:
-			return finite_or_zero(std::exp(X));
-		case ca::SimpleTransformOp::Log:
-			return X <= 0.0 ? 0.0f : finite_or_zero(std::log(X));
-		case ca::SimpleTransformOp::Log10:
-			return X <= 0.0 ? 0.0f : finite_or_zero(std::log10(X));
-		case ca::SimpleTransformOp::Unknown:
-			return 0.0f;
-	}
-	return 0.0f;
-}
-
-float scale_clamp(float p_in, float p_in_min, float p_in_max, float p_out_min, float p_out_max) {
-	if (p_in_min == p_in_max) {
-		return p_in < p_in_min ? p_out_min : p_out_max;
-	}
-	const double t = std::clamp((double(p_in) - p_in_min) / (double(p_in_max) - p_in_min), 0.0, 1.0);
-	return finite_or_zero(p_out_min + t * (double(p_out_max) - p_out_min));
 }
 
 float fade_out(ca::FaderType p_type, float p_t) {
@@ -284,11 +216,12 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				break;
 			}
 			case SoundNodeType::ScaleClamp:
-				write(port(n, cp::ScOut), scale_clamp(read(port(n, cp::ScIn)), read(port(n, cp::ScInMin)), read(port(n, cp::ScInMax)), read(port(n, cp::ScOutMin)),
-												read(port(n, cp::ScOutMax))));
+				write(port(n, cp::ScOut),
+						ca::scale_clamp(read(port(n, cp::ScIn)), read(port(n, cp::ScInMin)), read(port(n, cp::ScInMax)),
+								read(port(n, cp::ScOutMin)), read(port(n, cp::ScOutMax))));
 				break;
 			case SoundNodeType::SimpleTransform:
-				write(port(n, cp::StZ), simple_transform(n.option, read(port(n, cp::StX)), read(port(n, cp::StY))));
+				write(port(n, cp::StZ), ca::simple_transform(n.option, read(port(n, cp::StX)), read(port(n, cp::StY))));
 				break;
 			case SoundNodeType::Crossfader2: {
 				const float c = std::clamp(read(port(n, cp::Cf2Ctrl)), 0.0f, 1.0f);

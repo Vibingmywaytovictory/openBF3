@@ -133,6 +133,8 @@ enum class SimpleTransformOp : uint8_t {
 	Unknown,
 };
 SimpleTransformOp simple_transform_op(std::string_view p_enumerator);
+float simple_transform(uint8_t p_option, float p_x, float p_y);
+float scale_clamp(float p_in, float p_in_min, float p_in_max, float p_out_min, float p_out_max);
 
 enum class ConditionOp : uint8_t { And, Or, XOr, Equal, Less, Greater, LessOrEqual, GreaterOrEqual, Unknown };
 enum class LogicalOp : uint8_t { And, Or, Nand, Nor, Unknown };

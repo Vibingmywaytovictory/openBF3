@@ -251,6 +251,8 @@ struct CompileStats {
 Result<SoundProgram> compile_sound_patch(const EbxResolver &p_db, const EbxPartition &p_partition, const CompileOptions &p_options,
 		gameplay::WorkBudget &r_budget, CompileStats *r_stats = nullptr);
 
+Result<SoundPort> read_graph_port(const EbxStruct &p_node, std::string_view p_field);
+
 Result<std::vector<uint32_t>> order_by_register_dependencies(std::span<const std::vector<uint16_t>> p_reads,
 		std::span<const std::vector<uint16_t>> p_writes, uint32_t p_registers, gameplay::WorkBudget &r_budget, size_t &r_feedback_edges);
 
