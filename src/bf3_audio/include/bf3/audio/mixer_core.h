@@ -214,6 +214,7 @@ public:
 
 	uint32_t mix(float *r_interleaved_stereo, uint32_t p_frames);
 	void set_tap(MixTap *p_tap);
+	void set_sum_tap(MixTap *p_tap);
 	float bus_gain(core::audio::MasterBus p_bus) const;
 
 	const MixerCutStats &cut_stats() const;

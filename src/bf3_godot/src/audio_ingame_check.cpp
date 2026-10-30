@@ -141,6 +141,7 @@ void AudioIngameCheck::begin(double p_now_s, Bf3GameAudio &r_audio) {
 	capture_.instantiate();
 	capture_->set_buffer_length(2.0f);
 	mix_tap_ = std::make_unique<ba::WavRecorder>(ba::kMixRate, seconds_ + 5.0);
+	sum_tap_ = std::make_unique<ba::WavRecorder>(ba::kMixRate, seconds_ + 5.0);
 	heard_.reserve(size_t((seconds_ + 5.0) * double(ba::kMixRate)) * 2);
 	events_.reserve(size_t(1) << 16);
 	ledger_.set_categories(&r_audio.sound_categories());
@@ -151,11 +152,13 @@ void AudioIngameCheck::begin(double p_now_s, Bf3GameAudio &r_audio) {
 	at_start_ = snapshot(r_audio);
 	as->add_bus_effect(0, capture_, -1);
 	r_audio.set_mix_tap(mix_tap_.get());
+	r_audio.set_sum_tap(sum_tap_.get());
 	record_s_ = p_now_s;
 }
 
 void AudioIngameCheck::end(Bf3GameAudio &r_audio) {
 	r_audio.set_mix_tap(nullptr);
+	r_audio.set_sum_tap(nullptr);
 	pull();
 	godot::AudioServer *as = godot::AudioServer::get_singleton();
 	for (int i = as->get_bus_effect_count(0) - 1; i >= 0; --i) {
@@ -218,6 +221,7 @@ void AudioIngameCheck::note(const ba::MixerCutEvent &p_event, Bf3GameAudio &r_au
 		peak = std::max(peak, p_event.peak);
 	}
 	if (p_event.kind == ba::MixerCutKind::Join) {
+		joins_.emplace_back(p_event.handle, ba::InstanceHandle(p_event.count));
 		const auto next = fates_.find(ba::InstanceHandle(p_event.count));
 		if (next != fates_.end()) {
 			next->second.started = true;
@@ -269,7 +273,8 @@ void AudioIngameCheck::script(double p_now_s, const AudioIngameIo &p_io) {
 			firing_ = false;
 		}
 		if (kind_ == AudioIngamePhase::Pool && !primary_picked_ && p_io.pick_primary) {
-			primary_picked_ = p_io.pick_primary(step_patches_);
+			primary_name_ = p_io.pick_primary(step_patches_);
+			primary_picked_ = !primary_name_.empty();
 		}
 		deaths_ += was_alive_ ? 1u : 0u;
 		was_alive_ = false;
@@ -332,6 +337,11 @@ void AudioIngameCheck::script(double p_now_s, const AudioIngameIo &p_io) {
 	if (want != firing_) {
 		p_io.hold_fire(want);
 		firing_ = want;
+		if (record_s_ >= 0.0 && want) {
+			own_fire_.emplace_back(p_now_s - record_s_, -1.0);
+		} else if (record_s_ >= 0.0 && !own_fire_.empty() && own_fire_.back().second < 0.0) {
+			own_fire_.back().second = p_now_s - record_s_;
+		}
 		bursts_ += want ? 1u : 0u;
 	}
 }
@@ -615,7 +625,7 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 	const AudioCategoryCounts &own = cats[size_t(ba::SoundCategory::OwnGun)];
 	const AudioCategoryCounts &bots = cats[size_t(ba::SoundCategory::BotGun)];
 	const AudioCategoryCounts &surface = cats[size_t(ba::SoundCategory::ImpactSurface)];
-	row("the scenario ran", bursts_ >= 6 && own.requested >= 1 && bots.requested >= 10 && surface.requested >= 20,
+	mix_row("the scenario ran", bursts_ >= 6 && own.requested >= 1 && bots.requested >= 10 && surface.requested >= 20,
 			core::fmt("%.1f s recorded, %u own bursts, %u own deaths, %llu own gun, %llu bot gun and %llu surface "
 					  "impact sounds requested",
 					seconds_, bursts_, deaths_, (unsigned long long)own.requested, (unsigned long long)bots.requested,
@@ -701,6 +711,83 @@ void AudioIngameCheck::analyse_mix(Bf3GameAudio &r_audio) {
 					double(l.master_ceiling_clipped_samples) <=
 							kAudioIngameLimitedBlocksShare * double(std::max<uint64_t>(samples_out, 1)),
 			master_text);
+	struct Balance {
+		double own_db = -200.0, rest_db = -200.0, own_rms_db = -200.0, rest_rms_db = -200.0;
+		size_t bursts = 0, windows = 0;
+	};
+	const auto balance = [&](std::span<const float> p_x) {
+		const size_t frames = p_x.size() / 2;
+		const auto peak_in = [&](double p_from, double p_to) {
+			const size_t a =
+					size_t(std::clamp(p_from, 0.0, double(frames) / double(ba::kMixRate)) * double(ba::kMixRate));
+			const size_t b =
+					size_t(std::clamp(p_to, 0.0, double(frames) / double(ba::kMixRate)) * double(ba::kMixRate));
+			float p = 0.0f;
+			double e = 0.0;
+			for (size_t i = a * 2; i < b * 2; ++i) {
+				p = std::max(p, std::fabs(p_x[i]));
+				e += double(p_x[i]) * double(p_x[i]);
+			}
+			return std::pair<float, double>{ p,
+				b > a ? 10.0 * std::log10(std::max(e / double((b - a) * 2), 1.0e-30)) : -200.0 };
+		};
+		std::vector<std::pair<double, double>> fire;
+		for (const auto &[s, e] : own_fire_) {
+			fire.emplace_back(s, (e < 0.0 ? s + kAudioIngameHoldSeconds : e) + kAudioIngameOwnTailSeconds);
+		}
+		std::vector<double> own, rest, own_rms, rest_rms;
+		for (const auto &[s, e] : fire) {
+			const auto [p, rms] = peak_in(s, e);
+			if (p > kAudioIngameRestFloor) {
+				own.push_back(20.0 * std::log10(double(p)));
+				own_rms.push_back(rms);
+			}
+		}
+		for (double w = 0.0; w + kAudioIngameRestWindowSeconds <= double(frames) / double(ba::kMixRate);
+				w += kAudioIngameRestWindowSeconds) {
+			const bool near_own = std::any_of(fire.begin(), fire.end(), [&](const std::pair<double, double> &f) {
+				return w + kAudioIngameRestWindowSeconds > f.first - kAudioIngameOwnGuardSeconds &&
+						w < f.second + kAudioIngameOwnGuardSeconds;
+			});
+			const auto [p, rms] =
+					near_own ? std::pair<float, double>{ 0.0f, -200.0 } : peak_in(w, w + kAudioIngameRestWindowSeconds);
+			if (p > kAudioIngameRestFloor) {
+				rest.push_back(20.0 * std::log10(double(p)));
+				rest_rms.push_back(rms);
+			}
+		}
+		Balance b;
+		b.bursts = own.size();
+		b.windows = rest.size();
+		if (!own.empty() && !rest.empty()) {
+			for (std::vector<double> *v : { &own, &rest, &own_rms, &rest_rms }) {
+				std::sort(v->begin(), v->end());
+			}
+			b.own_db = own[own.size() / 2];
+			b.rest_db = rest[rest.size() / 2];
+			b.own_rms_db = own_rms[own_rms.size() / 2];
+			b.rest_rms_db = rest_rms[rest_rms.size() / 2];
+		}
+		return b;
+	};
+	const Balance before = balance(sum_tap_->samples());
+	const Balance after = balance(mix_tap_->samples());
+	const double shift = (after.own_rms_db - after.rest_rms_db) - (before.own_rms_db - before.rest_rms_db);
+	const double peak_shift = (after.own_db - after.rest_db) - (before.own_db - before.rest_db);
+	const std::string balance_text =
+			core::fmt("own bursts against the mix away from own fire (medians of %zu bursts and %zu %.2f s windows): "
+					  "RMS %.1f dB in the "
+					  "bus sum before the master (%.1f / %.1f dBFS), %.1f dB at the output (%.1f / %.1f dBFS), a shift "
+					  "of %+.1f dB; "
+					  "peak %.1f dB before (%.1f / %.1f dBFS), %.1f dB after (%.1f / %.1f dBFS), a shift of %+.1f dB",
+					after.bursts, after.windows, kAudioIngameRestWindowSeconds, before.own_rms_db - before.rest_rms_db,
+					before.own_rms_db, before.rest_rms_db, after.own_rms_db - after.rest_rms_db, after.own_rms_db,
+					after.rest_rms_db, shift, before.own_db - before.rest_db, before.own_db, before.rest_db,
+					after.own_db - after.rest_db, after.own_db, after.rest_db, peak_shift);
+	mix_row("own shot level against the rest",
+			before.bursts >= 3 && before.windows >= 10 && after.bursts >= 3 && after.windows >= 10 &&
+					std::fabs(shift) <= kAudioIngameBalanceDb,
+			balance_text);
 	const double lufs = ba::integrated_loudness_lufs(mix_tap_->samples());
 	std::array<std::vector<double>, size_t(ba::SoundCategory::Count)> peaks;
 	for (const auto &[h, p] : sound_peaks_) {
@@ -741,24 +828,44 @@ void AudioIngameCheck::analyse_pool(Bf3GameAudio &r_audio) {
 			core::fmt("%llu refused one-shots still held by the OneShotPool %.0f s after the refusal",
 					(unsigned long long)ghosts, kAudioIngameGhostSeconds));
 	const std::vector<std::string> explosive = r_audio.weapon_patches(true, 0);
-	uint64_t shots = 0, shot_joins = 0, throws = 0, throws_explosion = 0;
+	uint64_t shots = 0, throws = 0, throws_explosion = 0;
 	for (const auto &[h, f] : fates_) {
 		if (f.category == ba::SoundCategory::OwnGun &&
 				std::find(step_patches_.begin(), step_patches_.end(), f.program) != step_patches_.end()) {
 			++shots;
-			shot_joins += f.joined ? 1u : 0u;
 		}
 		if (std::find(explosive.begin(), explosive.end(), f.program) != explosive.end()) {
 			++throws;
 			throws_explosion += f.category == ba::SoundCategory::Explosion ? 1u : 0u;
 		}
 	}
+	const auto own_step = [&](ba::InstanceHandle p_h) {
+		const auto it = fates_.find(p_h);
+		return it != fates_.end() && it->second.category == ba::SoundCategory::OwnGun &&
+						std::find(step_patches_.begin(), step_patches_.end(), it->second.program) != step_patches_.end()
+				? &it->second
+				: nullptr;
+	};
+	uint64_t consecutive = 0, same_frame = 0;
+	for (const auto &[old_h, new_h] : joins_) {
+		const AudioSoundFate *a = own_step(old_h);
+		const AudioSoundFate *b = own_step(new_h);
+		if (a != nullptr && b != nullptr) {
+			(std::fabs(b->request_s - a->request_s) > kAudioIngameSameShotSeconds ? consecutive : same_frame) += 1;
+		}
+	}
 	const uint64_t join_requests = r_audio.one_shot_join_requests() - pool_joins_at_start_;
-	row("one-shots join", primary_picked_ && shots >= 2 && shot_joins > 0 && join_requests > 0,
-			core::fmt("own primary %s a shotgun (%zu Step patches): %llu own Step one-shots requested, %llu of them "
-					  "joined by the next; %llu pool join requests",
-					primary_picked_ ? "picked as" : "NOT picked as", step_patches_.size(), (unsigned long long)shots,
-					(unsigned long long)shot_joins, (unsigned long long)join_requests));
+	const GameAudioStats g = r_audio.stats();
+	row("one-shots join", primary_picked_ && shots >= 6 && consecutive >= 2,
+			core::fmt("own primary %s (%zu Step patches): %llu own Step one-shots requested, %llu joined by a later "
+					  "shot, "
+					  "%llu by a request of the same frame; %llu pool join requests; router %llu one-shots and %llu "
+					  "foley "
+					  "one-shots in the session",
+					primary_picked_ ? primary_name_.c_str() : "NOT picked", step_patches_.size(),
+					(unsigned long long)shots, (unsigned long long)consecutive, (unsigned long long)same_frame,
+					(unsigned long long)join_requests, (unsigned long long)g.router.one_shots,
+					(unsigned long long)g.router.foley));
 	row("the M67 counts as an explosion", throws >= 1 && throws_explosion == throws,
 			core::fmt("%u grenade presses: %llu throw sounds requested, %llu filed as explosion", grenades_,
 					(unsigned long long)throws, (unsigned long long)throws_explosion));

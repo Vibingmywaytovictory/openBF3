@@ -112,6 +112,8 @@ struct MixerCore::Impl {
 	std::vector<std::pair<uint32_t, float>> mixer_values;
 	size_t mixer_value_count = 0;
 	MixTap *tap = nullptr;
+	std::atomic<MixTap *> sum_tap{ nullptr };
+	std::vector<float> sum_block;
 	float output_gain = 1.0f;
 	std::array<float, size_t(core::audio::MasterBus::Unknown)> bus_gain{};
 	std::array<std::atomic<float>, size_t(core::audio::MasterBus::Unknown)> bus_gain_seen{};
@@ -175,6 +177,7 @@ struct MixerCore::Impl {
 			}
 		}
 		block.assign(size_t(kBlockFrames) * 2, 0.0f);
+		sum_block.assign(size_t(kBlockFrames) * 2, 0.0f);
 		mixer_values.resize(64);
 		output_gain = db_to_gain(p_config.output_gain_db);
 		master.configure(p_config.master, p_config.mix_rate, p_config.master_iir2_q);
@@ -270,6 +273,10 @@ size_t MixerCore::poll_feedback(std::span<MixerFeedback> r_out) {
 
 void MixerCore::set_tap(MixTap *p_tap) {
 	impl_->tap = p_tap;
+}
+
+void MixerCore::set_sum_tap(MixTap *p_tap) {
+	impl_->sum_tap.store(p_tap, std::memory_order_release);
 }
 
 namespace {
@@ -566,6 +573,18 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 		stats.peak_instances.store(active, std::memory_order_relaxed);
 	}
 
+	if (MixTap *st = m.sum_tap.load(std::memory_order_acquire)) {
+		for (uint32_t i = 0; i < kBlockFrames; ++i) {
+			float l = 0.0f, r = 0.0f;
+			for (size_t b = 0; b < size_t(core::audio::MasterBus::Unknown); ++b) {
+				l += m.buses.channels[b][0][i] * m.bus_gain[b];
+				r += m.buses.channels[b][1][i] * m.bus_gain[b];
+			}
+			m.sum_block[size_t(i) * 2] = l;
+			m.sum_block[size_t(i) * 2 + 1] = r;
+		}
+		st->on_block(m.sum_block.data(), kBlockFrames, first);
+	}
 	if (m.master_stats_reset.exchange(false, std::memory_order_relaxed)) {
 		m.master.reset_stats();
 	}

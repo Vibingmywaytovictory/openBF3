@@ -66,6 +66,7 @@ public:
 
 	void set_check(audio::GameAudioCheck *p_check);
 	void set_mix_tap(audio::MixTap *p_tap);
+	void set_sum_tap(audio::MixTap *p_tap);
 	void forward_cuts(bool p_on);
 	void take_cuts(std::vector<audio::MixerCutEvent> &r_out);
 	void drain_events();

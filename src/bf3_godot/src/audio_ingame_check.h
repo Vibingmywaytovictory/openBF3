@@ -48,6 +48,12 @@ bool parse_audio_ingame_phase(std::string_view p_text, AudioIngamePhase &r_phase
 inline constexpr double kAudioIngameGhostSeconds = 1.0;
 inline constexpr double kAudioIngameLimitedBlocksShare = 0.01;
 inline constexpr float kAudioIngameLimitFloorDb = -1.0f;
+inline constexpr double kAudioIngameBalanceDb = 3.0;
+inline constexpr double kAudioIngameOwnTailSeconds = 0.35;
+inline constexpr double kAudioIngameOwnGuardSeconds = 0.8;
+inline constexpr double kAudioIngameRestWindowSeconds = 0.25;
+inline constexpr float kAudioIngameRestFloor = 1.0e-3f;
+inline constexpr double kAudioIngameSameShotSeconds = 0.05;
 
 struct AudioIngameIo {
 	bool alive = false;
@@ -55,7 +61,7 @@ struct AudioIngameIo {
 	std::function<void(bool)> hold_fire;
 	std::function<void()> reload;
 	std::function<void()> grenade;
-	std::function<bool(std::span<const std::string>)> pick_primary;
+	std::function<std::string(std::span<const std::string>)> pick_primary;
 	std::function<void()> deploy;
 	std::function<void(float, float)> view;
 	std::function<float()> yaw;
@@ -116,10 +122,14 @@ private:
 	audio::MixerLevels levels_at_start_;
 	std::map<audio::InstanceHandle, double> refused_;
 	std::map<audio::InstanceHandle, float> sound_peaks_;
+	std::unique_ptr<audio::WavRecorder> sum_tap_;
+	std::vector<std::pair<double, double>> own_fire_;
+	std::vector<std::pair<audio::InstanceHandle, audio::InstanceHandle>> joins_;
 	uint64_t pool_joins_at_start_ = 0;
 	uint32_t last_step_ = UINT32_MAX;
 	uint32_t grenades_ = 0;
 	bool primary_picked_ = false;
+	std::string primary_name_;
 	std::vector<std::string> step_patches_;
 	Phase phase_ = Phase::WaitSpawn;
 	double first_s_ = -1.0, spawn_s_ = -1.0, record_s_ = -1.0;

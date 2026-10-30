@@ -413,6 +413,15 @@ std::vector<std::string> Bf3GameAudio::weapon_patches(bool p_explosive, uint32_t
 	return out;
 }
 
+void Bf3GameAudio::set_sum_tap(audio::MixTap *p_tap) {
+	if (!impl_->mixer) {
+		return;
+	}
+	AudioServer::get_singleton()->lock();
+	impl_->mixer->set_sum_tap(p_tap);
+	AudioServer::get_singleton()->unlock();
+}
+
 std::string_view Bf3GameAudio::scope_name(uint16_t p_scope) const {
 	const Impl &m = *impl_;
 	return m.a3.scopes && p_scope < m.a3.scopes->scopes.size() ? std::string_view(m.a3.scopes->scopes[p_scope].name)
@@ -604,7 +613,9 @@ template <class Impl> void print_sound_fates(Impl &r_m, bool p_always) {
 		return;
 	}
 	r_m.fate_line_at = now;
-	const ba::SoundFateTotals t = r_m.ledger.totals();
+	const ba::SoundFateTotals t = p_always || r_m.mixer == nullptr
+			? r_m.ledger.totals()
+			: r_m.ledger.totals(r_m.mixer->clock(), ba::kMixRate);
 	const uint64_t drops = t.other_drops() + t.data_drops();
 	if (!p_always && drops == r_m.fate_line_drops) {
 		return;

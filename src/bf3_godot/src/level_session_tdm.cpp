@@ -34,6 +34,7 @@
 
 #include "bf3/core/ui/text_db.h"
 #include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/format.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/server_session.h"
@@ -962,38 +963,46 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		io.hold_fire = [this](bool p_held) { mapper_.script_hold(InputMapper::WeaponAction::Fire, p_held); };
 		io.reload = [this] { mapper_.script_press(InputMapper::WeaponAction::Reload); };
 		io.grenade = [this] { mapper_.script_press(InputMapper::WeaponAction::Grenade); };
-		io.pick_primary = [this, &r_game, &m](std::span<const std::string> p_sounds) {
+		io.pick_primary = [this, &r_game, &m](std::span<const std::string> p_sounds) -> std::string {
 			const std::shared_ptr<const host::SharedLevel> level = shared_level();
 			const host::LoadoutKit *kit = level != nullptr && level->gunplay != nullptr
 					? level->gunplay->loadouts.kit(m.own_team, m.spawn_kit)
 					: nullptr;
 			if (kit == nullptr || r_game.gunplay == nullptr) {
-				return false;
+				return {};
 			}
+			const host::LoadoutItem *best = nullptr;
+			double best_interval = 0.0;
 			for (const host::LoadoutItem &item : kit->slots[size_t(core::gameplay::WeaponSlot::Primary)]) {
 				if (item.def >= level->gunplay->defs.size() ||
 						std::find(p_sounds.begin(), p_sounds.end(), level->gunplay->defs[item.def].sound) ==
 								p_sounds.end()) {
 					continue;
 				}
-				DeployPick pick;
-				pick.kit = m.spawn_kit;
-				pick.slot = uint8_t(host::LoadoutKitItem::Primary);
-				pick.item = item.identifier;
-				const bf3::core::Result<net::LoadoutRequest> q = deploy_loadout_request(pick, level->gunplay->loadouts,
-						r_game.gunplay->kits, m.own_team, m.own_loadout_choices()[pick.kit]);
-				if (!q) {
-					continue;
+				const double interval = core::gameplay::shot_interval(level->gunplay->defs[item.def].fire);
+				if (best == nullptr || interval < best_interval) {
+					best = &item;
+					best_interval = interval;
 				}
-				client_->send_loadout_request(*q);
-				if (const bf3::core::Result<host::Loadout> l = host::resolve_loadout(level->gunplay->loadouts,
-							r_game.gunplay->kits, m.own_team, pick.kit, m.own_loadout_choices()[pick.kit])) {
-					r_game.want_catalog_weapons(l->defs);
-				}
-				UtilityFunctions::print(to_godot("[audio-ingame] own primary: " + item.unlock));
-				return true;
 			}
-			return false;
+			if (best == nullptr) {
+				return {};
+			}
+			DeployPick pick;
+			pick.kit = m.spawn_kit;
+			pick.slot = uint8_t(host::LoadoutKitItem::Primary);
+			pick.item = best->identifier;
+			const bf3::core::Result<net::LoadoutRequest> q = deploy_loadout_request(pick, level->gunplay->loadouts,
+					r_game.gunplay->kits, m.own_team, m.own_loadout_choices()[pick.kit]);
+			if (!q) {
+				return {};
+			}
+			client_->send_loadout_request(*q);
+			if (const bf3::core::Result<host::Loadout> l = host::resolve_loadout(level->gunplay->loadouts,
+						r_game.gunplay->kits, m.own_team, pick.kit, m.own_loadout_choices()[pick.kit])) {
+				r_game.want_catalog_weapons(l->defs);
+			}
+			return best->unlock + core::fmt(" (%.3f s a shot)", best_interval);
 		};
 		io.deploy = [this] {
 			scripted_ui_key(KEY_ENTER, true);
