@@ -275,18 +275,19 @@ TEST_SUITE("ai-bot") {
 		Rig r;
 		r.bot.update_bot(true, true);
 		r.body.s.navigable = true;
+		const float far = r.tuning.squad_far_m;
 		SquadGoal g;
 		g.kind = SquadGoalKind::Slot;
-		g.position = { 25.0f, 0.0f, 0.0f };
+		g.position = { 0.8f * far, 0.0f, 0.0f };
 		r.bot.set_squad_goal(g);
 		CHECK(r.decide() == InfantryBehaviour::MoveTo);
 		CHECK(r.bot.activity() == InfantryActivity::Roam);
 		CHECK(r.body.calls == std::vector<std::string>{ "move_to 3" });
-		CHECK(r.bot.weighted_urgency(InfantryBehaviour::MoveTo) == doctest::Approx(1.5f * 25.0f / 30.0f));
-		g.position = { 10.0f, 0.0f, 0.0f };
+		CHECK(r.bot.weighted_urgency(InfantryBehaviour::MoveTo) == doctest::Approx(1.5f * 0.8f));
+		g.position = { 0.4f * far, 0.0f, 0.0f };
 		r.bot.set_squad_goal(g);
 		CHECK(r.decide() == InfantryBehaviour::Random);
-		CHECK(r.bot.weighted_urgency(InfantryBehaviour::MoveTo) == doctest::Approx(0.5f));
+		CHECK(r.bot.weighted_urgency(InfantryBehaviour::MoveTo) == doctest::Approx(1.5f * 0.4f));
 		g.position = { 2.0f, 0.0f, 0.0f };
 		r.bot.set_squad_goal(g);
 		CHECK(r.decide() == InfantryBehaviour::Random);
@@ -294,6 +295,35 @@ TEST_SUITE("ai-bot") {
 		r.body.s.hunt_target = true;
 		CHECK(r.decide() == InfantryBehaviour::MoveTo);
 		CHECK(r.bot.activity() == InfantryActivity::Hunt);
+	}
+
+	TEST_CASE("BBMoveTo under a squad order: MoveTo outranks Idle and Random at any distance, holding at the goal") {
+		Rig r;
+		r.bot.update_bot(true, true);
+		r.body.s.navigable = true;
+		std::array<float, kInfantryBehaviourCount> order{};
+		order.fill(1.0f);
+		order[size_t(InfantryBehaviour::Random)] = 0.4f;
+		r.bot.set_taking_orders(true);
+		REQUIRE(r.bot.receive_order(BotOrder(order.data(), uint8_t(InfantryBehaviour::MoveTo))));
+		SquadGoal g;
+		g.kind = SquadGoalKind::Slot;
+		g.position = { 1.0f, 0.0f, 0.0f };
+		r.bot.set_squad_goal(g);
+		CHECK(r.decide() == InfantryBehaviour::MoveTo);
+		CHECK(r.bot.weighted_urgency(InfantryBehaviour::MoveTo) == doctest::Approx(1.5f));
+		CHECK(r.bot.weighted_urgency(InfantryBehaviour::Random) == doctest::Approx(0.4f));
+		g.kind = SquadGoalKind::SquadTarget;
+		g.wait_for_members = true;
+		g.position = { 40.0f, 0.0f, 0.0f };
+		r.bot.set_squad_goal(g);
+		CHECK(r.decide() == InfantryBehaviour::MoveTo);
+		r.body.s.blind_fire = true;
+		CHECK(r.decide() == InfantryBehaviour::FireInfantery);
+		r.bot.update_bot(true, true);
+		CHECK(r.bot.ordered_behaviour() == -1);
+		r.body.s.blind_fire = false;
+		CHECK(r.decide() != InfantryBehaviour::MoveTo);
 	}
 
 	TEST_CASE("orders and personality: BF2's calculateMods scales each behaviour's urgency") {

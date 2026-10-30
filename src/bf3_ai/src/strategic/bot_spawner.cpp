@@ -90,6 +90,44 @@ double BotSpawner::draw() {
 	return services_.random != nullptr ? double(services_.random->next()) * kDrawScale : 0.0;
 }
 
+const SquadMember *BotSpawner::squad_leader_to_follow(const SquadMember *p_member) {
+	const double follow = draw();
+	const SquadMember *const leader = p_member != nullptr ? p_member->squad().squad_leader() : nullptr;
+	if (leader != nullptr && (follow > kFollowSquadDraw || !leader->player().is_ai()) && !p_member->is_squad_leader() &&
+			leader->player().is_alive() && !leader->player().is_man_down()) {
+		return leader;
+	}
+	return nullptr;
+}
+
+bool BotSpawner::follows_squad(const SquadMember *p_member, float p_draw) {
+	const double follow = draw();
+	const SquadMember *const leader = p_member != nullptr ? p_member->squad().squad_leader() : nullptr;
+	return p_member != nullptr && p_member->squad().number_of_squad_members() > 1 &&
+			(follow > p_draw || (leader != nullptr && !leader->player().is_ai()));
+}
+
+const SquadMember *BotSpawner::squad_mate_to_follow(const SquadMember *p_member) const {
+	if (p_member == nullptr) {
+		return nullptr;
+	}
+	const SquadCoordinator &squad = p_member->squad();
+	const SquadMember *const leader = squad.squad_leader();
+	const auto ready = [&](const SquadMember *p_mate) {
+		return p_mate != nullptr && p_mate != p_member && p_mate->player().is_alive() &&
+				!p_mate->player().is_man_down();
+	};
+	if (ready(leader)) {
+		return leader;
+	}
+	for (int i = 0; i < squad.number_of_squad_members(); ++i) {
+		if (ready(squad.squad_member(i))) {
+			return squad.squad_member(i);
+		}
+	}
+	return nullptr;
+}
+
 bool BotSpawner::find_suitable_spawn_group(int p_strategic_object_id, SpawnBot &r_bot) {
 	SpawnGame &game = *services_.game;
 	const int side = r_bot.side();
@@ -160,10 +198,7 @@ int BotSpawner::find_suitable_spawn_group(int p_side, const SpawnObjective *&r_o
 	const Vec2 squad_xz{ squad_position.x, squad_position.z };
 	point_weights_.clear();
 
-	const double follow = draw();
-	const SquadMember *const leader = member != nullptr ? member->squad().squad_leader() : nullptr;
-	if (leader != nullptr && (follow > kFollowSquadDraw || !leader->player().is_ai()) && !member->is_squad_leader() &&
-			leader->player().is_alive() && !leader->player().is_man_down()) {
+	if (squad_leader_to_follow(member) != nullptr) {
 		r_object = nullptr;
 		float best = FLT_MAX;
 		int selected = 0;

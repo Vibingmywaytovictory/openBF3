@@ -21,8 +21,8 @@ BotMain::BotMain(uint32_t p_bot_id, int p_player_id, int p_side, InfantryBody &r
 	behaviours_[size_t(InfantryBehaviour::TakeCoverInfantry)] =
 			std::make_unique<BBTakeCoverInfantry>(curve(InfantryBehaviour::TakeCoverInfantry), body_);
 	behaviours_[size_t(InfantryBehaviour::Avoid)] = std::make_unique<BBAvoid>(curve(InfantryBehaviour::Avoid), body_);
-	behaviours_[size_t(InfantryBehaviour::MoveTo)] =
-			std::make_unique<BBMoveTo>(curve(InfantryBehaviour::MoveTo), body_, squad_goal_, tuning_);
+	behaviours_[size_t(InfantryBehaviour::MoveTo)] = std::make_unique<BBMoveTo>(
+			curve(InfantryBehaviour::MoveTo), body_, squad_goal_, tuning_, ordered_behaviour_);
 	behaviours_[size_t(InfantryBehaviour::Random)] =
 			std::make_unique<BBRandom>(curve(InfantryBehaviour::Random), body_);
 	behaviours_[size_t(InfantryBehaviour::Idle)] = std::make_unique<BBIdle>(curve(InfantryBehaviour::Idle), body_);

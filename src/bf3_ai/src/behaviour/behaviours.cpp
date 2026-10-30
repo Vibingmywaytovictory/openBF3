@@ -48,6 +48,7 @@ const KeyDef<BehaviourTuning> kKeys[] = {
 	{ "bb.decision_ticks", KeyKind::U32, 1, 60, BF3_BB_FIELD(decision_ticks) },
 	{ "bb.squad_far_m", KeyKind::Float, 1.0, 1000.0, BF3_BB_FIELD(squad_far_m) },
 	{ "bb.squad_arrive_m", KeyKind::Float, 0.1, 100.0, BF3_BB_FIELD(squad_arrive_m) },
+	{ "bb.mission_arrive_m", KeyKind::Float, 0.1, 1000.0, BF3_BB_FIELD(mission_arrive_m) },
 };
 
 #undef BF3_BB_FIELD
@@ -292,12 +293,21 @@ bool BBAvoid::plan(BotScript &r_script, bool) {
 
 float BBMoveTo::situation() {
 	squad_ = false;
+	hold_ = false;
 	float x = body_.senses().hunt_target ? 1.0f : 0.0f;
-	if (goal_.kind != SquadGoalKind::None && std::isfinite(goal_.position.x) && std::isfinite(goal_.position.z)) {
+	const bool goal =
+			goal_.kind != SquadGoalKind::None && std::isfinite(goal_.position.x) && std::isfinite(goal_.position.z);
+	const bool waiting = goal_.kind == SquadGoalKind::SquadTarget && goal_.wait_for_members;
+	if (ordered_ == int(InfantryBehaviour::MoveTo)) {
+		hold_ = !goal || waiting || distance(body_.position(), goal_.position) <= tuning_.squad_arrive_m;
+		squad_ = true;
+		return std::max(x, 1.0f);
+	}
+	if (goal && !waiting) {
 		const float d = distance(body_.position(), goal_.position);
 		if (d > tuning_.squad_arrive_m) {
 			const float squad = std::clamp(d / std::max(tuning_.squad_far_m, 1e-3f), 0.0f, 1.0f);
-			if (squad > x) {
+			if (squad > x || squad >= 1.0f) {
 				x = squad;
 				squad_ = true;
 			}
@@ -309,7 +319,7 @@ float BBMoveTo::situation() {
 bool BBMoveTo::plan(BotScript &r_script, bool) {
 	if (squad_) {
 		r_script.clear(InfantryActivity::Roam);
-		r_script.add(PlanTarget::MoveTo, move_args(MoveGoal::Squad, goal_.position));
+		r_script.add(PlanTarget::MoveTo, move_args(MoveGoal::Squad, hold_ ? body_.position() : goal_.position));
 		return true;
 	}
 	r_script.clear(InfantryActivity::Hunt);

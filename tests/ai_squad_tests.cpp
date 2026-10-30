@@ -7,6 +7,7 @@
 #include "bf3/ai/path/map_properties.h"
 #include "bf3/ai/squad/squad_manager.h"
 #include "bf3/ai/strategic/bot_spawner.h"
+#include "bf3/ai/strategic/strategy.h"
 #include "bf3/ai/vehicle/aerial_height_map.h"
 #include "bf3/ai/vehicle/landing_zone_manager.h"
 #include "bf3/ai/vehicle/vehicle_occupancy.h"
@@ -14,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <string>
@@ -1039,6 +1041,259 @@ TEST_SUITE("ai-squad") {
 		CHECK(pressure.size() == 4);
 		for (const int kit : { 0, 2, 3, kKitEngineer }) {
 			CHECK(pressure[kit] > 40);
+		}
+	}
+}
+
+namespace {
+
+struct ControlPoints final : StrategicGame {
+	std::vector<Vec3> points;
+	bool control_point_info(uint32_t p_id, Vec3 &r_position, float &r_radius, bool &r_active) const override {
+		if (p_id >= points.size()) {
+			return false;
+		}
+		r_position = points[p_id];
+		r_radius = 10.0f;
+		r_active = true;
+		return true;
+	}
+	int owner_of_control_point(uint32_t) const override { return 0; }
+	bool control_point_takeable(uint32_t p_id) const override { return p_id < points.size(); }
+	float control_point_take_over_counter(uint32_t) const override { return 1.0f; }
+	float terrain_altitude(float, float) const override { return 0.0f; }
+	int number_of_maps() const override { return 1; }
+	bool polygon(const Vec3 &, int, uint32_t &, uint32_t &, Vec3 &) const override { return false; }
+};
+
+struct AreaHeat final : StrategyHeat {
+	std::map<int, float> heat;
+	float area_heat(const AIStrategicArea &p_area) const override {
+		const auto found = heat.find(p_area.index());
+		return found != heat.end() ? found->second : 0.0f;
+	}
+};
+
+void form_squad(World &r_world, SquadManager &r_squads, int p_squad, std::initializer_list<int> p_ids, Vec3 p_where,
+		bool p_human_leader = false) {
+	bool first = true;
+	for (const int id : p_ids) {
+		Player &player = r_world.add(id, !(first && p_human_leader), p_where);
+		r_world.join_squad(p_squad, player);
+		r_squads.player_joins_squad(id, p_squad, 1);
+		first = false;
+	}
+}
+
+void place_squad(World &r_world, SquadManager &r_squads, int p_squad, Vec3 p_where) {
+	SquadCoordinator &squad = r_squads.coordinator(1, p_squad);
+	for (int i = 0; i < squad.number_of_squad_members(); ++i) {
+		r_world.players[squad.squad_member(i)->player_id()]->body.where = p_where;
+	}
+	squad.update(++r_world.tick);
+}
+
+}
+
+TEST_SUITE("ai-strategy") {
+	TEST_CASE("StrategyManager: no strategies until one is set, one active per side, a forced strategy wins, reset "
+			  "clears") {
+		StrategyManager manager;
+		CHECK(manager.active_strategy_name(1) == "No Strategies");
+		CHECK(manager.active_strategy(2) == nullptr);
+		manager.create_strategy("Hunt");
+		manager.create_strategy("Spread");
+		manager.create_strategy("Hunt");
+		manager.set_active_strategy(1, "Hunt");
+		manager.set_active_strategy(2, "Spread");
+		manager.set_active_strategy(2, "Spread");
+		manager.set_active_strategy(2, "Nope");
+		CHECK(manager.active_strategy_name(1) == "Hunt");
+		CHECK(manager.active_strategy_name(2) == "Spread");
+		CHECK(manager.changes(2) == 1);
+		manager.force_strategy("Spread", 1);
+		manager.set_active_strategy(1, "Hunt");
+		CHECK(manager.active_strategy_name(1) == "Spread");
+		REQUIRE(manager.forced_strategy(1) != nullptr);
+		CHECK(manager.forced_strategy(2) == nullptr);
+		manager.reset();
+		CHECK(manager.active_strategy_name(1) == "No Strategies");
+		CHECK(manager.strategy("Hunt") == nullptr);
+	}
+
+	TEST_CASE("StrategyDecisions without areas to take: Spread sends bot-led squads to different areas, Hunt to the "
+			  "hottest") {
+		World world;
+		world.squads = 4;
+		SquadManager squads(world.services());
+		AIStrategicObjectManager objects{ StrategicServices{} };
+		const Vec2 centres[] = { { 0.0f, 0.0f }, { 100.0f, 0.0f }, { 0.0f, 100.0f }, { 200.0f, 200.0f } };
+		for (size_t i = 0; i < 4; ++i) {
+			REQUIRE(objects.create("a" + std::to_string(i), { centres[i].x - 40.0f, centres[i].y - 40.0f }, centres[i],
+					0.0f, 40.0f, std::string()));
+		}
+		objects.post_load_init_areas();
+		form_squad(world, squads, 1, { 1, 2 }, { 1.0f, 0.0f, 0.0f });
+		form_squad(world, squads, 2, { 3, 4 }, { 5.0f, 0.0f, 5.0f });
+		form_squad(world, squads, 3, { 5, 6 }, { 1.0f, 0.0f, 0.0f }, true);
+		for (int q = 1; q <= 3; ++q) {
+			squads.coordinator(1, q).update(++world.tick);
+		}
+		StrategyManager manager;
+		AreaHeat heat;
+		StrategyTuning tuning;
+		StrategyDecisions decisions(manager, squads, objects, &heat, tuning);
+		SaiServices services;
+		services.objects = &objects;
+		services.squads = &squads;
+		services.decisions = &decisions;
+		Sai sai(1, services);
+		const auto cycle = [&] {
+			decisions.choose_strategy(sai);
+			decisions.modify_strategic_objects_temperatures(sai);
+			decisions.update_bot_positions(sai);
+			decisions.update_distribution(sai);
+			decisions.distribute_with_no_areas(sai);
+		};
+		cycle();
+		CHECK(manager.active_strategy_name(1) == "Spread");
+		const SquadCoordinator &first = squads.coordinator(1, 1);
+		const SquadCoordinator &second = squads.coordinator(1, 2);
+		REQUIRE(first.squad_strategic_area_assignment() != nullptr);
+		REQUIRE(second.squad_strategic_area_assignment() != nullptr);
+		CHECK(first.mission_status() == SquadMissionStatus::Issued);
+		CHECK(first.order() == SquadOrder::Move);
+		CHECK(first.squad_strategic_area_assignment()->index() == 1);
+		CHECK(second.squad_strategic_area_assignment()->index() == 2);
+		CHECK(first.squad_goto_position().x == 100.0f);
+		CHECK(squads.coordinator(1, 3).mission_status() == SquadMissionStatus::None);
+		CHECK(decisions.squad_area(1, 1) == 0);
+		CHECK(decisions.stats().spread_missions == 2);
+
+		heat.heat[3] = tuning.hunt_heat + 1.0f;
+		heat.heat[1] = 0.5f;
+		cycle();
+		CHECK(manager.active_strategy_name(1) == "Hunt");
+		CHECK(decisions.hunted_area(1) == 3);
+		CHECK(first.squad_strategic_area_assignment()->index() == 3);
+		CHECK(second.squad_strategic_area_assignment()->index() == 3);
+		CHECK(squads.coordinator(1, 3).mission_status() == SquadMissionStatus::None);
+		CHECK(decisions.stats().hunt_missions == 2);
+		heat.heat[1] = 0.6f * heat.heat[3];
+		cycle();
+		CHECK(decisions.hunted_area(1) == 3);
+		CHECK(decisions.stats().hunt_missions == 2);
+
+		place_squad(world, squads, 1, { 200.0f, 0.0f, 200.0f });
+		squads.coordinator(1, 1).un_assign_squad();
+		squads.coordinator(1, 1).assign_squad(
+				&decisions.area(2), { 0.0f, 0.0f, 100.0f }, SquadOrder::Move, SquadMissionStatus::Accepted);
+		cycle();
+		CHECK(decisions.squad_area(1, 1) == 3);
+		CHECK(squads.coordinator(1, 1).mission_status() == SquadMissionStatus::None);
+		CHECK(decisions.release_squads_from_object(sai, 3, 1) == 1);
+		CHECK(second.mission_status() == SquadMissionStatus::None);
+	}
+
+	TEST_CASE("StrategyDecisions with areas to take: a free squad defends a contested owned area, the next attacks the "
+			  "nearest") {
+		World world;
+		world.squads = 4;
+		SquadManager squads(world.services());
+		ControlPoints points;
+		points.points = { { 0.0f, 0.0f, 0.0f }, { 150.0f, 0.0f, 0.0f }, { 400.0f, 0.0f, 0.0f } };
+		StrategicServices strategic;
+		strategic.game = &points;
+		AIStrategicObjectManager objects{ strategic };
+		for (uint32_t i = 0; i < 3; ++i) {
+			REQUIRE(objects.create_from_control_point("f" + std::to_string(i), i, 10.0f, std::string()));
+		}
+		objects.post_load_init_areas();
+		objects.strategic_object(0)->set_status(1, StrategicStatus::Owned);
+		objects.strategic_object(2)->set_status(1, StrategicStatus::Hostile);
+		form_squad(world, squads, 1, { 1, 2 }, { 10.0f, 0.0f, 0.0f });
+		form_squad(world, squads, 2, { 3, 4 }, { 140.0f, 0.0f, 0.0f });
+		for (int q = 1; q <= 2; ++q) {
+			squads.coordinator(1, q).update(++world.tick);
+		}
+		StrategyManager manager;
+		AreaHeat heat;
+		heat.heat[0] = 1.0f;
+		StrategyDecisions decisions(manager, squads, objects, &heat, StrategyTuning{});
+		SaiServices services;
+		services.objects = &objects;
+		services.squads = &squads;
+		services.decisions = &decisions;
+		Sai sai(1, services);
+		decisions.modify_strategic_objects_temperatures(sai);
+		decisions.update_bot_positions(sai);
+		decisions.update_distribution(sai);
+		decisions.distribute_resources(sai);
+		decisions.distribute_defence(sai);
+		decisions.distribute_attack(sai);
+		const SquadCoordinator &first = squads.coordinator(1, 1);
+		const SquadCoordinator &second = squads.coordinator(1, 2);
+		REQUIRE(first.squad_strategic_area_assignment() != nullptr);
+		REQUIRE(second.squad_strategic_area_assignment() != nullptr);
+		CHECK(first.order() == SquadOrder::Defend);
+		CHECK(first.squad_strategic_area_assignment()->index() == 0);
+		CHECK(second.order() == SquadOrder::Attack);
+		CHECK(second.squad_strategic_area_assignment()->index() == 1);
+		CHECK(second.squad_goto_position().x == 150.0f);
+		CHECK(decisions.stats().defend_missions == 1);
+		CHECK(decisions.stats().attack_missions == 1);
+		decisions.distribute_defence(sai);
+		decisions.distribute_attack(sai);
+		CHECK(decisions.stats().missions == 2);
+	}
+
+	TEST_CASE("BotSpawner: a member follows its living leader past the draw, never a leader, always a human leader; "
+			  "past the "
+			  "same draw a bot spawns on any living mate") {
+		World world;
+		SquadManager squads(world.services());
+		form_squad(world, squads, 1, { 1, 2, 3 }, { 0.0f, 0.0f, 0.0f });
+		AIRandom random(7);
+		random.init();
+		SpawnServices services;
+		services.random = &random;
+		BotSpawner spawner(services);
+		int followed = 0;
+		for (int i = 0; i < 200; ++i) {
+			followed += spawner.squad_leader_to_follow(squads.squad_member(2, 1)) != nullptr ? 1 : 0;
+		}
+		CHECK(followed > 120);
+		CHECK(followed < 160);
+		CHECK(spawner.squad_leader_to_follow(squads.squad_member(1, 1)) == nullptr);
+		world.players[1]->down = true;
+		for (int i = 0; i < 20; ++i) {
+			CHECK(spawner.squad_leader_to_follow(squads.squad_member(3, 1)) == nullptr);
+		}
+		int follows = 0;
+		for (int i = 0; i < 200; ++i) {
+			follows += spawner.follows_squad(squads.squad_member(1, 1), 0.3f) ? 1 : 0;
+		}
+		CHECK(follows > 120);
+		CHECK(follows < 160);
+		for (int i = 0; i < 20; ++i) {
+			CHECK(spawner.follows_squad(squads.squad_member(1, 1), 0.0f));
+		}
+		const SquadMember *const second = spawner.squad_mate_to_follow(squads.squad_member(1, 1));
+		REQUIRE(second != nullptr);
+		CHECK(second->player_id() == 2);
+		world.players[2]->alive = false;
+		const SquadMember *const third = spawner.squad_mate_to_follow(squads.squad_member(1, 1));
+		REQUIRE(third != nullptr);
+		CHECK(third->player_id() == 3);
+		world.players[3]->alive = false;
+		CHECK(spawner.squad_mate_to_follow(squads.squad_member(1, 1)) == nullptr);
+		CHECK_FALSE(spawner.follows_squad(nullptr, 0.0f));
+		world.players[2]->alive = true;
+		world.players[3]->alive = true;
+		world.players[1]->down = false;
+		world.players[1]->ai = false;
+		for (int i = 0; i < 20; ++i) {
+			CHECK(spawner.squad_leader_to_follow(squads.squad_member(3, 1)) != nullptr);
 		}
 	}
 }

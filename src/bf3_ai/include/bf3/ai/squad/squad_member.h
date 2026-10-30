@@ -21,6 +21,7 @@ public:
 	SquadBot *bot() const { return bot_; }
 	int member_index() const { return member_index_; }
 	void set_member_index(int p_index) { member_index_ = p_index; }
+	void detach_bot() { bot_ = nullptr; }
 	int squad_index() const { return squad_index_; }
 	int side() const { return side_; }
 	void set_is_squad_leader(bool p_leader) { is_squad_leader_ = p_leader; }

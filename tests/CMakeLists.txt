@@ -1188,6 +1188,8 @@ openbf3_test(test_ai_squad test_main.cpp ai_squad_tests.cpp)
 target_link_libraries(test_ai_squad PRIVATE bf3_ai)
 add_test(NAME ai.squad.unit COMMAND test_ai_squad --test-suite=ai-squad)
 set_tests_properties(ai.squad.unit PROPERTIES TIMEOUT 60 LABELS "unit")
+add_test(NAME ai.strategy.unit COMMAND test_ai_squad --test-suite=ai-strategy)
+set_tests_properties(ai.strategy.unit PROPERTIES TIMEOUT 60 LABELS "unit")
 
 openbf3_test(test_ai_world test_main.cpp ai_world_tests.cpp tdm_fixture.h gunplay_fixture.h test_support.h)
 target_link_libraries(test_ai_world PRIVATE bf3_host)
