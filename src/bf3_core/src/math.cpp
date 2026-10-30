@@ -23,6 +23,12 @@ Vec3 scale(const Vec3 &p_a, float p_s) {
 float length(const Vec3 &p_a) {
 	return std::sqrt(dot(p_a, p_a));
 }
+float horizontal_distance(const Vec3 &p_a, const Vec3 &p_b) {
+	const float dx = p_a[0] - p_b[0];
+	const float dz = p_a[2] - p_b[2];
+	return std::sqrt(dx * dx + dz * dz);
+}
+
 Vec3 normalize(const Vec3 &p_a) {
 	const float len = length(p_a);
 	return len > 0.0f ? scale(p_a, 1.0f / len) : p_a;

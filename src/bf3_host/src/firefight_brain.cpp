@@ -105,11 +105,6 @@ float yaw_of(float p_dx, float p_dz) {
 	return std::atan2(p_dx, p_dz);
 }
 
-float horizontal(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
-	const float dx = p_b[0] - p_a[0], dz = p_b[2] - p_a[2];
-	return std::sqrt(dx * dx + dz * dz);
-}
-
 float distance(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 	const float dx = p_b[0] - p_a[0], dy = p_b[1] - p_a[1], dz = p_b[2] - p_a[2];
 	return std::sqrt(dx * dx + dy * dy + dz * dz);

@@ -13,15 +13,10 @@ namespace bf3::sim::bots {
 namespace {
 
 using bf3::core::splitmix64_next;
+using bf3::core::vec::horizontal_distance;
 
 float unit(uint64_t &r_state) {
 	return float(splitmix64_next(r_state) >> 40) / float(1ull << 24);
-}
-
-float horizontal(const Vec3 &p_a, const Vec3 &p_b) {
-	const float dx = p_b[0] - p_a[0];
-	const float dz = p_b[2] - p_a[2];
-	return std::sqrt(dx * dx + dz * dz);
 }
 
 float wrap_angle(float p_radians) {
@@ -130,7 +125,7 @@ struct WalkerBrain::Impl {
 		if (want_objective) {
 			const size_t i = size_t(splitmix64_next(rng) % p_view.objectives.size());
 			g = p_view.objectives[i];
-			found = horizontal(g.position, p_position) > g.arrive_radius;
+			found = horizontal_distance(g.position, p_position) > g.arrive_radius;
 		}
 		if (!found && p_view.components != nullptr && p_view.query != nullptr) {
 			for (int attempt = 0; attempt < 8 && !found; ++attempt) {
@@ -143,12 +138,12 @@ struct WalkerBrain::Impl {
 				g.kind = BotGoal::Kind::NavPoint;
 				g.position = point;
 				g.poly = poly;
-				found = horizontal(point, p_position) >= params.goal_min_distance || attempt == 7;
+				found = horizontal_distance(point, p_position) >= params.goal_min_distance || attempt == 7;
 			}
 		}
 		if (!found && in_main && !p_view.objectives.empty()) {
 			g = p_view.objectives[size_t(splitmix64_next(rng) % p_view.objectives.size())];
-			found = horizontal(g.position, p_position) > g.arrive_radius;
+			found = horizontal_distance(g.position, p_position) > g.arrive_radius;
 		}
 		if (!found || g.poly == 0) {
 			return false;
@@ -206,8 +201,8 @@ struct WalkerBrain::Impl {
 		const Vec3 extents{ params.off_mesh_radius, 2.5f, params.off_mesh_radius };
 
 		if (dropping) {
-			const bool landed = (p_self.flags & soldier_flags::kGrounded) != 0 && horizontal(pos, drop_end) <= 1.0f &&
-					std::fabs(pos[1] - drop_end[1]) <= 2.5f;
+			const bool landed = (p_self.flags & soldier_flags::kGrounded) != 0 &&
+					horizontal_distance(pos, drop_end) <= 1.0f && std::fabs(pos[1] - drop_end[1]) <= 2.5f;
 			if (landed) {
 				dropping = false;
 			} else if (float(p_view.tick - drop_tick) * kTickSeconds > kDropTimeout) {
@@ -223,7 +218,8 @@ struct WalkerBrain::Impl {
 			}
 		}
 
-		if (horizontal(pos, goal.position) <= goal.arrive_radius && std::fabs(pos[1] - goal.position[1]) <= kArriveVertical) {
+		if (horizontal_distance(pos, goal.position) <= goal.arrive_radius &&
+				std::fabs(pos[1] - goal.position[1]) <= kArriveVertical) {
 			++stats.goals_reached;
 			forget_goal();
 			if (!pick_goal(p_view, pos)) {
@@ -232,7 +228,7 @@ struct WalkerBrain::Impl {
 		}
 
 		if (p_view.tick - anchor_tick >= stuck_ticks) {
-			const bool moved_enough = horizontal(pos, anchor) >= params.stuck_progress;
+			const bool moved_enough = horizontal_distance(pos, anchor) >= params.stuck_progress;
 			if (moving_ticks * 2 >= stuck_ticks && !moved_enough) {
 				++stats.stuck_events;
 				if (repaths_in_row >= params.max_repaths) {
@@ -263,7 +259,8 @@ struct WalkerBrain::Impl {
 				corner_count = corridor.corners(query, corners.data(), kMaxNavCorners);
 				corner_index = 0;
 				off_mesh = false;
-				const bool at_end = corner_count == 1 && corners[0].end && horizontal(pos, corners[0].position) <= goal.arrive_radius;
+				const bool at_end = corner_count == 1 && corners[0].end &&
+						horizontal_distance(pos, corners[0].position) <= goal.arrive_radius;
 				if (at_end && !corridor_partial) {
 
 					++stats.goals_reached;
@@ -327,12 +324,13 @@ struct WalkerBrain::Impl {
 				have_target = true;
 			}
 		} else if (!pending && !need_path && corner_count > 0) {
-			while (corner_index + 1 < corner_count && horizontal(pos, corners[corner_index].position) < params.corner_lookahead &&
+			while (corner_index + 1 < corner_count &&
+					horizontal_distance(pos, corners[corner_index].position) < params.corner_lookahead &&
 					(corners[corner_index].flags & nav_flags::kDrop) == 0) {
 				++corner_index;
 			}
 			const NavCorner &corner = corners[corner_index];
-			if ((corner.flags & nav_flags::kDrop) != 0 && horizontal(pos, corner.position) <= kDropReach) {
+			if ((corner.flags & nav_flags::kDrop) != 0 && horizontal_distance(pos, corner.position) <= kDropReach) {
 				Vec3 end{};
 				if (corridor.move_over_drop(*p_view.query, corner, &end)) {
 					dropping = true;
@@ -347,7 +345,7 @@ struct WalkerBrain::Impl {
 				target = corner.position;
 				have_target = true;
 				area = corner.area;
-				straight = horizontal(pos, corner.position);
+				straight = horizontal_distance(pos, corner.position);
 			}
 			uint8_t first_area = 0;
 			uint16_t first_flags = 0;
@@ -448,7 +446,7 @@ Command WalkerBrain::command(const WalkerView &p_view) {
 		m.moving_ticks = 0;
 	}
 	if (m.have_last) {
-		const float d = horizontal(m.last_position, self->position);
+		const float d = horizontal_distance(m.last_position, self->position);
 		if (d < 5.0f) {
 			m.stats.metres += double(d);
 		}

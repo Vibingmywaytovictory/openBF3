@@ -33,11 +33,7 @@ bool is_alive(const sim::SoldierState &p_state) {
 }
 
 using bf3::core::finite;
-
-float horizontal(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
-	const float dx = p_b[0] - p_a[0], dz = p_b[2] - p_a[2];
-	return std::sqrt(dx * dx + dz * dz);
-}
+using bf3::core::vec::horizontal_distance;
 
 struct Fnv {
 	uint64_t h = 0xcbf29ce484222325ull;
@@ -464,7 +460,7 @@ core::Result<FirefightReport> run_firefight(std::shared_ptr<const SharedLevel> p
 				k.last = st->position;
 			}
 			if (alive_now) {
-				const float step = horizontal(k.last, st->position);
+				const float step = horizontal_distance(k.last, st->position);
 				if (step < 5.0f && std::isfinite(step)) {
 					row.metres += double(step);
 				}
@@ -476,7 +472,7 @@ core::Result<FirefightReport> run_firefight(std::shared_ptr<const SharedLevel> p
 					k.window_origin = st->position;
 					k.window_max = 0.0f;
 				}
-				k.window_max = std::max(k.window_max, horizontal(k.window_origin, st->position));
+				k.window_max = std::max(k.window_max, horizontal_distance(k.window_origin, st->position));
 				if (now - k.window_start >= p_options.window_ticks) {
 					++row.windows;
 					++report.windows;

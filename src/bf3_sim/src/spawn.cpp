@@ -23,12 +23,7 @@ constexpr float kLiftStep = 0.1f;
 const float kLevelCos = std::cos(2.0f * core::kDegToRadF);
 
 using bf3::core::finite;
-
-float horizontal_distance(const Vec3 &p_a, const Vec3 &p_b) {
-	const float dx = p_a[0] - p_b[0];
-	const float dz = p_a[2] - p_b[2];
-	return std::sqrt(dx * dx + dz * dz);
-}
+using bf3::core::vec::horizontal_distance;
 
 bool floor_at(const CollisionWorld &p_world, float p_x, float p_z, float p_top, float p_bottom, StaticHit &r_hit) {
 	if (!(p_top > p_bottom)) {

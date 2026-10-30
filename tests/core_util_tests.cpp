@@ -62,6 +62,15 @@ std::string fault_of(std::string_view p_text, const KeyValueGrammar<Sample> &p_g
 }
 
 TEST_SUITE("core-util-unit") {
+	TEST_CASE("core.util: horizontal_distance measures in the ground plane and ignores height") {
+		const Vec3 a{ 3.0f, 100.0f, 4.0f };
+		const Vec3 b{ 0.0f, -5.0f, 0.0f };
+		CHECK(vec::horizontal_distance(a, b) == 5.0f);
+		CHECK(vec::horizontal_distance(b, a) == 5.0f);
+		CHECK(vec::horizontal_distance(a, a) == 0.0f);
+		CHECK(vec::horizontal_distance(a, Vec3{ 3.0f, -7.0f, 4.0f }) == 0.0f);
+	}
+
 	TEST_CASE("core.util: one degrees-to-radians constant in double and float") {
 		CHECK(kDegToRad * 180.0 == doctest::Approx(3.14159265358979323846).epsilon(1e-15));
 		CHECK(kDegToRad == 3.14159265358979323846 / 180.0);

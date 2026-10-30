@@ -65,6 +65,7 @@ Vec3 sub(const Vec3 &p_a, const Vec3 &p_b);
 Vec3 add(const Vec3 &p_a, const Vec3 &p_b);
 Vec3 scale(const Vec3 &p_a, float p_s);
 float length(const Vec3 &p_a);
+float horizontal_distance(const Vec3 &p_a, const Vec3 &p_b);
 Vec3 normalize(const Vec3 &p_a);
 }
 

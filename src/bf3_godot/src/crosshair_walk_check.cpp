@@ -29,6 +29,7 @@ namespace bf3::godot_side {
 
 using namespace godot;
 using bf3::core::fmt;
+using bf3::core::vec::horizontal_distance;
 namespace sw = bf3::sim::weapons;
 
 namespace {
@@ -54,12 +55,6 @@ constexpr std::string_view kPlaceMoment = "m02";
 
 float horizontal_speed(const sim::Vec3 &p_v) {
 	return std::sqrt(p_v[0] * p_v[0] + p_v[2] * p_v[2]);
-}
-
-float horizontal_distance(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
-	const float dx = p_a[0] - p_b[0];
-	const float dz = p_a[2] - p_b[2];
-	return std::sqrt(dx * dx + dz * dz);
 }
 
 }

@@ -20,6 +20,7 @@ namespace bf3::godot_side {
 
 using namespace godot;
 using bf3::core::fmt;
+using bf3::core::vec::horizontal_distance;
 
 namespace {
 
@@ -29,12 +30,6 @@ constexpr double kSettleSeconds = 1.0;
 constexpr float kArriveXz = 0.5f;
 constexpr float kArriveY = 1.5f;
 constexpr size_t kMaxPoints = 32;
-
-float horizontal_distance(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
-	const float dx = p_a[0] - p_b[0];
-	const float dz = p_a[2] - p_b[2];
-	return std::sqrt(dx * dx + dz * dz);
-}
 
 }
 
