@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "bf3/core/res/dx_texture.h"
+#include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/minimap.h"
 
 #include <cmath>
@@ -81,6 +82,14 @@ TEST_SUITE("ui-minimap-unit") {
 		CHECK(ui::minimap_zoom(p, true).player_is_center);
 		p.zoom_small_step = 7;
 		CHECK(ui::minimap_zoom(p, true).zoom == 0.0f);
+		CHECK(ui::minimap_zoom_at(p, false, 1).zoom == 0.4f);
+		CHECK(ui::minimap_zoom_at(p, false, 1).player_is_center);
+		CHECK_FALSE(ui::minimap_zoom_at(p, false, 2).player_is_center);
+		CHECK(ui::minimap_zoom_at(p, true, 2).player_is_center);
+		CHECK(ui::minimap_zoom_at(p, true, -1).zoom == 0.0f);
+		CHECK(ui::minimap_metres_per_unit(0.0f) == ui::kMinimapMetresPerLocalUnit);
+		CHECK(ui::minimap_metres_per_unit(1.2f) == doctest::Approx(1.375 * 2.2));
+		CHECK(ui::minimap_metres_per_unit(-1.0f) == ui::kMinimapMetresPerLocalUnit);
 	}
 
 	TEST_CASE("l8_mip_chain: sizes down to 1x1 and a 2x2 box filter") {

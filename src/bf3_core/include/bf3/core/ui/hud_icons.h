@@ -88,6 +88,8 @@ inline size_t hud_icon_frame(const HudIconStateFrames &p_state, double p_seconds
 	return size_t(std::floor(p_seconds * double(p_state.frame_rate))) % p_state.frames.size();
 }
 
+inline constexpr std::string_view kHudIconPlayerDead = "UIHudIcon_PlayerDead";
+
 struct HudIcon {
 	std::string type;
 	std::vector<HudIconStateFrames> states;

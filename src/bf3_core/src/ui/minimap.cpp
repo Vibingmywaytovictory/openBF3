@@ -414,8 +414,12 @@ Result<MinimapProfile> read_minimap_profile(const EbxResolver &p_db, WorkBudget 
 }
 
 MinimapZoom minimap_zoom(const MinimapProfile &p_profile, bool p_small) {
+	return minimap_zoom_at(p_profile, p_small, p_small ? p_profile.zoom_small_step : p_profile.zoom_large_step);
+}
+
+MinimapZoom minimap_zoom_at(const MinimapProfile &p_profile, bool p_small, int32_t p_step) {
 	MinimapZoom z;
-	z.step = p_small ? p_profile.zoom_small_step : p_profile.zoom_large_step;
+	z.step = p_step;
 	z.zoom = z.step >= 0 && size_t(z.step) < p_profile.zoom_steps.size() ? p_profile.zoom_steps[size_t(z.step)] : 0.0f;
 	z.player_is_center = p_small || !(float(z.step) >= p_profile.max_zoom_step);
 	return z;

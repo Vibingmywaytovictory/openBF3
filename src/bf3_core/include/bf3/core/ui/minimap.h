@@ -241,6 +241,7 @@ struct MinimapZoom {
 };
 
 MinimapZoom minimap_zoom(const MinimapProfile &p_profile, bool p_small);
+MinimapZoom minimap_zoom_at(const MinimapProfile &p_profile, bool p_small, int32_t p_step);
 
 Result<MinimapProfile> read_minimap_profile(const EbxResolver &p_db, level::WorkBudget &r_budget);
 
