@@ -67,6 +67,16 @@ struct ClientProjectilesConfig {
 using present::effect_seed;
 using present::impact_seed;
 
+inline constexpr size_t kMaxPresentedGrenades = 16;
+
+struct PresentedGrenade {
+	std::array<float, 3> position{};
+	uint32_t shot_index = 0;
+	uint16_t def = 0;
+	uint8_t slot = 0;
+	bool resting = false;
+};
+
 bool shot_event_of(const net::RemoteShot &p_shot, const sim::weapons::WeaponTable &p_table, uint64_t p_match_seed, sim::weapons::ShotEvent &r_event);
 
 class ClientProjectiles {
@@ -87,6 +97,7 @@ public:
 	void step_remote(double p_render_ticks, const sim::CollisionWorld &p_world, std::span<const net::OtherPose> p_others, PresentationEvents &r_events);
 
 	size_t take_samples(std::span<OwnTestSample> r_out);
+	size_t live_grenades(std::span<PresentedGrenade> r_out) const;
 	const ClientProjectilesStats &stats() const;
 
 private:

@@ -325,6 +325,31 @@ size_t ClientProjectiles::take_samples(std::span<OwnTestSample> r_out) {
 	return n;
 }
 
+size_t ClientProjectiles::live_grenades(std::span<PresentedGrenade> r_out) const {
+	size_t n = 0;
+	for (const sw::ProjectileWorld *w : { impl_->own.get(), impl_->remote.get() }) {
+		if (w == nullptr) {
+			continue;
+		}
+		for (const sw::Projectile &p : w->live()) {
+			if (n >= r_out.size() || p.def >= impl_->table->defs.size()) {
+				continue;
+			}
+			const sw::ProjectileSimDef &d = impl_->table->defs[p.def].projectile;
+			if (d.kind != sw::ProjectileKind::Grenade || !d.detonate_on_timeout) {
+				continue;
+			}
+			PresentedGrenade &g = r_out[n++];
+			g.position = { float(p.position[0]), float(p.position[1]), float(p.position[2]) };
+			g.shot_index = p.shot_index;
+			g.def = p.def;
+			g.slot = uint8_t(p.player_slot);
+			g.resting = (p.flags & sw::projectile_flags::kResting) != 0;
+		}
+	}
+	return n;
+}
+
 const ClientProjectilesStats &ClientProjectiles::stats() const {
 	return impl_->stats;
 }

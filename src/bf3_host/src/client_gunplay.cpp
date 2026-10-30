@@ -560,8 +560,10 @@ void ClientGunplay::publish(PresentationFrame &r_frame, std::span<const net::Oth
 			r_frame.own_weapons_valid = true;
 		}
 	}
+	r_frame.grenade_count = 0;
 	if (projectiles_ != nullptr) {
 		projectiles_->step_remote(r_frame.render_ticks_at_publish, p_world, p_poses, events_.ring());
+		r_frame.grenade_count = uint8_t(projectiles_->live_grenades(r_frame.grenades));
 		sample_scratch_.resize(4096);
 		size_t got = 0;
 		while ((got = projectiles_->take_samples(sample_scratch_)) > 0) {

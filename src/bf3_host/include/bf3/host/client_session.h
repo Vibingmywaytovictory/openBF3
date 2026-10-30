@@ -256,6 +256,8 @@ struct PresentationFrame {
 	sim::Tick own_revive_until = 0;
 	bool own_unspawned = false;
 	std::array<net::SoldierGear, net::kMaxSlots> gear = kNoGear;
+	uint8_t grenade_count = 0;
+	std::array<PresentedGrenade, kMaxPresentedGrenades> grenades{};
 };
 static_assert(std::is_trivially_copyable_v<PresentationFrame>);
 
