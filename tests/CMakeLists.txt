@@ -1095,6 +1095,13 @@ set_tests_properties(host.server.netthread PROPERTIES TIMEOUT 120 RUN_SERIAL TRU
 openbf3_label(timing host.server.netthread)
 openbf3_cost(host.server.netthread 1 10)
 
+openbf3_test(test_godot_mismatch test_main.cpp godot_mismatch_tests.cpp test_support.h)
+target_link_libraries(test_godot_mismatch PRIVATE test_proc_driver)
+target_include_directories(test_godot_mismatch PRIVATE ${PROJECT_SOURCE_DIR}/src/bf3_core/src)
+target_compile_definitions(test_godot_mismatch PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
+openbf3_proc_row(godot.mismatch test_godot_mismatch LABEL timing TIMEOUT 900 ARGS --test-suite=godot-mismatch)
+set_tests_properties(godot.mismatch PROPERTIES RUN_SERIAL TRUE)
+
 openbf3_check_rows()
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME hygiene.rules COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tools/check_hygiene.py" "${CMAKE_SOURCE_DIR}")
