@@ -277,7 +277,19 @@ ServerSessionStats ServerSession::stats() {
 		const uint32_t bf2 = b.bf2_bots.load(std::memory_order_relaxed);
 		out.brain = made == 0 ? "none" : bf2 == made ? "bf2" : "mixed";
 		out.bot_decisions = b.decisions.load(std::memory_order_relaxed);
+		out.squad_samples = b.squad_samples.load(std::memory_order_relaxed);
+		out.squad_near = b.squad_near.load(std::memory_order_relaxed);
+		out.squad_orders = b.squad_orders.load(std::memory_order_relaxed);
+		uint64_t below = 0;
+		for (size_t m = 0; m < ai::kCohesionBins && out.squad_samples > 0; ++m) {
+			below += b.squad_metres[m].load(std::memory_order_relaxed);
+			if (2u * below >= out.squad_samples) {
+				out.squad_median_m = float(m + 1u);
+				break;
+			}
+		}
 	}
+	out.squad_spawns = out.game.rules.squad_spawns;
 	return out;
 }
 

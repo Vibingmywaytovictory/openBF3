@@ -65,6 +65,11 @@ struct ServerSessionStats {
 	RotationStats rotation;
 	const char *brain = "none";
 	uint64_t bot_decisions = 0;
+	uint64_t squad_samples = 0;
+	uint64_t squad_near = 0;
+	float squad_median_m = 0.0f;
+	uint64_t squad_orders = 0;
+	uint64_t squad_spawns = 0;
 };
 
 uint64_t process_private_bytes();

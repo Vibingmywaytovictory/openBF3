@@ -345,13 +345,18 @@ void DedicatedMainLoop::report(const host::ServerSessionStats &p_stats) {
 			: std::string("no rules");
 	say(core::fmt("t=%.1f s tick %llu (%.2f Hz) p99 %.3f ms max %.3f ms overruns %llu | stages ms commands %.3f "
 				  "sources %.3f rules %.3f tick %.3f | peers %u "
-				  "clients %u (carried %u) bots %u | %s | levels changed %llu, in place %llu | stuck %u | private %.1f "
+				  "clients %u (carried %u) bots %u | %s | levels changed %llu, in place %llu | stuck %u | squads "
+				  "median %.0f m, "
+				  "near %.1f %% of %llu, orders %llu, spawns on a mate %llu | private %.1f "
 				  "MiB (peak %.1f) | kicks %s | godot nodes %lld resources "
 				  "%lld textures %lld B video %lld B | prebake%s",
 			elapsed_, (unsigned long long)s.ticks, s.measured_hz, s.p99_step_ms, s.max_step_ms,
 			(unsigned long long)s.overruns, g.last_commands_ms, g.last_sources_ms, g.last_rules_ms, g.last_tick_ms,
 			s.peers, g.clients, g.carried_seats, p_stats.bots, match.c_str(), (unsigned long long)rot.level_changes,
-			(unsigned long long)rot.in_place, p_stats.stuck_bots, double(p_stats.private_bytes) / kMiB,
+			(unsigned long long)rot.in_place, p_stats.stuck_bots, double(p_stats.squad_median_m),
+			p_stats.squad_samples > 0 ? 100.0 * double(p_stats.squad_near) / double(p_stats.squad_samples) : 0.0,
+			(unsigned long long)p_stats.squad_samples, (unsigned long long)p_stats.squad_orders,
+			(unsigned long long)p_stats.squad_spawns, double(p_stats.private_bytes) / kMiB,
 			double(p_stats.peak_private_bytes) / kMiB, host::kick_counts_text(g.kicks).c_str(),
 			(long long)monitor(Performance::OBJECT_NODE_COUNT), (long long)monitor(Performance::OBJECT_RESOURCE_COUNT),
 			(long long)monitor(Performance::RENDER_TEXTURE_MEM_USED),
@@ -405,14 +410,19 @@ void DedicatedMainLoop::_finalize() {
 	const core::SnapshotDiff diff = core::diff_snapshots(install_before_, install_.snapshot());
 	const host::ServerLevel &l = session_->level();
 	say(core::fmt("summary: %s %s loaded in %.2f s, played %.1f s, %llu ticks (%.2f Hz), tick p99 %.3f ms, overruns "
-				  "%llu, kills %d, stuck %u, brain %s, decisions %llu, private %.1f MiB "
+				  "%llu, kills %d, stuck %u, brain %s, decisions %llu, squad samples %llu, squad median %.1f m, "
+				  "squad near %.1f %%, squad orders %llu, squad spawns %llu, private %.1f MiB "
 				  "(peak %.1f MiB), godot nodes %lld, resources %+lld since the load, textures %lld B, dev commands "
 				  "%s, install %s, stopped by %s",
 			l.entry.level.c_str(), l.entry.mode.c_str(), load_seconds_, elapsed_,
 			(unsigned long long)stats.server.ticks, stats.server.measured_hz, stats.server.p99_step_ms,
 			(unsigned long long)stats.server.overruns, stats.kills, stats.stuck_bots, stats.brain,
-			(unsigned long long)stats.bot_decisions, double(stats.private_bytes) / kMiB,
-			double(stats.peak_private_bytes) / kMiB, (long long)monitor(Performance::OBJECT_NODE_COUNT),
+			(unsigned long long)stats.bot_decisions, (unsigned long long)stats.squad_samples,
+			double(stats.squad_median_m),
+			stats.squad_samples > 0 ? 100.0 * double(stats.squad_near) / double(stats.squad_samples) : 0.0,
+			(unsigned long long)stats.squad_orders, (unsigned long long)stats.squad_spawns,
+			double(stats.private_bytes) / kMiB, double(stats.peak_private_bytes) / kMiB,
+			(long long)monitor(Performance::OBJECT_NODE_COUNT),
 			(long long)(monitor(Performance::OBJECT_RESOURCE_COUNT) - resources_after_load_),
 			(long long)monitor(Performance::RENDER_TEXTURE_MEM_USED), args_.rules.dev_commands ? "on" : "off",
 			diff.clean() ? "unchanged" : diff.summary().c_str(), stopped_by_));
