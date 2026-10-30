@@ -7,6 +7,7 @@
 #include "bf3/audio/impact_audio.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/weapon_audio.h"
+#include "bf3/client_audio/area_feed.h"
 #include "bf3/client_audio/game_audio_frame.h"
 #include "bf3/client_audio/sound_fate_ledger.h"
 #include "bf3/core/path_guard.h"
@@ -15,6 +16,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -82,6 +84,10 @@ public:
 	std::span<const audio::KitAudioVariant> sound_variants() const;
 	GameAudioStats stats() const;
 	std::vector<std::string> load_report() const;
+	void set_sound_areas(const sim::logic::SoundAreaNatives *p_areas);
+	const audio::AreaFeedStats &area_feed() const;
+	std::optional<float> mixer_value(uint32_t p_name_hash) const;
+	core::Result<std::vector<std::string>> observe_area_waves(std::string_view p_patch, float p_area_type) const;
 	void shutdown();
 
 private:

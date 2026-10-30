@@ -197,6 +197,7 @@ struct MixerLevels {
 	uint32_t master_speakers = 0;
 };
 const char *mixer_cut_kind_name(MixerCutKind p_kind);
+inline constexpr size_t kMixerValueSlots = 64;
 
 class MixerCore {
 public:
@@ -216,6 +217,7 @@ public:
 	void set_tap(MixTap *p_tap);
 	void set_sum_tap(MixTap *p_tap);
 	float bus_gain(core::audio::MasterBus p_bus) const;
+	std::optional<float> mixer_value(uint32_t p_name_hash) const;
 
 	const MixerCutStats &cut_stats() const;
 	void record_cuts(bool p_on);

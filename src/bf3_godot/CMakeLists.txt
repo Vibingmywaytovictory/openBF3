@@ -227,6 +227,8 @@ if(OPENBF3_BUILD_CHECKS)
         src/audio_ingame_check.h
         src/collision_check.cpp
         src/collision_check.h
+        src/audio_areas_check.cpp
+        src/audio_areas_check.h
         src/crosshair_walk_check.cpp
         src/fx3_demo.cpp
         src/fx3_demo.h

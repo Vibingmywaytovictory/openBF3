@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.29)
+set(GODOT_WINDOWED TRUE)
+include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)
+if(LEVEL STREQUAL "MP_Subway")
+    set(points "-167.966,64.625,-465.812,0,2,shellcasings_762_indoor_wave|-280.845,60.062,-567.190,0,1,shellcasings_762_outdoor_tarmac|-230.993,64.407,-483.038,0,0,shellcasings_762_outdoor_wave|-212.344,64.781,-476.156,0,6,shellcasings_762_indoor_wave")
+elseif(LEVEL STREQUAL "MP_011")
+    set(points "39.100,1.280,-47.979,0,6,shellcasings_762_indoor_wave|159.301,5.120,-115.258,0,0,shellcasings_762_outdoor_wave")
+else()
+    message(FATAL_ERROR "godot.audio_areas: no points for ${LEVEL}")
+endif()
+set(cache "${BUILD_DIR}/godot-cache/${ROW}")
+file(MAKE_DIRECTORY "${cache}")
+godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 115 HEADER "${LEVEL} TeamDeathMatch0"
+    ARGS --path "${PROJECT_DIR}" res://scenes/metro_tdm.tscn -- "--level=${LEVEL}" --mode=TeamDeathMatch0 --audio-areas-check
+        "--audio-areas-points=${points}" --bots=0 --deploy-screen=0 --preround=0 --min-players=1 "--bf3-cache=${cache}")
+godot_require_pass("AUDIO AREAS: PASS")
+godot_require_pass("\\[level\\] install unchanged: yes")

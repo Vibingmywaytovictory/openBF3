@@ -1,5 +1,6 @@
 #include "level_session_game.h"
 #include "level_session_tdm.h"
+#include "native_flow.h"
 
 #include "bf3_localisation.h"
 #include "game_audio.h"
@@ -303,6 +304,15 @@ void Bf3LevelSession::game_parse_args() {
 	if (has_check_arg("icons3d-check")) {
 		g.icons3d = std::make_unique<Icons3dCheck>();
 		mapper_.set_scripted(true);
+	}
+	if (has_check_arg("audio-areas-check")) {
+		std::vector<AudioAreasPoint> points;
+		std::string why;
+		if (parse_audio_areas_points(user_arg_value("audio-areas-points"), points, why)) {
+			g.audio_areas = std::make_unique<AudioAreasCheck>(std::move(points));
+		} else {
+			error = why;
+		}
 	}
 #endif
 	if (has_user_arg("m2a-play-seconds")) {
@@ -1060,7 +1070,13 @@ void step_game_parts(Node3D &r_parent, GameState &r_game, const host::Presentati
 	}
 	r_game.ms_fx = ms_since(t0);
 	t0 = std::chrono::steady_clock::now();
+	host::UiFlowSession *areas_flow =
+			r_game.tdm != nullptr && r_game.tdm->native_flow != nullptr ? r_game.tdm->native_flow->session() : nullptr;
+	if (areas_flow != nullptr) {
+		areas_flow->set_listener(mf.camera.trans);
+	}
 	if (r_game.audio != nullptr && r_game.audio->built()) {
+		r_game.audio->set_sound_areas(areas_flow != nullptr ? areas_flow->sound_areas() : nullptr);
 		r_game.audio->step(mf, cues, effect_sounds);
 	}
 	r_game.ms_audio = ms_since(t0);
@@ -1342,6 +1358,19 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			g.finished = true;
 			UtilityFunctions::print(to_godot(std::string("CROSSHAIR WALK: ") + (g.crosshair_walk->exit_code() == 0 ? "PASS" : "FAIL")));
 			finish(g.crosshair_walk->exit_code());
+			return true;
+		}
+	}
+	if (g.audio_areas != nullptr && !g.finished) {
+		AudioAreasInputs in;
+		in.alive = g.alive;
+		in.audio = g.audio.get();
+		in.flow = g.tdm != nullptr && g.tdm->native_flow != nullptr ? g.tdm->native_flow->session() : nullptr;
+		if (g.audio_areas->step(*this, in, p_delta)) {
+			g.finished = true;
+			UtilityFunctions::print(
+					to_godot(std::string("AUDIO AREAS: ") + (g.audio_areas->exit_code() == 0 ? "PASS" : "FAIL")));
+			finish(g.audio_areas->exit_code());
 			return true;
 		}
 	}

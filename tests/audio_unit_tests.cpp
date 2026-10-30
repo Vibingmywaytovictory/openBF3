@@ -1888,6 +1888,37 @@ TEST_SUITE("audio-mixer") {
 		CHECK(other == full);
 	}
 
+	TEST_CASE("a mixer value reads back once a block applies it, and a later one replaces it") {
+		ba::MixerCore mixer(ba::MixerConfig{});
+		std::vector<float> buf(2 * 512);
+		const auto set = [&](uint32_t p_hash, float p_value) {
+			ba::MixerCommand c;
+			c.type = ba::MixerCommandType::SetMixerValue;
+			c.name_hash = p_hash;
+			c.value = p_value;
+			REQUIRE(mixer.push(c));
+		};
+		CHECK_FALSE(mixer.mixer_value(ba::kHashAreaType).has_value());
+		set(ba::kHashAreaType, 2.0f);
+		CHECK_FALSE(mixer.mixer_value(ba::kHashAreaType).has_value());
+		mixer.mix(buf.data(), 512);
+		CHECK(mixer.mixer_value(ba::kHashAreaType) == std::optional<float>(2.0f));
+		set(7u, 0.5f);
+		set(ba::kHashAreaType, 6.0f);
+		mixer.mix(buf.data(), 512);
+		CHECK(mixer.mixer_value(ba::kHashAreaType) == std::optional<float>(6.0f));
+		CHECK(mixer.mixer_value(7u) == std::optional<float>(0.5f));
+		CHECK_FALSE(mixer.mixer_value(8u).has_value());
+		for (uint32_t h = 100; h < 100 + ba::kMixerValueSlots; ++h) {
+			set(h, 1.0f);
+		}
+		mixer.mix(buf.data(), 512);
+		CHECK(mixer.mixer_value(100u + uint32_t(ba::kMixerValueSlots) - 3u) == std::optional<float>(1.0f));
+		CHECK_FALSE(mixer.mixer_value(100u + uint32_t(ba::kMixerValueSlots) - 2u).has_value());
+		set(ba::kHashAreaType, 0.0f);
+		mixer.mix(buf.data(), 512);
+		CHECK(mixer.mixer_value(ba::kHashAreaType) == std::optional<float>(0.0f));
+	}
 	TEST_CASE("a master mix replaces the bus sum, and SetMasterPreset picks its preset at a block edge") {
 		auto data = std::make_shared<MasterMixData>();
 		data->presets = { "loud", "quiet" };

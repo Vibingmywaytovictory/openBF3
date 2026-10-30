@@ -124,6 +124,8 @@ struct Bf3GameAudio::Impl {
 	bool forwarding = false;
 	std::vector<ba::MixerCutEvent> forwarded;
 	std::chrono::steady_clock::time_point fate_line_at{};
+	ba::AreaFeed area_feed;
+	const sim::logic::SoundAreaNatives *areas = nullptr;
 	uint64_t fate_line_drops = 0;
 };
 
@@ -299,6 +301,8 @@ void Bf3GameAudio::step(const GameFrame &p_frame, std::span<const fx::ImpactSoun
 		r.timeline = c.timeline;
 		m.impact_requests.push_back(r);
 	}
+	m.area_feed.step(*m.mixer, m.areas);
+	m.areas = nullptr;
 	m.driver.step(*m.router, m.impacts.get(), *m.clock, in, m.impact_requests, p_effect_sounds);
 	capture_step(m);
 	drain_mixer_events(m, *this);
@@ -430,6 +434,33 @@ std::string_view Bf3GameAudio::scope_name(uint16_t p_scope) const {
 
 const core::PathGuard &Bf3GameAudio::write_guard() const {
 	return impl_->capture_guard;
+}
+
+void Bf3GameAudio::set_sound_areas(const sim::logic::SoundAreaNatives *p_areas) {
+	impl_->areas = p_areas;
+}
+
+const audio::AreaFeedStats &Bf3GameAudio::area_feed() const {
+	return impl_->area_feed.stats();
+}
+
+std::optional<float> Bf3GameAudio::mixer_value(uint32_t p_name_hash) const {
+	return impl_->mixer != nullptr ? impl_->mixer->mixer_value(p_name_hash) : std::nullopt;
+}
+
+core::Result<std::vector<std::string>> Bf3GameAudio::observe_area_waves(
+		std::string_view p_patch, float p_area_type) const {
+	const Impl &m = *impl_;
+	if (m.table == nullptr) {
+		return core::make_error("observe area waves: no weapon audio table");
+	}
+	for (const ba::WeaponAudioDef &d : m.table->defs) {
+		if (d.patch == p_patch && d.program != nullptr) {
+			const uint32_t event = d.binding.start_event != 0 ? d.binding.start_event : ba::kHashFire;
+			return ba::observe_area_waves(d.program, m.bank, m.tuning, p_area_type, event);
+		}
+	}
+	return core::make_error("observe area waves: no weapon patch " + std::string(p_patch));
 }
 
 audio::MixerCore *Bf3GameAudio::mixer() const {

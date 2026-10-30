@@ -117,6 +117,9 @@ struct MixerCore::Impl {
 	float output_gain = 1.0f;
 	std::array<float, size_t(core::audio::MasterBus::Unknown)> bus_gain{};
 	std::array<std::atomic<float>, size_t(core::audio::MasterBus::Unknown)> bus_gain_seen{};
+	std::array<std::atomic<uint32_t>, kMixerValueSlots> mixer_value_hash_seen{};
+	std::array<std::atomic<float>, kMixerValueSlots> mixer_value_seen{};
+	std::atomic<size_t> mixer_values_seen{ 0 };
 	std::atomic<uint64_t> rendered{ 0 };
 	std::chrono::steady_clock::time_point last_call{};
 	bool have_last_call = false;
@@ -178,7 +181,7 @@ struct MixerCore::Impl {
 		}
 		block.assign(size_t(kBlockFrames) * 2, 0.0f);
 		sum_block.assign(size_t(kBlockFrames) * 2, 0.0f);
-		mixer_values.resize(64);
+		mixer_values.resize(kMixerValueSlots);
 		output_gain = db_to_gain(p_config.output_gain_db);
 		master.configure(p_config.master, p_config.mix_rate, p_config.master_iir2_q);
 		publish_master();
@@ -453,11 +456,15 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 				for (size_t k = 0; k < m.mixer_value_count; ++k) {
 					if (m.mixer_values[k].first == cmd.name_hash) {
 						m.mixer_values[k].second = cmd.value;
+						m.mixer_value_seen[k].store(cmd.value, std::memory_order_relaxed);
 						found = true;
 					}
 				}
 				if (!found && m.mixer_value_count < m.mixer_values.size()) {
+					m.mixer_value_seen[m.mixer_value_count].store(cmd.value, std::memory_order_relaxed);
+					m.mixer_value_hash_seen[m.mixer_value_count].store(cmd.name_hash, std::memory_order_relaxed);
 					m.mixer_values[m.mixer_value_count++] = { cmd.name_hash, cmd.value };
+					m.mixer_values_seen.store(m.mixer_value_count, std::memory_order_release);
 				}
 				for (InstanceSlot &s : m.instances) {
 					if (s.instance != nullptr) {
@@ -630,6 +637,16 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 float MixerCore::bus_gain(core::audio::MasterBus p_bus) const {
 	const size_t b = size_t(p_bus);
 	return b < impl_->bus_gain_seen.size() ? impl_->bus_gain_seen[b].load(std::memory_order_relaxed) : 0.0f;
+}
+
+std::optional<float> MixerCore::mixer_value(uint32_t p_name_hash) const {
+	const size_t n = impl_->mixer_values_seen.load(std::memory_order_acquire);
+	for (size_t k = 0; k < n; ++k) {
+		if (impl_->mixer_value_hash_seen[k].load(std::memory_order_relaxed) == p_name_hash) {
+			return impl_->mixer_value_seen[k].load(std::memory_order_relaxed);
+		}
+	}
+	return std::nullopt;
 }
 
 uint32_t MixerCore::mix(float *r_interleaved_stereo, uint32_t p_frames) {
