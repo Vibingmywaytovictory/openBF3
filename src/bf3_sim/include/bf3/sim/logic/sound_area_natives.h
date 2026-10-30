@@ -64,21 +64,4 @@ private:
 	std::unique_ptr<State> state_;
 };
 
-inline constexpr uint32_t kSoundAreaProbeTicks = 8;
-
-class SoundAreaProbe {
-public:
-	static core::Result<SoundAreaProbe> create(
-			const core::gameplay::LogicWorld &p_world, std::shared_ptr<const LogicGraph> p_graph);
-
-	core::Status at(const core::Vec3 &p_listener, uint32_t p_ticks = kSoundAreaProbeTicks);
-
-	const SoundAreaNatives &natives() const { return *natives_; }
-	const LogicRuntime &runtime() const { return *runtime_; }
-
-private:
-	std::unique_ptr<LogicRuntime> runtime_;
-	std::unique_ptr<SoundAreaNatives> natives_;
-};
-
 }

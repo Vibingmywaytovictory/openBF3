@@ -5,6 +5,9 @@
 
 #include "bf3/audio/audio_load.h"
 #include "bf3/audio/voice_cull.h"
+#if OPENBF3_BUILD_CHECKS
+#include "bf3/client_audio/area_wave_observer.h"
+#endif
 #include "bf3/client_audio/game_audio_frame.h"
 #include "bf3/client_audio/kit_audio.h"
 #include "bf3/core/audio/wave_bank.h"
@@ -448,6 +451,7 @@ std::optional<float> Bf3GameAudio::mixer_value(uint32_t p_name_hash) const {
 	return impl_->mixer != nullptr ? impl_->mixer->mixer_value(p_name_hash) : std::nullopt;
 }
 
+#if OPENBF3_BUILD_CHECKS
 core::Result<std::vector<std::string>> Bf3GameAudio::observe_area_waves(
 		std::string_view p_patch, float p_area_type) const {
 	const Impl &m = *impl_;
@@ -462,6 +466,7 @@ core::Result<std::vector<std::string>> Bf3GameAudio::observe_area_waves(
 	}
 	return core::make_error("observe area waves: no weapon patch " + std::string(p_patch));
 }
+#endif
 
 audio::MixerCore *Bf3GameAudio::mixer() const {
 	return impl_->mixer.get();

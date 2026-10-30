@@ -9,6 +9,7 @@
 #include "bf3/core/ui/text_db.h"
 #include "bf3/host/ui_flow_session.h"
 #include "bf3/sim/logic/sound_area_natives.h"
+#include "bf3/sim_harness/sound_area_probe.h"
 
 #include <windows.h>
 

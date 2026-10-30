@@ -2,7 +2,7 @@
 
 #include "bf3/audio/audio_load.h"
 #include "bf3/audio/patch_instance.h"
-#include "bf3/client_audio/area_feed.h"
+#include "bf3/client_audio/area_wave_observer.h"
 #include "bf3/core/audio/mixer_asset.h"
 #include "bf3/core/audio/sound_ports.h"
 #include "bf3/core/audio/sound_program.h"
@@ -21,6 +21,7 @@
 #include "bf3/core/level/level.h"
 #include "bf3/host/ui_flow_session.h"
 #include "bf3/sim/logic/sound_area_natives.h"
+#include "bf3/sim_harness/sound_area_probe.h"
 
 #include <doctest/doctest.h>
 

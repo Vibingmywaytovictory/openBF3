@@ -87,7 +87,9 @@ public:
 	void set_sound_areas(const sim::logic::SoundAreaNatives *p_areas);
 	const audio::AreaFeedStats &area_feed() const;
 	std::optional<float> mixer_value(uint32_t p_name_hash) const;
+#if OPENBF3_BUILD_CHECKS
 	core::Result<std::vector<std::string>> observe_area_waves(std::string_view p_patch, float p_area_type) const;
+#endif
 	void shutdown();
 
 private:
