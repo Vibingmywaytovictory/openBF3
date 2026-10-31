@@ -31,6 +31,11 @@ struct UiPagesCounters {
 	uint64_t bytes = 0;
 };
 
+struct UiPagesClock {
+	uint64_t process_frames = 0;
+	uint64_t draws = 0;
+};
+
 class Bf3UiPages : public godot::Node {
 	GDCLASS(Bf3UiPages, godot::Node)
 
@@ -47,6 +52,7 @@ public:
 	void use_sizes(const bf3::core::ui::SwfPageSizes &p_sizes);
 	void begin_frame();
 	void end_pass();
+	void drive_clock(std::optional<UiPagesClock> p_clock) { driven_clock_ = p_clock; }
 	uint64_t generation() const { return generation_; }
 	uint64_t pass_serial() const { return pass_serial_; }
 
@@ -81,6 +87,7 @@ protected:
 	static void _bind_methods();
 
 private:
+	UiPagesClock clock() const;
 	void free_pages();
 	void free_frame();
 	void free_present();
@@ -88,6 +95,8 @@ private:
 	void make_pages(const bf3::core::ui::SwfPageSizes &p_sizes);
 
 	godot::RenderingServer *rs_ = nullptr;
+	bool draws_are_counted_ = false;
+	std::optional<UiPagesClock> driven_clock_;
 	bf3::core::ui::SwfPageSizes sizes_;
 	std::optional<bf3::core::ui::SwfShelfPacker> result_;
 	std::optional<bf3::core::ui::SwfShelfPacker> pass_;
@@ -112,7 +121,7 @@ private:
 	uint64_t frame_ = UINT64_MAX;
 	uint64_t pass_serial_ = 1;
 	bool pass_requested_ = false;
-	bool frame_requested_ = false;
+	std::optional<uint64_t> frame_requested_at_;
 	bool sizes_fixed_ = false;
 	UiPagesCounters counters_;
 };

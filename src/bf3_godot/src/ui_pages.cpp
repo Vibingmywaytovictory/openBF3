@@ -3,6 +3,7 @@
 #include "swf_view.h"
 #include "ui_stage.h"
 
+#include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -38,7 +39,9 @@ RID make_page_viewport(RenderingServer *p_rs, RenderingServer::ViewportMSAA p_ms
 
 }
 
-Bf3UiPages::Bf3UiPages() : rs_(RenderingServer::get_singleton()) {
+Bf3UiPages::Bf3UiPages() :
+		rs_(RenderingServer::get_singleton()),
+		draws_are_counted_(DisplayServer::get_singleton()->get_name() != "headless") {
 	swf_view_hold_shaders();
 }
 
@@ -67,6 +70,15 @@ void Bf3UiPages::_exit_tree() {
 	free_frame();
 }
 
+UiPagesClock Bf3UiPages::clock() const {
+	if (driven_clock_) {
+		return *driven_clock_;
+	}
+	Engine *engine = Engine::get_singleton();
+	const uint64_t process_frames = engine->get_process_frames();
+	return UiPagesClock{ process_frames, draws_are_counted_ ? uint64_t(engine->get_frames_drawn()) : process_frames };
+}
+
 void Bf3UiPages::free_frame() {
 	free_present();
 	if (!frame_viewport_.is_valid()) {
@@ -79,7 +91,7 @@ void Bf3UiPages::free_frame() {
 	frame_viewport_ = RID();
 	frame_texture_ = RID();
 	frame_size_ = Vector2i();
-	frame_requested_ = false;
+	frame_requested_at_.reset();
 }
 
 void Bf3UiPages::free_present() {
@@ -144,10 +156,11 @@ void Bf3UiPages::size_frame(Vector2i p_window) {
 }
 
 void Bf3UiPages::mark_frame() {
-	if (frame_requested_ || !frame_viewport_.is_valid()) {
+	const uint64_t draws = clock().draws;
+	if (frame_requested_at_ == draws || !frame_viewport_.is_valid()) {
 		return;
 	}
-	frame_requested_ = true;
+	frame_requested_at_ = draws;
 	++counters_.frame_updates;
 	rs_->viewport_set_update_mode(frame_viewport_, RenderingServer::VIEWPORT_UPDATE_ONCE);
 }
@@ -220,7 +233,7 @@ void Bf3UiPages::make_pages(const ui::SwfPageSizes &p_sizes) {
 }
 
 void Bf3UiPages::begin_frame() {
-	const uint64_t frame = Engine::get_singleton()->get_process_frames();
+	const uint64_t frame = clock().process_frames;
 	if (frame != frame_) {
 		frame_ = frame;
 		end_pass();
@@ -233,7 +246,7 @@ void Bf3UiPages::end_pass() {
 	}
 	in_pass_.clear();
 	pass_requested_ = false;
-	frame_requested_ = false;
+	frame_requested_at_.reset();
 	if (scratch_viewport_.is_valid()) {
 		pass_.emplace(sizes_.scratch_width, sizes_.scratch_height);
 	}

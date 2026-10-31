@@ -14,6 +14,7 @@ class Bf3SwfView;
 class Bf3UiPages;
 
 inline constexpr uint32_t kUiOpenCensusMaxWaitFrames = 36000;
+inline constexpr uint64_t kUiOpenCensusDrivenClock = 1000000000;
 inline constexpr int32_t kUiOpenCensusWidth = 1280;
 inline constexpr int32_t kUiOpenCensusHeight = 720;
 inline constexpr uint64_t kUiOpenCensusPrimitiveTriangles = 32;

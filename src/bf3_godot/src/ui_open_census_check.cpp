@@ -594,10 +594,26 @@ void Bf3UiOpenCensusCheck::census_hidden_pages(Bf3UiPages &r_pages) {
 			bf3::core::fmt("%llu slots, %llu more passes", (unsigned long long)r_pages.counters().live_slots,
 					(unsigned long long)(r_pages.counters().passes - passes_start - shown_passes)));
 	const uint64_t resizes_open = Bf3SwfView::counters().viewport_resizes;
+	const bool shown_at_close = view->shown_in_frame();
+	UiPagesClock clock{ kUiOpenCensusDrivenClock, kUiOpenCensusDrivenClock };
+	uint64_t last_step_updates = 0;
 	screens->close_screen(movie);
 	for (uint32_t i = 0; i < kUiOpenCensusCloseSteps && screens->phase(movie).has_value(); ++i) {
+		r_pages.drive_clock(clock);
+		r_pages.mark_frame();
+		++clock.process_frames;
+		++clock.draws;
+		r_pages.drive_clock(clock);
+		const uint64_t before_step = r_pages.counters().frame_updates;
 		screens->step(kUiOpenCensusCloseStepSeconds);
+		last_step_updates = r_pages.counters().frame_updates - before_step;
 	}
+	r_pages.drive_clock(std::nullopt);
+	add("a closing screen redraws F in the step that hides it",
+			shown_at_close && !view->shown_in_frame() && last_step_updates == 1,
+			bf3::core::fmt("%s at close, %s after, %llu update(s) in the last step",
+					shown_at_close ? "shown" : "not shown", view->shown_in_frame() ? "shown" : "not shown",
+					(unsigned long long)last_step_updates));
 	add("a closed screen holds no slots", !screens->phase(movie).has_value() && r_pages.counters().live_slots == 0,
 			bf3::core::fmt("%llu slots, %s", (unsigned long long)r_pages.counters().live_slots,
 					screens->phase(movie).has_value() ? "still open" : "closed"));
@@ -825,6 +841,14 @@ void Bf3UiOpenCensusCheck::census_frame(Bf3UiPages &r_pages) {
 	Node2D *present = memnew(Node2D);
 	add_child(present);
 	r_pages.attach_present(present);
+	UiPagesClock clock{ kUiOpenCensusDrivenClock, kUiOpenCensusDrivenClock };
+	r_pages.drive_clock(clock);
+	const auto marked_then_drawn = [&] {
+		r_pages.mark_frame();
+		++clock.process_frames;
+		++clock.draws;
+		r_pages.drive_clock(clock);
+	};
 	Bf3SwfView *first = open_paged_view(ui::ui_data_category_leaf(kIngameMenuPartition));
 	Bf3SwfView *second = open_paged_view(ui::ui_data_category_leaf(kSpawnButtonScreenPartition));
 	const auto finish = [&] {
@@ -835,6 +859,7 @@ void Bf3UiOpenCensusCheck::census_frame(Bf3UiPages &r_pages) {
 			}
 		}
 		r_pages.attach_present(nullptr);
+		r_pages.drive_clock(std::nullopt);
 		remove_child(present);
 		memdelete(present);
 	};
@@ -904,14 +929,14 @@ void Bf3UiOpenCensusCheck::census_frame(Bf3UiPages &r_pages) {
 			first->item_material() == second->item_material() ? "one" : "one per view");
 	add("views draw in their order", first->frame_draw_index() == 0 && second->frame_draw_index() == 1,
 			bf3::core::fmt("%d, %d", first->frame_draw_index(), second->frame_draw_index()));
-	r_pages.end_pass();
+	marked_then_drawn();
 	const uint64_t before_order = updates();
 	first->set_frame_order(2);
 	add("a new order redraws F", first->frame_draw_index() == 2 && updates() == before_order + 1,
 			bf3::core::fmt("index %d, %llu update(s)", first->frame_draw_index(),
 					(unsigned long long)(updates() - before_order)));
 	first->set_frame_order(0);
-	r_pages.end_pass();
+	marked_then_drawn();
 	const uint64_t before_hide = updates();
 	const bf3::core::Status hidden_text = first->scene()->set_text(paged->path, kUiOpenCensusLongText);
 	first->set_visible(false);
@@ -951,7 +976,7 @@ void Bf3UiOpenCensusCheck::census_frame(Bf3UiPages &r_pages) {
 	settle_both();
 	r_pages.end_pass();
 	sync_both();
-	r_pages.end_pass();
+	marked_then_drawn();
 	const uint64_t before_free = updates();
 	remove_child(second);
 	memdelete(second);
