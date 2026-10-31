@@ -408,6 +408,21 @@ std::vector<NamedSet> simultaneous_sets() {
 	return sets;
 }
 
+SwfNodeId drawn_descendant(const SwfScene &p_scene, const SwfFontSet *p_fonts, SwfNodeId p_root) {
+	std::vector<SwfNodeId> stack{ p_root };
+	while (!stack.empty()) {
+		const SwfSceneNode *n = p_scene.node(stack.back());
+		stack.pop_back();
+		if (n == nullptr) {
+			continue;
+		}
+		if (swf_node_pieces(p_scene, p_fonts, *n).count != 0) {
+			return n->id;
+		}
+		stack.insert(stack.end(), n->children.begin(), n->children.end());
+	}
+	return kSwfNoNode;
+}
 }
 
 TEST_SUITE("ui-layer-plan") {
@@ -538,12 +553,67 @@ TEST_SUITE("ui-layer-plan") {
 		REQUIRE(s.scene->set_alpha(mask, 0.0f).ok());
 		(void)s.scene->take_changes();
 		CHECK(swf_rect_mask(*s.scene, fonts, id).has_value());
+		const SwfNodeId drawn = drawn_descendant(*s.scene, fonts, id);
+		REQUIRE(drawn != id);
+		const std::vector<SwfNodeId> tilted_below{ drawn };
+		CHECK_FALSE(swf_rect_mask(*s.scene, fonts, id, tilted_below).has_value());
 		SwfMatrix turned = s.scene->node(id)->matrix;
 		turned.b = 0.5f;
 		turned.c = -0.5f;
 		REQUIRE(s.scene->set_matrix(mask, turned).ok());
 		(void)s.scene->take_changes();
 		CHECK_FALSE(swf_rect_mask(*s.scene, fonts, id).has_value());
+	}
+
+	TEST_CASE("layer plan: a drawn triangle is no rectangle, a drawn rectangle is") {
+		Rig *r = rig_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudMessageComp messages(*r->messages);
+		HudClientState client = rig_client(*r);
+		client.messages = &messages;
+		ui_retail::RetailScreen s = ui_retail::open_retail_screen(*r->retail, kMenuScoreboardPartition, client);
+		const auto drawn_id = [&](std::string_view p_name, int32_t p_depth, std::vector<SwfDrawOp> p_ops) {
+			const std::string path = "instance1." + std::string(p_name);
+			const Result<SwfNodeId> id = s.scene->create_empty_movie_clip("instance1", p_name, p_depth);
+			REQUIRE(id.ok());
+			for (const SwfDrawOp &op : p_ops) {
+				REQUIRE(s.scene->draw(path, op).ok());
+			}
+			(void)s.scene->take_changes();
+			return *id;
+		};
+		const SwfColor red{ 255, 0, 0, 255 };
+		const SwfNodeId triangle = drawn_id("planTriangle", 16001,
+				{ SwfDrawOp::begin_fill(red), SwfDrawOp::move_to(0.0f, 0.0f), SwfDrawOp::line_to(40.0f, 0.0f),
+						SwfDrawOp::line_to(0.0f, 30.0f), SwfDrawOp::line_to(0.0f, 0.0f), SwfDrawOp::end_fill() });
+		const SwfNodeId rectangle = drawn_id("planRectangle", 16002,
+				{ SwfDrawOp::begin_fill(red), SwfDrawOp::move_to(0.0f, 0.0f), SwfDrawOp::line_to(40.0f, 0.0f),
+						SwfDrawOp::line_to(40.0f, 30.0f), SwfDrawOp::line_to(0.0f, 30.0f),
+						SwfDrawOp::line_to(0.0f, 0.0f), SwfDrawOp::end_fill() });
+		CHECK_FALSE(swf_rect_mask(*s.scene, s.hud->fonts(), triangle).has_value());
+		CHECK(swf_rect_mask(*s.scene, s.hud->fonts(), rectangle).has_value());
+	}
+
+	TEST_CASE("layer plan: the compass masks are not rectangles, so a real non-rectangle is rejected") {
+		Rig *r = rig_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const std::map<std::string, DrivenScreen> &screens = driven_screens(*r);
+		const auto it = screens.find("hudtdmscreen");
+		REQUIRE(it != screens.end());
+		uint32_t compass_masks = 0;
+		for (const SwfLayerWalkNode &l : it->second.settled.layers) {
+			if (l.kind == SwfLayerKind::Mask && l.path.find("Compass") != std::string::npos) {
+				++compass_masks;
+				CHECK_MESSAGE(
+						l.route == SwfLayerClass::OwnSurface, l.path, " is classed ", swf_layer_class_name(l.route));
+			}
+		}
+		CHECK(compass_masks > 0);
+		CHECK(it->second.settled.non_rect_masks == compass_masks);
 	}
 
 	TEST_CASE("layer plan: MenuHint's text is a page, not a group around one") {

@@ -520,11 +520,6 @@ std::optional<SwfRectMask> swf_rect_mask(
 	if (root == nullptr) {
 		return std::nullopt;
 	}
-	for (const SwfSceneNode *a = root; a != nullptr; a = p_scene.node(a->parent)) {
-		if (std::find(p_tilted.begin(), p_tilted.end(), a->id) != p_tilted.end()) {
-			return std::nullopt;
-		}
-	}
 	const SwfSceneNode *drawn = nullptr;
 	std::vector<SwfNodeId> stack{ p_mask };
 	while (!stack.empty()) {
@@ -544,6 +539,11 @@ std::optional<SwfRectMask> swf_rect_mask(
 	}
 	if (drawn == nullptr) {
 		return std::nullopt;
+	}
+	for (const SwfSceneNode *a = drawn; a != nullptr; a = p_scene.node(a->parent)) {
+		if (std::find(p_tilted.begin(), p_tilted.end(), a->id) != p_tilted.end()) {
+			return std::nullopt;
+		}
 	}
 	const SwfNodePieces pieces = swf_node_pieces(p_scene, p_fonts, *drawn);
 	const SwfMatrix &w = pieces.frame->world;
