@@ -2851,3 +2851,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * M3 menu pages, open timers: godot.menu_frames splits the slowest open frames (flow tick, asset read, open, initialize, events, first refresh, plan walk, build, setup) and prints root CPU and working set per step; report only, built, not run
 * M3 menu pages, godot.ui_open_census: new headless row, one Bf3SwfView per drawn screen under the dummy renderer, 30 of 30 sync, prints viewport creates and resizes, live surfaces, items, arrays and retained bytes per screen; about 1 s
 * Drawn-screen partition lists move to bf3_core (ui_drawn_screens.h); godot headers alias them, so the layer plan row reads the game's lists.
+* swf_layer_plan classes every layer without Godot; ui.layer_plan drives all drawn screens to their census floors, allow-lists own surfaces and proves listMask and GridScrollMaskMc rectangular.

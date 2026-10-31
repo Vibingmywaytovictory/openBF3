@@ -1,0 +1,526 @@
+#include <doctest/doctest.h>
+
+#include "bf3/core/level/level.h"
+#include "bf3/core/ui/hud_icons.h"
+#include "bf3/core/ui/hud_messages.h"
+#include "bf3/core/ui/hud_model.h"
+#include "bf3/core/ui/hud_screen.h"
+#include "bf3/core/ui/key_bindings.h"
+#include "bf3/core/ui/options.h"
+#include "bf3/core/ui/options_model.h"
+#include "bf3/core/ui/swf_layer_plan.h"
+#include "bf3/core/ui/text_db.h"
+#include "bf3/core/ui/ui_drawn_screens.h"
+#include "bf3/core/ui/ui_graph.h"
+#include "bf3/host/hud_feed.h"
+#include "bf3/host/ui_flow_session.h"
+#include "test_support.h"
+#include "ui_retail_support.h"
+
+#include <algorithm>
+#include <array>
+#include <cstdio>
+#include <cstring>
+#include <map>
+#include <memory>
+#include <optional>
+#include <set>
+#include <string>
+#include <string_view>
+#include <vector>
+
+using namespace bf3::core;
+using namespace bf3::core::ui;
+
+namespace {
+
+constexpr double kStepSeconds = 1.0 / 30.0;
+constexpr int kSteps = 90;
+constexpr int kStepsPerKill = 15;
+constexpr int32_t kMenuHintDataKey = 606381875;
+constexpr uint32_t kMenuOwnSurfaceHandful = 4;
+
+struct WindowSize {
+	int32_t width = 0;
+	int32_t height = 0;
+};
+constexpr std::array<WindowSize, 3> kWindows{ WindowSize{ 1280, 720 }, WindowSize{ 2560, 1440 },
+	WindowSize{ 3840, 2160 } };
+
+constexpr std::array<std::pair<std::string_view, uint32_t>, 25> kCensusFilterFloors{ {
+		{ "customizeaccessoriesscreen", 5 },
+		{ "customizesoldierscreen", 36 },
+		{ "customizesoldiersubscreen", 10 },
+		{ "eordetailsscoreboardscreen", 9 },
+		{ "eordetailsstatsscreen", 32 },
+		{ "eordetailstabsscreen", 4 },
+		{ "eorwinningteamscreen", 1 },
+		{ "hudmpscreen", 9 },
+		{ "hudscreen", 1 },
+		{ "hudtdmscreen", 4 },
+		{ "ingamemenump", 12 },
+		{ "killscreen", 10 },
+		{ "optionsaudioscreen", 14 },
+		{ "optionscontrolsscreen", 17 },
+		{ "optionsgameplayscreen", 18 },
+		{ "optionskeybindingscreen", 54 },
+		{ "optionsvideoscreen", 34 },
+		{ "scoreboardbackscreen", 3 },
+		{ "scoreboardtwoteamshud32screen", 202 },
+		{ "scoreboardtwoteamshud64screen", 200 },
+		{ "scoreboardtwoteamsscreen", 166 },
+		{ "screenadjustscreen", 3 },
+		{ "spawnbuttonscreen", 1 },
+		{ "spawnscreenpc", 15 },
+		{ "spawnscreenticketcountertdmscreen", 4 },
+} };
+
+constexpr std::array<std::string_view, 6> kOwnSurfaceAllowList{ ".scoringMessage", ".scoringMessage.txt",
+	".scoringMessage.txtBg", ".multiplayerCompass.cps.#", ".multiplayerCompass.objective#.obj",
+	".Button_#.button.bgHolder" };
+
+std::string digits_to_hash(std::string_view p_path) {
+	std::string out;
+	for (const char c : p_path) {
+		const bool digit = c >= '0' && c <= '9';
+		if (!digit || out.empty() || out.back() != '#') {
+			out.push_back(digit ? '#' : c);
+		}
+	}
+	return out;
+}
+
+bool allowed_own_surface(std::string_view p_path) {
+	const std::string path = digits_to_hash(p_path);
+	return std::any_of(kOwnSurfaceAllowList.begin(), kOwnSurfaceAllowList.end(), [&path](std::string_view p_tail) {
+		const std::string tail = digits_to_hash(p_tail);
+		return path.size() >= tail.size() && path.compare(path.size() - tail.size(), tail.size(), tail) == 0;
+	});
+}
+
+struct Rig {
+	ui_retail::Retail *retail = nullptr;
+	std::unique_ptr<level::LoadedLevel> level;
+	std::unique_ptr<bf3::host::UiFlowSession> session;
+	std::unique_ptr<OptionsCatalog> catalog;
+	std::unique_ptr<OptionsSession> options;
+	OptionsModel options_model;
+	std::unique_ptr<ItemIconIndex> items;
+	std::unique_ptr<HudMessageCompData> messages;
+	HudModel model;
+};
+
+void add_player(HudModel &r_model, HudPlayerList &r_list, uint8_t p_slot, const std::string &p_name) {
+	HudPlayer &p = r_model.players[p_slot];
+	std::memcpy(p.name.data(), p_name.data(), std::min(p_name.size(), p.name.size() - 1));
+	p.bot = true;
+	p.team = uint8_t(&r_list == &r_model.team.friendly_team_players ? 1 : 2);
+	p.kills = 10 + p_slot;
+	p.deaths = 3 + p_slot;
+	p.score = 100 * p_slot + 572;
+	p.ping_ms = 31;
+	r_model.player_count = uint8_t(std::max<int32_t>(r_model.player_count, p_slot + 1));
+	r_list.index[r_list.count++] = p_slot;
+}
+
+void set_item(HudItem &r_item, const ItemIcon &p_icon, uint32_t p_name) {
+	r_item.item_id = p_icon.item_id;
+	r_item.name_sid_hash = p_name;
+	bf3::host::hud_text(r_item.image_path, p_icon.path);
+}
+
+HudModel play_model(const ItemIconIndex &p_items) {
+	const std::vector<ItemIcon> &icons = p_items.icons();
+	const auto icon = [&icons](size_t p_i) -> const ItemIcon & { return icons[p_i % icons.size()]; };
+	HudModel m{};
+	m.local_player = 0;
+	m.local_team = 1;
+	for (uint8_t i = 0; i < 32; ++i) {
+		add_player(m, i < 16 ? m.team.friendly_team_players : m.team.enemy_team1_players, i,
+				"BOT_Sgt. Foster " + std::to_string(i));
+	}
+	m.soldier.health = 100.0f;
+	m.weapon.active_weapon_ammo = 30;
+	m.weapon.active_weapon_ammo_in_bag = 120;
+	m.kit.selected_kit_name = 0x6000u;
+	HudMenuList &menu = m.ingame_menu.menu_entries;
+	for (size_t i = 0; i < kHudMenuActionSids.size(); ++i) {
+		HudMenuEntry &e = menu.entries[menu.count++];
+		e.label_sid_hash = text_hash(kHudMenuActionSids[i]);
+		e.action = HudMenuAction(i);
+		e.enabled = true;
+	}
+	bf3::host::hud_text(m.settings.current_game_mode, "TeamDeathMatch0");
+	m.settings.current_game_mode_name = text_hash(bf3::host::kHudTdmModeSid);
+	m.settings.is_pc = true;
+	m.level.current_level = text_hash("ID_M_LEVELNAME_MP_SUBWAY");
+	m.team.friendly_team_name = text_hash("ID_M_US");
+	m.end_of_round.round_duration = 754.0f;
+	m.end_of_round.team_results = { 100, 87 };
+	HudCustomization &c = m.customization;
+	for (size_t l = 0; l < kHudSpawnKitItems; ++l) {
+		c.kit_grid_data[l].count = 3;
+		for (size_t i = 0; i < 3; ++i) {
+			set_item(c.kit_grid_data[l].items[i], icon(l * 3 + i), 0x7000u + uint32_t(l) * 0x10u + uint32_t(i));
+		}
+		c.kit_grid_selected[l] = 1;
+		c.kit_grid_category[l] = 0x6100u + uint32_t(l);
+	}
+	for (size_t a = 0; a < kHudAccessorySlots; ++a) {
+		c.accessory_grid[a].count = 2;
+		for (size_t i = 0; i < 2; ++i) {
+			set_item(c.accessory_grid[a].items[i], icon(40 + a * 2 + i),
+					0x7000u + uint32_t(5 + a) * 0x10u + uint32_t(i));
+		}
+	}
+	for (size_t k = 0; k < kHudKitCount; ++k) {
+		c.kits_data[k].name_sid_hash = k == 0 ? 0x6000u : 0x6001u;
+		for (size_t i = 0; i < kHudSpawnKitItems; ++i) {
+			set_item(c.kits_data[k].items[i], icon(60 + k * kHudSpawnKitItems + i), 0x7000u + uint32_t(i) * 0x10u + 1u);
+		}
+	}
+	return m;
+}
+
+void push_kill(HudModel &r_m, uint8_t p_killer, uint8_t p_victim, bool p_score) {
+	for (HudKillFeed *f : { &r_m.messages.kill_message, &r_m.messages.local_kill_message }) {
+		++f->newest_serial;
+		HudKill &k = f->lines[f->newest_serial % f->lines.size()];
+		k = HudKill{};
+		k.serial = f->newest_serial;
+		k.killer = p_killer;
+		k.victim = p_victim;
+		k.weapon_name_sid_hash = text_hash("ID_P_WNAME_M16A4");
+	}
+	if (!p_score) {
+		return;
+	}
+	HudScoreFeed &s = r_m.messages.score_message;
+	++s.newest_serial;
+	HudScoreEvent &e = s.events[s.newest_serial % s.events.size()];
+	e.serial = s.newest_serial;
+	e.sid_hash = text_hash(kHudScoreHeadshotSid);
+	e.points = 100;
+}
+
+Rig *rig_or_skip() {
+	static Rig r;
+	static bool tried = false;
+	if (!tried) {
+		tried = true;
+		r.retail = ui_retail::retail_or_skip();
+		if (r.retail == nullptr) {
+			return nullptr;
+		}
+		Result<std::unique_ptr<level::LoadedLevel>> l =
+				level::load_level(r.retail->mount->install, "MP_Subway", "TeamDeathMatch0");
+		REQUIRE_MESSAGE(l.ok(), (l.ok() ? std::string() : l.error().message));
+		r.level = std::move(*l);
+		bf3::host::UiFlowSessionOptions o;
+		o.initialize_screens = false;
+		Result<std::unique_ptr<bf3::host::UiFlowSession>> s = bf3::host::UiFlowSession::create(*r.level, o);
+		REQUIRE_MESSAGE(s.ok(), (s.ok() ? std::string() : s.error().message));
+		r.session = std::move(*s);
+		bf3::host::ui_flow_tdm_pc_defaults(*r.session, r.level->mode);
+		Result<OptionsCatalog> c = read_options_catalog(*r.retail->level);
+		REQUIRE_MESSAGE(c.ok(), (c.ok() ? std::string() : c.error().message));
+		r.catalog = std::make_unique<OptionsCatalog>(std::move(*c));
+		Result<KeyBindingMaps> maps = read_key_binding_maps(*r.retail->level);
+		Result<std::vector<std::string>> tabs = read_key_binding_tabs(*r.retail->level);
+		REQUIRE((maps.ok() && tabs.ok()));
+		Result<KeyBindingTable> t = KeyBindingTable::build(*maps, *tabs);
+		REQUIRE(t.ok());
+		r.options = std::make_unique<OptionsSession>(*r.catalog, *t);
+		r.options_model = r.options->model();
+		Result<ItemIconIndex> items = ItemIconIndex::read(*r.retail->ui);
+		REQUIRE_MESSAGE(items.ok(), (items.ok() ? std::string() : items.error().message));
+		r.items = std::make_unique<ItemIconIndex>(std::move(*items));
+		Result<HudMessageCompData> data = read_hud_message_comp(*r.retail->level);
+		REQUIRE_MESSAGE(data.ok(), (data.ok() ? std::string() : data.error().message));
+		r.messages = std::make_unique<HudMessageCompData>(std::move(*data));
+		r.model = play_model(*r.items);
+	} else if (r.retail == nullptr) {
+		bf3::test::skip_install_case("no install");
+		return nullptr;
+	}
+	return &r;
+}
+
+HudClientState rig_client(Rig &r_r) {
+	HudClientState c = ui_retail::retail_text_client(ui_retail::retail_text_db(*r_r.retail));
+	c.flow_data = [&r_r](std::string_view p_category, int32_t p_key) -> std::optional<std::string> {
+		if (p_key == kMenuHintDataKey) {
+			return std::string("ID_M_MINIMAPTYPE_HINT");
+		}
+		return r_r.session->data(p_category, p_key);
+	};
+	c.options = &r_r.options_model;
+	c.items = r_r.items.get();
+	c.localise_hash = [base = c.localise_hash](uint32_t p_hash) {
+		if (p_hash == 0x6000u) {
+			return std::string("ASSAULT");
+		}
+		if (p_hash == 0x6001u) {
+			return std::string("ENGINEER");
+		}
+		if (p_hash >= 0x6100u && p_hash < 0x6110u) {
+			return "CATEGORY " + std::to_string(p_hash - 0x6100u);
+		}
+		if (p_hash >= 0x7000u && p_hash < 0x8000u) {
+			return "ITEM " + std::to_string((p_hash - 0x7000u) / 0x10u) + "." + std::to_string(p_hash % 0x10u);
+		}
+		return base ? base(p_hash) : std::string();
+	};
+	return c;
+}
+
+struct DrivenScreen {
+	std::string partition;
+	std::string leaf;
+	SwfLayerWalk first;
+	SwfLayerWalk settled;
+};
+
+DrivenScreen drive_screen(Rig &r_r, std::string_view p_partition) {
+	HudMessageComp messages(*r_r.messages);
+	HudClientState client = rig_client(r_r);
+	client.messages = &messages;
+	ui_retail::RetailScreen s = ui_retail::open_retail_screen(*r_r.retail, p_partition, client);
+	DrivenScreen out;
+	out.partition = std::string(p_partition);
+	out.leaf = ui_data_category_leaf(p_partition);
+	const bool scores = p_partition != kKillScreenPartition;
+	HudModel m = r_r.model;
+	double now = 0.0;
+	messages.update(m, client, now);
+	s.hud->initialize(m);
+	s.hud->set_focus(true);
+	(void)s.scene->take_changes();
+	out.first = swf_layer_walk(*s.hud);
+	for (int i = 0; i < kSteps; ++i) {
+		now += kStepSeconds;
+		if (i % kStepsPerKill == 0) {
+			push_kill(m, uint8_t(i % 16), uint8_t(16 + i % 16), scores || i == 0);
+		}
+		messages.update(m, client, now);
+		s.hud->refresh(m);
+		s.hud->advance(kStepSeconds);
+		REQUIRE(s.scene->advance_seconds(kStepSeconds).ok());
+	}
+	(void)s.scene->take_changes();
+	out.settled = swf_layer_walk(*s.hud);
+	return out;
+}
+
+class StillLoadingImages final : public SwfImageSource {
+public:
+	SwfImageInfo request(std::string_view) override { return SwfImageInfo{}; }
+};
+
+SwfLayerPlan plan_while_icons_load(Rig &r_r, std::string_view p_partition) {
+	HudMessageComp messages(*r_r.messages);
+	HudClientState client = rig_client(r_r);
+	client.messages = &messages;
+	ui_retail::RetailScreen s = ui_retail::open_retail_screen(*r_r.retail, p_partition, client);
+	s.scene->set_image_source(std::make_shared<StillLoadingImages>());
+	const HudModel &m = r_r.model;
+	messages.update(m, client, 0.0);
+	s.hud->initialize(m);
+	s.hud->set_focus(true);
+	for (int i = 0; i < 4; ++i) {
+		s.hud->refresh(m);
+		s.hud->advance(kStepSeconds);
+		REQUIRE(s.scene->advance_seconds(kStepSeconds).ok());
+	}
+	(void)s.scene->take_changes();
+	return swf_layer_plan(swf_layer_walk(*s.hud), kWindows[0].width, kWindows[0].height);
+}
+
+const std::map<std::string, DrivenScreen> &driven_screens(Rig &r_r) {
+	static std::map<std::string, DrivenScreen> screens;
+	if (!screens.empty()) {
+		return screens;
+	}
+	std::set<std::string_view> partitions;
+	const auto add = [&partitions](const auto &p_list) { partitions.insert(p_list.begin(), p_list.end()); };
+	add(kHudDrawnPartitions);
+	add(kMenuDrawnPartitions);
+	add(kOptionsScreens);
+	add(kDeployDrawnPartitions);
+	add(kCustomizeScreenPartitions);
+	add(kNativeEorScreens);
+	add(kOverlayDrawnPartitions);
+	partitions.insert(kKillScreenPartition);
+	partitions.insert(kPopupBindKeyPartition);
+	partitions.insert(kPopupDelayPartition);
+	partitions.insert(kScreenAdjustPartition);
+	for (const std::string_view p : partitions) {
+		DrivenScreen d = drive_screen(r_r, p);
+		std::string leaf = d.leaf;
+		screens.emplace(std::move(leaf), std::move(d));
+	}
+	return screens;
+}
+
+bool is_hud_family(std::string_view p_leaf) {
+	return p_leaf == "hudmpscreen" || p_leaf == "hudtdmscreen" || p_leaf == "hudscreen" ||
+			p_leaf == "crosshairdefault" || p_leaf == "killscreen";
+}
+
+}
+
+TEST_SUITE("ui-layer-plan") {
+	TEST_CASE("layer plan: every drawn screen has its census filter floor, and own surfaces are the allow-listed few") {
+		Rig *r = rig_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const std::map<std::string, DrivenScreen> &screens = driven_screens(*r);
+		std::printf(
+				"screen pages clips own empty non_empty_filters multi_filter non_rect_masks plain_text kernels slot_px "
+				"own_kib first_own\n");
+		for (const auto &[leaf, d] : screens) {
+			const SwfLayerPlan plan = swf_layer_plan(d.settled, kWindows[0].width, kWindows[0].height);
+			const SwfLayerPlan first = swf_layer_plan(d.first, kWindows[0].width, kWindows[0].height);
+			const SwfLayerCounts &c = plan.counts;
+			std::printf("%s %u %u %u %u %u %u %u %u %u %llu %.1f %u\n", leaf.c_str(), c.pages, c.clips, c.own_surfaces,
+					c.empty, c.non_empty_filters, d.settled.multi_filter_layers, d.settled.non_rect_masks,
+					d.settled.plain_text_fields, c.distinct_kernels, static_cast<unsigned long long>(c.page_slot_px),
+					double(c.own_surface_bytes) / 1024.0, first.counts.own_surfaces);
+			for (const SwfPlannedLayer &l : plan.layers) {
+				if (l.klass() == SwfLayerClass::OwnSurface) {
+					std::printf("  own %s %s %dx%d\n", swf_layer_kind_name(l.kind), l.path.c_str(), l.width, l.height);
+					CHECK_MESSAGE(
+							allowed_own_surface(l.path), leaf, " has an own surface off the allow-list: ", l.path);
+				}
+			}
+			if (!is_hud_family(leaf)) {
+				CHECK_MESSAGE(c.own_surfaces <= kMenuOwnSurfaceHandful, leaf, " own surfaces ", c.own_surfaces);
+				CHECK_MESSAGE(d.settled.non_rect_masks == 0, leaf, " non-rect masks ", d.settled.non_rect_masks);
+			}
+		}
+		for (const auto &[leaf, floor] : kCensusFilterFloors) {
+			const auto it = screens.find(std::string(leaf));
+			REQUIRE_MESSAGE(it != screens.end(), "no driven screen for ", leaf);
+			const uint32_t seen =
+					swf_layer_plan(it->second.settled, kWindows[0].width, kWindows[0].height).counts.non_empty_filters;
+			CHECK_MESSAGE(seen >= floor, leaf, " has ", seen, " non-empty filter layers, the census saw ", floor);
+		}
+	}
+
+	TEST_CASE("layer plan: while icons load, the only added own surfaces are the image spinners") {
+		Rig *r = rig_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		std::vector<std::string_view> partitions(kCustomizeScreenPartitions.begin(), kCustomizeScreenPartitions.end());
+		partitions.push_back(kSpawnScreenPcPartition);
+		partitions.push_back(kEorStatsPartition);
+		uint32_t spinners_seen = 0;
+		for (const std::string_view p : partitions) {
+			const SwfLayerPlan plan = plan_while_icons_load(*r, p);
+			uint32_t spinners = 0;
+			uint64_t spinner_bytes = 0;
+			for (const SwfPlannedLayer &l : plan.layers) {
+				if (l.klass() != SwfLayerClass::OwnSurface) {
+					continue;
+				}
+				const bool spinner = l.kind == SwfLayerKind::Blend && l.filters == 0 &&
+						l.path.find(".spinnerMc.") != std::string::npos;
+				CHECK_MESSAGE((spinner || allowed_own_surface(l.path)), p, " ", l.path);
+				spinners += spinner ? 1u : 0u;
+				spinner_bytes += spinner ? swf_target_bytes(l.width, l.height, kSwfTargetFactor4x) : 0u;
+			}
+			spinners_seen += spinners;
+			std::printf("while icons load: %s own %u of which spinners %u (%.1f KiB)\n",
+					std::string(ui_data_category_leaf(p)).c_str(), plan.counts.own_surfaces, spinners,
+					double(spinner_bytes) / 1024.0);
+		}
+		CHECK(spinners_seen > 0);
+	}
+
+	TEST_CASE("layer plan: listMask and GridScrollMaskMc are rectangles, on every screen that has them") {
+		Rig *r = rig_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		uint32_t list_masks = 0;
+		uint32_t grid_masks = 0;
+		for (const auto &[leaf, d] : driven_screens(*r)) {
+			for (const SwfLayerWalkNode &l : d.settled.layers) {
+				if (l.kind != SwfLayerKind::Mask) {
+					continue;
+				}
+				const bool list = l.path.find("listMask") != std::string::npos;
+				const bool grid = l.path.find("GridScrollMaskMc") != std::string::npos;
+				list_masks += list ? 1u : 0u;
+				grid_masks += grid ? 1u : 0u;
+				if (list || grid) {
+					CHECK_MESSAGE(l.route == SwfLayerClass::Clip, leaf, " ", l.path, " is not a rectangle");
+				}
+			}
+		}
+		std::printf("rect masks: listMask %u GridScrollMaskMc %u\n", list_masks, grid_masks);
+		CHECK(list_masks > 0);
+		CHECK(grid_masks > 0);
+	}
+
+	TEST_CASE("layer plan: a rectangle stays one with alpha 0 and stops being one when rotated or tilted") {
+		Rig *r = rig_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudMessageComp messages(*r->messages);
+		HudClientState client = rig_client(*r);
+		client.messages = &messages;
+		ui_retail::RetailScreen s = ui_retail::open_retail_screen(*r->retail, kMenuScoreboardPartition, client);
+		s.hud->initialize(r->model);
+		for (int i = 0; i < 3; ++i) {
+			s.hud->refresh(r->model);
+			s.hud->advance(kStepSeconds);
+			REQUIRE(s.scene->advance_seconds(kStepSeconds).ok());
+		}
+		(void)s.scene->take_changes();
+		const SwfLayerWalk walk = swf_layer_walk(*s.hud);
+		std::string mask;
+		for (const SwfLayerWalkNode &l : walk.layers) {
+			if (l.kind == SwfLayerKind::Mask && l.path.find("listMask") != std::string::npos) {
+				mask = l.path;
+			}
+		}
+		REQUIRE(!mask.empty());
+		const SwfNodeId id = s.scene->find(mask);
+		const SwfFontSet *fonts = s.hud->fonts();
+		REQUIRE(swf_rect_mask(*s.scene, fonts, id).has_value());
+		const std::vector<SwfNodeId> tilted{ id };
+		CHECK_FALSE(swf_rect_mask(*s.scene, fonts, id, tilted).has_value());
+		REQUIRE(s.scene->set_alpha(mask, 0.0f).ok());
+		(void)s.scene->take_changes();
+		CHECK(swf_rect_mask(*s.scene, fonts, id).has_value());
+		SwfMatrix turned = s.scene->node(id)->matrix;
+		turned.b = 0.5f;
+		turned.c = -0.5f;
+		REQUIRE(s.scene->set_matrix(mask, turned).ok());
+		(void)s.scene->take_changes();
+		CHECK_FALSE(swf_rect_mask(*s.scene, fonts, id).has_value());
+	}
+
+	TEST_CASE("layer plan: MenuHint's text is a page, not a group around one") {
+		Rig *r = rig_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const std::map<std::string, DrivenScreen> &screens = driven_screens(*r);
+		const auto it = screens.find("optionsvideoscreen");
+		REQUIRE(it != screens.end());
+		bool page = false;
+		for (const SwfLayerWalkNode &l : it->second.settled.layers) {
+			if (l.path.find("MenuHint_01.hint.text") == std::string::npos) {
+				continue;
+			}
+			CHECK_MESSAGE(l.kind != SwfLayerKind::Blend, l.path);
+			page = page || (l.kind == SwfLayerKind::Filter && l.route == SwfLayerClass::Page);
+		}
+		CHECK(page);
+	}
+}
