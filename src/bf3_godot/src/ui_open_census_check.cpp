@@ -236,8 +236,8 @@ void Bf3UiOpenCensusCheck::finish() {
 					(unsigned long long)left.live_filter_stages));
 	add("no viewport made only to be replaced", thrown_viewports_ == 0,
 			bf3::core::fmt("%llu thrown away", (unsigned long long)thrown_viewports_));
-	add("no triangle array of few triangles", left.small_triangle_arrays_emitted == 0,
-			bf3::core::fmt("%llu emitted", (unsigned long long)left.small_triangle_arrays_emitted));
+	add("no triangle array of few triangles", left.smallest_triangle_array > kUiOpenCensusPrimitiveTriangles,
+			bf3::core::fmt("smallest array has %llu triangles", (unsigned long long)left.smallest_triangle_array));
 	Bf3Localisation *loc = Bf3Localisation::current();
 	if (loc == nullptr || !loc->install_snapshot_at_start().valid) {
 		add("install.unchanged", false, "no snapshot at start");

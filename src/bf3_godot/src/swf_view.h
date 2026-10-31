@@ -100,7 +100,7 @@ struct SwfViewCounters {
 	uint64_t live_surfaces = 0;
 	uint64_t live_items = 0;
 	uint64_t live_triangle_arrays = 0;
-	uint64_t small_triangle_arrays_emitted = 0;
+	uint64_t smallest_triangle_array = 0;
 	uint64_t live_filter_stages = 0;
 	uint64_t live_filter_materials = 0;
 	uint64_t retained_bytes = 0;

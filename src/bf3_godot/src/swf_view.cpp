@@ -1634,7 +1634,10 @@ struct Bf3SwfView::Impl {
 		rs->canvas_item_add_triangle_array(r_piece.item, indices, points, colors, uvs, PackedInt32Array(), PackedFloat32Array(), p_texture);
 		r_piece.has_array = true;
 		++g_counters.live_triangle_arrays;
-		g_counters.small_triangle_arrays_emitted += p_geo.indices.size() / 3 <= kPrimitiveMaxTriangles ? 1u : 0u;
+		const uint64_t triangles = uint64_t(p_geo.indices.size() / 3);
+		g_counters.smallest_triangle_array = g_counters.smallest_triangle_array == 0
+				? triangles
+				: std::min(g_counters.smallest_triangle_array, triangles);
 	}
 
 	void emit(Piece &r_piece, const Geometry &p_geo, RID p_texture) {
