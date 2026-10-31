@@ -76,9 +76,8 @@ constexpr std::array<std::pair<std::string_view, uint32_t>, 25> kCensusFilterFlo
 		{ "spawnscreenticketcountertdmscreen", 4 },
 } };
 
-constexpr std::array<std::string_view, 6> kOwnSurfaceAllowList{ ".scoringMessage", ".scoringMessage.txt",
-	".scoringMessage.txtBg", ".multiplayerCompass.cps.#", ".multiplayerCompass.objective#.obj",
-	".Button_#.button.bgHolder" };
+constexpr std::array<std::string_view, 5> kOwnSurfaceAllowList{ ".scoringMessage", ".scoringMessage.txt",
+	".scoringMessage.txtBg", ".multiplayerCompass.cps.#", ".multiplayerCompass.objective#.obj" };
 
 std::string digits_to_hash(std::string_view p_path) {
 	std::string out;
@@ -464,7 +463,7 @@ TEST_SUITE("ui-layer-plan") {
 		}
 	}
 
-	TEST_CASE("layer plan: while icons load, the only added own surfaces are the image spinners") {
+	TEST_CASE("layer plan: while icons load, the image spinners take page slots and add no own surface") {
 		Rig *r = rig_or_skip();
 		if (r == nullptr) {
 			return;
@@ -476,21 +475,21 @@ TEST_SUITE("ui-layer-plan") {
 		for (const std::string_view p : partitions) {
 			const SwfLayerPlan plan = plan_while_icons_load(*r, p);
 			uint32_t spinners = 0;
-			uint64_t spinner_bytes = 0;
 			for (const SwfPlannedLayer &l : plan.layers) {
-				if (l.klass() != SwfLayerClass::OwnSurface) {
-					continue;
+				const bool spinner = l.kind == SwfLayerKind::Blend && l.path.find(".spinnerMc.") != std::string::npos;
+				if (spinner && l.has_content) {
+					++spinners;
+					CHECK_MESSAGE(
+							l.klass() == SwfLayerClass::Page, p, " ", l.path, " is ", swf_layer_class_name(l.klass()));
 				}
-				const bool spinner = l.kind == SwfLayerKind::Blend && l.filters == 0 &&
-						l.path.find(".spinnerMc.") != std::string::npos;
-				CHECK_MESSAGE((spinner || allowed_own_surface(l.path)), p, " ", l.path);
-				spinners += spinner ? 1u : 0u;
-				spinner_bytes += spinner ? swf_target_bytes(l.width, l.height, kSwfTargetFactor4x) : 0u;
+				if (l.klass() == SwfLayerClass::OwnSurface) {
+					CHECK_MESSAGE(allowed_own_surface(l.path), p, " ", l.path);
+				}
 			}
 			spinners_seen += spinners;
-			std::printf("while icons load: %s own %u of which spinners %u (%.1f KiB)\n",
+			std::printf("while icons load: %s own %u, spinners %u, pages %u\n",
 					std::string(ui_data_category_leaf(p)).c_str(), plan.counts.own_surfaces, spinners,
-					double(spinner_bytes) / 1024.0);
+					plan.counts.pages);
 		}
 		CHECK(spinners_seen > 0);
 	}

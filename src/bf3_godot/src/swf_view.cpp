@@ -2184,6 +2184,33 @@ struct Bf3SwfView::Impl {
 		return !explicit_size && msaa == RenderingServer::VIEWPORT_MSAA_4X && Bf3UiPages::current() != nullptr;
 	}
 
+	void set_passthrough_stage(Canvas &r_c, bool p_wanted) {
+		if (!p_wanted) {
+			for (Stage &s : r_c.stages) {
+				forget_in_pass(s.item);
+				free_item(s.item);
+				release_filter_material(rs, s.material_key);
+				s.surface.free(rs);
+			}
+			r_c.stages.clear();
+			return;
+		}
+		ui::SwfFilter none;
+		none.kind = ui::SwfFilterKind::Blur;
+		none.blur_x = 0.0f;
+		none.blur_y = 0.0f;
+		none.passes = 0;
+		const ui::SwfFilterKernel kernel = ui::swf_filter_kernel(none, 1.0, 1.0);
+		Stage s;
+		s.item = make_item();
+		rs->canvas_item_set_default_texture_filter(s.item, RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR);
+		++items_created;
+		s.material_key = filter_material_key(none, 1.0, 1.0);
+		rs->canvas_item_set_material(s.item, acquire_filter_material(rs, filter_shader, s.material_key, kernel));
+		s.params.flags = kStageBlur;
+		r_c.stages.push_back(std::move(s));
+	}
+
 	void switch_route(Canvas &r_c, bool p_paged) {
 		if (p_paged) {
 			for (Stage &s : r_c.stages) {
@@ -2210,6 +2237,9 @@ struct Bf3SwfView::Impl {
 			switch_route(r_c, paged);
 		}
 		Bf3UiPages *pages = Bf3UiPages::current();
+		if (r_c.kind == CanvasKind::Blend && paged != !r_c.stages.empty()) {
+			set_passthrough_stage(r_c, paged);
+		}
 		if (paged) {
 			if (!r_c.group.is_valid()) {
 				r_c.group = make_item();

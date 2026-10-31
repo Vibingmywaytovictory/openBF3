@@ -355,7 +355,7 @@ struct LayerWalker {
 				ancestors_clear = ancestors_clear && out.layers[a].route == SwfLayerClass::Clip;
 			}
 			const bool leaf = l.children.empty() && !l.has_targets;
-			const bool one_stage = l.kind == SwfLayerKind::Filter && l.filters.size() == 1;
+			const bool one_stage = l.kind == SwfLayerKind::Blend || l.filters.size() == 1;
 			l.route = one_stage && leaf && ancestors_clear && !l.tilted_inside ? SwfLayerClass::Page
 																			   : SwfLayerClass::OwnSurface;
 		}
