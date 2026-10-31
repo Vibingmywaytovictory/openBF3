@@ -2864,3 +2864,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * SwfBounds and swf_map_rect in swf_layer_plan.h replace the Box and project copies, kernel_key uses fnv.h; ui.layer_plan output unchanged.
 * swf_rect_mask checks tilt from the drawn node; ui.layer_plan rejects a tilted child, a drawn triangle and the compass masks.
 * godot.ui_open_census compares the smallest triangle array with its own 32, so the row fails if the primitive threshold falls.
+* godot.ui_open_census requires swf_layer_walk and the renderer to count the same filter, mask and blend layers on all 30 screens; they agree.

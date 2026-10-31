@@ -39,6 +39,7 @@ private:
 
 	std::vector<std::string> partitions_;
 	std::vector<Row> rows_;
+	std::string walk_differs_;
 	size_t next_ = 0;
 	uint32_t waited_ = 0;
 	size_t synced_ = 0;

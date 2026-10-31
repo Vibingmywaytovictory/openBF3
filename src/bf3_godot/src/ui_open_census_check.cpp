@@ -86,6 +86,22 @@ void Bf3UiOpenCensusCheck::census_screen(const std::string &p_partition) {
 	const SwfViewStats &stats = view->stats();
 	synced_ += stats.structure_passes != 0 ? 1u : 0u;
 	with_items_ += stats.items != 0 ? 1u : 0u;
+	ui::SwfLayerWalkOptions walk_options;
+	walk_options.fonts = Bf3UiAssets::current()->swf_fonts();
+	const ui::SwfLayerWalk walk = ui::swf_layer_walk(*view->scene(), walk_options);
+	const auto layers = [&walk](ui::SwfLayerKind p_kind) {
+		return uint32_t(std::count_if(walk.layers.begin(), walk.layers.end(),
+				[p_kind](const ui::SwfLayerWalkNode &p_l) { return p_l.kind == p_kind; }));
+	};
+	const uint32_t walk_filters = layers(ui::SwfLayerKind::Filter);
+	const uint32_t walk_masks = layers(ui::SwfLayerKind::Mask);
+	const uint32_t walk_blends = layers(ui::SwfLayerKind::Blend);
+	if (walk_filters != stats.filter_layers || walk_masks != stats.mask_groups || walk_blends != stats.blend_layers ||
+			walk.engine_targets != stats.engine_targets) {
+		walk_differs_ += bf3::core::fmt(" %s: walk %u/%u/%u/%u, view %u/%u/%u/%u;", leaf.c_str(), walk_filters,
+				walk_masks, walk_blends, walk.engine_targets, stats.filter_layers, stats.mask_groups,
+				stats.blend_layers, stats.engine_targets);
+	}
 	filter_stages_ += after.live_filter_stages - before.live_filter_stages;
 	filter_materials_ += after.live_filter_materials - before.live_filter_materials;
 	thrown_viewports_ +=
@@ -219,6 +235,8 @@ void Bf3UiOpenCensusCheck::finish() {
 	census_filter_swap(std::string(kIngameMenuPartition));
 	add("every view synced under the dummy renderer", synced_ == partitions_.size(),
 			std::to_string(synced_) + " of " + std::to_string(partitions_.size()));
+	add("the layer walk counts what the renderer plans", walk_differs_.empty(),
+			walk_differs_.empty() ? "filters, masks, blends, targets equal on every screen" : walk_differs_);
 	add("the views built their items", with_items_ == partitions_.size(),
 			std::to_string(with_items_) + " of " + std::to_string(partitions_.size()));
 	const SwfViewCounters left = Bf3SwfView::counters();
