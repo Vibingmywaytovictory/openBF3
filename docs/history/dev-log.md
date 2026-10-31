@@ -2876,3 +2876,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Leaf blend groups take page slots through a passthrough stage: customizesoldierscreen's 20 spinners no longer allocate at open.
 * HUD moment captures restart their wait while any HUD view has page fills pending; godot.native_hud built, not run.
 * ui.layer_plan prints plain text glyphs: Keybindings 48 fields and 300 glyphs, Video 42 and 208.
+* godot.swf_view gains a byte comparison of paged layers against own surfaces; built, not run.

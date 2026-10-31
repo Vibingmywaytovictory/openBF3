@@ -4,6 +4,7 @@
 #include "godot_util.h"
 #include "swf_view.h"
 #include "ui_assets.h"
+#include "ui_pages.h"
 #include "ui_swf_writer.h"
 
 #include "bf3/core/level/budget.h"
@@ -63,6 +64,8 @@ constexpr float kDogTagPairX = 380.0f;
 constexpr float kDogTagPairY = 200.0f;
 constexpr int32_t kPlayFrames = 30;
 constexpr int32_t kPerfFrames = 300;
+constexpr int32_t kPageCompareMinFrames = 6;
+constexpr int32_t kPageCompareMaxFrames = 120;
 constexpr int32_t kPerfTextFields = 8;
 constexpr double kEdge = 2.0;
 constexpr double kScaleEdge = 3.0;
@@ -579,6 +582,11 @@ struct Bf3SwfViewCheck::State {
 	uint32_t perf_builds0[2] = { 0, 0 };
 	int exit_code = 0;
 	const ui::SwfFontSet *fonts = nullptr;
+	Bf3UiPages *compare_pages = nullptr;
+	std::array<Bf3SwfView *, 2> compare_own{};
+	std::array<Bf3SwfView *, 2> compare_paged{};
+	int compare_frames = 0;
+	bool compare_done = false;
 
 	Bf3SwfView *small_view(int p_movie) const { return views[size_t(p_movie)]; }
 	Bf3SwfView *big_view(int p_movie) const { return views[size_t(2 + p_movie)]; }
@@ -624,6 +632,57 @@ void Bf3SwfViewCheck::setup() {
 		s.add(fmt("open %s %s", kMovies[i % 2], i < 2 ? "1280x720" : "2560x1440"), bool(st), st ? std::string("opened") : st.error().message);
 		s.views[size_t(i)] = v;
 	}
+}
+
+void Bf3SwfViewCheck::run_page_comparison() {
+	State &s = *state_;
+	if (s.compare_pages == nullptr) {
+		s.compare_pages = memnew(Bf3UiPages);
+		add_child(s.compare_pages);
+		for (size_t i = 0; i < s.compare_own.size(); ++i) {
+			Bf3SwfView *own = memnew(Bf3SwfView);
+			own->set_playing(false);
+			own->set_target_size(Vector2i(1280, 720));
+			add_child(own);
+			Bf3SwfView *paged = memnew(Bf3SwfView);
+			paged->set_playing(false);
+			add_child(paged);
+			const bf3::core::Status own_open = own->open(kMovies[i]);
+			const bf3::core::Status paged_open = paged->open(kMovies[i]);
+			s.add(fmt("open %s twice, own surfaces and pages", kMovies[i]), own_open.ok() && paged_open.ok(),
+					own_open.ok() ? paged_open.ok() ? std::string("opened") : paged_open.error().message
+								  : own_open.error().message);
+			s.compare_own[i] = own;
+			s.compare_paged[i] = paged;
+		}
+		return;
+	}
+	++s.compare_frames;
+	const bool pending = std::any_of(s.compare_paged.begin(), s.compare_paged.end(),
+			[](const Bf3SwfView *p_view) { return p_view->page_fills_pending(); });
+	if (s.compare_frames < kPageCompareMinFrames || (pending && s.compare_frames < kPageCompareMaxFrames)) {
+		return;
+	}
+	for (size_t i = 0; i < s.compare_own.size(); ++i) {
+		const Img own = img_of(s.compare_own[i]->capture_hud());
+		const Img paged = img_of(s.compare_paged[i]->capture_hud());
+		uint64_t differing = 0;
+		int32_t largest = 0;
+		for (size_t p = 0; own.px.size() == paged.px.size() && p + 3 < own.px.size(); p += 4) {
+			int32_t step = 0;
+			for (size_t c = 0; c < 4; ++c) {
+				step = std::max(step, std::abs(int32_t(own.px[p + c]) - int32_t(paged.px[p + c])));
+			}
+			differing += step != 0 ? 1u : 0u;
+			largest = std::max(largest, step);
+		}
+		s.add(fmt("paged layers draw the bytes of own surfaces: %s", kMovies[i]),
+				!pending && s.compare_paged[i]->paged_layers() != 0 && !own.px.empty() &&
+						own.px.size() == paged.px.size() && differing == 0,
+				fmt("%u paged layers, %llu pixel(s) differ, largest step %d", s.compare_paged[i]->paged_layers(),
+						(unsigned long long)differing, largest));
+	}
+	s.compare_done = true;
 }
 
 void Bf3SwfViewCheck::finish() {
@@ -1410,6 +1469,13 @@ void Bf3SwfViewCheck::_process(double p_delta) {
 		}
 		return;
 	}
+	if (s.phase == 6) {
+		run_page_comparison();
+		if (s.compare_done) {
+			finish();
+		}
+		return;
+	}
 	if (s.phase == 5) {
 		run_images();
 		return;
@@ -1447,7 +1513,7 @@ void Bf3SwfViewCheck::_process(double p_delta) {
 						s.perf_fields.size(), mean, p95, sorted.empty() ? 0.0 : sorted.back(), sorted.size(), a.nodes_refreshed, b.nodes_refreshed, a.viewports_updated,
 						b.viewports_updated, a.structure_passes - s.perf_structure0[0], b.structure_passes - s.perf_structure0[1], a.content_builds - s.perf_builds0[0],
 						b.content_builds - s.perf_builds0[1]));
-		finish();
+		s.phase = 6;
 	}
 }
 

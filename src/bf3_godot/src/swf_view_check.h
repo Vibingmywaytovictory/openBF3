@@ -27,6 +27,7 @@ private:
 	void setup();
 	void finish();
 	void run_images();
+	void run_page_comparison();
 	std::unique_ptr<State> state_;
 };
 
