@@ -109,6 +109,7 @@ SwfGridWarp swf_grid_warp(const SwfScene &p_scene, const SwfSceneNode &p_node, c
 
 struct SwfNodePieces {
 	uint32_t count = 0;
+	uint32_t glyphs = 0;
 	bool has_bounds = false;
 	SwfRect local;
 	const SwfSceneNode *frame = nullptr;
@@ -163,6 +164,7 @@ struct SwfLayerWalk {
 	uint32_t root_items = 0;
 	uint32_t direct_blends = 0;
 	uint32_t plain_text_fields = 0;
+	uint32_t plain_text_glyphs = 0;
 	uint32_t engine_targets = 0;
 	uint32_t multi_filter_layers = 0;
 	uint32_t non_rect_masks = 0;
@@ -192,6 +194,7 @@ public:
 	virtual void attach(const SwfSceneNode &p_node, uint32_t p_layer, bool p_alpha, bool p_additive, bool p_own) = 0;
 	virtual void unsupported_filter(const SwfSceneNode &, const SwfFilter &) {}
 	virtual void unsupported_blend(const SwfSceneNode &) {}
+	virtual void plain_text(const SwfSceneNode &) {}
 
 protected:
 	~SwfLayerVisitor() = default;

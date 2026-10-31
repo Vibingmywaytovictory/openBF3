@@ -431,16 +431,17 @@ TEST_SUITE("ui-layer-plan") {
 			return;
 		}
 		const std::map<std::string, DrivenScreen> &screens = driven_screens(*r);
-		std::printf(
-				"screen pages clips own empty non_empty_filters multi_filter non_rect_masks plain_text kernels slot_px "
-				"own_kib first_own\n");
+		std::printf("screen pages clips own empty non_empty_filters multi_filter non_rect_masks plain_text "
+					"plain_glyphs kernels "
+					"slot_px own_kib first_own\n");
 		for (const auto &[leaf, d] : screens) {
 			const SwfLayerPlan plan = swf_layer_plan(d.settled, kWindows[0].width, kWindows[0].height);
 			const SwfLayerPlan first = swf_layer_plan(d.first, kWindows[0].width, kWindows[0].height);
 			const SwfLayerCounts &c = plan.counts;
-			std::printf("%s %u %u %u %u %u %u %u %u %u %llu %.1f %u\n", leaf.c_str(), c.pages, c.clips, c.own_surfaces,
-					c.empty, c.non_empty_filters, d.settled.multi_filter_layers, d.settled.non_rect_masks,
-					d.settled.plain_text_fields, c.distinct_kernels, static_cast<unsigned long long>(c.page_slot_px),
+			std::printf("%s %u %u %u %u %u %u %u %u %u %u %llu %.1f %u\n", leaf.c_str(), c.pages, c.clips,
+					c.own_surfaces, c.empty, c.non_empty_filters, d.settled.multi_filter_layers,
+					d.settled.non_rect_masks, d.settled.plain_text_fields, d.settled.plain_text_glyphs,
+					c.distinct_kernels, static_cast<unsigned long long>(c.page_slot_px),
 					double(c.own_surface_bytes) / 1024.0, first.counts.own_surfaces);
 			for (const SwfPlannedLayer &l : plan.layers) {
 				if (l.klass() == SwfLayerClass::OwnSurface) {

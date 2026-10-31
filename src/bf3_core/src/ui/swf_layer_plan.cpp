@@ -291,6 +291,7 @@ struct LayerWalker {
 			}
 			if (layer == p_layer && n->kind == SwfNodeKind::EditText && visitor.pieces(*n) != 0) {
 				++out.plain_text_fields;
+				visitor.plain_text(*n);
 			}
 		}
 		visitor.attach(*n, layer, p_ctx.alpha, p_ctx.additive, own);
@@ -370,6 +371,7 @@ struct BoundsVisitor final : SwfLayerVisitor {
 	std::vector<SwfBounds> masks;
 	std::unordered_map<SwfNodeId, SwfNodePieces> known;
 	uint32_t root_items = 0;
+	uint32_t plain_glyphs = 0;
 
 	explicit BoundsVisitor(const SwfScene &p_scene) : scene(p_scene) {}
 
@@ -387,6 +389,7 @@ struct BoundsVisitor final : SwfLayerVisitor {
 		return std::find(targets.begin(), targets.end(), p_node.id) != targets.end();
 	}
 	void target(const SwfSceneNode &, uint32_t) override {}
+	void plain_text(const SwfSceneNode &p_node) override { plain_glyphs += pieces_of(p_node).glyphs; }
 	void layer_opened(uint32_t, const SwfLayerWalkNode &) override {
 		nodes.emplace_back();
 		masks.emplace_back();
@@ -531,6 +534,7 @@ SwfNodePieces swf_node_pieces(const SwfScene &p_scene, const SwfFontSet *p_fonts
 					if (g.face == nullptr) {
 						continue;
 					}
+					++out.glyphs;
 					const SwfBounds gb = glyph_box(*g.face, g.glyph);
 					if (!gb.empty()) {
 						const double s = double(g.size) / double(kSwfFontUnitsPerEm);
@@ -667,6 +671,7 @@ SwfLayerWalk swf_layer_walk(const SwfScene &p_scene, const SwfLayerWalkOptions &
 	walk.tilted = resolve(p_scene, p_options.tilted_paths);
 	SwfLayerWalk out = swf_walk_layers(p_scene, walk, visitor);
 	out.root_items = visitor.root_items;
+	out.plain_text_glyphs = visitor.plain_glyphs;
 	for (size_t i = 0; i < out.layers.size(); ++i) {
 		SwfLayerWalkNode &l = out.layers[i];
 		l.has_nodes = !visitor.nodes[i].empty();
