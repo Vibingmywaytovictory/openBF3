@@ -13,6 +13,7 @@
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/minimap.h"
 #include "bf3/core/ui/screen_adjust.h"
+#include "bf3/core/ui/ui_drawn_screens.h"
 
 #include <godot_cpp/classes/font.hpp>
 #include <godot_cpp/classes/image.hpp>
@@ -47,8 +48,8 @@ struct NativeHudClipState {
 	bool visible = false;
 	uint32_t frame = 0;
 };
-inline constexpr std::array<std::string_view, kNativeHudViews> kNativeHudPartitions{ bf3::core::ui::kHudMpScreenPartition,
-	bf3::core::ui::kHudTdmScreenPartition, bf3::core::ui::kCrosshairDefaultPartition, bf3::core::ui::kHudSharedScreenPartition };
+inline constexpr std::array<std::string_view, kNativeHudViews> kNativeHudPartitions =
+		bf3::core::ui::kHudDrawnPartitions;
 
 inline constexpr std::string_view kUiMinimapCompPartition = "ui/uicomponents/uiminimapcomp";
 inline constexpr int32_t kUiMinimapIsSmallKey = -1358262034;

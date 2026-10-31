@@ -2,6 +2,7 @@
 
 #include "bf3/core/ui/hud_model.h"
 #include "bf3/core/ui/hud_screen.h"
+#include "bf3/core/ui/ui_drawn_screens.h"
 #include "bf3/core/ui/ui_graph.h"
 
 #include <array>
@@ -20,15 +21,13 @@ namespace bf3::godot_side {
 class Bf3UiScreens;
 
 inline constexpr std::string_view kEorGraphPrefix = "ui/flow/graph/endofround/";
-inline constexpr std::string_view kEorHud64Partition = "ui/flow/screen/scoreboards/scoreboardtwoteamshud64screen";
-inline constexpr std::string_view kEorTabsPartition = "ui/flow/screen/eordetailstabsscreen";
-inline constexpr std::string_view kEorScoreboardPartition = "ui/flow/screen/eordetailsscoreboardscreen";
-inline constexpr std::string_view kEorTwoTeamsPartition = "ui/flow/screen/scoreboards/scoreboardtwoteamsscreen";
-inline constexpr std::string_view kEorStatsPartition = "ui/flow/screen/eordetailsstatsscreen";
-inline constexpr std::string_view kEorPopupPartition = "ui/flow/screen/popups/popupgeneric";
-inline constexpr std::array<std::string_view, 7> kNativeEorScreens{ bf3::core::ui::kEorWinningTeamScreenPartition,
-	kEorHud64Partition, kEorTabsPartition, kEorScoreboardPartition, kEorTwoTeamsPartition, kEorStatsPartition,
-	kEorPopupPartition };
+using bf3::core::ui::kEorHud64Partition;
+using bf3::core::ui::kEorPopupPartition;
+using bf3::core::ui::kEorScoreboardPartition;
+using bf3::core::ui::kEorStatsPartition;
+using bf3::core::ui::kEorTabsPartition;
+using bf3::core::ui::kEorTwoTeamsPartition;
+using bf3::core::ui::kNativeEorScreens;
 inline constexpr std::array<std::string_view, 2> kNativeEorScoreboards{ kEorHud64Partition, kEorTwoTeamsPartition };
 inline constexpr std::string_view kEorMouseInputAction = "MouseInput";
 inline constexpr std::string_view kEorGameInputAction = "GameInput";

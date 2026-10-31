@@ -2,6 +2,7 @@
 
 #include "overview_map.h"
 
+#include "bf3/core/ui/ui_drawn_screens.h"
 #include "bf3/core/ui/ui_graph.h"
 
 #include <array>
@@ -27,12 +28,11 @@ class Bf3UiScreens;
 class InputMapper;
 class NativeTags;
 
-inline constexpr std::string_view kIngameMenuPartition = "ui/flow/screen/ingamemenump";
-inline constexpr std::string_view kMenuScoreboardPartition = "ui/flow/screen/scoreboards/scoreboardtwoteamsscreen";
-inline constexpr std::string_view kMenuScoreboardBackPartition = "ui/flow/screen/scoreboardbackscreen";
-inline constexpr std::string_view kPopupGenericPartition = "ui/flow/screen/popups/popupgeneric";
-inline constexpr std::array<std::string_view, 4> kMenuDrawnPartitions{ kIngameMenuPartition, kMenuScoreboardPartition,
-	kMenuScoreboardBackPartition, kPopupGenericPartition };
+using bf3::core::ui::kIngameMenuPartition;
+using bf3::core::ui::kMenuDrawnPartitions;
+using bf3::core::ui::kMenuScoreboardBackPartition;
+using bf3::core::ui::kMenuScoreboardPartition;
+using bf3::core::ui::kPopupGenericPartition;
 inline constexpr std::string_view kUiGameInputAction = "GameInput";
 inline constexpr std::string_view kUiMouseInputAction = "MouseInput";
 inline constexpr std::string_view kUiMouseCursorAction = "MouseCursor";

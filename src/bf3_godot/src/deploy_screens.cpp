@@ -74,8 +74,7 @@ bf3::core::Result<bf3::net::LoadoutRequest> deploy_loadout_request(const DeployP
 }
 
 void DeployScreens::draw(Bf3UiScreens &r_screens) {
-	for (const std::string_view p :
-			{ kSpawnScreenPcPartition, kSpawnButtonScreenPartition, kSpawnTicketCounterPartition }) {
+	for (const std::string_view p : bf3::core::ui::kDeployDrawnPartitions) {
 		r_screens.set_drawn(p, true);
 	}
 	for (const std::string_view p : kCustomizeScreenPartitions) {

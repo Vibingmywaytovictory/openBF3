@@ -325,6 +325,7 @@ target_sources(bf3_core PRIVATE
     src/ui/ui_direct_access.cpp
     include/bf3/core/ui/swf_hit.h
     src/ui/swf_hit.cpp
+    include/bf3/core/ui/ui_drawn_screens.h
 )
 openbf3_registry(bf3_core src/ui/widgets bf3/core/ui/hud_widget_registry.h HudWidgetRegistry bf3::core::ui register_hud_widgets_ register_hud_widget_files)
 

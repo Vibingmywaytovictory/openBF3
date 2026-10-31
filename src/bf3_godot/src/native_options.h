@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/core/ui/options_model.h"
+#include "bf3/core/ui/ui_drawn_screens.h"
 #include "bf3/core/ui/ui_graph.h"
 
 #include <array>
@@ -18,9 +19,9 @@ namespace bf3::godot_side {
 
 class Bf3UiScreens;
 
-inline constexpr std::string_view kPopupBindKeyPartition = "ui/flow/screen/popups/popupbindkey";
-inline constexpr std::string_view kPopupDelayPartition = "ui/flow/screen/popups/popupdelay";
-inline constexpr std::string_view kScreenAdjustPartition = "ui/flow/screen/screenadjustscreen";
+using bf3::core::ui::kPopupBindKeyPartition;
+using bf3::core::ui::kPopupDelayPartition;
+using bf3::core::ui::kScreenAdjustPartition;
 inline constexpr std::string_view kOptionsSettingsCategory = "ui/uicomponents/uisettingscomp";
 inline constexpr std::string_view kOptionsMemCardCategory = "ui/uicomponents/uimemcardcomp";
 inline constexpr std::string_view kOptionsSettingsLeaf = "uisettingscomp";

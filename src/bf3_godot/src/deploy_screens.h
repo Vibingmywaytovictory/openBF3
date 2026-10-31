@@ -2,6 +2,7 @@
 
 #include "bf3/core/result.h"
 #include "bf3/core/ui/hud_model.h"
+#include "bf3/core/ui/ui_drawn_screens.h"
 #include "bf3/core/ui/ui_graph.h"
 #include "bf3/host/loadout.h"
 #include "bf3/net/protocol.h"
@@ -26,9 +27,10 @@ namespace bf3::godot_side {
 class Bf3NativeHud;
 class Bf3UiScreens;
 
-inline constexpr std::string_view kSpawnScreenPcPartition = "ui/flow/screen/spawnscreenpc";
-inline constexpr std::string_view kSpawnButtonScreenPartition = "ui/flow/screen/spawnbuttonscreen";
-inline constexpr std::string_view kSpawnTicketCounterPartition = "ui/flow/screen/spawnscreenticketcountertdmscreen";
+using bf3::core::ui::kCustomizeScreenPartitions;
+using bf3::core::ui::kSpawnButtonScreenPartition;
+using bf3::core::ui::kSpawnScreenPcPartition;
+using bf3::core::ui::kSpawnTicketCounterPartition;
 inline constexpr std::string_view kSpawnScreenOverviewPath = "instance1.OverviewMap_01";
 inline constexpr std::string_view kUiKitCompPartition = "ui/uicomponents/uikitcomp";
 inline constexpr std::string_view kUiSpawnPointCompPartition = "ui/uicomponents/uispawnpointcomp";
@@ -46,8 +48,6 @@ inline constexpr std::array<int32_t, bf3::core::ui::kHudSpawnKitItems> kUiCustom
 	305101192, 305127776, -1021374313 };
 inline constexpr std::array<int32_t, bf3::core::ui::kHudAccessorySlots> kUiCustomizationAccessoryKeys{ -991137952,
 	-991137949, -991137950, -991137947 };
-inline constexpr std::array<std::string_view, 3> kCustomizeScreenPartitions{ "ui/flow/screen/customizesoldierscreen",
-	"ui/flow/screen/customizesoldiersubscreen", "ui/flow/screen/customizeaccessoriesscreen" };
 
 struct DeployScreensStats {
 	uint64_t spawn_actions = 0;

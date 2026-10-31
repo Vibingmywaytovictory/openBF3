@@ -2,12 +2,13 @@
 
 #include "native_screens.h"
 
-#include "bf3/core/ui/hud_screen.h"
+#include "bf3/core/ui/ui_drawn_screens.h"
 
 namespace bf3::godot_side {
 
 void OverlayScreens::draw(Bf3UiScreens &r_screens) {
-	r_screens.set_drawn(bf3::core::ui::kScoreboardHud32ScreenPartition, true);
-	r_screens.set_drawn(bf3::core::ui::kPreRoundWaitingScreenPartition, true);
+	for (const std::string_view p : bf3::core::ui::kOverlayDrawnPartitions) {
+		r_screens.set_drawn(p, true);
+	}
 }
 }
