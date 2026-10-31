@@ -90,6 +90,18 @@ struct SwfViewStats {
 	double sync_seconds = 0.0;
 };
 
+struct SwfViewCounters {
+	uint64_t viewport_creates = 0;
+	uint64_t viewport_resizes = 0;
+	uint64_t live_surfaces = 0;
+	uint64_t live_items = 0;
+	uint64_t live_triangle_arrays = 0;
+	uint64_t retained_bytes = 0;
+	uint64_t plans = 0;
+	double plan_seconds = 0.0;
+	double build_seconds = 0.0;
+};
+
 class Bf3SwfView : public godot::Node2D {
 	GDCLASS(Bf3SwfView, godot::Node2D)
 
@@ -116,6 +128,7 @@ public:
 	uint32_t instance_items() const;
 	uint64_t open_serial() const;
 	static double sync_seconds_total();
+	static SwfViewCounters counters();
 	bool is_open() const;
 	const std::string &error() const;
 

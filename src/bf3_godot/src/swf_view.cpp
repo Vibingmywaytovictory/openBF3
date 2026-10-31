@@ -188,6 +188,8 @@ struct SharedShaders {
 std::unique_ptr<SharedShaders> g_shaders;
 uint64_t g_open_serial = 0;
 double g_sync_seconds = 0.0;
+SwfViewCounters g_counters;
+std::vector<const Bf3SwfView *> g_views;
 
 const SharedShaders &acquire_shaders(RenderingServer *p_rs) {
 	if (g_shaders == nullptr) {
@@ -796,6 +798,8 @@ uint64_t target_bytes(Vector2i p_size, RenderingServer::ViewportMSAA p_msaa) {
 
 RID make_viewport(RenderingServer *p_rs, RenderingServer::ViewportMSAA p_msaa) {
 	const RID viewport = p_rs->viewport_create();
+	++g_counters.viewport_creates;
+	++g_counters.live_surfaces;
 	p_rs->viewport_set_disable_3d(viewport, true);
 	p_rs->viewport_set_transparent_background(viewport, true);
 	p_rs->viewport_set_clear_mode(viewport, RenderingServer::VIEWPORT_CLEAR_ALWAYS);
@@ -840,6 +844,7 @@ struct Surface {
 		}
 		size = s;
 		p_rs->viewport_set_size(viewport, size.x, size.y);
+		++g_counters.viewport_resizes;
 		return true;
 	}
 
@@ -857,6 +862,7 @@ struct Surface {
 		}
 		if (viewport.is_valid()) {
 			p_rs->free_rid(viewport);
+			--g_counters.live_surfaces;
 		}
 		canvas = RID();
 		viewport = RID();
@@ -891,6 +897,7 @@ struct Piece {
 	RID parent;
 	int32_t index = -1;
 	Applied applied;
+	bool has_array = false;
 };
 
 enum class CanvasKind : uint8_t {
@@ -1116,6 +1123,7 @@ struct Bf3SwfView::Impl {
 		}
 		if (r_s.size.x <= 0 || r_s.size.y <= 0) {
 			rs->free_rid(r_s.viewport);
+			--g_counters.live_surfaces;
 			r_s.viewport = RID();
 			r_s.texture = RID();
 			return;
@@ -1135,6 +1143,7 @@ struct Bf3SwfView::Impl {
 			bytes += target_bytes(it->size, it->msaa);
 			if (bytes > Bf3SwfView::kSpareSurfaceBytes || ++kept > Bf3SwfView::kSpareSurfaces) {
 				rs->free_rid(it->viewport);
+				--g_counters.live_surfaces;
 				it = std::make_reverse_iterator(spares.erase(std::next(it).base()));
 			} else {
 				++it;
@@ -1150,6 +1159,7 @@ struct Bf3SwfView::Impl {
 	void free_spares() {
 		for (const SpareSurface &sp : spares) {
 			rs->free_rid(sp.viewport);
+			--g_counters.live_surfaces;
 		}
 		spares.clear();
 	}
@@ -1190,10 +1200,25 @@ struct Bf3SwfView::Impl {
 		return true;
 	}
 
+	RID make_item() {
+		++g_counters.live_items;
+		return rs->canvas_item_create();
+	}
+
+	void free_item(RID p_item) {
+		--g_counters.live_items;
+		rs->free_rid(p_item);
+	}
+
+	void free_piece(const Piece &p_piece) {
+		g_counters.live_triangle_arrays -= p_piece.has_array ? 1u : 0u;
+		free_item(p_piece.item);
+	}
+
 	void free_canvas(Canvas &r_c) {
 		for (Stage &s : r_c.stages) {
 			if (s.item.is_valid()) {
-				rs->free_rid(s.item);
+				free_item(s.item);
 			}
 			if (s.material.is_valid()) {
 				rs->free_rid(s.material);
@@ -1202,7 +1227,7 @@ struct Bf3SwfView::Impl {
 		}
 		r_c.stages.clear();
 		if (r_c.quad.is_valid()) {
-			rs->free_rid(r_c.quad);
+			free_item(r_c.quad);
 		}
 		if (r_c.quad_material.is_valid()) {
 			rs->free_rid(r_c.quad_material);
@@ -1219,10 +1244,10 @@ struct Bf3SwfView::Impl {
 
 	void free_target(Target &r_t) {
 		if (r_t.root_item.is_valid()) {
-			rs->free_rid(r_t.root_item);
+			free_item(r_t.root_item);
 		}
 		if (r_t.quad.is_valid()) {
-			rs->free_rid(r_t.quad);
+			free_item(r_t.quad);
 		}
 		r_t.root_item = RID();
 		r_t.quad = RID();
@@ -1232,7 +1257,7 @@ struct Bf3SwfView::Impl {
 	void free_rec(NodeRec &r_rec) {
 		for (Piece &p : r_rec.pieces) {
 			if (p.item.is_valid()) {
-				rs->free_rid(p.item);
+				free_piece(p);
 			}
 		}
 		r_rec.pieces.clear();
@@ -1431,7 +1456,7 @@ struct Bf3SwfView::Impl {
 		order.clear();
 		free_spares();
 		if (present_item.is_valid()) {
-			rs->free_rid(present_item);
+			free_item(present_item);
 			present_item = RID();
 		}
 		scene.reset();
@@ -1592,6 +1617,8 @@ struct Bf3SwfView::Impl {
 
 	void emit(Piece &r_piece, const Geometry &p_geo, RID p_texture) {
 		rs->canvas_item_clear(r_piece.item);
+		g_counters.live_triangle_arrays -= r_piece.has_array ? 1u : 0u;
+		r_piece.has_array = false;
 		r_piece.has_bounds = false;
 		if (p_geo.indices.empty()) {
 			return;
@@ -1616,6 +1643,8 @@ struct Bf3SwfView::Impl {
 			indices.set(int64_t(i), p_geo.indices[i]);
 		}
 		rs->canvas_item_add_triangle_array(r_piece.item, indices, points, colors, uvs, PackedInt32Array(), PackedFloat32Array(), p_texture);
+		r_piece.has_array = true;
+		++g_counters.live_triangle_arrays;
 		r_piece.bounds = ui::SwfRect{ float(b.x0), float(b.x1), float(b.y0), float(b.y1) };
 		r_piece.has_bounds = !b.empty();
 	}
@@ -1623,7 +1652,7 @@ struct Bf3SwfView::Impl {
 	Piece &piece_at(NodeRec &r_rec, size_t p_index) {
 		while (r_rec.pieces.size() <= p_index) {
 			Piece p;
-			p.item = rs->canvas_item_create();
+			p.item = make_item();
 			++items_created;
 			rs->canvas_item_set_material(p.item, item_material);
 			rs->canvas_item_set_custom_rect(p.item, true, Rect2(-65536.0f, -65536.0f, 131072.0f, 131072.0f));
@@ -1846,7 +1875,7 @@ struct Bf3SwfView::Impl {
 
 	void trim(NodeRec &r_rec, size_t p_count) {
 		while (r_rec.pieces.size() > p_count) {
-			rs->free_rid(r_rec.pieces.back().item);
+			free_piece(r_rec.pieces.back());
 			r_rec.pieces.pop_back();
 		}
 	}
@@ -1999,6 +2028,7 @@ struct Bf3SwfView::Impl {
 		if (r_rec.built && reopened && r_rec.fingerprint == fingerprint) {
 			return;
 		}
+		const auto build_start = std::chrono::steady_clock::now();
 		stats.content_builds++;
 		r_rec.built = true;
 		r_rec.fingerprint = fingerprint;
@@ -2023,6 +2053,7 @@ struct Bf3SwfView::Impl {
 		for (Piece &p : r_rec.pieces) {
 			p.applied.valid = false;
 		}
+		g_counters.build_seconds += bf3::core::seconds_since(build_start);
 	}
 
 	uint32_t drawables(ui::SwfNodeId p_id) {
@@ -2095,7 +2126,7 @@ struct Bf3SwfView::Impl {
 				if (p_kind == CanvasKind::Mask) {
 					c.alpha.create(rs, Vector2i(), RID(), msaa);
 				}
-				c.quad = rs->canvas_item_create();
+				c.quad = make_item();
 				++items_created;
 				if (p_kind == CanvasKind::Mask) {
 					c.quad_material = rs->material_create();
@@ -2154,7 +2185,7 @@ struct Bf3SwfView::Impl {
 			return;
 		}
 		for (Stage &s : r_c.stages) {
-			rs->free_rid(s.item);
+			free_item(s.item);
 			rs->free_rid(s.material);
 			retire(s.surface, RenderingServer::VIEWPORT_MSAA_DISABLED);
 		}
@@ -2170,7 +2201,7 @@ struct Bf3SwfView::Impl {
 		for (const ui::SwfFilter &f : p_filters) {
 			Stage s;
 			s.surface.create(rs, Vector2i(), RID(), RenderingServer::VIEWPORT_MSAA_DISABLED);
-			s.item = rs->canvas_item_create();
+			s.item = make_item();
 			rs->canvas_item_set_parent(s.item, s.surface.canvas);
 			rs->canvas_item_set_default_texture_filter(s.item, RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR);
 			s.material = rs->material_create();
@@ -2439,9 +2470,9 @@ struct Bf3SwfView::Impl {
 		const Vector2i size(std::clamp(int32_t(std::ceil(t.local.width() * sx)), 1, kMaxLayerSide), std::clamp(int32_t(std::ceil(t.local.height() * sy)), 1, kMaxLayerSide));
 		if (!t.surface.viewport.is_valid()) {
 			t.surface.create(rs, size, r_canvas.content.viewport, msaa);
-			t.root_item = rs->canvas_item_create();
+			t.root_item = make_item();
 			rs->canvas_item_set_parent(t.root_item, t.surface.canvas);
-			t.quad = rs->canvas_item_create();
+			t.quad = make_item();
 			++items_created;
 			rs->canvas_item_set_material(t.quad, item_material);
 			rs->canvas_item_set_custom_rect(t.quad, true, Rect2(-65536.0f, -65536.0f, 131072.0f, 131072.0f));
@@ -2502,6 +2533,7 @@ struct Bf3SwfView::Impl {
 	}
 
 	void plan() {
+		const auto plan_start = std::chrono::steady_clock::now();
 		stats.structure_passes++;
 		const SwfViewStats keep = stats;
 		stats = SwfViewStats();
@@ -2596,6 +2628,8 @@ struct Bf3SwfView::Impl {
 			}
 		}
 		structure_dirty = false;
+		++g_counters.plans;
+		g_counters.plan_seconds += bf3::core::seconds_since(plan_start);
 	}
 
 	bool apply_piece(Piece &r_p, const Transform2D &p_xf, const std::array<Vector3, 3> &p_h, const Color &p_mul, const Color &p_add, int32_t p_flags, bool p_visible) {
@@ -2924,7 +2958,7 @@ struct Bf3SwfView::Impl {
 
 	void present() {
 		if (!present_item.is_valid()) {
-			present_item = rs->canvas_item_create();
+			present_item = make_item();
 			rs->canvas_item_set_parent(present_item, owner->get_canvas_item());
 			rs->canvas_item_set_material(present_item, present_material);
 			rs->canvas_item_set_default_texture_filter(present_item, RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_NEAREST);
@@ -3034,9 +3068,12 @@ struct Bf3SwfView::Impl {
 Bf3SwfView::Bf3SwfView() :
 		impl_(std::make_unique<Impl>()) {
 	impl_->owner = this;
+	g_views.push_back(this);
 }
 
-Bf3SwfView::~Bf3SwfView() = default;
+Bf3SwfView::~Bf3SwfView() {
+	g_views.erase(std::remove(g_views.begin(), g_views.end(), this), g_views.end());
+}
 
 void Bf3SwfView::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("open_movie", "movie"), &Bf3SwfView::open_movie);
@@ -3161,6 +3198,15 @@ uint64_t Bf3SwfView::open_serial() const {
 
 double Bf3SwfView::sync_seconds_total() {
 	return g_sync_seconds;
+}
+
+SwfViewCounters Bf3SwfView::counters() {
+	SwfViewCounters out = g_counters;
+	out.retained_bytes = 0;
+	for (const Bf3SwfView *v : g_views) {
+		out.retained_bytes += v->surface_bytes();
+	}
+	return out;
 }
 
 void Bf3SwfView::release_root_target() {
