@@ -25,6 +25,8 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <algorithm>
+#include <cmath>
+#include <optional>
 #include <set>
 #include <string_view>
 
@@ -34,6 +36,36 @@ namespace ui = bf3::core::ui;
 namespace bf3::godot_side {
 
 namespace {
+
+std::optional<Rect2> mask_window_rect(const Bf3SwfView &p_view, ui::SwfNodeId p_mask) {
+	const std::optional<ui::SwfRectMask> mask =
+			ui::swf_rect_mask(*p_view.scene(), Bf3UiAssets::current()->swf_fonts(), p_mask);
+	if (!mask) {
+		return std::nullopt;
+	}
+	const SwfStageFit fit = p_view.stage_fit();
+	const double x0 = std::round(double(mask->stage.x_min) * fit.scale_x + fit.offset_x);
+	const double y0 = std::round(double(mask->stage.y_min) * fit.scale_y + fit.offset_y);
+	const double x1 = std::round(double(mask->stage.x_max) * fit.scale_x + fit.offset_x);
+	const double y1 = std::round(double(mask->stage.y_max) * fit.scale_y + fit.offset_y);
+	return Rect2(real_t(x0), real_t(y0), real_t(x1 - x0), real_t(y1 - y0));
+}
+
+uint64_t planned_surfaces(const ui::SwfLayerPlan &p_plan) {
+	uint64_t out = 0;
+	for (const ui::SwfPlannedLayer &l : p_plan.layers) {
+		if (l.klass() == ui::SwfLayerClass::OwnSurface) {
+			out += l.kind == ui::SwfLayerKind::Mask ? 2u : 1u + l.filters;
+		}
+	}
+	return out;
+}
+
+std::string rect_text(const std::optional<Rect2> &p_rect) {
+	return p_rect ? bf3::core::fmt("%.0f,%.0f %.0fx%.0f", double(p_rect->position.x), double(p_rect->position.y),
+							double(p_rect->size.x), double(p_rect->size.y))
+				  : std::string("none");
+}
 
 std::vector<std::string> census_partitions() {
 	std::set<std::string> out;
@@ -264,6 +296,10 @@ void Bf3UiOpenCensusCheck::census_paged_screens() {
 	std::string slots_differ;
 	std::string still_pending;
 	std::string redraws;
+	std::string clips_differ;
+	std::string clip_rects_differ;
+	uint32_t clips_total = 0;
+	uint32_t pages_in_clips = 0;
 	uint64_t slots_after = 0;
 	uint64_t creates_total = 0;
 	for (const std::string &partition : partitions_) {
@@ -286,16 +322,33 @@ void Bf3UiOpenCensusCheck::census_paged_screens() {
 		walk_options.fonts = Bf3UiAssets::current()->swf_fonts();
 		const ui::SwfLayerWalk walk = ui::swf_layer_walk(*view->scene(), walk_options);
 		const ui::SwfLayerPlan plan = ui::swf_layer_plan(walk, view->target_size().x, view->target_size().y);
-		uint64_t own_surfaces = 0;
+		const uint64_t own_surfaces = planned_surfaces(plan);
+		uint32_t clips = 0;
 		for (size_t i = 0; i < plan.layers.size(); ++i) {
-			const ui::SwfPlannedLayer &l = plan.layers[i];
-			if (l.klass() == ui::SwfLayerClass::OwnSurface || l.klass() == ui::SwfLayerClass::Clip) {
-				own_surfaces += l.kind == ui::SwfLayerKind::Mask ? 2u : 1u + l.filters;
+			if (walk.layers[i].route == ui::SwfLayerClass::Clip) {
+				++clips;
+				const std::optional<Rect2> rect = view->clip_rect(walk.layers[i].path);
+				const std::optional<Rect2> want = mask_window_rect(*view, walk.layers[i].owner);
+				if (rect != want) {
+					clip_rects_differ += bf3::core::fmt(" %s %s: %s, mask %s;", leaf.c_str(),
+							walk.layers[i].path.c_str(), rect_text(rect).c_str(), rect_text(want).c_str());
+				}
+				pages_in_clips += uint32_t(std::count_if(walk.layers[i].children.begin(), walk.layers[i].children.end(),
+						[&plan](uint32_t p_child) { return plan.layers[p_child].klass() == ui::SwfLayerClass::Page; }));
 			}
 		}
+		if (view->clip_groups() != clips || view->clips_misplaced() != 0) {
+			clips_differ += bf3::core::fmt(" %s: %u clips, %u misplaced, plan %u;", leaf.c_str(), view->clip_groups(),
+					view->clips_misplaced(), clips);
+		}
+		clips_total += clips;
 		const uint64_t creates = synced.viewport_creates - before.viewport_creates;
 		creates_total += creates;
 		const uint64_t surfaces = synced.live_surfaces - before.live_surfaces;
+		UtilityFunctions::print(to_godot(bf3::core::fmt("[census pages] %s: %llu surface(s), %llu viewport create(s), "
+														"%u paged, %u clip(s) at %dx%d",
+				leaf.c_str(), (unsigned long long)surfaces, (unsigned long long)creates, view->paged_layers(), clips,
+				view->target_size().x, view->target_size().y)));
 		if (surfaces != own_surfaces + 1) {
 			surfaces_differ += bf3::core::fmt(" %s: %llu live, plan %llu;", leaf.c_str(), (unsigned long long)surfaces,
 					(unsigned long long)(own_surfaces + 1));
@@ -339,6 +392,12 @@ void Bf3UiOpenCensusCheck::census_paged_screens() {
 		memdelete(view);
 		slots_after = std::max(slots_after, pages->counters().live_slots);
 	}
+	add("every rect mask is a clip with no surface", clips_total != 0 && pages_in_clips != 0 && clips_differ.empty(),
+			clips_differ.empty()
+					? bf3::core::fmt("%u clips, %u paged layers directly inside one", clips_total, pages_in_clips)
+					: clips_differ);
+	add("a clip's rect is its mask's window rect", clip_rects_differ.empty(),
+			clip_rects_differ.empty() ? "equal on every clip" : clip_rects_differ);
 	add("a page-only screen makes only its root viewport", page_only != 0 && root_only_differs.empty(),
 			root_only_differs.empty() ? bf3::core::fmt("%u screens, %llu viewports over all 30", page_only,
 												(unsigned long long)creates_total)
@@ -356,6 +415,7 @@ void Bf3UiOpenCensusCheck::census_paged_screens() {
 	census_page_life(*pages);
 	census_hidden_pages(*pages);
 	census_page_overflow(*pages);
+	census_clips(*pages);
 	remove_child(pages);
 	memdelete(pages);
 }
@@ -586,6 +646,118 @@ void Bf3UiOpenCensusCheck::census_page_overflow(Bf3UiPages &r_pages) {
 	}
 	add("and every slot comes back", r_pages.counters().live_slots == 0,
 			bf3::core::fmt("%llu slots left", (unsigned long long)r_pages.counters().live_slots));
+}
+
+void Bf3UiOpenCensusCheck::census_clips(Bf3UiPages &r_pages) {
+	Bf3SwfView *view = nullptr;
+	std::string leaf;
+	std::string mask;
+	std::string child;
+	const auto walk_view = [](const Bf3SwfView &p_view, std::vector<std::string> p_tilted = {}) {
+		ui::SwfLayerWalkOptions options;
+		options.fonts = Bf3UiAssets::current()->swf_fonts();
+		options.tilted_paths = std::move(p_tilted);
+		return ui::swf_layer_walk(*p_view.scene(), options);
+	};
+	const auto planned = [&walk_view](const Bf3SwfView &p_view, std::vector<std::string> p_tilted = {}) {
+		return planned_surfaces(ui::swf_layer_plan(
+				walk_view(p_view, std::move(p_tilted)), p_view.target_size().x, p_view.target_size().y));
+	};
+	for (const std::string &partition : partitions_) {
+		leaf = ui::ui_data_category_leaf(partition);
+		view = open_paged_view(leaf);
+		if (view == nullptr) {
+			continue;
+		}
+		view->sync();
+		const ui::SwfLayerWalk walk = walk_view(*view);
+		const ui::SwfLayerPlan plan = ui::swf_layer_plan(walk, view->target_size().x, view->target_size().y);
+		for (size_t i = 0; i < plan.layers.size() && mask.empty(); ++i) {
+			for (const uint32_t c : walk.layers[i].children) {
+				if (plan.layers[i].klass() == ui::SwfLayerClass::Clip &&
+						plan.layers[c].klass() == ui::SwfLayerClass::Page) {
+					mask = walk.layers[i].path;
+					child = walk.layers[c].path;
+				}
+			}
+		}
+		if (!mask.empty()) {
+			break;
+		}
+		remove_child(view);
+		memdelete(view);
+		view = nullptr;
+	}
+	if (view == nullptr) {
+		add("a clip keeps its rect through a reopen", false, "no screen has a page inside a clip");
+		return;
+	}
+	const auto owner = [&view, &mask] { return view->scene()->find(mask); };
+	const auto rect_is_mask = [&] { return view->clip_rect(mask) == mask_window_rect(*view, owner()); };
+	settle_paged_view(r_pages, *view);
+	const uint32_t paged = view->paged_layers();
+	const uint32_t clips = view->clip_groups();
+	const std::optional<Rect2> first = view->clip_rect(mask);
+	const uint64_t creates_open = Bf3SwfView::counters().viewport_creates;
+	const uint64_t live_items = Bf3SwfView::counters().live_items;
+	const bf3::core::Status reopened = view->open(ui::hud_screen_movie(leaf));
+	view->sync();
+	settle_paged_view(r_pages, *view);
+	add("a clip keeps its rect through a reopen",
+			reopened.ok() && view->clip_rect(mask) == first && first.has_value() && view->clips_misplaced() == 0 &&
+					view->clip_groups() == clips && view->paged_layers() == paged &&
+					Bf3SwfView::counters().viewport_creates == creates_open &&
+					Bf3SwfView::counters().live_items <= live_items,
+			bf3::core::fmt("%s %s: %s then %s, %llu create(s), %llu items then %llu", leaf.c_str(), mask.c_str(),
+					rect_text(first).c_str(), rect_text(view->clip_rect(mask)).c_str(),
+					(unsigned long long)(Bf3SwfView::counters().viewport_creates - creates_open),
+					(unsigned long long)live_items, (unsigned long long)Bf3SwfView::counters().live_items));
+	const ui::SwfMatrix placed = view->scene()->node(owner())->matrix;
+	ui::SwfMatrix moved = placed;
+	moved.tx += float(kUiOpenCensusWholeMove / view->stage_fit().scale_x);
+	const uint64_t creates_move = Bf3SwfView::counters().viewport_creates;
+	const bf3::core::Status move = view->scene()->set_matrix(mask, moved);
+	view->sync();
+	add("a moved mask moves its clip",
+			move.ok() && rect_is_mask() && view->clip_rect(mask) != first &&
+					Bf3SwfView::counters().viewport_creates == creates_move,
+			bf3::core::fmt("%s then %s, mask %s", rect_text(first).c_str(), rect_text(view->clip_rect(mask)).c_str(),
+					rect_text(mask_window_rect(*view, owner())).c_str()));
+	const bf3::core::Status moved_back = view->scene()->set_matrix(mask, placed);
+	const bf3::core::Status faded = view->scene()->set_alpha(mask, 0.0f);
+	view->sync();
+	add("a mask at alpha 0 still clips", moved_back.ok() && faded.ok() && view->clip_rect(mask) == first,
+			rect_text(view->clip_rect(mask)));
+	const uint64_t surfaces_clipped = Bf3SwfView::counters().live_surfaces;
+	const uint64_t planned_clipped = planned(*view);
+	const bf3::core::Status tilted = view->set_tilt(mask, SwfTilt{ kUiOpenCensusTiltDegrees, 0.0f, 0.0f });
+	view->sync();
+	const uint64_t surfaces_tilted = Bf3SwfView::counters().live_surfaces;
+	const uint64_t planned_tilted = planned(*view, { mask });
+	const uint32_t clips_tilted = view->clip_groups();
+	add("a tilted mask takes its surfaces, and its pages their own",
+			tilted.ok() && clips_tilted + 1 == clips && planned_tilted >= planned_clipped + 2 &&
+					surfaces_tilted - surfaces_clipped == planned_tilted - planned_clipped,
+			bf3::core::fmt("%u of %u clips, %llu more surface(s), plan %llu more", clips_tilted, clips,
+					(unsigned long long)(surfaces_tilted - surfaces_clipped),
+					(unsigned long long)(planned_tilted - planned_clipped)));
+	const bf3::core::Status untilted = view->clear_tilt(mask);
+	view->sync();
+	settle_paged_view(r_pages, *view);
+	add("and its clip returns with no item out of place",
+			untilted.ok() && view->clip_groups() == clips && view->clips_misplaced() == 0 &&
+					view->clip_rect(mask) == first && view->paged_layers() == paged,
+			bf3::core::fmt("%u of %u clips, %u misplaced, %s", view->clip_groups(), clips, view->clips_misplaced(),
+					rect_text(view->clip_rect(mask)).c_str()));
+	const bf3::core::Status renderer = view->set_renderer_string(child, kOverviewMapRenderer);
+	view->sync();
+	add("an engine target in a clip links to the root",
+			renderer.ok() && view->stats().engine_targets == 1 && view->engine_targets_unlinked() == 0 &&
+					view->clips_misplaced() == 0 && view->clip_groups() == clips,
+			bf3::core::fmt("%s: %u target(s), %u unlinked, %u misplaced", child.c_str(), view->stats().engine_targets,
+					view->engine_targets_unlinked(), view->clips_misplaced()));
+	remove_child(view);
+	memdelete(view);
 }
 
 void Bf3UiOpenCensusCheck::census_pages() {

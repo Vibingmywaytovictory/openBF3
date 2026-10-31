@@ -171,6 +171,10 @@ public:
 	bool page_fills_pending() const;
 	uint32_t paged_layers() const;
 	uint32_t paged_quads_shown() const;
+	uint32_t clip_groups() const;
+	uint32_t clips_misplaced() const;
+	std::optional<godot::Rect2> clip_rect(std::string_view p_mask) const;
+	uint32_t engine_targets_unlinked() const;
 	void set_msaa(godot::RenderingServer::ViewportMSAA p_msaa);
 
 	bf3::core::Status set_isolated(std::string_view p_path);

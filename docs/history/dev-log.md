@@ -2879,3 +2879,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * godot.swf_view gains a byte comparison of paged layers against own surfaces; built, not run.
 * Architecture line for the renderer describes Bf3UiPages and the one layer walk.
 * swf_walk_layers classes a mask when its layer opens, so the renderer can choose a clip there.
+* Rect masks draw as clip groups with no surface: 24 page-only screens of 30, 40 viewports over all 30 in the census.

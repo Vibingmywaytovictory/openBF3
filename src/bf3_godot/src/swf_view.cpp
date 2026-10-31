@@ -869,6 +869,7 @@ enum class CanvasKind : uint8_t {
 	Filter,
 	Mask,
 	Blend,
+	Clip,
 };
 
 struct Canvas;
@@ -949,7 +950,10 @@ struct Canvas {
 	bool move_differs = false;
 	Vector2 move_delta;
 	bool arrays_released = false;
+	Rect2 clip_rect;
+	bool clip_shown = true;
 
+	bool masks() const { return kind == CanvasKind::Mask || kind == CanvasKind::Clip; }
 	bool quad_ready() const { return !paged || shown_slot.has_value(); }
 	const Surface &final_surface() const { return stages.empty() ? content : stages.back().surface; }
 };
@@ -1002,6 +1006,7 @@ struct Target {
 	RID quad_parent;
 	int32_t quad_index = -1;
 	Canvas *canvas = nullptr;
+	RID parent_viewport;
 	ui::SwfRect local;
 	ui::SwfRect drawn_local{ -1.0f, -1.0f, -1.0f, -1.0f };
 	Vector2i drawn_size;
@@ -2136,6 +2141,12 @@ struct Bf3SwfView::Impl {
 		if (fresh) {
 			if (p_kind == CanvasKind::Root) {
 				c.content.create(rs, target_size, owner_viewport, msaa);
+			} else if (p_kind == CanvasKind::Clip) {
+				c.group = make_item();
+				rs->canvas_item_set_clip(c.group, true);
+				rs->canvas_item_set_custom_rect(c.group, true, Rect2());
+				c.quad_parent = RID();
+				c.quad_index = -1;
 			} else {
 				if (p_kind == CanvasKind::Mask) {
 					c.content.create_canvas_only(rs);
@@ -2179,6 +2190,24 @@ struct Bf3SwfView::Impl {
 			r_c.content.create_canvas_only(rs);
 		}
 	}
+
+	RID draw_parent(Canvas &r_c) {
+		if (r_c.kind == CanvasKind::Clip) {
+			return r_c.group;
+		}
+		ensure_canvas(r_c);
+		return r_c.content.canvas;
+	}
+
+	static RID nearest_viewport(const Canvas &p_c) {
+		const Canvas *c = &p_c;
+		while (c->kind == CanvasKind::Clip) {
+			c = c->parent;
+		}
+		return c->content.viewport;
+	}
+
+	bool clips_usable() const { return !explicit_size; }
 
 	bool pages_usable() const {
 		return !explicit_size && msaa == RenderingServer::VIEWPORT_MSAA_4X && Bf3UiPages::current() != nullptr;
@@ -2249,10 +2278,8 @@ struct Bf3SwfView::Impl {
 				rs->canvas_item_set_parent(r_c.group, pages->scratch_canvas());
 				r_c.group_parent = pages->scratch_canvas();
 			}
-		} else {
-			ensure_canvas(r_c);
 		}
-		const RID target = paged ? r_c.group : r_c.content.canvas;
+		const RID target = paged ? r_c.group : draw_parent(r_c);
 		for (const ui::SwfNodeId id : r_c.nodes) {
 			NodeRec &rec = rec_for(id);
 			if (!paged && rec.arrays_released) {
@@ -2281,15 +2308,16 @@ struct Bf3SwfView::Impl {
 
 	void place_quad(Canvas &r_c) {
 		Canvas &p = *r_c.parent;
-		ensure_canvas(p);
+		const RID item = r_c.kind == CanvasKind::Clip ? r_c.group : r_c.quad;
+		const RID parent = draw_parent(p);
 		const int32_t index = p.next_index++;
-		if (r_c.quad_parent != p.content.canvas) {
-			rs->canvas_item_set_parent(r_c.quad, p.content.canvas);
-			r_c.quad_parent = p.content.canvas;
+		if (r_c.quad_parent != parent) {
+			rs->canvas_item_set_parent(item, parent);
+			r_c.quad_parent = parent;
 			p.changed = true;
 		}
 		if (r_c.quad_index != index) {
-			rs->canvas_item_set_draw_index(r_c.quad, index);
+			rs->canvas_item_set_draw_index(item, index);
 			r_c.quad_index = index;
 			p.changed = true;
 		}
@@ -2361,7 +2389,10 @@ struct Bf3SwfView::Impl {
 	}
 
 	void link_viewports(Canvas &r_c) {
-		RID parent = r_c.parent != nullptr ? r_c.parent->content.viewport : owner_viewport;
+		if (r_c.kind == CanvasKind::Clip) {
+			return;
+		}
+		RID parent = r_c.parent != nullptr ? nearest_viewport(*r_c.parent) : owner_viewport;
 		const bool stages_ready = std::all_of(
 				r_c.stages.begin(), r_c.stages.end(), [](const Stage &p_s) { return p_s.surface.viewport.is_valid(); });
 		if (!r_c.content.viewport.is_valid() || !parent.is_valid() || !stages_ready) {
@@ -2440,13 +2471,14 @@ struct Bf3SwfView::Impl {
 		}
 
 		void layer_opened(uint32_t, const ui::SwfLayerWalkNode &p_layer) override {
-			const CanvasKind kind = p_layer.kind == ui::SwfLayerKind::Filter ? CanvasKind::Filter
-					: p_layer.kind == ui::SwfLayerKind::Blend				 ? CanvasKind::Blend
-																			 : CanvasKind::Mask;
+			const CanvasKind kind = p_layer.kind == ui::SwfLayerKind::Filter		  ? CanvasKind::Filter
+					: p_layer.kind == ui::SwfLayerKind::Blend						  ? CanvasKind::Blend
+					: p_layer.route == ui::SwfLayerClass::Clip && view.clips_usable() ? CanvasKind::Clip
+																					  : CanvasKind::Mask;
 			Canvas &parent = p_layer.parent == ui::kSwfNoLayer ? root : *layers[p_layer.parent];
 			Canvas &c = view.canvas_for(kind, p_layer.owner, &parent);
 			layers.push_back(&c);
-			if (kind != CanvasKind::Mask) {
+			if (!c.masks()) {
 				c.additive = p_layer.additive;
 				view.rec_for(p_layer.owner).layer = &c;
 			}
@@ -2490,7 +2522,7 @@ struct Bf3SwfView::Impl {
 	};
 
 	void plan_target(ui::SwfNodeId p_id, const std::string &p_renderer, Canvas &r_canvas) {
-		ensure_canvas(r_canvas);
+		const RID quad_parent = draw_parent(r_canvas);
 		Target &t = targets[p_id];
 		const ui::SwfSceneNode &n = *node(p_id);
 		t.node = p_id;
@@ -2498,6 +2530,7 @@ struct Bf3SwfView::Impl {
 		t.path = n.path;
 		t.used = true;
 		t.canvas = &r_canvas;
+		t.parent_viewport = nearest_viewport(r_canvas);
 		r_canvas.targets.push_back(p_id);
 		ui::SwfBounds local;
 		const ui::SwfAffine to_local = ui::swf_inverse(ui::swf_affine(n.world)).value_or(kSingularAffine);
@@ -2530,7 +2563,7 @@ struct Bf3SwfView::Impl {
 		const double sy = std::sqrt(w.c * w.c + w.d * w.d);
 		const Vector2i size(std::clamp(int32_t(std::ceil(t.local.width() * sx)), 1, kMaxLayerSide), std::clamp(int32_t(std::ceil(t.local.height() * sy)), 1, kMaxLayerSide));
 		if (!t.surface.viewport.is_valid()) {
-			t.surface.create(rs, size, r_canvas.content.viewport, msaa);
+			t.surface.create(rs, size, t.parent_viewport, msaa);
 			t.root_item = make_item();
 			rs->canvas_item_set_parent(t.root_item, t.surface.canvas);
 			t.quad = make_item();
@@ -2541,7 +2574,7 @@ struct Bf3SwfView::Impl {
 			t.redraw = true;
 		} else {
 			t.surface.resize(rs, size);
-			rs->viewport_set_parent_viewport(t.surface.viewport, r_canvas.content.viewport);
+			rs->viewport_set_parent_viewport(t.surface.viewport, t.parent_viewport);
 		}
 		if (!(t.drawn_local == t.local) || t.drawn_size != size) {
 			t.drawn_local = t.local;
@@ -2555,9 +2588,9 @@ struct Bf3SwfView::Impl {
 			r_canvas.changed = true;
 		}
 		const int32_t index = r_canvas.next_index++;
-		if (t.quad_parent != r_canvas.content.canvas) {
-			rs->canvas_item_set_parent(t.quad, r_canvas.content.canvas);
-			t.quad_parent = r_canvas.content.canvas;
+		if (t.quad_parent != quad_parent) {
+			rs->canvas_item_set_parent(t.quad, quad_parent);
+			t.quad_parent = quad_parent;
 			r_canvas.changed = true;
 		}
 		if (t.quad_index != index) {
@@ -2923,7 +2956,8 @@ struct Bf3SwfView::Impl {
 		}
 		for (auto &[id, t] : targets) {
 			if (t.canvas != nullptr && t.surface.viewport.is_valid()) {
-				rs->viewport_set_parent_viewport(t.surface.viewport, t.canvas->content.viewport);
+				t.parent_viewport = nearest_viewport(*t.canvas);
+				rs->viewport_set_parent_viewport(t.surface.viewport, t.parent_viewport);
 			}
 		}
 	}
@@ -2955,8 +2989,8 @@ struct Bf3SwfView::Impl {
 					b.add(project_rect(tt->second.local, ui::swf_concat(stage_to_window, ui::swf_affine(n->world)), tilt_chain(tid, c.tilt_floor)));
 				}
 			}
-			if (c.kind == CanvasKind::Mask) {
-				ui::SwfBounds a;
+			ui::SwfBounds a;
+			if (c.masks()) {
 				for (const ui::SwfNodeId id : c.alpha_nodes) {
 					a.add(node_bounds(id, c));
 				}
@@ -2978,6 +3012,11 @@ struct Bf3SwfView::Impl {
 				}
 			}
 			c.extent = size;
+			if (c.kind == CanvasKind::Clip) {
+				c.origin = origin;
+				apply_clip(c, a);
+				continue;
+			}
 			if (c.paged && !update_page_layer(c, origin, size)) {
 				c.page_refused = true;
 				Bf3UiPages::current()->note_own_surface_fallback();
@@ -2999,6 +3038,23 @@ struct Bf3SwfView::Impl {
 		}
 		if (relink) {
 			relink_viewports();
+		}
+	}
+
+	void apply_clip(Canvas &r_c, const ui::SwfBounds &p_mask) {
+		const Rect2 rect = p_mask.empty() ? Rect2()
+										  : Rect2(real_t(std::round(p_mask.x0)), real_t(std::round(p_mask.y0)),
+													real_t(std::round(p_mask.x1) - std::round(p_mask.x0)),
+													real_t(std::round(p_mask.y1) - std::round(p_mask.y0)));
+		if (rect != r_c.clip_rect) {
+			rs->canvas_item_set_custom_rect(r_c.group, true, rect);
+			r_c.clip_rect = rect;
+			mark(r_c.parent);
+		}
+		if (r_c.has_content != r_c.clip_shown) {
+			rs->canvas_item_set_visible(r_c.group, r_c.has_content);
+			r_c.clip_shown = r_c.has_content;
+			mark(r_c.parent);
 		}
 	}
 
@@ -3286,6 +3342,9 @@ struct Bf3SwfView::Impl {
 				continue;
 			}
 			c->render_dirty = false;
+			if (c->kind == CanvasKind::Clip) {
+				continue;
+			}
 			stats.viewports_updated++;
 			c->content.render(rs);
 			c->alpha.render(rs);
@@ -3632,6 +3691,60 @@ void Bf3SwfView::release_page_slots() {
 	for (auto &[k, c] : impl_->canvases) {
 		impl_->release_slots(c);
 	}
+}
+
+uint32_t Bf3SwfView::clip_groups() const {
+	uint32_t out = 0;
+	for (const auto &[k, c] : impl_->canvases) {
+		out += c.kind == CanvasKind::Clip ? 1u : 0u;
+	}
+	return out;
+}
+
+uint32_t Bf3SwfView::clips_misplaced() const {
+	uint32_t out = 0;
+	const auto pieces_off = [this, &out](const std::vector<ui::SwfNodeId> &p_nodes, RID p_parent) {
+		for (const ui::SwfNodeId id : p_nodes) {
+			const auto rec = impl_->recs.find(id);
+			if (rec != impl_->recs.end()) {
+				out += uint32_t(std::count_if(rec->second.pieces.begin(), rec->second.pieces.end(),
+						[p_parent](const Piece &p_p) { return p_p.parent != p_parent; }));
+			}
+		}
+	};
+	for (const auto &[k, c] : impl_->canvases) {
+		if (c.kind != CanvasKind::Clip) {
+			continue;
+		}
+		pieces_off(c.nodes, c.group);
+		pieces_off(c.alpha_nodes, RID());
+		out += c.quad.is_valid() || c.quad_material.is_valid() || c.content.canvas.is_valid() ||
+						c.alpha.canvas.is_valid() || !c.group.is_valid()
+				? 1u
+				: 0u;
+		for (const Canvas *child : c.children) {
+			out += child->quad_parent != c.group ? 1u : 0u;
+		}
+		for (const ui::SwfNodeId id : c.targets) {
+			const auto t = impl_->targets.find(id);
+			out += t == impl_->targets.end() || t->second.quad_parent != c.group ? 1u : 0u;
+		}
+	}
+	return out;
+}
+
+std::optional<Rect2> Bf3SwfView::clip_rect(std::string_view p_mask) const {
+	const ui::SwfNodeId id = impl_->scene ? impl_->scene->find(p_mask) : ui::kSwfNoNode;
+	const auto it = impl_->canvases.find(canvas_key(CanvasKind::Clip, id));
+	return it != impl_->canvases.end() ? std::optional<Rect2>(it->second.clip_rect) : std::nullopt;
+}
+
+uint32_t Bf3SwfView::engine_targets_unlinked() const {
+	uint32_t out = 0;
+	for (const auto &[id, t] : impl_->targets) {
+		out += t.parent_viewport.is_valid() ? 0u : 1u;
+	}
+	return out;
 }
 
 bool Bf3SwfView::is_open() const {
