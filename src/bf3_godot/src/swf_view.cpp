@@ -790,7 +790,7 @@ RID make_viewport(RenderingServer *p_rs, RenderingServer::ViewportMSAA p_msaa) {
 	p_rs->viewport_set_disable_3d(viewport, true);
 	p_rs->viewport_set_transparent_background(viewport, true);
 	p_rs->viewport_set_clear_mode(viewport, RenderingServer::VIEWPORT_CLEAR_ALWAYS);
-	p_rs->viewport_set_update_mode(viewport, RenderingServer::VIEWPORT_UPDATE_ONCE);
+	p_rs->viewport_set_update_mode(viewport, RenderingServer::VIEWPORT_UPDATE_DISABLED);
 	p_rs->viewport_set_msaa_2d(viewport, p_msaa);
 	p_rs->viewport_set_use_hdr_2d(viewport, false);
 	return viewport;
@@ -844,6 +844,7 @@ struct Surface {
 
 	void render(RenderingServer *p_rs) const {
 		if (viewport.is_valid()) {
+			++g_counters.viewport_render_requests;
 			p_rs->viewport_set_update_mode(viewport, RenderingServer::VIEWPORT_UPDATE_ONCE);
 		}
 	}
@@ -1007,6 +1008,7 @@ struct Target {
 	ui::SwfRect drawn_local{ -1.0f, -1.0f, -1.0f, -1.0f };
 	Vector2i drawn_size;
 	bool live = false;
+	bool running = false;
 	bool used = false;
 	bool redraw = true;
 };
@@ -1233,7 +1235,23 @@ struct Bf3SwfView::Impl {
 		retire(r_c.alpha, msaa);
 	}
 
+	void set_target_running(Target &r_t, bool p_running) {
+		if (r_t.running == p_running) {
+			return;
+		}
+		r_t.running = p_running;
+		if (p_running) {
+			++g_counters.live_targets_running;
+			++g_counters.viewport_render_requests;
+		} else {
+			--g_counters.live_targets_running;
+		}
+		rs->viewport_set_update_mode(r_t.surface.viewport,
+				p_running ? RenderingServer::VIEWPORT_UPDATE_ALWAYS : RenderingServer::VIEWPORT_UPDATE_DISABLED);
+	}
+
 	void free_target(Target &r_t) {
+		set_target_running(r_t, false);
 		if (r_t.root_item.is_valid()) {
 			free_item(r_t.root_item);
 		}
@@ -2886,6 +2904,9 @@ struct Bf3SwfView::Impl {
 
 	void render_dirty() {
 		if (skips_hidden_render && !owner->is_visible_in_tree()) {
+			for (auto &[id, t] : targets) {
+				set_target_running(t, false);
+			}
 			return;
 		}
 		for (auto &[id, t] : targets) {
@@ -2908,7 +2929,7 @@ struct Bf3SwfView::Impl {
 		}
 		for (auto &[id, t] : targets) {
 			if (t.live) {
-				rs->viewport_set_update_mode(t.surface.viewport, RenderingServer::VIEWPORT_UPDATE_ALWAYS);
+				set_target_running(t, true);
 			} else if (t.redraw) {
 				t.surface.render(rs);
 				t.redraw = false;
@@ -3269,7 +3290,8 @@ Status Bf3SwfView::set_engine_target_live(std::string_view p_path, bool p_live) 
 		if (t.path == p_path) {
 			t.live = p_live;
 			if (!p_live) {
-				impl_->rs->viewport_set_update_mode(t.surface.viewport, RenderingServer::VIEWPORT_UPDATE_ONCE);
+				impl_->set_target_running(t, false);
+				t.redraw = true;
 			}
 			return Status::success();
 		}

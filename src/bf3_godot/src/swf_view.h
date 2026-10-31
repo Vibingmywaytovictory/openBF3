@@ -95,6 +95,8 @@ struct SwfViewCounters {
 	uint64_t viewport_creates = 0;
 	uint64_t viewport_resizes = 0;
 	uint64_t viewport_links_without_viewport = 0;
+	uint64_t viewport_render_requests = 0;
+	uint64_t live_targets_running = 0;
 	uint64_t live_surfaces = 0;
 	uint64_t live_items = 0;
 	uint64_t live_triangle_arrays = 0;

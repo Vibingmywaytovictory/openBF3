@@ -7,6 +7,7 @@
 #include "native_eor.h"
 #include "native_hud.h"
 #include "native_options.h"
+#include "overview_map.h"
 #include "swf_view.h"
 #include "ui_assets.h"
 
@@ -104,7 +105,7 @@ void Bf3UiOpenCensusCheck::census_screen(const std::string &p_partition) {
 	memdelete(view);
 }
 
-void Bf3UiOpenCensusCheck::census_hidden_screen(const std::string &p_partition) {
+void Bf3UiOpenCensusCheck::census_hidden_screen(const std::string &p_partition, std::string_view p_live_target) {
 	const std::string leaf = ui::ui_data_category_leaf(p_partition);
 	Bf3SwfView *view = memnew(Bf3SwfView);
 	view->set_playing(false);
@@ -119,15 +120,48 @@ void Bf3UiOpenCensusCheck::census_hidden_screen(const std::string &p_partition) 
 		memdelete(view);
 		return;
 	}
+	const SwfViewCounters start = Bf3SwfView::counters();
+	const auto requests = [&start] {
+		return (unsigned long long)(Bf3SwfView::counters().viewport_render_requests - start.viewport_render_requests);
+	};
+	const auto running = [&start] {
+		return (unsigned long long)(Bf3SwfView::counters().live_targets_running - start.live_targets_running);
+	};
 	view->sync();
-	const uint32_t hidden = view->stats().viewports_updated;
+	if (!p_live_target.empty()) {
+		const bf3::core::Status renderer = view->set_renderer_string(p_live_target, kOverviewMapRenderer);
+		view->sync();
+		const bf3::core::Status live = view->set_engine_target_live(p_live_target, true);
+		if (!renderer || !live) {
+			add("a hidden live target stays stopped", false,
+					!renderer ? renderer.error().message : live.error().message);
+		}
+		view->sync();
+	}
+	const unsigned long long hidden_requests = requests();
+	const unsigned long long hidden_running = running();
+	const uint32_t hidden_updates = view->stats().viewports_updated;
+	add("a hidden screen renders nothing", hidden_requests == 0 && hidden_running == 0 && hidden_updates == 0,
+			bf3::core::fmt("%s: %llu render request(s), %llu live target(s) running, %u viewport update(s) hidden",
+					leaf.c_str(), hidden_requests, hidden_running, hidden_updates));
 	view->set_visible(true);
 	view->sync();
-	const uint32_t shown = view->stats().viewports_updated;
-	add("a hidden screen renders nothing", hidden == 0,
-			bf3::core::fmt("%s: %u viewport update(s) hidden", leaf.c_str(), hidden));
-	add("and renders what it held once shown", shown != 0,
-			bf3::core::fmt("%s: %u viewport update(s) shown", leaf.c_str(), shown));
+	const uint32_t shown_updates = view->stats().viewports_updated;
+	const unsigned long long shown_requests = requests();
+	const unsigned long long shown_running = running();
+	add("and renders what it held once shown",
+			shown_updates != 0 && shown_requests != 0 && shown_running == (p_live_target.empty() ? 0u : 1u),
+			bf3::core::fmt("%s: %llu render request(s), %llu live target(s) running, %u viewport update(s) shown",
+					leaf.c_str(), shown_requests, shown_running, shown_updates));
+	if (!p_live_target.empty()) {
+		view->set_visible(false);
+		view->sync();
+		const unsigned long long stopped_running = running();
+		const unsigned long long stopped_requests = requests() - shown_requests;
+		add("a hidden live target stays stopped", stopped_running == 0 && stopped_requests == 0,
+				bf3::core::fmt("%s: hidden again, %llu running, %llu render request(s)", leaf.c_str(), stopped_running,
+						stopped_requests));
+	}
 	remove_child(view);
 	memdelete(view);
 }
@@ -180,16 +214,20 @@ void Bf3UiOpenCensusCheck::census_filter_swap(const std::string &p_partition) {
 void Bf3UiOpenCensusCheck::finish() {
 	done_ = true;
 	set_process(false);
-	census_hidden_screen(std::string(kIngameMenuPartition));
+	census_hidden_screen(std::string(kIngameMenuPartition), {});
+	census_hidden_screen(std::string(kSpawnScreenPcPartition), kSpawnScreenOverviewPath);
 	census_filter_swap(std::string(kIngameMenuPartition));
 	add("every view synced under the dummy renderer", synced_ == partitions_.size(),
 			std::to_string(synced_) + " of " + std::to_string(partitions_.size()));
 	add("the views built their items", with_items_ == partitions_.size(),
 			std::to_string(with_items_) + " of " + std::to_string(partitions_.size()));
 	const SwfViewCounters left = Bf3SwfView::counters();
-	add("freed views hold nothing", left.live_surfaces == 0 && left.live_items == 0 && left.live_triangle_arrays == 0,
-			bf3::core::fmt("%llu surfaces, %llu items, %llu arrays", (unsigned long long)left.live_surfaces,
-					(unsigned long long)left.live_items, (unsigned long long)left.live_triangle_arrays));
+	add("freed views hold nothing",
+			left.live_surfaces == 0 && left.live_items == 0 && left.live_triangle_arrays == 0 &&
+					left.live_targets_running == 0,
+			bf3::core::fmt("%llu surfaces, %llu items, %llu arrays, %llu running targets",
+					(unsigned long long)left.live_surfaces, (unsigned long long)left.live_items,
+					(unsigned long long)left.live_triangle_arrays, (unsigned long long)left.live_targets_running));
 	add("filter stages share their materials", filter_stages_ != 0 && filter_materials_ * 2 <= filter_stages_,
 			bf3::core::fmt("%llu materials for %llu stages", (unsigned long long)filter_materials_,
 					(unsigned long long)filter_stages_));

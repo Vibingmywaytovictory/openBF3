@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace bf3::godot_side {
@@ -31,7 +32,7 @@ private:
 	};
 	void census_screen(const std::string &p_partition);
 	void add(std::string p_name, bool p_pass, std::string p_detail);
-	void census_hidden_screen(const std::string &p_partition);
+	void census_hidden_screen(const std::string &p_partition, std::string_view p_live_target);
 	void census_filter_swap(const std::string &p_partition);
 	void finish();
 
