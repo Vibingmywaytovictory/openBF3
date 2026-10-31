@@ -2870,11 +2870,17 @@ struct Bf3SwfView::Impl {
 		}
 	}
 
+	bool hidden_from_render() const { return skips_hidden_render && !owner->is_visible_in_tree(); }
+
+	void stop_targets() {
+		for (auto &[id, t] : targets) {
+			set_target_running(t, false);
+		}
+	}
+
 	void render_dirty() {
-		if (skips_hidden_render && !owner->is_visible_in_tree()) {
-			for (auto &[id, t] : targets) {
-				set_target_running(t, false);
-			}
+		if (hidden_from_render()) {
+			stop_targets();
 			return;
 		}
 		for (auto &[id, t] : targets) {
@@ -3040,6 +3046,12 @@ void Bf3SwfView::_bind_methods() {
 
 void Bf3SwfView::_ready() {
 	set_process(true);
+}
+
+void Bf3SwfView::_notification(int p_what) {
+	if (p_what == NOTIFICATION_VISIBILITY_CHANGED && impl_->hidden_from_render()) {
+		impl_->stop_targets();
+	}
 }
 
 void Bf3SwfView::_process(double p_delta) {

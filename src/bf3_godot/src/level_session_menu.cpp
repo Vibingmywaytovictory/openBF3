@@ -163,7 +163,13 @@ void NativeMenu::show_cursor(const NativeMenuIo &p_io, bool p_shown) {
 void NativeMenu::attach_overview(Bf3UiScreens &r_screens, const NativeMenuIo &p_io) {
 	const UiScreenSlot slot = r_screens.find_screen(kIngameMenuPartition);
 	if (slot.view == nullptr) {
+		Bf3OverviewMap *overview = Bf3OverviewMap::current();
+		godot::Object *owner = ObjectDB::get_instance(ObjectID(overview_owner_));
+		if (overview != nullptr && owner != nullptr) {
+			overview->detach(Object::cast_to<Bf3SwfView>(owner));
+		}
 		overview_view_ = 0;
+		overview_owner_ = 0;
 		return;
 	}
 	Bf3OverviewMap *overview = Bf3OverviewMap::ensure(p_io.parent);
@@ -175,6 +181,7 @@ void NativeMenu::attach_overview(Bf3UiScreens &r_screens, const NativeMenuIo &p_
 		overview->detach(slot.view);
 		if (overview->attach(slot.view)) {
 			overview_view_ = view_open;
+			overview_owner_ = slot.view->get_instance_id();
 			++stats_.overview_attached;
 		}
 	}

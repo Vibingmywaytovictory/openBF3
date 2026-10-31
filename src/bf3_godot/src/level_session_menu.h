@@ -94,6 +94,7 @@ private:
 	bool in_menu_ = false;
 	bool quit_requested_ = false;
 	uint64_t overview_view_ = 0;
+	uint64_t overview_owner_ = 0;
 };
 
 }

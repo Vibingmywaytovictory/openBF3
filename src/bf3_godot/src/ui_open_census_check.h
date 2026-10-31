@@ -14,6 +14,8 @@ inline constexpr uint32_t kUiOpenCensusMaxWaitFrames = 36000;
 inline constexpr int32_t kUiOpenCensusWidth = 1280;
 inline constexpr int32_t kUiOpenCensusHeight = 720;
 inline constexpr uint64_t kUiOpenCensusPrimitiveTriangles = 32;
+inline constexpr uint32_t kUiOpenCensusCloseSteps = 600;
+inline constexpr double kUiOpenCensusCloseStepSeconds = 1.0 / 30.0;
 
 class Bf3UiOpenCensusCheck : public godot::Node {
 	GDCLASS(Bf3UiOpenCensusCheck, godot::Node)

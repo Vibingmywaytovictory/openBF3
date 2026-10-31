@@ -7,6 +7,7 @@
 #include "native_eor.h"
 #include "native_hud.h"
 #include "native_options.h"
+#include "native_screens.h"
 #include "overview_map.h"
 #include "swf_view.h"
 #include "ui_assets.h"
@@ -123,19 +124,25 @@ void Bf3UiOpenCensusCheck::census_screen(const std::string &p_partition) {
 
 void Bf3UiOpenCensusCheck::census_hidden_screen(const std::string &p_partition, std::string_view p_live_target) {
 	const std::string leaf = ui::ui_data_category_leaf(p_partition);
-	Bf3SwfView *view = memnew(Bf3SwfView);
-	view->set_playing(false);
-	view->set_skips_hidden_render(true);
-	view->set_target_size(Vector2i(kUiOpenCensusWidth, kUiOpenCensusHeight));
-	add_child(view);
-	view->set_visible(false);
-	const bf3::core::Status opened = view->open(ui::hud_screen_movie(leaf));
+	const std::string movie = ui::hud_screen_movie(leaf);
+	Bf3UiScreens *screens = memnew(Bf3UiScreens);
+	screens->set_manual(true);
+	add_child(screens);
+	const auto finish_screens = [this, screens] {
+		remove_child(screens);
+		memdelete(screens);
+	};
+	screens->set_drawn(movie, true);
+	const bf3::core::Status opened = screens->open_movie_screen(movie, nullptr);
 	if (!opened) {
 		add("a hidden screen renders nothing", false, opened.error().message);
-		remove_child(view);
-		memdelete(view);
+		finish_screens();
 		return;
 	}
+	screens->hide_screen(movie);
+	Bf3SwfView *view = screens->screen_view(movie);
+	view->set_process(false);
+	view->set_target_size(Vector2i(kUiOpenCensusWidth, kUiOpenCensusHeight));
 	const SwfViewCounters start = Bf3SwfView::counters();
 	const auto requests = [&start] {
 		return (unsigned long long)(Bf3SwfView::counters().viewport_render_requests - start.viewport_render_requests);
@@ -160,7 +167,7 @@ void Bf3UiOpenCensusCheck::census_hidden_screen(const std::string &p_partition, 
 	add("a hidden screen renders nothing", hidden_requests == 0 && hidden_running == 0 && hidden_updates == 0,
 			bf3::core::fmt("%s: %llu render request(s), %llu live target(s) running, %u viewport update(s) hidden",
 					leaf.c_str(), hidden_requests, hidden_running, hidden_updates));
-	view->set_visible(true);
+	screens->show_screen(movie);
 	view->sync();
 	const uint32_t shown_updates = view->stats().viewports_updated;
 	const unsigned long long shown_requests = requests();
@@ -170,16 +177,30 @@ void Bf3UiOpenCensusCheck::census_hidden_screen(const std::string &p_partition, 
 			bf3::core::fmt("%s: %llu render request(s), %llu live target(s) running, %u viewport update(s) shown",
 					leaf.c_str(), shown_requests, shown_running, shown_updates));
 	if (!p_live_target.empty()) {
-		view->set_visible(false);
+		screens->hide_screen(movie);
 		view->sync();
 		const unsigned long long stopped_running = running();
 		const unsigned long long stopped_requests = requests() - shown_requests;
 		add("a hidden live target stays stopped", stopped_running == 0 && stopped_requests == 0,
 				bf3::core::fmt("%s: hidden again, %llu running, %llu render request(s)", leaf.c_str(), stopped_running,
 						stopped_requests));
+		screens->show_screen(movie);
+		view->sync();
+		const unsigned long long restarted = running();
+		const unsigned long long close_requests = requests();
+		screens->close_screen(movie);
+		for (uint32_t i = 0; i < kUiOpenCensusCloseSteps && screens->phase(movie).has_value(); ++i) {
+			screens->step(kUiOpenCensusCloseStepSeconds);
+		}
+		add("closing a screen stops its live target",
+				!screens->phase(movie).has_value() && restarted == 1 && running() == 0 && !view->is_processing() &&
+						requests() == close_requests,
+				bf3::core::fmt("%s: %llu running before close, %llu after, %llu render request(s), %s, %s",
+						leaf.c_str(), restarted, running(), requests() - close_requests,
+						screens->phase(movie).has_value() ? "still open" : "closed",
+						view->is_processing() ? "processing" : "idle"));
 	}
-	remove_child(view);
-	memdelete(view);
+	finish_screens();
 }
 
 void Bf3UiOpenCensusCheck::census_filter_swap(const std::string &p_partition) {
@@ -236,7 +257,7 @@ void Bf3UiOpenCensusCheck::finish() {
 	add("every view synced under the dummy renderer", synced_ == partitions_.size(),
 			std::to_string(synced_) + " of " + std::to_string(partitions_.size()));
 	add("the layer walk counts what the renderer plans", walk_differs_.empty(),
-			walk_differs_.empty() ? "filters, masks, blends, targets equal on every screen" : walk_differs_);
+			walk_differs_.empty() ? "filters, masks and blends equal on every screen" : walk_differs_);
 	add("the views built their items", with_items_ == partitions_.size(),
 			std::to_string(with_items_) + " of " + std::to_string(partitions_.size()));
 	const SwfViewCounters left = Bf3SwfView::counters();
