@@ -39,7 +39,6 @@ constexpr double kStepSeconds = 1.0 / 30.0;
 constexpr int kSteps = 90;
 constexpr int kStepsPerKill = 15;
 constexpr int32_t kMenuHintDataKey = 606381875;
-constexpr uint32_t kMenuOwnSurfaceHandful = 4;
 
 struct WindowSize {
 	int32_t width = 0;
@@ -76,8 +75,10 @@ constexpr std::array<std::pair<std::string_view, uint32_t>, 25> kCensusFilterFlo
 		{ "spawnscreenticketcountertdmscreen", 4 },
 } };
 
-constexpr std::array<std::string_view, 5> kOwnSurfaceAllowList{ ".scoringMessage", ".scoringMessage.txt",
-	".scoringMessage.txtBg", ".multiplayerCompass.cps.#", ".multiplayerCompass.objective#.obj" };
+constexpr std::array<std::string_view, 4> kOwnSurfaceAllowList{ ".scoringMessage", ".scoringMessage.txt",
+	".scoringMessage.txtBg", ".multiplayerCompass.cps.#" };
+constexpr std::array<std::string_view, 7> kOwnWhenShownAllowList{ ".multiplayerCompass.objective#.obj.#",
+	".multiplayerCompass.objective#.obj", ".spinnerMc.#", ".bg", ".container.#", ".tf", ".icon.label" };
 
 std::string digits_to_hash(std::string_view p_path) {
 	std::string out;
@@ -90,12 +91,18 @@ std::string digits_to_hash(std::string_view p_path) {
 	return out;
 }
 
-bool allowed_own_surface(std::string_view p_path) {
+template <size_t N>
+const std::string_view *allow_list_entry(const std::array<std::string_view, N> &p_list, std::string_view p_path) {
 	const std::string path = digits_to_hash(p_path);
-	return std::any_of(kOwnSurfaceAllowList.begin(), kOwnSurfaceAllowList.end(), [&path](std::string_view p_tail) {
+	const auto it = std::find_if(p_list.begin(), p_list.end(), [&path](std::string_view p_tail) {
 		const std::string tail = digits_to_hash(p_tail);
 		return path.size() >= tail.size() && path.compare(path.size() - tail.size(), tail.size(), tail) == 0;
 	});
+	return it != p_list.end() ? &*it : nullptr;
+}
+
+bool allowed_own_surface(std::string_view p_path) {
+	return allow_list_entry(kOwnSurfaceAllowList, p_path) != nullptr;
 }
 
 struct Rig {
@@ -479,6 +486,8 @@ TEST_SUITE("ui-layer-plan") {
 			return;
 		}
 		const std::map<std::string, DrivenScreen> &screens = driven_screens(*r);
+		std::set<std::string_view> own_used;
+		std::set<std::string_view> when_shown_used;
 		std::printf("screen pages clips own empty non_empty_filters multi_filter non_rect_masks plain_text "
 					"plain_glyphs kernels "
 					"slot_px own_kib first_own\n");
@@ -494,14 +503,39 @@ TEST_SUITE("ui-layer-plan") {
 			for (const SwfPlannedLayer &l : plan.layers) {
 				if (l.klass() == SwfLayerClass::OwnSurface) {
 					std::printf("  own %s %s %dx%d\n", swf_layer_kind_name(l.kind), l.path.c_str(), l.width, l.height);
-					CHECK_MESSAGE(
-							allowed_own_surface(l.path), leaf, " has an own surface off the allow-list: ", l.path);
+					const std::string_view *entry = allow_list_entry(kOwnSurfaceAllowList, l.path);
+					CHECK_MESSAGE(entry != nullptr, leaf, " has an own surface off the allow-list: ", l.path);
+					if (entry != nullptr) {
+						own_used.insert(*entry);
+					}
+				}
+			}
+			for (size_t i = 0; i < plan.layers.size(); ++i) {
+				const SwfLayerWalkNode &l = d.settled.layers[i];
+				if (l.route == SwfLayerClass::OwnSurface && plan.layers[i].klass() == SwfLayerClass::Empty) {
+					std::printf("  own when shown %s %s children %zu tilted %d\n", swf_layer_kind_name(l.kind),
+							l.path.c_str(), l.children.size(), l.tilted_inside ? 1 : 0);
+					const std::string_view *entry = allow_list_entry(kOwnSurfaceAllowList, l.path);
+					const std::string_view *later = allow_list_entry(kOwnWhenShownAllowList, l.path);
+					CHECK_MESSAGE((entry != nullptr || later != nullptr), leaf,
+							" can take an own surface off the allow-lists: ", l.path);
+					if (later != nullptr) {
+						when_shown_used.insert(*later);
+					}
 				}
 			}
 			if (!is_hud_family(leaf)) {
-				CHECK_MESSAGE(c.own_surfaces <= kMenuOwnSurfaceHandful, leaf, " own surfaces ", c.own_surfaces);
+				CHECK_MESSAGE(c.own_surfaces == 0, leaf, " own surfaces ", c.own_surfaces);
+				CHECK_MESSAGE(
+						first.counts.own_surfaces == 0, leaf, " first walk own surfaces ", first.counts.own_surfaces);
 				CHECK_MESSAGE(d.settled.non_rect_masks == 0, leaf, " non-rect masks ", d.settled.non_rect_masks);
 			}
+		}
+		for (const std::string_view entry : kOwnSurfaceAllowList) {
+			CHECK_MESSAGE(own_used.count(entry) != 0, "nothing draws through the allow-list entry ", entry);
+		}
+		for (const std::string_view entry : kOwnWhenShownAllowList) {
+			CHECK_MESSAGE(when_shown_used.count(entry) != 0, "nothing needs the allow-list entry ", entry);
 		}
 		for (const auto &[leaf, floor] : kCensusFilterFloors) {
 			const auto it = screens.find(std::string(leaf));
@@ -535,6 +569,8 @@ TEST_SUITE("ui-layer-plan") {
 					CHECK_MESSAGE(allowed_own_surface(l.path), p, " ", l.path);
 				}
 			}
+			CHECK_MESSAGE(
+					plan.counts.own_surfaces == 0, p, " own surfaces while icons load ", plan.counts.own_surfaces);
 			spinners_seen += spinners;
 			std::printf("while icons load: %s own %u, spinners %u, pages %u\n",
 					std::string(ui_data_category_leaf(p)).c_str(), plan.counts.own_surfaces, spinners,
