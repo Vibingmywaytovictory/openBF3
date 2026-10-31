@@ -19,7 +19,12 @@ inline constexpr int32_t kSwfPageRound = 8;
 inline constexpr int32_t kSwfPagePadding = 1;
 inline constexpr uint64_t kSwfTargetFactor1x = 1;
 inline constexpr uint64_t kSwfTargetFactor4x = 5;
+inline constexpr double kSwfPageMargin = 1.25;
 inline constexpr uint32_t kSwfNoLayer = 0xffffffffu;
+inline constexpr int32_t kSwfPageBaseWidth = 1280;
+inline constexpr int32_t kSwfPageBaseHeight = 720;
+inline constexpr uint64_t kSwfPageDemandPxAtBase = 1080512;
+inline constexpr int32_t kSwfPageMaxSide = 16384;
 
 uint64_t swf_target_bytes(int32_t p_width, int32_t p_height, uint64_t p_factor);
 
@@ -160,5 +165,74 @@ struct SwfLayerPlan {
 SwfLayerPlan swf_layer_plan(const SwfLayerWalk &p_walk, int32_t p_window_width, int32_t p_window_height);
 
 int32_t swf_page_slot_side(int32_t p_side);
+
+struct SwfPageSlot {
+	int32_t x = 0;
+	int32_t y = 0;
+	int32_t width = 0;
+	int32_t height = 0;
+};
+
+class SwfShelfPacker {
+public:
+	SwfShelfPacker(int32_t p_width, int32_t p_height);
+
+	std::optional<SwfPageSlot> alloc(int32_t p_width, int32_t p_height);
+	void release(const SwfPageSlot &p_slot);
+	int32_t width() const { return width_; }
+	int32_t height() const { return height_; }
+	uint64_t used_px() const { return used_px_; }
+	uint32_t failures() const { return failures_; }
+	uint32_t live_slots() const { return live_slots_; }
+
+private:
+	struct Run {
+		int32_t x = 0;
+		int32_t width = 0;
+	};
+	struct Shelf {
+		int32_t y = 0;
+		int32_t height = 0;
+		std::vector<Run> free;
+	};
+
+	bool whole(const Shelf &p_shelf) const;
+	std::optional<SwfPageSlot> take(size_t p_shelf, int32_t p_width, int32_t p_height);
+
+	int32_t width_ = 0;
+	int32_t height_ = 0;
+	std::vector<Shelf> shelves_;
+	uint64_t used_px_ = 0;
+	uint32_t failures_ = 0;
+	uint32_t live_slots_ = 0;
+};
+
+struct SwfDirtyLayer {
+	int32_t width = 0;
+	int32_t height = 0;
+};
+
+struct SwfScratchPass {
+	std::vector<size_t> taken;
+	std::vector<SwfPageSlot> slots;
+	std::vector<size_t> waiting;
+	std::vector<size_t> too_large;
+};
+
+SwfScratchPass swf_select_scratch_pass(
+		std::span<const SwfDirtyLayer> p_dirty, int32_t p_page_width, int32_t p_page_height);
+
+struct SwfPageSizes {
+	int32_t result_width = 0;
+	int32_t result_height = 0;
+	int32_t scratch_width = 0;
+	int32_t scratch_height = 0;
+
+	uint64_t result_px() const { return uint64_t(result_width) * uint64_t(result_height); }
+	uint64_t result_bytes() const { return swf_target_bytes(result_width, result_height, kSwfTargetFactor1x); }
+	uint64_t scratch_bytes() const { return swf_target_bytes(scratch_width, scratch_height, kSwfTargetFactor4x); }
+};
+
+SwfPageSizes swf_page_sizes(int32_t p_window_width, int32_t p_window_height);
 
 }

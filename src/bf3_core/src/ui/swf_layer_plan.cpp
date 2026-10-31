@@ -750,4 +750,160 @@ int32_t swf_page_slot_side(int32_t p_side) {
 	return (std::max(1, p_side) + kSwfPagePadding + kSwfPageRound - 1) / kSwfPageRound * kSwfPageRound;
 }
 
+SwfShelfPacker::SwfShelfPacker(int32_t p_width, int32_t p_height) : width_(p_width), height_(p_height) {}
+
+bool SwfShelfPacker::whole(const Shelf &p_shelf) const {
+	return p_shelf.free.size() == 1 && p_shelf.free.front().x == 0 && p_shelf.free.front().width == width_;
+}
+
+std::optional<SwfPageSlot> SwfShelfPacker::take(size_t p_shelf, int32_t p_width, int32_t p_height) {
+	Shelf &shelf = shelves_[p_shelf];
+	for (size_t r = 0; r < shelf.free.size(); ++r) {
+		Run &run = shelf.free[r];
+		if (run.width < p_width) {
+			continue;
+		}
+		const SwfPageSlot slot{ run.x, shelf.y, p_width, p_height };
+		run.x += p_width;
+		run.width -= p_width;
+		if (run.width == 0) {
+			shelf.free.erase(shelf.free.begin() + std::ptrdiff_t(r));
+		}
+		used_px_ += uint64_t(p_width) * uint64_t(shelf.height);
+		++live_slots_;
+		return slot;
+	}
+	return std::nullopt;
+}
+
+std::optional<SwfPageSlot> SwfShelfPacker::alloc(int32_t p_width, int32_t p_height) {
+	const int32_t w = swf_page_slot_side(p_width);
+	const int32_t h = swf_page_slot_side(p_height);
+	if (w > width_ || h > height_) {
+		++failures_;
+		return std::nullopt;
+	}
+	size_t best = shelves_.size();
+	for (size_t i = 0; i < shelves_.size(); ++i) {
+		const Shelf &s = shelves_[i];
+		if (s.height < h || whole(s)) {
+			continue;
+		}
+		const bool room = std::any_of(s.free.begin(), s.free.end(), [w](const Run &p_r) { return p_r.width >= w; });
+		if (room && (best == shelves_.size() || s.height < shelves_[best].height)) {
+			best = i;
+		}
+	}
+	if (best != shelves_.size() && shelves_[best].height == h) {
+		return take(best, w, h);
+	}
+	for (size_t i = 0; i < shelves_.size(); ++i) {
+		if (!whole(shelves_[i]) || shelves_[i].height < h) {
+			continue;
+		}
+		if (shelves_[i].height > h) {
+			Shelf rest;
+			rest.y = shelves_[i].y + h;
+			rest.height = shelves_[i].height - h;
+			rest.free.push_back(Run{ 0, width_ });
+			shelves_[i].height = h;
+			shelves_.insert(shelves_.begin() + std::ptrdiff_t(i) + 1, std::move(rest));
+		}
+		return take(i, w, h);
+	}
+	const int32_t top = shelves_.empty() ? 0 : shelves_.back().y + shelves_.back().height;
+	if (top + h <= height_) {
+		Shelf s;
+		s.y = top;
+		s.height = h;
+		s.free.push_back(Run{ 0, width_ });
+		shelves_.push_back(std::move(s));
+		return take(shelves_.size() - 1, w, h);
+	}
+	if (best != shelves_.size()) {
+		return take(best, w, h);
+	}
+	++failures_;
+	return std::nullopt;
+}
+
+void SwfShelfPacker::release(const SwfPageSlot &p_slot) {
+	const auto it =
+			std::find_if(shelves_.begin(), shelves_.end(), [&p_slot](const Shelf &p_s) { return p_s.y == p_slot.y; });
+	if (it == shelves_.end()) {
+		return;
+	}
+	used_px_ -= uint64_t(p_slot.width) * uint64_t(it->height);
+	--live_slots_;
+	std::vector<Run> &free = it->free;
+	auto at = std::lower_bound(
+			free.begin(), free.end(), p_slot.x, [](const Run &p_r, int32_t p_x) { return p_r.x < p_x; });
+	at = free.insert(at, Run{ p_slot.x, p_slot.width });
+	if (at + 1 != free.end() && at->x + at->width == (at + 1)->x) {
+		at->width += (at + 1)->width;
+		free.erase(at + 1);
+	}
+	if (at != free.begin() && (at - 1)->x + (at - 1)->width == at->x) {
+		(at - 1)->width += at->width;
+		free.erase(at);
+	}
+	if (!whole(*it)) {
+		return;
+	}
+	size_t i = size_t(it - shelves_.begin());
+	if (i + 1 < shelves_.size() && whole(shelves_[i + 1])) {
+		shelves_[i].height += shelves_[i + 1].height;
+		shelves_.erase(shelves_.begin() + std::ptrdiff_t(i) + 1);
+	}
+	if (i > 0 && whole(shelves_[i - 1])) {
+		shelves_[i - 1].height += shelves_[i].height;
+		shelves_.erase(shelves_.begin() + std::ptrdiff_t(i));
+		--i;
+	}
+	if (i + 1 == shelves_.size()) {
+		shelves_.pop_back();
+	}
+}
+
+SwfScratchPass swf_select_scratch_pass(
+		std::span<const SwfDirtyLayer> p_dirty, int32_t p_page_width, int32_t p_page_height) {
+	SwfScratchPass pass;
+	SwfShelfPacker packer(p_page_width, p_page_height);
+	for (size_t i = 0; i < p_dirty.size(); ++i) {
+		if (swf_page_slot_side(p_dirty[i].width) > p_page_width ||
+				swf_page_slot_side(p_dirty[i].height) > p_page_height) {
+			pass.too_large.push_back(i);
+			continue;
+		}
+		if (const std::optional<SwfPageSlot> slot = packer.alloc(p_dirty[i].width, p_dirty[i].height)) {
+			pass.taken.push_back(i);
+			pass.slots.push_back(*slot);
+		} else {
+			pass.waiting.push_back(i);
+		}
+	}
+	return pass;
+}
+
+SwfPageSizes swf_page_sizes(int32_t p_window_width, int32_t p_window_height) {
+	const double area = double(std::max(1, p_window_width)) * double(std::max(1, p_window_height));
+	const double base = double(kSwfPageBaseWidth) * double(kSwfPageBaseHeight);
+	const double need = double(kSwfPageDemandPxAtBase) * (area / base) * kSwfPageMargin;
+	int32_t w = 2048;
+	int32_t h = 1024;
+	while (double(w) * double(h) < need && (w < kSwfPageMaxSide || h < kSwfPageMaxSide)) {
+		if (h < w) {
+			h *= 2;
+		} else {
+			w *= 2;
+		}
+	}
+	SwfPageSizes s;
+	s.result_width = w;
+	s.result_height = h;
+	s.scratch_width = std::max(1024, w / 2);
+	s.scratch_height = std::max(512, h / 2);
+	return s;
+}
+
 }

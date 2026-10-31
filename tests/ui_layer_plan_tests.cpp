@@ -24,6 +24,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <random>
 #include <set>
 #include <string>
 #include <string_view>
@@ -367,6 +368,46 @@ bool is_hud_family(std::string_view p_leaf) {
 			p_leaf == "crosshairdefault" || p_leaf == "killscreen";
 }
 
+struct NamedSet {
+	std::string name;
+	std::vector<std::string_view> partitions;
+};
+
+std::vector<NamedSet> simultaneous_sets() {
+	const std::vector<std::string_view> hud(kHudDrawnPartitions.begin(), kHudDrawnPartitions.end());
+	const auto with = [&hud](std::initializer_list<std::string_view> p_more) {
+		std::vector<std::string_view> v = hud;
+		v.insert(v.end(), p_more);
+		return v;
+	};
+	std::vector<NamedSet> sets;
+	sets.push_back({ "play", hud });
+	sets.push_back({ "scoreboard", with({ kScoreboardHud32ScreenPartition }) });
+	sets.push_back({ "escape", with({ kIngameMenuPartition, kScoreboardHud32ScreenPartition }) });
+	sets.push_back({ "escape_scoreboard",
+			with({ kIngameMenuPartition, kMenuScoreboardPartition, kMenuScoreboardBackPartition }) });
+	for (size_t i = 0; i < kOptionsScreens.size(); ++i) {
+		const std::string tab(ui_data_category_leaf(kOptionsScreens[i]));
+		sets.push_back({ "options_" + tab, with({ kIngameMenuPartition, kOptionsScreens[i] }) });
+		const std::string_view next = kOptionsScreens[(i + 1) % kOptionsScreens.size()];
+		sets.push_back({ "options_tab_" + tab, with({ kOptionsScreens[i], next }) });
+	}
+	const std::vector<std::string_view> deploy{ kSpawnScreenPcPartition, kSpawnButtonScreenPartition,
+		kSpawnTicketCounterPartition, kKillScreenPartition };
+	std::vector<std::string_view> deploy_set = hud;
+	deploy_set.insert(deploy_set.end(), deploy.begin(), deploy.end());
+	sets.push_back({ "deploy", deploy_set });
+	std::vector<std::string_view> customize_set = deploy_set;
+	customize_set.insert(customize_set.end(), kCustomizeScreenPartitions.begin(), kCustomizeScreenPartitions.end());
+	sets.push_back({ "customize", customize_set });
+	sets.push_back({ "end_of_round",
+			with({ kEorWinningTeamScreenPartition, kEorHud64Partition, kEorTabsPartition, kEorScoreboardPartition,
+					kEorTwoTeamsPartition }) });
+	sets.push_back({ "end_of_round_stats",
+			with({ kEorHud64Partition, kEorTabsPartition, kEorStatsPartition, kEorScoreboardPartition }) });
+	return sets;
+}
+
 }
 
 TEST_SUITE("ui-layer-plan") {
@@ -522,5 +563,239 @@ TEST_SUITE("ui-layer-plan") {
 			page = page || (l.kind == SwfLayerKind::Filter && l.route == SwfLayerClass::Page);
 		}
 		CHECK(page);
+	}
+
+	TEST_CASE("layer plan: every simultaneous set fits its pages with the margin, at 720p, 1440p and 2160p") {
+		Rig *r = rig_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const std::map<std::string, DrivenScreen> &screens = driven_screens(*r);
+		for (const WindowSize w : kWindows) {
+			const SwfPageSizes pages = swf_page_sizes(w.width, w.height);
+			std::printf("pages at %dx%d: R %dx%d (%.1f MiB) S %dx%d (%.1f MiB)\n", w.width, w.height,
+					pages.result_width, pages.result_height, double(pages.result_bytes()) / (1024.0 * 1024.0),
+					pages.scratch_width, pages.scratch_height, double(pages.scratch_bytes()) / (1024.0 * 1024.0));
+			uint64_t largest = 0;
+			std::string largest_name;
+			uint32_t passes_peak = 0;
+			for (const NamedSet &set : simultaneous_sets()) {
+				SwfShelfPacker packer(pages.result_width, pages.result_height);
+				std::vector<SwfDirtyLayer> dirty;
+				uint64_t px = 0;
+				for (const std::string_view p : set.partitions) {
+					const auto it = screens.find(std::string(ui_data_category_leaf(p)));
+					REQUIRE_MESSAGE(it != screens.end(), "no driven screen for ", p);
+					for (const SwfPlannedLayer &l : swf_layer_plan(it->second.settled, w.width, w.height).layers) {
+						if (l.klass() != SwfLayerClass::Page) {
+							continue;
+						}
+						CHECK_MESSAGE(packer.alloc(l.width, l.height).has_value(), set.name, " ", l.path);
+						dirty.push_back(SwfDirtyLayer{ l.width, l.height });
+						px += uint64_t(swf_page_slot_side(l.width)) * uint64_t(swf_page_slot_side(l.height));
+					}
+				}
+				CHECK_MESSAGE(packer.failures() == 0, set.name, " failures ", packer.failures());
+				CHECK_MESSAGE(double(px) * kSwfPageMargin <= double(pages.result_px()), set.name, " needs ", px, " of ",
+						pages.result_px());
+				if (px > largest) {
+					largest = px;
+					largest_name = set.name;
+				}
+				uint32_t passes = 0;
+				while (!dirty.empty()) {
+					const SwfScratchPass pass =
+							swf_select_scratch_pass(dirty, pages.scratch_width, pages.scratch_height);
+					CHECK_MESSAGE(pass.too_large.empty(), set.name, " holds a layer larger than S");
+					REQUIRE_MESSAGE(!pass.taken.empty(), set.name, " S pass took nothing");
+					std::vector<SwfDirtyLayer> rest;
+					for (const size_t i : pass.waiting) {
+						rest.push_back(dirty[i]);
+					}
+					dirty = std::move(rest);
+					++passes;
+				}
+				passes_peak = std::max(passes_peak, passes);
+			}
+			std::printf("largest set at %dx%d: %s %llu px of %llu, peak S passes %u\n", w.width, w.height,
+					largest_name.c_str(), static_cast<unsigned long long>(largest),
+					static_cast<unsigned long long>(pages.result_px()), passes_peak);
+			if (w.width == kSwfPageBaseWidth) {
+				CHECK_MESSAGE(largest <= kSwfPageDemandPxAtBase, largest_name, " needs ", largest,
+						" px, the page size plans for ", kSwfPageDemandPxAtBase);
+			}
+		}
+	}
+}
+
+TEST_SUITE("ui-layer-plan-unit") {
+	TEST_CASE("page sizes: 720p takes R 2048x1024, 1440p 4096x2048, and S is half of R per axis") {
+		const SwfPageSizes p720 = swf_page_sizes(1280, 720);
+		CHECK(p720.result_width == 2048);
+		CHECK(p720.result_height == 1024);
+		CHECK(p720.scratch_width == 1024);
+		CHECK(p720.scratch_height == 512);
+		const SwfPageSizes p1440 = swf_page_sizes(2560, 1440);
+		CHECK(p1440.result_width == 4096);
+		CHECK(p1440.result_height == 2048);
+		CHECK(p1440.scratch_width == 2048);
+		CHECK(p1440.scratch_height == 1024);
+		for (const WindowSize w : kWindows) {
+			const SwfPageSizes p = swf_page_sizes(w.width, w.height);
+			const double area_scale =
+					double(w.width) * double(w.height) / (double(kSwfPageBaseWidth) * double(kSwfPageBaseHeight));
+			CHECK(double(p.result_px()) >= double(kSwfPageDemandPxAtBase) * area_scale * kSwfPageMargin);
+		}
+	}
+
+	TEST_CASE("target bytes: four bytes a pixel, five times that for a 4x target") {
+		CHECK(swf_target_bytes(2048, 1024, kSwfTargetFactor1x) == 8388608u);
+		CHECK(swf_target_bytes(1024, 512, kSwfTargetFactor4x) == 10485760u);
+		CHECK(swf_target_bytes(-1, 512, kSwfTargetFactor4x) == 0u);
+	}
+
+	TEST_CASE("slot sides round up to 8 px after 1 px of padding") {
+		CHECK(swf_page_slot_side(0) == 8);
+		CHECK(swf_page_slot_side(7) == 8);
+		CHECK(swf_page_slot_side(8) == 16);
+		CHECK(swf_page_slot_side(884) == 888);
+	}
+
+	TEST_CASE("shelf packer: live slots never overlap and stay inside the page, through random alloc and free") {
+		SwfShelfPacker packer(512, 256);
+		std::mt19937 rng(20261031u);
+		std::vector<SwfPageSlot> live;
+		const auto overlap = [](const SwfPageSlot &p_a, const SwfPageSlot &p_b) {
+			return p_a.x < p_b.x + p_b.width && p_b.x < p_a.x + p_a.width && p_a.y < p_b.y + p_b.height &&
+					p_b.y < p_a.y + p_a.height;
+		};
+		for (int i = 0; i < 5000; ++i) {
+			if (!live.empty() && (rng() % 3 == 0 || live.size() > 40)) {
+				const size_t at = rng() % live.size();
+				packer.release(live[at]);
+				live.erase(live.begin() + std::ptrdiff_t(at));
+				continue;
+			}
+			const std::optional<SwfPageSlot> slot = packer.alloc(int32_t(rng() % 120) + 1, int32_t(rng() % 40) + 1);
+			if (!slot) {
+				continue;
+			}
+			REQUIRE(slot->x >= 0);
+			REQUIRE(slot->y >= 0);
+			REQUIRE(slot->x + slot->width <= 512);
+			REQUIRE(slot->y + slot->height <= 256);
+			for (const SwfPageSlot &o : live) {
+				REQUIRE_FALSE(overlap(*slot, o));
+			}
+			live.push_back(*slot);
+		}
+		CHECK(packer.live_slots() == live.size());
+	}
+
+	TEST_CASE("shelf packer: freeing everything gives the whole page back") {
+		SwfShelfPacker packer(256, 128);
+		std::vector<SwfPageSlot> live;
+		while (const std::optional<SwfPageSlot> slot = packer.alloc(31, 15)) {
+			live.push_back(*slot);
+		}
+		CHECK(live.size() == 8u * 8u);
+		CHECK(packer.failures() == 1u);
+		std::shuffle(live.begin(), live.end(), std::mt19937(7u));
+		for (const SwfPageSlot &s : live) {
+			packer.release(s);
+		}
+		CHECK(packer.used_px() == 0u);
+		CHECK(packer.live_slots() == 0u);
+		const std::optional<SwfPageSlot> whole = packer.alloc(255, 127);
+		REQUIRE(whole.has_value());
+		CHECK(whole->x == 0);
+		CHECK(whole->y == 0);
+	}
+
+	TEST_CASE("shelf packer: a freed slot is reused, and a slot too large for the page counts as a failure") {
+		SwfShelfPacker packer(64, 64);
+		const std::optional<SwfPageSlot> a = packer.alloc(31, 15);
+		const std::optional<SwfPageSlot> b = packer.alloc(31, 15);
+		REQUIRE((a.has_value() && b.has_value()));
+		packer.release(*a);
+		const std::optional<SwfPageSlot> c = packer.alloc(31, 15);
+		REQUIRE(c.has_value());
+		CHECK(c->x == a->x);
+		CHECK(c->y == a->y);
+		CHECK(packer.failures() == 0u);
+		CHECK_FALSE(packer.alloc(64, 8).has_value());
+		CHECK(packer.failures() == 1u);
+	}
+
+	TEST_CASE("scratch pass: every dirty layer is drawn in a bounded number of passes, oversized ones are named") {
+		std::mt19937 rng(11u);
+		std::vector<SwfDirtyLayer> dirty;
+		for (int i = 0; i < 2000; ++i) {
+			dirty.push_back(SwfDirtyLayer{ int32_t(rng() % 300) + 1, int32_t(rng() % 60) + 1 });
+		}
+		dirty.push_back(SwfDirtyLayer{ 2000, 16 });
+		size_t oversized = 0;
+		uint32_t passes = 0;
+		while (!dirty.empty()) {
+			const SwfScratchPass pass = swf_select_scratch_pass(dirty, 1024, 512);
+			oversized += pass.too_large.size();
+			std::vector<SwfDirtyLayer> rest;
+			for (const size_t i : pass.waiting) {
+				rest.push_back(dirty[i]);
+			}
+			const bool progress = !pass.taken.empty() || !pass.too_large.empty();
+			REQUIRE(progress);
+			CHECK(pass.taken.size() == pass.slots.size());
+			CHECK(pass.taken.size() + pass.waiting.size() + pass.too_large.size() == dirty.size());
+			dirty = std::move(rest);
+			REQUIRE(++passes < 200u);
+		}
+		CHECK(oversized == 1u);
+		CHECK(passes > 1u);
+	}
+
+	TEST_CASE("page churn: opening and closing screens at the planned margin never fails an allocation") {
+		const SwfPageSizes pages = swf_page_sizes(1280, 720);
+		SwfShelfPacker packer(pages.result_width, pages.result_height);
+		std::mt19937 rng(3u);
+		const auto screen = [&rng](int32_t p_rows) {
+			std::vector<SwfDirtyLayer> layers;
+			for (int32_t i = 0; i < p_rows; ++i) {
+				layers.push_back(SwfDirtyLayer{ int32_t(rng() % 240) + 16, int32_t(rng() % 28) + 14 });
+			}
+			return layers;
+		};
+		const std::array<std::vector<SwfDirtyLayer>, 8> screens{ screen(200), screen(160), screen(54), screen(40),
+			screen(30), screen(180), screen(30), screen(100) };
+		std::array<std::vector<SwfPageSlot>, 8> open;
+		const auto demand = [&screens](size_t p_i) {
+			uint64_t px = 0;
+			for (const SwfDirtyLayer &l : screens[p_i]) {
+				px += uint64_t(swf_page_slot_side(l.width)) * uint64_t(swf_page_slot_side(l.height));
+			}
+			return px;
+		};
+		uint64_t live_px = 0;
+		for (int i = 0; i < 2000; ++i) {
+			const size_t s = rng() % screens.size();
+			if (!open[s].empty()) {
+				for (const SwfPageSlot &slot : open[s]) {
+					packer.release(slot);
+				}
+				open[s].clear();
+				live_px -= demand(s);
+				continue;
+			}
+			if (double(live_px + demand(s)) * kSwfPageMargin > double(pages.result_px())) {
+				continue;
+			}
+			for (const SwfDirtyLayer &l : screens[s]) {
+				const std::optional<SwfPageSlot> slot = packer.alloc(l.width, l.height);
+				REQUIRE(slot.has_value());
+				open[s].push_back(*slot);
+			}
+			live_px += demand(s);
+		}
+		CHECK(packer.failures() == 0u);
 	}
 }
