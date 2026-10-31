@@ -80,8 +80,14 @@ constexpr std::array<std::pair<std::string_view, uint32_t>, 25> kCensusFilterFlo
 
 constexpr std::array<std::string_view, 4> kOwnSurfaceAllowList{ ".scoringMessage", ".scoringMessage.txt",
 	".scoringMessage.txtBg", ".multiplayerCompass.cps.#" };
-constexpr std::array<std::string_view, 7> kOwnWhenShownAllowList{ ".multiplayerCompass.objective#.obj.#",
-	".multiplayerCompass.objective#.obj", ".spinnerMc.#", ".bg", ".container.#", ".tf", ".icon.label" };
+constexpr std::array<std::string_view, 13> kOwnWhenShownAllowList{ ".multiplayerCompass.objective#.obj.#",
+	".multiplayerCompass.objective#.obj", ".Ammo.atp.ammoType_#.spinnerMc.#", ".HudAlertMessage_#.warning.bg",
+	".HudAlertMessage_#.information.bg", ".HudAlertMessage_#.alert.bg", ".TooltipMessage_#.container.#",
+	".TooltipMessage_#.container.textTop.textClip.t#.tf", ".TooltipMessage_#.container.textBottom.textClip.t#.tf",
+	".TooltipMessage_#.container.textTop.textClip.t#.controllerIcon.icon.label",
+	".TooltipMessage_#.container.textTop.textClip.t#.controllerIcon#.icon.label",
+	".TooltipMessage_#.container.textBottom.textClip.t#.controllerIcon.icon.label",
+	".TooltipMessage_#.container.textBottom.textClip.t#.controllerIcon#.icon.label" };
 
 std::string digits_to_hash(std::string_view p_path) {
 	std::string out;
