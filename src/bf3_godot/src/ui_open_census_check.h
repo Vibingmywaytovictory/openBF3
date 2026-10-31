@@ -49,6 +49,7 @@ private:
 	uint64_t thrown_viewports_ = 0;
 	uint64_t filter_stages_ = 0;
 	uint64_t filter_materials_ = 0;
+	uint64_t filter_kernels_ = 0;
 	bool done_ = false;
 };
 

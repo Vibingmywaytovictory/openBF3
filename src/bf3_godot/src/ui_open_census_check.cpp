@@ -105,6 +105,7 @@ void Bf3UiOpenCensusCheck::census_screen(const std::string &p_partition) {
 	}
 	filter_stages_ += after.live_filter_stages - before.live_filter_stages;
 	filter_materials_ += after.live_filter_materials - before.live_filter_materials;
+	filter_kernels_ += ui::swf_layer_plan(walk, view->target_size().x, view->target_size().y).counts.distinct_kernels;
 	thrown_viewports_ +=
 			(after.viewport_creates - before.viewport_creates) - (after.live_surfaces - before.live_surfaces);
 	UtilityFunctions::print(to_godot(bf3::core::fmt("[census] %s: %llu viewport create(s), %llu resize(s), %llu live "
@@ -267,9 +268,10 @@ void Bf3UiOpenCensusCheck::finish() {
 			bf3::core::fmt("%llu surfaces, %llu items, %llu arrays, %llu running targets",
 					(unsigned long long)left.live_surfaces, (unsigned long long)left.live_items,
 					(unsigned long long)left.live_triangle_arrays, (unsigned long long)left.live_targets_running));
-	add("filter stages share their materials", filter_stages_ != 0 && filter_materials_ * 2 <= filter_stages_,
-			bf3::core::fmt("%llu materials for %llu stages", (unsigned long long)filter_materials_,
-					(unsigned long long)filter_stages_));
+	add("filter stages share one material per kernel", filter_stages_ != 0 && filter_materials_ <= filter_kernels_,
+			bf3::core::fmt("%llu materials for %llu stages, %llu distinct kernels",
+					(unsigned long long)filter_materials_, (unsigned long long)filter_stages_,
+					(unsigned long long)filter_kernels_));
 	add("freed views hold no filter material", left.live_filter_materials == 0 && left.live_filter_stages == 0,
 			bf3::core::fmt("%llu materials, %llu stages", (unsigned long long)left.live_filter_materials,
 					(unsigned long long)left.live_filter_stages));
