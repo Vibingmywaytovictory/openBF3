@@ -439,6 +439,7 @@ void Bf3UiOpenCensusCheck::census_paged_screens() {
 	census_page_overflow(*pages);
 	census_clips(*pages);
 	census_frame(*pages);
+	census_undrawn_pass(*pages);
 	census_screen_band(*pages);
 	remove_child(pages);
 	memdelete(pages);
@@ -983,6 +984,64 @@ void Bf3UiOpenCensusCheck::census_frame(Bf3UiPages &r_pages) {
 	second = nullptr;
 	add("freeing a shown view redraws F", updates() == before_free + 1,
 			bf3::core::fmt("%llu update(s)", (unsigned long long)(updates() - before_free)));
+	finish();
+}
+
+void Bf3UiOpenCensusCheck::census_undrawn_pass(Bf3UiPages &r_pages) {
+	Bf3SwfView *view = open_paged_view(ui::ui_data_category_leaf(kIngameMenuPartition));
+	if (view == nullptr) {
+		return;
+	}
+	const auto finish = [&] {
+		r_pages.drive_clock(std::nullopt);
+		remove_child(view);
+		memdelete(view);
+	};
+	UiPagesClock clock{ kUiOpenCensusDrivenClock * 2, kUiOpenCensusDrivenClock * 2 };
+	r_pages.drive_clock(clock);
+	view->sync();
+	const uint32_t paged = view->paged_layers();
+	const UiPagesCounters filled = r_pages.counters();
+	const auto frame = [&](uint64_t p_draws) {
+		++clock.process_frames;
+		clock.draws += p_draws;
+		r_pages.drive_clock(clock);
+		view->sync();
+	};
+	for (uint32_t i = 0; i < kUiOpenCensusUndrawnFrames; ++i) {
+		frame(0);
+	}
+	const UiPagesCounters held = r_pages.counters();
+	add("a pass no frame drew stays up, and its layers wait",
+			paged != 0 && filled.pass_items != 0 && held.pass_items >= filled.pass_items &&
+					held.passes == filled.passes && view->paged_quads_shown() == 0 && view->page_fills_pending(),
+			bf3::core::fmt("%u paged, %u shown, %llu then %llu items up, %llu more pass(es)", paged,
+					view->paged_quads_shown(), (unsigned long long)filled.pass_items,
+					(unsigned long long)held.pass_items, (unsigned long long)(held.passes - filled.passes)));
+	ui::SwfLayerWalkOptions walk_options;
+	walk_options.fonts = Bf3UiAssets::current()->swf_fonts();
+	const ui::SwfLayerWalk walk = ui::swf_layer_walk(*view->scene(), walk_options);
+	const auto layer = std::find_if(walk.layers.begin(), walk.layers.end(), [&view](const ui::SwfLayerWalkNode &p_l) {
+		const ui::SwfSceneNode *n = view->scene()->node(p_l.owner);
+		return p_l.route == ui::SwfLayerClass::Page && p_l.has_nodes && n != nullptr &&
+				n->kind == ui::SwfNodeKind::EditText;
+	});
+	if (layer == walk.layers.end()) {
+		add("a layer that outgrows its slot leaves the undrawn pass", false, "no paged text layer");
+		finish();
+		return;
+	}
+	const bf3::core::Status grown = view->scene()->set_text(layer->path, kUiOpenCensusLongerText);
+	frame(0);
+	const uint64_t left = r_pages.counters().pass_items_left - held.pass_items_left;
+	add("a layer that outgrows its slot leaves the undrawn pass", grown.ok() && left == 2,
+			bf3::core::fmt("%s: %llu item(s) left", layer->path.c_str(), (unsigned long long)left));
+	frame(1);
+	const uint32_t shown_after_draw = view->paged_quads_shown();
+	settle_paged_view(r_pages, *view);
+	add("and its layers show once a frame has drawn it", shown_after_draw != 0 && view->paged_quads_shown() == paged,
+			bf3::core::fmt(
+					"%u shown after the draw, %u of %u settled", shown_after_draw, view->paged_quads_shown(), paged));
 	finish();
 }
 

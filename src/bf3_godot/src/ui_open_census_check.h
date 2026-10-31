@@ -23,6 +23,9 @@ inline constexpr uint32_t kUiOpenCensusMaxPasses = 512;
 inline constexpr int32_t kUiOpenCensusSmallPage = 32;
 inline constexpr uint32_t kUiOpenCensusIdlePasses = 40;
 inline constexpr const char *kUiOpenCensusLongText = "THE OPEN CENSUS FILLS THIS LAYER";
+inline constexpr const char *kUiOpenCensusLongerText =
+		"THE OPEN CENSUS FILLS THIS LAYER AND THEN IT GROWS PAST THE SLOT THAT IT HELD BEFORE";
+inline constexpr uint32_t kUiOpenCensusUndrawnFrames = 3;
 inline constexpr double kUiOpenCensusWholeMove = 12.0;
 inline constexpr double kUiOpenCensusFractionalMove = 0.5;
 inline constexpr float kUiOpenCensusTiltDegrees = 10.0f;
@@ -56,6 +59,7 @@ private:
 	void census_page_overflow(Bf3UiPages &r_pages);
 	void census_clips(Bf3UiPages &r_pages);
 	void census_frame(Bf3UiPages &r_pages);
+	void census_undrawn_pass(Bf3UiPages &r_pages);
 	void census_screen_band(Bf3UiPages &r_pages);
 	Bf3SwfView *open_paged_view(const std::string &p_leaf);
 	void settle_paged_view(Bf3UiPages &r_pages, Bf3SwfView &r_view);

@@ -9,6 +9,7 @@
 #include <godot_cpp/core/class_db.hpp>
 
 #include <algorithm>
+#include <iterator>
 
 using namespace godot;
 namespace ui = bf3::core::ui;
@@ -189,7 +190,7 @@ void Bf3UiPages::free_pages() {
 	result_.reset();
 	pass_.reset();
 	in_pass_.clear();
-	pass_requested_ = false;
+	pass_requested_at_.reset();
 }
 
 void Bf3UiPages::use_sizes(const ui::SwfPageSizes &p_sizes) {
@@ -233,9 +234,12 @@ void Bf3UiPages::make_pages(const ui::SwfPageSizes &p_sizes) {
 }
 
 void Bf3UiPages::begin_frame() {
-	const uint64_t frame = clock().process_frames;
-	if (frame != frame_) {
-		frame_ = frame;
+	const UiPagesClock now = clock();
+	if (now.process_frames == frame_) {
+		return;
+	}
+	frame_ = now.process_frames;
+	if (pass_requested_at_ != now.draws) {
 		end_pass();
 	}
 }
@@ -245,7 +249,7 @@ void Bf3UiPages::end_pass() {
 		rs_->canvas_item_set_visible(item, false);
 	}
 	in_pass_.clear();
-	pass_requested_ = false;
+	pass_requested_at_.reset();
 	frame_requested_at_.reset();
 	if (scratch_viewport_.is_valid()) {
 		pass_.emplace(sizes_.scratch_width, sizes_.scratch_height);
@@ -275,8 +279,8 @@ ui::SwfScratchPass Bf3UiPages::take_scratch(std::span<const ui::SwfDirtyLayer> p
 void Bf3UiPages::note_fill(RID p_group, RID p_stage) {
 	in_pass_.push_back(p_group);
 	in_pass_.push_back(p_stage);
-	if (!pass_requested_) {
-		pass_requested_ = true;
+	if (!pass_requested_at_) {
+		pass_requested_at_ = clock().draws;
 		++counters_.passes;
 		rs_->viewport_set_update_mode(scratch_viewport_, RenderingServer::VIEWPORT_UPDATE_ONCE);
 		rs_->viewport_set_update_mode(result_viewport_, RenderingServer::VIEWPORT_UPDATE_ONCE);
@@ -284,7 +288,9 @@ void Bf3UiPages::note_fill(RID p_group, RID p_stage) {
 }
 
 void Bf3UiPages::forget(RID p_item) {
-	in_pass_.erase(std::remove(in_pass_.begin(), in_pass_.end(), p_item), in_pass_.end());
+	const auto left = std::remove(in_pass_.begin(), in_pass_.end(), p_item);
+	counters_.pass_items_left += uint64_t(std::distance(left, in_pass_.end()));
+	in_pass_.erase(left, in_pass_.end());
 }
 
 void Bf3UiPages::note_own_surface_fallback() {
@@ -293,6 +299,7 @@ void Bf3UiPages::note_own_surface_fallback() {
 
 UiPagesCounters Bf3UiPages::counters() const {
 	UiPagesCounters out = counters_;
+	out.pass_items = in_pass_.size();
 	out.live_slots = result_ ? result_->live_slots() : 0;
 	out.used_px = result_ ? result_->used_px() : 0;
 	out.bytes = (scratch_viewport_.is_valid() ? sizes_.result_bytes() + sizes_.scratch_bytes() : 0) +

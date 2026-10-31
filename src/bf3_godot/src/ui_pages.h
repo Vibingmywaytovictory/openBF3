@@ -25,6 +25,8 @@ struct UiPagesCounters {
 	uint64_t frame_updates = 0;
 	uint64_t frame_presents = 0;
 	uint64_t own_surface_fallbacks = 0;
+	uint64_t pass_items = 0;
+	uint64_t pass_items_left = 0;
 	uint64_t live_viewports = 0;
 	uint64_t live_slots = 0;
 	uint64_t used_px = 0;
@@ -120,7 +122,7 @@ private:
 	uint64_t generation_ = 0;
 	uint64_t frame_ = UINT64_MAX;
 	uint64_t pass_serial_ = 1;
-	bool pass_requested_ = false;
+	std::optional<uint64_t> pass_requested_at_;
 	std::optional<uint64_t> frame_requested_at_;
 	bool sizes_fixed_ = false;
 	UiPagesCounters counters_;

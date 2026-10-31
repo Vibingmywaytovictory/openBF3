@@ -1226,16 +1226,21 @@ struct Bf3SwfView::Impl {
 		}
 	}
 
+	void leave_pass(Canvas &r_c) {
+		if (!r_c.settling || !r_c.group.is_valid()) {
+			return;
+		}
+		rs->canvas_item_set_visible(r_c.group, false);
+		forget_in_pass(r_c.group);
+		for (const Stage &s : r_c.stages) {
+			rs->canvas_item_set_visible(s.item, false);
+			forget_in_pass(s.item);
+		}
+	}
+
 	void release_slots(Canvas &r_c) {
 		Bf3UiPages *pages = Bf3UiPages::current();
-		if (r_c.settling && r_c.group.is_valid()) {
-			rs->canvas_item_set_visible(r_c.group, false);
-			forget_in_pass(r_c.group);
-			for (const Stage &s : r_c.stages) {
-				rs->canvas_item_set_visible(s.item, false);
-				forget_in_pass(s.item);
-			}
-		}
+		leave_pass(r_c);
 		if (pages != nullptr && pages->generation() == pages_generation) {
 			if (r_c.slot) {
 				pages->release_result(*r_c.slot);
@@ -3269,6 +3274,7 @@ struct Bf3SwfView::Impl {
 			return false;
 		}
 		if (!r_c.slot || !slot_fits(*r_c.slot, p_size)) {
+			leave_pass(r_c);
 			if (r_c.slot && r_c.slot != r_c.shown_slot) {
 				Bf3UiPages::current()->release_result(*r_c.slot);
 			}
