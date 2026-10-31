@@ -195,6 +195,11 @@ struct LayerWalker {
 		SwfLayerWalkNode l;
 		l.owner = p_owner.id;
 		l.kind = p_kind;
+		if (p_kind == SwfLayerKind::Mask) {
+			const bool rect = swf_rect_mask(scene, options.fonts, p_owner.id, options.tilted).has_value();
+			l.route = rect ? SwfLayerClass::Clip : SwfLayerClass::OwnSurface;
+			out.non_rect_masks += rect ? 0u : 1u;
+		}
 		l.path = p_owner.path;
 		l.parent = p_parent;
 		l.filters = std::move(p_filters);
@@ -340,13 +345,6 @@ struct LayerWalker {
 	}
 
 	void classify() {
-		for (SwfLayerWalkNode &l : out.layers) {
-			if (l.kind == SwfLayerKind::Mask) {
-				const bool rect = swf_rect_mask(scene, options.fonts, l.owner, options.tilted).has_value();
-				l.route = rect ? SwfLayerClass::Clip : SwfLayerClass::OwnSurface;
-				out.non_rect_masks += rect ? 0u : 1u;
-			}
-		}
 		for (SwfLayerWalkNode &l : out.layers) {
 			if (l.kind == SwfLayerKind::Mask) {
 				continue;

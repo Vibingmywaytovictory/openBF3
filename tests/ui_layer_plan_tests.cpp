@@ -367,6 +367,21 @@ bool is_hud_family(std::string_view p_leaf) {
 			p_leaf == "crosshairdefault" || p_leaf == "killscreen";
 }
 
+struct RouteRecorder final : SwfLayerVisitor {
+	const SwfScene &scene;
+	const SwfFontSet *fonts = nullptr;
+	std::vector<SwfLayerClass> opened;
+
+	RouteRecorder(const SwfScene &p_scene, const SwfFontSet *p_fonts) : scene(p_scene), fonts(p_fonts) {}
+
+	void seen(const SwfSceneNode &) override {}
+	uint32_t pieces(const SwfSceneNode &p_node) override { return swf_node_pieces(scene, fonts, p_node).count; }
+	bool engine_target(const SwfSceneNode &) override { return false; }
+	void target(const SwfSceneNode &, uint32_t) override {}
+	void layer_opened(uint32_t, const SwfLayerWalkNode &p_layer) override { opened.push_back(p_layer.route); }
+	void attach(const SwfSceneNode &, uint32_t, bool, bool, bool) override {}
+};
+
 struct NamedSet {
 	std::string name;
 	std::vector<std::string_view> partitions;
@@ -425,6 +440,39 @@ SwfNodeId drawn_descendant(const SwfScene &p_scene, const SwfFontSet *p_fonts, S
 }
 
 TEST_SUITE("ui-layer-plan") {
+	TEST_CASE("layer plan: a mask's route is known when its layer opens") {
+		Rig *r = rig_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudMessageComp messages(*r->messages);
+		HudClientState client = rig_client(*r);
+		client.messages = &messages;
+		ui_retail::RetailScreen s = ui_retail::open_retail_screen(*r->retail, kMenuScoreboardPartition, client);
+		s.hud->initialize(r->model);
+		for (int i = 0; i < 3; ++i) {
+			s.hud->refresh(r->model);
+			s.hud->advance(kStepSeconds);
+			REQUIRE(s.scene->advance_seconds(kStepSeconds).ok());
+		}
+		(void)s.scene->take_changes();
+		RouteRecorder recorder(*s.scene, s.hud->fonts());
+		SwfPlanWalkOptions options;
+		options.fonts = s.hud->fonts();
+		const SwfLayerWalk walk = swf_walk_layers(*s.scene, options, recorder);
+		REQUIRE(recorder.opened.size() == walk.layers.size());
+		uint32_t clips = 0;
+		for (size_t i = 0; i < walk.layers.size(); ++i) {
+			if (walk.layers[i].kind == SwfLayerKind::Mask) {
+				clips += walk.layers[i].route == SwfLayerClass::Clip ? 1u : 0u;
+				CHECK_MESSAGE(recorder.opened[i] == walk.layers[i].route, walk.layers[i].path, " opened as ",
+						swf_layer_class_name(recorder.opened[i]), " and ended as ",
+						swf_layer_class_name(walk.layers[i].route));
+			}
+		}
+		CHECK(clips > 0);
+	}
+
 	TEST_CASE("layer plan: every drawn screen has its census filter floor, and own surfaces are the allow-listed few") {
 		Rig *r = rig_or_skip();
 		if (r == nullptr) {
