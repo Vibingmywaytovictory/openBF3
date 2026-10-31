@@ -40,6 +40,8 @@ private:
 	size_t synced_ = 0;
 	size_t with_items_ = 0;
 	uint64_t thrown_viewports_ = 0;
+	uint64_t filter_stages_ = 0;
+	uint64_t filter_materials_ = 0;
 	bool done_ = false;
 };
 

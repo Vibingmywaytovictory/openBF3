@@ -84,6 +84,8 @@ void Bf3UiOpenCensusCheck::census_screen(const std::string &p_partition) {
 	const SwfViewStats &stats = view->stats();
 	synced_ += stats.structure_passes != 0 ? 1u : 0u;
 	with_items_ += stats.items != 0 ? 1u : 0u;
+	filter_stages_ += after.live_filter_stages - before.live_filter_stages;
+	filter_materials_ += after.live_filter_materials - before.live_filter_materials;
 	thrown_viewports_ +=
 			(after.viewport_creates - before.viewport_creates) - (after.live_surfaces - before.live_surfaces);
 	UtilityFunctions::print(to_godot(bf3::core::fmt("[census] %s: %llu viewport create(s), %llu resize(s), %llu live "
@@ -112,6 +114,12 @@ void Bf3UiOpenCensusCheck::finish() {
 	add("freed views hold nothing", left.live_surfaces == 0 && left.live_items == 0 && left.live_triangle_arrays == 0,
 			bf3::core::fmt("%llu surfaces, %llu items, %llu arrays", (unsigned long long)left.live_surfaces,
 					(unsigned long long)left.live_items, (unsigned long long)left.live_triangle_arrays));
+	add("filter stages share their materials", filter_stages_ != 0 && filter_materials_ * 2 <= filter_stages_,
+			bf3::core::fmt("%llu materials for %llu stages", (unsigned long long)filter_materials_,
+					(unsigned long long)filter_stages_));
+	add("freed views hold no filter material", left.live_filter_materials == 0 && left.live_filter_stages == 0,
+			bf3::core::fmt("%llu materials, %llu stages", (unsigned long long)left.live_filter_materials,
+					(unsigned long long)left.live_filter_stages));
 	add("no viewport made only to be replaced", thrown_viewports_ == 0,
 			bf3::core::fmt("%llu thrown away", (unsigned long long)thrown_viewports_));
 	add("no triangle array of few triangles", left.small_triangle_arrays_emitted == 0,

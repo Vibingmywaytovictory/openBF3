@@ -121,7 +121,6 @@ void fragment() {
 
 const char *kFilterShader = R"(shader_type canvas_item;
 render_mode blend_premul_alpha;
-uniform vec2 texel = vec2(1.0);
 uniform vec2 shift = vec2(0.0);
 uniform int taps_x = 1;
 uniform int taps_y = 1;
@@ -141,7 +140,7 @@ void fragment() {
 		for (int j = 0; j < taps_y; j++) {
 			vec4 row = vec4(0.0);
 			for (int i = 0; i < taps_x; i++) {
-				row += weights_x[i] * texture(TEXTURE, UV + vec2(float(i) - hx, float(j) - hy) * texel);
+				row += weights_x[i] * texture(TEXTURE, UV + vec2(float(i) - hx, float(j) - hy) * TEXTURE_PIXEL_SIZE);
 			}
 			acc += weights_y[j] * row;
 		}
@@ -151,7 +150,7 @@ void fragment() {
 	for (int j = 0; j < taps_y; j++) {
 		float row = 0.0;
 		for (int i = 0; i < taps_x; i++) {
-			vec2 o = (vec2(float(i) - hx, float(j) - hy) - shift) * texel;
+			vec2 o = (vec2(float(i) - hx, float(j) - hy) - shift) * TEXTURE_PIXEL_SIZE;
 			float s = texture(TEXTURE, UV + o).a;
 			row += weights_x[i] * (inner == 1 ? 1.0 - s : s);
 		}
@@ -434,6 +433,70 @@ Bounds project_rect(const ui::SwfRect &p_r, const ui::SwfAffine &p_m, const Hom 
 
 Color color_of(ui::SwfColor p_c) {
 	return Color(float(p_c.r) / 255.0f, float(p_c.g) / 255.0f, float(p_c.b) / 255.0f, float(p_c.a) / 255.0f);
+}
+
+using FilterMaterialKey = std::array<float, 14>;
+
+struct FilterMaterial {
+	RID material;
+	uint32_t users = 0;
+};
+
+std::map<FilterMaterialKey, FilterMaterial> g_filter_materials;
+
+FilterMaterialKey filter_material_key(
+		const ui::SwfFilter &p_f, const ui::SwfFilterKernel &p_kernel, double p_scale_x, double p_scale_y) {
+	const Color color = color_of(p_f.color);
+	return FilterMaterialKey{ float(p_f.kind), color.r, color.g, color.b, color.a,
+		float(double(p_f.blur_x) * p_scale_x), float(double(p_f.blur_y) * p_scale_y), float(p_f.passes),
+		float(p_kernel.shift_x), float(p_kernel.shift_y), p_f.strength, p_f.inner ? 1.0f : 0.0f,
+		p_f.knockout ? 1.0f : 0.0f, p_f.composite_source ? 1.0f : 0.0f };
+}
+
+RID acquire_filter_material(RenderingServer *p_rs, RID p_shader, const FilterMaterialKey &p_key,
+		const ui::SwfFilter &p_f, const ui::SwfFilterKernel &p_kernel) {
+	FilterMaterial &entry = g_filter_materials[p_key];
+	++entry.users;
+	++g_counters.live_filter_stages;
+	if (entry.material.is_valid()) {
+		return entry.material;
+	}
+	entry.material = p_rs->material_create();
+	++g_counters.live_filter_materials;
+	p_rs->material_set_shader(entry.material, p_shader);
+	PackedFloat32Array ax;
+	PackedFloat32Array ay;
+	ax.resize(kKernelSlots);
+	ay.resize(kKernelSlots);
+	for (int32_t i = 0; i < kKernelSlots; ++i) {
+		ax.set(i, i < int32_t(p_kernel.x.size()) ? float(p_kernel.x[size_t(i)]) : 0.0f);
+		ay.set(i, i < int32_t(p_kernel.y.size()) ? float(p_kernel.y[size_t(i)]) : 0.0f);
+	}
+	p_rs->material_set_param(entry.material, "shift", Vector2(float(p_kernel.shift_x), float(p_kernel.shift_y)));
+	p_rs->material_set_param(entry.material, "taps_x", int32_t(p_kernel.x.size()));
+	p_rs->material_set_param(entry.material, "taps_y", int32_t(p_kernel.y.size()));
+	p_rs->material_set_param(entry.material, "weights_x", ax);
+	p_rs->material_set_param(entry.material, "weights_y", ay);
+	p_rs->material_set_param(entry.material, "shadow", vec4_of(color_of(p_f.color)));
+	p_rs->material_set_param(entry.material, "strength", float(p_f.strength));
+	p_rs->material_set_param(entry.material, "inner", p_f.inner ? 1 : 0);
+	p_rs->material_set_param(entry.material, "knockout", p_f.knockout ? 1 : 0);
+	p_rs->material_set_param(entry.material, "source", p_f.composite_source ? 1 : 0);
+	p_rs->material_set_param(entry.material, "blur", p_f.kind == ui::SwfFilterKind::Blur ? 1 : 0);
+	return entry.material;
+}
+
+void release_filter_material(RenderingServer *p_rs, const FilterMaterialKey &p_key) {
+	const auto it = g_filter_materials.find(p_key);
+	if (it == g_filter_materials.end()) {
+		return;
+	}
+	--g_counters.live_filter_stages;
+	if (--it->second.users == 0) {
+		p_rs->free_rid(it->second.material);
+		--g_counters.live_filter_materials;
+		g_filter_materials.erase(it);
+	}
 }
 
 constexpr float kSwfColorAddUnit = 255.0f;
@@ -841,7 +904,7 @@ struct Canvas;
 struct Stage {
 	Surface surface;
 	RID item;
-	RID material;
+	FilterMaterialKey material_key{};
 };
 
 struct Canvas {
@@ -1149,9 +1212,7 @@ struct Bf3SwfView::Impl {
 			if (s.item.is_valid()) {
 				free_item(s.item);
 			}
-			if (s.material.is_valid()) {
-				rs->free_rid(s.material);
-			}
+			release_filter_material(rs, s.material_key);
 			retire(s.surface, RenderingServer::VIEWPORT_MSAA_DISABLED);
 		}
 		r_c.stages.clear();
@@ -2098,7 +2159,7 @@ struct Bf3SwfView::Impl {
 		}
 		for (Stage &s : r_c.stages) {
 			free_item(s.item);
-			rs->free_rid(s.material);
+			release_filter_material(rs, s.material_key);
 			retire(s.surface, RenderingServer::VIEWPORT_MSAA_DISABLED);
 		}
 		r_c.stages.clear();
@@ -2116,32 +2177,10 @@ struct Bf3SwfView::Impl {
 			s.item = make_item();
 			rs->canvas_item_set_parent(s.item, s.surface.canvas);
 			rs->canvas_item_set_default_texture_filter(s.item, RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR);
-			s.material = rs->material_create();
-			rs->material_set_shader(s.material, filter_shader);
-			rs->canvas_item_set_material(s.item, s.material);
 			const ui::SwfFilterKernel kernel = ui::swf_filter_kernel(f, kx, ky);
 			stats.kernels_clamped += kernel.clamped;
-			const std::vector<double> &wx = kernel.x;
-			const std::vector<double> &wy = kernel.y;
-			PackedFloat32Array ax;
-			PackedFloat32Array ay;
-			ax.resize(kKernelSlots);
-			ay.resize(kKernelSlots);
-			for (int32_t i = 0; i < kKernelSlots; ++i) {
-				ax.set(i, i < int32_t(wx.size()) ? float(wx[size_t(i)]) : 0.0f);
-				ay.set(i, i < int32_t(wy.size()) ? float(wy[size_t(i)]) : 0.0f);
-			}
-			rs->material_set_param(s.material, "shift", Vector2(float(kernel.shift_x), float(kernel.shift_y)));
-			rs->material_set_param(s.material, "taps_x", int32_t(wx.size()));
-			rs->material_set_param(s.material, "taps_y", int32_t(wy.size()));
-			rs->material_set_param(s.material, "weights_x", ax);
-			rs->material_set_param(s.material, "weights_y", ay);
-			rs->material_set_param(s.material, "shadow", vec4_of(color_of(f.color)));
-			rs->material_set_param(s.material, "strength", float(f.strength));
-			rs->material_set_param(s.material, "inner", f.inner ? 1 : 0);
-			rs->material_set_param(s.material, "knockout", f.knockout ? 1 : 0);
-			rs->material_set_param(s.material, "source", f.composite_source ? 1 : 0);
-			rs->material_set_param(s.material, "blur", f.kind == ui::SwfFilterKind::Blur ? 1 : 0);
+			s.material_key = filter_material_key(f, kernel, kx, ky);
+			rs->canvas_item_set_material(s.item, acquire_filter_material(rs, filter_shader, s.material_key, f, kernel));
 			r_c.margin_x += kernel.margin_x;
 			r_c.margin_y += kernel.margin_y;
 			r_c.stages.push_back(std::move(s));
@@ -2788,7 +2827,6 @@ struct Bf3SwfView::Impl {
 					swapped = take(s.surface, c.size, RenderingServer::VIEWPORT_MSAA_DISABLED) || swapped;
 					rs->canvas_item_clear(s.item);
 					rs->canvas_item_add_texture_rect(s.item, Rect2(0.0f, 0.0f, real_t(c.size.x), real_t(c.size.y)), input);
-					rs->material_set_param(s.material, "texel", Vector2(1.0f / float(c.size.x), 1.0f / float(c.size.y)));
 					input = s.surface.texture;
 				}
 				if (swapped) {
