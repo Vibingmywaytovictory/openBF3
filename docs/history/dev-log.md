@@ -2853,3 +2853,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Drawn-screen partition lists move to bf3_core (ui_drawn_screens.h); godot headers alias them, so the layer plan row reads the game's lists.
 * swf_layer_plan classes every layer without Godot; ui.layer_plan drives all drawn screens to their census floors, allow-lists own surfaces and proves listMask and GridScrollMaskMc rectangular.
 * Shelf packer, S-pass selector and page sizes land with ui.layer_plan.unit; ui.layer_plan fits every simultaneous set at 720p, 1440p and 2160p.
+* swf_view.cpp takes kernels, grid warps and target bytes from swf_layer_plan; script-mask children no longer count as drawables, so MenuHint hint.text is no group.

@@ -446,53 +446,6 @@ Color shader_add(const ui::SwfColorXform &p_cx) {
 	return Color(p_cx.add[0] / kSwfColorAddUnit, p_cx.add[1] / kSwfColorAddUnit, p_cx.add[2] / kSwfColorAddUnit, p_cx.add[3] / kSwfColorAddUnit);
 }
 
-bool supported_filter(const ui::SwfFilter &p_f) {
-	return p_f.kind == ui::SwfFilterKind::DropShadow || p_f.kind == ui::SwfFilterKind::Glow || p_f.kind == ui::SwfFilterKind::Blur;
-}
-
-std::vector<double> box_kernel(double p_width, uint32_t p_passes) {
-	std::vector<double> k{ 1.0 };
-	if (p_passes == 0 || !(p_width > 1.0)) {
-		return k;
-	}
-	const double h = p_width * 0.5;
-	const int32_t r = int32_t(std::ceil(h - 0.5));
-	std::vector<double> box(size_t(2 * r + 1), 0.0);
-	for (int32_t i = -r; i <= r; ++i) {
-		const double lo = std::max(double(i) - 0.5, -h);
-		const double hi = std::min(double(i) + 0.5, h);
-		box[size_t(i + r)] = std::max(0.0, hi - lo) / p_width;
-	}
-	for (uint32_t p = 0; p < p_passes; ++p) {
-		std::vector<double> out(k.size() + box.size() - 1, 0.0);
-		for (size_t i = 0; i < k.size(); ++i) {
-			for (size_t j = 0; j < box.size(); ++j) {
-				out[i + j] += k[i] * box[j];
-			}
-		}
-		k = std::move(out);
-	}
-	return k;
-}
-
-std::vector<double> clamp_kernel(std::vector<double> p_k, uint32_t &r_clamped) {
-	const size_t limit = size_t(Bf3SwfView::kMaxKernelTaps);
-	if (p_k.size() <= limit) {
-		return p_k;
-	}
-	++r_clamped;
-	const size_t drop = (p_k.size() - limit) / 2;
-	std::vector<double> k(p_k.begin() + std::ptrdiff_t(drop), p_k.begin() + std::ptrdiff_t(drop + limit));
-	double sum = 0.0;
-	for (double w : k) {
-		sum += w;
-	}
-	for (double &w : k) {
-		w = sum > 0.0 ? w / sum : 0.0;
-	}
-	return k;
-}
-
 void push_polygon(std::vector<ui::SwfPoint> &r_outline, std::vector<uint32_t> &r_ends, std::vector<ui::SwfPoint> p_poly) {
 	if (p_poly.size() < 3) {
 		return;
@@ -672,37 +625,6 @@ void flatten_glyph_contour(const std::vector<ui::GlyphPoint> &p_points, size_t p
 	}
 }
 
-struct GridWarp {
-	bool active = false;
-	double bx0 = 0.0;
-	double bx1 = 0.0;
-	double by0 = 0.0;
-	double by1 = 0.0;
-	double l = 0.0;
-	double r = 0.0;
-	double t = 0.0;
-	double b = 0.0;
-	double sx = 1.0;
-	double sy = 1.0;
-
-	static double axis(double p_v, double p_b0, double p_b1, double p_s0, double p_s1, double p_scale) {
-		const double inner0 = p_b0 + (p_s0 - p_b0) / p_scale;
-		const double inner1 = p_b1 - (p_b1 - p_s1) / p_scale;
-		if (p_v <= p_s0) {
-			return p_b0 + (p_v - p_b0) / p_scale;
-		}
-		if (p_v >= p_s1) {
-			return p_b1 - (p_b1 - p_v) / p_scale;
-		}
-		const double span = p_s1 - p_s0;
-		return span > 0.0 ? inner0 + (p_v - p_s0) / span * (inner1 - inner0) : inner0;
-	}
-
-	ui::SwfPoint warp(ui::SwfPoint p_p) const {
-		return { float(axis(p_p.x, bx0, bx1, l, r, sx)), float(axis(p_p.y, by0, by1, t, b, sy)) };
-	}
-};
-
 struct Vert {
 	ui::SwfPoint p;
 	ui::SwfPoint uv;
@@ -749,7 +671,7 @@ struct Geometry {
 		indices.push_back(base + 1);
 		indices.push_back(base + 2);
 	}
-	void add_warped(const Vert &p_a, const Vert &p_b, const Vert &p_c, const GridWarp &p_grid) {
+	void add_warped(const Vert &p_a, const Vert &p_b, const Vert &p_c, const ui::SwfGridWarp &p_grid) {
 		if (!p_grid.active) {
 			add_triangle(p_a, p_b, p_c);
 			return;
@@ -793,7 +715,7 @@ uint64_t target_bytes(Vector2i p_size, RenderingServer::ViewportMSAA p_msaa) {
 	} else if (p_msaa == RenderingServer::VIEWPORT_MSAA_8X) {
 		samples = 9;
 	}
-	return uint64_t(std::max(0, p_size.x)) * uint64_t(std::max(0, p_size.y)) * 4u * samples;
+	return ui::swf_target_bytes(p_size.x, p_size.y, samples);
 }
 
 RID make_viewport(RenderingServer *p_rs, RenderingServer::ViewportMSAA p_msaa) {
@@ -1672,63 +1594,11 @@ struct Bf3SwfView::Impl {
 	}
 
 	const ui::SwfSceneNode *grid_owner(const ui::SwfSceneNode &p_node, ui::SwfAffine *r_to_owner = nullptr) const {
-		ui::SwfAffine to_owner = ui::swf_affine(p_node.matrix);
-		for (const ui::SwfSceneNode *s = node(p_node.parent); s != nullptr; s = node(s->parent)) {
-			if (s->scaling_grid != nullptr) {
-				if (r_to_owner != nullptr) {
-					*r_to_owner = to_owner;
-				}
-				return s;
-			}
-			to_owner = ui::swf_concat(ui::swf_affine(s->matrix), to_owner);
-		}
-		return nullptr;
+		return ui::swf_grid_owner(*scene, p_node, r_to_owner);
 	}
 
-	void add_grid_bounds(const ui::SwfSceneNode &p_node, const ui::SwfAffine &p_to_owner, Bounds &r_bounds) const {
-		for (const ui::SwfNodeId c : p_node.children) {
-			const ui::SwfSceneNode *k = node(c);
-			if (k == nullptr || k->scaling_grid != nullptr) {
-				continue;
-			}
-			const ui::SwfAffine m = ui::swf_concat(p_to_owner, ui::swf_affine(k->matrix));
-			if (k->shape != nullptr) {
-				r_bounds.add(project_rect(k->shape->bounds, m, Hom{}));
-			}
-			add_grid_bounds(*k, m, r_bounds);
-		}
-	}
-
-	GridWarp grid_for(const ui::SwfSceneNode &p_node) const {
-		GridWarp g;
-		const ui::SwfSceneNode *sprite = p_node.shape != nullptr ? grid_owner(p_node) : nullptr;
-		if (sprite == nullptr) {
-			return g;
-		}
-		Bounds sb;
-		add_grid_bounds(*sprite, ui::SwfAffine{}, sb);
-		if (sb.empty()) {
-			return g;
-		}
-		const ui::SwfAffine w = ui::swf_concat(stage_to_window, ui::swf_affine(sprite->world));
-		g.sx = std::sqrt(w.a * w.a + w.b * w.b);
-		g.sy = std::sqrt(w.c * w.c + w.d * w.d);
-		const ui::SwfAffine win = ui::swf_concat(stage_to_window, ui::swf_affine(ui::SwfMatrix{}));
-		g.sx /= std::sqrt(win.a * win.a + win.b * win.b);
-		g.sy /= std::sqrt(win.c * win.c + win.d * win.d);
-		if (!(g.sx > 1e-6) || !(g.sy > 1e-6)) {
-			return g;
-		}
-		g.active = true;
-		g.bx0 = sb.x0;
-		g.bx1 = sb.x1;
-		g.by0 = sb.y0;
-		g.by1 = sb.y1;
-		g.l = sprite->scaling_grid->splitter.x_min;
-		g.r = sprite->scaling_grid->splitter.x_max;
-		g.t = sprite->scaling_grid->splitter.y_min;
-		g.b = sprite->scaling_grid->splitter.y_max;
-		return g;
+	ui::SwfGridWarp grid_for(const ui::SwfSceneNode &p_node) const {
+		return ui::swf_grid_warp(*scene, p_node, stage_to_window);
 	}
 
 	double screen_scale(const ui::SwfSceneNode &p_node) const {
@@ -1736,10 +1606,10 @@ struct Bf3SwfView::Impl {
 		return std::sqrt(std::abs(w.a * w.d - w.b * w.c));
 	}
 
-	void build_shape(
-			NodeRec &r_rec, const ui::SwfSceneNode &p_node, const ui::SwfShape &p_shape, const GridWarp &p_grid) {
+	void build_shape(NodeRec &r_rec, const ui::SwfSceneNode &p_node, const ui::SwfShape &p_shape,
+			const ui::SwfGridWarp &p_grid) {
 		const ui::SwfShape &shape = p_shape;
-		const GridWarp &grid = p_grid;
+		const ui::SwfGridWarp &grid = p_grid;
 		r_rec.grid = grid.active;
 		r_rec.built_scale_x = grid.sx;
 		r_rec.built_scale_y = grid.sy;
@@ -2039,7 +1909,7 @@ struct Bf3SwfView::Impl {
 		} else if (!n.image.empty()) {
 			build_image(r_rec, n);
 		} else if (n.drawing != nullptr) {
-			build_shape(r_rec, n, *n.drawing, GridWarp{});
+			build_shape(r_rec, n, *n.drawing, ui::SwfGridWarp{});
 		} else if (n.kind == ui::SwfNodeKind::EditText && n.edit_text != nullptr) {
 			build_text(r_rec, n);
 		} else if (n.kind == ui::SwfNodeKind::Bitmap && n.sub_image != nullptr) {
@@ -2072,7 +1942,7 @@ struct Bf3SwfView::Impl {
 				break;
 			}
 			const ui::SwfSceneNode *k = node(c);
-			if (k != nullptr && k->clip_depth == 0) {
+			if (k != nullptr && k->clip_depth == 0 && !k->is_mask) {
 				count += drawables(c);
 			}
 		}
@@ -2207,8 +2077,10 @@ struct Bf3SwfView::Impl {
 			s.material = rs->material_create();
 			rs->material_set_shader(s.material, filter_shader);
 			rs->canvas_item_set_material(s.item, s.material);
-			std::vector<double> wx = clamp_kernel(box_kernel(double(f.blur_x) * kx, f.passes), stats.kernels_clamped);
-			std::vector<double> wy = clamp_kernel(box_kernel(double(f.blur_y) * ky, f.passes), stats.kernels_clamped);
+			const ui::SwfFilterKernel kernel = ui::swf_filter_kernel(f, kx, ky);
+			stats.kernels_clamped += kernel.clamped;
+			const std::vector<double> &wx = kernel.x;
+			const std::vector<double> &wy = kernel.y;
 			PackedFloat32Array ax;
 			PackedFloat32Array ay;
 			ax.resize(kKernelSlots);
@@ -2217,10 +2089,7 @@ struct Bf3SwfView::Impl {
 				ax.set(i, i < int32_t(wx.size()) ? float(wx[size_t(i)]) : 0.0f);
 				ay.set(i, i < int32_t(wy.size()) ? float(wy[size_t(i)]) : 0.0f);
 			}
-			const bool shadow = f.kind == ui::SwfFilterKind::DropShadow;
-			const double dx = shadow ? std::cos(double(f.angle)) * double(f.distance) * kx : 0.0;
-			const double dy = shadow ? std::sin(double(f.angle)) * double(f.distance) * ky : 0.0;
-			rs->material_set_param(s.material, "shift", Vector2(float(dx), float(dy)));
+			rs->material_set_param(s.material, "shift", Vector2(float(kernel.shift_x), float(kernel.shift_y)));
 			rs->material_set_param(s.material, "taps_x", int32_t(wx.size()));
 			rs->material_set_param(s.material, "taps_y", int32_t(wy.size()));
 			rs->material_set_param(s.material, "weights_x", ax);
@@ -2231,8 +2100,8 @@ struct Bf3SwfView::Impl {
 			rs->material_set_param(s.material, "knockout", f.knockout ? 1 : 0);
 			rs->material_set_param(s.material, "source", f.composite_source ? 1 : 0);
 			rs->material_set_param(s.material, "blur", f.kind == ui::SwfFilterKind::Blur ? 1 : 0);
-			r_c.margin_x += double(wx.size() / 2) + std::abs(dx) + 1.0;
-			r_c.margin_y += double(wy.size() / 2) + std::abs(dy) + 1.0;
+			r_c.margin_x += kernel.margin_x;
+			r_c.margin_y += kernel.margin_y;
 			r_c.stages.push_back(std::move(s));
 		}
 	}
@@ -2326,7 +2195,7 @@ struct Bf3SwfView::Impl {
 			}
 			std::vector<ui::SwfFilter> filters;
 			for (const ui::SwfFilter &f : n->filters) {
-				if (supported_filter(f)) {
+				if (ui::swf_filter_supported(f)) {
 					filters.push_back(f);
 				} else {
 					stats.unsupported_filters++;
@@ -2710,7 +2579,7 @@ struct Bf3SwfView::Impl {
 		stats.nodes_refreshed++;
 		if (rec.drawn && rec.canvas != nullptr) {
 			const bool rebuild_grid = rec.grid && [&] {
-				const GridWarp g = grid_for(*n);
+				const ui::SwfGridWarp g = grid_for(*n);
 				ui::SwfAffine to_owner;
 				grid_owner(*n, &to_owner);
 				return !g.active || to_owner != rec.built_to_owner || std::abs(g.sx - rec.built_scale_x) > 1e-4 ||

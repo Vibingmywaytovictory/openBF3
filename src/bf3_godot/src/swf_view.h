@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/core/result.h"
+#include "bf3/core/ui/swf_layer_plan.h"
 #include "bf3/core/ui/swf_scene.h"
 
 #include <godot_cpp/classes/image.hpp>
@@ -106,13 +107,13 @@ class Bf3SwfView : public godot::Node2D {
 	GDCLASS(Bf3SwfView, godot::Node2D)
 
 public:
-	static constexpr int32_t kMaxLayerSide = 4096;
+	static constexpr int32_t kMaxLayerSide = bf3::core::ui::kSwfMaxLayerSide;
 	static constexpr uint64_t kSpareSurfaceBytes = uint64_t(64) << 20;
 	static constexpr size_t kSpareSurfaces = 256;
 	static constexpr uint64_t kDormantSurfaceBytes = uint64_t(64) << 20;
 	static constexpr size_t kDormantItems = 2048;
 	static constexpr uint32_t kDormantSettleSyncs = 60;
-	static constexpr int32_t kMaxKernelTaps = 63;
+	static constexpr int32_t kMaxKernelTaps = bf3::core::ui::kSwfMaxKernelTaps;
 
 	Bf3SwfView();
 	~Bf3SwfView() override;
