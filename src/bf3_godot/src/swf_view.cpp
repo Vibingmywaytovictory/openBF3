@@ -383,6 +383,7 @@ Hom tilt_homography(const SwfTilt &p_tilt, double p_px, double p_py, const ui::S
 
 constexpr int32_t kLayerGranule = 32;
 constexpr real_t kWholePixelTolerance = 1e-3f;
+constexpr uint64_t kIdleArrayPasses = 30;
 
 int32_t layer_alloc(int32_t p_need) {
 	const int32_t grown = p_need + p_need / 8;
@@ -947,6 +948,7 @@ struct Canvas {
 	uint32_t moved_pieces = 0;
 	bool move_differs = false;
 	Vector2 move_delta;
+	bool arrays_released = false;
 
 	bool quad_ready() const { return !paged || shown_slot.has_value(); }
 	const Surface &final_surface() const { return stages.empty() ? content : stages.back().surface; }
@@ -986,6 +988,7 @@ struct NodeRec {
 	uint64_t parked = 0;
 	ui::SwfNodeId id = ui::kSwfNoNode;
 	bool hidden = false;
+	bool arrays_released = false;
 };
 
 struct Target {
@@ -2064,6 +2067,7 @@ struct Bf3SwfView::Impl {
 		const auto build_start = std::chrono::steady_clock::now();
 		stats.content_builds++;
 		r_rec.built = true;
+		r_rec.arrays_released = false;
 		r_rec.fingerprint = fingerprint;
 		r_rec.content_dirty = true;
 		r_rec.counts = BuildCounts();
@@ -2220,7 +2224,11 @@ struct Bf3SwfView::Impl {
 		}
 		const RID target = paged ? r_c.group : r_c.content.canvas;
 		for (const ui::SwfNodeId id : r_c.nodes) {
-			for (Piece &p : rec_for(id).pieces) {
+			NodeRec &rec = rec_for(id);
+			if (!paged && rec.arrays_released) {
+				restore_arrays(id, rec);
+			}
+			for (Piece &p : rec.pieces) {
 				if (p.parent != target) {
 					rs->canvas_item_set_parent(p.item, target);
 					p.parent = target;
@@ -3125,6 +3133,40 @@ struct Bf3SwfView::Impl {
 		}
 	}
 
+	void restore_arrays(ui::SwfNodeId p_id, NodeRec &r_rec) {
+		r_rec.built = false;
+		build(p_id, r_rec);
+		r_rec.content_dirty = false;
+		for (Piece &p : r_rec.pieces) {
+			p.applied.valid = p.applied.mode != -1;
+		}
+	}
+
+	void release_idle_arrays() {
+		Bf3UiPages *pages = Bf3UiPages::current();
+		if (pages == nullptr) {
+			return;
+		}
+		for (Canvas *c : order) {
+			if (!c->paged || c->arrays_released || c->render_dirty || c->settling || !c->shown_slot ||
+					pages->pass_serial() - c->fill_pass < kIdleArrayPasses) {
+				continue;
+			}
+			c->arrays_released = true;
+			for (const ui::SwfNodeId id : c->nodes) {
+				NodeRec &rec = rec_for(id);
+				for (Piece &p : rec.pieces) {
+					if (p.has_array) {
+						rs->canvas_item_clear(p.item);
+						p.has_array = false;
+						--g_counters.live_triangle_arrays;
+						rec.arrays_released = true;
+					}
+				}
+			}
+		}
+	}
+
 	void fill_layer(Canvas &r_c, const ui::SwfPageSlot &p_scratch) {
 		Bf3UiPages *pages = Bf3UiPages::current();
 		const ui::SwfPageSlot &result = *r_c.slot;
@@ -3151,10 +3193,15 @@ struct Bf3SwfView::Impl {
 		rs->canvas_item_set_visible(stage.item, true);
 		pages->note_fill(r_c.group, stage.item);
 		for (const ui::SwfNodeId id : r_c.nodes) {
-			for (Piece &p : rec_for(id).pieces) {
+			NodeRec &rec = rec_for(id);
+			if (rec.arrays_released) {
+				restore_arrays(id, rec);
+			}
+			for (Piece &p : rec.pieces) {
 				p.drawn_visible = p.applied.visible;
 			}
 		}
+		r_c.arrays_released = false;
 		r_c.visible_diffs = 0;
 		r_c.render_dirty = false;
 		r_c.fill_pass = pages->pass_serial();
@@ -3382,6 +3429,7 @@ struct Bf3SwfView::Impl {
 			render_dirty();
 			present();
 		}
+		release_idle_arrays();
 		stats.changes = changes_count;
 		if (settle_syncs < Bf3SwfView::kDormantSettleSyncs && ++settle_syncs == Bf3SwfView::kDormantSettleSyncs) {
 			trim_dormant();

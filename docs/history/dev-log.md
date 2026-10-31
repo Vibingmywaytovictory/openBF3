@@ -2872,3 +2872,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Leaf filter layers draw through S and R with no viewport of their own, empty layers take no surface; a page-only screen's open makes only its root viewport.
 * Hidden and closed Bf3UiScreens views hold no page slots; hiding and showing a kept view costs no pass.
 * A paged layer moved by whole window pixels moves only its quad, no S pass.
+* An idle paged layer clears its text arrays after 30 passes and re-emits them on its next pass; 29 arrays fall to 1 on ingamemenump in the census.

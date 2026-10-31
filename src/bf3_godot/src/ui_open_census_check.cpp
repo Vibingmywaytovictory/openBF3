@@ -440,11 +440,26 @@ void Bf3UiOpenCensusCheck::census_page_life(Bf3UiPages &r_pages) {
 	add("a fractional move takes a pass", fractional.first == 1 && fractional.second == 0,
 			bf3::core::fmt("%llu pass(es), %u quad move(s)", (unsigned long long)fractional.first, fractional.second));
 	const uint64_t before_text = passes();
-	const bf3::core::Status text = view->scene()->set_text(layer->path, "CENSUS");
+	const bf3::core::Status text = view->scene()->set_text(layer->path, kUiOpenCensusLongText);
 	view->sync();
 	settle_paged_view(r_pages, *view);
 	add("a changed layer fills again", text.ok() && passes() == before_text + 1,
 			bf3::core::fmt("%llu pass(es)", (unsigned long long)(passes() - before_text)));
+	const uint64_t arrays_filled = Bf3SwfView::counters().live_triangle_arrays;
+	for (uint32_t i = 0; i < kUiOpenCensusIdlePasses; ++i) {
+		r_pages.end_pass();
+		view->sync();
+	}
+	const uint64_t arrays_idle = Bf3SwfView::counters().live_triangle_arrays;
+	add("an idle paged text gives its arrays back", arrays_idle < arrays_filled,
+			bf3::core::fmt("%llu arrays after its fill, %llu idle", (unsigned long long)arrays_filled,
+					(unsigned long long)arrays_idle));
+	const uint64_t before_refill = passes();
+	const auto refill = moved_by(kUiOpenCensusFractionalMove);
+	const uint64_t arrays_after = Bf3SwfView::counters().live_triangle_arrays;
+	add("and takes them again for its next pass", refill.first == 1 && arrays_after == arrays_idle + 1,
+			bf3::core::fmt("%llu pass(es), %llu arrays", (unsigned long long)(passes() - before_refill),
+					(unsigned long long)arrays_after));
 	remove_child(view);
 	memdelete(view);
 }
