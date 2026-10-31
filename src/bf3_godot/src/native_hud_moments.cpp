@@ -53,6 +53,15 @@ constexpr uint32_t kScanMaxFloors = 64;
 constexpr float kFloorNormalY = 0.7f;
 constexpr float kNearStep = 0.5f;
 constexpr float kNearRadius = 8.0f;
+constexpr int64_t kRepeatBytesListed = 16;
+
+std::string repeat_byte_text(int64_t p_index, int64_t p_width, int64_t p_layer_bytes, uint8_t p_first, uint8_t p_now) {
+	const bool in_layer = p_index < p_layer_bytes;
+	const int64_t pixel = in_layer ? p_index / 4 : p_index - p_layer_bytes;
+	const std::string channel = in_layer ? std::string(1, "rgba"[p_index % 4]) : std::string("transmittance");
+	return "; " + channel + " at " + std::to_string(pixel % p_width) + "," + std::to_string(pixel / p_width) + ": " +
+			std::to_string(int(p_first)) + " then " + std::to_string(int(p_now));
+}
 
 struct MomentFloor {
 	sim::Vec3 at{};
@@ -634,11 +643,20 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 				if (!fresh) {
 					const int64_t n = std::min(first->second.size(), bytes.size());
 					int64_t differ = std::max(first->second.size(), bytes.size()) - n;
+					std::string where;
 					for (int64_t i = 0; i < n; ++i) {
-						differ += first->second[i] != bytes[i] ? 1 : 0;
+						if (first->second[i] != bytes[i]) {
+							++differ;
+							if (differ <= kRepeatBytesListed) {
+								where += repeat_byte_text(
+										i, layer->get_width(), layer->get_data().size(), first->second[i], bytes[i]);
+							}
+						}
 					}
 					row(std::string(m.id) + ".repeat", differ == 0,
-							std::to_string(differ) + " of " + std::to_string(bytes.size()) + " HUD layer and transmittance bytes differ from the first capture of " + m.id);
+							std::to_string(differ) + " of " + std::to_string(bytes.size()) +
+									" HUD layer and transmittance bytes differ from the first capture of " + m.id +
+									where);
 				}
 			}
 			m.group->check(*this, r_session, r_hud, m.moment, ok ? layer : Ref<Image>());
