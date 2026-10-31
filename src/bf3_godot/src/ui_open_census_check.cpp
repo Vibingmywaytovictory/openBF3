@@ -219,9 +219,11 @@ void Bf3UiOpenCensusCheck::census_filter_swap(const std::string &p_partition) {
 		return;
 	}
 	view->sync();
-	const ui::SwfLayerWalk walk = ui::swf_layer_walk(*view->scene(), ui::SwfLayerWalkOptions{});
+	ui::SwfLayerWalkOptions walk_options;
+	walk_options.fonts = Bf3UiAssets::current()->swf_fonts();
+	const ui::SwfLayerWalk walk = ui::swf_layer_walk(*view->scene(), walk_options);
 	const auto layer = std::find_if(walk.layers.begin(), walk.layers.end(),
-			[](const ui::SwfLayerWalkNode &p_l) { return p_l.kind == ui::SwfLayerKind::Filter; });
+			[](const ui::SwfLayerWalkNode &p_l) { return p_l.kind == ui::SwfLayerKind::Filter && p_l.has_nodes; });
 	if (layer == walk.layers.end()) {
 		add("a swapped filter gets its viewports", false, leaf + " has no filter layer");
 		remove_child(view);
@@ -248,6 +250,256 @@ void Bf3UiOpenCensusCheck::census_filter_swap(const std::string &p_partition) {
 			bf3::core::fmt("%llu link(s)", (unsigned long long)links));
 	remove_child(view);
 	memdelete(view);
+}
+
+void Bf3UiOpenCensusCheck::census_paged_screens() {
+	Bf3UiPages *pages = memnew(Bf3UiPages);
+	add_child(pages);
+	uint32_t page_only = 0;
+	uint32_t paged_total = 0;
+	uint32_t fills_total = 0;
+	uint32_t worst_passes = 0;
+	std::string root_only_differs;
+	std::string surfaces_differ;
+	std::string slots_differ;
+	std::string still_pending;
+	std::string redraws;
+	uint64_t slots_after = 0;
+	uint64_t creates_total = 0;
+	for (const std::string &partition : partitions_) {
+		const std::string leaf = ui::ui_data_category_leaf(partition);
+		const SwfViewCounters before = Bf3SwfView::counters();
+		const UiPagesCounters pages_before = pages->counters();
+		Bf3SwfView *view = memnew(Bf3SwfView);
+		view->set_playing(false);
+		view->set_process(false);
+		add_child(view);
+		if (const bf3::core::Status opened = view->open(ui::hud_screen_movie(leaf)); !opened) {
+			add("a paged screen opens", false, opened.error().message);
+			remove_child(view);
+			memdelete(view);
+			continue;
+		}
+		view->sync();
+		const SwfViewCounters synced = Bf3SwfView::counters();
+		ui::SwfLayerWalkOptions walk_options;
+		walk_options.fonts = Bf3UiAssets::current()->swf_fonts();
+		const ui::SwfLayerWalk walk = ui::swf_layer_walk(*view->scene(), walk_options);
+		const ui::SwfLayerPlan plan = ui::swf_layer_plan(walk, view->target_size().x, view->target_size().y);
+		uint64_t own_surfaces = 0;
+		for (size_t i = 0; i < plan.layers.size(); ++i) {
+			const ui::SwfPlannedLayer &l = plan.layers[i];
+			if (l.klass() == ui::SwfLayerClass::OwnSurface || l.klass() == ui::SwfLayerClass::Clip) {
+				own_surfaces += l.kind == ui::SwfLayerKind::Mask ? 2u : 1u + l.filters;
+			}
+		}
+		const uint64_t creates = synced.viewport_creates - before.viewport_creates;
+		creates_total += creates;
+		const uint64_t surfaces = synced.live_surfaces - before.live_surfaces;
+		if (surfaces != own_surfaces + 1) {
+			surfaces_differ += bf3::core::fmt(" %s: %llu live, plan %llu;", leaf.c_str(), (unsigned long long)surfaces,
+					(unsigned long long)(own_surfaces + 1));
+		}
+		if (plan.counts.pages != 0 && own_surfaces == 0) {
+			++page_only;
+			if (creates != 1 || synced.viewport_resizes - before.viewport_resizes != 1) {
+				root_only_differs +=
+						bf3::core::fmt(" %s: %llu creates, %llu resizes;", leaf.c_str(), (unsigned long long)creates,
+								(unsigned long long)(synced.viewport_resizes - before.viewport_resizes));
+			}
+		}
+		const uint64_t slots = pages->counters().live_slots - pages_before.live_slots;
+		if (slots != plan.counts.pages || view->paged_layers() != plan.counts.pages) {
+			slots_differ += bf3::core::fmt(" %s: %llu slots, %u paged, plan %u;", leaf.c_str(),
+					(unsigned long long)slots, view->paged_layers(), plan.counts.pages);
+		}
+		paged_total += view->paged_layers();
+		uint32_t passes = 0;
+		uint32_t fills = view->stats().page_fills;
+		for (uint32_t i = 0; i < kUiOpenCensusMaxPasses && view->page_fills_pending(); ++i) {
+			pages->end_pass();
+			view->sync();
+			fills += view->stats().page_fills;
+			++passes;
+		}
+		worst_passes = std::max(worst_passes, passes);
+		fills_total += fills;
+		if (view->page_fills_pending()) {
+			still_pending += " " + leaf;
+		}
+		const uint64_t settled_passes = pages->counters().passes;
+		pages->end_pass();
+		view->sync();
+		pages->end_pass();
+		view->sync();
+		if (pages->counters().passes != settled_passes) {
+			redraws += " " + leaf;
+		}
+		remove_child(view);
+		memdelete(view);
+		slots_after = std::max(slots_after, pages->counters().live_slots);
+	}
+	add("a page-only screen makes only its root viewport", page_only != 0 && root_only_differs.empty(),
+			root_only_differs.empty() ? bf3::core::fmt("%u screens, %llu viewports over all 30", page_only,
+												(unsigned long long)creates_total)
+									  : root_only_differs);
+	add("no surface for an empty layer", surfaces_differ.empty(),
+			surfaces_differ.empty() ? "surfaces equal the plan on every screen" : surfaces_differ);
+	add("the renderer pages what the plan pages", paged_total != 0 && slots_differ.empty(),
+			slots_differ.empty() ? bf3::core::fmt("%u paged layers", paged_total) : slots_differ);
+	add("every layer fills within the passes", still_pending.empty() && fills_total >= paged_total,
+			still_pending.empty() ? bf3::core::fmt("%u fills, worst %u pass(es)", fills_total, worst_passes)
+								  : still_pending);
+	add("a settled screen asks for no pass", redraws.empty(), redraws.empty() ? "no pass on later syncs" : redraws);
+	add("a freed view gives its slots back", slots_after == 0,
+			bf3::core::fmt("%llu slots left", (unsigned long long)slots_after));
+	census_page_life(*pages);
+	census_page_overflow(*pages);
+	remove_child(pages);
+	memdelete(pages);
+}
+
+Bf3SwfView *Bf3UiOpenCensusCheck::open_paged_view(const std::string &p_leaf) {
+	Bf3SwfView *view = memnew(Bf3SwfView);
+	view->set_playing(false);
+	view->set_process(false);
+	add_child(view);
+	if (const bf3::core::Status opened = view->open(ui::hud_screen_movie(p_leaf)); !opened) {
+		add("a paged screen opens", false, opened.error().message);
+		remove_child(view);
+		memdelete(view);
+		return nullptr;
+	}
+	return view;
+}
+
+void Bf3UiOpenCensusCheck::settle_paged_view(Bf3UiPages &r_pages, Bf3SwfView &r_view) {
+	for (uint32_t i = 0; i < kUiOpenCensusMaxPasses && r_view.page_fills_pending(); ++i) {
+		r_pages.end_pass();
+		r_view.sync();
+	}
+}
+
+void Bf3UiOpenCensusCheck::census_page_life(Bf3UiPages &r_pages) {
+	Bf3SwfView *view = open_paged_view(ui::ui_data_category_leaf(kIngameMenuPartition));
+	if (view == nullptr) {
+		return;
+	}
+	const auto passes = [&r_pages] { return r_pages.counters().passes; };
+	view->sync();
+	const uint32_t paged = view->paged_layers();
+	add("a new layer's quad waits for its first write",
+			paged != 0 && view->paged_quads_shown() == 0 && view->page_fills_pending(),
+			bf3::core::fmt("%u paged, %u shown after the fill frame", paged, view->paged_quads_shown()));
+	settle_paged_view(r_pages, *view);
+	add("and shows on the frame after it", view->paged_quads_shown() == paged,
+			bf3::core::fmt("%u of %u shown", view->paged_quads_shown(), paged));
+	ui::SwfLayerWalkOptions walk_options;
+	walk_options.fonts = Bf3UiAssets::current()->swf_fonts();
+	const ui::SwfLayerWalk walk = ui::swf_layer_walk(*view->scene(), walk_options);
+	const auto layer = std::find_if(walk.layers.begin(), walk.layers.end(), [&view](const ui::SwfLayerWalkNode &p_l) {
+		const ui::SwfSceneNode *n = view->scene()->node(p_l.owner);
+		return p_l.route == ui::SwfLayerClass::Page && p_l.has_nodes && n != nullptr &&
+				n->kind == ui::SwfNodeKind::EditText;
+	});
+	if (layer == walk.layers.end()) {
+		add("a blinking layer keeps its texels", false, "no paged text layer");
+		remove_child(view);
+		memdelete(view);
+		return;
+	}
+	const uint64_t before_blink = passes();
+	const bf3::core::Status hide = view->scene()->set_visible(layer->path, false);
+	view->sync();
+	settle_paged_view(r_pages, *view);
+	const uint32_t shown_hidden = view->paged_quads_shown();
+	const bf3::core::Status show = view->scene()->set_visible(layer->path, true);
+	view->sync();
+	settle_paged_view(r_pages, *view);
+	add("a blinking layer keeps its texels",
+			hide.ok() && show.ok() && passes() == before_blink && shown_hidden + 1 == paged &&
+					view->paged_quads_shown() == paged,
+			bf3::core::fmt("%s: %llu pass(es), %u then %u of %u shown", layer->path.c_str(),
+					(unsigned long long)(passes() - before_blink), shown_hidden, view->paged_quads_shown(), paged));
+	const uint64_t before_text = passes();
+	const bf3::core::Status text = view->scene()->set_text(layer->path, "CENSUS");
+	view->sync();
+	settle_paged_view(r_pages, *view);
+	add("a changed layer fills again", text.ok() && passes() == before_text + 1,
+			bf3::core::fmt("%llu pass(es)", (unsigned long long)(passes() - before_text)));
+	remove_child(view);
+	memdelete(view);
+}
+
+void Bf3UiOpenCensusCheck::census_page_overflow(Bf3UiPages &r_pages) {
+	std::vector<Bf3SwfView *> views;
+	const auto sync_all = [&views] {
+		for (Bf3SwfView *v : views) {
+			v->sync();
+		}
+	};
+	const auto pending = [&views] {
+		return std::any_of(views.begin(), views.end(), [](const Bf3SwfView *p_v) { return p_v->page_fills_pending(); });
+	};
+	const auto settle_all = [&] {
+		for (uint32_t i = 0; i < kUiOpenCensusMaxPasses && pending(); ++i) {
+			r_pages.end_pass();
+			sync_all();
+		}
+	};
+	const auto stages_without = [&views] {
+		uint32_t without = 0;
+		for (const Bf3SwfView *v : views) {
+			without += v->filter_stages_without_viewport();
+		}
+		return without;
+	};
+	for (const std::string &partition : partitions_) {
+		if (Bf3SwfView *v = open_paged_view(ui::ui_data_category_leaf(partition))) {
+			views.push_back(v);
+		}
+	}
+	sync_all();
+	settle_all();
+	ui::SwfPageSizes small_scratch;
+	small_scratch.result_width = 2048;
+	small_scratch.result_height = 1024;
+	small_scratch.scratch_width = kUiOpenCensusSmallPage;
+	small_scratch.scratch_height = kUiOpenCensusSmallPage / 2;
+	const UiPagesCounters before_small = r_pages.counters();
+	r_pages.use_sizes(small_scratch);
+	sync_all();
+	settle_all();
+	const UiPagesCounters after_small = r_pages.counters();
+	add("remade pages refill every view, over several passes",
+			after_small.passes - before_small.passes > 1 && !pending() && stages_without() == 0,
+			bf3::core::fmt("%llu pass(es) for %zu views with S %dx%d",
+					(unsigned long long)(after_small.passes - before_small.passes), views.size(),
+					small_scratch.scratch_width, small_scratch.scratch_height));
+	add("a layer over S falls back to its own surface",
+			after_small.own_surface_fallbacks > before_small.own_surface_fallbacks,
+			bf3::core::fmt("%llu fallback(s)",
+					(unsigned long long)(after_small.own_surface_fallbacks - before_small.own_surface_fallbacks)));
+	ui::SwfPageSizes small_result;
+	small_result.result_width = kUiOpenCensusSmallPage;
+	small_result.result_height = kUiOpenCensusSmallPage / 2;
+	small_result.scratch_width = 1024;
+	small_result.scratch_height = 512;
+	r_pages.use_sizes(small_result);
+	sync_all();
+	settle_all();
+	const UiPagesCounters after_full = r_pages.counters();
+	add("a full R falls back to own surfaces",
+			after_full.own_surface_fallbacks > after_small.own_surface_fallbacks && stages_without() == 0 && !pending(),
+			bf3::core::fmt("%llu fallback(s), %llu px of %d used",
+					(unsigned long long)(after_full.own_surface_fallbacks - after_small.own_surface_fallbacks),
+					(unsigned long long)after_full.used_px, small_result.result_width * small_result.result_height));
+	for (Bf3SwfView *v : views) {
+		remove_child(v);
+		memdelete(v);
+	}
+	add("and every slot comes back", r_pages.counters().live_slots == 0,
+			bf3::core::fmt("%llu slots left", (unsigned long long)r_pages.counters().live_slots));
 }
 
 void Bf3UiOpenCensusCheck::census_pages() {
@@ -287,6 +539,7 @@ void Bf3UiOpenCensusCheck::finish() {
 	done_ = true;
 	set_process(false);
 	census_pages();
+	census_paged_screens();
 	census_hidden_screen(std::string(kIngameMenuPartition), {});
 	census_hidden_screen(std::string(kSpawnScreenPcPartition), kSpawnScreenOverviewPath);
 	census_filter_swap(std::string(kIngameMenuPartition));

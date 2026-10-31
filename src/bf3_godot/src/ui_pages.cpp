@@ -85,15 +85,25 @@ void Bf3UiPages::free_pages() {
 	pass_requested_ = false;
 }
 
+void Bf3UiPages::use_sizes(const ui::SwfPageSizes &p_sizes) {
+	sizes_fixed_ = true;
+	make_pages(p_sizes);
+}
+
 void Bf3UiPages::ensure(Vector2i p_window) {
 	const ui::SwfPageSizes want = ui::swf_page_sizes(p_window.x, p_window.y);
-	if (scratch_viewport_.is_valid() && want.result_width == sizes_.result_width &&
-			want.result_height == sizes_.result_height && want.scratch_width == sizes_.scratch_width &&
-			want.scratch_height == sizes_.scratch_height) {
+	if (sizes_fixed_ ||
+			(scratch_viewport_.is_valid() && want.result_width == sizes_.result_width &&
+					want.result_height == sizes_.result_height && want.scratch_width == sizes_.scratch_width &&
+					want.scratch_height == sizes_.scratch_height)) {
 		return;
 	}
+	make_pages(want);
+}
+
+void Bf3UiPages::make_pages(const ui::SwfPageSizes &p_sizes) {
 	free_pages();
-	sizes_ = want;
+	sizes_ = p_sizes;
 	const RID owner = is_inside_tree() && get_viewport() != nullptr ? get_viewport()->get_viewport_rid() : RID();
 	result_viewport_ = make_page_viewport(rs_, RenderingServer::VIEWPORT_MSAA_DISABLED,
 			RenderingServer::VIEWPORT_CLEAR_ONLY_NEXT_FRAME, sizes_.result_width, sizes_.result_height, owner);

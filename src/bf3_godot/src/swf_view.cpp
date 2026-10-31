@@ -2,6 +2,7 @@
 
 #include "godot_util.h"
 #include "ui_assets.h"
+#include "ui_pages.h"
 #include "ui_stage.h"
 #include "ui_textures.h"
 
@@ -858,6 +859,7 @@ struct Piece {
 	int32_t index = -1;
 	Applied applied;
 	bool has_array = false;
+	bool drawn_visible = true;
 };
 
 enum class CanvasKind : uint8_t {
@@ -882,6 +884,7 @@ struct Stage {
 	FilterMaterialKey material_key{};
 	StageParams params;
 	bool params_set = false;
+	RID parent;
 };
 
 struct Canvas {
@@ -930,7 +933,18 @@ struct Canvas {
 	uint64_t parked = 0;
 	bool hidden = false;
 	ui::SwfLayerClass route = ui::SwfLayerClass::OwnSurface;
+	bool made = false;
+	bool paged = false;
+	bool page_refused = false;
+	RID group;
+	RID group_parent;
+	std::optional<ui::SwfPageSlot> slot;
+	std::optional<ui::SwfPageSlot> shown_slot;
+	bool settling = false;
+	uint64_t fill_pass = 0;
+	int32_t visible_diffs = 0;
 
+	bool quad_ready() const { return !paged || shown_slot.has_value(); }
 	const Surface &final_surface() const { return stages.empty() ? content : stages.back().surface; }
 };
 
@@ -1061,6 +1075,8 @@ struct Bf3SwfView::Impl {
 	RID owner_viewport;
 	bool structure_dirty = true;
 	uint32_t items_created = 0;
+	uint64_t pages_generation = 0;
+	bool revealed = false;
 	SwfViewStats stats;
 
 	Impl() {
@@ -1186,15 +1202,55 @@ struct Bf3SwfView::Impl {
 		free_item(p_piece.item);
 	}
 
+	void forget_in_pass(RID p_item) {
+		if (Bf3UiPages *pages = Bf3UiPages::current()) {
+			pages->forget(p_item);
+		}
+	}
+
+	void release_slots(Canvas &r_c) {
+		Bf3UiPages *pages = Bf3UiPages::current();
+		if (r_c.settling && r_c.group.is_valid()) {
+			rs->canvas_item_set_visible(r_c.group, false);
+			forget_in_pass(r_c.group);
+			for (const Stage &s : r_c.stages) {
+				rs->canvas_item_set_visible(s.item, false);
+				forget_in_pass(s.item);
+			}
+		}
+		if (pages != nullptr && pages->generation() == pages_generation) {
+			if (r_c.slot) {
+				pages->release_result(*r_c.slot);
+			}
+			if (r_c.shown_slot && r_c.shown_slot != r_c.slot) {
+				pages->release_result(*r_c.shown_slot);
+			}
+		}
+		r_c.slot.reset();
+		r_c.shown_slot.reset();
+		r_c.settling = false;
+		r_c.quad_origin = Vector2i(-1, -1);
+		r_c.quad_size = Vector2i(-1, -1);
+		r_c.render_dirty = true;
+		r_c.bounds_dirty = true;
+	}
+
 	void free_canvas(Canvas &r_c) {
+		release_slots(r_c);
 		for (Stage &s : r_c.stages) {
 			if (s.item.is_valid()) {
+				forget_in_pass(s.item);
 				free_item(s.item);
 			}
 			release_filter_material(rs, s.material_key);
 			retire(s.surface, RenderingServer::VIEWPORT_MSAA_DISABLED);
 		}
 		r_c.stages.clear();
+		if (r_c.group.is_valid()) {
+			forget_in_pass(r_c.group);
+			free_item(r_c.group);
+			r_c.group = RID();
+		}
 		if (r_c.quad.is_valid()) {
 			free_item(r_c.quad);
 		}
@@ -1279,6 +1335,7 @@ struct Bf3SwfView::Impl {
 		}
 		auto handle = canvases.extract(p_it);
 		Canvas &c = handle.mapped();
+		release_slots(c);
 		for (const RID vp : { c.content.viewport, c.alpha.viewport }) {
 			if (vp.is_valid()) {
 				rs->viewport_set_parent_viewport(vp, RID());
@@ -2043,7 +2100,8 @@ struct Bf3SwfView::Impl {
 		}
 		Canvas &c = canvases[key];
 		c.owner_path = owner_path;
-		const bool fresh = !c.content.canvas.is_valid();
+		const bool fresh = !c.made;
+		c.made = true;
 		c.changed = fresh || c.parent != p_parent || c.kind != p_kind;
 		c.kind = p_kind;
 		c.owner = p_owner;
@@ -2070,8 +2128,8 @@ struct Bf3SwfView::Impl {
 			if (p_kind == CanvasKind::Root) {
 				c.content.create(rs, target_size, owner_viewport, msaa);
 			} else {
-				c.content.create_canvas_only(rs);
 				if (p_kind == CanvasKind::Mask) {
+					c.content.create_canvas_only(rs);
 					c.alpha.create_canvas_only(rs);
 				}
 				c.quad = make_item();
@@ -2107,8 +2165,80 @@ struct Bf3SwfView::Impl {
 		return c;
 	}
 
+	void ensure_canvas(Canvas &r_c) {
+		if (!r_c.content.canvas.is_valid()) {
+			r_c.content.create_canvas_only(rs);
+		}
+	}
+
+	bool pages_usable() const {
+		return !explicit_size && msaa == RenderingServer::VIEWPORT_MSAA_4X && Bf3UiPages::current() != nullptr;
+	}
+
+	void switch_route(Canvas &r_c, bool p_paged) {
+		if (p_paged) {
+			for (Stage &s : r_c.stages) {
+				retire(s.surface, RenderingServer::VIEWPORT_MSAA_DISABLED);
+			}
+			retire(r_c.content, msaa);
+			r_c.linked_parent = RID();
+			r_c.linked_stages = size_t(-1);
+			r_c.quad_texture = RID();
+		} else {
+			release_slots(r_c);
+		}
+		r_c.paged = p_paged;
+		r_c.quad_origin = Vector2i(-1, -1);
+		r_c.quad_size = Vector2i(-1, -1);
+		r_c.render_dirty = true;
+		r_c.bounds_dirty = true;
+		r_c.changed = true;
+	}
+
+	void place_layer(Canvas &r_c) {
+		const bool paged = r_c.route == ui::SwfLayerClass::Page && !r_c.page_refused && pages_usable();
+		if (paged != r_c.paged) {
+			switch_route(r_c, paged);
+		}
+		Bf3UiPages *pages = Bf3UiPages::current();
+		if (paged) {
+			if (!r_c.group.is_valid()) {
+				r_c.group = make_item();
+				rs->canvas_item_set_visible(r_c.group, false);
+			}
+			if (r_c.group_parent != pages->scratch_canvas()) {
+				rs->canvas_item_set_parent(r_c.group, pages->scratch_canvas());
+				r_c.group_parent = pages->scratch_canvas();
+			}
+		} else {
+			ensure_canvas(r_c);
+		}
+		const RID target = paged ? r_c.group : r_c.content.canvas;
+		for (const ui::SwfNodeId id : r_c.nodes) {
+			for (Piece &p : rec_for(id).pieces) {
+				if (p.parent != target) {
+					rs->canvas_item_set_parent(p.item, target);
+					p.parent = target;
+					r_c.changed = true;
+				}
+			}
+		}
+		for (Stage &s : r_c.stages) {
+			if (!paged && !s.surface.canvas.is_valid()) {
+				s.surface.create_canvas_only(rs);
+			}
+			const RID stage_parent = paged ? pages->result_canvas() : s.surface.canvas;
+			if (s.parent != stage_parent) {
+				rs->canvas_item_set_parent(s.item, stage_parent);
+				rs->canvas_item_set_visible(s.item, !paged);
+				s.parent = stage_parent;
+			}
+		}
+	}
+
 	void place_quad(Canvas &r_c) {
 		Canvas &p = *r_c.parent;
+		ensure_canvas(p);
 		const int32_t index = p.next_index++;
 		if (r_c.quad_parent != p.content.canvas) {
 			rs->canvas_item_set_parent(r_c.quad, p.content.canvas);
@@ -2133,6 +2263,7 @@ struct Bf3SwfView::Impl {
 			return;
 		}
 		for (Stage &s : r_c.stages) {
+			forget_in_pass(s.item);
 			free_item(s.item);
 			release_filter_material(rs, s.material_key);
 			retire(s.surface, RenderingServer::VIEWPORT_MSAA_DISABLED);
@@ -2148,9 +2279,7 @@ struct Bf3SwfView::Impl {
 		const double ky = fit.scale_y;
 		for (const ui::SwfFilter &f : p_filters) {
 			Stage s;
-			s.surface.create_canvas_only(rs);
 			s.item = make_item();
-			rs->canvas_item_set_parent(s.item, s.surface.canvas);
 			rs->canvas_item_set_default_texture_filter(s.item, RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR);
 			++items_created;
 			const ui::SwfFilterKernel kernel = ui::swf_filter_kernel(f, kx, ky);
@@ -2219,13 +2348,12 @@ struct Bf3SwfView::Impl {
 		r_rec.in_alpha = p_alpha;
 		r_rec.drawn = true;
 		r_rec.additive = p_additive;
-		const RID target = p_alpha ? r_c.alpha.canvas : r_c.content.canvas;
 		(p_alpha ? r_c.alpha_nodes : r_c.nodes).push_back(p_id);
 		for (Piece &p : r_rec.pieces) {
 			const int32_t index = p_alpha ? r_c.next_alpha_index++ : r_c.next_index++;
-			if (p.parent != target) {
-				rs->canvas_item_set_parent(p.item, target);
-				p.parent = target;
+			if (p_alpha && p.parent != r_c.alpha.canvas) {
+				rs->canvas_item_set_parent(p.item, r_c.alpha.canvas);
+				p.parent = r_c.alpha.canvas;
 				r_c.changed = true;
 			}
 			if (p.index != index) {
@@ -2319,6 +2447,7 @@ struct Bf3SwfView::Impl {
 	};
 
 	void plan_target(ui::SwfNodeId p_id, const std::string &p_renderer, Canvas &r_canvas) {
+		ensure_canvas(r_canvas);
 		Target &t = targets[p_id];
 		const ui::SwfSceneNode &n = *node(p_id);
 		t.node = p_id;
@@ -2455,7 +2584,9 @@ struct Bf3SwfView::Impl {
 		const ui::SwfLayerWalk walk = ui::swf_walk_layers(*scene, walk_options, planner);
 		for (size_t i = 0; i < walk.layers.size(); ++i) {
 			planner.layers[i]->route = walk.layers[i].route;
+			place_layer(*planner.layers[i]);
 		}
+		place_layer(root);
 		for (auto it = recs.begin(); it != recs.end();) {
 			if (node(it->first) == nullptr) {
 				park_rec(std::move(it->second));
@@ -2629,13 +2760,27 @@ struct Bf3SwfView::Impl {
 			}
 			const bool visible = rec.in_alpha || n->world_visible;
 			bool changed = false;
+			bool blinked = false;
 			for (Piece &p : rec.pieces) {
 				const int32_t flags = (p.wrap ? kFlagWrap : 0) | (p.additive ? kFlagAdditive : 0);
-				changed = apply_piece(p, xf, h, cmul, cadd, flags, visible) || changed;
+				const Applied before = p.applied;
+				const bool piece_changed = apply_piece(p, xf, h, cmul, cadd, flags, visible);
+				const bool blink = piece_changed && c.paged && before.valid && before.visible != visible &&
+						before.xform == xf && before.h == h && before.mul == cmul && before.add == cadd &&
+						before.flags == flags && before.mode == p.mode && before.uv == p.uv && before.inv == p.inv;
+				if (blink) {
+					c.visible_diffs += visible != p.drawn_visible ? 1 : -1;
+					blinked = true;
+				} else {
+					changed = changed || piece_changed;
+				}
 			}
 			if (changed || rec.content_dirty) {
 				rec.content_dirty = false;
 				mark(&c);
+			} else if (blinked) {
+				c.bounds_dirty = true;
+				mark(c.parent);
 			}
 		}
 		if (rec.layer != nullptr && rec.layer->parent != nullptr) {
@@ -2644,7 +2789,8 @@ struct Bf3SwfView::Impl {
 			const Hom h = l.kind == CanvasKind::Filter ? tilt_chain(p_id, p.tilt_floor) : Hom{};
 			const ui::SwfColorXform cx = l.kind == CanvasKind::Filter || l.kind == CanvasKind::Blend ? relative_color(p_id, p.color_floor) : ui::SwfColorXform{};
 			const int32_t flags = l.additive ? kFlagAdditive : 0;
-			if (apply_quad(l.quad, l.quad_applied, Transform2D(), h, cx, flags, n->world_visible && l.has_content)) {
+			if (apply_quad(l.quad, l.quad_applied, Transform2D(), h, cx, flags,
+						n->world_visible && l.has_content && l.quad_ready())) {
 				mark(&p);
 			}
 		}
@@ -2745,49 +2891,14 @@ struct Bf3SwfView::Impl {
 				}
 			}
 			c.extent = size;
-			const RID final_texture = c.final_surface().texture;
-			const bool kept = c.quad_size.x > 0 && !c.has_content;
-			if (kept) {
-				origin = c.quad_origin;
+			if (c.paged && !update_page_layer(c, origin, size)) {
+				c.page_refused = true;
+				Bf3UiPages::current()->note_own_surface_fallback();
+				place_layer(c);
+				c.changed = false;
 			}
-			const bool fits = kept || (c.quad_size.x > 0 && layer_fits(c.size, size));
-			const bool realloc = !fits || !final_texture.is_valid() || final_texture != c.quad_texture;
-			if (realloc) {
-				if (!fits) {
-					c.size = Vector2i(layer_alloc(size.x), layer_alloc(size.y));
-				}
-				bool swapped = take(c.content, c.size, msaa);
-				if (c.alpha.canvas.is_valid() && take(c.alpha, c.size, msaa)) {
-					swapped = true;
-					rs->material_set_param(c.quad_material, "mask_tex", c.alpha.texture);
-				}
-				RID input = c.content.texture;
-				for (Stage &s : c.stages) {
-					swapped = take(s.surface, c.size, RenderingServer::VIEWPORT_MSAA_DISABLED) || swapped;
-					rs->canvas_item_clear(s.item);
-					rs->canvas_item_add_texture_rect(s.item, Rect2(0.0f, 0.0f, real_t(c.size.x), real_t(c.size.y)), input);
-					input = s.surface.texture;
-				}
-				if (swapped) {
-					c.linked_parent = RID();
-					relink = true;
-				}
-				c.quad_texture = c.final_surface().texture;
-			}
-			if (realloc || origin != c.quad_origin) {
-				c.origin = origin;
-				const Transform2D shift(1.0f, 0.0f, 0.0f, 1.0f, real_t(-origin.x), real_t(-origin.y));
-				rs->viewport_set_canvas_transform(c.content.viewport, c.content.canvas, shift);
-				if (c.alpha.viewport.is_valid()) {
-					rs->viewport_set_canvas_transform(c.alpha.viewport, c.alpha.canvas, shift);
-				}
-				rs->canvas_item_clear(c.quad);
-				rs->canvas_item_add_texture_rect(c.quad,
-						Rect2(real_t(origin.x), real_t(origin.y), real_t(c.size.x), real_t(c.size.y)), c.quad_texture);
-				c.quad_origin = origin;
-				c.quad_size = c.size;
-				c.render_dirty = true;
-				mark(c.parent);
+			if (!c.paged) {
+				update_own_layer(c, origin, size, relink);
 			}
 			const bool resampled = c.kind == CanvasKind::Filter && !tilt_chain(c.owner, c.parent->tilt_floor).identity;
 			const int32_t filter = resampled ? 1 : 0;
@@ -2797,21 +2908,234 @@ struct Bf3SwfView::Impl {
 				c.quad_filter = filter;
 				mark(c.parent);
 			}
-			const ui::SwfSceneNode *owner_node = node(c.owner);
-			bool quad_changed = false;
-			if (c.kind == CanvasKind::Mask) {
-				quad_changed = apply_quad(c.quad, c.quad_applied, Transform2D(), Hom{}, ui::SwfColorXform{}, 0, c.has_content);
-			} else if (owner_node != nullptr) {
-				const Hom h = c.kind == CanvasKind::Filter ? tilt_chain(c.owner, c.parent->tilt_floor) : Hom{};
-				const ui::SwfColorXform cx = relative_color(c.owner, c.parent->color_floor);
-				quad_changed = apply_quad(c.quad, c.quad_applied, Transform2D(), h, cx, c.additive ? kFlagAdditive : 0, owner_node->world_visible && c.has_content);
-			}
-			if (quad_changed) {
-				mark(c.parent);
-			}
+			apply_layer_quad(c);
 		}
 		if (relink) {
 			relink_viewports();
+		}
+	}
+
+	void apply_layer_quad(Canvas &r_c) {
+		const ui::SwfSceneNode *owner_node = node(r_c.owner);
+		bool quad_changed = false;
+		if (r_c.kind == CanvasKind::Mask) {
+			quad_changed = apply_quad(
+					r_c.quad, r_c.quad_applied, Transform2D(), Hom{}, ui::SwfColorXform{}, 0, r_c.has_content);
+		} else if (owner_node != nullptr) {
+			const Hom h = r_c.kind == CanvasKind::Filter ? tilt_chain(r_c.owner, r_c.parent->tilt_floor) : Hom{};
+			const ui::SwfColorXform cx = relative_color(r_c.owner, r_c.parent->color_floor);
+			quad_changed = apply_quad(r_c.quad, r_c.quad_applied, Transform2D(), h, cx,
+					r_c.additive ? kFlagAdditive : 0, owner_node->world_visible && r_c.has_content && r_c.quad_ready());
+		}
+		if (quad_changed) {
+			mark(r_c.parent);
+		}
+	}
+
+	void update_own_layer(Canvas &r_c, Vector2i p_origin, Vector2i p_size, bool &r_relink) {
+		const RID final_texture = r_c.final_surface().texture;
+		if (!r_c.has_content && !final_texture.is_valid()) {
+			return;
+		}
+		const bool kept = r_c.quad_size.x > 0 && !r_c.has_content;
+		const Vector2i origin = kept ? r_c.quad_origin : p_origin;
+		const bool fits = kept || (r_c.quad_size.x > 0 && layer_fits(r_c.size, p_size));
+		const bool realloc = !fits || !final_texture.is_valid() || final_texture != r_c.quad_texture;
+		if (realloc) {
+			if (!fits) {
+				r_c.size = Vector2i(layer_alloc(p_size.x), layer_alloc(p_size.y));
+			}
+			bool swapped = take(r_c.content, r_c.size, msaa);
+			if (r_c.alpha.canvas.is_valid() && take(r_c.alpha, r_c.size, msaa)) {
+				swapped = true;
+				rs->material_set_param(r_c.quad_material, "mask_tex", r_c.alpha.texture);
+			}
+			RID input = r_c.content.texture;
+			for (Stage &s : r_c.stages) {
+				swapped = take(s.surface, r_c.size, RenderingServer::VIEWPORT_MSAA_DISABLED) || swapped;
+				rs->canvas_item_clear(s.item);
+				rs->canvas_item_add_texture_rect(
+						s.item, Rect2(0.0f, 0.0f, real_t(r_c.size.x), real_t(r_c.size.y)), input);
+				input = s.surface.texture;
+			}
+			if (swapped) {
+				r_c.linked_parent = RID();
+				r_relink = true;
+			}
+			r_c.quad_texture = r_c.final_surface().texture;
+		}
+		if (realloc || origin != r_c.quad_origin) {
+			r_c.origin = origin;
+			const Transform2D shift(1.0f, 0.0f, 0.0f, 1.0f, real_t(-origin.x), real_t(-origin.y));
+			rs->viewport_set_canvas_transform(r_c.content.viewport, r_c.content.canvas, shift);
+			if (r_c.alpha.viewport.is_valid()) {
+				rs->viewport_set_canvas_transform(r_c.alpha.viewport, r_c.alpha.canvas, shift);
+			}
+			rs->canvas_item_clear(r_c.quad);
+			rs->canvas_item_add_texture_rect(r_c.quad,
+					Rect2(real_t(origin.x), real_t(origin.y), real_t(r_c.size.x), real_t(r_c.size.y)),
+					r_c.quad_texture);
+			r_c.quad_origin = origin;
+			r_c.quad_size = r_c.size;
+			r_c.render_dirty = true;
+			mark(r_c.parent);
+		}
+	}
+
+	bool slot_fits(const ui::SwfPageSlot &p_slot, Vector2i p_size) const {
+		const int32_t w = ui::swf_page_slot_side(p_size.x);
+		const int32_t h = ui::swf_page_slot_side(p_size.y);
+		return w <= p_slot.width && h <= p_slot.height &&
+				(p_slot.width <= kLayerGranule * 2 || w * 4 >= p_slot.width) &&
+				(p_slot.height <= kLayerGranule * 2 || h * 4 >= p_slot.height);
+	}
+
+	void release_idle_slots() {
+		for (auto &[k, c] : canvases) {
+			if (c.paged && c.slot && !c.settling && (!c.has_content || hidden_from_render())) {
+				release_slots(c);
+			}
+		}
+	}
+
+	std::optional<ui::SwfPageSlot> alloc_slot(Vector2i p_size) {
+		Bf3UiPages *pages = Bf3UiPages::current();
+		std::optional<ui::SwfPageSlot> slot = pages->alloc_result(p_size);
+		if (!slot) {
+			for (const Bf3SwfView *v : g_views) {
+				v->impl_->release_idle_slots();
+			}
+			slot = pages->alloc_result(p_size);
+		}
+		return slot;
+	}
+
+	void set_page_quad(Canvas &r_c) {
+		Bf3UiPages *pages = Bf3UiPages::current();
+		rs->canvas_item_clear(r_c.quad);
+		rs->canvas_item_add_texture_rect_region(r_c.quad,
+				Rect2(real_t(r_c.origin.x), real_t(r_c.origin.y), real_t(r_c.extent.x), real_t(r_c.extent.y)),
+				pages->result_texture(),
+				Rect2(real_t(r_c.shown_slot->x), real_t(r_c.shown_slot->y), real_t(r_c.extent.x), real_t(r_c.extent.y)),
+				Color(1.0f, 1.0f, 1.0f, 1.0f), false, false);
+		r_c.quad_origin = r_c.origin;
+		r_c.quad_size = r_c.extent;
+	}
+
+	bool update_page_layer(Canvas &r_c, Vector2i p_origin, Vector2i p_size) {
+		if (!r_c.has_content) {
+			return true;
+		}
+		if (!Bf3UiPages::current()->fits_scratch(p_size)) {
+			return false;
+		}
+		if (!r_c.slot || !slot_fits(*r_c.slot, p_size)) {
+			if (r_c.slot && r_c.slot != r_c.shown_slot) {
+				Bf3UiPages::current()->release_result(*r_c.slot);
+			}
+			r_c.slot = alloc_slot(p_size);
+			if (!r_c.slot) {
+				return false;
+			}
+			r_c.settling = false;
+			r_c.render_dirty = true;
+		}
+		r_c.origin = p_origin;
+		if (r_c.visible_diffs > 0) {
+			r_c.render_dirty = true;
+		}
+		if (p_origin != r_c.quad_origin || p_size != r_c.quad_size) {
+			r_c.render_dirty = true;
+			if (r_c.shown_slot && r_c.shown_slot == r_c.slot) {
+				set_page_quad(r_c);
+				mark(r_c.parent);
+			}
+		}
+		return true;
+	}
+
+	void settle_pages() {
+		Bf3UiPages *pages = Bf3UiPages::current();
+		if (pages == nullptr) {
+			return;
+		}
+		for (Canvas *c : order) {
+			if (!c->settling || c->fill_pass == pages->pass_serial()) {
+				continue;
+			}
+			c->settling = false;
+			if (c->shown_slot != c->slot) {
+				if (c->shown_slot) {
+					pages->release_result(*c->shown_slot);
+				}
+				c->shown_slot = c->slot;
+				set_page_quad(*c);
+			}
+			apply_layer_quad(*c);
+			mark(c->parent);
+		}
+	}
+
+	void fill_layer(Canvas &r_c, const ui::SwfPageSlot &p_scratch) {
+		Bf3UiPages *pages = Bf3UiPages::current();
+		const ui::SwfPageSlot &result = *r_c.slot;
+		const Vector2 page(pages->scratch_size());
+		Stage &stage = r_c.stages.front();
+		rs->canvas_item_set_transform(r_c.group,
+				Transform2D(1.0f, 0.0f, 0.0f, 1.0f, real_t(p_scratch.x - r_c.origin.x),
+						real_t(p_scratch.y - r_c.origin.y)));
+		rs->canvas_item_set_visible(r_c.group, true);
+		const int32_t left = std::min(1, result.x);
+		const int32_t top = std::min(1, result.y);
+		rs->canvas_item_clear(stage.item);
+		rs->canvas_item_add_texture_rect_region(stage.item,
+				Rect2(real_t(result.x - left), real_t(result.y - top), real_t(result.width + left),
+						real_t(result.height + top)),
+				pages->scratch_texture(),
+				Rect2(real_t(p_scratch.x - left), real_t(p_scratch.y - top), real_t(result.width + left),
+						real_t(result.height + top)),
+				Color(1.0f, 1.0f, 1.0f, 1.0f), false, false);
+		rs->canvas_item_set_instance_shader_parameter(stage.item, "sample_rect",
+				Vector4((real_t(p_scratch.x) + 0.5f) / page.x, (real_t(p_scratch.y) + 0.5f) / page.y,
+						(real_t(p_scratch.x + r_c.extent.x) - 0.5f) / page.x,
+						(real_t(p_scratch.y + r_c.extent.y) - 0.5f) / page.y));
+		rs->canvas_item_set_visible(stage.item, true);
+		pages->note_fill(r_c.group, stage.item);
+		for (const ui::SwfNodeId id : r_c.nodes) {
+			for (Piece &p : rec_for(id).pieces) {
+				p.drawn_visible = p.applied.visible;
+			}
+		}
+		r_c.visible_diffs = 0;
+		r_c.render_dirty = false;
+		r_c.fill_pass = pages->pass_serial();
+		r_c.settling = true;
+		stats.page_fills++;
+	}
+
+	void fill_pages() {
+		Bf3UiPages *pages = Bf3UiPages::current();
+		if (pages == nullptr) {
+			return;
+		}
+		std::vector<Canvas *> dirty;
+		std::vector<ui::SwfDirtyLayer> sizes;
+		for (Canvas *c : order) {
+			if (!c->paged || !c->render_dirty || !c->has_content || !c->slot) {
+				continue;
+			}
+			if (c->settling && c->fill_pass == pages->pass_serial()) {
+				continue;
+			}
+			dirty.push_back(c);
+			sizes.push_back(ui::SwfDirtyLayer{ c->extent.x, c->extent.y });
+		}
+		if (dirty.empty()) {
+			return;
+		}
+		const ui::SwfScratchPass pass = pages->take_scratch(sizes);
+		for (size_t i = 0; i < pass.taken.size(); ++i) {
+			fill_layer(*dirty[pass.taken[i]], pass.slots[i]);
 		}
 	}
 
@@ -2833,8 +3157,10 @@ struct Bf3SwfView::Impl {
 				mark(t.canvas);
 			}
 		}
+		settle_pages();
+		fill_pages();
 		for (Canvas *c : order) {
-			if (!c->render_dirty) {
+			if (!c->render_dirty || c->paged) {
 				continue;
 			}
 			c->render_dirty = false;
@@ -2859,6 +3185,49 @@ struct Bf3SwfView::Impl {
 		}
 	}
 
+	bool first_fills_pending() {
+		if (revealed) {
+			return false;
+		}
+		for (const Canvas *c : order) {
+			if (c->paged && c->has_content && !c->shown_slot) {
+				return true;
+			}
+		}
+		revealed = true;
+		return false;
+	}
+
+	void begin_pages() {
+		Bf3UiPages *pages = pages_usable() ? Bf3UiPages::current() : nullptr;
+		if (pages != nullptr) {
+			pages->ensure(target_size);
+			pages->begin_frame();
+		}
+		const uint64_t generation = pages != nullptr ? pages->generation() : 0;
+		if (generation == pages_generation) {
+			return;
+		}
+		const auto forget_slots = [](Canvas &r_c) {
+			r_c.slot.reset();
+			r_c.shown_slot.reset();
+			r_c.settling = false;
+			r_c.quad_origin = Vector2i(-1, -1);
+			r_c.quad_size = Vector2i(-1, -1);
+			r_c.render_dirty = true;
+			r_c.bounds_dirty = true;
+		};
+		for (auto &[k, c] : canvases) {
+			forget_slots(c);
+		}
+		for (auto &[k, c] : dormant_canvases) {
+			forget_slots(c);
+		}
+		pages_generation = generation;
+		revealed = false;
+		structure_dirty = true;
+	}
+
 	void present() {
 		if (!present_item.is_valid()) {
 			present_item = make_item();
@@ -2868,7 +3237,7 @@ struct Bf3SwfView::Impl {
 		}
 		const auto it = canvases.find(canvas_key(CanvasKind::Root, 0));
 		rs->canvas_item_clear(present_item);
-		if (it == canvases.end()) {
+		if (it == canvases.end() || first_fills_pending()) {
 			return;
 		}
 		rs->canvas_item_set_transform(present_item, owner->get_global_transform_with_canvas().affine_inverse());
@@ -2900,6 +3269,7 @@ struct Bf3SwfView::Impl {
 				structure_dirty = true;
 			}
 		}
+		begin_pages();
 		const std::vector<ui::SwfSceneChange> changes = scene->take_changes();
 		constexpr uint32_t structural = ui::swf_change::kCreated | ui::swf_change::kRemoved | ui::swf_change::kChildren | ui::swf_change::kMask |
 				ui::swf_change::kEffects;
@@ -2931,6 +3301,7 @@ struct Bf3SwfView::Impl {
 		const uint32_t changes_count = uint32_t(changes.size());
 		stats.nodes_refreshed = 0;
 		stats.viewports_updated = 0;
+		stats.page_fills = 0;
 		for (int pass = 0; pass < 2; ++pass) {
 			if (structure_dirty) {
 				update_fit();
@@ -3042,6 +3413,7 @@ Status Bf3SwfView::open(std::string_view p_movie) {
 	impl_->update_fit();
 	impl_->open_serial = ++g_open_serial;
 	impl_->settle_syncs = 0;
+	impl_->revealed = false;
 	return Status::success();
 }
 
@@ -3067,6 +3439,7 @@ Status Bf3SwfView::open(std::shared_ptr<const ui::SwfLibrary> p_library, std::st
 	impl_->update_fit();
 	impl_->open_serial = ++g_open_serial;
 	impl_->settle_syncs = 0;
+	impl_->revealed = false;
 	return Status::success();
 }
 
@@ -3286,10 +3659,32 @@ ui::SwfRect Bf3SwfView::visible_rect() const {
 uint32_t Bf3SwfView::filter_stages_without_viewport() const {
 	uint32_t count = 0;
 	for (const auto &[k, c] : impl_->canvases) {
+		if (c.paged || !c.has_content) {
+			continue;
+		}
 		count += uint32_t(std::count_if(
 				c.stages.begin(), c.stages.end(), [](const Stage &p_s) { return !p_s.surface.viewport.is_valid(); }));
 	}
 	return count;
+}
+
+bool Bf3SwfView::page_fills_pending() const {
+	for (const auto &[k, c] : impl_->canvases) {
+		if (c.paged && c.has_content && (c.render_dirty || c.settling || !c.shown_slot)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+uint32_t Bf3SwfView::paged_quads_shown() const {
+	return uint32_t(std::count_if(impl_->canvases.begin(), impl_->canvases.end(),
+			[](const auto &p_c) { return p_c.second.paged && p_c.second.quad_applied.visible; }));
+}
+
+uint32_t Bf3SwfView::paged_layers() const {
+	return uint32_t(std::count_if(impl_->canvases.begin(), impl_->canvases.end(),
+			[](const auto &p_c) { return p_c.second.paged && p_c.second.has_content; }));
 }
 
 void Bf3SwfView::set_skips_hidden_render(bool p_skips) {

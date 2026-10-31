@@ -38,6 +38,7 @@ public:
 	void _exit_tree() override;
 
 	void ensure(godot::Vector2i p_window);
+	void use_sizes(const bf3::core::ui::SwfPageSizes &p_sizes);
 	void begin_frame();
 	void end_pass();
 	uint64_t generation() const { return generation_; }
@@ -64,6 +65,7 @@ protected:
 
 private:
 	void free_pages();
+	void make_pages(const bf3::core::ui::SwfPageSizes &p_sizes);
 
 	godot::RenderingServer *rs_ = nullptr;
 	bf3::core::ui::SwfPageSizes sizes_;
@@ -80,6 +82,7 @@ private:
 	uint64_t frame_ = UINT64_MAX;
 	uint64_t pass_serial_ = 1;
 	bool pass_requested_ = false;
+	bool sizes_fixed_ = false;
 	UiPagesCounters counters_;
 };
 

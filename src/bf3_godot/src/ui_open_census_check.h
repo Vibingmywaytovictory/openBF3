@@ -10,11 +10,16 @@
 
 namespace bf3::godot_side {
 
+class Bf3SwfView;
+class Bf3UiPages;
+
 inline constexpr uint32_t kUiOpenCensusMaxWaitFrames = 36000;
 inline constexpr int32_t kUiOpenCensusWidth = 1280;
 inline constexpr int32_t kUiOpenCensusHeight = 720;
 inline constexpr uint64_t kUiOpenCensusPrimitiveTriangles = 32;
 inline constexpr uint32_t kUiOpenCensusCloseSteps = 600;
+inline constexpr uint32_t kUiOpenCensusMaxPasses = 512;
+inline constexpr int32_t kUiOpenCensusSmallPage = 32;
 inline constexpr double kUiOpenCensusCloseStepSeconds = 1.0 / 30.0;
 
 class Bf3UiOpenCensusCheck : public godot::Node {
@@ -38,6 +43,11 @@ private:
 	void census_hidden_screen(const std::string &p_partition, std::string_view p_live_target);
 	void census_filter_swap(const std::string &p_partition);
 	void census_pages();
+	void census_paged_screens();
+	void census_page_life(Bf3UiPages &r_pages);
+	void census_page_overflow(Bf3UiPages &r_pages);
+	Bf3SwfView *open_paged_view(const std::string &p_leaf);
+	void settle_paged_view(Bf3UiPages &r_pages, Bf3SwfView &r_view);
 	void finish();
 
 	std::vector<std::string> partitions_;

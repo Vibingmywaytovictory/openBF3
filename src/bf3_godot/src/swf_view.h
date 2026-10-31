@@ -87,6 +87,7 @@ struct SwfViewStats {
 	uint32_t reopens = 0;
 	uint32_t nodes_refreshed = 0;
 	uint32_t viewports_updated = 0;
+	uint32_t page_fills = 0;
 	uint32_t changes = 0;
 	double sync_seconds = 0.0;
 };
@@ -165,6 +166,9 @@ public:
 	godot::Vector2 stage_to_canvas(bf3::core::ui::SwfPoint p_stage) const;
 	void set_skips_hidden_render(bool p_skips);
 	uint32_t filter_stages_without_viewport() const;
+	bool page_fills_pending() const;
+	uint32_t paged_layers() const;
+	uint32_t paged_quads_shown() const;
 	void set_msaa(godot::RenderingServer::ViewportMSAA p_msaa);
 
 	bf3::core::Status set_isolated(std::string_view p_path);
