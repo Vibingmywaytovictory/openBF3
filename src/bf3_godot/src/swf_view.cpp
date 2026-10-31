@@ -2619,6 +2619,19 @@ struct Bf3SwfView::Impl {
 		isolated_id = isolated.empty() ? ui::kSwfNoNode : scene->find(isolated);
 	}
 
+	std::vector<ui::SwfNodeId> tilted_nodes() const {
+		std::vector<ui::SwfNodeId> out;
+		for (const auto &[id, tilt] : tilts) {
+			out.push_back(id);
+		}
+		return out;
+	}
+
+	bool mask_is_rect(const Canvas &p_c) const {
+		return ui::swf_rect_mask(*scene, assets != nullptr ? assets->swf_fonts() : nullptr, p_c.owner, tilted_nodes())
+				.has_value();
+	}
+
 	void plan() {
 		settle_moves();
 		const auto plan_start = std::chrono::steady_clock::now();
@@ -2654,9 +2667,7 @@ struct Bf3SwfView::Impl {
 		walk_options.filters_enabled = filters_enabled;
 		walk_options.isolating = !isolated.empty();
 		walk_options.isolated = isolated_id;
-		for (const auto &[id, tilt] : tilts) {
-			walk_options.tilted.push_back(id);
-		}
+		walk_options.tilted = tilted_nodes();
 		Planner planner(*this, root);
 		const ui::SwfLayerWalk walk = ui::swf_walk_layers(*scene, walk_options, planner);
 		for (size_t i = 0; i < walk.layers.size(); ++i) {
@@ -2898,6 +2909,9 @@ struct Bf3SwfView::Impl {
 			if (changed || rec.content_dirty) {
 				rec.content_dirty = false;
 				mark(&c);
+				if (rec.in_alpha && c.masks() && clips_usable() && mask_is_rect(c) != (c.kind == CanvasKind::Clip)) {
+					structure_dirty = true;
+				}
 			} else if (blinked) {
 				c.bounds_dirty = true;
 				mark(c.parent);

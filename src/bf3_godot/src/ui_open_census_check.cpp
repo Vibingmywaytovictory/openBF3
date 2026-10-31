@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <optional>
 #include <set>
 #include <string_view>
@@ -649,6 +650,7 @@ void Bf3UiOpenCensusCheck::census_page_overflow(Bf3UiPages &r_pages) {
 }
 
 void Bf3UiOpenCensusCheck::census_clips(Bf3UiPages &r_pages) {
+	r_pages.use_sizes(ui::swf_page_sizes(kUiOpenCensusWidth, kUiOpenCensusHeight));
 	Bf3SwfView *view = nullptr;
 	std::string leaf;
 	std::string mask;
@@ -728,27 +730,54 @@ void Bf3UiOpenCensusCheck::census_clips(Bf3UiPages &r_pages) {
 	view->sync();
 	add("a mask at alpha 0 still clips", moved_back.ok() && faded.ok() && view->clip_rect(mask) == first,
 			rect_text(view->clip_rect(mask)));
-	const uint64_t surfaces_clipped = Bf3SwfView::counters().live_surfaces;
-	const uint64_t planned_clipped = planned(*view);
-	const bf3::core::Status tilted = view->set_tilt(mask, SwfTilt{ kUiOpenCensusTiltDegrees, 0.0f, 0.0f });
-	view->sync();
-	const uint64_t surfaces_tilted = Bf3SwfView::counters().live_surfaces;
-	const uint64_t planned_tilted = planned(*view, { mask });
-	const uint32_t clips_tilted = view->clip_groups();
-	add("a tilted mask takes its surfaces, and its pages their own",
-			tilted.ok() && clips_tilted + 1 == clips && planned_tilted >= planned_clipped + 2 &&
-					surfaces_tilted - surfaces_clipped == planned_tilted - planned_clipped,
-			bf3::core::fmt("%u of %u clips, %llu more surface(s), plan %llu more", clips_tilted, clips,
-					(unsigned long long)(surfaces_tilted - surfaces_clipped),
-					(unsigned long long)(planned_tilted - planned_clipped)));
-	const bf3::core::Status untilted = view->clear_tilt(mask);
-	view->sync();
-	settle_paged_view(r_pages, *view);
-	add("and its clip returns with no item out of place",
-			untilted.ok() && view->clip_groups() == clips && view->clips_misplaced() == 0 &&
-					view->clip_rect(mask) == first && view->paged_layers() == paged,
-			bf3::core::fmt("%u of %u clips, %u misplaced, %s", view->clip_groups(), clips, view->clips_misplaced(),
-					rect_text(view->clip_rect(mask)).c_str()));
+	const auto leaves_clip = [&](const std::string &p_name,
+									 const std::function<bf3::core::Status(Bf3SwfView &)> &p_change,
+									 const std::function<bf3::core::Status(Bf3SwfView &)> &p_restore,
+									 std::vector<std::string> p_tilted) {
+		Bf3SwfView *other = open_paged_view(leaf);
+		if (other == nullptr) {
+			return;
+		}
+		other->sync();
+		settle_paged_view(r_pages, *other);
+		const uint32_t other_paged = other->paged_layers();
+		const uint32_t other_clips = other->clip_groups();
+		const std::optional<Rect2> other_rect = other->clip_rect(mask);
+		const uint64_t surfaces_clipped = Bf3SwfView::counters().live_surfaces;
+		const uint64_t planned_clipped = planned(*other);
+		const bf3::core::Status changed = p_change(*other);
+		other->sync();
+		const uint64_t surfaces_after = Bf3SwfView::counters().live_surfaces;
+		const uint64_t planned_after = planned(*other, std::move(p_tilted));
+		const uint32_t clips_after = other->clip_groups();
+		add(p_name,
+				changed.ok() && clips_after + 1 == other_clips && planned_after >= planned_clipped + 2 &&
+						surfaces_after - surfaces_clipped == planned_after - planned_clipped,
+				bf3::core::fmt("%u of %u clips, %llu more surface(s), plan %llu more", clips_after, other_clips,
+						(unsigned long long)(surfaces_after - surfaces_clipped),
+						(unsigned long long)(planned_after - planned_clipped)));
+		const bf3::core::Status restored = p_restore(*other);
+		other->sync();
+		settle_paged_view(r_pages, *other);
+		add("and its clip returns with no item out of place",
+				restored.ok() && other->clip_groups() == other_clips && other->clips_misplaced() == 0 &&
+						other->clip_rect(mask) == other_rect && other->paged_layers() == other_paged,
+				bf3::core::fmt("%u of %u clips, %u misplaced, %s", other->clip_groups(), other_clips,
+						other->clips_misplaced(), rect_text(other->clip_rect(mask)).c_str()));
+		remove_child(other);
+		memdelete(other);
+	};
+	leaves_clip(
+			"a tilted mask takes its surfaces, and its pages their own",
+			[&mask](Bf3SwfView &p_v) { return p_v.set_tilt(mask, SwfTilt{ kUiOpenCensusTiltDegrees, 0.0f, 0.0f }); },
+			[&mask](Bf3SwfView &p_v) { return p_v.clear_tilt(mask); }, { mask });
+	ui::SwfMatrix turned = placed;
+	turned.b = kUiOpenCensusMaskTurn;
+	turned.c = -kUiOpenCensusMaskTurn;
+	leaves_clip(
+			"a turned mask leaves its clip in the same sync",
+			[&mask, &turned](Bf3SwfView &p_v) { return p_v.scene()->set_matrix(mask, turned); },
+			[&mask, &placed](Bf3SwfView &p_v) { return p_v.scene()->set_matrix(mask, placed); }, {});
 	const bf3::core::Status renderer = view->set_renderer_string(child, kOverviewMapRenderer);
 	view->sync();
 	add("an engine target in a clip links to the root",

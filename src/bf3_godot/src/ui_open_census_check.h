@@ -25,6 +25,7 @@ inline constexpr const char *kUiOpenCensusLongText = "THE OPEN CENSUS FILLS THIS
 inline constexpr double kUiOpenCensusWholeMove = 12.0;
 inline constexpr double kUiOpenCensusFractionalMove = 0.5;
 inline constexpr float kUiOpenCensusTiltDegrees = 10.0f;
+inline constexpr float kUiOpenCensusMaskTurn = 0.01f;
 inline constexpr double kUiOpenCensusCloseStepSeconds = 1.0 / 30.0;
 
 class Bf3UiOpenCensusCheck : public godot::Node {

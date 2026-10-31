@@ -2880,3 +2880,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Architecture line for the renderer describes Bf3UiPages and the one layer walk.
 * swf_walk_layers classes a mask when its layer opens, so the renderer can choose a clip there.
 * Rect masks draw as clip groups with no surface: 24 page-only screens of 30, 40 viewports over all 30 in the census.
+* A mask turned by script leaves its clip for two surfaces in the same sync and returns when it is upright again.
