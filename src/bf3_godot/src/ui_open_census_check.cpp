@@ -110,6 +110,8 @@ void Bf3UiOpenCensusCheck::finish() {
 	add("freed views hold nothing", left.live_surfaces == 0 && left.live_items == 0 && left.live_triangle_arrays == 0,
 			bf3::core::fmt("%llu surfaces, %llu items, %llu arrays", (unsigned long long)left.live_surfaces,
 					(unsigned long long)left.live_items, (unsigned long long)left.live_triangle_arrays));
+	add("no triangle array of few triangles", left.small_triangle_arrays_emitted == 0,
+			bf3::core::fmt("%llu emitted", (unsigned long long)left.small_triangle_arrays_emitted));
 	Bf3Localisation *loc = Bf3Localisation::current();
 	if (loc == nullptr || !loc->install_snapshot_at_start().valid) {
 		add("install.unchanged", false, "no snapshot at start");

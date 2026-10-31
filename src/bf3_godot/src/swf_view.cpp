@@ -659,6 +659,8 @@ std::vector<Vert> split_polygon(const std::vector<Vert> &p_poly, bool p_x_axis, 
 	return out;
 }
 
+constexpr size_t kPrimitiveMaxTriangles = 32;
+
 struct Geometry {
 	std::vector<Vert> verts;
 	std::vector<int32_t> indices;
@@ -1537,6 +1539,52 @@ struct Bf3SwfView::Impl {
 		return g;
 	}
 
+	void emit_primitives(Piece &r_piece, const Geometry &p_geo, RID p_texture) {
+		PackedVector2Array points;
+		PackedVector2Array uvs;
+		PackedColorArray colors;
+		points.resize(3);
+		uvs.resize(3);
+		colors.resize(3);
+		for (size_t i = 0; i + 2 < p_geo.indices.size(); i += 3) {
+			Vector2 *point = points.ptrw();
+			Vector2 *uv = uvs.ptrw();
+			Color *color = colors.ptrw();
+			for (size_t k = 0; k < 3; ++k) {
+				const Vert &v = p_geo.verts[size_t(p_geo.indices[i + k])];
+				point[k] = Vector2(v.p.x, v.p.y);
+				uv[k] = Vector2(v.uv.x, v.uv.y);
+				color[k] = v.color;
+			}
+			rs->canvas_item_add_primitive(r_piece.item, points, colors, uvs, p_texture);
+		}
+	}
+
+	void emit_triangle_array(Piece &r_piece, const Geometry &p_geo, RID p_texture) {
+		PackedVector2Array points;
+		PackedVector2Array uvs;
+		PackedColorArray colors;
+		PackedInt32Array indices;
+		points.resize(int64_t(p_geo.verts.size()));
+		uvs.resize(int64_t(p_geo.verts.size()));
+		colors.resize(int64_t(p_geo.verts.size()));
+		indices.resize(int64_t(p_geo.indices.size()));
+		Vector2 *point = points.ptrw();
+		Vector2 *uv = uvs.ptrw();
+		Color *color = colors.ptrw();
+		for (size_t i = 0; i < p_geo.verts.size(); ++i) {
+			const Vert &v = p_geo.verts[i];
+			point[i] = Vector2(v.p.x, v.p.y);
+			uv[i] = Vector2(v.uv.x, v.uv.y);
+			color[i] = v.color;
+		}
+		std::copy(p_geo.indices.begin(), p_geo.indices.end(), indices.ptrw());
+		rs->canvas_item_add_triangle_array(r_piece.item, indices, points, colors, uvs, PackedInt32Array(), PackedFloat32Array(), p_texture);
+		r_piece.has_array = true;
+		++g_counters.live_triangle_arrays;
+		g_counters.small_triangle_arrays_emitted += p_geo.indices.size() / 3 <= kPrimitiveMaxTriangles ? 1u : 0u;
+	}
+
 	void emit(Piece &r_piece, const Geometry &p_geo, RID p_texture) {
 		rs->canvas_item_clear(r_piece.item);
 		g_counters.live_triangle_arrays -= r_piece.has_array ? 1u : 0u;
@@ -1545,28 +1593,15 @@ struct Bf3SwfView::Impl {
 		if (p_geo.indices.empty()) {
 			return;
 		}
-		PackedVector2Array points;
-		PackedVector2Array uvs;
-		PackedColorArray colors;
-		PackedInt32Array indices;
-		points.resize(int64_t(p_geo.verts.size()));
-		uvs.resize(int64_t(p_geo.verts.size()));
-		colors.resize(int64_t(p_geo.verts.size()));
 		Bounds b;
-		for (size_t i = 0; i < p_geo.verts.size(); ++i) {
-			const Vert &v = p_geo.verts[i];
-			points.set(int64_t(i), Vector2(v.p.x, v.p.y));
-			uvs.set(int64_t(i), Vector2(v.uv.x, v.uv.y));
-			colors.set(int64_t(i), v.color);
+		for (const Vert &v : p_geo.verts) {
 			b.add(v.p.x, v.p.y);
 		}
-		indices.resize(int64_t(p_geo.indices.size()));
-		for (size_t i = 0; i < p_geo.indices.size(); ++i) {
-			indices.set(int64_t(i), p_geo.indices[i]);
+		if (p_geo.indices.size() / 3 <= kPrimitiveMaxTriangles) {
+			emit_primitives(r_piece, p_geo, p_texture);
+		} else {
+			emit_triangle_array(r_piece, p_geo, p_texture);
 		}
-		rs->canvas_item_add_triangle_array(r_piece.item, indices, points, colors, uvs, PackedInt32Array(), PackedFloat32Array(), p_texture);
-		r_piece.has_array = true;
-		++g_counters.live_triangle_arrays;
 		r_piece.bounds = ui::SwfRect{ float(b.x0), float(b.x1), float(b.y0), float(b.y1) };
 		r_piece.has_bounds = !b.empty();
 	}
