@@ -88,6 +88,7 @@ struct SwfViewStats {
 	uint32_t nodes_refreshed = 0;
 	uint32_t viewports_updated = 0;
 	uint32_t page_fills = 0;
+	uint32_t page_moves = 0;
 	uint32_t changes = 0;
 	double sync_seconds = 0.0;
 };

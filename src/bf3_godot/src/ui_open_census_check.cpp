@@ -422,6 +422,23 @@ void Bf3UiOpenCensusCheck::census_page_life(Bf3UiPages &r_pages) {
 					view->paged_quads_shown() == paged,
 			bf3::core::fmt("%s: %llu pass(es), %u then %u of %u shown", layer->path.c_str(),
 					(unsigned long long)(passes() - before_blink), shown_hidden, view->paged_quads_shown(), paged));
+	const auto moved_by = [&](double p_window_pixels) {
+		ui::SwfMatrix m = view->scene()->node(layer->owner)->matrix;
+		const uint64_t before = passes();
+		m.tx += float(p_window_pixels / view->stage_fit().scale_x);
+		const bf3::core::Status st = view->scene()->set_matrix(layer->path, m);
+		view->sync();
+		const uint32_t moves = view->stats().page_moves;
+		settle_paged_view(r_pages, *view);
+		return st.ok() ? std::pair<uint64_t, uint32_t>(passes() - before, moves)
+					   : std::pair<uint64_t, uint32_t>(UINT64_MAX, 0);
+	};
+	const auto whole = moved_by(kUiOpenCensusWholeMove);
+	add("a whole-pixel move only moves the quad", whole.first == 0 && whole.second == 1,
+			bf3::core::fmt("%llu pass(es), %u quad move(s)", (unsigned long long)whole.first, whole.second));
+	const auto fractional = moved_by(kUiOpenCensusFractionalMove);
+	add("a fractional move takes a pass", fractional.first == 1 && fractional.second == 0,
+			bf3::core::fmt("%llu pass(es), %u quad move(s)", (unsigned long long)fractional.first, fractional.second));
 	const uint64_t before_text = passes();
 	const bf3::core::Status text = view->scene()->set_text(layer->path, "CENSUS");
 	view->sync();

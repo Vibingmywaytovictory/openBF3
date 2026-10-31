@@ -382,6 +382,7 @@ Hom tilt_homography(const SwfTilt &p_tilt, double p_px, double p_py, const ui::S
 }
 
 constexpr int32_t kLayerGranule = 32;
+constexpr real_t kWholePixelTolerance = 1e-3f;
 
 int32_t layer_alloc(int32_t p_need) {
 	const int32_t grown = p_need + p_need / 8;
@@ -943,6 +944,9 @@ struct Canvas {
 	bool settling = false;
 	uint64_t fill_pass = 0;
 	int32_t visible_diffs = 0;
+	uint32_t moved_pieces = 0;
+	bool move_differs = false;
+	Vector2 move_delta;
 
 	bool quad_ready() const { return !paged || shown_slot.has_value(); }
 	const Surface &final_surface() const { return stages.empty() ? content : stages.back().surface; }
@@ -1076,6 +1080,7 @@ struct Bf3SwfView::Impl {
 	bool structure_dirty = true;
 	uint32_t items_created = 0;
 	uint64_t pages_generation = 0;
+	std::vector<Canvas *> moved_canvases;
 	bool revealed = false;
 	SwfViewStats stats;
 
@@ -2544,6 +2549,7 @@ struct Bf3SwfView::Impl {
 	}
 
 	void plan() {
+		settle_moves();
 		const auto plan_start = std::chrono::steady_clock::now();
 		stats.structure_passes++;
 		const SwfViewStats keep = stats;
@@ -2720,6 +2726,45 @@ struct Bf3SwfView::Impl {
 		}
 	}
 
+	static bool whole_pixels(Vector2 p_delta) {
+		return std::abs(p_delta.x - std::round(p_delta.x)) < kWholePixelTolerance &&
+				std::abs(p_delta.y - std::round(p_delta.y)) < kWholePixelTolerance;
+	}
+
+	void note_piece_move(Canvas &r_c, Vector2 p_delta) {
+		if (r_c.moved_pieces == 0) {
+			moved_canvases.push_back(&r_c);
+			r_c.move_delta = p_delta;
+		} else if ((r_c.move_delta - p_delta).length() > kWholePixelTolerance) {
+			r_c.move_differs = true;
+		}
+		++r_c.moved_pieces;
+	}
+
+	void settle_moves() {
+		for (Canvas *c : moved_canvases) {
+			size_t pieces = 0;
+			for (const ui::SwfNodeId id : c->nodes) {
+				const auto rec = recs.find(id);
+				pieces += rec != recs.end() ? rec->second.pieces.size() : 0;
+			}
+			const bool quad_only = !c->move_differs && c->moved_pieces == pieces && !c->render_dirty &&
+					c->has_content && c->paged && c->slot && c->shown_slot == c->slot && !c->settling &&
+					tilt_chain(c->owner, c->parent->tilt_floor).identity;
+			c->moved_pieces = 0;
+			c->move_differs = false;
+			if (quad_only) {
+				c->origin += Vector2i(int32_t(std::lround(c->move_delta.x)), int32_t(std::lround(c->move_delta.y)));
+				set_page_quad(*c);
+				stats.page_moves++;
+				mark(c->parent);
+			} else {
+				mark(c);
+			}
+		}
+		moved_canvases.clear();
+	}
+
 	void refresh(ui::SwfNodeId p_id) {
 		const auto it = recs.find(p_id);
 		if (it == recs.end()) {
@@ -2765,12 +2810,16 @@ struct Bf3SwfView::Impl {
 				const int32_t flags = (p.wrap ? kFlagWrap : 0) | (p.additive ? kFlagAdditive : 0);
 				const Applied before = p.applied;
 				const bool piece_changed = apply_piece(p, xf, h, cmul, cadd, flags, visible);
-				const bool blink = piece_changed && c.paged && before.valid && before.visible != visible &&
-						before.xform == xf && before.h == h && before.mul == cmul && before.add == cadd &&
-						before.flags == flags && before.mode == p.mode && before.uv == p.uv && before.inv == p.inv;
-				if (blink) {
+				const bool same_look = piece_changed && c.paged && before.valid && before.h == h &&
+						before.mul == cmul && before.add == cadd && before.flags == flags && before.mode == p.mode &&
+						before.uv == p.uv && before.inv == p.inv;
+				const Vector2 delta = xf.get_origin() - before.xform.get_origin();
+				if (same_look && before.visible != visible && before.xform == xf) {
 					c.visible_diffs += visible != p.drawn_visible ? 1 : -1;
 					blinked = true;
+				} else if (same_look && before.visible == visible && before.xform.columns[0] == xf.columns[0] &&
+						before.xform.columns[1] == xf.columns[1] && !rec.content_dirty && whole_pixels(delta)) {
+					note_piece_move(c, delta);
 				} else {
 					changed = changed || piece_changed;
 				}
@@ -3298,6 +3347,7 @@ struct Bf3SwfView::Impl {
 		stats.nodes_refreshed = 0;
 		stats.viewports_updated = 0;
 		stats.page_fills = 0;
+		stats.page_moves = 0;
 		for (int pass = 0; pass < 2; ++pass) {
 			if (structure_dirty) {
 				update_fit();
@@ -3324,6 +3374,7 @@ struct Bf3SwfView::Impl {
 				break;
 			}
 		}
+		settle_moves();
 		if (hidden_from_render()) {
 			stop_targets();
 		} else {

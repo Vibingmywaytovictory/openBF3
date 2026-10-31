@@ -2871,3 +2871,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Bf3UiPages holds one S and one R per game UI, 18.0 MiB at 720p, remade only when a window size needs other sizes; no view uses them yet.
 * Leaf filter layers draw through S and R with no viewport of their own, empty layers take no surface; a page-only screen's open makes only its root viewport.
 * Hidden and closed Bf3UiScreens views hold no page slots; hiding and showing a kept view costs no pass.
+* A paged layer moved by whole window pixels moves only its quad, no S pass.
