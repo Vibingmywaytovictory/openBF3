@@ -269,8 +269,14 @@ bool Bf3LevelSession::tdm_menu_frame(double p_now_s) {
 		}
 	}
 	if (m.menu_frames_check_on && m.menu_frames_check == nullptr) {
+		const std::string baseline_bytes = user_arg_value("menu-frames-baseline-bytes");
 		m.menu_frames_check = std::unique_ptr<MenuFramesCheck, void (*)(MenuFramesCheck *)>(
-				new MenuFramesCheck(user_arg_value("menu-frames-shots")), &delete_part<MenuFramesCheck>);
+				has_user_arg("menu-frames-baseline")
+						? new MenuFramesCheck(MenuFramesCheck::no_menu_baseline())
+						: new MenuFramesCheck(user_arg_value("menu-frames-shots"),
+								  baseline_bytes.empty() ? std::nullopt
+														 : std::optional<uint64_t>(std::stoull(baseline_bytes))),
+				&delete_part<MenuFramesCheck>);
 		RenderingServer::get_singleton()->viewport_set_measure_render_time(get_viewport()->get_viewport_rid(), true);
 	}
 	if (m.menu_frames_check != nullptr && !m.finished) {

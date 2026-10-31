@@ -31,8 +31,18 @@ std::string options_tab_button(size_t p_tab) {
 
 }
 
-MenuFramesCheck::MenuFramesCheck(std::string p_shot_dir) : shot_dir_(std::move(p_shot_dir)) {
+MenuFramesCheck::MenuFramesCheck(std::string p_shot_dir, std::optional<uint64_t> p_baseline_bytes) :
+		steps_(steps()), baseline_bytes_(p_baseline_bytes), shot_dir_(std::move(p_shot_dir)),
+		step_shots_(steps_.size(), 0u) {
 	frames_.reserve(kMenuFramesMaxFrames);
+}
+
+MenuFramesCheck MenuFramesCheck::no_menu_baseline() {
+	MenuFramesCheck check{ std::string() };
+	check.baseline_run_ = true;
+	check.steps_ = baseline_steps();
+	check.step_shots_.assign(check.steps_.size(), 0u);
+	return check;
 }
 
 const char *MenuFramesCheck::phase_name(Phase p_phase) {
@@ -111,22 +121,37 @@ void MenuFramesCheck::options_round(std::vector<Step> &r_steps, Phase p_phase, b
 	}
 }
 
+bool MenuFramesCheck::on_spawn_screen(const Ctx &p_c) {
+	return shown(p_c, kSpawnScreenPcPartition) && shown(p_c, kSpawnButtonScreenPartition) &&
+			!shown(p_c, kCustomizeScreenPartitions[0]);
+}
+
+bool MenuFramesCheck::in_deployed_play(const Ctx &p_c) {
+	return p_c.io.alive && p_c.io.game_input && !shown(p_c, kSpawnScreenPcPartition);
+}
+
+std::vector<MenuFramesCheck::Step> MenuFramesCheck::baseline_steps() {
+	std::vector<Step> s;
+	s.push_back({ "spawn screen up", Phase::Setup, 2.0, on_spawn_screen,
+			[](MenuFramesCheck &, const Ctx &c) { tap(c, godot::Key::KEY_ENTER); } });
+	s.push_back({ "deployed", Phase::Setup, 2.0, in_deployed_play, [](MenuFramesCheck &, const Ctx &) {}, true, -1.0,
+			true });
+	s.push_back({ "play, no menu", Phase::Play, kMenuFramesBaselineSeconds, [](const Ctx &) { return true; },
+			[](MenuFramesCheck &, const Ctx &) {} });
+	return s;
+}
+
 std::vector<MenuFramesCheck::Step> MenuFramesCheck::steps() {
 	using K = godot::Key;
 	const auto press = [](K p_key) { return Act([p_key](MenuFramesCheck &, const Ctx &c) { tap(c, p_key); }); };
 	const auto any = [](const Ctx &) { return true; };
 	const Act none = [](MenuFramesCheck &, const Ctx &) {};
-	const auto spawn_screen = [](const Ctx &c) {
-		return shown(c, kSpawnScreenPcPartition) && shown(c, kSpawnButtonScreenPartition) &&
-				!shown(c, kCustomizeScreenPartitions[0]);
-	};
+	const auto spawn_screen = on_spawn_screen;
 	const auto customize_open = [](const Ctx &c) { return shown(c, kCustomizeScreenPartitions[0]); };
 	const Act customize = [](MenuFramesCheck &r_self, const Ctx &c) {
 		r_self.click_clip(c, kSpawnScreenPcPartition, std::string(kDeployCheckTabs[0].button));
 	};
-	const auto deployed = [](const Ctx &c) {
-		return c.io.alive && c.io.game_input && !shown(c, kSpawnScreenPcPartition);
-	};
+	const auto deployed = in_deployed_play;
 	const auto menu_open = [](const Ctx &c) {
 		return shown(c, kIngameMenuPartition) && c.menu.in_menu() && !c.io.game_input &&
 				!shown(c, kPopupGenericPartition);
@@ -245,23 +270,42 @@ void MenuFramesCheck::judge() {
 	const double median_budget = base_median * kMenuFramesMedianFactor + kMenuFramesMedianSlackMs;
 	size_t hitches = 0;
 	size_t stalls = 0;
+	size_t first_stalls = 0;
 	double worst = 0.0;
+	double first_worst = 0.0;
 	for (const MenuFrameSample &f : frames_) {
 		if (gated(steps_[f.step].phase) && counted(f)) {
 			hitches += f.wall_ms > hitch_ms ? 1u : 0u;
 			stalls += f.wall_ms > stall_ms ? 1u : 0u;
 			worst = std::max(worst, double(f.wall_ms));
+		} else if (steps_[f.step].phase == Phase::First && counted(f)) {
+			first_stalls += f.wall_ms > stall_ms ? 1u : 0u;
+			first_worst = std::max(first_worst, double(f.wall_ms));
 		}
 	}
-	verdict_ = bf3::core::fmt("no-menu median %.2f ms, menus median %.2f ms (budget %.2f); hitches over 3 x the "
-							  "no-menu median (%.1f ms): %zu, worst %.2f ms; stalls over %.1f ms (gated): %zu",
-			base_median, menus_median, median_budget, hitch_ms, hitches, worst, stall_ms, stalls);
-	if (stalls != 0) {
-		failure_ = std::to_string(stalls) + " stall(s): " + verdict_;
-	} else if (menus_median > median_budget) {
-		failure_ = "the menus' median frame is over budget: " + verdict_;
-	} else if (glitches_seen_ == 0 || glitch_frames_ == 0) {
-		failure_ = "no glitch was drawn";
+	verdict_ = bf3::core::fmt("no-menu median %.2f ms, menus median %.2f ms (budget %.2f); hitches over %.0f x the "
+							  "no-menu median (%.1f ms, gated): %zu, worst %.2f ms; stalls over %.1f ms: %zu; first "
+							  "visits: worst %.2f ms, stalls %zu",
+			base_median, menus_median, median_budget, kMenuFramesHitchFactor, hitch_ms, hitches, worst, stall_ms,
+			stalls, first_worst, first_stalls);
+	std::vector<std::string> failures;
+	if (hitches != 0) {
+		failures.push_back(std::to_string(hitches) + " hitch(es) on second visits");
+	}
+	if (first_stalls != 0) {
+		failures.push_back(std::to_string(first_stalls) + " stall(s) on first visits");
+	}
+	if (menus_median > median_budget) {
+		failures.push_back("the menus' median frame is over budget");
+	}
+	if (glitches_seen_ == 0 || glitch_frames_ == 0) {
+		failures.push_back("no glitch was drawn");
+	}
+	for (const std::string &f : failures) {
+		failure_ += (failure_.empty() ? "" : "; ") + f;
+	}
+	if (!failure_.empty()) {
+		failure_ += "; " + verdict_;
 	}
 }
 
@@ -349,7 +393,15 @@ bool MenuFramesCheck::frame(Bf3UiScreens &r_screens, NativeFlow &r_flow, const N
 			failure_ = "timed out waiting for '" + steps_[next_].name + "'";
 		}
 	}
+	if (baseline_run_ && failure_.empty() && next_ == steps_.size()) {
+		baseline_bytes_ = p_io.local_video_bytes;
+		failure_ = baseline_bytes_ ? "" : "no DXGI local video memory reading";
+		done_ = true;
+		passed_ = failure_.empty();
+		return true;
+	}
 	if (failure_.empty() && next_ == steps_.size()) {
+		end_bytes_ = p_io.local_video_bytes;
 		judge();
 	}
 	if (!failure_.empty() || next_ == steps_.size()) {
@@ -361,6 +413,10 @@ bool MenuFramesCheck::frame(Bf3UiScreens &r_screens, NativeFlow &r_flow, const N
 
 std::string MenuFramesCheck::report() const {
 	using bf3::core::interpolated_percentile;
+	if (baseline_run_) {
+		return passed_ ? bf3::core::fmt("MENU FRAMES BASELINE: %llu bytes", (unsigned long long)*baseline_bytes_)
+					   : "MENU FRAMES: FAIL " + failure_;
+	}
 	std::string out = "[ui] menu frames check:\n";
 	for (const Phase ph : { Phase::Play, Phase::First, Phase::Deploy, Phase::Customize, Phase::Menu, Phase::Options }) {
 		std::vector<double> wall;
@@ -418,13 +474,20 @@ std::string MenuFramesCheck::report() const {
 	out += local_play_bytes_ ? bf3::core::fmt("[ui]   DXGI local video memory %.1f MiB in play, peak %.1f MiB\n",
 									   video_memory_mib(*local_play_bytes_), video_memory_mib(local_peak_bytes_))
 							 : "[ui]   DXGI local video memory: no reading\n";
+	out += baseline_bytes_ && end_bytes_
+			? bf3::core::fmt("[ui]   UI share %.1f MiB, reported only: DXGI local %.1f MiB with every menu visited "
+							 "against %.1f MiB in play with no menu ever opened\n",
+					  video_memory_mib(*end_bytes_ > *baseline_bytes_ ? *end_bytes_ - *baseline_bytes_ : 0),
+					  video_memory_mib(*end_bytes_), video_memory_mib(*baseline_bytes_))
+			: "[ui]   UI share: no DXGI reading or no no-menu baseline\n";
 	out += "[ui]   " + std::to_string(repeats_) + " key press(es) repeated after 3 s without the expected screen\n";
 	out += "[ui]   " + std::to_string(deaths_) + " death(s) in play or a menu, " + std::to_string(recovery_frames_) +
 			" frames until back in play not counted\n";
 	for (const std::string &s : shots_) {
 		out += "[ui]   shot " + s + "\n";
 	}
-	out += "[ui]   gated: every frame of the second visits (deploy screen, CUSTOMIZE, Escape menu, Options); " +
+	out += "[ui]   gated: every frame of the second visits (deploy screen, CUSTOMIZE, Escape menu, Options), stalls on "
+		   "first visits; " +
 			verdict_ + "\n";
 	out += passed_ ? "MENU FRAMES: PASS" : "MENU FRAMES: FAIL " + failure_;
 	return out;

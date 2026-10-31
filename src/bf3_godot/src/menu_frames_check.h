@@ -73,7 +73,8 @@ struct MenuFrameSample {
 
 class MenuFramesCheck {
 public:
-	explicit MenuFramesCheck(std::string p_shot_dir);
+	explicit MenuFramesCheck(std::string p_shot_dir, std::optional<uint64_t> p_baseline_bytes = std::nullopt);
+	static MenuFramesCheck no_menu_baseline();
 	bool frame(Bf3UiScreens &r_screens, NativeFlow &r_flow, const NativeMenu &p_menu, double p_now_s,
 			const MenuFramesIo &p_io);
 	std::string report() const;
@@ -100,6 +101,9 @@ private:
 		bool resume_escape = false;
 	};
 	static std::vector<Step> steps();
+	static std::vector<Step> baseline_steps();
+	static bool on_spawn_screen(const Ctx &p_c);
+	static bool in_deployed_play(const Ctx &p_c);
 	static void options_round(std::vector<Step> &r_steps, Phase p_phase, bool p_leave);
 	static const char *phase_name(Phase p_phase);
 	static bool gated(Phase p_phase);
@@ -113,7 +117,10 @@ private:
 	void judge();
 	std::vector<double> walls(bool p_menus) const;
 
-	std::vector<Step> steps_ = steps();
+	std::vector<Step> steps_;
+	bool baseline_run_ = false;
+	std::optional<uint64_t> baseline_bytes_;
+	std::optional<uint64_t> end_bytes_;
 	std::vector<MenuFrameSample> frames_;
 	size_t next_ = 0;
 	bool acted_ = false;
@@ -135,7 +142,7 @@ private:
 	uint64_t local_peak_bytes_ = 0;
 	std::string shot_dir_;
 	std::vector<std::string> shots_;
-	std::vector<uint32_t> step_shots_ = std::vector<uint32_t>(steps_.size(), 0u);
+	std::vector<uint32_t> step_shots_;
 	bool shot_last_ = false;
 	bool done_ = false;
 	bool passed_ = false;

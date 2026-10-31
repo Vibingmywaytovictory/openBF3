@@ -9,9 +9,15 @@ file(MAKE_DIRECTORY "${BUILD_DIR}/godot-cache/${ROW}")
 set(shots "${BUILD_DIR}/shots/${ROW}")
 file(REMOVE_RECURSE "${shots}")
 file(MAKE_DIRECTORY "${shots}")
+godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 120
+    ARGS --path "${PROJECT_DIR}" ${window_args} res://scenes/metro_tdm.tscn -- --bots=31 --deploy-screen=1 --preround=0 --min-players=1
+        --menu-frames-check --menu-frames-baseline "--bf3-cache=${BUILD_DIR}/godot-cache/${ROW}")
+godot_require_pass("MENU FRAMES BASELINE: [0-9]+ bytes")
+string(REGEX MATCH "MENU FRAMES BASELINE: ([0-9]+) bytes" baseline_line "${out}")
+set(baseline_bytes "${CMAKE_MATCH_1}")
 godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 295
     ARGS --path "${PROJECT_DIR}" ${window_args} res://scenes/metro_tdm.tscn -- --bots=31 --deploy-screen=1 --preround=0 --min-players=1
-        --menu-frames-check "--bf3-cache=${BUILD_DIR}/godot-cache/${ROW}" "--menu-frames-shots=${shots}")
+        --menu-frames-check "--menu-frames-baseline-bytes=${baseline_bytes}" "--bf3-cache=${BUILD_DIR}/godot-cache/${ROW}" "--menu-frames-shots=${shots}")
 godot_require_pass("MENU FRAMES: PASS")
 godot_require_pass("\\[level\\] install unchanged: yes")
 foreach(engine_error "Too many instances using shader instance variables" "Can.t make active a Viewport that is already active")

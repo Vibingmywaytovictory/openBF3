@@ -92,13 +92,15 @@ functional.
   `godot_require_pass`.
 * A frame-time window row takes its budget from its own run, so the budget moves with the machine:
   `godot.menu_frames` (1280x720) and `godot.menu_frames.fullscreen` play Metro TDM with 31 bots, visit every menu
-  screen once (reported, not gated: a first open builds the screen), measure 5 s of play with no menu, then report
-  each frame of the second visits (deploy screen, CUSTOMIZE, the Escape menu, Options tabs) over 3 x the no-menu
-  median as a hitch and fail on a stall, a frame over the larger of that and three 60 Hz refreshes (50 ms), or on a
-  median of those frames over 1.25 x the no-menu median + 2 ms; per frame they report the session's main-thread
-  time, the views' sync and the render setup CPU of the frame before; glitch screenshots are taken
+  screen once (a first visit fails on a stall, a frame over the larger of 3 x the no-menu median and three 60 Hz
+  refreshes, 50 ms), measure 5 s of play with no menu, then fail on a hitch, a frame of the second visits (deploy
+  screen, CUSTOMIZE, the Escape menu, Options tabs) over 3 x the no-menu median, or on a median of those frames over
+  1.25 x the no-menu median + 2 ms; a run reports every gate it failed. Per frame they report the session's
+  main-thread time, the views' sync and the render setup CPU of the frame before; glitch screenshots are taken
   on first visits only, and the frames from a death in play or a menu, until the check has deployed again and
-  restarted that block, are not counted.
+  restarted that block, are not counted. A first run with `--menu-frames-baseline` plays with no menu ever opened and
+  gives the row its no-menu DXGI reading; DXGI with every menu visited minus that reading is the UI share, reported
+  and not gated until a real reading sets a limit.
 * The project is set up by the `godot.project_setup` fixture, which writes `.godot/extension_list.cfg` and never runs
   `--import` (the first `--import` of a never-opened project exits 0xC0000005, README "Run").
 
