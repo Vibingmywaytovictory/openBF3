@@ -1248,6 +1248,10 @@ void Bf3LevelSession::tdm_shutdown() {
 	m.eor_flash.reset();
 }
 
+Bf3UiScreens *Bf3LevelSession::screen_stack() {
+	return game_ && game_->tdm ? tdm_ui_screens(*game_->tdm) : nullptr;
+}
+
 const Bf3UiScreens *Bf3LevelSession::screen_stack() const {
 	return game_ && game_->tdm ? tdm_ui_screens(*game_->tdm) : nullptr;
 }

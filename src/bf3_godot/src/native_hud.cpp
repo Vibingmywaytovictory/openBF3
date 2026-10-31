@@ -7,6 +7,7 @@
 #include "minimap_hud.h"
 #include "swf_view.h"
 #include "ui_assets.h"
+#include "ui_pages.h"
 #include "ui_stage.h"
 
 #include "bf3/core/ebx_db.h"
@@ -1135,6 +1136,13 @@ bool Bf3NativeHud::page_fills_pending() const {
 
 std::array<Ref<Image>, kNativeHudViews> Bf3NativeHud::capture_views() const {
 	std::array<Ref<Image>, kNativeHudViews> out;
+	const Bf3UiPages *pages = Bf3UiPages::current();
+	if (pages != nullptr && std::any_of(views_.begin(), views_.end(), [](const Bf3SwfView *p_view) {
+			return p_view != nullptr && p_view->draws_in_frame();
+		})) {
+		out[0] = pages->capture_frame();
+		return out;
+	}
 	for (size_t i = 0; i < kNativeHudViews; ++i) {
 		out[i] = views_[i] != nullptr ? views_[i]->capture_hud() : Ref<Image>();
 	}

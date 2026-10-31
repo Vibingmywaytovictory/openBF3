@@ -2,6 +2,7 @@
 
 #include "bf3/core/ui/swf_layer_plan.h"
 
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -63,6 +64,7 @@ public:
 	godot::Node2D *present_node() const { return present_node_; }
 	void present_frame(const godot::Rect2 &p_at);
 	godot::Rect2 presented_at() const { return present_rect_; }
+	godot::Ref<godot::Image> capture_frame() const;
 	godot::Vector2i scratch_size() const { return godot::Vector2i(sizes_.scratch_width, sizes_.scratch_height); }
 	godot::Vector2i result_size() const { return godot::Vector2i(sizes_.result_width, sizes_.result_height); }
 

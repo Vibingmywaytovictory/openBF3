@@ -365,6 +365,12 @@ void NativeHudMomentRun::hold(Bf3LevelSession &r_session) {
 	client->send_debug(q);
 }
 
+void NativeHudMomentRun::show_screens(Bf3LevelSession &r_session, bool p_shown) {
+	if (Bf3UiScreens *stack = r_session.screen_stack()) {
+		stack->set_visible(p_shown);
+	}
+}
+
 void NativeHudMomentRun::check_stack(const Bf3LevelSession &p_session, const Bf3NativeHud &p_hud) {
 	const Bf3UiScreens *stack = p_session.screen_stack();
 	const UiScreenRecords *records = p_session.screen_records();
@@ -549,9 +555,23 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 			return false;
 		case Phase::Capture: {
 			composite_ = r_hud.get_viewport() != nullptr ? r_hud.get_viewport()->get_texture()->get_image() : Ref<Image>();
+			show_screens(r_session, false);
+			hold(r_session);
+			frames_ = 0;
+			phase_ = Phase::HudOnly;
+			return false;
+		}
+		case Phase::HudOnly: {
+			hold(r_session);
+			if (r_hud.page_fills_pending()) {
+				frames_ = 0;
+				return false;
+			}
+			if (++frames_ < kRenderFrames) {
+				return false;
+			}
 			colour_ = r_hud.capture_views();
 			r_hud.set_additive_coverage(true);
-			hold(r_session);
 			frames_ = 0;
 			phase_ = Phase::Coverage;
 			return false;
@@ -568,6 +588,7 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 			}
 			const std::array<Ref<Image>, kNativeHudViews> coverage = r_hud.capture_views();
 			r_hud.set_additive_coverage(false);
+			show_screens(r_session, true);
 			Ref<Image> composite = composite_;
 			Ref<Image> layer = Bf3NativeHud::capture_layer(colour_, coverage);
 			Ref<Image> trans = swf_view_transmittance(colour_);

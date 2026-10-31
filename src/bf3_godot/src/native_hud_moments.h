@@ -115,13 +115,14 @@ public:
 	const bf3::sim::Vec3 &feet() const { return feet_; }
 
 private:
-	enum class Phase : uint8_t { Wait, Place, Arrive, Settle, Render, Capture, Coverage, Done };
+	enum class Phase : uint8_t { Wait, Place, Arrive, Settle, Render, Capture, HudOnly, Coverage, Done };
 	struct Selected {
 		NativeHudMomentGroup *group = nullptr;
 		size_t moment = 0;
 		std::string id;
 	};
 	void hold(Bf3LevelSession &r_session);
+	void show_screens(Bf3LevelSession &r_session, bool p_shown);
 	void check_host(Bf3NativeHud &r_hud);
 	void check_stack(const Bf3LevelSession &p_session, const Bf3NativeHud &p_hud);
 

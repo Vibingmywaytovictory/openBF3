@@ -121,6 +121,7 @@ public:
 	const bf3::sim::CollisionWorld *collision_world() const;
 	Bf3UiAssets *ui_assets() const;
 	const Bf3UiScreens *screen_stack() const;
+	Bf3UiScreens *screen_stack();
 	const UiScreenRecords *screen_records() const;
 	void scripted_ui_key(godot::Key p_key, bool p_pressed);
 	void push_window_mouse(godot::Vector2 p_window_px, int32_t p_button, bool p_pressed);

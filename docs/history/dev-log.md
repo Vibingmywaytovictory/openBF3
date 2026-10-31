@@ -2888,3 +2888,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * F's one present item sits on a UiFrame node after NativeScreens; the present material is one for all views.
 * A game UI view's root is F: 24 page-only screens make no viewport, 10 viewports over all 30 in the census against 40; hidden views leave F at once.
 * One item material for all views; a hidden HUD view skips its render work and reports no fills pending.
+* HUD moment captures read F, with the screens band hidden for colour and coverage; godot.native_hud built, not run.

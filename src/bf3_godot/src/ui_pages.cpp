@@ -121,6 +121,10 @@ void Bf3UiPages::present_frame(const Rect2 &p_at) {
 	}
 }
 
+Ref<Image> Bf3UiPages::capture_frame() const {
+	return frame_texture_.is_valid() ? rs_->texture_2d_get(frame_texture_) : Ref<Image>();
+}
+
 void Bf3UiPages::size_frame(Vector2i p_window) {
 	if (!frame_viewport_.is_valid()) {
 		const RID owner = is_inside_tree() && get_viewport() != nullptr ? get_viewport()->get_viewport_rid() : RID();
