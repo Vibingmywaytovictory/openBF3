@@ -279,6 +279,8 @@ if(OPENBF3_BUILD_CHECKS)
         src/tp_crowd_check.h
         src/ui_font_check.cpp
         src/ui_font_check.h
+        src/ui_open_census_check.cpp
+        src/ui_open_census_check.h
         src/viewmodel_demo.cpp
         src/viewmodel_demo.h
         src/widget_shots_check.cpp

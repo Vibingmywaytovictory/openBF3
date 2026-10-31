@@ -1,0 +1,9 @@
+[gd_scene format=3]
+
+[node name="UiOpenCensus" type="Node"]
+
+[node name="Localisation" type="Bf3Localisation" parent="."]
+
+[node name="UiAssets" type="Bf3UiAssets" parent="."]
+
+[node name="Check" type="Bf3UiOpenCensusCheck" parent="."]

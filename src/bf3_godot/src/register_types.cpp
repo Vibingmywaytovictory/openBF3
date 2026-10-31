@@ -26,6 +26,7 @@
 #include "settings_check.h"
 #include "swf_view_check.h"
 #include "ui_font_check.h"
+#include "ui_open_census_check.h"
 #include "viewmodel_demo.h"
 #include "widget_shots_check.h"
 #endif
@@ -84,6 +85,7 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 #if OPENBF3_BUILD_CHECKS
 	GDREGISTER_CLASS(bf3::godot_side::Bf3ViewmodelDemo);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3UiFontCheck);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3UiOpenCensusCheck);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3SwfViewCheck);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3SettingsCheck);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3M2aViewmodelDemo);

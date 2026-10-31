@@ -2849,3 +2849,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * M3 menu pages, view counters: `Bf3SwfView::counters()` gives viewport creates and resizes, live surfaces, items and triangle arrays, retained bytes, plan and build seconds, process-wide; no behaviour change
 * M3 menu pages, open report: godot.menu_frames prints frames to reveal, canvas and specialization pipeline compiles and viewports made per screen open; report only, built, not run
 * M3 menu pages, open timers: godot.menu_frames splits the slowest open frames (flow tick, asset read, open, initialize, events, first refresh, plan walk, build, setup) and prints root CPU and working set per step; report only, built, not run
+* M3 menu pages, godot.ui_open_census: new headless row, one Bf3SwfView per drawn screen under the dummy renderer, 30 of 30 sync, prints viewport creates and resizes, live surfaces, items, arrays and retained bytes per screen; about 1 s
