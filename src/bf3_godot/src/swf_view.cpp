@@ -3419,6 +3419,19 @@ struct Bf3SwfView::Impl {
 		stats.page_fills++;
 	}
 
+	void leave_pass_when_redrawn() {
+		const Bf3UiPages *pages = Bf3UiPages::current();
+		if (pages == nullptr) {
+			return;
+		}
+		for (Canvas *c : order) {
+			if (c->settling && c->render_dirty && c->fill_pass == pages->pass_serial()) {
+				leave_pass(*c);
+				c->settling = false;
+			}
+		}
+	}
+
 	void fill_pages() {
 		Bf3UiPages *pages = Bf3UiPages::current();
 		if (pages == nullptr) {
@@ -3647,6 +3660,7 @@ struct Bf3SwfView::Impl {
 			}
 		}
 		settle_moves();
+		leave_pass_when_redrawn();
 		if (hidden_from_render()) {
 			stop_targets();
 		} else {

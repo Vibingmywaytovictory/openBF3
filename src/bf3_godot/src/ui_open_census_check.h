@@ -27,6 +27,7 @@ inline constexpr const char *kUiOpenCensusLongerText =
 		"THE OPEN CENSUS FILLS THIS LAYER AND THEN IT GROWS PAST THE SLOT THAT IT HELD BEFORE";
 inline constexpr uint32_t kUiOpenCensusUndrawnFrames = 3;
 inline constexpr double kUiOpenCensusWholeMove = 12.0;
+inline constexpr double kUiOpenCensusPastSlotMove = 400.0;
 inline constexpr double kUiOpenCensusFractionalMove = 0.5;
 inline constexpr float kUiOpenCensusTiltDegrees = 10.0f;
 inline constexpr float kUiOpenCensusMaskTurn = 0.01f;

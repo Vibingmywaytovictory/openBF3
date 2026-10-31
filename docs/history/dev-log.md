@@ -2903,3 +2903,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * m02.repeat lists the first 16 differing bytes with channel, position and values; a count alone could not find the layer.
 * The menu frames step report prints each step's worst frame; report only.
 * Tilted filter layers sample R on a slot-independent grid; godot.native_hud m02.repeat 5 of 4608000 bytes differ -> 0.
+* A layer that changes during a held pass leaves it; the mask route rows now read the state that can fail; godot.ui_open_census.

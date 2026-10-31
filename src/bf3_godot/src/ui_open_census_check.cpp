@@ -836,10 +836,11 @@ void Bf3UiOpenCensusCheck::census_clips(Bf3UiPages &r_pages) {
 		const uint32_t clips_after = other->clip_groups();
 		add(p_name,
 				changed.ok() && clips_after + 1 == other_clips && planned_after >= planned_clipped + 2 &&
-						surfaces_after - surfaces_clipped == planned_after - planned_clipped,
-				bf3::core::fmt("%u of %u clips, %llu more surface(s), plan %llu more", clips_after, other_clips,
-						(unsigned long long)(surfaces_after - surfaces_clipped),
-						(unsigned long long)(planned_after - planned_clipped)));
+						surfaces_after - surfaces_clipped == planned_after - planned_clipped &&
+						other->own_stages_sampling_a_page() == 0,
+				bf3::core::fmt("%u of %u clips, %llu more surface(s), plan %llu more, %u stage(s) on a page's rect",
+						clips_after, other_clips, (unsigned long long)(surfaces_after - surfaces_clipped),
+						(unsigned long long)(planned_after - planned_clipped), other->own_stages_sampling_a_page()));
 		const bf3::core::Status restored = p_restore(*other);
 		other->sync();
 		settle_paged_view(r_pages, *other);
@@ -1073,6 +1074,28 @@ void Bf3UiOpenCensusCheck::census_undrawn_pass(Bf3UiPages &r_pages) {
 	const uint64_t left = r_pages.counters().pass_items_left - held.pass_items_left;
 	add("a layer that outgrows its slot leaves the undrawn pass", grown.ok() && left == 2,
 			bf3::core::fmt("%s: %llu item(s) left", layer->path.c_str(), (unsigned long long)left));
+	const uint64_t items_before_move = r_pages.counters().pass_items;
+	const uint64_t left_before_move = r_pages.counters().pass_items_left;
+	const auto neighbour = std::find_if(walk.layers.begin(), walk.layers.end(), [&](const ui::SwfLayerWalkNode &p_l) {
+		return p_l.route == ui::SwfLayerClass::Page && p_l.has_nodes && p_l.owner != layer->owner;
+	});
+	const ui::SwfSceneNode *moved_node =
+			neighbour != walk.layers.end() ? view->scene()->node(neighbour->owner) : nullptr;
+	if (moved_node == nullptr) {
+		add("a layer that moves leaves the undrawn pass", false, "no second paged layer");
+		finish();
+		return;
+	}
+	ui::SwfMatrix moved = moved_node->matrix;
+	moved.tx += float(kUiOpenCensusPastSlotMove / view->stage_fit().scale_x);
+	const bf3::core::Status past_slot = view->scene()->set_matrix(neighbour->path, moved);
+	frame(0);
+	const uint64_t move_left = r_pages.counters().pass_items_left - left_before_move;
+	add("a layer that moves leaves the undrawn pass, and its neighbours stay up",
+			past_slot.ok() && move_left == 2 && r_pages.counters().pass_items + move_left >= items_before_move,
+			bf3::core::fmt("%s: %llu item(s) left, %llu then %llu up", neighbour->path.c_str(),
+					(unsigned long long)move_left, (unsigned long long)items_before_move,
+					(unsigned long long)r_pages.counters().pass_items));
 	frame(1);
 	const uint32_t shown_after_draw = view->paged_quads_shown();
 	settle_paged_view(r_pages, *view);
