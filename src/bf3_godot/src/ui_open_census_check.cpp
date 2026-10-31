@@ -1042,6 +1042,16 @@ void Bf3UiOpenCensusCheck::census_undrawn_pass(Bf3UiPages &r_pages) {
 	add("and its layers show once a frame has drawn it", shown_after_draw != 0 && view->paged_quads_shown() == paged,
 			bf3::core::fmt(
 					"%u shown after the draw, %u of %u settled", shown_after_draw, view->paged_quads_shown(), paged));
+	const bf3::core::Status changed = view->scene()->set_text(layer->path, kUiOpenCensusLongText);
+	view->sync();
+	const UiPagesCounters before_remake = r_pages.counters();
+	r_pages.use_sizes(ui::swf_page_sizes(kUiOpenCensusWidth, kUiOpenCensusHeight));
+	const UiPagesCounters after_remake = r_pages.counters();
+	add("new pages hide what the last pass left up",
+			changed.ok() && before_remake.pass_items != 0 && after_remake.pass_items == 0 &&
+					after_remake.pass_items_left == before_remake.pass_items_left + before_remake.pass_items,
+			bf3::core::fmt("%llu items up, %llu hidden", (unsigned long long)before_remake.pass_items,
+					(unsigned long long)(after_remake.pass_items_left - before_remake.pass_items_left)));
 	finish();
 }
 

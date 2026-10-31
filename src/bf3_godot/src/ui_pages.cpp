@@ -189,6 +189,10 @@ void Bf3UiPages::free_pages() {
 	sizes_ = ui::SwfPageSizes{};
 	result_.reset();
 	pass_.reset();
+	for (const RID &item : in_pass_) {
+		rs_->canvas_item_set_visible(item, false);
+	}
+	counters_.pass_items_left += in_pass_.size();
 	in_pass_.clear();
 	pass_requested_at_.reset();
 }

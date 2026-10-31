@@ -2893,3 +2893,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * godot.swf_view's byte comparison closes the check's earlier views first; built, not run.
 * F's request is keyed to the draw it waits for: a hide, reorder or free in the flow step after a drawn frame now redraws F; rows drive a UiPagesClock.
 * A page pass stays up until a frame has drawn it, so fills made while the window is minimised are not lost; a layer that outgrows its slot leaves the pass.
+* Remaking the pages hides what the last pass left up, so a deferred layer cannot write stale pieces into another layer's new slot.
