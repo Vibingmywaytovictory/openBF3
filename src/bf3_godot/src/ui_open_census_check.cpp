@@ -354,6 +354,7 @@ void Bf3UiOpenCensusCheck::census_paged_screens() {
 	add("a freed view gives its slots back", slots_after == 0,
 			bf3::core::fmt("%llu slots left", (unsigned long long)slots_after));
 	census_page_life(*pages);
+	census_hidden_pages(*pages);
 	census_page_overflow(*pages);
 	remove_child(pages);
 	memdelete(pages);
@@ -429,6 +430,59 @@ void Bf3UiOpenCensusCheck::census_page_life(Bf3UiPages &r_pages) {
 			bf3::core::fmt("%llu pass(es)", (unsigned long long)(passes() - before_text)));
 	remove_child(view);
 	memdelete(view);
+}
+
+void Bf3UiOpenCensusCheck::census_hidden_pages(Bf3UiPages &r_pages) {
+	const std::string movie = ui::hud_screen_movie(ui::ui_data_category_leaf(kIngameMenuPartition));
+	Bf3UiScreens *screens = memnew(Bf3UiScreens);
+	screens->set_manual(true);
+	add_child(screens);
+	screens->set_drawn(movie, true);
+	if (const bf3::core::Status opened = screens->open_movie_screen(movie, nullptr); !opened) {
+		add("a hidden screen takes no slots", false, opened.error().message);
+		remove_child(screens);
+		memdelete(screens);
+		return;
+	}
+	screens->hide_screen(movie);
+	Bf3SwfView *view = screens->screen_view(movie);
+	view->set_process(false);
+	const uint64_t passes_start = r_pages.counters().passes;
+	view->sync();
+	view->sync();
+	const uint64_t hidden_slots = r_pages.counters().live_slots;
+	const uint64_t hidden_passes = r_pages.counters().passes - passes_start;
+	add("a hidden screen takes no slots", hidden_slots == 0 && hidden_passes == 0,
+			bf3::core::fmt(
+					"%llu slots, %llu passes", (unsigned long long)hidden_slots, (unsigned long long)hidden_passes));
+	screens->show_screen(movie);
+	view->sync();
+	const uint64_t shown_slots = r_pages.counters().live_slots;
+	settle_paged_view(r_pages, *view);
+	const uint64_t shown_passes = r_pages.counters().passes - passes_start;
+	add("and fills once shown",
+			shown_slots != 0 && shown_slots == view->paged_layers() && shown_passes != 0 &&
+					view->paged_quads_shown() == view->paged_layers(),
+			bf3::core::fmt("%llu slots, %llu passes, %u of %u shown", (unsigned long long)shown_slots,
+					(unsigned long long)shown_passes, view->paged_quads_shown(), view->paged_layers()));
+	screens->hide_screen(movie);
+	view->sync();
+	screens->show_screen(movie);
+	view->sync();
+	settle_paged_view(r_pages, *view);
+	add("hiding and showing again costs no pass",
+			r_pages.counters().live_slots == shown_slots && r_pages.counters().passes - passes_start == shown_passes,
+			bf3::core::fmt("%llu slots, %llu more passes", (unsigned long long)r_pages.counters().live_slots,
+					(unsigned long long)(r_pages.counters().passes - passes_start - shown_passes)));
+	screens->close_screen(movie);
+	for (uint32_t i = 0; i < kUiOpenCensusCloseSteps && screens->phase(movie).has_value(); ++i) {
+		screens->step(kUiOpenCensusCloseStepSeconds);
+	}
+	add("a closed screen holds no slots", !screens->phase(movie).has_value() && r_pages.counters().live_slots == 0,
+			bf3::core::fmt("%llu slots, %s", (unsigned long long)r_pages.counters().live_slots,
+					screens->phase(movie).has_value() ? "still open" : "closed"));
+	remove_child(screens);
+	memdelete(screens);
 }
 
 void Bf3UiOpenCensusCheck::census_page_overflow(Bf3UiPages &r_pages) {

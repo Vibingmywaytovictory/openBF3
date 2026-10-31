@@ -3148,10 +3148,6 @@ struct Bf3SwfView::Impl {
 	}
 
 	void render_dirty() {
-		if (hidden_from_render()) {
-			stop_targets();
-			return;
-		}
 		for (auto &[id, t] : targets) {
 			if (t.live && t.canvas != nullptr) {
 				mark(t.canvas);
@@ -3328,9 +3324,13 @@ struct Bf3SwfView::Impl {
 				break;
 			}
 		}
-		update_layers();
-		render_dirty();
-		present();
+		if (hidden_from_render()) {
+			stop_targets();
+		} else {
+			update_layers();
+			render_dirty();
+			present();
+		}
 		stats.changes = changes_count;
 		if (settle_syncs < Bf3SwfView::kDormantSettleSyncs && ++settle_syncs == Bf3SwfView::kDormantSettleSyncs) {
 			trim_dormant();
@@ -3496,6 +3496,12 @@ void Bf3SwfView::release_root_target() {
 	const auto it = impl_->canvases.find(canvas_key(CanvasKind::Root, 0));
 	if (it != impl_->canvases.end() && it->second.content.resize(impl_->rs, Vector2i(1, 1))) {
 		impl_->structure_dirty = true;
+	}
+}
+
+void Bf3SwfView::release_page_slots() {
+	for (auto &[k, c] : impl_->canvases) {
+		impl_->release_slots(c);
 	}
 }
 

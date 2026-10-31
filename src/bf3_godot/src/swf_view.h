@@ -133,6 +133,7 @@ public:
 	void close();
 	uint64_t surface_bytes() const;
 	void release_root_target();
+	void release_page_slots();
 	uint32_t instance_items() const;
 	uint64_t open_serial() const;
 	static double sync_seconds_total();

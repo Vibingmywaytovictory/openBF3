@@ -260,6 +260,7 @@ void Bf3UiScreens::keep_idle_view(const std::string &p_partition, Bf3SwfView *p_
 	p_view->set_visible(false);
 	p_view->set_process(false);
 	p_view->release_root_target();
+	p_view->release_page_slots();
 	idle_views_.emplace_back(p_partition, p_view->get_instance_id());
 	uint64_t bytes = 0;
 	uint32_t items = 0;
