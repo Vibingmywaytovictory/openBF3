@@ -761,6 +761,11 @@ struct Surface {
 		texture = p_rs->viewport_get_texture(viewport);
 	}
 
+	void create_canvas_only(RenderingServer *p_rs) {
+		canvas = p_rs->canvas_create();
+		size = Vector2i();
+	}
+
 	bool resize(RenderingServer *p_rs, Vector2i p_size) {
 		const Vector2i s(std::max(1, p_size.x), std::max(1, p_size.y));
 		if (s == size) {
@@ -1224,7 +1229,9 @@ struct Bf3SwfView::Impl {
 			}
 		}
 		for (const Stage &s : c.stages) {
-			rs->viewport_set_parent_viewport(s.surface.viewport, RID());
+			if (s.surface.viewport.is_valid()) {
+				rs->viewport_set_parent_viewport(s.surface.viewport, RID());
+			}
 		}
 		c.linked_parent = RID();
 		c.linked_stages = size_t(-1);
@@ -2000,7 +2007,7 @@ struct Bf3SwfView::Impl {
 		}
 		Canvas &c = canvases[key];
 		c.owner_path = owner_path;
-		const bool fresh = !c.content.viewport.is_valid();
+		const bool fresh = !c.content.canvas.is_valid();
 		c.changed = fresh || c.parent != p_parent || c.kind != p_kind;
 		c.kind = p_kind;
 		c.owner = p_owner;
@@ -2027,9 +2034,9 @@ struct Bf3SwfView::Impl {
 			if (p_kind == CanvasKind::Root) {
 				c.content.create(rs, target_size, owner_viewport, msaa);
 			} else {
-				c.content.create(rs, Vector2i(), RID(), msaa);
+				c.content.create_canvas_only(rs);
 				if (p_kind == CanvasKind::Mask) {
-					c.alpha.create(rs, Vector2i(), RID(), msaa);
+					c.alpha.create_canvas_only(rs);
 				}
 				c.quad = make_item();
 				++items_created;
@@ -2105,7 +2112,7 @@ struct Bf3SwfView::Impl {
 		const double ky = fit.scale_y;
 		for (const ui::SwfFilter &f : p_filters) {
 			Stage s;
-			s.surface.create(rs, Vector2i(), RID(), RenderingServer::VIEWPORT_MSAA_DISABLED);
+			s.surface.create_canvas_only(rs);
 			s.item = make_item();
 			rs->canvas_item_set_parent(s.item, s.surface.canvas);
 			rs->canvas_item_set_default_texture_filter(s.item, RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR);
@@ -2143,6 +2150,9 @@ struct Bf3SwfView::Impl {
 
 	void link_viewports(Canvas &r_c) {
 		RID parent = r_c.parent != nullptr ? r_c.parent->content.viewport : owner_viewport;
+		if (!r_c.content.viewport.is_valid() || !parent.is_valid()) {
+			return;
+		}
 		if (r_c.linked_parent == parent && r_c.linked_stages == r_c.stages.size()) {
 			return;
 		}
@@ -2763,13 +2773,13 @@ struct Bf3SwfView::Impl {
 				origin = c.quad_origin;
 			}
 			const bool fits = kept || (c.quad_size.x > 0 && layer_fits(c.size, size));
-			const bool realloc = !fits || final_texture != c.quad_texture;
+			const bool realloc = !fits || !final_texture.is_valid() || final_texture != c.quad_texture;
 			if (realloc) {
 				if (!fits) {
 					c.size = Vector2i(layer_alloc(size.x), layer_alloc(size.y));
 				}
 				bool swapped = take(c.content, c.size, msaa);
-				if (c.alpha.viewport.is_valid() && take(c.alpha, c.size, msaa)) {
+				if (c.alpha.canvas.is_valid() && take(c.alpha, c.size, msaa)) {
 					swapped = true;
 					rs->material_set_param(c.quad_material, "mask_tex", c.alpha.texture);
 				}
@@ -3280,7 +3290,9 @@ void Bf3SwfView::set_msaa(RenderingServer::ViewportMSAA p_msaa) {
 	impl_->msaa = p_msaa;
 	impl_->free_spares();
 	for (auto &[k, c] : impl_->canvases) {
-		impl_->rs->viewport_set_msaa_2d(c.content.viewport, p_msaa);
+		if (c.content.viewport.is_valid()) {
+			impl_->rs->viewport_set_msaa_2d(c.content.viewport, p_msaa);
+		}
 		if (c.alpha.viewport.is_valid()) {
 			impl_->rs->viewport_set_msaa_2d(c.alpha.viewport, p_msaa);
 		}

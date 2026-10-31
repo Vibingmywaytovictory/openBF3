@@ -84,6 +84,8 @@ void Bf3UiOpenCensusCheck::census_screen(const std::string &p_partition) {
 	const SwfViewStats &stats = view->stats();
 	synced_ += stats.structure_passes != 0 ? 1u : 0u;
 	with_items_ += stats.items != 0 ? 1u : 0u;
+	thrown_viewports_ +=
+			(after.viewport_creates - before.viewport_creates) - (after.live_surfaces - before.live_surfaces);
 	UtilityFunctions::print(to_godot(bf3::core::fmt("[census] %s: %llu viewport create(s), %llu resize(s), %llu live "
 													"surface(s), %llu live item(s), %llu live triangle array(s), %u "
 													"item(s) of the view, %u filter layer(s), %u mask group(s), %.1f "
@@ -110,6 +112,8 @@ void Bf3UiOpenCensusCheck::finish() {
 	add("freed views hold nothing", left.live_surfaces == 0 && left.live_items == 0 && left.live_triangle_arrays == 0,
 			bf3::core::fmt("%llu surfaces, %llu items, %llu arrays", (unsigned long long)left.live_surfaces,
 					(unsigned long long)left.live_items, (unsigned long long)left.live_triangle_arrays));
+	add("no viewport made only to be replaced", thrown_viewports_ == 0,
+			bf3::core::fmt("%llu thrown away", (unsigned long long)thrown_viewports_));
 	add("no triangle array of few triangles", left.small_triangle_arrays_emitted == 0,
 			bf3::core::fmt("%llu emitted", (unsigned long long)left.small_triangle_arrays_emitted));
 	Bf3Localisation *loc = Bf3Localisation::current();
