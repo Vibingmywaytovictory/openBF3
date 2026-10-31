@@ -3505,6 +3505,7 @@ struct Bf3SwfView::Impl {
 			return;
 		}
 		const auto forget_slots = [](Canvas &r_c) {
+			r_c.page_refused = false;
 			r_c.slot.reset();
 			r_c.shown_slot.reset();
 			r_c.settling = false;

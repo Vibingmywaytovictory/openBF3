@@ -657,6 +657,10 @@ void Bf3UiOpenCensusCheck::census_page_overflow(Bf3UiPages &r_pages) {
 	}
 	sync_all();
 	settle_all();
+	uint32_t paged_start = 0;
+	for (const Bf3SwfView *v : views) {
+		paged_start += v->paged_layers();
+	}
 	ui::SwfPageSizes small_scratch;
 	small_scratch.result_width = 2048;
 	small_scratch.result_height = 1024;
@@ -707,6 +711,20 @@ void Bf3UiOpenCensusCheck::census_page_overflow(Bf3UiPages &r_pages) {
 			bf3::core::fmt("%llu fallback(s), %llu px of %d used",
 					(unsigned long long)(after_full.own_surface_fallbacks - after_small.own_surface_fallbacks),
 					(unsigned long long)after_full.used_px, small_result.result_width * small_result.result_height));
+	const auto paged_now = [&views] {
+		uint32_t count = 0;
+		for (const Bf3SwfView *v : views) {
+			count += v->paged_layers();
+		}
+		return count;
+	};
+	const uint32_t paged_full = paged_now();
+	r_pages.use_sizes(ui::swf_page_sizes(kUiOpenCensusWidth, kUiOpenCensusHeight));
+	sync_all();
+	settle_all();
+	add("pages with room again take back the layers refused before",
+			paged_full < paged_start && paged_now() == paged_start && !pending(),
+			bf3::core::fmt("%u paged when full, %u now, %u at the start", paged_full, paged_now(), paged_start));
 	for (Bf3SwfView *v : views) {
 		remove_child(v);
 		memdelete(v);
