@@ -3244,6 +3244,7 @@ struct Bf3SwfView::Impl {
 	void release_idle_slots() {
 		for (auto &[k, c] : canvases) {
 			if (c.paged && c.slot && !c.settling && (!c.has_content || hidden_from_render())) {
+				revealed = revealed && !c.has_content;
 				release_slots(c);
 			}
 		}

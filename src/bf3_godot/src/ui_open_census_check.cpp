@@ -440,6 +440,7 @@ void Bf3UiOpenCensusCheck::census_paged_screens() {
 	census_clips(*pages);
 	census_frame(*pages);
 	census_undrawn_pass(*pages);
+	census_taken_slots(*pages);
 	census_screen_band(*pages);
 	remove_child(pages);
 	memdelete(pages);
@@ -1071,6 +1072,54 @@ void Bf3UiOpenCensusCheck::census_undrawn_pass(Bf3UiPages &r_pages) {
 			bf3::core::fmt("%llu items up, %llu hidden", (unsigned long long)before_remake.pass_items,
 					(unsigned long long)(after_remake.pass_items_left - before_remake.pass_items_left)));
 	finish();
+}
+
+void Bf3UiOpenCensusCheck::census_taken_slots(Bf3UiPages &r_pages) {
+	Bf3SwfView *hidden = open_paged_view(ui::ui_data_category_leaf(kIngameMenuPartition));
+	if (hidden == nullptr) {
+		return;
+	}
+	hidden->sync();
+	settle_paged_view(r_pages, *hidden);
+	r_pages.end_pass();
+	hidden->sync();
+	const bool shown = hidden->shown_in_frame();
+	const uint32_t paged = hidden->paged_layers();
+	hidden->set_visible(false);
+	r_pages.end_pass();
+	hidden->sync();
+	std::vector<ui::SwfPageSlot> held;
+	const Vector2i side(1, 1);
+	while (const std::optional<ui::SwfPageSlot> slot = r_pages.alloc_result(side)) {
+		held.push_back(*slot);
+	}
+	const uint64_t slots_full = r_pages.counters().live_slots;
+	Bf3SwfView *asking = open_paged_view(ui::ui_data_category_leaf(kIngameMenuPartition));
+	if (asking != nullptr) {
+		asking->sync();
+		remove_child(asking);
+		memdelete(asking);
+	}
+	const uint64_t slots_taken = r_pages.counters().live_slots;
+	for (const ui::SwfPageSlot &slot : held) {
+		r_pages.release_result(slot);
+	}
+	r_pages.end_pass();
+	hidden->set_visible(true);
+	hidden->sync();
+	add("a hidden view that lost its slots stays out of F until they refill",
+			shown && asking != nullptr && slots_taken < slots_full && !hidden->shown_in_frame() &&
+					hidden->page_fills_pending(),
+			bf3::core::fmt("%llu slots then %llu, %s", (unsigned long long)slots_full, (unsigned long long)slots_taken,
+					hidden->shown_in_frame() ? "shown" : "not shown"));
+	settle_paged_view(r_pages, *hidden);
+	r_pages.end_pass();
+	hidden->sync();
+	add("and comes back whole", hidden->shown_in_frame() && hidden->paged_quads_shown() == paged,
+			bf3::core::fmt("%s, %u of %u quads", hidden->shown_in_frame() ? "shown" : "not shown",
+					hidden->paged_quads_shown(), paged));
+	remove_child(hidden);
+	memdelete(hidden);
 }
 
 void Bf3UiOpenCensusCheck::census_screen_band(Bf3UiPages &r_pages) {
