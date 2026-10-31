@@ -193,5 +193,6 @@ private:
 };
 
 godot::Ref<godot::Image> swf_view_transmittance(std::span<const godot::Ref<godot::Image>> p_colour);
-
+void swf_view_hold_shaders();
+void swf_view_release_shaders();
 }

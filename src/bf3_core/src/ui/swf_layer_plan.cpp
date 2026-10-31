@@ -893,17 +893,15 @@ void SwfShelfPacker::release(const SwfPageSlot &p_slot) {
 	}
 }
 
-SwfScratchPass swf_select_scratch_pass(
-		std::span<const SwfDirtyLayer> p_dirty, int32_t p_page_width, int32_t p_page_height) {
+SwfScratchPass swf_select_scratch_pass(std::span<const SwfDirtyLayer> p_dirty, SwfShelfPacker &r_packer) {
 	SwfScratchPass pass;
-	SwfShelfPacker packer(p_page_width, p_page_height);
 	for (size_t i = 0; i < p_dirty.size(); ++i) {
-		if (swf_page_slot_side(p_dirty[i].width) > p_page_width ||
-				swf_page_slot_side(p_dirty[i].height) > p_page_height) {
+		if (swf_page_slot_side(p_dirty[i].width) > r_packer.width() ||
+				swf_page_slot_side(p_dirty[i].height) > r_packer.height()) {
 			pass.too_large.push_back(i);
 			continue;
 		}
-		if (const std::optional<SwfPageSlot> slot = packer.alloc(p_dirty[i].width, p_dirty[i].height)) {
+		if (const std::optional<SwfPageSlot> slot = r_packer.alloc(p_dirty[i].width, p_dirty[i].height)) {
 			pass.taken.push_back(i);
 			pass.slots.push_back(*slot);
 		} else {
@@ -911,6 +909,12 @@ SwfScratchPass swf_select_scratch_pass(
 		}
 	}
 	return pass;
+}
+
+SwfScratchPass swf_select_scratch_pass(
+		std::span<const SwfDirtyLayer> p_dirty, int32_t p_page_width, int32_t p_page_height) {
+	SwfShelfPacker packer(p_page_width, p_page_height);
+	return swf_select_scratch_pass(p_dirty, packer);
 }
 
 SwfPageSizes swf_page_sizes(int32_t p_window_width, int32_t p_window_height) {

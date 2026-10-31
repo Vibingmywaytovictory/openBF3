@@ -11,6 +11,7 @@
 #include "overview_map.h"
 #include "swf_view.h"
 #include "ui_assets.h"
+#include "ui_pages.h"
 
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/ui/hud_screen.h"
@@ -249,9 +250,43 @@ void Bf3UiOpenCensusCheck::census_filter_swap(const std::string &p_partition) {
 	memdelete(view);
 }
 
+void Bf3UiOpenCensusCheck::census_pages() {
+	Bf3UiPages *pages = memnew(Bf3UiPages);
+	add_child(pages);
+	const UiPagesCounters made = pages->counters();
+	const ui::SwfPageSizes sizes = ui::swf_page_sizes(kUiOpenCensusWidth, kUiOpenCensusHeight);
+	pages->ensure(Vector2i(kUiOpenCensusWidth, kUiOpenCensusHeight));
+	const UiPagesCounters at_720 = pages->counters();
+	pages->ensure(Vector2i(kUiOpenCensusWidth, kUiOpenCensusHeight));
+	const UiPagesCounters again = pages->counters();
+	add("the pages are two viewports, kept",
+			made.live_viewports == 2 && at_720.live_viewports == 2 && again.pages_made == at_720.pages_made,
+			bf3::core::fmt("%llu live, %llu made", (unsigned long long)again.live_viewports,
+					(unsigned long long)again.pages_made));
+	add("the pages cost their formula", at_720.bytes == sizes.result_bytes() + sizes.scratch_bytes(),
+			bf3::core::fmt("%.1f MiB for R %dx%d and S %dx%d at %dx%d", double(at_720.bytes) / (1024.0 * 1024.0),
+					sizes.result_width, sizes.result_height, sizes.scratch_width, sizes.scratch_height,
+					kUiOpenCensusWidth, kUiOpenCensusHeight));
+	const uint64_t generation = pages->generation();
+	pages->ensure(Vector2i(kUiOpenCensusWidth * 2, kUiOpenCensusHeight * 2));
+	const UiPagesCounters at_1440 = pages->counters();
+	add("a window size that needs more remakes the pages",
+			pages->generation() != generation && at_1440.live_viewports == 2 &&
+					at_1440.bytes ==
+							ui::swf_page_sizes(kUiOpenCensusWidth * 2, kUiOpenCensusHeight * 2).result_bytes() +
+									ui::swf_page_sizes(kUiOpenCensusWidth * 2, kUiOpenCensusHeight * 2).scratch_bytes(),
+			bf3::core::fmt("%.1f MiB, %llu live", double(at_1440.bytes) / (1024.0 * 1024.0),
+					(unsigned long long)at_1440.live_viewports));
+	remove_child(pages);
+	const bool gone = pages->counters().live_viewports == 0 && Bf3UiPages::current() == nullptr;
+	memdelete(pages);
+	add("leaving the tree frees the pages", gone, gone ? "no viewport left" : "still live");
+}
+
 void Bf3UiOpenCensusCheck::finish() {
 	done_ = true;
 	set_process(false);
+	census_pages();
 	census_hidden_screen(std::string(kIngameMenuPartition), {});
 	census_hidden_screen(std::string(kSpawnScreenPcPartition), kSpawnScreenOverviewPath);
 	census_filter_swap(std::string(kIngameMenuPartition));

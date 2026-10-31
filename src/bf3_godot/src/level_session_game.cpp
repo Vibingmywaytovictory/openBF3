@@ -3,15 +3,16 @@
 #include "native_flow.h"
 
 #include "bf3_localisation.h"
+#include "fx_renderer.h"
 #include "game_audio.h"
 #include "game_crowd.h"
-#include "fx_renderer.h"
 #include "game_fx.h"
 #include "godot_cache.h"
 #include "godot_util.h"
 #include "hud_items.h"
 #include "native_hud.h"
 #include "ui_assets.h"
+#include "ui_pages.h"
 #include "ui_stage.h"
 #include "video_memory.h"
 #include "viewmodel.h"
@@ -831,6 +832,9 @@ void build_game_ui(Node *p_parent, GameState &r_game, bool p_windowed) {
 	r_game.layer->set_name("GameUi");
 	p_parent->add_child(r_game.layer);
 	if (p_windowed) {
+		Bf3UiPages *pages = memnew(Bf3UiPages);
+		pages->set_name("UiPages");
+		r_game.layer->add_child(pages);
 		r_game.native_hud = memnew(Bf3NativeHud);
 		r_game.native_hud->set_name("NativeHud");
 		r_game.layer->add_child(r_game.native_hud);

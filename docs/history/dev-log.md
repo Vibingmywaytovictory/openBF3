@@ -2868,3 +2868,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Closing a screen stops its live targets (visibility notification), the closed menu's overview detaches, and godot.ui_open_census drives hidden screens through Bf3UiScreens.
 * The renderer and swf_layer_walk run one walk, swf_walk_layers; ui.layer_plan's table is byte-identical.
 * Filter stages draw blend_disabled with instance uniforms: 55 materials for 305 stages, down from 81; godot.ui_open_census fails on a shader or engine error.
+* Bf3UiPages holds one S and one R per game UI, 18.0 MiB at 720p, remade only when a window size needs other sizes; no view uses them yet.

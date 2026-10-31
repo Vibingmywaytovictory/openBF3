@@ -3377,6 +3377,14 @@ Ref<Image> Bf3SwfView::get_hud_image() const {
 	return capture_hud();
 }
 
+void swf_view_hold_shaders() {
+	acquire_shaders(RenderingServer::get_singleton());
+}
+
+void swf_view_release_shaders() {
+	release_shaders(RenderingServer::get_singleton());
+}
+
 Ref<Image> swf_view_transmittance(std::span<const Ref<Image>> p_colour) {
 	int32_t w = 0;
 	int32_t h = 0;

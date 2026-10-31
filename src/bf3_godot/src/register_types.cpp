@@ -75,6 +75,8 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	openbf3_register_native_hud();
 	void openbf3_register_native_screens();
 	openbf3_register_native_screens();
+	void openbf3_register_ui_pages();
+	openbf3_register_ui_pages();
 
 	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioStream);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioPlayback);

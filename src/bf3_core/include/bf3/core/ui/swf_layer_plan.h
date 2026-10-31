@@ -244,6 +244,8 @@ struct SwfPageSlot {
 	int32_t y = 0;
 	int32_t width = 0;
 	int32_t height = 0;
+
+	bool operator==(const SwfPageSlot &) const = default;
 };
 
 class SwfShelfPacker {
@@ -292,6 +294,7 @@ struct SwfScratchPass {
 	std::vector<size_t> too_large;
 };
 
+SwfScratchPass swf_select_scratch_pass(std::span<const SwfDirtyLayer> p_dirty, SwfShelfPacker &r_packer);
 SwfScratchPass swf_select_scratch_pass(
 		std::span<const SwfDirtyLayer> p_dirty, int32_t p_page_width, int32_t p_page_height);
 
