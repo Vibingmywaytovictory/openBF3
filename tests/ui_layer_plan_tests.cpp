@@ -12,6 +12,7 @@
 #include "bf3/core/ui/text_db.h"
 #include "bf3/core/ui/ui_drawn_screens.h"
 #include "bf3/core/ui/ui_graph.h"
+#include "bf3/core/ui/ui_stage.h"
 #include "bf3/host/hud_feed.h"
 #include "bf3/host/ui_flow_session.h"
 #include "test_support.h"
@@ -19,6 +20,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -39,6 +41,7 @@ constexpr double kStepSeconds = 1.0 / 30.0;
 constexpr int kSteps = 90;
 constexpr int kStepsPerKill = 15;
 constexpr int32_t kMenuHintDataKey = 606381875;
+constexpr double kClipEdgeTolerance = 1.0 / 64.0;
 
 struct WindowSize {
 	int32_t width = 0;
@@ -374,6 +377,23 @@ bool is_hud_family(std::string_view p_leaf) {
 			p_leaf == "crosshairdefault" || p_leaf == "killscreen";
 }
 
+uint32_t clips_off_whole_pixels(const SwfLayerWalk &p_walk, const WindowSize p_window) {
+	const UiStage st = ui_stage_show_all(p_walk.stage, float(p_window.width), float(p_window.height));
+	const auto off = [](double p_v) { return std::abs(p_v - std::round(p_v)) > kClipEdgeTolerance; };
+	uint32_t out = 0;
+	for (const SwfLayerWalkNode &l : p_walk.layers) {
+		if (l.route == SwfLayerClass::Clip && l.has_mask) {
+			out += off(double(l.mask.x_min) * st.scale + st.offset_x) ||
+							off(double(l.mask.x_max) * st.scale + st.offset_x) ||
+							off(double(l.mask.y_min) * st.scale + st.offset_y) ||
+							off(double(l.mask.y_max) * st.scale + st.offset_y)
+					? 1u
+					: 0u;
+		}
+	}
+	return out;
+}
+
 struct RouteRecorder final : SwfLayerVisitor {
 	const SwfScene &scene;
 	const SwfFontSet *fonts = nullptr;
@@ -500,6 +520,16 @@ TEST_SUITE("ui-layer-plan") {
 					d.settled.non_rect_masks, d.settled.plain_text_fields, d.settled.plain_text_glyphs,
 					c.distinct_kernels, static_cast<unsigned long long>(c.page_slot_px),
 					double(c.own_surface_bytes) / 1024.0, first.counts.own_surfaces);
+			if (c.clips != 0) {
+				std::printf("  clips off whole pixels %s: %u at 720p, %u at 1080p, %u at 1440p, of %u\n", leaf.c_str(),
+						clips_off_whole_pixels(d.settled, kWindows[0]),
+						clips_off_whole_pixels(d.settled, WindowSize{ 1920, 1080 }),
+						clips_off_whole_pixels(d.settled, kWindows[1]),
+						uint32_t(std::count_if(
+								d.settled.layers.begin(), d.settled.layers.end(), [](const SwfLayerWalkNode &p_l) {
+									return p_l.route == SwfLayerClass::Clip && p_l.has_mask;
+								})));
+			}
 			for (const SwfPlannedLayer &l : plan.layers) {
 				if (l.klass() == SwfLayerClass::OwnSurface) {
 					std::printf("  own %s %s %dx%d\n", swf_layer_kind_name(l.kind), l.path.c_str(), l.width, l.height);
@@ -513,8 +543,9 @@ TEST_SUITE("ui-layer-plan") {
 			for (size_t i = 0; i < plan.layers.size(); ++i) {
 				const SwfLayerWalkNode &l = d.settled.layers[i];
 				if (l.route == SwfLayerClass::OwnSurface && plan.layers[i].klass() == SwfLayerClass::Empty) {
-					std::printf("  own when shown %s %s children %zu tilted %d\n", swf_layer_kind_name(l.kind),
-							l.path.c_str(), l.children.size(), l.tilted_inside ? 1 : 0);
+					std::printf("  own when shown %s %s children %zu tilted %d targets %d\n",
+							swf_layer_kind_name(l.kind), l.path.c_str(), l.children.size(), l.tilted_inside ? 1 : 0,
+							l.has_targets ? 1 : 0);
 					const std::string_view *entry = allow_list_entry(kOwnSurfaceAllowList, l.path);
 					const std::string_view *later = allow_list_entry(kOwnWhenShownAllowList, l.path);
 					CHECK_MESSAGE((entry != nullptr || later != nullptr), leaf,

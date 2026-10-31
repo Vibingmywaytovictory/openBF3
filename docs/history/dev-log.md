@@ -2882,3 +2882,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Rect masks draw as clip groups with no surface: 24 page-only screens of 30, 40 viewports over all 30 in the census.
 * A mask turned by script leaves its clip for two surfaces in the same sync and returns when it is upright again.
 * ui.layer_plan allow-list holds what draws in driven play; menus hold no own surface; a second list names what allocates once shown.
+* ui.layer_plan prints clips with fractional edges: 24 of 25 on customizesoldierscreen at 720p.
