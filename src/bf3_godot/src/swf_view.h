@@ -94,6 +94,7 @@ struct SwfViewStats {
 struct SwfViewCounters {
 	uint64_t viewport_creates = 0;
 	uint64_t viewport_resizes = 0;
+	uint64_t viewport_links_without_viewport = 0;
 	uint64_t live_surfaces = 0;
 	uint64_t live_items = 0;
 	uint64_t live_triangle_arrays = 0;
@@ -161,6 +162,7 @@ public:
 	std::optional<bf3::core::ui::SwfPoint> canvas_to_stage(godot::Vector2 p_canvas) const;
 	godot::Vector2 stage_to_canvas(bf3::core::ui::SwfPoint p_stage) const;
 	void set_skips_hidden_render(bool p_skips);
+	uint32_t filter_stages_without_viewport() const;
 	void set_msaa(godot::RenderingServer::ViewportMSAA p_msaa);
 
 	bf3::core::Status set_isolated(std::string_view p_path);

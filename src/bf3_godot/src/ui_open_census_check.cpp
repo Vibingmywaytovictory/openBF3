@@ -21,6 +21,7 @@
 #include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <algorithm>
 #include <set>
 #include <string_view>
 
@@ -131,10 +132,56 @@ void Bf3UiOpenCensusCheck::census_hidden_screen(const std::string &p_partition) 
 	memdelete(view);
 }
 
+void Bf3UiOpenCensusCheck::census_filter_swap(const std::string &p_partition) {
+	const std::string leaf = ui::ui_data_category_leaf(p_partition);
+	Bf3SwfView *view = memnew(Bf3SwfView);
+	view->set_playing(false);
+	view->set_target_size(Vector2i(kUiOpenCensusWidth, kUiOpenCensusHeight));
+	add_child(view);
+	const bf3::core::Status opened = view->open(ui::hud_screen_movie(leaf));
+	if (!opened) {
+		add("a swapped filter gets its viewports", false, opened.error().message);
+		remove_child(view);
+		memdelete(view);
+		return;
+	}
+	view->sync();
+	const ui::SwfLayerWalk walk = ui::swf_layer_walk(*view->scene(), ui::SwfLayerWalkOptions{});
+	const auto layer = std::find_if(walk.layers.begin(), walk.layers.end(),
+			[](const ui::SwfLayerWalkNode &p_l) { return p_l.kind == ui::SwfLayerKind::Filter; });
+	if (layer == walk.layers.end()) {
+		add("a swapped filter gets its viewports", false, leaf + " has no filter layer");
+		remove_child(view);
+		memdelete(view);
+		return;
+	}
+	const uint64_t links_before = Bf3SwfView::counters().viewport_links_without_viewport;
+	const uint32_t passes_before = view->stats().filter_passes;
+	ui::SwfFilter recoloured = layer->filters.front();
+	recoloured.color.r = uint8_t(recoloured.color.r ^ 0xff);
+	const bf3::core::Status recolour = view->scene()->set_filters(layer->path, { recoloured });
+	view->sync();
+	const uint32_t after_recolour = view->filter_stages_without_viewport();
+	const bf3::core::Status doubled = view->scene()->set_filters(layer->path, { recoloured, layer->filters.front() });
+	view->sync();
+	const uint32_t after_double = view->filter_stages_without_viewport();
+	const uint64_t links = Bf3SwfView::counters().viewport_links_without_viewport - links_before;
+	const uint32_t passes = view->stats().filter_passes;
+	add("a swapped filter gets its viewports",
+			recolour.ok() && doubled.ok() && after_recolour == 0 && after_double == 0 && passes == passes_before + 1,
+			bf3::core::fmt("%s %s: %u, then %u stage(s) with none, %u to %u passes", leaf.c_str(), layer->path.c_str(),
+					after_recolour, after_double, passes_before, passes));
+	add("no engine call on a stage with no viewport", links == 0,
+			bf3::core::fmt("%llu link(s)", (unsigned long long)links));
+	remove_child(view);
+	memdelete(view);
+}
+
 void Bf3UiOpenCensusCheck::finish() {
 	done_ = true;
 	set_process(false);
 	census_hidden_screen(std::string(kIngameMenuPartition));
+	census_filter_swap(std::string(kIngameMenuPartition));
 	add("every view synced under the dummy renderer", synced_ == partitions_.size(),
 			std::to_string(synced_) + " of " + std::to_string(partitions_.size()));
 	add("the views built their items", with_items_ == partitions_.size(),

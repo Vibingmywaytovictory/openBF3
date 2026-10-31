@@ -2188,9 +2188,16 @@ struct Bf3SwfView::Impl {
 		}
 	}
 
+	void link_viewport(RID p_child, RID p_parent) {
+		g_counters.viewport_links_without_viewport += p_child.is_valid() ? 0u : 1u;
+		rs->viewport_set_parent_viewport(p_child, p_parent);
+	}
+
 	void link_viewports(Canvas &r_c) {
 		RID parent = r_c.parent != nullptr ? r_c.parent->content.viewport : owner_viewport;
-		if (!r_c.content.viewport.is_valid() || !parent.is_valid()) {
+		const bool stages_ready = std::all_of(
+				r_c.stages.begin(), r_c.stages.end(), [](const Stage &p_s) { return p_s.surface.viewport.is_valid(); });
+		if (!r_c.content.viewport.is_valid() || !parent.is_valid() || !stages_ready) {
 			return;
 		}
 		if (r_c.linked_parent == parent && r_c.linked_stages == r_c.stages.size()) {
@@ -2199,16 +2206,16 @@ struct Bf3SwfView::Impl {
 		r_c.linked_parent = parent;
 		r_c.linked_stages = r_c.stages.size();
 		if (r_c.kind == CanvasKind::Filter && !r_c.stages.empty()) {
-			rs->viewport_set_parent_viewport(r_c.content.viewport, r_c.stages.front().surface.viewport);
+			link_viewport(r_c.content.viewport, r_c.stages.front().surface.viewport);
 			for (size_t i = 0; i + 1 < r_c.stages.size(); ++i) {
-				rs->viewport_set_parent_viewport(r_c.stages[i].surface.viewport, r_c.stages[i + 1].surface.viewport);
+				link_viewport(r_c.stages[i].surface.viewport, r_c.stages[i + 1].surface.viewport);
 			}
-			rs->viewport_set_parent_viewport(r_c.stages.back().surface.viewport, parent);
+			link_viewport(r_c.stages.back().surface.viewport, parent);
 		} else {
-			rs->viewport_set_parent_viewport(r_c.content.viewport, parent);
+			link_viewport(r_c.content.viewport, parent);
 		}
 		if (r_c.alpha.viewport.is_valid()) {
-			rs->viewport_set_parent_viewport(r_c.alpha.viewport, parent);
+			link_viewport(r_c.alpha.viewport, parent);
 		}
 	}
 
@@ -3326,6 +3333,15 @@ ui::SwfRect Bf3SwfView::visible_rect() const {
 	const SwfStageFit &f = impl_->fit;
 	return ui::SwfRect{ float(-f.offset_x / f.scale_x), float((double(impl_->target_size.x) - f.offset_x) / f.scale_x), float(-f.offset_y / f.scale_y),
 		float((double(impl_->target_size.y) - f.offset_y) / f.scale_y) };
+}
+
+uint32_t Bf3SwfView::filter_stages_without_viewport() const {
+	uint32_t count = 0;
+	for (const auto &[k, c] : impl_->canvases) {
+		count += uint32_t(std::count_if(
+				c.stages.begin(), c.stages.end(), [](const Stage &p_s) { return !p_s.surface.viewport.is_valid(); }));
+	}
+	return count;
 }
 
 void Bf3SwfView::set_skips_hidden_render(bool p_skips) {

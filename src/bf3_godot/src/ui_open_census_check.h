@@ -32,6 +32,7 @@ private:
 	void census_screen(const std::string &p_partition);
 	void add(std::string p_name, bool p_pass, std::string p_detail);
 	void census_hidden_screen(const std::string &p_partition);
+	void census_filter_swap(const std::string &p_partition);
 	void finish();
 
 	std::vector<std::string> partitions_;
