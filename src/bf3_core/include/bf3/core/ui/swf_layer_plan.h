@@ -148,6 +148,9 @@ struct SwfLayerWalkNode {
 	uint32_t parent = kSwfNoLayer;
 	std::vector<uint32_t> children;
 	std::vector<SwfFilter> filters;
+	bool additive = false;
+	bool has_targets = false;
+	bool tilted_inside = false;
 	bool has_nodes = false;
 	SwfRect nodes;
 	bool has_mask = false;
@@ -171,6 +174,30 @@ struct SwfLayerWalkOptions {
 	std::vector<std::string> target_paths;
 };
 
+struct SwfPlanWalkOptions {
+	const SwfFontSet *fonts = nullptr;
+	std::vector<SwfNodeId> tilted;
+	bool filters_enabled = true;
+	bool isolating = false;
+	SwfNodeId isolated = kSwfNoNode;
+};
+
+class SwfLayerVisitor {
+public:
+	virtual void seen(const SwfSceneNode &p_node) = 0;
+	virtual uint32_t pieces(const SwfSceneNode &p_node) = 0;
+	virtual bool engine_target(const SwfSceneNode &p_node) = 0;
+	virtual void target(const SwfSceneNode &p_node, uint32_t p_layer) = 0;
+	virtual void layer_opened(uint32_t p_index, const SwfLayerWalkNode &p_layer) = 0;
+	virtual void attach(const SwfSceneNode &p_node, uint32_t p_layer, bool p_alpha, bool p_additive, bool p_own) = 0;
+	virtual void unsupported_filter(const SwfSceneNode &, const SwfFilter &) {}
+	virtual void unsupported_blend(const SwfSceneNode &) {}
+
+protected:
+	~SwfLayerVisitor() = default;
+};
+
+SwfLayerWalk swf_walk_layers(const SwfScene &p_scene, const SwfPlanWalkOptions &p_options, SwfLayerVisitor &r_visitor);
 SwfLayerWalk swf_layer_walk(const SwfScene &p_scene, const SwfLayerWalkOptions &p_options);
 SwfLayerWalk swf_layer_walk(const HudScreen &p_screen);
 

@@ -918,6 +918,7 @@ struct Canvas {
 	uint64_t owner_path = 0;
 	uint64_t parked = 0;
 	bool hidden = false;
+	ui::SwfLayerClass route = ui::SwfLayerClass::OwnSurface;
 
 	const Surface &final_surface() const { return stages.empty() ? content : stages.back().surface; }
 };
@@ -1025,7 +1026,6 @@ struct Bf3SwfView::Impl {
 	bool filters_enabled = true;
 	std::string isolated;
 	ui::SwfNodeId isolated_id = ui::kSwfNoNode;
-	std::set<ui::SwfNodeId> isolated_ancestors;
 	std::map<std::string, SwfTilt> tilt_paths;
 	std::unordered_map<ui::SwfNodeId, SwfTilt> tilts;
 	std::map<std::string, std::string> renderer_paths;
@@ -2016,29 +2016,6 @@ struct Bf3SwfView::Impl {
 		g_counters.build_seconds += bf3::core::seconds_since(build_start);
 	}
 
-	uint32_t drawables(ui::SwfNodeId p_id) {
-		const ui::SwfSceneNode *n = node(p_id);
-		if (n == nullptr) {
-			return 0;
-		}
-		NodeRec &rec = rec_for(p_id);
-		build(p_id, rec);
-		uint32_t count = 0;
-		for (const Piece &p : rec.pieces) {
-			count += p.has_bounds ? 1 : 0;
-		}
-		for (const ui::SwfNodeId c : n->children) {
-			if (count >= 2) {
-				break;
-			}
-			const ui::SwfSceneNode *k = node(c);
-			if (k != nullptr && k->clip_depth == 0 && !k->is_mask) {
-				count += drawables(c);
-			}
-		}
-		return count;
-	}
-
 	Canvas &canvas_for(CanvasKind p_kind, ui::SwfNodeId p_owner, Canvas *p_parent) {
 		const uint64_t key = canvas_key(p_kind, p_owner);
 		const ui::SwfSceneNode *owner_node = p_kind == CanvasKind::Root ? nullptr : node(p_owner);
@@ -2228,153 +2205,86 @@ struct Bf3SwfView::Impl {
 		}
 	}
 
-	struct Ctx {
-		bool additive = false;
-		bool alpha = false;
-		bool enabled = true;
-	};
+	struct Planner final : ui::SwfLayerVisitor {
+		Impl &view;
+		Canvas &root;
+		std::vector<Canvas *> layers;
 
-	void plan_node(ui::SwfNodeId p_id, Canvas &r_canvas, Ctx p_ctx) {
-		const ui::SwfSceneNode *n = node(p_id);
-		if (n == nullptr) {
-			return;
+		Planner(Impl &p_view, Canvas &p_root) : view(p_view), root(p_root) {}
+
+		Canvas &canvas_of(uint32_t p_layer) { return p_layer == ui::kSwfNoLayer ? root : *layers[p_layer]; }
+
+		void seen(const ui::SwfSceneNode &p_node) override {
+			NodeRec &rec = view.rec_for(p_node.id);
+			rec.seen = true;
+			rec.layer = nullptr;
 		}
-		NodeRec &rec = rec_for(p_id);
-		rec.seen = true;
-		rec.layer = nullptr;
-		bool own = true;
-		if (!p_ctx.enabled) {
-			if (p_id == isolated_id) {
-				p_ctx.enabled = true;
-			} else if (isolated_ancestors.count(p_id) != 0) {
-				own = false;
+
+		uint32_t pieces(const ui::SwfSceneNode &p_node) override {
+			NodeRec &rec = view.rec_for(p_node.id);
+			view.build(p_node.id, rec);
+			return uint32_t(std::count_if(
+					rec.pieces.begin(), rec.pieces.end(), [](const Piece &p_p) { return p_p.has_bounds; }));
+		}
+
+		bool engine_target(const ui::SwfSceneNode &p_node) override {
+			const auto rt = view.renderers.find(p_node.id);
+			return rt != view.renderers.end() && rt->second.find(";i") != std::string::npos;
+		}
+
+		void target(const ui::SwfSceneNode &p_node, uint32_t p_layer) override {
+			view.plan_target(p_node.id, view.renderers.at(p_node.id), canvas_of(p_layer));
+		}
+
+		void layer_opened(uint32_t, const ui::SwfLayerWalkNode &p_layer) override {
+			const CanvasKind kind = p_layer.kind == ui::SwfLayerKind::Filter ? CanvasKind::Filter
+					: p_layer.kind == ui::SwfLayerKind::Blend				 ? CanvasKind::Blend
+																			 : CanvasKind::Mask;
+			Canvas &parent = p_layer.parent == ui::kSwfNoLayer ? root : *layers[p_layer.parent];
+			Canvas &c = view.canvas_for(kind, p_layer.owner, &parent);
+			layers.push_back(&c);
+			if (kind != CanvasKind::Mask) {
+				c.additive = p_layer.additive;
+				view.rec_for(p_layer.owner).layer = &c;
+			}
+			if (kind == CanvasKind::Filter) {
+				view.setup_filter_stages(c, p_layer.filters);
+				view.stats.filter_layers++;
+				view.stats.filter_passes += uint32_t(p_layer.filters.size());
+				for (const ui::SwfFilter &fl : p_layer.filters) {
+					(fl.kind == ui::SwfFilterKind::DropShadow			 ? view.stats.drop_shadow_passes
+									: fl.kind == ui::SwfFilterKind::Glow ? view.stats.glow_passes
+																		 : view.stats.blur_passes)++;
+				}
+			} else if (kind == CanvasKind::Blend) {
+				view.stats.blend_layers++;
 			} else {
-				return;
+				view.stats.mask_groups++;
 			}
+			view.link_viewports(c);
+			view.place_quad(c);
 		}
-		if (!p_ctx.alpha && n->is_mask && n->clip_depth == 0) {
-			return;
-		}
-		const ui::SwfSceneNode *script_mask = !p_ctx.alpha && own ? node(n->script_mask) : nullptr;
-		Canvas *canvas = &r_canvas;
-		if (script_mask != nullptr) {
-			Canvas &g = canvas_for(CanvasKind::Mask, script_mask->id, &r_canvas);
-			link_viewports(g);
-			place_quad(g);
-			stats.mask_groups++;
-			canvas = &g;
-		}
-		if (!p_ctx.alpha && own) {
-			const auto rt = renderers.find(p_id);
-			if (rt != renderers.end() && rt->second.find(";i") != std::string::npos) {
-				plan_target(p_id, rt->second, *canvas);
-				plan_script_mask(script_mask, *canvas, p_ctx);
-				return;
-			}
-			std::vector<ui::SwfFilter> filters;
-			for (const ui::SwfFilter &f : n->filters) {
-				if (ui::swf_filter_supported(f)) {
-					filters.push_back(f);
-				} else {
-					stats.unsupported_filters++;
-					warn_once(std::string("filter ") + ui::swf_filter_kind_name(f.kind) + " not drawn on " + n->path);
-				}
-			}
-			const uint8_t blend = n->blend_mode;
-			const bool add = blend == ui::swf_blend::kAdd;
-			const bool layer = blend == ui::swf_blend::kLayer;
-			if (blend > ui::swf_blend::kLayer && !add) {
-				stats.unsupported_blends++;
-				warn_once("blend mode " + std::to_string(blend) + " drawn as normal on " + n->path);
-			}
-			if (filters_enabled && !filters.empty()) {
-				Canvas &f = canvas_for(CanvasKind::Filter, p_id, canvas);
-				f.additive = add || p_ctx.additive;
-				setup_filter_stages(f, filters);
-				link_viewports(f);
-				place_quad(f);
-				rec.layer = &f;
-				stats.filter_layers++;
-				stats.filter_passes += uint32_t(filters.size());
-				for (const ui::SwfFilter &fl : filters) {
-					(fl.kind == ui::SwfFilterKind::DropShadow ? stats.drop_shadow_passes
-									: fl.kind == ui::SwfFilterKind::Glow ? stats.glow_passes
-																		  : stats.blur_passes)++;
-				}
-				canvas = &f;
-				p_ctx.additive = false;
-			} else if (add || layer) {
-				if (drawables(p_id) >= 2) {
-					Canvas &b = canvas_for(CanvasKind::Blend, p_id, canvas);
-					b.additive = add || p_ctx.additive;
-					link_viewports(b);
-					place_quad(b);
-					rec.layer = &b;
-					stats.blend_layers++;
-					canvas = &b;
-					p_ctx.additive = false;
-				} else if (add) {
-					p_ctx.additive = true;
-				}
-			}
-		}
-		build(p_id, rec);
-		if (own) {
-			attach_pieces(p_id, rec, *canvas, p_ctx.alpha, p_ctx.additive);
-		}
-		plan_range(n->children, 0, n->children.size(), *canvas, p_ctx);
-		if (script_mask != nullptr) {
-			plan_script_mask(script_mask, canvases[canvas_key(CanvasKind::Mask, script_mask->id)], p_ctx);
-		}
-	}
 
-	void plan_script_mask(const ui::SwfSceneNode *p_mask, Canvas &r_group, Ctx p_ctx) {
-		if (p_mask == nullptr) {
-			return;
+		void attach(
+				const ui::SwfSceneNode &p_node, uint32_t p_layer, bool p_alpha, bool p_additive, bool p_own) override {
+			NodeRec &rec = view.rec_for(p_node.id);
+			view.build(p_node.id, rec);
+			if (p_own) {
+				view.attach_pieces(p_node.id, rec, canvas_of(p_layer), p_alpha, p_additive);
+			}
 		}
-		p_ctx.alpha = true;
-		p_ctx.additive = false;
-		p_ctx.enabled = true;
-		plan_node(p_mask->id, r_group, p_ctx);
-	}
 
-	void plan_range(const std::vector<ui::SwfNodeId> &p_kids, size_t p_begin, size_t p_end, Canvas &r_canvas, Ctx p_ctx) {
-		for (size_t i = p_begin; i < p_end; ++i) {
-			const ui::SwfSceneNode *c = node(p_kids[i]);
-			if (c == nullptr) {
-				continue;
-			}
-			if (c->clip_depth == 0) {
-				plan_node(p_kids[i], r_canvas, p_ctx);
-				continue;
-			}
-			size_t j = i + 1;
-			while (j < p_end) {
-				const ui::SwfSceneNode *k = node(p_kids[j]);
-				if (k == nullptr || k->depth > int32_t(c->clip_depth)) {
-					break;
-				}
-				++j;
-			}
-			if (p_ctx.alpha) {
-				rec_for(p_kids[i]).seen = true;
-				plan_range(p_kids, i + 1, j, r_canvas, p_ctx);
-				i = j - 1;
-				continue;
-			}
-			Canvas &g = canvas_for(CanvasKind::Mask, p_kids[i], &r_canvas);
-			link_viewports(g);
-			place_quad(g);
-			stats.mask_groups++;
-			Ctx mask_ctx = p_ctx;
-			mask_ctx.alpha = true;
-			mask_ctx.additive = false;
-			mask_ctx.enabled = true;
-			plan_node(p_kids[i], g, mask_ctx);
-			plan_range(p_kids, i + 1, j, g, p_ctx);
-			i = j - 1;
+		void unsupported_filter(const ui::SwfSceneNode &p_node, const ui::SwfFilter &p_filter) override {
+			view.stats.unsupported_filters++;
+			view.warn_once(
+					std::string("filter ") + ui::swf_filter_kind_name(p_filter.kind) + " not drawn on " + p_node.path);
 		}
-	}
+
+		void unsupported_blend(const ui::SwfSceneNode &p_node) override {
+			view.stats.unsupported_blends++;
+			view.warn_once("blend mode " + std::to_string(p_node.blend_mode) + " drawn as normal on " + p_node.path);
+		}
+	};
 
 	void plan_target(ui::SwfNodeId p_id, const std::string &p_renderer, Canvas &r_canvas) {
 		Target &t = targets[p_id];
@@ -2469,14 +2379,7 @@ struct Bf3SwfView::Impl {
 				renderers[id] = r;
 			}
 		}
-		isolated_id = ui::kSwfNoNode;
-		isolated_ancestors.clear();
-		if (!isolated.empty()) {
-			isolated_id = scene->find(isolated);
-			for (const ui::SwfSceneNode *a = isolated_id != ui::kSwfNoNode ? node(node(isolated_id)->parent) : nullptr; a != nullptr; a = node(a->parent)) {
-				isolated_ancestors.insert(a->id);
-			}
-		}
+		isolated_id = isolated.empty() ? ui::kSwfNoNode : scene->find(isolated);
 	}
 
 	void plan() {
@@ -2508,9 +2411,19 @@ struct Bf3SwfView::Impl {
 		rs->viewport_set_parent_viewport(root.content.viewport, owner_viewport);
 		root.origin = Vector2i();
 		root.size = target_size;
-		Ctx ctx;
-		ctx.enabled = isolated.empty();
-		plan_node(scene->root(), root, ctx);
+		ui::SwfPlanWalkOptions walk_options;
+		walk_options.fonts = assets != nullptr ? assets->swf_fonts() : nullptr;
+		walk_options.filters_enabled = filters_enabled;
+		walk_options.isolating = !isolated.empty();
+		walk_options.isolated = isolated_id;
+		for (const auto &[id, tilt] : tilts) {
+			walk_options.tilted.push_back(id);
+		}
+		Planner planner(*this, root);
+		const ui::SwfLayerWalk walk = ui::swf_walk_layers(*scene, walk_options, planner);
+		for (size_t i = 0; i < walk.layers.size(); ++i) {
+			planner.layers[i]->route = walk.layers[i].route;
+		}
 		for (auto it = recs.begin(); it != recs.end();) {
 			if (node(it->first) == nullptr) {
 				park_rec(std::move(it->second));

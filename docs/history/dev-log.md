@@ -2866,3 +2866,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * godot.ui_open_census compares the smallest triangle array with its own 32, so the row fails if the primitive threshold falls.
 * godot.ui_open_census requires swf_layer_walk and the renderer to count the same filter, mask and blend layers on all 30 screens; they agree.
 * Closing a screen stops its live targets (visibility notification), the closed menu's overview detaches, and godot.ui_open_census drives hidden screens through Bf3UiScreens.
+* The renderer and swf_layer_walk run one walk, swf_walk_layers; ui.layer_plan's table is byte-identical.

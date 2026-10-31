@@ -156,41 +156,27 @@ void add_shape_pieces(const SwfScene &p_scene, const SwfSceneNode &p_node, const
 	}
 }
 
-bool renderer_target(const std::vector<SwfNodeId> &p_targets, SwfNodeId p_id) {
-	return std::find(p_targets.begin(), p_targets.end(), p_id) != p_targets.end();
-}
-
-struct Walker {
+struct LayerWalker {
 	const SwfScene &scene;
-	const SwfFontSet *fonts = nullptr;
-	std::vector<SwfNodeId> tilted;
-	std::vector<SwfNodeId> targets;
+	const SwfPlanWalkOptions &options;
+	SwfLayerVisitor &visitor;
 	SwfLayerWalk out;
-	std::vector<SwfBounds> nodes;
-	std::vector<SwfBounds> masks;
-	std::unordered_map<SwfNodeId, SwfNodePieces> pieces;
-	std::set<SwfNodeId> mask_layers;
+	std::set<SwfNodeId> isolated_ancestors;
 
 	struct Ctx {
+		bool additive = false;
 		bool alpha = false;
+		bool enabled = true;
 	};
 
 	const SwfSceneNode *node(SwfNodeId p_id) const { return scene.node(p_id); }
-
-	const SwfNodePieces &pieces_of(const SwfSceneNode &p_n) {
-		const auto it = pieces.find(p_n.id);
-		if (it != pieces.end()) {
-			return it->second;
-		}
-		return pieces.emplace(p_n.id, swf_node_pieces(scene, fonts, p_n)).first->second;
-	}
 
 	uint32_t drawables(SwfNodeId p_id) {
 		const SwfSceneNode *n = node(p_id);
 		if (n == nullptr) {
 			return 0;
 		}
-		uint32_t count = pieces_of(*n).count;
+		uint32_t count = visitor.pieces(*n);
 		for (const SwfNodeId c : n->children) {
 			if (count >= 2) {
 				break;
@@ -203,58 +189,77 @@ struct Walker {
 		return count;
 	}
 
-	uint32_t add_layer(SwfLayerKind p_kind, const SwfSceneNode &p_owner, uint32_t p_parent) {
+	uint32_t add_layer(SwfLayerKind p_kind, const SwfSceneNode &p_owner, uint32_t p_parent,
+			std::vector<SwfFilter> p_filters = {}, bool p_additive = false) {
 		const uint32_t index = uint32_t(out.layers.size());
 		SwfLayerWalkNode l;
 		l.owner = p_owner.id;
 		l.kind = p_kind;
 		l.path = p_owner.path;
 		l.parent = p_parent;
+		l.filters = std::move(p_filters);
+		l.additive = p_additive;
 		out.layers.push_back(std::move(l));
-		nodes.emplace_back();
-		masks.emplace_back();
 		if (p_parent != kSwfNoLayer) {
 			out.layers[p_parent].children.push_back(index);
 		}
+		visitor.layer_opened(index, out.layers[index]);
 		return index;
 	}
 
-	void attach(const SwfSceneNode &p_n, uint32_t p_layer, bool p_alpha) {
-		const SwfNodePieces &p = pieces_of(p_n);
-		if (p_layer == kSwfNoLayer) {
-			out.root_items += p.count;
-		}
-		if (!p.has_bounds || (!p_alpha && !p_n.world_visible) || p_layer == kSwfNoLayer) {
+	void note_tilt(const SwfSceneNode &p_node, uint32_t p_layer) {
+		if (options.tilted.empty() || p_layer == kSwfNoLayer) {
 			return;
 		}
-		const SwfBounds b = swf_project_rect(p.local, swf_affine(p.frame->world));
-		(p_alpha ? masks[p_layer] : nodes[p_layer]).add(b);
+		SwfLayerWalkNode &l = out.layers[p_layer];
+		const SwfNodeId floor = l.kind == SwfLayerKind::Filter ? l.owner : kSwfNoNode;
+		for (const SwfSceneNode *a = &p_node; a != nullptr && a->id != floor; a = node(a->parent)) {
+			l.tilted_inside = l.tilted_inside ||
+					std::find(options.tilted.begin(), options.tilted.end(), a->id) != options.tilted.end();
+		}
 	}
 
-	void mask_group(const SwfSceneNode &p_mask, uint32_t p_parent, uint32_t &r_group) {
-		r_group = add_layer(SwfLayerKind::Mask, p_mask, p_parent);
-		mask_layers.insert(p_mask.id);
+	void walk_mask(const SwfSceneNode &p_mask, uint32_t p_group) {
+		Ctx alpha;
+		alpha.alpha = true;
+		walk_node(p_mask.id, p_group, alpha);
 	}
 
 	void walk_node(SwfNodeId p_id, uint32_t p_layer, Ctx p_ctx) {
 		const SwfSceneNode *n = node(p_id);
-		if (n == nullptr || (!p_ctx.alpha && n->is_mask && n->clip_depth == 0)) {
+		if (n == nullptr) {
 			return;
 		}
-		const SwfSceneNode *script_mask = !p_ctx.alpha ? node(n->script_mask) : nullptr;
+		visitor.seen(*n);
+		bool own = true;
+		if (!p_ctx.enabled) {
+			if (p_id == options.isolated) {
+				p_ctx.enabled = true;
+			} else if (isolated_ancestors.count(p_id) != 0) {
+				own = false;
+			} else {
+				return;
+			}
+		}
+		if (!p_ctx.alpha && n->is_mask && n->clip_depth == 0) {
+			return;
+		}
+		const SwfSceneNode *script_mask = !p_ctx.alpha && own ? node(n->script_mask) : nullptr;
 		uint32_t layer = p_layer;
 		uint32_t group = kSwfNoLayer;
 		if (script_mask != nullptr) {
-			mask_group(*script_mask, p_layer, group);
+			group = add_layer(SwfLayerKind::Mask, *script_mask, p_layer);
 			layer = group;
 		}
-		if (!p_ctx.alpha) {
-			if (renderer_target(targets, p_id)) {
+		if (!p_ctx.alpha && own) {
+			if (visitor.engine_target(*n)) {
 				++out.engine_targets;
+				if (layer != kSwfNoLayer) {
+					out.layers[layer].has_targets = true;
+				}
+				visitor.target(*n, layer);
 				if (script_mask != nullptr) {
-					Ctx alpha;
-					alpha.alpha = true;
-					walk_node(script_mask->id, group, alpha);
+					walk_mask(*script_mask, group);
 				}
 				return;
 			}
@@ -262,31 +267,39 @@ struct Walker {
 			for (const SwfFilter &f : n->filters) {
 				if (swf_filter_supported(f)) {
 					filters.push_back(f);
+				} else {
+					visitor.unsupported_filter(*n, f);
 				}
 			}
 			const bool add = n->blend_mode == swf_blend::kAdd;
 			const bool blend_layer = n->blend_mode == swf_blend::kLayer;
-			if (!filters.empty()) {
-				layer = add_layer(SwfLayerKind::Filter, *n, layer);
+			if (n->blend_mode > swf_blend::kLayer && !add) {
+				visitor.unsupported_blend(*n);
+			}
+			if (options.filters_enabled && !filters.empty()) {
 				out.multi_filter_layers += filters.size() >= 2 ? 1u : 0u;
-				out.layers[layer].filters = std::move(filters);
+				layer = add_layer(SwfLayerKind::Filter, *n, layer, std::move(filters), add || p_ctx.additive);
+				p_ctx.additive = false;
 			} else if (add || blend_layer) {
 				if (drawables(p_id) >= 2) {
-					layer = add_layer(SwfLayerKind::Blend, *n, layer);
+					layer = add_layer(SwfLayerKind::Blend, *n, layer, {}, add || p_ctx.additive);
+					p_ctx.additive = false;
 				} else {
 					++out.direct_blends;
+					p_ctx.additive = p_ctx.additive || add;
 				}
 			}
-			if (layer == p_layer && n->kind == SwfNodeKind::EditText && pieces_of(*n).count != 0) {
+			if (layer == p_layer && n->kind == SwfNodeKind::EditText && visitor.pieces(*n) != 0) {
 				++out.plain_text_fields;
 			}
 		}
-		attach(*n, layer, p_ctx.alpha);
+		visitor.attach(*n, layer, p_ctx.alpha, p_ctx.additive, own);
+		if (own && !p_ctx.alpha) {
+			note_tilt(*n, layer);
+		}
 		walk_range(n->children, 0, n->children.size(), layer, p_ctx);
 		if (script_mask != nullptr) {
-			Ctx alpha;
-			alpha.alpha = true;
-			walk_node(script_mask->id, group, alpha);
+			walk_mask(*script_mask, group);
 		}
 	}
 
@@ -309,14 +322,16 @@ struct Walker {
 				++j;
 			}
 			if (p_ctx.alpha) {
+				visitor.seen(*c);
 				walk_range(p_kids, i + 1, j, p_layer, p_ctx);
 				i = j - 1;
 				continue;
 			}
-			uint32_t group = kSwfNoLayer;
-			mask_group(*c, p_layer, group);
-			Ctx mask_ctx;
+			const uint32_t group = add_layer(SwfLayerKind::Mask, *c, p_layer);
+			Ctx mask_ctx = p_ctx;
 			mask_ctx.alpha = true;
+			mask_ctx.additive = false;
+			mask_ctx.enabled = true;
 			walk_node(p_kids[i], group, mask_ctx);
 			walk_range(p_kids, i + 1, j, group, p_ctx);
 			i = j - 1;
@@ -324,41 +339,67 @@ struct Walker {
 	}
 
 	void classify() {
-		std::vector<bool> leaf(out.layers.size());
-		for (size_t i = 0; i < out.layers.size(); ++i) {
-			leaf[i] = out.layers[i].children.empty();
-		}
-		for (size_t i = 0; i < out.layers.size(); ++i) {
-			SwfLayerWalkNode &l = out.layers[i];
-			l.has_nodes = !nodes[i].empty();
-			if (l.has_nodes) {
-				l.nodes = nodes[i].rect();
-			}
-			l.has_mask = !masks[i].empty();
-			if (l.has_mask) {
-				l.mask = masks[i].rect();
-			}
+		for (SwfLayerWalkNode &l : out.layers) {
 			if (l.kind == SwfLayerKind::Mask) {
-				const bool rect = swf_rect_mask(scene, fonts, l.owner, tilted).has_value();
+				const bool rect = swf_rect_mask(scene, options.fonts, l.owner, options.tilted).has_value();
 				l.route = rect ? SwfLayerClass::Clip : SwfLayerClass::OwnSurface;
 				out.non_rect_masks += rect ? 0u : 1u;
 			}
 		}
-		for (size_t i = 0; i < out.layers.size(); ++i) {
-			SwfLayerWalkNode &l = out.layers[i];
-			if (l.kind != SwfLayerKind::Filter) {
-				if (l.kind == SwfLayerKind::Blend) {
-					l.route = SwfLayerClass::OwnSurface;
-				}
+		for (SwfLayerWalkNode &l : out.layers) {
+			if (l.kind == SwfLayerKind::Mask) {
 				continue;
 			}
 			bool ancestors_clear = true;
 			for (uint32_t a = l.parent; a != kSwfNoLayer; a = out.layers[a].parent) {
 				ancestors_clear = ancestors_clear && out.layers[a].route == SwfLayerClass::Clip;
 			}
-			l.route = l.filters.size() == 1 && leaf[i] && ancestors_clear ? SwfLayerClass::Page
-																		  : SwfLayerClass::OwnSurface;
+			const bool leaf = l.children.empty() && !l.has_targets;
+			const bool one_stage = l.kind == SwfLayerKind::Filter && l.filters.size() == 1;
+			l.route = one_stage && leaf && ancestors_clear && !l.tilted_inside ? SwfLayerClass::Page
+																			   : SwfLayerClass::OwnSurface;
 		}
+	}
+};
+
+struct BoundsVisitor final : SwfLayerVisitor {
+	const SwfScene &scene;
+	const SwfFontSet *fonts = nullptr;
+	std::vector<SwfNodeId> targets;
+	std::vector<SwfBounds> nodes;
+	std::vector<SwfBounds> masks;
+	std::unordered_map<SwfNodeId, SwfNodePieces> known;
+	uint32_t root_items = 0;
+
+	explicit BoundsVisitor(const SwfScene &p_scene) : scene(p_scene) {}
+
+	const SwfNodePieces &pieces_of(const SwfSceneNode &p_n) {
+		const auto it = known.find(p_n.id);
+		if (it != known.end()) {
+			return it->second;
+		}
+		return known.emplace(p_n.id, swf_node_pieces(scene, fonts, p_n)).first->second;
+	}
+
+	void seen(const SwfSceneNode &) override {}
+	uint32_t pieces(const SwfSceneNode &p_node) override { return pieces_of(p_node).count; }
+	bool engine_target(const SwfSceneNode &p_node) override {
+		return std::find(targets.begin(), targets.end(), p_node.id) != targets.end();
+	}
+	void target(const SwfSceneNode &, uint32_t) override {}
+	void layer_opened(uint32_t, const SwfLayerWalkNode &) override {
+		nodes.emplace_back();
+		masks.emplace_back();
+	}
+	void attach(const SwfSceneNode &p_node, uint32_t p_layer, bool p_alpha, bool, bool) override {
+		const SwfNodePieces &p = pieces_of(p_node);
+		if (p_layer == kSwfNoLayer) {
+			root_items += p.count;
+		}
+		if (!p.has_bounds || (!p_alpha && !p_node.world_visible) || p_layer == kSwfNoLayer) {
+			return;
+		}
+		(p_alpha ? masks[p_layer] : nodes[p_layer]).add(swf_project_rect(p.local, swf_affine(p.frame->world)));
 	}
 };
 
@@ -600,15 +641,44 @@ const char *swf_layer_class_name(SwfLayerClass p_class) {
 	return "?";
 }
 
-SwfLayerWalk swf_layer_walk(const SwfScene &p_scene, const SwfLayerWalkOptions &p_options) {
-	Walker w{ p_scene };
-	w.fonts = p_options.fonts;
-	w.tilted = resolve(p_scene, p_options.tilted_paths);
-	w.targets = resolve(p_scene, p_options.target_paths);
+SwfLayerWalk swf_walk_layers(const SwfScene &p_scene, const SwfPlanWalkOptions &p_options, SwfLayerVisitor &r_visitor) {
+	LayerWalker w{ p_scene, p_options, r_visitor };
 	w.out.stage = p_scene.stage();
-	w.walk_node(p_scene.root(), kSwfNoLayer, Walker::Ctx{});
+	LayerWalker::Ctx ctx;
+	if (p_options.isolating) {
+		ctx.enabled = false;
+		const SwfSceneNode *isolated = p_scene.node(p_options.isolated);
+		for (const SwfSceneNode *a = isolated != nullptr ? p_scene.node(isolated->parent) : nullptr; a != nullptr;
+				a = p_scene.node(a->parent)) {
+			w.isolated_ancestors.insert(a->id);
+		}
+	}
+	w.walk_node(p_scene.root(), kSwfNoLayer, ctx);
 	w.classify();
 	return std::move(w.out);
+}
+
+SwfLayerWalk swf_layer_walk(const SwfScene &p_scene, const SwfLayerWalkOptions &p_options) {
+	BoundsVisitor visitor(p_scene);
+	visitor.fonts = p_options.fonts;
+	visitor.targets = resolve(p_scene, p_options.target_paths);
+	SwfPlanWalkOptions walk;
+	walk.fonts = p_options.fonts;
+	walk.tilted = resolve(p_scene, p_options.tilted_paths);
+	SwfLayerWalk out = swf_walk_layers(p_scene, walk, visitor);
+	out.root_items = visitor.root_items;
+	for (size_t i = 0; i < out.layers.size(); ++i) {
+		SwfLayerWalkNode &l = out.layers[i];
+		l.has_nodes = !visitor.nodes[i].empty();
+		if (l.has_nodes) {
+			l.nodes = visitor.nodes[i].rect();
+		}
+		l.has_mask = !visitor.masks[i].empty();
+		if (l.has_mask) {
+			l.mask = visitor.masks[i].rect();
+		}
+	}
+	return out;
 }
 
 SwfLayerWalk swf_layer_walk(const HudScreen &p_screen) {
