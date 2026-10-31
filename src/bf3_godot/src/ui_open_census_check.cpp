@@ -798,24 +798,39 @@ void Bf3UiOpenCensusCheck::census_pages() {
 	const UiPagesCounters at_720 = pages->counters();
 	pages->ensure(Vector2i(kUiOpenCensusWidth, kUiOpenCensusHeight));
 	const UiPagesCounters again = pages->counters();
-	add("the pages are two viewports, kept",
-			made.live_viewports == 2 && at_720.live_viewports == 2 && again.pages_made == at_720.pages_made,
+	const uint64_t frame_bytes = ui::swf_target_bytes(kUiOpenCensusWidth, kUiOpenCensusHeight, ui::kSwfTargetFactor4x);
+	add("the pages are three viewports, kept",
+			made.live_viewports == 3 && at_720.live_viewports == 3 && again.pages_made == at_720.pages_made,
 			bf3::core::fmt("%llu live, %llu made", (unsigned long long)again.live_viewports,
 					(unsigned long long)again.pages_made));
-	add("the pages cost their formula", at_720.bytes == sizes.result_bytes() + sizes.scratch_bytes(),
-			bf3::core::fmt("%.1f MiB for R %dx%d and S %dx%d at %dx%d", double(at_720.bytes) / (1024.0 * 1024.0),
+	add("S and R draw before F", pages->pages_chain_into_frame(),
+			pages->pages_chain_into_frame() ? "S under R under F" : "R is not F's child, or S not R's");
+	add("the pages cost their formula", at_720.bytes == sizes.result_bytes() + sizes.scratch_bytes() + frame_bytes,
+			bf3::core::fmt("%.1f MiB for R %dx%d, S %dx%d and F at %dx%d", double(at_720.bytes) / (1024.0 * 1024.0),
 					sizes.result_width, sizes.result_height, sizes.scratch_width, sizes.scratch_height,
 					kUiOpenCensusWidth, kUiOpenCensusHeight));
 	const uint64_t generation = pages->generation();
+	const RID frame = pages->frame_viewport();
+	pages->end_pass();
+	const uint64_t frame_updates = pages->counters().frame_updates;
 	pages->ensure(Vector2i(kUiOpenCensusWidth * 2, kUiOpenCensusHeight * 2));
 	const UiPagesCounters at_1440 = pages->counters();
 	add("a window size that needs more remakes the pages",
-			pages->generation() != generation && at_1440.live_viewports == 2 &&
+			pages->generation() != generation && at_1440.live_viewports == 3 &&
 					at_1440.bytes ==
 							ui::swf_page_sizes(kUiOpenCensusWidth * 2, kUiOpenCensusHeight * 2).result_bytes() +
-									ui::swf_page_sizes(kUiOpenCensusWidth * 2, kUiOpenCensusHeight * 2).scratch_bytes(),
+									ui::swf_page_sizes(kUiOpenCensusWidth * 2, kUiOpenCensusHeight * 2)
+											.scratch_bytes() +
+									frame_bytes * 4,
 			bf3::core::fmt("%.1f MiB, %llu live", double(at_1440.bytes) / (1024.0 * 1024.0),
 					(unsigned long long)at_1440.live_viewports));
+	add("a resize keeps F and draws it again",
+			pages->frame_viewport() == frame &&
+					pages->frame_size() == Vector2i(kUiOpenCensusWidth * 2, kUiOpenCensusHeight * 2) &&
+					at_1440.frame_updates == frame_updates + 1 && pages->pages_chain_into_frame(),
+			bf3::core::fmt("%s, %dx%d, %llu update(s)",
+					pages->frame_viewport() == frame ? "same viewport" : "another viewport", pages->frame_size().x,
+					pages->frame_size().y, (unsigned long long)(at_1440.frame_updates - frame_updates)));
 	remove_child(pages);
 	const bool gone = pages->counters().live_viewports == 0 && Bf3UiPages::current() == nullptr;
 	memdelete(pages);

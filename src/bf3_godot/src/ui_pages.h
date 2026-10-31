@@ -18,6 +18,7 @@ struct UiPagesCounters {
 	uint64_t viewport_creates = 0;
 	uint64_t pages_made = 0;
 	uint64_t passes = 0;
+	uint64_t frame_updates = 0;
 	uint64_t own_surface_fallbacks = 0;
 	uint64_t live_viewports = 0;
 	uint64_t live_slots = 0;
@@ -48,6 +49,12 @@ public:
 	godot::RID result_canvas() const { return result_canvas_; }
 	godot::RID scratch_texture() const { return scratch_texture_; }
 	godot::RID result_texture() const { return result_texture_; }
+	godot::RID frame_viewport() const { return frame_viewport_; }
+	godot::RID frame_canvas() const { return frame_canvas_; }
+	godot::RID frame_texture() const { return frame_texture_; }
+	godot::Vector2i frame_size() const { return frame_size_; }
+	bool pages_chain_into_frame() const;
+	void mark_frame();
 	godot::Vector2i scratch_size() const { return godot::Vector2i(sizes_.scratch_width, sizes_.scratch_height); }
 	godot::Vector2i result_size() const { return godot::Vector2i(sizes_.result_width, sizes_.result_height); }
 
@@ -65,6 +72,8 @@ protected:
 
 private:
 	void free_pages();
+	void free_frame();
+	void size_frame(godot::Vector2i p_window);
 	void make_pages(const bf3::core::ui::SwfPageSizes &p_sizes);
 
 	godot::RenderingServer *rs_ = nullptr;
@@ -77,11 +86,18 @@ private:
 	godot::RID result_viewport_;
 	godot::RID result_canvas_;
 	godot::RID result_texture_;
+	godot::RID result_parent_;
+	godot::RID scratch_parent_;
+	godot::RID frame_viewport_;
+	godot::RID frame_canvas_;
+	godot::RID frame_texture_;
+	godot::Vector2i frame_size_;
 	std::vector<godot::RID> in_pass_;
 	uint64_t generation_ = 0;
 	uint64_t frame_ = UINT64_MAX;
 	uint64_t pass_serial_ = 1;
 	bool pass_requested_ = false;
+	bool frame_requested_ = false;
 	bool sizes_fixed_ = false;
 	UiPagesCounters counters_;
 };

@@ -44,6 +44,7 @@ Bf3UiPages::Bf3UiPages() : rs_(RenderingServer::get_singleton()) {
 
 Bf3UiPages::~Bf3UiPages() {
 	free_pages();
+	free_frame();
 	swf_view_release_shaders();
 }
 
@@ -63,6 +64,53 @@ void Bf3UiPages::_exit_tree() {
 		g_current = nullptr;
 	}
 	free_pages();
+	free_frame();
+}
+
+void Bf3UiPages::free_frame() {
+	if (!frame_viewport_.is_valid()) {
+		return;
+	}
+	rs_->free_rid(frame_canvas_);
+	rs_->free_rid(frame_viewport_);
+	--counters_.live_viewports;
+	frame_canvas_ = RID();
+	frame_viewport_ = RID();
+	frame_texture_ = RID();
+	frame_size_ = Vector2i();
+	frame_requested_ = false;
+}
+
+void Bf3UiPages::size_frame(Vector2i p_window) {
+	if (!frame_viewport_.is_valid()) {
+		const RID owner = is_inside_tree() && get_viewport() != nullptr ? get_viewport()->get_viewport_rid() : RID();
+		frame_viewport_ = make_page_viewport(rs_, RenderingServer::VIEWPORT_MSAA_4X,
+				RenderingServer::VIEWPORT_CLEAR_ALWAYS, p_window.x, p_window.y, owner);
+		frame_canvas_ = rs_->canvas_create();
+		rs_->viewport_attach_canvas(frame_viewport_, frame_canvas_);
+		frame_texture_ = rs_->viewport_get_texture(frame_viewport_);
+		frame_size_ = p_window;
+		++counters_.viewport_creates;
+		++counters_.live_viewports;
+	} else if (p_window != frame_size_) {
+		frame_size_ = p_window;
+		rs_->viewport_set_size(frame_viewport_, p_window.x, p_window.y);
+		mark_frame();
+	}
+}
+
+void Bf3UiPages::mark_frame() {
+	if (frame_requested_ || !frame_viewport_.is_valid()) {
+		return;
+	}
+	frame_requested_ = true;
+	++counters_.frame_updates;
+	rs_->viewport_set_update_mode(frame_viewport_, RenderingServer::VIEWPORT_UPDATE_ONCE);
+}
+
+bool Bf3UiPages::pages_chain_into_frame() const {
+	return frame_viewport_.is_valid() && result_parent_ == frame_viewport_ && result_viewport_.is_valid() &&
+			scratch_parent_ == result_viewport_;
 }
 
 void Bf3UiPages::free_pages() {
@@ -72,6 +120,8 @@ void Bf3UiPages::free_pages() {
 		}
 	}
 	counters_.live_viewports -= scratch_viewport_.is_valid() ? 2u : 0u;
+	result_parent_ = RID();
+	scratch_parent_ = RID();
 	scratch_canvas_ = RID();
 	result_canvas_ = RID();
 	scratch_viewport_ = RID();
@@ -91,6 +141,7 @@ void Bf3UiPages::use_sizes(const ui::SwfPageSizes &p_sizes) {
 }
 
 void Bf3UiPages::ensure(Vector2i p_window) {
+	size_frame(p_window);
 	const ui::SwfPageSizes want = ui::swf_page_sizes(p_window.x, p_window.y);
 	if (sizes_fixed_ ||
 			(scratch_viewport_.is_valid() && want.result_width == sizes_.result_width &&
@@ -104,11 +155,12 @@ void Bf3UiPages::ensure(Vector2i p_window) {
 void Bf3UiPages::make_pages(const ui::SwfPageSizes &p_sizes) {
 	free_pages();
 	sizes_ = p_sizes;
-	const RID owner = is_inside_tree() && get_viewport() != nullptr ? get_viewport()->get_viewport_rid() : RID();
+	result_parent_ = frame_viewport_;
 	result_viewport_ = make_page_viewport(rs_, RenderingServer::VIEWPORT_MSAA_DISABLED,
-			RenderingServer::VIEWPORT_CLEAR_ONLY_NEXT_FRAME, sizes_.result_width, sizes_.result_height, owner);
+			RenderingServer::VIEWPORT_CLEAR_ONLY_NEXT_FRAME, sizes_.result_width, sizes_.result_height, result_parent_);
 	scratch_viewport_ = make_page_viewport(rs_, RenderingServer::VIEWPORT_MSAA_4X,
 			RenderingServer::VIEWPORT_CLEAR_ALWAYS, sizes_.scratch_width, sizes_.scratch_height, result_viewport_);
+	scratch_parent_ = result_viewport_;
 	result_canvas_ = rs_->canvas_create();
 	scratch_canvas_ = rs_->canvas_create();
 	rs_->viewport_attach_canvas(result_viewport_, result_canvas_);
@@ -137,6 +189,7 @@ void Bf3UiPages::end_pass() {
 	}
 	in_pass_.clear();
 	pass_requested_ = false;
+	frame_requested_ = false;
 	if (scratch_viewport_.is_valid()) {
 		pass_.emplace(sizes_.scratch_width, sizes_.scratch_height);
 	}
@@ -185,7 +238,9 @@ UiPagesCounters Bf3UiPages::counters() const {
 	UiPagesCounters out = counters_;
 	out.live_slots = result_ ? result_->live_slots() : 0;
 	out.used_px = result_ ? result_->used_px() : 0;
-	out.bytes = scratch_viewport_.is_valid() ? sizes_.result_bytes() + sizes_.scratch_bytes() : 0;
+	out.bytes = (scratch_viewport_.is_valid() ? sizes_.result_bytes() + sizes_.scratch_bytes() : 0) +
+			(frame_viewport_.is_valid() ? ui::swf_target_bytes(frame_size_.x, frame_size_.y, ui::kSwfTargetFactor4x)
+										: 0);
 	return out;
 }
 
