@@ -2858,3 +2858,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Filter, mask and blend layers make no viewport until they have a size; godot.ui_open_census: 637 viewports thrown away over the 30 screens before, 0 now.
 * Filter stages share refcounted materials keyed on parameters and read TEXTURE_PIXEL_SIZE; godot.ui_open_census: 305 materials for 305 stages before, 81 now.
 * Hidden Bf3UiScreens views skip render_dirty and keep their flags; godot.ui_open_census: 57 viewport updates hidden on ingamemenump before, 0 now, 57 on show.
+* architecture.md records the primitive rule, first-size viewports, shared filter materials, the hidden skip, swf_layer_plan and Godot's MSAA monitor overcount.
