@@ -175,6 +175,8 @@ public:
 	godot::RID item_material() const;
 	uint32_t surfaces_off_frame() const;
 	uint32_t filter_stages_without_viewport() const;
+	uint32_t own_stages_sampling_a_page() const;
+	uint32_t page_samples_restored() const;
 	bool page_fills_pending() const;
 	uint32_t paged_layers() const;
 	uint32_t paged_quads_shown() const;

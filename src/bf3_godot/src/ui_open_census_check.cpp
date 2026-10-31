@@ -666,6 +666,22 @@ void Bf3UiOpenCensusCheck::census_page_overflow(Bf3UiPages &r_pages) {
 	sync_all();
 	settle_all();
 	const UiPagesCounters after_small = r_pages.counters();
+	const auto own_sampling = [&views] {
+		uint32_t stale = 0;
+		for (const Bf3SwfView *v : views) {
+			stale += v->own_stages_sampling_a_page();
+		}
+		return stale;
+	};
+	const auto restored = [&views] {
+		uint32_t count = 0;
+		for (const Bf3SwfView *v : views) {
+			count += v->page_samples_restored();
+		}
+		return count;
+	};
+	add("a stage back on its own surface samples its whole texture", own_sampling() == 0 && restored() != 0,
+			bf3::core::fmt("%u still on a page's rect, %u restored", own_sampling(), restored()));
 	add("remade pages refill every view, over several passes",
 			after_small.passes - before_small.passes > 1 && !pending() && stages_without() == 0,
 			bf3::core::fmt("%llu pass(es) for %zu views with S %dx%d",
@@ -685,7 +701,8 @@ void Bf3UiOpenCensusCheck::census_page_overflow(Bf3UiPages &r_pages) {
 	settle_all();
 	const UiPagesCounters after_full = r_pages.counters();
 	add("a full R falls back to own surfaces",
-			after_full.own_surface_fallbacks > after_small.own_surface_fallbacks && stages_without() == 0 && !pending(),
+			after_full.own_surface_fallbacks > after_small.own_surface_fallbacks && stages_without() == 0 &&
+					own_sampling() == 0 && !pending(),
 			bf3::core::fmt("%llu fallback(s), %llu px of %d used",
 					(unsigned long long)(after_full.own_surface_fallbacks - after_small.own_surface_fallbacks),
 					(unsigned long long)after_full.used_px, small_result.result_width * small_result.result_height));
@@ -809,7 +826,8 @@ void Bf3UiOpenCensusCheck::census_clips(Bf3UiPages &r_pages) {
 		settle_paged_view(r_pages, *other);
 		add("and its clip returns with no item out of place",
 				restored.ok() && other->clip_groups() == other_clips && other->clips_misplaced() == 0 &&
-						other->clip_rect(mask) == other_rect && other->paged_layers() == other_paged,
+						other->clip_rect(mask) == other_rect && other->paged_layers() == other_paged &&
+						other->own_stages_sampling_a_page() == 0,
 				bf3::core::fmt("%u of %u clips, %u misplaced, %s", other->clip_groups(), other_clips,
 						other->clips_misplaced(), rect_text(other->clip_rect(mask)).c_str()));
 		remove_child(other);

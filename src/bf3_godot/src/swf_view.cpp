@@ -894,6 +894,7 @@ struct Stage {
 	FilterMaterialKey material_key{};
 	StageParams params;
 	bool params_set = false;
+	bool samples_page = false;
 	RID parent;
 };
 
@@ -1100,6 +1101,7 @@ struct Bf3SwfView::Impl {
 	uint64_t pages_generation = 0;
 	std::vector<Canvas *> moved_canvases;
 	bool revealed = false;
+	uint32_t page_samples_restored = 0;
 	SwfViewStats stats;
 
 	Impl() {
@@ -2389,6 +2391,11 @@ struct Bf3SwfView::Impl {
 			if (!paged && !s.surface.canvas.is_valid()) {
 				s.surface.create_canvas_only(rs);
 			}
+			if (!paged && s.samples_page) {
+				rs->canvas_item_set_instance_shader_parameter(s.item, "sample_rect", Vector4(0.0f, 0.0f, 1.0f, 1.0f));
+				s.samples_page = false;
+				++page_samples_restored;
+			}
 			const RID stage_parent = paged ? pages->result_canvas() : s.surface.canvas;
 			if (s.parent != stage_parent) {
 				rs->canvas_item_set_parent(s.item, stage_parent);
@@ -3378,6 +3385,7 @@ struct Bf3SwfView::Impl {
 				Vector4((real_t(p_scratch.x) + 0.5f) / page.x, (real_t(p_scratch.y) + 0.5f) / page.y,
 						(real_t(p_scratch.x + r_c.extent.x) - 0.5f) / page.x,
 						(real_t(p_scratch.y + r_c.extent.y) - 0.5f) / page.y));
+		stage.samples_page = true;
 		rs->canvas_item_set_visible(stage.item, true);
 		pages->note_fill(r_c.group, stage.item);
 		for (const ui::SwfNodeId id : r_c.nodes) {
@@ -4033,6 +4041,21 @@ uint32_t Bf3SwfView::filter_stages_without_viewport() const {
 				c.stages.begin(), c.stages.end(), [](const Stage &p_s) { return !p_s.surface.viewport.is_valid(); }));
 	}
 	return count;
+}
+
+uint32_t Bf3SwfView::own_stages_sampling_a_page() const {
+	uint32_t count = 0;
+	for (const auto &[k, c] : impl_->canvases) {
+		if (!c.paged) {
+			count += uint32_t(
+					std::count_if(c.stages.begin(), c.stages.end(), [](const Stage &p_s) { return p_s.samples_page; }));
+		}
+	}
+	return count;
+}
+
+uint32_t Bf3SwfView::page_samples_restored() const {
+	return impl_->page_samples_restored;
 }
 
 bool Bf3SwfView::page_fills_pending() const {
