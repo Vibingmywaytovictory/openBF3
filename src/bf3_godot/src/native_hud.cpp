@@ -1125,6 +1125,11 @@ void Bf3NativeHud::set_additive_coverage(bool p_coverage) {
 	}
 }
 
+bool Bf3NativeHud::page_fills_pending() const {
+	return std::any_of(views_.begin(), views_.end(),
+			[](const Bf3SwfView *p_view) { return p_view != nullptr && p_view->page_fills_pending(); });
+}
+
 std::array<Ref<Image>, kNativeHudViews> Bf3NativeHud::capture_views() const {
 	std::array<Ref<Image>, kNativeHudViews> out;
 	for (size_t i = 0; i < kNativeHudViews; ++i) {

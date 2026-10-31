@@ -167,6 +167,7 @@ public:
 	void set_ekg_clock(double p_seconds) { ekg_clock_ = p_seconds; }
 	void set_additive_coverage(bool p_coverage);
 	std::array<godot::Ref<godot::Image>, kNativeHudViews> capture_views() const;
+	bool page_fills_pending() const;
 	static godot::Ref<godot::Image> capture_layer(const std::array<godot::Ref<godot::Image>, kNativeHudViews> &p_colour,
 			const std::array<godot::Ref<godot::Image>, kNativeHudViews> &p_coverage);
 	uint64_t kill_feed_rows_added() const;

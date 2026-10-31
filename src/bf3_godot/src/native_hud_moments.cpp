@@ -538,6 +538,10 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 		case Phase::Render:
 			hold(r_session);
 			r_hud.set_visible(true);
+			if (r_hud.page_fills_pending()) {
+				frames_ = 0;
+				return false;
+			}
 			if (++frames_ < kRenderFrames) {
 				return false;
 			}
@@ -555,6 +559,10 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 		case Phase::Coverage: {
 			const Selected &m = moments_[index_];
 			hold(r_session);
+			if (r_hud.page_fills_pending()) {
+				frames_ = 0;
+				return false;
+			}
 			if (++frames_ < kRenderFrames) {
 				return false;
 			}

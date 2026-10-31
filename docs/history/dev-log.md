@@ -2874,3 +2874,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * A paged layer moved by whole window pixels moves only its quad, no S pass.
 * An idle paged layer clears its text arrays after 30 passes and re-emits them on its next pass; 29 arrays fall to 1 on ingamemenump in the census.
 * Leaf blend groups take page slots through a passthrough stage: customizesoldierscreen's 20 spinners no longer allocate at open.
+* HUD moment captures restart their wait while any HUD view has page fills pending; godot.native_hud built, not run.
