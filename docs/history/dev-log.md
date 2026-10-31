@@ -2899,3 +2899,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * ui.layer_plan's when-shown allow-list names each widget, so a new own layer whose path only ends in .bg or .tf no longer passes.
 * Remade pages clear each layer's refusal, so a layer refused at a small window returns to the pages when they have room; census 4 paged when full, 265 after.
 * HUD moment captures cap their wait for page fills at 600 frames and fail a row; godot.native_hud built, not run.
+* Architecture corrects a false claim: hidden views keep their page slots until R runs short (the dev-log line for 8db0df1c overstated it too); only a closed or never-shown view holds none.
