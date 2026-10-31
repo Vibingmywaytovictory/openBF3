@@ -191,6 +191,7 @@ struct SharedShaders {
 	RID filter;
 	RID present;
 	RID present_material;
+	RID item_material;
 	uint32_t users = 0;
 };
 
@@ -211,6 +212,8 @@ const SharedShaders &acquire_shaders(RenderingServer *p_rs) {
 		p_rs->shader_set_code(g_shaders->present, kPresentShader);
 		g_shaders->present_material = p_rs->material_create();
 		p_rs->material_set_shader(g_shaders->present_material, g_shaders->present);
+		g_shaders->item_material = p_rs->material_create();
+		p_rs->material_set_shader(g_shaders->item_material, g_shaders->item);
 	}
 	++g_shaders->users;
 	return *g_shaders;
@@ -220,7 +223,8 @@ void release_shaders(RenderingServer *p_rs) {
 	if (g_shaders == nullptr || --g_shaders->users != 0) {
 		return;
 	}
-	for (const RID &r : { g_shaders->present_material, g_shaders->item, g_shaders->filter, g_shaders->present }) {
+	for (const RID &r : { g_shaders->item_material, g_shaders->present_material, g_shaders->item, g_shaders->filter,
+				 g_shaders->present }) {
 		p_rs->free_rid(r);
 	}
 	g_shaders.reset();
@@ -1104,13 +1108,11 @@ struct Bf3SwfView::Impl {
 		item_shader = shaders.item;
 		filter_shader = shaders.filter;
 		present_material = shaders.present_material;
-		item_material = rs->material_create();
-		rs->material_set_shader(item_material, item_shader);
+		item_material = shaders.item_material;
 	}
 
 	~Impl() {
 		release();
-		rs->free_rid(item_material);
 		release_shaders(rs);
 	}
 
@@ -4028,6 +4030,9 @@ uint32_t Bf3SwfView::filter_stages_without_viewport() const {
 }
 
 bool Bf3SwfView::page_fills_pending() const {
+	if (impl_->hidden_from_render()) {
+		return false;
+	}
 	for (const auto &[k, c] : impl_->canvases) {
 		if (c.paged && c.has_content && (c.render_dirty || c.settling || !c.shown_slot)) {
 			return true;
@@ -4072,6 +4077,10 @@ bool Bf3SwfView::shown_in_frame() const {
 int32_t Bf3SwfView::frame_draw_index() const {
 	const Canvas *root = impl_->borrowed_root();
 	return root != nullptr ? root->frame_index : -1;
+}
+
+RID Bf3SwfView::item_material() const {
+	return impl_->item_material;
 }
 
 bool Bf3SwfView::presents_own_root() const {

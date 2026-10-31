@@ -327,6 +327,7 @@ bf3::core::Status Bf3NativeHud::open_view(size_t p_index) {
 	v->set_name(kNames[p_index]);
 	v->set_playing(false);
 	v->set_frame_order(int32_t(p_index));
+	v->set_skips_hidden_render(true);
 	add_child(v);
 	views_[p_index] = v;
 	const bf3::core::Status st = v->open(asset.movie);

@@ -896,7 +896,12 @@ void Bf3UiOpenCensusCheck::census_frame(Bf3UiPages &r_pages) {
 						(unsigned long long)(r_pages.counters().passes - passes_move)));
 	} else {
 		add("a moved layer redraws F and takes no pass", false, "no paged layer");
+		finish();
+		return;
 	}
+	add("views share one item material",
+			first->item_material().is_valid() && first->item_material() == second->item_material(),
+			first->item_material() == second->item_material() ? "one" : "one per view");
 	add("views draw in their order", first->frame_draw_index() == 0 && second->frame_draw_index() == 1,
 			bf3::core::fmt("%d, %d", first->frame_draw_index(), second->frame_draw_index()));
 	r_pages.end_pass();
@@ -908,11 +913,14 @@ void Bf3UiOpenCensusCheck::census_frame(Bf3UiPages &r_pages) {
 	first->set_frame_order(0);
 	r_pages.end_pass();
 	const uint64_t before_hide = updates();
+	const bf3::core::Status hidden_text = first->scene()->set_text(paged->path, kUiOpenCensusLongText);
 	first->set_visible(false);
 	const bool hidden_at_once = !first->shown_in_frame();
 	const uint64_t hide_updates = updates() - before_hide;
 	r_pages.end_pass();
 	first->sync();
+	add("a hidden view has no fill pending, whatever changed in it", hidden_text.ok() && !first->page_fills_pending(),
+			first->page_fills_pending() ? "pending" : "none pending");
 	add("hiding a view takes it out of F at once, with no sync", hidden_at_once && hide_updates == 1,
 			bf3::core::fmt(
 					"%s, %llu update(s)", hidden_at_once ? "out" : "still in", (unsigned long long)hide_updates));

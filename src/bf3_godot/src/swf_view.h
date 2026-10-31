@@ -172,6 +172,7 @@ public:
 	bool shown_in_frame() const;
 	int32_t frame_draw_index() const;
 	bool presents_own_root() const;
+	godot::RID item_material() const;
 	uint32_t surfaces_off_frame() const;
 	uint32_t filter_stages_without_viewport() const;
 	bool page_fills_pending() const;
