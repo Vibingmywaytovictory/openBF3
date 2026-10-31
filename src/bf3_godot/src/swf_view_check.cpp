@@ -637,6 +637,15 @@ void Bf3SwfViewCheck::setup() {
 void Bf3SwfViewCheck::run_page_comparison() {
 	State &s = *state_;
 	if (s.compare_pages == nullptr) {
+		for (Bf3SwfView *earlier : s.views) {
+			earlier->close();
+		}
+		for (Bf3SwfView *earlier : s.image_views) {
+			earlier->close();
+		}
+		if (s.transmit != nullptr) {
+			s.transmit->close();
+		}
 		s.compare_pages = memnew(Bf3UiPages);
 		add_child(s.compare_pages);
 		for (size_t i = 0; i < s.compare_own.size(); ++i) {

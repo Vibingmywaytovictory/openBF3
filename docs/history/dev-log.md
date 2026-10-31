@@ -2890,3 +2890,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * One item material for all views; a hidden HUD view skips its render work and reports no fills pending.
 * HUD moment captures read F, with the screens band hidden for colour and coverage; godot.native_hud built, not run.
 * Architecture line for the renderer says the round's views draw in F.
+* godot.swf_view's byte comparison closes the check's earlier views first; built, not run.
