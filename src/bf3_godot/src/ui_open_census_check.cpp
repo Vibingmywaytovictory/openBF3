@@ -19,6 +19,7 @@
 #include "bf3/core/util/format.h"
 
 #include <godot_cpp/classes/engine.hpp>
+#include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/memory.hpp>
@@ -831,6 +832,23 @@ void Bf3UiOpenCensusCheck::census_pages() {
 			bf3::core::fmt("%s, %dx%d, %llu update(s)",
 					pages->frame_viewport() == frame ? "same viewport" : "another viewport", pages->frame_size().x,
 					pages->frame_size().y, (unsigned long long)(at_1440.frame_updates - frame_updates)));
+	Node2D *present = memnew(Node2D);
+	add_child(present);
+	pages->attach_present(present);
+	const Rect2 window(0.0f, 0.0f, real_t(kUiOpenCensusWidth), real_t(kUiOpenCensusHeight));
+	const uint64_t presents = pages->counters().frame_presents;
+	pages->present_frame(window);
+	pages->present_frame(window);
+	const uint64_t once = pages->counters().frame_presents - presents;
+	pages->present_frame(Rect2(window.position, window.size * 2.0f));
+	const uint64_t resized = pages->counters().frame_presents - presents;
+	add("F has one present item, drawn again only for a new rect",
+			once == 1 && resized == 2 && pages->presented_at().size == window.size * 2.0f,
+			bf3::core::fmt("%llu draw(s) for one rect, %llu with a second", (unsigned long long)once,
+					(unsigned long long)resized));
+	pages->attach_present(nullptr);
+	remove_child(present);
+	memdelete(present);
 	remove_child(pages);
 	const bool gone = pages->counters().live_viewports == 0 && Bf3UiPages::current() == nullptr;
 	memdelete(pages);

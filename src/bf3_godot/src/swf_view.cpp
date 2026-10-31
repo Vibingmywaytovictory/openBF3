@@ -190,6 +190,7 @@ struct SharedShaders {
 	RID item;
 	RID filter;
 	RID present;
+	RID present_material;
 	uint32_t users = 0;
 };
 
@@ -208,6 +209,8 @@ const SharedShaders &acquire_shaders(RenderingServer *p_rs) {
 		p_rs->shader_set_code(g_shaders->filter, kFilterShader);
 		g_shaders->present = p_rs->shader_create();
 		p_rs->shader_set_code(g_shaders->present, kPresentShader);
+		g_shaders->present_material = p_rs->material_create();
+		p_rs->material_set_shader(g_shaders->present_material, g_shaders->present);
 	}
 	++g_shaders->users;
 	return *g_shaders;
@@ -217,7 +220,7 @@ void release_shaders(RenderingServer *p_rs) {
 	if (g_shaders == nullptr || --g_shaders->users != 0) {
 		return;
 	}
-	for (const RID &r : { g_shaders->item, g_shaders->filter, g_shaders->present }) {
+	for (const RID &r : { g_shaders->present_material, g_shaders->item, g_shaders->filter, g_shaders->present }) {
 		p_rs->free_rid(r);
 	}
 	g_shaders.reset();
@@ -1081,7 +1084,6 @@ struct Bf3SwfView::Impl {
 	RID item_shader;
 	RID item_material;
 	RID filter_shader;
-	RID present_shader;
 	RID present_material;
 	RID present_item;
 	RID owner_viewport;
@@ -1097,16 +1099,13 @@ struct Bf3SwfView::Impl {
 		const SharedShaders &shaders = acquire_shaders(rs);
 		item_shader = shaders.item;
 		filter_shader = shaders.filter;
-		present_shader = shaders.present;
+		present_material = shaders.present_material;
 		item_material = rs->material_create();
 		rs->material_set_shader(item_material, item_shader);
-		present_material = rs->material_create();
-		rs->material_set_shader(present_material, present_shader);
 	}
 
 	~Impl() {
 		release();
-		rs->free_rid(present_material);
 		rs->free_rid(item_material);
 		release_shaders(rs);
 	}
@@ -4040,6 +4039,10 @@ void swf_view_hold_shaders() {
 
 void swf_view_release_shaders() {
 	release_shaders(RenderingServer::get_singleton());
+}
+
+RID swf_view_present_material() {
+	return g_shaders != nullptr ? g_shaders->present_material : RID();
 }
 
 Ref<Image> swf_view_transmittance(std::span<const Ref<Image>> p_colour) {

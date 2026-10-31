@@ -3,8 +3,11 @@
 #include "bf3/core/ui/swf_layer_plan.h"
 
 #include <godot_cpp/classes/node.hpp>
+#include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/rid.hpp>
+#include <godot_cpp/variant/transform2d.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
 #include <cstdint>
@@ -19,6 +22,7 @@ struct UiPagesCounters {
 	uint64_t pages_made = 0;
 	uint64_t passes = 0;
 	uint64_t frame_updates = 0;
+	uint64_t frame_presents = 0;
 	uint64_t own_surface_fallbacks = 0;
 	uint64_t live_viewports = 0;
 	uint64_t live_slots = 0;
@@ -55,6 +59,10 @@ public:
 	godot::Vector2i frame_size() const { return frame_size_; }
 	bool pages_chain_into_frame() const;
 	void mark_frame();
+	void attach_present(godot::Node2D *p_node);
+	godot::Node2D *present_node() const { return present_node_; }
+	void present_frame(const godot::Rect2 &p_at);
+	godot::Rect2 presented_at() const { return present_rect_; }
 	godot::Vector2i scratch_size() const { return godot::Vector2i(sizes_.scratch_width, sizes_.scratch_height); }
 	godot::Vector2i result_size() const { return godot::Vector2i(sizes_.result_width, sizes_.result_height); }
 
@@ -73,6 +81,7 @@ protected:
 private:
 	void free_pages();
 	void free_frame();
+	void free_present();
 	void size_frame(godot::Vector2i p_window);
 	void make_pages(const bf3::core::ui::SwfPageSizes &p_sizes);
 
@@ -92,6 +101,10 @@ private:
 	godot::RID frame_canvas_;
 	godot::RID frame_texture_;
 	godot::Vector2i frame_size_;
+	godot::Node2D *present_node_ = nullptr;
+	godot::RID present_item_;
+	godot::Rect2 present_rect_;
+	godot::Transform2D present_transform_;
 	std::vector<godot::RID> in_pass_;
 	uint64_t generation_ = 0;
 	uint64_t frame_ = UINT64_MAX;

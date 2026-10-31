@@ -20,6 +20,7 @@
 #include "native_screens.h"
 #include "overlay_screens.h"
 #include "ui_assets.h"
+#include "ui_pages.h"
 #include "ui_post_process.h"
 #if OPENBF3_BUILD_CHECKS
 #include "audio_ingame_check.h"
@@ -167,6 +168,9 @@ void build_tdm_ui(
 		DeployScreens::draw(*screens);
 		OverlayScreens::draw(*screens);
 		r_game.layer->add_child(screens);
+		if (const Bf3UiPages *pages = Bf3UiPages::current(); pages != nullptr && pages->present_node() != nullptr) {
+			r_game.layer->move_child(pages->present_node(), -1);
+		}
 		screens->adopt(r_game.native_hud);
 		r_m.screen_records.add(screens);
 		r_m.ui_screens_id = screens->get_instance_id();

@@ -34,6 +34,7 @@
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/label.hpp>
+#include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/standard_material3d.hpp>
 #include <godot_cpp/classes/viewport.hpp>
@@ -841,6 +842,10 @@ void build_game_ui(Node *p_parent, GameState &r_game, bool p_windowed) {
 		r_game.hud_items = memnew(Bf3HudItems);
 		r_game.hud_items->set_name("HudItems");
 		r_game.layer->add_child(r_game.hud_items);
+		Node2D *frame = memnew(Node2D);
+		frame->set_name("UiFrame");
+		r_game.layer->add_child(frame);
+		pages->attach_present(frame);
 	}
 	r_game.score_label = make_label(16, HORIZONTAL_ALIGNMENT_RIGHT);
 	r_game.score_label->set_name("Score");

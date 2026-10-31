@@ -68,6 +68,7 @@ void Bf3UiPages::_exit_tree() {
 }
 
 void Bf3UiPages::free_frame() {
+	free_present();
 	if (!frame_viewport_.is_valid()) {
 		return;
 	}
@@ -79,6 +80,45 @@ void Bf3UiPages::free_frame() {
 	frame_texture_ = RID();
 	frame_size_ = Vector2i();
 	frame_requested_ = false;
+}
+
+void Bf3UiPages::free_present() {
+	if (present_item_.is_valid()) {
+		rs_->free_rid(present_item_);
+	}
+	present_item_ = RID();
+	present_rect_ = Rect2();
+	present_transform_ = Transform2D();
+}
+
+void Bf3UiPages::attach_present(Node2D *p_node) {
+	if (p_node != present_node_) {
+		free_present();
+		present_node_ = p_node;
+	}
+}
+
+void Bf3UiPages::present_frame(const Rect2 &p_at) {
+	if (present_node_ == nullptr || !present_node_->is_inside_tree() || !frame_viewport_.is_valid()) {
+		return;
+	}
+	if (!present_item_.is_valid()) {
+		present_item_ = rs_->canvas_item_create();
+		rs_->canvas_item_set_parent(present_item_, present_node_->get_canvas_item());
+		rs_->canvas_item_set_material(present_item_, swf_view_present_material());
+		rs_->canvas_item_set_default_texture_filter(present_item_, RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_NEAREST);
+	}
+	const Transform2D inverse = present_node_->get_global_transform_with_canvas().affine_inverse();
+	if (inverse != present_transform_) {
+		rs_->canvas_item_set_transform(present_item_, inverse);
+		present_transform_ = inverse;
+	}
+	if (p_at != present_rect_) {
+		rs_->canvas_item_clear(present_item_);
+		rs_->canvas_item_add_texture_rect(present_item_, p_at, frame_texture_);
+		present_rect_ = p_at;
+		++counters_.frame_presents;
+	}
 }
 
 void Bf3UiPages::size_frame(Vector2i p_window) {

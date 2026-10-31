@@ -2885,3 +2885,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * ui.layer_plan prints clips with fractional edges: 24 of 25 on customizesoldierscreen at 720p.
 * Architecture line for the renderer says rectangular masks are clip groups.
 * Bf3UiPages holds F, one window-size 4x target; S and R chain into it; the census counts three page viewports.
+* F's one present item sits on a UiFrame node after NativeScreens; the present material is one for all views.
