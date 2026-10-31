@@ -978,7 +978,8 @@ TEST_SUITE("render-catalog-accessories-1p") {
 
 TEST_SUITE("render-catalog-scope") {
 	TEST_CASE("catalog scope: every sniper's optics read their zoom-mesh factors from WeaponStates[0] and the optic's "
-			  "unlock; only an optic with factors and a multiply surround hides the rifle") {
+			  "unlock; only an optic with factors and a multiply surround hides the rifle, the vertex colour is drawn "
+			  "only on multiply rings") {
 		core::InstallReader reader;
 		if (!reader.locate({})) {
 			test::skip_install_case(reader.describe().c_str());
@@ -1054,7 +1055,7 @@ TEST_SUITE("render-catalog-scope") {
 			}
 		});
 		std::array<std::array<size_t, 3>, kSnipers.size()> counts{};
-		size_t irnv_reticles = 0;
+		size_t rings = 0, zero_mix = 0, irnv_reticles = 0;
 		for (const OpticLoad &l : loads) {
 			const std::string &optic = l.item->accessory_unlocks[0][l.index];
 			REQUIRE_MESSAGE(l.set != nullptr, optic, ": ", l.error);
@@ -1075,6 +1076,25 @@ TEST_SUITE("render-catalog-scope") {
 								render::viewmodel_scope_part(vm, a)
 						? 1u
 						: 0u;
+				for (const render::PreparedSurface &s : a.part.prepared.surfaces) {
+					if (s.material_index >= a.looks.size() || s.vertex_count() == 0 ||
+							s.colors.size() < 4 * s.vertex_count()) {
+						continue;
+					}
+					const render::ViewmodelSlotLook &look = a.looks[s.material_index];
+					uint8_t lowest = 255, highest = 0;
+					for (size_t k = 0; k < s.vertex_count(); ++k) {
+						lowest = std::min(lowest, s.colors[4 * k]);
+						highest = std::max(highest, s.colors[4 * k]);
+					}
+					if (render::viewmodel_slot_vertex_colour(look)) {
+						++rings;
+						CHECK_MESSAGE(lowest == 0, optic, " ", a.part.mesh, " ring has no black vertex");
+						CHECK_MESSAGE(highest == 255, optic, " ", a.part.mesh, " ring has no clear vertex");
+					} else if (look.blend && look.unlit) {
+						zero_mix += lowest == 0 ? 1u : 0u;
+					}
+				}
 			}
 			if (optic.ends_with("rx01") || optic.ends_with("rx_01") || optic.ends_with("kobra") ||
 					optic.ends_with("eotech") || optic.ends_with("pka") || optic.ends_with("acog") ||
@@ -1092,6 +1112,9 @@ TEST_SUITE("render-catalog-scope") {
 			CHECK(counts[w][1] == kSnipers[w].surround_kept);
 			CHECK(counts[w][2] == kSnipers[w].clear);
 		}
+		CHECK(rings >= kSnipers.size() * 7);
+		CHECK_MESSAGE(zero_mix >= kSnipers.size(), zero_mix,
+				" unlit Mix slots hold a zero vertex colour (the PKS-07 and ballistic reticles) and draw without it");
 		CHECK_MESSAGE(irnv_reticles >= kSnipers.size(), irnv_reticles, " IRNV reticles stay with the scope");
 		render::ViewmodelItem item;
 		item.zoom_mesh_in = 1.0f;

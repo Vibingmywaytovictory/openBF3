@@ -184,6 +184,7 @@ struct ViewmodelItem {
 
 std::array<anim::VmClipRef, anim::kVmClips> viewmodel_clip_refs(const ViewmodelItem &p_item);
 
+bool viewmodel_slot_vertex_colour(const ViewmodelSlotLook &p_look);
 bool viewmodel_scope_part(const ViewmodelItem &p_item, const ViewmodelAttachment &p_attachment);
 bool viewmodel_zoom_mesh_shown(bool p_shown, float p_blend, const ViewmodelItem &p_item);
 

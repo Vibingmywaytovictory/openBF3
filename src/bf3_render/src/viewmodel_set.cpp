@@ -408,8 +408,7 @@ std::optional<ViewmodelSight> optic_sight(const anim::Skeleton &p_rig, const Vie
 		for (const ViewmodelAttachment &a : p_item.attachments) {
 			for (const PreparedSurface &s : a.part.prepared.surfaces) {
 				out->surround |= a.zoom && a.socket_unlock == socket && s.material_index < a.looks.size() &&
-						a.looks[s.material_index].blend && a.looks[s.material_index].unlit &&
-						a.looks[s.material_index].blend_mode == ViewmodelBlend::Multiply;
+						viewmodel_slot_vertex_colour(a.looks[s.material_index]);
 			}
 		}
 	}
@@ -615,6 +614,10 @@ const PreparedTexture *ViewmodelSet::texture(const std::string &p_name, TextureR
 		}
 	}
 	return nullptr;
+}
+
+bool viewmodel_slot_vertex_colour(const ViewmodelSlotLook &p_look) {
+	return p_look.blend && p_look.unlit && p_look.blend_mode == ViewmodelBlend::Multiply;
 }
 
 bool viewmodel_scope_part(const ViewmodelItem &p_item, const ViewmodelAttachment &p_attachment) {

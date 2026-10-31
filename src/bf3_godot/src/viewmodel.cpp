@@ -290,6 +290,7 @@ void apply_blend_look(
 	if (p_look.unlit) {
 		p_m->set_shading_mode(BaseMaterial3D::SHADING_MODE_UNSHADED);
 	}
+	p_m->set_flag(BaseMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, bf3::render::viewmodel_slot_vertex_colour(p_look));
 }
 
 MeshInstance3D *make_part_mesh(Skeleton3D *p_skeleton, const bf3::render::ViewmodelPart &p_part,
