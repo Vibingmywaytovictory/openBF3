@@ -103,9 +103,38 @@ void Bf3UiOpenCensusCheck::census_screen(const std::string &p_partition) {
 	memdelete(view);
 }
 
+void Bf3UiOpenCensusCheck::census_hidden_screen(const std::string &p_partition) {
+	const std::string leaf = ui::ui_data_category_leaf(p_partition);
+	Bf3SwfView *view = memnew(Bf3SwfView);
+	view->set_playing(false);
+	view->set_skips_hidden_render(true);
+	view->set_target_size(Vector2i(kUiOpenCensusWidth, kUiOpenCensusHeight));
+	add_child(view);
+	view->set_visible(false);
+	const bf3::core::Status opened = view->open(ui::hud_screen_movie(leaf));
+	if (!opened) {
+		add("a hidden screen renders nothing", false, opened.error().message);
+		remove_child(view);
+		memdelete(view);
+		return;
+	}
+	view->sync();
+	const uint32_t hidden = view->stats().viewports_updated;
+	view->set_visible(true);
+	view->sync();
+	const uint32_t shown = view->stats().viewports_updated;
+	add("a hidden screen renders nothing", hidden == 0,
+			bf3::core::fmt("%s: %u viewport update(s) hidden", leaf.c_str(), hidden));
+	add("and renders what it held once shown", shown != 0,
+			bf3::core::fmt("%s: %u viewport update(s) shown", leaf.c_str(), shown));
+	remove_child(view);
+	memdelete(view);
+}
+
 void Bf3UiOpenCensusCheck::finish() {
 	done_ = true;
 	set_process(false);
+	census_hidden_screen(std::string(kIngameMenuPartition));
 	add("every view synced under the dummy renderer", synced_ == partitions_.size(),
 			std::to_string(synced_) + " of " + std::to_string(partitions_.size()));
 	add("the views built their items", with_items_ == partitions_.size(),

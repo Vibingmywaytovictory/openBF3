@@ -314,6 +314,7 @@ bf3::core::Status Bf3UiScreens::open_entry(
 			v = memnew(Bf3SwfView);
 			v->set_name(to_godot(ui::ui_data_category_leaf(p_partition)));
 			v->set_playing(false);
+			v->set_skips_hidden_render(true);
 			add_child(v);
 		}
 		e->view = v;

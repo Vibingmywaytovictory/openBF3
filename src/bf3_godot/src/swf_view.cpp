@@ -1042,6 +1042,7 @@ struct Bf3SwfView::Impl {
 	std::shared_ptr<const ui::SwfLibrary> library;
 	std::shared_ptr<Bf3UiTextures> textures;
 	std::optional<ui::SwfScene> scene;
+	bool skips_hidden_render = false;
 	std::string movie;
 	std::string error;
 	bool playing = true;
@@ -2877,6 +2878,9 @@ struct Bf3SwfView::Impl {
 	}
 
 	void render_dirty() {
+		if (skips_hidden_render && !owner->is_visible_in_tree()) {
+			return;
+		}
 		for (auto &[id, t] : targets) {
 			if (t.live && t.canvas != nullptr) {
 				mark(t.canvas);
@@ -3322,6 +3326,10 @@ ui::SwfRect Bf3SwfView::visible_rect() const {
 	const SwfStageFit &f = impl_->fit;
 	return ui::SwfRect{ float(-f.offset_x / f.scale_x), float((double(impl_->target_size.x) - f.offset_x) / f.scale_x), float(-f.offset_y / f.scale_y),
 		float((double(impl_->target_size.y) - f.offset_y) / f.scale_y) };
+}
+
+void Bf3SwfView::set_skips_hidden_render(bool p_skips) {
+	impl_->skips_hidden_render = p_skips;
 }
 
 void Bf3SwfView::set_msaa(RenderingServer::ViewportMSAA p_msaa) {
