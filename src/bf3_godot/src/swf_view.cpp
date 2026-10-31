@@ -955,6 +955,9 @@ struct Canvas {
 	bool arrays_released = false;
 	Rect2 clip_rect;
 	bool clip_shown = true;
+	bool borrowed = false;
+	bool frame_shown = false;
+	int32_t frame_index = -1;
 
 	bool masks() const { return kind == CanvasKind::Mask || kind == CanvasKind::Clip; }
 	bool quad_ready() const { return !paged || shown_slot.has_value(); }
@@ -1051,6 +1054,7 @@ struct Bf3SwfView::Impl {
 	std::shared_ptr<Bf3UiTextures> textures;
 	std::optional<ui::SwfScene> scene;
 	bool skips_hidden_render = false;
+	std::optional<int32_t> frame_order;
 	std::string movie;
 	std::string error;
 	bool playing = true;
@@ -1247,6 +1251,13 @@ struct Bf3SwfView::Impl {
 		r_c.bounds_dirty = true;
 	}
 
+	void mark_frame_if(bool p_wanted) {
+		Bf3UiPages *pages = Bf3UiPages::current();
+		if (p_wanted && pages != nullptr) {
+			pages->mark_frame();
+		}
+	}
+
 	void free_canvas(Canvas &r_c) {
 		release_slots(r_c);
 		for (Stage &s : r_c.stages) {
@@ -1271,7 +1282,11 @@ struct Bf3SwfView::Impl {
 		}
 		r_c.quad = RID();
 		r_c.quad_material = RID();
-		if (r_c.kind == CanvasKind::Root) {
+		if (r_c.borrowed) {
+			mark_frame_if(r_c.frame_shown);
+			r_c.content = Surface{};
+			r_c.borrowed = false;
+		} else if (r_c.kind == CanvasKind::Root) {
 			r_c.content.free(rs);
 		} else {
 			retire(r_c.content, msaa);
@@ -2137,10 +2152,8 @@ struct Bf3SwfView::Impl {
 		if (p_parent != nullptr) {
 			p_parent->children.push_back(&c);
 		}
-		if (fresh) {
-			if (p_kind == CanvasKind::Root) {
-				c.content.create(rs, target_size, owner_viewport, msaa);
-			} else if (p_kind == CanvasKind::Clip) {
+		if (fresh && p_kind != CanvasKind::Root) {
+			if (p_kind == CanvasKind::Clip) {
 				c.group = make_item();
 				rs->canvas_item_set_clip(c.group, true);
 				rs->canvas_item_set_custom_rect(c.group, true, Rect2());
@@ -2191,7 +2204,7 @@ struct Bf3SwfView::Impl {
 	}
 
 	RID draw_parent(Canvas &r_c) {
-		if (r_c.kind == CanvasKind::Clip) {
+		if (r_c.kind == CanvasKind::Clip || r_c.borrowed) {
 			return r_c.group;
 		}
 		ensure_canvas(r_c);
@@ -2210,6 +2223,79 @@ struct Bf3SwfView::Impl {
 
 	bool pages_usable() const {
 		return !explicit_size && msaa == RenderingServer::VIEWPORT_MSAA_4X && Bf3UiPages::current() != nullptr;
+	}
+
+	bool frame_usable() const { return frame_order.has_value() && pages_usable(); }
+
+	Canvas *borrowed_root() {
+		const auto it = canvases.find(canvas_key(CanvasKind::Root, 0));
+		return it != canvases.end() && it->second.borrowed ? &it->second : nullptr;
+	}
+
+	void set_frame_shown(Canvas &r_root, bool p_shown) {
+		if (r_root.frame_shown != p_shown) {
+			r_root.frame_shown = p_shown;
+			rs->canvas_item_set_visible(r_root.group, p_shown);
+			mark_frame_if(true);
+		}
+	}
+
+	void apply_frame_order(Canvas &r_root) {
+		if (r_root.frame_index != *frame_order) {
+			r_root.frame_index = *frame_order;
+			rs->canvas_item_set_draw_index(r_root.group, r_root.frame_index);
+			mark_frame_if(r_root.frame_shown);
+		}
+	}
+
+	void borrow_frame(Canvas &r_root, Bf3UiPages &r_pages) {
+		if (!r_root.borrowed) {
+			r_root.content.free(rs);
+			r_root.content.size = Vector2i();
+			if (present_item.is_valid()) {
+				free_item(present_item);
+				present_item = RID();
+			}
+			r_root.group = make_item();
+			rs->canvas_item_set_visible(r_root.group, false);
+			r_root.group_parent = RID();
+			r_root.frame_shown = false;
+			r_root.borrowed = true;
+			r_root.changed = true;
+		}
+		if (r_root.group_parent != r_pages.frame_canvas()) {
+			rs->canvas_item_set_parent(r_root.group, r_pages.frame_canvas());
+			r_root.group_parent = r_pages.frame_canvas();
+			r_root.frame_index = -1;
+			r_root.changed = true;
+		}
+		apply_frame_order(r_root);
+		r_root.content.viewport = r_pages.frame_viewport();
+		r_root.content.texture = r_pages.frame_texture();
+	}
+
+	void place_root(Canvas &r_root) {
+		if (frame_usable()) {
+			borrow_frame(r_root, *Bf3UiPages::current());
+		} else {
+			if (r_root.borrowed) {
+				mark_frame_if(r_root.frame_shown);
+				free_item(r_root.group);
+				r_root.group = RID();
+				r_root.group_parent = RID();
+				r_root.content = Surface{};
+				r_root.borrowed = false;
+				r_root.changed = true;
+			}
+			if (!r_root.content.viewport.is_valid()) {
+				r_root.content.create(rs, target_size, owner_viewport, msaa);
+			} else if (r_root.content.resize(rs, target_size)) {
+				r_root.changed = true;
+			}
+			rs->viewport_set_parent_viewport(r_root.content.viewport, owner_viewport);
+		}
+		r_root.origin = Vector2i();
+		r_root.size = target_size;
 	}
 
 	void set_passthrough_stage(Canvas &r_c, bool p_wanted) {
@@ -2655,12 +2741,7 @@ struct Bf3SwfView::Impl {
 		}
 		order.clear();
 		Canvas &root = canvas_for(CanvasKind::Root, 0, nullptr);
-		if (root.content.resize(rs, target_size)) {
-			root.changed = true;
-		}
-		rs->viewport_set_parent_viewport(root.content.viewport, owner_viewport);
-		root.origin = Vector2i();
-		root.size = target_size;
+		place_root(root);
 		ui::SwfPlanWalkOptions walk_options;
 		walk_options.fonts = assets != nullptr ? assets->swf_fonts() : nullptr;
 		walk_options.filters_enabled = filters_enabled;
@@ -3359,6 +3440,10 @@ struct Bf3SwfView::Impl {
 				continue;
 			}
 			stats.viewports_updated++;
+			if (c->borrowed) {
+				mark_frame_if(true);
+				continue;
+			}
 			c->content.render(rs);
 			c->alpha.render(rs);
 			for (const Stage &s : c->stages) {
@@ -3423,6 +3508,13 @@ struct Bf3SwfView::Impl {
 	}
 
 	void present() {
+		if (Canvas *root = borrowed_root()) {
+			if (Bf3UiPages *pages = Bf3UiPages::current()) {
+				pages->present_frame(present_rect);
+			}
+			set_frame_shown(*root, owner->is_visible_in_tree() && !first_fills_pending());
+			return;
+		}
 		if (!present_item.is_valid()) {
 			present_item = make_item();
 			rs->canvas_item_set_parent(present_item, owner->get_canvas_item());
@@ -3567,8 +3659,14 @@ void Bf3SwfView::_ready() {
 }
 
 void Bf3SwfView::_notification(int p_what) {
-	if (p_what == NOTIFICATION_VISIBILITY_CHANGED && impl_->hidden_from_render()) {
+	if (p_what != NOTIFICATION_VISIBILITY_CHANGED || is_visible_in_tree()) {
+		return;
+	}
+	if (impl_->hidden_from_render()) {
 		impl_->stop_targets();
+	}
+	if (Canvas *root = impl_->borrowed_root()) {
+		impl_->set_frame_shown(*root, false);
 	}
 }
 
@@ -3695,7 +3793,7 @@ SwfViewCounters Bf3SwfView::counters() {
 
 void Bf3SwfView::release_root_target() {
 	const auto it = impl_->canvases.find(canvas_key(CanvasKind::Root, 0));
-	if (it != impl_->canvases.end() && it->second.content.resize(impl_->rs, Vector2i(1, 1))) {
+	if (it != impl_->canvases.end() && !it->second.borrowed && it->second.content.resize(impl_->rs, Vector2i(1, 1))) {
 		impl_->structure_dirty = true;
 	}
 }
@@ -3952,11 +4050,65 @@ void Bf3SwfView::set_skips_hidden_render(bool p_skips) {
 	impl_->skips_hidden_render = p_skips;
 }
 
+void Bf3SwfView::set_frame_order(int32_t p_order) {
+	if (!impl_->frame_order.has_value()) {
+		impl_->structure_dirty = true;
+	}
+	impl_->frame_order = p_order;
+	if (Canvas *root = impl_->borrowed_root()) {
+		impl_->apply_frame_order(*root);
+	}
+}
+
+bool Bf3SwfView::draws_in_frame() const {
+	return impl_->borrowed_root() != nullptr;
+}
+
+bool Bf3SwfView::shown_in_frame() const {
+	const Canvas *root = impl_->borrowed_root();
+	return root != nullptr && root->frame_shown;
+}
+
+int32_t Bf3SwfView::frame_draw_index() const {
+	const Canvas *root = impl_->borrowed_root();
+	return root != nullptr ? root->frame_index : -1;
+}
+
+bool Bf3SwfView::presents_own_root() const {
+	return impl_->present_item.is_valid();
+}
+
+uint32_t Bf3SwfView::surfaces_off_frame() const {
+	const Canvas *root = impl_->borrowed_root();
+	if (root == nullptr) {
+		return 0;
+	}
+	const auto under_root = [](const Canvas *p_c) {
+		while (p_c->kind == CanvasKind::Clip) {
+			p_c = p_c->parent;
+		}
+		return p_c->kind == CanvasKind::Root;
+	};
+	uint32_t out = 0;
+	for (const auto &[k, c] : impl_->canvases) {
+		if (c.kind != CanvasKind::Root && c.parent != nullptr && under_root(c.parent) &&
+				c.content.viewport.is_valid() && c.linked_parent != root->content.viewport) {
+			++out;
+		}
+	}
+	for (const auto &[id, t] : impl_->targets) {
+		if (t.canvas != nullptr && under_root(t.canvas) && t.parent_viewport != root->content.viewport) {
+			++out;
+		}
+	}
+	return out;
+}
+
 void Bf3SwfView::set_msaa(RenderingServer::ViewportMSAA p_msaa) {
 	impl_->msaa = p_msaa;
 	impl_->free_spares();
 	for (auto &[k, c] : impl_->canvases) {
-		if (c.content.viewport.is_valid()) {
+		if (c.content.viewport.is_valid() && !c.borrowed) {
 			impl_->rs->viewport_set_msaa_2d(c.content.viewport, p_msaa);
 		}
 		if (c.alpha.viewport.is_valid()) {

@@ -88,6 +88,7 @@ public:
 	void follow(bf3::host::UiFlowSession *p_session);
 	void set_drawn(std::string_view p_partition, bool p_drawn);
 	void set_manual(bool p_manual) { manual_ = p_manual; }
+	void set_frame_band(bool p_band) { frame_band_ = p_band; }
 	void set_model(const bf3::core::ui::HudModel &p_model) { model_ = p_model; }
 	void set_safe_area(const bf3::core::ui::ScreenAdjustFractions &p_safe) { safe_area_ = p_safe; }
 	void set_client(bf3::core::ui::HudClientState p_client);
@@ -161,6 +162,7 @@ private:
 	uint64_t hud_id_ = 0;
 	bf3::host::UiFlowSession *session_ = nullptr;
 	bool manual_ = false;
+	bool frame_band_ = false;
 	std::vector<std::unique_ptr<Entry>> entries_;
 	std::set<std::string, std::less<>> drawn_;
 	HudBgPainter bg_;

@@ -164,6 +164,7 @@ void build_tdm_ui(
 		Bf3UiScreens *screens = memnew(Bf3UiScreens);
 		screens->set_name("NativeScreens");
 		screens->set_manual(true);
+		screens->set_frame_band(true);
 		screens->set_drawn(bf3::core::ui::kKillScreenPartition, true);
 		DeployScreens::draw(*screens);
 		OverlayScreens::draw(*screens);

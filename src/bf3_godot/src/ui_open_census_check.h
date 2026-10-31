@@ -54,6 +54,8 @@ private:
 	void census_hidden_pages(Bf3UiPages &r_pages);
 	void census_page_overflow(Bf3UiPages &r_pages);
 	void census_clips(Bf3UiPages &r_pages);
+	void census_frame(Bf3UiPages &r_pages);
+	void census_screen_band(Bf3UiPages &r_pages);
 	Bf3SwfView *open_paged_view(const std::string &p_leaf);
 	void settle_paged_view(Bf3UiPages &r_pages, Bf3SwfView &r_view);
 	void finish();

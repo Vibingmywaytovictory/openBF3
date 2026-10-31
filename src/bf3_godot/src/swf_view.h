@@ -167,6 +167,12 @@ public:
 	std::optional<bf3::core::ui::SwfPoint> canvas_to_stage(godot::Vector2 p_canvas) const;
 	godot::Vector2 stage_to_canvas(bf3::core::ui::SwfPoint p_stage) const;
 	void set_skips_hidden_render(bool p_skips);
+	void set_frame_order(int32_t p_order);
+	bool draws_in_frame() const;
+	bool shown_in_frame() const;
+	int32_t frame_draw_index() const;
+	bool presents_own_root() const;
+	uint32_t surfaces_off_frame() const;
 	uint32_t filter_stages_without_viewport() const;
 	bool page_fills_pending() const;
 	uint32_t paged_layers() const;

@@ -326,6 +326,7 @@ bf3::core::Status Bf3NativeHud::open_view(size_t p_index) {
 	Bf3SwfView *v = memnew(Bf3SwfView);
 	v->set_name(kNames[p_index]);
 	v->set_playing(false);
+	v->set_frame_order(int32_t(p_index));
 	add_child(v);
 	views_[p_index] = v;
 	const bf3::core::Status st = v->open(asset.movie);
@@ -473,6 +474,7 @@ void Bf3NativeHud::arrange() {
 	int32_t at = 0;
 	for (const size_t i : by_order) {
 		if (views_[i] != nullptr) {
+			views_[i]->set_frame_order(at);
 			move_child(views_[i], at++);
 		}
 	}

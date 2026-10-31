@@ -316,6 +316,9 @@ bf3::core::Status Bf3UiScreens::open_entry(
 			v->set_name(to_godot(ui::ui_data_category_leaf(p_partition)));
 			v->set_playing(false);
 			v->set_skips_hidden_render(true);
+			if (frame_band_) {
+				v->set_frame_order(int32_t(kNativeHudViews));
+			}
 			add_child(v);
 		}
 		e->view = v;
@@ -425,6 +428,9 @@ void Bf3UiScreens::arrange() {
 			own.begin(), own.end(), [](const Entry *p_a, const Entry *p_b) { return p_a->order < p_b->order; });
 	int32_t at = 0;
 	for (Entry *e : own) {
+		if (frame_band_) {
+			e->view->set_frame_order(int32_t(kNativeHudViews) + at);
+		}
 		move_child(e->view, at++);
 	}
 }

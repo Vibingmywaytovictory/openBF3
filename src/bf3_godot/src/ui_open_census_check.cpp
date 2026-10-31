@@ -304,6 +304,10 @@ void Bf3UiOpenCensusCheck::census_paged_screens() {
 	uint32_t pages_in_clips = 0;
 	uint64_t slots_after = 0;
 	uint64_t creates_total = 0;
+	uint32_t frame_views = 0;
+	uint32_t off_frame = 0;
+	uint64_t own_surfaces_total = 0;
+	std::string frame_redraws;
 	for (const std::string &partition : partitions_) {
 		const std::string leaf = ui::ui_data_category_leaf(partition);
 		const SwfViewCounters before = Bf3SwfView::counters();
@@ -311,6 +315,7 @@ void Bf3UiOpenCensusCheck::census_paged_screens() {
 		Bf3SwfView *view = memnew(Bf3SwfView);
 		view->set_playing(false);
 		view->set_process(false);
+		view->set_frame_order(0);
 		add_child(view);
 		if (const bf3::core::Status opened = view->open(ui::hud_screen_movie(leaf)); !opened) {
 			add("a paged screen opens", false, opened.error().message);
@@ -351,13 +356,16 @@ void Bf3UiOpenCensusCheck::census_paged_screens() {
 														"%u paged, %u clip(s) at %dx%d",
 				leaf.c_str(), (unsigned long long)surfaces, (unsigned long long)creates, view->paged_layers(), clips,
 				view->target_size().x, view->target_size().y)));
-		if (surfaces != own_surfaces + 1) {
+		if (surfaces != own_surfaces) {
 			surfaces_differ += bf3::core::fmt(" %s: %llu live, plan %llu;", leaf.c_str(), (unsigned long long)surfaces,
-					(unsigned long long)(own_surfaces + 1));
+					(unsigned long long)own_surfaces);
 		}
+		frame_views += view->draws_in_frame() && !view->presents_own_root() ? 1u : 0u;
+		off_frame += view->surfaces_off_frame();
+		own_surfaces_total += own_surfaces;
 		if (plan.counts.pages != 0 && own_surfaces == 0) {
 			++page_only;
-			if (creates != 1 || synced.viewport_resizes - before.viewport_resizes != 1) {
+			if (creates != 0 || synced.viewport_resizes - before.viewport_resizes != 0) {
 				root_only_differs +=
 						bf3::core::fmt(" %s: %llu creates, %llu resizes;", leaf.c_str(), (unsigned long long)creates,
 								(unsigned long long)(synced.viewport_resizes - before.viewport_resizes));
@@ -382,13 +390,19 @@ void Bf3UiOpenCensusCheck::census_paged_screens() {
 		if (view->page_fills_pending()) {
 			still_pending += " " + leaf;
 		}
+		pages->end_pass();
+		view->sync();
 		const uint64_t settled_passes = pages->counters().passes;
+		const uint64_t settled_frames = pages->counters().frame_updates;
 		pages->end_pass();
 		view->sync();
 		pages->end_pass();
 		view->sync();
 		if (pages->counters().passes != settled_passes) {
 			redraws += " " + leaf;
+		}
+		if (pages->counters().frame_updates != settled_frames) {
+			frame_redraws += " " + leaf;
 		}
 		remove_child(view);
 		memdelete(view);
@@ -400,10 +414,16 @@ void Bf3UiOpenCensusCheck::census_paged_screens() {
 					: clips_differ);
 	add("a clip's rect is its mask's window rect", clip_rects_differ.empty(),
 			clip_rects_differ.empty() ? "equal on every clip" : clip_rects_differ);
-	add("a page-only screen makes only its root viewport", page_only != 0 && root_only_differs.empty(),
+	add("a page-only screen makes no viewport", page_only != 0 && root_only_differs.empty(),
 			root_only_differs.empty() ? bf3::core::fmt("%u screens, %llu viewports over all 30", page_only,
 												(unsigned long long)creates_total)
 									  : root_only_differs);
+	add("every game UI view draws in F, with no present of its own", frame_views == partitions_.size(),
+			bf3::core::fmt("%u of %zu", frame_views, partitions_.size()));
+	add("own surfaces link to F", off_frame == 0 && own_surfaces_total != 0,
+			bf3::core::fmt("%u of %llu off F", off_frame, (unsigned long long)own_surfaces_total));
+	add("a settled screen asks F for no update", frame_redraws.empty(),
+			frame_redraws.empty() ? "no update on later syncs" : frame_redraws);
 	add("no surface for an empty layer", surfaces_differ.empty(),
 			surfaces_differ.empty() ? "surfaces equal the plan on every screen" : surfaces_differ);
 	add("the renderer pages what the plan pages", paged_total != 0 && slots_differ.empty(),
@@ -418,6 +438,8 @@ void Bf3UiOpenCensusCheck::census_paged_screens() {
 	census_hidden_pages(*pages);
 	census_page_overflow(*pages);
 	census_clips(*pages);
+	census_frame(*pages);
+	census_screen_band(*pages);
 	remove_child(pages);
 	memdelete(pages);
 }
@@ -426,6 +448,8 @@ Bf3SwfView *Bf3UiOpenCensusCheck::open_paged_view(const std::string &p_leaf) {
 	Bf3SwfView *view = memnew(Bf3SwfView);
 	view->set_playing(false);
 	view->set_process(false);
+	view->set_frame_order(0);
+	view->set_skips_hidden_render(true);
 	add_child(view);
 	if (const bf3::core::Status opened = view->open(ui::hud_screen_movie(p_leaf)); !opened) {
 		add("a paged screen opens", false, opened.error().message);
@@ -530,6 +554,7 @@ void Bf3UiOpenCensusCheck::census_hidden_pages(Bf3UiPages &r_pages) {
 	const std::string movie = ui::hud_screen_movie(ui::ui_data_category_leaf(kIngameMenuPartition));
 	Bf3UiScreens *screens = memnew(Bf3UiScreens);
 	screens->set_manual(true);
+	screens->set_frame_band(true);
 	add_child(screens);
 	screens->set_drawn(movie, true);
 	if (const bf3::core::Status opened = screens->open_movie_screen(movie, nullptr); !opened) {
@@ -568,6 +593,7 @@ void Bf3UiOpenCensusCheck::census_hidden_pages(Bf3UiPages &r_pages) {
 			r_pages.counters().live_slots == shown_slots && r_pages.counters().passes - passes_start == shown_passes,
 			bf3::core::fmt("%llu slots, %llu more passes", (unsigned long long)r_pages.counters().live_slots,
 					(unsigned long long)(r_pages.counters().passes - passes_start - shown_passes)));
+	const uint64_t resizes_open = Bf3SwfView::counters().viewport_resizes;
 	screens->close_screen(movie);
 	for (uint32_t i = 0; i < kUiOpenCensusCloseSteps && screens->phase(movie).has_value(); ++i) {
 		screens->step(kUiOpenCensusCloseStepSeconds);
@@ -575,6 +601,10 @@ void Bf3UiOpenCensusCheck::census_hidden_pages(Bf3UiPages &r_pages) {
 	add("a closed screen holds no slots", !screens->phase(movie).has_value() && r_pages.counters().live_slots == 0,
 			bf3::core::fmt("%llu slots, %s", (unsigned long long)r_pages.counters().live_slots,
 					screens->phase(movie).has_value() ? "still open" : "closed"));
+	const uint64_t resizes_closed = Bf3SwfView::counters().viewport_resizes - resizes_open;
+	add("and leaves F, whose size it does not touch", resizes_closed == 0 && !view->shown_in_frame(),
+			bf3::core::fmt("%llu resize(s), %s", (unsigned long long)resizes_closed,
+					view->shown_in_frame() ? "still shown" : "not shown"));
 	remove_child(screens);
 	memdelete(screens);
 }
@@ -781,13 +811,195 @@ void Bf3UiOpenCensusCheck::census_clips(Bf3UiPages &r_pages) {
 			[&mask, &placed](Bf3SwfView &p_v) { return p_v.scene()->set_matrix(mask, placed); }, {});
 	const bf3::core::Status renderer = view->set_renderer_string(child, kOverviewMapRenderer);
 	view->sync();
-	add("an engine target in a clip links to the root",
+	add("an engine target in a clip links to F",
 			renderer.ok() && view->stats().engine_targets == 1 && view->engine_targets_unlinked() == 0 &&
-					view->clips_misplaced() == 0 && view->clip_groups() == clips,
-			bf3::core::fmt("%s: %u target(s), %u unlinked, %u misplaced", child.c_str(), view->stats().engine_targets,
-					view->engine_targets_unlinked(), view->clips_misplaced()));
+					view->surfaces_off_frame() == 0 && view->clips_misplaced() == 0 && view->clip_groups() == clips,
+			bf3::core::fmt("%s: %u target(s), %u unlinked, %u off F, %u misplaced", child.c_str(),
+					view->stats().engine_targets, view->engine_targets_unlinked(), view->surfaces_off_frame(),
+					view->clips_misplaced()));
 	remove_child(view);
 	memdelete(view);
+}
+
+void Bf3UiOpenCensusCheck::census_frame(Bf3UiPages &r_pages) {
+	Node2D *present = memnew(Node2D);
+	add_child(present);
+	r_pages.attach_present(present);
+	Bf3SwfView *first = open_paged_view(ui::ui_data_category_leaf(kIngameMenuPartition));
+	Bf3SwfView *second = open_paged_view(ui::ui_data_category_leaf(kSpawnButtonScreenPartition));
+	const auto finish = [&] {
+		for (Bf3SwfView *v : { first, second }) {
+			if (v != nullptr) {
+				remove_child(v);
+				memdelete(v);
+			}
+		}
+		r_pages.attach_present(nullptr);
+		remove_child(present);
+		memdelete(present);
+	};
+	if (first == nullptr || second == nullptr) {
+		add("two views draw in F", false, "a screen did not open");
+		finish();
+		return;
+	}
+	second->set_frame_order(1);
+	const uint64_t creates = Bf3SwfView::counters().viewport_creates;
+	const auto sync_both = [&] {
+		first->sync();
+		second->sync();
+	};
+	const auto updates = [&r_pages] { return r_pages.counters().frame_updates; };
+	const auto settle_both = [&] {
+		for (uint32_t i = 0;
+				i < kUiOpenCensusMaxPasses && (first->page_fills_pending() || second->page_fills_pending()); ++i) {
+			r_pages.end_pass();
+			sync_both();
+		}
+	};
+	const uint64_t presents = r_pages.counters().frame_presents;
+	sync_both();
+	add("a view stays out of F until its first fills are done",
+			first->paged_layers() != 0 && first->page_fills_pending() && !first->shown_in_frame(),
+			bf3::core::fmt("%u paged, %s", first->paged_layers(), first->shown_in_frame() ? "shown" : "not shown"));
+	settle_both();
+	r_pages.end_pass();
+	sync_both();
+	add("and enters it once they are", first->shown_in_frame() && second->shown_in_frame(),
+			bf3::core::fmt("%s, %s", first->shown_in_frame() ? "shown" : "not shown",
+					second->shown_in_frame() ? "shown" : "not shown"));
+	add("two views share F and its one present",
+			first->draws_in_frame() && second->draws_in_frame() && !first->presents_own_root() &&
+					!second->presents_own_root() && r_pages.counters().frame_presents == presents + 1 &&
+					r_pages.presented_at() == first->present_rect() &&
+					Bf3SwfView::counters().viewport_creates == creates,
+			bf3::core::fmt("%llu present draw(s), %llu more viewports",
+					(unsigned long long)(r_pages.counters().frame_presents - presents),
+					(unsigned long long)(Bf3SwfView::counters().viewport_creates - creates)));
+	ui::SwfLayerWalkOptions walk_options;
+	walk_options.fonts = Bf3UiAssets::current()->swf_fonts();
+	const ui::SwfLayerWalk walk = ui::swf_layer_walk(*first->scene(), walk_options);
+	const auto paged = std::find_if(walk.layers.begin(), walk.layers.end(),
+			[](const ui::SwfLayerWalkNode &p_l) { return p_l.route == ui::SwfLayerClass::Page && p_l.has_nodes; });
+	if (paged != walk.layers.end()) {
+		r_pages.end_pass();
+		const uint64_t before_move = updates();
+		const uint64_t passes_move = r_pages.counters().passes;
+		ui::SwfMatrix m = first->scene()->node(paged->owner)->matrix;
+		m.tx += float(kUiOpenCensusWholeMove / first->stage_fit().scale_x);
+		const bf3::core::Status moved = first->scene()->set_matrix(paged->path, m);
+		first->sync();
+		add("a moved layer redraws F and takes no pass",
+				moved.ok() && updates() == before_move + 1 && r_pages.counters().passes == passes_move,
+				bf3::core::fmt("%s: %llu update(s), %llu pass(es)", paged->path.c_str(),
+						(unsigned long long)(updates() - before_move),
+						(unsigned long long)(r_pages.counters().passes - passes_move)));
+	} else {
+		add("a moved layer redraws F and takes no pass", false, "no paged layer");
+	}
+	add("views draw in their order", first->frame_draw_index() == 0 && second->frame_draw_index() == 1,
+			bf3::core::fmt("%d, %d", first->frame_draw_index(), second->frame_draw_index()));
+	r_pages.end_pass();
+	const uint64_t before_order = updates();
+	first->set_frame_order(2);
+	add("a new order redraws F", first->frame_draw_index() == 2 && updates() == before_order + 1,
+			bf3::core::fmt("index %d, %llu update(s)", first->frame_draw_index(),
+					(unsigned long long)(updates() - before_order)));
+	first->set_frame_order(0);
+	r_pages.end_pass();
+	const uint64_t before_hide = updates();
+	first->set_visible(false);
+	const bool hidden_at_once = !first->shown_in_frame();
+	const uint64_t hide_updates = updates() - before_hide;
+	r_pages.end_pass();
+	first->sync();
+	add("hiding a view takes it out of F at once, with no sync", hidden_at_once && hide_updates == 1,
+			bf3::core::fmt(
+					"%s, %llu update(s)", hidden_at_once ? "out" : "still in", (unsigned long long)hide_updates));
+	const uint64_t before_hidden_sync = updates();
+	r_pages.end_pass();
+	first->sync();
+	add("a hidden view asks F for nothing", updates() == before_hidden_sync,
+			bf3::core::fmt("%llu update(s)", (unsigned long long)(updates() - before_hidden_sync)));
+	first->set_visible(true);
+	const bool waits = !first->shown_in_frame();
+	first->sync();
+	add("and showing it brings it back on its next sync", waits && first->shown_in_frame(),
+			bf3::core::fmt(
+					"%s before the sync, %s after", waits ? "out" : "in", first->shown_in_frame() ? "in" : "out"));
+	settle_both();
+	r_pages.end_pass();
+	sync_both();
+	const uint64_t before_parent = updates();
+	const bf3::core::Status reopened =
+			first->open(ui::hud_screen_movie(ui::ui_data_category_leaf(kIngameMenuPartition)));
+	r_pages.end_pass();
+	first->sync();
+	add("a reopened view keeps F and its index",
+			reopened.ok() && first->draws_in_frame() && first->frame_draw_index() == 0 && updates() != before_parent &&
+					Bf3SwfView::counters().viewport_creates == creates,
+			bf3::core::fmt("index %d, %llu update(s)", first->frame_draw_index(),
+					(unsigned long long)(updates() - before_parent)));
+	settle_both();
+	r_pages.end_pass();
+	sync_both();
+	r_pages.end_pass();
+	const uint64_t before_free = updates();
+	remove_child(second);
+	memdelete(second);
+	second = nullptr;
+	add("freeing a shown view redraws F", updates() == before_free + 1,
+			bf3::core::fmt("%llu update(s)", (unsigned long long)(updates() - before_free)));
+	finish();
+}
+
+void Bf3UiOpenCensusCheck::census_screen_band(Bf3UiPages &r_pages) {
+	const std::string one = ui::hud_screen_movie(ui::ui_data_category_leaf(kIngameMenuPartition));
+	const std::string two = ui::hud_screen_movie(ui::ui_data_category_leaf(kSpawnButtonScreenPartition));
+	Bf3UiScreens *band = memnew(Bf3UiScreens);
+	band->set_manual(true);
+	band->set_frame_band(true);
+	add_child(band);
+	Bf3UiScreens *loading = memnew(Bf3UiScreens);
+	loading->set_manual(true);
+	add_child(loading);
+	const auto finish = [&] {
+		remove_child(band);
+		memdelete(band);
+		remove_child(loading);
+		memdelete(loading);
+	};
+	band->set_drawn(one, true);
+	band->set_drawn(two, true);
+	loading->set_drawn(one, true);
+	const bf3::core::Status opened_one = band->open_movie_screen(one, nullptr);
+	const bf3::core::Status opened_two = band->open_movie_screen(two, nullptr);
+	const bf3::core::Status opened_off = loading->open_movie_screen(one, nullptr);
+	if (!opened_one || !opened_two || !opened_off) {
+		add("screens draw above the HUD band", false, "a screen did not open");
+		finish();
+		return;
+	}
+	Bf3SwfView *view_one = band->screen_view(one);
+	Bf3SwfView *view_two = band->screen_view(two);
+	Bf3SwfView *view_off = loading->screen_view(one);
+	for (Bf3SwfView *v : { view_one, view_two, view_off }) {
+		v->set_process(false);
+		v->sync();
+	}
+	const int32_t hud_band = int32_t(kNativeHudViews);
+	const int32_t at_one = view_one->frame_draw_index();
+	const int32_t at_two = view_two->frame_draw_index();
+	add("screens draw above the HUD band", at_one >= hud_band && at_two > at_one,
+			bf3::core::fmt("%d and %d, the HUD below %d", at_one, at_two, hud_band));
+	band->order_screen(one, band->screen_slot(1).order + 1);
+	add("and follow the order they are given",
+			view_one->frame_draw_index() > view_two->frame_draw_index() && view_two->frame_draw_index() >= hud_band,
+			bf3::core::fmt("%d and %d", view_one->frame_draw_index(), view_two->frame_draw_index()));
+	add("a stack off the band keeps its own root, as the loading screen does",
+			!view_off->draws_in_frame() && view_off->presents_own_root() && r_pages.frame_viewport().is_valid(),
+			view_off->draws_in_frame() ? "draws in F" : "own root");
+	finish();
 }
 
 void Bf3UiOpenCensusCheck::census_pages() {
