@@ -10,6 +10,7 @@
 #include "bf3/core/ui/swf_hit.h"
 #include "bf3/core/ui/ui_graph.h"
 #include "bf3/core/ui/ui_input.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/host/ui_flow_session.h"
 
 #include <godot_cpp/classes/engine.hpp>
@@ -19,6 +20,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iterator>
 
@@ -50,6 +52,7 @@ struct Bf3UiScreens::Entry {
 	bool focused = false;
 	int32_t order = 0;
 	uint64_t shown_count = 1;
+	bool refreshed = false;
 	Bf3SwfView *view = nullptr;
 	std::unique_ptr<ui::HudPopup> popup;
 	std::unique_ptr<ui::SwfScene> scene;
@@ -206,7 +209,9 @@ bf3::core::Status Bf3UiScreens::open_screen(std::string_view p_partition) {
 	if (db_ == nullptr) {
 		return bf3::core::make_error(std::string(p_partition) + ": Bf3UiScreens has no resolver for screen assets");
 	}
+	const auto read_start = std::chrono::steady_clock::now();
 	bf3::core::Result<ui::HudScreenAsset> asset = ui::read_hud_screen_asset(*db_, p_partition);
+	stats_.asset_read_seconds += bf3::core::seconds_since(read_start);
 	if (!asset) {
 		return asset.error();
 	}
@@ -297,6 +302,7 @@ bf3::core::Status Bf3UiScreens::open_entry(
 	if (assets == nullptr || !assets->is_loaded() || assets->movies() == nullptr) {
 		return bf3::core::make_error(std::string(p_partition) + ": no Bf3UiAssets movies");
 	}
+	const auto open_start = std::chrono::steady_clock::now();
 	auto e = std::make_unique<Entry>();
 	e->partition = std::string(p_partition);
 	e->order = next_order_++;
@@ -347,7 +353,10 @@ bf3::core::Status Bf3UiScreens::open_entry(
 					p_event.param.defined() ? std::optional<std::string>(p_event.param.to_string()) : std::nullopt);
 		}
 	});
+	stats_.open_seconds += bf3::core::seconds_since(open_start);
+	const auto initialize_start = std::chrono::steady_clock::now();
 	e->screen->initialize(model_);
+	stats_.initialize_seconds += bf3::core::seconds_since(initialize_start);
 	++stats_.opened;
 	note("open " + ui::ui_data_category_leaf(partition) + (e->view != nullptr ? " drawn" : ""));
 	entries_.push_back(std::move(e));
@@ -659,6 +668,7 @@ void Bf3UiScreens::sync_flow() {
 }
 
 void Bf3UiScreens::deliver_widget_events() {
+	const auto start = std::chrono::steady_clock::now();
 	for (const host::UiFlowWidgetEvent &w : session_->take_widget_events()) {
 		Entry *e = find(w.partition);
 		ui::HudScreen *s = e != nullptr ? screen_of(*e) : nullptr;
@@ -671,6 +681,7 @@ void Bf3UiScreens::deliver_widget_events() {
 		note("deliver " + ui::ui_data_category_leaf(w.partition) + "." + w.instance + " " + w.query +
 				(taken ? "" : " (no port)"));
 	}
+	stats_.event_seconds += bf3::core::seconds_since(start);
 }
 
 void Bf3UiScreens::report_protocol() {
@@ -721,7 +732,12 @@ void Bf3UiScreens::step(double p_seconds) {
 			rects.safe_y = ui::hud_safe_offset(ui::kHudFootageSafeY, rects.visible.height(), safe_area_.height);
 			e->screen->set_stage_rects(rects);
 		}
+		const auto refresh_start = std::chrono::steady_clock::now();
 		e->screen->refresh(model_);
+		if (!e->refreshed) {
+			e->refreshed = true;
+			stats_.first_refresh_seconds += bf3::core::seconds_since(refresh_start);
+		}
 		e->screen->advance(dt);
 		if (const bf3::core::Status st = scene->advance_seconds(dt); !st) {
 			error(e->partition + ": " + st.error().message);

@@ -251,9 +251,12 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 			r_m.native_failure_printed = true;
 			UtilityFunctions::print(to_godot("[ui] ERROR native screens: " + s.error().message));
 		}
-		if (const bf3::core::Status s = flow.tick(st, r_m.native_delta_s); !s && !r_m.native_failure_printed) {
+		const auto flow_tick_start = std::chrono::steady_clock::now();
+		const bf3::core::Status flow_ticked = flow.tick(st, r_m.native_delta_s);
+		r_m.ms_flow_tick = bf3::core::ms_since(flow_tick_start);
+		if (!flow_ticked && !r_m.native_failure_printed) {
 			r_m.native_failure_printed = true;
-			UtilityFunctions::print(to_godot("[ui] ERROR native screens: " + s.error().message));
+			UtilityFunctions::print(to_godot("[ui] ERROR native screens: " + flow_ticked.error().message));
 		}
 		if (const std::optional<std::string> overflow = flow.take_journal_overflow()) {
 			UtilityFunctions::print(to_godot("[ui] ERROR " + *overflow));

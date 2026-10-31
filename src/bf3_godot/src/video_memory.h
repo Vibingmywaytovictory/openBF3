@@ -38,5 +38,5 @@ VideoMemoryMeter &process_video_memory_meter();
 std::optional<ProcessVideoMemory> process_video_memory();
 std::string process_video_memory_text();
 double video_memory_mib(uint64_t p_bytes);
-
+uint64_t process_working_set_bytes();
 }

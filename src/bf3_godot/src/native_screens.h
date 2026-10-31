@@ -66,6 +66,11 @@ struct UiScreensStats {
 	uint64_t mouse = 0;
 	uint64_t views_reused = 0;
 	uint64_t views_dropped = 0;
+	double asset_read_seconds = 0.0;
+	double open_seconds = 0.0;
+	double initialize_seconds = 0.0;
+	double event_seconds = 0.0;
+	double first_refresh_seconds = 0.0;
 };
 
 class Bf3UiScreens : public godot::Node2D, public UiScreenHost, public UiScreenRecords {

@@ -1,5 +1,8 @@
 #pragma once
 
+#include "native_screens.h"
+#include "swf_view.h"
+
 #include <godot_cpp/classes/global_constants.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 
@@ -15,7 +18,6 @@
 
 namespace bf3::godot_side {
 
-class Bf3UiScreens;
 class NativeFlow;
 class NativeMenu;
 
@@ -56,6 +58,8 @@ struct MenuFramesIo {
 	std::optional<uint64_t> local_video_bytes;
 	uint64_t pipeline_canvas = 0;
 	uint64_t pipeline_specialization = 0;
+	double flow_tick_ms = 0.0;
+	uint64_t working_set_bytes = 0;
 	uint64_t glitch_triggers = 0;
 	bool glitch_drawn = false;
 };
@@ -69,6 +73,14 @@ struct MenuFrameSample {
 	float setup_ms = 0.0f;
 	float render_cpu_ms = 0.0f;
 	float render_gpu_ms = 0.0f;
+	float flow_tick_ms = 0.0f;
+	float asset_read_ms = 0.0f;
+	float open_ms = 0.0f;
+	float initialize_ms = 0.0f;
+	float event_ms = 0.0f;
+	float first_refresh_ms = 0.0f;
+	float plan_ms = 0.0f;
+	float build_ms = 0.0f;
 	uint16_t opened = 0;
 	uint16_t glitches = 0;
 	bool glitch_drawn = false;
@@ -158,8 +170,18 @@ private:
 		uint64_t viewports = 0;
 		bool settled = false;
 	};
+	struct StepWorkingSet {
+		uint64_t first = 0;
+		uint64_t last = 0;
+	};
 	void record_opens(const Ctx &p_c);
+	void record_timers(const Ctx &p_c, MenuFrameSample &r_f);
+	std::string split_report() const;
+	std::string step_report(double p_base_median) const;
 
+	UiScreensStats screens_seen_;
+	SwfViewCounters view_seen_;
+	std::vector<StepWorkingSet> step_working_set_;
 	std::vector<OpenRecord> opens_;
 	std::map<std::string, uint64_t, std::less<>> open_serials_;
 	uint64_t frame_index_ = 0;

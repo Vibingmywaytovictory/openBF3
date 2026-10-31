@@ -66,7 +66,7 @@ struct TdmState {
 	uint32_t own_life_seen = 0;
 
 	TdmFrame frame;
-	double ms_tdm_hud = 0, ms_death_camera = 0;
+	double ms_tdm_hud = 0, ms_death_camera = 0, ms_flow_tick = 0;
 
 	std::unique_ptr<M2bCheck, void (*)(M2bCheck *)> check{ nullptr, nullptr };
 	bool finished = false;

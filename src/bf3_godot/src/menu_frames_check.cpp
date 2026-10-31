@@ -243,6 +243,24 @@ void MenuFramesCheck::record_opens(const Ctx &p_c) {
 	++frame_index_;
 }
 
+void MenuFramesCheck::record_timers(const Ctx &p_c, MenuFrameSample &r_f) {
+	const UiScreensStats &now = p_c.screens.stats();
+	const SwfViewCounters view = Bf3SwfView::counters();
+	r_f.flow_tick_ms = float(p_c.io.flow_tick_ms);
+	r_f.asset_read_ms = float((now.asset_read_seconds - screens_seen_.asset_read_seconds) * 1000.0);
+	r_f.open_ms = float((now.open_seconds - screens_seen_.open_seconds) * 1000.0);
+	r_f.initialize_ms = float((now.initialize_seconds - screens_seen_.initialize_seconds) * 1000.0);
+	r_f.event_ms = float((now.event_seconds - screens_seen_.event_seconds) * 1000.0);
+	r_f.first_refresh_ms = float((now.first_refresh_seconds - screens_seen_.first_refresh_seconds) * 1000.0);
+	r_f.plan_ms = float((view.plan_seconds - view_seen_.plan_seconds) * 1000.0);
+	r_f.build_ms = float((view.build_seconds - view_seen_.build_seconds) * 1000.0);
+	screens_seen_ = now;
+	view_seen_ = view;
+	StepWorkingSet &ws = step_working_set_[r_f.step];
+	ws.first = ws.first == 0 ? p_c.io.working_set_bytes : ws.first;
+	ws.last = p_c.io.working_set_bytes;
+}
+
 void MenuFramesCheck::record(const Ctx &p_c) {
 	const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
 	record_opens(p_c);
@@ -257,6 +275,8 @@ void MenuFramesCheck::record(const Ctx &p_c) {
 	f.setup_ms = float(p_c.io.setup_ms);
 	f.render_cpu_ms = float(p_c.io.render_cpu_ms);
 	f.render_gpu_ms = float(p_c.io.render_gpu_ms);
+	step_working_set_.resize(steps_.size());
+	record_timers(p_c, f);
 	f.opened = uint16_t(std::min<uint64_t>(opened - opened_seen_, 0xFFFF));
 	f.glitches = uint16_t(std::min<uint64_t>(p_c.io.glitch_triggers - glitches_seen_, 0xFFFF));
 	f.glitch_drawn = p_c.io.glitch_drawn;
@@ -456,6 +476,52 @@ bool MenuFramesCheck::frame(Bf3UiScreens &r_screens, NativeFlow &r_flow, const N
 	return done_;
 }
 
+std::string MenuFramesCheck::split_report() const {
+	std::vector<size_t> order;
+	for (size_t i = 0; i < frames_.size(); ++i) {
+		if (counted(frames_[i]) && frames_[i].opened != 0) {
+			order.push_back(i);
+		}
+	}
+	std::sort(
+			order.begin(), order.end(), [this](size_t a, size_t b) { return frames_[a].wall_ms > frames_[b].wall_ms; });
+	std::string out;
+	for (size_t n = 0; n < std::min(order.size(), kMenuFramesReportFrames); ++n) {
+		const MenuFrameSample &f = frames_[order[n]];
+		out += bf3::core::fmt("[ui]   open frame %zu (%s): wall %.2f ms: flow tick %.2f, asset read %.2f, open %.2f, "
+							  "initialize %.2f, events %.2f, first refresh %.2f, plan walk %.2f, content build %.2f, "
+							  "render setup %.2f\n",
+				order[n], steps_[f.step].name.c_str(), f.wall_ms, f.flow_tick_ms, f.asset_read_ms, f.open_ms,
+				f.initialize_ms, f.event_ms, f.first_refresh_ms, std::max(0.0f, f.plan_ms - f.build_ms), f.build_ms,
+				f.setup_ms);
+	}
+	return out;
+}
+
+std::string MenuFramesCheck::step_report(double p_base_median) const {
+	std::string out;
+	for (size_t s = 0; s < steps_.size(); ++s) {
+		std::vector<double> cpu;
+		size_t over = 0;
+		for (const MenuFrameSample &f : frames_) {
+			if (f.step == s && counted(f)) {
+				cpu.push_back(f.render_cpu_ms);
+				over += f.wall_ms > kMenuFramesHitchFactor * p_base_median ? 1u : 0u;
+			}
+		}
+		if (cpu.empty()) {
+			continue;
+		}
+		const StepWorkingSet ws = s < step_working_set_.size() ? step_working_set_[s] : StepWorkingSet{};
+		out += bf3::core::fmt("[ui]   step %s: %zu frames, %zu over %.0f x the no-menu median, root viewport CPU p50 "
+							  "%.2f p95 %.2f, working set %.1f to %.1f MiB\n",
+				steps_[s].name.c_str(), cpu.size(), over, kMenuFramesHitchFactor,
+				bf3::core::interpolated_percentile(cpu, 0.5), bf3::core::interpolated_percentile(cpu, 0.95),
+				video_memory_mib(ws.first), video_memory_mib(ws.last));
+	}
+	return out;
+}
+
 std::string MenuFramesCheck::report() const {
 	using bf3::core::interpolated_percentile;
 	if (baseline_run_) {
@@ -543,6 +609,9 @@ std::string MenuFramesCheck::report() const {
 						  "[ui]   open %s (%s): not revealed\n", r.partition.c_str(), steps_[r.step].name.c_str());
 	}
 	out += bf3::core::fmt("[ui]   %zu screen open(s) reported, gated by nothing yet\n", opens_.size());
+	out += split_report();
+	const std::vector<double> play = walls(false);
+	out += step_report(play.empty() ? 0.0 : interpolated_percentile(play, 0.5));
 	out += "[ui]   gated: every frame of the second visits (deploy screen, CUSTOMIZE, Escape menu, Options), stalls on "
 		   "first visits; " +
 			verdict_ + "\n";

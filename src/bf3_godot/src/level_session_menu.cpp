@@ -308,6 +308,8 @@ bool Bf3LevelSession::tdm_menu_frame(double p_now_s) {
 		if (const std::optional<ProcessVideoMemory> local = process_video_memory()) {
 			fio.local_video_bytes = local->local_bytes;
 		}
+		fio.flow_tick_ms = m.ms_flow_tick;
+		fio.working_set_bytes = process_working_set_bytes();
 		fio.pipeline_canvas =
 				uint64_t(Performance::get_singleton()->get_monitor(Performance::PIPELINE_COMPILATIONS_CANVAS));
 		fio.pipeline_specialization =

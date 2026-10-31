@@ -16,6 +16,7 @@
 #include <windows.h>
 
 #include <dxgi1_4.h>
+#include <psapi.h>
 
 namespace bf3::godot_side {
 
@@ -123,6 +124,12 @@ std::optional<ProcessVideoMemory> process_video_memory() {
 
 double video_memory_mib(uint64_t p_bytes) {
 	return double(p_bytes) / (1024.0 * 1024.0);
+}
+
+uint64_t process_working_set_bytes() {
+	PROCESS_MEMORY_COUNTERS pmc{};
+	pmc.cb = sizeof(pmc);
+	return GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)) ? uint64_t(pmc.WorkingSetSize) : 0;
 }
 
 std::string process_video_memory_text() {
