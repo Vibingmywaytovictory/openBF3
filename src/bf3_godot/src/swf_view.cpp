@@ -372,34 +372,6 @@ Hom tilt_homography(const SwfTilt &p_tilt, double p_px, double p_py, const ui::S
 	return hmul(p, t);
 }
 
-struct Bounds {
-	double x0 = 1e30;
-	double y0 = 1e30;
-	double x1 = -1e30;
-	double y1 = -1e30;
-	bool empty() const { return x0 > x1 || y0 > y1; }
-	void add(double p_x, double p_y) {
-		x0 = std::min(x0, p_x);
-		y0 = std::min(y0, p_y);
-		x1 = std::max(x1, p_x);
-		y1 = std::max(y1, p_y);
-	}
-	void add(const Bounds &p_b) {
-		if (!p_b.empty()) {
-			add(p_b.x0, p_b.y0);
-			add(p_b.x1, p_b.y1);
-		}
-	}
-	Bounds intersect(const Bounds &p_b) const {
-		Bounds r;
-		r.x0 = std::max(x0, p_b.x0);
-		r.y0 = std::max(y0, p_b.y0);
-		r.x1 = std::min(x1, p_b.x1);
-		r.y1 = std::min(y1, p_b.y1);
-		return r;
-	}
-};
-
 constexpr int32_t kLayerGranule = 32;
 
 int32_t layer_alloc(int32_t p_need) {
@@ -417,18 +389,11 @@ Vector4 vec4_of(const Color &p_c) {
 	return Vector4(p_c.r, p_c.g, p_c.b, p_c.a);
 }
 
-Bounds project_rect(const ui::SwfRect &p_r, const ui::SwfAffine &p_m, const Hom &p_h) {
-	Bounds b;
-	const double xs[2] = { p_r.x_min, p_r.x_max };
-	const double ys[2] = { p_r.y_min, p_r.y_max };
-	for (double x : xs) {
-		for (double y : ys) {
-			const ui::SwfPoint q = ui::swf_apply(p_m, x, y);
-			const ui::SwfPoint s = happly(p_h, q.x, q.y);
-			b.add(s.x, s.y);
-		}
-	}
-	return b;
+ui::SwfBounds project_rect(const ui::SwfRect &p_r, const ui::SwfAffine &p_m, const Hom &p_h) {
+	return ui::swf_map_rect(p_r, [&](double p_x, double p_y) {
+		const ui::SwfPoint q = ui::swf_apply(p_m, p_x, p_y);
+		return happly(p_h, q.x, q.y);
+	});
 }
 
 Color color_of(ui::SwfColor p_c) {
@@ -1680,7 +1645,7 @@ struct Bf3SwfView::Impl {
 		if (p_geo.indices.empty()) {
 			return;
 		}
-		Bounds b;
+		ui::SwfBounds b;
 		for (const Vert &v : p_geo.verts) {
 			b.add(v.p.x, v.p.y);
 		}
@@ -2417,7 +2382,7 @@ struct Bf3SwfView::Impl {
 		t.used = true;
 		t.canvas = &r_canvas;
 		r_canvas.targets.push_back(p_id);
-		Bounds local;
+		ui::SwfBounds local;
 		const ui::SwfAffine to_local = ui::swf_inverse(ui::swf_affine(n.world)).value_or(kSingularAffine);
 		std::vector<ui::SwfNodeId> stack(n.children.begin(), n.children.end());
 		while (!stack.empty()) {
@@ -2442,7 +2407,7 @@ struct Bf3SwfView::Impl {
 			local.add(0.0, 0.0);
 			local.add(1.0, 1.0);
 		}
-		t.local = ui::SwfRect{ float(local.x0), float(local.x1), float(local.y0), float(local.y1) };
+		t.local = local.rect();
 		const ui::SwfAffine w = ui::swf_concat(stage_to_window, ui::swf_affine(n.world));
 		const double sx = std::sqrt(w.a * w.a + w.b * w.b);
 		const double sy = std::sqrt(w.c * w.c + w.d * w.d);
@@ -2746,8 +2711,8 @@ struct Bf3SwfView::Impl {
 		}
 	}
 
-	Bounds node_bounds(ui::SwfNodeId p_id, const Canvas &p_c) const {
-		Bounds b;
+	ui::SwfBounds node_bounds(ui::SwfNodeId p_id, const Canvas &p_c) const {
+		ui::SwfBounds b;
 		const auto it = recs.find(p_id);
 		const ui::SwfSceneNode *n = node(p_id);
 		if (it == recs.end() || n == nullptr) {
@@ -2790,7 +2755,7 @@ struct Bf3SwfView::Impl {
 				continue;
 			}
 			c.bounds_dirty = false;
-			Bounds b;
+			ui::SwfBounds b;
 			for (const ui::SwfNodeId id : c.nodes) {
 				b.add(node_bounds(id, c));
 			}
@@ -2810,7 +2775,7 @@ struct Bf3SwfView::Impl {
 				}
 			}
 			if (c.kind == CanvasKind::Mask) {
-				Bounds a;
+				ui::SwfBounds a;
 				for (const ui::SwfNodeId id : c.alpha_nodes) {
 					a.add(node_bounds(id, c));
 				}

@@ -2861,3 +2861,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * architecture.md records the primitive rule, first-size viewports, shared filter materials, the hidden skip, swf_layer_plan and Godot's MSAA monitor overcount.
 * link_viewports waits for every filter stage's viewport; godot.ui_open_census swaps a live filter: 3 links on an empty RID before, 0 now.
 * New viewports start disabled and hidden Bf3UiScreens views stop their live targets; godot.ui_open_census counts render requests: 57 on ingamemenump opened hidden before, 0 now, 57 on show where 114 were asked for.
+* SwfBounds and swf_map_rect in swf_layer_plan.h replace the Box and project copies, kernel_key uses fnv.h; ui.layer_plan output unchanged.

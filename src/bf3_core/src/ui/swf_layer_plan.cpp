@@ -4,6 +4,7 @@
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/swf_font.h"
 #include "bf3/core/ui/ui_stage.h"
+#include "bf3/core/util/fnv.h"
 
 #include <algorithm>
 #include <array>
@@ -17,52 +18,10 @@ namespace bf3::core::ui {
 
 namespace {
 
-struct Box {
-	double x0 = 1e30;
-	double y0 = 1e30;
-	double x1 = -1e30;
-	double y1 = -1e30;
-	bool empty() const { return x0 > x1 || y0 > y1; }
-	void add(double p_x, double p_y) {
-		x0 = std::min(x0, p_x);
-		y0 = std::min(y0, p_y);
-		x1 = std::max(x1, p_x);
-		y1 = std::max(y1, p_y);
-	}
-	void add(const Box &p_b) {
-		if (!p_b.empty()) {
-			add(p_b.x0, p_b.y0);
-			add(p_b.x1, p_b.y1);
-		}
-	}
-	Box intersect(const Box &p_b) const {
-		Box r;
-		r.x0 = std::max(x0, p_b.x0);
-		r.y0 = std::max(y0, p_b.y0);
-		r.x1 = std::min(x1, p_b.x1);
-		r.y1 = std::min(y1, p_b.y1);
-		return r;
-	}
-	SwfRect rect() const { return SwfRect{ float(x0), float(x1), float(y0), float(y1) }; }
-};
-
-Box box_of(const SwfRect &p_r) {
-	Box b;
+SwfBounds box_of(const SwfRect &p_r) {
+	SwfBounds b;
 	b.add(p_r.x_min, p_r.y_min);
 	b.add(p_r.x_max, p_r.y_max);
-	return b;
-}
-
-Box project(const SwfRect &p_r, const SwfAffine &p_m) {
-	Box b;
-	const double xs[2] = { p_r.x_min, p_r.x_max };
-	const double ys[2] = { p_r.y_min, p_r.y_max };
-	for (const double x : xs) {
-		for (const double y : ys) {
-			const SwfPoint q = swf_apply(p_m, x, y);
-			b.add(q.x, q.y);
-		}
-	}
 	return b;
 }
 
@@ -122,7 +81,8 @@ double grid_axis(double p_v, double p_b0, double p_b1, double p_s0, double p_s1,
 	return span > 0.0 ? inner0 + (p_v - p_s0) / span * (inner1 - inner0) : inner0;
 }
 
-void add_grid_bounds(const SwfScene &p_scene, const SwfSceneNode &p_node, const SwfAffine &p_to_owner, Box &r_bounds) {
+void add_grid_bounds(
+		const SwfScene &p_scene, const SwfSceneNode &p_node, const SwfAffine &p_to_owner, SwfBounds &r_bounds) {
 	for (const SwfNodeId c : p_node.children) {
 		const SwfSceneNode *k = p_scene.node(c);
 		if (k == nullptr || k->scaling_grid != nullptr) {
@@ -130,14 +90,14 @@ void add_grid_bounds(const SwfScene &p_scene, const SwfSceneNode &p_node, const 
 		}
 		const SwfAffine m = swf_concat(p_to_owner, swf_affine(k->matrix));
 		if (k->shape != nullptr) {
-			r_bounds.add(project(k->shape->bounds, m));
+			r_bounds.add(swf_project_rect(k->shape->bounds, m));
 		}
 		add_grid_bounds(p_scene, *k, m, r_bounds);
 	}
 }
 
-Box glyph_box(const SwfFontFace &p_face, uint16_t p_glyph) {
-	Box b;
+SwfBounds glyph_box(const SwfFontFace &p_face, uint16_t p_glyph) {
+	SwfBounds b;
 	if (p_glyph < p_face.outlines.glyphs.size()) {
 		for (const GlyphPoint &p : p_face.outlines.glyphs[p_glyph].points) {
 			b.add(p.x, p.y);
@@ -147,7 +107,7 @@ Box glyph_box(const SwfFontFace &p_face, uint16_t p_glyph) {
 }
 
 void add_shape_pieces(const SwfScene &p_scene, const SwfSceneNode &p_node, const SwfShape &p_shape,
-		const SwfGridWarp &p_grid, SwfNodePieces &r_out, Box &r_box) {
+		const SwfGridWarp &p_grid, SwfNodePieces &r_out, SwfBounds &r_box) {
 	SwfAffine to_sprite;
 	if (p_grid.active) {
 		swf_grid_owner(p_scene, p_node, &to_sprite);
@@ -206,8 +166,8 @@ struct Walker {
 	std::vector<SwfNodeId> tilted;
 	std::vector<SwfNodeId> targets;
 	SwfLayerWalk out;
-	std::vector<Box> nodes;
-	std::vector<Box> masks;
+	std::vector<SwfBounds> nodes;
+	std::vector<SwfBounds> masks;
 	std::unordered_map<SwfNodeId, SwfNodePieces> pieces;
 	std::set<SwfNodeId> mask_layers;
 
@@ -267,7 +227,7 @@ struct Walker {
 		if (!p.has_bounds || (!p_alpha && !p_n.world_visible) || p_layer == kSwfNoLayer) {
 			return;
 		}
-		const Box b = project(p.local, swf_affine(p.frame->world));
+		const SwfBounds b = swf_project_rect(p.local, swf_affine(p.frame->world));
 		(p_alpha ? masks[p_layer] : nodes[p_layer]).add(b);
 	}
 
@@ -414,14 +374,8 @@ std::vector<SwfNodeId> resolve(const SwfScene &p_scene, const std::vector<std::s
 }
 
 uint64_t kernel_key(const SwfFilterKernel &p_k) {
-	uint64_t h = 14695981039346656037ull;
-	const auto mix = [&h](double p_v) {
-		const float f = float(p_v);
-		const auto *b = reinterpret_cast<const unsigned char *>(&f);
-		for (size_t i = 0; i < sizeof(f); ++i) {
-			h = (h ^ b[i]) * 1099511628211ull;
-		}
-	};
+	uint64_t h = kFnv1aOffset;
+	const auto mix = [&h](double p_v) { fnv1a_value(h, float(p_v)); };
 	mix(double(p_k.x.size()));
 	for (const double w : p_k.x) {
 		mix(w);
@@ -433,6 +387,10 @@ uint64_t kernel_key(const SwfFilterKernel &p_k) {
 	return h;
 }
 
+}
+
+SwfBounds swf_project_rect(const SwfRect &p_r, const SwfAffine &p_m) {
+	return swf_map_rect(p_r, [&p_m](double p_x, double p_y) { return swf_apply(p_m, p_x, p_y); });
 }
 
 uint64_t swf_target_bytes(int32_t p_width, int32_t p_height, uint64_t p_factor) {
@@ -480,7 +438,7 @@ SwfGridWarp swf_grid_warp(const SwfScene &p_scene, const SwfSceneNode &p_node, c
 	if (sprite == nullptr) {
 		return g;
 	}
-	Box sb;
+	SwfBounds sb;
 	add_grid_bounds(p_scene, *sprite, SwfAffine{}, sb);
 	if (sb.empty()) {
 		return g;
@@ -509,7 +467,7 @@ SwfGridWarp swf_grid_warp(const SwfScene &p_scene, const SwfSceneNode &p_node, c
 SwfNodePieces swf_node_pieces(const SwfScene &p_scene, const SwfFontSet *p_fonts, const SwfSceneNode &p_node) {
 	SwfNodePieces out;
 	out.frame = &p_node;
-	Box box;
+	SwfBounds box;
 	if (p_node.kind == SwfNodeKind::Shape && p_node.shape != nullptr) {
 		const SwfGridWarp grid = swf_grid_warp(p_scene, p_node, SwfAffine{});
 		if (grid.active) {
@@ -532,7 +490,7 @@ SwfNodePieces swf_node_pieces(const SwfScene &p_scene, const SwfFontSet *p_fonts
 					if (g.face == nullptr) {
 						continue;
 					}
-					const Box gb = glyph_box(*g.face, g.glyph);
+					const SwfBounds gb = glyph_box(*g.face, g.glyph);
 					if (!gb.empty()) {
 						const double s = double(g.size) / double(kSwfFontUnitsPerEm);
 						box.add(g.x + gb.x0 * s, g.baseline + gb.y0 * s);
@@ -602,7 +560,7 @@ std::optional<SwfRectMask> swf_rect_mask(
 			return std::nullopt;
 		}
 		const SwfFillMesh &mesh = shape->meshes.front();
-		Box vb;
+		SwfBounds vb;
 		for (const uint32_t i : mesh.indices) {
 			vb.add(mesh.vertices[i].x, mesh.vertices[i].y);
 		}
@@ -611,7 +569,7 @@ std::optional<SwfRectMask> swf_rect_mask(
 			return std::nullopt;
 		}
 	}
-	return SwfRectMask{ project(pieces.local, swf_affine(w)).rect() };
+	return SwfRectMask{ swf_project_rect(pieces.local, swf_affine(w)).rect() };
 }
 
 const char *swf_layer_kind_name(SwfLayerKind p_kind) {
@@ -691,9 +649,9 @@ SwfLayerPlan swf_layer_plan(const SwfLayerWalk &p_walk, int32_t p_window_width, 
 			l.taps_y = uint32_t(k.y.size());
 			kernels.insert(kernel_key(k));
 		}
-		Box b;
+		SwfBounds b;
 		if (w.has_nodes) {
-			b.add(project(w.nodes, to_window));
+			b.add(swf_project_rect(w.nodes, to_window));
 		}
 		for (const uint32_t c : w.children) {
 			const SwfPlannedLayer &k = plan.layers[c];
@@ -703,7 +661,7 @@ SwfLayerPlan swf_layer_plan(const SwfLayerWalk &p_walk, int32_t p_window_width, 
 			}
 		}
 		if (w.kind == SwfLayerKind::Mask) {
-			b = w.has_mask ? b.intersect(project(w.mask, to_window)) : Box{};
+			b = w.has_mask ? b.intersect(swf_project_rect(w.mask, to_window)) : SwfBounds{};
 		}
 		l.has_content = !b.empty();
 		if (l.has_content) {

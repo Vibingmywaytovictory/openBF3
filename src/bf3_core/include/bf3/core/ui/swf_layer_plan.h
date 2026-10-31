@@ -3,6 +3,7 @@
 #include "bf3/core/ui/swf_scene.h"
 #include "bf3/core/ui/swf_text.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -27,6 +28,51 @@ inline constexpr uint64_t kSwfPageDemandPxAtBase = 1080512;
 inline constexpr int32_t kSwfPageMaxSide = 16384;
 
 uint64_t swf_target_bytes(int32_t p_width, int32_t p_height, uint64_t p_factor);
+
+struct SwfBounds {
+	double x0 = 1e30;
+	double y0 = 1e30;
+	double x1 = -1e30;
+	double y1 = -1e30;
+
+	bool empty() const { return x0 > x1 || y0 > y1; }
+	void add(double p_x, double p_y) {
+		x0 = std::min(x0, p_x);
+		y0 = std::min(y0, p_y);
+		x1 = std::max(x1, p_x);
+		y1 = std::max(y1, p_y);
+	}
+	void add(const SwfBounds &p_b) {
+		if (!p_b.empty()) {
+			add(p_b.x0, p_b.y0);
+			add(p_b.x1, p_b.y1);
+		}
+	}
+	SwfBounds intersect(const SwfBounds &p_b) const {
+		SwfBounds r;
+		r.x0 = std::max(x0, p_b.x0);
+		r.y0 = std::max(y0, p_b.y0);
+		r.x1 = std::min(x1, p_b.x1);
+		r.y1 = std::min(y1, p_b.y1);
+		return r;
+	}
+	SwfRect rect() const { return SwfRect{ float(x0), float(x1), float(y0), float(y1) }; }
+};
+
+template <class Map> SwfBounds swf_map_rect(const SwfRect &p_r, Map p_map) {
+	SwfBounds b;
+	const double xs[2] = { p_r.x_min, p_r.x_max };
+	const double ys[2] = { p_r.y_min, p_r.y_max };
+	for (const double x : xs) {
+		for (const double y : ys) {
+			const SwfPoint q = p_map(x, y);
+			b.add(q.x, q.y);
+		}
+	}
+	return b;
+}
+
+SwfBounds swf_project_rect(const SwfRect &p_r, const SwfAffine &p_m);
 
 struct SwfFilterKernel {
 	std::vector<double> x;
