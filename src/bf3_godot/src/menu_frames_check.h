@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -33,6 +34,8 @@ inline constexpr double kMenuFramesMedianFactor = 1.25;
 inline constexpr double kMenuFramesMedianSlackMs = 2.0;
 inline constexpr size_t kMenuFramesMaxFrames = 30000;
 inline constexpr size_t kMenuFramesReportFrames = 12;
+inline constexpr size_t kMenuFramesReportOpens = 128;
+inline constexpr size_t kMenuFramesOpenSettleFrames = 2;
 inline constexpr uint32_t kMenuFramesShots = 18;
 inline constexpr uint32_t kMenuFramesShotsPerStep = 2;
 
@@ -51,6 +54,8 @@ struct MenuFramesIo {
 	double render_gpu_ms = 0.0;
 	double video_mb = 0.0;
 	std::optional<uint64_t> local_video_bytes;
+	uint64_t pipeline_canvas = 0;
+	uint64_t pipeline_specialization = 0;
 	uint64_t glitch_triggers = 0;
 	bool glitch_drawn = false;
 };
@@ -140,6 +145,27 @@ private:
 	double video_peak_mb_ = 0.0;
 	std::optional<uint64_t> local_play_bytes_;
 	uint64_t local_peak_bytes_ = 0;
+	struct OpenRecord {
+		std::string partition;
+		size_t step = 0;
+		uint64_t frame_opened = 0;
+		std::optional<uint64_t> frame_revealed;
+		uint64_t canvas_before = 0;
+		uint64_t specialization_before = 0;
+		uint64_t viewports_before = 0;
+		uint64_t canvas = 0;
+		uint64_t specialization = 0;
+		uint64_t viewports = 0;
+		bool settled = false;
+	};
+	void record_opens(const Ctx &p_c);
+
+	std::vector<OpenRecord> opens_;
+	std::map<std::string, uint64_t, std::less<>> open_serials_;
+	uint64_t frame_index_ = 0;
+	uint64_t canvas_seen_ = 0;
+	uint64_t specialization_seen_ = 0;
+	uint64_t viewports_seen_ = 0;
 	std::string shot_dir_;
 	std::vector<std::string> shots_;
 	std::vector<uint32_t> step_shots_;

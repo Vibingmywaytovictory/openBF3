@@ -308,6 +308,10 @@ bool Bf3LevelSession::tdm_menu_frame(double p_now_s) {
 		if (const std::optional<ProcessVideoMemory> local = process_video_memory()) {
 			fio.local_video_bytes = local->local_bytes;
 		}
+		fio.pipeline_canvas =
+				uint64_t(Performance::get_singleton()->get_monitor(Performance::PIPELINE_COMPILATIONS_CANVAS));
+		fio.pipeline_specialization =
+				uint64_t(Performance::get_singleton()->get_monitor(Performance::PIPELINE_COMPILATIONS_SPECIALIZATION));
 		const RID viewport = get_viewport()->get_viewport_rid();
 		fio.render_cpu_ms = RenderingServer::get_singleton()->viewport_get_measured_render_time_cpu(viewport);
 		fio.render_gpu_ms = RenderingServer::get_singleton()->viewport_get_measured_render_time_gpu(viewport);

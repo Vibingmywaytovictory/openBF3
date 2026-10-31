@@ -199,8 +199,53 @@ std::vector<MenuFramesCheck::Step> MenuFramesCheck::steps() {
 	return s;
 }
 
+void MenuFramesCheck::record_opens(const Ctx &p_c) {
+	const uint64_t viewports = Bf3SwfView::counters().viewport_creates;
+	for (size_t i = 0; i < p_c.screens.screen_count(); ++i) {
+		const UiScreenSlot s = p_c.screens.screen_slot(i);
+		if (s.view == nullptr) {
+			continue;
+		}
+		const uint64_t serial = s.view->open_serial();
+		auto [seen, fresh] = open_serials_.try_emplace(std::string(s.partition), serial);
+		if (fresh || seen->second != serial) {
+			seen->second = serial;
+			OpenRecord r;
+			r.partition = ui::ui_data_category_leaf(s.partition);
+			r.step = std::min(next_, steps_.size() - 1);
+			r.frame_opened = frame_index_;
+			r.canvas_before = canvas_seen_;
+			r.specialization_before = specialization_seen_;
+			r.viewports_before = viewports_seen_;
+			opens_.push_back(std::move(r));
+		}
+		const std::string leaf = ui::ui_data_category_leaf(s.partition);
+		if (!s.shown || !s.view->is_visible_in_tree()) {
+			continue;
+		}
+		for (OpenRecord &r : opens_) {
+			if (r.partition == leaf && !r.frame_revealed) {
+				r.frame_revealed = frame_index_;
+			}
+		}
+	}
+	for (OpenRecord &r : opens_) {
+		if (!r.settled && r.frame_revealed && frame_index_ >= *r.frame_revealed + kMenuFramesOpenSettleFrames) {
+			r.settled = true;
+			r.canvas = p_c.io.pipeline_canvas - r.canvas_before;
+			r.specialization = p_c.io.pipeline_specialization - r.specialization_before;
+			r.viewports = viewports - r.viewports_before;
+		}
+	}
+	canvas_seen_ = p_c.io.pipeline_canvas;
+	specialization_seen_ = p_c.io.pipeline_specialization;
+	viewports_seen_ = viewports;
+	++frame_index_;
+}
+
 void MenuFramesCheck::record(const Ctx &p_c) {
 	const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+	record_opens(p_c);
 	const uint64_t opened = p_c.screens.stats().opened;
 	MenuFrameSample f;
 	f.step = uint16_t(std::min(next_, steps_.size() - 1));
@@ -486,6 +531,18 @@ std::string MenuFramesCheck::report() const {
 	for (const std::string &s : shots_) {
 		out += "[ui]   shot " + s + "\n";
 	}
+	for (size_t i = 0; i < std::min(opens_.size(), kMenuFramesReportOpens); ++i) {
+		const OpenRecord &r = opens_[i];
+		out += r.settled
+				? bf3::core::fmt("[ui]   open %s (%s): %llu frame(s) to reveal, %llu canvas and %llu specialization "
+								 "pipeline compile(s), %llu viewport(s) made\n",
+						  r.partition.c_str(), steps_[r.step].name.c_str(),
+						  (unsigned long long)(*r.frame_revealed - r.frame_opened), (unsigned long long)r.canvas,
+						  (unsigned long long)r.specialization, (unsigned long long)r.viewports)
+				: bf3::core::fmt(
+						  "[ui]   open %s (%s): not revealed\n", r.partition.c_str(), steps_[r.step].name.c_str());
+	}
+	out += bf3::core::fmt("[ui]   %zu screen open(s) reported, gated by nothing yet\n", opens_.size());
 	out += "[ui]   gated: every frame of the second visits (deploy screen, CUSTOMIZE, Escape menu, Options), stalls on "
 		   "first visits; " +
 			verdict_ + "\n";
