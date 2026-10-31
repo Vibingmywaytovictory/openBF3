@@ -2902,3 +2902,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Architecture corrects a false claim: hidden views keep their page slots until R runs short (the dev-log line for 8db0df1c overstated it too); only a closed or never-shown view holds none.
 * m02.repeat lists the first 16 differing bytes with channel, position and values; a count alone could not find the layer.
 * The menu frames step report prints each step's worst frame; report only.
+* Tilted filter layers sample R on a slot-independent grid; godot.native_hud m02.repeat 5 of 4608000 bytes differ -> 0.

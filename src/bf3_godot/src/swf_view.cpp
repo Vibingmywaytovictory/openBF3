@@ -58,6 +58,7 @@ constexpr int32_t kModeSolid = 0;
 constexpr int32_t kModeBitmap = 1;
 constexpr int32_t kModeClipped = 2;
 constexpr int32_t kModeLayer = 3;
+constexpr int32_t kModeLayerResampled = 4;
 constexpr int32_t kFlagWrap = 1;
 constexpr int32_t kFlagAdditive = 2;
 
@@ -82,7 +83,7 @@ void vertex() {
 	vec3 q = vec3(dot(h0, hp), dot(h1, hp), dot(h2, hp));
 	float w = 1.0 / q.z;
 	VERTEX = q.xy * w;
-	uvw = vec3(UV * w, w);
+	uvw = vec3((mode == 4 ? UV / TEXTURE_PIXEL_SIZE - uv_rect.xy : UV) * w, w);
 	tint = COLOR;
 }
 void fragment() {
@@ -98,8 +99,13 @@ void fragment() {
 		if (t.x < uv_rect.x || t.y < uv_rect.y || t.x > uv_rect.z || t.y > uv_rect.w) {
 			discard;
 		}
-	} else if (mode == 3) {
-		vec4 p = texture(TEXTURE, t) * texture(mask_tex, t).a;
+	} else if (mode >= 3) {
+		vec4 p;
+		if (mode == 4) {
+			p = texture(TEXTURE, (round(t * 256.0) / 256.0 + uv_rect.xy) * TEXTURE_PIXEL_SIZE);
+		} else {
+			p = texture(TEXTURE, t) * texture(mask_tex, t).a;
+		}
 		if (p.a <= 0.0) {
 			if (max(p.r, max(p.g, p.b)) <= 0.0) {
 				discard;
@@ -2885,10 +2891,12 @@ struct Bf3SwfView::Impl {
 			Vector3(real_t(p_h.m[6]), real_t(p_h.m[7]), real_t(p_h.m[8])) };
 	}
 
-	bool apply_quad(RID p_item, Applied &r_a, const Transform2D &p_xf, const Hom &p_h, const ui::SwfColorXform &p_cx, int32_t p_flags, bool p_visible) {
+	bool apply_quad(RID p_item, Applied &r_a, const Transform2D &p_xf, const Hom &p_h, const ui::SwfColorXform &p_cx,
+			int32_t p_flags, bool p_visible, int32_t p_mode = kModeLayer, const Color &p_uv = Color()) {
 		Piece tmp;
 		tmp.item = p_item;
-		tmp.mode = kModeLayer;
+		tmp.mode = p_mode;
+		tmp.uv = p_uv;
 		tmp.applied = r_a;
 		const bool changed = apply_piece(tmp, p_xf, rows(p_h), shader_mul(p_cx), shader_add(p_cx), p_flags, p_visible);
 		r_a = tmp.applied;
@@ -3175,8 +3183,13 @@ struct Bf3SwfView::Impl {
 		} else if (owner_node != nullptr) {
 			const Hom h = r_c.kind == CanvasKind::Filter ? tilt_chain(r_c.owner, r_c.parent->tilt_floor) : Hom{};
 			const ui::SwfColorXform cx = relative_color(r_c.owner, r_c.parent->color_floor);
+			const bool resampled = r_c.kind == CanvasKind::Filter && !h.identity;
+			const Color slot = resampled && r_c.paged && r_c.shown_slot
+					? Color(real_t(r_c.shown_slot->x), real_t(r_c.shown_slot->y), 0.0f, 0.0f)
+					: Color();
 			quad_changed = apply_quad(r_c.quad, r_c.quad_applied, Transform2D(), h, cx,
-					r_c.additive ? kFlagAdditive : 0, owner_node->world_visible && r_c.has_content && r_c.quad_ready());
+					r_c.additive ? kFlagAdditive : 0, owner_node->world_visible && r_c.has_content && r_c.quad_ready(),
+					resampled ? kModeLayerResampled : kModeLayer, slot);
 		}
 		if (quad_changed) {
 			mark(r_c.parent);
