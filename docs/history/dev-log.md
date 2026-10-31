@@ -2901,3 +2901,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * HUD moment captures cap their wait for page fills at 600 frames and fail a row; godot.native_hud built, not run.
 * Architecture corrects a false claim: hidden views keep their page slots until R runs short (the dev-log line for 8db0df1c overstated it too); only a closed or never-shown view holds none.
 * m02.repeat lists the first 16 differing bytes with channel, position and values; a count alone could not find the layer.
+* The menu frames step report prints each step's worst frame; report only.

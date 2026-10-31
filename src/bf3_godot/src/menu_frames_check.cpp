@@ -503,19 +503,21 @@ std::string MenuFramesCheck::step_report(double p_base_median) const {
 	for (size_t s = 0; s < steps_.size(); ++s) {
 		std::vector<double> cpu;
 		size_t over = 0;
+		double worst = 0.0;
 		for (const MenuFrameSample &f : frames_) {
 			if (f.step == s && counted(f)) {
 				cpu.push_back(f.render_cpu_ms);
 				over += f.wall_ms > kMenuFramesHitchFactor * p_base_median ? 1u : 0u;
+				worst = std::max(worst, double(f.wall_ms));
 			}
 		}
 		if (cpu.empty()) {
 			continue;
 		}
 		const StepWorkingSet ws = s < step_working_set_.size() ? step_working_set_[s] : StepWorkingSet{};
-		out += bf3::core::fmt("[ui]   step %s: %zu frames, %zu over %.0f x the no-menu median, root viewport CPU p50 "
-							  "%.2f p95 %.2f, working set %.1f to %.1f MiB\n",
-				steps_[s].name.c_str(), cpu.size(), over, kMenuFramesHitchFactor,
+		out += bf3::core::fmt("[ui]   step %s: %zu frames, worst %.2f ms, %zu over %.0f x the no-menu median, root "
+							  "viewport CPU p50 %.2f p95 %.2f, working set %.1f to %.1f MiB\n",
+				steps_[s].name.c_str(), cpu.size(), worst, over, kMenuFramesHitchFactor,
 				bf3::core::interpolated_percentile(cpu, 0.5), bf3::core::interpolated_percentile(cpu, 0.95),
 				video_memory_mib(ws.first), video_memory_mib(ws.last));
 	}
