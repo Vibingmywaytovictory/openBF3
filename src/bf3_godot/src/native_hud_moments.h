@@ -122,6 +122,7 @@ private:
 		std::string id;
 	};
 	void hold(Bf3LevelSession &r_session);
+	bool holding_for_fills(const Bf3NativeHud &p_hud);
 	void show_screens(Bf3LevelSession &r_session, bool p_shown);
 	void check_host(Bf3NativeHud &r_hud);
 	void check_stack(const Bf3LevelSession &p_session, const Bf3NativeHud &p_hud);
@@ -133,6 +134,7 @@ private:
 	bool scripted_ = false;
 	size_t index_ = 0;
 	int32_t frames_ = 0;
+	int32_t fill_wait_ = 0;
 	double waited_ = 0.0;
 	double arriving_ = 0.0;
 	bf3::sim::Vec3 feet_{};

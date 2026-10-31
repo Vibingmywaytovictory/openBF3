@@ -40,6 +40,7 @@ namespace ui = bf3::core::ui;
 namespace {
 
 constexpr int32_t kRenderFrames = 3;
+constexpr int32_t kMaxFillWaitFrames = 600;
 constexpr double kGroupWaitTimeout = 90.0;
 constexpr double kArriveTimeout = 10.0;
 constexpr std::string_view kNameGlyphs = "WMHNEI";
@@ -345,6 +346,23 @@ NativeHudMomentRun::NativeHudMomentRun(std::string p_out_dir, std::string_view p
 
 NativeHudMomentRun::~NativeHudMomentRun() = default;
 
+bool NativeHudMomentRun::holding_for_fills(const Bf3NativeHud &p_hud) {
+	if (!p_hud.page_fills_pending()) {
+		fill_wait_ = 0;
+		return false;
+	}
+	if (fill_wait_ > kMaxFillWaitFrames) {
+		return false;
+	}
+	if (++fill_wait_ > kMaxFillWaitFrames) {
+		row(moments_[index_].id + ".fills", false,
+				"page fills still pending after " + std::to_string(kMaxFillWaitFrames) + " frames");
+		return false;
+	}
+	frames_ = 0;
+	return true;
+}
+
 void NativeHudMomentRun::row(const std::string &p_name, bool p_pass, const std::string &p_detail) {
 	failures_ += p_pass ? 0 : 1;
 	UtilityFunctions::print(String::utf8(("NATIVE HUD ROW " + p_name + " " + (p_pass ? "PASS" : "FAIL") + " " + p_detail).c_str()));
@@ -538,14 +556,14 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 			m.group->settle(*this, r_session, r_hud, m.moment);
 			r_hud.set_visible(true);
 			frames_ = 0;
+			fill_wait_ = 0;
 			phase_ = Phase::Render;
 			return false;
 		}
 		case Phase::Render:
 			hold(r_session);
 			r_hud.set_visible(true);
-			if (r_hud.page_fills_pending()) {
-				frames_ = 0;
+			if (holding_for_fills(r_hud)) {
 				return false;
 			}
 			if (++frames_ < kRenderFrames) {
@@ -563,8 +581,7 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 		}
 		case Phase::HudOnly: {
 			hold(r_session);
-			if (r_hud.page_fills_pending()) {
-				frames_ = 0;
+			if (holding_for_fills(r_hud)) {
 				return false;
 			}
 			if (++frames_ < kRenderFrames) {
@@ -579,8 +596,7 @@ bool NativeHudMomentRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, d
 		case Phase::Coverage: {
 			const Selected &m = moments_[index_];
 			hold(r_session);
-			if (r_hud.page_fills_pending()) {
-				frames_ = 0;
+			if (holding_for_fills(r_hud)) {
 				return false;
 			}
 			if (++frames_ < kRenderFrames) {

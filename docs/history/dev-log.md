@@ -2898,3 +2898,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * A hidden view that loses its page slots to R pressure stays out of F until they refill, so it does not come back with quads missing.
 * ui.layer_plan's when-shown allow-list names each widget, so a new own layer whose path only ends in .bg or .tf no longer passes.
 * Remade pages clear each layer's refusal, so a layer refused at a small window returns to the pages when they have room; census 4 paged when full, 265 after.
+* HUD moment captures cap their wait for page fills at 600 frames and fail a row; godot.native_hud built, not run.
