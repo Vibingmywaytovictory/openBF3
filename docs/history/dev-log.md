@@ -2906,3 +2906,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * A layer that changes during a held pass leaves it; the mask route rows now read the state that can fail; godot.ui_open_census.
 * A full scope hides the rifle, arms and other attachments at its ZoomInOutMeshTransitionFactors point, data only; render.catalog_scope (113 of this row's checks failed against the draft's rules).
 * Vertex colour draws on Multiply scope rings only; the PKS-07 and ballistic Mix reticles keep their zero-colour vertices; render.catalog_scope.
+* godot.deploy gains .sight_clear and .ring_fade per class, built and not run here.

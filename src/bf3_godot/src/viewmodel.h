@@ -62,6 +62,8 @@ struct SightMark {
 	float inner_px = 0, outer_px = 0;
 	std::array<float, 4> tint{};
 	bf3::render::ViewmodelBlend blend = bf3::render::ViewmodelBlend::Mix;
+	bool vertex_colour = false;
+	float colour_inner = 1.0f, colour_outer = 1.0f;
 };
 
 ViewmodelFrame viewmodel_frame_from(const bf3::host::PresentedWeapon &p_weapon, const godot::Vector3 &p_eye, double p_yaw, double p_pitch, float p_dt,
@@ -95,7 +97,9 @@ public:
 	void present(const ViewmodelFrame &p_frame, std::span<const bf3::anim::VmCue> p_cues, godot::Camera3D *p_camera);
 
 	const bf3::anim::AdsFrame &ads() const { return ads_frame_; }
+	bool scope_only() const { return scope_only_; }
 	bool optic_hides_weapon() const;
+	bool weapon_drawn() const;
 	const bf3::anim::AdsParams &ads_params() const { return ads_params_; }
 	bool ads_allowed() const { return ads_allowed_; }
 	const bf3::anim::ViewmodelOutput &output() const { return output_; }

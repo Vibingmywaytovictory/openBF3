@@ -1,3 +1,4 @@
+#include "bf3/core/util/format.h"
 #include "deploy_check.h"
 
 #include "deploy_screens.h"
@@ -32,6 +33,7 @@ std::string fire_seconds(double p_seconds) {
 
 SightPixels sight_pixels(const godot::Image &p_frame, std::span<const SightMark> p_marks) {
 	SightPixels out;
+	SightMark ring;
 	const int32_t w = p_frame.get_width(), h = p_frame.get_height();
 	const auto dark = [](const godot::Color &p_c) { return std::max({ p_c.r, p_c.g, p_c.b }) <= kDeployFireDarkMax; };
 	const auto visit = [&](const SightMark &p_m, float p_reach, int32_t p_stride, const auto &p_at) {
@@ -53,6 +55,10 @@ SightPixels sight_pixels(const godot::Image &p_frame, std::span<const SightMark>
 			out.surround = true;
 			out.inner_px = m.inner_px;
 			out.outer_px = m.outer_px;
+			out.surround_vertex_colour = m.vertex_colour;
+			out.surround_colour_inner = m.colour_inner;
+			out.surround_colour_outer = m.colour_outer;
+			ring = m;
 			out.band = out.band_dark = out.ring = out.ring_dark = out.inside = out.inside_dark = 0;
 			visit(m, m.outer_px + kDeployFireRingPx, 2, [&](float p_d, const godot::Color &p_c) {
 				if (p_d < m.inner_px - kDeployFireEdgePx) {
@@ -92,6 +98,37 @@ SightPixels sight_pixels(const godot::Image &p_frame, std::span<const SightMark>
 			out.disc = disc;
 			out.tinted = tinted;
 		}
+	}
+	if (out.surround) {
+		const float from = out.outer_px - kDeployFireShadeInsidePx;
+		std::array<double, kDeployFireShadeBins> sum{};
+		std::array<size_t, kDeployFireShadeBins> n{};
+		double clear = 0.0;
+		size_t clear_n = 0;
+		visit(ring, out.outer_px + kDeployFireShadeOutsidePx, 1, [&](float p_d, const godot::Color &p_c) {
+			const double lum = (double(p_c.r) + double(p_c.g) + double(p_c.b)) / 3.0;
+			if (p_d >= kDeployFireShadeClearFrom * out.outer_px && p_d <= kDeployFireShadeClearTo * out.outer_px) {
+				clear += lum;
+				++clear_n;
+			}
+			const float k = (p_d - from) / kDeployFireShadeBinPx;
+			if (k >= 0.0f && k < float(kDeployFireShadeBins)) {
+				sum[size_t(k)] += lum;
+				++n[size_t(k)];
+			}
+		});
+		const double base = clear_n > 0 ? clear / double(clear_n) : 0.0;
+		float r90 = -1.0f, r10 = -1.0f;
+		for (size_t i = 0; i < kDeployFireShadeBins; ++i) {
+			const float v = n[i] > 0 && base > 1e-4 ? float(sum[i] / double(n[i]) / base) : 0.0f;
+			out.shade_profile[i] = v;
+			const float r = from + (float(i) + 0.5f) * kDeployFireShadeBinPx;
+			r90 = r90 < 0.0f && v < 0.9f ? r : r90;
+			r10 = r10 < 0.0f && v <= kDeployFireDarkMax ? r : r10;
+		}
+		out.shade_r90 = r90;
+		out.shade_r10 = r10;
+		out.shade_fade_px = r90 >= 0.0f && r10 >= 0.0f ? r10 - r90 : -1.0f;
 	}
 	return out;
 }
@@ -558,6 +595,32 @@ void DeployCheck::fire_accessory_rows(const DeployCheckState &p_st) {
 					(!px.reticle_mesh.empty() || px.surround) && reticle_drawn && surround_drawn,
 			"optic " + (optic.empty() ? std::string("not picked") : optic) +
 					" at ADS: " + joined(fire_ads_.vm_attached) + sight + drawn_px + "; " + fire_ads_.vm_pose);
+	row(name + ".sight_clear",
+			fire_ads_.vm_optic_hides_weapon ? fire_ads_.vm_scope_only && !fire_ads_.vm_weapon_drawn
+											: !fire_ads_.vm_scope_only && fire_ads_.vm_weapon_drawn,
+			bf3::core::fmt("the optic's unlock %s ZoomInOutMeshTransitionFactors, its sight %s the scene; at ADS blend "
+						   "%.2f the rifle and arms are %s and %s; inside the lens %zu of %zu px dark",
+					fire_ads_.vm_optic_hides_weapon ? "has" : "does not have",
+					px.surround ? "multiplies" : "does not multiply", double(fire_ads_.vm_ads_blend),
+					fire_ads_.vm_weapon_drawn ? "drawn" : "not drawn",
+					fire_ads_.vm_scope_only ? "only the optic is drawn" : "other attachments are drawn", px.inside_dark,
+					px.inside));
+	if (px.surround) {
+		std::string profile;
+		for (size_t i = 0; i < kDeployFireShadeBins; ++i) {
+			profile += bf3::core::fmt("%s%.2f", i == 0 ? "" : " ", double(px.shade_profile[i]));
+		}
+		row(name + ".ring_fade", px.surround_vertex_colour && px.surround_colour_inner > px.surround_colour_outer,
+				bf3::core::fmt(
+						"the multiply ring (r %.1f..%.1f px) %s its vertex colour, %.2f at its inner vertex to "
+						"%.2f at its outer one; drawn: falling from 0.9 of the clear lens at r %.1f to %.2f at r "
+						"%.1f, %.1f px; profile every %.0f px from r %.1f: %s",
+						double(px.inner_px), double(px.outer_px), px.surround_vertex_colour ? "draws with" : "ignores",
+						double(px.surround_colour_inner), double(px.surround_colour_outer), double(px.shade_r90),
+						double(kDeployFireDarkMax), double(px.shade_r10), double(px.shade_fade_px),
+						double(kDeployFireShadeBinPx), double(px.outer_px - kDeployFireShadeInsidePx),
+						profile.c_str()));
+	}
 	if (fire_class_ == size_t(DeployFireClass::Assault)) {
 		const uint64_t sounds = fire_hip_.audio_accessory_sounds - fire_mark_.audio_accessory_sounds;
 		const uint64_t effects = fire_hip_.fx_accessory_effects - fire_mark_.fx_accessory_effects;
@@ -709,6 +772,10 @@ void fill_deploy_fire_state(DeployCheckState &r_state, GameState &r_game, const 
 		r_state.vm_pose = pose;
 		r_state.vm_sight_surfaces = vm->sight_surfaces();
 		r_state.vm_sight_marks = vm->sight_marks(p_eye);
+		r_state.vm_weapon_drawn = vm->weapon_drawn();
+		r_state.vm_scope_only = vm->scope_only();
+		r_state.vm_optic_hides_weapon = vm->optic_hides_weapon();
+		r_state.vm_ads_blend = vm->ads().blend;
 	}
 	if (catalog != nullptr && p_extra != nullptr) {
 		const auto other = std::make_unique<bf3::host::PresentationFrame>();

@@ -87,6 +87,12 @@ inline constexpr size_t kDeployFireReticlePixels = 3;
 inline constexpr float kDeployFireTintFloor = 0.25f;
 inline constexpr float kDeployFireTintDominance = 1.5f;
 inline constexpr float kDeployFireDarkMax = 0.1f;
+inline constexpr size_t kDeployFireShadeBins = 50;
+inline constexpr float kDeployFireShadeInsidePx = 90.0f;
+inline constexpr float kDeployFireShadeOutsidePx = 10.0f;
+inline constexpr float kDeployFireShadeBinPx = 2.0f;
+inline constexpr float kDeployFireShadeClearFrom = 0.3f;
+inline constexpr float kDeployFireShadeClearTo = 0.6f;
 inline constexpr float kDeployFireDarkShare = 0.95f;
 inline constexpr float kDeployFireEdgePx = 2.0f;
 inline constexpr float kDeployFireRingPx = 60.0f;
@@ -101,6 +107,11 @@ struct SightPixels {
 	size_t band = 0, band_dark = 0;
 	size_t ring = 0, ring_dark = 0;
 	size_t inside = 0, inside_dark = 0;
+	bool surround_vertex_colour = false;
+	float surround_colour_inner = 1.0f, surround_colour_outer = 1.0f;
+	std::array<float, kDeployFireShadeBins> shade_profile{};
+	float shade_fade_px = 0.0f;
+	float shade_r90 = -1.0f, shade_r10 = -1.0f;
 };
 
 struct DeployCheckList {
@@ -181,6 +192,10 @@ struct DeployCheckState {
 	godot::Vector2 vm_sight_px;
 	SightSurfaces vm_sight_surfaces;
 	std::vector<SightMark> vm_sight_marks;
+	bool vm_weapon_drawn = false;
+	bool vm_scope_only = false;
+	bool vm_optic_hides_weapon = false;
+	float vm_ads_blend = 0.0f;
 	std::string vm_pose;
 	bool extra_pick_valid = false;
 	bf3::net::LoadoutRequest extra_pick;

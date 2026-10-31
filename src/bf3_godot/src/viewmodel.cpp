@@ -208,7 +208,11 @@ std::vector<SightMark> Bf3Viewmodel::sight_marks(const Camera3D *p_camera) const
 			continue;
 		}
 		const Transform3D xform = n.attachments[a].mesh->get_global_transform();
-		for (const bf3::render::PreparedSurface &sf : at.part.prepared.surfaces) {
+		const Ref<Mesh> drawn = n.attachments[a].mesh->get_mesh();
+		const bool one_to_one =
+				drawn.is_valid() && size_t(drawn->get_surface_count()) == at.part.prepared.surfaces.size();
+		for (size_t si = 0; si < at.part.prepared.surfaces.size(); ++si) {
+			const bf3::render::PreparedSurface &sf = at.part.prepared.surfaces[si];
 			if (sf.material_index >= at.looks.size() || !at.looks[sf.material_index].blend ||
 					!at.looks[sf.material_index].unlit || sf.vertex_count() == 0) {
 				continue;
@@ -225,12 +229,23 @@ std::vector<SightMark> Bf3Viewmodel::sight_marks(const Camera3D *p_camera) const
 			m.tint = at.looks[sf.material_index].tint;
 			m.blend = at.looks[sf.material_index].blend_mode;
 			m.inner_px = std::numeric_limits<float>::max();
+			const bool colours = sf.colors.size() >= 4 * sf.vertex_count();
+			const Ref<BaseMaterial3D> mat =
+					one_to_one ? Ref<BaseMaterial3D>(drawn->surface_get_material(int32_t(si))) : Ref<BaseMaterial3D>();
+			m.vertex_colour = colours && mat.is_valid() && mat->get_flag(BaseMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR);
 			for (size_t k = 0; k < sf.vertex_count(); ++k) {
 				const Vector3 v =
 						xform.xform(Vector3(sf.positions[3 * k], sf.positions[3 * k + 1], sf.positions[3 * k + 2]));
 				const float r = float((v - centre).length() * px->z);
-				m.inner_px = std::min(m.inner_px, r);
-				m.outer_px = std::max(m.outer_px, r);
+				const float colour = colours ? float(sf.colors[4 * k]) / 255.0f : 1.0f;
+				if (r < m.inner_px) {
+					m.inner_px = r;
+					m.colour_inner = colour;
+				}
+				if (r > m.outer_px) {
+					m.outer_px = r;
+					m.colour_outer = colour;
+				}
 			}
 			out.push_back(m);
 		}
@@ -371,6 +386,11 @@ int Bf3Viewmodel::add_items(const bf3::render::ViewmodelSet &p_set) {
 bool Bf3Viewmodel::optic_hides_weapon() const {
 	return item_ >= 0 && size_t(item_) < items_.size() && items_[size_t(item_)].item->sight &&
 			items_[size_t(item_)].item->sight->hides_weapon;
+}
+
+bool Bf3Viewmodel::weapon_drawn() const {
+	return item_ >= 0 && size_t(item_) < items_.size() && items_[size_t(item_)].weapon != nullptr &&
+			items_[size_t(item_)].weapon->is_visible();
 }
 
 void Bf3Viewmodel::add_item_nodes(const bf3::render::ViewmodelSet &p_set) {
