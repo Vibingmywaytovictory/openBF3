@@ -975,3 +975,130 @@ TEST_SUITE("render-catalog-accessories-1p") {
 		CHECK(diff.clean());
 	}
 }
+
+TEST_SUITE("render-catalog-scope") {
+	TEST_CASE("catalog scope: every sniper's optics read their zoom-mesh factors from WeaponStates[0] and the optic's "
+			  "unlock; only an optic with factors and a multiply surround hides the rifle") {
+		core::InstallReader reader;
+		if (!reader.locate({})) {
+			test::skip_install_case(reader.describe().c_str());
+			return;
+		}
+		core::Result<std::shared_ptr<core::Install>> install = core::Install::open(reader);
+		REQUIRE(install.ok());
+		auto gunplay = host::load_gunplay_level(
+				*install, "MP_Subway", "TeamDeathMatch0", host::GunplayLoadOptions{ true, true });
+		REQUIRE_MESSAGE(gunplay.ok(), (gunplay.ok() ? "" : gunplay.error().message));
+		core::Result<std::unique_ptr<render::ViewmodelSources>> sources =
+				render::open_viewmodel_sources(reader, kLevel, nullptr);
+		REQUIRE_MESSAGE(sources.ok(), (sources.ok() ? "" : sources.error().message));
+		const core::EbxLibrary &lib = *(*sources)->ebx;
+		struct Sniper {
+			std::string_view unlock;
+			size_t hiding, surround_kept, clear;
+		};
+		constexpr std::array<Sniper, 11> kSnipers{ Sniper{ "weapons/mk11/u_mk11", 4, 3, 5 },
+			Sniper{ "weapons/sv98/u_sv98", 4, 3, 5 }, Sniper{ "weapons/sks/u_sks", 4, 3, 5 },
+			Sniper{ "weapons/m40a5/u_m40a5", 4, 3, 5 }, Sniper{ "weapons/model98b/u_m98b", 4, 3, 5 },
+			Sniper{ "weapons/m39ebr/u_m39ebr", 4, 3, 5 }, Sniper{ "weapons/svd/u_svd_us", 4, 3, 5 },
+			Sniper{ "weapons/xp1_qbu-88/u_qbu-88_sniper", 4, 3, 5 }, Sniper{ "weapons/xp1_l96/u_l96", 6, 3, 5 },
+			Sniper{ "weapons/xp2_hk417/u_hk417", 4, 3, 5 }, Sniper{ "weapons/xp2_jng90/u_jng90", 4, 3, 5 } };
+		constexpr std::array<std::pair<std::string_view, float>, 3> kZoomOut{
+			std::pair{ "weapons/mk11/u_mk11_rifle_scope", 0.85f },
+			std::pair{ "weapons/xp2_hk417/u_hk417_rifle_scope", 0.85f }, std::pair{ "weapons/svd/u_svd_irnv", 0.75f }
+		};
+		struct OpticLoad {
+			size_t sniper = 0;
+			uint8_t team = 0;
+			const host::LoadoutItem *item = nullptr;
+			size_t index = 0;
+			bool has_factors = false;
+			std::unique_ptr<render::ViewmodelSet> set;
+			std::string error;
+		};
+		std::vector<OpticLoad> loads;
+		for (size_t w = 0; w < kSnipers.size(); ++w) {
+			uint8_t team = 0;
+			const host::LoadoutItem *item = catalog_primary((*gunplay)->loadouts, kSnipers[w].unlock, team);
+			REQUIRE_MESSAGE(item != nullptr, kSnipers[w].unlock);
+			core::Result<std::vector<core::gameplay::WeaponUnlockModifier>> mods =
+					core::gameplay::weapon_unlock_modifiers(lib, item->unlock, "WeaponAnimationConfigurationModifier");
+			REQUIRE(mods.ok());
+			for (size_t i = 0; i < item->accessories[0].size(); ++i) {
+				if (item->accessory_unlocks[0][i].starts_with(render::kDefaultSocketUnlockPrefix)) {
+					continue;
+				}
+				bool has_factors = false;
+				for (const core::gameplay::WeaponUnlockModifier &m : *mods) {
+					const std::optional<core::EbxValue> f = m.modifier.get("ZoomInOutMeshTransitionFactors");
+					const core::OptionalEbxArray arr = f ? f->as_array() : core::OptionalEbxArray();
+					has_factors |= m.unlock == item->accessory_unlocks[0][i] && arr && arr->size() > 0;
+				}
+				loads.push_back(OpticLoad{ w, team, item, i, has_factors, {}, {} });
+			}
+		}
+		core::parallel_for(loads.size(), [&](size_t i) {
+			OpticLoad &l = loads[i];
+			render::ViewmodelSetSpec spec =
+					render::team_viewmodel_items(l.team, std::span<const std::string>(&l.item->unlock, 1));
+			spec.superbundle = kLevel;
+			const host::LoadoutAccessorySet set =
+					host::loadout_accessory_set(*l.item, { l.item->accessories[0][l.index], 0, 0, 0 });
+			spec.items[0].accessories = render::WeaponAccessories{ set.active, set.listed };
+			core::Result<std::unique_ptr<render::ViewmodelSet>> vs =
+					render::load_viewmodel_set(**sources, spec, nullptr);
+			if (vs) {
+				l.set = std::move(*vs);
+			} else {
+				l.error = vs.error().message;
+			}
+		});
+		std::array<std::array<size_t, 3>, kSnipers.size()> counts{};
+		size_t irnv_reticles = 0;
+		for (const OpticLoad &l : loads) {
+			const std::string &optic = l.item->accessory_unlocks[0][l.index];
+			REQUIRE_MESSAGE(l.set != nullptr, optic, ": ", l.error);
+			const render::ViewmodelItem &vm = l.set->items[0];
+			REQUIRE_MESSAGE(vm.sight.has_value(), optic);
+			const render::ViewmodelSight &sight = *vm.sight;
+			float want_out = 1.0f;
+			for (const auto &[unlock, out] : kZoomOut) {
+				want_out = optic == unlock ? out : want_out;
+			}
+			CHECK_MESSAGE(vm.zoom_mesh_in == doctest::Approx(1.0f), optic);
+			CHECK_MESSAGE(vm.zoom_mesh_out == doctest::Approx(want_out), optic);
+			CHECK_MESSAGE(sight.hides_weapon == (l.has_factors && sight.surround), optic);
+			CHECK_MESSAGE((!l.has_factors || sight.surround), optic, " has factors but no multiply surround");
+			++counts[l.sniper][sight.hides_weapon ? 0 : sight.surround ? 1 : 2];
+			for (const render::ViewmodelAttachment &a : vm.attachments) {
+				irnv_reticles += optic.ends_with("_irnv") && a.part.mesh.find("reticule") != std::string::npos &&
+								render::viewmodel_scope_part(vm, a)
+						? 1u
+						: 0u;
+			}
+			if (optic.ends_with("rx01") || optic.ends_with("rx_01") || optic.ends_with("kobra") ||
+					optic.ends_with("eotech") || optic.ends_with("pka") || optic.ends_with("acog") ||
+					optic.ends_with("m145") || optic.ends_with("pso-1")) {
+				CHECK_MESSAGE(!sight.hides_weapon, optic, " keeps the rifle");
+			}
+			if (optic.ends_with("ballistic_scope") || optic.ends_with("pks-07")) {
+				CHECK_MESSAGE(sight.hides_weapon, optic, " hides the rifle");
+			}
+		}
+		for (size_t w = 0; w < kSnipers.size(); ++w) {
+			MESSAGE(kSnipers[w].unlock, ": ", counts[w][0], " optics hide the rifle, ", counts[w][1],
+					" have a surround and keep it, ", counts[w][2], " have no surround");
+			CHECK(counts[w][0] == kSnipers[w].hiding);
+			CHECK(counts[w][1] == kSnipers[w].surround_kept);
+			CHECK(counts[w][2] == kSnipers[w].clear);
+		}
+		CHECK_MESSAGE(irnv_reticles >= kSnipers.size(), irnv_reticles, " IRNV reticles stay with the scope");
+		render::ViewmodelItem item;
+		item.zoom_mesh_in = 1.0f;
+		item.zoom_mesh_out = 0.85f;
+		CHECK_FALSE(render::viewmodel_zoom_mesh_shown(false, 0.99f, item));
+		CHECK(render::viewmodel_zoom_mesh_shown(false, 1.0f, item));
+		CHECK(render::viewmodel_zoom_mesh_shown(true, 0.9f, item));
+		CHECK_FALSE(render::viewmodel_zoom_mesh_shown(true, 0.8f, item));
+	}
+}

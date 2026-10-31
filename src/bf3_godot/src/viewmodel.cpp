@@ -367,6 +367,11 @@ int Bf3Viewmodel::add_items(const bf3::render::ViewmodelSet &p_set) {
 	return first;
 }
 
+bool Bf3Viewmodel::optic_hides_weapon() const {
+	return item_ >= 0 && size_t(item_) < items_.size() && items_[size_t(item_)].item->sight &&
+			items_[size_t(item_)].item->sight->hides_weapon;
+}
+
 void Bf3Viewmodel::add_item_nodes(const bf3::render::ViewmodelSet &p_set) {
 	SetTextures textures{ &p_set, {} };
 	for (const bf3::render::ViewmodelItem &it : p_set.items) {
@@ -387,6 +392,7 @@ void Bf3Viewmodel::add_item_nodes(const bf3::render::ViewmodelSet &p_set) {
 			na.zoom = a.zoom;
 			na.skinned = a.skinned;
 			na.name = a.socket_unlock + " " + a.part.mesh;
+			na.scope = bf3::render::viewmodel_scope_part(it, a);
 			if (a.skinned) {
 				na.mesh->set_skin(n.skin);
 			}
@@ -409,6 +415,8 @@ void Bf3Viewmodel::select_item(int p_index) {
 	ads_.reset();
 	ads_frame_ = bf3::anim::AdsFrame{};
 	output_ = bf3::anim::ViewmodelOutput{};
+	zoom_mesh_ = false;
+	scope_only_ = false;
 	if (item_ < 0) {
 		arms_->set_visible(false);
 		animator_.reset();
@@ -518,9 +526,14 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 		skeleton_->set_bone_pose_position(int32_t(b), to_godot(pose_.joints[b].t));
 	}
 
-	const bool aimed = ads_frame_.blend >= 0.5f;
-	for (const ItemNodes::Attachment &a : items_[size_t(item_)].attachments) {
-		const bool on = (aimed ? a.zoom : a.hip) && (a.skinned || (a.bone >= 0 && size_t(a.bone) < model_.size()));
+	const ItemNodes &shown = items_[size_t(item_)];
+	zoom_mesh_ = bf3::render::viewmodel_zoom_mesh_shown(zoom_mesh_, ads_frame_.blend, *shown.item);
+	scope_only_ = zoom_mesh_ && optic_hides_weapon();
+	arms_->set_visible(!scope_only_);
+	shown.weapon->set_visible(!scope_only_);
+	for (const ItemNodes::Attachment &a : shown.attachments) {
+		const bool on = (zoom_mesh_ ? a.zoom : a.hip) && (!scope_only_ || a.scope) &&
+				(a.skinned || (a.bone >= 0 && size_t(a.bone) < model_.size()));
 		a.mesh->set_visible(on);
 		if (on && !a.skinned) {
 			a.mesh->set_transform(xform_to_godot(model_[size_t(a.bone)]) * a.xform);

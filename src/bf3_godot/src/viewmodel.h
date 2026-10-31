@@ -95,6 +95,7 @@ public:
 	void present(const ViewmodelFrame &p_frame, std::span<const bf3::anim::VmCue> p_cues, godot::Camera3D *p_camera);
 
 	const bf3::anim::AdsFrame &ads() const { return ads_frame_; }
+	bool optic_hides_weapon() const;
 	const bf3::anim::AdsParams &ads_params() const { return ads_params_; }
 	bool ads_allowed() const { return ads_allowed_; }
 	const bf3::anim::ViewmodelOutput &output() const { return output_; }
@@ -129,6 +130,7 @@ private:
 			godot::Transform3D xform;
 			bool hip = true, zoom = true;
 			bool skinned = false;
+			bool scope = false;
 			std::string name;
 		};
 		std::vector<Attachment> attachments;
@@ -149,6 +151,8 @@ private:
 	bf3::anim::AdsCamera ads_;
 	bf3::anim::AdsParams ads_params_;
 	bf3::anim::AdsFrame ads_frame_;
+	bool zoom_mesh_ = false;
+	bool scope_only_ = false;
 	bool ads_allowed_ = true;
 	bf3::anim::ViewmodelOutput output_;
 	bf3::anim::LocalPose pose_;

@@ -145,6 +145,8 @@ struct ViewmodelSight {
 	size_t attachment = 0;
 	anim::Vec3 local{};
 	anim::Vec3 at_zoom_pose{};
+	bool surround = false;
+	bool hides_weapon = false;
 };
 
 struct ViewmodelLocomotionClips;
@@ -167,6 +169,7 @@ struct ViewmodelItem {
 	std::string weapon_class;
 	ViewmodelAdsData ads;
 	float zoom_render_fov_data = 0;
+	float zoom_mesh_in = 1.0f, zoom_mesh_out = 1.0f;
 	int32_t magazine_capacity = 0;
 
 	std::vector<std::unique_ptr<core::ant::AntPackage>> packages;
@@ -180,6 +183,9 @@ struct ViewmodelItem {
 };
 
 std::array<anim::VmClipRef, anim::kVmClips> viewmodel_clip_refs(const ViewmodelItem &p_item);
+
+bool viewmodel_scope_part(const ViewmodelItem &p_item, const ViewmodelAttachment &p_attachment);
+bool viewmodel_zoom_mesh_shown(bool p_shown, float p_blend, const ViewmodelItem &p_item);
 
 anim::AdsParams viewmodel_ads_params(const ViewmodelItem &p_item, const anim::ViewmodelTuning &p_tuning);
 

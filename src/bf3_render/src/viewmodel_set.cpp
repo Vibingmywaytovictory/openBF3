@@ -403,7 +403,43 @@ std::optional<ViewmodelSight> optic_sight(const anim::Skeleton &p_rig, const Vie
 			out = ViewmodelSight{ i, centre, anim::mat_point(m, centre) };
 		}
 	}
+	if (out) {
+		const std::string &socket = p_item.attachments[out->attachment].socket_unlock;
+		for (const ViewmodelAttachment &a : p_item.attachments) {
+			for (const PreparedSurface &s : a.part.prepared.surfaces) {
+				out->surround |= a.zoom && a.socket_unlock == socket && s.material_index < a.looks.size() &&
+						a.looks[s.material_index].blend && a.looks[s.material_index].unlit &&
+						a.looks[s.material_index].blend_mode == ViewmodelBlend::Multiply;
+			}
+		}
+	}
 	return out;
+}
+
+void read_optic_zoom_mesh_factors(const core::EbxLibrary &p_lib, ViewmodelItem &r_item) {
+	if (!r_item.sight) {
+		return;
+	}
+	core::Result<std::vector<core::gameplay::WeaponUnlockModifier>> mods =
+			core::gameplay::weapon_unlock_modifiers(p_lib, r_item.unlock, "WeaponAnimationConfigurationModifier");
+	if (!mods) {
+		return;
+	}
+	const std::string &optic = r_item.attachments[r_item.sight->attachment].socket_unlock;
+	for (const core::gameplay::WeaponUnlockModifier &m : *mods) {
+		const std::optional<core::EbxValue> factors =
+				m.unlock == optic ? m.modifier.get("ZoomInOutMeshTransitionFactors") : std::nullopt;
+		const core::OptionalEbxArray arr = factors ? factors->as_array() : core::OptionalEbxArray();
+		if (!arr || arr->size() < 2) {
+			continue;
+		}
+		const std::optional<core::EbxValue> in = arr->get(0), out = arr->get(1);
+		const std::optional<float> in_factor = in ? in->as_f32() : std::nullopt,
+								   out_factor = out ? out->as_f32() : std::nullopt;
+		r_item.zoom_mesh_in = in_factor.value_or(r_item.zoom_mesh_in);
+		r_item.zoom_mesh_out = out_factor.value_or(r_item.zoom_mesh_out);
+		r_item.sight->hides_weapon = r_item.sight->surround;
+	}
 }
 
 double driven_diff(const std::vector<anim::Xform> &p_a, const std::vector<anim::Xform> &p_b, const anim::ClipTracks &p_tracks) {
@@ -579,6 +615,14 @@ const PreparedTexture *ViewmodelSet::texture(const std::string &p_name, TextureR
 		}
 	}
 	return nullptr;
+}
+
+bool viewmodel_scope_part(const ViewmodelItem &p_item, const ViewmodelAttachment &p_attachment) {
+	return p_item.sight && p_item.attachments[p_item.sight->attachment].socket_unlock == p_attachment.socket_unlock;
+}
+
+bool viewmodel_zoom_mesh_shown(bool p_shown, float p_blend, const ViewmodelItem &p_item) {
+	return p_blend >= (p_shown ? p_item.zoom_mesh_out : p_item.zoom_mesh_in);
 }
 
 std::array<anim::VmClipRef, anim::kVmClips> viewmodel_clip_refs(const ViewmodelItem &p_item) {
@@ -766,6 +810,9 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 				}
 				read_attachments(lib, *swd, set->rig, spec.unlock, spec.accessories, item.attachments, set->notes);
 				item.zoom_render_fov_data = sane(number(swd->get("ZoomRenderFov")), 0.0f, 0.0f, 170.0f, clamped);
+				item.zoom_mesh_in = sane(
+						number(swd->get_path("WeaponStates[0].ZoomMeshTransitionFactor")), 1.0f, 0.0f, 1.0f, clamped);
+				item.zoom_mesh_out = item.zoom_mesh_in;
 				if (mesh.empty()) {
 					if (const std::optional<core::EbxValue> states = swd->get("WeaponStates")) {
 						const core::OptionalEbxArray arr = states->as_array();
@@ -1099,6 +1146,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 				a.looks = looks_of(a.part);
 			}
 			item.sight = optic_sight(set->rig, item);
+			read_optic_zoom_mesh_factors(lib, item);
 		}
 	}
 
