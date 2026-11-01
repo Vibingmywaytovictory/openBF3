@@ -499,7 +499,7 @@ TEST_SUITE("net-procs-listen-maplist") {
 		CHECK_MESSAGE(end.code == 0, out);
 		CHECK(end.stragglers == 0);
 		CHECK(contains(out, "[match] listen server rotates MP_Subway TeamDeathMatch0 x1, MP_011 TeamDeathMatch0 x1"));
-		CHECK(contains(out, "[match] level change 1: MP_011 TeamDeathMatch0 round 1"));
+		CHECK(contains(out, "[match] level change 1: MP_011 TeamDeathMatch0 round 1, load deadline 65535 s"));
 		CHECK(contains(out, "[level] install unchanged: yes"));
 		MESSAGE(line);
 	}

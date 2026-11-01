@@ -95,8 +95,6 @@ uint64_t peak_working_set_bytes() {
 	return GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)) ? uint64_t(pmc.PeakWorkingSetSize) : 0;
 }
 
-constexpr float kOwnClientLoadSeconds = 86400.0f;
-
 double mib(uint64_t p_bytes) {
 	return double(p_bytes) / (1024.0 * 1024.0);
 }
@@ -601,7 +599,7 @@ bool Bf3LevelSession::start_session(std::string *r_error) {
 		}
 	}
 	game_server_config(*game);
-	game->load = host::LoadDeadlines{ kOwnClientLoadSeconds, kOwnClientLoadSeconds, kOwnClientLoadSeconds };
+	game->load = host::kOwnClientLoadDeadlines;
 	if (connect_host_.empty()) {
 		host::ServerConfig sc;
 		sc.tick_hz = int(sim::kSimHz);

@@ -51,6 +51,8 @@ struct LoadDeadlines {
 	float cold_s = 300.0f;
 };
 
+inline constexpr LoadDeadlines kOwnClientLoadDeadlines{ 86400.0f, 86400.0f, 86400.0f };
+
 struct SeatLoad {
 	bool loading = false;
 	bool reported = false;

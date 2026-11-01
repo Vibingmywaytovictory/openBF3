@@ -293,6 +293,7 @@ bool Bf3MatchHost::prepare_listen_server() {
 	rules.dev_commands = true;
 	rules.seed = seed_;
 	server_config_.prebake = false;
+	server_config_.load = host::kOwnClientLoadDeadlines;
 	if (has_user_arg("intermission-s")) {
 		server_config_.intermission_s =
 				float(std::clamp(std::atof(user_arg_value("intermission-s").c_str()), 0.0, 600.0));
@@ -486,7 +487,7 @@ void Bf3MatchHost::watch_changes() {
 	}
 	handled_round_ = change.round_id;
 	say("level change " + std::to_string(level_index_) + ": " + change.level + " " + change.mode + " round " +
-			std::to_string(change.round_id));
+			std::to_string(change.round_id) + ", load deadline " + std::to_string(change.load_deadline_s) + " s");
 	++level_index_;
 	free_session();
 	if (const bf3::core::Status s = c->detach_level(); !s.ok()) {
