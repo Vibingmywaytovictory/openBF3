@@ -1964,6 +1964,166 @@ TEST_SUITE("host-session-unit") {
 	}
 
 	TEST_CASE(
+			"host.session: a client follows a LevelChange over its one transport: Ready only at attach, Loading every "
+			"0.5 s, detach then attach of the level MatchInfo names") {
+		auto pipe = std::make_shared<Pipe>();
+		std::shared_ptr<GameServerConfig> first_game = pipe_game();
+		ServerConfig first_config;
+		first_config.game = first_game;
+		first_config.transport = std::make_shared<PipeServerPort>(pipe);
+		ServerHost first;
+		std::string err;
+		REQUIRE_MESSAGE(first.start(first_config, &err), err);
+		pipe->connect(0);
+
+		ClientSession client;
+		ClientSessionConfig cc;
+		cc.name = "follower";
+		const core::Status started = client.start(cc, nullptr, std::make_unique<PipeClientTransport>(pipe, 0));
+		REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
+		net::MatchInfo held;
+		REQUIRE(wait_until([&] { return client.lobby_match(held); }, 10s, 16ms));
+
+		net::Loading progress;
+		progress.stage = 3;
+		progress.permille = 250;
+		client.set_load_progress(progress);
+		const auto reports_from = std::chrono::steady_clock::now();
+		REQUIRE(wait_until([&] { return first.game_stats().slots.at(0).load.reports >= 3; }, 10s, 16ms));
+		CHECK(std::chrono::steady_clock::now() - reports_from >= 900ms);
+		CHECK(first.game_stats().slots.at(0).load.permille == 250);
+		CHECK(first.game_stats().slots.at(0).load.loading);
+		CHECK(client.stats().ready_sent == 0);
+		CHECK(first.game_stats().slots.at(0).life == 0);
+
+		const core::Status attached = client.attach_level(synthetic_level());
+		REQUIRE_MESSAGE(attached.ok(), (attached.ok() ? std::string() : attached.error().message));
+		CHECK(wait_until([&] { return client.stats().ready_sent == 1; }, 10s, 16ms));
+		auto frame = std::make_unique<PresentationFrame>();
+		REQUIRE(wait_until(
+				[&] {
+					client.read_presentation(*frame);
+					return frame->valid && frame->own_curr.life > 0;
+				},
+				10s, 16ms));
+		const uint64_t loading_at_ready = client.stats().loading_sent;
+		CHECK(loading_at_ready >= 3);
+
+		auto next_level = std::make_shared<SharedLevel>(*synthetic_level());
+		next_level->level = "Levels/Next/Next";
+		net::LevelChange change;
+		change.level = next_level->level;
+		change.mode = next_level->mode;
+		change.round_id = 1;
+		change.load_deadline_s = 120;
+		{
+			std::lock_guard lock(pipe->mutex);
+			pipe->to_client[0].push_back({ 0, net::kChannelReliable, net::encode_level_change(change) });
+			pipe->to_client_ready.notify_all();
+		}
+		REQUIRE(wait_until([&] { return client.stats().level_changes == 1; }, 10s, 16ms));
+		net::LevelChange seen;
+		REQUIRE(client.level_change(seen));
+		CHECK(seen.level == next_level->level);
+		CHECK(seen.round_id == 1);
+		const uint64_t commands_at_change = client.stats().commands_sent;
+		std::this_thread::sleep_for(150ms);
+		CHECK(client.stats().commands_sent == commands_at_change);
+
+		const core::Status detached = client.detach_level();
+		REQUIRE_MESSAGE(detached.ok(), (detached.ok() ? std::string() : detached.error().message));
+		CHECK_FALSE(client.attach_level(synthetic_level()).ok());
+		CHECK(client.stats().connected);
+		CHECK(client.stats().ready_sent == 1);
+
+		client.set_load_progress(progress);
+		first.stop();
+		std::shared_ptr<GameServerConfig> second_game = pipe_game();
+		second_game->level = next_level;
+		second_game->round_id = 1;
+		ServerConfig second_config;
+		second_config.game = second_game;
+		second_config.transport = std::make_shared<PipeServerPort>(pipe);
+		ServerHost second;
+		REQUIRE_MESSAGE(second.start(second_config, &err), err);
+		pipe->connect(0);
+		net::Hello carried;
+		carried.name = "follower";
+		carried.game_build = net::game_build();
+		pipe->client_send(0, net::kChannelReliable, net::encode_hello(carried));
+		REQUIRE(wait_until([&] { return client.lobby_match(held) && held.round_id == 1; }, 10s, 16ms));
+		CHECK(held.level == next_level->level);
+		REQUIRE(wait_until([&] { return second.game_stats().slots.at(0).load.reports >= 1; }, 10s, 16ms));
+		CHECK(client.stats().ready_sent == 1);
+		CHECK(second.game_stats().slots.at(0).life == 0);
+
+		const core::Status reattached = client.attach_level(next_level);
+		REQUIRE_MESSAGE(reattached.ok(), (reattached.ok() ? std::string() : reattached.error().message));
+		CHECK(wait_until([&] { return client.stats().ready_sent == 2; }, 10s, 16ms));
+		frame = std::make_unique<PresentationFrame>();
+		REQUIRE(wait_until(
+				[&] {
+					client.read_presentation(*frame);
+					return frame->valid && frame->own_curr.life > 0;
+				},
+				10s, 16ms));
+		const SoldierState spawn = frame->own_curr;
+		InputSample input;
+		input.life = spawn.life;
+		input.yaw = yaw_radians(spawn.yaw);
+		input.move_forward = 1.0f;
+		REQUIRE(wait_until(
+				[&] {
+					client.set_input(input);
+					client.read_presentation(*frame);
+					return frame->server_own_valid && dist(frame->server_own.position, spawn.position) > 1.0f;
+				},
+				10s, 16ms));
+		const ClientStats stats = client.stats();
+		CHECK(stats.connected);
+		CHECK_FALSE(stats.kicked);
+		CHECK_FALSE(stats.transport_disconnected);
+		CHECK(stats.level_changes == 1);
+		client.stop();
+		second.stop();
+	}
+
+	TEST_CASE("host.session: a client still loading when the server moves on holds only the newest level's messages, "
+			  "and a client that joins during a change waits for the MatchInfo that names it in round") {
+		auto pipe = std::make_shared<Pipe>();
+		ClientSession client;
+		ClientSessionConfig cc;
+		cc.name = "late";
+		const core::Status started = client.start(cc, nullptr, std::make_unique<PipeClientTransport>(pipe, 0));
+		REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
+		const auto deliver = [&](std::vector<uint8_t> p_bytes) {
+			std::lock_guard lock(pipe->mutex);
+			pipe->to_client[0].push_back({ 0, net::kChannelReliable, std::move(p_bytes) });
+			pipe->to_client_ready.notify_all();
+		};
+		std::shared_ptr<const SharedLevel> level = synthetic_level();
+		net::MatchInfo changing;
+		changing.level = level->level;
+		changing.mode = level->mode;
+		changing.phase = net::MatchPhase::LevelChange;
+		changing.round_id = 4;
+		deliver(net::encode_match_info(changing));
+		net::LevelChange change;
+		change.level = level->level;
+		change.mode = level->mode;
+		change.round_id = 4;
+		deliver(net::encode_level_change(change));
+		REQUIRE(wait_until([&] { return client.stats().level_changes == 1; }, 10s, 16ms));
+		const core::Status attached = client.attach_level(level);
+		REQUIRE_MESSAGE(attached.ok(), (attached.ok() ? std::string() : attached.error().message));
+		std::this_thread::sleep_for(100ms);
+		CHECK(client.stats().ready_sent == 0);
+		CHECK(client.stats().connected);
+		CHECK_FALSE(client.stats().refused);
+		client.stop();
+	}
+
+	TEST_CASE(
 			"host.session: a client kicked in the lobby keeps the kick reason when the level it attaches is refused") {
 		auto pipe = std::make_shared<Pipe>();
 		ServerConfig sc;

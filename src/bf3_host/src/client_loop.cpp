@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -20,7 +21,15 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 	switch (*type) {
 		case net::MessageType::MatchInfo: {
 			core::Result<net::MatchInfo> m = net::decode_match_info(p_d.bytes);
-			if (!m || have_match) {
+			if (!m) {
+				return;
+			}
+			if (m->phase == net::MatchPhase::LevelChange) {
+				note_lobby_match(*m);
+				following = true;
+				return;
+			}
+			if (have_match) {
 				return;
 			}
 			if (!accept_match(*m, p_now)) {
@@ -92,6 +101,12 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 		}
 		case net::MessageType::Bye:
 			link.drop("the server said bye");
+			return;
+		case net::MessageType::LevelChange:
+			if (core::Result<net::LevelChange> c = net::decode_level_change(p_d.bytes)) {
+				note_level_change(*c);
+				following = true;
+			}
 			return;
 		default:
 			if (match.datagram(*type, p_d)) {
@@ -207,13 +222,14 @@ void ClientLoop::iterate() {
 	now = now_ns();
 	net::NetSim::Datagram d;
 	while (link.poll(now, d)) {
-		if (level != nullptr) {
+		if (level != nullptr && !following) {
 			handle_datagram(d, now);
 		} else {
 			hold(std::move(d), now);
 		}
 	}
 	link.send_requests(now);
+	send_load_report(now);
 	link.release(now);
 	if (mismatch_deadline && now >= *mismatch_deadline) {
 		mismatch_deadline.reset();
@@ -221,7 +237,7 @@ void ClientLoop::iterate() {
 			refuse((install_difference_text(stats_.mismatch_components) + " (the server sent no kick)").c_str());
 		}
 	}
-	if (level == nullptr) {
+	if (level == nullptr || following) {
 		publish_link_stats();
 		return;
 	}
@@ -257,6 +273,16 @@ core::Status ClientLoop::attach_level(std::shared_ptr<const SharedLevel> p_level
 	if (p_level == nullptr || p_level->static_world == nullptr) {
 		return core::make_error("ClientSession: no level");
 	}
+	{
+		std::lock_guard lock(lobby_mutex);
+		if (lobby_change &&
+				!level_refusal(net::MatchInfo{ .level = lobby_change->level, .mode = lobby_change->mode },
+						p_level->level, p_level->mode)
+						.empty()) {
+			return core::make_error("ClientSession: the server moved on to " + lobby_change->level + " " +
+					lobby_change->mode + ", " + p_level->level + " " + p_level->mode + " is stale");
+		}
+	}
 	core::Result<std::unique_ptr<sim::CollisionWorld>> created = sim::CollisionWorld::create(p_level->static_world);
 	if (!created) {
 		return core::error_at("ClientSession", created.error());
@@ -264,6 +290,7 @@ core::Status ClientLoop::attach_level(std::shared_ptr<const SharedLevel> p_level
 	world = std::move(*created);
 	BF3_TRY(prediction.init(*world, p_level->motor));
 	level = std::move(p_level);
+	following = false;
 	std::vector<HeldDatagram> replay;
 	replay.swap(held);
 	for (const HeldDatagram &h : replay) {
@@ -272,28 +299,144 @@ core::Status ClientLoop::attach_level(std::shared_ptr<const SharedLevel> p_level
 	return core::Status::success();
 }
 
+core::Status ClientLoop::detach_level() {
+	reset_level_state();
+	following = false;
+	return core::Status::success();
+}
+
+void ClientLoop::reset_level_state() {
+	std::destroy_at(&prediction);
+	std::destroy_at(&gunplay);
+	std::destroy_at(&match);
+	std::destroy_at(&feed);
+	std::destroy_at(&tracks);
+	std::destroy_at(&input);
+	std::destroy_at(&clock);
+	std::construct_at(&clock, config);
+	std::construct_at(&input);
+	std::construct_at(&tracks, config);
+	std::construct_at(&feed, slot);
+	std::construct_at(&match, feed, slot);
+	std::construct_at(&gunplay, config, feed, slot, now_ns);
+	std::construct_at(&prediction, config, clock, input, gunplay);
+	world.reset();
+	level.reset();
+	have_match = false;
+	pending_snapshot_valid = false;
+	pending_snapshot = net::Snapshot();
+	pending_spawned.clear();
+	baselines = net::SnapshotBaselines();
+	mismatch_deadline.reset();
+	link.new_level();
+	*build = PresentationFrame();
+	ClientStats fresh;
+	fresh.connected = stats_.connected;
+	fresh.slot = stats_.slot;
+	fresh.level_changes = stats_.level_changes;
+	fresh.ready_sent = stats_.ready_sent;
+	fresh.loading_sent = stats_.loading_sent;
+	fresh.kicked = stats_.kicked;
+	fresh.kick_reason = stats_.kick_reason;
+	fresh.kick_detail = stats_.kick_detail;
+	fresh.mismatch_components = stats_.mismatch_components;
+	stats_ = fresh;
+	link.stats(stats_);
+	std::lock_guard lock(frame_mutex);
+	*shared_frame = PresentationFrame();
+	shared_frame->serial = ++serial;
+	shared_frame->stats = stats_;
+}
+
+void ClientLoop::note_level_change(const net::LevelChange &p_change) {
+	bool counted = false;
+	{
+		std::lock_guard lock(lobby_mutex);
+		counted = !lobby_change || lobby_change->round_id != p_change.round_id;
+		lobby_change = p_change;
+		lobby_info.reset();
+	}
+	stats_.level_changes += counted ? 1u : 0u;
+	load_report_sent_ns = 0;
+	held.clear();
+}
+
+void ClientLoop::note_lobby_match(const net::MatchInfo &p_match) {
+	std::lock_guard lock(lobby_mutex);
+	lobby_info = p_match;
+}
+
 void ClientLoop::hold(net::NetSim::Datagram &&p_d, uint64_t p_now) {
 	const std::optional<net::MessageType> type = net::peek_type(p_d.bytes);
 	if (type == net::MessageType::Kick || type == net::MessageType::Bye) {
 		handle_datagram(p_d, p_now);
 		return;
 	}
-	if (!p_d.reliable) {
+	if (!p_d.reliable || type == net::MessageType::CombatEvents || type == net::MessageType::ShotEvents) {
 		return;
+	}
+	if (type == net::MessageType::LevelChange) {
+		if (core::Result<net::LevelChange> c = net::decode_level_change(p_d.bytes)) {
+			note_level_change(*c);
+			following = following || level != nullptr;
+		}
+		return;
+	}
+	if (type == net::MessageType::MatchInfo) {
+		core::Result<net::MatchInfo> m = net::decode_match_info(p_d.bytes);
+		if (!m) {
+			return;
+		}
+		note_lobby_match(*m);
+		held.clear();
+		if (m->phase == net::MatchPhase::LevelChange) {
+			following = following || level != nullptr;
+			return;
+		}
+	} else {
+		std::lock_guard lock(lobby_mutex);
+		if (!lobby_info || lobby_info->phase == net::MatchPhase::LevelChange) {
+			return;
+		}
 	}
 	if (held.size() >= kMaxHeldDatagrams) {
 		link.drop("more than " + std::to_string(kMaxHeldDatagrams) + " reliable datagrams before a level was attached");
 		return;
 	}
-	if (type == net::MessageType::MatchInfo) {
-		if (core::Result<net::MatchInfo> m = net::decode_match_info(p_d.bytes)) {
-			std::lock_guard lock(lobby_mutex);
-			if (!lobby_info) {
-				lobby_info = *m;
-			}
-		}
-	}
 	held.push_back({ std::move(p_d), p_now });
+}
+
+void ClientLoop::send_load_report(uint64_t p_now) {
+	if (!link.connected() || (have_match && level != nullptr && !following) ||
+			p_now < load_report_sent_ns + kLoadReportNs) {
+		return;
+	}
+	net::Loading report;
+	{
+		std::lock_guard lock(lobby_mutex);
+		if (!load_report || (!lobby_info && !lobby_change)) {
+			return;
+		}
+		report = *load_report;
+		report.round_id = lobby_info ? lobby_info->round_id : lobby_change->round_id;
+	}
+	link.submit(net::kChannelReliable, net::encode_loading(report), p_now);
+	load_report_sent_ns = p_now;
+	++stats_.loading_sent;
+}
+
+void ClientLoop::set_load_progress(const net::Loading &p_progress) {
+	std::lock_guard lock(lobby_mutex);
+	load_report = p_progress;
+}
+
+bool ClientLoop::level_change(net::LevelChange &r_change) const {
+	std::lock_guard lock(lobby_mutex);
+	if (!lobby_change) {
+		return false;
+	}
+	r_change = *lobby_change;
+	return true;
 }
 
 void ClientLoop::publish_link_stats() {
@@ -417,6 +560,11 @@ bool ClientLoop::accept_match(const net::MatchInfo &p_match, uint64_t p_now) {
 	ready.source_digest = level->source_digest;
 	ready.digests = own;
 	link.submit(net::kChannelReliable, net::encode_ready(ready), p_now);
+	++stats_.ready_sent;
+	{
+		std::lock_guard lock(lobby_mutex);
+		load_report.reset();
+	}
 	return true;
 }
 

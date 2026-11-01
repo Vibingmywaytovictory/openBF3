@@ -182,6 +182,9 @@ struct ClientStats {
 	net::KickReason kick_reason = net::KickReason::Protocol;
 	std::array<char, 128> kick_detail{};
 	uint8_t mismatch_components = 0;
+	uint32_t level_changes = 0;
+	uint32_t ready_sent = 0;
+	uint32_t loading_sent = 0;
 };
 static_assert(std::is_trivially_copyable_v<ClientStats>);
 
@@ -276,7 +279,10 @@ public:
 	core::Status start(const ClientSessionConfig &p_config, std::shared_ptr<const SharedLevel> p_level,
 			std::unique_ptr<ClientTransport> p_transport);
 	core::Status attach_level(std::shared_ptr<const SharedLevel> p_level);
+	core::Status detach_level();
 	bool lobby_match(net::MatchInfo &r_match) const;
+	bool level_change(net::LevelChange &r_change) const;
+	void set_load_progress(const net::Loading &p_progress);
 	void stop();
 	bool running() const;
 

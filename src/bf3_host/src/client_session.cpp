@@ -59,7 +59,13 @@ struct ClientSession::Impl {
 
 	void serve_attach(core::Status p_refusal) {
 		std::lock_guard lock(attach_mutex);
-		attach_result = p_refusal.ok() ? loop.attach_level(std::move(attach_pending)) : std::move(p_refusal);
+		if (!p_refusal.ok()) {
+			attach_result = std::move(p_refusal);
+		} else if (attach_pending != nullptr) {
+			attach_result = loop.attach_level(std::move(attach_pending));
+		} else {
+			attach_result = loop.detach_level();
+		}
 		attach_pending.reset();
 		attach_requested.store(false, std::memory_order_release);
 		attach_done.notify_all();
@@ -170,8 +176,30 @@ core::Status ClientSession::attach_level(std::shared_ptr<const SharedLevel> p_le
 	return *m.attach_result;
 }
 
+core::Status ClientSession::detach_level() {
+	std::lock_guard lock(impl_->lifecycle_mutex);
+	Impl &m = *impl_;
+	if (!m.thread.joinable()) {
+		return core::make_error("ClientSession: not running");
+	}
+	std::unique_lock attach(m.attach_mutex);
+	m.attach_pending.reset();
+	m.attach_result.reset();
+	m.attach_requested.store(true, std::memory_order_release);
+	m.attach_done.wait(attach, [&] { return m.attach_result.has_value(); });
+	return *m.attach_result;
+}
+
 bool ClientSession::lobby_match(net::MatchInfo &r_match) const {
 	return impl_->loop.lobby_match(r_match);
+}
+
+bool ClientSession::level_change(net::LevelChange &r_change) const {
+	return impl_->loop.level_change(r_change);
+}
+
+void ClientSession::set_load_progress(const net::Loading &p_progress) {
+	impl_->loop.set_load_progress(p_progress);
 }
 
 void ClientSession::stop() {

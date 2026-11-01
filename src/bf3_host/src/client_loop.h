@@ -26,11 +26,15 @@ namespace bf3::host {
 class ClientLoop {
 public:
 	static constexpr size_t kMaxHeldDatagrams = 16384;
+	static constexpr uint64_t kLoadReportNs = 500'000'000ull;
 
 	core::Status init(const ClientSessionConfig &p_config, std::shared_ptr<const SharedLevel> p_level);
 	void configure(const ClientSessionConfig &p_config);
 	core::Status attach_level(std::shared_ptr<const SharedLevel> p_level);
+	core::Status detach_level();
 	bool lobby_match(net::MatchInfo &r_match) const;
+	bool level_change(net::LevelChange &r_change) const;
+	void set_load_progress(const net::Loading &p_progress);
 	void begin(std::unique_ptr<ClientTransport> p_transport, MonotonicClock p_clock);
 	void iterate();
 	void shutdown();
@@ -82,6 +86,10 @@ private:
 	std::vector<HeldDatagram> held;
 	mutable std::mutex lobby_mutex;
 	std::optional<net::MatchInfo> lobby_info;
+	std::optional<net::LevelChange> lobby_change;
+	std::optional<net::Loading> load_report;
+	uint64_t load_report_sent_ns = 0;
+	bool following = false;
 	std::optional<uint64_t> mismatch_deadline;
 
 	RemoteTracks tracks{ config };
@@ -97,6 +105,10 @@ private:
 	void gunplay_datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d, uint64_t p_now);
 	void handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_now);
 	void hold(net::NetSim::Datagram &&p_d, uint64_t p_now);
+	void note_level_change(const net::LevelChange &p_change);
+	void note_lobby_match(const net::MatchInfo &p_match);
+	void send_load_report(uint64_t p_now);
+	void reset_level_state();
 	void publish_link_stats();
 	void client_tick(uint64_t p_now);
 	void publish(uint64_t p_now, const sim::PredictionEntry *p_made, const sim::Command &p_cmd);
