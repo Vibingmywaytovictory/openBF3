@@ -900,7 +900,9 @@ void Bf3LevelSession::attach_when_loaded() {
 }
 
 void Bf3LevelSession::report_load() {
-	if (attached_ || client_ == nullptr) {
+	const std::shared_ptr<host::ClientSession> client =
+			match_ != nullptr ? match_->client() : (session_ready_.load(std::memory_order_acquire) ? client_ : nullptr);
+	if (attached_ || client == nullptr) {
 		return;
 	}
 	load_stage_ = std::max(load_stage_, progress_.stage.load(std::memory_order_relaxed));
@@ -911,7 +913,7 @@ void Bf3LevelSession::report_load() {
 	l.warmth = host::CacheWarmth(progress_.warmth.load(std::memory_order_relaxed)) == host::CacheWarmth::Cold
 			? bf3::net::LoadWarmth::Cold
 			: bf3::net::LoadWarmth::Warm;
-	client_->set_load_progress(l);
+	client->set_load_progress(l);
 }
 
 void Bf3LevelSession::try_done() {
@@ -1029,8 +1031,8 @@ void Bf3LevelSession::_process(double p_delta) {
 		const Camera3D *camera = get_viewport() != nullptr ? get_viewport()->get_camera_3d() : nullptr;
 		look_.update(upload_, camera != nullptr ? camera->get_global_position() : Vector3());
 	}
+	report_load();
 	if (session_ready_.load(std::memory_order_acquire) && client_ != nullptr) {
-		report_load();
 		client_->read_presentation(*frame_);
 		if (frame_->stats.refused && !refusal_reported_) {
 			refusal_reported_ = true;

@@ -2914,3 +2914,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * The native HUD reads its level from the session, not the pinned MP_Subway; hygiene.rules, built and not run here.
 * A kick or lost connection shows popupgeneric over the game with BF3's title and QUIT, and QUIT exits 0; a headless client prints it and exits 1; ui.hud.screen.kick_popup, net.procs.kick.
 * architecture.md and testing.md name the match host, the level follow and the new rows; hygiene.rules.
+* The game reports Loading from the start of a followed level, so a cold load is flagged before the warm deadline; net.procs.follow, net.procs.listen_maplist.
