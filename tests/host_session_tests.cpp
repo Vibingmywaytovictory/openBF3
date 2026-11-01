@@ -2088,39 +2088,118 @@ TEST_SUITE("host-session-unit") {
 		second.stop();
 	}
 
-	TEST_CASE("host.session: a client still loading when the server moves on holds only the newest level's messages, "
-			  "and a client that joins during a change waits for the MatchInfo that names it in round") {
-		auto pipe = std::make_shared<Pipe>();
-		ClientSession client;
-		ClientSessionConfig cc;
-		cc.name = "late";
-		const core::Status started = client.start(cc, nullptr, std::make_unique<PipeClientTransport>(pipe, 0));
-		REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
-		const auto deliver = [&](std::vector<uint8_t> p_bytes) {
-			std::lock_guard lock(pipe->mutex);
-			pipe->to_client[0].push_back({ 0, net::kChannelReliable, std::move(p_bytes) });
-			pipe->to_client_ready.notify_all();
+	TEST_CASE(
+			"host.session: a client still loading when the server moves on replays only the newest level's messages, "
+			"refuses a stale attach, and a client that joins during a change waits for the MatchInfo that names it in "
+			"round") {
+		const auto level_named = [](const char *p_name, uint8_t p_digest) {
+			auto named = std::make_shared<SharedLevel>(*synthetic_level());
+			named->level = p_name;
+			named->source_digest = core::Sha256Digest{};
+			named->source_digest->bytes[0] = p_digest;
+			return std::shared_ptr<const SharedLevel>(std::move(named));
 		};
-		std::shared_ptr<const SharedLevel> level = synthetic_level();
-		net::MatchInfo changing;
-		changing.level = level->level;
-		changing.mode = level->mode;
-		changing.phase = net::MatchPhase::LevelChange;
-		changing.round_id = 4;
-		deliver(net::encode_match_info(changing));
+		const auto in_round = [](const SharedLevel &p_level, uint32_t p_round) {
+			net::MatchInfo m;
+			m.level = p_level.level;
+			m.mode = p_level.mode;
+			m.source_digest = p_level.source_digest;
+			m.motor_hash = motor_params_hash(p_level.motor);
+			m.round_id = p_round;
+			return m;
+		};
+		const auto deliver = [](Pipe &r_pipe, std::vector<uint8_t> p_bytes) {
+			std::lock_guard lock(r_pipe.mutex);
+			r_pipe.to_client[0].push_back({ 0, net::kChannelReliable, std::move(p_bytes) });
+			r_pipe.to_client_ready.notify_all();
+		};
+		const auto ready_digests = [](Pipe &r_pipe) {
+			std::vector<std::optional<core::Sha256Digest>> found;
+			std::lock_guard lock(r_pipe.mutex);
+			for (const net::Host::Event &e : r_pipe.to_server) {
+				if (net::peek_type(e.data) == net::MessageType::Ready) {
+					if (core::Result<net::Ready> r = net::decode_ready(e.data)) {
+						found.push_back(r->source_digest);
+					}
+				}
+			}
+			return found;
+		};
+		const std::shared_ptr<const SharedLevel> level_a = level_named("Levels/LevelA/LevelA", 0xA);
+		const std::shared_ptr<const SharedLevel> level_b = level_named("Levels/LevelB/LevelB", 0xB);
 		net::LevelChange change;
-		change.level = level->level;
-		change.mode = level->mode;
+		change.level = level_b->level;
+		change.mode = level_b->mode;
 		change.round_id = 4;
-		deliver(net::encode_level_change(change));
-		REQUIRE(wait_until([&] { return client.stats().level_changes == 1; }, 10s, 16ms));
-		const core::Status attached = client.attach_level(level);
-		REQUIRE_MESSAGE(attached.ok(), (attached.ok() ? std::string() : attached.error().message));
-		std::this_thread::sleep_for(100ms);
-		CHECK(client.stats().ready_sent == 0);
-		CHECK(client.stats().connected);
-		CHECK_FALSE(client.stats().refused);
-		client.stop();
+
+		{
+			auto pipe = std::make_shared<Pipe>();
+			ClientSession client;
+			ClientSessionConfig cc;
+			cc.name = "loading";
+			const core::Status started = client.start(cc, nullptr, std::make_unique<PipeClientTransport>(pipe, 0));
+			REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
+			deliver(*pipe, net::encode_match_info(in_round(*level_a, 3)));
+			net::MatchInfo seen;
+			REQUIRE(wait_until([&] { return client.lobby_match(seen); }, 10s, 16ms));
+			CHECK(seen.level == level_a->level);
+			net::Spawned stale_spawn;
+			stale_spawn.state.life = 9;
+			deliver(*pipe, net::encode_spawned(stale_spawn));
+			deliver(*pipe, net::encode_level_change(change));
+			REQUIRE(wait_until([&] { return client.stats().level_changes == 1; }, 10s, 16ms));
+			CHECK_FALSE(client.lobby_match(seen));
+
+			const core::Status stale_attach = client.attach_level(level_a);
+			REQUIRE_FALSE(stale_attach.ok());
+			CHECK(stale_attach.error().message.find(kAttachStale) != std::string::npos);
+			const core::Status attached = client.attach_level(level_b);
+			REQUIRE_MESSAGE(attached.ok(), (attached.ok() ? std::string() : attached.error().message));
+			std::this_thread::sleep_for(100ms);
+			CHECK(client.stats().ready_sent == 0);
+			CHECK_FALSE(client.stats().refused);
+			CHECK(client.stats().connected);
+
+			deliver(*pipe, net::encode_match_info(in_round(*level_b, 4)));
+			REQUIRE(wait_until([&] { return client.stats().ready_sent == 1; }, 10s, 16ms));
+			std::this_thread::sleep_for(100ms);
+			const std::vector<std::optional<core::Sha256Digest>> readies = ready_digests(*pipe);
+			REQUIRE(readies.size() == 1u);
+			CHECK(readies[0] == level_b->source_digest);
+			auto frame = std::make_unique<PresentationFrame>();
+			client.read_presentation(*frame);
+			CHECK(frame->own_curr.life == 0);
+			CHECK(client.stats().ready_sent == 1);
+			CHECK_FALSE(client.stats().refused);
+			CHECK(client.stats().connected);
+			client.stop();
+		}
+
+		{
+			auto pipe = std::make_shared<Pipe>();
+			ClientSession client;
+			ClientSessionConfig cc;
+			cc.name = "late";
+			const core::Status started = client.start(cc, nullptr, std::make_unique<PipeClientTransport>(pipe, 0));
+			REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
+			net::MatchInfo changing = in_round(*level_b, 4);
+			changing.phase = net::MatchPhase::LevelChange;
+			deliver(*pipe, net::encode_match_info(changing));
+			deliver(*pipe, net::encode_level_change(change));
+			REQUIRE(wait_until([&] { return client.stats().level_changes == 1; }, 10s, 16ms));
+			const core::Status attached = client.attach_level(level_b);
+			REQUIRE_MESSAGE(attached.ok(), (attached.ok() ? std::string() : attached.error().message));
+			std::this_thread::sleep_for(100ms);
+			CHECK(client.stats().ready_sent == 0);
+			CHECK(client.stats().connected);
+			CHECK_FALSE(client.stats().refused);
+			deliver(*pipe, net::encode_match_info(in_round(*level_b, 4)));
+			REQUIRE(wait_until([&] { return client.stats().ready_sent == 1; }, 10s, 16ms));
+			const std::vector<std::optional<core::Sha256Digest>> readies = ready_digests(*pipe);
+			REQUIRE(readies.size() == 1u);
+			CHECK(readies[0] == level_b->source_digest);
+			client.stop();
+		}
 	}
 
 	TEST_CASE(
