@@ -28,6 +28,7 @@ struct MatchLevel {
 	uint8_t rules_flags = 0;
 	bool rules_known = false;
 	uint32_t index = 1;
+	uint32_t round_id = 0;
 };
 
 class Bf3MatchHost : public godot::Node {

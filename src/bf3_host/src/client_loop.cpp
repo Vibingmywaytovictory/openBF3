@@ -362,6 +362,9 @@ void ClientLoop::note_level_change(const net::LevelChange &p_change) {
 		counted = !lobby_change || lobby_change->round_id != p_change.round_id;
 		lobby_change = p_change;
 		lobby_info.reset();
+		if (counted) {
+			load_report.reset();
+		}
 	}
 	stats_.level_changes += counted ? 1u : 0u;
 	load_report_sent_ns = 0;
@@ -434,6 +437,9 @@ void ClientLoop::send_load_report(uint64_t p_now) {
 
 void ClientLoop::set_load_progress(const net::Loading &p_progress) {
 	std::lock_guard lock(lobby_mutex);
+	if (lobby_change && lobby_change->round_id != p_progress.round_id) {
+		return;
+	}
 	load_report = p_progress;
 }
 

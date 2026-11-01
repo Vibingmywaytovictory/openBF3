@@ -169,6 +169,7 @@ private:
 	std::string assigned_level_;
 	std::string assigned_mode_;
 	std::optional<uint8_t> assigned_rules_;
+	uint32_t assigned_round_ = 0;
 	uint32_t level_index_ = 0;
 	std::string netsim_ = "off";
 	uint32_t walkers_ = 2;

@@ -132,6 +132,7 @@ void Bf3LevelSession::assign_level(const MatchLevel &p_level) {
 		assigned_rules_ = p_level.rules_flags;
 	}
 	level_index_ = p_level.index;
+	assigned_round_ = p_level.round_id;
 }
 
 void Bf3LevelSession::shutdown_level() {
@@ -906,6 +907,7 @@ void Bf3LevelSession::report_load() {
 	load_stage_ = std::max(load_stage_, progress_.stage.load(std::memory_order_relaxed));
 	load_permille_ = std::max(load_permille_, uint16_t(std::min<uint32_t>(progress_.permille(), 1000u)));
 	bf3::net::Loading l;
+	l.round_id = assigned_round_;
 	l.stage = load_stage_;
 	l.permille = load_permille_;
 	l.warmth = host::CacheWarmth(progress_.warmth.load(std::memory_order_relaxed)) == host::CacheWarmth::Cold

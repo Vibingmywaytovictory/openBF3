@@ -2918,3 +2918,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * A follow case holds a level's in-round MatchInfo and Spawned through a change, refuses the stale attach and readies with the new digest; host.session.unit.pure.
 * GameSettings forgets the mixer at begin_level, so a level's mixer at the freed one's address still gets the saved volumes; godot.settings audio.next_level.
 * A --maplist listen game uses the same day-long load deadlines as the plain listen game, so it never kicks its own client; net.procs.listen_maplist.
+* A level's load report never goes out under the next level's round, so a slow client that missed the change is not kicked LoadStalled while it progresses; host.session.unit.pure.

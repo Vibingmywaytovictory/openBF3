@@ -471,6 +471,7 @@ void Bf3MatchHost::_process(double p_delta) {
 	level.rules_flags = m.rules_flags;
 	level.rules_known = m.phase != bf3::net::MatchPhase::LevelChange;
 	level.index = level_index_;
+	level.round_id = m.round_id;
 	if (level.rules_known) {
 		rules_flags_ = level.rules_flags;
 	}
@@ -500,6 +501,7 @@ void Bf3MatchHost::watch_changes() {
 	pending_.rules_flags = rules_flags_.value_or(0);
 	pending_.rules_known = rules_flags_.has_value();
 	pending_.index = level_index_;
+	pending_.round_id = change.round_id;
 	phase_ = Phase::Swapping;
 }
 

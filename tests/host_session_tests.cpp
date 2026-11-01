@@ -2036,6 +2036,7 @@ TEST_SUITE("host-session-unit") {
 		CHECK(client.stats().connected);
 		CHECK(client.stats().ready_sent == 1);
 
+		progress.round_id = 1;
 		client.set_load_progress(progress);
 		first.stop();
 		std::shared_ptr<GameServerConfig> second_game = pipe_game();
@@ -2125,6 +2126,18 @@ TEST_SUITE("host-session-unit") {
 			}
 			return found;
 		};
+		const auto loading_for = [](Pipe &r_pipe, uint32_t p_round) {
+			std::vector<net::Loading> found;
+			std::lock_guard lock(r_pipe.mutex);
+			for (const net::Host::Event &e : r_pipe.to_server) {
+				if (net::peek_type(e.data) == net::MessageType::Loading) {
+					if (core::Result<net::Loading> l = net::decode_loading(e.data); l && l->round_id == p_round) {
+						found.push_back(*l);
+					}
+				}
+			}
+			return found;
+		};
 		const std::shared_ptr<const SharedLevel> level_a = level_named("Levels/LevelA/LevelA", 0xA);
 		const std::shared_ptr<const SharedLevel> level_b = level_named("Levels/LevelB/LevelB", 0xB);
 		net::LevelChange change;
@@ -2143,12 +2156,29 @@ TEST_SUITE("host-session-unit") {
 			net::MatchInfo seen;
 			REQUIRE(wait_until([&] { return client.lobby_match(seen); }, 10s, 16ms));
 			CHECK(seen.level == level_a->level);
+			net::Loading progress_a;
+			progress_a.stage = 7;
+			progress_a.permille = 900;
+			progress_a.round_id = 3;
+			client.set_load_progress(progress_a);
+			REQUIRE(wait_until([&] { return !loading_for(*pipe, 3).empty(); }, 10s, 16ms));
 			net::Spawned stale_spawn;
 			stale_spawn.state.life = 9;
 			deliver(*pipe, net::encode_spawned(stale_spawn));
 			deliver(*pipe, net::encode_level_change(change));
 			REQUIRE(wait_until([&] { return client.stats().level_changes == 1; }, 10s, 16ms));
 			CHECK_FALSE(client.lobby_match(seen));
+			client.set_load_progress(progress_a);
+			std::this_thread::sleep_for(200ms);
+			CHECK(loading_for(*pipe, 4).empty());
+			net::Loading progress_b;
+			progress_b.stage = 1;
+			progress_b.permille = 10;
+			progress_b.round_id = 4;
+			client.set_load_progress(progress_b);
+			REQUIRE(wait_until([&] { return !loading_for(*pipe, 4).empty(); }, 10s, 16ms));
+			CHECK(loading_for(*pipe, 4).front().stage == 1);
+			CHECK(loading_for(*pipe, 4).front().permille == 10);
 
 			const core::Status stale_attach = client.attach_level(level_a);
 			REQUIRE_FALSE(stale_attach.ok());
