@@ -98,6 +98,7 @@ core::Result<bool> GameSettings::save_if_changed(const std::string &p_path) {
 
 void GameSettings::begin_level() {
 	input_revision_ = ~0ull;
+	audio_mixer_ = nullptr;
 	level_hip_fov_deg_ = ui::settings_effects(store()).hip_fov_deg;
 }
 

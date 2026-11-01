@@ -252,6 +252,17 @@ void Bf3SettingsCheck::run() {
 	const std::string newer = "version = 99\nVolume = 0.3\n";
 	const std::string refused_path = path + std::string(kRefusedSettingsSuffix);
 	remove_file(refused_path);
+	bool audio_applied = false, audio_settled = false, audio_next_level = false;
+	if (bf3::core::Result<std::unique_ptr<GameSettings>> levels = GameSettings::load(**lib)) {
+		audio::MixerCore same_address(audio::MixerConfig{});
+		audio_applied = (*levels)->apply_audio(same_address);
+		audio_settled = !(*levels)->apply_audio(same_address);
+		(*levels)->begin_level();
+		audio_next_level = (*levels)->apply_audio(same_address);
+	}
+	add("audio.next_level", audio_applied && audio_settled && audio_next_level,
+			"a new level's mixer gets the bus gains and preset even at the freed mixer's address");
+
 	bool refused = false, moved = false, rewritten = false;
 	if (Ref<FileAccess> f = FileAccess::open(to_godot(path), FileAccess::WRITE); f.is_valid()) {
 		f->store_string(to_godot(newer));

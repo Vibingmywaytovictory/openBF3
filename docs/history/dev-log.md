@@ -2916,3 +2916,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * architecture.md and testing.md name the match host, the level follow and the new rows; hygiene.rules.
 * The game reports Loading from the start of a followed level, so a cold load is flagged before the warm deadline; net.procs.follow, net.procs.listen_maplist.
 * A follow case holds a level's in-round MatchInfo and Spawned through a change, refuses the stale attach and readies with the new digest; host.session.unit.pure.
+* GameSettings forgets the mixer at begin_level, so a level's mixer at the freed one's address still gets the saved volumes; godot.settings audio.next_level.
