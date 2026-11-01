@@ -94,6 +94,8 @@ uint64_t peak_working_set_bytes() {
 	return GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)) ? uint64_t(pmc.PeakWorkingSetSize) : 0;
 }
 
+constexpr float kOwnClientLoadSeconds = 86400.0f;
+
 double mib(uint64_t p_bytes) {
 	return double(p_bytes) / (1024.0 * 1024.0);
 }
@@ -548,6 +550,7 @@ bool Bf3LevelSession::start_session(std::string *r_error) {
 		}
 	}
 	game_server_config(*game);
+	game->load = host::LoadDeadlines{ kOwnClientLoadSeconds, kOwnClientLoadSeconds, kOwnClientLoadSeconds };
 	if (connect_host_.empty()) {
 		host::ServerConfig sc;
 		sc.tick_hz = int(sim::kSimHz);
@@ -559,8 +562,8 @@ bool Bf3LevelSession::start_session(std::string *r_error) {
 			return false;
 		}
 	}
-	client_ = std::make_unique<host::ClientSession>();
-	const bf3::core::Status s = client_->start(client_config(netsim_, seed_), shared_);
+	client_ = std::make_shared<host::ClientSession>();
+	const bf3::core::Status s = client_->start(client_config(netsim_, seed_), nullptr);
 	if (!s.ok()) {
 		*r_error = "client: " + s.error().message;
 		return false;
@@ -583,7 +586,7 @@ bool Bf3LevelSession::restart_client(const std::string &p_netsim, uint64_t p_see
 	if (client_ != nullptr) {
 		client_->stop();
 	}
-	client_ = std::make_unique<host::ClientSession>();
+	client_ = std::make_shared<host::ClientSession>();
 	*frame_ = host::PresentationFrame();
 	mapper_.reset_life();
 	mapper_.release_all();
@@ -822,6 +825,33 @@ void Bf3LevelSession::draw_others(uint64_t p_now_ns) {
 	}
 }
 
+void Bf3LevelSession::attach_when_loaded() {
+	if (attached_ || client_ == nullptr || (scene_ && timings_.upload_us == 0)) {
+		return;
+	}
+	attached_ = true;
+	if (const bf3::core::Status s = client_->attach_level(shared_level()); !s.ok()) {
+		std::lock_guard lock(loader_mutex_);
+		load_error_ = "client: " + s.error().message;
+		load_failed_.store(true, std::memory_order_release);
+	}
+}
+
+void Bf3LevelSession::report_load() {
+	if (attached_ || client_ == nullptr) {
+		return;
+	}
+	load_stage_ = std::max(load_stage_, progress_.stage.load(std::memory_order_relaxed));
+	load_permille_ = std::max(load_permille_, uint16_t(std::min<uint32_t>(progress_.permille(), 1000u)));
+	bf3::net::Loading l;
+	l.stage = load_stage_;
+	l.permille = load_permille_;
+	l.warmth = host::CacheWarmth(progress_.warmth.load(std::memory_order_relaxed)) == host::CacheWarmth::Cold
+			? bf3::net::LoadWarmth::Cold
+			: bf3::net::LoadWarmth::Warm;
+	client_->set_load_progress(l);
+}
+
 void Bf3LevelSession::try_done() {
 	if (done_ || !session_ready_.load(std::memory_order_acquire)) {
 		return;
@@ -838,6 +868,7 @@ void Bf3LevelSession::try_done() {
 		progress_.end(host::LoadStage::Textures);
 		progress_.end(host::LoadStage::Upload);
 	}
+	attach_when_loaded();
 	if (!spawned || (scene_ && timings_.upload_us == 0)) {
 		return;
 	}
@@ -937,6 +968,7 @@ void Bf3LevelSession::_process(double p_delta) {
 		look_.update(upload_, camera != nullptr ? camera->get_global_position() : Vector3());
 	}
 	if (session_ready_.load(std::memory_order_acquire) && client_ != nullptr) {
+		report_load();
 		client_->read_presentation(*frame_);
 		if (frame_->stats.refused && !refusal_reported_) {
 			refusal_reported_ = true;

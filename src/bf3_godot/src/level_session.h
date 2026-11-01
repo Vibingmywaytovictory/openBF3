@@ -150,6 +150,8 @@ private:
 	void update_hud(double p_delta);
 	void draw_others(uint64_t p_now_ns);
 	void try_done();
+	void attach_when_loaded();
+	void report_load();
 	void set_loading_display(bool p_loading);
 	bool start_session(std::string *r_error);
 	bf3::host::ClientSessionConfig client_config(const std::string &p_netsim, uint64_t p_seed) const;
@@ -192,7 +194,7 @@ private:
 	bf3::host::LoadProgress progress_;
 
 	std::unique_ptr<bf3::host::ServerHost> server_;
-	std::unique_ptr<bf3::host::ClientSession> client_;
+	std::shared_ptr<bf3::host::ClientSession> client_;
 	std::unique_ptr<bf3::host::ClientSession> extra_client_;
 	std::unique_ptr<bf3::host::PresentationFrame> frame_;
 
@@ -212,6 +214,9 @@ private:
 	int saved_vsync_ = -1;
 	int saved_max_fps_ = 0;
 
+	bool attached_ = false;
+	uint8_t load_stage_ = 0;
+	uint16_t load_permille_ = 0;
 	bool done_ = false;
 	bool failed_ = false;
 	bool quitting_ = false;
