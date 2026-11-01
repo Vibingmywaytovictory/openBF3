@@ -831,7 +831,7 @@ void GameState::want_catalog_weapons(std::span<const uint16_t> p_defs) {
 
 namespace {
 
-void build_game_ui(Node *p_parent, GameState &r_game, bool p_windowed) {
+void build_game_ui(Node *p_parent, GameState &r_game, bool p_windowed, const std::string &p_level) {
 	r_game.layer = memnew(CanvasLayer);
 	r_game.layer->set_name("GameUi");
 	p_parent->add_child(r_game.layer);
@@ -841,6 +841,7 @@ void build_game_ui(Node *p_parent, GameState &r_game, bool p_windowed) {
 		r_game.layer->add_child(pages);
 		r_game.native_hud = memnew(Bf3NativeHud);
 		r_game.native_hud->set_name("NativeHud");
+		r_game.native_hud->set_level(p_level);
 		r_game.layer->add_child(r_game.native_hud);
 		r_game.hud_items = memnew(Bf3HudItems);
 		r_game.hud_items->set_name("HudItems");
@@ -1111,7 +1112,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			UtilityFunctions::print(to_godot(n));
 		}
 		g.part_notes.clear();
-		build_game_ui(this, g, !headless_);
+		build_game_ui(this, g, !headless_, level_);
 		if (!g.hud_static_error.empty()) {
 			UtilityFunctions::print(to_godot("[game] HUD feed without weapon rows: " + g.hud_static_error));
 		}
