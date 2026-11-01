@@ -8,7 +8,6 @@
 #include <godot_cpp/classes/input_event.hpp>
 #include <godot_cpp/classes/node.hpp>
 
-#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -45,7 +44,6 @@ public:
 	void _unhandled_input(const godot::Ref<godot::InputEvent> &p_event) override;
 	void _exit_tree() override;
 
-	bool following() const { return following_; }
 	std::optional<MatchLevel> first_level() const;
 	std::shared_ptr<bf3::host::ClientSession> client() const;
 	bf3::host::ClientSessionConfig client_config() const;
@@ -73,7 +71,6 @@ private:
 	Bf3LevelSession *session() const;
 	void persistent_ui();
 
-	bool following_ = false;
 	bool headless_ = false;
 	bool ended_ = false;
 	std::string kick_text_;
@@ -94,7 +91,6 @@ private:
 	bool scene_tdm_ = false;
 
 	std::thread worker_;
-	std::atomic<bool> stop_{ false };
 	mutable std::mutex mutex_;
 	std::shared_ptr<bf3::host::ClientSession> client_;
 	std::string worker_error_;

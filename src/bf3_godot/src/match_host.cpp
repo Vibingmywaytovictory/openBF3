@@ -36,6 +36,7 @@
 #include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <atomic>
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
@@ -349,7 +350,6 @@ void Bf3MatchHost::_ready() {
 		return;
 	}
 	g_current = this;
-	following_ = true;
 	headless_ = DisplayServer::get_singleton()->get_name() == String("headless");
 	if (!user_arg_value("netsim").empty()) {
 		netsim_ = user_arg_value("netsim");
@@ -423,6 +423,7 @@ void Bf3MatchHost::connect_client(const std::string &p_host, uint16_t p_port) {
 		worker_error_ = s.error().message;
 		return;
 	}
+	connect_port_ = p_port;
 	client_ = std::move(made);
 }
 
