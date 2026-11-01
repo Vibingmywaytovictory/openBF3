@@ -458,8 +458,12 @@ TEST_SUITE("net-procs-follow") {
 		CHECK_FALSE(contains(server_out, "LoadStalled=1"));
 		CHECK(contains(server_out, "level change 3: MP_Subway TeamDeathMatch0 round 3,"));
 		CHECK(contains(server_out, "carried 1 clients"));
-		CHECK(summary_number(levels[3], "orphan nodes ") <= summary_number(levels[0], "orphan nodes "));
-		CHECK(summary_number(levels[3], "objects ") <= summary_number(levels[0], "objects "));
+		for (const std::string &level_line : levels) {
+			CHECK(summary_number(level_line, "orphan nodes ") == 0u);
+		}
+		const uint64_t first_objects = summary_number(levels[0], "objects ");
+		CHECK(first_objects != UINT64_MAX);
+		CHECK(summary_number(levels[3], "objects ") <= first_objects);
 		driver.finish(server->id, 1s);
 		for (const std::string &l : levels) {
 			MESSAGE(l);
