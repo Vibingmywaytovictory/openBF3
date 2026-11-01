@@ -9,13 +9,16 @@
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/hud_widget_registry.h"
 #include "bf3/core/ui/hud_widgets.h"
+#include "bf3/core/ui/kick_popup.h"
 #include "bf3/core/ui/swf_hit.h"
 #include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/swf_scene.h"
 #include "bf3/core/ui/swf_text.h"
 #include "bf3/core/ui/text_db.h"
 #include "bf3/core/ui/ui_direct_access.h"
+#include "bf3/core/ui/ui_drawn_screens.h"
 #include "bf3/core/ui/ui_fonts.h"
+#include "bf3/core/ui/ui_input.h"
 #include "bf3/core/ui/ui_stage.h"
 #include "test_support.h"
 #include "ui_retail_support.h"
@@ -907,6 +910,36 @@ TEST_SUITE("ui-hud-screen-unit") {
 }
 
 TEST_SUITE("ui-hud-screen") {
+	TEST_CASE("hud screen: a kick popup reads BF3's disconnected title and the server's reason, and its QUIT fires") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const TextDatabase &db = ui_retail::retail_text_db(*r);
+		const std::string reason = "not ready 120.0 s after the warm load began";
+		const HudPopup popup = hud_kick_popup(reason, true, db);
+		CHECK(popup.title == "YOU HAVE BEEN DISCONNECTED");
+		CHECK(popup.text == "TIMED OUT: " + reason);
+		REQUIRE(popup.buttons.size() == 1);
+		CHECK(popup.buttons[0].label == "QUIT");
+		CHECK(hud_kick_popup("server full", false, db).text == "server full");
+		HudClientState client = text_client(db);
+		client.popup = &popup;
+		Screen s = initialized(*r, kPopupGenericPartition, HudModel{}, client);
+		std::vector<HudWidgetEvent> fired;
+		s.hud->set_event_sink([&](const HudWidgetEvent &p_event) { fired.push_back(p_event); });
+		const std::string root(kHudScreenInstance);
+		CHECK(s.hud->clip(root + ".PopupGenericWidget_01.popupTitle").text() == popup.title);
+		CHECK(s.hud->clip(root + ".PopupGenericWidget_01.popupText").text() == popup.text);
+		CHECK(s.hud->clip(root + "." + std::string(kKickPopupButtons) + ".holder.btn0.button.label.txt").text() ==
+				"QUIT");
+		s.hud->focus_widget(root + "." + std::string(kKickPopupButtons));
+		s.hud->input_concept(int32_t(UiInputConcept::Activate), true);
+		REQUIRE(fired.size() >= 1);
+		CHECK(fired.back().instance.find(kKickPopupButtons) != std::string::npos);
+		CHECK(fired.back().param.to_string() == "QUIT");
+	}
+
 	TEST_CASE("hud screen: the MP_Subway screen assets and their widget classes") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {

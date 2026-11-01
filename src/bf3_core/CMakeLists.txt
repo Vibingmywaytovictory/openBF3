@@ -303,6 +303,8 @@ target_sources(bf3_core PRIVATE
     src/ui/as2_clip.cpp
     src/ui/as2_clip_loader.cpp
     src/ui/hud_screen.cpp
+    include/bf3/core/ui/kick_popup.h
+    src/ui/kick_popup.cpp
     src/ui/hud_widgets.cpp
     src/ui/hud_messages.cpp
     include/bf3/core/ui/hud_widget_registry.h

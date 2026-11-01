@@ -6,18 +6,31 @@
 #include "godot_util.h"
 #include "level_session.h"
 #include "minimap_hud.h"
+#include "native_loading.h"
+#include "native_screens.h"
 #include "tdm_flow.h"
 #include "ui_assets.h"
+#include "ui_cursor.h"
 #include "video_memory.h"
 
+#include "bf3/core/ebx_db.h"
+#include "bf3/core/gameplay/weapon_catalog.h"
 #include "bf3/core/install.h"
+#include "bf3/core/ui/kick_popup.h"
+#include "bf3/core/ui/ui_drawn_screens.h"
+#include "bf3/core/ui/ui_input.h"
 #include "bf3/core/util/key_values.h"
 #include "bf3/net/netsim.h"
 #include "bf3/sim/soldier_motor.h"
 
+#include <godot_cpp/classes/canvas_layer.hpp>
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/input.hpp>
+#include <godot_cpp/classes/input_event_key.hpp>
+#include <godot_cpp/classes/input_event_mouse_button.hpp>
+#include <godot_cpp/classes/input_event_mouse_motion.hpp>
 #include <godot_cpp/classes/performance.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/scene_tree.hpp>
@@ -45,9 +58,126 @@ void say(const std::string &p_line) {
 
 }
 
+class NativeKick {
+public:
+	NativeKick(Node *p_parent, std::string p_reason, bool p_timed_out) :
+			reason_(std::move(p_reason)), timed_out_(p_timed_out) {
+		layer_ = memnew(CanvasLayer);
+		layer_->set_name("KickPopup");
+		layer_->set_layer(kNativeLoadingLayer + 1);
+		screens_ = memnew(Bf3UiScreens);
+		screens_->set_name("KickScreens");
+		screens_->set_manual(true);
+		layer_->add_child(screens_);
+		p_parent->add_child(layer_);
+		cursor_ = Bf3UiCursor::ensure(p_parent);
+		if (cursor_ != nullptr) {
+			cursor_->set_follow_mouse(true);
+			cursor_->show_cursor();
+		}
+		Input::get_singleton()->set_mouse_mode(
+				cursor_ != nullptr ? Input::MOUSE_MODE_HIDDEN : Input::MOUSE_MODE_VISIBLE);
+	}
+
+	~NativeKick() {
+		if (worker_.joinable()) {
+			worker_.join();
+		}
+		screens_->set_resolver(nullptr);
+		screens_->set_widget_listener(nullptr);
+	}
+
+	void frame(double p_delta) {
+		if (!opened_ && !try_open()) {
+			return;
+		}
+		screens_->step(std::clamp(p_delta, 0.0, kNativeLoadingMaxStepSeconds));
+	}
+
+	void input(const Ref<InputEvent> &p_event) {
+		if (!opened_) {
+			return;
+		}
+		if (const InputEventKey *k = Object::cast_to<InputEventKey>(p_event.ptr())) {
+			if (k->is_pressed() && !k->is_echo() &&
+					(k->get_keycode() == KEY_ENTER || k->get_keycode() == KEY_KP_ENTER ||
+							k->get_keycode() == KEY_SPACE)) {
+				screens_->input_concept(int32_t(bf3::core::ui::UiInputConcept::Activate), true);
+			}
+		} else if (const InputEventMouseMotion *m = Object::cast_to<InputEventMouseMotion>(p_event.ptr())) {
+			screens_->mouse_move(m->get_position());
+		} else if (const InputEventMouseButton *b = Object::cast_to<InputEventMouseButton>(p_event.ptr())) {
+			screens_->mouse_button(b->get_position(), int32_t(b->get_button_index()), b->is_pressed());
+		}
+	}
+
+	bool quit() const { return quit_; }
+	const std::string &failure() const { return failure_; }
+
+private:
+	bool try_open() {
+		Bf3Localisation *loc = Bf3Localisation::current();
+		Bf3UiAssets *assets = Bf3UiAssets::current();
+		if (loc == nullptr || assets == nullptr || !failure_.empty()) {
+			failure_ = failure_.empty() ? std::string("no localisation or UI assets for the kick popup") : failure_;
+			return false;
+		}
+		if (loc->has_failed()) {
+			failure_ = to_std(loc->get_error());
+			return false;
+		}
+		if (!loc->is_loaded() || !assets->is_loaded()) {
+			return false;
+		}
+		if (!worker_.joinable() && !worker_done_.load(std::memory_order_acquire)) {
+			worker_ = std::thread([this, install = loc->install()] {
+				library_ = bf3::core::EbxLibrary::open(install, { bf3::core::gameplay::kDefaultWeaponLevel });
+				worker_done_.store(true, std::memory_order_release);
+			});
+		}
+		if (!worker_done_.load(std::memory_order_acquire)) {
+			return false;
+		}
+		worker_.join();
+		if (!library_) {
+			failure_ = library_.error().message;
+			return false;
+		}
+		namespace ui = bf3::core::ui;
+		screens_->set_client(ui::hud_text_client(loc->database()));
+		screens_->set_drawn(ui::kPopupGenericPartition, true);
+		screens_->set_resolver(library_->get());
+		screens_->set_widget_listener([this](const ui::HudWidgetEvent &p_event) {
+			quit_ = quit_ || p_event.instance.find(ui::kKickPopupButtons) != std::string::npos;
+		});
+		const bf3::core::Status s = screens_->open_popup(
+				ui::kPopupGenericPartition, ui::hud_kick_popup(reason_, timed_out_, *loc->database()));
+		if (!s.ok()) {
+			failure_ = s.error().message;
+			return false;
+		}
+		opened_ = true;
+		return true;
+	}
+
+	std::string reason_;
+	bool timed_out_ = false;
+	CanvasLayer *layer_ = nullptr;
+	Bf3UiScreens *screens_ = nullptr;
+	Bf3UiCursor *cursor_ = nullptr;
+	std::thread worker_;
+	std::atomic<bool> worker_done_{ false };
+	bf3::core::Result<std::unique_ptr<bf3::core::EbxLibrary>> library_ = bf3::core::make_error("not opened");
+	bool opened_ = false;
+	bool quit_ = false;
+	std::string failure_;
+};
+
 Bf3MatchHost::Bf3MatchHost() = default;
 
-Bf3MatchHost::~Bf3MatchHost() = default;
+Bf3MatchHost::~Bf3MatchHost() {
+	kick_.reset();
+}
 
 void Bf3MatchHost::_bind_methods() {}
 
@@ -230,6 +360,9 @@ void Bf3MatchHost::_ready() {
 		scene_game_ = s->has_meta("openbf3_game") && bool(s->get_meta("openbf3_game"));
 		scene_tdm_ = s->has_meta("openbf3_tdm") && bool(s->get_meta("openbf3_tdm"));
 	}
+	if (has_user_arg("game-build")) {
+		game_build_ = uint64_t(std::strtoull(user_arg_value("game-build").c_str(), nullptr, 10));
+	}
 	if (has_user_arg("match-levels")) {
 		levels_to_play_ = uint32_t(std::clamp(std::atoi(user_arg_value("match-levels").c_str()), 1, 1000));
 	}
@@ -274,6 +407,7 @@ host::ClientSessionConfig Bf3MatchHost::client_config() const {
 	}
 	cc.netsim.seed = seed_ * 7919u + 1u;
 	cc.request_dev_commands = true;
+	cc.game_build = game_build_;
 	return cc;
 }
 
@@ -292,7 +426,17 @@ void Bf3MatchHost::connect_client(const std::string &p_host, uint16_t p_port) {
 }
 
 void Bf3MatchHost::_process(double p_delta) {
-	(void)p_delta;
+	if (kick_ != nullptr) {
+		kick_->frame(p_delta);
+		if (kick_->quit()) {
+			say("QUIT from the kick popup");
+			get_tree()->quit(0);
+		} else if (!kick_->failure().empty()) {
+			say("no kick popup: " + kick_->failure());
+			get_tree()->quit(1);
+		}
+		return;
+	}
 	if (ended_) {
 		return;
 	}
@@ -375,6 +519,10 @@ void Bf3MatchHost::watch_link() {
 	}
 	const host::ClientStats link = c->stats();
 	if (!link.connected && link.last_error[0] != '\0') {
+		timed_out_kick_ = link.kicked &&
+				(link.kick_reason == bf3::net::KickReason::LoadTimeout ||
+						link.kick_reason == bf3::net::KickReason::LoadStalled);
+		kick_text_ = link.kicked ? std::string(link.kick_detail.data()) : std::string(link.last_error.data());
 		end_match(std::string("the connection to ") + connect_host_ + ":" + std::to_string(connect_port_) +
 				" ended: " + link.last_error.data());
 	}
@@ -413,6 +561,12 @@ void Bf3MatchHost::end_match(const std::string &p_reason) {
 	}
 	ended_ = true;
 	UtilityFunctions::print(to_godot("[level] " + p_reason));
+	if (!headless_ && Bf3Localisation::current() != nullptr) {
+		free_session();
+		set_process_unhandled_input(true);
+		kick_ = std::make_unique<NativeKick>(this, kick_text_.empty() ? p_reason : kick_text_, timed_out_kick_);
+		return;
+	}
 	if (Bf3LevelSession *s = session(); s != nullptr && s->level_assigned()) {
 		s->finish(1);
 		return;
@@ -432,7 +586,9 @@ void Bf3MatchHost::level_done(const Bf3LevelSession &p_session) {
 }
 
 void Bf3MatchHost::_unhandled_input(const Ref<InputEvent> &p_event) {
-	(void)p_event;
+	if (kick_ != nullptr) {
+		kick_->input(p_event);
+	}
 }
 
 void Bf3MatchHost::_exit_tree() {
@@ -449,6 +605,7 @@ void Bf3MatchHost::_exit_tree() {
 	if (c != nullptr) {
 		c->stop();
 	}
+	kick_.reset();
 	server_.reset();
 }
 

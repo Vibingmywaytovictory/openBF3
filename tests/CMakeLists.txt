@@ -471,7 +471,7 @@ foreach(_w IN ITEMS assets:*screen*assets* ticket_counter:*TicketCounter* ammo:*
         kill_feed_team_kill:*KillFeed*team*kill* kill_log:*KillLog
         score_popup:*ScorePopup score_aggregator:*ScoreAggregator damage_indicator:*DamageIndicator hud_alert:*HudAlertMessage
         shared_screen:*hudscreen*panels squad_list:*SquadList icon3d:*Icon3D* input_hooks:*input*hooks* hit_button:*hit*test* timers:*timers*enter*frames* direct_access:*DirectAccess*screen*clip*
-        movie_screen:*movie*screen*getData* in_menu:*game*menu*hides*soldier*)
+        movie_screen:*movie*screen*getData* in_menu:*game*menu*hides*soldier* kick_popup:*kick*popup*)
     string(REPLACE ":" ";" _p "${_w}")
     list(GET _p 0 _name)
     list(GET _p 1 _case)
@@ -1168,10 +1168,12 @@ openbf3_proc_row(net.procs.rotation test_net_procs LABEL timing TIMEOUT 1800 ARG
 openbf3_proc_row(net.procs.godot_connect test_net_procs LABEL timing TIMEOUT 900 ARGS --test-suite=net-procs-godot-connect)
 openbf3_proc_row(net.procs.follow test_net_procs LABEL timing TIMEOUT 1800 ARGS --test-suite=net-procs-follow)
 openbf3_proc_row(net.procs.listen_maplist test_net_procs LABEL timing TIMEOUT 1500 ARGS --test-suite=net-procs-listen-maplist)
-set_tests_properties(net.procs.connect net.procs.two_clients net.procs.rotation net.procs.godot_connect net.procs.follow net.procs.listen_maplist PROPERTIES RUN_SERIAL TRUE)
+openbf3_proc_row(net.procs.kick test_net_procs LABEL timing TIMEOUT 600 ARGS --test-suite=net-procs-kick)
+set_tests_properties(net.procs.connect net.procs.two_clients net.procs.rotation net.procs.godot_connect net.procs.follow net.procs.listen_maplist net.procs.kick PROPERTIES RUN_SERIAL TRUE)
 openbf3_cost(net.procs.connect 1 45)
 openbf3_cost(net.procs.two_clients 1 60)
 openbf3_cost(net.procs.godot_connect 1 7)
+openbf3_cost(net.procs.kick 1 7)
 openbf3_cost(net.procs.follow 1 345)
 openbf3_cost(net.procs.listen_maplist 1 156)
 

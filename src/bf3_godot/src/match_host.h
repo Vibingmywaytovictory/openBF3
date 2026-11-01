@@ -20,6 +20,7 @@ namespace bf3::godot_side {
 
 class Bf3LevelSession;
 class GameSettings;
+class NativeKick;
 
 struct MatchLevel {
 	std::string level;
@@ -74,6 +75,8 @@ private:
 	bool following_ = false;
 	bool headless_ = false;
 	bool ended_ = false;
+	std::string kick_text_;
+	bool timed_out_kick_ = false;
 	Phase phase_ = Phase::Lobby;
 	std::string connect_host_ = "127.0.0.1";
 	uint16_t connect_port_ = 0;
@@ -98,6 +101,7 @@ private:
 	std::unique_ptr<bf3::host::ServerSession> server_;
 	bf3::core::InstallReader install_;
 	std::shared_ptr<GameSettings> settings_;
+	std::unique_ptr<NativeKick> kick_;
 };
 
 }

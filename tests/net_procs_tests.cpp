@@ -505,6 +505,34 @@ TEST_SUITE("net-procs-listen-maplist") {
 	}
 }
 
+TEST_SUITE("net-procs-kick") {
+	TEST_CASE("a Godot --connect client kicked at its Hello reports the reason with no level loaded and exits 1") {
+		ProcDriver driver(driver_config_from_env());
+		const std::optional<Server> server = start_server(driver, 0, 300);
+		if (!server) {
+			return;
+		}
+		bf3::core::Result<size_t> client =
+				driver.start(godot_client(driver, server->port, { "--game-build=1", "--quit-after=3" }));
+		REQUIRE_MESSAGE(client.ok(), (client.ok() ? std::string() : client.error().message));
+		std::string line;
+		CHECK_MESSAGE(driver.wait_line(
+							  *client, [](std::string_view l) { return contains(l, " ended: kicked: "); }, 120s, &line),
+				driver.output(*client));
+		const ChildEnd client_end = driver.finish(*client, 60s);
+		CHECK(client_end.code == 1);
+		CHECK(client_end.stragglers == 0);
+		const std::string out = driver.output(*client);
+		CHECK_FALSE(contains(out, "[level] done: "));
+		CHECK_FALSE(contains(out, "[level] MP_"));
+		CHECK_MESSAGE(driver.wait_line(
+							  server->id, [](std::string_view l) { return contains(l, " Build=1 "); }, 30s),
+				driver.output(server->id));
+		driver.finish(server->id, 1s);
+		MESSAGE(line);
+	}
+}
+
 TEST_SUITE("net-procs-rotation") {
 	TEST_CASE("a dedicated server walks MP_Subway, MP_011, MP_003 and back to MP_Subway with two loadbots processes: "
 			  "the one that stalls on level 2 is kicked LoadStalled, the other follows every change on its slot, and "

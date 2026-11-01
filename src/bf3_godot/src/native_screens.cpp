@@ -227,6 +227,23 @@ bf3::core::Status Bf3UiScreens::open_movie_screen(std::string_view p_movie, ui::
 	return bf3::core::Status::success();
 }
 
+bf3::core::Status Bf3UiScreens::open_popup(std::string_view p_partition, ui::HudPopup p_popup) {
+	auto popup = std::make_unique<ui::HudPopup>(std::move(p_popup));
+	client_.popup = popup.get();
+	const bf3::core::Status opened = open_screen(p_partition);
+	client_.popup = nullptr;
+	BF3_TRY(opened);
+	Entry *e = find(p_partition);
+	if (e == nullptr || e->screen == nullptr) {
+		return bf3::core::make_error(std::string(p_partition) + ": the popup screen did not open");
+	}
+	e->popup = std::move(popup);
+	e->screen->focus_widget(std::string(ui::kHudScreenInstance) + "." + std::string(kPopupButtons));
+	e->modal = true;
+	focus_screen(p_partition);
+	return bf3::core::Status::success();
+}
+
 void Bf3UiScreens::free_view(Bf3SwfView *p_view) {
 	remove_child(p_view);
 	p_view->queue_free();
@@ -353,6 +370,9 @@ bf3::core::Status Bf3UiScreens::open_entry(
 	e->screen->set_event_sink([this, partition](const ui::HudWidgetEvent &p_event) {
 		++stats_.events_out;
 		note("event " + ui::ui_data_category_leaf(partition) + "." + p_event.instance + " " + p_event.query);
+		if (widget_listener_) {
+			widget_listener_(p_event);
+		}
 		if (session_ != nullptr) {
 			session_->widget_fired(partition, p_event.instance, p_event.query,
 					p_event.param.defined() ? std::optional<std::string>(p_event.param.to_string()) : std::nullopt);
