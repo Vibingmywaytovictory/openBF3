@@ -268,9 +268,13 @@ void Bf3LevelSession::_ready() {
 	}
 	match_ = Bf3MatchHost::current();
 	if (match_ != nullptr && !level_assigned()) {
-		scene_ = false;
-		set_process(false);
-		return;
+		if (const std::optional<MatchLevel> first = match_->first_level()) {
+			assign_level(*first);
+		} else {
+			scene_ = false;
+			set_process(false);
+			return;
+		}
 	}
 	timings_.ready_us = now_us();
 	timings_.process_start_to_ready_s = seconds_since_process_creation();
@@ -955,9 +959,6 @@ void Bf3LevelSession::try_done() {
 			cache_warmth_name(host::CacheWarmth(progress_.warmth.load())), mib(peak_working_set_bytes()));
 	UtilityFunctions::print(line);
 	UtilityFunctions::print(to_godot("[level] " + cache_summary()));
-	if (match_ != nullptr) {
-		match_->level_done(*this);
-	}
 	if (!bots_line_.empty()) {
 		UtilityFunctions::print(to_godot(bots_line_));
 	}
@@ -1061,6 +1062,10 @@ void Bf3LevelSession::_process(double p_delta) {
 		return;
 	}
 	since_done_ += p_delta;
+	if (match_ != nullptr && !level_reported_ && (loader_done_.load(std::memory_order_acquire) || failed_)) {
+		level_reported_ = true;
+		match_->level_done(*this);
+	}
 	frame_ms_after_done_.push_back(float(p_delta * 1000.0));
 	if (frame_ms_after_done_.size() > 100000) {
 		frame_ms_after_done_.erase(frame_ms_after_done_.begin(), frame_ms_after_done_.begin() + 50000);
@@ -1110,7 +1115,8 @@ void Bf3LevelSession::_process(double p_delta) {
 		}
 	}
 #endif
-	if (quit_after_ > 0.0 && since_done_ >= quit_after_ && shots_done && (match_ == nullptr || match_->last_level())) {
+	if (quit_after_ > 0.0 && since_done_ >= quit_after_ && shots_done &&
+			(match_ == nullptr || (level_reported_ && match_->last_level()))) {
 		finish(failed_ || shots_failed > 0 ? 1 : 0);
 	}
 }

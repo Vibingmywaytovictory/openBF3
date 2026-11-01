@@ -13,22 +13,27 @@
 #include "bf3/core/install.h"
 #include "bf3/core/util/key_values.h"
 #include "bf3/net/netsim.h"
+#include "bf3/sim/soldier_motor.h"
 
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/performance.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <algorithm>
 #include <cstdlib>
+#include <filesystem>
 #include <utility>
+#include <vector>
 
 namespace bf3::godot_side {
 
 using namespace godot;
 namespace host = bf3::host;
+namespace sim = bf3::sim;
 
 namespace {
 
@@ -74,8 +79,140 @@ bool Bf3MatchHost::parse_connect() {
 	return true;
 }
 
+std::optional<MatchLevel> Bf3MatchHost::first_level() const {
+	return first_level_;
+}
+
+std::shared_ptr<GameSettings> Bf3MatchHost::settings() const {
+	std::lock_guard lock(mutex_);
+	return settings_;
+}
+
+void Bf3MatchHost::keep_settings(std::shared_ptr<GameSettings> p_settings) {
+	std::lock_guard lock(mutex_);
+	settings_ = std::move(p_settings);
+}
+
+bool Bf3MatchHost::prepare_listen_server() {
+	const std::string text = user_arg_value("maplist");
+	std::vector<std::string> tried = { text };
+	if (text.rfind("res://", 0) == 0) {
+		tried[0] = to_std(ProjectSettings::get_singleton()->globalize_path(to_godot(text)));
+	} else {
+		const std::string project = to_std(ProjectSettings::get_singleton()->globalize_path("res://"));
+		tried.push_back(project + text);
+		tried.push_back(project + "../" + text);
+	}
+	std::optional<bf3::core::Result<host::MapList>> maps;
+	for (const std::string &path : tried) {
+		if (std::error_code ec;
+				std::filesystem::exists(std::filesystem::path(std::u8string(path.begin(), path.end())), ec)) {
+			maps = host::load_map_list(path);
+			break;
+		}
+	}
+	if (!maps || !*maps) {
+		end_match("--maplist=" + text + ": " + (maps ? maps->error().message : std::string("no such file")));
+		return false;
+	}
+	server_config_.maps = std::move(**maps);
+	if (server_config_.maps.entries.empty()) {
+		end_match("--maplist=" + text + ": no entries");
+		return false;
+	}
+	TdmOptions options;
+	options.tdm_tuning_cfg = config_path("res://config/tdm_tuning.cfg");
+	options.bot_tuning_cfg = config_path("res://config/bot_tuning.cfg");
+	if (const bf3::core::Status s = parse_tdm_options(tdm_arg_text(), options); !s.ok()) {
+		end_match(s.error().message);
+		return false;
+	}
+	bf3::core::InstallLocateOptions opts;
+	opts.cmdline_path = user_arg_value("bf3-install");
+	ProjectSettings *ps = ProjectSettings::get_singleton();
+	if (ps->has_setting("openbf3/install/path")) {
+		opts.setting_path = to_std(String(ps->get_setting("openbf3/install/path")));
+	}
+	install_.locate(opts);
+	if (!install_.is_mounted()) {
+		end_match("no usable install: " + install_.describe());
+		return false;
+	}
+	server_config_.level.shared.gunplay = true;
+	server_config_.level.shared.tdm = true;
+	server_config_.level.shared.tdm_tuning_cfg = options.tdm_tuning_cfg;
+	const String motor = "res://config/motor_tuning.cfg";
+	if (FileAccess::file_exists(motor)) {
+		bf3::core::Result<sim::MotorTuning> tuning =
+				sim::parse_motor_tuning(to_std(FileAccess::get_file_as_string(motor)));
+		if (!tuning) {
+			end_match(to_std(motor) + ": " + tuning.error().message);
+			return false;
+		}
+		server_config_.level.shared.tuning = *tuning;
+	}
+	server_config_.level.seed = seed_;
+	host::ServerRules &rules = server_config_.rules;
+	rules.deploy_screen = options.deploy_screen;
+	rules.kill_limit = options.kill_limit;
+	rules.preround_s = options.preround_s;
+	rules.min_players = options.min_players;
+	rules.max_players = host::kListenMaxPlayers;
+	rules.bots = std::min<uint32_t>(options.bots, kTdmMaxBots);
+	rules.bot_tuning_cfg = options.bot_tuning_cfg;
+	rules.dev_commands = true;
+	rules.seed = seed_;
+	server_config_.prebake = false;
+	if (has_user_arg("intermission-s")) {
+		server_config_.intermission_s =
+				float(std::clamp(std::atof(user_arg_value("intermission-s").c_str()), 0.0, 600.0));
+	}
+	const host::LevelEntry &first = server_config_.maps.entries.front();
+	MatchLevel level;
+	level.level = first.level;
+	level.mode = first.mode;
+	level.rules_flags =
+			uint8_t(bf3::net::rules_flags::kTdm | (rules.deploy_screen ? bf3::net::rules_flags::kDeployScreen : 0u));
+	level.rules_known = true;
+	first_level_ = level;
+	rules_flags_ = level.rules_flags;
+	phase_ = Phase::Playing;
+	std::string rotation;
+	for (const host::LevelEntry &e : server_config_.maps.entries) {
+		rotation += (rotation.empty() ? "" : ", ") + e.level + " " + e.mode + " x" + std::to_string(e.rounds);
+	}
+	say("listen server rotates " + rotation);
+	return true;
+}
+
+void Bf3MatchHost::run_listen_server() {
+	bf3::core::Result<std::shared_ptr<bf3::core::Install>> install = bf3::core::Install::open(install_);
+	if (!install) {
+		std::lock_guard lock(mutex_);
+		worker_error_ = install.error().message;
+		return;
+	}
+	server_config_.install = *install;
+	const std::string root = user_arg_value("bf3-cache");
+	if (!has_user_arg("no-cache")) {
+		const std::filesystem::path cache_root =
+				root.empty() ? default_cache_root() : std::filesystem::path(std::u8string(root.begin(), root.end()));
+		AcquiredCache acquired = acquire_cache(cache_root, install_.write_guard());
+		if (acquired.status == bf3::core::CacheStatus::Ok) {
+			server_config_.cache = acquired.cache;
+		}
+	}
+	const bf3::core::Status s = server_->start(std::move(server_config_));
+	if (!s.ok()) {
+		std::lock_guard lock(mutex_);
+		worker_error_ = s.error().message;
+		return;
+	}
+	connect_client("127.0.0.1", server_->port());
+}
+
 void Bf3MatchHost::_ready() {
-	if (Engine::get_singleton()->is_editor_hint() || !(has_user_arg("connect"))) {
+	if (Engine::get_singleton()->is_editor_hint() || !(has_user_arg("connect") || has_user_arg("maplist"))) {
 		set_process(false);
 		set_process_unhandled_input(false);
 		return;
@@ -93,13 +230,21 @@ void Bf3MatchHost::_ready() {
 		scene_game_ = s->has_meta("openbf3_game") && bool(s->get_meta("openbf3_game"));
 		scene_tdm_ = s->has_meta("openbf3_tdm") && bool(s->get_meta("openbf3_tdm"));
 	}
-	if (!parse_connect()) {
+	if (has_user_arg("match-levels")) {
+		levels_to_play_ = uint32_t(std::clamp(std::atoi(user_arg_value("match-levels").c_str()), 1, 1000));
+	}
+	if (has_user_arg("connect") ? !parse_connect() : !prepare_listen_server()) {
 		return;
 	}
 	persistent_ui();
-	say("connecting to " + connect_host_ + ":" + std::to_string(connect_port_) +
-			": level, mode and rules come from the server");
-	worker_ = std::thread([this] { connect_client(connect_host_, connect_port_); });
+	if (has_user_arg("connect")) {
+		say("connecting to " + connect_host_ + ":" + std::to_string(connect_port_) +
+				": level, mode and rules come from the server");
+		worker_ = std::thread([this] { connect_client(connect_host_, connect_port_); });
+	} else {
+		server_ = std::make_unique<host::ServerSession>();
+		worker_ = std::thread([this] { run_listen_server(); });
+	}
 	set_process(true);
 }
 
@@ -152,23 +297,65 @@ void Bf3MatchHost::_process(double p_delta) {
 		return;
 	}
 	watch_link();
-	if (ended_ || phase_ != Phase::Lobby) {
+	if (ended_) {
+		return;
+	}
+	if (phase_ == Phase::Swapping) {
+		make_session(pending_);
+		phase_ = Phase::Playing;
 		return;
 	}
 	const std::shared_ptr<host::ClientSession> c = client();
-	bf3::net::MatchInfo m;
-	if (c == nullptr || !c->lobby_match(m)) {
+	if (c == nullptr) {
 		return;
+	}
+	if (phase_ == Phase::Playing) {
+		watch_changes();
+		return;
+	}
+	bf3::net::MatchInfo m;
+	if (!c->lobby_match(m)) {
+		return;
+	}
+	if (bf3::net::LevelChange change; c->level_change(change)) {
+		handled_round_ = change.round_id;
 	}
 	MatchLevel level;
 	level.level = m.level;
 	level.mode = m.mode;
 	level.rules_flags = m.rules_flags;
-	level.rules_known = true;
+	level.rules_known = m.phase != bf3::net::MatchPhase::LevelChange;
 	level.index = level_index_;
+	if (level.rules_known) {
+		rules_flags_ = level.rules_flags;
+	}
 	free_session();
 	make_session(level);
 	phase_ = Phase::Playing;
+}
+
+void Bf3MatchHost::watch_changes() {
+	const std::shared_ptr<host::ClientSession> c = client();
+	bf3::net::LevelChange change;
+	if (!c->level_change(change) || handled_round_ == change.round_id) {
+		return;
+	}
+	handled_round_ = change.round_id;
+	say("level change " + std::to_string(level_index_) + ": " + change.level + " " + change.mode + " round " +
+			std::to_string(change.round_id));
+	++level_index_;
+	free_session();
+	if (const bf3::core::Status s = c->detach_level(); !s.ok()) {
+		end_match(s.error().message);
+		return;
+	}
+	pending_ = MatchLevel{};
+	pending_.level = change.level;
+	pending_.mode = change.mode;
+	pending_.rules_flags = rules_flags_.value_or(0);
+	pending_.rules_known = rules_flags_.has_value();
+	pending_.index = level_index_;
+	phase_ = Phase::Swapping;
 }
 
 void Bf3MatchHost::watch_link() {
@@ -234,7 +421,14 @@ void Bf3MatchHost::end_match(const std::string &p_reason) {
 }
 
 void Bf3MatchHost::level_done(const Bf3LevelSession &p_session) {
-	(void)p_session;
+	Performance *perf = Performance::get_singleton();
+	say("level " + std::to_string(level_index_) + " " + p_session.level_id() + " " + p_session.mode_id() +
+			" done: private " + std::to_string(host::process_private_bytes() / (1024u * 1024u)) + " MiB, " +
+			process_video_memory_text() + ", nodes " +
+			std::to_string(int64_t(perf->get_monitor(Performance::OBJECT_NODE_COUNT))) + ", orphan nodes " +
+			std::to_string(int64_t(perf->get_monitor(Performance::OBJECT_ORPHAN_NODE_COUNT))) + ", objects " +
+			std::to_string(int64_t(perf->get_monitor(Performance::OBJECT_COUNT))) + ", resources " +
+			std::to_string(int64_t(perf->get_monitor(Performance::OBJECT_RESOURCE_COUNT))));
 }
 
 void Bf3MatchHost::_unhandled_input(const Ref<InputEvent> &p_event) {
@@ -245,6 +439,9 @@ void Bf3MatchHost::_exit_tree() {
 	if (g_current == this) {
 		g_current = nullptr;
 	}
+	if (server_ != nullptr) {
+		server_->request_stop();
+	}
 	if (worker_.joinable()) {
 		worker_.join();
 	}
@@ -252,6 +449,7 @@ void Bf3MatchHost::_exit_tree() {
 	if (c != nullptr) {
 		c->stop();
 	}
+	server_.reset();
 }
 
 }

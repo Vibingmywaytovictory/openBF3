@@ -227,7 +227,7 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 	}
 	say("map list " + rotation +
 			(first_only ? std::string(" (the first entry of ") + config_file("maplist.cfg") +
-									" in place: the game client cannot follow a level change yet; --maplist rotates)"
+									" in place; --maplist rotates)"
 						: std::string()));
 
 	const std::string root_text = godot_path(args_.cache_root);

@@ -227,6 +227,7 @@ private:
 	int saved_max_fps_ = 0;
 
 	bool attached_ = false;
+	bool level_reported_ = false;
 	uint8_t load_stage_ = 0;
 	uint16_t load_permille_ = 0;
 	bool done_ = false;

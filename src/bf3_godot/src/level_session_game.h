@@ -214,7 +214,7 @@ struct GameState {
 	std::unique_ptr<Bf3GameCrowd, void (*)(Bf3GameCrowd *)> crowd{ nullptr, nullptr };
 	std::unique_ptr<CatalogWeapons> catalog;
 	CatalogCacheSource catalog_cache;
-	std::unique_ptr<GameSettings> settings;
+	std::shared_ptr<GameSettings> settings;
 	std::string settings_path;
 	bool settings_missed_printed = false;
 	bool crowd_built = false;

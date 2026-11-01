@@ -49,8 +49,8 @@ public:
 	bf3::host::ClientSessionConfig client_config() const;
 	bool last_level() const { return level_index_ >= levels_to_play_; }
 
-	std::shared_ptr<GameSettings> settings() const { return settings_; }
-	void keep_settings(std::shared_ptr<GameSettings> p_settings) { settings_ = std::move(p_settings); }
+	std::shared_ptr<GameSettings> settings() const;
+	void keep_settings(std::shared_ptr<GameSettings> p_settings);
 	void level_done(const Bf3LevelSession &p_session);
 
 protected:
@@ -60,8 +60,7 @@ private:
 	enum class Phase : uint8_t { Lobby, Playing, Swapping };
 
 	bool parse_connect();
-	void read_map_list();
-	void start_worker();
+	bool prepare_listen_server();
 	void connect_client(const std::string &p_host, uint16_t p_port);
 	void run_listen_server();
 	void watch_link();
@@ -76,15 +75,16 @@ private:
 	bool headless_ = false;
 	bool ended_ = false;
 	Phase phase_ = Phase::Lobby;
-	std::string connect_host_;
+	std::string connect_host_ = "127.0.0.1";
 	uint16_t connect_port_ = 0;
 	std::string netsim_ = "off";
 	uint64_t seed_ = 1;
 	std::optional<uint64_t> game_build_;
-	bf3::host::MapList maps_;
+	std::optional<MatchLevel> first_level_;
 	uint32_t level_index_ = 1;
 	uint32_t levels_to_play_ = 1;
-	uint32_t handled_round_ = 0;
+	std::optional<uint32_t> handled_round_;
+	std::optional<uint8_t> rules_flags_;
 	MatchLevel pending_;
 	bool scene_game_ = false;
 	bool scene_tdm_ = false;
@@ -94,6 +94,7 @@ private:
 	mutable std::mutex mutex_;
 	std::shared_ptr<bf3::host::ClientSession> client_;
 	std::string worker_error_;
+	bf3::host::ServerSessionConfig server_config_;
 	std::unique_ptr<bf3::host::ServerSession> server_;
 	bf3::core::InstallReader install_;
 	std::shared_ptr<GameSettings> settings_;

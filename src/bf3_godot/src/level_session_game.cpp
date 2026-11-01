@@ -10,6 +10,7 @@
 #include "godot_cache.h"
 #include "godot_util.h"
 #include "hud_items.h"
+#include "match_host.h"
 #include "native_hud.h"
 #include "ui_assets.h"
 #include "ui_pages.h"
@@ -591,7 +592,9 @@ bool Bf3LevelSession::game_load_assets(const host::LevelDatabase &p_db, bf3::cor
 				note(line);
 			}
 		}
-		if (!g.checks()) {
+		if (const std::shared_ptr<GameSettings> kept = match_ != nullptr ? match_->settings() : nullptr) {
+			g.settings = kept;
+		} else if (!g.checks()) {
 			bf3::core::Result<std::unique_ptr<GameSettings>> settings = GameSettings::load(p_db.level->db());
 			if (!settings) {
 				note("[game] ERROR settings: " + settings.error().message);
@@ -1116,13 +1119,18 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			g.settings->read_display();
 			g.settings_path = settings_file_of_args();
 			const std::string &path = g.settings_path;
-			const bf3::core::Result<bool> read = g.settings->read_file(path);
-			if (!read) {
-				UtilityFunctions::print(to_godot("[game] ERROR settings: " + read.error().message));
-			} else if (*read) {
-				UtilityFunctions::print(to_godot("[game] settings: " + path + " loaded"));
-			} else {
-				UtilityFunctions::print(to_godot("[game] settings: no " + path + ", the install's defaults"));
+			if (match_ == nullptr || match_->settings() != g.settings) {
+				const bf3::core::Result<bool> read = g.settings->read_file(path);
+				if (!read) {
+					UtilityFunctions::print(to_godot("[game] ERROR settings: " + read.error().message));
+				} else if (*read) {
+					UtilityFunctions::print(to_godot("[game] settings: " + path + " loaded"));
+				} else {
+					UtilityFunctions::print(to_godot("[game] settings: no " + path + ", the install's defaults"));
+				}
+			}
+			if (match_ != nullptr) {
+				match_->keep_settings(g.settings);
 			}
 			g.settings->begin_level();
 		}

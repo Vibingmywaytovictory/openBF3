@@ -84,6 +84,7 @@ public:
 
 	core::Status start(ServerSessionConfig p_config, LoadProgress *p_progress = nullptr);
 	void stop();
+	void request_stop() { stop_.store(true, std::memory_order_release); }
 
 	bool running() const;
 	uint16_t port() const;
