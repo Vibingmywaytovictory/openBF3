@@ -355,6 +355,113 @@ double level_change_load_s(std::string_view p_line) {
 
 }
 
+namespace {
+
+constexpr double kReturnPrivateMargin = 1.25;
+
+ChildSpec godot_client(ProcDriver &r_driver, uint16_t p_port, std::vector<std::string> p_extra) {
+	std::vector<std::string> args = { "--connect=127.0.0.1:" + std::to_string(p_port) };
+	args.insert(args.end(), p_extra.begin(), p_extra.end());
+	return r_driver.godot_child("client", { "--headless", "res://scenes/metro_tdm.tscn" }, std::move(args));
+}
+
+std::vector<std::string> lines_with(const std::string &p_text, std::string_view p_needle) {
+	std::vector<std::string> out;
+	std::istringstream lines(p_text);
+	for (std::string line; std::getline(lines, line);) {
+		if (contains(line, p_needle)) {
+			out.push_back(line);
+		}
+	}
+	return out;
+}
+
+}
+
+TEST_SUITE("net-procs-godot-connect") {
+	TEST_CASE("a Godot --connect client with no --level or --mode loads the level and mode the server names") {
+		ProcDriver driver(driver_config_from_env());
+		const std::optional<Server> server =
+				start_server(driver, 0, 900, { "--level=MP_011", "--mode=TeamDeathMatch0" });
+		if (!server) {
+			return;
+		}
+		bf3::core::Result<size_t> client = driver.start(godot_client(driver, server->port, { "--quit-after=1" }));
+		REQUIRE_MESSAGE(client.ok(), (client.ok() ? std::string() : client.error().message));
+		std::string line;
+		CHECK_MESSAGE(
+				driver.wait_line(
+						*client,
+						[](std::string_view l) { return contains(l, "[level] done: ") || contains(l, " ended: "); },
+						600s, &line),
+				driver.output(*client));
+		CHECK(contains(line, "[level] done: "));
+		const ChildEnd client_end = driver.finish(*client, 60s);
+		const std::string out = driver.output(*client);
+		CHECK_MESSAGE(client_end.code == 0, out);
+		CHECK(client_end.stragglers == 0);
+		CHECK(contains(out, "[level] MP_011 TeamDeathMatch0"));
+		CHECK(contains(out, "[level] install unchanged: yes"));
+		driver.finish(server->id, 1s);
+		MESSAGE(line);
+	}
+}
+
+TEST_SUITE("net-procs-follow") {
+	TEST_CASE("a Godot --connect client follows a dedicated server through MP_Subway, MP_011, MP_003 and back to "
+			  "MP_Subway: no kick, one connection, and private bytes on the return within the margin of the first "
+			  "visit") {
+		ProcDriver driver(driver_config_from_env());
+		const std::filesystem::path maplist = driver.roots("server").dir / L"maplist.cfg";
+		std::error_code ec;
+		std::filesystem::create_directories(maplist.parent_path(), ec);
+		{
+			std::ofstream out(maplist, std::ios::binary);
+			out << "MP_Subway TeamDeathMatch0 1\nMP_011 TeamDeathMatch0 1\nMP_003 TeamDeathMatch0 1\n";
+		}
+		const std::optional<Server> server = start_server(driver, 8, 1700,
+				{ "--maplist=" + path_utf8(maplist), "--kill-limit=5", "--intermission-s=5", "--stop-after-levels=4" });
+		if (!server) {
+			return;
+		}
+		bf3::core::Result<size_t> client =
+				driver.start(godot_client(driver, server->port, { "--match-levels=4", "--quit-after=2" }));
+		REQUIRE_MESSAGE(client.ok(), (client.ok() ? std::string() : client.error().message));
+		std::string line;
+		CHECK_MESSAGE(
+				driver.wait_line(
+						*client,
+						[](std::string_view l) { return contains(l, "[match] level 4 ") || contains(l, " ended: "); },
+						1500s, &line),
+				driver.output(*client));
+		CHECK(contains(line, "[match] level 4 MP_Subway TeamDeathMatch0 done: "));
+		const ChildEnd client_end = driver.finish(*client, 60s);
+		const std::string out = driver.output(*client);
+		CHECK_MESSAGE(client_end.code == 0, out);
+		CHECK(client_end.stragglers == 0);
+		CHECK_FALSE(contains(out, " ended: "));
+		CHECK(contains(out, "[match] level change 1: MP_011 TeamDeathMatch0 round 1"));
+		CHECK(contains(out, "[match] level change 2: MP_003 TeamDeathMatch0 round 2"));
+		CHECK(contains(out, "[match] level change 3: MP_Subway TeamDeathMatch0 round 3"));
+		CHECK(contains(out, "[level] install unchanged: yes"));
+		const std::vector<std::string> done = lines_with(out, "[level] done: ");
+		CHECK(done.size() == 4u);
+		const std::vector<std::string> levels = lines_with(out, " done: private ");
+		REQUIRE(levels.size() == 4u);
+		const uint64_t first_private = summary_number(levels[0], "done: private ");
+		const uint64_t last_private = summary_number(levels[3], "done: private ");
+		CHECK(first_private != UINT64_MAX);
+		CHECK(double(last_private) <= double(first_private) * kReturnPrivateMargin);
+		const std::string server_out = driver.output(server->id);
+		CHECK_FALSE(contains(server_out, "LoadTimeout=1"));
+		CHECK_FALSE(contains(server_out, "LoadStalled=1"));
+		CHECK(contains(server_out, "level change 3: MP_Subway TeamDeathMatch0 round 3,"));
+		CHECK(contains(server_out, "carried 1 clients"));
+		driver.finish(server->id, 1s);
+		MESSAGE(levels[0] << "\n" << levels[1] << "\n" << levels[2] << "\n" << levels[3]);
+	}
+}
+
 TEST_SUITE("net-procs-rotation") {
 	TEST_CASE("a dedicated server walks MP_Subway, MP_011, MP_003 and back to MP_Subway with two loadbots processes: "
 			  "the one that stalls on level 2 is kicked LoadStalled, the other follows every change on its slot, and "

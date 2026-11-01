@@ -2909,3 +2909,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * godot.deploy gains .sight_clear and .ring_fade per class, built and not run here.
 * ClientSession follows a LevelChange: following stops ticks and holds only the newest level's messages, detach_level keeps the transport, Loading goes out every 0.5 s, Ready is sent only by attach; host.session.unit.pure.
 * The game sends Ready when the scene is uploaded, with Loading reports until then; the listen server's load deadlines stay out of the owner's way; godot.mismatch.
+* Bf3MatchHost: a --connect client waits in the lobby and takes level, mode and deploy rule from MatchInfo; net.procs.godot_connect.

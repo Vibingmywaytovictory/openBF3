@@ -53,12 +53,15 @@ class CollisionWorld;
 
 namespace bf3::godot_side {
 
+class Bf3MatchHost;
 class Bf3UiAssets;
 class Bf3UiScreens;
 class M1Check;
 class M1LoadCheck;
 class ShotRunner;
 class UiScreenRecords;
+
+struct MatchLevel;
 
 struct SessionTimings {
 	uint64_t ready_us = 0;
@@ -91,6 +94,10 @@ public:
 	void _unhandled_input(const godot::Ref<godot::InputEvent> &p_event) override;
 
 	godot::String get_status_text() const;
+
+	void assign_level(const MatchLevel &p_level);
+	bool level_assigned() const { return level_index_ != 0; }
+	void shutdown_level();
 
 	bool done() const { return done_; }
 	bool scene_enabled() const { return scene_; }
@@ -158,6 +165,11 @@ private:
 
 	std::string level_ = "MP_Subway";
 	std::string mode_ = "TeamDeathMatch0";
+	Bf3MatchHost *match_ = nullptr;
+	std::string assigned_level_;
+	std::string assigned_mode_;
+	std::optional<uint8_t> assigned_rules_;
+	uint32_t level_index_ = 0;
 	std::string netsim_ = "off";
 	uint32_t walkers_ = 2;
 	uint64_t seed_ = 1;
@@ -265,6 +277,7 @@ private:
 	void game_shutdown();
 
 	void tdm_parse_args(std::string &r_error);
+	void tdm_follow_server();
 	void tdm_load_options(bf3::host::SharedLoadOptions &r_options);
 	bool tdm_rules(bf3::host::ServerRules &r_rules) const;
 	void tdm_server_config(bf3::host::GameServerConfig &r_config);

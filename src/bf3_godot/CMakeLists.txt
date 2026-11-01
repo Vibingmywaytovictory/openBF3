@@ -44,6 +44,8 @@ target_sources(bf3_godot PRIVATE
     src/fp_camera.h
     src/input_mapper.cpp
     src/input_mapper.h
+    src/match_host.cpp
+    src/match_host.h
     src/native_loading.cpp
     src/native_loading.h
 )

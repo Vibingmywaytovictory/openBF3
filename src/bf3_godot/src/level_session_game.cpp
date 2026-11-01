@@ -1508,7 +1508,7 @@ const sim::CollisionWorld *Bf3LevelSession::collision_world() const {
 }
 
 Bf3UiAssets *Bf3LevelSession::ui_assets() const {
-	return game_ ? game_->ui_assets : nullptr;
+	return game_ ? Bf3UiAssets::current() : nullptr;
 }
 
 }

@@ -55,6 +55,7 @@ struct ClientSession::Impl {
 	std::condition_variable attach_done;
 	std::atomic<bool> attach_requested{ false };
 	std::shared_ptr<const SharedLevel> attach_pending;
+	std::optional<ClientLevelConfig> attach_config;
 	std::optional<core::Status> attach_result;
 
 	void serve_attach(core::Status p_refusal) {
@@ -62,6 +63,10 @@ struct ClientSession::Impl {
 		if (!p_refusal.ok()) {
 			attach_result = std::move(p_refusal);
 		} else if (attach_pending != nullptr) {
+			if (attach_config) {
+				loop.configure_level(*attach_config);
+				attach_config.reset();
+			}
 			attach_result = loop.attach_level(std::move(attach_pending));
 		} else {
 			attach_result = loop.detach_level();
@@ -157,6 +162,15 @@ core::Status ClientSession::start(const ClientSessionConfig &p_config, std::shar
 	}
 	m.launch(this, std::move(*transport));
 	return core::Status::success();
+}
+
+core::Status ClientSession::attach_level(
+		std::shared_ptr<const SharedLevel> p_level, const ClientLevelConfig &p_config) {
+	{
+		std::lock_guard lock(impl_->attach_mutex);
+		impl_->attach_config = p_config;
+	}
+	return attach_level(std::move(p_level));
 }
 
 core::Status ClientSession::attach_level(std::shared_ptr<const SharedLevel> p_level) {

@@ -1165,7 +1165,9 @@ target_include_directories(test_net_procs PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_co
 openbf3_proc_row(net.procs.connect test_net_procs LABEL timing TIMEOUT 300 ARGS --test-suite=net-procs-connect)
 openbf3_proc_row(net.procs.two_clients test_net_procs LABEL timing TIMEOUT 300 ARGS --test-suite=net-procs-two-clients)
 openbf3_proc_row(net.procs.rotation test_net_procs LABEL timing TIMEOUT 1800 ARGS --test-suite=net-procs-rotation)
-set_tests_properties(net.procs.connect net.procs.two_clients net.procs.rotation PROPERTIES RUN_SERIAL TRUE)
+openbf3_proc_row(net.procs.godot_connect test_net_procs LABEL timing TIMEOUT 900 ARGS --test-suite=net-procs-godot-connect)
+openbf3_proc_row(net.procs.follow test_net_procs LABEL timing TIMEOUT 1800 ARGS --test-suite=net-procs-follow)
+set_tests_properties(net.procs.connect net.procs.two_clients net.procs.rotation net.procs.godot_connect net.procs.follow PROPERTIES RUN_SERIAL TRUE)
 openbf3_cost(net.procs.connect 1 45)
 openbf3_cost(net.procs.two_clients 1 60)
 

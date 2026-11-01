@@ -97,6 +97,15 @@ struct ClientSessionConfig {
 	uint32_t peer_timeout_max_ms = 0;
 };
 
+struct ClientLevelConfig {
+	std::shared_ptr<const struct ClientGunplayInputs> gunplay;
+	bool send_kit_select = false;
+	net::KitSelect kit_select;
+	bool record_predicted = false;
+};
+
+inline constexpr std::string_view kAttachStale = "the server moved on";
+
 using present::PresentedSoldier;
 
 struct ClientStats {
@@ -279,6 +288,7 @@ public:
 	core::Status start(const ClientSessionConfig &p_config, std::shared_ptr<const SharedLevel> p_level,
 			std::unique_ptr<ClientTransport> p_transport);
 	core::Status attach_level(std::shared_ptr<const SharedLevel> p_level);
+	core::Status attach_level(std::shared_ptr<const SharedLevel> p_level, const ClientLevelConfig &p_config);
 	core::Status detach_level();
 	bool lobby_match(net::MatchInfo &r_match) const;
 	bool level_change(net::LevelChange &r_change) const;

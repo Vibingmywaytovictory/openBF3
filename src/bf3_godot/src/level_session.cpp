@@ -2,6 +2,7 @@
 
 #include "godot_cache.h"
 #include "godot_util.h"
+#include "match_host.h"
 
 #if OPENBF3_BUILD_CHECKS
 #include "m1_check.h"
@@ -121,9 +122,23 @@ void Bf3LevelSession::_bind_methods() {
 }
 
 void Bf3LevelSession::_notification(int p_what) {
-	if (p_what == NOTIFICATION_PREDELETE) {
+	if (p_what == NOTIFICATION_PREDELETE || (p_what == NOTIFICATION_EXIT_TREE && match_ != nullptr)) {
 		shutdown();
 	}
+}
+
+void Bf3LevelSession::assign_level(const MatchLevel &p_level) {
+	assigned_level_ = p_level.level;
+	assigned_mode_ = p_level.mode;
+	if (p_level.rules_known) {
+		assigned_rules_ = p_level.rules_flags;
+	}
+	level_index_ = p_level.index;
+}
+
+void Bf3LevelSession::shutdown_level() {
+	shutdown();
+	client_.reset();
 }
 
 void Bf3LevelSession::shutdown() {
@@ -145,7 +160,7 @@ void Bf3LevelSession::shutdown() {
 	if (extra_client_ != nullptr) {
 		extra_client_->stop();
 	}
-	if (client_ != nullptr) {
+	if (client_ != nullptr && match_ == nullptr) {
 		client_->stop();
 	}
 	if (server_ != nullptr) {
@@ -210,11 +225,21 @@ void Bf3LevelSession::parse_args() {
 	shot_delay_ = shot_delay.empty() ? 0.0 : std::clamp(std::atof(shot_delay.c_str()), 0.0, 600.0);
 	game_parse_args();
 	parse_connect();
+	if (level_assigned()) {
+		level_ = assigned_level_;
+		mode_ = assigned_mode_;
+	}
 	motor_tuning_source_ = has_user_arg("motor-tuning") ? user_arg_value("motor-tuning")
 														: std::string("res://config/motor_tuning.cfg");
 }
 
 void Bf3LevelSession::parse_connect() {
+	if (match_ != nullptr) {
+		bots_ = 0;
+		nav_overlay_ = false;
+		tdm_follow_server();
+		return;
+	}
 	if (!has_user_arg("connect")) {
 		return;
 	}
@@ -239,6 +264,12 @@ void Bf3LevelSession::parse_connect() {
 
 void Bf3LevelSession::_ready() {
 	if (Engine::get_singleton()->is_editor_hint()) {
+		return;
+	}
+	match_ = Bf3MatchHost::current();
+	if (match_ != nullptr && !level_assigned()) {
+		scene_ = false;
+		set_process(false);
 		return;
 	}
 	timings_.ready_us = now_us();
@@ -286,7 +317,7 @@ void Bf3LevelSession::_ready() {
 	mapper_.install_actions();
 	cameras_.attach(this);
 	if (!headless_) {
-		loading_.attach(this, level_, mode_, seed_);
+		loading_.attach(this, level_, mode_, seed_ + std::max(level_index_, 1u) - 1u);
 	}
 	build_hud();
 	if (scene_) {
@@ -525,6 +556,22 @@ host::ClientSessionConfig Bf3LevelSession::client_config(const std::string &p_ne
 
 bool Bf3LevelSession::start_session(std::string *r_error) {
 	progress_.begin(host::LoadStage::Connect, 1);
+	if (match_ != nullptr) {
+		while (client_ == nullptr && !stop_.load(std::memory_order_acquire)) {
+			client_ = match_->client();
+			if (client_ == nullptr) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(20));
+			}
+		}
+		if (client_ == nullptr) {
+			*r_error = "stopped before the match client connected";
+			return false;
+		}
+		progress_.advance(host::LoadStage::Connect);
+		progress_.end(host::LoadStage::Connect);
+		progress_.begin(host::LoadStage::Spawn, 1);
+		return true;
+	}
 	bf3::core::Result<bf3::net::NetSimConfig> ns = bf3::net::parse_netsim(netsim_);
 	if (!ns) {
 		*r_error = "--netsim=" + netsim_ + ": " + ns.error().message;
@@ -830,7 +877,18 @@ void Bf3LevelSession::attach_when_loaded() {
 		return;
 	}
 	attached_ = true;
-	if (const bf3::core::Status s = client_->attach_level(shared_level()); !s.ok()) {
+	host::ClientSessionConfig game;
+	game_client_config(game);
+	host::ClientLevelConfig level_config;
+	level_config.gunplay = game.gunplay;
+	level_config.send_kit_select = game.send_kit_select;
+	level_config.kit_select = game.kit_select;
+	level_config.record_predicted = game.record_predicted;
+	if (const bf3::core::Status s = client_->attach_level(shared_level(), level_config); !s.ok()) {
+		if (match_ != nullptr && s.error().message.find(host::kAttachStale) != std::string::npos) {
+			UtilityFunctions::print(to_godot("[level] " + s.error().message));
+			return;
+		}
 		std::lock_guard lock(loader_mutex_);
 		load_error_ = "client: " + s.error().message;
 		load_failed_.store(true, std::memory_order_release);
@@ -897,6 +955,9 @@ void Bf3LevelSession::try_done() {
 			cache_warmth_name(host::CacheWarmth(progress_.warmth.load())), mib(peak_working_set_bytes()));
 	UtilityFunctions::print(line);
 	UtilityFunctions::print(to_godot("[level] " + cache_summary()));
+	if (match_ != nullptr) {
+		match_->level_done(*this);
+	}
 	if (!bots_line_.empty()) {
 		UtilityFunctions::print(to_godot(bots_line_));
 	}
@@ -1049,7 +1110,7 @@ void Bf3LevelSession::_process(double p_delta) {
 		}
 	}
 #endif
-	if (quit_after_ > 0.0 && since_done_ >= quit_after_ && shots_done) {
+	if (quit_after_ > 0.0 && since_done_ >= quit_after_ && shots_done && (match_ == nullptr || match_->last_level())) {
 		finish(failed_ || shots_failed > 0 ? 1 : 0);
 	}
 }

@@ -488,6 +488,13 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 	}
 }
 
+void Bf3LevelSession::tdm_follow_server() {
+	if (!game_ || !game_->tdm || !assigned_rules_) {
+		return;
+	}
+	game_->tdm->options.deploy_screen = (*assigned_rules_ & bf3::net::rules_flags::kDeployScreen) != 0;
+}
+
 void Bf3LevelSession::tdm_load_options(host::SharedLoadOptions &r_options) {
 	const GameState &g = *game_;
 	if (g.tdm_preview.on) {

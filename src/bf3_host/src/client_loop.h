@@ -31,6 +31,7 @@ public:
 	core::Status init(const ClientSessionConfig &p_config, std::shared_ptr<const SharedLevel> p_level);
 	void configure(const ClientSessionConfig &p_config);
 	core::Status attach_level(std::shared_ptr<const SharedLevel> p_level);
+	void configure_level(const ClientLevelConfig &p_config);
 	core::Status detach_level();
 	bool lobby_match(net::MatchInfo &r_match) const;
 	bool level_change(net::LevelChange &r_change) const;

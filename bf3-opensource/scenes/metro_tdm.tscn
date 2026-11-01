@@ -2,6 +2,8 @@
 
 [node name="MetroTdm" type="Node3D"]
 
+[node name="Match" type="Bf3MatchHost" parent="."]
+
 [node name="Session" type="Bf3LevelSession" parent="."]
 metadata/openbf3_game = true
 metadata/openbf3_tdm = true

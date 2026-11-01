@@ -279,7 +279,7 @@ core::Status ClientLoop::attach_level(std::shared_ptr<const SharedLevel> p_level
 				!level_refusal(net::MatchInfo{ .level = lobby_change->level, .mode = lobby_change->mode },
 						p_level->level, p_level->mode)
 						.empty()) {
-			return core::make_error("ClientSession: the server moved on to " + lobby_change->level + " " +
+			return core::make_error("ClientSession: " + std::string(kAttachStale) + " to " + lobby_change->level + " " +
 					lobby_change->mode + ", " + p_level->level + " " + p_level->mode + " is stale");
 		}
 	}
@@ -297,6 +297,13 @@ core::Status ClientLoop::attach_level(std::shared_ptr<const SharedLevel> p_level
 		handle_datagram(h.datagram, h.at);
 	}
 	return core::Status::success();
+}
+
+void ClientLoop::configure_level(const ClientLevelConfig &p_config) {
+	config.gunplay = p_config.gunplay;
+	config.send_kit_select = p_config.send_kit_select;
+	config.kit_select = p_config.kit_select;
+	config.record_predicted = p_config.record_predicted;
 }
 
 core::Status ClientLoop::detach_level() {
