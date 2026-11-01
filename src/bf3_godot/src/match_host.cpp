@@ -458,11 +458,13 @@ void Bf3MatchHost::_process(double p_delta) {
 		watch_changes();
 		return;
 	}
+	bf3::net::LevelChange change;
+	const bool changed = c->level_change(change);
 	bf3::net::MatchInfo m;
 	if (!c->lobby_match(m)) {
 		return;
 	}
-	if (bf3::net::LevelChange change; c->level_change(change)) {
+	if (changed) {
 		handled_round_ = change.round_id;
 	}
 	MatchLevel level;
