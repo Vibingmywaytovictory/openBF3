@@ -1813,6 +1813,32 @@ TEST_SUITE("level_modes") {
 }
 
 TEST_SUITE("level_eor") {
+	TEST_CASE("level_eor: a camera cut on the join view, spawn, death camera, EOR take and EOR release") {
+		CameraCuts cuts;
+		const auto step = [&](bool p_join, bool p_alive, bool p_death, bool p_eor) {
+			return cuts.step(CameraCutState{ p_join, p_alive, p_death, p_eor });
+		};
+		CHECK(!step(false, false, false, false));
+		CHECK(step(true, false, false, false));
+		CHECK(!step(true, false, false, false));
+		CHECK(step(false, true, false, false));
+		CHECK(!step(false, true, false, false));
+		CHECK(step(false, false, true, false));
+		CHECK(!step(false, false, true, false));
+		CHECK(!step(false, false, false, false));
+		CHECK(step(false, true, false, false));
+		CHECK(step(false, true, false, true));
+		CHECK(!step(false, false, false, true));
+		CHECK(step(false, false, false, false));
+		CHECK(step(true, false, false, false));
+		CHECK(cuts.count(CameraCut::JoinView) == 2);
+		CHECK(cuts.count(CameraCut::Spawn) == 2);
+		CHECK(cuts.count(CameraCut::DeathCamera) == 1);
+		CHECK(cuts.count(CameraCut::EorTake) == 1);
+		CHECK(cuts.count(CameraCut::EorRelease) == 1);
+		CHECK(cuts.total() == 7);
+	}
+
 	TEST_CASE("level_eor: the showroom's ShowTopPlayers camera, SpotLight and LVE in every shipped TDM mode") {
 		const std::shared_ptr<Install> install = shared_install_or_skip();
 		if (!install) {

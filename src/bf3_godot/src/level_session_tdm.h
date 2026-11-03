@@ -6,6 +6,7 @@
 #include "tdm_flow.h"
 #include "ui_screen_records.h"
 
+#include "bf3/core/level/eor_camera.h"
 #include "bf3/core/ui/hud_squads.h"
 #include "bf3/core/ui/ui_graph.h"
 #include "bf3/host/client_session.h"
@@ -60,6 +61,7 @@ struct TdmState {
 	std::unique_ptr<EorCameraView, void (*)(EorCameraView *)> eor_camera{ nullptr, nullptr };
 	std::unique_ptr<EorFlash, void (*)(EorFlash *)> eor_flash{ nullptr, nullptr };
 	std::unique_ptr<EorShowroom, void (*)(EorShowroom *)> eor_showroom{ nullptr, nullptr };
+	bf3::core::level::CameraCuts camera_cuts;
 
 	uint8_t spawn_kit = 0;
 	std::array<std::array<bf3::host::LoadoutChoice, bf3::host::kKitCount>, bf3::host::kKitTeams> loadout_choices{};

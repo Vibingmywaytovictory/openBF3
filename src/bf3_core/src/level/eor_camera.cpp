@@ -159,4 +159,31 @@ Result<std::optional<EorCamera>> read_eor_camera(const EbxResolver &p_db, const 
 	return std::optional<EorCamera>();
 }
 
+bool CameraCuts::step(const CameraCutState &p_state) {
+	const bool alive = p_state.alive && !p_state.eor_camera;
+	bool cut = false;
+	const auto edge = [&](bool p_was, bool p_now, CameraCut p_kind) {
+		if (p_now && !p_was) {
+			++counts_[size_t(p_kind)];
+			cut = true;
+		}
+	};
+	edge(last_.join_view, p_state.join_view, CameraCut::JoinView);
+	edge(last_.alive, alive, CameraCut::Spawn);
+	edge(last_.death_camera, p_state.death_camera, CameraCut::DeathCamera);
+	edge(last_.eor_camera, p_state.eor_camera, CameraCut::EorTake);
+	edge(!last_.eor_camera, !p_state.eor_camera, CameraCut::EorRelease);
+	last_ = p_state;
+	last_.alive = alive;
+	return cut;
+}
+
+uint64_t CameraCuts::total() const {
+	uint64_t n = 0;
+	for (const uint64_t c : counts_) {
+		n += c;
+	}
+	return n;
+}
+
 }

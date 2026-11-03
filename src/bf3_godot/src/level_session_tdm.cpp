@@ -1169,7 +1169,6 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 				const Basis b = Basis(Vector3(0, 1, 0), yaw + float(sim::kPi)) * Basis(Vector3(1, 0, 0), -0.25f);
 				p_camera->set_global_transform(Transform3D(b, Vector3(sp.position[0], sp.position[1] + 3.0f, sp.position[2])));
 				m.join_view_placed = true;
-				look_.cut();
 			}
 		}
 	}
@@ -1205,6 +1204,11 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			}
 			m.eor_showroom->frame(this, *plan_, upload_, eor, light_on);
 		}
+	}
+	if (m.camera_cuts.step(bf3::core::level::CameraCutState{ m.join_view_placed, r_game.alive,
+				m.death_camera != nullptr && m.death_camera->active(),
+				m.eor_camera != nullptr && m.eor_camera->active() })) {
+		look_.cut();
 	}
 	m.ms_death_camera = ms_since(t0);
 

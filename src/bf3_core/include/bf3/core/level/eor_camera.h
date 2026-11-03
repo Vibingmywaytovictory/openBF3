@@ -5,6 +5,7 @@
 #include "bf3/core/level/world.h"
 #include "bf3/core/result.h"
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -45,5 +46,32 @@ struct EorCamera {
 };
 
 Result<std::optional<EorCamera>> read_eor_camera(const EbxResolver &p_db, const World &p_world);
+
+enum class CameraCut : uint8_t {
+	JoinView,
+	Spawn,
+	DeathCamera,
+	EorTake,
+	EorRelease,
+};
+inline constexpr size_t kCameraCutKinds = 5;
+
+struct CameraCutState {
+	bool join_view = false;
+	bool alive = false;
+	bool death_camera = false;
+	bool eor_camera = false;
+};
+
+class CameraCuts {
+public:
+	bool step(const CameraCutState &p_state);
+	uint64_t count(CameraCut p_cut) const { return counts_[size_t(p_cut)]; }
+	uint64_t total() const;
+
+private:
+	CameraCutState last_;
+	std::array<uint64_t, kCameraCutKinds> counts_{};
+};
 
 }
