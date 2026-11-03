@@ -1,5 +1,6 @@
 #include "audio_commands.h"
 
+#include "bf3/core/audio/impulse_response.h"
 #include "bf3/core/audio/sound_stream.h"
 #include "bf3/core/audio/sound_wave.h"
 #include "bf3/core/ebx_db.h"
@@ -446,6 +447,42 @@ int cmd_audio_areas(
 }
 }
 
+int cmd_audio_irs(
+		const InstallReader &p_reader, std::shared_ptr<Install> p_install, const std::vector<std::string> &p_args) {
+	if (p_args.empty()) {
+		std::fprintf(stderr, "audio irs <sb-spec>\n");
+		return 2;
+	}
+	const InstallSnapshot before = p_reader.snapshot();
+	Result<std::unique_ptr<EbxLibrary>> lib = EbxLibrary::open(p_install, expand_superbundles(*p_install, p_args[0]));
+	if (!lib) {
+		std::fprintf(stderr, "audio irs: %s\n", lib.error().message.c_str());
+		return 1;
+	}
+	(void)(*lib)->load_all();
+	const std::vector<au::LibraryImpulse> irs = au::read_library_impulses(**lib);
+	size_t failed = 0;
+	for (const au::LibraryImpulse &e : irs) {
+		if (!e.ir) {
+			++failed;
+			std::printf("ir\t%s\terror=%s\n", e.name.c_str(), e.ir.error().message.c_str());
+			continue;
+		}
+		float peak = 0.0f;
+		double energy = 0.0;
+		for (const float x : e.ir->samples) {
+			peak = std::max(peak, std::fabs(x));
+			energy += double(x) * double(x);
+		}
+		std::printf("ir\t%s\tchannels=%u\trate=%u\tframes=%u\tblock=%u\tbins=%u\tbytes=%zu\tpeak=%.6f\tenergy=%.6f\n",
+				e.name.c_str(), e.ir->channels, e.ir->rate, e.ir->frames, e.ir->header.block, e.ir->header.bins,
+				e.ir->header.chunk_bytes(), peak, energy);
+	}
+	std::printf("audio irs %s: irs=%zu failed=%zu\n", p_args[0].c_str(), irs.size(), failed);
+	const bool clean = print_install_unchanged(p_reader, before);
+	return failed == 0 && clean ? 0 : 1;
+}
+
 const char *audio_usage() {
 	return "  audio waves <LEVEL> <MODE> [--decode] [--bench N]\n"
 		   "  audio loc <lang> [--decode]\n"
@@ -454,7 +491,8 @@ const char *audio_usage() {
 		   "  audio check [<LEVEL> <MODE>] [--g7] [--out-dir <dir>]\n"
 		   "  audio bank <LEVEL> <MODE> [--loads N]\n"
 		   "  audio wave <LEVEL> <MODE> <wave partition> [--envelope]\n"
-		   "  audio areas <LEVEL> <MODE> [--at x,y,z]... [--list]\n";
+		   "  audio areas <LEVEL> <MODE> [--at x,y,z]... [--list]\n"
+		   "  audio irs <sb-spec>\n";
 }
 
 int cmd_audio(const InstallReader &p_reader, std::shared_ptr<Install> p_install, const std::vector<std::string> &p_args) {
@@ -486,6 +524,9 @@ int cmd_audio(const InstallReader &p_reader, std::shared_ptr<Install> p_install,
 	}
 	if (p_args[0] == "areas") {
 		return cmd_audio_areas(p_reader, p_install, rest);
+	}
+	if (p_args[0] == "irs") {
+		return cmd_audio_irs(p_reader, p_install, rest);
 	}
 	std::fprintf(stderr, "%s", audio_usage());
 	return 2;

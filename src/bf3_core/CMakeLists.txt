@@ -450,3 +450,8 @@ target_sources(bf3_core PRIVATE
 target_sources(bf3_core PRIVATE
     include/bf3/core/ui/debug_screen.h
 )
+
+target_sources(bf3_core PRIVATE
+    include/bf3/core/audio/impulse_response.h
+    src/audio/impulse_response.cpp
+)

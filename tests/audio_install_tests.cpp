@@ -3,6 +3,7 @@
 #include "bf3/audio/audio_load.h"
 #include "bf3/audio/patch_instance.h"
 #include "bf3/client_audio/area_wave_observer.h"
+#include "bf3/core/audio/impulse_response.h"
 #include "bf3/core/audio/mixer_asset.h"
 #include "bf3/core/audio/sound_ports.h"
 #include "bf3/core/audio/sound_program.h"
@@ -881,6 +882,11 @@ constexpr const char *kAreaTypeMixer = "sound/mixers/areatype_mixer";
 constexpr float kOpenFieldFloor = 0.7f;
 constexpr std::array<float, 2> kListenerLifts{ 0.3f, 1.8f };
 
+std::string name_tail(std::string_view p_name) {
+	const size_t slash = p_name.rfind('/');
+	return std::string(slash == std::string_view::npos ? p_name : p_name.substr(slash + 1));
+}
+
 struct AreaWeight {
 	uint32_t input;
 	const char *name;
@@ -1192,5 +1198,148 @@ TEST_SUITE("audio-areas") {
 		CHECK(a.proximity(Vec3{ 5, -2, 5 }, 1.0f) == doctest::Approx(0.5f));
 		CHECK(a.proximity(Vec3{ 12, 4, 5 }, 1.0f) == doctest::Approx(0.5f));
 		CHECK(a.proximity(Vec3{ 5, 4, 5 }, 0.5f) == 0.5f);
+	}
+}
+
+namespace {
+
+struct CensusImpulse {
+	const char *name;
+	uint32_t frames;
+	size_t bytes;
+	float peak;
+	double energy[2];
+};
+
+constexpr std::array<CensusImpulse, 17> kCensusImpulses{ {
+		{ "ir_indoor_big_room", 30327, 108528, 0.592708f, { 10.715367, 9.878445 } },
+		{ "ir_indoor_factory_hall_02", 58080, 206160, 0.791582f, { 12.729421, 12.698075 } },
+		{ "ir_indoor_factory_hall_03", 95680, 339952, 0.652060f, { 49.144493, 41.763697 } },
+		{ "ir_indoor_factory_hall_04", 54132, 191696, 0.754006f, { 11.415291, 11.186657 } },
+		{ "ir_indoor_garage", 47153, 170000, 0.480332f, { 8.303995, 9.195576 } },
+		{ "ir_indoor_small_room", 17887, 65136, 0.753904f, { 12.495633, 13.332268 } },
+		{ "ir_indoor_xp_large_room_ 03", 47220, 170000, 0.744115f, { 282.969618, 260.526656 } },
+		{ "ir_indoor_xp_medium_room_ 01", 40983, 148304, 0.916846f, { 221.993944, 220.263110 } },
+		{ "ir_indoor_xp_medium_room_ 04", 28116, 101296, 0.878538f, { 29.430207, 37.778472 } },
+		{ "ir_indoor_xp_small_room_ 03", 24246, 86832, 0.792024f, { 109.893714, 116.514422 } },
+		{ "ir_indoor_xp_small_room_ 04", 25542, 90448, 0.818196f, { 24.550282, 24.399287 } },
+		{ "ir_outdoor_alley", 24508, 86832, 0.163687f, { 1.124867, 1.211780 } },
+		{ "ir_outdoor_downtown", 33172, 119376, 0.231001f, { 1.776709, 2.270255 } },
+		{ "ir_outdoor_forest_big", 47355, 170000, 0.372319f, { 1.666720, 2.438262 } },
+		{ "ir_outdoor_forest_small", 33172, 119376, 0.231001f, { 1.776709, 2.270255 } },
+		{ "ir_outdoor_openfield", 24780, 90448, 0.172657f, { 0.321390, 0.582716 } },
+		{ "ir_outdoor_townsquare", 30485, 108528, 0.286086f, { 4.280326, 3.073948 } },
+} };
+
+struct IrFixture {
+	InstallReader reader;
+	InstallSnapshot before;
+	std::shared_ptr<Install> install;
+	std::unique_ptr<EbxLibrary> all_mp;
+	std::vector<LibraryImpulse> census;
+};
+
+IrFixture *ir_fixture() {
+	static std::unique_ptr<IrFixture> f;
+	static bool tried = false;
+	if (!tried) {
+		tried = true;
+		auto made = std::make_unique<IrFixture>();
+		if (made->reader.locate({})) {
+			made->before = made->reader.snapshot();
+			Result<std::shared_ptr<Install>> install = Install::open(made->reader);
+			REQUIRE_MESSAGE(install.ok(), (install.ok() ? std::string() : install.error().message));
+			made->install = *install;
+			Result<std::unique_ptr<EbxLibrary>> lib =
+					EbxLibrary::open(made->install, expand_superbundles(*made->install, "@all-mp"));
+			REQUIRE_MESSAGE(lib.ok(), (lib.ok() ? std::string() : lib.error().message));
+			made->all_mp = std::move(*lib);
+			(void)made->all_mp->load_all();
+			made->census = read_library_impulses(*made->all_mp);
+			f = std::move(made);
+		}
+	}
+	if (f == nullptr) {
+		bf3::test::skip_install_case("no BF3 install found");
+	}
+	return f.get();
+}
+
+const ImpulseResponse *census_impulse(const IrFixture &p_f, std::string_view p_tail) {
+	for (const LibraryImpulse &e : p_f.census) {
+		if (name_tail(e.name) == p_tail && e.ir) {
+			return &*e.ir;
+		}
+	}
+	return nullptr;
+}
+
+}
+
+TEST_SUITE("audio-ir") {
+	TEST_CASE("the 17 census impulse responses decode to the header's frames, 48 kHz stereo, peaks and energies held") {
+		IrFixture *f = ir_fixture();
+		REQUIRE(f->census.size() == kCensusImpulses.size());
+		for (const LibraryImpulse &e : f->census) {
+			REQUIRE_MESSAGE(e.ir.ok(), e.name, ": ", (e.ir.ok() ? std::string() : e.ir.error().message));
+		}
+		for (const CensusImpulse &want : kCensusImpulses) {
+			const ImpulseResponse *ir = census_impulse(*f, want.name);
+			REQUIRE_MESSAGE(ir != nullptr, want.name);
+			INFO(want.name);
+			CHECK(ir->header.version == 1);
+			CHECK(ir->channels == 2);
+			CHECK(ir->rate == 48000);
+			CHECK(ir->header.block == 1024);
+			CHECK(ir->header.bins == 448);
+			CHECK(ir->header.bin_values == 896);
+			CHECK(ir->frames == want.frames);
+			CHECK(ir->header.frames == want.frames);
+			CHECK(ir->header.chunk_bytes() == want.bytes);
+			CHECK(want.bytes == kIrfHeaderBytes + size_t((want.frames + 1023) / 1024) * 3616);
+			CHECK(ir->samples.size() == size_t(2) * want.frames);
+			float peak = 0.0f;
+			for (uint32_t c = 0; c < 2; ++c) {
+				double energy = 0.0;
+				for (const float x : ir->channel(c)) {
+					peak = std::max(peak, std::fabs(x));
+					energy += double(x) * double(x);
+				}
+				CHECK(std::fabs(energy - want.energy[c]) < 1e-4 * std::max(1.0, want.energy[c]));
+			}
+			CHECK(std::fabs(peak - want.peak) < 1e-5f);
+		}
+		check_unchanged_snapshot(f->before, f->reader);
+	}
+
+	TEST_CASE("every impulse response on Metro and Seine TDM decodes and equals its census decode") {
+		IrFixture *f = ir_fixture();
+		for (const char *level_name : { "MP_Subway", "MP_011" }) {
+			INFO(level_name);
+			Result<std::unique_ptr<level::LoadedLevel>> lvl =
+					level::load_level(f->install, level_name, "TeamDeathMatch0");
+			REQUIRE_MESSAGE(lvl.ok(), (lvl.ok() ? std::string() : lvl.error().message));
+			const EbxDb &db = (*lvl)->db();
+			size_t count = 0;
+			for (size_t i = 0; i < db.size(); ++i) {
+				const EbxInstance primary = db.partition_at(i).primary();
+				if (!primary.is_a("ImpulseResponseAsset")) {
+					continue;
+				}
+				++count;
+				INFO(db.name_at(i));
+				Result<ImpulseResponse> ir = read_impulse_response(primary, (*lvl)->mount());
+				REQUIRE_MESSAGE(ir.ok(), (ir.ok() ? std::string() : ir.error().message));
+				CHECK(ir->frames == ir->header.frames);
+				CHECK(ir->samples.size() == size_t(ir->channels) * ir->header.frames);
+				const ImpulseResponse *census = census_impulse(*f, name_tail(db.name_at(i)));
+				REQUIRE(census != nullptr);
+				CHECK(census->frames == ir->frames);
+				CHECK(census->samples == ir->samples);
+			}
+			MESSAGE(std::string(level_name), ": ", count, " impulse responses");
+			CHECK(count > 0);
+		}
+		check_unchanged_snapshot(f->before, f->reader);
 	}
 }
