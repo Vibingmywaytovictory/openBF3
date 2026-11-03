@@ -200,6 +200,7 @@ struct ClientStats {
 	uint32_t prepare_sent = 0;
 	NetTraffic traffic_in;
 	NetTraffic traffic_out;
+	OwnHitCounts own_hits;
 };
 static_assert(std::is_trivially_copyable_v<ClientStats>);
 

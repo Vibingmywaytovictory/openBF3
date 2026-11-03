@@ -237,3 +237,8 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/net_stats.h
     src/net_stats.cpp
 )
+
+target_sources(bf3_host PRIVATE
+    include/bf3/host/own_hits.h
+    src/own_hits.cpp
+)

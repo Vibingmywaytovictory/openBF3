@@ -5,11 +5,23 @@ namespace bf3::host {
 void ClientEvents::push(const PresentEvent &p_event) {
 	PresentEvent e = p_event;
 	present_own_shot_id(shot_ids_, own_slot_, e);
+	count_own_hit(e);
 	if (e.kind == PresentKind::Spawn && e.slot == own_slot_ && e.id != 0 && revived_lives_[e.id % revived_lives_.size()] == e.id) {
 		e.flags |= present_flags::kRevived;
 	}
 	if (!ring_.push(e)) {
 		++overflow_;
+	}
+}
+
+void ClientEvents::count_own_hit(const PresentEvent &p_event) {
+	if (p_event.slot != own_slot_) {
+		return;
+	}
+	if (p_event.kind == PresentKind::SoldierContact && p_event.timeline == PresentTimeline::Predicted) {
+		own_hits_.predicted(p_event.id, p_event.aux, uint8_t(p_event.value));
+	} else if (p_event.kind == PresentKind::Hit && (p_event.flags & present_flags::kOwnShooter) != 0) {
+		own_hits_.confirmed(p_event.id, p_event.aux, uint8_t(p_event.material));
 	}
 }
 

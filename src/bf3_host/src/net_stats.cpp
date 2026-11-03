@@ -169,6 +169,7 @@ bool NetStatsMeter::sample(const NetSample &p_sample, uint64_t p_now_ns, NetStat
 	s.snapshot_loss = received + lost > 0 ? float(double(lost) / double(received + lost)) : 0.0f;
 	s.ghosts_in_scope = p_sample.ghosts_in_scope;
 	s.server_tick = p_sample.server_tick;
+	s.own_hits = p_sample.own_hits;
 	r_stats = s;
 	base_ns_ = p_now_ns;
 	base_in_ = *p_sample.in;

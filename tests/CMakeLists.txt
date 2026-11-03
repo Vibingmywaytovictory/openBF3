@@ -621,12 +621,13 @@ set_tests_properties(sim.lagcomp.unit anim.server_pose PROPERTIES TIMEOUT 600)
 
 openbf3_test(test_gunplay_client test_main.cpp host_gunplay_client_tests.cpp gunplay_fixture.h weapons_support.h test_support.h)
 target_link_libraries(test_gunplay_client PRIVATE bf3_host bf3_sim_harness)
+target_include_directories(test_gunplay_client PRIVATE ${PROJECT_SOURCE_DIR}/src/bf3_host/src)
 target_compile_definitions(test_gunplay_client PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""
     "OPENBF3_MECHANICS_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/weapon_mechanics.cfg\"")
 set(_openbf3_cl_pure *PresentationEvents*keeps*order* *present_weapon*from*two*predicted* *weapon*lane*replays*catch_up*
-    *ClientProjectiles*own*world*rewound* *view*sample*present_view_quality*)
+    *ClientProjectiles*own*world*rewound* *view*sample*present_view_quality* *own*hit*ledger*)
 openbf3_case_row(NAME host.gunplay.client.unit.pure EXE test_gunplay_client SUITE host-gunplay-client-unit
-    GROUP host-gunplay-client-unit COUNT 5 CASES ${_openbf3_cl_pure})
+    GROUP host-gunplay-client-unit COUNT 6 CASES ${_openbf3_cl_pure})
 openbf3_case_row(NAME host.gunplay.client.unit EXE test_gunplay_client SUITE host-gunplay-client-unit
     GROUP host-gunplay-client-unit COUNT 7 EXCLUDE ${_openbf3_cl_pure})
 openbf3_split_cover(NAME host.gunplay.client.unit.split_cover EXE test_gunplay_client SUITE host-gunplay-client-unit

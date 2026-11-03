@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/host/own_hits.h"
 #include "bf3/net/enet_host.h"
 #include "bf3/sim/sim_types.h"
 
@@ -58,6 +59,7 @@ struct NetStats {
 	float snapshot_loss = 0.0f;
 	uint32_t ghosts_in_scope = 0;
 	sim::Tick server_tick = 0;
+	OwnHitCounts own_hits;
 };
 static_assert(std::is_trivially_copyable_v<NetStats>);
 
@@ -69,6 +71,7 @@ struct NetSample {
 	double rtt_ms = 0.0;
 	uint32_t ghosts_in_scope = 0;
 	sim::Tick server_tick = 0;
+	OwnHitCounts own_hits{};
 };
 
 NetRates net_rates(const NetTraffic &p_from, const NetTraffic &p_to, double p_seconds);

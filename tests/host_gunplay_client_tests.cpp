@@ -10,6 +10,8 @@
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/lag_comp.h"
+#include "bf3/host/net_stats.h"
+#include "bf3/host/own_hits.h"
 #include "bf3/host/presentation_events.h"
 #include "bf3/host/presentation_weapon.h"
 #include "bf3/host/server_host.h"
@@ -25,6 +27,7 @@
 #include "bf3/sim/weapons/surface_materials.h"
 #include "bf3/sim/weapons/weapon_rng.h"
 #include "bf3/sim/weapons/weapon_rules.h"
+#include "client_events.h"
 #include "test_support.h"
 
 #include <algorithm>
@@ -1462,6 +1465,82 @@ TEST_SUITE("host-gunplay-client-unit") {
 		CHECK(extra == 1);
 		CHECK(same_value(out1[0].position, out[0].position));
 		CHECK(out1[0].target_pose == out[0].target_pose);
+	}
+
+	TEST_CASE("host.gunplay.client: the own hit ledger counts each predicted shot once, confirms it by the server's "
+			  "Hit on the same victim, compares the zone, and follows the shot ids across a reset") {
+		const uint8_t own = 3;
+		host::ClientEvents events(own);
+		auto push = [&](host::PresentKind p_kind, uint8_t p_slot, uint32_t p_id, uint8_t p_target, sw::HitZone p_zone,
+							host::PresentTimeline p_timeline, uint8_t p_flags) {
+			host::PresentEvent e;
+			e.kind = p_kind;
+			e.slot = p_slot;
+			e.id = p_id;
+			e.aux = p_target;
+			e.timeline = p_timeline;
+			e.flags = p_flags;
+			e.value = float(uint8_t(p_zone));
+			e.material = uint32_t(p_zone);
+			events.push(e);
+		};
+		const auto predicted = host::PresentTimeline::Predicted;
+		const auto immediate = host::PresentTimeline::Immediate;
+		const uint8_t by_own = host::present_flags::kOwnShooter;
+		using K = host::PresentKind;
+		for (uint32_t id : { 10u, 11u, 12u, 13u }) {
+			push(K::OwnShot, own, id, 0, sw::HitZone::Body, predicted, 0);
+		}
+		push(K::SoldierContact, own, 10, 5, sw::HitZone::Chest, predicted, 0);
+		push(K::SoldierContact, own, 10, 5, sw::HitZone::Head, predicted, 0);
+		push(K::SoldierContact, own, 11, 5, sw::HitZone::Head, predicted, 0);
+		push(K::SoldierContact, own, 12, 6, sw::HitZone::Legs, predicted, 0);
+		push(K::SoldierContact, own, 13, 5, sw::HitZone::Chest, host::PresentTimeline::Render, 0);
+		push(K::SoldierContact, 4, 13, 5, sw::HitZone::Chest, predicted, 0);
+		push(K::Hit, own, 10, 5, sw::HitZone::Chest, immediate, by_own);
+		push(K::Hit, own, 10, 5, sw::HitZone::Legs, immediate, by_own);
+		push(K::Hit, own, 11, 5, sw::HitZone::Chest, immediate, by_own);
+		push(K::Hit, own, 12, 7, sw::HitZone::Legs, immediate, by_own);
+		push(K::Hit, own, 13, 5, sw::HitZone::Chest, immediate, by_own);
+		push(K::Hit, own, 13, 5, sw::HitZone::Chest, immediate, by_own);
+		push(K::Hit, 4, 12, 6, sw::HitZone::Legs, host::PresentTimeline::Render, 0);
+		host::ClientStats s;
+		events.stats(s);
+		CHECK(s.own_hits.predicted == 3);
+		CHECK(s.own_hits.confirmed == 2);
+		CHECK(s.own_hits.same_zone == 1);
+		CHECK(s.own_hits.unpredicted == 2);
+
+		push(K::OwnShot, own, 10, 0, sw::HitZone::Body, predicted, 0);
+		push(K::SoldierContact, own, 10, 5, sw::HitZone::Head, predicted, 0);
+		push(K::Hit, own, 10, 5, sw::HitZone::Head, immediate, by_own);
+		events.stats(s);
+		CHECK(events.shot_id_resets() == 1);
+		CHECK(s.own_hits.predicted == 4);
+		CHECK(s.own_hits.confirmed == 3);
+		CHECK(s.own_hits.same_zone == 2);
+		CHECK(s.own_hits.unpredicted == 2);
+
+		host::OwnHitLedger ledger;
+		ledger.predicted(5, 1, 2);
+		ledger.predicted(5 + host::OwnHitLedger::kShots, 1, 2);
+		ledger.confirmed(5 + host::OwnHitLedger::kShots, 1, 2);
+		ledger.confirmed(5, 1, 2);
+		CHECK(ledger.counts().predicted == 2);
+		CHECK(ledger.counts().confirmed == 1);
+		CHECK(ledger.counts().same_zone == 1);
+		CHECK(ledger.counts().unpredicted == 1);
+
+		host::NetTraffic in, out;
+		host::NetStatsMeter meter;
+		host::NetSample sample{ &in, &out, 0, 0, 0.0, 0, 0, s.own_hits };
+		host::NetStats net;
+		CHECK_FALSE(meter.sample(sample, 1'000'000'000ull, net));
+		REQUIRE(meter.sample(sample, 2'000'000'000ull, net));
+		CHECK(net.own_hits.predicted == 4);
+		CHECK(net.own_hits.confirmed == 3);
+		CHECK(net.own_hits.same_zone == 2);
+		CHECK(net.own_hits.unpredicted == 2);
 	}
 
 	TEST_CASE("host.gunplay.client: E6: a client whose weapon table differs answers MatchInfo with a Mismatch, is "

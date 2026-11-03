@@ -184,7 +184,7 @@ void ClientLoop::publish(uint64_t p_now, const sim::PredictionEntry *p_made, con
 	collect_stats();
 	f.stats = stats_;
 	net_meter.sample({ &stats_.traffic_in, &stats_.traffic_out, stats_.snapshots_received, stats_.snapshots_lost,
-							 stats_.rtt_ms, f.other_count, stats_.last_server_tick },
+							 stats_.rtt_ms, f.other_count, stats_.last_server_tick, stats_.own_hits },
 			p_now, net_stats);
 	f.net = net_stats;
 	std::lock_guard lock(frame_mutex);

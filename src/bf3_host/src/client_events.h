@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/host/client_session.h"
+#include "bf3/host/own_hits.h"
 #include "bf3/net/protocol.h"
 
 #include <array>
@@ -24,15 +25,21 @@ public:
 	void spawned(const net::Spawned &p_spawned);
 
 	uint64_t shot_id_resets() const { return shot_ids_.resets(); }
-	void stats(ClientStats &r_stats) const { r_stats.events_overflow = overflow_; }
+	void stats(ClientStats &r_stats) const {
+		r_stats.events_overflow = overflow_;
+		r_stats.own_hits = own_hits_.counts();
+	}
 
 private:
+	void count_own_hit(const PresentEvent &p_event);
+
 	const uint8_t &own_slot_;
 	PresentationEvents ring_;
 	PresentationEvents own_;
 	OwnShotIds shot_ids_;
 	std::array<uint32_t, 8> revived_lives_{};
 	uint64_t overflow_ = 0;
+	OwnHitLedger own_hits_;
 };
 
 }

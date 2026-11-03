@@ -2952,3 +2952,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * audio.ir.install holds that each of the 1374 Reverb-bus sends in the 834 @all-mp patches is an output's ReverbSend; audio.ir.install.
 * The DivisibleLoopPlayer plays its wave's variations as crossfaded pieces on alternating slots (FreezeSegment, StartAtRandomPosition, Stop), so the area-bed patch compiles; sound-patch converter version 2; audio.patch.unit.
 * Each SoundArea's Sound plays as a looping area bed at the area's proximity from the listener's areas alone (AreaBeds, SoundPatchConfigurationAsset reader, AreaDef.sound); core.audio.areas.
+* The client counts its own predicted hits by own shot index and the server Hits that confirm them, in the same zone or unpredicted (`OwnHitLedger` in `ClientEvents`, `ClientStats::own_hits`, `NetStats::own_hits`); host.gunplay.client.unit.pure.
