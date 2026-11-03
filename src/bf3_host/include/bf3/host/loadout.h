@@ -124,6 +124,9 @@ LoadoutAccessorySet loadout_accessory_set(
 std::array<size_t, kLoadoutAccessories> loadout_accessory_options(
 		const LoadoutItem &p_item, const std::array<uint32_t, kLoadoutAccessories> &p_accessories);
 
+std::array<uint32_t, kLoadoutAccessories> loadout_accessories_applied(
+		const LoadoutItem &p_item, const std::array<uint32_t, kLoadoutAccessories> &p_accessories);
+
 uint8_t loadout_variant(const LoadoutItem &p_item, const std::array<uint32_t, kLoadoutAccessories> &p_accessories);
 
 uint8_t loadout_gear_variant(const LoadoutCatalog &p_catalog, uint16_t p_def,

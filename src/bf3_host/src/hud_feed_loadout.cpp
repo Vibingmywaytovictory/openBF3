@@ -124,11 +124,13 @@ void feed_loadout(Frame &r_frame) {
 	const LoadoutItem *weapon = selected->find(kLoadoutAccessoryWeapon, current_of(LoadoutKitItem::Primary));
 	const std::array<ui::HudItem *, kLoadoutAccessories> accessories{ &c.weapon_accessory1, &c.weapon_accessory2,
 		&c.weapon_accessory3, &c.weapon_accessory4 };
+	const std::array<uint32_t, kLoadoutAccessories> applied = weapon != nullptr
+			? loadout_accessories_applied(*weapon, choice.accessories)
+			: std::array<uint32_t, kLoadoutAccessories>{};
 	for (size_t a = 0; a < c.accessory_grid.size(); ++a) {
 		const std::span<const uint32_t> ids =
 				weapon != nullptr ? std::span<const uint32_t>(weapon->accessories[a]) : std::span<const uint32_t>();
-		const uint32_t chosen = choice.accessories[a] != 0 ? choice.accessories[a]
-														   : (weapon != nullptr ? weapon->default_accessories[a] : 0u);
+		const uint32_t chosen = applied[a];
 		*accessories[a] = item_or_empty(st, chosen);
 		fill_list(st, ids, chosen, c.accessory_grid[a], c.accessory_selected[a], r_frame.state.rows_dropped);
 	}

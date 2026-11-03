@@ -1138,6 +1138,7 @@ TEST_CASE("the loadout screens: kit and customization from the catalog and the o
 		return i;
 	};
 	assault.slots[0] = { item(1000, 0, { 201, 202 }), item(1001, 1, { 203 }) };
+	assault.slots[0][0].accessory_unlocks[0] = { "weapons/common/nooptics", "weapons/u_1000/u_1000_rds" };
 	assault.slots[0][0].default_accessories[0] = 202;
 	assault.slots[1] = { item(1002, 2) };
 	assault.slots[2] = { item(401, sw::kNoWeapon), item(402, sw::kNoWeapon) };
@@ -1194,8 +1195,8 @@ TEST_CASE("the loadout screens: kit and customization from the catalog and the o
 	CHECK(c.kit_grid_selected[4] == -1);
 	CHECK(c.accessory_grid[0].count == 2);
 	CHECK(c.accessory_grid[0].items[1].item_id == 202);
-	CHECK(c.accessory_selected[0] == 1);
-	CHECK(c.weapon_accessory1.item_id == 202);
+	CHECK(c.accessory_selected[0] == 0);
+	CHECK(c.weapon_accessory1.item_id == 201);
 	CHECK(c.weapon_accessory2.item_id == 0);
 	CHECK(c.accessory_grid[1].count == 0);
 	CHECK(state.bad_inputs == 0);

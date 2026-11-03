@@ -9,6 +9,7 @@
 #include "bf3/host/squads.h"
 #include "bf3/net/protocol.h"
 
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -148,6 +149,26 @@ TEST_SUITE("host-gunplay-loadout") {
 		CHECK(unpicked.magazine == table.defs[m27->def].magazine_capacity);
 		CHECK(unpicked.magazine == 46);
 		CHECK(unpicked.variant == 0);
+		const std::array<uint32_t, host::kLoadoutAccessories> shown = host::loadout_accessories_applied(*m16, {});
+		CHECK(shown != m16->default_accessories);
+		size_t no_entries = 0;
+		for (size_t a = 0; a < host::kLoadoutAccessories; ++a) {
+			for (size_t i = 0; i < m16->accessories[a].size(); ++i) {
+				if (m16->accessories[a][i] == shown[a]) {
+					CHECK(m16->accessory_unlocks[a][i].starts_with("weapons/common/no"));
+					std::printf("M16A4 part %zu unpicked: %s\n", a, m16->accessory_unlocks[a][i].c_str());
+					++no_entries;
+				}
+			}
+		}
+		CHECK(no_entries == host::kLoadoutAccessories);
+		const std::array<uint32_t, host::kLoadoutAccessories> &picked = g->loadout(0).choice.accessories;
+		const std::array<uint32_t, host::kLoadoutAccessories> applied = host::loadout_accessories_applied(*m27, picked);
+		for (size_t a = 0; a < host::kLoadoutAccessories; ++a) {
+			if (picked[a] != 0) {
+				CHECK(applied[a] == picked[a]);
+			}
+		}
 		size_t unpicked_variants = 0;
 		for (const auto &team : gl.loadouts.kits) {
 			for (const host::LoadoutKit &k : team) {

@@ -117,6 +117,18 @@ std::array<size_t, kLoadoutAccessories> loadout_accessory_options(
 	return out;
 }
 
+std::array<uint32_t, kLoadoutAccessories> loadout_accessories_applied(
+		const LoadoutItem &p_item, const std::array<uint32_t, kLoadoutAccessories> &p_accessories) {
+	const std::array<size_t, kLoadoutAccessories> options = loadout_accessory_options(p_item, p_accessories);
+	std::array<uint32_t, kLoadoutAccessories> out{};
+	for (size_t a = 0; a < kLoadoutAccessories; ++a) {
+		if (options[a] != sim::weapons::kNoVariantOption) {
+			out[a] = p_item.accessories[a][options[a]];
+		}
+	}
+	return out;
+}
+
 LoadoutAccessorySet loadout_accessory_set(
 		const LoadoutItem &p_item, const std::array<uint32_t, kLoadoutAccessories> &p_accessories) {
 	LoadoutAccessorySet out;
