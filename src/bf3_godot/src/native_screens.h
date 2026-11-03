@@ -94,6 +94,7 @@ public:
 	void set_client(bf3::core::ui::HudClientState p_client);
 	void set_options(const bf3::core::ui::OptionsModel *p_options);
 	bf3::core::Status open_movie_screen(std::string_view p_movie, bf3::core::ui::HudRootData *p_data);
+	bf3::core::Status open_asset_screen(const bf3::core::ui::HudScreenAsset &p_asset);
 	bf3::core::Status open_popup(std::string_view p_partition, bf3::core::ui::HudPopup p_popup);
 	void set_widget_listener(bf3::core::ui::HudWidgetEventSink p_listener) { widget_listener_ = std::move(p_listener); }
 	bf3::core::ui::HudScreen *hud_screen(std::string_view p_partition);

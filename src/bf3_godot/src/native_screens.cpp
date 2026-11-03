@@ -227,6 +227,15 @@ bf3::core::Status Bf3UiScreens::open_movie_screen(std::string_view p_movie, ui::
 	return bf3::core::Status::success();
 }
 
+bf3::core::Status Bf3UiScreens::open_asset_screen(const ui::HudScreenAsset &p_asset) {
+	if (find(p_asset.partition) != nullptr) {
+		return bf3::core::Status::success();
+	}
+	BF3_TRY(open_entry(p_asset.partition, p_asset, nullptr));
+	find(p_asset.partition)->movie = true;
+	return bf3::core::Status::success();
+}
+
 bf3::core::Status Bf3UiScreens::open_popup(std::string_view p_partition, ui::HudPopup p_popup) {
 	auto popup = std::make_unique<ui::HudPopup>(std::move(p_popup));
 	client_.popup = popup.get();

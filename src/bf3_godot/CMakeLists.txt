@@ -330,3 +330,7 @@ target_sources(bf3_godot PRIVATE
     src/video_memory.h
 )
 target_link_libraries(bf3_godot PRIVATE dxgi)
+target_sources(bf3_godot PRIVATE
+    src/net_overlay.cpp
+    src/net_overlay.h
+)

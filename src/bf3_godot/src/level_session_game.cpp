@@ -1100,6 +1100,12 @@ void step_game_parts(Node3D &r_parent, GameState &r_game, const host::Presentati
 
 }
 
+void Bf3LevelSession::toggle_net_overlay() {
+	if (game_) {
+		game_->net_overlay.toggle();
+	}
+}
+
 bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 	if (!game_) {
 		return false;
@@ -1150,6 +1156,12 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 					" key binding inputs have no Godot key"));
 		}
 	}
+	if (!g.net_overlay.attached()) {
+		g.net_overlay.attach(this, has_user_arg("net-overlay"));
+	}
+	g.net_overlay.update(double(p_now_ns) * 1e-9, f.net, [&g]() {
+		return g.audio != nullptr ? std::optional<bf3::audio::SoundFateTotals>(g.audio->sound_fates()) : std::nullopt;
+	});
 	g.base_sensitivity = mapper_.base_sensitivity;
 	if (!g.catalog_cache) {
 		const std::filesystem::path cache_root = no_cache_ ? std::filesystem::path() : cache_root_;

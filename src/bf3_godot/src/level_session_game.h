@@ -10,6 +10,7 @@
 #include "m2a_check.h"
 #include "minimap_modes_check.h"
 #include "native_hud_moments.h"
+#include "net_overlay.h"
 #include "tdm_flow.h"
 
 #include "bf3/anim/viewmodel_anim.h"
@@ -251,6 +252,7 @@ struct Bf3LevelSession::Game : GameState {
 	std::atomic<bool> vm_done{ false };
 	bool vm_built = false;
 	bf3::render::LoadProgress vm_progress;
+	NetOverlay net_overlay;
 
 	std::thread crowd_loader;
 	std::string crowd_body_error;

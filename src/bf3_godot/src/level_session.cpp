@@ -988,6 +988,9 @@ void Bf3LevelSession::_unhandled_input(const Ref<InputEvent> &p_event) {
 		if (k->is_pressed() && !k->is_echo() && k->get_keycode() == KEY_F7 && nav_draw_.uploaded()) {
 			nav_draw_.set_visible(!nav_draw_.visible());
 		}
+		if (k->is_pressed() && !k->is_echo() && k->get_keycode() == KEY_F9) {
+			toggle_net_overlay();
+		}
 	}
 	if (const InputEventMouseButton *mb = Object::cast_to<InputEventMouseButton>(p_event.ptr())) {
 		if (mb->is_pressed() && mapper_.free_camera()) {

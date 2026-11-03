@@ -277,6 +277,7 @@ private:
 	void game_presented(double p_delta, uint64_t p_now_ns);
 	bool game_frame(double p_delta, uint64_t p_now_ns);
 	void game_shutdown();
+	void toggle_net_overlay();
 
 	void tdm_parse_args(std::string &r_error);
 	void tdm_follow_server();
