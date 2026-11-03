@@ -35,6 +35,13 @@ bool ClientMatch::datagram(net::MessageType p_type, const net::NetSim::Datagram 
 			++soldier_gears_;
 			return true;
 		}
+		case net::MessageType::SquadOrder: {
+			core::Result<net::SquadOrder> o = net::decode_squad_order(p_d.bytes);
+			if (!o || !apply_squad_order(orders_, *o)) {
+				++bad_tdm_datagrams_;
+			}
+			return true;
+		}
 		case net::MessageType::LogicEvents:
 		case net::MessageType::FullSync:
 		case net::MessageType::LogicDelta:
@@ -109,6 +116,7 @@ void ClientMatch::publish(PresentationFrame &r_frame, bool p_have_own, uint32_t 
 	r_frame.own_revive_until = dead_life ? revive_until_ : 0u;
 	r_frame.own_unspawned = unspawned_now_;
 	r_frame.gear = gear_;
+	r_frame.squad_orders = orders_;
 }
 
 void ClientMatch::stats(ClientStats &r_stats) const {

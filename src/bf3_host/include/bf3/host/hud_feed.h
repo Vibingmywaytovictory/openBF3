@@ -197,6 +197,10 @@ struct HudTdmFeedState {
 };
 static_assert(std::is_trivially_copyable_v<HudTdmFeedState>);
 
+std::optional<net::SquadRequest> squad_flow_request(std::span<const std::string> p_params,
+		std::span<const net::PlayerRow> p_players, uint8_t p_own_slot, std::optional<std::string_view> p_selected_squad,
+		std::optional<std::string_view> p_selected_player);
+
 void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_drained, const HudStatic &p_static, HudTdmFeedState &r_state,
 		core::ui::HudModel &r_model);
 

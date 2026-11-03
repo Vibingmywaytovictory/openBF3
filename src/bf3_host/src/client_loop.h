@@ -52,7 +52,8 @@ public:
 	void take_logic(ClientLogicFeed &r_feed) { match.take_logic(r_feed); }
 	void take_own_test_samples(std::vector<OwnTestSample> &r_samples);
 	void send_kit_select(const net::KitSelect &p_select);
-	void send_spawn_request(uint8_t p_kit);
+	void send_spawn_request(uint8_t p_kit, uint8_t p_spawn_choice = 0);
+	void send_squad_request(const net::SquadRequest &p_request);
 	void send_suicide_request();
 	void send_loadout_request(const net::LoadoutRequest &p_request);
 

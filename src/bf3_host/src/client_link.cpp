@@ -195,12 +195,20 @@ void ClientLink::queue_kit_select(const net::KitSelect &p_select) {
 	kit_out_.push_back(p_select);
 }
 
-void ClientLink::queue_spawn_request(uint8_t p_kit) {
+void ClientLink::queue_spawn_request(uint8_t p_kit, uint8_t p_spawn_choice) {
 	std::lock_guard lock(requests_mutex_);
 	if (spawn_out_.size() >= 16) {
 		spawn_out_.pop_front();
 	}
-	spawn_out_.push_back(p_kit);
+	spawn_out_.push_back(net::SpawnRequest{ p_kit, p_spawn_choice });
+}
+
+void ClientLink::queue_squad_request(const net::SquadRequest &p_request) {
+	std::lock_guard lock(requests_mutex_);
+	if (squad_out_.size() >= 16) {
+		squad_out_.pop_front();
+	}
+	squad_out_.push_back(p_request);
 }
 
 void ClientLink::queue_suicide_request() {
@@ -237,7 +245,8 @@ bool ClientLink::take_report(net::DebugReport &r_report) {
 void ClientLink::send_requests(uint64_t p_now) {
 	std::deque<net::DebugRequest> requests;
 	std::deque<net::KitSelect> kits;
-	std::deque<uint8_t> spawns;
+	std::deque<net::SpawnRequest> spawns;
+	std::deque<net::SquadRequest> squads;
 	{
 		std::lock_guard lock(requests_mutex_);
 		requests.swap(debug_out_);
@@ -256,9 +265,16 @@ void ClientLink::send_requests(uint64_t p_now) {
 		std::lock_guard lock(requests_mutex_);
 		spawns.swap(spawn_out_);
 	}
-	for (const uint8_t kit : spawns) {
-		submit(net::kChannelReliable, net::encode_spawn_request({ kit, 0 }), p_now);
+	for (const net::SpawnRequest &spawn : spawns) {
+		submit(net::kChannelReliable, net::encode_spawn_request(spawn), p_now);
 		++spawn_requests_;
+	}
+	{
+		std::lock_guard lock(requests_mutex_);
+		squads.swap(squad_out_);
+	}
+	for (const net::SquadRequest &q : squads) {
+		submit(net::kChannelReliable, net::encode_squad_request(q), p_now);
 	}
 	uint32_t suicides = 0;
 	{

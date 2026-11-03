@@ -220,6 +220,8 @@ inline constexpr std::array<net::SoldierGear, net::kMaxSlots> kNoGear = [] {
 	return a;
 }();
 
+using SquadOrders = std::array<std::array<net::SquadOrder, net::kMaxSquads>, 2>;
+
 struct PresentationFrame {
 	uint64_t serial = 0;
 	bool valid = false;
@@ -268,6 +270,7 @@ struct PresentationFrame {
 	sim::Tick own_revive_until = 0;
 	bool own_unspawned = false;
 	std::array<net::SoldierGear, net::kMaxSlots> gear = kNoGear;
+	SquadOrders squad_orders{};
 	uint8_t grenade_count = 0;
 	std::array<PresentedGrenade, kMaxPresentedGrenades> grenades{};
 };
@@ -314,7 +317,8 @@ public:
 
 	void send_kit_select(const net::KitSelect &p_select);
 
-	void send_spawn_request(uint8_t p_kit);
+	void send_spawn_request(uint8_t p_kit, uint8_t p_spawn_choice = 0);
+	void send_squad_request(const net::SquadRequest &p_request);
 	void send_suicide_request();
 	void send_loadout_request(const net::LoadoutRequest &p_request);
 
@@ -405,6 +409,9 @@ struct PlayerTable {
 void apply_player_list(PlayerTable &r_table, const net::PlayerList &p_list);
 
 uint8_t player_rows(const PlayerTable &p_table, std::array<net::PlayerRow, net::kMaxPlayerRows> &r_rows);
+
+bool apply_squad_order(SquadOrders &r_orders, const net::SquadOrder &p_order);
+uint8_t squad_spawn_choice(std::span<const net::PlayerRow> p_players, uint8_t p_own_slot, uint8_t p_mate_slot);
 
 constexpr bool own_unspawned_at(bool p_match_valid, const net::MatchState &p_match, sim::Tick p_life_spawn_tick, sim::Tick p_tick) {
 	return p_match_valid && p_match.unspawn_tick != 0 && p_life_spawn_tick < p_match.unspawn_tick && p_tick >= p_match.unspawn_tick;

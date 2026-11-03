@@ -252,6 +252,7 @@ void NativeTags::update(const Camera3D *p_camera, bool p_show, Vector2 p_viewpor
 	const size_t n = iff_soldiers(f, now_ns, soldiers);
 	ui::NametagViewer viewer;
 	viewer.team = own_team_of(f);
+	viewer.squad = iff_own_squad(f);
 	const std::span<const IffSoldier> all(soldiers.data(), n);
 	reveal_.update(all, now_s, spotting_.fire_reveal_seconds());
 	++stats_.frames;

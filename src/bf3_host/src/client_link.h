@@ -47,7 +47,8 @@ public:
 
 	void queue_debug(const net::DebugRequest &p_request);
 	void queue_kit_select(const net::KitSelect &p_select);
-	void queue_spawn_request(uint8_t p_kit);
+	void queue_spawn_request(uint8_t p_kit, uint8_t p_spawn_choice = 0);
+	void queue_squad_request(const net::SquadRequest &p_request);
 	void queue_suicide_request();
 	void queue_loadout_request(const net::LoadoutRequest &p_request);
 	void report(net::DebugReport p_report);
@@ -81,7 +82,8 @@ private:
 	std::mutex requests_mutex_;
 	std::deque<net::DebugRequest> debug_out_;
 	std::deque<net::KitSelect> kit_out_;
-	std::deque<uint8_t> spawn_out_;
+	std::deque<net::SpawnRequest> spawn_out_;
+	std::deque<net::SquadRequest> squad_out_;
 	uint32_t suicide_out_ = 0;
 	std::deque<net::LoadoutRequest> loadout_out_;
 	std::deque<net::DebugReport> reports_;

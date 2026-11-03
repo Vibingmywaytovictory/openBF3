@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <map>
 #include <set>
+#include <tuple>
 #include <vector>
 
 using namespace bf3;
@@ -270,6 +271,52 @@ TEST_SUITE("host-client-m2b") {
 		hostile.removed = { 250 };
 		host::apply_player_list(table, hostile);
 		CHECK(host::player_rows(table, rows) == 1);
+	}
+
+	TEST_CASE("host.client.m2b: a squad order lands under its team and squad; a mate's spawn choice is its index by "
+			  "slot plus one") {
+		host::SquadOrders orders{};
+		net::SquadOrder attack;
+		attack.team = 2;
+		attack.squad = 5;
+		attack.kind = net::SquadOrderKind::Attack;
+		attack.area = 3;
+		attack.position = { 10.0f, 2.0f, -4.0f };
+		REQUIRE(host::apply_squad_order(orders, attack));
+		CHECK(orders[1][4].kind == net::SquadOrderKind::Attack);
+		CHECK(orders[1][4].area == 3);
+		CHECK(orders[1][4].position[2] == -4.0f);
+		CHECK(orders[0][4].kind == net::SquadOrderKind::None);
+		net::SquadOrder cleared = attack;
+		cleared.kind = net::SquadOrderKind::None;
+		REQUIRE(host::apply_squad_order(orders, cleared));
+		CHECK(orders[1][4].kind == net::SquadOrderKind::None);
+		for (const auto &[team, squad, kind] : { std::tuple{ 0, 1, 1 }, std::tuple{ 3, 1, 1 }, std::tuple{ 1, 0, 1 },
+					 std::tuple{ 1, 33, 1 }, std::tuple{ 1, 1, 4 } }) {
+			net::SquadOrder bad;
+			bad.team = uint8_t(team);
+			bad.squad = uint8_t(squad);
+			bad.kind = net::SquadOrderKind(kind);
+			CHECK_FALSE(host::apply_squad_order(orders, bad));
+		}
+
+		std::vector<net::PlayerRow> players = { row(2, 1, "own"), row(9, 1, "mate9"), row(4, 1, "mate4"),
+			row(6, 1, "other"), row(5, 2, "enemy"), row(1, 1, "mate1") };
+		players[0].squad = 3;
+		players[1].squad = 3;
+		players[2].squad = 3;
+		players[3].squad = 4;
+		players[4].squad = 3;
+		players[5].squad = 3;
+		CHECK(host::squad_spawn_choice(players, kOwnSlot, 1) == 1);
+		CHECK(host::squad_spawn_choice(players, kOwnSlot, 4) == 3);
+		CHECK(host::squad_spawn_choice(players, kOwnSlot, 9) == 4);
+		CHECK(host::squad_spawn_choice(players, kOwnSlot, kOwnSlot) == 0);
+		CHECK(host::squad_spawn_choice(players, kOwnSlot, 6) == 0);
+		CHECK(host::squad_spawn_choice(players, kOwnSlot, 5) == 0);
+		CHECK(host::squad_spawn_choice(players, 40, 4) == 0);
+		players[0].squad = 0;
+		CHECK(host::squad_spawn_choice(players, kOwnSlot, 4) == 0);
 	}
 
 	TEST_CASE("host.client.m2b: a MatchInfo naming another level or mode is refused with both names, case aside") {

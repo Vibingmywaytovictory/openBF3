@@ -55,5 +55,6 @@ void feed_round_stats(Frame &r_frame, std::span<const PresentEvent> p_drained);
 Loadout frame_loadout(Frame &r_frame, uint8_t p_kit);
 void feed_loadout(Frame &r_frame);
 void feed_menu(Frame &r_frame);
+void feed_squad(Frame &r_frame);
 
 }

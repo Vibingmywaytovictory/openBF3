@@ -34,6 +34,7 @@ private:
 	net::MatchState match_;
 	PlayerTable players_;
 	std::array<net::SoldierGear, net::kMaxSlots> gear_ = kNoGear;
+	SquadOrders orders_{};
 	bool death_valid_ = false;
 	uint32_t death_life_ = 0;
 	sim::Tick respawn_tick_ = 0;

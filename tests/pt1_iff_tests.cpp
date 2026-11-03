@@ -269,6 +269,52 @@ TEST_CASE("the minimap: teammates while alive, an enemy only inside its fire-rev
 	row("minimap.relation", ok, "teammates alive: Friendly; enemies: Enemy until shot + 3.15 s (ActiveSpottedTime 7 x SpotOnFireMultiplier 0.45), else hidden");
 }
 
+TEST_CASE("squads: a soldier carries its row's squad, the viewer its own, and a squadmate reads Squad on the minimap") {
+	bool ok = true;
+	auto rc_ = [&](bool p_c) {
+		ok = ok && p_c;
+		return p_c;
+	};
+	Recorded rec;
+	auto state = [](uint8_t p_slot, uint32_t p_tick) {
+		return sample(p_tick, p_slot, p_slot < 4 ? uint8_t(1) : uint8_t(2), float(p_slot) * 2.0f, true, false);
+	};
+	publish(rec, 100, state);
+	host::PresentationFrame &f = rec.frame;
+	f.stats.slot = 0;
+	f.players[0].squad = 2;
+	f.players[1].squad = 2;
+	f.players[2].squad = 3;
+	f.players[5].squad = 2;
+	f.players[6].squad = 63;
+	RC(gs::iff_own_squad(f) == 2);
+	std::array<gs::IffSoldier, net::kMaxSlots> soldiers{};
+	const size_t n = gs::iff_soldiers(f, rec.now_ns + 4'166'667ull, soldiers);
+	REQUIRE(rc_(n == 7));
+	const ui::NametagViewer viewer{ 1, gs::iff_own_squad(f) };
+	for (size_t i = 0; i < n; ++i) {
+		const gs::IffSoldier &s = soldiers[i];
+		const uint8_t want = s.slot == 1 || s.slot == 5 ? 2 : (s.slot == 2 ? 3 : 0);
+		CHECK_MESSAGE(rc_(s.squad == want), s.slot);
+	}
+	gs::IffReveal reveal;
+	std::array<gs::IffMinimapEntry, net::kMaxSlots> mm{};
+	gs::IffMinimapCounts c;
+	const size_t m = gs::iff_minimap(std::span<const gs::IffSoldier>(soldiers.data(), n), viewer, reveal, 1.0, mm, &c);
+	RC(c.squad == 1);
+	RC(c.friendly == 2);
+	RC(c.enemy == 0);
+	for (size_t i = 0; i < m; ++i) {
+		RC((mm[i].slot == 1) == (mm[i].relation == ui::TagRelation::Squad));
+	}
+	f.players[0].squad = 0;
+	RC(gs::iff_own_squad(f) == 0);
+	f.stats.slot = 200;
+	RC(gs::iff_own_squad(f) == 0);
+	row("frames.squad", ok,
+			"slot 1 in the viewer's squad 2 -> Squad; slot 5 squad 2 on the other team -> not drawn; squad 63 -> 0");
+}
+
 TEST_CASE("the kit's appearance by name") {
 	bool ok = true;
 	auto rc_ = [&](bool p_c) { ok = ok && p_c; return p_c; };

@@ -30,6 +30,7 @@ struct IffSoldier {
 };
 
 size_t iff_soldiers(const host::PresentationFrame &p_frame, uint64_t p_now_ns, std::span<IffSoldier> r_out);
+uint8_t iff_own_squad(const host::PresentationFrame &p_frame);
 
 class IffReveal {
 public:

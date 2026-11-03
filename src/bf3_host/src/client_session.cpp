@@ -280,8 +280,12 @@ void ClientSession::send_kit_select(const net::KitSelect &p_select) {
 	impl_->loop.send_kit_select(p_select);
 }
 
-void ClientSession::send_spawn_request(uint8_t p_kit) {
-	impl_->loop.send_spawn_request(p_kit);
+void ClientSession::send_spawn_request(uint8_t p_kit, uint8_t p_spawn_choice) {
+	impl_->loop.send_spawn_request(p_kit, p_spawn_choice);
+}
+
+void ClientSession::send_squad_request(const net::SquadRequest &p_request) {
+	impl_->loop.send_squad_request(p_request);
 }
 
 void ClientSession::send_suicide_request() {
@@ -544,6 +548,37 @@ void apply_player_list(PlayerTable &r_table, const net::PlayerList &p_list) {
 			}
 		}
 	}
+}
+
+bool apply_squad_order(SquadOrders &r_orders, const net::SquadOrder &p_order) {
+	if (p_order.team < 1 || p_order.team > r_orders.size() || p_order.squad < 1 || p_order.squad > net::kMaxSquads ||
+			uint8_t(p_order.kind) > uint8_t(net::SquadOrderKind::Defend)) {
+		return false;
+	}
+	r_orders[p_order.team - 1u][p_order.squad - 1u] = p_order;
+	return true;
+}
+
+uint8_t squad_spawn_choice(std::span<const net::PlayerRow> p_players, uint8_t p_own_slot, uint8_t p_mate_slot) {
+	const net::PlayerRow *own = nullptr;
+	for (const net::PlayerRow &row : p_players) {
+		if (row.slot == p_own_slot) {
+			own = &row;
+		}
+	}
+	if (own == nullptr || own->squad == 0 || own->squad > net::kMaxSquads || p_mate_slot == p_own_slot) {
+		return 0;
+	}
+	uint8_t index = 0;
+	bool found = false;
+	for (const net::PlayerRow &row : p_players) {
+		if (row.team != own->team || row.squad != own->squad) {
+			continue;
+		}
+		found = found || row.slot == p_mate_slot;
+		index += row.slot < p_mate_slot ? 1u : 0u;
+	}
+	return found ? uint8_t(index + 1u) : uint8_t(0);
 }
 
 uint8_t player_rows(const PlayerTable &p_table, std::array<net::PlayerRow, net::kMaxPlayerRows> &r_rows) {

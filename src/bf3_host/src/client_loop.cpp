@@ -626,8 +626,12 @@ void ClientLoop::send_kit_select(const net::KitSelect &p_select) {
 	link.queue_kit_select(p_select);
 }
 
-void ClientLoop::send_spawn_request(uint8_t p_kit) {
-	link.queue_spawn_request(p_kit);
+void ClientLoop::send_spawn_request(uint8_t p_kit, uint8_t p_spawn_choice) {
+	link.queue_spawn_request(p_kit, p_spawn_choice);
+}
+
+void ClientLoop::send_squad_request(const net::SquadRequest &p_request) {
+	link.queue_squad_request(p_request);
 }
 
 void ClientLoop::send_suicide_request() {

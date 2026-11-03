@@ -39,6 +39,7 @@ size_t iff_soldiers(const host::PresentationFrame &p_frame, uint64_t p_now_ns, s
 				s.team = row->team;
 			}
 			s.kit = row->kit < 4 ? row->kit : kIffNoKit;
+			s.squad = row->squad <= net::kMaxSquads ? row->squad : uint8_t(0);
 			s.bot = row->bot;
 			const size_t len = std::min<size_t>(row->name_bytes, row->name.size());
 			s.name = std::string_view(row->name.data(), len);
@@ -46,6 +47,17 @@ size_t iff_soldiers(const host::PresentationFrame &p_frame, uint64_t p_now_ns, s
 		r_out[out++] = s;
 	}
 	return out;
+}
+
+uint8_t iff_own_squad(const host::PresentationFrame &p_frame) {
+	const size_t rows = std::min<size_t>(p_frame.player_count, p_frame.players.size());
+	for (size_t i = 0; i < rows; ++i) {
+		const net::PlayerRow &row = p_frame.players[i];
+		if (row.slot == p_frame.stats.slot) {
+			return row.squad <= net::kMaxSquads ? row.squad : uint8_t(0);
+		}
+	}
+	return 0;
 }
 
 void IffReveal::update(std::span<const IffSoldier> p_soldiers, double p_now_s, float p_reveal_seconds) {

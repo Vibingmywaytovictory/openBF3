@@ -27,6 +27,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -948,6 +949,109 @@ TEST_CASE("the deploy list: one row per enabled spawner of the own team, labelle
 	CHECK(state.bad_inputs == 0);
 }
 
+TEST_CASE("squads: the own squad's members by slot with its leader, the team's squads, and a deploy row per living "
+		  "mate at its presented position") {
+	const host::HudStatic st = make_static();
+	std::vector<bf3::core::level::CharacterSpawnerDef> spawners(1);
+	spawners[0].team = 2;
+	spawners[0].location_text_sid = "ID_H_MP_DM_RANDOMSPAWN";
+	std::vector<net::PlayerRow> rows{ player(1, 2, "Me"), player(2, 2, "Other"), player(3, 1, "Enemy"),
+		player(4, 2, "Leader"), player(6, 2, "Down") };
+	rows[0].squad = 3;
+	rows[1].squad = 5;
+	rows[2].squad = 3;
+	rows[3].squad = 3;
+	rows[3].leader = true;
+	rows[4].squad = 3;
+	rows[4].alive = false;
+	std::vector<bf3::present::PresentedSoldier> others(2);
+	others[0].slot = 4;
+	others[0].position = { 10.0f, 1.0f, 20.0f };
+	others[0].yaw = 0.5f;
+	others[1].slot = 6;
+	host::HudFeedInput in;
+	in.tdm = true;
+	in.match_valid = true;
+	in.match.phase = net::MatchPhase::InRound;
+	in.own_slot = 1;
+	in.own_team = 2;
+	in.alive = false;
+	in.spawners = spawners;
+	in.players = rows;
+	in.others = others;
+	host::HudTdmFeedState state;
+	ui::HudModel m;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(m.players[4].squad == 3);
+	CHECK(m.players[2].squad == 5);
+	CHECK(m.players[3].squad == 3);
+	const ui::HudSquad &q = m.squad;
+	CHECK(q.local_player_has_squad);
+	CHECK_FALSE(q.local_player_is_squad_leader);
+	CHECK(q.squad_name == 3);
+	CHECK(q.squad_length == 3);
+	CHECK_FALSE(q.squad_is_empty);
+	REQUIRE(q.local_squad_members.count == 3);
+	CHECK(q.local_squad_members.index[0] == 1);
+	CHECK(q.local_squad_members.index[1] == 4);
+	CHECK(q.local_squad_members.index[2] == 6);
+	CHECK(q.local_squad_members.leader == 4);
+	REQUIRE(q.available_squads.count == 2);
+	CHECK(q.available_squads.squads[0].squad == 3);
+	CHECK(q.available_squads.squads[0].members == 3);
+	CHECK(q.available_squads.squads[0].open);
+	CHECK(q.available_squads.squads[1].squad == 5);
+	CHECK(q.available_squads.squads[1].members == 1);
+	const ui::HudSpawnPointList &list = m.spawn_points.spawn_points;
+	REQUIRE(list.count == 3);
+	CHECK(list.points[0].kind == ui::HudSpawnKind::Hq);
+	CHECK(list.points[1].kind == ui::HudSpawnKind::SquadMate);
+	CHECK(list.points[1].player == 4);
+	CHECK(list.points[1].available);
+	CHECK(list.points[1].x == 10.0f);
+	CHECK(list.points[1].z == 20.0f);
+	CHECK(list.points[2].player == 6);
+	CHECK_FALSE(list.points[2].available);
+	CHECK(state.bad_inputs == 0);
+	CHECK(m.squad_leaders[4]);
+	CHECK_FALSE(m.squad_leaders[1]);
+
+	const std::vector<std::string> join{ "join" };
+	const std::vector<std::string> create{ "create" };
+	const std::vector<std::string> kick{ "kick" };
+	std::optional<net::SquadRequest> r = host::squad_flow_request(join, rows, 1, "5", std::nullopt);
+	REQUIRE(r);
+	CHECK(r->op == net::SquadOp::Join);
+	CHECK(r->squad == 5);
+	r = host::squad_flow_request(join, rows, 1, "3", std::nullopt);
+	REQUIRE(r);
+	CHECK(r->op == net::SquadOp::Leave);
+	CHECK_FALSE(host::squad_flow_request(join, rows, 1, "0", std::nullopt));
+	CHECK_FALSE(host::squad_flow_request(join, rows, 1, "33", std::nullopt));
+	CHECK_FALSE(host::squad_flow_request(join, rows, 1, std::nullopt, std::nullopt));
+	r = host::squad_flow_request(create, rows, 1, std::nullopt, std::nullopt);
+	REQUIRE(r);
+	CHECK(r->op == net::SquadOp::Create);
+	CHECK_FALSE(host::squad_flow_request(kick, rows, 1, std::nullopt, "Leader"));
+	r = host::squad_flow_request(kick, rows, 4, std::nullopt, "Me");
+	REQUIRE(r);
+	CHECK(r->op == net::SquadOp::Kick);
+	CHECK(r->target == 1);
+	CHECK_FALSE(host::squad_flow_request(kick, rows, 4, std::nullopt, "Enemy"));
+	CHECK_FALSE(host::squad_flow_request(kick, rows, 4, std::nullopt, "Leader"));
+	CHECK_FALSE(host::squad_flow_request(create, rows, 9, std::nullopt, std::nullopt));
+	CHECK_FALSE(host::squad_flow_request({}, rows, 1, "5", std::nullopt));
+
+	rows[0].squad = 0;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK_FALSE(m.squad.local_player_has_squad);
+	CHECK(m.squad.local_squad_members.count == 0);
+	CHECK(m.spawn_points.spawn_points.count == 1);
+	rows[0].squad = 40;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(state.bad_inputs == 1);
+}
+
 TEST_CASE("kit items: GADGET 1 is the kit item slot when the kit has one, else gadget slot 1; GADGET 2 then also "
 		  "offers gadget slot 1; the labels are gadget slot 1's and 2's categories; a pick clears the item's other "
 		  "slots") {
@@ -1135,7 +1239,7 @@ TEST_CASE("the loadout screens: kit and customization from the catalog and the o
 	const auto entry = [&](ui::HudMenuAction p_action) { return menu.entries[size_t(p_action)]; };
 	CHECK(entry(ui::HudMenuAction::Resume).enabled);
 	CHECK(entry(ui::HudMenuAction::Scoreboard).enabled);
-	CHECK_FALSE(entry(ui::HudMenuAction::Squad).enabled);
+	CHECK(entry(ui::HudMenuAction::Squad).enabled);
 	CHECK_FALSE(entry(ui::HudMenuAction::Suicide).enabled);
 	CHECK(entry(ui::HudMenuAction::Options).enabled);
 	CHECK(entry(ui::HudMenuAction::Quit).enabled);
@@ -1143,7 +1247,7 @@ TEST_CASE("the loadout screens: kit and customization from the catalog and the o
 	in.in_menu = true;
 	host::fill_hud_tdm(in, {}, st, state, m);
 	CHECK(entry(ui::HudMenuAction::Suicide).enabled);
-	CHECK_FALSE(entry(ui::HudMenuAction::Squad).enabled);
+	CHECK(entry(ui::HudMenuAction::Squad).enabled);
 	CHECK(entry(ui::HudMenuAction::Options).enabled);
 	CHECK(m.user.is_in_menu);
 	CHECK(m.user.is_ingame);
