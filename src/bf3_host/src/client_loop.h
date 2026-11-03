@@ -72,6 +72,8 @@ private:
 
 	std::unique_ptr<PresentationFrame> build = std::make_unique<PresentationFrame>();
 	ClientStats stats_;
+	NetStatsMeter net_meter;
+	NetStats net_stats;
 	uint64_t serial = 0;
 	bool have_match = false;
 	uint8_t slot = 0;

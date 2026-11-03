@@ -2,6 +2,7 @@
 
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
+#include "bf3/host/net_stats.h"
 #include "bf3/host/server_session.h"
 
 #include <godot_cpp/classes/main_loop.hpp>
@@ -54,6 +55,7 @@ private:
 	bf3::core::InstallSnapshot install_before_;
 	std::shared_ptr<bf3::core::Cache> cache_;
 	std::unique_ptr<bf3::host::ServerSession> session_;
+	bf3::host::ServerNetMeter net_meter_;
 	double elapsed_ = 0.0;
 	double report_timer_ = 0.0;
 	double load_seconds_ = 0.0;

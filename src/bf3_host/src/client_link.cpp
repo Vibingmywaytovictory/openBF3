@@ -45,6 +45,7 @@ void ClientLink::refuse(const char *p_reason) {
 	if (transport_ != nullptr) {
 		const std::vector<uint8_t> bye = net::encode_bye();
 		transport_->send(net::kChannelReliable, bye, net::Host::SendMode::Reliable);
+		traffic_out_.count(bye, net::Host::SendMode::Reliable);
 		transport_->flush();
 		transport_->disconnect_all();
 	}
@@ -56,6 +57,7 @@ void ClientLink::shutdown() {
 		if (connected_) {
 			const std::vector<uint8_t> bye = net::encode_bye();
 			transport_->send(net::kChannelReliable, bye, net::Host::SendMode::Reliable);
+			traffic_out_.count(bye, net::Host::SendMode::Reliable);
 			transport_->flush();
 		}
 		transport_->disconnect_all();
@@ -78,7 +80,10 @@ void ClientLink::release(uint64_t p_now) {
 	net::NetSim::Datagram d;
 	while (out_.poll(p_now, d)) {
 		if (transport_ != nullptr && connected_) {
-			transport_->send(d.channel, d.bytes, d.reliable ? net::Host::SendMode::Reliable : net::Host::SendMode::Unsequenced);
+			const net::Host::SendMode mode =
+					d.reliable ? net::Host::SendMode::Reliable : net::Host::SendMode::Unsequenced;
+			transport_->send(d.channel, d.bytes, mode);
+			traffic_out_.count(d.bytes, mode);
 			sent = true;
 		}
 	}
@@ -107,6 +112,7 @@ void ClientLink::receive(uint32_t p_wait_ms) {
 	while (got > 0) {
 		const uint64_t at = clock_();
 		if (ev.type == net::Host::EventType::Receive) {
+			traffic_in_.count(ev.channel, ev.data);
 			net::NetSim::Datagram d;
 			d.peer = ev.peer;
 			d.channel = ev.channel;
@@ -307,6 +313,8 @@ void ClientLink::stats(ClientStats &r_stats) const {
 	r_stats.snapshots_late = snapshots_late_;
 	r_stats.commands_sent = commands_sent_;
 	r_stats.spawn_requests = spawn_requests_;
+	r_stats.traffic_in = traffic_in_;
+	r_stats.traffic_out = traffic_out_;
 }
 
 }

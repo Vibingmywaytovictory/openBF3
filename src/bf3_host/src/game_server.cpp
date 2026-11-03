@@ -63,6 +63,7 @@ struct GameServer::Impl {
 		[this](size_t p_slot) { reset_slot(p_slot); } };
 	ServerHandshake handshake;
 	SeatLoads loads;
+	std::unordered_map<uint32_t, NetTraffic> received;
 	uint64_t bad_datagrams = 0;
 	uint64_t step_precondition_failures = 0;
 	double last_step_ms = 0;
@@ -517,8 +518,9 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	return core::Status::success();
 }
 
-void GameServer::on_connect(uint32_t) {
-
+void GameServer::on_connect(uint32_t p_peer) {
+	impl_->outbox.forget_traffic(p_peer);
+	impl_->received.erase(p_peer);
 }
 
 void GameServer::on_disconnect(uint32_t p_peer) {
@@ -531,6 +533,7 @@ void GameServer::on_disconnect(uint32_t p_peer) {
 
 void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const uint8_t> p_datagram) {
 	Impl &m = *impl_;
+	m.received[p_peer].count(p_channel, p_datagram);
 	const std::optional<net::MessageType> type = net::peek_type(p_datagram);
 	if (!type) {
 		++m.bad_datagrams;
@@ -697,6 +700,11 @@ GameServerStats GameServer::stats() const {
 		o.load = m.loads[i];
 		g.clients += (s.used && s.remote) ? 1u : 0u;
 		g.soldiers += o.alive ? 1u : 0u;
+		if (s.used && s.remote) {
+			const auto in = m.received.find(s.peer);
+			g.traffic.push_back({ uint8_t(i), s.peer, m.outbox.traffic(s.peer),
+					in == m.received.end() ? NetTraffic() : in->second });
+		}
 	}
 	m.combat.stats(g);
 	return g;

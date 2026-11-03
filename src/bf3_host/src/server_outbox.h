@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/host/game_server.h"
+#include "bf3/host/net_stats.h"
 #include "bf3/net/enet_host.h"
 #include "bf3/net/protocol.h"
 
@@ -22,8 +23,9 @@ public:
 		d.channel = p_channel;
 		d.reliable = p_channel != net::kChannelUnreliable;
 		d.bytes = std::move(p_bytes);
-		sent_[p_peer] += net::enet_command_bytes(
-				d.bytes.size(), d.reliable ? net::Host::SendMode::Reliable : net::Host::SendMode::Unsequenced);
+		const net::Host::SendMode mode = d.reliable ? net::Host::SendMode::Reliable : net::Host::SendMode::Unsequenced;
+		sent_[p_peer] += net::enet_command_bytes(d.bytes.size(), mode);
+		traffic_[p_peer].count(d.bytes, mode);
 		pending_.push_back(std::move(d));
 	}
 
@@ -31,6 +33,13 @@ public:
 		const auto it = sent_.find(p_peer);
 		return it == sent_.end() ? 0 : it->second;
 	}
+
+	NetTraffic traffic(uint32_t p_peer) const {
+		const auto it = traffic_.find(p_peer);
+		return it == traffic_.end() ? NetTraffic() : it->second;
+	}
+
+	void forget_traffic(uint32_t p_peer) { traffic_.erase(p_peer); }
 
 	bool replies_full() const { return pending_.size() >= kMaxPendingReplies; }
 
@@ -44,6 +53,7 @@ public:
 private:
 	std::vector<OutDatagram> pending_;
 	std::unordered_map<uint32_t, uint64_t> sent_;
+	std::unordered_map<uint32_t, NetTraffic> traffic_;
 };
 
 }

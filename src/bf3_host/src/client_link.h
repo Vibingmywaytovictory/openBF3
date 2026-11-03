@@ -93,6 +93,8 @@ private:
 	uint64_t snapshots_late_ = 0;
 	uint64_t commands_sent_ = 0;
 	uint64_t spawn_requests_ = 0;
+	NetTraffic traffic_in_;
+	NetTraffic traffic_out_;
 };
 
 }

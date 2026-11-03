@@ -2,8 +2,10 @@
 
 #include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/math.h"
+#include "bf3/core/util/format.h"
 #include "bf3/host/firefight_run.h"
 #include "bf3/host/gunplay.h"
+#include "bf3/host/net_stats.h"
 #include "bf3/net/enet_host.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/soldier_motor.h"
@@ -785,6 +787,232 @@ TEST_SUITE("host-ghost") {
 		add(o, 1000 + sim::kSimHz + 2, 11 * second + second / 10);
 		tracks.publish(*frame, 11 * second + second / 5);
 		CHECK(frame->other_count == 2);
+	}
+
+	TEST_CASE("Metro ConquestLarge0, 5 s through a loopback ENet pair: the server's per-type counters hold every "
+			  "datagram ENet counts for the peer, within its command headers") {
+		Fixture *f = fixture();
+		if (f == nullptr) {
+			return;
+		}
+		std::string error;
+		std::unique_ptr<net::Host> enet_server =
+				net::Host::create_server("127.0.0.1", 0, 4, net::kChannelCount, &error);
+		REQUIRE_MESSAGE(enet_server, error);
+		std::unique_ptr<net::Host> enet_client = net::Host::create_client(net::kChannelCount, &error);
+		REQUIRE_MESSAGE(enet_client, error);
+		REQUIRE(enet_client->connect("127.0.0.1", enet_server->bound_port()) >= 0);
+		std::optional<uint32_t> server_peer;
+		bool client_connected = false;
+		const auto service = [&] {
+			net::Host::Event ev;
+			while (enet_server->service(0, ev) > 0) {
+				if (ev.type == net::Host::EventType::Connect) {
+					server_peer = ev.peer;
+				}
+			}
+			while (enet_client->service(0, ev) > 0) {
+				client_connected = client_connected || ev.type == net::Host::EventType::Connect;
+			}
+		};
+		REQUIRE(test::wait_until(
+				[&] {
+					service();
+					return server_peer.has_value() && client_connected;
+				},
+				std::chrono::seconds(10)));
+
+		host::GameServerConfig cfg;
+		cfg.level = f->level.shared;
+		cfg.max_slots = 64;
+		cfg.seed = 0x6058;
+		cfg.walkers = kWalkers;
+		cfg.respawn_ticks = 60;
+		cfg.gunplay.mechanics_cfg = OPENBF3_MECHANICS_CFG;
+		auto fill = std::make_shared<host::BotFillConfig>();
+		fill->level = f->level.bots;
+		fill->count = 0;
+		cfg.bots = fill;
+		auto ff = std::make_shared<host::FirefightConfig>();
+		ff->mode = host::FirefightMode::Free;
+		ff->count = kShooters;
+		ff->walk = true;
+		cfg.firefight = ff;
+		host::GameServer server;
+		const core::Status st = server.init(cfg);
+		REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
+
+		Peer peer(server);
+		peer.frame = host::shot_frame(*f->level.shared->static_world);
+		std::array<net::ChannelCounters, net::kCountedChannels> by_channel{};
+		uint64_t header_floor = 0, header_ceiling = 0, enet_refused = 0;
+		std::vector<host::OutDatagram> out;
+		const size_t fragment = net::enet_default_fragment_bytes();
+		const auto step = [&] {
+			out.clear();
+			server.tick(out);
+			for (const host::OutDatagram &d : out) {
+				if (d.peer != kPeer) {
+					continue;
+				}
+				const net::Host::SendMode mode =
+						d.reliable ? net::Host::SendMode::Reliable : net::Host::SendMode::Unsequenced;
+				if (!enet_server->send(*server_peer, d.channel, d.bytes.data(), d.bytes.size(), mode)) {
+					++enet_refused;
+					continue;
+				}
+				by_channel[d.channel].packets++;
+				by_channel[d.channel].bytes += net::enet_command_bytes(d.bytes.size(), mode);
+				const uint64_t pieces = std::max<uint64_t>(1, (d.bytes.size() + fragment - 1) / fragment);
+				header_floor += 4;
+				header_ceiling += pieces * 24;
+			}
+			enet_server->flush();
+			service();
+			peer.receive(out, server.current_tick());
+		};
+		server.on_connect(kPeer);
+		peer.join(*f->level.shared);
+		step();
+		REQUIRE(peer.slot >= 0);
+		uint64_t commands = 0;
+		for (sim::Tick i = 0; i < 5 * sim::kSimHz; ++i) {
+			peer.command(server.current_tick() + 1u);
+			++commands;
+			step();
+		}
+		const host::GameServerStats stats = server.stats();
+		REQUIRE(stats.traffic.size() == 1);
+		const host::SlotTraffic &t = stats.traffic[0];
+		CHECK(t.slot == uint8_t(peer.slot));
+		CHECK(t.peer == kPeer);
+		const host::NetTypeCounters sent = t.sent.total();
+		const net::PeerCounters enet = enet_server->peer_counters(*server_peer);
+		uint64_t enet_packets = 0, enet_bytes = 0;
+		for (size_t c = 0; c < net::kCountedChannels; ++c) {
+			CHECK(enet.sent[c].packets == by_channel[c].packets);
+			CHECK(enet.sent[c].bytes == by_channel[c].bytes);
+			enet_packets += enet.sent[c].packets;
+			enet_bytes += enet.sent[c].bytes;
+		}
+		const net::WireTotals wire = enet_server->wire_totals();
+		std::printf(
+				"host.ghost traffic: %llu datagrams, %llu payload B, %llu ENet command B, %llu B on the wire in %llu "
+				"UDP datagrams; Snapshot %llu B, SnapshotOthers %llu B, ShotEvents %llu B, CombatEvents %llu B, other "
+				"types %llu B; %llu refused by ENet\n",
+				(unsigned long long)sent.datagrams, (unsigned long long)sent.payload_bytes,
+				(unsigned long long)sent.enet_bytes, (unsigned long long)wire.sent_bytes,
+				(unsigned long long)wire.sent_datagrams,
+				(unsigned long long)t.sent.types[size_t(net::MessageType::Snapshot)].enet_bytes,
+				(unsigned long long)t.sent.types[size_t(net::MessageType::SnapshotOthers)].enet_bytes,
+				(unsigned long long)t.sent.types[size_t(net::MessageType::ShotEvents)].enet_bytes,
+				(unsigned long long)t.sent.types[size_t(net::MessageType::CombatEvents)].enet_bytes,
+				(unsigned long long)(sent.enet_bytes - t.sent.types[size_t(net::MessageType::Snapshot)].enet_bytes -
+						t.sent.types[size_t(net::MessageType::SnapshotOthers)].enet_bytes -
+						t.sent.types[size_t(net::MessageType::ShotEvents)].enet_bytes -
+						t.sent.types[size_t(net::MessageType::CombatEvents)].enet_bytes),
+				(unsigned long long)enet_refused);
+		std::fflush(stdout);
+		CHECK(enet_refused == 0);
+		CHECK(t.sent.types[0].datagrams == 0);
+		CHECK(t.sent.types[size_t(net::MessageType::Snapshot)].datagrams > 100);
+		CHECK(t.sent.types[size_t(net::MessageType::ShotEvents)].datagrams > 0);
+		CHECK(t.sent.types[size_t(net::MessageType::MatchInfo)].datagrams == 1);
+		CHECK(sent.datagrams == enet_packets);
+		CHECK(sent.enet_bytes == enet_bytes);
+		CHECK(sent.payload_bytes < enet_bytes);
+		CHECK(enet_bytes - sent.payload_bytes >= header_floor);
+		CHECK(enet_bytes - sent.payload_bytes <= header_ceiling);
+		CHECK(peer.total_bytes == sent.enet_bytes);
+		const host::NetTypeCounters received = t.received.total();
+		CHECK(t.received.types[size_t(net::MessageType::Hello)].datagrams == 1);
+		CHECK(t.received.types[size_t(net::MessageType::Ready)].datagrams == 1);
+		CHECK(t.received.types[size_t(net::MessageType::CommandPacket)].datagrams == commands);
+		CHECK(received.datagrams == commands + 2);
+		CHECK(received.payload_bytes > 0);
+	}
+
+	TEST_CASE("the net stats meter turns cumulative counters into per-type bytes/s, snapshot rate and loss once a "
+			  "window closes") {
+		host::NetTraffic in, out;
+		std::vector<uint8_t> snapshot(300, 0);
+		snapshot[0] = uint8_t(net::MessageType::Snapshot);
+		std::vector<uint8_t> command(40, 0);
+		command[0] = uint8_t(net::MessageType::CommandPacket);
+		const std::vector<uint8_t> stray{ 200, 1, 2 };
+		host::NetStatsMeter meter(1'000'000'000ull);
+		host::NetStats stats;
+		host::NetSample s{ &in, &out, 0, 0, 0.0, 0, 0 };
+		CHECK_FALSE(meter.sample(s, 5'000'000'000ull, stats));
+		for (int i = 0; i < 30; ++i) {
+			in.count(net::kChannelUnreliable, snapshot);
+			out.count(net::kChannelUnreliable, command);
+			out.count(net::kChannelUnreliable, command);
+		}
+		in.count(net::kChannelReliable, stray);
+		s.snapshots_received = 27;
+		s.snapshots_lost = 3;
+		s.rtt_ms = 41.5;
+		s.ghosts_in_scope = 17;
+		s.server_tick = 1234;
+		CHECK_FALSE(meter.sample(s, 5'900'000'000ull, stats));
+		CHECK(stats.revision == 0);
+		REQUIRE(meter.sample(s, 7'000'000'000ull, stats));
+		CHECK(stats.revision == 1);
+		CHECK(stats.window_s == doctest::Approx(2.0));
+		const double snapshot_bytes = double(net::enet_command_bytes(300, net::Host::SendMode::Unsequenced));
+		const double command_bytes = double(net::enet_command_bytes(40, net::Host::SendMode::Unsequenced));
+		const double stray_bytes = double(net::enet_command_bytes(3, net::Host::SendMode::Reliable));
+		CHECK(stats.in.bytes_per_s[size_t(net::MessageType::Snapshot)] == doctest::Approx(30.0 * snapshot_bytes / 2.0));
+		CHECK(stats.in.bytes_per_s[0] == doctest::Approx(stray_bytes / 2.0));
+		CHECK(stats.in.total_bytes_per_s == doctest::Approx((30.0 * snapshot_bytes + stray_bytes) / 2.0));
+		CHECK(stats.in.payload_bytes_per_s == doctest::Approx((30.0 * 300.0 + 3.0) / 2.0));
+		CHECK(stats.in.datagrams_per_s == doctest::Approx(31.0 / 2.0));
+		CHECK(stats.out.bytes_per_s[size_t(net::MessageType::CommandPacket)] ==
+				doctest::Approx(60.0 * command_bytes / 2.0));
+		CHECK(stats.snapshots_per_s == doctest::Approx(13.5));
+		CHECK(stats.snapshot_loss == doctest::Approx(0.1));
+		CHECK(stats.rtt_ms == doctest::Approx(41.5));
+		CHECK(stats.ghosts_in_scope == 17);
+		CHECK(stats.server_tick == 1234);
+		CHECK_FALSE(meter.sample(s, 7'500'000'000ull, stats));
+		REQUIRE(meter.sample(s, 8'000'000'000ull, stats));
+		CHECK(stats.revision == 2);
+		CHECK(stats.in.total_bytes_per_s == 0.0f);
+		CHECK(stats.snapshot_loss == 0.0f);
+
+		const std::vector<host::NetOverlayRow> rows = host::net_overlay_rows(stats);
+		REQUIRE(rows.size() == 15);
+		CHECK(rows[0].label == "NET IN");
+		CHECK(rows[0].value == "0 B/s");
+		CHECK(rows[2].label == "RTT");
+		CHECK(rows[2].value == "42 ms");
+		CHECK(rows[5].label == "GHOSTS IN SCOPE");
+		CHECK(rows[5].value == "17");
+		CHECK(rows[7].label == "IN Snapshot");
+		CHECK(rows[14].label == "OUT CommandPacket");
+	}
+
+	TEST_CASE("the server net meter prints each remote seat's bytes/s by type and its ENet bytes/s") {
+		host::SlotTraffic a;
+		a.slot = 3;
+		a.peer = 1;
+		std::vector<uint8_t> snapshot(500, 0);
+		snapshot[0] = uint8_t(net::MessageType::Snapshot);
+		std::vector<net::PeerCounters> enet(2);
+		host::ServerNetMeter meter;
+		CHECK(meter.report(std::span<const host::SlotTraffic>(&a, 1), enet, 1'000'000'000ull) ==
+				"no remote peers measured yet");
+		for (int i = 0; i < 60; ++i) {
+			a.sent.count(net::kChannelUnreliable, snapshot);
+		}
+		enet[1].sent[0].bytes = 60 * 508;
+		enet[1].received[0].bytes = 100;
+		const std::string line = meter.report(std::span<const host::SlotTraffic>(&a, 1), enet, 3'000'000'000ull);
+		const double per_s = 60.0 * double(net::enet_command_bytes(500, net::Host::SendMode::Unsequenced)) / 2.0;
+		CHECK(line ==
+				core::fmt("slot 3 peer 1 out %.0f B/s (Snapshot %.0f) in 0 B/s (none), enet out 15240 B/s in 50 B/s",
+						per_s, per_s));
 	}
 
 	TEST_CASE("install unchanged") {

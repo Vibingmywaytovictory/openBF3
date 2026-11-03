@@ -2,6 +2,7 @@
 
 #include "bf3/core/result.h"
 #include "bf3/host/level_load.h"
+#include "bf3/host/net_stats.h"
 #include "bf3/net/netsim.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/command.h"
@@ -197,6 +198,8 @@ struct ClientStats {
 	uint32_t loading_sent = 0;
 	uint32_t round_overs = 0;
 	uint32_t prepare_sent = 0;
+	NetTraffic traffic_in;
+	NetTraffic traffic_out;
 };
 static_assert(std::is_trivially_copyable_v<ClientStats>);
 
@@ -276,6 +279,7 @@ struct PresentationFrame {
 	SquadOrders squad_orders{};
 	uint8_t grenade_count = 0;
 	std::array<PresentedGrenade, kMaxPresentedGrenades> grenades{};
+	NetStats net;
 };
 static_assert(std::is_trivially_copyable_v<PresentationFrame>);
 

@@ -362,6 +362,10 @@ void DedicatedMainLoop::report(const host::ServerSessionStats &p_stats) {
 			(long long)monitor(Performance::OBJECT_NODE_COUNT), (long long)monitor(Performance::OBJECT_RESOURCE_COUNT),
 			(long long)monitor(Performance::RENDER_TEXTURE_MEM_USED),
 			(long long)monitor(Performance::RENDER_VIDEO_MEM_USED), prebake.empty() ? " none" : prebake.c_str()));
+	const uint64_t now_ns = uint64_t(
+			std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
+					.count());
+	say("net: " + net_meter_.report(g.traffic, session_->host().peer_counters(), now_ns));
 }
 
 bool DedicatedMainLoop::_process(double p_delta) {

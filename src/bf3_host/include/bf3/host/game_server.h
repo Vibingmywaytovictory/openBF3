@@ -4,6 +4,7 @@
 #include "bf3/host/bot_fill_stats.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/level_load.h"
+#include "bf3/host/net_stats.h"
 #include "bf3/host/server_view.h"
 #include "bf3/host/tdm_rules.h"
 #include "bf3/net/protocol.h"
@@ -169,6 +170,7 @@ struct GameServerStats {
 	uint64_t held_joins = 0;
 	uint64_t held_readies = 0;
 	uint64_t stale_loading = 0;
+	std::vector<SlotTraffic> traffic;
 };
 
 class GameServer {
