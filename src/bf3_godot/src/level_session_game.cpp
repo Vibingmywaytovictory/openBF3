@@ -1093,6 +1093,7 @@ void step_game_parts(Node3D &r_parent, GameState &r_game, const host::Presentati
 	}
 	if (r_game.audio != nullptr && r_game.audio->built()) {
 		r_game.audio->set_sound_areas(areas_flow != nullptr ? areas_flow->sound_areas() : nullptr);
+		r_game.audio->set_ir_reverbs(areas_flow != nullptr ? areas_flow->ir_reverbs() : nullptr);
 		r_game.audio->step(mf, cues, effect_sounds);
 	}
 	r_game.ms_audio = ms_since(t0);

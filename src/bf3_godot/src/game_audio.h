@@ -86,6 +86,8 @@ public:
 	std::vector<std::string> load_report() const;
 	void set_sound_areas(const sim::logic::SoundAreaNatives *p_areas);
 	const audio::AreaFeedStats &area_feed() const;
+	void set_ir_reverbs(const sim::logic::IrReverbNatives *p_reverbs);
+	const audio::IrReverbFeedStats &ir_feed() const;
 	std::optional<float> mixer_value(uint32_t p_name_hash) const;
 #if OPENBF3_BUILD_CHECKS
 	core::Result<std::vector<std::string>> observe_area_waves(std::string_view p_patch, float p_area_type) const;

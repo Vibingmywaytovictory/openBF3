@@ -2945,3 +2945,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * The master's RIR1 convolves the Reverb bus with two slots of impulse responses, 512-frame partitions up to 2.0 s, crossfaded; audio.mixer.unit, audio.ir.install.
 * A patch's ReverbSend feeds the Reverb bus at its cone's ReverbGain instead of being dropped; core.audio.areas, audio.patch.unit.
 * IrReverb zones read their SoundArea's Proximity as a Volume with the data's Gain and fade curve; core.audio.areas.
+* The game loads the level's impulse responses and feeds the two loudest zones to the reverb slots; audio.game, audio.game.burst.

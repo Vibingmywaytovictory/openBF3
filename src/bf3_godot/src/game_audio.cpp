@@ -12,6 +12,7 @@
 #include "bf3/client_audio/kit_audio.h"
 #include "bf3/core/audio/wave_bank.h"
 #include "bf3/core/level/level.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/host/client_wiring.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/level_load.h"
@@ -74,6 +75,8 @@ private:
 
 template <class Impl>
 ba::MixerA3Assets load_a3(const core::EbxResolver &p_db, Impl &r_m);
+template <class Impl>
+std::shared_ptr<const ba::ImpulseBank> load_impulses(const core::level::LoadedLevel &p_level, Impl &r_m);
 struct AudioCapture;
 void delete_capture(AudioCapture *p_capture);
 template <class Impl>
@@ -129,6 +132,9 @@ struct Bf3GameAudio::Impl {
 	std::chrono::steady_clock::time_point fate_line_at{};
 	ba::AreaFeed area_feed;
 	const sim::logic::SoundAreaNatives *areas = nullptr;
+	std::shared_ptr<const ba::ImpulseBank> impulses;
+	ba::IrReverbFeed ir_feed;
+	const sim::logic::IrReverbNatives *reverbs = nullptr;
 	uint64_t fate_line_drops = 0;
 };
 
@@ -167,6 +173,7 @@ core::Status Bf3GameAudio::load(const GameLoadInputs &p_in, std::span<const std:
 		m.categories.add_weapons(*m.table);
 	}
 	m.a3 = load_a3(p_in.db->level->db(), m);
+	m.impulses = load_impulses(*p_in.db->level, m);
 	m.loaded.store(true, std::memory_order_release);
 	return core::Status::success();
 }
@@ -206,6 +213,7 @@ bool Bf3GameAudio::build(godot::Node *p_parent, std::string *r_error) {
 	m.sizes = ba::game_mixer_sizes(m.tuning, count_arg("audio-max-voices"), count_arg("audio-max-instances"));
 	ba::MixerConfig mc = ba::game_mixer_config(m.tuning, m.sizes, kCommandCapacity);
 	ba::apply_mixer_a3(m.a3, mc);
+	mc.impulses = m.impulses;
 	if (const std::string fade = user_arg_value("audio-cut-fade"); !fade.empty()) {
 		mc.cut_fade_frames = uint32_t(std::clamp(std::atoi(fade.c_str()), 0, 4800));
 	}
@@ -306,6 +314,8 @@ void Bf3GameAudio::step(const GameFrame &p_frame, std::span<const fx::ImpactSoun
 	}
 	m.area_feed.step(*m.mixer, m.areas);
 	m.areas = nullptr;
+	m.ir_feed.step(*m.mixer, m.reverbs, m.impulses.get());
+	m.reverbs = nullptr;
 	m.driver.step(*m.router, m.impacts.get(), *m.clock, in, m.impact_requests, p_effect_sounds);
 	capture_step(m);
 	drain_mixer_events(m, *this);
@@ -443,6 +453,14 @@ void Bf3GameAudio::set_sound_areas(const sim::logic::SoundAreaNatives *p_areas) 
 	impl_->areas = p_areas;
 }
 
+void Bf3GameAudio::set_ir_reverbs(const sim::logic::IrReverbNatives *p_reverbs) {
+	impl_->reverbs = p_reverbs;
+}
+
+const audio::IrReverbFeedStats &Bf3GameAudio::ir_feed() const {
+	return impl_->ir_feed.stats();
+}
+
 const audio::AreaFeedStats &Bf3GameAudio::area_feed() const {
 	return impl_->area_feed.stats();
 }
@@ -578,6 +596,30 @@ ba::MixerA3Assets load_a3(const core::EbxResolver &p_db, Impl &r_m) {
 		r_m.report.push_back(a3.notes);
 	}
 	return a3;
+}
+
+template <class Impl>
+std::shared_ptr<const ba::ImpulseBank> load_impulses(const core::level::LoadedLevel &p_level, Impl &r_m) {
+	if (!r_m.a3.master || !(r_m.a3.master->max_reverb_seconds > 0.0f)) {
+		r_m.report.push_back("audio IR reverb: off (no master IrReverb length)");
+		return nullptr;
+	}
+	const auto t0 = std::chrono::steady_clock::now();
+	ba::ImpulseBankLoad load;
+	core::Result<ba::ImpulseBank> bank = ba::load_impulse_bank(
+			p_level.db(), p_level.mount(), r_m.a3.master->max_reverb_seconds, ba::kMixRate, &load);
+	if (!bank) {
+		r_m.report.push_back("audio IR reverb: off (" + bank.error().message + ")");
+		return nullptr;
+	}
+	char line[200];
+	std::snprintf(line, sizeof(line), "audio IR reverb: %zu of %zu impulse responses, %u partitions at most, %.1f ms",
+			bank->impulses.size(), load.assets, bank->max_partitions, core::ms_since(t0));
+	r_m.report.push_back(line);
+	if (!load.notes.empty()) {
+		r_m.report.push_back(load.notes);
+	}
+	return std::make_shared<const ba::ImpulseBank>(std::move(*bank));
 }
 
 audio::MixerProfile game_audio_profile(const Bf3GameAudio &p_audio) {
