@@ -110,6 +110,8 @@ struct Bf3GameAudio::Impl {
 	std::unique_ptr<ba::SimMixerClock> clock;
 	std::unique_ptr<ba::WeaponAudioRouter> router;
 	std::unique_ptr<ba::ImpactAudio> impacts;
+	std::vector<ba::FlyBySound> flyby_sounds;
+	std::unique_ptr<ba::FlyByAudio> flybys;
 	TapForwarder tap;
 	Ref<Bf3AudioStream> stream;
 	AudioStreamPlayer *player = nullptr;
@@ -166,6 +168,7 @@ core::Status Bf3GameAudio::load(const GameLoadInputs &p_in, std::span<const std:
 	m.kits = std::move(a->kits);
 	m.table = std::move(a->table);
 	m.impacts_cache = std::move(a->impacts);
+	m.flyby_sounds = std::move(a->flybys);
 	m.auditions = std::move(a->auditions);
 	m.bank = std::move(a->bank);
 	m.report = std::move(a->report);
@@ -264,6 +267,7 @@ bool Bf3GameAudio::build(godot::Node *p_parent, std::string *r_error) {
 	wc.max_weapon_voices = m.sizes.weapon_voices;
 	m.router = std::make_unique<ba::WeaponAudioRouter>(*m.mixer, m.table, m.bank, m.tuning, *m.pool, wc);
 	m.impacts = std::make_unique<ba::ImpactAudio>(*m.mixer, m.impacts_cache, m.bank, m.tuning, *m.pool);
+	m.flybys = std::make_unique<ba::FlyByAudio>(*m.mixer, m.flyby_sounds, m.bank, m.tuning, *m.pool);
 	m.beds.set_assets(m.bed_assets);
 	m.stream.instantiate();
 	m.stream->set_mixer(m.mixer);
@@ -341,7 +345,7 @@ void Bf3GameAudio::step(const GameFrame &p_frame, std::span<const fx::ImpactSoun
 	m.areas = nullptr;
 	m.ir_feed.step(*m.mixer, m.reverbs, m.impulses.get());
 	m.reverbs = nullptr;
-	m.driver.step(*m.router, m.impacts.get(), *m.clock, in, m.impact_requests, p_effect_sounds);
+	m.driver.step(*m.router, m.impacts.get(), *m.clock, in, m.impact_requests, p_effect_sounds, m.flybys.get());
 	capture_step(m);
 	drain_mixer_events(m, *this);
 	print_sound_fates(m, false);
@@ -550,6 +554,7 @@ GameAudioStats Bf3GameAudio::stats() const {
 	}
 	s.router = m.router->stats();
 	s.impacts = m.impacts->stats();
+	s.flybys = m.flybys->stats();
 	const ba::MixerStats &ms = m.mixer->stats();
 	s.mixer_frames = ms.frames.load(std::memory_order_relaxed);
 	s.short_blocks = ms.short_blocks.load(std::memory_order_relaxed);
@@ -603,6 +608,7 @@ void Bf3GameAudio::shutdown() {
 	}
 	m.router.reset();
 	m.impacts.reset();
+	m.flybys.reset();
 	m.clock.reset();
 	m.mixer.reset();
 	m.pool.reset();
@@ -627,6 +633,11 @@ ba::MixerA3Assets load_a3(const core::EbxResolver &p_db, Impl &r_m) {
 	}
 	for (const auto &a : r_m.auditions) {
 		programs.push_back(a.second.program);
+	}
+	for (const ba::FlyBySound &s : r_m.flyby_sounds) {
+		if (s.program && std::find(programs.begin(), programs.end(), s.program) == programs.end()) {
+			programs.push_back(s.program);
+		}
 	}
 	if (r_m.bed_assets) {
 		for (const ba::AreaBedSound &b : r_m.bed_assets->sounds) {
@@ -819,6 +830,14 @@ void capture_end(Impl &r_m) {
 		const ba::WeaponAudioStats &rs = r_m.router->stats();
 		UtilityFunctions::print(String::utf8(("[audio] weapon foley: " + std::to_string(rs.reloads) + " reloads, " + std::to_string(rs.foley) + " foley one-shots, " +
 				std::to_string(rs.foley_releases) + " releases, " + std::to_string(rs.foley_out_of_reach) + " out of reach, " + std::to_string(rs.one_shots) + " pool one-shots").c_str()));
+	}
+	if (r_m.flybys) {
+		const ba::FlyByAudioStats &fs = r_m.flybys->stats();
+		UtilityFunctions::print(String::utf8(("[audio] fly-bys: " + std::to_string(fs.bullets) + " bullets, " +
+				std::to_string(fs.starts) + " started, " + std::to_string(fs.receding) + " receding, " +
+				std::to_string(fs.slow) + " too slow, " + std::to_string(fs.refused) + " refused, " +
+				std::to_string(fs.untracked) + " untracked")
+						.c_str()));
 	}
 	if (c->dir.empty()) {
 		return;

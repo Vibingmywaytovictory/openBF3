@@ -1265,19 +1265,7 @@ TEST_CASE("late join: two clients' event streams through two trigger instances s
 	const uint16_t rifle = tw::id_of(*table, "weapons/m16a4/u_m16a4");
 	auto fire = std::make_shared<FireEffectTable>();
 	fire->defs.assign(table->defs.size(), rifle_effects());
-	auto capsules = std::make_shared<core::gameplay::CapsulePoseTable>();
-	capsules->version = core::gameplay::kCapsuleTableVersion;
-	capsules->capsule_count = 1;
-	for (size_t i = 0; i < core::gameplay::kCapsulePitchBuckets; ++i) {
-		capsules->pitch_deg[i] = -64.0f + 4.0f * float(i);
-	}
-	core::gameplay::CapsuleLocal c{};
-	c.b[1] = 1.0f;
-	c.radius = 0.3f;
-	capsules->steady.assign(core::gameplay::kCapsuleStances * core::gameplay::kCapsulePitchBuckets, c);
-	capsules->transition.assign(core::gameplay::kCapsuleTransitions * core::gameplay::kCapsuleTransitionFractions * core::gameplay::kCapsulePitchBuckets, c);
-	capsules->bound_radius = 2.0f;
-	REQUIRE(core::gameplay::capsule_pose_table_valid(*capsules));
+	const std::shared_ptr<const core::gameplay::CapsulePoseTable> capsules = tw::unit_capsule_table();
 	const std::unique_ptr<sim::CollisionWorld> wall = tw::wall_world({ 25.0f });
 
 	struct Client {

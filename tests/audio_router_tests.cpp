@@ -1,9 +1,11 @@
 #include "test_support.h"
+#include "weapons_support.h"
 
 #include "bf3/audio/audio_analysis.h"
 #include "bf3/audio/audio_check.h"
 #include "bf3/audio/audio_config.h"
 #include "bf3/audio/audio_load.h"
+#include "bf3/audio/flyby_audio.h"
 #include "bf3/audio/game_audio_check.h"
 #include "bf3/audio/impact_audio.h"
 #include "bf3/audio/mixer_core.h"
@@ -30,6 +32,7 @@
 #include "bf3/fx/effect_compiler.h"
 #include "bf3/fx/impact_table.h"
 #include "bf3/fx/triggers.h"
+#include "bf3/host/client_projectiles.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/client_wiring.h"
 #include "bf3/host/gunplay.h"
@@ -67,6 +70,7 @@ namespace present = bf3::present;
 namespace sw = bf3::sim::weapons;
 namespace sim = bf3::sim;
 namespace net = bf3::net;
+namespace tw = bf3::test::weapons;
 using ba::SamplerTraceEntry;
 using ba::SamplerTraceKind;
 
@@ -1341,6 +1345,157 @@ TEST_SUITE("audio-router") {
 		CHECK(cache->programs().size() == 2);
 		CHECK(cache->find("a") != nullptr);
 		CHECK(cache->find("c") == nullptr);
+	}
+
+	TEST_CASE("fly-bys: one start per bullet inside the radius, none outside, none under the speed, none past a wall") {
+		Rig r;
+		constexpr uint64_t kMatch = 0x5eed;
+		std::vector<ba::FlyBySound> sounds(2);
+		sounds[0] = ba::FlyBySound{ one_shot_program(r.wave, kImpactStart, true), 15.0f, 20.0f };
+		auto bullet = [&](uint8_t p_slot, uint32_t p_shot, uint8_t p_pellet, uint16_t p_def, float p_x, float p_z,
+							  float p_speed) {
+			host::PresentedBullet b;
+			b.slot = p_slot;
+			b.shot_index = p_shot;
+			b.pellet = p_pellet;
+			b.def = p_def;
+			b.origin = { p_x, 0.0f, -300.0f };
+			b.position = { p_x, 0.0f, p_z };
+			b.speed = p_speed;
+			b.spawn_time = r.render - 30 * kTick;
+			b.time = r.render;
+			return b;
+		};
+		{
+			ba::FlyByAudio fb(*r.mixer, sounds, r.wave.bank, ba::AudioTuning{}, *r.pool);
+			const uint64_t started = r.pool->started();
+			for (float z = -300.0f; z <= 300.0f; z += 10.0f) {
+				const std::vector<host::PresentedBullet> frame{ bullet(3, 10, 0, 0, 4.0f, z, 600.0f),
+					bullet(3, 11, 0, 0, 3.0f, z, 600.0f), bullet(3, 11, 1, 0, -3.0f, z, 600.0f),
+					bullet(4, 12, 0, 0, 16.0f, z, 600.0f), bullet(4, 13, 0, 0, 2.0f, z, 10.0f),
+					bullet(4, 14, 0, 1, 1.0f, z, 600.0f), bullet(4, 15, 0, 9, 1.0f, z, 600.0f) };
+				for (int twice = 0; twice < 2; ++twice) {
+					r.begin();
+					fb.set_listener(r.listener);
+					fb.on_bullets(frame, kMatch, *r.clock);
+					r.end();
+				}
+			}
+			for (int k = 0; k < 4; ++k) {
+				host::PresentedBullet away = bullet(6, 30, 0, 0, 0.0f, 5.0f + 10.0f * float(k), 600.0f);
+				away.origin = { 0.0f, 0.0f, 5.0f };
+				host::PresentedBullet across = bullet(6, 31, 0, 0, 10.0f * float(k), 4.0f, 600.0f);
+				across.origin = { 0.0f, 0.0f, 4.0f };
+				const std::vector<host::PresentedBullet> near_shooter{ away, across };
+				r.begin();
+				fb.set_listener(r.listener);
+				fb.on_bullets(near_shooter, kMatch, *r.clock);
+				r.end();
+			}
+			host::PresentedBullet ended = bullet(5, 20, 0, 0, 5.0f, 40.0f, 600.0f);
+			ended.origin = { 5.0f, 0.0f, -50.0f };
+			ended.ended = true;
+			host::PresentedBullet wild = ended;
+			wild.shot_index = 21;
+			wild.position[0] = std::numeric_limits<float>::quiet_NaN();
+			const std::vector<host::PresentedBullet> last{ ended, wild };
+			r.begin();
+			fb.on_bullets(last, kMatch, *r.clock);
+			r.end();
+			r.idle(2);
+			const ba::FlyByAudioStats &st = fb.stats();
+			CHECK(st.starts == 4);
+			CHECK(r.pool->started() - started == 4);
+			CHECK(st.bullets == 8);
+			CHECK(st.receding == 2);
+			CHECK(st.slow == 1);
+			CHECK(st.silent == 2);
+			CHECK(st.refused == 0);
+			CHECK(st.untracked == 0);
+			CHECK(st.farthest_start_m == doctest::Approx(5.0f));
+			CHECK(std::any_of(r.capture.samples.begin(), r.capture.samples.end(), [](float v) { return v != 0.0f; }));
+			CHECK(ba::closest_fraction({ 0, 0, 0 }, { 0, 0, 10 }, { 3, 0, 4 }) == doctest::Approx(0.4f));
+			CHECK(ba::closest_fraction({ 0, 0, 0 }, { 0, 0, 0 }, { 3, 0, 4 }) == 0.0f);
+		}
+
+		const std::shared_ptr<const sw::WeaponTable> table = tw::synthetic_table();
+		const uint16_t rifle = tw::id_of(*table, "weapons/m16a4/u_m16a4");
+		std::vector<ba::FlyBySound> rifle_sounds(table->defs.size());
+		rifle_sounds[rifle] = sounds[0];
+		const std::shared_ptr<const gameplay::CapsulePoseTable> capsules = tw::unit_capsule_table();
+		struct Flown {
+			uint64_t starts = 0;
+			float farthest_m = 0.0f;
+			size_t ended_publishes = 0;
+			float ended_z = 0.0f;
+			uint64_t unpresented = 0;
+			uint64_t receding = 0;
+		};
+		const auto fly = [&](const sim::CollisionWorld &p_world) {
+			Rig q;
+			q.listener.position = { 24.0f, 1.6f, 100.0f };
+			host::ClientProjectilesConfig pc;
+			pc.own_slot = 0;
+			Result<std::unique_ptr<host::ClientProjectiles>> made =
+					host::ClientProjectiles::create(table, capsules, kMatch, pc);
+			REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+			ba::FlyByAudio fb(*q.mixer, rifle_sounds, q.wave.bank, ba::AudioTuning{}, *q.pool);
+			const sw::SimTime at = q.render + 2 * kTick;
+			const auto shot = [&](uint32_t p_index, float p_x, float p_dx) {
+				net::RemoteShot s;
+				s.slot = 5;
+				s.shot_index = p_index;
+				s.def = rifle;
+				s.time = at;
+				s.origin = { p_x, 1.6f, 0.0f };
+				const float n = std::sqrt(p_dx * p_dx + 1.0f);
+				s.direction = { p_dx / n, 0.0f, 1.0f / n };
+				s.aim = s.direction;
+				return s;
+			};
+			(*made)->queue_remote(shot(1, 28.0f, 0.0f));
+			(*made)->queue_remote(shot(2, 45.0f, 0.0f));
+			(*made)->queue_remote(shot(3, 17.0f, 0.045f));
+			net::RemoteShot behind = shot(4, 24.0f, 0.0f);
+			behind.origin[2] = 105.0f;
+			(*made)->queue_remote(behind);
+			auto ring = std::make_unique<host::PresentationEvents>();
+			std::vector<host::PresentEvent> drained(host::kPresentationEventCapacity);
+			std::vector<host::PresentedBullet> bullets(host::kMaxPresentedBullets);
+			Flown out;
+			for (int f = 0; f < 120; ++f) {
+				(*made)->step_remote(double(q.render) / double(kTick), p_world, {}, *ring);
+				const size_t n = (*made)->present_bullets(bullets);
+				for (size_t k = 0; k < n; ++k) {
+					if (bullets[k].ended && bullets[k].shot_index == 3) {
+						++out.ended_publishes;
+						out.ended_z = bullets[k].position[2];
+					}
+				}
+				q.begin();
+				fb.set_listener(q.listener);
+				fb.on_bullets(std::span<const host::PresentedBullet>(bullets.data(), n), kMatch, *q.clock);
+				q.end();
+				(void)ring->drain(drained);
+			}
+			out.starts = fb.stats().starts;
+			out.farthest_m = fb.stats().farthest_start_m;
+			out.unpresented = (*made)->stats().bullets_unpresented;
+			out.receding = fb.stats().receding;
+			CHECK((*made)->stats().remote_spawned == 4);
+			return out;
+		};
+		const Flown walled = fly(*tw::wall_world({ 60.0f }));
+		CHECK(walled.starts == 1);
+		CHECK(walled.farthest_m == doctest::Approx(4.0f).epsilon(0.02));
+		CHECK(walled.ended_publishes == host::kEndedBulletPublishes);
+		CHECK(walled.ended_z == doctest::Approx(60.0f).epsilon(0.01));
+		CHECK(walled.unpresented == 0);
+		CHECK(walled.receding == 1);
+		const Flown open = fly(*tw::wall_world({}));
+		CHECK(open.starts == 2);
+		CHECK(open.receding == 1);
+		CHECK(open.farthest_m < 15.0f);
 	}
 
 	TEST_CASE("one-shot pool aging: a one-shot that never finishes is stopped, then killed and forgotten") {
@@ -2647,6 +2802,64 @@ TEST_SUITE("audio-game") {
 			census += " " + std::to_string(n) + " with " + std::to_string(channels);
 		}
 		MESSAGE("Metro TDM bank waves by channel count:" << census);
+		check_game_unchanged(*f);
+	}
+
+	TEST_CASE("fly-bys: Metro TDM's bullets name their FlyBySound, the patch compiles with its waves in the bank, and "
+			  "the data scopes it") {
+		GameFixture *f = need_game_install();
+		if (f == nullptr) {
+			return;
+		}
+		const std::vector<ba::FlyBySound> &fly = f->assets.flybys;
+		REQUIRE(fly.size() == f->gunplay->defs.size());
+		std::vector<std::shared_ptr<const SoundProgram>> programs;
+		std::string table;
+		size_t named = 0, bound = 0, m556 = 0;
+		for (size_t i = 0; i < fly.size(); ++i) {
+			const gameplay::ProjectileDef &p = f->gunplay->defs[i].projectile;
+			if (p.fly_by_sound.empty()) {
+				CHECK(!fly[i].program);
+				continue;
+			}
+			++named;
+			bound += fly[i].program ? 1 : 0;
+			CHECK_MESSAGE(fly[i].program, f->gunplay->defs[i].variant, ": ", p.fly_by_sound);
+			CHECK(fly[i].radius_m == p.fly_by_radius);
+			CHECK(fly[i].min_speed == p.fly_by_speed);
+			if (p.fly_by_sound == "sound/bullet_craft/bullet_flybys/bullet_flyby_556") {
+				++m556;
+				CHECK(fly[i].radius_m == 15.0f);
+				CHECK(fly[i].min_speed == 20.0f);
+			}
+			if (fly[i].program && std::find(programs.begin(), programs.end(), fly[i].program) == programs.end()) {
+				programs.push_back(fly[i].program);
+				table += "  " + p.fly_by_sound + " radius " + std::to_string(p.fly_by_radius) + " speed " +
+						std::to_string(p.fly_by_speed) + "\n";
+			}
+		}
+		CHECK(named > 0);
+		CHECK(bound == named);
+		CHECK(m556 > 0);
+		CHECK(f->assets.waves_missing == 0);
+		const ba::MixerA3Assets a3 = ba::load_mixer_a3(f->metro->db(), programs);
+		REQUIRE(a3.scopes != nullptr);
+		for (const std::shared_ptr<const SoundProgram> &p : programs) {
+			const uint16_t s = a3.scopes->scope_of(p->partition);
+			REQUIRE_MESSAGE(s != kNoScope, p->name);
+			const SoundScope &scope = a3.scopes->scopes[s];
+			table += "  " + p->name + ": " + scope.name + " closest " + std::to_string(scope.closest) + "\n";
+			if (iequals_ascii(p->name, "sound/bullet_craft/bullet_flybys/bullet_flyby_556")) {
+				CHECK(scope.name == "Bullet_Flyby_Standard_Scope");
+				CHECK(scope.closest == 5);
+			} else if (iequals_ascii(p->name, "sound/bullet_craft/bullet_flybys/bullet_flyby_sniper")) {
+				CHECK(scope.name == "Bullet_Flyby_Important_Scope");
+				CHECK(scope.closest == 2);
+			}
+		}
+		CHECK(named == 10);
+		CHECK(programs.size() == 2);
+		MESSAGE(named, " defs name a fly-by, ", programs.size(), " patches:\n", table);
 		check_game_unchanged(*f);
 	}
 

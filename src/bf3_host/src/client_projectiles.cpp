@@ -1,5 +1,6 @@
 #include "bf3/host/client_projectiles.h"
 
+#include "bf3/core/math.h"
 #include "bf3/sim/weapons/posed_target.h"
 #include "bf3/sim/weapons/weapon_rng.h"
 
@@ -69,6 +70,10 @@ struct ClientProjectiles::Impl {
 		uint8_t slot = 0;
 		uint32_t next = 0;
 	};
+	struct Ended {
+		PresentedBullet bullet;
+		uint8_t publishes = 0;
+	};
 
 	class OwnProvider final : public sw::HitTargetProvider {
 	public:
@@ -107,6 +112,61 @@ struct ClientProjectiles::Impl {
 	mutable ClientProjectilesStats stats;
 	std::array<Ordinal, kImpactOrdinals> ordinals{};
 	sw::ProjectileStepOutput out;
+	std::vector<sw::Projectile> before;
+	std::vector<Ended> ended;
+
+	static bool same_bullet(const sw::Projectile &p_a, const sw::Projectile &p_b) {
+		return p_a.player_slot == p_b.player_slot && p_a.shot_index == p_b.shot_index && p_a.pellet == p_b.pellet;
+	}
+
+	static PresentedBullet presented(const sw::Projectile &p_p) {
+		PresentedBullet b;
+		for (size_t k = 0; k < 3; ++k) {
+			b.origin[k] = float(p_p.origin[k]);
+			b.position[k] = float(p_p.position[k]);
+		}
+		b.speed = float(std::sqrt(p_p.velocity[0] * p_p.velocity[0] + p_p.velocity[1] * p_p.velocity[1] +
+				p_p.velocity[2] * p_p.velocity[2]));
+		b.spawn_time = p_p.spawn_time;
+		b.time = p_p.time;
+		b.shot_index = p_p.shot_index;
+		b.def = p_p.def;
+		b.slot = uint8_t(p_p.player_slot);
+		b.pellet = p_p.pellet;
+		return b;
+	}
+
+	void note_ended() {
+		const std::span<const sw::Projectile> now = remote->live();
+		size_t kept = 0;
+		for (const sw::Projectile &p : before) {
+			if (kept < now.size() && same_bullet(p, now[kept])) {
+				++kept;
+				continue;
+			}
+			PresentedBullet b = presented(p);
+			b.ended = true;
+			for (const sw::ImpactEvent &i : out.impacts) {
+				if (i.kind != sw::ImpactKind::Bounce && i.player_slot == p.player_slot &&
+						i.shot_index == p.shot_index && i.pellet == p.pellet) {
+					b.position = core::to_array(i.position);
+					b.time = i.time;
+					b.speed = core::vec::length(i.velocity);
+				}
+			}
+			for (const sw::DetonationEvent &d : out.detonations) {
+				if (d.player_slot == p.player_slot && d.shot_index == p.shot_index) {
+					b.position = core::to_array(d.position);
+					b.time = d.time;
+				}
+			}
+			if (ended.size() >= kMaxPresentedBullets) {
+				ended.erase(ended.begin());
+				++stats.bullets_unpresented;
+			}
+			ended.push_back(Ended{ b, kEndedBulletPublishes });
+		}
+	}
 
 	uint32_t next_ordinal(uint8_t p_slot, uint32_t p_shot) {
 		Ordinal &o = ordinals[(size_t(p_shot) * 131u + p_slot) % kImpactOrdinals];
@@ -238,6 +298,7 @@ core::Result<std::unique_ptr<ClientProjectiles>> ClientProjectiles::create(std::
 	m.own = std::make_unique<sw::ProjectileWorld>(p_table, p_config.limits);
 	m.remote = std::make_unique<sw::ProjectileWorld>(p_table, p_config.limits);
 	m.scratch.reserve(128);
+	m.ended.reserve(kMaxPresentedBullets);
 	return c;
 }
 
@@ -310,8 +371,12 @@ void ClientProjectiles::step_remote(double p_render_ticks, const sim::CollisionW
 			m.pending.pop_front();
 		}
 		m.out.clear();
+		m.before.assign(m.remote->live().begin(), m.remote->live().end());
 		m.remote->step(t, p_world, provider, m.out);
 		m.emit_impacts(r_events, PresentTimeline::Render, false);
+		if (m.out.removed > 0) {
+			m.note_ended();
+		}
 	}
 	m.remote_tick = target;
 	m.stats.live_remote = uint32_t(m.remote->live().size());
@@ -345,6 +410,35 @@ size_t ClientProjectiles::live_grenades(std::span<PresentedGrenade> r_out) const
 			g.def = p.def;
 			g.slot = uint8_t(p.player_slot);
 			g.resting = (p.flags & sw::projectile_flags::kResting) != 0;
+		}
+	}
+	return n;
+}
+
+size_t ClientProjectiles::present_bullets(std::span<PresentedBullet> r_out) {
+	Impl &m = *impl_;
+	size_t n = 0;
+	for (Impl::Ended &e : m.ended) {
+		if (n < r_out.size()) {
+			r_out[n++] = e.bullet;
+		} else {
+			++m.stats.bullets_unpresented;
+		}
+		--e.publishes;
+	}
+	m.ended.erase(std::remove_if(m.ended.begin(), m.ended.end(), [](const Impl::Ended &e) { return e.publishes == 0; }),
+			m.ended.end());
+	if (m.remote == nullptr) {
+		return n;
+	}
+	for (const sw::Projectile &p : m.remote->live()) {
+		if ((p.flags & sw::projectile_flags::kResting) != 0) {
+			continue;
+		}
+		if (n < r_out.size()) {
+			r_out[n++] = Impl::presented(p);
+		} else {
+			++m.stats.bullets_unpresented;
 		}
 	}
 	return n;

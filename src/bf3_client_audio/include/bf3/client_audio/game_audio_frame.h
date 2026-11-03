@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/audio/flyby_audio.h"
 #include "bf3/audio/game_audio_check.h"
 #include "bf3/audio/impact_audio.h"
 #include "bf3/audio/weapon_audio.h"
@@ -46,7 +47,8 @@ struct GameAudioInputs {
 class GameAudioDriver {
 public:
 	void step(WeaponAudioRouter &r_router, ImpactAudio *r_impacts, SimMixerClock &r_clock, const GameAudioInputs &p_in,
-			std::span<const ImpactSoundRequest> p_impacts = {}, std::span<const EffectSoundRequest> p_effects = {});
+			std::span<const ImpactSoundRequest> p_impacts = {}, std::span<const EffectSoundRequest> p_effects = {},
+			FlyByAudio *r_flybys = nullptr);
 
 private:
 	std::array<host::PresentedOtherWeapon, net::kMaxSlots> newest_{};
@@ -70,6 +72,7 @@ struct GameAudioAssets {
 	KitAudioSources kits;
 	std::shared_ptr<const WeaponAudioTable> table;
 	std::shared_ptr<const ImpactSoundCache> impacts;
+	std::vector<FlyBySound> flybys;
 	std::map<std::string, GameAuditionAsset, std::less<>> auditions;
 	std::shared_ptr<const core::audio::WaveBank> bank;
 	std::vector<std::string> report;
@@ -81,6 +84,9 @@ struct GameAudioAssets {
 core::Result<GameAudioAssets> load_game_audio_assets(const std::shared_ptr<const core::Install> &p_install, const core::level::LoadedLevel &p_level,
 		const host::GunplayLevel &p_gunplay, std::span<const std::string> p_impact_sounds, unsigned p_threads,
 		const std::atomic<bool> *p_stop = nullptr, const GameAudioLoadOptions &p_options = {});
+
+std::vector<FlyBySound> load_flyby_sounds(
+		const core::EbxResolver &p_db, const host::GunplayLevel &p_gunplay, std::vector<std::string> &r_report);
 
 core::Result<std::shared_ptr<const core::audio::SoundProgram>> compile_patch_lenient(const core::EbxResolver &p_db, std::string_view p_patch);
 

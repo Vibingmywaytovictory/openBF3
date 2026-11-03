@@ -63,3 +63,8 @@ target_sources(bf3_audio PRIVATE
 target_sources(bf3_audio PRIVATE
     src/patch_nodes_loop.cpp
 )
+
+target_sources(bf3_audio PRIVATE
+    include/bf3/audio/flyby_audio.h
+    src/flyby_audio.cpp
+)

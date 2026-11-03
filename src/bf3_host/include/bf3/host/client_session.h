@@ -281,6 +281,8 @@ struct PresentationFrame {
 	SquadOrders squad_orders{};
 	uint8_t grenade_count = 0;
 	std::array<PresentedGrenade, kMaxPresentedGrenades> grenades{};
+	uint16_t bullet_count = 0;
+	std::array<PresentedBullet, kMaxPresentedBullets> bullets{};
 	NetStats net;
 };
 static_assert(std::is_trivially_copyable_v<PresentationFrame>);

@@ -9,6 +9,7 @@
 #include "bf3/sim/weapons/weapon_sim_def.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <type_traits>
 
@@ -60,6 +61,22 @@ struct PresentedOwnWeapons {
 	std::array<PresentedOwnSlot, sim::weapons::kMaxWeaponSlots> slots{};
 };
 static_assert(std::is_trivially_copyable_v<PresentedOwnWeapons>);
+
+inline constexpr size_t kMaxPresentedBullets = 256;
+
+struct PresentedBullet {
+	std::array<float, 3> origin{};
+	std::array<float, 3> position{};
+	float speed = 0.0f;
+	sim::weapons::SimTime spawn_time = 0;
+	sim::weapons::SimTime time = 0;
+	uint32_t shot_index = 0;
+	uint16_t def = sim::weapons::kNoWeapon;
+	uint8_t slot = 0;
+	uint8_t pellet = 0;
+	bool ended = false;
+};
+static_assert(std::is_trivially_copyable_v<PresentedBullet>);
 
 enum class PresentJoin : uint8_t { Untracked = 0, Waiting = 1, Joined = 2 };
 

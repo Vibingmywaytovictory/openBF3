@@ -7,6 +7,7 @@
 #include "bf3/net/other_sample.h"
 #include "bf3/net/protocol.h"
 #include "bf3/present/effect_seed.h"
+#include "bf3/present/presented.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/weapon_sim.h"
@@ -32,6 +33,7 @@ struct ClientProjectilesStats {
 	uint64_t detonations_suppressed = 0;
 	uint64_t remote_late = 0;
 	uint64_t events_refused = 0;
+	uint64_t bullets_unpresented = 0;
 };
 static_assert(std::is_trivially_copyable_v<ClientProjectilesStats>);
 
@@ -66,6 +68,10 @@ struct ClientProjectilesConfig {
 
 using present::effect_seed;
 using present::impact_seed;
+using present::kMaxPresentedBullets;
+using present::PresentedBullet;
+
+inline constexpr uint8_t kEndedBulletPublishes = 4;
 
 inline constexpr size_t kMaxPresentedGrenades = 16;
 
@@ -98,6 +104,7 @@ public:
 
 	size_t take_samples(std::span<OwnTestSample> r_out);
 	size_t live_grenades(std::span<PresentedGrenade> r_out) const;
+	size_t present_bullets(std::span<PresentedBullet> r_out);
 	const ClientProjectilesStats &stats() const;
 
 private:

@@ -6,9 +6,11 @@
 #include "bf3/host/gunplay.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <optional>
 
 namespace bf3::audio {
@@ -16,8 +18,9 @@ namespace bf3::audio {
 namespace ca = core::audio;
 namespace sw = sim::weapons;
 
-void GameAudioDriver::step(WeaponAudioRouter &r_router, ImpactAudio *r_impacts, SimMixerClock &r_clock, const GameAudioInputs &p_in,
-		std::span<const ImpactSoundRequest> p_impacts, std::span<const EffectSoundRequest> p_effects) {
+void GameAudioDriver::step(WeaponAudioRouter &r_router, ImpactAudio *r_impacts, SimMixerClock &r_clock,
+		const GameAudioInputs &p_in, std::span<const ImpactSoundRequest> p_impacts,
+		std::span<const EffectSoundRequest> p_effects, FlyByAudio *r_flybys) {
 	r_router.set_own_slot(p_in.own_slot);
 	r_router.set_own_first_person(p_in.own_first_person);
 	if (p_in.frame != nullptr && p_in.frame->own_weapons_valid) {
@@ -46,6 +49,14 @@ void GameAudioDriver::step(WeaponAudioRouter &r_router, ImpactAudio *r_impacts, 
 		}
 		for (const EffectSoundRequest &e : p_effects) {
 			r_impacts->on_effect_sound(e, r_clock);
+		}
+	}
+	if (r_flybys != nullptr) {
+		r_flybys->set_listener(p_in.listener);
+		if (p_in.frame != nullptr && p_in.frame->valid) {
+			const size_t n = std::min<size_t>(p_in.frame->bullet_count, p_in.frame->bullets.size());
+			r_flybys->on_bullets(std::span<const host::PresentedBullet>(p_in.frame->bullets.data(), n),
+					p_in.frame->match_seed, r_clock);
 		}
 	}
 	r_router.update(p_in.now_ns);
@@ -102,6 +113,35 @@ core::Result<GameAuditionAsset> load_library_audition(const core::Install &p_ins
 
 }
 
+std::vector<FlyBySound> load_flyby_sounds(
+		const core::EbxResolver &p_db, const host::GunplayLevel &p_gunplay, std::vector<std::string> &r_report) {
+	std::vector<FlyBySound> out(p_gunplay.defs.size());
+	std::map<std::string, std::shared_ptr<const ca::SoundProgram>, std::less<>> compiled;
+	size_t defs = 0, failed = 0;
+	for (size_t i = 0; i < p_gunplay.defs.size(); ++i) {
+		const core::gameplay::ProjectileDef &p = p_gunplay.defs[i].projectile;
+		if (p.fly_by_sound.empty() || !(p.fly_by_radius > 0.0f)) {
+			continue;
+		}
+		auto it = compiled.find(p.fly_by_sound);
+		if (it == compiled.end()) {
+			core::Result<std::shared_ptr<const ca::SoundProgram>> prog = compile_patch_lenient(p_db, p.fly_by_sound);
+			if (!prog) {
+				++failed;
+				r_report.push_back("fly-by " + p.fly_by_sound + ": NOT LOADED (" + prog.error().message + ")");
+			}
+			it = compiled.emplace(p.fly_by_sound, prog ? *prog : nullptr).first;
+		}
+		if (it->second) {
+			out[i] = FlyBySound{ it->second, p.fly_by_radius, p.fly_by_speed };
+			++defs;
+		}
+	}
+	r_report.push_back("fly-bys: " + std::to_string(defs) + " defs, " + std::to_string(compiled.size() - failed) +
+			" patches, " + std::to_string(failed) + " failures");
+	return out;
+}
+
 core::Result<GameAudioAssets> load_game_audio_assets(const std::shared_ptr<const core::Install> &p_install, const core::level::LoadedLevel &p_level,
 		const host::GunplayLevel &p_gunplay, std::span<const std::string> p_impact_sounds, unsigned p_threads, const std::atomic<bool> *p_stop,
 		const GameAudioLoadOptions &p_options) {
@@ -140,6 +180,7 @@ core::Result<GameAudioAssets> load_game_audio_assets(const std::shared_ptr<const
 	for (const std::string &e : (*cache)->errors()) {
 		a.report.push_back("impact " + e);
 	}
+	a.flybys = load_flyby_sounds(db, p_gunplay, a.report);
 
 	std::vector<std::string> from_library;
 	for (const GameAuditionItem &item : game_audition_items()) {
@@ -195,6 +236,11 @@ core::Result<GameAudioAssets> load_game_audio_assets(const std::shared_ptr<const
 	}
 	for (const std::shared_ptr<const ca::SoundProgram> &p : a.impacts->programs()) {
 		all.push_back(p);
+	}
+	for (const FlyBySound &s : a.flybys) {
+		if (s.program && std::find(all.begin(), all.end(), s.program) == all.end()) {
+			all.push_back(s.program);
+		}
 	}
 	for (const auto &[name, au] : a.auditions) {
 		if (!au.bank) {

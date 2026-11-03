@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/core/gameplay/capsule_pose_table.h"
 #include "bf3/core/gameplay/weapon_def.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
@@ -386,6 +387,24 @@ inline std::unique_ptr<bf3::sim::CollisionWorld> wall_world(std::vector<float> p
 	bf3::core::Result<std::unique_ptr<bf3::sim::CollisionWorld>> w = bf3::sim::CollisionWorld::create(*shapes);
 	REQUIRE_MESSAGE(w.ok(), (w.ok() ? std::string() : w.error().message));
 	return std::move(*w);
+}
+
+inline std::shared_ptr<const gp::CapsulePoseTable> unit_capsule_table() {
+	auto capsules = std::make_shared<gp::CapsulePoseTable>();
+	capsules->version = gp::kCapsuleTableVersion;
+	capsules->capsule_count = 1;
+	for (size_t i = 0; i < gp::kCapsulePitchBuckets; ++i) {
+		capsules->pitch_deg[i] = -64.0f + 4.0f * float(i);
+	}
+	gp::CapsuleLocal c{};
+	c.b[1] = 1.0f;
+	c.radius = 0.3f;
+	capsules->steady.assign(gp::kCapsuleStances * gp::kCapsulePitchBuckets, c);
+	capsules->transition.assign(
+			gp::kCapsuleTransitions * gp::kCapsuleTransitionFractions * gp::kCapsulePitchBuckets, c);
+	capsules->bound_radius = 2.0f;
+	REQUIRE(gp::capsule_pose_table_valid(*capsules));
+	return capsules;
 }
 
 inline sw::HitTarget capsule_target(uint32_t p_id, const bf3::sim::Vec3 &p_a, const bf3::sim::Vec3 &p_b, float p_radius, sw::HitZone p_zone) {
