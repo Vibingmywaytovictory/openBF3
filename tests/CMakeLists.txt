@@ -1205,6 +1205,8 @@ set_tests_properties(net.procs.scale32 net.procs.scale64 net.procs.scale_control
 openbf3_cost(net.procs.scale32 1 220)
 openbf3_cost(net.procs.scale64 1 220)
 openbf3_cost(net.procs.scale_control 1 130)
+openbf3_proc_row(net.procs.master test_net_procs LABEL timing TIMEOUT 900 ARGS --test-suite=net-procs-master)
+set_tests_properties(net.procs.master PROPERTIES RUN_SERIAL TRUE)
 set_tests_properties(net.procs.connect net.procs.two_clients net.procs.rotation net.procs.godot_connect net.procs.follow net.procs.listen_maplist net.procs.kick godot.rotation PROPERTIES RUN_SERIAL TRUE)
 openbf3_cost(net.procs.connect 1 45)
 openbf3_cost(net.procs.two_clients 1 60)

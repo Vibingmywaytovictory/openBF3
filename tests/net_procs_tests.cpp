@@ -613,3 +613,73 @@ TEST_SUITE("godot-rotation") {
 		driver.finish(server->id, 1s);
 	}
 }
+
+TEST_SUITE("net-procs-master") {
+	TEST_CASE("a dedicated server registers with a master process, bf3dump servers lists it, and a headless Godot "
+			  "client finds and joins it by name") {
+		ProcDriver driver(driver_config_from_env());
+		const std::optional<size_t> master = start_tool(driver, "master", { "master", "--port=0", "--seconds=900" });
+		if (!master) {
+			return;
+		}
+		constexpr std::string_view kListening = "master: listening on 127.0.0.1:";
+		std::string listening;
+		REQUIRE_MESSAGE(line_starts(driver, *master, kListening, 30s, &listening), driver.output(*master));
+		const std::string_view digits = std::string_view(listening).substr(kListening.size());
+		uint32_t master_port = 0;
+		std::from_chars(digits.data(), digits.data() + digits.size(), master_port);
+		REQUIRE_MESSAGE((master_port > 0 && master_port < 65536), listening);
+		const std::string at = "127.0.0.1:" + std::to_string(master_port);
+		const std::optional<Server> server = start_server(driver, 0, 900,
+				{ "--level=MP_011", "--mode=TeamDeathMatch0", "--master=" + at, "--name=procs-master" });
+		if (!server) {
+			driver.finish(*master, 1s);
+			return;
+		}
+		CHECK_MESSAGE(driver.wait_line(
+							  server->id,
+							  [&](std::string_view l) {
+								  return contains(l, "[dedicated] master " + at + ": registered as procs-master");
+							  },
+							  60s),
+				driver.output(server->id));
+		const std::optional<size_t> listing = start_tool(driver, "servers", { "servers", at });
+		REQUIRE(listing.has_value());
+		const ChildEnd listed = driver.finish(*listing, 60s);
+		const std::string list_out = driver.output(*listing);
+		require_clean_exit(driver, *listing, listed, "bf3dump servers");
+		CHECK_MESSAGE(contains(list_out, "servers: 1 on " + at), list_out);
+		CHECK_MESSAGE(contains(list_out,
+							  "server: procs-master | 127.0.0.1:" + std::to_string(server->port) +
+									  " | MP_011 TeamDeathMatch0 | players 0, bots 0, max 32 | protocol "),
+				list_out);
+		CHECK_MESSAGE(contains(list_out, " (this build) | "), list_out);
+		bf3::core::Result<size_t> client = driver.start(driver.godot_child("client",
+				{ "--headless", "res://scenes/metro_tdm.tscn" }, { "--connect=procs-master@" + at, "--quit-after=1" }));
+		REQUIRE_MESSAGE(client.ok(), (client.ok() ? std::string() : client.error().message));
+		std::string line;
+		CHECK_MESSAGE(driver.wait_line(
+							  *client,
+							  [](std::string_view l) {
+								  return contains(l, "[level] done: ") || contains(l, "[level] --connect=");
+							  },
+							  600s, &line),
+				driver.output(*client));
+		CHECK(contains(line, "[level] done: "));
+		const ChildEnd client_end = driver.finish(*client, 60s);
+		const std::string out = driver.output(*client);
+		CHECK_MESSAGE(client_end.code == 0, out);
+		CHECK(client_end.stragglers == 0);
+		CHECK(contains(out, "the master lists procs-master at 127.0.0.1:" + std::to_string(server->port)));
+		CHECK(contains(out, "[level] MP_011 TeamDeathMatch0"));
+		CHECK(contains(out, "[level] install unchanged: yes"));
+		driver.finish(server->id, 1s);
+		const ChildEnd master_end = driver.finish(*master, 1s);
+		CHECK(master_end.stragglers == 0);
+		const std::vector<std::string> counts = lines_with(driver.output(*master), "master: 1 servers | ");
+		REQUIRE_MESSAGE(!counts.empty(), driver.output(*master));
+		CHECK_MESSAGE(contains(counts.back(), "registered 1,"), counts.back());
+		CHECK_MESSAGE(contains(counts.back(), "queries 2 | refused 0 ("), counts.back());
+		MESSAGE(line);
+	}
+}

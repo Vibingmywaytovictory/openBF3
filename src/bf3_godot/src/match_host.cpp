@@ -24,6 +24,7 @@
 #include "bf3/core/util/key_values.h"
 #include "bf3/core/util/text.h"
 #include "bf3/host/server_level.h"
+#include "bf3/net/master.h"
 #include "bf3/net/netsim.h"
 #include "bf3/render/level_prepare.h"
 #include "bf3/sim/soldier_motor.h"
@@ -202,17 +203,32 @@ std::shared_ptr<host::ClientSession> Bf3MatchHost::client() const {
 
 bool Bf3MatchHost::parse_connect() {
 	const std::string text = user_arg_value("connect");
-	const size_t colon = text.rfind(':');
-	uint32_t port = 0;
-	if (colon == std::string::npos || colon == 0 ||
-			bf3::core::parse_u32_value(std::string_view(text).substr(colon + 1), 1.0, 65535.0, port).fault !=
-					bf3::core::KeyFault::None) {
-		end_match("--connect=" + text + ": expected host:port with a port 1..65535");
+	bf3::core::Result<bf3::net::ConnectTarget> target = bf3::net::parse_connect_target(text);
+	if (!target) {
+		end_match("--connect=" + text + ": " + target.error().message + "; expected host:port or name@host:port");
 		return false;
 	}
-	connect_host_ = text.substr(0, colon);
-	connect_port_ = uint16_t(port);
+	connect_target_ = *target;
+	connect_host_ = target->at.host;
+	connect_port_ = target->at.port;
 	return true;
+}
+
+void Bf3MatchHost::join_target() {
+	if (!connect_target_.name.empty()) {
+		say("asking the master " + connect_host_ + ":" + std::to_string(connect_port_) + " for " +
+				connect_target_.name);
+	}
+	bf3::core::Result<bf3::net::Endpoint> at = bf3::net::resolve_connect_target(connect_target_);
+	if (!at) {
+		std::lock_guard lock(mutex_);
+		worker_error_ = "--connect=" + user_arg_value("connect") + ": " + at.error().message;
+		return;
+	}
+	if (!connect_target_.name.empty()) {
+		say("the master lists " + connect_target_.name + " at " + at->host + ":" + std::to_string(at->port));
+	}
+	connect_client(at->host, at->port);
 }
 
 void Bf3MatchHost::locate_install() {
@@ -502,13 +518,12 @@ void Bf3MatchHost::_ready() {
 		prepare_ = std::make_unique<host::ClientPrepare>(prepare_job());
 	}
 	if (has_user_arg("connect")) {
-		say("connecting to " + connect_host_ + ":" + std::to_string(connect_port_) +
-				": level, mode and rules come from the server");
+		say("connecting to " + user_arg_value("connect") + ": level, mode and rules come from the server");
 		worker_ = std::thread([this] {
 			if (prepare_ != nullptr) {
 				open_cache();
 			}
-			connect_client(connect_host_, connect_port_);
+			join_target();
 		});
 	} else {
 		server_ = std::make_unique<host::ServerSession>();
@@ -562,6 +577,7 @@ void Bf3MatchHost::connect_client(const std::string &p_host, uint16_t p_port) {
 		worker_error_ = s.error().message;
 		return;
 	}
+	connect_host_ = p_host;
 	connect_port_ = p_port;
 	client_ = std::move(made);
 }

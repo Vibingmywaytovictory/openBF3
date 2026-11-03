@@ -62,6 +62,7 @@ private:
 	enum class Phase : uint8_t { Lobby, Playing, Swapping };
 
 	bool parse_connect();
+	void join_target();
 	void locate_install();
 	std::shared_ptr<bf3::core::Cache> open_cache();
 	std::shared_ptr<bf3::core::Cache> held_cache() const;
@@ -86,6 +87,7 @@ private:
 	Phase phase_ = Phase::Lobby;
 	std::string connect_host_ = "127.0.0.1";
 	uint16_t connect_port_ = 0;
+	bf3::net::ConnectTarget connect_target_;
 	std::string netsim_ = "off";
 	uint64_t seed_ = 1;
 	std::optional<uint64_t> game_build_;
