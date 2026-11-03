@@ -2979,3 +2979,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * The game joins a server by name with --connect=<name>@<master host:port>; net.procs.master (timing, main only) registered, not run here.
 * --upnp maps the dedicated or --maplist listen server's UDP port through Godot's UPNP class and deletes it at shutdown; no row (the owner's run); build.server_deps.
 * Closing the game during a --connect=<name>@<master> lookup cancels it at once instead of waiting out the 5 s exchange; net.master.enet.
+* docs/architecture.md's client row names the own-hit ledger and the duel helpers net-hitreg added (the integration of M3 wave 6); hygiene.rules.
