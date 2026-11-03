@@ -6,6 +6,7 @@
 #include "bf3/core/util/text.h"
 #include "bf3/host/client_projectiles.h"
 #include "bf3/host/client_session.h"
+#include "bf3/host/duel.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
@@ -745,53 +746,19 @@ struct StrafeSpec {
 
 Script strafing_script(std::shared_ptr<StrafeSpec> p_spec = nullptr) {
 	struct State {
-		bool init = false;
-		uint32_t life = 0;
+		host::DuelStrafe strafe;
 		uint64_t generation = 0;
-		sim::Vec3 origin{};
-		float yaw0 = 0;
-		int dir = 1;
-		double leg_start = 0;
 	};
 	auto st = std::make_shared<State>();
 	return [st, p_spec](Player &r_p, double p_t) {
-		const host::PresentationFrame &f = *r_p.frame;
-		uint64_t generation = 0;
-		sim::Vec3 origin{};
-		float yaw0 = 0;
 		if (p_spec != nullptr) {
 			std::lock_guard lock(p_spec->mutex);
-			generation = p_spec->generation;
-			origin = p_spec->origin;
-			yaw0 = p_spec->yaw0;
+			if (p_spec->generation != st->generation) {
+				st->generation = p_spec->generation;
+				st->strafe.set_lane(p_spec->origin, p_spec->yaw0);
+			}
 		}
-		if (!st->init || st->life != f.own_curr.life || st->generation != generation) {
-			st->init = true;
-			st->life = f.own_curr.life;
-			st->generation = generation;
-			st->origin = generation != 0 ? origin : f.own_curr.position;
-			st->yaw0 = generation != 0 ? yaw0 : sim::yaw_radians(f.own_curr.yaw);
-			st->dir = 1;
-			st->leg_start = p_t;
-		}
-		const float side = st->yaw0 + 1.5707963f;
-		const float sx = std::sin(side), sz = std::cos(side);
-		const float off = (f.own_curr.position[0] - st->origin[0]) * sx + (f.own_curr.position[2] - st->origin[2]) * sz;
-		const int before = st->dir;
-		if (off > 4.0f) {
-			st->dir = -1;
-		} else if (off < -4.0f) {
-			st->dir = 1;
-		} else if (p_t - st->leg_start > 3.0) {
-			st->dir = -st->dir;
-		}
-		if (st->dir != before) {
-			st->leg_start = p_t;
-		}
-		r_p.input.yaw = st->dir > 0 ? side : st->yaw0 - 1.5707963f;
-		r_p.input.pitch = 0.0f;
-		r_p.input.move_forward = 1.0f;
-		r_p.input.held_buttons = 0;
+		st->strafe.step(r_p.frame->own_curr, p_t, r_p.input);
 	};
 }
 
@@ -1543,6 +1510,170 @@ TEST_SUITE("host-gunplay-client-unit") {
 		CHECK(net.own_hits.unpredicted == 2);
 	}
 
+	TEST_CASE("host.gunplay.client: the duel helpers: a site on the synthetic floor, the own eye, aim_at and "
+			  "DuelStrafe's legs") {
+		const core::Result<host::DuelSite> site = host::duel_site(*floor_level());
+		REQUIRE_MESSAGE(site.ok(), (site.ok() ? std::string() : site.error().message));
+		CHECK(site->spawn_index == 0);
+		CHECK(site->shooter_yaw == 0);
+		CHECK(site->target_yaw == 32768);
+		CHECK(site->distance == 20.0f);
+		CHECK(site->shooter[0] == doctest::Approx(0.0f).epsilon(1e-4));
+		CHECK(site->shooter[2] == doctest::Approx(40.0f).epsilon(1e-4));
+		CHECK(site->target[2] == doctest::Approx(60.0f).epsilon(1e-4));
+		CHECK(site->target[1] == doctest::Approx(site->shooter[1]).epsilon(1e-3));
+
+		auto f = std::make_unique<host::PresentationFrame>();
+		f->own_prev.position = { 0.0f, 0.0f, 0.0f };
+		f->own_curr.position = { 1.0f, 0.0f, 0.0f };
+		f->eye_height_prev = 1.6f;
+		f->eye_height_curr = 1.0f;
+		f->tick_fraction = 0.5;
+		const sim::Vec3 eye = host::present_own_eye(*f);
+		CHECK(eye[0] == doctest::Approx(0.5f));
+		CHECK(eye[1] == doctest::Approx(1.3f));
+		CHECK(eye[2] == doctest::Approx(0.0f));
+		const host::ViewAim ahead = host::aim_at({ 0.0f, 1.6f, 0.0f }, { 0.0f, 1.6f, 10.0f });
+		CHECK(ahead.yaw == doctest::Approx(0.0f));
+		CHECK(ahead.pitch == doctest::Approx(0.0f));
+		const host::ViewAim up_right = host::aim_at({ 0.0f, 0.0f, 0.0f }, { 10.0f, 10.0f, 0.0f });
+		CHECK(up_right.yaw == doctest::Approx(1.5707963f));
+		CHECK(up_right.pitch == doctest::Approx(0.7853982f));
+
+		host::DuelStrafe strafe;
+		strafe.set_lane({ 0.0f, 0.0f, 0.0f }, 0.0f);
+		sim::SoldierState own;
+		own.life = 1;
+		host::InputSample in;
+		strafe.step(own, 0.0, in);
+		CHECK(in.yaw == doctest::Approx(1.5707963f));
+		CHECK(in.move_forward == 1.0f);
+		CHECK(in.pitch == 0.0f);
+		own.position = { host::kDuelLaneTurn + 0.5f, 0.0f, 0.0f };
+		strafe.step(own, 0.5, in);
+		CHECK(in.yaw == doctest::Approx(-1.5707963f));
+		own.position = { 0.0f, 0.0f, 0.0f };
+		strafe.step(own, 0.5 + host::kDuelLegSeconds - 0.1, in);
+		CHECK(in.yaw == doctest::Approx(-1.5707963f));
+		strafe.step(own, 0.5 + host::kDuelLegSeconds + 0.1, in);
+		CHECK(in.yaw == doctest::Approx(1.5707963f));
+		own.position = { -host::kDuelLaneTurn - 0.5f, 0.0f, 0.0f };
+		strafe.step(own, 4.0, in);
+		CHECK(in.yaw == doctest::Approx(1.5707963f));
+		own.life = 2;
+		own.position = { 30.0f, 0.0f, 0.0f };
+		strafe.step(own, 5.0, in);
+		CHECK(in.yaw == doctest::Approx(-1.5707963f));
+	}
+
+	TEST_CASE("host.gunplay.client: the duel shooter deploys, teleports to the site, waits for the strafing target, "
+			  "fires every 12 ticks aimed at it and ends after its shots") {
+		host::DuelSite site;
+		site.shooter = { 0.0f, 0.0f, 40.0f };
+		site.target = { 0.0f, 0.0f, 60.0f };
+		site.target_yaw = 32768;
+		struct Seen {
+			uint32_t deploys = 0, fires = 0;
+			std::vector<net::DebugRequest> debug;
+			float yaw = 9.0f, pitch = 9.0f;
+			bool zoom = false;
+			uint32_t zoom_changes = 0;
+		} seen;
+		host::DuelShooterIo io;
+		io.deploy = [&] { ++seen.deploys; };
+		io.debug = [&](const net::DebugRequest &p_q) { seen.debug.push_back(p_q); };
+		io.view = [&](float p_yaw, float p_pitch) {
+			seen.yaw = p_yaw;
+			seen.pitch = p_pitch;
+		};
+		io.fire = [&] { ++seen.fires; };
+		io.hold_zoom = [&](bool p_on) {
+			seen.zoom = p_on;
+			++seen.zoom_changes;
+		};
+		auto f = std::make_unique<host::PresentationFrame>();
+		f->serial = 5;
+		f->publish_ns = 1'000'000'000ull;
+		f->render_ticks_at_publish = 100.0;
+		f->ticks_per_ns = 60e-9;
+		const uint64_t now_ns = f->publish_ns + 8'333'333ull;
+		host::DuelShooter shooter(site, 3);
+		using P = host::DuelPhase;
+		CHECK(shooter.frame(0.0, now_ns, *f, false, io) == P::Spawn);
+		CHECK(shooter.frame(0.5, now_ns, *f, false, io) == P::Spawn);
+		CHECK(shooter.frame(1.2, now_ns, *f, false, io) == P::Spawn);
+		CHECK(seen.deploys == 2);
+
+		f->valid = true;
+		f->own_curr.life = 1;
+		f->own_curr.position = { 7.0f, 0.0f, 7.0f };
+		CHECK(shooter.frame(2.0, now_ns, *f, true, io) == P::Teleport);
+		CHECK(shooter.frame(2.1, now_ns, *f, true, io) == P::Teleport);
+		REQUIRE(seen.debug.size() == 1);
+		CHECK(seen.debug[0].kind == net::DebugKind::Teleport);
+		CHECK(seen.debug[0].position[2] == doctest::Approx(40.0f));
+		CHECK(seen.debug[0].position[1] == doctest::Approx(0.05f));
+		CHECK(seen.debug[0].yaw == 0);
+		CHECK(seen.yaw == 0.0f);
+		CHECK(shooter.frame(3.0, now_ns, *f, true, io) == P::Teleport);
+		CHECK(seen.debug.size() == 1);
+		CHECK(shooter.frame(4.2, now_ns, *f, true, io) == P::Teleport);
+		CHECK(seen.debug.size() == 2);
+		f->server_own_valid = true;
+		f->server_own.life = 1;
+		f->server_own.position = { 0.2f, 0.0f, 40.0f };
+		f->own_prev.position = { 0.0f, 0.0f, 40.0f };
+		f->own_curr.position = { 0.0f, 0.0f, 40.0f };
+		f->eye_height_prev = f->eye_height_curr = 1.6f;
+		CHECK(shooter.frame(4.3, now_ns, *f, true, io) == P::Settle);
+
+		CHECK(shooter.frame(4.4, now_ns, *f, true, io) == P::Settle);
+		f->other_count = 1;
+		host::OtherTrack &t = f->others[0];
+		t.slot = 4;
+		t.count = 2;
+		t.samples[0] = { 98, record_at(4, { -2.0f / 30.0f, 0, 60.0f }, { 2, 0, 0 }) };
+		t.samples[1] = { 100, record_at(4, { 0.0f, 0, 60.0f }, { 2, 0, 0 }) };
+		t.track_newest_tick = 100;
+		CHECK(shooter.frame(4.5, now_ns, *f, true, io) == P::Settle);
+		CHECK(seen.yaw == doctest::Approx(0.0f).epsilon(0.01));
+		CHECK(seen.pitch == doctest::Approx(std::atan2(-0.3f, 20.0f)).epsilon(0.01));
+		f->stats.predicted_shots = 7;
+		CHECK(shooter.frame(5.9, now_ns, *f, true, io) == P::Settle);
+		CHECK(shooter.frame(6.1, now_ns, *f, true, io) == P::Fire);
+		CHECK(seen.fires == 0);
+		f->tick = 200;
+		CHECK(shooter.frame(6.2, now_ns, *f, true, io) == P::Fire);
+		CHECK(seen.zoom);
+		CHECK(seen.fires == 1);
+		f->tick = 205;
+		f->stats.predicted_shots = 8;
+		CHECK(shooter.frame(6.3, now_ns, *f, true, io) == P::Fire);
+		CHECK(seen.fires == 1);
+		f->tick = 212;
+		CHECK(shooter.frame(6.4, now_ns, *f, true, io) == P::Fire);
+		CHECK(seen.fires == 2);
+		f->stats.predicted_shots = 10;
+		CHECK(shooter.frame(6.5, now_ns, *f, true, io) == P::Tail);
+		CHECK_FALSE(seen.zoom);
+		CHECK(seen.zoom_changes == 2);
+		CHECK(shooter.shots() == 3);
+		CHECK(shooter.frame(8.0, now_ns, *f, true, io) == P::Tail);
+		CHECK(shooter.frame(8.6, now_ns, *f, true, io) == P::Done);
+		f->stats.own_hits = { 3, 3, 2, 1 };
+		const std::string report = shooter.report(f->stats);
+		CHECK_MESSAGE(report.find("shots 3 of 3, predicted hits 3, confirmed 3 (100.00 %), same zone 2 (66.67 %), "
+								  "unpredicted 1;") == 0,
+				report);
+
+		host::DuelShooter stranded(site, 3);
+		CHECK(stranded.frame(0.0, now_ns, *f, true, io) == P::Teleport);
+		f->server_own.position = { 30.0f, 0.0f, 0.0f };
+		CHECK(stranded.frame(1.0, now_ns, *f, true, io) == P::Teleport);
+		CHECK(stranded.frame(host::kDuelTeleportTimeoutSeconds + 1.0, now_ns, *f, true, io) == P::Failed);
+		CHECK(stranded.failure().find("dev commands") != std::string::npos);
+	}
+
 	TEST_CASE("host.gunplay.client: E6: a client whose weapon table differs answers MatchInfo with a Mismatch, is "
 			  "kicked by its reason, never predicts") {
 		const std::string variant = cfg_with("variant.cfg", "disc", "uniform_radius");
@@ -1959,93 +2090,22 @@ void run_fire_reload(const Arena &p_arena) {
 			int64_t(commits[1] - starts[1]), after_tactical);
 }
 
-struct LagcompSite {
-	sim::Vec3 shooter{};
-	uint16_t shooter_yaw = 0;
-	sim::Vec3 target{};
-	uint16_t target_yaw = 0;
-	uint32_t spawn_index = 0;
-	float distance = 0;
-	uint32_t candidates = 0;
-};
-
-std::optional<LagcompSite> find_lagcomp_site(const host::SharedLevel &p_level, float p_distance, float p_half) {
-	core::Result<std::unique_ptr<sim::CollisionWorld>> made = sim::CollisionWorld::create(p_level.static_world);
-	REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
-	if (!made.ok()) {
-		return std::nullopt;
-	}
-	const sim::CollisionWorld &w = **made;
-	const float eye = p_level.gunplay != nullptr && !p_level.gunplay->soldier.poses.empty() ? p_level.gunplay->soldier.poses[0].eye_height : 1.6f;
-	constexpr float kRadius = 0.35f, kHeight = 1.8f, kLift = 0.15f;
-	auto add = [](const sim::Vec3 &p_a, const sim::Vec3 &p_b, float p_s) {
-		return sim::Vec3{ p_a[0] + p_b[0] * p_s, p_a[1] + p_b[1] * p_s, p_a[2] + p_b[2] * p_s };
-	};
-	const sim::Vec3 up{ 0.0f, 1.0f, 0.0f };
-	LagcompSite out;
-	for (const sim::SpawnPoint &sp : p_level.spawns) {
-		sim::StaticHit g;
-		if (!w.ground_below(add(sp.position, up, 1.0f), 3.0f, sim::query_mask::kMovement, &g)) {
-			continue;
-		}
-		const sim::Vec3 feet = g.position;
-		if (w.overlap_capsule(add(feet, up, kLift), kRadius, kHeight - kLift, sim::query_mask::kMovement, 0.01f)) {
-			continue;
-		}
-		const sim::Vec3 eye_at = add(feet, up, eye);
-		for (uint32_t h = 0; h < 64; ++h) {
-			++out.candidates;
-			const uint16_t yaw = uint16_t(h * 1024u);
-			const float yr = sim::yaw_radians(yaw);
-			const sim::Vec3 dir{ std::sin(yr), 0.0f, std::cos(yr) };
-			const sim::Vec3 across{ std::cos(yr), 0.0f, -std::sin(yr) };
-			if (w.ray(eye_at, add({}, dir, p_distance + 3.0f), sim::query_mask::kProjectile)) {
-				continue;
-			}
-			sim::StaticHit gc;
-			if (!w.ground_below(add(add(feet, dir, p_distance), up, 1.5f), 4.0f, sim::query_mask::kMovement, &gc)) {
-				continue;
-			}
-			const sim::Vec3 centre = gc.position;
-			bool ok = std::fabs(centre[1] - feet[1]) <= 0.5f;
-			for (float o = -p_half; ok && o <= p_half + 1e-3f; o += 0.5f) {
-				const sim::Vec3 at = add(centre, across, o);
-				sim::StaticHit gp;
-				ok = w.ground_below(add(at, up, 1.0f), 2.0f, sim::query_mask::kMovement, &gp) && std::fabs(gp.position[1] - centre[1]) <= 0.1f;
-				for (float hgt : { 0.3f, 1.0f, 1.6f }) {
-					const sim::Vec3 p = add(at, up, hgt);
-					ok = ok && !w.ray(eye_at, { p[0] - eye_at[0], p[1] - eye_at[1], p[2] - eye_at[2] }, sim::query_mask::kProjectile);
-				}
-			}
-			ok = ok && !w.sweep_capsule(add(add(centre, across, -p_half), up, kLift), kRadius, kHeight - kLift, add({}, across, 2.0f * p_half), sim::query_mask::kMovement);
-			if (!ok) {
-				continue;
-			}
-			out.shooter = feet;
-			out.shooter_yaw = yaw;
-			out.target = centre;
-			out.target_yaw = uint16_t(yaw + 32768u);
-			out.spawn_index = sp.index;
-			out.distance = p_distance;
-			return out;
-		}
-	}
-	return std::nullopt;
-}
+using LagcompSite = host::DuelSite;
 
 std::optional<LagcompSite> lagcomp_site(const Arena &p_arena) {
-	for (float d : { 20.0f, 16.0f, 12.0f }) {
-		const std::optional<LagcompSite> s = find_lagcomp_site(*p_arena.level, d, 5.0f);
-		if (s.has_value()) {
-			std::printf("E12 site on %s: spawn %u, shooter feet (%.2f, %.2f, %.2f) yaw %u, strafe centre (%.2f, %.2f, %.2f) %.0f m ahead, +-5 m clear and in view\n",
-					p_arena.name, s->spawn_index, double(s->shooter[0]), double(s->shooter[1]), double(s->shooter[2]), unsigned(s->shooter_yaw),
-					double(s->target[0]), double(s->target[1]), double(s->target[2]), double(d));
-			return s;
-		}
-		std::printf("E12 site on %s: no %.0f m site among %zu spawns x 64 headings\n", p_arena.name, double(d), p_arena.level->spawns.size());
+	const core::Result<host::DuelSite> s = host::duel_site(*p_arena.level);
+	if (!s) {
+		std::printf("E12 site on %s: %s\n", p_arena.name, s.error().message.c_str());
+		CHECK_MESSAGE(false, "no E12 site on " << p_arena.name);
+		return std::nullopt;
 	}
-	CHECK_MESSAGE(false, "no E12 site on " << p_arena.name);
-	return std::nullopt;
+	std::printf(
+			"E12 site on %s: spawn %u, shooter feet (%.2f, %.2f, %.2f) yaw %u, strafe centre (%.2f, %.2f, %.2f) %.0f "
+			"m ahead, +-5 m clear and in view\n",
+			p_arena.name, s->spawn_index, double(s->shooter[0]), double(s->shooter[1]), double(s->shooter[2]),
+			unsigned(s->shooter_yaw), double(s->target[0]), double(s->target[1]), double(s->target[2]),
+			double(s->distance));
+	return *s;
 }
 
 struct LagcompResult {
@@ -2131,13 +2191,13 @@ LagcompResult run_lagcomp(const Arena &p_arena, const LagcompSite &p_site, const
 			if (drawn[i].slot != bot || !f.valid) {
 				continue;
 			}
-			const sim::Vec3 eye = tg::own_eye(f);
-			const float dx = drawn[i].position[0] - eye[0], dy = drawn[i].position[1] + 1.3f - eye[1], dz = drawn[i].position[2] - eye[2];
-			p.input.yaw = std::atan2(dx, dz);
-			p.input.pitch = std::atan2(dy, std::sqrt(dx * dx + dz * dz));
+			const host::ViewAim aim = host::aim_at(tg::own_eye(f),
+					{ drawn[i].position[0], drawn[i].position[1] + host::kDuelAimHeight, drawn[i].position[2] });
+			p.input.yaw = aim.yaw;
+			p.input.pitch = aim.pitch;
 			speed_sum += std::sqrt(drawn[i].velocity[0] * drawn[i].velocity[0] + drawn[i].velocity[2] * drawn[i].velocity[2]);
 			++speed_n;
-			if (f.tick >= last_press + 12u) {
+			if (f.tick >= last_press + host::kDuelFireTicks) {
 				++p.input.fire_presses;
 				last_press = f.tick;
 			}

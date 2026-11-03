@@ -242,3 +242,8 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/own_hits.h
     src/own_hits.cpp
 )
+
+target_sources(bf3_host PRIVATE
+    include/bf3/host/duel.h
+    src/duel.cpp
+)

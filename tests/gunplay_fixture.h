@@ -9,6 +9,7 @@
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/host/client_session.h"
+#include "bf3/host/duel.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/level_load.h"
 #include "bf3/host/server_host.h"
@@ -425,13 +426,7 @@ inline std::optional<net::DebugReport> target_info(Session &r_session, uint8_t p
 }
 
 inline sim::Vec3 own_eye(const host::PresentationFrame &p_frame) {
-	const float t = float(p_frame.tick_fraction);
-	sim::Vec3 e;
-	for (size_t k = 0; k < 3; ++k) {
-		e[k] = p_frame.own_prev.position[k] + (p_frame.own_curr.position[k] - p_frame.own_prev.position[k]) * t;
-	}
-	e[1] += p_frame.eye_height_prev + (p_frame.eye_height_curr - p_frame.eye_height_prev) * t;
-	return e;
+	return host::present_own_eye(p_frame);
 }
 
 }
