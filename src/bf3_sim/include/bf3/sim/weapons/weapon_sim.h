@@ -50,7 +50,7 @@ struct WeaponSlotState {
 	uint8_t mode_counter = 0;
 	uint8_t burst_left = 0;
 	uint8_t flags = 0;
-	uint8_t reserved0 = 0;
+	uint8_t variant = 0;
 	int32_t magazine = 0;
 	int32_t reserve = 0;
 	SimTime phase_start = 0;
@@ -118,6 +118,7 @@ struct ShotEvent {
 	uint16_t def = kNoWeapon;
 	uint8_t weapon_slot = 0;
 	uint8_t pellets = 1;
+	uint8_t variant = 0;
 	Vec3 origin{};
 	Vec3 aim{};
 	Vec3 direction{};
@@ -148,8 +149,9 @@ struct WeaponTickOutput {
 	uint8_t timed_dropped = 0;
 };
 
-core::Status spawn_soldier_weapons(SoldierWeaponsState &r_state, const WeaponTable &p_table, std::span<const uint16_t> p_loadout,
-		uint8_t p_active, Tick p_spawn_tick);
+core::Status spawn_soldier_weapons(SoldierWeaponsState &r_state, const WeaponTable &p_table,
+		std::span<const uint16_t> p_loadout, uint8_t p_active, Tick p_spawn_tick,
+		std::span<const uint8_t> p_variants = {});
 
 void step_soldier_weapons(const WeaponTable &p_table, SoldierWeaponsState &r_state, const Command &p_command, const WeaponContext &p_context,
 		uint64_t p_match_seed, WeaponTickOutput &r_out);

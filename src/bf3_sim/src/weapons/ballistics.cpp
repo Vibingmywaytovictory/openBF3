@@ -423,7 +423,7 @@ bool fly(Env &r_env, Projectile &r_p, SimTime p_t_end) {
 	if (r_p.def >= r_env.table.defs.size()) {
 		return false;
 	}
-	const ProjectileSimDef &d = r_env.table.defs[r_p.def].projectile;
+	const ProjectileSimDef &d = r_env.table.def(r_p.def, r_p.variant).projectile;
 	if (r_p.time >= p_t_end) {
 		return true;
 	}
@@ -562,7 +562,7 @@ bool fly(Env &r_env, Projectile &r_p, SimTime p_t_end) {
 }
 
 Projectile make_projectile(const WeaponTable &p_table, const ShotEvent &p_shot, uint8_t p_pellet) {
-	const WeaponSimDef &wd = p_table.defs[p_shot.def];
+	const WeaponSimDef &wd = p_table.def(p_shot.def, p_shot.variant);
 	Vec3 dir = p_shot.direction;
 	if (p_shot.pellets > 1 && p_shot.pellet_cone > 0) {
 		dir = sample_cone(p_shot.direction, p_shot.pellet_cone, unit_float(shot_random(p_shot.seed, RngPurpose::PelletRadius, p_pellet)),
@@ -577,6 +577,7 @@ Projectile make_projectile(const WeaponTable &p_table, const ShotEvent &p_shot, 
 	p.player_slot = p_shot.player_slot;
 	p.shot_index = p_shot.shot_index;
 	p.def = p_shot.def;
+	p.variant = p_shot.variant;
 	p.pellet = p_pellet;
 	p.damage_scale = 1.0f;
 	if (wd.projectile.time_to_arm <= 0) {
@@ -606,7 +607,7 @@ core::Status ProjectileWorld::spawn(const ShotEvent &p_shot) {
 		++refused_;
 		return core::make_error("ProjectileWorld::spawn: def " + std::to_string(p_shot.def) + " is not in the table");
 	}
-	const ProjectileSimDef &d = table_->defs[p_shot.def].projectile;
+	const ProjectileSimDef &d = table_->def(p_shot.def, p_shot.variant).projectile;
 	if (d.kind == ProjectileKind::None || d.kind == ProjectileKind::Other) {
 		++refused_;
 		return core::make_error("ProjectileWorld::spawn: " + table_->defs[p_shot.def].variant + " fires no simulated projectile");
@@ -674,7 +675,7 @@ bool refly_projectile(const WeaponTable &p_table, const ShotEvent &p_shot, uint8
 		r_status = core::make_error("refly_projectile: no such def or pellet");
 		return false;
 	}
-	const ProjectileSimDef &d = p_table.defs[p_shot.def].projectile;
+	const ProjectileSimDef &d = p_table.def(p_shot.def, p_shot.variant).projectile;
 	if (d.kind == ProjectileKind::None || d.kind == ProjectileKind::Other) {
 		r_status = core::make_error("refly_projectile: the def fires no simulated projectile");
 		return false;

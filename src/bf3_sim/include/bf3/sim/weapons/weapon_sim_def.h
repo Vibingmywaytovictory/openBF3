@@ -8,7 +8,9 @@
 #include "bf3/sim/weapons/sim_time.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -167,8 +169,13 @@ struct WeaponSimDef {
 	ProjectileSimDef projectile;
 };
 
+inline constexpr size_t kMaxWeaponVariants = 255;
+inline constexpr size_t kMaxWeaponVariantCombos = 4096;
+inline constexpr size_t kNoVariantOption = SIZE_MAX;
+
 struct WeaponTable {
 	std::vector<WeaponSimDef> defs;
+	std::vector<std::vector<WeaponSimDef>> variants;
 	std::shared_ptr<const SurfaceMaterialTable> materials;
 	Mechanics mechanics;
 
@@ -178,6 +185,13 @@ struct WeaponTable {
 
 	SimTime sprint_recover_time = 7'200'000;
 	uint64_t hash = 0;
+
+	const WeaponSimDef &def(uint16_t p_def, uint8_t p_variant) const {
+		if (p_variant != 0 && p_def < variants.size() && p_variant <= variants[p_def].size()) {
+			return variants[p_def][p_variant - 1u];
+		}
+		return defs[p_def];
+	}
 };
 inline constexpr uint16_t kNoWeapon = 0xFFFF;
 
@@ -188,7 +202,40 @@ struct WeaponTableOptions {
 	bool infinite_magazine = false;
 	bool exact_aim = false;
 	float sprint_recover_seconds = 0.12f;
+	std::span<const std::vector<WeaponSimDef>> variants;
 };
+
+struct WeaponVariantPart {
+	std::vector<std::string> unlocks;
+	size_t base = kNoVariantOption;
+};
+
+struct WeaponVariantMap {
+	std::vector<std::vector<uint8_t>> classes;
+	std::vector<uint8_t> radix;
+	std::vector<uint8_t> combo_variant;
+
+	bool operator==(const WeaponVariantMap &) const = default;
+};
+
+struct WeaponVariants {
+	WeaponVariantMap map;
+	std::vector<WeaponSimDef> defs;
+	size_t resolves = 0;
+};
+
+using WeaponVariantResolve =
+		std::function<core::Result<core::gameplay::WeaponDef>(const std::vector<std::string> &p_unlocks)>;
+
+core::Result<WeaponVariants> make_weapon_variants(const WeaponSimDef &p_plain,
+		std::span<const WeaponVariantPart> p_parts, const WeaponVariantResolve &p_resolve,
+		const SurfaceMaterialTable &p_materials);
+
+uint8_t weapon_variant(const WeaponVariantMap &p_map, std::span<const size_t> p_options);
+
+uint64_t weapon_sim_def_hash(const WeaponSimDef &p_def);
+
+std::vector<std::string> weapon_sim_def_diff(const WeaponSimDef &p_a, const WeaponSimDef &p_b);
 
 core::Result<std::shared_ptr<const WeaponTable>> make_weapon_table(std::span<const core::gameplay::WeaponDef> p_defs,
 		std::shared_ptr<const SurfaceMaterialTable> p_materials, const WeaponTableOptions &p_options = {});

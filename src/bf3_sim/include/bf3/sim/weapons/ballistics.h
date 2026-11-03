@@ -47,7 +47,8 @@ struct Projectile {
 	float damage_scale = 1;
 	uint8_t bounces = 0;
 	uint8_t passes = 0;
-	uint16_t reserved = 0;
+	uint8_t variant = 0;
+	uint8_t reserved = 0;
 };
 static_assert(std::is_trivially_copyable_v<Projectile>);
 

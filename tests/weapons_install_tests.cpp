@@ -1,6 +1,8 @@
 #include "weapons_install_support.h"
 
+#include "bf3/core/gameplay/kit_def.h"
 #include "bf3/core/gameplay/weapon_blob.h"
+#include "bf3/core/util/text.h"
 #include "bf3/sim/weapons/damage.h"
 #include "bf3/sim_harness/weapon_install_checks.h"
 
@@ -226,6 +228,90 @@ TEST_SUITE("weapons") {
 		CHECK(t.errors == 0);
 		const std::string tsv = format_w4_tsv(t);
 		CHECK(size_t(std::count(tsv.begin(), tsv.end(), '\n')) == t.rows.size() + 1);
+		check_install_unchanged(*w);
+	}
+
+	TEST_CASE("sim.weapons: accessory modifiers give variant sim defs that differ from the plain ones by exactly the "
+			  "modifier fields") {
+		WeaponsInstall *w = weapons_install();
+		if (w == nullptr) {
+			return;
+		}
+		const core::EbxResolver &db = *w->weapons.catalog->sources().level;
+		const core::Result<core::gameplay::UnlockProgression> progression = core::gameplay::read_unlock_progression(db);
+		REQUIRE(progression.ok());
+		struct Pick {
+			std::string weapon;
+			std::vector<std::string> accessories;
+			std::vector<std::string> fields;
+		};
+		const std::vector<Pick> picks{
+			{ "weapons/m16a4/u_m16a4", { "weapons/m16a4/u_m16a4_heavybarrel", "weapons/m16a4/u_m16a4_foregrip" },
+					{ "sway", "projectile damage", "projectile suppression" } },
+			{ "weapons/m27iar/u_m27iar", { "weapons/m27iar/u_m27iar_extendedmag" },
+					{ "magazine_capacity", "magazines" } },
+			{ "weapons/sv98/u_sv98", { "weapons/sv98/u_sv98_bipod" }, { "conditional" } },
+		};
+		for (const Pick &p : picks) {
+			CAPTURE(p.weapon);
+			const core::Result<core::gameplay::WeaponDef> plain_def = w->weapons.catalog->resolve(p.weapon);
+			REQUIRE(plain_def.ok());
+			const core::Result<WeaponSimDef> plain = make_weapon_sim_def(*plain_def, *w->weapons.materials);
+			REQUIRE(plain.ok());
+			const core::Result<std::vector<core::gameplay::KitSlot>> parts_read =
+					core::gameplay::read_weapon_customization(db, p.weapon, *progression);
+			REQUIRE(parts_read.ok());
+			std::vector<WeaponVariantPart> parts;
+			std::vector<size_t> options;
+			std::vector<std::string> active;
+			for (const core::gameplay::KitSlot &slot : *parts_read) {
+				WeaponVariantPart part;
+				for (const core::gameplay::KitUnlock &u : slot.unlocks) {
+					std::string name = core::to_lower_ascii(u.unlock);
+					if (part.base == kNoVariantOption && name.starts_with(core::gameplay::kNoAccessoryUnlockPrefix)) {
+						part.base = part.unlocks.size();
+					}
+					part.unlocks.push_back(std::move(name));
+				}
+				size_t option = part.base;
+				for (size_t i = 0; i < part.unlocks.size(); ++i) {
+					if (std::find(p.accessories.begin(), p.accessories.end(), part.unlocks[i]) != p.accessories.end()) {
+						option = i;
+					}
+				}
+				if (option != kNoVariantOption) {
+					active.push_back(part.unlocks[option]);
+				}
+				options.push_back(option);
+				parts.push_back(std::move(part));
+			}
+			for (const std::string &a : p.accessories) {
+				CHECK(std::find(active.begin(), active.end(), a) != active.end());
+			}
+			const core::Result<WeaponVariants> v = make_weapon_variants(
+					*plain, parts,
+					[&](const std::vector<std::string> &p_unlocks) {
+						return w->weapons.catalog->resolve(p.weapon, p_unlocks);
+					},
+					*w->weapons.materials);
+			REQUIRE_MESSAGE(v.ok(), (v.ok() ? std::string() : v.error().message));
+			const uint8_t variant = weapon_variant(v->map, options);
+			REQUIRE(variant != 0);
+			REQUIRE(variant <= v->defs.size());
+			const WeaponSimDef &modified = v->defs[variant - 1u];
+			std::string diff;
+			for (const std::string &f : weapon_sim_def_diff(*plain, modified)) {
+				diff += f + "; ";
+			}
+			std::printf("%s + %zu accessories: variant %u of %zu (%zu resolves), differs in %s\n", p.weapon.c_str(),
+					p.accessories.size(), unsigned(variant), v->defs.size(), v->resolves, diff.c_str());
+			CHECK(weapon_sim_def_diff(*plain, modified) == p.fields);
+			const core::Result<core::gameplay::WeaponDef> direct_def = w->weapons.catalog->resolve(p.weapon, active);
+			REQUIRE(direct_def.ok());
+			const core::Result<WeaponSimDef> direct = make_weapon_sim_def(*direct_def, *w->weapons.materials);
+			REQUIRE(direct.ok());
+			CHECK(weapon_sim_def_hash(*direct) == weapon_sim_def_hash(modified));
+		}
 		check_install_unchanged(*w);
 	}
 }

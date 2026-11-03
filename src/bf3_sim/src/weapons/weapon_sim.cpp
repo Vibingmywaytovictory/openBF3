@@ -123,6 +123,7 @@ bool fire_shot(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponSi
 	e.player_slot = r_io.st.player_slot;
 	e.shot_index = index;
 	e.def = r_s.def;
+	e.variant = r_s.variant;
 	e.weapon_slot = p_slot;
 	e.pellets = uint8_t(std::clamp(p_d.pellets, 1, int32_t(kMaxPellets)));
 	e.origin = detail::to_f(origin);
@@ -428,14 +429,26 @@ float eye_height_of(const MotorParams &p_motor, const SoldierState &p_state) {
 
 }
 
-core::Status spawn_soldier_weapons(SoldierWeaponsState &r_state, const WeaponTable &p_table, std::span<const uint16_t> p_loadout, uint8_t p_active,
-		Tick p_spawn_tick) {
+core::Status spawn_soldier_weapons(SoldierWeaponsState &r_state, const WeaponTable &p_table,
+		std::span<const uint16_t> p_loadout, uint8_t p_active, Tick p_spawn_tick, std::span<const uint8_t> p_variants) {
 	if (p_loadout.size() > kMaxWeaponSlots) {
 		return core::make_error("spawn_soldier_weapons: " + std::to_string(p_loadout.size()) + " slots (limit " + std::to_string(kMaxWeaponSlots) + ")");
 	}
 	for (const uint16_t id : p_loadout) {
 		if (id != kNoWeapon && id >= p_table.defs.size()) {
 			return core::make_error("spawn_soldier_weapons: def " + std::to_string(id) + " is not in the table (" + std::to_string(p_table.defs.size()) + ")");
+		}
+	}
+	if (p_variants.size() > p_loadout.size()) {
+		return core::make_error("spawn_soldier_weapons: " + std::to_string(p_variants.size()) + " variants for " +
+				std::to_string(p_loadout.size()) + " slots");
+	}
+	for (size_t i = 0; i < p_variants.size(); ++i) {
+		const uint16_t id = p_loadout[i];
+		if (p_variants[i] != 0 &&
+				(id == kNoWeapon || id >= p_table.variants.size() || p_variants[i] > p_table.variants[id].size())) {
+			return core::make_error("spawn_soldier_weapons: slot " + std::to_string(i) + " variant " +
+					std::to_string(p_variants[i]) + " is not in the table");
 		}
 	}
 	if (p_active >= p_loadout.size() || p_loadout[p_active] == kNoWeapon) {
@@ -455,7 +468,8 @@ core::Status spawn_soldier_weapons(SoldierWeaponsState &r_state, const WeaponTab
 		if (s.def == kNoWeapon) {
 			continue;
 		}
-		const WeaponSimDef &d = p_table.defs[s.def];
+		s.variant = i < p_variants.size() ? p_variants[i] : uint8_t(0);
+		const WeaponSimDef &d = p_table.def(s.def, s.variant);
 		s.phase = WeaponPhase::Ready;
 		s.magazine = d.magazine_capacity;
 		s.reserve = d.unlimited_ammo ? 0 : d.magazines * d.magazine_capacity;
@@ -464,7 +478,7 @@ core::Status spawn_soldier_weapons(SoldierWeaponsState &r_state, const WeaponTab
 	WeaponSlotState &a = r_state.slots[p_active];
 	a.phase = WeaponPhase::Deploying;
 	a.phase_start = tick_end(p_spawn_tick);
-	a.phase_end = a.phase_start + p_table.defs[a.def].deploy_time;
+	a.phase_end = a.phase_start + p_table.def(a.def, a.variant).deploy_time;
 	return core::Status::success();
 }
 
@@ -504,12 +518,12 @@ void step_soldier_weapons(const WeaponTable &p_table, SoldierWeaponsState &r_sta
 				WeaponSlotState &from = r_state.slots[r_state.active];
 				const uint8_t trigger = uint8_t(from.flags & slot_flags::kTriggerDown);
 				if (valid(from)) {
-					leave_slot(io, r_state.active, from, p_table.defs[from.def], io.t0);
+					leave_slot(io, r_state.active, from, p_table.def(from.def, from.variant), io.t0);
 				}
 				r_state.active = io.in.select_slot;
 				to.phase = WeaponPhase::Deploying;
 				to.phase_start = io.t0;
-				to.phase_end = io.t0 + p_table.defs[to.def].deploy_time;
+				to.phase_end = io.t0 + p_table.def(to.def, to.variant).deploy_time;
 				to.burst_left = 0;
 				to.flags = uint8_t((to.flags & ~(slot_flags::kTriggerDown | slot_flags::kPressPending | slot_flags::kReleasePending)) | trigger);
 				timed(io, io.t0, weapon_events::kDeployStarted, r_state.active);
@@ -519,7 +533,7 @@ void step_soldier_weapons(const WeaponTable &p_table, SoldierWeaponsState &r_sta
 		}
 		WeaponSlotState &s = r_state.slots[r_state.active];
 		if (valid(s)) {
-			const WeaponSimDef &d = p_table.defs[s.def];
+			const WeaponSimDef &d = p_table.def(s.def, s.variant);
 			const uint8_t steps = fire_mode_steps(s.mode_counter, io.in.fire_mode_counter);
 			if (steps > 0 && d.mode_count > 1) {
 				s.mode = uint8_t((s.mode + steps) % d.mode_count);
@@ -538,7 +552,7 @@ void step_soldier_weapons(const WeaponTable &p_table, SoldierWeaponsState &r_sta
 		if (!valid(s)) {
 			continue;
 		}
-		const WeaponSimDef &d = p_table.defs[s.def];
+		const WeaponSimDef &d = p_table.def(s.def, s.variant);
 		const bool active = i == r_state.active;
 		s.recoil = recover_recoil_tick(s.recoil, d, io.sway, active && io.shot, p_table.mechanics);
 		if (active) {
@@ -574,7 +588,7 @@ uint64_t soldier_weapons_hash(const SoldierWeaponsState &p_state) {
 		h.add(s.mode_counter);
 		h.add(s.burst_left);
 		h.add(s.flags);
-		h.add(s.reserved0);
+		h.add(s.variant);
 		h.add(s.magazine);
 		h.add(s.reserve);
 		h.add(s.phase_start);

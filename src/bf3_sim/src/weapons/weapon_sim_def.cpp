@@ -6,8 +6,10 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <map>
 #include <string>
 #include <system_error>
+#include <utility>
 
 namespace bf3::sim::weapons {
 
@@ -264,114 +266,160 @@ void hash_explosion(detail::Fnv64 &r_h, const ExplosionSimDef &p_e) {
 	r_h.add(p_e.zone_multiplier_from_data);
 }
 
-void hash_def(detail::Fnv64 &r_h, const WeaponSimDef &p_d) {
-	r_h.add_str(p_d.variant);
-	r_h.add(p_d.unlock_identifier);
-	r_h.add_str(p_d.weapon_class);
-	for (const FireModeDef &m : p_d.modes) {
-		r_h.add(m.logic);
-		r_h.add(m.interval);
-		r_h.add(m.burst_interval);
-		r_h.add(m.bullets_per_burst);
-	}
-	r_h.add(p_d.mode_count);
-	r_h.add(p_d.bolt_cycle);
-	r_h.add(p_d.bolt_hold_until_fire_release);
-	r_h.add(p_d.bolt_hold_until_zoom_release);
-	r_h.add(p_d.unzoom_on_bolt);
-	r_h.add(p_d.pre_fire_delay);
-	r_h.add(p_d.spawn_delay);
-	r_h.add(p_d.hold_delay);
-	r_h.add(p_d.hold_max_time);
-	r_h.add(p_d.hold_min_power);
-	r_h.add(p_d.hold_max_power);
-	r_h.add(p_d.hold_power_per_second);
-	r_h.add(p_d.magazine_capacity);
-	r_h.add(p_d.magazines);
-	r_h.add(p_d.unlimited_ammo);
-	r_h.add(p_d.pellets);
-	r_h.add(p_d.trace_frequency);
-	r_h.add(p_d.reload_type);
-	r_h.add(p_d.reload_tactical);
-	r_h.add(p_d.reload_empty);
-	r_h.add(p_d.reload_delay);
-	r_h.add(p_d.reload_threshold);
-	r_h.add(p_d.reload_commit_tactical);
-	r_h.add(p_d.reload_commit_empty);
-	r_h.add(p_d.switch_cancels_reload);
-	r_h.add(p_d.always_auto_reload);
-	r_h.add(p_d.hold_off_reload_until_fire_release);
-	r_h.add(p_d.deploy_time);
-	r_h.add(p_d.zoom_blocked_after_deploy);
-	for (const auto &stance : p_d.sway) {
-		for (const SwayState &s : stance) {
-			for (const Dispersion &d : s.move) {
-				hash_dispersion(r_h, d);
-			}
-			for (const bool b : s.has_move) {
-				r_h.add(b);
-			}
-			hash_recoil(r_h, s.recoil);
+template <class G> void def_groups(const WeaponSimDef &p_d, G &&r_group) {
+	r_group("identity", [&](detail::Fnv64 &r_h) {
+		r_h.add_str(p_d.variant);
+		r_h.add(p_d.unlock_identifier);
+		r_h.add_str(p_d.weapon_class);
+	});
+	r_group("modes", [&](detail::Fnv64 &r_h) {
+		for (const FireModeDef &m : p_d.modes) {
+			r_h.add(m.logic);
+			r_h.add(m.interval);
+			r_h.add(m.burst_interval);
+			r_h.add(m.bullets_per_burst);
 		}
-	}
-	for (const SwayModifier &m : p_d.suppression_modifier) {
-		hash_modifier(r_h, m);
-	}
-	r_h.add(uint64_t(p_d.conditional.size()));
-	for (const WeaponSimDef::Conditional &c : p_d.conditional) {
-		r_h.add(c.only_supported);
-		r_h.add(c.only_light);
-		for (const auto &stance : c.mod) {
-			for (const SwayModifier &m : stance) {
-				hash_modifier(r_h, m);
+		r_h.add(p_d.mode_count);
+	});
+	r_group("bolt", [&](detail::Fnv64 &r_h) {
+		r_h.add(p_d.bolt_cycle);
+		r_h.add(p_d.bolt_hold_until_fire_release);
+		r_h.add(p_d.bolt_hold_until_zoom_release);
+		r_h.add(p_d.unzoom_on_bolt);
+	});
+	r_group("fire delays", [&](detail::Fnv64 &r_h) {
+		r_h.add(p_d.pre_fire_delay);
+		r_h.add(p_d.spawn_delay);
+	});
+	r_group("hold", [&](detail::Fnv64 &r_h) {
+		r_h.add(p_d.hold_delay);
+		r_h.add(p_d.hold_max_time);
+		r_h.add(p_d.hold_min_power);
+		r_h.add(p_d.hold_max_power);
+		r_h.add(p_d.hold_power_per_second);
+	});
+	r_group("magazine_capacity", [&](detail::Fnv64 &r_h) { r_h.add(p_d.magazine_capacity); });
+	r_group("magazines", [&](detail::Fnv64 &r_h) {
+		r_h.add(p_d.magazines);
+		r_h.add(p_d.unlimited_ammo);
+	});
+	r_group("pellets", [&](detail::Fnv64 &r_h) { r_h.add(p_d.pellets); });
+	r_group("trace_frequency", [&](detail::Fnv64 &r_h) { r_h.add(p_d.trace_frequency); });
+	r_group("reload", [&](detail::Fnv64 &r_h) {
+		r_h.add(p_d.reload_type);
+		r_h.add(p_d.reload_tactical);
+		r_h.add(p_d.reload_empty);
+		r_h.add(p_d.reload_delay);
+		r_h.add(p_d.reload_threshold);
+		r_h.add(p_d.reload_commit_tactical);
+		r_h.add(p_d.reload_commit_empty);
+		r_h.add(p_d.switch_cancels_reload);
+		r_h.add(p_d.always_auto_reload);
+		r_h.add(p_d.hold_off_reload_until_fire_release);
+	});
+	r_group("deploy", [&](detail::Fnv64 &r_h) {
+		r_h.add(p_d.deploy_time);
+		r_h.add(p_d.zoom_blocked_after_deploy);
+	});
+	r_group("sway", [&](detail::Fnv64 &r_h) {
+		for (const auto &stance : p_d.sway) {
+			for (const SwayState &s : stance) {
+				for (const Dispersion &d : s.move) {
+					hash_dispersion(r_h, d);
+				}
+				for (const bool b : s.has_move) {
+					r_h.add(b);
+				}
+				hash_recoil(r_h, s.recoil);
 			}
 		}
-	}
-	r_h.add(p_d.first_shot_recoil_multiplier);
-	r_h.add(p_d.shooting_recoil_decrease_scale);
-	for (size_t s = 0; s < 3; ++s) {
-		for (size_t z = 0; z < 2; ++z) {
-			r_h.add(p_d.recovery_factor_idle[s][z]);
-			r_h.add(p_d.recovery_factor_firing[s][z]);
+	});
+	r_group("suppression_modifier", [&](detail::Fnv64 &r_h) {
+		for (const SwayModifier &m : p_d.suppression_modifier) {
+			hash_modifier(r_h, m);
 		}
-	}
-	for (const Dispersion &d : p_d.pellet_cone) {
-		hash_dispersion(r_h, d);
-	}
+	});
+	r_group("conditional", [&](detail::Fnv64 &r_h) {
+		r_h.add(uint64_t(p_d.conditional.size()));
+		for (const WeaponSimDef::Conditional &c : p_d.conditional) {
+			r_h.add(c.only_supported);
+			r_h.add(c.only_light);
+			for (const auto &stance : c.mod) {
+				for (const SwayModifier &m : stance) {
+					hash_modifier(r_h, m);
+				}
+			}
+		}
+	});
+	r_group("recoil scales", [&](detail::Fnv64 &r_h) {
+		r_h.add(p_d.first_shot_recoil_multiplier);
+		r_h.add(p_d.shooting_recoil_decrease_scale);
+	});
+	r_group("recovery", [&](detail::Fnv64 &r_h) {
+		for (size_t s = 0; s < 3; ++s) {
+			for (size_t z = 0; z < 2; ++z) {
+				r_h.add(p_d.recovery_factor_idle[s][z]);
+				r_h.add(p_d.recovery_factor_firing[s][z]);
+			}
+		}
+	});
+	r_group("pellet_cone", [&](detail::Fnv64 &r_h) {
+		for (const Dispersion &d : p_d.pellet_cone) {
+			hash_dispersion(r_h, d);
+		}
+	});
 	const ProjectileSimDef &p = p_d.projectile;
-	r_h.add(p.kind);
-	r_h.add3(p.launch_velocity);
-	r_h.add3(p.launch_offset);
-	r_h.add(p.muzzle_speed);
-	r_h.add(p.gravity);
-	r_h.add(p.time_to_live);
-	r_h.add(p.instant_hit);
-	r_h.add(p.start_damage);
-	r_h.add(p.end_damage);
-	r_h.add(p.falloff_start);
-	r_h.add(p.falloff_end);
-	r_h.add(p.time_to_arm);
-	r_h.add(p.detonate_on_timeout);
-	r_h.add(p.direct_damage);
-	r_h.add(p.engine_acceleration);
-	r_h.add(p.max_speed);
-	r_h.add(p.engine_ignition);
-	r_h.add(p.engine_time_to_live);
-	r_h.add(p.drag);
-	r_h.add(p.bounce_speed_multiplier);
-	r_h.add(p.min_bounce_speed);
-	r_h.add(p.property);
-	r_h.add(p.physics_material);
-	r_h.add(p.never_penetrate_any);
-	for (const core::gameplay::DamageRelation &r : p.zone) {
-		hash_relation(r_h, r);
-	}
-	hash_explosion(r_h, p.explosion);
-	hash_explosion(r_h, p.dud);
-	r_h.add(p.suppression_min);
-	r_h.add(p.suppression_max);
-	r_h.add(p.suppression_min_distance);
-	r_h.add(p.suppression_max_distance);
+	r_group("projectile launch", [&](detail::Fnv64 &r_h) {
+		r_h.add(p.kind);
+		r_h.add3(p.launch_velocity);
+		r_h.add3(p.launch_offset);
+		r_h.add(p.muzzle_speed);
+	});
+	r_group("projectile flight", [&](detail::Fnv64 &r_h) {
+		r_h.add(p.gravity);
+		r_h.add(p.time_to_live);
+		r_h.add(p.instant_hit);
+	});
+	r_group("projectile damage", [&](detail::Fnv64 &r_h) {
+		r_h.add(p.start_damage);
+		r_h.add(p.end_damage);
+		r_h.add(p.falloff_start);
+		r_h.add(p.falloff_end);
+	});
+	r_group("projectile motion", [&](detail::Fnv64 &r_h) {
+		r_h.add(p.time_to_arm);
+		r_h.add(p.detonate_on_timeout);
+		r_h.add(p.direct_damage);
+		r_h.add(p.engine_acceleration);
+		r_h.add(p.max_speed);
+		r_h.add(p.engine_ignition);
+		r_h.add(p.engine_time_to_live);
+		r_h.add(p.drag);
+		r_h.add(p.bounce_speed_multiplier);
+		r_h.add(p.min_bounce_speed);
+	});
+	r_group("projectile material", [&](detail::Fnv64 &r_h) {
+		r_h.add(p.property);
+		r_h.add(p.physics_material);
+		r_h.add(p.never_penetrate_any);
+		for (const core::gameplay::DamageRelation &r : p.zone) {
+			hash_relation(r_h, r);
+		}
+	});
+	r_group("projectile explosion", [&](detail::Fnv64 &r_h) {
+		hash_explosion(r_h, p.explosion);
+		hash_explosion(r_h, p.dud);
+	});
+	r_group("projectile suppression", [&](detail::Fnv64 &r_h) {
+		r_h.add(p.suppression_min);
+		r_h.add(p.suppression_max);
+		r_h.add(p.suppression_min_distance);
+		r_h.add(p.suppression_max_distance);
+	});
+}
+
+void hash_def(detail::Fnv64 &r_h, const WeaponSimDef &p_d) {
+	def_groups(p_d, [&](const char *, auto &&p_add) { p_add(r_h); });
 }
 
 void hash_mechanics(detail::Fnv64 &r_h, const Mechanics &p_m) {
@@ -601,6 +649,18 @@ core::Result<std::shared_ptr<const WeaponTable>> make_weapon_table(std::span<con
 		}
 		table->defs.push_back(std::move(*d));
 	}
+	if (p_options.variants.size() > table->defs.size()) {
+		return core::make_error("make_weapon_table: variants for " + std::to_string(p_options.variants.size()) +
+				" defs, the table has " + std::to_string(table->defs.size()));
+	}
+	for (size_t d = 0; d < p_options.variants.size(); ++d) {
+		if (p_options.variants[d].size() > kMaxWeaponVariants) {
+			return core::make_error("make_weapon_table: " + table->defs[d].variant + " has " +
+					std::to_string(p_options.variants[d].size()) + " variants (limit " +
+					std::to_string(kMaxWeaponVariants) + ")");
+		}
+	}
+	table->variants.assign(p_options.variants.begin(), p_options.variants.end());
 	table->materials = std::move(p_materials);
 	table->mechanics = p_options.mechanics;
 	table->infinite_magazine = p_options.infinite_magazine;
@@ -627,7 +687,161 @@ uint64_t weapon_table_hash(const WeaponTable &p_table) {
 		h.add(p_table.exact_aim);
 	}
 	h.add(p_table.sprint_recover_time);
+	if (!p_table.variants.empty()) {
+		h.add(uint64_t(p_table.variants.size()));
+		for (const std::vector<WeaponSimDef> &v : p_table.variants) {
+			h.add(uint64_t(v.size()));
+			for (const WeaponSimDef &d : v) {
+				hash_def(h, d);
+			}
+		}
+	}
 	return h.value();
+}
+
+uint64_t weapon_sim_def_hash(const WeaponSimDef &p_def) {
+	detail::Fnv64 h;
+	hash_def(h, p_def);
+	return h.value();
+}
+
+std::vector<std::string> weapon_sim_def_diff(const WeaponSimDef &p_a, const WeaponSimDef &p_b) {
+	std::vector<std::pair<const char *, uint64_t>> a;
+	def_groups(p_a, [&](const char *p_name, auto &&p_add) {
+		detail::Fnv64 h;
+		p_add(h);
+		a.emplace_back(p_name, h.value());
+	});
+	std::vector<std::string> out;
+	size_t i = 0;
+	def_groups(p_b, [&](const char *p_name, auto &&p_add) {
+		detail::Fnv64 h;
+		p_add(h);
+		if (a[i++].second != h.value()) {
+			out.emplace_back(p_name);
+		}
+	});
+	return out;
+}
+
+core::Result<WeaponVariants> make_weapon_variants(const WeaponSimDef &p_plain,
+		std::span<const WeaponVariantPart> p_parts, const WeaponVariantResolve &p_resolve,
+		const SurfaceMaterialTable &p_materials) {
+	WeaponVariants out;
+	const std::string where = "make_weapon_variants " + p_plain.variant;
+	const size_t parts = p_parts.size();
+	std::vector<size_t> base(parts);
+	for (size_t p = 0; p < parts; ++p) {
+		const WeaponVariantPart &part = p_parts[p];
+		if (part.unlocks.size() > kMaxWeaponVariants ||
+				(part.base != kNoVariantOption && part.base >= part.unlocks.size())) {
+			return core::make_error(where + ": part " + std::to_string(p) + " has " +
+					std::to_string(part.unlocks.size()) + " options and base " + std::to_string(part.base));
+		}
+		base[p] = part.base;
+	}
+	std::map<std::vector<size_t>, WeaponSimDef> known;
+	const auto sim_of = [&](const std::vector<size_t> &p_options) -> core::Result<WeaponSimDef> {
+		if (const auto it = known.find(p_options); it != known.end()) {
+			return it->second;
+		}
+		std::vector<std::string> unlocks;
+		for (size_t p = 0; p < parts; ++p) {
+			if (p_options[p] != kNoVariantOption) {
+				unlocks.push_back(p_parts[p].unlocks[p_options[p]]);
+			}
+		}
+		++out.resolves;
+		core::Result<core::gameplay::WeaponDef> def = p_resolve(unlocks);
+		if (!def) {
+			return core::error_at(where, def.error());
+		}
+		core::Result<WeaponSimDef> sim = make_weapon_sim_def(*def, p_materials);
+		if (!sim) {
+			return core::error_at(where, sim.error());
+		}
+		known.emplace(p_options, *sim);
+		return sim;
+	};
+	core::Result<WeaponSimDef> unpicked = sim_of(base);
+	if (!unpicked) {
+		return unpicked.error();
+	}
+	const uint64_t unpicked_hash = weapon_sim_def_hash(*unpicked);
+	std::vector<std::vector<size_t>> reps(parts);
+	out.map.classes.resize(parts);
+	out.map.radix.resize(parts);
+	size_t combos = 1;
+	for (size_t p = 0; p < parts; ++p) {
+		std::vector<uint64_t> hashes{ unpicked_hash };
+		out.map.classes[p].assign(p_parts[p].unlocks.size(), 0);
+		for (size_t o = 0; o < p_parts[p].unlocks.size(); ++o) {
+			std::vector<size_t> options = base;
+			options[p] = o;
+			core::Result<WeaponSimDef> d = sim_of(options);
+			if (!d) {
+				return d.error();
+			}
+			const uint64_t h = weapon_sim_def_hash(*d);
+			const size_t at = size_t(std::find(hashes.begin(), hashes.end(), h) - hashes.begin());
+			if (at == hashes.size()) {
+				hashes.push_back(h);
+				reps[p].push_back(o);
+			}
+			out.map.classes[p][o] = uint8_t(at);
+		}
+		out.map.radix[p] = uint8_t(hashes.size());
+		combos *= hashes.size();
+		if (combos > kMaxWeaponVariantCombos) {
+			return core::make_error(
+					where + ": more than " + std::to_string(kMaxWeaponVariantCombos) + " accessory combinations");
+		}
+	}
+	const uint64_t plain_hash = weapon_sim_def_hash(p_plain);
+	std::vector<uint64_t> variant_hashes;
+	out.map.combo_variant.resize(combos);
+	for (size_t c = 0; c < combos; ++c) {
+		std::vector<size_t> options = base;
+		size_t rest = c;
+		for (size_t p = 0; p < parts; ++p) {
+			const size_t cls = rest % out.map.radix[p];
+			rest /= out.map.radix[p];
+			if (cls != 0) {
+				options[p] = reps[p][cls - 1];
+			}
+		}
+		core::Result<WeaponSimDef> d = sim_of(options);
+		if (!d) {
+			return d.error();
+		}
+		const uint64_t h = weapon_sim_def_hash(*d);
+		if (h == plain_hash) {
+			out.map.combo_variant[c] = 0;
+			continue;
+		}
+		const size_t at = size_t(std::find(variant_hashes.begin(), variant_hashes.end(), h) - variant_hashes.begin());
+		if (at == variant_hashes.size()) {
+			if (variant_hashes.size() >= kMaxWeaponVariants) {
+				return core::make_error(
+						where + ": more than " + std::to_string(kMaxWeaponVariants) + " distinct variants");
+			}
+			variant_hashes.push_back(h);
+			out.defs.push_back(std::move(*d));
+		}
+		out.map.combo_variant[c] = uint8_t(at + 1);
+	}
+	return out;
+}
+
+uint8_t weapon_variant(const WeaponVariantMap &p_map, std::span<const size_t> p_options) {
+	size_t combo = 0, stride = 1;
+	for (size_t p = 0; p < p_map.radix.size(); ++p) {
+		const size_t o = p < p_options.size() ? p_options[p] : kNoVariantOption;
+		const size_t cls = o < p_map.classes[p].size() ? p_map.classes[p][o] : 0u;
+		combo += cls * stride;
+		stride *= p_map.radix[p];
+	}
+	return combo < p_map.combo_variant.size() ? p_map.combo_variant[combo] : uint8_t(0);
 }
 
 double sim_shot_interval_seconds(const WeaponSimDef &p_def, uint8_t p_mode) {
