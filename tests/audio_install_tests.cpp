@@ -2,7 +2,10 @@
 
 #include "bf3/audio/audio_load.h"
 #include "bf3/audio/ir_reverb.h"
+#include "bf3/audio/mixer_core.h"
 #include "bf3/audio/patch_instance.h"
+#include "bf3/audio/voice_cull.h"
+#include "bf3/client_audio/area_beds.h"
 #include "bf3/client_audio/area_wave_observer.h"
 #include "bf3/core/audio/impulse_response.h"
 #include "bf3/core/audio/mixer_asset.h"
@@ -1157,6 +1160,120 @@ void check_points(const AreasFixture &p_f, const AreaLevel &p_level, const char 
 	}
 }
 
+struct BedPass {
+	size_t sounding = 0;
+	double energy = 0.0;
+	float peak = 0.0f;
+};
+
+BedPass bed_pass(ba::MixerCore &r_mixer, ba::AreaBeds &r_beds, const lg::SoundAreaNatives &p_areas, uint32_t p_blocks) {
+	BedPass out;
+	std::array<float, 2 * ba::kBlockFrames> block{};
+	std::array<ba::MixerCutEvent, 256> cuts;
+	const ba::AudioTuning tuning;
+	ba::ListenerState listener;
+	listener.position = p_areas.listener();
+	for (uint32_t b = 0; b < p_blocks; ++b) {
+		r_beds.step(r_mixer, &p_areas, tuning, listener);
+		REQUIRE(r_mixer.mix(block.data(), ba::kBlockFrames) == ba::kBlockFrames);
+		for (float x : block) {
+			REQUIRE(std::isfinite(x));
+			out.energy += double(x) * x;
+			out.peak = std::max(out.peak, std::fabs(x));
+		}
+		r_mixer.reclaim();
+		for (size_t n = r_mixer.poll_cuts(cuts); n > 0; n = r_mixer.poll_cuts(cuts)) {
+			for (size_t i = 0; i < n; ++i) {
+				r_beds.on_cut(cuts[i]);
+			}
+		}
+	}
+	for (const ba::AreaBed &bed : r_beds.beds()) {
+		out.sounding += bed.handle != ba::kNoInstance ? 1u : 0u;
+	}
+	return out;
+}
+
+void check_beds(const AreasFixture &p_f, const AreaLevel &p_level, const char *p_level_name,
+		std::span<const AreaPoint> p_points, size_t p_with_sound, size_t p_sounds) {
+	lg::SoundAreaProbe &probe = *p_level.probe;
+	const gp::SoundAreaData &data = probe.natives().data();
+	Result<std::shared_ptr<const ba::AreaBedAssets>> assets = ba::load_area_beds(*p_f.install, *p_level.level, data, 4);
+	REQUIRE_MESSAGE(assets.ok(), (assets.ok() ? std::string() : assets.error().message));
+	const ba::AreaBedAssets &a = **assets;
+	for (const std::string &e : a.errors) {
+		MESSAGE(e);
+	}
+	MESSAGE(std::string(p_level_name), ": ", a.areas_with_sound, " of ", a.areas, " areas have a bed, ",
+			a.sounds.size(), " sounds, ", a.bank->stats().resident_waves, " resident waves, ",
+			double(a.bank->stats().resident_bytes) / double(1 << 20), " MiB");
+	CHECK(a.failures == 0);
+	CHECK(a.waves_missing == 0);
+	CHECK(a.areas_with_sound == p_with_sound);
+	CHECK(a.sounds.size() == p_sounds);
+	for (const ba::AreaBedSound &s : a.sounds) {
+		CAPTURE(s.program->name);
+		CHECK(std::any_of(s.program->nodes.begin(), s.program->nodes.end(),
+				[](const ca::SoundNode &n) { return n.type == ca::SoundNodeType::DivisibleLoopPlayer; }));
+		CHECK(s.program->is_looping);
+		CHECK(std::any_of(s.program->inputs.begin(), s.program->inputs.end(),
+				[](const ca::SoundInput &in) { return in.name_hash == ba::kHashBedAmplitude && !in.event; }));
+		CHECK(s.amplitude > 0.0f);
+	}
+	std::vector<std::shared_ptr<const ca::SoundProgram>> programs;
+	for (const ba::AreaBedSound &s : a.sounds) {
+		programs.push_back(s.program);
+	}
+	const ba::MixerA3Assets a3 = ba::load_mixer_a3(p_level.level->db(), programs);
+	REQUIRE(a3.hdr.has_value());
+	CHECK(a3.skipped_patches == 0);
+	ba::MixerConfig mc;
+	mc.max_instances = 256;
+	ba::apply_mixer_a3(a3, mc);
+	ba::MixerCore mixer(mc);
+	mixer.record_cuts(true);
+	ba::AreaBeds beds;
+	beds.set_assets(*assets);
+	size_t points_sounding = 0;
+	for (const AreaPoint &p : p_points) {
+		const std::string point_name = p.name;
+		CAPTURE(point_name);
+		REQUIRE(probe.at(bf3::core::Vec3{ p.feet.x, p.feet.y + kListenerLifts[1], p.feet.z }).ok());
+		const BedPass pass = bed_pass(mixer, beds, probe.natives(), 94);
+		size_t want = 0;
+		for (const ba::AreaBed &bed : beds.beds()) {
+			const lg::SoundAreaValue &v = probe.natives().areas()[bed.area];
+			const float proximity = v.published ? v.proximity : 0.0f;
+			CAPTURE(bed.area);
+			CHECK((bed.handle != ba::kNoInstance) == (proximity > 0.0f));
+			CHECK(bed.amplitude == proximity * a.sounds[bed.sound].amplitude);
+			want += proximity > 0.0f ? 1u : 0u;
+		}
+		CHECK(pass.sounding == want);
+		CHECK(mixer.stats().active_instances.load() == want);
+		points_sounding += want > 0 ? 1u : 0u;
+		MESSAGE(std::string(p_level_name), " ", point_name, ": ", want, " beds sound, peak ", pass.peak, ", rms ",
+				std::sqrt(pass.energy / (94.0 * 2.0 * ba::kBlockFrames)));
+		if (want > 0) {
+			CHECK(pass.energy > 0.0);
+		}
+		CHECK(pass.peak < 1.0f);
+	}
+	CHECK(points_sounding > 0);
+	CHECK(beds.stats().ended == 0);
+	CHECK(beds.stats().create_failures == 0);
+	CHECK(beds.stats().push_failures == 0);
+
+	ba::AreaBeds joiner;
+	joiner.set_assets(*assets);
+	ba::MixerCore fresh(mc);
+	fresh.record_cuts(true);
+	(void)bed_pass(fresh, joiner, probe.natives(), 1);
+	for (size_t i = 0; i < joiner.beds().size(); ++i) {
+		CHECK((joiner.beds()[i].handle != ba::kNoInstance) == (beds.beds()[i].handle != ba::kNoInstance));
+	}
+}
+
 }
 
 TEST_SUITE("audio-areas") {
@@ -1281,6 +1398,14 @@ TEST_SUITE("audio-areas") {
 				10.0 * std::log10(reverb / direct), " dB");
 		CHECK(reverb > 0.0);
 		CHECK(reverb < direct);
+	}
+
+	TEST_CASE("beds: each SoundArea's Sound loops at the area's proximity, from the listener alone") {
+		CHECK(bf3::core::ebx_name_hash("Amplitude") == ba::kHashBedAmplitude);
+		AreasFixture *f = areas_fixture();
+		check_beds(*f, f->metro, "Metro", kMetroPoints, 54, 24);
+		check_beds(*f, f->seine, "Seine", kSeinePoints, 133, 22);
+		check_unchanged_snapshot(f->before, f->reader);
 	}
 
 	TEST_CASE("prism: Height rises from the lowest point, the volume the look's areas measure") {

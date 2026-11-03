@@ -103,6 +103,9 @@ struct Reader {
 				return error("a SoundAreaEntityData has the fade curve '" + std::string(name.value_or("")) + "'");
 			}
 			a.curve = *c;
+			if (const std::optional<EbxInstance> sound = world.db().follow(inst->data(), "Sound")) {
+				a.sound = sound->partition().guid();
+			}
 		}
 		if (!std::isfinite(a.fade_width) || a.fade_width < 0.0f || !std::isfinite(a.proximity_multiplier)) {
 			return error("node " + std::to_string(p_node) + " has a non-finite or negative fade");

@@ -456,3 +456,8 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/audio/impulse_response.h
     src/audio/impulse_response.cpp
 )
+
+target_sources(bf3_core PRIVATE
+    include/bf3/core/audio/sound_patch_config.h
+    src/audio/sound_patch_config.cpp
+)

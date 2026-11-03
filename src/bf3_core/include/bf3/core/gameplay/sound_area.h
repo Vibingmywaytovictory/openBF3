@@ -4,6 +4,7 @@
 #include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/gameplay/logic_types.h"
 #include "bf3/core/gameplay/logic_world.h"
+#include "bf3/core/ids.h"
 #include "bf3/core/level/area_volume.h"
 #include "bf3/core/level/level_transform.h"
 #include "bf3/core/math.h"
@@ -34,6 +35,7 @@ struct AreaDef {
 	float fade_width = 0.0f;
 	AreaFadeCurve curve = AreaFadeCurve::SineAmplitude;
 	float proximity_multiplier = 1.0f;
+	Guid sound;
 
 	float proximity(const Vec3 &p_listener, float p_multiplier) const;
 };

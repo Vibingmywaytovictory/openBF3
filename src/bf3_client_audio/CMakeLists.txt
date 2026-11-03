@@ -13,3 +13,8 @@ add_library(bf3_client_audio STATIC
 target_include_directories(bf3_client_audio PUBLIC include)
 target_link_libraries(bf3_client_audio PUBLIC bf3_audio bf3_host)
 openbf3_module(bf3_client_audio)
+
+target_sources(bf3_client_audio PRIVATE
+    src/area_beds.cpp
+    include/bf3/client_audio/area_beds.h
+)

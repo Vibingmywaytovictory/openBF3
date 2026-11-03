@@ -16,6 +16,7 @@
 #include "bf3/host/client_wiring.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/level_load.h"
+#include "bf3/host/ui_flow_session.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
 #include <godot_cpp/classes/audio_server.hpp>
@@ -131,6 +132,8 @@ struct Bf3GameAudio::Impl {
 	std::vector<ba::MixerCutEvent> forwarded;
 	std::chrono::steady_clock::time_point fate_line_at{};
 	ba::AreaFeed area_feed;
+	ba::AreaBeds beds;
+	std::shared_ptr<const ba::AreaBedAssets> bed_assets;
 	const sim::logic::SoundAreaNatives *areas = nullptr;
 	std::shared_ptr<const ba::ImpulseBank> impulses;
 	ba::IrReverbFeed ir_feed;
@@ -171,6 +174,26 @@ core::Status Bf3GameAudio::load(const GameLoadInputs &p_in, std::span<const std:
 	m.categories = ba::SoundCategoryTable{};
 	if (m.table) {
 		m.categories.add_weapons(*m.table);
+	}
+	m.bed_assets.reset();
+	core::Result<host::ClientLogicWorld> logic = host::build_client_logic(*p_in.db->level);
+	core::Result<core::gameplay::SoundAreaData> areas = logic
+			? core::gameplay::read_sound_areas(logic->world, *logic->graph)
+			: core::Result<core::gameplay::SoundAreaData>(logic.error());
+	core::Result<std::shared_ptr<const ba::AreaBedAssets>> beds = areas
+			? ba::load_area_beds(*p_in.db->install, *p_in.db->level, *areas, p_in.threads)
+			: core::Result<std::shared_ptr<const ba::AreaBedAssets>>(areas.error());
+	if (beds) {
+		m.bed_assets = *beds;
+		m.report.push_back("area beds: " + std::to_string((*beds)->areas_with_sound) + " of " +
+				std::to_string((*beds)->areas) + " areas, " + std::to_string((*beds)->sounds.size()) + " sounds, " +
+				std::to_string((*beds)->failures) + " failures, " +
+				std::to_string((*beds)->bank->stats().resident_waves) + " resident waves");
+		for (const std::string &e : (*beds)->errors) {
+			m.report.push_back("area bed " + e);
+		}
+	} else {
+		m.report.push_back("area beds: NOT LOADED (" + beds.error().message + ")");
 	}
 	m.a3 = load_a3(p_in.db->level->db(), m);
 	m.impulses = load_impulses(*p_in.db->level, m);
@@ -241,6 +264,7 @@ bool Bf3GameAudio::build(godot::Node *p_parent, std::string *r_error) {
 	wc.max_weapon_voices = m.sizes.weapon_voices;
 	m.router = std::make_unique<ba::WeaponAudioRouter>(*m.mixer, m.table, m.bank, m.tuning, *m.pool, wc);
 	m.impacts = std::make_unique<ba::ImpactAudio>(*m.mixer, m.impacts_cache, m.bank, m.tuning, *m.pool);
+	m.beds.set_assets(m.bed_assets);
 	m.stream.instantiate();
 	m.stream->set_mixer(m.mixer);
 	m.player = memnew(AudioStreamPlayer);
@@ -313,6 +337,7 @@ void Bf3GameAudio::step(const GameFrame &p_frame, std::span<const fx::ImpactSoun
 		m.impact_requests.push_back(r);
 	}
 	m.area_feed.step(*m.mixer, m.areas);
+	m.beds.step(*m.mixer, m.areas, m.tuning, in.listener);
 	m.areas = nullptr;
 	m.ir_feed.step(*m.mixer, m.reverbs, m.impulses.get());
 	m.reverbs = nullptr;
@@ -465,6 +490,10 @@ const audio::AreaFeedStats &Bf3GameAudio::area_feed() const {
 	return impl_->area_feed.stats();
 }
 
+const audio::AreaBeds &Bf3GameAudio::area_beds() const {
+	return impl_->beds;
+}
+
 std::optional<float> Bf3GameAudio::mixer_value(uint32_t p_name_hash) const {
 	return impl_->mixer != nullptr ? impl_->mixer->mixer_value(p_name_hash) : std::nullopt;
 }
@@ -587,6 +616,11 @@ ba::MixerA3Assets load_a3(const core::EbxResolver &p_db, Impl &r_m) {
 	for (const auto &a : r_m.auditions) {
 		programs.push_back(a.second.program);
 	}
+	if (r_m.bed_assets) {
+		for (const ba::AreaBedSound &b : r_m.bed_assets->sounds) {
+			programs.push_back(b.program);
+		}
+	}
 	ba::MixerA3Assets a3 = ba::load_mixer_a3(p_db, programs);
 	char line[200];
 	std::snprintf(line, sizeof(line), "audio A3: HDR window %s, %zu scopes, %zu of %zu programs scoped", a3.hdr ? "from the data" : "absent (fixed window)",
@@ -668,6 +702,7 @@ template <class Impl> void drain_mixer_events(Impl &r_m, const Bf3GameAudio &p_a
 		for (size_t i = 0; i < n; ++i) {
 			const ba::MixerCutEvent &e = r_m.cut_batch[i];
 			r_m.ledger.note(e, p_audio.scope_name(e.scope));
+			r_m.beds.on_cut(e);
 			if (keep) {
 				if (c->events.size() < kMaxCaptureEvents) {
 					c->events.push_back(e);

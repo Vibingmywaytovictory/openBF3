@@ -7,6 +7,7 @@
 #include "bf3/audio/impact_audio.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/weapon_audio.h"
+#include "bf3/client_audio/area_beds.h"
 #include "bf3/client_audio/area_feed.h"
 #include "bf3/client_audio/game_audio_frame.h"
 #include "bf3/client_audio/sound_fate_ledger.h"
@@ -88,6 +89,7 @@ public:
 	const audio::AreaFeedStats &area_feed() const;
 	void set_ir_reverbs(const sim::logic::IrReverbNatives *p_reverbs);
 	const audio::IrReverbFeedStats &ir_feed() const;
+	const audio::AreaBeds &area_beds() const;
 	std::optional<float> mixer_value(uint32_t p_name_hash) const;
 #if OPENBF3_BUILD_CHECKS
 	core::Result<std::vector<std::string>> observe_area_waves(std::string_view p_patch, float p_area_type) const;
