@@ -2944,3 +2944,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * The irf1 ImpulseResponseAsset decoder and `bf3dump audio irs`; audio.ir.install decodes the 17 census responses and Metro's and Seine's; audio.ir.install.
 * The master's RIR1 convolves the Reverb bus with two slots of impulse responses, 512-frame partitions up to 2.0 s, crossfaded; audio.mixer.unit, audio.ir.install.
 * A patch's ReverbSend feeds the Reverb bus at its cone's ReverbGain instead of being dropped; core.audio.areas, audio.patch.unit.
+* IrReverb zones read their SoundArea's Proximity as a Volume with the data's Gain and fade curve; core.audio.areas.

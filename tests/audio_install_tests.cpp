@@ -23,6 +23,7 @@
 #include "bf3/core/level/level.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/host/ui_flow_session.h"
+#include "bf3/sim/logic/ir_reverb_natives.h"
 #include "bf3/sim/logic/sound_area_natives.h"
 #include "bf3/sim_harness/sound_area_probe.h"
 
@@ -1065,6 +1066,55 @@ std::vector<float> oracle_inputs(const AreaLevel &p_level) {
 	return out;
 }
 
+struct IrPoint {
+	const char *name;
+	bf3::core::Vec3 feet;
+	const char *impulse;
+	float amplitude;
+};
+
+void check_ir_points(const AreaLevel &p_level, const char *p_level_name, std::span<const IrPoint> p_points) {
+	Result<lg::IrReverbNatives> natives = lg::IrReverbNatives::create(p_level.logic->world, p_level.logic->graph);
+	REQUIRE_MESSAGE(natives.ok(), (natives.ok() ? std::string() : natives.error().message));
+	const lg::IrReverbNativeStats &stats = natives->stats();
+	MESSAGE(std::string(p_level_name), ": ", stats.zones, " IrReverb zones, ", stats.without_impulse,
+			" without an impulse response, ", stats.unfed, " with no Volume source");
+	CHECK(stats.zones > 0);
+	CHECK(stats.without_impulse == 0);
+	CHECK(stats.unfed == 0);
+	for (const lg::IrReverbDef &z : natives->zones()) {
+		REQUIRE(z.sources.size() == 1);
+		CHECK(p_level.logic->graph->nodes()[z.sources[0].node].type == gp::LogicTypeId::SoundArea);
+		CHECK(z.sources[0].port == gp::kSoundAreaProximity);
+		CHECK(z.gain_db <= 0.0f);
+	}
+	for (const IrPoint &p : p_points) {
+		const std::string point_name = p.name;
+		CAPTURE(point_name);
+		REQUIRE(p_level.probe->at(bf3::core::Vec3{ p.feet.x, p.feet.y + kListenerLifts[1], p.feet.z }).ok());
+		natives->update(p_level.probe->runtime());
+		REQUIRE(natives->updated());
+		std::map<std::string, float> loudest;
+		for (size_t i = 0; i < natives->zones().size(); ++i) {
+			float &a = loudest[name_tail(natives->zones()[i].impulse_name)];
+			a = std::max(a, natives->values()[i].amplitude);
+		}
+		std::string best;
+		float best_amplitude = 0.0f;
+		std::string list;
+		for (const auto &[name, a] : loudest) {
+			list += " " + name + "=" + std::to_string(a);
+			if (a > best_amplitude) {
+				best = name;
+				best_amplitude = a;
+			}
+		}
+		MESSAGE(std::string(p_level_name), " ", point_name, ":", list);
+		CHECK(best == p.impulse);
+		CHECK(std::fabs(best_amplitude - p.amplitude) < 1e-5f);
+	}
+}
+
 void check_points(const AreasFixture &p_f, const AreaLevel &p_level, const char *p_level_name,
 		std::span<const AreaPoint> p_points) {
 	lg::SoundAreaProbe &probe = *p_level.probe;
@@ -1187,6 +1237,24 @@ TEST_SUITE("audio-areas") {
 		AreasFixture *f = areas_fixture();
 		check_points(*f, f->metro, "Metro", kMetroPoints);
 		check_points(*f, f->seine, "Seine", kSeinePoints);
+		check_unchanged_snapshot(f->before, f->reader);
+	}
+
+	TEST_CASE("IrReverb zones: each fed by its SoundArea's Proximity; the loudest impulse response at fixed points") {
+		AreasFixture *f = areas_fixture();
+		const std::array<IrPoint, 4> metro{ {
+				{ "garage", kMetroPoints[0].feet, "IR_Indoor_Garage", 0.0562341f },
+				{ "street", kMetroPoints[1].feet, "", 0.0f },
+				{ "open ground", kMetroPoints[2].feet, "", 0.0f },
+				{ "room", kMetroPoints[3].feet, "IR_Indoor_Big_Room", 0.1f },
+		} };
+		const std::array<IrPoint, 3> seine{ {
+				{ "room", kSeinePoints[0].feet, "IR_Indoor_Big_Room", 0.200951f },
+				{ "open ground", kSeinePoints[1].feet, "", 0.0f },
+				{ "alley", kSeinePoints[2].feet, "IR_Outdoor_Alley", 0.177828f },
+		} };
+		check_ir_points(f->metro, "Metro", metro);
+		check_ir_points(f->seine, "Seine", seine);
 		check_unchanged_snapshot(f->before, f->reader);
 	}
 

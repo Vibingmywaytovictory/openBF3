@@ -8,7 +8,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace bf3::core::level {
@@ -19,6 +21,7 @@ inline constexpr float kAreaFadeDecibelFloor = -60.0f;
 enum class AreaFadeCurve : uint8_t { SineAmplitude, LinearAmplitude, LinearDecibel };
 
 float area_fade(AreaFadeCurve p_curve, float p_distance, float p_width);
+std::optional<AreaFadeCurve> parse_area_fade_curve(std::string_view p_name);
 
 struct AreaVolume {
 	enum class Kind : uint8_t { Prism, Box };

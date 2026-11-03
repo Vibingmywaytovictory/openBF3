@@ -140,3 +140,8 @@ target_sources(bf3_sim PRIVATE
     include/bf3/sim/logic/sound_area_natives.h
     src/logic/sound_area_natives.cpp
 )
+
+target_sources(bf3_sim PRIVATE
+    include/bf3/sim/logic/ir_reverb_natives.h
+    src/logic/ir_reverb_natives.cpp
+)

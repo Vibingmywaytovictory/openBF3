@@ -5,6 +5,7 @@
 #include "bf3/core/ui/ui_graph.h"
 #include "bf3/host/logic_screen_effects.h"
 #include "bf3/net/protocol.h"
+#include "bf3/sim/logic/ir_reverb_natives.h"
 #include "bf3/sim/logic/logic_runtime.h"
 #include "bf3/sim/logic/sound_area_natives.h"
 
@@ -123,6 +124,7 @@ public:
 	core::Status apply_ghost(const sim::logic::LogicGhost &p_ghost);
 	void set_listener(const core::Vec3 &p_position);
 	const sim::logic::SoundAreaNatives *sound_areas() const { return sound_areas_.get(); }
+	const sim::logic::IrReverbNatives *ir_reverbs() const { return ir_reverbs_.get(); }
 
 	core::ui::UiFlow &flow() { return *flow_; }
 	const core::ui::UiFlow &flow() const { return *flow_; }
@@ -183,6 +185,7 @@ private:
 	std::shared_ptr<const core::gameplay::LogicGraph> graph_;
 	std::unique_ptr<sim::logic::LogicRuntime> runtime_;
 	std::unique_ptr<sim::logic::SoundAreaNatives> sound_areas_;
+	std::unique_ptr<sim::logic::IrReverbNatives> ir_reverbs_;
 	std::optional<core::Vec3> listener_;
 	std::optional<core::ui::UiActionTable> actions_table_;
 	std::map<std::string, std::shared_ptr<const core::ui::UiGraphAsset>, std::less<>> graphs_;

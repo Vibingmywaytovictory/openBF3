@@ -16,19 +16,6 @@ std::optional<double> number(const std::optional<PropertyValue> &p_v) {
 	return p_v ? p_v->as_f64() : std::nullopt;
 }
 
-std::optional<AreaFadeCurve> fade_curve(std::string_view p_name) {
-	if (p_name == "FadeCurveType_SineAmplitude") {
-		return AreaFadeCurve::SineAmplitude;
-	}
-	if (p_name == "FadeCurveType_LinearAmplitude") {
-		return AreaFadeCurve::LinearAmplitude;
-	}
-	if (p_name == "FadeCurveType_LinearDecibel") {
-		return AreaFadeCurve::LinearDecibel;
-	}
-	return std::nullopt;
-}
-
 struct Reader {
 	const LogicWorld &world;
 	const LogicGraph &graph;
@@ -111,7 +98,7 @@ struct Reader {
 			a.proximity_multiplier = float(multiplier ? multiplier->as_f64().value_or(1.0) : 1.0);
 			const std::optional<PropertyValue> curve = world.effective(scope, *inst, "FadeCurve");
 			const std::optional<std::string_view> name = curve ? curve->enum_name() : std::nullopt;
-			const std::optional<AreaFadeCurve> c = name ? fade_curve(*name) : std::nullopt;
+			const std::optional<AreaFadeCurve> c = name ? level::parse_area_fade_curve(*name) : std::nullopt;
 			if (!c) {
 				return error("a SoundAreaEntityData has the fade curve '" + std::string(name.value_or("")) + "'");
 			}

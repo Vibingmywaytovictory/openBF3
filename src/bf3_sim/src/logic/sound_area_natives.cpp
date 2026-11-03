@@ -36,7 +36,16 @@ struct EntityFeeds {
 	std::vector<MixerOutputFeed> outputs;
 };
 
-std::optional<float> number(const std::optional<LogicValue> &p_v) {
+LogicValue float_value(float p_v) {
+	LogicValue v;
+	v.kind = LogicValue::Kind::Float;
+	v.f = double(p_v);
+	return v;
+}
+
+}
+
+std::optional<float> logic_number(const std::optional<LogicValue> &p_v) {
 	if (!p_v) {
 		return std::nullopt;
 	}
@@ -50,15 +59,6 @@ std::optional<float> number(const std::optional<LogicValue> &p_v) {
 		default:
 			return std::nullopt;
 	}
-}
-
-LogicValue float_value(float p_v) {
-	LogicValue v;
-	v.kind = LogicValue::Kind::Float;
-	v.f = double(p_v);
-	return v;
-}
-
 }
 
 struct SoundAreaNatives::State {
@@ -179,7 +179,7 @@ core::Status SoundAreaNatives::listen(const core::Vec3 &p_listener, LogicRuntime
 		const gp::AreaDef &a = s.data.areas[i];
 		SoundAreaValue &v = s.values[i];
 		for (const Source &src : s.multipliers[i]) {
-			if (const std::optional<float> m = number(r_runtime.output(src.node, src.port))) {
+			if (const std::optional<float> m = logic_number(r_runtime.output(src.node, src.port))) {
 				v.multiplier = *m;
 			}
 		}
@@ -205,7 +205,7 @@ core::Status SoundAreaNatives::settle(LogicRuntime &r_runtime) {
 	}
 	for (const EntityFeeds &f : s.entities) {
 		for (const MixerInputFeed &in : f.inputs) {
-			if (const std::optional<float> v = number(r_runtime.output(in.source.node, in.source.port))) {
+			if (const std::optional<float> v = logic_number(r_runtime.output(in.source.node, in.source.port))) {
 				s.contributions[f.mixer][in.input].push_back(*v);
 			}
 		}

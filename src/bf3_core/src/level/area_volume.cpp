@@ -63,6 +63,19 @@ float area_fade(AreaFadeCurve p_curve, float p_distance, float p_width) {
 	return 0.0f;
 }
 
+std::optional<AreaFadeCurve> parse_area_fade_curve(std::string_view p_name) {
+	if (p_name == "FadeCurveType_SineAmplitude") {
+		return AreaFadeCurve::SineAmplitude;
+	}
+	if (p_name == "FadeCurveType_LinearAmplitude") {
+		return AreaFadeCurve::LinearAmplitude;
+	}
+	if (p_name == "FadeCurveType_LinearDecibel") {
+		return AreaFadeCurve::LinearDecibel;
+	}
+	return std::nullopt;
+}
+
 AreaVolume AreaVolume::prism(std::span<const Vec3> p_points, const Vec3 &p_up, float p_height) {
 	AreaVolume out;
 	out.kind = Kind::Prism;

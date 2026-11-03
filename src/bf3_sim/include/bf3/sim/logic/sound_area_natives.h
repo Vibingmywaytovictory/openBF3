@@ -18,6 +18,8 @@ namespace bf3::sim::logic {
 
 using core::audio::kMixerAreaType;
 
+std::optional<float> logic_number(const std::optional<LogicValue> &p_v);
+
 struct SoundAreaValue {
 	uint32_t node = core::gameplay::kNoLogicIndex;
 	float proximity = 0.0f;

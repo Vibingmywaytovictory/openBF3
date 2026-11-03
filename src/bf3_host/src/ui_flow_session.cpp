@@ -93,6 +93,11 @@ core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const 
 	} else {
 		errors_.push_back("ui flow session: " + areas.error().message);
 	}
+	if (core::Result<lg::IrReverbNatives> reverbs = lg::IrReverbNatives::create(logic->world, graph_)) {
+		ir_reverbs_ = std::make_unique<lg::IrReverbNatives>(std::move(*reverbs));
+	} else {
+		errors_.push_back("ui flow session: " + reverbs.error().message);
+	}
 	const std::optional<uint32_t> scope = graph_->scope_named(options_.scope);
 	if (!scope) {
 		return core::make_error(
@@ -213,6 +218,9 @@ core::Status UiFlowSession::start_logic() {
 	runtime_ = std::make_unique<lg::LogicRuntime>(std::move(*rt));
 	if (sound_areas_ != nullptr) {
 		sound_areas_->reset();
+	}
+	if (ir_reverbs_ != nullptr) {
+		ir_reverbs_->reset();
 	}
 	for (const auto &[node, port] : watch_ports_) {
 		BF3_TRY(runtime_->watch(node, port, lg::LogicWatchKind::EventIn));
@@ -412,6 +420,9 @@ core::Status UiFlowSession::step() {
 	}
 	if (areas) {
 		BF3_TRY(sound_areas_->settle(*runtime_));
+	}
+	if (areas && ir_reverbs_ != nullptr) {
+		ir_reverbs_->update(*runtime_);
 	}
 	const sim::Tick now = runtime_->tick();
 	const auto later = [&](uint32_t p_node, int32_t p_port, uint32_t p_ticks) {
