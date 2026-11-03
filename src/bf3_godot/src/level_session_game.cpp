@@ -4,6 +4,7 @@
 
 #include "bf3_localisation.h"
 #include "fx_renderer.h"
+#include "fx_trace.h"
 #include "game_audio.h"
 #include "game_crowd.h"
 #include "game_fx.h"
@@ -321,6 +322,11 @@ void Bf3LevelSession::game_parse_args() {
 #endif
 	if (has_user_arg("m2a-play-seconds")) {
 		g.check_options.play_seconds = std::clamp(std::atof(user_arg_value("m2a-play-seconds").c_str()), 5.0, 3600.0);
+	}
+	if (has_user_arg("fx-trace") || has_user_arg("audio-trace")) {
+		g.traces = std::make_shared<FxTraces>();
+		g.traces->fx_path = user_arg_value("fx-trace");
+		g.traces->audio_path = user_arg_value("audio-trace");
 	}
 
 	const bool firefight_case = g.wants_case(M2aCase::Firefight);
@@ -1439,6 +1445,10 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		}
 	}
 	step_game_parts(*this, g, f, p_now_ns, p_delta, camera, own_vm, free_camera, others, n_others);
+	if (g.traces != nullptr) {
+		write_fx_traces(
+				*g.traces, guard_, g.fx != nullptr && g.fx->built() && !g.fx_off ? g.fx.get() : nullptr, g.audio.get());
+	}
 	g.ms_total = ms_since(frame_t0);
 
 	if (hud_ != nullptr && done_ && hud_timer_ == 0.0 && g.firefight_bots > 0) {

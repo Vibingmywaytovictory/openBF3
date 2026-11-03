@@ -424,6 +424,18 @@ void Bf3GameAudio::drain_events() {
 	drain_mixer_events(*impl_, *this);
 }
 
+void Bf3GameAudio::trace_weapon_starts(bool p_on) {
+	if (impl_->router) {
+		impl_->router->set_trace(p_on);
+	}
+}
+
+void Bf3GameAudio::take_weapon_starts(std::vector<audio::WeaponSoundStart> &r_out) {
+	if (impl_->router) {
+		impl_->router->take_starts(r_out);
+	}
+}
+
 const audio::SoundCategoryTable &Bf3GameAudio::sound_categories() const {
 	return impl_->categories;
 }

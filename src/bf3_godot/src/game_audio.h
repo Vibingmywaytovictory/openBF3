@@ -72,6 +72,8 @@ public:
 	void set_sum_tap(audio::MixTap *p_tap);
 	void forward_cuts(bool p_on);
 	void take_cuts(std::vector<audio::MixerCutEvent> &r_out);
+	void trace_weapon_starts(bool p_on);
+	void take_weapon_starts(std::vector<audio::WeaponSoundStart> &r_out);
 	void drain_events();
 	const audio::SoundCategoryTable &sound_categories() const;
 	bool one_shot_tracked(audio::InstanceHandle p_handle) const;

@@ -334,3 +334,7 @@ target_sources(bf3_godot PRIVATE
     src/net_overlay.cpp
     src/net_overlay.h
 )
+target_sources(bf3_godot PRIVATE
+    src/fx_trace.cpp
+    src/fx_trace.h
+)

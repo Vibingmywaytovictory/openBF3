@@ -55,6 +55,7 @@ class Bf3UiAssets;
 class Bf3Viewmodel;
 class Bf3GameAudio;
 class Bf3GameFx;
+struct FxTraces;
 class Bf3GameCrowd;
 
 template <typename T>
@@ -227,6 +228,7 @@ struct GameState {
 	bool firefight_pairs = false;
 
 	bool fx_off = false;
+	std::shared_ptr<FxTraces> traces;
 
 	bool camera_valid = false;
 	godot::Vector3 camera_prev;
