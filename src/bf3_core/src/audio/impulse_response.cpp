@@ -1,5 +1,6 @@
 #include "bf3/core/audio/impulse_response.h"
 
+#include "bf3/core/util/big_endian.h"
 #include "bf3/core/util/fft.h"
 
 #include <algorithm>
@@ -9,15 +10,6 @@
 namespace bf3::core::audio {
 
 namespace {
-
-uint32_t be32(std::span<const uint8_t> p_b, size_t p_at) {
-	return (uint32_t(p_b[p_at]) << 24) | (uint32_t(p_b[p_at + 1]) << 16) | (uint32_t(p_b[p_at + 2]) << 8) |
-			uint32_t(p_b[p_at + 3]);
-}
-
-int16_t be16s(std::span<const uint8_t> p_b, size_t p_at) {
-	return int16_t(uint16_t((uint16_t(p_b[p_at]) << 8) | uint16_t(p_b[p_at + 1])));
-}
 
 Error ir_error(const std::string &p_what) {
 	return make_error("irf1: " + p_what);

@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "bf3/core/math.h"
+#include "bf3/core/util/big_endian.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/fft.h"
 #include "bf3/core/util/finite.h"
@@ -95,6 +96,16 @@ TEST_SUITE("core-util-unit") {
 			}
 			CHECK(worst < 1e-12 * double(n));
 		}
+	}
+
+	TEST_CASE("core.util: big-endian reads take the most significant byte first at any offset") {
+		const std::array<uint8_t, 7> bytes{ 0x00, 0x69, 0x72, 0x66, 0x31, 0x80, 0x01 };
+		CHECK(be32(bytes, 1) == 0x69726631u);
+		CHECK(be32(bytes, 3) == 0x66318001u);
+		CHECK(be16(bytes, 5) == 0x8001u);
+		CHECK(be16s(bytes, 5) == int16_t(-32767));
+		CHECK(be16s(bytes, 3) == int16_t(0x6631));
+		CHECK(be16s(std::array<uint8_t, 2>{ 0xFF, 0xFF }, 0) == int16_t(-1));
 	}
 
 	TEST_CASE("core.util: horizontal_distance measures in the ground plane and ignores height") {

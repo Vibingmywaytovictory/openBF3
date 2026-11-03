@@ -2946,3 +2946,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * A patch's ReverbSend feeds the Reverb bus at its cone's ReverbGain instead of being dropped; core.audio.areas, audio.patch.unit.
 * IrReverb zones read their SoundArea's Proximity as a Volume with the data's Gain and fade curve; core.audio.areas.
 * The game loads the level's impulse responses and feeds the two loudest zones to the reverb slots; audio.game, audio.game.burst.
+* The irf1 decoder reads through one shared big-endian reader, `bf3/core/util/big_endian.h`, instead of its own copy; core.util.unit, audio.ir.install.
