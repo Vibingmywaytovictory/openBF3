@@ -1814,7 +1814,7 @@ TEST_SUITE("level_modes") {
 }
 
 TEST_SUITE("level_eor") {
-	TEST_CASE("level_eor: the showroom's ShowTopPlayers camera in every shipped TDM mode") {
+	TEST_CASE("level_eor: the showroom's ShowTopPlayers camera, SpotLight and LVE in every shipped TDM mode") {
 		const std::shared_ptr<Install> install = shared_install_or_skip();
 		if (!install) {
 			return;
@@ -1880,6 +1880,24 @@ TEST_SUITE("level_eor") {
 			CHECK_MESSAGE(c.fov_deg == 23.0f, name);
 			CHECK_MESSAGE(c.priority == 3, name);
 			CHECK_MESSAGE(std::abs(c.transform.forward[1] - (-0.0699f)) < 0.0001f, name);
+			REQUIRE_MESSAGE(c.light.has_value(), name);
+			const EorSpotLight &l = *c.light;
+			CHECK_MESSAGE((l.color == Vec3{ 0.354f, 0.643f, 1.0f }), name);
+			CHECK_MESSAGE(l.intensity == 100.0f, name);
+			CHECK_MESSAGE(l.radius == 20.0f, name);
+			CHECK_MESSAGE(l.attenuation_offset == 10.0f, name);
+			CHECK_MESSAGE(l.cone_inner_deg == 0.0f, name);
+			CHECK_MESSAGE(l.cone_outer_deg == 30.0f, name);
+			CHECK_MESSAGE(l.cast_shadows, name);
+			CHECK_MESSAGE(l.switched_with_environment, name);
+			CHECK_MESSAGE(
+					std::abs(vec::length(vec::sub(l.transform.trans, c.transform.trans)) - 8.882f) < 0.001f, name);
+			REQUIRE_MESSAGE(c.environment.has_value(), name);
+			CHECK_MESSAGE(to_lower_ascii(c.environment->visual_environment) ==
+							"levels/frontend/lighting/visualenvironment_frontendcustomize",
+					name);
+			CHECK_MESSAGE(c.environment->visibility == 1.0f, name);
+			CHECK_MESSAGE(c.environment->visibility_from_proximity, name);
 		}
 		CHECK(without == std::vector<std::string>{ "XP2_Factory CQTeamDeathMatch0", "XP2_Office CQTeamDeathMatch0" });
 	}
