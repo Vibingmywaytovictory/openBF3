@@ -279,6 +279,19 @@ core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared
 		if (!catalog) {
 			return core::error_at(where, catalog.error());
 		}
+		LoadoutVariantsReport report;
+		core::Result<std::vector<std::vector<sw::WeaponSimDef>>> variants = make_loadout_variants(
+				*catalog, level->defs,
+				[&](const std::string &p_unlock, const std::vector<std::string> &p_accessories) {
+					return w->catalog->resolve(p_unlock, p_accessories);
+				},
+				*level->materials, &report);
+		if (!variants) {
+			return core::error_at(where, variants.error());
+		}
+		level->variants = std::move(*variants);
+		level->variant_resolves = report.resolves;
+		catalog->hash = loadout_catalog_hash(*catalog);
 		level->loadouts = std::move(*catalog);
 		level->kits.hash = core::fnv1a_fold(level->kits.hash, level->loadouts.hash);
 	}
@@ -334,6 +347,7 @@ core::Result<std::shared_ptr<const sw::WeaponTable>> make_match_table(const Gunp
 	o.exact_aim = p_exact_aim;
 	o.infinite_magazine = p_infinite_magazine;
 	o.sprint_recover_seconds = p_level.sprint_recover_seconds;
+	o.variants = p_level.variants;
 	if (p_level.materials == nullptr) {
 		return core::make_error("make_match_table: no materials");
 	}
@@ -499,7 +513,7 @@ void Gunplay::on_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_team, uint32_t p
 			++m.stats.loadout_dropped;
 		}
 	}
-	if (!sw::spawn_soldier_weapons(s.weapons, *m.table, s.loadout.defs, l.active, p_tick).ok()) {
+	if (!sw::spawn_soldier_weapons(s.weapons, *m.table, s.loadout.defs, l.active, p_tick, s.loadout.variants).ok()) {
 		return;
 	}
 	s.armed = true;

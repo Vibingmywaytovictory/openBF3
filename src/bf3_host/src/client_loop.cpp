@@ -338,7 +338,7 @@ void ClientLoop::reset_level_state() {
 	std::construct_at(&tracks, config);
 	std::construct_at(&feed, slot);
 	std::construct_at(&match, feed, slot);
-	std::construct_at(&gunplay, config, feed, slot, now_ns);
+	std::construct_at(&gunplay, config, feed, slot, now_ns, match.gear());
 	std::construct_at(&prediction, config, clock, input, gunplay);
 	world.reset();
 	level.reset();

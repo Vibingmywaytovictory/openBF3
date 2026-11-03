@@ -129,6 +129,8 @@ struct GunplayLevel {
 	std::vector<std::string> notes;
 	KitTable kits;
 	LoadoutCatalog loadouts;
+	std::vector<std::vector<sim::weapons::WeaponSimDef>> variants;
+	size_t variant_resolves = 0;
 	core::gameplay::WeaponSwitching switching;
 	float sprint_recover_seconds = 0.12f;
 	float max_health = 100.0f;

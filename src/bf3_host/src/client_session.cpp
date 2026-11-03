@@ -446,6 +446,7 @@ core::Result<std::shared_ptr<const ClientGunplayInputs>> client_gunplay_inputs(c
 	in->table = *table;
 	in->capsules = std::make_shared<const core::gameplay::CapsulePoseTable>(g.capsule_table);
 	in->kits = g.kits;
+	in->loadouts = std::shared_ptr<const LoadoutCatalog>(p_level.gunplay, &g.loadouts);
 	in->shot_frame = shot_frame(*p_level.static_world);
 	in->load_mechanics = load_mechanics_cfg;
 	return std::shared_ptr<const ClientGunplayInputs>(std::move(in));

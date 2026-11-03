@@ -22,8 +22,9 @@ double seconds_at(int32_t p_offset, sim::Tick p_tick) {
 
 }
 
-PresentedWeapon present_weapon(const net::WeaponsWire &p_prev, const net::WeaponsWire &p_curr, sim::Tick p_curr_tick, double p_fraction,
-		const sw::WeaponTable &p_table, const sw::SwayContext &p_sway) {
+PresentedWeapon present_weapon(const net::WeaponsWire &p_prev, const net::WeaponsWire &p_curr, sim::Tick p_curr_tick,
+		double p_fraction, const sw::WeaponTable &p_table, const sw::SwayContext &p_sway,
+		std::span<const uint8_t> p_variants) {
 	PresentedWeapon p;
 	if (p_curr.active >= sw::kMaxWeaponSlots) {
 		return p;
@@ -33,6 +34,7 @@ PresentedWeapon present_weapon(const net::WeaponsWire &p_prev, const net::Weapon
 	if (slot.def == sw::kNoWeapon || slot.def >= p_table.defs.size() || b == nullptr) {
 		return p;
 	}
+	const uint8_t variant = p_curr.active < p_variants.size() ? p_variants[p_curr.active] : uint8_t(0);
 	const double f = std::clamp(std::isfinite(p_fraction) ? p_fraction : 0.0, 0.0, 1.0);
 	p.valid = true;
 	p.def = slot.def;
@@ -43,7 +45,7 @@ PresentedWeapon present_weapon(const net::WeaponsWire &p_prev, const net::Weapon
 	p.flags = b->flags;
 	p.magazine = slot.magazine;
 	p.reserve = slot.reserve;
-	p.magazine_capacity = p_table.defs[slot.def].magazine_capacity;
+	p.magazine_capacity = p_table.def(slot.def, variant).magazine_capacity;
 	const sim::Tick prev_tick = p_curr_tick > 0 ? p_curr_tick - 1u : 0u;
 	p.time_s = sw::units_to_seconds(sw::tick_end(prev_tick)) + f * sw::units_to_seconds(sw::kTimeUnitsPerTick);
 	p.phase_start_s = seconds_at(b->phase_start, p_curr_tick);
@@ -66,11 +68,10 @@ PresentedWeapon present_weapon(const net::WeaponsWire &p_prev, const net::Weapon
 	const bool before_curr_shot = same && curr_spread_time > now;
 	const net::WeaponTimersWire &held = before_curr_shot ? *a : *b;
 	const sw::SimTime held_time = before_curr_shot ? net::weapons_wire_time(a->spread_time, prev_tick) : curr_spread_time;
-	const sw::Dispersion disp = sw::effective_dispersion(p_table.defs[slot.def], p_sway);
+	const sw::Dispersion disp = sw::effective_dispersion(p_table.def(slot.def, variant), p_sway);
 	p.spread_deg = sw::spread_at(held.spread, held_time, now, disp, p_table.mechanics);
 	p.zoomed = (b->flags & sw::slot_flags::kZoomWasDown) != 0;
 	p.events = p_curr.events;
 	return p;
 }
-
 }

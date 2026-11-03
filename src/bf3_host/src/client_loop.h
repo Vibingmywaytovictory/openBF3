@@ -107,7 +107,7 @@ private:
 	RemoteTracks tracks{ config };
 	ClientEvents feed{ slot };
 	ClientMatch match{ feed, slot };
-	ClientGunplay gunplay{ config, feed, slot, now_ns };
+	ClientGunplay gunplay{ config, feed, slot, now_ns, match.gear() };
 	OwnPrediction prediction{ config, clock, input, gunplay };
 
 	void refuse(const char *p_reason);

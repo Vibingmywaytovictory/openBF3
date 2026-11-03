@@ -35,7 +35,7 @@ const sw::WeaponSimDef *BotArms::def(uint8_t p_slot) const {
 		return nullptr;
 	}
 	const uint16_t d = ws_->slots[p_slot].def;
-	return d != sw::kNoWeapon && d < table_->defs.size() ? &table_->defs[d] : nullptr;
+	return d != sw::kNoWeapon && d < table_->defs.size() ? &table_->def(d, ws_->slots[p_slot].variant) : nullptr;
 }
 
 int32_t BotArms::rounds(uint8_t p_slot) const {

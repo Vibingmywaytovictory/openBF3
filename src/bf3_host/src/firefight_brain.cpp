@@ -664,7 +664,7 @@ struct FirefightBrain::Impl {
 			const sw::WeaponTable &table = g->table();
 			const sw::WeaponSlotState &ss = ws.slots[ws.active < sw::kMaxWeaponSlots ? ws.active : 0];
 			if (ss.def != sw::kNoWeapon && ss.def < table.defs.size()) {
-				const sw::WeaponSimDef &d = table.defs[ss.def];
+				const sw::WeaponSimDef &d = table.def(ss.def, ss.variant);
 				const uint8_t modes = std::min<uint8_t>(d.mode_count, uint8_t(d.modes.size()));
 				int auto_mode = -1;
 				for (uint8_t k = 0; k < modes; ++k) {

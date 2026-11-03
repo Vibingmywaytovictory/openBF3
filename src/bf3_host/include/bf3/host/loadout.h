@@ -12,6 +12,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <string>
 #include <vector>
@@ -30,6 +31,7 @@ struct LoadoutItem {
 	std::array<std::vector<uint32_t>, kLoadoutAccessories> accessories;
 	std::array<std::vector<std::string>, kLoadoutAccessories> accessory_unlocks;
 	std::array<uint32_t, kLoadoutAccessories> default_accessories{};
+	sim::weapons::WeaponVariantMap variants;
 };
 
 struct LoadoutKit {
@@ -78,6 +80,7 @@ struct LoadoutChoice {
 
 struct Loadout {
 	std::array<uint16_t, sim::weapons::kMaxWeaponSlots> defs{};
+	std::array<uint8_t, sim::weapons::kMaxWeaponSlots> variants{};
 	LoadoutChoice choice;
 	bool chosen = false;
 };
@@ -117,6 +120,27 @@ struct LoadoutAccessorySet {
 
 LoadoutAccessorySet loadout_accessory_set(
 		const LoadoutItem &p_item, const std::array<uint32_t, kLoadoutAccessories> &p_accessories);
+
+std::array<size_t, kLoadoutAccessories> loadout_accessory_options(
+		const LoadoutItem &p_item, const std::array<uint32_t, kLoadoutAccessories> &p_accessories);
+
+uint8_t loadout_variant(const LoadoutItem &p_item, const std::array<uint32_t, kLoadoutAccessories> &p_accessories);
+
+uint8_t loadout_gear_variant(const LoadoutCatalog &p_catalog, uint16_t p_def,
+		const std::array<uint32_t, kLoadoutAccessories> &p_accessories);
+
+using LoadoutWeaponResolve = std::function<core::Result<core::gameplay::WeaponDef>(
+		const std::string &p_unlock, const std::vector<std::string> &p_accessories)>;
+
+struct LoadoutVariantsReport {
+	size_t weapons = 0;
+	size_t resolves = 0;
+	size_t variants = 0;
+};
+
+core::Result<std::vector<std::vector<sim::weapons::WeaponSimDef>>> make_loadout_variants(LoadoutCatalog &r_catalog,
+		std::span<const core::gameplay::WeaponDef> p_defs, const LoadoutWeaponResolve &p_resolve,
+		const sim::weapons::SurfaceMaterialTable &p_materials, LoadoutVariantsReport *r_report = nullptr);
 
 std::vector<uint8_t> loadout_item_slots(const LoadoutKit &p_kit, LoadoutKitItem p_item);
 

@@ -11,6 +11,7 @@
 
 #include "bf3/host/client_projectiles.h"
 #include "bf3/host/kits.h"
+#include "bf3/host/loadout.h"
 #include "bf3/host/presentation_events.h"
 #include "bf3/net/weapons_wire.h"
 #include "bf3/present/presented.h"
@@ -284,6 +285,7 @@ struct PresentationFrame {
 	uint16_t bullet_count = 0;
 	std::array<PresentedBullet, kMaxPresentedBullets> bullets{};
 	NetStats net;
+	std::array<uint8_t, sim::weapons::kMaxWeaponSlots> own_variants{};
 };
 static_assert(std::is_trivially_copyable_v<PresentationFrame>);
 
@@ -354,6 +356,7 @@ struct ClientGunplayInputs {
 	std::shared_ptr<const sim::weapons::WeaponTable> table;
 	std::shared_ptr<const core::gameplay::CapsulePoseTable> capsules;
 	KitTable kits;
+	std::shared_ptr<const LoadoutCatalog> loadouts;
 	net::ShotQuantization shot_frame;
 
 	std::function<core::Result<sim::weapons::Mechanics>(const std::string &p_path)> load_mechanics;

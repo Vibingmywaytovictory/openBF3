@@ -6,6 +6,7 @@
 #include "bf3/sim/weapons/weapon_sim_def.h"
 
 #include <cstdint>
+#include <span>
 #include <type_traits>
 
 namespace bf3::host {
@@ -32,7 +33,7 @@ struct PresentedWeapon {
 };
 static_assert(std::is_trivially_copyable_v<PresentedWeapon>);
 
-PresentedWeapon present_weapon(const net::WeaponsWire &p_prev, const net::WeaponsWire &p_curr, sim::Tick p_curr_tick, double p_fraction,
-		const sim::weapons::WeaponTable &p_table, const sim::weapons::SwayContext &p_sway);
-
+PresentedWeapon present_weapon(const net::WeaponsWire &p_prev, const net::WeaponsWire &p_curr, sim::Tick p_curr_tick,
+		double p_fraction, const sim::weapons::WeaponTable &p_table, const sim::weapons::SwayContext &p_sway,
+		std::span<const uint8_t> p_variants = {});
 }

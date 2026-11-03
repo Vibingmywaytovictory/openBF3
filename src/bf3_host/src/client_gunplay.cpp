@@ -302,7 +302,7 @@ void ClientGunplay::shot_events(const net::NetSim::Datagram &p_d) {
 		events_.push(ev);
 		++remote_shots_;
 		if (projectiles_ != nullptr) {
-			projectiles_->queue_remote(r);
+			projectiles_->queue_remote(r, gear_variant(r.slot, r.def));
 		}
 	}
 }
@@ -387,6 +387,14 @@ bool ClientGunplay::put_wire(const sim::SoldierState &p_s, sim::Tick p_spawn_tic
 		++bad_weapon_wires_;
 		return false;
 	}
+	const Life &l = lives_[p_s.life % lives_.size()];
+	if (l.valid && l.life == p_s.life) {
+		for (size_t i = 0; i < sim::weapons::kMaxWeaponSlots; ++i) {
+			if (w->slots[i].def == l.armed[i]) {
+				w->slots[i].variant = l.variants[i];
+			}
+		}
+	}
 	sim::WeaponPredictionEntry e;
 	e.tick = p_s.tick;
 	e.spawn_tick = p_spawn_tick;
@@ -395,11 +403,24 @@ bool ClientGunplay::put_wire(const sim::SoldierState &p_s, sim::Tick p_spawn_tic
 	return true;
 }
 
+uint8_t ClientGunplay::gear_variant(uint8_t p_slot, uint16_t p_def) const {
+	if (inputs_ == nullptr || inputs_->loadouts == nullptr || table_ == nullptr || p_slot >= gear_.size() ||
+			p_def == sim::weapons::kNoWeapon) {
+		return 0;
+	}
+	const net::SoldierGear &g = gear_[p_slot];
+	if (g.slot != p_slot || g.def != p_def) {
+		return 0;
+	}
+	const uint8_t v = loadout_gear_variant(*inputs_->loadouts, p_def, g.accessories);
+	return p_def < table_->variants.size() && v <= table_->variants[p_def].size() ? v : uint8_t(0);
+}
+
 void ClientGunplay::weapons_spawn(const sim::SoldierState &p_s) {
 	if (!on_) {
 		return;
 	}
-	const Life &l = lives_[p_s.life % lives_.size()];
+	Life &l = lives_[p_s.life % lives_.size()];
 	const sim::Tick t = p_s.tick;
 	lane_->set_emitted_through(t);
 	PresentEvent spawn;
@@ -419,7 +440,10 @@ void ClientGunplay::weapons_spawn(const sim::SoldierState &p_s) {
 			e.state = prev->state;
 		}
 		e.state.player_slot = own_slot_;
-		if (sim::weapons::spawn_soldier_weapons(e.state, *table_, defs, k.active, t).ok()) {
+		l.armed = defs;
+		l.variants = {};
+		l.variants[kLoadoutAccessoryWeapon] = gear_variant(own_slot_, defs[kLoadoutAccessoryWeapon]);
+		if (sim::weapons::spawn_soldier_weapons(e.state, *table_, defs, k.active, t, l.variants).ok()) {
 			e.tick = t;
 			e.spawn_tick = t;
 			lane_->put(e);
@@ -557,6 +581,9 @@ void ClientGunplay::publish(PresentationFrame &r_frame, std::span<const net::Oth
 		if (a != nullptr && b != nullptr) {
 			r_frame.own_weapons_prev = net::weapons_wire_view(a->state, r_frame.tick - 1u);
 			r_frame.own_weapons_curr = net::weapons_wire_view(b->state, r_frame.tick);
+			for (size_t i = 0; i < sim::weapons::kMaxWeaponSlots; ++i) {
+				r_frame.own_variants[i] = b->state.slots[i].variant;
+			}
 			r_frame.own_weapons_valid = true;
 		}
 	}

@@ -29,8 +29,9 @@ struct GunplayRefusal {
 
 class ClientGunplay {
 public:
-	ClientGunplay(const ClientSessionConfig &p_config, ClientEvents &r_events, const uint8_t &p_own_slot, const MonotonicClock &p_clock) :
-			config_(p_config), events_(r_events), own_slot_(p_own_slot), clock_(p_clock) {}
+	ClientGunplay(const ClientSessionConfig &p_config, ClientEvents &r_events, const uint8_t &p_own_slot,
+			const MonotonicClock &p_clock, const std::array<net::SoldierGear, net::kMaxSlots> &p_gear) :
+			config_(p_config), events_(r_events), own_slot_(p_own_slot), clock_(p_clock), gear_(p_gear) {}
 
 	bool on() const { return on_; }
 	sim::WeaponLane *lane() { return lane_.get(); }
@@ -110,6 +111,8 @@ private:
 		uint8_t kit = 0;
 		uint8_t team = 0;
 		std::array<uint16_t, sim::weapons::kMaxWeaponSlots> defs = net::kNoSpawnDefs;
+		std::array<uint16_t, sim::weapons::kMaxWeaponSlots> armed = net::kNoSpawnDefs;
+		std::array<uint8_t, sim::weapons::kMaxWeaponSlots> variants{};
 	};
 	static constexpr size_t kCommandViews = 256;
 	static constexpr size_t kLogLimit = size_t(1) << 20;
@@ -117,11 +120,13 @@ private:
 	bool def_ok(uint32_t p_def) const;
 	bool wire_at(sim::Tick p_tick) const { return on_ && wire_valid_ && wire_tick_ == p_tick; }
 	bool put_wire(const sim::SoldierState &p_s, sim::Tick p_spawn_tick);
+	uint8_t gear_variant(uint8_t p_slot, uint16_t p_def) const;
 
 	const ClientSessionConfig &config_;
 	ClientEvents &events_;
 	const uint8_t &own_slot_;
 	const MonotonicClock &clock_;
+	const std::array<net::SoldierGear, net::kMaxSlots> &gear_;
 
 	bool on_ = false;
 	std::shared_ptr<const ClientGunplayInputs> inputs_;

@@ -23,6 +23,15 @@ bool contains(const std::vector<uint32_t> &p_ids, uint32_t p_id) {
 	return std::find(p_ids.begin(), p_ids.end(), p_id) != p_ids.end();
 }
 
+size_t no_accessory(const std::vector<std::string> &p_names) {
+	for (size_t i = 0; i < p_names.size(); ++i) {
+		if (p_names[i].starts_with(gp::kNoAccessoryUnlockPrefix)) {
+			return i;
+		}
+	}
+	return sim::weapons::kNoVariantOption;
+}
+
 uint32_t sid_hash(const std::string &p_sid) {
 	return p_sid.empty() ? 0u : core::ui::text_hash(p_sid);
 }
@@ -96,25 +105,97 @@ const LoadoutItem *loadout_primary_item(const LoadoutCatalog &p_catalog, uint8_t
 	return nullptr;
 }
 
+std::array<size_t, kLoadoutAccessories> loadout_accessory_options(
+		const LoadoutItem &p_item, const std::array<uint32_t, kLoadoutAccessories> &p_accessories) {
+	std::array<size_t, kLoadoutAccessories> out;
+	for (size_t a = 0; a < kLoadoutAccessories; ++a) {
+		const std::vector<uint32_t> &ids = p_item.accessories[a];
+		const auto it = std::find(ids.begin(), ids.end(), p_accessories[a]);
+		out[a] = p_accessories[a] != 0 && it != ids.end() ? size_t(it - ids.begin())
+														  : no_accessory(p_item.accessory_unlocks[a]);
+	}
+	return out;
+}
+
 LoadoutAccessorySet loadout_accessory_set(
 		const LoadoutItem &p_item, const std::array<uint32_t, kLoadoutAccessories> &p_accessories) {
 	LoadoutAccessorySet out;
+	const std::array<size_t, kLoadoutAccessories> options = loadout_accessory_options(p_item, p_accessories);
 	for (size_t a = 0; a < kLoadoutAccessories; ++a) {
-		const std::vector<uint32_t> &ids = p_item.accessories[a];
 		const std::vector<std::string> &names = p_item.accessory_unlocks[a];
 		out.listed.insert(out.listed.end(), names.begin(), names.end());
-		const auto it = std::find(ids.begin(), ids.end(), p_accessories[a]);
-		if (p_accessories[a] != 0 && it != ids.end()) {
-			out.picked[a] = p_accessories[a];
-			out.active.push_back(names[size_t(it - ids.begin())]);
+		if (options[a] == sim::weapons::kNoVariantOption) {
 			continue;
 		}
-		for (const std::string &n : names) {
-			if (n.starts_with(gp::kNoAccessoryUnlockPrefix)) {
-				out.active.push_back(n);
-				break;
+		out.active.push_back(names[options[a]]);
+		if (p_accessories[a] != 0 && p_item.accessories[a][options[a]] == p_accessories[a]) {
+			out.picked[a] = p_accessories[a];
+		}
+	}
+	return out;
+}
+
+uint8_t loadout_variant(const LoadoutItem &p_item, const std::array<uint32_t, kLoadoutAccessories> &p_accessories) {
+	return sim::weapons::weapon_variant(p_item.variants, loadout_accessory_options(p_item, p_accessories));
+}
+
+uint8_t loadout_gear_variant(const LoadoutCatalog &p_catalog, uint16_t p_def,
+		const std::array<uint32_t, kLoadoutAccessories> &p_accessories) {
+	for (uint8_t t = 1; t <= kKitTeams; ++t) {
+		if (const LoadoutItem *item = loadout_primary_item(p_catalog, t, p_def)) {
+			return loadout_variant(*item, p_accessories);
+		}
+	}
+	return 0;
+}
+
+core::Result<std::vector<std::vector<sim::weapons::WeaponSimDef>>> make_loadout_variants(LoadoutCatalog &r_catalog,
+		std::span<const gp::WeaponDef> p_defs, const LoadoutWeaponResolve &p_resolve,
+		const sim::weapons::SurfaceMaterialTable &p_materials, LoadoutVariantsReport *r_report) {
+	std::vector<std::vector<sim::weapons::WeaponSimDef>> out(p_defs.size());
+	std::map<uint16_t, sim::weapons::WeaponVariantMap> maps;
+	LoadoutVariantsReport report;
+	for (std::array<LoadoutKit, kKitCount> &team : r_catalog.kits) {
+		for (LoadoutKit &k : team) {
+			for (LoadoutItem &item : k.slots[kLoadoutAccessoryWeapon]) {
+				if (item.def >= p_defs.size()) {
+					continue;
+				}
+				auto it = maps.find(item.def);
+				if (it == maps.end()) {
+					std::vector<sim::weapons::WeaponVariantPart> parts(kLoadoutAccessories);
+					for (size_t a = 0; a < kLoadoutAccessories; ++a) {
+						parts[a].unlocks = item.accessory_unlocks[a];
+						parts[a].base = no_accessory(item.accessory_unlocks[a]);
+					}
+					const std::string where = "loadout variants " + item.unlock;
+					core::Result<sim::weapons::WeaponSimDef> plain =
+							sim::weapons::make_weapon_sim_def(p_defs[item.def], p_materials);
+					if (!plain) {
+						return core::error_at(where, plain.error());
+					}
+					const std::string unlock = item.unlock;
+					core::Result<sim::weapons::WeaponVariants> v = sim::weapons::make_weapon_variants(
+							*plain, parts,
+							[&](const std::vector<std::string> &p_accessories) {
+								return p_resolve(unlock, p_accessories);
+							},
+							p_materials);
+					if (!v) {
+						return core::error_at(where, v.error());
+					}
+					++report.weapons;
+					report.resolves += v->resolves;
+					report.variants += v->defs.size();
+					out[item.def] = std::move(v->defs);
+					it = maps.emplace(item.def, std::move(v->map)).first;
+				}
+				item.variants = it->second;
 			}
 		}
+	}
+	if (r_report != nullptr) {
+		*r_report = report;
 	}
 	return out;
 }
@@ -265,6 +346,10 @@ Loadout default_loadout(const LoadoutCatalog &p_catalog, const KitTable &p_table
 	out.defs = p_table.loadout(p_team, p_kit).defs;
 	if (const LoadoutKit *k = p_catalog.kit(p_team, p_kit)) {
 		out.choice.items = k->defaults;
+		const LoadoutItem *weapon = k->find(kLoadoutAccessoryWeapon, k->defaults[kLoadoutAccessoryWeapon]);
+		if (weapon != nullptr && weapon->def == out.defs[kLoadoutAccessoryWeapon]) {
+			out.variants[kLoadoutAccessoryWeapon] = loadout_variant(*weapon, {});
+		}
 	}
 	return out;
 }
@@ -304,6 +389,9 @@ core::Result<Loadout> resolve_loadout(const LoadoutCatalog &p_catalog, const Kit
 		}
 		out.choice.accessories[a] = id;
 	}
+	out.variants[kLoadoutAccessoryWeapon] = weapon != nullptr && weapon->def == out.defs[kLoadoutAccessoryWeapon]
+			? loadout_variant(*weapon, out.choice.accessories)
+			: uint8_t(0);
 	if (p_choice.specialization != 0) {
 		if (!contains(k->specializations, p_choice.specialization)) {
 			return core::make_error(where + ": no specialization " + std::to_string(p_choice.specialization));
@@ -330,6 +418,12 @@ uint64_t loadout_catalog_hash(const LoadoutCatalog &p_catalog) {
 							core::fnv1a_value(h, uint64_t(a));
 						}
 					}
+					for (const std::vector<uint8_t> &classes : i.variants.classes) {
+						core::fnv1a_value(h, uint64_t(classes.size()));
+						core::fnv1a(h, classes.data(), classes.size());
+					}
+					core::fnv1a(h, i.variants.radix.data(), i.variants.radix.size());
+					core::fnv1a(h, i.variants.combo_variant.data(), i.variants.combo_variant.size());
 				}
 			}
 			core::fnv1a_value(h, uint64_t(k.specializations.size()));

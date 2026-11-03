@@ -83,7 +83,8 @@ struct PresentedGrenade {
 	bool resting = false;
 };
 
-bool shot_event_of(const net::RemoteShot &p_shot, const sim::weapons::WeaponTable &p_table, uint64_t p_match_seed, sim::weapons::ShotEvent &r_event);
+bool shot_event_of(const net::RemoteShot &p_shot, const sim::weapons::WeaponTable &p_table, uint64_t p_match_seed,
+		sim::weapons::ShotEvent &r_event, uint8_t p_variant = 0);
 
 class ClientProjectiles {
 public:
@@ -98,7 +99,7 @@ public:
 
 	void spawn_own(const sim::weapons::ShotEvent &p_shot, const ShotView &p_view);
 
-	void queue_remote(const net::RemoteShot &p_shot);
+	void queue_remote(const net::RemoteShot &p_shot, uint8_t p_variant = 0);
 	void step_own(sim::Tick p_tick, const sim::CollisionWorld &p_world, const ReceivedRecordSource &p_records, PresentationEvents &r_events);
 	void step_remote(double p_render_ticks, const sim::CollisionWorld &p_world, std::span<const net::OtherPose> p_others, PresentationEvents &r_events);
 

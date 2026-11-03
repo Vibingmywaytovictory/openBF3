@@ -37,13 +37,15 @@ bool bit(const std::array<uint64_t, 2> &p_mask, uint32_t p_slot) {
 
 }
 
-bool shot_event_of(const net::RemoteShot &p_shot, const sw::WeaponTable &p_table, uint64_t p_match_seed, sw::ShotEvent &r_event) {
+bool shot_event_of(const net::RemoteShot &p_shot, const sw::WeaponTable &p_table, uint64_t p_match_seed,
+		sw::ShotEvent &r_event, uint8_t p_variant) {
 	if (p_shot.def >= p_table.defs.size()) {
 		return false;
 	}
 	sw::ShotEvent e;
+	e.variant = p_variant;
 	e.time = p_shot.time;
-	e.spawn_time = p_shot.time + p_table.defs[p_shot.def].spawn_delay;
+	e.spawn_time = p_shot.time + p_table.def(p_shot.def, p_variant).spawn_delay;
 	e.seed = sw::shot_seed(p_match_seed, p_shot.slot, p_shot.shot_index);
 	e.player_slot = p_shot.slot;
 	e.shot_index = p_shot.shot_index;
@@ -315,10 +317,11 @@ void ClientProjectiles::spawn_own(const sw::ShotEvent &p_shot, const ShotView &p
 	}
 }
 
-void ClientProjectiles::queue_remote(const net::RemoteShot &p_shot) {
+void ClientProjectiles::queue_remote(const net::RemoteShot &p_shot, uint8_t p_variant) {
 	Impl &m = *impl_;
 	sw::ShotEvent e;
-	if (!shot_event_of(p_shot, *m.table, m.match_seed, e) || m.pending.size() >= m.config.max_remote_pending) {
+	if (!shot_event_of(p_shot, *m.table, m.match_seed, e, p_variant) ||
+			m.pending.size() >= m.config.max_remote_pending) {
 		++m.stats.refused;
 		return;
 	}
@@ -400,7 +403,7 @@ size_t ClientProjectiles::live_grenades(std::span<PresentedGrenade> r_out) const
 			if (n >= r_out.size() || p.def >= impl_->table->defs.size()) {
 				continue;
 			}
-			const sw::ProjectileSimDef &d = impl_->table->defs[p.def].projectile;
+			const sw::ProjectileSimDef &d = impl_->table->def(p.def, p.variant).projectile;
 			if (d.kind != sw::ProjectileKind::Grenade || !d.detonate_on_timeout) {
 				continue;
 			}
