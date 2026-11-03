@@ -521,6 +521,36 @@ TEST_SUITE("render-look-unit") {
 		CHECK(std::isfinite(d.exposure));
 	}
 
+	TEST_CASE("render.look.unit: a logic visual environment blends by its weight") {
+		LookEnvironment env;
+		env.base.light = true;
+		env.base.sun_color = { 4.0f, 3.0f, 2.0f };
+		env.base.tonemap = true;
+		env.base.middle_gray = 0.2f;
+		LookLogicEnvironment showroom;
+		showroom.name = "levels/frontend/lighting/visualenvironment_frontendcustomize";
+		showroom.state.light = true;
+		showroom.state.sun_color = { 8.0f, 6.0f, 4.0f };
+		showroom.state.tonemap = true;
+		showroom.state.middle_gray = 0.05f;
+		showroom.state.correction = true;
+		showroom.state.lut = 0;
+		env.logic.push_back(showroom);
+		REQUIRE(look_logic_index(env, "Levels/FrontEnd/Lighting/VisualEnvironment_FrontEndCustomize").has_value());
+		CHECK(!look_logic_index(env, "levels/other").has_value());
+		const LookLogicWeight off[] = { { 0, 0.0f } };
+		const LookLogicWeight half[] = { { 0, 0.5f } };
+		const LookLogicWeight full[] = { { 0, 1.0f } };
+		const LookLogicWeight over[] = { { 0, 3.0f }, { 7, 1.0f } };
+		CHECK(near(look_frame(env, { 0, 0, 0 }, off).sun_energy, 4.0f));
+		CHECK(look_frame(env, { 0, 0, 0 }, off).lut == -1);
+		CHECK(near(look_frame(env, { 0, 0, 0 }, half).sun_energy, 6.0f));
+		CHECK(look_frame(env, { 0, 0, 0 }, half).lut == 0);
+		CHECK(near(look_frame(env, { 0, 0, 0 }, full).middle_gray, 0.05f));
+		CHECK(near(look_frame(env, { 0, 0, 0 }, over).sun_energy, 8.0f));
+		CHECK(near(look_frame(env, { 0, 0, 0 }).sun_energy, 4.0f));
+	}
+
 	TEST_CASE("render.look.unit: look_grade") {
 		LookEnvState identity;
 		const LookVec3 c{ 0.2f, 0.5f, 0.9f };
@@ -678,6 +708,22 @@ TEST_SUITE("render-look") {
 		CHECK(env->from_data);
 		CHECK(env->base.light);
 		CHECK(env->areas.size() == 3);
+		const std::optional<size_t> showroom =
+				look_logic_index(*env, "levels/frontend/lighting/visualenvironment_frontendcustomize");
+		REQUIRE(showroom.has_value());
+		const LookEnvState &lve = env->logic[*showroom].state;
+		std::printf("render.look environment: %zu logic visual environments; frontendcustomize %s, lut %d\n",
+				env->logic.size(), lve.source.c_str(), lve.lut);
+		CHECK(lve.light);
+		CHECK(!lve.enlighten);
+		CHECK(!lve.sky);
+		CHECK(!lve.fog);
+		CHECK(lve.tonemap);
+		CHECK(lve.middle_gray == 0.05f);
+		CHECK(lve.correction);
+		CHECK(lve.grade_cube == "objects/ui_characterbackdrop/lighting/colorcube_frontend");
+		CHECK(lve.lut >= 0);
+		CHECK(size_t(lve.lut) < env->luts.size());
 		CHECK(env->luts.size() >= 1);
 		const SnapshotDiff diff = diff_snapshots(before, reader.snapshot());
 		std::printf("install.unchanged %s\n", diff.clean() ? "PASS" : diff.summary().c_str());

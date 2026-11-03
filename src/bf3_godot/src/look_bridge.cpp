@@ -182,7 +182,9 @@ void LookBridge::update(const LevelUpload &p_upload, const Vector3 &p_camera) {
 			sky_bound_[i] = true;
 		}
 	}
-	apply(render::look_frame(plan_->look_environment, { float(p_camera.x), float(p_camera.y), float(p_camera.z) }), false);
+	apply(render::look_frame(
+				  plan_->look_environment, { float(p_camera.x), float(p_camera.y), float(p_camera.z) }, logic_),
+			false);
 	if (cut_pending_) {
 		cut_pending_ = false;
 		sky_full_ = true;
@@ -297,6 +299,24 @@ void LookBridge::apply(const render::LookFrame &p_f, bool p_force) {
 
 void LookBridge::cut() {
 	cut_pending_ = plan_ != nullptr;
+}
+
+void LookBridge::set_logic_environment(std::string_view p_name, float p_weight) {
+	if (plan_ == nullptr) {
+		return;
+	}
+	const std::optional<size_t> index = render::look_logic_index(plan_->look_environment, p_name);
+	if (!index) {
+		return;
+	}
+	const float weight = std::isfinite(p_weight) ? std::clamp(p_weight, 0.0f, 1.0f) : 0.0f;
+	for (render::LookLogicWeight &w : logic_) {
+		if (w.index == *index) {
+			w.weight = weight;
+			return;
+		}
+	}
+	logic_.push_back(render::LookLogicWeight{ *index, weight });
 }
 
 std::string LookBridge::describe() const {

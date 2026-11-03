@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -70,10 +71,21 @@ struct LookArea {
 	LookEnvState state;
 };
 
+struct LookLogicEnvironment {
+	std::string name;
+	LookEnvState state;
+};
+
+struct LookLogicWeight {
+	size_t index = 0;
+	float weight = 0.0f;
+};
+
 struct LookEnvironment {
 	bool from_data = false;
 	LookEnvState base;
 	std::vector<LookArea> areas;
+	std::vector<LookLogicEnvironment> logic;
 	std::vector<std::vector<uint8_t>> luts;
 	std::vector<std::string> notes;
 };
@@ -99,7 +111,9 @@ struct LookFrame {
 };
 
 float look_area_weight(const LookArea &p_area, const LookVec3 &p_position);
-LookFrame look_frame(const LookEnvironment &p_env, const LookVec3 &p_position);
+LookFrame look_frame(
+		const LookEnvironment &p_env, const LookVec3 &p_position, std::span<const LookLogicWeight> p_logic = {});
+std::optional<size_t> look_logic_index(const LookEnvironment &p_env, std::string_view p_name);
 LookFrame look_frame_of(const LookEnvState &p_state);
 
 void fog_fit(const LookCubic &p_curve, float p_reach, float &r_density, float &r_curve, float &r_end);

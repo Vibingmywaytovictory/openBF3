@@ -474,8 +474,47 @@ LookVec3 look_grade(const LookEnvState &p_state, const std::vector<uint8_t> &p_c
 	return out;
 }
 
+namespace {
+
+void read_logic_environments(const EbxResolver &p_db, const World &p_world, LookEnvironment &r_env) {
+	for (const PlacedObject &object : p_world.objects) {
+		if (!object.entity.is_a("LogicVisualEnvironmentEntityData")) {
+			continue;
+		}
+		const std::optional<EbxInstance> blueprint = p_db.follow(object.entity.data(), "VisualEnvironment");
+		const std::optional<EbxInstance> ve = blueprint ? p_db.follow(blueprint->data(), "Object") : std::nullopt;
+		if (!ve) {
+			continue;
+		}
+		const std::string name = partition_name(p_db, *blueprint);
+		if (look_logic_index(r_env, name)) {
+			continue;
+		}
+		if (r_env.logic.size() >= kMaxVisualEnvironments) {
+			r_env.notes.push_back("more than " + std::to_string(kMaxVisualEnvironments) +
+					" logic visual environments: the rest ignored");
+			return;
+		}
+		LookLogicEnvironment l;
+		l.name = name;
+		size_t seen = 0, read = 0;
+		for (const EbxInstance &c : p_db.follow_all(ve->data(), "Components")) {
+			if (++seen > kMaxComponents) {
+				break;
+			}
+			read += read_component(p_db, c, name, l.state) ? 1 : 0;
+		}
+		if (read > 0) {
+			r_env.logic.push_back(std::move(l));
+		}
+	}
+}
+
+}
+
 core::Result<LookEnvironment> read_look_environment(const EbxResolver &p_db, const World &p_world) {
 	LookEnvironment env;
+	read_logic_environments(p_db, p_world, env);
 	const int32_t visibility_field = core::level::field_id("Visibility");
 	std::vector<Ve> ves;
 	for (const PlacedObject &object : p_world.objects) {
@@ -671,6 +710,9 @@ void decode_look_textures(const core::LevelMount &p_mount, LookEnvironment &r_en
 	for (LookArea &a : r_env.areas) {
 		decode(a.state);
 	}
+	for (LookLogicEnvironment &l : r_env.logic) {
+		decode(l.state);
+	}
 }
 
 float look_area_weight(const LookArea &p_area, const LookVec3 &p_position) {
@@ -729,7 +771,8 @@ LookFrame look_frame_of(const LookEnvState &p_s) {
 	return f;
 }
 
-LookFrame look_frame(const LookEnvironment &p_env, const LookVec3 &p_position) {
+LookFrame look_frame(
+		const LookEnvironment &p_env, const LookVec3 &p_position, std::span<const LookLogicWeight> p_logic) {
 	LookEnvState s = p_env.base;
 	for (const LookArea &a : p_env.areas) {
 		const float w = look_area_weight(a, p_position);
@@ -737,7 +780,20 @@ LookFrame look_frame(const LookEnvironment &p_env, const LookVec3 &p_position) {
 			blend_state(s, a.state, w);
 		}
 	}
+	for (const LookLogicWeight &l : p_logic) {
+		if (l.index < p_env.logic.size() && l.weight > 0.0f) {
+			blend_state(s, p_env.logic[l.index].state, std::fmin(l.weight, 1.0f));
+		}
+	}
 	return look_frame_of(s);
 }
 
+std::optional<size_t> look_logic_index(const LookEnvironment &p_env, std::string_view p_name) {
+	for (size_t i = 0; i < p_env.logic.size(); ++i) {
+		if (core::iequals_ascii(p_env.logic[i].name, p_name)) {
+			return i;
+		}
+	}
+	return std::nullopt;
+}
 }

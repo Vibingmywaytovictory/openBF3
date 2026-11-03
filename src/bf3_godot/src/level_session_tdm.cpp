@@ -1193,6 +1193,10 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			m.eor_flash->frame(this, r_game.layer, *eor_level->eor_fading, effects);
 		}
 		const std::optional<core::level::EorCamera> &eor = eor_level->eor_camera;
+		if (eor && eor->environment) {
+			const host::LogicEnvironmentState *lve = effects.environment(eor->environment->visual_environment);
+			look_.set_logic_environment(eor->environment->visual_environment, lve != nullptr ? lve->visibility : 0.0f);
+		}
 		if (plan_ != nullptr && upload_.begun()) {
 			if (m.eor_showroom == nullptr) {
 				m.eor_showroom = std::unique_ptr<EorShowroom, void (*)(EorShowroom *)>(

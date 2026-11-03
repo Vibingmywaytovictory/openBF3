@@ -2,7 +2,9 @@
 
 #include "bf3/core/gameplay/death_timeline.h"
 #include "bf3/core/install_snapshot.h"
+#include "bf3/core/level/eor_camera.h"
 #include "bf3/core/level/level.h"
+#include "bf3/core/level/world.h"
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/options_model.h"
 #include "bf3/core/ui/ui_input.h"
@@ -499,6 +501,44 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(sb.ghosts_applied == 1);
 		CHECK(sb.ghosts_refused == 1);
 		CHECK(b.session.errors().empty());
+	}
+
+	TEST_CASE("ui flow session: the showroom's LVE switches on at the EOR camera through AreaProximity") {
+		Level *l = level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		core::Result<std::unique_ptr<core::level::World>> world = core::level::World::traverse(*l->level);
+		REQUIRE(world.ok());
+		core::Result<std::optional<core::level::EorCamera>> eor = core::level::read_eor_camera(l->level->db(), **world);
+		REQUIRE(eor.ok());
+		REQUIRE(eor->has_value());
+		REQUIRE((*eor)->environment.has_value());
+		const std::string name = (*eor)->environment->visual_environment;
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level, UiFlowSessionOptions{});
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		UiFlowSession &s = **made;
+		ui_flow_tdm_pc_defaults(s, "TeamDeathMatch0");
+		Script sc{ s };
+		sc.state.phase = net::MatchPhase::InRound;
+		sc.state.joined = true;
+		const core::Vec3 far = core::vec::add((*eor)->transform.trans, core::Vec3{ 0.0f, 200.0f, 0.0f });
+		s.set_listener(far);
+		sc.run_to(30);
+		const LogicEnvironmentState *away = s.screen_effects().environment(name);
+		CHECK(away == nullptr);
+		s.set_listener((*eor)->transform.trans);
+		sc.run_to(60);
+		const LogicEnvironmentState *at = s.screen_effects().environment(name);
+		REQUIRE(at != nullptr);
+		std::printf("ui.flow.session showroom LVE at the EOR camera: visibility %.3f from %s\n", double(at->visibility),
+				at->source == LogicVisibilitySource::Runtime ? "the runtime" : "elsewhere");
+		CHECK(at->source == LogicVisibilitySource::Runtime);
+		CHECK(at->visibility == 1.0f);
+		s.set_listener(far);
+		sc.run_to(90);
+		CHECK(s.screen_effects().environment(name) == nullptr);
+		CHECK(s.errors().empty());
 	}
 
 	TEST_CASE("ui flow session: mp_eor_fading's flash and fades follow the logic's Sequence, LVE and Fade events") {

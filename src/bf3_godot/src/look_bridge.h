@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace godot {
@@ -39,6 +40,7 @@ public:
 
 	void update(const LevelUpload &p_upload, const godot::Vector3 &p_camera);
 	void cut();
+	void set_logic_environment(std::string_view p_name, float p_weight);
 
 	std::string describe() const;
 
@@ -56,6 +58,7 @@ private:
 	std::array<bool, 3> sky_bound_{};
 	std::optional<bf3::render::LookFrame> applied_;
 	std::optional<bf3::render::LookFrame> sent_;
+	std::vector<bf3::render::LookLogicWeight> logic_;
 	bool cut_pending_ = false;
 	bool sky_full_ = false;
 };
