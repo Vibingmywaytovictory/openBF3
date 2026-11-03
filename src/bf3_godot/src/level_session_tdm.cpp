@@ -1185,11 +1185,25 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			m.eor_camera->frame(p_camera, eor_level->eor_camera, r_game.hud_model.end_of_round);
 		}
 		const host::UiFlowSession *flow = m.native_flow != nullptr ? m.native_flow->session() : nullptr;
+		const host::LogicScreenEffectsFrame effects =
+				flow != nullptr ? flow->screen_effects() : host::LogicScreenEffectsFrame{};
 		if (m.windowed && eor_level->eor_fading != nullptr && flow != nullptr) {
 			if (m.eor_flash == nullptr) {
 				m.eor_flash = std::unique_ptr<EorFlash, void (*)(EorFlash *)>(new EorFlash(), &delete_part<EorFlash>);
 			}
-			m.eor_flash->frame(this, r_game.layer, *eor_level->eor_fading, flow->screen_effects());
+			m.eor_flash->frame(this, r_game.layer, *eor_level->eor_fading, effects);
+		}
+		const std::optional<core::level::EorCamera> &eor = eor_level->eor_camera;
+		if (plan_ != nullptr && upload_.begun()) {
+			if (m.eor_showroom == nullptr) {
+				m.eor_showroom = std::unique_ptr<EorShowroom, void (*)(EorShowroom *)>(
+						new EorShowroom(), &delete_part<EorShowroom>);
+			}
+			bool light_on = m.eor_camera != nullptr && m.eor_camera->active();
+			if (eor && eor->light && eor->light->switched_with_environment && eor->environment && flow != nullptr) {
+				light_on = effects.environment(eor->environment->visual_environment) != nullptr;
+			}
+			m.eor_showroom->frame(this, *plan_, upload_, eor, light_on);
 		}
 	}
 	m.ms_death_camera = ms_since(t0);

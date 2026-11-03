@@ -24,6 +24,7 @@ class Bf3UiScreens;
 class EorCameraView;
 class EorCheck;
 class EorFlash;
+class EorShowroom;
 class FovRoundCheck;
 class NativeEor;
 class NativeFlow;
@@ -58,6 +59,7 @@ struct TdmState {
 	std::unique_ptr<Bf3DeathCamera, void (*)(Bf3DeathCamera *)> death_camera{ nullptr, nullptr };
 	std::unique_ptr<EorCameraView, void (*)(EorCameraView *)> eor_camera{ nullptr, nullptr };
 	std::unique_ptr<EorFlash, void (*)(EorFlash *)> eor_flash{ nullptr, nullptr };
+	std::unique_ptr<EorShowroom, void (*)(EorShowroom *)> eor_showroom{ nullptr, nullptr };
 
 	uint8_t spawn_kit = 0;
 	std::array<std::array<bf3::host::LoadoutChoice, bf3::host::kKitCount>, bf3::host::kKitTeams> loadout_choices{};
