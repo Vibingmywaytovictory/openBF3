@@ -121,7 +121,8 @@ Dev preset, a row measured alone on a quiet machine; asan is about 10x.
 * M3's long rows, each as long as its gate: `godot.rotation` (a dedicated server and two clients over three levels,
   each round end keeping the data's 60 s intermission, about 8 min), `godot.level_change` (the same three levels in a
   listen game), `net.procs.scale32` and `net.procs.scale64` (the processes' start-up plus 120 s of 32 and 64 real
-  connections, timing), `net.procs.rotation` (a dedicated server over four map-list levels, MP_011 and MP_003
+  connections, timing, and their control `net.procs.scale_control`, 30 s of 64 with `--ghost-scope=off`),
+  `net.procs.rotation` (a dedicated server over four map-list levels, MP_011 and MP_003
   loaded cold on a fresh cache root, with two loadbots processes, timing), `net.procs.follow` and `net.procs.listen_maplist`
   (a headless Godot client over four and two levels, timing), `net.procs.hitreg` (a dedicated server, a strafing
   bf3dump client and a headless Godot shooter, 500 shots at 100 ms RTT, then again with lag compensation off,

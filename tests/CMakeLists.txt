@@ -1172,8 +1172,8 @@ openbf3_test(test_net_procs_harness test_main.cpp net_procs_harness_tests.cpp te
 target_link_libraries(test_net_procs_harness PRIVATE test_proc_driver)
 openbf3_proc_row(net.procs.harness test_net_procs_harness TIMEOUT 120 ARGS --test-suite=net-procs-harness)
 
-openbf3_test(test_net_procs test_main.cpp net_procs_tests.cpp net_procs_hitreg_tests.cpp net_procs_support.h
-    test_support.h)
+openbf3_test(test_net_procs test_main.cpp net_procs_tests.cpp net_procs_hitreg_tests.cpp net_procs_scale_tests.cpp
+    net_procs_support.h test_support.h)
 target_link_libraries(test_net_procs PRIVATE test_proc_driver bf3_present)
 target_include_directories(test_net_procs PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_core/src)
 openbf3_proc_row(net.procs.connect test_net_procs LABEL timing TIMEOUT 300 ARGS --test-suite=net-procs-connect)
@@ -1187,6 +1187,13 @@ openbf3_proc_row(godot.rotation test_net_procs LABEL timing TIMEOUT 1800 ARGS --
 openbf3_proc_row(net.procs.hitreg test_net_procs LABEL timing TIMEOUT 2400 ARGS --test-suite=net-procs-hitreg)
 set_tests_properties(net.procs.hitreg PROPERTIES RUN_SERIAL TRUE)
 openbf3_cost(net.procs.hitreg 1 600)
+openbf3_proc_row(net.procs.scale32 test_net_procs LABEL timing TIMEOUT 900 ARGS --test-suite=net-procs-scale32)
+openbf3_proc_row(net.procs.scale64 test_net_procs LABEL timing TIMEOUT 900 ARGS --test-suite=net-procs-scale64)
+openbf3_proc_row(net.procs.scale_control test_net_procs LABEL timing TIMEOUT 600 ARGS --test-suite=net-procs-scale-control)
+set_tests_properties(net.procs.scale32 net.procs.scale64 net.procs.scale_control PROPERTIES RUN_SERIAL TRUE)
+openbf3_cost(net.procs.scale32 1 220)
+openbf3_cost(net.procs.scale64 1 220)
+openbf3_cost(net.procs.scale_control 1 130)
 set_tests_properties(net.procs.connect net.procs.two_clients net.procs.rotation net.procs.godot_connect net.procs.follow net.procs.listen_maplist net.procs.kick godot.rotation PROPERTIES RUN_SERIAL TRUE)
 openbf3_cost(net.procs.connect 1 45)
 openbf3_cost(net.procs.two_clients 1 60)
