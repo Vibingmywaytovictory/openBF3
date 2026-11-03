@@ -66,6 +66,7 @@ struct ImpactAudioStats {
 	uint64_t effect_stops = 0;
 	uint64_t unknown_patches = 0;
 	uint64_t refused = 0;
+	uint64_t stale_dropped = 0;
 };
 static_assert(std::is_trivially_copyable_v<ImpactAudioStats>);
 

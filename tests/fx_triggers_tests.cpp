@@ -983,6 +983,67 @@ TEST_CASE("timelines: pending until the clock passes, start ages, invalid clocks
 	CHECK(starts_of(t, kMuzz3p)[0]->start_age == kMaxStartAge);
 }
 
+hk::PresentClock joined_at(int64_t p_now, int64_t p_first_snapshot) {
+	hk::PresentClock c = clock_at(p_now);
+	c.join = present::PresentJoin::Joined;
+	c.first_snapshot = p_first_snapshot;
+	return c;
+}
+
+TEST_CASE("late join: events timed before the first snapshot start nothing and count as stale_dropped, not at a "
+		  "clamped age") {
+	std::unique_ptr<Syn> s = make_syn();
+	FxWorld world;
+	FxTriggerConfig cfg;
+	cfg.own_slot = 1;
+	cfg.match_seed = kMatch;
+	FxTriggers t(world, *s->library, s->fire, cfg);
+	const int64_t u = sw::kTimeUnitsPerSecond;
+
+	hk::PresentClock waiting = clock_at(0);
+	waiting.render_valid = false;
+	waiting.join = present::PresentJoin::Waiting;
+	std::vector<hk::PresentEvent> lobby{ ev(hk::PresentKind::RemoteShot, 5, 1, 0, { 0, 1.6f, 0 }, { 0, 0, 1 }, 10 * u),
+		impact(5, 1, kConcrete, { 0, 0, 5 }, { 0, 1, 0 }) };
+	lobby[1].time = 10 * u;
+	hk::PresentEvent own_hit = impact(5, 2, kConcrete, { 0, 0, 6 }, { 0, 1, 0 });
+	own_hit.timeline = hk::PresentTimeline::Immediate;
+	lobby.push_back(own_hit);
+	t.on_events(lobby, waiting, kNear);
+	CHECK(t.stats().stale_dropped == 2);
+	CHECK(t.pending() == 0);
+	CHECK(starts_of(t, kMuzz3p).empty());
+	CHECK_FALSE(t.starts().empty());
+
+	const hk::PresentClock joined = joined_at(120 * u, 100 * u);
+	std::vector<hk::PresentEvent> burst;
+	for (uint32_t i = 0; i < 10; ++i) {
+		const int64_t at = (i < 6 ? 40 * u : 110 * u) + int64_t(i) * sw::kTimeUnitsPerTick;
+		burst.push_back(ev(hk::PresentKind::RemoteShot, 5, 10 + i, 0, { 0, 1.6f, 0 }, { 0, 0, 1 }, at));
+		hk::PresentEvent hit = impact(5, 10 + i, kConcrete, { 0, 0, 5 }, { 0, 1, 0 });
+		hit.time = at;
+		burst.push_back(hit);
+	}
+	t.on_events(burst, joined, kNear);
+	CHECK(t.stats().stale_dropped == 2 + 12);
+	const auto muzzles = starts_of(t, kMuzz3p);
+	REQUIRE(muzzles.size() == 4);
+	for (const TriggerStart *m : muzzles) {
+		CHECK(m->id >= 16);
+		CHECK(m->start_age < 10.0f);
+	}
+
+	hk::PresentClock untracked = clock_at(0);
+	untracked.render_valid = false;
+	hk::PresentEvent held = ev(hk::PresentKind::RemoteShot, 6, 1, 0, { 0, 1.6f, 0 }, { 0, 0, 1 }, 50 * u);
+	t.on_events(std::span<const hk::PresentEvent>(&held, 1), untracked, kNear);
+	CHECK(t.pending() == 1);
+	t.on_events({}, joined, kNear);
+	CHECK(t.pending() == 0);
+	CHECK(t.starts().empty());
+	CHECK(t.stats().stale_dropped == 2 + 12 + 1);
+}
+
 TEST_CASE("duplicates: a replayed stream starts nothing twice (E8 (7) double starts counted)") {
 	std::unique_ptr<Syn> s = make_syn();
 	FxWorld world;

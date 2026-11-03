@@ -1352,6 +1352,10 @@ void FxTriggers::on_events(std::span<const present::PresentEvent> p_events, cons
 	for (size_t i = 0; i < held; ++i) {
 		const present::PresentEvent e = m.pending.front();
 		m.pending.pop_front();
+		if (p_now.before_join(e.timeline, e.time)) {
+			++m.stats.stale_dropped;
+			continue;
+		}
 		float age = 0;
 		if (m.age_of(e, p_now, age)) {
 			m.dispatch(e, age);
@@ -1363,6 +1367,10 @@ void FxTriggers::on_events(std::span<const present::PresentEvent> p_events, cons
 		++m.stats.events;
 		if (!m.sane(e)) {
 			++m.stats.rejected;
+			continue;
+		}
+		if (p_now.before_join(e.timeline, e.time)) {
+			++m.stats.stale_dropped;
 			continue;
 		}
 		float age = 0;

@@ -161,6 +161,10 @@ void ImpactAudio::set_listener(const ListenerState &p_listener) {
 
 void ImpactAudio::play_impact(const ImpactSoundRequest &p_request, SimMixerClock &r_clock) {
 	Impl &m = *impl_;
+	if (r_clock.now().before_join(p_request.timeline, p_request.time)) {
+		++m.stats.stale_dropped;
+		return;
+	}
 	std::shared_ptr<const ca::SoundProgram> program = m.cache ? m.cache->find(p_request.patch) : nullptr;
 	if (!program) {
 		++m.stats.unknown_patches;

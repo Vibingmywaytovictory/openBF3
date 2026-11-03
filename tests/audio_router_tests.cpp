@@ -63,6 +63,7 @@ using namespace bf3::core::audio;
 namespace cp = bf3::core::audio::port;
 namespace ba = bf3::audio;
 namespace host = bf3::host;
+namespace present = bf3::present;
 namespace sw = bf3::sim::weapons;
 namespace sim = bf3::sim;
 namespace net = bf3::net;
@@ -392,6 +393,8 @@ struct Rig {
 	std::unique_ptr<ba::ImpactAudio> impacts;
 	ba::ListenerState listener;
 	sw::SimTime predicted = 1000 * kTick, render = 994 * kTick;
+	present::PresentJoin join = present::PresentJoin::Untracked;
+	sw::SimTime first_snapshot = 0;
 	uint64_t clock_at_events = 0;
 	std::vector<float> buffer = std::vector<float>(size_t(kFramesPerTick) * 2);
 
@@ -426,6 +429,8 @@ struct Rig {
 		now.predicted_valid = now.render_valid = true;
 		now.predicted = predicted;
 		now.render = render;
+		now.join = join;
+		now.first_snapshot = first_snapshot;
 		clock->set_now(now);
 		router->set_listener(listener);
 		impacts->set_listener(listener);
@@ -893,6 +898,55 @@ TEST_SUITE("audio-router") {
 		k.frame(std::vector<host::PresentEvent>{ death });
 		REQUIRE(k.recorder.seen.size() == 1);
 		CHECK(k.recorder.seen[0].up);
+	}
+
+	TEST_CASE("late join: a burst held across the join plays once from its post-join rounds; pre-join rounds, "
+			  "detonations and impacts request nothing") {
+		Rig r;
+		r.join = present::PresentJoin::Joined;
+		r.first_snapshot = r.render;
+		std::vector<Shooter> shooters(1);
+		shooters[0].burst(r.render - 60 * kTick, 500, 30);
+		const size_t before = size_t(std::count_if(shooters[0].shots.begin(), shooters[0].shots.end(),
+				[&](sw::SimTime t) { return t < r.first_snapshot; }));
+		REQUIRE(before > 10);
+		host::PresentEvent boom;
+		boom.kind = host::PresentKind::Detonation;
+		boom.timeline = host::PresentTimeline::Render;
+		boom.def = kGrenade;
+		boom.slot = 6;
+		boom.time = r.render - 2 * kTick;
+		boom.pos[2] = 20.0f;
+		r.frame(std::vector<host::PresentEvent>{ boom });
+		ba::ImpactSoundRequest hit;
+		hit.patch = "impact/concrete";
+		hit.position = { 0.0f, 0.0f, 10.0f };
+		hit.time = r.first_snapshot - kTick;
+		hit.timeline = host::PresentTimeline::Render;
+		r.begin();
+		r.impacts->play_impact(hit, *r.clock);
+		r.end();
+		run(r, shooters, 120);
+		const ba::WeaponAudioStats &st = r.router->stats();
+		CHECK(st.stale_dropped == before + 1);
+		CHECK(st.detonations == 0);
+		CHECK(st.one_shots == 0);
+		CHECK(r.impacts->stats().stale_dropped == 1);
+		CHECK(r.impacts->stats().impacts == 0);
+		CHECK(r.clock->late() == 0);
+		REQUIRE(r.recorder.seen.size() == 1);
+		CHECK(r.recorder.seen[0].up);
+		CHECK(st.bursts == 1);
+		CHECK(st.event_rounds + st.state_rounds > 0);
+
+		Rig w;
+		w.join = present::PresentJoin::Waiting;
+		std::vector<Shooter> lobby(1);
+		lobby[0].burst(w.render + 2 * kTick, 50, 5);
+		run(w, lobby, 3, {}, false);
+		CHECK(w.router->stats().stale_dropped > 0);
+		CHECK(w.router->stats().event_rounds == 0);
+		CHECK(w.clock->late() == 0);
 	}
 
 	TEST_CASE("others by distance: the crowd muzzle, the cull past max distance, the listener re-send") {
@@ -1643,6 +1697,9 @@ struct NetStream {
 			const uint32_t tick = in_flight.front().tick;
 			in_flight.pop_front();
 			newest_tick = tick;
+			if (frame->first_snapshot_tick == 0) {
+				frame->first_snapshot_tick = tick;
+			}
 			for (NetShooter &s : r_shooters) {
 				while (s.next_sent < s.shots.size() && sim::Tick(sw::tick_containing(s.shots[s.next_sent])) <= tick) {
 					host::PresentEvent e;

@@ -265,6 +265,7 @@ struct FxTriggerStats {
 	uint64_t attached_updates = 0;
 	uint64_t pending_now = 0;
 	uint64_t culled = 0;
+	uint64_t stale_dropped = 0;
 };
 static_assert(std::is_trivially_copyable_v<FxTriggerStats>);
 

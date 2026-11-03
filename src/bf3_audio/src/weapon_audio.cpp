@@ -964,6 +964,10 @@ struct WeaponAudioRouter::Impl {
 	void on_events(std::span<const present::PresentEvent> p_events, SimMixerClock &r_clock) {
 		clock = &r_clock;
 		for (const present::PresentEvent &e : p_events) {
+			if (r_clock.now().before_join(e.timeline, e.time)) {
+				++stats.stale_dropped;
+				continue;
+			}
 			switch (e.kind) {
 				case present::PresentKind::OwnShot:
 					own_shot(e, r_clock);
