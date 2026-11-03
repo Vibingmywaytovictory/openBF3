@@ -2142,6 +2142,40 @@ TEST_SUITE("audio-mixer") {
 		CHECK(rig.reverb.stats().lane_blocks > 0);
 	}
 
+	TEST_CASE("a delay line of 4 partitions wraps ten times and still equals direct convolution to 1e-5") {
+		const uint32_t partitions = 4;
+		const std::array<ImpulseResponse, 1> irs{ test_impulse(partitions * 512 - 37, 9) };
+		ReverbRig rig(test_bank(irs, partitions));
+		REQUIRE(rig.reverb.set_slot(0, 0, 0.5f));
+		const uint32_t lead = ba::kIrCrossfadeBlocks * 512;
+		const uint32_t blocks = ba::kIrCrossfadeBlocks + 10 * partitions;
+		std::vector<float> left(size_t(blocks) * 512, 0.0f), right(left.size(), 0.0f);
+		std::mt19937 rng(17);
+		std::uniform_real_distribution<float> u(-0.1f, 0.1f);
+		for (size_t i = lead; i < left.size(); ++i) {
+			left[i] = u(rng);
+			right[i] = u(rng);
+		}
+		const std::vector<float> out = rig.run(left, right, blocks);
+		double worst = 0.0, peak = 0.0;
+		for (uint32_t c = 0; c < 2; ++c) {
+			const std::vector<float> &x = c == 0 ? left : right;
+			const std::span<const float> h = irs[0].channel(c);
+			for (size_t n = 0; n < out.size() / 2; ++n) {
+				double want = 0.0;
+				for (size_t m = 0; m < h.size() && m <= n; ++m) {
+					want += double(h[m]) * double(x[n - m]);
+				}
+				want *= 0.5;
+				peak = std::max(peak, std::fabs(want));
+				worst = std::max(worst, std::fabs(want - double(out[n * 2 + c])));
+			}
+		}
+		MESSAGE("after ten wraps: largest difference from direct convolution ", worst, " of a peak ", peak);
+		CHECK(peak > 0.1);
+		CHECK(worst < 1e-5);
+	}
+
 	TEST_CASE("a slot switched under a running tail crossfades: no step above -60 dBFS") {
 		const std::array<ImpulseResponse, 2> irs{ test_impulse(3000, 11), test_impulse(2000, 12) };
 		const auto bank = test_bank(irs, ba::max_reverb_partitions(2.0f, 48000));
