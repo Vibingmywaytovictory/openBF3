@@ -116,6 +116,7 @@ void check_listen_config(const host::GameServerConfig &p_c, const host::ServerLe
 	CHECK(p_c.respawn_ticks == 300u);
 	CHECK(p_c.walkers == 0u);
 	CHECK(p_c.dev_commands == false);
+	CHECK(p_c.ghost_scope);
 	CHECK(p_c.seed == 1u);
 	REQUIRE(p_c.bots != nullptr);
 	if (p_c.bots == nullptr) {
@@ -366,6 +367,8 @@ TEST_SUITE("host-server-level") {
 		CHECK(host::tdm_game_server_config(*cold, rules).rules.max_players == host::kServerMaxPlayers);
 		rules.bots = 0;
 		CHECK(host::tdm_game_server_config(*cold, rules).tdm_bots == nullptr);
+		rules.ghost_scope = false;
+		CHECK_FALSE(host::tdm_game_server_config(*cold, rules).ghost_scope);
 
 		cache->close();
 		std::error_code ec;

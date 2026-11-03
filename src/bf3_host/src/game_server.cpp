@@ -484,7 +484,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	m.spawner.resize(p_config.max_slots);
 	m.logic.resize(p_config.max_slots);
 	m.commands.configure(p_config.max_slots, p_config.jitter_buffer_ticks);
-	m.snapshots.configure(p_config.max_slots, p_config.snapshot_budget_bytes);
+	m.snapshots.configure(p_config.max_slots, p_config.snapshot_budget_bytes, p_config.ghost_scope);
 	m.dev.configure(m.config, *m.world, p_config.max_slots);
 	m.handshake.configure(p_config.game_build.value_or(net::game_build()), *p_config.level, p_config.max_slots);
 	m.loads.configure(p_config.max_slots, p_config.load, p_config.round_id);

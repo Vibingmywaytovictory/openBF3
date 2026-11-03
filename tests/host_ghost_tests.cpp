@@ -319,7 +319,7 @@ host::GhostCandidate candidate(uint8_t p_slot, uint8_t p_team, float p_metres, f
 
 class Schedule {
 public:
-	Schedule() { scheduler.configure(8, 1200); }
+	explicit Schedule(bool p_scoped = true) { scheduler.configure(8, 1200, p_scoped); }
 
 	std::vector<uint8_t> step(
 			const host::GhostViewer &p_viewer, std::span<const host::GhostCandidate> p_cands, bool p_ack = true) {
@@ -761,6 +761,33 @@ TEST_SUITE("host-ghost") {
 		s.scheduler.attacked(0, 2, s.tick);
 		const std::vector<uint8_t> back = s.step(plain, gone);
 		CHECK(std::count(back.begin(), back.end(), uint8_t(2)) == 1);
+	}
+
+	TEST_CASE("with ghost scope off every live soldier goes in every snapshot at any range, absolute") {
+		const host::GhostViewer plain = test_viewer(false);
+		const std::array<host::GhostCandidate, 3> cands{ candidate(1, 2, 20000.0f, 90.0f, false),
+			candidate(2, 2, 250.0f, 90.0f, false), candidate(3, 1, 5000.0f, -90.0f, false) };
+		Schedule flat(false);
+		uint32_t carried = 0, absolute = 0, required = 0;
+		Schedule scoped;
+		uint32_t scoped_far = 0, scoped_deltas = 0;
+		for (int i = 0; i < 30; ++i) {
+			carried += uint32_t(flat.step(plain, cands).size());
+			required += uint32_t(flat.plan.bases.required);
+			for (const net::OtherBaseline &b : flat.plan.bases.others) {
+				absolute += b.back == 0 ? 1u : 0u;
+			}
+			const std::vector<uint8_t> c = scoped.step(plain, cands);
+			scoped_far += uint32_t(std::count(c.begin(), c.end(), uint8_t(1)));
+			for (const net::OtherBaseline &b : scoped.plan.bases.others) {
+				scoped_deltas += b.back != 0 ? 1u : 0u;
+			}
+		}
+		CHECK(carried == 90);
+		CHECK(required == 90);
+		CHECK(absolute == 90);
+		CHECK(scoped_far == 0);
+		CHECK(scoped_deltas > 0);
 	}
 
 	TEST_CASE("a remote track lasts three of its own sample gaps, at least 1 s, and a removal ends it") {

@@ -26,11 +26,11 @@ public:
 			slots_(p_slots), soldiers_(r_soldiers), commands_(r_commands), combat_(r_combat), log_(r_log),
 			motor_(p_motor), outbox_(r_outbox), match_(p_match) {}
 
-	void configure(size_t p_slots, uint32_t p_budget_bytes) {
+	void configure(size_t p_slots, uint32_t p_budget_bytes, bool p_ghost_scope = true) {
 		seq_.assign(p_slots, 0);
 		intervals_.assign(p_slots, SnapshotIntervals());
 		budget_bytes_ = p_budget_bytes;
-		ghosts_.configure(p_slots, int64_t(p_budget_bytes));
+		ghosts_.configure(p_slots, int64_t(p_budget_bytes), p_ghost_scope);
 	}
 	void reset(size_t p_slot) {
 		seq_[p_slot] = 0;

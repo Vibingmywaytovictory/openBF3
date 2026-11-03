@@ -67,9 +67,10 @@ bool shot_passes_by(
 	return distance2(closest, p_eye) <= p_fly_by.radius * p_fly_by.radius;
 }
 
-void GhostScheduler::configure(size_t p_slots, int64_t p_budget_bytes) {
+void GhostScheduler::configure(size_t p_slots, int64_t p_budget_bytes, bool p_scoped) {
 	clients_.assign(p_slots, Client());
 	budget_ = p_budget_bytes;
+	scoped_ = p_scoped;
 }
 
 void GhostScheduler::reset(size_t p_client) {
@@ -196,7 +197,8 @@ void GhostScheduler::plan(size_t p_client, const GhostViewer &p_viewer, std::spa
 			continue;
 		}
 		Ghost &g = c.ghosts[cand.slot];
-		const std::optional<GhostTier> tier = ghost_tier(p_viewer, cand, g.attacked_until > p_tick);
+		const std::optional<GhostTier> tier = scoped_ ? ghost_tier(p_viewer, cand, g.attacked_until > p_tick)
+													  : std::optional<GhostTier>(kUnscopedTier);
 		if (!tier) {
 			continue;
 		}
@@ -254,7 +256,7 @@ void GhostScheduler::plan(size_t p_client, const GhostViewer &p_viewer, std::spa
 		const GhostCandidate &cand = p_candidates[p.candidate];
 		r_plan.others.push_back(cand.record);
 		net::OtherBaseline b;
-		if (const SentGhost *s = baseline(c, c.ghosts[cand.slot], cand.record, p_seq, p_tick)) {
+		if (const SentGhost *s = scoped_ ? baseline(c, c.ghosts[cand.slot], cand.record, p_seq, p_tick) : nullptr) {
 			b.back = uint8_t(uint16_t(p_seq - s->seq));
 			b.tick = s->tick;
 			b.record = s->record;
@@ -267,6 +269,9 @@ void GhostScheduler::plan(size_t p_client, const GhostViewer &p_viewer, std::spa
 
 void GhostScheduler::own_base(size_t p_client, uint16_t p_seq, sim::Tick p_tick, net::OwnBaseline &r_base) const {
 	r_base = net::OwnBaseline();
+	if (!scoped_) {
+		return;
+	}
 	const Client &c = clients_[p_client];
 	for (uint8_t back = 1; back <= net::kMaxBaselineBack; ++back) {
 		const SentSnapshot *e = entry(c, uint16_t(p_seq - back));

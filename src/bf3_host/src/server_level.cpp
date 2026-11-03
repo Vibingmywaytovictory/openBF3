@@ -97,6 +97,7 @@ GameServerConfig tdm_game_server_config(const ServerLevel &p_level, const Server
 	const uint8_t max_players = std::clamp<uint8_t>(p_rules.max_players, 1, kServerMaxPlayers);
 	c.max_slots = std::max<uint32_t>(kServerSlots, max_players);
 	c.dev_commands = p_rules.dev_commands;
+	c.ghost_scope = p_rules.ghost_scope;
 	c.seed = p_rules.seed;
 	c.respawn_ticks =
 			uint32_t(std::clamp(std::lround(p_rules.respawn_s * double(sim::kSimHz)), 1L, 120L * long(sim::kSimHz)));

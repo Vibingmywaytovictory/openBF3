@@ -24,6 +24,7 @@ inline constexpr std::array<GhostTier, 4> kEnemyTiers{ { { 100.0f, 1, 1 }, { 300
 inline constexpr std::array<GhostTier, 3> kTeammateTiers{ { { 100.0f, 2, 3 }, { 300.0f, 6, 8 }, { 1.0e9f, 15, 24 } } };
 inline constexpr GhostTier kAttackerTier{ 0.0f, 1, 1 };
 inline constexpr GhostTier kAimConeTier{ 0.0f, 1, 2 };
+inline constexpr GhostTier kUnscopedTier{ 0.0f, 1, 1 };
 inline constexpr float kAimConeCos = 0.98480775f;
 inline constexpr sim::Tick kAttackerTicks = 5 * sim::kSimHz;
 inline constexpr size_t kGhostSentRing = 16;
@@ -65,7 +66,7 @@ bool shot_passes_by(
 
 class GhostScheduler {
 public:
-	void configure(size_t p_slots, int64_t p_budget_bytes);
+	void configure(size_t p_slots, int64_t p_budget_bytes, bool p_scoped = true);
 	void reset(size_t p_client);
 	void ack(size_t p_client, const net::CommandPacket &p_packet);
 	void attacked(size_t p_victim, size_t p_shooter, sim::Tick p_tick);
@@ -127,6 +128,7 @@ private:
 
 	std::vector<Client> clients_;
 	int64_t budget_ = int64_t(net::kMaxDatagramBytes);
+	bool scoped_ = true;
 };
 
 }
