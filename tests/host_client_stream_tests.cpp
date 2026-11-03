@@ -23,9 +23,11 @@
 #include <cstdio>
 #include <deque>
 #include <functional>
+#include <map>
 #include <memory>
 #include <span>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -416,6 +418,9 @@ struct StreamClient {
 	std::vector<host::PredictedTimed> timed_log;
 	std::vector<host::OwnTestSample> sample_log;
 	std::array<host::PresentEvent, 256> batch{};
+	bool keep_events = false;
+	std::vector<host::PresentEvent> kept;
+	std::vector<host::PresentClock> kept_clocks;
 
 	StreamHashes hashes() const { return { sent.h, frames.h, presented.h, events.h, gunplay.h, stats.h }; }
 };
@@ -522,6 +527,10 @@ void drive(StreamClient &r_c, uint32_t p_step, uint64_t p_now) {
 	while ((got = r_c.loop.events().drain(r_c.batch)) > 0) {
 		for (size_t k = 0; k < got; ++k) {
 			add_event(r_c.events, r_c.batch[k]);
+			if (r_c.keep_events) {
+				r_c.kept.push_back(r_c.batch[k]);
+				r_c.kept_clocks.push_back(host::present_clock(*r_c.frame, p_now));
+			}
 		}
 		r_c.event_count += got;
 	}
@@ -850,6 +859,112 @@ TEST_SUITE("host-client-stream") {
 		CHECK(ds.snapshot_others_received > 0u);
 		CHECK(stream.others > 0u);
 		check_hashes(d, kDelta);
+	}
+
+	TEST_CASE("late join: a client joining a 26-bot round at tick 300 is bound by its first snapshot, and every shot "
+			  "and impact it shares with a client "
+			  "there from the start carries the same seed") {
+		tt::TdmLevel *level = tt::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		host::GameServerConfig cfg;
+		cfg.level = level->shared;
+		cfg.max_slots = 40;
+		cfg.game_build = kStreamGameBuild;
+		cfg.seed = 71;
+		cfg.gunplay.mechanics_cfg = OPENBF3_MECHANICS_CFG;
+		cfg.rules.mode = host::MatchRulesConfig::Mode::Tdm;
+		cfg.rules.preround_override_s = 0.0f;
+		cfg.rules.max_players = 32;
+		auto fill = std::make_shared<host::BotFillConfig>();
+		fill->level = level->bots;
+		fill->count = 0;
+		cfg.bots = fill;
+		auto bots = std::make_shared<host::TdmBotConfig>();
+		bots->count = 26;
+		bots->tuning_cfg = OPENBF3_BOT_TUNING_CFG;
+		cfg.tdm_bots = bots;
+		host::GameServer server;
+		const core::Status st = server.init(cfg);
+		REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
+
+		constexpr sim::Tick kJoinTick = 300;
+		Stream stream(server, level->shared);
+		host::ClientSessionConfig early;
+		core::Result<net::NetSimConfig> lag = net::parse_netsim("lat=50,seed=3");
+		REQUIRE(lag.ok());
+		early.netsim = *lag;
+		StreamClient &a = stream.add("early", 1u, 0u, 2u, early);
+		a.keep_events = true;
+		StreamClient *b = nullptr;
+		stream.play(1800, [&](sim::Tick p_tick) {
+			if (p_tick == kJoinTick) {
+				host::ClientSessionConfig late;
+				late.netsim = *lag;
+				b = &stream.add("late", 2u, 1u, 1u, late);
+				b->keep_events = true;
+			}
+		});
+		REQUIRE(b != nullptr);
+		const sim::Tick a_first = a.frame->first_snapshot_tick, b_first = b->frame->first_snapshot_tick;
+		std::printf("host.client.join: first snapshots at ticks %u (early) and %u (late, joined at %u)\n",
+				unsigned(a_first), unsigned(b_first), unsigned(kJoinTick));
+		CHECK(a_first > 0u);
+		CHECK(a_first < kJoinTick);
+		CHECK(b_first > kJoinTick);
+
+		size_t waiting = 0, before = 0;
+		for (size_t i = 0; i < b->kept.size(); ++i) {
+			const host::PresentEvent &e = b->kept[i];
+			const host::PresentClock &c = b->kept_clocks[i];
+			waiting += c.join == present::PresentJoin::Waiting ? 1u : 0u;
+			const bool timed = e.timeline == host::PresentTimeline::Render;
+			const bool old = timed && e.time < sim::weapons::tick_start(b_first);
+			before += old ? 1u : 0u;
+			if (c.join == present::PresentJoin::Joined) {
+				CHECK(c.first_snapshot == sim::weapons::tick_start(b_first));
+				CHECK(c.before_join(e.timeline, e.time) == old);
+			}
+		}
+
+		using Key = std::tuple<int, uint8_t, uint32_t, uint8_t, uint32_t>;
+		const auto key_of = [](const host::PresentEvent &p_e) {
+			return Key{ int(p_e.kind), p_e.slot, p_e.id, p_e.pellet,
+				p_e.kind == host::PresentKind::Impact ? p_e.extra : 0u };
+		};
+		std::map<Key, const host::PresentEvent *> early_events;
+		for (const host::PresentEvent &e : a.kept) {
+			if (e.kind == host::PresentKind::RemoteShot || e.kind == host::PresentKind::Impact) {
+				early_events.emplace(key_of(e), &e);
+			}
+		}
+		const uint8_t a_slot = a.loop.stats().slot, b_slot = b->loop.stats().slot;
+		size_t shared_shots = 0, shared_impacts = 0, differ = 0, impact_times = 0;
+		for (const host::PresentEvent &e : b->kept) {
+			if ((e.kind != host::PresentKind::RemoteShot && e.kind != host::PresentKind::Impact) || e.slot == a_slot ||
+					e.slot == b_slot) {
+				continue;
+			}
+			const auto it = early_events.find(key_of(e));
+			if (it == early_events.end()) {
+				continue;
+			}
+			const host::PresentEvent &o = *it->second;
+			const bool impact = e.kind == host::PresentKind::Impact;
+			const bool same = o.seed == e.seed && o.def == e.def && o.flags == e.flags && o.material == e.material &&
+					(impact || o.time == e.time);
+			differ += same ? 0u : 1u;
+			impact_times += impact && o.time != e.time ? 1u : 0u;
+			(impact ? shared_impacts : shared_shots) += 1u;
+		}
+		std::printf("host.client.join: late client %zu events (%zu while waiting for its first snapshot, %zu timed "
+					"before it), %zu shots and %zu impacts shared with the early client, %zu differ in a choice, %zu "
+					"impacts at another time\n",
+				b->kept.size(), waiting, before, shared_shots, shared_impacts, differ, impact_times);
+		CHECK(shared_shots > 20u);
+		CHECK(shared_impacts > 20u);
+		CHECK(differ == 0u);
 	}
 
 	TEST_CASE("host-client-stream: install unchanged") {
