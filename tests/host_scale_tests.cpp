@@ -9,7 +9,9 @@
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/level_load.h"
+#include "bf3/host/load_bots.h"
 #include "bf3/host/scale_bench.h"
+#include "bf3/host/server_level.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/nav.h"
@@ -17,6 +19,8 @@
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/spawn.h"
 #include "bf3/sim/static_world.h"
+#include "gunplay_fixture.h"
+#include "tdm_fixture.h"
 #include "test_support.h"
 
 #include <windows.h>
@@ -32,6 +36,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace bf3;
@@ -534,6 +539,19 @@ TEST_SUITE("host-scale-unit") {
 		CHECK(paths.pending() == 0);
 	}
 
+	TEST_CASE("host.scale.unit: the bench takes 64 observers beside 64 walkers and refuses 65") {
+		ScaleBenchOptions o;
+		o.walkers = 64;
+		o.observers = kScaleBenchMaxObservers;
+		core::Result<ScaleReport> r = run_scale_bench(nullptr, o);
+		REQUIRE_FALSE(r.ok());
+		CHECK(r.error().message == "scale bench: no install");
+		o.observers = kScaleBenchMaxObservers + 1;
+		r = run_scale_bench(nullptr, o);
+		REQUIRE_FALSE(r.ok());
+		CHECK(r.error().message == "scale bench: at most 120 walkers and 64 observers in 128 slots");
+	}
+
 	TEST_CASE("host.scale.unit: the tail split names an injected slow part; nearest-rank percentiles") {
 		std::vector<GameServerTickTimes> ticks(1000);
 		for (size_t i = 0; i < ticks.size(); ++i) {
@@ -698,6 +716,223 @@ void gate(const ScaleReport &p_r) {
 	CHECK(p_r.respawns_in_window == 0);
 }
 
+inline constexpr uint32_t kScalePeers = 64;
+inline constexpr double kPeerBytesPerSecond = 36000.0;
+inline constexpr uint64_t kPeerIntervalBytes = 1200;
+inline constexpr int kScaleKillLimit = 100000;
+inline constexpr sim::Tick kSpawnRetryTicks = 30;
+
+struct PeerLevel {
+	ServerLevel level;
+	WarmCache warm;
+};
+
+PeerLevel *peer_level(Install &r_install) {
+	static std::unique_ptr<PeerLevel> s_level;
+	static bool s_tried = false;
+	if (s_tried) {
+		if (s_level == nullptr) {
+			bf3::test::skip_install_case("the Metro TDM load failed (see the first peers case)");
+		}
+		return s_level.get();
+	}
+	s_tried = true;
+	auto l = std::make_unique<PeerLevel>();
+	std::error_code ec;
+	l->warm.root = std::filesystem::temp_directory_path(ec) /
+			("openbf3_host_scale_peers_" + std::to_string(GetCurrentProcessId()));
+	std::filesystem::remove_all(l->warm.root, ec);
+	core::CacheOptions co;
+	co.root = l->warm.root;
+	co.guard = r_install.reader->write_guard();
+	std::string detail;
+	REQUIRE_MESSAGE(l->warm.cache.open(std::move(co), &detail) == core::CacheStatus::Ok, detail);
+	ServerLevelOptions o;
+	o.shared.tuning = shipped_tuning();
+	o.shared.gunplay = true;
+	o.shared.tdm = true;
+	o.shared.tdm_tuning_cfg = OPENBF3_TDM_TUNING_CFG;
+	o.shared.threads = std::max(1u, std::thread::hardware_concurrency() / 2u);
+	o.bots = false;
+	const auto start = std::chrono::steady_clock::now();
+	core::Result<ServerLevel> level =
+			load_server_level(r_install.install, { "MP_Subway", "TeamDeathMatch0", 1 }, o, &l->warm.cache, nullptr);
+	REQUIRE_MESSAGE(level.ok(), (level.ok() ? std::string() : level.error().message));
+	l->level = std::move(*level);
+	bf3::test::tdm::detail::frame() = shot_frame(*l->level.shared->static_world);
+	std::printf("peers fixture: Metro TDM without bots loaded in %.2f s\n",
+			std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+	s_level = std::move(l);
+	return s_level.get();
+}
+
+struct PeerRun {
+	uint32_t clients = 0;
+	uint32_t spawned = 0;
+	double window_s = 0.0;
+	std::vector<double> bytes_per_s;
+	uint64_t intervals = 0;
+	uint64_t over_budget = 0;
+	uint64_t max_interval = 0;
+	uint64_t kicks = 0;
+	uint64_t kicked_peers = 0;
+	uint64_t decode_errors = 0;
+	uint64_t bad_datagrams = 0;
+	uint64_t shots = 0;
+	uint64_t hits = 0;
+	uint64_t shot_events = 0;
+	Percentiles tick_ms;
+	Percentiles encode_ms;
+
+	double mean_bytes_per_s() const {
+		double sum = 0.0;
+		for (double b : bytes_per_s) {
+			sum += b;
+		}
+		return bytes_per_s.empty() ? 0.0 : sum / double(bytes_per_s.size());
+	}
+	double max_bytes_per_s() const {
+		return bytes_per_s.empty() ? 0.0 : *std::max_element(bytes_per_s.begin(), bytes_per_s.end());
+	}
+};
+
+std::optional<PeerRun> run_peers(const ServerLevel &p_level, double p_warmup_s, double p_window_s, bool p_ghost_scope) {
+	ServerRules rules;
+	rules.max_players = kServerMaxPlayers;
+	rules.bots = 0;
+	rules.preround_s = 0.0f;
+	rules.kill_limit = kScaleKillLimit;
+	rules.mechanics_cfg = OPENBF3_MECHANICS_CFG;
+	GameServerConfig config = tdm_game_server_config(p_level, rules);
+	config.ghost_scope = p_ghost_scope;
+	GameServer server;
+	const core::Status st = server.init(config);
+	CHECK_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
+	if (!st.ok()) {
+		return std::nullopt;
+	}
+	std::vector<std::unique_ptr<bf3::test::tdm::ScriptedPeer>> peers;
+	std::vector<std::unique_ptr<LegWalker>> walkers(kScalePeers);
+	std::vector<uint32_t> lives(kScalePeers, 0);
+	std::vector<uint32_t> spawned(kScalePeers, 0);
+	for (uint32_t i = 0; i < kScalePeers; ++i) {
+		peers.push_back(std::make_unique<bf3::test::tdm::ScriptedPeer>(server, 1 + i, "peer" + std::to_string(i)));
+		peers.back()->hello();
+	}
+	PeerRun run;
+	const net::ShotQuantization frame = shot_frame(*p_level.shared->static_world);
+	std::vector<OutDatagram> out;
+	const auto step = [&] {
+		out.clear();
+		server.tick(out);
+		for (const std::unique_ptr<bf3::test::tdm::ScriptedPeer> &p : peers) {
+			p->receive(out);
+		}
+		for (const OutDatagram &d : out) {
+			if (net::peek_type(d.bytes) == net::MessageType::ShotEvents) {
+				++run.shot_events;
+				run.decode_errors += net::decode_shot_events(d.bytes, frame).ok() ? 0u : 1u;
+			}
+		}
+	};
+	step();
+	for (const std::unique_ptr<bf3::test::tdm::ScriptedPeer> &p : peers) {
+		p->ready();
+	}
+	const auto play = [&] {
+		const sim::Tick next = server.current_tick() + 1u;
+		for (uint32_t i = 0; i < kScalePeers; ++i) {
+			bf3::test::tdm::ScriptedPeer &p = *peers[i];
+			const std::optional<sim::SoldierState> own = p.last_snapshot ? p.last_snapshot->own : std::nullopt;
+			if (own && (own->flags & sim::soldier_flags::kAlive) != 0) {
+				if (own->life != lives[i] || walkers[i] == nullptr) {
+					lives[i] = own->life;
+					walkers[i] = std::make_unique<LegWalker>(i, true);
+					++spawned[i];
+				}
+				p.command(walkers[i]->command(next, *own));
+			} else if (next % kSpawnRetryTicks == i % kSpawnRetryTicks) {
+				p.spawn_request(0);
+			}
+		}
+		step();
+	};
+	const uint64_t warmup = uint64_t(std::llround(p_warmup_s * double(sim::kSimHz)));
+	for (uint64_t t = 0; t < warmup; ++t) {
+		play();
+	}
+	const GameServerStats before = server.stats();
+	const uint64_t window = uint64_t(std::llround(p_window_s * double(sim::kSimHz)));
+	std::vector<double> ticks, encodes;
+	ticks.reserve(window);
+	encodes.reserve(window);
+	for (uint64_t t = 0; t < window; ++t) {
+		play();
+		ticks.push_back(server.last_tick_times().tick_ms);
+		encodes.push_back(server.last_tick_times().encode_ms);
+	}
+	const GameServerStats after = server.stats();
+	run.window_s = double(window) / double(sim::kSimHz);
+	run.tick_ms = percentiles_of(std::move(ticks));
+	run.encode_ms = percentiles_of(std::move(encodes));
+	run.clients = after.clients;
+	for (uint32_t s : spawned) {
+		run.spawned += s > 0 ? 1u : 0u;
+	}
+	for (const SlotTraffic &a : after.traffic) {
+		const auto b = std::find_if(before.traffic.begin(), before.traffic.end(),
+				[&](const SlotTraffic &p_t) { return p_t.slot == a.slot && p_t.peer == a.peer; });
+		if (b == before.traffic.end()) {
+			run.bytes_per_s.push_back(-1.0);
+			continue;
+		}
+		run.bytes_per_s.push_back(double(a.sent.total().enet_bytes - b->sent.total().enet_bytes) / run.window_s);
+		run.intervals += a.intervals.count - b->intervals.count;
+		run.over_budget += a.intervals.over_budget - b->intervals.over_budget;
+		run.max_interval = std::max(run.max_interval, a.intervals.max_bytes);
+	}
+	for (uint64_t k : after.kicks) {
+		run.kicks += k;
+	}
+	for (const std::unique_ptr<bf3::test::tdm::ScriptedPeer> &p : peers) {
+		run.kicked_peers += p->kick ? 1u : 0u;
+		run.decode_errors += p->decode_errors;
+	}
+	run.bad_datagrams = after.bad_datagrams;
+	run.shots = after.gunplay.shots - before.gunplay.shots;
+	run.hits = after.gunplay.hits - before.gunplay.hits;
+	std::printf("host.scale.peers: Metro TDM, %u peers walking and firing, ghost scope %s, %.0f s after %.0f s: %u "
+				"seated, %u spawned; ENet bytes/s per peer mean %.0f max %.0f (budget %.0f); %llu intervals, %llu over "
+				"%llu B, the largest %llu B since the join; %llu shots, %llu hits, %llu ShotEvents; kicks %llu, decode "
+				"errors %llu, bad datagrams %llu; tick_ms p50 %.3f p99 %.3f max %.3f, encode_ms p50 %.3f p99 %.3f\n",
+			kScalePeers, p_ghost_scope ? "on" : "off", run.window_s, p_warmup_s, run.clients, run.spawned,
+			run.mean_bytes_per_s(), run.max_bytes_per_s(), kPeerBytesPerSecond, (unsigned long long)run.intervals,
+			(unsigned long long)run.over_budget, (unsigned long long)kPeerIntervalBytes,
+			(unsigned long long)run.max_interval, (unsigned long long)run.shots, (unsigned long long)run.hits,
+			(unsigned long long)run.shot_events, (unsigned long long)run.kicks, (unsigned long long)run.decode_errors,
+			(unsigned long long)run.bad_datagrams, run.tick_ms.p50, run.tick_ms.p99, run.tick_ms.max, run.encode_ms.p50,
+			run.encode_ms.p99);
+	std::fflush(stdout);
+	return run;
+}
+
+void check_peer_budget(const PeerRun &p_run) {
+	CHECK(p_run.clients == kScalePeers);
+	CHECK(p_run.spawned == kScalePeers);
+	REQUIRE(p_run.bytes_per_s.size() == kScalePeers);
+	for (size_t i = 0; i < p_run.bytes_per_s.size(); ++i) {
+		CHECK_MESSAGE(p_run.bytes_per_s[i] >= 0.0, "seat ", i, " was not seated before the window");
+		CHECK_MESSAGE(p_run.bytes_per_s[i] <= kPeerBytesPerSecond, "seat ", i, ": ", p_run.bytes_per_s[i], " B/s");
+	}
+	CHECK(p_run.intervals * 2u >= uint64_t(kScalePeers) * uint64_t(std::llround(p_run.window_s * double(sim::kSimHz))));
+	CHECK(p_run.over_budget == 0);
+	CHECK(p_run.kicks == 0);
+	CHECK(p_run.kicked_peers == 0);
+	CHECK(p_run.decode_errors == 0);
+	CHECK(p_run.bad_datagrams == 0);
+	CHECK(p_run.shots > 0);
+	CHECK(p_run.shot_events > 0);
+}
 }
 
 TEST_SUITE("host-scale") {
@@ -721,16 +956,19 @@ TEST_SUITE("host-scale") {
 		}
 	}
 
-	TEST_CASE("host.scale: the observers = 16 encode row on MP_Subway (reported, not gated)") {
+	TEST_CASE("host.scale: G1 with 64 encoders, 64 scripted peers walking and firing on Metro TDM for 60 s") {
 		Install *m = install();
-		if (m == nullptr) {
+		PeerLevel *l = m != nullptr ? peer_level(*m) : nullptr;
+		if (l == nullptr) {
 			return;
 		}
-
-		WarmCache warm;
-		warm_cache(*m, "MP_Subway", warm);
-		const std::optional<ScaleReport> r = bench(*m, "MP_Subway", 16, 30.0, 0.0, warm.ok ? &warm.cache : nullptr);
-		CHECK((r && r->ticks == 1800));
+		const std::optional<PeerRun> r = run_peers(l->level, 5.0, 60.0, true);
+		REQUIRE(r.has_value());
+		check_peer_budget(*r);
+#if !defined(OPENBF3_TIMING_REPORT_ONLY)
+		CHECK_MESSAGE(r->tick_ms.p99 <= kScaleGateP99Ms, "G1 with 64 encoders: p99 tick ", r->tick_ms.p99, " ms > ",
+				kScaleGateP99Ms, " ms");
+#endif
 	}
 
 	TEST_CASE("host.scale: install unchanged (layout.toc, cas.cat, the .sb / .toc files)") {
@@ -741,6 +979,47 @@ TEST_SUITE("host-scale") {
 		const core::SnapshotDiff diff = core::diff_snapshots(m->before, m->reader->snapshot());
 		CHECK_MESSAGE(diff.clean(), diff.summary());
 		std::printf("install.unchanged: %s (%zu files)\n", diff.clean() ? "clean" : diff.summary().c_str(), m->before.files.size());
+	}
+}
+
+TEST_SUITE("host-scale-peers") {
+	TEST_CASE(
+			"host.scale.peers: 64 scripted peers walking and firing on Metro TDM through GameServer::on_receive, 20 s: "
+			"every peer within 36 KB/s, no snapshot interval over 1,200 B, no kick, no decode error") {
+		Install *m = install();
+		PeerLevel *l = m != nullptr ? peer_level(*m) : nullptr;
+		if (l == nullptr) {
+			return;
+		}
+		const std::optional<PeerRun> r = run_peers(l->level, 5.0, 20.0, true);
+		REQUIRE(r.has_value());
+		check_peer_budget(*r);
+	}
+
+	TEST_CASE("host.scale.peers: the control with ghost scope and delta off sends the same peers more than 36 KB/s") {
+		Install *m = install();
+		PeerLevel *l = m != nullptr ? peer_level(*m) : nullptr;
+		if (l == nullptr) {
+			return;
+		}
+		const std::optional<PeerRun> r = run_peers(l->level, 5.0, 5.0, false);
+		REQUIRE(r.has_value());
+		CHECK(r->clients == kScalePeers);
+		CHECK(r->mean_bytes_per_s() > kPeerBytesPerSecond);
+		CHECK(r->over_budget > 0);
+		CHECK(r->max_interval > kPeerIntervalBytes);
+		CHECK(r->decode_errors == 0);
+	}
+
+	TEST_CASE("host.scale.peers: install unchanged") {
+		Install *m = install();
+		if (m == nullptr) {
+			return;
+		}
+		const core::SnapshotDiff diff = core::diff_snapshots(m->before, m->reader->snapshot());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+		std::printf("install.unchanged: %s (%zu files)\n", diff.clean() ? "clean" : diff.summary().c_str(),
+				m->before.files.size());
 	}
 }
 

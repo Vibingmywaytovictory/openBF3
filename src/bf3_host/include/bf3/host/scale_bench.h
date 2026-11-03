@@ -157,6 +157,7 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 std::string format_scale_report(const ScaleReport &p_report);
 
 inline constexpr double kScaleGateP99Ms = 8.0;
+inline constexpr uint32_t kScaleBenchMaxObservers = 64;
 
 inline constexpr double kValidityMetres = 100.0;
 inline constexpr double kValidityWalkedShare = 0.9;
