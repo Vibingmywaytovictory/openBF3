@@ -78,6 +78,9 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 			if (order != SnapshotOrder::Newest) {
 				return;
 			}
+			if (first_snapshot_tick == 0) {
+				first_snapshot_tick = s->server_tick;
+			}
 			clock.anchor_snapshot(s->server_tick, p_now);
 			tracks.arrival(s->server_tick, p_now);
 			tracks.add(s->server_tick, s->others, slot, p_now);
@@ -171,6 +174,7 @@ void ClientLoop::publish(uint64_t p_now, const sim::PredictionEntry *p_made, con
 	}
 	tracks.publish(f, p_now);
 	f.newest_seq = link.newest_seq();
+	f.first_snapshot_tick = first_snapshot_tick;
 	gunplay.publish(f, tracks.finish(f, link.have_snapshot(), gunplay.newest_tick(), gunplay.wants_poses()), *world);
 	match.publish(f, prediction.have_own(), prediction.own_life());
 	stats_.own_shot_id_resets = feed.shot_id_resets();
@@ -341,6 +345,7 @@ void ClientLoop::reset_level_state() {
 	have_match = false;
 	pending_snapshot_valid = false;
 	pending_snapshot = net::Snapshot();
+	first_snapshot_tick = 0;
 	pending_spawned.clear();
 	baselines = net::SnapshotBaselines();
 	mismatch_deadline.reset();

@@ -61,18 +61,28 @@ struct PresentedOwnWeapons {
 };
 static_assert(std::is_trivially_copyable_v<PresentedOwnWeapons>);
 
+enum class PresentJoin : uint8_t { Untracked = 0, Waiting = 1, Joined = 2 };
+
 struct PresentClock {
 	bool predicted_valid = false;
 	bool render_valid = false;
 	sim::weapons::SimTime predicted = 0;
 	sim::weapons::SimTime render = 0;
 	uint64_t now_ns = 0;
+	PresentJoin join = PresentJoin::Untracked;
+	sim::weapons::SimTime first_snapshot = 0;
 
 	sim::weapons::SimTime now(PresentTimeline p_timeline) const {
 		return p_timeline == PresentTimeline::Predicted ? predicted : (p_timeline == PresentTimeline::Render ? render : 0);
 	}
 	bool valid(PresentTimeline p_timeline) const {
 		return p_timeline == PresentTimeline::Predicted ? predicted_valid : (p_timeline == PresentTimeline::Render ? render_valid : true);
+	}
+	bool before_join(PresentTimeline p_timeline, sim::weapons::SimTime p_time) const {
+		if (p_timeline != PresentTimeline::Render || join == PresentJoin::Untracked) {
+			return false;
+		}
+		return join == PresentJoin::Waiting || p_time < first_snapshot;
 	}
 };
 static_assert(std::is_trivially_copyable_v<PresentClock>);

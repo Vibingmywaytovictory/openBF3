@@ -89,6 +89,8 @@ size_t present_other_weapons(const PresentationFrame &p_frame, double p_render_t
 PresentClock present_clock(const PresentationFrame &p_frame, uint64_t p_now_ns) {
 	PresentClock c;
 	c.now_ns = p_now_ns;
+	c.join = p_frame.first_snapshot_tick > 0 ? present::PresentJoin::Joined : present::PresentJoin::Waiting;
+	c.first_snapshot = p_frame.first_snapshot_tick > 0 ? sim::weapons::tick_start(p_frame.first_snapshot_tick) : 0;
 	if (!p_frame.valid) {
 		return c;
 	}

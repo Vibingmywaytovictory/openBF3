@@ -315,6 +315,30 @@ TEST_SUITE("m2a-contract3") {
 		CHECK(later.predicted >= c.predicted);
 	}
 
+	TEST_CASE("m2a.contract3: the presentation clock's join bound: every Render event before the first snapshot, then "
+			  "those before its tick") {
+		const host::PresentClock untracked;
+		CHECK_FALSE(untracked.before_join(host::PresentTimeline::Render, 0));
+		host::PresentationFrame f;
+		const host::PresentClock waiting = host::present_clock(f, 5);
+		CHECK(waiting.join == present::PresentJoin::Waiting);
+		CHECK(waiting.before_join(host::PresentTimeline::Render, 1000 * sw::kTimeUnitsPerTick));
+		CHECK_FALSE(waiting.before_join(host::PresentTimeline::Predicted, 1000 * sw::kTimeUnitsPerTick));
+		CHECK_FALSE(waiting.before_join(host::PresentTimeline::Immediate, 0));
+		f.valid = true;
+		f.tick = 130;
+		f.publish_ns = 2'000'000'000ull;
+		f.render_ticks_at_publish = 118.0;
+		f.first_snapshot_tick = 120;
+		const host::PresentClock c = host::present_clock(f, f.publish_ns);
+		CHECK(c.join == present::PresentJoin::Joined);
+		CHECK(c.first_snapshot == 119 * sw::kTimeUnitsPerTick);
+		CHECK(c.before_join(host::PresentTimeline::Render, 119 * sw::kTimeUnitsPerTick - 1));
+		CHECK_FALSE(c.before_join(host::PresentTimeline::Render, 119 * sw::kTimeUnitsPerTick));
+		CHECK_FALSE(c.before_join(host::PresentTimeline::Predicted, 100 * sw::kTimeUnitsPerTick));
+		CHECK_FALSE(c.before_join(host::PresentTimeline::Immediate, 0));
+	}
+
 	TEST_CASE("m2a.contract3: G3: GameServer::init runs the firefight hook (none: unchanged; a config: bt's bots)") {
 		const std::shared_ptr<const host::SharedLevel> level = tg::synthetic_floor();
 		REQUIRE(level != nullptr);

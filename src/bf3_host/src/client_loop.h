@@ -82,6 +82,7 @@ private:
 
 	bool pending_snapshot_valid = false;
 	net::Snapshot pending_snapshot;
+	sim::Tick first_snapshot_tick = 0;
 	net::SnapshotBaselines baselines;
 	std::vector<sim::SoldierState> pending_spawned;
 

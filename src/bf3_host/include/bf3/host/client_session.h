@@ -266,6 +266,7 @@ struct PresentationFrame {
 	net::WeaponsWire own_weapons_curr;
 	uint64_t match_seed = 0;
 	sim::Tick newest_tick = 0;
+	sim::Tick first_snapshot_tick = 0;
 	uint8_t own_kit = 0;
 	uint8_t own_team = 0;
 

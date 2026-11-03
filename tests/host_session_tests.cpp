@@ -7,6 +7,7 @@
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/host/client_session.h"
+#include "bf3/host/client_wiring.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/level_load.h"
 #include "bf3/host/load_bots.h"
@@ -1929,6 +1930,7 @@ TEST_SUITE("host-session-unit") {
 		CHECK(client.stats().connected);
 		CHECK(server.game_stats().slots.at(0).used);
 		CHECK(server.game_stats().slots.at(0).life == 0);
+		const sim::Tick lobby_tick = server.game_stats().tick;
 
 		const core::Status attached = client.attach_level(synthetic_level());
 		REQUIRE_MESSAGE(attached.ok(), (attached.ok() ? std::string() : attached.error().message));
@@ -1953,6 +1955,11 @@ TEST_SUITE("host-session-unit") {
 							dist(frame->own_curr.position, spawn.position) > 1.0f;
 				},
 				10s, 16ms));
+		CHECK(frame->first_snapshot_tick > lobby_tick);
+		CHECK(frame->first_snapshot_tick <= frame->newest_tick);
+		const PresentClock joined = present_clock(*frame, frame->publish_ns);
+		CHECK(joined.join == present::PresentJoin::Joined);
+		CHECK(joined.first_snapshot == sim::weapons::tick_start(frame->first_snapshot_tick));
 		const ClientStats stats = client.stats();
 		CHECK(stats.connected);
 		CHECK(stats.slot == 0);
