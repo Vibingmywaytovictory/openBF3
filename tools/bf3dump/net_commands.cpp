@@ -7,6 +7,7 @@
 #include "bf3/core/util/format.h"
 #include "bf3/core/util/key_values.h"
 #include "bf3/host/client_session.h"
+#include "bf3/host/duel.h"
 #include "bf3/host/level_load.h"
 #include "bf3/host/load_bots.h"
 #include "bf3/net/loopback_ping.h"
@@ -48,7 +49,7 @@ void say(const std::string &p_line) {
 	std::fflush(stdout);
 }
 
-enum class Script : uint8_t { Still, Walk, Fire, WalkFire };
+enum class Script : uint8_t { Still, Walk, Fire, WalkFire, Strafe };
 
 struct NetArgs {
 	std::string host;
@@ -75,7 +76,8 @@ struct NetArgs {
 
 bool parse_script(std::string_view p_text, Script &r_script) {
 	static constexpr std::pair<std::string_view, Script> kScripts[] = { { "still", Script::Still },
-		{ "walk", Script::Walk }, { "fire", Script::Fire }, { "walkfire", Script::WalkFire } };
+		{ "walk", Script::Walk }, { "fire", Script::Fire }, { "walkfire", Script::WalkFire },
+		{ "strafe", Script::Strafe } };
 	for (const auto &[name, script] : kScripts) {
 		if (p_text == name) {
 			r_script = script;
@@ -220,7 +222,7 @@ core::Result<std::shared_ptr<const host::SharedLevel>> load_client_level(const c
 }
 
 const char *net_usage() {
-	return "  client <host:port> <LEVEL> <MODE> [--netsim=<profile>] [--script=still|walk|fire|walkfire] "
+	return "  client <host:port> <LEVEL> <MODE> [--netsim=<profile>] [--script=still|walk|fire|walkfire|strafe] "
 		   "[--seconds=S]\n"
 		   "      [--stats-file=<path>] [--build-override=N] [--cache=<dir>] [--config-dir=<dir>] "
 		   "[--motor-tuning=<cfg>]\n"
@@ -251,6 +253,21 @@ int cmd_client(const core::InstallReader &p_reader, const std::shared_ptr<core::
 			l.level.c_str(), l.mode.c_str(), core::seconds_since(t_load), l.seconds_shapes, l.seconds_tables,
 			l.seconds_gunplay, l.seconds_logic, a.cache.empty() ? "none" : a.cache.c_str()));
 
+	std::optional<host::DuelSite> site;
+	if (a.script == Script::Strafe) {
+		core::Result<host::DuelSite> found = host::duel_site(l);
+		if (!found) {
+			say("client: failed: " + found.error().message);
+			return 1;
+		}
+		site = *found;
+		say(core::fmt("client: duel site %.0f m from spawn %u: shooter (%.2f, %.2f, %.2f) yaw %u, lane centre (%.2f, "
+					  "%.2f, %.2f) yaw %u",
+				double(site->distance), unsigned(site->spawn_index), double(site->shooter[0]), double(site->shooter[1]),
+				double(site->shooter[2]), unsigned(site->shooter_yaw), double(site->target[0]), double(site->target[1]),
+				double(site->target[2]), unsigned(site->target_yaw)));
+	}
+
 	host::ClientSessionConfig cc;
 	cc.host = a.host;
 	cc.port = a.port;
@@ -258,6 +275,7 @@ int cmd_client(const core::InstallReader &p_reader, const std::shared_ptr<core::
 	cc.game_build = a.build;
 	cc.netsim = netsim_of(a, 1);
 	cc.mechanics_cfg = a.config_dir + "/weapon_mechanics.cfg";
+	cc.request_dev_commands = site.has_value();
 	host::ClientSession client;
 	if (const core::Status s = client.start(cc, *level); !s.ok()) {
 		say("client: failed: " + s.error().message);
@@ -284,6 +302,8 @@ int cmd_client(const core::InstallReader &p_reader, const std::shared_ptr<core::
 	const auto t0 = std::chrono::steady_clock::now();
 	const bool walks = a.script == Script::Walk || a.script == Script::WalkFire;
 	const bool fires = a.script == Script::Fire || a.script == Script::WalkFire;
+	host::DuelStrafe strafe;
+	uint32_t teleports = 0;
 	host::ClientStats last{};
 	while (!g_stop.load(std::memory_order_acquire)) {
 		const double t = core::seconds_since(t0);
@@ -311,6 +331,16 @@ int cmd_client(const core::InstallReader &p_reader, const std::shared_ptr<core::
 			walker.emplace(0u);
 			life_spawn = f.own_curr.position;
 			++lives;
+			if (site.has_value()) {
+				net::DebugRequest q;
+				q.kind = net::DebugKind::Teleport;
+				q.id = ++teleports;
+				q.position = { site->target[0], site->target[1] + 0.05f, site->target[2] };
+				q.yaw = site->target_yaw;
+				client.send_debug(q);
+				strafe.set_lane(q.position, sim::yaw_radians(site->target_yaw));
+				life_spawn = q.position;
+			}
 			say(core::fmt("client: spawned life %u in slot %u at %.1f %.1f %.1f", unsigned(input.life),
 					unsigned(last.slot), double(life_spawn[0]), double(life_spawn[1]), double(life_spawn[2])));
 		}
@@ -324,6 +354,9 @@ int cmd_client(const core::InstallReader &p_reader, const std::shared_ptr<core::
 			const sim::Command c = walker->command(f.tick, f.own_curr);
 			input.yaw = sim::yaw_radians(c.yaw);
 			input.move_forward = 1.0f;
+		}
+		if (alive && site.has_value()) {
+			strafe.step(f.own_curr, t, input);
 		}
 		if (alive && fires) {
 			if (!walks) {
@@ -381,10 +414,10 @@ int cmd_client(const core::InstallReader &p_reader, const std::shared_ptr<core::
 			!last.refused && before.valid && diff.clean();
 	say(core::fmt(
 			"client: summary slot %u, lives %u, snapshots %llu, commands %llu, max walk %.1f m, others seen [%s], "
-			"remote shots %zu, own shots %zu, seed mismatches %llu, %s, install %s%s%s",
+			"remote shots %zu, own shots %zu, seed mismatches %llu, teleports %u, %s, install %s%s%s",
 			unsigned(last.slot), lives, (unsigned long long)last.snapshots_received,
 			(unsigned long long)last.commands_sent, double(max_walk), others.c_str(), remote, shots.size() - remote,
-			(unsigned long long)seed_mismatches, connected_at_end ? "connected to the end" : "disconnected",
+			(unsigned long long)seed_mismatches, teleports, connected_at_end ? "connected to the end" : "disconnected",
 			before.valid && diff.clean() ? "unchanged" : ("CHANGED: " + diff.summary()).c_str(),
 			error.empty() ? "" : ", error: ", error.c_str()));
 	if (!a.stats_file.empty()) {
