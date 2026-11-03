@@ -2,6 +2,7 @@
 
 #include "bf3/core/math.h"
 #include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/fft.h"
 #include "bf3/core/util/finite.h"
 #include "bf3/core/util/format.h"
 #include "bf3/core/util/key_values.h"
@@ -9,6 +10,7 @@
 #include "bf3/core/util/splitmix64.h"
 #include "bf3/core/util/text.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -62,6 +64,39 @@ std::string fault_of(std::string_view p_text, const KeyValueGrammar<Sample> &p_g
 }
 
 TEST_SUITE("core-util-unit") {
+	TEST_CASE("core.util: the radix-2 FFT equals the direct DFT and inverts to N times its input") {
+		for (const uint32_t n : { 1u, 2u, 8u, 1024u }) {
+			std::vector<double> re(n), im(n), dre(n), dim(n);
+			for (uint32_t i = 0; i < n; ++i) {
+				re[i] = std::sin(0.37 * double(i)) + 0.25 * double(i % 5);
+				im[i] = std::cos(1.3 * double(i)) - 0.5;
+			}
+			for (uint32_t k = 0; k < n; ++k) {
+				for (uint32_t i = 0; i < n; ++i) {
+					const double a = -2.0 * 3.14159265358979323846 * double(k) * double(i) / double(n);
+					dre[k] += re[i] * std::cos(a) - im[i] * std::sin(a);
+					dim[k] += re[i] * std::sin(a) + im[i] * std::cos(a);
+				}
+			}
+			const std::vector<double> in_re = re, in_im = im;
+			const Fft<double> fft(n);
+			REQUIRE(fft.size() == n);
+			fft.forward(re.data(), im.data());
+			double worst = 0.0;
+			for (uint32_t k = 0; k < n; ++k) {
+				worst = std::max({ worst, std::fabs(re[k] - dre[k]), std::fabs(im[k] - dim[k]) });
+			}
+			CHECK(worst < 1e-9 * double(n));
+			fft.inverse(re.data(), im.data());
+			worst = 0.0;
+			for (uint32_t i = 0; i < n; ++i) {
+				worst = std::max(
+						{ worst, std::fabs(re[i] / double(n) - in_re[i]), std::fabs(im[i] / double(n) - in_im[i]) });
+			}
+			CHECK(worst < 1e-12 * double(n));
+		}
+	}
+
 	TEST_CASE("core.util: horizontal_distance measures in the ground plane and ignores height") {
 		const Vec3 a{ 3.0f, 100.0f, 4.0f };
 		const Vec3 b{ 0.0f, -5.0f, 0.0f };

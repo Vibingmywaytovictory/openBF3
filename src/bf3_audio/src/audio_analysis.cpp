@@ -1,10 +1,14 @@
 #include "bf3/audio/audio_analysis.h"
 
+#include "bf3/core/util/fft.h"
+
 #include <algorithm>
 #include <cmath>
 #include <complex>
 
 namespace bf3::audio {
+
+using core::Fft;
 
 namespace {
 
@@ -21,34 +25,6 @@ float mono_at(std::span<const float> p_x, uint32_t p_channels, uint64_t p_frame)
 
 uint64_t frames_of(std::span<const float> p_x, uint32_t p_channels) {
 	return p_channels ? p_x.size() / p_channels : 0;
-}
-
-void fft(std::vector<std::complex<double>> &r_a) {
-	const size_t n = r_a.size();
-	for (size_t i = 1, j = 0; i < n; ++i) {
-		size_t bit = n >> 1;
-		for (; j & bit; bit >>= 1) {
-			j ^= bit;
-		}
-		j ^= bit;
-		if (i < j) {
-			std::swap(r_a[i], r_a[j]);
-		}
-	}
-	for (size_t len = 2; len <= n; len <<= 1) {
-		const double ang = -2.0 * kPi / double(len);
-		const std::complex<double> wl(std::cos(ang), std::sin(ang));
-		for (size_t i = 0; i < n; i += len) {
-			std::complex<double> w(1.0, 0.0);
-			for (size_t k = 0; k < len / 2; ++k) {
-				const std::complex<double> u = r_a[i + k];
-				const std::complex<double> v = r_a[i + k + len / 2] * w;
-				r_a[i + k] = u + v;
-				r_a[i + k + len / 2] = u - v;
-				w *= wl;
-			}
-		}
-	}
 }
 
 double highpass_power(double p_f, double p_rate, double p_cutoff, double p_q) {
@@ -79,7 +55,8 @@ float band_db(std::span<const float> p_x, uint32_t p_channels, uint32_t p_rate, 
 	for (uint32_t i = 0; i < kFftSize; ++i) {
 		window[i] = 0.5 - 0.5 * std::cos(2.0 * kPi * double(i) / double(kFftSize));
 	}
-	std::vector<std::complex<double>> buf(kFftSize);
+	const Fft<double> fft(kFftSize);
+	std::vector<double> re(kFftSize), im(kFftSize);
 	double sum = 0.0;
 	size_t frames = 0;
 	const double bin_hz = double(p_rate) / double(kFftSize);
@@ -87,13 +64,14 @@ float band_db(std::span<const float> p_x, uint32_t p_channels, uint32_t p_rate, 
 	do {
 		for (uint32_t i = 0; i < kFftSize; ++i) {
 			const uint64_t f = start + i;
-			buf[i] = std::complex<double>(f < end ? double(mono_at(p_x, p_channels, f)) * window[i] : 0.0, 0.0);
+			re[i] = f < end ? double(mono_at(p_x, p_channels, f)) * window[i] : 0.0;
+			im[i] = 0.0;
 		}
-		fft(buf);
+		fft.forward(re.data(), im.data());
 		for (uint32_t k = 0; k <= kFftSize / 2; ++k) {
 			const double hz = double(k) * bin_hz;
 			if (hz >= p_low && hz < p_high) {
-				sum += std::norm(buf[k]) * p_weight(hz);
+				sum += (re[k] * re[k] + im[k] * im[k]) * p_weight(hz);
 			}
 		}
 		++frames;

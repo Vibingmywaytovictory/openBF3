@@ -48,6 +48,7 @@ target_sources(bf3_core PRIVATE
     src/util/text.cpp
     include/bf3/core/math.h
     include/bf3/core/util/elapsed.h
+    include/bf3/core/util/fft.h
     include/bf3/core/util/finite.h
     include/bf3/core/util/format.h
     include/bf3/core/util/key_values.h
