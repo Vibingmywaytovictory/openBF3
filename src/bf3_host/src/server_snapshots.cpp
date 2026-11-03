@@ -129,11 +129,13 @@ void SnapshotWriter::send(sim::Tick p_tick, uint64_t p_now_ns, GameServerTickTim
 		const int64_t used = wire_bytes(bytes.size()) + wire_bytes(extra);
 		outbox_.send(s.peer, net::kChannelUnreliable, std::move(bytes));
 		send_extras(i, snap, main, overflow);
+		int64_t shots = 0;
 		if (combat_.on()) {
 			Gunplay &g = *combat_.gunplay();
-			send_shots(i, snap, std::move(wanted), shot_cut, budget - used, g);
+			shots = send_shots(i, snap, std::move(wanted), shot_cut, budget - used, g);
 			log_.send(s.peer, snap.server_tick, g, outbox_);
 		}
+		intervals_[i].note(uint64_t(used + shots), budget_bytes_);
 	}
 	log_.clear();
 	if (combat_.on()) {
@@ -217,7 +219,7 @@ std::vector<uint8_t> SnapshotWriter::shot_events(
 	return bytes;
 }
 
-void SnapshotWriter::send_shots(size_t p_slot, const net::Snapshot &p_snapshot, std::vector<uint8_t> p_wanted,
+int64_t SnapshotWriter::send_shots(size_t p_slot, const net::Snapshot &p_snapshot, std::vector<uint8_t> p_wanted,
 		size_t p_cut, int64_t p_room, Gunplay &r_gunplay) {
 	std::vector<uint8_t> bytes = std::move(p_wanted);
 	size_t cut = p_cut;
@@ -226,9 +228,11 @@ void SnapshotWriter::send_shots(size_t p_slot, const net::Snapshot &p_snapshot, 
 		bytes = shot_events(p_slot, p_snapshot, size_t(payload), cut);
 	}
 	r_gunplay.count_shot_events_dropped(cut);
+	const int64_t wire = wire_bytes(bytes.size());
 	if (!bytes.empty()) {
 		outbox_.send(slots_[p_slot].peer, net::kChannelUnreliable, std::move(bytes));
 	}
+	return wire;
 }
 
 void SnapshotWriter::stats(GameServerStats &r_stats) const {

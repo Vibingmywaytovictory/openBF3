@@ -28,12 +28,16 @@ public:
 
 	void configure(size_t p_slots, uint32_t p_budget_bytes) {
 		seq_.assign(p_slots, 0);
+		intervals_.assign(p_slots, SnapshotIntervals());
+		budget_bytes_ = p_budget_bytes;
 		ghosts_.configure(p_slots, int64_t(p_budget_bytes));
 	}
 	void reset(size_t p_slot) {
 		seq_[p_slot] = 0;
+		intervals_[p_slot] = SnapshotIntervals();
 		ghosts_.reset(p_slot);
 	}
+	const SnapshotIntervals &intervals(size_t p_slot) const { return intervals_[p_slot]; }
 	void ack(size_t p_slot, const net::CommandPacket &p_packet) { ghosts_.ack(p_slot, p_packet); }
 	void set_fly_by(std::vector<FlyBy> p_fly_by) { fly_by_ = std::move(p_fly_by); }
 
@@ -47,7 +51,7 @@ private:
 			std::vector<net::OtherSoldier> &r_sent);
 	void send_extras(size_t p_slot, const net::Snapshot &p_snapshot, std::span<const net::OtherSoldier> p_main,
 			std::span<const net::OtherSoldier> p_others);
-	void send_shots(size_t p_slot, const net::Snapshot &p_snapshot, std::vector<uint8_t> p_wanted, size_t p_cut,
+	int64_t send_shots(size_t p_slot, const net::Snapshot &p_snapshot, std::vector<uint8_t> p_wanted, size_t p_cut,
 			int64_t p_room, Gunplay &r_gunplay);
 	std::vector<uint8_t> shot_events(
 			size_t p_slot, const net::Snapshot &p_snapshot, size_t p_max_bytes, size_t &r_cut) const;
@@ -62,6 +66,8 @@ private:
 	const MatchControl &match_;
 
 	std::vector<uint16_t> seq_;
+	std::vector<SnapshotIntervals> intervals_;
+	uint32_t budget_bytes_ = 0;
 	GhostScheduler ghosts_;
 	std::vector<GhostCandidate> candidates_;
 	std::vector<int> candidate_of_;

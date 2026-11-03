@@ -216,11 +216,14 @@ std::string ServerNetMeter::report(
 		if (prev != seen_.end() && seconds > 0.0) {
 			const NetRates sent = net_rates(prev->sent, n.sent, seconds);
 			const NetRates received = net_rates(prev->received, n.received, seconds);
-			out += core::fmt("%sslot %u peer %u out %.0f B/s (%s) in %.0f B/s (%s), enet out %.0f B/s in %.0f B/s",
+			out += core::fmt("%sslot %u peer %u out %.0f B/s (%s) in %.0f B/s (%s), enet out %.0f B/s in %.0f B/s, "
+							 "intervals %llu over %llu max %llu B",
 					out.empty() ? "" : "; ", unsigned(n.slot), unsigned(n.peer), double(sent.total_bytes_per_s),
 					top_types(sent).c_str(), double(received.total_bytes_per_s), top_types(received).c_str(),
 					double(per_second(prev->enet_sent, n.enet_sent, seconds)),
-					double(per_second(prev->enet_received, n.enet_received, seconds)));
+					double(per_second(prev->enet_received, n.enet_received, seconds)),
+					(unsigned long long)s.intervals.count, (unsigned long long)s.intervals.over_budget,
+					(unsigned long long)s.intervals.max_bytes);
 		}
 		next.push_back(std::move(n));
 	}

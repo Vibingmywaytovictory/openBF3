@@ -35,11 +35,24 @@ struct NetTraffic {
 };
 static_assert(std::is_trivially_copyable_v<NetTraffic>);
 
+struct SnapshotIntervals {
+	uint64_t count = 0;
+	uint64_t over_budget = 0;
+	uint64_t max_bytes = 0;
+
+	void note(uint64_t p_bytes, uint64_t p_budget) {
+		++count;
+		over_budget += p_bytes > p_budget ? 1u : 0u;
+		max_bytes = p_bytes > max_bytes ? p_bytes : max_bytes;
+	}
+};
+
 struct SlotTraffic {
 	uint8_t slot = 0;
 	uint32_t peer = 0;
 	NetTraffic sent;
 	NetTraffic received;
+	SnapshotIntervals intervals;
 };
 
 struct NetRates {

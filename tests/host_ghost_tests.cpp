@@ -606,6 +606,19 @@ TEST_SUITE("host-ghost") {
 			}
 		}
 		std::fflush(stdout);
+		size_t worst_ever = 0;
+		for (const Interval &iv : peer.intervals) {
+			worst_ever = std::max(worst_ever, iv.unreliable_bytes);
+		}
+		const auto seat = std::find_if(stats.traffic.begin(), stats.traffic.end(),
+				[&](const host::SlotTraffic &p_t) { return p_t.slot == own; });
+		REQUIRE(seat != stats.traffic.end());
+		std::printf("host.ghost: the server counted %llu intervals, %llu over the budget, the largest %llu B\n",
+				(unsigned long long)seat->intervals.count, (unsigned long long)seat->intervals.over_budget,
+				(unsigned long long)seat->intervals.max_bytes);
+		CHECK(seat->intervals.count == peer.intervals.size());
+		CHECK(seat->intervals.max_bytes == worst_ever);
+		CHECK(seat->intervals.over_budget == 0);
 		CHECK(peer.decode_failures == 0);
 		CHECK(std::count_if(stats.slots.begin(), stats.slots.end(),
 					  [](const host::SlotStats &p_s) { return p_s.used; }) == 64);
@@ -993,7 +1006,8 @@ TEST_SUITE("host-ghost") {
 		CHECK(rows[14].label == "OUT CommandPacket");
 	}
 
-	TEST_CASE("the server net meter prints each remote seat's bytes/s by type and its ENet bytes/s") {
+	TEST_CASE("the server net meter prints each remote seat's bytes/s by type, its ENet bytes/s and its snapshot "
+			  "intervals over the budget") {
 		host::SlotTraffic a;
 		a.slot = 3;
 		a.peer = 1;
@@ -1008,10 +1022,14 @@ TEST_SUITE("host-ghost") {
 		}
 		enet[1].sent[0].bytes = 60 * 508;
 		enet[1].received[0].bytes = 100;
+		a.intervals.note(1200, 1200);
+		a.intervals.note(1201, 1200);
+		a.intervals.note(300, 1200);
 		const std::string line = meter.report(std::span<const host::SlotTraffic>(&a, 1), enet, 3'000'000'000ull);
 		const double per_s = 60.0 * double(net::enet_command_bytes(500, net::Host::SendMode::Unsequenced)) / 2.0;
 		CHECK(line ==
-				core::fmt("slot 3 peer 1 out %.0f B/s (Snapshot %.0f) in 0 B/s (none), enet out 15240 B/s in 50 B/s",
+				core::fmt("slot 3 peer 1 out %.0f B/s (Snapshot %.0f) in 0 B/s (none), enet out 15240 B/s in 50 B/s, "
+						  "intervals 3 over 1 max 1201 B",
 						per_s, per_s));
 	}
 

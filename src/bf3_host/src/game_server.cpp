@@ -703,7 +703,7 @@ GameServerStats GameServer::stats() const {
 		if (s.used && s.remote) {
 			const auto in = m.received.find(s.peer);
 			g.traffic.push_back({ uint8_t(i), s.peer, m.outbox.traffic(s.peer),
-					in == m.received.end() ? NetTraffic() : in->second });
+					in == m.received.end() ? NetTraffic() : in->second, m.snapshots.intervals(i) });
 		}
 	}
 	m.combat.stats(g);
