@@ -219,7 +219,8 @@ void Bf3MatchHost::join_target() {
 		say("asking the master " + connect_host_ + ":" + std::to_string(connect_port_) + " for " +
 				connect_target_.name);
 	}
-	bf3::core::Result<bf3::net::Endpoint> at = bf3::net::resolve_connect_target(connect_target_);
+	bf3::core::Result<bf3::net::Endpoint> at =
+			bf3::net::resolve_connect_target(connect_target_, bf3::net::kMasterExchangeMs, &join_cancel_);
 	if (!at) {
 		std::lock_guard lock(mutex_);
 		worker_error_ = "--connect=" + user_arg_value("connect") + ": " + at.error().message;
@@ -780,6 +781,7 @@ void Bf3MatchHost::_exit_tree() {
 	if (server_ != nullptr) {
 		server_->request_stop();
 	}
+	join_cancel_.store(true, std::memory_order_release);
 	if (worker_.joinable()) {
 		worker_.join();
 	}

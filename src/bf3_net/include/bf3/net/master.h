@@ -203,12 +203,13 @@ core::Result<std::vector<uint8_t>> master_exchange(const Endpoint &p_master, std
 		uint32_t p_timeout_ms = kMasterExchangeMs, const std::atomic<bool> *p_cancel = nullptr);
 core::Result<MasterAck> send_master_heartbeat(const Endpoint &p_master, const MasterHeartbeat &p_heartbeat,
 		uint32_t p_timeout_ms = kMasterExchangeMs, const std::atomic<bool> *p_cancel = nullptr);
-core::Result<std::vector<MasterEntry>> query_master(
-		const Endpoint &p_master, uint32_t p_timeout_ms = kMasterExchangeMs);
+core::Result<std::vector<MasterEntry>> query_master(const Endpoint &p_master, uint32_t p_timeout_ms = kMasterExchangeMs,
+		const std::atomic<bool> *p_cancel = nullptr);
 Endpoint entry_endpoint(const MasterEntry &p_entry, const Endpoint &p_master);
 core::Result<Endpoint> find_server(
 		const std::vector<MasterEntry> &p_entries, std::string_view p_name, const Endpoint &p_master);
-core::Result<Endpoint> resolve_connect_target(const ConnectTarget &p_target, uint32_t p_timeout_ms = kMasterExchangeMs);
+core::Result<Endpoint> resolve_connect_target(const ConnectTarget &p_target, uint32_t p_timeout_ms = kMasterExchangeMs,
+		const std::atomic<bool> *p_cancel = nullptr);
 
 struct MasterHeartbeatStats {
 	uint64_t sent = 0;

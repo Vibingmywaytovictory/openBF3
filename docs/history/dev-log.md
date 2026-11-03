@@ -2978,3 +2978,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * ServerSession heartbeats --master=host:port as --name on the dedicated server and the --maplist listen game, which also takes --bind and --port; host.server.session.master (9.0 s).
 * The game joins a server by name with --connect=<name>@<master host:port>; net.procs.master (timing, main only) registered, not run here.
 * --upnp maps the dedicated or --maplist listen server's UDP port through Godot's UPNP class and deletes it at shutdown; no row (the owner's run); build.server_deps.
+* Closing the game during a --connect=<name>@<master> lookup cancels it at once instead of waiting out the 5 s exchange; net.master.enet.

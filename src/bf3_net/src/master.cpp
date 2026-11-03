@@ -516,8 +516,9 @@ core::Result<MasterAck> send_master_heartbeat(const Endpoint &p_master, const Ma
 	return decode_master_ack(*reply);
 }
 
-core::Result<std::vector<MasterEntry>> query_master(const Endpoint &p_master, uint32_t p_timeout_ms) {
-	core::Result<std::vector<uint8_t>> reply = master_exchange(p_master, encode_master_query(), p_timeout_ms);
+core::Result<std::vector<MasterEntry>> query_master(
+		const Endpoint &p_master, uint32_t p_timeout_ms, const std::atomic<bool> *p_cancel) {
+	core::Result<std::vector<uint8_t>> reply = master_exchange(p_master, encode_master_query(), p_timeout_ms, p_cancel);
 	if (!reply) {
 		return reply.error();
 	}
@@ -553,11 +554,12 @@ core::Result<Endpoint> find_server(
 			std::string(p_name).c_str(), p_master.host.c_str(), unsigned(p_master.port), p_entries.size()));
 }
 
-core::Result<Endpoint> resolve_connect_target(const ConnectTarget &p_target, uint32_t p_timeout_ms) {
+core::Result<Endpoint> resolve_connect_target(
+		const ConnectTarget &p_target, uint32_t p_timeout_ms, const std::atomic<bool> *p_cancel) {
 	if (p_target.name.empty()) {
 		return p_target.at;
 	}
-	core::Result<std::vector<MasterEntry>> entries = query_master(p_target.at, p_timeout_ms);
+	core::Result<std::vector<MasterEntry>> entries = query_master(p_target.at, p_timeout_ms, p_cancel);
 	if (!entries) {
 		return entries.error();
 	}

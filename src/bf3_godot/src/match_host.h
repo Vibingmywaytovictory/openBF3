@@ -10,6 +10,7 @@
 #include <godot_cpp/classes/input_event.hpp>
 #include <godot_cpp/classes/node.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -107,6 +108,7 @@ private:
 	bool scene_tdm_ = false;
 
 	std::thread worker_;
+	std::atomic<bool> join_cancel_{ false };
 	mutable std::mutex mutex_;
 	std::shared_ptr<bf3::host::ClientSession> client_;
 	std::string worker_error_;

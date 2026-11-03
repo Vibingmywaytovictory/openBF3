@@ -386,4 +386,23 @@ TEST_SUITE("net-master-enet") {
 		CHECK(s.registry.refusals[size_t(MasterRefusal::Malformed)] == 1);
 		CHECK(s.connections == 5);
 	}
+
+	TEST_CASE("a name lookup gives up as soon as its cancel flag is set, long before its timeout") {
+		const ConnectTarget target{ "procs-alpha", Endpoint{ "127.0.0.1", 1 } };
+		std::atomic<bool> cancel{ false };
+		std::thread closer([&] {
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			cancel.store(true, std::memory_order_release);
+		});
+		const auto started = std::chrono::steady_clock::now();
+		const core::Result<Endpoint> resolved = resolve_connect_target(target, 60000, &cancel);
+		const auto took = std::chrono::steady_clock::now() - started;
+		closer.join();
+		REQUIRE_FALSE(resolved.ok());
+		CHECK(resolved.error().message == "master 127.0.0.1:1: cancelled");
+		CHECK(took < std::chrono::seconds(30));
+		const core::Result<std::vector<MasterEntry>> none = query_master(target.at, 60000, &cancel);
+		REQUIRE_FALSE(none.ok());
+		CHECK(none.error().message == "master 127.0.0.1:1: cancelled");
+	}
 }
