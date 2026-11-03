@@ -215,11 +215,13 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 			!r_game.native_hud->has_failed()) {
 		bf3::core::ui::HudClientState client = r_game.native_hud->client();
 		client.items = r_game.hud_items != nullptr ? r_game.hud_items->item_index() : nullptr;
+		client.squad_names = &r_m.squad_names;
 		screens->set_client(std::move(client));
 		r_m.native_client_set = true;
 	}
 	if (!r_m.native_following && r_m.native_client_set && flow.poll()) {
 		screens->set_resolver(flow.resolver());
+		load_squad_names(r_m, flow.resolver());
 		screens->follow(flow.session());
 		r_m.native_following = true;
 		if (r_game.settings != nullptr && r_m.native_options != nullptr) {
@@ -268,6 +270,9 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 		}
 		for (const bf3::core::ui::UiFlowAction &a : flow.take_actions()) {
 			if (options != nullptr && options->take(a, *flow.session(), r_game.settings->session())) {
+				continue;
+			}
+			if (take_squad_action(r_m, a, p_f, *flow.session())) {
 				continue;
 			}
 			if (r_m.deploy_screens.take_action(a)) {
@@ -694,6 +699,7 @@ void Bf3LevelSession::tdm_presented(uint64_t p_now_ns) {
 			}
 		}
 	}
+	send_squad_requests(m, *client_);
 	if (r_mapper.take_team_presses() > 0) {
 		UtilityFunctions::print("[tdm] T: the teams are AutoTeam's in TDM");
 	}
@@ -707,7 +713,7 @@ void Bf3LevelSession::tdm_presented(uint64_t p_now_ns) {
 		m.deploy.kit = m.spawn_kit;
 	}
 	if (tdm_deploy_step(m.deploy, m.spawn_screen, m.can_deploy, f.newest_tick)) {
-		client_->send_spawn_request(m.deploy.kit);
+		client_->send_spawn_request(m.deploy.kit, tdm_spawn_choice(r_game.hud_model, f, m.own_slot));
 		++m.spawn_requests_sent;
 		m.last_request_tick = f.newest_tick;
 		if (m.deploy.resends == 0) {

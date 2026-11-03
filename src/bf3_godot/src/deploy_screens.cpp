@@ -80,6 +80,9 @@ void DeployScreens::draw(Bf3UiScreens &r_screens) {
 	for (const std::string_view p : kCustomizeScreenPartitions) {
 		r_screens.set_drawn(p, true);
 	}
+	for (const std::string_view p : bf3::core::ui::kSquadScreenPartitions) {
+		r_screens.set_drawn(p, true);
+	}
 }
 
 std::optional<uint8_t> DeployScreens::feed(bf3::host::UiFlowSession &r_session, const bf3::core::ui::HudModel &p_model,

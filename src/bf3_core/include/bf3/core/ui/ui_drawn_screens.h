@@ -18,6 +18,8 @@ inline constexpr std::string_view kSpawnButtonScreenPartition = "ui/flow/screen/
 inline constexpr std::string_view kSpawnTicketCounterPartition = "ui/flow/screen/spawnscreenticketcountertdmscreen";
 inline constexpr std::array<std::string_view, 3> kDeployDrawnPartitions{ kSpawnScreenPcPartition,
 	kSpawnButtonScreenPartition, kSpawnTicketCounterPartition };
+inline constexpr std::array<std::string_view, 3> kSquadScreenPartitions{ "ui/flow/screen/squadscreen",
+	"ui/flow/screen/squadspawnbackgroundscreenpc", "ui/flow/screen/squadigmbackgroundscreen" };
 inline constexpr std::array<std::string_view, 3> kCustomizeScreenPartitions{ "ui/flow/screen/customizesoldierscreen",
 	"ui/flow/screen/customizesoldiersubscreen", "ui/flow/screen/customizeaccessoriesscreen" };
 

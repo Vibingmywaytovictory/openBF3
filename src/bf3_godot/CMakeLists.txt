@@ -182,6 +182,7 @@ target_sources(bf3_godot PRIVATE
 
 target_sources(bf3_godot PRIVATE
     src/level_session_tdm.cpp
+    src/level_session_squad.cpp
     src/tdm_flow.cpp
     src/tdm_args.cpp
 )

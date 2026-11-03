@@ -6,6 +6,8 @@
 #include "tdm_flow.h"
 #include "ui_screen_records.h"
 
+#include "bf3/core/ui/hud_squads.h"
+#include "bf3/core/ui/ui_graph.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/hud_feed.h"
 #include "bf3/sim/sim_types.h"
@@ -140,7 +142,17 @@ struct TdmState {
 	std::unique_ptr<FovRoundCheck, void (*)(FovRoundCheck *)> fov_round{ nullptr, nullptr };
 	bool audio_ingame_on = false;
 	std::unique_ptr<AudioIngameCheck, void (*)(AudioIngameCheck *)> audio_ingame{ nullptr, nullptr };
+	bf3::core::ui::HudSquadNames squad_names{};
+	bool squad_names_loaded = false;
+	std::vector<net::SquadRequest> squad_requests;
+	uint64_t squad_requests_sent = 0;
 };
 
 Bf3UiScreens *tdm_ui_screens(const TdmState &p_m);
+void load_squad_names(TdmState &r_m, const bf3::core::EbxResolver *p_resolver);
+bool take_squad_action(TdmState &r_m, const bf3::core::ui::UiFlowAction &p_action,
+		const bf3::host::PresentationFrame &p_f, const bf3::host::UiFlowSession &p_session);
+uint8_t tdm_spawn_choice(
+		const bf3::core::ui::HudModel &p_model, const bf3::host::PresentationFrame &p_f, uint8_t p_own_slot);
+void send_squad_requests(TdmState &r_m, bf3::host::ClientSession &r_client);
 }
