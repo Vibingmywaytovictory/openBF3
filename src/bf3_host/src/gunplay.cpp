@@ -13,6 +13,7 @@
 #include "bf3/core/util/fnv.h"
 #include "bf3/core/util/splitmix64.h"
 #include "bf3/core/util/text.h"
+#include "bf3/host/squads.h"
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/weapons/damage.h"
 #include "bf3/sim/weapons/posed_target.h"
@@ -294,6 +295,12 @@ core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared
 		catalog->hash = loadout_catalog_hash(*catalog);
 		level->loadouts = std::move(*catalog);
 		level->kits.hash = core::fnv1a_fold(level->kits.hash, level->loadouts.hash);
+		core::Result<gp::SpecializationTable> specializations = gp::make_specialization_table(level->soldier, kits);
+		if (!specializations) {
+			return core::error_at(where, specializations.error());
+		}
+		level->specializations = std::move(*specializations);
+		level->kits.hash = core::fnv1a_fold(level->kits.hash, level->specializations.hash);
 	}
 	for (const std::string &s : level->kits.skipped) {
 		level->notes.push_back("kits: skipped " + s);
@@ -410,6 +417,7 @@ struct Gunplay::Impl {
 	std::shared_ptr<const sw::WeaponTable> table;
 	uint64_t match_seed = 0;
 	uint64_t weapon_hash = 0;
+	const SquadTable *squads = nullptr;
 	uint8_t flags = 0;
 	std::unique_ptr<sw::ProjectileWorld> projectiles;
 	std::unique_ptr<LagHistory> history;
@@ -491,6 +499,33 @@ void Gunplay::set_match_seed(uint64_t p_seed) {
 	impl_->match_seed = p_seed;
 }
 
+void Gunplay::set_squads(const SquadTable *p_squads) {
+	impl_->squads = p_squads;
+}
+
+gp::SpecializationEffects Gunplay::effects(uint8_t p_slot) const {
+	const Impl &m = *impl_;
+	if (p_slot >= m.slots.size()) {
+		return m.level->specializations.defaults;
+	}
+	std::vector<uint32_t> squad;
+	if (m.squads != nullptr && m.squads->squad_of(p_slot) != 0) {
+		for (const uint8_t mate : m.squads->members(m.squads->team_of(p_slot), m.squads->squad_of(p_slot))) {
+			if (mate < m.slots.size() && (mate == p_slot || m.slots[mate].armed)) {
+				squad.push_back(m.slots[mate].loadout.choice.specialization);
+			}
+		}
+	}
+	return gp::specialization_effects(m.level->specializations, m.slots[p_slot].loadout.choice.specialization, squad);
+}
+
+float Gunplay::received_damage(uint8_t p_victim, const sw::DamageEvent &p_event) const {
+	if (p_event.kind != sw::DamageKind::Blast && p_event.kind != sw::DamageKind::DudBlast) {
+		return p_event.amount;
+	}
+	return p_event.amount * effects(p_victim)[gp::SpecializationTarget::ExplosionDamage];
+}
+
 void Gunplay::on_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_team, uint32_t p_tick) {
 	Impl &m = *impl_;
 	if (p_slot >= m.slots.size()) {
@@ -515,6 +550,21 @@ void Gunplay::on_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_team, uint32_t p
 	}
 	if (!sw::spawn_soldier_weapons(s.weapons, *m.table, s.loadout.defs, l.active, p_tick, s.loadout.variants).ok()) {
 		return;
+	}
+	const gp::SpecializationEffects fx = effects(p_slot);
+	for (const gp::WeaponSlot w : { gp::WeaponSlot::Primary, gp::WeaponSlot::Sidearm, gp::WeaponSlot::Grenade }) {
+		sw::WeaponSlotState &x = s.weapons.slots[size_t(w)];
+		if (x.def == sw::kNoWeapon) {
+			continue;
+		}
+		const sw::WeaponSimDef &d = m.table->def(x.def, x.variant);
+		if (d.unlimited_ammo) {
+			continue;
+		}
+		const int32_t magazines = w == gp::WeaponSlot::Grenade
+				? d.magazines + int32_t(fx[gp::SpecializationTarget::Grenades])
+				: gp::boosted_magazines(d.magazines, fx);
+		x.reserve = magazines * d.magazine_capacity;
 	}
 	s.armed = true;
 	s.spawn_tick = p_tick;
@@ -671,7 +721,8 @@ void Gunplay::apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states
 			if (m.slots[victim].fired) {
 				mech.spawn_protection_blocks = false;
 			}
-			applied = sw::apply_damage(st, e.amount, mech);
+			const float amount = received_damage(uint8_t(victim), e);
+			applied = sw::apply_damage(st, amount, mech);
 			health_after = st.health;
 			if (!applied) {
 				++m.stats.protected_refused;
@@ -684,7 +735,7 @@ void Gunplay::apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states
 				h.shot_index = e.shot_index;
 				h.pellet = e.pellet;
 				h.zone = e.zone;
-				h.damage = e.amount;
+				h.damage = amount;
 				h.health_after = st.health;
 				h.time = e.time;
 				h.position = st.position;

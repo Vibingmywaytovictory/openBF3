@@ -3,6 +3,7 @@
 #include "bf3/core/gameplay/capsule_pose_table.h"
 #include "bf3/core/gameplay/material_grid.h"
 #include "bf3/core/gameplay/soldier_def.h"
+#include "bf3/core/gameplay/specializations.h"
 #include "bf3/core/gameplay/weapon_def.h"
 #include "bf3/core/gameplay/weapon_switching.h"
 #include "bf3/core/result.h"
@@ -11,8 +12,8 @@
 #include "bf3/host/level_load.h"
 #include "bf3/host/loadout.h"
 #include "bf3/net/protocol.h"
-#include "bf3/sim/command.h"
 #include "bf3/sim/collision_world.h"
+#include "bf3/sim/command.h"
 #include "bf3/sim/soldier_state.h"
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/ballistics.h"
@@ -35,6 +36,8 @@ class Install;
 }
 
 namespace bf3::host {
+
+class SquadTable;
 
 class GunplayObserver {
 public:
@@ -129,6 +132,7 @@ struct GunplayLevel {
 	std::vector<std::string> notes;
 	KitTable kits;
 	LoadoutCatalog loadouts;
+	core::gameplay::SpecializationTable specializations;
 	std::vector<std::vector<sim::weapons::WeaponSimDef>> variants;
 	size_t variant_resolves = 0;
 	core::gameplay::WeaponSwitching switching;
@@ -201,6 +205,9 @@ public:
 
 	void set_world(const sim::CollisionWorld &p_world);
 	void set_match_seed(uint64_t p_seed);
+	void set_squads(const SquadTable *p_squads);
+	core::gameplay::SpecializationEffects effects(uint8_t p_slot) const;
+	float received_damage(uint8_t p_victim, const sim::weapons::DamageEvent &p_event) const;
 	bool armed(uint8_t p_slot) const;
 	uint8_t team(uint8_t p_slot) const;
 	uint8_t kit(uint8_t p_slot) const;

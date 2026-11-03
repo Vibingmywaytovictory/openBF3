@@ -757,6 +757,7 @@ core::Status GameServer::Impl::init_gameplay() {
 	snapshots.set_fly_by(std::move(fly_by));
 	if (tdm) {
 		BF3_TRY(match.create_rules(config, combat.gunplay()->match_seed()));
+		combat.gunplay()->set_squads(&match.rules()->squads());
 	}
 	for (uint32_t i = 0; i < g.target_bots; ++i) {
 		auto source = std::make_unique<TargetBotSource>(TargetBotConfig{});

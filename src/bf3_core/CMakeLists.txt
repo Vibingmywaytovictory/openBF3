@@ -461,3 +461,8 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/audio/sound_patch_config.h
     src/audio/sound_patch_config.cpp
 )
+
+target_sources(bf3_core PRIVATE
+    include/bf3/core/gameplay/specializations.h
+    src/gameplay/specializations.cpp
+)
