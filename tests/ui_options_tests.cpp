@@ -946,6 +946,41 @@ TEST_SUITE("ui-options") {
 		CHECK(s.settings_changed());
 	}
 
+	TEST_CASE("settings effects: look rate from MouseSensitivity and the zoom, pose and sprint multipliers") {
+		OptionsLevel *l = options_level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		Result<KeyBindingMaps> maps = read_key_binding_maps(*l->lib);
+		Result<std::vector<std::string>> tabs = read_key_binding_tabs(*l->lib);
+		REQUIRE(maps.ok());
+		REQUIRE(tabs.ok());
+		Result<KeyBindingTable> t = KeyBindingTable::build(*maps, *tabs);
+		Result<OptionsCatalog> c = read_options_catalog(*l->lib);
+		REQUIRE(t.ok());
+		REQUIRE(c.ok());
+		SettingsStore s(*c, std::move(*t));
+		CHECK(s.default_value(kMouseSensitivityOption) == 0.5);
+		CHECK(s.value("MouseRawInput") == 1.0);
+		CHECK(look_radians_per_count(settings_effects(s).look_scale, {}) == kBaseLookRadiansPerCount);
+		for (const double v : { 0.0, 0.5, 1.5 }) {
+			CAPTURE(v);
+			REQUIRE(s.set_value(kMouseSensitivityOption, v));
+			const float scale = settings_effects(s).look_scale;
+			const float base = float(double(kBaseLookRadiansPerCount) * v / 0.5);
+			CHECK(look_radians_per_count(scale, {}) == doctest::Approx(base).epsilon(1e-6));
+			for (const float zoom : { 1.0f, 0.5f, 0.16f }) {
+				CAPTURE(zoom);
+				CHECK(look_radians_per_count(scale, { zoom, 1.0f, 1.0f }) ==
+						doctest::Approx(base * zoom).epsilon(1e-6));
+				CHECK(look_radians_per_count(scale, { zoom, 1.0f, 0.5f }) ==
+						doctest::Approx(base * zoom * 0.5f).epsilon(1e-6));
+				CHECK(look_radians_per_count(scale, { zoom, 0.5f, 1.0f }) ==
+						doctest::Approx(base * zoom * 0.5f).epsilon(1e-6));
+			}
+		}
+	}
+
 	TEST_CASE("settings store: the install's defaults round-trip through the text format") {
 		OptionsLevel *l = options_level_or_skip();
 		if (l == nullptr) {

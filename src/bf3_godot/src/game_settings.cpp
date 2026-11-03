@@ -113,7 +113,7 @@ size_t GameSettings::apply_input(InputMapper &r_mapper) {
 		missed_inputs_ += r_mapper.rebind(a.action, inputs);
 	}
 	const ui::SettingsEffects e = ui::settings_effects(store());
-	r_mapper.base_sensitivity = kBaseLookRadiansPerCount * e.look_scale;
+	r_mapper.base_sensitivity = ui::look_radians_per_count(e.look_scale, {});
 	r_mapper.mouse_sensitivity = r_mapper.base_sensitivity;
 	r_mapper.invert_look = e.invert_look;
 	r_mapper.hold_to_zoom = e.hold_to_zoom;

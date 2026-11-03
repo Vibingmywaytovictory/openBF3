@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/core/ui/settings_effects.h"
 #include "bf3/host/client_session.h"
 #include "bf3/sim/command.h"
 
@@ -35,7 +36,7 @@ inline constexpr size_t kInputActionCount = size_t(InputAction::Count);
 
 const char *input_action_name(InputAction p_action);
 
-inline constexpr float kBaseLookRadiansPerCount = 0.0022f;
+using bf3::core::ui::kBaseLookRadiansPerCount;
 
 std::string ui_idk_of_key(godot::Key p_key, godot::KeyLocation p_location = godot::KEY_LOCATION_UNSPECIFIED);
 std::string_view ui_idb_of_button(godot::MouseButton p_button);

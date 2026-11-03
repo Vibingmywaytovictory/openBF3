@@ -87,4 +87,13 @@ struct SettingsEffects {
 
 SettingsEffects settings_effects(const SettingsStore &p_store);
 
+inline constexpr float kBaseLookRadiansPerCount = 0.0022f;
+
+struct LookMultipliers {
+	float zoom = 1.0f;
+	float pose = 1.0f;
+	float sprint = 1.0f;
+};
+
+float look_radians_per_count(float p_look_scale, const LookMultipliers &p_look);
 }

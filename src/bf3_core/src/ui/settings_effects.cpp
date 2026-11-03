@@ -37,6 +37,10 @@ std::vector<std::string> action_inputs(const KeyBindingTable &p_table, const Act
 	return out;
 }
 
+float look_radians_per_count(float p_look_scale, const LookMultipliers &p_look) {
+	return kBaseLookRadiansPerCount * p_look_scale * p_look.zoom * p_look.pose * p_look.sprint;
+}
+
 SettingsEffects settings_effects(const SettingsStore &p_store) {
 	SettingsEffects e;
 	const float master = gain_of(p_store.value(kVolumeOption));
