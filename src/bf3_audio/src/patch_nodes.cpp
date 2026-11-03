@@ -26,10 +26,6 @@ namespace {
 constexpr float kPi = 3.14159265358979323846f;
 constexpr float kCaseTolerance = 0.001f;
 
-bool on(float p_v) {
-	return p_v >= 0.5f;
-}
-
 float fade_out(ca::FaderType p_type, float p_t) {
 	const float t = std::clamp(p_t, 0.0f, 1.0f);
 	if (p_type == ca::FaderType::Cosine) {
@@ -366,6 +362,9 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				break;
 			case SoundNodeType::Sampler:
 				sampler_events(ni, n, p_frame);
+				break;
+			case SoundNodeType::DivisibleLoopPlayer:
+				loop_player_events(ni, n, p_frame);
 				break;
 			default:
 				break;

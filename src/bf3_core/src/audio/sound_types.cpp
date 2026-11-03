@@ -24,6 +24,8 @@ constexpr std::string_view kDelayPorts[] = { "DelayTime", "Feedback", "In", "Out
 constexpr std::string_view kDelayFloats[] = { "MaxDelayTime" };
 constexpr std::string_view kDirectOutputPorts[] = { "BypassHeadroom", "In" };
 constexpr std::string_view kDirectOutputFloats[] = { "Gain", "HFDampingDistance", "HFDampingObstruction", "HFDampingOcclusion", "MinDistance" };
+constexpr std::string_view kDivisibleLoopPlayerPorts[] = { "Amplitude", "ExternalWave", "FreezeSegment", "Output", "Start", "Stop" };
+constexpr std::string_view kDivisibleLoopPlayerFloats[] = { "CrossFadeLength" };
 constexpr std::string_view kEventGatePorts[] = { "CoolDownTime", "Enable", "In", "Out" };
 constexpr std::string_view kFlatOutputPorts[] = { "BypassHeadroom", "CenterLevel", "In", "LfeLevel" };
 constexpr std::string_view kFlatOutputFloats[] = { "Angle", "Gain", "HFDampingDistance", "HFDampingObstruction", "HFDampingOcclusion", "MinDistance", "ReverbGain" };
@@ -101,7 +103,7 @@ constexpr SoundNodeTypeInfo kTypes[] = {
 	{ SoundNodeType::Delta, "DeltaNodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },
 	{ SoundNodeType::DialogSampler, "DialogSamplerNodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },
 	{ SoundNodeType::DistortionClip, "DistortionClipNodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },
-	{ SoundNodeType::DivisibleLoopPlayer, "DivisibleLoopPlayerNodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },
+	{ SoundNodeType::DivisibleLoopPlayer, "DivisibleLoopPlayerNodeData", SoundNodeRole::Patch, false, true, kDivisibleLoopPlayerPorts, kDivisibleLoopPlayerFloats, "", "" },
 	{ SoundNodeType::EventSwitcher, "EventSwitcherNodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },
 	{ SoundNodeType::FrequencyShiftSsb, "FrequencyShiftSsbNodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },
 	{ SoundNodeType::HighShelfIir2, "HighShelfIir2NodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },
@@ -202,6 +204,10 @@ std::span<const SoundNodeTypeInfo> sound_node_types() {
 const SoundNodeTypeInfo &sound_node_type_info(SoundNodeType p_type) {
 	size_t index = size_t(p_type);
 	return kTypes[index < std::size(kTypes) ? index : 0];
+}
+
+bool sound_node_implemented(SoundNodeType p_type) {
+	return sound_node_type_info(p_type).a2 || p_type == SoundNodeType::DivisibleLoopPlayer;
 }
 
 std::optional<SoundNodeType> sound_node_type(std::string_view p_ebx_name) {

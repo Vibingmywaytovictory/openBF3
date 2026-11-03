@@ -161,10 +161,28 @@ Result<std::unique_ptr<PatchInstance>> PatchInstance::create(std::shared_ptr<con
 	for (const SoundNode &n : p.nodes) {
 		if (n.type == SoundNodeType::Sampler) {
 			slot_count += n.plugins_count / cp::kSamplerSlotPlugins;
+		} else if (n.type == SoundNodeType::DivisibleLoopPlayer) {
+			slot_count += n.plugins_count / cp::kLoopSlotPlugins;
 		}
 	}
 	st.slots.assign(slot_count, SlotState{});
 	slot_count = 0;
+	const auto bind_slot = [&st](uint32_t p_slot, uint32_t p_sampler, ca::SoundPluginRef p_player,
+								   ca::SoundPluginRef p_gain) {
+		SlotState &slot = st.slots[p_slot];
+		slot.voice = p_player.valid() ? p_player.voice : 0xffff;
+		if (const uint32_t g = st.global_plugin(p_player); g != UINT32_MAX) {
+			st.plugins[g].role = PluginRole::Slot;
+			st.plugins[g].index = p_slot;
+			st.plugins[g].output = p_sampler;
+		}
+		if (const uint32_t g = st.global_plugin(p_gain); g != UINT32_MAX) {
+			st.plugins[g].role = PluginRole::SlotGain;
+			st.plugins[g].index = p_slot;
+			st.plugins[g].output = p_sampler;
+			slot.gain_plugin = g;
+		}
+	};
 	for (uint32_t ni = 0; ni < p.nodes.size(); ++ni) {
 		const SoundNode &n = p.nodes[ni];
 		NodeState &s = st.nodes[ni];
@@ -198,24 +216,34 @@ Result<std::unique_ptr<PatchInstance>> PatchInstance::create(std::shared_ptr<con
 				sm.step_connected = st.port(n, cp::SmpStep).connected();
 				sm.last_slot = uint8_t(std::max<uint32_t>(sm.slots_count, 1) - 1);
 				for (uint32_t k = 0; k < sm.slots_count; ++k) {
-					SlotState &slot = st.slots[slot_count + k];
-					const ca::SoundPluginRef player = p.plugin_refs[n.plugins_begin + k * cp::kSamplerSlotPlugins + cp::SlotSndPlayer];
-					const ca::SoundPluginRef gain = p.plugin_refs[n.plugins_begin + k * cp::kSamplerSlotPlugins + cp::SlotGain];
-					slot.voice = player.valid() ? player.voice : 0xffff;
-					if (const uint32_t g = st.global_plugin(player); g != UINT32_MAX) {
-						st.plugins[g].role = PluginRole::Slot;
-						st.plugins[g].index = uint32_t(slot_count + k);
-						st.plugins[g].output = s.index;
-					}
-					if (const uint32_t g = st.global_plugin(gain); g != UINT32_MAX) {
-						st.plugins[g].role = PluginRole::SlotGain;
-						st.plugins[g].index = uint32_t(slot_count + k);
-						st.plugins[g].output = s.index;
-						slot.gain_plugin = g;
-					}
+					const uint32_t refs = n.plugins_begin + k * cp::kSamplerSlotPlugins;
+					bind_slot(uint32_t(slot_count + k), s.index, p.plugin_refs[refs + cp::SlotSndPlayer],
+							p.plugin_refs[refs + cp::SlotGain]);
 				}
 				slot_count += sm.slots_count;
 				st.samplers.push_back(sm);
+				break;
+			}
+			case SoundNodeType::DivisibleLoopPlayer: {
+				s.index = uint32_t(st.loops.size());
+				LoopPlayerState lp;
+				lp.node = ni;
+				lp.samplers_begin = uint32_t(st.samplers.size());
+				lp.samplers_count = n.plugins_count / cp::kLoopSlotPlugins;
+				for (uint32_t k = 0; k < lp.samplers_count; ++k) {
+					SamplerState sm;
+					sm.node = ni;
+					sm.slots_begin = uint32_t(slot_count + k);
+					sm.slots_count = 1;
+					sm.loop = ca::SamplerLoop::None;
+					sm.trace_slot = uint8_t(k);
+					const uint32_t refs = n.plugins_begin + k * cp::kLoopSlotPlugins;
+					bind_slot(uint32_t(slot_count + k), uint32_t(st.samplers.size()),
+							p.plugin_refs[refs + cp::LoopSndPlayer], p.plugin_refs[refs + cp::LoopGain]);
+					st.samplers.push_back(sm);
+				}
+				slot_count += lp.samplers_count;
+				st.loops.push_back(lp);
 				break;
 			}
 			default:
@@ -734,6 +762,11 @@ bool PatchInstance::finished() const {
 	}
 	for (const SamplerState &s : st.samplers) {
 		if (s.active || st.sampler_busy(s)) {
+			return false;
+		}
+	}
+	for (const LoopPlayerState &l : st.loops) {
+		if (l.running) {
 			return false;
 		}
 	}

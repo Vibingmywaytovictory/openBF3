@@ -59,3 +59,7 @@ target_sources(bf3_audio PRIVATE
     include/bf3/audio/ir_reverb.h
     src/ir_reverb.cpp
 )
+
+target_sources(bf3_audio PRIVATE
+    src/patch_nodes_loop.cpp
+)

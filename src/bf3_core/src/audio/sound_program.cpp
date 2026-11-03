@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 #include <queue>
 #include <string>
 #include <unordered_map>
@@ -198,6 +199,9 @@ struct Compiler {
 				break;
 			case SoundNodeType::Lfo:
 				f |= read_bool(p_s, "StartAtRandomValue") ? kFlagStartAtRandomValue : 0;
+				break;
+			case SoundNodeType::DivisibleLoopPlayer:
+				f |= read_bool(p_s, "StartAtRandomPosition") ? kFlagStartAtRandomPosition : 0;
 				break;
 			case SoundNodeType::DeMux:
 				f |= read_bool(p_s, "WrapValue") ? kFlagWrapValue : 0;
@@ -470,42 +474,47 @@ struct Compiler {
 		return Status::success();
 	}
 
+	Status read_player(const EbxStruct &p_s, SoundNode &r_node, std::string_view p_what,
+			std::initializer_list<const char *> p_slot_plugins) {
+		const std::optional<EbxValue> w = p_s.get("Wave");
+		Result<uint16_t> wi = w ? wave_ref(*w) : Result<uint16_t>(kNoRegister);
+		if (!wi) {
+			return wi.error();
+		}
+		prog.wave_refs.push_back(*wi);
+		r_node.waves_count = 1;
+		const std::optional<EbxValue> pl = p_s.get("Plugins");
+		if (pl && pl->as_array()) {
+			if (pl->as_array()->size() > 16) {
+				return error(std::string(p_what) + " with " + std::to_string(pl->as_array()->size()) + " voice slots");
+			}
+			for (EbxValue sv : *pl->as_array()) {
+				BF3_TRY(budget.charge(1));
+				const std::optional<EbxStruct> s = sv.as_struct();
+				if (!s) {
+					return error(std::string(p_what) + " plugin slot is not a struct");
+				}
+				for (const char *f : p_slot_plugins) {
+					Result<SoundPluginRef> r = read_plugin_ref(*s, f);
+					if (!r) {
+						return r.error();
+					}
+					prog.plugin_refs.push_back(*r);
+				}
+				r_node.plugins_count = uint16_t(r_node.plugins_count + p_slot_plugins.size());
+			}
+		}
+		return Status::success();
+	}
+
 	Status read_node_extras(SoundNodeType p_type, const EbxStruct &p_s, SoundNode &r_node) {
 		r_node.waves_begin = uint32_t(prog.wave_refs.size());
 		r_node.plugins_begin = uint32_t(prog.plugin_refs.size());
 		switch (p_type) {
-			case SoundNodeType::Sampler: {
-				const std::optional<EbxValue> w = p_s.get("Wave");
-				Result<uint16_t> wi = w ? wave_ref(*w) : Result<uint16_t>(kNoRegister);
-				if (!wi) {
-					return wi.error();
-				}
-				prog.wave_refs.push_back(*wi);
-				r_node.waves_count = 1;
-				const std::optional<EbxValue> pl = p_s.get("Plugins");
-				if (pl && pl->as_array()) {
-					if (pl->as_array()->size() > 16) {
-						return error("sampler with " + std::to_string(pl->as_array()->size()) + " voice slots");
-					}
-					for (EbxValue sv : *pl->as_array()) {
-						BF3_TRY(budget.charge(1));
-						const std::optional<EbxStruct> s = sv.as_struct();
-						if (!s) {
-							return error("sampler plugin slot is not a struct");
-						}
-						for (const char *f : { "SndPlayer", "Resample", "Pause", "Gain" }) {
-							Result<SoundPluginRef> r = read_plugin_ref(*s, f);
-							if (!r) {
-								return r.error();
-							}
-							prog.plugin_refs.push_back(*r);
-						}
-						r_node.plugins_count = uint16_t(r_node.plugins_count + port::kSamplerSlotPlugins);
-					}
-				}
-				r_node.floats_count = uint16_t(r_node.floats_count);
-				break;
-			}
+			case SoundNodeType::Sampler:
+				return read_player(p_s, r_node, "sampler", { "SndPlayer", "Resample", "Pause", "Gain" });
+			case SoundNodeType::DivisibleLoopPlayer:
+				return read_player(p_s, r_node, "loop player", { "SndPlayer", "Pause", "Gain", "GainFader" });
 			case SoundNodeType::WaveSwitcher: {
 				const std::optional<EbxValue> arr = p_s.get("Waves");
 				if (arr && arr->as_array()) {
@@ -875,7 +884,7 @@ struct Compiler {
 			}
 			SoundNode node;
 			node.source_index = uint32_t(source_nodes.size());
-			if (!info.a2) {
+			if (!sound_node_implemented(*type)) {
 				++stats.unimplemented_nodes;
 				if (!options.allow_unimplemented) {
 					return error("node type " + std::string(info.ebx_name) + " is not implemented in A2");

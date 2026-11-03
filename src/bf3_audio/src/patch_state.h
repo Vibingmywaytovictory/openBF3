@@ -27,6 +27,10 @@ inline constexpr uint16_t kNoSegment = 0xffff;
 using core::splitmix64;
 double uniform01(uint64_t p_seed, uint32_t p_node, uint32_t p_draw);
 
+inline bool on(float p_v) {
+	return p_v >= 0.5f;
+}
+
 enum class AdsrPhase : uint8_t { Idle, Attack, Decay, Sustain, Release };
 
 struct NodeState {
@@ -68,6 +72,7 @@ struct PendingStart {
 	uint16_t segment = 0;
 	SamplerTraceKind kind = SamplerTraceKind::Trigger;
 	float offset_seconds = 0.0f;
+	uint32_t fade_in_frames = 0;
 };
 
 struct SlotState {
@@ -107,6 +112,18 @@ struct SamplerState {
 	float pitch = 1.0f;
 	bool instant_release = false;
 	bool trigger_was_on = false;
+	uint8_t trace_slot = 0;
+};
+
+struct LoopPlayerState {
+	uint32_t node = 0;
+	uint32_t samplers_begin = 0, samplers_count = 0;
+	uint32_t current = UINT32_MAX;
+	uint32_t piece = 0;
+	uint32_t wave_index = UINT32_MAX;
+	uint64_t next_frame = 0;
+	uint32_t draws = 0;
+	bool running = false;
 };
 
 enum class PluginRole : uint8_t {
@@ -193,6 +210,7 @@ struct PatchInstance::State {
 	std::vector<detail::NodeState> nodes;
 	std::vector<detail::GroupState> groups;
 	std::vector<detail::SamplerState> samplers;
+	std::vector<detail::LoopPlayerState> loops;
 	std::vector<detail::SlotState> slots;
 	std::vector<core::audio::WaveId> wave_ids;
 	std::vector<std::pair<uint32_t, uint32_t>> wave_variations;
@@ -271,13 +289,17 @@ struct PatchInstance::State {
 	uint32_t global_plugin(core::audio::SoundPluginRef p_ref) const {
 		return p_ref.valid() ? program->voices[p_ref.voice].plugins_begin + p_ref.plugin : UINT32_MAX;
 	}
-	void trace_entry(uint64_t p_frame, uint32_t p_node, uint8_t p_slot, uint16_t p_segment, SamplerTraceKind p_kind, float p_pitch, uint64_t p_prev_end);
+	void trace_entry(uint64_t p_frame, const detail::SamplerState &p_sampler, uint8_t p_slot, uint16_t p_segment,
+			SamplerTraceKind p_kind, float p_pitch, uint64_t p_prev_end);
 
 	void evaluate_program(uint64_t p_frame);
 
 	void advance(double p_seconds);
 
 	void sampler_events(uint32_t p_node_index, const core::audio::SoundNode &p_node, uint64_t p_frame);
+	void loop_player_events(uint32_t p_node_index, const core::audio::SoundNode &p_node, uint64_t p_frame);
+	bool start_loop_piece(
+			detail::LoopPlayerState &r_loop, uint64_t p_frame, float p_offset_seconds, uint32_t p_fade_frames);
 	void render_slot(detail::SamplerState &r_sampler, uint32_t p_slot, float *r_left, float *r_right, uint64_t p_first_frame, uint32_t p_frames);
 	bool sampler_busy(const detail::SamplerState &p_sampler) const;
 };

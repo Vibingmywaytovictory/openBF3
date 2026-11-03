@@ -21,7 +21,7 @@ namespace bf3::core::audio {
 
 inline constexpr uint32_t kSoundProgramFormatVersion = 1;
 
-inline constexpr uint32_t kSoundProgramConverterVersion = 1;
+inline constexpr uint32_t kSoundProgramConverterVersion = 2;
 inline constexpr const char *kSoundProgramCacheKind = "sound-patch";
 inline constexpr const char *kSoundProgramDepsCacheKind = "sound-patch-deps";
 
@@ -75,6 +75,7 @@ enum SoundNodeFlag : uint8_t {
 	kFlagIsRandom = 1 << 2,
 	kFlagRandomStartIndex = 1 << 3,
 	kFlagStartAtRandomValue = 1 << 4,
+	kFlagStartAtRandomPosition = kFlagStartAtRandomValue,
 	kFlagWrapValue = 1 << 5,
 	kFlagEnableHdr = 1 << 6,
 	kFlagAllowExtreme = 1 << 7,

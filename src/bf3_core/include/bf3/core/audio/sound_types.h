@@ -106,6 +106,7 @@ inline constexpr size_t kAllNodeTypes = 58;
 
 std::span<const SoundNodeTypeInfo> sound_node_types();
 const SoundNodeTypeInfo &sound_node_type_info(SoundNodeType p_type);
+bool sound_node_implemented(SoundNodeType p_type);
 
 std::optional<SoundNodeType> sound_node_type(std::string_view p_ebx_name);
 

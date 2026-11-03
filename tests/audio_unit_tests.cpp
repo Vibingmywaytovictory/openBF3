@@ -22,6 +22,7 @@
 #include <functional>
 #include <memory>
 #include <random>
+#include <string>
 #include <vector>
 
 using namespace bf3::core;
@@ -236,6 +237,25 @@ struct Builder {
 		set(idx, cp::SmpPitch, C(1.0f));
 		return idx;
 	}
+	uint32_t loop_player(uint32_t p_slots, uint16_t p_wave, float p_crossfade_seconds, uint8_t p_flags = 0) {
+		SoundNode n = make(SoundNodeType::DivisibleLoopPlayer, 0, p_flags);
+		n.waves_begin = uint32_t(p.wave_refs.size());
+		n.waves_count = 1;
+		p.wave_refs.push_back(p_wave);
+		n.plugins_begin = uint32_t(p.plugin_refs.size());
+		n.plugins_count = uint16_t(p_slots * cp::kLoopSlotPlugins);
+		for (uint32_t s = 0; s < p_slots; ++s) {
+			const uint16_t v = sampler_voice();
+			for (uint16_t k : { 0, 2, 3, 1 }) {
+				p.plugin_refs.push_back(SoundPluginRef{ v, k });
+			}
+		}
+		p.nodes.push_back(n);
+		const uint32_t idx = uint32_t(p.nodes.size() - 1);
+		setf(idx, cp::DlpCrossFadeLength, p_crossfade_seconds);
+		set(idx, cp::DlpAmplitude, C(1.0f));
+		return idx;
+	}
 	std::shared_ptr<const SoundProgram> build() {
 		REQUIRE_MESSAGE(validate_sound_program(p).ok(), (validate_sound_program(p).ok() ? std::string() : validate_sound_program(p).error().message));
 		return std::make_shared<SoundProgram>(p);
@@ -305,6 +325,34 @@ TestWave make_wave(uint32_t p_segments, uint32_t p_frames, int16_t p_first_loop,
 	w.variations.push_back(var);
 	std::vector<SoundWaveInfo> waves{ w };
 	std::vector<std::vector<std::vector<uint8_t>>> bytes{ { chunk } };
+	Result<std::shared_ptr<const WaveBank>> bank = WaveBank::from_memory(std::move(waves), std::move(bytes));
+	REQUIRE_MESSAGE(bank.ok(), (bank.ok() ? std::string() : bank.error().message));
+	return TestWave{ *bank, w.partition };
+}
+
+TestWave make_pieces(uint32_t p_pieces, uint32_t p_frames, std::string p_selection) {
+	SoundWaveInfo w;
+	w.name = "test_pieces";
+	static const uint8_t kPartition[16] = { 0x66, 0x66, 0x66, 0x66, 0x22, 0x22, 0x33, 0x33, 0x44, 0x44, 0x55, 0x55,
+		0x55, 0x55, 0x55, 0x66 };
+	w.partition = Guid::from_bytes(kPartition);
+	w.channels = 1;
+	w.selection = std::move(p_selection);
+	std::vector<std::vector<uint8_t>> chunks;
+	for (uint32_t k = 0; k < p_pieces; ++k) {
+		const std::vector<int16_t> samples(p_frames, int16_t(1000 * (k + 1)));
+		const std::vector<uint8_t> chunk = pcm_stream(samples, 1, 48000);
+		WaveVariation var;
+		var.chunk_index = uint16_t(k);
+		var.first_loop_segment = 0;
+		var.last_loop_segment = 0;
+		var.segments.push_back(WaveSegment{ 0, float(p_frames) / 48000.0f });
+		w.variations.push_back(var);
+		w.chunks.push_back(WaveChunkRef{ Guid{}, uint32_t(chunk.size()) });
+		chunks.push_back(chunk);
+	}
+	std::vector<SoundWaveInfo> waves{ w };
+	std::vector<std::vector<std::vector<uint8_t>>> bytes{ chunks };
 	Result<std::shared_ptr<const WaveBank>> bank = WaveBank::from_memory(std::move(waves), std::move(bytes));
 	REQUIRE_MESSAGE(bank.ok(), (bank.ok() ? std::string() : bank.error().message));
 	return TestWave{ *bank, w.partition };
@@ -1310,6 +1358,110 @@ TEST_SUITE("audio-patch") {
 			CHECK(e[2].frame == 2000);
 			CHECK(inst->finished());
 		}
+	}
+
+	TEST_CASE("DivisibleLoopPlayer: pieces in order on alternating slots, crossfades, FreezeSegment, Stop") {
+		constexpr uint32_t kPieces = 4, kFrames = 4800, kCrossfade = 960;
+		const TestWave w = make_pieces(kPieces, kFrames, "SwvsSequential");
+		struct Run {
+			std::vector<SamplerTraceEntry> starts;
+			std::vector<float> left;
+			bool finished = false;
+		};
+		const auto run = [&](float p_freeze, float p_amplitude, uint64_t p_stop_at, uint8_t p_flags) {
+			Builder b;
+			const uint16_t start = b.input(1, true), stop = b.input(2, true), amp = b.input(3, false, p_amplitude);
+			b.p.waves.push_back(SoundWaveRef{ w.partition, "test_pieces" });
+			const uint32_t n = b.loop_player(2, 0, float(kCrossfade) / 48000.0f, p_flags);
+			b.set(n, cp::DlpStart, Builder::R(start));
+			b.set(n, cp::DlpStop, Builder::R(stop));
+			b.set(n, cp::DlpAmplitude, Builder::R(amp));
+			b.set(n, cp::DlpFreezeSegment, Builder::C(p_freeze));
+			auto inst = instance(b.build(), w.bank, 7);
+			ba::SamplerTrace trace;
+			trace.entries.resize(256);
+			inst->set_sampler_trace(&trace);
+			Buses buses;
+			Run r;
+			inst->post_event(1, 0);
+			for (uint64_t f = 0; f < 24000; f += 512) {
+				if (f == p_stop_at) {
+					inst->post_event(2, 0);
+				}
+				buses.block(*inst, f);
+				for (uint32_t i = 0; i < 512; ++i) {
+					r.left.push_back(buses.left(i));
+				}
+			}
+			for (const SamplerTraceEntry &e : entries(trace)) {
+				if (e.kind != SamplerTraceKind::End) {
+					r.starts.push_back(e);
+				}
+			}
+			r.finished = inst->finished();
+			return r;
+		};
+		const float unit = 1000.0f / 32768.0f;
+
+		const Run seq = run(0.0f, 1.0f, UINT64_MAX, 0);
+		REQUIRE(seq.starts.size() >= 6);
+		CHECK(seq.starts[0].kind == SamplerTraceKind::Trigger);
+		CHECK(seq.starts[0].frame == 0);
+		for (size_t i = 0; i < seq.starts.size(); ++i) {
+			CAPTURE(i);
+			CHECK(seq.starts[i].variation == i % kPieces);
+			CHECK(seq.starts[i].slot == i % 2);
+			if (i > 0) {
+				CHECK(seq.starts[i].kind == SamplerTraceKind::Advance);
+				const uint64_t gap = seq.starts[i].frame - seq.starts[i - 1].frame;
+				CHECK(gap <= kFrames - kCrossfade);
+				CHECK(gap + 512 >= kFrames - kCrossfade);
+			}
+		}
+		CHECK(seq.left[2000] == doctest::Approx(1.0f * unit).epsilon(1e-4));
+		CHECK(seq.left[seq.starts[1].frame + kCrossfade + 100] == doctest::Approx(2.0f * unit).epsilon(1e-4));
+		CHECK(seq.left[seq.starts[2].frame + kCrossfade + 100] == doctest::Approx(3.0f * unit).epsilon(1e-4));
+		CHECK(seq.left[seq.starts[1].frame + kCrossfade / 2] > 1.0f * unit);
+		CHECK(seq.left[seq.starts[1].frame + kCrossfade / 2] < 2.0f * unit);
+		float step = 0.0f;
+		for (size_t i = 513; i < seq.left.size(); ++i) {
+			step = std::max(step, std::fabs(seq.left[i] - seq.left[i - 1]));
+		}
+		CHECK(step < 0.05f * unit);
+		CHECK_FALSE(seq.finished);
+
+		const Run frozen = run(1.0f, 1.0f, UINT64_MAX, 0);
+		REQUIRE(frozen.starts.size() >= 4);
+		for (size_t i = 0; i < frozen.starts.size(); ++i) {
+			CHECK(frozen.starts[i].variation == 0);
+			CHECK(frozen.starts[i].slot == i % 2);
+		}
+		CHECK(frozen.left[frozen.starts[2].frame + kCrossfade / 2] == doctest::Approx(1.0f * unit).epsilon(1e-3));
+
+		const Run half = run(0.0f, 0.5f, UINT64_MAX, 0);
+		CHECK(half.left[2000] == doctest::Approx(0.5f * unit).epsilon(1e-4));
+
+		const Run stopped = run(0.0f, 1.0f, 6144, 0);
+		for (const SamplerTraceEntry &e : stopped.starts) {
+			CHECK(e.frame < 6144);
+		}
+		CHECK(stopped.left[6144 + kCrossfade + 512] == 0.0f);
+		CHECK(stopped.left.back() == 0.0f);
+		float stop_step = 0.0f;
+		for (size_t i = 6144; i < 6144 + kCrossfade + 512; ++i) {
+			stop_step = std::max(stop_step, std::fabs(stopped.left[i] - stopped.left[i - 1]));
+		}
+		CHECK(stop_step < 0.05f * unit);
+		CHECK(stopped.finished);
+
+		const Run randomised = run(0.0f, 1.0f, UINT64_MAX, kFlagStartAtRandomPosition);
+		REQUIRE(randomised.starts.size() >= 3);
+		const uint32_t first = randomised.starts[0].variation;
+		CHECK(first < kPieces);
+		CHECK(randomised.starts[1].variation == (first + 1) % kPieces);
+		CHECK(randomised.starts[2].variation == (first + 2) % kPieces);
+		CHECK(randomised.starts[1].frame + 512 >= kCrossfade);
+		CHECK(randomised.starts[1].frame <= kFrames - kCrossfade);
 	}
 
 	TEST_CASE("node order: register dependencies, stable ties, a cycle is one feedback edge, hostile input") {

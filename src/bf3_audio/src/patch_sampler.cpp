@@ -17,10 +17,6 @@ using ca::SoundNode;
 
 namespace {
 
-bool on(float p_v) {
-	return p_v >= 0.5f;
-}
-
 float catmull_rom(float p0, float p1, float p2, float p3, float t) {
 	return p1 + 0.5f * t * (p2 - p0 + t * (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3 + t * (3.0f * (p1 - p2) + p3 - p0)));
 }
@@ -198,8 +194,8 @@ NextSegment tail_or_end(const SamplerState &s) {
 
 }
 
-void PatchInstance::State::trace_entry(uint64_t p_frame, uint32_t p_node, uint8_t p_slot, uint16_t p_segment, SamplerTraceKind p_kind, float p_pitch,
-		uint64_t p_prev_end) {
+void PatchInstance::State::trace_entry(uint64_t p_frame, const SamplerState &p_sampler, uint8_t p_slot,
+		uint16_t p_segment, SamplerTraceKind p_kind, float p_pitch, uint64_t p_prev_end) {
 	if (trace == nullptr) {
 		return;
 	}
@@ -209,15 +205,14 @@ void PatchInstance::State::trace_entry(uint64_t p_frame, uint32_t p_node, uint8_
 	}
 	SamplerTraceEntry &e = trace->entries[trace->count++];
 	e.frame = p_frame;
-	e.node = p_node;
-	e.slot = p_slot;
+	e.node = p_sampler.node;
+	e.slot = uint8_t(p_sampler.trace_slot + p_slot);
 	e.segment = p_segment;
 	e.kind = p_kind;
 	e.pitch = p_pitch;
 	e.prev_end = p_prev_end;
-	const SamplerState &s = samplers[nodes[p_node].index];
-	e.wave = s.wave;
-	e.variation = s.variation;
+	e.wave = p_sampler.wave;
+	e.variation = p_sampler.variation;
 }
 
 bool PatchInstance::State::sampler_busy(const SamplerState &p_sampler) const {
@@ -455,11 +450,10 @@ bool open_segment(const PatchInstance::State &st, const SamplerState &s, SlotPla
 void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *r_left, float *r_right, uint64_t p_first_frame, uint32_t p_frames) {
 	SlotState &slot = slots[s.slots_begin + p_slot];
 	SlotPlay &play = slot.play;
-	const uint32_t node = s.node;
 
 	const auto end_slot = [&](uint64_t p_frame) {
 		play.active = false;
-		trace_entry(p_frame, node, uint8_t(p_slot), play.segment, SamplerTraceKind::End, s.pitch, 0);
+		trace_entry(p_frame, s, uint8_t(p_slot), play.segment, SamplerTraceKind::End, s.pitch, 0);
 		if (!sampler_busy(s)) {
 			s.active = false;
 			s.finished_pulse = true;
@@ -498,7 +492,7 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 				const uint64_t heard = p_frame + uint64_t(std::max(0.0, std::ceil((2.0 - play.frac) / ratio_now - 1e-9)));
 				if (open_segment(*this, s, play, next.segment)) {
 					s.last_segment = next.segment;
-					trace_entry(heard, node, uint8_t(p_slot), next.segment, next.kind, s.pitch, heard);
+					trace_entry(heard, s, uint8_t(p_slot), next.segment, next.kind, s.pitch, heard);
 					continue;
 				}
 				++stats.decode_errors;
@@ -567,12 +561,16 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 			slot.fade = 0.0f;
 			slot.fade_step = 1.0f / std::max(1.0f, tuning.step_crossfade_ms * 0.001f * float(mix_rate));
 			slot.fade_kill = false;
+		} else if (pend.fade_in_frames > 0) {
+			slot.fade = 0.0f;
+			slot.fade_step = 1.0f / float(pend.fade_in_frames);
+			slot.fade_kill = false;
 		} else {
 			slot.fade = 1.0f;
 			slot.fade_step = 0.0f;
 			slot.fade_kill = false;
 		}
-		trace_entry(p_frame, node, uint8_t(p_slot), pend.segment, pend.kind, s.pitch, 0);
+		trace_entry(p_frame, s, uint8_t(p_slot), pend.segment, pend.kind, s.pitch, 0);
 	};
 
 	uint32_t i = 0;

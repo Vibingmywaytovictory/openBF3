@@ -64,7 +64,7 @@ Status check_shape(const SoundProgram &p, const SoundNode &n, bool p_child, size
 			!range_ok(n.plugins_begin, n.plugins_count, p.plugin_refs.size())) {
 		return invalid(where + ": a pool range lies outside its pool");
 	}
-	if (!info.a2) {
+	if (!sound_node_implemented(n.type)) {
 		if (n.ports_count || n.floats_count || n.children_count || n.waves_count || n.plugins_count || n.output != kNoRegister) {
 			return invalid(where + ": unimplemented " + std::string(info.ebx_name) + " carries data");
 		}
@@ -88,15 +88,20 @@ Status check_shape(const SoundProgram &p, const SoundNode &n, bool p_child, size
 	if (n.type == SoundNodeType::Sampler && (n.waves_count != 1 || n.plugins_count % port::kSamplerSlotPlugins != 0)) {
 		return invalid(where + ": sampler wave / slot layout");
 	}
+	const bool loop_player = n.type == SoundNodeType::DivisibleLoopPlayer;
+	if (loop_player && (n.waves_count != 1 || n.plugins_count % port::kLoopSlotPlugins != 0)) {
+		return invalid(where + ": loop player wave / slot layout");
+	}
 	const bool one_plugin = n.type == SoundNodeType::Gain || n.type == SoundNodeType::HighPassIir2 || n.type == SoundNodeType::LowPassIir2 ||
 			n.type == SoundNodeType::BandPassIir2 || n.type == SoundNodeType::PeakingIir2 || n.type == SoundNodeType::Delay;
 	if (one_plugin && n.plugins_count != 1) {
 		return invalid(where + ": plugin ref count");
 	}
-	if (!outputs && !one_plugin && n.type != SoundNodeType::Sampler && n.plugins_count != 0) {
+	if (!outputs && !one_plugin && n.type != SoundNodeType::Sampler && !loop_player && n.plugins_count != 0) {
 		return invalid(where + ": unexpected plugin refs");
 	}
-	if (n.type != SoundNodeType::Sampler && n.type != SoundNodeType::WaveSwitcher && n.waves_count != 0) {
+	if (n.type != SoundNodeType::Sampler && n.type != SoundNodeType::WaveSwitcher && !loop_player &&
+			n.waves_count != 0) {
 		return invalid(where + ": unexpected wave refs");
 	}
 	if (p_child && n.children_count != 0) {

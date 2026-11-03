@@ -13,6 +13,7 @@ enum ConeOutput : uint8_t { ConeBypassHeadroom, ConeCenterLevel, ConeIn, ConeInn
 enum Crossfader2 : uint8_t { Cf2Ctrl, Cf2Out1, Cf2Out2 };
 enum DeMux : uint8_t { DeMuxTrigger, DeMuxValue };
 enum Delay : uint8_t { DelayTime, DelayFeedback, DelayIn, DelayOut };
+enum DivisibleLoopPlayer : uint8_t { DlpAmplitude, DlpExternalWave, DlpFreezeSegment, DlpOutput, DlpStart, DlpStop };
 enum EventGate : uint8_t { GateCoolDown, GateEnable, GateIn, GateOut };
 enum Gain : uint8_t { GainAmplitude, GainIn, GainOut };
 enum Iir2 : uint8_t { Iir2Frequency, Iir2In, Iir2Out };
@@ -61,6 +62,7 @@ enum ValueSelectorEntry : uint8_t { VsEntryInput };
 enum ConeFloat : uint8_t { ConeGain, ConeHfAngle, ConeHfDistance, ConeHfObstruction, ConeHfOcclusion, ConeMinDistance, ConeOutsideGain, ConePanSize, ConeReverbGain };
 enum DelayFloat : uint8_t { DelayMax };
 enum DirectFloat : uint8_t { DirectGain, DirectHfDistance, DirectHfObstruction, DirectHfOcclusion, DirectMinDistance };
+enum DivisibleLoopPlayerFloat : uint8_t { DlpCrossFadeLength };
 enum FlatFloat : uint8_t { FlatAngle, FlatGain, FlatHfDistance, FlatHfObstruction, FlatHfOcclusion, FlatMinDistance, FlatReverbGain };
 enum LfoFloat : uint8_t { LfoMax, LfoMin };
 enum NumberGeneratorFloat : uint8_t { NumMax, NumMin };
@@ -148,6 +150,8 @@ constexpr uint32_t audio_ports(SoundNodeType p_type) {
 			return (1u << PeakIn) | (1u << PeakOut);
 		case SoundNodeType::Sampler:
 			return 1u << SmpOutput;
+		case SoundNodeType::DivisibleLoopPlayer:
+			return 1u << DlpOutput;
 		default:
 			return 0;
 	}
@@ -178,6 +182,8 @@ constexpr SoundNodeType child_type(SoundNodeType p_type) {
 
 inline constexpr uint16_t kSamplerSlotPlugins = 4;
 enum SamplerPlugin : uint8_t { SlotSndPlayer, SlotResample, SlotPause, SlotGain };
+inline constexpr uint16_t kLoopSlotPlugins = 4;
+enum LoopPlugin : uint8_t { LoopSndPlayer, LoopPause, LoopGain, LoopGainFader };
 enum OutputPlugin : uint8_t { OutLowPass, OutPan, OutMainSend, OutReverbSend, OutVu };
 inline constexpr uint16_t kOutputPlugins = 5;
 
