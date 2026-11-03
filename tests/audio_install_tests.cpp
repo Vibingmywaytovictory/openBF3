@@ -1408,6 +1408,51 @@ TEST_SUITE("audio-ir") {
 		check_unchanged_snapshot(f->before, f->reader);
 	}
 
+	TEST_CASE("every send to the Reverb bus in the census patches is an output's ReverbSend") {
+		IrFixture *f = ir_fixture();
+		size_t patches = 0, compiled = 0, reverb_sends = 0, owned = 0;
+		std::vector<std::string> unowned;
+		for (const EbxLibrary::Entry &e : f->all_mp->entries()) {
+			if (e.partition->primary().type_name() != "SoundPatchAsset") {
+				continue;
+			}
+			++patches;
+			CompileOptions options;
+			options.allow_unimplemented = true;
+			gameplay::WorkBudget budget;
+			Result<SoundProgram> prog = compile_sound_patch(*f->all_mp, *e.partition, options, budget);
+			if (!prog) {
+				continue;
+			}
+			++compiled;
+			for (size_t g = 0; g < prog->plugins.size(); ++g) {
+				const SoundVoicePlugin &pl = prog->plugins[g];
+				if ((pl.id != fourcc("Sen0") && pl.id != fourcc("Rou0")) || pl.connection == kNoRegister) {
+					continue;
+				}
+				const SoundConnection &c = prog->connections[pl.connection];
+				if (!c.to_bus || c.bus != MasterBus::Reverb) {
+					continue;
+				}
+				++reverb_sends;
+				const bool mine = std::any_of(prog->outputs.begin(), prog->outputs.end(), [&](const SoundOutput &o) {
+					return o.reverb_send_plugin.valid() &&
+							prog->voices[o.reverb_send_plugin.voice].plugins_begin + o.reverb_send_plugin.plugin == g;
+				});
+				owned += mine ? 1 : 0;
+				if (!mine && unowned.size() < 8) {
+					unowned.push_back(std::string(e.name));
+				}
+			}
+		}
+		MESSAGE("@all-mp: ", patches, " patches, ", compiled, " compiled, ", reverb_sends, " sends to the Reverb bus, ",
+				owned, " of them an output's ReverbSend");
+		CHECK(compiled == patches);
+		CHECK(reverb_sends > 0);
+		CHECK_MESSAGE(owned == reverb_sends, (unowned.empty() ? std::string() : unowned.front()));
+		check_unchanged_snapshot(f->before, f->reader);
+	}
+
 	TEST_CASE("every impulse response on Metro and Seine TDM decodes and equals its census decode") {
 		IrFixture *f = ir_fixture();
 		for (const char *level_name : { "MP_Subway", "MP_011" }) {

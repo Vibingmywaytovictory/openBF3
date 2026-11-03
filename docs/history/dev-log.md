@@ -2949,3 +2949,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * The irf1 decoder reads through one shared big-endian reader, `bf3/core/util/big_endian.h`, instead of its own copy; core.util.unit, audio.ir.install.
 * audio.hdr.install holds RIR1 of the install's master mix at a MaxReverbLength of 2.0 s and one IrReverb step per plan; audio.hdr.install.
 * audio.mixer.unit runs the reverb's frequency-domain delay line through ten wraps of 4 partitions against direct convolution; audio.mixer.unit.
+* audio.ir.install holds that each of the 1374 Reverb-bus sends in the 834 @all-mp patches is an output's ReverbSend; audio.ir.install.
