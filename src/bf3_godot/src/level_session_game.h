@@ -145,6 +145,7 @@ struct GameState {
 	std::array<std::unordered_map<uint16_t, std::string>, 2> vm_catalog;
 	std::vector<std::unique_ptr<bf3::render::ViewmodelSet>> vm_catalog_sets;
 	std::vector<bool> def_switch_when_empty;
+	std::vector<bf3::core::gameplay::WeaponAiming> def_aiming;
 	double vm_release_end_seen = -1;
 	bool slot_selectable(const bf3::net::WeaponSlotWire &p_slot) const;
 	void want_catalog_weapons(std::span<const uint16_t> p_defs);

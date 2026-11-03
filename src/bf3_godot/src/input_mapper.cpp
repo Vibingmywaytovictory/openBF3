@@ -65,6 +65,34 @@ float InputMapper::clamp_pitch(float p_pitch) {
 	return std::clamp(p_pitch, -limit, limit);
 }
 
+float InputMapper::clamp_view_pitch(float p_pitch) const {
+	const float limit = pitch_limit();
+	return std::clamp(p_pitch, std::max(own_look_.min_pitch, -limit), std::min(own_look_.max_pitch, limit));
+}
+
+void InputMapper::set_own_look(const OwnLook &p_look) {
+	own_look_ = p_look;
+	mouse_sensitivity = bf3::core::ui::look_radians_per_count(look_scale, p_look.rate);
+}
+
+OwnLook own_look_of(const bf3::core::gameplay::WeaponAiming *p_aiming, sim::Pose p_pose, bool p_sprinting,
+		bool p_zoomed, float p_zoom_look) {
+	OwnLook out;
+	out.rate.zoom = p_zoom_look;
+	if (p_aiming == nullptr || !p_aiming->present || size_t(p_pose) >= p_aiming->poses.size()) {
+		return out;
+	}
+	const bf3::core::gameplay::AimingPose &pose = p_aiming->poses[size_t(p_pose)];
+	out.rate.pose = pose.speed_multiplier;
+	out.min_pitch = pose.min_pitch_deg * bf3::core::kDegToRadF;
+	out.max_pitch = pose.max_pitch_deg * bf3::core::kDegToRadF;
+	const size_t level = p_zoomed && p_aiming->zoom_levels.size() > 1 ? 1 : 0;
+	if (p_sprinting && !p_aiming->zoom_levels.empty()) {
+		out.rate.sprint = p_aiming->zoom_levels[level].sprint_look_speed;
+	}
+	return out;
+}
+
 void InputMapper::install_actions() {
 	if (actions_installed_) {
 		return;
@@ -135,7 +163,8 @@ void InputMapper::look(float p_dx, float p_dy) {
 	ViewAngles &v = free_camera_ ? free_view_ : view_;
 	v.yaw = wrap_yaw(v.yaw - p_dx * mouse_sensitivity);
 	const float flip = invert_look && !free_camera_ ? -1.0f : 1.0f;
-	v.pitch = clamp_pitch(v.pitch - p_dy * mouse_sensitivity * flip);
+	const float pitch = v.pitch - p_dy * mouse_sensitivity * flip;
+	v.pitch = free_camera_ ? clamp_pitch(pitch) : clamp_view_pitch(pitch);
 }
 
 void InputMapper::handle_event(const Ref<InputEvent> &p_event) {
@@ -216,7 +245,7 @@ void InputMapper::script_press(InputAction p_action) {
 void InputMapper::script_view(float p_yaw, float p_pitch) {
 	ViewAngles &v = free_camera_ ? free_view_ : view_;
 	v.yaw = wrap_yaw(p_yaw);
-	v.pitch = clamp_pitch(p_pitch);
+	v.pitch = free_camera_ ? clamp_pitch(p_pitch) : clamp_view_pitch(p_pitch);
 }
 
 void InputMapper::release_all() {
@@ -261,7 +290,7 @@ void InputMapper::adopt(const bf3::host::PresentationFrame &p_frame) {
 	}
 	life_ = p_frame.own_curr.life;
 	view_.yaw = wrap_yaw(sim::yaw_radians(p_frame.own_curr.yaw));
-	view_.pitch = clamp_pitch(sim::pitch_radians(p_frame.own_curr.pitch));
+	view_.pitch = clamp_view_pitch(sim::pitch_radians(p_frame.own_curr.pitch));
 	pose_ = p_frame.own_curr.target_pose;
 	++adoptions_;
 }

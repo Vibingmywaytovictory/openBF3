@@ -490,8 +490,10 @@ bool Bf3LevelSession::game_load_assets(const host::LevelDatabase &p_db, bf3::cor
 	}
 	g.gunplay = *inputs;
 	g.def_switch_when_empty.clear();
+	g.def_aiming.clear();
 	for (const bf3::core::gameplay::WeaponDef &d : shared->gunplay->defs) {
 		g.def_switch_when_empty.push_back(d.allow_switching_out_of_ammo);
+		g.def_aiming.push_back(d.aiming);
 	}
 	const bf3::core::gameplay::WeaponSwitching &switching = shared->gunplay->switching;
 	const bf3::core::gameplay::DirectWeaponSwitch *grenade =
@@ -1237,6 +1239,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 	if (own_vm != nullptr && g.settings != nullptr) {
 		own_vm->set_hip_fov(g.settings->hip_fov_deg());
 	}
+	float zoom_look = 1.0f;
 	if (own_vm != nullptr && camera != nullptr) {
 		const bool show = g.alive && g.weapon.valid && !free_camera;
 		if (show) {
@@ -1263,12 +1266,13 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			const double release_end = own_vm->output().release_end_s;
 			mapper_.set_quick_release(by_flow, release_end > g.vm_release_end_seen);
 			g.vm_release_end_seen = std::max(g.vm_release_end_seen, release_end);
-			mapper_.mouse_sensitivity = g.base_sensitivity * std::clamp(own_vm->look_scale(), 0.05f, 4.0f);
-		} else {
-			mapper_.mouse_sensitivity = g.base_sensitivity;
+			zoom_look = std::clamp(own_vm->look_scale(), 0.05f, 4.0f);
 		}
 		own_vm->set_visible(show && own_vm->item() >= 0);
 	}
+	const bool own_aims = g.alive && g.weapon.valid && g.weapon.def < g.def_aiming.size();
+	mapper_.set_own_look(own_look_of(own_aims ? &g.def_aiming[g.weapon.def] : nullptr, f.own_curr.pose,
+			(f.own_curr.flags & sim::soldier_flags::kSprinting) != 0, g.weapon.valid && g.weapon.zoomed, zoom_look));
 	g.ms_vm = ms_since(part_t0);
 	part_t0 = std::chrono::steady_clock::now();
 

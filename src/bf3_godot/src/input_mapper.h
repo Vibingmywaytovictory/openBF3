@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/core/gameplay/weapon_def.h"
 #include "bf3/core/ui/settings_effects.h"
 #include "bf3/host/client_session.h"
 #include "bf3/sim/command.h"
@@ -49,11 +50,24 @@ struct ViewAngles {
 	float pitch = 0.0f;
 };
 
+struct OwnLook {
+	bf3::core::ui::LookMultipliers rate;
+	float min_pitch = -0.5f * bf3::sim::kPi;
+	float max_pitch = 0.5f * bf3::sim::kPi;
+};
+
+OwnLook own_look_of(const bf3::core::gameplay::WeaponAiming *p_aiming, bf3::sim::Pose p_pose, bool p_sprinting,
+		bool p_zoomed, float p_zoom_look);
+
 class InputMapper {
 public:
 
 	static float pitch_limit();
 	static float clamp_pitch(float p_pitch);
+	float clamp_view_pitch(float p_pitch) const;
+
+	void set_own_look(const OwnLook &p_look);
+	const OwnLook &own_look() const { return own_look_; }
 
 	void install_actions();
 	size_t rebind(std::string_view p_action, std::span<const std::string> p_inputs);
@@ -63,6 +77,9 @@ public:
 	void poll_devices();
 	void set_capture(bool p_capture);
 	bool captured() const { return captured_; }
+#if OPENBF3_BUILD_CHECKS
+	void capture_for_check() { captured_ = true; }
+#endif
 	void set_game_input(bool p_on);
 	bool game_input() const { return game_input_; }
 
@@ -92,6 +109,7 @@ public:
 	godot::Vector3 free_move() const;
 	float free_speed_factor() const { return held(InputAction::Sprint) ? 6.0f : 1.0f; }
 
+	float look_scale = 1.0f;
 	float base_sensitivity = kBaseLookRadiansPerCount;
 	float mouse_sensitivity = kBaseLookRadiansPerCount;
 	bool invert_look = false;
@@ -104,6 +122,7 @@ private:
 	std::array<bool, kInputActionCount> held_{};
 	ViewAngles view_;
 	ViewAngles free_view_;
+	OwnLook own_look_;
 	bf3::sim::Pose pose_ = bf3::sim::Pose::Stand;
 	uint32_t jump_presses_ = 0;
 	uint32_t life_ = 0;
