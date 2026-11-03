@@ -2922,3 +2922,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * The match host reads a LevelChange before the lobby MatchInfo, so a change between the reads cannot mark a stale session's round handled; net.procs.follow.
 * server.cmd's help says the game client follows level changes; a --maplist game logs its real port; unused following() and stop_ removed from the match host; hygiene.rules.
 * net.procs.follow asserts 0 orphan nodes on every level and fails if the objects count cannot be read; net.procs.follow.
+* Squads in the native rows: SquadSpawn, SquadListRow and SquadDetailedRow ported, squadscreen's lists and Join/Create/Kick buttons bound from the model with UISquadCompData's names, the scoreboard's LocalSquad from the players' squads; ui.widgets, ui.scoreboard, ui.hud.screen.unit, m2b.contract2.

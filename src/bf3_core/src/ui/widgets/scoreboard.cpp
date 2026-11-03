@@ -483,6 +483,14 @@ constexpr int32_t kRankZeroFrame = 1;
 constexpr int32_t kVoipOffFrame = 2;
 constexpr const char *kNoPing = "-";
 
+bool in_local_squad(const HudModel &p_model, const HudPlayer &p_player) {
+	if (p_model.local_player >= p_model.players.size() || p_player.squad == 0) {
+		return false;
+	}
+	const HudPlayer &local = p_model.players[p_model.local_player];
+	return local.squad == p_player.squad && local.team == p_player.team;
+}
+
 As2Value scoreboard_row(const HudModel &p_model, uint8_t p_slot) {
 	const HudPlayer &p = p_model.players[p_slot];
 	As2Value r = As2Value::object();
@@ -494,7 +502,7 @@ As2Value scoreboard_row(const HudModel &p_model, uint8_t p_slot) {
 	r.set("Deaths", As2Value::of(int32_t(p.deaths)));
 	r.set("Score", As2Value::of(p.score));
 	r.set("Ping", p.bot ? As2Value::of(kNoPing) : As2Value::of(int32_t(p.ping_ms)));
-	r.set("LocalSquad", As2Value::of(false));
+	r.set("LocalSquad", As2Value::of(in_local_squad(p_model, p)));
 	r.set("LocalPlayer", As2Value::of(p_slot == p_model.local_player));
 	r.set("MatchReady", As2Value::of(false));
 	return r;

@@ -421,6 +421,16 @@ public:
 		setup_refresh_data(*this, r_host, p_init.data);
 	}
 
+	void attach_node(HudWidgetHost &, const HudWidgetNode &p_node) override { sources_ = p_node.sources; }
+
+	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const override {
+		for (const HudDataSource &src : sources_) {
+			if (std::optional<As2Value> item = hud_squad_button_item(src, p_model, p_client)) {
+				r_out.push_back({ src.name, std::move(*item), src.on_initialize });
+			}
+		}
+	}
+
 	void update(HudWidgetHost &r_host, std::string_view p_key, const As2Value &p_value) override {
 		if (p_key == "ButtonItem") {
 			const As2Value &label = p_value.field("Label");
@@ -730,6 +740,7 @@ private:
 	}
 
 	HudWidgetHost *host_ = nullptr;
+	std::vector<HudDataSource> sources_;
 	HudButtonCallbacks callbacks_;
 	bool send_event_with_function_ = false;
 	bool active_ = true;

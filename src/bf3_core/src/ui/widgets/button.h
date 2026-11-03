@@ -38,6 +38,9 @@ public:
 	virtual const std::string &current_label() const = 0;
 };
 
+std::optional<As2Value> hud_squad_button_item(
+		const HudDataSource &p_source, const HudModel &p_model, const HudClientState &p_client);
+
 inline HudButton *hud_initialized_button(HudWidgetHost &r_host, const As2Clip &p_clip) {
 	HudScreen &screen = r_host.screen();
 	HudWidgetController *controller = screen.controller(p_clip.path());

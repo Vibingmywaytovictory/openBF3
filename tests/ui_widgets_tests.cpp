@@ -3,6 +3,7 @@
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/ui/as2_clip.h"
 #include "bf3/core/ui/hud_screen.h"
+#include "bf3/core/ui/hud_squads.h"
 #include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/swf_scene.h"
 #include "bf3/core/ui/text_db.h"
@@ -16,8 +17,13 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <map>
+#include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using namespace bf3::core;
@@ -125,6 +131,53 @@ std::vector<As2Value> scoreboard_rows(int32_t p_count, int32_t p_local) {
 		rows.push_back(std::move(r));
 	}
 	return rows;
+}
+
+std::vector<std::string> live_rows(const ScreenRig &p_b, std::string_view p_class) {
+	std::vector<std::pair<double, std::string>> found;
+	for (const std::unique_ptr<HudWidgetState> &w : p_b.s.hud->widgets()) {
+		if (w->class_name == p_class && !w->retired) {
+			found.emplace_back(double(p_b.s.hud->clip(w->path).y()), w->path);
+		}
+	}
+	std::sort(found.begin(), found.end());
+	std::vector<std::string> out;
+	for (const auto &f : found) {
+		out.push_back(f.second);
+	}
+	return out;
+}
+
+As2Value squad_list_row(std::string p_label, int32_t p_members, bool p_squad, bool p_local) {
+	As2Value r = As2Value::object();
+	r.set("Label", As2Value::of(std::move(p_label)));
+	r.set("Members", As2Value::of(p_members));
+	r.set("IsSquad", As2Value::of(p_squad));
+	r.set("LocalSquad", As2Value::of(p_local));
+	r.set("IsPrivate", As2Value::of(false));
+	r.set("HasFriend", As2Value::of(false));
+	return r;
+}
+
+As2Value squad_member_row(std::string p_label, int32_t p_kills, int32_t p_deaths, int32_t p_score, bool p_leader) {
+	As2Value r = As2Value::object();
+	r.set("Type", As2Value::of("SquadDetailedRow"));
+	r.set("Label", As2Value::of(std::move(p_label)));
+	r.set("Kills", As2Value::of(p_kills));
+	r.set("Deaths", As2Value::of(p_deaths));
+	r.set("Score", As2Value::of(p_score));
+	r.set("LocalSquad", As2Value::of(true));
+	r.set("Kit", As2Value::of(2));
+	r.set("Voip", As2Value::of(2));
+	r.set("BoosterIcon", As2Value::of(0));
+	r.set("SquadLeader", As2Value::of(p_leader));
+	r.set("EmptyRow", As2Value::of(false));
+	return r;
+}
+
+uint32_t clip_rgb(const As2Clip &p_clip) {
+	const As2ColorTransform c = p_clip.color_transform();
+	return (uint32_t(c.rb) << 16) | (uint32_t(c.gb) << 8) | uint32_t(c.bb);
 }
 }
 
@@ -853,6 +906,188 @@ TEST_SUITE("ui-widgets") {
 		CHECK_FALSE(bar.visible());
 		CHECK(b.s.hud->stats().as2.missing_paths == 0);
 		std::printf("ui.widgets console button bar: SELECT '%s' at 0, BACK at %.1f\n", label.text().c_str(), back.x());
+	}
+
+	TEST_CASE("widgets: squadscreen's squad rows read 'n / 4' with the local tick, its member rows the leader and "
+			  "K/D/score, and spawnscreenpc's squadSpawn row the mate's name, rank and kit, as their AS2 classes do") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		ScreenRig squad;
+		open_screen(*r, squad, "ui/flow/screen/squadscreen");
+		As2Value squads = As2Value::array();
+		squads.push(squad_list_row("Alpha", 3, true, true));
+		squads.push(squad_list_row("Bravo", 4, true, false));
+		squads.push(squad_list_row("Charlie", 0, true, false));
+		REQUIRE(hud_list_set_rows(*squad.s.hud, "List_04", squads));
+		const std::vector<std::string> squad_rows = live_rows(squad, "Widget.List.Rows.SquadListRow");
+		REQUIRE(squad_rows.size() == 3u);
+		const auto members = [&](const std::string &p_row) {
+			return squad.s.hud->clip(p_row + ".Members.txtField").text();
+		};
+		const auto label = [&](const std::string &p_row) {
+			return squad.s.hud->clip(p_row + ".Label.txtField").text();
+		};
+		CHECK(label(squad_rows[0]) == "Alpha");
+		CHECK(members(squad_rows[0]) == "3 / 4");
+		CHECK(members(squad_rows[1]) == "4 / 4");
+		CHECK(members(squad_rows[2]) == "0 / 4");
+		CHECK(squad.s.hud->clip(squad_rows[0] + ".Check").visible());
+		CHECK_FALSE(squad.s.hud->clip(squad_rows[1] + ".Check").visible());
+		CHECK_FALSE(squad.s.hud->clip(squad_rows[1] + ".privateIcon").visible());
+		const auto *bravo = dynamic_cast<const RowBaseClass *>(squad.s.hud->controller(squad_rows[1]));
+		REQUIRE(bravo != nullptr);
+		CHECK_FALSE(bravo->highlighted());
+		CHECK(clip_rgb(squad.s.hud->clip(squad_rows[1] + ".Label")) == 7586815u);
+		CHECK(clip_rgb(squad.s.hud->clip(squad_rows[2] + ".Members")) == 0xFFFFFFu);
+		const auto *alpha = dynamic_cast<const RowBaseClass *>(squad.s.hud->controller(squad_rows[0]));
+		REQUIRE(alpha != nullptr);
+		CHECK(clip_rgb(squad.s.hud->clip(squad_rows[0] + ".Label")) == (alpha->highlighted() ? 0u : 8429618u));
+
+		As2Value mates = As2Value::array();
+		mates.push(squad_member_row("BOT_Sgt. Foster", 2, 3, 572, true));
+		mates.push(squad_member_row("Maggy", 4, 2, 430, false));
+		REQUIRE(hud_list_set_rows(*squad.s.hud, "List_02", mates));
+		const std::vector<std::string> member_rows = live_rows(squad, "Widget.List.Rows.SquadDetailedRow");
+		REQUIRE(member_rows.size() == 2u);
+		const auto field = [&](const std::string &p_row, std::string_view p_name) {
+			return squad.s.hud->clip(p_row + "." + std::string(p_name) + ".txtField").text();
+		};
+		CHECK(field(member_rows[0], "Label") == "BOT_Sgt. Foster");
+		CHECK(field(member_rows[0], "KillsLabel") == "2");
+		CHECK(field(member_rows[0], "DeathsLabel") == "3");
+		CHECK(field(member_rows[0], "ScoreLabel") == "572");
+		CHECK(field(member_rows[1], "ScoreLabel") == "430");
+		CHECK(squad.s.hud->clip(member_rows[0] + ".squadLeaderIcon").visible());
+		CHECK_FALSE(squad.s.hud->clip(member_rows[1] + ".squadLeaderIcon").visible());
+		const float start = squad.s.hud->clip(member_rows[1] + ".dummyTextField").x();
+		CHECK(squad.s.hud->clip(member_rows[1] + ".Label").x() == doctest::Approx(start));
+		CHECK(squad.s.hud->clip(member_rows[0] + ".Label").x() == doctest::Approx(start + 30.0f));
+		const SwfSceneNode *bg = squad.s.scene->find_node(member_rows[1] + ".bg");
+		REQUIRE(bg != nullptr);
+		REQUIRE(bg->timeline != nullptr);
+		CHECK(squad.frame_label(member_rows[1] + ".bg").ends_with("Squad"));
+		CHECK(squad.s.hud->stats().as2.missing_paths == 0);
+		CHECK_MESSAGE(squad.s.hud->stats().as2.failed_ops == 0, squad.s.hud->stats().as2.last_failure);
+
+		ScreenRig spawn;
+		open_screen(*r, spawn, kSpawnScreenPc);
+		const uint32_t missing_at_open = spawn.s.hud->stats().as2.missing_paths;
+		As2Value spawn_rows = As2Value::array();
+		As2Value mate = As2Value::object();
+		mate.set("Type", As2Value::of("squadSpawn"));
+		mate.set("Label", As2Value::of("BOT_Sgt. Foster"));
+		mate.set("Rank", As2Value::of(0));
+		mate.set("KitIcon", As2Value::of(3));
+		mate.set("BoosterIcon", As2Value::of(0));
+		mate.set("Voip", As2Value::of(2));
+		mate.set("id", As2Value::of(5));
+		spawn_rows.push(std::move(mate));
+		REQUIRE(hud_list_set_rows(*spawn.s.hud, "List_01", spawn_rows));
+		const std::vector<std::string> mate_rows = live_rows(spawn, "Widget.List.Rows.SquadSpawn");
+		REQUIRE(mate_rows.size() == 1u);
+		CHECK(spawn.s.hud->clip(mate_rows[0] + ".Label.txtField").text() == "BOT_Sgt. Foster");
+		CHECK(spawn.s.hud->clip(mate_rows[0] + ".rankIcon").current_frame() == 1u);
+		CHECK(spawn.s.hud->clip(mate_rows[0] + ".kitIcon").current_frame() == 3u);
+		CHECK_FALSE(spawn.s.hud->clip(mate_rows[0] + ".dummyTextField").visible());
+		CHECK(spawn.s.hud->stats().as2.missing_paths == missing_at_open);
+		std::printf("ui.widgets squad rows: '%s' '%s', leader label at %.1f, mate row '%s'\n",
+				label(squad_rows[0]).c_str(), members(squad_rows[0]).c_str(),
+				squad.s.hud->clip(member_rows[0] + ".Label").x(),
+				spawn.s.hud->clip(mate_rows[0] + ".Label.txtField").text().c_str());
+	}
+
+	TEST_CASE("widgets: squadscreen's lists and buttons bind from the model: the team's squads by name, the selected "
+			  "squad's members padded to 4, JOIN or LEAVE SQUAD, CREATE SQUAD, KICK for the leader") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudSquadNames names;
+		for (size_t i = 0; i < names.size(); ++i) {
+			names[i] = "SQ" + std::to_string(i + 1);
+		}
+		std::map<std::pair<std::string, int32_t>, std::string> flow;
+		HudClientState client;
+		client.squad_names = &names;
+		client.flow_data = [&flow](std::string_view p_category, int32_t p_key) -> std::optional<std::string> {
+			const auto it = flow.find({ std::string(p_category), p_key });
+			return it != flow.end() ? std::optional<std::string>(it->second) : std::nullopt;
+		};
+		HudModel m;
+		m.local_player = 1;
+		m.local_team = 1;
+		m.player_count = 4;
+		const auto name = [&](uint8_t p_slot, std::string_view p_name) {
+			std::memcpy(m.players[p_slot].name.data(), p_name.data(), p_name.size());
+		};
+		name(0, "Leader");
+		name(1, "Me");
+		name(2, "Other");
+		name(3, "Enemy");
+		for (const uint8_t slot : { 0, 1, 2 }) {
+			m.players[slot].team = 1;
+		}
+		m.players[3].team = 2;
+		m.players[0].squad = 2;
+		m.squad_leaders[0] = true;
+		m.players[0].kills = 7;
+		m.players[1].squad = 2;
+		m.players[2].squad = 5;
+		m.players[3].squad = 2;
+		m.squad.available_squads.count = 2;
+		m.squad.available_squads.squads[0] = HudSquadEntry{ 2, 2, true };
+		m.squad.available_squads.squads[1] = HudSquadEntry{ 5, 4, false };
+
+		ScreenRig squad;
+		open_screen(*r, squad, "ui/flow/screen/squadscreen", client);
+		squad.s.hud->refresh(m);
+		const std::vector<std::string> squad_rows = live_rows(squad, "Widget.List.Rows.SquadListRow");
+		REQUIRE(squad_rows.size() == 2u);
+		CHECK(squad.s.hud->clip(squad_rows[0] + ".Label.txtField").text() == "SQ2");
+		CHECK(squad.s.hud->clip(squad_rows[0] + ".Members.txtField").text() == "2 / 4");
+		CHECK(squad.s.hud->clip(squad_rows[0] + ".Check").visible());
+		CHECK(squad.s.hud->clip(squad_rows[1] + ".Label.txtField").text() == "SQ5");
+		CHECK_FALSE(squad.s.hud->clip(squad_rows[1] + ".Check").visible());
+		const std::vector<std::string> member_rows = live_rows(squad, "Widget.List.Rows.SquadDetailedRow");
+		REQUIRE(member_rows.size() == 4u);
+		const auto field = [&](const std::string &p_row, std::string_view p_name) {
+			return squad.s.hud->clip(p_row + "." + std::string(p_name) + ".txtField").text();
+		};
+		CHECK(field(member_rows[0], "Label") == "Leader");
+		CHECK(field(member_rows[0], "KillsLabel") == "7");
+		CHECK(squad.s.hud->clip(member_rows[0] + ".squadLeaderIcon").visible());
+		CHECK(field(member_rows[1], "Label") == "Me");
+		CHECK_FALSE(squad.s.hud->clip(member_rows[1] + ".squadLeaderIcon").visible());
+		CHECK(field(member_rows[2], "Label").empty());
+		CHECK_FALSE(squad.s.hud->clip(member_rows[2] + ".KillsLabel").visible());
+		CHECK_FALSE(squad.s.hud->clip(member_rows[3] + ".KillsLabel").visible());
+		const auto button = [&](std::string_view p_name) { return squad.clip(std::string(p_name)); };
+		CHECK(button("Button_01").visible());
+		CHECK(button("Button_02").visible());
+		CHECK_FALSE(button("Button_03").visible());
+
+		flow[{ std::string(kUiSquadCompPartition), kSquadSelectedSquadKey }] = "5";
+		squad.s.hud->refresh(m);
+		CHECK_FALSE(button("Button_01").visible());
+		const std::vector<std::string> fives = live_rows(squad, "Widget.List.Rows.SquadDetailedRow");
+		REQUIRE_FALSE(fives.empty());
+		std::string labels;
+		for (const std::string &row : fives) {
+			labels += "[" + row + " " + field(row, "Label") + "]";
+		}
+		CHECK_MESSAGE(field(fives[0], "Label") == "Other", labels);
+
+		m.local_player = 0;
+		flow[{ std::string(kUiSquadCompPartition), kSquadSelectedSquadKey }] = "2";
+		flow[{ std::string(kUiSquadCompPartition), kSquadSelectedPlayerKey }] = "Me";
+		squad.s.hud->refresh(m);
+		CHECK(button("Button_03").visible());
+		CHECK(squad.s.hud->stats().as2.missing_paths == 0);
+		CHECK_MESSAGE(squad.s.hud->stats().as2.failed_ops == 0, squad.s.hud->stats().as2.last_failure);
+		std::printf("ui.widgets squadscreen from the model: %zu squads, %zu member rows\n", squad_rows.size(),
+				member_rows.size());
 	}
 
 	TEST_CASE("widgets: install unchanged") {

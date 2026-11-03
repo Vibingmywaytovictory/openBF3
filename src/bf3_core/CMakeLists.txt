@@ -440,3 +440,8 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/sound_area.h
     src/gameplay/sound_area.cpp
 )
+
+target_sources(bf3_core PRIVATE
+    include/bf3/core/ui/hud_squads.h
+    src/ui/hud_squads.cpp
+)

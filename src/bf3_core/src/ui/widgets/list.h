@@ -148,6 +148,11 @@ private:
 };
 
 std::optional<std::vector<As2Value>> hud_model_direct_rows(const HudDataSource &p_query, const HudModel &p_model);
+void goto_row_icon(const As2Clip &p_clip, const As2Value &p_frame);
+std::optional<As2Value> hud_squad_list_rows(
+		const HudDataSource &p_query, const HudModel &p_model, const HudClientState &p_client);
+std::optional<int32_t> hud_squad_list_selection(const HudDataSource &p_query, const HudModel &p_model);
+As2Clip attach_row_label(HudWidgetHost &r_host, const As2Clip &p_dummy, std::string_view p_name);
 std::optional<As2Value> hud_options_list_rows(const HudListBinding &p_binding, const HudClientState &p_client);
 std::optional<std::vector<As2Value>> hud_options_direct_rows(
 		const HudDataSource &p_query, const HudClientState &p_client);

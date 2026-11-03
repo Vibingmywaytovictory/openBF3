@@ -44,6 +44,18 @@ struct Board {
 	std::string text(const std::string &p_row, std::string_view p_field) const {
 		return s.hud->clip(p_row + "." + std::string(p_field)).text();
 	}
+	std::string frame_label(const std::string &p_path) const {
+		const SwfSceneNode *n = s.scene->find_node(p_path);
+		REQUIRE(n != nullptr);
+		REQUIRE(n->timeline != nullptr);
+		std::string out;
+		for (const SwfFrameLabel &l : n->timeline->labels) {
+			if (l.frame <= n->frame) {
+				out = l.name;
+			}
+		}
+		return out;
+	}
 };
 
 void add_player(HudModel &r_model, HudPlayerList &r_list, uint8_t p_slot, std::string_view p_name, bool p_bot) {
@@ -125,6 +137,42 @@ TEST_SUITE("ui-scoreboard") {
 		CHECK(b.text(foster, "KillsLabel") == "3");
 		CHECK(b.text(foster, "ScoreLabel") == "672");
 		CHECK(b.text(foster, "PingLabel") == "-");
+	}
+
+	TEST_CASE("scoreboard: the local squad's mates draw the Squad background, other squads and the enemy's do not") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		Board b;
+		b.s = ui_retail::open_retail_screen(*r, kScoreboard32);
+		HudModel m = footage_model();
+		for (const uint8_t slot : { 0, 1, 2 }) {
+			m.players[slot].team = 1;
+		}
+		m.players[3].team = 2;
+		m.players[0].squad = 3;
+		m.players[1].squad = 4;
+		m.players[2].squad = 3;
+		m.players[3].squad = 3;
+		b.s.hud->initialize(m);
+		b.s.hud->refresh(m);
+		CHECK_MESSAGE(b.s.hud->stats().as2.failed_ops == 0, b.s.hud->stats().as2.last_failure);
+		const std::string foster = b.row("List_01", 0);
+		const std::string nguyen = b.row("List_01", 1);
+		const std::string maggy = b.row("List_01", 2);
+		const std::string belikov = b.row("List_02", 0);
+		REQUIRE_FALSE(foster.empty());
+		REQUIRE_FALSE(belikov.empty());
+		CHECK(b.frame_label(foster + ".bg") == "outSquad");
+		CHECK(b.frame_label(nguyen + ".bg") == "out");
+		CHECK(b.frame_label(maggy + ".bg") == "outPlayer");
+		CHECK(b.frame_label(belikov + ".bg") == "out");
+
+		m.players[1].squad = 3;
+		m.players[0].squad = 0;
+		b.s.hud->refresh(m);
+		CHECK(b.frame_label(nguyen + ".bg") == "outSquad");
 	}
 
 	TEST_CASE("scoreboard: preroundwaitingscreen's alert shows the flow's pre-round texts and CountLeft") {

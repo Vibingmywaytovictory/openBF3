@@ -4,9 +4,7 @@
 
 namespace bf3::core::ui {
 
-namespace {
-
-void goto_icon_frame(const As2Clip &p_clip, const As2Value &p_frame) {
+void goto_row_icon(const As2Clip &p_clip, const As2Value &p_frame) {
 	if (p_frame.kind == As2Value::Kind::String && !std::isfinite(As2Value::of(p_frame.text).to_number())) {
 		p_clip.goto_and_stop(std::string_view(p_frame.text));
 	} else if (p_frame.defined()) {
@@ -14,7 +12,7 @@ void goto_icon_frame(const As2Clip &p_clip, const As2Value &p_frame) {
 	}
 }
 
-As2Clip attach_label(HudWidgetHost &r_host, const As2Clip &p_dummy, std::string_view p_name) {
+As2Clip attach_row_label(HudWidgetHost &r_host, const As2Clip &p_dummy, std::string_view p_name) {
 	const As2Clip self = r_host.self();
 	p_dummy.set_visible(false);
 	const As2Clip label = r_host.attach_movie(self, "mc_label", p_name, self.next_highest_depth());
@@ -22,6 +20,8 @@ As2Clip attach_label(HudWidgetHost &r_host, const As2Clip &p_dummy, std::string_
 	label.set_y(p_dummy.y());
 	return label;
 }
+
+namespace {
 
 class TeamSpawnClass : public RowBaseClass {
 public:
@@ -57,7 +57,7 @@ protected:
 		if (!dummy.exists()) {
 			return;
 		}
-		attach_label(r_host, dummy, kLabel);
+		attach_row_label(r_host, dummy, kLabel);
 		if (HudListLabel *l = label_field()) {
 			if (const std::optional<float> size = dummy.text_size()) {
 				l->set_text_size(*size);
@@ -79,7 +79,7 @@ protected:
 	void set_vehicle_icon(const As2Value &p_icon) const {
 		const As2Clip icon = host_->clip("vehicleIcon");
 		icon.set_visible(true);
-		goto_icon_frame(icon, p_icon);
+		goto_row_icon(icon, p_icon);
 		if (const As2Clip inner = icon.child("icon"); inner.exists()) {
 			inner.goto_and_stop(icon_frame());
 		}
@@ -117,7 +117,7 @@ private:
 		if (!dummy.exists()) {
 			return;
 		}
-		const As2Clip icon_label = attach_label(r_host, dummy, kIconLabel);
+		const As2Clip icon_label = attach_row_label(r_host, dummy, kIconLabel);
 		if (HudListLabel *l = controller_at<HudListLabel>(r_host, icon_label)) {
 			l->set_label_width(dummy.width() - kIconLabelInset);
 			if (const std::optional<float> size = dummy.text_size()) {
@@ -154,10 +154,34 @@ public:
 	}
 };
 
+As2Value squad_spawn_row(const HudModel &p_model, const HudSpawnPoint &p_point, int32_t p_index) {
+	const bool known = p_point.player < p_model.players.size();
+	As2Value row = As2Value::object();
+	row.set("Type", As2Value::of(std::string(kSquadSpawnRowType)));
+	row.set("Label", As2Value::of(known ? hud_player_name(p_model, p_point.player) : std::string()));
+	row.set("Rank", As2Value::of(0));
+	row.set("KitIcon", As2Value::of(known ? int32_t(p_model.players[p_point.player].kit_icon) : 0));
+	row.set("BoosterIcon", As2Value::of(known ? int32_t(p_model.players[p_point.player].booster_icon) : 0));
+	row.set("Voip", As2Value::of(kSquadSpawnVoipOffFrame));
+	row.set("Index", As2Value::of(p_index));
+	row.set("id", As2Value::of(p_index));
+	if (!p_point.available) {
+		row.set("Disabled", As2Value::of(true));
+	}
+	return row;
+}
+
+bool listed_spawn(HudSpawnKind p_kind) {
+	return p_kind == HudSpawnKind::Hq || p_kind == HudSpawnKind::Flag || p_kind == HudSpawnKind::SquadMate;
+}
+
 }
 
 std::optional<As2Value> hud_model_list_rows(
 		const HudDataSource &p_query, const HudModel &p_model, const HudClientState &p_client) {
+	if (std::optional<As2Value> squad = hud_squad_list_rows(p_query, p_model, p_client)) {
+		return squad;
+	}
 	if (p_query.category != kSpawnPointListCategory || p_query.key != kSpawnPointListKey) {
 		return std::nullopt;
 	}
@@ -165,6 +189,10 @@ std::optional<As2Value> hud_model_list_rows(
 	const HudSpawnPointList &list = p_model.spawn_points.spawn_points;
 	for (size_t i = 0; i < std::min<size_t>(list.count, list.points.size()); ++i) {
 		const HudSpawnPoint &p = list.points[i];
+		if (p.kind == HudSpawnKind::SquadMate) {
+			rows.push(squad_spawn_row(p_model, p, int32_t(i)));
+			continue;
+		}
 		if (p.kind != HudSpawnKind::Hq && p.kind != HudSpawnKind::Flag) {
 			continue;
 		}
@@ -187,6 +215,9 @@ std::optional<As2Value> hud_model_list_rows(
 }
 
 std::optional<int32_t> hud_model_list_selection(const HudDataSource &p_query, const HudModel &p_model) {
+	if (std::optional<int32_t> squad = hud_squad_list_selection(p_query, p_model)) {
+		return squad;
+	}
 	if (p_query.category != kSpawnPointListCategory || p_query.key != kDefaultSpawnPointKey) {
 		return std::nullopt;
 	}
@@ -196,7 +227,7 @@ std::optional<int32_t> hud_model_list_selection(const HudDataSource &p_query, co
 	int32_t row = 0;
 	for (size_t i = 0; i < std::min<size_t>(list.count, list.points.size()); ++i) {
 		const HudSpawnPoint &p = list.points[i];
-		if (p.kind != HudSpawnKind::Hq && p.kind != HudSpawnKind::Flag) {
+		if (!listed_spawn(p.kind)) {
 			continue;
 		}
 		if (p.available && int32_t(i) == selected) {

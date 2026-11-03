@@ -251,6 +251,7 @@ struct HudClientState {
 	std::function<std::optional<std::string>(std::string_view, int32_t)> flow_data;
 	const OptionsModel *options = nullptr;
 	const ItemIconIndex *items = nullptr;
+	const std::array<std::string, kHudMaxSquads> *squad_names = nullptr;
 };
 
 class TextDatabase;
