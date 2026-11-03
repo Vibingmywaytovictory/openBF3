@@ -256,6 +256,25 @@ struct ProjectileDef {
 	Suppression suppression;
 };
 
+struct AimingPose {
+	float min_pitch_deg = -90.0f;
+	float max_pitch_deg = 90.0f;
+	float speed_multiplier = 1.0f;
+};
+
+struct ZoomLook {
+	float look_speed = 1.0f;
+	float sprint_look_speed = 1.0f;
+};
+
+inline constexpr size_t kMaxZoomLevels = 8;
+
+struct WeaponAiming {
+	bool present = false;
+	std::array<AimingPose, 3> poses{};
+	std::vector<ZoomLook> zoom_levels;
+};
+
 struct WeaponDef {
 
 	std::string variant;
@@ -290,6 +309,7 @@ struct WeaponDef {
 	FireFunction fire;
 	ProjectileDef projectile;
 	GunSway sway;
+	WeaponAiming aiming;
 };
 
 const char *fire_logic_name(FireLogic p_logic);

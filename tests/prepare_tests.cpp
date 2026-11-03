@@ -198,6 +198,9 @@ gameplay::WeaponDef synthetic_weapon() {
 	d.silenced = true;
 	d.firing_data = "weapons/test/test#{00000000-0000-0000-0000-000000000000}";
 	d.deploy_time = 0.67f;
+	d.aiming.present = true;
+	d.aiming.poses[2] = AimingPose{ -60.0f, 80.0f, 0.75f };
+	d.aiming.zoom_levels = { ZoomLook{ 1.0f, 1.0f }, ZoomLook{ 0.16f, 0.5f } };
 	d.fire.logic = FireLogic::Burst;
 	d.fire.extra_modes = { FireLogic::Single, FireLogic::Automatic };
 	d.fire.rate_of_fire = 800;
@@ -380,6 +383,12 @@ TEST_SUITE("prepare-unit") {
 		CHECK(back->sway.applied.size() == 1);
 		CHECK(back->sway.conditional[0].unlock == "weapons/test/u_test_laser");
 		CHECK(back->fire.extra_modes.size() == 2);
+		CHECK(back->aiming.present);
+		CHECK(back->aiming.poses[2].min_pitch_deg == -60.0f);
+		CHECK(back->aiming.poses[2].speed_multiplier == 0.75f);
+		REQUIRE(back->aiming.zoom_levels.size() == 2);
+		CHECK(back->aiming.zoom_levels[1].look_speed == 0.16f);
+		CHECK(back->aiming.zoom_levels[1].sprint_look_speed == 0.5f);
 		CHECK(back->projectile.material.physics_property_index == -3);
 		CHECK(std::isnan(back->projectile.end_damage));
 		size_t refused = 0;

@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <memory>
 #include <random>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -286,6 +287,75 @@ TEST_SUITE("gameplay") {
 		CHECK(m9.fire.reload_time_bullets_left == 1.35f);
 		CHECK(m9.fire.reload_time == 1.6f);
 		CHECK(m9.fire.reload_threshold == 0.75f);
+	}
+
+	TEST_CASE("aiming pose limits and look multipliers of every MP_Subway aiming controller and weapon") {
+		Mounted m;
+		if (!open_or_skip(m)) {
+			return;
+		}
+		std::unique_ptr<EbxLibrary> lib = open_library(m, kMetro);
+		lib->load_all();
+		std::set<std::string> controllers;
+		for (const EbxLibrary::Entry &e : lib->entries()) {
+			if (e.name.starts_with("weapons/common/aimingcontrollers/") &&
+					!e.partition->instances_of("SoldierAimingSimulationData").empty()) {
+				controllers.insert(std::string(e.name));
+			}
+		}
+		CHECK(controllers.size() == 26);
+		for (const std::string &c : controllers) {
+			CAPTURE(c);
+			const Result<WeaponAiming> a = read_weapon_aiming(*lib, c);
+			REQUIRE_MESSAGE(a.ok(), (a.ok() ? std::string() : a.error().message));
+			for (const AimingPose &p : a->poses) {
+				CHECK(p.min_pitch_deg == -70.0f);
+				CHECK(p.max_pitch_deg == 85.0f);
+				CHECK(p.speed_multiplier == 1.0f);
+			}
+			CHECK(!a->zoom_levels.empty());
+		}
+		std::set<std::string> used;
+		size_t aimed = 0;
+		const std::vector<std::string> variants = list_weapon_variants(*lib);
+		for (const std::string &v : variants) {
+			CAPTURE(v);
+			const WeaponDef w = resolve(*lib, v.c_str());
+			CHECK(w.aiming.present == !w.aiming_controller.empty());
+			if (!w.aiming.present) {
+				continue;
+			}
+			++aimed;
+			used.insert(to_lower_ascii(w.aiming_controller));
+			for (const AimingPose &p : w.aiming.poses) {
+				CHECK(p.min_pitch_deg == -70.0f);
+				CHECK(p.max_pitch_deg == 85.0f);
+				CHECK(p.speed_multiplier == 1.0f);
+			}
+			REQUIRE_FALSE(w.aiming.zoom_levels.empty());
+			CHECK(w.aiming.zoom_levels.size() <= 2);
+			CHECK(w.aiming.zoom_levels[0].look_speed == 1.0f);
+			CHECK(w.aiming.zoom_levels[0].sprint_look_speed == 1.0f);
+		}
+		for (const std::string &c : used) {
+			CAPTURE(c);
+			CHECK(controllers.count(c) == 1);
+		}
+		std::printf("aiming: %zu of %zu weapon variants over %zu of %zu controllers, every pose -70..85 x 1\n", aimed,
+				variants.size(), used.size(), controllers.size());
+
+		const WeaponDef m16 = resolve(*lib, "weapons/m16a4/u_m16a4");
+		CHECK(to_lower_ascii(m16.aiming_controller) == "weapons/common/aimingcontrollers/aim_default_ironsight");
+		REQUIRE(m16.aiming.zoom_levels.size() == 2);
+		CHECK(m16.aiming.zoom_levels[1].look_speed == 0.5f);
+		CHECK(m16.aiming.zoom_levels[1].sprint_look_speed == 0.5f);
+		const WeaponDef sv98_iron = resolve(*lib, "weapons/sv98/u_sv98");
+		CHECK(to_lower_ascii(sv98_iron.aiming_controller) == "weapons/common/aimingcontrollers/aim_slow_ironsight");
+		const WeaponDef sv98 = resolve(*lib, "weapons/sv98/u_sv98", nullptr, { "u_sv98_rifle_scope" });
+		CHECK(to_lower_ascii(sv98.aiming_controller) == "weapons/common/aimingcontrollers/aim_slow_8x");
+		REQUIRE(sv98.aiming.zoom_levels.size() == 2);
+		CHECK(sv98.aiming.zoom_levels[1].look_speed == 0.16f);
+		CHECK(sv98.aiming.zoom_levels[1].sprint_look_speed == 0.5f);
 	}
 
 	TEST_CASE("bolt actions, shotgun, launchers and grenades on MP_Subway") {

@@ -19,6 +19,8 @@ struct WeaponResolveOptions {
 
 Result<WeaponDef> resolve_weapon(const EbxResolver &p_db, std::string_view p_partition, const WeaponResolveOptions &p_options = {});
 
+Result<WeaponAiming> read_weapon_aiming(const EbxResolver &p_db, std::string_view p_controller);
+
 struct WeaponUnlockModifier {
 	std::string unlock;
 	EbxInstance modifier;

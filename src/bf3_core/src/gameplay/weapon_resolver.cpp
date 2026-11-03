@@ -5,6 +5,7 @@
 #include "bf3/core/ids.h"
 
 #include <algorithm>
+#include <array>
 
 namespace bf3::core::gameplay {
 
@@ -109,6 +110,48 @@ void read_firing_data(Fields &r_f, const EbxInstance &p_wfd, WeaponDef &r_w) {
 	r_w.support_delay_stand = r_f.f32_or(w, "SupportDelayStand", 0);
 	r_w.support_delay_prone = r_f.f32_or(w, "SupportDelayProne", 0);
 	r_w.reload_whole_mags = r_f.flag_or(w, "ReloadWholeMags", false);
+}
+
+void read_aiming(Fields &r_f, std::string_view p_controller, WeaponAiming &r_aiming) {
+	const EbxPartition *part = p_controller.empty() ? nullptr : r_f.db().partition_by_name(p_controller);
+	if (part == nullptr) {
+		return;
+	}
+	const std::optional<EbxInstance> sim =
+			r_f.follow(part->primary().data(), "Data", "SoldierAimingSimulationData", true);
+	if (!sim) {
+		return;
+	}
+	const EbxStruct d = sim->data();
+	constexpr std::array<std::string_view, 3> kPoseFields = { "StandPose", "CrouchPose", "PronePose" };
+	for (size_t i = 0; i < kPoseFields.size(); ++i) {
+		const std::optional<EbxStruct> pose = r_f.sub(d, kPoseFields[i]);
+		if (!pose) {
+			return;
+		}
+		r_aiming.poses[i] = AimingPose{ r_f.f32(*pose, "MinimumPitch"), r_f.f32(*pose, "MaximumPitch"),
+			r_f.f32(*pose, "SpeedMultiplier") };
+	}
+	const OptionalEbxArray levels = r_f.array(d, "ZoomLevels");
+	if (!levels) {
+		return;
+	}
+	for (const EbxValue element : *levels) {
+		const std::optional<EbxRef> r = element.as_ref();
+		if (!r || r_aiming.zoom_levels.size() >= kMaxZoomLevels) {
+			r_f.fail(r_f.where(d, "ZoomLevels") + (r ? ": more than 8 levels" : ": element is not a reference"));
+			return;
+		}
+		const std::optional<EbxInstance> level =
+				r_f.follow_ref(d.partition(), *r, "ZoomLevelData", r_f.where(d, "ZoomLevels"));
+		if (!level) {
+			return;
+		}
+		const EbxStruct z = level->data();
+		r_aiming.zoom_levels.push_back(
+				ZoomLook{ r_f.f32(z, "LookSpeedMultiplier"), r_f.f32(z, "SprintLookSpeedMultiplier") });
+	}
+	r_aiming.present = r_f.ok();
 }
 
 bool apply_modifier(Fields &r_f, const EbxInstance &p_mod, WeaponDef &r_w, std::optional<EbxInstance> &r_projectile) {
@@ -270,6 +313,7 @@ Result<WeaponDef> resolve_weapon(const EbxResolver &p_db, std::string_view p_par
 	if (const std::optional<EbxInstance> sway = f.follow(wfd->data(), "WeaponSway", "GunSwayData", false)) {
 		detail::read_gun_sway(f, *sway, active, w.sway);
 	}
+	read_aiming(f, w.aiming_controller, w.aiming);
 	if (!f.ok()) {
 		return f.error();
 	}
@@ -278,6 +322,19 @@ Result<WeaponDef> resolve_weapon(const EbxResolver &p_db, std::string_view p_par
 		w.name_sid_hash = w.name_sid.empty() ? 0 : loc_sid_hash(w.name_sid);
 	}
 	return w;
+}
+
+Result<WeaponAiming> read_weapon_aiming(const EbxResolver &p_db, std::string_view p_controller) {
+	Fields f(p_db);
+	WeaponAiming a;
+	read_aiming(f, p_controller, a);
+	if (!f.ok()) {
+		return f.error();
+	}
+	if (!a.present) {
+		return make_error(std::string(p_controller) + ": no aiming controller partition");
+	}
+	return a;
 }
 
 Result<std::vector<WeaponUnlockModifier>> weapon_unlock_modifiers(

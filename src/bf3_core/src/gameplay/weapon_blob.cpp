@@ -353,6 +353,16 @@ void io_def(IO &io, WeaponDef &d) {
 	io_fire(io, d.fire);
 	io_projectile(io, d.projectile);
 	io_sway(io, d.sway);
+	io.v(d.aiming.present);
+	for (AimingPose &p : d.aiming.poses) {
+		io.v(p.min_pitch_deg);
+		io.v(p.max_pitch_deg);
+		io.v(p.speed_multiplier);
+	}
+	io.vec(d.aiming.zoom_levels, 8, [](IO &p_io, ZoomLook &p_z) {
+		p_io.v(p_z.look_speed);
+		p_io.v(p_z.sprint_look_speed);
+	});
 }
 
 class RecordingResolver final : public EbxResolver {
