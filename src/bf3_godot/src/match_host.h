@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/map_list.h"
@@ -8,6 +9,7 @@
 #include <godot_cpp/classes/input_event.hpp>
 #include <godot_cpp/classes/node.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -60,6 +62,12 @@ private:
 	enum class Phase : uint8_t { Lobby, Playing, Swapping };
 
 	bool parse_connect();
+	void locate_install();
+	std::shared_ptr<bf3::core::Cache> open_cache();
+	std::shared_ptr<bf3::core::Cache> held_cache() const;
+	bf3::host::PrepareJob prepare_job() const;
+	bool wait_for_prepare(const bf3::net::LevelChange &p_change);
+	std::string load_text(const Bf3LevelSession &p_session) const;
 	bool prepare_listen_server();
 	void connect_client(const std::string &p_host, uint16_t p_port);
 	void run_listen_server();
@@ -85,6 +93,9 @@ private:
 	uint32_t level_index_ = 1;
 	uint32_t levels_to_play_ = 1;
 	std::optional<uint32_t> handled_round_;
+	std::optional<uint32_t> waited_round_;
+	std::chrono::steady_clock::time_point change_seen_at_;
+	bool prepare_held_ = false;
 	std::optional<uint8_t> rules_flags_;
 	MatchLevel pending_;
 	bool scene_game_ = false;
@@ -98,6 +109,8 @@ private:
 	std::unique_ptr<bf3::host::ServerSession> server_;
 	bf3::core::InstallReader install_;
 	std::shared_ptr<GameSettings> settings_;
+	std::shared_ptr<bf3::core::Cache> cache_;
+	std::unique_ptr<bf3::host::ClientPrepare> prepare_;
 	std::unique_ptr<NativeKick> kick_;
 };
 

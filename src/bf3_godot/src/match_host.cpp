@@ -19,8 +19,13 @@
 #include "bf3/core/ui/kick_popup.h"
 #include "bf3/core/ui/ui_drawn_screens.h"
 #include "bf3/core/ui/ui_input.h"
+#include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/format.h"
 #include "bf3/core/util/key_values.h"
+#include "bf3/core/util/text.h"
+#include "bf3/host/server_level.h"
 #include "bf3/net/netsim.h"
+#include "bf3/render/level_prepare.h"
 #include "bf3/sim/soldier_motor.h"
 
 #include <godot_cpp/classes/canvas_layer.hpp>
@@ -210,6 +215,110 @@ bool Bf3MatchHost::parse_connect() {
 	return true;
 }
 
+void Bf3MatchHost::locate_install() {
+	bf3::core::InstallLocateOptions opts;
+	opts.cmdline_path = user_arg_value("bf3-install");
+	ProjectSettings *ps = ProjectSettings::get_singleton();
+	if (ps->has_setting("openbf3/install/path")) {
+		opts.setting_path = to_std(String(ps->get_setting("openbf3/install/path")));
+	}
+	install_.locate(opts);
+}
+
+std::shared_ptr<bf3::core::Cache> Bf3MatchHost::open_cache() {
+	const std::string root = user_arg_value("bf3-cache");
+	const std::filesystem::path cache_root =
+			root.empty() ? default_cache_root() : std::filesystem::path(std::u8string(root.begin(), root.end()));
+	AcquiredCache acquired = acquire_cache(cache_root, install_.write_guard());
+	if (acquired.status != bf3::core::CacheStatus::Ok) {
+		return nullptr;
+	}
+	std::lock_guard lock(mutex_);
+	cache_ = acquired.cache;
+	return cache_;
+}
+
+std::shared_ptr<bf3::core::Cache> Bf3MatchHost::held_cache() const {
+	std::lock_guard lock(mutex_);
+	return cache_;
+}
+
+host::PrepareJob Bf3MatchHost::prepare_job() const {
+	const bool meshes = !headless_;
+	const bool shared_level = !has_user_arg("maplist");
+	return [this, meshes, shared_level](const host::PrepareTask &p_task) -> bf3::core::Result<host::PrepareOutcome> {
+		const std::shared_ptr<bf3::core::Cache> cache = held_cache();
+		if (cache == nullptr) {
+			return bf3::core::make_error("no cache to prepare into");
+		}
+		bf3::core::Result<std::shared_ptr<bf3::core::Install>> install = bf3::core::Install::open(install_);
+		if (!install) {
+			return install.error();
+		}
+		host::PrepareOutcome outcome;
+		if (shared_level) {
+			host::ServerLevelOptions options;
+			options.shared.threads = p_task.threads;
+			options.stop = p_task.stop;
+			bf3::core::Result<host::ServerLevel> level = host::load_server_level(*install,
+					host::LevelEntry{ p_task.next.level, p_task.next.mode, 1 }, options, cache.get(), p_task.progress);
+			if (!level) {
+				return level.error();
+			}
+			outcome.source_digest = level->shared->source_digest;
+		}
+		p_task.permille->store(500, std::memory_order_release);
+		if (p_task.stop->load(std::memory_order_acquire)) {
+			return bf3::core::make_error(host::kServerLevelStopped);
+		}
+		bf3::render::PrepareOptions options;
+		options.threads = p_task.threads;
+		options.meshes = meshes;
+		bf3::core::Result<bf3::render::PrepareReport> report =
+				bf3::render::prepare_level(*install, p_task.next.level, p_task.next.mode, cache.get(), options);
+		if (!report) {
+			return report.error();
+		}
+		outcome.cold = report->meshes.converted > 0 || report->weapons.converted > 0;
+		return outcome;
+	};
+}
+
+bool Bf3MatchHost::wait_for_prepare(const bf3::net::LevelChange &p_change) {
+	if (prepare_ == nullptr) {
+		return false;
+	}
+	const bool holds = prepare_->holds(p_change);
+	if (waited_round_ != p_change.round_id) {
+		waited_round_ = p_change.round_id;
+		change_seen_at_ = std::chrono::steady_clock::now();
+		prepare_held_ = holds;
+	}
+	if (holds) {
+		return true;
+	}
+	const host::PrepareStatus s = prepare_->status();
+	if (s.serial == 0 || !bf3::core::iequals_ascii(s.next.level, p_change.level) ||
+			!bf3::core::iequals_ascii(s.next.mode, p_change.mode)) {
+		say("prepare: none for " + p_change.level + " " + p_change.mode);
+		return false;
+	}
+	std::string line = "prepare " + p_change.level + " " + p_change.mode + ": " +
+			(s.state == bf3::net::PrepareState::Ready ? "ready" : "not ready") +
+			bf3::core::fmt(" in %.2f s, ", s.seconds) +
+			(s.skipped ? std::string("nothing to prepare")
+					   : bf3::core::fmt("%s, target %.0f s", s.cold ? "cold" : "warm",
+								 s.cold ? host::kColdPrepareTargetSeconds : host::kWarmLoadTargetSeconds));
+	if (!s.error.empty()) {
+		line += " (" + s.error + ")";
+	}
+	line += prepare_held_
+			? bf3::core::fmt(", finished %.2f s after the level change", bf3::core::seconds_since(change_seen_at_))
+			: std::string(", finished before the level change");
+	say(line);
+	return false;
+}
+
 std::optional<MatchLevel> Bf3MatchHost::first_level() const {
 	return first_level_;
 }
@@ -258,13 +367,7 @@ bool Bf3MatchHost::prepare_listen_server() {
 		end_match(s.error().message);
 		return false;
 	}
-	bf3::core::InstallLocateOptions opts;
-	opts.cmdline_path = user_arg_value("bf3-install");
-	ProjectSettings *ps = ProjectSettings::get_singleton();
-	if (ps->has_setting("openbf3/install/path")) {
-		opts.setting_path = to_std(String(ps->get_setting("openbf3/install/path")));
-	}
-	install_.locate(opts);
+	locate_install();
 	if (!install_.is_mounted()) {
 		end_match("no usable install: " + install_.describe());
 		return false;
@@ -325,14 +428,8 @@ void Bf3MatchHost::run_listen_server() {
 		return;
 	}
 	server_config_.install = *install;
-	const std::string root = user_arg_value("bf3-cache");
 	if (!has_user_arg("no-cache")) {
-		const std::filesystem::path cache_root =
-				root.empty() ? default_cache_root() : std::filesystem::path(std::u8string(root.begin(), root.end()));
-		AcquiredCache acquired = acquire_cache(cache_root, install_.write_guard());
-		if (acquired.status == bf3::core::CacheStatus::Ok) {
-			server_config_.cache = acquired.cache;
-		}
+		server_config_.cache = open_cache();
 	}
 	const bf3::core::Status s = server_->start(std::move(server_config_));
 	if (!s.ok()) {
@@ -372,9 +469,20 @@ void Bf3MatchHost::_ready() {
 	}
 	persistent_ui();
 	if (has_user_arg("connect")) {
+		locate_install();
+	}
+	if (install_.is_mounted() && !has_user_arg("no-cache")) {
+		prepare_ = std::make_unique<host::ClientPrepare>(prepare_job());
+	}
+	if (has_user_arg("connect")) {
 		say("connecting to " + connect_host_ + ":" + std::to_string(connect_port_) +
 				": level, mode and rules come from the server");
-		worker_ = std::thread([this] { connect_client(connect_host_, connect_port_); });
+		worker_ = std::thread([this] {
+			if (prepare_ != nullptr) {
+				open_cache();
+			}
+			connect_client(connect_host_, connect_port_);
+		});
 	} else {
 		server_ = std::make_unique<host::ServerSession>();
 		worker_ = std::thread([this] { run_listen_server(); });
@@ -456,6 +564,9 @@ void Bf3MatchHost::_process(double p_delta) {
 		return;
 	}
 	if (phase_ == Phase::Playing) {
+		if (prepare_ != nullptr) {
+			prepare_->poll(*c);
+		}
 		watch_changes();
 		return;
 	}
@@ -486,7 +597,7 @@ void Bf3MatchHost::_process(double p_delta) {
 void Bf3MatchHost::watch_changes() {
 	const std::shared_ptr<host::ClientSession> c = client();
 	bf3::net::LevelChange change;
-	if (!c->level_change(change) || handled_round_ == change.round_id) {
+	if (!c->level_change(change) || handled_round_ == change.round_id || wait_for_prepare(change)) {
 		return;
 	}
 	handled_round_ = change.round_id;
@@ -580,6 +691,17 @@ void Bf3MatchHost::end_match(const std::string &p_reason) {
 	get_tree()->quit(1);
 }
 
+std::string Bf3MatchHost::load_text(const Bf3LevelSession &p_session) const {
+	const bool warm = host::CacheWarmth(p_session.progress().warmth.load()) == host::CacheWarmth::Warm;
+	std::string text = bf3::core::fmt(", load %.2f s (%s, target %.0f s)", p_session.timings().done_from_ready_s,
+			warm ? "warm" : "cold", warm ? host::kWarmLoadTargetSeconds : host::kColdLoadTargetSeconds);
+	if (const std::shared_ptr<bf3::core::Cache> cache = held_cache()) {
+		text += bf3::core::fmt(
+				", cache %llu MiB", static_cast<unsigned long long>(cache->stats().bytes / (1024u * 1024u)));
+	}
+	return text;
+}
+
 void Bf3MatchHost::level_done(const Bf3LevelSession &p_session) {
 	Performance *perf = Performance::get_singleton();
 	say("level " + std::to_string(level_index_) + " " + p_session.level_id() + " " + p_session.mode_id() +
@@ -588,7 +710,7 @@ void Bf3MatchHost::level_done(const Bf3LevelSession &p_session) {
 			std::to_string(int64_t(perf->get_monitor(Performance::OBJECT_NODE_COUNT))) + ", orphan nodes " +
 			std::to_string(int64_t(perf->get_monitor(Performance::OBJECT_ORPHAN_NODE_COUNT))) + ", objects " +
 			std::to_string(int64_t(perf->get_monitor(Performance::OBJECT_COUNT))) + ", resources " +
-			std::to_string(int64_t(perf->get_monitor(Performance::OBJECT_RESOURCE_COUNT))));
+			std::to_string(int64_t(perf->get_monitor(Performance::OBJECT_RESOURCE_COUNT))) + load_text(p_session));
 }
 
 void Bf3MatchHost::_unhandled_input(const Ref<InputEvent> &p_event) {
@@ -607,6 +729,7 @@ void Bf3MatchHost::_exit_tree() {
 	if (worker_.joinable()) {
 		worker_.join();
 	}
+	prepare_.reset();
 	std::shared_ptr<host::ClientSession> c = client();
 	if (c != nullptr) {
 		c->stop();
