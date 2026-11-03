@@ -262,6 +262,15 @@ bool Host::peer_connected(uint32_t p_peer) const {
 	return p_peer < h->peerCount && h->peers[p_peer].state == ENET_PEER_STATE_CONNECTED;
 }
 
+std::string Host::peer_ip(uint32_t p_peer) const {
+	const ENetHost *h = static_cast<const ENetHost *>(host_);
+	char text[64] = {};
+	if (p_peer >= h->peerCount || enet_address_get_host_ip(&h->peers[p_peer].address, text, sizeof(text)) != 0) {
+		return {};
+	}
+	return text;
+}
+
 PeerCounters Host::peer_counters(uint32_t p_peer) const {
 	return p_peer < counters_.size() ? counters_[p_peer] : PeerCounters();
 }

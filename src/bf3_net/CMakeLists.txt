@@ -52,3 +52,8 @@ target_sources(bf3_net PRIVATE
     src/ghost_delta.h
     src/ghost_delta.cpp
 )
+
+target_sources(bf3_net PRIVATE
+    include/bf3/net/master.h
+    src/master.cpp
+)

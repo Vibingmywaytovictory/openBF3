@@ -67,6 +67,7 @@ public:
 	uint32_t peer_rtt_ms(uint32_t p_peer) const;
 	size_t connected_peers() const;
 	bool peer_connected(uint32_t p_peer) const;
+	std::string peer_ip(uint32_t p_peer) const;
 
 	PeerCounters peer_counters(uint32_t p_peer) const;
 	size_t peer_capacity() const { return counters_.size(); }
