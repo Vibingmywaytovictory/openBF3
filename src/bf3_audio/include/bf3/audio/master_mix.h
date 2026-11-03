@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/audio/dsp.h"
+#include "bf3/audio/ir_reverb.h"
 #include "bf3/audio/patch_instance.h"
 #include "bf3/core/audio/master_patch.h"
 
@@ -25,6 +26,7 @@ public:
 	void configure(std::shared_ptr<const core::audio::MasterMixData> p_data, uint32_t p_rate, float p_iir2_q);
 	bool select(uint32_t p_stereo_mode, uint32_t p_preset);
 	bool active() const { return plan_ != nullptr; }
+	void attach_reverb(IrReverb *p_reverb) { reverb_ = p_reverb; }
 	const core::audio::MasterMixPlan *plan() const { return plan_; }
 
 	void process(const BusBuffers &p_buses, const float *p_bus_gain, float *r_interleaved_stereo, uint32_t p_frames);
@@ -44,6 +46,7 @@ private:
 	uint32_t rate_ = 48000;
 	float iir2_q_ = 0.70710678f;
 	float ceiling_ = 0.0f;
+	IrReverb *reverb_ = nullptr;
 	std::vector<RoleBuffer> buffers_;
 	std::vector<std::array<uint8_t, core::audio::kSpeakerRoles>> live_;
 	std::vector<std::vector<StepState>> states_;

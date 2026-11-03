@@ -40,6 +40,7 @@ struct MixerConfig {
 
 	std::shared_ptr<const core::audio::MasterMixData> master;
 	float master_iir2_q = 0.70710678f;
+	std::shared_ptr<const ImpulseBank> impulses;
 
 	float limit_ceiling = 0.966f;
 	uint32_t limit_attack_frames = 48;
@@ -61,6 +62,7 @@ enum class MixerCommandType : uint8_t {
 	SetBank,
 	SetBusGain,
 	SetMasterPreset,
+	SetReverbSlot,
 };
 
 struct MixerCommand {
@@ -72,6 +74,7 @@ struct MixerCommand {
 	PatchInstance *instance = nullptr;
 	InstanceHandle join = kNoInstance;
 	const core::audio::WaveBank *bank = nullptr;
+	uint32_t impulse = kNoImpulse;
 	uint64_t epoch = 0;
 	EmitterState emitter;
 	ListenerState listener;
@@ -218,6 +221,8 @@ public:
 	void set_sum_tap(MixTap *p_tap);
 	float bus_gain(core::audio::MasterBus p_bus) const;
 	std::optional<float> mixer_value(uint32_t p_name_hash) const;
+	IrSlot reverb_slot(uint32_t p_slot) const;
+	uint64_t reverb_lane_blocks() const;
 
 	const MixerCutStats &cut_stats() const;
 	void record_cuts(bool p_on);

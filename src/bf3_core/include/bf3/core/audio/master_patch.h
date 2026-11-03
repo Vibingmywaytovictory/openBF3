@@ -33,7 +33,7 @@ enum class MasterStepKind : uint8_t {
 	Send,
 	Route,
 	MatrixPan,
-	Silence
+	IrReverb
 };
 
 struct MasterStep {
@@ -64,6 +64,7 @@ struct MasterMixData {
 	uint32_t default_preset = 0;
 	uint32_t default_stereo_mode = 0;
 	float low_pass_hz = 0.0f;
+	float max_reverb_seconds = 0.0f;
 
 	const MasterMixPlan *plan(uint32_t p_stereo_mode, uint32_t p_preset) const;
 };

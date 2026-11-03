@@ -245,14 +245,26 @@ void MasterMixer::process(
 					}
 					break;
 				}
-				case ca::MasterStepKind::Silence:
-					for (size_t r = 0; r < ca::kSpeakerRoles; ++r) {
-						if (live[r]) {
-							std::fill_n(b[r].data(), frames, 0.0f);
-							live[r] = 0;
+				case ca::MasterStepKind::IrReverb: {
+					const size_t l = size_t(ca::SpeakerRole::L), r = size_t(ca::SpeakerRole::R);
+					const bool feed = reverb_ != nullptr && reverb_->active() && (live[l] || live[r]);
+					for (size_t role = 0; role < ca::kSpeakerRoles; ++role) {
+						if (live[role] && (!feed || (role != l && role != r))) {
+							std::fill_n(b[role].data(), frames, 0.0f);
+							live[role] = 0;
 						}
 					}
+					if (feed) {
+						for (const size_t role : { l, r }) {
+							if (!live[role]) {
+								std::fill_n(b[role].data(), frames, 0.0f);
+								live[role] = 1;
+							}
+						}
+						reverb_->process(b[l].data(), b[r].data(), frames);
+					}
 					break;
+				}
 			}
 		}
 	}

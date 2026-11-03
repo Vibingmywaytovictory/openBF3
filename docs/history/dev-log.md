@@ -2942,3 +2942,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * The net overlay in the game: F9 or --net-overlay shows the debugscreen with NetStats and the dropped-sound counts, refreshed each second; built, not run (owner playtest); hygiene.rules.
 * One radix-2 FFT in bf3_core, `core::Fft`, replaces band_db's own; core.util.unit holds it to a direct DFT; core.util.unit, audio.dsp.unit.
 * The irf1 ImpulseResponseAsset decoder and `bf3dump audio irs`; audio.ir.install decodes the 17 census responses and Metro's and Seine's; audio.ir.install.
+* The master's RIR1 convolves the Reverb bus with two slots of impulse responses, 512-frame partitions up to 2.0 s, crossfaded; audio.mixer.unit, audio.ir.install.

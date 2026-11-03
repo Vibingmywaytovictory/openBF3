@@ -54,3 +54,8 @@ target_sources(bf3_audio PRIVATE
     src/weapon_foley.cpp
     include/bf3/audio/weapon_foley.h
 )
+
+target_sources(bf3_audio PRIVATE
+    include/bf3/audio/ir_reverb.h
+    src/ir_reverb.cpp
+)

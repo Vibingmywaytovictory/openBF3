@@ -145,6 +145,11 @@ struct MixerCore::Impl {
 	std::atomic<uint64_t> level_master_clipped{ 0 };
 	std::atomic<float> level_master_compressor{ 0.0f };
 	MasterMixer master;
+	IrReverb reverb;
+	std::array<std::array<float, kBlockFrames>, 2> reverb_wet{};
+	std::array<std::atomic<uint32_t>, kIrSlots> reverb_impulse_seen{};
+	std::array<std::atomic<float>, kIrSlots> reverb_amplitude_seen{};
+	std::atomic<uint64_t> reverb_lane_blocks{ 0 };
 	std::atomic<bool> master_stats_reset{ false };
 	std::atomic<int32_t> master_preset{ -1 };
 	std::atomic<uint32_t> master_speakers{ 0 };
@@ -184,6 +189,11 @@ struct MixerCore::Impl {
 		mixer_values.resize(kMixerValueSlots);
 		output_gain = db_to_gain(p_config.output_gain_db);
 		master.configure(p_config.master, p_config.mix_rate, p_config.master_iir2_q);
+		reverb.configure(p_config.impulses);
+		master.attach_reverb(&reverb);
+		for (std::atomic<uint32_t> &i : reverb_impulse_seen) {
+			i.store(kNoImpulse, std::memory_order_relaxed);
+		}
 		publish_master();
 		bus_gain.fill(1.0f);
 		for (std::atomic<float> &g : bus_gain_seen) {
@@ -489,6 +499,13 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 					m.publish_master();
 				}
 				break;
+			case MixerCommandType::SetReverbSlot:
+				if (cmd.name_hash < kIrSlots && m.reverb.set_slot(cmd.name_hash, cmd.impulse, cmd.value)) {
+					const IrSlot seen = m.reverb.slot(cmd.name_hash);
+					m.reverb_impulse_seen[cmd.name_hash].store(seen.impulse, std::memory_order_relaxed);
+					m.reverb_amplitude_seen[cmd.name_hash].store(seen.amplitude, std::memory_order_relaxed);
+				}
+				break;
 			case MixerCommandType::SetBusGain:
 				if (cmd.name_hash < m.bus_gain.size() && std::isfinite(cmd.value) && cmd.value >= 0.0f) {
 					m.bus_gain[cmd.name_hash] = cmd.value;
@@ -587,8 +604,10 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 		for (uint32_t i = 0; i < kBlockFrames; ++i) {
 			float l = 0.0f, r = 0.0f;
 			for (size_t b = 0; b < size_t(core::audio::MasterBus::Unknown); ++b) {
-				l += m.buses.channels[b][0][i] * m.bus_gain[b];
-				r += m.buses.channels[b][1][i] * m.bus_gain[b];
+				if (b != size_t(core::audio::MasterBus::Reverb)) {
+					l += m.buses.channels[b][0][i] * m.bus_gain[b];
+					r += m.buses.channels[b][1][i] * m.bus_gain[b];
+				}
 			}
 			m.sum_block[size_t(i) * 2] = l;
 			m.sum_block[size_t(i) * 2 + 1] = r;
@@ -604,16 +623,23 @@ void MixerCore::Impl::render_block(MixerStats &stats) {
 			x *= m.output_gain;
 		}
 	} else {
+		const size_t wet = size_t(core::audio::MasterBus::Reverb);
+		std::copy_n(m.buses.channels[wet][0], kBlockFrames, m.reverb_wet[0].data());
+		std::copy_n(m.buses.channels[wet][1], kBlockFrames, m.reverb_wet[1].data());
+		m.reverb.process(m.reverb_wet[0].data(), m.reverb_wet[1].data(), kBlockFrames);
 		for (uint32_t i = 0; i < kBlockFrames; ++i) {
-			float l = 0.0f, r = 0.0f;
+			float l = m.reverb_wet[0][i] * m.bus_gain[wet], r = m.reverb_wet[1][i] * m.bus_gain[wet];
 			for (size_t b = 0; b < size_t(core::audio::MasterBus::Unknown); ++b) {
-				l += m.buses.channels[b][0][i] * m.bus_gain[b];
-				r += m.buses.channels[b][1][i] * m.bus_gain[b];
+				if (b != wet) {
+					l += m.buses.channels[b][0][i] * m.bus_gain[b];
+					r += m.buses.channels[b][1][i] * m.bus_gain[b];
+				}
 			}
 			m.block[size_t(i) * 2] = l * m.output_gain;
 			m.block[size_t(i) * 2 + 1] = r * m.output_gain;
 		}
 	}
+	m.reverb_lane_blocks.store(m.reverb.stats().lane_blocks, std::memory_order_relaxed);
 	if (m.metering.load(std::memory_order_relaxed)) {
 		m.meter_block(m.buses);
 	}
@@ -647,6 +673,18 @@ std::optional<float> MixerCore::mixer_value(uint32_t p_name_hash) const {
 		}
 	}
 	return std::nullopt;
+}
+
+IrSlot MixerCore::reverb_slot(uint32_t p_slot) const {
+	if (p_slot >= kIrSlots) {
+		return IrSlot{};
+	}
+	return IrSlot{ impl_->reverb_impulse_seen[p_slot].load(std::memory_order_relaxed),
+		impl_->reverb_amplitude_seen[p_slot].load(std::memory_order_relaxed) };
+}
+
+uint64_t MixerCore::reverb_lane_blocks() const {
+	return impl_->reverb_lane_blocks.load(std::memory_order_relaxed);
 }
 
 uint32_t MixerCore::mix(float *r_interleaved_stereo, uint32_t p_frames) {

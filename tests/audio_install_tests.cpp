@@ -1,6 +1,7 @@
 #include "test_support.h"
 
 #include "bf3/audio/audio_load.h"
+#include "bf3/audio/ir_reverb.h"
 #include "bf3/audio/patch_instance.h"
 #include "bf3/client_audio/area_wave_observer.h"
 #include "bf3/core/audio/impulse_response.h"
@@ -20,6 +21,7 @@
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/level.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/host/ui_flow_session.h"
 #include "bf3/sim/logic/sound_area_natives.h"
 #include "bf3/sim_harness/sound_area_probe.h"
@@ -31,6 +33,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -1339,6 +1342,15 @@ TEST_SUITE("audio-ir") {
 			}
 			MESSAGE(std::string(level_name), ": ", count, " impulse responses");
 			CHECK(count > 0);
+			ba::ImpulseBankLoad load;
+			const auto started = std::chrono::steady_clock::now();
+			Result<ba::ImpulseBank> bank = ba::load_impulse_bank(db, (*lvl)->mount(), 2.0f, 48000, &load);
+			MESSAGE(std::string(level_name), ": the impulse bank loads in ", ms_since(started), " ms");
+			REQUIRE_MESSAGE(bank.ok(), (bank.ok() ? std::string() : bank.error().message));
+			CHECK_MESSAGE(load.failed == 0, load.notes);
+			CHECK(load.assets == count);
+			CHECK(bank->impulses.size() == count);
+			CHECK(bank->max_partitions == 188);
 		}
 		check_unchanged_snapshot(f->before, f->reader);
 	}

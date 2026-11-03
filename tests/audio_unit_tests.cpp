@@ -2,6 +2,7 @@
 
 #include "bf3/audio/audio_analysis.h"
 #include "bf3/audio/dsp.h"
+#include "bf3/audio/ir_reverb.h"
 #include "bf3/audio/master_mix.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/patch_instance.h"
@@ -18,6 +19,7 @@
 #include <cmath>
 #include <complex>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <random>
 #include <vector>
@@ -2002,6 +2004,234 @@ TEST_SUITE("audio-mixer") {
 			CHECK(quiet[i] == doctest::Approx(plain[i] * 0.25f).epsilon(1e-5));
 		}
 		CHECK(peak > 0.1f);
+	}
+
+	ImpulseResponse test_impulse(uint32_t p_frames, uint32_t p_seed) {
+		ImpulseResponse ir;
+		ir.name = "test_ir_" + std::to_string(p_seed);
+		ir.partition.bytes[0] = uint8_t(p_seed);
+		ir.channels = 2;
+		ir.rate = 48000;
+		ir.frames = p_frames;
+		ir.samples.resize(size_t(2) * p_frames);
+		std::mt19937 rng(p_seed);
+		std::uniform_real_distribution<float> u(-1.0f, 1.0f);
+		for (uint32_t c = 0; c < 2; ++c) {
+			for (uint32_t i = 0; i < p_frames; ++i) {
+				ir.samples[size_t(c) * p_frames + i] = u(rng) * std::exp(-4.0f * float(i) / float(p_frames));
+			}
+		}
+		return ir;
+	}
+
+	std::shared_ptr<const ba::ImpulseBank> test_bank(std::span<const ImpulseResponse> p_irs, uint32_t p_partitions) {
+		auto bank = std::make_shared<ba::ImpulseBank>();
+		bank->max_partitions = p_partitions;
+		const ba::Fft fft(ba::kIrFftSize);
+		for (const ImpulseResponse &ir : p_irs) {
+			Result<ba::PreparedImpulse> prepared = ba::prepare_impulse(ir, p_partitions, fft);
+			REQUIRE_MESSAGE(prepared.ok(), (prepared.ok() ? std::string() : prepared.error().message));
+			bank->impulses.push_back(std::move(*prepared));
+		}
+		return bank;
+	}
+
+	std::shared_ptr<const MasterMixData> reverb_master() {
+		auto data = std::make_shared<MasterMixData>();
+		data->presets = { "only" };
+		data->max_reverb_seconds = 2.0f;
+		for (uint32_t stereo = 0; stereo < 2; ++stereo) {
+			MasterMixPlan plan;
+			plan.speakers = 2;
+			plan.voices.resize(2);
+			plan.voices[0].stage = -2;
+			plan.voices[0].bus = MasterBus::Reverb;
+			plan.voices[0].channels = 2;
+			MasterStep pass;
+			MasterStep convolve;
+			convolve.kind = MasterStepKind::IrReverb;
+			MasterStep send;
+			send.kind = MasterStepKind::Send;
+			send.values[0] = 1.0f;
+			send.to_voice = 1;
+			send.map.fill(-1);
+			send.map[size_t(SpeakerRole::L)] = int8_t(SpeakerRole::L);
+			send.map[size_t(SpeakerRole::R)] = int8_t(SpeakerRole::R);
+			plan.voices[0].steps = { pass, convolve, send };
+			plan.voices[1].stage = -1;
+			plan.voices[1].channels = 2;
+			plan.voices[1].steps = { pass };
+			plan.order = { 0, 1 };
+			plan.output_voice = 1;
+			data->plans[stereo].push_back(plan);
+		}
+		return data;
+	}
+
+	struct ReverbRig {
+		ba::MasterMixer master;
+		ba::IrReverb reverb;
+		std::vector<float> storage = std::vector<float>(size_t(MasterBus::Unknown) * ba::kMaxBusChannels * 512, 0.0f);
+		ba::BusBuffers buses;
+		std::array<float, size_t(MasterBus::Unknown)> gain{};
+
+		explicit ReverbRig(std::shared_ptr<const ba::ImpulseBank> p_bank) {
+			master.configure(reverb_master(), 48000, 0.70710678f);
+			reverb.configure(std::move(p_bank));
+			master.attach_reverb(&reverb);
+			for (size_t b = 0; b < size_t(MasterBus::Unknown); ++b) {
+				for (size_t c = 0; c < ba::kMaxBusChannels; ++c) {
+					buses.channels[b][c] = storage.data() + (b * ba::kMaxBusChannels + c) * 512;
+				}
+			}
+			buses.frames = 512;
+			gain.fill(1.0f);
+		}
+		std::vector<float> run(const std::vector<float> &p_left, const std::vector<float> &p_right, uint32_t p_blocks,
+				const std::function<void(uint32_t)> &p_before_block = {}) {
+			std::vector<float> out;
+			std::vector<float> block(1024);
+			for (uint32_t k = 0; k < p_blocks; ++k) {
+				if (p_before_block) {
+					p_before_block(k);
+				}
+				for (uint32_t i = 0; i < 512; ++i) {
+					const size_t at = size_t(k) * 512 + i;
+					buses.channels[size_t(MasterBus::Reverb)][0][i] = at < p_left.size() ? p_left[at] : 0.0f;
+					buses.channels[size_t(MasterBus::Reverb)][1][i] = at < p_right.size() ? p_right[at] : 0.0f;
+				}
+				master.process(buses, gain.data(), block.data(), 512);
+				out.insert(out.end(), block.begin(), block.end());
+			}
+			return out;
+		}
+	};
+
+	TEST_CASE("the Reverb bus convolves with its slot's impulse response: equal to direct convolution to 1e-5") {
+		const std::array<ImpulseResponse, 1> irs{ test_impulse(2900, 7) };
+		ReverbRig rig(test_bank(irs, ba::max_reverb_partitions(2.0f, 48000)));
+		REQUIRE(rig.reverb.set_slot(0, 0, 0.5f));
+		const uint32_t lead = ba::kIrCrossfadeBlocks * 512;
+		std::vector<float> left(lead + 12 * 512, 0.0f), right(left.size(), 0.0f);
+		left[lead + 100] = 1.0f;
+		right[lead + 700] = 1.0f;
+		std::mt19937 rng(3);
+		std::uniform_real_distribution<float> u(-0.05f, 0.05f);
+		for (uint32_t i = lead + 3000; i < lead + 3600; ++i) {
+			left[i] += u(rng);
+			right[i] += u(rng);
+		}
+		const std::vector<float> out = rig.run(left, right, uint32_t(left.size() / 512) + 8);
+		double worst = 0.0, peak = 0.0;
+		for (uint32_t c = 0; c < 2; ++c) {
+			const std::vector<float> &x = c == 0 ? left : right;
+			const std::span<const float> h = irs[0].channel(c);
+			for (size_t n = 0; n < out.size() / 2; ++n) {
+				double want = 0.0;
+				for (size_t m = 0; m < h.size() && m <= n; ++m) {
+					want += n - m < x.size() ? double(h[m]) * double(x[n - m]) : 0.0;
+				}
+				want *= 0.5;
+				peak = std::max(peak, std::fabs(want));
+				worst = std::max(worst, std::fabs(want - double(out[n * 2 + c])));
+			}
+		}
+		MESSAGE("largest difference from direct convolution: ", worst, " of a peak ", peak);
+		CHECK(peak > 0.4);
+		CHECK(worst < 1e-5);
+		CHECK(rig.reverb.stats().lane_blocks > 0);
+	}
+
+	TEST_CASE("a slot switched under a running tail crossfades: no step above -60 dBFS") {
+		const std::array<ImpulseResponse, 2> irs{ test_impulse(3000, 11), test_impulse(2000, 12) };
+		const auto bank = test_bank(irs, ba::max_reverb_partitions(2.0f, 48000));
+		const uint32_t blocks = 28, at = 11, fade = ba::kIrCrossfadeBlocks;
+		const float amp = 0.3f;
+		std::vector<float> left(blocks * 512, 0.0f), right(left.size(), 0.0f);
+		std::mt19937 rng(5);
+		std::uniform_real_distribution<float> u(-0.02f, 0.02f);
+		for (uint32_t i = 8 * 512; i < 11 * 512; ++i) {
+			left[i] = u(rng);
+			right[i] = u(rng);
+		}
+		ReverbRig rig(bank);
+		REQUIRE(rig.reverb.set_slot(0, 0, amp));
+		const std::vector<float> out = rig.run(left, right, blocks, [&](uint32_t k) {
+			if (k == at) {
+				REQUIRE(rig.reverb.set_slot(0, 1, amp));
+			}
+		});
+		CHECK(rig.reverb.stats().switches == 2);
+		CHECK(rig.reverb.stats().steals == 0);
+		const auto gain = [&](bool p_in, size_t p_n) {
+			const size_t k = p_n / 512, i = p_n % 512;
+			const auto edge = [&](size_t p_block) {
+				const float t = std::clamp(float(int64_t(p_block) - int64_t(at)) / float(fade), 0.0f, 1.0f);
+				return amp * (p_in ? t : 1.0f - t);
+			};
+			const float g0 = edge(k), g1 = edge(k + 1);
+			return double(g0 + (g1 - g0) * float(i + 1) / 512.0f);
+		};
+		double worst = 0.0, step = 0.0, hard = 0.0, peak = 0.0;
+		for (uint32_t c = 0; c < 2; ++c) {
+			const std::vector<float> &x = c == 0 ? left : right;
+			for (size_t n = 1; n < out.size() / 2; ++n) {
+				double ya = 0.0, yb = 0.0;
+				for (size_t m = 0; m <= n && m < irs[0].frames; ++m) {
+					ya += double(irs[0].channel(c)[m]) * double(x[n - m]);
+				}
+				for (size_t m = 0; m <= n && m < irs[1].frames; ++m) {
+					yb += double(irs[1].channel(c)[m]) * double(x[n - m]);
+				}
+				const double want = gain(false, n) * ya + gain(true, n) * yb;
+				peak = std::max(peak, std::fabs(want));
+				worst = std::max(worst, std::fabs(want - double(out[n * 2 + c])));
+				step = std::max(step, std::fabs(gain(false, n) - gain(false, n - 1)) * std::fabs(ya));
+				step = std::max(step, std::fabs(gain(true, n) - gain(true, n - 1)) * std::fabs(yb));
+				hard = n == size_t(at) * 512 ? std::max(hard, double(amp) * std::max(std::fabs(ya), std::fabs(yb)))
+											 : hard;
+			}
+		}
+		MESSAGE("crossfade: largest difference ", worst, " of a peak ", peak, "; largest step ", step,
+				"; a switch with no crossfade would step by ", hard);
+		CHECK(peak > 0.05);
+		CHECK(worst < 1e-5);
+		CHECK(step < 1e-3);
+		CHECK(hard > 1e-3);
+	}
+
+	TEST_CASE("the reverb controller holds the two loudest impulse responses in stable slots") {
+		ba::IrReverbController c;
+		const std::array<ba::IrZone, 4> a{ { { 3, 0.1f }, { 5, 0.4f }, { 3, 0.2f }, { 7, 0.05f } } };
+		std::array<ba::IrSlot, ba::kIrSlots> s = c.choose(a);
+		CHECK(s[0] == ba::IrSlot{ 5, 0.4f });
+		CHECK(s[1] == ba::IrSlot{ 3, 0.2f });
+		const std::array<ba::IrZone, 3> b{ { { 3, 0.6f }, { 7, 0.3f }, { 5, 0.0f } } };
+		s = c.choose(b);
+		CHECK(s[0] == ba::IrSlot{ 7, 0.3f });
+		CHECK(s[1] == ba::IrSlot{ 3, 0.6f });
+		s = c.choose({});
+		CHECK(s[0].impulse == ba::kNoImpulse);
+		CHECK(s[1].impulse == ba::kNoImpulse);
+	}
+
+	TEST_CASE("a SetReverbSlot command reaches the mixer's convolution and reads back") {
+		const std::array<ImpulseResponse, 1> irs{ test_impulse(1000, 21) };
+		ba::MixerConfig cfg;
+		cfg.master = reverb_master();
+		cfg.impulses = test_bank(irs, ba::max_reverb_partitions(2.0f, 48000));
+		ba::MixerCore mixer(cfg);
+		CHECK(mixer.reverb_slot(0).impulse == ba::kNoImpulse);
+		ba::MixerCommand c;
+		c.type = ba::MixerCommandType::SetReverbSlot;
+		c.name_hash = 1;
+		c.impulse = 0;
+		c.value = 0.1f;
+		REQUIRE(mixer.push(c));
+		std::vector<float> buf(2 * 512);
+		mixer.mix(buf.data(), 512);
+		CHECK(mixer.reverb_slot(1) == ba::IrSlot{ 0, 0.1f });
+		CHECK(mixer.reverb_slot(0).impulse == ba::kNoImpulse);
 	}
 
 	TEST_CASE("a Start refused with every instance slot full yields one finished feedback") {

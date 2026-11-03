@@ -270,7 +270,7 @@ Result<MasterStepKind> step_kind(uint32_t p_id) {
 		{ fourcc("Sen0"), MasterStepKind::Send },
 		{ fourcc("Rou0"), MasterStepKind::Route },
 		{ fourcc("MtP0"), MasterStepKind::MatrixPan },
-		{ fourcc("RIR1"), MasterStepKind::Silence },
+		{ fourcc("RIR1"), MasterStepKind::IrReverb },
 	};
 	for (const auto &[id, kind] : kKinds) {
 		if (id == p_id) {
@@ -527,6 +527,10 @@ Result<MasterMixData> read_master_mix(
 						for (size_t a = 0; a < roles.size(); ++a) {
 							step.map[size_t(roles[a])] = int8_t(a);
 						}
+					}
+					if (step.kind == MasterStepKind::IrReverb && pl.construct_count > 0 &&
+							pl.construct_begin < prog.construct_params.size()) {
+						out.max_reverb_seconds = prog.construct_params[pl.construct_begin];
 					}
 					if (pl.id == fourcc("Dac0")) {
 						plan.output_voice = uint16_t(v);
