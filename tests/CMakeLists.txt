@@ -1167,7 +1167,8 @@ openbf3_test(test_net_procs_harness test_main.cpp net_procs_harness_tests.cpp te
 target_link_libraries(test_net_procs_harness PRIVATE test_proc_driver)
 openbf3_proc_row(net.procs.harness test_net_procs_harness TIMEOUT 120 ARGS --test-suite=net-procs-harness)
 
-openbf3_test(test_net_procs test_main.cpp net_procs_tests.cpp test_support.h)
+openbf3_test(test_net_procs test_main.cpp net_procs_tests.cpp net_procs_hitreg_tests.cpp net_procs_support.h
+    test_support.h)
 target_link_libraries(test_net_procs PRIVATE test_proc_driver bf3_present)
 target_include_directories(test_net_procs PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_core/src)
 openbf3_proc_row(net.procs.connect test_net_procs LABEL timing TIMEOUT 300 ARGS --test-suite=net-procs-connect)
@@ -1178,6 +1179,9 @@ openbf3_proc_row(net.procs.follow test_net_procs LABEL timing TIMEOUT 1800 ARGS 
 openbf3_proc_row(net.procs.listen_maplist test_net_procs LABEL timing TIMEOUT 1500 ARGS --test-suite=net-procs-listen-maplist)
 openbf3_proc_row(net.procs.kick test_net_procs LABEL timing TIMEOUT 600 ARGS --test-suite=net-procs-kick)
 openbf3_proc_row(godot.rotation test_net_procs LABEL timing TIMEOUT 1800 ARGS --test-suite=godot-rotation)
+openbf3_proc_row(net.procs.hitreg test_net_procs LABEL timing TIMEOUT 2400 ARGS --test-suite=net-procs-hitreg)
+set_tests_properties(net.procs.hitreg PROPERTIES RUN_SERIAL TRUE)
+openbf3_cost(net.procs.hitreg 1 600)
 set_tests_properties(net.procs.connect net.procs.two_clients net.procs.rotation net.procs.godot_connect net.procs.follow net.procs.listen_maplist net.procs.kick godot.rotation PROPERTIES RUN_SERIAL TRUE)
 openbf3_cost(net.procs.connect 1 45)
 openbf3_cost(net.procs.two_clients 1 60)

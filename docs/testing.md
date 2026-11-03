@@ -123,7 +123,9 @@ Dev preset, a row measured alone on a quiet machine; asan is about 10x.
   listen game), `net.procs.scale32` and `net.procs.scale64` (the processes' start-up plus 120 s of 32 and 64 real
   connections, timing), `net.procs.rotation` (a dedicated server over four map-list levels, MP_011 and MP_003
   loaded cold on a fresh cache root, with two loadbots processes, timing), `net.procs.follow` and `net.procs.listen_maplist`
-  (a headless Godot client over four and two levels, timing); `godot.audio_ingame` and `godot.deploy`
+  (a headless Godot client over four and two levels, timing), `net.procs.hitreg` (a dedicated server, a strafing
+  bf3dump client and a headless Godot shooter, 500 shots at 100 ms RTT, then again with lag compensation off,
+  timing); `godot.audio_ingame` and `godot.deploy`
   run as phase rows (`--audio-ingame-phase`, the deploy phases), each phase within 120 s.
 * Asan: a row over 600 s gets `asan_sweep`. Its full tier runs at acceptance for branches touching what it links,
   and on the latest main after merges.
