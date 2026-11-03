@@ -461,6 +461,14 @@ void Bf3MatchHost::_ready() {
 	if (has_user_arg("game-build")) {
 		game_build_ = uint64_t(std::strtoull(user_arg_value("game-build").c_str(), nullptr, 10));
 	}
+	if (has_user_arg("mechanics")) {
+		mechanics_cfg_ =
+				to_std(ProjectSettings::get_singleton()->globalize_path(to_godot(user_arg_value("mechanics"))));
+	}
+	if (has_user_arg("own-test-rewind-ticks")) {
+		own_test_rewind_ticks_ = std::clamp(
+				std::atoi(user_arg_value("own-test-rewind-ticks").c_str()), 0, int32_t(host::kDefaultMaxRewindTicks));
+	}
 	if (has_user_arg("match-levels")) {
 		levels_to_play_ = uint32_t(std::clamp(std::atoi(user_arg_value("match-levels").c_str()), 1, 1000));
 	}
@@ -517,6 +525,10 @@ host::ClientSessionConfig Bf3MatchHost::client_config() const {
 	cc.netsim.seed = seed_ * 7919u + 1u;
 	cc.request_dev_commands = true;
 	cc.game_build = game_build_;
+	if (!mechanics_cfg_.empty()) {
+		cc.mechanics_cfg = mechanics_cfg_;
+	}
+	cc.own_test_max_rewind_ticks = own_test_rewind_ticks_;
 	return cc;
 }
 

@@ -89,6 +89,8 @@ private:
 	std::string netsim_ = "off";
 	uint64_t seed_ = 1;
 	std::optional<uint64_t> game_build_;
+	std::string mechanics_cfg_;
+	int32_t own_test_rewind_ticks_ = -1;
 	std::optional<MatchLevel> first_level_;
 	uint32_t level_index_ = 1;
 	uint32_t levels_to_play_ = 1;

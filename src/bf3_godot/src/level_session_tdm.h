@@ -19,6 +19,10 @@
 #include <string>
 #include <vector>
 
+namespace bf3::host {
+class DuelShooter;
+}
+
 namespace bf3::godot_side {
 
 class Bf3UiScreens;
@@ -146,6 +150,8 @@ struct TdmState {
 	std::unique_ptr<FovRoundCheck, void (*)(FovRoundCheck *)> fov_round{ nullptr, nullptr };
 	bool audio_ingame_on = false;
 	std::unique_ptr<AudioIngameCheck, void (*)(AudioIngameCheck *)> audio_ingame{ nullptr, nullptr };
+	uint32_t hitreg_shots = 0;
+	std::unique_ptr<bf3::host::DuelShooter, void (*)(bf3::host::DuelShooter *)> hitreg{ nullptr, nullptr };
 	bf3::core::ui::HudSquadNames squad_names{};
 	bool squad_names_loaded = false;
 	std::vector<net::SquadRequest> squad_requests;

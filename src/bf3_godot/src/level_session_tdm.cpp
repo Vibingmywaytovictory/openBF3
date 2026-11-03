@@ -36,6 +36,7 @@
 #include "bf3/core/ui/text_db.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/format.h"
+#include "bf3/host/duel.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/server_session.h"
@@ -476,7 +477,13 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 		if (m.audio_ingame_on && quit_after_ <= 0.0) {
 			quit_after_ = 1.0e9;
 		}
-		if (m.deploy_check || m.audio_ingame_on) {
+		if (has_user_arg("hitreg-check")) {
+			m.hitreg_shots = uint32_t(std::clamp(std::atoi(user_arg_value("hitreg-check").c_str()), 1, 5000));
+			if (quit_after_ <= 0.0) {
+				quit_after_ = 1.0e9;
+			}
+		}
+		if (m.deploy_check || m.audio_ingame_on || m.hitreg_shots > 0) {
 			mapper_.set_scripted(true);
 		}
 		UtilityFunctions::print(to_godot(std::string("[tdm] ") + (m.playable ? "playable scene" : "check run") + ": TDM rules on, " +
@@ -949,6 +956,44 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			UtilityFunctions::print(to_godot(m.deploy_run->report()));
 			finish(m.deploy_run->exit_code());
 			return true;
+		}
+	}
+	if (m.hitreg_shots > 0 && !m.finished) {
+		const std::shared_ptr<const host::SharedLevel> duel_level = shared_level();
+		if (m.hitreg == nullptr && duel_level != nullptr) {
+			const bf3::core::Result<host::DuelSite> site = host::duel_site(*duel_level);
+			if (!site) {
+				UtilityFunctions::print(to_godot("[hitreg] failed: " + site.error().message));
+				m.finished = true;
+				finish(1);
+				return true;
+			}
+			UtilityFunctions::print(
+					to_godot(bf3::core::fmt("[hitreg] %u shots from (%.2f, %.2f, %.2f) yaw %u at the lane "
+											"%.0f m ahead",
+							m.hitreg_shots, double(site->shooter[0]), double(site->shooter[1]),
+							double(site->shooter[2]), unsigned(site->shooter_yaw), double(site->distance))));
+			m.hitreg = std::unique_ptr<host::DuelShooter, void (*)(host::DuelShooter *)>(
+					new host::DuelShooter(*site, m.hitreg_shots), &delete_part<host::DuelShooter>);
+		}
+		if (m.hitreg != nullptr) {
+			host::DuelShooterIo io;
+			io.deploy = [&m] { m.deploy_click = true; };
+			io.debug = [this](const net::DebugRequest &p_request) {
+				if (host::ClientSession *c = client()) {
+					c->send_debug(p_request);
+				}
+			};
+			io.view = [this](float p_yaw, float p_pitch) { mapper_.script_view(p_yaw, p_pitch); };
+			io.fire = [this] { mapper_.script_press(InputMapper::WeaponAction::Fire); };
+			io.hold_zoom = [this](bool p_held) { mapper_.script_hold(InputMapper::WeaponAction::Ads, p_held); };
+			const host::DuelPhase phase = m.hitreg->frame(now_s, p_now_ns, f, r_game.alive, io);
+			if (phase == host::DuelPhase::Done || phase == host::DuelPhase::Failed) {
+				m.finished = true;
+				UtilityFunctions::print(to_godot("[hitreg] " + m.hitreg->report(f.stats)));
+				finish(phase == host::DuelPhase::Done ? 0 : 1);
+				return true;
+			}
 		}
 	}
 	if (m.audio_ingame_on && r_game.audio != nullptr && !m.finished) {
