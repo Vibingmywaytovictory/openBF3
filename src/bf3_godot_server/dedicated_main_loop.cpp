@@ -172,6 +172,13 @@ bool DedicatedMainLoop::parse_args(std::string &r_error) {
 	if (const std::string mechanics = config_path(config_file("weapon_mechanics.cfg").c_str()); !mechanics.empty()) {
 		a.rules.mechanics_cfg = mechanics;
 	}
+	if (has_user_arg("mechanics")) {
+		a.rules.mechanics_cfg = godot_path(user_arg_value("mechanics"));
+		if (a.rules.mechanics_cfg.empty() && r_error.empty()) {
+			r_error = "--mechanics needs a path";
+		}
+	}
+	u32_arg("max-rewind-ticks", 0.0, double(host::kDefaultMaxRewindTicks), a.rules.max_rewind_ticks, r_error);
 	return r_error.empty();
 }
 
@@ -271,6 +278,8 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 			r.preround_s >= 0.0f ? core::fmt("%.1f s", r.preround_s).c_str() : "data",
 			r.min_players >= 0 ? std::to_string(r.min_players).c_str() : "data",
 			r.dev_commands ? "on (--dev)" : "off"));
+	say(core::fmt("gunplay: mechanics %s, lag compensation rewinds at most %u ticks", r.mechanics_cfg.c_str(),
+			r.max_rewind_ticks));
 	say(core::fmt("rotation: intermission %s, load deadlines: stalled %.1f s, warm %.1f s, cold %.1f s",
 			config.intermission_s >= 0.0f ? core::fmt("%.1f s (--intermission-s)", config.intermission_s).c_str()
 										  : "data",

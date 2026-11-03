@@ -79,6 +79,7 @@ struct ServerRules {
 	double respawn_s = 5.0;
 	bool dev_commands = false;
 	uint64_t seed = 1;
+	uint32_t max_rewind_ticks = kDefaultMaxRewindTicks;
 };
 
 GameServerConfig tdm_game_server_config(const ServerLevel &p_level, const ServerRules &p_rules);

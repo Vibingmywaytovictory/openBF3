@@ -16,6 +16,7 @@
 #include "bf3/host/presentation_events.h"
 #include "bf3/host/presentation_weapon.h"
 #include "bf3/host/server_host.h"
+#include "bf3/host/server_level.h"
 #include "bf3/net/enet_host.h"
 #include "bf3/net/other_sample.h"
 #include "bf3/net/protocol.h"
@@ -1672,6 +1673,19 @@ TEST_SUITE("host-gunplay-client-unit") {
 		CHECK(stranded.frame(1.0, now_ns, *f, true, io) == P::Teleport);
 		CHECK(stranded.frame(host::kDuelTeleportTimeoutSeconds + 1.0, now_ns, *f, true, io) == P::Failed);
 		CHECK(stranded.failure().find("dev commands") != std::string::npos);
+	}
+
+	TEST_CASE("host.gunplay.client: the server rules carry the lag compensation's rewind limit and the mechanics "
+			  "file into the TDM GameServerConfig") {
+		host::ServerRules rules;
+		CHECK(rules.max_rewind_ticks == host::kDefaultMaxRewindTicks);
+		CHECK(host::tdm_game_server_config(host::ServerLevel{}, rules).gunplay.lag.max_rewind_ticks ==
+				host::kDefaultMaxRewindTicks);
+		rules.max_rewind_ticks = 0;
+		rules.mechanics_cfg = "no_damage.cfg";
+		const host::GameServerConfig c = host::tdm_game_server_config(host::ServerLevel{}, rules);
+		CHECK(c.gunplay.lag.max_rewind_ticks == 0);
+		CHECK(c.gunplay.mechanics_cfg == "no_damage.cfg");
 	}
 
 	TEST_CASE("host.gunplay.client: E6: a client whose weapon table differs answers MatchInfo with a Mismatch, is "
