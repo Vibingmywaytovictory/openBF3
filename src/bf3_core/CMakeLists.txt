@@ -445,3 +445,7 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/ui/hud_squads.h
     src/ui/hud_squads.cpp
 )
+
+target_sources(bf3_core PRIVATE
+    include/bf3/core/ui/debug_screen.h
+)
