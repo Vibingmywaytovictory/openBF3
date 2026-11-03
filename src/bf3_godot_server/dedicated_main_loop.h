@@ -4,6 +4,7 @@
 #include "bf3/core/install_snapshot.h"
 #include "bf3/host/net_stats.h"
 #include "bf3/host/server_session.h"
+#include "upnp_mapping.h"
 
 #include <godot_cpp/classes/main_loop.hpp>
 
@@ -29,6 +30,7 @@ struct DedicatedArgs {
 	float load_stall_s = -1.0f;
 	std::string master;
 	std::string name;
+	bool upnp = false;
 	bf3::host::ServerRules rules;
 };
 
@@ -70,6 +72,7 @@ private:
 	int64_t resources_after_load_ = 0;
 	uint64_t level_changes_seen_ = 0;
 	std::string master_state_;
+	UpnpMapping upnp_;
 	const char *stopped_by_ = "the process";
 	bool failed_ = false;
 };

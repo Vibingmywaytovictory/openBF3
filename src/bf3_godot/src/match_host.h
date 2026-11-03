@@ -5,6 +5,7 @@
 #include "bf3/host/client_session.h"
 #include "bf3/host/map_list.h"
 #include "bf3/host/server_session.h"
+#include "upnp_mapping.h"
 
 #include <godot_cpp/classes/input_event.hpp>
 #include <godot_cpp/classes/node.hpp>
@@ -116,6 +117,7 @@ private:
 	std::shared_ptr<bf3::core::Cache> cache_;
 	std::unique_ptr<bf3::host::ClientPrepare> prepare_;
 	std::unique_ptr<NativeKick> kick_;
+	UpnpMapping upnp_;
 };
 
 }

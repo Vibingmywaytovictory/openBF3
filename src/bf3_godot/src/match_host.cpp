@@ -461,7 +461,8 @@ void Bf3MatchHost::run_listen_server() {
 	}
 	const std::string master = server_config_.master;
 	const std::string name = server_config_.name;
-	const std::string own = server_config_.bind_ip == "0.0.0.0" ? std::string("127.0.0.1") : server_config_.bind_ip;
+	const std::string bind = server_config_.bind_ip;
+	const std::string own = bind == "0.0.0.0" ? std::string("127.0.0.1") : bind;
 	const bf3::core::Status s = server_->start(std::move(server_config_));
 	if (!s.ok()) {
 		std::lock_guard lock(mutex_);
@@ -471,6 +472,12 @@ void Bf3MatchHost::run_listen_server() {
 	if (!master.empty()) {
 		say("listen server on port " + std::to_string(server_->port()) + " heartbeats to the master " + master +
 				" as " + name);
+	}
+	if (has_user_arg("upnp")) {
+		const bf3::core::Status mapped = upnp_.open(bind, server_->port());
+		say(mapped.ok() ? bf3::core::fmt("UPnP: UDP %u mapped on the gateway, external address %s",
+								  unsigned(upnp_.port()), upnp_.external_address().c_str())
+						: mapped.error().message);
 	}
 	connect_client(own, server_->port());
 }
@@ -782,6 +789,7 @@ void Bf3MatchHost::_exit_tree() {
 		c->stop();
 	}
 	kick_.reset();
+	upnp_.close();
 	server_.reset();
 }
 

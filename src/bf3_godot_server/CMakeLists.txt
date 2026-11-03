@@ -10,6 +10,8 @@ add_library(bf3_godot_server SHARED
     ${godot_glue}/tdm_flow.cpp
     ${godot_glue}/tdm_flow.h
     ${godot_glue}/tdm_args.cpp
+    ${godot_glue}/upnp_mapping.cpp
+    ${godot_glue}/upnp_mapping.h
 )
 target_include_directories(bf3_godot_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${godot_glue})
 target_link_libraries(bf3_godot_server PRIVATE godot-cpp bf3_host)

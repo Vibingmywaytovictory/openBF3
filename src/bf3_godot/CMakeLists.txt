@@ -338,3 +338,7 @@ target_sources(bf3_godot PRIVATE
     src/fx_trace.cpp
     src/fx_trace.h
 )
+target_sources(bf3_godot PRIVATE
+    src/upnp_mapping.cpp
+    src/upnp_mapping.h
+)

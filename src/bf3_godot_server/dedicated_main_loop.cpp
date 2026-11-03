@@ -132,6 +132,7 @@ bool DedicatedMainLoop::parse_args(std::string &r_error) {
 	}
 	a.port_file = user_arg_value("port-file");
 	a.master = user_arg_value("master");
+	a.upnp = has_user_arg("upnp");
 	a.name = has_user_arg("name") ? user_arg_value("name") : std::string("openBF3");
 	if (has_user_arg("master") && a.master.empty() && r_error.empty()) {
 		r_error = "--master needs host:port";
@@ -328,6 +329,12 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 		}
 		out->close();
 	}
+	if (args_.upnp) {
+		const core::Status mapped = upnp_.open(args_.bind_ip, session_->port());
+		say(mapped.ok() ? core::fmt("UPnP: UDP %u mapped on the gateway, external address %s", unsigned(upnp_.port()),
+								  upnp_.external_address().c_str())
+						: mapped.error().message);
+	}
 	resources_after_load_ = monitor(Performance::OBJECT_RESOURCE_COUNT);
 	return true;
 }
@@ -458,6 +465,10 @@ void DedicatedMainLoop::_finalize() {
 	}
 	const host::ServerSessionStats stats = session_->stats();
 	report(stats);
+	if (upnp_.mapped()) {
+		upnp_.close();
+		say("UPnP: the mapping is deleted");
+	}
 	session_->stop();
 	const core::SnapshotDiff diff = core::diff_snapshots(install_before_, install_.snapshot());
 	const host::ServerLevel &l = session_->level();
