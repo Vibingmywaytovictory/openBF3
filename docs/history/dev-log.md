@@ -2943,3 +2943,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * One radix-2 FFT in bf3_core, `core::Fft`, replaces band_db's own; core.util.unit holds it to a direct DFT; core.util.unit, audio.dsp.unit.
 * The irf1 ImpulseResponseAsset decoder and `bf3dump audio irs`; audio.ir.install decodes the 17 census responses and Metro's and Seine's; audio.ir.install.
 * The master's RIR1 convolves the Reverb bus with two slots of impulse responses, 512-frame partitions up to 2.0 s, crossfaded; audio.mixer.unit, audio.ir.install.
+* A patch's ReverbSend feeds the Reverb bus at its cone's ReverbGain instead of being dropped; core.audio.areas, audio.patch.unit.

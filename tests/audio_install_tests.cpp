@@ -1190,6 +1190,31 @@ TEST_SUITE("audio-areas") {
 		check_unchanged_snapshot(f->before, f->reader);
 	}
 
+	TEST_CASE("the M16A3's ReverbSend feeds the Reverb bus") {
+		AreasFixture *f = areas_fixture();
+		auto inst = instance(f->m16.program, f->m16.bank, 0x5eed);
+		inst->set_parameter(kEnableStep, 1.0f);
+		place(*inst, 10.0f);
+		Buses buses;
+		inst->post_event(kFire, 0);
+		double reverb = 0.0, direct = 0.0;
+		for (uint64_t frame = 0; frame < 48000; frame += 512) {
+			buses.block(*inst, frame);
+			for (size_t b = 0; b < size_t(MasterBus::Unknown); ++b) {
+				for (size_t c = 0; c < 2; ++c) {
+					for (size_t i = 0; i < 512; ++i) {
+						const double x = buses.b.channels[b][c][i];
+						(b == size_t(MasterBus::Reverb) ? reverb : direct) += x * x;
+					}
+				}
+			}
+		}
+		MESSAGE("M16A3 Fire at 10 m: Reverb bus energy ", reverb, ", the other buses ", direct, ", ratio ",
+				10.0 * std::log10(reverb / direct), " dB");
+		CHECK(reverb > 0.0);
+		CHECK(reverb < direct);
+	}
+
 	TEST_CASE("prism: Height rises from the lowest point, the volume the look's areas measure") {
 		const std::array<Vec3, 4> uneven{ Vec3{ 0, 0, 0 }, Vec3{ 10, 2, 0 }, Vec3{ 10, 2, 10 }, Vec3{ 0, 0, 10 } };
 		gp::AreaDef a;

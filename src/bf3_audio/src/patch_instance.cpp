@@ -145,6 +145,7 @@ Result<std::unique_ptr<PatchInstance>> PatchInstance::create(std::shared_ptr<con
 		}
 		if (const uint32_t g = st.global_plugin(out.reverb_send_plugin); g != UINT32_MAX && st.plugins[g].role == PluginRole::Send) {
 			st.plugins[g].reverb_send = true;
+			st.plugins[g].output = uint32_t(o);
 		}
 		if (const uint32_t g = st.global_plugin(out.pan); g != UINT32_MAX) {
 			st.plugins[g].output = uint32_t(o);
@@ -540,9 +541,6 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 				}
 				case PluginRole::Send: {
 					tap_now();
-					if (ps.reverb_send) {
-						break;
-					}
 					const ca::SoundConnection &c = p.connections[ps.index];
 					float target = 1.0f;
 					if (ps.output != UINT32_MAX) {
@@ -551,6 +549,9 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 							target = st.hdr_send_gain(o, hdr_window_db);
 						} else {
 							target = db_to_gain(o.curve_gain_db + o.cone_db + window_db);
+						}
+						if (ps.reverb_send) {
+							target *= db_to_gain(p.outputs[ps.output].reverb_gain_db);
 						}
 					}
 					if (c.to_bus && c.bus == ca::MasterBus::Lfe) {
@@ -992,9 +993,6 @@ void PatchInstance::State::quiet_plugin(PluginState &r_ps, float p_rate, float p
 			biquads(BiquadCoefficients::design(BiquadShape::Peaking, p_rate, r_ps.attribute(0), r_ps.attribute(2), gain_to_db(std::max(0.0f, r_ps.attribute(1)))));
 			break;
 		case PluginRole::Send: {
-			if (r_ps.reverb_send) {
-				break;
-			}
 			const ca::SoundConnection &c = p.connections[r_ps.index];
 			float target = 1.0f;
 			if (r_ps.output != UINT32_MAX) {
@@ -1003,6 +1001,9 @@ void PatchInstance::State::quiet_plugin(PluginState &r_ps, float p_rate, float p
 					target = hdr_send_gain(o, p_hdr_window_db);
 				} else {
 					target = db_to_gain(o.curve_gain_db + o.cone_db + p_window_db);
+				}
+				if (r_ps.reverb_send) {
+					target *= db_to_gain(p.outputs[r_ps.output].reverb_gain_db);
 				}
 			}
 			if (c.to_bus && c.bus == ca::MasterBus::Lfe) {
