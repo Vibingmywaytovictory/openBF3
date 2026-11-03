@@ -15,6 +15,7 @@
 #include "bf3/present/presented.h"
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -194,6 +195,8 @@ struct ClientStats {
 	uint32_t level_changes = 0;
 	uint32_t ready_sent = 0;
 	uint32_t loading_sent = 0;
+	uint32_t round_overs = 0;
+	uint32_t prepare_sent = 0;
 };
 static_assert(std::is_trivially_copyable_v<ClientStats>);
 
@@ -280,6 +283,14 @@ size_t present_others(const PresentationFrame &p_frame, uint64_t p_now_ns, std::
 
 double present_own_fraction(const PresentationFrame &p_frame, uint64_t p_now_ns);
 
+struct ClientRoundOver {
+	net::RoundOverInfo info;
+	uint32_t round_id = 0;
+	std::string level;
+	std::string mode;
+	uint32_t serial = 0;
+};
+
 class ClientSession {
 public:
 	ClientSession();
@@ -296,6 +307,8 @@ public:
 	bool lobby_match(net::MatchInfo &r_match) const;
 	bool level_change(net::LevelChange &r_change) const;
 	void set_load_progress(const net::Loading &p_progress);
+	bool round_over(ClientRoundOver &r_round_over) const;
+	void set_prepare_progress(const net::Prepare &p_progress);
 	void stop();
 	bool running() const;
 
@@ -426,4 +439,65 @@ bool present_own_alive(const PresentationFrame &p_frame);
 
 const char *rules_refusal(const net::MatchInfo &p_match, bool p_has_logic, uint64_t p_logic_digest);
 std::string level_refusal(const net::MatchInfo &p_match, std::string_view p_level, std::string_view p_mode);
+}
+
+namespace bf3::host {
+
+inline constexpr unsigned kPrepareMaxThreads = 4;
+inline constexpr double kColdLoadTargetSeconds = 15.0;
+inline constexpr double kColdPrepareTargetSeconds = 40.0;
+inline constexpr double kWarmLoadTargetSeconds = 5.0;
+
+struct PrepareTask {
+	net::NextLevel next;
+	unsigned threads = kPrepareMaxThreads;
+	std::atomic<uint16_t> *permille = nullptr;
+	std::atomic<bool> *cold = nullptr;
+	const std::atomic<bool> *stop = nullptr;
+	LoadProgress *progress = nullptr;
+};
+
+struct PrepareOutcome {
+	std::optional<core::Sha256Digest> source_digest;
+	bool cold = false;
+};
+
+using PrepareJob = std::function<core::Result<PrepareOutcome>(const PrepareTask &p_task)>;
+
+struct PrepareStatus {
+	uint32_t serial = 0;
+	net::NextLevel next;
+	uint32_t round_id = 0;
+	net::PrepareState state = net::PrepareState::None;
+	uint16_t permille = 0;
+	bool running = false;
+	bool cold = false;
+	bool skipped = false;
+	double seconds = 0.0;
+	std::string error;
+};
+
+class ClientPrepare {
+public:
+	explicit ClientPrepare(PrepareJob p_job, unsigned p_threads = kPrepareMaxThreads);
+	~ClientPrepare();
+	ClientPrepare(const ClientPrepare &) = delete;
+	ClientPrepare &operator=(const ClientPrepare &) = delete;
+
+	void poll(ClientSession &r_client);
+	bool holds(const net::LevelChange &p_change) const;
+	PrepareStatus status() const;
+
+private:
+	struct Run;
+	void start(const ClientRoundOver &p_round_over);
+	void report(ClientSession &r_client) const;
+
+	PrepareJob job_;
+	unsigned threads_ = kPrepareMaxThreads;
+	std::shared_ptr<Run> run_;
+	std::optional<ClientRoundOver> queued_;
+	uint32_t seen_serial_ = 0;
+};
+
 }

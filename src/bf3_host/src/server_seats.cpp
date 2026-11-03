@@ -41,6 +41,17 @@ bool SeatLoads::progress(size_t p_slot, const net::Loading &p_message, sim::Tick
 	return true;
 }
 
+bool SeatLoads::prepared(size_t p_slot, const net::Prepare &p_message) {
+	if (p_message.round_id != round_id_) {
+		return false;
+	}
+	SeatLoad &s = seats_[p_slot];
+	s.prepare = p_message.state;
+	s.prepare_permille = p_message.permille;
+	++s.prepare_reports;
+	return true;
+}
+
 void SeatLoads::done(size_t p_slot) {
 	seats_[p_slot].loading = false;
 }

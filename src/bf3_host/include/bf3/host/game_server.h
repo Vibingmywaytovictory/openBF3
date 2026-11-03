@@ -62,6 +62,9 @@ struct SeatLoad {
 	uint8_t stage = 0;
 	uint16_t permille = 0;
 	uint32_t reports = 0;
+	net::PrepareState prepare = net::PrepareState::None;
+	uint16_t prepare_permille = 0;
+	uint32_t prepare_reports = 0;
 };
 
 struct CarriedSeat {

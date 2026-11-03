@@ -594,6 +594,15 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 			m.loads.progress(size_t(at), *l, m.tick);
 			return;
 		}
+		case net::MessageType::Prepare: {
+			core::Result<net::Prepare> p = net::decode_prepare(p_datagram);
+			if (!p || at < 0) {
+				++m.bad_datagrams;
+				return;
+			}
+			m.loads.prepared(size_t(at), *p);
+			return;
+		}
 		case net::MessageType::Bye:
 			if (at >= 0) {
 				on_disconnect(p_peer);

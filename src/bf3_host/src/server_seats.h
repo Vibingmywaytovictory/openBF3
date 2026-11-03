@@ -16,6 +16,7 @@ public:
 	void configure(size_t p_slots, const LoadDeadlines &p_deadlines, uint32_t p_round_id);
 	void begin(size_t p_slot, sim::Tick p_now);
 	bool progress(size_t p_slot, const net::Loading &p_message, sim::Tick p_now);
+	bool prepared(size_t p_slot, const net::Prepare &p_message);
 	void done(size_t p_slot);
 	void reset(size_t p_slot);
 

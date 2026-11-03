@@ -36,6 +36,7 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 				return;
 			}
 			have_match = true;
+			match_identity = *m;
 			slot = m->slot;
 			stats_.slot = m->slot;
 			tracks.set_divisor(std::max<uint8_t>(m->snapshot_divisor, 1));
@@ -107,6 +108,9 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 				note_level_change(*c);
 				following = true;
 			}
+			return;
+		case net::MessageType::RoundOverInfo:
+			note_round_over(p_d);
 			return;
 		default:
 			if (match.datagram(*type, p_d)) {
@@ -230,6 +234,7 @@ void ClientLoop::iterate() {
 	}
 	link.send_requests(now);
 	send_load_report(now);
+	send_prepare_report(now);
 	link.release(now);
 	if (mismatch_deadline && now >= *mismatch_deadline) {
 		mismatch_deadline.reset();
@@ -343,6 +348,8 @@ void ClientLoop::reset_level_state() {
 	fresh.level_changes = stats_.level_changes;
 	fresh.ready_sent = stats_.ready_sent;
 	fresh.loading_sent = stats_.loading_sent;
+	fresh.round_overs = stats_.round_overs;
+	fresh.prepare_sent = stats_.prepare_sent;
 	fresh.kicked = stats_.kicked;
 	fresh.kick_reason = stats_.kick_reason;
 	fresh.kick_detail = stats_.kick_detail;
@@ -441,6 +448,60 @@ void ClientLoop::set_load_progress(const net::Loading &p_progress) {
 		return;
 	}
 	load_report = p_progress;
+}
+
+void ClientLoop::note_round_over(const net::NetSim::Datagram &p_d) {
+	core::Result<net::RoundOverInfo> r = net::decode_round_over_info(p_d.bytes);
+	if (!r) {
+		++stats_.bad_tdm_datagrams;
+		return;
+	}
+	++stats_.round_overs;
+	std::lock_guard lock(lobby_mutex);
+	ClientRoundOver o;
+	o.info = std::move(*r);
+	o.round_id = match_identity.round_id;
+	o.level = match_identity.level;
+	o.mode = match_identity.mode;
+	o.serial = stats_.round_overs;
+	round_over_info = std::move(o);
+}
+
+bool ClientLoop::round_over(ClientRoundOver &r_round_over) const {
+	std::lock_guard lock(lobby_mutex);
+	if (!round_over_info) {
+		return false;
+	}
+	r_round_over = *round_over_info;
+	return true;
+}
+
+void ClientLoop::set_prepare_progress(const net::Prepare &p_progress) {
+	std::lock_guard lock(lobby_mutex);
+	prepare_report = p_progress;
+}
+
+void ClientLoop::send_prepare_report(uint64_t p_now) {
+	if (!link.connected()) {
+		return;
+	}
+	net::Prepare report;
+	{
+		std::lock_guard lock(lobby_mutex);
+		if (!prepare_report) {
+			return;
+		}
+		report = *prepare_report;
+	}
+	const bool same_state = prepare_last && prepare_last->round_id == report.round_id &&
+			prepare_last->state == report.state && prepare_last->next_source_digest == report.next_source_digest;
+	if (same_state && (prepare_last->permille == report.permille || p_now < prepare_sent_ns + kLoadReportNs)) {
+		return;
+	}
+	link.submit(net::kChannelReliable, net::encode_prepare(report), p_now);
+	prepare_last = report;
+	prepare_sent_ns = p_now;
+	++stats_.prepare_sent;
 }
 
 bool ClientLoop::level_change(net::LevelChange &r_change) const {

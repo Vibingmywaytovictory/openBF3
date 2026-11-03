@@ -228,3 +228,7 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/ai_bot_source.h
     src/ai_bot_source.cpp
 )
+
+target_sources(bf3_host PRIVATE
+    src/client_prepare.cpp
+)

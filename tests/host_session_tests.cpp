@@ -2232,6 +2232,186 @@ TEST_SUITE("host-session-unit") {
 		}
 	}
 
+	TEST_CASE("host.session: a client prepares the level a RoundOverInfo names on 4 below-normal threads, reports "
+			  "Prepare to the server, holds the LevelChange while it runs, and the cache entry its job wrote is there "
+			  "when the next level attaches") {
+		const std::filesystem::path root = std::filesystem::temp_directory_path() /
+				("openbf3-host-prepare-" + std::to_string(GetCurrentProcessId()));
+		std::error_code ec;
+		std::filesystem::remove_all(root, ec);
+		std::filesystem::create_directories(root / "install", ec);
+		auto cache = std::make_shared<core::Cache>();
+		{
+			core::CacheOptions co;
+			co.root = root / "cache";
+			co.guard.add_protected_root(root / "install");
+			std::string detail;
+			REQUIRE_MESSAGE(cache->open(std::move(co), &detail) == core::CacheStatus::Ok, detail);
+		}
+		const auto level_key = [](std::string_view p_level) {
+			core::CacheKeyInputs in;
+			in.kind = "prepare-test";
+			in.params = std::string(p_level);
+			return *core::make_cache_key(in);
+		};
+		auto next_level = std::make_shared<SharedLevel>(*synthetic_level());
+		next_level->level = "Levels/Next/Next";
+		next_level->source_digest = core::Sha256Digest{};
+		next_level->source_digest->bytes[0] = 0xB;
+
+		std::atomic<bool> released{ false };
+		std::atomic<int> jobs{ 0 };
+		std::atomic<unsigned> job_threads{ 0 };
+		std::atomic<int> job_priority{ THREAD_PRIORITY_NORMAL };
+		std::string job_level;
+		PrepareJob job = [&](const PrepareTask &p_task) -> core::Result<PrepareOutcome> {
+			++jobs;
+			job_level = p_task.next.level;
+			job_threads = p_task.threads;
+			job_priority = GetThreadPriority(GetCurrentThread());
+			p_task.permille->store(250);
+			while (!released.load() && !p_task.stop->load()) {
+				std::this_thread::sleep_for(5ms);
+			}
+			bool produced = false;
+			core::GetResult got = cache->get_or_put(level_key(p_task.next.level), [&](std::vector<uint8_t> &r_payload) {
+				produced = true;
+				r_payload.assign(p_task.next.level.begin(), p_task.next.level.end());
+				return true;
+			});
+			if (got.status != core::CacheStatus::Ok) {
+				return core::make_error("prepare: the cache refused the level");
+			}
+			p_task.cold->store(produced);
+			PrepareOutcome outcome;
+			outcome.source_digest = next_level->source_digest;
+			outcome.cold = produced;
+			return outcome;
+		};
+
+		auto pipe = std::make_shared<Pipe>();
+		ServerConfig sc;
+		sc.game = pipe_game();
+		sc.transport = std::make_shared<PipeServerPort>(pipe);
+		ServerHost server;
+		std::string err;
+		REQUIRE_MESSAGE(server.start(sc, &err), err);
+		pipe->connect(0);
+		ClientSession client;
+		ClientSessionConfig cc;
+		cc.name = "preparer";
+		const core::Status started = client.start(cc, nullptr, std::make_unique<PipeClientTransport>(pipe, 0));
+		REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
+		net::MatchInfo held;
+		REQUIRE(wait_until([&] { return client.lobby_match(held); }, 10s, 16ms));
+		const core::Status attached = client.attach_level(synthetic_level());
+		REQUIRE_MESSAGE(attached.ok(), (attached.ok() ? std::string() : attached.error().message));
+		REQUIRE(wait_until([&] { return client.stats().ready_sent == 1; }, 10s, 16ms));
+
+		ClientPrepare prepare(job, 8);
+		prepare.poll(client);
+		CHECK_FALSE(prepare.status().running);
+		CHECK(prepare.status().serial == 0u);
+
+		const auto deliver = [&](std::vector<uint8_t> p_bytes) {
+			std::lock_guard lock(pipe->mutex);
+			pipe->to_client[0].push_back({ 0, net::kChannelReliable, std::move(p_bytes) });
+			pipe->to_client_ready.notify_all();
+		};
+		net::RoundOverInfo over;
+		over.winner = 1;
+		over.next.level = next_level->level;
+		over.next.mode = next_level->mode;
+		over.next.source_digest = next_level->source_digest;
+		over.intermission_s = 60;
+		deliver(net::encode_round_over_info(over));
+		REQUIRE(wait_until([&] { return client.stats().round_overs == 1; }, 10s, 16ms));
+		const auto seat = [&] { return server.game_stats().slots.at(0).load; };
+		REQUIRE(wait_until(
+				[&] {
+					prepare.poll(client);
+					return seat().prepare == net::PrepareState::Preparing && seat().prepare_permille == 250;
+				},
+				10s, 16ms));
+		CHECK(prepare.status().running);
+		CHECK(prepare.status().round_id == held.round_id);
+		CHECK(jobs == 1);
+		CHECK(job_level == next_level->level);
+		CHECK(job_threads == kPrepareMaxThreads);
+		CHECK(job_priority == THREAD_PRIORITY_BELOW_NORMAL);
+
+		net::LevelChange change;
+		change.level = next_level->level;
+		change.mode = next_level->mode;
+		change.round_id = 1;
+		change.load_deadline_s = 120;
+		deliver(net::encode_level_change(change));
+		REQUIRE(wait_until([&] { return client.stats().level_changes == 1; }, 10s, 16ms));
+		CHECK(server.game_stats().bad_datagrams == 0);
+		server.stop();
+		std::shared_ptr<GameServerConfig> next_game = pipe_game();
+		next_game->level = next_level;
+		next_game->round_id = change.round_id;
+		ServerConfig next_config;
+		next_config.game = next_game;
+		next_config.transport = std::make_shared<PipeServerPort>(pipe);
+		ServerHost next;
+		REQUIRE_MESSAGE(next.start(next_config, &err), err);
+		pipe->connect(0);
+		net::Hello carried;
+		carried.name = cc.name;
+		carried.game_build = net::game_build();
+		pipe->client_send(0, net::kChannelReliable, net::encode_hello(carried));
+		const auto next_seat = [&] { return next.game_stats().slots.at(0).load; };
+		REQUIRE(wait_until(
+				[&] {
+					prepare.poll(client);
+					return next_seat().loading && next_seat().reports >= 2;
+				},
+				10s, 16ms));
+		CHECK(prepare.holds(change));
+		CHECK(next_seat().stage == uint8_t(LoadStage::Mount));
+		CHECK(next_seat().permille == 250);
+		CHECK_FALSE(next_seat().cold);
+		CHECK(jobs == 1);
+
+		released = true;
+		REQUIRE(wait_until(
+				[&] {
+					prepare.poll(client);
+					return !prepare.holds(change) && client.stats().prepare_sent >= 2;
+				},
+				10s, 16ms));
+		const PrepareStatus done = prepare.status();
+		CHECK_FALSE(done.running);
+		CHECK(done.state == net::PrepareState::Ready);
+		CHECK(done.permille == 1000);
+		CHECK(done.cold);
+		CHECK(done.error.empty());
+
+		const core::Status detached = client.detach_level();
+		REQUIRE_MESSAGE(detached.ok(), (detached.ok() ? std::string() : detached.error().message));
+		bool converted_at_attach = false;
+		core::GetResult loaded = cache->get_or_put(level_key(change.level), [&](std::vector<uint8_t> &) {
+			converted_at_attach = true;
+			return false;
+		});
+		REQUIRE(loaded.status == core::CacheStatus::Ok);
+		CHECK_FALSE(converted_at_attach);
+		CHECK(std::string(loaded.entry.payload().begin(), loaded.entry.payload().end()) == next_level->level);
+		const core::Status reattached = client.attach_level(next_level);
+		REQUIRE_MESSAGE(reattached.ok(), (reattached.ok() ? std::string() : reattached.error().message));
+		CHECK(wait_until([&] { return client.stats().ready_sent == 2; }, 10s, 16ms));
+		CHECK(jobs == 1);
+		CHECK(next.game_stats().bad_datagrams == 0);
+		CHECK_FALSE(client.stats().kicked);
+		client.stop();
+		next.stop();
+		loaded.entry.reset();
+		cache->close();
+		std::filesystem::remove_all(root, ec);
+	}
+
 	TEST_CASE(
 			"host.session: a client kicked in the lobby keeps the kick reason when the level it attaches is refused") {
 		auto pipe = std::make_shared<Pipe>();

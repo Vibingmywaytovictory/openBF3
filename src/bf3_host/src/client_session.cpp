@@ -216,6 +216,14 @@ void ClientSession::set_load_progress(const net::Loading &p_progress) {
 	impl_->loop.set_load_progress(p_progress);
 }
 
+bool ClientSession::round_over(ClientRoundOver &r_round_over) const {
+	return impl_->loop.round_over(r_round_over);
+}
+
+void ClientSession::set_prepare_progress(const net::Prepare &p_progress) {
+	impl_->loop.set_prepare_progress(p_progress);
+}
+
 void ClientSession::stop() {
 	std::lock_guard lock(impl_->lifecycle_mutex);
 	if (!impl_->thread.joinable()) {

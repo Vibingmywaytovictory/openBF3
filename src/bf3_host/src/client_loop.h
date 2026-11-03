@@ -36,6 +36,8 @@ public:
 	bool lobby_match(net::MatchInfo &r_match) const;
 	bool level_change(net::LevelChange &r_change) const;
 	void set_load_progress(const net::Loading &p_progress);
+	bool round_over(ClientRoundOver &r_round_over) const;
+	void set_prepare_progress(const net::Prepare &p_progress);
 	void begin(std::unique_ptr<ClientTransport> p_transport, MonotonicClock p_clock);
 	void iterate();
 	void shutdown();
@@ -91,6 +93,11 @@ private:
 	std::optional<net::LevelChange> lobby_change;
 	std::optional<net::Loading> load_report;
 	uint64_t load_report_sent_ns = 0;
+	std::optional<ClientRoundOver> round_over_info;
+	std::optional<net::Prepare> prepare_report;
+	std::optional<net::Prepare> prepare_last;
+	uint64_t prepare_sent_ns = 0;
+	net::MatchInfo match_identity;
 	bool following = false;
 	std::optional<uint64_t> mismatch_deadline;
 
@@ -110,6 +117,8 @@ private:
 	void note_level_change(const net::LevelChange &p_change);
 	void note_lobby_match(const net::MatchInfo &p_match);
 	void send_load_report(uint64_t p_now);
+	void note_round_over(const net::NetSim::Datagram &p_d);
+	void send_prepare_report(uint64_t p_now);
 	void reset_level_state();
 	void publish_link_stats();
 	void client_tick(uint64_t p_now);
