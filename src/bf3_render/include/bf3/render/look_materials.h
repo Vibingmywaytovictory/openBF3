@@ -51,6 +51,28 @@ enum class LookBlend : uint8_t {
 	Blend,
 };
 
+enum class LookProgram : uint8_t {
+	Standard,
+	CharacterBackdrop,
+	LightCone,
+};
+const char *look_program_name(LookProgram p_program);
+
+enum class LookLayerRole : uint8_t {
+	Base,
+	Lit,
+	Noise,
+	Flow,
+	Mask,
+	Dust,
+};
+const char *look_layer_role_name(LookLayerRole p_role);
+
+struct LookLayer {
+	LookLayerRole role = LookLayerRole::Base;
+	std::string name;
+};
+
 struct LookMaterial {
 	std::optional<LookTexture> color;
 	std::optional<LookTexture> normal;
@@ -61,6 +83,10 @@ struct LookMaterial {
 	size_t color_candidates = 0;
 	size_t normal_candidates = 0;
 	bool glass = false;
+	LookProgram program = LookProgram::Standard;
+	std::vector<LookLayer> layers;
+	std::optional<uint8_t> solution_blend;
+	std::vector<ShaderValue> values;
 };
 
 struct LookStats {

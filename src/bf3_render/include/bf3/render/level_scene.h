@@ -82,6 +82,7 @@ struct SceneMaterialPlan {
 	bool blend = false;
 	bool glass = false;
 	std::optional<LookMaterial> look;
+	std::vector<int32_t> layers;
 };
 
 inline constexpr uint32_t kSceneUndrawnMaterial = 0xFFFFFFFFu;

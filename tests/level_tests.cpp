@@ -1295,10 +1295,10 @@ TEST_SUITE("level") {
 		const MeshCensus census = census_of(level.db(), level.mount(), world);
 		CHECK(census.failures.empty());
 		CHECK(census.placements == 10873);
-		CHECK(census.scene_meshes == 843);
-		CHECK(census.model_meshes == 763);
+		CHECK(census.scene_meshes == 844);
+		CHECK(census.model_meshes == 764);
 		CHECK(census.world_meshes == 80);
-		CHECK(census.scene_instances == 10572);
+		CHECK(census.scene_instances == 10573);
 		CHECK(census.meshes.size() == 903);
 
 		const std::vector<CollisionPlacement> collision = collision_of(level, world);
@@ -1339,15 +1339,15 @@ TEST_SUITE("level") {
 
 		const MeshCensus current = census_of(t.level->db(), t.level->mount(), world);
 		CHECK(current.failures.empty());
-		CHECK(current.scene_instances == 5784);
-		CHECK(current.scene_meshes == 614);
+		CHECK(current.scene_instances == 5785);
+		CHECK(current.scene_meshes == 615);
 		CensusOptions legacy;
 		legacy.legacy_variations = true;
 		const MeshCensus handoff = census_of(t.level->db(), t.level->mount(), world, legacy);
-		CHECK(handoff.scene_meshes == 621);
-		CHECK(handoff.model_meshes == 580);
+		CHECK(handoff.scene_meshes == 622);
+		CHECK(handoff.model_meshes == 581);
 		CHECK(handoff.world_meshes == 41);
-		CHECK(handoff.scene_instances == 5784);
+		CHECK(handoff.scene_instances == 5785);
 	}
 
 	TEST_CASE("level: Caspian Border ConquestSmall0") {
@@ -1367,9 +1367,8 @@ TEST_SUITE("level") {
 		const MeshCensus census = census_of(t.level->db(), t.level->mount(), world);
 		CHECK(census.failures.empty());
 		CHECK(census.placements == 6847);
-		CHECK(census.scene_meshes == 305);
-		CHECK(census.scene_instances == 6847);
-
+		CHECK(census.scene_meshes == 306);
+		CHECK(census.scene_instances == 6848);
 	}
 
 	TEST_CASE("level: mutated level partitions fail or traverse, never crash") {

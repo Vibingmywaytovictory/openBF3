@@ -42,8 +42,7 @@ using Clock = std::chrono::steady_clock;
 using scene_internal::Mat3;
 using Vec3 = core::Vec3;
 
-constexpr std::string_view kUndrawnShaders[5] = { "invisible", "occluder", "shadowmesh", "lightcone_particles",
-	"ui_menu" };
+constexpr std::string_view kUndrawnShaders[4] = { "invisible", "occluder", "shadowmesh", "ui_menu" };
 
 constexpr std::string_view kAlphaTestWords[] = { "foliage", "vegetation", "alphatest", "alpha_test", "fence", "decal", "grass", "leaf", "leaves",
 	"tree", "bush", "ivy", "hair", "cutout", "masked" };
@@ -359,6 +358,12 @@ std::string look_key(const LookMaterial &p_look) {
 	key += char('0' + int(p_look.blend));
 	key += p_look.double_sided ? 'd' : 's';
 	key += p_look.glass ? 'g' : '-';
+	key += char('0' + int(p_look.program));
+	for (const LookLayer &l : p_look.layers) {
+		key += '\x05';
+		key += char('0' + int(l.role));
+		key += l.name;
+	}
 	return key;
 }
 
@@ -404,6 +409,11 @@ struct PlanBuilder {
 			m.normal = bind(*look.normal, TextureRole::Normal);
 			m.normal_uv = look.normal->channel;
 			m.normal_scale = look.normal->scale;
+		}
+		for (const LookLayer &l : look.layers) {
+			const bool colour =
+					l.role == LookLayerRole::Base || l.role == LookLayerRole::Lit || l.role == LookLayerRole::Dust;
+			m.layers.push_back(int32_t(texture(l.name, colour ? TextureRole::Color : TextureRole::Data)));
 		}
 		m.look = std::move(look);
 		const uint32_t at = uint32_t(plan.materials.size());

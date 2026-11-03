@@ -48,8 +48,13 @@ constexpr std::string_view kOverlayWords[] = { "puddle", "waterpuddle" };
 constexpr std::string_view kFoliageWords[] = { "vegetation", "foliage", "leaf", "leaves", "bush", "grass", "ivy", "vine" };
 constexpr std::string_view kBackdropWords[] = { "backdrop" };
 constexpr std::string_view kGlassWords[] = { "glass", "window" };
-constexpr std::string_view kUndrawnShaders[] = { "invisible", "occluder", "shadowmesh", "lightcone_particles",
-	"ui_menu" };
+constexpr std::string_view kUndrawnShaders[] = { "invisible", "occluder", "shadowmesh", "ui_menu" };
+constexpr std::string_view kCharacterBackdropWords[] = { "charbackdrop" };
+constexpr std::string_view kLightConeWords[] = { "lightcone" };
+constexpr std::string_view kDustWords[] = { "lightdust" };
+constexpr LookLayerRole kCharacterBackdropRoles[] = { LookLayerRole::Base, LookLayerRole::Lit, LookLayerRole::Noise,
+	LookLayerRole::Flow, LookLayerRole::Mask };
+constexpr LookLayerRole kLightConeRoles[] = { LookLayerRole::Base, LookLayerRole::Dust };
 
 constexpr std::string_view kNameAlphaWords[] = { "foliage", "vegetation", "alphatest", "alpha_test", "fence", "decal", "grass", "leaf", "leaves",
 	"tree", "bush", "ivy", "hair", "cutout", "masked" };
@@ -231,6 +236,47 @@ std::optional<size_t> neighbour_class(const Candidate &p_c) {
 	return size_t(p_c.role == kNormal ? 4 : 0) + size_t(std::min<uint8_t>(p_c.rank.quality, 1) * 2) + size_t(tiled(p_c.texture) ? 1 : 0);
 }
 
+LookLayerRole layer_role(std::string_view p_name, bool p_first_colour) {
+	const std::vector<std::string> w = words(last_part(p_name));
+	const auto named = [&](std::string_view p_word) { return std::find(w.begin(), w.end(), p_word) != w.end(); };
+	if (named("flow")) {
+		return LookLayerRole::Flow;
+	}
+	if (named("mask")) {
+		return LookLayerRole::Mask;
+	}
+	if (named("perlin") || named("noise")) {
+		return LookLayerRole::Noise;
+	}
+	if (has_word(last_part(p_name), kDustWords)) {
+		return LookLayerRole::Dust;
+	}
+	return p_first_colour ? LookLayerRole::Base : LookLayerRole::Lit;
+}
+
+template <size_t N>
+std::vector<LookLayer> program_layers(const SurfaceShader &p_shader, const LookLayerRole (&p_roles)[N]) {
+	std::vector<LookLayer> out;
+	bool first_colour = true;
+	for (const std::string &sampled : p_shader.sampled_textures) {
+		const std::string name = to_lower_ascii(sampled);
+		const LookLayerRole role = layer_role(name, first_colour);
+		if (role == LookLayerRole::Base || role == LookLayerRole::Lit) {
+			first_colour = false;
+		}
+		out.push_back(LookLayer{ role, name });
+	}
+	for (LookLayerRole r : p_roles) {
+		if (std::count_if(out.begin(), out.end(), [&](const LookLayer &p_l) { return p_l.role == r; }) != 1) {
+			return {};
+		}
+	}
+	if (out.size() != N) {
+		return {};
+	}
+	return out;
+}
+
 }
 
 struct LookResolver::GraphInfo {
@@ -243,6 +289,36 @@ struct LookResolver::FolderIndex {
 
 	std::array<std::vector<std::pair<std::string, Candidate>>, kNeighbourClasses> classes;
 };
+
+const char *look_program_name(LookProgram p_program) {
+	switch (p_program) {
+		case LookProgram::Standard:
+			return "standard";
+		case LookProgram::CharacterBackdrop:
+			return "character backdrop";
+		case LookProgram::LightCone:
+			return "light cone";
+	}
+	return "?";
+}
+
+const char *look_layer_role_name(LookLayerRole p_role) {
+	switch (p_role) {
+		case LookLayerRole::Base:
+			return "base";
+		case LookLayerRole::Lit:
+			return "lit";
+		case LookLayerRole::Noise:
+			return "noise";
+		case LookLayerRole::Flow:
+			return "flow";
+		case LookLayerRole::Mask:
+			return "mask";
+		case LookLayerRole::Dust:
+			return "dust";
+	}
+	return "?";
+}
 
 const char *look_tier_name(LookTier p_tier) {
 	switch (p_tier) {
@@ -677,6 +753,19 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 		out.blend = LookBlend::Blend;
 	}
 	out.color = std::move(color);
+	if (shader != nullptr) {
+		if (!shader->solutions.empty()) {
+			out.solution_blend = shader->solutions.front().blend_mode;
+		}
+		out.values = shader->values;
+		if (contains_any(shader_name, kCharacterBackdropWords)) {
+			out.layers = program_layers(*shader, kCharacterBackdropRoles);
+			out.program = out.layers.empty() ? LookProgram::Standard : LookProgram::CharacterBackdrop;
+		} else if (contains_any(shader_name, kLightConeWords) && out.blend == LookBlend::Blend) {
+			out.layers = program_layers(*shader, kLightConeRoles);
+			out.program = out.layers.empty() ? LookProgram::Standard : LookProgram::LightCone;
+		}
+	}
 	stats_.seconds_resolve += std::chrono::duration<double>(Clock::now() - start).count();
 	return out;
 }

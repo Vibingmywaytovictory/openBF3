@@ -551,8 +551,8 @@ TEST_SUITE("render-scene") {
 		REQUIRE(census.ok());
 		const double seconds_census = seconds_since(t0);
 		CHECK(census->placements == 10873);
-		CHECK(census->scene_meshes == 843);
-		CHECK(census->scene_instances == 10572);
+		CHECK(census->scene_meshes == 844);
+		CHECK(census->scene_instances == 10573);
 
 		Result<LevelScenePlan> plan = plan_level_scene(lvl, **world, *census);
 		REQUIRE(plan.ok());
@@ -560,7 +560,7 @@ TEST_SUITE("render-scene") {
 		std::printf("render.scene plan: load + traverse %.3f s, census %.3f s, plan %.3f s\n", seconds_load, seconds_census, p.seconds);
 
 		check_requests_match_m0(*census, p.requests);
-		CHECK(p.requests.size() == 620);
+		CHECK(p.requests.size() == 621);
 
 		size_t kept = 0, start_hidden = 0;
 		std::vector<size_t> shown(census->meshes.size(), 0);
@@ -584,11 +584,11 @@ TEST_SUITE("render-scene") {
 					"start-hidden), %zu materials, %zu textures, %zu terrains, %zu failures\n",
 				p.requests.size(), p.meshes.size(), kept, expected_meshes, p.instances.size(), census->instances.size(), start_hidden, p.materials.size(),
 				p.textures.size(), p.terrains.size(), p.failures.size());
-		CHECK(kept == 841);
-		CHECK(census->instances.size() == 10570);
+		CHECK(kept == 842);
+		CHECK(census->instances.size() == 10571);
 		CHECK(start_hidden == 64);
 		CHECK(p.meshes.size() == expected_meshes);
-		CHECK(p.meshes.size() <= 841);
+		CHECK(p.meshes.size() <= 842);
 		CHECK(p.instances.size() == census->instances.size() - start_hidden);
 		CHECK(p.terrains.size() == 1);
 		for (const auto &[item, error] : p.failures) {
@@ -664,14 +664,22 @@ TEST_SUITE("render-scene") {
 					CHECK(albedo.find("characterbackdrop") != std::string::npos);
 					CHECK(!mat.blend);
 					CHECK((mat.look && mat.look->shader_in_database));
+					CHECK((mat.look && mat.look->program == LookProgram::CharacterBackdrop));
+					CHECK(mat.layers.size() == 5);
 					backdrop_slots += m.instances;
 				} else if (shader == "objects/ui_characterbackdrop/shaders/lightcone_particles_01") {
+					CHECK((mat.look && mat.look->program == LookProgram::LightCone));
+					CHECK(mat.layers.size() == 2);
+					CHECK(mat.blend);
 					lightcone_slots += m.instances;
+				}
+				for (int32_t layer : mat.layers) {
+					CHECK((layer >= 0 && size_t(layer) < p.textures.size()));
 				}
 			}
 		}
 		CHECK(backdrop_slots >= 1);
-		CHECK(lightcone_slots == 0);
+		CHECK(lightcone_slots >= 1);
 		size_t no_textures = 0;
 		std::map<std::string, size_t> unlit_sets;
 		for (const SceneMaterialPlan &m : p.materials) {

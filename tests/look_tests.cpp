@@ -559,7 +559,7 @@ TEST_SUITE("render-look-unit") {
 }
 
 TEST_SUITE("render-look") {
-	TEST_CASE("render.look: Metro shader database, resolver and visual environment") {
+	TEST_CASE("render.look: Metro shader database, resolver, EOR backdrop and light cone, and visual environment") {
 		InstallReader reader;
 		if (!reader.locate({})) {
 			bf3::test::skip_install_case(reader.describe().c_str());
@@ -605,6 +605,61 @@ TEST_SUITE("render-look") {
 				(unsigned long long)stats.shader_work, resolver->failures().size());
 		CHECK(stats.shader_databases >= 1);
 		CHECK(resolver->failures().empty());
+
+		MaterialSlot backdrop_slot;
+		backdrop_slot.shader = "Objects/UI_CharacterBackdrop/Shaders/CharBackdrop_01";
+		const LookMaterial backdrop =
+				resolver->resolve(backdrop_slot, "objects/ui_characterbackdrop/ui_characterbackdrop_01_mesh");
+		const SurfaceShader *backdrop_graph =
+				resolver->shaders().by_name("objects/ui_characterbackdrop/shaders/charbackdrop_01");
+		REQUIRE(backdrop_graph != nullptr);
+		std::printf("render.look eor backdrop: %s, %zu layers, %zu values, %zu texture parameters, %zu solutions, "
+					"first blend %d\n",
+				look_program_name(backdrop.program), backdrop.layers.size(), backdrop.values.size(),
+				backdrop_graph->texture_parameters.size(), backdrop_graph->solutions.size(),
+				backdrop.solution_blend ? int(*backdrop.solution_blend) : -1);
+		CHECK(backdrop.drawn);
+		CHECK(backdrop.program == LookProgram::CharacterBackdrop);
+		const std::vector<std::pair<LookLayerRole, std::string>> backdrop_layers = {
+			{ LookLayerRole::Base, "objects/ui_characterbackdrop/textures/characterbackdrop_02_d" },
+			{ LookLayerRole::Lit, "objects/ui_characterbackdrop/textures/characterbackdrop_01_d" },
+			{ LookLayerRole::Noise, "textures/perlin" },
+			{ LookLayerRole::Flow, "objects/ui_characterbackdrop/textures/characterbackdrop_flow_01" },
+			{ LookLayerRole::Mask, "objects/ui_characterbackdrop/textures/characterbackdrop_01_mask" },
+		};
+		REQUIRE(backdrop.layers.size() == backdrop_layers.size());
+		for (size_t i = 0; i < backdrop_layers.size(); ++i) {
+			std::printf("render.look eor backdrop layer %s %s\n", look_layer_role_name(backdrop.layers[i].role),
+					backdrop.layers[i].name.c_str());
+			CHECK(backdrop.layers[i].role == backdrop_layers[i].first);
+			CHECK(backdrop.layers[i].name == backdrop_layers[i].second);
+		}
+		CHECK(backdrop.values.empty());
+		CHECK(backdrop_graph->texture_parameters.empty());
+		CHECK(backdrop.blend == LookBlend::Opaque);
+
+		MaterialSlot cone_slot;
+		cone_slot.shader = "objects/UI_CharacterBackdrop/Shaders/LightCone_Particles_01";
+		const LookMaterial cone =
+				resolver->resolve(cone_slot, "objects/ui_characterbackdrop/lightcone_particles_01_mesh");
+		std::printf("render.look eor light cone: drawn %d, %s, blend %d, solution blend %d, %zu layers, %zu values\n",
+				int(cone.drawn), look_program_name(cone.program), int(cone.blend),
+				cone.solution_blend ? int(*cone.solution_blend) : -1, cone.layers.size(), cone.values.size());
+		CHECK(cone.drawn);
+		CHECK(cone.blend == LookBlend::Blend);
+		CHECK(cone.program == LookProgram::LightCone);
+		REQUIRE(cone.solution_blend.has_value());
+		CHECK(*cone.solution_blend == 1);
+		REQUIRE(cone.layers.size() == 2);
+		CHECK(cone.layers[0].role == LookLayerRole::Dust);
+		CHECK(cone.layers[0].name == "objects/ui_characterbackdrop/textures/lightdust_01_d");
+		CHECK(cone.layers[1].role == LookLayerRole::Base);
+		CHECK(cone.layers[1].name == "levels/sp_earthquake/props/lightcone/lightcone_01");
+		REQUIRE(cone.values.size() == 2);
+		CHECK(cone.values[0].name == "ParticleSpeed");
+		CHECK(cone.values[0].value[0] == -0.01f);
+		CHECK(cone.values[1].name == "Color");
+		CHECK(cone.values[1].value[2] == 0.272f);
 
 		Result<std::unique_ptr<level::World>> world = level::World::traverse(lvl);
 		REQUIRE(world.ok());
