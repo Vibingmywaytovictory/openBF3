@@ -4,6 +4,7 @@
 
 #include "bf3/core/gameplay/weapon_resolver.h"
 #include "bf3/core/util/finite.h"
+#include "bf3/core/util/format.h"
 #include "bf3/sim/weapons/sim_time.h"
 
 #include <algorithm>
@@ -1410,6 +1411,35 @@ size_t FxTriggers::pending() const {
 
 size_t FxTriggers::live_tracers() const {
 	return impl_->tracers.size();
+}
+
+const char *trigger_purpose_name(TriggerPurpose p_purpose) {
+	switch (p_purpose) {
+		case TriggerPurpose::Muzzle:
+			return "Muzzle";
+		case TriggerPurpose::Shell:
+			return "Shell";
+		case TriggerPurpose::Tracer:
+			return "Tracer";
+		case TriggerPurpose::ImpactChoice:
+			return "ImpactChoice";
+		case TriggerPurpose::ImpactEffect:
+			return "ImpactEffect";
+		case TriggerPurpose::ImpactSpread:
+			return "ImpactSpread";
+		case TriggerPurpose::Decal:
+			return "Decal";
+		case TriggerPurpose::Detonation:
+			return "Detonation";
+	}
+	return "?";
+}
+
+std::string trigger_trace_row(const TriggerStart &p_start) {
+	return core::fmt("%s,%s,%u,%u,%u,%016llx,%s,%u", present::present_kind_name(p_start.kind),
+			trigger_purpose_name(p_start.purpose), unsigned(p_start.slot), unsigned(p_start.id),
+			unsigned(p_start.pellet), (unsigned long long)p_start.seed,
+			p_start.def != nullptr ? p_start.def->name.c_str() : "", unsigned(p_start.index));
 }
 
 }

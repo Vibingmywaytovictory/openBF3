@@ -3,6 +3,7 @@
 #include "bf3/audio/audio_load.h"
 #include "bf3/core/audio/sound_ports.h"
 #include "bf3/core/util/finite.h"
+#include "bf3/core/util/format.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
 #include <algorithm>
@@ -474,6 +475,19 @@ struct WeaponAudioRouter::Impl {
 	bool listener_set = false;
 	uint32_t own_burst_counter = 0;
 	uint64_t frame_counter = 0;
+	bool trace = false;
+	std::vector<WeaponSoundStart> trace_starts;
+
+	void traced(WeaponSoundStartKind p_kind, uint8_t p_slot, uint16_t p_def, uint32_t p_key, uint64_t p_seed) {
+		if (!trace) {
+			return;
+		}
+		if (trace_starts.size() >= kMaxWeaponSoundStarts) {
+			++stats.trace_dropped;
+			return;
+		}
+		trace_starts.push_back(WeaponSoundStart{ p_kind, p_slot, p_def, p_key, p_seed });
+	}
 
 	sw::SimTime horizon = 0;
 	bool horizon_valid = false;
@@ -855,8 +869,11 @@ struct WeaponAudioRouter::Impl {
 		if (d->form == WeaponAudioForm::OneShot) {
 			end_track(own);
 			(void)fire_def_of(own_slot, p_e.def);
-			(void)one_shot(d->program, d->one_shot_event, sound_seed(own_slot, own_burst_counter++), em, frame,
-					own_first_person, one_shot_join_key(own_slot, own_first_person));
+			const uint32_t key = own_burst_counter++;
+			if (one_shot(d->program, d->one_shot_event, sound_seed(own_slot, key), em, frame, own_first_person,
+						one_shot_join_key(own_slot, own_first_person))) {
+				traced(WeaponSoundStartKind::OwnOneShot, own_slot, p_e.def, key, sound_seed(own_slot, key));
+			}
 			return;
 		}
 		Voice *v = own.held != kNoInstance ? voice(own.held) : nullptr;
@@ -870,11 +887,13 @@ struct WeaponAudioRouter::Impl {
 			}
 		}
 		if (v == nullptr) {
-			v = start_burst(own, true, own_slot, p_e.def, sound_seed(own_slot, own_burst_counter++), frame, p_e.time, present::PresentTimeline::Predicted, em,
-					0.0f, own_first_person);
+			const uint32_t key = own_burst_counter++;
+			v = start_burst(own, true, own_slot, p_e.def, sound_seed(own_slot, key), frame, p_e.time,
+					present::PresentTimeline::Predicted, em, 0.0f, own_first_person);
 			if (v == nullptr) {
 				return;
 			}
+			traced(WeaponSoundStartKind::OwnBurst, own_slot, p_e.def, key, v->seed);
 			v->have_id = true;
 			v->first_id = p_e.id;
 			++stats.event_rounds;
@@ -911,8 +930,11 @@ struct WeaponAudioRouter::Impl {
 		if (d->form == WeaponAudioForm::OneShot) {
 			if (dist <= config.max_weapon_distance_m) {
 				(void)fire_def_of(p_e.slot, p_e.def);
-				(void)one_shot(d->program, d->one_shot_event, sound_seed(p_e.slot, p_e.id), em, frame, false,
-						one_shot_join_key(p_e.slot, false));
+				if (one_shot(d->program, d->one_shot_event, sound_seed(p_e.slot, p_e.id), em, frame, false,
+							one_shot_join_key(p_e.slot, false))) {
+					traced(WeaponSoundStartKind::RemoteOneShot, p_e.slot, p_e.def, p_e.id,
+							sound_seed(p_e.slot, p_e.id));
+				}
 			}
 			return;
 		}
@@ -948,6 +970,7 @@ struct WeaponAudioRouter::Impl {
 		if (v == nullptr) {
 			return;
 		}
+		traced(WeaponSoundStartKind::RemoteBurst, p_e.slot, p_e.def, seq, v->seed);
 		t.seq_ahead = uint8_t(std::min<uint32_t>(t.seq_ahead + 1u, 15u));
 		v->have_id = true;
 		v->first_id = p_e.id;
@@ -982,9 +1005,11 @@ struct WeaponAudioRouter::Impl {
 				case present::PresentKind::Detonation: {
 					const WeaponAudioDef *d = def_of(e.def);
 					if (d != nullptr && d->explosion) {
-						if (one_shot(d->explosion, 0, sound_seed(e.slot, 0x40000000u | (e.id & 0x3FFFFFFFu)),
-									event_emitter(e), r_clock.frame_of(e.time, e.timeline), false, 0)) {
+						const uint32_t key = 0x40000000u | (e.id & 0x3FFFFFFFu);
+						if (one_shot(d->explosion, 0, sound_seed(e.slot, key), event_emitter(e),
+									r_clock.frame_of(e.time, e.timeline), false, 0)) {
 							++stats.detonations;
+							traced(WeaponSoundStartKind::Detonation, e.slot, e.def, key, sound_seed(e.slot, key));
 						}
 					}
 					break;
@@ -1078,6 +1103,7 @@ struct WeaponAudioRouter::Impl {
 		if (v == nullptr) {
 			return;
 		}
+		traced(WeaponSoundStartKind::StateBurst, p_slot, p_def, p_burst_seq, v->seed);
 		++stats.state_rounds;
 		if (v->single) {
 			trigger_up(*v);
@@ -1643,6 +1669,41 @@ void WeaponAudioRouter::set_observer(WeaponAudioObserver *p_observer) {
 
 const WeaponAudioStats &WeaponAudioRouter::stats() const {
 	return impl_->stats;
+}
+
+void WeaponAudioRouter::set_trace(bool p_on) {
+	impl_->trace = p_on;
+	if (!p_on) {
+		impl_->trace_starts.clear();
+	}
+}
+
+void WeaponAudioRouter::take_starts(std::vector<WeaponSoundStart> &r_out) {
+	r_out.insert(r_out.end(), impl_->trace_starts.begin(), impl_->trace_starts.end());
+	impl_->trace_starts.clear();
+}
+
+const char *weapon_sound_start_kind_name(WeaponSoundStartKind p_kind) {
+	switch (p_kind) {
+		case WeaponSoundStartKind::OwnBurst:
+			return "OwnBurst";
+		case WeaponSoundStartKind::OwnOneShot:
+			return "OwnOneShot";
+		case WeaponSoundStartKind::RemoteBurst:
+			return "RemoteBurst";
+		case WeaponSoundStartKind::RemoteOneShot:
+			return "RemoteOneShot";
+		case WeaponSoundStartKind::StateBurst:
+			return "StateBurst";
+		case WeaponSoundStartKind::Detonation:
+			return "Detonation";
+	}
+	return "?";
+}
+
+std::string weapon_sound_trace_row(const WeaponSoundStart &p_start) {
+	return core::fmt("%s,%u,%u,%u,%016llx", weapon_sound_start_kind_name(p_start.kind), unsigned(p_start.slot),
+			unsigned(p_start.def), unsigned(p_start.key), (unsigned long long)p_start.seed);
 }
 
 bool OneShotPool::set_emitter(MixerCore &r_mixer, InstanceHandle p_handle, const EmitterState &p_emitter) {

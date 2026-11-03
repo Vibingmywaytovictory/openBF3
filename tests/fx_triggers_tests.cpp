@@ -1044,6 +1044,80 @@ TEST_CASE("late join: events timed before the first snapshot start nothing and c
 	CHECK(t.stats().stale_dropped == 2 + 12 + 1);
 }
 
+TEST_CASE("two clients: one remote burst with its surface and soldier impacts gives the same trace rows under other "
+		  "clocks, cameras and muzzles") {
+	std::unique_ptr<Syn> s = make_syn();
+	const int64_t u = sw::kTimeUnitsPerSecond;
+	std::vector<hk::PresentEvent> burst;
+	for (uint32_t i = 0; i < 10; ++i) {
+		const int64_t at = 30 * u + int64_t(i) * 6 * sw::kTimeUnitsPerTick;
+		hk::PresentEvent shot = ev(hk::PresentKind::RemoteShot, 5, 40 + i, 0, { 2, 1.6f, 8 }, { 0, 0, -1 }, at);
+		shot.flags = (i % 3) == 0 ? hk::present_flags::kTracer : uint8_t(0);
+		burst.push_back(shot);
+		hk::PresentEvent wall = impact(5, 40 + i, i < 5 ? kConcrete : kMetal, { 2, 1.5f, 0 }, { 0, 0, 1 });
+		wall.time = at + sw::kTimeUnitsPerTick;
+		burst.push_back(wall);
+		if (i >= 7) {
+			hk::PresentEvent hit =
+					ev(hk::PresentKind::Hit, 5, 40 + i, 0, { 2, 1.2f, 4 }, { 0, 0, 1 }, at + sw::kTimeUnitsPerTick);
+			hit.aux = 7;
+			hit.material = 1;
+			burst.push_back(hit);
+		}
+	}
+	struct Client {
+		uint8_t own = 0;
+		int64_t now = 0;
+		FxView view;
+		bool crowd_muzzle = false;
+	};
+	const std::array<Client, 2> clients{ Client{ 1, 30 * u, kNear, true },
+		Client{ 2, 31 * u, FxView{ { 40, 1.6f, -60 }, { 1, 0, 0 } }, false } };
+	std::array<std::vector<std::string>, 2> rows;
+	for (size_t c = 0; c < clients.size(); ++c) {
+		FxWorld world;
+		FxTriggerConfig cfg;
+		cfg.own_slot = clients[c].own;
+		cfg.match_seed = kMatch;
+		FxTriggers t(world, *s->library, s->fire, cfg);
+		if (clients[c].crowd_muzzle) {
+			MuzzleSample m;
+			m.slot = 5;
+			m.valid = true;
+			m.transform = effect_frame({ 2.2f, 1.4f, 7.5f }, { 0, 0, -1 }, { 0, 1, 0 });
+			t.on_muzzles(std::span<const MuzzleSample>(&m, 1));
+		}
+		for (size_t i = 0; i < burst.size(); i += 3) {
+			const std::span<const hk::PresentEvent> part(burst.data() + i, std::min<size_t>(3, burst.size() - i));
+			t.on_events(part, joined_at(clients[c].now + int64_t(i) * sw::kTimeUnitsPerTick, 20 * u), clients[c].view);
+			for (const TriggerStart &st : t.starts()) {
+				rows[c].push_back(trigger_trace_row(st));
+			}
+		}
+		t.on_events({}, joined_at(40 * u, 20 * u), clients[c].view);
+		for (const TriggerStart &st : t.starts()) {
+			rows[c].push_back(trigger_trace_row(st));
+		}
+		CHECK(t.stats().stale_dropped == 0);
+		CHECK(t.stats().remote_shots == 10);
+		CHECK(t.stats().soldier_hits == 3);
+	}
+	std::sort(rows[0].begin(), rows[0].end());
+	std::sort(rows[1].begin(), rows[1].end());
+	CHECK(rows[0].size() >= 10 + 4 + 10 + 3);
+	CHECK(rows[0] == rows[1]);
+	std::set<std::string> purposes;
+	for (const std::string &r : rows[0]) {
+		purposes.insert(r.substr(0, r.find(',', r.find(',') + 1)));
+	}
+	CHECK(purposes.count("RemoteShot,Muzzle") == 1);
+	CHECK(purposes.count("RemoteShot,Tracer") == 1);
+	CHECK(purposes.count("Impact,ImpactEffect") == 1);
+	CHECK(purposes.count("Hit,ImpactEffect") == 1);
+	REQUIRE_FALSE(rows[0].empty());
+	MESSAGE("trace: " << kTriggerTraceHeader << " / " << rows[0].front());
+}
+
 TEST_CASE("duplicates: a replayed stream starts nothing twice (E8 (7) double starts counted)") {
 	std::unique_ptr<Syn> s = make_syn();
 	FxWorld world;

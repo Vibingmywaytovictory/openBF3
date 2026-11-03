@@ -949,6 +949,53 @@ TEST_SUITE("audio-router") {
 		CHECK(w.clock->late() == 0);
 	}
 
+	TEST_CASE("trace: two clients at other render times and listeners record the same burst, one-shot and detonation "
+			  "seeds") {
+		std::array<std::vector<std::string>, 2> rows;
+		for (size_t c = 0; c < rows.size(); ++c) {
+			Rig r;
+			r.render += sw::SimTime(c) * 5 * kTick;
+			r.listener.position = { c == 0 ? 0.0f : 12.0f, 0.0f, c == 0 ? 0.0f : 30.0f };
+			r.router->set_trace(true);
+			const sw::SimTime t0 = 1020 * kTick;
+			std::vector<Shooter> shooters(1);
+			shooters[0].burst(t0, 300, 10);
+			shooters[0].burst(t0 + 60 * kTick, 310, 6);
+			host::PresentEvent knife = remote_shot(6, kKnife, 9, t0 + 3 * kTick, { 0.0f, 1.6f, 5.0f });
+			host::PresentEvent boom;
+			boom.kind = host::PresentKind::Detonation;
+			boom.timeline = host::PresentTimeline::Render;
+			boom.def = kGrenade;
+			boom.slot = 6;
+			boom.id = 4;
+			boom.time = t0 + kTick;
+			boom.pos[2] = 20.0f;
+			r.frame(std::vector<host::PresentEvent>{ knife, boom });
+			run(r, shooters, 160);
+			std::vector<ba::WeaponSoundStart> starts;
+			r.router->take_starts(starts);
+			for (const ba::WeaponSoundStart &st : starts) {
+				rows[c].push_back(ba::weapon_sound_trace_row(st));
+			}
+			std::vector<ba::WeaponSoundStart> again;
+			r.router->take_starts(again);
+			CHECK(again.empty());
+			CHECK(r.router->stats().trace_dropped == 0);
+			REQUIRE(r.recorder.seen.size() == 2);
+			CHECK(std::count_if(starts.begin(), starts.end(),
+						  [&](const ba::WeaponSoundStart &st) { return st.seed == r.recorder.seen[0].seed; }) == 1);
+		}
+		std::sort(rows[0].begin(), rows[0].end());
+		std::sort(rows[1].begin(), rows[1].end());
+		CHECK(rows[0].size() == 4);
+		CHECK(rows[0] == rows[1]);
+		CHECK(std::any_of(rows[0].begin(), rows[0].end(),
+				[](const std::string &r) { return r.rfind("RemoteOneShot,6,", 0) == 0; }));
+		CHECK(std::any_of(
+				rows[0].begin(), rows[0].end(), [](const std::string &r) { return r.rfind("Detonation,6,", 0) == 0; }));
+		MESSAGE(ba::kWeaponSoundTraceHeader << ": " << rows[0].front());
+	}
+
 	TEST_CASE("others by distance: the crowd muzzle, the cull past max distance, the listener re-send") {
 		Rig r;
 		std::vector<Shooter> shooters(2);

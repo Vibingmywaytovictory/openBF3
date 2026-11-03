@@ -285,6 +285,12 @@ struct TriggerStart {
 	EffectHandle handle;
 };
 
+const char *trigger_purpose_name(TriggerPurpose p_purpose);
+
+inline constexpr std::string_view kTriggerTraceHeader = "kind,purpose,slot,id,pellet,seed,blueprint,index";
+
+std::string trigger_trace_row(const TriggerStart &p_start);
+
 class FxTriggers {
 public:
 	FxTriggers(FxWorld &r_world, EffectLibrary &r_library, std::shared_ptr<const FireEffectTable> p_fire, const FxTriggerConfig &p_config = {});

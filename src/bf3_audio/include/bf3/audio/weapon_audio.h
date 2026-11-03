@@ -22,6 +22,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -240,8 +241,34 @@ struct WeaponAudioStats {
 	uint64_t accessory_sounds = 0;
 	uint64_t joins = 0;
 	uint64_t stale_dropped = 0;
+	uint64_t trace_dropped = 0;
 };
 static_assert(std::is_trivially_copyable_v<WeaponAudioStats>);
+
+enum class WeaponSoundStartKind : uint8_t {
+	OwnBurst = 0,
+	OwnOneShot = 1,
+	RemoteBurst = 2,
+	RemoteOneShot = 3,
+	StateBurst = 4,
+	Detonation = 5
+};
+
+const char *weapon_sound_start_kind_name(WeaponSoundStartKind p_kind);
+
+struct WeaponSoundStart {
+	WeaponSoundStartKind kind = WeaponSoundStartKind::OwnBurst;
+	uint8_t slot = 0;
+	uint16_t def = sim::weapons::kNoWeapon;
+	uint32_t key = 0;
+	uint64_t seed = 0;
+};
+static_assert(std::is_trivially_copyable_v<WeaponSoundStart>);
+
+inline constexpr size_t kMaxWeaponSoundStarts = 4096;
+inline constexpr std::string_view kWeaponSoundTraceHeader = "kind,slot,def,key,seed";
+
+std::string weapon_sound_trace_row(const WeaponSoundStart &p_start);
 
 class WeaponAudioObserver {
 public:
@@ -282,6 +309,9 @@ public:
 
 	void set_observer(WeaponAudioObserver *p_observer);
 	const WeaponAudioStats &stats() const;
+
+	void set_trace(bool p_on);
+	void take_starts(std::vector<WeaponSoundStart> &r_out);
 
 private:
 	struct Impl;

@@ -4,6 +4,32 @@
 
 namespace bf3::present {
 
+const char *present_kind_name(PresentKind p_kind) {
+	switch (p_kind) {
+		case PresentKind::OwnShot:
+			return "OwnShot";
+		case PresentKind::OwnTimed:
+			return "OwnTimed";
+		case PresentKind::RemoteShot:
+			return "RemoteShot";
+		case PresentKind::Impact:
+			return "Impact";
+		case PresentKind::SoldierContact:
+			return "SoldierContact";
+		case PresentKind::Hit:
+			return "Hit";
+		case PresentKind::Death:
+			return "Death";
+		case PresentKind::Detonation:
+			return "Detonation";
+		case PresentKind::Spawn:
+			return "Spawn";
+		case PresentKind::Revive:
+			return "Revive";
+	}
+	return "?";
+}
+
 bool PresentationEvents::push(const PresentEvent &p_event) {
 	const uint64_t head = head_.load(std::memory_order_relaxed);
 	const uint64_t tail = tail_.load(std::memory_order_acquire);
