@@ -7,7 +7,9 @@
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/soldier_state.h"
 
+#include <algorithm>
 #include <cmath>
+#include <optional>
 #include <utility>
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -91,6 +93,18 @@ core::Status ServerSession::start(ServerSessionConfig p_config, LoadProgress *p_
 	if (p_config.maps.entries.empty()) {
 		return core::make_error("server session: the map list is empty");
 	}
+	std::optional<net::Endpoint> master;
+	if (!p_config.master.empty()) {
+		core::Result<net::Endpoint> at = net::parse_endpoint(p_config.master);
+		if (!at) {
+			return core::make_error("server session: --master: " + at.error().message);
+		}
+		if (!net::valid_server_name(p_config.name)) {
+			return core::make_error("server session: --name=" + p_config.name +
+					": a server name is 1 to 32 of A-Z a-z 0-9 space _ - .");
+		}
+		master = std::move(*at);
+	}
 	config_ = std::move(p_config);
 	config_.level.bots = config_.rules.bots > 0;
 	config_.level.keep_database = false;
@@ -153,7 +167,36 @@ core::Status ServerSession::start(ServerSessionConfig p_config, LoadProgress *p_
 	if (!prebake_finished_) {
 		prebake_thread_ = std::thread([this] { run_prebake(); });
 	}
+	if (master.has_value()) {
+		if (const core::Status s = heartbeater_.start(
+					*master, [this] { return heartbeat(); }, config_.master_heartbeat_ms);
+				!s.ok()) {
+			stop();
+			return core::make_error("server session: " + s.error().message);
+		}
+	}
 	return {};
+}
+
+net::MasterHeartbeat ServerSession::heartbeat() const {
+	const GameServerStats g = host_.game_stats();
+	net::MasterHeartbeat h;
+	h.name = config_.name;
+	h.port = host_.port();
+	const LevelEntry current = rotation_ != nullptr ? rotation_->stats().current : level_->entry;
+	h.level = current.level;
+	h.mode = current.mode;
+	uint32_t players = 0, bots = 0;
+	for (const SlotStats &s : g.slots) {
+		players += (s.used && s.remote) ? 1u : 0u;
+		bots += (s.used && !s.remote) ? 1u : 0u;
+	}
+	h.max_players = uint8_t(std::max<uint32_t>(config_.rules.max_players, 1u));
+	h.players = uint8_t(std::min<uint32_t>(players, h.max_players));
+	h.bots = uint8_t(std::min<uint32_t>(bots, h.max_players - h.players));
+	h.protocol = net::kProtocolVersion;
+	h.build = game_ != nullptr && game_->game_build.has_value() ? *game_->game_build : net::game_build();
+	return h;
 }
 
 GameServerConfig ServerSession::rotation_config(const ServerLevel &p_level) const {
@@ -201,6 +244,7 @@ void ServerSession::run_prebake() {
 
 void ServerSession::stop() {
 	stop_.store(true, std::memory_order_release);
+	heartbeater_.stop();
 	if (prebake_thread_.joinable()) {
 		prebake_thread_.join();
 	}
@@ -290,6 +334,8 @@ ServerSessionStats ServerSession::stats() {
 		}
 	}
 	out.squad_spawns = out.game.rules.squad_spawns;
+	out.master = heartbeater_.running();
+	out.heartbeat = heartbeater_.stats();
 	return out;
 }
 

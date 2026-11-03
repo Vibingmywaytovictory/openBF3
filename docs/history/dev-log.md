@@ -2975,3 +2975,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * CUSTOMIZE shows for an unpicked accessory part the weapons/common/no* entry the sim applies (loadout_accessories_applied), not the first free one; ui.hud.tdm.unit, host.gunplay.loadout.
 * A minimal master server: heartbeats list servers by name under their source address, expire after 3 missed 30 s heartbeats and refuse hostile datagrams; net.master.unit, net.master.enet.
 * bf3dump master runs the master server (127.0.0.1 unless --bind) and bf3dump servers lists a master's servers; checked by hand, net.procs.master (timing) runs both.
+* ServerSession heartbeats --master=host:port as --name on the dedicated server and the --maplist listen game, which also takes --bind and --port; host.server.session.master (9.0 s).

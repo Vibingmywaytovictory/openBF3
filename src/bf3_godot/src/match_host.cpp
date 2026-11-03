@@ -398,6 +398,18 @@ bool Bf3MatchHost::prepare_listen_server() {
 	rules.seed = seed_;
 	server_config_.prebake = false;
 	server_config_.load = host::kOwnClientLoadDeadlines;
+	if (has_user_arg("bind")) {
+		server_config_.bind_ip = user_arg_value("bind");
+	}
+	if (uint32_t port = 0; has_user_arg("port")) {
+		if (bf3::core::parse_u32_value(user_arg_value("port"), 0.0, 65535.0, port).fault != bf3::core::KeyFault::None) {
+			end_match("--port=" + user_arg_value("port") + ": not a port 0..65535");
+			return false;
+		}
+		server_config_.port = uint16_t(port);
+	}
+	server_config_.master = user_arg_value("master");
+	server_config_.name = has_user_arg("name") ? user_arg_value("name") : std::string("openBF3");
 	if (has_user_arg("intermission-s")) {
 		server_config_.intermission_s =
 				float(std::clamp(std::atof(user_arg_value("intermission-s").c_str()), 0.0, 600.0));
@@ -431,13 +443,20 @@ void Bf3MatchHost::run_listen_server() {
 	if (!has_user_arg("no-cache")) {
 		server_config_.cache = open_cache();
 	}
+	const std::string master = server_config_.master;
+	const std::string name = server_config_.name;
+	const std::string own = server_config_.bind_ip == "0.0.0.0" ? std::string("127.0.0.1") : server_config_.bind_ip;
 	const bf3::core::Status s = server_->start(std::move(server_config_));
 	if (!s.ok()) {
 		std::lock_guard lock(mutex_);
 		worker_error_ = s.error().message;
 		return;
 	}
-	connect_client("127.0.0.1", server_->port());
+	if (!master.empty()) {
+		say("listen server on port " + std::to_string(server_->port()) + " heartbeats to the master " + master +
+				" as " + name);
+	}
+	connect_client(own, server_->port());
 }
 
 void Bf3MatchHost::_ready() {

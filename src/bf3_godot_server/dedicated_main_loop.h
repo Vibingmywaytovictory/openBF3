@@ -27,6 +27,8 @@ struct DedicatedArgs {
 	uint32_t stop_after_levels = 0;
 	float intermission_s = -1.0f;
 	float load_stall_s = -1.0f;
+	std::string master;
+	std::string name;
 	bf3::host::ServerRules rules;
 };
 
@@ -49,6 +51,7 @@ private:
 	bool parse_args(std::string &r_error);
 	bool start(std::string &r_error);
 	void report(const bf3::host::ServerSessionStats &p_stats);
+	void report_master(const bf3::host::ServerSessionStats &p_stats);
 
 	DedicatedArgs args_;
 	bf3::core::InstallReader install_;
@@ -66,6 +69,7 @@ private:
 	uint64_t peak_private_bytes_ = 0;
 	int64_t resources_after_load_ = 0;
 	uint64_t level_changes_seen_ = 0;
+	std::string master_state_;
 	const char *stopped_by_ = "the process";
 	bool failed_ = false;
 };

@@ -10,16 +10,19 @@
 #include "bf3/host/server_level.h"
 #include "bf3/host/server_session.h"
 #include "bf3/host/tdm_brain.h"
+#include "bf3/net/master.h"
 #include "bf3/sim/nav.h"
 
 #include "gunplay_fixture.h"
 #include "tdm_fixture.h"
 #include "test_support.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -535,6 +538,103 @@ TEST_SUITE("host-tdm-levels") {
 			CHECK(r.stale_aim_shots == 0u);
 		}
 		cache->close();
+		std::error_code ec;
+		std::filesystem::remove_all(root, ec);
+		const core::SnapshotDiff diff = core::diff_snapshots(m.before, m.reader.snapshot());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+		std::printf("install.unchanged: %s (%zu files)\n", diff.clean() ? "clean" : diff.summary().c_str(),
+				m.before.files.size());
+	}
+}
+
+TEST_SUITE("host-server-session-master") {
+	TEST_CASE("ServerSession: a bad --master or --name is refused before the load, and given --master it heartbeats "
+			  "its name, port, level, mode and players to the master, which lists it and keeps it fresh") {
+		bf3::test::Mounted m;
+		if (!bf3::test::open_or_skip(m)) {
+			return;
+		}
+		{
+			host::ServerSessionConfig bad;
+			bad.install = m.install;
+			bad.maps.entries.push_back(host::LevelEntry{ "MP_Subway", "TeamDeathMatch0", 1 });
+			bad.master = "127.0.0.1";
+			bad.name = "alpha";
+			host::ServerSession refused;
+			const core::Status no_port = refused.start(bad);
+			REQUIRE_FALSE(no_port.ok());
+			CHECK(no_port.error().message.find("--master") != std::string::npos);
+			bad.master = "127.0.0.1:25250";
+			bad.name = "al@pha";
+			const core::Status bad_name = refused.start(bad);
+			REQUIRE_FALSE(bad_name.ok());
+			CHECK(bad_name.error().message.find("--name=al@pha") != std::string::npos);
+			CHECK_FALSE(refused.running());
+		}
+		net::MasterServerConfig mc;
+		mc.port = 0;
+		core::Result<std::unique_ptr<net::MasterServer>> made = net::MasterServer::start(mc);
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		net::MasterServer &master = **made;
+		std::mutex master_mutex;
+		std::atomic<bool> stop{ false };
+		std::thread service([&] {
+			while (!stop.load(std::memory_order_acquire)) {
+				std::lock_guard lock(master_mutex);
+				master.service(5,
+						uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
+								std::chrono::steady_clock::now().time_since_epoch())
+										.count()));
+			}
+		});
+		const std::filesystem::path root = scratch_cache("server-master");
+		host::ServerSessionConfig config;
+		config.install = m.install;
+		config.cache = open_cache(root, m.reader);
+		config.maps.entries.push_back(host::LevelEntry{ "MP_Subway", "TeamDeathMatch0", 1 });
+		config.level = server_options(false);
+		config.rules.bot_tuning_cfg = OPENBF3_BOT_TUNING_CFG;
+		config.rules.mechanics_cfg = OPENBF3_MECHANICS_CFG;
+		config.master = "127.0.0.1:" + std::to_string(master.port());
+		config.name = "session test";
+		config.master_heartbeat_ms = 200;
+		host::ServerSession session;
+		const core::Status started = session.start(config);
+		REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
+		const auto listed = [&] {
+			std::lock_guard lock(master_mutex);
+			return master.list(uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
+					std::chrono::steady_clock::now().time_since_epoch())
+							.count()));
+		};
+		CHECK(bf3::test::wait_until([&] { return session.stats().heartbeat.acked >= 3; }, std::chrono::seconds(10)));
+		const std::vector<net::MasterEntry> entries = listed();
+		REQUIRE(entries.size() == 1u);
+		const net::MasterHeartbeat &h = entries[0].server;
+		CHECK(h.name == "session test");
+		CHECK(h.port == session.port());
+		CHECK(h.level == "MP_Subway");
+		CHECK(h.mode == "TeamDeathMatch0");
+		CHECK(h.players == 0u);
+		CHECK(h.bots == config.rules.bots);
+		CHECK(h.max_players == host::kListenMaxPlayers);
+		CHECK(h.protocol == net::kProtocolVersion);
+		CHECK(h.build == net::game_build());
+		CHECK(entries[0].address == "127.0.0.1");
+		const host::ServerSessionStats s = session.stats();
+		CHECK(s.master);
+		CHECK(s.heartbeat.failed == 0u);
+		CHECK(s.heartbeat.refused == 0u);
+		{
+			std::lock_guard lock(master_mutex);
+			CHECK(master.stats().registry.registered == 1u);
+			CHECK(master.stats().registry.refreshed >= 2u);
+		}
+		session.stop();
+		CHECK_FALSE(session.stats().master);
+		stop.store(true, std::memory_order_release);
+		service.join();
+		config.cache->close();
 		std::error_code ec;
 		std::filesystem::remove_all(root, ec);
 		const core::SnapshotDiff diff = core::diff_snapshots(m.before, m.reader.snapshot());

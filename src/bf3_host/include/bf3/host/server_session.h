@@ -6,6 +6,7 @@
 #include "bf3/host/rotation.h"
 #include "bf3/host/server_host.h"
 #include "bf3/host/server_level.h"
+#include "bf3/net/master.h"
 
 #include <atomic>
 #include <chrono>
@@ -36,6 +37,9 @@ struct ServerSessionConfig {
 	LoadDeadlines load;
 	float intermission_s = -1.0f;
 	std::shared_ptr<TickClock> clock;
+	std::string master;
+	std::string name;
+	uint32_t master_heartbeat_ms = net::kMasterHeartbeatMs;
 };
 
 struct PrebakeEntry {
@@ -70,6 +74,8 @@ struct ServerSessionStats {
 	float squad_median_m = 0.0f;
 	uint64_t squad_orders = 0;
 	uint64_t squad_spawns = 0;
+	bool master = false;
+	net::MasterHeartbeatStats heartbeat;
 };
 
 uint64_t process_private_bytes();
@@ -101,6 +107,7 @@ private:
 	void run_prebake();
 	GameServerConfig rotation_config(const ServerLevel &p_level) const;
 	void track_stuck(const GameServerStats &p_game);
+	net::MasterHeartbeat heartbeat() const;
 
 	struct StuckTrack {
 		uint32_t life = 0;
@@ -126,6 +133,8 @@ private:
 
 	std::vector<StuckTrack> stuck_;
 	uint32_t stuck_bots_ = 0;
+
+	net::MasterHeartbeater heartbeater_;
 };
 
 }

@@ -131,6 +131,11 @@ bool DedicatedMainLoop::parse_args(std::string &r_error) {
 		a.bind_ip = user_arg_value("bind");
 	}
 	a.port_file = user_arg_value("port-file");
+	a.master = user_arg_value("master");
+	a.name = has_user_arg("name") ? user_arg_value("name") : std::string("openBF3");
+	if (has_user_arg("master") && a.master.empty() && r_error.empty()) {
+		r_error = "--master needs host:port";
+	}
 	u32_arg("port", 0.0, 65535.0, a.port, r_error);
 	u32_arg("stop-after-kills", 0.0, 100000.0, a.stop_after_kills, r_error);
 	u32_arg("stop-after-squad-samples", 0.0, 100000000.0, a.stop_after_squad_samples, r_error);
@@ -271,6 +276,8 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 	config.bind_ip = args_.bind_ip;
 	config.port = uint16_t(args_.port);
 	config.intermission_s = args_.intermission_s;
+	config.master = args_.master;
+	config.name = args_.name;
 	if (args_.load_stall_s > 0.0f) {
 		config.load.stall_s = args_.load_stall_s;
 	}
@@ -309,6 +316,10 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 			l.nav_cache_hit ? "cache hit" : "baked"));
 	say(core::fmt("ServerHost on %s:%u at 60 Hz%s", args_.bind_ip.c_str(), unsigned(session_->port()),
 			args_.run_seconds > 0.0 ? core::fmt(", for %.1f s", args_.run_seconds).c_str() : ", until stopped"));
+	if (!args_.master.empty()) {
+		say(core::fmt("master %s: heartbeat as %s every %u s", args_.master.c_str(), args_.name.c_str(),
+				unsigned(net::kMasterHeartbeatMs / 1000u)));
+	}
 	if (!args_.port_file.empty()) {
 		Ref<FileAccess> out = FileAccess::open(to_godot(godot_path(args_.port_file)), FileAccess::WRITE);
 		if (out.is_null() || !out->store_string(to_godot(std::to_string(session_->port()) + "\n"))) {
@@ -381,6 +392,26 @@ void DedicatedMainLoop::report(const host::ServerSessionStats &p_stats) {
 			std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
 					.count());
 	say("net: " + net_meter_.report(g.traffic, session_->host().peer_counters(), now_ns));
+	report_master(p_stats);
+}
+
+void DedicatedMainLoop::report_master(const host::ServerSessionStats &p_stats) {
+	if (!p_stats.master) {
+		return;
+	}
+	const net::MasterHeartbeatStats &h = p_stats.heartbeat;
+	std::string state;
+	if (!h.last_error.empty()) {
+		state = (h.last_refusal != net::MasterRefusal::None ? "refused: " : "unreachable: ") + h.last_error;
+	} else if (h.acked > 0) {
+		state = "registered as " + args_.name;
+	}
+	if (state.empty() || state == master_state_) {
+		return;
+	}
+	master_state_ = state;
+	say(core::fmt(
+			"master %s: %s (%llu heartbeats sent)", args_.master.c_str(), state.c_str(), (unsigned long long)h.sent));
 }
 
 bool DedicatedMainLoop::_process(double p_delta) {
