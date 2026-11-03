@@ -35,3 +35,5 @@ target_sources(bf3dump PRIVATE export_commands.cpp export_commands.h)
 
 target_sources(bf3dump PRIVATE net_commands.cpp net_commands.h)
 target_compile_definitions(bf3dump PRIVATE "OPENBF3_CONFIG_DIR=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config\"")
+
+target_sources(bf3dump PRIVATE master_commands.cpp master_commands.h)

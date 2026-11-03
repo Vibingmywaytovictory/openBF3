@@ -44,6 +44,7 @@
 
 #include "export_commands.h"
 
+#include "master_commands.h"
 #include "net_commands.h"
 
 #include <fcntl.h>
@@ -476,6 +477,7 @@ void usage() {
 	std::fprintf(stderr, "%s", bf3dump::firefight_usage());
 	std::fprintf(stderr, "%s", bf3dump::export_usage());
 	std::fprintf(stderr, "%s", bf3dump::net_usage());
+	std::fprintf(stderr, "%s", bf3dump::master_usage());
 }
 
 }
@@ -505,6 +507,12 @@ int wmain(int argc, wchar_t **argv) {
 	}
 	if (args[0] == "loadbots") {
 		return bf3dump::cmd_loadbots(std::vector<std::string>(args.begin() + 1, args.end()));
+	}
+	if (args[0] == "master") {
+		return bf3dump::cmd_master(std::vector<std::string>(args.begin() + 1, args.end()));
+	}
+	if (args[0] == "servers") {
+		return bf3dump::cmd_servers(std::vector<std::string>(args.begin() + 1, args.end()));
 	}
 	const auto start = std::chrono::steady_clock::now();
 	Context ctx;
