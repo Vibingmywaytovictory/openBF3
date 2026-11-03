@@ -118,8 +118,9 @@ std::string parse_net_args(const std::vector<std::string> &p_args, bool p_client
 							core::KeyFault::None;
 		} else if (key == "--seed") {
 			ok = ok && core::parse_u32_value(value, 0.0, 4294967295.0, r_args.seed).fault == core::KeyFault::None;
-		} else if (p_client && key == "--script") {
-			ok = ok && parse_script(value, r_args.script);
+		} else if (key == "--script") {
+			ok = ok && parse_script(value, r_args.script) &&
+					(p_client || r_args.script == Script::Walk || r_args.script == Script::WalkFire);
 			r_args.script_name = std::string(value);
 		} else if (p_client && key == "--stats-file") {
 			r_args.stats_file = std::string(value);
@@ -228,7 +229,8 @@ const char *net_usage() {
 		   "[--motor-tuning=<cfg>]\n"
 		   "      [--name=N] [--kit=K] [--seed=N] [--threads=N]\n"
 		   "  loadbots <host:port> <LEVEL> <MODE> [--count=N] [--seconds=S] [--netsim=<profile>] [--build-override=N]\n"
-		   "      [--name=N] [--kit=K] [--seed=N] [--stall-level=N] [--levels=N]\n";
+		   "      [--name=N] [--kit=K] [--seed=N] [--stall-level=N] [--levels=N]\n"
+		   "      [--script=walk|walkfire]\n";
 }
 
 int cmd_client(const core::InstallReader &p_reader, const std::shared_ptr<core::Install> &p_install,
@@ -460,6 +462,7 @@ int cmd_loadbots(const std::vector<std::string> &p_args) {
 	fc.bot.netsim = netsim_of(a, 2);
 	fc.bot.kit = uint8_t(a.kit);
 	fc.bot.stall_level = a.stall_level;
+	fc.bot.fire = a.script == Script::WalkFire;
 	host::LoadBotFleet fleet;
 	if (const core::Status s = fleet.start(fc); !s.ok()) {
 		say("loadbots: failed: " + s.error().message);

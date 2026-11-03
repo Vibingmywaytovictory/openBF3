@@ -35,6 +35,12 @@ sim::Command LegWalker::command(sim::Tick p_tick, const sim::SoldierState &p_sta
 	const uint32_t leg = ((p_tick - start_) / kLegTicks + phase_) & 3u;
 	c.yaw = uint16_t(base_yaw_ + leg * 16384u);
 	c.pose = sim::Pose::Stand;
+	const uint32_t in_leg = (p_tick - start_) % kLegTicks;
+	if (fire_ && in_leg < kFireTicks && (in_leg & 1u) == 0) {
+		c.buttons |= sim::buttons::kFire;
+	} else if (fire_ && in_leg == kReloadTick) {
+		c.buttons |= sim::buttons::kReload;
+	}
 	return c;
 }
 
@@ -242,7 +248,7 @@ struct LoadBotFleet::Impl {
 			if (soldier_alive(*own) && own->life != own_life) {
 				own_life = own->life;
 				spawn_at = own->position;
-				walker = std::make_unique<LegWalker>(index);
+				walker = std::make_unique<LegWalker>(index, config.fire);
 				++stats.lives;
 			}
 			if (soldier_alive(*own) && own->life == own_life) {
