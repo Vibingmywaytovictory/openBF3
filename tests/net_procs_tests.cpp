@@ -359,10 +359,11 @@ namespace {
 
 constexpr double kReturnMargin = 1.25;
 
-ChildSpec godot_client(ProcDriver &r_driver, uint16_t p_port, std::vector<std::string> p_extra) {
+ChildSpec godot_client(
+		ProcDriver &r_driver, uint16_t p_port, std::vector<std::string> p_extra, std::string_view p_role = "client") {
 	std::vector<std::string> args = { "--connect=127.0.0.1:" + std::to_string(p_port) };
 	args.insert(args.end(), p_extra.begin(), p_extra.end());
-	return r_driver.godot_child("client", { "--headless", "res://scenes/metro_tdm.tscn" }, std::move(args));
+	return r_driver.godot_child(p_role, { "--headless", "res://scenes/metro_tdm.tscn" }, std::move(args));
 }
 
 std::vector<std::string> lines_with(const std::string &p_text, std::string_view p_needle) {
@@ -617,5 +618,84 @@ TEST_SUITE("net-procs-rotation") {
 						   << staller_summary << "\n"
 						   << steady_summary << "\n"
 						   << server_summary);
+	}
+}
+
+TEST_SUITE("godot-rotation") {
+	TEST_CASE("two Godot --connect clients, one on an emptied cache and one on a kept cache, follow a dedicated server "
+			  "through MP_Subway, MP_011 and MP_003 with the data's end-of-round intermission: each prepares the next "
+			  "level before the level change, neither is kicked, and each logs its load seconds and cache bytes per "
+			  "level") {
+		ProcDriver driver(driver_config_from_env());
+		const std::filesystem::path maplist = driver.roots("server").dir / L"maplist.cfg";
+		std::error_code ec;
+		std::filesystem::create_directories(maplist.parent_path(), ec);
+		{
+			std::ofstream out(maplist, std::ios::binary);
+			out << "MP_Subway TeamDeathMatch0 1\nMP_011 TeamDeathMatch0 1\nMP_003 TeamDeathMatch0 1\n";
+		}
+		std::filesystem::remove_all(driver.roots("cold").cache, ec);
+		const std::optional<Server> server = start_server(
+				driver, 8, 1700, { "--maplist=" + path_utf8(maplist), "--kill-limit=5", "--stop-after-levels=3" });
+		if (!server) {
+			return;
+		}
+		std::map<std::string, size_t> clients;
+		for (const char *role : { "cold", "warm" }) {
+			bf3::core::Result<size_t> started =
+					driver.start(godot_client(driver, server->port, { "--match-levels=3", "--quit-after=2" }, role));
+			REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
+			clients[role] = *started;
+		}
+		for (const auto &[role, id] : clients) {
+			std::string line;
+			CHECK_MESSAGE(driver.wait_line(
+								  id,
+								  [](std::string_view l) {
+									  return contains(l, "[match] level 3 ") || contains(l, " ended: ");
+								  },
+								  1500s, &line),
+					role << ":\n"
+						 << driver.output(id));
+			CHECK_MESSAGE(contains(line, "[match] level 3 MP_003 TeamDeathMatch0 done: "), role << ": " << line);
+		}
+		for (const auto &[role, id] : clients) {
+			const ChildEnd end = driver.finish(id, 60s);
+			const std::string out = driver.output(id);
+			CHECK_MESSAGE(end.code == 0, role << ":\n" << out);
+			CHECK(end.stragglers == 0);
+			CHECK_FALSE(contains(out, " ended: "));
+			CHECK(contains(out, "[level] install unchanged: yes"));
+			for (const char *level : { "MP_011", "MP_003" }) {
+				const std::vector<std::string> prepared =
+						lines_with(out, std::string("[match] prepare ") + level + " TeamDeathMatch0: ");
+				CHECK_MESSAGE(prepared.size() == 1u, role << " " << level << ":\n" << out);
+				for (const std::string &p : prepared) {
+					CHECK_MESSAGE(contains(p, ": ready in "), role << ": " << p);
+					CHECK_MESSAGE(contains(p, "finished before the level change"), role << ": " << p);
+					MESSAGE(role << ": " << p);
+				}
+			}
+			const std::vector<std::string> levels = lines_with(out, " done: private ");
+			CHECK(levels.size() == 3u);
+			for (const std::string &l : levels) {
+				CHECK_MESSAGE(contains(l, ", load "), role << ": " << l);
+				CHECK_MESSAGE(summary_number(l, ", cache ") != UINT64_MAX, role << ": " << l);
+				MESSAGE(role << ": " << l);
+			}
+			if (role == "cold" && !levels.empty()) {
+				CHECK_MESSAGE(contains(levels.front(), "(cold, target 15 s)"), levels.front());
+			}
+		}
+		const std::string server_out = driver.output(server->id);
+		const std::vector<std::string> kicks = lines_with(server_out, "| kicks ");
+		CHECK_FALSE(kicks.empty());
+		for (const std::string &k : kicks) {
+			CHECK_MESSAGE(contains(k, " LoadTimeout=0 LoadStalled=0 |"), k);
+		}
+		CHECK(contains(server_out, "level change 1: MP_011 TeamDeathMatch0 round 1,"));
+		CHECK(contains(server_out, "level change 2: MP_003 TeamDeathMatch0 round 2,"));
+		CHECK(lines_with(server_out, "carried 2 clients").size() == 2u);
+		driver.finish(server->id, 1s);
 	}
 }
