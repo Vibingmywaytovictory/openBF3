@@ -977,6 +977,9 @@ TEST_SUITE("audio-hdr-install") {
 		CHECK(std::any_of(shelves.begin(), shelves.end(), [](const MasterStep *s) {
 			return s->values[0] == 1200.0f && std::fabs(s->values[1] - std::pow(10.0f, 1.5f / 20.0f)) < 1.0e-4f;
 		}));
+		CHECK(m->max_reverb_seconds == 2.0f);
+		CHECK(steps_of(*stereo, MasterStepKind::IrReverb).size() == 1);
+		CHECK(steps_of(*surround, MasterStepKind::IrReverb).size() == 1);
 
 		const auto render = [&](uint32_t p_stereo, MasterBus p_bus, float p_amp, float p_hz,
 									std::vector<float> &r_out) {
