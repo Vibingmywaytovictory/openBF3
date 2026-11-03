@@ -4,6 +4,14 @@
 #include <atomic>
 #include <thread>
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
 namespace bf3::core {
 
 unsigned parallel_lanes(size_t p_count, unsigned p_max_lanes) {
@@ -23,6 +31,7 @@ void parallel_for(size_t p_count, const std::function<void(size_t)> &p_work, uns
 		return;
 	}
 	std::atomic<size_t> next{ 0 };
+	const int priority = GetThreadPriority(GetCurrentThread());
 	auto lane = [&]() {
 		for (;;) {
 			const size_t i = next.fetch_add(1, std::memory_order_relaxed);
@@ -35,7 +44,10 @@ void parallel_for(size_t p_count, const std::function<void(size_t)> &p_work, uns
 	std::vector<std::thread> threads;
 	threads.reserve(lanes - 1);
 	for (unsigned t = 1; t < lanes; ++t) {
-		threads.emplace_back(lane);
+		threads.emplace_back([&] {
+			SetThreadPriority(GetCurrentThread(), priority);
+			lane();
+		});
 	}
 	lane();
 	for (std::thread &t : threads) {

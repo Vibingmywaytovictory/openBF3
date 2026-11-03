@@ -12,9 +12,21 @@
 #include "bf3/core/thread_pool.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstring>
+#include <mutex>
+#include <set>
 #include <string>
+#include <thread>
 #include <vector>
+
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 
 using namespace bf3::core;
 
@@ -495,5 +507,26 @@ TEST_SUITE("containers") {
 		REQUIRE(squares.size() == 257);
 		CHECK(squares[256] == 256u * 256u);
 		CHECK(parallel_map<int>(0, [](size_t) { return 1; }).empty());
+	}
+
+	TEST_CASE("thread pool: every lane runs at the calling thread's priority") {
+		std::mutex mutex;
+		std::set<int> priorities;
+		std::set<std::thread::id> lanes;
+		std::thread caller([&] {
+			REQUIRE(SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL));
+			parallel_for(
+					64,
+					[&](size_t) {
+						std::this_thread::sleep_for(std::chrono::milliseconds(2));
+						std::lock_guard lock(mutex);
+						priorities.insert(GetThreadPriority(GetCurrentThread()));
+						lanes.insert(std::this_thread::get_id());
+					},
+					4);
+		});
+		caller.join();
+		CHECK(lanes.size() > 1);
+		CHECK(priorities == std::set<int>{ THREAD_PRIORITY_BELOW_NORMAL });
 	}
 }
