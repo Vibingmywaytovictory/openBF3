@@ -25,7 +25,7 @@ constexpr uint32_t kShots = 500;
 constexpr uint64_t kMinHits = 100;
 constexpr std::string_view kNetsim = "--netsim=lat=50,loss=1";
 
-std::filesystem::path no_damage_config(ProcDriver &r_driver) {
+std::filesystem::path light_damage_config(ProcDriver &r_driver) {
 	const std::filesystem::path from = r_driver.config().godot_project / L"config";
 	const std::filesystem::path to = r_driver.roots("config").dir;
 	std::error_code ec;
@@ -40,7 +40,7 @@ std::filesystem::path no_damage_config(ProcDriver &r_driver) {
 			const std::string key = "bullet_damage_modifier = 1";
 			const size_t at = body.find(key);
 			REQUIRE_MESSAGE(at != std::string::npos, key);
-			body.replace(at, key.size(), "bullet_damage_modifier = 0");
+			body.replace(at, key.size(), "bullet_damage_modifier = 0.001");
 		}
 		std::ofstream out(to / name, std::ios::binary);
 		out << body;
@@ -109,6 +109,8 @@ Duel run_duel(ProcDriver &r_driver, const std::filesystem::path &p_config, uint3
 				   << r_driver.output(*shooter) << "\n"
 				   << p_case << " target:\n"
 				   << r_driver.output(*target));
+	CHECK_MESSAGE(!contains(r_driver.output(*target), "client: spawned life 2"),
+			p_case << ": the target died under the light damage");
 	if (!reported || !contains(d.line, "[hitreg] shots ")) {
 		return d;
 	}
@@ -131,7 +133,7 @@ TEST_SUITE("net-procs-hitreg") {
 			  "dedicated server confirms 99 % of its predicted hits, 99 % in the same zone; with lag compensation "
 			  "off it confirms at most half") {
 		ProcDriver driver(driver_config_from_env());
-		const std::filesystem::path config = no_damage_config(driver);
+		const std::filesystem::path config = light_damage_config(driver);
 		const Duel gate = run_duel(driver, config, 21, "gate");
 		if (gate.skipped) {
 			return;
