@@ -44,6 +44,7 @@ using namespace godot;
 
 namespace bf3::godot_side {
 
+#if OPENBF3_BUILD_CHECKS
 void Bf3LevelSession::push_window_mouse(Vector2 p_window_px, int32_t p_button, bool p_pressed) {
 	Viewport *vp = get_viewport();
 	if (vp == nullptr) {
@@ -65,6 +66,7 @@ void Bf3LevelSession::push_window_mouse(Vector2 p_window_px, int32_t p_button, b
 	e->set_pressed(p_pressed);
 	vp->push_input(e);
 }
+#endif
 
 void NativeMenu::build(Bf3UiScreens &r_screens) {
 	for (const std::string_view p : kMenuDrawnPartitions) {

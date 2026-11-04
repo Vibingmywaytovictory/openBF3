@@ -108,7 +108,7 @@ with ranges checked at load: motor, vehicle, mechanics, TDM rules, bot tuning an
 tables over one grammar (`bf3/core/util/key_values.h`, byte and line caps on every file), each with its own messages.
 
 `OPENBF3_BUILD_CHECKS` (ON in the `dev` preset, OFF in `release`) compiles the `*_check`, `*_demo`, `s0_selftest` and
-`fx_ref` sources into `bf3_godot` and registers their classes; without it a check switch is reported and ignored.
+`fx_ref` sources into `bf3_godot` and registers their classes; without it a check switch is reported and ignored. `hygiene.rules` fails on a named test hook (`push_window_mouse`, `capture_for_check`, `run_check_and_quit`) in a `bf3_godot` source that is not inside `#if OPENBF3_BUILD_CHECKS` or one of the sources only that option compiles.
 
 ## Where things live
 

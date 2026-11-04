@@ -2990,3 +2990,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * The game's --squad-check=<name> (host::SquadJoin) switches to that player's team, joins its squad, deploys on it through the spawn screen's SelectSpawnPoint action and prints the squads at round over; host.squad_join.unit.
 * bf3dump client --squad=create leads a squad of its own and --until=round-over stops at round over and writes the squads to its stats file; checked by net.procs.bots_squads (main only).
 * net.procs.bots_squads (timing, main only): 29 bots, a bf3dump client and a headless game client in one squad at 100 ms RTT on the dedicated Metro TDM server, a round to 100 kills, with its --bot-squads=off control; registered, not run here.
+* Bf3LevelSession::push_window_mouse is declared and defined only with OPENBF3_BUILD_CHECKS, and hygiene.rules fails on a named test hook outside that guard in bf3_godot; hygiene.rules (2 failures on 31b0b133, 0 after).

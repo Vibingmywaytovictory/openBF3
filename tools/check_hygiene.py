@@ -11,6 +11,9 @@ MD_ALLOW_GLOB = re.compile(r'^tools/[^/]+/README\.md$')
 ARCHITECTURE_MAX_LINES = 220
 IDENT = re.compile(r'[A-Za-z0-9_]')
 RAW_PREFIX = ('', 'L', 'u', 'U', 'u8')
+TEST_HOOKS = re.compile(r'\b(push_window_mouse|capture_for_check|run_check_and_quit)\b')
+TEST_HOOK_DIR = 'src/bf3_godot'
+CHECKS_GUARD = re.compile(r'#\s*if\s+OPENBF3_BUILD_CHECKS\b')
 
 
 def lex_comments(text):
@@ -134,6 +137,38 @@ def is_cmake(p):
     return p.endswith('CMakeLists.txt') or p.endswith('.cmake')
 
 
+def check_only_sources(root):
+    out = set()
+    depth = 0
+    for l in open(os.path.join(root, TEST_HOOK_DIR, 'CMakeLists.txt'), encoding='utf-8').read().split('\n'):
+        s = l.strip()
+        if s.startswith('if(OPENBF3_BUILD_CHECKS)'):
+            depth = 1
+        elif depth and s.startswith('if('):
+            depth += 1
+        elif depth and s.startswith('endif('):
+            depth -= 1
+        elif depth:
+            out.update(f'{TEST_HOOK_DIR}/{t}' for t in s.split() if t.startswith('src/'))
+    return out
+
+
+def ungated_test_hooks(text):
+    gates = []
+    found = []
+    for n, l in enumerate(text.split('\n'), 1):
+        s = l.strip()
+        if s.startswith('#if'):
+            gates.append(bool(CHECKS_GUARD.match(s)))
+        elif s.startswith(('#else', '#elif')) and gates:
+            gates[-1] = False
+        elif s.startswith('#endif') and gates:
+            gates.pop()
+        elif not any(gates) and TEST_HOOKS.search(l):
+            found.append(n)
+    return found
+
+
 def main():
     root = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else '.')
     strip = '--strip' in sys.argv
@@ -174,6 +209,12 @@ def main():
             if rel in MD_ALLOW_FILES or MD_ALLOW_GLOB.match(rel) or any(rel.startswith(d + '/') for d in MD_ALLOW_DIRS):
                 continue
             failures.append(f'{rel}: prose file outside the allowed set (README.md, CLAUDE.md, docs/architecture.md, docs/testing.md, tools/<tool>/README.md, docs/design/, docs/history/, research/)')
+    check_only = check_only_sources(root)
+    for p in walk(root, (TEST_HOOK_DIR,), lambda x: x.endswith(CODE_EXT)):
+        rel = os.path.relpath(p, root).replace('\\', '/')
+        lines = [] if rel in check_only else ungated_test_hooks(open(p, encoding='utf-8').read())
+        if lines:
+            failures.append(f'{rel}:{lines[0]}: test hook outside #if OPENBF3_BUILD_CHECKS ({len(lines)} in file)')
     arch = os.path.join(root, 'docs', 'architecture.md')
     if os.path.exists(arch):
         count = len(open(arch, encoding='utf-8').read().split('\n'))
