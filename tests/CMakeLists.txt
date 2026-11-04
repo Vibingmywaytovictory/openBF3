@@ -1239,7 +1239,7 @@ openbf3_proc_row(net.procs.godot_connect test_net_procs LABEL timing TIMEOUT 900
 openbf3_proc_row(net.procs.follow test_net_procs LABEL timing TIMEOUT 1800 ARGS --test-suite=net-procs-follow)
 openbf3_proc_row(net.procs.listen_maplist test_net_procs LABEL timing TIMEOUT 1500 ARGS --test-suite=net-procs-listen-maplist)
 openbf3_proc_row(net.procs.kick test_net_procs LABEL timing TIMEOUT 600 ARGS --test-suite=net-procs-kick)
-openbf3_proc_row(godot.rotation test_net_procs LABEL timing TIMEOUT 1800 ARGS --test-suite=godot-rotation)
+openbf3_proc_row(godot.rotation test_net_procs LABEL window TIMEOUT 1800 ARGS --test-suite=godot-rotation)
 openbf3_proc_row(net.procs.hitreg test_net_procs LABEL timing TIMEOUT 2400 ARGS --test-suite=net-procs-hitreg)
 set_tests_properties(net.procs.hitreg PROPERTIES RUN_SERIAL TRUE)
 openbf3_cost(net.procs.hitreg 1 228)

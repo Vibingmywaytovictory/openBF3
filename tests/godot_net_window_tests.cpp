@@ -36,9 +36,7 @@ constexpr uint64_t kJoinAfterKills = 2;
 
 ChildSpec windowed_client(
 		ProcDriver &r_driver, uint16_t p_port, std::vector<std::string> p_extra, std::string_view p_role) {
-	std::vector<std::string> args = { "--connect=127.0.0.1:" + std::to_string(p_port) };
-	args.insert(args.end(), p_extra.begin(), p_extra.end());
-	return r_driver.godot_child(p_role, { "--resolution", "1280x720", "res://scenes/metro_tdm.tscn" }, std::move(args));
+	return godot_client(r_driver, p_port, std::move(p_extra), p_role, true);
 }
 
 bool windows_skipped(ProcDriver &r_driver) {

@@ -165,11 +165,13 @@ inline std::string edited_motor_tuning(const char *p_cfg) {
 	return out;
 }
 
-inline ChildSpec godot_client(
-		ProcDriver &r_driver, uint16_t p_port, std::vector<std::string> p_extra, std::string_view p_role = "client") {
+inline ChildSpec godot_client(ProcDriver &r_driver, uint16_t p_port, std::vector<std::string> p_extra,
+		std::string_view p_role = "client", bool p_windowed = false) {
 	std::vector<std::string> args = { "--connect=127.0.0.1:" + std::to_string(p_port) };
 	args.insert(args.end(), p_extra.begin(), p_extra.end());
-	return r_driver.godot_child(p_role, { "--headless", "res://scenes/metro_tdm.tscn" }, std::move(args));
+	std::vector<std::string> engine = p_windowed
+			? std::vector<std::string>{ "--resolution", "1280x720", "res://scenes/metro_tdm.tscn" }
+			: std::vector<std::string>{ "--headless", "res://scenes/metro_tdm.tscn" };
+	return r_driver.godot_child(p_role, std::move(engine), std::move(args));
 }
-
 }

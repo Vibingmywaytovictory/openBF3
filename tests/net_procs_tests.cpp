@@ -541,11 +541,15 @@ TEST_SUITE("net-procs-rotation") {
 }
 
 TEST_SUITE("godot-rotation") {
-	TEST_CASE("two Godot --connect clients, one on an emptied cache and one on a kept cache, follow a dedicated server "
-			  "through MP_Subway, MP_011 and MP_003 with the data's end-of-round intermission: each prepares the next "
-			  "level before the level change, neither is kicked, and each logs its load seconds and cache bytes per "
-			  "level") {
+	TEST_CASE("two Godot --connect clients, one windowed on an emptied cache and one headless on a kept cache, follow "
+			  "a dedicated server through MP_Subway, MP_011 and MP_003 with the data's end-of-round intermission: each "
+			  "prepares the next level before the level change, neither is kicked, and each logs its load seconds and "
+			  "cache bytes per level") {
 		ProcDriver driver(driver_config_from_env());
+		if (const std::string why = driver.skip_reason(godot_client(driver, 1, {}, "cold", true)); !why.empty()) {
+			bf3::test::skip_install_case(why.c_str());
+			return;
+		}
 		const std::filesystem::path maplist = driver.roots("server").dir / L"maplist.cfg";
 		std::error_code ec;
 		std::filesystem::create_directories(maplist.parent_path(), ec);
@@ -561,8 +565,8 @@ TEST_SUITE("godot-rotation") {
 		}
 		std::map<std::string, size_t> clients;
 		for (const char *role : { "cold", "warm" }) {
-			bf3::core::Result<size_t> started =
-					driver.start(godot_client(driver, server->port, { "--match-levels=3", "--quit-after=2" }, role));
+			bf3::core::Result<size_t> started = driver.start(godot_client(driver, server->port,
+					{ "--match-levels=3", "--quit-after=2" }, role, std::string_view(role) == "cold"));
 			REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
 			clients[role] = *started;
 		}
