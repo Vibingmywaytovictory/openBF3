@@ -34,7 +34,6 @@ core::Result<std::unique_ptr<DeployedGadgetSet>> load_deployed_gadgets(const cor
 	const auto start = std::chrono::steady_clock::now();
 	auto set = std::make_unique<DeployedGadgetSet>();
 	const std::vector<std::string> databases = variation_database_names(p_mount);
-	const core::LevelMount &mount = p_mount;
 	for (const DeployedGadgetSpec &spec : p_specs) {
 		const std::string what = "deployed gadget def " + std::to_string(spec.def);
 		core::Result<core::gameplay::DeployedObject> object = core::gameplay::read_fired_object(p_db, spec.firing_data);
@@ -54,7 +53,7 @@ core::Result<std::unique_ptr<DeployedGadgetSet>> load_deployed_gadgets(const cor
 		MeshRequest request;
 		request.lods = { 0 };
 		request.filter = core::res::SubsetFilter::Drawn;
-		core::Result<CachedMesh> mesh = load_mesh_cached(p_cache, mount, object->mesh, request);
+		core::Result<CachedMesh> mesh = load_mesh_cached(p_cache, p_mount, object->mesh, request);
 		if (!mesh) {
 			return core::error_at(what + ": " + object->mesh, mesh.error());
 		}
@@ -86,7 +85,7 @@ core::Result<std::unique_ptr<DeployedGadgetSet>> load_deployed_gadgets(const cor
 	std::vector<std::string> errors(wanted.size());
 	std::vector<PreparedTexture> textures(wanted.size());
 	core::parallel_for(wanted.size(), [&](size_t i) {
-		core::Result<core::res::LoadedTexture> tex = core::res::load_texture(mount, wanted[i].first);
+		core::Result<core::res::LoadedTexture> tex = core::res::load_texture(p_mount, wanted[i].first);
 		if (!tex) {
 			errors[i] = tex.error().message;
 			return;

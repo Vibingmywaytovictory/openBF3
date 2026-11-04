@@ -12,9 +12,7 @@
 namespace bf3::core::gameplay {
 
 inline constexpr int32_t kOnSpawnedEvent = logic_port_id("OnSpawned");
-inline constexpr int32_t kOnDestroyedEvent = logic_port_id("OnDestroyed");
 inline constexpr int32_t kEffectStartEvent = logic_port_id("Start");
-inline constexpr int32_t kEffectStopEvent = logic_port_id("Stop");
 inline constexpr size_t kMaxDeployedComponents = 64;
 
 struct DeployedObject {
@@ -25,6 +23,8 @@ struct DeployedObject {
 };
 
 Result<DeployedObject> read_deployed_object(const EbxResolver &p_db, const EbxInstance &p_projectile);
+
+Result<DeployedObject> read_fired_object(const EbxResolver &p_db, const EbxInstance &p_firing);
 
 Result<DeployedObject> read_fired_object(const EbxResolver &p_db, std::string_view p_firing_data);
 

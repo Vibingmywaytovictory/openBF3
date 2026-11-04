@@ -75,6 +75,18 @@ Result<DeployedObject> read_deployed_object(const EbxResolver &p_db, const EbxIn
 	return out;
 }
 
+Result<DeployedObject> read_fired_object(const EbxResolver &p_db, const EbxInstance &p_firing) {
+	const std::optional<EbxInstance> primary = p_db.follow(p_firing.data(), "PrimaryFire");
+	const std::optional<EbxValue> shot = primary ? primary->get("Shot") : std::nullopt;
+	const std::optional<EbxStruct> s = shot ? shot->as_struct() : std::nullopt;
+	const std::optional<EbxInstance> projectile = s ? p_db.follow(*s, "ProjectileData") : std::nullopt;
+	if (!projectile) {
+		return make_error("firing data " + partition_of(p_db, p_firing) + "#" + p_firing.guid().to_string() +
+				" fires no projectile");
+	}
+	return read_deployed_object(p_db, *projectile);
+}
+
 Result<DeployedObject> read_fired_object(const EbxResolver &p_db, std::string_view p_firing_data) {
 	const size_t hash = p_firing_data.find('#');
 	const std::optional<Guid> guid =
@@ -84,14 +96,7 @@ Result<DeployedObject> read_fired_object(const EbxResolver &p_db, std::string_vi
 	if (!firing) {
 		return make_error("firing data " + std::string(p_firing_data) + " not found");
 	}
-	const std::optional<EbxInstance> primary = p_db.follow(firing->data(), "PrimaryFire");
-	const std::optional<EbxValue> shot = primary ? primary->get("Shot") : std::nullopt;
-	const std::optional<EbxStruct> s = shot ? shot->as_struct() : std::nullopt;
-	const std::optional<EbxInstance> projectile = s ? p_db.follow(*s, "ProjectileData") : std::nullopt;
-	if (!projectile) {
-		return make_error("firing data " + std::string(p_firing_data) + " fires no projectile");
-	}
-	return read_deployed_object(p_db, *projectile);
+	return read_fired_object(p_db, *firing);
 }
 
 }

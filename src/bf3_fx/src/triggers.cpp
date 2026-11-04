@@ -205,7 +205,7 @@ void read_def(const core::EbxResolver &p_db, const gp::WeaponDef &p_def, size_t 
 
 	r_w.firearm = p_def.projectile.kind == gp::ProjectileKind::Bullet && !(r_w.first_person.empty() && r_w.third_person.empty());
 	if (p_def.projectile.kind == gp::ProjectileKind::Other) {
-		core::Result<gp::DeployedObject> deployed = gp::read_fired_object(p_db, p_def.firing_data);
+		core::Result<gp::DeployedObject> deployed = gp::read_fired_object(p_db, *wfd);
 		if (deployed) {
 			r_w.deployed = std::move(deployed->effects);
 		} else {
