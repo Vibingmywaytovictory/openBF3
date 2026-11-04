@@ -23,6 +23,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <array>
+#include <cmath>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -43,6 +44,7 @@ constexpr const char *kPopupGeneric = "ui/flow/screen/popups/popupgeneric";
 constexpr uint32_t kOptionsTitleHash = 0x2ad6638eu;
 constexpr uint32_t kSaveSettingsHash = 0xbed6cb61u;
 constexpr int32_t kRowsPerTeam = 32;
+constexpr float kScoreboardRowHeight = 28.0f;
 constexpr int32_t kLocalRow = 1;
 constexpr int32_t kSettleFrames = 4;
 constexpr int32_t kPopupFrames = 30;
@@ -194,6 +196,16 @@ bool Bf3WidgetShotsCheck::open_scoreboard() {
 	s.add("scoreboard AS2 paths", stats.as2.missing_paths == 0 && stats.as2.failed_ops == 0,
 			fmt("%u missing paths, %u failed ops %s", unsigned(stats.as2.missing_paths), unsigned(stats.as2.failed_ops),
 					stats.as2.last_failure.c_str()));
+	for (const char *list : { "List_01", "List_02" }) {
+		const std::string path = std::string(ui::kHudScreenInstance) + "." + list;
+		const ui::As2Clip bar = s.screen->clip(path + ".ScrollBar");
+		const float shown = s.screen->clip(path + ".listMask").height();
+		const float total = kScoreboardRowHeight * float(kRowsPerTeam);
+		const float thumb = s.screen->clip(path + ".ScrollBar.whiteBar").height();
+		s.add(fmt("%s scroll bar", list), bar.visible() && thumb == std::round(shown * shown / total),
+				fmt("%s, thumb %.1f of %.1f for %.0f of %.0f px of rows", bar.visible() ? "shown" : "hidden", thumb,
+						shown, shown, total));
+	}
 	return true;
 }
 

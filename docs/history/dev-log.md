@@ -2993,3 +2993,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Bf3LevelSession::push_window_mouse is declared and defined only with OPENBF3_BUILD_CHECKS, and hygiene.rules fails on a named test hook outside that guard in bf3_godot; hygiene.rules (2 failures on 31b0b133, 0 after).
 * A popup's Dimmer resizes to the new visible rect when the window changes size while it is open (2560x1080: 1962.67 x 864 at x -341.3, was 1536 x 864 at -128); ui.widgets.
 * godot.eor clicks STATS (eordetailsscoreboardscreen TabBar_01 button_1), QUIT (eordetailstabsscreen Button_00) and the popup's OK at their clips' centres instead of fixed 1280x720 pixels, and runs at 2560x1080; build only (window row not run).
+* 32 a side, the EOR page's lists (336 px) show the scroll bar with a 126 px thumb and the Tab list (448 px) a 224 px one; hud64's 32 rows of 20 px fit its 640 px and show none. Nothing to fix: no run had overflowed a list; ui.eor.

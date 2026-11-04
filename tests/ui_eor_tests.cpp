@@ -26,6 +26,7 @@ namespace {
 constexpr std::string_view kEorDetailsScoreboard = "ui/flow/screen/eordetailsscoreboardscreen";
 constexpr std::string_view kEorDetailsStats = "ui/flow/screen/eordetailsstatsscreen";
 constexpr std::string_view kEorDetailsTabs = "ui/flow/screen/eordetailstabsscreen";
+constexpr std::string_view kHud32 = "ui/flow/screen/scoreboards/scoreboardtwoteamshud32screen";
 constexpr std::string_view kHud64 = "ui/flow/screen/scoreboards/scoreboardtwoteamshud64screen";
 constexpr std::string_view kTwoTeams = "ui/flow/screen/scoreboards/scoreboardtwoteamsscreen";
 constexpr std::string_view kStats = "instance1.Stats_01";
@@ -369,5 +370,49 @@ TEST_SUITE("ui-eor") {
 		CHECK(s.hud->clip(clip("headerText")).text() == "YOUR TEAM WON!");
 		CHECK(s.hud->clip(clip("textHolder.values_0.keyText")).text_color() == std::optional<uint32_t>(kEnemyText));
 		CHECK(s.hud->clip(clip("textHolder.values_1.keyText")).text_color() == std::optional<uint32_t>(kFriendlyText));
+	}
+
+	TEST_CASE("32 a side: the EOR page and Tab lists show the ScrollBar with the thumb at visible/total, hud64 fits") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const HudModel m = scoreboard_round();
+		std::vector<As2Value> rows;
+		for (int32_t i = 0; i < 32; ++i) {
+			As2Value row = hud_scoreboard_rows(m, m.team.friendly_team_players)[0];
+			row.set("Index", As2Value::of(1000 + i));
+			rows.push_back(std::move(row));
+		}
+		struct Want {
+			std::string_view partition;
+			float visible;
+			float total;
+		};
+		for (const Want &w : { Want{ kTwoTeams, 336.0f, 32.0f * 28.0f }, Want{ kHud32, 448.0f, 32.0f * 28.0f },
+					 Want{ kHud64, 640.0f, 32.0f * 20.0f } }) {
+			RetailScreen s = open_retail_screen(*r, w.partition, retail_text_client(retail_text_db(*r)));
+			s.hud->initialize(m);
+			for (const std::string_view list : { "List_01", "List_02" }) {
+				REQUIRE(hud_list_set_direct_rows(*s.hud, list, rows));
+			}
+			s.hud->refresh(m);
+			CHECK_MESSAGE(s.hud->stats().as2.failed_ops == 0, s.hud->stats().as2.last_failure);
+			for (const std::string_view list : { "List_01", "List_02" }) {
+				const std::string p = std::string(kHudScreenInstance) + "." + std::string(list);
+				const As2Clip bar = s.hud->clip(p + ".ScrollBar");
+				const float thumb = s.hud->clip(p + ".ScrollBar.whiteBar").height();
+				MESSAGE(std::string(w.partition)
+						<< " " << list << ": mask " << s.hud->clip(p + ".listMask").height() << ", bar "
+						<< std::string(bar.visible() ? "shown" : "hidden") << ", thumb " << thumb);
+				REQUIRE(bar.exists());
+				CHECK(s.hud->clip(p + ".listMask").height() == doctest::Approx(w.visible));
+				CHECK(bar.visible() == (w.total > w.visible));
+				if (w.total > w.visible) {
+					CHECK(s.hud->clip(p + ".ScrollBar.backGround").height() == doctest::Approx(w.visible));
+					CHECK(thumb == doctest::Approx(std::round(w.visible * w.visible / w.total)));
+				}
+			}
+		}
 	}
 }
