@@ -491,6 +491,9 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 				quit_after_ = 1.0e9;
 			}
 		}
+#if OPENBF3_BUILD_CHECKS
+		m.auto_deploy = has_check_arg("auto-deploy");
+#endif
 		if (has_check_arg("squad-check")) {
 			m.squad_join = std::unique_ptr<host::SquadJoin, void (*)(host::SquadJoin *)>(
 					new host::SquadJoin(user_arg_value("squad-check"), kSquadCheckTimeoutS),
@@ -1201,6 +1204,9 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			finish(fov_passed ? m.eor_check->exit_code() : 1);
 			return true;
 		}
+	}
+	if (m.auto_deploy && m.spawn_screen && m.can_deploy && !r_game.alive) {
+		m.deploy_click = true;
 	}
 #endif
 	if (m.native_eor != nullptr && m.native_eor->quit_requested() && !m.finished) {

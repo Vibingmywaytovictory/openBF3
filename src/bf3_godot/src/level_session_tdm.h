@@ -158,6 +158,7 @@ struct TdmState {
 	bool squad_names_loaded = false;
 	std::vector<net::SquadRequest> squad_requests;
 	uint64_t squad_requests_sent = 0;
+	bool auto_deploy = false;
 };
 
 Bf3UiScreens *tdm_ui_screens(const TdmState &p_m);
