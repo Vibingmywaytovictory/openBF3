@@ -39,9 +39,13 @@ echo   level mode   one level, e.g. MP_Subway TeamDeathMatch0; without them the 
 echo   --maplist=PATH   rotate through a map list ^(one "level mode rounds" line per entry; PATH is absolute or relative to bf3-opensource-server, e.g. ..\bf3-opensource\config\maplist.cfg^); load bots and the game client follow its level changes
 echo   --bots=0..64 ^(default 31^) --max-players=1..64 ^(default 32^) --kill-limit=N ^(data: 100^) --preround=S ^(data: 10^) --min-players=N
 echo   --port=N ^(default 0: any free port, printed^) --port-file=PATH --bind=IP ^(default 127.0.0.1^) --bf3-cache=PATH --seed=N --dev
+echo   --bind=0.0.0.0 --port=N   take other PCs' clients on UDP port N; the inbound UDP firewall rule for N is yours to add
+echo   --upnp   map the UDP port on the router ^(refused with the 127.0.0.1 bind^)
+echo   --master=HOST:PORT --name=NAME ^(default openBF3^)   heartbeat to a master ^(bf3dump master^), joined by tools\play.cmd --connect=NAME@HOST:PORT
+echo   --ghost-scope=on^|off --bot-squads=on^|off ^(default on^) --bf3-install=DIR ^(default: OPENBF3_INSTALL, then C:\Program Files\EA Games\Battlefield 3^)
 echo   --dedicated-seconds=S --stop-after-kills=N   stop after S seconds or N kills
 echo   --stop-after-squad-samples=N   --stop-after-kills also waits for N squad cohesion samples
 echo   --stop-after-levels=N   stop once the rotation reached its Nth level and no client is left
 echo   --intermission-s=S --load-stall-s=S   dev overrides: S seconds from round over to the next round ^(data: 60^), and of no load progress before a LoadStalled kick ^(30^)
-echo Join it with: tools\play.cmd --connect=127.0.0.1:PORT
+echo Join it with: tools\play.cmd --connect=127.0.0.1:PORT, or from another PC --connect=THIS_PC_IP:PORT
 exit /b 0
