@@ -1076,6 +1076,8 @@ void Bf3NativeHud::paint_tags() {
 	const ui::NametagStyle &style = tags_->style();
 	const float cs = tags_->canvas_scale();
 	const ui::HudIcon *player = a->atlas.find(kPlayerIcon);
+	const ui::HudIcon *leader = a->atlas.find(ui::kHudIconSquadLeader);
+	const ui::HudIcon *leader_bg = a->atlas.find(ui::kHudIconSquadLeaderBg);
 	const auto frame = [&](const ui::HudIcon *p_icon, ui::HudIconState p_state, Vector2 p_centre, float p_size, const Color &p_modulate) {
 		const ui::HudIconStateFrames *st = p_icon != nullptr ? p_icon->state(p_state) : nullptr;
 		if (st == nullptr && p_icon != nullptr) {
@@ -1105,7 +1107,11 @@ void Bf3NativeHud::paint_tags() {
 		const float icon_size = style.icon_size * t.scale;
 		float top = t.anchor.y;
 		if (t.icon) {
-			if (squad && kit != nullptr) {
+			if (t.squad_leader && leader != nullptr) {
+				frame(leader_bg, ui::HudIconState::Squad, t.anchor, icon_size, Color(1, 1, 1, t.alpha));
+				frame(leader, ui::HudIconState::Squad, t.anchor, icon_size, Color(1, 1, 1, t.alpha));
+				paint_.tag_leaders++;
+			} else if (squad && kit != nullptr) {
 				frame(kit, ui::HudIconState::Squad, t.anchor, icon_size, Color(1, 1, 1, t.alpha));
 			} else {
 				frame(player, relation_state(t.relation), t.anchor, icon_size, Color(1, 1, 1, t.alpha));

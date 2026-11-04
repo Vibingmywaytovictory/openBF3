@@ -19,6 +19,7 @@ struct IffSoldier {
 	uint8_t team = 0;
 	uint8_t kit = kIffNoKit;
 	uint8_t squad = 0;
+	bool leader = false;
 	bool alive = false;
 	bool bot = false;
 	bool firing = false;

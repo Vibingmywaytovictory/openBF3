@@ -61,6 +61,7 @@ struct NametagSubject {
 	uint8_t team = 0;
 	uint8_t squad = 0;
 	bool alive = false;
+	bool leader = false;
 	bool in_front = false;
 	float distance_m = 0.0f;
 	float crosshair_stage = 1e9f;
@@ -79,6 +80,7 @@ struct NametagDecision {
 	float scale = 1.0f;
 	float alpha = 1.0f;
 	bool needs_line_of_sight = false;
+	bool squad_leader = false;
 };
 
 TagRelation tag_relation(const NametagViewer &p_viewer, uint8_t p_team, uint8_t p_squad);

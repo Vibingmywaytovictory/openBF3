@@ -196,8 +196,8 @@ These are structural, known, and listed so nobody mistakes them for design inten
 * Nametags are engine-drawn by `Bf3NativeHud` through `NativeTags` (`native_tags.cpp`): UIHudIcon_Player by relation, the
   squad kit icon for squad mates, names in `$Menu_medium` at the UINametagCompData sizes and tints; the name's kit icon
   (16 units in an 18-unit column) and its black glow are not measured, and the HealthBarSize bar is not drawn (other
-  soldiers' health is not presented). The client reads PlayerList squads into `HudPlayer::squad` and `IffSoldier::squad` and squad orders into `PresentationFrame::squad_orders`, shown as markers (above); no screen of the TDM HUD binds GameMessage, so an order has no HudMessage, and the
-  squad leader has no hud3dicon; voice and boosters are not modelled. Data.UINametagComp.getUIColor is native, so the SquadList takes its
+  soldiers' health is not presented). The client reads PlayerList squads into `HudPlayer::squad` and `IffSoldier::squad` and squad orders into `PresentationFrame::squad_orders`, shown as markers (above); no screen of the TDM HUD binds GameMessage, so an order has no HudMessage; the
+  viewer's squad leader's nametag draws UIHudIcon_SquadleaderBg and UIHudIcon_SquadLeader (Squad state) in place of the kit icon, an inference; voice and boosters are not modelled. Data.UINametagComp.getUIColor is native, so the SquadList takes its
   slot 0 as the squadlist txt field's authored colour (e4ff9d; only the icons' setRGB changes the look) and leaves out
   tint2Texts' shadow and glow filters, whose colours are not in the install.
 * The 1P hand grenade plays its state flow (`read_hold_release_flow`, 1P_WeaponHandlingWrapper to

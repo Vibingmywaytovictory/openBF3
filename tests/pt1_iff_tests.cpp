@@ -287,6 +287,10 @@ TEST_CASE("squads: a soldier carries its row's squad, the viewer its own, and a 
 	f.players[2].squad = 3;
 	f.players[5].squad = 2;
 	f.players[6].squad = 63;
+	f.players[1].leader = true;
+	f.players[2].leader = true;
+	f.players[3].leader = true;
+	f.players[6].leader = true;
 	RC(gs::iff_own_squad(f) == 2);
 	std::array<gs::IffSoldier, net::kMaxSlots> soldiers{};
 	const size_t n = gs::iff_soldiers(f, rec.now_ns + 4'166'667ull, soldiers);
@@ -296,7 +300,30 @@ TEST_CASE("squads: a soldier carries its row's squad, the viewer its own, and a 
 		const gs::IffSoldier &s = soldiers[i];
 		const uint8_t want = s.slot == 1 || s.slot == 5 ? 2 : (s.slot == 2 ? 3 : 0);
 		CHECK_MESSAGE(rc_(s.squad == want), s.slot);
+		CHECK_MESSAGE(rc_(s.leader == (s.slot == 1 || s.slot == 2)), s.slot);
 	}
+	const ui::NametagStyle style;
+	ui::NametagSubject leader;
+	leader.team = 1;
+	leader.squad = 2;
+	leader.alive = true;
+	leader.leader = true;
+	leader.in_front = true;
+	leader.distance_m = 5.0f;
+	ui::NametagDecision d = ui::decide_nametag(style, viewer, leader);
+	RC(d.relation == ui::TagRelation::Squad && d.icon && d.squad_leader);
+	leader.squad = 3;
+	d = ui::decide_nametag(style, viewer, leader);
+	RC(d.relation == ui::TagRelation::Friendly && d.icon && !d.squad_leader);
+	leader.squad = 2;
+	leader.leader = false;
+	RC(!ui::decide_nametag(style, viewer, leader).squad_leader);
+	leader.leader = true;
+	leader.alive = false;
+	RC(!ui::decide_nametag(style, viewer, leader).squad_leader);
+	leader.alive = true;
+	leader.team = 2;
+	RC(!ui::decide_nametag(style, viewer, leader).squad_leader);
 	gs::IffReveal reveal;
 	std::array<gs::IffMinimapEntry, net::kMaxSlots> mm{};
 	gs::IffMinimapCounts c;
@@ -312,7 +339,10 @@ TEST_CASE("squads: a soldier carries its row's squad, the viewer its own, and a 
 	f.stats.slot = 200;
 	RC(gs::iff_own_squad(f) == 0);
 	row("frames.squad", ok,
-			"slot 1 in the viewer's squad 2 -> Squad; slot 5 squad 2 on the other team -> not drawn; squad 63 -> 0");
+			"slot 1 in the viewer's squad 2 -> Squad; slot 5 squad 2 on the other team -> not drawn; squad 63 -> 0; "
+			"the viewer's "
+			"squad leader's nametag carries the squad leader icon, another squad's, an enemy's or a dead one's does "
+			"not");
 }
 
 TEST_CASE("the kit's appearance by name") {

@@ -328,6 +328,7 @@ void NativeTags::update(const Camera3D *p_camera, bool p_show, Vector2 p_viewpor
 			sub.slot = s.slot;
 			sub.team = s.team;
 			sub.squad = s.squad;
+			sub.leader = s.leader;
 			sub.alive = s.alive;
 			const Vector3 anchor = vec(s.feet) + Vector3(0.0f, s.eye_height + style_.vertical_offset, 0.0f);
 			if (!anchor.is_finite()) {
@@ -365,6 +366,7 @@ void NativeTags::update(const Camera3D *p_camera, bool p_show, Vector2 p_viewpor
 			t.relation = dec.relation;
 			t.icon = dec.icon;
 			t.name = dec.name;
+			t.squad_leader = dec.squad_leader;
 			t.scale = dec.scale;
 			t.alpha = dec.alpha;
 			t.distance_m = sub.distance_m;

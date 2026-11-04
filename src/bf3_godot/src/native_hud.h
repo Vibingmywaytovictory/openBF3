@@ -85,6 +85,7 @@ struct NativeHudPaintStats {
 	uint32_t minimap_downed = 0;
 	uint32_t minimap_orders = 0;
 	uint32_t tag_icons = 0;
+	uint32_t tag_leaders = 0;
 	uint32_t tag_names = 0;
 	uint32_t paints = 0;
 };

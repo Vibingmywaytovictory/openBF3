@@ -40,6 +40,7 @@ size_t iff_soldiers(const host::PresentationFrame &p_frame, uint64_t p_now_ns, s
 			}
 			s.kit = row->kit < 4 ? row->kit : kIffNoKit;
 			s.squad = row->squad <= net::kMaxSquads ? row->squad : uint8_t(0);
+			s.leader = s.squad != 0 && row->leader;
 			s.bot = row->bot;
 			const size_t len = std::min<size_t>(row->name_bytes, row->name.size());
 			s.name = std::string_view(row->name.data(), len);

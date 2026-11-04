@@ -89,6 +89,8 @@ inline size_t hud_icon_frame(const HudIconStateFrames &p_state, double p_seconds
 }
 
 inline constexpr std::string_view kHudIconPlayerDead = "UIHudIcon_PlayerDead";
+inline constexpr std::string_view kHudIconSquadLeader = "UIHudIcon_SquadLeader";
+inline constexpr std::string_view kHudIconSquadLeaderBg = "UIHudIcon_SquadleaderBg";
 
 struct HudIcon {
 	std::string type;

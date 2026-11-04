@@ -1674,11 +1674,20 @@ TEST_SUITE("ui-hud-screen") {
 					std::to_string(frame + 1) + (red ? " red" : " blue") + ", minimap " +
 					std::string(look->minimap_icon) + " (" + std::to_string(st->frames.size()) + " frame)";
 		}
+		for (const std::string_view icon : { kHudIconSquadLeader, kHudIconSquadLeaderBg }) {
+			const HudIcon *leader = atlas->find(icon);
+			REQUIRE_MESSAGE(leader != nullptr, std::string(icon));
+			const HudIconStateFrames *st = leader->state(HudIconState::Squad);
+			REQUIRE_MESSAGE(st != nullptr, std::string(icon));
+			CHECK_FALSE(st->frames.empty());
+		}
 		CHECK(t.hud->stats().as2.failed_ops == 0);
 		row("squad_order",
 				"MapmarkerManager_00 Marker tags from squad orders, the icon frame by the iconsIngame label and the "
 				"AS2 UIHudIcon number: " +
-						summary);
+						summary +
+						"; the squad leader nametag icons UIHudIcon_SquadLeader and UIHudIcon_SquadleaderBg have a "
+						"Squad state");
 	}
 
 	TEST_CASE("hud screen: KillFeed") {

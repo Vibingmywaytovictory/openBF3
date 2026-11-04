@@ -62,6 +62,7 @@ struct NativeTag {
 	core::ui::TagRelation relation = core::ui::TagRelation::None;
 	bool icon = false;
 	bool name = false;
+	bool squad_leader = false;
 	float scale = 1.0f;
 	float alpha = 1.0f;
 	float distance_m = 0.0f;

@@ -147,6 +147,7 @@ NametagDecision decide_nametag(const NametagStyle &p_style, const NametagViewer 
 		return out;
 	}
 	out.icon = true;
+	out.squad_leader = out.relation == TagRelation::Squad && p_subject.leader;
 	out.name = d <= p_style.show_label_range || looked_at;
 	return out;
 }
