@@ -146,6 +146,11 @@ target_sources(bf3_godot PRIVATE
 )
 
 target_sources(bf3_godot PRIVATE
+    src/game_deployables.h
+    src/game_deployables.cpp
+)
+
+target_sources(bf3_godot PRIVATE
     src/game_audio.cpp
 )
 

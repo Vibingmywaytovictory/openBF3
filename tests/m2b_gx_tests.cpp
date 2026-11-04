@@ -344,7 +344,7 @@ TEST_CASE("m2b.gx.unit R13: FxTriggers accepts a Revive event") {
 	events[0].aux = 7;
 	events[1].kind = host::PresentKind::Spawn;
 	events[1].timeline = host::PresentTimeline::Immediate;
-	events[2].kind = host::PresentKind(uint8_t(host::PresentKind::Revive) + 1);
+	events[2].kind = host::PresentKind(uint8_t(host::PresentKind::GadgetRemove) + 1);
 	events[2].timeline = host::PresentTimeline::Immediate;
 	host::PresentClock clock;
 	triggers.on_events(events, clock, fx::FxView{});

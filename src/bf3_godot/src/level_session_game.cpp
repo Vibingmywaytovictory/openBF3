@@ -600,6 +600,19 @@ bool Bf3LevelSession::game_load_assets(const host::LevelDatabase &p_db, bf3::cor
 				note(line);
 			}
 		}
+		{
+			const double t0 = steady_s();
+			g.deployables = std::make_unique<GameDeployables>();
+			if (const bf3::core::Status s = g.deployables->load(li); !s.ok()) {
+				note("[game] ERROR deployables load: " + s.error().message);
+				g.deployables.reset();
+			} else {
+				char line[128];
+				std::snprintf(line, sizeof(line), "[game] deployables loaded in %.2f s: %u gadget meshes",
+						steady_s() - t0, g.deployables->stats().parts);
+				note(line);
+			}
+		}
 		if (const std::shared_ptr<GameSettings> kept = match_ != nullptr ? match_->settings() : nullptr) {
 			g.settings = kept;
 		} else if (!g.checks()) {
@@ -1002,6 +1015,14 @@ void step_game_parts(Node3D &r_parent, GameState &r_game, const host::Presentati
 		}
 	}
 	r_game.crowd_built = r_game.crowd != nullptr && r_game.crowd->built();
+	if (r_game.deployables != nullptr && r_game.deployables->loaded() && !r_game.deployables->built() &&
+			!r_game.deployables->build(&r_parent, &error)) {
+		UtilityFunctions::print(to_godot("[game] ERROR deployables build: " + error));
+		r_game.deployables.reset();
+	}
+	if (r_game.deployables != nullptr && r_game.deployables->built()) {
+		r_game.deployables->step(p_frame);
+	}
 	GameFrame mf;
 	mf.frame = &p_frame;
 	mf.clock = host::present_clock(p_frame, p_now_ns);

@@ -2,6 +2,7 @@
 
 #include "fx_ebx.h"
 
+#include "bf3/core/gameplay/deployed_object.h"
 #include "bf3/core/gameplay/weapon_resolver.h"
 #include "bf3/core/util/finite.h"
 #include "bf3/core/util/format.h"
@@ -203,6 +204,14 @@ void read_def(const core::EbxResolver &p_db, const gp::WeaponDef &p_def, size_t 
 	}
 
 	r_w.firearm = p_def.projectile.kind == gp::ProjectileKind::Bullet && !(r_w.first_person.empty() && r_w.third_person.empty());
+	if (p_def.projectile.kind == gp::ProjectileKind::Other) {
+		core::Result<gp::DeployedObject> deployed = gp::read_fired_object(p_db, p_def.firing_data);
+		if (deployed) {
+			r_w.deployed = std::move(deployed->effects);
+		} else {
+			r_notes.push_back(where + ": " + deployed.error().message);
+		}
+	}
 }
 
 enum class KeyKind : uint8_t { Shot = 1, Impact = 2, Soldier = 3, SoldierHit = 4, Detonation = 5 };
@@ -315,6 +324,7 @@ std::vector<std::string> FireEffectTable::blueprints() const {
 		if (!w.detonation.empty()) {
 			names.insert(w.detonation);
 		}
+		names.insert(w.deployed.begin(), w.deployed.end());
 	}
 	if (!default_detonation.empty()) {
 		names.insert(default_detonation);
@@ -816,6 +826,12 @@ struct FxTriggers::Impl {
 	std::unordered_map<uint64_t, ShotMemory> shots;
 	std::deque<uint64_t> shot_order;
 
+	struct Deployed {
+		uint32_t id = 0;
+		EffectHandle handle;
+	};
+	std::vector<Deployed> deployed_live;
+
 	struct Attached {
 		EffectHandle handle;
 		uint8_t slot = 0;
@@ -1277,13 +1293,53 @@ struct FxTriggers::Impl {
 		}
 	}
 
+	void on_deploy(const present::PresentEvent &p_e, float p_age) {
+		const WeaponFireEffects *w = def_of(p_e.def);
+		if (w == nullptr) {
+			++stats.unknown_defs;
+			return;
+		}
+		if (std::any_of(
+					deployed_live.begin(), deployed_live.end(), [&](const Deployed &d) { return d.id == p_e.id; })) {
+			return;
+		}
+		const uint64_t seed = present::effect_seed(config.match_seed, p_e.slot, p_e.id);
+		for (size_t i = 0; i < w->deployed.size(); ++i) {
+			const std::shared_ptr<const EffectDef> def = get(w->deployed[i]);
+			if (!def) {
+				continue;
+			}
+			const EffectHandle h = start(def, p_e, TriggerPurpose::Deployed, uint32_t(i),
+					trigger_seed(seed, TriggerPurpose::Deployed, uint32_t(i)),
+					effect_frame(from(p_e.pos), { 0, 1, 0 }, { 0, 0, 1 }), {}, p_age, false);
+			if (h.valid()) {
+				deployed_live.push_back(Deployed{ p_e.id, h });
+				++stats.deployed_starts;
+			}
+		}
+	}
+
+	void on_remove(const present::PresentEvent &p_e) {
+		size_t keep = 0;
+		for (const Deployed &d : deployed_live) {
+			if (d.id != p_e.id) {
+				deployed_live[keep++] = d;
+				continue;
+			}
+			world.stop(d.handle);
+			++stats.deployed_stops;
+		}
+		deployed_live.resize(keep);
+	}
+
 	bool sane(const present::PresentEvent &p_e) const {
 		for (size_t k = 0; k < 3; ++k) {
 			if (!std::isfinite(p_e.pos[k]) || !std::isfinite(p_e.dir[k]) || std::fabs(p_e.pos[k]) > 1.0e7f) {
 				return false;
 			}
 		}
-		return uint8_t(p_e.kind) <= uint8_t(present::PresentKind::Revive) && uint8_t(p_e.timeline) <= uint8_t(present::PresentTimeline::Immediate);
+		return uint8_t(p_e.kind) <= uint8_t(present::PresentKind::GadgetRemove) &&
+				uint8_t(p_e.timeline) <= uint8_t(present::PresentTimeline::Immediate);
 	}
 
 	void dispatch(const present::PresentEvent &p_e, float p_age) {
@@ -1301,6 +1357,12 @@ struct FxTriggers::Impl {
 				break;
 			case present::PresentKind::Detonation:
 				on_detonation(p_e, p_age);
+				break;
+			case present::PresentKind::GadgetDeploy:
+				on_deploy(p_e, p_age);
+				break;
+			case present::PresentKind::GadgetRemove:
+				on_remove(p_e);
 				break;
 			default:
 				break;
@@ -1453,6 +1515,8 @@ const char *trigger_purpose_name(TriggerPurpose p_purpose) {
 			return "Decal";
 		case TriggerPurpose::Detonation:
 			return "Detonation";
+		case TriggerPurpose::Deployed:
+			return "Deployed";
 	}
 	return "?";
 }

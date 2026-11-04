@@ -34,9 +34,10 @@ struct MeshMaterials {
 };
 
 std::vector<std::string> variation_database_names(const core::EbxLibrary &p_library);
+std::vector<std::string> variation_database_names(const core::LevelMount &p_mount);
 
-core::Result<MeshMaterials> mesh_materials(const core::EbxLibrary &p_library, std::string_view p_mesh_partition, uint32_t p_variation_hash,
-		const std::vector<std::string> &p_databases);
+core::Result<MeshMaterials> mesh_materials(const core::EbxResolver &p_library, std::string_view p_mesh_partition,
+		uint32_t p_variation_hash, const std::vector<std::string> &p_databases);
 
 inline constexpr size_t kMaxMaterialSlots = 4096;
 inline constexpr size_t kMaxTextureParameters = 256;

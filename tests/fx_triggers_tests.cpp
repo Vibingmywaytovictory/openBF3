@@ -1551,6 +1551,38 @@ TEST_CASE("cells: Metro's fire effects, preload, the 1p flash fraction, in-game 
 	REQUIRE(knife != nullptr);
 	CHECK_FALSE(knife->firearm);
 	CHECK(knife->tracer.empty());
+	{
+		core::Result<std::shared_ptr<const hk::GunplayLevel>> kits =
+				hk::load_gunplay_level(r.install, "MP_Subway", "TeamDeathMatch0", hk::GunplayLoadOptions{ true, true });
+		REQUIRE_MESSAGE(kits.ok(), (kits.ok() ? std::string() : kits.error().message));
+		std::vector<core::gameplay::WeaponDef> gadget_defs;
+		for (const std::string_view w : { "weapons/gadgets/medicbag/medicbag", "weapons/gadgets/ammobag/ammobag",
+					 "weapons/gadgets/radiobeacon/radio_beacon" }) {
+			for (const sim::weapons::GadgetDef &g : (*kits)->gadgets) {
+				if (g.weapon == w && g.def < (*kits)->defs.size()) {
+					gadget_defs.push_back((*kits)->defs[g.def]);
+				}
+			}
+		}
+		REQUIRE(gadget_defs.size() == 3);
+		core::Result<FireEffectTable> gadgets = load_fire_effects(*metro->sources->level, gadget_defs);
+		REQUIRE(gadgets.ok());
+		CHECK(gadgets->defs[0].deployed.empty());
+		CHECK(gadgets->defs[1].deployed.empty());
+		CHECK(gadgets->defs[2].deployed ==
+				std::vector<std::string>{ "sound/weapons/handheld/radiobeacon/radiobeacon_object_sfx" });
+		CHECK_FALSE(gadgets->defs[0].firearm);
+		const std::vector<std::string> blueprints = gadgets->blueprints();
+		CHECK(metro->library->preload(blueprints, 0) == 0);
+		const std::vector<std::string> sounds = impact_sound_names(*metro->impacts, *metro->library, blueprints);
+		const std::string beacon_sound = "sound/weapons/handheld/radiobeacon/radiobeacon_object";
+		CHECK(std::find(sounds.begin(), sounds.end(), beacon_sound) != sounds.end());
+		core::Result<std::shared_ptr<const bf3::audio::ImpactSoundCache>> beacon_cache =
+				bf3::audio::ImpactSoundCache::build(*metro->sources->level, std::vector<std::string>{ beacon_sound });
+		REQUIRE(beacon_cache.ok());
+		CHECK((*beacon_cache)->compiled() == 1);
+		CHECK((*beacon_cache)->failed() == 0);
+	}
 	size_t firearms = 0, with_tracer = 0;
 	for (const WeaponFireEffects &w : fire->defs) {
 		firearms += w.firearm ? 1 : 0;
@@ -1878,7 +1910,48 @@ TEST_CASE("install unchanged") {
 }
 
 TEST_SUITE("fx-triggers-unit") {
-	TEST_CASE("M2b cam: a Revive event is accepted and starts nothing; a kind past Revive is rejected") {
+	TEST_CASE("deployables: a GadgetDeploy starts its def's deployed effects once at the position, GadgetRemove stops "
+			  "them") {
+		std::unique_ptr<Syn> s = make_syn();
+		auto fire = std::make_shared<FireEffectTable>(*s->fire);
+		REQUIRE(fire->defs.size() >= 2);
+		fire->defs[1].deployed = { kMuzz3p };
+		const std::vector<std::string> names = fire->blueprints();
+		CHECK(std::find(names.begin(), names.end(), std::string(kMuzz3p)) != names.end());
+		FxWorld world;
+		FxTriggerConfig cfg;
+		cfg.match_seed = kMatch;
+		FxTriggers t(world, *s->library, fire, cfg);
+		hk::PresentEvent deploy = ev(hk::PresentKind::GadgetDeploy, 4, 77, 1, { 2, 0.1f, 3 }, { 0, 0, 0 });
+		deploy.timeline = hk::PresentTimeline::Immediate;
+		t.on_events(std::span<const hk::PresentEvent>(&deploy, 1), clock_at(0), kNear);
+		const auto started = starts_of(t, kMuzz3p);
+		REQUIRE(started.size() == 1);
+		CHECK(started[0]->purpose == TriggerPurpose::Deployed);
+		CHECK(started[0]->started);
+		CHECK(started[0]->transform.trans == Vec3{ 2, 0.1f, 3 });
+		CHECK(started[0]->seed == trigger_seed(hk::effect_seed(kMatch, 4, 77), TriggerPurpose::Deployed, 0));
+		const EffectHandle h = started[0]->handle;
+		CHECK(world.alive(h));
+		t.on_events(std::span<const hk::PresentEvent>(&deploy, 1), clock_at(0), kNear);
+		CHECK(t.starts().empty());
+		hk::PresentEvent other = deploy;
+		other.def = 0;
+		other.id = 78;
+		t.on_events(std::span<const hk::PresentEvent>(&other, 1), clock_at(0), kNear);
+		CHECK(t.starts().empty());
+		CHECK(t.stats().deployed_starts == 1);
+		CHECK(t.stats().rejected == 0);
+		hk::PresentEvent remove = deploy;
+		remove.kind = hk::PresentKind::GadgetRemove;
+		t.on_events(std::span<const hk::PresentEvent>(&remove, 1), clock_at(0), kNear);
+		CHECK(t.stats().deployed_stops == 1);
+		t.on_events(std::span<const hk::PresentEvent>(&deploy, 1), clock_at(0), kNear);
+		CHECK(starts_of(t, kMuzz3p).size() == 1);
+		CHECK(t.stats().deployed_starts == 2);
+	}
+
+	TEST_CASE("M2b cam: a Revive event is accepted and starts nothing; a kind past GadgetRemove is rejected") {
 		std::unique_ptr<Syn> s = make_syn();
 		FxWorld world;
 		FxTriggers t(world, *s->library, s->fire, {});
@@ -1887,7 +1960,7 @@ TEST_SUITE("fx-triggers-unit") {
 		revive.aux = 4;
 		events.push_back(revive);
 		hk::PresentEvent past = revive;
-		past.kind = hk::PresentKind(uint8_t(hk::PresentKind::Revive) + 1);
+		past.kind = hk::PresentKind(uint8_t(hk::PresentKind::GadgetRemove) + 1);
 		events.push_back(past);
 		t.on_events(events, clock_at(0), kNear);
 		CHECK(t.stats().events == 2);

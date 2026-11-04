@@ -175,11 +175,15 @@ const std::array<float, 4> *MaterialSlot::vector(std::string_view p_parameter) c
 }
 
 std::vector<std::string> variation_database_names(const EbxLibrary &p_library) {
-	std::vector<std::string> out;
 	if (p_library.superbundle_count() == 0) {
-		return out;
+		return {};
 	}
-	for (const std::string &name : p_library.mount(0).ebx_names()) {
+	return variation_database_names(p_library.mount(0));
+}
+
+std::vector<std::string> variation_database_names(const core::LevelMount &p_mount) {
+	std::vector<std::string> out;
+	for (const std::string &name : p_mount.ebx_names()) {
 		std::string lower = core::to_lower_ascii(name);
 		if (lower.find("meshvariationdb") != std::string::npos) {
 			out.push_back(std::move(lower));
@@ -190,8 +194,8 @@ std::vector<std::string> variation_database_names(const EbxLibrary &p_library) {
 	return out;
 }
 
-core::Result<MeshMaterials> mesh_materials(const EbxLibrary &p_library, std::string_view p_mesh_partition, uint32_t p_variation_hash,
-		const std::vector<std::string> &p_databases) {
+core::Result<MeshMaterials> mesh_materials(const EbxResolver &p_library, std::string_view p_mesh_partition,
+		uint32_t p_variation_hash, const std::vector<std::string> &p_databases) {
 	const std::string where = "materials of " + std::string(p_mesh_partition);
 	const core::EbxPartition *mesh = p_library.partition_by_name(p_mesh_partition);
 	if (mesh == nullptr) {

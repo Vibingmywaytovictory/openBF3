@@ -3,6 +3,7 @@
 #include "audio_areas_check.h"
 #include "catalog_weapons.h"
 #include "crosshair_walk_check.h"
+#include "game_deployables.h"
 #include "game_frame.h"
 #include "game_settings.h"
 #include "icons3d_check.h"
@@ -215,6 +216,7 @@ struct GameState {
 	std::unique_ptr<Bf3GameFx, void (*)(Bf3GameFx *)> fx{ nullptr, nullptr };
 	std::unique_ptr<Bf3GameAudio, void (*)(Bf3GameAudio *)> audio{ nullptr, nullptr };
 	std::unique_ptr<Bf3GameCrowd, void (*)(Bf3GameCrowd *)> crowd{ nullptr, nullptr };
+	std::unique_ptr<GameDeployables> deployables;
 	std::unique_ptr<CatalogWeapons> catalog;
 	CatalogCacheSource catalog_cache;
 	std::shared_ptr<GameSettings> settings;

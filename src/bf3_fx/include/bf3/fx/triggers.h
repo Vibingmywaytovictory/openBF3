@@ -54,6 +54,7 @@ enum class TriggerPurpose : uint8_t {
 	ImpactSpread = 5,
 	Decal = 6,
 	Detonation = 7,
+	Deployed = 8,
 };
 
 constexpr uint64_t trigger_seed(uint64_t p_event_seed, TriggerPurpose p_purpose, uint32_t p_index) {
@@ -86,6 +87,7 @@ struct WeaponFireEffects {
 	bool firearm = true;
 
 	std::string detonation;
+	std::vector<std::string> deployed;
 	float tracer_speed = 0;
 	float tracer_ttl = 0;
 	float converge = kTracerConvergeM;
@@ -260,6 +262,8 @@ struct FxTriggerStats {
 	uint64_t firearm_shots = 0;
 	uint64_t tracer_shots = 0;
 	uint64_t no_round_shots = 0;
+	uint64_t deployed_starts = 0;
+	uint64_t deployed_stops = 0;
 	uint64_t hits_confirmed = 0;
 	uint64_t duds = 0;
 	uint64_t rejected = 0;

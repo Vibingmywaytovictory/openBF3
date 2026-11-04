@@ -481,3 +481,8 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/level/spot_light.h
     src/level/spot_light.cpp
 )
+
+target_sources(bf3_core PRIVATE
+    include/bf3/core/gameplay/deployed_object.h
+    src/gameplay/deployed_object.cpp
+)

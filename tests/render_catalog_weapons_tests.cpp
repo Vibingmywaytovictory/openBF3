@@ -12,8 +12,10 @@
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/text.h"
 #include "bf3/host/gunplay.h"
+#include "bf3/host/level_load.h"
 #include "bf3/host/loadout.h"
 #include "bf3/render/crowd_weapons.h"
+#include "bf3/render/deployed_gadgets.h"
 #include "bf3/render/mesh_cache.h"
 #include "bf3/render/soldier_assets.h"
 #include "bf3/render/viewmodel_set.h"
@@ -1336,5 +1338,72 @@ TEST_SUITE("render-catalog-scope") {
 		CHECK(render::viewmodel_zoom_mesh_shown(false, 1.0f, item));
 		CHECK(render::viewmodel_zoom_mesh_shown(true, 0.9f, item));
 		CHECK_FALSE(render::viewmodel_zoom_mesh_shown(true, 0.8f, item));
+	}
+}
+
+TEST_SUITE("render-catalog-deployables") {
+	TEST_CASE(
+			"catalog deployables: each kit gadget of Metro TDM resolves its projectile's mesh, materials and textures, "
+			"and the radio beacon the effect its OnSpawned starts") {
+		core::InstallReader reader;
+		if (!reader.locate({})) {
+			test::skip_install_case(reader.describe().c_str());
+			return;
+		}
+		const core::InstallSnapshot before = reader.snapshot();
+		core::Result<std::shared_ptr<core::Install>> install = core::Install::open(reader);
+		REQUIRE(install.ok());
+		auto gunplay = host::load_gunplay_level(
+				*install, "MP_Subway", "TeamDeathMatch0", host::GunplayLoadOptions{ true, true });
+		REQUIRE_MESSAGE(gunplay.ok(), (gunplay.ok() ? "" : gunplay.error().message));
+		const host::GunplayLevel &level = **gunplay;
+		core::Result<host::LevelDatabase> db =
+				host::open_level_database(*install, "MP_Subway", "TeamDeathMatch0", 0, nullptr);
+		REQUIRE_MESSAGE(db.ok(), (db.ok() ? "" : db.error().message));
+		std::vector<render::DeployedGadgetSpec> specs;
+		for (const sim::weapons::GadgetDef &g : level.gadgets) {
+			REQUIRE(g.def < level.defs.size());
+			specs.push_back(render::DeployedGadgetSpec{ g.def, level.defs[g.def].firing_data });
+		}
+		REQUIRE(specs.size() == 3);
+		core::Result<std::unique_ptr<render::DeployedGadgetSet>> set =
+				render::load_deployed_gadgets(db->level->db(), db->level->mount(), specs);
+		REQUIRE_MESSAGE(set.ok(), (set.ok() ? "" : set.error().message));
+		std::map<std::string, std::string> meshes;
+		std::map<std::string, std::vector<std::string>> effects;
+		for (const sim::weapons::GadgetDef &g : level.gadgets) {
+			const render::DeployedGadgetPart *p = (*set)->part(g.def);
+			REQUIRE(p != nullptr);
+			MESSAGE(g.weapon, ": ", p->object.entity_type, " ", p->object.mesh, ", ", p->prepared.vertices,
+					" vertices, ", p->prepared.surfaces.size(), " surfaces, ", p->object.effects.size(), " effects");
+			meshes[g.weapon] = p->object.mesh;
+			effects[g.weapon] = p->object.effects;
+			CHECK(p->prepared.vertices > 0);
+			CHECK_FALSE(p->prepared.skinned);
+			for (const render::PreparedSurface &s : p->prepared.surfaces) {
+				REQUIRE(s.material_index < p->materials.slots.size());
+				const std::string diffuse = p->materials.slots[s.material_index].texture("Diffuse");
+				CAPTURE(diffuse);
+				CHECK((diffuse.empty() || (*set)->texture(diffuse) != nullptr));
+			}
+		}
+		for (const std::string &n : (*set)->notes) {
+			MESSAGE(n);
+		}
+		CHECK((*set)->notes.empty());
+		CHECK(meshes ==
+				std::map<std::string, std::string>{
+						{ "weapons/gadgets/ammobag/ammobag", "weapons/gadgets/ammobag/ammobag_projectile_mesh" },
+						{ "weapons/gadgets/medicbag/medicbag", "weapons/gadgets/medicbag/mediccrate_projectile_mesh" },
+						{ "weapons/gadgets/radiobeacon/radio_beacon",
+								"weapons/gadgets/radiobeacon/radiobeacon_projectile_mesh" } });
+		CHECK(effects ==
+				std::map<std::string, std::vector<std::string>>{ { "weapons/gadgets/ammobag/ammobag", {} },
+						{ "weapons/gadgets/medicbag/medicbag", {} },
+						{ "weapons/gadgets/radiobeacon/radio_beacon",
+								{ "sound/weapons/handheld/radiobeacon/radiobeacon_object_sfx" } } });
+		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
+		std::printf("render.catalog_deployables install.unchanged %s\n", diff.clean() ? "yes" : diff.summary().c_str());
+		CHECK(diff.clean());
 	}
 }
