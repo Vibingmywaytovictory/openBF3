@@ -1261,7 +1261,7 @@ target_link_libraries(test_host_ghost PRIVATE bf3_host)
 target_include_directories(test_host_ghost PRIVATE ${PROJECT_SOURCE_DIR}/src/bf3_host/src)
 target_compile_definitions(test_host_ghost PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""
     "OPENBF3_MECHANICS_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/weapon_mechanics.cfg\"")
-openbf3_case_row(NAME host.ghost.unit EXE test_host_ghost SUITE host-ghost GROUP host-ghost COUNT 7 EXCLUDE *Metro* install*unchanged)
+openbf3_case_row(NAME host.ghost.unit EXE test_host_ghost SUITE host-ghost GROUP host-ghost COUNT 8 EXCLUDE *Metro* install*unchanged)
 openbf3_case_row(NAME host.ghost EXE test_host_ghost SUITE host-ghost GROUP host-ghost COUNT 4 CASES *Metro* INSTALL_CASE install*unchanged)
 openbf3_split_cover(NAME host.ghost.split_cover EXE test_host_ghost SUITE host-ghost GROUP host-ghost)
 set_tests_properties(host.ghost.unit PROPERTIES TIMEOUT 60)
