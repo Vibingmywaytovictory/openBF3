@@ -37,6 +37,7 @@ using bf3::test::procs::kLevel;
 using bf3::test::procs::kMode;
 using bf3::test::procs::line_starts;
 using bf3::test::procs::need;
+using bf3::test::procs::number_after;
 using bf3::test::procs::ProcDriver;
 using bf3::test::procs::require_clean_exit;
 using bf3::test::procs::Server;
@@ -132,7 +133,11 @@ TEST_SUITE("net-procs-connect") {
 		}
 		const size_t bots = *fleet_started;
 		CHECK_MESSAGE(driver.wait_line(
-							  server->id, [](std::string_view l) { return contains(l, " clients 5 bots "); }, 30s),
+							  server->id,
+							  [](std::string_view l) {
+								  return l.rfind("[dedicated] t=", 0) == 0 && number_after(l, " clients ") == 5.0;
+							  },
+							  30s),
 				driver.output(server->id));
 
 		std::string fleet;
