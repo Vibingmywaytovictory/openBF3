@@ -65,6 +65,14 @@ inline constexpr std::array<DeployCheckTab, 2> kDeployCheckTabs{ {
 } };
 inline constexpr double kDeployCheckTabSeconds = 1.5;
 inline constexpr uint32_t kCustomizeFirstStep = 10;
+inline constexpr size_t kDeployCheckCustomizeTab = 0;
+inline constexpr size_t kDeployCheckSquadTab = 1;
+inline constexpr uint32_t kDeployCheckBaseSpawns = 3;
+
+enum class DeployCheckPhase : uint8_t { Loadout, Gadget, Squad, Scope };
+inline constexpr std::array<std::string_view, 4> kDeployCheckPhaseNames{ "loadout", "gadget", "squad", "scope" };
+
+bool parse_deploy_check_phase(std::string_view p_text, DeployCheckPhase &r_phase);
 
 enum class DeployFireClass : uint8_t { Assault, Lmg, Shotgun, Sniper, Pdw, Other };
 inline constexpr std::array<std::string_view, 5> kDeployFireClassNames{ "ar", "lmg", "shotgun", "sniper", "pdw" };
@@ -146,6 +154,10 @@ struct DeployCheckState {
 	std::array<uint32_t, 32> primary_items{};
 	uint32_t chosen_primary = 0;
 	uint32_t spawned_primary = 0;
+	std::array<uint32_t, bf3::sim::weapons::kMaxWeaponSlots> spawned_items{};
+	std::array<uint16_t, bf3::sim::weapons::kMaxWeaponSlots> spawned_defs{};
+	uint16_t chosen_gadget2_def = bf3::sim::weapons::kNoWeapon;
+	std::string chosen_gadget2_unlock;
 	bool spawned_primary_fire_fx = false;
 	bool spawned_primary_audio = false;
 	uint64_t concepts_found = 0;
@@ -224,7 +236,7 @@ struct DeployCheckIo {
 
 class DeployCheck {
 public:
-	explicit DeployCheck(std::string p_shots_dir) : shots_dir_(std::move(p_shots_dir)) {}
+	DeployCheck(std::string p_shots_dir, DeployCheckPhase p_phase);
 
 	bool frame(Bf3UiScreens &r_screens, double p_now_s, const DeployCheckIo &p_io);
 	std::string report() const;
@@ -264,7 +276,15 @@ private:
 	static std::string node_fact(Bf3UiScreens &r_screens, std::string_view p_partition, std::string_view p_path);
 	static bool spawn_row_drawn(Bf3UiScreens &r_screens, std::string &r_fact);
 
+	bool fires() const { return kind_ == DeployCheckPhase::Scope; }
+	uint32_t tab_spawns() const;
+	uint32_t expected_spawn_ends() const;
+
 	std::string shots_dir_;
+	DeployCheckPhase kind_ = DeployCheckPhase::Loadout;
+	uint32_t spawn_gadget_ = 0;
+	uint16_t spawn_gadget_def_ = bf3::sim::weapons::kNoWeapon;
+	std::string spawn_gadget_unlock_;
 	Phase phase_ = Phase::Join;
 	Phase after_ = Phase::Done;
 	double start_s_ = -1.0;

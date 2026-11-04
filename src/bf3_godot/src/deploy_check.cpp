@@ -40,6 +40,29 @@ uint32_t next_primary(const DeployCheckState &p_st) {
 
 }
 
+bool parse_deploy_check_phase(std::string_view p_text, DeployCheckPhase &r_phase) {
+	for (size_t i = 0; i < kDeployCheckPhaseNames.size(); ++i) {
+		if (p_text == kDeployCheckPhaseNames[i]) {
+			r_phase = DeployCheckPhase(i);
+			return true;
+		}
+	}
+	return false;
+}
+
+DeployCheck::DeployCheck(std::string p_shots_dir, DeployCheckPhase p_phase) :
+		shots_dir_(std::move(p_shots_dir)), kind_(p_phase) {
+	tab_ = kind_ == DeployCheckPhase::Squad ? kDeployCheckSquadTab : kDeployCheckCustomizeTab;
+}
+
+uint32_t DeployCheck::tab_spawns() const {
+	return kind_ == DeployCheckPhase::Loadout ? kDeployCheckBaseSpawns : 1u;
+}
+
+uint32_t DeployCheck::expected_spawn_ends() const {
+	return kind_ == DeployCheckPhase::Scope ? 1u : tab_spawns() + 1u;
+}
+
 bool DeployCheck::up(const Bf3UiScreens &p_screens, std::string_view p_partition) {
 	const std::optional<UiScreenPhase> p = p_screens.phase(p_partition);
 	return p.has_value() && *p != UiScreenPhase::Exiting;
@@ -214,7 +237,7 @@ void DeployCheck::step(
 		case Phase::JoinDeploy:
 			if (p_st.alive && p_st.own_spawns > mark_.own_spawns) {
 				spawned("join.enter_deploys", "Enter on spawnscreenpc, spawned after " + seconds_text(in),
-						kDeployCheckNoKit, Phase::Suicide, p_now_s);
+						kDeployCheckNoKit, fires() ? Phase::Done : Phase::Suicide, p_now_s);
 			}
 			break;
 		case Phase::SpawnEnd:
@@ -234,6 +257,23 @@ void DeployCheck::step(
 						spawn_how_ + ": " + std::to_string(p_st.spawn_actions - mark_.spawn_actions) +
 								" flow Spawn action(s), spawned as " + kit_text(p_st.own_kit) + " with primary item " +
 								std::to_string(p_st.spawned_primary));
+				if (spawn_gadget_ != 0) {
+					std::string slots;
+					for (size_t i = 0; i < p_st.spawned_defs.size(); ++i) {
+						slots += (slots.empty() ? "" : ", ") + std::to_string(p_st.spawned_defs[i]) + " (item " +
+								std::to_string(p_st.spawned_items[i]) + ")";
+					}
+					row(spawn_row_ + ".gadget",
+							spawn_gadget_def_ != bf3::sim::weapons::kNoWeapon &&
+									std::find(p_st.spawned_defs.begin(), p_st.spawned_defs.end(), spawn_gadget_def_) !=
+											p_st.spawned_defs.end(),
+							"picked gadget item " + std::to_string(spawn_gadget_) + " (" +
+									(spawn_gadget_unlock_.empty() ? std::string("not in the kit's catalog")
+																  : spawn_gadget_unlock_) +
+									", def " + std::to_string(spawn_gadget_def_) + "), spawned with the defs " + slots +
+									" in the weapon slots");
+					spawn_gadget_ = 0;
+				}
 				if (spawn_primary_ != 0) {
 					row(spawn_row_ + ".fire_fx", p_st.spawned_primary_fire_fx,
 							"primary item " + std::to_string(p_st.spawned_primary) + " first-person fire effects " +
@@ -269,7 +309,7 @@ void DeployCheck::step(
 				shot(p_io, spawn_ends_ < 2 ? "kill_card" : "kill_card" + std::to_string(spawn_ends_), p_now_s);
 				sub_ = 1;
 			}
-			if (up(r_screens, kSpawnScreenPcPartition) && spawn_ends_ >= 3) {
+			if (up(r_screens, kSpawnScreenPcPartition) && spawn_ends_ >= tab_spawns()) {
 				probe_step_ = 0;
 				enter(Phase::TabProbe, p_now_s, p_st);
 			} else if (up(r_screens, kSpawnScreenPcPartition)) {
@@ -375,6 +415,10 @@ void DeployCheck::step(
 				if (p_st.time_to_respawn > 0.0f || in < kDeployCheckSettleSeconds) {
 					break;
 				}
+				if (kind_ == DeployCheckPhase::Gadget && p_st.spawn_kit != kDeployCheckClickKit) {
+					p_io.kit_key(kDeployCheckClickKit);
+					break;
+				}
 				tab_opened_.clear();
 				probe_step_ = 1;
 			} else if (probe_step_ == 1) {
@@ -398,12 +442,15 @@ void DeployCheck::step(
 					probe_step_ = 4;
 				}
 			} else if (probe_step_ == 4 && p_st.alive && p_st.own_spawns > mark_.own_spawns) {
-				const Phase next = tab_ + 1 < kDeployCheckTabs.size() ? Phase::Suicide : Phase::Done;
+				const uint8_t kit = kind_ == DeployCheckPhase::Squad ? kDeployCheckNoKit : kDeployCheckClickKit;
 				spawned(std::string("tabs.") + std::string(tab.name) + ".deploys",
-						"btnDeploy click after the " + std::string(tab.name) + " tab", kDeployCheckClickKit, next,
-						p_now_s);
+						"btnDeploy click after the " + std::string(tab.name) + " tab", kit, Phase::Done, p_now_s);
 				spawn_primary_ = picked_;
-				++tab_;
+				if (kind_ == DeployCheckPhase::Gadget) {
+					spawn_gadget_ = p_st.lists[kDeployCheckGadget2List].chosen;
+					spawn_gadget_def_ = p_st.chosen_gadget2_def;
+					spawn_gadget_unlock_ = p_st.chosen_gadget2_unlock;
+				}
 			}
 			break;
 		}
@@ -487,12 +534,12 @@ void DeployCheck::step(
 			fire(r_screens, p_now_s, p_io, p_st);
 			break;
 		case Phase::Done:
-			if (fire_class_ == 0 && fire_step_ == 0 && failures_ == 0) {
+			if (fires() && fire_class_ == 0 && fire_step_ == 0 && failures_ == 0) {
 				enter(Phase::Fire, p_now_s, p_st);
 				break;
 			}
-			passed_ = failures_ == 0 && spawn_ends_ == 3 + kDeployCheckTabs.size() &&
-					fire_class_ == kDeployFireClassNames.size();
+			passed_ = failures_ == 0 && spawn_ends_ == expected_spawn_ends() &&
+					fire_class_ == (fires() ? kDeployFireClassNames.size() : 0u);
 			done_ = true;
 			break;
 	}
@@ -540,19 +587,26 @@ void DeployCheck::customize(
 				row("tabs.customize.loadout", shown(r_screens, sub),
 						"LOADOUT of " + kit_text(p_st.spawn_kit) + ": customizesoldiersubscreen " +
 								(shown(r_screens, sub) ? "shown" : "not shown"));
-				cust_expected_ = next_primary(p_st);
-				++probe_step_;
+				if (kind_ == DeployCheckPhase::Gadget) {
+					probe_s_ = p_now_s;
+					probe_step_ = kCustomizeFirstStep + 3;
+				} else {
+					cust_expected_ = next_primary(p_st);
+					++probe_step_;
+				}
 			}
 			break;
 		case 2:
 			clicked(sub, "instance1.KitSelector_01" + std::string(kDeployCheckSelectorRight));
 			break;
 		case 3:
-			if (waited) {
-				picked("tabs.customize.primary", p_st.chosen_primary, cust_mark_.chosen_primary);
-				picked_ = p_st.chosen_primary;
+			if (waited && kind_ == DeployCheckPhase::Gadget) {
 				cust_expected_ = next_item(p_st.lists[kDeployCheckGadget2List]);
 				++probe_step_;
+			} else if (waited) {
+				picked("tabs.customize.primary", p_st.chosen_primary, cust_mark_.chosen_primary);
+				picked_ = p_st.chosen_primary;
+				probe_step_ = kCustomizeFirstStep + 6;
 			}
 			break;
 		case 4:
@@ -563,7 +617,9 @@ void DeployCheck::customize(
 				shot(p_io, "customize_picked", p_now_s);
 				picked("tabs.customize.gadget", p_st.lists[kDeployCheckGadget2List].chosen,
 						cust_mark_.lists[kDeployCheckGadget2List].chosen);
-				++probe_step_;
+				tap(p_io, godot::KEY_ESCAPE);
+				probe_s_ = p_now_s;
+				probe_step_ = kCustomizeFirstStep + 11;
 			}
 			break;
 		case 6:
@@ -644,7 +700,9 @@ std::string DeployCheck::report() const {
 	for (const std::string &l : lines_) {
 		out += l + "\n";
 	}
-	out += "[deploy] " + std::to_string(rows_) + " rows, " + std::to_string(failures_) + " failed\n";
+	out += "[deploy] phase " + std::string(kDeployCheckPhaseNames[size_t(kind_)]) + ": " + std::to_string(rows_) +
+			" rows, " + std::to_string(failures_) + " failed, " + std::to_string(spawn_ends_) + " of " +
+			std::to_string(expected_spawn_ends()) + " deploys\n";
 	out += std::string("DEPLOY: ") + (exit_code() == 0 ? "PASS" : "FAIL");
 	return out;
 }

@@ -884,8 +884,16 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 	}
 	if (m.deploy_check && screens != nullptr && m.native_following && !m.finished) {
 		if (m.deploy_run == nullptr) {
+			DeployCheckPhase phase = DeployCheckPhase::Loadout;
+			if (!parse_deploy_check_phase(user_arg_value("deploy-phase"), phase)) {
+				UtilityFunctions::print(to_godot("[deploy] bad --deploy-phase=" + user_arg_value("deploy-phase") +
+						": loadout, gadget, squad or scope"));
+				m.finished = true;
+				finish(2);
+				return true;
+			}
 			m.deploy_run = std::unique_ptr<DeployCheck, void (*)(DeployCheck *)>(
-					new DeployCheck(user_arg_value("deploy-shots")), &delete_part<DeployCheck>);
+					new DeployCheck(user_arg_value("deploy-shots"), phase), &delete_part<DeployCheck>);
 		}
 		DeployCheckIo io;
 		io.press = [this](Key p_key, bool p_pressed) { scripted_ui_key(p_key, p_pressed); };
@@ -977,6 +985,25 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 				s.spawned_primary_fire_fx =
 						fire != nullptr && def < fire->defs.size() && !fire->defs[def].first_person.empty();
 				s.spawned_primary_audio = r_game.audio != nullptr && r_game.audio->weapon_bound(def);
+			}
+			for (size_t slot = 0; f.own_weapons_valid && slot < s.spawned_items.size(); ++slot) {
+				s.spawned_defs[slot] = f.own_weapons_curr.slots[slot].def;
+				if (const host::HudStaticRow *row = r_game.hud_static.row(f.own_weapons_curr.slots[slot].def)) {
+					s.spawned_items[slot] = row->item_id;
+				}
+			}
+			const std::shared_ptr<const host::SharedLevel> kit_level = shared_level();
+			if (const host::LoadoutKit *kit = kit_level != nullptr && kit_level->gunplay != nullptr
+							? kit_level->gunplay->loadouts.kit(m.own_team, m.spawn_kit)
+							: nullptr) {
+				for (const std::vector<host::LoadoutItem> &items : kit->slots) {
+					for (const host::LoadoutItem &item : items) {
+						if (item.identifier == c.kit_gadget2.item_id) {
+							s.chosen_gadget2_def = item.def;
+							s.chosen_gadget2_unlock = item.unlock;
+						}
+					}
+				}
 			}
 			if (const Bf3UiPostProcess *post = Bf3UiPostProcess::current()) {
 				s.glitch_triggers = post->stats().glitch_triggers;
