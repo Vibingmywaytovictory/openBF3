@@ -59,6 +59,11 @@ void PredictionRing::clear() {
 }
 
 CatchUpStats catch_up(const SoldierMotor &p_motor, const SoldierState &p_base, PredictionRing &r_ring, Tick p_until) {
+	return catch_up(p_motor, motor_modifiers(p_motor.params()), p_base, r_ring, p_until);
+}
+
+CatchUpStats catch_up(const SoldierMotor &p_motor, const MotorModifiers &p_modifiers, const SoldierState &p_base,
+		PredictionRing &r_ring, Tick p_until) {
 	CatchUpStats stats;
 	SoldierState state = p_base;
 
@@ -91,7 +96,7 @@ CatchUpStats catch_up(const SoldierMotor &p_motor, const SoldierState &p_base, P
 		const bool sent = e != nullptr && e->sent && e->command.tick == t;
 		const Command cmd = sent ? e->command : repeated_command(prev, t);
 		const SoldierState weapon_before = state;
-		p_motor.step(state, cmd);
+		p_motor.step(state, cmd, p_modifiers);
 		weapon_replay.step(cmd, weapon_before, state);
 		if (survives(t)) {
 			r_ring.put({ cmd, state, sent });

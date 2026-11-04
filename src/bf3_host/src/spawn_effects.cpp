@@ -51,4 +51,20 @@ void apply_spawn_effects(
 	}
 }
 
+sim::MotorModifiers spawn_motor_modifiers(
+		const sim::MotorParams &p_params, const gp::SpecializationTable &p_table, uint32_t p_mask) {
+	sim::MotorModifiers out = sim::motor_modifiers(p_params);
+	for (size_t i = 0; i < p_table.entries.size() && i < gp::kMaxSpecializationEntries; ++i) {
+		if ((p_mask >> i & 1u) == 0) {
+			continue;
+		}
+		for (const auto &[target, value] : p_table.entries[i].effects) {
+			if (target == gp::SpecializationTarget::Sprint && value > 0.0f) {
+				out.body_sprint_multiplier = value;
+			}
+		}
+	}
+	return out;
+}
+
 }

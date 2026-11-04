@@ -8,6 +8,7 @@
 #include "bf3/net/protocol.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/command.h"
+#include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/soldier_state.h"
 #include "server_slots.h"
 #include "server_soldiers.h"
@@ -36,6 +37,7 @@ public:
 	void note_command(size_t p_slot, const sim::Command &p_command);
 	void step_soldier(size_t p_slot, const sim::Command &p_command, const sim::SoldierState &p_before, const sim::SoldierState &p_after);
 	sim::Command clamp_pitch(size_t p_slot, const sim::Command &p_command, sim::Pose p_pose) const;
+	sim::MotorModifiers motor_modifiers(size_t p_slot, const sim::MotorParams &p_params) const;
 
 	void resolve(sim::Tick p_tick, const SlotTable &p_slots, const Soldiers &p_soldiers, CombatEventSink &r_sink);
 	std::span<sim::SoldierState> tick_states() { return tick_states_; }

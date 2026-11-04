@@ -56,7 +56,8 @@ void OwnPrediction::match_started(uint64_t p_now) {
 }
 
 void OwnPrediction::catch_up(const sim::SoldierState &p_base) {
-	const sim::CatchUpStats c = sim::catch_up(motor_, p_base, *ring_, clock_.next_tick());
+	const sim::CatchUpStats c = sim::catch_up(
+			motor_, gunplay_.motor_modifiers(p_base.life, motor_.params()), p_base, *ring_, clock_.next_tick());
 	replayed_ticks_ += c.steps;
 }
 
@@ -191,7 +192,7 @@ bool OwnPrediction::step(const sim::PredictionEntry *p_base, const sim::Command 
 		return false;
 	}
 	sim::SoldierState state = p_base->state;
-	motor_.step(state, p_command);
+	motor_.step(state, p_command, gunplay_.motor_modifiers(state.life, motor_.params()));
 	gunplay_.predict(p_command, p_base->state, state, *world_);
 	events_acc_ |= state.events;
 	ring_->put({ p_command, state, true });

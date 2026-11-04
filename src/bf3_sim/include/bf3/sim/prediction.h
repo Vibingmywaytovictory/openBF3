@@ -52,6 +52,8 @@ struct CatchUpStats {
 };
 
 CatchUpStats catch_up(const SoldierMotor &p_motor, const SoldierState &p_base, PredictionRing &r_ring, Tick p_until);
+CatchUpStats catch_up(const SoldierMotor &p_motor, const MotorModifiers &p_modifiers, const SoldierState &p_base,
+		PredictionRing &r_ring, Tick p_until);
 
 }
 

@@ -243,7 +243,18 @@ core::Status SoldierMotor::init(const CollisionWorld &p_world, const MotorParams
 	return core::Status::success();
 }
 
+MotorModifiers motor_modifiers(const MotorParams &p_params) {
+	MotorModifiers out;
+	out.body_sprint_multiplier = p_params.body_sprint_multiplier;
+	return out;
+}
+
 void SoldierMotor::step(SoldierState &r_state, const Command &p_command, MotorStepInfo *r_info) const {
+	step(r_state, p_command, motor_modifiers(impl_->params), r_info);
+}
+
+void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const MotorModifiers &p_modifiers,
+		MotorStepInfo *r_info) const {
 	const Impl &m = *impl_;
 	const MotorParams &p = m.params;
 	const MotorTuning &tun = p.tuning;
@@ -370,7 +381,7 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, MotorSt
 		const float throttle = eval(p.poses[size_t(s.pose)].throttle, mag);
 		float value = directional_speed(*speed, f, rgt) * throttle;
 		if (sprinting) {
-			value *= speed->sprint_multiplier * p.body_sprint_multiplier;
+			value *= speed->sprint_multiplier * p_modifiers.body_sprint_multiplier;
 		}
 
 		const float sy = JPH::Sin(yaw);

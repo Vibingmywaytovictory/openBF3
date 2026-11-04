@@ -49,6 +49,14 @@ sim::Command Combat::clamp_pitch(size_t p_slot, const sim::Command &p_command, s
 	return gunplay_ != nullptr ? gunplay_->clamp_pitch(uint8_t(p_slot), p_command, p_pose) : p_command;
 }
 
+sim::MotorModifiers Combat::motor_modifiers(size_t p_slot, const sim::MotorParams &p_params) const {
+	if (gunplay_ == nullptr) {
+		return sim::motor_modifiers(p_params);
+	}
+	return spawn_motor_modifiers(
+			p_params, gunplay_->level().specializations, gunplay_->spawn_specializations(uint8_t(p_slot)));
+}
+
 void Combat::resolve(sim::Tick p_tick, const SlotTable &p_slots, const Soldiers &p_soldiers, CombatEventSink &r_sink) {
 	tick_states_.assign(p_slots.size(), sim::SoldierState());
 	for (size_t i = 0; i < p_slots.size(); ++i) {

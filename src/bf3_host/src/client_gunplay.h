@@ -52,6 +52,7 @@ public:
 	void weapons_ring_miss(const sim::SoldierState &p_s);
 	void weapons_reconcile(const sim::SoldierState &p_s);
 	bool reconcile_after_match(const sim::SoldierState &p_s);
+	sim::MotorModifiers motor_modifiers(uint32_t p_life, const sim::MotorParams &p_params) const;
 
 	void command_made(sim::Command &r_command, const InputSample &p_input, uint32_t p_own_life, uint64_t p_now, bool p_have_snapshot, uint16_t p_newest_seq,
 			const PresentationFrame &p_built);

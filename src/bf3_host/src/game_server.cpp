@@ -284,7 +284,7 @@ struct GameServer::Impl {
 			if (was_alive && !s.dummy && match.take_suicide(i)) {
 				soldiers.kill(i);
 			}
-			soldiers.step(i, motor);
+			soldiers.step(i, motor, combat.motor_modifiers(i, motor.params()));
 			++times.motor_steps;
 			if (was_alive && !s.dummy) {
 				combat.step_soldier(i, body.last, before, body.state);

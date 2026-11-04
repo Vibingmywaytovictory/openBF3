@@ -425,6 +425,14 @@ core::gameplay::SpecializationEffects ClientGunplay::spawn_effects(const Life &p
 	return core::gameplay::specialization_effects_of(*inputs_->specializations, p_life.specializations);
 }
 
+sim::MotorModifiers ClientGunplay::motor_modifiers(uint32_t p_life, const sim::MotorParams &p_params) const {
+	const Life &l = lives_[p_life % lives_.size()];
+	if (inputs_ == nullptr || inputs_->specializations == nullptr || !l.valid || l.life != p_life) {
+		return sim::motor_modifiers(p_params);
+	}
+	return spawn_motor_modifiers(p_params, *inputs_->specializations, l.specializations);
+}
+
 void ClientGunplay::weapons_spawn(const sim::SoldierState &p_s) {
 	if (!on_) {
 		return;

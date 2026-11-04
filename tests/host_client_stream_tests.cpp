@@ -1042,6 +1042,66 @@ TEST_SUITE("host-client-stream") {
 		CHECK(s.weapon_reconciliations == 0);
 	}
 
+	TEST_CASE("specializations: Sprint raises the sprint speed by the body's SprintMultiplier, predicted with no "
+			  "reconciliation") {
+		tt::TdmLevel *level = tt::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const uint32_t sprint = tt::specialization_id(*level->shared->gunplay, "sprintboostl1");
+		REQUIRE(sprint != 0);
+		host::GameServer server;
+		const core::Status st = server.init(solo_tdm_config(*level, 92));
+		REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
+		const uint8_t assault = uint8_t(host::KitRole::Assault);
+		Stream stream(server, level->shared);
+		StreamClient &a = stream.add("sprint", 1u, 0u, assault, host::ClientSessionConfig{});
+		a.scripted = false;
+		float fastest = 0.0f;
+		uint64_t reconciled_alive = 0;
+		stream.play(600, [&](sim::Tick p_tick) {
+			const host::PresentationFrame &f = *a.frame;
+			const bool alive = f.valid && (f.own_curr.flags & sim::soldier_flags::kAlive) != 0;
+			if (p_tick == 20u) {
+				net::LoadoutRequest q;
+				q.kit = assault;
+				q.specialization = sprint;
+				a.loop.send_loadout_request(q);
+			}
+			if (!alive && p_tick >= 40u && p_tick % 30u == 0u) {
+				a.loop.send_spawn_request(assault);
+			}
+			a.input.move_forward = alive ? 1.0f : 0.0f;
+			a.input.held_buttons = alive ? sim::buttons::kSprint : 0u;
+			a.input.yaw = a.base_yaw;
+			a.input.pitch = 0.0f;
+			const host::ClientStats s = a.loop.stats();
+			if (!alive) {
+				reconciled_alive = s.reconciliations;
+				return;
+			}
+			const sim::SoldierState *own = server.soldier(s.slot);
+			if (own != nullptr && (own->flags & sim::soldier_flags::kSprinting) != 0) {
+				fastest = std::max(fastest, std::hypot(own->velocity[0], own->velocity[2]));
+			}
+		});
+		const host::ClientStats s = a.loop.stats();
+		const host::Gunplay *g = server.gunplay();
+		REQUIRE(g != nullptr);
+		const sim::MotorParams &motor = level->shared->motor;
+		const float plain = motor.poses[size_t(sim::Pose::Stand)].on_ground.velocity *
+				motor.poses[size_t(sim::Pose::Stand)].on_ground.sprint_multiplier * motor.body_sprint_multiplier;
+		const float boosted = plain / motor.body_sprint_multiplier * 1.1f;
+		std::printf("specializations: Sprint client spawned %llu time(s), fastest sprint %.3f m/s (plain %.3f, boosted "
+					"%.3f), reconciliations %llu (%llu after the spawn)\n",
+				(unsigned long long)s.spawns, double(fastest), double(plain), double(boosted),
+				(unsigned long long)s.reconciliations, (unsigned long long)(s.reconciliations - reconciled_alive));
+		REQUIRE(s.spawns >= 1);
+		CHECK(fastest > plain + 0.5f * (boosted - plain));
+		CHECK(fastest <= boosted + 1e-3f);
+		CHECK(s.reconciliations == reconciled_alive);
+	}
+
 	TEST_CASE("host-client-stream: install unchanged") {
 		tt::TdmLevel *level = tt::load_tdm_level_once();
 		if (level != nullptr) {

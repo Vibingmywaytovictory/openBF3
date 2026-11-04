@@ -129,6 +129,15 @@ float walk_speed(const MotorParams &p_params, const SoldierState &p_state);
 
 uint64_t motor_params_hash(const MotorParams &p_params);
 
+struct MotorModifiers {
+	float body_sprint_multiplier = 1.0f;
+
+	bool operator==(const MotorModifiers &) const = default;
+};
+static_assert(std::is_trivially_copyable_v<MotorModifiers>);
+
+MotorModifiers motor_modifiers(const MotorParams &p_params);
+
 struct MotorStepInfo {
 	float target_speed = 0;
 	float horizontal_speed = 0;
@@ -148,6 +157,8 @@ public:
 	const MotorParams &params() const;
 
 	void step(SoldierState &r_state, const Command &p_command, MotorStepInfo *r_info = nullptr) const;
+	void step(SoldierState &r_state, const Command &p_command, const MotorModifiers &p_modifiers,
+			MotorStepInfo *r_info = nullptr) const;
 
 	SoldierState spawn_state(const Vec3 &p_feet, uint16_t p_yaw, uint32_t p_life, Tick p_tick, bool p_protect = true) const;
 
