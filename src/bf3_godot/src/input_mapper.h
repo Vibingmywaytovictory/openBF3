@@ -170,6 +170,7 @@ private:
 	void weapon_sample(bf3::host::InputSample &r_sample) const;
 	bool slot_selectable(uint8_t p_slot) const;
 	void select_weapon(uint8_t p_slot);
+	uint8_t next_gadget_slot() const;
 	void cycle_weapon(int p_direction);
 	struct WeaponKeys {
 		bool enabled = false;

@@ -359,7 +359,8 @@ constexpr WeaponActionKey kWeaponActions[] = {
 };
 static_assert(sizeof(kWeaponActions) / sizeof(kWeaponActions[0]) == InputMapper::kWeaponActionCount);
 
-constexpr uint8_t kWheelSlots[] = { 0, 1, 2, 6, 7 };
+constexpr uint8_t kWheelSlots[] = { 0, 1, 2, 4, 5, 6, 7 };
+constexpr uint8_t kGadgetCycle[] = { 4, 5, 2 };
 
 }
 
@@ -469,6 +470,28 @@ void InputMapper::select_weapon(uint8_t p_slot) {
 	if (slot_selectable(p_slot)) {
 		weapon_.wanted = p_slot;
 	}
+}
+
+uint8_t InputMapper::next_gadget_slot() const {
+	constexpr size_t n = sizeof(kGadgetCycle);
+	if (weapon_.filled == 0) {
+		return 2;
+	}
+	const uint8_t from =
+			weapon_.wanted != 0xFF ? weapon_.wanted : (weapon_.pending != 0xFF ? weapon_.pending : weapon_.active);
+	size_t at = n - 1;
+	for (size_t i = 0; i < n; ++i) {
+		if (kGadgetCycle[i] == from) {
+			at = i;
+		}
+	}
+	for (size_t step = 1; step <= n; ++step) {
+		const uint8_t s = kGadgetCycle[(at + step) % n];
+		if ((weapon_.filled & (1u << s)) != 0) {
+			return s;
+		}
+	}
+	return 2;
 }
 
 void InputMapper::cycle_weapon(int p_direction) {
@@ -770,7 +793,7 @@ void InputMapper::script_press(TdmAction p_action) {
 	switch (p_action) {
 		case TdmAction::Gadget:
 			if (!tdm_.spawn_screen) {
-				select_weapon(2);
+				select_weapon(next_gadget_slot());
 			} else {
 				tdm_.kit = 2;
 			}
