@@ -299,6 +299,10 @@ if(OPENBF3_BUILD_CHECKS)
         src/settings_check.h
     )
     target_sources(bf3_godot PRIVATE
+        src/late_join_check.cpp
+        src/late_join_check.h
+    )
+    target_sources(bf3_godot PRIVATE
         src/look_rate_check.cpp
         src/look_rate_check.h
     )

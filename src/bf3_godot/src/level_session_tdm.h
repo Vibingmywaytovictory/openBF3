@@ -45,6 +45,7 @@ class LoadingScreenCheck;
 class OverlayCheck;
 class AudioIngameCheck;
 class UiSizesCheck;
+class LateJoinCheck;
 
 struct TdmState {
 
@@ -158,6 +159,7 @@ struct TdmState {
 	bool squad_names_loaded = false;
 	std::vector<net::SquadRequest> squad_requests;
 	uint64_t squad_requests_sent = 0;
+	std::unique_ptr<LateJoinCheck, void (*)(LateJoinCheck *)> late_join{ nullptr, nullptr };
 	bool auto_deploy = false;
 };
 

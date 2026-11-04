@@ -1257,9 +1257,11 @@ target_include_directories(test_godot_net_window PRIVATE ${PROJECT_SOURCE_DIR}/s
 target_compile_definitions(test_godot_net_window PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
 openbf3_proc_row(godot.kick_popup test_godot_net_window LABEL window TIMEOUT 300 ARGS --test-suite=godot-kick-popup)
 openbf3_proc_row(godot.net.fx_same test_godot_net_window LABEL window TIMEOUT 300 ARGS --test-suite=godot-net-fx-same)
-set_tests_properties(godot.kick_popup godot.net.fx_same PROPERTIES RUN_SERIAL TRUE)
+openbf3_proc_row(godot.net.late_join test_godot_net_window LABEL window TIMEOUT 400 ARGS --test-suite=godot-net-late-join)
+set_tests_properties(godot.kick_popup godot.net.fx_same godot.net.late_join PROPERTIES RUN_SERIAL TRUE)
 openbf3_cost(godot.kick_popup 1 9)
 openbf3_cost(godot.net.fx_same 1 32)
+openbf3_cost(godot.net.late_join 1 42)
 
 openbf3_check_rows()
 find_package(Python3 COMPONENTS Interpreter REQUIRED)

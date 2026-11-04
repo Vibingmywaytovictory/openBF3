@@ -29,6 +29,10 @@ constexpr uint32_t kFxBots = 23;
 constexpr uint32_t kFxPlaySeconds = 20;
 constexpr size_t kFxMinSharedMuzzles = 20;
 constexpr size_t kFxMinSharedImpacts = 20;
+constexpr uint32_t kJoinBots = 15;
+constexpr uint32_t kJoinShooters = 12;
+constexpr uint32_t kJoinShooterSeconds = 200;
+constexpr uint64_t kJoinAfterKills = 2;
 
 ChildSpec windowed_client(
 		ProcDriver &r_driver, uint16_t p_port, std::vector<std::string> p_extra, std::string_view p_role) {
@@ -143,6 +147,12 @@ Shared compare(const Trace &p_a, const Trace &p_b, size_t p_prefix_cells) {
 		}
 	}
 	return s;
+}
+
+uint64_t round_kills(std::string_view p_line) {
+	const uint64_t us = summary_number(p_line, " US ");
+	const uint64_t ru = summary_number(p_line, " - RU ");
+	return us == UINT64_MAX || ru == UINT64_MAX ? 0 : us + ru;
 }
 
 std::string line_with(const std::string &p_text, std::string_view p_needle) {
@@ -287,5 +297,74 @@ TEST_SUITE("godot-net-fx-same") {
 		CHECK(fx.by_prefix["RemoteShot,Tracer,"] >= 1);
 		CHECK(fx.by_prefix["Impact,ImpactEffect,"] >= kFxMinSharedImpacts);
 		CHECK(sounds.keys >= 1);
+	}
+}
+
+TEST_SUITE("godot-net-late-join") {
+	TEST_CASE("godot.net.late_join: a windowed client joining a running round at 100 ms RTT has the fire loops at "
+			  "once and starts no effect or sound timed before its first snapshot; one joining in RoundOver gets the "
+			  "end-of-round screen") {
+		ProcDriver driver(driver_config_from_env());
+		if (windows_skipped(driver)) {
+			return;
+		}
+		const std::string level = "--level=" + std::string(kLevel);
+		const std::string mode = "--mode=" + std::string(kMode);
+		const std::optional<Server> over =
+				start_server(driver, kJoinBots, 600, { level, mode, "--kill-limit=1", "--intermission-s=120" }, "over");
+		if (!over) {
+			return;
+		}
+		const std::optional<Server> round =
+				start_server(driver, kJoinBots, 600, { level, mode, "--kill-limit=500", "--ghost-scope=off" }, "round");
+		if (!round) {
+			return;
+		}
+		const std::optional<size_t> shooters = start_tool(driver, "shooters",
+				{ "loadbots", "127.0.0.1:" + std::to_string(round->port), std::string(kLevel), std::string(kMode),
+						"--count=" + std::to_string(kJoinShooters), "--script=walkfire",
+						"--seconds=" + std::to_string(kJoinShooterSeconds), "--name=lj", "--seed=1" });
+		REQUIRE(shooters.has_value());
+		const std::string all_spawned = " spawned " + std::to_string(kJoinShooters) + " ";
+		CHECK_MESSAGE(driver.wait_line(
+							  *shooters, [&](std::string_view l) { return contains(l, all_spawned); }, 120s),
+				driver.output(*shooters));
+		std::string fighting;
+		CHECK_MESSAGE(driver.wait_line(
+							  round->id,
+							  [](std::string_view l) {
+								  return contains(l, ": in round US ") && round_kills(l) >= kJoinAfterKills;
+							  },
+							  120s, &fighting),
+				driver.output(round->id));
+		const std::optional<size_t> joiner = start_child(driver,
+				windowed_client(driver, round->port,
+						{ std::string(kNetsim100ms), "--late-join-check=in-round", "--auto-deploy" }, "joiner"));
+		REQUIRE(joiner.has_value());
+		std::string over_line;
+		CHECK_MESSAGE(
+				driver.wait_line(
+						over->id, [](std::string_view l) { return contains(l, ": round over US "); }, 120s, &over_line),
+				driver.output(over->id));
+		const std::optional<size_t> late = start_child(driver,
+				windowed_client(driver, over->port, { std::string(kNetsim100ms), "--late-join-check=round-over" },
+						"round_over"));
+		REQUIRE(late.has_value());
+		std::string in_round, in_over;
+		CHECK_MESSAGE(line_starts(driver, *joiner, "[late_join] LATE JOIN in-round: ", 300s, &in_round),
+				driver.output(*joiner));
+		CHECK_MESSAGE(
+				line_starts(driver, *late, "[late_join] LATE JOIN round-over: ", 300s, &in_over), driver.output(*late));
+		CHECK(contains(in_round, "LATE JOIN in-round: PASS"));
+		CHECK(contains(in_over, "LATE JOIN round-over: PASS"));
+		for (const size_t id : { *joiner, *late }) {
+			const ChildEnd end = driver.finish(id, 60s);
+			require_clean_exit(driver, id, end, "client");
+			CHECK(contains(driver.output(id), "[level] install unchanged: yes"));
+		}
+		driver.finish(*shooters, 1s);
+		driver.finish(round->id, 1s);
+		driver.finish(over->id, 1s);
+		MESSAGE(in_round << "\n" << in_over << "\nround over server: " << over_line);
 	}
 }

@@ -27,15 +27,19 @@
 #include "deploy_check.h"
 #include "eor_check.h"
 #include "fov_round_check.h"
+#include "late_join_check.h"
 #include "loading_screen_check.h"
 #include "native_screens_check.h"
 #include "overlay_check.h"
 #include "viewmodel.h"
 #endif
 
+#include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/text_db.h"
+#include "bf3/core/ui/ui_drawn_screens.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/format.h"
+#include "bf3/host/client_wiring.h"
 #include "bf3/host/duel.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/kits.h"
@@ -181,8 +185,8 @@ void build_tdm_ui(
 		r_m.ui_screens_id = screens->get_instance_id();
 		r_m.native_flow =
 				std::unique_ptr<NativeFlow, void (*)(NativeFlow *)>(new NativeFlow(), &delete_part<NativeFlow>);
-		r_m.native_flow->set_keep_log(
-				r_m.native_screens_check || r_m.loading_screen_check || r_m.eor_check_on || r_m.options_check_on);
+		r_m.native_flow->set_keep_log(r_m.native_screens_check || r_m.loading_screen_check || r_m.eor_check_on ||
+				r_m.options_check_on || r_m.late_join != nullptr);
 		r_m.native_menu =
 				std::unique_ptr<NativeMenu, void (*)(NativeMenu *)>(new NativeMenu(), &delete_part<NativeMenu>);
 		r_m.native_menu->build(*screens);
@@ -493,6 +497,17 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 		}
 #if OPENBF3_BUILD_CHECKS
 		m.auto_deploy = has_check_arg("auto-deploy");
+		if (has_check_arg("late-join-check")) {
+			if (const std::optional<LateJoinMode> mode = LateJoinCheck::parse_mode(user_arg_value("late-join-check"))) {
+				m.late_join = std::unique_ptr<LateJoinCheck, void (*)(LateJoinCheck *)>(
+						new LateJoinCheck(*mode), &delete_part<LateJoinCheck>);
+				if (quit_after_ <= 0.0) {
+					quit_after_ = 1.0e9;
+				}
+			} else if (error.empty()) {
+				error = "--late-join-check=" + user_arg_value("late-join-check") + ": not in-round or round-over";
+			}
+		}
 #endif
 		if (has_check_arg("squad-check")) {
 			m.squad_join = std::unique_ptr<host::SquadJoin, void (*)(host::SquadJoin *)>(
@@ -1207,6 +1222,64 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 	}
 	if (m.auto_deploy && m.spawn_screen && m.can_deploy && !r_game.alive) {
 		m.deploy_click = true;
+	}
+	if (m.late_join != nullptr && !m.finished) {
+		LateJoinFrame in;
+		in.now_s = now_s;
+		in.first_snapshot_tick = f.first_snapshot_tick;
+		in.match_valid = f.match_valid;
+		in.phase = f.match.phase;
+		in.own_slot = m.own_slot;
+		in.frame_valid = f.valid;
+		in.events = r_game.events;
+		std::array<host::PresentedOtherWeapon, net::kMaxSlots> others{};
+		const size_t n_others = host::present_other_weapons(f, host::present_render_ticks(f, p_now_ns), others);
+		in.others = std::span<const host::PresentedOtherWeapon>(others.data(), n_others);
+		if (r_game.fx != nullptr && r_game.fx->built() && !r_game.fx_off && r_game.fx->triggers() != nullptr) {
+			if (m.late_join->new_effect_frame(r_game.fx->stats().frames)) {
+				in.effect_starts = r_game.fx->triggers()->starts();
+			}
+			in.effects = r_game.fx->triggers()->stats();
+		}
+		if (r_game.audio != nullptr && r_game.audio->built()) {
+			r_game.audio->trace_weapon_starts(true);
+			std::vector<bf3::audio::WeaponSoundStart> &sounds = m.late_join->sound_buffer();
+			sounds.clear();
+			r_game.audio->take_weapon_starts(sounds);
+			in.sound_starts = sounds;
+			const GameAudioStats st = r_game.audio->stats();
+			in.router_stale_dropped = st.router.stale_dropped;
+			in.impact_stale_dropped = st.impacts.stale_dropped;
+			in.weapon_voices = st.router.weapon_voices;
+		}
+		const auto visible = [screens](std::string_view p_partition) {
+			const std::optional<UiScreenRecord> r =
+					screens != nullptr ? screens->screen_record(p_partition) : std::optional<UiScreenRecord>();
+			return r && r->visible;
+		};
+		in.eor_visible = visible(bf3::core::ui::kEorWinningTeamScreenPartition) ||
+				visible(bf3::core::ui::kEorHud64Partition) || visible(bf3::core::ui::kEorScoreboardPartition) ||
+				visible(bf3::core::ui::kEorTabsPartition) || visible(bf3::core::ui::kScoreboardHud32ScreenPartition);
+		host::UiFlowSession *late_flow = m.native_flow != nullptr ? m.native_flow->session() : nullptr;
+		if (late_flow != nullptr) {
+			in.flow_log = late_flow->log();
+		}
+		if (screens != nullptr) {
+			in.screens_log = screens->log();
+		}
+		const bool late_done = m.late_join->frame(in);
+		if (late_flow != nullptr) {
+			late_flow->clear_log();
+		}
+		if (screens != nullptr) {
+			screens->clear_log();
+		}
+		if (late_done) {
+			m.finished = true;
+			UtilityFunctions::print(to_godot(m.late_join->report()));
+			finish(m.late_join->exit_code());
+			return true;
+		}
 	}
 #endif
 	if (m.native_eor != nullptr && m.native_eor->quit_requested() && !m.finished) {
