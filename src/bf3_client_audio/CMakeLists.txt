@@ -18,3 +18,8 @@ target_sources(bf3_client_audio PRIVATE
     src/area_beds.cpp
     include/bf3/client_audio/area_beds.h
 )
+
+target_sources(bf3_client_audio PRIVATE
+    src/soldier_audio.cpp
+    include/bf3/client_audio/soldier_audio.h
+)

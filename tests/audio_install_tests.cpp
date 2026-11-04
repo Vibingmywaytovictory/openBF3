@@ -1,6 +1,7 @@
 #include "test_support.h"
 
 #include "bf3/audio/audio_load.h"
+#include "bf3/audio/footstep_driver.h"
 #include "bf3/audio/ir_reverb.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/patch_instance.h"
@@ -17,6 +18,9 @@
 #include "bf3/core/cache/cached_convert.h"
 #include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/ebx_db.h"
+#include "bf3/core/gameplay/material_grid.h"
+#include "bf3/core/gameplay/material_sound.h"
+#include "bf3/core/gameplay/soldier_sound.h"
 #include "bf3/core/gameplay/sound_area.h"
 #include "bf3/core/gameplay/weapon_blob.h"
 #include "bf3/core/gameplay/work_budget.h"
@@ -1616,5 +1620,313 @@ TEST_SUITE("audio-ir") {
 			CHECK(bank->max_partitions == 188);
 		}
 		check_unchanged_snapshot(f->before, f->reader);
+	}
+}
+
+namespace {
+
+namespace ssp = bf3::core::gameplay::soldier_sound_port;
+
+std::map<std::string, float> named_sound_ids(const EbxResolver &p_db, std::string_view p_level) {
+	const std::optional<std::string> grid = gp::MaterialGrid::grid_of_level(p_db, p_level);
+	REQUIRE(grid.has_value());
+	Result<gp::MaterialGrid> g = gp::MaterialGrid::load(p_db, *grid);
+	REQUIRE_MESSAGE(g.ok(), (g.ok() ? std::string() : g.error().message));
+	Result<gp::MaterialSounds> s = gp::read_material_sounds(p_db, *grid);
+	REQUIRE_MESSAGE(s.ok(), (s.ok() ? std::string() : s.error().message));
+	CHECK(s->by_material.size() == g->material_names().size());
+	std::map<std::string, float> out;
+	for (size_t i = 0; i < s->by_material.size() && i < 256; ++i) {
+		if (const std::optional<float> id = s->sound_id(uint8_t(i)); id && out.count(g->material_names()[i]) == 0) {
+			out.emplace(g->material_names()[i], *id);
+		}
+	}
+	MESSAGE(p_level, ": ", s->rows, " grid rows, ", s->rows_with_sound, " with a MaterialPropertySoundData, ",
+			out.size(), " named materials with a MaterialSoundId");
+	return out;
+}
+
+struct StepPatch {
+	std::shared_ptr<const SoundProgram> program;
+	std::shared_ptr<const WaveBank> bank;
+	size_t missing = 0;
+};
+
+StepPatch step_patch(const Install &p_install, const level::LoadedLevel &p_level, const std::string &p_patch) {
+	StepPatch out;
+	Result<std::shared_ptr<const SoundProgram>> prog = ba::compile_patch(p_level.db(), p_patch);
+	REQUIRE_MESSAGE(prog.ok(), (prog.ok() ? std::string() : prog.error().message));
+	out.program = *prog;
+	Result<std::vector<SoundWaveInfo>> waves = ba::read_program_waves(
+			p_level.db(), std::span<const std::shared_ptr<const SoundProgram>>(&out.program, 1), &out.missing);
+	REQUIRE(waves.ok());
+	Result<std::shared_ptr<const WaveBank>> bank =
+			WaveBank::load(p_install, p_level.mount(), *waves, WaveBankOptions{});
+	REQUIRE_MESSAGE(bank.ok(), (bank.ok() ? std::string() : bank.error().message));
+	out.bank = *bank;
+	return out;
+}
+
+std::set<std::string> stepped_waves(const StepPatch &p_patch, uint32_t p_speed_input, float p_material, float p_speed) {
+	Result<std::unique_ptr<ba::PatchInstance>> made =
+			ba::PatchInstance::create(p_patch.program, p_patch.bank, ba::AudioTuning{}, 7, ba::kMixRate);
+	REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+	ba::PatchInstance &inst = **made;
+	ba::SamplerTrace trace;
+	trace.entries.resize(4096);
+	inst.set_sampler_trace(&trace);
+	inst.set_parameter(uint32_t(ssp::kSoundMaterialId), p_material);
+	inst.set_parameter(uint32_t(ssp::kPose), 0.0f);
+	inst.set_parameter(uint32_t(ssp::kIsFirstPerson), 0.0f);
+	inst.set_parameter(p_speed_input, p_speed);
+	ba::EmitterState emitter;
+	emitter.position = ba::Vec3{ 0.0f, 0.0f, 2.0f };
+	inst.set_geometry(emitter, ba::ListenerState{});
+	Buses b;
+	inst.post_event(uint32_t(ssp::kFootPlantLeft), 0);
+	for (uint32_t block = 0; block < 96; ++block) {
+		b.block(inst, uint64_t(block) * ba::kBlockFrames);
+	}
+	std::set<std::string> names;
+	for (uint32_t i = 0; i < trace.count; ++i) {
+		const SamplerTraceEntry &e = trace.entries[i];
+		if (e.kind != SamplerTraceKind::Trigger && e.kind != SamplerTraceKind::Step) {
+			continue;
+		}
+		for (const SoundWaveRef &w : p_patch.program->waves) {
+			const std::optional<WaveId> id = p_patch.bank->find(w.partition);
+			if (id && *id == e.wave) {
+				names.insert(w.name);
+			}
+		}
+	}
+	return names;
+}
+
+std::set<std::string> material_waves(const std::set<std::string> &p_names) {
+	std::set<std::string> out;
+	for (const std::string &n : p_names) {
+		if (n.rfind("sound/character/footsteps/", 0) == 0 && n.find("/indoor/") == std::string::npos &&
+				n.find("/landing/") == std::string::npos && n.find("/scufflestep") == std::string::npos) {
+			out.insert(n);
+		}
+	}
+	return out;
+}
+
+void collect_fates(ba::MixerCore &r_mixer, std::vector<ba::MixerCutEvent> &r_cuts,
+		std::map<ba::InstanceHandle, ba::MixerCutKind> &r_fates) {
+	for (size_t n = r_mixer.poll_cuts(r_cuts); n > 0; n = r_mixer.poll_cuts(r_cuts)) {
+		for (size_t i = 0; i < n; ++i) {
+			const ba::MixerCutKind k = r_cuts[i].kind;
+			if (k == ba::MixerCutKind::Finish || k == ba::MixerCutKind::Refused || k == ba::MixerCutKind::Kill ||
+					k == ba::MixerCutKind::Cull || k == ba::MixerCutKind::Join) {
+				r_fates[r_cuts[i].handle] = k;
+			}
+		}
+	}
+}
+
+}
+
+TEST_SUITE("audio-footsteps") {
+	TEST_CASE("Metro and Caspian TDM: each physics material's MaterialSoundId through the grid's MaterialIndexMap and "
+			  "MaterialProperties") {
+		Fixture *f = need_install();
+		const std::map<std::string, float> metro = named_sound_ids(f->metro->db(), f->metro->root_name);
+		const std::map<std::string, float> want_metro{ { "Default", 0.0f }, { "Brick", 1.0f }, { "Metal", 5.0f },
+			{ "Concrete", 1.0f }, { "Glass", 1.0f }, { "Gravel", 4.0f }, { "Sand", 7.0f }, { "Wood", 9.0f },
+			{ "Cloth", 12.0f }, { "Grass", 2.0f }, { "Water", 8.0f }, { "Foliage", 2.0f }, { "Forest", 10.0f },
+			{ "Dirt", 0.0f } };
+		for (const auto &[name, id] : want_metro) {
+			CAPTURE(name);
+			REQUIRE(metro.count(name) == 1);
+			CHECK(metro.at(name) == id);
+		}
+		CHECK(metro.count("Bullet") == 0);
+		CHECK(metro.count("Head") == 0);
+		const std::map<std::string, float> caspian = named_sound_ids(*f->all_mp, "levels/mp_007/mp_007");
+		std::set<float> caspian_ids;
+		std::string line;
+		for (const auto &[name, id] : caspian) {
+			caspian_ids.insert(id);
+			line += " " + name + "=" + std::to_string(int(id));
+		}
+		MESSAGE("Caspian:", line);
+		REQUIRE(caspian.count("Water") == 1);
+		CHECK(caspian.at("Water") == 8.0f);
+		CHECK(caspian.at("Grass") == 2.0f);
+		CHECK(caspian.at("Concrete") == 1.0f);
+		CHECK(caspian_ids == std::set<float>{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12 });
+		check_unchanged(*f);
+	}
+
+	TEST_CASE("mpsoldier: SoldierSoundComponentData thresholds and periods, the footsteps' OnStart/OnStop compares and "
+			  "speed input, SoldierSoundData") {
+		Fixture *f = need_install();
+		Result<gp::SoldierSoundDef> d = gp::read_soldier_sounds(f->metro->db());
+		REQUIRE_MESSAGE(d.ok(), (d.ok() ? std::string() : d.error().message));
+		CHECK(d->footsteps == "sound/character/soldier_movement_footsteps");
+		CHECK(d->walk_velocity_threshold == 1.0f);
+		CHECK(d->run_velocity_threshold == 5.5f);
+		CHECK(d->walk_period == 0.3f);
+		CHECK(d->run_period == 0.2f);
+		CHECK(d->start_above == 0.012f);
+		CHECK(d->stop_at_or_below == 0.01f);
+		CHECK(d->speed_scale == 50.0f);
+		CHECK(d->speed_input == 258270452u);
+		CHECK(d->bullet_impact == "sound/bullet_craft/bullet_impacts/bullet_impact_1pplayer");
+		CHECK(d->movement == "sound/character/soldier_movement_sounds_mp");
+		CHECK(d->death == "sound/character/death_screams/us/death_screams_us");
+		const StepPatch steps = step_patch(*f->install, *f->metro, d->footsteps);
+		const ba::FootstepParams p = ba::footstep_params(*d, *steps.program);
+		MESSAGE("footsteps: ", steps.program->outputs.size(), " outputs, audible to ", p.radius_m, " m, ",
+				steps.missing, " waves not on Metro");
+		CHECK(p.radius_m == doctest::Approx(46.8f).epsilon(0.01));
+		for (const uint32_t h :
+				{ uint32_t(ssp::kSoundMaterialId), uint32_t(ssp::kPose), uint32_t(ssp::kIsFirstPerson), d->speed_input,
+						uint32_t(ssp::kFootPlantLeft), uint32_t(ssp::kFootPlantRight), uint32_t(ssp::kOnStart),
+						uint32_t(ssp::kOnStop), uint32_t(ssp::kOnJump), uint32_t(ssp::kOnLand) }) {
+			CAPTURE(h);
+			CHECK(steps.program->input_register(h).has_value());
+		}
+		Result<std::shared_ptr<const SoundProgram>> hit = ba::compile_patch(f->metro->db(), d->bullet_impact);
+		CHECK_MESSAGE(hit.ok(), (hit.ok() ? std::string() : hit.error().message));
+	}
+
+	TEST_CASE("the footsteps' WaveSwitchers: SoundMaterialId 8 steps on walk_water/run_water, 15 on glass, 1 on "
+			  "sprint_tarmac") {
+		Fixture *f = need_install();
+		Result<gp::SoldierSoundDef> d = gp::read_soldier_sounds(f->metro->db());
+		REQUIRE(d.ok());
+		const StepPatch steps = step_patch(*f->install, *f->metro, d->footsteps);
+		const auto heard = [&](float p_id) {
+			std::set<std::string> all;
+			for (const float speed : { 2.0f, 7.0f }) {
+				const std::set<std::string> w = material_waves(stepped_waves(steps, d->speed_input, p_id, speed));
+				all.insert(w.begin(), w.end());
+			}
+			std::string line;
+			for (const std::string &n : all) {
+				line += " " + n;
+			}
+			MESSAGE("SoundMaterialId ", p_id, ":", line);
+			return all;
+		};
+		const std::set<std::string> water = heard(8.0f);
+		CHECK(water.count("sound/character/footsteps/water/walk_water_wave") == 1);
+		CHECK(water.count("sound/character/footsteps/water/run_water_wave") == 1);
+		for (const std::string &n : water) {
+			CAPTURE(n);
+			CHECK(n.find("/water/") != std::string::npos);
+		}
+		const std::set<std::string> glass = heard(15.0f);
+		CHECK_FALSE(glass.empty());
+		for (const std::string &n : glass) {
+			CAPTURE(n);
+			CHECK(n.find("/glass/") != std::string::npos);
+		}
+		const std::set<std::string> tarmac = heard(1.0f);
+		CHECK(tarmac == std::set<std::string>{ "sound/character/footsteps/tarmac/sprint_tarmac_wave" });
+	}
+
+	TEST_CASE("FootstepDriver: the own soldier walks then sprints from concrete onto water, bots at 30 m and 60 m; "
+			  "every step finishes") {
+		Fixture *f = need_install();
+		Result<gp::SoldierSoundDef> d = gp::read_soldier_sounds(f->metro->db());
+		REQUIRE(d.ok());
+		const StepPatch steps = step_patch(*f->install, *f->metro, d->footsteps);
+		const ba::FootstepParams p = ba::footstep_params(*d, *steps.program);
+		ba::MixerConfig mc;
+		mc.max_instances = 256;
+		ba::MixerCore mixer(mc);
+		mixer.record_cuts(true);
+		ba::OneShotPool pool(64);
+		ba::FootstepDriver driver(mixer, steps.program, steps.bank, ba::AudioTuning{}, pool, p,
+				[](const ba::Vec3 &p_feet) { return std::optional<float>(p_feet.x < 0.0f ? 1.0f : 8.0f); });
+		std::vector<float> out(2 * 800);
+		std::vector<ba::MixerCutEvent> cuts(256);
+		std::array<ba::MixerFeedback, 128> fb;
+		std::map<ba::InstanceHandle, ba::MixerCutKind> fates;
+		std::array<size_t, 3> slot_steps{};
+		size_t far_posts = 0;
+		ba::Vec3 own{ -4.0f, 0.0f, 0.0f };
+		const ba::ListenerState listener{};
+		for (int frame = 0; frame < 300; ++frame) {
+			const float speed = frame < 10 ? 0.0f : frame < 180 ? 2.0f : frame < 240 ? 7.0f : 0.0f;
+			own.x += speed / 64.0f;
+			std::array<ba::FootstepSoldier, 3> soldiers{};
+			soldiers[0].slot = 0;
+			soldiers[0].position = own;
+			soldiers[0].velocity = ba::Vec3{ speed, 0.0f, 0.0f };
+			soldiers[0].first_person = true;
+			soldiers[1].slot = 1;
+			soldiers[1].position = ba::Vec3{ -1.0f, 0.0f, 30.0f };
+			soldiers[1].velocity = ba::Vec3{ 2.0f, 0.0f, 0.0f };
+			soldiers[2].slot = 2;
+			soldiers[2].position = ba::Vec3{ -1.0f, 0.0f, 60.0f };
+			soldiers[2].velocity = ba::Vec3{ 2.0f, 0.0f, 0.0f };
+			driver.step(soldiers, listener, 1.0 / 64.0, mixer.earliest_frame());
+			for (const ba::FootstepPost &x : driver.last_posts()) {
+				far_posts += x.slot == 2 ? 1u : 0u;
+				if (x.event == ba::FootstepEvent::Left || x.event == ba::FootstepEvent::Right) {
+					++slot_steps[std::min<size_t>(x.slot, 2)];
+				}
+			}
+			REQUIRE(mixer.mix(out.data(), 800) == 800);
+			for (size_t n = mixer.poll_feedback(fb); n > 0; n = mixer.poll_feedback(fb)) {
+				for (size_t i = 0; i < n; ++i) {
+					if (fb[i].finished) {
+						pool.on_finished(fb[i].handle);
+					}
+				}
+			}
+			pool.update(mixer);
+			collect_fates(mixer, cuts, fates);
+		}
+		for (int tail = 0; tail < 180; ++tail) {
+			REQUIRE(mixer.mix(out.data(), 800) == 800);
+			for (size_t n = mixer.poll_feedback(fb); n > 0; n = mixer.poll_feedback(fb)) {
+				for (size_t i = 0; i < n; ++i) {
+					if (fb[i].finished) {
+						pool.on_finished(fb[i].handle);
+					}
+				}
+			}
+			pool.update(mixer);
+			collect_fates(mixer, cuts, fates);
+		}
+		const ba::FootstepStats &st = driver.stats();
+		const uint64_t all_steps =
+				st.posts[size_t(ba::FootstepEvent::Left)] + st.posts[size_t(ba::FootstepEvent::Right)];
+		size_t finished = 0, other = 0;
+		for (const auto &[h, k] : fates) {
+			const bool ok = k == ba::MixerCutKind::Finish || k == ba::MixerCutKind::Join;
+			finished += ok ? 1u : 0u;
+			other += ok ? 0u : 1u;
+		}
+		MESSAGE("footsteps: ", all_steps, " steps, ", slot_steps[0], " own, ", slot_steps[1], " from the bot at 30 m (",
+				st.by_material[1], " posts on SoundMaterialId 1, ", st.by_material[8], " on 8), ",
+				st.posts[size_t(ba::FootstepEvent::Start)], " starts, ", st.posts[size_t(ba::FootstepEvent::Stop)],
+				" stops, ", st.joined, " joined, ", st.refused, " refused, farthest ", st.farthest_m,
+				" m; fates: ", finished, " finished or joined, ", other, " other; peak ",
+				mixer.stats().peak_instances.load(), " instances");
+		CHECK(all_steps == slot_steps[0] + slot_steps[1]);
+		CHECK(slot_steps[1] == 15);
+		CHECK(slot_steps[0] >= 8 + 4);
+		CHECK(st.by_material[1] > 0);
+		CHECK(st.by_material[8] > 0);
+		CHECK(st.posts[size_t(ba::FootstepEvent::Start)] == 1);
+		CHECK(st.posts[size_t(ba::FootstepEvent::Stop)] == 1);
+		CHECK(st.refused == 0);
+		CHECK(st.no_ground == 0);
+		CHECK(far_posts == 0);
+		CHECK(st.farthest_m <= p.radius_m);
+		CHECK(st.farthest_m >= 30.0f);
+		CHECK(other == 0);
+		CHECK(finished > 0);
+		CHECK(mixer.stats().active_instances.load() == 0);
+		CHECK(pool.live() == 0);
+		check_unchanged(*f);
 	}
 }

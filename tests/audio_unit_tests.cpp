@@ -2,6 +2,7 @@
 
 #include "bf3/audio/audio_analysis.h"
 #include "bf3/audio/dsp.h"
+#include "bf3/audio/footstep_driver.h"
 #include "bf3/audio/ir_reverb.h"
 #include "bf3/audio/master_mix.h"
 #include "bf3/audio/mixer_core.h"
@@ -2497,5 +2498,128 @@ TEST_SUITE("audio-mixer") {
 		CHECK(pool.contains(sounding));
 		CHECK_FALSE(pool.contains(refused));
 		CHECK(mixer.stats().active_instances.load() == 1);
+	}
+}
+
+namespace {
+
+ba::FootstepParams unit_footstep_params() {
+	ba::FootstepParams p;
+	p.walk_threshold = 1.0f;
+	p.run_threshold = 5.5f;
+	p.walk_period = 0.3f;
+	p.run_period = 0.2f;
+	p.start_above = 0.012f;
+	p.stop_at_or_below = 0.01f;
+	p.speed_scale = 50.0f;
+	p.speed_input = 1u;
+	p.radius_m = 46.8f;
+	return p;
+}
+
+ba::FootstepSoldier walker(
+		uint8_t p_slot, float p_x, float p_speed, bf3::sim::MoveMode p_mode = bf3::sim::MoveMode::OnGround) {
+	ba::FootstepSoldier s;
+	s.slot = p_slot;
+	s.position = ba::Vec3{ p_x, 0.0f, 0.0f };
+	s.velocity = ba::Vec3{ p_speed, 0.0f, 0.0f };
+	s.mode = p_mode;
+	return s;
+}
+
+size_t count_events(std::span<const ba::FootstepPost> p_posts, ba::FootstepEvent p_event, uint8_t p_slot = 0xFF) {
+	return size_t(std::count_if(p_posts.begin(), p_posts.end(),
+			[&](const ba::FootstepPost &p) { return p.event == p_event && (p_slot == 0xFF || p.slot == p_slot); }));
+}
+
+}
+
+TEST_SUITE("audio-footsteps") {
+	TEST_CASE("steps alternate left and right every WalkPeriod above the walk threshold, every RunPeriod above the run "
+			  "threshold") {
+		const ba::FootstepParams p = unit_footstep_params();
+		for (const float speed : { 0.9f, 2.0f, 5.5f, 7.0f }) {
+			CAPTURE(speed);
+			ba::FootstepScheduler s(p);
+			std::vector<ba::FootstepPost> posts;
+			const std::array<ba::FootstepSoldier, 1> one{ walker(3, 0.0f, speed) };
+			for (int f = 0; f <= 120; ++f) {
+				s.step(one, ba::Vec3{}, 1.0 / 64.0, posts);
+			}
+			const size_t left = count_events(posts, ba::FootstepEvent::Left),
+						 right = count_events(posts, ba::FootstepEvent::Right);
+			const size_t want = speed > p.run_threshold ? 9u : speed > p.walk_threshold ? 6u : 0u;
+			CHECK(left + right == want);
+			CHECK(left >= right);
+			CHECK(left - right <= 1u);
+			const std::vector<ba::FootstepPost> steps = [&] {
+				std::vector<ba::FootstepPost> out;
+				std::copy_if(posts.begin(), posts.end(), std::back_inserter(out), [](const ba::FootstepPost &x) {
+					return x.event == ba::FootstepEvent::Left || x.event == ba::FootstepEvent::Right;
+				});
+				return out;
+			}();
+			for (size_t i = 1; i < steps.size(); ++i) {
+				CHECK(steps[i].event != steps[i - 1].event);
+			}
+		}
+	}
+
+	TEST_CASE("OnStart above start_above x speed_scale, OnStop at stop_at_or_below x speed_scale; jump and land on "
+			  "motor edges") {
+		const ba::FootstepParams p = unit_footstep_params();
+		ba::FootstepScheduler s(p);
+		std::vector<ba::FootstepPost> posts;
+		const auto run = [&](float p_speed, bf3::sim::MoveMode p_mode) {
+			posts.clear();
+			const std::array<ba::FootstepSoldier, 1> one{ walker(1, 0.0f, p_speed, p_mode) };
+			s.step(one, ba::Vec3{}, 1.0 / 60.0, posts);
+		};
+		run(0.0f, bf3::sim::MoveMode::OnGround);
+		CHECK(posts.empty());
+		run(0.59f, bf3::sim::MoveMode::OnGround);
+		CHECK(count_events(posts, ba::FootstepEvent::Start) == 0);
+		run(0.61f, bf3::sim::MoveMode::OnGround);
+		CHECK(count_events(posts, ba::FootstepEvent::Start) == 1);
+		run(0.55f, bf3::sim::MoveMode::OnGround);
+		CHECK(posts.empty());
+		run(0.5f, bf3::sim::MoveMode::OnGround);
+		CHECK(count_events(posts, ba::FootstepEvent::Stop) == 1);
+		run(0.0f, bf3::sim::MoveMode::Jumping);
+		CHECK(count_events(posts, ba::FootstepEvent::Jump) == 1);
+		run(0.0f, bf3::sim::MoveMode::InAir);
+		CHECK(posts.empty());
+		run(0.0f, bf3::sim::MoveMode::OnGround);
+		CHECK(count_events(posts, ba::FootstepEvent::Land) == 1);
+		run(0.0f, bf3::sim::MoveMode::Falling);
+		CHECK(posts.empty());
+		run(0.0f, bf3::sim::MoveMode::OnGround);
+		CHECK(count_events(posts, ba::FootstepEvent::Land) == 1);
+		CHECK(count_events(posts, ba::FootstepEvent::Jump) == 0);
+	}
+
+	TEST_CASE("nothing beyond the audible radius, from the dead, in the air, or from non-finite soldiers; stale tracks "
+			  "are dropped") {
+		const ba::FootstepParams p = unit_footstep_params();
+		ba::FootstepScheduler s(p);
+		std::vector<ba::FootstepPost> posts;
+		const float nan = std::numeric_limits<float>::quiet_NaN();
+		const std::array<ba::FootstepSoldier, 5> many{ walker(1, 46.0f, 2.0f), walker(2, 47.0f, 2.0f),
+			walker(3, 5.0f, 2.0f, bf3::sim::MoveMode::Dead), walker(4, 5.0f, 2.0f, bf3::sim::MoveMode::InAir),
+			walker(5, nan, 2.0f) };
+		for (int f = 0; f <= 60; ++f) {
+			s.step(many, ba::Vec3{}, 1.0 / 60.0, posts);
+		}
+		CHECK(count_events(posts, ba::FootstepEvent::Left, 1) + count_events(posts, ba::FootstepEvent::Right, 1) == 3);
+		for (const ba::FootstepPost &x : posts) {
+			CHECK(x.slot == 1);
+			CHECK(x.distance_m <= p.radius_m);
+		}
+		CHECK(s.tracked() == 2);
+		const std::array<ba::FootstepSoldier, 0> none{};
+		for (int f = 0; f <= 31; ++f) {
+			s.step(none, ba::Vec3{}, 1.0 / 60.0, posts);
+		}
+		CHECK(s.tracked() == 0);
 	}
 }

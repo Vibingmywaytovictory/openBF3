@@ -68,3 +68,8 @@ target_sources(bf3_audio PRIVATE
     include/bf3/audio/flyby_audio.h
     src/flyby_audio.cpp
 )
+
+target_sources(bf3_audio PRIVATE
+    include/bf3/audio/footstep_driver.h
+    src/footstep_driver.cpp
+)

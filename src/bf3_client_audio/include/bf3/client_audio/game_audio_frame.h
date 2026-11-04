@@ -5,6 +5,7 @@
 #include "bf3/audio/impact_audio.h"
 #include "bf3/audio/weapon_audio.h"
 #include "bf3/client_audio/kit_audio.h"
+#include "bf3/client_audio/soldier_audio.h"
 #include "bf3/core/audio/wave_bank.h"
 #include "bf3/core/install.h"
 #include "bf3/host/client_session.h"
@@ -17,6 +18,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -73,6 +75,7 @@ struct GameAudioAssets {
 	std::shared_ptr<const WeaponAudioTable> table;
 	std::shared_ptr<const ImpactSoundCache> impacts;
 	std::vector<FlyBySound> flybys;
+	std::optional<SoldierAudioAssets> soldier;
 	std::map<std::string, GameAuditionAsset, std::less<>> auditions;
 	std::shared_ptr<const core::audio::WaveBank> bank;
 	std::vector<std::string> report;

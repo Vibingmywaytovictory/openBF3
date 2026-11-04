@@ -112,6 +112,11 @@ struct Bf3GameAudio::Impl {
 	std::unique_ptr<ba::ImpactAudio> impacts;
 	std::vector<ba::FlyBySound> flyby_sounds;
 	std::unique_ptr<ba::FlyByAudio> flybys;
+	std::optional<ba::SoldierAudioAssets> soldier;
+	std::shared_ptr<ba::FootstepGroundProbe> ground;
+	std::unique_ptr<ba::FootstepDriver> footsteps;
+	std::unique_ptr<ba::OwnHitAudio> own_hit;
+	std::vector<ba::FootstepSoldier> step_soldiers;
 	TapForwarder tap;
 	Ref<Bf3AudioStream> stream;
 	AudioStreamPlayer *player = nullptr;
@@ -169,6 +174,17 @@ core::Status Bf3GameAudio::load(const GameLoadInputs &p_in, std::span<const std:
 	m.table = std::move(a->table);
 	m.impacts_cache = std::move(a->impacts);
 	m.flyby_sounds = std::move(a->flybys);
+	m.soldier = std::move(a->soldier);
+	m.ground.reset();
+	if (m.soldier) {
+		core::Result<std::shared_ptr<ba::FootstepGroundProbe>> ground = ba::FootstepGroundProbe::create(
+				p_in.shared->static_world, p_in.shared->gunplay->materials, m.soldier->materials);
+		if (ground) {
+			m.ground = *ground;
+		} else {
+			a->report.push_back("footsteps: no ground probe (" + ground.error().message + ")");
+		}
+	}
 	m.auditions = std::move(a->auditions);
 	m.bank = std::move(a->bank);
 	m.report = std::move(a->report);
@@ -268,6 +284,13 @@ bool Bf3GameAudio::build(godot::Node *p_parent, std::string *r_error) {
 	m.router = std::make_unique<ba::WeaponAudioRouter>(*m.mixer, m.table, m.bank, m.tuning, *m.pool, wc);
 	m.impacts = std::make_unique<ba::ImpactAudio>(*m.mixer, m.impacts_cache, m.bank, m.tuning, *m.pool);
 	m.flybys = std::make_unique<ba::FlyByAudio>(*m.mixer, m.flyby_sounds, m.bank, m.tuning, *m.pool);
+	if (m.soldier && m.ground) {
+		m.footsteps = std::make_unique<ba::FootstepDriver>(*m.mixer, m.soldier->footsteps, m.bank, m.tuning, *m.pool,
+				m.soldier->params, [ground = m.ground](const ba::Vec3 &p_feet) { return ground->sound_id(p_feet); });
+	}
+	if (m.soldier) {
+		m.own_hit = std::make_unique<ba::OwnHitAudio>(*m.mixer, m.soldier->own_hit, m.bank, m.tuning, *m.pool);
+	}
 	m.beds.set_assets(m.bed_assets);
 	m.stream.instantiate();
 	m.stream->set_mixer(m.mixer);
@@ -346,6 +369,13 @@ void Bf3GameAudio::step(const GameFrame &p_frame, std::span<const fx::ImpactSoun
 	m.ir_feed.step(*m.mixer, m.reverbs, m.impulses.get());
 	m.reverbs = nullptr;
 	m.driver.step(*m.router, m.impacts.get(), *m.clock, in, m.impact_requests, p_effect_sounds, m.flybys.get());
+	if (m.footsteps) {
+		ba::footstep_soldiers(p_frame.frame, p_frame.others, p_frame.own_slot, in.own_first_person, m.step_soldiers);
+		m.footsteps->step(m.step_soldiers, in.listener, p_frame.dt, m.clock->earliest_frame());
+	}
+	if (m.own_hit) {
+		m.own_hit->on_events(p_frame.events, in.listener, m.clock->earliest_frame());
+	}
 	capture_step(m);
 	drain_mixer_events(m, *this);
 	print_sound_fates(m, false);
@@ -555,6 +585,12 @@ GameAudioStats Bf3GameAudio::stats() const {
 	s.router = m.router->stats();
 	s.impacts = m.impacts->stats();
 	s.flybys = m.flybys->stats();
+	if (m.footsteps) {
+		s.footsteps = m.footsteps->stats();
+	}
+	if (m.own_hit) {
+		s.own_hits = m.own_hit->stats();
+	}
 	const ba::MixerStats &ms = m.mixer->stats();
 	s.mixer_frames = ms.frames.load(std::memory_order_relaxed);
 	s.short_blocks = ms.short_blocks.load(std::memory_order_relaxed);
@@ -609,6 +645,8 @@ void Bf3GameAudio::shutdown() {
 	m.router.reset();
 	m.impacts.reset();
 	m.flybys.reset();
+	m.footsteps.reset();
+	m.own_hit.reset();
 	m.clock.reset();
 	m.mixer.reset();
 	m.pool.reset();
@@ -643,6 +681,10 @@ ba::MixerA3Assets load_a3(const core::EbxResolver &p_db, Impl &r_m) {
 		for (const ba::AreaBedSound &b : r_m.bed_assets->sounds) {
 			programs.push_back(b.program);
 		}
+	}
+	if (r_m.soldier) {
+		programs.push_back(r_m.soldier->footsteps);
+		programs.push_back(r_m.soldier->own_hit);
 	}
 	ba::MixerA3Assets a3 = ba::load_mixer_a3(p_db, programs);
 	char line[200];
@@ -837,6 +879,30 @@ void capture_end(Impl &r_m) {
 				std::to_string(fs.starts) + " started, " + std::to_string(fs.receding) + " receding, " +
 				std::to_string(fs.slow) + " too slow, " + std::to_string(fs.refused) + " refused, " +
 				std::to_string(fs.untracked) + " untracked")
+						.c_str()));
+	}
+	if (r_m.footsteps) {
+		const ba::FootstepStats &st = r_m.footsteps->stats();
+		std::string ids;
+		for (size_t i = 0; i < st.by_material.size(); ++i) {
+			if (st.by_material[i] != 0) {
+				ids += " " + std::to_string(i) + ":" + std::to_string(st.by_material[i]);
+			}
+		}
+		UtilityFunctions::print(String::utf8(("[audio] footsteps: " +
+				std::to_string(st.posts[size_t(ba::FootstepEvent::Left)] + st.posts[size_t(ba::FootstepEvent::Right)]) +
+				" steps, " + std::to_string(st.posts[size_t(ba::FootstepEvent::Start)]) + " starts, " +
+				std::to_string(st.posts[size_t(ba::FootstepEvent::Stop)]) + " stops, " +
+				std::to_string(st.posts[size_t(ba::FootstepEvent::Jump)]) + " jumps, " +
+				std::to_string(st.posts[size_t(ba::FootstepEvent::Land)]) + " lands, " + std::to_string(st.refused) +
+				" refused, " + std::to_string(st.no_ground) + " without ground, farthest " +
+				std::to_string(st.farthest_m) + " m, by SoundMaterialId" + ids)
+						.c_str()));
+	}
+	if (r_m.own_hit) {
+		const ba::OwnHitStats &hs = r_m.own_hit->stats();
+		UtilityFunctions::print(String::utf8(("[audio] own hits: " + std::to_string(hs.hits) + " hits, " +
+				std::to_string(hs.starts) + " started, " + std::to_string(hs.refused) + " refused")
 						.c_str()));
 	}
 	if (c->dir.empty()) {

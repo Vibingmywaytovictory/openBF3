@@ -33,6 +33,8 @@ struct GameAudioStats {
 	audio::WeaponAudioStats router;
 	audio::ImpactAudioStats impacts;
 	audio::FlyByAudioStats flybys;
+	audio::FootstepStats footsteps;
+	audio::OwnHitStats own_hits;
 	uint64_t mixer_frames = 0;
 	uint64_t short_blocks = 0, late_blocks = 0, late_commands = 0, ring_overflows = 0;
 	uint32_t peak_instances = 0;

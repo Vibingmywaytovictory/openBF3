@@ -181,6 +181,16 @@ core::Result<GameAudioAssets> load_game_audio_assets(const std::shared_ptr<const
 		a.report.push_back("impact " + e);
 	}
 	a.flybys = load_flyby_sounds(db, p_gunplay, a.report);
+	if (p_gunplay.materials) {
+		core::Result<SoldierAudioAssets> soldier = load_soldier_audio(db, *p_gunplay.materials, a.report);
+		if (soldier) {
+			a.soldier = std::move(*soldier);
+			a.programs += 2;
+		} else {
+			++a.program_failures;
+			a.report.push_back("footsteps: NOT LOADED (" + soldier.error().message + ")");
+		}
+	}
 
 	std::vector<std::string> from_library;
 	for (const GameAuditionItem &item : game_audition_items()) {
@@ -241,6 +251,10 @@ core::Result<GameAudioAssets> load_game_audio_assets(const std::shared_ptr<const
 		if (s.program && std::find(all.begin(), all.end(), s.program) == all.end()) {
 			all.push_back(s.program);
 		}
+	}
+	if (a.soldier) {
+		all.push_back(a.soldier->footsteps);
+		all.push_back(a.soldier->own_hit);
 	}
 	for (const auto &[name, au] : a.auditions) {
 		if (!au.bank) {
