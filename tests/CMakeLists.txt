@@ -800,7 +800,7 @@ openbf3_cost(audio.decode.perf 1 11)
 openbf3_cost(tools.tc_cost 1 9)
 openbf3_cost(host.gunplay.client 1 988)
 openbf3_cost(host.gunplay.server 1 127)
-openbf3_cost(host.gunplay.client.unit 1 91)
+openbf3_cost(host.gunplay.client.unit 1 92)
 openbf3_cost(godot.fx_ref 1 182)
 openbf3_cost(godot.fx_demo 1 27)
 

@@ -376,6 +376,8 @@ struct ServerOptions {
 	uint32_t target_bots = 0;
 	uint64_t seed = 1;
 	bool rewind_rows = false;
+	bool ghost_scope = true;
+	uint32_t snapshot_budget_bytes = uint32_t(net::kMaxDatagramBytes);
 };
 
 class Server {
@@ -390,6 +392,8 @@ public:
 		game->max_slots = 64;
 		game->dev_commands = true;
 		game->seed = p_options.seed;
+		game->ghost_scope = p_options.ghost_scope;
+		game->snapshot_budget_bytes = p_options.snapshot_budget_bytes;
 		host::GunplayConfig &g = game->gunplay;
 		g.mechanics_cfg = p_options.mechanics_cfg.empty() ? mechanics_cfg_path() : p_options.mechanics_cfg;
 		g.match_seed = p_options.match_seed;
@@ -1861,11 +1865,14 @@ TEST_SUITE("host-gunplay-client-unit") {
 				s.weapon_reconciliations, p.count(host::PresentKind::Hit), s.remote_shots);
 	}
 
-	TEST_CASE("host.gunplay.client: the SnapshotOthers merge and its acks (60 target bots: the others do not fit one Snapshot)") {
+	TEST_CASE("host.gunplay.client: the SnapshotOthers merge and its acks (60 target bots, ghost scope off: absolute, "
+			  "the others do not fit one Snapshot, two datagrams of budget)") {
 		Server server;
 		std::string err;
 		ServerOptions so;
 		so.target_bots = 60;
+		so.ghost_scope = false;
+		so.snapshot_budget_bytes = 2 * uint32_t(net::kMaxDatagramBytes);
 		REQUIRE_MESSAGE(server.start(so, err), err);
 		Bot firing;
 		REQUIRE(firing.start(server.port(), 1, 8, firing_script(7)));
@@ -1876,7 +1883,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 		p.run_for(3.0);
 		for (const auto t0 = std::chrono::steady_clock::now(); tg::seconds_since(t0) < 10.0;) {
 			const host::ClientStats now = p.client.stats();
-			if (now.snapshot_others_received > 50 && now.remote_shots > 0) {
+			if (now.snapshot_others_received > 50 && now.remote_shots > 0 && p.frame->other_count == 61) {
 				break;
 			}
 			p.run_for(0.25);
@@ -1902,11 +1909,14 @@ TEST_SUITE("host-gunplay-client-unit") {
 }
 
 TEST_SUITE("host-gunplay-client-unit") {
-	TEST_CASE("host.gunplay.client: hostile gunplay datagrams are refused and counted; the session keeps predicting") {
+	TEST_CASE("host.gunplay.client: hostile gunplay datagrams are refused and counted; the session keeps predicting "
+			  "(ghost scope off: a SnapshotOthers every snapshot)") {
 		Server server;
 		std::string err;
 		ServerOptions so;
 		so.target_bots = 60;
+		so.ghost_scope = false;
+		so.snapshot_budget_bytes = 2 * uint32_t(net::kMaxDatagramBytes);
 		REQUIRE_MESSAGE(server.start(so, err), err);
 		Bot b1, b2;
 		REQUIRE(b1.start(server.port(), 1, 10, firing_script(5)));
