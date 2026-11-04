@@ -8,6 +8,7 @@
 #include "bf3/audio/voice_cull.h"
 #include "bf3/client_audio/area_beds.h"
 #include "bf3/client_audio/area_wave_observer.h"
+#include "bf3/client_audio/soldier_audio.h"
 #include "bf3/core/audio/impulse_response.h"
 #include "bf3/core/audio/mixer_asset.h"
 #include "bf3/core/audio/sound_ports.h"
@@ -32,7 +33,9 @@
 #include "bf3/host/ui_flow_session.h"
 #include "bf3/sim/logic/ir_reverb_natives.h"
 #include "bf3/sim/logic/sound_area_natives.h"
+#include "bf3/sim/weapons/weapon_install.h"
 #include "bf3/sim_harness/sound_area_probe.h"
+#include "sim_world_support.h"
 
 #include <doctest/doctest.h>
 
@@ -1927,6 +1930,88 @@ TEST_SUITE("audio-footsteps") {
 		CHECK(finished > 0);
 		CHECK(mixer.stats().active_instances.load() == 0);
 		CHECK(pool.live() == 0);
+		check_unchanged(*f);
+	}
+
+	TEST_CASE("load_soldier_audio; FootstepGroundProbe over Metro's Concrete and Water pairs; footstep_soldiers") {
+		Fixture *f = need_install();
+		Result<bf3::sim::weapons::InstallWeapons> w = bf3::sim::weapons::open_install_weapons(f->install);
+		REQUIRE_MESSAGE(w.ok(), (w.ok() ? std::string() : w.error().message));
+		std::vector<std::string> report;
+		Result<ba::SoldierAudioAssets> a = ba::load_soldier_audio(f->metro->db(), *w->materials, report);
+		REQUIRE_MESSAGE(a.ok(), (a.ok() ? std::string() : a.error().message));
+		REQUIRE(report.size() == 1);
+		MESSAGE(report.front());
+		REQUIRE(a->footsteps);
+		REQUIRE(a->own_hit);
+		CHECK(a->materials.rows_with_sound == 34);
+		CHECK(a->params.radius_m == doctest::Approx(46.8f).epsilon(0.01));
+
+		const bf3::sim::weapons::SurfaceMaterialTable &surfaces = *w->materials;
+		std::optional<uint32_t> concrete, water;
+		for (uint32_t i = 0; i < surfaces.grid_pair_count(); ++i) {
+			const bf3::sim::weapons::SurfacePair sp = surfaces.static_pair(i);
+			const std::string_view name = sp.resolved ? surfaces.grid().material_name(sp.physics_material) : "";
+			if (name == "Concrete" && !concrete) {
+				concrete = i;
+			}
+			if (name == "Water" && !water) {
+				water = i;
+			}
+		}
+		REQUIRE(concrete.has_value());
+		REQUIRE(water.has_value());
+		std::vector<bf3::sim::StaticTriangle> tris;
+		sim_world_test::add_floor(tris, -20.0f, -20.0f, 0.0f, 20.0f, 0.0f, sim_world_test::tag_of(*concrete, 0));
+		sim_world_test::add_floor(tris, 0.0f, -20.0f, 20.0f, 20.0f, 0.0f, sim_world_test::tag_of(*water, 0));
+		Result<std::shared_ptr<const bf3::sim::StaticWorldShapes>> shapes =
+				bf3::sim::build_static_world(std::span<const bf3::sim::StaticTriangle>(tris));
+		REQUIRE_MESSAGE(shapes.ok(), (shapes.ok() ? std::string() : shapes.error().message));
+		Result<std::shared_ptr<ba::FootstepGroundProbe>> probe =
+				ba::FootstepGroundProbe::create(*shapes, w->materials, a->materials);
+		REQUIRE_MESSAGE(probe.ok(), (probe.ok() ? std::string() : probe.error().message));
+		CHECK((*probe)->sound_id(ba::Vec3{ -5.0f, 0.02f, 3.0f }) == std::optional<float>(1.0f));
+		CHECK((*probe)->sound_id(ba::Vec3{ 5.0f, -0.3f, 3.0f }) == std::optional<float>(8.0f));
+		CHECK((*probe)->sound_id(ba::Vec3{ 5.0f, 1.4f, 3.0f }) == std::optional<float>(8.0f));
+		CHECK_FALSE((*probe)->sound_id(ba::Vec3{ 5.0f, 1.7f, 3.0f }).has_value());
+		CHECK_FALSE((*probe)->sound_id(ba::Vec3{ 30.0f, 0.0f, 3.0f }).has_value());
+		CHECK_FALSE((*probe)->sound_id(ba::Vec3{ std::nanf(""), 0.0f, 0.0f }).has_value());
+
+		auto frame = std::make_unique<bf3::host::PresentationFrame>();
+		frame->valid = true;
+		frame->own_curr.life = 3;
+		frame->own_curr.flags = bf3::sim::soldier_flags::kAlive;
+		frame->own_curr.position = { 1.0f, 2.0f, 3.0f };
+		frame->own_curr.velocity = { 4.0f, 0.0f, 0.0f };
+		frame->own_curr.pose = bf3::sim::Pose::Crouch;
+		std::array<bf3::host::PresentedSoldier, 2> others{};
+		others[0].slot = 7;
+		others[1].slot = 9;
+		others[1].generation = 2;
+		others[1].position = { 0.0f, 0.0f, -20.0f };
+		others[1].velocity = { 0.0f, 0.0f, 2.0f };
+		others[1].eye_height = 1.5f;
+		others[1].mode = bf3::sim::MoveMode::InAir;
+		std::vector<ba::FootstepSoldier> soldiers;
+		ba::footstep_soldiers(frame.get(), others, 7, true, soldiers);
+		REQUIRE(soldiers.size() == 2);
+		CHECK(soldiers[0].slot == 7);
+		CHECK(soldiers[0].generation == 3);
+		CHECK(soldiers[0].first_person);
+		CHECK(soldiers[0].pose == uint8_t(bf3::sim::Pose::Crouch));
+		CHECK(soldiers[0].position.z == 3.0f);
+		CHECK(soldiers[0].velocity.x == 4.0f);
+		CHECK(soldiers[1].slot == 9);
+		CHECK(soldiers[1].generation == 2);
+		CHECK_FALSE(soldiers[1].first_person);
+		CHECK(soldiers[1].mode == bf3::sim::MoveMode::InAir);
+		CHECK(soldiers[1].velocity.z == 2.0f);
+		frame->own_curr.flags = 0;
+		ba::footstep_soldiers(frame.get(), others, 7, true, soldiers);
+		REQUIRE(soldiers.size() == 1);
+		CHECK(soldiers[0].slot == 9);
+		ba::footstep_soldiers(nullptr, others, 0xFF, false, soldiers);
+		CHECK(soldiers.size() == 2);
 		check_unchanged(*f);
 	}
 }
