@@ -58,6 +58,11 @@ struct SightSurfaces {
 	size_t lenses_clear = 0;
 };
 
+struct ViewmodelLightNodes {
+	uint32_t lights = 0, lights_shown = 0, lights_shadowed = 0;
+	uint32_t toggled = 0, toggled_shown = 0;
+};
+
 struct SightMark {
 	std::string mesh;
 	godot::Vector2 centre;
@@ -92,6 +97,7 @@ public:
 	const bf3::anim::ViewmodelTuning &tuning() const { return tuning_; }
 	const bf3::render::ViewmodelItem *current_item() const;
 	std::vector<std::string> visible_attachments() const;
+	ViewmodelLightNodes light_nodes() const;
 	std::optional<godot::Vector2> sight_offset_px(const godot::Camera3D *p_camera) const;
 	SightSurfaces sight_surfaces() const;
 	std::vector<SightMark> sight_marks(const godot::Camera3D *p_camera) const;
@@ -110,6 +116,7 @@ public:
 	float look_scale() const { return ads_frame_.look_scale; }
 	void set_hip_fov(float p_hip_fov_deg) { hip_fov_deg_ = p_hip_fov_deg; }
 	void set_weapon_light(bool p_on) { weapon_light_ = p_on; }
+	bool weapon_light() const { return weapon_light_; }
 	void set_shadow_quality(uint8_t p_quality) { shadow_quality_ = p_quality; }
 	float world_fov() const { return ads_frame_.world_fov; }
 

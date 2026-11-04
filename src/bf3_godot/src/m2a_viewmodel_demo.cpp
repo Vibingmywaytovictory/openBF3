@@ -40,6 +40,8 @@ namespace sw = bf3::sim::weapons;
 namespace {
 
 constexpr float kShotsDt = 1.0f / 60.0f;
+constexpr const char *kLightItem = "weapons/m416/u_m416";
+constexpr const char *kLightAccessory = "weapons/m416/u_m416_flashlight";
 
 std::string kit_short(const bf3::render::ViewmodelKit &p_kit) {
 	std::string k = p_kit.kit;
@@ -191,6 +193,21 @@ void Bf3M2aViewmodelDemo::_ready() {
 				}
 				(team == 1 ? set_us_ : set_ru_) = std::move(*set);
 			}
+			if (check_mode_) {
+				const std::string lit_unlock = kLightItem;
+				bf3::render::ViewmodelSetSpec lit =
+						bf3::render::team_viewmodel_items(1, std::span<const std::string>(&lit_unlock, 1));
+				lit.superbundle = level;
+				lit.items[0].accessories = bf3::render::WeaponAccessories{ { kLightAccessory }, { kLightAccessory } };
+				bf3::core::Result<std::unique_ptr<bf3::render::ViewmodelSet>> set =
+						bf3::render::load_viewmodel_set(*sources_, lit, &progress_, cache.get());
+				if (!set) {
+					load_error_ = std::string("light set: ") + set.error().message;
+					load_done_ = true;
+					return;
+				}
+				set_light_ = std::move(*set);
+			}
 			cache.reset();
 
 			progress_.set("weapon table and scripted timelines", 7);
@@ -328,6 +345,8 @@ void Bf3M2aViewmodelDemo::build_scene() {
 	add_child(vm_ru_);
 	if (!vm_us_->build(*set_us_, tuning_) || !vm_ru_->build(*set_ru_, tuning_)) {
 		load_error_ = "a viewmodel set has no items or no CameraJoint";
+	} else if (set_light_ != nullptr) {
+		light_item_ = vm_us_->add_items(*set_light_);
 	}
 	build_props();
 	built_ = load_error_.empty();

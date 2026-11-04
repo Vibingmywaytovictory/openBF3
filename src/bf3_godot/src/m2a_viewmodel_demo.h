@@ -48,6 +48,7 @@ public:
 	const std::string &kit_defs_difference() const { return kit_defs_difference_; }
 	const bf3::render::ViewmodelSet &set(int p_team) const { return p_team == 2 ? *set_ru_ : *set_us_; }
 	Bf3Viewmodel *viewmodel(int p_team) const;
+	int light_item() const { return light_item_; }
 	godot::Camera3D *camera() const { return camera_; }
 	const bf3::sim::weapons::WeaponTable &table() const { return *table_; }
 	const bf3::anim::ViewmodelTuning &tuning() const { return tuning_; }
@@ -87,7 +88,8 @@ private:
 	std::filesystem::path cache_root_;
 	bf3::core::PathGuard cache_guard_;
 	std::unique_ptr<bf3::render::ViewmodelSources> sources_;
-	std::unique_ptr<bf3::render::ViewmodelSet> set_us_, set_ru_;
+	std::unique_ptr<bf3::render::ViewmodelSet> set_us_, set_ru_, set_light_;
+	int light_item_ = -1;
 	std::shared_ptr<const bf3::sim::weapons::WeaponTable> table_;
 	std::vector<Kit> kits_;
 	std::vector<bf3::render::ViewmodelKit> kit_defs_;

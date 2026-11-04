@@ -134,6 +134,24 @@ std::vector<std::string> Bf3Viewmodel::visible_attachments() const {
 	return out;
 }
 
+ViewmodelLightNodes Bf3Viewmodel::light_nodes() const {
+	ViewmodelLightNodes out;
+	if (item_ < 0 || size_t(item_) >= items_.size()) {
+		return out;
+	}
+	const ItemNodes &n = items_[size_t(item_)];
+	for (const ItemNodes::Attachment &a : n.attachments) {
+		out.toggled += a.light_toggle ? 1 : 0;
+		out.toggled_shown += a.light_toggle && a.mesh != nullptr && a.mesh->is_visible() ? 1 : 0;
+	}
+	for (const ItemNodes::Light &l : n.lights) {
+		++out.lights;
+		out.lights_shown += l.node->is_visible() ? 1 : 0;
+		out.lights_shadowed += l.node->has_shadow() ? 1 : 0;
+	}
+	return out;
+}
+
 SightSurfaces Bf3Viewmodel::sight_surfaces() const {
 	SightSurfaces out;
 	if (item_ < 0 || size_t(item_) >= items_.size()) {

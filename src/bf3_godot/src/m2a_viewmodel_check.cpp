@@ -498,6 +498,37 @@ void run_pass(Bf3M2aViewmodelDemo &p_demo, size_t p_kit, double p_fps, Accum &r_
 	}
 }
 
+struct LightToggleState {
+	ViewmodelLightNodes nodes;
+	size_t others_shown = 0;
+};
+
+LightToggleState present_light(Bf3Viewmodel &r_vm, Camera3D *p_camera, bool p_on, uint8_t p_quality, double &r_t) {
+	r_vm.set_weapon_light(p_on);
+	r_vm.set_shadow_quality(p_quality);
+	ViewmodelFrame frame;
+	frame.dt = 1.0f / 60.0f;
+	frame.phase = uint8_t(sw::WeaponPhase::Ready);
+	frame.magazine = 1;
+	frame.eye = Vector3(0, 1.6f, 0);
+	for (int i = 0; i < 3; ++i) {
+		r_t += double(frame.dt);
+		frame.time_s = r_t;
+		r_vm.present(frame, {}, p_camera);
+	}
+	LightToggleState out;
+	out.nodes = r_vm.light_nodes();
+	out.others_shown = r_vm.visible_attachments().size() - out.nodes.toggled_shown;
+	return out;
+}
+
+std::string light_state_text(const LightToggleState &p_s) {
+	return fmt(
+			"%u/%u spot lights shown, %u shadowed, %u/%u HideByLightToggle meshes shown, %zu other attachments shown",
+			p_s.nodes.lights_shown, p_s.nodes.lights, p_s.nodes.lights_shadowed, p_s.nodes.toggled_shown,
+			p_s.nodes.toggled, p_s.others_shown);
+}
+
 }
 
 int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
@@ -768,6 +799,45 @@ int run_m2a_viewmodel_check(Bf3M2aViewmodelDemo &p_demo) {
 	}
 	print(fmt("[vm] info present cost: mean %.1f us, max %.1f us per frame over %llu frames at 60 fps (noisy on the shared machine)",
 			all.present_frames ? all.present_us_sum / double(all.present_frames) : 0.0, all.present_us_max, (unsigned long long)all.present_frames));
+	{
+		Bf3Viewmodel *vm = p_demo.viewmodel(1);
+		const int item = p_demo.light_item();
+		vm->select_item(item);
+		const bf3::render::ViewmodelItem *it = vm->current_item();
+		const bf3::core::level::SpotLight *light =
+				it != nullptr && it->lights.size() == 1 ? &it->lights.front().socket.light : nullptr;
+		if (light == nullptr || !light->cast_shadows || light->cast_shadows_min_level == 0) {
+			row("vm.weapon_light", false,
+					fmt("item %d (%s): %zu lights, want one shadow-casting light with a CastShadowsMinLevel above Low",
+							item, it != nullptr ? short_unlock(it->unlock).c_str() : "none",
+							it != nullptr ? it->lights.size() : size_t(0)));
+		} else {
+			const uint8_t level = light->cast_shadows_min_level;
+			double t = 0.0;
+			const LightToggleState below = present_light(*vm, p_demo.camera(), true, uint8_t(level - 1), t);
+			const LightToggleState at = present_light(*vm, p_demo.camera(), true, level, t);
+			const LightToggleState off = present_light(*vm, p_demo.camera(), false, level, t);
+			const LightToggleState back = present_light(*vm, p_demo.camera(), true, uint8_t(level - 1), t);
+			const auto lit = [](const LightToggleState &p_s, uint32_t p_shadowed) {
+				return p_s.nodes.lights == 1 && p_s.nodes.lights_shown == 1 &&
+						p_s.nodes.lights_shadowed == p_shadowed && p_s.nodes.toggled >= 1 &&
+						p_s.nodes.toggled_shown == p_s.nodes.toggled && p_s.others_shown >= 1;
+			};
+			row("vm.weapon_light.on", lit(below, 0) && lit(back, 0),
+					fmt("%s with the flashlight on at ShadowQuality %u (below its CastShadowsMinLevel %u): ",
+							short_unlock(it->unlock).c_str(), unsigned(level - 1), unsigned(level)) +
+							light_state_text(below) + "; on again: " + light_state_text(back));
+			row("vm.weapon_light.shadow", lit(at, 1),
+					fmt("at ShadowQuality %u: ", unsigned(level)) + light_state_text(at));
+			row("vm.weapon_light.off",
+					off.nodes.lights == 1 && off.nodes.lights_shown == 0 && off.nodes.lights_shadowed == 0 &&
+							off.nodes.toggled >= 1 && off.nodes.toggled_shown == 0 &&
+							off.others_shown == below.others_shown,
+					"toggled off: " + light_state_text(off));
+		}
+		vm->set_weapon_light(true);
+		vm->select_item(-1);
+	}
 	print(fmt("[vm] load %.2f s", p_demo.load_seconds()));
 
 	uint32_t pass = 0;
