@@ -30,6 +30,7 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <deque>
@@ -2937,6 +2938,51 @@ TEST_SUITE("host-session-unit") {
 		CHECK(s.motor_hash_mismatch == 0);
 		CHECK(spawned == 0);
 		CHECK(g.kicks[size_t(net::KickReason::Collision)] == 1);
+	}
+
+	TEST_CASE("host.session: a fleet of 12 LegWalker relay shooters keeps at least two in their fire window on every "
+			  "server tick whatever tick each spawned on, and each reloads only outside its window") {
+		constexpr uint32_t kShooters = 12;
+		constexpr sim::Tick kFrom = 7001;
+		constexpr sim::Tick kSpawnStep = 53;
+		constexpr sim::Tick kTo = kFrom + kSpawnStep * kShooters + 3 * LegWalker::kRelayTicks;
+		std::vector<std::vector<uint8_t>> fired(kShooters, std::vector<uint8_t>(kTo, 0));
+		std::vector<std::vector<sim::Tick>> reloads(kShooters);
+		sim::SoldierState state{};
+		for (uint32_t i = 0; i < kShooters; ++i) {
+			LegWalker walker(i, true, kShooters);
+			for (sim::Tick t = kFrom + kSpawnStep * i; t < kTo; ++t) {
+				const sim::Command c = walker.command(t, state);
+				fired[i][t] = (c.buttons & sim::buttons::kFire) != 0 ? 1 : 0;
+				if ((c.buttons & sim::buttons::kReload) != 0) {
+					reloads[i].push_back(t);
+				}
+			}
+		}
+		const sim::Tick all_spawned = kFrom + kSpawnStep * (kShooters - 1);
+		uint32_t fewest = kShooters;
+		for (sim::Tick t = all_spawned; t + 1 < kTo; ++t) {
+			uint32_t firing = 0;
+			for (uint32_t i = 0; i < kShooters; ++i) {
+				firing += (fired[i][t] | fired[i][t + 1]) != 0 ? 1u : 0u;
+			}
+			fewest = std::min(fewest, firing);
+		}
+		CHECK(fewest >= 2);
+		size_t fewest_reloads = SIZE_MAX;
+		size_t fired_near_reload = 0;
+		for (uint32_t i = 0; i < kShooters; ++i) {
+			fewest_reloads = std::min(fewest_reloads, reloads[i].size());
+			for (const sim::Tick r : reloads[i]) {
+				const sim::Tick quiet_from = r - (LegWalker::kRelayReloadTick - LegWalker::kRelayFireTicks);
+				const sim::Tick quiet_to = std::min(kTo, r + (LegWalker::kRelayTicks - LegWalker::kRelayReloadTick));
+				for (sim::Tick t = std::max(quiet_from, kFrom + kSpawnStep * i); t < quiet_to; ++t) {
+					fired_near_reload += fired[i][t];
+				}
+			}
+		}
+		CHECK(fewest_reloads >= 3);
+		CHECK(fired_near_reload == 0);
 	}
 
 	TEST_CASE("host.session: LoadBotFleet of 4 against a socket-free GameServer decodes every snapshot") {

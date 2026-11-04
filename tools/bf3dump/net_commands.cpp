@@ -51,7 +51,7 @@ void say(const std::string &p_line) {
 	std::fflush(stdout);
 }
 
-enum class Script : uint8_t { Still, Walk, Fire, WalkFire, Strafe };
+enum class Script : uint8_t { Still, Walk, Fire, WalkFire, Strafe, RelayFire };
 
 struct NetArgs {
 	std::string host;
@@ -81,7 +81,7 @@ struct NetArgs {
 bool parse_script(std::string_view p_text, Script &r_script) {
 	static constexpr std::pair<std::string_view, Script> kScripts[] = { { "still", Script::Still },
 		{ "walk", Script::Walk }, { "fire", Script::Fire }, { "walkfire", Script::WalkFire },
-		{ "strafe", Script::Strafe } };
+		{ "strafe", Script::Strafe }, { "relayfire", Script::RelayFire } };
 	for (const auto &[name, script] : kScripts) {
 		if (p_text == name) {
 			r_script = script;
@@ -124,7 +124,9 @@ std::string parse_net_args(const std::vector<std::string> &p_args, bool p_client
 			ok = ok && core::parse_u32_value(value, 0.0, 4294967295.0, r_args.seed).fault == core::KeyFault::None;
 		} else if (key == "--script") {
 			ok = ok && parse_script(value, r_args.script) &&
-					(p_client || r_args.script == Script::Walk || r_args.script == Script::WalkFire);
+					(p_client ? r_args.script != Script::RelayFire
+							  : r_args.script == Script::Walk || r_args.script == Script::WalkFire ||
+											r_args.script == Script::RelayFire);
 			r_args.script_name = std::string(value);
 		} else if (p_client && key == "--stats-file") {
 			r_args.stats_file = std::string(value);
@@ -516,7 +518,8 @@ int cmd_loadbots(const std::vector<std::string> &p_args) {
 	fc.bot.netsim = netsim_of(a, 2);
 	fc.bot.kit = uint8_t(a.kit);
 	fc.bot.stall_level = a.stall_level;
-	fc.bot.fire = a.script == Script::WalkFire;
+	fc.bot.fire = a.script == Script::WalkFire || a.script == Script::RelayFire;
+	fc.bot.relay = a.script == Script::RelayFire ? a.count : 0u;
 	host::LoadBotFleet fleet;
 	if (const core::Status s = fleet.start(fc); !s.ok()) {
 		say("loadbots: failed: " + s.error().message);

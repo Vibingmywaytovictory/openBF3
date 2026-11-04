@@ -35,13 +35,23 @@ sim::Command LegWalker::command(sim::Tick p_tick, const sim::SoldierState &p_sta
 	const uint32_t leg = ((p_tick - start_) / kLegTicks + phase_) & 3u;
 	c.yaw = uint16_t(base_yaw_ + leg * 16384u);
 	c.pose = sim::Pose::Stand;
-	const uint32_t in_leg = (p_tick - start_) % kLegTicks;
-	if (fire_ && in_leg < kFireTicks && (in_leg & 1u) == 0) {
+	const uint32_t at = fire_tick(p_tick);
+	const uint32_t fire_ticks = relay_ > 0 ? kRelayFireTicks : kFireTicks;
+	const uint32_t reload_tick = relay_ > 0 ? kRelayReloadTick : kReloadTick;
+	if (fire_ && at < fire_ticks && (at & 1u) == 0) {
 		c.buttons |= sim::buttons::kFire;
-	} else if (fire_ && in_leg == kReloadTick) {
+	} else if (fire_ && at == reload_tick) {
 		c.buttons |= sim::buttons::kReload;
 	}
 	return c;
+}
+
+uint32_t LegWalker::fire_tick(sim::Tick p_tick) const {
+	if (relay_ == 0) {
+		return (p_tick - start_) % kLegTicks;
+	}
+	const uint64_t offset = uint64_t(phase_ % relay_) * kRelayTicks / relay_;
+	return uint32_t((uint64_t(p_tick) + offset) % kRelayTicks);
 }
 
 namespace {
@@ -248,7 +258,7 @@ struct LoadBotFleet::Impl {
 			if (soldier_alive(*own) && own->life != own_life) {
 				own_life = own->life;
 				spawn_at = own->position;
-				walker = std::make_unique<LegWalker>(index, config.fire);
+				walker = std::make_unique<LegWalker>(index, config.fire, config.relay);
 				++stats.lives;
 			}
 			if (soldier_alive(*own) && own->life == own_life) {

@@ -322,7 +322,7 @@ TEST_SUITE("godot-net-late-join") {
 		}
 		const std::optional<size_t> shooters = start_tool(driver, "shooters",
 				{ "loadbots", "127.0.0.1:" + std::to_string(round->port), std::string(kLevel), std::string(kMode),
-						"--count=" + std::to_string(kJoinShooters), "--script=walkfire",
+						"--count=" + std::to_string(kJoinShooters), "--script=relayfire",
 						"--seconds=" + std::to_string(kJoinShooterSeconds), "--name=lj", "--seed=1" });
 		REQUIRE(shooters.has_value());
 		const std::string all_spawned = " spawned " + std::to_string(kJoinShooters) + " ";

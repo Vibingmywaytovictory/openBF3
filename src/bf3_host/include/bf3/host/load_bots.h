@@ -23,13 +23,20 @@ public:
 	static constexpr uint32_t kLegTicks = 2u * sim::kSimHz;
 	static constexpr uint32_t kFireTicks = 40;
 	static constexpr uint32_t kReloadTick = 90;
+	static constexpr uint32_t kRelayTicks = 5u * sim::kSimHz;
+	static constexpr uint32_t kRelayFireTicks = sim::kSimHz;
+	static constexpr uint32_t kRelayReloadTick = kRelayFireTicks + 6;
 
-	explicit LegWalker(uint32_t p_phase, bool p_fire = false) : phase_(p_phase), fire_(p_fire) {}
+	explicit LegWalker(uint32_t p_phase, bool p_fire = false, uint32_t p_relay = 0) :
+			phase_(p_phase), fire_(p_fire), relay_(p_relay) {}
 	sim::Command command(sim::Tick p_tick, const sim::SoldierState &p_state) override;
 
 private:
+	uint32_t fire_tick(sim::Tick p_tick) const;
+
 	uint32_t phase_ = 0;
 	bool fire_ = false;
+	uint32_t relay_ = 0;
 	bool started_ = false;
 	uint16_t base_yaw_ = 0;
 	sim::Tick start_ = 0;
@@ -45,6 +52,7 @@ struct LoadBotConfig {
 	uint32_t spawn_retry_ms = 1000;
 	uint32_t stall_level = 0;
 	bool fire = false;
+	uint32_t relay = 0;
 };
 
 struct LoadBotFleetConfig {
