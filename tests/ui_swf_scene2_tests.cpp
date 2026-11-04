@@ -309,6 +309,38 @@ TEST_SUITE("ui-scene2-unit") {
 		CHECK_FALSE(s.swap_depths("content", kSwfAs2MaxDepth + 1).ok());
 	}
 
+	TEST_CASE("swf scene: a path is walked once until the display list changes, and the next lookup sees the change") {
+		const SwfLibrary lib = two_boxes_library();
+		SwfScene s = open_scene(lib, "boxes");
+		const SwfNodeId fill = need(s, "content.fill").id;
+		const SwfNodeId placed_other = need(s, "other").id;
+		const uint32_t lookups = s.stats().path_lookups;
+		const uint32_t walks = s.stats().path_walks;
+		for (int i = 0; i < 100; ++i) {
+			CHECK(need(s, "content.fill").id == fill);
+			CHECK(s.find_node("content.missing") == nullptr);
+		}
+		CHECK(s.stats().path_lookups == lookups + 200);
+		CHECK(s.stats().path_walks == walks + 1);
+		Result<SwfNodeId> attached = s.attach_movie("", "Box", "other", -kSwfAs2DepthOffset);
+		REQUIRE(attached.ok());
+		CHECK(need(s, "other").id == *attached);
+		CHECK(need(s, "other.fill").id != fill);
+		CHECK(s.stats().path_walks == walks + 3);
+		REQUIRE(s.remove_movie("other").ok());
+		CHECK(need(s, "other").id == placed_other);
+		CHECK(s.find_node(need(s, "other").path) == &need(s, "other"));
+		REQUIRE(s.swap_depths("content", "other").ok());
+		CHECK(need(s, "content").depth == 3);
+		CHECK(need(s, "content.fill").id == fill);
+		const As2Clip root(&s, "");
+		CHECK(root.attach_movie("Box", "late", 7).exists());
+		CHECK(need(s, "late.fill").id != fill);
+		REQUIRE(s.remove_movie("late").ok());
+		CHECK(s.find_node("late") == nullptr);
+		CHECK(s.find_node("late.fill") == nullptr);
+	}
+
 	TEST_CASE("as2 clip: _rotation keeps the scales, and Color.setTransform changes only the fields it is given") {
 		const SwfLibrary lib = two_boxes_library();
 		SwfScene s = open_scene(lib, "boxes");

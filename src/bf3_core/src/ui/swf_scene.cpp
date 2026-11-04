@@ -3,11 +3,16 @@
 #include "bf3/core/util/text.h"
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <cmath>
+#include <cstring>
 #include <deque>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
+#include <unordered_map>
 
 namespace bf3::core::ui {
 
@@ -18,6 +23,7 @@ constexpr size_t kNodeUnits = 4;
 constexpr uint32_t kSlotBits = 16;
 constexpr uint32_t kSlotMask = (1u << kSlotBits) - 1;
 constexpr uint32_t kMaxGeneration = 0xfffeu;
+constexpr size_t kFoundPathsMax = 4096;
 static_assert(kSwfSceneMaxNodes <= (1u << kSlotBits));
 
 uint32_t slot_of(SwfNodeId p_id) {
@@ -136,6 +142,41 @@ std::string segment_of(const SwfSceneNode &p_n) {
 	return p_n.name.empty() ? "#" + std::to_string(p_n.depth) : p_n.name;
 }
 
+bool segment_is(const SwfSceneNode &p_n, std::string_view p_segment) {
+	if (!p_n.name.empty()) {
+		return p_n.name == p_segment;
+	}
+	if (!p_segment.starts_with('#')) {
+		return false;
+	}
+	std::array<char, 12> digits{};
+	const std::to_chars_result r = std::to_chars(digits.data(), digits.data() + digits.size(), p_n.depth);
+	return std::string_view(digits.data(), size_t(r.ptr - digits.data())) == p_segment.substr(1);
+}
+
+struct PathHash {
+	using is_transparent = void;
+	size_t operator()(std::string_view p_path) const {
+		uint64_t h = uint64_t(p_path.size()) * 0x9E3779B97F4A7C15ull;
+		size_t i = 0;
+		for (; i + sizeof(uint64_t) <= p_path.size(); i += sizeof(uint64_t)) {
+			uint64_t word = 0;
+			std::memcpy(&word, p_path.data() + i, sizeof(uint64_t));
+			h = (h ^ word) * 0xFF51AFD7ED558CCDull;
+			h ^= h >> 32;
+		}
+		for (; i < p_path.size(); ++i) {
+			h = (h ^ uint8_t(p_path[i])) * 0x100000001B3ull;
+		}
+		return size_t(h ^ (h >> 29));
+	}
+};
+
+struct FoundPath {
+	SwfNodeId id = kSwfNoNode;
+	uint64_t revision = 0;
+};
+
 }
 
 SwfColorXform swf_color_xform(const SwfColorTransform &p_cx) {
@@ -195,7 +236,9 @@ struct SwfScene::Impl {
 	std::vector<std::unique_ptr<SwfDrawing>> drawings;
 	std::shared_ptr<SwfImageSource> images;
 	std::deque<std::pair<SwfNodeId, uint32_t>> queue;
-	SwfSceneStats stats;
+	mutable SwfSceneStats stats;
+	uint64_t structure_revision = 0;
+	mutable std::unordered_map<std::string, FoundPath, PathHash, std::equal_to<>> found_paths;
 	double accumulator = 0.0;
 	std::optional<WorkBudget> budget;
 	std::function<void(SwfNodeId, uint32_t)> on_script;
@@ -338,6 +381,7 @@ struct SwfScene::Impl {
 	}
 
 	void repath(SwfSceneNode &r_n) {
+		structure_revision++;
 		if (const SwfSceneNode *p = get(r_n.parent)) {
 			r_n.path = path_for(*p, r_n);
 		}
@@ -351,6 +395,7 @@ struct SwfScene::Impl {
 		auto it = std::upper_bound(r_parent.children.begin(), r_parent.children.end(), depth, [&](int32_t d, SwfNodeId c) { return d < get(c)->depth; });
 		r_parent.children.insert(it, p_child);
 		r_parent.children_revision++;
+		structure_revision++;
 	}
 
 	SwfNodeId child_at(const SwfSceneNode &p_parent, int32_t p_depth) const {
@@ -367,6 +412,7 @@ struct SwfScene::Impl {
 		if (n == nullptr) {
 			return;
 		}
+		structure_revision++;
 		while (!n->children.empty()) {
 			remove(n->children.back());
 		}
@@ -723,10 +769,26 @@ struct SwfScene::Impl {
 	}
 
 	SwfNodeId find(std::string_view p_path) const {
-		SwfNodeId cur = 0;
 		if (p_path.empty()) {
-			return cur;
+			return 0;
 		}
+		stats.path_lookups++;
+		auto it = found_paths.find(p_path);
+		if (it == found_paths.end()) {
+			if (found_paths.size() >= kFoundPathsMax) {
+				found_paths.clear();
+			}
+			it = found_paths.emplace(std::string(p_path), FoundPath{ kSwfNoNode, structure_revision + 1 }).first;
+		}
+		if (it->second.revision != structure_revision) {
+			it->second = FoundPath{ walk(p_path), structure_revision };
+		}
+		return it->second.id;
+	}
+
+	SwfNodeId walk(std::string_view p_path) const {
+		stats.path_walks++;
+		SwfNodeId cur = 0;
 		size_t i = 0;
 		bool first = true;
 		while (i <= p_path.size()) {
@@ -742,7 +804,7 @@ struct SwfScene::Impl {
 			SwfNodeId found = kSwfNoNode;
 			for (const SwfNodeId c : n->children) {
 				const SwfSceneNode *child = get(c);
-				if (segment_of(*child) == seg) {
+				if (segment_is(*child, seg)) {
 					found = c;
 					break;
 				}

@@ -1337,6 +1337,22 @@ TEST_SUITE("ui-options-screens") {
 		CHECK(b.text(rows[0] + ".Label_0.txtField") == shown(foot[0].label));
 	}
 
+	TEST_CASE("options screens: building the key binding list walks a clip path again only after the display list "
+			  "changed") {
+		ui_retail::Retail *r = ui_retail::retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		std::unique_ptr<OptionsSession> o = retail_options(*r);
+		OptionsRig b;
+		open_options(*r, b, kOptionsKeyBindingScreen, o->model());
+		REQUIRE_FALSE(b.rows("List_01").empty());
+		const SwfSceneStats &st = b.s.scene->stats();
+		std::printf("ui.options.screens key binding screen: %u clip path lookups, %u walks\n",
+				unsigned(st.path_lookups), unsigned(st.path_walks));
+		CHECK(st.path_walks * 4u < st.path_lookups);
+	}
+
 	TEST_CASE("options screens: the menu hint shows the flow's hint SID") {
 		ui_retail::Retail *r = ui_retail::retail_or_skip();
 		if (r == nullptr) {

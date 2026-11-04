@@ -159,6 +159,8 @@ struct SwfSceneStats {
 	uint32_t labels_missing = 0;
 	uint32_t clip_action_nodes = 0;
 	uint32_t replays = 0;
+	uint32_t path_lookups = 0;
+	uint32_t path_walks = 0;
 };
 
 class SwfScene {
