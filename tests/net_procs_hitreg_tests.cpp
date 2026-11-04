@@ -105,8 +105,11 @@ Duel run_duel(ProcDriver &r_driver, const std::filesystem::path &p_config, uint3
 	d.shooter_code = shooter_end.code;
 	r_driver.finish(*target, 1s);
 	r_driver.finish(server->id, 1s);
+	MESSAGE(p_case << " shooter:\n"
+				   << r_driver.output(*shooter) << "\n"
+				   << p_case << " target:\n"
+				   << r_driver.output(*target));
 	if (!reported || !contains(d.line, "[hitreg] shots ")) {
-		MESSAGE(p_case << " shooter:\n" << r_driver.output(*shooter));
 		return d;
 	}
 	d.shots = summary_number(d.line, "[hitreg] shots ");

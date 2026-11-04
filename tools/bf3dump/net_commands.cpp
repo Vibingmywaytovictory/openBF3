@@ -10,6 +10,7 @@
 #include "bf3/host/duel.h"
 #include "bf3/host/level_load.h"
 #include "bf3/host/load_bots.h"
+#include "bf3/host/server_session.h"
 #include "bf3/host/squad_join.h"
 #include "bf3/net/loopback_ping.h"
 #include "bf3/net/netsim.h"
@@ -390,6 +391,10 @@ int cmd_client(const core::InstallReader &p_reader, const std::shared_ptr<core::
 			say(core::fmt("client: spawned life %u in slot %u at %.1f %.1f %.1f", unsigned(input.life),
 					unsigned(last.slot), double(life_spawn[0]), double(life_spawn[1]), double(life_spawn[2])));
 		}
+		for (net::DebugReport report; client.take_debug_report(report); report = net::DebugReport()) {
+			say(core::fmt("client: debug report %u %s: %s", unsigned(report.id), report.ok ? "ok" : "failed",
+					report.text.c_str()));
+		}
 		if (f.match_valid && !alive && std::chrono::steady_clock::now() - last_spawn_request >= 1s) {
 			client.send_spawn_request(uint8_t(a.kit));
 			last_spawn_request = std::chrono::steady_clock::now();
@@ -439,10 +444,12 @@ int cmd_client(const core::InstallReader &p_reader, const std::shared_ptr<core::
 		if (std::chrono::steady_clock::now() - last_status >= 1s) {
 			last_status = std::chrono::steady_clock::now();
 			say(core::fmt("client: t=%.1f s slot %u life %u alive %d snapshots %llu commands %llu others %zu shots %zu "
-						  "rtt %.1f ms",
+						  "rtt %.1f ms, at %.1f %.1f %.1f, health %.2f, match %s",
 					t, unsigned(last.slot), unsigned(input.life), int(alive),
 					(unsigned long long)last.snapshots_received, (unsigned long long)last.commands_sent, seen.size(),
-					shots.size(), last.rtt_ms));
+					shots.size(), last.rtt_ms, double(f.own_curr.position[0]), double(f.own_curr.position[1]),
+					double(f.own_curr.position[2]), double(f.own_curr.health),
+					f.match_valid ? host::match_phase_name(f.match.phase) : "none"));
 		}
 		std::this_thread::sleep_for(4ms);
 	}
