@@ -28,6 +28,8 @@ namespace {
 bool silent_kind(ba::MixerCutKind p_kind) {
 	switch (p_kind) {
 		case ba::MixerCutKind::Start:
+		case ba::MixerCutKind::Suspend:
+		case ba::MixerCutKind::Unsuspend:
 		case ba::MixerCutKind::Fade:
 		case ba::MixerCutKind::LateBlock:
 		case ba::MixerCutKind::CallGap:
