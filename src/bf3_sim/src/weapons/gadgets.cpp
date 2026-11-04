@@ -388,6 +388,15 @@ void GadgetField::step(const CollisionWorld &p_world) {
 	}
 }
 
+bool supplies(const GadgetDef &p_gadget, const Deployable &p_bag, const SupplyReceiver &p_receiver, bool p_healing) {
+	const SupplyUnitDef &u = p_healing ? p_gadget.healing : p_gadget.ammo;
+	const float points = p_healing ? p_bag.healing_points : p_bag.ammo_points;
+	return p_gadget.kind == GadgetKind::Supply && p_bag.resting && p_gadget.supply_soldiers && u.active() &&
+			!(p_gadget.team_specific && p_bag.team != p_receiver.team) &&
+			!(p_gadget.exclude_self && p_bag.owner == p_receiver.slot) && (u.infinite || points > 0.0f) &&
+			core::vec::length(core::vec::sub(p_bag.position, p_receiver.position)) <= u.radius;
+}
+
 void GadgetField::supply(
 		std::span<const SupplyReceiver> p_receivers, float p_seconds, std::span<SupplyGrant> r_grants) {
 	const size_t n = std::min(p_receivers.size(), r_grants.size());
@@ -417,11 +426,7 @@ void GadgetField::supply(
 			for (Deployable &d : live_) {
 				const GadgetDef &g = defs_[d.gadget];
 				const SupplyUnitDef &u = healing ? g.healing : g.ammo;
-				const float points = healing ? d.healing_points : d.ammo_points;
-				if (g.kind != GadgetKind::Supply || !d.resting || !g.supply_soldiers || !u.active() ||
-						(g.team_specific && d.team != r.team) || (g.exclude_self && d.owner == r.slot) ||
-						(!u.infinite && points <= 0.0f) ||
-						core::vec::length(core::vec::sub(d.position, r.position)) > u.radius) {
+				if (!supplies(g, d, r, healing)) {
 					continue;
 				}
 				if (u.inc_speed > best_rate) {

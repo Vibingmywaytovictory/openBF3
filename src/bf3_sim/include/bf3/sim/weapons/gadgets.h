@@ -108,6 +108,8 @@ struct SupplyGrant {
 	float ammo = 0;
 };
 
+bool supplies(const GadgetDef &p_gadget, const Deployable &p_bag, const SupplyReceiver &p_receiver, bool p_healing);
+
 struct GadgetFieldStats {
 	uint64_t thrown = 0, placed = 0, landed = 0, no_ground = 0, steep = 0, full = 0, replaced = 0, lost = 0,
 			 removed = 0;
