@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "net_procs_driver.h"
+#include "net_procs_support.h"
 #include "test_support.h"
 #include "win32_text.h"
 
@@ -24,24 +25,6 @@ using bf3::test::procs::ProcDriver;
 constexpr std::string_view kServerHostOn = "[dedicated] ServerHost on 127.0.0.1:";
 constexpr std::string_view kKicked = "ended: kicked: install differs: motor";
 
-std::string edited_motor_tuning() {
-	std::ifstream in(OPENBF3_MOTOR_TUNING_CFG, std::ios::binary);
-	std::stringstream text;
-	text << in.rdbuf();
-	std::string out;
-	std::string line;
-	bool edited = false;
-	while (std::getline(text, line)) {
-		if (line.rfind("gravity = ", 0) == 0) {
-			line = "gravity = 9.5";
-			edited = true;
-		}
-		out += line + "\n";
-	}
-	REQUIRE_MESSAGE(edited, OPENBF3_MOTOR_TUNING_CFG << " has no gravity line");
-	return out;
-}
-
 }
 
 TEST_SUITE("godot-mismatch") {
@@ -62,7 +45,7 @@ TEST_SUITE("godot-mismatch") {
 		std::filesystem::create_directories(tuning.parent_path());
 		{
 			std::ofstream out(tuning, std::ios::binary);
-			out << edited_motor_tuning();
+			out << bf3::test::procs::edited_motor_tuning(OPENBF3_MOTOR_TUNING_CFG);
 			REQUIRE(out.good());
 		}
 

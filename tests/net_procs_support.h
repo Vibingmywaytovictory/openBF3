@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -144,6 +145,24 @@ inline bool kicks_none(std::string_view p_line) {
 		}
 	}
 	return any;
+}
+
+inline std::string edited_motor_tuning(const char *p_cfg) {
+	std::ifstream in(p_cfg, std::ios::binary);
+	std::stringstream text;
+	text << in.rdbuf();
+	std::string out;
+	std::string line;
+	bool edited = false;
+	while (std::getline(text, line)) {
+		if (line.rfind("gravity = ", 0) == 0) {
+			line = "gravity = 9.5";
+			edited = true;
+		}
+		out += line + "\n";
+	}
+	REQUIRE_MESSAGE(edited, p_cfg << " has no gravity line");
+	return out;
 }
 
 inline ChildSpec godot_client(

@@ -63,12 +63,13 @@ void say(const std::string &p_line) {
 	UtilityFunctions::print(to_godot("[match] " + p_line));
 }
 
+constexpr double kKickPopupCheckSeconds = 30.0;
 }
 
 class NativeKick {
 public:
-	NativeKick(Node *p_parent, std::string p_reason, bool p_timed_out) :
-			reason_(std::move(p_reason)), timed_out_(p_timed_out) {
+	NativeKick(Node *p_parent, std::string p_reason, bool p_timed_out, bool p_check) :
+			reason_(std::move(p_reason)), timed_out_(p_timed_out), check_(p_check) {
 		layer_ = memnew(CanvasLayer);
 		layer_->set_name("KickPopup");
 		layer_->set_layer(kNativeLoadingLayer + 1);
@@ -99,6 +100,9 @@ public:
 			return;
 		}
 		screens_->step(std::clamp(p_delta, 0.0, kNativeLoadingMaxStepSeconds));
+		if (check_ && !clicked_) {
+			check(p_delta);
+		}
 	}
 
 	void input(const Ref<InputEvent> &p_event) {
@@ -122,6 +126,33 @@ public:
 	const std::string &failure() const { return failure_; }
 
 private:
+	void check(double p_delta) {
+		namespace ui = bf3::core::ui;
+		check_s_ += p_delta;
+		if (screens_->phase(ui::kPopupGenericPartition) != UiScreenPhase::Shown) {
+			if (check_s_ > kKickPopupCheckSeconds) {
+				failure_ = bf3::core::fmt("popupgeneric not shown %.0f s after it opened", kKickPopupCheckSeconds);
+			}
+			return;
+		}
+		ui::HudScreen *s = screens_->hud_screen(ui::kPopupGenericPartition);
+		const std::string root(ui::kHudScreenInstance);
+		const std::string button = root + "." + std::string(ui::kKickPopupButtons) + ".holder.btn0";
+		const std::optional<Vector2> at = screens_->clip_centre(ui::kPopupGenericPartition, button);
+		if (s == nullptr || !at) {
+			failure_ = "popupgeneric has no " + button;
+			return;
+		}
+		say("kick popup: title \"" + s->clip(root + ".PopupGenericWidget_01.popupTitle").text() + "\", text \"" +
+				s->clip(root + ".PopupGenericWidget_01.popupText").text() + "\", button \"" +
+				s->clip(button + ".button.label.txt").text() + "\"" +
+				bf3::core::fmt(", shown %.2f s after it opened; clicking it", check_s_));
+		clicked_ = true;
+		screens_->mouse_move(*at);
+		screens_->mouse_button(*at, int32_t(MOUSE_BUTTON_LEFT), true);
+		screens_->mouse_button(*at, int32_t(MOUSE_BUTTON_LEFT), false);
+	}
+
 	bool try_open() {
 		Bf3Localisation *loc = Bf3Localisation::current();
 		Bf3UiAssets *assets = Bf3UiAssets::current();
@@ -169,6 +200,9 @@ private:
 
 	std::string reason_;
 	bool timed_out_ = false;
+	bool check_ = false;
+	bool clicked_ = false;
+	double check_s_ = 0.0;
 	CanvasLayer *layer_ = nullptr;
 	Bf3UiScreens *screens_ = nullptr;
 	Bf3UiCursor *cursor_ = nullptr;
@@ -736,7 +770,8 @@ void Bf3MatchHost::end_match(const std::string &p_reason) {
 	if (!headless_ && Bf3Localisation::current() != nullptr) {
 		free_session();
 		set_process_unhandled_input(true);
-		kick_ = std::make_unique<NativeKick>(this, kick_text_.empty() ? p_reason : kick_text_, timed_out_kick_);
+		kick_ = std::make_unique<NativeKick>(
+				this, kick_text_.empty() ? p_reason : kick_text_, timed_out_kick_, has_check_arg("kick-popup-check"));
 		return;
 	}
 	if (Bf3LevelSession *s = session(); s != nullptr && s->level_assigned()) {
