@@ -1,12 +1,15 @@
 #include "bf3/sim_harness/vehicle_replay.h"
 
+#include "bf3/core/thread_pool.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/splitmix64.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <optional>
 #include <string>
 
 namespace bf3::sim {
@@ -75,6 +78,14 @@ struct Recording {
 	std::vector<std::vector<VehicleContacts>> contacts;
 	std::vector<std::vector<uint64_t>> state_hashes;
 	std::vector<std::vector<VehicleCommand>> commands;
+};
+
+struct ReplayTally {
+	uint32_t runs = 0;
+	uint32_t ticks = 0;
+	uint32_t mismatches = 0;
+	VehicleDivergence first;
+	size_t first_run = 0;
 };
 
 struct Harness {
@@ -189,33 +200,75 @@ struct Harness {
 		return core::Status::success();
 	}
 
-	core::Status check_g1(VehicleWorld &r_server, const Recording &p_rec, const VehicleReplayOptions &p_options, uint64_t p_salt, uint32_t &r_g1_ticks,
-			uint32_t &r_g1_mismatches, VehicleDivergence &r_g1_first, uint32_t &r_runs, uint32_t &r_replay_ticks, uint32_t &r_replay_mismatches,
-			VehicleDivergence &r_replay_first, std::unique_ptr<VehicleWorld> &r_prediction) {
-		core::Result<std::unique_ptr<VehicleWorld>> made = make_world();
-		BF3_TRY(made);
-		r_prediction = std::move(*made);
-		BF3_TRY(r_prediction->restore(p_rec.snapshots[0]));
-		BF3_TRY(replay(*r_prediction, p_rec, 0, p_rec.ticks, r_g1_ticks, r_g1_mismatches, r_g1_first));
-		if (p_rec.ticks < 2) {
-			return core::Status::success();
-		}
-		std::vector<uint32_t> restore_ticks;
-		for (const uint32_t t : p_options.restore_ticks) {
-			restore_ticks.push_back(std::min(t, p_rec.ticks - 1));
-		}
-		uint64_t seed = p_options.seed ^ (p_salt * 0x9E3779B97F4A7C15ull);
-		for (uint32_t i = 0; i < p_options.random_restores; ++i) {
-			restore_ticks.push_back(1u + uint32_t(splitmix64_next(seed) % uint64_t(p_rec.ticks - 1)));
-		}
-		for (const uint32_t t : restore_ticks) {
-			const uint32_t end = std::min<uint32_t>(p_rec.ticks, t + p_options.replay_length);
-			for (VehicleWorld *w : { r_prediction.get(), &r_server }) {
-				BF3_TRY(w->restore(p_rec.snapshots[t]));
-				++r_runs;
-				BF3_TRY(replay(*w, p_rec, t, end, r_replay_ticks, r_replay_mismatches, r_replay_first));
+	core::Status restore_replays(VehicleWorld &r_world, const Recording &p_rec,
+			const std::vector<uint32_t> &p_restore_ticks, uint32_t p_length, size_t p_world, ReplayTally &r_tally) {
+		for (size_t k = 0; k < p_restore_ticks.size(); ++k) {
+			const uint32_t t = p_restore_ticks[k];
+			const uint32_t end = std::min<uint32_t>(p_rec.ticks, t + p_length);
+			BF3_TRY(r_world.restore(p_rec.snapshots[t]));
+			++r_tally.runs;
+			const uint32_t before = r_tally.mismatches;
+			BF3_TRY(replay(r_world, p_rec, t, end, r_tally.ticks, r_tally.mismatches, r_tally.first));
+			if (before == 0 && r_tally.mismatches != 0) {
+				r_tally.first_run = k * 2 + p_world;
 			}
 		}
+		return core::Status::success();
+	}
+
+	core::Status check_g1(VehicleWorld &r_server, const Recording &p_rec, const VehicleReplayOptions &p_options,
+			uint64_t p_salt, uint32_t &r_g1_ticks, uint32_t &r_g1_mismatches, VehicleDivergence &r_g1_first,
+			uint32_t &r_runs, uint32_t &r_replay_ticks, uint32_t &r_replay_mismatches,
+			VehicleDivergence &r_replay_first) {
+		core::Result<std::unique_ptr<VehicleWorld>> made = make_world();
+		BF3_TRY(made);
+		std::unique_ptr<VehicleWorld> prediction = std::move(*made);
+		std::vector<uint32_t> restore_ticks;
+		if (p_rec.ticks >= 2) {
+			for (const uint32_t t : p_options.restore_ticks) {
+				restore_ticks.push_back(std::min(t, p_rec.ticks - 1));
+			}
+			uint64_t seed = p_options.seed ^ (p_salt * 0x9E3779B97F4A7C15ull);
+			for (uint32_t i = 0; i < p_options.random_restores; ++i) {
+				restore_ticks.push_back(1u + uint32_t(splitmix64_next(seed) % uint64_t(p_rec.ticks - 1)));
+			}
+		}
+		std::array<Harness, 2> lanes{ *this, *this };
+		std::array<ReplayTally, 2> tallies;
+		std::array<core::Status, 2> status;
+		core::parallel_for(
+				2,
+				[&](size_t p_world) {
+					Harness &h = lanes[p_world];
+					h.steps = 0;
+					if (p_world == 1) {
+						status[1] = h.restore_replays(
+								r_server, p_rec, restore_ticks, p_options.replay_length, 1, tallies[1]);
+						return;
+					}
+					status[0] = [&]() -> core::Status {
+						BF3_TRY(prediction->restore(p_rec.snapshots[0]));
+						BF3_TRY(h.replay(*prediction, p_rec, 0, p_rec.ticks, r_g1_ticks, r_g1_mismatches, r_g1_first));
+						return h.restore_replays(
+								*prediction, p_rec, restore_ticks, p_options.replay_length, 0, tallies[0]);
+					}();
+				},
+				p_options.lanes);
+		steps += lanes[0].steps + lanes[1].steps;
+		BF3_TRY(status[0]);
+		BF3_TRY(status[1]);
+		const ReplayTally *first = nullptr;
+		for (const ReplayTally &t : tallies) {
+			r_runs += t.runs;
+			r_replay_ticks += t.ticks;
+			if (t.mismatches != 0 && (first == nullptr || t.first_run < first->first_run)) {
+				first = &t;
+			}
+		}
+		if (first != nullptr && r_replay_mismatches == 0) {
+			r_replay_first = first->first;
+		}
+		r_replay_mismatches += tallies[0].mismatches + tallies[1].mismatches;
 		return core::Status::success();
 	}
 };
@@ -415,32 +468,60 @@ core::Result<VehicleCourseReport> run_vehicle_course(std::shared_ptr<const Stati
 	}
 	report.drove = vehicle_course_drove(report, &report.drove_why);
 
-	std::unique_ptr<VehicleWorld> prediction;
-	if (p_options.g1) {
-		BF3_TRY(h.check_g1(**server, rec, p_options, uint64_t(p_course.kind) + 1u, report.g1_ticks, report.g1_mismatches, report.g1_first, report.replay_runs,
-				report.replay_ticks, report.replay_mismatches, report.replay_first, prediction));
-	}
-	if (p_options.g2) {
-		if (prediction == nullptr) {
-			core::Result<std::unique_ptr<VehicleWorld>> made = h.make_world();
-			BF3_TRY(made);
-			prediction = std::move(*made);
+	const uint32_t modes = p_options.g2 ? (p_options.modes | 1u) : 0u;
+	const uint32_t pod_bits =
+			(1u << uint32_t(VehicleRestoreMode::ExactPod)) | (1u << uint32_t(VehicleRestoreMode::PodOwnLambdas));
+	const size_t replays = p_options.replay_ticks.size();
+	const size_t g1_job = kVehicleRestoreModeCount * replays;
+	std::vector<ClientHistory> own(replays);
+	std::vector<std::optional<VehicleCorrectionReport>> corrections(g1_job);
+	const auto run_job = [&](Harness &r_lane, size_t p_job) -> core::Status {
+		if (p_job == g1_job) {
+			return r_lane.check_g1(**server, rec, p_options, uint64_t(p_course.kind) + 1u, report.g1_ticks,
+					report.g1_mismatches, report.g1_first, report.replay_runs, report.replay_ticks,
+					report.replay_mismatches, report.replay_first);
 		}
-
-		const uint32_t modes = p_options.modes | 1u;
-		const uint32_t pod_bits = (1u << uint32_t(VehicleRestoreMode::ExactPod)) | (1u << uint32_t(VehicleRestoreMode::PodOwnLambdas));
-		std::vector<ClientHistory> own(p_options.replay_ticks.size());
+		const size_t m = p_job / replays, i = p_job % replays;
+		core::Result<std::unique_ptr<VehicleWorld>> client = r_lane.make_world();
+		BF3_TRY(client);
+		const bool primary = VehicleRestoreMode(m) == VehicleRestoreMode::OwnHistory;
+		VehicleCorrectionReport c;
+		BF3_TRY(client_loop(r_lane, **client, rec, VehicleRestoreMode(m), p_options.replay_ticks[i], p_options,
+				primary ? nullptr : &own[i], primary && (modes & pod_bits) != 0 ? &own[i] : nullptr, c));
+		corrections[p_job] = c;
+		return core::Status::success();
+	};
+	for (const bool pod_phase : { false, true }) {
+		std::vector<size_t> jobs;
+		if (!pod_phase && p_options.g1) {
+			jobs.push_back(g1_job);
+		}
 		for (size_t m = 0; m < kVehicleRestoreModeCount; ++m) {
-			if ((modes & (1u << m)) == 0) {
-				continue;
+			if ((modes & (1u << m)) != 0 && ((pod_bits & (1u << m)) != 0) == pod_phase) {
+				for (size_t i = 0; i < replays; ++i) {
+					jobs.push_back(m * replays + i);
+				}
 			}
-			const bool primary = VehicleRestoreMode(m) == VehicleRestoreMode::OwnHistory;
-			for (size_t i = 0; i < p_options.replay_ticks.size(); ++i) {
-				VehicleCorrectionReport c;
-				BF3_TRY(client_loop(h, *prediction, rec, VehicleRestoreMode(m), p_options.replay_ticks[i], p_options, primary ? nullptr : &own[i],
-						primary && (modes & pod_bits) != 0 ? &own[i] : nullptr, c));
-				report.corrections.push_back(c);
-			}
+		}
+		std::vector<Harness> lanes(jobs.size(), h);
+		std::vector<core::Status> status(jobs.size());
+		core::parallel_for(
+				jobs.size(),
+				[&](size_t j) {
+					lanes[j].steps = 0;
+					status[j] = run_job(lanes[j], jobs[j]);
+				},
+				p_options.lanes);
+		for (size_t j = 0; j < jobs.size(); ++j) {
+			h.steps += lanes[j].steps;
+		}
+		for (const core::Status &s : status) {
+			BF3_TRY(s);
+		}
+	}
+	for (std::optional<VehicleCorrectionReport> &c : corrections) {
+		if (c.has_value()) {
+			report.corrections.push_back(*c);
 		}
 	}
 	report.steps = h.steps;
@@ -695,9 +776,8 @@ core::Result<VehicleGroupReport> run_vehicle_group(std::shared_ptr<const StaticW
 		report.ticks_vehicle_contact += contact ? 1u : 0u;
 		report.slot0_ticks_asleep += rec.states[t][0].body.active == 0 ? 1u : 0u;
 	}
-	std::unique_ptr<VehicleWorld> prediction;
-	BF3_TRY(h.check_g1(**server, rec, p_options, 0x51u, report.g1_ticks, report.g1_mismatches, report.g1_first, report.replay_runs, report.replay_ticks,
-			report.replay_mismatches, report.replay_first, prediction));
+	BF3_TRY(h.check_g1(**server, rec, p_options, 0x51u, report.g1_ticks, report.g1_mismatches, report.g1_first,
+			report.replay_runs, report.replay_ticks, report.replay_mismatches, report.replay_first));
 	report.steps = h.steps;
 	report.seconds = seconds_since(start);
 	return report;

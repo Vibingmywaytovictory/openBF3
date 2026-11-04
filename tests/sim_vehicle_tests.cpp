@@ -789,6 +789,7 @@ TEST_SUITE("sim-vehicle-unit") {
 		const std::shared_ptr<const VehicleModel> m = fixture_model();
 		std::vector<VehicleCourseReport> reports;
 		VehicleReplayOptions o;
+		o.lanes = 0;
 		if (kAsan) {
 
 			o.modes = (1u << uint32_t(VehicleRestoreMode::OwnHistory)) | (1u << uint32_t(VehicleRestoreMode::ExactPod)) |
@@ -798,7 +799,7 @@ TEST_SUITE("sim-vehicle-unit") {
 
 		const auto synthetic = synthetic_vehicle_courses();
 		std::vector<core::Result<VehicleCourseReport>> runs = core::parallel_map<core::Result<VehicleCourseReport>>(
-				synthetic.size(), [&](size_t i) { return run_vehicle_course(shapes, m, synthetic[i], o); }, kCourseLanes);
+				synthetic.size(), [&](size_t i) { return run_vehicle_course(shapes, m, synthetic[i], o); });
 		for (size_t i = 0; i < synthetic.size(); ++i) {
 			const VehicleCourse &c = synthetic[i];
 			core::Result<VehicleCourseReport> &r = runs[i];
@@ -832,7 +833,9 @@ TEST_SUITE("sim-vehicle-unit") {
 		const std::shared_ptr<const StaticWorldShapes> shapes = ground_shapes();
 		const std::shared_ptr<const VehicleModel> m = fixture_model();
 		const std::array<VehicleCourse, 3> group = synthetic_vehicle_group();
-		core::Result<VehicleGroupReport> r = run_vehicle_group(shapes, m, group);
+		VehicleReplayOptions o;
+		o.lanes = 0;
+		core::Result<VehicleGroupReport> r = run_vehicle_group(shapes, m, group, o);
 		REQUIRE_MESSAGE(r.ok(), (r.ok() ? std::string() : r.error().message));
 		std::printf("G1m %s", format_vehicle_group_report(*r).c_str());
 		std::string why;
@@ -904,7 +907,9 @@ TEST_SUITE("sim-vehicle-unit") {
 		group[2].a = { -50.0f, ground_y(-50.0f, 17.0f), 17.0f };
 		group[2].b = { 90.0f, y64 + slope * 26.0f, 17.0f };
 		group[2].start = at(-50.0f, 17.0f, true);
-		core::Result<VehicleGroupReport> r = run_vehicle_group(*shapes, m, group);
+		VehicleReplayOptions o;
+		o.lanes = 0;
+		core::Result<VehicleGroupReport> r = run_vehicle_group(*shapes, m, group, o);
 		REQUIRE_MESSAGE(r.ok(), (r.ok() ? std::string() : r.error().message));
 		std::printf("G1t %s", format_vehicle_group_report(*r).c_str());
 		std::string why;

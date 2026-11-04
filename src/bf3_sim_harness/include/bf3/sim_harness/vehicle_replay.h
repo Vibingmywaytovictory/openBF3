@@ -48,6 +48,7 @@ struct VehicleReplayOptions {
 	VehicleGhostQuantisation quantisation = kDefaultVehicleGhost;
 	bool g1 = true, g2 = true;
 	bool keep_hashes = true;
+	unsigned lanes = 1;
 };
 
 struct VehicleDivergence {
