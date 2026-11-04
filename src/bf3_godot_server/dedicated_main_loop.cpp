@@ -438,11 +438,11 @@ bool DedicatedMainLoop::_process(double p_delta) {
 		return true;
 	}
 	elapsed_ += p_delta;
-	report_timer_ += p_delta;
+	const bool report_due = report_cadence_.step(p_delta);
 	const bool kills_due = args_.stop_after_kills > 0;
 	const bool levels_due = args_.stop_after_levels > 0;
 	bool levels_played = false;
-	if (report_timer_ >= 1.0 || kills_due || levels_due) {
+	if (report_due || kills_due || levels_due) {
 		const host::ServerSessionStats stats = session_->stats();
 		levels_played = levels_due && stats.rotation.level_changes + 1u >= args_.stop_after_levels &&
 				!stats.rotation.changing && stats.game.clients == 0;
@@ -451,8 +451,7 @@ bool DedicatedMainLoop::_process(double p_delta) {
 		stuck_ = stats.stuck_bots;
 		private_bytes_ = stats.private_bytes;
 		peak_private_bytes_ = stats.peak_private_bytes;
-		if (report_timer_ >= 1.0) {
-			report_timer_ = 0.0;
+		if (report_due) {
 			report(stats);
 		}
 	}

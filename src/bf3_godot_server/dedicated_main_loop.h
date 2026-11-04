@@ -2,6 +2,7 @@
 
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
+#include "bf3/core/util/cadence.h"
 #include "bf3/host/net_stats.h"
 #include "bf3/host/server_session.h"
 #include "upnp_mapping.h"
@@ -62,7 +63,7 @@ private:
 	std::unique_ptr<bf3::host::ServerSession> session_;
 	bf3::host::ServerNetMeter net_meter_;
 	double elapsed_ = 0.0;
-	double report_timer_ = 0.0;
+	bf3::core::Cadence report_cadence_{ 1.0 };
 	double load_seconds_ = 0.0;
 	int32_t kills_ = 0;
 	uint64_t squad_samples_ = 0;

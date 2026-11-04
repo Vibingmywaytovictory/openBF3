@@ -2,6 +2,7 @@
 
 #include "bf3/core/math.h"
 #include "bf3/core/util/big_endian.h"
+#include "bf3/core/util/cadence.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/fft.h"
 #include "bf3/core/util/finite.h"
@@ -139,6 +140,34 @@ TEST_SUITE("core-util-unit") {
 		CHECK(s >= 0.05);
 		CHECK(ms >= 50.0);
 		CHECK(ms >= s * 1000.0);
+	}
+
+	TEST_CASE("core.util: a 1 s Cadence stepped by 33 ms frames fires the k-th time within one frame after k s") {
+		Cadence cadence(1.0);
+		constexpr double kFrame = 0.033;
+		double t = 0.0;
+		uint32_t fires = 0;
+		bool on_time = true;
+		for (uint32_t frame = 0; frame < 3636; ++frame) {
+			t += kFrame;
+			if (cadence.step(kFrame)) {
+				++fires;
+				on_time = on_time && t >= double(fires) - 1e-9 && t < double(fires) + kFrame + 1e-9;
+			}
+		}
+		CHECK(t < 120.0);
+		CHECK(fires == 119u);
+		CHECK(on_time);
+	}
+
+	TEST_CASE("core.util: a Cadence fires once for a frame of several periods and keeps its phase after it") {
+		Cadence cadence(1.0);
+		CHECK(cadence.step(5.25));
+		CHECK_FALSE(cadence.step(0.25));
+		CHECK_FALSE(cadence.step(0.25));
+		CHECK(cadence.step(0.25));
+		CHECK_FALSE(cadence.step(0.5));
+		CHECK(cadence.step(0.5));
 	}
 
 	TEST_CASE("core.util: thread_cpu_seconds counts this thread's work, not its sleep") {
