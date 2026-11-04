@@ -83,6 +83,8 @@ struct PresentedGrenade {
 	bool resting = false;
 };
 
+uint8_t shot_round_flag(const sim::weapons::WeaponTable &p_table, uint16_t p_def, uint8_t p_variant);
+
 bool shot_event_of(const net::RemoteShot &p_shot, const sim::weapons::WeaponTable &p_table, uint64_t p_match_seed,
 		sim::weapons::ShotEvent &r_event, uint8_t p_variant = 0);
 

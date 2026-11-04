@@ -1393,6 +1393,13 @@ TEST_SUITE("host-gunplay-client-unit") {
 		CHECK(derived.seed == sw::shot_seed(1, 9, 41));
 		CHECK(derived.spawn_time == r.time + t.table->defs[t.rifle].spawn_delay);
 		CHECK(!host::shot_event_of(bad, *t.table, 1, derived));
+		CHECK(host::shot_round_flag(*t.table, t.rifle, 0) == 0);
+		CHECK(host::shot_round_flag(*t.table, bad.def, 0) == 0);
+		sw::WeaponTable thrown = *t.table;
+		thrown.defs[t.rifle].projectile.kind = sw::ProjectileKind::Other;
+		CHECK(host::shot_round_flag(thrown, t.rifle, 0) == host::present_flags::kNoRound);
+		thrown.defs[t.rifle].projectile.kind = sw::ProjectileKind::None;
+		CHECK(host::shot_round_flag(thrown, t.rifle, 0) == host::present_flags::kNoRound);
 		std::printf("client projectiles: own contact %zu (chest of slot 5 at its rewound record), %" PRIu64 " E12 samples, remote impact %zu, refused %" PRIu64 "\n",
 				contacts, p.stats().samples_logged, impacts, p.stats().refused);
 	}

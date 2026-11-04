@@ -638,6 +638,16 @@ TEST_CASE("shots: 1p and 3p muzzles, shells per firearm shot, fallbacks, knife, 
 	CHECK(t.stats().muzzle_fallbacks == 1);
 	CHECK(starts_of(t, kMuzz3p).size() == 1);
 
+	hk::PresentEvent thrown = remote;
+	thrown.id = 11;
+	thrown.seed = hk::effect_seed(kMatch, 5, 11);
+	thrown.flags = uint8_t(hk::present_flags::kNoRound | hk::present_flags::kTracer);
+	t.on_events(std::span<const hk::PresentEvent>(&thrown, 1), clock_at(0), kNear);
+	CHECK(t.starts().empty());
+	CHECK(t.stats().no_round_shots == 1);
+	CHECK(t.stats().muzzle_fallbacks == 1);
+	CHECK(t.live_tracers() == 0);
+
 	hk::PresentEvent knife = ev(hk::PresentKind::OwnShot, 1, 1, 2, { 0, 1.6f, 0 }, { 0, 0, 1 });
 	t.on_events(std::span<const hk::PresentEvent>(&knife, 1), clock_at(0), kNear);
 	CHECK(t.starts().empty());

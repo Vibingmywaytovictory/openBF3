@@ -980,6 +980,10 @@ struct FxTriggers::Impl {
 	void on_shot(const present::PresentEvent &p_e, float p_age) {
 		const bool own = p_e.kind == present::PresentKind::OwnShot;
 		++(own ? stats.own_shots : stats.remote_shots);
+		if ((p_e.flags & present::flags::kNoRound) != 0) {
+			++stats.no_round_shots;
+			return;
+		}
 		const uint16_t effects = effects_of(p_e.slot, p_e.def);
 		const WeaponFireEffects *w = def_of(effects);
 		const Vec3 origin = from(p_e.pos);

@@ -136,7 +136,7 @@ void ClientGunplay::Emit::emitted(const sim::Command &p_command, const sim::weap
 		copy3(e.pos, shot.origin);
 		copy3(e.dir, shot.direction);
 		e.aux = shot.weapon_slot;
-		e.flags = shot.tracer ? present_flags::kTracer : uint8_t(0);
+		e.flags = uint8_t((shot.tracer ? present_flags::kTracer : 0u) | s.round_flag(shot.def, shot.variant));
 		e.seed = effect_seed(s.match_seed_, own, shot.shot_index);
 		e.value = shot.power;
 		e.extra = shot.pellets;
@@ -150,7 +150,7 @@ void ClientGunplay::Emit::emitted(const sim::Command &p_command, const sim::weap
 			s.fired_view_seq_ = v.view.view_seq;
 			s.fired_ns_ = s.clock_();
 		}
-		if (s.projectiles_ != nullptr) {
+		if (s.projectiles_ != nullptr && (e.flags & present_flags::kNoRound) == 0) {
 			s.projectiles_->spawn_own(shot, have_view ? v.view : ShotView{});
 		}
 	}
@@ -279,6 +279,10 @@ bool ClientGunplay::def_ok(uint32_t p_def) const {
 	return table_ != nullptr && p_def < table_->defs.size();
 }
 
+uint8_t ClientGunplay::round_flag(uint16_t p_def, uint8_t p_variant) const {
+	return table_ != nullptr ? shot_round_flag(*table_, p_def, p_variant) : uint8_t(0);
+}
+
 void ClientGunplay::shot_events(const net::NetSim::Datagram &p_d) {
 	core::Result<net::ShotEvents> e = net::decode_shot_events(p_d.bytes, frame_);
 	if (!e) {
@@ -301,15 +305,16 @@ void ClientGunplay::shot_events(const net::NetSim::Datagram &p_d) {
 		ev.def = r.def;
 		copy3(ev.pos, r.origin);
 		copy3(ev.dir, r.direction);
-		ev.flags = r.tracer ? present_flags::kTracer : uint8_t(0);
+		const uint8_t variant = gear_variant(r.slot, r.def);
+		ev.flags = uint8_t((r.tracer ? present_flags::kTracer : 0u) | round_flag(r.def, variant));
 		ev.seed = effect_seed(match_seed_, r.slot, r.shot_index);
 		ev.value = r.power;
 		ev.extra = r.pellets;
 		ev.time = r.time;
 		events_.push(ev);
 		++remote_shots_;
-		if (projectiles_ != nullptr) {
-			projectiles_->queue_remote(r, gear_variant(r.slot, r.def));
+		if (projectiles_ != nullptr && (ev.flags & present_flags::kNoRound) == 0) {
+			projectiles_->queue_remote(r, variant);
 		}
 	}
 }

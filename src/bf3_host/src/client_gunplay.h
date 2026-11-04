@@ -120,6 +120,7 @@ private:
 	static constexpr size_t kLogLimit = size_t(1) << 20;
 
 	bool def_ok(uint32_t p_def) const;
+	uint8_t round_flag(uint16_t p_def, uint8_t p_variant) const;
 	bool wire_at(sim::Tick p_tick) const { return on_ && wire_valid_ && wire_tick_ == p_tick; }
 	bool put_wire(const sim::SoldierState &p_s, sim::Tick p_spawn_tick);
 	uint8_t gear_variant(uint8_t p_slot, uint16_t p_def) const;

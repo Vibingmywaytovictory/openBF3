@@ -259,6 +259,7 @@ struct FxTriggerStats {
 	uint64_t remote_shots = 0;
 	uint64_t firearm_shots = 0;
 	uint64_t tracer_shots = 0;
+	uint64_t no_round_shots = 0;
 	uint64_t hits_confirmed = 0;
 	uint64_t duds = 0;
 	uint64_t rejected = 0;

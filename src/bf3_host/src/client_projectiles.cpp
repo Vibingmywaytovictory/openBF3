@@ -37,6 +37,12 @@ bool bit(const std::array<uint64_t, 2> &p_mask, uint32_t p_slot) {
 
 }
 
+uint8_t shot_round_flag(const sw::WeaponTable &p_table, uint16_t p_def, uint8_t p_variant) {
+	return p_def < p_table.defs.size() && !sw::fires_round(p_table.def(p_def, p_variant).projectile)
+			? present_flags::kNoRound
+			: uint8_t(0);
+}
+
 bool shot_event_of(const net::RemoteShot &p_shot, const sw::WeaponTable &p_table, uint64_t p_match_seed,
 		sw::ShotEvent &r_event, uint8_t p_variant) {
 	if (p_shot.def >= p_table.defs.size()) {

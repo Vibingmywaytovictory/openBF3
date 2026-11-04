@@ -608,7 +608,7 @@ core::Status ProjectileWorld::spawn(const ShotEvent &p_shot) {
 		return core::make_error("ProjectileWorld::spawn: def " + std::to_string(p_shot.def) + " is not in the table");
 	}
 	const ProjectileSimDef &d = table_->def(p_shot.def, p_shot.variant).projectile;
-	if (d.kind == ProjectileKind::None || d.kind == ProjectileKind::Other) {
+	if (!fires_round(d)) {
 		++refused_;
 		return core::make_error("ProjectileWorld::spawn: " + table_->defs[p_shot.def].variant + " fires no simulated projectile");
 	}
@@ -676,7 +676,7 @@ bool refly_projectile(const WeaponTable &p_table, const ShotEvent &p_shot, uint8
 		return false;
 	}
 	const ProjectileSimDef &d = p_table.def(p_shot.def, p_shot.variant).projectile;
-	if (d.kind == ProjectileKind::None || d.kind == ProjectileKind::Other) {
+	if (!fires_round(d)) {
 		r_status = core::make_error("refly_projectile: the def fires no simulated projectile");
 		return false;
 	}

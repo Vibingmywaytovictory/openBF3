@@ -173,6 +173,10 @@ inline constexpr size_t kMaxWeaponVariants = 255;
 inline constexpr size_t kMaxWeaponVariantCombos = 4096;
 inline constexpr size_t kNoVariantOption = SIZE_MAX;
 
+inline bool fires_round(const ProjectileSimDef &p_projectile) {
+	return p_projectile.kind != ProjectileKind::None && p_projectile.kind != ProjectileKind::Other;
+}
+
 struct WeaponTable {
 	std::vector<WeaponSimDef> defs;
 	std::vector<std::vector<WeaponSimDef>> variants;
