@@ -5,11 +5,13 @@
 #include "bf3/core/install.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/ui/as2_clip.h"
+#include "bf3/core/ui/hud_icons.h"
 #include "bf3/core/ui/hud_messages.h"
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/hud_widget_registry.h"
 #include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/kick_popup.h"
+#include "bf3/core/ui/squad_order_marks.h"
 #include "bf3/core/ui/swf_hit.h"
 #include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/swf_scene.h"
@@ -29,6 +31,7 @@
 #include <cstdio>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -1605,6 +1608,77 @@ TEST_SUITE("ui-hud-screen") {
 		row("icon3d", "MapmarkerManager key 1055499673 UIMapmarkertagComp at the visible rect without the safe rect; Marker tag create -> stop at " +
 						std::to_string(complete) + ", red label for UIHudIcon 4 (name set by the next updateTag, the red frame has its own field), hiddenRed/showRed snapping, spotted, remove -> removed; TeamSupportIcon frame " +
 						std::to_string(beacon) + " (RadioBeacon) team 2; Alert snapped");
+	}
+
+	TEST_CASE("hud screen: squad order markers") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		REQUIRE(r->ui != nullptr);
+		Result<HudIconAtlas> atlas = read_hud_icon_atlas(*r->ui);
+		REQUIRE_MESSAGE(atlas.ok(), (atlas.ok() ? std::string() : atlas.error().message));
+		HudModel m = moment_m02();
+		HudWorldTags world;
+		HudClientState c = test_client();
+		c.world_tags = &world;
+		Screen t = initialized(*r, kHudTdmScreenPartition, m, c);
+		const std::string mm = "instance1.MapmarkerManager_00";
+		const auto *api = dynamic_cast<HudIcon3DManagerApi *>(t.hud->controller(mm));
+		REQUIRE(api != nullptr);
+		Icon3dPlacement at;
+		at.shown = true;
+		at.x = 640.0f;
+		at.y = 300.0f;
+		CHECK_FALSE(squad_order_look(HudSquadOrder::None));
+		CHECK_FALSE(squad_order_tag(1, HudSquadOrder::None, at));
+		Icon3dPlacement hidden = at;
+		hidden.shown = false;
+		CHECK_FALSE(squad_order_tag(1, HudSquadOrder::Attack, hidden));
+		std::string summary;
+		uint32_t id = 40;
+		for (const HudSquadOrder order : { HudSquadOrder::Attack, HudSquadOrder::Defend, HudSquadOrder::Move }) {
+			const std::optional<HudSquadOrderLook> look = squad_order_look(order);
+			REQUIRE(look);
+			const std::optional<HudWorldTag> made = squad_order_tag(++id, order, at);
+			REQUIRE(made);
+			CHECK(made->component == HudTagComponent::Mapmarker);
+			world.tags = { *made };
+			t.hud->refresh(m);
+			REQUIRE(api->tag_paths().size() == 1);
+			const std::string tag = api->tag_paths().front();
+			CHECK(tag == mm + ".tag" + std::to_string(id));
+			CHECK(t.hud->widget(tag)->class_name == "Widget.Icon3D.Mapmarker.Mapmarkertag");
+			CHECK(t.at(tag).visible);
+			CHECK(t.clip(tag).x() == doctest::Approx(640.0f));
+			CHECK(t.clip(tag).y() == doctest::Approx(300.0f));
+			const uint32_t frame = t.label(tag + ".tag.icon", look->marker_frame);
+			CHECK(frame + 1 == uint32_t(look->marker_icon));
+			CHECK(t.at(tag + ".tag.icon").frame == frame);
+			CHECK(t.at(tag + ".tag.iconBg").visible);
+			const bool red = order == HudSquadOrder::Attack;
+			CHECK(t.at(tag + ".tag").frame == t.label(tag + ".tag", red ? "hiddenRed" : "hiddenBlue"));
+			CHECK_FALSE(t.at(tag + ".tag.label").visible);
+			const HudIcon *mini = atlas->find(look->minimap_icon);
+			REQUIRE_MESSAGE(mini != nullptr, std::string(look->minimap_icon));
+			const HudIconStateFrames *st = mini->state(HudIconState::Default);
+			REQUIRE(st != nullptr);
+			CHECK_FALSE(st->frames.empty());
+			world.tags.clear();
+			t.hud->refresh(m);
+			CHECK(t.at(tag).frame == t.label(tag, "remove"));
+			CHECK(frames_until(t, [&] { return t.scene->find_node(tag) == nullptr; }, 30) > 0);
+			t.hud->refresh(m);
+			CHECK(api->tag_paths().empty());
+			summary += std::string(summary.empty() ? "" : ", ") + std::string(look->marker_frame) + " frame " +
+					std::to_string(frame + 1) + (red ? " red" : " blue") + ", minimap " +
+					std::string(look->minimap_icon) + " (" + std::to_string(st->frames.size()) + " frame)";
+		}
+		CHECK(t.hud->stats().as2.failed_ops == 0);
+		row("squad_order",
+				"MapmarkerManager_00 Marker tags from squad orders, the icon frame by the iconsIngame label and the "
+				"AS2 UIHudIcon number: " +
+						summary);
 	}
 
 	TEST_CASE("hud screen: KillFeed") {

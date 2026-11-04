@@ -15,6 +15,7 @@
 #include "bf3/core/ui/hud_icons.h"
 #include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/minimap.h"
+#include "bf3/core/ui/squad_order_marks.h"
 #include "bf3/core/ui/text_db.h"
 #include "bf3/core/util/elapsed.h"
 
@@ -613,6 +614,7 @@ void Bf3NativeHud::step(double p_seconds) {
 	}
 	if (tags_ != nullptr && !fixture_) {
 		tags_->update_alerts(world_camera_, world_show_ && is_visible_in_tree(), ui_stage(this), world_tags_);
+		tags_->update_orders(world_camera_, world_show_ && is_visible_in_tree(), ui_stage(this), world_tags_);
 	} else {
 		world_tags_.tags.clear();
 	}
@@ -1013,6 +1015,16 @@ void Bf3NativeHud::paint_minimap(const SwfEngineTarget &p_target, const ui::SwfS
 		if (on_map(p)) {
 			draw(dead, ui::HudIconState::Friendly, Vector2(p.x, p.y), 0.0f, MinimapDebugKind::Downed, d.x, d.z);
 			paint_.minimap_downed++;
+		}
+	}
+	if (tags_ != nullptr && tags_->order_mark()) {
+		const NativeOrderMark &o = *tags_->order_mark();
+		const std::optional<ui::HudSquadOrderLook> look = ui::squad_order_look(o.order);
+		const ui::ScreenPoint p = ui::minimap_project(view, o.position[0], o.position[2]);
+		if (look && on_map(p)) {
+			draw(a->atlas.find(look->minimap_icon), ui::HudIconState::Default, Vector2(p.x, p.y), 0.0f,
+					MinimapDebugKind::Objective, o.position[0], o.position[2]);
+			paint_.minimap_orders++;
 		}
 	}
 	if (tags_ != nullptr) {

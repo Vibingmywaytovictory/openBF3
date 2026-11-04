@@ -1052,6 +1052,50 @@ TEST_CASE("squads: the own squad's members by slot with its leader, the team's s
 	CHECK(state.bad_inputs == 1);
 }
 
+TEST_CASE("squad orders: the own squad's standing order is the one shown; other squads', the other team's and None are "
+		  "not") {
+	std::vector<net::PlayerRow> rows{ player(1, 2, "Me"), player(2, 1, "Enemy"), player(3, 2, "Loner") };
+	rows[0].squad = 3;
+	rows[1].squad = 3;
+	std::array<std::array<net::SquadOrder, net::kMaxSquads>, 2> orders{};
+	CHECK_FALSE(host::own_squad_order(orders, rows, 1));
+	net::SquadOrder enemy;
+	enemy.team = 1;
+	enemy.squad = 3;
+	enemy.kind = net::SquadOrderKind::Attack;
+	enemy.position = { 1.0f, 2.0f, 3.0f };
+	orders[0][2] = enemy;
+	CHECK_FALSE(host::own_squad_order(orders, rows, 1));
+	REQUIRE(host::own_squad_order(orders, rows, 2));
+	net::SquadOrder other = enemy;
+	other.team = 2;
+	other.squad = 4;
+	orders[1][3] = other;
+	CHECK_FALSE(host::own_squad_order(orders, rows, 1));
+	net::SquadOrder mine = other;
+	mine.squad = 3;
+	mine.kind = net::SquadOrderKind::Defend;
+	mine.area = 5;
+	mine.position = { 10.0f, 0.5f, -20.0f };
+	orders[1][2] = mine;
+	const std::optional<net::SquadOrder> got = host::own_squad_order(orders, rows, 1);
+	REQUIRE(got);
+	CHECK(got->kind == net::SquadOrderKind::Defend);
+	CHECK(got->area == 5);
+	CHECK(got->position[2] == -20.0f);
+	CHECK_FALSE(host::own_squad_order(orders, rows, 3));
+	CHECK_FALSE(host::own_squad_order(orders, rows, 9));
+	orders[1][2].kind = net::SquadOrderKind::None;
+	CHECK_FALSE(host::own_squad_order(orders, rows, 1));
+	rows[0].squad = 40;
+	CHECK_FALSE(host::own_squad_order(orders, rows, 1));
+	CHECK(host::hud_squad_order(net::SquadOrderKind::Attack) == ui::HudSquadOrder::Attack);
+	CHECK(host::hud_squad_order(net::SquadOrderKind::Defend) == ui::HudSquadOrder::Defend);
+	CHECK(host::hud_squad_order(net::SquadOrderKind::Move) == ui::HudSquadOrder::Move);
+	CHECK(host::hud_squad_order(net::SquadOrderKind::None) == ui::HudSquadOrder::None);
+	CHECK(host::hud_squad_order(net::SquadOrderKind(9)) == ui::HudSquadOrder::None);
+}
+
 TEST_CASE("kit items: GADGET 1 is the kit item slot when the kit has one, else gadget slot 1; GADGET 2 then also "
 		  "offers gadget slot 1; the labels are gadget slot 1's and 2's categories; a pick clears the item's other "
 		  "slots") {

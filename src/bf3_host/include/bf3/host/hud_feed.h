@@ -7,6 +7,7 @@
 #include "bf3/core/result.h"
 #include "bf3/core/ui/hud_icons.h"
 #include "bf3/core/ui/hud_model.h"
+#include "bf3/core/ui/squad_order_marks.h"
 #include "bf3/core/ui/swf_layout.h"
 #include "bf3/host/loadout.h"
 #include "bf3/host/presentation_events.h"
@@ -200,6 +201,11 @@ static_assert(std::is_trivially_copyable_v<HudTdmFeedState>);
 std::optional<net::SquadRequest> squad_flow_request(std::span<const std::string> p_params,
 		std::span<const net::PlayerRow> p_players, uint8_t p_own_slot, std::optional<std::string_view> p_selected_squad,
 		std::optional<std::string_view> p_selected_player);
+
+core::ui::HudSquadOrder hud_squad_order(net::SquadOrderKind p_kind);
+
+std::optional<net::SquadOrder> own_squad_order(std::span<const std::array<net::SquadOrder, net::kMaxSquads>> p_orders,
+		std::span<const net::PlayerRow> p_players, uint8_t p_own_slot);
 
 void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_drained, const HudStatic &p_static, HudTdmFeedState &r_state,
 		core::ui::HudModel &r_model);

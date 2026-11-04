@@ -136,6 +136,38 @@ void feed_squad(Frame &r_frame) {
 
 namespace bf3::host {
 
+core::ui::HudSquadOrder hud_squad_order(net::SquadOrderKind p_kind) {
+	switch (p_kind) {
+		case net::SquadOrderKind::Move:
+			return core::ui::HudSquadOrder::Move;
+		case net::SquadOrderKind::Attack:
+			return core::ui::HudSquadOrder::Attack;
+		case net::SquadOrderKind::Defend:
+			return core::ui::HudSquadOrder::Defend;
+		case net::SquadOrderKind::None:
+			break;
+	}
+	return core::ui::HudSquadOrder::None;
+}
+
+std::optional<net::SquadOrder> own_squad_order(std::span<const std::array<net::SquadOrder, net::kMaxSquads>> p_orders,
+		std::span<const net::PlayerRow> p_players, uint8_t p_own_slot) {
+	for (const net::PlayerRow &row : p_players) {
+		if (row.slot != p_own_slot) {
+			continue;
+		}
+		if (row.team < 1 || row.team > p_orders.size() || row.squad < 1 || row.squad > net::kMaxSquads) {
+			return std::nullopt;
+		}
+		const net::SquadOrder &o = p_orders[row.team - 1u][row.squad - 1u];
+		if (o.team != row.team || o.squad != row.squad || hud_squad_order(o.kind) == core::ui::HudSquadOrder::None) {
+			return std::nullopt;
+		}
+		return o;
+	}
+	return std::nullopt;
+}
+
 std::optional<net::SquadRequest> squad_flow_request(std::span<const std::string> p_params,
 		std::span<const net::PlayerRow> p_players, uint8_t p_own_slot, std::optional<std::string_view> p_selected_squad,
 		std::optional<std::string_view> p_selected_player) {

@@ -4,16 +4,19 @@
 
 #include "bf3/core/ui/icon3d_placement.h"
 #include "bf3/core/ui/nametags.h"
+#include "bf3/core/ui/squad_order_marks.h"
 #include "bf3/core/ui/ui_stage.h"
 
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2.hpp>
+#include <godot_cpp/variant/vector3.hpp>
 
 #include <array>
 #include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -33,11 +36,21 @@ class Bf3LevelSession;
 inline constexpr uint32_t kMaxLosRaysPerFrame = 4;
 inline constexpr double kNativeTagsSummaryEveryS = 30.0;
 inline constexpr float kAlertBehindReach = 4096.0f;
+inline constexpr uint32_t kOrderTagId = 0xFF000000u;
 
 struct NativeAlert {
 	uint32_t id = 0;
 	uint8_t slot = 0;
 	uint32_t shot_index = 0;
+	std::array<float, 3> position{};
+	float distance_m = 0.0f;
+	bool in_front = false;
+	core::ui::Icon3dPlacement placement;
+};
+
+struct NativeOrderMark {
+	core::ui::HudSquadOrder order = core::ui::HudSquadOrder::None;
+	uint8_t squad = 0;
 	std::array<float, 3> position{};
 	float distance_m = 0.0f;
 	bool in_front = false;
@@ -72,6 +85,8 @@ struct NativeTagStats {
 	uint64_t frame_max_ns = 0;
 	uint64_t alert_candidates = 0;
 	uint64_t alert_tags = 0;
+	uint64_t order_frames = 0;
+	uint64_t order_tags = 0;
 };
 
 class NativeTags {
@@ -86,6 +101,10 @@ public:
 			core::ui::HudWorldTags &r_tags);
 	const core::ui::Icon3dStyle &alert_style() const { return alert_style_; }
 	const std::vector<NativeAlert> &alerts() const { return alerts_; }
+	void update_orders(const godot::Camera3D *p_camera, bool p_show, const core::ui::UiStage &p_stage,
+			core::ui::HudWorldTags &r_tags);
+	const core::ui::Icon3dStyle &marker_style() const { return marker_style_; }
+	const std::optional<NativeOrderMark> &order_mark() const { return order_; }
 
 	bool loaded() const { return applied_; }
 	const core::ui::NametagStyle &style() const { return style_; }
@@ -100,6 +119,8 @@ private:
 	void run_loader();
 	void apply_loaded();
 	void log_summary() const;
+	core::ui::Icon3dPlacement place(const godot::Camera3D &p_camera, const core::ui::Icon3dStyle &p_style,
+			const core::ui::UiStage &p_stage, const godot::Vector3 &p_at, float &r_distance, bool &r_in_front) const;
 
 	Bf3LevelSession *session_ = nullptr;
 	std::thread loader_;
@@ -111,6 +132,8 @@ private:
 	core::ui::NametagStyle style_;
 	core::ui::SpottingRules spotting_;
 	core::ui::Icon3dStyle alert_style_;
+	core::ui::Icon3dStyle marker_style_;
+	std::optional<NativeOrderMark> order_;
 	std::vector<NativeAlert> alerts_;
 	std::array<std::string, 4> kit_icons_;
 	IffReveal reveal_;

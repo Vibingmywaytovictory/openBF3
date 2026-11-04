@@ -179,7 +179,7 @@ These are structural, known, and listed so nobody mistakes them for design inten
   their tags from `HudClientState::world_tags` at stage positions. TDM fills only grenade alerts: the client's live timed grenades
   (`PresentationFrame::grenades`) placed by `ui::place_icon3d` from UIAlerttagComp's UI3dIconCompData (draw, fade and scale by distance, the
   ray from the centre shifted down by SnapCenterYOffset snapping to the SnapSafeZone box edge; the formulas are inferred), each tag's _xscale and _alpha set from it
-  (`godot.native_hud.icons3d`); requests, markers and spotting have no source, and the in-game row reaches about 7.4 m, not the 8-15 m fade.
+  (`godot.native_hud.icons3d`); the own squad's standing order is a MapmarkerManager tag, UIHudIcon_ObjectiveAttack 18, ObjectiveDefend 16 or ObjectiveMoveTo 17 (the iconsIngame frame labels), placed by UIMapmarkertagComp and drawn on the minimap as the atlas icon of that name; requests and spotting have no source, and the in-game row reaches about 7.4 m, not the 8-15 m fade.
   The moment fixture's fading kill rows sit on the nearest timeline frame with the row still present (0.20 for 0.00 and 0.06, 0.50 for 0.28 and 0.43 fading in).
 * The in-round HUD does not pass the strict 1280x720 screenshot gate (the 16 footage moments against the moment
   fixture's captures); there is no gate row, because the owner deferred pixel-exact HUD work on 2026-10-24. The main
@@ -196,7 +196,7 @@ These are structural, known, and listed so nobody mistakes them for design inten
 * Nametags are engine-drawn by `Bf3NativeHud` through `NativeTags` (`native_tags.cpp`): UIHudIcon_Player by relation, the
   squad kit icon for squad mates, names in `$Menu_medium` at the UINametagCompData sizes and tints; the name's kit icon
   (16 units in an 18-unit column) and its black glow are not measured, and the HealthBarSize bar is not drawn (other
-  soldiers' health is not presented). The client reads PlayerList squads into `HudPlayer::squad` and `IffSoldier::squad` and squad orders into `PresentationFrame::squad_orders`, but no hud3dicon, minimap marker or HudMessage shows an order and the
+  soldiers' health is not presented). The client reads PlayerList squads into `HudPlayer::squad` and `IffSoldier::squad` and squad orders into `PresentationFrame::squad_orders`, shown as markers (above); no screen of the TDM HUD binds GameMessage, so an order has no HudMessage, and the
   squad leader has no hud3dicon; voice and boosters are not modelled. Data.UINametagComp.getUIColor is native, so the SquadList takes its
   slot 0 as the squadlist txt field's authored colour (e4ff9d; only the icons' setRGB changes the look) and leaves out
   tint2Texts' shadow and glow filters, whose colours are not in the install.

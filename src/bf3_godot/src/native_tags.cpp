@@ -11,6 +11,7 @@
 #include "bf3/core/ui/ui_stage.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/text.h"
+#include "bf3/host/hud_feed.h"
 #include "bf3/net/loopback_ping.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
@@ -23,6 +24,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <span>
 
 using namespace godot;
 namespace ui = bf3::core::ui;
@@ -56,6 +58,7 @@ struct NativeTags::Loaded {
 	ui::NametagStyle style;
 	ui::SpottingRules spotting;
 	ui::Icon3dStyle alert_style;
+	ui::Icon3dStyle marker_style;
 	std::array<std::string, 4> kit_icons;
 	std::string notes;
 	double seconds = 0.0;
@@ -100,6 +103,12 @@ void NativeTags::run_loader() {
 				out->alert_style = *s;
 			} else {
 				notes += " alert tag style: " + s.error().message + " (retail defaults);";
+			}
+			if (core::Result<ui::Icon3dStyle> s =
+							ui::read_icon3d_style(**lib, ui::kMapmarkerTagCompPartition, &budget)) {
+				out->marker_style = *s;
+			} else {
+				notes += " map marker style: " + s.error().message + ";";
 			}
 			if (const core::EbxPartition *team = (*lib)->partition_by_name("gameplay/teams/us")) {
 				if (core::Result<core::gameplay::TeamDef> td = core::gameplay::read_team_data(**lib, team->primary(), &budget)) {
@@ -156,6 +165,7 @@ void NativeTags::apply_loaded() {
 	style_ = l->style;
 	spotting_ = l->spotting;
 	alert_style_ = l->alert_style;
+	marker_style_ = l->marker_style;
 	kit_icons_ = l->kit_icons;
 	char line[512];
 	std::snprintf(line, sizeof(line),
@@ -184,6 +194,56 @@ void NativeTags::log_summary() const {
 	UtilityFunctions::print(line);
 }
 
+ui::Icon3dPlacement NativeTags::place(const Camera3D &p_camera, const ui::Icon3dStyle &p_style,
+		const ui::UiStage &p_stage, const Vector3 &p_at, float &r_distance, bool &r_in_front) const {
+	const Transform3D view = p_camera.get_global_transform();
+	const Vector3 local = view.affine_inverse().xform(p_at);
+	r_distance = view.origin.distance_to(p_at);
+	r_in_front = local.z < 0.0f;
+	ui::SwfPoint stage;
+	if (r_in_front) {
+		const Vector2 w = p_camera.unproject_position(p_at);
+		stage = ui::ui_window_to_stage(p_stage, ui::SwfPoint{ w.x, w.y });
+	} else {
+		const ui::SwfPoint o = ui::icon3d_snap_origin(p_style, p_stage.visible);
+		stage = ui::SwfPoint{ o.x + local.x * kAlertBehindReach, o.y - local.y * kAlertBehindReach };
+	}
+	return ui::place_icon3d(p_style, r_distance, r_in_front, stage, p_stage.visible);
+}
+
+void NativeTags::update_orders(
+		const Camera3D *p_camera, bool p_show, const ui::UiStage &p_stage, ui::HudWorldTags &r_tags) {
+	order_.reset();
+	if (session_ == nullptr || !applied_) {
+		return;
+	}
+	const host::PresentationFrame &f = session_->frame();
+	if (!f.valid) {
+		return;
+	}
+	const size_t rows = std::min<size_t>(f.player_count, f.players.size());
+	const std::optional<net::SquadOrder> o = host::own_squad_order(
+			f.squad_orders, std::span<const net::PlayerRow>(f.players.data(), rows), f.stats.slot);
+	if (!o) {
+		return;
+	}
+	NativeOrderMark mark;
+	mark.order = host::hud_squad_order(o->kind);
+	mark.squad = o->squad;
+	mark.position = { o->position[0], o->position[1], o->position[2] };
+	++stats_.order_frames;
+	if (p_show && p_camera != nullptr && p_camera->is_inside_tree() && p_stage.scale > 0.0f) {
+		const Vector3 at(mark.position[0], mark.position[1] + marker_style_.vertical_offset, mark.position[2]);
+		mark.placement = place(*p_camera, marker_style_, p_stage, at, mark.distance_m, mark.in_front);
+		if (std::optional<ui::HudWorldTag> tag =
+						ui::squad_order_tag(kOrderTagId + mark.squad, mark.order, mark.placement)) {
+			r_tags.tags.push_back(std::move(*tag));
+			++stats_.order_tags;
+		}
+	}
+	order_ = mark;
+}
+
 void NativeTags::update_alerts(
 		const Camera3D *p_camera, bool p_show, const ui::UiStage &p_stage, ui::HudWorldTags &r_tags) {
 	r_tags.tags.clear();
@@ -199,25 +259,13 @@ void NativeTags::update_alerts(
 	if (!f.valid) {
 		return;
 	}
-	const Transform3D view = p_camera->get_global_transform();
-	const Transform3D to_camera = view.affine_inverse();
-	const Vector3 eye = view.origin;
 	const size_t n = std::min<size_t>(f.grenade_count, f.grenades.size());
 	for (size_t i = 0; i < n; ++i) {
 		const host::PresentedGrenade &g = f.grenades[i];
 		const Vector3 at(g.position[0], g.position[1] + alert_style_.vertical_offset, g.position[2]);
-		const float distance = eye.distance_to(at);
-		const Vector3 local = to_camera.xform(at);
-		const bool in_front = local.z < 0.0f;
-		ui::SwfPoint stage;
-		if (in_front) {
-			const Vector2 w = p_camera->unproject_position(at);
-			stage = ui::ui_window_to_stage(p_stage, ui::SwfPoint{ w.x, w.y });
-		} else {
-			const ui::SwfPoint o = ui::icon3d_snap_origin(alert_style_, p_stage.visible);
-			stage = ui::SwfPoint{ o.x + local.x * kAlertBehindReach, o.y - local.y * kAlertBehindReach };
-		}
-		const ui::Icon3dPlacement p = ui::place_icon3d(alert_style_, distance, in_front, stage, p_stage.visible);
+		float distance = 0.0f;
+		bool in_front = false;
+		const ui::Icon3dPlacement p = place(*p_camera, alert_style_, p_stage, at, distance, in_front);
 		++stats_.alert_candidates;
 		if (!p.shown) {
 			continue;
