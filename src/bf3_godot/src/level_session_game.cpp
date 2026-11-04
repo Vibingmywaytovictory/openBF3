@@ -1016,6 +1016,12 @@ void step_game_parts(Node3D &r_parent, GameState &r_game, const host::Presentati
 	mf.own_alive = r_game.alive;
 	mf.own_slot = r_game.own_slot;
 	mf.own_team = r_game.own_team;
+	if (p_own_vm != nullptr && p_own_vm->is_visible() && r_game.alive && !p_free_camera) {
+		const bf3::anim::ViewmodelOutput &vo = p_own_vm->output();
+		mf.own_step_tags = std::span<const int32_t>(
+				vo.event_tags.data(), std::min<size_t>(vo.event_tag_count, vo.event_tags.size()));
+		mf.own_steps_animated = vo.loco_tagged;
+	}
 
 	Camera3D *active = p_camera;
 	if (Viewport *vp = r_parent.get_viewport()) {

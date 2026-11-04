@@ -1621,8 +1621,9 @@ core::Status load_route_clip(const core::ant::AntLibrary &p_library, const anim:
 	return core::Status::success();
 }
 
-void load_delta_clip(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, std::string_view p_chooser, const anim::ChooserIndices &p_indices,
-		const std::string &p_where, ViewmodelClip &r_clip, float &r_start, float &r_end, std::string &r_path, std::vector<std::string> &r_notes) {
+void load_delta_clip(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, std::string_view p_chooser,
+		const anim::ChooserIndices &p_indices, const std::string &p_where, ViewmodelClip &r_clip, float &r_start,
+		float &r_end, std::string &r_path, std::vector<anim::VmEventTag> &r_tags, std::vector<std::string> &r_notes) {
 	core::Result<anim::AntClipRoute> route = anim::route_ant_controller(p_library, "IndexChooserControllerAsset", p_chooser, p_indices);
 	if (!route) {
 		r_notes.push_back(p_where + " " + std::string(p_chooser) + ": " + route.error().message + " (no delta)");
@@ -1660,13 +1661,21 @@ void load_delta_clip(const core::ant::AntLibrary &p_library, const anim::Skeleto
 		r_end = end;
 	}
 	r_clip = std::move(clip);
-	char line[200];
-	std::snprintf(line, sizeof(line), ": %s frames %.0f .. %.0f of %u (%s)", r_clip.name.c_str(), double(r_start), double(r_end), r_clip.tracks.end_frame,
-			r_clip.controller.c_str());
+	r_tags.clear();
+	for (const anim::AntEventTag &t : route->event_tags) {
+		const float frame = t.tick * scale;
+		if (std::isfinite(frame) && frame >= r_start && frame < r_end) {
+			r_tags.push_back(anim::VmEventTag{ t.id, frame });
+		}
+	}
+	char line[240];
+	std::snprintf(line, sizeof(line), ": %s frames %.0f .. %.0f of %u (%s), %zu event tags", r_clip.name.c_str(),
+			double(r_start), double(r_end), r_clip.tracks.end_frame, r_clip.controller.c_str(), r_tags.size());
 	r_notes.push_back(p_where + " " + std::string(p_chooser) + line);
 }
 
-anim::VmDeltaClip delta_ref(const ViewmodelClip &p_clip, float p_start, float p_end) {
+anim::VmDeltaClip delta_ref(
+		const ViewmodelClip &p_clip, float p_start, float p_end, std::span<const anim::VmEventTag> p_tags) {
 	anim::VmDeltaClip d;
 	if (p_clip.source == Source::Clip) {
 		d.clip.clip = &p_clip.clip.clip;
@@ -1674,10 +1683,10 @@ anim::VmDeltaClip delta_ref(const ViewmodelClip &p_clip, float p_start, float p_
 		d.clip.seconds = p_clip.seconds;
 		d.start_frame = p_start;
 		d.end_frame = p_end;
+		d.tags = p_tags;
 	}
 	return d;
 }
-
 }
 
 void load_viewmodel_locomotion(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, uint32_t p_ant_ref, ViewmodelItem &r_item,
@@ -1692,8 +1701,10 @@ void load_viewmodel_locomotion(const core::ant::AntLibrary &p_library, const ani
 	l->weapon_type = *type;
 	anim::ChooserIndices idx;
 	idx.weapon_type = *type;
-	load_delta_clip(p_library, p_rig, kVmRunDeltaChooser, idx, where, l->run, l->run_start_frame, l->run_end_frame, l->run_path, r_notes);
-	load_delta_clip(p_library, p_rig, kVmSprintDeltaChooser, idx, where, l->sprint, l->sprint_start_frame, l->sprint_end_frame, l->sprint_path, r_notes);
+	load_delta_clip(p_library, p_rig, kVmRunDeltaChooser, idx, where, l->run, l->run_start_frame, l->run_end_frame,
+			l->run_path, l->run_tags, r_notes);
+	load_delta_clip(p_library, p_rig, kVmSprintDeltaChooser, idx, where, l->sprint, l->sprint_start_frame,
+			l->sprint_end_frame, l->sprint_path, l->sprint_tags, r_notes);
 	if (l->run.source != Source::Clip && l->sprint.source != Source::Clip) {
 		r_notes.push_back(where + ": weapon type " + std::to_string(*type) + ", no delta (the procedural bob)");
 		return;
@@ -1801,8 +1812,8 @@ void load_viewmodel_throw_flow(const core::ant::AntLibrary &p_library, const ani
 anim::VmLocomotion viewmodel_locomotion(const ViewmodelItem &p_item) {
 	anim::VmLocomotion out;
 	if (const ViewmodelLocomotionClips *l = p_item.locomotion.get()) {
-		out.run = delta_ref(l->run, l->run_start_frame, l->run_end_frame);
-		out.sprint = delta_ref(l->sprint, l->sprint_start_frame, l->sprint_end_frame);
+		out.run = delta_ref(l->run, l->run_start_frame, l->run_end_frame, l->run_tags);
+		out.sprint = delta_ref(l->sprint, l->sprint_start_frame, l->sprint_end_frame, l->sprint_tags);
 	}
 	return out;
 }

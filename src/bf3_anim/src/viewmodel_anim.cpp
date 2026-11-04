@@ -970,6 +970,8 @@ ViewmodelAnimator::ViewmodelAnimator(const Skeleton &p_rig, std::span<const VmCl
 ViewmodelAnimator::~ViewmodelAnimator() = default;
 
 void ViewmodelAnimator::step(const ViewmodelFrameInput &p_input, std::span<const VmCue> p_cues, LocalPose &r_pose, ViewmodelOutput &r_out) {
+	r_out.event_tag_count = 0;
+	r_out.loco_tagged = false;
 	impl_->step(p_input, p_cues, r_pose, r_out);
 }
 
@@ -1039,6 +1041,28 @@ float vm_loco_advance(float p_frame, float p_frames, const VmDeltaClip &p_d) {
 	return p_d.start_frame + f;
 }
 
+void vm_loco_tags(const VmDeltaClip &p_clip, float p_from_frame, float p_frames, ViewmodelOutput &r_out) {
+	for (const VmEventTag &t : p_clip.tags) {
+		if (r_out.event_tag_count < kMaxVmStepEventTags && vm_tag_crossed(p_clip, p_from_frame, p_frames, t.frame)) {
+			r_out.event_tags[r_out.event_tag_count++] = t.id;
+		}
+	}
+}
+
+}
+
+bool vm_tag_crossed(const VmDeltaClip &p_clip, float p_from_frame, float p_frames, float p_tag_frame) {
+	const float len = p_clip.end_frame - p_clip.start_frame;
+	if (!(len > 0.0f) || !(p_frames > 0.0f) || !(p_frames < len) || !std::isfinite(p_from_frame) ||
+			!(p_tag_frame >= p_clip.start_frame && p_tag_frame < p_clip.end_frame)) {
+		return false;
+	}
+	float ahead = p_tag_frame - p_from_frame;
+	ahead -= len * std::floor(ahead / len);
+	if (!(ahead > 0.0f)) {
+		ahead += len;
+	}
+	return ahead <= p_frames;
 }
 
 bool vm_loco_apply(VmDeltaLoco &r_loco, const ViewmodelFrameInput &p_input, float p_sprint_w, float p_ads, float p_dt, float p_blend_seconds, LocalPose &r_pose,
@@ -1054,13 +1078,25 @@ bool vm_loco_apply(VmDeltaLoco &r_loco, const ViewmodelFrameInput &p_input, floa
 	const float ads = std::clamp(std::isfinite(p_ads) ? p_ads : 0.0f, 0.0f, 1.0f);
 	const float run_w = r_loco.run_ok ? r_loco.move_w * (1.0f - sprint_w) * (1.0f - ads) : 0.0f;
 	const float spr_w = r_loco.sprint_ok ? sprint_w : 0.0f;
+	const float run_from = r_loco.run_frame, sprint_from = r_loco.sprint_frame;
+	float run_frames = 0.0f, sprint_frames = 0.0f;
 	if (r_loco.run_ok) {
 		const float fps = r_loco.loco.run.clip.tracks->fps > 0.0f ? r_loco.loco.run.clip.tracks->fps : 30.0f;
-		r_loco.run_frame = vm_loco_advance(r_loco.run_frame, p_dt * fps * speed / kVmRunSpeedUnit, r_loco.loco.run);
+		run_frames = p_dt * fps * speed / kVmRunSpeedUnit;
+		r_loco.run_frame = vm_loco_advance(r_loco.run_frame, run_frames, r_loco.loco.run);
 	}
 	if (r_loco.sprint_ok) {
 		const float fps = r_loco.loco.sprint.clip.tracks->fps > 0.0f ? r_loco.loco.sprint.clip.tracks->fps : 30.0f;
-		r_loco.sprint_frame = vm_loco_advance(r_loco.sprint_frame, sprint_w > 0.0f ? p_dt * fps : 0.0f, r_loco.loco.sprint);
+		sprint_frames = sprint_w > 0.0f ? p_dt * fps : 0.0f;
+		r_loco.sprint_frame = vm_loco_advance(r_loco.sprint_frame, sprint_frames, r_loco.loco.sprint);
+	}
+	const float run_play = r_loco.run_ok ? r_loco.move_w * (1.0f - sprint_w) : 0.0f;
+	const float sprint_play = r_loco.sprint_ok ? sprint_w : 0.0f;
+	const bool sprint_leads = sprint_play > run_play;
+	const VmDeltaClip &lead = sprint_leads ? r_loco.loco.sprint : r_loco.loco.run;
+	r_out.loco_tagged = (sprint_leads ? sprint_play : run_play) > 0.0f && !lead.tags.empty();
+	if (r_out.loco_tagged) {
+		vm_loco_tags(lead, sprint_leads ? sprint_from : run_from, sprint_leads ? sprint_frames : run_frames, r_out);
 	}
 	auto add = [&](const VmDeltaClip &p_d, float p_frame, const BoneMask &p_mask, float p_w) {
 		if (!(p_w > 0.0f)) {

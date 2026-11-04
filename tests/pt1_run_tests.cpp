@@ -975,6 +975,121 @@ TEST_SUITE("pt1-run") {
 		}
 	}
 
+	TEST_CASE(
+			"1p deltas: the M16A2's run loop and sprint sequences hold eight footstep tags each; the steps they cross "
+			"per second at 4.0 and 6.5 m/s") {
+		Pt1Data *d = pt1_or_skip();
+		if (d == nullptr) {
+			return;
+		}
+		const bf3::core::ant::AntLibrary &lib = *d->library;
+		const bf3::core::ant::AntRig *ant_rig = nullptr;
+		for (const bf3::core::ant::AntRig &r : lib.rigs()) {
+			if (r.name == "Venice1pAntSke01") {
+				ant_rig = &r;
+			}
+		}
+		REQUIRE(ant_rig != nullptr);
+		bf3::core::Result<Skeleton> rig = skeleton_from_rig(*ant_rig);
+		REQUIRE(rig.ok());
+		uint32_t ref = 0;
+		const bf3::core::ant::AntPackage &sp = *lib.static_package();
+		for (size_t i = 0; i < sp.object_count(); ++i) {
+			const bf3::core::ant::GdStruct o = sp.object(i);
+			if (o.type_name() == "WeaponAsset" && o.name() == "M16A2") {
+				ref = 0x15480000u | (o.guid().index() & 0xFFFFu);
+			}
+		}
+		REQUIRE(ref != 0u);
+		bf3::render::ViewmodelItem item;
+		item.unlock = "M16A2";
+		std::vector<std::string> notes;
+		bf3::render::load_viewmodel_locomotion(lib, *rig, ref, item, notes);
+		for (const std::string &n : notes) {
+			MESSAGE(n);
+		}
+		REQUIRE(item.locomotion != nullptr);
+		const bf3::render::ViewmodelLocomotionClips &m16 = *item.locomotion;
+		constexpr int32_t kLeft = -35609206, kRight = -1008111485;
+		const auto line = [](const std::vector<VmEventTag> &p_tags) {
+			std::string out;
+			for (const VmEventTag &t : p_tags) {
+				out += " " +
+						std::string(t.id == kLeft		 ? "L"
+										: t.id == kRight ? "R"
+														 : "?") +
+						"@" + std::to_string(t.frame);
+			}
+			return out;
+		};
+		MESSAGE("run tags:" << line(m16.run_tags) << " | sprint tags:" << line(m16.sprint_tags));
+		const auto steps_of = [](const std::vector<VmEventTag> &p_tags) {
+			std::vector<VmEventTag> out;
+			std::copy_if(p_tags.begin(), p_tags.end(), std::back_inserter(out),
+					[](const VmEventTag &t) { return t.id == kLeft || t.id == kRight; });
+			return out;
+		};
+		const std::vector<VmEventTag> run = steps_of(m16.run_tags), sprint = steps_of(m16.sprint_tags);
+		REQUIRE(run.size() == 8);
+		REQUIRE(sprint.size() == 8);
+		for (size_t i = 0; i < 8; ++i) {
+			CHECK(run[i].id == (i % 2 == 0 ? kLeft : kRight));
+			CHECK(sprint[i].id == (i % 2 == 0 ? kRight : kLeft));
+		}
+		CHECK(run.front().frame == doctest::Approx((15.0f + 28.0f) * 0.5f));
+		CHECK(run.back().frame == doctest::Approx((146.0f + 28.0f) * 0.5f));
+		CHECK(sprint.front().frame == doctest::Approx(5.0f));
+		CHECK(sprint.back().frame == doctest::Approx(67.0f));
+
+		struct Case {
+			float speed;
+			bool sprinting;
+			double want_per_second;
+		};
+		const Case cases[] = { { 4.0f, false, 8.0 / (76.0 / (30.0 * 4.0 / 3.6)) },
+			{ 6.5f, true, 8.0 / (72.0 / 30.0) } };
+		const std::array<VmClipRef, kVmClips> no_clips{};
+		for (const Case &c : cases) {
+			ViewmodelAnimator a(*rig, no_clips, ViewmodelTuning{});
+			a.set_locomotion(bf3::render::viewmodel_locomotion(item));
+			ViewmodelFrameInput in;
+			in.speed = c.speed;
+			in.sprinting = c.sprinting;
+			LocalPose pose;
+			ViewmodelOutput out;
+			size_t steps = 0, lefts = 0, tagged = 0;
+			int32_t last = 0;
+			bool alternate = true;
+			constexpr int kWarm = 60, kFrames = 60 * 10;
+			for (int f = 0; f < kWarm + kFrames; ++f) {
+				in.time_s += 1.0 / 60.0;
+				in.dt = 1.0f / 60.0f;
+				a.step(in, {}, pose, out);
+				if (f < kWarm) {
+					continue;
+				}
+				tagged += out.loco_tagged ? 1u : 0u;
+				for (uint8_t i = 0; i < out.event_tag_count; ++i) {
+					if (out.event_tags[i] != kLeft && out.event_tags[i] != kRight) {
+						continue;
+					}
+					alternate = alternate && out.event_tags[i] != last;
+					last = out.event_tags[i];
+					lefts += out.event_tags[i] == kLeft ? 1u : 0u;
+					++steps;
+				}
+			}
+			const double per_second = double(steps) / (double(kFrames) / 60.0);
+			MESSAGE(c.speed << " m/s" << (c.sprinting ? " sprinting" : "") << ": " << steps << " steps in 10 s, "
+							<< per_second << " a second (" << c.want_per_second << " from the tags)");
+			CHECK(tagged == size_t(kFrames));
+			CHECK(per_second == doctest::Approx(c.want_per_second).epsilon(0.05));
+			CHECK(alternate);
+			CHECK(lefts * 2 + 1 >= steps);
+			CHECK(lefts * 2 <= steps + 1);
+		}
+	}
+
 	TEST_CASE("1p grenade: the hand grenade's hold-and-release flow, its clips and branch ticks") {
 		Pt1Data *d = pt1_or_skip();
 		if (d == nullptr) {

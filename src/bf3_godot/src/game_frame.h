@@ -44,6 +44,8 @@ struct GameFrame {
 	bool own_alive = false;
 	uint8_t own_slot = 0xFF;
 	uint8_t own_team = 0;
+	std::span<const int32_t> own_step_tags;
+	bool own_steps_animated = false;
 };
 
 }

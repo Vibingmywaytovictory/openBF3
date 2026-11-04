@@ -54,7 +54,10 @@ core::Result<SoldierAudioAssets> load_soldier_audio(const core::EbxResolver &p_d
 	a.own_hit = *hit;
 	r_report.push_back("footsteps [" + a.def.footsteps + "]: " + std::to_string(a.materials.rows_with_sound) + " of " +
 			std::to_string(a.materials.rows) + " grid rows with a MaterialSoundId, audible to " +
-			std::to_string(a.params.radius_m) + " m; own hit [" + a.def.bullet_impact + "]");
+			std::to_string(a.params.radius_m) + " m, " + std::to_string(a.params.ant_step_count) +
+			" animation step events" +
+			(a.params.local_player_closes_period ? ", the period closed for the local player" : "") + "; own hit [" +
+			a.def.bullet_impact + "]");
 	return a;
 }
 
@@ -93,7 +96,8 @@ std::optional<float> FootstepGroundProbe::sound_id(const Vec3 &p_feet) const {
 }
 
 void footstep_soldiers(const host::PresentationFrame *p_frame, std::span<const host::PresentedSoldier> p_others,
-		uint8_t p_own_slot, bool p_own_first_person, std::vector<FootstepSoldier> &r_out) {
+		uint8_t p_own_slot, bool p_own_first_person, const OwnStepTags &p_own_tags,
+		std::vector<FootstepSoldier> &r_out) {
 	r_out.clear();
 	if (p_frame != nullptr && p_frame->valid && p_own_slot != 0xFF &&
 			(p_frame->own_curr.flags & sim::soldier_flags::kAlive) != 0) {
@@ -106,6 +110,13 @@ void footstep_soldiers(const host::PresentationFrame *p_frame, std::span<const h
 		s.pose = uint8_t(o.pose);
 		s.mode = o.mode;
 		s.first_person = p_own_first_person;
+		s.local_player = true;
+		s.animated = p_own_first_person && p_own_tags.animated;
+		for (const int32_t t : p_own_tags.tags) {
+			if (s.animated && s.tag_count < s.tags.size()) {
+				s.tags[s.tag_count++] = t;
+			}
+		}
 		r_out.push_back(s);
 	}
 	for (const host::PresentedSoldier &p : p_others) {

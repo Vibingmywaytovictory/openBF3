@@ -23,6 +23,7 @@ namespace bf3::audio {
 
 inline constexpr size_t kMaxFootstepSoldiers = 128;
 inline constexpr size_t kFootstepMaterialIds = 16;
+inline constexpr size_t kMaxFootstepTags = 4;
 
 struct FootstepParams {
 	float walk_threshold = 0.0f;
@@ -34,6 +35,9 @@ struct FootstepParams {
 	float speed_scale = 0.0f;
 	uint32_t speed_input = 0;
 	float radius_m = 0.0f;
+	std::array<core::gameplay::SoldierAntStep, core::gameplay::kMaxSoldierAntSteps> ant_steps{};
+	uint8_t ant_step_count = 0;
+	bool local_player_closes_period = false;
 };
 
 float audible_radius(const core::audio::SoundProgram &p_program);
@@ -41,10 +45,12 @@ float audible_radius(const core::audio::SoundProgram &p_program);
 FootstepParams footstep_params(
 		const core::gameplay::SoldierSoundDef &p_def, const core::audio::SoundProgram &p_footsteps);
 
-enum class FootstepEvent : uint8_t { Start, Stop, Jump, Land, Left, Right };
-inline constexpr size_t kFootstepEventCount = 6;
+enum class FootstepEvent : uint8_t { Start, Stop, Jump, Land, Left, Right, Animated };
+inline constexpr size_t kFootstepEventCount = 7;
 
 uint32_t footstep_event_hash(FootstepEvent p_event);
+
+std::optional<uint32_t> animated_step_event(const FootstepParams &p_params, int32_t p_tag);
 
 struct FootstepSoldier {
 	uint8_t slot = 0;
@@ -54,14 +60,20 @@ struct FootstepSoldier {
 	uint8_t pose = 0;
 	sim::MoveMode mode = sim::MoveMode::OnGround;
 	bool first_person = false;
+	bool local_player = false;
+	bool animated = false;
+	uint8_t tag_count = 0;
+	std::array<int32_t, kMaxFootstepTags> tags{};
 };
 static_assert(std::is_trivially_copyable_v<FootstepSoldier>);
 
 struct FootstepPost {
 	uint8_t slot = 0;
 	FootstepEvent event = FootstepEvent::Left;
+	uint32_t hash = 0;
 	float speed = 0.0f;
 	float distance_m = 0.0f;
+	bool local_period = false;
 };
 static_assert(std::is_trivially_copyable_v<FootstepPost>);
 
@@ -72,6 +84,7 @@ public:
 	void step(std::span<const FootstepSoldier> p_soldiers, const Vec3 &p_listener, double p_dt,
 			std::vector<FootstepPost> &r_out);
 	size_t tracked() const { return tracks_.size(); }
+	uint64_t unknown_tags() const { return unknown_tags_; }
 	const FootstepParams &params() const { return params_; }
 
 private:
@@ -86,6 +99,7 @@ private:
 	FootstepParams params_;
 	std::vector<Track> tracks_;
 	uint64_t frame_ = 0;
+	uint64_t unknown_tags_ = 0;
 };
 
 struct FootstepStats {
@@ -93,6 +107,8 @@ struct FootstepStats {
 	std::array<uint64_t, kFootstepEventCount> posts{};
 	uint64_t refused = 0;
 	uint64_t no_ground = 0;
+	uint64_t local_period = 0;
+	uint64_t unknown_tags = 0;
 	uint64_t joined = 0;
 	std::array<uint64_t, kFootstepMaterialIds + 1> by_material{};
 	uint32_t tracked = 0;

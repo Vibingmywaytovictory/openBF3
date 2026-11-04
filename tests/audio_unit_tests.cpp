@@ -2598,6 +2598,56 @@ TEST_SUITE("audio-footsteps") {
 		CHECK(count_events(posts, ba::FootstepEvent::Jump) == 0);
 	}
 
+	TEST_CASE("the local player: the data closes the period gates, its 1p animation tags post the patch's events; with "
+			  "no animation tags it steps on the period, flagged") {
+		ba::FootstepParams p = unit_footstep_params();
+		p.ant_steps[0] = bf3::core::gameplay::SoldierAntStep{ -35609206, 2672540575u };
+		p.ant_steps[1] = bf3::core::gameplay::SoldierAntStep{ -1008111485, 623859716u };
+		p.ant_step_count = 2;
+		p.local_player_closes_period = true;
+		CHECK(ba::animated_step_event(p, -35609206) == std::optional<uint32_t>(2672540575u));
+		CHECK_FALSE(ba::animated_step_event(p, 77).has_value());
+		ba::FootstepScheduler s(p);
+		std::vector<ba::FootstepPost> posts;
+		size_t tags = 0;
+		for (int f = 0; f < 240; ++f) {
+			std::array<ba::FootstepSoldier, 2> two{ walker(0, 0.0f, 6.5f), walker(1, 3.0f, 6.5f) };
+			two[0].local_player = true;
+			two[0].first_person = true;
+			two[0].animated = f < 120;
+			if (two[0].animated && f % 18 == 9) {
+				two[0].tags[0] = (tags++ % 2) == 0 ? -35609206 : -1008111485;
+				two[0].tags[1] = 77;
+				two[0].tag_count = 2;
+			}
+			s.step(two, ba::Vec3{}, 1.0 / 64.0, posts);
+			if (f == 119) {
+				CHECK(count_events(posts, ba::FootstepEvent::Animated, 0) == tags);
+				CHECK(count_events(posts, ba::FootstepEvent::Left, 0) +
+								count_events(posts, ba::FootstepEvent::Right, 0) ==
+						0);
+				CHECK(count_events(posts, ba::FootstepEvent::Left, 1) +
+								count_events(posts, ba::FootstepEvent::Right, 1) ==
+						9);
+			}
+		}
+		CHECK(tags == 7);
+		CHECK(s.unknown_tags() == 7);
+		size_t left = 0, right = 0, own_period = 0, flagged = 0;
+		for (const ba::FootstepPost &x : posts) {
+			left += x.slot == 0 && x.hash == 2672540575u ? 1u : 0u;
+			right += x.slot == 0 && x.hash == 623859716u ? 1u : 0u;
+			const bool period = x.event == ba::FootstepEvent::Left || x.event == ba::FootstepEvent::Right;
+			own_period += x.slot == 0 && period ? 1u : 0u;
+			flagged += x.local_period ? 1u : 0u;
+			CHECK(x.local_period == (period && x.slot == 0));
+		}
+		CHECK(left == 4);
+		CHECK(right == 3);
+		CHECK(own_period == 9);
+		CHECK(flagged == own_period);
+	}
+
 	TEST_CASE("nothing beyond the audible radius, from the dead, in the air, or from non-finite soldiers; stale tracks "
 			  "are dropped") {
 		const ba::FootstepParams p = unit_footstep_params();

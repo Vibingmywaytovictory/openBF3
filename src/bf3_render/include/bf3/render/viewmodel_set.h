@@ -306,6 +306,7 @@ struct ViewmodelLocomotionClips {
 	ViewmodelClip run, sprint;
 	float run_start_frame = 0, run_end_frame = 0, sprint_start_frame = 0, sprint_end_frame = 0;
 	std::string run_path, sprint_path;
+	std::vector<anim::VmEventTag> run_tags, sprint_tags;
 };
 
 void load_viewmodel_locomotion(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, uint32_t p_ant_ref, ViewmodelItem &r_item,

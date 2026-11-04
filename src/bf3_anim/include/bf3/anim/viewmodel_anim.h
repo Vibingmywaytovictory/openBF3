@@ -125,6 +125,8 @@ struct ViewmodelFrameInput {
 	bool switch_back = false;
 };
 
+inline constexpr size_t kMaxVmStepEventTags = 4;
+
 struct ViewmodelOutput {
 	Xform weapon_offset;
 	float camera_recoil_pitch_deg = 0, camera_recoil_yaw_deg = 0;
@@ -142,6 +144,9 @@ struct ViewmodelOutput {
 	float loco_run_weight = 0, loco_sprint_weight = 0;
 	float loco_run_frame = 0, loco_sprint_frame = 0;
 	double release_end_s = -1;
+	std::array<int32_t, kMaxVmStepEventTags> event_tags{};
+	uint8_t event_tag_count = 0;
+	bool loco_tagged = false;
 };
 
 struct VmLocomotion;
@@ -230,10 +235,18 @@ namespace bf3::anim {
 inline constexpr float kVmRunSpeedUnit = 0.06f * 60.0f;
 inline constexpr float kVmMovingSpeed = 0.0015f * 60.0f;
 
+struct VmEventTag {
+	int32_t id = 0;
+	float frame = 0.0f;
+};
+
 struct VmDeltaClip {
 	VmClipRef clip;
 	float start_frame = 0.0f, end_frame = 0.0f;
+	std::span<const VmEventTag> tags;
 };
+
+bool vm_tag_crossed(const VmDeltaClip &p_clip, float p_from_frame, float p_frames, float p_tag_frame);
 
 struct VmLocomotion {
 	VmDeltaClip run;

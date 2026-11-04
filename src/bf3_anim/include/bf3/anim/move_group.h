@@ -37,6 +37,13 @@ struct AntBranchTag {
 	bool branch_in = false;
 };
 
+struct AntEventTag {
+	int32_t id = 0;
+	float tick = 0.0f;
+};
+
+inline constexpr size_t kMaxAntEventTags = 32;
+
 struct AntClipRoute {
 	uint32_t clip_controller = 0;
 	std::string controller;
@@ -51,6 +58,7 @@ struct AntClipRoute {
 	std::vector<std::string> path;
 	std::vector<AntBranchTag> branches;
 	float loop_end_tick = 0.0f;
+	std::vector<AntEventTag> event_tags;
 };
 
 core::Result<AntClipRoute> route_ant_controller(const core::ant::AntLibrary &p_library, const core::ant::AntPackage &p_from, const core::ant::GdGuid &p_controller,

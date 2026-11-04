@@ -4,9 +4,11 @@
 #include "bf3/core/gameplay/logic_types.h"
 #include "bf3/core/result.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace bf3::core::gameplay {
 
@@ -23,7 +25,15 @@ inline constexpr int32_t kOnJump = logic_port_id("OnJump");
 inline constexpr int32_t kOnLand = logic_port_id("OnLand");
 inline constexpr int32_t kFootPlantLeft = logic_port_id("FootPlantLeft");
 inline constexpr int32_t kFootPlantRight = logic_port_id("FootPlantRight");
+inline constexpr int32_t kSpeed = logic_port_id("Speed");
 }
+
+struct SoldierAntStep {
+	int32_t tag = 0;
+	uint32_t event = 0;
+};
+
+inline constexpr size_t kMaxSoldierAntSteps = 8;
 
 struct SoldierSoundDef {
 	std::string footsteps;
@@ -39,6 +49,8 @@ struct SoldierSoundDef {
 	std::string death;
 	std::string bullet_impact;
 	std::string breath_control;
+	std::vector<SoldierAntStep> ant_steps;
+	bool local_player_closes_period = false;
 };
 
 Result<SoldierSoundDef> read_soldier_sounds(const EbxResolver &p_db, std::string_view p_soldier = kMpSoldier);

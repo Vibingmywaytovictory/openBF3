@@ -1670,7 +1670,13 @@ StepPatch step_patch(const Install &p_install, const level::LoadedLevel &p_level
 	return out;
 }
 
-std::set<std::string> stepped_waves(const StepPatch &p_patch, uint32_t p_speed_input, float p_material, float p_speed) {
+struct SteppedWaves {
+	std::set<std::string> names;
+	float peak = 0.0f;
+};
+
+SteppedWaves stepped(const StepPatch &p_patch, uint32_t p_speed_input, float p_material, float p_speed,
+		uint32_t p_event, float p_first_person) {
 	Result<std::unique_ptr<ba::PatchInstance>> made =
 			ba::PatchInstance::create(p_patch.program, p_patch.bank, ba::AudioTuning{}, 7, ba::kMixRate);
 	REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
@@ -1680,17 +1686,26 @@ std::set<std::string> stepped_waves(const StepPatch &p_patch, uint32_t p_speed_i
 	inst.set_sampler_trace(&trace);
 	inst.set_parameter(uint32_t(ssp::kSoundMaterialId), p_material);
 	inst.set_parameter(uint32_t(ssp::kPose), 0.0f);
-	inst.set_parameter(uint32_t(ssp::kIsFirstPerson), 0.0f);
+	inst.set_parameter(uint32_t(ssp::kIsFirstPerson), p_first_person);
 	inst.set_parameter(p_speed_input, p_speed);
 	ba::EmitterState emitter;
 	emitter.position = ba::Vec3{ 0.0f, 0.0f, 2.0f };
 	inst.set_geometry(emitter, ba::ListenerState{});
 	Buses b;
-	inst.post_event(uint32_t(ssp::kFootPlantLeft), 0);
+	if (p_patch.program->start_event != 0) {
+		inst.post_event(p_patch.program->start_event, 0);
+	}
+	if (p_event != 0) {
+		inst.post_event(p_event, 0);
+	}
+	SteppedWaves out;
 	for (uint32_t block = 0; block < 96; ++block) {
 		b.block(inst, uint64_t(block) * ba::kBlockFrames);
+		for (const float v : b.storage) {
+			out.peak = std::max(out.peak, std::fabs(v));
+		}
 	}
-	std::set<std::string> names;
+	std::set<std::string> &names = out.names;
 	for (uint32_t i = 0; i < trace.count; ++i) {
 		const SamplerTraceEntry &e = trace.entries[i];
 		if (e.kind != SamplerTraceKind::Trigger && e.kind != SamplerTraceKind::Step) {
@@ -1703,7 +1718,11 @@ std::set<std::string> stepped_waves(const StepPatch &p_patch, uint32_t p_speed_i
 			}
 		}
 	}
-	return names;
+	return out;
+}
+
+std::set<std::string> stepped_waves(const StepPatch &p_patch, uint32_t p_speed_input, float p_material, float p_speed) {
+	return stepped(p_patch, p_speed_input, p_material, p_speed, uint32_t(ssp::kFootPlantLeft), 0.0f).names;
 }
 
 std::set<std::string> material_waves(const std::set<std::string> &p_names) {
@@ -1781,6 +1800,15 @@ TEST_SUITE("audio-footsteps") {
 		CHECK(d->bullet_impact == "sound/bullet_craft/bullet_impacts/bullet_impact_1pplayer");
 		CHECK(d->movement == "sound/character/soldier_movement_sounds_mp");
 		CHECK(d->death == "sound/character/death_screams/us/death_screams_us");
+		CHECK(d->local_player_closes_period);
+		std::map<int32_t, uint32_t> ant;
+		for (const gp::SoldierAntStep &a : d->ant_steps) {
+			ant.emplace(a.tag, a.event);
+		}
+		CHECK(d->ant_steps.size() == 4);
+		CHECK(ant ==
+				std::map<int32_t, uint32_t>{ { -35609206, 2672540575u }, { -1008111485, 623859716u },
+						{ 339947722, 2300644978u }, { 409850175, 2937376969u } });
 		const StepPatch steps = step_patch(*f->install, *f->metro, d->footsteps);
 		const ba::FootstepParams p = ba::footstep_params(*d, *steps.program);
 		MESSAGE("footsteps: ", steps.program->outputs.size(), " outputs, audible to ", p.radius_m, " m, ",
@@ -1933,6 +1961,127 @@ TEST_SUITE("audio-footsteps") {
 		check_unchanged(*f);
 	}
 
+	TEST_CASE("running: the own soldier's 1p animation steps post the footsteps' animation events and the period is "
+			  "closed for the local player; clothes_vest_ru at 4.0 m/s, clothes_vest_sp at 6.5 m/s") {
+		Fixture *f = need_install();
+		Result<gp::SoldierSoundDef> d = gp::read_soldier_sounds(f->metro->db());
+		REQUIRE(d.ok());
+		const StepPatch steps = step_patch(*f->install, *f->metro, d->footsteps);
+		const ba::FootstepParams p = ba::footstep_params(*d, *steps.program);
+		const std::optional<uint32_t> left = ba::animated_step_event(p, -35609206);
+		const std::optional<uint32_t> right = ba::animated_step_event(p, -1008111485);
+		REQUIRE(left.has_value());
+		REQUIRE(right.has_value());
+		CHECK(*left == 2672540575u);
+		CHECK(*right == 623859716u);
+		CHECK(p.local_player_closes_period);
+
+		const auto has = [](const std::set<std::string> &p_names, std::string_view p_part) {
+			return std::any_of(p_names.begin(), p_names.end(),
+					[&](const std::string &n) { return n.find(p_part) != std::string::npos; });
+		};
+		std::map<int, SteppedWaves> heard;
+		for (const float speed : { 4.0f, 6.5f }) {
+			const SteppedWaves w = stepped(steps, d->speed_input, 1.0f, speed, *left, 1.0f);
+			std::string line;
+			for (const std::string &n : w.names) {
+				line += " " + n;
+			}
+			MESSAGE("animation step at ", speed, " m/s on SoundMaterialId 1, 1p, peak ", w.peak, ":", line);
+			heard[int(speed * 10.0f)] = w;
+		}
+		CHECK(heard[40].names.count("sound/character/footsteps/tarmac/sprint_tarmac_wave") == 1);
+		CHECK(heard[65].names.count("sound/character/footsteps/tarmac/sprint_tarmac_wave") == 1);
+		CHECK(has(heard[40].names, "clothing/clothes_vest_ru"));
+		CHECK_FALSE(has(heard[40].names, "clothing/clothes_vest_sp"));
+		CHECK(has(heard[65].names, "clothing/clothes_vest_sp"));
+		CHECK_FALSE(has(heard[65].names, "clothing/clothes_vest_ru"));
+		CHECK(heard[65].peak > heard[40].peak);
+
+		ba::MixerConfig mc;
+		mc.max_instances = 256;
+		ba::MixerCore mixer(mc);
+		mixer.record_cuts(true);
+		ba::OneShotPool pool(64);
+		ba::FootstepDriver driver(mixer, steps.program, steps.bank, ba::AudioTuning{}, pool, p,
+				[](const ba::Vec3 &) { return std::optional<float>(1.0f); });
+		std::vector<float> out(2 * 800);
+		std::vector<ba::MixerCutEvent> cuts(256);
+		std::array<ba::MixerFeedback, 128> fb;
+		std::map<ba::InstanceHandle, ba::MixerCutKind> fates;
+		const ba::ListenerState listener{};
+		size_t own_tags = 0, own_animated = 0, own_period = 0, bot_steps = 0;
+		bool left_next = true;
+		const auto drain = [&] {
+			REQUIRE(mixer.mix(out.data(), 800) == 800);
+			for (size_t n = mixer.poll_feedback(fb); n > 0; n = mixer.poll_feedback(fb)) {
+				for (size_t i = 0; i < n; ++i) {
+					if (fb[i].finished) {
+						pool.on_finished(fb[i].handle);
+					}
+				}
+			}
+			pool.update(mixer);
+			collect_fates(mixer, cuts, fates);
+		};
+		for (int frame = 0; frame < 480; ++frame) {
+			const bool sprint = frame >= 180;
+			const bool animated = frame < 360;
+			const int every = sprint ? 18 : 17;
+			std::array<ba::FootstepSoldier, 2> soldiers{};
+			soldiers[0].slot = 0;
+			soldiers[0].velocity = ba::Vec3{ 0.0f, 0.0f, sprint ? 6.5f : 4.0f };
+			soldiers[0].first_person = true;
+			soldiers[0].local_player = true;
+			soldiers[0].animated = animated;
+			if (animated && frame % every == every - 1) {
+				soldiers[0].tags[0] = left_next ? -35609206 : -1008111485;
+				soldiers[0].tag_count = 1;
+				left_next = !left_next;
+				++own_tags;
+			}
+			soldiers[1].slot = 1;
+			soldiers[1].position = ba::Vec3{ 0.0f, 0.0f, 20.0f };
+			soldiers[1].velocity = ba::Vec3{ 6.5f, 0.0f, 0.0f };
+			driver.step(soldiers, listener, 1.0 / 60.0, mixer.earliest_frame());
+			for (const ba::FootstepPost &x : driver.last_posts()) {
+				const bool step = x.event == ba::FootstepEvent::Left || x.event == ba::FootstepEvent::Right;
+				if (x.slot == 0) {
+					own_animated += x.event == ba::FootstepEvent::Animated ? 1u : 0u;
+					own_period += step ? 1u : 0u;
+					if (x.event == ba::FootstepEvent::Animated) {
+						CHECK((x.hash == *left || x.hash == *right));
+					}
+				} else {
+					bot_steps += step ? 1u : 0u;
+					CHECK(x.event != ba::FootstepEvent::Animated);
+				}
+			}
+			drain();
+		}
+		for (int tail = 0; tail < 180; ++tail) {
+			drain();
+		}
+		const ba::FootstepStats &st = driver.stats();
+		MESSAGE("own soldier: ", own_tags, " animation tags, ", own_animated, " animation steps, ", own_period,
+				" period steps once the animation stops; the bot sprinting at 20 m: ", bot_steps,
+				" period steps in 8 s; ", st.local_period, " own period steps started, ", st.refused, " refused");
+		CHECK(own_animated == own_tags);
+		CHECK(own_tags == 10 + 10);
+		CHECK(own_period == 9);
+		CHECK(st.local_period == own_period);
+		CHECK(bot_steps == 39);
+		CHECK(st.unknown_tags == 0);
+		CHECK(st.refused == 0);
+		size_t other = 0;
+		for (const auto &[h, k] : fates) {
+			other += k == ba::MixerCutKind::Finish || k == ba::MixerCutKind::Join ? 0u : 1u;
+		}
+		CHECK(other == 0);
+		CHECK(pool.live() == 0);
+		check_unchanged(*f);
+	}
+
 	TEST_CASE("load_soldier_audio; FootstepGroundProbe over Metro's Concrete and Water pairs; footstep_soldiers") {
 		Fixture *f = need_install();
 		Result<bf3::sim::weapons::InstallWeapons> w = bf3::sim::weapons::open_install_weapons(f->install);
@@ -1944,6 +2093,8 @@ TEST_SUITE("audio-footsteps") {
 		MESSAGE(report.front());
 		REQUIRE(a->footsteps);
 		REQUIRE(a->own_hit);
+		CHECK(a->params.ant_step_count == 4);
+		CHECK(a->params.local_player_closes_period);
 		CHECK(a->materials.rows_with_sound == 34);
 		CHECK(a->params.radius_m == doctest::Approx(46.8f).epsilon(0.01));
 
@@ -1993,9 +2144,16 @@ TEST_SUITE("audio-footsteps") {
 		others[1].eye_height = 1.5f;
 		others[1].mode = bf3::sim::MoveMode::InAir;
 		std::vector<ba::FootstepSoldier> soldiers;
-		ba::footstep_soldiers(frame.get(), others, 7, true, soldiers);
+		const std::array<int32_t, 2> own_tags{ -35609206, 5 };
+		ba::footstep_soldiers(frame.get(), others, 7, true, ba::OwnStepTags{ own_tags, true }, soldiers);
 		REQUIRE(soldiers.size() == 2);
 		CHECK(soldiers[0].slot == 7);
+		CHECK(soldiers[0].local_player);
+		CHECK(soldiers[0].animated);
+		CHECK(soldiers[0].tag_count == 2);
+		CHECK(soldiers[0].tags[0] == -35609206);
+		CHECK_FALSE(soldiers[1].local_player);
+		CHECK(soldiers[1].tag_count == 0);
 		CHECK(soldiers[0].generation == 3);
 		CHECK(soldiers[0].first_person);
 		CHECK(soldiers[0].pose == uint8_t(bf3::sim::Pose::Crouch));
@@ -2006,11 +2164,16 @@ TEST_SUITE("audio-footsteps") {
 		CHECK_FALSE(soldiers[1].first_person);
 		CHECK(soldiers[1].mode == bf3::sim::MoveMode::InAir);
 		CHECK(soldiers[1].velocity.z == 2.0f);
+		ba::footstep_soldiers(frame.get(), others, 7, false, ba::OwnStepTags{ own_tags, true }, soldiers);
+		REQUIRE(soldiers.size() == 2);
+		CHECK(soldiers[0].local_player);
+		CHECK_FALSE(soldiers[0].animated);
+		CHECK(soldiers[0].tag_count == 0);
 		frame->own_curr.flags = 0;
-		ba::footstep_soldiers(frame.get(), others, 7, true, soldiers);
+		ba::footstep_soldiers(frame.get(), others, 7, true, ba::OwnStepTags{}, soldiers);
 		REQUIRE(soldiers.size() == 1);
 		CHECK(soldiers[0].slot == 9);
-		ba::footstep_soldiers(nullptr, others, 0xFF, false, soldiers);
+		ba::footstep_soldiers(nullptr, others, 0xFF, false, ba::OwnStepTags{}, soldiers);
 		CHECK(soldiers.size() == 2);
 		check_unchanged(*f);
 	}

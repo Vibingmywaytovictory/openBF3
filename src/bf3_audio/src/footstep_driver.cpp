@@ -60,7 +60,22 @@ FootstepParams footstep_params(const core::gameplay::SoldierSoundDef &p_def, con
 	p.speed_scale = p_def.speed_scale;
 	p.speed_input = p_def.speed_input;
 	p.radius_m = audible_radius(p_footsteps);
+	for (const core::gameplay::SoldierAntStep &a : p_def.ant_steps) {
+		if (p.ant_step_count < p.ant_steps.size()) {
+			p.ant_steps[p.ant_step_count++] = a;
+		}
+	}
+	p.local_player_closes_period = p_def.local_player_closes_period;
 	return p;
+}
+
+std::optional<uint32_t> animated_step_event(const FootstepParams &p_params, int32_t p_tag) {
+	for (uint8_t i = 0; i < p_params.ant_step_count; ++i) {
+		if (p_params.ant_steps[i].tag == p_tag) {
+			return p_params.ant_steps[i].event;
+		}
+	}
+	return std::nullopt;
 }
 
 uint32_t footstep_event_hash(FootstepEvent p_event) {
@@ -77,6 +92,8 @@ uint32_t footstep_event_hash(FootstepEvent p_event) {
 			return uint32_t(ssp::kFootPlantLeft);
 		case FootstepEvent::Right:
 			return uint32_t(ssp::kFootPlantRight);
+		case FootstepEvent::Animated:
+			return 0;
 	}
 	return 0;
 }
@@ -101,7 +118,10 @@ void FootstepScheduler::step(std::span<const FootstepSoldier> p_soldiers, const 
 		auto it = std::find_if(tracks_.begin(), tracks_.end(), [key](const Track &t) { return t.key == key; });
 		const float speed = horizontal_speed(s.velocity);
 		const float normalized = params_.speed_scale > 0.0f ? speed / params_.speed_scale : 0.0f;
-		const auto post = [&](FootstepEvent p_event) { r_out.push_back(FootstepPost{ s.slot, p_event, speed, d }); };
+		const auto post_as = [&](FootstepEvent p_event, uint32_t p_hash, float p_speed) {
+			r_out.push_back(FootstepPost{ s.slot, p_event, p_hash, p_speed, d, false });
+		};
+		const auto post = [&](FootstepEvent p_event) { post_as(p_event, footstep_event_hash(p_event), speed); };
 		if (it == tracks_.end()) {
 			if (tracks_.size() >= kMaxFootstepSoldiers) {
 				continue;
@@ -129,7 +149,17 @@ void FootstepScheduler::step(std::span<const FootstepSoldier> p_soldiers, const 
 			t.moving = false;
 			post(FootstepEvent::Stop);
 		}
-		if (s.mode != sim::MoveMode::OnGround || !(speed > params_.walk_threshold)) {
+		if (s.animated) {
+			for (uint8_t i = 0; i < s.tag_count && i < s.tags.size(); ++i) {
+				if (const std::optional<uint32_t> event = animated_step_event(params_, s.tags[i])) {
+					post_as(FootstepEvent::Animated, *event, speed);
+				} else {
+					++unknown_tags_;
+				}
+			}
+		}
+		const bool gated = s.local_player && params_.local_player_closes_period;
+		if ((gated && s.animated) || s.mode != sim::MoveMode::OnGround || !(speed > params_.walk_threshold)) {
 			t.phase = 0.0;
 			continue;
 		}
@@ -138,6 +168,7 @@ void FootstepScheduler::step(std::span<const FootstepSoldier> p_soldiers, const 
 		if (period > 0.0 && t.phase >= period) {
 			t.phase = std::min(t.phase - period, period);
 			post(t.left_next ? FootstepEvent::Left : FootstepEvent::Right);
+			r_out.back().local_period = gated;
 			t.left_next = !t.left_next;
 		}
 	}
@@ -179,7 +210,7 @@ struct FootstepDriver::Impl {
 		const float pose = float(p_soldier.pose);
 		const float speed = p_post.speed;
 		OneShotOptions o;
-		o.event = footstep_event_hash(p_post.event);
+		o.event = p_post.hash;
 		o.set_first_person = true;
 		o.first_person = p_soldier.first_person;
 		const uint64_t material_key = uint64_t(std::clamp(std::lround(id), 0l, 255l));
@@ -210,6 +241,7 @@ struct FootstepDriver::Impl {
 			(void)mixer.push(c);
 		}
 		++stats.posts[size_t(p_post.event)];
+		stats.local_period += p_post.local_period ? 1u : 0u;
 		++stats.by_material[std::min<size_t>(size_t(material_key), kFootstepMaterialIds)];
 		stats.farthest_m = std::max(stats.farthest_m, p_post.distance_m);
 	}
@@ -241,6 +273,7 @@ void FootstepDriver::step(
 		}
 	}
 	m.stats.tracked = uint32_t(m.scheduler.tracked());
+	m.stats.unknown_tags = m.scheduler.unknown_tags();
 	m.stats.peak_tracked = std::max(m.stats.peak_tracked, m.stats.tracked);
 }
 

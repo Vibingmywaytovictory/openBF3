@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 namespace bf3::anim {
 
@@ -239,6 +240,32 @@ bool read_branch_tags(const AntLibrary &p_library, const AntPackage &p_pkg, cons
 	});
 }
 
+bool read_event_tags(const AntLibrary &p_library, const AntPackage &p_pkg, const GdStruct &p_owner, float p_start_time,
+		std::vector<AntEventTag> &r_tags) {
+	return visit_tags(p_library, p_pkg, p_owner, [&](const GdStruct &p_tag, const AntPackage &) {
+		if (p_tag.type_name() != "FbTagAsset") {
+			return true;
+		}
+		int64_t id = 0, time_i = 0;
+		float time = 0.0f;
+		if (!p_tag.read_int("FbTagId", id) || id < std::numeric_limits<int32_t>::min() ||
+				id > std::numeric_limits<int32_t>::max()) {
+			return false;
+		}
+		if (!p_tag.read_float("Time", time)) {
+			if (!p_tag.read_int("Time", time_i)) {
+				return false;
+			}
+			time = float(time_i);
+		}
+		if (!finite(time) || r_tags.size() >= kMaxAntEventTags) {
+			return false;
+		}
+		r_tags.push_back(AntEventTag{ int32_t(id), time - p_start_time });
+		return true;
+	});
+}
+
 bool read_bool_state_tag(const AntLibrary &p_library, const AntPackage &p_pkg, const GdStruct &p_owner,
 		std::string_view p_signal, AntBoolStateTag &r_tag) {
 	return visit_tags(p_library, p_pkg, p_owner, [&](const GdStruct &p_tag, const AntPackage &p_tag_pkg) {
@@ -427,6 +454,14 @@ core::Result<AntClipRoute> route_from(const AntLibrary &p_library, const AntPack
 			}
 			if (!read_branch_tags(p_library, *pkg, cur, route.branches)) {
 				return core::make_error(label(cur) + ": unreadable branch tags");
+			}
+			float start_time = 0.0f;
+			if (anim.read_float("StartTime", start_time) && !finite(start_time)) {
+				return core::make_error(label(cur) + ": a non-finite Anims[0].StartTime");
+			}
+			route.event_tags.clear();
+			if (!read_event_tags(p_library, *pkg, cur, start_time, route.event_tags)) {
+				return core::make_error(label(cur) + ": unreadable event tags");
 			}
 			route.sequence = true;
 			route.start_in_tick = in0;

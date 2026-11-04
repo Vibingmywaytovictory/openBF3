@@ -53,8 +53,14 @@ private:
 	core::gameplay::MaterialSounds materials_;
 };
 
+struct OwnStepTags {
+	std::span<const int32_t> tags;
+	bool animated = false;
+};
+
 void footstep_soldiers(const host::PresentationFrame *p_frame, std::span<const host::PresentedSoldier> p_others,
-		uint8_t p_own_slot, bool p_own_first_person, std::vector<FootstepSoldier> &r_out);
+		uint8_t p_own_slot, bool p_own_first_person, const OwnStepTags &p_own_tags,
+		std::vector<FootstepSoldier> &r_out);
 
 std::optional<Vec3> own_hit_forward(const host::PresentEvent &p_hit, std::span<const host::PresentedSoldier> p_others);
 
