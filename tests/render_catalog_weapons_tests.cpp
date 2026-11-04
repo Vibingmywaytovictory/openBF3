@@ -49,8 +49,8 @@ constexpr float kSightOffsetMeasured = 0.06f;
 constexpr float kSightMeasuredMetres = 0.001f;
 constexpr float kSightRatioSpread = 0.3f;
 
-const std::set<std::string> kCurveFireWeapons{ "weapons/m40a5/u_m40a5", "weapons/model98b/u_m98b",
-	"weapons/sv98/u_sv98", "weapons/xp1_l96/u_l96", "weapons/xp2_jng90/u_jng90" };
+const std::set<std::string> kCurveFireWeapons{ "weapons/gadgets/defibrillator/u_defib", "weapons/m40a5/u_m40a5",
+	"weapons/model98b/u_m98b", "weapons/sv98/u_sv98", "weapons/xp1_l96/u_l96", "weapons/xp2_jng90/u_jng90" };
 
 struct CatalogEntry {
 	uint8_t team = 1;
@@ -59,6 +59,7 @@ struct CatalogEntry {
 	std::string gap;
 	std::string facts;
 	std::string fire;
+	bool gadget = false;
 };
 
 std::string role_facts(const render::ViewmodelItem &p_item) {
@@ -275,6 +276,7 @@ TEST_SUITE("render-catalog-weapons") {
 			}
 			const render::ViewmodelClip &fire = item.clips[size_t(Role::Fire)];
 			e.fire = fire.source == Source::Clip ? fire.codec + " " + fire.controller : std::string();
+			e.gadget = item.kind == render::ViewmodelItemKind::Gadget;
 		});
 		const double s_load = seconds_since(t0);
 		std::vector<std::string> failed;
@@ -308,6 +310,21 @@ TEST_SUITE("render-catalog-weapons") {
 				chooser_fire.insert(e.weapon.unlock + " " + e.fire);
 			}
 		}
+		std::set<std::string> gadget_slots, gadget_items;
+		for (const CatalogEntry &e : entries) {
+			if (std::find(host::kGadgetSlots.begin(), host::kGadgetSlots.end(), e.weapon.slot) !=
+					host::kGadgetSlots.end()) {
+				gadget_slots.insert(e.weapon.unlock);
+			}
+			if (e.gadget) {
+				gadget_items.insert(e.weapon.unlock);
+			}
+		}
+		const std::set<std::string> gadgets{ "weapons/gadgets/ammobag/u_ammobag",
+			"weapons/gadgets/defibrillator/u_defib", "weapons/gadgets/medicbag/u_medkit",
+			"weapons/gadgets/radiobeacon/u_radiobeacon" };
+		CHECK(gadget_slots == gadgets);
+		CHECK(gadget_items == gadgets);
 		CHECK(curve_fire == kCurveFireWeapons);
 		CHECK(chooser_fire == std::set<std::string>{ "weapons/remington870/u_870 Dct 1P_MasterShotgunFire" });
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
@@ -467,6 +484,17 @@ TEST_SUITE("render-catalog-weapons-3p") {
 				failed.empty(), failed.size(), " fail, the first: ", failed.empty() ? std::string() : failed.front());
 		CHECK(carried.size() == n);
 		CHECK(ms.weapon_palettes == n);
+		std::set<std::string> gadget_parts;
+		for (const CrowdEntry &e : entries) {
+			const bool gadget_slot = std::find(host::kGadgetSlots.begin(), host::kGadgetSlots.end(), e.weapon.slot) !=
+					host::kGadgetSlots.end();
+			if (gadget_slot && e.error.empty() && e.set != nullptr) {
+				gadget_parts.insert(e.weapon.unlock);
+			}
+		}
+		CHECK(gadget_parts ==
+				std::set<std::string>{ "weapons/gadgets/ammobag/u_ammobag", "weapons/gadgets/defibrillator/u_defib",
+						"weapons/gadgets/medicbag/u_medkit", "weapons/gadgets/radiobeacon/u_radiobeacon" });
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
 		std::printf("render.catalog_weapons_3p install.unchanged %s\n", diff.clean() ? "yes" : diff.summary().c_str());
 		CHECK(diff.clean());

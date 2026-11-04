@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <map>
 #include <set>
+#include <span>
 
 namespace bf3::host {
 
@@ -73,18 +74,21 @@ std::vector<LoadoutWeapon> loadout_weapons(const LoadoutCatalog &p_catalog, uint
 		if (kit == nullptr) {
 			return out;
 		}
-		for (const uint8_t s : kKitSlots) {
-			for (const LoadoutItem &item : kit->slots[s]) {
-				if (item.def == sim::weapons::kNoWeapon) {
-					continue;
+		for (const std::span<const uint8_t> slots :
+				{ std::span<const uint8_t>(kKitSlots), std::span<const uint8_t>(kGadgetSlots) }) {
+			for (const uint8_t s : slots) {
+				for (const LoadoutItem &item : kit->slots[s]) {
+					if (item.def == sim::weapons::kNoWeapon) {
+						continue;
+					}
+					const auto it = std::find_if(
+							out.begin(), out.end(), [&](const LoadoutWeapon &w) { return w.def == item.def; });
+					if (it != out.end()) {
+						it->kits = uint8_t(it->kits | (1u << k));
+						continue;
+					}
+					out.push_back(LoadoutWeapon{ item.def, item.unlock, s, uint8_t(1u << k) });
 				}
-				const auto it =
-						std::find_if(out.begin(), out.end(), [&](const LoadoutWeapon &w) { return w.def == item.def; });
-				if (it != out.end()) {
-					it->kits = uint8_t(it->kits | (1u << k));
-					continue;
-				}
-				out.push_back(LoadoutWeapon{ item.def, item.unlock, s, uint8_t(1u << k) });
 			}
 		}
 	}

@@ -596,6 +596,8 @@ const char *viewmodel_item_kind_name(ViewmodelItemKind p_kind) {
 			return "grenade";
 		case ViewmodelItemKind::Knife:
 			return "knife";
+		case ViewmodelItemKind::Gadget:
+			return "gadget";
 	}
 	return "?";
 }
@@ -806,9 +808,11 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		item.reload_threshold = def->fire.reload_threshold;
 		item.magazine_capacity = def->fire.magazine_capacity;
 		item.weapon_class = def->weapon_class;
+		const bool aims = def->aiming.zoom_levels.size() >= 2;
 		item.kind = def->fire.logic == core::gameplay::FireLogic::HoldAndRelease ? ViewmodelItemKind::Grenade
-				: spec.unlock.find("knife") != std::string::npos				   ? ViewmodelItemKind::Knife
-																				   : ViewmodelItemKind::Gun;
+				: spec.unlock.find("knife") != std::string::npos				 ? ViewmodelItemKind::Knife
+				: aims															 ? ViewmodelItemKind::Gun
+																				 : ViewmodelItemKind::Gadget;
 
 		std::string mesh = spec.mesh;
 		std::string package = spec.ant_package;
@@ -1312,6 +1316,14 @@ ViewmodelCoverage viewmodel_coverage(const ViewmodelItem &p_item) {
 		case ViewmodelItemKind::Gun:
 			pick(c.entries[1], "fire", { Role::FireSingle, Role::Fire });
 			pick(c.entries[2], "reload", { Role::Reload, Role::ReloadEmpty });
+			break;
+		case ViewmodelItemKind::Gadget:
+			pick(c.entries[1], "fire", { Role::Fire, Role::FireSingle });
+			pick(c.entries[2], "reload", { Role::Reload });
+			if (c.entries[2].source == Source::Missing) {
+				c.entries[2].applicable = false;
+				c.entries[2].name = "no magazine";
+			}
 			break;
 	}
 	c.covered = true;
