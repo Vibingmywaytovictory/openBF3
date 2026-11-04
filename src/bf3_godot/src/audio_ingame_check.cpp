@@ -62,6 +62,50 @@ std::string reason_text(uint8_t p_reason, std::string_view p_scope) {
 
 }
 
+float audio_ingame_clearance(
+		const sim::CollisionWorld &p_world, const sim::MotorParams &p_motor, const sim::Vec3 &p_feet, float p_yaw) {
+	const sim::PoseParams &stand = p_motor.poses[0];
+	const sim::Vec3 from{ p_feet[0], p_feet[1] + stand.step_height, p_feet[2] };
+	const sim::Vec3 delta{ std::sin(p_yaw) * kAudioIngameRunMeters, 0.0f, std::cos(p_yaw) * kAudioIngameRunMeters };
+	const float radius = p_motor.radius * kAudioIngameRunRadiusShare;
+	sim::StaticHit hit;
+	if (!p_world.sweep_capsule(from, radius, std::max(stand.height - stand.step_height, radius * 2.0f), delta,
+				sim::query_mask::kMovement, &hit)) {
+		return kAudioIngameRunMeters;
+	}
+	return std::clamp(hit.fraction, 0.0f, 1.0f) * kAudioIngameRunMeters;
+}
+
+float audio_ingame_clearest_yaw(const std::function<float(float)> &p_clearance, float p_from, float &r_clear_m) {
+	float yaw = p_from;
+	r_clear_m = -1.0f;
+	for (uint32_t i = 0; i < kAudioIngameRunYaws; ++i) {
+		const float at = p_from + 2.0f * std::numbers::pi_v<float> * float(i) / float(kAudioIngameRunYaws);
+		const float clear = p_clearance(at);
+		if (clear > r_clear_m) {
+			r_clear_m = clear;
+			yaw = at;
+		}
+	}
+	return yaw;
+}
+
+std::optional<AudioIngameSpot> audio_ingame_open_spot(const sim::CollisionWorld &p_world,
+		const sim::MotorParams &p_motor, std::span<const sim::SpawnPoint> p_spawns) {
+	std::optional<AudioIngameSpot> best;
+	for (const sim::SpawnPoint &p : p_spawns) {
+		AudioIngameSpot spot;
+		spot.feet = p.position;
+		spot.yaw = audio_ingame_clearest_yaw(
+				[&](float p_yaw) { return audio_ingame_clearance(p_world, p_motor, p.position, p_yaw); }, 0.0f,
+				spot.clear_m);
+		if (!best || spot.clear_m > best->clear_m) {
+			best = spot;
+		}
+	}
+	return best;
+}
+
 bool parse_audio_ingame_phase(std::string_view p_text, AudioIngamePhase &r_phase) {
 	if (p_text.empty() || p_text == "mix") {
 		r_phase = AudioIngamePhase::Mix;
@@ -276,7 +320,38 @@ void AudioIngameCheck::note(const ba::MixerCutEvent &p_event, Bf3GameAudio &r_au
 	}
 }
 
+void AudioIngameCheck::pick_run_yaw(const AudioIngameIo &p_io) {
+	if (!p_io.clearance) {
+		return;
+	}
+	float best = 0.0f;
+	base_yaw_ = audio_ingame_clearest_yaw(p_io.clearance, base_yaw_, best);
+	run_clear_min_m_ = std::min(run_clear_min_m_, best);
+	++run_picks_;
+}
+
 void AudioIngameCheck::script_steps(double p_now_s, const AudioIngameIo &p_io) {
+	if (leg_s_ < 0.0 && !spot_checked_) {
+		spot_checked_ = true;
+		float clear = 0.0f;
+		if (p_io.clearance && p_io.open_spot && p_io.teleport) {
+			(void)audio_ingame_clearest_yaw(p_io.clearance, base_yaw_, clear);
+			spot_ = clear < kAudioIngameRunOpenMeters ? p_io.open_spot() : std::nullopt;
+			spot_s_ = p_now_s;
+		}
+	}
+	if (leg_s_ < 0.0 && spot_) {
+		const float off = std::hypot(p_io.feet[0] - spot_->feet[0], p_io.feet[2] - spot_->feet[2]);
+		if (off > kAudioIngameArriveMeters && p_now_s - spot_s_ < kAudioIngameArriveSeconds) {
+			p_io.teleport(*spot_);
+			p_io.move(false, false);
+			return;
+		}
+		teleports_ += off <= kAudioIngameArriveMeters ? 1u : 0u;
+		spot_clear_m_ = spot_->clear_m;
+		base_yaw_ = spot_->yaw;
+		spot_.reset();
+	}
 	if (leg_s_ < 0.0) {
 		leg_s_ = p_now_s;
 		leg_ = AudioIngameLeg::Stand;
@@ -292,9 +367,11 @@ void AudioIngameCheck::script_steps(double p_now_s, const AudioIngameIo &p_io) {
 								   : (leg_index_ % 4 == 1 ? AudioIngameLeg::Walk : AudioIngameLeg::Sprint);
 		leg_s_ = p_now_s;
 		last_step_s_ = -1.0;
+		if (leg_ != AudioIngameLeg::Stand) {
+			pick_run_yaw(p_io);
+		}
 	}
-	const float back = (leg_index_ / 4) % 2 == 1 ? std::numbers::pi_v<float> : 0.0f;
-	p_io.view(base_yaw_ + back, 0.0f);
+	p_io.view(base_yaw_, 0.0f);
 	p_io.move(leg_ != AudioIngameLeg::Stand, leg_ == AudioIngameLeg::Sprint);
 }
 
@@ -343,6 +420,7 @@ void AudioIngameCheck::script(double p_now_s, const AudioIngameIo &p_io) {
 			p_io.move(false, false);
 		}
 		leg_s_ = -1.0;
+		spot_checked_ = false;
 		if (p_io.time_to_respawn <= 0.0f && p_now_s - last_deploy_s_ > 1.5) {
 			p_io.deploy();
 			last_deploy_s_ = p_now_s;
@@ -988,7 +1066,11 @@ void AudioIngameCheck::analyse_steps(Bf3GameAudio &r_audio) {
 	const AudioIngameLegTally &walk = legs_[size_t(AudioIngameLeg::Walk)];
 	const AudioIngameLegTally &sprint = legs_[size_t(AudioIngameLeg::Sprint)];
 	row("own steps walking", walk.legs >= kAudioIngameMinLegs && walk.steps >= kAudioIngameMinLegSteps * walk.legs,
-			tally_text(AudioIngameLeg::Walk));
+			tally_text(AudioIngameLeg::Walk) +
+					core::fmt("; %u moving legs each along the clearest of %u yaws, the shortest clear %.1f of %.0f m; "
+							  "%u moves to the most open spawn point (%.1f m clear)",
+							run_picks_, kAudioIngameRunYaws, double(run_clear_min_m_), double(kAudioIngameRunMeters),
+							teleports_, double(spot_clear_m_)));
 	double walk_interval = 0.0, run_interval = 0.0;
 	size_t run_steps = 0;
 	for (const auto &[speed, interval] : walk.intervals) {

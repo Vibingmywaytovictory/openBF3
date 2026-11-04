@@ -3,6 +3,9 @@
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/wav_io.h"
 #include "bf3/client_audio/sound_fate_ledger.h"
+#include "bf3/sim/collision_world.h"
+#include "bf3/sim/soldier_motor.h"
+#include "bf3/sim/spawn.h"
 #include "game_audio.h"
 
 #include <godot_cpp/classes/audio_effect_capture.hpp>
@@ -12,6 +15,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -52,9 +56,26 @@ inline constexpr std::array<double, kAudioIngameLegs> kAudioIngameLegSeconds{ 1.
 inline constexpr double kAudioIngameLegSettleSeconds = 0.6;
 inline constexpr uint32_t kAudioIngameMinLegs = 2;
 inline constexpr uint32_t kAudioIngameMinLegSteps = 3;
+inline constexpr uint32_t kAudioIngameRunYaws = 16;
+inline constexpr float kAudioIngameRunMeters = 32.0f;
+inline constexpr float kAudioIngameRunRadiusShare = 0.6f;
+inline constexpr float kAudioIngameRunOpenMeters = 24.0f;
+inline constexpr float kAudioIngameArriveMeters = 1.0f;
+inline constexpr double kAudioIngameArriveSeconds = 5.0;
+
+struct AudioIngameSpot {
+	sim::Vec3 feet{};
+	float yaw = 0.0f;
+	float clear_m = 0.0f;
+};
 inline constexpr uint64_t kAudioIngameMinBotShots = 10;
 
 bool parse_audio_ingame_phase(std::string_view p_text, AudioIngamePhase &r_phase);
+float audio_ingame_clearance(
+		const sim::CollisionWorld &p_world, const sim::MotorParams &p_motor, const sim::Vec3 &p_feet, float p_yaw);
+float audio_ingame_clearest_yaw(const std::function<float(float)> &p_clearance, float p_from, float &r_clear_m);
+std::optional<AudioIngameSpot> audio_ingame_open_spot(
+		const sim::CollisionWorld &p_world, const sim::MotorParams &p_motor, std::span<const sim::SpawnPoint> p_spawns);
 
 inline constexpr double kAudioIngameGhostSeconds = 1.0;
 inline constexpr double kAudioIngameLimitedBlocksShare = 0.01;
@@ -77,6 +98,10 @@ struct AudioIngameIo {
 	std::function<void(float, float)> view;
 	std::function<float()> yaw;
 	std::function<void(bool, bool)> move;
+	std::function<float(float)> clearance;
+	std::function<std::optional<AudioIngameSpot>()> open_spot;
+	std::function<void(const AudioIngameSpot &)> teleport;
+	sim::Vec3 feet{};
 	uint8_t own_slot = 0xFF;
 };
 
@@ -140,6 +165,7 @@ private:
 	void analyse_pool(Bf3GameAudio &r_audio);
 	void analyse_steps(Bf3GameAudio &r_audio);
 	void analyse_flyby(Bf3GameAudio &r_audio);
+	void pick_run_yaw(const AudioIngameIo &p_io);
 	void script_steps(double p_now_s, const AudioIngameIo &p_io);
 	void tally_steps(double p_now_s, Bf3GameAudio &r_audio, const AudioIngameIo &p_io);
 	void row(const std::string &p_name, bool p_pass, const std::string &p_detail);
@@ -200,6 +226,13 @@ private:
 	uint64_t other_steps_ = 0;
 	uint32_t stands_after_moving_ = 0;
 	double last_step_s_ = -1.0;
+	float run_clear_min_m_ = kAudioIngameRunMeters;
+	uint32_t run_picks_ = 0;
+	bool spot_checked_ = false;
+	std::optional<AudioIngameSpot> spot_;
+	double spot_s_ = -1.0;
+	uint32_t teleports_ = 0;
+	float spot_clear_m_ = 0.0f;
 	GameAudioStats stats_at_start_;
 
 	bool done_ = false;

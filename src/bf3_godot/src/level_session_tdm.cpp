@@ -1214,6 +1214,30 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			mapper_.script_hold(InputAction::Forward, p_forward);
 			mapper_.script_hold(InputAction::Sprint, p_sprint);
 		};
+		io.clearance = [this](float p_yaw) {
+			const sim::CollisionWorld *world = collision_world();
+			const std::shared_ptr<const host::SharedLevel> level = shared_level();
+			return world != nullptr && level != nullptr
+					? audio_ingame_clearance(*world, level->motor, frame_->own_curr.position, p_yaw)
+					: 0.0f;
+		};
+		io.open_spot = [this]() -> std::optional<AudioIngameSpot> {
+			const sim::CollisionWorld *world = collision_world();
+			const std::shared_ptr<const host::SharedLevel> level = shared_level();
+			return world != nullptr && level != nullptr ? audio_ingame_open_spot(*world, level->motor, level->spawns)
+														: std::nullopt;
+		};
+		io.teleport = [this](const AudioIngameSpot &p_spot) {
+			if (client_ == nullptr) {
+				return;
+			}
+			net::DebugRequest q;
+			q.kind = net::DebugKind::Teleport;
+			q.position = p_spot.feet;
+			q.yaw = sim::quantize_yaw(p_spot.yaw);
+			client_->send_debug(q);
+		};
+		io.feet = frame_->own_curr.position;
 		io.own_slot = m.own_slot;
 		if (m.audio_ingame->frame(now_s, *r_game.audio, io)) {
 			m.finished = true;
