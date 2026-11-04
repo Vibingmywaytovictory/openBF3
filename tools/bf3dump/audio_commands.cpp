@@ -8,11 +8,10 @@
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/ui/text_db.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/host/ui_flow_session.h"
 #include "bf3/sim/logic/sound_area_natives.h"
 #include "bf3/sim_harness/sound_area_probe.h"
-
-#include <windows.h>
 
 #include <algorithm>
 #include <chrono>
@@ -36,15 +35,6 @@ int cmd_audio_bank(const InstallReader &p_reader, std::shared_ptr<Install> p_ins
 int cmd_audio_wave(const InstallReader &p_reader, std::shared_ptr<Install> p_install, const std::vector<std::string> &p_args);
 
 namespace {
-
-double thread_cpu_seconds() {
-	FILETIME created, exited, kernel, user;
-	if (!GetThreadTimes(GetCurrentThread(), &created, &exited, &kernel, &user)) {
-		return 0.0;
-	}
-	auto ticks = [](const FILETIME &p_t) { return (uint64_t(p_t.dwHighDateTime) << 32) | p_t.dwLowDateTime; };
-	return double(ticks(kernel) + ticks(user)) * 1e-7;
-}
 
 bool print_install_unchanged(const InstallReader &p_reader, const InstallSnapshot &p_before) {
 	const InstallSnapshot after = p_reader.snapshot();

@@ -37,6 +37,7 @@ namespace {
 using Clock = std::chrono::steady_clock;
 
 using bf3::core::seconds_since;
+using bf3::core::thread_cpu_seconds;
 
 double ms_between(Clock::time_point p_a, Clock::time_point p_b) {
 	return std::chrono::duration<double, std::milli>(p_b - p_a).count();
@@ -56,15 +57,6 @@ uint64_t peak_working_set() {
 		return uint64_t(pmc.PeakWorkingSetSize);
 	}
 	return 0;
-}
-
-double thread_cpu_seconds() {
-	FILETIME create, exit, kernel, user;
-	if (!GetThreadTimes(GetCurrentThread(), &create, &exit, &kernel, &user)) {
-		return 0.0;
-	}
-	const auto to100ns = [](const FILETIME &p_t) { return (uint64_t(p_t.dwHighDateTime) << 32) | p_t.dwLowDateTime; };
-	return double(to100ns(kernel) + to100ns(user)) * 1e-7;
 }
 
 Percentiles percentiles_impl(std::vector<double> p_values) {
