@@ -20,6 +20,7 @@ namespace godot {
 class Camera3D;
 class MeshInstance3D;
 class Skeleton3D;
+class SpotLight3D;
 }
 
 namespace bf3::host {
@@ -138,6 +139,12 @@ private:
 			std::string name;
 		};
 		std::vector<Attachment> attachments;
+		struct Light {
+			godot::SpotLight3D *node = nullptr;
+			int32_t bone = -1;
+			godot::Transform3D xform;
+		};
+		std::vector<Light> lights;
 	};
 
 	void set_viewmodel_fov(float p_fov);

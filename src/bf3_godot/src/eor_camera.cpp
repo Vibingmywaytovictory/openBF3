@@ -159,7 +159,7 @@ void EorShowroom::place_light(Node *p_parent, const core::level::EorSpotLight &p
 	const float offset = p_light.attenuation_offset > 0.0f ? p_light.attenuation_offset : 1.0f;
 	light_->set_param(Light3D::PARAM_ENERGY, p_light.intensity / (offset * offset));
 	light_->set_param(Light3D::PARAM_RANGE, p_light.radius);
-	light_->set_param(Light3D::PARAM_SPOT_ANGLE, p_light.cone_outer_deg);
+	light_->set_param(Light3D::PARAM_SPOT_ANGLE, render::spot_light_half_angle_deg(p_light));
 	light_->set_shadow(p_light.cast_shadows);
 	light_->set_visible(false);
 	p_parent->add_child(light_);

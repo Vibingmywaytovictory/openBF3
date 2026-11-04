@@ -12,6 +12,7 @@
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/skeleton3d.hpp>
+#include <godot_cpp/classes/spot_light3d.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -308,6 +309,28 @@ void apply_blend_look(
 	p_m->set_flag(BaseMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, bf3::render::viewmodel_slot_vertex_colour(p_look));
 }
 
+SpotLight3D *make_weapon_light(
+		Skeleton3D *p_skeleton, const bf3::render::WeaponSocketLight &p_light, SetTextures &r_textures) {
+	const bf3::core::level::SpotLight &l = p_light.light;
+	SpotLight3D *node = memnew(SpotLight3D);
+	node->set_name(to_godot(p_light.socket_unlock.substr(p_light.socket_unlock.rfind('/') + 1)));
+	node->set_color(Color(l.color[0], l.color[1], l.color[2]));
+	node->set_param(Light3D::PARAM_ENERGY, l.intensity);
+	node->set_param(Light3D::PARAM_ATTENUATION, 2.0f);
+	node->set_param(Light3D::PARAM_RANGE, l.radius);
+	node->set_param(Light3D::PARAM_SPOT_ANGLE, bf3::render::spot_light_half_angle_deg(l));
+	node->set_param(Light3D::PARAM_SPECULAR, l.specular ? 1.0f : 0.0f);
+	node->set_shadow(l.cast_shadows);
+	if (!l.texture.empty()) {
+		if (const Ref<Texture2D> t = r_textures.find(l.texture, bf3::render::TextureRole::Color); t.is_valid()) {
+			node->set_projector(t);
+		}
+	}
+	node->set_visible(false);
+	p_skeleton->add_child(node);
+	return node;
+}
+
 MeshInstance3D *make_part_mesh(Skeleton3D *p_skeleton, const bf3::render::ViewmodelPart &p_part,
 		const std::vector<bf3::render::ViewmodelSlotLook> &p_looks, std::vector<Ref<StandardMaterial3D>> &r_materials,
 		SetTextures &r_textures) {
@@ -419,6 +442,12 @@ void Bf3Viewmodel::add_item_nodes(const bf3::render::ViewmodelSet &p_set) {
 			}
 			n.attachments.push_back(na);
 		}
+		for (const bf3::render::ViewmodelLight &l : it.lights) {
+			if (l.rig_bone >= 0) {
+				n.lights.push_back(
+						{ make_weapon_light(skeleton_, l.socket, textures), l.rig_bone, to_godot(l.socket.transform) });
+			}
+		}
 	}
 }
 
@@ -430,6 +459,9 @@ void Bf3Viewmodel::select_item(int p_index) {
 		items_[size_t(item_)].weapon->set_visible(false);
 		for (const ItemNodes::Attachment &a : items_[size_t(item_)].attachments) {
 			a.mesh->set_visible(false);
+		}
+		for (const ItemNodes::Light &l : items_[size_t(item_)].lights) {
+			l.node->set_visible(false);
 		}
 	}
 	item_ = p_index >= 0 && size_t(p_index) < items_.size() ? p_index : -1;
@@ -558,6 +590,13 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 		a.mesh->set_visible(on);
 		if (on && !a.skinned) {
 			a.mesh->set_transform(xform_to_godot(model_[size_t(a.bone)]) * a.xform);
+		}
+	}
+	for (const ItemNodes::Light &l : shown.lights) {
+		const bool on = size_t(l.bone) < model_.size();
+		l.node->set_visible(on);
+		if (on) {
+			l.node->set_transform(xform_to_godot(model_[size_t(l.bone)]) * l.xform);
 		}
 	}
 	set_viewmodel_fov(ads_frame_.viewmodel_fov);
