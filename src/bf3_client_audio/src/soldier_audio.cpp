@@ -52,12 +52,17 @@ core::Result<SoldierAudioAssets> load_soldier_audio(const core::EbxResolver &p_d
 		return hit.error();
 	}
 	a.own_hit = *hit;
+	core::Result<std::shared_ptr<const ca::SoundProgram>> movement = compile_patch(p_db, a.def.movement);
+	if (!movement) {
+		return movement.error();
+	}
+	a.movement = *movement;
 	r_report.push_back("footsteps [" + a.def.footsteps + "]: " + std::to_string(a.materials.rows_with_sound) + " of " +
 			std::to_string(a.materials.rows) + " grid rows with a MaterialSoundId, audible to " +
 			std::to_string(a.params.radius_m) + " m, " + std::to_string(a.params.ant_step_count) +
 			" animation step events" +
 			(a.params.local_player_closes_period ? ", the period closed for the local player" : "") + "; own hit [" +
-			a.def.bullet_impact + "]");
+			a.def.bullet_impact + "]; movement [" + a.def.movement + "]");
 	return a;
 }
 

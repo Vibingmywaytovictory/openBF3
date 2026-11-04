@@ -4,6 +4,7 @@
 #include "godot_util.h"
 
 #include "bf3/audio/audio_load.h"
+#include "bf3/audio/movement_foley.h"
 #include "bf3/audio/voice_cull.h"
 #if OPENBF3_BUILD_CHECKS
 #include "bf3/client_audio/area_wave_observer.h"
@@ -116,6 +117,7 @@ struct Bf3GameAudio::Impl {
 	std::shared_ptr<ba::FootstepGroundProbe> ground;
 	std::unique_ptr<ba::FootstepDriver> footsteps;
 	std::unique_ptr<ba::OwnHitAudio> own_hit;
+	std::unique_ptr<ba::MovementFoley> movement;
 	std::vector<ba::FootstepSoldier> step_soldiers;
 	TapForwarder tap;
 	Ref<Bf3AudioStream> stream;
@@ -290,6 +292,7 @@ bool Bf3GameAudio::build(godot::Node *p_parent, std::string *r_error) {
 	}
 	if (m.soldier) {
 		m.own_hit = std::make_unique<ba::OwnHitAudio>(*m.mixer, m.soldier->own_hit, m.bank, m.tuning, *m.pool);
+		m.movement = std::make_unique<ba::MovementFoley>(m.soldier->movement, m.bank, m.tuning);
 	}
 	m.beds.set_assets(m.bed_assets);
 	m.stream.instantiate();
@@ -373,6 +376,11 @@ void Bf3GameAudio::step(const GameFrame &p_frame, std::span<const fx::ImpactSoun
 			ba::OwnStepTags{ p_frame.own_step_tags, p_frame.own_steps_animated }, m.step_soldiers);
 	if (m.footsteps) {
 		m.footsteps->step(m.step_soldiers, in.listener, p_frame.dt, m.clock->earliest_frame());
+	}
+	if (m.movement) {
+		const auto own = std::find_if(m.step_soldiers.begin(), m.step_soldiers.end(),
+				[](const ba::FootstepSoldier &s) { return s.local_player; });
+		m.movement->step(*m.mixer, own != m.step_soldiers.end() ? &*own : nullptr, in.listener);
 	}
 	if (m.own_hit) {
 		m.own_hit->on_events(p_frame.events, p_frame.others, in.listener, m.clock->earliest_frame());
@@ -648,6 +656,7 @@ void Bf3GameAudio::shutdown() {
 	m.flybys.reset();
 	m.footsteps.reset();
 	m.own_hit.reset();
+	m.movement.reset();
 	m.clock.reset();
 	m.mixer.reset();
 	m.pool.reset();
@@ -686,6 +695,7 @@ ba::MixerA3Assets load_a3(const core::EbxResolver &p_db, Impl &r_m) {
 	if (r_m.soldier) {
 		programs.push_back(r_m.soldier->footsteps);
 		programs.push_back(r_m.soldier->own_hit);
+		programs.push_back(r_m.soldier->movement);
 	}
 	ba::MixerA3Assets a3 = ba::load_mixer_a3(p_db, programs);
 	char line[200];
@@ -769,6 +779,9 @@ template <class Impl> void drain_mixer_events(Impl &r_m, const Bf3GameAudio &p_a
 			const ba::MixerCutEvent &e = r_m.cut_batch[i];
 			r_m.ledger.note(e, p_audio.scope_name(e.scope));
 			r_m.beds.on_cut(e);
+			if (r_m.movement) {
+				r_m.movement->on_cut(e);
+			}
 			if (keep) {
 				if (c->events.size() < kMaxCaptureEvents) {
 					c->events.push_back(e);
@@ -900,6 +913,13 @@ void capture_end(Impl &r_m) {
 				std::to_string(st.local_period) + " own on the period, " + std::to_string(st.refused) + " refused, " +
 				std::to_string(st.no_ground) + " without ground, farthest " + std::to_string(st.farthest_m) +
 				" m, by SoundMaterialId" + ids)
+						.c_str()));
+	}
+	if (r_m.movement) {
+		const ba::MovementFoleyStats &foley = r_m.movement->stats();
+		UtilityFunctions::print(String::utf8(("[audio] movement foley: " + std::to_string(foley.starts) + " starts, " +
+				std::to_string(foley.stops) + " stops, " + std::to_string(foley.ended) + " ended, " +
+				std::to_string(foley.jumps) + " jumps, peak " + std::to_string(foley.peak_speed) + " m/s")
 						.c_str()));
 	}
 	if (r_m.own_hit) {

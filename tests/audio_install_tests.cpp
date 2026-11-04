@@ -4,6 +4,7 @@
 #include "bf3/audio/footstep_driver.h"
 #include "bf3/audio/ir_reverb.h"
 #include "bf3/audio/mixer_core.h"
+#include "bf3/audio/movement_foley.h"
 #include "bf3/audio/patch_instance.h"
 #include "bf3/audio/voice_cull.h"
 #include "bf3/client_audio/area_beds.h"
@@ -2082,6 +2083,99 @@ TEST_SUITE("audio-footsteps") {
 		check_unchanged(*f);
 	}
 
+	TEST_CASE("movement: soldier_movement_sounds_mp breathes from 5.6 m/s in 1p, not at 4.0 or 5.5 m/s and not in 3p") {
+		Fixture *f = need_install();
+		Result<gp::SoldierSoundDef> d = gp::read_soldier_sounds(f->metro->db());
+		REQUIRE(d.ok());
+		const auto has = [](const std::set<std::string> &p_names, std::string_view p_part) {
+			return std::any_of(p_names.begin(), p_names.end(),
+					[&](const std::string &n) { return n.find(p_part) != std::string::npos; });
+		};
+		const StepPatch moves = step_patch(*f->install, *f->metro, d->movement);
+		CHECK(moves.program->start_event != 0);
+		std::map<int, SteppedWaves> breath;
+		for (const float speed : { 4.0f, 5.5f, 6.5f }) {
+			for (const float person : { 0.0f, 1.0f }) {
+				const SteppedWaves w = stepped(moves, uint32_t(ssp::kSpeed), 0.0f, speed, 0, person);
+				std::string line;
+				for (const std::string &n : w.names) {
+					line += " " + n;
+				}
+				MESSAGE("movement at ", speed, " m/s, first person ", person, ", peak ", w.peak, ":", line);
+				breath[int(speed * 10.0f) * 2 + int(person)] = w;
+			}
+		}
+		CHECK_FALSE(has(breath[81].names, "/breathing/"));
+		CHECK_FALSE(has(breath[111].names, "/breathing/"));
+		CHECK(has(breath[131].names, "/breathing/"));
+		CHECK(breath[131].peak > 0.0f);
+		CHECK(breath[130].peak == 0.0f);
+		check_unchanged(*f);
+	}
+
+	TEST_CASE("MovementFoley: one looping soldier_movement_sounds_mp for the own soldier, fed its speed; stopped on "
+			  "death, it finishes") {
+		Fixture *f = need_install();
+		Result<gp::SoldierSoundDef> d = gp::read_soldier_sounds(f->metro->db());
+		REQUIRE(d.ok());
+		const StepPatch moves = step_patch(*f->install, *f->metro, d->movement);
+		ba::MixerConfig mc;
+		mc.max_instances = 16;
+		ba::MixerCore mixer(mc);
+		mixer.record_cuts(true);
+		ba::MovementFoley foley(moves.program, moves.bank, ba::AudioTuning{});
+		std::vector<float> out(2 * 800);
+		std::vector<ba::MixerCutEvent> cuts(256);
+		const ba::ListenerState listener{};
+		const auto drain = [&] {
+			REQUIRE(mixer.mix(out.data(), 800) == 800);
+			for (size_t n = mixer.poll_cuts(cuts); n > 0; n = mixer.poll_cuts(cuts)) {
+				for (size_t i = 0; i < n; ++i) {
+					foley.on_cut(cuts[i]);
+				}
+			}
+		};
+		double jog_energy = 0.0, sprint_energy = 0.0;
+		for (int frame = 0; frame < 600; ++frame) {
+			ba::FootstepSoldier own;
+			own.slot = 3;
+			own.local_player = true;
+			own.first_person = true;
+			own.velocity = ba::Vec3{ 0.0f, 0.0f, frame < 120 ? 4.0f : 6.5f };
+			own.mode = frame >= 480 ? bf3::sim::MoveMode::Dead
+					: frame == 300	? bf3::sim::MoveMode::Jumping
+									: bf3::sim::MoveMode::OnGround;
+			foley.step(mixer, &own, listener);
+			drain();
+			double e = 0.0;
+			for (const float v : out) {
+				e += double(v) * double(v);
+			}
+			if (frame < 120) {
+				jog_energy += e;
+			} else if (frame < 480) {
+				sprint_energy += e;
+			}
+		}
+		for (int tail = 0; tail < 600 && foley.stats().ended == 0; ++tail) {
+			drain();
+		}
+		const ba::MovementFoleyStats &st = foley.stats();
+		MESSAGE("movement foley: ", st.starts, " starts, ", st.updates, " speed updates, ", st.jumps, " jumps, ",
+				st.stops, " stops, ", st.ended, " ended; energy jogging ", jog_energy, ", sprinting ", sprint_energy);
+		CHECK(st.starts == 1);
+		CHECK(st.updates == 1);
+		CHECK(st.jumps == 1);
+		CHECK(st.stops == 1);
+		CHECK(st.push_failures == 0);
+		CHECK(st.create_failures == 0);
+		CHECK(foley.handle() == ba::kNoInstance);
+		CHECK(jog_energy == 0.0);
+		CHECK(sprint_energy > 0.0);
+		CHECK(mixer.stats().active_instances.load() == 0);
+		check_unchanged(*f);
+	}
+
 	TEST_CASE("load_soldier_audio; FootstepGroundProbe over Metro's Concrete and Water pairs; footstep_soldiers") {
 		Fixture *f = need_install();
 		Result<bf3::sim::weapons::InstallWeapons> w = bf3::sim::weapons::open_install_weapons(f->install);
@@ -2093,6 +2187,9 @@ TEST_SUITE("audio-footsteps") {
 		MESSAGE(report.front());
 		REQUIRE(a->footsteps);
 		REQUIRE(a->own_hit);
+		REQUIRE(a->movement);
+		CHECK(a->movement->input_register(uint32_t(ssp::kSpeed)).has_value());
+		CHECK(a->movement->input_register(uint32_t(ssp::kIsFirstPerson)).has_value());
 		CHECK(a->params.ant_step_count == 4);
 		CHECK(a->params.local_player_closes_period);
 		CHECK(a->materials.rows_with_sound == 34);

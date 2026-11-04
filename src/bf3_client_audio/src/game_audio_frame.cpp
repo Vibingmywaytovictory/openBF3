@@ -255,6 +255,7 @@ core::Result<GameAudioAssets> load_game_audio_assets(const std::shared_ptr<const
 	if (a.soldier) {
 		all.push_back(a.soldier->footsteps);
 		all.push_back(a.soldier->own_hit);
+		all.push_back(a.soldier->movement);
 	}
 	for (const auto &[name, au] : a.auditions) {
 		if (!au.bank) {

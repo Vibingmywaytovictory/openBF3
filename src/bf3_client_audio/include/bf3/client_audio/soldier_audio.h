@@ -33,6 +33,7 @@ struct SoldierAudioAssets {
 	FootstepParams params;
 	std::shared_ptr<const core::audio::SoundProgram> footsteps;
 	std::shared_ptr<const core::audio::SoundProgram> own_hit;
+	std::shared_ptr<const core::audio::SoundProgram> movement;
 };
 
 core::Result<SoldierAudioAssets> load_soldier_audio(const core::EbxResolver &p_db,
