@@ -52,6 +52,8 @@ struct UiGameState {
 	uint32_t own_spawns = 0;
 	uint8_t winner = 0;
 	bool end_of_round = false;
+	bool round_over_before_join = false;
+	bool end_of_round_before_join = false;
 };
 
 struct UiFlowSessionOptions {
@@ -94,6 +96,7 @@ struct UiFlowSessionStats {
 	uint64_t networked_dropped = 0;
 	uint64_t networked_local = 0;
 	uint64_t networked_echoed = 0;
+	uint64_t networked_missed = 0;
 	uint64_t ghosts_applied = 0;
 	uint64_t ghosts_refused = 0;
 	uint64_t reloads = 0;
@@ -194,6 +197,7 @@ private:
 	std::map<uint64_t, std::vector<std::pair<uint32_t, int32_t>>> networked_targets_;
 	std::vector<sim::logic::LogicNetworkedEvent> received_;
 	std::optional<sim::logic::LogicGhost> ghost_;
+	sim::logic::LogicGhost start_ghost_;
 	std::unique_ptr<core::ui::UiFlow> flow_;
 	uint32_t scope_ = 0;
 	std::map<uint32_t, std::string> ui_graph_of_;
@@ -216,6 +220,7 @@ private:
 	std::vector<std::string> errors_;
 	UiGameState last_;
 	bool round_over_ = false;
+	bool missed_round_end_ = false;
 	UiFlowSessionStats stats_;
 };
 

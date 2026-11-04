@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstdio>
 #include <memory>
 #include <optional>
@@ -58,6 +59,14 @@ Level *level_or_skip() {
 	}
 	REQUIRE_MESSAGE(l.error.empty(), l.error);
 	return &l;
+}
+
+size_t bools_lost(const sim::logic::LogicGhost &p_from, const sim::logic::LogicGhost &p_to) {
+	size_t lost = 0;
+	for (size_t i = 0; i < p_from.bool_bits.size() && i < p_to.bool_bits.size(); ++i) {
+		lost += size_t(std::popcount(p_from.bool_bits[i] & ~p_to.bool_bits[i]));
+	}
+	return lost;
 }
 
 bool is_step(const std::string &p_line) {
@@ -411,6 +420,53 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(has("close spawnbuttonscreen"));
 		CHECK(has("push eorwinningteamscreen"));
 		CHECK(has("push eordetailstabsscreen"));
+		CHECK(s.errors().empty());
+	}
+
+	TEST_CASE("ui flow session: a client that joins in RoundOver, after the server sent its round-end events and with "
+			  "the server's round-end ghost, gets the end-of-round screens from its own RoundOver and EndOfRound") {
+		Level *l = level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		UiFlowSessionOptions echo;
+		echo.echo_networked = true;
+		core::Result<std::unique_ptr<UiFlowSession>> made_server = UiFlowSession::create(*l->level, echo);
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level);
+		REQUIRE(made_server.ok());
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		Script server{ **made_server };
+		ui_flow_tdm_pc_defaults(server.session, "TeamDeathMatch0");
+		server.state.phase = net::MatchPhase::InRound;
+		server.state.joined = true;
+		server.run_to(120);
+		server.state.phase = net::MatchPhase::RoundOver;
+		server.state.winner = 1;
+		server.run_to(180);
+		server.state.end_of_round = true;
+		server.run_to(600);
+		UiFlowSession &s = **made;
+		ui_flow_tdm_pc_defaults(s, "TeamDeathMatch0");
+		REQUIRE(s.apply_ghost(server.session.runtime().ghost()).ok());
+		Script sc{ s };
+		sc.state.phase = net::MatchPhase::RoundOver;
+		sc.state.winner = 1;
+		sc.state.joined = true;
+		sc.state.end_of_round = true;
+		sc.state.round_over_before_join = true;
+		sc.state.end_of_round_before_join = true;
+		sc.run_to(sim::logic::logic_delay_ticks(13.0));
+		const Lines over = sc.phase("joined in round over");
+		const auto has = [&](std::string_view p_line) {
+			return std::find(over.begin(), over.end(), p_line) != over.end();
+		};
+		CHECK(sc.at("native RoundOver.OnRoundOver 1", 0) == 1);
+		CHECK(sc.at("native EndOfRound", 0) == 1);
+		CHECK(has("push eorwinningteamscreen"));
+		CHECK(has("push eordetailstabsscreen"));
+		CHECK(s.stats().networked_echoed == 0);
+		CHECK(s.stats().networked_missed > 0);
+		CHECK(bools_lost(server.session.runtime().ghost(), s.runtime().ghost()) == 0);
 		CHECK(s.errors().empty());
 	}
 

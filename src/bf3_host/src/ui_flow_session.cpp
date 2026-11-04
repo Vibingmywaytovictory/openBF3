@@ -230,6 +230,7 @@ core::Status UiFlowSession::start_logic() {
 	if (!started) {
 		return core::error_at("ui flow session: runtime start", started.error());
 	}
+	start_ghost_ = runtime_->ghost();
 	if (ghost_) {
 		if (const core::Status applied = apply_ghost(*ghost_); !applied.ok()) {
 			errors_.push_back(applied.error().message);
@@ -284,17 +285,18 @@ void UiFlowSession::deliver_networked() {
 	}
 	for (const lg::LogicNetworkedEvent &ev : runtime_->networked()) {
 		++stats_.networked_local;
-		if (!options_.echo_networked) {
+		if (!options_.echo_networked && !missed_round_end_) {
 			continue;
 		}
 		for (const gp::LogicEdge &e : graph_->networked_edges()) {
 			if (e.source == ev.source && e.source_port == ev.source_port && e.connection == ev.connection &&
 					e.target != gp::kNoLogicIndex) {
 				deliver(e.target, e.target_port);
-				++stats_.networked_echoed;
+				++(options_.echo_networked ? stats_.networked_echoed : stats_.networked_missed);
 			}
 		}
 	}
+	missed_round_end_ = false;
 }
 
 void UiFlowSession::note(std::string p_line) {
@@ -347,6 +349,14 @@ core::Status UiFlowSession::update(const UiGameState &p_state) {
 		last_.end_of_round = p_state.end_of_round;
 	}
 	const bool joining = p_state.joined && !last_.joined;
+	const bool round_ends = p_state.phase == net::MatchPhase::RoundOver && p_state.phase != last_.phase;
+	const bool end_of_round_starts = p_state.end_of_round && !last_.end_of_round;
+	missed_round_end_ =
+			(round_ends && p_state.round_over_before_join) || (end_of_round_starts && p_state.end_of_round_before_join);
+	const bool replay = missed_round_end_ && ghost_.has_value();
+	if (replay) {
+		BF3_TRY(runtime_->apply_ghost(start_ghost_));
+	}
 	if (joining) {
 		enter_scope_input("Spawn");
 	}
@@ -391,6 +401,9 @@ core::Status UiFlowSession::update(const UiGameState &p_state) {
 		last_.own_spawns = spawns_seen;
 	}
 	const core::Status stepped = step();
+	if (replay && stepped.ok()) {
+		BF3_TRY(runtime_->apply_ghost(*ghost_));
+	}
 	dispatch_data_writes();
 	return stepped;
 }

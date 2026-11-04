@@ -249,6 +249,11 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 	st.own_spawns = r_m.own_spawns;
 	st.winner = p_f.match.winner;
 	st.end_of_round = host::match_end_of_round_at(p_f.match_valid, p_f.match, p_f.newest_tick);
+	const auto before_join = [&p_f](sim::Tick p_tick) {
+		return p_tick != 0 && (p_f.first_snapshot_tick == 0 || p_tick < p_f.first_snapshot_tick);
+	};
+	st.round_over_before_join = st.phase == net::MatchPhase::RoundOver && before_join(p_f.match.round_end_tick);
+	st.end_of_round_before_join = st.end_of_round && before_join(p_f.match.unspawn_tick);
 	if (r_m.native_following) {
 		if (const std::optional<uint8_t> kit = r_m.deploy_screens.feed(
 					*flow.session(), r_game.hud_model, r_m.scoreboard_held, r_m.spawn_kit)) {
