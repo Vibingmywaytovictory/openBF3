@@ -122,7 +122,11 @@ TEST_SUITE("net-procs-bots-squads") {
 		}
 		bf3::core::Result<size_t> game = driver.start(godot_client(
 				driver, server->port, { std::string(kNetsim), "--squad-check=" + std::string(kMateName) }, "game"));
-		REQUIRE_MESSAGE(game.ok(), (game.ok() ? std::string() : game.error().message));
+		if (!need(game.ok(), game.ok() ? std::string() : game.error().message)) {
+			driver.finish(*mate, 1s);
+			driver.finish(server->id, 1s);
+			return;
+		}
 		std::string report;
 		const bool reported = driver.wait_line(
 				*game, [](std::string_view l) { return contains(l, "[squads] ") || contains(l, " ended: "); }, 2200s,

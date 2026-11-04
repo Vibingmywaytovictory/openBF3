@@ -26,6 +26,7 @@ using bf3::test::procs::kicks_none;
 using bf3::test::procs::kLevel;
 using bf3::test::procs::kMode;
 using bf3::test::procs::line_starts;
+using bf3::test::procs::need;
 using bf3::test::procs::number_after;
 using bf3::test::procs::ProcDriver;
 using bf3::test::procs::require_clean_exit;
@@ -259,8 +260,11 @@ void check_scale(uint32_t p_connections, double p_seconds) {
 		CHECK(summary_number(summary, "spawned ") == p_connections / kLoadbotProcesses);
 		CHECK(fleet_shots(f) > 0);
 	}
-	REQUIRE_MESSAGE(
-			s->window.has_value(), "the server never reported ", p_connections, " seated clients:\n", s->server_output);
+	if (!need(s->window.has_value(),
+				"the server never reported " + std::to_string(p_connections) + " seated clients:\n" +
+						s->server_output)) {
+		return;
+	}
 	const Gate g = gate_of(*s->window, p_connections);
 	std::printf("net.procs.scale%u: %u reports from t=%.1f s: worst 10 s tick p99 %.3f ms, worst client mean %.0f B/s, "
 				"intervals over 1,200 B %llu, worst private %.1f MiB, clients held %s, kicks %s\n",
@@ -303,7 +307,9 @@ TEST_SUITE("net-procs-scale-control") {
 			return;
 		}
 		CHECK(contains(s->server_output, "ghost scope off (--ghost-scope=off)"));
-		REQUIRE_MESSAGE(s->window.has_value(), s->server_output);
+		if (!need(s->window.has_value(), s->server_output)) {
+			return;
+		}
 		const Gate g = gate_of(*s->window, 64);
 		double sum = 0.0;
 		for (const auto &[slot, mean] : g.mean_out) {
