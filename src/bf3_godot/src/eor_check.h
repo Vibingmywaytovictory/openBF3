@@ -12,6 +12,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace bf3::core::ui {
@@ -43,10 +44,8 @@ inline constexpr double kEorCheckHud64ShotS = 2.75;
 inline constexpr double kEorCheckStatsShotS = 1.0;
 inline constexpr double kEorCheckPopupShotS = 1.0;
 inline constexpr size_t kEorCheckMaxLines = 4096;
-inline constexpr float kEorCheckStatsTabX = 346.0f;
-inline constexpr float kEorCheckStatsTabY = 112.0f;
-inline constexpr float kEorCheckQuitX = 145.0f;
-inline constexpr float kEorCheckQuitY = 647.0f;
+inline constexpr const char *kEorCheckStatsTab = "TabBar_01.tabBarHolder.button_1";
+inline constexpr const char *kEorCheckQuitButton = "Button_00";
 inline constexpr double kEorCheckCameraM = 0.01;
 inline constexpr double kEorCheckFovDeg = 0.01;
 inline constexpr float kEorCheckFlashPeak = 0.9f;
@@ -134,6 +133,7 @@ private:
 	bool check_grade();
 	static double page_after_banner(const EorCheckIo &p_io);
 	bool click_popup_ok(Bf3UiScreens &r_screens);
+	bool click_clip(Bf3UiScreens &r_screens, std::string_view p_partition, const std::string &p_path);
 	static void click(Bf3UiScreens &r_screens, godot::Vector2 p_at);
 	static void press_concept(Bf3UiScreens &r_screens, int32_t p_concept);
 

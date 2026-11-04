@@ -191,6 +191,17 @@ void EorCheck::shot_later(const char *p_name, double p_at_s) {
 	shot_at_s_ = p_at_s;
 }
 
+bool EorCheck::click_clip(Bf3UiScreens &r_screens, std::string_view p_partition, const std::string &p_path) {
+	const std::optional<godot::Vector2> at = r_screens.clip_centre(p_partition, p_path);
+	if (!at) {
+		fail(p_path + " has no centre on " + std::string(p_partition));
+		return false;
+	}
+	note("click " + p_path + " at " + fixed_text(at->x) + ", " + fixed_text(at->y));
+	click(r_screens, *at);
+	return true;
+}
+
 void EorCheck::click(Bf3UiScreens &r_screens, godot::Vector2 p_at) {
 	r_screens.mouse_move(p_at);
 	r_screens.mouse_button(p_at, int32_t(godot::MOUSE_BUTTON_LEFT), true);
@@ -403,7 +414,9 @@ bool EorCheck::click_popup_ok(Bf3UiScreens &r_screens) {
 		fail("the OK button's centre hits '" + hit + "'");
 		return false;
 	}
-	click(r_screens, godot::Vector2(x, y));
+	if (!click_clip(r_screens, kEorPopupPartition, ok_path)) {
+		return false;
+	}
 	note("clicked OK");
 	return true;
 }
@@ -491,9 +504,11 @@ bool EorCheck::frame(Bf3UiScreens &r_screens, bf3::host::UiFlowSession *p_sessio
 				if (check_eor_view(r_screens, p_io) &&
 						check_page(r_screens, p_model, double(p_io.eor.eor_s) - (p_now_s - page_s_))) {
 					shot(p_io, "eor_scoreboard");
-					click(r_screens, godot::Vector2(kEorCheckStatsTabX, kEorCheckStatsTabY));
-					note("clicked STATS");
-					go(Step::StatsClicked, p_now_s);
+					if (click_clip(r_screens, kEorScoreboardPartition,
+								std::string(ui::kHudScreenInstance) + "." + kEorCheckStatsTab)) {
+						note("clicked STATS");
+						go(Step::StatsClicked, p_now_s);
+					}
 				}
 			}
 			break;
@@ -581,9 +596,11 @@ bool EorCheck::frame(Bf3UiScreens &r_screens, bf3::host::UiFlowSession *p_sessio
 				if (!check_page(r_screens, p_model, double(p_io.eor.eor_s) - (p_now_s - page_s_))) {
 					break;
 				}
-				click(r_screens, godot::Vector2(kEorCheckQuitX, kEorCheckQuitY));
-				note("clicked QUIT");
-				go(Step::QuitClicked, p_now_s);
+				if (click_clip(r_screens, kEorTabsPartition,
+							std::string(ui::kHudScreenInstance) + "." + kEorCheckQuitButton)) {
+					note("clicked QUIT");
+					go(Step::QuitClicked, p_now_s);
+				}
 			}
 			break;
 		case Step::QuitClicked:
