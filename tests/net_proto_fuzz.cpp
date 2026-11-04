@@ -31,7 +31,7 @@ struct Rng {
 
 const net::ShotQuantization kFrame{ { -2048.0f, -512.0f, -2048.0f } };
 
-constexpr std::array<net::MessageType, 30> kTypes = {
+constexpr std::array<net::MessageType, 31> kTypes = {
 	net::MessageType::Snapshot,
 	net::MessageType::CommandPacket,
 	net::MessageType::SnapshotOthers,
@@ -62,6 +62,7 @@ constexpr std::array<net::MessageType, 30> kTypes = {
 	net::MessageType::LogicDelta,
 	net::MessageType::SquadRequest,
 	net::MessageType::SquadOrder,
+	net::MessageType::Deployables,
 };
 
 const char *type_name(net::MessageType p_type) {
@@ -126,6 +127,8 @@ const char *type_name(net::MessageType p_type) {
 			return "SquadRequest";
 		case net::MessageType::SquadOrder:
 			return "SquadOrder";
+		case net::MessageType::Deployables:
+			return "Deployables";
 	}
 	return "?";
 }
@@ -298,6 +301,10 @@ Verdict decode_as(net::MessageType p_type, std::span<const uint8_t> p_bytes) {
 			return check(
 					p_bytes, [](std::span<const uint8_t> p) { return net::decode_squad_order(p); },
 					[](const net::SquadOrder &p_m, bool &) { return net::encode_squad_order(p_m); });
+		case net::MessageType::Deployables:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_deployables(p); },
+					[](const net::Deployables &p_m, bool &) { return net::encode_deployables(p_m); });
 	}
 	return Verdict::Refused;
 }
@@ -669,6 +676,11 @@ std::vector<Sample> samples() {
 				net::encode_squad_request({ net::SquadOp::Join, 5, 0 }) });
 		out.push_back({ net::MessageType::SquadOrder, "SquadOrder",
 				net::encode_squad_order({ 1, 5, net::SquadOrderKind::Attack, 3, { -120.0f, 66.5f, 48.0f } }) });
+		net::Deployables dp;
+		dp.server_tick = tick;
+		dp.added = { { 4, 90, 3, 1, { 12.0f, 60.5f, -8.0f } } };
+		dp.removed = { 2 };
+		out.push_back({ net::MessageType::Deployables, "Deployables", net::encode_deployables(dp) });
 	}
 	return out;
 }

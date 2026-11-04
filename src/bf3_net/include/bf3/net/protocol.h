@@ -23,7 +23,7 @@
 
 namespace bf3::net {
 
-inline constexpr uint16_t kProtocolVersion = 5;
+inline constexpr uint16_t kProtocolVersion = 6;
 inline constexpr uint8_t kChannelUnreliable = 0;
 inline constexpr uint8_t kChannelReliable = 1;
 inline constexpr uint8_t kChannelBulk = 2;
@@ -83,6 +83,7 @@ enum class MessageType : uint8_t {
 	LogicDelta = 39,
 	SquadRequest = 40,
 	SquadOrder = 41,
+	Deployables = 42,
 };
 
 std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram);
@@ -630,6 +631,8 @@ struct PlayerList {
 	std::vector<uint8_t> removed;
 };
 
+inline constexpr uint8_t kSpawnChoiceBeacon = 0xFF;
+
 struct SpawnRequest {
 	uint8_t kit = 0;
 	uint8_t spawn_choice = 0;
@@ -761,4 +764,25 @@ std::vector<uint8_t> encode_squad_request(const SquadRequest &p_message);
 core::Result<SquadRequest> decode_squad_request(std::span<const uint8_t> p_datagram);
 std::vector<uint8_t> encode_squad_order(const SquadOrder &p_message);
 core::Result<SquadOrder> decode_squad_order(std::span<const uint8_t> p_datagram);
+
+inline constexpr size_t kMaxDeployablesPerMessage = 128;
+
+struct DeployableWire {
+	uint16_t id = 0;
+	uint16_t def = 0;
+	uint8_t owner = 0;
+	uint8_t team = 0;
+	sim::Vec3 position{};
+
+	bool operator==(const DeployableWire &) const = default;
+};
+
+struct Deployables {
+	sim::Tick server_tick = 0;
+	std::vector<DeployableWire> added;
+	std::vector<uint16_t> removed;
+};
+
+std::vector<uint8_t> encode_deployables(const Deployables &p_message);
+core::Result<Deployables> decode_deployables(std::span<const uint8_t> p_datagram);
 }

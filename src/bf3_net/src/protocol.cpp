@@ -1856,6 +1856,44 @@ template <class A, MaybeConst<SquadOrder> M> void serialize(A &r_a, M &r_m) {
 	r_a.check("position out of range", [&] { return in_world(r_m.position); });
 }
 
+template <class A, MaybeConst<DeployableWire> D> void serialize(A &r_a, D &r_d) {
+	r_a.bits(r_d.id, 16);
+	r_a.bits(r_d.def, kWireDefBits);
+	r_a.bits(r_d.owner, kWireSlotBits);
+	r_a.bits(r_d.team, 2);
+	vec3(r_a, r_d.position);
+	r_a.check("deployable field out of range", [&] {
+		return r_d.id != 0 && r_d.def < kMaxWireDefs && r_d.owner < kMaxSlots && r_d.team <= kMaxTeam &&
+				in_world(r_d.position);
+	});
+}
+
+const size_t kDeployableMinBits = count_bits([](auto &r_a) {
+	DeployableWire d{};
+	serialize(r_a, d);
+});
+
+template <class A, MaybeConst<Deployables> M> void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.server_tick, 32);
+	uint64_t added = r_m.added.size();
+	uint64_t removed = r_m.removed.size();
+	r_a.varint(added);
+	r_a.varint(removed);
+	r_a.check("deployable count out of range", [&] {
+		return added <= kMaxDeployablesPerMessage && removed <= kMaxDeployablesPerMessage &&
+				r_a.fits(added * kDeployableMinBits + removed * 16u);
+	});
+	const size_t a = r_a.resize(r_m.added, size_t(added));
+	for (size_t i = 0; i < a && r_a.ok(); ++i) {
+		serialize(r_a, r_m.added[i]);
+	}
+	const size_t r = r_a.resize(r_m.removed, size_t(removed));
+	for (size_t i = 0; i < r && r_a.ok(); ++i) {
+		r_a.bits(r_m.removed[i], 16);
+		r_a.check("removed deployable id 0", [&] { return r_m.removed[i] != 0; });
+	}
+}
+
 struct Framing {
 	MessageType type;
 	const char *what;
@@ -1928,6 +1966,7 @@ std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram) {
 		case MessageType::LogicDelta:
 		case MessageType::SquadRequest:
 		case MessageType::SquadOrder:
+		case MessageType::Deployables:
 			return MessageType(p_datagram[0]);
 	}
 	return std::nullopt;
@@ -2498,6 +2537,14 @@ std::vector<uint8_t> encode_squad_order(const SquadOrder &p_message) {
 
 core::Result<SquadOrder> decode_squad_order(std::span<const uint8_t> p_datagram) {
 	return decode_as<SquadOrder>(p_datagram, { MessageType::SquadOrder, "SquadOrder" });
+}
+
+std::vector<uint8_t> encode_deployables(const Deployables &p_message) {
+	return encode_as(MessageType::Deployables, kMaxReliableBytes, p_message);
+}
+
+core::Result<Deployables> decode_deployables(std::span<const uint8_t> p_datagram) {
+	return decode_as<Deployables>(p_datagram, { MessageType::Deployables, "Deployables" });
 }
 
 bool set_player_name(PlayerRow &r_row, std::string_view p_name) {
