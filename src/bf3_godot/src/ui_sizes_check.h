@@ -32,6 +32,13 @@ inline constexpr size_t kUiSizesScoreboardRow = 1;
 inline constexpr size_t kUiSizesResumeRow = 0;
 inline constexpr size_t kUiSizesOptionsRow = 4;
 inline constexpr size_t kUiSizesVideoTab = 3;
+inline constexpr size_t kUiSizesQuitRow = 5;
+inline constexpr float kUiSizesLookCounts = 100.0f;
+inline constexpr float kUiSizesLookTolerance = 1e-4f;
+inline constexpr std::string_view kUiSizesQuitTitle = "QUIT TO WINDOWS";
+inline constexpr std::string_view kUiSizesPopupTitle = "instance1.PopupGenericWidget_01.popupTitle";
+inline constexpr std::string_view kUiSizesPopupCancel = "instance1.PopupButtonsManager_01.holder.btn1";
+inline constexpr std::string_view kUiSizesPopupDimmer = "instance1.Dimmer_01";
 
 struct UiSizesWindow {
 	const char *tag;
@@ -63,6 +70,9 @@ struct UiSizesCheckIo {
 	bool alive = false;
 	bool game_input = true;
 	bool hud_visible = false;
+	bool captured = false;
+	float look_per_count = 0.0f;
+	std::function<float(float)> look;
 };
 
 class UiSizesCheck {
@@ -98,11 +108,14 @@ private:
 	void check_fit(const Ctx &p_c, std::string_view p_partition, const UiSizesWindow &p_window);
 	void mouse_at(
 			const Ctx &p_c, std::string_view p_what, std::optional<bf3::core::ui::SwfPoint> p_stage, bool p_click);
+	void measure_look(const Ctx &p_c, const UiSizesWindow &p_window);
+	void check_dimmer(const Ctx &p_c, const UiSizesWindow &p_window);
 
 	std::string shot_dir_;
 	std::vector<Step> steps_ = steps();
 	std::vector<std::string> facts_;
 	std::vector<std::string> shots_;
+	std::vector<float> look_rates_;
 	std::string waiting_;
 	size_t next_ = 0;
 	bool acted_ = false;

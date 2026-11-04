@@ -134,6 +134,46 @@ void UiSizesCheck::mouse_at(
 	}
 }
 
+void UiSizesCheck::measure_look(const Ctx &p_c, const UiSizesWindow &p_window) {
+	if (!p_c.io.look || !p_c.io.captured) {
+		failure_ = std::string(p_window.tag) + ": the mouse is not captured in play, so no motion turns the view";
+		return;
+	}
+	const float rate = p_c.io.look(kUiSizesLookCounts) / kUiSizesLookCounts;
+	look_rates_.push_back(rate);
+	facts_.push_back(fmt("%s look: %.0f counts of captured relative motion through the window turn %.7f rad per count, "
+						 "the mapper's rate %.7f",
+			p_window.tag, double(kUiSizesLookCounts), double(rate), double(p_c.io.look_per_count)));
+	const float tolerance = kUiSizesLookTolerance * p_c.io.look_per_count;
+	if (!(std::abs(rate - p_c.io.look_per_count) <= tolerance)) {
+		failure_ = "the look per count is not the mapper's rate: " + facts_.back();
+	} else if (!(std::abs(rate - look_rates_.front()) <= tolerance)) {
+		failure_ = fmt("the look per count depends on the window size: %.7f at the first size, ",
+						   double(look_rates_.front())) +
+				facts_.back();
+	}
+}
+
+void UiSizesCheck::check_dimmer(const Ctx &p_c, const UiSizesWindow &p_window) {
+	ui::HudScreen *s = p_c.screens.hud_screen(kPopupGenericPartition);
+	const ui::As2Clip dimmer = s != nullptr ? s->clip(kUiSizesPopupDimmer) : ui::As2Clip();
+	const ui::SwfSceneNode *node = dimmer.node();
+	if (node == nullptr || !node->world_visible) {
+		failure_ = std::string(p_window.tag) + ": popupgeneric's Dimmer_01 is not drawn";
+		return;
+	}
+	const ui::SwfRect covered = ui::swf_transform_bounds(dimmer.local_bounds(), node->world);
+	const ui::SwfRect want = rule(p_c).visible;
+	facts_.push_back(fmt("%s popupgeneric Dimmer_01 covers x %.1f..%.1f y %.1f..%.1f of Stage.visibleRect x %.1f..%.1f "
+						 "y %.1f..%.1f",
+			p_window.tag, double(covered.x_min), double(covered.x_max), double(covered.y_min), double(covered.y_max),
+			double(want.x_min), double(want.x_max), double(want.y_min), double(want.y_max)));
+	if (covered.x_min > want.x_min || covered.x_max < want.x_max || covered.y_min > want.y_min ||
+			covered.y_max < want.y_max) {
+		failure_ = "the open popup's Dimmer does not cover the visible rect after the resize: " + facts_.back();
+	}
+}
+
 std::vector<UiSizesCheck::Step> UiSizesCheck::steps() const {
 	using K = godot::Key;
 	const auto tap = [](K p_key) {
@@ -239,6 +279,7 @@ std::vector<UiSizesCheck::Step> UiSizesCheck::steps() const {
 			},
 			[wide](UiSizesCheck &r_self, const Ctx &c) {
 				r_self.check_fit(c, ui::kHudMpScreenPartition, wide);
+				r_self.measure_look(c, wide);
 				c.io.press(K::KEY_ESCAPE, true);
 				c.io.press(K::KEY_ESCAPE, false);
 			},
@@ -254,14 +295,52 @@ std::vector<UiSizesCheck::Step> UiSizesCheck::steps() const {
 			},
 			[restored, menu_row](UiSizesCheck &r_self, const Ctx &c) {
 				r_self.check_fit(c, kIngameMenuPartition, restored);
-				r_self.mouse_at(c, std::string(restored.tag) + " RESUME", menu_row(kUiSizesResumeRow)(c), true);
+				r_self.mouse_at(c, std::string(restored.tag) + " QUIT", menu_row(kUiSizesQuitRow)(c), true);
 			},
 			std::string("menu_") + restored.tag });
+	s.push_back({ "1280x720: a click on QUIT opens the QuitPopup, the window goes " + std::string(wide.tag),
+			[](UiSizesCheck &r_self, const Ctx &c) {
+				ui::HudScreen *popup = c.screens.hud_screen(kPopupGenericPartition);
+				const std::string title = popup != nullptr ? popup->clip(kUiSizesPopupTitle).text() : std::string();
+				if (shown(c, kPopupGenericPartition) && title != kUiSizesQuitTitle) {
+					r_self.failure_ = "popupgeneric opened with the title '" + title + "', not the QuitPopup's";
+				}
+				return shown(c, kPopupGenericPartition) && title == kUiSizesQuitTitle;
+			},
+			[wide](UiSizesCheck &r_self, const Ctx &c) {
+				c.io.set_window(wanted_size(c, wide), wide.fullscreen);
+				r_self.last_tap_s_ = r_self.now_s_;
+			},
+			std::string("quit_popup_") + restored.tag });
+	s.push_back({ std::string(wide.tag) + ": the window is " + wide.tag + " with the QuitPopup open",
+			[wide](UiSizesCheck &r_self, const Ctx &c) {
+				return shown(c, kPopupGenericPartition) && r_self.window_settled(c, wide);
+			},
+			[wide](UiSizesCheck &r_self, const Ctx &c) {
+				r_self.check_fit(c, kPopupGenericPartition, wide);
+				r_self.check_dimmer(c, wide);
+				r_self.mouse_at(c, std::string(wide.tag) + " CANCEL",
+						c.screens.clip_stage_centre(kPopupGenericPartition, kUiSizesPopupCancel), true);
+			},
+			std::string("quit_popup_") + wide.tag });
+	s.push_back({ std::string(wide.tag) + ": CANCEL closes the popup to the menu, the window goes back to 1280x720",
+			menu_up, [restored](UiSizesCheck &r_self, const Ctx &c) {
+				c.io.set_window(wanted_size(c, restored), restored.fullscreen);
+				r_self.last_tap_s_ = r_self.now_s_;
+			} });
+	s.push_back({ "1280x720 with the menu after the popup",
+			[restored, menu_up](UiSizesCheck &r_self, const Ctx &c) {
+				return menu_up(r_self, c) && r_self.window_settled(c, restored);
+			},
+			[restored, menu_row](UiSizesCheck &r_self, const Ctx &c) {
+				r_self.check_fit(c, kIngameMenuPartition, restored);
+				r_self.mouse_at(c, std::string(restored.tag) + " RESUME", menu_row(kUiSizesResumeRow)(c), true);
+			} });
 	s.push_back({ "a click on RESUME returns to play at 1280x720",
 			[](UiSizesCheck &, const Ctx &c) {
 				return !shown(c, kIngameMenuPartition) && c.io.alive && c.io.game_input && !c.io.cursor_shown;
 			},
-			[](UiSizesCheck &, const Ctx &) {} });
+			[restored](UiSizesCheck &r_self, const Ctx &c) { r_self.measure_look(c, restored); } });
 	return s;
 }
 

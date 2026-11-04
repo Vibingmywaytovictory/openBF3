@@ -38,6 +38,8 @@
 #include <godot_cpp/classes/window.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <cmath>
+#include <numbers>
 #include <string>
 
 using namespace godot;
@@ -445,6 +447,20 @@ bool Bf3LevelSession::tdm_menu_frame(double p_now_s) {
 		uio.alive = game_->alive;
 		uio.game_input = mapper_.game_input();
 		uio.hud_visible = game_->native_hud != nullptr && game_->native_hud->is_visible();
+		uio.captured = mapper_.captured();
+		uio.look_per_count = mapper_.mouse_sensitivity;
+		uio.look = [this, window](float p_counts) {
+			const float before = mapper_.view().yaw;
+			Ref<InputEventMouseMotion> e;
+			e.instantiate();
+			const Vector2 centre = window != nullptr ? Vector2(window->get_size()) * 0.5f : Vector2();
+			e->set_position(centre);
+			e->set_global_position(centre);
+			e->set_relative(Vector2(p_counts, 0.0f));
+			e->set_screen_relative(Vector2(p_counts, 0.0f));
+			get_viewport()->push_input(e);
+			return std::remainder(before - mapper_.view().yaw, 2.0f * std::numbers::pi_v<float>);
+		};
 		if (m.ui_sizes_check->frame(*screens, *m.native_flow, *m.native_menu, m.native_options.get(), p_now_s, uio)) {
 			m.finished = true;
 			UtilityFunctions::print(to_godot(m.ui_sizes_check->report()));
