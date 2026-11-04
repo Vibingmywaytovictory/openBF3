@@ -2014,4 +2014,80 @@ TEST_SUITE("audio-footsteps") {
 		CHECK(soldiers.size() == 2);
 		check_unchanged(*f);
 	}
+
+	TEST_CASE("OwnHitAudio: bullet_impact_1pplayer starts once per shot that hits the own soldier, facing from the "
+			  "shooter's eye to the hit") {
+		Fixture *f = need_install();
+		Result<gp::SoldierSoundDef> d = gp::read_soldier_sounds(f->metro->db());
+		REQUIRE(d.ok());
+		std::array<bf3::host::PresentedSoldier, 2> others{};
+		others[0].slot = 7;
+		others[1].slot = 9;
+		others[1].position = { 0.0f, 0.0f, -20.0f };
+		others[1].eye_height = 1.5f;
+
+		const auto hit = [](uint8_t p_shooter, uint32_t p_shot, uint8_t p_pellet, uint8_t p_flags) {
+			bf3::host::PresentEvent e;
+			e.kind = bf3::host::PresentKind::Hit;
+			e.flags = p_flags;
+			e.slot = p_shooter;
+			e.aux = 7;
+			e.id = p_shot;
+			e.pellet = p_pellet;
+			e.pos[0] = 0.0f;
+			e.pos[1] = 1.5f;
+			e.pos[2] = 0.0f;
+			e.dir[1] = 1.0f;
+			e.seed = 11u + p_shot;
+			return e;
+		};
+		const ba::Vec3 forward = ba::own_hit_forward(hit(9, 1, 0, 0), others).value_or(ba::Vec3{});
+		CHECK(forward.x == doctest::Approx(0.0f));
+		CHECK(forward.y == doctest::Approx(0.0f));
+		CHECK(forward.z == doctest::Approx(1.0f));
+		CHECK_FALSE(ba::own_hit_forward(hit(4, 1, 0, 0), others).has_value());
+
+		const StepPatch own = step_patch(*f->install, *f->metro, d->bullet_impact);
+		ba::MixerConfig mc;
+		mc.max_instances = 64;
+		ba::MixerCore mixer(mc);
+		mixer.record_cuts(true);
+		ba::OneShotPool pool(16);
+		ba::OwnHitAudio audio(mixer, own.program, own.bank, ba::AudioTuning{}, pool);
+		const uint8_t victim = bf3::host::present_flags::kOwnVictim;
+		bf3::host::PresentEvent death = hit(9, 3, 0, victim);
+		death.kind = bf3::host::PresentKind::Death;
+		const std::array<bf3::host::PresentEvent, 6> events{ hit(9, 1, 0, victim), hit(9, 1, 1, victim),
+			hit(9, 2, 0, victim), hit(4, 1, 0, victim), hit(9, 5, 0, bf3::host::present_flags::kOwnShooter), death };
+		ba::ListenerState listener;
+		listener.position = ba::Vec3{ 0.0f, 1.5f, 0.0f };
+		audio.on_events(events, others, listener, mixer.earliest_frame());
+		CHECK(audio.stats().hits == 4);
+		CHECK(audio.stats().starts == 3);
+		CHECK(audio.stats().refused == 0);
+		std::vector<float> out(2 * 800);
+		std::vector<ba::MixerCutEvent> cuts(256);
+		std::array<ba::MixerFeedback, 64> fb;
+		std::map<ba::InstanceHandle, ba::MixerCutKind> fates;
+		for (int block = 0; block < 600 && (block == 0 || pool.live() > 0); ++block) {
+			REQUIRE(mixer.mix(out.data(), 800) == 800);
+			for (size_t n = mixer.poll_feedback(fb); n > 0; n = mixer.poll_feedback(fb)) {
+				for (size_t i = 0; i < n; ++i) {
+					if (fb[i].finished) {
+						pool.on_finished(fb[i].handle);
+					}
+				}
+			}
+			pool.update(mixer);
+			collect_fates(mixer, cuts, fates);
+		}
+		size_t finished = 0;
+		for (const auto &[h, k] : fates) {
+			finished += k == ba::MixerCutKind::Finish ? 1u : 0u;
+		}
+		CHECK(finished == 3);
+		CHECK(fates.size() == 3);
+		CHECK(pool.live() == 0);
+		check_unchanged(*f);
+	}
 }

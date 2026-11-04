@@ -123,12 +123,28 @@ void footstep_soldiers(const host::PresentationFrame *p_frame, std::span<const h
 	}
 }
 
+std::optional<Vec3> own_hit_forward(const host::PresentEvent &p_hit, std::span<const host::PresentedSoldier> p_others) {
+	for (const host::PresentedSoldier &p : p_others) {
+		if (p.slot != p_hit.slot) {
+			continue;
+		}
+		const Vec3 d{ p_hit.pos[0] - p.position[0], p_hit.pos[1] - (p.position[1] + p.eye_height),
+			p_hit.pos[2] - p.position[2] };
+		const float len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+		if (!std::isfinite(len) || !(len > 1e-3f)) {
+			return std::nullopt;
+		}
+		return Vec3{ d.x / len, d.y / len, d.z / len };
+	}
+	return std::nullopt;
+}
+
 OwnHitAudio::OwnHitAudio(MixerCore &r_mixer, std::shared_ptr<const ca::SoundProgram> p_program,
 		std::shared_ptr<const ca::WaveBank> p_bank, const AudioTuning &p_tuning, OneShotPool &r_pool) :
 		mixer_(r_mixer), program_(std::move(p_program)), bank_(std::move(p_bank)), tuning_(p_tuning), pool_(r_pool) {}
 
-void OwnHitAudio::on_events(
-		std::span<const host::PresentEvent> p_events, const ListenerState &p_listener, uint64_t p_frame) {
+void OwnHitAudio::on_events(std::span<const host::PresentEvent> p_events,
+		std::span<const host::PresentedSoldier> p_others, const ListenerState &p_listener, uint64_t p_frame) {
 	heard_.clear();
 	for (const host::PresentEvent &e : p_events) {
 		if (e.kind != host::PresentKind::Hit || (e.flags & host::present_flags::kOwnVictim) == 0) {
@@ -142,10 +158,7 @@ void OwnHitAudio::on_events(
 		heard_.push_back(key);
 		EmitterState em;
 		em.position = p_listener.position;
-		const Vec3 dir{ e.dir[0], e.dir[1], e.dir[2] };
-		if (core::finite(dir) && (dir.x != 0.0f || dir.y != 0.0f || dir.z != 0.0f)) {
-			em.forward = dir;
-		}
+		em.forward = own_hit_forward(e, p_others).value_or(p_listener.forward);
 		OneShotOptions o;
 		o.set_first_person = true;
 		o.first_person = true;

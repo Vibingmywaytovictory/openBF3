@@ -374,7 +374,7 @@ void Bf3GameAudio::step(const GameFrame &p_frame, std::span<const fx::ImpactSoun
 		m.footsteps->step(m.step_soldiers, in.listener, p_frame.dt, m.clock->earliest_frame());
 	}
 	if (m.own_hit) {
-		m.own_hit->on_events(p_frame.events, in.listener, m.clock->earliest_frame());
+		m.own_hit->on_events(p_frame.events, p_frame.others, in.listener, m.clock->earliest_frame());
 	}
 	capture_step(m);
 	drain_mixer_events(m, *this);

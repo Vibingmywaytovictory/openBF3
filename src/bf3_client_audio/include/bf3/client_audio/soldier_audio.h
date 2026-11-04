@@ -56,6 +56,8 @@ private:
 void footstep_soldiers(const host::PresentationFrame *p_frame, std::span<const host::PresentedSoldier> p_others,
 		uint8_t p_own_slot, bool p_own_first_person, std::vector<FootstepSoldier> &r_out);
 
+std::optional<Vec3> own_hit_forward(const host::PresentEvent &p_hit, std::span<const host::PresentedSoldier> p_others);
+
 struct OwnHitStats {
 	uint64_t hits = 0;
 	uint64_t starts = 0;
@@ -68,7 +70,8 @@ public:
 	OwnHitAudio(MixerCore &r_mixer, std::shared_ptr<const core::audio::SoundProgram> p_program,
 			std::shared_ptr<const core::audio::WaveBank> p_bank, const AudioTuning &p_tuning, OneShotPool &r_pool);
 
-	void on_events(std::span<const host::PresentEvent> p_events, const ListenerState &p_listener, uint64_t p_frame);
+	void on_events(std::span<const host::PresentEvent> p_events, std::span<const host::PresentedSoldier> p_others,
+			const ListenerState &p_listener, uint64_t p_frame);
 	const OwnHitStats &stats() const { return stats_; }
 
 private:
