@@ -778,6 +778,10 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		in.players = std::span<const net::PlayerRow>(f.players.data(), std::min<size_t>(f.player_count, f.players.size()));
 		in.own_slot = m.own_slot;
 		in.own_team = m.own_team;
+		in.own_position = f.own_curr.position;
+		std::array<host::PresentedSoldier, net::kMaxSlots> tdm_others{};
+		const size_t tdm_other_count = host::present_others(f, p_now_ns, tdm_others);
+		in.others = std::span<const host::PresentedSoldier>(tdm_others.data(), tdm_other_count);
 		in.server_tick = f.newest_tick;
 		in.own_respawn_tick = f.own_respawn_tick;
 		in.own_revive_until = f.own_revive_until;
