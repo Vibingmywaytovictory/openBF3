@@ -13,6 +13,7 @@
 #include "client_events.h"
 #include "client_match.h"
 #include "client_tracks.h"
+#include "gunplay_fixture.h"
 #include "server_gadgets.h"
 #include "server_ghosts.h"
 #include "test_support.h"
@@ -791,6 +792,109 @@ TEST_SUITE("host-ghost") {
 		CHECK(absolute == 90);
 		CHECK(scoped_far == 0);
 		CHECK(scoped_deltas > 0);
+	}
+
+	TEST_CASE("63 walkers around a peer joining the synthetic floor: required records wait for room, no interval "
+			  "passes the 1,200 B budget, and once the deltas start every enemy within 100 m arrives every snapshot") {
+		host::GameServerConfig cfg;
+		cfg.level = test::gunplay::synthetic_floor();
+		REQUIRE(cfg.level != nullptr);
+		cfg.max_slots = 64;
+		cfg.walkers = 63;
+		cfg.seed = 0x6057;
+		host::GameServer server;
+		const core::Status st = server.init(cfg);
+		REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
+		const auto alive = [&] {
+			uint32_t n = 0;
+			for (uint32_t j = 0; j < cfg.max_slots; ++j) {
+				n += server.view().alive(uint8_t(j)) ? 1u : 0u;
+			}
+			return n;
+		};
+		std::vector<host::OutDatagram> out;
+		for (sim::Tick i = 0; i < 4 * sim::kSimHz && alive() < cfg.walkers; ++i) {
+			out.clear();
+			server.tick(out);
+		}
+		REQUIRE(alive() == cfg.walkers);
+
+		Peer peer(server);
+		const auto step = [&] {
+			out.clear();
+			server.tick(out);
+			peer.receive(out, server.current_tick());
+		};
+		server.on_connect(kPeer);
+		peer.join(*cfg.level);
+		step();
+		REQUIRE(peer.slot >= 0);
+		const uint8_t own = uint8_t(peer.slot);
+		std::array<std::optional<size_t>, net::kMaxSlots> first_carried{};
+		uint64_t near_checks = 0, near_missing = 0;
+		const auto note = [&](size_t p_index) {
+			const Interval &iv = peer.intervals[p_index];
+			for (uint32_t j = 0; j < cfg.max_slots; ++j) {
+				if (iv.carried[j] && !first_carried[j]) {
+					first_carried[j] = p_index;
+				}
+			}
+			const sim::SoldierState *me = server.soldier(own);
+			if (p_index < 10 || me == nullptr || !server.view().alive(own)) {
+				return;
+			}
+			for (uint32_t j = 0; j < cfg.max_slots; ++j) {
+				const sim::SoldierState *s = server.soldier(j);
+				if (j == own || s == nullptr || !server.view().alive(uint8_t(j)) ||
+						server.view().team(uint8_t(j)) == server.view().team(own) ||
+						core::vec::length(core::vec::sub(s->position, me->position)) > 100.0f) {
+					continue;
+				}
+				++near_checks;
+				near_missing += iv.carried[j] ? 0u : 1u;
+			}
+		};
+		for (sim::Tick i = 0; i < 4 * sim::kSimHz; ++i) {
+			peer.command(server.current_tick() + 1u);
+			const size_t before = peer.intervals.size();
+			step();
+			for (size_t k = before; k < peer.intervals.size(); ++k) {
+				note(k);
+			}
+		}
+		REQUIRE(server.view().alive(own));
+
+		const host::GameServerStats stats = server.stats();
+		const auto seat = std::find_if(stats.traffic.begin(), stats.traffic.end(),
+				[&](const host::SlotTraffic &p_t) { return p_t.slot == own; });
+		REQUIRE(seat != stats.traffic.end());
+		size_t worst = 0, latest_first = 0;
+		for (const Interval &iv : peer.intervals) {
+			worst = std::max(worst, iv.unreliable_bytes);
+		}
+		uint32_t seen = 0;
+		for (uint32_t j = 0; j < cfg.max_slots; ++j) {
+			if (j != own && first_carried[j]) {
+				++seen;
+				latest_first = std::max(latest_first, *first_carried[j]);
+			}
+		}
+		std::printf("host.ghost: 63 walkers on the synthetic floor: %zu intervals, the largest %zu B (server %llu B, "
+					"%llu over), %llu overflow datagrams, every walker carried by interval %zu, enemies within 100 m "
+					"%llu checks, %llu missing\n",
+				peer.intervals.size(), worst, (unsigned long long)seat->intervals.max_bytes,
+				(unsigned long long)seat->intervals.over_budget, (unsigned long long)peer.overflow, latest_first,
+				(unsigned long long)near_checks, (unsigned long long)near_missing);
+		CHECK(peer.decode_failures == 0);
+		CHECK(seat->intervals.count == peer.intervals.size());
+		CHECK(seat->intervals.max_bytes == worst);
+		CHECK(seat->intervals.max_bytes > kIntervalBytes * 3 / 4);
+		CHECK(seat->intervals.over_budget == 0);
+		CHECK(worst <= kIntervalBytes);
+		CHECK(seen == cfg.walkers);
+		CHECK(latest_first <= 3);
+		CHECK(near_checks > 1000);
+		CHECK(near_missing == 0);
 	}
 
 	TEST_CASE("deployables: a seat gets each resting deployable in its scope once and each removal once; the client "

@@ -385,6 +385,7 @@ struct SnapshotBases {
 	OwnBaseline own;
 	std::vector<OtherBaseline> others;
 	size_t required = 0;
+	size_t required_bytes = kMaxDatagramBytes;
 };
 
 struct SnapshotSize {
@@ -438,7 +439,7 @@ struct SnapshotOthers {
 };
 std::vector<uint8_t> encode_snapshot_others(const SnapshotOthers &p_message, size_t *r_dropped = nullptr,
 		std::span<const OtherBaseline> p_bases = {}, SnapshotSize *r_size = nullptr,
-		size_t p_max_bytes = kMaxDatagramBytes, size_t p_required = 0);
+		size_t p_max_bytes = kMaxDatagramBytes, size_t p_required = 0, size_t p_required_bytes = kMaxDatagramBytes);
 core::Result<SnapshotOthers> decode_snapshot_others(
 		std::span<const uint8_t> p_datagram, const SnapshotBaselines *p_baselines = nullptr);
 

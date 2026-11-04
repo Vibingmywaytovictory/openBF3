@@ -1241,7 +1241,7 @@ target_compile_definitions(test_godot_mismatch PRIVATE "OPENBF3_MOTOR_TUNING_CFG
 openbf3_proc_row(godot.mismatch test_godot_mismatch LABEL timing TIMEOUT 900 ARGS --test-suite=godot-mismatch)
 set_tests_properties(godot.mismatch PROPERTIES RUN_SERIAL TRUE)
 
-openbf3_test(test_host_ghost test_main.cpp host_ghost_tests.cpp test_support.h)
+openbf3_test(test_host_ghost test_main.cpp host_ghost_tests.cpp gunplay_fixture.h test_support.h)
 target_link_libraries(test_host_ghost PRIVATE bf3_host)
 target_include_directories(test_host_ghost PRIVATE ${PROJECT_SOURCE_DIR}/src/bf3_host/src)
 target_compile_definitions(test_host_ghost PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""

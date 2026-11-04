@@ -206,13 +206,24 @@ struct Gate {
 	bool clients_held = true;
 	bool kicks_none = true;
 	std::map<uint32_t, double> mean_out;
+	std::string over_at;
 };
 
 Gate gate_of(const Window &p_window, uint32_t p_connections) {
 	Gate g;
 	std::map<uint32_t, double> sum;
 	std::map<uint32_t, uint32_t> count;
+	const Report *previous = nullptr;
 	for (const Report &r : p_window.reports) {
+		for (const auto &[slot, seat] : r.seats) {
+			const auto was = previous != nullptr ? previous->seats.find(slot) : r.seats.end();
+			if (previous != nullptr && was != previous->seats.end() && seat.over > was->second.over) {
+				g.over_at += "t=" + std::to_string(int(r.t)) + " s slot " + std::to_string(slot) + " +" +
+						std::to_string(seat.over - was->second.over) + " (max " + std::to_string(seat.max_bytes) +
+						" B); ";
+			}
+		}
+		previous = &r;
 		++g.reports;
 		g.worst_p99 = std::max(g.worst_p99, r.p99_ms);
 		g.worst_private = std::max(g.worst_private, r.private_mib);
@@ -264,7 +275,7 @@ void check_scale(uint32_t p_connections, double p_seconds) {
 	for (const auto &[slot, mean] : g.mean_out) {
 		CHECK_MESSAGE(mean <= kPeerBytesPerSecond, "slot ", slot, ": ", mean, " B/s");
 	}
-	CHECK(g.over == 0);
+	CHECK_MESSAGE(g.over == 0, g.over_at);
 	CHECK(g.worst_private <= kPrivateMiB);
 	CHECK(contains(s->server_summary, "install unchanged"));
 }

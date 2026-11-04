@@ -27,7 +27,6 @@ constexpr size_t kMaxTextBytes = 2048;
 constexpr size_t kMaxSweepRows = 1024;
 
 constexpr size_t kMaxReliableBytes = 256 * 1024;
-constexpr size_t kDatagramBits = kMaxDatagramBytes * 8;
 constexpr float kMaxWorldCoordinate = 1.0e6f;
 
 constexpr uint8_t kKnownWeaponFlags = weapon_flags::kExactAim | weapon_flags::kInfiniteMagazine;
@@ -1136,17 +1135,17 @@ template <class M, class Context> size_t written_bits(const M &p_message, Contex
 
 template <class M, class Context>
 size_t plan_list(const M &p_message, Context &r_ctx, GhostListContext &r_list, std::span<const OtherBaseline> p_bases,
-		size_t p_max_bytes, size_t p_required) {
+		size_t p_max_bytes, size_t p_required, size_t p_required_bytes) {
 	r_list.count = 0;
 	size_t bits = written_bits(p_message, r_ctx);
-	const size_t datagram = kDatagramBits;
 	const size_t budget = std::min(p_max_bytes, kMaxDatagramBytes) * 8;
+	const size_t required_budget = std::max(budget, std::min(p_required_bytes, kMaxDatagramBytes) * 8);
 	r_list.forms.clear();
 	r_list.delta_others = 0;
 	for (size_t i = 0; i < p_message.others.size(); ++i) {
 		size_t entry = 0;
 		const GhostEntry e = choose_form(p_message.others[i], p_bases, i, p_message.seq, p_message.server_tick, entry);
-		const size_t cap = i < p_required ? datagram : budget;
+		const size_t cap = i < p_required ? required_budget : budget;
 		if (bits > cap || entry > cap - bits) {
 			break;
 		}
@@ -2134,7 +2133,8 @@ std::vector<uint8_t> encode_snapshot(const Snapshot &p_snapshot, size_t *r_dropp
 			choose_own(p_snapshot, *p_bases, ctx);
 			bases = p_bases->others;
 		}
-		carried = plan_list(p_snapshot, ctx, ctx.list, bases, p_max_bytes, p_bases != nullptr ? p_bases->required : 0);
+		carried = plan_list(p_snapshot, ctx, ctx.list, bases, p_max_bytes, p_bases != nullptr ? p_bases->required : 0,
+				p_bases != nullptr ? p_bases->required_bytes : kMaxDatagramBytes);
 		bytes = encode_as(MessageType::Snapshot, kMaxDatagramBytes, p_snapshot, ctx);
 	}
 	if (r_dropped) {
@@ -2190,12 +2190,13 @@ bool others_acked(const CommandPacket &p_packet, uint16_t p_seq) {
 }
 
 std::vector<uint8_t> encode_snapshot_others(const SnapshotOthers &p_message, size_t *r_dropped,
-		std::span<const OtherBaseline> p_bases, SnapshotSize *r_size, size_t p_max_bytes, size_t p_required) {
+		std::span<const OtherBaseline> p_bases, SnapshotSize *r_size, size_t p_max_bytes, size_t p_required,
+		size_t p_required_bytes) {
 	GhostListContext ctx;
 	std::vector<uint8_t> bytes;
 	size_t carried = 0;
 	if (slots_in_range(p_message.others, {})) {
-		carried = plan_list(p_message, ctx, ctx, p_bases, p_max_bytes, p_required);
+		carried = plan_list(p_message, ctx, ctx, p_bases, p_max_bytes, p_required, p_required_bytes);
 		bytes = encode_as(MessageType::SnapshotOthers, kMaxDatagramBytes, p_message, ctx);
 	}
 	if (r_dropped) {

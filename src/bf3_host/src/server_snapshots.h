@@ -30,6 +30,7 @@ public:
 		seq_.assign(p_slots, 0);
 		intervals_.assign(p_slots, SnapshotIntervals());
 		budget_bytes_ = p_budget_bytes;
+		ghost_scope_ = p_ghost_scope;
 		ghosts_.configure(p_slots, int64_t(p_budget_bytes), p_ghost_scope);
 	}
 	void reset(size_t p_slot) {
@@ -47,8 +48,9 @@ public:
 private:
 	void gather(sim::Tick p_tick);
 	GhostViewer viewer(size_t p_slot) const;
+	int64_t required_room(int64_t p_spent) const;
 	size_t send_overflow(size_t p_slot, const net::Snapshot &p_snapshot, size_t p_carried, int64_t p_room,
-			std::vector<net::OtherSoldier> &r_sent);
+			int64_t p_required_room, std::vector<net::OtherSoldier> &r_sent);
 	void send_extras(size_t p_slot, const net::Snapshot &p_snapshot, std::span<const net::OtherSoldier> p_main,
 			std::span<const net::OtherSoldier> p_others);
 	int64_t send_shots(size_t p_slot, const net::Snapshot &p_snapshot, std::vector<uint8_t> p_wanted, size_t p_cut,
@@ -68,6 +70,7 @@ private:
 	std::vector<uint16_t> seq_;
 	std::vector<SnapshotIntervals> intervals_;
 	uint32_t budget_bytes_ = 0;
+	bool ghost_scope_ = true;
 	GhostScheduler ghosts_;
 	std::vector<GhostCandidate> candidates_;
 	std::vector<int> candidate_of_;

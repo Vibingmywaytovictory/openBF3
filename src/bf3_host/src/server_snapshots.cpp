@@ -112,6 +112,7 @@ void SnapshotWriter::send(sim::Tick p_tick, uint64_t p_now_ns, GameServerTickTim
 		const int64_t reserve = std::min(wire_bytes(wanted.size()), budget * 2 / 5);
 		const int64_t snapshot_room = std::max<int64_t>(budget - reserve - command_header(), 0);
 
+		plan_.bases.required_bytes = size_t(required_room(reserve));
 		net::SnapshotSize size;
 		size_t dropped = 0;
 		std::vector<uint8_t> bytes = net::encode_snapshot(snap, &dropped, &plan_.bases, size_t(snapshot_room), &size);
@@ -120,7 +121,9 @@ void SnapshotWriter::send(sim::Tick p_tick, uint64_t p_now_ns, GameServerTickTim
 		}
 		const size_t carried = size.carried;
 		overflow.clear();
-		const size_t extra = send_overflow(i, snap, carried, budget - reserve - wire_bytes(bytes.size()), overflow);
+		const int64_t main_wire = wire_bytes(bytes.size());
+		const size_t extra = send_overflow(
+				i, snap, carried, budget - reserve - main_wire, required_room(reserve + main_wire), overflow);
 		const std::span<const net::OtherSoldier> main(snap.others.data(), carried);
 		ghosts_.sent(i, snap, main, overflow);
 		++sent_;
@@ -146,8 +149,15 @@ void SnapshotWriter::send(sim::Tick p_tick, uint64_t p_now_ns, GameServerTickTim
 	r_times.snapshots = uint32_t(sent_ - sent_before);
 }
 
+int64_t SnapshotWriter::required_room(int64_t p_spent) const {
+	if (!ghost_scope_) {
+		return int64_t(net::kMaxDatagramBytes);
+	}
+	return std::max<int64_t>(int64_t(budget_bytes_) - p_spent - command_header(), 0);
+}
+
 size_t SnapshotWriter::send_overflow(size_t p_slot, const net::Snapshot &p_snapshot, size_t p_carried, int64_t p_room,
-		std::vector<net::OtherSoldier> &r_sent) {
+		int64_t p_required_room, std::vector<net::OtherSoldier> &r_sent) {
 	const size_t required = std::min(plan_.bases.required, p_snapshot.others.size());
 	const size_t mandatory = required > p_carried ? required - p_carried : 0;
 	const int64_t payload = p_room - command_header();
@@ -161,8 +171,8 @@ size_t SnapshotWriter::send_overflow(size_t p_slot, const net::Snapshot &p_snaps
 	const std::span<const net::OtherBaseline> bases(
 			plan_.bases.others.data() + p_carried, p_snapshot.others.size() - p_carried);
 	net::SnapshotSize size;
-	std::vector<uint8_t> bytes =
-			net::encode_snapshot_others(so, nullptr, bases, &size, size_t(std::max<int64_t>(payload, 0)), mandatory);
+	std::vector<uint8_t> bytes = net::encode_snapshot_others(
+			so, nullptr, bases, &size, size_t(std::max<int64_t>(payload, 0)), mandatory, size_t(p_required_room));
 	if (combat_.on()) {
 		combat_.gunplay()->count_others_dropped(mandatory > size.carried ? mandatory - size.carried : 0);
 	}
