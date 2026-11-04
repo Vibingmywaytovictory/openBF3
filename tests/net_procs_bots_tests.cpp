@@ -138,7 +138,9 @@ TEST_SUITE("net-procs-bots-squads") {
 		const std::string server_out = driver.output(server->id);
 		driver.finish(server->id, 1s);
 		MESSAGE("game client: " << report);
-		REQUIRE_MESSAGE(contains(report, "[squads] done: "), driver.output(*game));
+		if (!need(contains(report, "[squads] done: "), driver.output(*game))) {
+			return;
+		}
 		CHECK(game_end.code == 0);
 
 		std::string game_squads = report.substr(report.rfind("; squads ") + 9);
@@ -150,12 +152,14 @@ TEST_SUITE("net-procs-bots-squads") {
 		CHECK(game_squads == mate_squads);
 		const uint64_t mate_slot = summary_number(report, ": mate " + std::string(kMateName) + " slot ");
 		const uint64_t own_slot = summary_number(report, ", own slot ");
-		REQUIRE(mate_slot != UINT64_MAX);
-		REQUIRE(own_slot != UINT64_MAX);
+		if (!need(mate_slot != UINT64_MAX, report) || !need(own_slot != UINT64_MAX, report)) {
+			return;
+		}
 		const std::optional<std::string> mate_squad = squad_of(game_squads, uint32_t(mate_slot));
 		const std::optional<std::string> own_squad = squad_of(game_squads, uint32_t(own_slot));
-		REQUIRE(mate_squad.has_value());
-		REQUIRE(own_squad.has_value());
+		if (!need(mate_squad.has_value(), game_squads) || !need(own_squad.has_value(), game_squads)) {
+			return;
+		}
 		CHECK(*mate_squad == *own_squad);
 		CHECK(mate_squad->find("/0") == std::string::npos);
 		const uint64_t mate_spawns = summary_number(report, ", on the mate ");
@@ -167,12 +171,18 @@ TEST_SUITE("net-procs-bots-squads") {
 				[](const std::string &l) { return number_after(l, " clients ").value_or(0.0) >= 2.0; });
 		const auto over = std::find_if(
 				status.begin(), status.end(), [](const std::string &l) { return contains(l, kRoundOver); });
-		REQUIRE_MESSAGE(seated != status.end(), server_out);
-		REQUIRE_MESSAGE(over != status.end(), server_out);
+		if (!need(seated != status.end(), server_out) || !need(over != status.end(), server_out)) {
+			return;
+		}
 		double worst_p99 = 0.0;
+		std::string_view worst_line;
 		bool kicks = true;
 		for (auto it = seated; it != status.end() && it <= over; ++it) {
-			worst_p99 = std::max(worst_p99, number_after(*it, ") p99 ").value_or(1.0e9));
+			const double p99 = number_after(*it, ") p99 ").value_or(1.0e9);
+			if (p99 >= worst_p99) {
+				worst_p99 = p99;
+				worst_line = *it;
+			}
 		}
 		for (const std::string &l : status) {
 			kicks = kicks && kicks_none(l);
@@ -190,7 +200,9 @@ TEST_SUITE("net-procs-bots-squads") {
 		std::fflush(stdout);
 		CHECK(limit == double(kKillLimit));
 		CHECK(std::max(us, ru) == double(kKillLimit));
-		REQUIRE(ru > 0.0);
+		if (!need(ru > 0.0, *over)) {
+			return;
+		}
 		CHECK(us / ru >= kTeamKdMin);
 		CHECK(us / ru <= kTeamKdMax);
 		CHECK(c.samples >= kMinSquadSamples);
@@ -199,7 +211,7 @@ TEST_SUITE("net-procs-bots-squads") {
 		CHECK(spawns_on_mates != UINT64_MAX);
 		CHECK(spawns_on_mates >= 1u);
 		CHECK(kicks);
-		CHECK(worst_p99 < kTickP99Ms);
+		CHECK_MESSAGE(worst_p99 < kTickP99Ms, worst_line);
 	}
 
 	TEST_CASE("the control: the same server with --bot-squads=off fails the cohesion threshold") {
