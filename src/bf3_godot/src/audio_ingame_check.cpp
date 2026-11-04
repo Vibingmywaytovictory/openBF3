@@ -536,7 +536,7 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 		c.started += f.started ? 1u : 0u;
 		c.finished += f.finished ? 1u : 0u;
 		c.joined += f.joined ? 1u : 0u;
-		if (!f.started && f.cull == 0 && f.parks == 0 && !f.refused && !f.killed) {
+		if (!f.started && f.cull == 0 && f.parks == 0 && !f.refused && !f.killed && !f.joined) {
 			++c.other_drops;
 			++c.reasons["requested, never started or dropped"];
 		}
