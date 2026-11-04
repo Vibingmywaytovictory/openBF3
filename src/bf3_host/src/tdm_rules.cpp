@@ -281,6 +281,8 @@ struct TdmRules::Impl {
 		bool damaged = false;
 		bool pending_spawn = false;
 		int16_t spawn_mate = kNoSquadMate;
+		bool spawn_beacon = false;
+		std::optional<sim::Vec3> beacon;
 		uint8_t bot_spawn_choice = 0;
 		bool suicide = false;
 		uint32_t last_request = UINT32_MAX;
@@ -1000,7 +1002,9 @@ SpawnRefusal TdmRules::request_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_sp
 			why = SpawnRefusal::Alive;
 		} else if (p_kit >= kKitCount) {
 			why = SpawnRefusal::BadKit;
-		} else if (p_spawn_choice != 0 && m.squad_mate(p_slot, p_spawn_choice) == kNoSquadMate) {
+		} else if (p_spawn_choice == net::kSpawnChoiceBeacon
+						? !s->beacon.has_value()
+						: p_spawn_choice != 0 && m.squad_mate(p_slot, p_spawn_choice) == kNoSquadMate) {
 			why = SpawnRefusal::SquadMate;
 		} else if (p_tick < s->earliest) {
 			why = SpawnRefusal::TooEarly;
@@ -1011,7 +1015,8 @@ SpawnRefusal TdmRules::request_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_sp
 		return why;
 	}
 	s->pending_spawn = true;
-	s->spawn_mate = int16_t(m.squad_mate(p_slot, p_spawn_choice));
+	s->spawn_beacon = p_spawn_choice == net::kSpawnChoiceBeacon;
+	s->spawn_mate = s->spawn_beacon ? kNoSquadMate : int16_t(m.squad_mate(p_slot, p_spawn_choice));
 	s->kit = p_kit;
 	s->revive_until = 0;
 	m.remove_downed(p_slot);
@@ -1025,6 +1030,10 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 	m.tick = p_tick;
 	const size_t n = std::min(m.slots.size(), r_states.size());
 
+	for (size_t i = 0; i < m.slots.size(); ++i) {
+		Impl::Slot &s = m.slots[i];
+		s.beacon = s.connected ? p_gunplay.squad_beacon(uint8_t(i), m.team_of(i)) : std::nullopt;
+	}
 	for (size_t i = 0; i < n; ++i) {
 		Impl::Slot &s = m.slots[i];
 		if (s.corpse_fresh) {
@@ -1213,7 +1222,17 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		Impl::Slot &s = m.slots[i];
 		if (s.connected && s.pending_spawn) {
 			const bool open = phase == lg::RoundPhase::PreRound || phase == lg::RoundPhase::InRound;
-			if (open && s.spawn_mate == kNoSquadMate) {
+			if (open && s.spawn_beacon && s.beacon) {
+				RulesOrder o;
+				o.kind = RulesOrder::Kind::SpawnAt;
+				o.slot = uint8_t(i);
+				o.position = m.squad_spawn_point(*s.beacon);
+				o.yaw = s.corpse_yaw;
+				r_orders.push_back(o);
+				++m.stats.beacon_spawns;
+			} else if (open && s.spawn_beacon) {
+				++m.stats.refused[size_t(SpawnRefusal::SquadMate)];
+			} else if (open && s.spawn_mate == kNoSquadMate) {
 				r_orders.push_back(RulesOrder{ RulesOrder::Kind::Spawn, uint8_t(i) });
 			} else if (open &&
 					m.mate_ready(uint8_t(i), s.spawn_mate, std::span<const sim::SoldierState>(r_states.data(), n))) {
@@ -1230,6 +1249,7 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 				++m.stats.refused[size_t(SpawnRefusal::SquadMate)];
 			}
 			s.pending_spawn = false;
+			s.spawn_beacon = false;
 			s.spawn_mate = kNoSquadMate;
 		}
 	}

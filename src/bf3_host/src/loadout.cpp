@@ -19,6 +19,10 @@ bool simulated(size_t p_slot) {
 	return std::find(kKitSlots.begin(), kKitSlots.end(), uint8_t(p_slot)) != kKitSlots.end();
 }
 
+bool gadget_slot(size_t p_slot) {
+	return std::find(kGadgetSlots.begin(), kGadgetSlots.end(), uint8_t(p_slot)) != kGadgetSlots.end();
+}
+
 bool contains(const std::vector<uint32_t> &p_ids, uint32_t p_id) {
 	return std::find(p_ids.begin(), p_ids.end(), p_id) != p_ids.end();
 }
@@ -230,6 +234,28 @@ std::vector<std::string> loadout_variants(std::span<const gp::KitDef> p_kits) {
 	return std::vector<std::string>(out.begin(), out.end());
 }
 
+std::vector<KitGadgetUnlock> loadout_gadget_unlocks(std::span<const gp::KitDef> p_kits) {
+	std::map<std::string, std::string> out;
+	for (const gp::KitDef &k : p_kits) {
+		for (const uint8_t s : kGadgetSlots) {
+			const gp::KitSlot *slot = k.slot(gp::WeaponSlot(s));
+			if (slot == nullptr) {
+				continue;
+			}
+			for (const gp::KitUnlock &u : slot->unlocks) {
+				if (u.type == "SoldierWeaponUnlockAsset" && !u.weapon.empty()) {
+					out.emplace(to_lower_ascii(u.unlock), to_lower_ascii(u.weapon));
+				}
+			}
+		}
+	}
+	std::vector<KitGadgetUnlock> list;
+	for (auto &[unlock, weapon] : out) {
+		list.push_back(KitGadgetUnlock{ unlock, weapon });
+	}
+	return list;
+}
+
 core::Result<LoadoutCatalog> make_loadout_catalog(const core::EbxResolver &p_db,
 		const gp::UnlockProgression &p_progression, std::span<const gp::KitDef> p_kits,
 		std::span<const gp::WeaponDef> p_defs, const KitTable &p_table, gp::WorkBudget *p_budget) {
@@ -288,6 +314,9 @@ core::Result<LoadoutCatalog> make_loadout_catalog(const core::EbxResolver &p_db,
 									where + " slot " + std::to_string(s) + ": " + item.unlock + " has no weapon def");
 						}
 						item.def = it->second;
+					} else if (gadget_slot(s)) {
+						const auto it = by_variant.find(item.unlock);
+						item.def = it != by_variant.end() ? it->second : sim::weapons::kNoWeapon;
 					}
 					if (s == kLoadoutAccessoryWeapon) {
 						auto cached = parts_of.find(item.unlock);
@@ -385,7 +414,7 @@ core::Result<Loadout> resolve_loadout(const LoadoutCatalog &p_catalog, const Kit
 					where + ": slot " + std::to_string(s) + " does not allow item " + std::to_string(id));
 		}
 		out.choice.items[s] = id;
-		if (simulated(s)) {
+		if (simulated(s) || gadget_slot(s)) {
 			out.defs[s] = item->def;
 		}
 	}

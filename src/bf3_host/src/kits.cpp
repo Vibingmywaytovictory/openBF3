@@ -57,15 +57,17 @@ core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p
 core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p_teams, std::span<const core::gameplay::KitDef> p_kits,
 		std::span<const core::gameplay::WeaponDef> p_defs, const KitTableOptions &p_options) {
 	using core::gameplay::WeaponSlot;
-	size_t gadget = p_defs.size();
-	if (!p_options.assault_gadget.empty()) {
-		const std::string want = to_lower_ascii(p_options.assault_gadget);
+	const auto def_named = [&](const std::string &p_lower) {
 		for (size_t d = 0; d < p_defs.size(); ++d) {
-			if (to_lower_ascii(p_defs[d].variant) == want) {
-				gadget = d;
-				break;
+			if (to_lower_ascii(p_defs[d].variant) == p_lower) {
+				return d;
 			}
 		}
+		return p_defs.size();
+	};
+	size_t gadget = p_defs.size();
+	if (!p_options.assault_gadget.empty()) {
+		gadget = def_named(to_lower_ascii(p_options.assault_gadget));
 		if (gadget == p_defs.size() || gadget >= size_t(sim::weapons::kNoWeapon)) {
 			return core::make_error("kits: the assault gadget " + p_options.assault_gadget + " has no weapon def");
 		}
@@ -114,6 +116,16 @@ core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p
 			for (size_t s = 0; s < kit->weapon_slots.size() && s < core::gameplay::kWeaponSlotCount; ++s) {
 				const core::gameplay::KitUnlock *u = kit->default_unlock(WeaponSlot(s));
 				const bool resolved = std::find(kKitSlots.begin(), kKitSlots.end(), uint8_t(s)) != kKitSlots.end();
+				if (!resolved && u != nullptr &&
+						std::find(kGadgetSlots.begin(), kGadgetSlots.end(), uint8_t(s)) != kGadgetSlots.end()) {
+					const std::string unlock = to_lower_ascii(u->unlock);
+					const size_t def = def_named(unlock);
+					if (def < p_defs.size() && def < size_t(sim::weapons::kNoWeapon)) {
+						l.defs[s] = uint16_t(def);
+						l.unlocks[s] = unlock;
+						continue;
+					}
+				}
 				if (!resolved) {
 					if (u != nullptr) {
 						table.skipped.push_back(std::string(kit_role_name(role)) + "/" + std::to_string(team_id) + "/" + std::to_string(s) + ": " + u->unlock);
@@ -125,13 +137,7 @@ core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p
 							(kit->progression_known ? "" : " (the progression tables were not found)"));
 				}
 				const std::string unlock = to_lower_ascii(u->unlock);
-				size_t id = p_defs.size();
-				for (size_t d = 0; d < p_defs.size(); ++d) {
-					if (to_lower_ascii(p_defs[d].variant) == unlock) {
-						id = d;
-						break;
-					}
-				}
+				const size_t id = def_named(unlock);
 				if (id == p_defs.size() || id >= size_t(sim::weapons::kNoWeapon)) {
 					return core::make_error("kits: " + asset + " slot " + std::to_string(s) + " unlock " + u->unlock + " has no weapon def");
 				}

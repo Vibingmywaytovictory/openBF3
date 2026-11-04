@@ -20,6 +20,7 @@
 #include "bf3/sim/weapons/weapon_input.h"
 #include "bf3/sim/weapons/weapon_install.h"
 #include "bf3/sim/weapons/weapon_rules.h"
+#include "server_gadgets.h"
 
 #include <algorithm>
 #include <array>
@@ -265,6 +266,32 @@ core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared
 		}
 		level->defs.push_back(std::move(*def));
 	}
+	if (p_options.loadouts) {
+		for (const KitGadgetUnlock &u : loadout_gadget_unlocks(kits)) {
+			core::Result<sw::GadgetDef> g = sw::read_gadget_def(db, u.weapon);
+			if (!g) {
+				return core::error_at(where, g.error());
+			}
+			if (g->kind == sw::GadgetKind::None || variants.contains(u.unlock)) {
+				continue;
+			}
+			core::Result<gp::WeaponDef> def = w->catalog->resolve(u.unlock);
+			if (!def) {
+				return core::error_at(where + ": gadget " + u.unlock, def.error());
+			}
+			g->def = uint16_t(level->defs.size());
+			level->defs.push_back(std::move(*def));
+			level->gadgets.push_back(std::move(*g));
+			variants.insert(u.unlock);
+		}
+		for (const gp::WeaponDef &d : level->defs) {
+			core::Result<sw::AmmoPickupDef> pick = sw::read_ammo_pickup(db, d.blueprint);
+			if (!pick) {
+				level->notes.push_back("ammo pickup: " + pick.error().message);
+			}
+			level->ammo_pickups.push_back(pick ? *pick : sw::AmmoPickupDef());
+		}
+	}
 	KitTableOptions kit_options;
 	if (p_options.tdm_kits) {
 		kit_options.assault_gadget = std::string(kTdmAssaultGadget);
@@ -301,6 +328,7 @@ core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared
 		}
 		level->specializations = std::move(*specializations);
 		level->kits.hash = core::fnv1a_fold(level->kits.hash, level->specializations.hash);
+		level->kits.hash = core::fnv1a_fold(level->kits.hash, gadget_defs_hash(level->gadgets, level->ammo_pickups));
 	}
 	for (const std::string &s : level->kits.skipped) {
 		level->notes.push_back("kits: skipped " + s);
@@ -420,6 +448,8 @@ struct Gunplay::Impl {
 	const SquadTable *squads = nullptr;
 	uint8_t flags = 0;
 	std::unique_ptr<sw::ProjectileWorld> projectiles;
+	std::unique_ptr<ServerGadgets> gadgets;
+	std::vector<GadgetSoldier> gadget_soldiers;
 	std::unique_ptr<LagHistory> history;
 	std::unique_ptr<RewindProvider> rewind;
 	const sim::CollisionWorld *world = nullptr;
@@ -480,6 +510,7 @@ core::Result<std::unique_ptr<Gunplay>> Gunplay::create(const SharedLevel &p_leve
 	m.weapon_hash = match_weapon_hash(*m.table, level.capsule_table);
 	m.flags = match_weapon_flags(p_config.exact_aim, p_config.infinite_magazine);
 	m.projectiles = std::make_unique<sw::ProjectileWorld>(m.table);
+	m.gadgets = std::make_unique<ServerGadgets>(level, m.table);
 	m.history = std::make_unique<LagHistory>(p_config.lag, uint32_t(net::kMaxSlots));
 	m.rewind = std::make_unique<RewindProvider>(*m.history, level.capsule_table, p_config.lag);
 	if (p_config.observer != nullptr && p_config.observer->wants_rewind_rows()) {
@@ -566,6 +597,7 @@ void Gunplay::on_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_team, uint32_t p
 				: gp::boosted_magazines(d.magazines, fx);
 		x.reserve = magazines * d.magazine_capacity;
 	}
+	m.gadgets->armed(p_slot, s.weapons);
 	s.armed = true;
 	s.spawn_tick = p_tick;
 	s.fired = false;
@@ -631,7 +663,9 @@ void Gunplay::step_soldier(uint8_t p_slot, const sim::Command &p_command, const 
 		}
 		for (uint8_t i = 0; i < s.out.shot_count; ++i) {
 			const sw::ShotEvent &e = s.out.shots[i];
-			if (!m.projectiles->spawn(e).ok()) {
+			if (m.gadgets->is_gadget(e.def)) {
+				m.gadgets->deploy(e, s.team, p_command.tick, m.world);
+			} else if (!m.projectiles->spawn(e).ok()) {
 				++m.stats.projectiles_refused;
 			}
 			if (refused) {
@@ -801,6 +835,13 @@ void Gunplay::apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states
 		w.dud = d.dud;
 		r_sink.detonation(w);
 	}
+	m.gadget_soldiers.assign(std::min(p_states.size(), m.slots.size()), GadgetSoldier());
+	for (size_t i = 0; i < m.gadget_soldiers.size(); ++i) {
+		if (m.slots[i].armed && alive(p_states[i])) {
+			m.gadget_soldiers[i] = GadgetSoldier{ &p_states[i], &m.slots[i].weapons, m.teams[i] };
+		}
+	}
+	m.gadgets->step(p_tick, m.world, m.gadget_soldiers, m.level->max_health);
 }
 
 const sw::SoldierWeaponsState &Gunplay::weapons(uint8_t p_slot) const {
@@ -852,7 +893,24 @@ void Gunplay::clear(uint8_t p_slot) {
 	if (p_slot < impl_->slots.size()) {
 		impl_->clear(p_slot);
 		impl_->teams[p_slot] = 0;
+		impl_->gadgets->forget(p_slot);
 	}
+}
+
+std::span<const sw::Deployable> Gunplay::deployables() const {
+	return impl_->gadgets->live();
+}
+
+uint64_t Gunplay::deployables_revision() const {
+	return impl_->gadgets->revision();
+}
+
+const GadgetStats &Gunplay::gadget_stats() const {
+	return impl_->gadgets->stats();
+}
+
+std::optional<sim::Vec3> Gunplay::squad_beacon(uint8_t p_slot, uint8_t p_team) const {
+	return impl_->gadgets->squad_beacon(p_slot, p_team, impl_->squads);
 }
 
 bool Gunplay::armed(uint8_t p_slot) const {

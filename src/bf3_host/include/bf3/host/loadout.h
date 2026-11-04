@@ -87,6 +87,13 @@ struct Loadout {
 
 std::vector<std::string> loadout_variants(std::span<const core::gameplay::KitDef> p_kits);
 
+struct KitGadgetUnlock {
+	std::string unlock;
+	std::string weapon;
+};
+
+std::vector<KitGadgetUnlock> loadout_gadget_unlocks(std::span<const core::gameplay::KitDef> p_kits);
+
 core::Result<LoadoutCatalog> make_loadout_catalog(const core::EbxResolver &p_db,
 		const core::gameplay::UnlockProgression &p_progression, std::span<const core::gameplay::KitDef> p_kits,
 		std::span<const core::gameplay::WeaponDef> p_defs, const KitTable &p_table,

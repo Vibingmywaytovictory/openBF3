@@ -138,6 +138,7 @@ struct RulesStats {
 	uint64_t squad_spawns = 0, squad_spawns_on_nav = 0;
 	uint64_t squad_revives = 0, squad_wipes = 0;
 	uint64_t level_ends = 0;
+	uint64_t beacon_spawns = 0;
 };
 static_assert(std::is_trivially_copyable_v<RulesStats>);
 

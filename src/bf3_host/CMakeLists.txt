@@ -252,3 +252,9 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/squad_join.h
     src/squad_join.cpp
 )
+
+target_sources(bf3_host PRIVATE
+    include/bf3/host/gadgets.h
+    src/server_gadgets.h
+    src/server_gadgets.cpp
+)

@@ -2220,3 +2220,283 @@ TEST_SUITE("host-tdm-server") {
 		tdm::check_install_unchanged(*level);
 	}
 }
+
+namespace {
+
+const sw::GadgetDef *gadget_named(const host::GunplayLevel &p_level, std::string_view p_weapon) {
+	for (const sw::GadgetDef &g : p_level.gadgets) {
+		if (g.weapon == p_weapon) {
+			return &g;
+		}
+	}
+	return nullptr;
+}
+
+std::optional<sim::Tick> rest_tick(Match &r_match, size_t p_count, uint32_t p_max) {
+	for (uint32_t i = 0; i < p_max; ++i) {
+		size_t resting = 0;
+		for (const sw::Deployable &d : r_match.server.gunplay()->deployables()) {
+			resting += d.resting ? 1u : 0u;
+		}
+		if (resting >= p_count) {
+			return r_match.now();
+		}
+		r_match.tick();
+	}
+	return std::nullopt;
+}
+
+}
+
+TEST_SUITE("host-gunplay-gadgets") {
+	TEST_CASE("gadgets: Metro TDM's medkit, ammo bag and radio beacon carry the install's supply and deploy data and "
+			  "are the "
+			  "kits' default slot 4 and 5 weapons") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &g = *level->shared->gunplay;
+		std::printf("gadgets: %zu gadget defs, %zu ammo pickups for %zu weapon defs\n", g.gadgets.size(),
+				g.ammo_pickups.size(), g.defs.size());
+		CHECK(g.gadgets.size() == 3u);
+		CHECK(g.ammo_pickups.size() == g.defs.size());
+		const sw::GadgetDef *medkit = gadget_named(g, "weapons/gadgets/medicbag/medicbag");
+		const sw::GadgetDef *ammo = gadget_named(g, "weapons/gadgets/ammobag/ammobag");
+		const sw::GadgetDef *beacon = gadget_named(g, "weapons/gadgets/radiobeacon/radio_beacon");
+		REQUIRE(medkit != nullptr);
+		REQUIRE(ammo != nullptr);
+		REQUIRE(beacon != nullptr);
+		CHECK(medkit->kind == sw::GadgetKind::Supply);
+		CHECK(medkit->healing == sw::SupplyUnitDef{ 3.5f, 12.0f, 1.0f, 0.0f, true });
+		CHECK_FALSE(medkit->ammo.active());
+		CHECK(ammo->ammo == sw::SupplyUnitDef{ 3.5f, 1.0f, 7.0f, 0.0f, true });
+		CHECK_FALSE(ammo->healing.active());
+		for (const sw::GadgetDef *s : { medkit, ammo }) {
+			CHECK(s->max_count == 1u);
+			CHECK(s->max_attach_inclination_deg == 25.0f);
+			CHECK_FALSE(s->team_specific);
+			CHECK_FALSE(s->exclude_self);
+			CHECK(s->supply_soldiers);
+		}
+		CHECK(beacon->kind == sw::GadgetKind::SpawnBeacon);
+		CHECK(beacon->ground_ray_m == doctest::Approx(3.1f));
+		CHECK(beacon->ground_flatness == doctest::Approx(0.5f));
+		CHECK(beacon->max_count == 1u);
+		REQUIRE(medkit->def < g.ammo_pickups.size());
+		REQUIRE(beacon->def < g.ammo_pickups.size());
+		CHECK(g.ammo_pickups[medkit->def] == sw::AmmoPickupDef{ -1, 1.0f, true, 1.0f });
+		CHECK(g.ammo_pickups[beacon->def] == sw::AmmoPickupDef{ -1, 2.5f, false, 5.0f });
+		std::string replenished;
+		size_t replenishing = 0;
+		for (size_t d = 0; d < g.ammo_pickups.size(); ++d) {
+			if (g.ammo_pickups[d].auto_replenish) {
+				++replenishing;
+				replenished += " " + g.defs[d].variant;
+			}
+		}
+		std::printf("gadgets: %zu auto-replenishing defs:%s\n", replenishing, replenished.c_str());
+		CHECK(replenishing == 2u);
+		for (uint8_t team = 1; team <= 2; ++team) {
+			CHECK(host::default_loadout(g.loadouts, g.kits, team, 0).defs[4] == medkit->def);
+			CHECK(host::default_loadout(g.loadouts, g.kits, team, 2).defs[4] == ammo->def);
+			CHECK(host::default_loadout(g.loadouts, g.kits, team, 3).defs[5] == beacon->def);
+			CHECK(host::default_loadout(g.loadouts, g.kits, team, 1).defs[5] == sw::kNoWeapon);
+			CHECK(g.kits.loadout(team, 3).defs[5] == beacon->def);
+		}
+	}
+
+	TEST_CASE("gadgets: a thrown medkit heals a fallen soldier at its SupplyIncSpeed of 12 HP/s before regeneration "
+			  "starts") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		std::unique_ptr<Match> m = start_match(*level, true, 71u, 0, 1);
+		tdm::ScriptedPeer &medic = m->join("medic");
+		tdm::ScriptedPeer &patient = m->join("patient");
+		medic.ready();
+		patient.ready();
+		REQUIRE(wait_in_round(*m));
+		medic.spawn_request(0);
+		patient.spawn_request(1);
+		REQUIRE(m->until([&] { return is_alive(m->state(medic.slot())) && is_alive(m->state(patient.slot())); }, 600));
+		const std::optional<Drop> drop = find_drop(*m, false);
+		REQUIRE(drop.has_value());
+		m->teleport(medic, add(drop->beside, 0.0f, 0.05f, 0.0f));
+		m->teleport(patient, add(drop->floor, 0.0f, drop->height, 0.0f));
+		REQUIRE(m->until(
+				[&] {
+					const sim::SoldierState *s = m->state(patient.slot());
+					return s != nullptr && s->health < 99.0f && s->mode == sim::MoveMode::OnGround;
+				},
+				600));
+		m->ticks(5);
+		REQUIRE(is_alive(m->state(patient.slot())));
+		const float hurt = m->state(patient.slot())->health;
+		const uint16_t medkit = m->server.gunplay()->weapons(uint8_t(medic.slot())).slots[4].def;
+		std::printf(
+				"medkit: patient at %.1f HP after the fall, the medic's slot 4 holds def %u\n", hurt, unsigned(medkit));
+		CHECK(medkit != sw::kNoWeapon);
+		bool fire = false;
+		const sim::Vec3 target = add(drop->floor, 0.0f, 0.1f, 0.0f);
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			return aim_command(
+					*m, p_tick, p_state, target, sim::Pose::Stand, select_and_fire(4, fire && (p_tick % 30u) < 10u));
+		};
+		m->ticks(40);
+		fire = true;
+		const std::optional<sim::Tick> rested = rest_tick(*m, 1, 300);
+		fire = false;
+		REQUIRE(rested.has_value());
+		const float at_rest = m->state(patient.slot())->health;
+		const uint32_t window = 90;
+		m->ticks(window);
+		const float after = m->state(patient.slot())->health;
+		const host::GadgetStats &st = m->server.gunplay()->gadget_stats();
+		std::printf("medkit: rested at tick %u, health %.2f -> %.2f over %u ticks (%.2f HP/s), %llu deploys, %llu heal "
+					"ticks\n",
+				unsigned(*rested), at_rest, after, window, (after - at_rest) * 60.0f / float(window),
+				(unsigned long long)st.deploys, (unsigned long long)st.heal_ticks);
+		CHECK(after - at_rest == doctest::Approx(12.0f * float(window) / 60.0f).epsilon(0.01));
+		CHECK(st.deploys >= 1u);
+		CHECK(m->rules().stats().regen_ticks == 0u);
+	}
+
+	TEST_CASE("gadgets: an ammo bag refills a magazine of the primary's reserve per second, up to the spawn reserve") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		std::unique_ptr<Match> m = start_match(*level, true, 73u, 0, 1);
+		tdm::ScriptedPeer &support = m->join("support");
+		tdm::ScriptedPeer &rifle = m->join("rifle");
+		support.ready();
+		rifle.ready();
+		REQUIRE(wait_in_round(*m));
+		support.spawn_request(2);
+		rifle.spawn_request(0);
+		REQUIRE(m->until([&] { return is_alive(m->state(support.slot())) && is_alive(m->state(rifle.slot())); }, 600));
+		std::optional<Patch> patch = find_patch(*m, 3.0f);
+		REQUIRE(patch.has_value());
+		m->teleport(support, add(patch->medic, 0.0f, 0.05f, 0.0f));
+		m->teleport(rifle, add(patch->victim, 0.0f, 0.05f, 0.0f));
+		m->ticks(20);
+		const sw::WeaponSlotState &primary = m->server.gunplay()->weapons(uint8_t(rifle.slot())).slots[0];
+		const int32_t full = primary.reserve;
+		const int32_t magazine = m->server.gunplay()->table().def(primary.def, primary.variant).magazine_capacity;
+		bool shoot = true;
+		m->scripts[1] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			const sim::Vec3 sky = add(p_state.position, 0.0f, 30.0f, 1.0f);
+			return aim_command(
+					*m, p_tick, p_state, sky, sim::Pose::Stand, select_and_fire(0, shoot && (p_tick % 4u) < 2u));
+		};
+		REQUIRE(m->until([&] { return primary.reserve <= full - magazine; }, 1200));
+		shoot = false;
+		m->ticks(240);
+		const int32_t low = primary.reserve;
+		REQUIRE(low < full);
+		CHECK(m->server.gunplay()->weapons(uint8_t(support.slot())).slots[4].def != sw::kNoWeapon);
+		bool fire = false;
+		const sim::Vec3 target = add(patch->victim, 0.0f, 0.1f, 0.0f);
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			return aim_command(
+					*m, p_tick, p_state, target, sim::Pose::Stand, select_and_fire(4, fire && (p_tick % 30u) < 10u));
+		};
+		m->ticks(40);
+		fire = true;
+		const std::optional<sim::Tick> rested = rest_tick(*m, 1, 300);
+		fire = false;
+		REQUIRE(rested.has_value());
+		const int32_t at_rest = primary.reserve;
+		sim::Tick first_refill = 0;
+		REQUIRE(m->until(
+				[&] {
+					if (first_refill == 0 && primary.reserve > at_rest) {
+						first_refill = m->now();
+					}
+					return primary.reserve >= full;
+				},
+				600));
+		std::printf("ammo bag: reserve %d of %d (magazine %d) before the bag, the first refill %u ticks after it "
+					"rested, full at %u\n",
+				low, full, magazine, unsigned(first_refill - *rested), unsigned(m->now() - *rested));
+		CHECK(at_rest == low);
+		CHECK(first_refill - *rested >= 58u);
+		CHECK(first_refill - *rested <= 62u);
+		CHECK(primary.reserve == full);
+		CHECK(m->server.gunplay()->gadget_stats().rounds_refilled >= uint64_t(full - low));
+	}
+
+	TEST_CASE("gadgets: a recon's radio beacon is a spawn point for its squad: a mate's beacon SpawnRequest deploys at "
+			  "it; with no beacon, outside the squad or on the other team it is refused") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		REQUIRE(level->bots != nullptr);
+		std::unique_ptr<Match> m = start_match(*level, true, 79u, 0, -1, squad_server(*level));
+		tdm::ScriptedPeer &alpha = m->join("alpha");
+		tdm::ScriptedPeer &bravo = m->join("bravo");
+		tdm::ScriptedPeer &charlie = m->join("charlie");
+		alpha.ready();
+		bravo.ready();
+		charlie.ready();
+		m->bot();
+		REQUIRE(wait_in_round(*m));
+		REQUIRE(m->rules().team_of(uint8_t(alpha.slot())) == m->rules().team_of(uint8_t(charlie.slot())));
+		REQUIRE(m->rules().team_of(uint8_t(alpha.slot())) != m->rules().team_of(uint8_t(bravo.slot())));
+		alpha.spawn_request(3);
+		REQUIRE(m->until([&] { return is_alive(m->state(alpha.slot())); }, 600));
+		m->ticks(net::kPlayerListIntervalTicks + 2u);
+		REQUIRE(squad_index(alpha, alpha.slot(), charlie.slot()) >= 0);
+		charlie.spawn_request(1, net::kSpawnChoiceBeacon);
+		m->ticks(3);
+		CHECK_FALSE(is_alive(m->state(charlie.slot())));
+		CHECK(m->rules().stats().refused[size_t(host::SpawnRefusal::SquadMate)] == 1u);
+
+		CHECK(m->server.gunplay()->weapons(uint8_t(alpha.slot())).slots[5].def != sw::kNoWeapon);
+		bool fire = false;
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			sim::Command c = sim::idle_command(p_tick, p_state.yaw, sim::quantize_pitch(-0.3f), sim::Pose::Stand);
+			c.buttons = select_and_fire(5, fire && (p_tick % 30u) < 10u);
+			return c;
+		};
+		m->ticks(60);
+		fire = true;
+		const std::optional<sim::Tick> placed = rest_tick(*m, 1, 240);
+		fire = false;
+		REQUIRE(placed.has_value());
+		const sim::Vec3 beacon = m->server.gunplay()->deployables()[0].position;
+		const sim::Vec3 owner = m->state(alpha.slot())->position;
+		std::printf("beacon: placed at (%.2f %.2f %.2f), %.2f m from its owner\n", beacon[0], beacon[1], beacon[2],
+				distance(beacon, owner));
+		CHECK(distance(beacon, owner) < 1.5f);
+		m->ticks(2);
+		REQUIRE(m->row(alpha.slot()) != nullptr);
+		const uint8_t squad = m->row(alpha.slot())->squad;
+		squad_request(*m, charlie, net::SquadOp::Leave);
+		REQUIRE(m->row(charlie.slot())->squad == 0);
+		m->ticks(1);
+		charlie.spawn_request(1, net::kSpawnChoiceBeacon);
+		m->ticks(3);
+		CHECK_FALSE(is_alive(m->state(charlie.slot())));
+		CHECK(m->rules().stats().refused[size_t(host::SpawnRefusal::SquadMate)] == 2u);
+		bravo.spawn_request(1, net::kSpawnChoiceBeacon);
+		m->ticks(3);
+		CHECK_FALSE(is_alive(m->state(bravo.slot())));
+		CHECK(m->rules().stats().refused[size_t(host::SpawnRefusal::SquadMate)] == 3u);
+		squad_request(*m, charlie, net::SquadOp::Join, squad);
+		REQUIRE(m->row(charlie.slot())->squad == squad);
+		m->ticks(1);
+		charlie.spawn_request(1, net::kSpawnChoiceBeacon);
+		REQUIRE(m->until([&] { return is_alive(m->state(charlie.slot())); }, 10));
+		REQUIRE(charlie.spawned.size() == 1u);
+		const sim::Vec3 deployed = charlie.spawned.back().state.position;
+		std::printf("beacon: charlie deployed at (%.2f %.2f %.2f), %.2f m from the beacon\n", deployed[0], deployed[1],
+				deployed[2], distance(deployed, beacon));
+		CHECK(distance(deployed, beacon) <= 1.5f);
+		CHECK(m->rules().stats().beacon_spawns == 1u);
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+}

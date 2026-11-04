@@ -7,6 +7,7 @@
 #include "bf3/core/gameplay/weapon_def.h"
 #include "bf3/core/gameplay/weapon_switching.h"
 #include "bf3/core/result.h"
+#include "bf3/host/gadgets.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/lag_comp.h"
 #include "bf3/host/level_load.h"
@@ -17,6 +18,7 @@
 #include "bf3/sim/soldier_state.h"
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/ballistics.h"
+#include "bf3/sim/weapons/gadgets.h"
 #include "bf3/sim/weapons/mechanics_tuning.h"
 #include "bf3/sim/weapons/surface_materials.h"
 #include "bf3/sim/weapons/weapon_sim.h"
@@ -135,6 +137,8 @@ struct GunplayLevel {
 	core::gameplay::SpecializationTable specializations;
 	std::vector<std::vector<sim::weapons::WeaponSimDef>> variants;
 	size_t variant_resolves = 0;
+	std::vector<sim::weapons::GadgetDef> gadgets;
+	std::vector<sim::weapons::AmmoPickupDef> ammo_pickups;
 	core::gameplay::WeaponSwitching switching;
 	float sprint_recover_seconds = 0.12f;
 	float max_health = 100.0f;
@@ -209,6 +213,10 @@ public:
 	core::gameplay::SpecializationEffects effects(uint8_t p_slot) const;
 	float received_damage(uint8_t p_victim, const sim::weapons::DamageEvent &p_event) const;
 	bool armed(uint8_t p_slot) const;
+	std::span<const sim::weapons::Deployable> deployables() const;
+	uint64_t deployables_revision() const;
+	const GadgetStats &gadget_stats() const;
+	std::optional<sim::Vec3> squad_beacon(uint8_t p_slot, uint8_t p_team) const;
 	uint8_t team(uint8_t p_slot) const;
 	uint8_t kit(uint8_t p_slot) const;
 
