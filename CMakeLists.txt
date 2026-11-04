@@ -8,14 +8,27 @@ endif()
 option(OPENBF3_BUILD_GODOT "Build the GDExtension (src/bf3_godot, needs godot-cpp)" ON)
 option(OPENBF3_BUILD_TESTS "Build the doctest executables (tests/)" ON)
 option(OPENBF3_BUILD_CHECKS "Compile the headless checks, demos and self-tests into the GDExtension" ON)
-set(OPENBF3_ENGINE_API "${CMAKE_SOURCE_DIR}/engine-api/4.8.dev7.c971f93e7" CACHE PATH
+set(openbf3_engine_api_pin "${CMAKE_SOURCE_DIR}/engine-api/4.8.beta2.cafc17a19")
+set(openbf3_godot_exe_name Godot_v4.8-beta2_win64_console.exe)
+string(FIND "${OPENBF3_ENGINE_API}" "${CMAKE_SOURCE_DIR}/engine-api/" openbf3_engine_api_in_tree)
+if(openbf3_engine_api_in_tree EQUAL 0 AND NOT OPENBF3_ENGINE_API STREQUAL openbf3_engine_api_pin)
+    message(STATUS "OPENBF3_ENGINE_API: ${OPENBF3_ENGINE_API} is not the pinned dump, using ${openbf3_engine_api_pin}")
+    unset(OPENBF3_ENGINE_API CACHE)
+endif()
+set(OPENBF3_ENGINE_API "${openbf3_engine_api_pin}" CACHE PATH
     "Folder with extension_api.json + gdextension_interface.json dumped from the exact Godot build")
 set(OPENBF3_GODOT_PROJECT "${CMAKE_SOURCE_DIR}/bf3-opensource" CACHE PATH
     "Godot project; the extension DLL is written to its bin/ folder")
 set(OPENBF3_GODOT_SERVER_PROJECT "${CMAKE_SOURCE_DIR}/bf3-opensource-server" CACHE PATH
     "Godot project of the dedicated server; the server extension DLL is written to its bin/ folder")
 if(OPENBF3_BUILD_GODOT)
-    find_program(OPENBF3_GODOT_EXE NAMES Godot_v4.8-dev7_win64_console.exe
+    get_filename_component(openbf3_cached_godot_name "${OPENBF3_GODOT_EXE}" NAME)
+    if(openbf3_cached_godot_name MATCHES "^Godot_v.*_win64_console\\.exe$"
+        AND NOT openbf3_cached_godot_name STREQUAL openbf3_godot_exe_name)
+        message(STATUS "OPENBF3_GODOT_EXE: ${OPENBF3_GODOT_EXE} is not ${openbf3_godot_exe_name}, searching again")
+        unset(OPENBF3_GODOT_EXE CACHE)
+    endif()
+    find_program(OPENBF3_GODOT_EXE NAMES ${openbf3_godot_exe_name}
         HINTS "${CMAKE_SOURCE_DIR}/.." "${CMAKE_SOURCE_DIR}/../.." NO_DEFAULT_PATH
         DOC "Godot console executable for the headless godot.* ctest rows")
 endif()

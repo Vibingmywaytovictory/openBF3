@@ -2,8 +2,8 @@
 setlocal EnableDelayedExpansion
 if /i "%~1"=="--help" goto help
 set "ROOT=%~dp0.."
-if "%OPENBF3_GODOT%"=="" for %%G in ("%ROOT%\..\Godot_v4.8-dev7_win64_console.exe" "%ROOT%\..\..\Godot_v4.8-dev7_win64_console.exe") do if not defined OPENBF3_GODOT if exist "%%~G" set "OPENBF3_GODOT=%%~G"
-if "%OPENBF3_GODOT%"=="" set "OPENBF3_GODOT=%ROOT%\..\Godot_v4.8-dev7_win64_console.exe"
+if "%OPENBF3_GODOT%"=="" for %%G in ("%ROOT%\..\Godot_v4.8-beta2_win64_console.exe" "%ROOT%\..\..\Godot_v4.8-beta2_win64_console.exe") do if not defined OPENBF3_GODOT if exist "%%~G" set "OPENBF3_GODOT=%%~G"
+if "%OPENBF3_GODOT%"=="" set "OPENBF3_GODOT=%ROOT%\..\Godot_v4.8-beta2_win64_console.exe"
 if not exist "%OPENBF3_GODOT%" (
     echo server.cmd: Godot not found at "%OPENBF3_GODOT%" ^(set OPENBF3_GODOT^)
     exit /b 2
