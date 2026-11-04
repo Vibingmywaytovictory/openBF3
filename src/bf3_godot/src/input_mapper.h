@@ -197,7 +197,7 @@ private:
 	} weapon_;
 
 public:
-	enum class TdmAction : uint8_t { Gadget = 0, Scoreboard, Kit1, Kit2, Kit3, Kit4, Count };
+	enum class TdmAction : uint8_t { Gadget = 0, Scoreboard, Kit1, Kit2, Kit3, Kit4, WeaponLight, Count };
 	static constexpr size_t kTdmActionCount = size_t(TdmAction::Count);
 	static const char *tdm_action_name(TdmAction p_action);
 	void enable_tdm(bool p_on);
@@ -206,6 +206,7 @@ public:
 	bool spawn_screen_up() const { return tdm_.spawn_screen; }
 	bool scoreboard_held() const;
 	int take_kit();
+	bool weapon_light() const { return tdm_.weapon_light; }
 
 	void script_press(TdmAction p_action);
 	void script_hold(TdmAction p_action, bool p_held);
@@ -219,6 +220,7 @@ private:
 		bool scoreboard_scripted = false;
 		int kit = -1;
 		uint64_t consumed_clicks = 0;
+		bool weapon_light = true;
 	} tdm_;
 };
 

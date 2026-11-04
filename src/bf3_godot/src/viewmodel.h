@@ -109,6 +109,8 @@ public:
 	const std::vector<bf3::anim::Xform> &model() const { return model_; }
 	float look_scale() const { return ads_frame_.look_scale; }
 	void set_hip_fov(float p_hip_fov_deg) { hip_fov_deg_ = p_hip_fov_deg; }
+	void set_weapon_light(bool p_on) { weapon_light_ = p_on; }
+	void set_shadow_quality(uint8_t p_quality) { shadow_quality_ = p_quality; }
 	float world_fov() const { return ads_frame_.world_fov; }
 
 	float applied_weapon_fov() const;
@@ -137,6 +139,7 @@ private:
 			bool hip = true, zoom = true;
 			bool skinned = false;
 			bool scope = false;
+			bool light_toggle = false;
 			std::string name;
 		};
 		std::vector<Attachment> attachments;
@@ -144,6 +147,7 @@ private:
 			godot::SpotLight3D *node = nullptr;
 			int32_t bone = -1;
 			godot::Transform3D xform;
+			const bf3::core::level::SpotLight *light = nullptr;
 		};
 		std::vector<Light> lights;
 	};
@@ -171,6 +175,8 @@ private:
 	std::vector<bf3::anim::Xform> model_;
 	float viewmodel_fov_ = -1;
 	float hip_fov_deg_ = 0.0f;
+	bool weapon_light_ = true;
+	uint8_t shadow_quality_ = 0;
 	double last_present_us_ = 0;
 };
 

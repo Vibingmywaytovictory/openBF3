@@ -52,6 +52,7 @@ public:
 	size_t missed_inputs() const { return missed_inputs_; }
 	void begin_level();
 	float hip_fov_deg() const { return level_hip_fov_deg_; }
+	uint8_t shadow_quality() const { return shadow_quality_; }
 	bf3::core::ui::ScreenAdjustFractions safe_area() const { return safe_area_; }
 
 private:
@@ -66,6 +67,7 @@ private:
 	core::ui::VideoEffects video_shown_;
 	size_t missed_inputs_ = 0;
 	float level_hip_fov_deg_ = 70.0f;
+	uint8_t shadow_quality_ = 0;
 	bf3::core::ui::ScreenAdjustFractions safe_area_;
 };
 

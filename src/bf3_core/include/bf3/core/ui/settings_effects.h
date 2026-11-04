@@ -40,6 +40,7 @@ inline constexpr ActionConcept kActionConcepts[] = {
 	{ "bf3_grenade", "infantry", "ConceptThrowGrenade", false },
 	{ "bf3_knife", "infantry", "ConceptMeleeAttack", false },
 	{ "bf3_fire_mode", "infantry", "ConceptCycleFireMode", false },
+	{ "bf3_weapon_light", "infantry", "ConceptToggleWeaponLight", false },
 	{ "bf3_scoreboard", "default", "ConceptScoreboard", false },
 };
 
@@ -58,6 +59,7 @@ inline constexpr std::string_view kFullscreenOption = "FullscreenEnabled";
 inline constexpr std::string_view kMonitorOption = "FullscreenScreen";
 inline constexpr std::string_view kVSyncOption = "VSync";
 inline constexpr std::string_view kFieldOfViewOption = "FieldOfView";
+inline constexpr std::string_view kShadowQualityOption = "ShadowQuality";
 inline constexpr std::string_view kSafeAreaWidthOption = "ScreenSafeAreaWidth";
 inline constexpr std::string_view kSafeAreaHeightOption = "ScreenSafeAreaHeight";
 
@@ -78,6 +80,7 @@ struct SettingsEffects {
 	uint32_t stereo_mode = 0;
 	float look_scale = 1.0f;
 	float hip_fov_deg = 70.0f;
+	uint8_t shadow_quality = 0;
 	double safe_width = 0.95;
 	double safe_height = 0.95;
 	bool invert_look = false;

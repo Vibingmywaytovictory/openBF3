@@ -512,6 +512,7 @@ void read_attachments(const core::EbxLibrary &p_lib, const core::EbxInstance &p_
 				a.transform = object.transform;
 				a.hip = mesh == object.mesh_1p;
 				a.zoom = mesh == object.mesh_1p_zoom && !(socket.hide_by_zoom_transition && zoom_mesh_transition);
+				a.light_toggle = socket.hide_by_light_toggle;
 				a.part.mesh = mesh;
 				r_out.push_back(std::move(a));
 			}

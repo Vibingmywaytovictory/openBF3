@@ -138,6 +138,7 @@ struct ViewmodelAttachment {
 	bool hip = true;
 	bool zoom = true;
 	bool skinned = false;
+	bool light_toggle = false;
 	ViewmodelPart part;
 	std::vector<ViewmodelSlotLook> looks;
 };

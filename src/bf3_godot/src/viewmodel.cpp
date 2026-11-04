@@ -320,7 +320,7 @@ SpotLight3D *make_weapon_light(
 	node->set_param(Light3D::PARAM_RANGE, l.radius);
 	node->set_param(Light3D::PARAM_SPOT_ANGLE, bf3::render::spot_light_half_angle_deg(l));
 	node->set_param(Light3D::PARAM_SPECULAR, l.specular ? 1.0f : 0.0f);
-	node->set_shadow(l.cast_shadows);
+	node->set_shadow(false);
 	if (!l.texture.empty()) {
 		if (const Ref<Texture2D> t = r_textures.find(l.texture, bf3::render::TextureRole::Color); t.is_valid()) {
 			node->set_projector(t);
@@ -435,6 +435,7 @@ void Bf3Viewmodel::add_item_nodes(const bf3::render::ViewmodelSet &p_set) {
 			na.hip = a.hip;
 			na.zoom = a.zoom;
 			na.skinned = a.skinned;
+			na.light_toggle = a.light_toggle;
 			na.name = a.socket_unlock + " " + a.part.mesh;
 			na.scope = bf3::render::viewmodel_scope_part(it, a);
 			if (a.skinned) {
@@ -444,8 +445,8 @@ void Bf3Viewmodel::add_item_nodes(const bf3::render::ViewmodelSet &p_set) {
 		}
 		for (const bf3::render::ViewmodelLight &l : it.lights) {
 			if (l.rig_bone >= 0) {
-				n.lights.push_back(
-						{ make_weapon_light(skeleton_, l.socket, textures), l.rig_bone, to_godot(l.socket.transform) });
+				n.lights.push_back({ make_weapon_light(skeleton_, l.socket, textures), l.rig_bone,
+						to_godot(l.socket.transform), &l.socket.light });
 			}
 		}
 	}
@@ -590,15 +591,16 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 	shown.weapon->set_visible(!scope_only_);
 	for (const ItemNodes::Attachment &a : shown.attachments) {
 		const bool on = (zoom_mesh_ ? a.zoom : a.hip) && (!scope_only_ || a.scope) &&
-				(a.skinned || (a.bone >= 0 && size_t(a.bone) < model_.size()));
+				(weapon_light_ || !a.light_toggle) && (a.skinned || (a.bone >= 0 && size_t(a.bone) < model_.size()));
 		a.mesh->set_visible(on);
 		if (on && !a.skinned) {
 			a.mesh->set_transform(xform_to_godot(model_[size_t(a.bone)]) * a.xform);
 		}
 	}
 	for (const ItemNodes::Light &l : shown.lights) {
-		const bool on = size_t(l.bone) < model_.size();
+		const bool on = weapon_light_ && size_t(l.bone) < model_.size();
 		l.node->set_visible(on);
+		l.node->set_shadow(on && bf3::core::level::spot_light_shadows(*l.light, shadow_quality_));
 		if (on) {
 			l.node->set_transform(xform_to_godot(model_[size_t(l.bone)]) * l.xform);
 		}

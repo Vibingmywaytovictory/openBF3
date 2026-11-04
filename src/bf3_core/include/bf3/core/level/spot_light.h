@@ -26,6 +26,7 @@ struct SpotLight {
 	float ortho_width = 0.0f;
 	float ortho_height = 0.0f;
 	bool cast_shadows = false;
+	uint8_t cast_shadows_min_level = 0;
 	bool specular = false;
 	std::string texture;
 	LevelTransform local;
@@ -36,4 +37,9 @@ std::optional<Vec3> ebx_vec3(const EbxInstance &p_instance, std::string_view p_f
 
 Result<SpotLight> read_spot_light(const EbxResolver &p_db, const EbxInstance &p_entity);
 
+inline constexpr uint8_t kQualityLevels = 4;
+
+inline bool spot_light_shadows(const SpotLight &p_light, uint8_t p_quality) {
+	return p_light.cast_shadows && p_quality >= p_light.cast_shadows_min_level;
+}
 }

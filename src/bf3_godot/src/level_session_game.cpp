@@ -1266,8 +1266,12 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 	g.prev_view_valid = true;
 	if (own_vm != nullptr && g.settings != nullptr) {
 		own_vm->set_hip_fov(g.settings->hip_fov_deg());
+		own_vm->set_shadow_quality(g.settings->shadow_quality());
 	}
 	float zoom_look = 1.0f;
+	if (own_vm != nullptr) {
+		own_vm->set_weapon_light(mapper_.weapon_light());
+	}
 	if (own_vm != nullptr && camera != nullptr) {
 		const bool show = g.alive && g.weapon.valid && !free_camera;
 		if (show) {

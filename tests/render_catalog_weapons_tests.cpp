@@ -888,6 +888,16 @@ TEST_SUITE("render-catalog-accessories-1p") {
 		CHECK(light.socket.socket_unlock == "weapons/m416/u_m416_flashlight");
 		CHECK(light.socket.light.intensity == 20.0f);
 		CHECK((*m416_set)->texture(light.socket.light.texture) != nullptr);
+		CHECK(light.socket.light.cast_shadows_min_level == 3);
+		CHECK_FALSE(core::level::spot_light_shadows(light.socket.light, 2));
+		CHECK(core::level::spot_light_shadows(light.socket.light, 3));
+		std::vector<std::string> toggled;
+		for (const render::ViewmodelAttachment &a : c.attachments) {
+			if (a.light_toggle) {
+				toggled.push_back(core::to_lower_ascii(a.part.mesh));
+			}
+		}
+		CHECK(toggled == std::vector<std::string>{ "weapons/accessories/flashlight/flashlightbeam_1p_mesh" });
 		CHECK(c.weapon.variation_hash == 1200125952u);
 		CHECK(c.weapon.materials.variation_hash == 1200125952u);
 		std::string camo;

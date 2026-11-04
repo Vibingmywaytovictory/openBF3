@@ -912,7 +912,8 @@ TEST_SUITE("ui-options") {
 				"bf3_forward=IDK_W bf3_back=IDK_S bf3_left=IDK_A bf3_right=IDK_D bf3_sprint=IDK_LeftShift "
 				"bf3_jump=IDK_Space bf3_crouch=IDK_X bf3_crouch_hold=IDK_LeftCtrl bf3_prone=IDK_Z "
 				"bf3_fire=IDB_Button_0 bf3_ads=IDB_Button_1 bf3_reload=IDK_R bf3_primary=IDK_1 bf3_sidearm=IDK_2 "
-				"bf3_gadget=IDK_3 bf3_grenade=IDK_G bf3_knife=IDK_F bf3_fire_mode=IDK_V bf3_scoreboard=IDK_Tab ");
+				"bf3_gadget=IDK_3 bf3_grenade=IDK_G bf3_knife=IDK_F bf3_fire_mode=IDK_V bf3_weapon_light=IDK_T "
+				"bf3_scoreboard=IDK_Tab ");
 		Result<OptionsCatalog> c = read_options_catalog(*l->lib);
 		REQUIRE(c.ok());
 		for (std::string_view id : { kVolumeOption, kMusicVolumeOption, kDialogueVolumeOption, kMouseSensitivityOption,
@@ -933,6 +934,8 @@ TEST_SUITE("ui-options") {
 			CHECK(e.bus_gains[b] == (voice_or_music ? 0.7f : 1.0f));
 		}
 		CHECK(e.look_scale == 1.0f);
+		CHECK(c->option(kShadowQualityOption) != nullptr);
+		CHECK(e.shadow_quality == 2);
 		CHECK_FALSE(e.invert_look);
 		CHECK(e.hold_to_zoom);
 		CHECK(e.video == VideoEffects{});

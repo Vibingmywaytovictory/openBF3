@@ -732,6 +732,7 @@ constexpr TdmActionKey kTdmActions[] = {
 	{ InputMapper::TdmAction::Kit2, "bf3_kit_2", KEY_2, KEY_NONE },
 	{ InputMapper::TdmAction::Kit3, "bf3_kit_3", KEY_3, KEY_NONE },
 	{ InputMapper::TdmAction::Kit4, "bf3_kit_4", KEY_4, KEY_NONE },
+	{ InputMapper::TdmAction::WeaponLight, "bf3_weapon_light", KEY_T, KEY_NONE },
 };
 static_assert(sizeof(kTdmActions) / sizeof(kTdmActions[0]) == InputMapper::kTdmActionCount);
 
@@ -808,6 +809,11 @@ void InputMapper::script_press(TdmAction p_action) {
 				select_weapon(2);
 			}
 			break;
+		case TdmAction::WeaponLight:
+			if (!tdm_.spawn_screen) {
+				tdm_.weapon_light = !tdm_.weapon_light;
+			}
+			break;
 		default:
 			break;
 	}
@@ -844,6 +850,9 @@ bool InputMapper::tdm_handle_event(const Ref<InputEvent> &p_event) {
 	}
 	if (captured_ && p_event->is_action_pressed(tdm_action_name(TdmAction::Gadget), false, false)) {
 		script_press(TdmAction::Gadget);
+	}
+	if (captured_ && p_event->is_action_pressed(tdm_action_name(TdmAction::WeaponLight), false, false)) {
+		script_press(TdmAction::WeaponLight);
 	}
 	return false;
 }

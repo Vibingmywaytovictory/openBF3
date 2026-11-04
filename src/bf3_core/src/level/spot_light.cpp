@@ -2,6 +2,7 @@
 
 #include "bf3/core/util/finite.h"
 
+#include <algorithm>
 #include <array>
 #include <utility>
 
@@ -15,6 +16,8 @@ constexpr std::array<std::pair<std::string_view, SpotLightShape>, 3> kShapes{ {
 		{ "SpotLightShape_Ortho", SpotLightShape::Ortho },
 } };
 
+constexpr std::array<std::string_view, kQualityLevels> kQualityLevelNames{ "QualityLevel_Low", "QualityLevel_Medium",
+	"QualityLevel_High", "QualityLevel_Ultra" };
 }
 
 std::optional<float> ebx_f32(const EbxInstance &p_instance, std::string_view p_field) {
@@ -72,6 +75,14 @@ Result<SpotLight> read_spot_light(const EbxResolver &p_db, const EbxInstance &p_
 	}
 	const std::optional<EbxValue> shadows = p_entity.get("CastShadowsEnable");
 	out.cast_shadows = shadows && shadows->as_bool().value_or(false);
+	if (const std::optional<EbxValue> level = p_entity.get("CastShadowsMinLevel")) {
+		const std::optional<std::string_view> name = level->enum_name();
+		const auto it = std::find(kQualityLevelNames.begin(), kQualityLevelNames.end(), name.value_or(""));
+		if (it == kQualityLevelNames.end()) {
+			return make_error(where + " has an unknown CastShadowsMinLevel " + std::string(name.value_or("(none)")));
+		}
+		out.cast_shadows_min_level = uint8_t(it - kQualityLevelNames.begin());
+	}
 	const std::optional<EbxValue> specular = p_entity.get("SpecularEnable");
 	out.specular = specular && specular->as_bool().value_or(false);
 	if (const std::optional<EbxInstance> texture = p_db.follow(p_entity.data(), "Texture")) {
