@@ -6,8 +6,10 @@
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/loadout.h"
+#include "bf3/host/spawn_effects.h"
 #include "bf3/host/squads.h"
 #include "bf3/net/protocol.h"
+#include "bf3/sim/weapons/weapon_install.h"
 
 #include <array>
 #include <cmath>
@@ -54,14 +56,7 @@ host::LoadoutChoice pick(const host::LoadoutItem &p_item, const std::vector<std:
 	return c;
 }
 
-uint32_t specialization_id(const host::GunplayLevel &p_level, const std::string &p_name) {
-	for (const core::gameplay::KitSpecialization &e : p_level.specializations.entries) {
-		if (e.unlock == "persistence/unlocks/soldiers/specializations/" + p_name) {
-			return e.identifier;
-		}
-	}
-	return 0;
-}
+using tdm::specialization_id;
 
 host::LoadoutChoice specialization(uint32_t p_identifier) {
 	host::LoadoutChoice c;
@@ -304,6 +299,64 @@ TEST_SUITE("host-gunplay-loadout") {
 		CHECK(g->received_damage(4, blast(4, sw::DamageKind::Blast)) == 40.0f);
 		g->clear(3);
 		CHECK(g->received_damage(2, blast(2, sw::DamageKind::Blast)) == 40.0f);
+		tdm::check_install_unchanged(*level);
+	}
+
+	TEST_CASE("specializations: Explosives doubles the explosive and rocket magazines, Grenades adds three 40 mm "
+			  "grenades to an underslung launcher") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		using core::gameplay::SpecializationTarget;
+		const uint32_t explosives = specialization_id(gl, "explosiveboostl1");
+		const uint32_t grenades = specialization_id(gl, "grenadeboostl1");
+		REQUIRE(explosives != 0);
+		REQUIRE(grenades != 0);
+		CHECK(gl.specializations.find(explosives)->effects ==
+				std::vector<std::pair<SpecializationTarget, float>>{ { SpecializationTarget::Explosives, 2.0f } });
+		const core::gameplay::SpecializationEffects plain = gl.specializations.defaults;
+		const core::gameplay::SpecializationEffects boom =
+				core::gameplay::specialization_effects(gl.specializations, explosives, {});
+		const core::gameplay::SpecializationEffects nades =
+				core::gameplay::specialization_effects(gl.specializations, grenades, {});
+		core::Result<sw::InstallWeapons> w = sw::open_install_weapons(level->install);
+		REQUIRE_MESSAGE(w.ok(), (w.ok() ? std::string() : w.error().message));
+		const auto sim_def = [&](const std::string &p_variant) {
+			core::Result<core::gameplay::WeaponDef> d = w->catalog->resolve(p_variant);
+			REQUIRE_MESSAGE(d.ok(), (p_variant + ": " + (d.ok() ? std::string() : d.error().message)));
+			core::Result<sw::WeaponSimDef> s = sw::make_weapon_sim_def(*d, *w->materials);
+			REQUIRE_MESSAGE(s.ok(), (p_variant + ": " + (s.ok() ? std::string() : s.error().message)));
+			return *s;
+		};
+		const size_t gadget = size_t(core::gameplay::WeaponSlot::Gadget1);
+		for (const char *v : { "weapons/gadgets/c4/u_c4", "weapons/gadgets/claymore/u_claymore",
+					 "weapons/gadgets/m15/u_m15", "weapons/smaw/u_smaw", "weapons/rpg7/u_rpg7",
+					 "weapons/fgm148/u_fgm148", "weapons/fim92a/u_fim92", "weapons/sa18igla/u_sa18igla" }) {
+			const sw::WeaponSimDef d = sim_def(v);
+			CAPTURE(v);
+			CAPTURE(d.weapon_class);
+			REQUIRE(d.magazines > 0);
+			CHECK(host::spawn_magazines(d, gadget, plain) == d.magazines);
+			CHECK(host::spawn_magazines(d, gadget, boom) == 2 * d.magazines);
+			CHECK(host::spawn_magazines(d, gadget, nades) == d.magazines);
+			std::printf("Explosives: %s (%s) %d -> %d magazines\n", v, d.weapon_class.c_str(), d.magazines,
+					host::spawn_magazines(d, gadget, boom));
+		}
+		for (const char *v : { "weapons/gadgets/m320/u_m320_he", "weapons/m16a4/u_m16a4_m320_he",
+					 "weapons/aek971/u_aek971_m320_shg" }) {
+			const sw::WeaponSimDef d = sim_def(v);
+			CAPTURE(v);
+			CHECK(d.weapon_class == "wcUgl");
+			CHECK(host::spawn_magazines(d, gadget, plain) == d.magazines);
+			CHECK(host::spawn_magazines(d, gadget, nades) == d.magazines + 3);
+			CHECK(host::spawn_magazines(d, gadget, boom) == d.magazines);
+			std::printf("Grenades: %s %d -> %d magazines\n", v, d.magazines, host::spawn_magazines(d, gadget, nades));
+		}
+		const sw::WeaponSimDef m16 = sim_def("weapons/m16a4/u_m16a4");
+		CHECK(host::spawn_magazines(m16, 0, boom) == m16.magazines);
+		CHECK(host::spawn_magazines(m16, 0, nades) == m16.magazines);
 		tdm::check_install_unchanged(*level);
 	}
 }

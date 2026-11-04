@@ -892,6 +892,7 @@ void serialize(A &r_a, M &r_m) {
 				def, kWireDefBits, [](uint16_t p_def) { return p_def < kMaxWireDefs ? uint32_t(p_def) : kNoWireDef; },
 				[](uint32_t p_code) { return p_code == kNoWireDef ? sw::kNoWeapon : uint16_t(p_code); });
 	}
+	r_a.bits(r_m.specializations, 32);
 	r_a.check("slot out of range", [&] { return r_m.slot < kMaxSlots; });
 	r_a.check("state field out of range", [&] { return state; });
 	r_a.check("kit or team out of range", [&] { return r_m.kit < kMaxKits && r_m.team <= kMaxTeam; });

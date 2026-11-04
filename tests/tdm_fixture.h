@@ -373,6 +373,15 @@ inline void check_install_unchanged(TdmLevel &r_level) {
 	std::filesystem::remove_all(r_level.cache_root, ec);
 }
 
+inline uint32_t specialization_id(const host::GunplayLevel &p_level, const std::string &p_name) {
+	for (const core::gameplay::KitSpecialization &e : p_level.specializations.entries) {
+		if (e.unlock == "persistence/unlocks/soldiers/specializations/" + p_name) {
+			return e.identifier;
+		}
+	}
+	return 0;
+}
+
 inline ScriptedPeer::ScriptedPeer(host::GameServer &r_server, uint32_t p_peer, std::string p_name) :
 		server_(&r_server), peer_(p_peer), name_(std::move(p_name)) {
 	server_->on_connect(peer_);

@@ -263,3 +263,8 @@ target_sources(bf3_host PRIVATE
     src/server_gadgets.h
     src/server_gadgets.cpp
 )
+
+target_sources(bf3_host PRIVATE
+    include/bf3/host/spawn_effects.h
+    src/spawn_effects.cpp
+)

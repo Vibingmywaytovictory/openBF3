@@ -26,9 +26,9 @@ namespace tt = bf3::test::tdm;
 
 namespace {
 
-constexpr uint64_t kTdmStreamHash = 0x57db81b4a0637273ull;
+constexpr uint64_t kTdmStreamHash = 0x2d774dc2588171b0ull;
 constexpr uint64_t kTdmStateHash = 0x2220c5539e632193ull;
-constexpr uint64_t kDevStreamHash = 0x35563572825090c5ull;
+constexpr uint64_t kDevStreamHash = 0x796c36d9b010dfd3ull;
 constexpr uint64_t kDevStateHash = 0x0c1c1cbd3540140bull;
 
 struct StreamRecorder {

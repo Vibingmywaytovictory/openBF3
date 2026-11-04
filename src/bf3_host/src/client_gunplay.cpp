@@ -1,6 +1,7 @@
 #include "client_gunplay.h"
 
 #include "bf3/host/gunplay.h"
+#include "bf3/host/spawn_effects.h"
 
 #include <algorithm>
 #include <cmath>
@@ -238,6 +239,7 @@ void ClientGunplay::spawned(const net::Spawned &p_spawned, bool p_have_own, uint
 	l.kit = p_spawned.kit;
 	l.team = p_spawned.team;
 	l.defs = p_spawned.defs;
+	l.specializations = p_spawned.specializations;
 	if (p_have_own && p_spawned.state.life == p_own_life) {
 		kit_ = p_spawned.kit;
 		team_ = p_spawned.team;
@@ -416,6 +418,13 @@ uint8_t ClientGunplay::gear_variant(uint8_t p_slot, uint16_t p_def) const {
 	return p_def < table_->variants.size() && v <= table_->variants[p_def].size() ? v : uint8_t(0);
 }
 
+core::gameplay::SpecializationEffects ClientGunplay::spawn_effects(const Life &p_life) const {
+	if (inputs_ == nullptr || inputs_->specializations == nullptr) {
+		return {};
+	}
+	return core::gameplay::specialization_effects_of(*inputs_->specializations, p_life.specializations);
+}
+
 void ClientGunplay::weapons_spawn(const sim::SoldierState &p_s) {
 	if (!on_) {
 		return;
@@ -444,6 +453,7 @@ void ClientGunplay::weapons_spawn(const sim::SoldierState &p_s) {
 		l.variants = {};
 		l.variants[kLoadoutAccessoryWeapon] = gear_variant(own_slot_, defs[kLoadoutAccessoryWeapon]);
 		if (sim::weapons::spawn_soldier_weapons(e.state, *table_, defs, k.active, t, l.variants).ok()) {
+			apply_spawn_effects(e.state, *table_, spawn_effects(l));
 			e.tick = t;
 			e.spawn_tick = t;
 			lane_->put(e);

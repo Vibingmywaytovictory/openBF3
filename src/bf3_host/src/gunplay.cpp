@@ -13,6 +13,7 @@
 #include "bf3/core/util/fnv.h"
 #include "bf3/core/util/splitmix64.h"
 #include "bf3/core/util/text.h"
+#include "bf3/host/spawn_effects.h"
 #include "bf3/host/squads.h"
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/weapons/damage.h"
@@ -434,6 +435,7 @@ struct Gunplay::Impl {
 		std::array<AckEntry, kAckRing> acks{};
 		std::array<std::array<std::optional<LoadoutChoice>, kKitCount>, kKitTeams> choices{};
 		Loadout loadout;
+		uint32_t specializations = 0;
 	};
 	struct TickDeath {
 		net::DeathEvent event;
@@ -535,9 +537,13 @@ void Gunplay::set_squads(const SquadTable *p_squads) {
 }
 
 gp::SpecializationEffects Gunplay::effects(uint8_t p_slot) const {
+	return gp::specialization_effects_of(impl_->level->specializations, specialization_mask(p_slot));
+}
+
+uint32_t Gunplay::specialization_mask(uint8_t p_slot) const {
 	const Impl &m = *impl_;
 	if (p_slot >= m.slots.size()) {
-		return m.level->specializations.defaults;
+		return 0;
 	}
 	std::vector<uint32_t> squad;
 	if (m.squads != nullptr && m.squads->squad_of(p_slot) != 0) {
@@ -547,7 +553,12 @@ gp::SpecializationEffects Gunplay::effects(uint8_t p_slot) const {
 			}
 		}
 	}
-	return gp::specialization_effects(m.level->specializations, m.slots[p_slot].loadout.choice.specialization, squad);
+	return gp::specialization_mask(m.level->specializations, m.slots[p_slot].loadout.choice.specialization, squad);
+}
+
+uint32_t Gunplay::spawn_specializations(uint8_t p_slot) const {
+	const Impl &m = *impl_;
+	return p_slot < m.slots.size() && m.slots[p_slot].armed ? m.slots[p_slot].specializations : 0u;
 }
 
 float Gunplay::received_damage(uint8_t p_victim, const sw::DamageEvent &p_event) const {
@@ -582,21 +593,9 @@ void Gunplay::on_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_team, uint32_t p
 	if (!sw::spawn_soldier_weapons(s.weapons, *m.table, s.loadout.defs, l.active, p_tick, s.loadout.variants).ok()) {
 		return;
 	}
-	const gp::SpecializationEffects fx = effects(p_slot);
-	for (const gp::WeaponSlot w : { gp::WeaponSlot::Primary, gp::WeaponSlot::Sidearm, gp::WeaponSlot::Grenade }) {
-		sw::WeaponSlotState &x = s.weapons.slots[size_t(w)];
-		if (x.def == sw::kNoWeapon) {
-			continue;
-		}
-		const sw::WeaponSimDef &d = m.table->def(x.def, x.variant);
-		if (d.unlimited_ammo) {
-			continue;
-		}
-		const int32_t magazines = w == gp::WeaponSlot::Grenade
-				? d.magazines + int32_t(fx[gp::SpecializationTarget::Grenades])
-				: gp::boosted_magazines(d.magazines, fx);
-		x.reserve = magazines * d.magazine_capacity;
-	}
+	s.specializations = specialization_mask(p_slot);
+	apply_spawn_effects(
+			s.weapons, *m.table, gp::specialization_effects_of(m.level->specializations, s.specializations));
 	m.gadgets->armed(p_slot, s.weapons);
 	s.armed = true;
 	s.spawn_tick = p_tick;

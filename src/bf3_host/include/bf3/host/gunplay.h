@@ -211,6 +211,8 @@ public:
 	void set_match_seed(uint64_t p_seed);
 	void set_squads(const SquadTable *p_squads);
 	core::gameplay::SpecializationEffects effects(uint8_t p_slot) const;
+	uint32_t specialization_mask(uint8_t p_slot) const;
+	uint32_t spawn_specializations(uint8_t p_slot) const;
 	float received_damage(uint8_t p_victim, const sim::weapons::DamageEvent &p_event) const;
 	bool armed(uint8_t p_slot) const;
 	std::span<const sim::weapons::Deployable> deployables() const;

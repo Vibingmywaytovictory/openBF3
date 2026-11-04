@@ -29,6 +29,7 @@ enum class SpecializationTarget : uint8_t {
 };
 
 inline constexpr size_t kSpecializationTargets = size_t(SpecializationTarget::Count);
+inline constexpr size_t kMaxSpecializationEntries = 32;
 
 std::string_view specialization_target_field(SpecializationTarget p_target);
 
@@ -58,6 +59,10 @@ Result<SpecializationTable> make_specialization_table(const SoldierDef &p_soldie
 
 SpecializationEffects specialization_effects(
 		const SpecializationTable &p_table, uint32_t p_own, std::span<const uint32_t> p_squad);
+
+uint32_t specialization_mask(const SpecializationTable &p_table, uint32_t p_own, std::span<const uint32_t> p_squad);
+
+SpecializationEffects specialization_effects_of(const SpecializationTable &p_table, uint32_t p_mask);
 
 int32_t boosted_magazines(int32_t p_magazines, const SpecializationEffects &p_effects);
 

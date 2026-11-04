@@ -113,6 +113,7 @@ private:
 		std::array<uint16_t, sim::weapons::kMaxWeaponSlots> defs = net::kNoSpawnDefs;
 		std::array<uint16_t, sim::weapons::kMaxWeaponSlots> armed = net::kNoSpawnDefs;
 		std::array<uint8_t, sim::weapons::kMaxWeaponSlots> variants{};
+		uint32_t specializations = 0;
 	};
 	static constexpr size_t kCommandViews = 256;
 	static constexpr size_t kLogLimit = size_t(1) << 20;
@@ -121,6 +122,7 @@ private:
 	bool wire_at(sim::Tick p_tick) const { return on_ && wire_valid_ && wire_tick_ == p_tick; }
 	bool put_wire(const sim::SoldierState &p_s, sim::Tick p_spawn_tick);
 	uint8_t gear_variant(uint8_t p_slot, uint16_t p_def) const;
+	core::gameplay::SpecializationEffects spawn_effects(const Life &p_life) const;
 
 	const ClientSessionConfig &config_;
 	ClientEvents &events_;

@@ -1,6 +1,7 @@
 #include "server_combat.h"
 
 #include "bf3/host/kits.h"
+#include "bf3/host/spawn_effects.h"
 
 #include <algorithm>
 #include <utility>
@@ -165,6 +166,10 @@ std::array<uint16_t, sim::weapons::kMaxWeaponSlots> Combat::spawned_defs(size_t 
 		return net::kNoSpawnDefs;
 	}
 	return gunplay_->loadout(uint8_t(p_slot)).defs;
+}
+
+uint32_t Combat::spawned_specializations(size_t p_slot) const {
+	return gunplay_ != nullptr ? gunplay_->spawn_specializations(uint8_t(p_slot)) : 0u;
 }
 
 std::optional<net::SoldierGear> Combat::gear(size_t p_slot) const {

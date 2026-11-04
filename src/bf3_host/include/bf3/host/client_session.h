@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/core/gameplay/specializations.h"
 #include "bf3/core/result.h"
 #include "bf3/host/level_load.h"
 #include "bf3/host/net_stats.h"
@@ -363,6 +364,7 @@ struct ClientGunplayInputs {
 	std::shared_ptr<const core::gameplay::CapsulePoseTable> capsules;
 	KitTable kits;
 	std::shared_ptr<const LoadoutCatalog> loadouts;
+	std::shared_ptr<const core::gameplay::SpecializationTable> specializations;
 	net::ShotQuantization shot_frame;
 
 	std::function<core::Result<sim::weapons::Mechanics>(const std::string &p_path)> load_mechanics;

@@ -4,6 +4,8 @@
 #include "bf3/host/client_session.h"
 #include "bf3/host/client_wiring.h"
 #include "bf3/host/game_server.h"
+#include "bf3/host/gunplay.h"
+#include "bf3/host/kits.h"
 #include "bf3/host/tdm_brain.h"
 #include "bf3/host/tdm_rules.h"
 #include "bf3/net/bit_stream.h"
@@ -19,6 +21,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <deque>
@@ -47,13 +50,13 @@ struct StreamHashes {
 	uint64_t stats = 0;
 };
 
-constexpr StreamHashes kAlpha{ 0xe79bb990cbf5c65bull, 0xf416d4f622f467e6ull, 0x3f24f1302942fb82ull,
+constexpr StreamHashes kAlpha{ 0x74c411a409d526f6ull, 0xf416d4f622f467e6ull, 0x3f24f1302942fb82ull,
 	0x9e79b4bef6e1116cull, 0x028c38532c255c38ull, 0x320c8103c211c28eull };
-constexpr StreamHashes kBravo{ 0x1eae8902b78fad8dull, 0x4ed2cdeb21a35e7full, 0xd538a1dd56c44484ull,
+constexpr StreamHashes kBravo{ 0x5806affc57efae26ull, 0x4ed2cdeb21a35e7full, 0xd538a1dd56c44484ull,
 	0xfcb7be65b29252feull, 0xb3dc37ab0b77a79full, 0xe3b534cc320f73e5ull };
-constexpr StreamHashes kCharlie{ 0x6c8fa3208d05a871ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull,
+constexpr StreamHashes kCharlie{ 0x73621232ac6f535eull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull,
 	0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0xd4bbb61a31c1220aull };
-constexpr StreamHashes kDelta{ 0xe515f1f20b271c45ull, 0x058351b12f8bb276ull, 0xbb797920590e895full,
+constexpr StreamHashes kDelta{ 0x9a1d5cef079ba3d2ull, 0x058351b12f8bb276ull, 0xbb797920590e895full,
 	0xccd97b8938eeaf83ull, 0xdff0ad8c528c54c9ull, 0x1dc383c71f3037bfull };
 
 constexpr uint32_t kTdmTicks = 1500;
@@ -965,6 +968,78 @@ TEST_SUITE("host-client-stream") {
 		CHECK(shared_shots > 20u);
 		CHECK(shared_impacts > 20u);
 		CHECK(differ == 0u);
+	}
+
+	host::GameServerConfig solo_tdm_config(const tt::TdmLevel &p_level, uint64_t p_seed) {
+		host::GameServerConfig cfg;
+		cfg.level = p_level.shared;
+		cfg.max_slots = 8;
+		cfg.game_build = kStreamGameBuild;
+		cfg.seed = p_seed;
+		cfg.gunplay.mechanics_cfg = OPENBF3_MECHANICS_CFG;
+		cfg.rules.mode = host::MatchRulesConfig::Mode::Tdm;
+		cfg.rules.deploy_screen = true;
+		cfg.rules.preround_override_s = 0.0f;
+		cfg.rules.min_players_override = 1;
+		return cfg;
+	}
+
+	TEST_CASE("specializations: a client predicts the spawn its Spawned names, the Ammo reserve with no weapon "
+			  "reconciliation") {
+		tt::TdmLevel *level = tt::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const uint32_t ammo = tt::specialization_id(*level->shared->gunplay, "ammoboostl1");
+		REQUIRE(ammo != 0);
+		host::GameServer server;
+		const core::Status st = server.init(solo_tdm_config(*level, 91));
+		REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
+
+		const uint8_t support = uint8_t(host::KitRole::Support);
+		Stream stream(server, level->shared);
+		StreamClient &a = stream.add("ammo", 1u, 0u, support, host::ClientSessionConfig{});
+		a.scripted = false;
+		int32_t spawn_reserve = -1, server_reserve = -1, plain = 0, boosted = 0;
+		uint32_t mask = 0;
+		uint32_t spawned_lives = 0;
+		stream.play(600, [&](sim::Tick p_tick) {
+			const host::PresentationFrame &f = *a.frame;
+			const bool alive = f.valid && (f.own_curr.flags & sim::soldier_flags::kAlive) != 0;
+			if (p_tick == 20u) {
+				net::LoadoutRequest q;
+				q.kit = support;
+				q.specialization = ammo;
+				a.loop.send_loadout_request(q);
+			}
+			if (!alive && p_tick >= 40u && p_tick % 30u == 0u) {
+				a.loop.send_spawn_request(support);
+			}
+			if (alive && f.own_curr.life > spawned_lives) {
+				spawned_lives = f.own_curr.life;
+				spawn_reserve = f.own_weapons_curr.slots[0].reserve;
+				const host::Gunplay *g = server.gunplay();
+				const uint8_t slot = a.loop.stats().slot;
+				const sim::weapons::WeaponSlotState &primary = g->weapons(slot).slots[0];
+				const sim::weapons::WeaponSimDef &d = g->table().def(primary.def, primary.variant);
+				mask = g->spawn_specializations(slot);
+				plain = d.magazines * d.magazine_capacity;
+				boosted = int32_t(std::lround(d.magazines * 1.5)) * d.magazine_capacity;
+				server_reserve = primary.reserve;
+			}
+		});
+		const host::ClientStats s = a.loop.stats();
+		std::printf(
+				"specializations: Ammo client spawned %llu time(s), predicted reserve %d, the server's %d (plain %d, "
+				"boosted %d), weapon reconciliations %llu, ring misses %llu\n",
+				(unsigned long long)s.spawns, spawn_reserve, server_reserve, plain, boosted,
+				(unsigned long long)s.weapon_reconciliations, (unsigned long long)s.weapon_ring_misses);
+		REQUIRE(s.spawns >= 1);
+		CHECK(mask != 0u);
+		CHECK(boosted > plain);
+		CHECK(server_reserve == boosted);
+		CHECK(spawn_reserve == boosted);
+		CHECK(s.weapon_reconciliations == 0);
 	}
 
 	TEST_CASE("host-client-stream: install unchanged") {

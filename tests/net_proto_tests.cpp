@@ -211,8 +211,8 @@ int decode_reencode(std::span<const uint8_t> p_bytes) {
 				return -1;
 			}
 			auto b = net::decode_spawned(net::encode_spawned(*a));
-			return b && b->slot == a->slot && b->spawn_index == a->spawn_index && b->state == a->state && b->kit == a->kit &&
-							b->team == a->team
+			return b && b->slot == a->slot && b->spawn_index == a->spawn_index && b->state == a->state &&
+							b->kit == a->kit && b->team == a->team && b->specializations == a->specializations
 					? 1
 					: 0;
 		}
@@ -701,7 +701,7 @@ TEST_SUITE("net-proto") {
 			s.defs = { 0, 1, sim::weapons::kNoWeapon, sim::weapons::kNoWeapon, sim::weapons::kNoWeapon,
 				sim::weapons::kNoWeapon, 254, 7 };
 			const std::vector<uint8_t> b = net::encode_spawned(s);
-			CHECK(b.size() == 1 + 1 + 4 + 77 + 2 + 9);
+			CHECK(b.size() == 1 + 1 + 4 + 77 + 2 + 9 + 4);
 			auto d = net::decode_spawned(b);
 			REQUIRE(d);
 			CHECK(d->slot == 5);
@@ -1125,11 +1125,13 @@ TEST_SUITE("net-proto") {
 				for (size_t i = 0; i < sim::weapons::kMaxWeaponSlots; ++i) {
 					w.write_bits(i == 0 ? 3u : 0xFFu, 8);
 				}
+				w.write_bits(0x5u, 32);
 			});
 		};
 		REQUIRE(net::decode_spawned(spawned(127, 2, 8, 50.0f)));
 		CHECK(net::decode_spawned(spawned(127, 2, 8, 50.0f))->defs[0] == 3);
 		CHECK(net::decode_spawned(spawned(127, 2, 8, 50.0f))->defs[1] == sim::weapons::kNoWeapon);
+		CHECK(net::decode_spawned(spawned(127, 2, 8, 50.0f))->specializations == 0x5u);
 		std::vector<uint8_t> no_defs = spawned(1, 0, 0, 50.0f);
 		no_defs.pop_back();
 		CHECK_FALSE(net::decode_spawned(no_defs));
@@ -2110,12 +2112,12 @@ void append_v2_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>>
 
 TEST_SUITE("net-proto") {
 	TEST_CASE("proto v2: version, message types and the bounds") {
-		CHECK(net::kProtocolVersion == 6);
+		CHECK(net::kProtocolVersion == 7);
 		for (const uint8_t t : { uint8_t(3), uint8_t(4), uint8_t(23), uint8_t(24) }) {
 			CHECK(net::peek_type(std::span<const uint8_t>(&t, 1)).has_value());
 		}
-		CHECK(net::Hello{}.protocol == 6);
-		CHECK(net::MatchInfo{}.protocol == 6);
+		CHECK(net::Hello{}.protocol == 7);
+		CHECK(net::MatchInfo{}.protocol == 7);
 	}
 
 	TEST_CASE("proto v2: MatchInfo, Spawned, KitSelect and the new Debug kinds round trip; out-of-range values are refused") {
@@ -2145,7 +2147,7 @@ TEST_SUITE("net-proto") {
 				s.kit = kit;
 				s.team = team;
 				const std::vector<uint8_t> b = net::encode_spawned(s);
-				CHECK(b.size() == 1 + 1 + 4 + 77 + 2 + 9);
+				CHECK(b.size() == 1 + 1 + 4 + 77 + 2 + 9 + 4);
 				auto d = net::decode_spawned(b);
 				CHECK(d.ok() == (kit < net::kMaxKits && team <= net::kMaxTeam));
 				if (d) {
@@ -3548,9 +3550,11 @@ TEST_SUITE("net-proto") {
 		for (const bool revived : { false, true }) {
 			net::Spawned sp{ 7, 3, sample_state(rng, 500) };
 			sp.revived = revived;
+			sp.specializations = revived ? 0x80000001u : 0x4000u;
 			auto d = net::decode_spawned(net::encode_spawned(sp));
 			REQUIRE(d);
 			CHECK(d->revived == revived);
+			CHECK(d->specializations == sp.specializations);
 		}
 	}
 
@@ -4225,7 +4229,7 @@ TEST_SUITE("net-proto") {
 		const std::vector<uint8_t> bytes = net::encode_kick(kick);
 		const std::optional<std::string> v3 = decode_kick_v3(bytes);
 		REQUIRE(v3.has_value());
-		CHECK(*v3 == "protocol 3 (server 6)");
+		CHECK(*v3 == "protocol 3 (server 7)");
 		auto v4 = net::decode_kick(bytes);
 		REQUIRE(v4);
 		CHECK(v4->code == net::KickReason::Protocol);
@@ -4618,10 +4622,10 @@ TEST_SUITE("net-proto") {
 			{ "Snapshot", 367, 0x5a3ed6545076d226ull, 0 },
 			{ "Snapshot (no own)", 20, 0xa85c8a910ea8826bull, 0 },
 			{ "CommandPacket", 58, 0x0561e87f8ae9a655ull, 0 },
-			{ "Hello", 20, 0x7250d8fb92141b3eull, 0 },
-			{ "MatchInfo", 126, 0x448e375bf52e62d9ull, 0 },
+			{ "Hello", 20, 0xd1043d92745304c9ull, 0 },
+			{ "MatchInfo", 126, 0x5fa7d3643dd8f50aull, 0 },
 			{ "Ready", 34, 0x50302cdf0f51bcb5ull, 0 },
-			{ "Spawned", 94, 0x1af4b750393b4270ull, 0 },
+			{ "Spawned", 98, 0xededd38e508ae170ull, 0 },
 			{ "Loading", 11, 0x6d0d37720d72edd7ull, 0 },
 			{ "Kick", 20, 0x24730a3e43ab6c1aull, 0 },
 			{ "Bye", 1, 0xaf63cb4c8601cfa9ull, 0 },
@@ -4634,8 +4638,8 @@ TEST_SUITE("net-proto") {
 			{ "KitSelect", 3, 0xa9266a18e1c669aaull, 0 },
 			{ "Debug (SpawnTarget)", 30, 0xbf53c23636c9b9efull, 0 },
 			{ "DebugReport (v2)", 916, 0xe73adddf5cc1ab3dull, 0 },
-			{ "MatchInfo (v2)", 94, 0x6e9ec62a456bdafbull, 0 },
-			{ "Spawned (v2)", 94, 0x9785ca9dec6fc2bbull, 0 },
+			{ "MatchInfo (v2)", 94, 0xc40f37ab3da04630ull, 0 },
+			{ "Spawned (v2)", 98, 0xdda4f57b21059febull, 0 },
 			{ "MatchState", 42, 0x6e8a7b2bfcb229a0ull, 0 },
 			{ "PlayerList (full)", 217, 0x8ad8a19f7b621f12ull, 0 },
 			{ "PlayerList (delta)", 51, 0x94d11dcdb2a83842ull, 0 },
@@ -4643,8 +4647,8 @@ TEST_SUITE("net-proto") {
 			{ "SuicideRequest", 1, 0xaf63d14c8601d9dbull, 0 },
 			{ "LoadoutRequest", 54, 0xbff00e287a388828ull, 0 },
 			{ "CombatEvents (v3)", 137, 0x40d29b14535383d7ull, 0 },
-			{ "MatchInfo (v3)", 94, 0xd9ea45845970259bull, 0 },
-			{ "Spawned (v3 revived)", 94, 0x185c920e1aff4290ull, 0 },
+			{ "MatchInfo (v3)", 94, 0xe195fbe5bc819934ull, 0 },
+			{ "Spawned (v3 revived)", 98, 0x8b014185e7467390ull, 0 },
 			{ "SoldierGear", 20, 0xfa6162cd1bdf3cf3ull, 0 },
 			{ "Mismatch", 2, 0x07c26e07b48c3c08ull, 0 },
 			{ "RoundOverInfo", 68, 0x00a78cf9ae380179ull, 0 },
@@ -4655,7 +4659,7 @@ TEST_SUITE("net-proto") {
 			{ "LogicDelta", 13, 0xb406185960cdf447ull, 0 },
 			{ "SquadRequest", 4, 0x339b5db77a00fa9bull, 0 },
 			{ "SquadOrder", 18, 0x786f0a82bee37cb8ull, 0 },
-			{ "MatchInfo (v4)", 157, 0x97dbb19fd45c1921ull, 0 },
+			{ "MatchInfo (v4)", 157, 0x6cd0c18f888594e0ull, 0 },
 			{ "Ready (v4 digests)", 82, 0x52d9ba4d4bfcaf1eull, 0 },
 			{ "Kick (v4 reason)", 25, 0xc256cbdc95a2f23cull, 0 },
 			{ "PlayerList (v4 squads)", 89, 0x1f220dc607e2158aull, 0 },
@@ -4695,17 +4699,17 @@ TEST_SUITE("net-proto") {
 		CHECK(bad([](net::Deployables &r) { r.removed[0] = 0; }));
 		CHECK(bad([](net::Deployables &r) { r.removed.assign(net::kMaxDeployablesPerMessage + 1, 4); }));
 		CHECK(net::peek_type(net::encode_deployables(m)) == net::MessageType::Deployables);
-		CHECK(net::kProtocolVersion == 6);
+		CHECK(net::kProtocolVersion == 7);
 	}
 
 	TEST_CASE("proto: golden bytes of the encoders' clamp, cut and drop paths") {
 		static constexpr GoldenPin kPins[] = {
-			{ "Hello (name cut inside a code point)", 43, 0x92203f4039685726ull, 0 },
+			{ "Hello (name cut inside a code point)", 43, 0x2feb94ad0c1312ffull, 0 },
 			{ "Kick (reason cut at 2048 bytes)", 2051, 0x028412f145ceb5d9ull, 0 },
 			{ "Loading (permille above 1000)", 11, 0xd2694e25edbe818full, 0 },
 			{ "Bye", 1, 0xaf63cb4c8601cfa9ull, 0 },
 			{ "MatchInfo (out-of-range fields travel as given)", 199, 0x5c40fecca265b345ull, 0 },
-			{ "Spawned (out-of-range fields travel as given)", 94, 0x282e0ad5f170e1e8ull, 0 },
+			{ "Spawned (out-of-range fields travel as given)", 98, 0xc74f17ff5bde5468ull, 0 },
 			{ "Debug (out-of-range fields travel as given)", 30, 0x8236dbe05bdccf42ull, 0 },
 			{ "MatchState (clamped)", 42, 0x06f49c6520c2a109ull, 0 },
 			{ "PlayerList (canonicalised)", 50, 0xe2b018756621270eull, 8 },

@@ -79,29 +79,40 @@ Result<SpecializationTable> make_specialization_table(const SoldierDef &p_soldie
 			out.entries.push_back(std::move(e));
 		}
 	}
+	if (out.entries.size() > kMaxSpecializationEntries) {
+		return make_error("specializations: the kits list " + std::to_string(out.entries.size()) +
+				" entries, more than " + std::to_string(kMaxSpecializationEntries));
+	}
 	out.hash = specialization_table_hash(out);
 	return out;
 }
 
 SpecializationEffects specialization_effects(
 		const SpecializationTable &p_table, uint32_t p_own, std::span<const uint32_t> p_squad) {
-	SpecializationEffects out = p_table.defaults;
-	const auto apply = [&](const KitSpecialization *p_entry) {
-		if (p_entry == nullptr) {
-			return;
+	return specialization_effects_of(p_table, specialization_mask(p_table, p_own, p_squad));
+}
+
+uint32_t specialization_mask(const SpecializationTable &p_table, uint32_t p_own, std::span<const uint32_t> p_squad) {
+	uint32_t mask = 0;
+	for (size_t i = 0; i < p_table.entries.size() && i < kMaxSpecializationEntries; ++i) {
+		const KitSpecialization &e = p_table.entries[i];
+		const bool own = !e.squad && e.identifier == p_own;
+		const bool squad = e.squad && std::find(p_squad.begin(), p_squad.end(), e.identifier) != p_squad.end();
+		if (e.identifier != 0 && (own || squad)) {
+			mask |= uint32_t(1) << i;
 		}
-		for (const auto &[target, value] : p_entry->effects) {
-			out.value[size_t(target)] = value;
-		}
-	};
-	const KitSpecialization *own = p_table.find(p_own);
-	if (own != nullptr && !own->squad) {
-		apply(own);
 	}
-	for (const uint32_t id : p_squad) {
-		const KitSpecialization *e = p_table.find(id);
-		if (e != nullptr && e->squad) {
-			apply(e);
+	return mask;
+}
+
+SpecializationEffects specialization_effects_of(const SpecializationTable &p_table, uint32_t p_mask) {
+	SpecializationEffects out = p_table.defaults;
+	for (size_t i = 0; i < p_table.entries.size() && i < kMaxSpecializationEntries; ++i) {
+		if ((p_mask >> i & 1u) == 0) {
+			continue;
+		}
+		for (const auto &[target, value] : p_table.entries[i].effects) {
+			out.value[size_t(target)] = value;
 		}
 	}
 	return out;

@@ -23,7 +23,7 @@
 
 namespace bf3::net {
 
-inline constexpr uint16_t kProtocolVersion = 6;
+inline constexpr uint16_t kProtocolVersion = 7;
 inline constexpr uint8_t kChannelUnreliable = 0;
 inline constexpr uint8_t kChannelReliable = 1;
 inline constexpr uint8_t kChannelBulk = 2;
@@ -172,6 +172,7 @@ struct Spawned {
 
 	bool revived = false;
 	std::array<uint16_t, sim::weapons::kMaxWeaponSlots> defs = kNoSpawnDefs;
+	uint32_t specializations = 0;
 };
 
 enum class LoadWarmth : uint8_t { Warm = 0, Cold = 1 };
