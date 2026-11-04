@@ -260,8 +260,9 @@ target_compile_definitions(test_host_session PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\
 set(_openbf3_session_pure *judge_rest*synthetic* *present_others* *GameServer*without*sockets* *GameServer*SpawnSweep*batches*
     *NetThread*fake*Host*stalled* *ClientSession*started*with*no*level* *kicked*in*the*lobby*
     *inbound*queue*overflows* *collision*digest*follows* *Hello*another*game_build*
-    *component*digests*differ* *client*whose*differs*kicked* *client*follows*LevelChange* *still*loading*server*moves* *client*prepares*RoundOverInfo*)
-openbf3_case_row(NAME host.session.unit.pure EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 18
+    *component*digests*differ* *client*whose*differs*kicked* *client*follows*LevelChange* *still*loading*server*moves* *client*prepares*RoundOverInfo*
+    *attaches*level*connect*timeout*after*MatchInfo*)
+openbf3_case_row(NAME host.session.unit.pure EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 19
     CASES ${_openbf3_session_pure})
 openbf3_case_row(NAME host.session.loadbots EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 1
     CASES *LoadBotFleet*socket-free*)

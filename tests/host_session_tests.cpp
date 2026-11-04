@@ -2874,6 +2874,49 @@ TEST_SUITE("host-session-unit") {
 		CHECK(g.bad_datagrams == 0);
 	}
 
+	TEST_CASE("host.session: a client that attaches its level a connect timeout after MatchInfo still waits for the "
+			  "server's Motor kick") {
+		auto edited = std::make_shared<SharedLevel>(*synthetic_level());
+		edited->motor.jump_height += 0.25f;
+		auto pipe = std::make_shared<Pipe>();
+		ServerConfig sc;
+		sc.game = pipe_game();
+		sc.transport = std::make_shared<PipeServerPort>(pipe);
+		ServerHost server;
+		std::string err;
+		REQUIRE_MESSAGE(server.start(sc, &err), err);
+		pipe->connect(0);
+		ClientSession client;
+		ClientSessionConfig cc;
+		cc.name = "slow loader";
+		cc.connect_timeout_ms = 1000;
+		const core::Status started = client.start(cc, nullptr, std::make_unique<PipeClientTransport>(pipe, 0));
+		REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
+		net::MatchInfo held;
+		REQUIRE(wait_until([&] { return client.lobby_match(held); }, 10s, 16ms));
+		const sim::Tick lobby_tick = server.game_stats().tick;
+		const sim::Tick timed_out = lobby_tick + sim::Tick(cc.connect_timeout_ms * sim::kSimHz / 1000 + 15);
+		REQUIRE(wait_until([&] { return server.game_stats().tick >= timed_out; }, 10s, 16ms));
+		const core::Status attached = client.attach_level(edited);
+		REQUIRE_MESSAGE(attached.ok(), (attached.ok() ? std::string() : attached.error().message));
+		CHECK(wait_until(
+				[&] {
+					const ClientStats s = client.stats();
+					return !s.connected && s.last_error[0] != '\0';
+				},
+				10s, 16ms));
+		CHECK(wait_until([&] { return pipe->count_sent(0, net::MessageType::Kick) == 1; }, 10s, 16ms));
+		const ClientStats s = client.stats();
+		CHECK(std::string(s.last_error.data()) == "kicked: install differs: motor");
+		CHECK(s.kicked);
+		CHECK_FALSE(s.refused);
+		CHECK(s.kick_reason == net::KickReason::Motor);
+		CHECK(s.mismatch_components == net::mismatch_bits::kMotor);
+		CHECK(server.game_stats().kicks[size_t(net::KickReason::Motor)] == 1);
+		client.stop();
+		server.stop();
+	}
+
 	TEST_CASE("host.session: a client whose static world differs is kicked Collision before it spawns") {
 		std::vector<StaticTriangle> t;
 		add_floor(t, -120, -120, 120, 120, 0);

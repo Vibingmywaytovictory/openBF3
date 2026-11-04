@@ -599,7 +599,7 @@ void ClientLoop::send_mismatch(uint8_t p_components, uint64_t p_now) {
 	have_match = true;
 	stats_.mismatch_components = p_components;
 	link.submit(net::kChannelReliable, net::encode_mismatch({ p_components }), p_now);
-	mismatch_deadline = p_now + uint64_t(config.connect_timeout_ms) * 1'000'000ull;
+	mismatch_deadline = std::max(p_now, now_ns()) + uint64_t(config.connect_timeout_ms) * 1'000'000ull;
 	collect_stats();
 }
 
