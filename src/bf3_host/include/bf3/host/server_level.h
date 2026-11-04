@@ -81,6 +81,7 @@ struct ServerRules {
 	uint64_t seed = 1;
 	uint32_t max_rewind_ticks = kDefaultMaxRewindTicks;
 	bool ghost_scope = true;
+	bool bot_squads = true;
 };
 
 GameServerConfig tdm_game_server_config(const ServerLevel &p_level, const ServerRules &p_rules);

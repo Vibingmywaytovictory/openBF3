@@ -97,6 +97,9 @@ void TdmStrategy::add_bot(uint8_t p_slot, ai::BotMain &r_bot) {
 		return;
 	}
 	world_->add_bot(p_slot, false);
+	if (!shared_.config->squads) {
+		return;
+	}
 	world_->set_squad_bot(p_slot, &r_bot);
 	bots_[p_slot] = std::make_unique<ai::BotSquad>(r_bot, *world_, service_.get(), tuning_);
 	orders_->add_bot(p_slot, *bots_[p_slot]);

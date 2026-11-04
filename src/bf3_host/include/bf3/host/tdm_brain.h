@@ -131,6 +131,7 @@ struct TdmBotConfig {
 
 	ai::BehaviourTuning behaviours;
 	ai::StrategyTuning strategy;
+	bool squads = true;
 
 	std::string tuning_cfg;
 	std::shared_ptr<TdmBotStats> stats;

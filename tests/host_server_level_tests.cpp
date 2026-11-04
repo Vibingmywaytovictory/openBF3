@@ -366,6 +366,9 @@ TEST_SUITE("host-server-level") {
 			return;
 		}
 		CHECK(big.tdm_bots->count == 63u);
+		CHECK(big.tdm_bots->squads);
+		rules.bot_squads = false;
+		CHECK_FALSE(host::tdm_game_server_config(*cold, rules).tdm_bots->squads);
 		rules.max_players = 200;
 		CHECK(host::tdm_game_server_config(*cold, rules).rules.max_players == host::kServerMaxPlayers);
 		rules.bots = 0;

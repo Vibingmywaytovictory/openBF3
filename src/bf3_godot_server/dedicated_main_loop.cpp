@@ -100,6 +100,21 @@ bool seconds_arg(const char *p_name, double p_min, double p_max, float &r_value,
 	return true;
 }
 
+bool on_off_arg(const char *p_name, bool &r_value, std::string &r_error) {
+	if (!has_user_arg(p_name)) {
+		return true;
+	}
+	const std::string text = user_arg_value(p_name);
+	if (text != "on" && text != "off") {
+		if (r_error.empty()) {
+			r_error = core::fmt("--%s=%s: not on or off", p_name, text.c_str());
+		}
+		return false;
+	}
+	r_value = text == "on";
+	return true;
+}
+
 int64_t monitor(Performance::Monitor p_monitor) {
 	return int64_t(Performance::get_singleton()->get_monitor(p_monitor));
 }
@@ -174,11 +189,8 @@ bool DedicatedMainLoop::parse_args(std::string &r_error) {
 	a.rules.preround_s = tdm.preround_s;
 	a.rules.min_players = tdm.min_players;
 	a.rules.dev_commands = has_user_arg("dev");
-	const std::string ghost_scope = has_user_arg("ghost-scope") ? user_arg_value("ghost-scope") : std::string("on");
-	a.rules.ghost_scope = ghost_scope != "off";
-	if (ghost_scope != "on" && ghost_scope != "off" && r_error.empty()) {
-		r_error = "--ghost-scope=" + ghost_scope + ": not on or off";
-	}
+	on_off_arg("ghost-scope", a.rules.ghost_scope, r_error);
+	on_off_arg("bot-squads", a.rules.bot_squads, r_error);
 	a.rules.bot_tuning_cfg = config_path(config_file("bot_tuning.cfg").c_str());
 	if (const std::string mechanics = config_path(config_file("weapon_mechanics.cfg").c_str()); !mechanics.empty()) {
 		a.rules.mechanics_cfg = mechanics;
@@ -285,13 +297,13 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 
 	const host::ServerRules &r = config.rules;
 	say(core::fmt("rules TDM: %u bots, max players %u%s, kill limit %s, pre-round %s, min players %s, dev commands %s, "
-				  "ghost scope %s",
+				  "ghost scope %s, bot squads %s",
 			r.bots, unsigned(r.max_players),
 			r.max_players != host::kListenMaxPlayers ? " (an override of the listen game's 32)" : "",
 			r.kill_limit > 0 ? std::to_string(r.kill_limit).c_str() : "data",
 			r.preround_s >= 0.0f ? core::fmt("%.1f s", r.preround_s).c_str() : "data",
 			r.min_players >= 0 ? std::to_string(r.min_players).c_str() : "data", r.dev_commands ? "on (--dev)" : "off",
-			r.ghost_scope ? "on" : "off (--ghost-scope=off)"));
+			r.ghost_scope ? "on" : "off (--ghost-scope=off)", r.bot_squads ? "on" : "off (--bot-squads=off)"));
 	say(core::fmt("gunplay: mechanics %s, lag compensation rewinds at most %u ticks", r.mechanics_cfg.c_str(),
 			r.max_rewind_ticks));
 	say(core::fmt("rotation: intermission %s, load deadlines: stalled %.1f s, warm %.1f s, cold %.1f s",

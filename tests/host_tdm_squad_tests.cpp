@@ -36,6 +36,8 @@ constexpr uint32_t kHoldSettledTicks = 60;
 constexpr float kHoldStillMps = 0.5f;
 constexpr int kPaceKillLimit = 5;
 constexpr uint32_t kPaceTicks = 420 * 60;
+constexpr int kCohesionKills = 50;
+constexpr int kSquadsOffKills = 25;
 
 struct ActivityLog final : host::TdmBotObserver {
 	std::array<host::TdmBotActivity, kSlots> activity{};
@@ -72,13 +74,14 @@ struct Cohesion {
 	std::string error;
 };
 
-Cohesion run_cohesion(const tt::TdmLevel &p_level, uint64_t p_seed) {
+Cohesion run_cohesion(const tt::TdmLevel &p_level, uint64_t p_seed, bool p_squads, int p_kill_limit) {
 	Cohesion out;
-	tt::TdmRunConfig c = bots_only(p_seed, 50);
+	tt::TdmRunConfig c = bots_only(p_seed, p_kill_limit);
 	const auto log = std::make_shared<ActivityLog>();
-	c.configure_bots = [log](host::TdmBotConfig &r_bots) {
+	c.configure_bots = [log, p_squads](host::TdmBotConfig &r_bots) {
 		r_bots.tuning_cfg = OPENBF3_BOT_TUNING_CFG;
 		r_bots.observer = log;
+		r_bots.squads = p_squads;
 	};
 	std::array<uint8_t, kSlots> seen{};
 	std::array<uint32_t, kSlots> origin_life{};
@@ -344,8 +347,8 @@ TEST_SUITE("host-tdm-squads") {
 		if (level == nullptr) {
 			return;
 		}
-		const std::vector<Cohesion> runs =
-				core::parallel_map<Cohesion>(3, [&](size_t i) { return run_cohesion(*level, uint64_t(i + 1)); }, 3);
+		const std::vector<Cohesion> runs = core::parallel_map<Cohesion>(
+				3, [&](size_t i) { return run_cohesion(*level, uint64_t(i + 1), true, kCohesionKills); }, 3);
 		for (size_t i = 0; i < runs.size(); ++i) {
 			const Cohesion &run = runs[i];
 			REQUIRE_MESSAGE(run.error.empty(), run.error);
@@ -370,6 +373,36 @@ TEST_SUITE("host-tdm-squads") {
 		}
 	}
 	TEST_CASE("host-tdm-squads: install unchanged") {
+		tt::TdmLevel *level = tt::load_tdm_level_once();
+		if (level != nullptr) {
+			tt::check_install_unchanged(*level);
+		}
+	}
+}
+
+TEST_SUITE("host-tdm-squads-off") {
+	TEST_CASE("bots-only TDM, seed 1, the bots' squads off: every bot still in a squad, members do not keep up with a "
+			  "leader who left its deploy point") {
+		tt::TdmLevel *level = tt::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const Cohesion run = run_cohesion(*level, 1, false, kSquadsOffKills);
+		REQUIRE_MESSAGE(run.error.empty(), run.error);
+		const float median = core::nearest_rank(run.distances, 0.5);
+		const double near = run.samples > 0 ? double(run.near) / double(run.samples) : 0.0;
+		std::printf("host.tdm.squads_off: %u bots, %u without a squad; %llu member ticks, median %.1f m to the leader, "
+					"%.1f %% within %.0f m; spawns on a squad mate %llu; kills %d / %d in %u ticks\n",
+				run.bots, run.unsquadded, (unsigned long long)run.samples, median, 100.0 * near, host::kSquadNearMetres,
+				(unsigned long long)run.squad_spawns, run.result.kills[1], run.result.kills[2], run.result.ticks);
+		CHECK(run.result.failure.empty());
+		CHECK(run.result.round_over);
+		CHECK(run.bots == 32u);
+		CHECK(run.unsquadded == 0u);
+		CHECK(run.samples > 0u);
+		CHECK((median > kMedianMetres || near < kNearShare));
+	}
+	TEST_CASE("host-tdm-squads-off: install unchanged") {
 		tt::TdmLevel *level = tt::load_tdm_level_once();
 		if (level != nullptr) {
 			tt::check_install_unchanged(*level);
