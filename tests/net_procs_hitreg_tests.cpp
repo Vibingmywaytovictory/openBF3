@@ -67,7 +67,8 @@ Duel run_duel(ProcDriver &r_driver, const std::filesystem::path &p_config, uint3
 	const std::string mechanics = path_utf8(p_config / L"weapon_mechanics.cfg");
 	const std::optional<Server> server = start_server(r_driver, 0, 1500,
 			{ "--level=" + std::string(kLevel), "--mode=" + std::string(kMode), "--dev", "--min-players=1",
-					"--mechanics=" + mechanics, "--max-rewind-ticks=" + std::to_string(p_rewind) },
+					"--infinite-magazine", "--mechanics=" + mechanics,
+					"--max-rewind-ticks=" + std::to_string(p_rewind) },
 			"server");
 	if (!server) {
 		d.skipped = true;
@@ -140,7 +141,7 @@ TEST_SUITE("net-procs-hitreg") {
 		}
 		REQUIRE(gate.ran);
 		CHECK(gate.shooter_code == 0);
-		CHECK(contains(gate.server_gunplay, "rewinds at most 21 ticks"));
+		CHECK(contains(gate.server_gunplay, "rewinds at most 21 ticks, magazines infinite"));
 		CHECK(gate.shots >= kShots);
 		CHECK(gate.predicted >= kMinHits);
 		CHECK(double(gate.confirmed) >= 0.99 * double(gate.predicted));
@@ -152,7 +153,7 @@ TEST_SUITE("net-procs-hitreg") {
 		}
 		REQUIRE(control.ran);
 		CHECK(control.shooter_code == 0);
-		CHECK(contains(control.server_gunplay, "rewinds at most 0 ticks"));
+		CHECK(contains(control.server_gunplay, "rewinds at most 0 ticks, magazines infinite"));
 		CHECK(control.shots >= kShots);
 		CHECK(control.predicted >= kMinHits);
 		CHECK(double(control.confirmed) <= 0.5 * double(control.predicted));

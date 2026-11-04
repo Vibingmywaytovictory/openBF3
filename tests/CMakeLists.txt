@@ -1207,7 +1207,7 @@ openbf3_proc_row(net.procs.kick test_net_procs LABEL timing TIMEOUT 600 ARGS --t
 openbf3_proc_row(godot.rotation test_net_procs LABEL timing TIMEOUT 1800 ARGS --test-suite=godot-rotation)
 openbf3_proc_row(net.procs.hitreg test_net_procs LABEL timing TIMEOUT 2400 ARGS --test-suite=net-procs-hitreg)
 set_tests_properties(net.procs.hitreg PROPERTIES RUN_SERIAL TRUE)
-openbf3_cost(net.procs.hitreg 1 600)
+openbf3_cost(net.procs.hitreg 1 228)
 openbf3_proc_row(net.procs.scale32 test_net_procs LABEL timing TIMEOUT 900 ARGS --test-suite=net-procs-scale32)
 openbf3_proc_row(net.procs.scale64 test_net_procs LABEL timing TIMEOUT 900 ARGS --test-suite=net-procs-scale64)
 openbf3_proc_row(net.procs.scale_control test_net_procs LABEL timing TIMEOUT 600 ARGS --test-suite=net-procs-scale-control)
