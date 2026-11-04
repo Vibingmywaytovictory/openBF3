@@ -9,7 +9,20 @@
 
 namespace bf3::present {
 
-enum class PresentKind : uint8_t { OwnShot = 0, OwnTimed = 1, RemoteShot = 2, Impact = 3, SoldierContact = 4, Hit = 5, Death = 6, Detonation = 7, Spawn = 8, Revive = 9 };
+enum class PresentKind : uint8_t {
+	OwnShot = 0,
+	OwnTimed = 1,
+	RemoteShot = 2,
+	Impact = 3,
+	SoldierContact = 4,
+	Hit = 5,
+	Death = 6,
+	Detonation = 7,
+	Spawn = 8,
+	Revive = 9,
+	GadgetDeploy = 10,
+	GadgetRemove = 11
+};
 enum class PresentTimeline : uint8_t { Predicted = 0, Render = 1, Immediate = 2 };
 
 const char *present_kind_name(PresentKind p_kind);

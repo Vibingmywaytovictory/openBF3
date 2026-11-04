@@ -10,7 +10,10 @@
 #include "bf3/net/protocol.h"
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/weapons/spread_recoil.h"
+#include "client_events.h"
+#include "client_match.h"
 #include "client_tracks.h"
+#include "server_gadgets.h"
 #include "server_ghosts.h"
 #include "test_support.h"
 
@@ -788,6 +791,113 @@ TEST_SUITE("host-ghost") {
 		CHECK(absolute == 90);
 		CHECK(scoped_far == 0);
 		CHECK(scoped_deltas > 0);
+	}
+
+	TEST_CASE("deployables: a seat gets each resting deployable in its scope once and each removal once; the client "
+			  "keeps them in the frame and pushes GadgetDeploy and GadgetRemove") {
+		const auto deployable = [](uint16_t p_id, uint8_t p_owner, uint8_t p_team, float p_x, bool p_resting) {
+			sim::weapons::Deployable d;
+			d.id = p_id;
+			d.def = uint16_t(90 + p_id);
+			d.owner = p_owner;
+			d.team = p_team;
+			d.resting = p_resting;
+			d.position = { p_x, 1.0f, 2.0f };
+			return d;
+		};
+		std::vector<sim::weapons::Deployable> live{ deployable(1, 2, 1, 10.0f, true), deployable(2, 3, 1, 5.0f, false),
+			deployable(3, 4, 2, 5000.0f, true), deployable(4, 5, 2, 40.0f, true) };
+		host::DeployableSync sync;
+		sync.configure(8, true);
+		const sim::Vec3 at{ 0.0f, 0.0f, 0.0f };
+		const auto decoded = [](const std::optional<std::vector<uint8_t>> &p_bytes) {
+			REQUIRE(p_bytes.has_value());
+			if (!p_bytes) {
+				return net::Deployables();
+			}
+			core::Result<net::Deployables> d = net::decode_deployables(*p_bytes);
+			REQUIRE(d.ok());
+			return d ? *d : net::Deployables();
+		};
+		const net::Deployables first = decoded(sync.update(2, 1, at, live, 1, 100));
+		CHECK(first.server_tick == 100u);
+		REQUIRE(first.added.size() == 2u);
+		if (first.added.size() != 2u) {
+			return;
+		}
+		CHECK(first.added[0].id == 1u);
+		CHECK(first.added[0].def == 91u);
+		CHECK(first.added[0].owner == 2u);
+		CHECK(first.added[0].team == 1u);
+		CHECK(first.added[0].position == sim::Vec3{ 10.0f, 1.0f, 2.0f });
+		CHECK(first.added[1].id == 4u);
+		CHECK(first.removed.empty());
+		CHECK(sync.stats().out_of_scope == 1u);
+		CHECK_FALSE(sync.update(2, 1, at, live, 1, 101).has_value());
+		CHECK_FALSE(sync.update(2, 1, at, live, 1, 100 + host::kDeployableScopeTicks).has_value());
+		live[1].resting = true;
+		live.erase(live.begin());
+		const net::Deployables second = decoded(sync.update(2, 1, at, live, 2, 131));
+		REQUIRE(second.added.size() == 1u);
+		REQUIRE(second.removed.size() == 1u);
+		if (second.added.size() != 1u || second.removed.size() != 1u) {
+			return;
+		}
+		CHECK(second.added[0].id == 2u);
+		CHECK(second.removed[0] == 1u);
+		const net::Deployables enemy = decoded(sync.update(3, 2, { 5000.0f, 0.0f, 0.0f }, live, 2, 131));
+		REQUIRE(enemy.added.size() == 2u);
+		if (enemy.added.size() != 2u) {
+			return;
+		}
+		CHECK(enemy.added[0].id == 3u);
+		CHECK(enemy.added[1].id == 4u);
+		CHECK(sync.stats().out_of_scope == 4u);
+		host::DeployableSync open;
+		open.configure(8, false);
+		CHECK(decoded(open.update(2, 1, at, live, 2, 131)).added.size() == 3u);
+		sync.reset(2);
+		CHECK(decoded(sync.update(2, 1, at, live, 2, 132)).added.size() == 2u);
+
+		const uint8_t own = 2;
+		host::ClientEvents events(own);
+		host::ClientMatch match(events, own);
+		std::unique_ptr<host::PresentationFrame> frame = std::make_unique<host::PresentationFrame>();
+		match.deployables(first);
+		match.publish(*frame, false, 0);
+		REQUIRE(frame->deployable_count == 2u);
+		CHECK(frame->deployables[0].id == 1u);
+		CHECK(frame->deployables[1].id == 4u);
+		match.deployables(second);
+		net::Deployables junk;
+		junk.removed.push_back(77);
+		junk.added.push_back(first.added[1]);
+		match.deployables(junk);
+		match.publish(*frame, false, 0);
+		REQUIRE(frame->deployable_count == 2u);
+		CHECK(frame->deployables[0].id == 4u);
+		CHECK(frame->deployables[1].id == 2u);
+		host::ClientStats stats;
+		match.stats(stats);
+		CHECK(stats.deployable_messages == 3u);
+		CHECK(stats.bad_deployables == 2u);
+		std::array<host::PresentEvent, 8> out{};
+		REQUIRE(events.ring().drain(out) == 4u);
+		CHECK(out[0].kind == host::PresentKind::GadgetDeploy);
+		CHECK(out[0].timeline == host::PresentTimeline::Immediate);
+		CHECK(out[0].id == 1u);
+		CHECK(out[0].slot == 2u);
+		CHECK(out[0].def == 91u);
+		CHECK(out[0].aux == 1u);
+		CHECK(out[0].pos[0] == 10.0f);
+		CHECK((out[0].flags & host::present_flags::kOwnShooter) != 0);
+		CHECK(out[1].kind == host::PresentKind::GadgetDeploy);
+		CHECK(out[1].id == 4u);
+		CHECK((out[1].flags & host::present_flags::kOwnShooter) == 0);
+		CHECK(out[2].kind == host::PresentKind::GadgetRemove);
+		CHECK(out[2].id == 1u);
+		CHECK(out[3].kind == host::PresentKind::GadgetDeploy);
+		CHECK(out[3].id == 2u);
 	}
 
 	TEST_CASE("a remote track lasts three of its own sample gaps, at least 1 s, and a removal ends it") {

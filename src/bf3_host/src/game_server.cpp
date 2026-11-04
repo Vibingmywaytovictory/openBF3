@@ -10,6 +10,7 @@
 #include "server_combat_log.h"
 #include "server_commands.h"
 #include "server_dev.h"
+#include "server_gadgets.h"
 #include "server_handshake.h"
 #include "server_logic_sync.h"
 #include "server_match.h"
@@ -59,6 +60,7 @@ struct GameServer::Impl {
 	Spawner spawner{ slots, soldiers, match, combat, motor, outbox, logic };
 	CombatLog combat_log{ spawner, match, combat };
 	SnapshotWriter snapshots{ slots, soldiers, commands, combat, combat_log, motor, outbox, match };
+	DeployableSync deployables;
 	DevCommands dev{ slots, soldiers, spawner, combat, match, motor, outbox,
 		[this](size_t p_slot) { reset_slot(p_slot); } };
 	ServerHandshake handshake;
@@ -85,6 +87,7 @@ struct GameServer::Impl {
 		logic.reset(i);
 		commands.reset(i);
 		snapshots.reset(i);
+		deployables.reset(i);
 		dev.reset(i);
 		loads.reset(i);
 	}
@@ -314,6 +317,7 @@ struct GameServer::Impl {
 			snapshots.send(n, net::monotonic_ns(), times);
 		}
 		send_rules(n);
+		send_deployables(n);
 		logic.send(n);
 		outbox.drain(r_out);
 		times.collision_queries = world->query_count() - queries_before;
@@ -407,6 +411,25 @@ struct GameServer::Impl {
 		}
 	}
 
+	void send_deployables(sim::Tick p_tick) {
+		const Gunplay *g = combat.gunplay();
+		if (g == nullptr) {
+			return;
+		}
+		for (size_t i = 0; i < slots.size(); ++i) {
+			const Seat &s = slots[i];
+			if (!s.used || !s.remote) {
+				continue;
+			}
+			const uint8_t team = match.on() ? match.rules()->team_of(uint8_t(i))
+											: uint8_t(std::clamp(s.team, 0, int(net::kMaxTeam)));
+			if (std::optional<std::vector<uint8_t>> bytes = deployables.update(
+						i, team, soldiers[i].state.position, g->deployables(), g->deployables_revision(), p_tick)) {
+				outbox.send(s.peer, net::kChannelReliable, *bytes);
+			}
+		}
+	}
+
 	void receive_kit_select(int p_slot, std::span<const uint8_t> p_datagram) {
 		core::Result<net::KitSelect> k = net::decode_kit_select(p_datagram);
 		if (!k || p_slot < 0 || size_t(p_slot) >= slots.size()) {
@@ -485,6 +508,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	m.logic.resize(p_config.max_slots);
 	m.commands.configure(p_config.max_slots, p_config.jitter_buffer_ticks);
 	m.snapshots.configure(p_config.max_slots, p_config.snapshot_budget_bytes, p_config.ghost_scope);
+	m.deployables.configure(p_config.max_slots, p_config.ghost_scope);
 	m.dev.configure(m.config, *m.world, p_config.max_slots);
 	m.handshake.configure(p_config.game_build.value_or(net::game_build()), *p_config.level, p_config.max_slots);
 	m.loads.configure(p_config.max_slots, p_config.load, p_config.round_id);

@@ -8,6 +8,7 @@
 #include "client_logic_sync.h"
 
 #include <cstdint>
+#include <vector>
 
 namespace bf3::host {
 
@@ -19,6 +20,7 @@ public:
 	bool datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d);
 	const char *check_rules(const net::MatchInfo &p_match, const SharedLevel &p_level);
 	void combat(const net::CombatEvents &p_events, bool p_have_own, uint32_t p_own_life);
+	void deployables(const net::Deployables &p_message);
 	void restrict(sim::Command &r_command);
 	bool unspawned(sim::Tick p_tick, bool p_have_own, sim::Tick p_life_spawn_tick);
 	void publish(PresentationFrame &r_frame, bool p_have_own, uint32_t p_own_life) const;
@@ -36,6 +38,9 @@ private:
 	PlayerTable players_;
 	std::array<net::SoldierGear, net::kMaxSlots> gear_ = kNoGear;
 	SquadOrders orders_{};
+	std::vector<net::DeployableWire> deployables_;
+	uint64_t deployable_messages_ = 0;
+	uint64_t bad_deployables_ = 0;
 	bool death_valid_ = false;
 	uint32_t death_life_ = 0;
 	sim::Tick respawn_tick_ = 0;

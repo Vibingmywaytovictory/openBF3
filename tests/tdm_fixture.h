@@ -77,6 +77,7 @@ public:
 	std::vector<net::SoldierGear> gear;
 	std::vector<net::CombatEvents> combat;
 	std::vector<net::SquadOrder> squad_orders;
+	std::vector<net::Deployables> deployables;
 	std::optional<net::Snapshot> last_snapshot;
 	net::SnapshotBaselines baselines;
 	std::optional<net::Kick> kick;
@@ -484,6 +485,14 @@ inline void ScriptedPeer::receive(std::span<const host::OutDatagram> p_out) {
 				ok = m.ok();
 				if (ok) {
 					squad_orders.push_back(*m);
+				}
+				break;
+			}
+			case net::MessageType::Deployables: {
+				core::Result<net::Deployables> m = net::decode_deployables(d.bytes);
+				ok = m.ok();
+				if (ok) {
+					deployables.push_back(*m);
 				}
 				break;
 			}

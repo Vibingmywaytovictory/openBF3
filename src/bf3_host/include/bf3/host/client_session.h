@@ -202,6 +202,8 @@ struct ClientStats {
 	NetTraffic traffic_in;
 	NetTraffic traffic_out;
 	OwnHitCounts own_hits;
+	uint64_t deployable_messages = 0;
+	uint64_t bad_deployables = 0;
 };
 static_assert(std::is_trivially_copyable_v<ClientStats>);
 
@@ -210,6 +212,8 @@ struct ClientLogicFeed {
 	std::optional<sim::logic::LogicGhost> ghost;
 	std::vector<sim::logic::LogicNetworkedEvent> events;
 };
+
+inline constexpr size_t kMaxPresentedDeployables = 256;
 
 inline constexpr size_t kOtherSamples = 3;
 using OtherSample = net::TimedOther;
@@ -286,6 +290,8 @@ struct PresentationFrame {
 	std::array<PresentedBullet, kMaxPresentedBullets> bullets{};
 	NetStats net;
 	std::array<uint8_t, sim::weapons::kMaxWeaponSlots> own_variants{};
+	uint16_t deployable_count = 0;
+	std::array<net::DeployableWire, kMaxPresentedDeployables> deployables{};
 };
 static_assert(std::is_trivially_copyable_v<PresentationFrame>);
 

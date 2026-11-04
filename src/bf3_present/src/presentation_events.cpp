@@ -26,6 +26,10 @@ const char *present_kind_name(PresentKind p_kind) {
 			return "Spawn";
 		case PresentKind::Revive:
 			return "Revive";
+		case PresentKind::GadgetDeploy:
+			return "GadgetDeploy";
+		case PresentKind::GadgetRemove:
+			return "GadgetRemove";
 	}
 	return "?";
 }

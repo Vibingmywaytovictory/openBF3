@@ -3,6 +3,7 @@
 #include "bf3/core/util/fnv.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/squads.h"
+#include "server_ghosts.h"
 
 #include <algorithm>
 #include <cmath>
@@ -148,6 +149,81 @@ std::optional<sim::Vec3> ServerGadgets::squad_beacon(uint8_t p_slot, uint8_t p_t
 const GadgetStats &ServerGadgets::stats() const {
 	stats_.field = field_.stats();
 	return stats_;
+}
+
+void DeployableSync::configure(size_t p_slots, bool p_scoped) {
+	viewers_.assign(p_slots, Viewer());
+	scoped_ = p_scoped;
+}
+
+void DeployableSync::reset(size_t p_slot) {
+	if (p_slot < viewers_.size()) {
+		viewers_[p_slot] = Viewer();
+	}
+}
+
+std::optional<std::vector<uint8_t>> DeployableSync::update(size_t p_slot, uint8_t p_team, const sim::Vec3 &p_position,
+		std::span<const sw::Deployable> p_live, uint64_t p_revision, sim::Tick p_tick) {
+	if (p_slot >= viewers_.size()) {
+		return std::nullopt;
+	}
+	Viewer &v = viewers_[p_slot];
+	if (v.revision == p_revision && p_tick - v.checked < kDeployableScopeTicks) {
+		return std::nullopt;
+	}
+	v.revision = p_revision;
+	v.checked = p_tick;
+	GhostViewer viewer;
+	viewer.slot = uint8_t(p_slot);
+	viewer.team = p_team;
+	viewer.spawned = true;
+	viewer.position = p_position;
+	viewer.eye = p_position;
+	std::vector<uint16_t> scope;
+	net::Deployables m;
+	m.server_tick = p_tick;
+	for (const sw::Deployable &d : p_live) {
+		if (!d.resting) {
+			continue;
+		}
+		GhostCandidate c;
+		c.slot = d.owner;
+		c.team = d.team;
+		c.position = d.position;
+		if (scoped_ && !ghost_tier(viewer, c, false)) {
+			++stats_.out_of_scope;
+			continue;
+		}
+		scope.push_back(d.id);
+		if (!std::binary_search(v.known.begin(), v.known.end(), d.id) &&
+				m.added.size() < net::kMaxDeployablesPerMessage) {
+			m.added.push_back(net::DeployableWire{ d.id, d.def, d.owner, d.team, d.position });
+		}
+	}
+	std::sort(scope.begin(), scope.end());
+	for (const uint16_t id : v.known) {
+		if (!std::binary_search(scope.begin(), scope.end(), id) && m.removed.size() < net::kMaxDeployablesPerMessage) {
+			m.removed.push_back(id);
+		}
+	}
+	if (m.added.empty() && m.removed.empty()) {
+		return std::nullopt;
+	}
+	std::vector<uint16_t> known = v.known;
+	for (const uint16_t id : m.removed) {
+		known.erase(std::lower_bound(known.begin(), known.end(), id));
+	}
+	for (const net::DeployableWire &a : m.added) {
+		known.insert(std::lower_bound(known.begin(), known.end(), a.id), a.id);
+	}
+	v.known = std::move(known);
+	if (m.added.size() + m.removed.size() >= net::kMaxDeployablesPerMessage) {
+		v.revision = UINT64_MAX;
+	}
+	++stats_.messages;
+	stats_.added += m.added.size();
+	stats_.removed += m.removed.size();
+	return net::encode_deployables(m);
 }
 
 }

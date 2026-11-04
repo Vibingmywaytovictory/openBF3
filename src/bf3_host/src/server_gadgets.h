@@ -54,4 +54,29 @@ private:
 	mutable GadgetStats stats_;
 };
 
+inline constexpr sim::Tick kDeployableScopeTicks = 30;
+
+struct DeployableSyncStats {
+	uint64_t messages = 0, added = 0, removed = 0, out_of_scope = 0;
+};
+
+class DeployableSync {
+public:
+	void configure(size_t p_slots, bool p_scoped);
+	void reset(size_t p_slot);
+	std::optional<std::vector<uint8_t>> update(size_t p_slot, uint8_t p_team, const sim::Vec3 &p_position,
+			std::span<const sim::weapons::Deployable> p_live, uint64_t p_revision, sim::Tick p_tick);
+	const DeployableSyncStats &stats() const { return stats_; }
+
+private:
+	struct Viewer {
+		std::vector<uint16_t> known;
+		uint64_t revision = UINT64_MAX;
+		sim::Tick checked = 0;
+	};
+	std::vector<Viewer> viewers_;
+	bool scoped_ = true;
+	DeployableSyncStats stats_;
+};
+
 }

@@ -1,5 +1,7 @@
 #include "client_match.h"
 
+#include <algorithm>
+
 namespace bf3::host {
 
 bool ClientMatch::datagram(net::MessageType p_type, const net::NetSim::Datagram &p_d) {
@@ -40,6 +42,15 @@ bool ClientMatch::datagram(net::MessageType p_type, const net::NetSim::Datagram 
 			if (!o || !apply_squad_order(orders_, *o)) {
 				++bad_tdm_datagrams_;
 			}
+			return true;
+		}
+		case net::MessageType::Deployables: {
+			core::Result<net::Deployables> d = net::decode_deployables(p_d.bytes);
+			if (!d) {
+				++bad_tdm_datagrams_;
+				return true;
+			}
+			deployables(*d);
 			return true;
 		}
 		case net::MessageType::LogicEvents:
@@ -87,6 +98,52 @@ void ClientMatch::combat(const net::CombatEvents &p_events, bool p_have_own, uin
 	}
 }
 
+void ClientMatch::deployables(const net::Deployables &p_message) {
+	++deployable_messages_;
+	for (const uint16_t id : p_message.removed) {
+		const auto it = std::find_if(
+				deployables_.begin(), deployables_.end(), [&](const net::DeployableWire &d) { return d.id == id; });
+		if (it == deployables_.end()) {
+			++bad_deployables_;
+			continue;
+		}
+		PresentEvent ev;
+		ev.kind = PresentKind::GadgetRemove;
+		ev.timeline = PresentTimeline::Immediate;
+		ev.slot = it->owner;
+		ev.def = it->def;
+		ev.id = it->id;
+		ev.time = sim::weapons::tick_end(p_message.server_tick);
+		for (size_t k = 0; k < 3; ++k) {
+			ev.pos[k] = it->position[k];
+		}
+		events_.push(ev);
+		deployables_.erase(it);
+	}
+	for (const net::DeployableWire &d : p_message.added) {
+		const auto it = std::find_if(
+				deployables_.begin(), deployables_.end(), [&](const net::DeployableWire &o) { return o.id == d.id; });
+		if (it != deployables_.end() || deployables_.size() >= kMaxPresentedDeployables) {
+			++bad_deployables_;
+			continue;
+		}
+		deployables_.push_back(d);
+		PresentEvent ev;
+		ev.kind = PresentKind::GadgetDeploy;
+		ev.timeline = PresentTimeline::Immediate;
+		ev.slot = d.owner;
+		ev.aux = d.team;
+		ev.def = d.def;
+		ev.id = d.id;
+		ev.time = sim::weapons::tick_end(p_message.server_tick);
+		ev.flags = uint8_t(d.owner == own_slot_ ? present_flags::kOwnShooter : 0u);
+		for (size_t k = 0; k < 3; ++k) {
+			ev.pos[k] = d.position[k];
+		}
+		events_.push(ev);
+	}
+}
+
 void ClientMatch::restrict(sim::Command &r_command) {
 	if (!valid_) {
 		return;
@@ -117,6 +174,8 @@ void ClientMatch::publish(PresentationFrame &r_frame, bool p_have_own, uint32_t 
 	r_frame.own_unspawned = unspawned_now_;
 	r_frame.gear = gear_;
 	r_frame.squad_orders = orders_;
+	r_frame.deployable_count = uint16_t(std::min(deployables_.size(), r_frame.deployables.size()));
+	std::copy_n(deployables_.begin(), r_frame.deployable_count, r_frame.deployables.begin());
 }
 
 void ClientMatch::stats(ClientStats &r_stats) const {
@@ -124,6 +183,8 @@ void ClientMatch::stats(ClientStats &r_stats) const {
 	r_stats.player_lists = player_lists_;
 	r_stats.soldier_gears = soldier_gears_;
 	r_stats.revives = revives_;
+	r_stats.deployable_messages = deployable_messages_;
+	r_stats.bad_deployables = bad_deployables_;
 	r_stats.bad_tdm_datagrams = bad_tdm_datagrams_;
 	r_stats.restricted_commands = restricted_commands_;
 	r_stats.unspawned_ticks = unspawned_ticks_;

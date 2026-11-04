@@ -2473,6 +2473,21 @@ TEST_SUITE("host-gunplay-gadgets") {
 				distance(beacon, owner));
 		CHECK(distance(beacon, owner) < 1.5f);
 		m->ticks(2);
+		const sw::Deployable &placed_beacon = m->server.gunplay()->deployables()[0];
+		for (const tdm::ScriptedPeer *p : { &alpha, &bravo, &charlie }) {
+			REQUIRE(p->deployables.size() == 1u);
+			const net::Deployables sent = p->deployables.empty() ? net::Deployables() : p->deployables[0];
+			CHECK(sent.removed.empty());
+			REQUIRE(sent.added.size() == 1u);
+			if (sent.added.empty()) {
+				continue;
+			}
+			CHECK(sent.added[0].id == placed_beacon.id);
+			CHECK(sent.added[0].def == placed_beacon.def);
+			CHECK(sent.added[0].owner == uint8_t(alpha.slot()));
+			CHECK(sent.added[0].team == m->rules().team_of(uint8_t(alpha.slot())));
+			CHECK(distance(sent.added[0].position, beacon) < 0.01f);
+		}
 		REQUIRE(m->row(alpha.slot()) != nullptr);
 		const uint8_t squad = m->row(alpha.slot())->squad;
 		squad_request(*m, charlie, net::SquadOp::Leave);
