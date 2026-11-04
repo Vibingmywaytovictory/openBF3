@@ -34,7 +34,7 @@ class EorCameraView;
 class EorFlash;
 class NativeEor;
 
-inline constexpr double kEorCheckSeconds = 420.0;
+inline constexpr double kEorCheckSeconds = 240.0;
 inline constexpr double kEorCheckToleranceS = 0.25;
 inline constexpr double kEorCheckSettleS = 1.0;
 inline constexpr double kEorCheckStepWaitS = 2.0;

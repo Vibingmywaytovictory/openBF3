@@ -11,8 +11,8 @@ set(shot_args "")
 if(NOT shots STREQUAL "")
     set(shot_args "--eor-shots=${shots}")
 endif()
-godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 460
-    ARGS --path "${PROJECT_DIR}" --resolution 2560x1080 res://scenes/metro_tdm.tscn -- --bots=4 --deploy-screen=1 --preround=0
+godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 280
+    ARGS --path "${PROJECT_DIR}" --resolution 2560x1080 res://scenes/metro_tdm.tscn -- --bots=31 --deploy-screen=1 --preround=0
         --min-players=1 --kill-limit=5 --eor-check ${shot_args} ${cache_args})
 godot_require_pass("EOR CHECK: PASS")
 godot_require_pass("\\[level\\] install unchanged: yes")

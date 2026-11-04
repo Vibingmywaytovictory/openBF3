@@ -36,6 +36,7 @@ constexpr uint32_t kHoldSettledTicks = 60;
 constexpr float kHoldStillMps = 0.5f;
 constexpr int kPaceKillLimit = 5;
 constexpr uint32_t kPaceTicks = 420 * 60;
+constexpr uint32_t kPaceFullTicks = 60 * 60;
 constexpr int kCohesionKills = 50;
 constexpr int kSquadsOffKills = 25;
 
@@ -410,43 +411,58 @@ TEST_SUITE("host-tdm-squads-off") {
 	}
 }
 
+namespace {
+
+struct Pace {
+	tt::TdmRunResult result;
+	std::string error;
+};
+
+void check_pace(const tt::TdmLevel &p_level, uint32_t p_bots, uint32_t p_max_ticks) {
+	const std::vector<Pace> runs = core::parallel_map<Pace>(
+			6,
+			[&](size_t i) {
+				Pace pace;
+				tt::TdmRunConfig c = bots_only(uint64_t(i + 1), kPaceKillLimit);
+				c.bots = p_bots;
+				c.peer = true;
+				c.rules.deploy_screen = true;
+				c.rules.min_players_override = 1;
+				c.max_ticks = p_max_ticks;
+				c.configure_bots = [](host::TdmBotConfig &r_bots) { r_bots.tuning_cfg = OPENBF3_BOT_TUNING_CFG; };
+				core::Result<tt::TdmRunResult> r = tt::run_tdm(p_level, c);
+				if (r) {
+					pace.result = std::move(*r);
+				} else {
+					pace.error = r.error().message;
+				}
+				return pace;
+			},
+			3);
+	for (size_t i = 0; i < runs.size(); ++i) {
+		REQUIRE_MESSAGE(runs[i].error.empty(), runs[i].error);
+		const tt::TdmRunResult &r = runs[i].result;
+		std::printf("host.tdm.pace %u bots seed %zu: kills %d / %d in %.1f s, round over %d\n", p_bots, i + 1,
+				r.kills[1], r.kills[2], double(r.ticks) * sim::kTickSeconds, int(r.round_over));
+		CHECK(r.failure.empty());
+		CHECK(r.round_over);
+	}
+}
+
+}
+
 TEST_SUITE("host-tdm-pace") {
 	TEST_CASE("TDM with 4 bots and an idle player, seeds 1-6: a round to 5 kills ends inside 420 s") {
 		tt::TdmLevel *level = tt::load_tdm_level_once();
-		if (level == nullptr) {
-			return;
+		if (level != nullptr) {
+			check_pace(*level, 4, kPaceTicks);
 		}
-		struct Pace {
-			tt::TdmRunResult result;
-			std::string error;
-		};
-		const std::vector<Pace> runs = core::parallel_map<Pace>(
-				6,
-				[&](size_t i) {
-					Pace pace;
-					tt::TdmRunConfig c = bots_only(uint64_t(i + 1), kPaceKillLimit);
-					c.bots = 4;
-					c.peer = true;
-					c.rules.deploy_screen = true;
-					c.rules.min_players_override = 1;
-					c.max_ticks = kPaceTicks;
-					c.configure_bots = [](host::TdmBotConfig &r_bots) { r_bots.tuning_cfg = OPENBF3_BOT_TUNING_CFG; };
-					core::Result<tt::TdmRunResult> r = tt::run_tdm(*level, c);
-					if (r) {
-						pace.result = std::move(*r);
-					} else {
-						pace.error = r.error().message;
-					}
-					return pace;
-				},
-				3);
-		for (size_t i = 0; i < runs.size(); ++i) {
-			REQUIRE_MESSAGE(runs[i].error.empty(), runs[i].error);
-			const tt::TdmRunResult &r = runs[i].result;
-			std::printf("host.tdm.pace seed %zu: kills %d / %d in %.0f s, round over %d\n", i + 1, r.kills[1],
-					r.kills[2], double(r.ticks) * sim::kTickSeconds, int(r.round_over));
-			CHECK(r.failure.empty());
-			CHECK(r.round_over);
+	}
+	TEST_CASE(
+			"TDM with 31 bots and an idle player, godot.eor's rounds, seeds 1-6: a round to 5 kills ends inside 60 s") {
+		tt::TdmLevel *level = tt::load_tdm_level_once();
+		if (level != nullptr) {
+			check_pace(*level, 31, kPaceFullTicks);
 		}
 	}
 	TEST_CASE("host-tdm-pace: install unchanged") {
