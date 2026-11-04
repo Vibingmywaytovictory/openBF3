@@ -66,8 +66,8 @@ Duel run_duel(ProcDriver &r_driver, const std::filesystem::path &p_config, uint3
 	Duel d;
 	const std::string mechanics = path_utf8(p_config / L"weapon_mechanics.cfg");
 	const std::optional<Server> server = start_server(r_driver, 0, 1500,
-			{ "--level=" + std::string(kLevel), "--mode=" + std::string(kMode), "--dev", "--mechanics=" + mechanics,
-					"--max-rewind-ticks=" + std::to_string(p_rewind) },
+			{ "--level=" + std::string(kLevel), "--mode=" + std::string(kMode), "--dev", "--min-players=1",
+					"--mechanics=" + mechanics, "--max-rewind-ticks=" + std::to_string(p_rewind) },
 			"server");
 	if (!server) {
 		d.skipped = true;
