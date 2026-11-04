@@ -35,6 +35,7 @@ public:
 	void ack(size_t p_slot, const net::CommandPacket &p_packet);
 	void note_command(size_t p_slot, const sim::Command &p_command);
 	void step_soldier(size_t p_slot, const sim::Command &p_command, const sim::SoldierState &p_before, const sim::SoldierState &p_after);
+	sim::Command clamp_pitch(size_t p_slot, const sim::Command &p_command, sim::Pose p_pose) const;
 
 	void resolve(sim::Tick p_tick, const SlotTable &p_slots, const Soldiers &p_soldiers, CombatEventSink &r_sink);
 	std::span<sim::SoldierState> tick_states() { return tick_states_; }

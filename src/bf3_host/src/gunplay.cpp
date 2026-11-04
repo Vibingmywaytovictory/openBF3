@@ -9,6 +9,7 @@
 #include "bf3/core/gameplay/work_budget.h"
 #include "bf3/core/install.h"
 #include "bf3/core/level/level.h"
+#include "bf3/core/math.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/fnv.h"
 #include "bf3/core/util/splitmix64.h"
@@ -559,6 +560,30 @@ uint32_t Gunplay::specialization_mask(uint8_t p_slot) const {
 uint32_t Gunplay::spawn_specializations(uint8_t p_slot) const {
 	const Impl &m = *impl_;
 	return p_slot < m.slots.size() && m.slots[p_slot].armed ? m.slots[p_slot].specializations : 0u;
+}
+
+sim::Command clamp_command_pitch(const sim::Command &p_command, const gp::AimingPose &p_pose) {
+	sim::Command out = p_command;
+	const int16_t low = sim::quantize_pitch(p_pose.min_pitch_deg * core::kDegToRadF);
+	const int16_t high = sim::quantize_pitch(p_pose.max_pitch_deg * core::kDegToRadF);
+	if (low <= high) {
+		out.pitch = std::clamp(out.pitch, low, high);
+	}
+	return out;
+}
+
+sim::Command Gunplay::clamp_pitch(uint8_t p_slot, const sim::Command &p_command, sim::Pose p_pose) const {
+	const Impl &m = *impl_;
+	if (p_slot >= m.slots.size() || !m.slots[p_slot].armed) {
+		return p_command;
+	}
+	const sw::SoldierWeaponsState &w = m.slots[p_slot].weapons;
+	const uint16_t def = w.active < w.slots.size() ? w.slots[w.active].def : sw::kNoWeapon;
+	if (def >= m.level->defs.size() || size_t(p_pose) >= gp::kSoldierPoseCount) {
+		return p_command;
+	}
+	const gp::WeaponAiming &aiming = m.level->defs[def].aiming;
+	return aiming.present ? clamp_command_pitch(p_command, aiming.poses[size_t(p_pose)]) : p_command;
 }
 
 float Gunplay::received_damage(uint8_t p_victim, const sw::DamageEvent &p_event) const {

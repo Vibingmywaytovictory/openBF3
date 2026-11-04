@@ -279,7 +279,7 @@ struct GameServer::Impl {
 			const bool was_alive = soldier_alive(body.state);
 			const sim::SoldierState before = body.state;
 			if (!s.dummy) {
-				soldiers.command(i, match.restrict(body.last));
+				soldiers.command(i, combat.clamp_pitch(i, match.restrict(body.last), body.state.pose));
 			}
 			if (was_alive && !s.dummy && match.take_suicide(i)) {
 				soldiers.kill(i);

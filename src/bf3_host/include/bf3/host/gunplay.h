@@ -174,6 +174,8 @@ uint8_t match_weapon_flags(bool p_exact_aim, bool p_infinite_magazine);
 inline constexpr float kShotFrameMargin = 64.0f;
 net::ShotQuantization shot_frame(const sim::StaticWorldShapes &p_world);
 
+sim::Command clamp_command_pitch(const sim::Command &p_command, const core::gameplay::AimingPose &p_pose);
+
 using LoadoutChoices = std::array<std::array<std::optional<LoadoutChoice>, kKitCount>, kKitTeams>;
 
 class Gunplay {
@@ -213,6 +215,7 @@ public:
 	core::gameplay::SpecializationEffects effects(uint8_t p_slot) const;
 	uint32_t specialization_mask(uint8_t p_slot) const;
 	uint32_t spawn_specializations(uint8_t p_slot) const;
+	sim::Command clamp_pitch(uint8_t p_slot, const sim::Command &p_command, sim::Pose p_pose) const;
 	float received_damage(uint8_t p_victim, const sim::weapons::DamageEvent &p_event) const;
 	bool armed(uint8_t p_slot) const;
 	std::span<const sim::weapons::Deployable> deployables() const;

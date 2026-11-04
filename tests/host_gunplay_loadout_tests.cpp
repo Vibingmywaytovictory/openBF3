@@ -3,6 +3,7 @@
 #include "gunplay_fixture.h"
 #include "tdm_fixture.h"
 
+#include "bf3/core/math.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/loadout.h"
@@ -11,8 +12,10 @@
 #include "bf3/net/protocol.h"
 #include "bf3/sim/weapons/weapon_install.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -357,6 +360,69 @@ TEST_SUITE("host-gunplay-loadout") {
 		const sw::WeaponSimDef m16 = sim_def("weapons/m16a4/u_m16a4");
 		CHECK(host::spawn_magazines(m16, 0, boom) == m16.magazines);
 		CHECK(host::spawn_magazines(m16, 0, nades) == m16.magazines);
+		tdm::check_install_unchanged(*level);
+	}
+
+	TEST_CASE("pitch: the server clamps a command's pitch to the active weapon's aiming pose limits") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		std::unique_ptr<host::Gunplay> g = make_gunplay(*level);
+		g->on_spawn(0, uint8_t(host::KitRole::Assault), 1, 100);
+		REQUIRE(g->armed(0));
+		const sw::SoldierWeaponsState &w = g->weapons(0);
+		REQUIRE(w.slots[w.active].def < gl.defs.size());
+		const core::gameplay::WeaponAiming &aiming = gl.defs[w.slots[w.active].def].aiming;
+		REQUIRE(aiming.present);
+		const int16_t up = sim::quantize_pitch(85.0f * core::kDegToRadF);
+		const int16_t down = sim::quantize_pitch(-70.0f * core::kDegToRadF);
+		const auto pitched = [](float p_degrees) {
+			sim::Command c;
+			c.pitch = sim::quantize_pitch(p_degrees * core::kDegToRadF);
+			return c;
+		};
+		for (const sim::Pose pose : { sim::Pose::Stand, sim::Pose::Crouch, sim::Pose::Prone }) {
+			CAPTURE(int(pose));
+			CHECK(aiming.poses[size_t(pose)].min_pitch_deg == -70.0f);
+			CHECK(aiming.poses[size_t(pose)].max_pitch_deg == 85.0f);
+			CHECK(g->clamp_pitch(0, pitched(89.0f), pose).pitch == up);
+			CHECK(g->clamp_pitch(0, pitched(-89.0f), pose).pitch == down);
+			CHECK(g->clamp_pitch(0, pitched(30.0f), pose).pitch == pitched(30.0f).pitch);
+		}
+		CHECK(g->clamp_pitch(5, pitched(89.0f), sim::Pose::Stand).pitch == pitched(89.0f).pitch);
+
+		tdm::TdmRunConfig c;
+		c.bots = 0;
+		c.max_ticks = 900;
+		c.hashes = false;
+		int16_t highest = INT16_MIN, lowest = INT16_MAX;
+		uint32_t alive_ticks = 0;
+		c.on_tick = [&](sim::Tick p_now, host::GameServer &r_server, tdm::ScriptedPeer *p_peer) {
+			if (p_peer == nullptr || p_peer->slot() < 0) {
+				return;
+			}
+			const sim::SoldierState *own = r_server.soldier(uint32_t(p_peer->slot()));
+			if (!tdm::is_alive(own)) {
+				return;
+			}
+			++alive_ticks;
+			highest = std::max(highest, own->pitch);
+			lowest = std::min(lowest, own->pitch);
+			sim::Command cmd = pitched((p_now / 60) % 2 == 0 ? 89.0f : -89.0f);
+			cmd.yaw = own->yaw;
+			cmd.pose = own->target_pose;
+			p_peer->command(cmd);
+		};
+		core::Result<tdm::TdmRunResult> run = tdm::run_tdm(*level, c);
+		REQUIRE_MESSAGE(run.ok(), (run.ok() ? std::string() : run.error().message));
+		REQUIRE_MESSAGE(run->failure.empty(), run->failure);
+		std::printf("pitch: %u alive ticks, server pitch %d..%d (limits %d..%d of %d)\n", alive_ticks, int(lowest),
+				int(highest), int(down), int(up), int(sim::kPitchLimit));
+		REQUIRE(alive_ticks > 120);
+		CHECK(highest == up);
+		CHECK(lowest == down);
 		tdm::check_install_unchanged(*level);
 	}
 }

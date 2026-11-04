@@ -45,6 +45,10 @@ void Combat::step_soldier(size_t p_slot, const sim::Command &p_command, const si
 	gunplay_->step_soldier(uint8_t(p_slot), p_command, p_before, p_after);
 }
 
+sim::Command Combat::clamp_pitch(size_t p_slot, const sim::Command &p_command, sim::Pose p_pose) const {
+	return gunplay_ != nullptr ? gunplay_->clamp_pitch(uint8_t(p_slot), p_command, p_pose) : p_command;
+}
+
 void Combat::resolve(sim::Tick p_tick, const SlotTable &p_slots, const Soldiers &p_soldiers, CombatEventSink &r_sink) {
 	tick_states_.assign(p_slots.size(), sim::SoldierState());
 	for (size_t i = 0; i < p_slots.size(); ++i) {
