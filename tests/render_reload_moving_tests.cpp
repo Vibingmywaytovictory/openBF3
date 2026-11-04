@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "bf3/anim/hand_reach.h"
 #include "bf3/anim/pose.h"
 #include "bf3/anim/viewmodel_anim.h"
 #include "bf3/core/install.h"
@@ -32,14 +33,18 @@ struct Gait {
 	float speed;
 	bool sprinting;
 };
-constexpr Gait kGaits[] = { { "walking", 1.0f, false }, { "running", 4.0f, false }, { "sprinting", 6.5f, true } };
+constexpr Gait kGaits[] = { { "standing", 0.0f, false }, { "walking", 1.0f, false }, { "running", 4.0f, false },
+	{ "sprinting", 6.5f, true } };
 
 struct Action {
 	const char *name;
 	bool reload;
 	bool empty;
+	bool fire;
 };
-constexpr Action kActions[] = { { "idle", false, false }, { "reload", true, false }, { "empty reload", true, true } };
+constexpr Action kActions[] = { { "idle", false, false, false }, { "reload", true, false, false },
+	{ "empty reload", true, true, false }, { "fire", false, false, true } };
+constexpr double kFireSeconds = 1.5;
 
 constexpr const char *kHands[] = { "LeftHand", "RightHand" };
 
@@ -55,6 +60,7 @@ struct Weapon {
 struct Drift {
 	std::array<double, 2> worst{};
 	std::array<int, 2> out_of_reach{};
+	std::array<double, 2> out_of_reach_worst{};
 };
 
 Drift hand_drift(const render::ViewmodelSet &p_set, const render::ViewmodelItem &p_item, const Gait &p_gait,
@@ -64,15 +70,17 @@ Drift hand_drift(const render::ViewmodelSet &p_set, const render::ViewmodelItem 
 	anim::ViewmodelAnimator moving(p_set.rig, refs, tuning);
 	anim::ViewmodelAnimator plain(p_set.rig, refs, tuning);
 	moving.set_locomotion(render::viewmodel_locomotion(p_item));
+	moving.set_hand_reach(p_set.hand_reach);
+	const bool standing = !(p_gait.speed > 0.0f) && !p_gait.sprinting;
 	const int32_t root = p_set.rig.find("Wep_Root");
 	const std::array<int32_t, 2> hands{ p_set.rig.find(kHands[0]), p_set.rig.find(kHands[1]) };
 	const std::array<int32_t, 2> shoulders{ p_set.rig.find("LeftArm"), p_set.rig.find("RightArm") };
 	const std::array<int32_t, 2> elbows{ p_set.rig.find("LeftForeArm"), p_set.rig.find("RightForeArm") };
-	const std::array<int32_t, 2> effectors{ p_set.rig.find("IK_Joint_LeftHand"), p_set.rig.find("IK_Joint_RightHand") };
 	const anim::VmClipRef &reload = refs[size_t(p_action.empty ? anim::VmClip::ReloadEmpty : anim::VmClip::Reload)];
 	const float reload_seconds =
 			reload.seconds > 0.0f ? reload.seconds : (reload.tracks ? reload.tracks->duration_seconds() : 0.0f);
-	const int frames = kSettleFrames + int((p_action.reload ? reload_seconds : 1.0f) / float(kFrameSeconds)) + 12;
+	const double action_seconds = p_action.reload ? double(reload_seconds) : (p_action.fire ? kFireSeconds : 1.0);
+	const int frames = kSettleFrames + int(action_seconds / kFrameSeconds) + 12;
 	anim::ViewmodelFrameInput in;
 	in.speed = p_gait.speed;
 	in.sprinting = p_gait.sprinting;
@@ -87,6 +95,10 @@ Drift hand_drift(const render::ViewmodelSet &p_set, const render::ViewmodelItem 
 		if (p_action.reload && f == kSettleFrames) {
 			cues.push_back(anim::VmCue{ anim::VmCue::Kind::ReloadStarted, in.time_s, p_action.empty });
 		}
+		if (p_action.fire && f == kSettleFrames) {
+			cues.push_back(anim::VmCue{ anim::VmCue::Kind::Shot, in.time_s, false });
+			cues.push_back(anim::VmCue{ anim::VmCue::Kind::BoltStarted, in.time_s, false });
+		}
 		moving.step(in, cues, moving_pose, moving_out);
 		plain.step(in, cues, plain_pose, plain_out);
 		if (f < kSettleFrames) {
@@ -94,22 +106,22 @@ Drift hand_drift(const render::ViewmodelSet &p_set, const render::ViewmodelItem 
 		}
 		anim::model_pose(p_set.rig, moving_pose, moving_model);
 		anim::model_pose(p_set.rig, plain_pose, plain_model);
+		const anim::Xform moving_frame = standing ? anim::Xform{} : moving_model[size_t(root)];
+		const anim::Xform plain_frame = standing ? anim::Xform{} : plain_model[size_t(root)];
 		for (size_t h = 0; h < hands.size(); ++h) {
-			const auto out_of_reach = [&](const std::vector<anim::Xform> &p_model) {
-				const auto at = [&](int32_t p_joint) { return p_model[size_t(p_joint)].t; };
-				const double arm_length =
-						anim::vec_dist(at(shoulders[h]), at(elbows[h])) + anim::vec_dist(at(elbows[h]), at(hands[h]));
-				return anim::vec_dist(at(shoulders[h]), at(effectors[h])) > arm_length - kHeldMetres;
-			};
-			if (out_of_reach(plain_model) || out_of_reach(moving_model)) {
+			const anim::Xform on_frame =
+					anim::xform_mul(anim::xform_inverse(plain_frame), plain_model[size_t(hands[h])]);
+			const anim::Vec3 place = anim::xform_mul(moving_frame, on_frame).t;
+			const auto at = [&](int32_t p_joint) { return moving_model[size_t(p_joint)].t; };
+			const double arm_length =
+					anim::vec_dist(at(shoulders[h]), at(elbows[h])) + anim::vec_dist(at(elbows[h]), at(hands[h]));
+			const double off = anim::vec_dist(at(hands[h]), place);
+			if (anim::vec_dist(at(shoulders[h]), place) > arm_length - kHeldMetres) {
 				++drift.out_of_reach[h];
+				drift.out_of_reach_worst[h] = std::max(drift.out_of_reach_worst[h], off);
 				continue;
 			}
-			const anim::Vec3 a =
-					anim::xform_mul(anim::xform_inverse(moving_model[size_t(root)]), moving_model[size_t(hands[h])]).t;
-			const anim::Vec3 b =
-					anim::xform_mul(anim::xform_inverse(plain_model[size_t(root)]), plain_model[size_t(hands[h])]).t;
-			drift.worst[h] = std::max(drift.worst[h], anim::vec_dist(a, b));
+			drift.worst[h] = std::max(drift.worst[h], off);
 		}
 	}
 	return drift;
@@ -119,8 +131,7 @@ Drift hand_drift(const render::ViewmodelSet &p_set, const render::ViewmodelItem 
 
 TEST_SUITE("render-viewmodel-reload-moving") {
 	TEST_CASE("1p reload while walking, running and sprinting: each kit's weapons stay in the hands that hold them "
-			  "without the "
-			  "locomotion deltas") {
+			  "without the locomotion deltas, and standing the hand reach leaves the clips' hands where they are") {
 		core::InstallReader reader;
 		if (!reader.locate({})) {
 			test::skip_install_case(reader.describe().c_str());
@@ -160,7 +171,15 @@ TEST_SUITE("render-viewmodel-reload-moving") {
 				}
 			}
 		}
-		REQUIRE(weapons.size() >= 8);
+		for (uint8_t team = 1; team <= host::kKitTeams; ++team) {
+			for (const host::LoadoutWeapon &lw : host::loadout_weapons(catalog, team)) {
+				if ((lw.unlock == "weapons/m40a5/u_m40a5" || lw.unlock == "weapons/remington870/u_870") &&
+						seen.insert(std::to_string(team) + lw.unlock).second) {
+					weapons.push_back(Weapon{ team, lw.unlock, {}, {}, 0.0, {} });
+				}
+			}
+		}
+		REQUIRE(weapons.size() >= 10);
 		core::Result<std::unique_ptr<render::ViewmodelSources>> sources =
 				render::open_viewmodel_sources(reader, kLevel, nullptr);
 		REQUIRE_MESSAGE(sources.ok(), (sources.ok() ? "" : sources.error().message));
@@ -189,17 +208,35 @@ TEST_SUITE("render-viewmodel-reload-moving") {
 					return;
 				}
 			}
+			const anim::Skeleton &rig = (*set)->rig;
+			for (size_t a = 0; a < 2; ++a) {
+				const anim::HandReachArm &arm = (*set)->hand_reach.arms[a];
+				const std::string side = a == 0 ? "Left" : "Right";
+				const bool usable = arm.usable(rig.size());
+				if (!usable || rig.bone(size_t(arm.arm)).name != side + "Arm" ||
+						rig.bone(size_t(arm.fore)).name != side + "ForeArm" ||
+						rig.bone(size_t(arm.hand)).name != side + "Hand" ||
+						rig.bone(size_t(arm.effector)).name != "IK_Joint_" + side + "Hand" || arm.reach != 1.0f) {
+					w.error = "the rig's hand reach is not " + side + "Arm, ForeArm, Hand to IK_Joint_" + side +
+							"Hand at reach 1";
+					for (const std::string &n : (*set)->notes) {
+						if (n.find("hand reach") != std::string::npos) {
+							w.error += "; " + n;
+						}
+					}
+					return;
+				}
+			}
 			const render::ViewmodelItem &item = (*set)->items[0];
 			for (const Gait &g : kGaits) {
 				for (const Action &a : kActions) {
 					const Drift d = hand_drift(**set, item, g, a);
-					char line[240];
+					char line[300];
 					std::snprintf(line, sizeof(line),
-							"%s %s: LeftHand %.1f mm, RightHand %.1f mm; frames with the effector out of the arm's "
-							"reach: "
-							"%d left, %d right",
+							"%s %s: LeftHand %.1f mm, RightHand %.1f mm; frames with the hand's place out of the arm's "
+							"reach: %d left, %d right, at most %.1f and %.1f mm off there",
 							a.name, g.name, d.worst[0] * 1000.0, d.worst[1] * 1000.0, d.out_of_reach[0],
-							d.out_of_reach[1]);
+							d.out_of_reach[1], d.out_of_reach_worst[0] * 1000.0, d.out_of_reach_worst[1] * 1000.0);
 					w.lines.push_back(line);
 					if (std::max(d.worst[0], d.worst[1]) > w.worst) {
 						w.worst = std::max(d.worst[0], d.worst[1]);
@@ -220,7 +257,8 @@ TEST_SUITE("render-viewmodel-reload-moving") {
 			}
 		}
 		MESSAGE(weapons.size(), " weapons, ", std::size(kGaits), " gaits, ", std::size(kActions), " actions; ",
-				drifting.size(), " with a hand more than ", kHeldMetres * 1000.0, " mm off its place on the weapon");
+				drifting.size(), " with a hand more than ", kHeldMetres * 1000.0,
+				" mm off its place (on the weapon while moving, in the view standing)");
 		for (const std::string &d : drifting) {
 			MESSAGE("drift: ", d);
 		}

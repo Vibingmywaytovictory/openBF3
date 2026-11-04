@@ -755,6 +755,11 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		return rig_skeleton.error();
 	}
 	set->rig = std::move(*rig_skeleton);
+	if (core::Result<anim::HandReach> reach = anim::read_hand_reach(ant, set->rig, kRigName)) {
+		set->hand_reach = *reach;
+	} else {
+		set->notes.push_back(reach.error().message + " (the hands are not held on the weapon)");
+	}
 	const anim::LocalPose rest = anim::rest_pose(set->rig);
 
 	set->arms.mesh = p_spec.arms_mesh;

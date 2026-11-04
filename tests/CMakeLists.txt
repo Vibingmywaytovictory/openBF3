@@ -663,7 +663,7 @@ target_compile_definitions(test_host_gunplay_server PRIVATE "OPENBF3_MOTOR_TUNIN
 add_test(NAME host.gunplay.server COMMAND test_host_gunplay_server --test-suite=host-gunplay-server)
 set_tests_properties(host.gunplay.server PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE)
 
-openbf3_test(test_anim_viewmodel test_main.cpp anim_viewmodel_tests.cpp weapons_support.h test_support.h)
+openbf3_test(test_anim_viewmodel test_main.cpp anim_viewmodel_tests.cpp anim_hand_reach_tests.cpp weapons_support.h test_support.h)
 target_link_libraries(test_anim_viewmodel PRIVATE bf3_anim bf3_sim bf3_sim_harness)
 target_compile_definitions(test_anim_viewmodel PRIVATE "OPENBF3_VIEWMODEL_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/viewmodel_tuning.cfg\"")
 add_test(NAME anim.viewmodel.unit COMMAND test_anim_viewmodel --test-suite=anim-viewmodel-unit)

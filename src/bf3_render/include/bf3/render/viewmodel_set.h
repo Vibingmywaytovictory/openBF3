@@ -200,6 +200,7 @@ anim::AdsParams viewmodel_ads_params(const ViewmodelItem &p_item, const anim::Vi
 struct ViewmodelSet {
 	std::shared_ptr<core::ant::AntLibrary> library;
 	anim::Skeleton rig;
+	anim::HandReach hand_reach;
 	anim::EbxSkeleton arms_skeleton;
 	anim::EbxSkeleton weapon_skeleton;
 	ViewmodelPart arms;

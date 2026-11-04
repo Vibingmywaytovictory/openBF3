@@ -484,6 +484,7 @@ void Bf3Viewmodel::select_item(int p_index) {
 		animator_->set_locomotion(bf3::render::viewmodel_locomotion(*n.item));
 	}
 	animator_->set_throw_flow(n.item->throw_flow);
+	animator_->set_hand_reach(set_->hand_reach);
 	ads_params_ = bf3::render::viewmodel_ads_params(*n.item, tuning_);
 	viewmodel_fov_ = -1;
 	set_viewmodel_fov(ads_params_.render_fov);

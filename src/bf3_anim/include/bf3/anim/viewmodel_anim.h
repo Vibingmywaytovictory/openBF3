@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/anim/hand_reach.h"
 #include "bf3/anim/pose.h"
 #include "bf3/anim/pose_math.h"
 #include "bf3/anim/skeleton.h"
@@ -163,6 +164,8 @@ public:
 	void set_locomotion(const VmLocomotion &p_locomotion);
 
 	void set_throw_flow(const VmThrowFlow &p_flow);
+
+	void set_hand_reach(const HandReach &p_reach);
 
 private:
 	struct Impl;

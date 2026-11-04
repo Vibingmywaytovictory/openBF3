@@ -450,6 +450,8 @@ struct ViewmodelAnimator::Impl {
 	SpringState sway_x, sway_y, bob_amp, kick_back, kick_pitch, cam_pitch, cam_yaw;
 	float sway_tx = 0, sway_ty = 0, bob_target = 0;
 	std::unique_ptr<VmDeltaLoco, VmDeltaLocoDeleter> delta_loco;
+	HandReach hand_reach;
+	std::vector<Xform> held_model, reach_model;
 
 	VmThrowFlow flow;
 	bool has_flow = false;
@@ -882,7 +884,14 @@ struct ViewmodelAnimator::Impl {
 			pitch -= 10.0f * core::kDegToRadF * s;
 		}
 
+		const bool held = delta_loco && hand_reach.any(rig.size());
+		if (held) {
+			model_pose(rig, r_pose, held_model);
+		}
 		const bool loco_applied = delta_loco && vm_loco_apply(*delta_loco, p_input, sprint_w, ads, dt, tuning.sprint_blend_seconds, r_pose, r_out);
+		if (held && loco_applied && (r_out.loco_run_weight > 0.0f || r_out.loco_sprint_weight > 0.0f)) {
+			reach_hands(rig, hand_reach, held_model, r_pose, reach_model);
+		}
 
 		const float speed = std::max(0.0f, finite_or(p_input.speed, 0.0f));
 		sway_tx = std::clamp(finite_or(p_input.view_yaw_rate, 0.0f) * tuning.sway_scale, -tuning.sway_max, tuning.sway_max);
@@ -1084,6 +1093,10 @@ bool VmThrowFlow::valid() const {
 	return ok(release_from_s) && ok(release_until_s) && ok(release_in_s) && ok(hold_from_s) && ok(release_end_s) &&
 			std::isfinite(hold_loop_s) && hold_loop_s > 0.0f && release_until_s >= release_from_s &&
 			release_end_s > release_in_s;
+}
+
+void ViewmodelAnimator::set_hand_reach(const HandReach &p_reach) {
+	impl_->hand_reach = p_reach;
 }
 
 void ViewmodelAnimator::set_throw_flow(const VmThrowFlow &p_flow) {

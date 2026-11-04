@@ -41,6 +41,8 @@ target_sources(bf3_anim PRIVATE
 
 target_sources(bf3_anim PRIVATE
     src/viewmodel_anim.cpp
+    src/hand_reach.cpp
+    include/bf3/anim/hand_reach.h
 )
 
 target_sources(bf3_anim PRIVATE
