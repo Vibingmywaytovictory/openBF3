@@ -14,6 +14,7 @@
 #include "bf3/render/look_materials.h"
 #include "bf3/render/material_lookup.h"
 #include "bf3/render/mesh_cache.h"
+#include "bf3/render/weapon_camo.h"
 
 #include <algorithm>
 #include <chrono>
@@ -790,6 +791,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		if (!def) {
 			return core::error_at(spec.unlock, def.error());
 		}
+		item.weapon.variation_hash = weapon_camo_hash(lib, spec.accessories, def->blueprint);
 		item.render_fov = def->render_fov;
 		item.zoom_render_fov = def->zoom_render_fov;
 		item.deploy_time = def->deploy_time;
@@ -1043,6 +1045,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 			return st.error();
 		}
 		for (ViewmodelAttachment &a : item.attachments) {
+			a.part.variation_hash = item.weapon.variation_hash;
 			if (core::Status st = materials(a.part); !st.ok()) {
 				return core::error_at(item.unlock, st.error());
 			}

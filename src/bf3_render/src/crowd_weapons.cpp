@@ -9,6 +9,7 @@
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/thread_pool.h"
 #include "bf3/render/mesh_cache.h"
+#include "bf3/render/weapon_camo.h"
 
 #include <algorithm>
 #include <chrono>
@@ -37,18 +38,6 @@ anim::Xform xform_of(const anim::Mat34 &p_m) {
 std::string partition_name(const core::EbxLibrary &p_library, const core::EbxInstance &p_instance) {
 	const std::optional<std::string_view> n = p_library.name_of(p_instance.partition().guid());
 	return n ? std::string(*n) : std::string();
-}
-
-uint32_t variation_hash_of(const core::EbxLibrary &p_library, const std::string &p_variation) {
-	if (p_variation.empty()) {
-		return 0;
-	}
-	const core::EbxPartition *part = p_library.partition_by_name(p_variation);
-	if (part == nullptr) {
-		return 0;
-	}
-	const std::optional<core::EbxValue> h = part->primary().get("NameHash");
-	return h ? h->as_u32().value_or(0) : 0;
 }
 
 core::Result<core::EbxInstance> soldier_weapon_data(const core::EbxLibrary &p_library, const std::string &p_partition) {
@@ -192,7 +181,8 @@ core::Status attach_accessories(const core::EbxLibrary &p_lib, const SoldierSpec
 			if (mesh->mesh.meshes.size() != 1) {
 				return core::make_error(o.mesh_3p + ": LOD " + std::to_string(lod) + " not prepared");
 			}
-			core::Result<MeshMaterials> materials = mesh_materials(p_lib, o.mesh_3p, 0, p_databases);
+			core::Result<MeshMaterials> materials = mesh_materials(p_lib, o.mesh_3p,
+					weapon_camo_hash(p_lib, r_part.spec.accessories, r_part.spec.weapon_unlock), p_databases);
 			if (!materials) {
 				return core::error_at(o.mesh_3p, materials.error());
 			}
@@ -308,7 +298,8 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 		}
 	}
 
-	core::Result<MeshMaterials> materials = mesh_materials(p_lib, spec.mesh, variation_hash_of(p_lib, std::string()), p_databases);
+	core::Result<MeshMaterials> materials = mesh_materials(
+			p_lib, spec.mesh, weapon_camo_hash(p_lib, spec.accessories, spec.weapon_unlock), p_databases);
 	if (!materials) {
 		return core::error_at(spec.mesh, materials.error());
 	}

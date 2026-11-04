@@ -17,6 +17,7 @@
 #include "bf3/render/mesh_cache.h"
 #include "bf3/render/soldier_assets.h"
 #include "bf3/render/viewmodel_set.h"
+#include "bf3/render/weapon_camo.h"
 #include "bf3/render/weapon_sockets.h"
 #include "game_crowd_items.h"
 #include "test_support.h"
@@ -481,6 +482,7 @@ struct AccessoryRow {
 	std::vector<std::string> meshes;
 	size_t sockets = 0;
 	size_t modifiers = 0;
+	std::string camo;
 	std::string error;
 	std::string facts;
 };
@@ -488,8 +490,48 @@ struct AccessoryRow {
 constexpr const char *kAccessoryGap = "an unlock that no SocketData, WeaponModifierData or GunSwayModifierData names";
 constexpr const char *kCamouflageGap = " (camouflage)";
 
+std::array<std::string, 2> weapon_meshes(const core::EbxResolver &p_db, const core::EbxInstance &p_swd) {
+	std::array<std::string, 2> out;
+	const std::optional<core::EbxValue> states = p_swd.get("WeaponStates");
+	const core::OptionalEbxArray arr = states ? states->as_array() : core::OptionalEbxArray();
+	const std::optional<core::EbxValue> s0 = arr && arr->size() > 0 ? arr->get(0) : std::nullopt;
+	const std::optional<core::EbxStruct> st = s0 ? s0->as_struct() : std::nullopt;
+	for (size_t k = 0; st && k < out.size(); ++k) {
+		if (const std::optional<core::EbxInstance> m = p_db.follow(*st, k == 0 ? "Mesh1p" : "Mesh3p")) {
+			out[k] = std::string(p_db.name_of(m->partition().guid()).value_or(std::string_view()));
+		}
+	}
+	return out;
+}
+
+std::string camo_textures(const core::EbxLibrary &p_lib, const std::array<std::string, 2> &p_meshes,
+		const render::WeaponCamo &p_camo, const std::vector<std::string> &p_databases, std::string &r_error) {
+	std::string out;
+	for (const std::string &mesh : p_meshes) {
+		core::Result<render::MeshMaterials> m = render::mesh_materials(p_lib, mesh, p_camo.variation_hash, p_databases);
+		if (!m) {
+			r_error = "camo " + p_camo.variation + ": " + m.error().message;
+			return out;
+		}
+		if (m->variation_hash != p_camo.variation_hash) {
+			r_error = "camo " + p_camo.variation + ": " + mesh + " has no MeshVariationDatabaseEntry for it";
+			return out;
+		}
+		std::string texture;
+		for (const render::MaterialSlot &slot : m->slots) {
+			texture = texture.empty() ? slot.texture(render::kCamoTextureParameter) : texture;
+		}
+		if (texture.empty()) {
+			r_error = "camo " + p_camo.variation + ": no slot of " + mesh + " names a Camo texture";
+			return out;
+		}
+		out += (out.empty() ? "" : ", ") + mesh + " " + texture;
+	}
+	return out;
+}
+
 std::string accessory_gap(const AccessoryRow &p_row) {
-	if (p_row.sockets != 0 || p_row.modifiers != 0 ||
+	if (p_row.sockets != 0 || p_row.modifiers != 0 || !p_row.camo.empty() ||
 			p_row.unlock.starts_with(core::gameplay::kNoAccessoryUnlockPrefix)) {
 		return {};
 	}
@@ -548,6 +590,7 @@ TEST_SUITE("render-catalog-accessories") {
 			}
 		}
 		REQUIRE(weapons.size() == 2 * 61);
+		const std::vector<std::string> databases = render::variation_database_names(lib);
 		t0 = std::chrono::steady_clock::now();
 		core::parallel_for(weapons.size(), [&](size_t i) {
 			Weapon &w = weapons[i];
@@ -560,7 +603,12 @@ TEST_SUITE("render-catalog-accessories") {
 				return;
 			}
 			const std::vector<render::WeaponSocket> sockets = render::read_weapon_sockets(lib, swd.front());
+			const std::array<std::string, 2> meshes = weapon_meshes(lib, swd.front());
 			for (size_t a = 0; a < host::kLoadoutAccessories; ++a) {
+				bool camo_slot = false;
+				for (const std::string &unlock : w.item->accessory_unlocks[a]) {
+					camo_slot |= render::weapon_camo(lib, unlock, base->blueprint).has_value();
+				}
 				for (const std::string &unlock : w.item->accessory_unlocks[a]) {
 					AccessoryRow row;
 					row.team = w.team;
@@ -584,6 +632,14 @@ TEST_SUITE("render-catalog-accessories") {
 							}
 						}
 					}
+					if (const std::optional<render::WeaponCamo> camo =
+									render::weapon_camo(lib, unlock, base->blueprint)) {
+						row.camo = camo->variation;
+						row.facts = "camo " + camo_textures(lib, meshes, *camo, databases, row.error) + "; ";
+					} else if (camo_slot && render::unlock_links_nothing(lib, unlock)) {
+						row.camo = "the default materials";
+						row.facts = "camo: links nothing, the default materials; ";
+					}
 					core::gameplay::WeaponResolveOptions opt;
 					opt.unlocks = { unlock };
 					core::Result<core::gameplay::WeaponDef> d =
@@ -599,7 +655,7 @@ TEST_SUITE("render-catalog-accessories") {
 								row.modifiers += core::to_lower_ascii(g.unlock) == unlock ? 1u : 0u;
 							}
 						}
-						row.facts = "zoom fov " + std::to_string(int(d->zoom_render_fov)) + ", controller " +
+						row.facts += "zoom fov " + std::to_string(int(d->zoom_render_fov)) + ", controller " +
 								d->aiming_controller + ", sound " + d->sound + (d->silenced ? ", silenced" : "");
 					}
 					w.rows.push_back(std::move(row));
@@ -626,7 +682,7 @@ TEST_SUITE("render-catalog-accessories") {
 		const double s_rows = seconds_since(t0);
 		std::vector<std::string> failed;
 		std::map<std::string, size_t> gaps;
-		size_t rows = 0, with_mesh = 0, with_modifiers = 0;
+		size_t rows = 0, with_mesh = 0, with_modifiers = 0, camos = 0, default_camos = 0;
 		for (const Weapon &w : weapons) {
 			if (!w.error.empty()) {
 				failed.push_back(w.item->unlock + ": " + w.error);
@@ -643,6 +699,8 @@ TEST_SUITE("render-catalog-accessories") {
 				const std::string gap = accessory_gap(r);
 				with_mesh += r.meshes.empty() ? 0u : 1u;
 				with_modifiers += r.modifiers != 0 ? 1u : 0u;
+				camos += !r.camo.empty() && r.camo.starts_with("weapons/") ? 1u : 0u;
+				default_camos += !r.camo.empty() && !r.camo.starts_with("weapons/") ? 1u : 0u;
 				const std::string verdict =
 						!error.empty() ? "FAIL " + error : (!gap.empty() ? "data gap: " + gap : std::string("ok"));
 				std::printf("render.catalog_accessories team %u %s slot %zu %s: %s; %zu sockets, %zu meshes, %zu "
@@ -657,15 +715,16 @@ TEST_SUITE("render-catalog-accessories") {
 			}
 		}
 		MESSAGE(rows, " accessories of ", weapons.size(), " (team, primary) pairs: ", with_mesh,
-				" with socket meshes (", meshes.size(), " distinct), ", with_modifiers,
-				" with weapon modifiers; setup ", s_setup, " s, rows ", s_rows, " s");
+				" with socket meshes (", meshes.size(), " distinct), ", with_modifiers, " with weapon modifiers, ",
+				camos, " camouflages with their variation, ", default_camos,
+				" that link nothing (the default materials); setup ", s_setup, " s, rows ", s_rows, " s");
 		for (const auto &[gap, n] : gaps) {
 			MESSAGE("data gap: ", n, " accessories: ", gap);
 		}
 		CHECK(rows == listed);
-		CHECK(gaps ==
-				std::map<std::string, size_t>{
-						{ kAccessoryGap, 14 }, { std::string(kAccessoryGap) + kCamouflageGap, 104 } });
+		CHECK(gaps == std::map<std::string, size_t>{ { kAccessoryGap, 14 } });
+		CHECK(camos == 76);
+		CHECK(default_camos == 38);
 		CHECK_MESSAGE(
 				failed.empty(), failed.size(), " fail, the first: ", failed.empty() ? std::string() : failed.front());
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
@@ -745,6 +804,32 @@ TEST_SUITE("render-catalog-accessories-1p") {
 		CHECK(b.ads.controller == "weapons/common/aimingcontrollers/aim_default_4x");
 		CHECK(b.ads.zoom_fov < a.ads.zoom_fov);
 		CHECK(b.zoom_render_fov == doctest::Approx(15.0f));
+		CHECK(b.weapon.variation_hash == 0);
+		uint8_t m416_team = 0;
+		const host::LoadoutItem *m416 = catalog_primary(level.loadouts, "weapons/m416/u_m416", m416_team);
+		REQUIRE(m416 != nullptr);
+		std::array<uint32_t, host::kLoadoutAccessories> m416_picks{};
+		for (size_t slot = 0; slot < host::kLoadoutAccessories; ++slot) {
+			const uint32_t light = accessory_ending(*m416, slot, "_flashlight");
+			m416_picks[slot] = light != 0 ? light : accessory_ending(*m416, slot, "_camo_1");
+		}
+		render::ViewmodelSetSpec lit =
+				render::team_viewmodel_items(m416_team, std::span<const std::string>(&m416->unlock, 1));
+		lit.superbundle = kLevel;
+		const host::LoadoutAccessorySet lit_set = host::loadout_accessory_set(*m416, m416_picks);
+		lit.items[0].accessories = render::WeaponAccessories{ lit_set.active, lit_set.listed };
+		core::Result<std::unique_ptr<render::ViewmodelSet>> m416_set =
+				render::load_viewmodel_set(**sources, lit, nullptr);
+		REQUIRE_MESSAGE(m416_set.ok(), (m416_set.ok() ? "" : m416_set.error().message));
+		const render::ViewmodelItem &c = (*m416_set)->items[0];
+		MESSAGE("M416 with camo 1: variation ", c.weapon.variation_hash);
+		CHECK(c.weapon.variation_hash == 1200125952u);
+		CHECK(c.weapon.materials.variation_hash == 1200125952u);
+		std::string camo;
+		for (const render::MaterialSlot &slot : c.weapon.materials.slots) {
+			camo = camo.empty() ? slot.texture(render::kCamoTextureParameter) : camo;
+		}
+		CHECK(core::to_lower_ascii(camo) == "characters/shared/xp2_clothcamo/abu");
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
 		CHECK(diff.clean());
 	}
@@ -826,6 +911,31 @@ TEST_SUITE("render-catalog-accessories-3p") {
 			CHECK(s.material_index < b.materials.slots.size());
 			CHECK(s.bones.size() == s.vertex_count() * 4);
 		}
+		CHECK(b.materials.variation_hash == 0);
+		uint8_t m416_team = 0;
+		const host::LoadoutItem *m416 = catalog_primary(level.loadouts, "weapons/m416/u_m416", m416_team);
+		REQUIRE(m416 != nullptr);
+		std::array<uint32_t, host::kLoadoutAccessories> camo_picks{};
+		for (size_t slot = 0; slot < host::kLoadoutAccessories; ++slot) {
+			camo_picks[slot] = accessory_ending(*m416, slot, "_camo_1");
+		}
+		render::CrowdWeaponSpec camo_item = godot_side::catalog_crowd_spec(level, m416->def);
+		const host::LoadoutAccessorySet camo_set = host::loadout_accessory_set(*m416, camo_picks);
+		camo_item.accessories = render::WeaponAccessories{ camo_set.active, camo_set.listed };
+		std::array<std::span<const render::CrowdWeaponSpec>, 2> camo_items{};
+		camo_items[0] = std::span<const render::CrowdWeaponSpec>(&camo_item, 1);
+		core::Result<std::unique_ptr<render::CrowdWeaponSet>> camo =
+				render::load_crowd_weapons(**ebx, spec, **assets, camo_items, nullptr);
+		REQUIRE_MESSAGE(camo.ok(), (camo.ok() ? "" : camo.error().message));
+		REQUIRE((*camo)->teams[0].size() == 1);
+		const render::CrowdWeaponPart &c = (*camo)->teams[0][0];
+		std::string camo_texture;
+		for (const render::MaterialSlot &slot : c.materials.slots) {
+			camo_texture = camo_texture.empty() ? slot.texture(render::kCamoTextureParameter) : camo_texture;
+		}
+		MESSAGE("M416 3p with camo 1: variation ", c.materials.variation_hash, ", Camo texture ", camo_texture);
+		CHECK(c.materials.variation_hash == 1200125952u);
+		CHECK(core::to_lower_ascii(camo_texture) == "characters/shared/xp2_clothcamo/abu");
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
 		CHECK(diff.clean());
 	}

@@ -67,3 +67,8 @@ target_sources(bf3_render PRIVATE
     include/bf3/render/weapon_sockets.h
     src/weapon_sockets.cpp
 )
+
+target_sources(bf3_render PRIVATE
+    include/bf3/render/weapon_camo.h
+    src/weapon_camo.cpp
+)
