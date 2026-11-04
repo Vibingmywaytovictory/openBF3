@@ -2988,3 +2988,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * The dedicated server's --bot-squads=off keeps the bots in their squads without a SquadBot (no goal, order or squad spawn), the control of net.procs.bots_squads; host.tdm.squads_off, host.server.level.
 * The TDM HUD feed gets the presented soldiers, so a living squad mate's deploy row is available, also before the first spawn, and the own position, so LONGEST HEADSHOT measures from the player; the owner's playtest (no row: the Godot glue).
 * The game's --squad-check=<name> (host::SquadJoin) switches to that player's team, joins its squad, deploys on it through the spawn screen's SelectSpawnPoint action and prints the squads at round over; host.squad_join.unit.
+* bf3dump client --squad=create leads a squad of its own and --until=round-over stops at round over and writes the squads to its stats file; checked by net.procs.bots_squads (main only).

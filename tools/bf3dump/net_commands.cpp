@@ -10,6 +10,7 @@
 #include "bf3/host/duel.h"
 #include "bf3/host/level_load.h"
 #include "bf3/host/load_bots.h"
+#include "bf3/host/squad_join.h"
 #include "bf3/net/loopback_ping.h"
 #include "bf3/net/netsim.h"
 #include "bf3/present/effect_seed.h"
@@ -72,6 +73,8 @@ struct NetArgs {
 	uint32_t levels = 0;
 	uint32_t threads = 0;
 	uint32_t seed = 1;
+	bool squad_create = false;
+	bool until_round_over = false;
 };
 
 bool parse_script(std::string_view p_text, Script &r_script) {
@@ -134,6 +137,12 @@ std::string parse_net_args(const std::vector<std::string> &p_args, bool p_client
 		} else if (p_client && key == "--motor-tuning") {
 			r_args.motor_tuning = std::string(value);
 			ok = ok && !value.empty();
+		} else if (p_client && key == "--squad") {
+			r_args.squad_create = value == "create";
+			ok = ok && r_args.squad_create;
+		} else if (p_client && key == "--until") {
+			r_args.until_round_over = value == "round-over";
+			ok = ok && r_args.until_round_over;
 		} else if (p_client && key == "--threads") {
 			ok = ok && core::parse_u32_value(value, 0.0, 64.0, r_args.threads).fault == core::KeyFault::None;
 		} else if (!p_client && key == "--count") {
@@ -172,6 +181,18 @@ net::NetSimConfig netsim_of(const NetArgs &p_args, uint64_t p_salt) {
 	net::NetSimConfig c = *net::parse_netsim(p_args.netsim);
 	c.seed = uint64_t(p_args.seed) * 7919u + p_salt;
 	return c;
+}
+
+bool leads_a_squad_alone(std::span<const net::PlayerRow> p_rows, uint8_t p_slot) {
+	const net::PlayerRow *own = nullptr;
+	for (const net::PlayerRow &row : p_rows) {
+		own = row.slot == p_slot ? &row : own;
+	}
+	if (own == nullptr || own->squad == 0 || !own->leader) {
+		return false;
+	}
+	return std::count_if(p_rows.begin(), p_rows.end(),
+				   [own](const net::PlayerRow &r) { return r.team == own->team && r.squad == own->squad; }) == 1;
 }
 
 struct ShotSeen {
@@ -227,7 +248,7 @@ const char *net_usage() {
 		   "[--seconds=S]\n"
 		   "      [--stats-file=<path>] [--build-override=N] [--cache=<dir>] [--config-dir=<dir>] "
 		   "[--motor-tuning=<cfg>]\n"
-		   "      [--name=N] [--kit=K] [--seed=N] [--threads=N]\n"
+		   "      [--name=N] [--kit=K] [--seed=N] [--threads=N] [--squad=create] [--until=round-over]\n"
 		   "  loadbots <host:port> <LEVEL> <MODE> [--count=N] [--seconds=S] [--netsim=<profile>] [--build-override=N]\n"
 		   "      [--name=N] [--kit=K] [--seed=N] [--stall-level=N] [--levels=N]\n"
 		   "      [--script=walk|walkfire]\n";
@@ -306,6 +327,10 @@ int cmd_client(const core::InstallReader &p_reader, const std::shared_ptr<core::
 	const bool fires = a.script == Script::Fire || a.script == Script::WalkFire;
 	host::DuelStrafe strafe;
 	uint32_t teleports = 0;
+	bool squad_created = false;
+	uint32_t squad_requests = 0;
+	auto last_squad_request = std::chrono::steady_clock::time_point();
+	std::string squads;
 	host::ClientStats last{};
 	while (!g_stop.load(std::memory_order_acquire)) {
 		const double t = core::seconds_since(t0);
@@ -323,6 +348,25 @@ int cmd_client(const core::InstallReader &p_reader, const std::shared_ptr<core::
 			playing = true;
 			say(core::fmt(
 					"client: playing slot %u, match seed %llu", unsigned(last.slot), (unsigned long long)f.match_seed));
+		}
+		const std::span<const net::PlayerRow> rows(
+				f.players.data(), std::min<size_t>(f.player_count, f.players.size()));
+		if (a.squad_create && !squad_created && f.match_valid &&
+				std::chrono::steady_clock::now() - last_squad_request >= 1s) {
+			squad_created = leads_a_squad_alone(rows, last.slot);
+			if (!squad_created) {
+				net::SquadRequest q;
+				q.op = net::SquadOp::Create;
+				client.send_squad_request(q);
+				++squad_requests;
+				last_squad_request = std::chrono::steady_clock::now();
+			}
+		}
+		if (a.until_round_over && f.match_valid && f.match.phase == net::MatchPhase::RoundOver) {
+			squads = host::squad_list_text(rows);
+			say(core::fmt("client: round over, US %d - RU %d, squad requests %u, squads %s", f.match.kills[0],
+					f.match.kills[1], squad_requests, squads.c_str()));
+			break;
 		}
 		const bool alive = host::present_own_alive(f);
 		if (f.valid && f.own_curr.life > input.life) {
@@ -433,6 +477,9 @@ int cmd_client(const core::InstallReader &p_reader, const std::shared_ptr<core::
 		for (const ShotSeen &s : shots) {
 			out << "shot " << (s.remote ? "remote " : "own ") << unsigned(s.slot) << ' ' << s.id << ' ' << s.seed
 				<< '\n';
+		}
+		if (!squads.empty()) {
+			out << "squads " << squads << '\n';
 		}
 		out << "end\n";
 		if (!out) {
