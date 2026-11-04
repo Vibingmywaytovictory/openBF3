@@ -37,9 +37,12 @@
 #include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/input_event_mouse_motion.hpp>
+#include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/performance.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/scene_tree.hpp>
+#include <godot_cpp/core/object.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <atomic>
@@ -795,13 +798,26 @@ std::string Bf3MatchHost::load_text(const Bf3LevelSession &p_session) const {
 
 void Bf3MatchHost::level_done(const Bf3LevelSession &p_session) {
 	Performance *perf = Performance::get_singleton();
+	const int64_t orphans = int64_t(perf->get_monitor(Performance::OBJECT_ORPHAN_NODE_COUNT));
+	int64_t freeing = 0;
+	const TypedArray<int> ids = Node::get_orphan_node_ids();
+	for (int64_t i = 0; i < ids.size(); ++i) {
+		for (Node *n = Object::cast_to<Node>(ObjectDB::get_instance(uint64_t(int64_t(ids[i])))); n != nullptr;
+				n = n->get_parent()) {
+			if (n->is_queued_for_deletion()) {
+				++freeing;
+				break;
+			}
+		}
+	}
 	say("level " + std::to_string(level_index_) + " " + p_session.level_id() + " " + p_session.mode_id() +
 			" done: private " + std::to_string(host::process_private_bytes() / (1024u * 1024u)) + " MiB, " +
 			process_video_memory_text() + ", nodes " +
 			std::to_string(int64_t(perf->get_monitor(Performance::OBJECT_NODE_COUNT))) + ", orphan nodes " +
-			std::to_string(int64_t(perf->get_monitor(Performance::OBJECT_ORPHAN_NODE_COUNT))) + ", objects " +
-			std::to_string(int64_t(perf->get_monitor(Performance::OBJECT_COUNT))) + ", resources " +
-			std::to_string(int64_t(perf->get_monitor(Performance::OBJECT_RESOURCE_COUNT))) + load_text(p_session));
+			std::to_string(std::max<int64_t>(orphans - freeing, 0)) + ", " + std::to_string(freeing) +
+			" queued for deletion, objects " + std::to_string(int64_t(perf->get_monitor(Performance::OBJECT_COUNT))) +
+			", resources " + std::to_string(int64_t(perf->get_monitor(Performance::OBJECT_RESOURCE_COUNT))) +
+			load_text(p_session));
 }
 
 void Bf3MatchHost::_unhandled_input(const Ref<InputEvent> &p_event) {
