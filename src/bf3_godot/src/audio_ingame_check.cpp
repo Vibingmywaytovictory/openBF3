@@ -644,6 +644,7 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 	uint64_t call_gaps = 0;
 	float call_gap_max = 0.0f;
 	std::map<std::string, uint64_t> audible;
+	const ba::MixerCutEvent *largest = nullptr;
 	for (const ba::MixerCutEvent &e : events_) {
 		if (e.kind == ba::MixerCutKind::CallGap) {
 			++call_gaps;
@@ -651,6 +652,7 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 		}
 		if (!silent_kind(e.kind) && e.step > ba::kAudibleStep) {
 			++audible[std::string(ba::mixer_cut_kind_name(e.kind)) + " " + e.program];
+			largest = largest == nullptr || e.step > largest->step ? &e : largest;
 		}
 	}
 	row("no dropout", zero_runs == 0 && delta(&Snapshot::late_blocks) == 0 && call_gaps == 0,
@@ -666,6 +668,11 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 		if (audible_text.size() < 300) {
 			audible_text += "; " + what + " x" + std::to_string(n);
 		}
+	}
+	if (largest != nullptr) {
+		audible_text += core::fmt("; the largest a %s of handle %u at %.1f m, step %.5f, peak %.5f",
+				ba::mixer_cut_kind_name(largest->kind), unsigned(largest->handle), double(largest->distance_m),
+				double(largest->step), double(largest->peak));
 	}
 	row("no hard cut",
 			audible_total == 0 && delta(&Snapshot::takeover_cuts) == 0 && delta(&Snapshot::abrupt_gain) == 0 &&
