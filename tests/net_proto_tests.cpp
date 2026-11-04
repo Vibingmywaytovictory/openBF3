@@ -110,7 +110,7 @@ bool same_snapshot(const net::Snapshot &p_a, const net::Snapshot &p_b) {
 			p_a.applied_repeated != p_b.applied_repeated || p_a.command_buffer_ticks != p_b.command_buffer_ticks ||
 			p_a.sequence_echo != p_b.sequence_echo || p_a.echo_hold_100us != p_b.echo_hold_100us ||
 			p_a.own_events != p_b.own_events || p_a.own != p_b.own || p_a.others.size() != p_b.others.size() ||
-			p_a.own_weapons != p_b.own_weapons) {
+			p_a.own_weapons != p_b.own_weapons || p_a.own_suppression != p_b.own_suppression) {
 		return false;
 	}
 	for (size_t i = 0; i < p_a.others.size(); ++i) {
@@ -2112,12 +2112,12 @@ void append_v2_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>>
 
 TEST_SUITE("net-proto") {
 	TEST_CASE("proto v2: version, message types and the bounds") {
-		CHECK(net::kProtocolVersion == 7);
+		CHECK(net::kProtocolVersion == 8);
 		for (const uint8_t t : { uint8_t(3), uint8_t(4), uint8_t(23), uint8_t(24) }) {
 			CHECK(net::peek_type(std::span<const uint8_t>(&t, 1)).has_value());
 		}
-		CHECK(net::Hello{}.protocol == 7);
-		CHECK(net::MatchInfo{}.protocol == 7);
+		CHECK(net::Hello{}.protocol == 8);
+		CHECK(net::MatchInfo{}.protocol == 8);
 	}
 
 	TEST_CASE("proto v2: MatchInfo, Spawned, KitSelect and the new Debug kinds round trip; out-of-range values are refused") {
@@ -2483,7 +2483,7 @@ TEST_SUITE("net-proto") {
 				rest.others.size(), " others, fnv1a ", fnv1a(tail));
 		CHECK(once.size() == 1183);
 		CHECK(keep == 41);
-		CHECK(fnv1a(once) == 0xef3a0d8716bdae03ull);
+		CHECK(fnv1a(once) == 0xab105d629eedea3bull);
 		CHECK(tail.size() == 503);
 		CHECK(fnv1a(tail) == 0x3b763f9c38937cabull);
 	}
@@ -4229,7 +4229,7 @@ TEST_SUITE("net-proto") {
 		const std::vector<uint8_t> bytes = net::encode_kick(kick);
 		const std::optional<std::string> v3 = decode_kick_v3(bytes);
 		REQUIRE(v3.has_value());
-		CHECK(*v3 == "protocol 3 (server 7)");
+		CHECK(*v3 == "protocol 3 (server 8)");
 		auto v4 = net::decode_kick(bytes);
 		REQUIRE(v4);
 		CHECK(v4->code == net::KickReason::Protocol);
@@ -4619,11 +4619,11 @@ TEST_SUITE("net-proto") {
 		}
 		CHECK(types.size() == 31);
 		static constexpr GoldenPin kPins[] = {
-			{ "Snapshot", 367, 0x5a3ed6545076d226ull, 0 },
+			{ "Snapshot", 367, 0x6567ed5d2836a9b6ull, 0 },
 			{ "Snapshot (no own)", 20, 0xa85c8a910ea8826bull, 0 },
 			{ "CommandPacket", 58, 0x0561e87f8ae9a655ull, 0 },
-			{ "Hello", 20, 0xd1043d92745304c9ull, 0 },
-			{ "MatchInfo", 126, 0x5fa7d3643dd8f50aull, 0 },
+			{ "Hello", 20, 0x87bc80da195bb0d8ull, 0 },
+			{ "MatchInfo", 126, 0x5fd548c3656735e7ull, 0 },
 			{ "Ready", 34, 0x50302cdf0f51bcb5ull, 0 },
 			{ "Spawned", 98, 0xededd38e508ae170ull, 0 },
 			{ "Loading", 11, 0x6d0d37720d72edd7ull, 0 },
@@ -4631,14 +4631,14 @@ TEST_SUITE("net-proto") {
 			{ "Bye", 1, 0xaf63cb4c8601cfa9ull, 0 },
 			{ "Debug", 30, 0x3f09a8f270a73a7dull, 0 },
 			{ "DebugReport", 492, 0x74b3a36917721e73ull, 0 },
-			{ "Snapshot (v2 own weapons)", 522, 0xb98e1708c7189610ull, 0 },
+			{ "Snapshot (v2 own weapons)", 522, 0xef0067090eaa962dull, 0 },
 			{ "SnapshotOthers", 121, 0x49f12d8715464b47ull, 0 },
 			{ "ShotEvents", 190, 0x1ee136123af4ddfaull, 0 },
 			{ "CombatEvents", 124, 0x7f963139bc7ca784ull, 0 },
 			{ "KitSelect", 3, 0xa9266a18e1c669aaull, 0 },
 			{ "Debug (SpawnTarget)", 30, 0xbf53c23636c9b9efull, 0 },
 			{ "DebugReport (v2)", 916, 0xe73adddf5cc1ab3dull, 0 },
-			{ "MatchInfo (v2)", 94, 0xc40f37ab3da04630ull, 0 },
+			{ "MatchInfo (v2)", 94, 0x8c37dbb23a6b0455ull, 0 },
 			{ "Spawned (v2)", 98, 0xdda4f57b21059febull, 0 },
 			{ "MatchState", 42, 0x6e8a7b2bfcb229a0ull, 0 },
 			{ "PlayerList (full)", 217, 0x8ad8a19f7b621f12ull, 0 },
@@ -4647,7 +4647,7 @@ TEST_SUITE("net-proto") {
 			{ "SuicideRequest", 1, 0xaf63d14c8601d9dbull, 0 },
 			{ "LoadoutRequest", 54, 0xbff00e287a388828ull, 0 },
 			{ "CombatEvents (v3)", 137, 0x40d29b14535383d7ull, 0 },
-			{ "MatchInfo (v3)", 94, 0xe195fbe5bc819934ull, 0 },
+			{ "MatchInfo (v3)", 94, 0x330a72696b0b51a1ull, 0 },
 			{ "Spawned (v3 revived)", 98, 0x8b014185e7467390ull, 0 },
 			{ "SoldierGear", 20, 0xfa6162cd1bdf3cf3ull, 0 },
 			{ "Mismatch", 2, 0x07c26e07b48c3c08ull, 0 },
@@ -4659,7 +4659,7 @@ TEST_SUITE("net-proto") {
 			{ "LogicDelta", 13, 0xb406185960cdf447ull, 0 },
 			{ "SquadRequest", 4, 0x339b5db77a00fa9bull, 0 },
 			{ "SquadOrder", 18, 0x786f0a82bee37cb8ull, 0 },
-			{ "MatchInfo (v4)", 157, 0x6cd0c18f888594e0ull, 0 },
+			{ "MatchInfo (v4)", 157, 0xb48ee02f44ba2dabull, 0 },
 			{ "Ready (v4 digests)", 82, 0x52d9ba4d4bfcaf1eull, 0 },
 			{ "Kick (v4 reason)", 25, 0xc256cbdc95a2f23cull, 0 },
 			{ "PlayerList (v4 squads)", 89, 0x1f220dc607e2158aull, 0 },
@@ -4699,12 +4699,12 @@ TEST_SUITE("net-proto") {
 		CHECK(bad([](net::Deployables &r) { r.removed[0] = 0; }));
 		CHECK(bad([](net::Deployables &r) { r.removed.assign(net::kMaxDeployablesPerMessage + 1, 4); }));
 		CHECK(net::peek_type(net::encode_deployables(m)) == net::MessageType::Deployables);
-		CHECK(net::kProtocolVersion == 7);
+		CHECK(net::kProtocolVersion == 8);
 	}
 
 	TEST_CASE("proto: golden bytes of the encoders' clamp, cut and drop paths") {
 		static constexpr GoldenPin kPins[] = {
-			{ "Hello (name cut inside a code point)", 43, 0x2feb94ad0c1312ffull, 0 },
+			{ "Hello (name cut inside a code point)", 43, 0xd77b8c4ce4b2f808ull, 0 },
 			{ "Kick (reason cut at 2048 bytes)", 2051, 0x028412f145ceb5d9ull, 0 },
 			{ "Loading (permille above 1000)", 11, 0xd2694e25edbe818full, 0 },
 			{ "Bye", 1, 0xaf63cb4c8601cfa9ull, 0 },
@@ -4716,7 +4716,7 @@ TEST_SUITE("net-proto") {
 			{ "PlayerList (full drops removed)", 27, 0x47ea6ae9e75df6d4ull, 1 },
 			{ "CommandPacket (clamped, chain cut at a gap)", 57, 0x54a8e4154ecc6c70ull, 0 },
 			{ "CommandPacket (no commands)", 0, 0xcbf29ce484222325ull, 0 },
-			{ "Snapshot (others over the datagram)", 1189, 0xbcb65a9961d4638full, 24 },
+			{ "Snapshot (others over the datagram)", 1189, 0x87f90dc2c2c75e6aull, 24 },
 			{ "SnapshotOthers (others over the datagram)", 1178, 0x82aafe2e191acf87ull, 78 },
 			{ "ShotEvents (dropped, clamped, one datagram)", 1195, 0x3ed13adbc383dac9ull, 82 },
 			{ "CombatEvents (budget, clamps)", 5309, 0x83759aa16ad8fd11ull, 61 },
@@ -5095,5 +5095,34 @@ TEST_SUITE("net-proto") {
 		removed.removed = { 3 };
 		removed.others.push_back(net::quantize_other(3, *snap.own));
 		CHECK_FALSE(net::decode_snapshot(net::encode_snapshot(removed)));
+	}
+}
+
+TEST_SUITE("net-proto") {
+	TEST_CASE("proto: the own suppression travels with the own state as its level and age; a zero level is refused") {
+		Rng rng(808);
+		net::Snapshot s = sample_snapshot(rng, 3);
+		REQUIRE(s.own);
+		const size_t without = net::encode_snapshot(s).size();
+		s.own_suppression = net::OwnSuppression{ 22937, 125 };
+		const std::vector<uint8_t> bytes = net::encode_snapshot(s);
+		auto d = net::decode_snapshot(bytes);
+		REQUIRE(d);
+		CHECK(same_snapshot(*d, s));
+		REQUIRE(d->own_suppression);
+		CHECK(d->own_suppression->level == 22937);
+		CHECK(d->own_suppression->age == 125);
+		CHECK(bytes.size() <= without + 4);
+		s.own_suppression = net::OwnSuppression{ 0, 4 };
+		CHECK_FALSE(net::decode_snapshot(net::encode_snapshot(s)));
+		s.own_suppression = net::OwnSuppression{ 1, net::kMaxSuppressionAge };
+		auto e = net::decode_snapshot(net::encode_snapshot(s));
+		REQUIRE(e);
+		CHECK(e->own_suppression->age == net::kMaxSuppressionAge);
+		s.own.reset();
+		s.own_weapons.reset();
+		auto f = net::decode_snapshot(net::encode_snapshot(s));
+		REQUIRE(f);
+		CHECK_FALSE(f->own_suppression);
 	}
 }

@@ -225,6 +225,12 @@ void Combat::fill_snapshot(size_t p_slot, net::Snapshot &r_snapshot) const {
 	}
 	if (r_snapshot.own && gunplay_->armed(uint8_t(p_slot))) {
 		r_snapshot.own_weapons = net::weapons_wire_view(gunplay_->weapons(uint8_t(p_slot)), r_snapshot.server_tick);
+		const sim::weapons::SuppressionState s = gunplay_->suppression(uint8_t(p_slot));
+		if (gunplay_->suppression_level(uint8_t(p_slot), r_snapshot.server_tick) > 0.0f &&
+				s.hit_tick <= r_snapshot.server_tick) {
+			r_snapshot.own_suppression = net::OwnSuppression{ s.level,
+				uint16_t(std::min<sim::Tick>(r_snapshot.server_tick - s.hit_tick, net::kMaxSuppressionAge)) };
+		}
 	}
 	for (net::OtherSoldier &o : r_snapshot.others) {
 		if (o.slot < per_slot_.size() && per_slot_[o.slot].record_valid) {

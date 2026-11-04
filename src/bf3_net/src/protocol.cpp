@@ -1059,6 +1059,11 @@ template <class A, MaybeConst<Snapshot> M> void serialize(A &r_a, M &r_m, Snapsh
 				return canonical_weapons(r_weapons, canonical) && canonical == r_weapons;
 			});
 		});
+		r_a.optional(r_m.own_suppression, [&](auto &r_suppression) {
+			r_a.bits(r_suppression.level, 16);
+			r_a.bits(r_suppression.age, 12);
+			r_a.check("own suppression without a level", [&] { return r_suppression.level != 0; });
+		});
 	});
 	r_ctx.list.cap = kMaxSlots;
 	r_ctx.list.allow_removed = true;

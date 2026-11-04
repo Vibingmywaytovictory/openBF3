@@ -9,6 +9,7 @@
 #include "bf3/sim/command.h"
 #include "bf3/sim/prediction.h"
 #include "bf3/sim/soldier_state.h"
+#include "bf3/sim/weapons/suppression.h"
 
 #include "bf3/host/client_projectiles.h"
 #include "bf3/host/kits.h"
@@ -293,6 +294,7 @@ struct PresentationFrame {
 	std::array<uint8_t, sim::weapons::kMaxWeaponSlots> own_variants{};
 	uint16_t deployable_count = 0;
 	std::array<net::DeployableWire, kMaxPresentedDeployables> deployables{};
+	float own_suppression = 0.0f;
 };
 static_assert(std::is_trivially_copyable_v<PresentationFrame>);
 
@@ -365,6 +367,7 @@ struct ClientGunplayInputs {
 	KitTable kits;
 	std::shared_ptr<const LoadoutCatalog> loadouts;
 	std::shared_ptr<const core::gameplay::SpecializationTable> specializations;
+	sim::weapons::SuppressionDef suppression;
 	net::ShotQuantization shot_frame;
 
 	std::function<core::Result<sim::weapons::Mechanics>(const std::string &p_path)> load_mechanics;

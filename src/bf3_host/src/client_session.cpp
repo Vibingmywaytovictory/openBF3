@@ -449,6 +449,11 @@ core::Result<std::shared_ptr<const ClientGunplayInputs>> client_gunplay_inputs(c
 	in->loadouts = std::shared_ptr<const LoadoutCatalog>(p_level.gunplay, &g.loadouts);
 	in->specializations =
 			std::shared_ptr<const core::gameplay::SpecializationTable>(p_level.gunplay, &g.specializations);
+	core::Result<sim::weapons::SuppressionDef> suppression = sim::weapons::make_suppression_def(g.soldier);
+	if (!suppression) {
+		return core::error_at("client gunplay inputs", suppression.error());
+	}
+	in->suppression = *suppression;
 	in->shot_frame = shot_frame(*p_level.static_world);
 	in->load_mechanics = load_mechanics_cfg;
 	return std::shared_ptr<const ClientGunplayInputs>(std::move(in));

@@ -146,6 +146,7 @@ private:
 	bool wire_valid_ = false;
 	net::WeaponsWire wire_;
 	sim::Tick wire_tick_ = 0;
+	sim::weapons::SuppressionState suppression_;
 	sim::Tick newest_tick_ = 0;
 	std::array<CommandView, kCommandViews> views_{};
 	bool fire_seen_ = false;

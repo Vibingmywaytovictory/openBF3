@@ -23,7 +23,7 @@
 
 namespace bf3::net {
 
-inline constexpr uint16_t kProtocolVersion = 7;
+inline constexpr uint16_t kProtocolVersion = 8;
 inline constexpr uint8_t kChannelUnreliable = 0;
 inline constexpr uint8_t kChannelReliable = 1;
 inline constexpr uint8_t kChannelBulk = 2;
@@ -350,6 +350,15 @@ void set_other_weapon(OtherSoldier &r_other, uint16_t p_def, sim::weapons::Weapo
 
 void set_other_team(OtherSoldier &r_other, uint8_t p_team);
 
+inline constexpr uint16_t kMaxSuppressionAge = 4095;
+
+struct OwnSuppression {
+	uint16_t level = 0;
+	uint16_t age = 0;
+
+	bool operator==(const OwnSuppression &) const = default;
+};
+
 struct Snapshot {
 	uint16_t seq = 0;
 	sim::Tick server_tick = 0;
@@ -364,6 +373,7 @@ struct Snapshot {
 
 	std::optional<WeaponsWire> own_weapons;
 	std::vector<uint8_t> removed;
+	std::optional<OwnSuppression> own_suppression;
 };
 
 inline constexpr uint8_t kMaxBaselineBack = 31;
