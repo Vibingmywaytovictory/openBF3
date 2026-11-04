@@ -1498,6 +1498,61 @@ TEST_SUITE("audio-router") {
 		CHECK(open.farthest_m < 15.0f);
 	}
 
+	TEST_CASE(
+			"fly-bys: none for a round that hits the own soldier, none for a round stopped short of its closest pass") {
+		Rig r;
+		constexpr uint64_t kMatch = 0x5eed;
+		std::vector<ba::FlyBySound> sounds(1);
+		sounds[0] = ba::FlyBySound{ one_shot_program(r.wave, kImpactStart, true), 15.0f, 20.0f };
+		ba::FlyByAudio fb(*r.mixer, sounds, r.wave.bank, ba::AudioTuning{}, *r.pool);
+		auto bullet = [&](uint8_t p_slot, uint32_t p_shot, uint8_t p_pellet, float p_x, float p_z_from, float p_z_to,
+							  bool p_ended) {
+			host::PresentedBullet b;
+			b.slot = p_slot;
+			b.shot_index = p_shot;
+			b.pellet = p_pellet;
+			b.def = 0;
+			b.origin = { p_x, 0.0f, p_z_from };
+			b.position = { p_x, 0.0f, p_z_to };
+			b.speed = 600.0f;
+			b.spawn_time = r.render - 30 * kTick;
+			b.time = r.render;
+			b.ended = p_ended;
+			return b;
+		};
+		host::PresentEvent own;
+		own.kind = host::PresentKind::Hit;
+		own.flags = host::present_flags::kOwnVictim;
+		own.slot = 3;
+		own.id = 10;
+		own.pellet = 1;
+		host::PresentEvent mate = own;
+		mate.flags = 0;
+		mate.id = 11;
+		mate.pellet = 0;
+		const std::vector<host::PresentEvent> events{ own, own, mate };
+		fb.on_events(events);
+		const uint64_t started = r.pool->started();
+		const std::vector<host::PresentedBullet> frame{ bullet(3, 10, 1, 0.5f, -300.0f, 50.0f, false),
+			bullet(3, 10, 0, 1.0f, -300.0f, 50.0f, false), bullet(3, 11, 0, 2.0f, -300.0f, 50.0f, false),
+			bullet(5, 20, 0, 1.0f, -50.0f, -5.0f, true), bullet(5, 21, 0, 1.0f, -50.0f, 3.0f, true),
+			bullet(5, 22, 0, 1.0f, -50.0f, -0.5f, true) };
+		r.begin();
+		fb.set_listener(r.listener);
+		fb.on_bullets(frame, kMatch, *r.clock);
+		r.end();
+		r.idle(2);
+		const ba::FlyByAudioStats &st = fb.stats();
+		MESSAGE("fly-bys: ", st.starts, " started, ", st.own_hits, " hit the own soldier, ", st.stopped,
+				" stopped short, ", st.receding, " receding");
+		CHECK(st.bullets == 6);
+		CHECK(st.own_hits == 1);
+		CHECK(st.stopped == 2);
+		CHECK(st.starts == 3);
+		CHECK(r.pool->started() - started == 3);
+		CHECK(st.refused == 0);
+	}
+
 	TEST_CASE("one-shot pool aging: a one-shot that never finishes is stopped, then killed and forgotten") {
 		Rig r;
 

@@ -5,7 +5,9 @@
 #include "bf3/present/effect_seed.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 
 namespace bf3::audio {
 
@@ -26,8 +28,12 @@ float closest_fraction(const Vec3 &p_from, const Vec3 &p_to, const Vec3 &p_point
 
 namespace {
 
+uint64_t shot_key(uint8_t p_slot, uint8_t p_pellet, uint32_t p_shot) {
+	return (uint64_t(p_slot) << 40) | (uint64_t(p_pellet) << 32) | uint64_t(p_shot);
+}
+
 uint64_t bullet_key(const present::PresentedBullet &p_b) {
-	return (uint64_t(p_b.slot) << 40) | (uint64_t(p_b.pellet) << 32) | uint64_t(p_b.shot_index);
+	return shot_key(p_b.slot, p_b.pellet, p_b.shot_index);
 }
 
 }
@@ -51,7 +57,14 @@ struct FlyByAudio::Impl {
 	FlyByAudioStats stats;
 	std::vector<Track> tracks;
 	std::vector<Track> fresh;
+	std::array<uint64_t, kFlyByOwnHits> own_hits{};
+	size_t own_hit_count = 0, own_hit_next = 0;
 	uint64_t frame = 0;
+
+	bool hit_own(uint64_t p_key) const {
+		return std::find(own_hits.begin(), own_hits.begin() + std::ptrdiff_t(own_hit_count), p_key) !=
+				own_hits.begin() + std::ptrdiff_t(own_hit_count);
+	}
 
 	Impl(MixerCore &r_mixer, std::vector<FlyBySound> p_sounds, std::shared_ptr<const ca::WaveBank> p_bank,
 			const AudioTuning &p_tuning, OneShotPool &r_pool) :
@@ -92,6 +105,14 @@ struct FlyByAudio::Impl {
 		r_track.done = true;
 		if (u <= 0.0f && !r_track.approaching) {
 			++stats.receding;
+			return;
+		}
+		if (p_b.ended && u >= 1.0f) {
+			++stats.stopped;
+			return;
+		}
+		if (hit_own(r_track.key)) {
+			++stats.own_hits;
 			return;
 		}
 		const Vec3 at = vec::add(p_from, vec::scale(vec::sub(to, p_from), u));
@@ -135,6 +156,22 @@ FlyByAudio::~FlyByAudio() = default;
 
 void FlyByAudio::set_listener(const ListenerState &p_listener) {
 	impl_->listener = p_listener;
+}
+
+void FlyByAudio::on_events(std::span<const present::PresentEvent> p_events) {
+	Impl &m = *impl_;
+	for (const present::PresentEvent &e : p_events) {
+		if (e.kind != present::PresentKind::Hit || (e.flags & present::flags::kOwnVictim) == 0) {
+			continue;
+		}
+		const uint64_t key = shot_key(e.slot, e.pellet, e.id);
+		if (m.hit_own(key)) {
+			continue;
+		}
+		m.own_hits[m.own_hit_next] = key;
+		m.own_hit_next = (m.own_hit_next + 1) % m.own_hits.size();
+		m.own_hit_count = std::min(m.own_hit_count + 1, m.own_hits.size());
+	}
 }
 
 void FlyByAudio::on_bullets(

@@ -53,6 +53,7 @@ void GameAudioDriver::step(WeaponAudioRouter &r_router, ImpactAudio *r_impacts, 
 	}
 	if (r_flybys != nullptr) {
 		r_flybys->set_listener(p_in.listener);
+		r_flybys->on_events(p_in.events);
 		if (p_in.frame != nullptr && p_in.frame->valid) {
 			const size_t n = std::min<size_t>(p_in.frame->bullet_count, p_in.frame->bullets.size());
 			r_flybys->on_bullets(std::span<const host::PresentedBullet>(p_in.frame->bullets.data(), n),
