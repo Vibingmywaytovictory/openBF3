@@ -3005,3 +3005,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Key 3 selects the next filled gadget slot of 4, 5 and 2 in turn, and the mouse wheel cycles slots 4 and 5 too; no row (the bf3_godot input mapper has no unit row; owner playtest).
 * net.procs.connect waits for a status line whose client count is 5 by field (number_after), not for the text ' clients 5 bots ', which the '(carried N)' field broke; net.procs.connect 35 of 35 in 48.7 s.
 * bf3/core/util/cadence.h: Cadence carries a period's remainder, and the dedicated status line uses it, so it keeps 1 Hz (it drifted to about 1.03 s, 116-117 lines in 120 s); net.procs.scale32 121 reports, passed in 194.4 s; scale32/64 COST 192; core.util.unit.
+* net.procs.bots_squads waits up to 10 s for the server's round-over status line before it copies the server output (the mate sees the round end about a second before the server's next status line); net.procs.bots_squads 50 of 50.

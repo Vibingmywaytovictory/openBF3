@@ -132,6 +132,9 @@ TEST_SUITE("net-procs-bots-squads") {
 		CHECK_MESSAGE(line_starts(driver, *mate, "client: summary", 300s), driver.output(*mate));
 		const ChildEnd mate_end = driver.finish(*mate, 60s);
 		require_clean_exit(driver, *mate, mate_end, "bf3dump client");
+		driver.wait_line(
+				server->id,
+				[](std::string_view l) { return l.rfind(kStatusPrefix, 0) == 0 && contains(l, kRoundOver); }, 10s);
 		const std::string server_out = driver.output(server->id);
 		driver.finish(server->id, 1s);
 		MESSAGE("game client: " << report);
