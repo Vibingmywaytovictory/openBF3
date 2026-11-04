@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -113,6 +114,36 @@ inline uint64_t summary_number(std::string_view p_line, std::string_view p_key) 
 	uint64_t v = 0;
 	const auto res = std::from_chars(tail.data(), tail.data() + tail.size(), v);
 	return res.ec == std::errc() ? v : UINT64_MAX;
+}
+
+inline std::optional<double> number_after(std::string_view p_text, std::string_view p_key) {
+	const size_t at = p_text.find(p_key);
+	if (at == std::string_view::npos) {
+		return std::nullopt;
+	}
+	const std::string_view tail = p_text.substr(at + p_key.size());
+	double v = 0.0;
+	const auto res = std::from_chars(tail.data(), tail.data() + tail.size(), v);
+	return res.ec == std::errc() ? std::optional<double>(v) : std::nullopt;
+}
+
+inline bool kicks_none(std::string_view p_line) {
+	const size_t at = p_line.find("| kicks ");
+	if (at == std::string_view::npos) {
+		return false;
+	}
+	const size_t start = at + 8;
+	const size_t end = p_line.find(" |", start);
+	std::istringstream s(std::string(p_line.substr(start, end - start)));
+	std::string token;
+	bool any = false;
+	while (s >> token) {
+		any = true;
+		if (token.size() < 2 || token.substr(token.size() - 2) != "=0") {
+			return false;
+		}
+	}
+	return any;
 }
 
 inline ChildSpec godot_client(

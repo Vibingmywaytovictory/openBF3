@@ -22,9 +22,11 @@ using namespace std::chrono_literals;
 using bf3::test::procs::ChildEnd;
 using bf3::test::procs::contains;
 using bf3::test::procs::driver_config_from_env;
+using bf3::test::procs::kicks_none;
 using bf3::test::procs::kLevel;
 using bf3::test::procs::kMode;
 using bf3::test::procs::line_starts;
+using bf3::test::procs::number_after;
 using bf3::test::procs::ProcDriver;
 using bf3::test::procs::require_clean_exit;
 using bf3::test::procs::Server;
@@ -39,17 +41,6 @@ constexpr uint32_t kLoadbotProcesses = 2;
 constexpr double kSettleSeconds = 5.0;
 constexpr std::string_view kStatusPrefix = "[dedicated] t=";
 constexpr std::string_view kNetPrefix = "[dedicated] net: ";
-
-std::optional<double> number_after(std::string_view p_text, std::string_view p_key) {
-	const size_t at = p_text.find(p_key);
-	if (at == std::string_view::npos) {
-		return std::nullopt;
-	}
-	const std::string_view tail = p_text.substr(at + p_key.size());
-	double v = 0.0;
-	const auto res = std::from_chars(tail.data(), tail.data() + tail.size(), v);
-	return res.ec == std::errc() ? std::optional<double>(v) : std::nullopt;
-}
 
 struct Seat {
 	double enet_out = 0.0;
@@ -66,25 +57,6 @@ struct Report {
 	bool kicks_none = false;
 	std::map<uint32_t, Seat> seats;
 };
-
-bool kicks_none(std::string_view p_line) {
-	const size_t at = p_line.find("| kicks ");
-	if (at == std::string_view::npos) {
-		return false;
-	}
-	const size_t start = at + 8;
-	const size_t end = p_line.find(" |", start);
-	std::istringstream s(std::string(p_line.substr(start, end - start)));
-	std::string token;
-	bool any = false;
-	while (s >> token) {
-		any = true;
-		if (token.size() < 2 || token.substr(token.size() - 2) != "=0") {
-			return false;
-		}
-	}
-	return any;
-}
 
 std::map<uint32_t, Seat> seats_of(std::string_view p_line) {
 	std::map<uint32_t, Seat> seats;
