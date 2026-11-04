@@ -515,6 +515,16 @@ struct TdmRules::Impl {
 		return p_mate;
 	}
 
+	bool bot_nav_main(const sim::Vec3 &p_mate) {
+		if (nav == nullptr || bots == nullptr) {
+			return true;
+		}
+		sim::NavPolyRef poly = 0;
+		sim::Vec3 at{};
+		return nav->nearest(p_mate, kSquadSpawnNavExtents, &poly, &at) && poly != 0 &&
+				sim::nav_poly_component(nav->world(), bots->components, poly) == bots->main_component;
+	}
+
 	bool squad_wiped(uint8_t p_victim) const {
 		const std::span<const uint8_t> members = squads.members(squads.team_of(p_victim), squads.squad_of(p_victim));
 		if (members.size() < 2) {
@@ -1344,7 +1354,9 @@ bool TdmRules::take_squad_spawn(
 	};
 	const auto ready = [&](uint8_t p_choice) {
 		const int mate = p_choice != 0 ? m.squads.mate(p_slot, uint8_t(p_choice - 1u)) : kNoSquadMate;
-		return m.mate_ready(p_slot, mate, p_live) && calm(mate) ? mate : kNoSquadMate;
+		return m.mate_ready(p_slot, mate, p_live) && calm(mate) && m.bot_nav_main(p_live[size_t(mate)].position)
+				? mate
+				: kNoSquadMate;
 	};
 	int mate = ready(choice);
 	for (uint8_t other = 1; mate == kNoSquadMate && other <= m.squads.squad_size(); ++other) {

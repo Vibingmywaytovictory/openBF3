@@ -7,6 +7,7 @@
 #include "bf3/core/gameplay/eor_timeline.h"
 #include "bf3/core/gameplay/mode_def.h"
 #include "bf3/core/level/eor_camera.h"
+#include "bf3/core/math.h"
 #include "bf3/core/ui/text_db.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/client_session.h"
@@ -2246,6 +2247,88 @@ std::optional<sim::Tick> rest_tick(Match &r_match, size_t p_count, uint32_t p_ma
 	return std::nullopt;
 }
 
+std::function<void(host::GameServerConfig &)> gadget_bot_server(
+		const tdm::TdmLevel &p_level, uint8_t p_kit, std::shared_ptr<host::TdmBotStats> p_stats, bool p_squads = true) {
+	return [&p_level, p_kit, p_stats, p_squads](host::GameServerConfig &r_cfg) {
+		auto shared = std::make_shared<host::SharedLevel>(*p_level.shared);
+		auto tuning = p_level.shared->tdm_tuning != nullptr
+				? std::make_shared<host::TdmTuning>(*p_level.shared->tdm_tuning)
+				: std::make_shared<host::TdmTuning>();
+		tuning->bot_kit_weights = {};
+		tuning->bot_kit_weights[p_kit] = 1;
+		shared->tdm_tuning = tuning;
+		r_cfg.level = shared;
+		auto fill = std::make_shared<host::BotFillConfig>();
+		fill->level = p_level.bots;
+		fill->count = 0;
+		r_cfg.bots = fill;
+		auto bots = std::make_shared<host::TdmBotConfig>();
+		bots->count = 1;
+		bots->stats = p_stats;
+		bots->squads = p_squads;
+		r_cfg.tdm_bots = bots;
+	};
+}
+
+struct GadgetBotMatch {
+	int bot = -1;
+	tdm::ScriptedPeer *mate = nullptr;
+	size_t mate_script = 0;
+};
+
+GadgetBotMatch gadget_bot_match(Match &r_match) {
+	GadgetBotMatch g;
+	for (const char *name : { "alpha", "bravo", "charlie" }) {
+		r_match.join(name).ready();
+	}
+	REQUIRE(wait_in_round(r_match));
+	for (const net::PlayerRow &r : r_match.rules().players()) {
+		if (r.bot) {
+			g.bot = int(r.slot);
+		}
+	}
+	REQUIRE(g.bot >= 0);
+	if (g.bot < 0) {
+		return g;
+	}
+	const uint8_t team = r_match.rules().team_of(uint8_t(g.bot));
+	tdm::ScriptedPeer *mate = nullptr;
+	for (size_t i = 0; i < r_match.peers.size() && mate == nullptr; ++i) {
+		if (r_match.rules().team_of(uint8_t(r_match.peers[i]->slot())) == team) {
+			mate = r_match.peers[i].get();
+			g.mate_script = i;
+		}
+	}
+	REQUIRE(mate != nullptr);
+	if (mate == nullptr) {
+		return g;
+	}
+	mate->spawn_request(0);
+	const bool alive =
+			r_match.until([&] { return is_alive(r_match.state(g.bot)) && is_alive(r_match.state(mate->slot())); }, 900);
+	REQUIRE(alive);
+	g.mate = alive ? mate : nullptr;
+	return g;
+}
+
+std::optional<sim::Vec3> ring_spot(const Match &p_match, const sim::Vec3 &p_centre, float p_min, float p_max,
+		const std::optional<sim::Vec3> &p_apart) {
+	for (float r = p_min; r <= p_max; r += 1.0f) {
+		for (int k = 0; k < 16; ++k) {
+			const float a = float(k) * sim::kTwoPi / 16.0f;
+			const std::optional<sim::Vec3> f =
+					floor_at(*p_match.world, add(p_centre, r * std::cos(a), 0.0f, r * std::sin(a)));
+			if (f && std::fabs((*f)[1] - p_centre[1]) < 0.3f &&
+					p_match.motor.fits_standing(add(*f, 0.0f, 0.05f, 0.0f)) &&
+					clear(*p_match.world, add(p_centre, 0.0f, 1.2f, 0.0f), add(*f, 0.0f, 1.2f, 0.0f)) &&
+					(!p_apart || core::vec::horizontal_distance(*f, *p_apart) >= 8.0f)) {
+				return f;
+			}
+		}
+	}
+	return std::nullopt;
+}
+
 }
 
 TEST_SUITE("host-gunplay-gadgets") {
@@ -2513,5 +2596,114 @@ TEST_SUITE("host-gunplay-gadgets") {
 		CHECK(distance(deployed, beacon) <= 1.5f);
 		CHECK(m->rules().stats().beacon_spawns == 1u);
 		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+}
+
+TEST_SUITE("host-tdm-server") {
+	TEST_CASE("squad spawn: a bot whose squad mate stands on a nav island off the bots' main component spawns on the "
+			  "main component, not stranded beside the mate") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		REQUIRE(level->bots != nullptr);
+		core::Result<std::unique_ptr<sim::NavQuery>> nav = sim::NavQuery::create(level->bots->nav);
+		REQUIRE_MESSAGE(nav.ok(), (nav.ok() ? std::string() : nav.error().message));
+		if (!nav.ok()) {
+			return;
+		}
+		const auto component = [&](const sim::Vec3 &p_at) {
+			sim::NavPolyRef poly = 0;
+			sim::Vec3 at{};
+			return (*nav)->nearest(p_at, host::kSquadSpawnNavExtents, &poly, &at) && poly != 0
+					? sim::nav_poly_component((*nav)->world(), level->bots->components, poly)
+					: UINT32_MAX;
+		};
+		auto stats = std::make_shared<host::TdmBotStats>();
+		std::unique_ptr<Match> m = start_match(*level, true, 101u, 0, 1, gadget_bot_server(*level, 1, stats));
+		const GadgetBotMatch g = gadget_bot_match(*m);
+		REQUIRE(g.mate != nullptr);
+		if (g.mate == nullptr) {
+			return;
+		}
+		REQUIRE(m->rules().squads().same_squad(uint8_t(g.bot), uint8_t(g.mate->slot())));
+		std::optional<sim::Vec3> island, centre, shooter, away;
+		for (const sim::SpawnPoint &sp : m->level->spawns) {
+			const std::optional<sim::Vec3> f = floor_at(*m->world, sp.position);
+			const uint32_t c = f ? component(*f) : UINT32_MAX;
+			if (f && c != UINT32_MAX && c != level->bots->main_component &&
+					m->motor.fits_standing(add(*f, 0.0f, 0.05f, 0.0f))) {
+				island = f;
+				break;
+			}
+		}
+		REQUIRE(island.has_value());
+		if (!island.has_value()) {
+			return;
+		}
+		for (const sim::SpawnPoint &sp : m->level->spawns) {
+			const std::optional<sim::Vec3> f = floor_at(*m->world, sp.position);
+			if (!f || core::vec::horizontal_distance(*f, *island) < 60.0f ||
+					component(*f) != level->bots->main_component ||
+					!m->motor.fits_standing(add(*f, 0.0f, 0.05f, 0.0f))) {
+				continue;
+			}
+			const std::optional<sim::Vec3> s = ring_spot(*m, *f, 8.0f, 15.0f, std::nullopt);
+			if (!centre && s) {
+				centre = f;
+				shooter = s;
+			} else if (centre && core::vec::horizontal_distance(*f, *centre) >= 60.0f) {
+				away = f;
+				break;
+			}
+		}
+		REQUIRE(centre.has_value());
+		REQUIRE(away.has_value());
+		if (!centre.has_value() || !away.has_value()) {
+			return;
+		}
+		size_t enemy_script = 0;
+		for (size_t i = 0; i < m->peers.size(); ++i) {
+			enemy_script = m->peers[i].get() != g.mate ? i : enemy_script;
+		}
+		tdm::ScriptedPeer &enemy = *m->peers[enemy_script];
+		m->teleport(*g.mate, add(*island, 0.0f, 0.05f, 0.0f));
+		m->place(g.bot, add(*centre, 0.0f, 0.05f, 0.0f));
+		enemy.spawn_request(0);
+		REQUIRE(m->until([&] { return is_alive(m->state(enemy.slot())); }, 600));
+		m->teleport(enemy, add(*shooter, 0.0f, 0.05f, 0.0f));
+		m->ticks(5);
+		REQUIRE(is_alive(m->state(g.bot)));
+		const uint32_t life = m->state(g.bot)->life;
+		m->scripts[enemy_script] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			const sim::SoldierState *b = m->state(g.bot);
+			const sim::Vec3 chest = b != nullptr ? add(b->position, 0.0f, 1.2f, 0.0f) : p_state.position;
+			return aim_command(*m, p_tick, p_state, chest, sim::Pose::Stand, select_and_fire(0, true));
+		};
+		REQUIRE(m->until([&] { return !is_alive(m->state(g.bot)); }, 900));
+		m->scripts[enemy_script] = {};
+		if (is_alive(m->state(enemy.slot()))) {
+			m->teleport(enemy, add(*away, 0.0f, 0.05f, 0.0f));
+		}
+		const uint64_t squad_before = m->rules().stats().squad_spawns;
+		const bool back = m->until(
+				[&] {
+					const sim::SoldierState *b = m->state(g.bot);
+					return is_alive(b) && b->life != life;
+				},
+				1800);
+		REQUIRE(back);
+		if (!back) {
+			return;
+		}
+		const sim::Vec3 at = m->state(g.bot)->position;
+		std::printf(
+				"island squad spawn: mate on nav component %u at (%.1f %.1f %.1f), the bots' main component %u; the "
+				"bot respawned at (%.1f %.1f %.1f) on component %u, %.1f m from the mate, %llu squad spawns\n",
+				component(*island), (*island)[0], (*island)[1], (*island)[2], level->bots->main_component, at[0], at[1],
+				at[2], component(at), core::vec::horizontal_distance(at, *island),
+				(unsigned long long)(m->rules().stats().squad_spawns - squad_before));
+		CHECK(component(at) == level->bots->main_component);
+		CHECK(m->rules().stats().squad_spawns == squad_before);
 	}
 }
