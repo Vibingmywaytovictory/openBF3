@@ -1,0 +1,18 @@
+cmake_minimum_required(VERSION 3.29)
+set(GODOT_WINDOWED TRUE)
+include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)
+set(cache_args "")
+set(shot_args "")
+if(DEFINED BUILD_DIR AND NOT BUILD_DIR STREQUAL "")
+    file(MAKE_DIRECTORY "${BUILD_DIR}/godot-cache/godot.net_overlay")
+    set(cache_args "--bf3-cache=${BUILD_DIR}/godot-cache/godot.net_overlay")
+    set(shots "${BUILD_DIR}/shots/net_overlay")
+    file(REMOVE_RECURSE "${shots}")
+    file(MAKE_DIRECTORY "${shots}")
+    set(shot_args "--net-overlay-shots=${shots}")
+endif()
+godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 115
+    ARGS --path "${PROJECT_DIR}" --resolution 1280x720 res://scenes/metro_tdm.tscn -- --bots=7 --deploy-screen=0 --preround=0 --min-players=1
+        --net-overlay-check ${cache_args} ${shot_args})
+godot_require_pass("NET OVERLAY: PASS")
+godot_require_pass("\\[level\\] install unchanged: yes")

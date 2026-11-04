@@ -239,6 +239,8 @@ if(OPENBF3_BUILD_CHECKS)
         src/audio_areas_check.cpp
         src/audio_areas_check.h
         src/crosshair_walk_check.cpp
+        src/net_overlay_check.cpp
+        src/net_overlay_check.h
         src/fx3_demo.cpp
         src/fx3_demo.h
         src/fx_demo.cpp

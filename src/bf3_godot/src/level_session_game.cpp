@@ -35,6 +35,7 @@
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -305,6 +306,9 @@ void Bf3LevelSession::game_parse_args() {
 	}
 	if (has_check_arg("gadgets-draw")) {
 		g.gadgets_draw = std::make_unique<GadgetsDrawRun>();
+	}
+	if (has_check_arg("net-overlay-check")) {
+		g.net_overlay_check = std::make_unique<NetOverlayCheck>(user_arg_value("net-overlay-shots"));
 	}
 	if (has_check_arg("minimap-modes")) {
 		g.minimap_modes = std::make_unique<MinimapModesCheck>(user_arg_value("level"), user_arg_value("minimap-mode"));
@@ -1202,6 +1206,33 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 	g.net_overlay.update(double(p_now_ns) * 1e-9, f.net, [&g]() {
 		return g.audio != nullptr ? std::optional<bf3::audio::SoundFateTotals>(g.audio->sound_fates()) : std::nullopt;
 	});
+#if OPENBF3_BUILD_CHECKS
+	if (g.net_overlay_check != nullptr && !g.finished) {
+		NetOverlayCheckIo io;
+		io.alive = g.alive;
+		io.deploy = [this] {
+			scripted_ui_key(KEY_ENTER, true);
+			scripted_ui_key(KEY_ENTER, false);
+		};
+		io.toggle_key = [this] {
+			Ref<InputEventKey> e;
+			e.instantiate();
+			e->set_keycode(KEY_F9);
+			e->set_physical_keycode(KEY_F9);
+			e->set_pressed(true);
+			_unhandled_input(e);
+		};
+		io.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		const std::optional<bf3::audio::SoundFateTotals> sounds =
+				g.audio != nullptr ? std::optional<bf3::audio::SoundFateTotals>(g.audio->sound_fates()) : std::nullopt;
+		if (g.net_overlay_check->step(double(p_now_ns) * 1e-9, g.net_overlay, f.net, sounds, io)) {
+			g.finished = true;
+			UtilityFunctions::print(to_godot(g.net_overlay_check->report()));
+			finish(g.net_overlay_check->exit_code());
+			return true;
+		}
+	}
+#endif
 	g.base_sensitivity = mapper_.base_sensitivity;
 	if (!g.catalog_cache) {
 		const std::filesystem::path cache_root = no_cache_ ? std::filesystem::path() : cache_root_;

@@ -1171,6 +1171,10 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_cost(godot.menu_frames 1 81)
     openbf3_cost(godot.menu_frames.fullscreen 1 91)
 endif()
+if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+    openbf3_godot_row(godot.net_overlay godot_net_overlay.cmake WINDOW TIMEOUT 120)
+    set_tests_properties(godot.net_overlay PROPERTIES RUN_SERIAL TRUE)
+endif()
 
 target_sources(test_host_tdm PRIVATE host_server_level_tests.cpp)
 target_compile_definitions(test_host_tdm PRIVATE "OPENBF3_MAPLIST_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/maplist.cfg\"")
