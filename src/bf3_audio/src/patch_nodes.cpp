@@ -96,6 +96,11 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				write(port(n, cp::PhysVelocity), geometry.velocity);
 				write(port(n, cp::PhysRelativeVelocity), geometry.relative_velocity);
 				break;
+			case SoundNodeType::Orientation:
+				write(port(n, cp::OriYaw), geometry.relative_yaw_deg);
+				write(port(n, cp::OriPitch), geometry.relative_pitch_deg);
+				write(port(n, cp::OriRoll), 0.0f);
+				break;
 			case SoundNodeType::MultiCrossfader: {
 				const bool start = rose(port(n, cp::McfStart));
 				const bool stop = on(read(port(n, cp::McfStop)));

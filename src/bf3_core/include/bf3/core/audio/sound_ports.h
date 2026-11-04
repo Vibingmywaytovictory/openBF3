@@ -17,10 +17,12 @@ enum DivisibleLoopPlayer : uint8_t { DlpAmplitude, DlpExternalWave, DlpFreezeSeg
 enum EventGate : uint8_t { GateCoolDown, GateEnable, GateIn, GateOut };
 enum Gain : uint8_t { GainAmplitude, GainIn, GainOut };
 enum Iir2 : uint8_t { Iir2Frequency, Iir2In, Iir2Out };
+enum Shelf : uint8_t { ShelfAmplitude, ShelfFrequency, ShelfIn, ShelfOut };
 enum Lfo : uint8_t { LfoAmplitude, LfoHz, LfoOut };
 enum LogicalExpression : uint8_t { LogicTrigger };
 enum MultiCrossfader : uint8_t { McfControl, McfStart, McfStop };
 enum NumberGenerator : uint8_t { NumTrigger, NumY };
+enum Orientation : uint8_t { OriPitch, OriRoll, OriYaw };
 enum PadRumble : uint8_t { RumbleHigh, RumbleLow };
 enum ParameterFilterLinear : uint8_t { PflAttack, PflIn, PflOut, PflRelease };
 enum Peaking : uint8_t { PeakAmplitude, PeakFrequency, PeakIn, PeakOut, PeakQ };
@@ -96,6 +98,8 @@ constexpr uint32_t output_ports(SoundNodeType p_type) {
 			return 1u << NumY;
 		case SoundNodeType::ParameterFilterLinear:
 			return 1u << PflOut;
+		case SoundNodeType::Orientation:
+			return (1u << OriPitch) | (1u << OriRoll) | (1u << OriYaw);
 		case SoundNodeType::Physics:
 			return 0x1fu;
 		case SoundNodeType::Sampler:
@@ -148,6 +152,8 @@ constexpr uint32_t audio_ports(SoundNodeType p_type) {
 			return (1u << Iir2In) | (1u << Iir2Out);
 		case SoundNodeType::PeakingIir2:
 			return (1u << PeakIn) | (1u << PeakOut);
+		case SoundNodeType::HighShelfIir2:
+			return (1u << ShelfIn) | (1u << ShelfOut);
 		case SoundNodeType::Sampler:
 			return 1u << SmpOutput;
 		case SoundNodeType::DivisibleLoopPlayer:
@@ -198,6 +204,8 @@ constexpr uint8_t attribute_port(SoundNodeType p_type, uint8_t p_attribute) {
 			return p_attribute == 0 ? uint8_t(PeakFrequency) : p_attribute == 1 ? uint8_t(PeakAmplitude) : p_attribute == 2 ? uint8_t(PeakQ) : kNoPort;
 		case SoundNodeType::BandPassIir2:
 			return p_attribute == 0 ? uint8_t(BandPassFrequency) : p_attribute == 1 ? uint8_t(BandPassBandwidth) : kNoPort;
+		case SoundNodeType::HighShelfIir2:
+			return p_attribute == 0 ? uint8_t(ShelfFrequency) : p_attribute == 1 ? uint8_t(ShelfAmplitude) : kNoPort;
 		case SoundNodeType::Gain:
 			return p_attribute == 0 ? uint8_t(GainAmplitude) : kNoPort;
 		case SoundNodeType::Delay:

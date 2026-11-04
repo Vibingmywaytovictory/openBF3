@@ -101,7 +101,7 @@ struct SoundNodeTypeInfo {
 };
 
 inline constexpr size_t kPatchNodeTypes = 46;
-inline constexpr size_t kA2NodeTypes = 32;
+inline constexpr size_t kA2NodeTypes = 34;
 inline constexpr size_t kAllNodeTypes = 58;
 
 std::span<const SoundNodeTypeInfo> sound_node_types();

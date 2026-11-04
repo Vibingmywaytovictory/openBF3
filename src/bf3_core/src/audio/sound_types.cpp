@@ -31,6 +31,7 @@ constexpr std::string_view kFlatOutputPorts[] = { "BypassHeadroom", "CenterLevel
 constexpr std::string_view kFlatOutputFloats[] = { "Angle", "Gain", "HFDampingDistance", "HFDampingObstruction", "HFDampingOcclusion", "MinDistance", "ReverbGain" };
 constexpr std::string_view kGainPorts[] = { "Amplitude", "In", "Out" };
 constexpr std::string_view kHighPassIir2Ports[] = { "Frequency", "In", "Out" };
+constexpr std::string_view kHighShelfIir2Ports[] = { "Amplitude", "Frequency", "In", "Out" };
 constexpr std::string_view kLfoPorts[] = { "Amplitude", "Hz", "Out" };
 constexpr std::string_view kLfoFloats[] = { "Max", "Min" };
 constexpr std::string_view kLogicalExpressionPorts[] = { "Trigger" };
@@ -38,6 +39,8 @@ constexpr std::string_view kLowPassIir2Ports[] = { "Frequency", "In", "Out" };
 constexpr std::string_view kMultiCrossfaderPorts[] = { "Control", "Start", "Stop" };
 constexpr std::string_view kNumberGeneratorPorts[] = { "Trigger", "Y" };
 constexpr std::string_view kNumberGeneratorFloats[] = { "Max", "Min" };
+constexpr std::string_view kOrientationPorts[] = { "ListenerRelativePitch", "ListenerRelativeRoll",
+	"ListenerRelativeYaw" };
 constexpr std::string_view kPadRumblePorts[] = { "RumbleHigh", "RumbleLow" };
 constexpr std::string_view kParameterFilterLinearPorts[] = { "AttackSpeed", "In", "Out", "ReleaseSpeed" };
 constexpr std::string_view kPeakingIir2Ports[] = { "Amplitude", "Frequency", "In", "Out", "Q" };
@@ -106,10 +109,10 @@ constexpr SoundNodeTypeInfo kTypes[] = {
 	{ SoundNodeType::DivisibleLoopPlayer, "DivisibleLoopPlayerNodeData", SoundNodeRole::Patch, false, true, kDivisibleLoopPlayerPorts, kDivisibleLoopPlayerFloats, "", "" },
 	{ SoundNodeType::EventSwitcher, "EventSwitcherNodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },
 	{ SoundNodeType::FrequencyShiftSsb, "FrequencyShiftSsbNodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },
-	{ SoundNodeType::HighShelfIir2, "HighShelfIir2NodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },
+	{ SoundNodeType::HighShelfIir2, "HighShelfIir2NodeData", SoundNodeRole::Patch, true, true, kHighShelfIir2Ports, kNone, "", "" },
 	{ SoundNodeType::Limiter, "LimiterNodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },
 	{ SoundNodeType::LowShelfIir2, "LowShelfIir2NodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },
-	{ SoundNodeType::Orientation, "OrientationNodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },
+	{ SoundNodeType::Orientation, "OrientationNodeData", SoundNodeRole::Patch, true, false, kOrientationPorts, kNone, "", "" },
 	{ SoundNodeType::ParameterFilterLp, "ParameterFilterLpNodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },
 	{ SoundNodeType::Route, "RouteNodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },
 	{ SoundNodeType::Send, "SendNodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },

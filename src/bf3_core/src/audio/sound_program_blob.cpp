@@ -92,8 +92,10 @@ Status check_shape(const SoundProgram &p, const SoundNode &n, bool p_child, size
 	if (loop_player && (n.waves_count != 1 || n.plugins_count % port::kLoopSlotPlugins != 0)) {
 		return invalid(where + ": loop player wave / slot layout");
 	}
-	const bool one_plugin = n.type == SoundNodeType::Gain || n.type == SoundNodeType::HighPassIir2 || n.type == SoundNodeType::LowPassIir2 ||
-			n.type == SoundNodeType::BandPassIir2 || n.type == SoundNodeType::PeakingIir2 || n.type == SoundNodeType::Delay;
+	const bool one_plugin = n.type == SoundNodeType::Gain || n.type == SoundNodeType::HighPassIir2 ||
+			n.type == SoundNodeType::LowPassIir2 || n.type == SoundNodeType::BandPassIir2 ||
+			n.type == SoundNodeType::PeakingIir2 || n.type == SoundNodeType::HighShelfIir2 ||
+			n.type == SoundNodeType::Delay;
 	if (one_plugin && n.plugins_count != 1) {
 		return invalid(where + ": plugin ref count");
 	}

@@ -21,7 +21,7 @@ namespace bf3::core::audio {
 
 inline constexpr uint32_t kSoundProgramFormatVersion = 1;
 
-inline constexpr uint32_t kSoundProgramConverterVersion = 2;
+inline constexpr uint32_t kSoundProgramConverterVersion = 3;
 inline constexpr const char *kSoundProgramCacheKind = "sound-patch";
 inline constexpr const char *kSoundProgramDepsCacheKind = "sound-patch-deps";
 

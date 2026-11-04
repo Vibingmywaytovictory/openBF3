@@ -2980,3 +2980,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * --upnp maps the dedicated or --maplist listen server's UDP port through Godot's UPNP class and deletes it at shutdown; no row (the owner's run); build.server_deps.
 * Closing the game during a --connect=<name>@<master> lookup cancels it at once instead of waiting out the 5 s exchange; net.master.enet.
 * docs/architecture.md's client row names the own-hit ledger and the duel helpers net-hitreg added (the integration of M3 wave 6); hygiene.rules.
+* Sound patches play HighShelfIir2 (the HS20 plugin, 98 nodes @all-mp) and OrientationNodeData (listener-relative yaw and pitch of the emitter's forward); A2 is 34 types and the census holds the handheld set inside it; audio.patch.unit, audio.census.

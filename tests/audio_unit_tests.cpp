@@ -634,6 +634,37 @@ TEST_SUITE("audio-patch") {
 		CHECK(z(SimpleTransformOp::Exp) == 0.0f);
 	}
 
+	TEST_CASE("Orientation: ListenerRelativeYaw and Pitch of the emitter's forward in the listener frame, in degrees") {
+		Builder b;
+		const uint16_t pitch = b.reg(), roll = b.reg(), yaw = b.reg();
+		const uint32_t n = b.node(SoundNodeType::Orientation);
+		b.set(n, cp::OriPitch, Builder::R(pitch));
+		b.set(n, cp::OriRoll, Builder::R(roll));
+		b.set(n, cp::OriYaw, Builder::R(yaw));
+		auto inst = instance(b.build());
+		const auto eval = [&](ba::Vec3 p_forward) {
+			ba::EmitterState e;
+			e.position = ba::Vec3{ 0.0f, 0.0f, 5.0f };
+			e.forward = p_forward;
+			inst->set_geometry(e, ba::ListenerState{});
+			inst->evaluate(0.0);
+		};
+		eval(ba::Vec3{ 0.0f, 0.0f, 1.0f });
+		CHECK(inst->value(yaw) == doctest::Approx(0.0));
+		CHECK(inst->value(pitch) == doctest::Approx(0.0));
+		eval(ba::Vec3{ -2.0f, 0.0f, 0.0f });
+		CHECK(inst->value(yaw) == doctest::Approx(90.0));
+		eval(ba::Vec3{ 1.0f, 0.0f, 0.0f });
+		CHECK(inst->value(yaw) == doctest::Approx(-90.0));
+		eval(ba::Vec3{ 0.0f, 1.0f, 1.0f });
+		CHECK(inst->value(yaw) == doctest::Approx(0.0));
+		CHECK(inst->value(pitch) == doctest::Approx(45.0));
+		CHECK(inst->value(roll) == 0.0f);
+		eval(ba::Vec3{ 0.0f, 0.0f, 0.0f });
+		CHECK(inst->value(yaw) == 0.0f);
+		CHECK(inst->value(pitch) == 0.0f);
+	}
+
 	TEST_CASE("Condition, LogicalExpression, DeMux, Switcher, ValueSelector, SimpleValueSelector") {
 		Builder b;
 		const uint16_t x = b.input(1, false), y = b.input(2, false), ev = b.input(3, true);

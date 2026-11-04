@@ -552,6 +552,7 @@ struct Compiler {
 			case SoundNodeType::LowPassIir2:
 			case SoundNodeType::BandPassIir2:
 			case SoundNodeType::PeakingIir2:
+			case SoundNodeType::HighShelfIir2:
 			case SoundNodeType::Delay: {
 				BF3_TRY(budget.charge(1));
 				Result<SoundPluginRef> r = read_plugin_ref(p_s, "Plugin");

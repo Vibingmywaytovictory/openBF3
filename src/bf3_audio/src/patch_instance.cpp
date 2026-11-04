@@ -36,8 +36,9 @@ float length(const Vec3 &a) {
 using bf3::core::finite;
 
 bool one_plugin_node(SoundNodeType t) {
-	return t == SoundNodeType::Gain || t == SoundNodeType::HighPassIir2 || t == SoundNodeType::LowPassIir2 || t == SoundNodeType::BandPassIir2 ||
-			t == SoundNodeType::PeakingIir2 || t == SoundNodeType::Delay;
+	return t == SoundNodeType::Gain || t == SoundNodeType::HighPassIir2 || t == SoundNodeType::LowPassIir2 ||
+			t == SoundNodeType::BandPassIir2 || t == SoundNodeType::PeakingIir2 || t == SoundNodeType::HighShelfIir2 ||
+			t == SoundNodeType::Delay;
 }
 
 constexpr uint32_t kMaxDelaySeconds = 4;
@@ -123,6 +124,10 @@ Result<std::unique_ptr<PatchInstance>> PatchInstance::create(std::shared_ptr<con
 			ps.attributes[0] = 1000.0f;
 			ps.attributes[1] = 1.0f;
 			ps.attributes[2] = 0.70710678f;
+		} else if (id == ca::fourcc("HS20")) {
+			ps.role = PluginRole::HighShelf;
+			ps.attributes[0] = 24000.0f;
+			ps.attributes[1] = 1.0f;
 		} else if (id == ca::fourcc("Del0")) {
 			ps.role = PluginRole::Delay;
 		} else if (id == ca::fourcc("LPB0")) {
@@ -385,6 +390,17 @@ void PatchInstance::set_geometry(const EmitterState &p_emitter, const ListenerSt
 		g.azimuth = g.elevation = g.relative_velocity = g.cone_angle_deg = 0.0f;
 	}
 	g.velocity = length(p_emitter.velocity);
+	const float forward_length = length(p_emitter.forward);
+	if (forward_length > 1e-6f && finite(p_emitter.forward)) {
+		const Vec3 f{ p_emitter.forward.x / forward_length, p_emitter.forward.y / forward_length,
+			p_emitter.forward.z / forward_length };
+		g.relative_yaw_deg = std::atan2(dot(f, right), dot(f, p_listener.forward)) * 180.0f / kPi;
+		g.relative_pitch_deg =
+				std::asin(std::clamp(dot(f, p_listener.up) / std::max(1e-6f, length(p_listener.up)), -1.0f, 1.0f)) *
+				180.0f / kPi;
+	} else {
+		g.relative_yaw_deg = g.relative_pitch_deg = 0.0f;
+	}
 }
 
 namespace {
@@ -521,6 +537,12 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 				case PluginRole::Peaking: {
 					const BiquadCoefficients c =
 							BiquadCoefficients::design(BiquadShape::Peaking, rate, ps.attribute(0), ps.attribute(2), gain_to_db(std::max(0.0f, ps.attribute(1))));
+					process_biquad_pair(ps.biquad, ch[0], ch[1], p_frames, c);
+					break;
+				}
+				case PluginRole::HighShelf: {
+					const BiquadCoefficients c = BiquadCoefficients::design(BiquadShape::HighShelf, rate,
+							ps.attribute(0), st.tuning.iir2_q, gain_to_db(std::max(0.0f, ps.attribute(1))));
 					process_biquad_pair(ps.biquad, ch[0], ch[1], p_frames, c);
 					break;
 				}
@@ -971,6 +993,7 @@ bool PatchInstance::State::voice_quiet(const ca::SoundVoice &p_voice, uint16_t p
 			case PluginRole::LowPass:
 			case PluginRole::BandPass:
 			case PluginRole::Peaking:
+			case PluginRole::HighShelf:
 				if (ps.biquad[0].z1 != 0.0f || ps.biquad[0].z2 != 0.0f || ps.biquad[1].z1 != 0.0f || ps.biquad[1].z2 != 0.0f) {
 					return false;
 				}
@@ -1024,6 +1047,10 @@ void PatchInstance::State::quiet_plugin(PluginState &r_ps, float p_rate, float p
 		}
 		case PluginRole::Peaking:
 			biquads(BiquadCoefficients::design(BiquadShape::Peaking, p_rate, r_ps.attribute(0), r_ps.attribute(2), gain_to_db(std::max(0.0f, r_ps.attribute(1)))));
+			break;
+		case PluginRole::HighShelf:
+			biquads(BiquadCoefficients::design(BiquadShape::HighShelf, p_rate, r_ps.attribute(0), tuning.iir2_q,
+					gain_to_db(std::max(0.0f, r_ps.attribute(1)))));
 			break;
 		case PluginRole::Send: {
 			const ca::SoundConnection &c = p.connections[r_ps.index];

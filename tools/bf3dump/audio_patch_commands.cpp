@@ -16,6 +16,7 @@
 #include "bf3/core/audio/sound_stream.h"
 #include "bf3/core/audio/sound_wave.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -185,14 +186,14 @@ int cmd_audio_census(const InstallReader &p_reader, std::shared_ptr<Install> p_i
 	for (const std::string &f : failures) {
 		std::printf("  failure: %s\n", f.c_str());
 	}
-	const bool handheld_set_ok = handheld_types == a2;
+	const bool handheld_set_ok = std::includes(a2.begin(), a2.end(), handheld_types.begin(), handheld_types.end());
 	std::printf("audio census %s: patches=%zu under_sound=%zu masters=%zu mixers=%zu configurations=%zu waves=%zu patch_node_instances=%zu "
 				"patch_types=%zu all_node_instances=%zu all_types=%zu voices=%zu graphs=%zu compiled=%zu compile_failures=%zu unknown_types=%zu "
-				"connections=%zu sen0=%zu rou0=%zu other_named=%zu feedback_edges=%zu handheld=%zu handheld_types=%zu handheld_set_a2=%d "
+				"connections=%zu sen0=%zu rou0=%zu other_named=%zu feedback_edges=%zu handheld=%zu handheld_types=%zu a2_types=%zu handheld_in_a2=%d "
 				"handheld_strict=%zu max_nodes=%zu max_registers=%zu max_voices=%zu blob_failures=%zu blob_bytes=%zu\n",
 			p_args[0].c_str(), patches, under_sound, masters, mixers, configs, waves, patch_nodes, patch_types.size(), all_nodes, all_types.size(), voices,
 			graphs, compiled, compile_failures, unknown_types + unknown_patch_types, connections, sen0, rou0, other_named, feedback, handheld,
-			handheld_types.size(), handheld_set_ok ? 1 : 0, handheld_strict, max_nodes, max_registers, max_voices, blob_failures, blob_bytes);
+			handheld_types.size(), a2.size(), handheld_set_ok ? 1 : 0, handheld_strict, max_nodes, max_registers, max_voices, blob_failures, blob_bytes);
 	const bool unchanged = unchanged_line(p_reader, before);
 	return (compile_failures == 0 && blob_failures == 0 && handheld_strict == handheld && handheld_set_ok && unchanged) ? 0 : 1;
 }

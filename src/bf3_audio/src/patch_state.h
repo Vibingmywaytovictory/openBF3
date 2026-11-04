@@ -135,6 +135,7 @@ enum class PluginRole : uint8_t {
 	LowPass,
 	BandPass,
 	Peaking,
+	HighShelf,
 	Delay,
 	Damping,
 	Pan,
@@ -188,6 +189,8 @@ struct Geometry {
 	float velocity = 0.0f;
 	float relative_velocity = 0.0f;
 	float cone_angle_deg = 0.0f;
+	float relative_yaw_deg = 0.0f;
+	float relative_pitch_deg = 0.0f;
 };
 
 }
