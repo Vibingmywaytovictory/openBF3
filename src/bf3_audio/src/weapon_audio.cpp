@@ -358,6 +358,7 @@ bool OneShotPool::start(MixerCore &r_mixer, std::shared_ptr<const ca::SoundProgr
 	e.emitter = p_emitter;
 	e.join_key = p_options.join_key;
 	e.program = p_program.get();
+	e.shakes_camera = p_options.shakes_camera;
 	live_.push_back(e);
 	peak_ = std::max<uint32_t>(peak_, uint32_t(live_.size()));
 	++started_;
@@ -400,6 +401,11 @@ InstanceHandle OneShotPool::last_handle() const {
 
 bool OneShotPool::contains(InstanceHandle p_handle) const {
 	return std::any_of(live_.begin(), live_.end(), [&](const Entry &e) { return e.handle == p_handle; });
+}
+
+bool OneShotPool::shakes_camera(InstanceHandle p_handle) const {
+	return std::any_of(
+			live_.begin(), live_.end(), [&](const Entry &e) { return e.handle == p_handle && e.shakes_camera; });
 }
 
 uint32_t OneShotPool::resend_emitters(MixerCore &r_mixer) const {
@@ -465,6 +471,7 @@ struct WeaponAudioRouter::Impl {
 	OneShotPool &pool;
 	WeaponAudioConfig config;
 	WeaponAudioStats stats;
+	HapticsFeed haptics;
 	WeaponAudioObserver *observer = nullptr;
 	uint8_t own_slot = 0xFF;
 	std::array<std::pair<uint16_t, uint16_t>, 256> slot_sounds{};
@@ -1279,6 +1286,9 @@ struct WeaponAudioRouter::Impl {
 		for (int guard = 0; guard < 64; ++guard) {
 			const size_t n = mixer.poll_feedback(fb);
 			for (size_t i = 0; i < n; ++i) {
+				if (pool.shakes_camera(fb[i].handle)) {
+					haptics.note(fb[i]);
+				}
 				if (!fb[i].finished) {
 					continue;
 				}
@@ -1669,6 +1679,10 @@ void WeaponAudioRouter::set_observer(WeaponAudioObserver *p_observer) {
 
 const WeaponAudioStats &WeaponAudioRouter::stats() const {
 	return impl_->stats;
+}
+
+const HapticsFeed &WeaponAudioRouter::haptics() const {
+	return impl_->haptics;
 }
 
 void WeaponAudioRouter::set_trace(bool p_on) {

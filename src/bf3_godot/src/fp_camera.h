@@ -55,6 +55,7 @@ struct ViewEffects {
 	float world_fov_deg = FpCamera::kFovDegrees;
 	float recoil_pitch_deg = 0, recoil_yaw_deg = 0;
 	float kick_pitch_deg = 0, kick_yaw_deg = 0;
+	float shake_pitch_rad = 0, shake_yaw_rad = 0, shake_roll_rad = 0;
 };
 
 void apply_view_effects(godot::Camera3D *p_camera, const godot::Vector3 &p_eye, double p_yaw, double p_pitch, const ViewEffects &p_effects);

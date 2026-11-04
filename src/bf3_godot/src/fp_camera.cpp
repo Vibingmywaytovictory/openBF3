@@ -119,7 +119,10 @@ void apply_view_effects(godot::Camera3D *p_camera, const godot::Vector3 &p_eye, 
 	}
 	const bf3::anim::ViewAngles a = bf3::anim::camera_view_angles(p_yaw, p_pitch, p_effects.recoil_pitch_deg, p_effects.recoil_yaw_deg,
 			p_effects.kick_pitch_deg, p_effects.kick_yaw_deg);
-	const godot::Basis basis = godot::Basis(godot::Vector3(0, 1, 0), real_t(a.yaw + 3.14159265358979323846)) * godot::Basis(godot::Vector3(1, 0, 0), real_t(a.pitch));
+	const godot::Basis basis =
+			godot::Basis(godot::Vector3(0, 1, 0), real_t(a.yaw + p_effects.shake_yaw_rad + 3.14159265358979323846)) *
+			godot::Basis(godot::Vector3(1, 0, 0), real_t(a.pitch + p_effects.shake_pitch_rad)) *
+			godot::Basis(godot::Vector3(0, 0, 1), real_t(p_effects.shake_roll_rad));
 	p_camera->set_keep_aspect_mode(godot::Camera3D::KEEP_HEIGHT);
 	p_camera->set_fov(p_effects.world_fov_deg);
 	p_camera->set_global_transform(godot::Transform3D(basis, p_eye));

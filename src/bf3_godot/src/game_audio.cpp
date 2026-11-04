@@ -583,6 +583,11 @@ bool Bf3GameAudio::weapon_bound(uint16_t p_def) const {
 	return m.table != nullptr && p_def < m.table->defs.size() && m.table->defs[p_def].form != ba::WeaponAudioForm::None;
 }
 
+audio::CameraShake Bf3GameAudio::camera_shake() const {
+	const Impl &m = *impl_;
+	return m.router && m.mixer ? m.router->haptics().current(m.mixer->clock()) : audio::CameraShake{};
+}
+
 GameAudioStats Bf3GameAudio::stats() const {
 	const Impl &m = *impl_;
 	GameAudioStats s;

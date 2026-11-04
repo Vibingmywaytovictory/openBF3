@@ -1498,6 +1498,64 @@ TEST_SUITE("audio-router") {
 		CHECK(open.farthest_m < 15.0f);
 	}
 
+	TEST_CASE("fly-bys: the patch's CameraShake values reach the router's HapticsFeed, summed per block, and end with "
+			  "the instance; the same patch started as a plain one-shot does not shake") {
+		Rig r;
+		constexpr uint64_t kMatch = 0x5eed;
+		Builder b;
+		const uint16_t trig = b.input(kImpactStart, true);
+		b.input(kStopHash, true);
+		b.p.start_event = kImpactStart;
+		b.p.stop_event = kStopHash;
+		b.p.waves.push_back(SoundWaveRef{ r.wave.partition, "test_wave" });
+		const uint32_t smp = b.sampler(1, 0, SamplerLoop::None);
+		b.set(smp, cp::SmpTrigger, Builder::R(trig));
+		const uint32_t shake = b.node(SoundNodeType::CameraShake);
+		b.set(shake, cp::ShakePitch, Builder::C(0.4f));
+		b.set(shake, cp::ShakeYaw, Builder::C(-0.8f));
+		b.set(shake, cp::ShakeRoll, Builder::C(0.2f));
+		const std::shared_ptr<const SoundProgram> shaking = b.build();
+		std::vector<ba::FlyBySound> sounds(1);
+		sounds[0] = ba::FlyBySound{ shaking, 15.0f, 20.0f };
+		ba::FlyByAudio fb(*r.mixer, sounds, r.wave.bank, ba::AudioTuning{}, *r.pool);
+		CHECK(r.router->haptics().current(r.mixer->clock()).sources == 0);
+		std::vector<host::PresentedBullet> frame(2);
+		for (uint32_t i = 0; i < 2; ++i) {
+			host::PresentedBullet &x = frame[i];
+			x.slot = 3;
+			x.def = 0;
+			x.shot_index = 40 + i;
+			x.origin = { 1.0f + float(i), 0.0f, -300.0f };
+			x.position = { 1.0f + float(i), 0.0f, 50.0f };
+			x.speed = 600.0f;
+			x.spawn_time = r.render - 30 * kTick;
+			x.time = r.render;
+		}
+		r.begin();
+		fb.set_listener(r.listener);
+		fb.on_bullets(frame, kMatch, *r.clock);
+		ba::EmitterState near_em;
+		near_em.position = { 0.5f, 0.0f, 0.0f };
+		REQUIRE(r.pool->start(
+				*r.mixer, shaking, r.wave.bank, ba::AudioTuning{}, 7, near_em, r.listener, r.clock->earliest_frame()));
+		r.end();
+		r.idle(4);
+		CHECK(r.pool->started() == 3);
+		const ba::CameraShake both = r.router->haptics().current(r.mixer->clock());
+		MESSAGE("shake: pitch ", both.pitch, ", yaw ", both.yaw, ", roll ", both.roll, " from ", both.sources,
+				" instances");
+		CHECK(fb.stats().starts == 2);
+		CHECK(both.sources == 2);
+		CHECK(both.pitch == doctest::Approx(0.8f));
+		CHECK(both.yaw == doctest::Approx(-1.6f));
+		CHECK(both.roll == doctest::Approx(0.4f));
+		CHECK(r.router->haptics().blocks() > 0);
+		r.idle(int(ba::kOneShotStopAfterSeconds * 60.0) + 60);
+		CHECK(r.pool->live() == 0);
+		CHECK(r.router->haptics().current(r.mixer->clock()).sources == 0);
+		CHECK(r.router->haptics().peak() == doctest::Approx(1.6f));
+	}
+
 	TEST_CASE(
 			"fly-bys: none for a round that hits the own soldier, none for a round stopped short of its closest pass") {
 		Rig r;
@@ -2915,6 +2973,58 @@ TEST_SUITE("audio-game") {
 		CHECK(named == 10);
 		CHECK(programs.size() == 2);
 		MESSAGE(named, " defs name a fly-by, ", programs.size(), " patches:\n", table);
+		struct Shake {
+			float pitch = 0.0f, yaw = 0.0f, roll = 0.0f;
+			uint32_t blocks = 0, shaking = 0;
+			bool finished = false;
+		};
+		const auto shake_at = [&](const std::shared_ptr<const SoundProgram> &p_program, float p_distance) {
+			Result<std::unique_ptr<ba::PatchInstance>> made =
+					ba::PatchInstance::create(p_program, f->assets.bank, ba::AudioTuning{}, 11, ba::kMixRate);
+			REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+			ba::PatchInstance &inst = **made;
+			ba::EmitterState em;
+			em.position = ba::Vec3{ p_distance, 0.0f, 0.0f };
+			inst.set_geometry(em, ba::ListenerState{});
+			inst.post_event(p_program->start_event, 0);
+			std::vector<float> storage(size_t(MasterBus::Unknown) * 2 * ba::kBlockFrames, 0.0f);
+			ba::BusBuffers buses;
+			for (size_t i = 0; i < size_t(MasterBus::Unknown); ++i) {
+				buses.channels[i][0] = storage.data() + (i * 2) * ba::kBlockFrames;
+				buses.channels[i][1] = storage.data() + (i * 2 + 1) * ba::kBlockFrames;
+			}
+			Shake out;
+			for (; out.blocks < 400 && !inst.finished(); ++out.blocks) {
+				std::fill(storage.begin(), storage.end(), 0.0f);
+				buses.frames = ba::kBlockFrames;
+				buses.first_frame = uint64_t(out.blocks) * ba::kBlockFrames;
+				inst.process_block(buses);
+				const ba::PatchHaptics h = inst.haptics();
+				out.pitch = std::max(out.pitch, std::fabs(h.shake_pitch));
+				out.yaw = std::max(out.yaw, std::fabs(h.shake_yaw));
+				out.roll = std::max(out.roll, std::fabs(h.shake_roll));
+				out.shaking += ba::has_haptics(h) ? 1u : 0u;
+			}
+			out.finished = inst.finished();
+			return out;
+		};
+		for (const std::shared_ptr<const SoundProgram> &p : programs) {
+			CHECK(std::count_if(p->nodes.begin(), p->nodes.end(),
+						  [](const SoundNode &n) { return n.type == SoundNodeType::CameraShake; }) == 1);
+			for (const float distance : { 0.5f, 2.0f }) {
+				const Shake s = shake_at(p, distance);
+				MESSAGE(p->name, " passing at ", distance, " m: CameraShake peaks pitch ", s.pitch, ", yaw ", s.yaw,
+						", roll ", s.roll, " over ", s.shaking, " of ", s.blocks, " blocks");
+				CHECK(s.finished);
+				if (distance < 1.0f) {
+					CHECK(s.shaking > 0);
+					CHECK(s.pitch > 0.0f);
+					CHECK(s.pitch < 0.1f);
+				} else {
+					CHECK(s.shaking == 0);
+				}
+			}
+		}
 		check_game_unchanged(*f);
 	}
 

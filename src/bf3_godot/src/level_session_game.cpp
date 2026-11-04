@@ -1288,6 +1288,12 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			ViewmodelFrame vf = viewmodel_frame_from(g.weapon, cameras_.last_eye(), view.yaw, view.pitch, dt, sprinting, speed, yaw_rate, pitch_rate);
 			vf.grounded = (f.own_curr.flags & sim::soldier_flags::kGrounded) != 0;
 			vf.switch_back = mapper_.quick_switching_back();
+			if (g.audio != nullptr && g.audio->built()) {
+				const bf3::audio::CameraShake shake = g.audio->camera_shake();
+				vf.shake_pitch_rad = shake.pitch;
+				vf.shake_yaw_rad = shake.yaw;
+				vf.shake_roll_rad = shake.roll;
+			}
 			own_vm->present(vf, g.cues, camera);
 			const bf3::render::ViewmodelItem *vm_item = own_vm->current_item();
 			const bool by_flow = vm_item != nullptr && vm_item->throw_flow.valid() && vm_item->throw_flow.skip_undeploy;

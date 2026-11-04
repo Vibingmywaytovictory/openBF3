@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/audio/audio_config.h"
+#include "bf3/audio/haptics_feed.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/patch_instance.h"
 #include "bf3/audio/weapon_foley.h"
@@ -134,6 +135,7 @@ struct OneShotOptions {
 	uint32_t mix_rate = kMixRate;
 	std::function<void(PatchInstance &, InstanceHandle)> before_start;
 	uint64_t join_key = 0;
+	bool shakes_camera = false;
 };
 
 constexpr uint64_t one_shot_join_key(uint8_t p_slot, bool p_first_person) {
@@ -164,6 +166,7 @@ public:
 
 	InstanceHandle last_handle() const;
 	bool contains(InstanceHandle p_handle) const;
+	bool shakes_camera(InstanceHandle p_handle) const;
 
 	uint32_t resend_emitters(MixerCore &r_mixer) const;
 
@@ -183,6 +186,7 @@ private:
 		bool stopped = false;
 		uint64_t join_key = 0;
 		const core::audio::SoundProgram *program = nullptr;
+		bool shakes_camera = false;
 	};
 	uint32_t limit_ = kTuningVoices;
 	std::vector<Entry> live_;
@@ -309,6 +313,7 @@ public:
 
 	void set_observer(WeaponAudioObserver *p_observer);
 	const WeaponAudioStats &stats() const;
+	const HapticsFeed &haptics() const;
 
 	void set_trace(bool p_on);
 	void take_starts(std::vector<WeaponSoundStart> &r_out);

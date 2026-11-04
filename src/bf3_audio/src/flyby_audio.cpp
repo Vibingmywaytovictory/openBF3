@@ -138,8 +138,10 @@ struct FlyByAudio::Impl {
 		const sw::SimTime when = p_from_time + sw::SimTime(std::llround(double(u) * double(p_b.time - p_from_time)));
 		const uint64_t seed = present::impact_seed(
 				present::effect_seed(p_match_seed, p_b.slot, p_b.shot_index), p_b.pellet, kFlyByOrdinal);
+		OneShotOptions o;
+		o.shakes_camera = true;
 		if (!pool.start(mixer, p_sound.program, bank, tuning, seed, em, listener,
-					r_clock.frame_of(when, present::PresentTimeline::Render))) {
+					r_clock.frame_of(when, present::PresentTimeline::Render), o)) {
 			++stats.refused;
 			return;
 		}

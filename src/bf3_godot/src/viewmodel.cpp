@@ -564,6 +564,9 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 	fx.recoil_yaw_deg = p_frame.recoil_yaw_deg;
 	fx.kick_pitch_deg = output_.camera_recoil_pitch_deg;
 	fx.kick_yaw_deg = output_.camera_recoil_yaw_deg;
+	fx.shake_pitch_rad = p_frame.shake_pitch_rad;
+	fx.shake_yaw_rad = p_frame.shake_yaw_rad;
+	fx.shake_roll_rad = p_frame.shake_roll_rad;
 	apply_view_effects(p_camera, p_frame.eye, p_frame.yaw, p_frame.pitch, fx);
 
 	const Transform3D cam = p_camera ? p_camera->get_global_transform() : Transform3D();

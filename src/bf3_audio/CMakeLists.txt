@@ -78,3 +78,8 @@ target_sources(bf3_audio PRIVATE
     include/bf3/audio/movement_foley.h
     src/movement_foley.cpp
 )
+
+target_sources(bf3_audio PRIVATE
+    include/bf3/audio/haptics_feed.h
+    src/haptics_feed.cpp
+)

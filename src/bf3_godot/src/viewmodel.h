@@ -44,6 +44,7 @@ struct ViewmodelFrame {
 	bool grounded = true;
 	float speed = 0;
 	float recoil_pitch_deg = 0, recoil_yaw_deg = 0;
+	float shake_pitch_rad = 0, shake_yaw_rad = 0, shake_roll_rad = 0;
 	godot::Vector3 eye;
 	double yaw = 0, pitch = 0;
 	float view_yaw_rate = 0, view_pitch_rate = 0;
