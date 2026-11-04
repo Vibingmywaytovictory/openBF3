@@ -13,6 +13,7 @@
 #include "bf3/core/math.h"
 #include "bf3/core/result.h"
 #include "bf3/render/viewmodel_assets.h"
+#include "bf3/render/weapon_lights.h"
 #include "bf3/render/weapon_sockets.h"
 
 #include <array>
@@ -149,6 +150,11 @@ struct ViewmodelSight {
 	bool hides_weapon = false;
 };
 
+struct ViewmodelLight {
+	int32_t rig_bone = -1;
+	WeaponSocketLight socket;
+};
+
 struct ViewmodelLocomotionClips;
 
 struct ViewmodelItem {
@@ -174,6 +180,7 @@ struct ViewmodelItem {
 
 	std::vector<std::unique_ptr<core::ant::AntPackage>> packages;
 	std::vector<ViewmodelAttachment> attachments;
+	std::vector<ViewmodelLight> lights;
 	std::vector<ViewmodelSlotLook> weapon_looks;
 	std::optional<ViewmodelSight> sight;
 	uint32_t hidden_surfaces = 0;

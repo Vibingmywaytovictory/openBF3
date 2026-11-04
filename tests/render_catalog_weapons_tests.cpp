@@ -18,6 +18,7 @@
 #include "bf3/render/soldier_assets.h"
 #include "bf3/render/viewmodel_set.h"
 #include "bf3/render/weapon_camo.h"
+#include "bf3/render/weapon_lights.h"
 #include "bf3/render/weapon_sockets.h"
 #include "game_crowd_items.h"
 #include "test_support.h"
@@ -483,6 +484,8 @@ struct AccessoryRow {
 	size_t sockets = 0;
 	size_t modifiers = 0;
 	std::string camo;
+	std::vector<std::string> light_prefabs;
+	size_t lights = 0;
 	std::string error;
 	std::string facts;
 };
@@ -630,6 +633,19 @@ TEST_SUITE("render-catalog-accessories") {
 									row.meshes.push_back(*m);
 								}
 							}
+							for (const std::string *prefab : { &o.prefab_1p, &o.prefab_3p }) {
+								if (prefab->empty()) {
+									continue;
+								}
+								core::Result<std::vector<core::level::SpotLight>> l =
+										render::read_prefab_spot_lights(lib, *prefab);
+								if (!l) {
+									row.error = l.error().message;
+									continue;
+								}
+								row.lights += l->size();
+								row.light_prefabs.push_back(core::to_lower_ascii(*prefab));
+							}
 						}
 					}
 					if (const std::optional<render::WeaponCamo> camo =
@@ -682,7 +698,8 @@ TEST_SUITE("render-catalog-accessories") {
 		const double s_rows = seconds_since(t0);
 		std::vector<std::string> failed;
 		std::map<std::string, size_t> gaps;
-		size_t rows = 0, with_mesh = 0, with_modifiers = 0, camos = 0, default_camos = 0;
+		size_t rows = 0, with_mesh = 0, with_modifiers = 0, camos = 0, default_camos = 0, with_lights = 0;
+		std::map<std::string, size_t> prefab_rows;
 		for (const Weapon &w : weapons) {
 			if (!w.error.empty()) {
 				failed.push_back(w.item->unlock + ": " + w.error);
@@ -700,13 +717,17 @@ TEST_SUITE("render-catalog-accessories") {
 				with_mesh += r.meshes.empty() ? 0u : 1u;
 				with_modifiers += r.modifiers != 0 ? 1u : 0u;
 				camos += !r.camo.empty() && r.camo.starts_with("weapons/") ? 1u : 0u;
+				with_lights += r.lights != 0 ? 1u : 0u;
+				for (const std::string &prefab : r.light_prefabs) {
+					++prefab_rows[prefab];
+				}
 				default_camos += !r.camo.empty() && !r.camo.starts_with("weapons/") ? 1u : 0u;
 				const std::string verdict =
 						!error.empty() ? "FAIL " + error : (!gap.empty() ? "data gap: " + gap : std::string("ok"));
 				std::printf("render.catalog_accessories team %u %s slot %zu %s: %s; %zu sockets, %zu meshes, %zu "
-							"modifiers; %s\n",
+							"lights, %zu modifiers; %s\n",
 						unsigned(r.team), r.weapon.c_str(), r.slot + 1, r.unlock.c_str(), verdict.c_str(), r.sockets,
-						r.meshes.size(), r.modifiers, r.facts.c_str());
+						r.meshes.size(), r.lights, r.modifiers, r.facts.c_str());
 				if (!error.empty()) {
 					failed.push_back(r.weapon + " " + r.unlock + ": " + error);
 				} else if (!gap.empty()) {
@@ -717,10 +738,46 @@ TEST_SUITE("render-catalog-accessories") {
 		MESSAGE(rows, " accessories of ", weapons.size(), " (team, primary) pairs: ", with_mesh,
 				" with socket meshes (", meshes.size(), " distinct), ", with_modifiers, " with weapon modifiers, ",
 				camos, " camouflages with their variation, ", default_camos,
-				" that link nothing (the default materials); setup ", s_setup, " s, rows ", s_rows, " s");
+				" that link nothing (the default materials), ", with_lights, " with spot lights; setup ", s_setup,
+				" s, rows ", s_rows, " s");
 		for (const auto &[gap, n] : gaps) {
 			MESSAGE("data gap: ", n, " accessories: ", gap);
 		}
+		for (const auto &[prefab, n] : prefab_rows) {
+			MESSAGE("socket prefab ", prefab, ": ", n, " accessories");
+		}
+		CHECK(with_lights == 244);
+		CHECK(prefab_rows ==
+				std::map<std::string, size_t>{ { "weapons/accessories/anpeq2/anpeq2", 122 },
+						{ "weapons/accessories/anpeq2/anpeq2_3p", 102 },
+						{ "weapons/accessories/anpeq2/pistol_laser", 20 },
+						{ "weapons/accessories/flashlight/flashlight_1p", 122 },
+						{ "weapons/accessories/flashlight/flashlight_3p", 124 },
+						{ "weapons/accessories/scopeglint/scopeglint", 318 } });
+		core::Result<std::vector<core::level::SpotLight>> flashlight =
+				render::read_prefab_spot_lights(lib, "weapons/accessories/flashlight/flashlight_1p");
+		core::Result<std::vector<core::level::SpotLight>> laser =
+				render::read_prefab_spot_lights(lib, "weapons/accessories/anpeq2/anpeq2");
+		REQUIRE(flashlight.ok());
+		REQUIRE(laser.ok());
+		REQUIRE(flashlight->size() == 1);
+		REQUIRE(laser->size() == 1);
+		const core::level::SpotLight &f = flashlight->front();
+		CHECK((f.color == core::Vec3{ 0.789f, 0.708f, 0.582f }));
+		CHECK(f.intensity == 20.0f);
+		CHECK(f.radius == 30.0f);
+		CHECK(f.shape == core::level::SpotLightShape::Frustum);
+		CHECK(render::spot_light_half_angle_deg(f) == 10.0f);
+		CHECK(f.cast_shadows);
+		CHECK(core::to_lower_ascii(f.texture) == "weapons/accessories/flashlight/flashlightprojection_01");
+		CHECK(f.local.forward[2] == -1.0f);
+		const core::level::SpotLight &l = laser->front();
+		CHECK((l.color == core::Vec3{ 1.0f, 0.0f, 0.0f }));
+		CHECK(l.intensity == 100.0f);
+		CHECK(l.radius == 500.0f);
+		CHECK(render::spot_light_half_angle_deg(l) == doctest::Approx(0.11f));
+		CHECK_FALSE(l.cast_shadows);
+		CHECK(core::to_lower_ascii(l.texture) == "weapons/accessories/targetpointer/laserprojection");
 		CHECK(rows == listed);
 		CHECK(gaps == std::map<std::string, size_t>{ { kAccessoryGap, 14 } });
 		CHECK(camos == 76);
@@ -804,6 +861,7 @@ TEST_SUITE("render-catalog-accessories-1p") {
 		CHECK(b.ads.controller == "weapons/common/aimingcontrollers/aim_default_4x");
 		CHECK(b.ads.zoom_fov < a.ads.zoom_fov);
 		CHECK(b.zoom_render_fov == doctest::Approx(15.0f));
+		CHECK(b.lights.empty());
 		CHECK(b.weapon.variation_hash == 0);
 		uint8_t m416_team = 0;
 		const host::LoadoutItem *m416 = catalog_primary(level.loadouts, "weapons/m416/u_m416", m416_team);
@@ -822,7 +880,14 @@ TEST_SUITE("render-catalog-accessories-1p") {
 				render::load_viewmodel_set(**sources, lit, nullptr);
 		REQUIRE_MESSAGE(m416_set.ok(), (m416_set.ok() ? "" : m416_set.error().message));
 		const render::ViewmodelItem &c = (*m416_set)->items[0];
-		MESSAGE("M416 with camo 1: variation ", c.weapon.variation_hash);
+		REQUIRE(c.lights.size() == 1);
+		const render::ViewmodelLight &light = c.lights.front();
+		MESSAGE("M416 flashlight: ", light.socket.prefab, " on ", light.socket.bone, " (rig bone ", light.rig_bone,
+				"), projector ", light.socket.light.texture, "; camo variation ", c.weapon.variation_hash);
+		CHECK(light.rig_bone >= 0);
+		CHECK(light.socket.socket_unlock == "weapons/m416/u_m416_flashlight");
+		CHECK(light.socket.light.intensity == 20.0f);
+		CHECK((*m416_set)->texture(light.socket.light.texture) != nullptr);
 		CHECK(c.weapon.variation_hash == 1200125952u);
 		CHECK(c.weapon.materials.variation_hash == 1200125952u);
 		std::string camo;

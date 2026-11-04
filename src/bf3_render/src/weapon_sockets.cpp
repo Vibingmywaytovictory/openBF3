@@ -13,12 +13,16 @@ anim::Mat34 mat_of(const std::optional<core::EbxValue> &p_v) {
 }
 
 std::string mesh_name(const core::EbxResolver &p_db, const core::EbxStruct &p_object, std::string_view p_field,
-		std::vector<std::string> &r_skipped) {
+		std::vector<std::string> &r_skipped, std::string &r_prefab) {
 	const std::optional<core::EbxInstance> asset = p_db.follow(p_object, p_field);
 	if (!asset) {
 		return {};
 	}
 	const std::string name(p_db.name_of(asset->partition().guid()).value_or(std::string_view()));
+	if (asset->is_a("PrefabBlueprint")) {
+		r_prefab = name;
+		return {};
+	}
 	if (!asset->is_a("MeshAsset")) {
 		r_skipped.push_back(std::string(p_field) + " " + name + " is a " + std::string(asset->type_name()));
 		return {};
@@ -74,16 +78,17 @@ std::vector<WeaponSocket> read_weapon_sockets(const core::EbxResolver &p_db, con
 			}
 			WeaponSocketObject o;
 			o.skinned = skinned;
-			o.mesh_1p = mesh_name(p_db, object.data(), "Asset1p", s.skipped);
-			o.mesh_1p_zoom = mesh_name(p_db, object.data(), "Asset1pzoom", s.skipped);
-			o.mesh_3p = mesh_name(p_db, object.data(), "Asset3p", s.skipped);
+			o.mesh_1p = mesh_name(p_db, object.data(), "Asset1p", s.skipped, o.prefab_1p);
+			o.mesh_1p_zoom = mesh_name(p_db, object.data(), "Asset1pzoom", s.skipped, o.prefab_1p);
+			o.mesh_3p = mesh_name(p_db, object.data(), "Asset3p", s.skipped, o.prefab_3p);
 			o.transform = skinned ? anim::Mat34{} : anim::mat_mul(socket_m, mat_of(object.get("Transform")));
 			for (const auto &[guid, m] : placed_3p) {
 				if (guid == object.guid()) {
 					o.transform_3p = m;
 				}
 			}
-			if (o.mesh_1p.empty() && o.mesh_1p_zoom.empty() && o.mesh_3p.empty()) {
+			if (o.mesh_1p.empty() && o.mesh_1p_zoom.empty() && o.mesh_3p.empty() && o.prefab_1p.empty() &&
+					o.prefab_3p.empty()) {
 				continue;
 			}
 			s.objects.push_back(std::move(o));

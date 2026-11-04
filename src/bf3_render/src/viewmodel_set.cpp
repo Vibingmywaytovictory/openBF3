@@ -814,6 +814,15 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 					locomotion_ant_ref = id->as_i64();
 				}
 				read_attachments(lib, *swd, set->rig, spec.unlock, spec.accessories, item.attachments, set->notes);
+				core::Result<std::vector<WeaponSocketLight>> lights =
+						weapon_socket_lights(lib, read_weapon_sockets(lib, *swd), spec.accessories, true);
+				if (!lights) {
+					set->notes.push_back(spec.unlock + ": no lights: " + lights.error().message);
+				} else {
+					for (WeaponSocketLight &l : *lights) {
+						item.lights.push_back(ViewmodelLight{ set->rig.find(l.bone), std::move(l) });
+					}
+				}
 				item.zoom_render_fov_data = sane(number(swd->get("ZoomRenderFov")), 0.0f, 0.0f, 170.0f, clamped);
 				item.zoom_mesh_in = sane(
 						number(swd->get_path("WeaponStates[0].ZoomMeshTransitionFactor")), 1.0f, 0.0f, 1.0f, clamped);
@@ -1191,6 +1200,14 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		for (const ViewmodelSlotLook &l : *list) {
 			if (!l.color_texture.empty() && seen.insert({ l.color_texture, l.color_role }).second) {
 				wanted.emplace_back(l.color_texture, l.color_role);
+			}
+		}
+	}
+	for (const ViewmodelItem &item : set->items) {
+		for (const ViewmodelLight &l : item.lights) {
+			const std::string &name = l.socket.light.texture;
+			if (!name.empty() && seen.insert({ name, TextureRole::Color }).second) {
+				wanted.emplace_back(name, TextureRole::Color);
 			}
 		}
 	}

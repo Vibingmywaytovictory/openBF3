@@ -15,6 +15,7 @@ inline constexpr std::string_view kDefaultSocketUnlockPrefix = core::gameplay::k
 
 struct WeaponSocketObject {
 	std::string mesh_1p, mesh_1p_zoom, mesh_3p;
+	std::string prefab_1p, prefab_3p;
 	bool skinned = false;
 	anim::Mat34 transform;
 	std::optional<anim::Mat34> transform_3p;
