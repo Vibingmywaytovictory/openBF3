@@ -1695,17 +1695,21 @@ TEST_SUITE("host-gunplay-client-unit") {
 				held.failure());
 	}
 
-	TEST_CASE("host.gunplay.client: the server rules carry the lag compensation's rewind limit and the mechanics "
-			  "file into the TDM GameServerConfig") {
+	TEST_CASE("host.gunplay.client: the server rules carry the lag compensation's rewind limit, the infinite "
+			  "magazine and the mechanics file into the TDM GameServerConfig") {
 		host::ServerRules rules;
 		CHECK(rules.max_rewind_ticks == host::kDefaultMaxRewindTicks);
-		CHECK(host::tdm_game_server_config(host::ServerLevel{}, rules).gunplay.lag.max_rewind_ticks ==
-				host::kDefaultMaxRewindTicks);
+		CHECK_FALSE(rules.infinite_magazine);
+		const host::GameServerConfig d = host::tdm_game_server_config(host::ServerLevel{}, rules);
+		CHECK(d.gunplay.lag.max_rewind_ticks == host::kDefaultMaxRewindTicks);
+		CHECK_FALSE(d.gunplay.infinite_magazine);
 		rules.max_rewind_ticks = 0;
 		rules.mechanics_cfg = "no_damage.cfg";
+		rules.infinite_magazine = true;
 		const host::GameServerConfig c = host::tdm_game_server_config(host::ServerLevel{}, rules);
 		CHECK(c.gunplay.lag.max_rewind_ticks == 0);
 		CHECK(c.gunplay.mechanics_cfg == "no_damage.cfg");
+		CHECK(c.gunplay.infinite_magazine);
 	}
 
 	TEST_CASE("host.gunplay.client: E6: a client whose weapon table differs answers MatchInfo with a Mismatch, is "

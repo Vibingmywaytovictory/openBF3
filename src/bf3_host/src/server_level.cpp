@@ -103,6 +103,7 @@ GameServerConfig tdm_game_server_config(const ServerLevel &p_level, const Server
 			uint32_t(std::clamp(std::lround(p_rules.respawn_s * double(sim::kSimHz)), 1L, 120L * long(sim::kSimHz)));
 	c.gunplay.mechanics_cfg = p_rules.mechanics_cfg;
 	c.gunplay.lag.max_rewind_ticks = p_rules.max_rewind_ticks;
+	c.gunplay.infinite_magazine = p_rules.infinite_magazine;
 	if (p_level.bots != nullptr) {
 		auto fill = std::make_shared<BotFillConfig>();
 		fill->level = p_level.bots;

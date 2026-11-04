@@ -80,6 +80,7 @@ struct ServerRules {
 	bool dev_commands = false;
 	uint64_t seed = 1;
 	uint32_t max_rewind_ticks = kDefaultMaxRewindTicks;
+	bool infinite_magazine = false;
 	bool ghost_scope = true;
 	bool bot_squads = true;
 };

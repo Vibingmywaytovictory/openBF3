@@ -202,6 +202,7 @@ bool DedicatedMainLoop::parse_args(std::string &r_error) {
 		}
 	}
 	u32_arg("max-rewind-ticks", 0.0, double(host::kDefaultMaxRewindTicks), a.rules.max_rewind_ticks, r_error);
+	a.rules.infinite_magazine = has_user_arg("infinite-magazine");
 	return r_error.empty();
 }
 
@@ -304,8 +305,9 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 			r.preround_s >= 0.0f ? core::fmt("%.1f s", r.preround_s).c_str() : "data",
 			r.min_players >= 0 ? std::to_string(r.min_players).c_str() : "data", r.dev_commands ? "on (--dev)" : "off",
 			r.ghost_scope ? "on" : "off (--ghost-scope=off)", r.bot_squads ? "on" : "off (--bot-squads=off)"));
-	say(core::fmt("gunplay: mechanics %s, lag compensation rewinds at most %u ticks", r.mechanics_cfg.c_str(),
-			r.max_rewind_ticks));
+	say(core::fmt("gunplay: mechanics %s, lag compensation rewinds at most %u ticks, magazines %s",
+			r.mechanics_cfg.c_str(), r.max_rewind_ticks,
+			r.infinite_magazine ? "infinite (--infinite-magazine)" : "finite"));
 	say(core::fmt("rotation: intermission %s, load deadlines: stalled %.1f s, warm %.1f s, cold %.1f s",
 			config.intermission_s >= 0.0f ? core::fmt("%.1f s (--intermission-s)", config.intermission_s).c_str()
 										  : "data",
