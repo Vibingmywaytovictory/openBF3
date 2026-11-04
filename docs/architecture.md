@@ -174,7 +174,7 @@ These are structural, known, and listed so nobody mistakes them for design inten
   moves or fades HudMessage_02, and the kill log rows (same movie and classes) fade in the timeline's 5 frames in the same
   footage, so that kill feed look is not reproduced. The damage indicator's Scale
   (the hit's damage) and Angle (clockwise from the view, checked against the sprite's rotation) are inferred, and the
-  in-round HudAlertMessage and LogMessage widgets have no source in TDM (no combat area, squads or log lines in the model); preroundwaitingscreen's HudAlertMessage takes Title and Description from the flow's data (`HudClientState::flow_data`), Timer from CountLeft, and shows the Timer it holds when ShowAlert arrives, as 18.57's stale '1' under GET READY shows.
+  in-round HudAlertMessage and LogMessage widgets have no source in TDM (no combat area, squad alert or log line in the model, though the squads are); preroundwaitingscreen's HudAlertMessage takes Title and Description from the flow's data (`HudClientState::flow_data`), Timer from CountLeft, and shows the Timer it holds when ShowAlert arrives, as 18.57's stale '1' under GET READY shows.
   The Icon3D managers (SupportIconManager, MapmarkerManager, AlertManager) run their AS2 and create, update and remove
   their tags from `HudClientState::world_tags` at stage positions. TDM fills only grenade alerts: the client's live timed grenades
   (`PresentationFrame::grenades`) placed by `ui::place_icon3d` from UIAlerttagComp's UI3dIconCompData (draw, fade and scale by distance, the
