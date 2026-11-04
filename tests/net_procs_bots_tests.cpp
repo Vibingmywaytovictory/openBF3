@@ -23,9 +23,10 @@ using namespace std::chrono_literals;
 using bf3::core::detail::path_utf8;
 using namespace bf3::test::procs;
 
-constexpr uint32_t kGateBots = 29;
-constexpr uint32_t kControlBots = 31;
-constexpr int kKillLimit = 100;
+constexpr uint32_t kMaxPlayers = 64;
+constexpr uint32_t kGateBots = 61;
+constexpr uint32_t kControlBots = 63;
+constexpr int kKillLimit = 250;
 constexpr double kTeamKdMin = 0.75;
 constexpr double kTeamKdMax = 1.33;
 constexpr double kSquadMedianMetres = 20.0;
@@ -101,14 +102,14 @@ Cohesion status_cohesion(std::string_view p_line) {
 }
 
 TEST_SUITE("net-procs-bots-squads") {
-	TEST_CASE("the dedicated Metro TDM server with 29 bots, a bf3dump client that leads a squad of its own and a "
-			  "headless game client that joins it, both at 100 ms RTT: a round to 100 kills, team K/D in [0.75, "
-			  "1.33], squad cohesion as host.tdm.squads, both clients agree on every squad and leader, the game "
-			  "client deploys on its mate, no kick, tick p99 < 8 ms") {
+	TEST_CASE("the dedicated Metro TDM server with 64 players, 61 bots, a bf3dump client that leads a squad of its "
+			  "own and a headless game client that joins it, both at 100 ms RTT: a round to 250 kills, team K/D in "
+			  "[0.75, 1.33], squad cohesion as host.tdm.squads, both clients agree on every squad and leader, the "
+			  "game client deploys on its mate, no kick, tick p99 < 8 ms") {
 		ProcDriver driver(driver_config_from_env());
 		const std::optional<Server> server = start_server(driver, kGateBots, 2400,
 				{ "--level=" + std::string(kLevel), "--mode=" + std::string(kMode),
-						"--kill-limit=" + std::to_string(kKillLimit) });
+						"--max-players=" + std::to_string(kMaxPlayers), "--kill-limit=" + std::to_string(kKillLimit) });
 		if (!server) {
 			return;
 		}
@@ -221,8 +222,9 @@ TEST_SUITE("net-procs-bots-squads") {
 	TEST_CASE("the control: the same server with --bot-squads=off fails the cohesion threshold") {
 		ProcDriver driver(driver_config_from_env());
 		const std::optional<Server> server = start_server(driver, kControlBots, 900,
-				{ "--level=" + std::string(kLevel), "--mode=" + std::string(kMode), "--bot-squads=off",
-						"--stop-after-kills=5", "--stop-after-squad-samples=" + std::to_string(kMinSquadSamples) });
+				{ "--level=" + std::string(kLevel), "--mode=" + std::string(kMode),
+						"--max-players=" + std::to_string(kMaxPlayers), "--bot-squads=off", "--stop-after-kills=5",
+						"--stop-after-squad-samples=" + std::to_string(kMinSquadSamples) });
 		if (!server) {
 			return;
 		}
