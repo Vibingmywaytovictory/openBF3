@@ -109,6 +109,8 @@ private:
 	uint64_t base_shots_ = 0;
 	uint64_t shots_ = 0;
 	sim::Tick last_press_ = 0;
+	float seen_from_lane_ = -1.0f;
+	float seen_speed_ = 0.0f;
 	bool zoomed_ = false;
 	std::string failure_;
 };

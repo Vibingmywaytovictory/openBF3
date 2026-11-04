@@ -2,6 +2,7 @@
 
 #include "bf3/core/util/format.h"
 #include "bf3/host/gunplay.h"
+#include "bf3/host/server_session.h"
 #include "bf3/sim/command.h"
 
 #include <array>
@@ -25,6 +26,11 @@ double percent(uint64_t p_part, uint64_t p_whole) {
 	return p_whole > 0 ? 100.0 * double(p_part) / double(p_whole) : 0.0;
 }
 
+std::string match_text(const PresentationFrame &p_frame) {
+	return p_frame.match_valid ? core::fmt("match %s, %u players needed", match_phase_name(p_frame.match.phase),
+										 unsigned(p_frame.match.players_needed))
+							   : std::string("no match state");
+}
 }
 
 std::optional<DuelSite> find_duel_site(
@@ -244,8 +250,9 @@ DuelPhase DuelShooter::frame(
 				aim();
 				const float speed = std::sqrt(
 						target->velocity[0] * target->velocity[0] + target->velocity[2] * target->velocity[2]);
-				if (flat_distance(target->position, site_.target) <= kDuelLaneNearMetres &&
-						speed > kDuelMovingMetresPerSecond) {
+				seen_from_lane_ = flat_distance(target->position, site_.target);
+				seen_speed_ = speed;
+				if (seen_from_lane_ <= kDuelLaneNearMetres && speed > kDuelMovingMetresPerSecond) {
 					settled_s_ = settled_s_ < 0.0 ? p_now_s : settled_s_;
 				}
 			}
@@ -254,7 +261,12 @@ DuelPhase DuelShooter::frame(
 				last_press_ = 0;
 				enter(DuelPhase::Fire, p_now_s);
 			} else if (p_now_s - phase_s_ > kDuelSettleTimeoutSeconds) {
-				fail(core::fmt("no target strafed on the lane within %.0f s", kDuelSettleTimeoutSeconds));
+				const std::string seen = seen_from_lane_ < 0.0f
+						? std::string("no other seen")
+						: core::fmt("the first other last %.1f m from the lane centre at %.1f m/s",
+								  double(seen_from_lane_), double(seen_speed_));
+				fail(core::fmt("no target strafed on the lane within %.0f s: %s; %s", kDuelSettleTimeoutSeconds,
+						seen.c_str(), match_text(p_frame).c_str()));
 			}
 			break;
 		case DuelPhase::Fire:

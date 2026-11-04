@@ -1572,7 +1572,8 @@ TEST_SUITE("host-gunplay-client-unit") {
 	}
 
 	TEST_CASE("host.gunplay.client: the duel shooter deploys, teleports to the site, waits for the strafing target, "
-			  "fires every 12 ticks aimed at it and ends after its shots") {
+			  "fires every 12 ticks aimed at it and ends after its shots; a settle timeout names the first other's "
+			  "distance and speed and the match phase") {
 		host::DuelSite site;
 		site.shooter = { 0.0f, 0.0f, 40.0f };
 		site.target = { 0.0f, 0.0f, 60.0f };
@@ -1677,6 +1678,21 @@ TEST_SUITE("host-gunplay-client-unit") {
 		CHECK(stranded.frame(1.0, now_ns, *f, true, io) == P::Teleport);
 		CHECK(stranded.frame(host::kDuelTeleportTimeoutSeconds + 1.0, now_ns, *f, true, io) == P::Failed);
 		CHECK(stranded.failure().find("dev commands") != std::string::npos);
+
+		host::DuelShooter held(site, 3);
+		f->server_own.position = { 0.2f, 0.0f, 40.0f };
+		f->match_valid = true;
+		f->match.phase = net::MatchPhase::PreRound;
+		f->match.players_needed = 2;
+		t.samples[0] = { 98, record_at(4, { 0.0f, 0, 60.0f }, { 0, 0, 0 }) };
+		t.samples[1] = { 100, record_at(4, { 0.0f, 0, 60.0f }, { 0, 0, 0 }) };
+		CHECK(held.frame(0.0, now_ns, *f, true, io) == P::Teleport);
+		CHECK(held.frame(0.1, now_ns, *f, true, io) == P::Settle);
+		CHECK(held.frame(10.0, now_ns, *f, true, io) == P::Settle);
+		CHECK(held.frame(0.1 + host::kDuelSettleTimeoutSeconds + 0.1, now_ns, *f, true, io) == P::Failed);
+		CHECK_MESSAGE(held.failure().find("the first other last 0.0 m from the lane centre at 0.0 m/s; match "
+										  "pre-round, 2 players needed") != std::string::npos,
+				held.failure());
 	}
 
 	TEST_CASE("host.gunplay.client: the server rules carry the lag compensation's rewind limit and the mechanics "
