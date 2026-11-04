@@ -150,3 +150,8 @@ target_sources(bf3_sim PRIVATE
     include/bf3/sim/weapons/gadgets.h
     src/weapons/gadgets.cpp
 )
+
+target_sources(bf3_sim PRIVATE
+    include/bf3/sim/weapons/suppression.h
+    src/weapons/suppression.cpp
+)

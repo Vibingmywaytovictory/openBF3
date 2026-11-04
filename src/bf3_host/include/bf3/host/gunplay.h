@@ -20,6 +20,7 @@
 #include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/gadgets.h"
 #include "bf3/sim/weapons/mechanics_tuning.h"
+#include "bf3/sim/weapons/suppression.h"
 #include "bf3/sim/weapons/surface_materials.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
@@ -103,6 +104,7 @@ struct GunplayStats {
 	uint64_t loadout_select = 0, loadout_refused = 0, loadout_dropped = 0;
 	uint64_t shot_events_dropped = 0, combat_events_clamped = 0, others_dropped = 0;
 	uint64_t trace_dropped = 0;
+	uint64_t near_misses = 0;
 	uint32_t live_projectiles = 0;
 	double tick_weapons_ms_max = 0;
 };
@@ -216,6 +218,10 @@ public:
 	uint32_t specialization_mask(uint8_t p_slot) const;
 	uint32_t spawn_specializations(uint8_t p_slot) const;
 	sim::Command clamp_pitch(uint8_t p_slot, const sim::Command &p_command, sim::Pose p_pose) const;
+	const sim::weapons::SuppressionDef &suppression_def() const;
+	sim::weapons::SuppressionState suppression(uint8_t p_slot) const;
+	float suppression_level(uint8_t p_slot, uint32_t p_tick) const;
+	bool near_missed(uint8_t p_slot, uint32_t p_tick) const;
 	float received_damage(uint8_t p_victim, const sim::weapons::DamageEvent &p_event) const;
 	bool armed(uint8_t p_slot) const;
 	std::span<const sim::weapons::Deployable> deployables() const;
@@ -244,6 +250,7 @@ public:
 
 private:
 	Gunplay();
+	void suppress(uint32_t p_tick, std::span<const sim::SoldierState> p_states);
 	struct Impl;
 	std::unique_ptr<Impl> impl_;
 };

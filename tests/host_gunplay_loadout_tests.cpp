@@ -4,12 +4,16 @@
 #include "tdm_fixture.h"
 
 #include "bf3/core/math.h"
+#include "bf3/host/duel.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/loadout.h"
 #include "bf3/host/spawn_effects.h"
 #include "bf3/host/squads.h"
 #include "bf3/net/protocol.h"
+#include "bf3/sim/collision_world.h"
+#include "bf3/sim/soldier_motor.h"
+#include "bf3/sim/weapons/suppression.h"
 #include "bf3/sim/weapons/weapon_install.h"
 
 #include <algorithm>
@@ -18,6 +22,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -360,6 +365,141 @@ TEST_SUITE("host-gunplay-loadout") {
 		const sw::WeaponSimDef m16 = sim_def("weapons/m16a4/u_m16a4");
 		CHECK(host::spawn_magazines(m16, 0, boom) == m16.magazines);
 		CHECK(host::spawn_magazines(m16, 0, nades) == m16.magazines);
+		tdm::check_install_unchanged(*level);
+	}
+
+	TEST_CASE("suppression: near misses suppress enemies by the projectile's multiplier, Cover halves it, the "
+			  "Suppression specialization raises it") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		const uint32_t cover = specialization_id(gl, "suppressionresistl1");
+		const uint32_t boost = specialization_id(gl, "suppressionboostl1");
+		REQUIRE(cover != 0);
+		REQUIRE(boost != 0);
+		host::GunplayConfig config;
+		config.mechanics_cfg = OPENBF3_MECHANICS_CFG;
+		config.exact_aim = true;
+		core::Result<std::unique_ptr<host::Gunplay>> made = host::Gunplay::create(*level->shared, config);
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		host::Gunplay &g = **made;
+		const sim::weapons::SuppressionDef &sd = g.suppression_def();
+		REQUIRE(sd.present);
+		CHECK(sd.sphere_radius == 1.5f);
+		CHECK(sd.decay == 0.5f);
+		CHECK(sd.fall_off_delay == 2.0f);
+		CHECK(sd.low_threshold == doctest::Approx(0.3f));
+		core::Result<std::unique_ptr<sim::CollisionWorld>> world =
+				sim::CollisionWorld::create(level->shared->static_world);
+		REQUIRE(world.ok());
+		g.set_world(**world);
+		const std::optional<host::DuelSite> site =
+				host::find_duel_site(**world, *level->shared, 30.0f, host::kDuelLaneHalf);
+		REQUIRE(site.has_value());
+		sim::SoldierMotor motor;
+		REQUIRE(motor.init(**world, level->shared->motor).ok());
+
+		const uint8_t assault = uint8_t(host::KitRole::Assault);
+		const uint8_t shooter = 0, plain = 1, covered = 2, mate = 3, boosted = 4;
+		REQUIRE(g.select_loadout(covered, 2, assault, specialization(cover)));
+		REQUIRE(g.select_loadout(boosted, 1, assault, specialization(boost)));
+		const sim::Tick spawn = 100;
+		std::vector<sim::SoldierState> states(8);
+		const float dx = site->target[0] - site->shooter[0], dz = site->target[2] - site->shooter[2];
+		const float length = std::hypot(dx, dz);
+		const sim::Vec3 side{ dz / length, 0.0f, -dx / length };
+		const auto at = [&](float p_side, float p_along) {
+			const float back = p_along / length;
+			return sim::Vec3{ site->target[0] + side[0] * p_side + dx * back, site->target[1],
+				site->target[2] + side[2] * p_side + dz * back };
+		};
+		const auto place = [&](uint8_t p_slot, uint8_t p_team, const sim::Vec3 &p_feet, uint16_t p_yaw) {
+			g.on_spawn(p_slot, assault, p_team, spawn);
+			REQUIRE(g.armed(p_slot));
+			states[p_slot] = motor.spawn_state(p_feet, p_yaw, 1, spawn, false);
+			states[p_slot].flags = uint16_t(states[p_slot].flags | sim::soldier_flags::kGrounded);
+		};
+		place(shooter, 1, site->shooter, site->shooter_yaw);
+		place(plain, 2, at(1.0f, 0.0f), site->shooter_yaw);
+		place(covered, 2, at(-1.0f, 0.0f), site->shooter_yaw);
+		place(mate, 1, at(1.3f, -4.0f), site->shooter_yaw);
+		place(boosted, 1, at(3.0f, -length), site->shooter_yaw);
+		const sim::Vec3 aim_point{ site->target[0], site->target[1] + motor.eye_height(states[plain]),
+			site->target[2] };
+		const sim::Vec3 eye{ site->shooter[0], site->shooter[1] + motor.eye_height(states[shooter]), site->shooter[2] };
+		const host::ViewAim view = host::aim_at(eye, aim_point);
+		const sim::Vec3 boosted_eye{ states[boosted].position[0],
+			states[boosted].position[1] + motor.eye_height(states[boosted]), states[boosted].position[2] };
+		const host::ViewAim boosted_view = host::aim_at(boosted_eye, aim_point);
+
+		struct Sink final : host::CombatEventSink {
+			uint64_t hits = 0;
+			void hit(const net::HitEvent &) override { ++hits; }
+			void death(const net::DeathEvent &) override {}
+			void detonation(const net::DetonationWire &) override {}
+		} sink;
+		sim::Tick tick = spawn;
+		std::array<bool, 8> firing{};
+		const auto step = [&] {
+			++tick;
+			for (uint8_t s = 0; s < 5; ++s) {
+				sim::Command c = sim::hold_command(states[s]);
+				c.tick = tick;
+				const host::ViewAim &v = s == boosted ? boosted_view : view;
+				c.yaw = s == shooter || s == boosted ? sim::quantize_yaw(v.yaw) : states[s].yaw;
+				c.pitch = s == shooter || s == boosted ? sim::quantize_pitch(v.pitch) : int16_t(0);
+				c.buttons = firing[s] ? sim::buttons::kFire : 0u;
+				states[s].tick = tick;
+				g.step_soldier(s, c, states[s], states[s]);
+			}
+			g.step_projectiles(tick, states);
+			g.apply_rules(tick, states, sink);
+		};
+		const auto fire = [&](uint8_t p_slot, uint64_t p_rounds) {
+			const uint64_t before = g.stats().shots;
+			firing[p_slot] = true;
+			for (uint32_t i = 0; i < 120 && g.stats().shots < before + p_rounds; ++i) {
+				step();
+			}
+			firing[p_slot] = false;
+			for (uint32_t i = 0; i < 12; ++i) {
+				step();
+			}
+			return g.stats().shots - before;
+		};
+		for (uint32_t i = 0; i < 90; ++i) {
+			step();
+		}
+		CHECK(g.suppression_level(plain, tick) == 0.0f);
+		REQUIRE(fire(shooter, 5) == 5);
+		const sim::Tick burst = g.suppression(plain).hit_tick;
+		const float per_round = 7.0f * sim::weapons::kSuppressionPerMultiplier;
+		std::printf("suppression: 5 near misses at %.1f m: plain %.4f, Cover %.4f, team mate %.4f, %llu near misses, "
+					"%llu hits\n",
+				double(length), double(g.suppression_level(plain, tick)), double(g.suppression_level(covered, tick)),
+				double(g.suppression_level(mate, tick)), (unsigned long long)g.stats().near_misses,
+				(unsigned long long)sink.hits);
+		CHECK(sink.hits == 0);
+		CHECK(g.stats().near_misses == 10);
+		CHECK(g.suppression_level(plain, tick) == doctest::Approx(5 * per_round).epsilon(1e-3));
+		CHECK(g.suppression_level(covered, tick) == doctest::Approx(5 * per_round * 0.5f).epsilon(1e-3));
+		CHECK(g.suppression_level(mate, tick) == 0.0f);
+		CHECK(g.suppression_level(shooter, tick) == 0.0f);
+		CHECK(g.suppression_level(plain, tick) >= sd.low_threshold);
+		CHECK(g.suppression_level(covered, tick) < sd.low_threshold);
+
+		CHECK(g.suppression_level(plain, burst + 2 * sim::kSimHz) == doctest::Approx(5 * per_round).epsilon(1e-3));
+		CHECK(g.suppression_level(plain, burst + 2 * sim::kSimHz + 30) ==
+				doctest::Approx(5 * per_round - 0.25f).epsilon(1e-3));
+		while (tick < burst + 3 * sim::kSimHz) {
+			step();
+		}
+		CHECK(g.suppression_level(plain, tick) == 0.0f);
+		REQUIRE(fire(boosted, 1) == 1);
+		CHECK(g.suppression_level(plain, tick) == doctest::Approx(per_round * 1.5f).epsilon(1e-3));
+		CHECK(g.suppression_level(covered, tick) == doctest::Approx(per_round * 1.5f * 0.5f).epsilon(1e-3));
 		tdm::check_install_unchanged(*level);
 	}
 

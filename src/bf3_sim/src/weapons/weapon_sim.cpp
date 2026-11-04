@@ -416,17 +416,6 @@ void sort_timed(WeaponTickOutput &r_out) {
 	}
 }
 
-float eye_height_of(const MotorParams &p_motor, const SoldierState &p_state) {
-	const size_t from = std::min<size_t>(uint8_t(p_state.pose), kPoseCount - 1);
-	const size_t to = std::min<size_t>(uint8_t(p_state.target_pose), kPoseCount - 1);
-	const float a = p_motor.poses[from].eye_height;
-	if (from == to || p_state.transition_ticks == 0 || p_state.transition_total == 0) {
-		return from == to ? a : p_motor.poses[to].eye_height;
-	}
-	const float progress = 1.0f - float(std::min(p_state.transition_ticks, p_state.transition_total)) / float(p_state.transition_total);
-	return a + (p_motor.poses[to].eye_height - a) * progress;
-}
-
 }
 
 core::Status spawn_soldier_weapons(SoldierWeaponsState &r_state, const WeaponTable &p_table,
@@ -625,8 +614,8 @@ SwayContext weapon_sway_context(const MotorParams &p_motor, const SoldierState &
 WeaponContext make_weapon_context(const MotorParams &p_motor, const SoldierState &p_before, const SoldierState &p_after, const Command &p_command,
 		float p_suppression) {
 	WeaponContext c;
-	c.eye_start = { p_before.position[0], p_before.position[1] + eye_height_of(p_motor, p_before), p_before.position[2] };
-	c.eye_end = { p_after.position[0], p_after.position[1] + eye_height_of(p_motor, p_after), p_after.position[2] };
+	c.eye_start = { p_before.position[0], p_before.position[1] + eye_height(p_motor, p_before), p_before.position[2] };
+	c.eye_end = { p_after.position[0], p_after.position[1] + eye_height(p_motor, p_after), p_after.position[2] };
 	c.yaw = p_command.yaw;
 	c.pitch = p_command.pitch;
 	c.sway = weapon_sway_context(p_motor, p_after, p_command);

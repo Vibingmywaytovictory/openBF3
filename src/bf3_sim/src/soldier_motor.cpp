@@ -562,16 +562,19 @@ SoldierState SoldierMotor::spawn_state(const Vec3 &p_feet, uint16_t p_yaw, uint3
 	return s;
 }
 
-float SoldierMotor::eye_height(const SoldierState &p_state) const {
-	const MotorParams &p = impl_->params;
+float eye_height(const MotorParams &p_params, const SoldierState &p_state) {
 	const size_t from = std::min<size_t>(uint8_t(p_state.pose), kPoseCount - 1);
 	const size_t to = std::min<size_t>(uint8_t(p_state.target_pose), kPoseCount - 1);
-	const float a = p.poses[from].eye_height;
+	const float a = p_params.poses[from].eye_height;
 	if (from == to || p_state.transition_ticks == 0 || p_state.transition_total == 0) {
-		return from == to ? a : p.poses[to].eye_height;
+		return from == to ? a : p_params.poses[to].eye_height;
 	}
 	const float progress = 1.0f - float(std::min(p_state.transition_ticks, p_state.transition_total)) / float(p_state.transition_total);
-	return a + (p.poses[to].eye_height - a) * progress;
+	return a + (p_params.poses[to].eye_height - a) * progress;
+}
+
+float SoldierMotor::eye_height(const SoldierState &p_state) const {
+	return sim::eye_height(impl_->params, p_state);
 }
 
 bool SoldierMotor::fits_standing(const Vec3 &p_feet) const {

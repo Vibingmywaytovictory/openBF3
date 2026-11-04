@@ -127,6 +127,8 @@ float eval(const Curve &p_curve, float p_x);
 
 float walk_speed(const MotorParams &p_params, const SoldierState &p_state);
 
+float eye_height(const MotorParams &p_params, const SoldierState &p_state);
+
 uint64_t motor_params_hash(const MotorParams &p_params);
 
 struct MotorModifiers {
