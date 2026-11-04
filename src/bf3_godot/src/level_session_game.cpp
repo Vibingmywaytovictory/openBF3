@@ -303,6 +303,9 @@ void Bf3LevelSession::game_parse_args() {
 	if (has_check_arg("crosshair-walk")) {
 		g.crosshair_walk = std::make_unique<CrosshairWalkRun>();
 	}
+	if (has_check_arg("gadgets-draw")) {
+		g.gadgets_draw = std::make_unique<GadgetsDrawRun>();
+	}
 	if (has_check_arg("minimap-modes")) {
 		g.minimap_modes = std::make_unique<MinimapModesCheck>(user_arg_value("level"), user_arg_value("minimap-mode"));
 	}
@@ -1440,6 +1443,35 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			g.finished = true;
 			UtilityFunctions::print(to_godot(std::string("CROSSHAIR WALK: ") + (g.crosshair_walk->exit_code() == 0 ? "PASS" : "FAIL")));
 			finish(g.crosshair_walk->exit_code());
+			return true;
+		}
+	}
+	if (g.gadgets_draw != nullptr && !g.finished) {
+		const std::shared_ptr<const host::SharedLevel> level = shared_level();
+		GadgetsDrawInputs in;
+		in.alive = g.alive;
+		in.spawn_screen = tdm_spawn_screen_shown();
+		in.own_slot = g.own_slot;
+		in.weapon = &g.weapon;
+		in.deployables = g.deployables.get();
+		in.own_vm = g.own_viewmodel();
+		if (level != nullptr && level->gunplay != nullptr) {
+			in.gadgets = level->gunplay->gadgets;
+		}
+		in.deploy = [this] {
+			scripted_ui_key(KEY_ENTER, true);
+			scripted_ui_key(KEY_ENTER, false);
+		};
+		in.suicide = [this] {
+			if (host::ClientSession *c = client()) {
+				c->send_suicide_request();
+			}
+		};
+		if (g.gadgets_draw->step(*this, in, p_delta)) {
+			g.finished = true;
+			UtilityFunctions::print(
+					to_godot(std::string("GADGETS DRAW: ") + (g.gadgets_draw->exit_code() == 0 ? "PASS" : "FAIL")));
+			finish(g.gadgets_draw->exit_code());
 			return true;
 		}
 	}

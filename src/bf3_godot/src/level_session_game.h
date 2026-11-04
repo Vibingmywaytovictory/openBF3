@@ -3,6 +3,7 @@
 #include "audio_areas_check.h"
 #include "catalog_weapons.h"
 #include "crosshair_walk_check.h"
+#include "gadgets_draw_check.h"
 #include "game_deployables.h"
 #include "game_frame.h"
 #include "game_settings.h"
@@ -267,6 +268,7 @@ struct Bf3LevelSession::Game : GameState {
 	std::unique_ptr<MinimapModesCheck> minimap_modes;
 	std::unique_ptr<Icons3dCheck> icons3d;
 	std::unique_ptr<CrosshairWalkRun> crosshair_walk;
+	std::unique_ptr<GadgetsDrawRun> gadgets_draw;
 	std::unique_ptr<AudioAreasCheck> audio_areas;
 #endif
 	bool finished = false;

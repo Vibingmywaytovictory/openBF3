@@ -7,11 +7,13 @@
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/variant/vector3.hpp>
 
 #include <cstddef>
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -23,6 +25,15 @@ struct GameDeployablesStats {
 	uint32_t unknown_defs = 0;
 	uint64_t created = 0;
 	uint64_t freed = 0;
+};
+
+struct GameDeployableView {
+	uint16_t def = 0;
+	bool in_tree = false;
+	bool visible = false;
+	bool def_mesh = false;
+	int32_t surfaces = 0;
+	godot::Vector3 position;
 };
 
 class GameDeployables {
@@ -37,6 +48,7 @@ public:
 	bool built() const { return root_ != nullptr; }
 	void step(const host::PresentationFrame &p_frame);
 	const GameDeployablesStats &stats() const { return stats_; }
+	std::optional<GameDeployableView> view(uint16_t p_id) const;
 
 private:
 	std::unique_ptr<render::DeployedGadgetSet> set_;

@@ -140,4 +140,25 @@ void GameDeployables::step(const host::PresentationFrame &p_frame) {
 	stats_.shown = uint32_t(shown_.size());
 }
 
+std::optional<GameDeployableView> GameDeployables::view(uint16_t p_id) const {
+	const auto it = shown_.find(p_id);
+	if (it == shown_.end()) {
+		return std::nullopt;
+	}
+	const MeshInstance3D *node = Object::cast_to<MeshInstance3D>(ObjectDB::get_instance(it->second.node_id));
+	if (node == nullptr) {
+		return std::nullopt;
+	}
+	GameDeployableView v;
+	v.def = it->second.def;
+	v.in_tree = node->is_inside_tree();
+	v.visible = v.in_tree && node->is_visible_in_tree();
+	const Ref<Mesh> mesh = node->get_mesh();
+	const auto def_mesh = meshes_.find(it->second.def);
+	v.def_mesh = mesh.is_valid() && def_mesh != meshes_.end() && mesh == def_mesh->second;
+	v.surfaces = mesh.is_valid() ? mesh->get_surface_count() : 0;
+	v.position = v.in_tree ? node->get_global_position() : node->get_position();
+	return v;
+}
+
 }
