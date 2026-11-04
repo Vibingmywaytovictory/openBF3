@@ -22,14 +22,15 @@ exit /b %ERRORLEVEL%
 echo Usage: tools\play.cmd [user args]
 echo The TDM scene ^(default^): a Metro TDM round, you and 31 bots ^(16 v 16^), teams by the game.
 echo   Spawn screen: 1-4 pick the kit ^(assault, engineer, support, recon^) or click it, Enter or Deploy spawns.
-echo   In game: Tab scoreboard, 3 the gadget ^(assault: the defibrillator^), the weapon keys otherwise.
+echo   In game: Tab scoreboard, 3 the next kit gadget, slots 4, 5 and 2 in turn ^(assault: the medkit and the defibrillator; support: the ammo bag; recon: the radio beacon^), the weapon keys otherwise.
 echo   --bots=0..31 ^(default 31^) --kill-limit=N ^(data: 100^) --preround=S ^(data: 10^) --min-players=N ^(data: 4^) --deploy-screen=0 ^(automatic respawn^)
 echo   --firefight   the firefight scene instead: --kit=0..3 --team=1^|2 --bots=N ^(default 24^) --respawn=S
 echo   --tdm   TDM rules on the firefight scene without the spawn screen; the bots are the TDM bots
 echo           ^(config\bot_tuning.cfg^), at most 31; try: tools\play.cmd --tdm --bots=31
 echo   --kill-limit=0..100000 --preround=0..600   with --tdm: the kill limit ^(data: 100^) and the pre-round seconds ^(data: 10^)
 echo   --connect=host:port   join a running server ^(tools\server.cmd^) instead of starting one; no local bots;
-echo           the server names the level, the mode and the rules
+echo           the server names the level, the mode and the rules; --connect=NAME@HOST:PORT asks the master at HOST:PORT for the server NAME
+echo   --bf3-install=DIR   the retail install ^(default: OPENBF3_INSTALL, then C:\Program Files\EA Games\Battlefield 3^); both PCs need the same install
 echo   --maplist=file   this game's own server rotates the map list ^(try bf3-opensource\config\maplist.cfg^); without it a round restarts in place
 echo With --tdm the match state prints as "[tdm] match: ..." console lines ^(no TDM HUD in the firefight scene^).
 echo At exit the console prints the prediction line: corrections and those over 1 mm per predicted minute, and motor_hash_mismatch.
