@@ -31,6 +31,7 @@
 #include "loading_screen_check.h"
 #include "native_screens_check.h"
 #include "overlay_check.h"
+#include "squad_team_check.h"
 #include "viewmodel.h"
 #endif
 
@@ -506,6 +507,13 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 				}
 			} else if (error.empty()) {
 				error = "--late-join-check=" + user_arg_value("late-join-check") + ": not in-round or round-over";
+			}
+		}
+		if (has_check_arg("squad-team-check")) {
+			m.squad_team = std::unique_ptr<SquadTeamCheck, void (*)(SquadTeamCheck *)>(
+					new SquadTeamCheck(user_arg_value("squad-team-shots")), &delete_part<SquadTeamCheck>);
+			if (quit_after_ <= 0.0) {
+				quit_after_ = 1.0e9;
 			}
 		}
 #endif
@@ -1020,6 +1028,50 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			m.finished = true;
 			UtilityFunctions::print(to_godot(m.deploy_run->report()));
 			finish(m.deploy_run->exit_code());
+			return true;
+		}
+	}
+	if (m.squad_team != nullptr && screens != nullptr && m.native_following && !m.finished) {
+		SquadTeamCheckIo io;
+		io.press = [this](Key p_key, bool p_pressed) { scripted_ui_key(p_key, p_pressed); };
+		io.move = [this](Vector2 p_at) {
+			Ref<InputEventMouseMotion> e;
+			e.instantiate();
+			e->set_position(p_at);
+			e->set_global_position(p_at);
+			tdm_ui_input(e);
+		};
+		io.click = [this](Vector2 p_at, bool p_pressed) {
+			Ref<InputEventMouseButton> e;
+			e.instantiate();
+			e->set_position(p_at);
+			e->set_global_position(p_at);
+			e->set_button_index(MOUSE_BUTTON_LEFT);
+			e->set_pressed(p_pressed);
+			tdm_ui_input(e);
+		};
+		io.join_extra = [this](std::string *r_error) { return join_extra_client(r_error); };
+		io.extra_request = [this](const net::SquadRequest &p_request) {
+			if (extra_client_ != nullptr) {
+				extra_client_->send_squad_request(p_request);
+			}
+		};
+		io.own_request = [&m](const net::SquadRequest &p_request) { queue_squad_request(m, p_request); };
+		io.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		io.players =
+				std::span<const net::PlayerRow>(f.players.data(), std::min<size_t>(f.player_count, f.players.size()));
+		io.own_slot = m.own_slot;
+		io.names = &m.squad_names;
+		io.squad_data = [&m](int32_t p_key) {
+			const std::optional<std::string> v = m.native_flow != nullptr && m.native_flow->session() != nullptr
+					? m.native_flow->session()->data(bf3::core::ui::kUiSquadCompPartition, p_key)
+					: std::nullopt;
+			return v.value_or(std::string("unset"));
+		};
+		if (m.squad_team->frame(*screens, now_s, io)) {
+			m.finished = true;
+			UtilityFunctions::print(to_godot(m.squad_team->report()));
+			finish(m.squad_team->exit_code());
 			return true;
 		}
 	}

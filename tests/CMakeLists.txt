@@ -1180,7 +1180,8 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
 endif()
 if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     openbf3_godot_row(godot.net_overlay godot_net_overlay.cmake WINDOW TIMEOUT 120)
-    set_tests_properties(godot.net_overlay PROPERTIES RUN_SERIAL TRUE)
+    openbf3_godot_row(godot.squad_team godot_squad_team.cmake WINDOW TIMEOUT 120)
+    set_tests_properties(godot.net_overlay godot.squad_team PROPERTIES RUN_SERIAL TRUE)
 endif()
 
 target_sources(test_host_tdm PRIVATE host_server_level_tests.cpp)

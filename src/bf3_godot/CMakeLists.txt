@@ -241,6 +241,8 @@ if(OPENBF3_BUILD_CHECKS)
         src/crosshair_walk_check.cpp
         src/net_overlay_check.cpp
         src/net_overlay_check.h
+        src/squad_team_check.cpp
+        src/squad_team_check.h
         src/fx3_demo.cpp
         src/fx3_demo.h
         src/fx_demo.cpp
