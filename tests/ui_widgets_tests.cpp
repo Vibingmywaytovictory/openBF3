@@ -5,10 +5,12 @@
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/hud_squads.h"
 #include "bf3/core/ui/hud_widgets.h"
+#include "bf3/core/ui/swf_hit.h"
 #include "bf3/core/ui/swf_scene.h"
 #include "bf3/core/ui/text_db.h"
 #include "bf3/core/ui/ui_direct_access.h"
 #include "bf3/core/ui/ui_input.h"
+#include "bf3/core/ui/ui_stage.h"
 #include "list.h"
 #include "test_support.h"
 #include "ui_retail_support.h"
@@ -645,6 +647,41 @@ TEST_SUITE("ui-widgets") {
 		CHECK(b.events[1].index == 0);
 		CHECK(b.events[1].param.to_string() == "ID_M_POPUP_YES");
 		CHECK(b.s.hud->hit_target(100.0f, 100.0f) == std::string(kHudScreenInstance) + ".Dimmer_01");
+	}
+
+	TEST_CASE("widgets: an open popup's Dimmer covers the new visible rect after a 16:9 to 21:9 resize") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudPopup popup;
+		popup.title = "Options";
+		popup.buttons = { { "ID_M_POPUP_YES", -1 } };
+		HudClientState client;
+		client.popup = &popup;
+		ScreenRig b;
+		open_screen(*r, b, kPopupGeneric, client);
+		b.s.hud->advance(0.45);
+		HudStageRects wide;
+		wide.visible = ui_stage_show_all(2560.0f, 1080.0f).visible;
+		REQUIRE(wide.visible.width() > 1700.0f);
+		b.s.hud->set_stage_rects(wide);
+		const As2Clip dimmer = b.clip("Dimmer_01");
+		CHECK(dimmer.width() == doctest::Approx(wide.visible.width() + 256.0f));
+		CHECK(dimmer.height() == doctest::Approx(wide.visible.height() + 144.0f));
+		const SwfSceneNode *node = dimmer.node();
+		REQUIRE(node != nullptr);
+		const SwfRect covered =
+				swf_transform_bounds(swf_node_local_bounds(*b.s.scene, *node), swf_world_matrix(*b.s.scene, node->id));
+		std::printf("ui.widgets dimmer at 21:9 covers %.1f..%.1f x %.1f..%.1f of %.1f..%.1f x %.1f..%.1f\n",
+				covered.x_min, covered.x_max, covered.y_min, covered.y_max, wide.visible.x_min, wide.visible.x_max,
+				wide.visible.y_min, wide.visible.y_max);
+		CHECK(covered.x_min <= wide.visible.x_min);
+		CHECK(covered.x_max >= wide.visible.x_max);
+		CHECK(covered.y_min <= wide.visible.y_min);
+		CHECK(covered.y_max >= wide.visible.y_max);
+		CHECK(b.s.hud->hit_target(wide.visible.x_min + 4.0f, 360.0f) == std::string(kHudScreenInstance) + ".Dimmer_01");
+		CHECK(b.s.hud->hit_target(wide.visible.x_max - 4.0f, 360.0f) == std::string(kHudScreenInstance) + ".Dimmer_01");
 	}
 
 	TEST_CASE("widgets: list label follows its row's state") {

@@ -53,6 +53,8 @@ public:
 		}
 	}
 
+	void update_screen_size(HudWidgetHost &r_host) override { resize_to_screen(r_host); }
+
 	bool mouse_move(HudWidgetHost &r_host, const HudMouse &p_mouse) override { return p_mouse.target == r_host.path(); }
 
 	void in_event(HudWidgetHost &r_host, int32_t p_index, const As2Value &) override {
