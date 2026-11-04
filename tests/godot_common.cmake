@@ -1,7 +1,4 @@
-set(godot "$ENV{OPENBF3_GODOT}")
-if(godot STREQUAL "" AND DEFINED GODOT_EXE AND NOT GODOT_EXE STREQUAL "" AND NOT GODOT_EXE MATCHES "-NOTFOUND$")
-	set(godot "${GODOT_EXE}")
-endif()
+include(${CMAKE_CURRENT_LIST_DIR}/godot_exe.cmake)
 if(godot STREQUAL "" OR NOT EXISTS "${godot}")
 	message("SKIPPED: no Godot console executable (OPENBF3_GODOT unset and none found next to the checkout at configure time)")
 	cmake_language(EXIT 77)

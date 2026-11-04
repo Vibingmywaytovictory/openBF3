@@ -101,8 +101,9 @@ functional.
   restarted that block, are not counted. A first run with `--menu-frames-baseline` plays with no menu ever opened and
   gives the row its no-menu DXGI reading; DXGI with every menu visited minus that reading is the UI share, reported
   and not gated until a real reading sets a limit.
-* The project is set up by the `godot.project_setup` fixture, which writes `.godot/extension_list.cfg` and never runs
-  `--import` (the first `--import` of a never-opened project exits 0xC0000005, README "Run").
+* The project is set up by the `godot.project_setup` fixture, which fails when the Godot executable's `--version` is
+  not the `OPENBF3_ENGINE_API` build, writes `.godot/extension_list.cfg` and never runs `--import` (the first
+  `--import` of a never-opened project exits 0xC0000005, README "Run").
 
 ## 4. Budgets
 

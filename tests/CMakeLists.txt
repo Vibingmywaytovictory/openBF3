@@ -77,7 +77,8 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/proc_row.cmake)
 if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     add_test(NAME godot.project_setup COMMAND ${CMAKE_COMMAND} -DPROJECT_DIR=${OPENBF3_GODOT_PROJECT}
         "-DDLL=$<TARGET_FILE:bf3_godot>" -DSERVER_PROJECT_DIR=${OPENBF3_GODOT_SERVER_PROJECT}
-        "-DSERVER_DLL=$<TARGET_FILE:bf3_godot_server>" -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_project_setup.cmake)
+        "-DSERVER_DLL=$<TARGET_FILE:bf3_godot_server>" "-DENGINE_API=${OPENBF3_ENGINE_API}"
+        "-DGODOT_EXE=${OPENBF3_GODOT_EXE}" -P ${CMAKE_CURRENT_SOURCE_DIR}/godot_project_setup.cmake)
     set_tests_properties(godot.project_setup PROPERTIES FIXTURES_SETUP godot_project
         RESOURCE_LOCK "openbf3_godot_project;openbf3_godot_server_project" TIMEOUT 60)
 endif()
