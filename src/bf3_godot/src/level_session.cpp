@@ -15,6 +15,7 @@
 #include "bf3/core/level/world.h"
 #include "bf3/core/util/key_values.h"
 #include "bf3/host/game_server.h"
+#include "bf3/host/prediction_tally.h"
 #include "bf3/net/loopback_ping.h"
 #include "bf3/net/netsim.h"
 
@@ -160,6 +161,9 @@ void Bf3LevelSession::shutdown() {
 		extra_client_->stop();
 	}
 	if (client_ != nullptr && match_ == nullptr) {
+		host::PredictionTally prediction;
+		host::tally_level(prediction, client_->stats());
+		UtilityFunctions::print(to_godot("[level] " + host::prediction_tally_text(prediction)));
 		client_->stop();
 	}
 	if (server_ != nullptr) {

@@ -254,6 +254,11 @@ target_sources(bf3_host PRIVATE
 )
 
 target_sources(bf3_host PRIVATE
+    include/bf3/host/prediction_tally.h
+    src/prediction_tally.cpp
+)
+
+target_sources(bf3_host PRIVATE
     include/bf3/host/gadgets.h
     src/server_gadgets.h
     src/server_gadgets.cpp

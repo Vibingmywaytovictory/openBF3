@@ -694,6 +694,7 @@ void Bf3MatchHost::watch_changes() {
 			std::to_string(change.round_id) + ", load deadline " + std::to_string(change.load_deadline_s) + " s");
 	++level_index_;
 	free_session();
+	host::tally_level(prediction_, c->stats());
 	if (const bf3::core::Status s = c->detach_level(); !s.ok()) {
 		end_match(s.error().message);
 		return;
@@ -823,6 +824,8 @@ void Bf3MatchHost::_exit_tree() {
 	prepare_.reset();
 	std::shared_ptr<host::ClientSession> c = client();
 	if (c != nullptr) {
+		host::tally_level(prediction_, c->stats());
+		say(host::prediction_tally_text(prediction_));
 		c->stop();
 	}
 	kick_.reset();

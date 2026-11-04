@@ -32,4 +32,5 @@ echo   --connect=host:port   join a running server ^(tools\server.cmd^) instead 
 echo           the server names the level, the mode and the rules
 echo   --maplist=file   this game's own server rotates the map list ^(try bf3-opensource\config\maplist.cfg^); without it a round restarts in place
 echo With --tdm the match state prints as "[tdm] match: ..." console lines ^(no TDM HUD in the firefight scene^).
+echo At exit the console prints the prediction line: corrections and those over 1 mm per predicted minute, and motor_hash_mismatch.
 exit /b 0

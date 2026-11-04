@@ -4,6 +4,7 @@
 #include "bf3/core/install_reader.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/map_list.h"
+#include "bf3/host/prediction_tally.h"
 #include "bf3/host/server_session.h"
 #include "upnp_mapping.h"
 
@@ -104,6 +105,7 @@ private:
 	bool prepare_held_ = false;
 	std::optional<uint8_t> rules_flags_;
 	MatchLevel pending_;
+	bf3::host::PredictionTally prediction_;
 	bool scene_game_ = false;
 	bool scene_tdm_ = false;
 
