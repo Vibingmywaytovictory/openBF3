@@ -1913,6 +1913,9 @@ TEST_SUITE("level_eor") {
 			CHECK_MESSAGE(l.attenuation_offset == 10.0f, name);
 			CHECK_MESSAGE(l.cone_inner_deg == 0.0f, name);
 			CHECK_MESSAGE(l.cone_outer_deg == 30.0f, name);
+			CHECK_MESSAGE(l.shape == SpotLightShape::Cone, name);
+			CHECK_MESSAGE(l.frustum_fov_deg == 40.0f, name);
+			CHECK_MESSAGE(l.texture.empty(), name);
 			CHECK_MESSAGE(l.cast_shadows, name);
 			CHECK_MESSAGE(l.switched_with_environment, name);
 			CHECK_MESSAGE(

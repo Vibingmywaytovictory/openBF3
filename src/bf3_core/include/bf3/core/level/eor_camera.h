@@ -2,6 +2,7 @@
 
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/level/level_transform.h"
+#include "bf3/core/level/spot_light.h"
 #include "bf3/core/level/world.h"
 #include "bf3/core/result.h"
 
@@ -16,16 +17,9 @@ namespace bf3::core::level {
 inline constexpr std::string_view kEorCameraEvent = "ShowTopPlayers";
 inline constexpr std::string_view kCameraTakeControl = "TakeControl";
 
-struct EorSpotLight {
+struct EorSpotLight : SpotLight {
 	uint32_t object = 0;
 	LevelTransform transform;
-	Vec3 color{};
-	float intensity = 0.0f;
-	float radius = 0.0f;
-	float attenuation_offset = 0.0f;
-	float cone_inner_deg = 0.0f;
-	float cone_outer_deg = 0.0f;
-	bool cast_shadows = false;
 	bool switched_with_environment = false;
 };
 

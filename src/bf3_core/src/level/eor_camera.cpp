@@ -1,7 +1,6 @@
 #include "bf3/core/level/eor_camera.h"
 
 #include "bf3/core/level/connections.h"
-#include "bf3/core/util/finite.h"
 
 #include <cmath>
 #include <utility>
@@ -21,22 +20,6 @@ bool takes_control_on_eor(const Connections &p_connections, const EbxInstance &p
 		}
 	}
 	return false;
-}
-
-std::optional<float> f32_of(const EbxInstance &p_instance, std::string_view p_field) {
-	const std::optional<EbxValue> v = p_instance.get(p_field);
-	const std::optional<float> f = v ? v->as_f32() : std::nullopt;
-	return f && finite(*f) ? f : std::nullopt;
-}
-
-std::optional<Vec3> vec3_of(const EbxInstance &p_instance, std::string_view p_field) {
-	const std::optional<EbxValue> v = p_instance.get(p_field);
-	const std::optional<EbxStruct> s = v ? v->as_struct() : std::nullopt;
-	const std::optional<Vec3> out = s ? s->vec3() : std::nullopt;
-	if (!out || !finite(*out)) {
-		return std::nullopt;
-	}
-	return out;
 }
 
 std::vector<std::pair<EbxInstance, int32_t>> event_sources(
@@ -61,7 +44,7 @@ Result<EorEnvironment> read_environment(
 				" names no VisualEnvironment");
 	}
 	out.visual_environment = std::string(*name);
-	out.visibility = f32_of(p_lve.entity, "Visibility").value_or(1.0f);
+	out.visibility = ebx_f32(p_lve.entity, "Visibility").value_or(1.0f);
 	const int32_t visibility = field_id("Visibility");
 	for (const Connection &c : p_connections.property) {
 		if (c.target == p_lve.entity && c.target_field == visibility && c.source.is_a("AreaProximityEntityData")) {
@@ -71,28 +54,16 @@ Result<EorEnvironment> read_environment(
 	return out;
 }
 
-Result<EorSpotLight> read_light(const Connections &p_connections, uint32_t p_object, const PlacedObject &p_light,
-		const std::optional<EorEnvironment> &p_environment, const World &p_world) {
+Result<EorSpotLight> read_light(const EbxResolver &p_db, const Connections &p_connections, uint32_t p_object,
+		const PlacedObject &p_light, const std::optional<EorEnvironment> &p_environment, const World &p_world) {
+	Result<SpotLight> light = read_spot_light(p_db, p_light.entity);
+	if (!light) {
+		return make_error("read_eor_camera: " + light.error().message);
+	}
 	EorSpotLight out;
+	static_cast<SpotLight &>(out) = std::move(*light);
 	out.object = p_object;
 	out.transform = p_light.transform;
-	const std::optional<Vec3> color = vec3_of(p_light.entity, "Color");
-	const std::optional<float> intensity = f32_of(p_light.entity, "Intensity"),
-							   radius = f32_of(p_light.entity, "Radius"),
-							   inner = f32_of(p_light.entity, "ConeInnerAngle"),
-							   outer = f32_of(p_light.entity, "ConeOuterAngle");
-	if (!color || !intensity || !radius || !inner || !outer || *radius <= 0.0f || *outer <= 0.0f || *outer >= 180.0f) {
-		return make_error("read_eor_camera: spot light " + p_light.entity.guid().to_string() +
-				" has no usable Color, Intensity, Radius or cone");
-	}
-	out.color = *color;
-	out.intensity = *intensity;
-	out.radius = *radius;
-	out.cone_inner_deg = *inner;
-	out.cone_outer_deg = *outer;
-	out.attenuation_offset = f32_of(p_light.entity, "AttenuationOffset").value_or(0.0f);
-	const std::optional<EbxValue> shadows = p_light.entity.get("CastShadowsEnable");
-	out.cast_shadows = shadows && shadows->as_bool().value_or(false);
 	if (p_environment) {
 		const EbxInstance &lve = p_world.objects[p_environment->object].entity;
 		const int32_t enable = field_id("Enable"), disable = field_id("Disable");
@@ -102,7 +73,6 @@ Result<EorSpotLight> read_light(const Connections &p_connections, uint32_t p_obj
 	}
 	return out;
 }
-
 }
 
 Result<std::optional<EorCamera>> read_eor_camera(const EbxResolver &p_db, const World &p_world) {
@@ -150,7 +120,7 @@ Result<std::optional<EorCamera>> read_eor_camera(const EbxResolver &p_db, const 
 		}
 		if (light) {
 			Result<EorSpotLight> l =
-					read_light(*connections, *light, p_world.objects[*light], out.environment, p_world);
+					read_light(p_db, *connections, *light, p_world.objects[*light], out.environment, p_world);
 			BF3_TRY(l);
 			out.light = *l;
 		}

@@ -473,3 +473,8 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/soldier_sound.h
     src/gameplay/soldier_sound.cpp
 )
+
+target_sources(bf3_core PRIVATE
+    include/bf3/core/level/spot_light.h
+    src/level/spot_light.cpp
+)
