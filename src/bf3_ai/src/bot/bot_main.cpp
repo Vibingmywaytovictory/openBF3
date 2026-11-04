@@ -26,6 +26,12 @@ BotMain::BotMain(uint32_t p_bot_id, int p_player_id, int p_side, InfantryBody &r
 	behaviours_[size_t(InfantryBehaviour::Random)] =
 			std::make_unique<BBRandom>(curve(InfantryBehaviour::Random), body_);
 	behaviours_[size_t(InfantryBehaviour::Idle)] = std::make_unique<BBIdle>(curve(InfantryBehaviour::Idle), body_);
+	behaviours_[size_t(InfantryBehaviour::MedicAssist)] =
+			std::make_unique<BBMedicAssist>(curve(InfantryBehaviour::MedicAssist), body_);
+	behaviours_[size_t(InfantryBehaviour::CallForMedic)] =
+			std::make_unique<BBCallForMedic>(curve(InfantryBehaviour::CallForMedic), body_);
+	behaviours_[size_t(InfantryBehaviour::Resupply)] =
+			std::make_unique<BBResupply>(curve(InfantryBehaviour::Resupply), body_);
 	std::vector<UrgencyGenerator *> generators;
 	for (const std::unique_ptr<BotBehaviour> &b : behaviours_) {
 		generators.push_back(b.get());

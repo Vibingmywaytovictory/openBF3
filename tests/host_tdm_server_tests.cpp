@@ -235,8 +235,9 @@ std::optional<Patch> find_patch(const Match &p_match, float p_sky_m) {
 	return std::nullopt;
 }
 
-float pick_drop(const Match &p_match, const sim::Vec3 &p_floor, bool p_lethal) {
-	for (float h = 6.0f; h <= 78.0f; h += 1.0f) {
+float pick_drop(const Match &p_match, const sim::Vec3 &p_floor, bool p_lethal, float p_min_damage, float p_max_damage,
+		float p_max_height) {
+	for (float h = 6.0f; h <= p_max_height; h += 1.0f) {
 		sim::SoldierState s = p_match.motor.spawn_state(add(p_floor, 0.0f, h, 0.0f), 0, 1, 0, false);
 		for (int i = 0; i < 900; ++i) {
 			p_match.motor.step(s, sim::idle_command(s.tick + 1u, s.yaw, s.pitch, s.target_pose));
@@ -244,7 +245,7 @@ float pick_drop(const Match &p_match, const sim::Vec3 &p_floor, bool p_lethal) {
 				break;
 			}
 		}
-		if (p_lethal ? s.health <= 0.0f : (s.damage > 10.0f && s.damage < 60.0f && s.health > 0.0f)) {
+		if (p_lethal ? s.health <= 0.0f : (s.damage > p_min_damage && s.damage < p_max_damage && s.health > 0.0f)) {
 			return h;
 		}
 	}
@@ -256,11 +257,26 @@ struct Drop {
 	float height = 0;
 	uint32_t spawn = 0;
 };
-std::optional<Drop> find_drop(const Match &p_match, bool p_lethal) {
+std::optional<Drop> find_drop(const Match &p_match, bool p_lethal, float p_min_damage = 10.0f,
+		float p_max_damage = 60.0f, bool p_under_roof = false) {
+	constexpr float kHeadroom = 2.5f;
 	const sim::CollisionWorld &w = *p_match.world;
 	for (const sim::SpawnPoint &sp : p_match.level->spawns) {
 		sim::StaticHit hit;
-		if (!w.ground_below(add(sp.position, 0.0f, 80.0f, 0.0f), 160.0f, sim::query_mask::kMovement, &hit) || hit.normal[1] < 0.9f) {
+		float max_height = 78.0f;
+		if (p_under_roof) {
+			const std::optional<sim::Vec3> f = floor_at(w, sp.position);
+			if (!f) {
+				continue;
+			}
+			hit.position = *f;
+			sim::StaticHit roof;
+			if (w.ray(add(*f, 0.0f, 0.5f, 0.0f), sim::Vec3{ 0.0f, max_height, 0.0f }, sim::query_mask::kMovement,
+						&roof)) {
+				max_height = roof.fraction * max_height + 0.5f - kHeadroom;
+			}
+		} else if (!w.ground_below(add(sp.position, 0.0f, 80.0f, 0.0f), 160.0f, sim::query_mask::kMovement, &hit) ||
+				hit.normal[1] < 0.9f) {
 			continue;
 		}
 		const sim::Vec3 floor = hit.position;
@@ -269,7 +285,7 @@ std::optional<Drop> find_drop(const Match &p_match, bool p_lethal) {
 				!p_match.motor.fits_standing(add(*beside, 0.0f, 0.05f, 0.0f))) {
 			continue;
 		}
-		const float h = pick_drop(p_match, floor, p_lethal);
+		const float h = pick_drop(p_match, floor, p_lethal, p_min_damage, p_max_damage, max_height);
 		if (h > 0.0f) {
 			return Drop{ floor, *beside, h, sp.index };
 		}
@@ -2311,6 +2327,31 @@ GadgetBotMatch gadget_bot_match(Match &r_match) {
 	return g;
 }
 
+int supply_slot_of(const Match &p_match, int p_slot, bool p_healing) {
+	const host::Gunplay &gp = *p_match.server.gunplay();
+	const sw::SoldierWeaponsState &w = gp.weapons(uint8_t(p_slot));
+	for (const uint8_t s : host::kGadgetSlots) {
+		for (const sw::GadgetDef &d : gp.level().gadgets) {
+			if (d.def == w.slots[s].def && (p_healing ? d.healing : d.ammo).active()) {
+				return s;
+			}
+		}
+	}
+	return -1;
+}
+
+const sw::Deployable *resting_bag(const Match &p_match, int p_owner, bool p_healing) {
+	const host::Gunplay &gp = *p_match.server.gunplay();
+	const std::span<const sw::GadgetDef> defs = gp.level().gadgets;
+	for (const sw::Deployable &d : gp.deployables()) {
+		if (int(d.owner) == p_owner && d.resting && d.gadget < defs.size() &&
+				(p_healing ? defs[d.gadget].healing : defs[d.gadget].ammo).active()) {
+			return &d;
+		}
+	}
+	return nullptr;
+}
+
 std::optional<sim::Vec3> ring_spot(const Match &p_match, const sim::Vec3 &p_centre, float p_min, float p_max,
 		const std::optional<sim::Vec3> &p_apart) {
 	for (float r = p_min; r <= p_max; r += 1.0f) {
@@ -2601,6 +2642,247 @@ TEST_SUITE("host-gunplay-gadgets") {
 		CHECK(distance(deployed, beacon) <= 1.5f);
 		CHECK(m->rules().stats().beacon_spawns == 1u);
 		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+	TEST_CASE("gadgets: a medic bot walks to a hurt mate and throws its medkit at the mate's feet, which heals the "
+			  "mate") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		REQUIRE(level->bots != nullptr);
+		auto stats = std::make_shared<host::TdmBotStats>();
+		std::unique_ptr<Match> m = start_match(*level, true, 83u, 0, 1, gadget_bot_server(*level, 0, stats, false));
+		const GadgetBotMatch g = gadget_bot_match(*m);
+		REQUIRE(g.mate != nullptr);
+		const std::optional<Drop> drop = find_drop(*m, false, 25.0f, 60.0f, true);
+		REQUIRE(drop.has_value());
+		if (g.mate == nullptr || !drop.has_value()) {
+			return;
+		}
+		REQUIRE(m->server.gunplay()->kit(uint8_t(g.bot)) == 0u);
+		REQUIRE(supply_slot_of(*m, g.bot, true) >= 0);
+		m->place(g.bot, add(drop->beside, 0.0f, 0.05f, 0.0f));
+		m->teleport(*g.mate, add(drop->floor, 0.0f, drop->height, 0.0f));
+		REQUIRE(m->until(
+				[&] {
+					const sim::SoldierState *s = m->state(g.mate->slot());
+					return s != nullptr && s->health < 80.0f && s->mode == sim::MoveMode::OnGround;
+				},
+				600));
+		const sim::Tick landed = m->now();
+		const float hurt = m->state(g.mate->slot())->health;
+		const sim::Vec3 feet = m->state(g.mate->slot())->position;
+		const sw::Deployable *bag = nullptr;
+		REQUIRE(m->until(
+				[&] {
+					bag = resting_bag(*m, g.bot, true);
+					return bag != nullptr;
+				},
+				900));
+		if (bag == nullptr) {
+			return;
+		}
+		const sim::Tick rested = m->now();
+		const float at_rest = m->state(g.mate->slot())->health;
+		const float off = distance(bag->position, feet);
+		const uint64_t heal_before = m->server.gunplay()->gadget_stats().heal_ticks;
+		m->ticks(60);
+		const float after = m->state(g.mate->slot())->health;
+		std::printf(
+				"medic bot: mate at %.1f HP, medkit at rest %u ticks after the landing, %.2f m from the mate's feet, "
+				"mate %.1f -> %.1f HP in 1 s\n",
+				hurt, unsigned(rested - landed), off, at_rest, after);
+		CHECK(off <= 3.5f);
+		CHECK(m->server.gunplay()->gadget_stats().heal_ticks - heal_before >= 50u);
+		CHECK(after - at_rest >= 6.0f);
+		CHECK(stats->medkit_throws.load() >= 1u);
+	}
+
+	TEST_CASE("gadgets: a support bot throws its ammo bag for a mate who emptied a magazine of its reserve, which "
+			  "refills it") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		REQUIRE(level->bots != nullptr);
+		auto stats = std::make_shared<host::TdmBotStats>();
+		std::unique_ptr<Match> m = start_match(*level, true, 89u, 0, 1, gadget_bot_server(*level, 2, stats, false));
+		const GadgetBotMatch g = gadget_bot_match(*m);
+		REQUIRE(g.mate != nullptr);
+		const std::optional<Patch> patch = find_patch(*m, 3.0f);
+		REQUIRE(patch.has_value());
+		if (g.mate == nullptr || !patch.has_value()) {
+			return;
+		}
+		REQUIRE(m->server.gunplay()->kit(uint8_t(g.bot)) == 2u);
+		REQUIRE(supply_slot_of(*m, g.bot, false) >= 0);
+		m->teleport(*g.mate, add(patch->victim, 0.0f, 0.05f, 0.0f));
+		m->ticks(20);
+		const sw::WeaponSlotState &primary = m->server.gunplay()->weapons(uint8_t(g.mate->slot())).slots[0];
+		const int32_t full = primary.reserve;
+		const int32_t magazine = m->server.gunplay()->table().def(primary.def, primary.variant).magazine_capacity;
+		bool shoot = true;
+		m->scripts[g.mate_script] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			const sim::Vec3 sky = add(p_state.position, 0.0f, 30.0f, 1.0f);
+			return aim_command(
+					*m, p_tick, p_state, sky, sim::Pose::Stand, select_and_fire(0, shoot && (p_tick % 4u) < 2u));
+		};
+		REQUIRE(m->until([&] { return primary.reserve <= full - magazine; }, 1200));
+		shoot = false;
+		m->ticks(120);
+		const int32_t low = primary.reserve;
+		m->place(g.bot, add(patch->shooter, 0.0f, 0.05f, 0.0f));
+		const sim::Tick placed = m->now();
+		const sw::Deployable *bag = nullptr;
+		REQUIRE(m->until(
+				[&] {
+					bag = resting_bag(*m, g.bot, false);
+					return bag != nullptr;
+				},
+				900));
+		if (bag == nullptr) {
+			return;
+		}
+		const float off = distance(bag->position, m->state(g.mate->slot())->position);
+		const sim::Tick rested = m->now();
+		CHECK(m->until([&] { return primary.reserve > low; }, 180));
+		std::printf("support bot: mate reserve %d of %d (magazine %d), ammo bag at rest %u ticks after the bot was "
+					"placed, %.2f m from the mate, the reserve at %d %u ticks after the rest\n",
+				low, full, magazine, unsigned(rested - placed), off, primary.reserve, unsigned(m->now() - rested));
+		CHECK(off <= 3.5f);
+		CHECK(m->server.gunplay()->gadget_stats().rounds_refilled > 0u);
+		CHECK(stats->ammo_throws.load() >= 1u);
+	}
+
+	TEST_CASE(
+			"gadgets: a bot with no squad order shot below 50 HP calls for a medic once the enemy is gone, walks to a "
+			"medkit 8 to 15 m away and stays in it until healed") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		REQUIRE(level->bots != nullptr);
+		auto stats = std::make_shared<host::TdmBotStats>();
+		std::unique_ptr<Match> m = start_match(*level, true, 97u, 0, 1, gadget_bot_server(*level, 1, stats, false));
+		const GadgetBotMatch g = gadget_bot_match(*m);
+		REQUIRE(g.mate != nullptr);
+		if (g.mate == nullptr) {
+			return;
+		}
+		size_t enemy_script = 0;
+		for (size_t i = 0; i < m->peers.size(); ++i) {
+			enemy_script = m->peers[i].get() != g.mate ? i : enemy_script;
+		}
+		tdm::ScriptedPeer &enemy = *m->peers[enemy_script];
+		std::optional<sim::Vec3> centre, spot, shooter, away;
+		for (const sim::SpawnPoint &sp : m->level->spawns) {
+			const std::optional<sim::Vec3> f = floor_at(*m->world, sp.position);
+			if (!f || !m->motor.fits_standing(add(*f, 0.0f, 0.05f, 0.0f))) {
+				continue;
+			}
+			const std::optional<sim::Vec3> s = ring_spot(*m, *f, 8.0f, 15.0f, std::nullopt);
+			const std::optional<sim::Vec3> e = s ? ring_spot(*m, *f, 8.0f, 15.0f, s) : std::nullopt;
+			if (s && e) {
+				centre = f;
+				spot = s;
+				shooter = e;
+				break;
+			}
+		}
+		REQUIRE(centre.has_value());
+		if (!centre.has_value()) {
+			return;
+		}
+		for (const sim::SpawnPoint &sp : m->level->spawns) {
+			const std::optional<sim::Vec3> f = floor_at(*m->world, sp.position);
+			if (f && core::vec::horizontal_distance(*f, *centre) >= 60.0f &&
+					m->motor.fits_standing(add(*f, 0.0f, 0.05f, 0.0f))) {
+				away = f;
+				break;
+			}
+		}
+		REQUIRE(away.has_value());
+		if (!away.has_value()) {
+			return;
+		}
+		REQUIRE(m->server.gunplay()->kit(uint8_t(g.bot)) == 1u);
+		REQUIRE(supply_slot_of(*m, g.bot, true) < 0);
+		REQUIRE(supply_slot_of(*m, g.mate->slot(), true) >= 0);
+		m->place(g.bot, add(*centre, 0.0f, 0.05f, 0.0f));
+		m->teleport(*g.mate, add(*away, 0.0f, 0.05f, 0.0f));
+		enemy.spawn_request(0);
+		REQUIRE(m->until([&] { return is_alive(m->state(enemy.slot())); }, 600));
+		m->teleport(enemy, add(*shooter, 0.0f, 0.05f, 0.0f));
+		m->ticks(5);
+		bool shoot = true;
+		m->scripts[enemy_script] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			const sim::SoldierState *b = m->state(g.bot);
+			const sim::Vec3 chest = b != nullptr ? add(b->position, 0.0f, 1.2f, 0.0f) : p_state.position;
+			return aim_command(*m, p_tick, p_state, chest, sim::Pose::Stand, select_and_fire(0, shoot));
+		};
+		REQUIRE(m->until(
+				[&] {
+					const sim::SoldierState *b = m->state(g.bot);
+					return b != nullptr && b->health < 50.0f;
+				},
+				600));
+		shoot = false;
+		m->scripts[enemy_script] = {};
+		m->teleport(enemy, add(*away, 0.0f, 0.05f, 0.0f));
+		REQUIRE(is_alive(m->state(g.bot)));
+		if (!is_alive(m->state(g.bot))) {
+			return;
+		}
+		const std::optional<sim::Vec3> hurt_floor = floor_at(*m->world, m->state(g.bot)->position);
+		spot = hurt_floor ? ring_spot(*m, *hurt_floor, 8.0f, 15.0f, std::nullopt) : std::nullopt;
+		REQUIRE(spot.has_value());
+		if (!spot.has_value()) {
+			return;
+		}
+		m->teleport(*g.mate, add(*spot, 0.0f, 0.05f, 0.0f));
+		bool fire = false;
+		const sim::Vec3 target = add(*spot, 0.6f, 0.1f, 0.0f);
+		m->scripts[g.mate_script] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			return aim_command(
+					*m, p_tick, p_state, target, sim::Pose::Stand, select_and_fire(4, fire && (p_tick % 30u) < 10u));
+		};
+		m->ticks(40);
+		fire = true;
+		const sw::Deployable *bag = nullptr;
+		REQUIRE(m->until(
+				[&] {
+					bag = resting_bag(*m, g.mate->slot(), true);
+					return bag != nullptr;
+				},
+				300));
+		fire = false;
+		if (bag == nullptr) {
+			return;
+		}
+		const sim::Vec3 at = bag->position;
+		m->scripts[g.mate_script] = {};
+		m->teleport(*g.mate, add(*away, 0.0f, 0.05f, 0.0f));
+		const float hurt = m->state(g.bot)->health;
+		const float start = distance(m->state(g.bot)->position, at);
+		const sim::Tick shot = m->now();
+		sim::Tick entered = 0, inside_since = 0;
+		const bool healed = m->until(
+				[&] {
+					const bool inside = distance(m->state(g.bot)->position, at) <= 3.5f;
+					entered = inside && entered == 0 ? m->now() : entered;
+					inside_since = inside ? (inside_since != 0 ? inside_since : m->now()) : 0;
+					return inside_since != 0 && m->now() - inside_since >= 60u && m->state(g.bot)->health >= 80.0f;
+				},
+				1200);
+		std::printf(
+				"calling bot: %.1f HP when the medkit came to rest, %.1f m from it, first in it %u ticks later, in it "
+				"since %u ticks, %.1f HP at %u ticks\n",
+				hurt, start, entered != 0 ? unsigned(entered - shot) : 0u,
+				inside_since != 0 ? unsigned(inside_since - shot) : 0u, m->state(g.bot)->health,
+				unsigned(m->now() - shot));
+		CHECK(start > 3.5f);
+		CHECK(healed);
+		CHECK(stats->medic_calls.load() >= 1u);
 	}
 }
 

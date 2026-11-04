@@ -75,6 +75,7 @@ void TdmShared::begin_tick(sim::Tick p_tick) {
 	if (was_alive.size() < n) {
 		was_alive.resize(n, 0);
 		fired_tick.resize(n, 0);
+		medic_call.resize(n, 0);
 		shot_cursor.resize(n, 0);
 	}
 	firing.assign(n, 0);

@@ -30,7 +30,7 @@ struct StrategyTuning {
 	float hunt_heat = 2.0f;
 	float hunt_keep = 0.5f;
 	float squad_spawn_draw = 0.0f;
-	std::array<float, kInfantryBehaviourCount> order{ { 1.0f, 1.0f, 1.0f, 1.0f, 1.5f, 0.4f, 1.0f } };
+	std::array<float, kInfantryBehaviourCount> order{ { 1.0f, 1.0f, 1.0f, 1.0f, 1.5f, 0.4f, 1.0f, 1.0f, 0.4f, 1.0f } };
 
 	bool operator==(const StrategyTuning &) const = default;
 };

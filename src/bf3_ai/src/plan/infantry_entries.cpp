@@ -30,6 +30,10 @@ const char *infantry_activity_name(InfantryActivity p_activity) {
 			return "revive";
 		case InfantryActivity::Grenade:
 			return "grenade";
+		case InfantryActivity::Support:
+			return "support";
+		case InfantryActivity::CallMedic:
+			return "call_medic";
 	}
 	return "?";
 }

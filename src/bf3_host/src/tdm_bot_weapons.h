@@ -11,7 +11,7 @@
 
 namespace bf3::host::tdm_bot {
 
-enum class Trigger : uint8_t { None, Aimed, Blind, Defib, Grenade, Knife };
+enum class Trigger : uint8_t { None, Aimed, Blind, Defib, Grenade, Knife, Supply };
 
 class BotArms {
 public:
@@ -51,6 +51,7 @@ struct WeaponCommand {
 	sim::weapons::WeaponInput input;
 	float comp_yaw = 0.0f, comp_pitch = 0.0f;
 	bool defib_fired = false;
+	bool supply_fired = false;
 };
 
 class BotWeapons {

@@ -15,6 +15,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace bf3::host {
@@ -37,6 +38,8 @@ public:
 	void add_bot(uint8_t p_slot, ai::BotMain &r_bot);
 	void remove_bot(uint8_t p_slot);
 	void step(sim::Tick p_tick);
+	std::optional<sim::Vec3> mission(uint8_t p_slot) const;
+	uint64_t squad_mates(uint8_t p_slot) const;
 
 	sim::Tick game_tick() const override { return tick_; }
 	double tick_seconds() const override { return double(sim::kTickSeconds); }

@@ -32,6 +32,9 @@ constexpr float kDefibConeDeg = 6.0f;
 constexpr float kKnifeBehindDeg = 100.0f;
 constexpr uint32_t kKnifeTicks = 45;
 
+constexpr float kThrowReachSlack = 0.5f;
+constexpr float kBagArriveMetres = 1.0f;
+
 constexpr float kHeadAimDrop = 0.1f;
 constexpr float kZoomBeyondMetres = 6.0f;
 constexpr uint32_t kHoldTicks = 240;
@@ -75,6 +78,7 @@ void BotBody::new_life(sim::Tick p_tick, const sim::SoldierState &p_state) {
 	retreat.new_life();
 	medic.new_life();
 	grenade.new_life();
+	support.new_life();
 	knife_until = 0;
 	navigation.new_life();
 	activity = TdmBotActivity::Roam;
@@ -186,7 +190,8 @@ void BotBody::compose(const BotFrame &p_frame, TdmBotActivity p_activity, const 
 	request.aligned = p_aligned;
 	request.sprint = i.sprint;
 	request.zoom = i.zoom;
-	request.quiet = !f.visible && f.tick - targeting.last_engaged() > 120u && p_activity != TdmBotActivity::Revive;
+	request.quiet = !f.visible && f.tick - targeting.last_engaged() > 120u && p_activity != TdmBotActivity::Revive &&
+			p_activity != TdmBotActivity::Support;
 	request.throw_ready = grenade.throw_ready();
 	request.defib_ready = medic.defib_ready(f.tick);
 	request.react_at = targeting.react_at();
@@ -201,6 +206,9 @@ void BotBody::compose(const BotFrame &p_frame, TdmBotActivity p_activity, const 
 	const WeaponCommand weapon = weapons.input(*shared, slot, f.arms, request, rng);
 	if (weapon.defib_fired) {
 		medic.fired_defib(f.tick);
+	}
+	if (weapon.supply_fired) {
+		support.thrown(*shared, f.tick, i.want_slot);
 	}
 	const sw::WeaponInput &in = weapon.input;
 	const float comp_yaw = weapon.comp_yaw, comp_pitch = weapon.comp_pitch;
@@ -404,6 +412,59 @@ void BotBody::revive_trigger(const BotFrame &p_frame, BotIntent &r_intent) {
 void BotBody::throw_step(const BotFrame &p_frame, BotIntent &r_intent) {
 	BotIntent &i = r_intent;
 	grenade.step(p_frame.arms, p_frame.tick, p_frame.eye, i.want_slot, i.trigger, i.want_yaw, i.want_pitch, i.have_aim);
+}
+
+SupportSense BotBody::sense_support(const BotFrame &p_frame, bool p_engaged, const SupportWay &p_way) {
+	SupportCheck check;
+	check.tick = p_frame.tick;
+	check.slot = slot;
+	check.self = &p_frame.self;
+	check.states = p_frame.states;
+	check.engaged = p_engaged;
+	check.way = p_way;
+	return support.update(*shared, p_frame.arms, check);
+}
+
+bool BotBody::support_approach(const BotFrame &p_frame, SupplyNeed p_need, BotIntent &r_intent) {
+	const sim::Vec3 *at = support.target(p_need);
+	if (at == nullptr) {
+		return false;
+	}
+	support.pursue(p_need, p_frame.tick);
+	if (horizontal(p_frame.self.position, *at) <= cfg().behaviours.throw_m) {
+		return true;
+	}
+	navigation.set_goal(*shared, p_frame.tick, *at, kBagArriveMetres, true, kSquadGoalMoveMetres);
+	walk(p_frame, r_intent);
+	r_intent.want_yaw = r_intent.walk_yaw;
+	return false;
+}
+
+void BotBody::support_trigger(const BotFrame &p_frame, SupplyNeed p_need, BotIntent &r_intent) {
+	const sim::Vec3 *at = support.target(p_need);
+	if (at == nullptr || horizontal(p_frame.self.position, *at) > cfg().behaviours.throw_m + kThrowReachSlack) {
+		return;
+	}
+	support.pursue(p_need, p_frame.tick);
+	r_intent.want_slot = support.gadget_slot(p_need);
+	r_intent.aim_at(p_frame.eye, add(*at, 0.0f, kReviveCentreUp, 0.0f));
+	r_intent.trigger = Trigger::Supply;
+}
+
+void BotBody::call_medic(const BotFrame &p_frame) {
+	support.post_call(*shared, p_frame.tick, slot);
+}
+
+void BotBody::medkit_or_hold(const BotFrame &p_frame, BotIntent &r_intent) {
+	const std::optional<sim::Vec3> &bag = support.medkit();
+	if (bag.has_value() &&
+			navigation.set_goal(*shared, p_frame.tick, *bag, kBagArriveMetres, true, kSquadGoalMoveMetres) &&
+			walk(p_frame, r_intent)) {
+		r_intent.want_yaw = r_intent.walk_yaw;
+		return;
+	}
+	r_intent.pose = sim::Pose::Crouch;
+	look_around(p_frame, r_intent);
 }
 
 }

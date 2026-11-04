@@ -5,7 +5,9 @@
 #include "bf3/core/thread_pool.h"
 #include "bf3/core/util/percentile.h"
 #include "bf3/host/ai_bot_source.h"
+#include "bf3/host/gadgets.h"
 #include "bf3/host/game_server.h"
+#include "bf3/host/gunplay.h"
 #include "bf3/host/server_view.h"
 #include "bf3/host/tdm_brain.h"
 #include "bf3/sim/bots/aim_model.h"
@@ -16,6 +18,7 @@
 #include "bf3/sim/static_world.h"
 
 #include "gunplay_fixture.h"
+#include "tdm_bot_support.h"
 #include "tdm_fixture.h"
 #include "test_support.h"
 
@@ -25,6 +28,7 @@
 #include <cstdio>
 #include <fstream>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -40,8 +44,8 @@ constexpr bool kRuNtLanded = true;
 
 constexpr float kDeg = sim::kPi / 180.0f;
 
-constexpr uint64_t kReplayDecisionHash = 0x6f8c86a343329ea5ull;
-constexpr uint64_t kReplayWorldHash = 0xc7dd2a72df2728b1ull;
+constexpr uint64_t kReplayDecisionHash = 0x7483048eed6991b6ull;
+constexpr uint64_t kReplayWorldHash = 0x1f392bb5d1eb9a6full;
 
 void pending_skip(const char *p_row) {
 	std::printf("%s: PENDING (ru, nt): needs run_tdm and the v3 codecs on the branch\n", p_row);
@@ -421,6 +425,33 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK_FALSE(host::load_bot_tuning("no/such/bot_tuning.cfg", big).ok());
 	}
 
+	TEST_CASE("support and squads: under a squad order a bot helps a mate within bb.order_detour_m of its way to the "
+			  "mission, or any mate once inside the mission's free radius; a follower helps only its squad mates") {
+		namespace tb = host::tdm_bot;
+		ai::BehaviourTuning b;
+		b.order_detour_m = 2.0f;
+		const sim::Vec3 self{ 0.0f, 0.0f, 0.0f };
+		const tb::SupportWay free;
+		tb::SupportWay mission;
+		mission.point = sim::Vec3{ 40.0f, 3.0f, 0.0f };
+		mission.free_within_m = 10.0f;
+		tb::SupportWay follower;
+		follower.following = true;
+		follower.squad_mates = (uint64_t(1) << 5) | (uint64_t(1) << 63);
+		CHECK(tb::may_help(b, free, self, sim::Vec3{ -12.0f, 0.0f, 9.0f }, 7));
+		CHECK(tb::may_help(b, mission, self, sim::Vec3{ 20.0f, 0.0f, 0.0f }, 7));
+		CHECK(tb::may_help(b, mission, self, sim::Vec3{ 20.0f, 0.0f, 4.0f }, 7));
+		CHECK_FALSE(tb::may_help(b, mission, self, sim::Vec3{ 20.0f, 0.0f, 7.0f }, 5));
+		CHECK_FALSE(tb::may_help(b, mission, self, sim::Vec3{ -5.0f, 0.0f, 0.0f }, 5));
+		CHECK(tb::may_help(b, mission, sim::Vec3{ 33.0f, 0.0f, 0.0f }, sim::Vec3{ 30.0f, 0.0f, 12.0f }, 7));
+		CHECK(tb::may_help(b, follower, self, sim::Vec3{ -12.0f, 0.0f, 9.0f }, 5));
+		CHECK(tb::may_help(b, follower, self, sim::Vec3{ 3.0f, 0.0f, 1.0f }, 63));
+		CHECK_FALSE(tb::may_help(b, follower, self, sim::Vec3{ 3.0f, 0.0f, 1.0f }, 7));
+		CHECK_FALSE(tb::may_help(b, follower, self, sim::Vec3{ 3.0f, 0.0f, 1.0f }, 64));
+		b.order_detour_m = 0.0f;
+		CHECK_FALSE(tb::may_help(b, mission, self, sim::Vec3{ 20.0f, 0.0f, 4.0f }, 7));
+		CHECK(tb::may_help(b, mission, self, sim::Vec3{ 20.0f, 9.0f, 0.0f }, 7));
+	}
 	TEST_CASE("brain on a fake ServerView: the pre-round idle, sight through the open only, turning onto the target") {
 		const std::unique_ptr<sim::CollisionWorld> world = wall_world();
 		m2b_fake::FakeView view;
@@ -560,6 +591,31 @@ TEST_SUITE("host-tdm-bots-unit") {
 }
 
 namespace {
+
+struct [[maybe_unused]] GadgetUse {
+	std::set<uint16_t> seen;
+	uint64_t medkits = 0, ammo_bags = 0;
+	host::GadgetStats stats;
+};
+
+[[maybe_unused]] std::shared_ptr<GadgetUse> watch_gadgets(tt::TdmRunConfig &r_config) {
+	auto use = std::make_shared<GadgetUse>();
+	r_config.on_tick = [use](sim::Tick, host::GameServer &r_server, tt::ScriptedPeer *) {
+		const host::Gunplay *g = r_server.gunplay();
+		if (g == nullptr) {
+			return;
+		}
+		const std::span<const sim::weapons::GadgetDef> defs = g->level().gadgets;
+		for (const sim::weapons::Deployable &d : g->deployables()) {
+			if (d.gadget < defs.size() && use->seen.insert(d.id).second) {
+				use->medkits += defs[d.gadget].healing.active() ? 1u : 0u;
+				use->ammo_bags += defs[d.gadget].ammo.active() ? 1u : 0u;
+			}
+		}
+		use->stats = g->gadget_stats();
+	};
+	return use;
+}
 
 [[maybe_unused]] tt::TdmRunConfig base_config(uint64_t p_seed, uint32_t p_bots, bool p_peer, int p_kill_limit) {
 	tt::TdmRunConfig c;
@@ -831,11 +887,13 @@ TEST_SUITE("host-tdm-bots") {
 				tt::TdmRunResult result;
 				uint32_t stuck_m2a = 0;
 				std::shared_ptr<tt::BotChecks> checks;
+				std::shared_ptr<GadgetUse> gadgets;
 			};
 			const std::vector<Run> runs = core::parallel_map<Run>(3, [&](size_t i) {
 				Run run;
 				tt::TdmRunConfig c = base_config(uint64_t(i + 1), 32, false, 50);
 				c.after_round_ticks = 0;
+				run.gadgets = watch_gadgets(c);
 				const std::shared_ptr<tt::BotChecks> checks = tt::attach_bot_checks(c, level);
 				core::Result<tt::TdmRunResult> r = tt::run_tdm(*level, c);
 				if (!r) {
@@ -849,14 +907,33 @@ TEST_SUITE("host-tdm-bots") {
 			}, 3);
 			int32_t k1 = 0, k2 = 0;
 			uint32_t revives = 0;
+			uint64_t medkits = 0, ammo_bags = 0, heal_ticks = 0, rounds_refilled = 0, calls = 0;
 			for (size_t i = 0; i < runs.size(); ++i) {
 				REQUIRE_MESSAGE(runs[i].error.empty(), runs[i].error);
 				const tt::TdmRunResult &r = runs[i].result;
 				std::printf("host.tdm.bots seed %zu: ", i + 1);
 				print_result("", r);
+				const GadgetUse &g = *runs[i].gadgets;
+				std::printf("  gadgets: %llu medkits and %llu ammo bags thrown, %llu heal ticks (%.0f HP), %llu ammo "
+							"ticks (%llu rounds)\n",
+						(unsigned long long)g.medkits, (unsigned long long)g.ammo_bags,
+						(unsigned long long)g.stats.heal_ticks, g.stats.healed, (unsigned long long)g.stats.ammo_ticks,
+						(unsigned long long)g.stats.rounds_refilled);
+				medkits += g.medkits;
+				ammo_bags += g.ammo_bags;
+				heal_ticks += g.stats.heal_ticks;
+				rounds_refilled += g.stats.rounds_refilled;
 				std::printf("  (run_tdm's own stuck count, without the exemptions: %u)\n", runs[i].stuck_m2a);
 				if (runs[i].checks != nullptr) {
 					print_checks("  checks", *runs[i].checks);
+					const host::TdmBotStats &st = *runs[i].checks->stats;
+					std::printf(
+							"  support: %llu medkit and %llu ammo bag throws, %llu calls for a medic, %llu answered, "
+							"%llu mates given up\n",
+							(unsigned long long)st.medkit_throws.load(), (unsigned long long)st.ammo_throws.load(),
+							(unsigned long long)st.medic_calls.load(), (unsigned long long)st.calls_answered.load(),
+							(unsigned long long)st.assists_given_up.load());
+					calls += st.medic_calls.load();
 				}
 				CHECK(r.failure.empty());
 				CHECK(r.round_over);
@@ -873,6 +950,15 @@ TEST_SUITE("host-tdm-bots") {
 			CHECK(kd >= 0.75);
 			CHECK(kd <= 1.33);
 			CHECK(revives >= 1u);
+			std::printf("host.tdm.bots pooled gadgets: %llu medkits, %llu ammo bags, %llu heal ticks, %llu rounds "
+						"refilled\n",
+					(unsigned long long)medkits, (unsigned long long)ammo_bags, (unsigned long long)heal_ticks,
+					(unsigned long long)rounds_refilled);
+			CHECK(medkits >= 1u);
+			CHECK(ammo_bags >= 1u);
+			CHECK(heal_ticks > 0u);
+			CHECK(rounds_refilled > 0u);
+			CHECK(calls >= 1u);
 		}
 	}
 	TEST_CASE("host-tdm-bots: install unchanged") {

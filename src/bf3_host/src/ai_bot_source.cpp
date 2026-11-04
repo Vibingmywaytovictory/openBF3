@@ -30,6 +30,10 @@ TdmBotActivity tdm_activity(ai::InfantryActivity p_activity) {
 			return TdmBotActivity::Revive;
 		case ai::InfantryActivity::Grenade:
 			return TdmBotActivity::Grenade;
+		case ai::InfantryActivity::Support:
+			return TdmBotActivity::Support;
+		case ai::InfantryActivity::CallMedic:
+			return TdmBotActivity::CallMedic;
 	}
 	return TdmBotActivity::Roam;
 }
@@ -54,6 +58,25 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 
 	void see() override { sighting = body.see(now, *state, view().states()); }
 
+	SupportWay support_way() const {
+		SupportWay way;
+		const TdmStrategy *strategy = body.shared->strategy.get();
+		if (strategy == nullptr) {
+			return way;
+		}
+		way.point = strategy->mission(body.slot);
+		if (way.point.has_value()) {
+			way.free_within_m = body.cfg().behaviours.mission_arrive_m;
+			return way;
+		}
+		way.following = bot->ordered_behaviour() == int(ai::InfantryBehaviour::MoveTo) &&
+				bot->squad_goal().kind == ai::SquadGoalKind::Slot;
+		if (way.following) {
+			way.squad_mates = strategy->squad_mates(body.slot);
+		}
+		return way;
+	}
+
 	void update_sensing() override {
 		const TdmShared &sh = *body.shared;
 		frame.emplace(body.sense_revive(now, *state, view(), sighting));
@@ -68,6 +91,12 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 		sensed.hunt_near = sensed.hunt_target &&
 				body.hunt.enemy_within(body.awareness.perception(), fr.self, body.cfg().behaviours.hunt_near_m);
 		sensed.navigable = sh.nav != nullptr;
+		const SupportSense support = body.sense_support(fr,
+				fr.visible || fr.shot_recent || sensed.grenade_running || sensed.revive_target || sensed.hunt_near,
+				support_way());
+		sensed.heal_target = support.heal;
+		sensed.supply_target = support.supply;
+		sensed.call_medic = support.call;
 	}
 
 	const ai::InfantrySenses &senses() const override { return sensed; }
@@ -120,6 +149,9 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 			case ai::MoveGoal::Cover:
 				body.walk_facing(f(), intent);
 				break;
+			case ai::MoveGoal::Medkit:
+				body.medkit_or_hold(f(), intent);
+				break;
 			case ai::MoveGoal::Squad:
 				body.navigation.set_goal(
 						*body.shared, now, p_point, body.cfg().behaviours.squad_arrive_m, false, kSquadGoalMoveMetres);
@@ -152,6 +184,10 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 			body.move_fight(f(), intent);
 			return true;
 		}
+		if (p_object == ai::ObjectGoal::Patient || p_object == ai::ObjectGoal::SupplyMate) {
+			return body.support_approach(
+					f(), p_object == ai::ObjectGoal::Patient ? SupplyNeed::Health : SupplyNeed::Ammo, intent);
+		}
 		return body.revive_approach(f(), intent);
 	}
 
@@ -178,6 +214,15 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 			case ai::TriggerKind::Defib:
 				body.revive_trigger(f(), intent);
 				break;
+			case ai::TriggerKind::Medkit:
+				body.support_trigger(f(), SupplyNeed::Health, intent);
+				break;
+			case ai::TriggerKind::AmmoBag:
+				body.support_trigger(f(), SupplyNeed::Ammo, intent);
+				break;
+			case ai::TriggerKind::CallMedic:
+				body.call_medic(f());
+				return true;
 		}
 		return intent.trigger != Trigger::None;
 	}

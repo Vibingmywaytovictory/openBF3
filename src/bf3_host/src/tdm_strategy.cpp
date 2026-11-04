@@ -123,6 +123,28 @@ void TdmStrategy::remove_bot(uint8_t p_slot) {
 	spawn_life_[p_slot] = 0;
 }
 
+std::optional<sim::Vec3> TdmStrategy::mission(uint8_t p_slot) const {
+	if (p_slot >= bots_.size() || bots_[p_slot] == nullptr || bots_[p_slot]->has_no_order()) {
+		return std::nullopt;
+	}
+	for (int side = 1; side <= 2; ++side) {
+		const ai::SquadCoordinator *squad = squads_->squad_from_player(p_slot, side);
+		if (squad != nullptr && squad->mission_status() == ai::SquadMissionStatus::Accepted) {
+			return squad->squad_goto_position();
+		}
+	}
+	return std::nullopt;
+}
+
+uint64_t TdmStrategy::squad_mates(uint8_t p_slot) const {
+	const SquadTable &table = rules_->squads();
+	uint64_t mates = 0;
+	for (const uint8_t m : table.members(table.team_of(p_slot), table.squad_of(p_slot))) {
+		mates |= m < 64 && m != p_slot ? uint64_t(1) << m : 0u;
+	}
+	return mates;
+}
+
 float TdmStrategy::area_heat(const ai::AIStrategicArea &p_area) const {
 	for (size_t i = 0; i < heat_.size(); ++i) {
 		if (world_->area(i) == &p_area) {

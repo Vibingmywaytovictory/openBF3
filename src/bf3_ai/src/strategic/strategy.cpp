@@ -28,6 +28,9 @@ const KeyDef<StrategyTuning> kKeys[] = {
 	{ "sai.order.move_to", KeyKind::Float, 0.0, 100.0, BF3_SAI_FIELD(order[4]) },
 	{ "sai.order.random", KeyKind::Float, 0.0, 100.0, BF3_SAI_FIELD(order[5]) },
 	{ "sai.order.idle", KeyKind::Float, 0.0, 100.0, BF3_SAI_FIELD(order[6]) },
+	{ "sai.order.medic_assist", KeyKind::Float, 0.0, 100.0, BF3_SAI_FIELD(order[7]) },
+	{ "sai.order.call_for_medic", KeyKind::Float, 0.0, 100.0, BF3_SAI_FIELD(order[8]) },
+	{ "sai.order.resupply", KeyKind::Float, 0.0, 100.0, BF3_SAI_FIELD(order[9]) },
 };
 
 #undef BF3_SAI_FIELD

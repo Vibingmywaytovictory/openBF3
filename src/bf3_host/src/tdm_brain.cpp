@@ -59,6 +59,10 @@ const char *tdm_bot_activity_name(TdmBotActivity p_activity) {
 			return "revive";
 		case TdmBotActivity::Grenade:
 			return "grenade";
+		case TdmBotActivity::Support:
+			return "support";
+		case TdmBotActivity::CallMedic:
+			return "call_medic";
 	}
 	return "?";
 }

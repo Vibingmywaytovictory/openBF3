@@ -77,7 +77,8 @@ WeaponCommand BotWeapons::input(TdmShared &r_shared, uint8_t p_slot, const BotAr
 		}
 		if (p_arms.def(want_slot) == nullptr) {
 			want_slot = p_arms.def(kSlotPrimary) != nullptr ? kSlotPrimary : ws->active;
-			if (trigger == Trigger::Defib || trigger == Trigger::Knife || trigger == Trigger::Grenade) {
+			if (trigger == Trigger::Defib || trigger == Trigger::Knife || trigger == Trigger::Grenade ||
+					trigger == Trigger::Supply) {
 				trigger = Trigger::None;
 			}
 		}
@@ -128,6 +129,14 @@ WeaponCommand BotWeapons::input(TdmShared &r_shared, uint8_t p_slot, const BotAr
 					tapped_ = true;
 					out.defib_fired = true;
 					sh.count(&TdmBotStats::revive_shots, uint64_t(1));
+				} else {
+					tapped_ = false;
+				}
+			} else if (trigger == Trigger::Supply) {
+				if (in_hand && q.aligned && phase == sw::WeaponPhase::Ready && !tapped_) {
+					fire = true;
+					tapped_ = true;
+					out.supply_fired = true;
 				} else {
 					tapped_ = false;
 				}

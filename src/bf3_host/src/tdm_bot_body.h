@@ -11,6 +11,7 @@
 #include "tdm_bot_movement.h"
 #include "tdm_bot_objectives.h"
 #include "tdm_bot_shared.h"
+#include "tdm_bot_support.h"
 #include "tdm_bot_targeting.h"
 #include "tdm_bot_weapons.h"
 
@@ -85,6 +86,7 @@ struct BotBody {
 	BotRetreat retreat;
 	BotRevive medic;
 	BotGrenade grenade;
+	BotSupport support;
 
 	sim::Tick knife_until = 0;
 
@@ -126,6 +128,12 @@ struct BotBody {
 	void revive_trigger(const BotFrame &p_frame, BotIntent &r_intent);
 
 	void throw_step(const BotFrame &p_frame, BotIntent &r_intent);
+
+	SupportSense sense_support(const BotFrame &p_frame, bool p_engaged, const SupportWay &p_way);
+	bool support_approach(const BotFrame &p_frame, SupplyNeed p_need, BotIntent &r_intent);
+	void support_trigger(const BotFrame &p_frame, SupplyNeed p_need, BotIntent &r_intent);
+	void call_medic(const BotFrame &p_frame);
+	void medkit_or_hold(const BotFrame &p_frame, BotIntent &r_intent);
 };
 
 }

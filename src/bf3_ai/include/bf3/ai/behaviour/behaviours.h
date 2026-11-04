@@ -17,8 +17,19 @@ namespace bf3::ai {
 class BotScript;
 struct SquadGoal;
 
-enum class InfantryBehaviour : uint8_t { Revive, FireInfantery, TakeCoverInfantry, Avoid, MoveTo, Random, Idle };
-inline constexpr size_t kInfantryBehaviourCount = 7;
+enum class InfantryBehaviour : uint8_t {
+	Revive,
+	FireInfantery,
+	TakeCoverInfantry,
+	Avoid,
+	MoveTo,
+	Random,
+	Idle,
+	MedicAssist,
+	CallForMedic,
+	Resupply
+};
+inline constexpr size_t kInfantryBehaviourCount = 10;
 std::string_view infantry_behaviour_kind(InfantryBehaviour p_behaviour);
 
 struct BehaviourCurve {
@@ -31,12 +42,22 @@ struct BehaviourCurve {
 
 struct BehaviourTuning {
 	std::array<BehaviourCurve, kInfantryBehaviourCount> curves{ { { 8.0f }, { 7.0f }, { 6.0f }, { 1.75f }, { 1.5f },
-			{ 1.0f }, { 0.5f } } };
+			{ 1.0f }, { 0.5f }, { 2.5f }, { 5.5f }, { 2.4f } } };
 	uint32_t decision_ticks = 6;
 	float squad_far_m = 15.0f;
 	float squad_arrive_m = 3.0f;
 	float mission_arrive_m = 10.0f;
 	float hunt_near_m = 30.0f;
+	float assist_radius_m = 15.0f;
+	float assist_below_hp = 80.0f;
+	float call_below_hp = 50.0f;
+	float call_radius_m = 40.0f;
+	float call_s = 8.0f;
+	float assist_s = 8.0f;
+	float rethrow_s = 3.0f;
+	float throw_m = 2.0f;
+	uint32_t resupply_used_mags = 1;
+	float order_detour_m = 0.0f;
 
 	bool operator==(const BehaviourTuning &) const = default;
 };
@@ -166,6 +187,36 @@ protected:
 class BBIdle final : public BotBehaviour {
 public:
 	BBIdle(const UrgeCurve &p_curve, InfantryBody &r_body) : BotBehaviour(InfantryBehaviour::Idle, p_curve, r_body) {}
+	bool plan(BotScript &r_script, bool p_was_active) override;
+
+protected:
+	float situation() override;
+};
+
+class BBMedicAssist final : public BotBehaviour {
+public:
+	BBMedicAssist(const UrgeCurve &p_curve, InfantryBody &r_body) :
+			BotBehaviour(InfantryBehaviour::MedicAssist, p_curve, r_body) {}
+	bool plan(BotScript &r_script, bool p_was_active) override;
+
+protected:
+	float situation() override;
+};
+
+class BBCallForMedic final : public BotBehaviour {
+public:
+	BBCallForMedic(const UrgeCurve &p_curve, InfantryBody &r_body) :
+			BotBehaviour(InfantryBehaviour::CallForMedic, p_curve, r_body) {}
+	bool plan(BotScript &r_script, bool p_was_active) override;
+
+protected:
+	float situation() override;
+};
+
+class BBResupply final : public BotBehaviour {
+public:
+	BBResupply(const UrgeCurve &p_curve, InfantryBody &r_body) :
+			BotBehaviour(InfantryBehaviour::Resupply, p_curve, r_body) {}
 	bool plan(BotScript &r_script, bool p_was_active) override;
 
 protected:

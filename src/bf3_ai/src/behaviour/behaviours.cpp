@@ -45,11 +45,30 @@ const KeyDef<BehaviourTuning> kKeys[] = {
 	{ "bb.idle.weight", KeyKind::Float, 0.0, 1000.0, BF3_BB_FIELD(curves[6].weight) },
 	{ "bb.idle.slope", KeyKind::Float, -100.0, 100.0, BF3_BB_FIELD(curves[6].slope) },
 	{ "bb.idle.offset", KeyKind::Float, -100.0, 100.0, BF3_BB_FIELD(curves[6].offset) },
+	{ "bb.medic_assist.weight", KeyKind::Float, 0.0, 1000.0, BF3_BB_FIELD(curves[7].weight) },
+	{ "bb.medic_assist.slope", KeyKind::Float, -100.0, 100.0, BF3_BB_FIELD(curves[7].slope) },
+	{ "bb.medic_assist.offset", KeyKind::Float, -100.0, 100.0, BF3_BB_FIELD(curves[7].offset) },
+	{ "bb.call_for_medic.weight", KeyKind::Float, 0.0, 1000.0, BF3_BB_FIELD(curves[8].weight) },
+	{ "bb.call_for_medic.slope", KeyKind::Float, -100.0, 100.0, BF3_BB_FIELD(curves[8].slope) },
+	{ "bb.call_for_medic.offset", KeyKind::Float, -100.0, 100.0, BF3_BB_FIELD(curves[8].offset) },
+	{ "bb.resupply.weight", KeyKind::Float, 0.0, 1000.0, BF3_BB_FIELD(curves[9].weight) },
+	{ "bb.resupply.slope", KeyKind::Float, -100.0, 100.0, BF3_BB_FIELD(curves[9].slope) },
+	{ "bb.resupply.offset", KeyKind::Float, -100.0, 100.0, BF3_BB_FIELD(curves[9].offset) },
 	{ "bb.decision_ticks", KeyKind::U32, 1, 60, BF3_BB_FIELD(decision_ticks) },
 	{ "bb.squad_far_m", KeyKind::Float, 1.0, 1000.0, BF3_BB_FIELD(squad_far_m) },
 	{ "bb.squad_arrive_m", KeyKind::Float, 0.1, 100.0, BF3_BB_FIELD(squad_arrive_m) },
 	{ "bb.mission_arrive_m", KeyKind::Float, 0.1, 1000.0, BF3_BB_FIELD(mission_arrive_m) },
 	{ "bb.hunt_near_m", KeyKind::Float, 0.0, 1000.0, BF3_BB_FIELD(hunt_near_m) },
+	{ "bb.assist_radius_m", KeyKind::Float, 0.0, 1000.0, BF3_BB_FIELD(assist_radius_m) },
+	{ "bb.assist_below_hp", KeyKind::Float, 0.0, 1000.0, BF3_BB_FIELD(assist_below_hp) },
+	{ "bb.call_below_hp", KeyKind::Float, 0.0, 1000.0, BF3_BB_FIELD(call_below_hp) },
+	{ "bb.call_radius_m", KeyKind::Float, 0.0, 1000.0, BF3_BB_FIELD(call_radius_m) },
+	{ "bb.call_s", KeyKind::Float, 0.1, 600.0, BF3_BB_FIELD(call_s) },
+	{ "bb.assist_s", KeyKind::Float, 0.1, 600.0, BF3_BB_FIELD(assist_s) },
+	{ "bb.rethrow_s", KeyKind::Float, 0.0, 600.0, BF3_BB_FIELD(rethrow_s) },
+	{ "bb.throw_m", KeyKind::Float, 0.5, 50.0, BF3_BB_FIELD(throw_m) },
+	{ "bb.resupply_used_mags", KeyKind::U32, 0, 100, BF3_BB_FIELD(resupply_used_mags) },
+	{ "bb.order_detour_m", KeyKind::Float, 0.0, 1000.0, BF3_BB_FIELD(order_detour_m) },
 };
 
 #undef BF3_BB_FIELD
@@ -103,6 +122,12 @@ std::string_view infantry_behaviour_kind(InfantryBehaviour p_behaviour) {
 			return "BBRandom";
 		case InfantryBehaviour::Idle:
 			return "BBIdle";
+		case InfantryBehaviour::MedicAssist:
+			return "BBMedicAssist";
+		case InfantryBehaviour::CallForMedic:
+			return "BBCallForMedic";
+		case InfantryBehaviour::Resupply:
+			return "BBResupply";
 	}
 	return "?";
 }
@@ -356,6 +381,39 @@ float BBIdle::situation() {
 bool BBIdle::plan(BotScript &r_script, bool) {
 	r_script.clear(InfantryActivity::Idle);
 	r_script.add(PlanTarget::Sense, sense_args(SenseFocus::Around));
+	return true;
+}
+
+float BBMedicAssist::situation() {
+	return body_.senses().heal_target ? 1.0f : 0.0f;
+}
+
+bool BBMedicAssist::plan(BotScript &r_script, bool) {
+	r_script.clear(InfantryActivity::Support);
+	r_script.add(PlanTarget::MoveToObject, object_args(ObjectGoal::Patient));
+	r_script.add(PlanTarget::Trigger, trigger_args(TriggerKind::Medkit));
+	return true;
+}
+
+float BBCallForMedic::situation() {
+	return body_.senses().call_medic ? 1.0f : 0.0f;
+}
+
+bool BBCallForMedic::plan(BotScript &r_script, bool) {
+	r_script.clear(InfantryActivity::CallMedic);
+	r_script.add(PlanTarget::Trigger, trigger_args(TriggerKind::CallMedic));
+	r_script.add(PlanTarget::MoveTo, move_args(MoveGoal::Medkit));
+	return true;
+}
+
+float BBResupply::situation() {
+	return body_.senses().supply_target ? 1.0f : 0.0f;
+}
+
+bool BBResupply::plan(BotScript &r_script, bool) {
+	r_script.clear(InfantryActivity::Support);
+	r_script.add(PlanTarget::MoveToObject, object_args(ObjectGoal::SupplyMate));
+	r_script.add(PlanTarget::Trigger, trigger_args(TriggerKind::AmmoBag));
 	return true;
 }
 

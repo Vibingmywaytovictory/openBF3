@@ -8,8 +8,19 @@
 
 namespace bf3::ai {
 
-enum class InfantryActivity : uint8_t { Idle, Roam, Hunt, Fight, Retreat, RegenWait, Revive, Grenade };
-inline constexpr size_t kInfantryActivityCount = 8;
+enum class InfantryActivity : uint8_t {
+	Idle,
+	Roam,
+	Hunt,
+	Fight,
+	Retreat,
+	RegenWait,
+	Revive,
+	Grenade,
+	Support,
+	CallMedic
+};
+inline constexpr size_t kInfantryActivityCount = 10;
 const char *infantry_activity_name(InfantryActivity p_activity);
 
 struct InfantrySenses {
@@ -22,14 +33,17 @@ struct InfantrySenses {
 	bool hunt_target = false;
 	bool hunt_near = false;
 	bool navigable = false;
+	bool heal_target = false;
+	bool supply_target = false;
+	bool call_medic = false;
 
 	bool operator==(const InfantrySenses &) const = default;
 };
 
-enum class MoveGoal : uint8_t { Roam, Hunt, Cover, Squad };
-enum class ObjectGoal : uint8_t { Target, Corpse };
+enum class MoveGoal : uint8_t { Roam, Hunt, Cover, Squad, Medkit };
+enum class ObjectGoal : uint8_t { Target, Corpse, Patient, SupplyMate };
 enum class PoseRequest : uint8_t { Crouch, NearCorpse };
-enum class TriggerKind : uint8_t { Aimed, Blind, Grenade, Defib };
+enum class TriggerKind : uint8_t { Aimed, Blind, Grenade, Defib, Medkit, AmmoBag, CallMedic };
 enum class SenseFocus : uint8_t { Target, BlindPoint, Threat, ShotOrigin, Around };
 
 class InfantryBody {

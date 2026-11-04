@@ -27,8 +27,20 @@ struct BotLevel;
 class Gunplay;
 class ServerView;
 
-enum class TdmBotActivity : uint8_t { Dead = 0, Restricted = 1, Roam = 2, Hunt = 3, Fight = 4, Retreat = 5, RegenWait = 6, Revive = 7, Grenade = 8 };
-inline constexpr size_t kTdmBotActivityCount = 9;
+enum class TdmBotActivity : uint8_t {
+	Dead = 0,
+	Restricted = 1,
+	Roam = 2,
+	Hunt = 3,
+	Fight = 4,
+	Retreat = 5,
+	RegenWait = 6,
+	Revive = 7,
+	Grenade = 8,
+	Support = 9,
+	CallMedic = 10
+};
+inline constexpr size_t kTdmBotActivityCount = 11;
 inline constexpr float kSquadNearMetres = 30.0f;
 const char *tdm_bot_activity_name(TdmBotActivity p_activity);
 
@@ -85,6 +97,11 @@ struct TdmBotStats {
 	std::atomic<uint32_t> walk_unavailable{ 0 };
 	std::atomic<uint64_t> off_main_ticks{ 0 };
 	std::atomic<uint64_t> hunts_given_up{ 0 };
+	std::atomic<uint64_t> medkit_throws{ 0 };
+	std::atomic<uint64_t> ammo_throws{ 0 };
+	std::atomic<uint64_t> medic_calls{ 0 };
+	std::atomic<uint64_t> calls_answered{ 0 };
+	std::atomic<uint64_t> assists_given_up{ 0 };
 	std::atomic<uint64_t> activity_ticks[kTdmBotActivityCount]{};
 
 	std::atomic<uint64_t> squad_orders{ 0 };

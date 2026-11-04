@@ -4,6 +4,7 @@
 #include "bf3/ai/bot/bot_main.h"
 #include "bf3/ai/plan/infantry_entries.h"
 #include "bf3/ai/plan/plan_entries.h"
+#include "bf3/ai/strategic/strategy.h"
 #include "bf3/host/ai_bot_source.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/server_view.h"
@@ -135,6 +136,22 @@ TEST_SUITE("ai-bot") {
 		CHECK(r.bot.activity() == InfantryActivity::Roam);
 		CHECK(r.body.calls == std::vector<std::string>{ "move_to 0" });
 
+		r.body.s.heal_target = true;
+		CHECK(r.decide() == InfantryBehaviour::MedicAssist);
+		CHECK(r.bot.activity() == InfantryActivity::Support);
+		CHECK(r.body.calls == std::vector<std::string>{ "move_to_object 2", "trigger 4" });
+		r.body.s.heal_target = false;
+		r.body.s.supply_target = true;
+		CHECK(r.decide() == InfantryBehaviour::Resupply);
+		CHECK(r.bot.activity() == InfantryActivity::Support);
+		CHECK(r.body.calls == std::vector<std::string>{ "move_to_object 3", "trigger 5" });
+		r.body.s.supply_target = false;
+		r.body.s.call_medic = true;
+		CHECK(r.decide() == InfantryBehaviour::CallForMedic);
+		CHECK(r.bot.activity() == InfantryActivity::CallMedic);
+		CHECK(r.body.calls == std::vector<std::string>{ "trigger 6", "move_to 4" });
+		r.body.s.call_medic = false;
+
 		r.body.s.hunt_target = true;
 		CHECK(r.decide() == InfantryBehaviour::MoveTo);
 		CHECK(r.bot.activity() == InfantryActivity::Hunt);
@@ -194,6 +211,49 @@ TEST_SUITE("ai-bot") {
 			CHECK(r.bot.stats().chosen[i] > 0u);
 		}
 		CHECK(r.bot.stats().decisions == r.bot.stats().planned + r.bot.stats().unplanned);
+	}
+
+	TEST_CASE(
+			"support behaviours: a revive and a fight come first, a medkit before an ammo bag, both before a hunt or a "
+			"squad move; a call for a medic outranks waiting in cover") {
+		Rig r;
+		r.bot.update_bot(true, true);
+		r.body.s = { .navigable = true, .heal_target = true, .supply_target = true };
+		CHECK(r.decide() == InfantryBehaviour::MedicAssist);
+		r.body.s.revive_target = true;
+		CHECK(r.decide() == InfantryBehaviour::Revive);
+		r.body.s.revive_target = false;
+		r.body.s.enemy_visible = true;
+		CHECK(r.decide() == InfantryBehaviour::FireInfantery);
+		r.body.s.enemy_visible = false;
+		r.body.s.heal_target = false;
+		r.body.s.hunt_target = true;
+		CHECK(r.decide() == InfantryBehaviour::Resupply);
+		SquadGoal g;
+		g.kind = SquadGoalKind::Slot;
+		g.position = { 3.0f * r.tuning.squad_far_m, 0.0f, 0.0f };
+		r.bot.set_squad_goal(g);
+		CHECK(r.decide() == InfantryBehaviour::Resupply);
+		const StrategyTuning strategy;
+		r.bot.set_taking_orders(true);
+		REQUIRE(r.bot.receive_order(BotOrder(strategy.order.data(), uint8_t(InfantryBehaviour::MoveTo))));
+		CHECK(r.decide() == InfantryBehaviour::Resupply);
+		CHECK(r.bot.weighted_urgency(InfantryBehaviour::Resupply) > r.bot.weighted_urgency(InfantryBehaviour::MoveTo));
+		r.body.s.supply_target = false;
+		CHECK(r.decide() == InfantryBehaviour::MoveTo);
+
+		Rig c;
+		c.bot.update_bot(true, true);
+		c.body.s = { .enemy_visible = true, .low_health = true, .navigable = true };
+		CHECK(c.decide() == InfantryBehaviour::TakeCoverInfantry);
+		c.body.s.enemy_visible = false;
+		c.body.cleared = true;
+		CHECK(c.decide() == InfantryBehaviour::TakeCoverInfantry);
+		CHECK(c.bot.activity() == InfantryActivity::RegenWait);
+		c.body.s.call_medic = true;
+		CHECK(c.decide() == InfantryBehaviour::CallForMedic);
+		CHECK(c.bot.weighted_urgency(InfantryBehaviour::CallForMedic) >
+				c.bot.weighted_urgency(InfantryBehaviour::TakeCoverInfantry));
 	}
 
 	TEST_CASE("BBTakeCoverInfantry: retreat, wait in cover once cleared, leave when recovered") {
