@@ -1088,7 +1088,10 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_godot_row(godot.audio_ingame godot_audio_ingame.cmake WINDOW TIMEOUT 480 ARGS -DPHASE=mix)
     openbf3_godot_row(godot.audio_ingame.pool godot_audio_ingame.cmake WINDOW TIMEOUT 480 ARGS -DPHASE=pool)
     openbf3_godot_row(godot.audio_ingame.play godot_audio_ingame.cmake WINDOW TIMEOUT 300 ARGS -DPHASE=play)
-    set_tests_properties(godot.audio_ingame godot.audio_ingame.pool godot.audio_ingame.play PROPERTIES RUN_SERIAL TRUE)
+    openbf3_godot_row(godot.audio_ingame.steps godot_audio_ingame.cmake WINDOW TIMEOUT 300 ARGS -DPHASE=steps)
+    openbf3_godot_row(godot.audio_ingame.flyby godot_audio_ingame.cmake WINDOW TIMEOUT 300 ARGS -DPHASE=flyby)
+    set_tests_properties(godot.audio_ingame godot.audio_ingame.pool godot.audio_ingame.play godot.audio_ingame.steps
+        godot.audio_ingame.flyby PROPERTIES RUN_SERIAL TRUE)
     openbf3_cost(godot.audio_ingame 1 39)
     openbf3_cost(godot.audio_ingame.pool 1 35)
     openbf3_cost(godot.audio_ingame.play 1 75)

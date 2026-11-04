@@ -554,6 +554,18 @@ std::optional<float> Bf3GameAudio::mixer_value(uint32_t p_name_hash) const {
 }
 
 #if OPENBF3_BUILD_CHECKS
+std::span<const ba::FootstepPost> Bf3GameAudio::footstep_posts() const {
+	return impl_->footsteps ? impl_->footsteps->last_posts() : std::span<const ba::FootstepPost>();
+}
+
+std::string Bf3GameAudio::footstep_program() const {
+	return impl_->soldier && impl_->soldier->footsteps ? impl_->soldier->footsteps->name : std::string();
+}
+
+std::vector<ba::FlyBySound> Bf3GameAudio::flyby_sounds() const {
+	return impl_->flyby_sounds;
+}
+
 core::Result<std::vector<std::string>> Bf3GameAudio::observe_area_waves(
 		std::string_view p_patch, float p_area_type) const {
 	const Impl &m = *impl_;

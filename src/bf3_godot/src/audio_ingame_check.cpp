@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <numbers>
 
 namespace bf3::godot_side {
 
@@ -68,6 +69,14 @@ bool parse_audio_ingame_phase(std::string_view p_text, AudioIngamePhase &r_phase
 	}
 	if (p_text == "pool") {
 		r_phase = AudioIngamePhase::Pool;
+		return true;
+	}
+	if (p_text == "steps") {
+		r_phase = AudioIngamePhase::Steps;
+		return true;
+	}
+	if (p_text == "flyby") {
+		r_phase = AudioIngamePhase::Flyby;
 		return true;
 	}
 	return false;
@@ -150,6 +159,7 @@ void AudioIngameCheck::begin(double p_now_s, Bf3GameAudio &r_audio) {
 	levels_at_start_ = r_audio.mixer()->levels();
 	pool_joins_at_start_ = r_audio.one_shot_join_requests();
 	at_start_ = snapshot(r_audio);
+	stats_at_start_ = r_audio.stats();
 	as->add_bus_effect(0, capture_, -1);
 	r_audio.set_mix_tap(mix_tap_.get());
 	r_audio.set_sum_tap(sum_tap_.get());
@@ -266,6 +276,57 @@ void AudioIngameCheck::note(const ba::MixerCutEvent &p_event, Bf3GameAudio &r_au
 	}
 }
 
+void AudioIngameCheck::script_steps(double p_now_s, const AudioIngameIo &p_io) {
+	if (leg_s_ < 0.0) {
+		leg_s_ = p_now_s;
+		leg_ = AudioIngameLeg::Stand;
+		leg_index_ = 0;
+	}
+	if (p_now_s - leg_s_ >= kAudioIngameLegSeconds[size_t(leg_)]) {
+		if (record_s_ >= 0.0 && leg_s_ >= record_s_) {
+			++legs_[size_t(leg_)].legs;
+			stands_after_moving_ += leg_ == AudioIngameLeg::Stand && leg_index_ != 0 ? 1u : 0u;
+		}
+		++leg_index_;
+		leg_ = leg_index_ % 2 == 0 ? AudioIngameLeg::Stand
+								   : (leg_index_ % 4 == 1 ? AudioIngameLeg::Walk : AudioIngameLeg::Sprint);
+		leg_s_ = p_now_s;
+		last_step_s_ = -1.0;
+	}
+	const float back = (leg_index_ / 4) % 2 == 1 ? std::numbers::pi_v<float> : 0.0f;
+	p_io.view(base_yaw_ + back, 0.0f);
+	p_io.move(leg_ != AudioIngameLeg::Stand, leg_ == AudioIngameLeg::Sprint);
+}
+
+void AudioIngameCheck::tally_steps(double p_now_s, Bf3GameAudio &r_audio, const AudioIngameIo &p_io) {
+	const bool settled = p_io.alive && leg_s_ >= 0.0 && p_now_s - leg_s_ >= kAudioIngameLegSettleSeconds;
+	AudioIngameLegTally &t = legs_[size_t(leg_)];
+	if (settled && tally_s_ >= 0.0) {
+		t.seconds += p_now_s - tally_s_;
+	}
+	tally_s_ = p_now_s;
+	for (const ba::FootstepPost &post : r_audio.footstep_posts()) {
+		if (post.slot != p_io.own_slot) {
+			++other_steps_;
+			continue;
+		}
+		if (post.event == ba::FootstepEvent::Start) {
+			++t.starts;
+		} else if (post.event == ba::FootstepEvent::Stop) {
+			++t.stops;
+		} else if ((post.event == ba::FootstepEvent::Left || post.event == ba::FootstepEvent::Right) && settled) {
+			t.speed_min = t.steps == 0 ? post.speed : std::min(t.speed_min, post.speed);
+			t.speed_max = t.steps == 0 ? post.speed : std::max(t.speed_max, post.speed);
+			t.speed_sum += double(post.speed);
+			++t.steps;
+			if (last_step_s_ >= 0.0) {
+				t.intervals.emplace_back(post.speed, p_now_s - last_step_s_);
+			}
+			last_step_s_ = p_now_s;
+		}
+	}
+}
+
 void AudioIngameCheck::script(double p_now_s, const AudioIngameIo &p_io) {
 	if (!p_io.alive) {
 		if (firing_) {
@@ -278,6 +339,10 @@ void AudioIngameCheck::script(double p_now_s, const AudioIngameIo &p_io) {
 		}
 		deaths_ += was_alive_ ? 1u : 0u;
 		was_alive_ = false;
+		if (p_io.move) {
+			p_io.move(false, false);
+		}
+		leg_s_ = -1.0;
 		if (p_io.time_to_respawn <= 0.0f && p_now_s - last_deploy_s_ > 1.5) {
 			p_io.deploy();
 			last_deploy_s_ = p_now_s;
@@ -294,6 +359,14 @@ void AudioIngameCheck::script(double p_now_s, const AudioIngameIo &p_io) {
 	if (in < kAudioIngameSettleSeconds) {
 		base_yaw_ = p_io.yaw();
 		last_s_ = p_now_s;
+		return;
+	}
+	if (kind_ == AudioIngamePhase::Steps) {
+		script_steps(p_now_s, p_io);
+		return;
+	}
+	if (kind_ == AudioIngamePhase::Flyby) {
+		p_io.view(base_yaw_, 0.0f);
 		return;
 	}
 	double t = in - kAudioIngameSettleSeconds;
@@ -383,6 +456,9 @@ bool AudioIngameCheck::frame(double p_now_s, Bf3GameAudio &r_audio, const AudioI
 			return false;
 		case Phase::Record:
 			script(p_now_s, p_io);
+			if (kind_ == AudioIngamePhase::Steps) {
+				tally_steps(p_now_s, r_audio, p_io);
+			}
 			pull();
 			take(r_audio);
 			if (p_now_s - record_s_ < seconds_) {
@@ -391,6 +467,9 @@ bool AudioIngameCheck::frame(double p_now_s, Bf3GameAudio &r_audio, const AudioI
 			if (firing_) {
 				p_io.hold_fire(false);
 				firing_ = false;
+			}
+			if (p_io.move) {
+				p_io.move(false, false);
 			}
 			end(r_audio);
 			r_audio.drain_events();
@@ -625,9 +704,14 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 	const AudioCategoryCounts &own = cats[size_t(ba::SoundCategory::OwnGun)];
 	const AudioCategoryCounts &bots = cats[size_t(ba::SoundCategory::BotGun)];
 	const AudioCategoryCounts &surface = cats[size_t(ba::SoundCategory::ImpactSurface)];
-	row("the scenario ran",
-			(kind_ == AudioIngamePhase::Pool || bursts_ >= 6) && own.requested >= 1 && bots.requested >= 10 &&
-					surface.requested >= 20,
+	const bool moved = legs_[size_t(AudioIngameLeg::Walk)].legs >= kAudioIngameMinLegs &&
+			legs_[size_t(AudioIngameLeg::Sprint)].legs >= kAudioIngameMinLegs;
+	const bool fired = kind_ == AudioIngamePhase::Pool || bursts_ >= 6;
+	const bool ran = kind_ == AudioIngamePhase::Steps ? moved
+			: kind_ == AudioIngamePhase::Flyby
+			? bursts_ == 0 && bots.requested >= kAudioIngameMinBotShots && surface.requested >= 20
+			: fired && own.requested >= 1 && bots.requested >= 10 && surface.requested >= 20;
+	row("the scenario ran", ran,
 			core::fmt("%.1f s recorded, %u own bursts, %u own deaths, %llu own gun, %llu bot gun and %llu surface "
 					  "impact sounds requested",
 					seconds_, bursts_, deaths_, (unsigned long long)own.requested, (unsigned long long)bots.requested,
@@ -635,6 +719,12 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 	analyse_mix(r_audio);
 	if (kind_ == AudioIngamePhase::Pool) {
 		analyse_pool(r_audio);
+	}
+	if (kind_ == AudioIngamePhase::Steps) {
+		analyse_steps(r_audio);
+	}
+	if (kind_ == AudioIngamePhase::Flyby) {
+		analyse_flyby(r_audio);
 	}
 
 	if (!out_dir_.empty()) {
@@ -877,6 +967,132 @@ void AudioIngameCheck::analyse_pool(Bf3GameAudio &r_audio) {
 	row("the M67 counts as an explosion", throws >= 1 && throws_explosion == throws,
 			core::fmt("%u grenade presses: %llu throw sounds requested, %llu filed as explosion", grenades_,
 					(unsigned long long)throws, (unsigned long long)throws_explosion));
+}
+
+void AudioIngameCheck::analyse_steps(Bf3GameAudio &r_audio) {
+	const auto cadence = [](const AudioIngameLegTally &p_t) {
+		return p_t.seconds > 0.0 ? double(p_t.steps) / p_t.seconds : 0.0;
+	};
+	const auto mean = [](const AudioIngameLegTally &p_t) {
+		return p_t.steps > 0 ? p_t.speed_sum / double(p_t.steps) : 0.0;
+	};
+	const auto tally_text = [&](AudioIngameLeg p_leg) {
+		const AudioIngameLegTally &t = legs_[size_t(p_leg)];
+		return core::fmt("%s: %u legs, %llu own steps over %.1f s (%.2f steps/s), speed %.2f..%.2f mean %.2f m/s, "
+						 "%llu starts, %llu stops",
+				std::string(kAudioIngameLegNames[size_t(p_leg)]).c_str(), t.legs, (unsigned long long)t.steps,
+				t.seconds, cadence(t), double(t.speed_min), double(t.speed_max), mean(t), (unsigned long long)t.starts,
+				(unsigned long long)t.stops);
+	};
+	const AudioIngameLegTally &stand = legs_[size_t(AudioIngameLeg::Stand)];
+	const AudioIngameLegTally &walk = legs_[size_t(AudioIngameLeg::Walk)];
+	const AudioIngameLegTally &sprint = legs_[size_t(AudioIngameLeg::Sprint)];
+	row("own steps walking", walk.legs >= kAudioIngameMinLegs && walk.steps >= kAudioIngameMinLegSteps * walk.legs,
+			tally_text(AudioIngameLeg::Walk));
+	double walk_interval = 0.0, run_interval = 0.0;
+	size_t run_steps = 0;
+	for (const auto &[speed, interval] : walk.intervals) {
+		walk_interval += interval / double(walk.intervals.size());
+	}
+	for (const auto &[speed, interval] : sprint.intervals) {
+		if (speed > walk.speed_max) {
+			run_interval += interval;
+			++run_steps;
+		}
+	}
+	run_interval = run_steps > 0 ? run_interval / double(run_steps) : 0.0;
+	row("own steps sprinting",
+			sprint.legs >= kAudioIngameMinLegs && sprint.steps >= kAudioIngameMinLegSteps * sprint.legs &&
+					run_steps >= kAudioIngameMinLegSteps && sprint.speed_max > walk.speed_max &&
+					run_interval < walk_interval,
+			tally_text(AudioIngameLeg::Sprint) +
+					core::fmt("; %zu sprint steps faster than any walking step come every %.3f s, walking steps "
+							  "every %.3f s; against ",
+							run_steps, run_interval, walk_interval) +
+					tally_text(AudioIngameLeg::Walk));
+	row("no own steps standing", stand.legs >= kAudioIngameMinLegs && stand.steps == 0,
+			tally_text(AudioIngameLeg::Stand) +
+					core::fmt(" (after the first %.1f s of each leg)", kAudioIngameLegSettleSeconds));
+	row("own starts and stops",
+			walk.starts + sprint.starts >= walk.legs + sprint.legs &&
+					stand.stops + walk.stops + sprint.stops >= stands_after_moving_,
+			core::fmt("%llu Start posts over %u moving legs, %llu Stop posts (%llu while standing) for %u standing "
+					  "legs that follow a moving one",
+					(unsigned long long)(walk.starts + sprint.starts), walk.legs + sprint.legs,
+					(unsigned long long)(stand.stops + walk.stops + sprint.stops), (unsigned long long)stand.stops,
+					stands_after_moving_));
+	const GameAudioStats now = r_audio.stats();
+	const ba::FootstepStats &a = stats_at_start_.footsteps;
+	const ba::FootstepStats &b = now.footsteps;
+	std::string ids;
+	uint64_t materials = 0;
+	for (size_t i = 0; i < b.by_material.size(); ++i) {
+		const uint64_t n = b.by_material[i] - a.by_material[i];
+		if (n != 0) {
+			ids += core::fmt(" %zu:%llu", i, (unsigned long long)n);
+			++materials;
+		}
+	}
+	const std::string program = r_audio.footstep_program();
+	uint64_t requested = 0, refused = 0, killed = 0;
+	for (const auto &[h, f] : fates_) {
+		if (!program.empty() && f.program == program) {
+			++requested;
+			refused += f.refused ? 1u : 0u;
+			killed += f.killed ? 1u : 0u;
+		}
+	}
+	row("footstep sounds",
+			!program.empty() && requested > 0 && materials >= 1 && b.refused == a.refused && refused == 0 &&
+					killed == 0,
+			core::fmt("program %s: %llu instances requested in the recording, %llu refused, %llu killed; the driver "
+					  "%llu refused, %llu without ground, by SoundMaterialId%s; %llu other soldiers' posts, farthest "
+					  "%.1f m",
+					program.empty() ? "none" : program.c_str(), (unsigned long long)requested,
+					(unsigned long long)refused, (unsigned long long)killed,
+					(unsigned long long)(b.refused - a.refused), (unsigned long long)(b.no_ground - a.no_ground),
+					ids.empty() ? " none" : ids.c_str(), (unsigned long long)other_steps_, double(b.farthest_m)));
+}
+
+void AudioIngameCheck::analyse_flyby(Bf3GameAudio &r_audio) {
+	const std::vector<ba::FlyBySound> sounds = r_audio.flyby_sounds();
+	float radius = 0.0f;
+	std::vector<std::string> programs;
+	for (const ba::FlyBySound &f : sounds) {
+		if (f.program) {
+			radius = std::max(radius, f.radius_m);
+			programs.push_back(f.program->name);
+		}
+	}
+	const GameAudioStats now = r_audio.stats();
+	const ba::FlyByAudioStats &a = stats_at_start_.flybys;
+	const ba::FlyByAudioStats &b = now.flybys;
+	const uint64_t bullets = b.bullets - a.bullets, starts = b.starts - a.starts;
+	row("fly-bys start", starts > 0 && starts <= bullets,
+			core::fmt("%llu presented bullets, %llu fly-by starts, %llu silent, %llu too slow, %llu receding, %llu "
+					  "refused, %llu untracked in the recording",
+					(unsigned long long)bullets, (unsigned long long)starts, (unsigned long long)(b.silent - a.silent),
+					(unsigned long long)(b.slow - a.slow), (unsigned long long)(b.receding - a.receding),
+					(unsigned long long)(b.refused - a.refused), (unsigned long long)(b.untracked - a.untracked)));
+	uint64_t requested = 0, far = 0, refused = 0, started = 0;
+	float farthest = 0.0f;
+	for (const auto &[h, f] : fates_) {
+		if (std::find(programs.begin(), programs.end(), f.program) == programs.end()) {
+			continue;
+		}
+		++requested;
+		started += f.started ? 1u : 0u;
+		refused += f.refused ? 1u : 0u;
+		far += f.distance_m > radius ? 1u : 0u;
+		farthest = std::max(farthest, f.distance_m);
+	}
+	row("fly-by sounds within the data's radius",
+			requested > 0 && far == 0 && refused == 0 && b.farthest_start_m <= radius,
+			core::fmt("%zu fly-by programs, the largest FlyBySoundRadius %.1f m: %llu requested, %llu started, %llu "
+					  "refused, %llu beyond the radius, farthest %.1f m (the driver's farthest start %.1f m)",
+					programs.size(), double(radius), (unsigned long long)requested, (unsigned long long)started,
+					(unsigned long long)refused, (unsigned long long)far, double(farthest),
+					double(b.farthest_start_m)));
 }
 
 std::string AudioIngameCheck::report() const {

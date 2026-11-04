@@ -100,6 +100,9 @@ public:
 	std::optional<float> mixer_value(uint32_t p_name_hash) const;
 #if OPENBF3_BUILD_CHECKS
 	core::Result<std::vector<std::string>> observe_area_waves(std::string_view p_patch, float p_area_type) const;
+	std::span<const audio::FootstepPost> footstep_posts() const;
+	std::string footstep_program() const;
+	std::vector<audio::FlyBySound> flyby_sounds() const;
 #endif
 	void shutdown();
 

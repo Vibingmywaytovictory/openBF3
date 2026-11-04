@@ -24,11 +24,17 @@ if(PHASE STREQUAL "play")
     return()
 endif()
 set(extra "")
+set(bots 31)
 if(PHASE STREQUAL "pool")
     set(extra --audio-max-instances=24)
+elseif(PHASE STREQUAL "steps")
+    set(bots 7)
+    set(extra --audio-ingame-seconds=30)
+elseif(PHASE STREQUAL "flyby")
+    set(extra --audio-ingame-seconds=40)
 endif()
 godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 420
-    ARGS --path "${PROJECT_DIR}" res://scenes/metro_tdm.tscn -- --bots=31 --preround=0 "--audio-ingame-check=${out}"
+    ARGS --path "${PROJECT_DIR}" res://scenes/metro_tdm.tscn -- --bots=${bots} --preround=0 "--audio-ingame-check=${out}"
         "--audio-ingame-phase=${PHASE}" ${extra} "--bf3-cache=${cache}")
 godot_require_pass("AUDIO INGAME: PASS")
 godot_require_pass("\\[level\\] install unchanged: yes")

@@ -3,6 +3,7 @@
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/wav_io.h"
 #include "bf3/client_audio/sound_fate_ledger.h"
+#include "game_audio.h"
 
 #include <godot_cpp/classes/audio_effect_capture.hpp>
 
@@ -41,7 +42,17 @@ struct AudioIngameAim {
 inline constexpr std::array<AudioIngameAim, 10> kAudioIngameAims{ { { 0, -70 }, { 0, -35 }, { 0, -5 }, { 90, -5 },
 		{ 180, -5 }, { 270, -5 }, { 45, -20 }, { 135, -50 }, { 225, 15 }, { 315, -10 } } };
 
-enum class AudioIngamePhase : uint8_t { Mix, Pool };
+enum class AudioIngamePhase : uint8_t { Mix, Pool, Steps, Flyby };
+
+enum class AudioIngameLeg : uint8_t { Stand, Walk, Sprint };
+inline constexpr size_t kAudioIngameLegs = 3;
+inline constexpr std::array<std::string_view, kAudioIngameLegs> kAudioIngameLegNames{ "standing", "walking",
+	"sprinting" };
+inline constexpr std::array<double, kAudioIngameLegs> kAudioIngameLegSeconds{ 1.5, 3.0, 3.0 };
+inline constexpr double kAudioIngameLegSettleSeconds = 0.6;
+inline constexpr uint32_t kAudioIngameMinLegs = 2;
+inline constexpr uint32_t kAudioIngameMinLegSteps = 3;
+inline constexpr uint64_t kAudioIngameMinBotShots = 10;
 
 bool parse_audio_ingame_phase(std::string_view p_text, AudioIngamePhase &r_phase);
 
@@ -65,6 +76,20 @@ struct AudioIngameIo {
 	std::function<void()> deploy;
 	std::function<void(float, float)> view;
 	std::function<float()> yaw;
+	std::function<void(bool, bool)> move;
+	uint8_t own_slot = 0xFF;
+};
+
+struct AudioIngameLegTally {
+	uint32_t legs = 0;
+	uint64_t steps = 0;
+	uint64_t starts = 0;
+	uint64_t stops = 0;
+	double seconds = 0.0;
+	double speed_sum = 0.0;
+	float speed_min = 0.0f;
+	float speed_max = 0.0f;
+	std::vector<std::pair<float, double>> intervals;
 };
 
 struct AudioSoundFate {
@@ -113,6 +138,10 @@ private:
 	void analyse(Bf3GameAudio &r_audio);
 	void analyse_mix(Bf3GameAudio &r_audio);
 	void analyse_pool(Bf3GameAudio &r_audio);
+	void analyse_steps(Bf3GameAudio &r_audio);
+	void analyse_flyby(Bf3GameAudio &r_audio);
+	void script_steps(double p_now_s, const AudioIngameIo &p_io);
+	void tally_steps(double p_now_s, Bf3GameAudio &r_audio, const AudioIngameIo &p_io);
 	void row(const std::string &p_name, bool p_pass, const std::string &p_detail);
 	void mix_row(const std::string &p_name, bool p_pass, const std::string &p_detail);
 
@@ -163,6 +192,15 @@ private:
 	bool have_view_ = false, firing_ = false;
 	double last_s_ = 0.0;
 	uint32_t bursts_ = 0, deaths_ = 0;
+	AudioIngameLeg leg_ = AudioIngameLeg::Stand;
+	double leg_s_ = -1.0;
+	double tally_s_ = -1.0;
+	uint32_t leg_index_ = 0;
+	std::array<AudioIngameLegTally, kAudioIngameLegs> legs_{};
+	uint64_t other_steps_ = 0;
+	uint32_t stands_after_moving_ = 0;
+	double last_step_s_ = -1.0;
+	GameAudioStats stats_at_start_;
 
 	bool done_ = false;
 	uint32_t rows_ = 0, failures_ = 0;

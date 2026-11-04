@@ -1065,7 +1065,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			AudioIngamePhase phase = AudioIngamePhase::Mix;
 			if (!parse_audio_ingame_phase(user_arg_value("audio-ingame-phase"), phase)) {
 				UtilityFunctions::print(to_godot("[audio-ingame] bad --audio-ingame-phase=" +
-						user_arg_value("audio-ingame-phase") + ": mix or pool"));
+						user_arg_value("audio-ingame-phase") + ": mix, pool, steps or flyby"));
 				m.finished = true;
 				finish(2);
 				return true;
@@ -1074,6 +1074,9 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 					new AudioIngameCheck(user_arg_value("audio-ingame-check"),
 							std::atof(user_arg_value("audio-ingame-seconds").c_str()), phase),
 					&delete_part<AudioIngameCheck>);
+			if (phase == AudioIngamePhase::Steps) {
+				mapper_.set_scripted(true);
+			}
 		}
 		AudioIngameIo io;
 		io.alive = r_game.alive;
@@ -1128,6 +1131,11 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		};
 		io.view = [this](float p_yaw, float p_pitch) { mapper_.script_view(p_yaw, p_pitch); };
 		io.yaw = [this] { return mapper_.view().yaw; };
+		io.move = [this](bool p_forward, bool p_sprint) {
+			mapper_.script_hold(InputAction::Forward, p_forward);
+			mapper_.script_hold(InputAction::Sprint, p_sprint);
+		};
+		io.own_slot = m.own_slot;
 		if (m.audio_ingame->frame(now_s, *r_game.audio, io)) {
 			m.finished = true;
 			UtilityFunctions::print(to_godot(m.audio_ingame->report()));
