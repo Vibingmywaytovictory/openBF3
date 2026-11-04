@@ -113,6 +113,9 @@ core::Status add_unlock_fire_effects(
 
 std::vector<std::string> impact_sound_names(const ImpactTable &p_table);
 
+std::vector<std::string> impact_sound_names(
+		const ImpactTable &p_table, EffectLibrary &r_library, std::span<const std::string> p_blueprints);
+
 std::vector<std::string> impact_effect_names(const ImpactTable &p_table);
 
 std::vector<std::string> impact_decal_names(const ImpactTable &p_table);

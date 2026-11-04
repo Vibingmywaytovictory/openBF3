@@ -4,6 +4,7 @@
 #include "test_support.h"
 #include "weapons_support.h"
 
+#include "bf3/audio/impact_audio.h"
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/material_grid.h"
 #include "bf3/core/gameplay/weapon_blob.h"
@@ -1559,6 +1560,51 @@ TEST_CASE("cells: Metro's fire effects, preload, the 1p flash fraction, in-game 
 					  << " fire blueprints + " << impact_names.size() << " impact effects = " << names.size() << " preloaded, " << failures << " failures");
 	CHECK(impact_sound_names(*metro->impacts).size() > 0);
 	MESSAGE("Metro: " << impact_sound_names(*metro->impacts).size() << " impact sounds, " << impact_decal_names(*metro->impacts).size() << " decals");
+	{
+		const std::vector<std::string> cell_sounds = impact_sound_names(*metro->impacts);
+		const std::vector<std::string> all_sounds = impact_sound_names(*metro->impacts, *metro->library, names);
+		std::set<std::string> component_sounds;
+		size_t impact_effects_with_sound = 0, outside_cells = 0;
+		for (const std::string &n : names) {
+			core::Result<std::shared_ptr<const EffectDef>> def = metro->library->get(n);
+			REQUIRE(def.ok());
+			bool any = false, outside = false;
+			for (const EffectComponentDef &c : (*def)->components) {
+				if (c.kind == ComponentKind::Sound && !c.asset.empty()) {
+					component_sounds.insert(c.asset);
+					any = true;
+					outside =
+							outside || std::find(cell_sounds.begin(), cell_sounds.end(), c.asset) == cell_sounds.end();
+				}
+			}
+			const bool impact = std::find(impact_names.begin(), impact_names.end(), n) != impact_names.end();
+			impact_effects_with_sound += impact && any ? 1 : 0;
+			outside_cells += impact && outside ? 1 : 0;
+		}
+		MESSAGE("Metro: " << impact_effects_with_sound << " of " << impact_names.size()
+						  << " impact effects carry a sound component, " << outside_cells
+						  << " of them outside the cells' sounds; " << component_sounds.size() << " component sounds, "
+						  << all_sounds.size() << " impact sounds with them");
+		CHECK(impact_effects_with_sound == 8);
+		CHECK(outside_cells == 6);
+		for (const std::string &s : component_sounds) {
+			MESSAGE("component sound: " << s);
+			CAPTURE(s);
+			CHECK(std::find(all_sounds.begin(), all_sounds.end(), s) != all_sounds.end());
+		}
+		for (const std::string &s : cell_sounds) {
+			CAPTURE(s);
+			CHECK(std::find(all_sounds.begin(), all_sounds.end(), s) != all_sounds.end());
+		}
+		core::Result<std::shared_ptr<const bf3::audio::ImpactSoundCache>> cache =
+				bf3::audio::ImpactSoundCache::build(*metro->sources->level, all_sounds);
+		REQUIRE(cache.ok());
+		for (const std::string &e : (*cache)->errors()) {
+			MESSAGE("impact sound: " << e);
+		}
+		CHECK((*cache)->failed() == 0);
+		CHECK((*cache)->compiled() == all_sounds.size());
+	}
 
 	std::shared_ptr<FireEffectTable> table = std::make_shared<FireEffectTable>(*fire);
 	uint16_t m16_id = 0;

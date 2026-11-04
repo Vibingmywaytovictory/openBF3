@@ -54,6 +54,7 @@ struct Bf3GameFx::Impl {
 	fx::AtlasPixels pixels;
 	std::optional<fx::ImpactTable> impacts;
 	std::unique_ptr<fx::EffectLibrary> library;
+	std::vector<std::string> preloaded;
 	std::shared_ptr<const fx::FireEffectTable> fire;
 	std::vector<std::tuple<uint16_t, uint32_t, uint16_t>> accessory_effects;
 	std::unique_ptr<fx::FxWorld> world;
@@ -171,6 +172,7 @@ core::Status Bf3GameFx::load(const GameLoadInputs &p_in) {
 	m.world.reset();
 	m.local_defs.clear();
 	m.library.reset();
+	m.preloaded.clear();
 	m.fire.reset();
 	m.impacts.reset();
 	m.pixels = {};
@@ -310,6 +312,7 @@ core::Status Bf3GameFx::load(const GameLoadInputs &p_in) {
 		std::sort(names.begin(), names.end());
 		names.erase(std::unique(names.begin(), names.end()), names.end());
 		const size_t failed = m.library->preload(names, p_in.threads);
+		m.preloaded = names;
 		m.stats.preloaded = uint32_t(names.size());
 		m.stats.preload_failures = uint32_t(failed);
 		m.notes.push_back(fmt("preload: %zu blueprints (%zu fire, %zu impact), %zu failed, %.3f s", names.size(),
@@ -345,7 +348,11 @@ bool Bf3GameFx::loaded() const {
 }
 
 std::vector<std::string> Bf3GameFx::impact_sound_names() const {
-	return impl_->impacts ? fx::impact_sound_names(*impl_->impacts) : std::vector<std::string>{};
+	const Impl &m = *impl_;
+	if (!m.impacts) {
+		return {};
+	}
+	return m.library ? fx::impact_sound_names(*m.impacts, *m.library, m.preloaded) : fx::impact_sound_names(*m.impacts);
 }
 
 bool Bf3GameFx::build(Node3D *p_parent, std::string *r_error) {

@@ -385,6 +385,24 @@ std::vector<std::string> impact_sound_names(const ImpactTable &p_table) {
 	return { names.begin(), names.end() };
 }
 
+std::vector<std::string> impact_sound_names(
+		const ImpactTable &p_table, EffectLibrary &r_library, std::span<const std::string> p_blueprints) {
+	std::vector<std::string> cells = impact_sound_names(p_table);
+	std::set<std::string> names(cells.begin(), cells.end());
+	for (const std::string &b : p_blueprints) {
+		const core::Result<std::shared_ptr<const EffectDef>> def = r_library.get(b);
+		if (!def) {
+			continue;
+		}
+		for (const EffectComponentDef &c : (*def)->components) {
+			if (c.kind == ComponentKind::Sound && !c.asset.empty()) {
+				names.insert(c.asset);
+			}
+		}
+	}
+	return { names.begin(), names.end() };
+}
+
 std::vector<std::string> impact_effect_names(const ImpactTable &p_table) {
 	std::set<std::string> names;
 	for (size_t r = 0; r < p_table.rows(); ++r) {
