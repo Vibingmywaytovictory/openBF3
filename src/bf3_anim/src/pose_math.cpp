@@ -27,6 +27,34 @@ Quat quat_normalized(const Quat &p_q) {
 	return Quat{ float(p_q.x / n), float(p_q.y / n), float(p_q.z / n), float(p_q.w / n) };
 }
 
+Quat quat_axis_angle(const Vec3 &p_axis, float p_radians) {
+	const float s = std::sin(p_radians * 0.5f);
+	return Quat{ p_axis.x * s, p_axis.y * s, p_axis.z * s, std::cos(p_radians * 0.5f) };
+}
+
+Quat quat_from_to(const Vec3 &p_from, const Vec3 &p_to) {
+	const double fx = p_from.x, fy = p_from.y, fz = p_from.z, tx = p_to.x, ty = p_to.y, tz = p_to.z;
+	const double nf = std::sqrt(fx * fx + fy * fy + fz * fz), nt = std::sqrt(tx * tx + ty * ty + tz * tz);
+	if (!(nf > 0.0) || !(nt > 0.0) || !std::isfinite(nf * nt)) {
+		return Quat{};
+	}
+	const double d = (fx * tx + fy * ty + fz * tz) / (nf * nt);
+	double cx = fy * tz - fz * ty, cy = fz * tx - fx * tz, cz = fx * ty - fy * tx;
+	double w = 1.0 + d;
+	if (w < 1e-9) {
+		const bool x_small = std::fabs(fx) <= std::fabs(fy) && std::fabs(fx) <= std::fabs(fz);
+		cx = x_small ? 0.0 : -fy;
+		cy = x_small ? -fz : fx;
+		cz = x_small ? fy : 0.0;
+		w = 0.0;
+	} else {
+		cx /= nf * nt;
+		cy /= nf * nt;
+		cz /= nf * nt;
+	}
+	return quat_normalized(Quat{ float(cx), float(cy), float(cz), float(w) });
+}
+
 Vec3 quat_rotate(const Quat &q, const Vec3 &v) {
 
 	const float tx = 2.0f * (q.y * v.z - q.z * v.y);

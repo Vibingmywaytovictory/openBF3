@@ -31,6 +31,9 @@ double quat_angle_deg(const Quat &p_a, const Quat &p_b);
 
 Quat quat_from_mat(const Mat34 &p_m);
 
+Quat quat_axis_angle(const Vec3 &p_axis, float p_radians);
+Quat quat_from_to(const Vec3 &p_from, const Vec3 &p_to);
+
 Vec3 vec_add(const Vec3 &p_a, const Vec3 &p_b);
 Vec3 vec_sub(const Vec3 &p_a, const Vec3 &p_b);
 Vec3 vec_scale(const Vec3 &p_a, float p_s);

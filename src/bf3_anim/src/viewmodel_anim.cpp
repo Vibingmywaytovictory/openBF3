@@ -26,14 +26,9 @@ float finite_or(float p_v, float p_fallback) {
 	return std::isfinite(p_v) ? p_v : p_fallback;
 }
 
-Quat quat_axis_angle(float p_x, float p_y, float p_z, float p_radians) {
-	const float s = std::sin(p_radians * 0.5f);
-	return Quat{ p_x * s, p_y * s, p_z * s, std::cos(p_radians * 0.5f) };
-}
-
 Quat camera_rotation(float p_pitch_rad, float p_yaw_rad, float p_roll_rad) {
-	return quat_normalized(
-			quat_mul(quat_axis_angle(0, 1, 0, p_yaw_rad), quat_mul(quat_axis_angle(1, 0, 0, p_pitch_rad), quat_axis_angle(0, 0, 1, p_roll_rad))));
+	return quat_normalized(quat_mul(quat_axis_angle(Vec3{ 0, 1, 0 }, p_yaw_rad),
+			quat_mul(quat_axis_angle(Vec3{ 1, 0, 0 }, p_pitch_rad), quat_axis_angle(Vec3{ 0, 0, 1 }, p_roll_rad))));
 }
 
 float hump(float p_u) {
