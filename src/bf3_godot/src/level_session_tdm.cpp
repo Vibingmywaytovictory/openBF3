@@ -40,6 +40,7 @@
 #include "bf3/host/game_server.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/server_session.h"
+#include "bf3/host/squad_join.h"
 #include "bf3/host/tdm_brain.h"
 #include "bf3/host/tdm_rules.h"
 #include "bf3/net/protocol.h"
@@ -74,6 +75,8 @@ Bf3UiScreens *tdm_ui_screens(const TdmState &p_m) {
 }
 
 namespace {
+
+constexpr double kSquadCheckTimeoutS = 1500.0;
 
 void print_match(const net::MatchState &p_match) {
 	char line[192];
@@ -479,6 +482,14 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 		}
 		if (has_user_arg("hitreg-check")) {
 			m.hitreg_shots = uint32_t(std::clamp(std::atoi(user_arg_value("hitreg-check").c_str()), 1, 5000));
+			if (quit_after_ <= 0.0) {
+				quit_after_ = 1.0e9;
+			}
+		}
+		if (has_check_arg("squad-check")) {
+			m.squad_join = std::unique_ptr<host::SquadJoin, void (*)(host::SquadJoin *)>(
+					new host::SquadJoin(user_arg_value("squad-check"), kSquadCheckTimeoutS),
+					&delete_part<host::SquadJoin>);
 			if (quit_after_ <= 0.0) {
 				quit_after_ = 1.0e9;
 			}
@@ -998,6 +1009,32 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 				finish(phase == host::DuelPhase::Done ? 0 : 1);
 				return true;
 			}
+		}
+	}
+	if (m.squad_join != nullptr && !m.finished) {
+		host::SquadJoinView view;
+		view.players =
+				std::span<const net::PlayerRow>(f.players.data(), std::min<size_t>(f.player_count, f.players.size()));
+		view.own_slot = m.own_slot;
+		view.own_alive = r_game.alive;
+		view.own_life = f.own_curr.life;
+		view.own_position = f.own_curr.position;
+		sim::Vec3 mate{};
+		const int mate_slot = m.squad_join->mate_slot();
+		if (mate_slot >= 0 && presented_position(f, p_now_ns, uint8_t(mate_slot), mate)) {
+			view.mate_position = mate;
+		}
+		view.can_deploy = m.spawn_screen && m.can_deploy;
+		view.round_over = f.match_valid && f.match.phase == net::MatchPhase::RoundOver;
+		host::SquadJoinIo io;
+		io.request = [&m](const net::SquadRequest &p_request) { queue_squad_request(m, p_request); };
+		io.deploy_on = [&m, &r_game](uint8_t p_slot) { return deploy_on_squad_mate(m, r_game.hud_model, p_slot); };
+		const host::SquadJoinPhase phase = m.squad_join->frame(now_s, view, io);
+		if (phase == host::SquadJoinPhase::Done || phase == host::SquadJoinPhase::Failed) {
+			m.finished = true;
+			UtilityFunctions::print(to_godot("[squads] " + m.squad_join->report()));
+			finish(phase == host::SquadJoinPhase::Done ? 0 : 1);
+			return true;
 		}
 	}
 	if (m.audio_ingame_on && r_game.audio != nullptr && !m.finished) {

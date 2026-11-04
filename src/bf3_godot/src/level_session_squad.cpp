@@ -3,9 +3,13 @@
 #include "godot_util.h"
 
 #include "bf3/core/ui/hud_squads.h"
+#include "bf3/core/ui/hud_widgets.h"
 #include "bf3/host/ui_flow_session.h"
 
 #include <godot_cpp/variant/utility_functions.hpp>
+
+#include <algorithm>
+#include <string>
 
 namespace bf3::godot_side {
 
@@ -73,6 +77,28 @@ uint8_t tdm_spawn_choice(const ui::HudModel &p_model, const host::PresentationFr
 	const std::span<const net::PlayerRow> players(
 			p_f.players.data(), std::min<size_t>(p_f.player_count, p_f.players.size()));
 	return host::squad_spawn_choice(players, p_own_slot, p.player);
+}
+
+void queue_squad_request(TdmState &r_m, const net::SquadRequest &p_request) {
+	queue(r_m, p_request);
+}
+
+bool deploy_on_squad_mate(TdmState &r_m, ui::HudModel &r_model, uint8_t p_mate_slot) {
+	const ui::HudSpawnPointList &list = r_model.spawn_points.spawn_points;
+	for (size_t i = 0; i < std::min<size_t>(list.count, list.points.size()); ++i) {
+		const ui::HudSpawnPoint &p = list.points[i];
+		if (p.kind != ui::HudSpawnKind::SquadMate || p.player != p_mate_slot || !p.available) {
+			continue;
+		}
+		ui::UiFlowAction select;
+		select.key = ui::kSelectSpawnPointActionKey;
+		select.params.push_back(std::to_string(i));
+		r_m.deploy_screens.take_action(select);
+		r_m.deploy_screens.apply(r_model);
+		r_m.deploy_click = true;
+		return true;
+	}
+	return false;
 }
 
 void send_squad_requests(TdmState &r_m, host::ClientSession &r_client) {
