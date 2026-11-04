@@ -18,8 +18,8 @@ namespace {
 constexpr uint64_t kFootstepJoinTag = uint64_t(1) << 62;
 constexpr uint32_t kFootstepTrackFrames = 30;
 
-float horizontal_speed(const Vec3 &p_v) {
-	return std::sqrt(p_v.x * p_v.x + p_v.z * p_v.z);
+float speed_of(const Vec3 &p_v) {
+	return std::sqrt(p_v.x * p_v.x + p_v.y * p_v.y + p_v.z * p_v.z);
 }
 
 float distance(const Vec3 &p_a, const Vec3 &p_b) {
@@ -92,6 +92,8 @@ uint32_t footstep_event_hash(FootstepEvent p_event) {
 			return uint32_t(ssp::kFootPlantLeft);
 		case FootstepEvent::Right:
 			return uint32_t(ssp::kFootPlantRight);
+		case FootstepEvent::EnterAir:
+			return uint32_t(ssp::kOnEnterAir);
 		case FootstepEvent::Animated:
 			return 0;
 	}
@@ -116,7 +118,7 @@ void FootstepScheduler::step(std::span<const FootstepSoldier> p_soldiers, const 
 		}
 		const uint16_t key = track_key(s);
 		auto it = std::find_if(tracks_.begin(), tracks_.end(), [key](const Track &t) { return t.key == key; });
-		const float speed = horizontal_speed(s.velocity);
+		const float speed = speed_of(s.velocity);
 		const float normalized = params_.speed_scale > 0.0f ? speed / params_.speed_scale : 0.0f;
 		const auto post_as = [&](FootstepEvent p_event, uint32_t p_hash, float p_speed) {
 			r_out.push_back(FootstepPost{ s.slot, p_event, p_hash, p_speed, d, false });
@@ -131,6 +133,7 @@ void FootstepScheduler::step(std::span<const FootstepSoldier> p_soldiers, const 
 			t.seen = frame_;
 			t.moving = normalized > params_.start_above;
 			t.mode = s.mode;
+			t.last_speed = speed;
 			tracks_.push_back(t);
 			continue;
 		}
@@ -139,9 +142,12 @@ void FootstepScheduler::step(std::span<const FootstepSoldier> p_soldiers, const 
 		if (s.mode == sim::MoveMode::Jumping && t.mode != sim::MoveMode::Jumping) {
 			post(FootstepEvent::Jump);
 		} else if (s.mode == sim::MoveMode::OnGround && airborne(t.mode)) {
-			post(FootstepEvent::Land);
+			post_as(FootstepEvent::Land, footstep_event_hash(FootstepEvent::Land), std::max(t.last_speed, speed));
+		} else if (airborne(s.mode) && !airborne(t.mode)) {
+			post(FootstepEvent::EnterAir);
 		}
 		t.mode = s.mode;
+		t.last_speed = speed;
 		if (!t.moving && normalized > params_.start_above) {
 			t.moving = true;
 			post(FootstepEvent::Start);

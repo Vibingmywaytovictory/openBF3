@@ -45,8 +45,8 @@ float audible_radius(const core::audio::SoundProgram &p_program);
 FootstepParams footstep_params(
 		const core::gameplay::SoldierSoundDef &p_def, const core::audio::SoundProgram &p_footsteps);
 
-enum class FootstepEvent : uint8_t { Start, Stop, Jump, Land, Left, Right, Animated };
-inline constexpr size_t kFootstepEventCount = 7;
+enum class FootstepEvent : uint8_t { Start, Stop, Jump, Land, Left, Right, EnterAir, Animated };
+inline constexpr size_t kFootstepEventCount = 8;
 
 uint32_t footstep_event_hash(FootstepEvent p_event);
 
@@ -92,6 +92,7 @@ private:
 		uint16_t key = 0;
 		uint64_t seen = 0;
 		double phase = 0.0;
+		float last_speed = 0.0f;
 		bool moving = false;
 		bool left_next = true;
 		sim::MoveMode mode = sim::MoveMode::OnGround;

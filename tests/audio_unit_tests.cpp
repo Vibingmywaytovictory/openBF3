@@ -2592,10 +2592,40 @@ TEST_SUITE("audio-footsteps") {
 		run(0.0f, bf3::sim::MoveMode::OnGround);
 		CHECK(count_events(posts, ba::FootstepEvent::Land) == 1);
 		run(0.0f, bf3::sim::MoveMode::Falling);
-		CHECK(posts.empty());
+		CHECK(count_events(posts, ba::FootstepEvent::EnterAir) == 1);
+		CHECK(posts.size() == 1);
 		run(0.0f, bf3::sim::MoveMode::OnGround);
 		CHECK(count_events(posts, ba::FootstepEvent::Land) == 1);
 		CHECK(count_events(posts, ba::FootstepEvent::Jump) == 0);
+	}
+
+	TEST_CASE("the speed fed is the velocity's length; OnLand carries the speed before the landing, OnEnterAir posts "
+			  "when the ground drops away") {
+		const ba::FootstepParams p = unit_footstep_params();
+		ba::FootstepScheduler s(p);
+		std::vector<ba::FootstepPost> posts;
+		const auto run = [&](ba::Vec3 p_v, bf3::sim::MoveMode p_mode) {
+			posts.clear();
+			ba::FootstepSoldier one = walker(2, 0.0f, 0.0f, p_mode);
+			one.velocity = p_v;
+			s.step(std::span<const ba::FootstepSoldier>(&one, 1), ba::Vec3{}, 1.0 / 60.0, posts);
+		};
+		run(ba::Vec3{}, bf3::sim::MoveMode::OnGround);
+		run(ba::Vec3{ 3.0f, 0.0f, 4.0f }, bf3::sim::MoveMode::OnGround);
+		REQUIRE(count_events(posts, ba::FootstepEvent::Start) == 1);
+		CHECK(posts.front().speed == doctest::Approx(5.0f));
+		CHECK(posts.front().hash == ba::footstep_event_hash(ba::FootstepEvent::Start));
+		run(ba::Vec3{ 3.0f, -1.0f, 4.0f }, bf3::sim::MoveMode::Falling);
+		REQUIRE(count_events(posts, ba::FootstepEvent::EnterAir) == 1);
+		CHECK(posts.front().hash == uint32_t(bf3::core::gameplay::soldier_sound_port::kOnEnterAir));
+		run(ba::Vec3{ 0.0f, -15.0f, 0.0f }, bf3::sim::MoveMode::Falling);
+		CHECK(posts.empty());
+		run(ba::Vec3{ 0.0f, 0.0f, 0.0f }, bf3::sim::MoveMode::OnGround);
+		REQUIRE(count_events(posts, ba::FootstepEvent::Land) == 1);
+		const auto land = std::find_if(posts.begin(), posts.end(),
+				[](const ba::FootstepPost &x) { return x.event == ba::FootstepEvent::Land; });
+		CHECK(land->speed == doctest::Approx(15.0f));
+		CHECK(land->hash == ba::footstep_event_hash(ba::FootstepEvent::Land));
 	}
 
 	TEST_CASE("the local player: the data closes the period gates, its 1p animation tags post the patch's events; with "

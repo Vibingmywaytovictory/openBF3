@@ -25,6 +25,7 @@ inline constexpr int32_t kOnJump = logic_port_id("OnJump");
 inline constexpr int32_t kOnLand = logic_port_id("OnLand");
 inline constexpr int32_t kFootPlantLeft = logic_port_id("FootPlantLeft");
 inline constexpr int32_t kFootPlantRight = logic_port_id("FootPlantRight");
+inline constexpr int32_t kOnEnterAir = logic_port_id("OnEnterAir");
 inline constexpr int32_t kSpeed = logic_port_id("Speed");
 }
 
