@@ -495,6 +495,17 @@ const char *kLevels[] = { "MP_001", "MP_003", "MP_007", "MP_011", "MP_012", "MP_
 	"XP1_004", "XP2_Factory", "XP2_Office", "XP2_Palace", "XP2_Skybar", "XP3_Alborz", "XP3_Desert", "XP3_Shield", "XP3_Valley", "XP4_FD", "XP4_Parl",
 	"XP4_Quake", "XP4_Rubble", "XP5_001", "XP5_002", "XP5_003", "XP5_004" };
 
+struct G1Part {
+	const char *last;
+	size_t runs = 0;
+	size_t runs_without = 0;
+	size_t digests = 0;
+};
+constexpr G1Part kG1Parts[] = { { "XP1_002", 84, 7, 10 }, { "XP4_FD", 83, 24, 7 }, { "XP5_004", 63, 0, 7 } };
+static_assert(kG1Parts[0].runs + kG1Parts[1].runs + kG1Parts[2].runs == 230);
+static_assert(kG1Parts[0].runs_without + kG1Parts[1].runs_without + kG1Parts[2].runs_without == 31);
+static_assert(kG1Parts[0].digests + kG1Parts[1].digests + kG1Parts[2].digests == 24);
+
 uint32_t expected_holed(const std::string &p_level) {
 	if (p_level == "MP_001" || p_level == "XP4_Parl") {
 		return 1;
@@ -737,12 +748,24 @@ LevelCheck check_level(std::span<RunResult> p_results, unsigned p_lanes) {
 }
 
 TEST_SUITE("sim-terrain") {
-	TEST_CASE("sim.terrain: G1 every level x mode: one record digest per level, the exhaustive field check, lattice and tile-centre rays") {
+	void g1_every_level(size_t p_part) {
 		Shared *s = shared();
 		if (!s->ok) {
 			bf3::test::skip_install_case(s->reader.describe().c_str());
 			return;
 		}
+		const G1Part &part = kG1Parts[p_part];
+		const auto end_of = [](size_t p_index) {
+			const size_t at =
+					size_t(std::find(std::begin(kLevels), std::end(kLevels), std::string_view(kG1Parts[p_index].last)) -
+							std::begin(kLevels));
+			return at < std::size(kLevels) ? at + 1 : 0;
+		};
+		const size_t first = p_part == 0 ? 0 : end_of(p_part - 1);
+		const size_t last = end_of(p_part);
+		REQUIRE(first < last);
+		REQUIRE((p_part + 1 < std::size(kG1Parts) || last == std::size(kLevels)));
+		const std::span<const char *const> levels(std::begin(kLevels) + first, std::begin(kLevels) + last);
 		const auto start = std::chrono::steady_clock::now();
 		const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
 
@@ -758,8 +781,8 @@ TEST_SUITE("sim-terrain") {
 		};
 		std::vector<Job> jobs;
 		std::vector<size_t> first_job;
-		for (size_t li = 0; li < std::size(kLevels); ++li) {
-			const std::string level_name = kLevels[li];
+		for (size_t li = 0; li < levels.size(); ++li) {
+			const std::string level_name = levels[li];
 			bf3::core::Result<level::LevelInfo> info = level::level_info(*s->install, level_name);
 			REQUIRE_MESSAGE(info.ok(), level_name, ": ", (info.ok() ? std::string() : info.error().message));
 			first_job.push_back(jobs.size());
@@ -769,16 +792,16 @@ TEST_SUITE("sim-terrain") {
 		}
 		first_job.push_back(jobs.size());
 		std::vector<RunResult> all(jobs.size());
-		std::vector<LevelCheck> checks(std::size(kLevels));
-		std::vector<std::atomic<size_t>> remaining(std::size(kLevels));
-		for (size_t li = 0; li < std::size(kLevels); ++li) {
+		std::vector<LevelCheck> checks(levels.size());
+		std::vector<std::atomic<size_t>> remaining(levels.size());
+		for (size_t li = 0; li < levels.size(); ++li) {
 			remaining[li].store(first_job[li + 1] - first_job[li], std::memory_order_relaxed);
 		}
 		bf3::core::parallel_for(
 				jobs.size(),
 				[&](size_t i) {
 					const size_t li = jobs[i].level;
-					all[i] = run_one(s->install, kLevels[li], jobs[i].mode, jobs[i].keep, soup_threads);
+					all[i] = run_one(s->install, levels[li], jobs[i].mode, jobs[i].keep, soup_threads);
 
 					if (remaining[li].fetch_sub(1, std::memory_order_acq_rel) == 1) {
 						checks[li] = check_level(std::span<RunResult>(all.data() + first_job[li], first_job[li + 1] - first_job[li]), check_lanes);
@@ -789,8 +812,8 @@ TEST_SUITE("sim-terrain") {
 		std::fflush(stdout);
 		size_t runs = 0, runs_without = 0, digests = 0, lattice_rays = 0, lattice_missed = 0, open_rays = 0, open_hits = 0, centre_missed = 0, failures = 0;
 		double worst = 0.0;
-		for (size_t li = 0; li < std::size(kLevels); ++li) {
-			const char *level_id = kLevels[li];
+		for (size_t li = 0; li < levels.size(); ++li) {
+			const char *level_id = levels[li];
 			const std::string level_name = level_id;
 			const std::span<const RunResult> results(all.data() + first_job[li], first_job[li + 1] - first_job[li]);
 			double level_seconds = 0.0;
@@ -859,14 +882,29 @@ TEST_SUITE("sim-terrain") {
 		std::printf("sim.terrain G1: %zu runs (%zu without terrain, %zu failed), %zu digests; lattice %zu rays, %zu missed; open-cell %zu rays, %zu hits; "
 					"tile centres %zu bad; worst error %.4f m; %.1f s\n",
 				runs, runs_without, failures, digests, lattice_rays, lattice_missed, open_rays, open_hits, centre_missed, worst, seconds_since(start));
-		CHECK(runs == 230);
-		CHECK(runs_without == 31);
-		CHECK(digests == 24);
+		CHECK(runs == part.runs);
+		CHECK(runs_without == part.runs_without);
+		CHECK(digests == part.digests);
 		CHECK(failures == 0);
 		CHECK(lattice_missed == 0);
 		CHECK(open_hits == 0);
 		CHECK(centre_missed == 0);
 		CHECK(worst <= 0.05);
+	}
+
+	TEST_CASE("sim.terrain: G1 every level x mode, MP_001 to XP1_002: one record digest per level, the exhaustive "
+			  "field check, lattice and tile-centre rays") {
+		g1_every_level(0);
+	}
+
+	TEST_CASE("sim.terrain: G1 every level x mode, XP1_003 to XP4_FD: one record digest per level, the exhaustive "
+			  "field check, lattice and tile-centre rays") {
+		g1_every_level(1);
+	}
+
+	TEST_CASE("sim.terrain: G1 every level x mode, XP4_Parl to XP5_004: one record digest per level, the exhaustive "
+			  "field check, lattice and tile-centre rays") {
+		g1_every_level(2);
 	}
 
 	TEST_CASE("sim.terrain: G1 full worlds: Caspian CQL, Kharg CQL and Metro TDM cold then warm through a scratch cache") {

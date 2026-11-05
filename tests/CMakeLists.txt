@@ -419,13 +419,17 @@ openbf3_test(test_sim_terrain test_main.cpp terrain_collision_tests.cpp terrain_
 target_link_libraries(test_sim_terrain PRIVATE bf3_sim Jolt bf3_sim_harness)
 target_include_directories(test_sim_terrain PRIVATE ${CMAKE_SOURCE_DIR}/src/bf3_sim/src)
 add_test(NAME sim.terrain.unit COMMAND test_sim_terrain --test-suite=sim-terrain-unit)
-openbf3_case_row(NAME sim.terrain EXE test_sim_terrain SUITE sim-terrain GROUP sim-terrain COUNT 2 CASES "*G1*every*"
+openbf3_case_row(NAME sim.terrain EXE test_sim_terrain SUITE sim-terrain GROUP sim-terrain COUNT 2 CASES "*G1*every*MP_001*"
+    INSTALL_CASE "*install is unchanged*")
+openbf3_case_row(NAME sim.terrain.part2 EXE test_sim_terrain SUITE sim-terrain GROUP sim-terrain COUNT 2 CASES "*G1*every*XP1_003*"
+    INSTALL_CASE "*install is unchanged*")
+openbf3_case_row(NAME sim.terrain.part3 EXE test_sim_terrain SUITE sim-terrain GROUP sim-terrain COUNT 2 CASES "*G1*every*XP4_Parl*"
     INSTALL_CASE "*install is unchanged*")
 openbf3_case_row(NAME sim.terrain.worlds EXE test_sim_terrain SUITE sim-terrain GROUP sim-terrain COUNT 3
     CASES "*G1*full*worlds*" "*G6*Caspian*" INSTALL_CASE "*install is unchanged*")
 openbf3_split_cover(NAME sim.terrain.split_cover EXE test_sim_terrain SUITE sim-terrain GROUP sim-terrain
     INSTALL_CASE "*install is unchanged*")
-set_tests_properties(sim.terrain sim.terrain.worlds PROPERTIES TIMEOUT 1800)
+set_tests_properties(sim.terrain sim.terrain.part2 sim.terrain.part3 sim.terrain.worlds PROPERTIES TIMEOUT 1800)
 set_tests_properties(sim.terrain.unit PROPERTIES TIMEOUT 600)
 if(TARGET bf3dump)
     add_test(NAME tools.tc_cost COMMAND ${CMAKE_COMMAND} -DBF3DUMP=$<TARGET_FILE:bf3dump> -DREPORT_ONLY=${OPENBF3_ASAN}
@@ -433,7 +437,7 @@ if(TARGET bf3dump)
     set_tests_properties(tools.tc_cost PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE)
 endif()
 if(OPENBF3_ASAN)
-    set_tests_properties(sim.terrain PROPERTIES TIMEOUT 10800) # G1 over 230 runs: 25 of 29 levels in 5,400 s under asan (serial)
+    set_tests_properties(sim.terrain sim.terrain.part2 sim.terrain.part3 PROPERTIES TIMEOUT 10800)
 endif()
 
 openbf3_test(test_ui1_contract test_main.cpp ui1_contract_tests.cpp test_support.h)
@@ -749,8 +753,8 @@ openbf3_label(timing host.scale sim.nav.bake sim.weapons.perf tools.fx_bench aud
 openbf3_label(serial_wallclock host.scale.unit)
 openbf3_label(merge_also tools.ebx_memory tools.m1_prepare)
 if(OPENBF3_ASAN)
-    openbf3_label(asan_sweep sim.terrain sim.vehicle sim.nav host.scale host.scale.paced)
-    openbf3_label(bigmem sim.terrain)
+    openbf3_label(asan_sweep sim.terrain sim.terrain.part2 sim.terrain.part3 sim.vehicle sim.nav host.scale host.scale.paced)
+    openbf3_label(bigmem sim.terrain sim.terrain.part2 sim.terrain.part3)
     openbf3_label(serial_wallclock core.gameplay.tables.unit)
     set_tests_properties(sim.nav host.scale PROPERTIES TIMEOUT 3600)
     set_tests_properties(host.scale.paced PROPERTIES TIMEOUT 1800)
@@ -765,7 +769,9 @@ function(openbf3_cost p_row p_processors p_cost)
         set_tests_properties(${p_row} PROPERTIES COST ${p_cost})
     endif()
 endfunction()
-openbf3_cost(sim.terrain 9 117)
+openbf3_cost(sim.terrain 8 60)
+openbf3_cost(sim.terrain.part2 7 61)
+openbf3_cost(sim.terrain.part3 7 49)
 openbf3_cost(sim.terrain.worlds 2 25)
 openbf3_cost(sim.nav 6 47)
 openbf3_cost(logic.census 5 16)
