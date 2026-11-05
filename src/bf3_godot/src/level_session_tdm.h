@@ -94,6 +94,7 @@ struct TdmState {
 	bool mouse_released = false;
 	uint8_t own_slot = 0xFF;
 	uint8_t own_team = 0;
+	bool players_printed = false;
 
 	double own_death_s = -1.0;
 	uint8_t own_killer = 0xFF;

@@ -35,6 +35,7 @@ struct SquadJoinIo {
 };
 
 std::string squad_list_text(std::span<const net::PlayerRow> p_players);
+std::string players_text(std::span<const net::PlayerRow> p_players, uint8_t p_own_slot);
 
 class SquadJoin {
 public:

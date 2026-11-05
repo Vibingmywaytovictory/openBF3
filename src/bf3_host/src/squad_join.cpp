@@ -67,6 +67,26 @@ std::string squad_list_text(std::span<const net::PlayerRow> p_players) {
 	return out;
 }
 
+std::string players_text(std::span<const net::PlayerRow> p_players, uint8_t p_own_slot) {
+	std::vector<const net::PlayerRow *> humans;
+	size_t bots = 0;
+	for (const net::PlayerRow &row : p_players) {
+		if (row.bot) {
+			++bots;
+		} else {
+			humans.push_back(&row);
+		}
+	}
+	std::sort(humans.begin(), humans.end(),
+			[](const net::PlayerRow *a, const net::PlayerRow *b) { return a->slot < b->slot; });
+	std::string out;
+	for (const net::PlayerRow *row : humans) {
+		out += core::fmt("%s%s (%sslot %u)", out.empty() ? "" : ", ", std::string(net::player_name(*row)).c_str(),
+				row->slot == p_own_slot ? "you, " : "", unsigned(row->slot));
+	}
+	return core::fmt("%zu player(s): %s; %zu bot(s)", humans.size(), out.empty() ? "none" : out.c_str(), bots);
+}
+
 SquadJoin::SquadJoin(std::string p_mate, double p_timeout_s) : mate_(std::move(p_mate)), timeout_s_(p_timeout_s) {}
 
 void SquadJoin::fail(const std::string &p_why) {

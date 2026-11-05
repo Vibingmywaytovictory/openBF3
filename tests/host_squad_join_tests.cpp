@@ -147,4 +147,14 @@ TEST_SUITE("host-squad-join-unit") {
 		CHECK(join.failure().find("timed out after 10 s waiting for the mate") != std::string::npos);
 		CHECK(s.requests.empty());
 	}
+
+	TEST_CASE("the player list text names the humans by the server's rows in slot order, marks the own one and "
+			  "counts the bots") {
+		std::vector<net::PlayerRow> rows = { row(25, 2, 1, false, "Bob", true), row(3, 1, 2, true, "bot", true),
+			row(24, 1, 1, true, "Ann", true), row(4, 2, 1, true, "bot", false) };
+		rows[1].bot = true;
+		rows[3].bot = true;
+		CHECK(host::players_text(rows, 24) == "2 player(s): Ann (you, slot 24), Bob (slot 25); 2 bot(s)");
+		CHECK(host::players_text({}, 0) == "0 player(s): none; 0 bot(s)");
+	}
 }

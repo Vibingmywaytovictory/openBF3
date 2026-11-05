@@ -528,11 +528,19 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 		if (m.deploy_check || m.audio_ingame_on || m.hitreg_shots > 0) {
 			mapper_.set_scripted(true);
 		}
-		UtilityFunctions::print(to_godot(std::string("[tdm] ") + (m.playable ? "playable scene" : "check run") + ": TDM rules on, " +
-				(m.options.deploy_screen ? "spawn screen (Enter deploys, 1-4 kit, 3 defibrillator, Tab scoreboard)" : "no spawn screen (automatic respawn, K kit)") +
-				", " + std::to_string(m.options.bots) + " TDM bots, " + limits_text(m.options) + ", tuning " +
-				(m.options.tdm_tuning_cfg.empty() ? "built-in" : "config/tdm_tuning.cfg") + " / " +
-				(m.options.bot_tuning_cfg.empty() ? "built-in" : "config/bot_tuning.cfg") + (m.checks() ? ", case play" : "")));
+		if (has_user_arg("connect")) {
+			UtilityFunctions::print(to_godot(std::string("[tdm] ") + (m.playable ? "playable scene" : "check run") +
+					": TDM rules, bots, limits and tuning from the server" + (m.checks() ? ", case play" : "")));
+		} else {
+			UtilityFunctions::print(to_godot(std::string("[tdm] ") + (m.playable ? "playable scene" : "check run") +
+					": TDM rules on, " +
+					(m.options.deploy_screen ? "spawn screen (Enter deploys, 1-4 kit, 3 defibrillator, Tab scoreboard)"
+											 : "no spawn screen (automatic respawn, K kit)") +
+					", " + std::to_string(m.options.bots) + " TDM bots, " + limits_text(m.options) + ", tuning " +
+					(m.options.tdm_tuning_cfg.empty() ? "built-in" : "config/tdm_tuning.cfg") + " / " +
+					(m.options.bot_tuning_cfg.empty() ? "built-in" : "config/bot_tuning.cfg") +
+					(m.checks() ? ", case play" : "")));
+		}
 	}
 	if (!error.empty()) {
 		UtilityFunctions::print(to_godot("[tdm] bad arguments: " + error));
@@ -630,6 +638,11 @@ void Bf3LevelSession::tdm_presented(uint64_t p_now_ns) {
 		}
 	}
 	const net::PlayerRow *own_row = m.own_slot != 0xFF ? player_row_of(f, m.own_slot) : nullptr;
+	if (own_row != nullptr && !m.players_printed) {
+		m.players_printed = true;
+		UtilityFunctions::print(to_godot(
+				"[tdm] " + host::players_text(std::span<const net::PlayerRow>(f.players.data(), rows), m.own_slot)));
+	}
 	const uint8_t roster_team =
 			own_row != nullptr && (own_row->team == 1 || own_row->team == 2) ? own_row->team : uint8_t(0);
 	m.own_team = roster_team != 0 ? roster_team : (f.own_team == 1 || f.own_team == 2 ? f.own_team : uint8_t(0));

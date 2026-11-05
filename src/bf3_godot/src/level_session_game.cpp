@@ -389,9 +389,16 @@ void Bf3LevelSession::game_parse_args() {
 		cases_text += (cases_text.empty() ? "" : ",") + std::string(m2a_case_name(c));
 	}
 	char line[512];
-	std::snprintf(line, sizeof(line), "[game] %s: kit %s, team %s, respawn %.1f s, bots %u, walkers %u%s%s", g.playable ? "playable scene" : "check run",
-			host::kit_role_name(host::KitRole(g.kit)), team_name(g.team), g.respawn_s, bots_, walkers_, cases_text.empty() ? "" : ", cases ",
-			cases_text.c_str());
+	if (has_user_arg("connect")) {
+		std::snprintf(line, sizeof(line), "[game] %s: kit %s, team %s, respawn and bots from the server%s%s",
+				g.playable ? "playable scene" : "check run", host::kit_role_name(host::KitRole(g.kit)),
+				team_name(g.team), cases_text.empty() ? "" : ", cases ", cases_text.c_str());
+	} else {
+		std::snprintf(line, sizeof(line), "[game] %s: kit %s, team %s, respawn %.1f s, bots %u, walkers %u%s%s",
+				g.playable ? "playable scene" : "check run", host::kit_role_name(host::KitRole(g.kit)),
+				team_name(g.team), g.respawn_s, bots_, walkers_, cases_text.empty() ? "" : ", cases ",
+				cases_text.c_str());
+	}
 	UtilityFunctions::print(line);
 	if (!error.empty()) {
 		UtilityFunctions::print(to_godot("[game] bad arguments: " + error));

@@ -299,7 +299,8 @@ std::vector<std::string> lines_with(const std::string &p_text, std::string_view 
 }
 
 TEST_SUITE("net-procs-godot-connect") {
-	TEST_CASE("a Godot --connect client with no --level or --mode loads the level and mode the server names") {
+	TEST_CASE("a Godot --connect client with no --level or --mode loads the level and mode the server names and "
+			  "prints the server's players and bots, not the listen game's defaults") {
 		ProcDriver driver(driver_config_from_env());
 		const std::optional<Server> server =
 				start_server(driver, 0, 900, { "--level=MP_011", "--mode=TeamDeathMatch0" });
@@ -322,6 +323,12 @@ TEST_SUITE("net-procs-godot-connect") {
 		CHECK(client_end.stragglers == 0);
 		CHECK(contains(out, "[level] MP_011 TeamDeathMatch0"));
 		CHECK(contains(out, "[level] install unchanged: yes"));
+		CHECK(contains(out, "[tdm] 1 player(s): player (you, slot "));
+		CHECK(contains(out, "); 0 bot(s)"));
+		CHECK(contains(out, "TDM rules, bots, limits and tuning from the server"));
+		CHECK(contains(out, "respawn and bots from the server"));
+		CHECK_FALSE(contains(out, " TDM bots, "));
+		CHECK_FALSE(contains(out, ", bots 31, "));
 		driver.finish(server->id, 1s);
 		MESSAGE(line);
 	}
