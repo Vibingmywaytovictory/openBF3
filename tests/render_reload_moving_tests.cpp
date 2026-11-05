@@ -27,6 +27,7 @@ constexpr const char *kLevel = "Win32/Levels/MP_Subway/MP_Subway";
 constexpr double kFrameSeconds = 1.0 / 60.0;
 constexpr int kSettleFrames = 60;
 constexpr double kHeldMetres = 0.001;
+constexpr double kBoltRootMetres = 0.1;
 
 struct Gait {
 	const char *name;
@@ -55,7 +56,33 @@ struct Weapon {
 	std::vector<std::string> lines;
 	double worst = 0.0;
 	std::string worst_case;
+	std::string bolt;
+	double bolt_root = 0.0;
 };
+
+double bolt_root_travel(const render::ViewmodelSet &p_set, const render::ViewmodelItem &p_item) {
+	const render::ViewmodelClip &idle = p_item.clips[size_t(render::ViewmodelClipRole::Idle)];
+	const render::ViewmodelClip &bolt = p_item.clips[size_t(render::ViewmodelClipRole::Bolt)];
+	const int32_t root = p_set.rig.find("Wep_Root");
+	core::ant::ClipPose sample;
+	anim::LocalPose base = anim::rest_pose(p_set.rig);
+	if (idle.source == render::ViewmodelClipSource::Clip && core::ant::sample_clip(idle.clip.clip, 0.0f, sample)) {
+		anim::apply_clip_pose(idle.tracks, sample, base);
+	}
+	std::vector<anim::Xform> model;
+	anim::model_pose(p_set.rig, base, model);
+	const anim::Vec3 at_idle = model[size_t(root)].t;
+	double travel = 0.0;
+	for (uint32_t f = 0; f <= bolt.tracks.end_frame; ++f) {
+		anim::LocalPose pose = base;
+		if (core::ant::sample_clip(bolt.clip.clip, float(f), sample)) {
+			anim::apply_clip_pose(bolt.tracks, sample, pose);
+		}
+		anim::model_pose(p_set.rig, pose, model);
+		travel = std::max(travel, anim::vec_dist(model[size_t(root)].t, at_idle));
+	}
+	return travel;
+}
 
 struct Drift {
 	std::array<double, 2> worst{};
@@ -228,6 +255,10 @@ TEST_SUITE("render-viewmodel-reload-moving") {
 				}
 			}
 			const render::ViewmodelItem &item = (*set)->items[0];
+			if (item.clips[size_t(render::ViewmodelClipRole::Bolt)].source == render::ViewmodelClipSource::Clip) {
+				w.bolt = item.clips[size_t(render::ViewmodelClipRole::Bolt)].controller;
+				w.bolt_root = bolt_root_travel(**set, item);
+			}
 			for (const Gait &g : kGaits) {
 				for (const Action &a : kActions) {
 					const Drift d = hand_drift(**set, item, g, a);
@@ -251,6 +282,12 @@ TEST_SUITE("render-viewmodel-reload-moving") {
 			for (const std::string &l : w.lines) {
 				std::printf("render.viewmodel_reload_moving team %u %s %s\n", unsigned(w.team), w.unlock.c_str(),
 						l.c_str());
+			}
+			if (!w.bolt.empty()) {
+				MESSAGE(w.unlock, " Bolt ", w.bolt, ": Wep_Root up to ", w.bolt_root * 1000.0,
+						" mm from its IdlePose place");
+				CHECK_MESSAGE(w.bolt_root < kBoltRootMetres, w.unlock, " Bolt ", w.bolt, " takes Wep_Root ",
+						w.bolt_root * 1000.0, " mm from its IdlePose place");
 			}
 			if (w.worst > kHeldMetres) {
 				drifting.push_back(w.unlock + " " + w.worst_case);

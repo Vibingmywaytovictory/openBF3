@@ -301,6 +301,8 @@ namespace bf3::render {
 inline constexpr std::string_view kVmRunDeltaChooser = "1P_RunLoopChooser";
 inline constexpr std::string_view kVmShotgunFireChooser = "Wep_ShotgunFireChooser";
 inline constexpr std::string_view kVmSprintDeltaChooser = "Wep_SprintDeltaChooser";
+inline constexpr std::string_view kVmSniperBoltChooser = "Wep_SniperBoltActionChooser";
+inline constexpr std::string_view kVmShotgunBoltChooser = "Wep_ShotgunBoltActionChooser";
 
 struct ViewmodelLocomotionClips {
 	uint32_t weapon_type = 0;
@@ -316,6 +318,9 @@ void load_viewmodel_locomotion(const core::ant::AntLibrary &p_library, const ani
 anim::VmLocomotion viewmodel_locomotion(const ViewmodelItem &p_item);
 
 void load_viewmodel_chooser_fire(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig,
+		uint32_t p_ant_ref, ViewmodelItem &r_item, std::vector<std::string> &r_notes);
+
+void load_viewmodel_chooser_bolt(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig,
 		uint32_t p_ant_ref, ViewmodelItem &r_item, std::vector<std::string> &r_notes);
 
 void load_viewmodel_throw_flow(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, uint32_t p_ant_ref,

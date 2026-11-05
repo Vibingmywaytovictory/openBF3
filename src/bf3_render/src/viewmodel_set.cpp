@@ -221,13 +221,13 @@ struct RoleRule {
 const RoleRule kRoleRules[] = {
 	{ Role::Deploy, { "Deploy Anim", nullptr, nullptr } },
 	{ Role::Idle, { "IdlePose Anim", nullptr, nullptr } },
-	{ Role::Fire, { "Fire Anim", nullptr, nullptr } },
+	{ Role::Fire, { "Fire Anim", nullptr, nullptr }, { "Fire", nullptr, nullptr } },
 	{ Role::FireSingle, { "FireSingle Anim", nullptr, nullptr } },
 	{ Role::Reload, { "ReloadClipFull Anim", "ReloadFull Anim", "Reload Anim" },
 			{ "ReloadClipFull", "ReloadFull", "Reload" } },
 	{ Role::ReloadEmpty, { "ReloadClipEmpty Anim", "ReloadEmpty Anim", nullptr },
 			{ "ReloadClipEmpty", "ReloadEmpty", nullptr } },
-	{ Role::Bolt, { "BoltAction Anim", "Bolt Anim", "Pump Anim" } },
+	{ Role::Bolt, { "BoltAction Anim", "Bolt Anim", "Pump Anim" }, { "BoltAction", "Bolt", "Pump" } },
 	{ Role::ZoomIn, { "zoomInOut Anim", "ZoomIn Anim", "zoomIn Anim" } },
 	{ Role::ZoomOut, { "ZoomOut Anim", "zoomOut Anim", nullptr } },
 	{ Role::ZoomIdle, { "ZoomPose Anim", nullptr, nullptr } },
@@ -936,6 +936,9 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 			if (item.kind == ViewmodelItemKind::Gun && item.clips[size_t(Role::Fire)].source == Source::Missing &&
 					item.clips[size_t(Role::FireSingle)].source == Source::Missing) {
 				load_viewmodel_chooser_fire(ant, set->rig, uint32_t(*locomotion_ant_ref), item, set->notes);
+			}
+			if (item.kind == ViewmodelItemKind::Gun) {
+				load_viewmodel_chooser_bolt(ant, set->rig, uint32_t(*locomotion_ant_ref), item, set->notes);
 			}
 			if (item.kind == ViewmodelItemKind::Grenade) {
 				load_viewmodel_throw_flow(ant, set->rig, uint32_t(*locomotion_ant_ref), item, set->notes);
@@ -1752,6 +1755,41 @@ void load_viewmodel_chooser_fire(const core::ant::AntLibrary &p_library, const a
 	}
 	r_notes.push_back(where + ": " + route_path(*route) + " -> " + clip.name);
 	r_item.clips[size_t(Role::Fire)] = std::move(clip);
+}
+
+void load_viewmodel_chooser_bolt(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig,
+		uint32_t p_ant_ref, ViewmodelItem &r_item, std::vector<std::string> &r_notes) {
+	core::Result<uint32_t> type = anim::weapon_type_index(p_library, p_ant_ref);
+	core::Result<uint32_t> specific = anim::weapon_choice_index(p_library, p_ant_ref);
+	if (!type || !specific) {
+		return;
+	}
+	const std::string_view chooser = *type == uint32_t(anim::AntWeaponType::SniperRifle) ? kVmSniperBoltChooser
+			: *type == uint32_t(anim::AntWeaponType::Shotgun)							 ? kVmShotgunBoltChooser
+																						 : std::string_view();
+	if (chooser.empty()) {
+		return;
+	}
+	const std::string where = r_item.unlock + " 1p Bolt";
+	anim::ChooserIndices idx;
+	idx.weapon_type = *type;
+	idx.specific_weapon = int64_t(*specific);
+	core::Result<anim::AntClipRoute> route =
+			anim::route_ant_controller(p_library, "IndexChooserControllerAsset", chooser, idx);
+	if (!route) {
+		r_notes.push_back(where + " " + std::string(chooser) + " at specific weapon " + std::to_string(*specific) +
+				": " + route.error().message + " (the package's " + r_item.clips[size_t(Role::Bolt)].controller + ")");
+		return;
+	}
+	ViewmodelClip clip;
+	if (const core::Status st = load_route_clip(p_library, p_rig, *route, clip); !st.ok()) {
+		r_notes.push_back(where + " " + route_path(*route) + ": " + st.error().message + " (the package's " +
+				r_item.clips[size_t(Role::Bolt)].controller + ")");
+		return;
+	}
+	r_notes.push_back(where + ": " + route_path(*route) + " -> " + clip.name + " in place of the package's " +
+			r_item.clips[size_t(Role::Bolt)].controller);
+	r_item.clips[size_t(Role::Bolt)] = std::move(clip);
 }
 
 void load_viewmodel_throw_flow(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, uint32_t p_ant_ref,
