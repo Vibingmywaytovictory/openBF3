@@ -90,6 +90,7 @@ std::vector<std::string> loadout_variants(std::span<const core::gameplay::KitDef
 struct KitGadgetUnlock {
 	std::string unlock;
 	std::string weapon;
+	std::string type;
 };
 
 std::vector<KitGadgetUnlock> loadout_gadget_unlocks(std::span<const core::gameplay::KitDef> p_kits);

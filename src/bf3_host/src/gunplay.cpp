@@ -184,6 +184,14 @@ gp::CapsulePoseTable build_capsules(std::shared_ptr<const core::Install> p_insta
 	return std::move(*table);
 }
 
+core::Status sim_def_status(const core::Result<gp::WeaponDef> &p_def, const sw::SurfaceMaterialTable &p_materials) {
+	if (!p_def) {
+		return p_def.error();
+	}
+	const core::Result<sw::WeaponSimDef> d = sw::make_weapon_sim_def(*p_def, p_materials);
+	return d ? core::Status::success() : core::Status(d.error());
+}
+
 }
 
 core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared_ptr<const core::Install> p_install, std::string_view p_level_id,
@@ -271,20 +279,32 @@ core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared
 	}
 	if (p_options.loadouts) {
 		for (const KitGadgetUnlock &u : loadout_gadget_unlocks(kits)) {
+			if (u.type != "SoldierWeaponUnlockAsset" || u.weapon.empty()) {
+				level->notes.push_back("gadget " + u.unlock + ": a " + u.type + " with no weapon");
+				continue;
+			}
 			core::Result<sw::GadgetDef> g = sw::read_gadget_def(db, u.weapon);
 			if (!g) {
 				return core::error_at(where, g.error());
 			}
-			if (g->kind == sw::GadgetKind::None || variants.contains(u.unlock)) {
+			if (variants.contains(u.unlock)) {
 				continue;
 			}
+			const bool deployable = g->kind != sw::GadgetKind::None;
 			core::Result<gp::WeaponDef> def = w->catalog->resolve(u.unlock);
-			if (!def) {
-				return core::error_at(where + ": gadget " + u.unlock, def.error());
+			const core::Status simulated = sim_def_status(def, *level->materials);
+			if (!simulated) {
+				if (deployable) {
+					return core::error_at(where + ": gadget " + u.unlock, simulated.error());
+				}
+				level->notes.push_back("gadget " + u.unlock + ": " + simulated.error().message);
+				continue;
 			}
-			g->def = uint16_t(level->defs.size());
+			if (deployable) {
+				g->def = uint16_t(level->defs.size());
+				level->gadgets.push_back(std::move(*g));
+			}
 			level->defs.push_back(std::move(*def));
-			level->gadgets.push_back(std::move(*g));
 			variants.insert(u.unlock);
 		}
 		for (const gp::WeaponDef &d : level->defs) {

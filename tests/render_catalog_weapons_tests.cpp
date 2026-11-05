@@ -54,6 +54,18 @@ constexpr float kSightRatioSpread = 0.3f;
 const std::set<std::string> kCurveFireWeapons{ "weapons/gadgets/defibrillator/u_defib", "weapons/m40a5/u_m40a5",
 	"weapons/model98b/u_m98b", "weapons/sv98/u_sv98", "weapons/xp1_l96/u_l96", "weapons/xp2_jng90/u_jng90" };
 
+const std::set<std::string> kGadgetItems{ "weapons/gadgets/ammobag/u_ammobag", "weapons/gadgets/c4/u_c4",
+	"weapons/gadgets/claymore/u_claymore", "weapons/gadgets/defibrillator/u_defib", "weapons/gadgets/eodbot/u_eodbot",
+	"weapons/gadgets/m15/u_m15", "weapons/gadgets/m224/u_m224", "weapons/gadgets/medicbag/u_medkit",
+	"weapons/gadgets/radiobeacon/u_radiobeacon", "weapons/gadgets/repairtool/u_repairtool" };
+
+std::set<std::string> gadget_slot_weapons() {
+	std::set<std::string> out = kGadgetItems;
+	out.insert({ "weapons/xp4_crossbow_prototype/u_crossbow_scoped_cobra",
+			"weapons/xp4_crossbow_prototype/u_crossbow_scoped_riflescope" });
+	return out;
+}
+
 struct CatalogEntry {
 	uint8_t team = 1;
 	host::LoadoutWeapon weapon;
@@ -322,11 +334,8 @@ TEST_SUITE("render-catalog-weapons") {
 				gadget_items.insert(e.weapon.unlock);
 			}
 		}
-		const std::set<std::string> gadgets{ "weapons/gadgets/ammobag/u_ammobag",
-			"weapons/gadgets/defibrillator/u_defib", "weapons/gadgets/medicbag/u_medkit",
-			"weapons/gadgets/radiobeacon/u_radiobeacon" };
-		CHECK(gadget_slots == gadgets);
-		CHECK(gadget_items == gadgets);
+		CHECK(gadget_slots == gadget_slot_weapons());
+		CHECK(gadget_items == kGadgetItems);
 		CHECK(curve_fire == kCurveFireWeapons);
 		CHECK(chooser_fire == std::set<std::string>{ "weapons/remington870/u_870 Dct 1P_MasterShotgunFire" });
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
@@ -494,9 +503,7 @@ TEST_SUITE("render-catalog-weapons-3p") {
 				gadget_parts.insert(e.weapon.unlock);
 			}
 		}
-		CHECK(gadget_parts ==
-				std::set<std::string>{ "weapons/gadgets/ammobag/u_ammobag", "weapons/gadgets/defibrillator/u_defib",
-						"weapons/gadgets/medicbag/u_medkit", "weapons/gadgets/radiobeacon/u_radiobeacon" });
+		CHECK(gadget_parts == gadget_slot_weapons());
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
 		std::printf("render.catalog_weapons_3p install.unchanged %s\n", diff.clean() ? "yes" : diff.summary().c_str());
 		CHECK(diff.clean());

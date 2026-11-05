@@ -4,6 +4,7 @@
 #include "tdm_fixture.h"
 
 #include "bf3/core/math.h"
+#include "bf3/core/util/text.h"
 #include "bf3/host/duel.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
@@ -181,6 +182,77 @@ TEST_SUITE("host-gunplay-loadout") {
 			}
 		}
 		CHECK(unpicked_variants == 0);
+		tdm::check_install_unchanged(*level);
+	}
+
+	TEST_CASE("loadout: every gadget-slot unlock the weapon catalog resolves has a weapon def, a picked C4 spawns in "
+			  "its slot") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		const auto noted = [&](const std::string &p_unlock) {
+			const std::string head = "gadget " + p_unlock + ": ";
+			return std::any_of(
+					gl.notes.begin(), gl.notes.end(), [&](const std::string &n) { return n.starts_with(head); });
+		};
+		size_t with_def = 0, without_def = 0;
+		for (uint8_t t = 1; t <= host::kKitTeams; ++t) {
+			for (uint8_t k = 0; k < host::kKitCount; ++k) {
+				const host::LoadoutKit *kit = gl.loadouts.kit(t, k);
+				REQUIRE(kit != nullptr);
+				for (const uint8_t s : host::kGadgetSlots) {
+					for (const host::LoadoutItem &item : kit->slots[s]) {
+						CAPTURE(item.unlock);
+						CAPTURE(unsigned(s));
+						if (item.def == sw::kNoWeapon) {
+							CHECK(noted(item.unlock));
+							++without_def;
+							continue;
+						}
+						REQUIRE(item.def < gl.defs.size());
+						CHECK(core::to_lower_ascii(gl.defs[item.def].variant) == item.unlock);
+						++with_def;
+					}
+				}
+			}
+		}
+		std::printf("gadget-slot items: %zu with a weapon def, %zu without (noted), %zu defs\n", with_def, without_def,
+				gl.defs.size());
+		for (const std::string &n : gl.notes) {
+			if (n.starts_with("gadget ")) {
+				std::printf("%s\n", n.c_str());
+			}
+		}
+		CHECK(with_def > 0);
+
+		const uint8_t support = uint8_t(host::KitRole::Support);
+		const host::LoadoutKit *us_support = gl.loadouts.kit(1, support);
+		REQUIRE(us_support != nullptr);
+		const size_t gadget2 = size_t(core::gameplay::WeaponSlot::Gadget2);
+		const auto c4 = std::find_if(us_support->slots[gadget2].begin(), us_support->slots[gadget2].end(),
+				[](const host::LoadoutItem &i) { return i.unlock == "weapons/gadgets/c4/u_c4"; });
+		REQUIRE(c4 != us_support->slots[gadget2].end());
+		REQUIRE(c4->def != sw::kNoWeapon);
+		std::unique_ptr<host::Gunplay> g = make_gunplay(*level);
+		host::LoadoutChoice choice;
+		choice.items[gadget2] = c4->identifier;
+		REQUIRE(g->select_loadout(0, 1, support, choice));
+		g->on_spawn(0, support, 1, 100);
+		REQUIRE(g->armed(0));
+		CHECK(g->weapons(0).slots[gadget2].def == c4->def);
+		CHECK(g->weapons(0).slots[gadget2].magazine > 0);
+		const sw::WeaponSimDef &c4_sim = g->table().defs[c4->def];
+		REQUIRE_FALSE(c4_sim.unlimited_ammo);
+		CHECK(g->weapons(0).slots[gadget2].reserve == c4_sim.magazines * c4_sim.magazine_capacity);
+		choice.specialization = specialization_id(gl, "explosiveboostl1");
+		REQUIRE(choice.specialization != 0);
+		REQUIRE(g->select_loadout(1, 1, support, choice));
+		g->on_spawn(1, support, 1, 100);
+		REQUIRE(g->armed(1));
+		CHECK(g->weapons(1).slots[gadget2].def == c4->def);
+		CHECK(g->weapons(1).slots[gadget2].reserve == 2 * c4_sim.magazines * c4_sim.magazine_capacity);
 		tdm::check_install_unchanged(*level);
 	}
 

@@ -2384,7 +2384,12 @@ TEST_SUITE("host-gunplay-gadgets") {
 			CHECK(host::default_loadout(g.loadouts, g.kits, team, 0).defs[4] == medkit->def);
 			CHECK(host::default_loadout(g.loadouts, g.kits, team, 2).defs[4] == ammo->def);
 			CHECK(host::default_loadout(g.loadouts, g.kits, team, 3).defs[5] == beacon->def);
-			CHECK(host::default_loadout(g.loadouts, g.kits, team, 1).defs[5] == sw::kNoWeapon);
+			const host::KitLoadout &engineer = g.kits.loadout(team, 1);
+			CHECK(engineer.unlocks[5] == "weapons/gadgets/repairtool/u_repairtool");
+			CHECK(engineer.defs[5] != sw::kNoWeapon);
+			CHECK(host::default_loadout(g.loadouts, g.kits, team, 1).defs[5] == engineer.defs[5]);
+			CHECK(std::none_of(g.gadgets.begin(), g.gadgets.end(),
+					[&](const sw::GadgetDef &p_gadget) { return p_gadget.def == engineer.defs[5]; }));
 			CHECK(g.kits.loadout(team, 3).defs[5] == beacon->def);
 		}
 	}
