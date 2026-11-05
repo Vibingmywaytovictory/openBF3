@@ -3,6 +3,7 @@
 #include "bf3/core/gameplay/eor_timeline.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/text.h"
+#include "bf3/host/tdm_brain.h"
 
 #include <algorithm>
 #include <chrono>
@@ -18,6 +19,21 @@
 #include <windows.h>
 
 namespace bf3::host {
+
+namespace {
+
+std::shared_ptr<const TdmBotConfig> keep_bot_stats(
+		const std::shared_ptr<const TdmBotConfig> &p_bots, const std::shared_ptr<const GameServerConfig> &p_current) {
+	if (p_bots == nullptr || p_current == nullptr || p_current->tdm_bots == nullptr ||
+			p_current->tdm_bots->stats == nullptr || p_bots->stats == p_current->tdm_bots->stats) {
+		return p_bots;
+	}
+	auto bots = std::make_shared<TdmBotConfig>(*p_bots);
+	bots->stats = p_current->tdm_bots->stats;
+	return bots;
+}
+
+}
 
 bool same_level(const LevelEntry &p_a, const LevelEntry &p_b) {
 	return core::iequals_ascii(p_a.level, p_b.level) && core::iequals_ascii(p_a.mode, p_b.mode);
@@ -173,6 +189,7 @@ std::unique_ptr<GameServer> Rotation::after_tick(GameServer &r_server) {
 		c.round_id = round_id_;
 		c.rules.hold_level_end = true;
 		c.carried_seats = r_server.seats_to_carry();
+		c.tdm_bots = keep_bot_stats(c.tdm_bots, current_config_);
 		next = std::make_unique<GameServer>();
 		const core::Status st = next->init(c);
 		if (st.ok()) {

@@ -787,6 +787,70 @@ TEST_SUITE("host-rotation") {
 		CHECK(peer.round_overs[0].next.level == level->shared->level);
 	}
 
+	TEST_CASE("rotation totals: the bots of every level count into the first level's TdmBotStats, so squad samples "
+			  "and orders grow on level 2") {
+		tt::TdmLevel *level = tt::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const std::string second = level->shared->level + "-two";
+		const std::shared_ptr<const host::SharedLevel> two = renamed(level->shared, second);
+		const auto counted = [&](std::shared_ptr<const host::SharedLevel> p_level, int p_kill_limit) {
+			host::GameServerConfig c = metro_config(std::move(p_level), *level, true);
+			c.rules.kill_limit_override = p_kill_limit;
+			auto bots = std::make_shared<host::TdmBotConfig>(*c.tdm_bots);
+			bots->stats = std::make_shared<host::TdmBotStats>();
+			c.tdm_bots = bots;
+			return std::make_shared<const host::GameServerConfig>(std::move(c));
+		};
+		const std::shared_ptr<const host::GameServerConfig> first = counted(level->shared, 1);
+		const std::shared_ptr<host::TdmBotStats> stats = first->tdm_bots->stats;
+		host::RotationConfig rc;
+		rc.maps.entries = { host::LevelEntry{ level->shared->level, level->shared->mode, 2 },
+			host::LevelEntry{ second, level->shared->mode, 1 } };
+		rc.first = first;
+		rc.background = false;
+		rc.intermission_override_s = 1.0f;
+		rc.load = [&](const host::LevelEntry &) -> core::Result<std::shared_ptr<const host::GameServerConfig>> {
+			return counted(two, 50);
+		};
+		host::Rotation rotation(rc);
+		auto server = std::make_unique<host::GameServer>();
+		REQUIRE(server->init(*first).ok());
+		std::vector<host::OutDatagram> out;
+		bool changed = false;
+		for (uint32_t i = 0; i < 2u * (kRoundTicks + kIntermissionTicks) && !changed; ++i) {
+			out.clear();
+			server->tick(out);
+			if (std::unique_ptr<host::GameServer> next = rotation.after_tick(*server)) {
+				server = std::move(next);
+				changed = true;
+			}
+		}
+		REQUIRE(changed);
+		const uint64_t samples0 = stats->squad_samples.load();
+		const uint64_t orders0 = stats->squad_orders.load();
+		bool grew = false;
+		uint32_t level_two_ticks = 0;
+		for (; level_two_ticks < 120u * kSecond && !grew; ++level_two_ticks) {
+			out.clear();
+			server->tick(out);
+			CHECK(rotation.after_tick(*server) == nullptr);
+			grew = stats->squad_samples.load() > samples0 && stats->squad_orders.load() > orders0;
+		}
+		const host::RotationStats rs = rotation.stats();
+		std::printf("rotation totals: level 1 squad samples %llu, orders %llu; level 2 after %.2f s: samples %llu, "
+					"orders %llu, bots made %u; %llu in place, %llu level changes\n",
+				(unsigned long long)samples0, (unsigned long long)orders0, double(level_two_ticks) / double(kSecond),
+				(unsigned long long)stats->squad_samples.load(), (unsigned long long)stats->squad_orders.load(),
+				unsigned(stats->bots.load()), (unsigned long long)rs.in_place, (unsigned long long)rs.level_changes);
+		CHECK(rs.in_place == 1u);
+		CHECK(rs.level_changes == 1u);
+		CHECK(stats->bots.load() == 24u);
+		CHECK(stats->squad_samples.load() > samples0);
+		CHECK(stats->squad_orders.load() > orders0);
+	}
+
 	TEST_CASE("install unchanged") {
 		tt::TdmLevel *level = tt::load_tdm_level_once();
 		if (level == nullptr) {
