@@ -14,9 +14,13 @@
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
+#include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/classes/viewport_texture.hpp>
+#include <godot_cpp/classes/window.hpp>
+#include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
@@ -348,6 +352,86 @@ CheckRow check_input_keys() {
 	return row;
 }
 
+namespace {
+
+constexpr uint64_t kHiddenFrames = 4;
+constexpr int kViewmodelDiff = 8;
+
+PackedByteArray viewport_rgba(Bf3LevelSession &p_session, int32_t &r_width, int32_t &r_height) {
+	const Ref<ViewportTexture> texture = p_session.get_viewport()->get_texture();
+	Ref<Image> image = texture.is_valid() ? texture->get_image() : Ref<Image>();
+	r_width = r_height = 0;
+	if (image.is_null()) {
+		return PackedByteArray();
+	}
+	if (image->get_format() != Image::FORMAT_RGBA8) {
+		image->convert(Image::FORMAT_RGBA8);
+	}
+	r_width = image->get_width();
+	r_height = image->get_height();
+	return image->get_data();
+}
+
+}
+
+ShotLuma shot_luma(const PackedByteArray &p_shown, const PackedByteArray &p_hidden, int32_t p_width, int32_t p_height) {
+	ShotLuma out;
+	const size_t pixels = size_t(std::max(p_width, 0)) * size_t(std::max(p_height, 0));
+	if (pixels == 0 || size_t(p_shown.size()) != pixels * 4 || size_t(p_hidden.size()) != pixels * 4) {
+		return out;
+	}
+	const uint8_t *shown = p_shown.ptr();
+	const uint8_t *hidden = p_hidden.ptr();
+	const auto luma = [](const uint8_t *p_px) { return 0.2126 * p_px[0] + 0.7152 * p_px[1] + 0.0722 * p_px[2]; };
+	double world = 0.0, viewmodel = 0.0;
+	size_t world_n = 0;
+	for (int32_t y = 0; y < p_height; ++y) {
+		for (int32_t x = 0; x < p_width; ++x) {
+			const size_t at = (size_t(y) * size_t(p_width) + size_t(x)) * 4;
+			if (y >= p_height / 2 && x >= p_width / 4 && x < p_width * 3 / 4) {
+				world += luma(hidden + at);
+				++world_n;
+			}
+			int diff = 0;
+			for (size_t k = 0; k < 3; ++k) {
+				diff = std::max(diff, std::abs(int(shown[at + k]) - int(hidden[at + k])));
+			}
+			if (diff > kViewmodelDiff) {
+				viewmodel += luma(shown + at);
+				++out.viewmodel_pixels;
+			}
+		}
+	}
+	out.world = world_n > 0 ? world / double(world_n) : 0.0;
+	out.viewmodel_share = double(out.viewmodel_pixels) / double(pixels);
+	out.viewmodel_mean = out.viewmodel_pixels > 0 ? viewmodel / double(out.viewmodel_pixels) : 0.0;
+	return out;
+}
+
+void ShotRunner::hide_viewmodels() {
+	hidden_viewmodels_.clear();
+	const TypedArray<Node> found = session_.get_tree()->get_root()->find_children("*", "Bf3Viewmodel", true, false);
+	for (int64_t i = 0; i < found.size(); ++i) {
+		Node *viewmodel = Object::cast_to<Node>(found[i]);
+		for (int32_t c = 0; viewmodel != nullptr && c < viewmodel->get_child_count(); ++c) {
+			Node3D *part = Object::cast_to<Node3D>(viewmodel->get_child(c));
+			if (part != nullptr && part->is_visible()) {
+				part->set_visible(false);
+				hidden_viewmodels_.push_back(part->get_instance_id());
+			}
+		}
+	}
+}
+
+void ShotRunner::show_viewmodels() {
+	for (const uint64_t id : hidden_viewmodels_) {
+		if (Node3D *node = Object::cast_to<Node3D>(ObjectDB::get_instance(id)); node != nullptr) {
+			node->set_visible(true);
+		}
+	}
+	hidden_viewmodels_.clear();
+}
+
 bool ShotRunner::parse(const std::string &p_shots, const std::string &p_spawns, std::vector<FreeShot> &r_free, std::vector<SpawnShot> &r_spawn,
 		std::string &r_error) {
 	{
@@ -522,11 +606,39 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 						lines_.push_back("screenshot failed: " + path);
 					}
 					UtilityFunctions::print(to_godot("[m1] shot " + lines_.back()));
+					if (luma_) {
+						shown_ = viewport_rgba(session_, shown_width_, shown_height_);
+						hide_viewmodels();
+						state_ = 4;
+						frames_ = 0;
+						return false;
+					}
 				}
 				mapper.release_all();
 				++next_;
 				state_ = 0;
 				return false;
+			case 4: {
+				if (frames_ < kHiddenFrames) {
+					return false;
+				}
+				int32_t width = 0, height = 0;
+				const PackedByteArray hidden = viewport_rgba(session_, width, height);
+				show_viewmodels();
+				const ShotLuma l = width == shown_width_ && height == shown_height_
+						? shot_luma(shown_, hidden, width, height)
+						: ShotLuma{};
+				lines_.push_back(fmt("luma spawn %u: world lower half %.1f / 255 (viewmodel hidden), viewmodel %zu px "
+									 "(%.2f %% of the frame) mean %.1f / 255",
+						shot.index, l.world, l.viewmodel_pixels, l.viewmodel_share * 100.0, l.viewmodel_mean));
+				UtilityFunctions::print(to_godot("[m1] shot " + lines_.back()));
+				UtilityFunctions::print(to_godot("[m1] shot " + session_.look_summary()));
+				shown_ = PackedByteArray();
+				mapper.release_all();
+				++next_;
+				state_ = 0;
+				return false;
+			}
 		}
 	}
 	if (next_ < spawn_.size() + teleport_.size()) {

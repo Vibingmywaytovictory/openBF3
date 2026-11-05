@@ -6,6 +6,8 @@
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/spawn.h"
 
+#include <godot_cpp/variant/packed_byte_array.hpp>
+
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -30,6 +32,16 @@ int print_check_table(const char *p_title, const std::vector<CheckRow> &p_rows);
 CheckRow check_surface_format();
 
 CheckRow check_input_keys();
+
+struct ShotLuma {
+	double world = 0.0;
+	size_t viewmodel_pixels = 0;
+	double viewmodel_share = 0.0;
+	double viewmodel_mean = 0.0;
+};
+
+ShotLuma shot_luma(const godot::PackedByteArray &p_shown, const godot::PackedByteArray &p_hidden, int32_t p_width,
+		int32_t p_height);
 
 class ShotRunner {
 public:
@@ -60,11 +72,15 @@ public:
 		settle_s_ = p_settle_s;
 		measure_frames_ = p_measure == 1 ? 2 : p_measure;
 	}
+	void set_luma(bool p_on) { luma_ = p_on; }
 	size_t saved() const { return saved_; }
 	size_t failed() const { return failed_; }
 	const std::vector<std::string> &lines() const { return lines_; }
 
 private:
+	void hide_viewmodels();
+	void show_viewmodels();
+
 	Bf3LevelSession &session_;
 	std::vector<FreeShot> free_;
 	std::vector<SpawnShot> spawn_;
@@ -91,6 +107,11 @@ private:
 	double median_cpu_sum_ms_ = 0.0, median_gpu_sum_ms_ = 0.0;
 	size_t median_views_ = 0;
 	std::vector<float> run_cpu_samples_;
+
+	bool luma_ = false;
+	godot::PackedByteArray shown_;
+	int32_t shown_width_ = 0, shown_height_ = 0;
+	std::vector<uint64_t> hidden_viewmodels_;
 };
 
 class M1Check {

@@ -352,13 +352,14 @@ void Bf3LevelSession::_ready() {
 		}
 		shots_ = std::make_unique<ShotRunner>(*this, std::move(free_shots), std::move(spawn_shots), user_arg_value("shot-dir"));
 		shots_->set_teleports(std::move(teleport_shots));
+		shots_->set_luma(has_user_arg("shot-luma"));
 
 		const double settle = std::clamp(std::atof(user_arg_value("shot-settle").c_str()), 0.0, 60.0);
 		const long measure = std::clamp(std::atol(user_arg_value("shot-measure").c_str()), 0L, 100000L);
 		shots_->set_timing(settle, uint32_t(measure));
 	}
 #else
-	for (const char *shot_arg : { "shots", "shot-spawns", "shot-teleports" }) {
+	for (const char *shot_arg : { "shots", "shot-spawns", "shot-teleports", "shot-luma" }) {
 		has_check_arg(shot_arg);
 	}
 #endif
