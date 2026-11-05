@@ -80,6 +80,7 @@ struct ServerSessionStats {
 
 uint64_t process_private_bytes();
 uint64_t process_peak_private_bytes();
+bool release_free_heap_memory();
 
 class ServerSession {
 public:

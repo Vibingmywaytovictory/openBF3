@@ -45,6 +45,12 @@ uint64_t process_peak_private_bytes() {
 	return uint64_t(memory_counters().PeakPagefileUsage);
 }
 
+bool release_free_heap_memory() {
+	HEAP_OPTIMIZE_RESOURCES_INFORMATION info{};
+	info.Version = HEAP_OPTIMIZE_RESOURCES_CURRENT_VERSION;
+	return HeapSetInformation(nullptr, HeapOptimizeResources, &info, sizeof(info)) != FALSE;
+}
+
 const char *prebake_state_name(PrebakeEntry::State p_state) {
 	switch (p_state) {
 		case PrebakeEntry::State::Pending:

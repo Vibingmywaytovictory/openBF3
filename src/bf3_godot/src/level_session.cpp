@@ -505,6 +505,7 @@ void Bf3LevelSession::run_loader() {
 
 	server_level_->database = host::LevelDatabase();
 	cache.reset();
+	host::release_free_heap_memory();
 	loader_done_.store(true, std::memory_order_release);
 }
 
@@ -1073,10 +1074,12 @@ void Bf3LevelSession::_process(double p_delta) {
 		return;
 	}
 	since_done_ += p_delta;
-	if (match_ != nullptr && !level_reported_ && frames_ > done_frame_ &&
-			(loader_done_.load(std::memory_order_acquire) || failed_)) {
+	if (!level_reported_ && frames_ > done_frame_ && (loader_done_.load(std::memory_order_acquire) || failed_)) {
 		level_reported_ = true;
-		match_->level_done(*this);
+		host::release_free_heap_memory();
+		if (match_ != nullptr) {
+			match_->level_done(*this);
+		}
 	}
 	frame_ms_after_done_.push_back(float(p_delta * 1000.0));
 	if (frame_ms_after_done_.size() > 100000) {

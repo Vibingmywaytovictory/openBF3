@@ -334,6 +334,7 @@ host::PrepareJob Bf3MatchHost::prepare_job() const {
 			return report.error();
 		}
 		outcome.cold = report->meshes.converted > 0 || report->weapons.converted > 0;
+		host::release_free_heap_memory();
 		return outcome;
 	};
 }
