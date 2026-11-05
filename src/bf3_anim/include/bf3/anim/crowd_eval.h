@@ -30,6 +30,10 @@ constexpr uint8_t kReloadStart = 1 << 0;
 constexpr uint8_t kHidden = 1 << 1;
 }
 
+inline constexpr uint8_t kCrowdPlantLeft = 1u << 0;
+inline constexpr uint8_t kCrowdPlantRight = 1u << 1;
+inline constexpr uint8_t kCrowdPlantsMeasured = 1u << 2;
+
 struct CrowdSoldierInput {
 	Vec3 position{};
 	Vec3 velocity{};
@@ -132,6 +136,8 @@ public:
 	std::span<const Xform> model(uint32_t p_i) const;
 	const CrowdFrameStats &stats() const;
 	uint64_t bad_inputs() const;
+
+	uint8_t foot_plants(uint32_t p_i) const;
 
 	bool muzzle_model(uint32_t p_i, Xform &r_model) const;
 

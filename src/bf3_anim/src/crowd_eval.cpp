@@ -63,6 +63,8 @@ struct CrowdEvaluator::Impl {
 		bool skipped_lod = false;
 		bool hidden = false;
 		uint8_t loco_clips = 0;
+		uint8_t plants = 0, plants_published = 0;
+		bool plants_measured = false;
 		bool two_cycle = false, idle_mix = false, reloading = false, aiming = false;
 		int8_t tier = -1;
 		int64_t done_ns = 0;
@@ -264,6 +266,8 @@ void CrowdEvaluator::Impl::publish(double p_blocked) {
 		}
 		stats.skipped_lod += s.skipped_lod ? 1 : 0;
 		stats.hidden += s.hidden ? 1 : 0;
+		s.plants_published = uint8_t(s.plants | (s.plants_measured ? kCrowdPlantsMeasured : 0u));
+		s.plants = 0;
 		last_ns = std::max(last_ns, s.done_ns);
 	}
 	const int64_t kick_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(kick_time.time_since_epoch()).count();
@@ -390,6 +394,9 @@ uint64_t CrowdEvaluator::bad_inputs() const {
 	return impl_->bad_inputs;
 }
 
+uint8_t CrowdEvaluator::foot_plants(uint32_t p_i) const {
+	return p_i < impl_->soldiers.size() ? impl_->soldiers[p_i].plants_published : 0;
+}
 }
 
 #include "bf3/anim/server_pose.h"
@@ -441,6 +448,8 @@ struct CrowdMoveRunDeleter {
 struct CrowdMoveStats {
 	uint32_t sampled = 0, moving = 0;
 	bool idle_mix = false;
+	bool plants_measured = false;
+	uint8_t plants = 0;
 };
 std::unique_ptr<CrowdMoveRun, CrowdMoveRunDeleter> crowd_move_make(const CrowdMoveGroupSet &p_set, const Skeleton &p_rig, uint32_t p_soldiers);
 bool crowd_move_pose(CrowdMoveRun &r_run, uint32_t p_i, size_t p_stance, const CrowdSoldierInput &p_input, float p_step, const LocalPose &p_idle,
@@ -888,6 +897,7 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 	}
 	if ((s.input.flags & crowd_flags::kHidden) != 0 || xs.hidden) {
 		s.hidden = true;
+		s.plants_measured = false;
 		finish();
 		return;
 	}
@@ -916,6 +926,7 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 	const float step = float(std::max(0.0, s.clock - s.last_eval_clock));
 	s.last_eval_clock = s.clock;
 	s.ever = true;
+	s.plants_measured = false;
 	const uint32_t team_index = std::min<uint32_t>(s.input.team, uint32_t(teams.size() - 1));
 	const Team &team = teams[team_index];
 	const Combat::Team &xteam = x.teams[team_index];
@@ -968,6 +979,8 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 				s.loco_clips = uint8_t(std::min<uint32_t>(ps.sampled, 255));
 				s.two_cycle = ps.moving >= 2;
 				s.idle_mix = ps.idle_mix;
+				s.plants |= ps.plants;
+				s.plants_measured = s.plants_measured || ps.plants_measured;
 				xs.moving = ps.moving >= 1;
 				return;
 			}
@@ -1367,6 +1380,35 @@ uint32_t sample_group_pose(const CrowdMoveGroup &p_group, const MoveGroupWeights
 	return n;
 }
 
+bool phase_crossed(float p_from, float p_advance, float p_at) {
+	if (!(p_at >= 0.0f) || !(p_advance > 0.0f) || p_advance >= 1.0f) {
+		return false;
+	}
+	float d = p_at - p_from;
+	d -= std::floor(d);
+	return d > 0.0f && d <= p_advance;
+}
+
+void foot_plants_crossed(const CrowdMoveGroup &p_group, const MoveGroupWeights &p_w, float p_from, float p_advance,
+		CrowdMoveStats &r_stats) {
+	const MoveGroupTerm *lead = nullptr;
+	for (uint32_t k = 0; k < p_w.count && k < kMaxMoveGroupTerms; ++k) {
+		const MoveGroupTerm &t = p_w.terms[k];
+		if (t.clip < p_group.plants.size() && p_group.timing[t.clip].seconds > 0.0f &&
+				(lead == nullptr || t.weight > lead->weight)) {
+			lead = &t;
+		}
+	}
+	if (lead == nullptr || !p_group.plants[lead->clip].valid()) {
+		return;
+	}
+	const CrowdFootPlants &f = p_group.plants[lead->clip];
+	const float from = p_from + lead->start_phase;
+	r_stats.plants_measured = true;
+	r_stats.plants = uint8_t((phase_crossed(from, p_advance, f.left) ? kCrowdPlantLeft : 0u) |
+			(phase_crossed(from, p_advance, f.right) ? kCrowdPlantRight : 0u));
+}
+
 float ramp_weight(float p_w, float p_target, float p_step, float p_seconds) {
 	const float d = p_seconds > 0.0f ? p_step / p_seconds : 1.0f;
 	return p_w < p_target ? std::min(p_target, p_w + d) : std::max(p_target, p_w - d);
@@ -1424,8 +1466,16 @@ bool crowd_move_pose(CrowdMoveRun &r_run, uint32_t p_i, size_t p_stance, const C
 		const float b = ws.cycles_per_second;
 		cps = cps > 0.0f && b > 0.0f ? (1.0f - sw) * cps + sw * b : (b > 0.0f ? b : cps);
 	}
+	const float phase_before = r_phase;
+	float advance = 0.0f;
 	if (x.move_w > 0.0f && cps > 0.0f && std::isfinite(cps)) {
 		r_phase = advance_phase(r_phase, step, 1.0f / cps);
+		advance = x.move_w >= 0.5f ? step * cps : 0.0f;
+	}
+	if (sw >= 0.5f) {
+		foot_plants_crossed(sprint_group, ws, phase_before, advance, r_stats);
+	} else {
+		foot_plants_crossed(main, wa, phase_before, advance, r_stats);
 	}
 	if (!(x.move_w > 0.0f)) {
 		r_out = p_idle;

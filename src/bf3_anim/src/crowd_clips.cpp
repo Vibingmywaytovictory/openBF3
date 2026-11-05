@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -79,6 +80,45 @@ Vec3 joint_model_position(const Skeleton &p_rig, const CrowdClipData &p_clip, in
 	return r_model[size_t(p_joint)].t;
 }
 
+float touchdown_phase(std::span<const float> p_height) {
+	const size_t n = p_height.size();
+	if (n < 2) {
+		return -1.0f;
+	}
+	const auto [lo, hi] = std::minmax_element(p_height.begin(), p_height.end());
+	const float contact = *lo + kCrowdFootContactM;
+	if (!std::isfinite(contact) || !(*hi > contact)) {
+		return -1.0f;
+	}
+	const size_t top = size_t(hi - p_height.begin());
+	for (size_t k = 1; k <= n; ++k) {
+		const size_t f = (top + k) % n, prev = (top + k - 1) % n;
+		if (p_height[f] <= contact && p_height[prev] > contact) {
+			const float t = (p_height[prev] - contact) / (p_height[prev] - p_height[f]);
+			const float u = (float(top + k - 1) + t) / float(n);
+			return u - std::floor(u);
+		}
+	}
+	return -1.0f;
+}
+
+}
+
+CrowdFootPlants measure_foot_plants(const Skeleton &p_rig, const CrowdClipData &p_clip) {
+	const int32_t left = p_rig.find(kCrowdLeftFoot), right = p_rig.find(kCrowdRightFoot);
+	const uint32_t frames = p_clip.tracks.end_frame;
+	if (left < 0 || right < 0 || frames < 2 || p_clip.binding.rig == nullptr) {
+		return {};
+	}
+	LocalPose pose;
+	core::ant::ClipPose scratch;
+	std::vector<Xform> model;
+	std::vector<float> l(frames), r(frames);
+	for (uint32_t f = 0; f < frames; ++f) {
+		l[f] = joint_model_position(p_rig, p_clip, left, float(f), pose, scratch, model).y;
+		r[f] = model[size_t(right)].t.y;
+	}
+	return CrowdFootPlants{ touchdown_phase(l), touchdown_phase(r) };
 }
 
 core::Result<CrowdClipSet> load_crowd_clips(const core::ant::AntPackageSource &p_source, const AntLibrary &p_library, const CrowdClipNames &p_names) {
@@ -787,6 +827,7 @@ core::Result<CrowdMoveGroupSet> load_crowd_move_groups(const CrowdClipSet &p_set
 					dir = Vec3{ dx / len, 0.0f, dz / len };
 				}
 			}
+			g.plants.push_back(measure_foot_plants(p_set.rig, *d));
 			g.clips.push_back(std::move(*d));
 			g.timing.push_back(tm);
 			g.root_dir.push_back(dir);
@@ -795,6 +836,7 @@ core::Result<CrowdMoveGroupSet> load_crowd_move_groups(const CrowdClipSet &p_set
 			out.notes.push_back(where + ": " + why + " (the stance keeps its cycles)");
 			g.clips.clear();
 			g.timing.clear();
+			g.plants.clear();
 			g.root_dir.clear();
 			continue;
 		}

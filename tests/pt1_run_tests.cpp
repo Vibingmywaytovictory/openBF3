@@ -817,6 +817,95 @@ TEST_SUITE("pt1-run") {
 		CHECK(sprint.def.clips[w65.terms[0].clip].controller == "Rifle_Sprint");
 	}
 
+	TEST_CASE("3p foot plants: each moving clip's LeftFoot and RightFoot touchdowns half a cycle apart; the evaluator "
+			  "reports them in turn at the move group's cadence, each with its foot down") {
+		Pt1Data *d = pt1_or_skip();
+		if (d == nullptr) {
+			return;
+		}
+		const Gait gaits[] = {
+			{ "run fwd 4.0", 0, Vec3{ 0, 0, 4.0f }, false, CrowdMoveGroupRole::Run, 0.0f },
+			{ "run left 3.0", 0, Vec3{ 3.0f, 0, 0 }, false, CrowdMoveGroupRole::Run, -0.5f * kPi },
+			{ "sprint fwd 6.5", 0, Vec3{ 0, 0, 6.5f }, true, CrowdMoveGroupRole::Sprint, 0.0f },
+		};
+		const Skeleton &rig = d->clips.rig;
+		const int32_t feet[2] = { rig.find(kCrowdLeftFoot), rig.find(kCrowdRightFoot) };
+		REQUIRE(feet[0] >= 0);
+		REQUIRE(feet[1] >= 0);
+		const SkinBinds binds = rig_binds(rig);
+		CrowdTeam t;
+		t.binds = &binds;
+		const std::vector<CrowdTeam> teams{ t, t };
+		CrowdStanceSet stance;
+		stance.moves = &d->moves;
+		stance.move_groups = &d->groups;
+		CrowdConfig cfg;
+		cfg.temporal_lod = false;
+		for (const Gait &g : gaits) {
+			CAPTURE(g.what);
+			const CrowdMoveGroup &grp = d->groups.get(g.group);
+			REQUIRE(grp.plants.size() == grp.clips.size());
+			const uint32_t clip = moving_clip(grp.def, g.x);
+			const CrowdFootPlants &p = grp.plants[clip];
+			REQUIRE(p.valid());
+			float apart = p.left - p.right;
+			apart -= std::floor(apart);
+			const float speed = std::sqrt(g.velocity.x * g.velocity.x + g.velocity.z * g.velocity.z);
+			const MoveGroupWeights w = move_group_weights(
+					grp.def, grp.timing, move_group_x(g.velocity, grp.x_sign), speed, d->groups.options);
+			REQUIRE(w.cycles_per_second > 0.0f);
+
+			auto e = CrowdEvaluator::make(d->clips, stance, teams, 1, cfg);
+			REQUIRE(e.ok());
+			CrowdSoldierInput in;
+			in.velocity = g.velocity;
+			in.sprinting = g.sprinting;
+			std::vector<std::pair<int, int>> plants;
+			std::array<float, 2> lowest{ 1e9f, 1e9f }, at_plant{ -1e9f, -1e9f };
+			uint32_t measured = 0;
+			for (int f = 0; f < kGaitFrames; ++f) {
+				in.position =
+						Vec3{ g.velocity.x * float(f * kFrameSeconds), 0.0f, g.velocity.z * float(f * kFrameSeconds) };
+				(*e)->set_inputs(std::span<const CrowdSoldierInput>(&in, 1), kFrameSeconds);
+				(*e)->evaluate_all_here();
+				const std::span<const Xform> m = (*e)->model(0);
+				REQUIRE(m.size() == rig.size());
+				const uint8_t bits = (*e)->foot_plants(0);
+				if (f < kGaitSkip) {
+					continue;
+				}
+				measured += (bits & kCrowdPlantsMeasured) != 0 ? 1u : 0u;
+				for (int k = 0; k < 2; ++k) {
+					const float y = m[size_t(feet[k])].t.y;
+					lowest[size_t(k)] = std::min(lowest[size_t(k)], y);
+					if ((bits & (k == 0 ? kCrowdPlantLeft : kCrowdPlantRight)) != 0) {
+						plants.emplace_back(f, k);
+						at_plant[size_t(k)] = std::max(at_plant[size_t(k)], y);
+					}
+				}
+			}
+			bool alternate = true;
+			for (size_t i = 1; i < plants.size(); ++i) {
+				alternate = alternate && plants[i].second != plants[i - 1].second;
+			}
+			const double seconds = plants.size() > 1
+					? double(plants.back().first - plants.front().first) * kFrameSeconds / double(plants.size() - 1)
+					: 0.0;
+			const double want = 0.5 / double(w.cycles_per_second);
+			MESSAGE(std::string(g.what), " ", grp.def.clips[clip].controller, ": touchdowns left ", p.left, ", right ",
+					p.right, " of the cycle; ", plants.size(), " plants every ", seconds, " s (half cycle ", want,
+					" s); a planting foot at most ", at_plant[0] - lowest[0], " / ", at_plant[1] - lowest[1],
+					" m above its lowest");
+			CHECK(std::fabs(apart - 0.5f) < 0.1f);
+			CHECK(measured == uint32_t(kGaitFrames - kGaitSkip));
+			CHECK(alternate);
+			CHECK(plants.size() >= 10);
+			CHECK(seconds == doctest::Approx(want).epsilon(0.05));
+			CHECK(at_plant[0] - lowest[0] < 0.05f);
+			CHECK(at_plant[1] - lowest[1] < 0.05f);
+		}
+	}
+
 	TEST_CASE("1p deltas: routes per weapon type, cadence and amplitude before and after") {
 		Pt1Data *d = pt1_or_skip();
 		if (d == nullptr) {

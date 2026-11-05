@@ -141,11 +141,24 @@ struct CrowdMoveGroupNames {
 	ChooserIndices indices;
 };
 
+inline constexpr std::string_view kCrowdLeftFoot = "LeftFoot";
+inline constexpr std::string_view kCrowdRightFoot = "RightFoot";
+inline constexpr float kCrowdFootContactM = 0.02f;
+
+struct CrowdFootPlants {
+	float left = -1.0f;
+	float right = -1.0f;
+	bool valid() const { return left >= 0.0f && right >= 0.0f; }
+};
+
+CrowdFootPlants measure_foot_plants(const Skeleton &p_rig, const CrowdClipData &p_clip);
+
 struct CrowdMoveGroup {
 	bool ok = false;
 	MoveGroupDef def;
 	std::vector<CrowdClipData> clips;
 	std::vector<MoveGroupClipTiming> timing;
+	std::vector<CrowdFootPlants> plants;
 	std::vector<Vec3> root_dir;
 	float x_sign = -1.0f;
 	float worst_direction_deg = 0.0f;
