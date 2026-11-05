@@ -22,6 +22,7 @@
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -917,6 +918,68 @@ TEST_SUITE("audio-patch") {
 		}
 		CHECK(same->value(num) == drawn);
 		CHECK(other->value(num) != drawn);
+	}
+
+	TEST_CASE("an Adsr with no Release input releases over R once its Trigger reads off: an event pulse plays the "
+			  "envelope out, a level holds it, a connected Release still holds") {
+		Builder b;
+		const uint16_t pulse = b.input(1, true), level = b.input(2, false), rel = b.input(3, true);
+		const uint16_t step = b.reg(), step_done = b.reg(), held = b.reg(), latched = b.reg();
+		const auto adsr = [&](uint16_t p_trigger, std::optional<uint16_t> p_release, float p_r, uint16_t p_value,
+								  std::optional<uint16_t> p_finished) {
+			const uint32_t n = b.node(SoundNodeType::Adsr);
+			b.set(n, cp::AdsrA, Builder::C(0.0f));
+			b.set(n, cp::AdsrD, Builder::C(0.0f));
+			b.set(n, cp::AdsrS, Builder::C(1.0f));
+			b.set(n, cp::AdsrR, Builder::C(p_r));
+			b.set(n, cp::AdsrTrigger, Builder::R(p_trigger));
+			if (p_release) {
+				b.set(n, cp::AdsrRelease, Builder::R(*p_release));
+			}
+			b.set(n, cp::AdsrValue, Builder::R(p_value));
+			if (p_finished) {
+				b.set(n, cp::AdsrFinished, Builder::R(*p_finished));
+			}
+		};
+		adsr(pulse, std::nullopt, 0.5f, step, step_done);
+		adsr(level, std::nullopt, 0.2f, held, std::nullopt);
+		adsr(pulse, rel, 0.2f, latched, std::nullopt);
+		auto inst = instance(b.build());
+		const double dt = 0.01;
+		inst->evaluate(dt);
+		inst->post_event(1, 0);
+		inst->set_parameter(2, 1.0f);
+		inst->evaluate(dt);
+		CHECK(inst->value(step) == 1.0f);
+		CHECK(inst->value(held) == 1.0f);
+		CHECK(inst->value(latched) == 1.0f);
+		inst->evaluate(dt);
+		inst->evaluate(0.0);
+		CHECK(inst->value(step) == doctest::Approx(0.98f));
+		float at_300ms = -1.0f;
+		bool finished = false;
+		for (int i = 0; i < 60; ++i) {
+			inst->evaluate(dt);
+			at_300ms = i == 29 ? inst->value(step) : at_300ms;
+			finished = finished || inst->value(step_done) == 1.0f;
+		}
+		MESSAGE("a pulse-triggered Adsr with R 0.5 s and no Release input: ", at_300ms, " at 0.3 s");
+		CHECK(at_300ms == doctest::Approx(0.4f).epsilon(0.03));
+		CHECK(inst->value(step) == 0.0f);
+		CHECK(finished);
+		CHECK(inst->value(held) == 1.0f);
+		CHECK(inst->value(latched) == 1.0f);
+		inst->set_parameter(2, 0.0f);
+		for (int i = 0; i < 30; ++i) {
+			inst->evaluate(dt);
+		}
+		CHECK(inst->value(held) == 0.0f);
+		CHECK(inst->value(latched) == 1.0f);
+		inst->post_event(3, 0);
+		for (int i = 0; i < 30; ++i) {
+			inst->evaluate(dt);
+		}
+		CHECK(inst->value(latched) == 0.0f);
 	}
 
 	TEST_CASE("a SingleShot Timer whose Period reads 0 ticks once at its first step: the modular explosions' 20 to "
