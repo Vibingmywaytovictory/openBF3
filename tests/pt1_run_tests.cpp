@@ -7,6 +7,7 @@
 #include "bf3/anim/locomotion.h"
 #include "bf3/anim/move_group.h"
 #include "bf3/anim/pose.h"
+#include "bf3/anim/server_pose.h"
 #include "bf3/anim/skeleton.h"
 #include "bf3/anim/viewmodel_anim.h"
 #include "bf3/core/ant/ant_install_source.h"
@@ -17,6 +18,7 @@
 #include "test_support.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -904,6 +906,223 @@ TEST_SUITE("pt1-run") {
 			CHECK(at_plant[0] - lowest[0] < 0.05f);
 			CHECK(at_plant[1] - lowest[1] < 0.05f);
 		}
+	}
+
+	TEST_CASE("3p weapon: with BF3's move groups and stance clips Wep_Root stays by the right hand in every gait, "
+			  "stance, stance change, aim and fire, the crouch and prone poses lower it, and its barrel points the way "
+			  "the soldier faces and aims except in the sprint and crawl carries the clips author across the body") {
+		Pt1Data *d = pt1_or_skip();
+		if (d == nullptr) {
+			return;
+		}
+		constexpr double kWeaponRootFromHandMetres = 0.3, kBarrelOffFacingDeg = 10.0, kStanceLowerMetres = 0.1,
+						 kMovingOffFacingDeg = 45.0, kBarrelOffClipsDeg = 0.5;
+		enum class Carry : uint8_t { Steady, Moving, Across };
+		const Skeleton &rig = d->clips.rig;
+		const int32_t wep = rig.find("Wep_Root"), hand = rig.find("RightHand");
+		REQUIRE(wep >= 0);
+		REQUIRE(hand >= 0);
+		const bf3::core::Result<AimMeasure> aim = measure_aim(d->clips, AdditiveOrder::LocalPost);
+		REQUIRE(aim.ok());
+		if (wep < 0 || hand < 0 || !aim.ok()) {
+			return;
+		}
+		Vec3 axis{};
+		(aim->barrel_axis == 0					? axis.x
+						: aim->barrel_axis == 1 ? axis.y
+												: axis.z) = aim->barrel_negative ? -1.0f : 1.0f;
+		const SkinBinds binds = rig_binds(rig);
+		CrowdTeam t;
+		t.binds = &binds;
+		const std::vector<CrowdTeam> teams{ t, t };
+		bf3::core::Result<ServerPoseClips> stance_clips = load_server_pose_clips(*d->source, *d->library);
+		REQUIRE_MESSAGE(stance_clips.ok(), (stance_clips.ok() ? "" : stance_clips.error().message));
+		if (!stance_clips.ok()) {
+			return;
+		}
+		CrowdStanceSet stance;
+		stance.pose = &*stance_clips;
+		stance.moves = &d->moves;
+		stance.move_groups = &d->groups;
+		CrowdConfig cfg;
+		cfg.temporal_lod = false;
+		struct Case {
+			const char *what;
+			uint8_t stance, target;
+			Vec3 velocity;
+			bool sprinting;
+			float pitch_deg;
+			int fire_every;
+			Carry carry;
+			ServerPoseClip pose;
+			CrowdMoveGroupRole group;
+		};
+		constexpr ServerPoseClip kStand = ServerPoseClip::StandIdle, kCrouch = ServerPoseClip::CrouchIdle,
+								 kProne = ServerPoseClip::ProneIdle;
+		constexpr CrowdMoveGroupRole kRun = CrowdMoveGroupRole::Run, kSneak = CrowdMoveGroupRole::Sneak,
+									 kNoGroup = CrowdMoveGroupRole::Count;
+		const Case cases[] = { { "stand idle", 0, 0, Vec3{}, false, 0.0f, 0, Carry::Steady, kStand, kNoGroup },
+			{ "stand aim up 40", 0, 0, Vec3{}, false, 40.0f, 0, Carry::Steady, kStand, kNoGroup },
+			{ "stand aim down 40", 0, 0, Vec3{}, false, -40.0f, 0, Carry::Steady, kStand, kNoGroup },
+			{ "stand fire", 0, 0, Vec3{}, false, 0.0f, 6, Carry::Moving, kStand, kNoGroup },
+			{ "walk fwd 1.5", 0, 0, Vec3{ 0, 0, 1.5f }, false, 0.0f, 0, Carry::Steady, kStand, kRun },
+			{ "run fwd 4.0", 0, 0, Vec3{ 0, 0, 4.0f }, false, 0.0f, 0, Carry::Steady, kStand, kRun },
+			{ "run fwd 4.0 fire", 0, 0, Vec3{ 0, 0, 4.0f }, false, 0.0f, 6, Carry::Moving, kStand, kRun },
+			{ "run left 3.0", 0, 0, Vec3{ 3.0f, 0, 0 }, false, 0.0f, 0, Carry::Steady, kStand, kRun },
+			{ "run right 3.0", 0, 0, Vec3{ -3.0f, 0, 0 }, false, 0.0f, 0, Carry::Steady, kStand, kRun },
+			{ "run bwd 3.0", 0, 0, Vec3{ 0, 0, -3.0f }, false, 0.0f, 0, Carry::Steady, kStand, kRun },
+			{ "run fwd-left 4.0", 0, 0, Vec3{ 2.8f, 0, 2.8f }, false, 0.0f, 0, Carry::Steady, kStand, kRun },
+			{ "sprint fwd 6.5", 0, 0, Vec3{ 0, 0, 6.5f }, true, 0.0f, 0, Carry::Across, kStand,
+					CrowdMoveGroupRole::Sprint },
+			{ "crouch idle", 1, 1, Vec3{}, false, 0.0f, 0, Carry::Steady, kCrouch, kNoGroup },
+			{ "crouch aim up 40", 1, 1, Vec3{}, false, 40.0f, 0, Carry::Steady, kCrouch, kNoGroup },
+			{ "crouch fire", 1, 1, Vec3{}, false, 0.0f, 6, Carry::Moving, kCrouch, kNoGroup },
+			{ "crouch fwd 2.0", 1, 1, Vec3{ 0, 0, 2.0f }, false, 0.0f, 0, Carry::Steady, kCrouch, kSneak },
+			{ "crouch left 1.4", 1, 1, Vec3{ 1.4f, 0, 0 }, false, 0.0f, 0, Carry::Steady, kCrouch, kSneak },
+			{ "prone idle", 2, 2, Vec3{}, false, 0.0f, 0, Carry::Steady, kProne, kNoGroup },
+			{ "prone aim up 20", 2, 2, Vec3{}, false, 20.0f, 0, Carry::Steady, kProne, kNoGroup },
+			{ "prone fwd 0.8", 2, 2, Vec3{ 0, 0, 0.8f }, false, 0.0f, 0, Carry::Across, kProne, kNoGroup },
+			{ "stand to crouch", 0, 1, Vec3{}, false, 0.0f, 0, Carry::Moving, ServerPoseClip::StandToCrouch, kNoGroup },
+			{ "crouch to stand", 1, 0, Vec3{}, false, 0.0f, 0, Carry::Moving, ServerPoseClip::CrouchToStand, kNoGroup },
+			{ "stand to prone", 0, 2, Vec3{}, false, 0.0f, 0, Carry::Moving, ServerPoseClip::StandToProne, kNoGroup },
+			{ "prone to stand", 2, 0, Vec3{}, false, 0.0f, 0, Carry::Moving, ServerPoseClip::ProneToStand, kNoGroup },
+			{ "crouch to prone", 1, 2, Vec3{}, false, 0.0f, 0, Carry::Moving, ServerPoseClip::CrouchToProne, kNoGroup },
+			{ "prone to crouch", 2, 1, Vec3{}, false, 0.0f, 0, Carry::Moving, ServerPoseClip::ProneToCrouch,
+					kNoGroup } };
+		std::array<double, 3> idle_height{};
+		struct Authored {
+			double azimuth = 0.0, elevation = 0.0;
+		};
+		const auto authored = [&](const CrowdClipData &p_clip, const std::string &p_name,
+									  const CrowdClipData *p_onto = nullptr) {
+			LocalPose pose, delta;
+			bf3::core::ant::ClipPose scratch;
+			std::vector<Xform> model;
+			Authored worst;
+			for (uint32_t f = 0; f <= p_clip.tracks.end_frame; ++f) {
+				if (p_onto != nullptr) {
+					sample_pose(rig, p_onto->clip, p_onto->tracks, 0.0f, pose, scratch);
+					delta = identity_pose(rig);
+					if (bf3::core::ant::sample_clip(p_clip.clip, float(f), scratch)) {
+						apply_clip_pose(p_clip.tracks, scratch, delta);
+					}
+					apply_additive(pose, delta, p_clip.mask, 1.0f, cfg.aim_order);
+				} else {
+					sample_pose(rig, p_clip.clip, p_clip.tracks, float(f), pose, scratch);
+				}
+				model_pose(rig, pose, model);
+				const Vec3 root_fwd = quat_rotate(model[size_t(d->clips.root_joint)].q, Vec3{ 0, 0, 1 });
+				const Vec3 barrel = quat_rotate(model[size_t(wep)].q, axis);
+				const double az = (std::atan2(double(barrel.x), double(barrel.z)) -
+										  std::atan2(double(root_fwd.x), double(root_fwd.z))) *
+						180.0 / std::numbers::pi;
+				worst.azimuth = std::max(worst.azimuth, std::fabs(std::remainder(az, 360.0)));
+				worst.elevation = std::max(worst.elevation,
+						std::fabs(std::asin(std::clamp(double(barrel.y), -1.0, 1.0))) * 180.0 / std::numbers::pi);
+			}
+			MESSAGE("3p weapon authored " << p_name << ": barrel azimuth up to " << worst.azimuth
+										  << " deg off the root's facing, elevation up to " << worst.elevation
+										  << " deg");
+			return worst;
+		};
+		std::array<double, kCrowdMoveGroupRoles> group_elevation{};
+		for (const CrowdMoveGroupRole role :
+				{ CrowdMoveGroupRole::Run, CrowdMoveGroupRole::Sprint, CrowdMoveGroupRole::Sneak }) {
+			const CrowdMoveGroup &grp = d->groups.get(role);
+			for (size_t k = 0; k < grp.def.clips.size() && k < grp.clips.size(); ++k) {
+				group_elevation[size_t(role)] = std::max(
+						group_elevation[size_t(role)], authored(grp.clips[k], grp.def.clips[k].controller).elevation);
+			}
+		}
+		const ServerPoseClipNames stance_names;
+		std::array<double, kServerPoseClips> pose_elevation{};
+		for (size_t k = 0; k < kServerPoseClips; ++k) {
+			if (stance_clips->present[k]) {
+				pose_elevation[k] = authored(stance_clips->clips[k], stance_names.controllers[k]).elevation;
+			}
+		}
+		REQUIRE(d->moves.has(CrowdMoveClip::CrouchFire));
+		const CrowdClipData &crouch_fire = d->moves.get(CrowdMoveClip::CrouchFire);
+		const double crouch_fire_elevation = authored(crouch_fire,
+				crouch_fire.additive ? "Rifle_CrouchFire onto the crouch idle" : "Rifle_CrouchFire",
+				crouch_fire.additive ? &stance_clips->get(kCrouch) : nullptr)
+													 .elevation;
+		const ServerPoseClip idle_of[3] = { kStand, kCrouch, kProne };
+		const auto allowed_off_aim = [&](const Case &p_case) {
+			double allowed = pose_elevation[size_t(p_case.pose)];
+			if (p_case.target != p_case.stance) {
+				allowed = std::max({ allowed, pose_elevation[size_t(idle_of[p_case.stance])],
+						pose_elevation[size_t(idle_of[p_case.target])] });
+			}
+			if (p_case.group != kNoGroup) {
+				allowed = std::max(allowed, group_elevation[size_t(p_case.group)]);
+			}
+			if (p_case.fire_every > 0) {
+				allowed = p_case.stance == 1 ? std::max(allowed, crouch_fire_elevation)
+											 : allowed + double(kCrowdFireKickDeg);
+			}
+			return allowed + kBarrelOffClipsDeg;
+		};
+		for (const Case &c : cases) {
+			auto e = CrowdEvaluator::make(d->clips, stance, teams, 1, cfg);
+			REQUIRE(e.ok());
+			if (!e.ok()) {
+				return;
+			}
+			CrowdSoldierInput in;
+			in.velocity = c.velocity;
+			in.sprinting = c.sprinting;
+			in.pose = in.target_pose = c.stance;
+			in.pitch = c.pitch_deg * kPi / 180.0f;
+			double worst_azimuth = 0.0, worst_hand = 0.0, worst_off_aim = 0.0, last_off_aim = 0.0, height = 0.0;
+			for (int f = 0; f < 150; ++f) {
+				in.position =
+						Vec3{ c.velocity.x * float(f * kFrameSeconds), 0.0f, c.velocity.z * float(f * kFrameSeconds) };
+				if (f >= 60) {
+					in.target_pose = c.target;
+					in.transition = c.target != c.stance ? float(f - 60) / 89.0f : 0.0f;
+				}
+				if (c.fire_every > 0 && f % c.fire_every == 0) {
+					in.fire_seq = uint8_t(in.fire_seq + 1);
+				}
+				(*e)->set_inputs(std::span<const CrowdSoldierInput>(&in, 1), kFrameSeconds);
+				(*e)->evaluate_all_here();
+				if (f < 60) {
+					continue;
+				}
+				const std::span<const Xform> m = (*e)->model(0);
+				REQUIRE(m.size() == rig.size());
+				const Vec3 barrel = quat_rotate(m[size_t(wep)].q, axis);
+				const double azimuth = std::atan2(double(barrel.x), double(barrel.z)) * 180.0 / std::numbers::pi;
+				last_off_aim = std::asin(std::clamp(double(barrel.y), -1.0, 1.0)) * 180.0 / std::numbers::pi -
+						double(c.pitch_deg);
+				worst_off_aim = std::max(worst_off_aim, std::fabs(last_off_aim));
+				worst_azimuth = std::max(worst_azimuth, std::fabs(azimuth));
+				worst_hand = std::max(worst_hand, vec_dist(m[size_t(wep)].t, m[size_t(hand)].t));
+				height = double(m[size_t(wep)].t.y);
+			}
+			if (c.target == c.stance && c.velocity.x == 0.0f && c.velocity.z == 0.0f && c.pitch_deg == 0.0f &&
+					c.fire_every == 0) {
+				idle_height[c.stance] = height;
+			}
+			const double allowed = allowed_off_aim(c);
+			MESSAGE("3p weapon " << std::string(c.what) << ": barrel azimuth up to " << worst_azimuth
+								 << " deg off the facing, elevation up to " << worst_off_aim
+								 << " deg off the aim in a frame (" << last_off_aim << " in the last, " << allowed
+								 << " allowed by the clips), Wep_Root up to " << worst_hand * 100.0
+								 << " cm from RightHand, " << height * 100.0 << " cm up");
+			CHECK(worst_hand < kWeaponRootFromHandMetres);
+			if (c.carry == Carry::Steady) {
+				CHECK(worst_azimuth < kBarrelOffFacingDeg);
+			} else if (c.carry == Carry::Moving) {
+				CHECK(worst_azimuth < kMovingOffFacingDeg);
+			}
+			if (c.carry != Carry::Across) {
+				CHECK(worst_off_aim < allowed);
+			}
+		}
+		CHECK(idle_height[1] < idle_height[0] - kStanceLowerMetres);
+		CHECK(idle_height[2] < idle_height[1] - kStanceLowerMetres);
 	}
 
 	TEST_CASE("1p deltas: routes per weapon type, cadence and amplitude before and after") {
