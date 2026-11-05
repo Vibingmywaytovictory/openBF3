@@ -811,7 +811,8 @@ bool PatchInstance::finished() const {
 			if (phase == AdsrPhase::Attack || phase == AdsrPhase::Decay || phase == AdsrPhase::Release) {
 				return false;
 			}
-		} else if (p.nodes[i].type == SoundNodeType::Timer && s.mode && ca::TimerMode(p.nodes[i].option) == ca::TimerMode::SingleShot) {
+		} else if (p.nodes[i].type == SoundNodeType::Timer && (s.mode || s.pulse) &&
+				ca::TimerMode(p.nodes[i].option) == ca::TimerMode::SingleShot) {
 			return false;
 		}
 	}

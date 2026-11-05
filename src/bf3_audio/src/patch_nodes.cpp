@@ -469,10 +469,11 @@ void PatchInstance::State::advance(double p_seconds) {
 			case SoundNodeType::Timer:
 				if (s.mode) {
 					const float period = read(port(n, cp::TimerPeriod));
+					const bool single = ca::TimerMode(n.option) == ca::TimerMode::SingleShot;
 					s.value += dt;
-					if (period > 0.0f && s.value >= period) {
+					if ((period > 0.0f || single) && s.value >= period) {
 						s.pulse = 1;
-						if (ca::TimerMode(n.option) == ca::TimerMode::SingleShot) {
+						if (single) {
 							s.mode = 0;
 							s.value = period;
 						} else {

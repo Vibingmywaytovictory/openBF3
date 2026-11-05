@@ -919,6 +919,80 @@ TEST_SUITE("audio-patch") {
 		CHECK(other->value(num) != drawn);
 	}
 
+	TEST_CASE("a SingleShot Timer whose Period reads 0 ticks once at its first step: the modular explosions' 20 to "
+			  "1020 m "
+			  "delay, 0 s within 20 m, triggers its Adsr and the instance finishes") {
+		Builder b;
+		const uint16_t start = b.input(1, true);
+		const uint16_t dist = b.reg(), period = b.reg(), tick = b.reg(), env = b.reg(), done = b.reg();
+		uint32_t n = b.node(SoundNodeType::Physics);
+		b.set(n, cp::PhysDistance, Builder::R(dist));
+		n = b.node(SoundNodeType::ScaleClamp);
+		b.set(n, cp::ScIn, Builder::R(dist));
+		b.set(n, cp::ScInMin, Builder::C(20.0f));
+		b.set(n, cp::ScInMax, Builder::C(1020.0f));
+		b.set(n, cp::ScOutMin, Builder::C(0.0f));
+		b.set(n, cp::ScOutMax, Builder::C(3.0f));
+		b.set(n, cp::ScOut, Builder::R(period));
+		n = b.node(SoundNodeType::Timer, uint8_t(TimerMode::SingleShot));
+		b.set(n, cp::TimerStart, Builder::R(start));
+		b.set(n, cp::TimerPeriod, Builder::R(period));
+		b.set(n, cp::TimerTick, Builder::R(tick));
+		n = b.node(SoundNodeType::Adsr);
+		b.set(n, cp::AdsrA, Builder::C(0.01f));
+		b.set(n, cp::AdsrD, Builder::C(0.01f));
+		b.set(n, cp::AdsrS, Builder::C(0.0f));
+		b.set(n, cp::AdsrR, Builder::C(0.01f));
+		b.set(n, cp::AdsrTrigger, Builder::R(tick));
+		b.set(n, cp::AdsrValue, Builder::R(env));
+		b.set(n, cp::AdsrFinished, Builder::R(done));
+		const std::shared_ptr<const SoundProgram> prog = b.build();
+		struct Run {
+			uint32_t ticks = 0;
+			int first_tick = -1;
+			int finished_at = -1;
+			float env_peak = 0.0f;
+		};
+		const auto run = [&](float p_distance) {
+			auto inst = instance(prog);
+			ba::EmitterState e;
+			e.position = ba::Vec3{ 0.0f, 0.0f, p_distance };
+			inst->set_geometry(e, ba::ListenerState{});
+			const double dt = 0.005;
+			inst->evaluate(dt);
+			inst->post_event(1, 0);
+			Run r;
+			for (int i = 0; i < 1000 && r.finished_at < 0; ++i) {
+				inst->evaluate(dt);
+				if (inst->value(tick) == 1.0f) {
+					++r.ticks;
+					r.first_tick = r.first_tick < 0 ? i : r.first_tick;
+				}
+				r.env_peak = std::max(r.env_peak, inst->value(env));
+				if (i > 0 && inst->finished()) {
+					r.finished_at = i;
+				}
+			}
+			return r;
+		};
+		for (const float d : { 0.0f, 5.0f, 20.0f }) {
+			CAPTURE(d);
+			const Run r = run(d);
+			CHECK(r.ticks == 1);
+			CHECK(r.first_tick >= 0);
+			CHECK(r.first_tick <= 2);
+			CHECK(r.env_peak > 0.9f);
+			CHECK(r.finished_at >= 0);
+			CHECK(r.finished_at < 20);
+		}
+		const Run far = run(520.0f);
+		CHECK(far.ticks == 1);
+		CHECK(far.first_tick >= 298);
+		CHECK(far.first_tick <= 302);
+		CHECK(far.env_peak > 0.9f);
+		CHECK(far.finished_at > far.first_tick);
+	}
+
 	TEST_CASE("MultiCrossfader reading R: bands, Start/Stop gating, LockControlValue") {
 		Builder b;
 		const uint16_t d = b.input(1, false), start = b.input(2, true), stop = b.input(3, true);
