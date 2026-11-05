@@ -435,6 +435,20 @@ void AudioIngameCheck::tally_steps(double p_now_s, Bf3GameAudio &r_audio, const 
 	for (const ba::FootstepPost &post : r_audio.footstep_posts()) {
 		if (post.slot != p_io.own_slot) {
 			++other_steps_;
+			if ((post.event == ba::FootstepEvent::Left || post.event == ba::FootstepEvent::Right) && step_params_) {
+				AudioIngameRemoteTally &r = remote_[post.speed > step_params_->run_threshold ? 1 : 0];
+				if (!post.animated_plant) {
+					++r.period;
+					continue;
+				}
+				++r.animated;
+				const auto last = remote_last_s_.find(post.slot);
+				if (last != remote_last_s_.end() && p_now_s - last->second < kAudioIngameRemoteGapSeconds) {
+					r.interval_sum += p_now_s - last->second;
+					++r.intervals;
+				}
+				remote_last_s_[post.slot] = p_now_s;
+			}
 			continue;
 		}
 		if (post.event == ba::FootstepEvent::Start) {
@@ -1213,6 +1227,24 @@ void AudioIngameCheck::analyse_steps(Bf3GameAudio &r_audio) {
 					(unsigned long long)(walk.starts + sprint.starts), walk.legs + sprint.legs,
 					(unsigned long long)(stand.stops + walk.stops + sprint.stops), (unsigned long long)stand.stops,
 					stands_after_moving_));
+	std::string remote;
+	uint64_t remote_animated = 0, remote_period = 0;
+	for (size_t g = 0; g < remote_.size(); ++g) {
+		const AudioIngameRemoteTally &r = remote_[g];
+		remote_animated += r.animated;
+		remote_period += r.period;
+		remote +=
+				core::fmt("%s%s %.1f m/s: %llu on the animation, %llu on the period, a soldier's animation steps every "
+						  "%.3f s (%llu intervals), the period's every %.3f s",
+						g == 0 ? "" : "; ", g == 0 ? "at or below" : "above",
+						step_params_ ? double(step_params_->run_threshold) : 0.0, (unsigned long long)r.animated,
+						(unsigned long long)r.period, r.intervals > 0 ? r.interval_sum / double(r.intervals) : 0.0,
+						(unsigned long long)r.intervals,
+						step_params_ ? double(g == 0 ? step_params_->walk_period : step_params_->run_period) : 0.0);
+	}
+	row("remote steps on the 3p animation",
+			remote_[0].animated >= kAudioIngameMinRemoteSteps && remote_animated > remote_period,
+			"other soldiers' steps on their 3p animation's foot touchdowns, by gait: " + remote);
 	const GameAudioStats now = r_audio.stats();
 	const ba::FootstepStats &a = stats_at_start_.footsteps;
 	const ba::FootstepStats &b = now.footsteps;

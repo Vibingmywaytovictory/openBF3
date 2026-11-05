@@ -46,6 +46,7 @@ struct GameFrame {
 	uint8_t own_team = 0;
 	std::span<const int32_t> own_step_tags;
 	bool own_steps_animated = false;
+	std::span<const uint8_t> other_plants;
 };
 
 }

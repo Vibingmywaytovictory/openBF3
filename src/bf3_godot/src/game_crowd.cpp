@@ -6,6 +6,7 @@
 #include "skin_upload.h"
 
 #include "bf3/anim/server_pose.h"
+#include "bf3/audio/footstep_driver.h"
 #include "bf3/core/ant/ant_install_source.h"
 #include "bf3/core/install.h"
 #include "bf3/core/job_queue.h"
@@ -149,6 +150,8 @@ struct Bf3GameCrowd::Impl {
 		uint8_t kit = 0;
 	};
 	std::array<Slot, kSlotsPerTeam> slots{};
+	std::array<uint8_t, kSlotsPerTeam> plants{};
+	void collect_plants();
 
 	struct CamCorpse {
 		bool active = false;
@@ -934,6 +937,7 @@ void Bf3GameCrowd::step(const GameFrame &p_frame) {
 	}
 	m.build_inputs(p_frame);
 	m.eval->wait_and_publish(*m.lanes);
+	m.collect_plants();
 	m.adopt_catalog();
 	if (m.uploader) {
 		m.uploader->upload(*m.eval, m.roots, m.upload_stats);
@@ -948,6 +952,21 @@ void Bf3GameCrowd::step(const GameFrame &p_frame) {
 
 std::span<const fx::MuzzleSample> Bf3GameCrowd::muzzles() const {
 	return impl_->muzzles;
+}
+
+void Bf3GameCrowd::Impl::collect_plants() {
+	for (uint32_t slot = 0; slot < kSlotsPerTeam; ++slot) {
+		const Slot &s = slots[slot];
+		const uint32_t index = uint32_t(s.team) * kSlotsPerTeam + slot + uint32_t(s.lane) * kCamLaneOffset;
+		const uint8_t p = s.known && s.present && !s.dead && index < kCrowdSoldiers ? eval->foot_plants(index) : 0u;
+		plants[slot] = uint8_t(((p & anim::kCrowdPlantLeft) != 0 ? audio::kFootPlantLeftBit : 0u) |
+				((p & anim::kCrowdPlantRight) != 0 ? audio::kFootPlantRightBit : 0u) |
+				((p & anim::kCrowdPlantsMeasured) != 0 ? audio::kFootPlantsAnimatedBit : 0u));
+	}
+}
+
+std::span<const uint8_t> Bf3GameCrowd::foot_plants() const {
+	return impl_->built ? std::span<const uint8_t>(impl_->plants) : std::span<const uint8_t>();
 }
 
 GameCrowdStats Bf3GameCrowd::stats() const {

@@ -66,6 +66,8 @@ inline constexpr float kAudioIngameRunOpenMeters = 24.0f;
 inline constexpr float kAudioIngameArriveMeters = 1.0f;
 inline constexpr double kAudioIngameArriveSeconds = 5.0;
 inline constexpr double kAudioIngameClipCadenceShare = 0.025;
+inline constexpr uint32_t kAudioIngameMinRemoteSteps = 10;
+inline constexpr double kAudioIngameRemoteGapSeconds = 1.0;
 
 struct AudioIngameSpot {
 	sim::Vec3 feet{};
@@ -129,6 +131,13 @@ struct AudioIngameLegTally {
 	float speed_max = 0.0f;
 	std::vector<std::pair<float, double>> intervals;
 	std::vector<double> clip_intervals;
+};
+
+struct AudioIngameRemoteTally {
+	uint64_t animated = 0;
+	uint64_t period = 0;
+	uint64_t intervals = 0;
+	double interval_sum = 0.0;
 };
 
 struct AudioSoundFate {
@@ -238,6 +247,8 @@ private:
 	uint32_t leg_index_ = 0;
 	std::array<AudioIngameLegTally, kAudioIngameLegs> legs_{};
 	uint64_t other_steps_ = 0;
+	std::array<AudioIngameRemoteTally, 2> remote_{};
+	std::map<uint8_t, double> remote_last_s_;
 	uint32_t stands_after_moving_ = 0;
 	double last_step_s_ = -1.0;
 	std::optional<sim::Vec3> last_feet_;

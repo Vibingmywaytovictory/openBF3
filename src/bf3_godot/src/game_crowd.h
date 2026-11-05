@@ -61,6 +61,7 @@ public:
 	size_t slot_accessory_meshes(uint8_t p_slot) const;
 
 	std::span<const fx::MuzzleSample> muzzles() const;
+	std::span<const uint8_t> foot_plants() const;
 	GameCrowdStats stats() const;
 	void shutdown();
 

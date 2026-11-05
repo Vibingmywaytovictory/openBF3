@@ -2983,6 +2983,45 @@ TEST_SUITE("audio-footsteps") {
 		CHECK(flagged == own_period);
 	}
 
+	TEST_CASE("a remote soldier on its 3p animation plants Left and Right on its foot touchdowns, never on the period, "
+			  "and none in the air; without the animation it steps on the period again") {
+		ba::FootstepScheduler s(unit_footstep_params());
+		std::vector<ba::FootstepPost> posts;
+		size_t plants = 0, plants_in_air = 0;
+		for (int f = 0; f < 240; ++f) {
+			std::array<ba::FootstepSoldier, 1> one{ walker(1, 3.0f, 6.5f) };
+			one[0].animated = f < 120;
+			const bool in_air = f >= 60 && f < 80;
+			one[0].mode = in_air ? bf3::sim::MoveMode::InAir : bf3::sim::MoveMode::OnGround;
+			if (one[0].animated && f % 17 == 5) {
+				one[0].plants = (f / 17) % 2 == 0 ? ba::kFootPlantLeftBit : ba::kFootPlantRightBit;
+				plants += in_air ? 0u : 1u;
+				plants_in_air += in_air ? 1u : 0u;
+			}
+			s.step(one, ba::Vec3{}, 1.0 / 64.0, posts);
+			if (f == 119) {
+				size_t on_plants = 0;
+				for (const ba::FootstepPost &x : posts) {
+					const bool step = x.event == ba::FootstepEvent::Left || x.event == ba::FootstepEvent::Right;
+					on_plants += step && x.animated_plant ? 1u : 0u;
+					CHECK((!step || x.animated_plant));
+				}
+				CHECK(on_plants == plants);
+				CHECK(count_events(posts, ba::FootstepEvent::Left, 1) +
+								count_events(posts, ba::FootstepEvent::Right, 1) ==
+						plants);
+			}
+		}
+		CHECK(plants == 6);
+		CHECK(plants_in_air == 1);
+		size_t period = 0;
+		for (const ba::FootstepPost &x : posts) {
+			const bool step = x.event == ba::FootstepEvent::Left || x.event == ba::FootstepEvent::Right;
+			period += step && !x.animated_plant ? 1u : 0u;
+		}
+		CHECK(period == 9);
+	}
+
 	TEST_CASE("a foot plants on the period's Left and Right and on the 1p animation's tags, at the soldier's speed; "
 			  "Start, Stop, Jump, Land and EnterAir plant none") {
 		CHECK(ba::footstep_plant(ba::FootstepEvent::Left));

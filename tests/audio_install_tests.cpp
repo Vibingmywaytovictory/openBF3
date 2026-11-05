@@ -2242,9 +2242,15 @@ TEST_SUITE("audio-footsteps") {
 		others[1].mode = bf3::sim::MoveMode::InAir;
 		std::vector<ba::FootstepSoldier> soldiers;
 		const std::array<int32_t, 2> own_tags{ -35609206, 5 };
-		ba::footstep_soldiers(frame.get(), others, 7, true, ba::OwnStepTags{ own_tags, true }, soldiers);
+		std::array<uint8_t, 16> plants{};
+		plants[7] = ba::kFootPlantsAnimatedBit | ba::kFootPlantLeftBit;
+		plants[9] = ba::kFootPlantsAnimatedBit | ba::kFootPlantRightBit;
+		ba::footstep_soldiers(frame.get(), others, 7, true, ba::OwnStepTags{ own_tags, true }, plants, soldiers);
 		REQUIRE(soldiers.size() == 2);
 		CHECK(soldiers[0].slot == 7);
+		CHECK(soldiers[0].plants == 0);
+		CHECK(soldiers[1].animated);
+		CHECK(soldiers[1].plants == ba::kFootPlantRightBit);
 		CHECK(soldiers[0].local_player);
 		CHECK(soldiers[0].animated);
 		CHECK(soldiers[0].tag_count == 2);
@@ -2261,16 +2267,17 @@ TEST_SUITE("audio-footsteps") {
 		CHECK_FALSE(soldiers[1].first_person);
 		CHECK(soldiers[1].mode == bf3::sim::MoveMode::InAir);
 		CHECK(soldiers[1].velocity.z == 2.0f);
-		ba::footstep_soldiers(frame.get(), others, 7, false, ba::OwnStepTags{ own_tags, true }, soldiers);
+		ba::footstep_soldiers(frame.get(), others, 7, false, ba::OwnStepTags{ own_tags, true }, {}, soldiers);
 		REQUIRE(soldiers.size() == 2);
 		CHECK(soldiers[0].local_player);
 		CHECK_FALSE(soldiers[0].animated);
 		CHECK(soldiers[0].tag_count == 0);
 		frame->own_curr.flags = 0;
-		ba::footstep_soldiers(frame.get(), others, 7, true, ba::OwnStepTags{}, soldiers);
+		ba::footstep_soldiers(frame.get(), others, 7, true, ba::OwnStepTags{}, {}, soldiers);
 		REQUIRE(soldiers.size() == 1);
 		CHECK(soldiers[0].slot == 9);
-		ba::footstep_soldiers(nullptr, others, 0xFF, false, ba::OwnStepTags{}, soldiers);
+		CHECK_FALSE(soldiers[0].animated);
+		ba::footstep_soldiers(nullptr, others, 0xFF, false, ba::OwnStepTags{}, {}, soldiers);
 		CHECK(soldiers.size() == 2);
 		check_unchanged(*f);
 	}

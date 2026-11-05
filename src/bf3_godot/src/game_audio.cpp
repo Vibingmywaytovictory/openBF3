@@ -375,7 +375,8 @@ void Bf3GameAudio::step(const GameFrame &p_frame, std::span<const fx::ImpactSoun
 	m.reverbs = nullptr;
 	m.driver.step(*m.router, m.impacts.get(), *m.clock, in, m.impact_requests, p_effect_sounds, m.flybys.get());
 	ba::footstep_soldiers(p_frame.frame, p_frame.others, p_frame.own_slot, in.own_first_person,
-			ba::OwnStepTags{ p_frame.own_step_tags, p_frame.own_steps_animated }, m.step_soldiers);
+			ba::OwnStepTags{ p_frame.own_step_tags, p_frame.own_steps_animated }, p_frame.other_plants,
+			m.step_soldiers);
 	if (m.footsteps) {
 		m.footsteps->step(m.step_soldiers, in.listener, p_frame.dt, m.clock->earliest_frame());
 	}
@@ -938,9 +939,9 @@ void capture_end(Impl &r_m) {
 				std::to_string(st.posts[size_t(ba::FootstepEvent::Jump)]) + " jumps, " +
 				std::to_string(st.posts[size_t(ba::FootstepEvent::Land)]) + " lands, " +
 				std::to_string(st.posts[size_t(ba::FootstepEvent::Animated)]) + " from the 1p animation, " +
-				std::to_string(st.local_period) + " own on the period, " + std::to_string(st.refused) + " refused, " +
-				std::to_string(st.no_ground) + " without ground, farthest " + std::to_string(st.farthest_m) +
-				" m, by SoundMaterialId" + ids)
+				std::to_string(st.local_period) + " own on the period, " + std::to_string(st.animated_plants) +
+				" on the 3p animation, " + std::to_string(st.refused) + " refused, " + std::to_string(st.no_ground) +
+				" without ground, farthest " + std::to_string(st.farthest_m) + " m, by SoundMaterialId" + ids)
 						.c_str()));
 	}
 	if (r_m.movement) {

@@ -108,7 +108,7 @@ std::optional<float> FootstepGroundProbe::sound_id(const Vec3 &p_feet) const {
 
 void footstep_soldiers(const host::PresentationFrame *p_frame, std::span<const host::PresentedSoldier> p_others,
 		uint8_t p_own_slot, bool p_own_first_person, const OwnStepTags &p_own_tags,
-		std::vector<FootstepSoldier> &r_out) {
+		std::span<const uint8_t> p_other_plants, std::vector<FootstepSoldier> &r_out) {
 	r_out.clear();
 	if (p_frame != nullptr && p_frame->valid && p_own_slot != 0xFF &&
 			(p_frame->own_curr.flags & sim::soldier_flags::kAlive) != 0) {
@@ -141,6 +141,10 @@ void footstep_soldiers(const host::PresentationFrame *p_frame, std::span<const h
 		s.velocity = Vec3{ p.velocity[0], p.velocity[1], p.velocity[2] };
 		s.pose = uint8_t(p.pose);
 		s.mode = p.mode;
+		if (p.slot < p_other_plants.size()) {
+			s.plants = uint8_t(p_other_plants[p.slot] & (kFootPlantLeftBit | kFootPlantRightBit));
+			s.animated = (p_other_plants[p.slot] & kFootPlantsAnimatedBit) != 0;
+		}
 		r_out.push_back(s);
 	}
 }

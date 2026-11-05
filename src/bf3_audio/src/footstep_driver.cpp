@@ -125,7 +125,7 @@ void FootstepScheduler::step(std::span<const FootstepSoldier> p_soldiers, const 
 		const float speed = speed_of(s.velocity);
 		const float normalized = params_.speed_scale > 0.0f ? speed / params_.speed_scale : 0.0f;
 		const auto post_as = [&](FootstepEvent p_event, uint32_t p_hash, float p_speed) {
-			r_out.push_back(FootstepPost{ s.slot, p_event, p_hash, p_speed, d, false });
+			r_out.push_back(FootstepPost{ s.slot, p_event, p_hash, p_speed, d, false, false });
 		};
 		const auto post = [&](FootstepEvent p_event) { post_as(p_event, footstep_event_hash(p_event), speed); };
 		if (it == tracks_.end()) {
@@ -169,7 +169,18 @@ void FootstepScheduler::step(std::span<const FootstepSoldier> p_soldiers, const 
 			}
 		}
 		const bool gated = s.local_player && params_.local_player_closes_period;
-		if ((gated && s.animated) || s.mode != sim::MoveMode::OnGround || !(speed > params_.walk_threshold)) {
+		const bool remote_animated = !s.local_player && s.animated;
+		if (remote_animated && s.mode == sim::MoveMode::OnGround) {
+			for (const auto &[bit, event] : { std::pair{ kFootPlantLeftBit, FootstepEvent::Left },
+						 std::pair{ kFootPlantRightBit, FootstepEvent::Right } }) {
+				if ((s.plants & bit) != 0) {
+					post(event);
+					r_out.back().animated_plant = true;
+				}
+			}
+		}
+		if ((gated && s.animated) || remote_animated || s.mode != sim::MoveMode::OnGround ||
+				!(speed > params_.walk_threshold)) {
 			t.phase = 0.0;
 			continue;
 		}
@@ -252,6 +263,7 @@ struct FootstepDriver::Impl {
 		}
 		++stats.posts[size_t(p_post.event)];
 		stats.local_period += p_post.local_period ? 1u : 0u;
+		stats.animated_plants += p_post.animated_plant ? 1u : 0u;
 		++stats.by_material[std::min<size_t>(size_t(material_key), kFootstepMaterialIds)];
 		stats.farthest_m = std::max(stats.farthest_m, p_post.distance_m);
 	}

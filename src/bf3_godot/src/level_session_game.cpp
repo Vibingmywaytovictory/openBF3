@@ -1082,6 +1082,7 @@ void step_game_parts(Node3D &r_parent, GameState &r_game, const host::Presentati
 	auto t0 = std::chrono::steady_clock::now();
 	if (r_game.crowd_built) {
 		r_game.crowd->step(mf);
+		mf.other_plants = r_game.crowd->foot_plants();
 	}
 	r_game.ms_crowd = ms_since(t0);
 	std::vector<fx::MuzzleSample> muzzles;

@@ -62,7 +62,7 @@ struct OwnStepTags {
 
 void footstep_soldiers(const host::PresentationFrame *p_frame, std::span<const host::PresentedSoldier> p_others,
 		uint8_t p_own_slot, bool p_own_first_person, const OwnStepTags &p_own_tags,
-		std::vector<FootstepSoldier> &r_out);
+		std::span<const uint8_t> p_other_plants, std::vector<FootstepSoldier> &r_out);
 
 std::optional<Vec3> own_hit_forward(const host::PresentEvent &p_hit, std::span<const host::PresentedSoldier> p_others);
 

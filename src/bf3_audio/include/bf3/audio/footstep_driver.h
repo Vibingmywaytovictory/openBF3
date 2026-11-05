@@ -24,6 +24,9 @@ namespace bf3::audio {
 inline constexpr size_t kMaxFootstepSoldiers = 128;
 inline constexpr size_t kFootstepMaterialIds = 16;
 inline constexpr size_t kMaxFootstepTags = 4;
+inline constexpr uint8_t kFootPlantLeftBit = 1u << 0;
+inline constexpr uint8_t kFootPlantRightBit = 1u << 1;
+inline constexpr uint8_t kFootPlantsAnimatedBit = 1u << 2;
 
 struct FootstepParams {
 	float walk_threshold = 0.0f;
@@ -63,6 +66,7 @@ struct FootstepSoldier {
 	bool first_person = false;
 	bool local_player = false;
 	bool animated = false;
+	uint8_t plants = 0;
 	uint8_t tag_count = 0;
 	std::array<int32_t, kMaxFootstepTags> tags{};
 };
@@ -75,6 +79,7 @@ struct FootstepPost {
 	float speed = 0.0f;
 	float distance_m = 0.0f;
 	bool local_period = false;
+	bool animated_plant = false;
 };
 static_assert(std::is_trivially_copyable_v<FootstepPost>);
 
@@ -110,6 +115,7 @@ struct FootstepStats {
 	uint64_t refused = 0;
 	uint64_t no_ground = 0;
 	uint64_t local_period = 0;
+	uint64_t animated_plants = 0;
 	uint64_t unknown_tags = 0;
 	uint64_t joined = 0;
 	std::array<uint64_t, kFootstepMaterialIds + 1> by_material{};
