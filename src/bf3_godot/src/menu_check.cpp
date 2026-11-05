@@ -242,9 +242,8 @@ std::vector<MenuCheck::Step> MenuCheck::steps() {
 			},
 			"open" });
 	s.push_back({ "Down highlights SCOREBOARD", row_is(1, "selected"), press(K::KEY_DOWN) });
-	s.push_back({ "Down skips SQUAD & TEAM to SUICIDE",
-			[](MenuCheck &, const Ctx &c) { return row_state(c, 2) == "inactive" && row_state(c, 3) == "selected"; },
-			press(K::KEY_DOWN) });
+	s.push_back({ "Down highlights SQUAD & TEAM", row_is(2, "selected"), press(K::KEY_DOWN) });
+	s.push_back({ "Down highlights SUICIDE", row_is(3, "selected"), press(K::KEY_DOWN) });
 	s.push_back({ "Down highlights OPTIONS", row_is(4, "selected"), press(K::KEY_DOWN) });
 	s.push_back({ "Down highlights QUIT",
 			[](MenuCheck &, const Ctx &c) { return shown(c, kIngameMenuPartition) && row_state(c, 5) == "selected"; },
@@ -279,6 +278,7 @@ std::vector<MenuCheck::Step> MenuCheck::steps() {
 			},
 			press(K::KEY_DOWN) });
 	s.push_back({ "SCOREBOARD highlighted again", row_is(1, "selected"), press(K::KEY_DOWN) });
+	s.push_back({ "SQUAD & TEAM highlighted", row_is(2, "selected"), press(K::KEY_DOWN) });
 	s.push_back({ "SUICIDE highlighted", row_is(3, "selected"), press(K::KEY_ENTER) });
 	s.push_back({ "SUICIDE asks in popupgeneric",
 			[](MenuCheck &, const Ctx &c) { return shown(c, kPopupGenericPartition); }, press(K::KEY_ENTER),
