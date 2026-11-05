@@ -572,21 +572,29 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 					const float spread = ps.output != UINT32_MAX ? p.outputs[ps.output].pan_size : 0.0f;
 					const StereoGains pan = equal_power_pan(st.geometry.azimuth, spread);
 					const float gl = pan.left * pan_scale, gr = pan.right * pan_scale;
-					const float l0 = ps.pan_started ? ps.pan_prev[0] : gl, r0 = ps.pan_started ? ps.pan_prev[1] : gr;
-					const float dl = gl - l0, dr = gr - r0;
+					if (!ps.pan_started) {
+						ps.pan_from[0] = gl;
+						ps.pan_from[1] = gr;
+						ps.pan_started = true;
+					} else if (p_offset == 0) {
+						ps.pan_from[0] = ps.pan_prev[0];
+						ps.pan_from[1] = ps.pan_prev[1];
+					}
+					const float block = float(std::max(p_offset + p_frames, std::min(r_buses.frames, kMaxSubBlock)));
+					const float dl = gl - ps.pan_from[0], dr = gr - ps.pan_from[1];
 					float peak = 0.0f;
 					for (uint32_t i = 0; i < p_frames; ++i) {
 						const float m = 0.5f * (ch[0][i] + ch[1][i]);
-						const float t = float(i + 1) / float(p_frames);
+						const float t = float(p_offset + i + 1) / block;
 						peak = std::max(peak, std::fabs(m));
-						ch[0][i] = m * (l0 + dl * t);
-						ch[1][i] = m * (r0 + dr * t);
+						ch[0][i] = m * (ps.pan_from[0] + dl * t);
+						ch[1][i] = m * (ps.pan_from[1] + dr * t);
 					}
-					st.voice_pan_step[v] = std::max(
-							st.voice_pan_step[v], peak * std::max(std::fabs(dl), std::fabs(dr)) / float(p_frames));
-					ps.pan_prev[0] = gl;
-					ps.pan_prev[1] = gr;
-					ps.pan_started = true;
+					st.voice_pan_step[v] =
+							std::max(st.voice_pan_step[v], peak * std::max(std::fabs(dl), std::fabs(dr)) / block);
+					const float done = float(p_offset + p_frames) / block;
+					ps.pan_prev[0] = ps.pan_from[0] + dl * done;
+					ps.pan_prev[1] = ps.pan_from[1] + dr * done;
 					break;
 				}
 				case PluginRole::Send: {

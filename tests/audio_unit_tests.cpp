@@ -1149,6 +1149,50 @@ TEST_SUITE("audio-patch") {
 		CHECK(inst->stats().pan_steps == 0);
 	}
 
+	TEST_CASE("a pan change ramps over the whole block even when an event splits the block early") {
+		const TestWave w = make_wave(1, 48000, -1, -1, 48000, true);
+		Builder b;
+		const uint16_t trig = b.input(1, true);
+		(void)b.input(2, true);
+		b.p.waves.push_back(SoundWaveRef{ w.partition, "test_wave" });
+		const uint32_t s = b.sampler(1, 0, SamplerLoop::None);
+		b.set(s, cp::SmpTrigger, Builder::R(trig));
+		SoundVoicePlugin pan;
+		pan.id = fourcc("Pn21");
+		pan.channels = 1;
+		b.p.plugins.insert(b.p.plugins.begin() + 4, pan);
+		b.p.voices[0].plugins_count = 6;
+		auto inst = instance(b.build(), w.bank);
+		ba::EmitterState emitter;
+		emitter.position = ba::Vec3{ 5.0f, 0.0f, 8.66f };
+		inst->set_geometry(emitter, ba::ListenerState{});
+		Buses buses;
+		inst->post_event(1, 0);
+		buses.block(*inst, 0);
+		buses.block(*inst, 512);
+		const float *l = buses.b.channels[size_t(MasterBus::GameMixMain)][0];
+		const float *r = buses.b.channels[size_t(MasterBus::GameMixMain)][1];
+		float left_before = 0.0f, right_before = 0.0f;
+		for (uint32_t i = 464; i < 512; ++i) {
+			left_before = std::max(left_before, std::fabs(l[i]));
+			right_before = std::max(right_before, std::fabs(r[i]));
+		}
+		emitter.position = ba::Vec3{ -5.0f, 0.0f, 8.66f };
+		inst->set_geometry(emitter, ba::ListenerState{});
+		inst->post_event(2, 6);
+		buses.block(*inst, 1024);
+		float left_after = 0.0f, right_after = 0.0f;
+		for (uint32_t i = 464; i < 512; ++i) {
+			left_after = std::max(left_after, std::fabs(l[i]));
+			right_after = std::max(right_after, std::fabs(r[i]));
+		}
+		CHECK(left_before > 0.1f);
+		CHECK(left_before > right_before * 1.5f);
+		CHECK(right_after == doctest::Approx(left_before).epsilon(0.05));
+		CHECK(left_after == doctest::Approx(right_before).epsilon(0.05));
+		CHECK(inst->stats().pan_steps == 0);
+	}
+
 	TEST_CASE("Sampler: a slot stepped twice within a block or across a block edge fades every old play out") {
 		const TestWave w = make_wave(5, 4800, 1, 3, 48000, true);
 		Builder b;

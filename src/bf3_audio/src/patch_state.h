@@ -155,6 +155,7 @@ struct PluginState {
 	float gain_prev = 0.0f;
 	bool gain_started = false;
 	float pan_prev[2] = { 0.0f, 0.0f };
+	float pan_from[2] = { 0.0f, 0.0f };
 	bool pan_started = false;
 	uint32_t delay_begin = 0, delay_frames = 0, delay_write = 0;
 	float attribute(uint8_t p_attribute) const {
