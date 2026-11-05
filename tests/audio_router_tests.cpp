@@ -30,6 +30,7 @@
 #include "bf3/core/path_guard.h"
 #include "bf3/core/util/text.h"
 #include "bf3/fx/effect_compiler.h"
+#include "bf3/fx/effect_library.h"
 #include "bf3/fx/impact_table.h"
 #include "bf3/fx/triggers.h"
 #include "bf3/host/client_projectiles.h"
@@ -1828,6 +1829,8 @@ struct GameFixture {
 	std::unique_ptr<level::LoadedLevel> metro;
 	std::shared_ptr<const host::GunplayLevel> gunplay;
 	std::vector<std::string> impact_names;
+	std::vector<std::string> effect_sound_names;
+	std::map<uint16_t, std::vector<std::string>> detonation_sounds;
 	std::string impact_note;
 	ba::GameAudioAssets assets;
 	ba::AudioTuning tuning;
@@ -1864,13 +1867,47 @@ GameFixture *game_fixture() {
 		Result<bf3::fx::ImpactTable> table = bf3::fx::ImpactTable::load(made->metro->db(), *grid, budget);
 		if (table) {
 			made->impact_names = bf3::fx::impact_sound_names(*table);
+			bf3::fx::EffectLibrary::Sources es;
+			es.fx.db = &made->metro->db();
+			es.impacts = &*table;
+			bf3::fx::EffectLibrary library(es);
+			Result<bf3::fx::FireEffectTable> fire = bf3::fx::load_fire_effects(made->metro->db(), made->gunplay->defs);
+			REQUIRE_MESSAGE(fire.ok(), (fire.ok() ? std::string() : fire.error().message));
+			std::vector<std::string> blueprints = fire->blueprints();
+			for (std::string &n : bf3::fx::impact_effect_names(*table)) {
+				blueprints.push_back(std::move(n));
+			}
+			std::sort(blueprints.begin(), blueprints.end());
+			blueprints.erase(std::unique(blueprints.begin(), blueprints.end()), blueprints.end());
+			library.preload(blueprints, 0);
+			for (const std::string &n : bf3::fx::impact_sound_names(*table, library, blueprints)) {
+				if (std::find(made->impact_names.begin(), made->impact_names.end(), n) == made->impact_names.end()) {
+					made->effect_sound_names.push_back(n);
+				}
+			}
+			for (size_t d = 0; d < fire->defs.size(); ++d) {
+				if (fire->defs[d].detonation.empty()) {
+					continue;
+				}
+				const Result<std::shared_ptr<const bf3::fx::EffectDef>> det = library.get(fire->defs[d].detonation);
+				if (!det || !*det) {
+					continue;
+				}
+				for (const bf3::fx::EffectComponentDef &c : (*det)->components) {
+					if (c.kind == bf3::fx::ComponentKind::Sound && !c.asset.empty()) {
+						made->detonation_sounds[uint16_t(d)].push_back(c.asset);
+					}
+				}
+			}
 		} else {
 			made->impact_note = "impact table: " + table.error().message;
 		}
 	} else {
 		made->impact_note = "impact table: no material grid for " + made->metro->root_name;
 	}
-	Result<ba::GameAudioAssets> a = ba::load_game_audio_assets(made->install, *made->metro, *made->gunplay, made->impact_names, 0);
+	std::vector<std::string> sounds = made->impact_names;
+	sounds.insert(sounds.end(), made->effect_sound_names.begin(), made->effect_sound_names.end());
+	Result<ba::GameAudioAssets> a = ba::load_game_audio_assets(made->install, *made->metro, *made->gunplay, sounds, 0);
 	REQUIRE_MESSAGE(a.ok(), (a.ok() ? std::string() : a.error().message));
 	made->assets = std::move(*a);
 	std::ifstream cfg(OPENBF3_AUDIO_TUNING_CFG, std::ios::binary);
@@ -2119,8 +2156,9 @@ struct GameRig {
 		impacts.reset();
 	}
 
-	void frame(const host::PresentationFrame &p_frame, uint64_t p_now_ns, std::span<const host::PresentEvent> p_events, uint8_t p_own_slot,
-			std::span<const ba::ImpactSoundRequest> p_impacts = {}) {
+	void frame(const host::PresentationFrame &p_frame, uint64_t p_now_ns, std::span<const host::PresentEvent> p_events,
+			uint8_t p_own_slot, std::span<const ba::ImpactSoundRequest> p_impacts = {},
+			std::span<const ba::EffectSoundRequest> p_effects = {}) {
 		now = host::present_clock(p_frame, p_now_ns);
 		clock->set_now(now);
 		presented = host::present_others(p_frame, p_now_ns, soldiers);
@@ -2134,7 +2172,7 @@ struct GameRig {
 		in.listener = listener;
 		in.own_slot = p_own_slot;
 		in.own_first_person = true;
-		driver->step(*router, impacts.get(), *clock, in, p_impacts);
+		driver->step(*router, impacts.get(), *clock, in, p_impacts, p_effects);
 		mixer->mix(buffer.data(), kFramesPerTick);
 	}
 	const host::PresentedSoldier *soldier(uint8_t p_slot) const {
@@ -3383,6 +3421,168 @@ TEST_SUITE("audio-game") {
 			CHECK(ws.bursts >= shooters.size() * 4);
 		}
 		CHECK(std::count(played.begin(), played.end(), uint64_t(0)) == 0);
+		check_game_unchanged(*f);
+	}
+
+	TEST_CASE("24 soldiers for 60 s with grenades bursting 3 to 60 m away: every sound ends by the data's rules, none "
+			  "killed by the one-shot pool or the router") {
+		GameFixture *f = need_game_install();
+		if (f == nullptr) {
+			return;
+		}
+		const ba::WeaponAudioTable &table = *f->assets.table;
+		std::vector<uint16_t> drivers, one_shots;
+		for (const ba::KitAudioItem &item : f->assets.kits.items) {
+			const ba::WeaponAudioForm form = table.defs[item.def].form;
+			(form == ba::WeaponAudioForm::Driver ? drivers : one_shots).push_back(item.def);
+		}
+		REQUIRE(!drivers.empty());
+		std::vector<uint16_t> grenades;
+		std::string grenade_line;
+		for (const auto &[def, names] : f->detonation_sounds) {
+			const bool known = std::all_of(names.begin(), names.end(),
+					[&](const std::string &n) { return f->assets.impacts->find(n) != nullptr; });
+			if (def < table.defs.size() && table.defs[def].explosive && known) {
+				grenades.push_back(def);
+				grenade_line += " " + std::to_string(def) + ":";
+				for (const std::string &n : names) {
+					grenade_line += " " + n;
+				}
+			}
+		}
+		MESSAGE("detonations with effect sounds:" << grenade_line);
+		REQUIRE(!grenades.empty());
+		GameRig rig(*f, nullptr);
+		use_game_mixer(rig, nullptr);
+		rig.listener.position = { 0.0f, 1.6f, 0.0f };
+		rig.mixer->record_cuts(true);
+		ba::SoundCategoryTable categories;
+		categories.add_weapons(table);
+		ba::SoundFateLedger ledger;
+		ledger.set_categories(&categories);
+		std::mt19937_64 rng(0x24u);
+		std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+		const double t_start = 600.25;
+		constexpr int kSeconds = 60;
+		constexpr uint32_t kShooters = 23;
+		std::vector<NetShooter> shooters(kShooters);
+		for (uint32_t i = 0; i < kShooters; ++i) {
+			NetShooter &s = shooters[i];
+			s.slot = uint8_t(1 + i);
+			s.state.life = 1;
+			const float r = 3.0f + 97.0f * unit(rng);
+			const float a = 6.2831853f * unit(rng);
+			s.state.position = { r * std::sin(a), 0.0f, r * std::cos(a) };
+			s.state.yaw = uint16_t(rng());
+			const bool one_shot = !one_shots.empty() && i % 9 == 4;
+			s.def = one_shot ? one_shots[i % one_shots.size()] : drivers[i % drivers.size()];
+			const double iv = one_shot ? 1.0 : std::max(0.06, table.defs[s.def].shot_interval_s);
+			const sw::SimTime interval = sw::SimTime(std::llround(iv * double(sw::kTimeUnitsPerSecond)));
+			for (double t = t_start + 30.0 + 120.0 * unit(rng); t < t_start + kSeconds * 60.0 - 120.0;) {
+				const bool automatic = table.defs[s.def].fire_mode != ba::WeaponFireMode::Single;
+				const uint32_t rounds = one_shot
+						? 1u
+						: (automatic ? 5u + uint32_t(unit(rng) * 30.0f) : 1u + uint32_t(unit(rng) * 10.0f));
+				s.burst(sw::SimTime(std::llround(t * double(sw::kTimeUnitsPerTick))), rounds, interval);
+				t += double(rounds) * iv * 60.0 + 60.0 + 180.0 * unit(rng);
+			}
+		}
+		std::vector<std::string_view> impact_names;
+		for (const std::string &n : f->impact_names) {
+			if (f->assets.impacts->find(n)) {
+				impact_names.push_back(n);
+			}
+		}
+		NetStream net;
+		std::vector<host::PresentEvent> events;
+		std::vector<ba::ImpactSoundRequest> impacts;
+		std::vector<ba::EffectSoundRequest> effects;
+		std::array<ba::MixerCutEvent, 512> cuts;
+		const auto drain_cuts = [&] {
+			for (size_t n = rig.mixer->poll_cuts(cuts); n > 0; n = rig.mixer->poll_cuts(cuts)) {
+				for (size_t k = 0; k < n; ++k) {
+					ledger.note(cuts[k], {});
+				}
+			}
+		};
+		uint32_t detonation_id = 1;
+		uint64_t near_detonations = 0, effect_requests = 0;
+		const uint64_t frames = uint64_t(kSeconds) * 60;
+		for (uint64_t fi = 0; fi < frames + 6 * 60; ++fi) {
+			const double t = t_start + double(fi);
+			const uint64_t now_ns = uint64_t(std::llround(t * kNsPerTick));
+			events.clear();
+			impacts.clear();
+			effects.clear();
+			net.advance(t, shooters, events);
+			net.publish(t, now_ns, shooters);
+			const host::PresentClock c = host::present_clock(*net.frame, now_ns);
+			if (fi < frames && !impact_names.empty() && fi % 6 == 0) {
+				ba::ImpactSoundRequest r;
+				r.patch = impact_names[size_t(rng() % impact_names.size())];
+				r.position = { 60.0f * (unit(rng) - 0.5f), 0.0f, 60.0f * (unit(rng) - 0.5f) };
+				r.seed = rng();
+				r.time = c.render;
+				r.timeline = host::PresentTimeline::Render;
+				impacts.push_back(r);
+			}
+			if (fi < frames && fi % 90 == 45 && c.valid(host::PresentTimeline::Render)) {
+				const bool near = (fi / 90) % 2 == 0;
+				const float r = near ? 3.0f + 17.0f * unit(rng) : 20.0f + 40.0f * unit(rng);
+				const float a = 6.2831853f * unit(rng);
+				const uint16_t def = grenades[(fi / 90) % grenades.size()];
+				host::PresentEvent e;
+				e.kind = host::PresentKind::Detonation;
+				e.timeline = host::PresentTimeline::Render;
+				e.slot = shooters[(fi / 90) % kShooters].slot;
+				e.def = def;
+				e.id = detonation_id;
+				e.time = c.render;
+				e.pos[0] = r * std::sin(a);
+				e.pos[1] = 0.0f;
+				e.pos[2] = r * std::cos(a);
+				events.push_back(e);
+				const std::vector<std::string> &names = f->detonation_sounds.at(def);
+				for (size_t k = 0; k < names.size(); ++k) {
+					ba::EffectSoundRequest q;
+					q.patch = names[k];
+					q.effect = detonation_id;
+					q.component = uint32_t(k);
+					q.position = { e.pos[0], e.pos[1], e.pos[2] };
+					effects.push_back(q);
+					++effect_requests;
+				}
+				++detonation_id;
+				near_detonations += near ? 1u : 0u;
+			}
+			rig.frame(*net.frame, now_ns, events, 0, impacts, effects);
+			drain_cuts();
+			net.trim(shooters);
+		}
+		const ba::WeaponAudioStats &ws = rig.router->stats();
+		const ba::ImpactAudioStats &is = rig.impacts->stats();
+		const ba::SoundFateTotals fates = ledger.totals(rig.mixer->clock(), ba::kMixRate);
+		MESSAGE(ledger.format(fates));
+		MESSAGE("router: bursts " << ws.bursts << " forgotten " << ws.forgotten << " stolen " << ws.stolen
+								  << "; effect sounds " << is.effect_sounds << " (" << near_detonations << " of "
+								  << detonation_id - 1 << " detonations within 20 m); pool: peak " << rig.pool->peak()
+								  << " stolen " << rig.pool->stolen() << " forgotten " << rig.pool->forgotten() << "; "
+								  << ba::format_mixer_cuts(rig.mixer->cut_stats()));
+		CHECK(fates.other_drops() == 0);
+		CHECK(fates.data_drops() > 0);
+		CHECK(fates.categories[size_t(ba::SoundCategory::Other)].requested > 0);
+		CHECK(fates.categories[size_t(ba::SoundCategory::Explosion)].requested > 0);
+		CHECK(ledger.untracked() == 0);
+		CHECK(ledger.overflows() == 0);
+		CHECK(rig.pool->forgotten() == 0);
+		CHECK(rig.pool->stolen() == 0);
+		CHECK(rig.pool->failed() == 0);
+		CHECK(ws.forgotten == 0);
+		CHECK(ws.stolen == 0);
+		CHECK(ws.mixer_refusals == 0);
+		CHECK(ws.bursts > 50);
+		CHECK(is.effect_sounds == effect_requests);
+		CHECK(near_detonations >= 15);
 		check_game_unchanged(*f);
 	}
 
