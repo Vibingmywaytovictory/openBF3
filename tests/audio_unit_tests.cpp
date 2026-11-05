@@ -1071,6 +1071,46 @@ TEST_SUITE("audio-patch") {
 		CHECK(again.left(100 + 480 - 512) == doctest::Approx(1000.0f / 32768.0f));
 	}
 
+	TEST_CASE("an instance finishes only once the tail of a filter after its sampler has rung out on the bus") {
+		const TestWave w = make_pieces(1, 1000, "");
+		Builder b;
+		const uint16_t trig = b.input(1, true);
+		b.p.waves.push_back(SoundWaveRef{ w.partition, "test_pieces" });
+		const uint32_t s = b.sampler(1, 0, SamplerLoop::None);
+		b.set(s, cp::SmpTrigger, Builder::R(trig));
+		SoundVoicePlugin hp;
+		hp.id = fourcc("HI20");
+		hp.channels = 1;
+		b.p.plugins.insert(b.p.plugins.begin() + 4, hp);
+		b.p.voices[0].plugins_count = 6;
+		b.p.links.push_back(SoundPluginLink{ s, SoundPluginRef{ 0, 4 }, 0, false, Builder::C(20.0f) });
+		auto inst = instance(b.build(), w.bank);
+		ba::SamplerTrace trace;
+		trace.entries.resize(16);
+		inst->set_sampler_trace(&trace);
+		Buses buses;
+		inst->post_event(1, 0);
+		uint64_t first = 0, end_frame = 0;
+		float edge_at_end = 0.0f;
+		for (; first < 512 * 200; first += 512) {
+			buses.block(*inst, first);
+			for (const SamplerTraceEntry &e : entries(trace)) {
+				if (e.kind == SamplerTraceKind::End && end_frame == 0) {
+					end_frame = e.frame;
+					edge_at_end = inst->edge().edge;
+				}
+			}
+			if (inst->finished()) {
+				break;
+			}
+		}
+		REQUIRE(end_frame > 0);
+		CHECK(edge_at_end > ba::kAudibleStep);
+		REQUIRE(inst->finished());
+		CHECK(inst->edge().edge <= ba::kSilentEdge);
+		CHECK(first + 512 - end_frame < 48000 / 4);
+	}
+
 	TEST_CASE("Sampler: a slot stepped twice within a block or across a block edge fades every old play out") {
 		const TestWave w = make_wave(5, 4800, 1, 3, 48000, true);
 		Builder b;

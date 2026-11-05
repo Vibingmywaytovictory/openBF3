@@ -144,6 +144,7 @@ enum class MixerCutKind : uint8_t {
 };
 inline constexpr size_t kMixerCutKinds = size_t(MixerCutKind::Count);
 inline constexpr float kAudibleStep = 1.0e-3f;
+inline constexpr float kSilentEdge = 1.0e-5f;
 inline constexpr float kLoudStep = 1.0e-2f;
 inline constexpr double kLateCallMs = 25.0;
 struct MixerCutEvent {

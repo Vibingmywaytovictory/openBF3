@@ -782,6 +782,9 @@ bool PatchInstance::finished() const {
 	if (st.program->stop_event != 0 && !st.stop_seen) {
 		return false;
 	}
+	if (std::max(std::fabs(st.edge[0]), std::fabs(st.edge[1])) > kSilentEdge) {
+		return false;
+	}
 	for (const SamplerState &s : st.samplers) {
 		if (s.active || st.sampler_busy(s)) {
 			return false;
