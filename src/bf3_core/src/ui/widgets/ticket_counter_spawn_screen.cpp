@@ -43,8 +43,8 @@ public:
 		if (k.player_team > 0) {
 			r_out.push_back({ "SDM_PlayerTeam", As2Value::of(k.player_team) });
 		}
-		r_out.push_back({ "TDM_FriendlyTickets", As2Value::of(k.player_team_kills) });
-		r_out.push_back({ "TDM_EnemyTickets", As2Value::of(k.enemy_team_kills) });
+		r_out.push_back({ "TDM_FriendlyTickets", As2Value::of(k.team1_kills) });
+		r_out.push_back({ "TDM_EnemyTickets", As2Value::of(k.team2_kills) });
 		if (p_client.localise_hash) {
 			if (p_model.team.friendly_team_name != 0) {
 				r_out.push_back({ "TDM_FriendlyTeamName",

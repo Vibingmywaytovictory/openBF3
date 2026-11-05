@@ -326,8 +326,8 @@ TEST_SUITE("ui-deploy") {
 		CHECK_FALSE(s.at("instance1.TicketCounterSpawnScreen_01").visible);
 		HudModel m{};
 		m.kill_counter.player_team = 1;
-		m.kill_counter.player_team_kills = 5;
-		m.kill_counter.enemy_team_kills = 8;
+		m.kill_counter.team1_kills = 5;
+		m.kill_counter.team2_kills = 8;
 		m.team.friendly_team_name = kUsHash;
 		m.team.enemy_team1_name = kRuHash;
 		s.hud->initialize(m);
@@ -340,7 +340,7 @@ TEST_SUITE("ui-deploy") {
 		const SwfMatrix w = swf_world_matrix(*s.scene, s.at(t).id);
 		CHECK(w.tx == doctest::Approx(769.0f));
 		CHECK(w.ty == doctest::Approx(97.0f));
-		m.kill_counter.enemy_team_kills = 9;
+		m.kill_counter.team2_kills = 9;
 		s.hud->refresh(m);
 		CHECK(s.at(t + ".txtTeam2Tickets").text == "9");
 		CHECK(s.at(t + ".txtTeam1Tickets").text == "5");

@@ -486,7 +486,7 @@ openbf3_test(test_ui_hud_screen test_main.cpp ui_hud_screen_tests.cpp ui_retail_
 target_link_libraries(test_ui_hud_screen PRIVATE bf3_core)
 add_test(NAME ui.hud.screen.unit COMMAND test_ui_hud_screen --test-suite=ui-hud-screen-unit)
 set(_openbf3_hud_screen_install "*hud*screen:*install*unchanged*")
-foreach(_w IN ITEMS assets:*screen*assets* ticket_counter:*TicketCounter* ammo:*Ammo health:*Health compass:*Compass
+foreach(_w IN ITEMS assets:*screen*assets* ticket_counter:*TicketCounter*:3 ammo:*Ammo health:*Health compass:*Compass
         background:*HudBackgroundWidget* minimap:*Minimap crosshair:*Crosshair hidden:*Hitindicator* kill_feed:*KillFeed
         kill_feed_team_kill:*KillFeed*team*kill* kill_log:*KillLog
         score_popup:*ScorePopup score_aggregator:*ScoreAggregator damage_indicator:*DamageIndicator hud_alert:*HudAlertMessage
@@ -495,7 +495,9 @@ foreach(_w IN ITEMS assets:*screen*assets* ticket_counter:*TicketCounter* ammo:*
     string(REPLACE ":" ";" _p "${_w}")
     list(GET _p 0 _name)
     list(GET _p 1 _case)
-    openbf3_case_row(NAME ui.hud.screen.${_name} EXE test_ui_hud_screen SUITE ui-hud-screen GROUP ui-hud-screen COUNT 2
+    list(APPEND _p 2)
+    list(GET _p 2 _count)
+    openbf3_case_row(NAME ui.hud.screen.${_name} EXE test_ui_hud_screen SUITE ui-hud-screen GROUP ui-hud-screen COUNT ${_count}
         CASES "${_case}" INSTALL_CASE ${_openbf3_hud_screen_install})
 endforeach()
 openbf3_split_cover(NAME ui.hud.screen.split_cover EXE test_ui_hud_screen SUITE ui-hud-screen GROUP ui-hud-screen

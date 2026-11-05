@@ -1054,6 +1054,61 @@ TEST_SUITE("ui-hud-screen") {
 		row("ticket_counter", "TDM rows tickets1 friendly / tickets0 enemy, name width " + std::to_string(name_w) + " -> right bound " + std::to_string(right));
 	}
 
+	TEST_CASE("hud screen: TicketCounterSpawnScreen keeps the own team's name and tickets left for either team") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const auto source_of = [&](std::string_view p_partition, std::string_view p_name) -> HudDataSource {
+			Result<HudScreenAsset> asset = read_hud_screen_asset(*r->level, p_partition);
+			REQUIRE(asset.ok());
+			for (const HudWidgetNode &w : asset->widgets) {
+				if (const HudDataSource *src = w.source(p_name)) {
+					return *src;
+				}
+			}
+			FAIL(std::string(p_name));
+			return {};
+		};
+		for (const auto &[spawn, ingame] : { std::pair{ "TDM_FriendlyTickets", "Team1TDMKills" },
+					 std::pair{ "TDM_EnemyTickets", "Team2TDMKills" } }) {
+			const HudDataSource a = source_of(kSpawnTicketCounterPartition, spawn);
+			const HudDataSource b = source_of(kHudTdmScreenPartition, ingame);
+			CHECK(a.key != 0);
+			CHECK(a.key == b.key);
+			CHECK(a.category == b.category);
+		}
+		const std::string t = "instance1.TicketCounterSpawnScreen_01.Ticket";
+		for (const int32_t team : { 1, 2 }) {
+			HudModel m{};
+			m.team.friendly_team_name = uint32_t(team);
+			m.team.enemy_team1_name = uint32_t(3 - team);
+			m.kill_counter.player_team = team;
+			m.kill_counter.team1_kills = 42;
+			m.kill_counter.team2_kills = 56;
+			m.kill_counter.player_team_kills = team == 1 ? 42 : 56;
+			m.kill_counter.enemy_team_kills = team == 1 ? 56 : 42;
+			Screen s = initialized(*r, kSpawnTicketCounterPartition, m);
+			const std::string own = team == 1 ? "US" : "RU";
+			const std::string enemy = team == 1 ? "RU" : "US";
+			const std::string own_tickets = team == 1 ? "42" : "56";
+			const std::string enemy_tickets = team == 1 ? "56" : "42";
+			CHECK(s.at(t + ".txtTeam1Team").text == own);
+			CHECK(s.at(t + ".txtTeam1Tickets").text == own_tickets);
+			CHECK(s.at(t + ".txtTeam2Team").text == enemy);
+			CHECK(s.at(t + ".txtTeam2Tickets").text == enemy_tickets);
+			m.kill_counter.team2_kills = 57;
+			m.kill_counter.player_team_kills = team == 1 ? 42 : 57;
+			m.kill_counter.enemy_team_kills = team == 1 ? 57 : 42;
+			s.hud->refresh(m);
+			CHECK(s.at(t + (team == 1 ? ".txtTeam2Tickets" : ".txtTeam1Tickets")).text == "57");
+			CHECK(s.at(t + (team == 1 ? ".txtTeam1Tickets" : ".txtTeam2Tickets")).text == "42");
+		}
+		row("ticket_counter",
+				"spawn screen: TDM_FriendlyTickets / TDM_EnemyTickets carry Team1Kills / Team2Kills and "
+				"the AS2 swaps them by SDM_PlayerTeam, so the own team reads left for US and RU");
+	}
+
 	TEST_CASE("hud screen: Ammo") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {
