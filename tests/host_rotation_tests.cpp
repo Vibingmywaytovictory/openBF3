@@ -5,6 +5,7 @@
 #include "bf3/host/map_list.h"
 #include "bf3/host/rotation.h"
 #include "bf3/host/server_session.h"
+#include "bf3/host/stuck_bots.h"
 #include "bf3/host/tdm_brain.h"
 #include "bf3/host/tdm_rules.h"
 #include "bf3/net/protocol.h"
@@ -962,5 +963,49 @@ TEST_SUITE("host-rotation") {
 			return;
 		}
 		tt::check_install_unchanged(*level);
+	}
+}
+
+TEST_SUITE("host-rotation-unit") {
+	TEST_CASE("stuck bots: a bot within 1 m for 1200 ticks counts once and a walking one never; a level change, or the "
+			  "next level's ticks starting again, starts every window again") {
+		struct Bot {
+			bool alive = true;
+			uint32_t life = 1;
+			sim::Vec3 at{};
+		};
+		const auto stats = [](sim::Tick p_tick, std::initializer_list<Bot> p_bots) {
+			host::GameServerStats g;
+			g.tick = p_tick;
+			for (const Bot &b : p_bots) {
+				host::SlotStats s;
+				s.used = true;
+				s.alive = b.alive;
+				s.life = b.life;
+				s.state.position = b.at;
+				g.slots.push_back(s);
+			}
+			return g;
+		};
+		host::StuckBots one_level;
+		for (sim::Tick t = 60; t <= 3060; t += 60) {
+			one_level.sample(
+					stats(t,
+							{ Bot{ true, 1, { 0.3f, 0.0f, 0.0f } }, Bot{ true, 1, { float(t) / 30.0f, 0.0f, 0.0f } } }),
+					0);
+			CHECK(one_level.count() == (t >= 60 + host::kStuckWindowTicks ? 1u : 0u));
+		}
+
+		for (const bool by_level : { true, false }) {
+			host::StuckBots swapped;
+			swapped.sample(stats(7000, { Bot{ true, 1, { 5.0f, 0.0f, 5.0f } } }), 0);
+			swapped.sample(stats(7060, { Bot{ true, 1, { 5.0f, 0.0f, 5.0f } } }), 0);
+			for (sim::Tick t = 60; t <= 1260; t += 60) {
+				const float x = 5.5f + float(t - 60) / 30.0f;
+				swapped.sample(stats(t, { Bot{ true, 1, { x, 0.0f, 5.0f } } }), by_level ? 1u : 0u);
+				CHECK_MESSAGE(
+						swapped.count() == 0u, (by_level ? "level change" : "ticks start again") << ", tick " << t);
+			}
+		}
 	}
 }

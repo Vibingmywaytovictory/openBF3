@@ -6,6 +6,7 @@
 #include "bf3/host/rotation.h"
 #include "bf3/host/server_host.h"
 #include "bf3/host/server_level.h"
+#include "bf3/host/stuck_bots.h"
 #include "bf3/net/master.h"
 
 #include <atomic>
@@ -53,9 +54,6 @@ struct PrebakeEntry {
 };
 const char *prebake_state_name(PrebakeEntry::State p_state);
 const char *match_phase_name(net::MatchPhase p_phase);
-
-inline constexpr uint32_t kStuckWindowTicks = 1200;
-inline constexpr float kStuckMetres = 1.0f;
 
 struct ServerSessionStats {
 	ServerStats server;
@@ -107,16 +105,7 @@ public:
 private:
 	void run_prebake();
 	GameServerConfig rotation_config(const ServerLevel &p_level) const;
-	void track_stuck(const GameServerStats &p_game);
 	net::MasterHeartbeat heartbeat() const;
-
-	struct StuckTrack {
-		uint32_t life = 0;
-		sim::Tick since = 0;
-		sim::Vec3 at{};
-		bool counted = false;
-		bool alive = false;
-	};
 
 	ServerSessionConfig config_;
 	std::unique_ptr<ServerLevel> level_;
@@ -132,8 +121,7 @@ private:
 	std::vector<PrebakeEntry> prebake_;
 	bool prebake_finished_ = true;
 
-	std::vector<StuckTrack> stuck_;
-	uint32_t stuck_bots_ = 0;
+	StuckBots stuck_;
 
 	net::MasterHeartbeater heartbeater_;
 };

@@ -8,7 +8,6 @@
 #include "bf3/sim/soldier_state.h"
 
 #include <algorithm>
-#include <cmath>
 #include <optional>
 #include <utility>
 
@@ -276,33 +275,6 @@ bool ServerSession::wait_prebake(std::chrono::milliseconds p_timeout) const {
 	return prebake_done_.wait_for(lock, p_timeout, [this] { return prebake_finished_; });
 }
 
-void ServerSession::track_stuck(const GameServerStats &p_game) {
-	stuck_.resize(p_game.slots.size());
-	for (size_t i = 0; i < p_game.slots.size(); ++i) {
-		const SlotStats &s = p_game.slots[i];
-		StuckTrack &t = stuck_[i];
-		if (!s.used || s.remote || !s.alive || s.life != t.life || !t.alive) {
-			t = StuckTrack{};
-			if (s.used && !s.remote && s.alive) {
-				t.alive = true;
-				t.life = s.life;
-				t.since = p_game.tick;
-				t.at = s.state.position;
-			}
-			continue;
-		}
-		if (p_game.tick - t.since >= kStuckWindowTicks) {
-			const float dx = s.state.position[0] - t.at[0], dz = s.state.position[2] - t.at[2];
-			if (std::sqrt(dx * dx + dz * dz) < kStuckMetres && !t.counted) {
-				++stuck_bots_;
-				t.counted = true;
-			}
-			t.since = p_game.tick;
-			t.at = s.state.position;
-		}
-	}
-}
-
 ServerSessionStats ServerSession::stats() {
 	ServerSessionStats out;
 	out.server = host_.stats();
@@ -313,8 +285,8 @@ ServerSessionStats ServerSession::stats() {
 	out.prebake = prebake();
 	out.private_bytes = process_private_bytes();
 	out.peak_private_bytes = process_peak_private_bytes();
-	track_stuck(out.game);
-	out.stuck_bots = stuck_bots_;
+	stuck_.sample(out.game, out.rotation.level_changes);
+	out.stuck_bots = stuck_.count();
 	for (const SlotStats &s : out.game.slots) {
 		out.bots += (s.used && !s.remote) ? 1u : 0u;
 	}
