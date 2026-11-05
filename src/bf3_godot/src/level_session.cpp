@@ -942,6 +942,7 @@ void Bf3LevelSession::try_done() {
 		return;
 	}
 	done_ = true;
+	done_frame_ = frames_;
 	timings_.done_us = now_us();
 	timings_.done_from_process_s = seconds_since_process_creation();
 	timings_.done_from_ready_s = double(timings_.done_us - timings_.ready_us) / 1e6;
@@ -1072,7 +1073,8 @@ void Bf3LevelSession::_process(double p_delta) {
 		return;
 	}
 	since_done_ += p_delta;
-	if (match_ != nullptr && !level_reported_ && (loader_done_.load(std::memory_order_acquire) || failed_)) {
+	if (match_ != nullptr && !level_reported_ && frames_ > done_frame_ &&
+			(loader_done_.load(std::memory_order_acquire) || failed_)) {
 		level_reported_ = true;
 		match_->level_done(*this);
 	}

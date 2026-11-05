@@ -239,6 +239,7 @@ private:
 	bool shut_down_ = false;
 	double since_done_ = 0.0;
 	uint64_t frames_ = 0;
+	uint64_t done_frame_ = 0;
 	std::vector<float> frame_ms_after_done_;
 	uint64_t others_presented_ = 0;
 	uint64_t others_extrapolated_ = 0;
