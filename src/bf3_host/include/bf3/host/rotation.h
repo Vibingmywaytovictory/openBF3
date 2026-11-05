@@ -35,6 +35,8 @@ struct RotationStats {
 	uint64_t in_place = 0;
 	uint64_t level_changes = 0;
 	uint64_t load_failures = 0;
+	int64_t kills = 0;
+	uint64_t squad_spawns = 0;
 	bool changing = false;
 	bool loading = false;
 	double last_load_s = 0.0;
@@ -68,6 +70,7 @@ private:
 	net::NextLevel next_identity(const LevelEntry &p_entry) const;
 	uint16_t intermission_s() const;
 	bool level_over(const GameServer &p_server) const;
+	void count_totals(const TdmRules &p_rules);
 	void join_loader();
 
 	RotationConfig config_;
@@ -77,6 +80,10 @@ private:
 	uint32_t round_id_ = 0;
 	sim::Tick round_over_tick_ = 0;
 	std::shared_ptr<const GameServerConfig> current_config_;
+	uint64_t restarts_seen_ = 0;
+	int64_t round_kills_ = 0;
+	int64_t banked_kills_ = 0;
+	uint64_t banked_spawns_ = 0;
 
 	mutable std::mutex mutex_;
 	std::thread loader_;

@@ -484,13 +484,13 @@ void DedicatedMainLoop::_finalize() {
 	}
 	session_->stop();
 	const core::SnapshotDiff diff = core::diff_snapshots(install_before_, install_.snapshot());
-	const host::ServerLevel &l = session_->level();
+	const host::LevelEntry &l = stats.rotation.current;
 	say(core::fmt("summary: %s %s loaded in %.2f s, played %.1f s, %llu ticks (%.2f Hz), tick p99 %.3f ms, overruns "
 				  "%llu, kills %d, stuck %u, brain %s, decisions %llu, squad samples %llu, squad median %.1f m, "
 				  "squad near %.1f %%, squad orders %llu, squad spawns %llu, private %.1f MiB "
 				  "(peak %.1f MiB), godot nodes %lld, resources %+lld since the load, textures %lld B, dev commands "
 				  "%s, install %s, stopped by %s",
-			l.entry.level.c_str(), l.entry.mode.c_str(), load_seconds_, elapsed_,
+			l.level.c_str(), l.mode.c_str(), load_seconds_, elapsed_,
 			(unsigned long long)stats.server.ticks, stats.server.measured_hz, stats.server.p99_step_ms,
 			(unsigned long long)stats.server.overruns, stats.kills, stats.stuck_bots, stats.brain,
 			(unsigned long long)stats.bot_decisions, (unsigned long long)stats.squad_samples,

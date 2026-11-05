@@ -531,6 +531,10 @@ TEST_SUITE("net-procs-rotation") {
 		CHECK(contains(server_out, "LoadStalled=1"));
 		CHECK(contains(server_summary, "install unchanged"));
 		CHECK(contains(server_summary, "stopped by --stop-after-levels"));
+		CHECK(contains(server_summary, "summary: MP_Subway TeamDeathMatch0 loaded in "));
+		const uint64_t kills = summary_number(server_summary, ", kills ");
+		CHECK(kills != UINT64_MAX);
+		CHECK(kills >= 15u);
 		MESSAGE(changes[0] << "\n"
 						   << changes[1] << "\n"
 						   << changes[2] << "\n"

@@ -817,17 +817,31 @@ TEST_SUITE("host-rotation") {
 		host::Rotation rotation(rc);
 		auto server = std::make_unique<host::GameServer>();
 		REQUIRE(server->init(*first).ok());
+		const auto kills = [&] {
+			const net::MatchState &m = server->rules()->match_state();
+			return int64_t(m.kills[0]) + int64_t(m.kills[1]);
+		};
 		std::vector<host::OutDatagram> out;
+		std::vector<int64_t> round_over_kills;
+		bool over = false;
 		bool changed = false;
+		uint64_t level_one_spawns = 0;
 		for (uint32_t i = 0; i < 2u * (kRoundTicks + kIntermissionTicks) && !changed; ++i) {
 			out.clear();
 			server->tick(out);
+			const bool now_over = phase_of(*server) == net::MatchPhase::RoundOver;
+			if (now_over && !over) {
+				round_over_kills.push_back(kills());
+			}
+			over = now_over;
+			level_one_spawns = server->rules()->stats().squad_spawns;
 			if (std::unique_ptr<host::GameServer> next = rotation.after_tick(*server)) {
 				server = std::move(next);
 				changed = true;
 			}
 		}
 		REQUIRE(changed);
+		REQUIRE(round_over_kills.size() == 2u);
 		const uint64_t samples0 = stats->squad_samples.load();
 		const uint64_t orders0 = stats->squad_orders.load();
 		bool grew = false;
@@ -836,19 +850,30 @@ TEST_SUITE("host-rotation") {
 			out.clear();
 			server->tick(out);
 			CHECK(rotation.after_tick(*server) == nullptr);
-			grew = stats->squad_samples.load() > samples0 && stats->squad_orders.load() > orders0;
+			grew = stats->squad_samples.load() > samples0 && stats->squad_orders.load() > orders0 && kills() > 0;
 		}
 		const host::RotationStats rs = rotation.stats();
-		std::printf("rotation totals: level 1 squad samples %llu, orders %llu; level 2 after %.2f s: samples %llu, "
-					"orders %llu, bots made %u; %llu in place, %llu level changes\n",
-				(unsigned long long)samples0, (unsigned long long)orders0, double(level_two_ticks) / double(kSecond),
-				(unsigned long long)stats->squad_samples.load(), (unsigned long long)stats->squad_orders.load(),
-				unsigned(stats->bots.load()), (unsigned long long)rs.in_place, (unsigned long long)rs.level_changes);
+		const int64_t played = round_over_kills[0] + round_over_kills[1];
+		const uint64_t level_two_spawns = server->rules()->stats().squad_spawns;
+		std::printf("rotation totals: level 1 squad samples %llu, orders %llu, round kills %lld and %lld, spawns on a "
+					"mate %llu; level 2 after %.2f s: samples %llu, orders %llu, bots made %u, kills %lld, spawns on a "
+					"mate %llu; rotation kills %lld, spawns on a mate %llu, %llu in place, %llu level changes\n",
+				(unsigned long long)samples0, (unsigned long long)orders0, (long long)round_over_kills[0],
+				(long long)round_over_kills[1], (unsigned long long)level_one_spawns,
+				double(level_two_ticks) / double(kSecond), (unsigned long long)stats->squad_samples.load(),
+				(unsigned long long)stats->squad_orders.load(), unsigned(stats->bots.load()), (long long)kills(),
+				(unsigned long long)level_two_spawns, (long long)rs.kills, (unsigned long long)rs.squad_spawns,
+				(unsigned long long)rs.in_place, (unsigned long long)rs.level_changes);
 		CHECK(rs.in_place == 1u);
 		CHECK(rs.level_changes == 1u);
 		CHECK(stats->bots.load() == 24u);
 		CHECK(stats->squad_samples.load() > samples0);
 		CHECK(stats->squad_orders.load() > orders0);
+		CHECK(round_over_kills[0] >= 1);
+		CHECK(round_over_kills[1] >= 1);
+		CHECK(kills() > 0);
+		CHECK(rs.kills == played + kills());
+		CHECK(rs.squad_spawns == level_one_spawns + level_two_spawns);
 	}
 
 	TEST_CASE("install unchanged") {

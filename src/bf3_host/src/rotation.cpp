@@ -133,6 +133,19 @@ uint16_t Rotation::intermission_s() const {
 	return config_.intermission_s;
 }
 
+void Rotation::count_totals(const TdmRules &p_rules) {
+	const RulesStats &rs = p_rules.stats();
+	if (rs.restarts != restarts_seen_) {
+		restarts_seen_ = rs.restarts;
+		banked_kills_ += round_kills_;
+	}
+	const net::MatchState &m = p_rules.match_state();
+	round_kills_ = int64_t(m.kills[0]) + int64_t(m.kills[1]);
+	std::lock_guard lock(mutex_);
+	stats_.kills = banked_kills_ + round_kills_;
+	stats_.squad_spawns = banked_spawns_ + rs.squad_spawns;
+}
+
 bool Rotation::level_over(const GameServer &p_server) const {
 	if (config_.intermission_override_s < 0.0f) {
 		return p_server.level_ended();
@@ -146,6 +159,7 @@ std::unique_ptr<GameServer> Rotation::after_tick(GameServer &r_server) {
 	if (rules == nullptr) {
 		return nullptr;
 	}
+	count_totals(*rules);
 	if (!announced_ && !changing_ && rules->phase() == net::MatchPhase::RoundOver) {
 		announced_ = true;
 		round_over_tick_ = r_server.current_tick();
@@ -213,9 +227,15 @@ std::unique_ptr<GameServer> Rotation::after_tick(GameServer &r_server) {
 		return nullptr;
 	}
 	changing_ = false;
+	banked_kills_ += round_kills_;
+	banked_spawns_ += rules->stats().squad_spawns;
+	round_kills_ = 0;
+	restarts_seen_ = 0;
 	std::lock_guard lock(mutex_);
 	stats_.changing = false;
 	++stats_.level_changes;
+	stats_.kills = banked_kills_;
+	stats_.squad_spawns = banked_spawns_;
 	return next;
 }
 

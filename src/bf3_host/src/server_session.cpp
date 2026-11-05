@@ -312,7 +312,9 @@ ServerSessionStats ServerSession::stats() {
 	for (const SlotStats &s : out.game.slots) {
 		out.bots += (s.used && !s.remote) ? 1u : 0u;
 	}
-	if (out.game.rules_active) {
+	if (rotation_ != nullptr) {
+		out.kills = int32_t(std::min<int64_t>(out.rotation.kills, INT32_MAX));
+	} else if (out.game.rules_active) {
 		out.kills = out.game.match.kills[0] + out.game.match.kills[1];
 	}
 	if (game_ != nullptr && game_->tdm_bots != nullptr && game_->tdm_bots->stats != nullptr) {
@@ -333,7 +335,7 @@ ServerSessionStats ServerSession::stats() {
 			}
 		}
 	}
-	out.squad_spawns = out.game.rules.squad_spawns;
+	out.squad_spawns = rotation_ != nullptr ? out.rotation.squad_spawns : out.game.rules.squad_spawns;
 	out.master = heartbeater_.running();
 	out.heartbeat = heartbeater_.stats();
 	return out;
