@@ -102,6 +102,7 @@ public:
 	core::Result<std::vector<std::string>> observe_area_waves(std::string_view p_patch, float p_area_type) const;
 	std::span<const audio::FootstepPost> footstep_posts() const;
 	std::string footstep_program() const;
+	std::optional<audio::FootstepParams> footstep_params() const;
 	std::vector<audio::FlyBySound> flyby_sounds() const;
 #endif
 	void shutdown();

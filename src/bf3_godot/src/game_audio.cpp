@@ -562,6 +562,10 @@ std::string Bf3GameAudio::footstep_program() const {
 	return impl_->soldier && impl_->soldier->footsteps ? impl_->soldier->footsteps->name : std::string();
 }
 
+std::optional<ba::FootstepParams> Bf3GameAudio::footstep_params() const {
+	return impl_->soldier ? std::optional<ba::FootstepParams>(impl_->soldier->params) : std::nullopt;
+}
+
 std::vector<ba::FlyBySound> Bf3GameAudio::flyby_sounds() const {
 	return impl_->flyby_sounds;
 }

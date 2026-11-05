@@ -100,6 +100,10 @@ uint32_t footstep_event_hash(FootstepEvent p_event) {
 	return 0;
 }
 
+bool footstep_plant(FootstepEvent p_event) {
+	return p_event == FootstepEvent::Left || p_event == FootstepEvent::Right || p_event == FootstepEvent::Animated;
+}
+
 FootstepScheduler::FootstepScheduler(const FootstepParams &p_params) : params_(p_params) {
 	tracks_.reserve(kMaxFootstepSoldiers);
 }

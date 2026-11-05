@@ -1227,6 +1227,12 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			return world != nullptr && level != nullptr ? audio_ingame_open_spot(*world, level->motor, level->spawns)
 														: std::nullopt;
 		};
+		io.locomotion = [&r_game]() -> std::optional<bf3::anim::VmLocomotion> {
+			const Bf3Viewmodel *vm = r_game.own_viewmodel();
+			const bf3::render::ViewmodelItem *item = vm != nullptr ? vm->current_item() : nullptr;
+			return item != nullptr ? std::optional<bf3::anim::VmLocomotion>(bf3::render::viewmodel_locomotion(*item))
+								   : std::nullopt;
+		};
 		io.teleport = [this](const AudioIngameSpot &p_spot) {
 			if (client_ == nullptr) {
 				return;

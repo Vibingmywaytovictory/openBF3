@@ -247,6 +247,7 @@ struct VmDeltaClip {
 };
 
 bool vm_tag_crossed(const VmDeltaClip &p_clip, float p_from_frame, float p_frames, float p_tag_frame);
+float vm_loco_fps(const VmDeltaClip &p_clip, bool p_sprint, float p_speed);
 
 struct VmLocomotion {
 	VmDeltaClip run;

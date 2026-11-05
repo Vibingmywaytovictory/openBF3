@@ -49,6 +49,7 @@ enum class FootstepEvent : uint8_t { Start, Stop, Jump, Land, Left, Right, Enter
 inline constexpr size_t kFootstepEventCount = 8;
 
 uint32_t footstep_event_hash(FootstepEvent p_event);
+bool footstep_plant(FootstepEvent p_event);
 
 std::optional<uint32_t> animated_step_event(const FootstepParams &p_params, int32_t p_tag);
 

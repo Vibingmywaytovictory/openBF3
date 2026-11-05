@@ -322,6 +322,21 @@ void AudioIngameCheck::note(const ba::MixerCutEvent &p_event, Bf3GameAudio &r_au
 	}
 }
 
+std::optional<double> audio_ingame_clip_steps_per_second(
+		const anim::VmLocomotion &p_loco, const ba::FootstepParams &p_params, bool p_sprint, float p_speed) {
+	const anim::VmDeltaClip &c = p_sprint ? p_loco.sprint : p_loco.run;
+	size_t steps = 0;
+	for (const anim::VmEventTag &tag : c.tags) {
+		steps += tag.frame >= c.start_frame && tag.frame < c.end_frame && ba::animated_step_event(p_params, tag.id)
+				? 1u
+				: 0u;
+	}
+	const float len = c.end_frame - c.start_frame;
+	const double rate =
+			len > 0.0f ? double(steps) * double(anim::vm_loco_fps(c, p_sprint, p_speed)) / double(len) : 0.0;
+	return rate > 0.0 && std::isfinite(rate) ? std::optional<double>(rate) : std::nullopt;
+}
+
 void AudioIngameCheck::pick_run_yaw(const AudioIngameIo &p_io) {
 	if (!p_io.clearance) {
 		return;
@@ -384,6 +399,13 @@ void AudioIngameCheck::tally_steps(double p_now_s, Bf3GameAudio &r_audio, const 
 		t.seconds += p_now_s - tally_s_;
 	}
 	tally_s_ = p_now_s;
+	if (settled && last_feet_) {
+		t.moved_m += std::hypot(p_io.feet[0] - (*last_feet_)[0], p_io.feet[2] - (*last_feet_)[2]);
+	}
+	last_feet_ = p_io.alive ? std::optional<sim::Vec3>(p_io.feet) : std::nullopt;
+	if (!step_params_) {
+		step_params_ = r_audio.footstep_params();
+	}
 	for (const ba::FootstepPost &post : r_audio.footstep_posts()) {
 		if (post.slot != p_io.own_slot) {
 			++other_steps_;
@@ -393,13 +415,20 @@ void AudioIngameCheck::tally_steps(double p_now_s, Bf3GameAudio &r_audio, const 
 			++t.starts;
 		} else if (post.event == ba::FootstepEvent::Stop) {
 			++t.stops;
-		} else if ((post.event == ba::FootstepEvent::Left || post.event == ba::FootstepEvent::Right) && settled) {
+		} else if (ba::footstep_plant(post.event) && settled) {
+			t.animated += post.event == ba::FootstepEvent::Animated ? 1u : 0u;
 			t.speed_min = t.steps == 0 ? post.speed : std::min(t.speed_min, post.speed);
 			t.speed_max = t.steps == 0 ? post.speed : std::max(t.speed_max, post.speed);
 			t.speed_sum += double(post.speed);
 			++t.steps;
 			if (last_step_s_ >= 0.0) {
 				t.intervals.emplace_back(post.speed, p_now_s - last_step_s_);
+				const std::optional<anim::VmLocomotion> loco = p_io.locomotion ? p_io.locomotion() : std::nullopt;
+				const std::optional<double> rate = loco && step_params_
+						? audio_ingame_clip_steps_per_second(
+								  *loco, *step_params_, leg_ == AudioIngameLeg::Sprint, post.speed)
+						: std::nullopt;
+				t.clip_intervals.push_back(rate ? 1.0 / *rate : 0.0);
 			}
 			last_step_s_ = p_now_s;
 		}
@@ -1065,42 +1094,69 @@ void AudioIngameCheck::analyse_steps(Bf3GameAudio &r_audio) {
 	};
 	const auto tally_text = [&](AudioIngameLeg p_leg) {
 		const AudioIngameLegTally &t = legs_[size_t(p_leg)];
-		return core::fmt("%s: %u legs, %llu own steps over %.1f s (%.2f steps/s), speed %.2f..%.2f mean %.2f m/s, "
-						 "%llu starts, %llu stops",
+		return core::fmt("%s: %u legs, %llu own steps (%llu from the 1p animation) over %.1f s (%.2f steps/s), speed "
+						 "%.2f..%.2f mean %.2f m/s, the own feet moved %.1f m (%.2f m/s), %llu starts, %llu stops",
 				std::string(kAudioIngameLegNames[size_t(p_leg)]).c_str(), t.legs, (unsigned long long)t.steps,
-				t.seconds, cadence(t), double(t.speed_min), double(t.speed_max), mean(t), (unsigned long long)t.starts,
+				(unsigned long long)t.animated, t.seconds, cadence(t), double(t.speed_min), double(t.speed_max),
+				mean(t), t.moved_m, t.seconds > 0.0 ? t.moved_m / t.seconds : 0.0, (unsigned long long)t.starts,
 				(unsigned long long)t.stops);
 	};
 	const AudioIngameLegTally &stand = legs_[size_t(AudioIngameLeg::Stand)];
 	const AudioIngameLegTally &walk = legs_[size_t(AudioIngameLeg::Walk)];
 	const AudioIngameLegTally &sprint = legs_[size_t(AudioIngameLeg::Sprint)];
-	row("own steps walking", walk.legs >= kAudioIngameMinLegs && walk.steps >= kAudioIngameMinLegSteps * walk.legs,
-			tally_text(AudioIngameLeg::Walk) +
-					core::fmt("; %u moving legs each along the clearest of %u yaws, the shortest clear %.1f of %.0f m; "
-							  "%u moves to the most open spawn point (%.1f m clear)",
-							run_picks_, kAudioIngameRunYaws, double(run_clear_min_m_), double(kAudioIngameRunMeters),
-							teleports_, double(spot_clear_m_)));
-	double walk_interval = 0.0, run_interval = 0.0;
-	size_t run_steps = 0;
-	for (const auto &[speed, interval] : walk.intervals) {
-		walk_interval += interval / double(walk.intervals.size());
+	double walk_interval = 0.0, run_interval = 0.0, walk_clip = 0.0, run_clip = 0.0;
+	size_t run_steps = 0, walk_known = 0, run_known = 0;
+	for (size_t i = 0; i < walk.intervals.size(); ++i) {
+		walk_interval += walk.intervals[i].second / double(walk.intervals.size());
+		walk_clip += walk.clip_intervals[i] / double(walk.intervals.size());
+		walk_known += walk.clip_intervals[i] > 0.0 ? 1u : 0u;
 	}
-	for (const auto &[speed, interval] : sprint.intervals) {
-		if (speed > walk.speed_max) {
-			run_interval += interval;
+	for (size_t i = 0; i < sprint.intervals.size(); ++i) {
+		if (sprint.intervals[i].first > walk.speed_max) {
+			run_interval += sprint.intervals[i].second;
+			run_clip += sprint.clip_intervals[i];
+			run_known += sprint.clip_intervals[i] > 0.0 ? 1u : 0u;
 			++run_steps;
 		}
 	}
 	run_interval = run_steps > 0 ? run_interval / double(run_steps) : 0.0;
+	run_clip = run_steps > 0 ? run_clip / double(run_steps) : 0.0;
+	const auto on_clip = [](double p_interval, double p_clip, size_t p_known, size_t p_intervals) {
+		return p_intervals > 0 && p_known == p_intervals &&
+				std::fabs(p_interval / p_clip - 1.0) <= kAudioIngameClipCadenceShare;
+	};
+	const bool walk_animated = walk.animated > 0 && walk.animated == walk.steps;
+	const bool walk_cadence = walk.animated == 0 ||
+			(walk_animated && on_clip(walk_interval, walk_clip, walk_known, walk.intervals.size()));
+	row("own steps walking",
+			walk.legs >= kAudioIngameMinLegs && walk.steps >= kAudioIngameMinLegSteps * walk.legs && walk_cadence,
+			tally_text(AudioIngameLeg::Walk) +
+					core::fmt(
+							"; %u moving legs each along the clearest of %u yaws, the shortest clear %.1f of %.0f m; "
+							"%u moves to the most open spawn point (%.1f m clear); steps every %.3f s, the run clip's "
+							"step tags every %.3f s at the step speeds (%zu of %zu known; %s)",
+							run_picks_, kAudioIngameRunYaws, double(run_clear_min_m_), double(kAudioIngameRunMeters),
+							teleports_, double(spot_clear_m_), walk_interval, walk_clip, walk_known,
+							walk.intervals.size(),
+							walk.animated == 0		? "on the period, no clip cadence"
+									: walk_animated ? "on the 1p animation, they must match within the share"
+													: "period and animation steps mixed"));
+	const bool on_period = walk.animated == 0 && sprint.animated == 0;
+	const bool on_animation = walk_animated && sprint.animated == sprint.steps;
+	const bool gait_cadence = on_period ? run_interval < walk_interval
+										: on_animation && on_clip(run_interval, run_clip, run_known, run_steps);
 	row("own steps sprinting",
 			sprint.legs >= kAudioIngameMinLegs && sprint.steps >= kAudioIngameMinLegSteps * sprint.legs &&
-					run_steps >= kAudioIngameMinLegSteps && sprint.speed_max > walk.speed_max &&
-					run_interval < walk_interval,
+					run_steps >= kAudioIngameMinLegSteps && sprint.speed_max > walk.speed_max && gait_cadence,
 			tally_text(AudioIngameLeg::Sprint) +
-					core::fmt("; %zu sprint steps faster than any walking step come every %.3f s, walking steps "
-							  "every %.3f s; against ",
-							run_steps, run_interval, walk_interval) +
-					tally_text(AudioIngameLeg::Walk));
+					core::fmt("; %zu sprint steps faster than any walking step come every %.3f s, the sprint clip's "
+							  "step tags every %.3f s (%zu of %zu known), walking steps every %.3f s; %s; against ",
+							run_steps, run_interval, run_clip, run_known, run_steps, walk_interval,
+							on_period ? "on the period, sprint steps must come sooner"
+									: on_animation
+									? "on the 1p animation, sprint steps must match the sprint clip within the share"
+									: "period and animation steps mixed") +
+					tally_text(AudioIngameLeg::Walk) + core::fmt("; the share %.3f", kAudioIngameClipCadenceShare));
 	row("no own steps standing", stand.legs >= kAudioIngameMinLegs && stand.steps == 0,
 			tally_text(AudioIngameLeg::Stand) +
 					core::fmt(" (after the first %.1f s of each leg)", kAudioIngameLegSettleSeconds));

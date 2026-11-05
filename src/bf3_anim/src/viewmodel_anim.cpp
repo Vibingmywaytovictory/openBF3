@@ -1051,6 +1051,11 @@ void vm_loco_tags(const VmDeltaClip &p_clip, float p_from_frame, float p_frames,
 
 }
 
+float vm_loco_fps(const VmDeltaClip &p_clip, bool p_sprint, float p_speed) {
+	const float fps = p_clip.clip.tracks != nullptr && p_clip.clip.tracks->fps > 0.0f ? p_clip.clip.tracks->fps : 30.0f;
+	return p_sprint ? fps : fps * p_speed / kVmRunSpeedUnit;
+}
+
 bool vm_tag_crossed(const VmDeltaClip &p_clip, float p_from_frame, float p_frames, float p_tag_frame) {
 	const float len = p_clip.end_frame - p_clip.start_frame;
 	if (!(len > 0.0f) || !(p_frames > 0.0f) || !(p_frames < len) || !std::isfinite(p_from_frame) ||
@@ -1081,13 +1086,11 @@ bool vm_loco_apply(VmDeltaLoco &r_loco, const ViewmodelFrameInput &p_input, floa
 	const float run_from = r_loco.run_frame, sprint_from = r_loco.sprint_frame;
 	float run_frames = 0.0f, sprint_frames = 0.0f;
 	if (r_loco.run_ok) {
-		const float fps = r_loco.loco.run.clip.tracks->fps > 0.0f ? r_loco.loco.run.clip.tracks->fps : 30.0f;
-		run_frames = p_dt * fps * speed / kVmRunSpeedUnit;
+		run_frames = p_dt * vm_loco_fps(r_loco.loco.run, false, speed);
 		r_loco.run_frame = vm_loco_advance(r_loco.run_frame, run_frames, r_loco.loco.run);
 	}
 	if (r_loco.sprint_ok) {
-		const float fps = r_loco.loco.sprint.clip.tracks->fps > 0.0f ? r_loco.loco.sprint.clip.tracks->fps : 30.0f;
-		sprint_frames = sprint_w > 0.0f ? p_dt * fps : 0.0f;
+		sprint_frames = sprint_w > 0.0f ? p_dt * vm_loco_fps(r_loco.loco.sprint, true, speed) : 0.0f;
 		r_loco.sprint_frame = vm_loco_advance(r_loco.sprint_frame, sprint_frames, r_loco.loco.sprint);
 	}
 	const float run_play = r_loco.run_ok ? r_loco.move_w * (1.0f - sprint_w) : 0.0f;

@@ -2678,6 +2678,45 @@ TEST_SUITE("audio-footsteps") {
 		CHECK(flagged == own_period);
 	}
 
+	TEST_CASE("a foot plants on the period's Left and Right and on the 1p animation's tags, at the soldier's speed; "
+			  "Start, Stop, Jump, Land and EnterAir plant none") {
+		CHECK(ba::footstep_plant(ba::FootstepEvent::Left));
+		CHECK(ba::footstep_plant(ba::FootstepEvent::Right));
+		CHECK(ba::footstep_plant(ba::FootstepEvent::Animated));
+		for (const ba::FootstepEvent e : { ba::FootstepEvent::Start, ba::FootstepEvent::Stop, ba::FootstepEvent::Jump,
+					 ba::FootstepEvent::Land, ba::FootstepEvent::EnterAir }) {
+			CHECK_FALSE(ba::footstep_plant(e));
+		}
+		ba::FootstepParams p = unit_footstep_params();
+		p.ant_steps[0] = bf3::core::gameplay::SoldierAntStep{ -35609206, 2672540575u };
+		p.ant_steps[1] = bf3::core::gameplay::SoldierAntStep{ -1008111485, 623859716u };
+		p.ant_step_count = 2;
+		p.local_player_closes_period = true;
+		ba::FootstepScheduler s(p);
+		std::vector<ba::FootstepPost> posts;
+		size_t tags = 0, planted = 0, at_speed = 0;
+		for (int f = 0; f < 240; ++f) {
+			const float speed = f < 120 ? 4.0f : 6.5f;
+			ba::FootstepSoldier own = walker(0, 0.0f, speed);
+			own.local_player = true;
+			own.first_person = true;
+			own.animated = true;
+			if (f % 17 == 8) {
+				own.tags[0] = (tags++ % 2) == 0 ? -35609206 : -1008111485;
+				own.tag_count = 1;
+			}
+			posts.clear();
+			s.step(std::span<const ba::FootstepSoldier>(&own, 1), ba::Vec3{}, 1.0 / 64.0, posts);
+			for (const ba::FootstepPost &x : posts) {
+				planted += ba::footstep_plant(x.event) ? 1u : 0u;
+				at_speed += ba::footstep_plant(x.event) && x.speed == doctest::Approx(speed) ? 1u : 0u;
+			}
+		}
+		CHECK(tags == 14);
+		CHECK(planted == tags);
+		CHECK(at_speed == tags);
+	}
+
 	TEST_CASE("nothing beyond the audible radius, from the dead, in the air, or from non-finite soldiers; stale tracks "
 			  "are dropped") {
 		const ba::FootstepParams p = unit_footstep_params();

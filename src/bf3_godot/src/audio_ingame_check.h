@@ -1,5 +1,7 @@
 #pragma once
 
+#include "bf3/anim/viewmodel_anim.h"
+#include "bf3/audio/footstep_driver.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/wav_io.h"
 #include "bf3/client_audio/sound_fate_ledger.h"
@@ -62,6 +64,7 @@ inline constexpr float kAudioIngameRunRadiusShare = 0.6f;
 inline constexpr float kAudioIngameRunOpenMeters = 24.0f;
 inline constexpr float kAudioIngameArriveMeters = 1.0f;
 inline constexpr double kAudioIngameArriveSeconds = 5.0;
+inline constexpr double kAudioIngameClipCadenceShare = 0.025;
 
 struct AudioIngameSpot {
 	sim::Vec3 feet{};
@@ -71,6 +74,8 @@ struct AudioIngameSpot {
 inline constexpr uint64_t kAudioIngameMinBotShots = 10;
 
 bool parse_audio_ingame_phase(std::string_view p_text, AudioIngamePhase &r_phase);
+std::optional<double> audio_ingame_clip_steps_per_second(
+		const anim::VmLocomotion &p_loco, const audio::FootstepParams &p_params, bool p_sprint, float p_speed);
 float audio_ingame_clearance(
 		const sim::CollisionWorld &p_world, const sim::MotorParams &p_motor, const sim::Vec3 &p_feet, float p_yaw);
 float audio_ingame_clearest_yaw(const std::function<float(float)> &p_clearance, float p_from, float &r_clear_m);
@@ -98,6 +103,7 @@ struct AudioIngameIo {
 	std::function<void(float, float)> view;
 	std::function<float()> yaw;
 	std::function<void(bool, bool)> move;
+	std::function<std::optional<anim::VmLocomotion>()> locomotion;
 	std::function<float(float)> clearance;
 	std::function<std::optional<AudioIngameSpot>()> open_spot;
 	std::function<void(const AudioIngameSpot &)> teleport;
@@ -108,13 +114,16 @@ struct AudioIngameIo {
 struct AudioIngameLegTally {
 	uint32_t legs = 0;
 	uint64_t steps = 0;
+	uint64_t animated = 0;
 	uint64_t starts = 0;
 	uint64_t stops = 0;
 	double seconds = 0.0;
 	double speed_sum = 0.0;
+	double moved_m = 0.0;
 	float speed_min = 0.0f;
 	float speed_max = 0.0f;
 	std::vector<std::pair<float, double>> intervals;
+	std::vector<double> clip_intervals;
 };
 
 struct AudioSoundFate {
@@ -226,6 +235,8 @@ private:
 	uint64_t other_steps_ = 0;
 	uint32_t stands_after_moving_ = 0;
 	double last_step_s_ = -1.0;
+	std::optional<sim::Vec3> last_feet_;
+	std::optional<audio::FootstepParams> step_params_;
 	float run_clear_min_m_ = kAudioIngameRunMeters;
 	uint32_t run_picks_ = 0;
 	bool spot_checked_ = false;
