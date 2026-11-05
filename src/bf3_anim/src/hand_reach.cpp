@@ -275,6 +275,7 @@ core::Result<HandReach> read_hand_reach(
 				}
 				arm.effector = effector;
 				arm.reach = std::clamp(value, 0.0f, 1.0f);
+				out.signals[size_t(&arm - out.arms.data())] = std::string(reach.name());
 			}
 		}
 	}

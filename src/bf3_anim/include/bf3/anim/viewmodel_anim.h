@@ -40,11 +40,18 @@ enum class VmClip : uint8_t {
 inline constexpr size_t kVmClips = size_t(VmClip::Count);
 const char *vm_clip_name(VmClip p_clip);
 
+struct VmReachTag {
+	uint8_t arm = 0;
+	float from_frame = 0.0f, to_frame = 0.0f;
+	float value = 1.0f;
+};
+
 struct VmClipRef {
 	const core::ant::DecodedClip *clip = nullptr;
 	const ClipTracks *tracks = nullptr;
 	float seconds = 0;
 	bool stand_in = false;
+	std::span<const VmReachTag> reach;
 };
 
 struct SpringParams {

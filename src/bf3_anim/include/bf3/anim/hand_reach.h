@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -25,6 +26,7 @@ struct HandReachArm {
 
 struct HandReach {
 	std::array<HandReachArm, 2> arms;
+	std::array<std::string, 2> signals;
 
 	bool any(size_t p_joints) const;
 };

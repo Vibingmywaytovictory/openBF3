@@ -258,4 +258,72 @@ TEST_SUITE("anim-viewmodel-unit") {
 			}
 		}
 	}
+
+	TEST_CASE("hand reach in the animator: a clip's reach tag at 0 lets the locomotion move the hand in its window "
+			  "only") {
+		ArmRig r(Vec3{ 0.04f, -0.03f, 0.02f });
+		bf3::core::ant::DecodedClip delta;
+		delta.codec = bf3::core::ant::ClipCodec::Raw;
+		delta.additive = true;
+		delta.num_keys = 2;
+		delta.num_quats = 1;
+		delta.end_frame = 30;
+		delta.key_times = { 0, 30 };
+		delta.quats = { turn_deg(0, 0, 1, 10), turn_deg(0, 0, 1, 10) };
+		ClipTracks delta_tracks;
+		delta_tracks.rotation_bone = { r.arm };
+		delta_tracks.fps = 30.0f;
+		delta_tracks.end_frame = 30;
+		delta_tracks.channels_bound = 1;
+		VmLocomotion loco;
+		loco.run.clip.clip = &delta;
+		loco.run.clip.tracks = &delta_tracks;
+		loco.run.end_frame = 30.0f;
+		bf3::core::ant::DecodedClip fire;
+		fire.codec = bf3::core::ant::ClipCodec::Raw;
+		fire.num_keys = 2;
+		fire.num_quats = 1;
+		fire.end_frame = 30;
+		fire.key_times = { 0, 30 };
+		fire.quats = { Quat{}, Quat{} };
+		ClipTracks fire_tracks;
+		fire_tracks.rotation_bone = { 0 };
+		fire_tracks.fps = 30.0f;
+		fire_tracks.end_frame = 30;
+		fire_tracks.channels_bound = 1;
+		const std::array<VmReachTag, 1> tags{ VmReachTag{ 0, 0.0f, 18.0f, 0.0f } };
+		std::array<VmClipRef, kVmClips> refs{};
+		refs[size_t(VmClip::Fire)] = VmClipRef{ &fire, &fire_tracks, 1.0f, false, tags };
+		ViewmodelAnimator a(r.rig, refs, ViewmodelTuning{});
+		a.set_locomotion(loco);
+		a.set_hand_reach(r.reach);
+		const Xform rest = r.hand_at_rest();
+		ViewmodelFrameInput in;
+		in.speed = 4.0f;
+		LocalPose pose;
+		ViewmodelOutput out;
+		double in_window = 0.0, after = 1.0;
+		for (int f = 0; f < 90; ++f) {
+			in.time_s += 1.0 / 60.0;
+			in.dt = 1.0f / 60.0f;
+			std::vector<VmCue> cues;
+			if (f == 30) {
+				cues.push_back(VmCue{ VmCue::Kind::Shot, in.time_s, false });
+			}
+			a.step(in, cues, pose, out);
+			const double off = vec_dist(model_of(r.rig, pose, r.hand).t, rest.t);
+			if (f == 29) {
+				CHECK(off < 1e-5);
+			}
+			if (f == 45) {
+				in_window = off;
+			}
+			if (f == 75) {
+				after = off;
+			}
+		}
+		MESSAGE("hand ", in_window * 1000.0, " mm off its place in the tag's window, ", after * 1000.0, " mm after it");
+		CHECK(in_window > 0.01);
+		CHECK(after < 1e-5);
+	}
 }

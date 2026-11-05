@@ -44,6 +44,13 @@ struct AntEventTag {
 
 inline constexpr size_t kMaxAntEventTags = 32;
 
+inline constexpr size_t kMaxAntFloatStateTags = 256;
+
+struct AntFloatStateTag {
+	std::string signal;
+	float tick = 0.0f, ticks = 0.0f, value = 0.0f;
+};
+
 struct AntClipRoute {
 	uint32_t clip_controller = 0;
 	std::string controller;
@@ -59,6 +66,7 @@ struct AntClipRoute {
 	std::vector<AntBranchTag> branches;
 	float loop_end_tick = 0.0f;
 	std::vector<AntEventTag> event_tags;
+	std::vector<AntFloatStateTag> float_tags;
 };
 
 core::Result<AntClipRoute> route_ant_controller(const core::ant::AntLibrary &p_library, const core::ant::AntPackage &p_from, const core::ant::GdGuid &p_controller,

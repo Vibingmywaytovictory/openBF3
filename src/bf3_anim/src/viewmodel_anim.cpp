@@ -450,7 +450,7 @@ struct ViewmodelAnimator::Impl {
 	SpringState sway_x, sway_y, bob_amp, kick_back, kick_pitch, cam_pitch, cam_yaw;
 	float sway_tx = 0, sway_ty = 0, bob_target = 0;
 	std::unique_ptr<VmDeltaLoco, VmDeltaLocoDeleter> delta_loco;
-	HandReach hand_reach;
+	HandReach hand_reach, tagged_reach;
 	std::vector<Xform> held_model, reach_model;
 
 	VmThrowFlow flow;
@@ -633,6 +633,31 @@ struct ViewmodelAnimator::Impl {
 			}
 			default:
 				break;
+		}
+	}
+
+	void tag_reach(double p_t, float p_ads) {
+		tagged_reach = hand_reach;
+		for (const Action *a : { &prev, &cur }) {
+			if (!a->active || a->procedural) {
+				continue;
+			}
+			const VmClipRef &r = ref(a->role);
+			float w = weight_of(*a, p_t);
+			if (a->role == VmClip::Fire || a->role == VmClip::FireSingle) {
+				w *= 1.0f - p_ads;
+			}
+			if (r.reach.empty() || r.tracks == nullptr || !(w > 0.0f)) {
+				continue;
+			}
+			const float fps = r.tracks->fps > 0.0f ? r.tracks->fps : 30.0f;
+			const float frame = clip_time(*a, p_t) * fps;
+			for (const VmReachTag &tag : r.reach) {
+				if (tag.arm < tagged_reach.arms.size() && frame >= tag.from_frame && frame < tag.to_frame) {
+					float &reach = tagged_reach.arms[tag.arm].reach;
+					reach += (std::clamp(tag.value, 0.0f, 1.0f) - reach) * std::min(w, 1.0f);
+				}
+			}
 		}
 	}
 
@@ -890,7 +915,8 @@ struct ViewmodelAnimator::Impl {
 		}
 		const bool loco_applied = delta_loco && vm_loco_apply(*delta_loco, p_input, sprint_w, ads, dt, tuning.sprint_blend_seconds, r_pose, r_out);
 		if (held && loco_applied && (r_out.loco_run_weight > 0.0f || r_out.loco_sprint_weight > 0.0f)) {
-			reach_hands(rig, hand_reach, held_model, r_pose, reach_model);
+			tag_reach(t, ads);
+			reach_hands(rig, tagged_reach, held_model, r_pose, reach_model);
 		}
 
 		const float speed = std::max(0.0f, finite_or(p_input.speed, 0.0f));

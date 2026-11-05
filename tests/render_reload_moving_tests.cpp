@@ -89,6 +89,73 @@ struct Drift {
 	std::array<int, 2> straight{};
 };
 
+struct BagThrow {
+	size_t reach_tags = 0;
+	int window_frames = 0;
+	double window_off_free = 0.0, held_off = 0.0;
+};
+
+BagThrow bag_throw_while_running(const render::ViewmodelSet &p_set, const render::ViewmodelItem &p_item) {
+	BagThrow out;
+	const std::array<anim::VmClipRef, anim::kVmClips> refs = render::viewmodel_clip_refs(p_item);
+	const anim::VmClipRef &fire = refs[size_t(anim::VmClip::Fire)];
+	out.reach_tags = fire.reach.size();
+	if (fire.reach.empty() || fire.tracks == nullptr) {
+		return out;
+	}
+	anim::ViewmodelAnimator reaching(p_set.rig, refs, anim::ViewmodelTuning{});
+	anim::ViewmodelAnimator free(p_set.rig, refs, anim::ViewmodelTuning{});
+	anim::ViewmodelAnimator plain(p_set.rig, refs, anim::ViewmodelTuning{});
+	reaching.set_locomotion(render::viewmodel_locomotion(p_item));
+	free.set_locomotion(render::viewmodel_locomotion(p_item));
+	reaching.set_hand_reach(p_set.hand_reach);
+	const int32_t root = p_set.rig.find("Wep_Root");
+	const std::array<int32_t, 2> hands{ p_set.rig.find(kHands[0]), p_set.rig.find(kHands[1]) };
+	anim::ViewmodelFrameInput in;
+	in.speed = 4.0f;
+	anim::LocalPose rp, fp, pp;
+	anim::ViewmodelOutput ro, fo, po;
+	std::vector<anim::Xform> rm, fm, pm;
+	double shot = 0.0;
+	const int frames = kSettleFrames + int(double(fire.seconds) / kFrameSeconds);
+	for (int f = 0; f < frames; ++f) {
+		in.time_s += kFrameSeconds;
+		in.dt = float(kFrameSeconds);
+		std::vector<anim::VmCue> cues;
+		if (f == kSettleFrames) {
+			shot = in.time_s;
+			cues.push_back(anim::VmCue{ anim::VmCue::Kind::Shot, in.time_s, false });
+		}
+		reaching.step(in, cues, rp, ro);
+		free.step(in, cues, fp, fo);
+		plain.step(in, cues, pp, po);
+		if (f < kSettleFrames) {
+			continue;
+		}
+		anim::model_pose(p_set.rig, rp, rm);
+		anim::model_pose(p_set.rig, fp, fm);
+		anim::model_pose(p_set.rig, pp, pm);
+		const float frame = float(in.time_s - shot) * fire.tracks->fps;
+		for (size_t h = 0; h < hands.size(); ++h) {
+			bool tagged = false;
+			for (const anim::VmReachTag &t : fire.reach) {
+				tagged = tagged || (t.arm == h && t.value == 0.0f && frame >= t.from_frame && frame < t.to_frame);
+			}
+			if (tagged && ro.action_clip == uint32_t(anim::VmClip::Fire) && ro.action_weight >= 1.0f) {
+				++out.window_frames;
+				out.window_off_free =
+						std::max(out.window_off_free, anim::vec_dist(rm[size_t(hands[h])].t, fm[size_t(hands[h])].t));
+			} else if (!tagged && frame > 0.0f && frame < fire.reach.front().from_frame) {
+				const anim::Vec3 place = anim::xform_mul(
+						rm[size_t(root)], anim::xform_mul(anim::xform_inverse(pm[size_t(root)]), pm[size_t(hands[h])]))
+												 .t;
+				out.held_off = std::max(out.held_off, anim::vec_dist(rm[size_t(hands[h])].t, place));
+			}
+		}
+	}
+	return out;
+}
+
 Drift hand_drift(const render::ViewmodelSet &p_set, const render::ViewmodelItem &p_item, const Gait &p_gait,
 		const Action &p_action) {
 	const anim::ViewmodelTuning tuning;
@@ -305,6 +372,31 @@ TEST_SUITE("render-viewmodel-reload-moving") {
 			MESSAGE("drift: ", d);
 		}
 		CHECK(drifting.empty());
+		for (const std::string bag : { "weapons/gadgets/ammobag/u_ammobag", "weapons/gadgets/medicbag/u_medkit" }) {
+			render::ViewmodelSetSpec spec = render::team_viewmodel_items(1, std::span<const std::string>(&bag, 1));
+			spec.superbundle = kLevel;
+			core::Result<std::unique_ptr<render::ViewmodelSet>> set =
+					render::load_viewmodel_set(**sources, spec, nullptr);
+			REQUIRE_MESSAGE(set.ok(), bag, ": ", (set.ok() ? "" : set.error().message));
+			if (!set.ok() || (*set)->items.size() != 1) {
+				continue;
+			}
+			for (const std::string &note : (*set)->notes) {
+				if (note.find(" 1p Fire") != std::string::npos || note.find(" reach:") != std::string::npos ||
+						note.find("1p locomotion") != std::string::npos) {
+					MESSAGE(note);
+				}
+			}
+			const BagThrow b = bag_throw_while_running(**set, (*set)->items[0]);
+			MESSAGE(bag, " Fire ", (*set)->items[0].clips[size_t(render::ViewmodelClipRole::Fire)].controller, ": ",
+					b.reach_tags, " reach tags; running, ", b.window_frames, " hand frames in their window, at most ",
+					b.window_off_free * 1000.0, " mm from the hand the deltas move freely; before it the hand at most ",
+					b.held_off * 1000.0, " mm off its place");
+			CHECK(b.reach_tags == 2);
+			CHECK(b.window_frames > 20);
+			CHECK(b.window_off_free < 1e-4);
+			CHECK(b.held_off < kHeldMetres);
+		}
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
 		CHECK(diff.clean());
 	}

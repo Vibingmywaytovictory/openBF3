@@ -632,6 +632,19 @@ bool viewmodel_zoom_mesh_shown(bool p_shown, float p_blend, const ViewmodelItem 
 	return p_blend >= (p_shown ? p_item.zoom_mesh_out : p_item.zoom_mesh_in);
 }
 
+std::vector<anim::VmReachTag> viewmodel_reach_tags(const ViewmodelClip &p_clip, const anim::HandReach &p_reach) {
+	std::vector<anim::VmReachTag> out;
+	for (const anim::AntFloatStateTag &t : p_clip.state_tags) {
+		for (size_t a = 0; a < p_reach.signals.size(); ++a) {
+			if (!p_reach.signals[a].empty() && t.signal == p_reach.signals[a]) {
+				out.push_back(anim::VmReachTag{ uint8_t(a), t.tick * p_clip.tick_frames,
+						(t.tick + t.ticks) * p_clip.tick_frames, std::clamp(t.value, 0.0f, 1.0f) });
+			}
+		}
+	}
+	return out;
+}
+
 std::array<anim::VmClipRef, anim::kVmClips> viewmodel_clip_refs(const ViewmodelItem &p_item) {
 	std::array<anim::VmClipRef, anim::kVmClips> refs{};
 	for (size_t r = 0; r < kViewmodelClipRoles; ++r) {
@@ -643,6 +656,7 @@ std::array<anim::VmClipRef, anim::kVmClips> viewmodel_clip_refs(const ViewmodelI
 				ref.tracks = &c.tracks;
 				ref.seconds = c.seconds;
 				ref.stand_in = c.blend_instead;
+				ref.reach = c.reach;
 				break;
 			case Source::VbrStandIn:
 			case Source::ProceduralStandIn:
@@ -940,6 +954,9 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 			if (item.kind == ViewmodelItemKind::Gun) {
 				load_viewmodel_chooser_bolt(ant, set->rig, uint32_t(*locomotion_ant_ref), item, set->notes);
 			}
+			if (item.kind == ViewmodelItemKind::Gadget) {
+				load_viewmodel_bags_fire(ant, set->rig, uint32_t(*locomotion_ant_ref), item, set->notes);
+			}
 			if (item.kind == ViewmodelItemKind::Grenade) {
 				load_viewmodel_throw_flow(ant, set->rig, uint32_t(*locomotion_ant_ref), item, set->notes);
 			}
@@ -1030,6 +1047,20 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		for (const ViewmodelClip &c : item.clips) {
 			if (c.source == Source::VbrStandIn || c.source == Source::ProceduralStandIn || c.blend_instead) {
 				++item.stand_ins;
+			}
+		}
+		for (size_t r = 0; r < item.clips.size(); ++r) {
+			ViewmodelClip &c = item.clips[r];
+			c.reach = viewmodel_reach_tags(c, set->hand_reach);
+			if (!c.reach.empty()) {
+				std::string line = spec.unlock + " " + viewmodel_clip_role_name(Role(r)) + " " + c.name + " reach:";
+				for (const anim::VmReachTag &t : c.reach) {
+					char part[96];
+					std::snprintf(part, sizeof(part), " %s %.1f at frames %.1f..%.1f", t.arm == 0 ? "left" : "right",
+							double(t.value), double(t.from_frame), double(t.to_frame));
+					line += part;
+				}
+				set->notes.push_back(line);
 			}
 		}
 		char line[320];
@@ -1616,6 +1647,10 @@ std::string route_path(const anim::AntClipRoute &p_route) {
 	return out;
 }
 
+float route_tick_frames(const anim::AntClipRoute &p_route) {
+	return std::isfinite(p_route.fps_scale) && p_route.fps_scale > 0.0f ? p_route.fps_scale : 0.5f;
+}
+
 core::Status load_route_clip(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig,
 		const anim::AntClipRoute &p_route, ViewmodelClip &r_clip) {
 	const core::ant::AntPackage *sp = p_library.static_package();
@@ -1633,6 +1668,8 @@ core::Status load_route_clip(const core::ant::AntLibrary &p_library, const anim:
 	if (const core::Status st = load_role_clip(p_library, *pkg, c, p_rig, clip, unsupported); !st.ok()) {
 		return st;
 	}
+	clip.state_tags = p_route.float_tags;
+	clip.tick_frames = route_tick_frames(p_route);
 	r_clip = std::move(clip);
 	return core::Status::success();
 }
@@ -1668,7 +1705,7 @@ void load_delta_clip(const core::ant::AntLibrary &p_library, const anim::Skeleto
 		return;
 	}
 
-	const float scale = std::isfinite(route->fps_scale) && route->fps_scale > 0.0f ? route->fps_scale : 0.5f;
+	const float scale = route_tick_frames(*route);
 	const float end = float(clip.tracks.end_frame);
 	r_start = std::clamp(route->start_in_tick * scale, 0.0f, end);
 	r_end = std::clamp(route->end_in_tick * scale, 0.0f, end);
@@ -1790,6 +1827,44 @@ void load_viewmodel_chooser_bolt(const core::ant::AntLibrary &p_library, const a
 	r_notes.push_back(where + ": " + route_path(*route) + " -> " + clip.name + " in place of the package's " +
 			r_item.clips[size_t(Role::Bolt)].controller);
 	r_item.clips[size_t(Role::Bolt)] = std::move(clip);
+}
+
+void load_viewmodel_bags_fire(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, uint32_t p_ant_ref,
+		ViewmodelItem &r_item, std::vector<std::string> &r_notes) {
+	core::Result<uint32_t> type = anim::weapon_type_index(p_library, p_ant_ref);
+	core::Result<uint32_t> specific = anim::weapon_choice_index(p_library, p_ant_ref);
+	if (!type || !specific || *type != uint32_t(anim::AntWeaponType::Bags)) {
+		return;
+	}
+	const std::string where = r_item.unlock + " 1p Fire";
+	ViewmodelClip &fire = r_item.clips[size_t(Role::Fire)];
+	anim::ChooserIndices idx;
+	idx.weapon_type = *type;
+	idx.specific_weapon = int64_t(*specific);
+	core::Result<anim::AntClipRoute> route =
+			anim::route_ant_controller(p_library, "IndexChooserControllerAsset", kVmBagsThrowChooser, idx);
+	if (!route) {
+		r_notes.push_back(where + " " + std::string(kVmBagsThrowChooser) + " at specific weapon " +
+				std::to_string(*specific) + ": " + route.error().message + " (no state tags)");
+		return;
+	}
+	if (fire.source != Source::Clip) {
+		ViewmodelClip clip;
+		if (const core::Status st = load_route_clip(p_library, p_rig, *route, clip); !st.ok()) {
+			r_notes.push_back(where + " " + route_path(*route) + ": " + st.error().message);
+			return;
+		}
+		fire = std::move(clip);
+	} else if (fire.controller != route->controller) {
+		r_notes.push_back(where + " " + route_path(*route) + " ends at " + route->controller + ", not the package's " +
+				fire.controller + " (no state tags)");
+		return;
+	} else {
+		fire.state_tags = route->float_tags;
+		fire.tick_frames = route_tick_frames(*route);
+	}
+	r_notes.push_back(where + ": " + route_path(*route) + " -> " + fire.name + ", " +
+			std::to_string(fire.state_tags.size()) + " float state tags");
 }
 
 void load_viewmodel_throw_flow(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, uint32_t p_ant_ref,

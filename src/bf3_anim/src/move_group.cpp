@@ -266,6 +266,39 @@ bool read_event_tags(const AntLibrary &p_library, const AntPackage &p_pkg, const
 	});
 }
 
+bool read_float_state_tags(const AntLibrary &p_library, const AntPackage &p_pkg, const GdStruct &p_owner,
+		float p_start_time, std::vector<AntFloatStateTag> &r_tags) {
+	return visit_tags(p_library, p_pkg, p_owner, [&](const GdStruct &p_tag, const AntPackage &p_tag_pkg) {
+		GdGuid vg;
+		if (p_tag.type_name() != "FloatGameStateTag") {
+			return true;
+		}
+		const GdStruct value =
+				p_tag.read_guid("ValueAsset", vg) && !vg.is_null() ? p_library.resolve(p_tag_pkg, vg) : GdStruct();
+		auto number = [&](std::string_view p_field, float &r_v) {
+			int64_t i = 0;
+			if (p_tag.read_float(p_field, r_v)) {
+				return finite(r_v);
+			}
+			if (p_tag.read_int(p_field, i)) {
+				r_v = float(i);
+				return true;
+			}
+			return false;
+		};
+		AntFloatStateTag t;
+		if (!value.valid() || value.type_name() != "FloatAsset" || !number("Time", t.tick) ||
+				!number("Duration", t.ticks) || !number("Value", t.value) || t.ticks < 0.0f ||
+				r_tags.size() >= kMaxAntFloatStateTags) {
+			return false;
+		}
+		t.signal = std::string(value.name());
+		t.tick -= p_start_time;
+		r_tags.push_back(std::move(t));
+		return true;
+	});
+}
+
 bool read_bool_state_tag(const AntLibrary &p_library, const AntPackage &p_pkg, const GdStruct &p_owner,
 		std::string_view p_signal, AntBoolStateTag &r_tag) {
 	return visit_tags(p_library, p_pkg, p_owner, [&](const GdStruct &p_tag, const AntPackage &p_tag_pkg) {
@@ -462,6 +495,10 @@ core::Result<AntClipRoute> route_from(const AntLibrary &p_library, const AntPack
 			route.event_tags.clear();
 			if (!read_event_tags(p_library, *pkg, cur, start_time, route.event_tags)) {
 				return core::make_error(label(cur) + ": unreadable event tags");
+			}
+			route.float_tags.clear();
+			if (!read_float_state_tags(p_library, *pkg, cur, start_time, route.float_tags)) {
+				return core::make_error(label(cur) + ": unreadable float game state tags");
 			}
 			route.sequence = true;
 			route.start_in_tick = in0;

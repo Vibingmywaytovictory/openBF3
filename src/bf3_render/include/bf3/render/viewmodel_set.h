@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/anim/clip_asset.h"
+#include "bf3/anim/move_group.h"
 #include "bf3/anim/pose.h"
 #include "bf3/anim/pose_math.h"
 #include "bf3/anim/skeleton.h"
@@ -92,6 +93,10 @@ struct ViewmodelClip {
 
 	bool blend_instead = false;
 	float endpoint_deg = 0;
+
+	std::vector<anim::AntFloatStateTag> state_tags;
+	float tick_frames = 0.5f;
+	std::vector<anim::VmReachTag> reach;
 };
 
 inline constexpr float kZoomPathToleranceDeg = 2.0f;
@@ -191,6 +196,8 @@ struct ViewmodelItem {
 };
 
 std::array<anim::VmClipRef, anim::kVmClips> viewmodel_clip_refs(const ViewmodelItem &p_item);
+
+std::vector<anim::VmReachTag> viewmodel_reach_tags(const ViewmodelClip &p_clip, const anim::HandReach &p_reach);
 
 bool viewmodel_slot_vertex_colour(const ViewmodelSlotLook &p_look);
 bool viewmodel_scope_part(const ViewmodelItem &p_item, const ViewmodelAttachment &p_attachment);
@@ -303,6 +310,7 @@ inline constexpr std::string_view kVmShotgunFireChooser = "Wep_ShotgunFireChoose
 inline constexpr std::string_view kVmSprintDeltaChooser = "Wep_SprintDeltaChooser";
 inline constexpr std::string_view kVmSniperBoltChooser = "Wep_SniperBoltActionChooser";
 inline constexpr std::string_view kVmShotgunBoltChooser = "Wep_ShotgunBoltActionChooser";
+inline constexpr std::string_view kVmBagsThrowChooser = "Wep_BagsThrowChooser";
 
 struct ViewmodelLocomotionClips {
 	uint32_t weapon_type = 0;
@@ -322,6 +330,9 @@ void load_viewmodel_chooser_fire(const core::ant::AntLibrary &p_library, const a
 
 void load_viewmodel_chooser_bolt(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig,
 		uint32_t p_ant_ref, ViewmodelItem &r_item, std::vector<std::string> &r_notes);
+
+void load_viewmodel_bags_fire(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, uint32_t p_ant_ref,
+		ViewmodelItem &r_item, std::vector<std::string> &r_notes);
 
 void load_viewmodel_throw_flow(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, uint32_t p_ant_ref,
 		ViewmodelItem &r_item, std::vector<std::string> &r_notes);
