@@ -39,6 +39,8 @@ struct Pipe {
 	std::vector<Sent> sent;
 	std::vector<std::pair<uint32_t, size_t>> disconnects;
 	std::set<uint32_t> connected;
+	std::map<uint32_t, uint32_t> rtt_ms;
+	size_t capacity = 0;
 	std::atomic<uint64_t> services{ 0 };
 
 	void connect(uint32_t p_peer) {
@@ -127,7 +129,15 @@ public:
 	}
 	uint16_t bound_port() const override { return 0; }
 	net::PeerCounters peer_counters(uint32_t) const override { return {}; }
-	size_t peer_capacity() const override { return 0; }
+	uint32_t peer_rtt_ms(uint32_t p_peer) const override {
+		std::lock_guard lock(pipe_->mutex);
+		const auto at = pipe_->rtt_ms.find(p_peer);
+		return at != pipe_->rtt_ms.end() ? at->second : 0u;
+	}
+	size_t peer_capacity() const override {
+		std::lock_guard lock(pipe_->mutex);
+		return pipe_->capacity;
+	}
 
 private:
 	std::shared_ptr<Pipe> pipe_;

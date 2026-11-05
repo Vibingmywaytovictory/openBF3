@@ -31,6 +31,7 @@ public:
 	size_t connected_peers() const override { return host_->connected_peers(); }
 	uint16_t bound_port() const override { return host_->bound_port(); }
 	net::PeerCounters peer_counters(uint32_t p_peer) const override { return host_->peer_counters(p_peer); }
+	uint32_t peer_rtt_ms(uint32_t p_peer) const override { return host_->peer_rtt_ms(p_peer); }
 	size_t peer_capacity() const override { return host_->peer_capacity(); }
 
 private:
@@ -121,6 +122,11 @@ std::vector<net::PeerCounters> ServerNetThread::peer_counters() const {
 	return counters_;
 }
 
+void ServerNetThread::peer_rtts(std::vector<uint32_t> &r_rtt_ms) const {
+	std::lock_guard lock(counters_mutex_);
+	r_rtt_ms.assign(rtts_.begin(), rtts_.end());
+}
+
 void ServerNetThread::send_all(std::vector<NetOut> &r_out) {
 	if (r_out.empty()) {
 		return;
@@ -153,8 +159,10 @@ void ServerNetThread::publish() {
 	peers_.store(static_cast<uint32_t>(port_->connected_peers()), std::memory_order_relaxed);
 	std::lock_guard lock(counters_mutex_);
 	counters_.resize(port_->peer_capacity());
+	rtts_.resize(counters_.size());
 	for (size_t i = 0; i < counters_.size(); ++i) {
 		counters_[i] = port_->peer_counters(static_cast<uint32_t>(i));
+		rtts_[i] = port_->peer_rtt_ms(static_cast<uint32_t>(i));
 	}
 }
 

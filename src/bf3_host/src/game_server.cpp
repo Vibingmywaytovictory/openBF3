@@ -836,6 +836,20 @@ TdmRules *GameServer::rules() {
 	return impl_->match.rules();
 }
 
+void GameServer::set_peer_rtts(std::span<const uint32_t> p_rtt_ms) {
+	Impl &m = *impl_;
+	TdmRules *rules = m.match.rules();
+	if (rules == nullptr) {
+		return;
+	}
+	for (size_t i = 0; i < m.slots.size(); ++i) {
+		const Seat &s = m.slots[i];
+		if (s.used && s.remote && s.peer < p_rtt_ms.size()) {
+			rules->set_ping(uint8_t(i), uint16_t(std::min<uint32_t>(p_rtt_ms[s.peer], UINT16_MAX)));
+		}
+	}
+}
+
 bool GameServer::set_squad_order(uint8_t p_team, uint8_t p_squad, const SquadOrderState &p_order) {
 	TdmRules *rules = impl_->match.rules();
 	return rules != nullptr && rules->set_squad_order(p_team, p_squad, p_order);

@@ -27,6 +27,7 @@ public:
 	virtual size_t connected_peers() const = 0;
 	virtual uint16_t bound_port() const = 0;
 	virtual net::PeerCounters peer_counters(uint32_t p_peer) const = 0;
+	virtual uint32_t peer_rtt_ms(uint32_t p_peer) const = 0;
 	virtual size_t peer_capacity() const = 0;
 };
 
@@ -67,6 +68,7 @@ public:
 	uint64_t errors() const { return errors_.load(std::memory_order_relaxed); }
 	uint64_t inbound_dropped() const { return inbound_dropped_.load(std::memory_order_relaxed); }
 	std::vector<net::PeerCounters> peer_counters() const;
+	void peer_rtts(std::vector<uint32_t> &r_rtt_ms) const;
 
 private:
 	void run();
@@ -91,6 +93,7 @@ private:
 
 	mutable std::mutex counters_mutex_;
 	std::vector<net::PeerCounters> counters_;
+	std::vector<uint32_t> rtts_;
 
 	std::atomic<uint32_t> peers_{ 0 };
 	std::atomic<uint64_t> errors_{ 0 };

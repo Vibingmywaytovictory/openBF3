@@ -185,6 +185,7 @@ public:
 	void on_connect(uint32_t p_peer);
 	void on_disconnect(uint32_t p_peer);
 	void on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const uint8_t> p_datagram);
+	void set_peer_rtts(std::span<const uint32_t> p_rtt_ms);
 
 	void tick(std::vector<OutDatagram> &r_out);
 	sim::Tick current_tick() const;

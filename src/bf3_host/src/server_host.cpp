@@ -244,6 +244,7 @@ void ServerHost::run() {
 	int64_t next = tick_clock.now_ns();
 	std::vector<net::Host::Event> events;
 	std::vector<NetOut> sends;
+	std::vector<uint32_t> rtts;
 
 	while (!stop_requested_.load(std::memory_order_acquire)) {
 		stall_if_requested();
@@ -263,6 +264,10 @@ void ServerHost::run() {
 				} else if (ev.type == net::Host::EventType::Receive) {
 					game_->on_receive(ev.peer, ev.channel, ev.data);
 				}
+			}
+			if (net_) {
+				net_->peer_rtts(rtts);
+				game_->set_peer_rtts(rtts);
 			}
 			const int64_t step_start = tick_clock.now_ns();
 			std::vector<OutDatagram> out;

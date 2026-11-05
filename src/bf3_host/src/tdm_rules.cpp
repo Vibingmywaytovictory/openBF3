@@ -295,6 +295,7 @@ struct TdmRules::Impl {
 		int32_t score = 0;
 		std::array<char, net::kMaxPlayerNameBytes> name{};
 		uint8_t name_bytes = 0;
+		uint16_t ping_ms = 0;
 	};
 
 	std::shared_ptr<const core::gameplay::LogicGraph> graph;
@@ -1305,6 +1306,7 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		r.bot = s.bot;
 		r.alive = i < n && s.alive && state_alive(r_states[i]);
 		r.name_bytes = s.name_bytes;
+		r.ping_ms = s.ping_ms;
 		r.kills = s.kills;
 		r.deaths = s.deaths;
 		r.score = s.score;
@@ -1317,6 +1319,12 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		m.last_states[i] = r_states[i];
 	}
 	return core::Status::success();
+}
+
+void TdmRules::set_ping(uint8_t p_slot, uint16_t p_ms) {
+	if (p_slot < impl_->slots.size()) {
+		impl_->slots[p_slot].ping_ms = p_ms;
+	}
 }
 
 void TdmRules::set_spawn_choice(uint8_t p_slot, uint8_t p_choice) {

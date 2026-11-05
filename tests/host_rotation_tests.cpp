@@ -876,6 +876,86 @@ TEST_SUITE("host-rotation") {
 		CHECK(rs.squad_spawns == level_one_spawns + level_two_spawns);
 	}
 
+	TEST_CASE("player rows: a ServerHost writes each client's transport RTT into its PlayerRow ping (103 ms and 41 "
+			  "ms), and the bots' rows keep ping 0") {
+		tt::TdmLevel *level = tt::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		host::GameServerConfig c = metro_config(level->shared, *level, true);
+		auto bots = std::make_shared<host::TdmBotConfig>(*c.tdm_bots);
+		bots->count = 4;
+		c.tdm_bots = bots;
+		auto pipe = std::make_shared<tp::Pipe>();
+		pipe->capacity = 4;
+		pipe->rtt_ms = { { 1u, 103u }, { 2u, 41u } };
+		host::ServerConfig sc;
+		sc.game = std::make_shared<const host::GameServerConfig>(std::move(c));
+		sc.transport = std::make_shared<tp::PipeServerPort>(pipe);
+		sc.clock = std::make_shared<RacingClock>();
+		host::ServerHost server;
+		std::string err;
+		REQUIRE_MESSAGE(server.start(sc, &err), err);
+		for (const uint32_t peer : { 1u, 2u }) {
+			pipe->connect(peer);
+			net::Hello h;
+			h.name = "pinged" + std::to_string(peer);
+			h.game_build = net::game_build();
+			pipe->client_send(peer, net::kChannelReliable, net::encode_hello(h));
+			pipe->client_send(peer, net::kChannelReliable, net::encode_ready({}));
+		}
+		std::map<uint8_t, net::PlayerRow> rows;
+		size_t read = 0;
+		uint64_t decode_errors = 0;
+		const auto humans_pinged = [&] {
+			std::lock_guard lock(pipe->mutex);
+			for (; read < pipe->sent.size(); ++read) {
+				const tp::Pipe::Sent &d = pipe->sent[read];
+				if (d.peer != 1u || net::peek_type(d.bytes) != net::MessageType::PlayerList) {
+					continue;
+				}
+				core::Result<net::PlayerList> l = net::decode_player_list(d.bytes);
+				if (!l) {
+					++decode_errors;
+					continue;
+				}
+				if (l->full) {
+					rows.clear();
+				}
+				for (const uint8_t slot : l->removed) {
+					rows.erase(slot);
+				}
+				for (const net::PlayerRow &r : l->rows) {
+					rows[r.slot] = r;
+				}
+			}
+			std::map<uint16_t, uint32_t> humans;
+			uint32_t bot_rows = 0;
+			for (const auto &[slot, r] : rows) {
+				humans[r.ping_ms] += r.bot ? 0u : 1u;
+				bot_rows += r.bot ? 1u : 0u;
+			}
+			return humans[103] == 1u && humans[41] == 1u && bot_rows == 4u;
+		};
+		const bool pinged = bf3::test::wait_until(humans_pinged, 20s, 16ms);
+		server.stop();
+		std::lock_guard lock(pipe->mutex);
+		for (const auto &[slot, r] : rows) {
+			std::printf("player rows: slot %u %s ping %u ms\n", unsigned(slot), r.bot ? "bot" : "client",
+					unsigned(r.ping_ms));
+		}
+		CHECK(pinged);
+		CHECK(decode_errors == 0u);
+		for (const auto &[slot, r] : rows) {
+			CAPTURE(unsigned(slot));
+			if (r.bot) {
+				CHECK(r.ping_ms == 0u);
+			} else {
+				CHECK((r.ping_ms == 103u || r.ping_ms == 41u));
+			}
+		}
+	}
+
 	TEST_CASE("install unchanged") {
 		tt::TdmLevel *level = tt::load_tdm_level_once();
 		if (level == nullptr) {
