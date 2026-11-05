@@ -18,6 +18,7 @@ namespace bf3::anim {
 struct HandReachArm {
 	int32_t arm = -1, fore = -1, hand = -1, effector = -1;
 	float reach = 0.0f;
+	int32_t shoulder = -1;
 
 	bool usable(size_t p_joints) const;
 };

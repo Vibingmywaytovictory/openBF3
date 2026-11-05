@@ -21,6 +21,7 @@ using core::ant::GdStruct;
 
 constexpr uint32_t kMaxFeatureEntries = 256;
 constexpr float kMinSegmentMetres = 1e-5f;
+constexpr float kStraightSlackMetres = 1e-4f;
 constexpr double kSamePlaceMetres = 1e-7;
 constexpr double kSameTurnDegrees = 1e-4;
 constexpr std::array<std::string_view, 2> kSides = { "Left", "Right" };
@@ -84,6 +85,25 @@ Vec3 bend_axis(const Vec3 &p_to_shoulder, const Vec3 &p_to_hand, const Vec3 &p_t
 	return Vec3{};
 }
 
+void shoulder_toward(const Skeleton &p_rig, const HandReachArm &p_arm, const Vec3 &p_target, float p_nearest,
+		float p_farthest, LocalPose &r_pose, std::vector<Xform> &r_model) {
+	const Vec3 s = r_model[size_t(p_arm.shoulder)].t;
+	const Vec3 to_arm = vec_sub(r_model[size_t(p_arm.arm)].t, s), to_target = vec_sub(p_target, s);
+	const float r = core::vec::length(to_arm), d = core::vec::length(to_target);
+	const float now = core::vec::length(vec_sub(to_arm, to_target));
+	const float want = std::clamp(now, p_nearest, std::max(p_nearest, p_farthest));
+	const Vec3 axis = core::vec::cross(to_arm, to_target);
+	if (!(r > kMinSegmentMetres && d > kMinSegmentMetres) || !(core::vec::length(axis) > 0.0f) || now == want) {
+		return;
+	}
+	const float apart = std::acos(std::clamp(core::vec::dot(to_arm, to_target) / (r * d), -1.0f, 1.0f));
+	const float left = std::acos(std::clamp((r * r + d * d - want * want) / (2.0f * r * d), -1.0f, 1.0f));
+	const Quat q =
+			quat_mul(quat_axis_angle(core::vec::normalize(axis), apart - left), r_model[size_t(p_arm.shoulder)].q);
+	set_model_rotation(p_rig, p_arm.shoulder, q, r_model, r_pose);
+	refresh_chain(p_rig, r_pose, p_arm.shoulder, p_arm.hand, r_model);
+}
+
 float elbow_angle(float p_upper, float p_lower, float p_span) {
 	const float c = (p_upper * p_upper + p_lower * p_lower - p_span * p_span) / (2.0f * p_upper * p_lower);
 	return std::acos(std::clamp(c, -1.0f, 1.0f));
@@ -95,19 +115,25 @@ void reach_arm(const Skeleton &p_rig, const HandReachArm &p_arm, const std::vect
 	if (!(w > 0.0f)) {
 		return;
 	}
-	const Vec3 a = r_model[size_t(p_arm.arm)].t, b = r_model[size_t(p_arm.fore)].t, c = r_model[size_t(p_arm.hand)].t;
 	const Xform place = xform_mul(r_model[size_t(p_arm.effector)],
 			xform_mul(xform_inverse(p_held[size_t(p_arm.effector)]), p_held[size_t(p_arm.hand)]));
-	if (vec_dist(place.t, c) < kSamePlaceMetres &&
+	const Vec3 c0 = r_model[size_t(p_arm.hand)].t;
+	if (vec_dist(place.t, c0) < kSamePlaceMetres &&
 			quat_angle_deg(place.q, r_model[size_t(p_arm.hand)].q) < kSameTurnDegrees) {
 		return;
 	}
-	const Vec3 target = vec_add(c, vec_scale(vec_sub(place.t, c), w));
+	const Vec3 target = vec_add(c0, vec_scale(vec_sub(place.t, c0), w));
 	const Quat target_q = core::ant::quat_slerp(r_model[size_t(p_arm.hand)].q, place.q, w);
-	const float upper = core::vec::length(vec_sub(b, a)), lower = core::vec::length(vec_sub(c, b));
+	const float upper = core::vec::length(vec_sub(r_model[size_t(p_arm.fore)].t, r_model[size_t(p_arm.arm)].t));
+	const float lower = core::vec::length(vec_sub(c0, r_model[size_t(p_arm.fore)].t));
 	if (!(upper > kMinSegmentMetres && lower > kMinSegmentMetres) || !std::isfinite(target.x + target.y + target.z)) {
 		return;
 	}
+	if (p_arm.shoulder >= 0) {
+		shoulder_toward(p_rig, p_arm, target, std::fabs(upper - lower) + kStraightSlackMetres,
+				upper + lower - kStraightSlackMetres, r_pose, r_model);
+	}
+	const Vec3 a = r_model[size_t(p_arm.arm)].t, b = r_model[size_t(p_arm.fore)].t, c = r_model[size_t(p_arm.hand)].t;
 	const float span = std::clamp(core::vec::length(vec_sub(target, a)), std::fabs(upper - lower) + kMinSegmentMetres,
 			upper + lower - kMinSegmentMetres);
 	const Vec3 bend = bend_axis(vec_sub(a, b), vec_sub(c, b), vec_sub(target, a));
@@ -129,7 +155,8 @@ void reach_arm(const Skeleton &p_rig, const HandReachArm &p_arm, const std::vect
 
 bool HandReachArm::usable(size_t p_joints) const {
 	auto in = [&](int32_t p_j) { return p_j >= 0 && size_t(p_j) < p_joints; };
-	return in(arm) && in(fore) && in(hand) && in(effector) && std::isfinite(reach) && reach > 0.0f;
+	return in(arm) && in(fore) && in(hand) && in(effector) && (shoulder < 0 || in(shoulder)) && std::isfinite(reach) &&
+			reach > 0.0f;
 }
 
 bool HandReach::any(size_t p_joints) const {
@@ -212,10 +239,13 @@ core::Result<HandReach> read_hand_reach(
 		arm.arm = mapped_joint(side + "Arm");
 		arm.fore = mapped_joint(side + "ForeArm");
 		arm.hand = mapped_joint(side + "Hand");
-		if (arm.arm < 0 || arm.fore < 0 || arm.hand < 0 || !ancestor_of(p_rig, arm.arm, arm.fore) ||
-				!ancestor_of(p_rig, arm.fore, arm.hand) || arm.arm == arm.fore || arm.fore == arm.hand) {
-			return core::make_error(
-					where + ": the ParticleIK feature maps no " + side + "Arm, ForeArm and Hand chain onto the rig");
+		arm.shoulder = mapped_joint(side + "Shoulder");
+		if (arm.arm < 0 || arm.fore < 0 || arm.hand < 0 || arm.shoulder < 0 ||
+				!ancestor_of(p_rig, arm.shoulder, arm.arm) || !ancestor_of(p_rig, arm.arm, arm.fore) ||
+				!ancestor_of(p_rig, arm.fore, arm.hand) || arm.shoulder == arm.arm || arm.arm == arm.fore ||
+				arm.fore == arm.hand) {
+			return core::make_error(where + ": the ParticleIK feature maps no " + side + "Shoulder, Arm, ForeArm and " +
+					"Hand chain onto the rig");
 		}
 	}
 	const GdArray effectors = joint_to_effector.array("EffectorJoints");
@@ -249,7 +279,7 @@ core::Result<HandReach> read_hand_reach(
 		}
 	}
 	for (const HandReachArm &arm : out.arms) {
-		if (arm.effector < 0 || ancestor_of(p_rig, arm.arm, arm.effector)) {
+		if (arm.effector < 0 || ancestor_of(p_rig, arm.shoulder, arm.effector)) {
 			return core::make_error(where + ": no effector outside the arm for " + p_rig.bone(size_t(arm.hand)).name);
 		}
 	}
@@ -263,7 +293,7 @@ void reach_hands(const Skeleton &p_rig, const HandReach &p_reach, const std::vec
 	}
 	model_pose(p_rig, r_pose, r_model);
 	for (const HandReachArm &arm : p_reach.arms) {
-		if (arm.usable(p_rig.size()) && !ancestor_of(p_rig, arm.arm, arm.effector)) {
+		if (arm.usable(p_rig.size()) && !ancestor_of(p_rig, arm.shoulder >= 0 ? arm.shoulder : arm.arm, arm.effector)) {
 			reach_arm(p_rig, arm, p_held, r_pose, r_model);
 		}
 	}

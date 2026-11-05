@@ -86,8 +86,7 @@ double bolt_root_travel(const render::ViewmodelSet &p_set, const render::Viewmod
 
 struct Drift {
 	std::array<double, 2> worst{};
-	std::array<int, 2> out_of_reach{};
-	std::array<double, 2> out_of_reach_worst{};
+	std::array<int, 2> straight{};
 };
 
 Drift hand_drift(const render::ViewmodelSet &p_set, const render::ViewmodelItem &p_item, const Gait &p_gait,
@@ -144,9 +143,7 @@ Drift hand_drift(const render::ViewmodelSet &p_set, const render::ViewmodelItem 
 					anim::vec_dist(at(shoulders[h]), at(elbows[h])) + anim::vec_dist(at(elbows[h]), at(hands[h]));
 			const double off = anim::vec_dist(at(hands[h]), place);
 			if (anim::vec_dist(at(shoulders[h]), place) > arm_length - kHeldMetres) {
-				++drift.out_of_reach[h];
-				drift.out_of_reach_worst[h] = std::max(drift.out_of_reach_worst[h], off);
-				continue;
+				++drift.straight[h];
 			}
 			drift.worst[h] = std::max(drift.worst[h], off);
 		}
@@ -158,7 +155,8 @@ Drift hand_drift(const render::ViewmodelSet &p_set, const render::ViewmodelItem 
 
 TEST_SUITE("render-viewmodel-reload-moving") {
 	TEST_CASE("1p reload while walking, running and sprinting: each kit's weapons stay in the hands that hold them "
-			  "without the locomotion deltas, and standing the hand reach leaves the clips' hands where they are") {
+			  "without the locomotion deltas in every frame, and standing the hand reach leaves the clips' hands where "
+			  "they are") {
 		core::InstallReader reader;
 		if (!reader.locate({})) {
 			test::skip_install_case(reader.describe().c_str());
@@ -198,13 +196,21 @@ TEST_SUITE("render-viewmodel-reload-moving") {
 				}
 			}
 		}
-		for (uint8_t team = 1; team <= host::kKitTeams; ++team) {
-			for (const host::LoadoutWeapon &lw : host::loadout_weapons(catalog, team)) {
-				if ((lw.unlock == "weapons/m40a5/u_m40a5" || lw.unlock == "weapons/remington870/u_870") &&
-						seen.insert(std::to_string(team) + lw.unlock).second) {
-					weapons.push_back(Weapon{ team, lw.unlock, {}, {}, 0.0, {} });
+		weapons.push_back(Weapon{ 2, "weapons/sa18igla/u_sa18igla", {}, {}, 0.0, {} });
+		for (const std::string extra : { "weapons/m40a5/u_m40a5", "weapons/remington870/u_870",
+					 "weapons/model98b/u_m98b", "weapons/p90/u_p90" }) {
+			bool listed = false;
+			for (uint8_t team = 1; team <= host::kKitTeams; ++team) {
+				for (const host::LoadoutWeapon &lw : host::loadout_weapons(catalog, team)) {
+					if (lw.unlock == extra) {
+						listed = true;
+						if (seen.insert(std::to_string(team) + lw.unlock).second) {
+							weapons.push_back(Weapon{ team, lw.unlock, {}, {}, 0.0, {} });
+						}
+					}
 				}
 			}
+			CHECK_MESSAGE(listed, extra, " is not in the loadout catalog");
 		}
 		REQUIRE(weapons.size() >= 10);
 		core::Result<std::unique_ptr<render::ViewmodelSources>> sources =
@@ -264,10 +270,9 @@ TEST_SUITE("render-viewmodel-reload-moving") {
 					const Drift d = hand_drift(**set, item, g, a);
 					char line[300];
 					std::snprintf(line, sizeof(line),
-							"%s %s: LeftHand %.1f mm, RightHand %.1f mm; frames with the hand's place out of the arm's "
-							"reach: %d left, %d right, at most %.1f and %.1f mm off there",
-							a.name, g.name, d.worst[0] * 1000.0, d.worst[1] * 1000.0, d.out_of_reach[0],
-							d.out_of_reach[1], d.out_of_reach_worst[0] * 1000.0, d.out_of_reach_worst[1] * 1000.0);
+							"%s %s: LeftHand %.1f mm, RightHand %.1f mm; frames with the arm straight to its place: "
+							"%d left, %d right",
+							a.name, g.name, d.worst[0] * 1000.0, d.worst[1] * 1000.0, d.straight[0], d.straight[1]);
 					w.lines.push_back(line);
 					if (std::max(d.worst[0], d.worst[1]) > w.worst) {
 						w.worst = std::max(d.worst[0], d.worst[1]);

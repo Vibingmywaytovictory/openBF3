@@ -157,6 +157,43 @@ TEST_SUITE("anim-viewmodel-unit") {
 		}
 	}
 
+	TEST_CASE("hand reach with the shoulder: a place beyond the straight arm or inside the folded one turns the "
+			  "shoulder just enough for the hand to reach it; a place within the arm leaves the shoulder alone") {
+		ArmRig r;
+		HandReach with_shoulder = r.reach;
+		with_shoulder.arms[0].shoulder = r.rig.find("Shoulder");
+		REQUIRE(with_shoulder.any(r.rig.size()));
+		const Xform rest = r.hand_at_rest();
+		const Vec3 arm_at = model_of(r.rig, rest_pose(r.rig), r.arm).t;
+		const Vec3 beyond = vec_add(arm_at, Vec3{ 0.0f, 0.0f, 0.12f + 0.18f + 0.08f + 0.18f + 0.02f });
+		std::vector<Xform> scratch;
+		LocalPose p = r.with_effector(Xform{ rest.q, beyond });
+		reach_hands(r.rig, r.reach, r.held(), p, scratch);
+		CHECK(vec_dist(model_of(r.rig, p, r.hand).t, beyond) > 0.019);
+		p = r.with_effector(Xform{ rest.q, beyond });
+		reach_hands(r.rig, with_shoulder, r.held(), p, scratch);
+		CHECK(vec_dist(model_of(r.rig, p, r.hand).t, beyond) < 2e-4);
+		const double shoulder_turn =
+				quat_angle_deg(p.joints[size_t(with_shoulder.arms[0].shoulder)].q, rest_pose(r.rig).joints[1].q);
+		MESSAGE("shoulder turned ", shoulder_turn, " degrees");
+		CHECK(shoulder_turn > 1.0);
+		CHECK(shoulder_turn < 30.0);
+
+		const Vec3 inside = vec_add(arm_at, Vec3{ 0.0f, 0.02f, 0.01f });
+		p = r.with_effector(Xform{ rest.q, inside });
+		reach_hands(r.rig, r.reach, r.held(), p, scratch);
+		CHECK(vec_dist(model_of(r.rig, p, r.hand).t, inside) > 0.01);
+		p = r.with_effector(Xform{ rest.q, inside });
+		reach_hands(r.rig, with_shoulder, r.held(), p, scratch);
+		CHECK(vec_dist(model_of(r.rig, p, r.hand).t, inside) < 2e-4);
+
+		const Vec3 near = vec_add(arm_at, Vec3{ 0.0f, 0.0f, 0.4f });
+		p = r.with_effector(Xform{ rest.q, near });
+		reach_hands(r.rig, with_shoulder, r.held(), p, scratch);
+		CHECK(vec_dist(model_of(r.rig, p, r.hand).t, near) < 1e-4);
+		CHECK(quat_angle_deg(p.joints[size_t(with_shoulder.arms[0].shoulder)].q, rest_pose(r.rig).joints[1].q) < 1e-6);
+	}
+
 	TEST_CASE("hand reach: a hand off its effector keeps that offset; it is not pulled onto the effector, and it "
 			  "follows the effector's move") {
 		const Vec3 offset{ 0.05f, 0.02f, -0.03f };
