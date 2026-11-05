@@ -1702,6 +1702,77 @@ TEST_SUITE("host-gunplay-client-unit") {
 				held.failure());
 	}
 
+	TEST_CASE("host.gunplay.client: the duel shooter given a target name settles on and aims at that player while "
+			  "a nearer bot stands off the lane, and a settle timeout names a target that is not seen") {
+		host::DuelSite site;
+		site.shooter = { 0.0f, 0.0f, 40.0f };
+		site.target = { 0.0f, 0.0f, 60.0f };
+		site.target_yaw = 32768;
+		float yaw = 9.0f, pitch = 9.0f;
+		uint32_t fires = 0;
+		host::DuelShooterIo io;
+		io.deploy = [] {};
+		io.debug = [](const net::DebugRequest &) {};
+		io.view = [&](float p_yaw, float p_pitch) {
+			yaw = p_yaw;
+			pitch = p_pitch;
+		};
+		io.fire = [&] { ++fires; };
+		io.hold_zoom = [](bool) {};
+		auto f = std::make_unique<host::PresentationFrame>();
+		f->serial = 5;
+		f->publish_ns = 1'000'000'000ull;
+		f->render_ticks_at_publish = 100.0;
+		f->ticks_per_ns = 60e-9;
+		const uint64_t now_ns = f->publish_ns + 8'333'333ull;
+		f->valid = true;
+		f->own_curr.life = 1;
+		f->own_prev.position = { 0.0f, 0.0f, 40.0f };
+		f->own_curr.position = { 0.0f, 0.0f, 40.0f };
+		f->eye_height_prev = f->eye_height_curr = 1.6f;
+		f->server_own_valid = true;
+		f->server_own.life = 1;
+		f->server_own.position = { 0.2f, 0.0f, 40.0f };
+		f->other_count = 2;
+		host::OtherTrack &bot = f->others[0];
+		bot.slot = 3;
+		bot.count = 2;
+		bot.samples[0] = { 98, record_at(3, { 10.0f, 0, 45.0f }, { 0, 0, 0 }) };
+		bot.samples[1] = { 100, record_at(3, { 10.0f, 0, 45.0f }, { 0, 0, 0 }) };
+		bot.track_newest_tick = 100;
+		host::OtherTrack &mover = f->others[1];
+		mover.slot = 4;
+		mover.count = 2;
+		mover.samples[0] = { 98, record_at(4, { -2.0f / 30.0f, 0, 60.0f }, { 2, 0, 0 }) };
+		mover.samples[1] = { 100, record_at(4, { 0.0f, 0, 60.0f }, { 2, 0, 0 }) };
+		mover.track_newest_tick = 100;
+		f->player_count = 2;
+		f->players[0].slot = 3;
+		f->players[0].bot = true;
+		CHECK_FALSE(net::set_player_name(f->players[0], "bot"));
+		f->players[1].slot = 4;
+		CHECK_FALSE(net::set_player_name(f->players[1], "target"));
+		using P = host::DuelPhase;
+
+		host::DuelShooter shooter(site, 3, "target");
+		CHECK(shooter.frame(0.0, now_ns, *f, true, io) == P::Teleport);
+		CHECK(shooter.frame(0.1, now_ns, *f, true, io) == P::Settle);
+		CHECK(shooter.frame(0.2, now_ns, *f, true, io) == P::Settle);
+		CHECK(yaw == doctest::Approx(0.0f).epsilon(0.01));
+		CHECK(pitch == doctest::Approx(std::atan2(-0.3f, 20.0f)).epsilon(0.01));
+		CHECK(shooter.frame(1.8, now_ns, *f, true, io) == P::Fire);
+		f->tick = 200;
+		CHECK(shooter.frame(1.9, now_ns, *f, true, io) == P::Fire);
+		CHECK(fires == 1);
+		CHECK(yaw == doctest::Approx(0.0f).epsilon(0.01));
+
+		host::DuelShooter missing(site, 3, "nobody");
+		CHECK(missing.frame(0.0, now_ns, *f, true, io) == P::Teleport);
+		CHECK(missing.frame(0.1, now_ns, *f, true, io) == P::Settle);
+		CHECK(missing.frame(0.1 + host::kDuelSettleTimeoutSeconds + 0.1, now_ns, *f, true, io) == P::Failed);
+		CHECK_MESSAGE(missing.failure().find("'nobody' not seen") != std::string::npos, missing.failure());
+	}
+
 	TEST_CASE("host.gunplay.client: the server rules carry the lag compensation's rewind limit, the infinite "
 			  "magazine and the mechanics file into the TDM GameServerConfig") {
 		host::ServerRules rules;

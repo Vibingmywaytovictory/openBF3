@@ -155,6 +155,7 @@ struct TdmState {
 	bool audio_ingame_on = false;
 	std::unique_ptr<AudioIngameCheck, void (*)(AudioIngameCheck *)> audio_ingame{ nullptr, nullptr };
 	uint32_t hitreg_shots = 0;
+	std::string hitreg_target = "target";
 	std::unique_ptr<bf3::host::DuelShooter, void (*)(bf3::host::DuelShooter *)> hitreg{ nullptr, nullptr };
 	std::unique_ptr<bf3::host::SquadJoin, void (*)(bf3::host::SquadJoin *)> squad_join{ nullptr, nullptr };
 	bf3::core::ui::HudSquadNames squad_names{};

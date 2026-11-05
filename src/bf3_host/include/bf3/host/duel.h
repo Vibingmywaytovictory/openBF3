@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 
 namespace bf3::host {
@@ -83,7 +84,7 @@ enum class DuelPhase : uint8_t { Spawn, Teleport, Settle, Fire, Tail, Done, Fail
 
 class DuelShooter {
 public:
-	DuelShooter(const DuelSite &p_site, uint32_t p_shots);
+	DuelShooter(const DuelSite &p_site, uint32_t p_shots, std::string p_target = {});
 
 	DuelPhase frame(double p_now_s, uint64_t p_now_ns, const PresentationFrame &p_frame, bool p_alive,
 			const DuelShooterIo &p_io);
@@ -95,9 +96,12 @@ public:
 private:
 	void fail(const std::string &p_why);
 	void enter(DuelPhase p_phase, double p_now_s);
+	const PresentedSoldier *pick_target(
+			std::span<const PresentedSoldier> p_drawn, const PresentationFrame &p_frame) const;
 
 	DuelSite site_;
 	uint32_t want_shots_ = 0;
+	std::string target_;
 	DuelPhase phase_ = DuelPhase::Spawn;
 	double phase_s_ = -1.0;
 	double first_s_ = -1.0;

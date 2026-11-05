@@ -5,9 +5,11 @@
 #include "bf3/host/server_session.h"
 #include "bf3/sim/command.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <memory>
+#include <utility>
 
 namespace bf3::host {
 
@@ -165,7 +167,28 @@ void DuelStrafe::step(const sim::SoldierState &p_own, double p_t, InputSample &r
 	r_input.held_buttons = 0;
 }
 
-DuelShooter::DuelShooter(const DuelSite &p_site, uint32_t p_shots) : site_(p_site), want_shots_(p_shots) {}
+DuelShooter::DuelShooter(const DuelSite &p_site, uint32_t p_shots, std::string p_target) :
+		site_(p_site), want_shots_(p_shots), target_(std::move(p_target)) {}
+
+const PresentedSoldier *DuelShooter::pick_target(
+		std::span<const PresentedSoldier> p_drawn, const PresentationFrame &p_frame) const {
+	if (target_.empty()) {
+		return p_drawn.empty() ? nullptr : &p_drawn[0];
+	}
+	const size_t rows = std::min<size_t>(p_frame.player_count, p_frame.players.size());
+	for (size_t r = 0; r < rows; ++r) {
+		const net::PlayerRow &row = p_frame.players[r];
+		if (row.bot || net::player_name(row) != target_) {
+			continue;
+		}
+		for (const PresentedSoldier &s : p_drawn) {
+			if (s.slot == row.slot) {
+				return &s;
+			}
+		}
+	}
+	return nullptr;
+}
 
 void DuelShooter::fail(const std::string &p_why) {
 	failure_ = p_why;
@@ -196,9 +219,9 @@ DuelPhase DuelShooter::frame(
 		}
 		enter(DuelPhase::Spawn, p_now_s);
 	}
-	std::array<PresentedSoldier, 8> drawn;
+	std::array<PresentedSoldier, net::kMaxSlots> drawn;
 	const size_t n = playing ? present_others(p_frame, p_now_ns, drawn) : 0;
-	const PresentedSoldier *target = n > 0 ? &drawn[0] : nullptr;
+	const PresentedSoldier *target = pick_target(std::span<const PresentedSoldier>(drawn.data(), n), p_frame);
 	const auto aim = [&] {
 		const ViewAim a = aim_at(present_own_eye(p_frame),
 				{ target->position[0], target->position[1] + kDuelAimHeight, target->position[2] });
@@ -261,9 +284,10 @@ DuelPhase DuelShooter::frame(
 				last_press_ = 0;
 				enter(DuelPhase::Fire, p_now_s);
 			} else if (p_now_s - phase_s_ > kDuelSettleTimeoutSeconds) {
+				const std::string who = target_.empty() ? std::string("the first other") : "'" + target_ + "'";
 				const std::string seen = seen_from_lane_ < 0.0f
-						? std::string("no other seen")
-						: core::fmt("the first other last %.1f m from the lane centre at %.1f m/s",
+						? (target_.empty() ? std::string("no other seen") : who + " not seen")
+						: core::fmt("%s last %.1f m from the lane centre at %.1f m/s", who.c_str(),
 								  double(seen_from_lane_), double(seen_speed_));
 				fail(core::fmt("no target strafed on the lane within %.0f s: %s; %s", kDuelSettleTimeoutSeconds,
 						seen.c_str(), match_text(p_frame).c_str()));

@@ -492,6 +492,9 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 		}
 		if (has_user_arg("hitreg-check")) {
 			m.hitreg_shots = uint32_t(std::clamp(std::atoi(user_arg_value("hitreg-check").c_str()), 1, 5000));
+			if (has_user_arg("hitreg-target")) {
+				m.hitreg_target = user_arg_value("hitreg-target");
+			}
 			if (quit_after_ <= 0.0) {
 				quit_after_ = 1.0e9;
 			}
@@ -1099,12 +1102,14 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 				return true;
 			}
 			UtilityFunctions::print(
-					to_godot(bf3::core::fmt("[hitreg] %u shots from (%.2f, %.2f, %.2f) yaw %u at the lane "
+					to_godot(bf3::core::fmt("[hitreg] %u shots from (%.2f, %.2f, %.2f) yaw %u at %s on the lane "
 											"%.0f m ahead",
 							m.hitreg_shots, double(site->shooter[0]), double(site->shooter[1]),
-							double(site->shooter[2]), unsigned(site->shooter_yaw), double(site->distance))));
+							double(site->shooter[2]), unsigned(site->shooter_yaw),
+							m.hitreg_target.empty() ? "the first other" : ("'" + m.hitreg_target + "'").c_str(),
+							double(site->distance))));
 			m.hitreg = std::unique_ptr<host::DuelShooter, void (*)(host::DuelShooter *)>(
-					new host::DuelShooter(*site, m.hitreg_shots), &delete_part<host::DuelShooter>);
+					new host::DuelShooter(*site, m.hitreg_shots, m.hitreg_target), &delete_part<host::DuelShooter>);
 		}
 		if (m.hitreg != nullptr) {
 			host::DuelShooterIo io;
