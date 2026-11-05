@@ -1243,6 +1243,12 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			q.yaw = sim::quantize_yaw(p_spot.yaw);
 			client_->send_debug(q);
 		};
+		io.fight_spot = [this, &r_game, &m, p_now_ns]() -> std::optional<AudioIngameSpot> {
+			std::array<host::PresentedSoldier, net::kMaxSlots> others{};
+			const size_t n = frame_->valid ? host::present_others(*frame_, p_now_ns, others) : 0;
+			return audio_ingame_fight_spot(std::span<const host::PresentedSoldier>(others.data(), n), r_game.slot_team,
+					m.own_team, frame_->own_curr.position);
+		};
 		io.feet = frame_->own_curr.position;
 		io.own_slot = m.own_slot;
 		if (m.audio_ingame->frame(now_s, *r_game.audio, io)) {

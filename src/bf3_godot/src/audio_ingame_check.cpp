@@ -2,6 +2,7 @@
 
 #include "game_audio.h"
 #include "level_session_game.h"
+#include "m2b_check_rows.h"
 
 #include "bf3/audio/audio_analysis.h"
 #include "bf3/audio/voice_cull.h"
@@ -106,6 +107,31 @@ std::optional<AudioIngameSpot> audio_ingame_open_spot(const sim::CollisionWorld 
 		}
 	}
 	return best;
+}
+
+std::optional<AudioIngameSpot> audio_ingame_fight_spot(std::span<const present::PresentedSoldier> p_others,
+		std::span<const uint8_t> p_slot_team, uint8_t p_own_team, const sim::Vec3 &p_feet) {
+	const present::PresentedSoldier *best = nullptr;
+	float best_d = 0.0f;
+	for (const present::PresentedSoldier &o : p_others) {
+		const uint8_t team = o.slot < p_slot_team.size() ? p_slot_team[o.slot] : 0;
+		if (team == 0 || team == p_own_team || o.mode == sim::MoveMode::Dead) {
+			continue;
+		}
+		const float d = std::hypot(o.position[0] - p_feet[0], o.position[2] - p_feet[2]);
+		if (best == nullptr || d < best_d) {
+			best = &o;
+			best_d = d;
+		}
+	}
+	if (best == nullptr) {
+		return std::nullopt;
+	}
+	const M2bSeekSpot s = m2b_seek_spot(best->position, best->yaw, kAudioIngameFightMeters);
+	AudioIngameSpot spot;
+	spot.feet = s.position;
+	spot.yaw = s.yaw;
+	return spot;
 }
 
 bool parse_audio_ingame_phase(std::string_view p_text, AudioIngamePhase &r_phase) {
@@ -452,6 +478,7 @@ void AudioIngameCheck::script(double p_now_s, const AudioIngameIo &p_io) {
 		}
 		leg_s_ = -1.0;
 		spot_checked_ = false;
+		fight_.reset();
 		if (p_io.time_to_respawn <= 0.0f && p_now_s - last_deploy_s_ > 1.5) {
 			p_io.deploy();
 			last_deploy_s_ = p_now_s;
@@ -465,8 +492,18 @@ void AudioIngameCheck::script(double p_now_s, const AudioIngameIo &p_io) {
 		last_step_ = UINT32_MAX;
 	}
 	const double in = p_now_s - alive_s_;
+	if (kind_ == AudioIngamePhase::Flyby && fights_ == 0 && in < kAudioIngameSettleSeconds && p_io.fight_spot &&
+			p_io.teleport) {
+		fight_ = p_io.fight_spot();
+		if (fight_) {
+			p_io.teleport(*fight_);
+			base_yaw_ = fight_->yaw;
+			++fights_;
+			fight_after_s_ = std::max(fight_after_s_, in);
+		}
+	}
 	if (in < kAudioIngameSettleSeconds) {
-		base_yaw_ = p_io.yaw();
+		base_yaw_ = fight_ ? fight_->yaw : p_io.yaw();
 		last_s_ = p_now_s;
 		return;
 	}
@@ -475,7 +512,15 @@ void AudioIngameCheck::script(double p_now_s, const AudioIngameIo &p_io) {
 		return;
 	}
 	if (kind_ == AudioIngamePhase::Flyby) {
-		p_io.view(base_yaw_, 0.0f);
+		if (!have_view_) {
+			have_view_ = true;
+			yaw_ = p_io.yaw();
+		}
+		const float max_step =
+				float(std::clamp(p_now_s - last_s_, 0.0, 0.1)) * kAudioIngameTurnDegPerSecond * core::kDegToRadF;
+		yaw_ += std::clamp(std::remainder(base_yaw_ - yaw_, 2.0f * std::numbers::pi_v<float>), -max_step, max_step);
+		last_s_ = p_now_s;
+		p_io.view(yaw_, 0.0f);
 		return;
 	}
 	double t = in - kAudioIngameSettleSeconds;
@@ -1217,10 +1262,12 @@ void AudioIngameCheck::analyse_flyby(Bf3GameAudio &r_audio) {
 	const uint64_t bullets = b.bullets - a.bullets, starts = b.starts - a.starts;
 	row("fly-bys start", starts > 0 && starts <= bullets,
 			core::fmt("%llu presented bullets, %llu fly-by starts, %llu silent, %llu too slow, %llu receding, %llu "
-					  "refused, %llu untracked in the recording",
+					  "refused, %llu untracked in the recording; %u moves to %.0f m in front of the nearest enemy, the "
+					  "latest %.1f s into a life, %u own deaths",
 					(unsigned long long)bullets, (unsigned long long)starts, (unsigned long long)(b.silent - a.silent),
 					(unsigned long long)(b.slow - a.slow), (unsigned long long)(b.receding - a.receding),
-					(unsigned long long)(b.refused - a.refused), (unsigned long long)(b.untracked - a.untracked)));
+					(unsigned long long)(b.refused - a.refused), (unsigned long long)(b.untracked - a.untracked),
+					fights_, double(kAudioIngameFightMeters), fight_after_s_, deaths_));
 	uint64_t requested = 0, far = 0, refused = 0, started = 0;
 	float farthest = 0.0f;
 	for (const auto &[h, f] : fates_) {

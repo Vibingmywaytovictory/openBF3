@@ -5,6 +5,7 @@
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/wav_io.h"
 #include "bf3/client_audio/sound_fate_ledger.h"
+#include "bf3/present/presented.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/spawn.h"
@@ -72,6 +73,7 @@ struct AudioIngameSpot {
 	float clear_m = 0.0f;
 };
 inline constexpr uint64_t kAudioIngameMinBotShots = 10;
+inline constexpr float kAudioIngameFightMeters = 15.0f;
 
 bool parse_audio_ingame_phase(std::string_view p_text, AudioIngamePhase &r_phase);
 std::optional<double> audio_ingame_clip_steps_per_second(
@@ -81,6 +83,8 @@ float audio_ingame_clearance(
 float audio_ingame_clearest_yaw(const std::function<float(float)> &p_clearance, float p_from, float &r_clear_m);
 std::optional<AudioIngameSpot> audio_ingame_open_spot(
 		const sim::CollisionWorld &p_world, const sim::MotorParams &p_motor, std::span<const sim::SpawnPoint> p_spawns);
+std::optional<AudioIngameSpot> audio_ingame_fight_spot(std::span<const present::PresentedSoldier> p_others,
+		std::span<const uint8_t> p_slot_team, uint8_t p_own_team, const sim::Vec3 &p_feet);
 
 inline constexpr double kAudioIngameGhostSeconds = 1.0;
 inline constexpr double kAudioIngameLimitedBlocksShare = 0.01;
@@ -107,6 +111,7 @@ struct AudioIngameIo {
 	std::function<float(float)> clearance;
 	std::function<std::optional<AudioIngameSpot>()> open_spot;
 	std::function<void(const AudioIngameSpot &)> teleport;
+	std::function<std::optional<AudioIngameSpot>()> fight_spot;
 	sim::Vec3 feet{};
 	uint8_t own_slot = 0xFF;
 };
@@ -243,6 +248,9 @@ private:
 	std::optional<AudioIngameSpot> spot_;
 	double spot_s_ = -1.0;
 	uint32_t teleports_ = 0;
+	double fight_after_s_ = 0.0;
+	std::optional<AudioIngameSpot> fight_;
+	uint32_t fights_ = 0;
 	float spot_clear_m_ = 0.0f;
 	GameAudioStats stats_at_start_;
 
