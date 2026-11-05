@@ -1055,6 +1055,9 @@ void PatchInstance::State::quiet_plugin(PluginState &r_ps, float p_rate, float p
 			biquads(BiquadCoefficients::design(BiquadShape::HighShelf, p_rate, r_ps.attribute(0), tuning.iir2_q,
 					gain_to_db(std::max(0.0f, r_ps.attribute(1)))));
 			break;
+		case PluginRole::Pan:
+			r_ps.pan_started = false;
+			break;
 		case PluginRole::Send: {
 			const ca::SoundConnection &c = p.connections[r_ps.index];
 			float target = 1.0f;

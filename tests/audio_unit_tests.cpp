@@ -1111,6 +1111,44 @@ TEST_SUITE("audio-patch") {
 		CHECK(first + 512 - end_frame < 48000 / 4);
 	}
 
+	TEST_CASE("a sound that wakes a quiet voice pans from where it is, not from where the voice's last sound was") {
+		const TestWave w = make_wave(1, 4800, -1, -1, 48000, true);
+		Builder b;
+		const uint16_t trig = b.input(1, true);
+		b.p.waves.push_back(SoundWaveRef{ w.partition, "test_wave" });
+		const uint32_t s = b.sampler(1, 0, SamplerLoop::None);
+		b.set(s, cp::SmpTrigger, Builder::R(trig));
+		SoundVoicePlugin pan;
+		pan.id = fourcc("Pn21");
+		pan.channels = 1;
+		b.p.plugins.insert(b.p.plugins.begin() + 4, pan);
+		b.p.voices[0].plugins_count = 6;
+		auto inst = instance(b.build(), w.bank);
+		ba::EmitterState emitter;
+		emitter.position = ba::Vec3{ -10.0f, 0.0f, 0.0f };
+		inst->set_geometry(emitter, ba::ListenerState{});
+		Buses buses;
+		inst->post_event(1, 0);
+		uint64_t first = 0;
+		for (; first < 512 * 16; first += 512) {
+			buses.block(*inst, first);
+		}
+		CHECK(inst->stats().pan_steps == 0);
+		emitter.position = ba::Vec3{ 10.0f, 0.0f, 0.0f };
+		inst->set_geometry(emitter, ba::ListenerState{});
+		buses.block(*inst, first);
+		first += 512;
+		inst->post_event(1, 454);
+		buses.block(*inst, first);
+		float left = 0.0f, right = 0.0f;
+		for (uint32_t i = 454; i < 512; ++i) {
+			left = std::max(left, std::fabs(buses.b.channels[size_t(MasterBus::GameMixMain)][0][i]));
+			right = std::max(right, std::fabs(buses.b.channels[size_t(MasterBus::GameMixMain)][1][i]));
+		}
+		CHECK(std::max(left, right) > 0.01f);
+		CHECK(inst->stats().pan_steps == 0);
+	}
+
 	TEST_CASE("Sampler: a slot stepped twice within a block or across a block edge fades every old play out") {
 		const TestWave w = make_wave(5, 4800, 1, 3, 48000, true);
 		Builder b;
