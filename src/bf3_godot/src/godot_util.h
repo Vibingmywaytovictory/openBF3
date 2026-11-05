@@ -13,6 +13,8 @@ std::string user_arg_value(const char *p_name);
 
 bool has_user_arg(const char *p_name);
 
+std::string player_name_arg();
+
 inline constexpr bool kBuildChecks = OPENBF3_BUILD_CHECKS != 0;
 
 bool has_check_arg(const char *p_name);

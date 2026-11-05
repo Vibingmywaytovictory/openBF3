@@ -598,7 +598,7 @@ host::ClientSessionConfig Bf3MatchHost::client_config() const {
 	host::ClientSessionConfig cc;
 	cc.host = connect_host_;
 	cc.port = connect_port_;
-	cc.name = "player";
+	cc.name = player_name_arg();
 	if (bf3::core::Result<bf3::net::NetSimConfig> ns = bf3::net::parse_netsim(netsim_)) {
 		cc.netsim = *ns;
 	}

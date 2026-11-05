@@ -30,6 +30,8 @@ echo           ^(config\bot_tuning.cfg^), at most 31; try: tools\play.cmd --tdm 
 echo   --kill-limit=0..100000 --preround=0..600   with --tdm: the kill limit ^(data: 100^) and the pre-round seconds ^(data: 10^)
 echo   --connect=host:port   join a running server ^(tools\server.cmd^) instead of starting one; no local bots;
 echo           the server names the level, the mode and the rules; --connect=NAME@HOST:PORT asks the master at HOST:PORT for the server NAME
+echo   --name=NAME   your player name on the scoreboard, the kill feed and the nametags ^(default: player; the server keeps 16 bytes^);
+echo           a listen game with --master also registers its server under it
 echo   --bf3-install=DIR   the retail install ^(default: OPENBF3_INSTALL, then C:\Program Files\EA Games\Battlefield 3^); both PCs need the same install
 echo   --maplist=file   this game's own server rotates the map list ^(try bf3-opensource\config\maplist.cfg^); without it a round restarts in place
 echo With --tdm the match state prints as "[tdm] match: ..." console lines ^(no TDM HUD in the firefight scene^).

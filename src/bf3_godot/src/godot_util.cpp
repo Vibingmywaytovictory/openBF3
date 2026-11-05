@@ -43,6 +43,11 @@ bool has_user_arg(const char *p_name) {
 	return false;
 }
 
+std::string player_name_arg() {
+	const std::string name = user_arg_value("name");
+	return name.empty() ? std::string("player") : name;
+}
+
 bool has_check_arg(const char *p_name) {
 	if (!has_user_arg(p_name)) {
 		return false;

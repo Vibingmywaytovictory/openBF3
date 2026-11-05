@@ -551,7 +551,7 @@ host::ClientSessionConfig Bf3LevelSession::client_config(const std::string &p_ne
 		cc.host = connect_host_;
 		cc.port = connect_port_;
 	}
-	cc.name = "player";
+	cc.name = player_name_arg();
 	bf3::core::Result<bf3::net::NetSimConfig> ns = bf3::net::parse_netsim(p_netsim);
 	if (ns) {
 		cc.netsim = *ns;
