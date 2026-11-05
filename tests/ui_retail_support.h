@@ -3,7 +3,9 @@
 #include <doctest/doctest.h>
 
 #include "bf3/core/ebx_db.h"
+#include "bf3/core/ui/as2_clip.h"
 #include "bf3/core/ui/hud_screen.h"
+#include "bf3/core/ui/swf_hit.h"
 #include "bf3/core/ui/swf_image.h"
 #include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/swf_scene.h"
@@ -17,6 +19,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace ui_retail {
 
@@ -159,6 +162,13 @@ inline RetailScreen open_retail_screen(
 	REQUIRE_MESSAGE(hud.ok(), (hud.ok() ? std::string() : hud.error().message));
 	s.hud = std::move(*hud);
 	return s;
+}
+
+inline std::pair<float, float> stage_centre(const RetailScreen &p_s, std::string_view p_path) {
+	const bf3::core::ui::SwfSceneNode &n = p_s.at(p_path);
+	const bf3::core::ui::SwfRect b = bf3::core::ui::swf_node_local_bounds(*p_s.scene, n);
+	const bf3::core::ui::SwfMatrix w = bf3::core::ui::swf_world_matrix(*p_s.scene, n.id);
+	return { w.tx + w.a * (b.x_min + b.x_max) * 0.5f, w.ty + w.d * (b.y_min + b.y_max) * 0.5f };
 }
 
 }

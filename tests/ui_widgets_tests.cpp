@@ -1127,6 +1127,93 @@ TEST_SUITE("ui-widgets") {
 				member_rows.size());
 	}
 
+	TEST_CASE("widgets: squadscreen: a member row's Index is its place in List_02, not the player's slot, so a click "
+			  "on it highlights the player's name, squadgraph's SetSelectedPlayer stores it and the leader is offered "
+			  "KICK") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudSquadNames names;
+		for (size_t i = 0; i < names.size(); ++i) {
+			names[i] = "SQ" + std::to_string(i + 1);
+		}
+		std::map<std::pair<std::string, int32_t>, std::string> flow;
+		HudClientState client;
+		client.squad_names = &names;
+		client.flow_data = [&flow](std::string_view p_category, int32_t p_key) -> std::optional<std::string> {
+			const auto it = flow.find({ std::string(p_category), p_key });
+			return it != flow.end() ? std::optional<std::string>(it->second) : std::nullopt;
+		};
+		HudModel m;
+		m.local_player = 1;
+		m.local_team = 1;
+		m.player_count = 3;
+		const auto name = [&](uint8_t p_slot, std::string_view p_name) {
+			std::memcpy(m.players[p_slot].name.data(), p_name.data(), p_name.size());
+		};
+		name(0, "Bot");
+		name(1, "Leader");
+		name(2, "Mate");
+		m.players[0].team = 2;
+		m.players[0].squad = 1;
+		m.squad_leaders[0] = true;
+		m.players[1].team = 1;
+		m.players[1].squad = 2;
+		m.players[2].team = 1;
+		m.players[2].squad = 2;
+		m.squad_leaders[1] = true;
+		m.squad.available_squads.count = 1;
+		m.squad.available_squads.squads[0] = HudSquadEntry{ 2, 2, true };
+
+		ScreenRig squad;
+		open_screen(*r, squad, "ui/flow/screen/squadscreen", client);
+		std::string seen;
+		squad.s.hud->set_event_sink([&](const HudWidgetEvent &p_e) {
+			if (p_e.query != "UIWidgetEventID_OnItemHighlighted") {
+				return;
+			}
+			if (p_e.instance != "List_04" && p_e.instance != "List_02") {
+				return;
+			}
+			const int32_t key = p_e.instance == "List_04" ? kSquadSelectedSquadKey : kSquadSelectedPlayerKey;
+			flow[{ std::string(kUiSquadCompPartition), key }] = p_e.param.to_string();
+			seen += "[" + p_e.instance + " " + p_e.param.to_string() + "]";
+		});
+		squad.s.hud->refresh(m);
+		const auto label = [&](const std::string &p_row) {
+			return squad.s.hud->clip(p_row + ".Label.txtField").text();
+		};
+		const auto click = [&](const std::string &p_path) {
+			const auto [x, y] = ui_retail::stage_centre(squad.s, p_path);
+			squad.s.hud->mouse_move(x, y);
+			squad.s.hud->mouse_button(x, y, 1, true);
+			squad.s.hud->mouse_button(x, y, 1, false);
+			squad.s.hud->refresh(m);
+		};
+		const auto selected = [&](int32_t p_key) { return flow[{ std::string(kUiSquadCompPartition), p_key }]; };
+		const std::vector<std::string> squad_rows = live_rows(squad, "Widget.List.Rows.SquadListRow");
+		REQUIRE(squad_rows.size() == 1u);
+		click(squad_rows[0]);
+		CHECK(selected(kSquadSelectedSquadKey) == "2");
+		const std::vector<std::string> member_rows = live_rows(squad, "Widget.List.Rows.SquadDetailedRow");
+		REQUIRE(member_rows.size() == 4u);
+		REQUIRE(label(member_rows[1]) == "Mate");
+		for (size_t i = 0; i < member_rows.size(); ++i) {
+			const auto *row = dynamic_cast<const RowBaseClass *>(squad.s.hud->controller(member_rows[i]));
+			REQUIRE(row != nullptr);
+			CHECK(row->row_index() == double(i));
+		}
+		CHECK_FALSE(squad.clip("Button_03").visible());
+		click(member_rows[1]);
+		CHECK_MESSAGE(selected(kSquadSelectedPlayerKey) == "Mate", seen);
+		CHECK(hud_selected_squad_player(m, client) == 2);
+		CHECK(squad.clip("Button_03").visible());
+		CHECK(squad.s.hud->stats().as2.missing_paths == 0);
+		CHECK_MESSAGE(squad.s.hud->stats().as2.failed_ops == 0, squad.s.hud->stats().as2.last_failure);
+		std::printf("ui.widgets squadscreen member click: %s\n", seen.c_str());
+	}
+
 	TEST_CASE("widgets: install unchanged") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {

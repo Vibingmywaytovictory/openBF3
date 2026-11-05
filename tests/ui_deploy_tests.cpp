@@ -37,13 +37,6 @@ constexpr std::string_view kTicket = "instance1.TicketCounterSpawnScreen_01.Tick
 constexpr uint32_t kUsHash = 0x5501u;
 constexpr uint32_t kRuHash = 0x5502u;
 
-std::pair<float, float> stage_centre(const RetailScreen &p_s, std::string_view p_path) {
-	const SwfSceneNode &n = p_s.at(p_path);
-	const SwfRect b = swf_node_local_bounds(*p_s.scene, n);
-	const SwfMatrix w = swf_world_matrix(*p_s.scene, n.id);
-	return { w.tx + w.a * (b.x_min + b.x_max) * 0.5f, w.ty + w.d * (b.y_min + b.y_max) * 0.5f };
-}
-
 HudModel dead_for(float p_seconds, bool p_can_spawn) {
 	HudModel m{};
 	m.spawn_logic.time_to_respawn = p_seconds;

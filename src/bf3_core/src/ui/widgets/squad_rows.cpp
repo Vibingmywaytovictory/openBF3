@@ -476,7 +476,7 @@ As2Value available_squad_rows(const HudModel &p_model, const HudClientState &p_c
 	return rows;
 }
 
-As2Value squad_member_row(const HudModel &p_model, uint8_t p_slot, int32_t p_local_squad) {
+As2Value squad_member_row(const HudModel &p_model, uint8_t p_slot, int32_t p_local_squad, size_t p_row) {
 	const HudPlayer &p = p_model.players[p_slot];
 	As2Value row = As2Value::object();
 	row.set("Label", As2Value::of(hud_player_name(p_model, p_slot)));
@@ -489,7 +489,7 @@ As2Value squad_member_row(const HudModel &p_model, uint8_t p_slot, int32_t p_loc
 	row.set("BoosterIcon", As2Value::of(int32_t(p.booster_icon)));
 	row.set("SquadLeader", As2Value::of(p_model.squad_leaders[p_slot]));
 	row.set("EmptyRow", As2Value::of(false));
-	row.set("Index", As2Value::of(int32_t(p_slot)));
+	row.set("Index", As2Value::of(int32_t(p_row)));
 	row.set("id", As2Value::of(int32_t(p_slot)));
 	return row;
 }
@@ -507,7 +507,7 @@ As2Value squad_member_rows(const HudModel &p_model, const HudClientState &p_clie
 		if (p.squad != squad || p.team == 0 || p.team != p_model.local_team) {
 			continue;
 		}
-		rows.push(squad_member_row(p_model, uint8_t(slot), local));
+		rows.push(squad_member_row(p_model, uint8_t(slot), local, members));
 		++members;
 	}
 	for (; members < kHudSquadSize; ++members) {
