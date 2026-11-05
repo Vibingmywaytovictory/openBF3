@@ -28,7 +28,7 @@ namespace {
 
 constexpr uint64_t kTdmStreamHash = 0x87e9a76c4eb213f7ull;
 constexpr uint64_t kTdmStateHash = 0xa7801285a914cf3full;
-constexpr uint64_t kDevStreamHash = 0xd0c2d36d93d92a9cull;
+constexpr uint64_t kDevStreamHash = 0x4cd234e5dc79c888ull;
 constexpr uint64_t kDevStateHash = 0x42d578c88359ddc9ull;
 
 struct StreamRecorder {

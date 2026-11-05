@@ -73,6 +73,18 @@ void OwnPrediction::decay(uint64_t p_now) {
 	}
 }
 
+void TeleportRun::snapshot(uint16_t p_own_events) {
+	const bool teleported = (p_own_events & sim::soldier_events::kTeleported) != 0;
+	open_ = teleported && (open_ || !run_);
+	run_ = teleported;
+}
+
+bool TeleportRun::take() {
+	const bool open = open_;
+	open_ = false;
+	return open;
+}
+
 void OwnPrediction::authoritative(const sim::SoldierState &p_s, uint64_t p_now) {
 	if (have_own_ && p_s.life < own_life_) {
 		return;
@@ -116,7 +128,12 @@ void OwnPrediction::authoritative(const sim::SoldierState &p_s, uint64_t p_now) 
 		after_match(p_s);
 		return;
 	}
-	++reconciliations_;
+	const bool ordered = teleport_run_.take();
+	if (ordered) {
+		++ordered_moves_;
+	} else {
+		++reconciliations_;
+	}
 	last_reconcile_tick_ = p_s.tick;
 	last_reconcile_ns_ = p_now;
 	const sim::Tick next = clock_.next_tick();
@@ -128,12 +145,14 @@ void OwnPrediction::authoritative(const sim::SoldierState &p_s, uint64_t p_now) 
 	const sim::Vec3 new_pos = after != nullptr ? after->state.position : p_s.position;
 	const sim::Vec3 corr = sub3(old_pos, new_pos);
 	const float m = length3(corr);
-	if (m > 1e-3f) {
+	if (m > 1e-3f && !ordered) {
 		++corrections_over_1mm_;
 	}
-	max_correction_m_ = std::max(max_correction_m_, m);
+	if (!ordered) {
+		max_correction_m_ = std::max(max_correction_m_, m);
+	}
 	if (m > config_.teleport_above_m) {
-		++teleports_;
+		teleports_ += ordered ? 0u : 1u;
 		visual_offset_ = {};
 	} else {
 		for (size_t k = 0; k < 3; ++k) {
@@ -236,6 +255,7 @@ void OwnPrediction::stats(ClientStats &r_stats) const {
 	r_stats.corrections_over_1mm = corrections_over_1mm_;
 	r_stats.max_correction_m = max_correction_m_;
 	r_stats.teleports = teleports_;
+	r_stats.ordered_moves = ordered_moves_;
 	r_stats.hash_mismatches = hash_mismatches_;
 	r_stats.health_rebases = health_rebases_;
 }

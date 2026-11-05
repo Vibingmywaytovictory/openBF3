@@ -143,6 +143,7 @@ struct ClientStats {
 	uint64_t corrections_over_1mm = 0;
 	float max_correction_m = 0.0f;
 	uint64_t teleports = 0;
+	uint64_t ordered_moves = 0;
 	uint64_t hash_mismatches = 0;
 	double interp_delay_ms = 0.0;
 	net::NetSimStats netsim_out;

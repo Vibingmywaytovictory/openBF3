@@ -33,5 +33,6 @@ echo           the server names the level, the mode and the rules; --connect=NAM
 echo   --bf3-install=DIR   the retail install ^(default: OPENBF3_INSTALL, then C:\Program Files\EA Games\Battlefield 3^); both PCs need the same install
 echo   --maplist=file   this game's own server rotates the map list ^(try bf3-opensource\config\maplist.cfg^); without it a round restarts in place
 echo With --tdm the match state prints as "[tdm] match: ..." console lines ^(no TDM HUD in the firefight scene^).
-echo At exit the console prints the prediction line: corrections and those over 1 mm per predicted minute, and motor_hash_mismatch.
+echo At exit the console prints the prediction line: corrections and those over 1 mm per predicted minute, motor_hash_mismatch,
+echo and apart from the corrections the server-ordered moves ^(dev teleports^).
 exit /b 0

@@ -137,6 +137,7 @@ void ClientLoop::client_tick(uint64_t p_now) {
 	pending_spawned.clear();
 	if (pending_snapshot_valid) {
 		if (pending_snapshot.own.has_value()) {
+			prediction.snapshot_events(pending_snapshot.own_events);
 			prediction.authoritative(*pending_snapshot.own, p_now);
 		}
 		pending_snapshot_valid = false;

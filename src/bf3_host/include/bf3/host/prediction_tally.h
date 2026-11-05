@@ -13,6 +13,7 @@ struct PredictionTally {
 	uint64_t corrections = 0;
 	uint64_t corrections_over_1mm = 0;
 	uint64_t motor_hash_mismatch = 0;
+	uint64_t ordered_moves = 0;
 	float max_correction_m = 0.0f;
 	uint64_t commands_seen = 0;
 };

@@ -39,6 +39,7 @@ inline constexpr uint16_t kPoseStarted = 1u << 4;
 inline constexpr uint16_t kPoseFinished = 1u << 5;
 inline constexpr uint16_t kPoseRefused = 1u << 6;
 inline constexpr uint16_t kSpawned = 1u << 7;
+inline constexpr uint16_t kTeleported = 1u << 8;
 }
 
 struct SoldierState {

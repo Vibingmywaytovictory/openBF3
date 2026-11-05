@@ -16,6 +16,16 @@
 
 namespace bf3::host {
 
+class TeleportRun {
+public:
+	void snapshot(uint16_t p_own_events);
+	bool take();
+
+private:
+	bool run_ = false;
+	bool open_ = false;
+};
+
 class OwnPrediction {
 public:
 	OwnPrediction(const ClientSessionConfig &p_config, ClientClock &r_clock, ClientInput &r_input, ClientGunplay &r_gunplay) :
@@ -34,6 +44,7 @@ public:
 	void note_server_events(uint16_t p_events) { server_events_acc_ = uint16_t(server_events_acc_ | p_events); }
 
 	void decay(uint64_t p_now);
+	void snapshot_events(uint16_t p_own_events) { teleport_run_.snapshot(p_own_events); }
 	void authoritative(const sim::SoldierState &p_s, uint64_t p_now);
 	void fill_base(sim::Tick p_tick);
 	const sim::PredictionEntry *entry(sim::Tick p_tick) const { return ring_->find(p_tick); }
@@ -79,6 +90,8 @@ private:
 	uint64_t corrections_over_1mm_ = 0;
 	float max_correction_m_ = 0.0f;
 	uint64_t teleports_ = 0;
+	uint64_t ordered_moves_ = 0;
+	TeleportRun teleport_run_;
 	uint64_t hash_mismatches_ = 0;
 	uint64_t health_rebases_ = 0;
 };

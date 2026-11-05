@@ -262,8 +262,8 @@ set(_openbf3_session_pure *judge_rest*synthetic* *present_others* *GameServer*wi
     *NetThread*fake*Host*stalled* *ClientSession*started*with*no*level* *kicked*in*the*lobby*
     *inbound*queue*overflows* *collision*digest*follows* *Hello*another*game_build*
     *component*digests*differ* *client*whose*differs*kicked* *client*follows*LevelChange* *still*loading*server*moves* *client*prepares*RoundOverInfo*
-    *attaches*level*connect*timeout*after*MatchInfo* *LegWalker*relay*shooters*)
-openbf3_case_row(NAME host.session.unit.pure EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 20
+    *attaches*level*connect*timeout*after*MatchInfo* *LegWalker*relay*shooters* *server-ordered*teleport*marks*)
+openbf3_case_row(NAME host.session.unit.pure EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 21
     CASES ${_openbf3_session_pure})
 openbf3_case_row(NAME host.session.loadbots EXE test_host_session SUITE host-session-unit GROUP host-session-unit COUNT 1
     CASES *LoadBotFleet*socket-free*)

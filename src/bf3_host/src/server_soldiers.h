@@ -12,11 +12,14 @@
 
 namespace bf3::host {
 
+inline constexpr uint8_t kTeleportEventSnapshots = 8;
+
 struct Soldier {
 	bool spawned = false;
 	sim::SoldierState state;
 	sim::Command last;
 	uint16_t own_events = 0;
+	uint8_t teleport_snapshots = 0;
 };
 
 class Soldiers {
@@ -32,6 +35,7 @@ public:
 		s.spawned = true;
 		s.last = sim::hold_command(s.state);
 		s.own_events = uint16_t(s.own_events | s.state.events);
+		s.teleport_snapshots = 0;
 	}
 
 	void replace(size_t p_slot, const sim::SoldierState &p_state) {
@@ -47,7 +51,10 @@ public:
 		s.state = p_state;
 	}
 
-	void teleport(size_t p_slot, const sim::SoldierState &p_state) { soldiers_[p_slot].state = p_state; }
+	void teleport(size_t p_slot, const sim::SoldierState &p_state) {
+		soldiers_[p_slot].state = p_state;
+		soldiers_[p_slot].teleport_snapshots = kTeleportEventSnapshots;
+	}
 	void leave(size_t p_slot) { soldiers_[p_slot].spawned = false; }
 	void clear(size_t p_slot) { soldiers_[p_slot] = Soldier(); }
 
@@ -71,8 +78,13 @@ public:
 	}
 
 	uint16_t take_events(size_t p_slot) {
-		const uint16_t events = soldiers_[p_slot].own_events;
-		soldiers_[p_slot].own_events = 0;
+		Soldier &s = soldiers_[p_slot];
+		uint16_t events = s.own_events;
+		s.own_events = 0;
+		if (s.teleport_snapshots > 0) {
+			events = uint16_t(events | sim::soldier_events::kTeleported);
+			--s.teleport_snapshots;
+		}
 		return events;
 	}
 

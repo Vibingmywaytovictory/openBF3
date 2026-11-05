@@ -20,9 +20,11 @@
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/spawn.h"
 #include "bf3/sim/static_world.h"
+#include "client_prediction.h"
 #include "client_transport.h"
 #include "pipe_transport.h"
 #include "server_net_thread.h"
+#include "server_soldiers.h"
 #include "test_support.h"
 
 #include <algorithm>
@@ -1317,7 +1319,8 @@ TEST_SUITE("host-session-unit") {
 		behind->server.stop();
 	}
 
-	TEST_CASE("host.session: a server-side teleport is reconciled once and smoothed (offset 0 within 400 ms)") {
+	TEST_CASE("host.session: a server-side teleport is reconciled once as a server-ordered move, not a correction, "
+			  "and smoothed (offset 0 within 400 ms)") {
 		auto live = start_live(synthetic_level(), {});
 		REQUIRE(wait_spawned(*live));
 		run_for(*live, 1.5);
@@ -1337,7 +1340,7 @@ TEST_SUITE("host-session-unit") {
 			}
 			const float o = std::sqrt(f.visual_offset[0] * f.visual_offset[0] + f.visual_offset[1] * f.visual_offset[1] + f.visual_offset[2] * f.visual_offset[2]);
 			max_offset = std::max(max_offset, o);
-			if (f.stats.reconciliations > 0 && reconcile_ns == 0) {
+			if (f.stats.ordered_moves > 0 && reconcile_ns == 0) {
 				reconcile_ns = f.stats.last_reconcile_ns;
 			}
 			if (reconcile_ns != 0 && zero_ns == 0 && o == 0.0f) {
@@ -1345,9 +1348,16 @@ TEST_SUITE("host-session-unit") {
 			}
 		});
 		const ClientStats s = live->client.stats();
-		std::printf("teleport 0.08 m: reconciliations %llu, max offset %.4f m, offset 0 after %.0f ms, teleports %llu\n", (unsigned long long)s.reconciliations,
-				double(max_offset), reconcile_ns && zero_ns ? double(zero_ns - reconcile_ns) / 1e6 : -1.0, (unsigned long long)s.teleports);
-		CHECK(s.reconciliations == 1);
+		std::printf(
+				"teleport 0.08 m: reconciliations %llu, server-ordered moves %llu, corrections over 1 mm %llu, largest "
+				"%.4f m, max offset %.4f m, offset 0 after %.0f ms, teleports %llu\n",
+				(unsigned long long)s.reconciliations, (unsigned long long)s.ordered_moves,
+				(unsigned long long)s.corrections_over_1mm, double(s.max_correction_m), double(max_offset),
+				reconcile_ns && zero_ns ? double(zero_ns - reconcile_ns) / 1e6 : -1.0, (unsigned long long)s.teleports);
+		CHECK(s.ordered_moves == 1);
+		CHECK(s.reconciliations == 0);
+		CHECK(s.corrections_over_1mm == 0);
+		CHECK(s.max_correction_m == 0.0f);
 		CHECK(s.teleports == 0);
 		CHECK(max_offset > 0.05f);
 		REQUIRE(zero_ns != 0);
@@ -3074,5 +3084,70 @@ TEST_SUITE("host-session-unit") {
 		CHECK(f.bytes_in_per_s > 0.0);
 		std::printf("LoadBotFleet x%u: %llu snapshots, %.0f B/s in, %.0f B/s out per fleet over %.2f s\n", kBots,
 				(unsigned long long)f.snapshots, f.bytes_in_per_s, f.bytes_out_per_s, f.seconds);
+	}
+}
+
+TEST_SUITE("host-session-unit") {
+	TEST_CASE("host.session: a server-ordered teleport marks kTeleported in the own events of the next 8 snapshots, "
+			  "and the client takes one reconciliation of each marked run as the move") {
+		auto level = synthetic_level();
+		Direct d;
+		GameServerConfig cfg;
+		cfg.level = level;
+		cfg.max_slots = 8;
+		cfg.dev_commands = true;
+		REQUIRE(d.server.init(cfg).ok());
+		d.server.on_connect(0);
+		net::Hello hello;
+		hello.name = "test";
+		hello.game_build = net::game_build();
+		d.receive(net::encode_hello(hello));
+		d.tick();
+		d.receive(net::encode_ready({}));
+		for (int i = 0; i < 8; ++i) {
+			d.tick();
+		}
+		REQUIRE(d.spawned.size() == 1);
+		const auto marked = [](const net::Snapshot &p_s) {
+			return (p_s.own_events & soldier_events::kTeleported) != 0;
+		};
+		CHECK(std::none_of(d.snapshots.begin(), d.snapshots.end(), marked));
+		const size_t before = d.snapshots.size();
+		net::DebugRequest tp;
+		tp.kind = net::DebugKind::Teleport;
+		tp.id = 7;
+		tp.position = { 4.0f, 3.0f, -4.0f };
+		tp.yaw = 512;
+		d.receive(net::encode_debug(tp));
+		for (int i = 0; i < 4 * int(kTeleportEventSnapshots); ++i) {
+			d.tick();
+		}
+		REQUIRE(d.reports.size() == 1);
+		CHECK(d.reports[0].ok);
+		REQUIRE(d.snapshots.size() >= before + 2u * kTeleportEventSnapshots);
+		const size_t run = size_t(std::count_if(d.snapshots.begin() + ptrdiff_t(before), d.snapshots.end(), marked));
+		CHECK(run == kTeleportEventSnapshots);
+		for (size_t i = before; i < before + kTeleportEventSnapshots; ++i) {
+			CHECK_MESSAGE(marked(d.snapshots[i]), "snapshot " << i - before << " after the teleport");
+		}
+		REQUIRE(d.snapshots[before].own.has_value());
+		CHECK(d.snapshots[before].own->position[0] == doctest::Approx(4.0f));
+		CHECK(d.snapshots[before].own->position[2] == doctest::Approx(-4.0f));
+
+		TeleportRun r;
+		CHECK_FALSE(r.take());
+		r.snapshot(soldier_events::kTeleported);
+		CHECK(r.take());
+		CHECK_FALSE(r.take());
+		r.snapshot(soldier_events::kTeleported | soldier_events::kLanded);
+		CHECK_FALSE(r.take());
+		r.snapshot(0);
+		CHECK_FALSE(r.take());
+		r.snapshot(soldier_events::kTeleported);
+		r.snapshot(soldier_events::kTeleported);
+		CHECK(r.take());
+		r.snapshot(soldier_events::kTeleported);
+		r.snapshot(soldier_events::kLanded);
+		CHECK_FALSE(r.take());
 	}
 }
