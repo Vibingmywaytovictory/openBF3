@@ -5,6 +5,7 @@
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/host/firefight_run.h"
+#include "bf3/sim/collision_world.h"
 #include "bf3/sim/soldier_motor.h"
 #include "test_support.h"
 
@@ -204,6 +205,33 @@ TEST_SUITE("host-gunplay-firefight") {
 		CHECK(r->kills[2] > 0);
 		CHECK(r->peer_exposed > 0);
 		CHECK_MESSAGE(r->peer_hits > 0, "the bots never hit the human slot (exposed in ", r->peer_exposed, " of ", r->peer_checks, " checks)");
+	}
+
+	TEST_CASE("a soldier where four Metro floor slabs leave 6 cm gaps has ground under its footprint") {
+		Fixture *f = fixture();
+		if (f == nullptr) {
+			return;
+		}
+		core::Result<std::unique_ptr<sim::CollisionWorld>> made =
+				sim::CollisionWorld::create(f->level.shared->static_world);
+		REQUIRE(made.ok());
+		const sim::CollisionWorld &world = **made;
+		const sim::MotorParams &motor = f->level.shared->motor;
+		const sim::Vec3 corner{ -224.77f, 64.404f, -501.90f };
+		const float rim = 0.9f * motor.radius;
+		const sim::Vec3 on_axes[5] = { corner, { corner[0] + rim, corner[1], corner[2] },
+			{ corner[0] - rim, corner[1], corner[2] }, { corner[0], corner[1], corner[2] + rim },
+			{ corner[0], corner[1], corner[2] - rim } };
+		for (const sim::Vec3 &p : on_axes) {
+			sim::StaticHit hit;
+			CHECK_FALSE(world.ground_below(
+					sim::Vec3{ p[0], p[1] + 0.5f, p[2] }, host::kBelowProbeMetres, sim::query_mask::kMovement, &hit));
+		}
+		sim::StaticHit floor;
+		CHECK(world.sweep_capsule(sim::Vec3{ corner[0], corner[1] + 0.3f, corner[2] }, motor.radius,
+				2.0f * motor.radius + 0.05f, sim::Vec3{ 0.0f, -1.0f, 0.0f }, sim::query_mask::kMovement, &floor));
+		CHECK(floor.position[1] == doctest::Approx(corner[1]).epsilon(1e-4));
+		CHECK(host::ground_under_footprint(world, motor.radius, corner));
 	}
 
 	TEST_CASE("install unchanged") {

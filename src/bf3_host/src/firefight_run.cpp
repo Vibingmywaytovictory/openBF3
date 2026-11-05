@@ -194,6 +194,21 @@ FirefightCounters firefight_counters(const FirefightStats &p_stats) {
 	return c;
 }
 
+bool ground_under_footprint(const sim::CollisionWorld &p_world, float p_radius, const sim::Vec3 &p_feet) {
+	const float rim = 0.9f * p_radius;
+	const float diagonal = rim * 0.70710678f;
+	const float offsets[9][2] = { { 0.0f, 0.0f }, { rim, 0.0f }, { -rim, 0.0f }, { 0.0f, rim }, { 0.0f, -rim },
+		{ diagonal, diagonal }, { diagonal, -diagonal }, { -diagonal, diagonal }, { -diagonal, -diagonal } };
+	for (const auto &o : offsets) {
+		sim::StaticHit hit;
+		const sim::Vec3 probe{ p_feet[0] + o[0], p_feet[1] + 0.5f, p_feet[2] + o[1] };
+		if (p_world.ground_below(probe, kBelowProbeMetres, sim::query_mask::kMovement, &hit)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 core::Result<FirefightLevel> load_firefight_level(std::shared_ptr<const core::Install> p_install, std::string_view p_level, std::string_view p_mode,
 		const FirefightLoadOptions &p_options) {
 	if (p_install == nullptr) {
@@ -504,18 +519,7 @@ core::Result<FirefightReport> run_firefight(std::shared_ptr<const SharedLevel> p
 					}
 				}
 
-				bool ground = false;
-				const float rim = 0.9f * motor.radius;
-				const float offsets[5][2] = { { 0.0f, 0.0f }, { rim, 0.0f }, { -rim, 0.0f }, { 0.0f, rim }, { 0.0f, -rim } };
-				for (const auto &o : offsets) {
-					sim::StaticHit hit;
-					const sim::Vec3 probe{ st->position[0] + o[0], st->position[1] + 0.5f, st->position[2] + o[1] };
-					if (world.ground_below(probe, kBelowProbeMetres, sim::query_mask::kMovement, &hit)) {
-						ground = true;
-						break;
-					}
-				}
-				if (!ground) {
+				if (!ground_under_footprint(world, motor.radius, st->position)) {
 					++report.below_ground;
 					if (report.below_ground <= 8) {
 						std::fprintf(stderr, "firefight: below the ground: tick %u slot %u at %.2f %.2f %.2f move mode %d\n", now, unsigned(k.slot), st->position[0],

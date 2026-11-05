@@ -39,6 +39,8 @@ struct FirefightLoadOptions {
 	uint64_t seed = 1;
 };
 
+bool ground_under_footprint(const sim::CollisionWorld &p_world, float p_radius, const sim::Vec3 &p_feet);
+
 core::Result<FirefightLevel> load_firefight_level(std::shared_ptr<const core::Install> p_install, std::string_view p_level, std::string_view p_mode,
 		const FirefightLoadOptions &p_options);
 
