@@ -637,7 +637,7 @@ struct ViewmodelAnimator::Impl {
 	}
 
 	void tag_reach(double p_t, float p_ads) {
-		tagged_reach = hand_reach;
+		tagged_reach.arms = hand_reach.arms;
 		for (const Action *a : { &prev, &cur }) {
 			if (!a->active || a->procedural) {
 				continue;
