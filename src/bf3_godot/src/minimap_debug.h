@@ -35,6 +35,7 @@ struct MinimapDebugFrame {
 	std::vector<MinimapDebugHit> hits;
 	uint64_t paints = 0;
 	uint64_t frame = 0;
+	bool rendered = false;
 };
 
 inline constexpr std::string_view kMinimapDebugUvGlsl = R"(

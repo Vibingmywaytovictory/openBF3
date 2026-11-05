@@ -234,7 +234,25 @@ void MinimapModesCheck::whole_view_row(const MinimapDebugFrame &p_frame) {
 					double(p_frame.metres_per_unit), double(centre_err), double(local_err)));
 }
 
-bool MinimapModesCheck::sweep(Bf3NativeHud &r_hud, std::map<size_t, MinimapObjectiveTally> &r_tally) {
+void MinimapModesCheck::redeploy_if_dead(const MinimapModesIo &p_io) {
+	if (!p_io.alive && p_io.spawn_screen && clock_ - redeploy_clock_ > kMinimapModesRedeploySeconds) {
+		p_io.deploy();
+		redeploy_clock_ = clock_;
+		++redeploys_;
+	}
+}
+
+bool MinimapModesCheck::settled(Bf3NativeHud &r_hud, const MinimapModesIo &p_io) {
+	if (p_io.alive && r_hud.minimap_debug().rendered) {
+		return ++frames_ >= kMinimapModesSettleFrames;
+	}
+	frames_ = 0;
+	redeploy_if_dead(p_io);
+	return false;
+}
+
+bool MinimapModesCheck::sweep(
+		Bf3NativeHud &r_hud, const MinimapModesIo &p_io, std::map<size_t, MinimapObjectiveTally> &r_tally) {
 	if (sweep_index_ >= objectives_.size()) {
 		r_hud.set_minimap_pose_override(std::nullopt);
 		return true;
@@ -247,7 +265,7 @@ bool MinimapModesCheck::sweep(Bf3NativeHud &r_hud, std::map<size_t, MinimapObjec
 	pose.yaw = 0.4f + 0.9f * float(sweep_index_);
 	pose.valid = true;
 	r_hud.set_minimap_pose_override(pose);
-	if (++frames_ < kMinimapModesSettleFrames) {
+	if (!settled(r_hud, p_io)) {
 		return false;
 	}
 	tally(r_hud.minimap_debug(), r_tally, true, sweep_index_);
@@ -326,7 +344,7 @@ bool MinimapModesCheck::step(Bf3NativeHud &r_hud, const MinimapModesIo &p_io, do
 		}
 		case Phase::Deploy:
 			if (!p_io.alive || !r_hud.minimap_ready() || r_hud.minimap_debug().paints == 0) {
-				if (clock_ - phase_start_ > 2.0 && !p_io.alive && p_io.spawn_screen) {
+				if (clock_ - phase_start_ > kMinimapModesRedeploySeconds && !p_io.alive && p_io.spawn_screen) {
 					p_io.deploy();
 					phase_start_ = clock_;
 				}
@@ -355,7 +373,7 @@ bool MinimapModesCheck::step(Bf3NativeHud &r_hud, const MinimapModesIo &p_io, do
 			return false;
 		}
 		case Phase::Small:
-			if (!sweep(r_hud, small_)) {
+			if (!sweep(r_hud, p_io, small_)) {
 				return false;
 			}
 			objective_rows("minimap_small", small_);
@@ -406,7 +424,7 @@ bool MinimapModesCheck::step(Bf3NativeHud &r_hud, const MinimapModesIo &p_io, do
 		}
 		case Phase::LargeWhole:
 			if (sweep_index_ < objectives_.size()) {
-				sweep(r_hud, large_whole_);
+				sweep(r_hud, p_io, large_whole_);
 				return false;
 			}
 			if (sweep_index_ == objectives_.size()) {
@@ -416,7 +434,7 @@ bool MinimapModesCheck::step(Bf3NativeHud &r_hud, const MinimapModesIo &p_io, do
 				frames_ = 0;
 				return false;
 			}
-			if (++frames_ < kMinimapModesSettleFrames) {
+			if (!settled(r_hud, p_io)) {
 				return false;
 			}
 			whole_view_row(r_hud.minimap_debug());
@@ -445,7 +463,7 @@ bool MinimapModesCheck::step(Bf3NativeHud &r_hud, const MinimapModesIo &p_io, do
 			return false;
 		}
 		case Phase::Large: {
-			if (!sweep(r_hud, large_)) {
+			if (!sweep(r_hud, p_io, large_)) {
 				return false;
 			}
 			objective_rows("minimap_large", large_);
@@ -485,6 +503,7 @@ bool MinimapModesCheck::step(Bf3NativeHud &r_hud, const MinimapModesIo &p_io, do
 			}
 			if (mates.empty()) {
 				r_hud.set_minimap_pose_override(std::nullopt);
+				redeploy_if_dead(p_io);
 				if (clock_ - phase_start_ > kMinimapModesDownedSeconds) {
 					row(mode_ + ".revive_icons", false,
 							core::fmt("no team-mate went down within %.0f s", kMinimapModesDownedSeconds));
@@ -497,7 +516,7 @@ bool MinimapModesCheck::step(Bf3NativeHud &r_hud, const MinimapModesIo &p_io, do
 			pose.z = mates.front().z;
 			pose.valid = true;
 			r_hud.set_minimap_pose_override(pose);
-			if (++frames_ < kMinimapModesSettleFrames) {
+			if (!settled(r_hud, p_io)) {
 				return false;
 			}
 			const MinimapDebugFrame &f = r_hud.minimap_debug();
@@ -513,9 +532,10 @@ bool MinimapModesCheck::step(Bf3NativeHud &r_hud, const MinimapModesIo &p_io, do
 				}
 			}
 			row(mode_ + ".revive_icons", err >= 0.0f && err <= ui::kMinimapUvCheckTexels,
-					core::fmt("%zu downed team-mates in their revive window; the first drawn as %s at its corpse's UV "
-							  "within %.2f texels",
-							mates.size(), icon.c_str(), double(err)));
+					core::fmt(
+							"%zu downed team-mates in their revive window; the first drawn as %s at its corpse's UV "
+							"within %.2f texels, read from a drawn paint (%u redeploys of the own soldier on the way)",
+							mates.size(), icon.c_str(), double(err), redeploys_));
 			return finish();
 		}
 		case Phase::Done:

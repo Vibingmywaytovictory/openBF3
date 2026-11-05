@@ -20,6 +20,7 @@ inline constexpr double kMinimapModesWaitSeconds = 150.0;
 inline constexpr double kMinimapModesDownedSeconds = 60.0;
 inline constexpr double kMinimapModesSizeSeconds = 3.0;
 inline constexpr uint32_t kMinimapModesSettleFrames = 4;
+inline constexpr double kMinimapModesRedeploySeconds = 2.0;
 inline constexpr float kMinimapModesOffsetMetres = 45.0f;
 inline constexpr float kMinimapModesScaleTolerance = 0.02f;
 inline constexpr int32_t kMinimapModesScaleSpanPixels = 64;
@@ -71,7 +72,9 @@ private:
 			const MinimapDebugFrame &p_frame, float p_local_x, float p_local_y) const;
 	void objective_rows(const std::string &p_view, const std::map<size_t, MinimapObjectiveTally> &p_tally);
 	void whole_view_row(const MinimapDebugFrame &p_frame);
-	bool sweep(Bf3NativeHud &r_hud, std::map<size_t, MinimapObjectiveTally> &r_tally);
+	void redeploy_if_dead(const MinimapModesIo &p_io);
+	bool settled(Bf3NativeHud &r_hud, const MinimapModesIo &p_io);
+	bool sweep(Bf3NativeHud &r_hud, const MinimapModesIo &p_io, std::map<size_t, MinimapObjectiveTally> &r_tally);
 	void row(const std::string &p_name, bool p_pass, const std::string &p_detail);
 
 	std::string level_;
@@ -80,6 +83,8 @@ private:
 	Phase phase_ = Phase::Wait;
 	double clock_ = 0.0;
 	double phase_start_ = 0.0;
+	double redeploy_clock_ = 0.0;
+	uint32_t redeploys_ = 0;
 	uint32_t frames_ = 0;
 	size_t sweep_index_ = 0;
 	int32_t zoom_step_before_ = 0;

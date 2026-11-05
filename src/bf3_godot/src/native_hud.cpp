@@ -853,6 +853,7 @@ void Bf3NativeHud::paint(size_t p_index) {
 				continue;
 			}
 			paint_minimap(t, *v->scene());
+			minimap_debug_.rendered = v->is_visible_in_tree();
 			if (!t.live) {
 				note_status(v->set_engine_target_live(t.path, true), t.path);
 			}
