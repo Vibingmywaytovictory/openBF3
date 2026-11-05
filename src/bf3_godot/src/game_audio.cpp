@@ -118,6 +118,7 @@ struct Bf3GameAudio::Impl {
 	std::unique_ptr<ba::FootstepDriver> footsteps;
 	std::unique_ptr<ba::OwnHitAudio> own_hit;
 	std::unique_ptr<ba::MovementFoley> movement;
+	std::unique_ptr<ba::DeathScreamAudio> deaths;
 	std::vector<ba::FootstepSoldier> step_soldiers;
 	TapForwarder tap;
 	Ref<Bf3AudioStream> stream;
@@ -293,6 +294,7 @@ bool Bf3GameAudio::build(godot::Node *p_parent, std::string *r_error) {
 	if (m.soldier) {
 		m.own_hit = std::make_unique<ba::OwnHitAudio>(*m.mixer, m.soldier->own_hit, m.bank, m.tuning, *m.pool);
 		m.movement = std::make_unique<ba::MovementFoley>(m.soldier->movement, m.bank, m.tuning);
+		m.deaths = std::make_unique<ba::DeathScreamAudio>(*m.mixer, m.soldier->death, m.bank, m.tuning, *m.pool);
 	}
 	m.beds.set_assets(m.bed_assets);
 	m.stream.instantiate();
@@ -384,6 +386,9 @@ void Bf3GameAudio::step(const GameFrame &p_frame, std::span<const fx::ImpactSoun
 	}
 	if (m.own_hit) {
 		m.own_hit->on_events(p_frame.events, p_frame.others, in.listener, m.clock->earliest_frame());
+	}
+	if (m.deaths) {
+		m.deaths->on_events(p_frame.events, p_frame.others, p_frame.own_slot, in.listener, m.clock->earliest_frame());
 	}
 	capture_step(m);
 	drain_mixer_events(m, *this);
@@ -678,6 +683,7 @@ void Bf3GameAudio::shutdown() {
 	m.footsteps.reset();
 	m.own_hit.reset();
 	m.movement.reset();
+	m.deaths.reset();
 	m.clock.reset();
 	m.mixer.reset();
 	m.pool.reset();
@@ -717,6 +723,7 @@ ba::MixerA3Assets load_a3(const core::EbxResolver &p_db, Impl &r_m) {
 		programs.push_back(r_m.soldier->footsteps);
 		programs.push_back(r_m.soldier->own_hit);
 		programs.push_back(r_m.soldier->movement);
+		programs.push_back(r_m.soldier->death);
 	}
 	ba::MixerA3Assets a3 = ba::load_mixer_a3(p_db, programs);
 	char line[200];
@@ -947,6 +954,13 @@ void capture_end(Impl &r_m) {
 		const ba::OwnHitStats &hs = r_m.own_hit->stats();
 		UtilityFunctions::print(String::utf8(("[audio] own hits: " + std::to_string(hs.hits) + " hits, " +
 				std::to_string(hs.starts) + " started, " + std::to_string(hs.refused) + " refused")
+						.c_str()));
+	}
+	if (r_m.deaths) {
+		const ba::DeathScreamStats &ds = r_m.deaths->stats();
+		UtilityFunctions::print(String::utf8(("[audio] death screams: " + std::to_string(ds.deaths) + " deaths, " +
+				std::to_string(ds.starts) + " started, " + std::to_string(ds.refused) + " refused, " +
+				std::to_string(ds.unplaced) + " not presented")
 						.c_str()));
 	}
 	if (c->dir.empty()) {

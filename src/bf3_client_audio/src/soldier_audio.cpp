@@ -2,6 +2,7 @@
 
 #include "bf3/audio/audio_load.h"
 #include "bf3/core/util/finite.h"
+#include "bf3/core/util/splitmix64.h"
 
 #include <algorithm>
 #include <cmath>
@@ -57,12 +58,17 @@ core::Result<SoldierAudioAssets> load_soldier_audio(const core::EbxResolver &p_d
 		return movement.error();
 	}
 	a.movement = *movement;
+	core::Result<std::shared_ptr<const ca::SoundProgram>> death = compile_patch(p_db, a.def.death);
+	if (!death) {
+		return death.error();
+	}
+	a.death = *death;
 	r_report.push_back("footsteps [" + a.def.footsteps + "]: " + std::to_string(a.materials.rows_with_sound) + " of " +
 			std::to_string(a.materials.rows) + " grid rows with a MaterialSoundId, audible to " +
 			std::to_string(a.params.radius_m) + " m, " + std::to_string(a.params.ant_step_count) +
 			" animation step events" +
 			(a.params.local_player_closes_period ? ", the period closed for the local player" : "") + "; own hit [" +
-			a.def.bullet_impact + "]; movement [" + a.def.movement + "]");
+			a.def.bullet_impact + "]; movement [" + a.def.movement + "]; death [" + a.def.death + "]");
 	return a;
 }
 
@@ -186,4 +192,47 @@ void OwnHitAudio::on_events(std::span<const host::PresentEvent> p_events,
 	}
 }
 
+DeathScreamAudio::DeathScreamAudio(MixerCore &r_mixer, std::shared_ptr<const ca::SoundProgram> p_program,
+		std::shared_ptr<const ca::WaveBank> p_bank, const AudioTuning &p_tuning, OneShotPool &r_pool) :
+		mixer_(r_mixer), program_(std::move(p_program)), bank_(std::move(p_bank)), tuning_(p_tuning), pool_(r_pool) {}
+
+void DeathScreamAudio::on_events(std::span<const host::PresentEvent> p_events,
+		std::span<const host::PresentedSoldier> p_others, uint8_t p_own_slot, const ListenerState &p_listener,
+		uint64_t p_frame) {
+	heard_.clear();
+	for (const host::PresentEvent &e : p_events) {
+		if (e.kind != host::PresentKind::Death) {
+			continue;
+		}
+		++stats_.deaths;
+		const uint64_t key = (uint64_t(e.aux) << 56) ^ uint64_t(e.time);
+		if (std::find(heard_.begin(), heard_.end(), key) != heard_.end() || !program_) {
+			continue;
+		}
+		heard_.push_back(key);
+		const bool own = e.aux == p_own_slot;
+		EmitterState em;
+		bool placed = own;
+		em.position = p_listener.position;
+		for (const host::PresentedSoldier &p : p_others) {
+			if (!own && p.slot == e.aux) {
+				em.position = Vec3{ p.position[0], p.position[1] + p.eye_height, p.position[2] };
+				placed = core::finite(em.position);
+				break;
+			}
+		}
+		if (!placed) {
+			++stats_.unplaced;
+			continue;
+		}
+		OneShotOptions o;
+		o.set_first_person = true;
+		o.first_person = own;
+		if (!pool_.start(mixer_, program_, bank_, tuning_, core::splitmix64(key), em, p_listener, p_frame, o)) {
+			++stats_.refused;
+			continue;
+		}
+		++stats_.starts;
+	}
+}
 }

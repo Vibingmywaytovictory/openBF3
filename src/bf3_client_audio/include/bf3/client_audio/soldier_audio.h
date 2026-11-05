@@ -34,6 +34,7 @@ struct SoldierAudioAssets {
 	std::shared_ptr<const core::audio::SoundProgram> footsteps;
 	std::shared_ptr<const core::audio::SoundProgram> own_hit;
 	std::shared_ptr<const core::audio::SoundProgram> movement;
+	std::shared_ptr<const core::audio::SoundProgram> death;
 };
 
 core::Result<SoldierAudioAssets> load_soldier_audio(const core::EbxResolver &p_db,
@@ -91,4 +92,30 @@ private:
 	std::vector<uint64_t> heard_;
 };
 
+struct DeathScreamStats {
+	uint64_t deaths = 0;
+	uint64_t starts = 0;
+	uint64_t refused = 0;
+	uint64_t unplaced = 0;
+};
+static_assert(std::is_trivially_copyable_v<DeathScreamStats>);
+
+class DeathScreamAudio {
+public:
+	DeathScreamAudio(MixerCore &r_mixer, std::shared_ptr<const core::audio::SoundProgram> p_program,
+			std::shared_ptr<const core::audio::WaveBank> p_bank, const AudioTuning &p_tuning, OneShotPool &r_pool);
+
+	void on_events(std::span<const host::PresentEvent> p_events, std::span<const host::PresentedSoldier> p_others,
+			uint8_t p_own_slot, const ListenerState &p_listener, uint64_t p_frame);
+	const DeathScreamStats &stats() const { return stats_; }
+
+private:
+	MixerCore &mixer_;
+	std::shared_ptr<const core::audio::SoundProgram> program_;
+	std::shared_ptr<const core::audio::WaveBank> bank_;
+	AudioTuning tuning_;
+	OneShotPool &pool_;
+	DeathScreamStats stats_;
+	std::vector<uint64_t> heard_;
+};
 }

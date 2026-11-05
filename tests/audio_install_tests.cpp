@@ -2350,4 +2350,73 @@ TEST_SUITE("audio-footsteps") {
 		CHECK(pool.live() == 0);
 		check_unchanged(*f);
 	}
+
+	TEST_CASE("DeathScreamAudio: the SoldierSoundData Death patch starts once per death, at the presented victim's "
+			  "head or at the listener for the own soldier") {
+		Fixture *f = need_install();
+		Result<gp::SoldierSoundDef> d = gp::read_soldier_sounds(f->metro->db());
+		REQUIRE(d.ok());
+		const StepPatch death = step_patch(*f->install, *f->metro, d->death);
+		MESSAGE("death [", d->death, "]: ", death.missing, " waves not on Metro");
+		CHECK(death.missing == 0);
+		std::array<bf3::host::PresentedSoldier, 2> others{};
+		others[0].slot = 7;
+		others[1].slot = 9;
+		others[1].position = { 0.0f, 0.0f, -10.0f };
+		others[1].eye_height = 1.5f;
+		const auto died = [](uint8_t p_victim, int64_t p_time) {
+			bf3::host::PresentEvent e;
+			e.kind = bf3::host::PresentKind::Death;
+			e.slot = 3;
+			e.aux = p_victim;
+			e.time = p_time;
+			return e;
+		};
+		bf3::host::PresentEvent hit = died(9, 5);
+		hit.kind = bf3::host::PresentKind::Hit;
+		const std::array<bf3::host::PresentEvent, 5> events{ died(9, 1), died(9, 1), died(7, 2), died(4, 3), hit };
+		ba::MixerConfig mc;
+		mc.max_instances = 64;
+		ba::MixerCore mixer(mc);
+		mixer.record_cuts(true);
+		ba::OneShotPool pool(16);
+		ba::DeathScreamAudio audio(mixer, death.program, death.bank, ba::AudioTuning{}, pool);
+		ba::ListenerState listener;
+		listener.position = ba::Vec3{ 0.0f, 1.5f, 0.0f };
+		audio.on_events(events, others, 7, listener, mixer.earliest_frame());
+		CHECK(audio.stats().deaths == 4);
+		CHECK(audio.stats().starts == 2);
+		CHECK(audio.stats().unplaced == 1);
+		CHECK(audio.stats().refused == 0);
+		std::vector<float> out(2 * 800);
+		std::vector<ba::MixerCutEvent> cuts(256);
+		std::array<ba::MixerFeedback, 64> fb;
+		std::map<ba::InstanceHandle, ba::MixerCutKind> fates;
+		float peak = 0.0f;
+		for (int block = 0; block < 900 && (block == 0 || pool.live() > 0); ++block) {
+			REQUIRE(mixer.mix(out.data(), 800) == 800);
+			for (const float v : out) {
+				peak = std::max(peak, std::fabs(v));
+			}
+			for (size_t n = mixer.poll_feedback(fb); n > 0; n = mixer.poll_feedback(fb)) {
+				for (size_t i = 0; i < n; ++i) {
+					if (fb[i].finished) {
+						pool.on_finished(fb[i].handle);
+					}
+				}
+			}
+			pool.update(mixer);
+			collect_fates(mixer, cuts, fates);
+		}
+		MESSAGE("two death screams, at 10 m and at the listener: peak ", peak);
+		CHECK(peak > ba::kAudibleStep);
+		size_t finished = 0;
+		for (const auto &[h, k] : fates) {
+			finished += k == ba::MixerCutKind::Finish ? 1u : 0u;
+		}
+		CHECK(finished == 2);
+		CHECK(fates.size() == 2);
+		CHECK(pool.live() == 0);
+		check_unchanged(*f);
+	}
 }
