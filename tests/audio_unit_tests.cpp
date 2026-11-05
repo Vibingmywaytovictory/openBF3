@@ -1651,6 +1651,52 @@ TEST_SUITE("audio-patch") {
 		}
 	}
 
+	TEST_CASE("Sampler: a segment that nothing follows fades into its last sample, one that runs on into the next "
+			  "segment does not") {
+		constexpr uint32_t kFrames = 1012;
+		const auto sine = [](uint32_t i) {
+			return double(std::lrint(16000.0 * std::sin(2.0 * kPi * 1000.0 * double(i) / 48000.0))) / 32768.0;
+		};
+		for (const uint32_t segments : { 1u, 2u }) {
+			CAPTURE(segments);
+			const TestWave w = make_wave(segments, kFrames, -1, -1, 48000, true);
+			Builder b;
+			const uint16_t trig = b.input(1, true);
+			b.p.waves.push_back(SoundWaveRef{ w.partition, "test_wave" });
+			const uint32_t s = b.sampler(1, 0, SamplerLoop::None);
+			b.set(s, cp::SmpTrigger, Builder::R(trig));
+			auto inst = instance(b.build(), w.bank);
+			Buses buses;
+			std::vector<float> out;
+			inst->post_event(1, 0);
+			for (uint64_t f = 0; f < 4096; f += 512) {
+				buses.block(*inst, f);
+				for (uint32_t i = 0; i < 512; ++i) {
+					out.push_back(buses.left(i));
+				}
+			}
+			const double gain = double(out[5]) / sine(5);
+			REQUIRE(std::fabs(gain) > 0.1);
+			const uint32_t last = segments * kFrames - 1;
+			float end_step = 0.0f, after = 0.0f;
+			for (uint32_t i = last; i < out.size(); ++i) {
+				end_step = std::max(end_step, std::fabs(i == last ? out[i] : out[i] - out[i - 1]));
+				after = i > last ? std::max(after, std::fabs(out[i])) : after;
+			}
+			const double data_end = std::fabs(gain * sine(kFrames - 1));
+			MESSAGE(segments, " segment(s): the data's last sample ", data_end, ", the played step into silence ",
+					end_step, ", 2 ms before the end ", out[last - 96]);
+			CHECK(data_end > 0.15);
+			CHECK(end_step < ba::kAudibleStep);
+			CHECK(after == 0.0f);
+			CHECK(std::fabs(out[last - 200] - gain * sine(kFrames - 201)) < 1e-6);
+			if (segments == 2) {
+				CHECK(std::fabs(out[kFrames - 1] - gain * sine(kFrames - 1)) < 1e-6);
+			}
+			CHECK(inst->finished());
+		}
+	}
+
 	TEST_CASE("DivisibleLoopPlayer: pieces in order on alternating slots, crossfades, FreezeSegment, Stop") {
 		constexpr uint32_t kPieces = 4, kFrames = 4800, kCrossfade = 960;
 		const TestWave w = make_pieces(kPieces, kFrames, "SwvsSequential");

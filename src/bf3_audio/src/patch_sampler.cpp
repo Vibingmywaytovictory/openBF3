@@ -132,6 +132,28 @@ bool take_input_frame(SlotPlay &r_play, float &r_left, float &r_right) {
 	return true;
 }
 
+void fade_into_segment_end(SlotPlay &r_play, uint32_t p_got, uint32_t p_fade) {
+	const uint32_t total = r_play.decoder.header().total_frames;
+	const uint32_t end = r_play.decoder.position();
+	if (p_fade == 0 || p_got == 0 || end < p_got || end > total) {
+		return;
+	}
+	const uint32_t first = end - p_got;
+	const uint32_t from = total > p_fade ? std::max(first, total - p_fade) : first;
+	for (uint32_t k = from; k < end; ++k) {
+		const float g = float(total - 1 - k) / float(p_fade);
+		float *x = r_play.input.data() + size_t(k - first) * r_play.channels;
+		for (uint32_t c = 0; c < r_play.channels; ++c) {
+			x[c] *= g;
+		}
+	}
+}
+
+uint32_t segment_end_fade_frames(const AudioTuning &p_tuning, uint32_t p_rate) {
+	const double frames = double(p_tuning.step_crossfade_ms) * 0.001 * double(p_rate);
+	return std::isfinite(frames) && frames >= 1.0 ? uint32_t(std::lround(frames)) : 0u;
+}
+
 void push_history(SlotPlay &r_play, float p_left, float p_right) {
 	for (int k = 0; k < 3; ++k) {
 		r_play.history[k][0] = r_play.history[k + 1][0];
@@ -147,7 +169,7 @@ float history_at(const SlotPlay &p_play, int p_channel, float p_t) {
 }
 
 void render_outgoing(SlotState &r_slot, double p_ratio, float *r_left, float *r_right, uint32_t p_from,
-		uint32_t p_frames, uint64_t &r_decode_errors) {
+		uint32_t p_frames, uint32_t p_end_fade, uint64_t &r_decode_errors) {
 	SlotPlay &o = r_slot.outgoing;
 	for (uint32_t i = p_from; i < p_frames && o.active; ++i) {
 		r_slot.outgoing_gain += r_slot.outgoing_step;
@@ -173,6 +195,7 @@ void render_outgoing(SlotState &r_slot, double p_ratio, float *r_left, float *r_
 				}
 				o.input_count = *got;
 				o.input_pos = 0;
+				fade_into_segment_end(o, *got, p_end_fade);
 			}
 			push_history(o, l, r);
 		}
@@ -479,6 +502,11 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 			if (*got > 0) {
 				play.input_count = *got;
 				play.input_pos = 0;
+				const uint32_t fade = segment_end_fade_frames(tuning, play.rate);
+				if (play.decoder.position() + fade > play.decoder.header().total_frames &&
+						!next_segment(s, p_slot, play.segment).play) {
+					fade_into_segment_end(play, *got, fade);
+				}
 				continue;
 			}
 
@@ -507,7 +535,7 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 					? uint32_t(std::min<uint64_t>(slot.outgoing_frame - p_first_frame, p_frames))
 					: 0u;
 			render_outgoing(slot, double(slot.outgoing.rate) / double(mix_rate) * double(s.pitch), r_left, r_right,
-					from, p_frames, stats.decode_errors);
+					from, p_frames, segment_end_fade_frames(tuning, slot.outgoing.rate), stats.decode_errors);
 		}
 	};
 	const auto start_pending = [&](uint64_t p_frame) {
