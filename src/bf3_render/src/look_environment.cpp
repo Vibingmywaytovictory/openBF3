@@ -32,6 +32,7 @@ constexpr uint32_t kFogFitSamples = 48;
 constexpr uint32_t kFogFitSteps = 128;
 constexpr float kFogFitReach = 1500.0f;
 constexpr float kHorizonRows = 0.15f;
+constexpr float kLobeMinWidth = 1e-4f;
 
 using bf3::core::to_lower_ascii;
 
@@ -126,6 +127,12 @@ bool read_component(const EbxResolver &p_db, const EbxInstance &p_c, const std::
 		r_state.ground_color = vec3(p_c, "SkyBoxGroundColor").value_or(r_state.ground_color);
 		r_state.bounce_scale = number(p_c, "BounceScale").value_or(1.0f);
 		r_state.enlighten_sun_scale = number(p_c, "SunScale").value_or(1.0f);
+		r_state.skybox_sun = vec3(p_c, "SkyBoxSunLightColor").value_or(LookVec3{});
+		r_state.skybox_sun_size = std::clamp(number(p_c, "SkyBoxSunLightColorSize").value_or(0.0f), 0.0f, kPi * 0.5f);
+		r_state.skybox_back = vec3(p_c, "SkyBoxBackLightColor").value_or(LookVec3{});
+		r_state.skybox_back_size = std::clamp(number(p_c, "SkyBoxBackLightColorSize").value_or(0.0f), 0.0f, kPi * 0.5f);
+		r_state.back_rotation_x = number(p_c, "SkyBoxBackLightRotationX").value_or(0.0f);
+		r_state.back_rotation_y = number(p_c, "SkyBoxBackLightRotationY").value_or(0.0f);
 	} else if (p_c.is_a("SkyComponentData")) {
 		if (r_state.sky) {
 			return false;
@@ -334,6 +341,12 @@ void blend_state(LookEnvState &r_state, const LookEnvState &p_a, float p_w) {
 		r_state.ground_color = lerp3(r_state.ground_color, p_a.ground_color, p_w);
 		r_state.bounce_scale = lerp1(r_state.bounce_scale, p_a.bounce_scale, p_w);
 		r_state.enlighten_sun_scale = lerp1(r_state.enlighten_sun_scale, p_a.enlighten_sun_scale, p_w);
+		r_state.skybox_sun = lerp3(r_state.skybox_sun, p_a.skybox_sun, p_w);
+		r_state.skybox_sun_size = lerp1(r_state.skybox_sun_size, p_a.skybox_sun_size, p_w);
+		r_state.skybox_back = lerp3(r_state.skybox_back, p_a.skybox_back, p_w);
+		r_state.skybox_back_size = lerp1(r_state.skybox_back_size, p_a.skybox_back_size, p_w);
+		r_state.back_rotation_x = lerp1(r_state.back_rotation_x, p_a.back_rotation_x, p_w);
+		r_state.back_rotation_y = lerp1(r_state.back_rotation_y, p_a.back_rotation_y, p_w);
 	}
 	if (p_a.sky) {
 		r_state.sky = true;
@@ -720,11 +733,32 @@ float look_area_weight(const LookArea &p_area, const LookVec3 &p_position) {
 			core::level::AreaFadeCurve::LinearAmplitude, p_area.volume.distance(p_position), p_area.fade);
 }
 
+float look_lobe_weight(const LookSkyLobe &p_lobe, const LookVec3 &p_direction) {
+	if (!(p_lobe.size > 0.0f)) {
+		return 0.0f;
+	}
+	const float c = p_lobe.axis[0] * p_direction[0] + p_lobe.axis[1] * p_direction[1] + p_lobe.axis[2] * p_direction[2];
+	const float edge = std::cos(p_lobe.size);
+	return std::clamp((c - edge) / std::fmax(1.0f - edge, kLobeMinWidth), 0.0f, 1.0f);
+}
+
+float look_lobe_mean(const LookSkyLobe &p_lobe) {
+	return p_lobe.size > 0.0f ? (1.0f - std::cos(p_lobe.size)) * 0.25f : 0.0f;
+}
+
 LookFrame look_frame_of(const LookEnvState &p_s) {
 	LookFrame f;
-	const float az = p_s.sun_rotation_x * kPi / 180.0f, el = p_s.sun_rotation_y * kPi / 180.0f;
-	const LookVec3 to_sun = { std::sin(az) * std::cos(el), std::sin(el), std::cos(az) * std::cos(el) };
+	const auto toward = [](float p_rotation_x, float p_rotation_y) {
+		const float az = p_rotation_x * kPi / 180.0f, el = p_rotation_y * kPi / 180.0f;
+		return LookVec3{ std::sin(az) * std::cos(el), std::sin(el), std::cos(az) * std::cos(el) };
+	};
+	const float el = p_s.sun_rotation_y * kPi / 180.0f;
+	const LookVec3 to_sun = toward(p_s.sun_rotation_x, p_s.sun_rotation_y);
 	f.sun_direction = { -to_sun[0], -to_sun[1], -to_sun[2] };
+	if (p_s.enlighten) {
+		f.sun_lobe = { to_sun, p_s.skybox_sun, p_s.skybox_sun_size };
+		f.back_lobe = { toward(p_s.back_rotation_x, p_s.back_rotation_y), p_s.skybox_back, p_s.skybox_back_size };
+	}
 	const float peak = max3(p_s.sun_color);
 	if (peak > 1e-6f) {
 		f.sun_color = scaled(p_s.sun_color, 1.0f / peak);
@@ -763,7 +797,8 @@ LookFrame look_frame_of(const LookEnvState &p_s) {
 	f.exposure_speed = 1.0f / std::fmax(p_s.exposure_time, 0.01f);
 
 	const auto luma = [](const LookVec3 &p_c) { return 0.2126f * p_c[0] + 0.7152f * p_c[1] + 0.0722f * p_c[2]; };
-	const float ambient = 0.5f * (luma(f.ambient_up) + luma(f.ambient_horizon));
+	const float ambient = 0.5f * (luma(f.ambient_up) + luma(f.ambient_horizon)) +
+			look_lobe_mean(f.sun_lobe) * luma(f.sun_lobe.color) + look_lobe_mean(f.back_lobe) * luma(f.back_lobe.color);
 	const float average = kReferenceAlbedo * (ambient + kSunlitShare * f.sun_energy * luma(f.sun_color) * std::fmax(std::sin(el), 0.0f));
 	f.exposure = average > 1e-6f ? std::clamp(f.middle_gray / average, f.min_exposure, f.max_exposure) : f.max_exposure;
 	f.bloom = std::fmax(max3(p_s.bloom), 0.0f);

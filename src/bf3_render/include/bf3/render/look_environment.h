@@ -41,6 +41,9 @@ struct LookEnvState {
 
 	LookVec3 sky_color{ 0.06f, 0.1f, 0.15f }, ground_color{ 0.1f, 0.1f, 0.1f };
 	float bounce_scale = 1.0f, enlighten_sun_scale = 1.0f;
+	LookVec3 skybox_sun{}, skybox_back{};
+	float skybox_sun_size = 0.0f, skybox_back_size = 0.0f;
+	float back_rotation_x = 0.0f, back_rotation_y = 0.0f;
 
 	std::string panorama, panorama_alpha, gradient;
 	float sky_brightness = 1.0f, sky_rotation = 0.0f, uv_min_y = 0.0f, uv_max_y = 1.0f;
@@ -94,11 +97,18 @@ core::Result<LookEnvironment> read_look_environment(const core::EbxResolver &p_d
 
 void decode_look_textures(const core::LevelMount &p_mount, LookEnvironment &r_env);
 
+struct LookSkyLobe {
+	LookVec3 axis{ 0.0f, 1.0f, 0.0f };
+	LookVec3 color{};
+	float size = 0.0f;
+};
+
 struct LookFrame {
 	LookVec3 sun_direction{ 0.0f, -1.0f, 0.0f };
 	LookVec3 sun_color{ 1.0f, 1.0f, 1.0f };
 	float sun_energy = 1.0f;
 	LookVec3 ambient_up{}, ambient_horizon{}, ambient_down{};
+	LookSkyLobe sun_lobe, back_lobe;
 	float sky_brightness = 1.0f, sky_rotation = 0.0f, uv_min_y = 0.0f, uv_max_y = 1.0f;
 	LookVec3 horizon{};
 	bool fog = false;
@@ -115,6 +125,9 @@ LookFrame look_frame(
 		const LookEnvironment &p_env, const LookVec3 &p_position, std::span<const LookLogicWeight> p_logic = {});
 std::optional<size_t> look_logic_index(const LookEnvironment &p_env, std::string_view p_name);
 LookFrame look_frame_of(const LookEnvState &p_state);
+
+float look_lobe_weight(const LookSkyLobe &p_lobe, const LookVec3 &p_direction);
+float look_lobe_mean(const LookSkyLobe &p_lobe);
 
 void fog_fit(const LookCubic &p_curve, float p_reach, float &r_density, float &r_curve, float &r_end);
 float look_cubic(const LookCubic &p_c, float p_t);

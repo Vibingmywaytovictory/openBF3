@@ -521,6 +521,71 @@ TEST_SUITE("render-look-unit") {
 		CHECK(std::isfinite(d.exposure));
 	}
 
+	TEST_CASE("render.look.unit: the Enlighten sky box lobes light a sunless state") {
+		LookEnvState night;
+		night.light = true;
+		night.sun_color = { 0.0f, 0.0f, 0.0f };
+		night.sun_rotation_x = 90.0f;
+		night.sun_rotation_y = 0.0f;
+		night.enlighten = true;
+		night.sky_color = { 0.036f, 0.046f, 0.056f };
+		night.ground_color = { 0.007f, 0.01f, 0.013f };
+		night.skybox_sun = { 0.678f, 1.331f, 2.0f };
+		night.skybox_sun_size = 0.5f;
+		night.skybox_back = { 0.1f, 0.2f, 0.3f };
+		night.skybox_back_size = 0.25f;
+		night.back_rotation_x = 270.0f;
+		night.back_rotation_y = 0.0f;
+		night.tonemap = true;
+		night.middle_gray = 0.025f;
+		night.min_exposure = 1.0f;
+		night.max_exposure = 4.0f;
+
+		const LookFrame f = look_frame_of(night);
+		CHECK(f.sun_energy == 0.0f);
+		CHECK(near(f.sun_lobe.axis[0], 1.0f));
+		CHECK(near(f.sun_lobe.axis[1], 0.0f));
+		CHECK(near(f.sun_lobe.color[2], 2.0f));
+		CHECK(near(f.sun_lobe.size, 0.5f));
+		CHECK(near(f.back_lobe.axis[0], -1.0f));
+		CHECK(near(f.back_lobe.size, 0.25f));
+		const float edge = std::cos(0.5f);
+		CHECK(near(look_lobe_weight(f.sun_lobe, { 1.0f, 0.0f, 0.0f }), 1.0f));
+		CHECK(near(look_lobe_weight(f.sun_lobe, { std::cos(0.25f), std::sin(0.25f), 0.0f }),
+				(std::cos(0.25f) - edge) / (1.0f - edge)));
+		CHECK(look_lobe_weight(f.sun_lobe, { std::cos(0.6f), std::sin(0.6f), 0.0f }) == 0.0f);
+		CHECK(look_lobe_weight(f.sun_lobe, { 0.0f, 1.0f, 0.0f }) == 0.0f);
+		CHECK(look_lobe_weight(f.sun_lobe, { -1.0f, 0.0f, 0.0f }) == 0.0f);
+		CHECK(near(look_lobe_mean(f.sun_lobe), (1.0f - edge) * 0.25f));
+		CHECK(look_lobe_weight(LookSkyLobe{}, { 0.0f, 1.0f, 0.0f }) == 0.0f);
+		CHECK(look_lobe_mean(LookSkyLobe{}) == 0.0f);
+
+		LookEnvState no_lobes = night;
+		no_lobes.skybox_sun_size = 0.0f;
+		no_lobes.skybox_back_size = 0.0f;
+		const LookFrame bare = look_frame_of(no_lobes);
+		CHECK(bare.exposure > f.exposure);
+		CHECK(f.exposure > night.min_exposure);
+		CHECK(f.exposure < night.max_exposure);
+
+		LookEnvState no_enlighten = night;
+		no_enlighten.enlighten = false;
+		CHECK(look_frame_of(no_enlighten).sun_lobe.size == 0.0f);
+
+		LookEnvironment env;
+		env.base = no_lobes;
+		LookArea area;
+		area.volume.kind = bf3::core::level::AreaVolume::Kind::Box;
+		area.volume.half = { 1, 1, 1 };
+		area.fade = 2.0f;
+		area.state = night;
+		env.areas.push_back(area);
+		const LookFrame half = look_frame(env, { 2, 0, 0 });
+		CHECK(near(half.sun_lobe.size, 0.25f));
+		CHECK(near(half.sun_lobe.color[2], 2.0f));
+		CHECK(near(look_frame(env, { 0, 0, 0 }).back_lobe.size, 0.25f));
+	}
+
 	TEST_CASE("render.look.unit: a logic visual environment blends by its weight") {
 		LookEnvironment env;
 		env.base.light = true;
@@ -725,6 +790,49 @@ TEST_SUITE("render-look") {
 		CHECK(lve.lut >= 0);
 		CHECK(size_t(lve.lut) < env->luts.size());
 		CHECK(env->luts.size() >= 1);
+		const SnapshotDiff diff = diff_snapshots(before, reader.snapshot());
+		std::printf("install.unchanged %s\n", diff.clean() ? "PASS" : diff.summary().c_str());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+	}
+
+	TEST_CASE("render.look: MP_003's dusk has no sun and lights through its Enlighten sky box lobes") {
+		InstallReader reader;
+		if (!reader.locate({})) {
+			bf3::test::skip_install_case(reader.describe().c_str());
+			return;
+		}
+		const InstallSnapshot before = reader.snapshot();
+		Result<std::shared_ptr<Install>> install = Install::open(reader);
+		REQUIRE(install.ok());
+		Result<std::unique_ptr<level::LoadedLevel>> loaded = level::load_level(*install, "MP_003", "TeamDeathMatch0");
+		REQUIRE(loaded.ok());
+		Result<std::unique_ptr<level::World>> world = level::World::traverse(**loaded);
+		REQUIRE(world.ok());
+		Result<LookEnvironment> env = read_look_environment((*loaded)->db(), **world);
+		REQUIRE(env.ok());
+		const LookEnvState &dusk = env->base;
+		const LookFrame f = look_frame_of(dusk);
+		std::printf("render.look MP_003: base %s; sun x %.2f; sky box sun lobe (%.3f %.3f %.3f) size %.3f, back lobe "
+					"(%.3f %.3f %.3f) size %.3f; "
+					"exposure %.2f (%.2f..%.2f)\n",
+				dusk.source.c_str(), double(f.sun_energy), double(f.sun_lobe.color[0]), double(f.sun_lobe.color[1]),
+				double(f.sun_lobe.color[2]), double(f.sun_lobe.size), double(f.back_lobe.color[0]),
+				double(f.back_lobe.color[1]), double(f.back_lobe.color[2]), double(f.back_lobe.size),
+				double(f.exposure), double(f.min_exposure), double(f.max_exposure));
+		CHECK(env->from_data);
+		CHECK(env->areas.empty());
+		CHECK(dusk.light);
+		CHECK(dusk.enlighten);
+		CHECK(f.sun_energy == 0.0f);
+		CHECK(near(f.sun_lobe.color[0], 0.678f));
+		CHECK(near(f.sun_lobe.color[1], 1.331f));
+		CHECK(near(f.sun_lobe.color[2], 2.0f));
+		CHECK(near(f.sun_lobe.size, 0.5f));
+		CHECK(near(f.back_lobe.color[1], 0.247f));
+		CHECK(near(f.back_lobe.size, 0.528f));
+		CHECK(near(f.sun_lobe.axis[1], -f.sun_direction[1]));
+		CHECK(f.exposure > f.min_exposure);
+		CHECK(f.exposure < f.max_exposure);
 		const SnapshotDiff diff = diff_snapshots(before, reader.snapshot());
 		std::printf("install.unchanged %s\n", diff.clean() ? "PASS" : diff.summary().c_str());
 		CHECK_MESSAGE(diff.clean(), diff.summary());

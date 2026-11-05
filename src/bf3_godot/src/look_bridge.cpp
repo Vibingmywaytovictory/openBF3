@@ -50,10 +50,21 @@ uniform vec3 horizon = vec3(0.5);
 uniform vec3 ambient_up = vec3(0.1);
 uniform vec3 ambient_horizon = vec3(0.1);
 uniform vec3 ambient_down = vec3(0.1);
+uniform vec3 sun_lobe_axis = vec3(0.0, 1.0, 0.0);
+uniform vec3 sun_lobe_color = vec3(0.0);
+uniform float sun_lobe_size = 0.0;
+uniform vec3 back_lobe_axis = vec3(0.0, 1.0, 0.0);
+uniform vec3 back_lobe_color = vec3(0.0);
+uniform float back_lobe_size = 0.0;
+float lobe(vec3 d, vec3 axis, float size) {
+	float edge = cos(size);
+	return size > 0.0 ? clamp((dot(d, axis) - edge) / max(1.0 - edge, 0.0001), 0.0, 1.0) : 0.0;
+}
 void sky() {
 	vec3 d = normalize(EYEDIR);
 	if (AT_CUBEMAP_PASS) {
-		COLOR = d.y >= 0.0 ? mix(ambient_horizon, ambient_up, smoothstep(0.0, 0.7, d.y)) : mix(ambient_horizon, ambient_down, smoothstep(0.0, 0.5, -d.y));
+		vec3 bands = d.y >= 0.0 ? mix(ambient_horizon, ambient_up, smoothstep(0.0, 0.7, d.y)) : mix(ambient_horizon, ambient_down, smoothstep(0.0, 0.5, -d.y));
+		COLOR = bands + sun_lobe_color * lobe(d, sun_lobe_axis, sun_lobe_size) + back_lobe_color * lobe(d, back_lobe_axis, back_lobe_size);
 	} else {
 		float vs = acos(clamp(d.y, -1.0, 1.0)) / PI;
 		vec3 c = has_gradient ? textureLod(gradient, vec2(0.5, vs), 0.0).rgb * brightness : horizon;
@@ -90,6 +101,13 @@ bool moved3(const render::LookVec3 &p_a, const render::LookVec3 &p_b) {
 	return moved(p_a[0], p_b[0]) || moved(p_a[1], p_b[1]) || moved(p_a[2], p_b[2]);
 }
 
+bool moved_lobe(const render::LookSkyLobe &p_a, const render::LookSkyLobe &p_b) {
+	return moved3(p_a.axis, p_b.axis) || moved3(p_a.color, p_b.color) || moved(p_a.size, p_b.size);
+}
+
+Vector3 vector3(const render::LookVec3 &p_v) {
+	return Vector3(p_v[0], p_v[1], p_v[2]);
+}
 }
 
 LookBridge::LookBridge() = default;
@@ -217,12 +235,20 @@ void LookBridge::apply(const render::LookFrame &p_f, bool p_force) {
 		s.sun_energy = p_f.sun_energy;
 	}
 
-	if (first || moved3(s.ambient_up, p_f.ambient_up) || moved3(s.ambient_horizon, p_f.ambient_horizon) || moved3(s.ambient_down, p_f.ambient_down) ||
-			moved(s.sky_brightness, p_f.sky_brightness) || moved3(s.horizon, p_f.horizon) || s.sky_rotation != p_f.sky_rotation ||
-			s.uv_min_y != p_f.uv_min_y || s.uv_max_y != p_f.uv_max_y) {
+	if (first || moved3(s.ambient_up, p_f.ambient_up) || moved3(s.ambient_horizon, p_f.ambient_horizon) ||
+			moved3(s.ambient_down, p_f.ambient_down) || moved(s.sky_brightness, p_f.sky_brightness) ||
+			moved3(s.horizon, p_f.horizon) || s.sky_rotation != p_f.sky_rotation || s.uv_min_y != p_f.uv_min_y ||
+			s.uv_max_y != p_f.uv_max_y || moved_lobe(s.sun_lobe, p_f.sun_lobe) ||
+			moved_lobe(s.back_lobe, p_f.back_lobe)) {
 		sky_material_->set_shader_parameter("ambient_up", color3(p_f.ambient_up));
 		sky_material_->set_shader_parameter("ambient_horizon", color3(p_f.ambient_horizon));
 		sky_material_->set_shader_parameter("ambient_down", color3(p_f.ambient_down));
+		sky_material_->set_shader_parameter("sun_lobe_axis", vector3(p_f.sun_lobe.axis));
+		sky_material_->set_shader_parameter("sun_lobe_color", color3(p_f.sun_lobe.color));
+		sky_material_->set_shader_parameter("sun_lobe_size", p_f.sun_lobe.size);
+		sky_material_->set_shader_parameter("back_lobe_axis", vector3(p_f.back_lobe.axis));
+		sky_material_->set_shader_parameter("back_lobe_color", color3(p_f.back_lobe.color));
+		sky_material_->set_shader_parameter("back_lobe_size", p_f.back_lobe.size);
 		sky_material_->set_shader_parameter("brightness", p_f.sky_brightness);
 		sky_material_->set_shader_parameter("rotation", p_f.sky_rotation);
 		sky_material_->set_shader_parameter("uv_min_y", p_f.uv_min_y);
@@ -231,6 +257,8 @@ void LookBridge::apply(const render::LookFrame &p_f, bool p_force) {
 		s.ambient_up = p_f.ambient_up;
 		s.ambient_horizon = p_f.ambient_horizon;
 		s.ambient_down = p_f.ambient_down;
+		s.sun_lobe = p_f.sun_lobe;
+		s.back_lobe = p_f.back_lobe;
 		s.sky_brightness = p_f.sky_brightness;
 		s.sky_rotation = p_f.sky_rotation;
 		s.uv_min_y = p_f.uv_min_y;
@@ -324,13 +352,18 @@ std::string LookBridge::describe() const {
 		return "look: not built";
 	}
 	const render::LookFrame &f = *applied_;
-	char line[640];
+	char line[768];
 	std::snprintf(line, sizeof(line),
-			"look L1: sun (%.3f %.3f %.3f) x %.2f; ambient up (%.3f %.3f %.3f) down (%.3f %.3f %.3f); sky x%.2f (textures %d%d%d); fog %s %.0f..%.0f m "
+			"look L1: sun (%.3f %.3f %.3f) x %.2f; ambient up (%.3f %.3f %.3f) down (%.3f %.3f %.3f); sky box sun lobe "
+			"(%.3f %.3f %.3f) size %.3f, "
+			"back lobe (%.3f %.3f %.3f) size %.3f; sky x%.2f (textures %d%d%d); fog %s %.0f..%.0f m "
 			"density %.3f curve %.2f; middle grey %.3f exposure %.2f (%.2f..%.2f); bloom %.3f; lut %d",
-			f.sun_color[0], f.sun_color[1], f.sun_color[2], f.sun_energy, f.ambient_up[0], f.ambient_up[1], f.ambient_up[2], f.ambient_down[0],
-			f.ambient_down[1], f.ambient_down[2], f.sky_brightness, int(sky_bound_[0]), int(sky_bound_[1]), int(sky_bound_[2]), f.fog ? "on" : "off",
-			f.fog_begin, f.fog_end, f.fog_density, f.fog_curve, f.middle_gray, f.exposure, f.min_exposure, f.max_exposure, f.bloom, f.lut);
+			f.sun_color[0], f.sun_color[1], f.sun_color[2], f.sun_energy, f.ambient_up[0], f.ambient_up[1],
+			f.ambient_up[2], f.ambient_down[0], f.ambient_down[1], f.ambient_down[2], f.sun_lobe.color[0],
+			f.sun_lobe.color[1], f.sun_lobe.color[2], f.sun_lobe.size, f.back_lobe.color[0], f.back_lobe.color[1],
+			f.back_lobe.color[2], f.back_lobe.size, f.sky_brightness, int(sky_bound_[0]), int(sky_bound_[1]),
+			int(sky_bound_[2]), f.fog ? "on" : "off", f.fog_begin, f.fog_end, f.fog_density, f.fog_curve, f.middle_gray,
+			f.exposure, f.min_exposure, f.max_exposure, f.bloom, f.lut);
 	return line;
 }
 
