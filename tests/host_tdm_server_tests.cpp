@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "gunplay_fixture.h"
+#include "pipe_transport.h"
 #include "tdm_fixture.h"
 
 #include "bf3/core/gameplay/eor_fading.h"
@@ -12,7 +13,9 @@
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/kits.h"
+#include "bf3/host/load_bots.h"
 #include "bf3/host/loadout.h"
+#include "bf3/net/loopback_ping.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/logic/round_natives.h"
 #include "bf3/sim/nav_query.h"
@@ -22,11 +25,13 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cinttypes>
 #include <cmath>
 #include <cstdio>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -36,6 +41,7 @@ using namespace bf3;
 namespace tdm = bf3::test::tdm;
 namespace tg = bf3::test::gunplay;
 namespace sw = bf3::sim::weapons;
+namespace tp = bf3::test::pipe;
 
 namespace {
 
@@ -2644,7 +2650,7 @@ TEST_SUITE("host-gunplay-gadgets") {
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 	TEST_CASE("gadgets: a medic bot walks to a hurt mate and throws its medkit at the mate's feet, which heals the "
-			  "mate") {
+			  "mate, and a loadbots client decodes the Deployables the server sends the mate") {
 		tdm::TdmLevel *level = tdm::load_tdm_level_once();
 		if (level == nullptr) {
 			return;
@@ -2686,16 +2692,59 @@ TEST_SUITE("host-gunplay-gadgets") {
 		const float at_rest = m->state(g.mate->slot())->health;
 		const float off = distance(bag->position, feet);
 		const uint64_t heal_before = m->server.gunplay()->gadget_stats().heal_ticks;
-		m->ticks(60);
+		std::vector<std::vector<uint8_t>> to_mate;
+		const auto keep_deployables = [&] {
+			for (const host::OutDatagram &d : m->out) {
+				if (d.peer == g.mate->peer() && net::peek_type(d.bytes) == net::MessageType::Deployables) {
+					to_mate.push_back(d.bytes);
+				}
+			}
+		};
+		keep_deployables();
+		for (int i = 0; i < 60; ++i) {
+			m->tick();
+			keep_deployables();
+		}
 		const float after = m->state(g.mate->slot())->health;
 		std::printf(
 				"medic bot: mate at %.1f HP, medkit at rest %u ticks after the landing, %.2f m from the mate's feet, "
-				"mate %.1f -> %.1f HP in 1 s\n",
-				hurt, unsigned(rested - landed), off, at_rest, after);
+				"mate %.1f -> %.1f HP in 1 s; %zu Deployables to the mate\n",
+				hurt, unsigned(rested - landed), off, at_rest, after, to_mate.size());
 		CHECK(off <= 3.5f);
 		CHECK(m->server.gunplay()->gadget_stats().heal_ticks - heal_before >= 50u);
 		CHECK(after - at_rest >= 6.0f);
 		CHECK(stats->medkit_throws.load() >= 1u);
+		REQUIRE(!to_mate.empty());
+
+		auto pipe = std::make_shared<tp::Pipe>();
+		pipe->connect(0);
+		{
+			std::lock_guard lock(pipe->mutex);
+			for (const std::vector<uint8_t> &bytes : to_mate) {
+				pipe->to_client[0].push_back(tp::Pipe::Sent{ 0, net::kChannelReliable, bytes });
+			}
+		}
+		std::vector<std::unique_ptr<host::ClientTransport>> link;
+		link.push_back(std::make_unique<tp::PipeClientTransport>(pipe, 0));
+		host::LoadBotFleetConfig fc;
+		fc.count = 1;
+		fc.bot.level = level->shared->level;
+		fc.bot.mode = level->shared->mode;
+		host::LoadBotFleet fleet;
+		const core::Status started = fleet.start(fc, std::move(link), net::monotonic_ns);
+		REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
+		const auto handled = [&] {
+			const host::LoadBotFleetStats f = fleet.stats();
+			return f.bots.size() == 1u && f.bots[0].reliable_messages + f.bots[0].decode_errors >= to_mate.size();
+		};
+		CHECK(bf3::test::wait_until(handled, std::chrono::seconds(10), std::chrono::milliseconds(16)));
+		fleet.stop();
+		const host::LoadBotStats loadbot = fleet.stats().bots.at(0);
+		std::printf("medic bot: a loadbots client decodes %llu of the %zu Deployables, %llu decode errors\n",
+				(unsigned long long)loadbot.reliable_messages, to_mate.size(),
+				(unsigned long long)loadbot.decode_errors);
+		CHECK(loadbot.decode_errors == 0u);
+		CHECK(loadbot.reliable_messages == to_mate.size());
 	}
 
 	TEST_CASE("gadgets: a support bot throws its ammo bag for a mate who emptied a magazine of its reserve, which "
