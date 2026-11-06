@@ -81,7 +81,7 @@ std::string nav_params_text(const NavParams &p_params);
 
 std::string recast_build_id();
 inline constexpr uint32_t kNavFormatVersion = 1;
-inline constexpr uint32_t kNavConverterVersion = 2;
+inline constexpr uint32_t kNavConverterVersion = 3;
 inline constexpr const char *kNavTileCacheKind = "nav-tile";
 inline constexpr const char *kNavWorldCacheKind = "nav-world";
 inline constexpr const char *kNavAreaCacheKind = "nav-area";

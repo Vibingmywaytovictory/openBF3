@@ -339,6 +339,22 @@ TEST_SUITE("sim-nav-unit") {
 		CHECK(a.weak_component != b.weak_component);
 	}
 
+	TEST_CASE("sim.nav.unit: a 0.4 m crack between two floor slabs, narrower than the soldier stands across, is one "
+			  "component") {
+		std::vector<StaticTriangle> t;
+		add_floor(t, 0, 0, 64, 32.0f, 0.0f);
+		add_floor(t, 0, 32.4f, 64, 64, 0.0f);
+		add_floor(t, 0, 0, 64, 64, -3.0f);
+		NavBakeOptions o;
+		o.params.drop_links = false;
+		const auto w = bake(t, tiles_range(0, 0, 0, 0), o);
+		const NavComponents c = nav_components(*w);
+		const NavPointCheck a = at(*w, c, 32, 0, 16), b = at(*w, c, 32, 0, 48);
+		REQUIRE(a.poly != 0);
+		REQUIRE(b.poly != 0);
+		CHECK(a.component == b.component);
+	}
+
 	TEST_CASE("sim.nav.unit: a 1.5 m ceiling gives crouch area; the slab top is walk area") {
 		std::vector<StaticTriangle> t;
 		add_floor(t, 0, 0, 64, 64, 0.0f);
@@ -772,6 +788,7 @@ TEST_SUITE("sim-nav-unit") {
 		CHECK(nav_cells(NavParams()).walkable_radius == 2);
 		CHECK(nav_cells(NavParams()).passage_radius == 1);
 		CHECK(nav_cells(NavParams()).corridor_cells == 4);
+		CHECK(nav_cells(NavParams()).bridge_gap == 2);
 		NavParams q;
 		q.radius_round_up = true;
 		CHECK(nav_cells(q).walkable_radius == 2);

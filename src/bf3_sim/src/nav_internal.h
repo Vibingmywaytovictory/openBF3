@@ -56,6 +56,7 @@ struct NavCells {
 	int walkable_radius = 0;
 	int passage_radius = 0;
 	int corridor_cells = 0;
+	int bridge_gap = 0;
 	int border = 0;
 	int tile_cells = 0;
 	int max_edge = 0;

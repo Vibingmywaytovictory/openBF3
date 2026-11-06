@@ -78,6 +78,67 @@ Column ground_below(const rcCompactHeightfield &p_chf, const std::vector<uint8_t
 	return out;
 }
 
+struct GapFill {
+	int x = 0;
+	int z = 0;
+	int top = 0;
+};
+
+core::Status bridge_floor_gaps(rcContext &r_context, rcHeightfield &r_hf, int p_climb, int p_height, int p_max_gap) {
+	if (p_max_gap < 1) {
+		return core::Status::success();
+	}
+	std::vector<GapFill> fills;
+	const int dirs[2][2] = { { 1, 0 }, { 0, 1 } };
+	for (int z = 0; z < r_hf.height; ++z) {
+		for (int x = 0; x < r_hf.width; ++x) {
+			for (const rcSpan *s = r_hf.spans[x + z * r_hf.width]; s != nullptr; s = s->next) {
+				if (s->area == RC_NULL_AREA) {
+					continue;
+				}
+				const int top = int(s->smax);
+				for (const auto &d : dirs) {
+					for (int k = 1; k <= p_max_gap + 1; ++k) {
+						const int cx = x + d[0] * k, cz = z + d[1] * k;
+						if (cx >= r_hf.width || cz >= r_hf.height) {
+							break;
+						}
+						int far_top = -1;
+						bool blocked = false;
+						for (const rcSpan *t = r_hf.spans[cx + cz * r_hf.width]; t != nullptr; t = t->next) {
+							if (int(t->smax) < top - p_climb || int(t->smin) > top + p_height) {
+								continue;
+							}
+							if (t->area != RC_NULL_AREA && std::abs(int(t->smax) - top) <= p_climb) {
+								far_top = int(t->smax);
+							} else {
+								blocked = true;
+							}
+						}
+						if (blocked) {
+							break;
+						}
+						if (far_top < 0) {
+							continue;
+						}
+						for (int j = 1; j < k; ++j) {
+							fills.push_back({ x + d[0] * j, z + d[1] * j, top + (far_top - top) * j / k });
+						}
+						break;
+					}
+				}
+			}
+		}
+	}
+	for (const GapFill &f : fills) {
+		if (!rcAddSpan(&r_context, r_hf, f.x, f.z, (unsigned short)std::max(0, f.top - 1), (unsigned short)f.top,
+					RC_WALKABLE_AREA, p_climb)) {
+			return core::make_error("rcAddSpan failed");
+		}
+	}
+	return core::Status::success();
+}
+
 int walkable_run(const rcCompactHeightfield &p_chf, const unsigned char *p_areas, int p_x, int p_z, int p_span,
 		int p_dir, int p_limit) {
 	int run = 0;
@@ -347,6 +408,10 @@ core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavPa
 	}
 	if (!rcRasterizeTriangles(&r_context, v, areas.data(), int(ntris), *hf, c.walkable_climb)) {
 		return core::make_error(where + ": rcRasterizeTriangles failed");
+	}
+	if (core::Status st = bridge_floor_gaps(r_context, *hf, c.walkable_climb, c.walkable_height, c.bridge_gap);
+			!st.ok()) {
+		return core::make_error(where + ": " + st.error().message);
 	}
 	areas = std::vector<unsigned char>();
 	rcFilterLowHangingWalkableObstacles(&r_context, c.walkable_climb, *hf);

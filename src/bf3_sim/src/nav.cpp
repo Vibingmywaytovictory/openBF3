@@ -106,6 +106,7 @@ NavCells nav_cells(const NavParams &p_params) {
 	c.walkable_radius = int(std::ceil(r - 1e-4f));
 	c.passage_radius = p.radius_round_up ? c.walkable_radius : int(std::floor(r + 1e-4f));
 	c.corridor_cells = int(std::ceil(2.0f * r - 1e-4f));
+	c.bridge_gap = int(std::floor(2.0f * r * std::sin(p.max_slope_degrees * core::kDegToRadF) + 1e-4f));
 	c.border = c.walkable_radius + 3;
 	c.tile_cells = int(std::lround(kNavTileSize / p.cell_size));
 	c.max_edge = int(p.max_edge_length / p.cell_size);

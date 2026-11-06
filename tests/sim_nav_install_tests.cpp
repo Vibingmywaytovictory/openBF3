@@ -582,7 +582,7 @@ TEST_SUITE("sim-nav") {
 				l.bots->nav->stats().polys, l.bots->nav->stats().drop_links, l.seconds_bots);
 		std::fflush(stdout);
 		CHECK(c.spawns == 51);
-		CHECK(c.spawns_main >= 46);
+		CHECK(c.spawns_main >= 48);
 	}
 
 	TEST_CASE("sim.nav: §5.1 the nav input is the motor's collision set on MP_Subway and MP_007 ConquestLarge0") {
