@@ -233,4 +233,6 @@ Result<SwfRichText> swf_node_rich_text(const SwfSceneNode &p_node, WorkBudget &r
 
 Result<SwfTextLayout> swf_layout_node_text(const SwfFontSet &p_fonts, const SwfSceneNode &p_node, WorkBudget &r_budget);
 
+SwfRect swf_node_field_bounds(const SwfSceneNode &p_node, const SwfFontSet *p_fonts);
+
 }

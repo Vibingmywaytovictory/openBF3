@@ -1522,4 +1522,13 @@ Result<SwfTextLayout> swf_layout_node_text(const SwfFontSet &p_fonts, const SwfS
 	return swf_layout_text(p_fonts, *p_node.edit_text, *rich, p_node.text_options, r_budget);
 }
 
+SwfRect swf_node_field_bounds(const SwfSceneNode &p_node, const SwfFontSet *p_fonts) {
+	if (p_node.text_options.auto_size == SwfTextAutoSize::None || p_fonts == nullptr) {
+		return swf_node_text_bounds(p_node);
+	}
+	WorkBudget budget(kSwfTextBudgetUnits);
+	const Result<SwfTextLayout> layout = swf_layout_node_text(*p_fonts, p_node, budget);
+	return layout ? layout->bounds : swf_node_text_bounds(p_node);
+}
+
 }

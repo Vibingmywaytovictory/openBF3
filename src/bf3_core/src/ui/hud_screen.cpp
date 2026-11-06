@@ -1612,7 +1612,7 @@ std::string HudScreen::hit_target(float p_stage_x, float p_stage_y) const {
 		by_node[id] = SwfHitTarget{ id, area };
 		paths[id] = t.path;
 	}
-	const SwfHitWorld world(*scene_);
+	const SwfHitWorld world(*scene_, fonts_);
 	const SwfNodeId hit =
 			world.topmost_target(p_stage_x, p_stage_y, [&](SwfNodeId p_id) -> std::optional<SwfHitTarget> {
 				const auto it = by_node.find(p_id);

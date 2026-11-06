@@ -1207,6 +1207,29 @@ TEST_SUITE("ui-widgets") {
 				squad.clip("CheckBox_01.textField").text().c_str());
 	}
 
+	TEST_CASE("widgets: an autoSize text field takes clicks only over its laid-out text: squadscreen's Privacy "
+			  "CheckBox, its textField authored 400 px wide, is hit on PRIVACY and not 300 px to the right") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		ScreenRig squad;
+		open_screen(*r, squad, "ui/flow/screen/squadscreen");
+		squad.s.hud->refresh(HudModel{});
+		squad.clip("CheckBox_01").set_visible(true);
+		const std::string box = std::string(kHudScreenInstance) + ".CheckBox_01";
+		const SwfSceneNode *field = squad.s.scene->find_node(box + ".textField");
+		REQUIRE(field != nullptr);
+		const SwfMatrix at = swf_world_matrix(*squad.s.scene, field->id);
+		const SwfRect authored = swf_transform_bounds(swf_node_text_bounds(*field), at);
+		REQUIRE(authored.width() > 300.0f);
+		const float y = (authored.y_min + authored.y_max) * 0.5f;
+		CHECK(squad.s.hud->hit_target(authored.x_min + 10.0f, y) == box);
+		const std::string far = squad.s.hud->hit_target(authored.x_min + 300.0f, y);
+		CHECK_MESSAGE(far != box, far);
+		std::printf("ui.widgets autoSize hit: authored %.1f..%.1f, '%s' at +300\n", authored.x_min, authored.x_max,
+				far.c_str());
+	}
 	TEST_CASE("widgets: squadscreen: a member row's Index is its place in List_02, not the player's slot, so a click "
 			  "on it highlights the player's name, squadgraph's SetSelectedPlayer stores it and the leader is offered "
 			  "KICK") {

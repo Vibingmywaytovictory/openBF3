@@ -27,7 +27,7 @@ using SwfHitTargetOf = std::function<std::optional<SwfHitTarget>(SwfNodeId)>;
 
 class SwfHitWorld {
 public:
-	explicit SwfHitWorld(const SwfScene &p_scene);
+	SwfHitWorld(const SwfScene &p_scene, const SwfFontSet *p_fonts);
 
 	bool leaf_hit(SwfNodeId p_node, float p_stage_x, float p_stage_y) const;
 	bool subtree_hit(SwfNodeId p_root, float p_stage_x, float p_stage_y, bool p_ignore_visibility) const;
@@ -48,6 +48,7 @@ private:
 	bool masks_pass(SwfNodeId p_leaf, float p_x, float p_y) const;
 
 	const SwfScene &scene_;
+	const SwfFontSet *fonts_ = nullptr;
 	std::unordered_map<SwfNodeId, Node> nodes_;
 	std::vector<SwfNodeId> order_;
 };

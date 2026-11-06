@@ -58,7 +58,8 @@ bool has_geometry(const SwfSceneNode &p_node) {
 	}
 }
 
-bool geometry_hit(const SwfSceneNode &p_node, const SwfMatrix &p_world, float p_x, float p_y) {
+bool geometry_hit(
+		const SwfSceneNode &p_node, const SwfFontSet *p_fonts, const SwfMatrix &p_world, float p_x, float p_y) {
 	const std::optional<SwfPointF> p = swf_stage_to_local(p_world, p_x, p_y);
 	if (!p) {
 		return false;
@@ -67,7 +68,7 @@ bool geometry_hit(const SwfSceneNode &p_node, const SwfMatrix &p_world, float p_
 		case SwfNodeKind::Shape:
 			return p_node.shape != nullptr && shape_hit(*p_node.shape, *p);
 		case SwfNodeKind::EditText:
-			return in_rect(swf_node_text_bounds(p_node), *p);
+			return in_rect(swf_node_field_bounds(p_node, p_fonts), *p);
 		case SwfNodeKind::Bitmap:
 			return p_node.sub_image != nullptr &&
 					in_rect(SwfRect{ 0.0f, float(p_node.sub_image->width()), 0.0f, float(p_node.sub_image->height()) },
@@ -102,7 +103,7 @@ SwfMatrix swf_world_matrix(const SwfScene &p_scene, SwfNodeId p_node) {
 	return m;
 }
 
-SwfHitWorld::SwfHitWorld(const SwfScene &p_scene) : scene_(p_scene) {
+SwfHitWorld::SwfHitWorld(const SwfScene &p_scene, const SwfFontSet *p_fonts) : scene_(p_scene), fonts_(p_fonts) {
 	walk(p_scene.root(), SwfMatrix{}, true, {}, 0);
 }
 
@@ -145,7 +146,7 @@ bool SwfHitWorld::leaf_hit(SwfNodeId p_node, float p_stage_x, float p_stage_y) c
 	const SwfSceneNode *n = scene_.node(p_node);
 	const auto it = nodes_.find(p_node);
 	return n != nullptr && it != nodes_.end() && has_geometry(*n) &&
-			geometry_hit(*n, it->second.world, p_stage_x, p_stage_y);
+			geometry_hit(*n, fonts_, it->second.world, p_stage_x, p_stage_y);
 }
 
 bool SwfHitWorld::subtree(SwfNodeId p_id, float p_x, float p_y, bool p_ignore_visibility, uint32_t p_depth) const {
@@ -157,7 +158,7 @@ bool SwfHitWorld::subtree(SwfNodeId p_id, float p_x, float p_y, bool p_ignore_vi
 	if (!p_ignore_visibility && !it->second.visible) {
 		return false;
 	}
-	if (has_geometry(*n) && geometry_hit(*n, it->second.world, p_x, p_y) && masks_pass(p_id, p_x, p_y)) {
+	if (has_geometry(*n) && geometry_hit(*n, fonts_, it->second.world, p_x, p_y) && masks_pass(p_id, p_x, p_y)) {
 		return true;
 	}
 	for (const SwfNodeId c : n->children) {
@@ -193,7 +194,7 @@ bool SwfHitWorld::masks_pass(SwfNodeId p_leaf, float p_x, float p_y) const {
 			if (n == nullptr || ni == nodes_.end()) {
 				continue;
 			}
-			inside = has_geometry(*n) && geometry_hit(*n, ni->second.world, p_x, p_y);
+			inside = has_geometry(*n) && geometry_hit(*n, fonts_, ni->second.world, p_x, p_y);
 			for (const SwfNodeId c : n->children) {
 				stack.push_back(c);
 			}
@@ -251,7 +252,7 @@ SwfNodeId SwfHitWorld::topmost_target(float p_stage_x, float p_stage_y, const Sw
 		if (!through_hit_area && !info.visible) {
 			continue;
 		}
-		if (!geometry_hit(*leaf, info.world, p_stage_x, p_stage_y) ||
+		if (!geometry_hit(*leaf, fonts_, info.world, p_stage_x, p_stage_y) ||
 				(!through_hit_area && !masks_pass(*it, p_stage_x, p_stage_y))) {
 			continue;
 		}
