@@ -393,6 +393,16 @@ bool placeholder_texture(std::string_view p_name) {
 	return w.front().rfind(kPlaceholderPrefix, 0) == 0 || listed(std::string_view(w.front()), kPlaceholderWords);
 }
 
+bool mask_texture(std::string_view p_name) {
+	const std::optional<NameRole> suffix = suffix_role(p_name);
+	if (suffix && suffix->role == kColor && suffix->quality == 1) {
+		return true;
+	}
+	const std::vector<std::string> w = words(last_part(p_name));
+	return std::any_of(
+			w.begin(), w.end(), [](const std::string &p_word) { return p_word.find("mask") != std::string::npos; });
+}
+
 std::unique_ptr<LookResolver> LookResolver::open(const core::LevelMount &p_mount) {
 	const Clock::time_point start = Clock::now();
 	std::unique_ptr<LookResolver> out(new LookResolver());
@@ -738,13 +748,12 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 	} else if (color_alpha && has_word(shader_name, kBackdropWords)) {
 		out.blend = LookBlend::AlphaTest;
 	}
-	if (out.blend == LookBlend::Blend && !color_alpha && color) {
-		for (const std::string &w : words(last_part(color->name))) {
-			if (w.find("mask") != std::string::npos) {
-				out.drawn = false;
-				return out;
-			}
+	if (out.blend == LookBlend::Blend && !color_alpha && color && mask_texture(color->name)) {
+		if (!has_word(shader_name, kGlassWords)) {
+			out.drawn = false;
+			return out;
 		}
+		color.reset();
 	}
 	out.double_sided = shader_info != nullptr ? shader_info->double_sided : foliage;
 

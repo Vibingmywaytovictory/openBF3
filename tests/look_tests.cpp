@@ -4,9 +4,12 @@
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
+#include "bf3/core/level/census.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
 #include "bf3/core/res/res_loader.h"
+#include "bf3/core/util/text.h"
+#include "bf3/render/level_scene.h"
 #include "bf3/render/look_environment.h"
 #include "bf3/render/look_materials.h"
 #include "bf3/render/shader_database.h"
@@ -232,6 +235,60 @@ TEST_SUITE("render-look-unit") {
 		CHECK(placeholder_texture("levels/a/defaultnormal"));
 		CHECK(placeholder_texture("levels/a/black"));
 		CHECK(!placeholder_texture("levels/a/wall_d"));
+		CHECK(mask_texture("levels/a/water_rgb"));
+		CHECK(mask_texture("levels/a/wash_01_m"));
+		CHECK(mask_texture("levels/a/wall_dirtmask"));
+		CHECK(!mask_texture("levels/a/rock_01c_d"));
+		CHECK(!mask_texture("levels/a/rock_01c_n"));
+	}
+
+	TEST_CASE(
+			"render.look.unit: a transparent graph that samples only masks is not drawn, a glass pane keeps its tint") {
+		using F = res::TextureFormat;
+		ShaderDatabase db;
+		db.shaders.push_back(graph_shader("levels/t/wash", SurfaceShaderType::Transparent,
+				{ { "levels/t/water_rgb", 1, kUsageTexCoord0, 1.0f },
+						{ "levels/t/wash_01_m", 1, kUsageTexCoord0, 1.0f } }));
+		db.shaders.push_back(graph_shader("levels/t/pane", SurfaceShaderType::Transparent,
+				{ { "levels/t/pane_01_m", 1, kUsageTexCoord0, 1.0f } }));
+		db.shaders.push_back(graph_shader("levels/t/roof_glass", SurfaceShaderType::Transparent,
+				{ { "levels/t/roof_glass_rgb", 1, kUsageTexCoord0, 1.0f } }));
+		db.shaders.push_back(graph_shader("levels/t/rock", SurfaceShaderType::Opaque,
+				{ { "levels/t/rock_d", 1, kUsageTexCoord0, 1.0f }, { "levels/t/rock_n", 1, kUsageTexCoord0, 1.0f } }));
+		std::map<std::string, LookResolver::HeaderInfo> headers;
+		headers["levels/t/water_rgb"] = { res::TextureKind::Texture2D, F::Dxt1 };
+		headers["levels/t/wash_01_m"] = { res::TextureKind::Texture2D, F::Dxt1 };
+		headers["levels/t/pane_01_m"] = { res::TextureKind::Texture2D, F::Dxt5 };
+		headers["levels/t/roof_glass_rgb"] = { res::TextureKind::Texture2D, F::Dxt1 };
+		headers["levels/t/rock_d"] = { res::TextureKind::Texture2D, F::Dxt1 };
+		headers["levels/t/rock_n"] = { res::TextureKind::Texture2D, F::NormalDxn };
+		LookResolver resolver(ShaderLookup(std::move(db)), headers);
+
+		MaterialSlot wash;
+		wash.shader = "levels/t/wash";
+		CHECK(!resolver.resolve(wash, "levels/t/wash_mesh").drawn);
+
+		MaterialSlot pane;
+		pane.shader = "levels/t/pane";
+		const LookMaterial p = resolver.resolve(pane, "levels/t/pane_mesh");
+		CHECK(p.drawn);
+		CHECK(p.blend == LookBlend::Blend);
+
+		MaterialSlot roof;
+		roof.shader = "levels/t/roof_glass";
+		const LookMaterial g = resolver.resolve(roof, "levels/t/roof_mesh");
+		CHECK(g.drawn);
+		CHECK(g.glass);
+		CHECK(!g.color);
+
+		MaterialSlot rock;
+		rock.shader = "levels/t/rock";
+		const LookMaterial r = resolver.resolve(rock, "levels/t/rock_mesh");
+		CHECK(r.drawn);
+		REQUIRE(r.color);
+		CHECK(r.color->name == "levels/t/rock_d");
+		REQUIRE(r.normal);
+		CHECK(r.normal->name == "levels/t/rock_n");
 	}
 
 	TEST_CASE("render.look.unit: resolver tiers, normal pairing, glass and undrawn shaders") {
@@ -833,6 +890,60 @@ TEST_SUITE("render-look") {
 		CHECK(near(f.sun_lobe.axis[1], -f.sun_direction[1]));
 		CHECK(f.exposure > f.min_exposure);
 		CHECK(f.exposure < f.max_exposure);
+		const SnapshotDiff diff = diff_snapshots(before, reader.snapshot());
+		std::printf("install.unchanged %s\n", diff.clean() ? "PASS" : diff.summary().c_str());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+	}
+
+	TEST_CASE("render.look: MP_007's river water wash is not drawn and no blend material draws a mask as its colour") {
+		InstallReader reader;
+		if (!reader.locate({})) {
+			bf3::test::skip_install_case(reader.describe().c_str());
+			return;
+		}
+		const InstallSnapshot before = reader.snapshot();
+		Result<std::shared_ptr<Install>> install = Install::open(reader);
+		REQUIRE(install.ok());
+		Result<std::unique_ptr<level::LoadedLevel>> loaded = level::load_level(*install, "MP_007", "TeamDeathMatchC0");
+		REQUIRE(loaded.ok());
+		Result<std::unique_ptr<level::World>> world = level::World::traverse(**loaded);
+		REQUIRE(world.ok());
+		Result<level::MeshCensus> census = level::mesh_census(**loaded, **world);
+		REQUIRE(census.ok());
+		Result<LevelScenePlan> plan = plan_level_scene(**loaded, **world, *census);
+		REQUIRE(plan.ok());
+
+		std::unique_ptr<LookResolver> resolver = LookResolver::open((*loaded)->mount());
+		REQUIRE(resolver != nullptr);
+		MaterialSlot wash;
+		wash.shader = "Levels/MP_007/Props/M_MP007_WaterWash_01";
+		const LookMaterial wash_look = resolver->resolve(wash, "levels/mp_007/props/mp007_waterwash_01_mesh");
+		std::printf("render.look MP_007 water wash: drawn %d, blend %d, colour %s\n", int(wash_look.drawn),
+				int(wash_look.blend), wash_look.color ? wash_look.color->name.c_str() : "-");
+		CHECK(!wash_look.drawn);
+
+		size_t drawn_slots = 0, blend_slots = 0;
+		for (const SceneMeshPlan &m : plan->meshes) {
+			for (uint32_t s : m.surface_materials) {
+				if (s == kSceneUndrawnMaterial) {
+					continue;
+				}
+				REQUIRE(s < plan->materials.size());
+				const SceneMaterialPlan &mat = plan->materials[s];
+				++drawn_slots;
+				CHECK(to_lower_ascii(mat.slot.shader) != "levels/mp_007/props/m_mp007_waterwash_01");
+				if (!mat.blend || mat.glass || mat.albedo < 0) {
+					continue;
+				}
+				++blend_slots;
+				const std::string &albedo = plan->textures[size_t(mat.albedo)].name;
+				CHECK_MESSAGE(
+						!mask_texture(albedo), (mat.slot.shader + " draws the mask " + albedo + " as its colour"));
+			}
+		}
+		std::printf("render.look MP_007 plan: %zu materials, %zu drawn slots, %zu blend slots with an albedo\n",
+				plan->materials.size(), drawn_slots, blend_slots);
+		CHECK(blend_slots > 0);
 		const SnapshotDiff diff = diff_snapshots(before, reader.snapshot());
 		std::printf("install.unchanged %s\n", diff.clean() ? "PASS" : diff.summary().c_str());
 		CHECK_MESSAGE(diff.clean(), diff.summary());

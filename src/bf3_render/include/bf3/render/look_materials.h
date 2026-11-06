@@ -149,5 +149,6 @@ struct NameRole {
 std::optional<NameRole> suffix_role(std::string_view p_name);
 std::optional<NameRole> graph_role(std::string_view p_name);
 bool placeholder_texture(std::string_view p_name);
+bool mask_texture(std::string_view p_name);
 
 }
