@@ -18,6 +18,7 @@
 #include <godot_cpp/classes/gd_extension_manager.hpp>
 #include <godot_cpp/classes/performance.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
+#include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <chrono>
@@ -117,6 +118,17 @@ bool on_off_arg(const char *p_name, bool &r_value, std::string &r_error) {
 
 int64_t monitor(Performance::Monitor p_monitor) {
 	return int64_t(Performance::get_singleton()->get_monitor(p_monitor));
+}
+
+void fail(const std::string &p_error) {
+	say("failed: " + p_error);
+	UtilityFunctions::push_error(to_godot("[dedicated] " + p_error));
+}
+
+void exit_with_failure() {
+	SceneTree *exit_code_setter = memnew(SceneTree);
+	exit_code_setter->quit(1);
+	memdelete(exit_code_setter);
 }
 
 }
@@ -357,8 +369,7 @@ void DedicatedMainLoop::_initialize() {
 	say("extensions " + extensions_text());
 	std::string error;
 	if (!parse_args(error) || !start(error)) {
-		say("failed: " + error);
-		UtilityFunctions::push_error(to_godot("[dedicated] " + error));
+		fail(error);
 		failed_ = true;
 	}
 }
@@ -473,6 +484,9 @@ bool DedicatedMainLoop::_process(double p_delta) {
 
 void DedicatedMainLoop::_finalize() {
 	if (!session_) {
+		if (failed_) {
+			exit_with_failure();
+		}
 		return;
 	}
 	const host::ServerSessionStats stats = session_->stats();
@@ -501,8 +515,16 @@ void DedicatedMainLoop::_finalize() {
 			(long long)(monitor(Performance::OBJECT_RESOURCE_COUNT) - resources_after_load_),
 			(long long)monitor(Performance::RENDER_TEXTURE_MEM_USED), args_.rules.dev_commands ? "on" : "off",
 			diff.clean() ? "unchanged" : diff.summary().c_str(), stopped_by_));
+	if (stats.rotation.load_failures > 0) {
+		fail(core::fmt("rotation: %llu level loads failed, the last %s",
+				(unsigned long long)stats.rotation.load_failures, stats.rotation.last_error.c_str()));
+		failed_ = true;
+	}
 	session_.reset();
 	cache_.reset();
+	if (failed_) {
+		exit_with_failure();
+	}
 }
 
 }
