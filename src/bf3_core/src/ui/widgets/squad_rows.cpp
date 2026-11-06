@@ -1,5 +1,6 @@
 #include "button.h"
 #include "list.h"
+#include "squad_data.h"
 
 #include "bf3/core/ui/hud_squads.h"
 #include "bf3/core/ui/hud_widgets.h"
@@ -22,6 +23,7 @@ constexpr uint32_t kFriendlyText = 7586815u;
 constexpr std::string_view kLabel = "Label";
 constexpr std::string_view kMembers = "Members";
 constexpr std::string_view kSquadsPerRow = " / 4";
+constexpr bool kSquadPrivacyOffered = false;
 
 HudListLabel *row_label(HudWidgetHost &r_host, std::string_view p_name) {
 	return controller_at<HudListLabel>(r_host, r_host.clip(p_name));
@@ -570,6 +572,21 @@ std::optional<As2Value> hud_squad_button_item(
 	item.set("Label", As2Value::of(std::string(label)));
 	item.set("Visible", As2Value::of(visible));
 	return item;
+}
+
+std::optional<As2Value> hud_squad_source_value(
+		const HudDataSource &p_source, const HudModel &p_model, const HudClientState &p_client) {
+	if (p_source.category != kUiSquadCompPartition) {
+		return std::nullopt;
+	}
+	if (p_source.key == kSquadHeaderNameKey) {
+		return As2Value::of(squad_label(p_client, hud_selected_squad(p_model, p_client)));
+	}
+	if (p_source.key == kSquadPrivacyKey || p_source.key == kSquadPrivacyEnabledKey ||
+			p_source.key == kSquadPrivacyVisibleKey) {
+		return As2Value::of(kSquadPrivacyOffered);
+	}
+	return std::nullopt;
 }
 
 std::optional<int32_t> hud_squad_list_selection(const HudDataSource &p_query, const HudModel &p_model) {

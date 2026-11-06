@@ -1,4 +1,5 @@
 #include "list.h"
+#include "squad_data.h"
 
 namespace bf3::core::ui {
 
@@ -230,6 +231,10 @@ public:
 
 	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const override {
 		for (const HudDataSource &src : sources_) {
+			if (std::optional<As2Value> squad = hud_squad_source_value(src, p_model, p_client)) {
+				r_out.push_back({ src.name, std::move(*squad), src.on_initialize });
+				continue;
+			}
 			const auto key = std::find_if(
 					kHeaderKeys.begin(), kHeaderKeys.end(), [&](const HeaderKey &k) { return k.data_key == src.key; });
 			if (key == kHeaderKeys.end() || key->field == HeaderField::TeamName && !p_client.localise_hash) {

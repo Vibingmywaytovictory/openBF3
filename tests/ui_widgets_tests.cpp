@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -1125,6 +1126,85 @@ TEST_SUITE("ui-widgets") {
 		CHECK_MESSAGE(squad.s.hud->stats().as2.failed_ops == 0, squad.s.hud->stats().as2.last_failure);
 		std::printf("ui.widgets squadscreen from the model: %zu squads, %zu member rows\n", squad_rows.size(),
 				member_rows.size());
+	}
+
+	TEST_CASE("widgets: squadscreen draws none of its movies' placeholder text: CheckBox_01 runs "
+			  "Widget.CheckBox.CheckBox and stays hidden while no squad can be made private, and List_02's header "
+			  "names the selected squad") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudSquadNames names;
+		for (size_t i = 0; i < names.size(); ++i) {
+			names[i] = "SQ" + std::to_string(i + 1);
+		}
+		std::map<std::pair<std::string, int32_t>, std::string> flow;
+		HudClientState client;
+		client.squad_names = &names;
+		client.flow_data = [&flow](std::string_view p_category, int32_t p_key) -> std::optional<std::string> {
+			const auto it = flow.find({ std::string(p_category), p_key });
+			return it != flow.end() ? std::optional<std::string>(it->second) : std::nullopt;
+		};
+		HudModel m;
+		m.local_player = 0;
+		m.local_team = 1;
+		m.player_count = 2;
+		std::memcpy(m.players[0].name.data(), "Me", 2);
+		std::memcpy(m.players[1].name.data(), "Mate", 4);
+		for (size_t slot = 0; slot < 2; ++slot) {
+			m.players[slot].team = 1;
+			m.players[slot].squad = 2;
+		}
+		m.squad_leaders[0] = true;
+		m.squad.available_squads.count = 2;
+		m.squad.available_squads.squads[0] = HudSquadEntry{ 2, 2, true };
+		m.squad.available_squads.squads[1] = HudSquadEntry{ 5, 0, true };
+
+		ScreenRig squad;
+		open_screen(*r, squad, "ui/flow/screen/squadscreen", client);
+		squad.s.hud->refresh(m);
+		const std::string box = std::string(kHudScreenInstance) + ".CheckBox_01";
+		const HudWidgetState *w = squad.s.hud->widget(box);
+		CHECK((w != nullptr && w->class_name == "Widget.CheckBox.CheckBox"));
+		CHECK(squad.s.hud->controller(box) != nullptr);
+		CHECK(squad.clip("CheckBox_01.textField").text() == "PRIVACY");
+		CHECK(squad.clip("CheckBox_01.box").current_frame() == 1u);
+		CHECK_FALSE(squad.clip("CheckBox_01").visible());
+		CHECK(squad.clip("Button_01").visible());
+		CHECK(squad.clip("ScoreboardHeader_01.teamText").text() == "SQ2");
+		flow[{ std::string(kUiSquadCompPartition), kSquadSelectedSquadKey }] = "5";
+		squad.s.hud->refresh(m);
+		CHECK(squad.clip("ScoreboardHeader_01.teamText").text() == "SQ5");
+
+		const auto shown = [&](const SwfSceneNode &p_node) {
+			for (const SwfSceneNode *n = &p_node; n != nullptr; n = squad.s.scene->node(n->parent)) {
+				if (!n->visible) {
+					return false;
+				}
+			}
+			return true;
+		};
+		std::string leaks;
+		const std::function<void(SwfNodeId)> walk = [&](SwfNodeId p_id) {
+			const SwfSceneNode *n = squad.s.scene->node(p_id);
+			if (n == nullptr) {
+				return;
+			}
+			if (n->edit_text != nullptr && (n->text == "BOLD1" || n->text == "HEADER") && shown(*n)) {
+				leaks += " " + n->path + " '" + n->text + "'";
+			}
+			for (const SwfNodeId c : n->children) {
+				walk(c);
+			}
+		};
+		walk(squad.s.scene->root());
+		CHECK_MESSAGE(leaks.empty(), leaks);
+		CHECK(squad.s.hud->stats().as2.missing_paths == 0);
+		CHECK_MESSAGE(squad.s.hud->stats().as2.failed_ops == 0, squad.s.hud->stats().as2.last_failure);
+		std::printf("ui.widgets squadscreen header '%s', privacy '%s' hidden\n",
+				squad.clip("ScoreboardHeader_01.teamText").text().c_str(),
+				squad.clip("CheckBox_01.textField").text().c_str());
 	}
 
 	TEST_CASE("widgets: squadscreen: a member row's Index is its place in List_02, not the player's slot, so a click "
