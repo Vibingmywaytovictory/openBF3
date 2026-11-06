@@ -86,11 +86,54 @@ struct FieldReader {
 	}
 };
 
+constexpr uint32_t kMaxSpawnLinkHops = 16;
+
+Status mark_linked_spawns(const World &p_world, uint32_t p_scope, const EbxInstance &p_source, int32_t p_field,
+		uint32_t p_depth, std::vector<bool> &r_linked) {
+	if (p_depth > kMaxSpawnLinkHops || p_scope >= p_world.scopes.size()) {
+		return Status::success();
+	}
+	const Connections &c = p_world.scopes.connections(p_scope);
+	BF3_TRY(p_world.budget->charge(1 + c.link.size()));
+	const Scope &scope = p_world.scopes.get(p_scope);
+	for (const Connection &link : c.link) {
+		if (!(link.source == p_source) || link.source_field != p_field) {
+			continue;
+		}
+		const PlacedObject *placed = p_world.placed(p_scope, link.target);
+		if (placed != nullptr && placed->kind == ObjectKind::AlternateSpawn) {
+			r_linked[size_t(placed - p_world.objects.data())] = true;
+		} else if (link.target.is_a("InterfaceDescriptorData") && scope.reference && scope.parent) {
+			BF3_TRY(mark_linked_spawns(
+					p_world, *scope.parent, *scope.reference, link.target_field, p_depth + 1, r_linked));
+		} else if (const std::optional<uint32_t> child = p_world.scopes.child(p_scope, link.target)) {
+			const std::optional<EbxInstance> descriptor =
+					p_world.scopes.db().follow(p_world.scopes.get(*child).blueprint.data(), "Descriptor");
+			if (descriptor) {
+				BF3_TRY(mark_linked_spawns(p_world, *child, *descriptor, link.target_field, p_depth + 1, r_linked));
+			}
+		}
+	}
+	return Status::success();
+}
+
+Result<std::vector<bool>> spawner_linked_points(const World &p_world) {
+	std::vector<bool> linked(p_world.objects.size(), false);
+	const int32_t field = field_id("AlternativeSpawnPoints");
+	for (const PlacedObject &object : p_world.objects) {
+		if (object.kind == ObjectKind::CharacterSpawnReference) {
+			BF3_TRY(mark_linked_spawns(p_world, object.scope, object.entity, field, 0, linked));
+		}
+	}
+	return linked;
+}
 }
 
 Result<LevelSpawns> read_level_spawns(const World &p_world) {
 	WorkBudget &budget = *p_world.budget;
 	BF3_TRY(budget.status());
+	Result<std::vector<bool>> linked = spawner_linked_points(p_world);
+	BF3_TRY(linked);
 	LevelSpawns out;
 	for (uint32_t i = 0; i < p_world.objects.size(); ++i) {
 		const PlacedObject &object = p_world.objects[i];
@@ -100,6 +143,9 @@ Result<LevelSpawns> read_level_spawns(const World &p_world) {
 		BF3_TRY(budget.charge(1));
 		const FieldReader read{ p_world, object };
 		if (object.kind == ObjectKind::AlternateSpawn) {
+			if (!(*linked)[i]) {
+				continue;
+			}
 			SpawnPointDef p;
 			p.object = i;
 			p.transform = object.transform;

@@ -8,6 +8,7 @@
 #include "bf3/core/level/eor_camera.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/mode_areas.h"
+#include "bf3/core/level/spawn_points.h"
 #include "bf3/core/level/world.h"
 #include "bf3/core/superbundle_mount.h"
 #include "bf3/core/thread_pool.h"
@@ -21,6 +22,7 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <random>
@@ -1841,6 +1843,110 @@ TEST_SUITE("level_modes") {
 			CHECK(tdm->polygon_tiles > 0);
 			CHECK(tdm->tiles.size() <= kMaxTdmRegionTiles);
 		}
+	}
+
+	TEST_CASE("level_modes: a TDM mode spawns on the points its spawners link, in every shipped TDM mode") {
+		const std::shared_ptr<Install> install = shared_install_or_skip();
+		if (!install) {
+			return;
+		}
+		struct Job {
+			std::string level;
+			std::string mode;
+		};
+		std::vector<Job> jobs;
+		for (std::string_view id : shipped_level_ids()) {
+			Result<LevelInfo> info = level_info(*install, id);
+			REQUIRE_MESSAGE(info.ok(), (info.ok() ? std::string() : info.error().message));
+			for (const std::string &mode : info->modes) {
+				if (mode.find("TeamDeathMatch") != std::string::npos) {
+					jobs.push_back({ std::string(id), mode });
+				}
+			}
+		}
+		struct Counted {
+			std::string error;
+			size_t points = 0;
+			std::set<std::string> partitions;
+		};
+		const std::vector<Counted> counted = parallel_map<Counted>(
+				jobs.size(),
+				[&](size_t p_i) {
+					Counted c;
+					Result<std::unique_ptr<LoadedLevel>> loaded = load_level(install, jobs[p_i].level, jobs[p_i].mode);
+					if (!loaded) {
+						c.error = loaded.error().message;
+						return c;
+					}
+					Result<std::unique_ptr<World>> world = World::traverse(**loaded);
+					if (!world) {
+						c.error = world.error().message;
+						return c;
+					}
+					Result<LevelSpawns> spawns = read_level_spawns(**world);
+					if (!spawns) {
+						c.error = spawns.error().message;
+						return c;
+					}
+					c.points = spawns->points.size();
+					for (const SpawnPointDef &p : spawns->points) {
+						const EbxInstance &entity = (*world)->objects[p.object].entity;
+						c.partitions.insert(
+								std::string((*loaded)->db().name_of(entity.partition().guid()).value_or("")));
+					}
+					return c;
+				},
+				4);
+		REQUIRE(jobs.size() == 62);
+		const std::map<std::string, size_t> expected = { { "MP_001 TeamDeathMatch0", 43 },
+			{ "MP_001 TeamDeathMatchC0", 43 }, { "MP_003 TeamDeathMatch0", 73 }, { "MP_003 TeamDeathMatchC0", 73 },
+			{ "MP_007 TeamDeathMatch0", 64 }, { "MP_007 TeamDeathMatchC0", 64 }, { "MP_011 TeamDeathMatch0", 65 },
+			{ "MP_011 TeamDeathMatchC0", 65 }, { "MP_012 TeamDeathMatch0", 85 }, { "MP_012 TeamDeathMatchC0", 85 },
+			{ "MP_013 TeamDeathMatch0", 53 }, { "MP_013 TeamDeathMatchC0", 53 }, { "MP_017 TeamDeathMatch0", 47 },
+			{ "MP_017 TeamDeathMatchC0", 47 }, { "MP_018 TeamDeathMatch0", 78 }, { "MP_018 TeamDeathMatchC0", 78 },
+			{ "MP_Subway TeamDeathMatch0", 102 }, { "MP_Subway TeamDeathMatchC0", 102 },
+			{ "XP1_001 TeamDeathMatch0", 25 }, { "XP1_001 TeamDeathMatchC0", 25 }, { "XP1_002 TeamDeathMatch0", 39 },
+			{ "XP1_002 TeamDeathMatchC0", 39 }, { "XP1_003 TeamDeathMatch0", 27 }, { "XP1_003 TeamDeathMatchC0", 27 },
+			{ "XP1_004 TeamDeathMatch0", 20 }, { "XP1_004 TeamDeathMatchC0", 20 },
+			{ "XP2_Factory CQTeamDeathMatch0", 0 }, { "XP2_Factory TeamDeathMatchC0", 33 },
+			{ "XP2_Factory TeamDeathMatchCQ0", 33 }, { "XP2_Office CQTeamDeathMatch0", 0 },
+			{ "XP2_Office TeamDeathMatchC0", 49 }, { "XP2_Office TeamDeathMatchCQ0", 49 },
+			{ "XP2_Palace CQTeamDeathMatch0", 31 }, { "XP2_Palace TeamDeathMatchC0", 31 },
+			{ "XP2_Palace TeamDeathMatchCQ0", 31 }, { "XP2_Skybar CQTeamDeathMatch0", 39 },
+			{ "XP2_Skybar TeamDeathMatchC0", 39 }, { "XP2_Skybar TeamDeathMatchCQ0", 39 },
+			{ "XP3_Alborz TeamDeathMatch0", 28 }, { "XP3_Alborz TeamDeathMatchC0", 28 },
+			{ "XP3_Desert TeamDeathMatch0", 40 }, { "XP3_Desert TeamDeathMatchC0", 40 },
+			{ "XP3_Shield TeamDeathMatch0", 23 }, { "XP3_Shield TeamDeathMatchC0", 23 },
+			{ "XP3_Valley TeamDeathMatch0", 29 }, { "XP3_Valley TeamDeathMatchC0", 29 },
+			{ "XP4_FD TeamDeathMatch0", 34 }, { "XP4_FD TeamDeathMatchC0", 34 }, { "XP4_Parl TeamDeathMatch0", 36 },
+			{ "XP4_Parl TeamDeathMatchC0", 36 }, { "XP4_Quake TeamDeathMatch0", 34 },
+			{ "XP4_Quake TeamDeathMatchC0", 34 }, { "XP4_Rubble TeamDeathMatch0", 37 },
+			{ "XP4_Rubble TeamDeathMatchC0", 37 }, { "XP5_001 TeamDeathMatch0", 36 },
+			{ "XP5_001 TeamDeathMatchC0", 36 }, { "XP5_002 TeamDeathMatch0", 29 }, { "XP5_002 TeamDeathMatchC0", 29 },
+			{ "XP5_003 TeamDeathMatch0", 36 }, { "XP5_003 TeamDeathMatchC0", 36 }, { "XP5_004 TeamDeathMatch0", 30 },
+			{ "XP5_004 TeamDeathMatchC0", 30 } };
+		for (size_t i = 0; i < jobs.size(); ++i) {
+			const std::string name = jobs[i].level + " " + jobs[i].mode;
+			REQUIRE_MESSAGE(counted[i].error.empty(), name << ": " << counted[i].error);
+			std::printf("core.level.modes %s spawns %zu\n", name.c_str(), counted[i].points);
+			const auto want = expected.find(name);
+			CHECK_MESSAGE((want != expected.end() && want->second == counted[i].points),
+					name << " has " << counted[i].points);
+		}
+		const auto partitions_of = [&](std::string_view p_name) {
+			for (size_t i = 0; i < jobs.size(); ++i) {
+				if (jobs[i].level + " " + jobs[i].mode == p_name) {
+					return counted[i].partitions;
+				}
+			}
+			return std::set<std::string>();
+		};
+		CHECK(partitions_of("MP_012 TeamDeathMatch0") ==
+				std::set<std::string>{ "levels/mp_012/teamdeathmatch/layer1_teamdeathmatch_logic" });
+		CHECK(partitions_of("MP_018 TeamDeathMatch0") ==
+				std::set<std::string>{ "levels/mp_018/teamdeathmatch/layer0_teamdeathmatch_logic" });
+		CHECK(partitions_of("XP5_002 TeamDeathMatch0") ==
+				std::set<std::string>{ "levels/xp5_002/dm/layer0_dm_shared" });
 	}
 }
 
