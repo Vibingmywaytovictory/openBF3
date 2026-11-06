@@ -139,11 +139,12 @@ core::Result<NavClusterMap> build_nav_clusters(const sim::NavPolyGraph &p_graph,
 				}
 			}
 		}
-		if (portals.size() + best.size() > std::numeric_limits<uint16_t>::max()) {
-			return core::make_error("nav clusters: " + std::to_string(portals.size() + best.size()) +
-					" portals exceed the cluster graph's 16-bit portal index; raise the target area");
+		if (best.size() > std::numeric_limits<uint16_t>::max() ||
+				portals.size() + best.size() > std::numeric_limits<uint32_t>::max()) {
+			return core::make_error("nav clusters: cluster " + std::to_string(c) + "'s " + std::to_string(best.size()) +
+					" portals exceed the cluster graph's portal index");
 		}
-		table[c].first_portal = uint16_t(portals.size());
+		table[c].first_portal = uint32_t(portals.size());
 		table[c].number_of_portals = uint16_t(best.size());
 		for (const auto &[to, entry] : best) {
 			portals.push_back({ entry.first, to });

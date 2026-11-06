@@ -13,7 +13,7 @@ namespace bf3::ai {
 struct Cluster {
 	uint32_t first_polygon = 0;
 	uint32_t number_of_polygons = 0;
-	uint16_t first_portal = 0;
+	uint32_t first_portal = 0;
 	uint16_t number_of_portals = 0;
 	MaterialId material = kMaterialGround;
 };

@@ -191,6 +191,39 @@ TEST_SUITE("ai-world-unit") {
 		}
 	}
 
+	TEST_CASE("nav clusters: a graph with more than 65535 portals keeps every cluster's portals") {
+		constexpr uint32_t kPolys = 40000;
+		sim::NavPolyGraph graph;
+		graph.polys.resize(kPolys);
+		graph.first_link.reserve(kPolys + 1);
+		for (uint32_t i = 0; i < kPolys; ++i) {
+			graph.polys[i].ref = sim::NavPolyRef(i + 1);
+			graph.polys[i].centre = { float(i) * 40.0f, 0.0f, 0.0f };
+			graph.polys[i].area_m2 = 1600.0f;
+			graph.polys[i].area = sim::kNavAreaWalk;
+			graph.first_link.push_back(uint32_t(graph.links.size()));
+			if (i > 0) {
+				graph.links.push_back({ i - 1, { float(i) * 40.0f - 20.0f, 0.0f, 0.0f } });
+			}
+			if (i + 1 < kPolys) {
+				graph.links.push_back({ i + 1, { float(i) * 40.0f + 20.0f, 0.0f, 0.0f } });
+			}
+		}
+		graph.first_link.push_back(uint32_t(graph.links.size()));
+		core::Result<ai::NavClusterMap> built = ai::build_nav_clusters(graph, ai::NavClusterOptions{});
+		REQUIRE_MESSAGE(built.ok(), (built.ok() ? std::string() : built.error().message));
+		REQUIRE(built->cluster_count() == kPolys);
+		CHECK(built->graph.number_of_portals() == 2 * (kPolys - 1));
+		for (const uint32_t c : { 0u, kPolys / 2, kPolys - 1 }) {
+			const ai::Cluster &cluster = built->graph.cluster(c);
+			CHECK(cluster.number_of_portals == (c == 0 || c == kPolys - 1 ? 1u : 2u));
+			for (uint32_t i = 0; i < cluster.number_of_portals; ++i) {
+				const uint32_t to = built->graph.cluster_portal(c, i).to_cluster;
+				CHECK((to + 1 == c || to == c + 1));
+			}
+		}
+	}
+
 	TEST_CASE("nav clusters: the cluster path around the wall goes through the gap") {
 		const std::shared_ptr<const sim::NavWorld> nav = walled_nav();
 		core::Result<ai::NavClusterMap> built = ai::build_nav_clusters(sim::nav_poly_graph(*nav));
