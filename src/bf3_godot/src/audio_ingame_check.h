@@ -76,6 +76,7 @@ struct AudioIngameSpot {
 };
 inline constexpr uint64_t kAudioIngameMinBotShots = 10;
 inline constexpr float kAudioIngameFightMeters = 15.0f;
+inline constexpr double kAudioIngameReviveRetrySeconds = 0.5;
 
 bool parse_audio_ingame_phase(std::string_view p_text, AudioIngamePhase &r_phase);
 std::optional<double> audio_ingame_clip_steps_per_second(
@@ -113,6 +114,7 @@ struct AudioIngameIo {
 	std::function<float(float)> clearance;
 	std::function<std::optional<AudioIngameSpot>()> open_spot;
 	std::function<void(const AudioIngameSpot &)> teleport;
+	std::function<void()> revive;
 	std::function<std::optional<AudioIngameSpot>()> fight_spot;
 	sim::Vec3 feet{};
 	uint8_t own_slot = 0xFF;
@@ -236,11 +238,11 @@ private:
 
 	bool was_alive_ = false;
 	double alive_s_ = -1.0;
-	double last_deploy_s_ = -10.0;
+	double last_deploy_s_ = -10.0, last_revive_s_ = -10.0;
 	float base_yaw_ = 0.0f, yaw_ = 0.0f, pitch_ = 0.0f;
 	bool have_view_ = false, firing_ = false;
 	double last_s_ = 0.0;
-	uint32_t bursts_ = 0, deaths_ = 0;
+	uint32_t bursts_ = 0, deaths_ = 0, lives_ = 0;
 	AudioIngameLeg leg_ = AudioIngameLeg::Stand;
 	double leg_s_ = -1.0;
 	double tally_s_ = -1.0;
@@ -261,7 +263,7 @@ private:
 	uint32_t teleports_ = 0;
 	double fight_after_s_ = 0.0;
 	std::optional<AudioIngameSpot> fight_;
-	uint32_t fights_ = 0;
+	uint32_t fights_ = 0, revives_ = 0;
 	float spot_clear_m_ = 0.0f;
 	GameAudioStats stats_at_start_;
 

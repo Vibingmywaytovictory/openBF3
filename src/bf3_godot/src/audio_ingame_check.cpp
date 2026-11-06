@@ -492,8 +492,12 @@ void AudioIngameCheck::script(double p_now_s, const AudioIngameIo &p_io) {
 		}
 		leg_s_ = -1.0;
 		spot_checked_ = false;
-		fight_.reset();
+		if (fight_ && p_io.revive && p_now_s - last_revive_s_ > kAudioIngameReviveRetrySeconds) {
+			p_io.revive();
+			last_revive_s_ = p_now_s;
+		}
 		if (p_io.time_to_respawn <= 0.0f && p_now_s - last_deploy_s_ > 1.5) {
+			fight_.reset();
 			p_io.deploy();
 			last_deploy_s_ = p_now_s;
 		}
@@ -501,12 +505,14 @@ void AudioIngameCheck::script(double p_now_s, const AudioIngameIo &p_io) {
 	}
 	if (!was_alive_) {
 		was_alive_ = true;
+		++lives_;
+		revives_ += fight_ ? 1u : 0u;
 		alive_s_ = p_now_s;
 		have_view_ = false;
 		last_step_ = UINT32_MAX;
 	}
 	const double in = p_now_s - alive_s_;
-	if (kind_ == AudioIngamePhase::Flyby && fights_ == 0 && in < kAudioIngameSettleSeconds && p_io.fight_spot &&
+	if (kind_ == AudioIngamePhase::Flyby && !fight_ && in < kAudioIngameSettleSeconds && p_io.fight_spot &&
 			p_io.teleport) {
 		fight_ = p_io.fight_spot();
 		if (fight_) {
@@ -1292,6 +1298,10 @@ void AudioIngameCheck::analyse_flyby(Bf3GameAudio &r_audio) {
 	const ba::FlyByAudioStats &a = stats_at_start_.flybys;
 	const ba::FlyByAudioStats &b = now.flybys;
 	const uint64_t bullets = b.bullets - a.bullets, starts = b.starts - a.starts;
+	row("every life in front of an enemy", lives_ > 0 && fights_ + revives_ == lives_,
+			core::fmt(
+					"%u lives: %u moves to %.0f m in front of the nearest enemy, %u revives at the body; %u own deaths",
+					lives_, fights_, double(kAudioIngameFightMeters), revives_, deaths_));
 	row("fly-bys start", starts > 0 && starts <= bullets,
 			core::fmt("%llu presented bullets, %llu fly-by starts, %llu silent, %llu too slow, %llu receding, %llu "
 					  "refused, %llu untracked in the recording; %u moves to %.0f m in front of the nearest enemy, the "
