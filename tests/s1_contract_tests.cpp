@@ -42,7 +42,7 @@ TEST_CASE("s1 contract: nav defaults are the plan's and the soldier's") {
 	const sim::NavParams p;
 
 	CHECK(p.cell_size == 0.2f);
-	CHECK(p.radius_round_up);
+	CHECK(!p.radius_round_up);
 	CHECK(std::ceil(p.agent_radius / p.cell_size) * p.cell_size >= p.agent_radius);
 	CHECK(p.cell_height == 0.1f);
 

@@ -269,7 +269,8 @@ TEST_SUITE("sim-nav-unit") {
 		}
 	}
 
-	TEST_CASE("sim.nav.unit: a 0.9 m door is closed with Recast's ceil radius (0.5 m) and open with round to nearest (0.25 m)") {
+	TEST_CASE("sim.nav.unit: a 0.9 m door is closed with Recast's ceil radius (0.5 m) and open where it is "
+			  "narrower than the ceil radius allows (0.25 m)") {
 		std::vector<StaticTriangle> t;
 		add_floor(t, 0, 0, 64, 64, 0.0f);
 
@@ -294,6 +295,48 @@ TEST_SUITE("sim-nav-unit") {
 		REQUIRE(d.poly != 0);
 		CHECK(c.component == d.component);
 		CHECK(ground_sccs(oc) == 1);
+	}
+
+	TEST_CASE("sim.nav.unit: a 1.0 m door between two rooms is closed with the ceil radius (0.4 m) and open with the "
+			  "default "
+			  "passages") {
+		std::vector<StaticTriangle> t;
+		add_floor(t, 0, 0, 64, 64, 0.0f);
+		add_box(t, { 31.9f, 0.0f, -1.0f }, { 32.1f, 3.0f, 29.95f });
+		add_box(t, { 31.9f, 0.0f, 30.95f }, { 32.1f, 3.0f, 65.0f });
+		NavBakeOptions o;
+		o.params.drop_links = false;
+		o.params.radius_round_up = true;
+		const auto closed = bake(t, tiles_range(0, 0, 0, 0), o);
+		const NavComponents cc = nav_components(*closed);
+		const NavPointCheck ca = at(*closed, cc, 16, 0, 30.45f), cb = at(*closed, cc, 48, 0, 30.45f);
+		REQUIRE(ca.poly != 0);
+		REQUIRE(cb.poly != 0);
+		CHECK(ca.weak_component != cb.weak_component);
+		o.params.radius_round_up = NavParams().radius_round_up;
+		const auto w = bake(t, tiles_range(0, 0, 0, 0), o);
+		const NavComponents c = nav_components(*w);
+		const NavPointCheck a = at(*w, c, 16, 0, 30.45f), b = at(*w, c, 48, 0, 30.45f);
+		REQUIRE(a.poly != 0);
+		REQUIRE(b.poly != 0);
+		CHECK(a.component == b.component);
+		CHECK(ground_sccs(c) == 1);
+	}
+
+	TEST_CASE("sim.nav.unit: a 0.75 m gap that the 0.35 m soldier cannot pass is closed at the default cell size and "
+			  "radius") {
+		std::vector<StaticTriangle> t;
+		add_floor(t, 0, 0, 64, 64, 0.0f);
+		add_box(t, { 31.9f, 0.0f, -1.0f }, { 32.1f, 3.0f, 29.95f });
+		add_box(t, { 31.9f, 0.0f, 30.7f }, { 32.1f, 3.0f, 65.0f });
+		NavBakeOptions o;
+		o.params.drop_links = false;
+		const auto w = bake(t, tiles_range(0, 0, 0, 0), o);
+		const NavComponents c = nav_components(*w);
+		const NavPointCheck a = at(*w, c, 16, 0, 30.3f), b = at(*w, c, 48, 0, 30.3f);
+		REQUIRE(a.poly != 0);
+		REQUIRE(b.poly != 0);
+		CHECK(a.weak_component != b.weak_component);
 	}
 
 	TEST_CASE("sim.nav.unit: a 1.5 m ceiling gives crouch area; the slab top is walk area") {
@@ -727,13 +770,18 @@ TEST_SUITE("sim-nav-unit") {
 		CHECK(!bake_nav_world(std::span<const StaticTriangle>(t), tiles_range(0, 0, 0, 0), bad).ok());
 		CHECK(nav_cells(NavParams()).walkable_climb == 3);
 		CHECK(nav_cells(NavParams()).walkable_radius == 2);
+		CHECK(nav_cells(NavParams()).passage_radius == 1);
+		CHECK(nav_cells(NavParams()).corridor_cells == 4);
 		NavParams q;
-		q.radius_round_up = false;
-		CHECK(nav_cells(q).walkable_radius == 2);
-		q.cell_size = 0.25f;
-		CHECK(nav_cells(q).walkable_radius == 1);
 		q.radius_round_up = true;
 		CHECK(nav_cells(q).walkable_radius == 2);
+		CHECK(nav_cells(q).passage_radius == 2);
+		q.radius_round_up = false;
+		q.cell_size = 0.25f;
+		CHECK(nav_cells(q).walkable_radius == 2);
+		CHECK(nav_cells(q).passage_radius == 1);
+		q.radius_round_up = true;
+		CHECK(nav_cells(q).passage_radius == 2);
 	}
 
 	TEST_CASE("sim.nav.unit: cache keys change with the input, the params and the link check; cold then warm tiles on a scratch root") {

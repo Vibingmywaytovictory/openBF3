@@ -799,7 +799,7 @@ std::string format_nav_bake_bench(const NavBakeBench &p_b) {
 	const auto line = [&](const std::string &p_text) { out += p_text + "\n"; };
 	line(fmt("nav bake %s %s: threads %u, layers %s, radius %s (%.2f m), cs %.2f ch %.2f climb %.2f slope %.0f height %.2f crouch %.2f", p_b.options.level.c_str(),
 			p_b.options.mode.c_str(), p_b.options.threads, p_b.options.layer_mask == sim::query_mask::kMovement ? "movement" : "all",
-			p_b.params.radius_round_up ? "ceil" : "nearest", double(p_b.params.agent_radius), double(p_b.params.cell_size), double(p_b.params.cell_height),
+			p_b.params.radius_round_up ? "ceil" : "passages", double(p_b.params.agent_radius), double(p_b.params.cell_size), double(p_b.params.cell_height),
 			double(p_b.params.agent_climb), double(p_b.params.max_slope_degrees), double(p_b.params.agent_height), double(p_b.params.crouch_height)));
 	line(fmt("   region: %zu tiles requested (%zu from the combat polygons + margin, %zu only from points; %zu points outside every area); %zu terrain-only, %zu "
 			 "with objects",

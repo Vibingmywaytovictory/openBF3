@@ -35,7 +35,7 @@ struct ScaleBenchOptions {
 
 	bool gated = true;
 
-	bool radius_round_up = true;
+	bool radius_round_up = sim::NavParams().radius_round_up;
 	float cell_size = 0.0f;
 };
 
@@ -113,7 +113,7 @@ struct NavBakeBenchOptions {
 	std::string mode = "ConquestLarge0";
 	unsigned threads = 16;
 	uint32_t layer_mask = sim::query_mask::kMovement;
-	bool radius_round_up = true;
+	bool radius_round_up = sim::NavParams().radius_round_up;
 	float cell_size = 0.0f;
 	int partition = -1;
 	bool link_checks = true;

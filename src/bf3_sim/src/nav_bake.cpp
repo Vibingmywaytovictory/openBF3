@@ -78,6 +78,94 @@ Column ground_below(const rcCompactHeightfield &p_chf, const std::vector<uint8_t
 	return out;
 }
 
+int walkable_run(const rcCompactHeightfield &p_chf, const unsigned char *p_areas, int p_x, int p_z, int p_span,
+		int p_dir, int p_limit) {
+	int run = 0;
+	int x = p_x, z = p_z, span = p_span;
+	while (run < p_limit) {
+		const int con = rcGetCon(p_chf.spans[span], p_dir);
+		if (con == RC_NOT_CONNECTED) {
+			break;
+		}
+		x += rcGetDirOffsetX(p_dir);
+		z += rcGetDirOffsetY(p_dir);
+		span = int(p_chf.cells[x + z * p_chf.width].index) + con;
+		if (p_areas[span] == RC_NULL_AREA) {
+			break;
+		}
+		++run;
+	}
+	return run;
+}
+
+int narrowest_run(
+		const rcCompactHeightfield &p_chf, const unsigned char *p_areas, int p_x, int p_z, int p_span, int p_limit) {
+	int narrowest = p_limit;
+	for (int axis = 0; axis < 2; ++axis) {
+		const int across = 1 + walkable_run(p_chf, p_areas, p_x, p_z, p_span, axis, p_limit) +
+				walkable_run(p_chf, p_areas, p_x, p_z, p_span, axis + 2, p_limit);
+		narrowest = std::min(narrowest, across);
+	}
+	return narrowest;
+}
+
+core::Status erode_with_passages(rcContext &r_context, rcCompactHeightfield &r_chf, const NavCells &p_cells) {
+	if (p_cells.passage_radius >= p_cells.walkable_radius) {
+		return rcErodeWalkableArea(&r_context, p_cells.walkable_radius, r_chf)
+				? core::Status::success()
+				: core::make_error("rcErodeWalkableArea failed");
+	}
+	const std::vector<unsigned char> before(r_chf.areas, r_chf.areas + r_chf.spanCount);
+	if (!rcErodeWalkableArea(&r_context, p_cells.passage_radius, r_chf)) {
+		return core::make_error("rcErodeWalkableArea failed");
+	}
+	const std::vector<unsigned char> passages(r_chf.areas, r_chf.areas + r_chf.spanCount);
+	std::copy(before.begin(), before.end(), r_chf.areas);
+	if (!rcErodeWalkableArea(&r_context, p_cells.walkable_radius, r_chf)) {
+		return core::make_error("rcErodeWalkableArea failed");
+	}
+	const int open_width = 2 * p_cells.walkable_radius + 1;
+	const int passage_run = p_cells.corridor_cells - 2 * p_cells.passage_radius;
+	struct Open {
+		int x = 0, z = 0, span = 0, depth = 0;
+	};
+	std::vector<Open> open;
+	std::vector<uint8_t> reached(size_t(r_chf.spanCount), 0);
+	for (int z = 0; z < r_chf.height; ++z) {
+		for (int x = 0; x < r_chf.width; ++x) {
+			const rcCompactCell &cell = r_chf.cells[x + z * r_chf.width];
+			for (int i = int(cell.index); i < int(cell.index + cell.count); ++i) {
+				if (r_chf.areas[i] == RC_NULL_AREA && passages[size_t(i)] != RC_NULL_AREA &&
+						narrowest_run(r_chf, before.data(), x, z, i, open_width) < open_width &&
+						narrowest_run(r_chf, passages.data(), x, z, i, passage_run) >= passage_run) {
+					reached[size_t(i)] = 1;
+					open.push_back({ x, z, i, 0 });
+				}
+			}
+		}
+	}
+	for (size_t at = 0; at < open.size(); ++at) {
+		const Open o = open[at];
+		r_chf.areas[o.span] = passages[size_t(o.span)];
+		if (o.depth >= p_cells.walkable_radius) {
+			continue;
+		}
+		for (int dir = 0; dir < 4; ++dir) {
+			const int con = rcGetCon(r_chf.spans[o.span], dir);
+			if (con == RC_NOT_CONNECTED) {
+				continue;
+			}
+			const int nx = o.x + rcGetDirOffsetX(dir), nz = o.z + rcGetDirOffsetY(dir);
+			const int ni = int(r_chf.cells[nx + nz * r_chf.width].index) + con;
+			if (reached[size_t(ni)] == 0 && passages[size_t(ni)] != RC_NULL_AREA) {
+				reached[size_t(ni)] = 1;
+				open.push_back({ nx, nz, ni, o.depth + 1 });
+			}
+		}
+	}
+	return core::Status::success();
+}
+
 void find_drop_links(const rcPolyMesh &p_mesh, const rcCompactHeightfield &p_chf, const std::vector<uint8_t> &p_areas, const NavParams &p_params,
 		const NavCells &p_cells, const CollisionWorld *p_world, NavTileBake &r_bake, std::vector<DropLink> &r_links) {
 	const int nvp = p_mesh.nvp;
@@ -278,8 +366,8 @@ core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavPa
 		chf->areas[s] = int(chf->spans[s].h) < c.stand_height ? kNavAreaCrouch : kNavAreaWalk;
 	}
 	std::vector<uint8_t> areas_before(chf->areas, chf->areas + chf->spanCount);
-	if (!rcErodeWalkableArea(&r_context, c.walkable_radius, *chf)) {
-		return core::make_error(where + ": rcErodeWalkableArea failed");
+	if (core::Status st = erode_with_passages(r_context, *chf, c); !st.ok()) {
+		return core::make_error(where + ": " + st.error().message);
 	}
 	const int min_region = int(p_params.min_region_cells);
 	const int merge_region = int(p_params.merge_region_cells);

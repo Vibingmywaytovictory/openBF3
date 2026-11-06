@@ -55,7 +55,7 @@ struct Args {
 	std::vector<std::string> positional;
 	unsigned threads = 0;
 	uint32_t layers = sim::query_mask::kMovement;
-	bool radius_round_up = true;
+	bool radius_round_up = sim::NavParams().radius_round_up;
 	float cell_size = 0.0f;
 	int partition = -1;
 	bool links = true;
@@ -81,7 +81,7 @@ Args parse(const std::vector<std::string> &p_args, size_t p_from) {
 			a.layers = sim::query_mask::kAll;
 		} else if (s == "--radius=ceil") {
 			a.radius_round_up = true;
-		} else if (s == "--radius=nearest") {
+		} else if (s == "--radius=passages") {
 			a.radius_round_up = false;
 		} else if (s == "--partition=watershed" || s == "--partition=monotone" || s == "--partition=layers" || s == "--partition=auto") {
 			a.partition = s == "--partition=watershed" ? 0 : s == "--partition=monotone" ? 1 : s == "--partition=layers" ? 2 : 3;
@@ -342,7 +342,7 @@ int cmd_nav_components(const core::InstallReader &p_reader, const std::shared_pt
 	std::printf("nav %s %s: layers %s, radius %s; region %zu tiles (%zu polygon, %zu point-only, %zu of %zu points outside the areas); %zu tiles with polys, %zu "
 				"polys, %zu drop links; db %.2f s, areas %.2f s, shared %.2f s, bots %.2f s (nav %.2f s, %s)\n",
 			p_args.positional[0].c_str(), p_args.positional[1].c_str(), p_args.layers == sim::query_mask::kMovement ? "movement" : "all",
-			p_args.radius_round_up ? "ceil" : "nearest", l->combat.tiles.size(), l->combat.polygon_tiles, l->combat.point_only_tiles,
+			p_args.radius_round_up ? "ceil" : "passages", l->combat.tiles.size(), l->combat.polygon_tiles, l->combat.point_only_tiles,
 			l->combat.points_outside_areas, l->combat.points, ns.tiles, ns.polys, ns.drop_links, l->seconds_db, l->seconds_areas, l->seconds_shared,
 			l->seconds_bots, l->bots->seconds_nav, ns.world_hit ? "cache hit" : "baked");
 	for (const core::level::WaterPlane &w : l->combat.water) {
@@ -573,8 +573,8 @@ int cmd_nav_probe(const core::InstallReader &p_reader, const std::shared_ptr<cor
 }
 
 const char *nav_usage() {
-	return "  nav bake|stats <LEVEL> <MODE> [--threads=N] [--layers=movement|all] [--radius=ceil|nearest] [--cs=M] [--no-links] [--tiles]\n"
-		   "  nav components <LEVEL> <MODE> [--points] [--seams] [--layers=movement|all] [--radius=ceil|nearest] [--cs=M] [--threads=N] "
+	return "  nav bake|stats <LEVEL> <MODE> [--threads=N] [--layers=movement|all] [--radius=ceil|passages] [--cs=M] [--no-links] [--tiles]\n"
+		   "  nav components <LEVEL> <MODE> [--points] [--seams] [--layers=movement|all] [--radius=ceil|passages] [--cs=M] [--threads=N] "
 		   "[--cache=<dir>] [--dump=<file>]\n"
 		   "  nav path <LEVEL> <MODE> [--pairs=N] [--seed=N] [--threads=N] [--cache=<dir>]\n"
 		   "  nav probe <LEVEL> <MODE> <x> <y> <z> <radius> [--dump=<file>]\n"
@@ -662,7 +662,7 @@ int cmd_bots(const core::InstallReader &p_reader, const std::shared_ptr<core::In
 				std::fprintf(stderr, "bots: cannot read %s\n", s.c_str() + 9);
 				return 2;
 			}
-		} else if (s == "--radius=ceil" || s == "--radius=nearest") {
+		} else if (s == "--radius=ceil" || s == "--radius=passages") {
 			o.radius_round_up = s == "--radius=ceil";
 		} else if (s.rfind("--cs=", 0) == 0 && parse_float(s.substr(5), f) && f >= 0.1f && f <= 1.0f) {
 			o.cell_size = f;

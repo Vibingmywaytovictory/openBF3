@@ -56,7 +56,7 @@ struct NavParams {
 	float agent_climb = 0.3f;
 	float max_slope_degrees = 50.0f;
 
-	bool radius_round_up = true;
+	bool radius_round_up = false;
 	float max_edge_length = 12.0f;
 	float max_simplification_error = 1.3f;
 	uint32_t min_region_cells = 8 * 8;
@@ -81,7 +81,7 @@ std::string nav_params_text(const NavParams &p_params);
 
 std::string recast_build_id();
 inline constexpr uint32_t kNavFormatVersion = 1;
-inline constexpr uint32_t kNavConverterVersion = 1;
+inline constexpr uint32_t kNavConverterVersion = 2;
 inline constexpr const char *kNavTileCacheKind = "nav-tile";
 inline constexpr const char *kNavWorldCacheKind = "nav-world";
 inline constexpr const char *kNavAreaCacheKind = "nav-area";

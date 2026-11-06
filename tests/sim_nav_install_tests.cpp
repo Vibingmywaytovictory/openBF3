@@ -558,6 +558,33 @@ TEST_SUITE("sim-nav") {
 		CHECK(double(c.spawns_main) >= 0.9 * double(c.spawns));
 	}
 
+	TEST_CASE("sim.nav: XP2_Office TeamDeathMatchC0 joins its floors' spawns to the main component") {
+		Install *m = install();
+		if (m == nullptr) {
+			return;
+		}
+		core::Result<core::level::LevelCombatTiles> combat = core::level::level_combat_tiles(
+				m->install, "XP2_Office", "TeamDeathMatchC0", sim::NavParams().region_margin);
+		REQUIRE_MESSAGE(combat.ok(), (combat.ok() ? std::string() : combat.error().message));
+		const ModeLoad l = load_mode_on(*m, "XP2_Office", "TeamDeathMatchC0", *combat, nullptr);
+		REQUIRE_MESSAGE(l.bots != nullptr, l.error);
+		RowCounts c;
+		for (const host::BotPointRow &r : l.bots->points) {
+			c.add(r);
+			if (r.kind == host::BotPointRow::Kind::Spawn && !r.in_main) {
+				std::printf("   spawn %u (%.2f %.2f %.2f): %s, h %.2f v %.2f\n", r.index, r.point[0], r.point[1],
+						r.point[2], row_class(r), r.check.horizontal, r.check.vertical);
+			}
+		}
+		std::printf("sim.nav XP2_Office TeamDeathMatchC0: spawns %zu / %zu in main (exit-only %zu, entry-only %zu, "
+					"disconnected %zu, off-mesh %zu); nav %zu polys, %zu drop links; bots %.2f s\n",
+				c.spawns_main, c.spawns, c.exit_only, c.entry_only, c.disconnected, c.off_mesh,
+				l.bots->nav->stats().polys, l.bots->nav->stats().drop_links, l.seconds_bots);
+		std::fflush(stdout);
+		CHECK(c.spawns == 51);
+		CHECK(c.spawns_main >= 46);
+	}
+
 	TEST_CASE("sim.nav: §5.1 the nav input is the motor's collision set on MP_Subway and MP_007 ConquestLarge0") {
 		Install *m = install();
 		if (m == nullptr) {
@@ -582,10 +609,11 @@ TEST_SUITE("sim-nav") {
 			bool ceil;
 		};
 		const Variant variants[] = {
-			{ "as built (movement, cs 0.2, radius ceil 0.4 m)", sim::query_mask::kMovement, 0.2f, true },
-			{ "all layers (Raycast included, the research's set)", sim::query_mask::kAll, 0.2f, true },
+			{ "as built (movement, cs 0.2, radius ceil 0.4 m, passages 0.2 m)", sim::query_mask::kMovement, 0.2f,
+					false },
+			{ "all layers (Raycast included, the research's set)", sim::query_mask::kAll, 0.2f, false },
 			{ "plan (cs 0.25, radius ceil 0.5 m)", sim::query_mask::kMovement, 0.25f, true },
-			{ "cs 0.25, radius nearest 0.25 m", sim::query_mask::kMovement, 0.25f, false },
+			{ "cs 0.25, radius ceil 0.5 m, passages 0.25 m", sim::query_mask::kMovement, 0.25f, false },
 		};
 		std::optional<size_t> plan_main, built_main;
 
