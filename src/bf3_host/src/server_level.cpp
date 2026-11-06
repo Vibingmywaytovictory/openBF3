@@ -1,8 +1,8 @@
 #include "bf3/host/server_level.h"
 
 #include "bf3/core/install.h"
-#include "bf3/core/level/combat_tiles_cache.h"
 #include "bf3/core/level/level.h"
+#include "bf3/core/level/mode_areas.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/tdm_brain.h"
@@ -43,16 +43,15 @@ core::Result<ServerLevel> load_server_level(std::shared_ptr<const core::Install>
 	if (p_options.after_database) {
 		BF3_TRY(p_options.after_database(*db, shared));
 	}
-	std::optional<core::level::CombatTilesLoad> combat;
+	std::optional<core::level::LevelCombatTiles> combat;
 	if (p_options.bots) {
 		const auto t = std::chrono::steady_clock::now();
-		core::Result<core::level::CombatTilesLoad> c =
-				core::level::load_level_combat_tiles(p_cache, p_install, *db->level, sim::NavParams().region_margin);
+		core::Result<core::level::LevelCombatTiles> c =
+				core::level::mode_combat_tiles(*db->level, *db->world, sim::NavParams().region_margin);
 		if (!c) {
 			return core::error_at("combat areas", c.error());
 		}
 		combat = std::move(*c);
-		out.combat_cache_hit = combat->cache_hit;
 		out.seconds.combat = core::seconds_since(t);
 	}
 	const auto t_shared = std::chrono::steady_clock::now();
@@ -73,7 +72,7 @@ core::Result<ServerLevel> load_server_level(std::shared_ptr<const core::Install>
 		BotLoadOptions bot_options;
 		bot_options.cache = p_cache;
 		bot_options.threads = shared.threads;
-		bot_options.combat = &combat->tiles;
+		bot_options.combat = &*combat;
 		bot_options.seed = p_options.seed;
 		bot_options.synthetic_spawns = p_options.synthetic_spawns;
 		core::Result<std::shared_ptr<const BotLevel>> bots = load_bot_level(*db, *out.shared, bot_options, p_progress);

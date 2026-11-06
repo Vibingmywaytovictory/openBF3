@@ -1,7 +1,6 @@
 #include <doctest/doctest.h>
 
 #include "bf3/core/cache/disk_cache.h"
-#include "bf3/core/level/combat_tiles_cache.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/mode_areas.h"
 #include "bf3/core/thread_pool.h"
@@ -63,51 +62,44 @@ host::ServerLevelOptions server_options(bool p_bots) {
 }
 
 void print_level(const char *p_what, const host::ServerLevel &p_level) {
-	std::printf(
-			"%s %s %s: database %.2f s, combat areas %.2f s (%s), shared %.2f s, bots %.2f s (nav %s), total %.2f s\n",
+	std::printf("%s %s %s: database %.2f s, combat areas %.2f s, shared %.2f s, bots %.2f s (nav %s), total %.2f s\n",
 			p_what, p_level.entry.level.c_str(), p_level.entry.mode.c_str(), p_level.seconds.database,
-			p_level.seconds.combat, p_level.combat_cache_hit ? "cache hit" : "baked", p_level.seconds.shared,
-			p_level.seconds.bots, p_level.nav_cache_hit ? "cache hit" : "baked", p_level.seconds.total);
+			p_level.seconds.combat, p_level.seconds.shared, p_level.seconds.bots,
+			p_level.nav_cache_hit ? "cache hit" : "baked", p_level.seconds.total);
 }
 
 void check_tiles_equal(const core::level::LevelCombatTiles &p_a, const core::level::LevelCombatTiles &p_b) {
-	CHECK(p_a.modes == p_b.modes);
+	CHECK(p_a.mode == p_b.mode);
 	CHECK(p_a.tiles == p_b.tiles);
 	CHECK(p_a.water == p_b.water);
 	CHECK(p_a.polygon_tiles == p_b.polygon_tiles);
 	CHECK(p_a.point_only_tiles == p_b.point_only_tiles);
 	CHECK(p_a.points == p_b.points);
 	CHECK(p_a.points_outside_areas == p_b.points_outside_areas);
-	REQUIRE(p_a.areas.size() == p_b.areas.size());
-	if (p_a.areas.size() != p_b.areas.size()) {
+	const core::level::ModeAreas &x = p_a.areas, &y = p_b.areas;
+	REQUIRE(x.combat_areas.size() == y.combat_areas.size());
+	if (x.combat_areas.size() != y.combat_areas.size()) {
 		return;
 	}
-	for (size_t i = 0; i < p_a.areas.size(); ++i) {
-		const core::level::ModeAreas &x = p_a.areas[i], &y = p_b.areas[i];
-		REQUIRE(x.combat_areas.size() == y.combat_areas.size());
-		if (x.combat_areas.size() != y.combat_areas.size()) {
-			return;
-		}
-		for (size_t k = 0; k < x.combat_areas.size(); ++k) {
-			CHECK(x.combat_areas[k].trigger == y.combat_areas[k].trigger);
-			CHECK(x.combat_areas[k].shape == y.combat_areas[k].shape);
-			CHECK(x.combat_areas[k].team == y.combat_areas[k].team);
-			CHECK(x.combat_areas[k].polygon == y.combat_areas[k].polygon);
-			CHECK(x.combat_areas[k].height == y.combat_areas[k].height);
-		}
-		REQUIRE(x.objectives.size() == y.objectives.size());
-		if (x.objectives.size() != y.objectives.size()) {
-			return;
-		}
-		for (size_t k = 0; k < x.objectives.size(); ++k) {
-			CHECK(x.objectives[k].kind == y.objectives[k].kind);
-			CHECK(x.objectives[k].object == y.objectives[k].object);
-			CHECK(x.objectives[k].position == y.objectives[k].position);
-			CHECK(x.objectives[k].team == y.objectives[k].team);
-			CHECK(x.objectives[k].scope_label == y.objectives[k].scope_label);
-		}
-		CHECK(x.unwired_triggers == y.unwired_triggers);
+	for (size_t k = 0; k < x.combat_areas.size(); ++k) {
+		CHECK(x.combat_areas[k].trigger == y.combat_areas[k].trigger);
+		CHECK(x.combat_areas[k].shape == y.combat_areas[k].shape);
+		CHECK(x.combat_areas[k].team == y.combat_areas[k].team);
+		CHECK(x.combat_areas[k].polygon == y.combat_areas[k].polygon);
+		CHECK(x.combat_areas[k].height == y.combat_areas[k].height);
 	}
+	REQUIRE(x.objectives.size() == y.objectives.size());
+	if (x.objectives.size() != y.objectives.size()) {
+		return;
+	}
+	for (size_t k = 0; k < x.objectives.size(); ++k) {
+		CHECK(x.objectives[k].kind == y.objectives[k].kind);
+		CHECK(x.objectives[k].object == y.objectives[k].object);
+		CHECK(x.objectives[k].position == y.objectives[k].position);
+		CHECK(x.objectives[k].team == y.objectives[k].team);
+		CHECK(x.objectives[k].scope_label == y.objectives[k].scope_label);
+	}
+	CHECK(x.unwired_triggers == y.unwired_triggers);
 }
 
 void check_listen_config(const host::GameServerConfig &p_c, const host::ServerLevel &p_level) {
@@ -250,8 +242,9 @@ TEST_SUITE("host-map-list-unit") {
 }
 
 TEST_SUITE("host-server-level") {
-	TEST_CASE("load_server_level: Metro TDM cold then warm on a scratch cache, combat tiles cached by the mount "
-			  "digest, the listen config field for field") {
+	TEST_CASE("load_server_level: Metro TDM cold then warm on a scratch cache, the bot region from the mode's own "
+			  "combat tiles, "
+			  "the listen config field for field") {
 		bf3::test::Mounted m;
 		if (!bf3::test::open_or_skip(m)) {
 			return;
@@ -267,7 +260,6 @@ TEST_SUITE("host-server-level") {
 			return;
 		}
 		print_level("host.server.level cold", *cold);
-		CHECK_FALSE(cold->combat_cache_hit);
 		CHECK_FALSE(cold->nav_cache_hit);
 		REQUIRE(cold->shared != nullptr);
 		if (cold->shared == nullptr) {
@@ -291,12 +283,10 @@ TEST_SUITE("host-server-level") {
 			return;
 		}
 		print_level("host.server.level warm", *warm);
-		CHECK(warm->combat_cache_hit);
 		CHECK(warm->nav_cache_hit);
 		CHECK(warm->shared->source_digest == cold->shared->source_digest);
 		CHECK(warm->shared->logic_digest == cold->shared->logic_digest);
 		CHECK(warm->bots->region == cold->bots->region);
-		CHECK(warm->seconds.combat < cold->seconds.combat);
 		CHECK(cold->shared->collision_digest != 0);
 		CHECK(warm->shared->collision_digest == cold->shared->collision_digest);
 		core::Result<host::ServerLevel> client =
@@ -315,43 +305,48 @@ TEST_SUITE("host-server-level") {
 
 		const float margin = sim::NavParams().region_margin;
 		core::Result<core::level::LevelCombatTiles> direct =
-				core::level::level_combat_tiles(m.install, "MP_Subway", margin);
+				core::level::level_combat_tiles(m.install, "MP_Subway", "TeamDeathMatch0", margin);
 		REQUIRE(direct.ok());
 		if (!direct.ok()) {
 			return;
 		}
-		core::Result<core::level::CombatTilesLoad> hit =
-				core::level::load_level_combat_tiles(cache.get(), m.install, *cold->database.level, margin);
-		REQUIRE(hit.ok());
-		if (!hit.ok()) {
-			return;
-		}
-		CHECK(hit->cache_hit);
-		std::printf("host.server.level: combat tiles %zu tiles over %zu modes, direct %.2f s, cache hit %.3f s (mount "
-					"digest %.3f s)\n",
-				direct->tiles.size(), direct->modes.size(), direct->seconds, hit->seconds, hit->seconds_key);
-		check_tiles_equal(*direct, hit->tiles);
+		CHECK(direct->mode == "TeamDeathMatch0");
 		CHECK_FALSE(direct->tiles.empty());
-		core::Result<core::level::LevelCombatTiles> decoded =
-				core::level::decode_combat_tiles(core::level::encode_combat_tiles(*direct));
-		REQUIRE(decoded.ok());
-		if (!decoded.ok()) {
+		CHECK(cold->bots->region == direct->tiles);
+		REQUIRE(cold->database.world != nullptr);
+		if (cold->database.world == nullptr) {
 			return;
 		}
-		check_tiles_equal(*direct, *decoded);
-		std::vector<uint8_t> bytes = core::level::encode_combat_tiles(*direct);
-		bytes.pop_back();
-		CHECK_FALSE(core::level::decode_combat_tiles(bytes).ok());
-		bytes = core::level::encode_combat_tiles(*direct);
-		bytes.push_back(0);
-		CHECK_FALSE(core::level::decode_combat_tiles(bytes).ok());
-		core::Result<core::level::CombatTilesLoad> other_margin =
-				core::level::load_level_combat_tiles(cache.get(), m.install, *cold->database.level, margin + 1.0f);
-		REQUIRE(other_margin.ok());
-		if (!other_margin.ok()) {
+		core::Result<core::level::LevelCombatTiles> from_world =
+				core::level::mode_combat_tiles(*cold->database.level, *cold->database.world, margin);
+		REQUIRE(from_world.ok());
+		if (!from_world.ok()) {
 			return;
 		}
-		CHECK_FALSE(other_margin->cache_hit);
+		check_tiles_equal(*direct, *from_world);
+		std::printf("host.server.level: combat tiles %zu tiles for %s, direct %.2f s, from the loaded world %.3f s\n",
+				direct->tiles.size(), direct->mode.c_str(), direct->seconds, from_world->seconds);
+		core::Result<std::unique_ptr<core::level::LoadedLevel>> cql_level =
+				core::level::load_level(m.install, "MP_Subway", "ConquestLarge0");
+		REQUIRE(cql_level.ok());
+		if (!cql_level.ok()) {
+			return;
+		}
+		core::Result<std::unique_ptr<core::level::World>> cql_world = core::level::World::traverse(**cql_level);
+		REQUIRE(cql_world.ok());
+		if (!cql_world.ok()) {
+			return;
+		}
+		core::Result<core::level::LevelCombatTiles> cql =
+				core::level::mode_combat_tiles(**cql_level, **cql_world, margin);
+		REQUIRE(cql.ok());
+		if (!cql.ok()) {
+			return;
+		}
+		CHECK(cql->mode == "ConquestLarge0");
+		CHECK(cql->tiles != direct->tiles);
+		std::printf("host.server.level: combat tiles %zu for ConquestLarge0 against %zu for TeamDeathMatch0\n",
+				cql->tiles.size(), direct->tiles.size());
 
 		host::ServerRules rules;
 		rules.bot_tuning_cfg = OPENBF3_BOT_TUNING_CFG;
@@ -434,7 +429,6 @@ TEST_SUITE("host-server-level-prebake") {
 					e.seconds.database, e.seconds.combat, e.seconds.shared, e.seconds.bots, e.error.empty() ? "" : ": ",
 					e.error.c_str());
 			CHECK(e.state == host::PrebakeEntry::State::Done);
-			CHECK_FALSE(e.combat_cache_hit);
 			CHECK_FALSE(e.nav_cache_hit);
 		}
 		const host::ServerSessionStats running = session.stats();
@@ -449,7 +443,6 @@ TEST_SUITE("host-server-level-prebake") {
 				return;
 			}
 			print_level("host.server.level.prebake warm", *warm);
-			CHECK(warm->combat_cache_hit);
 			CHECK(warm->nav_cache_hit);
 		}
 		session.stop();

@@ -322,13 +322,12 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 	}
 	load_seconds_ = core::seconds_since(t0);
 	const host::ServerLevel &l = session_->level();
-	say(core::fmt("%s %s loaded in %.2f s: database %.2f s, combat areas %.2f s (%s), shared %.2f s (shapes %.2f, "
+	say(core::fmt("%s %s loaded in %.2f s: database %.2f s, combat areas %.2f s, shared %.2f s (shapes %.2f, "
 				  "tables %.2f, gunplay %.2f, logic %.2f), "
 				  "bots %.2f s (nav %s)",
 			l.entry.level.c_str(), l.entry.mode.c_str(), l.seconds.total, l.seconds.database, l.seconds.combat,
-			l.combat_cache_hit ? "cache hit" : "baked", l.seconds.shared, l.shared->seconds_shapes,
-			l.shared->seconds_tables, l.shared->seconds_gunplay, l.shared->seconds_logic, l.seconds.bots,
-			l.nav_cache_hit ? "cache hit" : "baked"));
+			l.seconds.shared, l.shared->seconds_shapes, l.shared->seconds_tables, l.shared->seconds_gunplay,
+			l.shared->seconds_logic, l.seconds.bots, l.nav_cache_hit ? "cache hit" : "baked"));
 	say(core::fmt("ServerHost on %s:%u at 60 Hz%s", args_.bind_ip.c_str(), unsigned(session_->port()),
 			args_.run_seconds > 0.0 ? core::fmt(", for %.1f s", args_.run_seconds).c_str() : ", until stopped"));
 	if (!args_.master.empty()) {

@@ -133,7 +133,8 @@ core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase
 	std::optional<core::level::LevelCombatTiles> own_combat;
 	const core::level::LevelCombatTiles *combat = p_options.combat;
 	if (combat == nullptr) {
-		core::Result<core::level::LevelCombatTiles> c = core::level::level_combat_tiles(p_db.install, p_shared.level, params.region_margin);
+		core::Result<core::level::LevelCombatTiles> c =
+				core::level::mode_combat_tiles(*p_db.level, *p_db.world, params.region_margin);
 		if (!c) {
 			return core::error_at("load_bot_level: combat areas", c.error());
 		}

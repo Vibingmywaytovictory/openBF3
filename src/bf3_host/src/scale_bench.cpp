@@ -183,7 +183,8 @@ core::Result<ScaleReport> run_scale_bench(std::shared_ptr<const core::Install> p
 	report.seconds_database = seconds_since(clock);
 	const sim::NavParams defaults;
 	clock = Clock::now();
-	core::Result<core::level::LevelCombatTiles> combat = core::level::level_combat_tiles(p_install, p_options.level, defaults.region_margin);
+	core::Result<core::level::LevelCombatTiles> combat =
+			core::level::mode_combat_tiles(*db->level, *db->world, defaults.region_margin);
 	if (!combat) {
 		return core::error_at("scale bench: combat areas", combat.error());
 	}
@@ -657,7 +658,8 @@ core::Result<NavBakeSetup> nav_bake_setup(const std::shared_ptr<const core::Inst
 	out.seconds_load = seconds_since(clock);
 
 	clock = Clock::now();
-	core::Result<core::level::LevelCombatTiles> combat = core::level::level_combat_tiles(p_install, p_options.level, out.params.region_margin);
+	core::Result<core::level::LevelCombatTiles> combat =
+			core::level::mode_combat_tiles(**level, **world, out.params.region_margin);
 	if (!combat) {
 		return core::error_at("nav bake bench: combat areas", combat.error());
 	}

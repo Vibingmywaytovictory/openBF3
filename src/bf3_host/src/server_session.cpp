@@ -233,7 +233,6 @@ void ServerSession::run_prebake() {
 		if (baked) {
 			e.state = PrebakeEntry::State::Done;
 			e.seconds = baked->seconds;
-			e.combat_cache_hit = baked->combat_cache_hit;
 			e.nav_cache_hit = baked->nav_cache_hit;
 		} else {
 			e.state = PrebakeEntry::State::Failed;

@@ -57,8 +57,8 @@ Result<std::vector<std::array<int32_t, 2>>> combat_area_tiles(std::span<const Co
 std::vector<std::array<int32_t, 2>> point_tiles(const Vec3 &p_point, float p_margin);
 
 struct LevelCombatTiles {
-	std::vector<std::string> modes;
-	std::vector<ModeAreas> areas;
+	std::string mode;
+	ModeAreas areas;
 	std::vector<std::array<int32_t, 2>> tiles;
 	size_t polygon_tiles = 0;
 	size_t point_only_tiles = 0;
@@ -68,6 +68,8 @@ struct LevelCombatTiles {
 	std::vector<WaterPlane> water;
 	double seconds = 0.0;
 };
-Result<LevelCombatTiles> level_combat_tiles(std::shared_ptr<const Install> p_install, std::string_view p_level_id, float p_margin);
+Result<LevelCombatTiles> mode_combat_tiles(const LoadedLevel &p_level, const World &p_world, float p_margin);
+Result<LevelCombatTiles> level_combat_tiles(
+		std::shared_ptr<const Install> p_install, std::string_view p_level_id, std::string_view p_mode, float p_margin);
 
 }

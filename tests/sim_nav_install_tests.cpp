@@ -148,6 +148,7 @@ bool in_combat_area(const sim::Vec3 &p_point, const core::level::ModeAreas &p_ar
 struct ModeLoad {
 	std::shared_ptr<const host::SharedLevel> shared;
 	std::shared_ptr<const host::BotLevel> bots;
+	core::level::LevelCombatTiles combat;
 	double seconds_db = 0, seconds_shared = 0, seconds_bots = 0;
 	std::string error;
 };
@@ -217,6 +218,25 @@ ModeLoad load_mode_on(Install &r_m, const std::string &p_level, const std::strin
 	return load_bots(base, p_combat, p_cache, {}, p_threads);
 }
 
+ModeLoad load_mode_region(Install &r_m, const std::string &p_level, const std::string &p_mode, core::Cache *p_cache,
+		unsigned p_threads = 0) {
+	const LevelBase base = load_base(r_m, p_level, p_mode, p_cache, p_threads);
+	ModeLoad out;
+	if (base.shared == nullptr) {
+		out.error = base.error;
+		return out;
+	}
+	core::Result<core::level::LevelCombatTiles> combat =
+			core::level::mode_combat_tiles(*base.db->level, *base.db->world, sim::NavParams().region_margin);
+	if (!combat) {
+		out.error = p_level + " " + p_mode + ": " + combat.error().message;
+		return out;
+	}
+	out = load_bots(base, *combat, p_cache, {}, p_threads);
+	out.combat = std::move(*combat);
+	return out;
+}
+
 std::optional<ModeLoad> load_mode(Install &r_m, const std::string &p_level, const std::string &p_mode, const core::level::LevelCombatTiles &p_combat,
 		core::Cache *p_cache) {
 	ModeLoad l = load_mode_on(r_m, p_level, p_mode, p_combat, p_cache);
@@ -259,14 +279,15 @@ struct RowCounts {
 RowCounts g2_level(Install &r_m, const std::string &p_level) {
 	RowCounts level_counts;
 	auto clock = std::chrono::steady_clock::now();
-	core::Result<core::level::LevelCombatTiles> combat = core::level::level_combat_tiles(r_m.install, p_level, sim::NavParams().region_margin);
-	CHECK_MESSAGE(combat.ok(), p_level, ": ", (combat.ok() ? std::string() : combat.error().message));
-	if (!combat) {
+	core::Result<core::level::LevelInfo> info = core::level::level_info(*r_m.install, p_level);
+	CHECK_MESSAGE(info.ok(), p_level, ": ", (info.ok() ? std::string() : info.error().message));
+	if (!info) {
 		return level_counts;
 	}
-	std::printf("---- sim.nav G2 %s: %zu modes, region %zu tiles (%zu polygon, %zu point-only), %zu water planes, combat areas %.2f s\n", p_level.c_str(),
-			combat->modes.size(), combat->tiles.size(), combat->polygon_tiles, combat->point_only_tiles, combat->water.size(), seconds_since(clock));
-	CHECK(combat->modes.size() == 7);
+	const std::vector<std::string> &modes = info->modes;
+	std::printf("---- sim.nav G2 %s: %zu modes, each on its own combat region; level info %.2f s\n", p_level.c_str(),
+			modes.size(), seconds_since(clock));
+	CHECK(modes.size() == 7);
 	core::Cache cache;
 	if (!open_cache(r_m, (p_level + "_g2").c_str(), cache)) {
 		return level_counts;
@@ -274,22 +295,12 @@ RowCounts g2_level(Install &r_m, const std::string &p_level) {
 
 	constexpr unsigned kModeLanes = 4;
 	const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
-	std::vector<ModeLoad> loads;
-	loads.reserve(combat->modes.size());
-	if (!combat->modes.empty()) {
-		loads.push_back(load_mode_on(r_m, p_level, combat->modes[0], *combat, &cache));
-	}
-	if (combat->modes.size() > 1) {
-		std::vector<ModeLoad> rest = core::parallel_map<ModeLoad>(
-				combat->modes.size() - 1,
-				[&](size_t i) { return load_mode_on(r_m, p_level, combat->modes[i + 1], *combat, &cache, std::max(1u, hw / kModeLanes)); },
-				kModeLanes);
-		for (ModeLoad &l : rest) {
-			loads.push_back(std::move(l));
-		}
-	}
-	for (size_t m = 0; m < combat->modes.size(); ++m) {
-		const std::string &mode = combat->modes[m];
+	std::vector<ModeLoad> loads = core::parallel_map<ModeLoad>(
+			modes.size(),
+			[&](size_t i) { return load_mode_region(r_m, p_level, modes[i], &cache, std::max(1u, hw / kModeLanes)); },
+			kModeLanes);
+	for (size_t m = 0; m < modes.size(); ++m) {
+		const std::string &mode = modes[m];
 		CHECK_MESSAGE(loads[m].bots != nullptr, p_level, " ", mode, ": ", loads[m].error);
 		if (loads[m].bots == nullptr) {
 			continue;
@@ -297,22 +308,27 @@ RowCounts g2_level(Install &r_m, const std::string &p_level) {
 		const ModeLoad *l = &loads[m];
 		RowCounts c;
 		for (const host::BotPointRow &r : l->bots->points) {
-			const bool played = r.kind == host::BotPointRow::Kind::Spawn || in_combat_area(r.point, combat->areas[m]);
+			const bool played = r.kind == host::BotPointRow::Kind::Spawn || in_combat_area(r.point, l->combat.areas);
 			c.add(r, played);
 			level_counts.add(r, played);
 		}
 		const sim::NavStats &ns = l->bots->nav->stats();
-		std::printf("G2 %s %s: objectives %zu / %zu in main (+ %zu outside every combat area, %zu of them in main); spawns %zu / %zu in main "
-					"(exit-only %zu, entry-only %zu, disconnected %zu, off-mesh %zu); %zu combat areas (%zu unwired triggers); nav %zu polys, %s; "
+		std::printf("G2 %s %s: objectives %zu / %zu in main (+ %zu outside every combat area, %zu of them in main); "
+					"spawns %zu / %zu in main "
+					"(exit-only %zu, entry-only %zu, disconnected %zu, off-mesh %zu); %zu combat areas (%zu unwired "
+					"triggers); region %zu tiles (%zu polygon, "
+					"%zu point-only); nav %zu polys, %s; "
 					"steps db %.2f s, shared %.2f s, bots %.2f s\n",
-				p_level.c_str(), mode.c_str(), c.objectives_main, c.objectives, c.objectives_unplayed, c.objectives_unplayed_main, c.spawns_main,
-				c.spawns, c.exit_only, c.entry_only, c.disconnected, c.off_mesh, combat->areas[m].combat_areas.size(),
-				combat->areas[m].unwired_triggers.size(), ns.polys,
-				ns.world_hit ? "nav-world cache hit" : (std::to_string(ns.tiles_hit) + " tiles from the cache").c_str(), l->seconds_db, l->seconds_shared,
-				l->seconds_bots);
+				p_level.c_str(), mode.c_str(), c.objectives_main, c.objectives, c.objectives_unplayed,
+				c.objectives_unplayed_main, c.spawns_main, c.spawns, c.exit_only, c.entry_only, c.disconnected,
+				c.off_mesh, l->combat.areas.combat_areas.size(), l->combat.areas.unwired_triggers.size(),
+				l->combat.tiles.size(), l->combat.polygon_tiles, l->combat.point_only_tiles, ns.polys,
+				ns.world_hit ? "nav-world cache hit" : (std::to_string(ns.tiles_hit) + " tiles from the cache").c_str(),
+				l->seconds_db, l->seconds_shared, l->seconds_bots);
 		for (const host::BotPointRow &r : l->bots->points) {
 			if (!r.in_main) {
-				const bool played = r.kind == host::BotPointRow::Kind::Spawn || in_combat_area(r.point, combat->areas[m]);
+				const bool played =
+						r.kind == host::BotPointRow::Kind::Spawn || in_combat_area(r.point, l->combat.areas);
 				std::printf("   %s %u (%.2f %.2f %.2f): %s, h %.2f v %.2f%s%s\n", kind_name(r.kind), r.index, r.point[0], r.point[1], r.point[2],
 						row_class(r), r.check.horizontal, r.check.vertical,
 						r.kind == host::BotPointRow::Kind::Spawn && !r.settled ? ", spawn did not settle" : "", played ? "" : ", outside every combat area");
@@ -372,7 +388,8 @@ void input_proofs(Install &r_m, const std::string &p_level, const std::string &p
 	REQUIRE_MESSAGE(level.ok(), (level.ok() ? std::string() : level.error().message));
 	core::Result<std::unique_ptr<core::level::World>> world = core::level::World::traverse(**level);
 	REQUIRE_MESSAGE(world.ok(), (world.ok() ? std::string() : world.error().message));
-	core::Result<core::level::LevelCombatTiles> combat = core::level::level_combat_tiles(r_m.install, p_level, sim::NavParams().region_margin);
+	core::Result<core::level::LevelCombatTiles> combat =
+			core::level::mode_combat_tiles(**level, **world, sim::NavParams().region_margin);
 	REQUIRE_MESSAGE(combat.ok(), (combat.ok() ? std::string() : combat.error().message));
 	core::level::SoupOptions so;
 	core::Result<core::level::CollisionSoup> soup = core::level::build_collision_soup(**level, **world, so);
@@ -555,7 +572,8 @@ TEST_SUITE("sim-nav") {
 		if (m == nullptr) {
 			return;
 		}
-		core::Result<core::level::LevelCombatTiles> combat = core::level::level_combat_tiles(m->install, "MP_Subway", sim::NavParams().region_margin);
+		core::Result<core::level::LevelCombatTiles> combat = core::level::level_combat_tiles(
+				m->install, "MP_Subway", "ConquestLarge0", sim::NavParams().region_margin);
 		REQUIRE_MESSAGE(combat.ok(), (combat.ok() ? std::string() : combat.error().message));
 		struct Variant {
 			const char *name;
@@ -706,5 +724,25 @@ TEST_SUITE("sim-nav-bake") {
 		const core::SnapshotDiff diff = core::diff_snapshots(m->before, m->reader->snapshot());
 		CHECK_MESSAGE(diff.clean(), diff.summary());
 		std::printf("install.unchanged: %s (%zu files)\n", diff.clean() ? "clean" : diff.summary().c_str(), m->before.files.size());
+	}
+
+	TEST_CASE("sim.nav.bake: XP3_Desert TeamDeathMatch0 bakes its own combat region within the terrain budget") {
+		Install *m = install();
+		if (m == nullptr) {
+			return;
+		}
+		host::NavBakeBenchOptions o;
+		o.level = "XP3_Desert";
+		o.mode = "TeamDeathMatch0";
+		o.threads = 4;
+		o.tuning_text = read_text(OPENBF3_MOTOR_TUNING_CFG);
+		core::Result<host::NavBakeBench> b = host::run_nav_bake_bench(m->install, o);
+		REQUIRE_MESSAGE(b.ok(), (b.ok() ? std::string() : b.error().message));
+		std::printf("---- sim.nav.bake XP3_Desert TeamDeathMatch0, %u threads ----\n%s", b->options.threads,
+				host::format_nav_bake_bench(*b).c_str());
+		std::fflush(stdout);
+		REQUIRE(b->nav != nullptr);
+		CHECK(b->nav->stats().polys > 0);
+		CHECK(b->tiles_requested > 0);
 	}
 }

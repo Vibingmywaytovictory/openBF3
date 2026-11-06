@@ -48,7 +48,6 @@ struct PrebakeEntry {
 	LevelEntry entry;
 	State state = State::Pending;
 	ServerLevelSeconds seconds;
-	bool combat_cache_hit = false;
 	bool nav_cache_hit = false;
 	std::string error;
 };

@@ -180,7 +180,7 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
         ARGS -DUSER_ARGS=--m0-inspector-check "-DPASS_LINE=M0 INSPECTOR CHECK: PASS")
 endif()
 openbf3_test(test_level test_main.cpp level_tests.cpp test_support.h)
-target_link_libraries(test_level PRIVATE bf3_core)
+target_link_libraries(test_level PRIVATE bf3_core bf3_sim)
 add_test(NAME core.level.unit COMMAND test_level --test-suite=level_unit)
 add_test(NAME core.level COMMAND test_level --test-suite=level)
 add_test(NAME core.level.eor_camera COMMAND test_level --test-suite=level_eor)

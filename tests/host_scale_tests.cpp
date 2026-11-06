@@ -670,7 +670,8 @@ void warm_cache(Install &r_install, const char *p_level, WarmCache &r_warm) {
 	if (!db) {
 		return;
 	}
-	core::Result<core::level::LevelCombatTiles> combat = core::level::level_combat_tiles(r_install.install, p_level, sim::NavParams().region_margin);
+	core::Result<core::level::LevelCombatTiles> combat =
+			core::level::mode_combat_tiles(*db->level, *db->world, sim::NavParams().region_margin);
 	CHECK_MESSAGE(combat.ok(), (combat.ok() ? std::string() : combat.error().message));
 	core::Result<sim::MotorTuning> tuning = sim::parse_motor_tuning(read_text(OPENBF3_MOTOR_TUNING_CFG));
 	CHECK(tuning.ok());

@@ -961,7 +961,8 @@ TEST_SUITE("sim-terrain") {
 
 			CHECK(rc.open_hits == 0);
 
-			bf3::core::Result<level::LevelCombatTiles> combat = level::level_combat_tiles(s->install, run.level, sim::NavParams().region_margin);
+			bf3::core::Result<level::LevelCombatTiles> combat =
+					level::mode_combat_tiles(**loaded, **world, sim::NavParams().region_margin);
 			REQUIRE(combat.ok());
 			size_t without_ground = 0;
 			for (const std::array<int32_t, 2> &t : combat->tiles) {

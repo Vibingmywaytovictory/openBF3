@@ -53,7 +53,6 @@ struct ServerLevel {
 	std::shared_ptr<const BotLevel> bots;
 	LevelDatabase database;
 	ServerLevelSeconds seconds;
-	bool combat_cache_hit = false;
 	bool nav_cache_hit = false;
 };
 

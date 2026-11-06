@@ -7,9 +7,11 @@
 #include "bf3/core/level/connections.h"
 #include "bf3/core/level/eor_camera.h"
 #include "bf3/core/level/level.h"
+#include "bf3/core/level/mode_areas.h"
 #include "bf3/core/level/world.h"
 #include "bf3/core/superbundle_mount.h"
 #include "bf3/core/thread_pool.h"
+#include "bf3/sim/nav.h"
 #include "test_support.h"
 
 #include <algorithm>
@@ -32,6 +34,8 @@ using namespace bf3::core;
 using namespace bf3::core::level;
 
 namespace {
+
+constexpr size_t kMaxTdmRegionTiles = 64;
 
 uint32_t bits(float p_value) {
 	uint32_t b = 0;
@@ -1809,6 +1813,32 @@ TEST_SUITE("level_modes") {
 		Result<std::unique_ptr<LoadedLevel>> absent = load_level(install, "XP2_Office", "TeamDeathMatch0");
 		REQUIRE_FALSE(absent.ok());
 		CHECK(absent.error().message.find("no game mode `TeamDeathMatch0`") != std::string::npos);
+	}
+
+	TEST_CASE("level_modes: the XP5 TDM combat region is the TDM mode's own, whatever AirSuperiority0's area costs") {
+		const std::shared_ptr<Install> install = shared_install_or_skip();
+		if (!install) {
+			return;
+		}
+		for (const std::string_view id : { "XP5_001", "XP5_002", "XP5_003", "XP5_004" }) {
+			CAPTURE(id);
+			Result<LevelCombatTiles> tdm =
+					level_combat_tiles(install, id, "TeamDeathMatch0", bf3::sim::NavParams().region_margin);
+			CHECK_MESSAGE(tdm.ok(), (tdm.ok() ? std::string() : tdm.error().message));
+			if (!tdm) {
+				continue;
+			}
+			std::printf("core.level.modes %s %s: %zu combat areas, %zu objectives, %zu points (%zu outside the areas), "
+						"region %zu tiles (%zu polygon, %zu "
+						"point-only)\n",
+					std::string(id).c_str(), tdm->mode.c_str(), tdm->areas.combat_areas.size(),
+					tdm->areas.objectives.size(), tdm->points, tdm->points_outside_areas, tdm->tiles.size(),
+					tdm->polygon_tiles, tdm->point_only_tiles);
+			CHECK(tdm->mode == "TeamDeathMatch0");
+			CHECK_FALSE(tdm->areas.combat_areas.empty());
+			CHECK(tdm->polygon_tiles > 0);
+			CHECK(tdm->tiles.size() <= kMaxTdmRegionTiles);
+		}
 	}
 }
 

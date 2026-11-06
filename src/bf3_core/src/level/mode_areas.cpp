@@ -395,68 +395,47 @@ std::vector<std::array<int32_t, 2>> point_tiles(const Vec3 &p_point, float p_mar
 	return out;
 }
 
-Result<LevelCombatTiles> level_combat_tiles(std::shared_ptr<const Install> p_install, std::string_view p_level_id, float p_margin) {
-	if (p_install == nullptr) {
-		return make_error("level_combat_tiles: no install");
-	}
+Result<LevelCombatTiles> mode_combat_tiles(const LoadedLevel &p_level, const World &p_world, float p_margin) {
 	const auto start = std::chrono::steady_clock::now();
-	Result<LevelInfo> info = level_info(*p_install, p_level_id);
-	if (!info) {
-		return error_at("level_combat_tiles " + std::string(p_level_id), info.error());
-	}
+	const std::string where = "mode_combat_tiles " + p_level.info.id + " " + p_level.mode;
 	LevelCombatTiles out;
-	std::set<std::array<int32_t, 2>> all;
-	std::set<std::array<int32_t, 2>> point_set;
-	for (const std::string &mode : info->modes) {
-		Result<std::unique_ptr<LoadedLevel>> level = load_level(p_install, p_level_id, mode);
-		if (!level) {
-			return error_at("level_combat_tiles " + std::string(p_level_id) + " " + mode, level.error());
-		}
-		Result<std::unique_ptr<World>> world = World::traverse(**level);
-		if (!world) {
-			return error_at("level_combat_tiles " + std::string(p_level_id) + " " + mode + ": traverse", world.error());
-		}
-		Result<ModeAreas> areas = read_mode_areas(**world);
-		if (!areas) {
-			return error_at("level_combat_tiles " + std::string(p_level_id) + " " + mode, areas.error());
-		}
-		Result<std::vector<std::array<int32_t, 2>>> tiles = combat_area_tiles(areas->combat_areas, p_margin);
-		if (!tiles) {
-			return error_at("level_combat_tiles " + std::string(p_level_id) + " " + mode, tiles.error());
-		}
-		for (const std::array<int32_t, 2> &t : *tiles) {
-			all.insert(t);
-		}
-		if (out.water.empty()) {
-			Result<std::vector<WaterPlane>> water = read_water_planes(**world);
-			if (!water) {
-				return error_at("level_combat_tiles " + std::string(p_level_id) + " " + mode, water.error());
-			}
-			out.water = std::move(*water);
-		}
-		Result<LevelSpawns> spawns = read_level_spawns(**world);
-		if (!spawns) {
-			return error_at("level_combat_tiles " + std::string(p_level_id) + " " + mode + ": spawns", spawns.error());
-		}
-		std::vector<Vec3> points;
-		for (const ModeObjectiveDef &o : areas->objectives) {
-			points.push_back(o.position);
-		}
-		for (const SpawnPointDef &sp : spawns->points) {
-			points.push_back(sp.transform.trans);
-		}
-		for (const Vec3 &pt : points) {
-			if (!inside_any(areas->combat_areas, pt)) {
-				++out.points_outside_areas;
-			}
-			for (const std::array<int32_t, 2> &t : point_tiles(pt, p_margin)) {
-				point_set.insert(t);
-			}
-		}
-		out.points += points.size();
-		out.modes.push_back(mode);
-		out.areas.push_back(std::move(*areas));
+	out.mode = p_level.mode;
+	Result<ModeAreas> areas = read_mode_areas(p_world);
+	if (!areas) {
+		return error_at(where, areas.error());
 	}
+	Result<std::vector<std::array<int32_t, 2>>> tiles = combat_area_tiles(areas->combat_areas, p_margin);
+	if (!tiles) {
+		return error_at(where, tiles.error());
+	}
+	std::set<std::array<int32_t, 2>> all(tiles->begin(), tiles->end());
+	Result<std::vector<WaterPlane>> water = read_water_planes(p_world);
+	if (!water) {
+		return error_at(where, water.error());
+	}
+	out.water = std::move(*water);
+	Result<LevelSpawns> spawns = read_level_spawns(p_world);
+	if (!spawns) {
+		return error_at(where + ": spawns", spawns.error());
+	}
+	std::vector<Vec3> points;
+	for (const ModeObjectiveDef &o : areas->objectives) {
+		points.push_back(o.position);
+	}
+	for (const SpawnPointDef &sp : spawns->points) {
+		points.push_back(sp.transform.trans);
+	}
+	std::set<std::array<int32_t, 2>> point_set;
+	for (const Vec3 &pt : points) {
+		if (!inside_any(areas->combat_areas, pt)) {
+			++out.points_outside_areas;
+		}
+		for (const std::array<int32_t, 2> &t : point_tiles(pt, p_margin)) {
+			point_set.insert(t);
+		}
+	}
+	out.points = points.size();
+	out.areas = std::move(*areas);
 	out.polygon_tiles = all.size();
 	for (const std::array<int32_t, 2> &t : point_set) {
 		out.point_only_tiles += all.insert(t).second ? 1 : 0;
@@ -466,4 +445,25 @@ Result<LevelCombatTiles> level_combat_tiles(std::shared_ptr<const Install> p_ins
 	return out;
 }
 
+Result<LevelCombatTiles> level_combat_tiles(std::shared_ptr<const Install> p_install, std::string_view p_level_id,
+		std::string_view p_mode, float p_margin) {
+	if (p_install == nullptr) {
+		return make_error("level_combat_tiles: no install");
+	}
+	const auto start = std::chrono::steady_clock::now();
+	const std::string where = "level_combat_tiles " + std::string(p_level_id) + " " + std::string(p_mode);
+	Result<std::unique_ptr<LoadedLevel>> level = load_level(p_install, p_level_id, p_mode);
+	if (!level) {
+		return error_at(where, level.error());
+	}
+	Result<std::unique_ptr<World>> world = World::traverse(**level);
+	if (!world) {
+		return error_at(where + ": traverse", world.error());
+	}
+	Result<LevelCombatTiles> out = mode_combat_tiles(**level, **world, p_margin);
+	if (out) {
+		out->seconds = seconds_since(start);
+	}
+	return out;
+}
 }

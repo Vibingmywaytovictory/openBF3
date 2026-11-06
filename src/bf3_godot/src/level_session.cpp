@@ -465,11 +465,10 @@ void Bf3LevelSession::run_loader() {
 		char line[512];
 		std::snprintf(line, sizeof(line),
 				"[bots] bot level %.2f s: nav %zu polys (%s), main component %u, %zu goals, spawns %u of %u in main%s; "
-				"combat areas %.2f s (%s)",
+				"combat areas %.2f s",
 				server_level_->seconds.bots, ns.polys, ns.world_hit ? "cache hit" : "baked", bot_level_->main_component,
 				bot_level_->objectives.size(), bot_level_->spawns.in_main, bot_level_->spawns.level_points,
-				bot_level_->spawns.synthetic > 0 ? " (synthetic spawns)" : "", server_level_->seconds.combat,
-				server_level_->combat_cache_hit ? "cache hit" : "baked");
+				bot_level_->spawns.synthetic > 0 ? " (synthetic spawns)" : "", server_level_->seconds.combat);
 		bots_line_ = line;
 		if (nav_overlay_ && scene_) {
 			nav_arrays_ = prepare_nav_overlay(sim::nav_debug_mesh(*bot_level_->nav, &bot_level_->components), bot_level_->main_component);

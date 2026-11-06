@@ -155,7 +155,8 @@ core::Result<Loaded> load(const core::InstallReader &p_reader, const std::shared
 	out.seconds_db = seconds_since(clock);
 	clock = std::chrono::steady_clock::now();
 	const sim::NavParams defaults;
-	core::Result<core::level::LevelCombatTiles> combat = core::level::level_combat_tiles(p_install, p_level, defaults.region_margin);
+	core::Result<core::level::LevelCombatTiles> combat =
+			core::level::mode_combat_tiles(*out.db->level, *out.db->world, defaults.region_margin);
 	if (!combat) {
 		return combat.error();
 	}
@@ -354,10 +355,9 @@ int cmd_nav_components(const core::InstallReader &p_reader, const std::shared_pt
 		}
 		std::printf("water: plane y %.2f, %zu points, x %.0f..%.0f z %.0f..%.0f\n", w.y, w.polygon.size(), x0, x1, z0, z1);
 	}
-	for (size_t m = 0; m < l->combat.modes.size(); ++m) {
-		std::printf("mode %s: %zu combat areas (%zu unwired triggers), %zu objectives\n", l->combat.modes[m].c_str(), l->combat.areas[m].combat_areas.size(),
-				l->combat.areas[m].unwired_triggers.size(), l->combat.areas[m].objectives.size());
-	}
+	std::printf("mode %s: %zu combat areas (%zu unwired triggers), %zu objectives\n", l->combat.mode.c_str(),
+			l->combat.areas.combat_areas.size(), l->combat.areas.unwired_triggers.size(),
+			l->combat.areas.objectives.size());
 	print_components(*l->bots);
 	if (p_args.points) {
 		print_points(*l->bots);
