@@ -1031,7 +1031,8 @@ TEST_CASE("squads: the own squad's members by slot with its leader, the team's s
 	CHECK_FALSE(host::squad_flow_request(join, rows, 1, std::nullopt, std::nullopt));
 	r = host::squad_flow_request(create, rows, 1, std::nullopt, std::nullopt);
 	REQUIRE(r);
-	CHECK(r->op == net::SquadOp::Create);
+	CHECK(r->op == net::SquadOp::Leave);
+	CHECK(r->squad == 0);
 	CHECK_FALSE(host::squad_flow_request(kick, rows, 1, std::nullopt, "Leader"));
 	r = host::squad_flow_request(kick, rows, 4, std::nullopt, "Me");
 	REQUIRE(r);
@@ -1043,6 +1044,9 @@ TEST_CASE("squads: the own squad's members by slot with its leader, the team's s
 	CHECK_FALSE(host::squad_flow_request({}, rows, 1, "5", std::nullopt));
 
 	rows[0].squad = 0;
+	r = host::squad_flow_request(create, rows, 1, std::nullopt, std::nullopt);
+	REQUIRE(r);
+	CHECK(r->op == net::SquadOp::Create);
 	host::fill_hud_tdm(in, {}, st, state, m);
 	CHECK_FALSE(m.squad.local_player_has_squad);
 	CHECK(m.squad.local_squad_members.count == 0);

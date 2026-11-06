@@ -555,11 +555,10 @@ std::optional<As2Value> hud_squad_button_item(
 		for (size_t i = 0; i < std::min<size_t>(list.count, list.squads.size()); ++i) {
 			open = open || (list.squads[i].squad == selected && list.squads[i].open);
 		}
-		const bool leave = own != 0 && selected == own;
-		label = leave ? kSquadLeaveSid : kSquadJoinSid;
-		visible = leave || (selected > 0 && open);
+		label = kSquadJoinSid;
+		visible = selected > 0 && selected != own && open;
 	} else if (p_source.key == kSquadCreateButtonKey) {
-		label = kSquadCreateSid;
+		label = own != 0 ? kSquadLeaveSid : kSquadCreateSid;
 		visible = p_model.local_team != 0;
 	} else if (p_source.key == kSquadKickButtonKey) {
 		label = kSquadKickSid;
@@ -582,8 +581,11 @@ std::optional<As2Value> hud_squad_source_value(
 	if (p_source.key == kSquadHeaderNameKey) {
 		return As2Value::of(squad_label(p_client, hud_selected_squad(p_model, p_client)));
 	}
-	if (p_source.key == kSquadPrivacyKey || p_source.key == kSquadPrivacyEnabledKey ||
-			p_source.key == kSquadPrivacyVisibleKey) {
+	if (p_source.key == kSquadPrivacyVisibleKey) {
+		const int32_t own = own_squad(p_model);
+		return As2Value::of(own != 0 && hud_selected_squad(p_model, p_client) == own);
+	}
+	if (p_source.key == kSquadPrivacyKey || p_source.key == kSquadPrivacyEnabledKey) {
 		return As2Value::of(kSquadPrivacyOffered);
 	}
 	return std::nullopt;

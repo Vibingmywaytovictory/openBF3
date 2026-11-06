@@ -1037,7 +1037,7 @@ TEST_SUITE("ui-widgets") {
 	}
 
 	TEST_CASE("widgets: squadscreen's lists and buttons bind from the model: the team's squads by name, the selected "
-			  "squad's members padded to 4, JOIN or LEAVE SQUAD, CREATE SQUAD, KICK for the leader") {
+			  "squad's members padded to 4, JOIN on another squad, CREATE or LEAVE SQUAD, KICK for the leader") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {
 			return;
@@ -1102,13 +1102,16 @@ TEST_SUITE("ui-widgets") {
 		CHECK_FALSE(squad.s.hud->clip(member_rows[2] + ".KillsLabel").visible());
 		CHECK_FALSE(squad.s.hud->clip(member_rows[3] + ".KillsLabel").visible());
 		const auto button = [&](std::string_view p_name) { return squad.clip(std::string(p_name)); };
-		CHECK(button("Button_01").visible());
+		CHECK_FALSE(button("Button_01").visible());
 		CHECK(button("Button_02").visible());
+		CHECK(button("Button_02.button.label.txt").text() == "LEAVE SQUAD");
 		CHECK_FALSE(button("Button_03").visible());
+		CHECK(button("CheckBox_01").visible());
 
 		flow[{ std::string(kUiSquadCompPartition), kSquadSelectedSquadKey }] = "5";
 		squad.s.hud->refresh(m);
 		CHECK_FALSE(button("Button_01").visible());
+		CHECK_FALSE(button("CheckBox_01").visible());
 		const std::vector<std::string> fives = live_rows(squad, "Widget.List.Rows.SquadDetailedRow");
 		REQUIRE_FALSE(fives.empty());
 		std::string labels;
@@ -1122,6 +1125,15 @@ TEST_SUITE("ui-widgets") {
 		flow[{ std::string(kUiSquadCompPartition), kSquadSelectedPlayerKey }] = "Me";
 		squad.s.hud->refresh(m);
 		CHECK(button("Button_03").visible());
+		CHECK(button("CheckBox_01").visible());
+		const std::string kick = std::string(kHudScreenInstance) + ".Button_03";
+		const SwfSceneNode *kick_bg = squad.s.scene->find_node(kick + ".button.bgHolder");
+		REQUIRE(kick_bg != nullptr);
+		const SwfRect kick_box = swf_transform_bounds(
+				swf_node_local_bounds(*squad.s.scene, *kick_bg), swf_world_matrix(*squad.s.scene, kick_bg->id));
+		const std::string kick_hit = squad.s.hud->hit_target(
+				(kick_box.x_min + kick_box.x_max) * 0.5f, (kick_box.y_min + kick_box.y_max) * 0.5f);
+		CHECK_MESSAGE(kick_hit == kick, kick_hit);
 		CHECK(squad.s.hud->stats().as2.missing_paths == 0);
 		CHECK_MESSAGE(squad.s.hud->stats().as2.failed_ops == 0, squad.s.hud->stats().as2.last_failure);
 		std::printf("ui.widgets squadscreen from the model: %zu squads, %zu member rows\n", squad_rows.size(),
@@ -1129,8 +1141,8 @@ TEST_SUITE("ui-widgets") {
 	}
 
 	TEST_CASE("widgets: squadscreen draws none of its movies' placeholder text: CheckBox_01 runs "
-			  "Widget.CheckBox.CheckBox and stays hidden while no squad can be made private, and List_02's header "
-			  "names the selected squad") {
+			  "Widget.CheckBox.CheckBox, shown dimmed on the own squad in JOIN's place as no squad can be made "
+			  "private, LEAVE SQUAD is CREATE SQUAD's button, and List_02's header names the selected squad") {
 		Retail *r = retail_or_skip();
 		if (r == nullptr) {
 			return;
@@ -1170,12 +1182,17 @@ TEST_SUITE("ui-widgets") {
 		CHECK(squad.s.hud->controller(box) != nullptr);
 		CHECK(squad.clip("CheckBox_01.textField").text() == "PRIVACY");
 		CHECK(squad.clip("CheckBox_01.box").current_frame() == 1u);
-		CHECK_FALSE(squad.clip("CheckBox_01").visible());
-		CHECK(squad.clip("Button_01").visible());
+		CHECK(squad.clip("CheckBox_01").visible());
+		CHECK(squad.clip("CheckBox_01").alpha() == doctest::Approx(50.0));
+		CHECK_FALSE(squad.clip("Button_01").visible());
+		CHECK(squad.clip("Button_02.button.label.txt").text() == "LEAVE SQUAD");
 		CHECK(squad.clip("ScoreboardHeader_01.teamText").text() == "SQ2");
 		flow[{ std::string(kUiSquadCompPartition), kSquadSelectedSquadKey }] = "5";
 		squad.s.hud->refresh(m);
 		CHECK(squad.clip("ScoreboardHeader_01.teamText").text() == "SQ5");
+		CHECK_FALSE(squad.clip("CheckBox_01").visible());
+		CHECK(squad.clip("Button_01").visible());
+		CHECK(squad.clip("Button_01.button.label.txt").text() == "JOIN");
 
 		const auto shown = [&](const SwfSceneNode &p_node) {
 			for (const SwfSceneNode *n = &p_node; n != nullptr; n = squad.s.scene->node(n->parent)) {
@@ -1202,7 +1219,7 @@ TEST_SUITE("ui-widgets") {
 		CHECK_MESSAGE(leaks.empty(), leaks);
 		CHECK(squad.s.hud->stats().as2.missing_paths == 0);
 		CHECK_MESSAGE(squad.s.hud->stats().as2.failed_ops == 0, squad.s.hud->stats().as2.last_failure);
-		std::printf("ui.widgets squadscreen header '%s', privacy '%s' hidden\n",
+		std::printf("ui.widgets squadscreen header '%s', privacy '%s' shown on the own squad, hidden on squad 5\n",
 				squad.clip("ScoreboardHeader_01.teamText").text().c_str(),
 				squad.clip("CheckBox_01.textField").text().c_str());
 	}

@@ -296,18 +296,26 @@ bool SquadTeamCheck::frame(Bf3UiScreens &r_screens, double p_now_s, const SquadT
 			if (in >= kSquadTeamSettleSeconds) {
 				shot(p_io, "initial");
 				agree(r_screens, "list.initial", p_io);
+				initial_squad_ = me->squad;
 				enter(Phase::Create, p_now_s);
 			}
 			break;
 		case Phase::Create:
 			if (sub_ < 3) {
 				click(r_screens, kSquadScreen, kSquadTeamCreateButton, p_io);
-			} else if (me->squad != 0 && me->leader && squad_count(p_io.players, me->team, me->squad) == 1) {
+			} else if (me->squad != 0 && me->squad != initial_squad_ && me->leader &&
+					squad_count(p_io.players, me->team, me->squad) == 1) {
 				created_ = me->squad;
+				const std::string left = left_first_
+						? fmt(", after LEAVE SQUAD on the same button left squad %u", unsigned(initial_squad_))
+						: std::string();
 				row("create", true,
-						fmt("CREATE SQUAD made squad %u (%s) with the own player its leader", unsigned(created_),
-								squad_name(created_, p_io).c_str()));
+						fmt("CREATE SQUAD made squad %u (%s) with the own player its leader%s", unsigned(created_),
+								squad_name(created_, p_io).c_str(), left.c_str()));
 				enter(Phase::MateJoins, p_now_s);
+			} else if (initial_squad_ != 0 && me->squad == 0 && !left_first_) {
+				left_first_ = true;
+				enter(Phase::Create, p_now_s);
 			}
 			break;
 		case Phase::MateJoins:
@@ -404,7 +412,7 @@ bool SquadTeamCheck::frame(Bf3UiScreens &r_screens, double p_now_s, const SquadT
 				agree(r_screens, "list.after_join", p_io);
 			}
 			if (sub_ < 3) {
-				click(r_screens, kSquadScreen, kSquadTeamJoinButton, p_io);
+				click(r_screens, kSquadScreen, kSquadTeamCreateButton, p_io);
 			} else if (me->squad != mate_squad_) {
 				row("leave", p2->squad == mate_squad_,
 						fmt("LEAVE SQUAD took the own player out of squad %u (now in %u); player2 stays in %u",

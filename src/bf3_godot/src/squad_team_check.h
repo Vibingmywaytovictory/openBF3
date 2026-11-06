@@ -110,6 +110,8 @@ private:
 	bool extra_joined_ = false;
 	uint8_t own_team_ = 0;
 	uint8_t created_ = 0;
+	uint8_t initial_squad_ = 0;
+	bool left_first_ = false;
 	uint8_t mate_squad_ = 0;
 	std::vector<std::string> lines_;
 	uint32_t rows_ = 0;

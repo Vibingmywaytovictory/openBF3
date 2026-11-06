@@ -186,7 +186,7 @@ std::optional<net::SquadRequest> squad_flow_request(std::span<const std::string>
 	const std::string_view what = p_params.front();
 	net::SquadRequest q;
 	if (what == core::ui::kSquadCreateParam) {
-		q.op = net::SquadOp::Create;
+		q.op = own->squad != 0 ? net::SquadOp::Leave : net::SquadOp::Create;
 		return q;
 	}
 	if (what == core::ui::kSquadJoinParam) {
