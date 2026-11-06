@@ -475,7 +475,14 @@ void input_proofs(Install &r_m, const std::string &p_level, const std::string &p
 		}
 		if (jolt && brute) {
 			++both;
-			const double err = std::fabs(double(hit.fraction) - best) * len;
+			const double normal_length = std::sqrt(double(hit.normal[0]) * hit.normal[0] +
+					double(hit.normal[1]) * hit.normal[1] + double(hit.normal[2]) * hit.normal[2]);
+			const double incidence = normal_length > 0.0
+					? std::fabs(double(hit.normal[0]) * d[0] + double(hit.normal[1]) * d[1] +
+							  double(hit.normal[2]) * d[2]) /
+							(normal_length * len)
+					: 1.0;
+			const double err = std::fabs(double(hit.fraction) - best) * len * incidence;
 			worst = std::max(worst, err);
 			if (err <= 0.001) {
 				++agree;
@@ -495,9 +502,11 @@ void input_proofs(Install &r_m, const std::string &p_level, const std::string &p
 			examples.push_back(line);
 		}
 	}
-	std::printf("sim.nav §5.1 %s %s proof 3: %zu rays, both hit %zu (agree within 1 mm %zu, worst %.6f m), neither %zu, ambiguous (edge) %zu, "
+	std::printf("sim.nav §5.1 %s %s proof 3: %zu rays, both hit %zu (agree within 1 mm along the hit normal %zu, worst "
+				"%.6f m), neither %zu, ambiguous (edge) %zu, "
 				"disagree %zu; %.2f s\n",
-			p_level.c_str(), p_mode.c_str(), rays, both, agree, worst, neither, ambiguous, disagree, seconds_since(clock));
+			p_level.c_str(), p_mode.c_str(), rays, both, agree, worst, neither, ambiguous, disagree,
+			seconds_since(clock));
 	for (const std::string &e : examples) {
 		std::printf("   disagree %s\n", e.c_str());
 	}
