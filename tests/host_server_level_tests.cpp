@@ -10,6 +10,7 @@
 #include "bf3/host/server_session.h"
 #include "bf3/host/tdm_brain.h"
 #include "bf3/net/master.h"
+#include "bf3/sim/collision_world.h"
 #include "bf3/sim/nav.h"
 
 #include "gunplay_fixture.h"
@@ -374,6 +375,102 @@ TEST_SUITE("host-server-level") {
 		cache->close();
 		std::error_code ec;
 		std::filesystem::remove_all(root, ec);
+		const core::SnapshotDiff diff = core::diff_snapshots(m.before, m.reader.snapshot());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+		std::printf("install.unchanged: %s (%zu files)\n", diff.clean() ? "clean" : diff.summary().c_str(),
+				m.before.files.size());
+	}
+
+	TEST_CASE("XP2_Office TeamDeathMatchC0: a spawn on point 27 stands on a floor") {
+		bf3::test::Mounted m;
+		if (!bf3::test::open_or_skip(m)) {
+			return;
+		}
+		const host::ServerLevelOptions options = server_options(false);
+		core::Result<host::LevelDatabase> db =
+				host::open_level_database(m.install, "XP2_Office", "TeamDeathMatchC0", options.shared.threads, nullptr);
+		REQUIRE_MESSAGE(db.ok(), (db.ok() ? std::string() : db.error().message));
+		if (!db.ok()) {
+			return;
+		}
+		core::Result<std::shared_ptr<const host::SharedLevel>> loaded =
+				host::load_shared_level(*db, options.shared, nullptr);
+		REQUIRE_MESSAGE(loaded.ok(), (loaded.ok() ? std::string() : loaded.error().message));
+		if (!loaded.ok()) {
+			return;
+		}
+		const std::shared_ptr<const host::SharedLevel> level = *loaded;
+		constexpr uint32_t kPoint = 27;
+		REQUIRE(level->spawns.size() > kPoint);
+		host::GameServerConfig config;
+		config.level = level;
+		config.max_slots = 2;
+		config.dev_commands = true;
+		config.gunplay.mechanics_cfg = OPENBF3_MECHANICS_CFG;
+		config.rules.mode = host::MatchRulesConfig::Mode::Tdm;
+		config.rules.deploy_screen = false;
+		config.rules.preround_override_s = 0.0f;
+		config.rules.min_players_override = 1;
+		host::GameServer server;
+		const core::Status started = server.init(config);
+		REQUIRE_MESSAGE(started.ok(), (started.ok() ? std::string() : started.error().message));
+		if (!started.ok()) {
+			return;
+		}
+		tt::ScriptedPeer peer(server, 1, "office");
+		std::vector<host::OutDatagram> out;
+		const auto own = [&] { return peer.slot() >= 0 ? server.soldier(uint32_t(peer.slot())) : nullptr; };
+		const auto tick = [&] {
+			if (const sim::SoldierState *s = own(); tt::is_alive(s)) {
+				peer.command(sim::idle_command(server.current_tick() + 1u, s->yaw, s->pitch, s->target_pose));
+			}
+			out.clear();
+			server.tick(out);
+			peer.receive(out);
+		};
+		const auto until = [&](const auto &p_done, uint32_t p_ticks) {
+			for (uint32_t i = 0; i < p_ticks && !p_done(); ++i) {
+				tick();
+			}
+			return p_done();
+		};
+		peer.hello();
+		tick();
+		REQUIRE(until([&] { return server.rules()->phase() == net::MatchPhase::InRound; }, 240));
+		peer.ready();
+		REQUIRE(until([&] { return tt::is_alive(own()); }, 10));
+		const uint32_t life = own()->life;
+		net::DebugRequest spawn_at;
+		spawn_at.kind = net::DebugKind::SpawnAt;
+		spawn_at.id = 1;
+		spawn_at.index = kPoint;
+		peer.debug(spawn_at);
+		REQUIRE(until([&] { return own()->life != life; }, 5));
+		for (uint32_t i = 0; i < 60; ++i) {
+			tick();
+		}
+		const sim::SoldierState spawned = *own();
+		core::Result<std::unique_ptr<sim::CollisionWorld>> world = sim::CollisionWorld::create(level->static_world);
+		REQUIRE(world.ok());
+		if (!world.ok()) {
+			return;
+		}
+		sim::StaticHit floor;
+		const bool has_floor =
+				(*world)->ground_below({ spawned.position[0], spawned.position[1] + 0.5f, spawned.position[2] }, 1.0f,
+						sim::query_mask::kMovement, &floor);
+		std::printf("host.server.level XP2_Office: point %u at (%.2f %.2f %.2f), soldier 1 s after the spawn at (%.2f "
+					"%.2f %.2f), "
+					"grounded %d, floor %s %.3f m below\n",
+				kPoint, double(level->spawns[kPoint].position[0]), double(level->spawns[kPoint].position[1]),
+				double(level->spawns[kPoint].position[2]), double(spawned.position[0]), double(spawned.position[1]),
+				double(spawned.position[2]), int((spawned.flags & sim::soldier_flags::kGrounded) != 0),
+				has_floor ? "hit" : "missed", has_floor ? double(spawned.position[1] - floor.position[1]) : 0.0);
+		CHECK(tt::is_alive(&spawned));
+		CHECK((spawned.flags & sim::soldier_flags::kGrounded) != 0);
+		CHECK(has_floor);
+		CHECK(spawned.position[1] - floor.position[1] < 0.1f);
+
 		const core::SnapshotDiff diff = core::diff_snapshots(m.before, m.reader.snapshot());
 		CHECK_MESSAGE(diff.clean(), diff.summary());
 		std::printf("install.unchanged: %s (%zu files)\n", diff.clean() ? "clean" : diff.summary().c_str(),

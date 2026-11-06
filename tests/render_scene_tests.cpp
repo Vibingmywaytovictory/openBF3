@@ -568,7 +568,8 @@ TEST_SUITE("render-scene") {
 			kept += m.kept ? 1 : 0;
 		}
 		for (const level::SceneInstance &inst : census->instances) {
-			Result<bool> hidden = level::starts_hidden(**world, (*world)->objects[inst.object]);
+			Result<bool> hidden = level::starts_hidden(
+					**world, (*world)->objects[inst.object], bf3::core::gameplay::LogicSide::Client);
 			REQUIRE(hidden.ok());
 			if (*hidden) {
 				++start_hidden;

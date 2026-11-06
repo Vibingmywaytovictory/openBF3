@@ -146,8 +146,6 @@ struct LogicGraphStats {
 	std::vector<std::pair<std::string, size_t>> unimplemented_types;
 };
 
-enum class LogicSide : uint8_t { Server, Client };
-
 struct LogicGraphOptions {
 	std::string mode;
 	LogicSide side = LogicSide::Server;

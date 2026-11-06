@@ -213,7 +213,7 @@ Result<std::optional<std::vector<uint16_t>>> hidden_parts(const EbxResolver &p_d
 	return std::optional<std::vector<uint16_t>>(std::move(damaged));
 }
 
-Result<bool> starts_hidden(const World &p_world, const PlacedObject &p_object) {
+Result<bool> starts_hidden(const World &p_world, const PlacedObject &p_object, gameplay::LogicSide p_side) {
 	WorkBudget &budget = *p_world.budget;
 	BF3_TRY(budget.status());
 	if (!p_object.reference) {
@@ -221,17 +221,26 @@ Result<bool> starts_hidden(const World &p_world, const PlacedObject &p_object) {
 	}
 
 	const Connections &connections = p_world.scopes.connections(p_object.scope);
-	const std::vector<uint32_t> *into = connections.property_into(*p_object.reference, field_id("Visible"));
-	if (!into) {
-		return false;
-	}
-	BF3_TRY(budget.charge(into->size()));
-	const int32_t value = field_id("Value");
-	for (const uint32_t at : *into) {
-		const Connection &c = connections.property[at];
-		if (c.source.is_a("BoolEntityData") && c.source_field == value) {
-			const std::optional<EbxValue> d = c.source.get("DefaultValue");
-			if ((d ? d->as_bool() : std::nullopt) == false) {
+	const auto starts_false = [&](const Connection &p_c) {
+		if (!gameplay::realm_on_side(gameplay::entity_realm(p_c.source), p_side)) {
+			return false;
+		}
+		std::optional<EbxValue> initial;
+		if (p_c.source.is_a("BoolEntityData") && p_c.source_field == field_id("Value")) {
+			initial = p_c.source.get("DefaultValue");
+		} else if (p_c.source.is_a("SyncedBoolEntityData") && p_c.source_field == field_id("Out")) {
+			initial = p_c.source.get("In");
+		}
+		return (initial ? initial->as_bool() : std::nullopt) == false;
+	};
+	for (const int32_t field : { field_id("Visible"), field_id("Enabled") }) {
+		const std::vector<uint32_t> *into = connections.property_into(*p_object.reference, field);
+		if (!into) {
+			continue;
+		}
+		BF3_TRY(budget.charge(into->size()));
+		for (const uint32_t at : *into) {
+			if (starts_false(connections.property[at])) {
 				return true;
 			}
 		}

@@ -1054,7 +1054,7 @@ public:
 	}
 
 private:
-	bool on_side(LogicRealm p_realm) const { return options_.side == LogicSide::Server ? realm_on_server(p_realm) : realm_on_client(p_realm); }
+	bool on_side(LogicRealm p_realm) const { return realm_on_side(p_realm, options_.side); }
 
 	Status emit_charge(size_t p_units = 1) { return budget_.charge(p_units); }
 
@@ -1100,18 +1100,7 @@ private:
 						: object.entity.is_a("WorldPartReferenceObjectData") ? LogicTypeId::WorldPartReference
 																			 : LogicTypeId::ReferenceObject;
 			}
-			LogicRealm realm = LogicRealm::Unset;
-			if (const std::optional<EbxValue> v = object.entity.get("Realm")) {
-				const std::optional<std::string_view> name = v->enum_name();
-				const std::optional<LogicRealm> parsed = name ? logic_realm_from_name(*name) : std::nullopt;
-				if (parsed) {
-					realm = *parsed;
-				} else if (const std::optional<int32_t> raw = v->enum_value(); raw && *raw >= 0 && *raw <= 4) {
-					realm = static_cast<LogicRealm>(*raw);
-				} else {
-					realm = LogicRealm::None;
-				}
-			}
+			const LogicRealm realm = entity_realm(object.entity);
 			if (!on_side(realm)) {
 				objects_.add(object.scope, object.entity, kAbsent | i);
 				if (object.reference) {

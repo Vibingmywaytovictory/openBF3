@@ -126,7 +126,7 @@ Result<std::string> placement_line(const EbxResolver &p_db, const World &p_world
 	} else {
 		line += " mesh -";
 	}
-	const Result<bool> start_hidden = starts_hidden(p_world, p_object);
+	const Result<bool> start_hidden = starts_hidden(p_world, p_object, bf3::core::gameplay::LogicSide::Client);
 	if (!start_hidden) {
 		return start_hidden.error();
 	}

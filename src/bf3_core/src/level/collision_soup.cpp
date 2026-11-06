@@ -649,7 +649,7 @@ Result<CollisionSoup> build_collision_soup(const LoadedLevel &p_level, const Wor
 			out.state = SoupPlacement::State::NoRes;
 			continue;
 		}
-		const Result<bool> hidden = starts_hidden(p_world, object);
+		const Result<bool> hidden = starts_hidden(p_world, object, gameplay::LogicSide::Server);
 		if (!hidden) {
 			return hidden.error();
 		}

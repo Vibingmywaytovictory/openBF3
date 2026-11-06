@@ -6,6 +6,10 @@
 #include <span>
 #include <string_view>
 
+namespace bf3::core {
+class EbxInstance;
+}
+
 namespace bf3::core::gameplay {
 
 constexpr int32_t logic_port_id(std::string_view p_name) {
@@ -229,6 +233,14 @@ constexpr bool realm_on_server(LogicRealm p_realm) {
 constexpr bool realm_on_client(LogicRealm p_realm) {
 	return p_realm == LogicRealm::Client || p_realm == LogicRealm::ClientAndServer || p_realm == LogicRealm::Unset;
 }
+
+enum class LogicSide : uint8_t { Server, Client };
+
+constexpr bool realm_on_side(LogicRealm p_realm, LogicSide p_side) {
+	return p_side == LogicSide::Server ? realm_on_server(p_realm) : realm_on_client(p_realm);
+}
+
+LogicRealm entity_realm(const EbxInstance &p_entity);
 
 enum class LogicEventTarget : uint8_t { Invalid = 0, ClientAndServer = 1, Client = 2, Server = 3, NetworkedClient = 4, NetworkedClientAndServer = 5 };
 std::optional<LogicEventTarget> logic_event_target_from_name(std::string_view p_enumerator);

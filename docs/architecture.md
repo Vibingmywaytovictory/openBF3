@@ -80,7 +80,7 @@ is bit-stable per toolchain, not across them.
    read from the install is bounded against the buffer that holds it before any allocation (readers are sticky-fail
    cursors with a `WorkBudget`).
 2. **Objects to tables.** `gameplay/` turns EBX into weapon, kit, soldier, vehicle and mode tables and the level
-   logic graph; `level/` into spawn points, mode areas, connections and the collision soup; `ui/` into the HUD model,
+   logic graph; `level/` into spawn points, mode areas, connections and the collision soup (`starts_hidden` leaves out a placement whose Visible or Enabled starts false from a BoolEntityData DefaultValue or a SyncedBoolEntityData In of a Realm on that `LogicSide`: XP2_Office's 282 garage, duct and pipe placements, shown by a Realm_Client AreaProximity, collide on both sides and stay unrendered, and MP_011's 30 storefront ruins, Enabled by a SyncedBool, are gone on both); `ui/` into the HUD model,
    minimap and fonts. These are what the simulation and the HUD consume; nothing above `bf3_core` touches EBX.
 3. **Tables to the cache.** `bf3_render`, `bf3_fx` and `bf3_audio` convert meshes, textures, effects and sound banks
    into prepared, Godot-shaped blobs keyed by content digest (`cached_convert`). `bf3dump prepare` fills the cache

@@ -804,7 +804,8 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 			return core::make_error("scene plan: census instance " + std::to_string(i) + " names no kept mesh or object");
 		}
 		if (!p_options.include_hidden_start) {
-			core::Result<bool> hidden = core::level::starts_hidden(p_world, p_world.objects[inst.object]);
+			core::Result<bool> hidden = core::level::starts_hidden(
+					p_world, p_world.objects[inst.object], core::gameplay::LogicSide::Client);
 			if (!hidden) {
 				return core::error_at("scene plan", hidden.error());
 			}

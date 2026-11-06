@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/core/gameplay/logic_types.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
 #include "bf3/core/math.h"
@@ -16,7 +17,7 @@ namespace bf3::core::level {
 
 Result<std::optional<std::vector<uint16_t>>> hidden_parts(const EbxResolver &p_db, const EbxInstance &p_entity, WorkBudget &r_budget);
 
-Result<bool> starts_hidden(const World &p_world, const PlacedObject &p_object);
+Result<bool> starts_hidden(const World &p_world, const PlacedObject &p_object, gameplay::LogicSide p_side);
 
 struct BakeSplit {
 	LevelTransform placed;

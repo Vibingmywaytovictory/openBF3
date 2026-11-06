@@ -87,7 +87,7 @@ size_t composite_hiding(const LoadedLevel &p_level, const World &p_world) {
 size_t count_start_hidden(const World &p_world) {
 	size_t n = 0;
 	for (const PlacedObject &o : p_world.objects) {
-		const Result<bool> hidden = starts_hidden(p_world, o);
+		const Result<bool> hidden = starts_hidden(p_world, o, bf3::core::gameplay::LogicSide::Client);
 		REQUIRE(hidden.ok());
 		n += *hidden ? 1 : 0;
 	}
@@ -915,7 +915,7 @@ TEST_SUITE("level_unit") {
 		size_t checks = 0;
 		const double seconds = timed([&] {
 			for (; checks < 100000; ++checks) {
-				const Result<bool> hidden = starts_hidden(world, placed);
+				const Result<bool> hidden = starts_hidden(world, placed, bf3::core::gameplay::LogicSide::Client);
 				if (!hidden.ok()) {
 					break;
 				}
@@ -923,7 +923,7 @@ TEST_SUITE("level_unit") {
 			}
 		});
 		CHECK(checks == WorkBudget::kDefaultLimit / kConnections - 1);
-		CHECK(budget_error(starts_hidden(world, placed).error()));
+		CHECK(budget_error(starts_hidden(world, placed, bf3::core::gameplay::LogicSide::Client).error()));
 		CHECK(seconds < kHostileSeconds);
 	}
 
@@ -1646,7 +1646,9 @@ TEST_SUITE("level") {
 			REQUIRE_FALSE(census.ok());
 			CHECK(budget_error(census.error()));
 			CHECK(seconds < kHostileSeconds);
-			CHECK_FALSE(starts_hidden(**census_world, (*census_world)->objects[0]).ok());
+			CHECK_FALSE(
+					starts_hidden(**census_world, (*census_world)->objects[0], bf3::core::gameplay::LogicSide::Client)
+							.ok());
 			Result<std::unique_ptr<World>> collision_world = walk(db);
 			REQUIRE(collision_world.ok());
 			Result<std::vector<CollisionPlacement>> collision = std::vector<CollisionPlacement>();

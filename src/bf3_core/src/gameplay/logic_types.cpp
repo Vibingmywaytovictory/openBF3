@@ -1,5 +1,7 @@
 #include "bf3/core/gameplay/logic_types.h"
 
+#include "bf3/core/ebx.h"
+
 #include <array>
 #include <cstddef>
 
@@ -268,4 +270,18 @@ std::optional<LogicEventTarget> logic_event_target_from_name(std::string_view p_
 	return std::nullopt;
 }
 
+LogicRealm entity_realm(const EbxInstance &p_entity) {
+	const std::optional<EbxValue> v = p_entity.get("Realm");
+	if (!v) {
+		return LogicRealm::Unset;
+	}
+	const std::optional<std::string_view> name = v->enum_name();
+	if (const std::optional<LogicRealm> parsed = name ? logic_realm_from_name(*name) : std::nullopt) {
+		return *parsed;
+	}
+	if (const std::optional<int32_t> raw = v->enum_value(); raw && *raw >= 0 && *raw <= 4) {
+		return static_cast<LogicRealm>(*raw);
+	}
+	return LogicRealm::None;
+}
 }
