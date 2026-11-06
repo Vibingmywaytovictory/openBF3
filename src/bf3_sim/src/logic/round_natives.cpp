@@ -494,7 +494,7 @@ core::Status RoundNatives::player_died(uint8_t p_slot, uint8_t p_team, int p_kil
 				continue;
 			}
 			c.kills += enemy ? c.enemy_weight : double(std::isfinite(s.config.team_kill_weight) ? s.config.team_kill_weight : 0.0f);
-			c.kills = std::max(0.0, c.kills);
+			c.kills = std::clamp(c.kills, 0.0, double(s.limit_of(c)));
 			BF3_TRY(s.publish_counter(c, r_runtime));
 		}
 	}

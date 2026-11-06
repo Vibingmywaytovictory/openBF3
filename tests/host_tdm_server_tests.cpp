@@ -1303,6 +1303,46 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(started->rules().match_state().players_needed == 0);
 	}
 
+	TEST_CASE("kill limit: kills before the round over lands count to the KillCounter's limit, not past it") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		constexpr int kLimit = 2;
+		std::unique_ptr<Match> m = start_match(*level, false, 7, kLimit, 1);
+		std::vector<Script *> bots;
+		for (int i = 0; i < 6; ++i) {
+			bots.push_back(m->bot());
+		}
+		REQUIRE(wait_in_round(*m));
+		int killer = -1;
+		std::vector<int> victims;
+		for (const Script *b : bots) {
+			const uint8_t team = m->rules().team_of(uint8_t(b->slot));
+			if (team == 1 && killer < 0) {
+				killer = b->slot;
+			} else if (team == 2) {
+				victims.push_back(b->slot);
+			}
+		}
+		REQUIRE(killer >= 0);
+		REQUIRE(victims.size() == 3u);
+		for (const int v : victims) {
+			net::DeathEvent e;
+			e.victim = uint8_t(v);
+			e.killer = uint8_t(killer);
+			m->server.rules()->death(e);
+		}
+		REQUIRE(m->until([&] { return m->rules().phase() == net::MatchPhase::RoundOver; }, 60));
+		const net::MatchState &ms = m->rules().match_state();
+		std::printf("kill limit: 3 kills by team 1 in one tick at limit %d: round over US %d - RU %d, winner %u\n",
+				kLimit, int(ms.kills[0]), int(ms.kills[1]), unsigned(ms.winner));
+		CHECK(ms.kills[0] == kLimit);
+		CHECK(ms.kills[1] == 0);
+		CHECK(ms.winner == 1);
+		CHECK_FALSE(m->rules().faulted());
+	}
+
 	TEST_CASE("hostile: SpawnRequest refusals and v3 datagrams") {
 		tdm::TdmLevel *level = tdm::load_tdm_level_once();
 		if (level == nullptr) {

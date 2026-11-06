@@ -45,7 +45,7 @@ constexpr bool kRuNtLanded = true;
 constexpr float kDeg = sim::kPi / 180.0f;
 
 constexpr uint64_t kReplayDecisionHash = 0x7483048eed6991b6ull;
-constexpr uint64_t kReplayWorldHash = 0x1f392bb5d1eb9a6full;
+constexpr uint64_t kReplayWorldHash = 0x92ef0bc9e895631eull;
 
 void pending_skip(const char *p_row) {
 	std::printf("%s: PENDING (ru, nt): needs run_tdm and the v3 codecs on the branch\n", p_row);
@@ -983,13 +983,14 @@ TEST_SUITE("host-tdm-replay") {
 				return;
 			}
 			const uint64_t seeds[3] = { 11, 11, 12 };
+			constexpr int kReplayKillLimit = 20;
 			struct Run {
 				std::string error;
 				tt::TdmRunResult result;
 			};
 			const std::vector<Run> runs = core::parallel_map<Run>(3, [&](size_t i) {
 				Run run;
-				tt::TdmRunConfig c = base_config(seeds[i], 32, true, 20);
+				tt::TdmRunConfig c = base_config(seeds[i], 32, true, kReplayKillLimit);
 				c.after_round_ticks = 600;
 				c.hashes = true;
 				c.record_decisions = true;
@@ -1025,6 +1026,7 @@ TEST_SUITE("host-tdm-replay") {
 			CHECK(a.trace_hash == b.trace_hash);
 			CHECK(a.match_bytes_hash == b.match_bytes_hash);
 			CHECK(a.kills == b.kills);
+			CHECK(std::max(a.kills[1], a.kills[2]) == kReplayKillLimit);
 			CHECK(differ_other > 0u);
 
 			const size_t decision_ticks = std::min(a.decision_hashes.size(), b.decision_hashes.size());
@@ -1046,10 +1048,12 @@ TEST_SUITE("host-tdm-replay") {
 				}
 				return h;
 			};
-			std::printf("host.tdm.replay: seed %llu, %u ticks, round over at %u: %llu bot commands over %zu ticks, %zu / %zu ticks differ (same seed), %zu "
-						"differ (other seed); decisions %016llx / %016llx / %016llx; world %016llx\n",
-					(unsigned long long)seeds[0], a.ticks, a.round_over_tick, (unsigned long long)a.decisions, a.decision_hashes.size(), decisions_differ,
-					decision_ticks, decisions_differ_other, (unsigned long long)a.decision_hash, (unsigned long long)b.decision_hash,
+			std::printf("host.tdm.replay: seed %llu, %u ticks, round over at %u, US %d - RU %d: %llu bot commands over "
+						"%zu ticks, %zu / %zu ticks differ "
+						"(same seed), %zu differ (other seed); decisions %016llx / %016llx / %016llx; world %016llx\n",
+					(unsigned long long)seeds[0], a.ticks, a.round_over_tick, int(a.kills[1]), int(a.kills[2]),
+					(unsigned long long)a.decisions, a.decision_hashes.size(), decisions_differ, decision_ticks,
+					decisions_differ_other, (unsigned long long)a.decision_hash, (unsigned long long)b.decision_hash,
 					(unsigned long long)c.decision_hash, (unsigned long long)digest(a.world_hashes));
 			CHECK(decision_ticks > 0u);
 			CHECK(a.decision_hashes.size() == b.decision_hashes.size());
