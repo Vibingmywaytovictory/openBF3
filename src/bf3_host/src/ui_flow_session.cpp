@@ -546,15 +546,22 @@ void UiFlowSession::push_graph(uint32_t p_node) {
 	if (top != entered_.rend() && top->graph == e.graph) {
 		return;
 	}
-	if (e.pop_previous && top != entered_.rend()) {
-		const std::string previous = top->graph;
-		const auto asset = graphs_.find(previous);
-		if (asset == graphs_.end() || asset->second == nullptr || !asset->second->protect_screens) {
-			note("pop graph " + ui::ui_data_category_leaf(previous) + " for " + ui::ui_data_category_leaf(e.graph));
-			++stats_.graphs_popped;
-			flow_->close_graph(previous);
+	if (e.pop_previous) {
+		std::vector<std::string> previous;
+		for (auto g = entered_.rbegin(); g != entered_.rend(); ++g) {
+			if (g->priority == e.priority && g->graph != e.graph) {
+				previous.push_back(g->graph);
+			}
 		}
-		std::erase_if(entered_, [&](const GraphEntity &g) { return g.graph == previous; });
+		for (const std::string &graph : previous) {
+			const auto asset = graphs_.find(graph);
+			if (asset == graphs_.end() || asset->second == nullptr || !asset->second->protect_screens) {
+				note("pop graph " + ui::ui_data_category_leaf(graph) + " for " + ui::ui_data_category_leaf(e.graph));
+				++stats_.graphs_popped;
+				flow_->close_graph(graph);
+			}
+			std::erase_if(entered_, [&](const GraphEntity &g) { return g.graph == graph; });
+		}
 	}
 	std::erase_if(entered_, [&](const GraphEntity &g) { return g.graph == e.graph; });
 	entered_.push_back(e);

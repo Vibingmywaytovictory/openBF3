@@ -237,9 +237,8 @@ TEST_SUITE("ui-flow-session") {
 			"deploy UnSpawnCustomizationVehicle", "deploy UnSpawnCustomization", "deploy OnFrontendCameraChanged",
 			"deploy NotifyMinimapZoomLevelHasChanged" };
 		Lines first_spawn_expected{ "deploy OnFrontendCameraChanged", "deploy Spawn", "native Playing",
-			"push hudscreen", "close spawnscreenpc", "close spawnbuttonscreen",
-			"close spawnscreenticketcountertdmscreen", "push preroundwaitingscreen", "push hudmpscreen",
-			"push hudtdmscreen" };
+			"close spawnscreenpc", "close spawnbuttonscreen", "close spawnscreenticketcountertdmscreen",
+			"push hudscreen", "push preroundwaitingscreen", "push hudmpscreen", "push hudtdmscreen" };
 		first_spawn_expected.insert(first_spawn_expected.end(), spawned_tail.begin(), spawned_tail.end());
 		CHECK(first_spawn == first_spawn_expected);
 		const Lines menu_expected{ "close hudscreen", "close hudmpscreen", "close hudtdmscreen", "push ingamemenump",
@@ -275,9 +274,9 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(sc.at("push killscreen", 601) - died == int64_t(sim::logic::logic_delay_ticks(timeline->kill_card_s)));
 		CHECK(sc.at("close killscreen", 601) - died ==
 				int64_t(sim::logic::logic_delay_ticks(timeline->spawn_screens_s)));
-		Lines deploy_expected{ "deploy OnFrontendCameraChanged", "deploy Spawn", "native Playing", "push hudscreen",
+		Lines deploy_expected{ "deploy OnFrontendCameraChanged", "deploy Spawn", "native Playing",
 			"close spawnscreenpc", "close spawnbuttonscreen", "close spawnscreenticketcountertdmscreen",
-			"push hudmpscreen", "push hudtdmscreen" };
+			"push hudscreen", "push hudmpscreen", "push hudtdmscreen" };
 		deploy_expected.insert(deploy_expected.end(), spawned_tail.begin(), spawned_tail.end());
 		CHECK(deploy == deploy_expected);
 		Lines revive_expected{ "native Died", "push chatscreen", "close chatscreen",
@@ -382,10 +381,11 @@ TEST_SUITE("ui-flow-session") {
 						"deploy MouseInput", "deploy OnFrontendCameraChanged" });
 		escape(540);
 		const Lines menu = sc.phase("Deactivate on the deploy screen");
-		REQUIRE(menu.size() >= 3);
+		REQUIRE(menu.size() >= 4);
 		CHECK(menu[0] == "close spawnscreenpc");
 		CHECK(menu[1] == "close spawnbuttonscreen");
-		CHECK(menu[2] == "push ingamemenump");
+		CHECK(menu[2] == "close spawnscreenticketcountertdmscreen");
+		CHECK(menu[3] == "push ingamemenump");
 		CHECK(s.flow().find_screen("ui/flow/screen/ingamemenump") != nullptr);
 		CHECK(s.errors().empty());
 		CHECK(s.flow().errors().empty());
@@ -1163,7 +1163,8 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(s.pending_data_writes() == 0);
 	}
 
-	TEST_CASE("ui flow session: RESUME in the menu opened on the deploy screen brings the deploy screens back") {
+	TEST_CASE("ui flow session: the menu opened on the deploy screen closes the deploy screens and their ticket "
+			  "counter, and RESUME brings them all back") {
 		Level *l = level_or_skip();
 		if (l == nullptr) {
 			return;
@@ -1207,8 +1208,10 @@ TEST_SUITE("ui-flow-session") {
 			return std::find(p_lines.begin(), p_lines.end(), p_line) != p_lines.end();
 		};
 		CHECK(has(opened, "close spawnbuttonscreen"));
+		CHECK(has(opened, "close spawnscreenticketcountertdmscreen"));
 		CHECK(has(opened, "push ingamemenump"));
 		CHECK(has(resumed, "close ingamemenump"));
+		CHECK(has(resumed, "push spawnscreenticketcountertdmscreen"));
 		CHECK(has(resumed, "push spawnbuttonscreen"));
 		CHECK(has(resumed, "push spawnscreenpc"));
 		constexpr int32_t kIsInMenu = -1093247625;
