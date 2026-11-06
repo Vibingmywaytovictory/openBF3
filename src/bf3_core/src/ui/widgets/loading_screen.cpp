@@ -1,6 +1,7 @@
 #include "bf3/core/ui/loading_screen.h"
 
 #include "bf3/core/ui/as2_clip_loader.h"
+#include "bf3/core/util/fnv.h"
 #include "bf3/core/util/splitmix64.h"
 #include "hud_widget_support.h"
 #include "scroll_text.h"
@@ -408,7 +409,10 @@ LoadingScreenSource loading_screen_source(const level::LevelInfo &p_info, std::s
 	s.level_description = p_info.description;
 	s.platform = std::move(p_platform);
 	s.hints = std::move(p_hints);
-	s.seed = p_seed;
+	uint64_t seed = kFnv1aOffset;
+	fnv1a(seed, p_info.id.data(), p_info.id.size());
+	fnv1a(seed, p_mode_id.data(), p_mode_id.size());
+	s.seed = fnv1a_fold(seed, p_seed);
 	return s;
 }
 

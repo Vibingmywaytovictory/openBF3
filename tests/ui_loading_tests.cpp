@@ -11,7 +11,10 @@
 #include "test_support.h"
 #include "ui_retail_support.h"
 
+#include <algorithm>
+#include <cstdio>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -134,6 +137,36 @@ TEST_SUITE("ui-loading") {
 		f->hud->set_stage_rects(wide);
 		f->step();
 		CHECK(f->hud->clip(holder).width() == doctest::Approx(1600.0).epsilon(0.001));
+	}
+
+	TEST_CASE("ui loading: each TDM level's first hint comes from its own HintAsset, picked by level and mode, not one "
+			  "fixed hint on every level") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		std::set<std::string> firsts;
+		std::string shown;
+		for (const std::string_view level : { "MP_Subway", "MP_011", "MP_003" }) {
+			Result<LevelMount> mount = level::mount_level_description(*r->mount->install, level);
+			REQUIRE_MESSAGE(mount.ok(), (mount.ok() ? std::string() : mount.error().message));
+			Result<level::LevelInfo> info = level::level_info(*mount, level);
+			REQUIRE_MESSAGE(info.ok(), (info.ok() ? std::string() : info.error().message));
+			REQUIRE(std::find(info->modes.begin(), info->modes.end(), "TeamDeathMatch0") != info->modes.end());
+			Result<std::vector<std::string>> hints = level::level_hints(*mount, info->loading.hint_asset);
+			REQUIRE_MESSAGE(hints.ok(), (hints.ok() ? std::string() : hints.error().message));
+			REQUIRE(hints->size() == 89u);
+			const std::vector<std::string> tips = *hints;
+			LoadingScreenData data(loading_screen_source(*info, "TeamDeathMatch0", std::move(*hints), "win32", kSeed));
+			const std::string first = data.get_data("nextHint").to_string();
+			CHECK(std::find(tips.begin(), tips.end(), first) != tips.end());
+			LoadingScreenData again(loading_screen_source(*info, "TeamDeathMatch0", tips, "win32", kSeed));
+			CHECK(again.get_data("nextHint").to_string() == first);
+			firsts.insert(first);
+			shown += " " + std::string(level) + " " + first;
+		}
+		CHECK_MESSAGE(firsts.size() > 1u, shown);
+		std::printf("ui.loading first hints:%s\n", shown.c_str());
 	}
 
 	TEST_CASE("ui loading: the hint changes every 13 s") {
