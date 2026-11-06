@@ -6,6 +6,7 @@
 #include "win32_text.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -24,7 +25,8 @@ using bf3::core::detail::path_utf8;
 using namespace bf3::test::procs;
 
 constexpr uint32_t kMaxPlayers = 64;
-constexpr uint32_t kGateBots = 61;
+constexpr uint32_t kGateBots = 60;
+constexpr uint32_t kClients = 4;
 constexpr uint32_t kControlBots = 63;
 constexpr int kKillLimit = 250;
 constexpr double kTeamKdMin = 0.75;
@@ -35,6 +37,7 @@ constexpr uint64_t kMinSquadSamples = 2000;
 constexpr double kTickP99Ms = 8.0;
 constexpr std::string_view kNetsim = "--netsim=lat=50";
 constexpr std::string_view kMateName = "mate";
+constexpr std::array<std::string_view, 2> kRivalNames = { "rival1", "rival2" };
 constexpr std::string_view kStatusPrefix = "[dedicated] t=";
 constexpr std::string_view kRoundOver = ": round over US ";
 
@@ -83,6 +86,20 @@ std::optional<std::string> squad_of(const std::string &p_list, uint32_t p_slot) 
 	return std::nullopt;
 }
 
+std::array<size_t, 2> team_members(const std::string &p_list) {
+	std::array<size_t, 2> n{};
+	std::istringstream in(p_list);
+	std::string token;
+	while (in >> token) {
+		const size_t colon = token.find(':');
+		const char team = colon == std::string::npos || colon + 1 >= token.size() ? '0' : token[colon + 1];
+		if (team == '1' || team == '2') {
+			++n[size_t(team - '1')];
+		}
+	}
+	return n;
+}
+
 struct Cohesion {
 	uint64_t samples = 0;
 	double median = 0.0;
@@ -102,10 +119,11 @@ Cohesion status_cohesion(std::string_view p_line) {
 }
 
 TEST_SUITE("net-procs-bots-squads") {
-	TEST_CASE("the dedicated Metro TDM server with 64 players, 61 bots, a bf3dump client that leads a squad of its "
-			  "own and a headless game client that joins it, both at 100 ms RTT: a round to 250 kills, team K/D in "
-			  "[0.75, 1.33], squad cohesion as host.tdm.squads, both clients agree on every squad and leader, the "
-			  "game client deploys on its mate, no kick, tick p99 < 8 ms") {
+	TEST_CASE("the dedicated Metro TDM server with 64 players, 60 bots, a bf3dump client that leads a squad of its "
+			  "own and a headless game client that joins it on one team and two still bf3dump clients that lead "
+			  "squads of their own on the other, all at 100 ms RTT: a round to 250 kills, team K/D in [0.75, 1.33], "
+			  "squad cohesion as host.tdm.squads, both clients agree on every squad and leader, the game client "
+			  "deploys on its mate, no kick, tick p99 < 8 ms") {
 		ProcDriver driver(driver_config_from_env());
 		const std::optional<Server> server = start_server(driver, kGateBots, 2400,
 				{ "--level=" + std::string(kLevel), "--mode=" + std::string(kMode),
@@ -113,19 +131,45 @@ TEST_SUITE("net-procs-bots-squads") {
 		if (!server) {
 			return;
 		}
-		const std::optional<size_t> mate = start_tool(driver, "mate",
-				client_args(driver, "mate", server->port,
-						{ "--script=still", "--squad=create", "--until=round-over", "--seconds=2300",
-								"--name=" + std::string(kMateName), std::string(kNetsim) }));
-		if (!mate || !need(line_starts(driver, *mate, "client: playing", 300s), driver.output(*mate))) {
+		std::vector<size_t> tools;
+		const auto stop_all = [&] {
+			for (const size_t t : tools) {
+				driver.finish(t, 1s);
+			}
 			driver.finish(server->id, 1s);
+		};
+		const auto seat = [&](std::string_view p_name, std::vector<std::string> p_extra) {
+			p_extra.insert(p_extra.end(),
+					{ "--script=still", "--until=round-over", "--seconds=2300", "--name=" + std::string(p_name),
+							std::string(kNetsim) });
+			const std::optional<size_t> id =
+					start_tool(driver, p_name, client_args(driver, p_name, server->port, std::move(p_extra)));
+			if (id) {
+				tools.push_back(*id);
+			}
+			return id && need(line_starts(driver, *id, "client: playing", 300s), driver.output(*id));
+		};
+		if (!seat(kMateName, { "--squad=create" }) || !seat(kRivalNames[0], { "--squad=create" })) {
+			stop_all();
 			return;
 		}
+		const size_t mate = tools[0];
 		bf3::core::Result<size_t> game = driver.start(godot_client(
 				driver, server->port, { std::string(kNetsim), "--squad-check=" + std::string(kMateName) }, "game"));
-		if (!need(game.ok(), game.ok() ? std::string() : game.error().message)) {
-			driver.finish(*mate, 1s);
-			driver.finish(server->id, 1s);
+		if (!need(game.ok(), game.ok() ? std::string() : game.error().message) ||
+				!need(driver.wait_line(
+							  server->id,
+							  [](std::string_view l) {
+								  return l.rfind(kStatusPrefix, 0) == 0 &&
+										  number_after(l, " clients ").value_or(0.0) >= double(kClients - 1);
+							  },
+							  300s),
+						driver.output(server->id)) ||
+				!seat(kRivalNames[1], { "--squad=create" })) {
+			if (game.ok()) {
+				driver.finish(*game, 1s);
+			}
+			stop_all();
 			return;
 		}
 		std::string report;
@@ -134,9 +178,11 @@ TEST_SUITE("net-procs-bots-squads") {
 				&report);
 		CHECK_MESSAGE(reported, driver.output(*game));
 		const ChildEnd game_end = driver.finish(*game, 60s);
-		CHECK_MESSAGE(line_starts(driver, *mate, "client: summary", 300s), driver.output(*mate));
-		const ChildEnd mate_end = driver.finish(*mate, 60s);
-		require_clean_exit(driver, *mate, mate_end, "bf3dump client");
+		for (const size_t t : tools) {
+			CHECK_MESSAGE(line_starts(driver, t, "client: summary", 300s), driver.output(t));
+			const ChildEnd end = driver.finish(t, 60s);
+			require_clean_exit(driver, t, end, "bf3dump client");
+		}
 		driver.wait_line(
 				server->id,
 				[](std::string_view l) { return l.rfind(kStatusPrefix, 0) == 0 && contains(l, kRoundOver); }, 10s);
@@ -153,8 +199,11 @@ TEST_SUITE("net-procs-bots-squads") {
 			game_squads.pop_back();
 		}
 		const std::string mate_squads = squads_line(driver.roots("mate").dir / L"stats.txt");
-		CHECK_MESSAGE(!mate_squads.empty(), driver.output(*mate));
+		CHECK_MESSAGE(!mate_squads.empty(), driver.output(mate));
 		CHECK(game_squads == mate_squads);
+		const std::array<size_t, 2> members = team_members(game_squads);
+		CHECK(members[0] == kMaxPlayers / 2);
+		CHECK(members[1] == kMaxPlayers / 2);
 		const uint64_t mate_slot = summary_number(report, ": mate " + std::string(kMateName) + " slot ");
 		const uint64_t own_slot = summary_number(report, ", own slot ");
 		if (!need(mate_slot != UINT64_MAX, report) || !need(own_slot != UINT64_MAX, report)) {
@@ -173,7 +222,7 @@ TEST_SUITE("net-procs-bots-squads") {
 
 		const std::vector<std::string> status = lines_of(server_out, kStatusPrefix);
 		const auto seated = std::find_if(status.begin(), status.end(),
-				[](const std::string &l) { return number_after(l, " clients ").value_or(0.0) >= 2.0; });
+				[](const std::string &l) { return number_after(l, " clients ").value_or(0.0) >= double(kClients); });
 		const auto over = std::find_if(
 				status.begin(), status.end(), [](const std::string &l) { return contains(l, kRoundOver); });
 		if (!need(seated != status.end(), server_out) || !need(over != status.end(), server_out)) {

@@ -1278,7 +1278,7 @@ openbf3_proc_row(net.procs.master test_net_procs LABEL timing TIMEOUT 900 ARGS -
 set_tests_properties(net.procs.master PROPERTIES RUN_SERIAL TRUE)
 openbf3_proc_row(net.procs.bots_squads test_net_procs LABEL timing TIMEOUT 3600 ARGS --test-suite=net-procs-bots-squads)
 set_tests_properties(net.procs.bots_squads PROPERTIES RUN_SERIAL TRUE)
-openbf3_cost(net.procs.bots_squads 1 351)
+openbf3_cost(net.procs.bots_squads 1 387)
 set_tests_properties(net.procs.connect net.procs.two_clients net.procs.rotation net.procs.godot_connect net.procs.follow net.procs.listen_maplist net.procs.kick godot.rotation PROPERTIES RUN_SERIAL TRUE)
 openbf3_cost(net.procs.connect 1 45)
 openbf3_cost(net.procs.two_clients 1 60)
