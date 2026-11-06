@@ -72,6 +72,8 @@ std::optional<uint16_t> find_clear_heading(const SoldierMotor &p_motor, const Co
 
 std::optional<Vec3> find_drop_spot(const SoldierMotor &p_motor, const CollisionWorld &p_world, float p_clearance = 50.0f, float p_grid = 5.0f);
 
+float fall_out_y(const SoldierMotor &p_motor, const CollisionWorld &p_world);
+
 struct FriendlyDeath {
 	Vec3 position{};
 	uint32_t tick = 0;

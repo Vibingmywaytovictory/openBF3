@@ -373,6 +373,15 @@ std::optional<Vec3> find_drop_spot(const SoldierMotor &p_motor, const CollisionW
 	return std::nullopt;
 }
 
+float fall_out_y(const SoldierMotor &p_motor, const CollisionWorld &p_world) {
+	const std::shared_ptr<const StaticWorldShapes> &shapes = p_world.shapes();
+	if (shapes == nullptr || (shapes->tile_count() == 0 && shapes->terrain_count() == 0) ||
+			!std::isfinite(shapes->min()[1])) {
+		return -INFINITY;
+	}
+	return shapes->min()[1] - p_motor.params().poses[size_t(Pose::Stand)].height;
+}
+
 namespace {
 
 using bf3::core::splitmix64;

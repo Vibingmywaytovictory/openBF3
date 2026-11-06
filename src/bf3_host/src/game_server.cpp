@@ -68,6 +68,7 @@ struct GameServer::Impl {
 	std::unordered_map<uint32_t, NetTraffic> received;
 	uint64_t bad_datagrams = 0;
 	uint64_t step_precondition_failures = 0;
+	float fall_out_y = -INFINITY;
 	double last_step_ms = 0;
 
 	GameServerTickTimes times;
@@ -281,7 +282,7 @@ struct GameServer::Impl {
 			if (!s.dummy) {
 				soldiers.command(i, combat.clamp_pitch(i, match.restrict(body.last), body.state.pose));
 			}
-			if (was_alive && !s.dummy && match.take_suicide(i)) {
+			if (was_alive && !s.dummy && (match.take_suicide(i) || body.state.position[1] < fall_out_y)) {
 				soldiers.kill(i);
 			}
 			soldiers.step(i, motor, combat.motor_modifiers(i, motor.params()));
@@ -501,6 +502,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	}
 	m.world = std::move(*world);
 	BF3_TRY(m.motor.init(*m.world, p_config.level->motor));
+	m.fall_out_y = sim::fall_out_y(m.motor, *m.world);
 	m.motor_hash = sim::motor_params_hash(p_config.level->motor);
 	m.slots.resize(p_config.max_slots);
 	m.soldiers.resize(p_config.max_slots);

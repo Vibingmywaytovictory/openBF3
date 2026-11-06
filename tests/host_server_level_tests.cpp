@@ -381,7 +381,9 @@ TEST_SUITE("host-server-level") {
 				m.before.files.size());
 	}
 
-	TEST_CASE("XP2_Office TeamDeathMatchC0: a spawn on point 27 stands on a floor") {
+	TEST_CASE(
+			"XP2_Office TeamDeathMatchC0: a spawn on point 27 stands on a floor, and a soldier below the static world "
+			"dies a fall death") {
 		bf3::test::Mounted m;
 		if (!bf3::test::open_or_skip(m)) {
 			return;
@@ -470,6 +472,38 @@ TEST_SUITE("host-server-level") {
 		CHECK((spawned.flags & sim::soldier_flags::kGrounded) != 0);
 		CHECK(has_floor);
 		CHECK(spawned.position[1] - floor.position[1] < 0.1f);
+
+		const float lowest = level->static_world->min()[1];
+		const float limit = lowest - level->motor.poses[size_t(sim::Pose::Stand)].height;
+		net::DebugRequest teleport;
+		teleport.kind = net::DebugKind::Teleport;
+		teleport.id = 2;
+		teleport.position = { spawned.position[0], lowest - 0.5f, spawned.position[2] };
+		teleport.yaw = spawned.yaw;
+		peer.debug(teleport);
+		const size_t deaths_before = peer.combat.size();
+		uint32_t ticks = 0;
+		while (ticks < 120 && tt::is_alive(own())) {
+			tick();
+			++ticks;
+		}
+		const sim::SoldierState dead = *own();
+		bool fall_death = false;
+		for (size_t i = deaths_before; i < peer.combat.size(); ++i) {
+			for (const net::DeathEvent &d : peer.combat[i].deaths) {
+				fall_death = fall_death ||
+						(d.victim == uint8_t(peer.slot()) && d.killer == d.victim && d.def == sim::weapons::kNoWeapon);
+			}
+		}
+		std::printf("host.server.level XP2_Office: lowest static bound %.2f m, fall-out height %.2f m, teleported to "
+					"%.2f m, dead "
+					"after %u ticks at %.2f m, fall death %d\n",
+				double(lowest), double(limit), double(lowest - 0.5f), ticks, double(dead.position[1]), int(fall_death));
+		CHECK(limit < lowest);
+		CHECK_FALSE(tt::is_alive(&dead));
+		CHECK(fall_death);
+		CHECK(dead.position[1] < limit);
+		CHECK(ticks <= 60u);
 
 		const core::SnapshotDiff diff = core::diff_snapshots(m.before, m.reader.snapshot());
 		CHECK_MESSAGE(diff.clean(), diff.summary());
