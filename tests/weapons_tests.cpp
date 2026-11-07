@@ -1168,6 +1168,24 @@ TEST_SUITE("weapons-unit") {
 		}
 	}
 
+	TEST_CASE("sim.weapons.unit: a bullet first stepped nine ticks late hits where one stepped every tick hits") {
+		const std::shared_ptr<const WeaponTable> t = synthetic_table();
+		const std::unique_ptr<CollisionWorld> w = wall_world({ 60.0f });
+		const StaticTargets none({});
+		const ShotEvent s = level_shot(id_of(*t, kM16A3), { 0, 1.6f, 0 }, 300'000);
+		ProjectileWorld on_time(t), late(t);
+		REQUIRE(on_time.spawn(s).ok());
+		REQUIRE(late.spawn(s).ok());
+		const Flown a = fly(on_time, *w, none, 1, 60), b = fly(late, *w, none, 10, 60);
+		REQUIRE(a.impacts.size() == 1);
+		REQUIRE(b.impacts.size() == a.impacts.size());
+		MESSAGE("every tick: y " << a.impacts[0].position[1] << " at " << a.impacts[0].time << "; late: y "
+								 << b.impacts[0].position[1] << " at " << b.impacts[0].time);
+		CHECK(b.impacts[0].kind == a.impacts[0].kind);
+		CHECK(b.impacts[0].time == a.impacts[0].time);
+		CHECK(b.impacts[0].position == a.impacts[0].position);
+	}
+
 	TEST_CASE("sim.weapons.unit: W8 600 random ticks per def: the state invariants and the projectile bounds") {
 		const std::shared_ptr<const WeaponTable> t = synthetic_table();
 		const std::unique_ptr<CollisionWorld> w = wall_world({ 40.0f, 300.0f });

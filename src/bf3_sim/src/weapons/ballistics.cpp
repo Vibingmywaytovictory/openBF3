@@ -462,7 +462,8 @@ bool fly(Env &r_env, Projectile &r_p, SimTime p_t_end) {
 			r_p.time = limit;
 			break;
 		}
-		const SegmentEnd e = next_segment(r_p, d, limit, r_env.limits.missile_substeps);
+		const SegmentEnd e = next_segment(
+				r_p, d, std::min(limit, tick_end(tick_containing(r_p.time))), r_env.limits.missile_substeps);
 		if (!r_env.charge(1)) {
 			return true;
 		}
