@@ -89,6 +89,7 @@ constexpr LogicParamField kSyncedBoolF[] = { { "In", K::Bool } };
 constexpr LogicParamField kIntF[] = { { "DefaultValue", K::Int }, { "IncDecValue", K::Int } };
 constexpr LogicParamField kFloatF[] = { { "DefaultValue", K::Float }, { "IncDecValue", K::Float } };
 constexpr LogicParamField kIntHubF[] = { { "InputCount", K::Int }, { "InputSelect", K::Int } };
+constexpr LogicParamField kEventAndGateF[] = { { "EventCount", K::Int } };
 constexpr LogicParamField kBoolToEventF[] = { { "Value", K::Bool }, { "InitalEvent", K::Bool } };
 constexpr LogicParamField kNotF[] = { { "In", K::Bool } };
 constexpr LogicParamField kAndOrF[] = { { "In1", K::Bool }, { "In2", K::Bool } };
@@ -158,6 +159,8 @@ std::span<const LogicParamField> logic_param_fields(LogicTypeId p_type) {
 			return fields(kFloatF);
 		case T::IntHub:
 			return fields(kIntHubF);
+		case T::EventAndGate:
+			return fields(kEventAndGateF);
 		case T::BoolToEvent:
 			return fields(kBoolToEventF);
 		case T::Not:

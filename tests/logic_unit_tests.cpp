@@ -2150,4 +2150,70 @@ TEST_SUITE("logic-unit") {
 		REQUIRE(r.ok());
 		CHECK(r->ticks == 10);
 	}
+
+	TEST_CASE("logic: TransformHub - Out takes the In1..In8 value set last; nothing before the first") {
+		G g;
+		const int32_t kTx = logic_port_id("Tx");
+		const uint32_t hub = g.node(LogicTypeId::TransformHub);
+		const uint32_t open = g.node(LogicTypeId::CapturePoint), close = g.node(LogicTypeId::CapturePoint),
+					   last = g.node(LogicTypeId::CapturePoint);
+		g.b.add_property(open, kTx, hub, port::kIn1);
+		g.b.add_property(close, kTx, hub, port::kIn2);
+		g.b.add_property(last, kTx, hub, logic_port_id("In8"));
+		const uint32_t sink = property_sink(g, hub, port::kOut);
+		LogicRuntime rt = make_runtime(g.finish());
+		start(rt);
+		CHECK_FALSE(rt.output(hub, port::kOut).has_value());
+		const std::pair<uint32_t, float> writes[] = { { open, 1.0f }, { close, 2.0f }, { open, 3.0f }, { close, 4.0f },
+			{ last, 8.0f } };
+		std::vector<float> seen;
+		for (const auto &[source, x] : writes) {
+			REQUIRE(rt.force_property(source, kTx, v_transform(x, 0, 0)).ok());
+			step(rt);
+			seen.push_back(out_value(rt, hub, port::kOut, K::Transform).m[9]);
+		}
+		CHECK(seen == std::vector<float>{ 1.0f, 2.0f, 3.0f, 4.0f, 8.0f });
+		CHECK(property_ticks(rt, sink) == std::vector<Tick>{ 1, 2, 3, 4, 5 });
+		no_unhandled(rt);
+	}
+
+	TEST_CASE("logic: EventAndGate - Out once every In1..In<EventCount> has come, repeats ignored, Reset re-arms; "
+			  "an In past EventCount is not an input") {
+		G g;
+		const uint32_t gate = g.node(LogicTypeId::EventAndGate);
+		g.b.add_param(gate, logic_port_id("EventCount"), v_int(2));
+		const uint32_t in1 = driver(g, gate, port::kIn1), in2 = driver(g, gate, port::kIn2),
+					   reset = driver(g, gate, port::kReset);
+		const uint32_t sink = event_sink(g, gate, port::kOut);
+		const uint32_t three = g.node(LogicTypeId::EventAndGate);
+		g.b.add_param(three, logic_port_id("EventCount"), v_int(3));
+		const uint32_t three_in[3] = { driver(g, three, port::kIn1), driver(g, three, port::kIn2),
+			driver(g, three, port::kIn3) };
+		const uint32_t three_sink = event_sink(g, three, port::kOut);
+		LogicRuntime rt = make_runtime(g.finish());
+		start(rt);
+		const uint32_t order[] = { in1, in1, in2, in2, in1, reset, in2, in1, three_in[2], three_in[0], three_in[0],
+			three_in[1] };
+		for (const uint32_t d : order) {
+			force(rt, d);
+			step(rt);
+		}
+		CHECK(hits(rt, sink) == std::vector<Tick>{ 3, 8 });
+		CHECK(hits(rt, three_sink) == std::vector<Tick>{ 12 });
+		no_unhandled(rt);
+		G g2;
+		const uint32_t two = g2.node(LogicTypeId::EventAndGate);
+		g2.b.add_param(two, logic_port_id("EventCount"), v_int(2));
+		const uint32_t past = driver(g2, two, port::kIn3), first = driver(g2, two, port::kIn1);
+		const uint32_t two_sink = event_sink(g2, two, port::kOut);
+		LogicRuntime rt2 = make_runtime(g2.finish());
+		start(rt2);
+		force(rt2, past);
+		force(rt2, first);
+		step(rt2);
+		CHECK(hits(rt2, two_sink).empty());
+		REQUIRE(rt2.unhandled().size() == 1);
+		CHECK(rt2.unhandled()[0].type == LogicTypeId::EventAndGate);
+		CHECK(rt2.unhandled()[0].port == port::kIn3);
+	}
 }

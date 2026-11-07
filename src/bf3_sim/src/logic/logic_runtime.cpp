@@ -115,6 +115,7 @@ constexpr int32_t kBoolSettingName = gp::logic_port_id("BoolSettingName");
 constexpr int32_t kIntSettingName = gp::logic_port_id("IntSettingName");
 constexpr int32_t kFloatSettingName = gp::logic_port_id("FloatSettingName");
 constexpr int32_t kTransform = gp::logic_port_id("Transform");
+constexpr int32_t kEventCount = gp::logic_port_id("EventCount");
 }
 
 constexpr size_t kMaxOutputs = 10;
@@ -1086,6 +1087,25 @@ struct LogicRuntime::State {
 					unhandled_port(p_node, p_port, true);
 				}
 				return;
+			case T::EventAndGate: {
+				const int64_t count =
+						std::clamp<int64_t>(as_int(in(p_node, port::kEventCount)), 0, int64_t(kMaxOutputs) - 1);
+				const int k = index_of(kInN, p_port);
+				const uint64_t all = ((uint64_t(1) << count) - 1) << 1;
+				if (p_port == port::kReset) {
+					st.used = 0;
+				} else if (k >= 1 && k <= count) {
+					if ((st.used & all) != all) {
+						st.used |= uint64_t(1) << k;
+						if ((st.used & all) == all) {
+							fire(p_node, port::kOut, p_context);
+						}
+					}
+				} else {
+					unhandled_port(p_node, p_port, true);
+				}
+				return;
+			}
 			case T::TeamFilter:
 				if (p_port == port::kIn) {
 					const int64_t team = as_int(in(p_node, port::kTeam));
@@ -1350,6 +1370,15 @@ struct LogicRuntime::State {
 				return;
 			case T::PrintDebugText:
 				return;
+			case T::TransformHub: {
+				const int k = index_of(kInN, p_port);
+				if (k >= 1 && k <= 8) {
+					publish(p_node, port::kOut, p_value);
+				} else {
+					unhandled_port(p_node, p_port, false);
+				}
+				return;
+			}
 			case T::Locator:
 
 				if (p_port == port::kTransform) {
