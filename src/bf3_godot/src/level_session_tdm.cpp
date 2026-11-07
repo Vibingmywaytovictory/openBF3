@@ -13,6 +13,7 @@
 #include "hud_items.h"
 #include "input_mapper.h"
 #include "level_session_menu.h"
+#include "logic_placements.h"
 #include "native_eor.h"
 #include "native_flow.h"
 #include "native_hud.h"
@@ -1525,6 +1526,15 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 				light_on = effects.environment(eor->environment->visual_environment) != nullptr;
 			}
 			m.eor_showroom->frame(this, *plan_, upload_, eor, light_on);
+		}
+		if (plan_ != nullptr && upload_.begun() && flow != nullptr) {
+			if (m.logic_placements == nullptr) {
+				m.logic_placements = std::unique_ptr<LogicPlacements, void (*)(LogicPlacements *)>(
+						new LogicPlacements(), &delete_part<LogicPlacements>);
+			}
+			if (m.logic_placements->frame(*plan_, flow->runtime(), upload_)) {
+				UtilityFunctions::print(to_godot(m.logic_placements->describe()));
+			}
 		}
 	}
 	if (m.camera_cuts.step(bf3::core::level::CameraCutState{ m.join_view_placed, r_game.alive,

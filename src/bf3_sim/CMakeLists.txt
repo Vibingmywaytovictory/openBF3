@@ -147,6 +147,11 @@ target_sources(bf3_sim PRIVATE
 )
 
 target_sources(bf3_sim PRIVATE
+    include/bf3/sim/logic/placement_drivers.h
+    src/logic/placement_drivers.cpp
+)
+
+target_sources(bf3_sim PRIVATE
     include/bf3/sim/weapons/gadgets.h
     src/weapons/gadgets.cpp
 )

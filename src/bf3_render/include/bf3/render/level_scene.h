@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/core/cache/cached_convert.h"
+#include "bf3/core/level/census.h"
 #include "bf3/core/level/level_transform.h"
 #include "bf3/core/math.h"
 #include "bf3/core/result.h"
@@ -97,9 +98,13 @@ struct SceneMeshPlan {
 	uint32_t instances = 0;
 };
 
+inline constexpr uint32_t kNoSceneDrivers = 0xFFFFFFFFu;
+
 struct SceneInstancePlan {
 	uint32_t mesh = 0;
 	core::level::LevelTransform transform;
+	bool visible_at_start = true;
+	uint32_t drivers = kNoSceneDrivers;
 };
 
 struct SceneEnvironment {
@@ -119,6 +124,8 @@ struct LevelScenePlan {
 	std::vector<SceneMeshRequest> requests;
 	std::vector<SceneMeshPlan> meshes;
 	std::vector<SceneInstancePlan> instances;
+	std::vector<core::level::LogicDriverRef> drivers;
+	std::vector<std::vector<uint32_t>> driver_sets;
 	std::vector<SceneMaterialPlan> materials;
 	std::vector<SceneTexturePlan> textures;
 	std::vector<SceneTerrainPlan> terrains;

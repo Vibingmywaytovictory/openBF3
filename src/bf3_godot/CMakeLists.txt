@@ -359,3 +359,7 @@ target_sources(bf3_godot PRIVATE
     src/upnp_mapping.cpp
     src/upnp_mapping.h
 )
+target_sources(bf3_godot PRIVATE
+    src/logic_placements.cpp
+    src/logic_placements.h
+)

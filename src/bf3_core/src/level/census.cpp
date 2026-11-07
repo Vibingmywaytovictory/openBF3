@@ -213,6 +213,25 @@ Result<std::optional<std::vector<uint16_t>>> hidden_parts(const EbxResolver &p_d
 	return std::optional<std::vector<uint16_t>>(std::move(damaged));
 }
 
+namespace {
+
+std::optional<bool> driver_start(const Connection &p_connection, gameplay::LogicSide p_side) {
+	if (!gameplay::realm_on_side(gameplay::entity_realm(p_connection.source), p_side)) {
+		return std::nullopt;
+	}
+	std::optional<EbxValue> initial;
+	if (p_connection.source.is_a("BoolEntityData") && p_connection.source_field == field_id("Value")) {
+		initial = p_connection.source.get("DefaultValue");
+	} else if (p_connection.source.is_a("SyncedBoolEntityData") && p_connection.source_field == field_id("Out")) {
+		initial = p_connection.source.get("In");
+	} else {
+		return std::nullopt;
+	}
+	return (initial ? initial->as_bool() : std::nullopt) != false;
+}
+
+}
+
 Result<bool> starts_hidden(const World &p_world, const PlacedObject &p_object, gameplay::LogicSide p_side) {
 	WorkBudget &budget = *p_world.budget;
 	BF3_TRY(budget.status());
@@ -221,18 +240,6 @@ Result<bool> starts_hidden(const World &p_world, const PlacedObject &p_object, g
 	}
 
 	const Connections &connections = p_world.scopes.connections(p_object.scope);
-	const auto starts_false = [&](const Connection &p_c) {
-		if (!gameplay::realm_on_side(gameplay::entity_realm(p_c.source), p_side)) {
-			return false;
-		}
-		std::optional<EbxValue> initial;
-		if (p_c.source.is_a("BoolEntityData") && p_c.source_field == field_id("Value")) {
-			initial = p_c.source.get("DefaultValue");
-		} else if (p_c.source.is_a("SyncedBoolEntityData") && p_c.source_field == field_id("Out")) {
-			initial = p_c.source.get("In");
-		}
-		return (initial ? initial->as_bool() : std::nullopt) == false;
-	};
 	for (const int32_t field : { field_id("Visible"), field_id("Enabled") }) {
 		const std::vector<uint32_t> *into = connections.property_into(*p_object.reference, field);
 		if (!into) {
@@ -240,12 +247,50 @@ Result<bool> starts_hidden(const World &p_world, const PlacedObject &p_object, g
 		}
 		BF3_TRY(budget.charge(into->size()));
 		for (const uint32_t at : *into) {
-			if (starts_false(connections.property[at])) {
+			if (driver_start(connections.property[at], p_side) == false) {
 				return true;
 			}
 		}
 	}
 	return false;
+}
+
+Result<std::vector<VisibilityDriver>> visibility_drivers(
+		const World &p_world, const PlacedObject &p_object, gameplay::LogicSide p_side) {
+	WorkBudget &budget = *p_world.budget;
+	BF3_TRY(budget.status());
+	std::vector<VisibilityDriver> out;
+	if (!p_object.reference) {
+		return out;
+	}
+	const Connections &connections = p_world.scopes.connections(p_object.scope);
+	for (const int32_t field : { field_id("Visible"), field_id("Enabled") }) {
+		const std::vector<uint32_t> *into = connections.property_into(*p_object.reference, field);
+		if (!into) {
+			continue;
+		}
+		BF3_TRY(budget.charge(into->size()));
+		for (const uint32_t at : *into) {
+			const Connection &c = connections.property[at];
+			if (const std::optional<bool> start = driver_start(c, p_side)) {
+				out.push_back(VisibilityDriver{ c.source, c.source_field, *start });
+			}
+		}
+	}
+	return out;
+}
+
+std::vector<Guid> scope_path(const World &p_world, uint32_t p_scope) {
+	std::vector<Guid> out;
+	for (std::optional<uint32_t> at = p_scope; at && *at < p_world.scopes.size();) {
+		const Scope &scope = p_world.scopes.get(*at);
+		if (scope.reference) {
+			out.push_back(scope.reference->guid());
+		}
+		at = scope.parent && *scope.parent < *at ? scope.parent : std::nullopt;
+	}
+	std::reverse(out.begin(), out.end());
+	return out;
 }
 
 BakeSplit bake_split(const LevelTransform &p_transform) {

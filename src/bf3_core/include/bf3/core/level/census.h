@@ -19,6 +19,23 @@ Result<std::optional<std::vector<uint16_t>>> hidden_parts(const EbxResolver &p_d
 
 Result<bool> starts_hidden(const World &p_world, const PlacedObject &p_object, gameplay::LogicSide p_side);
 
+struct VisibilityDriver {
+	EbxInstance source;
+	int32_t port = 0;
+	bool start = true;
+};
+Result<std::vector<VisibilityDriver>> visibility_drivers(
+		const World &p_world, const PlacedObject &p_object, gameplay::LogicSide p_side);
+
+struct LogicDriverRef {
+	std::vector<Guid> scope_path;
+	Guid source;
+	int32_t port = 0;
+	bool start = true;
+	bool operator==(const LogicDriverRef &) const = default;
+};
+std::vector<Guid> scope_path(const World &p_world, uint32_t p_scope);
+
 struct BakeSplit {
 	LevelTransform placed;
 	std::optional<std::array<core::Vec3, 3>> linear;

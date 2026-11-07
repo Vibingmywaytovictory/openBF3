@@ -22,6 +22,7 @@
 #include <iterator>
 #include <map>
 #include <span>
+#include <tuple>
 #include <unordered_map>
 
 namespace bf3::render {
@@ -798,23 +799,47 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 
 	std::vector<uint32_t> shown(p_census.meshes.size(), 0);
 	std::vector<uint8_t> instance_shown(p_census.instances.size(), 1);
+	std::vector<uint32_t> instance_drivers(p_census.instances.size(), kNoSceneDrivers);
+	std::map<std::tuple<uint32_t, core::Guid, int32_t>, uint32_t> driver_of;
+	std::map<std::vector<uint32_t>, uint32_t> set_of;
 	for (size_t i = 0; i < p_census.instances.size(); ++i) {
 		const core::level::SceneInstance &inst = p_census.instances[i];
 		if (inst.mesh >= p_census.meshes.size() || inst.object >= p_world.objects.size() || request_of[inst.mesh] == UINT32_MAX) {
 			return core::make_error("scene plan: census instance " + std::to_string(i) + " names no kept mesh or object");
 		}
-		if (!p_options.include_hidden_start) {
-			core::Result<bool> hidden = core::level::starts_hidden(
-					p_world, p_world.objects[inst.object], core::gameplay::LogicSide::Client);
-			if (!hidden) {
-				return core::error_at("scene plan", hidden.error());
-			}
-			if (*hidden) {
-				instance_shown[i] = 0;
-				continue;
-			}
-		}
 		++shown[inst.mesh];
+		if (p_options.include_hidden_start) {
+			continue;
+		}
+		const core::level::PlacedObject &object = p_world.objects[inst.object];
+		core::Result<std::vector<core::level::VisibilityDriver>> drivers =
+				core::level::visibility_drivers(p_world, object, core::gameplay::LogicSide::Client);
+		if (!drivers) {
+			return core::error_at("scene plan", drivers.error());
+		}
+		if (drivers->empty()) {
+			continue;
+		}
+		std::vector<uint32_t> set;
+		for (const core::level::VisibilityDriver &d : *drivers) {
+			const auto key = std::make_tuple(object.scope, d.source.guid(), d.port);
+			auto found = driver_of.find(key);
+			if (found == driver_of.end()) {
+				found = driver_of.emplace(key, uint32_t(plan.drivers.size())).first;
+				plan.drivers.push_back(core::level::LogicDriverRef{
+						core::level::scope_path(p_world, object.scope), d.source.guid(), d.port, d.start });
+			}
+			set.push_back(found->second);
+			instance_shown[i] = instance_shown[i] != 0 && d.start ? 1 : 0;
+		}
+		std::sort(set.begin(), set.end());
+		set.erase(std::unique(set.begin(), set.end()), set.end());
+		auto at = set_of.find(set);
+		if (at == set_of.end()) {
+			at = set_of.emplace(set, uint32_t(plan.driver_sets.size())).first;
+			plan.driver_sets.push_back(set);
+		}
+		instance_drivers[i] = at->second;
 	}
 
 	std::vector<uint32_t> plan_mesh_of(p_census.meshes.size(), UINT32_MAX);
@@ -854,11 +879,9 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 	}
 	plan.instances.reserve(p_census.instances.size());
 	for (size_t i = 0; i < p_census.instances.size(); ++i) {
-		if (instance_shown[i] == 0) {
-			continue;
-		}
 		const core::level::SceneInstance &inst = p_census.instances[i];
-		plan.instances.push_back(SceneInstancePlan{ plan_mesh_of[inst.mesh], inst.transform });
+		plan.instances.push_back(SceneInstancePlan{
+				plan_mesh_of[inst.mesh], inst.transform, instance_shown[i] != 0, instance_drivers[i] });
 	}
 
 	if (p_options.include_terrain) {

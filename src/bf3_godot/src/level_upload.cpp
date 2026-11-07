@@ -304,6 +304,11 @@ void LevelUpload::begin(std::shared_ptr<const render::LevelScenePlan> p_plan, co
 	meshes_.assign(plan.meshes.size(), RID());
 	terrain_meshes_.assign(plan.terrains.size(), RID());
 	instances_by_mesh_.assign(plan.meshes.size(), {});
+	plan_instances_.assign(plan.instances.size(), RID());
+	instance_visible_.assign(plan.instances.size(), 1);
+	for (size_t i = 0; i < plan.instances.size(); ++i) {
+		instance_visible_[i] = plan.instances[i].visible_at_start ? 1 : 0;
+	}
 	for (size_t i = 0; i < plan.instances.size(); ++i) {
 		if (plan.instances[i].mesh < plan.meshes.size()) {
 			instances_by_mesh_[plan.instances[i].mesh].push_back(uint32_t(i));
@@ -621,6 +626,10 @@ void LevelUpload::create_instances(double p_deadline_us) {
 		for (int k = 0; k < 32 && next < list.size(); ++k, ++next) {
 			const RID inst = rs->instance_create2(meshes_[mesh], scenario_);
 			rs->instance_set_transform(inst, instance_transform(plan.instances[list[next]].transform));
+			if (instance_visible_[list[next]] == 0) {
+				rs->instance_set_visible(inst, false);
+			}
+			plan_instances_[list[next]] = inst;
 			instances_.push_back(inst);
 			++made;
 		}
@@ -754,6 +763,18 @@ void LevelUpload::free_all() {
 	}
 	pending_instances_.clear();
 	pending_terrains_.clear();
+	plan_instances_.clear();
+	instance_visible_.clear();
+}
+
+void LevelUpload::set_instance_visible(uint32_t p_instance, bool p_visible) {
+	if (p_instance >= instance_visible_.size() || (instance_visible_[p_instance] != 0) == p_visible) {
+		return;
+	}
+	instance_visible_[p_instance] = p_visible ? 1 : 0;
+	if (plan_instances_[p_instance].is_valid()) {
+		RenderingServer::get_singleton()->instance_set_visible(plan_instances_[p_instance], p_visible);
+	}
 }
 
 UploadStats LevelUpload::stats() const {

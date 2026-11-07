@@ -46,6 +46,7 @@ class OverlayCheck;
 class AudioIngameCheck;
 class UiSizesCheck;
 class LateJoinCheck;
+class LogicPlacements;
 class SquadTeamCheck;
 
 struct TdmState {
@@ -68,6 +69,7 @@ struct TdmState {
 	std::unique_ptr<EorCameraView, void (*)(EorCameraView *)> eor_camera{ nullptr, nullptr };
 	std::unique_ptr<EorFlash, void (*)(EorFlash *)> eor_flash{ nullptr, nullptr };
 	std::unique_ptr<EorShowroom, void (*)(EorShowroom *)> eor_showroom{ nullptr, nullptr };
+	std::unique_ptr<LogicPlacements, void (*)(LogicPlacements *)> logic_placements{ nullptr, nullptr };
 	bf3::core::level::CameraCuts camera_cuts;
 
 	uint8_t spawn_kit = 0;

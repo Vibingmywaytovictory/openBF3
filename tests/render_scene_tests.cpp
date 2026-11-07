@@ -571,26 +571,43 @@ TEST_SUITE("render-scene") {
 			Result<bool> hidden = level::starts_hidden(
 					**world, (*world)->objects[inst.object], bf3::core::gameplay::LogicSide::Client);
 			REQUIRE(hidden.ok());
-			if (*hidden) {
-				++start_hidden;
-			} else {
-				++shown[inst.mesh];
-			}
+			start_hidden += *hidden ? 1 : 0;
+			++shown[inst.mesh];
 		}
 		size_t expected_meshes = 0;
 		for (size_t v = 0; v < census->meshes.size(); ++v) {
 			expected_meshes += census->meshes[v].kept && shown[v] > 0 ? 1 : 0;
 		}
-		std::printf("render.scene plan: %zu requests, %zu meshes (%zu kept variants, %zu with a shown placement), %zu instances (%zu census - %zu "
+		std::printf("render.scene plan: %zu requests, %zu meshes (%zu kept variants, %zu with a placement), %zu "
+					"instances (%zu census, %zu "
 					"start-hidden), %zu materials, %zu textures, %zu terrains, %zu failures\n",
-				p.requests.size(), p.meshes.size(), kept, expected_meshes, p.instances.size(), census->instances.size(), start_hidden, p.materials.size(),
-				p.textures.size(), p.terrains.size(), p.failures.size());
+				p.requests.size(), p.meshes.size(), kept, expected_meshes, p.instances.size(), census->instances.size(),
+				start_hidden, p.materials.size(), p.textures.size(), p.terrains.size(), p.failures.size());
 		CHECK(kept == 842);
 		CHECK(census->instances.size() == 10571);
 		CHECK(start_hidden == 64);
 		CHECK(p.meshes.size() == expected_meshes);
 		CHECK(p.meshes.size() <= 842);
-		CHECK(p.instances.size() == census->instances.size() - start_hidden);
+		CHECK(p.instances.size() == census->instances.size());
+		size_t hidden_at_start = 0, driven = 0, hidden_undriven = 0;
+		for (const SceneInstancePlan &inst : p.instances) {
+			hidden_at_start += inst.visible_at_start ? 0 : 1;
+			driven += inst.drivers != kNoSceneDrivers ? 1 : 0;
+			hidden_undriven += !inst.visible_at_start && inst.drivers == kNoSceneDrivers ? 1 : 0;
+		}
+		std::printf("render.scene plan: %zu instances hidden at start, %zu driven by %zu client logic drivers in %zu "
+					"sets\n",
+				hidden_at_start, driven, p.drivers.size(), p.driver_sets.size());
+		CHECK(hidden_at_start == start_hidden);
+		CHECK(hidden_undriven == 0);
+		for (const SceneInstancePlan &inst : p.instances) {
+			if (inst.drivers != kNoSceneDrivers) {
+				REQUIRE(inst.drivers < p.driver_sets.size());
+				for (const uint32_t d : p.driver_sets[inst.drivers]) {
+					CHECK(d < p.drivers.size());
+				}
+			}
+		}
 		CHECK(p.terrains.size() == 1);
 		for (const auto &[item, error] : p.failures) {
 			std::printf("render.scene plan failure: %s: %s\n", item.c_str(), error.c_str());

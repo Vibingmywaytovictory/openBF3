@@ -93,6 +93,10 @@ public:
 	std::vector<std::pair<std::string, std::string>> failures() const;
 	size_t mesh_rids() const;
 	const std::vector<godot::RID> &instances() const { return instances_; }
+	void set_instance_visible(uint32_t p_instance, bool p_visible);
+	bool instance_visible(uint32_t p_instance) const {
+		return p_instance < instance_visible_.size() && instance_visible_[p_instance] != 0;
+	}
 	godot::RID mesh_rid(uint32_t p_mesh) const;
 	godot::RID material_rid(uint32_t p_material) const;
 	godot::RID texture_rid(uint32_t p_texture) const;
@@ -147,6 +151,8 @@ private:
 	std::deque<std::pair<uint32_t, size_t>> pending_instances_;
 	std::deque<uint32_t> pending_terrains_;
 	std::vector<godot::RID> instances_;
+	std::vector<godot::RID> plan_instances_;
+	std::vector<uint8_t> instance_visible_;
 	size_t meshes_done_ = 0;
 	size_t textures_done_ = 0;
 
