@@ -40,6 +40,11 @@ struct InstallStatus {
 	std::vector<std::string> problems;
 };
 
+bool running_under_wine();
+
+std::vector<std::filesystem::path> proton_install_candidates(
+		const std::filesystem::path &p_exe_dir, const std::string &p_home, const std::vector<std::filesystem::path> &p_media_dirs);
+
 class InstallReader {
 public:
 	static constexpr const char *kEnvVar = "OPENBF3_INSTALL";

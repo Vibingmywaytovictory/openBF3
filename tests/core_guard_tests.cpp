@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "bf3/core/install_reader.h"
 #include "bf3/core/path_guard.h"
 
 #include <windows.h>
@@ -173,4 +174,18 @@ TEST_CASE("guard: resolves junctions and refuses hard links") {
 	} else {
 		MESSAGE("could not create a hard link; hard-link check not exercised");
 	}
+}
+
+TEST_CASE("proton install candidates") {
+	const std::vector<fs::path> c = bf3::core::proton_install_candidates(L"Z:\\home\\deck\\openBF3", "/home/deck", { fs::path(L"Z:\\run\\media\\deck\\SD") });
+	REQUIRE(c.size() == 6);
+	CHECK(c[0] == fs::path(L"Z:\\home\\deck\\openBF3\\Battlefield 3"));
+	CHECK(c[1] == fs::path(L"Z:\\home\\deck\\Battlefield 3"));
+	CHECK(c[2] == fs::path(L"Z:\\home\\deck\\.local\\share\\Steam\\steamapps\\common\\Battlefield 3"));
+	CHECK(c[3] == fs::path(L"Z:\\home\\deck\\.steam\\steam\\steamapps\\common\\Battlefield 3"));
+	CHECK(c[4] == fs::path(L"Z:\\run\\media\\deck\\SD\\steamapps\\common\\Battlefield 3"));
+	CHECK(c[5] == fs::path(L"Z:\\run\\media\\deck\\SD\\Battlefield 3"));
+	CHECK(bf3::core::proton_install_candidates({}, "", {}).empty());
+	CHECK(bf3::core::proton_install_candidates({}, "relative", {}).empty());
+	CHECK_FALSE(bf3::core::running_under_wine());
 }

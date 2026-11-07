@@ -31,6 +31,7 @@
 
 #include <godot_cpp/classes/canvas_layer.hpp>
 #include <godot_cpp/classes/display_server.hpp>
+#include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/input.hpp>
@@ -778,6 +779,9 @@ void Bf3MatchHost::end_match(const std::string &p_reason) {
 		kick_ = std::make_unique<NativeKick>(
 				this, kick_text_.empty() ? p_reason : kick_text_, timed_out_kick_, has_check_arg("kick-popup-check"));
 		return;
+	}
+	if (!headless_ && !has_user_arg("quit-after")) {
+		OS::get_singleton()->alert(to_godot(kick_text_.empty() ? p_reason : kick_text_), "openBF3");
 	}
 	if (Bf3LevelSession *s = session(); s != nullptr && s->level_assigned()) {
 		s->finish(1);

@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <cwchar>
+#include <iterator>
 
 namespace bf3::core {
 
@@ -16,12 +18,82 @@ bool is_dir(const std::filesystem::path &p_path) {
 	return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
 }
 
+std::vector<std::filesystem::path> subdirectories(const std::filesystem::path &p_dir) {
+	std::vector<std::filesystem::path> out;
+	WIN32_FIND_DATAW fd{};
+	HANDLE h = FindFirstFileExW((p_dir / L"*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
+	if (h == INVALID_HANDLE_VALUE) {
+		return out;
+	}
+	do {
+		if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && std::wcscmp(fd.cFileName, L".") != 0 && std::wcscmp(fd.cFileName, L"..") != 0) {
+			out.push_back(p_dir / fd.cFileName);
+		}
+	} while (FindNextFileW(h, &fd));
+	FindClose(h);
+	return out;
+}
+
+std::vector<std::filesystem::path> media_dirs() {
+	std::vector<std::filesystem::path> out;
+	for (const std::filesystem::path &d : subdirectories(L"Z:\\run\\media")) {
+		out.push_back(d);
+		for (const std::filesystem::path &e : subdirectories(d)) {
+			out.push_back(e);
+		}
+	}
+	return out;
+}
+
+std::filesystem::path exe_dir() {
+	wchar_t buf[32768];
+	const DWORD n = GetModuleFileNameW(nullptr, buf, DWORD(std::size(buf)));
+	if (n == 0 || n >= std::size(buf)) {
+		return {};
+	}
+	return std::filesystem::path(std::wstring(buf, n)).parent_path();
+}
+
 int to_int(const std::string &p_s) {
 	char *end = nullptr;
 	const long v = std::strtol(p_s.c_str(), &end, 10);
 	return (end != p_s.c_str()) ? static_cast<int>(v) : -1;
 }
 
+}
+
+bool running_under_wine() {
+	const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+	return ntdll != nullptr && GetProcAddress(ntdll, "wine_get_version") != nullptr;
+}
+
+std::vector<std::filesystem::path> proton_install_candidates(
+		const std::filesystem::path &p_exe_dir, const std::string &p_home, const std::vector<std::filesystem::path> &p_media_dirs) {
+	const std::filesystem::path name(L"Battlefield 3");
+	const std::filesystem::path steam_common = std::filesystem::path(L"steamapps") / L"common" / name;
+	std::vector<std::filesystem::path> out;
+	const auto add = [&](const std::filesystem::path &p_path) {
+		if (std::find(out.begin(), out.end(), p_path) == out.end()) {
+			out.push_back(p_path);
+		}
+	};
+	if (!p_exe_dir.empty()) {
+		add(p_exe_dir / name);
+		add(p_exe_dir.parent_path() / name);
+	}
+	if (!p_home.empty() && p_home.front() == '/') {
+		std::wstring h = L"Z:" + detail::widen(p_home);
+		std::replace(h.begin(), h.end(), L'/', L'\\');
+		const std::filesystem::path home(h);
+		add(home / name);
+		add(home / L".local" / L"share" / L"Steam" / steam_common);
+		add(home / L".steam" / L"steam" / steam_common);
+	}
+	for (const std::filesystem::path &m : p_media_dirs) {
+		add(m / steam_common);
+		add(m / name);
+	}
+	return out;
 }
 
 bool InstallReader::locate(const InstallLocateOptions &p_options) {
@@ -51,7 +123,17 @@ bool InstallReader::locate(const InstallLocateOptions &p_options) {
 		return false;
 	}
 
-	return mount(std::filesystem::path(detail::widen(candidates.front().path)), candidates.front().source);
+	const std::filesystem::path first(detail::widen(candidates.front().path));
+	if (mount(first, candidates.front().source) || !running_under_wine()) {
+		return status_.layout_ok;
+	}
+	for (const std::filesystem::path &c : proton_install_candidates(exe_dir(), detail::env_value("HOME"), media_dirs())) {
+		if (is_dir(c / L"Data") && mount(c, "proton")) {
+			return true;
+		}
+	}
+	mount(first, std::string(candidates.front().source) + "; also looked next to the game folder, in ~/Battlefield 3 and in the Steam libraries");
+	return false;
 }
 
 bool InstallReader::mount(const std::filesystem::path &p_root, std::string p_source) {

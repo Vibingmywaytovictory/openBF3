@@ -34,6 +34,7 @@
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/label.hpp>
+#include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/canvas_layer.hpp>
 #include <godot_cpp/classes/procedural_sky_material.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
@@ -1025,6 +1026,11 @@ void Bf3LevelSession::_process(double p_delta) {
 		UtilityFunctions::push_error(to_godot("[level] load failed: " + error));
 		UtilityFunctions::print(to_godot("[level] load failed: " + error));
 		if (m1_check_ || !load_check_.empty() || quit_after_ > 0.0) {
+			finish(1);
+			return;
+		}
+		if (DisplayServer::get_singleton()->get_name() != String("headless")) {
+			OS::get_singleton()->alert(to_godot("The game could not load: " + error), "openBF3");
 			finish(1);
 			return;
 		}
