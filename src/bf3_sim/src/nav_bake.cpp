@@ -196,7 +196,7 @@ core::Status erode_with_passages(rcContext &r_context, rcCompactHeightfield &r_c
 		for (int x = 0; x < r_chf.width; ++x) {
 			const rcCompactCell &cell = r_chf.cells[x + z * r_chf.width];
 			for (int i = int(cell.index); i < int(cell.index + cell.count); ++i) {
-				if (r_chf.areas[i] == RC_NULL_AREA && passages[size_t(i)] != RC_NULL_AREA &&
+				if (r_chf.areas[i] == RC_NULL_AREA && passages[size_t(i)] == kNavAreaWalk &&
 						narrowest_run(r_chf, before.data(), x, z, i, open_width) < open_width &&
 						narrowest_run(r_chf, passages.data(), x, z, i, passage_run) >= passage_run) {
 					reached[size_t(i)] = 1;
@@ -218,7 +218,7 @@ core::Status erode_with_passages(rcContext &r_context, rcCompactHeightfield &r_c
 			}
 			const int nx = o.x + rcGetDirOffsetX(dir), nz = o.z + rcGetDirOffsetY(dir);
 			const int ni = int(r_chf.cells[nx + nz * r_chf.width].index) + con;
-			if (reached[size_t(ni)] == 0 && passages[size_t(ni)] != RC_NULL_AREA) {
+			if (reached[size_t(ni)] == 0 && passages[size_t(ni)] == kNavAreaWalk) {
 				reached[size_t(ni)] = 1;
 				open.push_back({ nx, nz, ni, o.depth + 1 });
 			}

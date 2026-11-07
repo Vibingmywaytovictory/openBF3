@@ -339,6 +339,23 @@ TEST_SUITE("sim-nav-unit") {
 		CHECK(a.weak_component != b.weak_component);
 	}
 
+	TEST_CASE("sim.nav.unit: a 1.0 m door under a 1.5 m lintel, a crouch passage, keeps the ceil radius and stays "
+			  "closed") {
+		std::vector<StaticTriangle> t;
+		add_floor(t, 0, 0, 64, 64, 0.0f);
+		add_box(t, { 31.9f, 0.0f, -1.0f }, { 32.1f, 3.0f, 29.95f });
+		add_box(t, { 31.9f, 0.0f, 30.95f }, { 32.1f, 3.0f, 65.0f });
+		add_box(t, { 31.9f, 1.5f, 29.95f }, { 32.1f, 3.0f, 30.95f });
+		NavBakeOptions o;
+		o.params.drop_links = false;
+		const auto w = bake(t, tiles_range(0, 0, 0, 0), o);
+		const NavComponents c = nav_components(*w);
+		const NavPointCheck a = at(*w, c, 16, 0, 30.45f), b = at(*w, c, 48, 0, 30.45f);
+		REQUIRE(a.poly != 0);
+		REQUIRE(b.poly != 0);
+		CHECK(a.weak_component != b.weak_component);
+	}
+
 	TEST_CASE("sim.nav.unit: a 0.4 m crack between two floor slabs, narrower than the soldier stands across, is one "
 			  "component") {
 		std::vector<StaticTriangle> t;
