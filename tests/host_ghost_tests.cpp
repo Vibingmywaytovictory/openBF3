@@ -8,8 +8,11 @@
 #include "bf3/host/net_stats.h"
 #include "bf3/net/enet_host.h"
 #include "bf3/net/protocol.h"
+#include "bf3/sim/collision_world.h"
 #include "bf3/sim/soldier_motor.h"
+#include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/spread_recoil.h"
+#include "bf3/sim/weapons/weapon_input.h"
 #include "client_events.h"
 #include "client_match.h"
 #include "client_tracks.h"
@@ -46,8 +49,11 @@ using namespace bf3;
 
 inline constexpr uint32_t kPeer = 7;
 inline constexpr uint32_t kWalkers = 31;
-inline constexpr uint32_t kShooters = 32;
+inline constexpr uint32_t kShooters = 31;
 inline constexpr sim::Tick kRunTicks = 20 * sim::kSimHz;
+inline constexpr sim::Tick kScriptedShotGap = 15;
+inline constexpr float kScriptedMinMetres = 6.0f;
+inline constexpr float kScriptedMaxMetres = 30.0f;
 inline constexpr size_t kIntervalBytes = 1200;
 inline constexpr double kBytesPerSecond = 36000.0;
 inline constexpr sim::Tick kAttackerTicks = 5 * sim::kSimHz;
@@ -298,6 +304,45 @@ private:
 	bool have_interval_ = false;
 };
 
+sim::Vec3 eye_at(const sim::Vec3 &p_feet) {
+	return core::vec::add(p_feet, { 0.0f, 1.6f, 0.0f });
+}
+
+sim::Vec3 chest_at(const sim::Vec3 &p_feet) {
+	return core::vec::add(p_feet, { 0.0f, 1.2f, 0.0f });
+}
+
+class ScriptedShooter final : public host::CommandSource {
+public:
+	explicit ScriptedShooter(const host::GameServer &p_server) : server_(p_server) {}
+
+	sim::Command command(sim::Tick p_tick, const sim::SoldierState &p_state) override {
+		sim::Command c = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, sim::Pose::Stand);
+		const sim::SoldierState *t = target >= 0 && firing ? server_.soldier(uint32_t(target)) : nullptr;
+		if (t == nullptr) {
+			return c;
+		}
+		const sim::Vec3 to = core::vec::sub(chest_at(t->position), eye_at(p_state.position));
+		c.yaw = sim::quantize_yaw(std::atan2(to[0], to[2]));
+		c.pitch = sim::quantize_pitch(std::atan2(to[1], std::hypot(to[0], to[2])));
+		c.buttons = sim::buttons::kZoom;
+		if (p_tick >= next_shot_ && t->protect_ticks == 0 && core::vec::length(to) <= kScriptedMaxMetres) {
+			c.buttons |= sim::weapons::weapon_buttons::kFire;
+			next_shot_ = p_tick + kScriptedShotGap;
+			++shots;
+		}
+		return c;
+	}
+
+	int target = -1;
+	bool firing = false;
+	uint32_t shots = 0;
+
+private:
+	const host::GameServer &server_;
+	sim::Tick next_shot_ = 0;
+};
+
 host::GhostViewer test_viewer(bool p_zoomed) {
 	host::GhostViewer v;
 	v.slot = 0;
@@ -379,8 +424,8 @@ bool all_equal(const std::vector<uint32_t> &p_gaps, uint32_t p_gap) {
 }
 
 TEST_SUITE("host-ghost") {
-	TEST_CASE("Metro ConquestLarge0, 31 walkers and 32 firefight shooters around one peer, 20 s: the peer's ghosts fit "
-			  "the budget and keep their tier rates") {
+	TEST_CASE("Metro ConquestLarge0, 31 walkers, 31 firefight shooters and a scripted shooter around one peer, 20 s: "
+			  "the peer's ghosts fit the budget and keep their tier rates") {
 		Fixture *f = fixture();
 		if (f == nullptr) {
 			return;
@@ -424,6 +469,36 @@ TEST_SUITE("host-ghost") {
 			step();
 		}
 		REQUIRE(server.view().alive(own));
+		auto shooter_source = std::make_unique<ScriptedShooter>(server);
+		ScriptedShooter &shooter = *shooter_source;
+		const int shooter_slot = server.add_local_soldier(std::move(shooter_source), 3 - int(server.view().team(own)));
+		REQUIRE(shooter_slot >= 0);
+		const sim::SoldierState *at_start = server.soldier(own);
+		REQUIRE(at_start != nullptr);
+		const sim::CollisionWorld &world = server.view().world();
+		const sim::Vec3 peer_chest = chest_at(at_start->position);
+		std::optional<sim::Vec3> post;
+		for (float metres = kScriptedMinMetres; !post && metres <= kScriptedMaxMetres; metres += 2.0f) {
+			for (uint32_t k = 0; !post && k < 16; ++k) {
+				const float a = float(k) * 3.14159265f / 8.0f;
+				const sim::Vec3 feet =
+						core::vec::add(at_start->position, { metres * std::sin(a), 0.0f, metres * std::cos(a) });
+				const sim::Vec3 chest = chest_at(feet);
+				const bool seen =
+						!world.ray(peer_chest, core::vec::sub(chest, peer_chest), sim::query_mask::kProjectile);
+				const bool floor = world.ray(chest, { 0.0f, -1.4f, 0.0f }, sim::query_mask::kProjectile);
+				const bool headroom = !world.ray(chest, { 0.0f, 0.8f, 0.0f }, sim::query_mask::kProjectile);
+				if (seen && floor && headroom) {
+					post = feet;
+				}
+			}
+		}
+		REQUIRE_MESSAGE(post.has_value(), "no clear post 6-30 m from the peer");
+		const float post_metres = core::vec::length(core::vec::sub(*post, at_start->position));
+		REQUIRE(server.place_soldier(uint32_t(shooter_slot), *post, at_start->yaw, sim::Pose::Stand).ok());
+		shooter.target = own;
+		shooter.firing = true;
+		sim::Tick shooter_hit_tick = 0;
 		const size_t first_interval = peer.intervals.size();
 		const uint64_t bytes_before = peer.total_bytes;
 		const sim::Tick start_tick = server.current_tick();
@@ -484,6 +559,10 @@ TEST_SUITE("host-ghost") {
 			peer.command(server.current_tick() + 1u, look());
 			const size_t before = peer.intervals.size();
 			step();
+			if (shooter.firing && peer.attacked_until[size_t(shooter_slot)] != 0) {
+				shooter.firing = false;
+				shooter_hit_tick = server.current_tick();
+			}
 			relocate_attacker();
 			if (peer.intervals.size() == before) {
 				continue;
@@ -603,6 +682,10 @@ TEST_SUITE("host-ghost") {
 					"beyond 100 m: %llu intervals, %llu due, %llu missed\n",
 				(unsigned long long)attacker_checks, (unsigned long long)attacker_misses,
 				(unsigned long long)cone_intervals, (unsigned long long)cone_checks, (unsigned long long)cone_misses);
+		std::printf(
+				"host.ghost: the scripted shooter in slot %d, %.1f m from the peer, fired %u shots and first hit it "
+				"%u ticks into the run; %u attackers moved past 150 m\n",
+				shooter_slot, post_metres, shooter.shots, unsigned(shooter_hit_tick - start_tick), relocated);
 		for (size_t e = 0; e < misses_by_every.size(); ++e) {
 			if (misses_by_every[e] != 0) {
 				std::printf("host.ghost: %llu misses of a ghost due every %zu intervals\n",
@@ -633,6 +716,8 @@ TEST_SUITE("host-ghost") {
 		CHECK(per_second <= kBytesPerSecond);
 		CHECK(enemy_near_missing == 0);
 		CHECK(rate_misses == 0);
+		CHECK(shooter_hit_tick != 0);
+		CHECK(relocated == 1);
 		CHECK(attacker_checks > 0);
 		CHECK(attacker_misses == 0);
 		CHECK(cone_checks > 0);
