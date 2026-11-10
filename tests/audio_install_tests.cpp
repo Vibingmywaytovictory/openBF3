@@ -1944,7 +1944,7 @@ TEST_SUITE("audio-footsteps") {
 				" m; fates: ", finished, " finished or joined, ", other, " other; peak ",
 				mixer.stats().peak_instances.load(), " instances");
 		CHECK(all_steps == slot_steps[0] + slot_steps[1]);
-		CHECK(slot_steps[1] == 15);
+		CHECK(slot_steps[1] == 14);
 		CHECK(slot_steps[0] >= 8 + 4);
 		CHECK(st.by_material[1] > 0);
 		CHECK(st.by_material[8] > 0);
@@ -2071,7 +2071,7 @@ TEST_SUITE("audio-footsteps") {
 		CHECK(own_tags == 10 + 10);
 		CHECK(own_period == 9);
 		CHECK(st.local_period == own_period);
-		CHECK(bot_steps == 39);
+		CHECK(bot_steps == 36);
 		CHECK(st.unknown_tags == 0);
 		CHECK(st.refused == 0);
 		size_t other = 0;

@@ -179,15 +179,17 @@ void FootstepScheduler::step(std::span<const FootstepSoldier> p_soldiers, const 
 				}
 			}
 		}
-		if ((gated && s.animated) || remote_animated || s.mode != sim::MoveMode::OnGround ||
-				!(speed > params_.walk_threshold)) {
-			t.phase = 0.0;
+		if ((gated && s.animated) || remote_animated || s.mode != sim::MoveMode::OnGround) {
+			t.phase = 0.0f;
 			continue;
 		}
-		const double period = speed > params_.run_threshold ? params_.run_period : params_.walk_period;
-		t.phase += dt;
-		if (period > 0.0 && t.phase >= period) {
-			t.phase = std::min(t.phase - period, period);
+		if (!(speed > params_.walk_threshold)) {
+			continue;
+		}
+		const float period = speed > params_.run_threshold ? params_.run_period : params_.walk_period;
+		t.phase += float(dt);
+		if (period > 0.0f && t.phase > period) {
+			t.phase = 0.0f;
 			post(t.left_next ? FootstepEvent::Left : FootstepEvent::Right);
 			r_out.back().local_period = gated;
 			t.left_next = !t.left_next;

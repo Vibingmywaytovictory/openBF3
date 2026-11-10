@@ -2870,6 +2870,49 @@ TEST_SUITE("audio-footsteps") {
 		}
 	}
 
+	TEST_CASE("the step timer fires once it exceeds the period and restarts at 0, the remainder dropped; it is frozen "
+			  "at or below the walk threshold; the first step is the left foot (R2-D2, R4-D2)") {
+		const ba::FootstepParams p = unit_footstep_params();
+		const auto frames_to_steps = [&](float p_speed, double p_dt, int p_frames) {
+			ba::FootstepScheduler s(p);
+			std::vector<ba::FootstepPost> posts;
+			std::vector<int> at;
+			const std::array<ba::FootstepSoldier, 1> one{ walker(3, 0.0f, p_speed) };
+			s.step(one, ba::Vec3{}, p_dt, posts);
+			for (int f = 1; f <= p_frames; ++f) {
+				const size_t before = posts.size();
+				s.step(one, ba::Vec3{}, p_dt, posts);
+				for (size_t i = before; i < posts.size(); ++i) {
+					if (posts[i].event == ba::FootstepEvent::Left || posts[i].event == ba::FootstepEvent::Right) {
+						at.push_back(posts[i].event == ba::FootstepEvent::Left ? f : -f);
+					}
+				}
+			}
+			return at;
+		};
+		CHECK(frames_to_steps(3.0f, 1.0 / 60.0, 60) == std::vector<int>{ 18, -36, 54 });
+		CHECK(frames_to_steps(6.0f, 1.0 / 60.0, 60) == std::vector<int>{ 13, -26, 39, -52 });
+		CHECK(frames_to_steps(3.0f, 1.0 / 30.0, 30) == std::vector<int>{ 10, -20, 30 });
+		CHECK(frames_to_steps(0.9f, 1.0 / 60.0, 60).empty());
+
+		ba::FootstepScheduler paused(p);
+		std::vector<ba::FootstepPost> posts;
+		const std::array<ba::FootstepSoldier, 1> walking{ walker(3, 0.0f, 3.0f) };
+		const std::array<ba::FootstepSoldier, 1> standing{ walker(3, 0.0f, 0.9f) };
+		for (int f = 0; f <= 15; ++f) {
+			paused.step(walking, ba::Vec3{}, 1.0 / 60.0, posts);
+		}
+		for (int f = 0; f < 30; ++f) {
+			paused.step(standing, ba::Vec3{}, 1.0 / 60.0, posts);
+		}
+		int first = 0;
+		for (int f = 1; f <= 20 && first == 0; ++f) {
+			paused.step(walking, ba::Vec3{}, 1.0 / 60.0, posts);
+			first = count_events(posts, ba::FootstepEvent::Left) > 0 ? f : 0;
+		}
+		CHECK(first == 3);
+	}
+
 	TEST_CASE("OnStart above start_above x speed_scale, OnStop at stop_at_or_below x speed_scale; jump and land on "
 			  "motor edges") {
 		const ba::FootstepParams p = unit_footstep_params();

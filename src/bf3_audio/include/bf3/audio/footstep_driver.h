@@ -97,7 +97,7 @@ private:
 	struct Track {
 		uint16_t key = 0;
 		uint64_t seen = 0;
-		double phase = 0.0;
+		float phase = 0.0f;
 		float last_speed = 0.0f;
 		bool moving = false;
 		bool left_next = true;
