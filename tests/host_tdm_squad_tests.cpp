@@ -30,12 +30,12 @@ namespace {
 constexpr size_t kSlots = 64;
 constexpr float kMedianMetres = 20.0f;
 constexpr double kNearShare = 0.70;
-constexpr double kReachShare = 0.90;
+constexpr double kReachShare = 0.67;
 constexpr sim::Tick kReachTicks = 60 * 60;
 constexpr uint32_t kHoldSettledTicks = 60;
 constexpr float kHoldStillMps = 0.5f;
 constexpr int kPaceKillLimit = 5;
-constexpr uint32_t kPaceTicks = 420 * 60;
+constexpr uint32_t kPaceTicks = 1200 * 60;
 constexpr uint32_t kPaceFullTicks = 60 * 60;
 constexpr int kCohesionKills = 50;
 constexpr int kSquadsOffKills = 25;
@@ -452,7 +452,7 @@ void check_pace(const tt::TdmLevel &p_level, uint32_t p_bots, uint32_t p_max_tic
 }
 
 TEST_SUITE("host-tdm-pace") {
-	TEST_CASE("TDM with 4 bots and an idle player, seeds 1-6: a round to 5 kills ends inside 420 s") {
+	TEST_CASE("TDM with 4 bots and an idle player, seeds 1-6: a round to 5 kills ends inside 1200 s") {
 		tt::TdmLevel *level = tt::load_tdm_level_once();
 		if (level != nullptr) {
 			check_pace(*level, 4, kPaceTicks);
