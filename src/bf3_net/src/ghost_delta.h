@@ -239,6 +239,45 @@ constexpr bool float_differs(float p_value, float p_base) {
 	return std::bit_cast<uint32_t>(p_value) != std::bit_cast<uint32_t>(p_base);
 }
 
+template <class A, MaybeConst<sim::VaultState> V> constexpr void serialize_vault(A &r_a, V &r_v) {
+	r_a.bits(r_v.ticks, 16);
+	r_a.bits(r_v.kind, 8);
+	r_a.bits(r_v.variant, 8);
+	r_a.bits(r_v.yaw, 16);
+	r_a.f32(r_v.distance);
+	r_a.f32(r_v.height);
+	r_a.f32(r_v.length);
+	r_a.f32(r_v.moved);
+}
+
+constexpr bool vault_differs(const sim::VaultState &p_a, const sim::VaultState &p_b) {
+	return p_a.ticks != p_b.ticks || p_a.kind != p_b.kind || p_a.variant != p_b.variant || p_a.yaw != p_b.yaw ||
+			float_differs(p_a.distance, p_b.distance) || float_differs(p_a.height, p_b.height) ||
+			float_differs(p_a.length, p_b.length) || float_differs(p_a.moved, p_b.moved);
+}
+
+template <class A, MaybeConst<sim::SoldierState> S>
+constexpr void delta_vault(A &r_a, S &r_s, const sim::SoldierState &p_b) {
+	if (r_s.mode != sim::MoveMode::AnimationControlled && p_b.mode != sim::MoveMode::AnimationControlled) {
+		r_a.store(r_s.vault, [] { return sim::VaultState{}; });
+		return;
+	}
+	bool vault = vault_differs(r_s.vault, p_b.vault);
+	r_a.bits(vault, 1);
+	if (!vault) {
+		r_a.store(r_s.vault, [&] { return p_b.vault; });
+		return;
+	}
+	lane(r_a, r_s.vault.ticks, p_b.vault.ticks, 16);
+	lane(r_a, r_s.vault.kind, p_b.vault.kind, 8);
+	lane(r_a, r_s.vault.variant, p_b.vault.variant, 8);
+	lane(r_a, r_s.vault.yaw, p_b.vault.yaw, 16);
+	float_lane(r_a, r_s.vault.distance, p_b.vault.distance);
+	float_lane(r_a, r_s.vault.height, p_b.vault.height);
+	float_lane(r_a, r_s.vault.length, p_b.vault.length);
+	float_lane(r_a, r_s.vault.moved, p_b.vault.moved);
+}
+
 template <class A, MaybeConst<sim::SoldierState> S>
 constexpr void delta(A &r_a, S &r_s, const sim::SoldierState &p_b, sim::Tick p_tick) {
 	const auto vec_differs = [](const sim::Vec3 &p_x, const sim::Vec3 &p_y) {
@@ -321,6 +360,7 @@ constexpr void delta(A &r_a, S &r_s, const sim::SoldierState &p_b, sim::Tick p_t
 		r_a.store(r_s.impact_speed, [&] { return p_b.impact_speed; });
 		r_a.store(r_s.damage, [&] { return p_b.damage; });
 	}
+	delta_vault(r_a, r_s, p_b);
 	r_a.store(r_s.tick, [&] { return p_tick; });
 }
 

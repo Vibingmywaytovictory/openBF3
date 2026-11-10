@@ -157,7 +157,8 @@ bool state_in_range(const sim::SoldierState &p_s) {
 	return finite(p_s.position) && finite(p_s.velocity) && finite(p_s.ground_normal) && valid_pose(uint8_t(p_s.pose)) &&
 			valid_pose(uint8_t(p_s.target_pose)) && uint8_t(p_s.mode) < sim::kMoveModeCount &&
 			p_s.pitch >= -sim::kPitchLimit && p_s.pitch <= sim::kPitchLimit && finite(p_s.health) &&
-			finite(p_s.impact_speed) && finite(p_s.damage);
+			finite(p_s.impact_speed) && finite(p_s.damage) && finite(p_s.vault.distance) && finite(p_s.vault.height) &&
+			finite(p_s.vault.length) && finite(p_s.vault.moved);
 }
 
 template <class A, MaybeConst<sim::SoldierState> S>
@@ -182,6 +183,11 @@ constexpr bool serialize(A &r_a, S &r_s) {
 	r_a.f32(r_s.health);
 	r_a.f32(r_s.impact_speed);
 	r_a.f32(r_s.damage);
+	if (r_s.mode == sim::MoveMode::AnimationControlled) {
+		serialize_vault(r_a, r_s.vault);
+	} else {
+		r_a.store(r_s.vault, [] { return sim::VaultState{}; });
+	}
 	return r_a.valid([&] { return state_in_range(r_s); });
 }
 
@@ -1109,7 +1115,7 @@ void choose_own(const Snapshot &p_snapshot, const SnapshotBases &p_bases, Snapsh
 			weapons_usable = weapons_delta < weapons_absolute;
 		}
 	}
-	const size_t absolute = kOwnStateBits + weapons_absolute;
+	const size_t absolute = count_bits([&](auto &r_a) { serialize(r_a, *p_snapshot.own); }) + weapons_absolute;
 	const size_t with_delta = kGhostBackBits + state_delta +
 			(p_snapshot.own_weapons ? 1u + (weapons_usable ? weapons_delta : weapons_absolute) : 0u);
 	if (with_delta < absolute) {

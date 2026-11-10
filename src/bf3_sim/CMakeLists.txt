@@ -32,9 +32,11 @@ target_sources(bf3_sim PRIVATE
 
 target_sources(bf3_sim PRIVATE
     include/bf3/sim/prediction.h
+    include/bf3/sim/vault.h
     src/soldier_state.cpp
     src/motor_tuning.cpp
     src/soldier_motor.cpp
+    src/vault.cpp
     src/spawn.cpp
     src/prediction.cpp
 )

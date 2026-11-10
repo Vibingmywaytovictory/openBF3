@@ -2116,12 +2116,12 @@ void append_v2_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>>
 
 TEST_SUITE("net-proto") {
 	TEST_CASE("proto v2: version, message types and the bounds") {
-		CHECK(net::kProtocolVersion == 9);
+		CHECK(net::kProtocolVersion == 10);
 		for (const uint8_t t : { uint8_t(3), uint8_t(4), uint8_t(23), uint8_t(24) }) {
 			CHECK(net::peek_type(std::span<const uint8_t>(&t, 1)).has_value());
 		}
-		CHECK(net::Hello{}.protocol == 9);
-		CHECK(net::MatchInfo{}.protocol == 9);
+		CHECK(net::Hello{}.protocol == 10);
+		CHECK(net::MatchInfo{}.protocol == 10);
 	}
 
 	TEST_CASE("proto v2: MatchInfo, Spawned, KitSelect and the new Debug kinds round trip; out-of-range values are refused") {
@@ -2151,7 +2151,8 @@ TEST_SUITE("net-proto") {
 				s.kit = kit;
 				s.team = team;
 				const std::vector<uint8_t> b = net::encode_spawned(s);
-				CHECK(b.size() == 1 + 1 + 4 + 77 + 2 + 9 + 4);
+				CHECK(b.size() ==
+						1 + 1 + 4 + 77 + (s.state.mode == sim::MoveMode::AnimationControlled ? 22 : 0) + 2 + 9 + 4);
 				auto d = net::decode_spawned(b);
 				CHECK(d.ok() == (kit < net::kMaxKits && team <= net::kMaxTeam));
 				if (d) {
@@ -4275,7 +4276,7 @@ TEST_SUITE("net-proto") {
 		const std::vector<uint8_t> bytes = net::encode_kick(kick);
 		const std::optional<std::string> v3 = decode_kick_v3(bytes);
 		REQUIRE(v3.has_value());
-		CHECK(*v3 == "protocol 3 (server 9)");
+		CHECK(*v3 == "protocol 3 (server 10)");
 		auto v4 = net::decode_kick(bytes);
 		REQUIRE(v4);
 		CHECK(v4->code == net::KickReason::Protocol);
@@ -4677,7 +4678,7 @@ TEST_SUITE("net-proto") {
 			{ "Bye", 1, 0xaf63cb4c8601cfa9ull, 0 },
 			{ "Debug", 30, 0x3f09a8f270a73a7dull, 0 },
 			{ "DebugReport", 492, 0x74b3a36917721e73ull, 0 },
-			{ "Snapshot (v2 own weapons)", 522, 0xef0067090eaa962dull, 0 },
+			{ "Snapshot (v2 own weapons)", 544, 0x971614bd4f8a4005ull, 0 },
 			{ "SnapshotOthers", 121, 0x49f12d8715464b47ull, 0 },
 			{ "ShotEvents", 190, 0x1ee136123af4ddfaull, 0 },
 			{ "CombatEvents", 124, 0x7f963139bc7ca784ull, 0 },
@@ -4749,7 +4750,7 @@ TEST_SUITE("net-proto") {
 		CHECK(bad([](net::Deployables &r) { r.removed[0] = 0; }));
 		CHECK(bad([](net::Deployables &r) { r.removed.assign(net::kMaxDeployablesPerMessage + 1, 4); }));
 		CHECK(net::peek_type(net::encode_deployables(m)) == net::MessageType::Deployables);
-		CHECK(net::kProtocolVersion == 9);
+		CHECK(net::kProtocolVersion == 10);
 	}
 
 	TEST_CASE("proto v9: spot and order requests, spot states and order notices round-trip and refuse what is out of "
@@ -4802,7 +4803,7 @@ TEST_SUITE("net-proto") {
 		CHECK_FALSE(net::decode_order_notice(net::encode_order_notice({ cm::OrderType::Count, 1 })).ok());
 		CHECK(net::peek_type(net::encode_order_notice({ cm::OrderType::RequestAmmo, 1 })) ==
 				net::MessageType::OrderNotice);
-		CHECK(net::kProtocolVersion == 9);
+		CHECK(net::kProtocolVersion == 10);
 	}
 
 	TEST_CASE("proto: golden bytes of the encoders' clamp, cut and drop paths") {
@@ -4819,7 +4820,7 @@ TEST_SUITE("net-proto") {
 			{ "PlayerList (full drops removed)", 27, 0x47ea6ae9e75df6d4ull, 1 },
 			{ "CommandPacket (clamped, chain cut at a gap)", 57, 0x54a8e4154ecc6c70ull, 0 },
 			{ "CommandPacket (no commands)", 0, 0xcbf29ce484222325ull, 0 },
-			{ "Snapshot (others over the datagram)", 1189, 0x87f90dc2c2c75e6aull, 24 },
+			{ "Snapshot (others over the datagram)", 1189, 0x87404d088fc01e0aull, 25 },
 			{ "SnapshotOthers (others over the datagram)", 1178, 0x82aafe2e191acf87ull, 78 },
 			{ "ShotEvents (dropped, clamped, one datagram)", 1195, 0x3ed13adbc383dac9ull, 82 },
 			{ "CombatEvents (budget, clamps)", 5309, 0x83759aa16ad8fd11ull, 61 },
@@ -5227,5 +5228,67 @@ TEST_SUITE("net-proto") {
 		auto f = net::decode_snapshot(net::encode_snapshot(s));
 		REQUIRE(f);
 		CHECK_FALSE(f->own_suppression);
+	}
+
+	TEST_CASE("proto v10: a vaulting own state carries its VaultState, absolute and as a delta; any other mode carries "
+			  "none") {
+		Rng rng(0x7A017ull);
+		const sim::Tick tick = 900000;
+		net::Snapshot s = sample_snapshot(rng, 0);
+		REQUIRE(s.own);
+		s.seq = 300;
+		s.server_tick = tick;
+		s.own->tick = tick;
+		s.own->mode = sim::MoveMode::OnGround;
+		const size_t still = net::encode_snapshot(s).size();
+		s.own->mode = sim::MoveMode::AnimationControlled;
+		s.own->vault = { 17, 1, 255, 40000, 0.42f, 1.05f, 0.25f, 0.61f };
+		const std::vector<uint8_t> vaulting = net::encode_snapshot(s);
+		CHECK(vaulting.size() == still + 22);
+		const bf3::core::Result<net::Snapshot> d = net::decode_snapshot(vaulting);
+		REQUIRE(d);
+		CHECK(d->own == s.own);
+
+		net::Snapshot dead = s;
+		dead.own->mode = sim::MoveMode::Dead;
+		const bf3::core::Result<net::Snapshot> dd = net::decode_snapshot(net::encode_snapshot(dead));
+		REQUIRE(dd);
+		CHECK(dd->own->vault == sim::VaultState{});
+		CHECK(net::encode_snapshot(dead).size() == still);
+
+		net::SnapshotBaselines store;
+		sim::SoldierState base = *s.own;
+		base.tick = tick - 2;
+		base.vault.ticks = 15;
+		base.vault.moved = 0.5f;
+		store.keep(299, tick - 2, base, s.own_weapons, {});
+		net::SnapshotBases bases;
+		bases.own = { 1, tick - 2, base, s.own_weapons };
+		net::SnapshotSize size;
+		const std::vector<uint8_t> delta = net::encode_snapshot(s, nullptr, &bases, net::kMaxDatagramBytes, &size);
+		CHECK(size.own_delta);
+		CHECK(delta.size() < vaulting.size());
+		const bf3::core::Result<net::Snapshot> dv = net::decode_snapshot(delta, &store);
+		REQUIRE(dv);
+		CHECK(dv->own == s.own);
+
+		net::Snapshot landed = s;
+		landed.own->mode = sim::MoveMode::OnGround;
+		landed.own->vault = {};
+		const std::vector<uint8_t> after = net::encode_snapshot(landed, nullptr, &bases, net::kMaxDatagramBytes, &size);
+		const bf3::core::Result<net::Snapshot> dl = net::decode_snapshot(after, &store);
+		REQUIRE(dl);
+		CHECK(dl->own == landed.own);
+
+		sim::SoldierState walking = base;
+		walking.mode = sim::MoveMode::OnGround;
+		walking.vault = {};
+		net::SnapshotBaselines walk_store;
+		walk_store.keep(299, tick - 2, walking, s.own_weapons, {});
+		bases.own = { 1, tick - 2, walking, s.own_weapons };
+		const bf3::core::Result<net::Snapshot> ds = net::decode_snapshot(
+				net::encode_snapshot(s, nullptr, &bases, net::kMaxDatagramBytes, &size), &walk_store);
+		REQUIRE(ds);
+		CHECK(ds->own == s.own);
 	}
 }

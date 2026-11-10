@@ -1,8 +1,10 @@
 #include "bf3/sim/soldier_motor.h"
 
 #include "bf3/core/gameplay/soldier_def.h"
+#include "bf3/core/util/finite.h"
 #include "bf3/core/util/key_values.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <string>
@@ -191,6 +193,128 @@ void set_factors(StateSpeed &r_s, const MotorTuning &p_t, float p_accel_scale) {
 	r_s.sprint_factor = gain_factor(p_t.sprint_model, r_s.sprint_gain * p_accel_scale, p_t.reference_hz);
 }
 
+core::Status to_keys(const std::vector<core::gameplay::MoveKeyDef> &p_keys, std::array<MoveKey, kMaxMoveKeys> &r_keys,
+		uint8_t &r_count) {
+	if (p_keys.size() > kMaxMoveKeys) {
+		return core::make_error("motor params: a special move has " + std::to_string(p_keys.size()) +
+				" keys (at most " + std::to_string(kMaxMoveKeys) + ")");
+	}
+	for (size_t i = 0; i < p_keys.size(); ++i) {
+		if (!core::finite(p_keys[i].value) || !std::isfinite(p_keys[i].time) ||
+				(i > 0 && p_keys[i].time < p_keys[i - 1].time)) {
+			return core::make_error("motor params: a special move key is not finite or not in time order");
+		}
+		r_keys[i] = { p_keys[i].value, p_keys[i].time };
+	}
+	r_count = uint8_t(p_keys.size());
+	return core::Status::success();
+}
+
+uint8_t move_pose(const std::optional<core::gameplay::SoldierPose> &p_pose) {
+	return p_pose ? uint8_t(*p_pose) : kNoMovePose;
+}
+
+core::Result<SpecialMoveParams> to_move(const core::gameplay::SpecialMoveDef &p_def) {
+	SpecialMoveParams m;
+	BF3_TRY(to_keys(p_def.motion, m.motion, m.motion_count));
+	BF3_TRY(to_keys(p_def.gravity, m.gravity, m.gravity_count));
+	m.override_pose = move_pose(p_def.override_pose);
+	m.reset_pose = move_pose(p_def.reset_pose);
+	m.scale_with_distance = p_def.scale_with_distance;
+	m.keep_initial_direction = p_def.keep_initial_direction;
+	m.optimum_distance = p_def.optimum_distance;
+	m.optimum_height = p_def.optimum_height;
+	m.optimum_length = p_def.optimum_length;
+	m.min_distance_scale = p_def.min_distance_scale;
+	m.max_distance_scale = p_def.max_distance_scale;
+	m.min_height_scale = p_def.min_height_scale;
+	m.max_height_scale = p_def.max_height_scale;
+	m.min_length_scale = p_def.min_length_scale;
+	m.max_length_scale = p_def.max_length_scale;
+	m.exit_velocity = p_def.exit_velocity;
+	for (const float f :
+			{ m.optimum_distance, m.optimum_height, m.optimum_length, m.min_distance_scale, m.max_distance_scale,
+					m.min_height_scale, m.max_height_scale, m.min_length_scale, m.max_length_scale, m.exit_velocity }) {
+		if (!std::isfinite(f)) {
+			return core::make_error("motor params: a special move value is not finite");
+		}
+	}
+	return m;
+}
+
+core::Result<VaultParams> to_vault(const core::gameplay::SpecialMovesDef &p_def) {
+	VaultParams v;
+	for (size_t k = 0; k < kVaultKindCount; ++k) {
+		if (!p_def.vault[k]) {
+			return core::make_error(std::string("motor params: SpecialMovesComponentData has no ") +
+					core::gameplay::kVaultStateFields[k]);
+		}
+		core::Result<SpecialMoveParams> plain = to_move(*p_def.vault[k]);
+		BF3_TRY(plain);
+		v.plain[k] = *plain;
+		const std::vector<core::gameplay::VaultVariantDef> &variants = p_def.vault_variants[k];
+		if (variants.size() > kMaxVaultVariants) {
+			return core::make_error(std::string("motor params: ") + core::gameplay::kVaultVariantFields[k] + " has " +
+					std::to_string(variants.size()) + " entries (at most " + std::to_string(kMaxVaultVariants) + ")");
+		}
+		for (size_t i = 0; i < variants.size(); ++i) {
+			const core::gameplay::VaultVariantDef &d = variants[i];
+			VaultVariant &out = v.variants[k][i];
+			out.distance = d.distance;
+			out.distance_tolerance = d.distance_tolerance;
+			out.height = d.height;
+			out.height_tolerance = d.height_tolerance;
+			out.length = d.length;
+			out.length_tolerance = d.length_tolerance;
+			core::Result<SpecialMoveParams> move = to_move(d.move);
+			BF3_TRY(move);
+			out.move = *move;
+		}
+		v.variant_count[k] = uint8_t(variants.size());
+	}
+	v.present = true;
+	return v;
+}
+
+void hash_keys(uint64_t &r_hash, const std::array<MoveKey, kMaxMoveKeys> &p_keys, uint8_t p_count) {
+	hash_value(r_hash, p_count);
+	for (size_t i = 0; i < std::min<size_t>(p_count, kMaxMoveKeys); ++i) {
+		for (const float f : p_keys[i].value) {
+			hash_value(r_hash, f);
+		}
+		hash_value(r_hash, p_keys[i].time);
+	}
+}
+
+void hash_move(uint64_t &r_hash, const SpecialMoveParams &p_m) {
+	hash_keys(r_hash, p_m.motion, p_m.motion_count);
+	hash_keys(r_hash, p_m.gravity, p_m.gravity_count);
+	hash_value(r_hash, p_m.override_pose);
+	hash_value(r_hash, p_m.reset_pose);
+	hash_value(r_hash, p_m.scale_with_distance);
+	hash_value(r_hash, p_m.keep_initial_direction);
+	for (const float f : { p_m.optimum_distance, p_m.optimum_height, p_m.optimum_length, p_m.min_distance_scale,
+				 p_m.max_distance_scale, p_m.min_height_scale, p_m.max_height_scale, p_m.min_length_scale,
+				 p_m.max_length_scale, p_m.exit_velocity }) {
+		hash_value(r_hash, f);
+	}
+}
+
+void hash_vault(uint64_t &r_hash, const VaultParams &p_v) {
+	for (size_t k = 0; k < kVaultKindCount; ++k) {
+		hash_move(r_hash, p_v.plain[k]);
+		hash_value(r_hash, p_v.variant_count[k]);
+		for (size_t i = 0; i < std::min<size_t>(p_v.variant_count[k], kMaxVaultVariants); ++i) {
+			const VaultVariant &x = p_v.variants[k][i];
+			for (const float f :
+					{ x.distance, x.distance_tolerance, x.height, x.height_tolerance, x.length, x.length_tolerance }) {
+				hash_value(r_hash, f);
+			}
+			hash_move(r_hash, x.move);
+		}
+	}
+}
+
 std::optional<float> scalar_of(const core::gameplay::SoldierDef &p_def, std::string_view p_state, std::string_view p_name) {
 	const core::gameplay::MovementStateDef *s = p_def.state(p_state);
 	const std::optional<double> v = s ? s->scalar(p_name) : std::nullopt;
@@ -368,6 +492,11 @@ core::Result<MotorParams> make_motor_params(const core::gameplay::SoldierDef &p_
 	if (p.poses[size_t(Pose::Stand)].height < 2.0f * p.radius || p.poses[size_t(Pose::Crouch)].height < 2.0f * p.radius) {
 		return core::make_error("motor params: the stand or crouch height is below the capsule diameter");
 	}
+	if (p_def.special_moves) {
+		core::Result<VaultParams> vault = to_vault(*p_def.special_moves);
+		BF3_TRY(vault);
+		p.vault = *vault;
+	}
 	return p;
 }
 
@@ -413,6 +542,9 @@ uint64_t motor_params_hash(const MotorParams &p_params) {
 	if (p_params.protect_abort_buttons != 0 || p_params.protect_abort_move) {
 		hash_value(h, p_params.protect_abort_buttons);
 		hash_value(h, uint8_t(p_params.protect_abort_move ? 1 : 0));
+	}
+	if (p_params.vault.present) {
+		hash_vault(h, p_params.vault);
 	}
 	return h;
 }

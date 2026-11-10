@@ -5,6 +5,7 @@
 #include "bf3/sim/command.h"
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/soldier_state.h"
+#include "bf3/sim/vault.h"
 
 #include <array>
 #include <cstdint>
@@ -116,6 +117,7 @@ struct MotorParams {
 	Curve fall_damage_horizontal;
 	std::array<PoseParams, kPoseCount> poses{};
 	MotorTuning tuning;
+	VaultParams vault;
 
 	uint32_t protect_abort_buttons = 0;
 	bool protect_abort_move = false;

@@ -13,6 +13,8 @@
 #include <cassert>
 #include <cfloat>
 #include <cmath>
+#include <optional>
+#include <span>
 
 namespace bf3::sim {
 
@@ -140,7 +142,130 @@ struct SoldierMotor::Impl {
 
 	bool pose_fits(Pose p_pose, const Vec3 &p_feet, uint16_t p_yaw) const;
 	bool footprint_free(const Vec3 &p_feet, uint16_t p_yaw) const;
+	void begin_pose(SoldierState &r_s, Pose p_to) const;
+	void request_move_pose(SoldierState &r_s, uint8_t p_pose) const;
+	void begin_vault(SoldierState &r_s, const VaultStart &p_start) const;
+	void step_vault(SoldierState &r_s, bool p_blocked, MotorStepInfo *r_info) const;
 };
+
+void SoldierMotor::Impl::begin_pose(SoldierState &r_s, Pose p_to) const {
+	uint16_t n = params.poses[size_t(r_s.pose)].transition_ticks[size_t(p_to)];
+	n = n == 0 ? 1 : n;
+	r_s.target_pose = p_to;
+	r_s.transition_total = n;
+	r_s.transition_ticks = uint16_t(n - 1);
+	r_s.events |= soldier_events::kPoseStarted;
+	if (r_s.transition_ticks == 0) {
+		r_s.pose = r_s.target_pose;
+		r_s.events |= soldier_events::kPoseFinished;
+	}
+}
+
+void SoldierMotor::Impl::request_move_pose(SoldierState &r_s, uint8_t p_pose) const {
+	if (p_pose >= kPoseCount || Pose(p_pose) == r_s.target_pose) {
+		return;
+	}
+	const Pose to = Pose(p_pose);
+	if (to != Pose::Stand && !pose_fits(to, r_s.position, r_s.yaw)) {
+		r_s.events |= soldier_events::kPoseRefused;
+		return;
+	}
+	begin_pose(r_s, to);
+}
+
+void SoldierMotor::Impl::begin_vault(SoldierState &r_s, const VaultStart &p_start) const {
+	VaultState v;
+	v.kind = uint8_t(p_start.kind);
+	v.variant = choose_vault_variant(params.vault, p_start.kind, p_start.measure);
+	v.yaw = r_s.yaw;
+	v.distance = p_start.measure.distance;
+	v.height = p_start.measure.height;
+	v.length = p_start.measure.length;
+	r_s.vault = v;
+	r_s.mode = MoveMode::AnimationControlled;
+	r_s.events |= soldier_events::kVaulted;
+	request_move_pose(r_s, vault_move(params.vault, p_start.kind, v.variant).override_pose);
+}
+
+void SoldierMotor::Impl::step_vault(SoldierState &r_s, bool p_blocked, MotorStepInfo *r_info) const {
+	const float dt = kTickSeconds;
+	const CollisionWorld::Impl &cw = w();
+	const uint32_t mask = query_mask::kMovement;
+	JPH::CharacterVirtual &ch = *character;
+	SoldierState &s = r_s;
+	const VaultKind kind = VaultKind(std::min<uint8_t>(s.vault.kind, uint8_t(kVaultKindCount - 1)));
+	const SpecialMoveParams &move = vault_move(params.vault, kind, s.vault.variant);
+	const std::span<const MoveKey> keys(move.motion.data(), std::min<size_t>(move.motion_count, kMaxMoveKeys));
+	const float t0 = float(s.vault.ticks) * dt;
+	s.vault.ticks = uint16_t(std::min<uint32_t>(uint32_t(s.vault.ticks) + 1u, 0xFFFFu));
+	const float t1 = float(s.vault.ticks) * dt;
+	const std::optional<Vec3> from = sample_move_keys(keys, t0);
+	const std::optional<Vec3> to = sample_move_keys(keys, t1);
+	Vec3 local{};
+	if (from && to) {
+		local = { (*to)[0] - (*from)[0], (*to)[1] - (*from)[1], (*to)[2] - (*from)[2] };
+	}
+	const float frame = yaw_radians(move.keep_initial_direction ? s.vault.yaw : s.yaw);
+	const float sy = JPH::Sin(frame);
+	const float cy = JPH::Cos(frame);
+	const VaultMeasure measure{ s.vault.distance, s.vault.height, s.vault.length };
+	const VaultScales scales = vault_scales(move, measure);
+	const float sh = vault_horizontal_scale(scales, measure, s.vault.moved);
+	const float sv = scales.on ? scales.height : 1.0f;
+	const JPH::Vec3 motion((sy * local[2] - cy * local[0]) * sh, local[1] * sv, (cy * local[2] + sy * local[0]) * sh);
+
+	const JPH::Vec3 p0 = JPH::Vec3(ch.GetPosition());
+	ch.SetLinearVelocity(motion / dt);
+	JPH::CharacterVirtual::ExtendedUpdateSettings update;
+	update.mStickToFloorStepDown = JPH::Vec3::sZero();
+	update.mWalkStairsStepUp = JPH::Vec3::sZero();
+	ch.ExtendedUpdate(dt, JPH::Vec3::sZero(), update, cw.broadphase_filter(mask), cw.object_filter(mask),
+			cw.body_filter, cw.shape_filter, *cw.temp);
+	const JPH::Vec3 p1 = JPH::Vec3(ch.GetPosition());
+	const JPH::Vec3 disp = p1 - p0;
+	if (s.vault.ticks > 1) {
+		s.vault.moved += std::sqrt(disp.GetX() * disp.GetX() + disp.GetZ() * disp.GetZ());
+	}
+	bool aborted = false;
+	for (const JPH::CharacterContact &c : ch.GetActiveContacts()) {
+		if (c.mHadCollision &&
+				vault_contact_aborts(
+						from_jolt(JPH::Vec3(c.mPosition) - p1), from_jolt(c.mContactNormal), from_jolt(motion))) {
+			aborted = true;
+			break;
+		}
+	}
+	const bool finished =
+			aborted || keys.empty() || t1 >= move_duration(move) || motion.Length() / dt < move.exit_velocity;
+
+	const JPH::CharacterBase::EGroundState ground_state = ch.GetGroundState();
+	const bool grounded = ground_state == JPH::CharacterBase::EGroundState::OnGround;
+	s.position = from_jolt(p1);
+	s.velocity = aborted ? Vec3{ 0.0f, 0.0f, 0.0f } : from_jolt(disp / dt);
+	if (grounded || ground_state == JPH::CharacterBase::EGroundState::OnSteepGround) {
+		const JPH::Vec3 n = ch.GetGroundNormal();
+		s.ground_normal = n.LengthSq() > 1e-6f ? from_jolt(n.Normalized()) : Vec3{ 0.0f, 1.0f, 0.0f };
+	} else {
+		s.ground_normal = { 0.0f, 1.0f, 0.0f };
+	}
+	if (finished) {
+		s.vault = VaultState{};
+		s.events |= soldier_events::kVaultEnded;
+		s.mode = grounded ? MoveMode::OnGround : MoveMode::InAir;
+		request_move_pose(s, move.reset_pose);
+	}
+	uint16_t flags = soldier_flags::kAlive;
+	flags |= grounded ? soldier_flags::kGrounded : 0;
+	flags |= p_blocked ? soldier_flags::kStandBlocked : 0;
+	flags |= s.protect_ticks > 0 ? soldier_flags::kSpawnProtected : 0;
+	s.flags = flags;
+	s.air_ticks = grounded ? 0 : uint16_t(std::min<uint32_t>(uint32_t(s.air_ticks) + 1u, 0xFFFFu));
+	if (r_info != nullptr) {
+		r_info->horizontal_speed = std::sqrt(s.velocity[0] * s.velocity[0] + s.velocity[2] * s.velocity[2]);
+		r_info->pose_blocked = p_blocked;
+		r_info->contacts = uint32_t(ch.GetActiveContacts().size());
+	}
+}
 
 bool SoldierMotor::Impl::footprint_free(const Vec3 &p_feet, uint16_t p_yaw) const {
 	const PoseParams &prone = params.poses[size_t(Pose::Prone)];
@@ -272,6 +397,9 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 			!finite3(s.velocity, kMaxSpeed) || uint8_t(s.pose) >= kPoseCount || uint8_t(s.target_pose) >= kPoseCount) {
 		return;
 	}
+	if (s.mode != MoveMode::AnimationControlled) {
+		s.vault = VaultState{};
+	}
 
 	if (s.protect_ticks > 0) {
 		--s.protect_ticks;
@@ -312,7 +440,7 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 				blocked = false;
 			}
 		}
-	} else {
+	} else if (s.mode != MoveMode::AnimationControlled) {
 		Pose requested = p_command.pose;
 		if (uint8_t(requested) >= kPoseCount) {
 			requested = s.pose;
@@ -326,17 +454,8 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 		} else if (requested == Pose::Prone && !grounded0) {
 
 		} else if (m.pose_fits(requested, s.position, s.yaw)) {
-			uint16_t n = p.poses[size_t(s.pose)].transition_ticks[size_t(requested)];
-			n = n == 0 ? 1 : n;
-			s.target_pose = requested;
-			s.transition_total = n;
-			s.transition_ticks = uint16_t(n - 1);
-			s.events |= soldier_events::kPoseStarted;
+			m.begin_pose(s, requested);
 			blocked = false;
-			if (s.transition_ticks == 0) {
-				s.pose = s.target_pose;
-				s.events |= soldier_events::kPoseFinished;
-			}
 		} else {
 			if (!blocked) {
 				s.events |= soldier_events::kPoseRefused;
@@ -362,6 +481,18 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 		if (n.LengthSq() > 1e-6f) {
 			ground_plane = n.Normalized();
 		}
+	}
+	if (s.mode != MoveMode::AnimationControlled && p.vault.present && (p_command.buttons & buttons::kJump) != 0 &&
+			grounded0 && s.pose == Pose::Stand && s.target_pose == Pose::Stand && s.transition_ticks == 0 &&
+			vault_input_allows(forward_in)) {
+		const Vec3 facing{ JPH::Sin(yaw), 0.0f, JPH::Cos(yaw) };
+		if (const std::optional<VaultStart> start = probe_vault(*m.world, s.position, facing, mask)) {
+			m.begin_vault(s, *start);
+		}
+	}
+	if (s.mode == MoveMode::AnimationControlled) {
+		m.step_vault(s, blocked, r_info);
+		return;
 	}
 
 	float target[2] = { 0.0f, 0.0f };

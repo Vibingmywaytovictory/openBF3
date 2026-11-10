@@ -40,7 +40,23 @@ inline constexpr uint16_t kPoseFinished = 1u << 5;
 inline constexpr uint16_t kPoseRefused = 1u << 6;
 inline constexpr uint16_t kSpawned = 1u << 7;
 inline constexpr uint16_t kTeleported = 1u << 8;
+inline constexpr uint16_t kVaulted = 1u << 9;
+inline constexpr uint16_t kVaultEnded = 1u << 10;
 }
+
+struct VaultState {
+	uint16_t ticks = 0;
+	uint8_t kind = 0;
+	uint8_t variant = 0;
+	uint16_t yaw = 0;
+	float distance = 0;
+	float height = 0;
+	float length = 0;
+	float moved = 0;
+
+	bool operator==(const VaultState &) const = default;
+};
+static_assert(std::is_trivially_copyable_v<VaultState>);
 
 struct SoldierState {
 	Tick tick = 0;
@@ -66,6 +82,7 @@ struct SoldierState {
 	float health = 100.0f;
 	float impact_speed = 0.0f;
 	float damage = 0.0f;
+	VaultState vault;
 
 	bool operator==(const SoldierState &) const = default;
 };

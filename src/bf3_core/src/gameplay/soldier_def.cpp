@@ -51,6 +51,99 @@ std::vector<CurvePoint> read_value_at_x(WorkBudget &r_budget, const EbxStruct &p
 	return out;
 }
 
+std::vector<MoveKeyDef> read_move_keys(WorkBudget &r_budget, const EbxStruct &p_move, std::string_view p_field) {
+	std::vector<MoveKeyDef> out;
+	const OptionalEbxArray array = array_of(r_budget, p_move.get(p_field));
+	if (!array) {
+		return out;
+	}
+	for (const EbxValue point : *array) {
+		const std::optional<EbxStruct> s = point.as_struct();
+		if (!s) {
+			continue;
+		}
+		const std::optional<core::Vec3> value = vec3(*s, "Value");
+		const std::optional<double> time = number(*s, "Time");
+		if (value && time) {
+			out.push_back({ *value, static_cast<float>(*time) });
+		}
+	}
+	return out;
+}
+
+std::optional<SoldierPose> move_pose(const EbxStruct &p_move, std::string_view p_field) {
+	return soldier_pose_from_name(text_view(p_move, p_field));
+}
+
+std::optional<EbxStruct> move_state(
+		WorkBudget &r_budget, const EbxResolver &p_db, const EbxStruct &p_owner, std::string_view p_field) {
+	const std::optional<EbxValue> value = p_owner.get(p_field);
+	std::optional<EbxStruct> state = value ? value->as_struct() : std::nullopt;
+	if (!state) {
+		if (const std::optional<EbxInstance> target = p_db.follow(p_owner, p_field)) {
+			state = target->data();
+		}
+	}
+	if (!state || !r_budget.take_type(*state)) {
+		return std::nullopt;
+	}
+	return state;
+}
+
+SpecialMoveDef read_special_move(WorkBudget &r_budget, const EbxStruct &p_move) {
+	SpecialMoveDef out;
+	const EbxStruct &d = p_move;
+	out.motion = read_move_keys(r_budget, d, "MotionPoints");
+	out.gravity = read_move_keys(r_budget, d, "GravityPoints");
+	out.optimum_distance = static_cast<float>(number_or(d, "OptimumDistanceFromObject", 0));
+	out.optimum_height = static_cast<float>(number_or(d, "OptimumHeightOfObject", 0));
+	out.optimum_length = static_cast<float>(number_or(d, "OptimumLengthOfObject", 0));
+	out.min_distance_scale = static_cast<float>(number_or(d, "MinDistanceScale", 1));
+	out.max_distance_scale = static_cast<float>(number_or(d, "MaxDistanceScale", 1));
+	out.min_height_scale = static_cast<float>(number_or(d, "MinHeightScale", 1));
+	out.max_height_scale = static_cast<float>(number_or(d, "MaxHeightScale", 1));
+	out.min_length_scale = static_cast<float>(number_or(d, "MinObjectLengthScale", 1));
+	out.max_length_scale = static_cast<float>(number_or(d, "MaxObjectLengthScale", 1));
+	out.scale_with_distance = boolean(d, "ScaleWithDistanceToObject").value_or(false);
+	out.keep_initial_direction = boolean(d, "KeepInitialSoldierDirection").value_or(false);
+	out.exit_velocity = static_cast<float>(number_or(d, "ExitAnimationDrivenStateVelocity", 0));
+	out.override_pose = move_pose(d, "OverridePose");
+	out.reset_pose = move_pose(d, "ResetPose");
+	return out;
+}
+
+SpecialMovesDef read_special_moves(WorkBudget &r_budget, const EbxResolver &p_db, const EbxInstance &p_component) {
+	SpecialMovesDef out;
+	const EbxStruct c = p_component.data();
+	for (size_t k = 0; k < kVaultStateCount; ++k) {
+		if (const std::optional<EbxStruct> state = move_state(r_budget, p_db, c, kVaultStateFields[k])) {
+			out.vault[k] = read_special_move(r_budget, *state);
+		}
+		const OptionalEbxArray list = array_of(r_budget, c.get(kVaultVariantFields[k]));
+		if (!list) {
+			continue;
+		}
+		for (const EbxValue element : *list) {
+			const std::optional<EbxStruct> s = element.as_struct();
+			const std::optional<EbxStruct> state =
+					s ? move_state(r_budget, p_db, *s, "SpecialMoveState") : std::nullopt;
+			if (!state) {
+				continue;
+			}
+			VaultVariantDef v;
+			v.distance = static_cast<float>(number_or(*s, "DistToObject", 0));
+			v.distance_tolerance = static_cast<float>(number_or(*s, "DistToObjectTolerance", 0));
+			v.height = static_cast<float>(number_or(*s, "HeightOfObject", 0));
+			v.height_tolerance = static_cast<float>(number_or(*s, "HeightOfObjectTolerance", 0));
+			v.length = static_cast<float>(number_or(*s, "LengthOfObject", 0));
+			v.length_tolerance = static_cast<float>(number_or(*s, "LengthOfObjectTolerance", 0));
+			v.move = read_special_move(r_budget, *state);
+			out.vault_variants[k].push_back(std::move(v));
+		}
+	}
+	return out;
+}
+
 PoseDef read_pose(WorkBudget &r_budget, const EbxInstance &p_pose) {
 	PoseDef out;
 	const EbxStruct d = p_pose.data();
@@ -394,6 +487,9 @@ Result<SoldierDef> read_soldier_def(const EbxResolver &p_db, std::string_view p_
 	}
 	if (const std::optional<EbxInstance> c = first_of(budget, components, "SpottingTargetComponentData")) {
 		out.spotting_target = scalars(budget, *c);
+	}
+	if (const std::optional<EbxInstance> c = first_of(budget, components, "SpecialMovesComponentData")) {
+		out.special_moves = read_special_moves(budget, p_db, *c);
 	}
 
 	Result<LogicConnections> wiring = LogicConnections::of(p_db, blueprint, budget);

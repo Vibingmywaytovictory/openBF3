@@ -115,6 +115,101 @@ gameplay::StatePoseSpeed speed(gameplay::SoldierPose p_pose, float p_v, float p_
 	return s;
 }
 
+using Keys = std::vector<std::array<float, 4>>;
+
+gameplay::SpecialMoveDef special_move(
+		const Keys &p_motion, const Keys &p_gravity, const std::array<float, 9> &p_scale, bool p_keep_direction) {
+	gameplay::SpecialMoveDef m;
+	for (const auto &[t, x, y, z] : p_motion) {
+		m.motion.push_back({ { x, y, z }, t });
+	}
+	for (const auto &[t, x, y, z] : p_gravity) {
+		m.gravity.push_back({ { x, y, z }, t });
+	}
+	m.optimum_distance = p_scale[0];
+	m.optimum_height = p_scale[1];
+	m.optimum_length = p_scale[2];
+	m.min_distance_scale = p_scale[3];
+	m.max_distance_scale = p_scale[4];
+	m.min_height_scale = p_scale[5];
+	m.max_height_scale = p_scale[6];
+	m.min_length_scale = p_scale[7];
+	m.max_length_scale = p_scale[8];
+	m.scale_with_distance = true;
+	m.keep_initial_direction = p_keep_direction;
+	m.exit_velocity = -1.0f;
+	m.override_pose = gameplay::SoldierPose::Crouch;
+	m.reset_pose = gameplay::SoldierPose::Stand;
+	return m;
+}
+
+gameplay::VaultVariantDef vault_variant(const std::array<float, 6> &p_band, gameplay::SpecialMoveDef p_move) {
+	gameplay::VaultVariantDef v;
+	v.distance = p_band[0];
+	v.distance_tolerance = p_band[1];
+	v.height = p_band[2];
+	v.height_tolerance = p_band[3];
+	v.length = p_band[4];
+	v.length_tolerance = p_band[5];
+	v.move = std::move(p_move);
+	return v;
+}
+
+gameplay::SpecialMovesDef synthetic_special_moves() {
+	const Keys over_high = { { 0, 0, 0, 0 }, { 0.2f, 0, 0.8f, 0.8f }, { 0.4f, 0, 1.1f, 0.8f }, { 0.7f, 0, 0, 2.0f },
+		{ 0.75f, 0, 0, 2.2f } };
+	const Keys over_high_gravity = { { 0, 0, 0, 0 }, { 0.4f, 0, 0, 0 }, { 0.41f, 0, -9.81f, 0 },
+		{ 0.7f, 0, -9.81f, 0 } };
+	const std::array<float, 9> over_high_scale = { 0.6f, 0.6f, 0.05f, 0.9f, 1.6f, 0.7f, 2.0f, 1.0f, 1.7f };
+	gameplay::SpecialMovesDef s;
+	s.vault[0] = special_move(over_high, over_high_gravity, over_high_scale, true);
+	s.vault[1] = special_move({ { 0, 0, 0, 0 }, { 0.1f, 0, 0.7f, 0.3f }, { 0.2f, 0, 1.25f, 0.6f },
+									  { 0.25f, 0, 1.25f, 0.7f }, { 0.3f, 0, 1.25f, 0.8f }, { 0.35f, 0, 1.25f, 0.9f },
+									  { 0.375f, 0, 1.25f, 0.95f }, { 0.4f, 0, 1.25f, 1.0f } },
+			{ { 0, 0, 0, 0 }, { 0.4f, 0, 0, 0 }, { 0.5f, 0, -9.81f, 0 } },
+			{ 0.7f, 1.2f, 0.05f, 0.4f, 2.0f, 0.5f, 1.0f, 1.0f, 1.3f }, true);
+	s.vault[2] = special_move({ { 0, 0, 0, 0 }, { 0.3f, 0, 0.8f, 0.9f }, { 0.35f, 0, 0.85f, 1.4f },
+									  { 0.4f, 0, 0.85f, 1.6f }, { 0.45f, 0, 0.8f, 1.8f }, { 0.5f, 0, 0.7f, 2.0f },
+									  { 0.65f, 0, 0.6f, 2.8f }, { 0.75f, 0, 0.5f, 3.1f }, { 0.8f, 0, 0.5f, 3.3f } },
+			{ { 0, 0, 0, 0 }, { 0.4f, 0, 0, 0 }, { 0.8f, 0, -9.81f, 0 } },
+			{ 1.8f, 0.45f, 0.1f, 0.1f, 1.5f, 0.4f, 1.5f, 1.0f, 1.0f }, true);
+	Keys over_high_second = over_high;
+	over_high_second[1] = { 0.2f, 0, 0.8f, 0.4f };
+	s.vault_variants[0] = {
+		vault_variant({ 0.4f, 0.2f, 1, 1, 1, 1 },
+				special_move({ { 0, 0, 0, 0 }, { 0.2f, 0, 0.6f, -0.2f }, { 0.4f, 0, 1.25f, 0 }, { 0.7f, 0, 0, 1.4f },
+									 { 0.75f, 0, 0, 1.6f } },
+						{ { 0, 0, 0, 0 }, { 0.2f, 0, 0, 0 }, { 0.21f, 0, -9.81f, 0 }, { 0.75f, 0, -9.81f, 0 } },
+						{ 0.4f, 1.0f, 0.1f, 1.0f, 1.3f, 1.4f, 2.0f, 1.0f, 1.2f }, true)),
+		vault_variant({ 1, 1, 1, 1, 1, 1 }, special_move(over_high_second, over_high_gravity, over_high_scale, true)),
+	};
+	s.vault_variants[1] = {
+		vault_variant({ 0.4f, 0.2f, 1, 1, 1, 1 },
+				special_move({ { 0, 0, 0, 0 }, { 0.15f, 0, 0.5f, -0.2f }, { 0.25f, 0, 1.0f, -0.2f },
+									 { 0.3f, 0, 1.25f, 0.2f }, { 0.35f, 0, 1.25f, 0.3f }, { 0.4f, 0, 1.25f, 0.4f },
+									 { 0.45f, 0, 1.25f, 0.5f } },
+						{ { 0, 0, 0, 0 }, { 0.4f, 0, 0, 0 }, { 0.41f, 0, -9.81f, 0 }, { 0.7f, 0, -9.81f, 0 } },
+						{ 0.9f, 1.0f, 0.05f, 0.1f, 1.2f, 0.1f, 2.0f, 1.0f, 2.0f }, false)),
+		vault_variant({ 0.75f, 0.6f, 1, 1, 1, 1 },
+				special_move({ { 0, 0, 0, 0 }, { 0.15f, 0, 0.5f, 0.35f }, { 0.25f, 0, 1.0f, 0.65f },
+									 { 0.315f, 0, 1.2f, 0.85f }, { 0.365f, 0, 1.2f, 1.0f }, { 0.3815f, 0, 1.2f, 1.05f },
+									 { 0.388f, 0, 1.2f, 1.07f }, { 0.388f, 0, 1.2f, 1.07f } },
+						{ { 0, 0, 0, 0 }, { 0.5f, 0, 0, 0 }, { 1.0f, 0, -9.81f, 0 } },
+						{ 1.0f, 1.2f, 0.05f, 0.8f, 2.0f, 0.9f, 1.0f, 1.0f, 1.3f }, true)),
+	};
+	s.vault_variants[2] = {
+		vault_variant({ 0.6f, 0.3f, 1, 1, 1, 1 },
+				special_move(
+						{ { 0, 0, 0, 0 }, { 0.2f, 0, 0.5f, -0.1f }, { 0.4f, 0, 0.5f, 0.5f }, { 0.6f, 0, 0.2f, 1.1f } },
+						{}, { 0.5f, 0.45f, 0.05f, 0.8f, 2.0f, 0.9f, 2.0f, 1.0f, 1.7f }, false)),
+		vault_variant({ 1.2f, 0.4f, 1, 1, 1, 1 },
+				special_move({ { 0, 0, 0, 0 }, { 0.2f, 0, 0.5f, 0.07f }, { 0.6f, 0, 0.5f, 1.25f } },
+						{ { 0, 0, 0, 0 }, { 0.3f, 0, 0, 0 }, { 0.31f, 0, -9.81f, 0 }, { 1.0f, 0, -9.81f, 0 } },
+						{ 1.0f, 0.45f, 0.05f, 0.8f, 2.0f, 0.9f, 2.0f, 1.0f, 1.7f }, false)),
+	};
+	return s;
+}
+
 gameplay::SoldierDef synthetic_soldier() {
 	using gameplay::SoldierPose;
 	gameplay::SoldierDef d;
@@ -184,6 +279,7 @@ gameplay::SoldierDef synthetic_soldier() {
 	d.states = { ground, jump, air, falling };
 	d.fall_damage_vertical = { { 0, 0 }, { 13.9f, 0 }, { 14, 20 }, { 22, 40 }, { 30, 100 } };
 	d.fall_damage_horizontal = d.fall_damage_vertical;
+	d.special_moves = synthetic_special_moves();
 	return d;
 }
 
@@ -1680,6 +1776,231 @@ TEST_SUITE("sim-motor-unit") {
 			CHECK(hi_y < 0.015f);
 			CHECK(lo_v >= 0.95f * expected);
 			CHECK(horizontal(trace.back().velocity) == doctest::Approx(expected).epsilon(0.01));
+		}
+	}
+
+	TEST_CASE("sim.motor: Q10 / R-B4 vault rules: trigger 0.2, probe heights, one-sided vault up, first-match bands, "
+			  "scales, abort cone") {
+		CHECK_FALSE(vault_input_allows(0.1f));
+		CHECK_FALSE(vault_input_allows(axis_value(25)));
+		CHECK(vault_input_allows(0.2f));
+		CHECK(vault_input_allows(axis_value(26)));
+		CHECK(vault_probe_height(0.5f) == doctest::Approx(0.9f).epsilon(1e-6));
+		CHECK(vault_probe_height(0.97f) == 0.1f);
+		CHECK(vault_probe_height(1.0f) == 0.1f);
+		CHECK(vault_up_or_over(VaultKind::OverHigh, 1.0f, 0.9f) == VaultKind::UpHigh);
+		CHECK(vault_up_or_over(VaultKind::OverHigh, 1.0f, 0.7f) == VaultKind::OverHigh);
+		CHECK(vault_up_or_over(VaultKind::OverHigh, 1.0f, 1.6f) == VaultKind::UpHigh);
+		CHECK(vault_up_or_over(VaultKind::OverLow, 1.0f, 1.0f) == VaultKind::OverLow);
+
+		VaultParams bands;
+		bands.variant_count[0] = 2;
+		bands.variants[0][0] = { 1.0f, 0.5f, 1.0f, 0.2f, 0.5f, 0.3f, {} };
+		bands.variants[0][1] = { 1.0f, 1.0f, 1.0f, 0.5f, 1.0f, 1.0f, {} };
+		CHECK(choose_vault_variant(bands, VaultKind::OverHigh, { 1.2f, 1.15f, 0.6f }) == 0);
+		CHECK(choose_vault_variant(bands, VaultKind::OverHigh, { 1.2f, 1.25f, 0.6f }) == 1);
+		CHECK(choose_vault_variant(bands, VaultKind::OverHigh, { 1.2f, 1.2f, 0.6f }) == 1);
+		CHECK(choose_vault_variant(bands, VaultKind::OverHigh, { 3.0f, 1.0f, 1.0f }) == kPlainVaultMove);
+		CHECK(choose_vault_variant(bands, VaultKind::OverLow, { 1.0f, 1.0f, 0.5f }) == kPlainVaultMove);
+		bands.plain[0].optimum_distance = 7.0f;
+		CHECK(vault_move(bands, VaultKind::OverHigh, kPlainVaultMove).optimum_distance == 7.0f);
+
+		SpecialMoveParams move;
+		move.scale_with_distance = true;
+		move.optimum_distance = 1.0f;
+		move.optimum_height = 1.0f;
+		move.optimum_length = 0.5f;
+		move.min_distance_scale = 0.5f;
+		move.max_distance_scale = 1.5f;
+		move.min_height_scale = 0.8f;
+		move.max_height_scale = 1.3f;
+		move.min_length_scale = 0.5f;
+		move.max_length_scale = 2.0f;
+		const VaultMeasure measured{ 1.5f, 1.2f, 0.3f };
+		const VaultScales s = vault_scales(move, measured);
+		CHECK(s.on);
+		CHECK(s.distance == doctest::Approx(1.5f));
+		CHECK(s.height == doctest::Approx(1.2f));
+		CHECK(s.length == doctest::Approx(0.6f));
+		CHECK(vault_horizontal_scale(s, measured, 1.29f) == doctest::Approx(1.5f));
+		CHECK(vault_horizontal_scale(s, measured, 1.31f) == doctest::Approx(0.6f));
+		CHECK(vault_horizontal_scale(s, measured, 1.99f) == doctest::Approx(0.6f));
+		CHECK(vault_horizontal_scale(s, measured, 2.01f) == 1.0f);
+		CHECK_FALSE(vault_scales(move, measured, true).on);
+		CHECK(vault_horizontal_scale(vault_scales(move, measured, true), measured, 0.0f) == 1.0f);
+		SpecialMoveParams zero = move;
+		zero.optimum_distance = 0.0f;
+		zero.optimum_height = 0.0f;
+		zero.optimum_length = 0.0f;
+		const VaultScales z = vault_scales(zero, measured);
+		CHECK(z.distance == 0.0f);
+		CHECK(z.height == 0.0f);
+		CHECK(z.length == 1.0f);
+
+		const std::vector<MoveKey> keys = { { { 0, 0, 0 }, 0.0f }, { { 0, 1.1f, 0.8f }, 0.4f },
+			{ { 0, 0, 2.2f }, 0.75f } };
+		CHECK(*sample_move_keys(keys, 0.2f) == Vec3{ 0.0f, 0.55f, 0.4f });
+		CHECK(*sample_move_keys(keys, 2.0f) == Vec3{ 0.0f, 0.0f, 2.2f });
+		CHECK_FALSE(sample_move_keys({}, 0.1f));
+		SpecialMoveParams timed;
+		timed.motion[0] = { {}, 0.0f };
+		timed.motion[1] = { { 0, 0, 1 }, 0.9f };
+		timed.motion_count = 2;
+		CHECK(move_duration(timed) == 0.9f);
+		CHECK(seconds_to_ticks(move_duration(timed)) == 54);
+
+		CHECK_FALSE(vault_contact_aborts({ 0.2f, 0.0f, 0.0f }, { -0.8f, 0.6f, 0.0f }, { 1.0f, 0.0f, 0.0f }));
+		CHECK(vault_contact_aborts({ 0.5f, 0.0f, 0.0f }, { -0.8f, 0.6f, 0.0f }, { 1.0f, 0.0f, 0.0f }));
+		CHECK_FALSE(vault_contact_aborts({ 0.5f, 0.0f, 0.0f }, { -0.3f, 0.9539392f, 0.0f }, { 1.0f, 0.0f, 0.0f }));
+		CHECK_FALSE(vault_contact_aborts({ 0.5f, 0.0f, 0.0f }, { -1.0f, 0.0f, 0.0f }, { 1e-4f, 0.0f, 0.0f }));
+
+		const MotorParams p = params_with(shipped_tuning());
+		REQUIRE(p.vault.present);
+		const auto probe_kind = [](float p_height) -> std::optional<VaultKind> {
+			using namespace vault_rules;
+			if (kMiddleHeight + kHighOffset < p_height) {
+				return std::nullopt;
+			}
+			if (kMiddleHeight + kMiddleOffset < p_height) {
+				return VaultKind::OverHigh;
+			}
+			if (kMiddleHeight + kLowOffset < p_height) {
+				return VaultKind::OverLow;
+			}
+			return std::nullopt;
+		};
+		CHECK(probe_kind(p.vault.plain[size_t(VaultKind::OverHigh)].optimum_height) == VaultKind::OverHigh);
+		CHECK(probe_kind(p.vault.plain[size_t(VaultKind::UpHigh)].optimum_height) == VaultKind::OverHigh);
+		CHECK(probe_kind(p.vault.plain[size_t(VaultKind::OverLow)].optimum_height) == VaultKind::OverLow);
+		CHECK(p.vault.variant_count == std::array<uint8_t, 3>{ 2, 2, 2 });
+		CHECK(move_duration(p.vault.plain[0]) == 0.75f);
+		CHECK(move_duration(p.vault.plain[1]) == 0.4f);
+		CHECK(move_duration(p.vault.plain[2]) == 0.8f);
+		CHECK(p.vault.plain[0].override_pose == uint8_t(Pose::Crouch));
+		CHECK(p.vault.plain[0].reset_pose == uint8_t(Pose::Stand));
+		gameplay::SoldierDef d = synthetic_soldier();
+		d.special_moves->vault[1].reset();
+		CHECK_FALSE(make_motor_params(d).ok());
+		d = synthetic_soldier();
+		d.special_moves->vault[2]->motion.resize(kMaxMoveKeys + 1);
+		CHECK_FALSE(make_motor_params(d).ok());
+		d.special_moves.reset();
+		REQUIRE(make_motor_params(d).ok());
+		CHECK_FALSE(make_motor_params(d)->vault.present);
+	}
+
+	TEST_CASE("sim.motor: motor vault cases: a 1 m wall is vaulted and landed beyond, 2 m is refused, a 1 m block is "
+			  "climbed, prediction matches") {
+		const auto world_with = [](float p_height, float p_depth) {
+			std::vector<StaticTriangle> t = flat_world(50.0f);
+			add_box(t, { -3.0f, 0.0f, 2.0f }, { 3.0f, p_height, 2.0f + p_depth });
+			return t;
+		};
+		const auto attempt = [](const SoldierMotor &p_motor, int8_t p_forward, uint32_t p_ticks) {
+			SoldierState s = at_rest(p_motor, { 0.0f, 0.0f, 0.8f });
+			run(p_motor, s, 30, [&](Tick t) { return move_command(t, kAxisMax, 0, 0); });
+			const Tick jump = s.tick + 1;
+			return run(p_motor, s, p_ticks, [&](Tick t) {
+				return move_command(t, p_forward, 0, 0, Pose::Stand, t == jump ? buttons::kJump : 0);
+			});
+		};
+		const auto first_with = [](const std::vector<SoldierState> &p_trace, uint16_t p_event) {
+			for (size_t i = 0; i < p_trace.size(); ++i) {
+				if ((p_trace[i].events & p_event) != 0) {
+					return i;
+				}
+			}
+			return p_trace.size();
+		};
+		const MotorParams params = params_with(shipped_tuning());
+
+		SUBCASE("a 1 m wall, 0.2 m thick: VaultOverHigh, its first variant, 0.75 s, then standing beyond the wall") {
+			const std::vector<StaticTriangle> t = world_with(1.0f, 0.2f);
+			Rig server = rig_of(t, params);
+			const std::vector<SoldierState> trace = attempt(*server.motor, kAxisMax, 150);
+			REQUIRE((trace[0].events & soldier_events::kVaulted) != 0);
+			CHECK((trace[0].events & soldier_events::kJumped) == 0);
+			CHECK(trace[0].mode == MoveMode::AnimationControlled);
+			CHECK(trace[0].vault.kind == uint8_t(VaultKind::OverHigh));
+			CHECK(trace[0].vault.variant == 0);
+			CHECK(trace[0].vault.distance == doctest::Approx(0.37f).epsilon(0.03));
+			CHECK(trace[0].vault.height == doctest::Approx(1.0f).epsilon(1e-3));
+			CHECK(trace[0].vault.length == doctest::Approx(0.2f).epsilon(1e-3));
+			CHECK(trace[0].target_pose == Pose::Crouch);
+			const size_t ended = first_with(trace, soldier_events::kVaultEnded);
+			std::printf("vault 1 m wall: D %.4f H %.4f L %.4f, ended after %zu ticks at (%.3f, %.3f, %.3f)\n",
+					double(trace[0].vault.distance), double(trace[0].vault.height), double(trace[0].vault.length),
+					ended + 1, double(trace[ended].position[0]), double(trace[ended].position[1]),
+					double(trace[ended].position[2]));
+			CHECK(ended == 44);
+			float lowest = 1e9f;
+			for (size_t i = 0; i < ended; ++i) {
+				CHECK(trace[i].mode == MoveMode::AnimationControlled);
+				lowest = std::min(lowest, trace[i].position[1]);
+			}
+			CHECK(lowest >= -0.01f);
+			CHECK(trace[ended].vault == VaultState{});
+			CHECK(trace[ended].target_pose == Pose::Stand);
+			const SoldierState &last = trace.back();
+			CHECK(grounded(last));
+			CHECK(last.mode == MoveMode::OnGround);
+			CHECK(last.position[2] > 2.2f + params.radius);
+			CHECK(std::fabs(last.position[1]) < 0.03f);
+			CHECK(last.pose == Pose::Stand);
+
+			Rig client = rig_of(t, params);
+			const std::vector<SoldierState> predicted = attempt(*client.motor, kAxisMax, 150);
+			REQUIRE(predicted.size() == trace.size());
+			for (size_t i = 0; i < trace.size(); ++i) {
+				REQUIRE_MESSAGE(soldier_state_hash(predicted[i]) == soldier_state_hash(trace[i]), "tick " << i);
+			}
+			PredictionRing ring(128);
+			const size_t mid = 20;
+			for (size_t i = 0; i + 1 < trace.size() && i < 100; ++i) {
+				SoldierState wrong = trace[i + 1];
+				wrong.vault = {};
+				wrong.position[1] += 0.5f;
+				Command c = move_command(trace[i + 1].tick, kAxisMax, 0, 0);
+				ring.put({ c, wrong, true });
+			}
+			const CatchUpStats stats = catch_up(*client.motor, trace[mid], ring, trace[60].tick);
+			CHECK(stats.steps == 60 - mid - 1);
+			for (size_t i = mid; i < 60; ++i) {
+				const PredictionEntry *e = ring.find(trace[i].tick);
+				REQUIRE(e != nullptr);
+				REQUIRE_MESSAGE(soldier_state_hash(e->state) == soldier_state_hash(trace[i]), "resimulated tick " << i);
+			}
+		}
+		SUBCASE("a 2 m wall: the high probe hits, no vault, a plain jump that stays in front of the wall") {
+			Rig r = rig_of(world_with(2.0f, 0.2f), params);
+			const std::vector<SoldierState> trace = attempt(*r.motor, kAxisMax, 90);
+			CHECK((trace[0].events & soldier_events::kVaulted) == 0);
+			CHECK((trace[0].events & soldier_events::kJumped) != 0);
+			for (const SoldierState &s : trace) {
+				CHECK(s.mode != MoveMode::AnimationControlled);
+				CHECK(s.position[2] < 2.0f - 0.3f);
+			}
+		}
+		SUBCASE("the forward input gate: 25/127 jumps, 26/127 vaults") {
+			Rig r = rig_of(world_with(1.0f, 0.2f), params);
+			const std::vector<SoldierState> below = attempt(*r.motor, 25, 10);
+			CHECK((below[0].events & soldier_events::kVaulted) == 0);
+			CHECK((below[0].events & soldier_events::kJumped) != 0);
+			const std::vector<SoldierState> at = attempt(*r.motor, 26, 10);
+			CHECK((at[0].events & soldier_events::kVaulted) != 0);
+		}
+		SUBCASE("a 1 m crate, 10 m deep: the top continues 0.25 m in, VaultUpHigh, walking on the top") {
+			Rig r = rig_of(world_with(1.0f, 10.0f), params);
+			const std::vector<SoldierState> trace = attempt(*r.motor, kAxisMax, 120);
+			REQUIRE((trace[0].events & soldier_events::kVaulted) != 0);
+			CHECK(trace[0].vault.kind == uint8_t(VaultKind::UpHigh));
+			CHECK(trace[0].vault.length == vault_rules::kUpLength);
+			const SoldierState &last = trace.back();
+			std::printf("vault up 1 m crate: variant %u, end (%.3f, %.3f, %.3f)\n", unsigned(trace[0].vault.variant),
+					double(last.position[0]), double(last.position[1]), double(last.position[2]));
+			CHECK(grounded(last));
+			CHECK(last.position[1] == doctest::Approx(1.0f + params.tuning.character_padding).epsilon(0.03));
+			CHECK(last.position[2] > 2.0f);
 		}
 	}
 }

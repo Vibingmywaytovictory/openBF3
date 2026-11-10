@@ -48,7 +48,7 @@ namespace {
 
 constexpr uint64_t kM2aKitHash = 0x31b45dc7cc3f4271ull;
 constexpr uint64_t kM2aWeaponHash = 0x4ddd79ce5db2ec5dull;
-constexpr uint64_t kM2aMotorHash = 0x6d75dd5f51d95090ull;
+constexpr uint64_t kM2aMotorHash = 0x5030b00de56f1ee8ull;
 
 using tdm::distance;
 using tdm::is_alive;

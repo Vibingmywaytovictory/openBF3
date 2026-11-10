@@ -73,6 +73,45 @@ struct SpecializationDef {
 	std::string target_field;
 };
 
+struct MoveKeyDef {
+	core::Vec3 value{};
+	float time = 0;
+};
+
+struct SpecialMoveDef {
+	std::vector<MoveKeyDef> motion;
+	std::vector<MoveKeyDef> gravity;
+	float optimum_distance = 0;
+	float optimum_height = 0;
+	float optimum_length = 0;
+	float min_distance_scale = 1, max_distance_scale = 1;
+	float min_height_scale = 1, max_height_scale = 1;
+	float min_length_scale = 1, max_length_scale = 1;
+	bool scale_with_distance = false;
+	bool keep_initial_direction = false;
+	float exit_velocity = 0;
+	std::optional<SoldierPose> override_pose;
+	std::optional<SoldierPose> reset_pose;
+};
+
+struct VaultVariantDef {
+	float distance = 0, distance_tolerance = 0;
+	float height = 0, height_tolerance = 0;
+	float length = 0, length_tolerance = 0;
+	SpecialMoveDef move;
+};
+
+inline constexpr size_t kVaultStateCount = 3;
+inline constexpr std::array<const char *, kVaultStateCount> kVaultStateFields = { "VaultOverHighState",
+	"VaultUpHighState", "VaultOverLowState" };
+inline constexpr std::array<const char *, kVaultStateCount> kVaultVariantFields = { "IndexedVaultOverHighStates",
+	"IndexedVaultUpStates", "IndexedVaultOverLowStates" };
+
+struct SpecialMovesDef {
+	std::array<std::optional<SpecialMoveDef>, kVaultStateCount> vault;
+	std::array<std::vector<VaultVariantDef>, kVaultStateCount> vault_variants;
+};
+
 struct SoldierDef {
 	std::string blueprint;
 	std::string physics;
@@ -124,6 +163,8 @@ struct SoldierDef {
 	std::vector<std::pair<std::string, double>> spotting_target;
 
 	std::vector<SpecializationDef> specializations;
+
+	std::optional<SpecialMovesDef> special_moves;
 
 	const PoseDef *pose(SoldierPose p_pose) const;
 	const MovementStateDef *state(std::string_view p_type) const;

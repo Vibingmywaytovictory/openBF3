@@ -55,6 +55,16 @@ uint64_t soldier_state_hash(const SoldierState &p_state) {
 	h.add(p_state.health);
 	h.add(p_state.impact_speed);
 	h.add(p_state.damage);
+	if (p_state.vault != VaultState{}) {
+		h.add(p_state.vault.ticks);
+		h.add(p_state.vault.kind);
+		h.add(p_state.vault.variant);
+		h.add(p_state.vault.yaw);
+		h.add(p_state.vault.distance);
+		h.add(p_state.vault.height);
+		h.add(p_state.vault.length);
+		h.add(p_state.vault.moved);
+	}
 	return h.value();
 }
 
