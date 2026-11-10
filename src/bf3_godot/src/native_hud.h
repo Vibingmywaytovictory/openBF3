@@ -2,6 +2,7 @@
 
 #include "hud_view_paint.h"
 #include "minimap_debug.h"
+#include "native_rose.h"
 #include "native_tags.h"
 #include "overview_map.h"
 #include "swf_view.h"
@@ -134,6 +135,9 @@ public:
 	void set_manual(bool p_manual);
 	void set_world(Bf3LevelSession *p_session, const godot::Camera3D *p_camera, bool p_show);
 	NativeTags *tags() const { return tags_.get(); }
+	void set_commo_rose(const NativeRoseState &p_state) { rose_state_ = p_state; }
+	NativeRose *rose() const { return rose_.get(); }
+	const std::string &rose_error() const { return rose_error_; }
 	const godot::Camera3D *world_camera() const { return world_camera_; }
 	void set_fixture(const bf3::core::ui::HudModel &p_model, const NativeHudMinimapPose &p_pose);
 	bool fixture() const { return fixture_; }
@@ -241,6 +245,9 @@ private:
 	godot::RID minimap_icon_item_;
 	godot::RID minimap_parent_;
 	std::unique_ptr<NativeTags> tags_;
+	std::unique_ptr<NativeRose> rose_;
+	NativeRoseState rose_state_;
+	std::string rose_error_;
 	const godot::Camera3D *world_camera_ = nullptr;
 	bool world_show_ = false;
 	godot::RID tags_item_;

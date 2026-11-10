@@ -130,8 +130,9 @@ NametagDecision decide_nametag(const NametagStyle &p_style, const NametagViewer 
 	NametagDecision out;
 	out.relation = tag_relation(p_viewer, p_subject.team, p_subject.squad);
 	const float d = p_subject.distance_m;
+	const bool spotted = out.relation == TagRelation::Enemy && p_subject.spotted_kind != 0;
 	if (out.relation == TagRelation::None || !p_subject.alive || !p_subject.in_front || !std::isfinite(d) || d < 0.0f ||
-			d < p_style.minimum_draw_distance || d > p_style.draw_distance) {
+			d < p_style.minimum_draw_distance || (d > p_style.draw_distance && !spotted)) {
 		return NametagDecision{ out.relation, false, false, 1.0f, 1.0f, false };
 	}
 	const float ts = p_style.scale_distance > 0.0f ? std::clamp(d / p_style.scale_distance, 0.0f, 1.0f) : 1.0f;
@@ -141,9 +142,9 @@ NametagDecision decide_nametag(const NametagStyle &p_style, const NametagViewer 
 	out.alpha = std::clamp(1.0f + (p_style.max_far_fade - 1.0f) * tf, 0.0f, 1.0f);
 	const bool looked_at = std::isfinite(p_subject.crosshair_stage) && p_subject.crosshair_stage <= look_at_threshold(p_style, d);
 	if (out.relation == TagRelation::Enemy) {
-
-		out.needs_line_of_sight = looked_at;
-		out.name = looked_at && p_subject.line_of_sight;
+		out.icon = spotted;
+		out.needs_line_of_sight = looked_at && d <= p_style.draw_distance;
+		out.name = out.needs_line_of_sight && p_subject.line_of_sight;
 		return out;
 	}
 	out.icon = true;

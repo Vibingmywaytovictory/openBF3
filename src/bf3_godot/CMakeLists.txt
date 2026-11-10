@@ -119,6 +119,10 @@ target_sources(bf3_godot PRIVATE
     src/ui_screen_records.h
     src/native_tags.cpp
     src/native_tags.h
+    src/commo_frame.cpp
+    src/commo_frame.h
+    src/native_rose.cpp
+    src/native_rose.h
     src/native_hud_moments.h
 )
 
@@ -279,6 +283,8 @@ if(OPENBF3_BUILD_CHECKS)
         src/minimap_modes_check.h
         src/icons3d_check.cpp
         src/icons3d_check.h
+        src/commo_rose_check.cpp
+        src/commo_rose_check.h
         src/native_hud_moments.cpp
         src/native_screens_check.cpp
         src/native_screens_check.h

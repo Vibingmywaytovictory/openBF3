@@ -45,6 +45,8 @@ godot::Key key_of_ui_idk(std::string_view p_idk);
 godot::KeyLocation key_location_of_ui_idk(std::string_view p_idk);
 godot::MouseButton button_of_ui_idb(std::string_view p_idb);
 
+inline constexpr float kRoseCursorRadius = 160.0f;
+
 struct ViewAngles {
 	float yaw = 0.0f;
 	float pitch = 0.0f;
@@ -197,7 +199,7 @@ private:
 	} weapon_;
 
 public:
-	enum class TdmAction : uint8_t { Gadget = 0, Scoreboard, Kit1, Kit2, Kit3, Kit4, WeaponLight, Count };
+	enum class TdmAction : uint8_t { Gadget = 0, Scoreboard, Kit1, Kit2, Kit3, Kit4, WeaponLight, Spot, Count };
 	static constexpr size_t kTdmActionCount = size_t(TdmAction::Count);
 	static const char *tdm_action_name(TdmAction p_action);
 	void enable_tdm(bool p_on);
@@ -205,6 +207,11 @@ public:
 	void set_spawn_screen(bool p_up);
 	bool spawn_screen_up() const { return tdm_.spawn_screen; }
 	bool scoreboard_held() const;
+	bool spot_held() const;
+	void set_rose_open(bool p_open);
+	float rose_x() const { return tdm_.rose_x; }
+	float rose_y() const { return tdm_.rose_y; }
+	void script_rose_cursor(float p_x, float p_y);
 	int take_kit();
 	bool weapon_light() const { return tdm_.weapon_light; }
 
@@ -218,6 +225,10 @@ private:
 		bool installed = false;
 		bool spawn_screen = false;
 		bool scoreboard_scripted = false;
+		bool spot_scripted = false;
+		bool rose_open = false;
+		float rose_x = 0.0f;
+		float rose_y = 0.0f;
 		int kit = -1;
 		uint64_t consumed_clicks = 0;
 		bool weapon_light = true;

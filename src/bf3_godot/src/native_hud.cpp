@@ -125,6 +125,9 @@ struct Bf3NativeHud::Loaded {
 	std::array<std::optional<ui::HudScreenAsset>, kNativeHudViews> assets;
 	std::optional<ui::HudMessageCompData> messages;
 	std::optional<ui::HudDamageIndicatorCompData> damage;
+	std::optional<ui::HudScreenAsset> rose;
+	std::optional<ui::CommoRoseLayout> rose_layout;
+	std::string rose_error;
 	std::string error;
 	double seconds = 0.0;
 };
@@ -271,6 +274,20 @@ void Bf3NativeHud::start_loader() {
 			} else {
 				out->messages = std::move(*m);
 			}
+			bf3::core::Result<ui::HudScreenAsset> rose =
+					ui::read_hud_screen_asset(**lib, ui::kCommoRoseScreenPartition);
+			bf3::core::Result<ui::UiGraphAsset> rose_graph =
+					ui::read_ui_graph_asset(**lib, ui::kCommoRoseScreenPartition);
+			bf3::core::Result<ui::CommoRoseLayout> rose_layout = rose_graph
+					? ui::read_commo_rose(*rose_graph)
+					: bf3::core::Result<ui::CommoRoseLayout>(rose_graph.error());
+			if (rose && rose_layout) {
+				out->rose = std::move(*rose);
+				out->rose_layout = std::move(*rose_layout);
+			} else {
+				out->rose_error = std::string(ui::kCommoRoseScreenPartition) + ": " +
+						(rose ? rose_layout.error().message : rose.error().message);
+			}
 			bf3::core::Result<ui::HudDamageIndicatorCompData> d = ui::read_hud_damage_indicator_comp(**lib);
 			if (!d) {
 				out->error += std::string(ui::kUiDamageIndicatorCompPartition) + ": " + d.error().message + "; ";
@@ -314,6 +331,21 @@ void Bf3NativeHud::build() {
 		}
 		summary += " " + screens_[i]->asset().name + " " + std::to_string(screens_[i]->stats().instances) + " instances / " +
 				std::to_string(screens_[i]->stats().controllers) + " controllers;";
+	}
+	rose_error_ = loaded_->rose_error;
+	if (loaded_->rose && loaded_->rose_layout) {
+		ui::HudStageRects rects;
+		rects.visible = ui_stage(this).visible;
+		bf3::core::Result<std::unique_ptr<NativeRose>> rose =
+				NativeRose::open(*this, *loaded_->rose, *loaded_->rose_layout, client_, rects);
+		if (rose) {
+			rose_ = std::move(*rose);
+		} else {
+			rose_error_ = rose.error().message;
+		}
+	}
+	if (!rose_error_.empty()) {
+		UtilityFunctions::push_warning(to_godot("[hud] commo rose not drawn: " + rose_error_));
 	}
 	UtilityFunctions::print(to_godot("[hud] native HUD built in " + std::to_string(loaded_->seconds) + " s:" + summary));
 }
@@ -656,6 +688,13 @@ void Bf3NativeHud::step(double p_seconds) {
 	if (tags_ != nullptr) {
 		tags_->update(world_camera_, world_show_ && is_visible_in_tree(), ui_window_rect(this).size);
 		paint_tags();
+	}
+	if (rose_ != nullptr) {
+		ui::HudStageRects rects;
+		rects.visible = ui_stage(this).visible;
+		rects.safe_x = ui::hud_safe_offset(ui::kHudFootageSafeX, rects.visible.width(), safe_area_.width);
+		rects.safe_y = ui::hud_safe_offset(ui::kHudFootageSafeY, rects.visible.height(), safe_area_.height);
+		rose_->step(model_, rose_state_, rects, dt);
 	}
 }
 
@@ -1107,8 +1146,12 @@ void Bf3NativeHud::paint_tags() {
 		const bool squad = t.relation == ui::TagRelation::Squad;
 		const float icon_size = style.icon_size * t.scale;
 		float top = t.anchor.y;
+		const std::string_view need_name = need_icon_name(t.need_icon);
+		const ui::HudIcon *need = need_name.empty() ? nullptr : a->atlas.find(need_name);
 		if (t.icon) {
-			if (t.squad_leader && leader != nullptr) {
+			if (need != nullptr) {
+				frame(need, relation_state(t.relation), t.anchor, icon_size, Color(1, 1, 1, t.alpha));
+			} else if (t.squad_leader && leader != nullptr) {
 				frame(leader_bg, ui::HudIconState::Squad, t.anchor, icon_size, Color(1, 1, 1, t.alpha));
 				frame(leader, ui::HudIconState::Squad, t.anchor, icon_size, Color(1, 1, 1, t.alpha));
 				paint_.tag_leaders++;

@@ -1,6 +1,7 @@
 #include "iff_frame.h"
 
 #include "bf3/host/client_wiring.h"
+#include "bf3/sim/commo.h"
 #include "bf3/sim/soldier_state.h"
 
 #include <algorithm>
@@ -26,6 +27,7 @@ size_t iff_soldiers(const host::PresentationFrame &p_frame, uint64_t p_now_ns, s
 		s.eye_height = std::isfinite(p.eye_height) ? std::clamp(p.eye_height, 0.0f, 3.0f) : 1.6f;
 		s.yaw = p.yaw;
 		s.alive = (p.flags & sim::soldier_flags::kAlive) != 0;
+		s.spot = p.slot < p_frame.spots.size() ? p_frame.spots[p.slot] : net::SpotRow{ p.slot };
 		if (i < nw && weapons[i].valid && weapons[i].slot == p.slot) {
 			s.team = weapons[i].team <= 2 ? weapons[i].team : uint8_t(0);
 			s.firing = weapons[i].firing;
@@ -95,7 +97,13 @@ size_t iff_minimap(std::span<const IffSoldier> p_soldiers, const core::ui::Namet
 	IffMinimapCounts c;
 	size_t out = 0;
 	for (const IffSoldier &s : p_soldiers) {
-		const core::ui::TagRelation r = core::ui::minimap_relation(p_viewer, s.team, s.squad, s.alive, p_now_s, p_reveal.revealed_until(s.slot));
+		core::ui::TagRelation r = core::ui::minimap_relation(
+				p_viewer, s.team, s.squad, s.alive, p_now_s, p_reveal.revealed_until(s.slot));
+		if (r == core::ui::TagRelation::None && s.alive && sim::commo::minimap_shows_enemy(s.spot.state, false) &&
+				core::ui::tag_relation(p_viewer, s.team, s.squad) == core::ui::TagRelation::Enemy) {
+			r = core::ui::TagRelation::Enemy;
+			++c.spotted_enemies;
+		}
 		if (r == core::ui::TagRelation::None) {
 			if (s.alive && core::ui::tag_relation(p_viewer, s.team, s.squad) == core::ui::TagRelation::Enemy) {
 				++c.hidden_enemies;

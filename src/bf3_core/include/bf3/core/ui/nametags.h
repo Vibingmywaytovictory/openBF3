@@ -66,6 +66,7 @@ struct NametagSubject {
 	float distance_m = 0.0f;
 	float crosshair_stage = 1e9f;
 	bool line_of_sight = false;
+	uint8_t spotted_kind = 0;
 };
 
 struct NametagViewer {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "commo_frame.h"
 #include "death_camera.h"
 #include "deploy_screens.h"
 #include "m2b_check.h"
@@ -96,6 +97,7 @@ struct TdmState {
 	bool mouse_released = false;
 	uint8_t own_slot = 0xFF;
 	uint8_t own_team = 0;
+	CommoFrame commo;
 	bool players_printed = false;
 
 	double own_death_s = -1.0;

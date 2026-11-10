@@ -322,6 +322,8 @@ target_sources(bf3_core PRIVATE
     src/ui/widgets/squad_data.h
     include/bf3/core/ui/ui_graph.h
     src/ui/ui_graph.cpp
+    include/bf3/core/ui/commo_rose.h
+    src/ui/commo_rose.cpp
     src/ui/ui_graph_flow.cpp
     include/bf3/core/ui/ui_input.h
     src/ui/ui_input.cpp

@@ -1,5 +1,6 @@
 #include "native_tags.h"
 
+#include "commo_frame.h"
 #include "godot_util.h"
 #include "level_session.h"
 
@@ -285,6 +286,31 @@ void NativeTags::update_alerts(
 	}
 }
 
+std::string_view need_icon_name(int32_t p_icon) {
+	switch (p_icon) {
+		case sim::commo::kIconNeedBackup:
+			return "UIHudIcon_NeedBackup";
+		case sim::commo::kIconNeedAmmo:
+			return "UIHudIcon_NeedAmmo";
+		case sim::commo::kIconNeedMedic:
+			return "UIHudIcon_NeedMedic";
+		case sim::commo::kIconNeedPickup:
+			return "UIHudIcon_NeedPickup";
+		case sim::commo::kIconNeedRepair:
+			return "UIHudIcon_NeedRepair";
+		case sim::commo::kIconNeedAmmoHighlight:
+			return "UIHudIcon_NeedAmmoHighlight";
+		case sim::commo::kIconNeedMedicHighlight:
+			return "UIHudIcon_NeedMedicHighlight";
+		case sim::commo::kIconNeedRepairHighlight:
+			return "UIHudIcon_NeedRepairHighlight";
+		case sim::commo::kIconNeedPickupHighlight:
+			return "UIHudIcon_NeedPickupHighlight";
+		default:
+			return {};
+	}
+}
+
 void NativeTags::update(const Camera3D *p_camera, bool p_show, Vector2 p_viewport_size) {
 	tags_.clear();
 	minimap_.clear();
@@ -303,6 +329,30 @@ void NativeTags::update(const Camera3D *p_camera, bool p_show, Vector2 p_viewpor
 	viewer.squad = iff_own_squad(f);
 	const std::span<const IffSoldier> all(soldiers.data(), n);
 	reveal_.update(all, now_s, spotting_.fire_reveal_seconds());
+	const std::shared_ptr<const host::SharedLevel> shared = session_->shared_level();
+	const host::GunplayLevel *gunplay = shared != nullptr ? shared->gunplay.get() : nullptr;
+	const sim::commo::Supplies mine = own_supplies(f, gunplay);
+	if (f.own_order.serial > order_icon_.seen) {
+		sim::commo::receive_order(
+				order_icon_, f.own_order.serial, f.own_order.notice.order, f.own_order.notice.issuer, mine);
+		++stats_.orders_received;
+	}
+	sim::commo::step_order_icon(order_icon_, order_clock_ >= 0.0 ? float(now_s - order_clock_) : 0.0f,
+			f.server_own_valid && f.server_own.health > 0.0f);
+	order_clock_ = now_s;
+	std::optional<sim::spotting::SpotterDef> spotter;
+	if (gunplay != nullptr) {
+		if (core::Result<sim::spotting::SpottingDef> d = sim::spotting::make_spotting_def(gunplay->soldier);
+				d && d->spotter_present) {
+			spotter = d->spotter;
+		}
+	}
+	sim::commo::NeedParty me;
+	me.health = f.own_curr.health;
+	me.max_health = gunplay != nullptr ? gunplay->max_health : 100.0f;
+	me.low_ammo = f.stats.slot < f.spots.size() && f.spots[f.stats.slot].low_ammo;
+	me.supplies = mine;
+	me.def = spotter ? &*spotter : nullptr;
 	++stats_.frames;
 	for (const IffSoldier &s : all) {
 		stats_.unknown_team += s.team == 0 ? 1u : 0u;
@@ -330,6 +380,19 @@ void NativeTags::update(const Camera3D *p_camera, bool p_show, Vector2 p_viewpor
 			sub.squad = s.squad;
 			sub.leader = s.leader;
 			sub.alive = s.alive;
+			sim::commo::SpotKind kind;
+			kind.active = s.spot.state == sim::spotting::SpotState::Active;
+			kind.spotter_known = s.spot.spotter != sim::spotting::kNoSpotter;
+			for (const IffSoldier &o : all) {
+				if (o.slot == s.spot.spotter) {
+					kind.spotter_team = o.team;
+					kind.spotter_leads_squad = o.leader;
+				}
+			}
+			if (s.spot.spotter == f.stats.slot) {
+				kind.spotter_team = viewer.team;
+			}
+			sub.spotted_kind = sim::commo::spotted_kind(kind, viewer.team, false);
 			const Vector3 anchor = vec(s.feet) + Vector3(0.0f, s.eye_height + style_.vertical_offset, 0.0f);
 			if (!anchor.is_finite()) {
 				continue;
@@ -371,6 +434,21 @@ void NativeTags::update(const Camera3D *p_camera, bool p_show, Vector2 p_viewpor
 			t.alpha = dec.alpha;
 			t.distance_m = sub.distance_m;
 			t.kit = s.kit;
+			t.spotted_kind = sub.spotted_kind;
+			if (dec.relation != ui::TagRelation::Enemy) {
+				sim::commo::NeedParty mate;
+				mate.max_health = me.max_health;
+				mate.health = s.spot.low_health ? 0.0f : mate.max_health;
+				mate.low_ammo = s.spot.low_ammo;
+				if (gunplay != nullptr && s.kit < host::kKitCount && s.team >= 1 && s.team <= host::kKitTeams) {
+					mate.supplies = host::supplies_of(gunplay->kits.loadout(s.team, s.kit).defs, gunplay->gadgets);
+				}
+				mate.def = me.def;
+				const int32_t standing = sim::commo::standing_need_icon(me, mate);
+				t.need_icon = sim::commo::teammate_icon(order_icon_, s.slot, standing, now_s);
+				stats_.need_icons += t.need_icon != sim::commo::kIconNone ? 1u : 0u;
+			}
+			stats_.spotted_icons += t.spotted_kind != 0 && t.icon ? 1u : 0u;
 			t.anchor = screen + Vector2(style_.pixel_offset[0], style_.pixel_offset[1]) * canvas_scale_;
 			t.text = s.name.empty() ? String("#") + String::num_int64(s.slot) : String::utf8(s.name.data(), int64_t(s.name.size()));
 			stats_.friendly_icons += t.icon ? 1u : 0u;

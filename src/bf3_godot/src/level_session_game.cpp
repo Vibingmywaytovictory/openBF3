@@ -317,6 +317,10 @@ void Bf3LevelSession::game_parse_args() {
 		g.icons3d = std::make_unique<Icons3dCheck>();
 		mapper_.set_scripted(true);
 	}
+	if (has_check_arg("commo-rose-check")) {
+		g.commo_rose = std::make_unique<CommoRoseCheck>();
+		mapper_.set_scripted(true);
+	}
 	if (has_check_arg("audio-areas-check")) {
 		std::vector<AudioAreasPoint> points;
 		std::string why;
@@ -1452,6 +1456,19 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			g.finished = true;
 			UtilityFunctions::print(to_godot(g.icons3d->report()));
 			finish(g.icons3d->exit_code());
+			return true;
+		}
+	}
+	if (g.commo_rose != nullptr && g.native_hud != nullptr && !g.finished) {
+		CommoRoseIo io;
+		io.alive = g.alive;
+		io.commo = g.tdm != nullptr ? &g.tdm->commo : nullptr;
+		io.hold = [this](bool p_held) { mapper_.script_hold(InputMapper::TdmAction::Spot, p_held); };
+		io.cursor = [this](float p_x, float p_y) { mapper_.script_rose_cursor(p_x, p_y); };
+		if (g.commo_rose->step(*g.native_hud, io, p_delta)) {
+			g.finished = true;
+			UtilityFunctions::print(to_godot(g.commo_rose->report()));
+			finish(g.commo_rose->exit_code());
 			return true;
 		}
 	}

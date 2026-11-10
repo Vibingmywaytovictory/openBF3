@@ -28,6 +28,7 @@ struct IffSoldier {
 	float eye_height = 1.6f;
 	float yaw = 0.0f;
 	std::string_view name;
+	net::SpotRow spot;
 };
 
 size_t iff_soldiers(const host::PresentationFrame &p_frame, uint64_t p_now_ns, std::span<IffSoldier> r_out);
@@ -57,6 +58,7 @@ struct IffMinimapCounts {
 	uint32_t squad = 0;
 	uint32_t enemy = 0;
 	uint32_t hidden_enemies = 0;
+	uint32_t spotted_enemies = 0;
 };
 
 size_t iff_minimap(std::span<const IffSoldier> p_soldiers, const core::ui::NametagViewer &p_viewer, const IffReveal &p_reveal, double p_now_s,

@@ -569,6 +569,13 @@ struct HudUser {
 	bool is_in_menu = false;
 };
 
+struct HudCommoRose {
+	int32_t selected_button = -1;
+	bool in_vehicle = false;
+	bool alive = true;
+	bool leader = false;
+};
+
 struct HudModel {
 	uint32_t version = kHudModelVersion;
 	uint64_t serial = 0;
@@ -601,6 +608,7 @@ struct HudModel {
 	HudIngameMenu ingame_menu;
 	HudUser user;
 	std::array<bool, kHudMaxPlayers> squad_leaders{};
+	HudCommoRose commo_rose;
 };
 static_assert(std::is_trivially_copyable_v<HudModel>);
 

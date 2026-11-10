@@ -2,6 +2,8 @@
 
 #include "iff_frame.h"
 
+#include "bf3/sim/commo.h"
+
 #include "bf3/core/ui/icon3d_placement.h"
 #include "bf3/core/ui/nametags.h"
 #include "bf3/core/ui/squad_order_marks.h"
@@ -67,6 +69,8 @@ struct NativeTag {
 	float alpha = 1.0f;
 	float distance_m = 0.0f;
 	uint8_t kit = kIffNoKit;
+	uint8_t spotted_kind = 0;
+	int32_t need_icon = 0;
 	godot::Vector2 anchor;
 	godot::String text;
 };
@@ -88,7 +92,12 @@ struct NativeTagStats {
 	uint64_t alert_tags = 0;
 	uint64_t order_frames = 0;
 	uint64_t order_tags = 0;
+	uint64_t spotted_icons = 0;
+	uint64_t need_icons = 0;
+	uint64_t orders_received = 0;
 };
+
+std::string_view need_icon_name(int32_t p_icon);
 
 class NativeTags {
 public:
@@ -138,6 +147,8 @@ private:
 	std::vector<NativeAlert> alerts_;
 	std::array<std::string, 4> kit_icons_;
 	IffReveal reveal_;
+	sim::commo::OrderIcon order_icon_;
+	double order_clock_ = -1.0;
 	NativeTagStats stats_;
 	std::vector<NativeTag> tags_;
 	std::vector<IffMinimapEntry> minimap_;

@@ -3,6 +3,7 @@
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_snapshot.h"
+#include "bf3/core/ui/commo_rose.h"
 #include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/ui/ui_graph.h"
 #include "bf3/core/ui/ui_input.h"
@@ -424,6 +425,40 @@ int32_t input_action_of(const UiGraphAsset &p_graph, std::string_view p_event) {
 using Lines = std::vector<std::string>;
 
 TEST_SUITE("ui-graph") {
+	TEST_CASE(
+			"ui graph: the commo rose screen's buttons set the OrderType command and the rose button the screen graph "
+			"names") {
+		RetailGraphs *r = retail_graphs_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		const std::shared_ptr<const UiGraphAsset> screen = r->provider()(kCommoRoseScreenPartition);
+		REQUIRE(screen != nullptr);
+		CHECK(screen->is_screen());
+		Result<CommoRoseLayout> rose = read_commo_rose(*screen);
+		REQUIRE_MESSAGE(rose.ok(), (rose.ok() ? std::string() : rose.error().message));
+		REQUIRE(rose->entries.size() == 12u);
+		struct Want {
+			const char *instance;
+			int32_t button, foot, vehicle;
+			bool spot;
+		};
+		const Want want[] = { { "Button_01", 0, 8, 8, false }, { "Button_02", 1, 14, 14, false },
+			{ "Button_03", 2, 13, 13, false }, { "Button_04", 3, 12, 12, false }, { "Button_05", 4, 1, 6, false },
+			{ "Button_06", 5, 9, 9, false }, { "Button_07", 6, 7, 15, false }, { "Button_08", 7, 10, 10, false },
+			{ "Button_09", 8, 11, 11, false }, { "Button_10", 9, 3, 16, false }, { "Button_11", 10, -1, -1, true },
+			{ "Button_12", 11, 17, 17, true } };
+		for (const Want &w : want) {
+			CAPTURE(w.instance);
+			const CommoRoseEntry *e = rose->find(w.instance);
+			REQUIRE(e != nullptr);
+			CHECK(e->button == w.button);
+			CHECK(e->command(false) == w.foot);
+			CHECK(e->command(true) == w.vehicle);
+			CHECK(e->spot_and_order == w.spot);
+		}
+	}
+
 	TEST_CASE("ui graph: the eight in-round graphs read and every action key is in veniceuiactions") {
 		RetailGraphs *r = retail_graphs_or_skip();
 		if (r == nullptr) {

@@ -8,6 +8,7 @@
 #include <godot_cpp/classes/input_map.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace bf3::godot_side {
 
@@ -160,6 +161,10 @@ void InputMapper::set_game_input(bool p_on) {
 }
 
 void InputMapper::look(float p_dx, float p_dy) {
+	if (tdm_.rose_open && !free_camera_) {
+		script_rose_cursor(tdm_.rose_x + p_dx, tdm_.rose_y + p_dy);
+		return;
+	}
 	ViewAngles &v = free_camera_ ? free_view_ : view_;
 	v.yaw = wrap_yaw(v.yaw - p_dx * mouse_sensitivity);
 	const float flip = invert_look && !free_camera_ ? -1.0f : 1.0f;
@@ -733,6 +738,7 @@ constexpr TdmActionKey kTdmActions[] = {
 	{ InputMapper::TdmAction::Kit3, "bf3_kit_3", KEY_3, KEY_NONE },
 	{ InputMapper::TdmAction::Kit4, "bf3_kit_4", KEY_4, KEY_NONE },
 	{ InputMapper::TdmAction::WeaponLight, "bf3_weapon_light", KEY_T, KEY_NONE },
+	{ InputMapper::TdmAction::Spot, "bf3_spot", KEY_Q, KEY_NONE },
 };
 static_assert(sizeof(kTdmActions) / sizeof(kTdmActions[0]) == InputMapper::kTdmActionCount);
 
@@ -784,6 +790,32 @@ bool InputMapper::scoreboard_held() const {
 	return Input::get_singleton()->is_action_pressed(kTdmActions[size_t(TdmAction::Scoreboard)].name);
 }
 
+bool InputMapper::spot_held() const {
+	if (!tdm_.enabled || tdm_.spawn_screen) {
+		return false;
+	}
+	if (scripted_) {
+		return tdm_.spot_scripted;
+	}
+	return captured_ && !free_camera_ &&
+			Input::get_singleton()->is_action_pressed(kTdmActions[size_t(TdmAction::Spot)].name);
+}
+
+void InputMapper::set_rose_open(bool p_open) {
+	if (p_open != tdm_.rose_open) {
+		tdm_.rose_x = 0.0f;
+		tdm_.rose_y = 0.0f;
+	}
+	tdm_.rose_open = p_open;
+}
+
+void InputMapper::script_rose_cursor(float p_x, float p_y) {
+	const float r = std::sqrt(p_x * p_x + p_y * p_y);
+	const float k = r > kRoseCursorRadius ? kRoseCursorRadius / r : 1.0f;
+	tdm_.rose_x = p_x * k;
+	tdm_.rose_y = p_y * k;
+}
+
 int InputMapper::take_kit() {
 	const int k = tdm_.kit;
 	tdm_.kit = -1;
@@ -822,6 +854,9 @@ void InputMapper::script_press(TdmAction p_action) {
 void InputMapper::script_hold(TdmAction p_action, bool p_held) {
 	if (p_action == TdmAction::Scoreboard) {
 		tdm_.scoreboard_scripted = p_held;
+	}
+	if (p_action == TdmAction::Spot) {
+		tdm_.spot_scripted = p_held;
 	}
 }
 

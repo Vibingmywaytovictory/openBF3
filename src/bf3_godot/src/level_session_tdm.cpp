@@ -874,6 +874,45 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		}
 	}
 	m.kill_card_source = host::HudKillCardSource();
+	if (client_ != nullptr && p_camera != nullptr && !p_free_camera) {
+		const std::shared_ptr<const host::SharedLevel> level = shared_level();
+		const Transform3D eye = p_camera->get_global_transform();
+		const Vector3 view = -eye.basis.get_column(2);
+		CommoFrameInput ci;
+		ci.frame = &f;
+		ci.now_ns = p_now_ns;
+		ci.now_s = now_s;
+		ci.dt = float(p_delta);
+		ci.held = mapper.spot_held();
+		ci.own_slot = m.own_slot;
+		ci.own_team = m.own_team;
+		ci.alive = r_game.alive;
+		ci.eye = { eye.origin.x, eye.origin.y, eye.origin.z };
+		ci.view = { view.x, view.y, view.z };
+		ci.gunplay = level != nullptr ? level->gunplay.get() : nullptr;
+		ci.world = collision_world();
+		const CommoFrameOutput co = m.commo.update(ci);
+		if (co.spot) {
+			client_->send_spot_request(*co.spot);
+		}
+		if (co.order) {
+			client_->send_order_request(*co.order);
+		}
+		mapper.set_rose_open(m.commo.rose_open());
+		if (r_game.native_hud != nullptr) {
+			NativeRoseState rs;
+			rs.open = m.commo.rose_open();
+			rs.cursor = Vector2(mapper.rose_x(), mapper.rose_y());
+			rs.alive = r_game.alive;
+			for (size_t i = 0; i < std::min<size_t>(f.player_count, f.players.size()); ++i) {
+				rs.leader = rs.leader || (f.players[i].slot == m.own_slot && f.players[i].leader);
+			}
+			r_game.native_hud->set_commo_rose(rs);
+			if (const NativeRose *rose = r_game.native_hud->rose(); rose != nullptr && rose->shown()) {
+				m.commo.select(rose_command(rose->selected_entry(), rs.in_vehicle));
+			}
+		}
+	}
 	step_native_screens(r_game, m, this, level_id());
 	m.ms_tdm_hud = ms_since(t0);
 #if OPENBF3_BUILD_CHECKS
