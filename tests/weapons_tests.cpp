@@ -155,6 +155,8 @@ Flown fly(ProjectileWorld &r_pw, const CollisionWorld &p_world, const HitTargetP
 	return f;
 }
 
+constexpr double kSwayDeg = 3.14159265358979323846 / 180.0;
+
 double len3(const Vec3 &p_v) {
 	return std::sqrt(double(p_v[0]) * p_v[0] + double(p_v[1]) * p_v[1] + double(p_v[2]) * p_v[2]);
 }
@@ -235,12 +237,21 @@ TEST_SUITE("weapons-unit") {
 		CHECK(weapon_table_hash(*synthetic_table()) == t->hash);
 		CHECK(synthetic_table(true)->hash != t->hash);
 		Mechanics m;
-		m.disc = DiscDistribution::UniformRadius;
-		CHECK(synthetic_table(false, m)->hash != t->hash);
-		m = {};
-		m.recovery = RecoveryShape::Exponential;
+		m.apply_protection_threshold = true;
 		CHECK(synthetic_table(false, m)->hash != t->hash);
 		auto changed = std::make_shared<WeaponTable>(*t);
+		changed->defs[0].gameplay_deviation_scale[1] += 0.5f;
+		CHECK(weapon_table_hash(*changed) != t->hash);
+		changed = std::make_shared<WeaponTable>(*t);
+		changed->defs[0].deviation_scale[0] += 0.5f;
+		CHECK(weapon_table_hash(*changed) != t->hash);
+		changed = std::make_shared<WeaponTable>(*t);
+		changed->defs[0].camera_spring_constant += 1.0f;
+		CHECK(weapon_table_hash(*changed) != t->hash);
+		changed = std::make_shared<WeaponTable>(*t);
+		changed->defs[0].modes[0].interval_seconds = std::nextafter(changed->defs[0].modes[0].interval_seconds, 1.0f);
+		CHECK(weapon_table_hash(*changed) != t->hash);
+		changed = std::make_shared<WeaponTable>(*t);
 		changed->sprint_recover_time += 1;
 		CHECK(weapon_table_hash(*changed) != t->hash);
 		changed = std::make_shared<WeaponTable>(*t);
@@ -370,17 +381,15 @@ TEST_SUITE("weapons-unit") {
 		CHECK(make_weapon_sim_def(synthetic(k870).def, *materials).ok());
 
 		w = base.def;
-		w.sway.suppression[0].decrease_per_second = -20;
-		w.sway.suppression[0].min_angle = -3;
+		w.sway.suppression[0].decrease_per_second = -10;
+		w.sway.suppression[0].min_angle = -2;
 		core::Result<WeaponSimDef> lmg = make_weapon_sim_def(w, *materials);
 		REQUIRE_MESSAGE(lmg.ok(), (lmg.ok() ? std::string() : lmg.error().message));
 		SwayContext supp;
 		supp.suppression = 1.0f;
 		const Dispersion sd = effective_dispersion(*lmg, supp);
-		CHECK(sd.min_angle == 0.0f);
-		CHECK(sd.decrease_per_second < 0);
-		CHECK(decay_spread(1.0f, sd, kTimeUnitsPerSecond / 100) > 1.0f);
-		CHECK(decay_spread(1.0f, sd, kTimeUnitsPerSecond * 100) == sd.max_angle);
+		CHECK(sd.min_angle == doctest::Approx(lmg->sway[0][0].move[0].min_angle - 2.0f));
+		CHECK(sd.decrease_per_second == doctest::Approx(lmg->sway[0][0].move[0].decrease_per_second - 10.0f));
 		CHECK(make_weapon_sim_def(synthetic(kKnife).def, *materials).ok());
 	}
 
@@ -434,19 +443,24 @@ TEST_SUITE("weapons-unit") {
 
 		{
 			Synthetic fast = synthetic(kM16A3);
-			fast.def.fire.rate_of_fire = 28'800;
+			fast.def.fire.rate_of_fire = 27'000;
 			const std::shared_ptr<const WeaponTable> t = table_of({ fast }, true);
 			Driver d(t, { 0 });
 			d.idle_until_ready();
-			bool eight = true;
+			uint8_t most = 0;
 			for (int i = 0; i < 60; ++i) {
 				d.step(fire(true));
-				eight = eight && d.out.shot_count == kMaxShotsPerTick;
+				most = std::max(most, d.out.shot_count);
 			}
-			CHECK(eight);
+			CHECK(most == kMaxShotsPerTick);
 			CHECK(d.refused == 0);
+			REQUIRE(d.shots.size() > 400);
+			float carry = sway_carry_at(d.shots[0].time);
 			for (size_t i = 1; i < d.shots.size(); ++i) {
-				REQUIRE(d.shots[i].time - d.shots[i - 1].time == 125'000);
+				const SwayWait w = sway_wait(d.shots[i - 1].time, carry, t->defs[0].modes[0].interval_seconds);
+				REQUIRE(d.shots[i].time == w.time);
+				REQUIRE(std::llabs(d.shots[i].time - d.shots[i - 1].time - 133'333) <= 1);
+				carry = w.carry;
 			}
 		}
 
@@ -619,119 +633,345 @@ TEST_SUITE("weapons-unit") {
 		}
 	}
 
-	TEST_CASE("sim.weapons.unit: spread and recoil arithmetic, the disc variants' moments") {
-		const Dispersion disp{ 0.5f, 3.0f, 0.2f, 10.0f };
-		CHECK(decay_spread(2.0f, disp, kTimeUnitsPerSecond / 10) == doctest::Approx(1.0f));
-		CHECK(decay_spread(2.0f, disp, kTimeUnitsPerSecond) == 0.5f);
-		CHECK(decay_spread(0.2f, disp, kTimeUnitsPerSecond) == 0.2f);
-		CHECK(decay_spread(5.0f, disp, 0) == 3.0f);
-		CHECK(spread_after_shot(2.9f, disp) == 3.0f);
-		CHECK(spread_after_shot(1.0f, disp) == doctest::Approx(1.2f));
-		Mechanics m;
-		CHECK(enter_spread(0.1f, disp, m) == 0.5f);
-		m.min_spread_rise = MinSpreadRise::AtDecreaseRate;
-		CHECK(enter_spread(0.1f, disp, m) == 0.1f);
-
-		const Vec3 aim{ 0.3f, 0.1f, 0.95f };
-		for (const DiscDistribution disc : { DiscDistribution::UniformArea, DiscDistribution::UniformRadius }) {
-			double sum_r = 0, sum_r2 = 0, worst = 0, len_err = 0;
-			constexpr int kDraws = 100'000;
-			for (int i = 0; i < kDraws; ++i) {
-				const uint64_t seed = shot_seed(7, 3, uint32_t(i));
-				const Vec3 v = sample_cone(aim, 2.0f, unit_float(shot_random(seed, RngPurpose::SpreadRadius)), unit_float(shot_random(seed, RngPurpose::SpreadAngle)), disc);
-				const double a = angle_between(v, aim) / 2.0;
-				sum_r += a;
-				sum_r2 += a * a;
-				worst = std::max(worst, a);
-				len_err = std::max(len_err, std::fabs(len3(v) - 1.0));
-			}
-			const double mean_r = sum_r / kDraws, mean_r2 = sum_r2 / kDraws;
-			MESSAGE((disc == DiscDistribution::UniformArea ? "uniform area" : "uniform radius") << ": E[r/R] " << mean_r << ", E[(r/R)^2] " << mean_r2);
-			CHECK(worst <= 1.0 + 1e-4);
-			CHECK(len_err <= 1e-6);
-			if (disc == DiscDistribution::UniformArea) {
-				CHECK(mean_r == doctest::Approx(2.0 / 3.0).epsilon(0.01));
-				CHECK(mean_r2 == doctest::Approx(0.5).epsilon(0.01));
-			} else {
-				CHECK(mean_r == doctest::Approx(0.5).epsilon(0.01));
-				CHECK(mean_r2 == doctest::Approx(1.0 / 3.0).epsilon(0.01));
-			}
+	TEST_CASE("sim.weapons.unit: Q2 Q3 Q6 R-A0 the sway generator, the polar draw, the kick, the recovery, the signs") {
+		const uint32_t states[] = { 449972507u, 767167897u, 805624826u, 950006068u, 2121102460u, 1898997609u,
+			1173878147u, 607081849u, 589913191u, 23435746u, 603991418u, 1950715051u };
+		const double units[] = { 0.209535, 0.357240, 0.375148, 0.442381, 0.987715, 0.884290, 0.546630, 0.282695,
+			0.274700, 0.010913, 0.281255, 0.908373 };
+		uint32_t g = 5489u;
+		for (size_t i = 0; i < std::size(states); ++i) {
+			g = sway_rng_next(g);
+			CHECK(g == states[i]);
+			CHECK(double(sway_rng_unit(g)) == doctest::Approx(units[i]).epsilon(5e-6));
 		}
-		CHECK(sample_cone(aim, 0.0f, 0.5f, 0.5f, DiscDistribution::UniformArea)[2] == doctest::Approx(aim[2] / len3(aim)));
-
-		const Recoil rec{ 0.4f, 1.0f, -0.3f, 0.2f, 0.5f, 6.0f };
-		RecoilOffset o{};
-		o = recoil_after_shot(o, rec, true, 2.5f, 0.0f);
-		CHECK(o.pitch == doctest::Approx(1.0f));
-		CHECK(o.yaw == doctest::Approx(-0.3f));
-		for (int i = 0; i < 10; ++i) {
-			o = recoil_after_shot(o, rec, false, 2.5f, 0.0f);
-		}
-		CHECK(o.pitch == 1.0f);
-		CHECK(o.yaw == -0.5f);
-		o = recoil_after_shot({}, rec, false, 2.5f, 1.0f);
-		CHECK(o.yaw == doctest::Approx(0.2f));
+		CHECK(sway_rng_seeded(0) == 1u);
+		CHECK(sway_rng_seeded(0x80000005u) == 5u);
+		CHECK(sway_rng_next(0) == sway_rng_next(1));
 
 		const std::shared_ptr<const WeaponTable> t = synthetic_table();
-		const WeaponSimDef &a3 = t->defs[id_of(*t, kM16A3)];
-		SwayContext ctx;
-		Mechanics lin;
-		const RecoilOffset lr = recover_recoil_tick({ 1.0f, -1.0f }, a3, ctx, false, lin);
-		CHECK(lr.pitch == doctest::Approx(1.0f - 18.0f / 60.0f));
-		CHECK(lr.yaw == doctest::Approx(-1.0f + 18.0f / 60.0f));
-		const RecoilOffset lf = recover_recoil_tick({ 1.0f, 0.0f }, a3, ctx, true, lin);
-		CHECK(lf.pitch == doctest::Approx(1.0f - 1.8f / 60.0f));
-		CHECK(recover_recoil_tick({ 0.1f, 0.0f }, a3, ctx, false, lin).pitch == 0.0f);
-		Mechanics ex;
-		ex.recovery = RecoveryShape::Exponential;
-		CHECK(recover_recoil_tick({ 1.0f, 0.0f }, a3, ctx, false, ex).pitch == doctest::Approx(std::exp(-18.0 / 60.0)));
-		CHECK(recover_recoil_tick({ 1.0f, 0.0f }, a3, ctx, true, ex).pitch == doctest::Approx(std::exp(-1.8 / 60.0)));
+		const WeaponSimDef &m16 = t->defs[id_of(*t, kM16A3)];
+		SwayContext ads;
+		ads.zoom = Zoom::Zoom;
+		struct Draw {
+			uint32_t seed;
+			double pitch;
+			double yaw;
+			double kick_yaw;
+			double kick_up;
+		};
+		const Draw draws[] = { { 12345u, 1.736661, 0.811906, -0.301420, 0.646805 },
+			{ 1u, -1.736272, 0.487140, -0.338388, 0.601027 }, { 7u, -0.041543, -0.115986, 0.031283, 0.632191 } };
+		for (const Draw &d : draws) {
+			GunSwayState s;
+			s.dispersion = 2.5f;
+			sway_fire_start(s);
+			sway_shot(s, d.seed);
+			CHECK(double(s.deviation_pitch) / kSwayDeg == doctest::Approx(d.pitch).epsilon(3e-6));
+			CHECK(double(s.deviation_yaw) / kSwayDeg == doctest::Approx(d.yaw).epsilon(3e-6));
+			const GunSwayState again = [&] {
+				GunSwayState c = s;
+				sway_shot(c, d.seed);
+				return c;
+			}();
+			CHECK(again.deviation_pitch == s.deviation_pitch);
+			CHECK(again.rng == s.rng);
+			CHECK(again.shots == 2);
+			sway_update(s, m16, ads);
+			CHECK(double(s.recoil_yaw) / kSwayDeg == doctest::Approx(d.kick_yaw).epsilon(3e-6));
+			CHECK(-double(s.recoil_pitch) / kSwayDeg == doctest::Approx(d.kick_up).epsilon(3e-6));
+			CHECK(s.dispersion == doctest::Approx(2.6f));
+		}
 
-		SwayContext crouch_sprint;
-		crouch_sprint.stance = Stance::Crouch;
-		crouch_sprint.move = SwayMove::Sprinting;
-		CHECK(effective_dispersion(a3, crouch_sprint).min_angle == a3.sway[1][0].move[0].min_angle);
+		GunSwayState one;
+		one.dispersion = m16.sway[0][1].move[0].min_angle;
+		sway_fire_start(one);
+		sway_shot(one, 12345u);
+		sway_shot(one, 12345u);
+		sway_update(one, m16, ads);
+		CHECK(one.dispersion == doctest::Approx(0.3f));
+		CHECK(-double(one.recoil_pitch) / kSwayDeg == doctest::Approx(0.258722).epsilon(3e-6));
+		sway_fire_stop(one);
+		int updates = 0;
+		while (one.recoil_pitch != 0.0f && updates < 30) {
+			sway_update(one, m16, ads);
+			++updates;
+		}
+		CHECK(updates == 4);
+		CHECK(one.recoil_yaw == 0.0f);
+
+		GunSwayState kick;
+		sway_fire_start(kick);
+		sway_shot(kick, 12345u);
+		sway_update(kick, m16, ads);
+		sway_shot(kick, 12346u);
+		sway_update(kick, m16, ads);
+		const double second_up = -double(kick.recoil_pitch) / kSwayDeg - 0.646805;
+		CHECK(second_up >= 0.9 * 0.26 - 1e-5);
+		CHECK(second_up <= 0.26 + 1e-5);
+		GunSwayState clamp;
+		clamp.recoil_pitch = float(-9.9 * kSwayDeg);
+		sway_shot(clamp, 99u);
+		sway_update(clamp, m16, ads);
+		CHECK(-double(clamp.recoil_pitch) / kSwayDeg == doctest::Approx(10.0).epsilon(1e-6));
+
+		GunSwayState held = kick;
+		const float before = held.recoil_pitch;
+		sway_update(held, m16, ads);
+		GunSwayState released = kick;
+		sway_fire_stop(released);
+		sway_update(released, m16, ads);
+		const double t1 = double(kSwaySeconds);
+		CHECK(double(held.recoil_pitch - before) == doctest::Approx(18.0 * t1 * t1 * 0.01 * 0.1).epsilon(1e-2));
+		CHECK(double(released.recoil_pitch - before) == doctest::Approx(18.0 * t1 * t1 * 0.01).epsilon(1e-2));
+
+		GunSwayState env;
+		env.dispersion = 6.95f;
+		sway_fire_start(env);
+		Dispersion top{ 2.5f, 7.0f, 0.1f, 15.0f };
+		WeaponSimDef wide = m16;
+		wide.sway[0][1].move[0] = top;
+		sway_shot(env, 5u);
+		sway_update(env, wide, ads);
+		CHECK(env.dispersion == doctest::Approx(7.05f));
+		sway_shot(env, 6u);
+		sway_update(env, wide, ads);
+		CHECK(env.dispersion == doctest::Approx(7.05f));
+		sway_fire_stop(env);
+		for (int i = 0; i < 9; ++i) {
+			sway_update(env, wide, ads);
+		}
+		CHECK(env.dispersion == doctest::Approx(2.55f));
+		sway_update(env, wide, ads);
+		CHECK(env.dispersion == 2.5f);
+		GunSwayState low;
+		low.dispersion = 1.0f;
+		sway_fire_start(low);
+		sway_update(low, wide, ads);
+		CHECK(low.dispersion == 1.0f);
+
+		WeaponSimDef blend = m16;
+		blend.sway[0][0].move[size_t(SwayMove::Base)] = { 2.5f, 7.0f, 0.1f, 15.0f };
+		blend.sway[0][0].move[size_t(SwayMove::Moving)] = { 3.0f, 8.0f, 0.2f, 12.0f };
+		blend.sway[0][0].has_move[size_t(SwayMove::Moving)] = true;
+		SwayContext walk;
+		walk.move = SwayMove::Moving;
+		walk.move_fraction = 0.5f;
+		const Dispersion half = effective_dispersion(blend, walk);
+		CHECK(half.min_angle == doctest::Approx(2.75f));
+		CHECK(half.max_angle == 8.0f);
+		CHECK(half.increase_per_shot == 0.2f);
+		CHECK(half.decrease_per_second == 12.0f);
+		SwayContext sprint;
+		sprint.move = SwayMove::Sprinting;
+		sprint.stance = Stance::Crouch;
+		sprint.zoom = Zoom::Zoom;
+		REQUIRE(sway_record(m16, sprint, kSwayAirHold));
+		CHECK_FALSE(sway_record(m16, sprint, kSwayAirHold)->modifiers);
+		CHECK(sway_record(m16, sprint, kSwayAirHold)->dispersion.min_angle ==
+				m16.sway[0][0].move[size_t(SwayMove::Sprinting)].min_angle);
+		SwayContext crouch;
+		crouch.stance = Stance::Crouch;
+		CHECK_FALSE(sway_record(m16, crouch, 0.2f));
+		CHECK(sway_record(m16, SwayContext{}, 0.2f)->dispersion.min_angle ==
+				m16.sway[0][0].move[size_t(SwayMove::Jumping)].min_angle);
 		SwayContext supp;
 		supp.suppression = 1.0f;
-		CHECK(effective_dispersion(a3, supp).min_angle == doctest::Approx(a3.sway[0][0].move[0].min_angle + 1.5f));
-		CHECK(effective_dispersion(a3, supp).max_angle == a3.sway[0][0].move[0].max_angle);
-		CHECK(effective_dispersion(a3, supp).increase_per_shot ==
-				doctest::Approx(a3.sway[0][0].move[0].increase_per_shot + 0.1f));
-		CHECK(effective_recoil(a3, supp).horizontal_max == a3.sway[0][0].recoil.horizontal_max);
+		CHECK(effective_dispersion(m16, supp).min_angle == doctest::Approx(m16.sway[0][0].move[0].min_angle + 1.5f));
+		CHECK(effective_dispersion(m16, supp).max_angle == m16.sway[0][0].move[0].max_angle);
+		CHECK(effective_dispersion(m16, supp).increase_per_shot ==
+				doctest::Approx(m16.sway[0][0].move[0].increase_per_shot + 0.1f));
 		supp.suppression = 0.5f;
-		CHECK(effective_dispersion(a3, supp).min_angle == doctest::Approx(a3.sway[0][0].move[0].min_angle + 0.75f));
+		CHECK(effective_dispersion(m16, supp).min_angle == doctest::Approx(m16.sway[0][0].move[0].min_angle + 0.75f));
 
-		const Vec3 n = aim_direction(0, 0, {});
-		CHECK(n[2] == doctest::Approx(1.0f));
-		CHECK(std::fabs(n[0]) < 1e-6f);
-		const Vec3 up = aim_direction(0, kPitchLimit, { 10.0f, 0.0f });
-		CHECK(up[1] == doctest::Approx(std::sin(89.99 * 3.14159265358979323846 / 180.0)).epsilon(1e-6));
+		const Vec3 right = sway_rotate({ 0, 0, 1 }, 0.0f, float(kSwayDeg));
+		CHECK(double(right[0]) == doctest::Approx(0.017452).epsilon(1e-4));
+		CHECK(std::fabs(right[1]) < 1e-7f);
+		CHECK(double(right[2]) == doctest::Approx(0.999848).epsilon(1e-6));
+		const Vec3 up = sway_rotate({ 0, 0, 1 }, -float(kSwayDeg), 0.0f);
+		CHECK(std::fabs(up[0]) < 1e-7f);
+		CHECK(double(up[1]) == doctest::Approx(0.017452).epsilon(1e-4));
+
+		const auto ticks = [](float p_rpm, int p_shots) {
+			std::vector<uint32_t> out;
+			SimTime at = 0;
+			float carry = kSwaySeconds;
+			for (int i = 0; i < p_shots; ++i) {
+				out.push_back(sway_tick(at));
+				const SwayWait w = sway_wait(at, carry, 60.0f / p_rpm);
+				at = w.time;
+				carry = w.carry;
+			}
+			out.push_back(sway_tick(at));
+			return out;
+		};
+		CHECK(ticks(800.0f, 10) == std::vector<uint32_t>{ 0, 2, 4, 6, 8, 11, 13, 15, 17, 20, 22 });
+		CHECK(ticks(600.0f, 2) == std::vector<uint32_t>{ 0, 2, 5 });
+		CHECK(ticks(900.0f, 3) == std::vector<uint32_t>{ 0, 2, 4, 6 });
+		CHECK(ticks(750.0f, 10) == std::vector<uint32_t>{ 0, 2, 4, 7, 9, 11, 14, 16, 19, 21, 23 });
+		CHECK(ticks(1000.0f, 10) == std::vector<uint32_t>{ 0, 1, 3, 5, 7, 8, 10, 12, 14, 16, 17 });
+		CHECK(sway_wait(0, kSwaySeconds, 0.0f).time == 0);
+		CHECK(sway_carry_at(sway_tick_start(7)) == kSwaySeconds);
 	}
 
-	TEST_CASE("sim.weapons.unit: the spread without a shot: stance, move, jump, zoom, decay, rise, and the shot evaluates the same function") {
+	TEST_CASE("sim.weapons.unit: T1 / R-A0 TV4 the M16A4 10-round ADS burst at 30 Hz, shot ticks, seeds, draws, kicks "
+			  "and the recovery") {
+		const std::shared_ptr<const WeaponTable> t = synthetic_table();
+		const uint16_t id = id_of(*t, kM16A3);
+		const WeaponSimDef &def = t->defs[id];
+		constexpr uint32_t kPress = 12345;
+		const Tick press_tick = Tick(2 * kPress + 1);
+		REQUIRE(sway_tick(tick_start(press_tick)) == kPress);
+		SoldierWeaponsState st;
+		const uint16_t loadout[] = { id };
+		REQUIRE(spawn_soldier_weapons(st, *t, loadout, 0, press_tick - 600).ok());
+		WeaponContext ctx;
+		ctx.eye_start = { 0, 1.6f, 0 };
+		ctx.eye_end = ctx.eye_start;
+		ctx.sway.zoom = Zoom::Zoom;
+		struct Row {
+			uint32_t tick;
+			double d;
+			double yaw;
+			double pitch;
+			double cam_pitch;
+			double cam_yaw;
+		};
+		const Row rows[] = { { 0, 0.2, +0.064952, +0.138933, -0.646805, -0.301420 },
+			{ 2, 0.3, +0.006883, -0.062467, -0.891203, -0.478471 },
+			{ 4, 0.4, -0.159277, +0.206580, -1.148423, -0.532298 },
+			{ 6, 0.5, +0.044238, -0.017001, -1.392464, -0.462902 },
+			{ 8, 0.6, -0.317243, -0.057779, -1.649328, -0.770281 },
+			{ 11, 0.7, -0.413354, +0.264971, -1.894840, -0.888242 },
+			{ 13, 0.8, +0.115222, -0.002647, -2.131758, -0.887562 },
+			{ 15, 0.9, -0.457170, -0.264250, -2.381498, -1.263658 },
+			{ 17, 1.0, +0.014071, +0.025779, -2.618059, -1.516531 },
+			{ 20, 1.1, +0.201819, +0.067098, -2.869270, -1.579984 } };
+		struct After {
+			uint32_t tick;
+			double d;
+			double cam_pitch;
+			double cam_yaw;
+		};
+		const After after[] = { { 22, 1.2, -2.868124, -1.578838 }, { 23, 0.7, -2.822288, -1.533002 },
+			{ 24, 0.2, -2.719155, -1.429869 }, { 27, 0.2, -1.836800, -0.547514 }, { 28, 0.2, -1.275302, 0.0 },
+			{ 29, 0.2, -0.541916, 0.0 }, { 30, 0.2, 0.0, 0.0 } };
+		const auto rotate = [](const std::array<double, 3> &p_v, double p_pitch, double p_yaw) {
+			const double x = p_v[0] * std::cos(p_yaw) + p_v[2] * std::sin(p_yaw);
+			const double z = -p_v[0] * std::sin(p_yaw) + p_v[2] * std::cos(p_yaw);
+			return std::array<double, 3>{ x, p_v[1] * std::cos(p_pitch) - z * std::sin(p_pitch),
+				p_v[1] * std::sin(p_pitch) + z * std::cos(p_pitch) };
+		};
+		std::vector<ShotEvent> shots;
+		std::vector<GunSwayState> at_shot;
+		std::vector<GunSwayState> kicked(31);
+		std::vector<bool> seen(31, false);
+		WeaponTickOutput out;
+		for (Tick tick = st.tick + 1; tick <= press_tick + 70; ++tick) {
+			Command c;
+			c.tick = tick;
+			WeaponInput in;
+			in.zoom = true;
+			in.fire = tick >= press_tick && shots.size() < 10;
+			c.buttons = with_weapon_input(0, in);
+			step_soldier_weapons(*t, st, c, ctx, 1, out);
+			if (tick < press_tick) {
+				CHECK(out.shot_count == 0);
+				continue;
+			}
+			const uint32_t k = sway_tick(tick_start(tick)) - kPress;
+			if (starts_sway_tick(tick) && k <= 30) {
+				kicked[k] = st.current().sway;
+				seen[k] = true;
+			}
+			for (uint8_t i = 0; i < out.shot_count; ++i) {
+				shots.push_back(out.shots[i]);
+				at_shot.push_back(st.current().sway);
+			}
+		}
+		REQUIRE(shots.size() == 10);
+		CHECK(st.current().magazine == def.magazine_capacity - 10);
+		for (size_t i = 0; i < shots.size(); ++i) {
+			const Row &r = rows[i];
+			const ShotEvent &e = shots[i];
+			CAPTURE(i);
+			CHECK(sway_tick(e.time) == kPress + r.tick);
+			CHECK(double(e.spread) == doctest::Approx(r.d).epsilon(1e-6));
+			CHECK(std::fabs(double(at_shot[i].deviation_yaw) / kSwayDeg - r.yaw) < 2e-6);
+			CHECK(std::fabs(double(at_shot[i].deviation_pitch) / kSwayDeg - r.pitch) < 2e-6);
+			const std::array<double, 3> want = rotate(rotate({ 0, 0, 1 }, r.pitch * kSwayDeg, r.yaw * kSwayDeg),
+					double(at_shot[i].recoil_pitch), double(at_shot[i].recoil_yaw));
+			for (size_t a = 0; a < 3; ++a) {
+				CHECK(std::fabs(double(e.direction[a]) - want[a]) < 2e-6);
+			}
+			const RecoilOffset kick = camera_recoil(def, kicked[r.tick + 1], Zoom::Zoom);
+			CHECK(seen[r.tick + 1]);
+			CHECK(std::fabs(double(kick.pitch) + r.cam_pitch) < 2e-6);
+			CHECK(std::fabs(double(kick.yaw) - r.cam_yaw) < 2e-6);
+			CHECK(kicked[r.tick + 1].shots == (i == 0 ? 1 : 2));
+		}
+		for (const After &a : after) {
+			CAPTURE(a.tick);
+			REQUIRE(seen[a.tick]);
+			const RecoilOffset cam = camera_recoil(def, kicked[a.tick], Zoom::Zoom);
+			CHECK(double(kicked[a.tick].dispersion) == doctest::Approx(a.d).epsilon(1e-6));
+			CHECK(std::fabs(double(cam.pitch) + a.cam_pitch) < 2e-6);
+			CHECK(std::fabs(double(cam.yaw) - a.cam_yaw) < 2e-6);
+		}
+		CHECK((kicked[23].flags & sway_flags::kTriggerHeld) == 0);
+	}
+
+	TEST_CASE("sim.weapons.unit: Q5 the camera spring runs only unzoomed and follows the recovered accumulator; R4-A2 "
+			  "bullets carry the gameplay-scaled recoil") {
 		const std::shared_ptr<const WeaponTable> t = synthetic_table();
 		WeaponSimDef d = t->defs[id_of(*t, kM16A3)];
-		const float hip[3][2] = { { 2.5f, 3.0f }, { 2.0f, 2.5f }, { 1.5f, 2.0f } };
-		for (size_t s = 0; s < 3; ++s) {
-			SwayState &st = d.sway[s][0];
-			st.move[size_t(SwayMove::Base)].min_angle = hip[s][0];
-			st.move[size_t(SwayMove::Moving)].min_angle = hip[s][1];
-			st.has_move[size_t(SwayMove::Moving)] = true;
-		}
-		d.sway[0][0].move[size_t(SwayMove::Jumping)].min_angle = 7.0f;
-		d.sway[0][0].has_move[size_t(SwayMove::Jumping)] = true;
-		d.sway[0][1].move[size_t(SwayMove::Base)].min_angle = 0.2f;
-		const Mechanics immediate;
-		Mechanics rise;
-		rise.min_spread_rise = MinSpreadRise::AtDecreaseRate;
-		const SimTime now = 600 * kTimeUnitsPerTick;
+		d.camera_spring_constant = 250.0f;
+		d.camera_spring_damping = 0.35f;
+		d.camera_spring_min_threshold_angle = 1.0f;
+		d.deviation_scale = { 0.5f, 1.0f };
+		d.gameplay_deviation_scale = { 0.25f, 1.0f };
+		SwayContext hip;
+		GunSwayState s;
+		s.recoil_pitch = float(-1.1 * kSwayDeg);
+		s.since_shot = 100.0f;
+		sway_update(s, d, hip);
+		CHECK(s.recoil_pitch == 0.0f);
+		CHECK(s.spring_pitch == 0.0f);
+		GunSwayState big;
+		big.recoil_pitch = float(-2.5 * kSwayDeg);
+		big.recoil_yaw = float(0.5 * kSwayDeg);
+		sway_fire_start(big);
+		const double dt = double(kSwaySeconds);
+		sway_update(big, d, hip);
+		const double v = double(big.recoil_pitch);
+		const double w = 250.0 * v * dt * (1.0 - 0.35);
+		CHECK(double(big.spring_pitch_rate) == doctest::Approx(w).epsilon(1e-6));
+		CHECK(double(big.spring_pitch) == doctest::Approx(w * dt).epsilon(1e-6));
+		CHECK(big.spring_yaw == 0.0f);
+		const RecoilOffset cam = camera_recoil(d, big, Zoom::NoZoom);
+		CHECK(double(cam.pitch) == doctest::Approx(-w * dt * 0.5 / kSwayDeg).epsilon(1e-5));
+		const RecoilOffset gameplay = gameplay_recoil(d, big, Zoom::NoZoom);
+		CHECK(double(gameplay.pitch) == doctest::Approx(-v * 0.25 / kSwayDeg).epsilon(1e-6));
+		SwayContext zoomed;
+		zoomed.zoom = Zoom::Zoom;
+		GunSwayState z = big;
+		sway_update(z, d, zoomed);
+		CHECK(z.spring_pitch == big.spring_pitch);
+		CHECK(z.spring_pitch_rate == big.spring_pitch_rate);
+		CHECK(camera_recoil(d, z, Zoom::Zoom).pitch == doctest::Approx(-double(z.recoil_pitch) / kSwayDeg));
+		const Vec3 bullet = shoot_direction(0, 0, d, big, Zoom::NoZoom, false);
+		CHECK(double(bullet[1]) == doctest::Approx(std::sin(-v * 0.25)).epsilon(1e-4));
+		const Vec3 turned = shoot_direction(uint16_t(kYawSteps / 4), 0, d, GunSwayState{}, Zoom::NoZoom, false);
+		CHECK(double(turned[0]) == doctest::Approx(1.0).epsilon(1e-6));
+	}
 
+	TEST_CASE("sim.weapons.unit: Q2 B3 the sway record from the soldier: sprint, air, moving above 0.5 m/s, stance and "
+			  "zoom") {
 		MotorParams motor;
 		for (PoseParams &pp : motor.poses) {
 			pp.on_ground.velocity = 2.0f;
-			pp.on_ground.backward = 0.5f;
-			pp.on_ground.left = 0.75f;
-			pp.on_ground.right = 0.75f;
+			pp.on_ground.backward = 2.0f;
+			pp.on_ground.left = 2.0f;
+			pp.on_ground.right = 2.0f;
 			pp.throttle.points[0] = { 0.0f, 1.0f };
 			pp.throttle.count = 1;
 		}
@@ -739,109 +979,51 @@ TEST_SUITE("weapons-unit") {
 		still.flags = soldier_flags::kAlive;
 		Command c;
 		c.tick = 600;
-		const auto spread_now = [&](const SoldierState &p_state, const Command &p_command, float p_stored, SimTime p_stored_time, const Mechanics &p_mech) {
-			return spread_at(p_stored, p_stored_time, now, effective_dispersion(d, weapon_sway_context(motor, p_state, p_command)), p_mech);
-		};
 		CHECK(weapon_sway_context(motor, still, c).move == SwayMove::Base);
-		CHECK(spread_now(still, c, 0.0f, 0, immediate) == 2.5f);
-
-		SoldierState walking = still;
-		walking.velocity = { 0.0f, 0.0f, 2.0f };
-		CHECK(walk_speed(motor, walking) == 2.0f);
-		CHECK(weapon_sway_context(motor, walking, c).move == SwayMove::Moving);
-		CHECK(weapon_sway_context(motor, walking, c).move_fraction == 1.0f);
-		CHECK(spread_now(walking, c, 2.5f, now - kTimeUnitsPerTick, immediate) == 3.0f);
-		SoldierState half = still;
-		half.velocity = { 0.0f, 0.0f, 1.0f };
-		CHECK(weapon_sway_context(motor, half, c).move_fraction == 0.5f);
-		CHECK(spread_now(half, c, 0.0f, 0, immediate) == 2.75f);
-		SoldierState backing = still;
-		backing.velocity = { 0.0f, 0.0f, -0.5f };
-		CHECK(walk_speed(motor, backing) == 1.0f);
-		CHECK(spread_now(backing, c, 0.0f, 0, immediate) == 2.75f);
-		SoldierState sidestep = still;
-		sidestep.velocity = { 0.75f, 0.0f, 0.0f };
-		CHECK(walk_speed(motor, sidestep) == 1.5f);
-		CHECK(spread_now(sidestep, c, 0.0f, 0, immediate) == 2.75f);
-		SoldierState turned = still;
-		turned.yaw = uint16_t(kYawSteps / 4);
-		turned.velocity = { 2.0f, 0.0f, 0.0f };
-		CHECK(walk_speed(motor, turned) == doctest::Approx(2.0f));
-		CHECK(spread_now(turned, c, 0.0f, 0, immediate) == doctest::Approx(3.0f));
 		SoldierState creeping = still;
-		creeping.velocity = { 0.05f, 0.0f, 0.05f };
-		const float creep_walk = 2.0f * (0.5f * 1.0f + 0.5f * 0.75f);
-		CHECK(walk_speed(motor, creeping) == doctest::Approx(creep_walk));
-		CHECK(weapon_sway_context(motor, creeping, c).move == SwayMove::Moving);
-		CHECK(spread_now(creeping, c, 0.0f, 0, immediate) == doctest::Approx(2.5f + 0.5f * std::sqrt(0.005f) / creep_walk));
-		CHECK(spread_at(0.0f, 0, now, effective_dispersion(d, weapon_sway_context(MotorParams{}, half, c)), immediate) == 3.0f);
-
+		creeping.velocity = { 0.0f, 0.0f, 0.5f };
+		CHECK(weapon_sway_context(motor, creeping, c).move == SwayMove::Base);
+		SoldierState walking = still;
+		walking.velocity = { 0.0f, 0.0f, 1.0f };
+		CHECK(weapon_sway_context(motor, walking, c).move == SwayMove::Moving);
+		CHECK(weapon_sway_context(motor, walking, c).move_fraction == 0.5f);
 		SoldierState airborne = still;
-		airborne.mode = MoveMode::Jumping;
+		airborne.mode = MoveMode::Falling;
 		CHECK(weapon_sway_context(motor, airborne, c).move == SwayMove::Jumping);
-		CHECK(spread_now(airborne, c, 2.5f, now - kTimeUnitsPerTick, immediate) == 7.0f);
-		SoldierState falling = still;
-		falling.mode = MoveMode::Falling;
-		CHECK(weapon_sway_context(motor, falling, c).move == SwayMove::Jumping);
 		SoldierState sprint = walking;
 		sprint.flags = uint16_t(soldier_flags::kAlive | soldier_flags::kSprinting);
 		CHECK(weapon_sway_context(motor, sprint, c).move == SwayMove::Sprinting);
-
-		SoldierState crouched = still;
-		crouched.target_pose = Pose::Crouch;
 		SoldierState prone = still;
 		prone.target_pose = Pose::Prone;
-		CHECK(weapon_sway_context(motor, crouched, c).stance == Stance::Crouch);
 		CHECK(weapon_sway_context(motor, prone, c).stance == Stance::Prone);
-		CHECK(spread_now(crouched, c, 0.0f, 0, immediate) == 2.0f);
-		CHECK(spread_now(prone, c, 0.0f, 0, immediate) == 1.5f);
-		SoldierState crouch_walk = crouched;
-		crouch_walk.velocity = walking.velocity;
-		CHECK(spread_now(crouch_walk, c, 0.0f, 0, immediate) == 2.5f);
-		SoldierState prone_crawl = prone;
-		prone_crawl.velocity = walking.velocity;
-		CHECK(spread_now(prone_crawl, c, 0.0f, 0, immediate) == 2.0f);
-
 		Command zoom = c;
 		zoom.buttons = buttons::kZoom;
 		CHECK(weapon_sway_context(motor, still, zoom).zoom == Zoom::Zoom);
-		CHECK(spread_now(still, zoom, 0.0f, 0, immediate) == 0.2f);
-
-		const float decrease = d.sway[0][0].move[0].decrease_per_second;
-		CHECK(decrease == 15.0f);
-		CHECK(spread_now(still, c, 6.0f, now, immediate) == 6.0f);
-		CHECK(spread_now(still, c, 6.0f, now - kTimeUnitsPerSecond / 10, immediate) == doctest::Approx(6.0f - 0.1f * decrease));
-		CHECK(spread_now(still, c, 6.0f, now - kTimeUnitsPerSecond / 5, immediate) == doctest::Approx(6.0f - 0.2f * decrease));
-		CHECK(spread_now(still, c, 6.0f, now - kTimeUnitsPerSecond, immediate) == 2.5f);
-		CHECK(spread_now(walking, c, 6.0f, now - kTimeUnitsPerSecond, immediate) == 3.0f);
-
-		CHECK(spread_now(walking, c, 2.5f, now - kTimeUnitsPerSecond / 60, rise) == doctest::Approx(2.5f + decrease / 60.0f));
-		CHECK(spread_now(walking, c, 2.5f, now - kTimeUnitsPerSecond, rise) == 3.0f);
 
 		CHECK(make_weapon_context(motor, still, still, c).sway.suppression == 0.0f);
 		CHECK(make_weapon_context(motor, still, still, c, 0.641f).sway.suppression == 0.641f);
 		CHECK(make_weapon_context(motor, still, still, c, 3.0f).sway.suppression == 1.0f);
 		CHECK(make_weapon_context(motor, still, still, c, std::nanf("")).sway.suppression == 0.0f);
 
-		Driver drv(t, { id_of(*t, kM16A3) });
-		drv.ctx.sway = SwayContext{};
-		drv.idle_until_ready();
-		const WeaponSimDef &live = t->defs[id_of(*t, kM16A3)];
-		const Dispersion live_disp = effective_dispersion(live, drv.ctx.sway);
-		size_t checked = 0;
-		for (int i = 0; i < 120; ++i) {
-			const WeaponSlotState before = drv.st.current();
-			const size_t had = drv.shots.size();
-			drv.step(fire(i % 20 < 14, false));
-			for (size_t k = had; k < drv.shots.size(); ++k) {
-				const ShotEvent &e = drv.shots[k];
-				const float want = k == had ? spread_at(before.spread, before.spread_time, e.time, live_disp, t->mechanics)
-											: spread_at(spread_after_shot(drv.shots[k - 1].spread, live_disp), drv.shots[k - 1].time, e.time, live_disp, t->mechanics);
-				CHECK(std::memcmp(&want, &e.spread, sizeof(float)) == 0);
-				++checked;
-			}
+		const std::shared_ptr<const WeaponTable> t = synthetic_table();
+		WeaponSimDef d = t->defs[id_of(*t, kM16A3)];
+		d.sway[0][0].move[size_t(SwayMove::Jumping)].min_angle = 7.0f;
+		d.sway[0][0].move[size_t(SwayMove::Jumping)].max_angle = 8.0f;
+		GunSwayState s;
+		SwayContext air;
+		air.move = SwayMove::Jumping;
+		sway_update(s, d, air);
+		CHECK(s.since_air == 0.0f);
+		CHECK(s.dispersion == d.sway[0][0].move[size_t(SwayMove::Jumping)].min_angle);
+		SwayContext ground;
+		for (int i = 0; i < 14; ++i) {
+			sway_update(s, d, ground);
 		}
-		CHECK(checked > 15);
+		CHECK(s.since_air < kSwayAirHold);
+		CHECK(s.dispersion == d.sway[0][0].move[size_t(SwayMove::Jumping)].min_angle);
+		sway_update(s, d, ground);
+		CHECK(s.since_air == kSwayAirHold);
+		CHECK(s.dispersion < d.sway[0][0].move[size_t(SwayMove::Jumping)].min_angle);
 	}
 
 	TEST_CASE("sim.weapons.unit: W7 determinism: replays, a mid-burst restore, seeds, two worlds") {
@@ -924,8 +1106,15 @@ TEST_SUITE("weapons-unit") {
 				times = times && a[i].time == b[i].time;
 			}
 			const double share = double(changed) / double(a.size());
-			MESSAGE("seed 1 vs 2: " << changed << " of " << a.size() << " hip-fire directions differ");
-			CHECK(share >= 0.99);
+			MESSAGE("seed 1 vs 2: "
+					<< changed << " of " << a.size()
+					<< " hip-fire directions differ (R-A0: the sway is seeded with the 30 Hz tick number)");
+			CHECK(share == 0.0);
+			std::set<std::array<float, 3>> distinct;
+			for (const ShotEvent &e : a) {
+				distinct.insert({ e.direction[0], e.direction[1], e.direction[2] });
+			}
+			CHECK(distinct.size() == a.size());
 			CHECK(times);
 		}
 
@@ -1249,11 +1438,11 @@ TEST_SUITE("weapons-unit") {
 		Driver dr(t, { 0 });
 		dr.idle_until_ready();
 		const int32_t magazine = dr.st.current().magazine;
-		for (int i = 0; i < 180; ++i) {
+		for (int i = 0; i < 170; ++i) {
 			dr.step(fire(true, false));
 		}
-		std::printf("M2b ru defib: %zu shots in 180 ticks, magazine %d -> %d, events %05x\n", dr.shots.size(), magazine, dr.st.current().magazine,
-				unsigned(dr.all_events));
+		std::printf("M2b ru defib: %zu shots in 170 ticks, magazine %d -> %d, events %05x\n", dr.shots.size(), magazine,
+				dr.st.current().magazine, unsigned(dr.all_events));
 		CHECK(dr.shots.size() == 3);
 		CHECK(dr.st.current().magazine == magazine);
 		CHECK((dr.all_events & (weapon_events::kReloadStarted | weapon_events::kReloadFinished)) == 0);
@@ -1261,7 +1450,11 @@ TEST_SUITE("weapons-unit") {
 			CHECK(e.def == 0);
 		}
 		if (dr.shots.size() >= 2) {
-			CHECK(dr.shots[1].time - dr.shots[0].time == seconds_to_units(1.0));
+			CHECK(dr.shots[1].time ==
+					sway_wait(dr.shots[0].time, sway_carry_at(dr.shots[0].time),
+							dr.table->defs[0].modes[0].interval_seconds)
+							.time);
+			CHECK(std::llabs(dr.shots[1].time - dr.shots[0].time - seconds_to_units(1.0)) < kTimeUnitsPerTick);
 		}
 	}
 }

@@ -103,6 +103,8 @@ struct FireModeDef {
 	FireLogic logic = FireLogic::Unknown;
 	SimTime interval = 0;
 	SimTime burst_interval = 0;
+	float interval_seconds = 0;
+	float burst_interval_seconds = 0;
 	int32_t bullets_per_burst = 1;
 };
 
@@ -161,8 +163,11 @@ struct WeaponSimDef {
 	float first_shot_recoil_multiplier = 1;
 	float shooting_recoil_decrease_scale = 0;
 
-	std::array<std::array<float, 2>, 3> recovery_factor_idle{};
-	std::array<std::array<float, 2>, 3> recovery_factor_firing{};
+	std::array<float, 2> deviation_scale{ 1, 1 };
+	std::array<float, 2> gameplay_deviation_scale{ 1, 1 };
+	float camera_spring_constant = 0;
+	float camera_spring_damping = 0;
+	float camera_spring_min_threshold_angle = 0;
 
 	std::array<Dispersion, 3> pellet_cone{};
 

@@ -145,6 +145,7 @@ struct XhairFrame {
 	uint32_t shots = 0;
 	sw::SwayMove move = sw::SwayMove::Base;
 	float speed = 0.0f;
+	float sway_speed = 0.0f;
 };
 
 constexpr bf3::sim::Tick kXhairSpawn = 100;
@@ -203,7 +204,8 @@ std::vector<XhairFrame> crosshair_frames(const sw::WeaponTable &p_table, std::sp
 		in.weapon = host::present_weapon(wires[i - 1], wires[i], tick, 0.0, p_table, sway);
 		host::fill_hud(in, {}, p_static, state, model);
 		frames.push_back({ tick, ui::hud_crosshair_arm(model.weapon.dispersion, p_base_offset), shots[i], sway.move,
-				std::hypot(soldiers[i].velocity[0], soldiers[i].velocity[2]) });
+				std::hypot(soldiers[i].velocity[0], soldiers[i].velocity[2]),
+				std::hypot(soldiers[i - 1].velocity[0], soldiers[i - 1].velocity[2]) });
 	}
 	return frames;
 }
@@ -213,7 +215,8 @@ double speed_fraction_arm(const sw::WeaponSimDef &p_def, float p_speed, float p_
 	moving.move = sw::SwayMove::Moving;
 	const float standing = sw::effective_dispersion(p_def, sw::SwayContext{}).min_angle;
 	const float walking = sw::effective_dispersion(p_def, moving).min_angle;
-	return ui::hud_crosshair_arm(standing + (walking - standing) * std::min(1.0f, p_speed / p_walk_speed), p_base_offset);
+	const float fraction = p_speed > sw::kSwayMovingSpeed ? std::min(1.0f, p_speed / p_walk_speed) : 0.0f;
+	return ui::hud_crosshair_arm(standing + (walking - standing) * fraction, p_base_offset);
 }
 
 struct RampMatch {
@@ -471,16 +474,20 @@ TEST_CASE("walking opens the crosshair without a shot: the presented spread foll
 	const std::array<uint16_t, 2> loadout{ m16, m9 };
 	const std::vector<XhairFrame> frames = crosshair_frames(*k.table, loadout, st, 0.151, script);
 	const std::vector<XhairFrame> before = frames_in(frames, { kXhairSpawn + 40, script.walk.from });
-	const std::vector<XhairFrame> walking = frames_in(frames, script.walk);
-	const std::vector<XhairFrame> after = frames_in(frames, { script.walk.to, script.last + 1 });
+	const std::vector<XhairFrame> walking = frames_in(frames, { script.walk.from + 2, script.walk.to });
+	const std::vector<XhairFrame> after = frames_in(frames, { script.walk.to + 2, script.last + 1 });
+	CHECK(frames_in(frames, { script.walk.from, script.walk.from + 1 }).front().arm == 65.0);
+	CHECK(frames_in(frames, { script.walk.to, script.walk.to + 1 }).front().arm == 75.0);
 	const bool ok = arms_all(before, 65.0) && arms_all(walking, 75.0) && arms_all(after, 65.0) && frames.back().shots == 0;
 	CHECK(arms_all(before, 65.0));
 	CHECK(arms_all(walking, 75.0));
 	CHECK(arms_all(after, 65.0));
 	CHECK(frames.back().shots == 0);
 	row("feed.crosshair_walk", ok,
-			fmt("no shot fired: arms %.0f standing, %.0f on every scripted 1.5 m/s frame (the sim's Moving minimum above 0.1 m/s), %.0f after stopping (2.5 / 3.0 deg, offset 0.151)", arm_at(before, 0),
-					arm_at(walking, 0), arm_at(after, 0)));
+			fmt("no shot fired: arms %.0f standing, %.0f on every scripted 1.5 m/s frame from the first 30 Hz sway "
+				"update of the walk (the Moving minimum above 0.5 m/s), %.0f from the first update after stopping (2.5 "
+				"/ 3.0 deg, offset 0.151)",
+					arm_at(before, 0), arm_at(walking, 0), arm_at(after, 0)));
 }
 
 TEST_CASE("hit indicator: 0.3 s per own server hit, level 1, others ignored") {
@@ -895,11 +902,11 @@ TEST_CASE("crosshair footage: the M16A3 builds of the 18.57 recording through th
 		w.late = frames_in(f, { walk.walk.from + 42, walk.walk.to });
 		for (const XhairFrame &x : frames_in(f, { walk.walk.from - 4, walk.walk.from + 30 })) {
 			w.onset_sim.push_back(x.arm);
-			w.onset_blend.push_back(speed_fraction_arm(def, x.speed, walk_speed, offset));
+			w.onset_blend.push_back(speed_fraction_arm(def, x.sway_speed, walk_speed, offset));
 		}
 		for (const XhairFrame &x : frames_in(f, { walk.walk.to - 4, walk.walk.to + 30 })) {
 			w.stop_sim.push_back(x.arm);
-			w.stop_blend.push_back(speed_fraction_arm(def, x.speed, walk_speed, offset));
+			w.stop_blend.push_back(speed_fraction_arm(def, x.sway_speed, walk_speed, offset));
 		}
 		return w;
 	};
@@ -937,8 +944,11 @@ TEST_CASE("crosshair footage: the M16A3 builds of the 18.57 recording through th
 					arms_text(std::span<const double>(wh.onset_sim).subspan(onset.frame, kFootageHeavyOnset.size())).c_str(), onset.max_error,
 					onset_is_blend ? "equal to" : "not equal to"));
 	row("footage.suppressed.move_stop", stop.max_error <= kFootageArmRounding && stop_is_blend,
-			fmt("footage arms per 30 fps frame from 301.88 s: %s; the sim's presented arms as the motor decelerates: %s, max %.0f px, %s the blend",
-					arms_text(kFootageSuppressedStop).c_str(), arms_text(std::span<const double>(ws.stop_sim).subspan(stop.frame, kFootageSuppressedStop.size())).c_str(),
+			fmt("footage arms per 30 fps frame from 301.88 s: %s; the sim's presented arms as the motor decelerates: "
+				"%s, max %.0f px, %s the blend of the last 30 Hz sway update (Moving above 0.5 m/s, Q2 B3)",
+					arms_text(kFootageSuppressedStop).c_str(),
+					arms_text(std::span<const double>(ws.stop_sim).subspan(stop.frame, kFootageSuppressedStop.size()))
+							.c_str(),
 					stop.max_error, stop_is_blend ? "equal to" : "not equal to"));
 
 	XhairScript s;

@@ -189,8 +189,10 @@ WeaponCommand BotWeapons::input(TdmShared &r_shared, uint8_t p_slot, const BotAr
 			in.zoom = q.zoom && gun && in_hand && !busy;
 
 			if (gun) {
-				out.comp_yaw = q.skill * ss.recoil.yaw * core::kDegToRadF;
-				out.comp_pitch = q.skill * ss.recoil.pitch * core::kDegToRadF;
+				const sw::RecoilOffset kick =
+						sw::gameplay_recoil(*d, ss.sway, in.zoom ? sw::Zoom::Zoom : sw::Zoom::NoZoom);
+				out.comp_yaw = q.skill * kick.yaw * core::kDegToRadF;
+				out.comp_pitch = q.skill * kick.pitch * core::kDegToRadF;
 			}
 		}
 	}

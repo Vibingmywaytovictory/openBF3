@@ -71,6 +71,7 @@ void start_reload(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Weapo
 	}
 	r_s.flags = uint8_t(r_s.flags & ~slot_flags::kReloadCommitted);
 	r_s.burst_left = 0;
+	sway_fire_stop(r_s.sway);
 	timed(r_io, p_time, weapon_events::kReloadStarted, p_slot);
 }
 
@@ -101,14 +102,17 @@ bool fire_shot(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponSi
 		++r_io.out.refused_shots;
 		return false;
 	}
-	const Dispersion disp = effective_dispersion(p_d, r_io.sway);
-	const float spread = spread_at(r_s.spread, r_s.spread_time, p_time, disp, r_io.mech);
+	if ((r_s.sway.flags & sway_flags::kTriggerHeld) == 0) {
+		sway_fire_start(r_s.sway);
+	}
+	const float spread = r_s.sway.dispersion;
+	sway_shot(r_s.sway, sway_tick(p_time));
 
 	const uint32_t index = r_io.st.next_shot_index++;
 	const uint64_t seed = shot_seed(r_io.match_seed, r_io.st.player_slot, index);
-	const Vec3 aim = aim_direction(r_io.cmd.yaw, r_io.cmd.pitch, r_s.recoil);
-	const Vec3 dir = sample_cone(aim, spread, unit_float(shot_random(seed, RngPurpose::SpreadRadius)),
-			unit_float(shot_random(seed, RngPurpose::SpreadAngle)), r_io.mech.disc);
+	const Zoom zoom = r_io.sway.zoom;
+	const Vec3 aim = shoot_direction(r_io.cmd.yaw, r_io.cmd.pitch, p_d, r_s.sway, zoom, false);
+	const Vec3 dir = shoot_direction(r_io.cmd.yaw, r_io.cmd.pitch, p_d, r_s.sway, zoom, true);
 	const double frac = tick_fraction(p_time);
 	const DVec3 e0 = detail::to_d(r_io.ctx.eye_start);
 	const DVec3 e1 = detail::to_d(r_io.ctx.eye_end);
@@ -132,7 +136,7 @@ bool fire_shot(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponSi
 	e.spread = spread;
 	const size_t stance = std::min<size_t>(size_t(r_io.sway.stance), 2);
 	e.pellet_cone = p_d.pellets > 1 ? p_d.pellet_cone[stance].min_angle : 0.0f;
-	e.recoil = r_s.recoil;
+	e.recoil = gameplay_recoil(p_d, r_s.sway, zoom);
 	e.tracer = p_d.trace_frequency > 0 && (index % uint32_t(p_d.trace_frequency)) == 0;
 	e.power = p_power;
 	if (r_io.table.exact_aim) {
@@ -141,12 +145,6 @@ bool fire_shot(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponSi
 		e.pellet_cone = 0;
 	}
 
-	r_s.spread = spread_after_shot(spread, disp);
-	r_s.spread_time = p_time;
-	const Recoil rec = effective_recoil(p_d, r_io.sway);
-	const bool first = (r_s.flags & slot_flags::kFirstShotArmed) != 0;
-	r_s.recoil = recoil_after_shot(r_s.recoil, rec, first, p_d.first_shot_recoil_multiplier, unit_float(shot_random(seed, RngPurpose::RecoilHorizontal)));
-	r_s.flags = uint8_t(r_s.flags & ~slot_flags::kFirstShotArmed);
 	if (!r_io.table.infinite_magazine && !p_d.unlimited_ammo && r_s.magazine > 0) {
 		--r_s.magazine;
 	}
@@ -155,7 +153,21 @@ bool fire_shot(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponSi
 	return true;
 }
 
-enum class Action : uint8_t { None, DeployEnd, BoltEnd, Commit, ReloadEnd, ShellStart, ShellLoaded, InterruptReload, ReloadStart, Shot, HoldStart, Throw };
+enum class Action : uint8_t {
+	None,
+	DeployEnd,
+	BoltEnd,
+	Commit,
+	ReloadEnd,
+	ShellStart,
+	ShellLoaded,
+	InterruptReload,
+	ReloadStart,
+	Shot,
+	HoldStart,
+	Throw,
+	FireStop
+};
 
 void process_active(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponSimDef &p_d, SimTime p_block_until, bool p_blocked) {
 	const bool trigger_was = (r_s.flags & slot_flags::kTriggerDown) != 0;
@@ -229,31 +241,43 @@ void process_active(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Wea
 				break;
 			case WeaponPhase::Ready: {
 				const bool ammo = has_ammo(r_io, r_s, p_d);
+				if ((r_s.sway.flags & sway_flags::kTriggerHeld) != 0) {
+					const SimTime cycle_end = std::max(now, r_s.next_shot_time);
+					const bool goes_on = !p_blocked && ammo && p_block_until <= cycle_end &&
+							((mode.logic == FireLogic::Automatic && r_io.in.fire) ||
+									(mode.logic == FireLogic::Burst && r_s.burst_left > 0));
+					if (!goes_on && r_io.in.reload && can_reload(r_s, p_d) && r_s.burst_left == 0) {
+						offer(now, Action::ReloadStart);
+						break;
+					}
+					offer(cycle_end, goes_on ? Action::Shot : Action::FireStop);
+					break;
+				}
 				if (r_io.in.reload && can_reload(r_s, p_d) && r_s.burst_left == 0) {
 					offer(now, Action::ReloadStart);
 					break;
 				}
 				if (!p_blocked && ammo) {
-					const SimTime ready = std::max({ now, r_s.next_shot_time, p_block_until });
+					const SimTime ready = std::max({ now, r_s.next_shot_time, p_block_until, press_ready });
 					switch (mode.logic) {
 						case FireLogic::Automatic:
 							if (r_io.in.fire) {
-								offer(std::max(ready, press_ready), Action::Shot);
+								offer(ready, Action::Shot);
 							}
 							break;
 						case FireLogic::Burst:
 							if (r_s.burst_left > 0 || pending) {
-								offer(std::max(ready, press_ready), Action::Shot);
+								offer(ready, Action::Shot);
 							}
 							break;
 						case FireLogic::HoldAndRelease:
 							if (pending) {
-								offer(std::max(ready, press_ready), Action::HoldStart);
+								offer(ready, Action::HoldStart);
 							}
 							break;
 						default:
 							if (pending) {
-								offer(std::max(ready, press_ready), Action::Shot);
+								offer(ready, Action::Shot);
 							}
 							break;
 					}
@@ -333,19 +357,27 @@ void process_active(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Wea
 					break;
 				}
 				r_s.next_shot_time = now + mode.interval;
+				r_s.next_shot_carry = 0.0f;
 				r_s.phase = WeaponPhase::Ready;
 				r_s.flags = uint8_t(r_s.flags & ~(slot_flags::kReleasePending | slot_flags::kPressPending));
 				timed(r_io, now, weapon_events::kThrown, p_slot);
 				break;
 			}
 			case Action::Shot: {
+				const float carry = now == r_s.next_shot_time && r_s.next_shot_carry > 0.0f ? r_s.next_shot_carry
+																							: sway_carry_at(now);
 				if (!fire_shot(r_io, p_slot, r_s, p_d, now, 1.0f)) {
 					iter = kMaxLoopEvents;
 					break;
 				}
+				const auto wait = [&](float p_seconds) {
+					const SwayWait w = sway_wait(now, carry, p_seconds);
+					r_s.next_shot_time = w.time;
+					r_s.next_shot_carry = w.carry;
+				};
 				switch (mode.logic) {
 					case FireLogic::Automatic:
-						r_s.next_shot_time = now + mode.interval;
+						wait(mode.interval_seconds);
 						break;
 					case FireLogic::Burst:
 						if (r_s.burst_left == 0) {
@@ -356,10 +388,10 @@ void process_active(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Wea
 						if (!has_ammo(r_io, r_s, p_d)) {
 							r_s.burst_left = 0;
 						}
-						r_s.next_shot_time = now + (r_s.burst_left > 0 ? mode.burst_interval : mode.interval);
+						wait(r_s.burst_left > 0 ? mode.burst_interval_seconds : mode.interval_seconds);
 						break;
 					case FireLogic::SingleWithBoltAction:
-						r_s.next_shot_time = now + mode.interval;
+						wait(mode.interval_seconds);
 						r_s.flags = uint8_t(r_s.flags & ~slot_flags::kPressPending);
 						if (has_ammo(r_io, r_s, p_d) && p_d.bolt_cycle > 0) {
 							r_s.phase = WeaponPhase::Bolt;
@@ -375,12 +407,15 @@ void process_active(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Wea
 						}
 						break;
 					default:
-						r_s.next_shot_time = now + mode.interval;
+						wait(mode.interval_seconds);
 						r_s.flags = uint8_t(r_s.flags & ~slot_flags::kPressPending);
 						break;
 				}
 				break;
 			}
+			case Action::FireStop:
+				sway_fire_stop(r_s.sway);
+				break;
 			case Action::None:
 				break;
 		}
@@ -401,6 +436,7 @@ void leave_slot(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponS
 	finish_phase(r_s);
 	r_s.burst_left = 0;
 	r_s.flags = uint8_t(r_s.flags & ~(slot_flags::kPressPending | slot_flags::kReleasePending));
+	sway_fire_stop(r_s.sway);
 }
 
 void sort_timed(WeaponTickOutput &r_out) {
@@ -462,7 +498,6 @@ core::Status spawn_soldier_weapons(SoldierWeaponsState &r_state, const WeaponTab
 		s.phase = WeaponPhase::Ready;
 		s.magazine = d.magazine_capacity;
 		s.reserve = d.unlimited_ammo ? 0 : d.magazines * d.magazine_capacity;
-		s.flags = slot_flags::kFirstShotArmed;
 	}
 	WeaponSlotState &a = r_state.slots[p_active];
 	a.phase = WeaponPhase::Deploying;
@@ -497,6 +532,13 @@ void step_soldier_weapons(const WeaponTable &p_table, SoldierWeaponsState &r_sta
 	}
 	const size_t defs = p_table.defs.size();
 	auto valid = [&](const WeaponSlotState &p_s) { return p_s.def != kNoWeapon && p_s.def < defs; };
+	if (starts_sway_tick(p_command.tick)) {
+		for (WeaponSlotState &s : r_state.slots) {
+			if (valid(s)) {
+				sway_update(s.sway, p_table.def(s.def, s.variant), io.sway);
+			}
+		}
+	}
 
 	if (p_context.alive && r_state.active < kMaxWeaponSlots) {
 
@@ -540,22 +582,38 @@ void step_soldier_weapons(const WeaponTable &p_table, SoldierWeaponsState &r_sta
 		if (!valid(s)) {
 			continue;
 		}
-		const WeaponSimDef &d = p_table.def(s.def, s.variant);
 		const bool active = i == r_state.active;
-		s.recoil = recover_recoil_tick(s.recoil, d, io.sway, active && io.shot, p_table.mechanics);
 		if (active) {
 			s.flags = uint8_t(io.in.fire ? (s.flags | slot_flags::kTriggerDown) : (s.flags & ~slot_flags::kTriggerDown));
 			s.flags = uint8_t(io.in.zoom ? (s.flags | slot_flags::kZoomWasDown) : (s.flags & ~slot_flags::kZoomWasDown));
-		}
-		if ((p_table.mechanics.first_shot_rearm == FirstShotRearm::OnTriggerRelease && active && !io.in.fire) ||
-				(p_table.mechanics.first_shot_rearm == FirstShotRearm::WhenRecovered && s.recoil.pitch == 0.0f && s.recoil.yaw == 0.0f)) {
-			s.flags = uint8_t(s.flags | slot_flags::kFirstShotArmed);
 		}
 	}
 	sort_timed(r_out);
 	r_state.tick = p_command.tick;
 	r_state.events = io.events;
 	r_out.events = io.events;
+}
+
+namespace {
+
+void hash_sway(detail::Fnv64 &r_h, const GunSwayState &p_s) {
+	r_h.add(p_s.dispersion);
+	r_h.add(p_s.deviation_pitch);
+	r_h.add(p_s.deviation_yaw);
+	r_h.add(p_s.recoil_pitch);
+	r_h.add(p_s.recoil_yaw);
+	r_h.add(p_s.since_shot);
+	r_h.add(p_s.since_air);
+	r_h.add(p_s.spring_pitch);
+	r_h.add(p_s.spring_yaw);
+	r_h.add(p_s.spring_pitch_rate);
+	r_h.add(p_s.spring_yaw_rate);
+	r_h.add(p_s.rng);
+	r_h.add(p_s.last_seed);
+	r_h.add(p_s.shots);
+	r_h.add(p_s.flags);
+}
+
 }
 
 uint64_t soldier_weapons_hash(const SoldierWeaponsState &p_state) {
@@ -582,10 +640,8 @@ uint64_t soldier_weapons_hash(const SoldierWeaponsState &p_state) {
 		h.add(s.phase_start);
 		h.add(s.phase_end);
 		h.add(s.next_shot_time);
-		h.add(s.spread);
-		h.add(s.spread_time);
-		h.add(s.recoil.pitch);
-		h.add(s.recoil.yaw);
+		h.add(s.next_shot_carry);
+		hash_sway(h, s.sway);
 		h.add(s.hold_start);
 	}
 	return h.value();
@@ -600,7 +656,7 @@ SwayContext weapon_sway_context(const MotorParams &p_motor, const SoldierState &
 		sway.move = SwayMove::Sprinting;
 	} else if (p_after.mode == MoveMode::Jumping || p_after.mode == MoveMode::InAir || p_after.mode == MoveMode::Falling) {
 		sway.move = SwayMove::Jumping;
-	} else if (hs2 > 0.0f) {
+	} else if (hs2 > kSwayMovingSpeed * kSwayMovingSpeed) {
 		sway.move = SwayMove::Moving;
 		const float walk = walk_speed(p_motor, p_after);
 		sway.move_fraction = walk > 0.0f ? std::min(1.0f, std::sqrt(hs2) / walk) : 1.0f;

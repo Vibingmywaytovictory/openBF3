@@ -54,8 +54,9 @@ inline Presented present(const sw::SoldierWeaponsState &p_prev, const sw::Soldie
 	p.phase_end_s = sw::units_to_seconds(b.phase_end);
 	p.flags = b.flags;
 	p.magazine = b.magazine;
-	p.recoil.pitch = a.recoil.pitch + (b.recoil.pitch - a.recoil.pitch) * f;
-	p.recoil.yaw = a.recoil.yaw + (b.recoil.yaw - a.recoil.yaw) * f;
+	constexpr float kToDeg = 180.0f / 3.14159265358979323846f;
+	p.recoil.pitch = -(a.sway.recoil_pitch + (b.sway.recoil_pitch - a.sway.recoil_pitch) * f) * kToDeg;
+	p.recoil.yaw = (a.sway.recoil_yaw + (b.sway.recoil_yaw - a.sway.recoil_yaw) * f) * kToDeg;
 	p.zoomed = (b.flags & sw::slot_flags::kZoomWasDown) != 0;
 	return p;
 }

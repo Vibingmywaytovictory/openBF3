@@ -76,8 +76,8 @@ WeaponInput script_input(const WeaponTable &p_table, const RangeScenario &p_scen
 			in.fire = (p_index % std::max<uint32_t>(1, p_scenario.tap_period)) == 0;
 			break;
 		case FireScript::ReloadAt:
-			in.fire = true;
-			in.reload = p_index == p_scenario.reload_tick;
+			in.fire = p_index < p_scenario.reload_tick;
+			in.reload = p_index >= p_scenario.reload_tick;
 			break;
 		case FireScript::Throw:
 			in.fire = p_index < p_scenario.hold_ticks;

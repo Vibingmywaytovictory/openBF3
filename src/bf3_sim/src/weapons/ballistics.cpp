@@ -567,8 +567,9 @@ Projectile make_projectile(const WeaponTable &p_table, const ShotEvent &p_shot, 
 	const WeaponSimDef &wd = p_table.def(p_shot.def, p_shot.variant);
 	Vec3 dir = p_shot.direction;
 	if (p_shot.pellets > 1 && p_shot.pellet_cone > 0) {
-		dir = sample_cone(p_shot.direction, p_shot.pellet_cone, unit_float(shot_random(p_shot.seed, RngPurpose::PelletRadius, p_pellet)),
-				unit_float(shot_random(p_shot.seed, RngPurpose::PelletAngle, p_pellet)), p_table.mechanics.disc);
+		dir = sample_cone(p_shot.direction, p_shot.pellet_cone,
+				unit_float(shot_random(p_shot.seed, RngPurpose::PelletRadius, p_pellet)),
+				unit_float(shot_random(p_shot.seed, RngPurpose::PelletAngle, p_pellet)));
 	}
 	const DVec3 v = frame_apply(frame_of(normalize(to_d(dir))), wd.projectile.launch_velocity);
 	Projectile p;

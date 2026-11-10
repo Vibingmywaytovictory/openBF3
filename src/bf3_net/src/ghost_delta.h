@@ -372,7 +372,6 @@ inline WeaponTimersWire shifted(const WeaponTimersWire &p_t, int64_t p_shift) {
 	t.phase_start = shifted_offset(p_t.phase_start, p_shift);
 	t.phase_end = shifted_offset(p_t.phase_end, p_shift);
 	t.next_shot_time = shifted_offset(p_t.next_shot_time, p_shift);
-	t.spread_time = shifted_offset(p_t.spread_time, p_shift);
 	t.hold_start = shifted_offset(p_t.hold_start, p_shift);
 	return t;
 }
@@ -392,11 +391,23 @@ constexpr void timers_delta(A &r_a, T &r_t, const WeaponTimersWire &p_p) {
 	lane(r_a, r_t.phase_start, p_p.phase_start, 32);
 	lane(r_a, r_t.phase_end, p_p.phase_end, 32);
 	lane(r_a, r_t.next_shot_time, p_p.next_shot_time, 32);
-	lane(r_a, r_t.spread_time, p_p.spread_time, 32);
 	lane(r_a, r_t.hold_start, p_p.hold_start, 32);
-	float_lane(r_a, r_t.spread, p_p.spread);
-	float_lane(r_a, r_t.recoil.pitch, p_p.recoil.pitch);
-	float_lane(r_a, r_t.recoil.yaw, p_p.recoil.yaw);
+	float_lane(r_a, r_t.next_shot_carry, p_p.next_shot_carry);
+	float_lane(r_a, r_t.sway.dispersion, p_p.sway.dispersion);
+	float_lane(r_a, r_t.sway.deviation_pitch, p_p.sway.deviation_pitch);
+	float_lane(r_a, r_t.sway.deviation_yaw, p_p.sway.deviation_yaw);
+	float_lane(r_a, r_t.sway.recoil_pitch, p_p.sway.recoil_pitch);
+	float_lane(r_a, r_t.sway.recoil_yaw, p_p.sway.recoil_yaw);
+	float_lane(r_a, r_t.sway.since_shot, p_p.sway.since_shot);
+	float_lane(r_a, r_t.sway.since_air, p_p.sway.since_air);
+	float_lane(r_a, r_t.sway.spring_pitch, p_p.sway.spring_pitch);
+	float_lane(r_a, r_t.sway.spring_yaw, p_p.sway.spring_yaw);
+	float_lane(r_a, r_t.sway.spring_pitch_rate, p_p.sway.spring_pitch_rate);
+	float_lane(r_a, r_t.sway.spring_yaw_rate, p_p.sway.spring_yaw_rate);
+	lane(r_a, r_t.sway.rng, p_p.sway.rng, 32);
+	lane(r_a, r_t.sway.last_seed, p_p.sway.last_seed, 32);
+	lane(r_a, r_t.sway.shots, p_p.sway.shots, 8);
+	lane(r_a, r_t.sway.flags, p_p.sway.flags, 8);
 }
 
 template <class A, MaybeConst<WeaponsWire> W>

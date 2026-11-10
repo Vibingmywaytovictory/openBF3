@@ -381,10 +381,14 @@ net::WeaponsWire sample_weapons(Rng &r_rng) {
 		t.phase_start = -int32_t(r_rng.below(1000000));
 		t.phase_end = int32_t(r_rng.below(1000000));
 		t.next_shot_time = net::kWeaponsWireTimeZero;
-		t.spread_time = -int32_t(r_rng.below(100000));
-		t.hold_start = net::kWeaponsWireTimeZero;
-		t.spread = r_rng.uniform(0, 4);
-		t.recoil = { r_rng.uniform(-1, 1), r_rng.uniform(-1, 1) };
+		t.hold_start = -int32_t(r_rng.below(100000));
+		t.sway.dispersion = r_rng.uniform(0, 4);
+		const float pitch = r_rng.uniform(-1, 1);
+		const float yaw = r_rng.uniform(-1, 1);
+		if (i == 1) {
+			t.sway.recoil_pitch = pitch * 0.05f;
+			t.sway.recoil_yaw = yaw * 0.05f;
+		}
 	}
 	return w;
 }

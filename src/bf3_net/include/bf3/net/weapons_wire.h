@@ -36,10 +36,9 @@ struct WeaponTimersWire {
 	int32_t phase_start = 0;
 	int32_t phase_end = 0;
 	int32_t next_shot_time = 0;
-	int32_t spread_time = 0;
 	int32_t hold_start = 0;
-	float spread = 0;
-	sim::weapons::RecoilOffset recoil{};
+	float next_shot_carry = 0;
+	sim::weapons::GunSwayState sway{};
 
 	bool operator==(const WeaponTimersWire &) const = default;
 };

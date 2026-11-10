@@ -340,7 +340,7 @@ std::vector<RuleTick> rules_run(const sw::WeaponTable &p_table, sim::Tick p_spaw
 		ctx.sway.zoom = in.zoom ? sw::Zoom::Zoom : sw::Zoom::NoZoom;
 		sw::step_weapons_with_rules(p_table, st, c, ctx, kMatchSeed, p_spawn_tick, wout);
 		const sw::WeaponSlotState &s = st.current();
-		out.push_back({ t, wout.events, s.flags, s.mode, s.spread, s.phase });
+		out.push_back({ t, wout.events, s.flags, s.mode, s.sway.dispersion, s.phase });
 	}
 	return out;
 }

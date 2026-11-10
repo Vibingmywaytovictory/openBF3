@@ -8,16 +8,10 @@ namespace bf3::sim::weapons {
 
 namespace {
 
-constexpr std::string_view kDiscs[] = { "uniform_area", "uniform_radius" };
-constexpr std::string_view kRecoveries[] = { "linear", "exponential" };
-constexpr std::string_view kRearms[] = { "on_trigger_release", "when_recovered" };
-constexpr std::string_view kRises[] = { "immediate", "at_decrease_rate" };
 constexpr std::string_view kLinear[] = { "linear" };
 constexpr std::string_view kFalloffBases[] = { "straight_line", "path_length" };
 
-static_assert(sizeof(DiscDistribution) == 1 && sizeof(RecoveryShape) == 1 && sizeof(FirstShotRearm) == 1 &&
-		sizeof(MinSpreadRise) == 1 && sizeof(FalloffShape) == 1 && sizeof(FalloffBasis) == 1 &&
-		sizeof(BlastFalloff) == 1);
+static_assert(sizeof(FalloffShape) == 1 && sizeof(FalloffBasis) == 1 && sizeof(BlastFalloff) == 1);
 
 using Key = core::KeyDef<Mechanics>;
 using core::KeyKind;
@@ -25,10 +19,6 @@ using core::KeyKind;
 #define BF3_MECH_FIELD(f) [](Mechanics &m) -> void * { return &m.f; }
 
 const Key kKeys[] = {
-	{ "disc", KeyKind::Choice, 0, 0, BF3_MECH_FIELD(disc), kDiscs },
-	{ "recovery", KeyKind::Choice, 0, 0, BF3_MECH_FIELD(recovery), kRecoveries },
-	{ "first_shot_rearm", KeyKind::Choice, 0, 0, BF3_MECH_FIELD(first_shot_rearm), kRearms },
-	{ "min_spread_rise", KeyKind::Choice, 0, 0, BF3_MECH_FIELD(min_spread_rise), kRises },
 	{ "falloff", KeyKind::Choice, 0, 0, BF3_MECH_FIELD(falloff), kLinear },
 	{ "falloff_basis", KeyKind::Choice, 0, 0, BF3_MECH_FIELD(falloff_basis), kFalloffBases },
 	{ "blast_falloff", KeyKind::Choice, 0, 0, BF3_MECH_FIELD(blast_falloff), kLinear },

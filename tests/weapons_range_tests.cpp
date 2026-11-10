@@ -258,8 +258,10 @@ TEST_SUITE("weapons-range") {
 				for (size_t i = 0; i < std::min(a.shots.size(), c.shots.size()); ++i) {
 					changed += a.shots[i].direction != c.shots[i].direction ? 1 : 0;
 				}
-				std::printf("  seed 2: %zu of %zu hip-fire directions differ\n", changed, a.shots.size());
-				CHECK(double(changed) >= 0.99 * double(a.shots.size()));
+				std::printf("  seed 2: %zu of %zu hip-fire directions differ (R-A0: the sway seed is the 30 Hz tick "
+							"number, not the match seed)\n",
+						changed, a.shots.size());
+				CHECK(changed == 0);
 			}
 		}
 		std::printf("static impacts: %zu, unresolved pair %zu, physics material differs %zu\n", audit.statics, audit.unresolved, audit.wrong_material);

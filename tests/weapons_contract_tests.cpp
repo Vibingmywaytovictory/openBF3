@@ -146,8 +146,6 @@ TEST_SUITE("weapons-contract") {
 
 	TEST_CASE("weapons contract: the unmeasured mechanics default to the plan's no-measurement choice") {
 		const Mechanics m;
-		CHECK(m.disc == DiscDistribution::UniformArea);
-		CHECK(m.recovery == RecoveryShape::Linear);
 		CHECK_FALSE(m.measured);
 		CHECK(m.bullet_damage_modifier == 1.0f);
 	}

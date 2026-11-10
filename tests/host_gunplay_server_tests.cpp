@@ -150,6 +150,17 @@ bool shots_equal(const sw::ShotEvent &p_a, const sw::ShotEvent &p_b) {
 			std::memcmp(&p_a.power, &p_b.power, sizeof(float)) == 0;
 }
 
+size_t on_cadence(const std::vector<sw::ShotEvent> &p_shots, float p_seconds) {
+	size_t ok = 0;
+	float carry = p_shots.empty() ? 0.0f : sw::sway_carry_at(p_shots[0].time);
+	for (size_t i = 1; i < p_shots.size(); ++i) {
+		const sw::SwayWait w = sw::sway_wait(p_shots[i - 1].time, carry, p_seconds);
+		ok += p_shots[i].time == w.time ? 1u : 0u;
+		carry = w.carry;
+	}
+	return ok;
+}
+
 void row(const char *p_gate, const std::string &p_name, bool p_pass, const std::string &p_measured, const std::string &p_threshold) {
 	std::printf("%-4s %-58s %s | %s | %s\n", p_gate, p_name.c_str(), p_pass ? "PASS" : "FAIL", p_measured.c_str(), p_threshold.c_str());
 	CHECK_MESSAGE(p_pass, p_gate << " " << p_name << ": " << p_measured << " (" << p_threshold << ")");
@@ -178,15 +189,13 @@ void check_fire_timing(Run &r_run, const sw::WeaponTable &p_table, uint8_t p_wea
 		const std::vector<WeaponTickRecord> ticks = r_run.rec->ticks();
 		const std::vector<sw::ShotEvent> shots = r_run.rec->shots(r_run.slot);
 		const std::optional<sim::Tick> press = press_tick(ticks, r_run.slot);
-		bool gaps = shots.size() >= 8;
-		for (size_t i = 1; i < shots.size(); ++i) {
-			gaps = gaps && shots[i].time - shots[i - 1].time == mode.interval;
-		}
+		const bool gaps = shots.size() >= 8 && on_cadence(shots, mode.interval_seconds) == shots.size() - 1;
 		const bool first = press && !shots.empty() && shots.front().time == sw::tick_start(*press);
 		row("E1", name + " automatic: gaps = the table interval", gaps && first,
-				fmt("%zu shots (%zu while held), first at the press tick's start: %s, gaps %s", shots.size(), n, first ? "yes" : "no",
-						gaps ? "all equal" : "differ"),
-				fmt("every gap %" PRId64 ", first at tick_start(press)", mode.interval));
+				fmt("%zu shots (%zu while held), first at the press tick's start: %s, gaps %s", shots.size(), n,
+						first ? "yes" : "no", gaps ? "all equal" : "differ"),
+				fmt("every gap %" PRId64 " on the 30 Hz float32 timer (R-A3 A), first at tick_start(press)",
+						mode.interval));
 		return;
 	}
 
@@ -241,7 +250,7 @@ std::optional<double> drop_at(const Flight &p_f, double p_distance) {
 	return std::nullopt;
 }
 
-std::string variant_cfg(const std::string &p_base, const char *p_disc, const char *p_recovery) {
+std::string variant_cfg(const std::string &p_base, const char *p_key, const char *p_value) {
 	std::string out;
 	size_t at = 0;
 	while (at < p_base.size()) {
@@ -250,10 +259,8 @@ std::string variant_cfg(const std::string &p_base, const char *p_disc, const cha
 			end = p_base.size();
 		}
 		std::string line = p_base.substr(at, end - at);
-		if (line.rfind("disc", 0) == 0) {
-			line = std::string("disc = ") + p_disc;
-		} else if (line.rfind("recovery", 0) == 0) {
-			line = std::string("recovery = ") + p_recovery;
+		if (line.rfind(std::string(p_key) + " ", 0) == 0) {
+			line = std::string(p_key) + " = " + p_value;
 		}
 		out += line + "\n";
 		at = end + 1;
@@ -376,15 +383,14 @@ TEST_SUITE("host-gunplay-server") {
 					const std::vector<WeaponTickRecord> ticks = r.rec->ticks();
 					const std::vector<sw::ShotEvent> shots = r.rec->shots(r.slot);
 					const std::optional<sim::Tick> press = press_tick(ticks, r.slot);
-					size_t gaps_ok = 0;
-					for (size_t i = 1; i < shots.size(); ++i) {
-						gaps_ok += shots[i].time - shots[i - 1].time == 4'500'000 ? 1u : 0u;
-					}
+					const size_t gaps_ok = on_cadence(shots, 60.0f / 800.0f);
 					const bool first = press && !shots.empty() && shots.front().time == sw::tick_start(*press);
-					row("E1", "M16A3 one magazine held: 31 shots, 30 gaps of 4500000", shots.size() == 31 && gaps_ok == 30 && first,
-							fmt("%zu shots, %zu gaps of 4500000, first %s the press tick %u's start", shots.size(), gaps_ok, first ? "at" : "NOT at",
-									press ? unsigned(*press) : 0u),
-							"31 shots; first at the press tick's start; all 30 gaps exactly 4500000");
+					row("E1", "M16A3 one magazine held: 31 shots, 30 gaps of 4500000 on the float32 timer",
+							shots.size() == 31 && gaps_ok == 30 && first,
+							fmt("%zu shots, %zu gaps on the timer, first %s the press tick %u's start", shots.size(),
+									gaps_ok, first ? "at" : "NOT at", press ? unsigned(*press) : 0u),
+							"31 shots; first at the press tick's start; all 30 gaps the 30 Hz float32 timer's 60 / 800 "
+							"s (4500000 +- 1, R-A3 A)");
 					if (rep) {
 						std::vector<sw::ShotEvent> traced;
 						for (const net::TraceGunplayTick &t : rep->trace_gunplay) {
@@ -832,31 +838,27 @@ TEST_SUITE("host-gunplay-server") {
 		std::error_code ec;
 		std::filesystem::create_directories(dir, ec);
 		struct Variant {
-			const char *disc;
-			const char *recovery;
-			sw::DiscDistribution d;
-			sw::RecoveryShape r;
+			const char *key;
+			const char *value;
+			bool threshold;
 		};
-		const Variant variants[] = { { "uniform_area", "linear", sw::DiscDistribution::UniformArea, sw::RecoveryShape::Linear },
-			{ "uniform_area", "exponential", sw::DiscDistribution::UniformArea, sw::RecoveryShape::Exponential },
-			{ "uniform_radius", "linear", sw::DiscDistribution::UniformRadius, sw::RecoveryShape::Linear },
-			{ "uniform_radius", "exponential", sw::DiscDistribution::UniformRadius, sw::RecoveryShape::Exponential } };
+		const Variant variants[] = { { "apply_protection_threshold", "false", false },
+			{ "apply_protection_threshold", "true", true } };
 		std::set<uint64_t> hashes;
 		uint64_t shipped_hash = 0;
 		for (const Variant &v : variants) {
-			const std::filesystem::path cfg = dir / (std::string(v.disc) + "_" + v.recovery + ".cfg");
+			const std::filesystem::path cfg = dir / (std::string(v.key) + "_" + v.value + ".cfg");
 			{
 				std::ofstream out(cfg, std::ios::binary);
-				out << variant_cfg(base, v.disc, v.recovery);
+				out << variant_cfg(base, v.key, v.value);
 			}
-			const std::string name = std::string(v.disc) + " + " + v.recovery;
+			const std::string name = std::string(v.key) + " = " + v.value;
 			const std::shared_ptr<const sw::WeaponTable> table = local_table(*m->level, cfg.string());
 			REQUIRE(table != nullptr);
 			if (table == nullptr) {
 				return;
 			}
-			CHECK(table->mechanics.disc == v.d);
-			CHECK(table->mechanics.recovery == v.r);
+			CHECK(table->mechanics.apply_protection_threshold == v.threshold);
 			CHECK_FALSE(table->mechanics.measured);
 
 			host::GunplayConfig g;
@@ -870,59 +872,13 @@ TEST_SUITE("host-gunplay-server") {
 			const uint64_t server_hash = r.s->server.game_stats().weapon_hash;
 			const uint64_t client_hash = host::match_weapon_hash(*table, m->level->gunplay->capsule_table);
 			hashes.insert(server_hash);
-			if (v.d == sw::DiscDistribution::UniformArea && v.r == sw::RecoveryShape::Linear) {
+			if (!v.threshold) {
 				shipped_hash = server_hash;
 			}
 			row("E6", name + ": the client-built table's hash = the server's", server_hash == client_hash,
 					fmt("server %016" PRIx64 ", client %016" PRIx64, server_hash, client_hash), "equal");
 
 			run_for(*r.s, 1.5);
-			r.rec->clear();
-			hold_fire(r, 10, 3.0);
-			run_for(*r.s, 0.3);
-			{
-				const std::vector<WeaponTickRecord> ticks = r.rec->ticks();
-				const sw::WeaponSimDef *d = nullptr;
-				size_t shots = 0;
-				double pitch = 0;
-				bool first = true;
-				bool started = false;
-				float measured = NAN;
-				for (const WeaponTickRecord &t : ticks) {
-					if (t.slot != r.slot) {
-						continue;
-					}
-					if (!started && t.shots.empty()) {
-						continue;
-					}
-					if (!started) {
-						started = true;
-						d = &table->defs[t.after.slots[t.after.active].def];
-					}
-					const sw::SwayContext ctx;
-					const sw::Recoil rec = sw::effective_recoil(*d, ctx);
-					for (size_t k = 0; k < t.shots.size() && shots < 10; ++k) {
-						const double up = double(rec.up_per_shot) * (first ? double(d->first_shot_recoil_multiplier) : 1.0);
-						first = false;
-						pitch = std::min(pitch + up, std::max(double(rec.up_max), 0.0));
-						++shots;
-					}
-					const bool firing = !t.shots.empty();
-					if (v.r == sw::RecoveryShape::Exponential) {
-						pitch *= double(firing ? d->recovery_factor_firing[0][0] : d->recovery_factor_idle[0][0]);
-					} else {
-						const double step = double(d->sway[0][0].recoil.decrease_factor) * (firing ? double(d->shooting_recoil_decrease_scale) : 1.0) / double(sim::kSimHz);
-						pitch = std::max(0.0, pitch - step);
-					}
-					if (shots == 10) {
-						measured = t.after.slots[t.after.active].recoil.pitch;
-						break;
-					}
-				}
-				row("E6", name + ": recoil pitch after a 10-round burst = the variant's recurrence", shots == 10 && std::fabs(double(measured) - pitch) <= 1e-4,
-						fmt("%.6f deg (recurrence %.6f, diff %.2e)", double(measured), pitch, double(measured) - pitch), "within 1e-4 deg");
-			}
-
 			const uint64_t shots_before = r.s->server.game_stats().gunplay.shots;
 			run_for(*r.s, 10.0, [&](bool, uint64_t, double p_t) {
 				const double phase = std::fmod(p_t, 3.0);
@@ -982,22 +938,21 @@ TEST_SUITE("host-gunplay-server") {
 			std::vector<double> u_other = u;
 			const auto area = [](double p_x) { return p_x * p_x; };
 			const auto radius = [](double p_x) { return p_x; };
-			const bool is_area = v.d == sw::DiscDistribution::UniformArea;
-			const double d_own = ks_d(u, is_area ? std::function<double(double)>(area) : std::function<double(double)>(radius));
-			const double d_other = ks_d(u_other, is_area ? std::function<double(double)>(radius) : std::function<double(double)>(area));
+			const double d_own = ks_d(u, std::function<double(double)>(radius));
+			const double d_other = ks_d(u_other, std::function<double(double)>(area));
 			const double bound = 1.63 / std::sqrt(2000.0);
-			row("E6", name + ": 2,000 server shot offsets fit the variant's radial CDF", d_own <= bound,
-					fmt("KS D %.4f (against the other disc %.4f)", d_own, d_other), fmt("D <= %.4f", bound));
+			row("E6", name + ": 2,000 server shot offsets fit the polar draw's uniform radius (Q2)", d_own <= bound,
+					fmt("KS D %.4f (against the uniform-area disc %.4f)", d_own, d_other), fmt("D <= %.4f", bound));
 			CHECK(d_other > bound);
 			CHECK(server.stats().gunplay.weapon_precondition_failures == 0);
 		}
-		row("E6", "four distinct weapon_hash values", hashes.size() == 4, fmt("%zu distinct", hashes.size()), "4");
+		row("E6", "two distinct weapon_hash values", hashes.size() == 2, fmt("%zu distinct", hashes.size()), "2");
 
 		{
 			const std::filesystem::path other = dir / "mismatch.cfg";
 			{
 				std::ofstream out(other, std::ios::binary);
-				out << variant_cfg(base, "uniform_radius", "linear");
+				out << variant_cfg(base, "apply_protection_threshold", "true");
 			}
 			const std::shared_ptr<const sw::WeaponTable> t = local_table(*m->level, other.string());
 			const uint64_t h = t != nullptr ? host::match_weapon_hash(*t, m->level->gunplay->capsule_table) : 0;

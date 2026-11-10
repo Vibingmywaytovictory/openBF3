@@ -44,8 +44,8 @@ constexpr bool kRuNtLanded = true;
 
 constexpr float kDeg = sim::kPi / 180.0f;
 
-constexpr uint64_t kReplayDecisionHash = 0xa654de5fef380092ull;
-constexpr uint64_t kReplayWorldHash = 0x408d397b06fb46c2ull;
+constexpr uint64_t kReplayDecisionHash = 0x1616b6fc64b4cf62ull;
+constexpr uint64_t kReplayWorldHash = 0x45ba819f37d91966ull;
 
 void pending_skip(const char *p_row) {
 	std::printf("%s: PENDING (ru, nt): needs run_tdm and the v3 codecs on the branch\n", p_row);

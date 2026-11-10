@@ -356,10 +356,15 @@ bf3::host::PresentedWeapon present_weapon(const sw::SoldierWeaponsState &p_prev,
 	p.phase_progress = b.phase_end > 0 && len > 0 ? float(std::clamp((p_time_s - p.phase_start_s) / len, 0.0, 1.0)) : 0.0f;
 
 	const bool same = p_prev.active == p_curr.active && a.def == b.def;
-	p.spread_deg = same ? a.spread + (b.spread - a.spread) * f : b.spread;
-	p.recoil.pitch = same ? a.recoil.pitch + (b.recoil.pitch - a.recoil.pitch) * f : b.recoil.pitch;
-	p.recoil.yaw = same ? a.recoil.yaw + (b.recoil.yaw - a.recoil.yaw) * f : b.recoil.yaw;
 	p.zoomed = (b.flags & sw::slot_flags::kZoomWasDown) != 0;
+	p.spread_deg = same ? a.sway.dispersion + (b.sway.dispersion - a.sway.dispersion) * f : b.sway.dispersion;
+	if (p.valid && b.def < p_table.defs.size()) {
+		const sw::Zoom zoom = p.zoomed ? sw::Zoom::Zoom : sw::Zoom::NoZoom;
+		const sw::RecoilOffset rb = sw::camera_recoil(p_table.defs[b.def], b.sway, zoom);
+		const sw::RecoilOffset ra = same ? sw::camera_recoil(p_table.defs[b.def], a.sway, zoom) : rb;
+		p.recoil.pitch = ra.pitch + (rb.pitch - ra.pitch) * f;
+		p.recoil.yaw = ra.yaw + (rb.yaw - ra.yaw) * f;
+	}
 	p.events = p_curr.events;
 	return p;
 }

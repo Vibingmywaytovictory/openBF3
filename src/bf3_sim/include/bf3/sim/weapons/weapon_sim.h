@@ -56,9 +56,8 @@ struct WeaponSlotState {
 	SimTime phase_start = 0;
 	SimTime phase_end = 0;
 	SimTime next_shot_time = 0;
-	float spread = 0;
-	SimTime spread_time = 0;
-	RecoilOffset recoil{};
+	float next_shot_carry = 0;
+	GunSwayState sway{};
 	SimTime hold_start = 0;
 };
 static_assert(std::is_trivially_copyable_v<WeaponSlotState>);

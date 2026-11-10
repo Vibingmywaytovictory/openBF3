@@ -178,6 +178,17 @@ const ImpactEvent *first_impact(const Flight &p_f, ImpactKind p_kind) {
 	return nullptr;
 }
 
+std::vector<SimTime> bf3_cadence(SimTime p_first, float p_seconds, size_t p_count) {
+	std::vector<SimTime> out{ p_first };
+	float carry = sway_carry_at(p_first);
+	while (out.size() < p_count) {
+		const SwayWait w = sway_wait(out.back(), carry, p_seconds);
+		out.push_back(w.time);
+		carry = w.carry;
+	}
+	return out;
+}
+
 double angle_deg(const Vec3 &p_a, const Vec3 &p_b) {
 	const double c = std::clamp(dot(normalize(to_d(p_a)), normalize(to_d(p_b))), -1.0, 1.0);
 	return std::acos(c) * 180.0 / kPiD;
@@ -192,23 +203,29 @@ void check_m16a3(Rows &r_rows, const WeaponCheckInputs &p_in) {
 	if (const std::optional<FireTimingResult> t = timing(*p_in.table, *id, FireScript::Hold, 360, 0, p_in.eye_height, p_in.match_seed)) {
 		bool gaps = t->shots.size() >= 31;
 		SimTime lo = INT64_MAX, hi = 0;
+		const float interval = p_in.table->defs[*id].modes[0].interval_seconds;
+		const std::vector<SimTime> cadence = bf3_cadence(t->shots.empty() ? 0 : t->shots[0].time, interval, 32);
 		for (size_t i = 1; i < std::min<size_t>(31, t->shots.size()); ++i) {
 			const SimTime g = t->shots[i].time - t->shots[i - 1].time;
 			lo = std::min(lo, g);
 			hi = std::max(hi, g);
-			gaps = gaps && g == 4'500'000;
+			gaps = gaps && t->shots[i].time == cadence[i] && std::llabs(g - 4'500'000) <= 1;
 		}
 		const bool first = !t->shots.empty() && t->shots[0].time == tick_start(t->first_script_tick);
 		const std::vector<const TimedWeaponEvent *> reloads = events_of(*t, weapon_events::kReloadStarted);
-		const bool reload = t->shots.size() >= 31 && !reloads.empty() && reloads[0]->time == t->shots[30].time + 4'500'000;
+		const bool reload = t->shots.size() >= 31 && !reloads.empty() && reloads[0]->time == cadence[31];
 		size_t first_mag = 0;
 		for (const ShotEvent &s : t->shots) {
 			first_mag += (reloads.empty() || s.time < reloads[0]->time) ? 1 : 0;
 		}
 		r_rows.add("W1", "M16A3 one magazine: held from the press tick", gaps && first && reload && first_mag == 31,
-				fmt("%zu shots before the reload, gaps %s..%s, first at the press tick's start %s, empty reload at last + %s", first_mag, units(lo).c_str(),
-						units(hi).c_str(), first ? "yes" : "no", reloads.empty() || t->shots.size() < 31 ? "-" : units(reloads[0]->time - t->shots[30].time).c_str()),
-				"31 shots, every gap 4500000, then the empty reload");
+				fmt("%zu shots before the reload, gaps %s..%s, first at the press tick's start %s, empty reload "
+					"at last + %s",
+						first_mag, units(lo).c_str(), units(hi).c_str(), first ? "yes" : "no",
+						reloads.empty() || t->shots.size() < 31 ? "-"
+																: units(reloads[0]->time - t->shots[30].time).c_str()),
+				"31 shots on the 30 Hz float32 timer of 60 / 800 s (gaps 4500000 +- 1, R-A3 A), then the empty reload "
+				"one interval later");
 	}
 	const std::optional<uint16_t> oid = find(*p_in.oracle, kM16A3);
 	if (!oid || !p_in.oracle->infinite_magazine) {
@@ -216,12 +233,16 @@ void check_m16a3(Rows &r_rows, const WeaponCheckInputs &p_in) {
 		return;
 	}
 	if (const std::optional<FireTimingResult> t = timing(*p_in.oracle, *oid, FireScript::Hold, 600, 0, p_in.eye_height, p_in.match_seed)) {
-		bool gaps = true;
+		bool gaps = !t->shots.empty();
+		const std::vector<SimTime> cadence = bf3_cadence(t->shots.empty() ? 0 : t->shots[0].time,
+				p_in.oracle->defs[*oid].modes[0].interval_seconds, t->shots.size());
 		for (size_t i = 1; i < t->shots.size(); ++i) {
-			gaps = gaps && t->shots[i].time - t->shots[i - 1].time == 4'500'000;
+			gaps = gaps && t->shots[i].time == cadence[i] &&
+					std::llabs(t->shots[i].time - t->shots[i - 1].time - 4'500'000) <= 1;
 		}
 		r_rows.add("W1", "M16A3 10 s held (infinite_magazine table)", t->shots.size() == 134 && gaps,
-				fmt("%zu shots, every gap 4500000: %s", t->shots.size(), gaps ? "yes" : "no"), "134 shots, every gap exactly 4500000 (75 ms)");
+				fmt("%zu shots, every gap on the 30 Hz float32 timer: %s", t->shots.size(), gaps ? "yes" : "no"),
+				"134 shots, gaps 4500000 +- 1 as the float32 timer carries them");
 	}
 }
 
@@ -307,19 +328,21 @@ void check_bursts(Rows &r_rows, const WeaponCheckInputs &p_in) {
 			}
 			ok = ok && shots.size() == c.count;
 			for (size_t i = 1; i < shots.size(); ++i) {
-				ok = ok && shots[i]->time - shots[i - 1]->time == c.gap;
+				ok = ok && std::llabs(shots[i]->time - shots[i - 1]->time - c.gap) <= 1;
 			}
 			if (g > 0 && !groups[g - 1].empty()) {
 				min_between = std::min(min_between, shots.front()->time - groups[g - 1].back()->time);
 			}
 			++full;
 		}
-		ok = ok && full >= 3 && min_between >= c.between;
+		ok = ok && full >= 3 && min_between >= c.between - 1;
 		r_rows.add("W1", c.name, ok,
-				fmt("%zu presses fired, each %zu shots %s apart: %s; burst to burst >= %s", full, c.count, units(c.gap).c_str(), ok ? "yes" : "no",
+				fmt("%zu presses fired, each %zu shots %s apart: %s; burst to burst >= %s", full, c.count,
+						units(c.gap).c_str(), ok ? "yes" : "no",
 						min_between == INT64_MAX ? "-" : units(min_between).c_str()),
-				fmt("%zu shots %s apart per press, one burst per press, next burst >= %s after the last shot", c.count, units(c.gap).c_str(),
-						units(c.between).c_str()));
+				fmt("%zu shots %s +- 1 apart per press (the 30 Hz float32 timer, R-A3 A), one burst per press, next "
+					"burst >= %s - 1 after the last shot",
+						c.count, units(c.gap).c_str(), units(c.between).c_str()));
 	}
 }
 
@@ -344,11 +367,12 @@ void check_870(Rows &r_rows, const WeaponCheckInputs &p_in) {
 	}
 	bool pump = times.size() == size_t(d.magazine_capacity);
 	for (size_t i = 1; i < times.size(); ++i) {
-		pump = pump && times[i] - times[i - 1] == 28'800'000;
+		pump = pump && std::llabs(times[i] - times[i - 1] - 28'800'000) <= 1;
 	}
 	r_rows.add("W1", "870MCS pump: Tap pinned to the tick containing the ready time", pump,
-			fmt("%zu shots in the first magazine, gaps %s", times.size(), times.size() >= 2 ? units(times[1] - times[0]).c_str() : "-"),
-			"shots exactly 28800000 apart (0.48 s, 125 RPM)");
+			fmt("%zu shots in the first magazine, gaps %s", times.size(),
+					times.size() >= 2 ? units(times[1] - times[0]).c_str() : "-"),
+			"shots 28800000 +- 1 apart (0.48 s, 125 RPM, on the 30 Hz float32 timer, R-A3 A)");
 
 	bool pellets = !t->shots.empty();
 	double widest = 0;

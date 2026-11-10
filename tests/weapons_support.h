@@ -530,8 +530,12 @@ inline RandomRun random_run(const std::shared_ptr<const sw::WeaponTable> &p_tabl
 			const sw::WeaponSimDef &sd = p_table->defs[s.def];
 			violation(s.magazine < 0 || s.magazine > sd.magazine_capacity, "magazine outside [0, capacity]", c.tick);
 			violation(s.reserve < 0, "negative reserve", c.tick);
-			violation(!std::isfinite(s.spread) || s.spread < 0, "spread not finite", c.tick);
-			violation(!std::isfinite(s.recoil.pitch) || !std::isfinite(s.recoil.yaw), "recoil not finite", c.tick);
+			violation(!std::isfinite(s.sway.dispersion) || s.sway.dispersion < 0, "spread not finite", c.tick);
+			violation(!std::isfinite(s.sway.recoil_pitch) || !std::isfinite(s.sway.recoil_yaw), "recoil not finite",
+					c.tick);
+			violation(!std::isfinite(s.sway.spring_pitch) || !std::isfinite(s.sway.spring_yaw),
+					"camera spring not finite", c.tick);
+			violation(s.sway.shots > sw::kSwayShotCountCap, "shot counter above its cap", c.tick);
 			violation(s.mode >= std::max<uint8_t>(1, sd.mode_count), "mode out of range", c.tick);
 		}
 		violation(wout.shot_count > sw::kMaxShotsPerTick, "more than 8 shots", c.tick);

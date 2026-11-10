@@ -1848,11 +1848,30 @@ net::WeaponsWire sample_weapons_wire(Rng &r_rng) {
 		t.phase_start = sample_wire_time(r_rng);
 		t.phase_end = sample_wire_time(r_rng);
 		t.next_shot_time = sample_wire_time(r_rng);
-		t.spread_time = sample_wire_time(r_rng);
+		const uint32_t since = uint32_t(sample_wire_time(r_rng));
 		t.hold_start = sample_wire_time(r_rng);
-		t.spread = r_rng.uniform(0, 8);
+		t.sway.dispersion = r_rng.uniform(0, 8);
+		t.next_shot_carry = float(since % 34u) / 1000.0f;
+		t.sway.since_shot = float(since % 3000u) / 100.0f;
+		t.sway.since_air = since % 5u == 0 ? float(since % 50u) / 100.0f : sw::kSwayAirHold;
+		t.sway.last_seed = since % 7u == 0 ? sw::kNoSwaySeed : since;
+		t.sway.rng = since % 11u == 0 ? (since >> 1) : sw::GunSwayState{}.rng;
+		t.sway.shots = uint8_t(since % 3u);
+		t.sway.flags = uint8_t((since >> 4) % 4u);
 		if (r_rng.below(3) != 0) {
-			t.recoil = { r_rng.uniform(-3, 3), r_rng.uniform(-3, 3) };
+			const float a = r_rng.uniform(-3, 3);
+			const float b = r_rng.uniform(-3, 3);
+			if (i != w.active) {
+				continue;
+			}
+			t.sway.recoil_pitch = a * 0.01f;
+			t.sway.recoil_yaw = b * 0.01f;
+			t.sway.deviation_pitch = b * 0.004f;
+			t.sway.deviation_yaw = a * 0.004f;
+			t.sway.spring_pitch = a * 0.008f;
+			t.sway.spring_yaw = b * 0.008f;
+			t.sway.spring_pitch_rate = a * 0.1f;
+			t.sway.spring_yaw_rate = b * 0.1f;
 		}
 	}
 	return w;
@@ -2379,11 +2398,11 @@ TEST_SUITE("net-proto") {
 			t.phase_start = i == 0 ? -250000 : net::kWeaponsWireTimeZero;
 			t.phase_end = net::kWeaponsWireTimeZero;
 			t.next_shot_time = i == 0 ? 400000 : net::kWeaponsWireTimeZero;
-			t.spread_time = i == 0 ? -1000 : net::kWeaponsWireTimeZero;
 			t.hold_start = net::kWeaponsWireTimeZero;
-			t.spread = i == 0 ? 1.5f : 0.0f;
+			t.sway.dispersion = i == 0 ? 1.5f : 0.0f;
 			if (i == 0) {
-				t.recoil = { 0.4f, -0.1f };
+				t.sway.recoil_pitch = -0.007f;
+				t.sway.recoil_yaw = -0.002f;
 			}
 		}
 		kit.sprint_recover_until = net::kWeaponsWireTimeZero;
@@ -2486,11 +2505,11 @@ TEST_SUITE("net-proto") {
 
 		MESSAGE("64 players: Snapshot ", once.size(), " B with ", keep, " others, fnv1a ", fnv1a(once), "; SnapshotOthers ", tail.size(), " B with ",
 				rest.others.size(), " others, fnv1a ", fnv1a(tail));
-		CHECK(once.size() == 1183);
-		CHECK(keep == 41);
-		CHECK(fnv1a(once) == 0xab105d629eedea3bull);
-		CHECK(tail.size() == 503);
-		CHECK(fnv1a(tail) == 0x3b763f9c38937cabull);
+		CHECK(once.size() == 1179);
+		CHECK(keep == 38);
+		CHECK(fnv1a(once) == 0x5109a195f6b5ea37ull);
+		CHECK(tail.size() == 571);
+		CHECK(fnv1a(tail) == 0x5f546c8592275ee0ull);
 	}
 
 	TEST_CASE("proto v2: set_other_weapon masks to the wire widths; others' weapon fields round trip") {
@@ -3025,11 +3044,11 @@ TEST_SUITE("net-proto") {
 		st.tick = 100000;
 		st.slots[0].def = 1;
 		st.slots[0].phase = sw::WeaponPhase::Ready;
-		st.slots[0].spread_time = sw::tick_start(st.tick) - 40 * sw::kTimeUnitsPerSecond;
+		st.slots[0].hold_start = sw::tick_start(st.tick) - 40 * sw::kTimeUnitsPerSecond;
 		st.slots[0].next_shot_time = sw::tick_start(st.tick) + 5;
 		st.slots[3].mode_counter = 3;
 		const net::WeaponsWire v = net::weapons_wire_view(st, st.tick);
-		CHECK(v.timers[0].spread_time == -net::kWeaponsWireMaxOffset);
+		CHECK(v.timers[0].hold_start == -net::kWeaponsWireMaxOffset);
 		CHECK(v.timers[0].next_shot_time == 5);
 		CHECK(v.timers[0].phase_start == net::kWeaponsWireTimeZero);
 		CHECK(v.slots[3].mode_counter == 3);
@@ -3037,7 +3056,7 @@ TEST_SUITE("net-proto") {
 		REQUIRE(back.ok());
 		CHECK(back->slots[0].next_shot_time == st.slots[0].next_shot_time);
 		CHECK(back->slots[0].phase_start == 0);
-		CHECK(back->slots[0].spread_time == sw::tick_start(st.tick) - sw::SimTime(net::kWeaponsWireMaxOffset));
+		CHECK(back->slots[0].hold_start == sw::tick_start(st.tick) - sw::SimTime(net::kWeaponsWireMaxOffset));
 		CHECK(back->slots[3].mode_counter == 3);
 		CHECK_FALSE(net::weapons_from_wire(v, st.tick, 0, 1).ok());
 		net::WeaponsWire bad = v;
@@ -3067,9 +3086,15 @@ TEST_SUITE("net-proto") {
 			w.write_signed(p_offset, 32);
 			w.write_bool(true);
 			w.write_bool(true);
+			w.write_f32(0.0f);
 			w.write_f32(p_spread);
 			w.write_bool(true);
+			w.write_f32(0.0f);
 			w.write_bool(true);
+			w.write_bool(true);
+			w.write_bits(0, 2);
+			w.write_bits(0, 2);
+			w.write_bits(0, 2);
 			w.write_bool(true);
 			for (int i = 1; i < 8; ++i) {
 				w.write_bool(false);
@@ -3092,7 +3117,7 @@ TEST_SUITE("net-proto") {
 
 		net::Snapshot s = sample_snapshot(rng, 0);
 		net::WeaponsWire nan = sample_weapons_wire(rng);
-		nan.timers[0].spread = std::numeric_limits<float>::quiet_NaN();
+		nan.timers[0].sway.dispersion = std::numeric_limits<float>::quiet_NaN();
 		s.own_weapons = nan;
 		CHECK_FALSE(net::decode_snapshot(net::encode_snapshot(s)));
 	}
@@ -4678,7 +4703,7 @@ TEST_SUITE("net-proto") {
 			{ "Bye", 1, 0xaf63cb4c8601cfa9ull, 0 },
 			{ "Debug", 30, 0x3f09a8f270a73a7dull, 0 },
 			{ "DebugReport", 492, 0x74b3a36917721e73ull, 0 },
-			{ "Snapshot (v2 own weapons)", 544, 0x971614bd4f8a4005ull, 0 },
+			{ "Snapshot (v2 own weapons)", 631, 0xce3e0f9c92bc4978ull, 0 },
 			{ "SnapshotOthers", 121, 0x49f12d8715464b47ull, 0 },
 			{ "ShotEvents", 190, 0x1ee136123af4ddfaull, 0 },
 			{ "CombatEvents", 124, 0x7f963139bc7ca784ull, 0 },
@@ -4820,7 +4845,7 @@ TEST_SUITE("net-proto") {
 			{ "PlayerList (full drops removed)", 27, 0x47ea6ae9e75df6d4ull, 1 },
 			{ "CommandPacket (clamped, chain cut at a gap)", 57, 0x54a8e4154ecc6c70ull, 0 },
 			{ "CommandPacket (no commands)", 0, 0xcbf29ce484222325ull, 0 },
-			{ "Snapshot (others over the datagram)", 1189, 0x87404d088fc01e0aull, 25 },
+			{ "Snapshot (others over the datagram)", 1190, 0x86b330e1663a60d7ull, 27 },
 			{ "SnapshotOthers (others over the datagram)", 1178, 0x82aafe2e191acf87ull, 78 },
 			{ "ShotEvents (dropped, clamped, one datagram)", 1195, 0x3ed13adbc383dac9ull, 82 },
 			{ "CombatEvents (budget, clamps)", 5309, 0x83759aa16ad8fd11ull, 61 },

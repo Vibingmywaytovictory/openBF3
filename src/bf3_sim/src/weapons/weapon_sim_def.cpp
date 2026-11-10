@@ -210,11 +210,6 @@ ProjectileSimDef make_projectile(Checker &r_c, const WeaponDef &p_def, const Sur
 	return out;
 }
 
-float exp_factor(float p_rate_per_second) {
-
-	return float(std::exp(-double(p_rate_per_second) / double(kSimHz)));
-}
-
 void hash_dispersion(detail::Fnv64 &r_h, const Dispersion &p_d) {
 	r_h.add(p_d.min_angle);
 	r_h.add(p_d.max_angle);
@@ -277,6 +272,8 @@ template <class G> void def_groups(const WeaponSimDef &p_d, G &&r_group) {
 			r_h.add(m.logic);
 			r_h.add(m.interval);
 			r_h.add(m.burst_interval);
+			r_h.add(m.interval_seconds);
+			r_h.add(m.burst_interval_seconds);
 			r_h.add(m.bullets_per_burst);
 		}
 		r_h.add(p_d.mode_count);
@@ -355,13 +352,16 @@ template <class G> void def_groups(const WeaponSimDef &p_d, G &&r_group) {
 		r_h.add(p_d.first_shot_recoil_multiplier);
 		r_h.add(p_d.shooting_recoil_decrease_scale);
 	});
-	r_group("recovery", [&](detail::Fnv64 &r_h) {
-		for (size_t s = 0; s < 3; ++s) {
-			for (size_t z = 0; z < 2; ++z) {
-				r_h.add(p_d.recovery_factor_idle[s][z]);
-				r_h.add(p_d.recovery_factor_firing[s][z]);
-			}
+	r_group("deviation scales", [&](detail::Fnv64 &r_h) {
+		for (size_t z = 0; z < 2; ++z) {
+			r_h.add(p_d.deviation_scale[z]);
+			r_h.add(p_d.gameplay_deviation_scale[z]);
 		}
+	});
+	r_group("camera recoil", [&](detail::Fnv64 &r_h) {
+		r_h.add(p_d.camera_spring_constant);
+		r_h.add(p_d.camera_spring_damping);
+		r_h.add(p_d.camera_spring_min_threshold_angle);
 	});
 	r_group("pellet_cone", [&](detail::Fnv64 &r_h) {
 		for (const Dispersion &d : p_d.pellet_cone) {
@@ -423,10 +423,6 @@ void hash_def(detail::Fnv64 &r_h, const WeaponSimDef &p_d) {
 }
 
 void hash_mechanics(detail::Fnv64 &r_h, const Mechanics &p_m) {
-	r_h.add(p_m.disc);
-	r_h.add(p_m.recovery);
-	r_h.add(p_m.first_shot_rearm);
-	r_h.add(p_m.min_spread_rise);
 	r_h.add(p_m.falloff);
 	r_h.add(p_m.falloff_basis);
 	r_h.add(p_m.blast_falloff);
@@ -471,6 +467,7 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 			c.fail("RateOfFire", "must be > 0");
 		}
 		m.interval = rpm_to_interval(data_decimal(rof));
+		m.interval_seconds = rof > 0 ? 60.0f / rof : 0.0f;
 		if (m.interval < kMinInterval) {
 			c.fail("RateOfFire", "= " + std::to_string(rof) + " gives an interval below tick / " + std::to_string(kMaxShotsPerTick));
 		}
@@ -480,6 +477,7 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 				c.fail("RateOfFireForBurst", "must be > 0 for a burst mode");
 			}
 			m.burst_interval = rpm_to_interval(data_decimal(burst));
+			m.burst_interval_seconds = burst > 0 ? 60.0f / burst : 0.0f;
 			if (m.burst_interval < kMinInterval) {
 				c.fail("RateOfFireForBurst", "= " + std::to_string(burst) + " gives an interval below tick / " + std::to_string(kMaxShotsPerTick));
 			}
@@ -489,6 +487,7 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 			m.bullets_per_burst = std::clamp(f.bullets_per_burst, 1, kMaxBulletsPerBurst);
 		} else {
 			m.burst_interval = m.interval;
+			m.burst_interval_seconds = m.interval_seconds;
 			m.bullets_per_burst = 1;
 		}
 	}
@@ -605,13 +604,16 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 	}
 	d.first_shot_recoil_multiplier = c.factor(p_def.sway.first_shot_recoil_multiplier, "FirstShotRecoilMultiplier");
 	d.shooting_recoil_decrease_scale = c.factor(p_def.sway.shooting_recoil_decrease_scale, "ShootingRecoilDecreaseScale");
-	for (size_t s = 0; s < 3; ++s) {
-		for (size_t z = 0; z < 2; ++z) {
-			const float rate = d.sway[s][z].recoil.decrease_factor;
-			d.recovery_factor_idle[s][z] = c.ok() ? exp_factor(rate) : 1.0f;
-			d.recovery_factor_firing[s][z] = c.ok() ? exp_factor(rate * d.shooting_recoil_decrease_scale) : 1.0f;
-		}
+	for (size_t z = 0; z < 2; ++z) {
+		d.deviation_scale[z] =
+				c.factor(p_def.sway.deviation_scale[z], std::string("DeviationScaleFactor") + kZoomName[z]);
+		d.gameplay_deviation_scale[z] = c.factor(
+				p_def.sway.gameplay_deviation_scale[z], std::string("GameplayDeviationScaleFactor") + kZoomName[z]);
 	}
+	d.camera_spring_constant = c.factor(p_def.sway.camera_spring_constant, "CameraRecoilData.SpringConstant");
+	d.camera_spring_damping = c.range(p_def.sway.camera_spring_damping, 0.0f, 1.0f, "CameraRecoilData.SpringDamping");
+	d.camera_spring_min_threshold_angle =
+			c.angle(p_def.sway.camera_spring_min_threshold_angle, "CameraRecoilData.SpringMinThresholdAngle");
 	for (size_t s = 0; s < 3; ++s) {
 		d.pellet_cone[s] = f.weapon_dispersion[s];
 		c.dispersion(d.pellet_cone[s], std::string("SoldierWeaponDispersion ") + kStanceName[s]);

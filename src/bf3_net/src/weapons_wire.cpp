@@ -2,6 +2,8 @@
 
 #include "weapons_wire_layout.h"
 
+#include "bf3/sim/weapons/weapon_rng.h"
+
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -50,10 +52,9 @@ WeaponTimersWire timers_of(const sw::WeaponSlotState &p_s, uint8_t p_slot, sw::S
 	t.phase_start = time_offset(p_s.phase_start, p_base);
 	t.phase_end = time_offset(p_s.phase_end, p_base);
 	t.next_shot_time = time_offset(p_s.next_shot_time, p_base);
-	t.spread_time = time_offset(p_s.spread_time, p_base);
 	t.hold_start = time_offset(p_s.hold_start, p_base);
-	t.spread = p_s.spread;
-	t.recoil = p_s.recoil;
+	t.next_shot_carry = p_s.next_shot_carry;
+	t.sway = p_s.sway;
 	return t;
 }
 
@@ -132,6 +133,84 @@ bool zigzag_varint(A &r_a, T &r_value) {
 	return fits;
 }
 
+constexpr uint8_t kSwayDrawsRaw = 3;
+
+uint32_t sway_rng_after(uint32_t p_seed, uint8_t p_code) {
+	if (p_code == 0) {
+		return sw::GunSwayState{}.rng;
+	}
+	uint32_t r = sw::sway_rng_seeded(p_seed);
+	for (uint8_t i = 0; i < 2u * p_code; ++i) {
+		r = sw::sway_rng_next(r);
+	}
+	return r;
+}
+
+uint8_t sway_draws(uint32_t p_rng, uint32_t p_seed) {
+	for (uint8_t code = 0; code < kSwayDrawsRaw; ++code) {
+		if ((code == 0) == (p_seed == sw::kNoSwaySeed) && sway_rng_after(p_seed, code) == p_rng) {
+			return code;
+		}
+	}
+	return kSwayDrawsRaw;
+}
+
+template <class A, MaybeConst<sw::GunSwayState> S> bool wire_sway(A &r_a, S &r_s) {
+	r_a.f32(r_s.dispersion);
+	bool rest = positive_zero(r_s.deviation_pitch) && positive_zero(r_s.deviation_yaw) &&
+			positive_zero(r_s.recoil_pitch) && positive_zero(r_s.recoil_yaw) && positive_zero(r_s.spring_pitch) &&
+			positive_zero(r_s.spring_yaw) && positive_zero(r_s.spring_pitch_rate) && positive_zero(r_s.spring_yaw_rate);
+	r_a.bits(rest, 1);
+	if (!rest) {
+		r_a.f32(r_s.deviation_pitch);
+		r_a.f32(r_s.deviation_yaw);
+		r_a.f32(r_s.recoil_pitch);
+		r_a.f32(r_s.recoil_yaw);
+		r_a.f32(r_s.spring_pitch);
+		r_a.f32(r_s.spring_yaw);
+		r_a.f32(r_s.spring_pitch_rate);
+		r_a.f32(r_s.spring_yaw_rate);
+	} else {
+		r_a.store(r_s.deviation_pitch, [] { return 0.0f; });
+		r_a.store(r_s.deviation_yaw, [] { return 0.0f; });
+		r_a.store(r_s.recoil_pitch, [] { return 0.0f; });
+		r_a.store(r_s.recoil_yaw, [] { return 0.0f; });
+		r_a.store(r_s.spring_pitch, [] { return 0.0f; });
+		r_a.store(r_s.spring_yaw, [] { return 0.0f; });
+		r_a.store(r_s.spring_pitch_rate, [] { return 0.0f; });
+		r_a.store(r_s.spring_yaw_rate, [] { return 0.0f; });
+	}
+	r_a.f32(r_s.since_shot);
+	bool held_air = r_s.since_air == sw::kSwayAirHold;
+	r_a.bits(held_air, 1);
+	if (held_air) {
+		r_a.store(r_s.since_air, [] { return sw::kSwayAirHold; });
+	} else {
+		r_a.f32(r_s.since_air);
+	}
+	bool unseeded = r_s.last_seed == sw::kNoSwaySeed;
+	r_a.bits(unseeded, 1);
+	if (unseeded) {
+		r_a.store(r_s.last_seed, [] { return sw::kNoSwaySeed; });
+	} else {
+		r_a.bits(r_s.last_seed, 32);
+	}
+	uint8_t draws = sway_draws(r_s.rng, r_s.last_seed);
+	r_a.bits(draws, 2);
+	if (draws == kSwayDrawsRaw) {
+		r_a.bits(r_s.rng, 32);
+	} else {
+		r_a.store(r_s.rng, [&] { return sway_rng_after(r_s.last_seed, draws); });
+	}
+	r_a.bits(r_s.shots, 2);
+	r_a.bits(r_s.flags, 2);
+	return std::isfinite(r_s.dispersion) && std::isfinite(r_s.deviation_pitch) && std::isfinite(r_s.deviation_yaw) &&
+			std::isfinite(r_s.recoil_pitch) && std::isfinite(r_s.recoil_yaw) && std::isfinite(r_s.spring_pitch) &&
+			std::isfinite(r_s.spring_yaw) && std::isfinite(r_s.spring_pitch_rate) &&
+			std::isfinite(r_s.spring_yaw_rate) && std::isfinite(r_s.since_shot) && std::isfinite(r_s.since_air) &&
+			r_s.shots <= sw::kSwayShotCountCap;
+}
+
 template <class A, MaybeConst<WeaponsWire> W>
 void serialize_weapons(A &r_a, W &r_wire, const WeaponsWireFaults &p_faults) {
 	r_a.bits(r_wire.next_shot_index, 32);
@@ -166,16 +245,10 @@ void serialize_weapons(A &r_a, W &r_wire, const WeaponsWireFaults &p_faults) {
 		ok = wire_offset(r_a, t.phase_start) && ok;
 		ok = wire_offset(r_a, t.phase_end) && ok;
 		ok = wire_offset(r_a, t.next_shot_time) && ok;
-		r_a.f32(t.spread);
-		ok = wire_offset(r_a, t.spread_time) && ok;
-		bool rest = positive_zero(t.recoil.pitch) && positive_zero(t.recoil.yaw);
-		r_a.bits(rest, 1);
-		if (!rest) {
-			r_a.f32(t.recoil.pitch);
-			r_a.f32(t.recoil.yaw);
-		}
+		r_a.f32(t.next_shot_carry);
+		ok = wire_sway(r_a, t.sway) && ok;
 		ok = wire_offset(r_a, t.hold_start) && ok;
-		r_a.check(p_faults.field, [&] { return ok && std::isfinite(t.spread) && std::isfinite(t.recoil.pitch) && std::isfinite(t.recoil.yaw); });
+		r_a.check(p_faults.field, [&] { return ok && std::isfinite(t.next_shot_carry); });
 	}
 }
 
@@ -252,7 +325,8 @@ core::Result<sw::SoldierWeaponsState> weapons_from_wire(const WeaponsWire &p_wir
 		if (uint8_t(t->phase) > uint8_t(sw::WeaponPhase::Releasing)) {
 			return core::make_error("weapons wire: slot " + std::to_string(i) + " phase out of range");
 		}
-		if (!std::isfinite(t->spread) || !std::isfinite(t->recoil.pitch) || !std::isfinite(t->recoil.yaw)) {
+		if (!std::isfinite(t->next_shot_carry) || !std::isfinite(t->sway.dispersion) ||
+				!std::isfinite(t->sway.recoil_pitch) || !std::isfinite(t->sway.recoil_yaw)) {
 			return core::make_error("weapons wire: slot " + std::to_string(i) + " non-finite spread or recoil");
 		}
 		s.def = o.def;
@@ -265,9 +339,8 @@ core::Result<sw::SoldierWeaponsState> weapons_from_wire(const WeaponsWire &p_wir
 		s.phase_start = time_from(t->phase_start, base);
 		s.phase_end = time_from(t->phase_end, base);
 		s.next_shot_time = time_from(t->next_shot_time, base);
-		s.spread = t->spread;
-		s.spread_time = time_from(t->spread_time, base);
-		s.recoil = t->recoil;
+		s.next_shot_carry = t->next_shot_carry;
+		s.sway = t->sway;
 		s.hold_start = time_from(t->hold_start, base);
 	}
 	return st;
