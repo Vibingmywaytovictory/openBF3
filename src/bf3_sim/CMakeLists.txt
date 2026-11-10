@@ -160,3 +160,10 @@ target_sources(bf3_sim PRIVATE
     include/bf3/sim/weapons/suppression.h
     src/weapons/suppression.cpp
 )
+
+target_sources(bf3_sim PRIVATE
+    include/bf3/sim/spotting.h
+    include/bf3/sim/commo.h
+    src/spotting.cpp
+    src/commo.cpp
+)

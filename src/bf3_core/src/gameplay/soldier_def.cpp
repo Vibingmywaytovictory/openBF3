@@ -228,13 +228,17 @@ const StatePoseSpeed *MovementStateDef::pose(SoldierPose p_pose) const {
 	return nullptr;
 }
 
-std::optional<double> MovementStateDef::scalar(std::string_view p_name) const {
-	for (const auto &[name, value] : scalars) {
+std::optional<double> scalar_field(std::span<const std::pair<std::string, double>> p_scalars, std::string_view p_name) {
+	for (const auto &[name, value] : p_scalars) {
 		if (name == p_name) {
 			return value;
 		}
 	}
 	return std::nullopt;
+}
+
+std::optional<double> MovementStateDef::scalar(std::string_view p_name) const {
+	return scalar_field(scalars, p_name);
 }
 
 const PoseDef *SoldierDef::pose(SoldierPose p_pose) const {

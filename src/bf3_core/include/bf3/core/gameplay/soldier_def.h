@@ -7,6 +7,7 @@
 
 #include <array>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -40,6 +41,8 @@ struct PoseDef {
 
 	std::array<std::optional<float>, kSoldierPoseCount> transition_to{};
 };
+
+std::optional<double> scalar_field(std::span<const std::pair<std::string, double>> p_scalars, std::string_view p_name);
 
 struct StatePoseSpeed {
 	SoldierPose pose = SoldierPose::Stand;
