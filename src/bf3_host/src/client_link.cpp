@@ -217,6 +217,14 @@ void ClientLink::queue_squad_request(const net::SquadRequest &p_request) {
 	squad_out_.push_back(p_request);
 }
 
+void ClientLink::queue_commo(std::vector<uint8_t> p_bytes) {
+	std::lock_guard lock(requests_mutex_);
+	if (commo_out_.size() >= 16) {
+		commo_out_.pop_front();
+	}
+	commo_out_.push_back(std::move(p_bytes));
+}
+
 void ClientLink::queue_suicide_request() {
 	std::lock_guard lock(requests_mutex_);
 	suicide_out_ = 1;
@@ -281,6 +289,14 @@ void ClientLink::send_requests(uint64_t p_now) {
 	}
 	for (const net::SquadRequest &q : squads) {
 		submit(net::kChannelReliable, net::encode_squad_request(q), p_now);
+	}
+	std::deque<std::vector<uint8_t>> commo;
+	{
+		std::lock_guard lock(requests_mutex_);
+		commo.swap(commo_out_);
+	}
+	for (const std::vector<uint8_t> &c : commo) {
+		submit(net::kChannelReliable, c, p_now);
 	}
 	uint32_t suicides = 0;
 	{

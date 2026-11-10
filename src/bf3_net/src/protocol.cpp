@@ -1899,6 +1899,56 @@ template <class A, MaybeConst<Deployables> M> void serialize(A &r_a, M &r_m) {
 	}
 }
 
+template <class A, MaybeConst<SpotRequest> M> void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.type, 2);
+	uint64_t count = r_m.targets.size();
+	r_a.bits(count, 4);
+	r_a.check("spot target count out of range", [&] { return count >= 1 && count <= sim::spotting::kMaxSpotTargets; });
+	const size_t n = r_a.resize(r_m.targets, size_t(count));
+	for (size_t i = 0; i < n && r_a.ok(); ++i) {
+		r_a.bits(r_m.targets[i], kWireSlotBits);
+		r_a.check("spot target out of range", [&] { return r_m.targets[i] < kMaxSlots; });
+	}
+}
+
+template <class A, MaybeConst<OrderRequest> M> void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.order, 5);
+	r_a.bits(r_m.target, 8);
+	r_a.check("unknown order type", [&] { return uint8_t(r_m.order) < uint8_t(sim::commo::OrderType::Count); });
+	r_a.check("order target out of range", [&] { return r_m.target < kMaxSlots || r_m.target == kNoOrderTarget; });
+}
+
+template <class A, MaybeConst<SpotRow> R> void serialize(A &r_a, R &r_r) {
+	r_a.bits(r_r.slot, kWireSlotBits);
+	r_a.bits(r_r.state, 3);
+	r_a.bits(r_r.spotter, 8);
+	r_a.bits(r_r.low_ammo, 1);
+	r_a.bits(r_r.low_health, 1);
+	r_a.check("spot row out of range", [&] {
+		return uint8_t(r_r.state) < sim::spotting::kSpotStateCount &&
+				(r_r.spotter < kMaxSlots || r_r.spotter == sim::spotting::kNoSpotter);
+	});
+}
+
+template <class A, MaybeConst<SpotStates> M> void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.server_tick, 32);
+	r_a.bits(r_m.full, 1);
+	uint64_t rows = r_m.rows.size();
+	r_a.varint(rows);
+	r_a.check("spot row count out of range", [&] { return rows <= kMaxSlots && r_a.fits(rows * 20u); });
+	const size_t n = r_a.resize(r_m.rows, size_t(rows));
+	for (size_t i = 0; i < n && r_a.ok(); ++i) {
+		serialize(r_a, r_m.rows[i]);
+		r_a.check("spot rows not ascending", [&] { return i == 0 || r_m.rows[i].slot > r_m.rows[i - 1].slot; });
+	}
+}
+
+template <class A, MaybeConst<OrderNotice> M> void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.order, 5);
+	r_a.bits(r_m.issuer, kWireSlotBits);
+	r_a.check("unknown order type", [&] { return uint8_t(r_m.order) < uint8_t(sim::commo::OrderType::Count); });
+}
+
 struct Framing {
 	MessageType type;
 	const char *what;
@@ -1972,6 +2022,10 @@ std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram) {
 		case MessageType::SquadRequest:
 		case MessageType::SquadOrder:
 		case MessageType::Deployables:
+		case MessageType::SpotRequest:
+		case MessageType::OrderRequest:
+		case MessageType::SpotStates:
+		case MessageType::OrderNotice:
 			return MessageType(p_datagram[0]);
 	}
 	return std::nullopt;
@@ -2569,4 +2623,35 @@ std::string_view player_name(const PlayerRow &p_row) {
 	return std::string_view(p_row.name.data(), std::min<size_t>(p_row.name_bytes, kMaxPlayerNameBytes));
 }
 
+std::vector<uint8_t> encode_spot_request(const SpotRequest &p_message) {
+	return encode_as(MessageType::SpotRequest, kMaxReliableBytes, p_message);
+}
+
+core::Result<SpotRequest> decode_spot_request(std::span<const uint8_t> p_datagram) {
+	return decode_as<SpotRequest>(p_datagram, { MessageType::SpotRequest, "SpotRequest" });
+}
+
+std::vector<uint8_t> encode_order_request(const OrderRequest &p_message) {
+	return encode_as(MessageType::OrderRequest, kMaxReliableBytes, p_message);
+}
+
+core::Result<OrderRequest> decode_order_request(std::span<const uint8_t> p_datagram) {
+	return decode_as<OrderRequest>(p_datagram, { MessageType::OrderRequest, "OrderRequest" });
+}
+
+std::vector<uint8_t> encode_spot_states(const SpotStates &p_message) {
+	return encode_as(MessageType::SpotStates, kMaxReliableBytes, p_message);
+}
+
+core::Result<SpotStates> decode_spot_states(std::span<const uint8_t> p_datagram) {
+	return decode_as<SpotStates>(p_datagram, { MessageType::SpotStates, "SpotStates" });
+}
+
+std::vector<uint8_t> encode_order_notice(const OrderNotice &p_message) {
+	return encode_as(MessageType::OrderNotice, kMaxReliableBytes, p_message);
+}
+
+core::Result<OrderNotice> decode_order_notice(std::span<const uint8_t> p_datagram) {
+	return decode_as<OrderNotice>(p_datagram, { MessageType::OrderNotice, "OrderNotice" });
+}
 }

@@ -130,6 +130,17 @@ struct SlotStats {
 	sim::SoldierState state;
 };
 
+struct SpottingStats {
+	uint64_t spot_requests = 0;
+	uint64_t spots_applied = 0;
+	uint64_t unhandled_spot_types = 0;
+	uint64_t spot_targets_refused = 0;
+	uint64_t order_requests = 0;
+	uint64_t orders_stored = 0;
+	uint64_t orders_refused = 0;
+	uint64_t state_messages = 0;
+};
+
 struct GameServerStats {
 	sim::Tick tick = 0;
 	uint32_t clients = 0;
@@ -172,6 +183,7 @@ struct GameServerStats {
 	uint64_t held_readies = 0;
 	uint64_t stale_loading = 0;
 	std::vector<SlotTraffic> traffic;
+	SpottingStats spotting;
 };
 
 class GameServer {
@@ -209,6 +221,10 @@ public:
 	TdmRules *rules();
 
 	bool set_squad_order(uint8_t p_team, uint8_t p_squad, const SquadOrderState &p_order);
+
+	void request_spot(uint8_t p_slot, const net::SpotRequest &p_request);
+	void request_order(uint8_t p_slot, const net::OrderRequest &p_request);
+	net::SpotRow spot_row(uint8_t p_slot) const;
 
 	bool level_ended() const;
 	void restart_round();

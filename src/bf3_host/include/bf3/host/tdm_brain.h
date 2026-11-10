@@ -100,6 +100,7 @@ struct TdmBotStats {
 	std::atomic<uint64_t> medkit_throws{ 0 };
 	std::atomic<uint64_t> ammo_throws{ 0 };
 	std::atomic<uint64_t> medic_calls{ 0 };
+	std::atomic<uint64_t> medic_orders{ 0 };
 	std::atomic<uint64_t> calls_answered{ 0 };
 	std::atomic<uint64_t> assists_given_up{ 0 };
 	std::atomic<uint64_t> activity_ticks[kTdmBotActivityCount]{};

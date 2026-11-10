@@ -3083,3 +3083,119 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(m->rules().stats().squad_spawns == squad_before);
 	}
 }
+
+namespace {
+
+std::optional<net::SpotRow> last_spot_row(const tdm::ScriptedPeer &p_peer, int p_slot) {
+	std::optional<net::SpotRow> out;
+	for (const net::SpotStates &m : p_peer.spot_states) {
+		for (const net::SpotRow &r : m.rows) {
+			if (int(r.slot) == p_slot) {
+				out = r;
+			}
+		}
+	}
+	return out;
+}
+
+void send_spot(Match &r_match, const tdm::ScriptedPeer &p_from, uint8_t p_type, std::vector<uint8_t> p_targets) {
+	r_match.server.on_receive(
+			p_from.peer(), net::kChannelReliable, net::encode_spot_request({ p_type, std::move(p_targets) }));
+}
+
+void send_order(Match &r_match, const tdm::ScriptedPeer &p_from, sim::commo::OrderType p_type, uint8_t p_target) {
+	r_match.server.on_receive(p_from.peer(), net::kChannelReliable, net::encode_order_request({ p_type, p_target }));
+}
+
+}
+
+TEST_SUITE("host-spotting") {
+	TEST_CASE("spotting: a spot request reaches every client as the target's state and spotter, Active lasts the "
+			  "soldier's ActiveSpottedTime on the server tick, and an order reaches only its receiver") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		std::unique_ptr<Match> m = start_match(*level, false, 61u, 0, 1);
+		tdm::ScriptedPeer &alpha = m->join("alpha");
+		tdm::ScriptedPeer &bravo = m->join("bravo");
+		tdm::ScriptedPeer &charlie = m->join("charlie");
+		alpha.ready();
+		bravo.ready();
+		charlie.ready();
+		REQUIRE(wait_in_round(*m));
+		REQUIRE(m->until(
+				[&] {
+					return is_alive(m->state(alpha.slot())) && is_alive(m->state(bravo.slot())) &&
+							is_alive(m->state(charlie.slot()));
+				},
+				60));
+		const uint8_t a = uint8_t(alpha.slot());
+		const uint8_t b = uint8_t(bravo.slot());
+		const uint8_t c = uint8_t(charlie.slot());
+		REQUIRE(m->rules().team_of(a) == m->rules().team_of(c));
+		REQUIRE(m->rules().team_of(a) != m->rules().team_of(b));
+		for (const tdm::ScriptedPeer *p : { &alpha, &bravo, &charlie }) {
+			REQUIRE_FALSE(p->spot_states.empty());
+			CHECK(p->spot_states.front().full);
+			CHECK(last_spot_row(*p, b).value_or(net::SpotRow{}).state == sim::spotting::SpotState::None);
+		}
+
+		const sim::spotting::SpottingDef def = *sim::spotting::make_spotting_def(level->shared->gunplay->soldier);
+		CHECK(def.target.active_time == 7.0f);
+		send_spot(*m, alpha, uint8_t(sim::spotting::SpotType::Active), { b });
+		const sim::Tick applied = m->now();
+		m->tick();
+		for (const tdm::ScriptedPeer *p : { &alpha, &bravo, &charlie }) {
+			const std::optional<net::SpotRow> row = last_spot_row(*p, b);
+			REQUIRE(row.has_value());
+			CHECK(row->state == sim::spotting::SpotState::Active);
+			CHECK(row->spotter == a);
+		}
+		CHECK(m->server.stats().spotting.spots_applied == 1u);
+		send_spot(*m, charlie, uint8_t(sim::spotting::SpotType::Active), { b });
+		send_spot(*m, alpha, 3, { b });
+		CHECK(m->server.stats().spotting.unhandled_spot_types == 1u);
+		CHECK(m->server.spot_row(b).spotter == a);
+
+		const bool expired = m->until(
+				[&] {
+					return last_spot_row(charlie, b).value_or(net::SpotRow{}).state == sim::spotting::SpotState::None;
+				},
+				2 * 7 * sim::kSimHz);
+		REQUIRE(expired);
+		const sim::Tick lasted = m->now() - applied;
+		std::printf("spotting: Active from tick %u for %u ticks (%.3f s at %u Hz), %llu state messages\n", applied,
+				lasted, double(lasted) / double(sim::kSimHz), sim::kSimHz,
+				(unsigned long long)m->server.stats().spotting.state_messages);
+		CHECK(lasted >= 7u * sim::kSimHz);
+		CHECK(lasted <= 7u * sim::kSimHz + 3u);
+		CHECK(last_spot_row(alpha, b).value_or(net::SpotRow{}).state == sim::spotting::SpotState::None);
+		CHECK(last_spot_row(bravo, b).value_or(net::SpotRow{}).state == sim::spotting::SpotState::None);
+
+		send_spot(*m, alpha, uint8_t(sim::spotting::SpotType::Passive), { b });
+		m->tick();
+		CHECK(last_spot_row(bravo, b).value_or(net::SpotRow{}).state == sim::spotting::SpotState::Passive);
+
+		const size_t before_a = alpha.order_notices.size();
+		const size_t before_b = bravo.order_notices.size();
+		send_order(*m, alpha, sim::commo::OrderType::RequestHeal, c);
+		m->tick();
+		REQUIRE(charlie.order_notices.size() == 1u);
+		CHECK(charlie.order_notices.back().order == sim::commo::OrderType::RequestHeal);
+		CHECK(charlie.order_notices.back().issuer == a);
+		CHECK(alpha.order_notices.size() == before_a);
+		CHECK(bravo.order_notices.size() == before_b);
+		send_order(*m, alpha, sim::commo::OrderType::RequestHeal, c);
+		m->tick();
+		CHECK(charlie.order_notices.size() == 2u);
+		send_order(*m, alpha, sim::commo::OrderType::GoGoGo, net::kNoOrderTarget);
+		send_order(*m, alpha, sim::commo::OrderType::RequestAmmo, a);
+		m->tick();
+		CHECK(charlie.order_notices.size() == 2u);
+		CHECK(alpha.order_notices.size() == before_a);
+		CHECK(m->server.stats().spotting.orders_stored == 2u);
+		CHECK(m->server.stats().spotting.orders_refused == 1u);
+		CHECK(m->server.stats().bad_datagrams == 0u);
+	}
+}

@@ -76,6 +76,8 @@ void TdmShared::begin_tick(sim::Tick p_tick) {
 		was_alive.resize(n, 0);
 		fired_tick.resize(n, 0);
 		medic_call.resize(n, 0);
+		ordered_heal_until.resize(n, 0);
+		order_seen.resize(n, 0);
 		shot_cursor.resize(n, 0);
 	}
 	firing.assign(n, 0);
@@ -86,6 +88,19 @@ void TdmShared::begin_tick(sim::Tick p_tick) {
 			add_heat(states[s].position, kHeatDeath, p_tick);
 		}
 		was_alive[s] = alive[s];
+	}
+
+	for (size_t s = 0; s < n; ++s) {
+		const StoredOrder o = view.stored_order(uint8_t(s));
+		if (o.serial > order_seen[s]) {
+			order_seen[s] = o.serial;
+			if (o.type == sim::commo::OrderType::RequestHeal && o.issuer < n && !view.bot(o.issuer)) {
+				ordered_heal_until[o.issuer] = p_tick + sim::seconds_to_ticks(sim::commo::kOrderIconSeconds);
+			}
+		}
+		if (ordered_heal_until[s] >= p_tick && alive[s] != 0) {
+			medic_call[s] = p_tick;
+		}
 	}
 
 	if (host.gunplay != nullptr) {

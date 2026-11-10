@@ -53,6 +53,31 @@ bool ClientMatch::datagram(net::MessageType p_type, const net::NetSim::Datagram 
 			deployables(*d);
 			return true;
 		}
+		case net::MessageType::SpotStates: {
+			core::Result<net::SpotStates> s = net::decode_spot_states(p_d.bytes);
+			if (!s) {
+				++bad_tdm_datagrams_;
+				return true;
+			}
+			if (s->full) {
+				spots_ = kNoSpots;
+			}
+			for (const net::SpotRow &row : s->rows) {
+				spots_[row.slot] = row;
+			}
+			++spot_state_messages_;
+			return true;
+		}
+		case net::MessageType::OrderNotice: {
+			core::Result<net::OrderNotice> o = net::decode_order_notice(p_d.bytes);
+			if (!o) {
+				++bad_tdm_datagrams_;
+				return true;
+			}
+			own_order_.notice = *o;
+			++own_order_.serial;
+			return true;
+		}
 		case net::MessageType::LogicEvents:
 		case net::MessageType::FullSync:
 		case net::MessageType::LogicDelta:
@@ -176,6 +201,8 @@ void ClientMatch::publish(PresentationFrame &r_frame, bool p_have_own, uint32_t 
 	r_frame.squad_orders = orders_;
 	r_frame.deployable_count = uint16_t(std::min(deployables_.size(), r_frame.deployables.size()));
 	std::copy_n(deployables_.begin(), r_frame.deployable_count, r_frame.deployables.begin());
+	r_frame.spots = spots_;
+	r_frame.own_order = own_order_;
 }
 
 void ClientMatch::stats(ClientStats &r_stats) const {
@@ -183,6 +210,8 @@ void ClientMatch::stats(ClientStats &r_stats) const {
 	r_stats.player_lists = player_lists_;
 	r_stats.soldier_gears = soldier_gears_;
 	r_stats.revives = revives_;
+	r_stats.spot_state_messages = spot_state_messages_;
+	r_stats.orders_received = own_order_.serial;
 	r_stats.deployable_messages = deployable_messages_;
 	r_stats.bad_deployables = bad_deployables_;
 	r_stats.bad_tdm_datagrams = bad_tdm_datagrams_;

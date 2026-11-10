@@ -43,7 +43,8 @@ struct TdmShared {
 
 	sim::Tick scan_tick = UINT32_MAX;
 	std::vector<uint8_t> teams, alive, was_alive, firing;
-	std::vector<sim::Tick> fired_tick, medic_call;
+	std::vector<sim::Tick> fired_tick, medic_call, ordered_heal_until;
+	std::vector<uint64_t> order_seen;
 	std::vector<uint32_t> shot_cursor;
 	std::vector<tdm_bot::RecentShot> ring;
 	std::vector<sim::bots::HeardShot> heard;

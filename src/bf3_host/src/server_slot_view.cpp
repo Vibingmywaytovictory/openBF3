@@ -53,4 +53,19 @@ uint8_t SlotView::kit(uint8_t p_slot) const {
 	return k != kKeepKit ? k : (combat_.on() ? combat_.gunplay()->kit(p_slot) : uint8_t(0));
 }
 
+net::SpotRow SlotView::spot_row(uint8_t p_slot) const {
+	return spotting_ != nullptr && combat_.on() && p_slot < slots_.size() ? spotting_->row(p_slot)
+																		  : ServerView::spot_row(p_slot);
+}
+
+StoredOrder SlotView::stored_order(uint8_t p_slot) const {
+	return spotting_ != nullptr && combat_.on() && p_slot < slots_.size() ? spotting_->stored_order(p_slot)
+																		  : StoredOrder{};
+}
+
+void SlotView::post_order(uint8_t p_slot, const net::OrderRequest &p_request) const {
+	if (spotting_ != nullptr && p_slot < slots_.size()) {
+		spotting_->queue_order(p_slot, p_request);
+	}
+}
 }

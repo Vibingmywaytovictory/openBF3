@@ -8,6 +8,7 @@
 #include "server_match.h"
 #include "server_slots.h"
 #include "server_soldiers.h"
+#include "server_spotting.h"
 
 #include <cstdint>
 #include <span>
@@ -21,6 +22,7 @@ public:
 			slots_(p_slots), soldiers_(p_soldiers), match_(p_match), combat_(p_combat), tick_(p_tick) {}
 
 	void configure(const sim::CollisionWorld &p_world) { world_ = &p_world; }
+	void set_spotting(ServerSpotting *p_spotting) { spotting_ = p_spotting; }
 	bool ready() const { return world_ != nullptr; }
 
 	std::span<const sim::SoldierState> states() const override;
@@ -34,6 +36,10 @@ public:
 	net::MatchPhase phase() const override;
 	bool input_restricted() const override;
 	uint8_t kit(uint8_t p_slot) const override;
+	bool bot(uint8_t p_slot) const override { return p_slot < slots_.size() && slots_[p_slot].bot; }
+	net::SpotRow spot_row(uint8_t p_slot) const override;
+	StoredOrder stored_order(uint8_t p_slot) const override;
+	void post_order(uint8_t p_slot, const net::OrderRequest &p_request) const override;
 
 private:
 	const SlotTable &slots_;
@@ -42,6 +48,7 @@ private:
 	const Combat &combat_;
 	const sim::Tick &tick_;
 	const sim::CollisionWorld *world_ = nullptr;
+	ServerSpotting *spotting_ = nullptr;
 
 	mutable std::vector<sim::SoldierState> cache_;
 	mutable sim::Tick cache_tick_ = 0;

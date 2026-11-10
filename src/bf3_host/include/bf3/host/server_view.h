@@ -2,6 +2,7 @@
 
 #include "bf3/net/protocol.h"
 #include "bf3/sim/collision_world.h"
+#include "bf3/sim/commo.h"
 #include "bf3/sim/soldier_state.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
@@ -9,6 +10,12 @@
 #include <span>
 
 namespace bf3::host {
+
+struct StoredOrder {
+	uint64_t serial = 0;
+	sim::commo::OrderType type = sim::commo::OrderType::None;
+	uint8_t issuer = sim::spotting::kNoSpotter;
+};
 
 struct DownedSoldier {
 	uint8_t slot = 0;
@@ -35,6 +42,19 @@ public:
 	virtual uint8_t kit(uint8_t p_slot) const {
 		(void)p_slot;
 		return 0;
+	}
+	virtual bool bot(uint8_t p_slot) const {
+		(void)p_slot;
+		return false;
+	}
+	virtual net::SpotRow spot_row(uint8_t p_slot) const { return net::SpotRow{ p_slot }; }
+	virtual StoredOrder stored_order(uint8_t p_slot) const {
+		(void)p_slot;
+		return {};
+	}
+	virtual void post_order(uint8_t p_slot, const net::OrderRequest &p_request) const {
+		(void)p_slot;
+		(void)p_request;
 	}
 };
 

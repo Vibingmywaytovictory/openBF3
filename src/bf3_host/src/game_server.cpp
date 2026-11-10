@@ -18,9 +18,10 @@
 #include "server_seats.h"
 #include "server_slot_view.h"
 #include "server_slots.h"
-#include "server_soldiers.h"
 #include "server_snapshots.h"
+#include "server_soldiers.h"
 #include "server_spawner.h"
+#include "server_spotting.h"
 
 #include "bf3/net/loopback_ping.h"
 #include "bf3/net/protocol.h"
@@ -61,6 +62,8 @@ struct GameServer::Impl {
 	CombatLog combat_log{ spawner, match, combat };
 	SnapshotWriter snapshots{ slots, soldiers, commands, combat, combat_log, motor, outbox, match };
 	DeployableSync deployables;
+	ServerSpotting spotting;
+	std::vector<uint8_t> alive_mask;
 	DevCommands dev{ slots, soldiers, spawner, combat, match, motor, outbox,
 		[this](size_t p_slot) { reset_slot(p_slot); } };
 	ServerHandshake handshake;
@@ -91,6 +94,7 @@ struct GameServer::Impl {
 		deployables.reset(i);
 		dev.reset(i);
 		loads.reset(i);
+		spotting.reset(i);
 	}
 
 	void drop_client(size_t p_slot) {
@@ -182,6 +186,9 @@ struct GameServer::Impl {
 		}
 		for (const SquadOrderMessage &o : joined.orders) {
 			outbox.send(p_peer, net::kChannelReliable, o.bytes);
+		}
+		if (combat.on()) {
+			outbox.send(p_peer, net::kChannelReliable, net::encode_spot_states(spotting.full(tick)));
 		}
 	}
 
@@ -319,6 +326,7 @@ struct GameServer::Impl {
 		}
 		send_rules(n);
 		send_deployables(n);
+		send_spotting(n);
 		logic.send(n);
 		outbox.drain(r_out);
 		times.collision_queries = world->query_count() - queries_before;
@@ -429,6 +437,107 @@ struct GameServer::Impl {
 				outbox.send(s.peer, net::kChannelReliable, *bytes);
 			}
 		}
+	}
+
+	const std::vector<uint8_t> &alive() {
+		alive_mask.assign(slots.size(), 0);
+		for (size_t i = 0; i < slots.size(); ++i) {
+			alive_mask[i] = slots[i].used && soldiers[i].spawned && soldiers.alive(i) ? 1 : 0;
+		}
+		return alive_mask;
+	}
+
+	void step_spotting() {
+		const Gunplay *g = combat.gunplay();
+		if (g == nullptr) {
+			return;
+		}
+		spotting.step(sim::kTickSeconds, alive());
+		step_bot_spotters();
+		for (const auto &[slot, request] : spotting.take_queued_orders()) {
+			order(slot, request);
+		}
+		const float heal_below = spotting.def().spotter.order_heal_percent;
+		const float max_health = g->level().max_health;
+		for (size_t i = 0; i < slots.size(); ++i) {
+			spotting.set_low_health(uint8_t(i),
+					alive_mask[i] != 0 && max_health > 0.0f &&
+							100.0f * soldiers[i].state.health / max_health < heal_below);
+		}
+		if (spotting.low_ammo_due(sim::kTickSeconds)) {
+			const float need = spotting.def().spotter.order_need_ammo_percent;
+			for (size_t i = 0; i < slots.size(); ++i) {
+				spotting.set_low_ammo(uint8_t(i), alive_mask[i] != 0 && soldier_low_ammo(*g, uint8_t(i), need));
+			}
+		}
+	}
+
+	void step_bot_spotters() {
+		std::vector<SpotSubject> subjects;
+		std::vector<BotEye> eyes;
+		for (size_t i = 0; i < slots.size(); ++i) {
+			if (alive_mask[i] == 0) {
+				continue;
+			}
+			const sim::SoldierState &st = soldiers[i].state;
+			const uint8_t team = uint8_t(std::clamp(
+					match.on() ? int(match.rules()->team_of(uint8_t(i))) : slots[i].team, 0, int(net::kMaxTeam)));
+			const float eye = motor.eye_height(st);
+			SpotSubject s;
+			s.slot = uint8_t(i);
+			s.team = team;
+			s.half_height = 0.5f * (eye + 0.2f);
+			s.centre = { st.position[0], st.position[1] + s.half_height, st.position[2] };
+			subjects.push_back(s);
+			if (slots[i].bot) {
+				eyes.push_back(BotEye{ uint8_t(i), team, { st.position[0], st.position[1] + eye, st.position[2] },
+						sim::weapons::aim_direction(st.yaw, st.pitch, {}) });
+			}
+		}
+		spotting.step_bots(
+				double(tick) * double(sim::kTickSeconds), sim::kTickSeconds, eyes, subjects, world.get(), alive_mask);
+	}
+
+	void send_spotting(sim::Tick p_tick) {
+		if (std::optional<net::SpotStates> changes = spotting.take_changes(p_tick)) {
+			broadcast(net::encode_spot_states(*changes));
+		}
+	}
+
+	void spot(size_t p_slot, const net::SpotRequest &p_request) {
+		if (combat.on()) {
+			spotting.spot(uint8_t(p_slot), p_request, alive());
+		}
+	}
+
+	void order(size_t p_slot, const net::OrderRequest &p_request) {
+		if (!combat.on()) {
+			return;
+		}
+		if (const std::optional<OrderDelivery> d = spotting.order(uint8_t(p_slot), p_request, alive())) {
+			const Seat &target = slots[d->target];
+			if (target.used && target.remote) {
+				outbox.send(target.peer, net::kChannelReliable, net::encode_order_notice(d->notice));
+			}
+		}
+	}
+
+	void receive_spot_request(int p_slot, std::span<const uint8_t> p_datagram) {
+		core::Result<net::SpotRequest> r = net::decode_spot_request(p_datagram);
+		if (!r || p_slot < 0 || size_t(p_slot) >= slots.size()) {
+			++bad_datagrams;
+			return;
+		}
+		spot(size_t(p_slot), *r);
+	}
+
+	void receive_order_request(int p_slot, std::span<const uint8_t> p_datagram) {
+		core::Result<net::OrderRequest> r = net::decode_order_request(p_datagram);
+		if (!r || p_slot < 0 || size_t(p_slot) >= slots.size()) {
+			++bad_datagrams;
+			return;
+		}
+		order(size_t(p_slot), *r);
 	}
 
 	void receive_kit_select(int p_slot, std::span<const uint8_t> p_datagram) {
@@ -661,6 +770,12 @@ void GameServer::on_receive(uint32_t p_peer, uint8_t p_channel, std::span<const 
 		case net::MessageType::SquadRequest:
 			m.receive_squad_request(at, p_datagram);
 			return;
+		case net::MessageType::SpotRequest:
+			m.receive_spot_request(at, p_datagram);
+			return;
+		case net::MessageType::OrderRequest:
+			m.receive_order_request(at, p_datagram);
+			return;
 		default:
 			++m.bad_datagrams;
 			return;
@@ -698,6 +813,7 @@ GameServerStats GameServer::stats() const {
 		g.rules = rules->stats();
 	}
 	g.rules_step_failures = m.match.step_failures();
+	g.spotting = m.spotting.stats();
 	g.step_precondition_failures = m.step_precondition_failures;
 	g.last_step_ms = m.last_step_ms;
 	m.snapshots.stats(g);
@@ -776,6 +892,13 @@ core::Status GameServer::Impl::init_gameplay() {
 		return core::make_error("GameServer: " + std::to_string(g.target_bots) + " target bots for " + std::to_string(slots.size()) + " slots");
 	}
 	BF3_TRY(combat.create(*config.level, g, config.seed, *world));
+	core::Result<sim::spotting::SpottingDef> spotting_def =
+			sim::spotting::make_spotting_def(config.level->gunplay->soldier);
+	if (!spotting_def) {
+		return core::error_at("GameServer", spotting_def.error());
+	}
+	spotting.configure(slots.size(), *spotting_def);
+	view.set_spotting(&spotting);
 	std::vector<FlyBy> fly_by;
 	for (const core::gameplay::WeaponDef &d : config.level->gunplay->defs) {
 		fly_by.push_back({ d.projectile.fly_by_radius, float(core::gameplay::max_range(d)) });
@@ -806,6 +929,7 @@ void GameServer::Impl::step_rules(sim::Tick p_tick) {
 		soldiers.take_rules(combat.tick_states(), slots);
 	}
 
+	step_spotting();
 	spawner.place_queued(p_tick);
 	const std::vector<RulesOrder> orders = match.take_orders();
 	if (!orders.empty()) {
@@ -815,6 +939,26 @@ void GameServer::Impl::step_rules(sim::Tick p_tick) {
 
 core::Status GameServer::place_soldier(uint32_t p_slot, const sim::Vec3 &p_position, uint16_t p_yaw, sim::Pose p_pose) {
 	return impl_->spawner.queue_place(p_slot, p_position, p_yaw, p_pose);
+}
+
+void GameServer::request_spot(uint8_t p_slot, const net::SpotRequest &p_request) {
+	if (p_slot < impl_->slots.size()) {
+		impl_->spot(p_slot, p_request);
+	}
+}
+
+void GameServer::request_order(uint8_t p_slot, const net::OrderRequest &p_request) {
+	if (p_slot < impl_->slots.size()) {
+		impl_->order(p_slot, p_request);
+	}
+}
+
+net::SpotRow GameServer::spot_row(uint8_t p_slot) const {
+	const Impl &m = *impl_;
+	if (p_slot >= m.slots.size() || !m.combat.on()) {
+		return net::SpotRow{ p_slot };
+	}
+	return m.spotting.row(p_slot);
 }
 
 const ServerView &GameServer::view() const {

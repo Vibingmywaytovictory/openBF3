@@ -296,6 +296,14 @@ void ClientSession::send_squad_request(const net::SquadRequest &p_request) {
 	impl_->loop.send_squad_request(p_request);
 }
 
+void ClientSession::send_spot_request(const net::SpotRequest &p_request) {
+	impl_->loop.send_commo(net::encode_spot_request(p_request));
+}
+
+void ClientSession::send_order_request(const net::OrderRequest &p_request) {
+	impl_->loop.send_commo(net::encode_order_request(p_request));
+}
+
 void ClientSession::send_suicide_request() {
 	impl_->loop.send_suicide_request();
 }

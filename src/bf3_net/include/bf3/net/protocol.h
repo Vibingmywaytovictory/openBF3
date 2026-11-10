@@ -4,8 +4,10 @@
 #include "bf3/core/result.h"
 #include "bf3/net/weapons_wire.h"
 #include "bf3/sim/command.h"
+#include "bf3/sim/commo.h"
 #include "bf3/sim/logic/logic_runtime.h"
 #include "bf3/sim/soldier_state.h"
+#include "bf3/sim/spotting.h"
 #include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/damage.h"
 #include "bf3/sim/weapons/hit_target.h"
@@ -23,7 +25,7 @@
 
 namespace bf3::net {
 
-inline constexpr uint16_t kProtocolVersion = 8;
+inline constexpr uint16_t kProtocolVersion = 9;
 inline constexpr uint8_t kChannelUnreliable = 0;
 inline constexpr uint8_t kChannelReliable = 1;
 inline constexpr uint8_t kChannelBulk = 2;
@@ -84,6 +86,10 @@ enum class MessageType : uint8_t {
 	SquadRequest = 40,
 	SquadOrder = 41,
 	Deployables = 42,
+	SpotRequest = 43,
+	OrderRequest = 44,
+	SpotStates = 45,
+	OrderNotice = 46,
 };
 
 std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram);
@@ -797,4 +803,46 @@ struct Deployables {
 
 std::vector<uint8_t> encode_deployables(const Deployables &p_message);
 core::Result<Deployables> decode_deployables(std::span<const uint8_t> p_datagram);
+
+inline constexpr uint8_t kNoOrderTarget = 0xFF;
+
+struct SpotRequest {
+	uint8_t type = uint8_t(sim::spotting::SpotType::Active);
+	std::vector<uint8_t> targets;
+};
+
+struct OrderRequest {
+	sim::commo::OrderType order = sim::commo::OrderType::None;
+	uint8_t target = kNoOrderTarget;
+};
+
+struct SpotRow {
+	uint8_t slot = 0;
+	sim::spotting::SpotState state = sim::spotting::SpotState::None;
+	uint8_t spotter = sim::spotting::kNoSpotter;
+	bool low_ammo = false;
+	bool low_health = false;
+
+	bool operator==(const SpotRow &) const = default;
+};
+
+struct SpotStates {
+	sim::Tick server_tick = 0;
+	bool full = false;
+	std::vector<SpotRow> rows;
+};
+
+struct OrderNotice {
+	sim::commo::OrderType order = sim::commo::OrderType::None;
+	uint8_t issuer = 0;
+};
+
+std::vector<uint8_t> encode_spot_request(const SpotRequest &p_message);
+core::Result<SpotRequest> decode_spot_request(std::span<const uint8_t> p_datagram);
+std::vector<uint8_t> encode_order_request(const OrderRequest &p_message);
+core::Result<OrderRequest> decode_order_request(std::span<const uint8_t> p_datagram);
+std::vector<uint8_t> encode_spot_states(const SpotStates &p_message);
+core::Result<SpotStates> decode_spot_states(std::span<const uint8_t> p_datagram);
+std::vector<uint8_t> encode_order_notice(const OrderNotice &p_message);
+core::Result<OrderNotice> decode_order_notice(std::span<const uint8_t> p_datagram);
 }

@@ -2,11 +2,14 @@
 
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
+#include "bf3/sim/commo.h"
+#include "bf3/sim/spotting.h"
 #include "bf3/sim/weapons/gadgets.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"
 
 #include <algorithm>
 #include <limits>
+#include <optional>
 
 namespace bf3::host::tdm_bot {
 
@@ -96,6 +99,51 @@ bool supplied(const Gunplay &p_gunplay, uint8_t p_slot, uint8_t p_team, const si
 		}
 	}
 	return false;
+}
+
+namespace {
+
+std::optional<uint8_t> nearest_medic(const TdmShared &p_shared, uint8_t p_slot, float p_within) {
+	const TdmShared &sh = p_shared;
+	const std::span<const sim::SoldierState> states = sh.host.view->states();
+	if (sh.host.gunplay == nullptr || p_slot >= states.size() || p_slot >= sh.teams.size()) {
+		return std::nullopt;
+	}
+	const Gunplay &g = *sh.host.gunplay;
+	std::optional<uint8_t> best;
+	float best_d = p_within * p_within;
+	const size_t n = std::min(states.size(), sh.teams.size());
+	for (size_t s = 0; s < n; ++s) {
+		if (s == p_slot || sh.teams[s] == 0 || sh.teams[s] != sh.teams[p_slot] || sh.alive[s] == 0 ||
+				supply_slot(g, BotArms(&g, uint8_t(s)), SupplyNeed::Health) == kNoSupplySlot) {
+			continue;
+		}
+		const sim::Vec3 d = core::vec::sub(states[s].position, states[p_slot].position);
+		const float dd = core::vec::dot(d, d);
+		if (dd < best_d) {
+			best_d = dd;
+			best = uint8_t(s);
+		}
+	}
+	return best;
+}
+
+void ask_medic(TdmShared &r_shared, uint8_t p_slot) {
+	const TdmShared &p_shared = r_shared;
+	if (p_shared.host.gunplay == nullptr) {
+		return;
+	}
+	const core::Result<sim::spotting::SpottingDef> def =
+			sim::spotting::make_spotting_def(p_shared.host.gunplay->level().soldier);
+	if (!def || !def->spotter_present) {
+		return;
+	}
+	const std::optional<uint8_t> medic = nearest_medic(p_shared, p_slot, def->spotter.pickup_order_distance);
+	p_shared.host.view->post_order(
+			p_slot, net::OrderRequest{ sim::commo::OrderType::RequestHeal, medic.value_or(net::kNoOrderTarget) });
+	r_shared.count(&TdmBotStats::medic_orders, uint64_t(1));
+}
+
 }
 
 void BotSupport::new_life() {
@@ -290,6 +338,7 @@ void BotSupport::post_call(TdmShared &r_shared, sim::Tick p_tick, uint8_t p_slot
 		posted_ = true;
 		call_since_ = p_tick;
 		r_shared.count(&TdmBotStats::medic_calls, uint64_t(1));
+		ask_medic(r_shared, p_slot);
 	}
 	if (p_slot < r_shared.medic_call.size()) {
 		r_shared.medic_call[p_slot] = p_tick;

@@ -39,6 +39,9 @@ private:
 	std::array<net::SoldierGear, net::kMaxSlots> gear_ = kNoGear;
 	SquadOrders orders_{};
 	std::vector<net::DeployableWire> deployables_;
+	std::array<net::SpotRow, net::kMaxSlots> spots_ = kNoSpots;
+	ReceivedOrder own_order_;
+	uint64_t spot_state_messages_ = 0;
 	uint64_t deployable_messages_ = 0;
 	uint64_t bad_deployables_ = 0;
 	bool death_valid_ = false;

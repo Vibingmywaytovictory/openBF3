@@ -705,6 +705,10 @@ void ClientLoop::send_squad_request(const net::SquadRequest &p_request) {
 	link.queue_squad_request(p_request);
 }
 
+void ClientLoop::send_commo(std::vector<uint8_t> p_bytes) {
+	link.queue_commo(std::move(p_bytes));
+}
+
 void ClientLoop::send_suicide_request() {
 	link.queue_suicide_request();
 }

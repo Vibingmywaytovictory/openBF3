@@ -31,7 +31,7 @@ struct Rng {
 
 const net::ShotQuantization kFrame{ { -2048.0f, -512.0f, -2048.0f } };
 
-constexpr std::array<net::MessageType, 31> kTypes = {
+constexpr std::array<net::MessageType, 35> kTypes = {
 	net::MessageType::Snapshot,
 	net::MessageType::CommandPacket,
 	net::MessageType::SnapshotOthers,
@@ -63,6 +63,10 @@ constexpr std::array<net::MessageType, 31> kTypes = {
 	net::MessageType::SquadRequest,
 	net::MessageType::SquadOrder,
 	net::MessageType::Deployables,
+	net::MessageType::SpotRequest,
+	net::MessageType::OrderRequest,
+	net::MessageType::SpotStates,
+	net::MessageType::OrderNotice,
 };
 
 const char *type_name(net::MessageType p_type) {
@@ -129,6 +133,14 @@ const char *type_name(net::MessageType p_type) {
 			return "SquadOrder";
 		case net::MessageType::Deployables:
 			return "Deployables";
+		case net::MessageType::SpotRequest:
+			return "SpotRequest";
+		case net::MessageType::OrderRequest:
+			return "OrderRequest";
+		case net::MessageType::SpotStates:
+			return "SpotStates";
+		case net::MessageType::OrderNotice:
+			return "OrderNotice";
 	}
 	return "?";
 }
@@ -305,6 +317,22 @@ Verdict decode_as(net::MessageType p_type, std::span<const uint8_t> p_bytes) {
 			return check(
 					p_bytes, [](std::span<const uint8_t> p) { return net::decode_deployables(p); },
 					[](const net::Deployables &p_m, bool &) { return net::encode_deployables(p_m); });
+		case net::MessageType::SpotRequest:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_spot_request(p); },
+					[](const net::SpotRequest &p_m, bool &) { return net::encode_spot_request(p_m); });
+		case net::MessageType::OrderRequest:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_order_request(p); },
+					[](const net::OrderRequest &p_m, bool &) { return net::encode_order_request(p_m); });
+		case net::MessageType::SpotStates:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_spot_states(p); },
+					[](const net::SpotStates &p_m, bool &) { return net::encode_spot_states(p_m); });
+		case net::MessageType::OrderNotice:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_order_notice(p); },
+					[](const net::OrderNotice &p_m, bool &) { return net::encode_order_notice(p_m); });
 	}
 	return Verdict::Refused;
 }
@@ -681,6 +709,16 @@ std::vector<Sample> samples() {
 		dp.added = { { 4, 90, 3, 1, { 12.0f, 60.5f, -8.0f } } };
 		dp.removed = { 2 };
 		out.push_back({ net::MessageType::Deployables, "Deployables", net::encode_deployables(dp) });
+		out.push_back({ net::MessageType::SpotRequest, "SpotRequest", net::encode_spot_request({ 1, { 3, 9, 127 } }) });
+		out.push_back({ net::MessageType::OrderRequest, "OrderRequest",
+				net::encode_order_request({ bf3::sim::commo::OrderType::RequestHeal, 6 }) });
+		net::SpotStates ss;
+		ss.server_tick = tick;
+		ss.rows = { { 2, bf3::sim::spotting::SpotState::Active, 5, false },
+			{ 9, bf3::sim::spotting::SpotState::None, bf3::sim::spotting::kNoSpotter, true } };
+		out.push_back({ net::MessageType::SpotStates, "SpotStates", net::encode_spot_states(ss) });
+		out.push_back({ net::MessageType::OrderNotice, "OrderNotice",
+				net::encode_order_notice({ bf3::sim::commo::OrderType::RequestAmmo, 11 }) });
 	}
 	return out;
 }

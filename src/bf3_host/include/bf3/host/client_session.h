@@ -207,6 +207,8 @@ struct ClientStats {
 	OwnHitCounts own_hits;
 	uint64_t deployable_messages = 0;
 	uint64_t bad_deployables = 0;
+	uint64_t spot_state_messages = 0;
+	uint64_t orders_received = 0;
 };
 static_assert(std::is_trivially_copyable_v<ClientStats>);
 
@@ -236,6 +238,19 @@ inline constexpr std::array<net::SoldierGear, net::kMaxSlots> kNoGear = [] {
 }();
 
 using SquadOrders = std::array<std::array<net::SquadOrder, net::kMaxSquads>, 2>;
+
+inline constexpr std::array<net::SpotRow, net::kMaxSlots> kNoSpots = [] {
+	std::array<net::SpotRow, net::kMaxSlots> a{};
+	for (size_t i = 0; i < a.size(); ++i) {
+		a[i].slot = uint8_t(i);
+	}
+	return a;
+}();
+
+struct ReceivedOrder {
+	uint64_t serial = 0;
+	net::OrderNotice notice;
+};
 
 struct PresentationFrame {
 	uint64_t serial = 0;
@@ -296,6 +311,8 @@ struct PresentationFrame {
 	uint16_t deployable_count = 0;
 	std::array<net::DeployableWire, kMaxPresentedDeployables> deployables{};
 	float own_suppression = 0.0f;
+	std::array<net::SpotRow, net::kMaxSlots> spots = kNoSpots;
+	ReceivedOrder own_order;
 };
 static_assert(std::is_trivially_copyable_v<PresentationFrame>);
 
@@ -352,6 +369,8 @@ public:
 
 	void send_spawn_request(uint8_t p_kit, uint8_t p_spawn_choice = 0);
 	void send_squad_request(const net::SquadRequest &p_request);
+	void send_spot_request(const net::SpotRequest &p_request);
+	void send_order_request(const net::OrderRequest &p_request);
 	void send_suicide_request();
 	void send_loadout_request(const net::LoadoutRequest &p_request);
 

@@ -40,6 +40,10 @@ target_sources(bf3_host PRIVATE
     src/server_snapshots.h
     src/server_spawner.cpp
     src/server_spawner.h
+    src/server_spotting.cpp
+    src/server_spotting.h
+    src/spotter.cpp
+    include/bf3/host/spotter.h
     src/client_session.cpp
     src/client_loop.cpp
     src/client_loop.h
