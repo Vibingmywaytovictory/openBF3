@@ -36,6 +36,7 @@ struct WalkerStats {
 	uint64_t off_mesh_ticks = 0;
 	uint64_t sprint_ticks = 0;
 	uint64_t crouch_ticks = 0;
+	uint64_t vault_jumps = 0;
 	double metres = 0.0;
 
 	uint64_t starts_outside_main = 0;

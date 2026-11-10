@@ -72,6 +72,7 @@ NavParams nav_params_from_motor(const MotorParams &p_motor) {
 	if (finite_positive(stand.step_height)) {
 		p.agent_climb = stand.step_height;
 	}
+	p.vault_links = p_motor.vault.present;
 	return p;
 }
 
@@ -83,7 +84,8 @@ std::string nav_params_text(const NavParams &p_params) {
 			";min_region=" + std::to_string(p.min_region_cells) + ";merge_region=" + std::to_string(p.merge_region_cells) +
 			";detail_dist=" + bits_hex(p.detail_sample_distance) + ";detail_err=" + bits_hex(p.detail_sample_max_error) +
 			";partition=" + std::to_string(int(p.partition)) + ";drop=" + (p.drop_links ? "1" : "0") + ";drop_max=" + bits_hex(p.drop_max) +
-			";drop_reach=" + bits_hex(p.drop_reach) + ";drop_spacing=" + bits_hex(p.drop_sample_spacing) + ";margin=" + bits_hex(p.region_margin);
+			";drop_reach=" + bits_hex(p.drop_reach) + ";drop_spacing=" + bits_hex(p.drop_sample_spacing) + ";margin=" + bits_hex(p.region_margin) +
+			";vault=" + (p.vault_links ? "1" : "0");
 }
 
 std::string recast_build_id() {
@@ -175,7 +177,7 @@ int nav_recast_border_cells(const NavParams &p_params) {
 
 float nav_input_border(const NavParams &p_params) {
 	const float recast = float(nav_recast_border_cells(p_params)) * p_params.cell_size;
-	if (!p_params.drop_links) {
+	if (!p_params.drop_links && !p_params.vault_links) {
 		return recast;
 	}
 	return std::max(recast, p_params.drop_reach + p_params.agent_radius + p_params.cell_size);
@@ -690,6 +692,7 @@ core::Result<std::shared_ptr<const NavWorld>> NavWorldBuilder::finish(const NavP
 	p_stats.tiles_empty = 0;
 	p_stats.polys = 0;
 	p_stats.drop_links = 0;
+	p_stats.vault_links = 0;
 	p_stats.data_bytes = 0;
 	for (size_t i = 0; i < p_tiles.size(); ++i) {
 		const std::vector<uint8_t> &d = p_data[i];
@@ -716,7 +719,11 @@ core::Result<std::shared_ptr<const NavWorld>> NavWorldBuilder::finish(const NavP
 		running += uint32_t(tile->header->polyCount);
 		++p_stats.tiles;
 		p_stats.polys += size_t(tile->header->polyCount - tile->header->offMeshConCount);
-		p_stats.drop_links += size_t(tile->header->offMeshConCount);
+		for (int k = tile->header->offMeshBase; k < tile->header->polyCount; ++k) {
+			const bool vault = (tile->polys[k].flags & nav_flags::kVault) != 0;
+			p_stats.vault_links += vault ? 1u : 0u;
+			p_stats.drop_links += vault ? 0u : 1u;
+		}
 		p_stats.data_bytes += d.size();
 		for (int k = 0; k < 3; ++k) {
 			w.min[k] = any ? std::min(w.min[k], tile->header->bmin[k]) : tile->header->bmin[k];

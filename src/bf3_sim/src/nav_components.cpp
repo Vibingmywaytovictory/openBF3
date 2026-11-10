@@ -45,6 +45,7 @@ Graph poly_graph(const NavWorld::Impl &w, std::vector<uint32_t> *r_parent) {
 	std::vector<double> &area = g.area;
 	start.assign(n + 1, 0);
 	area.assign(n, 0.0);
+	std::vector<uint8_t> vault(n, 0);
 	for (int ti = 0; ti < mesh.getMaxTiles(); ++ti) {
 		const dtMeshTile *tile = mesh.getTile(ti);
 		if (tile == nullptr || tile->header == nullptr) {
@@ -58,6 +59,7 @@ Graph poly_graph(const NavWorld::Impl &w, std::vector<uint32_t> *r_parent) {
 				++count;
 			}
 			start[gi + 1] = count;
+			vault[gi] = (poly.flags & nav_flags::kVault) != 0 ? 1 : 0;
 			if (poly.getType() == DT_POLYTYPE_GROUND) {
 				area[gi] = poly_area(*tile, poly);
 			}
@@ -81,7 +83,8 @@ Graph poly_graph(const NavWorld::Impl &w, std::vector<uint32_t> *r_parent) {
 			const uint32_t gi = w.poly_base[size_t(ti)] + uint32_t(pi);
 			uint32_t at = start[gi];
 			for (unsigned int l = tile->polys[pi].firstLink; l != DT_NULL_LINK; l = tile->links[l].next) {
-				const uint32_t h = w.global(NavPolyRef(tile->links[l].ref));
+				uint32_t h = w.global(NavPolyRef(tile->links[l].ref));
+				h = h != UINT32_MAX && (vault[gi] != 0 || vault[h] != 0) ? UINT32_MAX : h;
 				edges[at++] = h == UINT32_MAX ? gi : h;
 				if (h != UINT32_MAX && r_parent != nullptr) {
 					const uint32_t a = find(*r_parent, gi), b = find(*r_parent, h);

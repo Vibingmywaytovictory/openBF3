@@ -49,6 +49,7 @@ core::Result<std::unique_ptr<NavQuery>> NavQuery::create(std::shared_ptr<const N
 	impl->filter.setAreaCost(kNavAreaWalk, 1.0f);
 	impl->filter.setAreaCost(kNavAreaCrouch, 1.5f);
 	impl->filter.setAreaCost(kNavAreaDrop, 1.0f);
+	impl->filter.setAreaCost(kNavAreaVault, 1.0f);
 	return std::unique_ptr<NavQuery>(new NavQuery(std::move(impl)));
 }
 
@@ -326,7 +327,7 @@ uint32_t NavCorridor::corners(NavQuery &p_query, NavCorner *r_corners, uint32_t 
 		c.poly = NavPolyRef(polys[i]);
 		nav_poly_area_flags(world, c.poly, &c.area, &c.flags);
 		c.end = (flags[i] & DT_STRAIGHTPATH_END) != 0;
-		if ((flags[i] & DT_STRAIGHTPATH_OFFMESH_CONNECTION) != 0) {
+		if ((flags[i] & DT_STRAIGHTPATH_OFFMESH_CONNECTION) != 0 && (c.flags & nav_flags::kVault) == 0) {
 			c.flags = uint16_t(c.flags | nav_flags::kDrop);
 		}
 	}
@@ -370,7 +371,7 @@ bool NavCorridor::crouch_within(NavQuery &p_query, const Vec3 &p_position, float
 
 bool NavCorridor::move_over_drop(NavQuery &p_query, const NavCorner &p_corner, Vec3 *r_end) {
 	Impl &m = *impl_;
-	if (m.empty || (p_corner.flags & nav_flags::kDrop) == 0) {
+	if (m.empty || (p_corner.flags & (nav_flags::kDrop | nav_flags::kVault)) == 0) {
 		return false;
 	}
 	NavQuery::Impl &q = p_query.impl();

@@ -17,7 +17,7 @@ inline constexpr uint32_t kMaxNavCorners = 8;
 
 struct NavQueryOptions {
 	uint32_t max_nodes = 4096;
-	uint16_t include_flags = nav_flags::kAll;
+	uint16_t include_flags = uint16_t(nav_flags::kAll & ~nav_flags::kVault);
 	uint16_t exclude_flags = 0;
 };
 

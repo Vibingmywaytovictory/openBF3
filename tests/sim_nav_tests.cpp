@@ -459,6 +459,77 @@ TEST_SUITE("sim-nav-unit") {
 		CHECK(rail_checked->stats().drop_links > 0);
 	}
 
+	TEST_CASE("sim.nav.unit: a 1 m wall across the floor gets vault links on the static world, crossed by a query that "
+			  "includes them; a 2 m wall gets none") {
+		for (const float h : { 1.0f, 2.0f }) {
+			INFO("wall " << h);
+			std::vector<StaticTriangle> t;
+			add_floor(t, 0, 0, 64, 64, 0.0f);
+			add_box(t, { 0, 0, 30 }, { 64, h, 30.2f });
+			core::Result<std::shared_ptr<const StaticWorldShapes>> shapes =
+					build_static_world(std::span<const StaticTriangle>(t));
+			REQUIRE(shapes.ok());
+			const auto plain = bake(t, tiles_range(0, 0, 0, 0));
+			CHECK(plain->stats().vault_links == 0);
+			NavBakeOptions o;
+			o.link_shapes = *shapes;
+			const auto w = bake(t, tiles_range(0, 0, 0, 0), o);
+			const NavComponents c = nav_components(*w);
+			const NavPointCheck near_side = at(*w, c, 20, 0, 20), far_side = at(*w, c, 20, 0, 40);
+			REQUIRE(near_side.poly != 0);
+			REQUIRE(far_side.poly != 0);
+			NavQueryOptions vaulting;
+			vaulting.include_flags = nav_flags::kAll;
+			core::Result<std::unique_ptr<NavQuery>> q = NavQuery::create(w, vaulting);
+			REQUIRE(q.ok());
+			NavQuery &query = **q;
+			CHECK(query.begin_path(near_side.poly, near_side.nearest, far_side.poly, far_side.nearest) ==
+					NavPathStatus::InProgress);
+			NavPathStatus st = NavPathStatus::InProgress;
+			for (int i = 0; i < 1000 && st == NavPathStatus::InProgress; ++i) {
+				st = query.continue_path(64, nullptr);
+			}
+			std::vector<NavPolyRef> polys;
+			const NavPathStatus done = query.finish_path(polys);
+			NavCorridor corridor;
+			corridor.reset(polys, near_side.nearest, far_side.nearest);
+			NavCorner corners[kMaxNavCorners];
+			const uint32_t n = corridor.corners(query, corners, kMaxNavCorners);
+			bool vault_corner = false;
+			uint32_t vault_at = 0;
+			for (uint32_t i = 0; i < n; ++i) {
+				vault_at = vault_corner ? vault_at : i;
+				vault_corner = vault_corner || (corners[i].flags & nav_flags::kVault) != 0;
+				CHECK((corners[i].flags & nav_flags::kDrop) == 0);
+			}
+			std::printf("sim.nav.unit: %.1f m wall: %zu vault links, %zu drop links\n", double(h),
+					w->stats().vault_links, w->stats().drop_links);
+			if (h < 1.5f) {
+				CHECK(w->stats().vault_links > 0);
+				CHECK(done == NavPathStatus::Done);
+				CHECK(vault_corner);
+				Vec3 end{};
+				CHECK(corridor.move_over_drop(query, corners[vault_at], &end));
+				CHECK(end[2] > 30.2f);
+			} else {
+				CHECK(w->stats().vault_links == 0);
+				CHECK(near_side.weak_component != far_side.weak_component);
+				CHECK(done == NavPathStatus::Partial);
+				CHECK_FALSE(vault_corner);
+			}
+			CHECK(near_side.component != far_side.component);
+			core::Result<std::unique_ptr<NavQuery>> q2 = NavQuery::create(w);
+			REQUIRE(q2.ok());
+			CHECK((*q2)->begin_path(near_side.poly, near_side.nearest, far_side.poly, far_side.nearest) ==
+					NavPathStatus::InProgress);
+			st = NavPathStatus::InProgress;
+			for (int i = 0; i < 1000 && st == NavPathStatus::InProgress; ++i) {
+				st = (*q2)->continue_path(64, nullptr);
+			}
+			CHECK((*q2)->finish_path(polys) == NavPathStatus::Partial);
+		}
+	}
+
 	TEST_CASE("sim.nav.unit: a 200 m slab filed under one tile walks in every tile it covers; the input equals the cooked world (no world_only)") {
 
 		std::vector<StaticTriangle> t;

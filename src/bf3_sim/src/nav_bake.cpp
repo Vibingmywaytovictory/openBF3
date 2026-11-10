@@ -5,6 +5,7 @@
 #include "bf3/core/thread_pool.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/sim/collision_world.h"
+#include "bf3/sim/vault.h"
 
 #include <DetourAlloc.h>
 #include <DetourNavMeshBuilder.h>
@@ -227,13 +228,16 @@ core::Status erode_with_passages(rcContext &r_context, rcCompactHeightfield &r_c
 	return core::Status::success();
 }
 
-void find_drop_links(const rcPolyMesh &p_mesh, const rcCompactHeightfield &p_chf, const std::vector<uint8_t> &p_areas, const NavParams &p_params,
-		const NavCells &p_cells, const CollisionWorld *p_world, NavTileBake &r_bake, std::vector<DropLink> &r_links) {
+struct EdgeSample {
+	float x = 0, y = 0, z = 0;
+	float nx = 0, nz = 0;
+};
+
+template <class Visit> void visit_edge_samples(const rcPolyMesh &p_mesh, float p_spacing, Visit &&p_visit) {
 	const int nvp = p_mesh.nvp;
 	const float cs = p_mesh.cs;
 	const float ch = p_mesh.ch;
 	const float *bmin = p_mesh.bmin;
-	const float climb = float(p_cells.walkable_climb) * ch;
 	for (int i = 0; i < p_mesh.npolys; ++i) {
 		const unsigned short *p = &p_mesh.polys[size_t(i) * 2 * size_t(nvp)];
 		int nv = 0;
@@ -269,72 +273,136 @@ void find_drop_links(const rcPolyMesh &p_mesh, const rcCompactHeightfield &p_chf
 				nx = -nx;
 				nz = -nz;
 			}
-			const int samples = std::max(1, int(len / p_params.drop_sample_spacing));
+			const int samples = std::max(1, int(len / p_spacing));
 			for (int k = 0; k < samples; ++k) {
-				if (int(r_links.size()) >= kMaxOffMeshPerTile) {
+				const float t = (float(k) + 0.5f) / float(samples);
+				if (!p_visit(EdgeSample{ ax + ex * t, ay + (by - ay) * t, az + ez * t, nx, nz })) {
 					return;
 				}
-				const float t = (float(k) + 0.5f) / float(samples);
-				const float sx = ax + ex * t, sy = ay + (by - ay) * t, sz = az + ez * t;
-
-				float ledge = -1.0f;
-				for (float d = 0.5f * cs; d <= p_params.drop_reach; d += cs) {
-					const Column c = ground_below(p_chf, p_areas, sx + nx * d, sz + nz * d, sy + climb);
-					if (!c.inside) {
-						break;
-					}
-					if (!c.found || sy - c.top > climb + 0.5f * ch) {
-						ledge = d;
-						break;
-					}
-				}
-				if (ledge < 0.0f) {
-					continue;
-				}
-
-				const float reach = ledge + p_params.agent_radius + cs;
-				if (reach > p_params.drop_reach) {
-					continue;
-				}
-				const float px = sx + nx * reach, pz = sz + nz * reach;
-				const Column land = ground_below(p_chf, p_areas, px, pz, sy + climb);
-				if (!land.inside || !land.found || !land.walkable) {
-					continue;
-				}
-				const float drop = sy - land.top;
-				if (drop <= climb + 0.5f * ch || drop > p_params.drop_max) {
-					continue;
-				}
-				++r_bake.link_candidates;
-				if (p_world != nullptr) {
-					const Vec3 feet{ sx, sy + kSweepLift, sz };
-					const Vec3 out{ nx * reach, 0.0f, nz * reach };
-					++r_bake.link_sweeps;
-					if (p_world->sweep_capsule(feet, p_params.agent_radius, p_params.agent_height, out, query_mask::kMovement)) {
-						++r_bake.links_rejected;
-						continue;
-					}
-					const Vec3 over{ px, sy + kSweepLift, pz };
-					const Vec3 down{ 0.0f, -drop, 0.0f };
-					++r_bake.link_sweeps;
-					if (p_world->sweep_capsule(over, p_params.agent_radius, p_params.agent_height, down, query_mask::kMovement)) {
-						++r_bake.links_rejected;
-						continue;
-					}
-				}
-				DropLink link;
-				link.start[0] = sx;
-				link.start[1] = sy;
-				link.start[2] = sz;
-				link.end[0] = px;
-				link.end[1] = land.top;
-				link.end[2] = pz;
-				r_links.push_back(link);
 			}
 		}
 	}
 }
 
+void find_drop_links(const rcPolyMesh &p_mesh, const rcCompactHeightfield &p_chf, const std::vector<uint8_t> &p_areas,
+		const NavParams &p_params, const NavCells &p_cells, const CollisionWorld *p_world, NavTileBake &r_bake,
+		std::vector<DropLink> &r_links) {
+	const float cs = p_mesh.cs;
+	const float ch = p_mesh.ch;
+	const float climb = float(p_cells.walkable_climb) * ch;
+	visit_edge_samples(p_mesh, p_params.drop_sample_spacing, [&](const EdgeSample &p_s) {
+		if (int(r_links.size()) >= kMaxOffMeshPerTile) {
+			return false;
+		}
+		const float sx = p_s.x, sy = p_s.y, sz = p_s.z, nx = p_s.nx, nz = p_s.nz;
+		float ledge = -1.0f;
+		for (float d = 0.5f * cs; d <= p_params.drop_reach; d += cs) {
+			const Column c = ground_below(p_chf, p_areas, sx + nx * d, sz + nz * d, sy + climb);
+			if (!c.inside) {
+				break;
+			}
+			if (!c.found || sy - c.top > climb + 0.5f * ch) {
+				ledge = d;
+				break;
+			}
+		}
+		if (ledge < 0.0f) {
+			return true;
+		}
+
+		const float reach = ledge + p_params.agent_radius + cs;
+		if (reach > p_params.drop_reach) {
+			return true;
+		}
+		const float px = sx + nx * reach, pz = sz + nz * reach;
+		const Column land = ground_below(p_chf, p_areas, px, pz, sy + climb);
+		if (!land.inside || !land.found || !land.walkable) {
+			return true;
+		}
+		const float drop = sy - land.top;
+		if (drop <= climb + 0.5f * ch || drop > p_params.drop_max) {
+			return true;
+		}
+		++r_bake.link_candidates;
+		if (p_world != nullptr) {
+			const Vec3 feet{ sx, sy + kSweepLift, sz };
+			const Vec3 out{ nx * reach, 0.0f, nz * reach };
+			++r_bake.link_sweeps;
+			if (p_world->sweep_capsule(
+						feet, p_params.agent_radius, p_params.agent_height, out, query_mask::kMovement)) {
+				++r_bake.links_rejected;
+				return true;
+			}
+			const Vec3 over{ px, sy + kSweepLift, pz };
+			const Vec3 down{ 0.0f, -drop, 0.0f };
+			++r_bake.link_sweeps;
+			if (p_world->sweep_capsule(
+						over, p_params.agent_radius, p_params.agent_height, down, query_mask::kMovement)) {
+				++r_bake.links_rejected;
+				return true;
+			}
+		}
+		DropLink link;
+		link.start[0] = sx;
+		link.start[1] = sy;
+		link.start[2] = sz;
+		link.end[0] = px;
+		link.end[1] = land.top;
+		link.end[2] = pz;
+		r_links.push_back(link);
+		return true;
+	});
+}
+
+void find_vault_links(const rcPolyMesh &p_mesh, const rcCompactHeightfield &p_chf, const std::vector<uint8_t> &p_areas,
+		const NavParams &p_params, const NavCells &p_cells, const CollisionWorld &p_world,
+		std::vector<DropLink> &r_links) {
+	const float cs = p_mesh.cs;
+	const float ch = p_mesh.ch;
+	const float climb = float(p_cells.walkable_climb) * ch;
+	const float reach = p_params.drop_reach + p_params.agent_radius;
+	const float scan = vault_rules::kProbeReach + 2.0f * cs;
+	visit_edge_samples(p_mesh, p_params.drop_sample_spacing, [&](const EdgeSample &p_s) {
+		if (int(r_links.size()) >= kMaxOffMeshPerTile) {
+			return false;
+		}
+		StaticHit floor;
+		if (!p_world.ground_below({ p_s.x, p_s.y + climb, p_s.z }, 2.0f * climb, query_mask::kMovement, &floor)) {
+			return true;
+		}
+		const Vec3 low{ p_s.x, floor.position[1] + vault_rules::kMiddleHeight + vault_rules::kLowOffset, p_s.z };
+		if (!p_world.ray_any(low, { p_s.nx * scan, 0.0f, p_s.nz * scan }, query_mask::kMovement)) {
+			return true;
+		}
+		const Vec3 facing{ p_s.nx, 0.0f, p_s.nz };
+		for (const float step : { 0.0f, cs }) {
+			const Vec3 feet{ p_s.x + p_s.nx * step, floor.position[1], p_s.z + p_s.nz * step };
+			const std::optional<VaultStart> vault = probe_vault(p_world, feet, facing, query_mask::kMovement);
+			if (!vault) {
+				continue;
+			}
+			const float land_at = step + vault->measure.distance + vault->measure.length + p_params.agent_radius + cs;
+			if (vault->kind == VaultKind::UpHigh || land_at > reach) {
+				break;
+			}
+			const float px = p_s.x + p_s.nx * land_at, pz = p_s.z + p_s.nz * land_at;
+			const Column land = ground_below(p_chf, p_areas, px, pz, p_s.y + climb);
+			if (!land.inside || !land.found || !land.walkable || p_s.y - land.top > p_params.drop_max) {
+				break;
+			}
+			DropLink link;
+			link.start[0] = p_s.x;
+			link.start[1] = p_s.y;
+			link.start[2] = p_s.z;
+			link.end[0] = px;
+			link.end[1] = land.top;
+			link.end[2] = pz;
+			r_links.push_back(link);
+			break;
+		}
+		return true;
+	});
+}
 }
 
 core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavParams &p_params, const CollisionWorld *p_links, rcContext &r_context) {
@@ -488,6 +556,10 @@ core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavPa
 		find_drop_links(*pmesh, *chf, areas_before, p_params, c, p_links, out, links);
 		out.seconds_links = seconds_since(link_start);
 	}
+	const size_t drops = links.size();
+	if (p_params.vault_links && p_links != nullptr) {
+		find_vault_links(*pmesh, *chf, areas_before, p_params, c, *p_links, links);
+	}
 	chf.reset();
 	std::vector<float> con_verts(links.size() * 6);
 	std::vector<float> con_rad(links.size(), std::max(p_params.agent_radius, 2.0f * cs));
@@ -495,6 +567,10 @@ core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavPa
 	std::vector<unsigned char> con_area(links.size(), kNavAreaDrop);
 	std::vector<unsigned short> con_flags(links.size(), nav_flags::kDrop);
 	std::vector<unsigned int> con_id(links.size());
+	for (size_t i = drops; i < links.size(); ++i) {
+		con_area[i] = kNavAreaVault;
+		con_flags[i] = nav_flags::kVault;
+	}
 	for (size_t i = 0; i < links.size(); ++i) {
 		std::memcpy(&con_verts[i * 6], links[i].start, sizeof(links[i].start));
 		std::memcpy(&con_verts[i * 6 + 3], links[i].end, sizeof(links[i].end));
@@ -542,7 +618,8 @@ core::Result<NavTileBake> bake_nav_tile(const NavTileInput &p_input, const NavPa
 	out.info.polys = uint32_t(pmesh->npolys);
 	out.info.vertices = uint32_t(pmesh->nverts);
 	out.info.detail_triangles = uint32_t(dmesh->ntris);
-	out.info.drop_links = uint32_t(links.size());
+	out.info.drop_links = uint32_t(drops);
+	out.info.vault_links = uint32_t(links.size() - drops);
 	out.info.data_bytes = uint32_t(out.data.size());
 	out.info.seconds = seconds_since(start);
 	return out;
@@ -605,7 +682,8 @@ core::Result<std::shared_ptr<const NavWorld>> bake_nav_inputs(std::vector<NavTil
 		core::Cache *p_cache, bool *r_stored) {
 	BF3_TRY(check_nav_params(p_options.params));
 	core::Cache *cache = (p_cache != nullptr && p_cache->is_open()) ? p_cache : nullptr;
-	const bool link_checked = p_options.link_shapes != nullptr && p_options.params.drop_links;
+	const bool link_checked =
+			p_options.link_shapes != nullptr && (p_options.params.drop_links || p_options.params.vault_links);
 
 	for (const NavTileInput &in : p_inputs) {
 		size_t wet = 0;

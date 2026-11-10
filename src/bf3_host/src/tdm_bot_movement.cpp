@@ -193,6 +193,7 @@ bool BotNavigation::walk(TdmShared &r_shared, sim::Tick p_tick, const sim::Soldi
 	r_yaw = wy;
 	r_sprint = (wc.buttons & sim::buttons::kSprint) != 0;
 	r_pose = wc.pose;
+	r_jump = (wc.buttons & sim::buttons::kJump) != 0;
 	return true;
 }
 

@@ -35,6 +35,8 @@ float yaw_of(float p_dx, float p_dz) {
 
 constexpr float kDropReach = 0.6f;
 constexpr float kDropTimeout = 3.0f;
+constexpr float kVaultStallSpeed = 0.5f;
+constexpr float kVaultCone = 20.0f * kPi / 180.0f;
 constexpr float kArriveVertical = 1.5f;
 constexpr float kBackRadius = 16.0f;
 constexpr float kSprintStraight = 6.0f;
@@ -77,6 +79,7 @@ struct WalkerBrain::Impl {
 	std::vector<NavPolyRef> polys;
 
 	bool dropping = false;
+	bool vault_link = false;
 	Vec3 drop_end{};
 	Tick drop_tick = 0;
 
@@ -99,6 +102,7 @@ struct WalkerBrain::Impl {
 		corner_count = 0;
 		corner_index = 0;
 		dropping = false;
+		vault_link = false;
 		repaths_in_row = 0;
 		partial_in_row = 0;
 	}
@@ -115,6 +119,7 @@ struct WalkerBrain::Impl {
 		corner_count = 0;
 		corner_index = 0;
 		dropping = false;
+		vault_link = false;
 	}
 
 	bool pick_goal(const WalkerView &p_view, const Vec3 &p_position) {
@@ -158,6 +163,7 @@ struct WalkerBrain::Impl {
 		corner_count = 0;
 		corner_index = 0;
 		dropping = false;
+		vault_link = false;
 		repaths_in_row = 0;
 		partial_in_row = 0;
 		sprint_leg = unit(rng) < params.sprint_share;
@@ -327,14 +333,16 @@ struct WalkerBrain::Impl {
 		} else if (!pending && !need_path && corner_count > 0) {
 			while (corner_index + 1 < corner_count &&
 					horizontal_distance(pos, corners[corner_index].position) < params.corner_lookahead &&
-					(corners[corner_index].flags & nav_flags::kDrop) == 0) {
+					(corners[corner_index].flags & (nav_flags::kDrop | nav_flags::kVault)) == 0) {
 				++corner_index;
 			}
 			const NavCorner &corner = corners[corner_index];
-			if ((corner.flags & nav_flags::kDrop) != 0 && horizontal_distance(pos, corner.position) <= kDropReach) {
+			if ((corner.flags & (nav_flags::kDrop | nav_flags::kVault)) != 0 &&
+					horizontal_distance(pos, corner.position) <= kDropReach) {
 				Vec3 end{};
 				if (corridor.move_over_drop(*p_view.query, corner, &end)) {
 					dropping = true;
+					vault_link = (corner.flags & nav_flags::kVault) != 0;
 					drop_end = end;
 					drop_tick = p_view.tick;
 					target = end;
@@ -391,6 +399,14 @@ struct WalkerBrain::Impl {
 				std::fabs(rel) <= kSprintCone && p_self.pose == Pose::Stand) {
 			c.buttons |= buttons::kSprint;
 			++stats.sprint_ticks;
+		}
+		if (dropping && vault_link && move && (p_self.flags & soldier_flags::kGrounded) != 0 &&
+				p_self.mode != MoveMode::AnimationControlled &&
+				std::sqrt(p_self.velocity[0] * p_self.velocity[0] + p_self.velocity[2] * p_self.velocity[2]) <
+						kVaultStallSpeed &&
+				std::fabs(rel) <= kVaultCone) {
+			c.buttons |= buttons::kJump;
+			++stats.vault_jumps;
 		}
 		if (crouch) {
 			++stats.crouch_ticks;

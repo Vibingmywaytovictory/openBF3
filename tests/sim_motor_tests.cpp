@@ -8,8 +8,11 @@
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/core/level/spawn_points.h"
 #include "bf3/core/util/elapsed.h"
+#include "bf3/sim/bots/walker_brain.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/command.h"
+#include "bf3/sim/nav.h"
+#include "bf3/sim/nav_query.h"
 #include "bf3/sim/prediction.h"
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/soldier_state.h"
@@ -2002,6 +2005,58 @@ TEST_SUITE("sim-motor-unit") {
 			CHECK(last.position[1] == doctest::Approx(1.0f + params.tuning.character_padding).epsilon(0.03));
 			CHECK(last.position[2] > 2.0f);
 		}
+	}
+
+	TEST_CASE("sim.motor: a walker bot crosses a 1 m wall over its vault link: the path's kVault corner, the jump, the "
+			  "vault") {
+		std::vector<StaticTriangle> t = flat_world(32.0f);
+		add_box(t, { -32.0f, 0.0f, 0.0f }, { 32.0f, 1.0f, 0.2f });
+		const MotorParams params = params_with(shipped_tuning());
+		Rig r = rig_of(t, params);
+		NavBakeOptions bake;
+		bake.params = nav_params_from_motor(params);
+		bake.link_shapes = r.world->shapes();
+		core::Result<std::shared_ptr<const NavWorld>> nav = bake_nav_world(std::span<const StaticTriangle>(t),
+				std::vector<NavTileKey>{ { -1, -1 }, { -1, 0 }, { 0, -1 }, { 0, 0 } }, bake);
+		REQUIRE_MESSAGE(nav.ok(), (nav.ok() ? std::string() : nav.error().message));
+		REQUIRE((*nav)->stats().vault_links > 0);
+		const NavComponents components = nav_components(**nav);
+		NavQueryOptions vaulting;
+		vaulting.include_flags = nav_flags::kAll;
+		core::Result<std::unique_ptr<NavQuery>> query = NavQuery::create(*nav, vaulting);
+		REQUIRE(query.ok());
+		bots::PathService paths(**query, {});
+		bots::BotGoal goal;
+		REQUIRE((*query)->nearest({ 3.0f, 0.0f, 12.0f }, { 1.0f, 2.0f, 1.0f }, &goal.poly, &goal.position));
+		const std::vector<bots::BotGoal> objectives{ goal };
+		bots::WalkerParams walker;
+		walker.objective_share = 1.0f;
+		walker.sprint_share = 0.0f;
+		walker.crouch_share = 0.0f;
+		bots::WalkerBrain brain(0, 77, walker);
+		SoldierState s = at_rest(*r.motor, { 2.0f, 0.0f, -10.0f });
+		bool vaulted = false, arrived = false;
+		uint32_t ticks = 0;
+		for (; ticks < 1800 && !arrived; ++ticks) {
+			bots::WalkerView view;
+			view.tick = s.tick + 1;
+			view.self = &s;
+			view.objectives = objectives;
+			view.components = &components;
+			view.main_component = components.largest;
+			view.query = query->get();
+			view.paths = &paths;
+			paths.run();
+			r.motor->step(s, brain.command(view));
+			vaulted = vaulted || (s.events & soldier_events::kVaulted) != 0;
+			arrived = s.position[2] > 10.0f && grounded(s);
+		}
+		std::printf("walker over a 1 m wall: %u ticks, vault jumps %llu, at (%.2f, %.2f, %.2f)\n", ticks,
+				static_cast<unsigned long long>(brain.stats().vault_jumps), double(s.position[0]),
+				double(s.position[1]), double(s.position[2]));
+		CHECK(vaulted);
+		CHECK(arrived);
+		CHECK(brain.stats().vault_jumps >= 1);
 	}
 }
 

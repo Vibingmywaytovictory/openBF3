@@ -106,6 +106,7 @@ std::vector<uint8_t> encode_nav_tile(const NavTileInfo &p_info, std::span<const 
 	w.u32(p_info.vertices);
 	w.u32(p_info.detail_triangles);
 	w.u32(p_info.drop_links);
+	w.u32(p_info.vault_links);
 	w.raw(p_info.input.bytes.data(), p_info.input.bytes.size());
 	w.u32(uint32_t(p_data.size()));
 	w.raw(p_data.data(), p_data.size());
@@ -125,6 +126,7 @@ core::Status decode_nav_tile(std::span<const uint8_t> p_blob, const NavParams &p
 	info.vertices = r.u32();
 	info.detail_triangles = r.u32();
 	info.drop_links = r.u32();
+	info.vault_links = r.u32();
 	for (uint8_t &b : info.input.bytes) {
 		b = r.u8();
 	}
@@ -144,7 +146,8 @@ core::Status decode_nav_tile(std::span<const uint8_t> p_blob, const NavParams &p
 		BF3_TRY(validate_detour_tile(data, p_params, info.tile));
 		dtMeshHeader h;
 		std::memcpy(&h, data.data(), sizeof(h));
-		if (uint32_t(h.polyCount - h.offMeshConCount) != info.polys || uint32_t(h.offMeshConCount) != info.drop_links) {
+		if (uint32_t(h.polyCount - h.offMeshConCount) != info.polys ||
+				uint64_t(h.offMeshConCount) != uint64_t(info.drop_links) + info.vault_links) {
 			return core::make_error("nav-tile: the info does not match the Detour data");
 		}
 	}
@@ -203,7 +206,8 @@ core::CacheKeyInputs nav_tile_key_inputs(const core::Sha256Digest &p_input, cons
 
 core::CacheKeyInputs nav_world_key_inputs(const core::Sha256Digest &p_source_digest, std::string_view p_level, std::string_view p_mode,
 		const NavLoadOptions &p_options) {
-	const bool link_checked = p_options.bake.link_shapes != nullptr && p_options.bake.params.drop_links;
+	const bool link_checked = p_options.bake.link_shapes != nullptr &&
+			(p_options.bake.params.drop_links || p_options.bake.params.vault_links);
 	core::CacheKeyInputs in;
 	in.kind = kNavWorldCacheKind;
 	in.converter_version = kNavConverterVersion;
@@ -230,7 +234,7 @@ core::Result<std::shared_ptr<const NavWorld>> load_nav_world_cached(core::Cache 
 	std::sort(region.begin(), region.end());
 	region.erase(std::unique(region.begin(), region.end()), region.end());
 	core::Cache *cache = (p_cache != nullptr && p_cache->is_open()) ? p_cache : nullptr;
-	const bool link_checked = bake.link_shapes != nullptr && bake.params.drop_links;
+	const bool link_checked = bake.link_shapes != nullptr && (bake.params.drop_links || bake.params.vault_links);
 
 	std::optional<core::CacheKey> world_key;
 	if (cache != nullptr) {

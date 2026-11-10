@@ -31,6 +31,7 @@ void WalkerStats::add(const WalkerStats &p_other) {
 	off_mesh_ticks += p_other.off_mesh_ticks;
 	sprint_ticks += p_other.sprint_ticks;
 	crouch_ticks += p_other.crouch_ticks;
+	vault_jumps += p_other.vault_jumps;
 	metres += p_other.metres;
 	starts_outside_main += p_other.starts_outside_main;
 }

@@ -37,11 +37,13 @@ inline constexpr float kNavTileSize = 64.0f;
 inline constexpr uint8_t kNavAreaWalk = 1;
 inline constexpr uint8_t kNavAreaCrouch = 2;
 inline constexpr uint8_t kNavAreaDrop = 3;
+inline constexpr uint8_t kNavAreaVault = 4;
 namespace nav_flags {
 inline constexpr uint16_t kWalk = 1u << 0;
 inline constexpr uint16_t kCrouch = 1u << 1;
 inline constexpr uint16_t kDrop = 1u << 2;
-inline constexpr uint16_t kAll = kWalk | kCrouch | kDrop;
+inline constexpr uint16_t kVault = 1u << 3;
+inline constexpr uint16_t kAll = kWalk | kCrouch | kDrop | kVault;
 }
 
 enum class NavPartition : uint8_t { Watershed = 0, Monotone = 1, Layers = 2 };
@@ -70,6 +72,7 @@ struct NavParams {
 	float drop_max = 4.9f;
 	float drop_reach = 1.5f;
 	float drop_sample_spacing = 1.0f;
+	bool vault_links = true;
 	float region_margin = 32.0f;
 
 	bool operator==(const NavParams &) const = default;
@@ -80,7 +83,7 @@ NavParams nav_params_from_motor(const MotorParams &p_motor);
 std::string nav_params_text(const NavParams &p_params);
 
 std::string recast_build_id();
-inline constexpr uint32_t kNavFormatVersion = 1;
+inline constexpr uint32_t kNavFormatVersion = 2;
 inline constexpr uint32_t kNavConverterVersion = 4;
 inline constexpr const char *kNavTileCacheKind = "nav-tile";
 inline constexpr const char *kNavWorldCacheKind = "nav-world";
@@ -127,6 +130,7 @@ struct NavTileInfo {
 	uint32_t vertices = 0;
 	uint32_t detail_triangles = 0;
 	uint32_t drop_links = 0;
+	uint32_t vault_links = 0;
 	uint32_t data_bytes = 0;
 	core::Sha256Digest input{};
 	double seconds = 0.0;
@@ -137,6 +141,7 @@ struct NavStats {
 	size_t tiles_empty = 0;
 	size_t polys = 0;
 	size_t drop_links = 0;
+	size_t vault_links = 0;
 	uint64_t data_bytes = 0;
 	size_t tiles_hit = 0;
 	size_t tiles_baked = 0;
