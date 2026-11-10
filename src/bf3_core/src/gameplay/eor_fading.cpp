@@ -23,33 +23,12 @@ constexpr int32_t kFadeTime = logic_port_id("FadeTime");
 constexpr int32_t kVisibility = logic_port_id("Visibility");
 constexpr int32_t kValue = logic_port_id("Value");
 
-std::optional<EbxInstance> event_target(const level::Connections &p_c, const EbxInstance &p_source, int32_t p_event,
-		int32_t p_target_event, std::string_view p_type) {
-	for (const level::Connection &c : p_c.event) {
-		if (c.source == p_source && c.source_field == p_event && c.target_field == p_target_event &&
-				c.target.is_a(p_type)) {
-			return c.target;
-		}
-	}
-	return std::nullopt;
-}
-
 std::optional<float> seconds_in(const EbxStruct &p_object, std::string_view p_field) {
 	const std::optional<double> v = number(p_object, p_field);
 	if (!v || !std::isfinite(*v) || *v < 0.0 || *v > 3600000.0) {
 		return std::nullopt;
 	}
 	return float(*v);
-}
-
-std::optional<float> fade_time(const level::Connections &p_c, const EbxInstance &p_fade) {
-	for (const level::Connection &c : p_c.property) {
-		if (c.target == p_fade && c.target_field == kFadeTime && c.source_field == kValue &&
-				c.source.is_a("FloatEntityData")) {
-			return seconds_in(c.source.data(), "DefaultValue");
-		}
-	}
-	return seconds_in(p_fade.data(), "FadeTime");
 }
 
 std::optional<std::array<float, 3>> vec3_field(const EbxStruct &p_object, std::string_view p_field) {
@@ -66,6 +45,27 @@ std::optional<EbxInstance> ref_of(const EbxResolver &p_db, const EbxInstance &p_
 	return r ? p_db.resolve(p_from.partition(), *r) : std::nullopt;
 }
 
+}
+
+std::optional<EbxInstance> logic_event_target(const level::Connections &p_c, const EbxInstance &p_source,
+		int32_t p_event, int32_t p_target_event, std::string_view p_type) {
+	for (const level::Connection &c : p_c.event) {
+		if (c.source == p_source && c.source_field == p_event && c.target_field == p_target_event &&
+				c.target.is_a(p_type)) {
+			return c.target;
+		}
+	}
+	return std::nullopt;
+}
+
+std::optional<float> fade_entity_seconds(const level::Connections &p_c, const EbxInstance &p_fade) {
+	for (const level::Connection &c : p_c.property) {
+		if (c.target == p_fade && c.target_field == kFadeTime && c.source_field == kValue &&
+				c.source.is_a("FloatEntityData")) {
+			return seconds_in(c.source.data(), "DefaultValue");
+		}
+	}
+	return seconds_in(p_fade.data(), "FadeTime");
 }
 
 Result<std::vector<EorFadingKey>> read_sequence_float_track(
@@ -207,7 +207,7 @@ Result<EorFading> read_eor_fading(const EbxResolver &p_db, level::WorkBudget &r_
 	BF3_TRY(connections);
 	const level::Connections &c = *connections;
 	const std::optional<EbxInstance> sequence =
-			event_target(c, *descriptor, logic_port_id(kEorFadingStartEvent), kStart, "SequenceEntityData");
+			logic_event_target(c, *descriptor, logic_port_id(kEorFadingStartEvent), kStart, "SequenceEntityData");
 	if (!sequence) {
 		return make_error(where + ": StartFade starts no sequence");
 	}
@@ -235,13 +235,14 @@ Result<EorFading> read_eor_fading(const EbxResolver &p_db, level::WorkBudget &r_
 	}
 	out.visibility = std::move(*keys);
 	BF3_TRY(read_grade(p_db, *environment, where, out));
-	const std::optional<EbxInstance> ui_fade = event_target(c, *sequence, kOnStarted, kFadeOut, "FadeEntityData");
-	const std::optional<EbxInstance> screen_fade = event_target(c, *sequence, kOnFinished, kFadeOut, "FadeEntityData");
+	const std::optional<EbxInstance> ui_fade = logic_event_target(c, *sequence, kOnStarted, kFadeOut, "FadeEntityData");
+	const std::optional<EbxInstance> screen_fade =
+			logic_event_target(c, *sequence, kOnFinished, kFadeOut, "FadeEntityData");
 	if (!ui_fade || !screen_fade) {
 		return make_error(where + ": the sequence starts no UI fade or ends in no screen fade");
 	}
-	const std::optional<float> ui_s = fade_time(c, *ui_fade);
-	const std::optional<float> screen_s = fade_time(c, *screen_fade);
+	const std::optional<float> ui_s = fade_entity_seconds(c, *ui_fade);
+	const std::optional<float> screen_s = fade_entity_seconds(c, *screen_fade);
 	if (!ui_s || !screen_s || boolean(ui_fade->data(), "FadeUI") != std::optional<bool>(true) ||
 			boolean(screen_fade->data(), "FadeScreen") != std::optional<bool>(true)) {
 		return make_error(where + ": the fades lack a FadeTime, or do not fade the UI and then the screen");

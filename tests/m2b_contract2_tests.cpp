@@ -86,11 +86,12 @@ static_assert(std::is_same_v<decltype(&gs::Bf3GameCrowd::set_corpse_seconds), vo
 static_assert(std::is_same_v<decltype(&host::fill_hud_tdm),
 		void (*)(const host::HudFeedInput &, std::span<const host::PresentEvent>, const host::HudStatic &, host::HudTdmFeedState &, ui::HudModel &)>);
 static_assert(std::is_same_v<decltype(&gs::Bf3DeathCamera::step),
-		gs::DeathCameraView (gs::Bf3DeathCamera::*)(double, const fx::Vec3 *, const sim::CollisionWorld *)>);
+		gs::DeathCameraView (gs::Bf3DeathCamera::*)(double, const gs::ChaseTarget *, const sim::CollisionWorld *)>);
 
 static_assert(std::is_same_v<decltype(host::HudFeedInput::death), const core::gameplay::DeathTimeline *>);
 static_assert(std::is_same_v<decltype(&gs::death_camera_params),
-		gs::DeathCameraParams (*)(const core::gameplay::DeathTimeline &)>);
+		gs::DeathCameraParams (*)(const core::gameplay::DeathTimeline &, const core::gameplay::SoldierCameras *,
+				const core::gameplay::PlayerCameraDef *)>);
 static_assert(host::kHudSpawnSlots == std::array<uint8_t, 5>{ 0, 1, 2, 6, 7 });
 static_assert(host::kHudSpawnSlots[2] == host::kKitGadgetSlot && host::kHudSpawnSlots[0] == host::kKitSlots[0] &&
 		host::kHudSpawnSlots[1] == host::kKitSlots[1] && host::kHudSpawnSlots[3] == host::kKitSlots[2] && host::kHudSpawnSlots[4] == host::kKitSlots[3]);
@@ -153,17 +154,17 @@ TEST_SUITE("m2b-contract2") {
 		const anim::CrowdStanceSet s{};
 		CHECK(s.corpse_seconds == anim::kCrowdDeathHideSeconds);
 
-		const gs::DeathCameraParams dp = gs::death_camera_params(core::gameplay::DeathTimeline{ 1.0f, 4.0f });
-		CHECK(dp.seconds == 4.0f);
-		CHECK(dp.orbit_seconds == 1.0f);
-		CHECK(dp.orbit_seconds + dp.turn_seconds < dp.seconds);
-		CHECK(dp.camera_radius_m > 0.0f);
+		const gs::DeathCameraParams dp =
+				gs::death_camera_params(core::gameplay::DeathTimeline{ 1.0f, 4.0f }, nullptr, nullptr);
+		CHECK(dp.killer_camera_s == 1.0f);
+		CHECK(!dp.has_chase);
+		CHECK(dp.fade_in_s == 0.0f);
 		const gs::DeathCameraStart ds{};
 		CHECK(ds.killer_slot == 0xFF);
 		CHECK(ds.killer_camera);
 		const gs::DeathCameraView dv{};
 		CHECK(!dv.active);
-		CHECK(!dv.finished);
+		CHECK(dv.black == 0.0f);
 
 		const gs::TdmOptions o{};
 		CHECK(o.deploy_screen);
@@ -352,35 +353,27 @@ TEST_SUITE("m2b-contract2") {
 		if constexpr (!kCamLanded) {
 			pending("cam", "Bf3DeathCamera: the corpse view, the turn to the killer, the end", "src/bf3_godot/src/death_camera.cpp is cam's");
 		} else {
-			gs::Bf3DeathCamera cam;
+			gs::DeathCameraParams chased;
+			chased.has_chase = true;
+			gs::Bf3DeathCamera cam(chased);
 			CHECK(!cam.active());
 			gs::DeathCameraStart start;
-			start.corpse = { 0.0f, 0.0f, 0.0f };
-			start.eye = { 0.0f, 1.6f, 0.0f };
-			start.yaw_rad = 0.0f;
 			start.killer_slot = 5;
 			start.killer_camera = true;
 			cam.begin(start, 100.0);
 			CHECK(cam.active());
-			const fx::Vec3 killer{ 20.0f, 1.0f, 0.0f };
-			const gs::DeathCameraView early = cam.step(100.1, &killer, nullptr);
-			CHECK(early.active);
-			CHECK(!early.finished);
-			const gs::DeathCameraView turned = cam.step(100.0 + 3.5, &killer, nullptr);
-			CHECK(turned.on_killer);
-			const fx::Vec3 f = turned.camera.forward;
-			const fx::Vec3 to{ killer.x - turned.camera.trans.x, killer.y - turned.camera.trans.y, killer.z - turned.camera.trans.z };
-			const float len = std::sqrt(to.x * to.x + to.y * to.y + to.z * to.z);
-			REQUIRE(len > 0.0f);
-			CHECK((f.x * to.x + f.y * to.y + f.z * to.z) / len > 0.9f);
-			const gs::DeathCameraView done = cam.step(100.0 + 4.1, &killer, nullptr);
-			CHECK(done.finished);
+			gs::ChaseTarget killer;
+			killer.eye = { 20.0f, 1.6f, 0.0f };
+			CHECK(!cam.step(100.1, &killer, nullptr).active);
+			const gs::DeathCameraView on = cam.step(101.0, &killer, nullptr);
+			CHECK(on.active);
+			CHECK(cam.on_killer());
 			cam.end();
 			CHECK(!cam.active());
 
-			start.corpse.x = std::nanf("");
 			cam.begin(start, 200.0);
-			const gs::DeathCameraView bad = cam.step(200.1, nullptr, nullptr);
+			killer.eye.x = std::nanf("");
+			const gs::DeathCameraView bad = cam.step(201.5, &killer, nullptr);
 			CHECK(!bad.active);
 			CHECK(cam.stats().bad_inputs >= 1);
 		}

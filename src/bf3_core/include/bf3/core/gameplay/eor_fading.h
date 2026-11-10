@@ -6,10 +6,15 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
+
+namespace bf3::core::level {
+struct Connections;
+}
 
 namespace bf3::core::gameplay {
 
@@ -41,4 +46,7 @@ Result<EorFading> read_eor_fading(const EbxResolver &p_db, level::WorkBudget &r_
 Result<std::vector<EorFadingKey>> read_sequence_float_track(
 		const EbxResolver &p_db, const EbxInstance &p_sequence, int32_t p_track);
 float eor_fading_key_at(std::span<const EorFadingKey> p_keys, float p_seconds);
+std::optional<EbxInstance> logic_event_target(const level::Connections &p_c, const EbxInstance &p_source,
+		int32_t p_event, int32_t p_target_event, std::string_view p_type);
+std::optional<float> fade_entity_seconds(const level::Connections &p_c, const EbxInstance &p_fade);
 }

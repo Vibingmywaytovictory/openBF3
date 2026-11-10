@@ -302,6 +302,16 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(killer.chase.has_collision);
 		CHECK(killer.chase.inherit_target_velocity);
 		CHECK(killer.chase.update_rate == 30.0f);
+		core::level::WorkBudget camera_budget;
+		const core::Result<core::gameplay::PlayerCameraDef> pkc =
+				core::gameplay::read_player_camera(l->level->db(), camera_budget);
+		REQUIRE_MESSAGE(pkc.ok(), (pkc.ok() ? std::string() : pkc.error().message));
+		CHECK(pkc->soldier_target_mode == core::gameplay::CameraTargetMode::Index);
+		CHECK(pkc->soldier_camera_index == 2);
+		CHECK(pkc->release_if_target_lost);
+		CHECK(pkc->fade_out_s == 0.0f);
+		CHECK(pkc->fade_in_s == 0.25f);
+		CHECK(cams->target_of(*pkc) == &killer);
 		CHECK(sc.at("push killscreen", 601) - died == int64_t(sim::logic::logic_delay_ticks(timeline->kill_card_s)));
 		CHECK(sc.at("close killscreen", 601) - died ==
 				int64_t(sim::logic::logic_delay_ticks(timeline->spawn_screens_s)));

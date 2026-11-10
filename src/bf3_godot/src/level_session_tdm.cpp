@@ -113,6 +113,26 @@ bool presented_position(const host::PresentationFrame &p_frame, uint64_t p_now_n
 	return false;
 }
 
+bool presented_chase_target(
+		const host::PresentationFrame &p_frame, uint64_t p_now_ns, uint8_t p_slot, ChaseTarget &r_target) {
+	if (!p_frame.valid || p_slot == 0xFF) {
+		return false;
+	}
+	std::array<host::PresentedSoldier, net::kMaxSlots> others{};
+	const size_t n = host::present_others(p_frame, p_now_ns, others);
+	for (size_t i = 0; i < n; ++i) {
+		const host::PresentedSoldier &s = others[i];
+		if (s.slot == p_slot) {
+			r_target.eye = fx::Vec3{ s.position[0], s.position[1] + s.eye_height, s.position[2] };
+			r_target.yaw_rad = s.yaw;
+			r_target.pitch_rad = s.pitch;
+			r_target.velocity = fx::Vec3{ s.velocity[0], s.velocity[1], s.velocity[2] };
+			return true;
+		}
+	}
+	return false;
+}
+
 const net::PlayerRow *player_row_of(const host::PresentationFrame &p_frame, uint8_t p_slot) {
 	const size_t n = std::min<size_t>(p_frame.player_count, p_frame.players.size());
 	for (size_t i = 0; i < n; ++i) {
@@ -160,8 +180,9 @@ Transform3D kept_view(const TdmState &p_m) {
 	return Transform3D(b, Vector3(p_m.view_origin[0], p_m.view_origin[1], p_m.view_origin[2]));
 }
 
-void build_tdm_ui(
-		GameState &r_game, TdmState &r_m, bool p_headless, const bf3::core::gameplay::DeathTimeline *p_death) {
+void build_tdm_ui(GameState &r_game, TdmState &r_m, bool p_headless, const bf3::core::gameplay::DeathTimeline *p_death,
+		const bf3::core::gameplay::SoldierCameras *p_cameras,
+		const bf3::core::gameplay::PlayerCameraDef *p_killer_camera) {
 	r_m.built = true;
 	r_m.windowed = !p_headless;
 
@@ -199,7 +220,8 @@ void build_tdm_ui(
 		r_m.native_options->build(*screens);
 	}
 	r_m.death_camera = std::unique_ptr<Bf3DeathCamera, void (*)(Bf3DeathCamera *)>(
-			new Bf3DeathCamera(p_death != nullptr ? death_camera_params(*p_death) : DeathCameraParams{}),
+			new Bf3DeathCamera(p_death != nullptr ? death_camera_params(*p_death, p_cameras, p_killer_camera)
+												  : DeathCameraParams{}),
 			&delete_part<Bf3DeathCamera>);
 	if (r_game.crowd != nullptr && !r_game.crowd->built()) {
 		r_game.crowd->set_corpse_seconds(r_m.corpse_seconds > 0.0f ? r_m.corpse_seconds : bf3::anim::kCrowdCorpseSeconds);
@@ -808,7 +830,9 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 	using bf3::core::ms_since;
 	if (!m.built) {
 		const std::shared_ptr<const host::SharedLevel> level = shared_level();
-		build_tdm_ui(r_game, m, headless_, level != nullptr ? level->death.get() : nullptr);
+		build_tdm_ui(r_game, m, headless_, level != nullptr ? level->death.get() : nullptr,
+				level != nullptr ? level->cameras.get() : nullptr,
+				level != nullptr ? level->killer_camera.get() : nullptr);
 	}
 	InputMapper &mapper = mapper_;
 	m.scoreboard_held = mapper.scoreboard_held();
@@ -1484,29 +1508,25 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			m.death_camera->end();
 		}
 		if (m.death_view_pending) {
+			if (p_camera != nullptr) {
+				keep_view(m, p_camera->get_global_transform(), float(p_camera->get_fov()));
+			}
 			DeathCameraStart st;
-
-			const sim::Vec3 &p = f.own_curr.position;
-			st.corpse = fx::Vec3{ p[0] + f.visual_offset[0], p[1] + f.visual_offset[1], p[2] + f.visual_offset[2] };
-			st.yaw_rad = sim::yaw_radians(f.own_curr.yaw);
-			const Vector3 eye = cameras_.last_eye();
-			st.eye = fx::Vec3{ eye.x, eye.y, eye.z };
 			st.killer_slot = m.own_killer == m.own_slot ? uint8_t(0xFF) : m.own_killer;
 			st.killer_camera = !f.match_valid || f.match.killer_camera;
-			st.vfov_deg = p_camera != nullptr ? float(p_camera->get_fov()) : 0.0f;
 			m.death_camera->begin(st, now_s);
 		}
+		if (m.death_camera->active() && f.own_respawn_tick != 0 && f.newest_tick >= f.own_respawn_tick) {
+			m.death_camera->end();
+		}
+		m.killer_view_black = 0.0f;
 		if (m.death_camera->active()) {
-			sim::Vec3 k{};
-			fx::Vec3 killer{};
-			const bool seen = presented_position(f, p_now_ns, m.own_killer, k);
-			if (seen) {
-				killer = k;
-			}
+			ChaseTarget killer;
+			const bool seen = presented_chase_target(f, p_now_ns, m.own_killer, killer);
 			const DeathCameraView v = m.death_camera->step(now_s, seen ? &killer : nullptr, r_game.world.get());
 			if (v.active && p_camera != nullptr) {
-				const Transform3D t = camera_transform(v.camera);
-				keep_view(m, t, v.vfov_deg);
+				keep_view(m, camera_transform(v.camera), m.view_vfov_deg);
+				m.killer_view_black = v.black;
 			}
 		}
 	}
@@ -1542,8 +1562,9 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			m.eor_camera->frame(p_camera, eor_level->eor_camera, r_game.hud_model.end_of_round);
 		}
 		const host::UiFlowSession *flow = m.native_flow != nullptr ? m.native_flow->session() : nullptr;
-		const host::LogicScreenEffectsFrame effects =
+		host::LogicScreenEffectsFrame effects =
 				flow != nullptr ? flow->screen_effects() : host::LogicScreenEffectsFrame{};
+		effects.screen_faded = std::max(effects.screen_faded, m.killer_view_black);
 		if (m.windowed && eor_level->eor_fading != nullptr && flow != nullptr) {
 			if (m.eor_flash == nullptr) {
 				m.eor_flash = std::unique_ptr<EorFlash, void (*)(EorFlash *)>(new EorFlash(), &delete_part<EorFlash>);

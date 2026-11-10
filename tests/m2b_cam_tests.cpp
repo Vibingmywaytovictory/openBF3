@@ -2,6 +2,7 @@
 
 #include "death_camera.h"
 
+#include "bf3/core/gameplay/death_timeline.h"
 #include "bf3/host/kits.h"
 #include "bf3/render/viewmodel_set.h"
 #include "bf3/sim/collision_world.h"
@@ -19,38 +20,27 @@ namespace sim = bf3::sim;
 
 namespace {
 
-float cam_dot(const fx::Vec3 &p_a, const fx::Vec3 &p_b) {
-	return p_a.x * p_b.x + p_a.y * p_b.y + p_a.z * p_b.z;
+gs::ChaseTarget target_at(fx::Vec3 p_eye) {
+	gs::ChaseTarget t;
+	t.eye = p_eye;
+	return t;
 }
 
-fx::Vec3 cam_sub(const fx::Vec3 &p_a, const fx::Vec3 &p_b) {
-	return fx::Vec3{ p_a.x - p_b.x, p_a.y - p_b.y, p_a.z - p_b.z };
-}
-
-float cam_len(const fx::Vec3 &p_a) {
-	return std::sqrt(cam_dot(p_a, p_a));
-}
-
-float looks_at(const gs::DeathCameraView &p_v, const fx::Vec3 &p_point) {
-	const fx::Vec3 to = cam_sub(p_point, p_v.camera.trans);
-	const float l = cam_len(to);
-	return l > 0.0f ? cam_dot(p_v.camera.forward, to) / l : -2.0f;
-}
-
-bool orthonormal(const fx::Transform &p_t) {
-	const float e = 1e-3f;
-	return std::fabs(cam_len(p_t.right) - 1.0f) < e && std::fabs(cam_len(p_t.up) - 1.0f) < e && std::fabs(cam_len(p_t.forward) - 1.0f) < e &&
-			std::fabs(cam_dot(p_t.right, p_t.up)) < e && std::fabs(cam_dot(p_t.right, p_t.forward)) < e && std::fabs(cam_dot(p_t.up, p_t.forward)) < e;
-}
-
-gs::DeathCameraStart start_at_origin(uint8_t p_killer) {
-	gs::DeathCameraStart s;
-	s.corpse = { 0.0f, 0.0f, 0.0f };
-	s.eye = { 0.0f, 1.6f, 0.0f };
-	s.yaw_rad = 0.0f;
-	s.killer_slot = p_killer;
-	s.killer_camera = true;
-	return s;
+bf3::core::gameplay::ChaseCameraDef killer_chase() {
+	bf3::core::gameplay::ChaseCameraDef c;
+	c.target_offset = { -0.1f, -0.2f, 0.1f };
+	c.target_rotation_offset_deg = 15.0f;
+	c.wanted_angle_deg = 5.0f;
+	c.wanted_distance = 2.5f;
+	c.pill_maximum_collision_radius = 0.4f;
+	c.pill_minimum_collision_radius = 0.1f;
+	c.pill_minimum_collision_length = 0.1f;
+	c.to_wanted_position_scale = { 100.0f, 100.0f, 100.0f };
+	c.velocity_drag = 15.0f;
+	c.max_velocity = 5.0f;
+	c.update_rate = 30.0f;
+	c.has_collision = true;
+	return c;
 }
 
 void cam_quad(std::vector<sim::StaticTriangle> &r_out, const sim::Vec3 &p_a, const sim::Vec3 &p_b, const sim::Vec3 &p_c, const sim::Vec3 &p_d) {
@@ -64,159 +54,180 @@ void cam_quad(std::vector<sim::StaticTriangle> &r_out, const sim::Vec3 &p_a, con
 }
 
 TEST_SUITE("m2b-cam-unit") {
-	TEST_CASE("death camera: the corpse view without a killer, continuity, the killer lost, hostile inputs") {
-		const gs::DeathCameraParams p{};
+	TEST_CASE("chase camera frame: the pivot shifts along the eye frame, TargetRotationOffset turns forward toward the "
+			  "right axis, the camera sits behind and raised by WantedAngleDeg (R3-C5 TV3, TV4)") {
+		const bf3::core::gameplay::ChaseCameraDef c2 = killer_chase();
+		const gs::ChaseFrame f = gs::chase_frame(c2, target_at({ 10.0f, 2.0f, 5.0f }));
+		CHECK(f.pivot.x == doctest::Approx(9.9f));
+		CHECK(f.pivot.y == doctest::Approx(1.8f));
+		CHECK(f.pivot.z == doctest::Approx(5.1f));
+		CHECK(f.forward.x == doctest::Approx(0.2588f).epsilon(1e-3));
+		CHECK(f.forward.z == doctest::Approx(0.9659f).epsilon(1e-3));
+		CHECK(f.direction.x == doctest::Approx(-0.2578f).epsilon(1e-3));
+		CHECK(f.direction.y == doctest::Approx(0.0872f).epsilon(1e-3));
+		CHECK(f.direction.z == doctest::Approx(-0.9622f).epsilon(1e-3));
+		gs::ChaseCamera cam(c2);
+		cam.activate(target_at({ 10.0f, 2.0f, 5.0f }), nullptr);
+		CHECK(cam.position().x == doctest::Approx(10.0f - 0.641f).epsilon(1e-3));
+		CHECK(cam.position().y == doctest::Approx(2.0f - 0.017f).epsilon(1e-2));
+		CHECK(cam.position().z == doctest::Approx(5.0f - 1.921f).epsilon(1e-3));
+		CHECK(cam.velocity().x == 0.0f);
 
-		{
-			gs::Bf3DeathCamera cam;
-			const fx::Vec3 killer{ 20.0f, 0.0f, 0.0f };
-			cam.begin(start_at_origin(0xFF), 10.0);
-			const gs::DeathCameraView v0 = cam.step(10.0, &killer, nullptr);
-			REQUIRE(v0.active);
-			CHECK(cam_len(cam_sub(v0.camera.trans, fx::Vec3{ 0.0f, 1.6f, 0.0f })) < 1e-4f);
-			CHECK(v0.camera.forward.z > 0.99f);
-			const gs::DeathCameraView v1 = cam.step(10.0 + p.orbit_seconds + 0.01, &killer, nullptr);
-			CHECK(!v1.on_killer);
-			CHECK(v1.camera.trans.z == doctest::Approx(-p.back_m).epsilon(1e-3));
-			CHECK(v1.camera.trans.y == doctest::Approx(p.up_m).epsilon(1e-3));
-			CHECK(looks_at(v1, fx::Vec3{ 0.0f, p.eye_height_m, 0.0f }) > 0.999f);
-			CHECK(orthonormal(v1.camera));
-			const gs::DeathCameraView v2 = cam.step(13.0, &killer, nullptr);
-			CHECK(!v2.on_killer);
-			CHECK(!v2.finished);
-			CHECK(cam.step(14.0, &killer, nullptr).finished);
-			CHECK(cam.active());
-			CHECK(cam.stats().killer_views == 0);
+		bf3::core::gameplay::ChaseCameraDef c1;
+		c1.target_offset = { 0.0f, -0.1f, 0.0f };
+		c1.target_rotation_offset_deg = 180.0f;
+		c1.wanted_angle_deg = 15.0f;
+		c1.wanted_distance = 3.0f;
+		c1.pill_maximum_collision_radius = 0.4f;
+		gs::ChaseCamera front(c1);
+		front.activate(target_at({ 0.0f, 0.0f, 0.0f }), nullptr);
+		CHECK(front.position().x == doctest::Approx(0.0f).epsilon(1e-3));
+		CHECK(front.position().y == doctest::Approx(0.573f).epsilon(1e-3));
+		CHECK(front.position().z == doctest::Approx(2.511f).epsilon(1e-3));
+	}
 
-			cam.begin(start_at_origin(0xFF), 0.0);
-			fx::Vec3 prev = cam.step(0.0, nullptr, nullptr).camera.trans;
-			for (int f = 1; f <= 240; ++f) {
-				const fx::Vec3 now = cam.step(f / 60.0, nullptr, nullptr).camera.trans;
-				CHECK(cam_len(cam_sub(now, prev)) < 0.25f);
-				prev = now;
-			}
-		}
-
-		{
-			gs::Bf3DeathCamera cam;
-			gs::DeathCameraStart s = start_at_origin(5);
-			s.killer_camera = false;
-			const fx::Vec3 killer{ 20.0f, 0.0f, 0.0f };
-			cam.begin(s, 0.0);
-			const gs::DeathCameraView v = cam.step(3.0, &killer, nullptr);
-			CHECK(!v.on_killer);
-			CHECK(looks_at(v, fx::Vec3{ 0.0f, p.eye_height_m, 0.0f }) > 0.999f);
-		}
-
-		{
-			gs::Bf3DeathCamera cam;
-			const fx::Vec3 killer{ 0.0f, 0.0f, -20.0f };
-			cam.begin(start_at_origin(5), 0.0);
-			fx::Vec3 prev = cam.step(0.0, &killer, nullptr).camera.trans;
-			for (int f = 1; f <= 200; ++f) {
-				const gs::DeathCameraView v = cam.step(f / 60.0, &killer, nullptr);
-				CHECK(cam_len(cam_sub(v.camera.trans, prev)) < 0.3f);
-				CHECK(orthonormal(v.camera));
-				prev = v.camera.trans;
-			}
-			const fx::Vec3 aim{ killer.x, killer.y + p.killer_height_m, killer.z };
-			const gs::DeathCameraView lost = cam.step(3.5, nullptr, nullptr);
-			CHECK(lost.on_killer);
-			CHECK(looks_at(lost, aim) > 0.999f);
-
-			CHECK(lost.camera.trans.z > 0.0f);
-			const fx::Vec3 nan{ std::nanf(""), 0.0f, 0.0f };
-			const uint64_t bad = cam.stats().bad_inputs;
-			const gs::DeathCameraView ignored = cam.step(3.6, &nan, nullptr);
-			CHECK(ignored.active);
-			CHECK(cam.stats().bad_inputs == bad + 1);
-			CHECK(looks_at(ignored, aim) > 0.999f);
-			CHECK(cam.stats().killer_views == 1);
-
-			const gs::DeathCameraView ended = cam.step(std::numeric_limits<double>::quiet_NaN(), &killer, nullptr);
-			CHECK(!ended.active);
-			CHECK(!cam.active());
-			CHECK(cam.stats().bad_inputs == bad + 2);
-			cam.begin(start_at_origin(5), 0.0);
-			cam.end();
-			CHECK(!cam.step(1.0, &killer, nullptr).active);
-			CHECK(cam.stats().views == 2);
-		}
-
-		{
-			gs::DeathCameraParams h;
-			h.seconds = std::numeric_limits<float>::quiet_NaN();
-			h.orbit_seconds = -1.0f;
-			h.back_m = std::numeric_limits<float>::infinity();
-			h.camera_radius_m = -3.0f;
-			h.up_m = 2.0f;
-			gs::Bf3DeathCamera cam(h);
-			CHECK(cam.params().seconds == p.seconds);
-			CHECK(cam.params().orbit_seconds == p.orbit_seconds);
-			CHECK(cam.params().back_m == p.back_m);
-			CHECK(cam.params().camera_radius_m == p.camera_radius_m);
-			CHECK(cam.params().up_m == 2.0f);
-
-			gs::DeathCameraStart s = start_at_origin(0xFF);
-			s.yaw_rad = std::numeric_limits<float>::infinity();
-			cam.begin(s, 0.0);
-			CHECK(!cam.active());
-			CHECK(cam.stats().bad_inputs == 1);
+	TEST_CASE("chase camera dynamics: the spring toward the wanted point with VelocityDrag and the MaxVelocity clamp "
+			  "at 1/UpdateRate steps (R2-C5 TV6)") {
+		bf3::core::gameplay::ChaseCameraDef c = killer_chase();
+		c.target_rotation_offset_deg = 0.0f;
+		c.target_offset = {};
+		c.wanted_angle_deg = 0.0f;
+		gs::ChaseCamera cam(c);
+		cam.activate(target_at({ 0.0f, 0.0f, 0.0f }), nullptr);
+		const float z0 = cam.position().z;
+		CHECK(z0 == doctest::Approx(-2.1f));
+		const double h = 1.0 / 30.0;
+		cam.step(h, target_at({ 0.0f, 0.0f, 1.0f }), nullptr);
+		CHECK(cam.velocity().z == doctest::Approx(3.333f).epsilon(1e-3));
+		CHECK(cam.position().z - z0 == doctest::Approx(0.111f).epsilon(1e-2));
+		cam.step(h, target_at({ 0.0f, 0.0f, 1.0f }), nullptr);
+		CHECK(cam.velocity().z == doctest::Approx(4.630f).epsilon(1e-3));
+		cam.step(h, target_at({ 0.0f, 0.0f, 1.0f }), nullptr);
+		CHECK(cam.velocity().z == doctest::Approx(4.765f).epsilon(1e-3));
+		for (int i = 0; i < 20; ++i) {
+			cam.step(h, target_at({ 0.0f, 0.0f, 1.0f }), nullptr);
+			CHECK(std::sqrt(cam.velocity().x * cam.velocity().x + cam.velocity().y * cam.velocity().y +
+						  cam.velocity().z * cam.velocity().z) <= 5.0001f);
 		}
 	}
 
-	TEST_CASE("death camera: a wall behind the corpse pulls the camera in") {
+	TEST_CASE("killer camera: the victim keeps his own view until KillerCameraTimer, then a cut to the killer's chase "
+			  "camera from black with a 0.25 s fade-in; released when the killer is lost; no killer, no camera "
+			  "(R2-C5 TV1, R3-C5 TV5)") {
+		gs::DeathCameraParams p;
+		p.killer_camera_s = 1.0f;
+		p.fade_in_s = 0.25f;
+		p.release_if_target_lost = true;
+		p.has_chase = true;
+		p.chase = killer_chase();
+		gs::Bf3DeathCamera cam(p);
+		gs::DeathCameraStart s;
+		s.killer_slot = 4;
+		cam.begin(s, 10.0);
+		const gs::ChaseTarget killer = target_at({ 0.0f, 1.6f, 20.0f });
+		CHECK(!cam.step(10.5, &killer, nullptr).active);
+		CHECK(!cam.step(10.99, &killer, nullptr).active);
+		const gs::DeathCameraView cut = cam.step(11.0, &killer, nullptr);
+		REQUIRE(cut.active);
+		CHECK(cut.black == 1.0f);
+		CHECK(cut.camera.trans.z == doctest::Approx(20.0f - 1.921f).epsilon(1e-3));
+		CHECK(cam.step(11.125, &killer, nullptr).black == doctest::Approx(0.5f));
+		const gs::DeathCameraView in = cam.step(11.25, &killer, nullptr);
+		CHECK(in.active);
+		CHECK(in.black == 0.0f);
+		CHECK(cam.stats().killer_views == 1);
+		CHECK(!cam.step(11.3, nullptr, nullptr).active);
+		CHECK(!cam.active());
+		CHECK(cam.stats().released_lost == 1);
 
+		gs::Bf3DeathCamera suicide(p);
+		suicide.begin(gs::DeathCameraStart{}, 0.0);
+		CHECK(!suicide.step(2.0, &killer, nullptr).active);
+		gs::Bf3DeathCamera off(p);
+		gs::DeathCameraStart no;
+		no.killer_slot = 4;
+		no.killer_camera = false;
+		off.begin(no, 0.0);
+		CHECK(!off.step(2.0, &killer, nullptr).active);
+	}
+
+	TEST_CASE("killer camera from PlayerKillerCamera's data: the soldier camera its target mode picks, the fade out on "
+			  "OnTakeControl then the fade in, the target lost holds the view unless ReleaseControlIfTargetLost") {
+		bf3::core::gameplay::SoldierCameras cams;
+		cams.cameras.resize(3);
+		cams.cameras[0].kind = bf3::core::gameplay::SoldierCameraKind::FirstPerson;
+		cams.cameras[1].kind = bf3::core::gameplay::SoldierCameraKind::Chase;
+		cams.cameras[1].chase.wanted_distance = 3.0f;
+		cams.cameras[2].kind = bf3::core::gameplay::SoldierCameraKind::Chase;
+		cams.cameras[2].chase = killer_chase();
+		bf3::core::gameplay::PlayerCameraDef pc;
+		pc.soldier_target_mode = bf3::core::gameplay::CameraTargetMode::Index;
+		pc.soldier_camera_index = 2;
+		pc.release_if_target_lost = false;
+		pc.fade_out_s = 0.5f;
+		pc.fade_in_s = 1.0f;
+		const bf3::core::gameplay::DeathTimeline death{ 2.0f, 4.0f };
+		const gs::DeathCameraParams p = gs::death_camera_params(death, &cams, &pc);
+		CHECK(p.killer_camera_s == 2.0f);
+		CHECK(p.has_chase);
+		CHECK(p.chase.wanted_distance == 2.5f);
+		CHECK(p.fade_out_s == 0.5f);
+		CHECK(p.fade_in_s == 1.0f);
+		CHECK(!p.release_if_target_lost);
+		pc.soldier_target_mode = bf3::core::gameplay::CameraTargetMode::ThirdPerson;
+		CHECK(gs::death_camera_params(death, &cams, &pc).chase.wanted_distance == 3.0f);
+		pc.soldier_target_mode = bf3::core::gameplay::CameraTargetMode::FirstPerson;
+		CHECK(!gs::death_camera_params(death, &cams, &pc).has_chase);
+		pc.soldier_target_mode = bf3::core::gameplay::CameraTargetMode::Index;
+		pc.soldier_camera_index = 3;
+		CHECK(!gs::death_camera_params(death, &cams, &pc).has_chase);
+		CHECK(!gs::death_camera_params(death, &cams, nullptr).has_chase);
+
+		gs::Bf3DeathCamera cam(p);
+		gs::DeathCameraStart s;
+		s.killer_slot = 4;
+		cam.begin(s, 0.0);
+		const gs::ChaseTarget killer = target_at({ 0.0f, 1.6f, 20.0f });
+		CHECK(!cam.step(1.9, &killer, nullptr).active);
+		const gs::DeathCameraView cut = cam.step(2.0, &killer, nullptr);
+		REQUIRE(cut.active);
+		CHECK(cut.black == 0.0f);
+		CHECK(cam.step(2.25, &killer, nullptr).black == doctest::Approx(0.5f));
+		CHECK(cam.step(2.5, &killer, nullptr).black == 1.0f);
+		CHECK(cam.step(3.0, &killer, nullptr).black == doctest::Approx(0.5f));
+		const gs::DeathCameraView seen = cam.step(3.5, &killer, nullptr);
+		CHECK(seen.black == 0.0f);
+		const gs::DeathCameraView held = cam.step(3.6, nullptr, nullptr);
+		CHECK(held.active);
+		CHECK(cam.active());
+		CHECK(held.camera.trans.z == seen.camera.trans.z);
+		CHECK(cam.stats().released_lost == 0);
+
+		gs::DeathCameraParams none = p;
+		none.has_chase = false;
+		gs::Bf3DeathCamera no_camera(none);
+		no_camera.begin(s, 0.0);
+		CHECK(!no_camera.step(3.0, &killer, nullptr).active);
+	}
+
+	TEST_CASE("chase camera: a wall behind the killer shortens the pill toward the pivot") {
 		std::vector<sim::StaticTriangle> tris;
 		cam_quad(tris, { -5.0f, -1.0f, -1.0f }, { -5.0f, 5.0f, -1.0f }, { 5.0f, 5.0f, -1.0f }, { 5.0f, -1.0f, -1.0f });
 		bf3::core::Result<std::shared_ptr<const sim::StaticWorldShapes>> shapes = sim::build_static_world(std::span<const sim::StaticTriangle>(tris));
 		REQUIRE_MESSAGE(shapes.ok(), (shapes.ok() ? std::string() : shapes.error().message));
 		bf3::core::Result<std::unique_ptr<sim::CollisionWorld>> world = sim::CollisionWorld::create(*shapes);
 		REQUIRE_MESSAGE(world.ok(), (world.ok() ? std::string() : world.error().message));
-		const gs::DeathCameraParams p{};
-		gs::Bf3DeathCamera cam;
-		cam.begin(start_at_origin(0xFF), 0.0);
-		const gs::DeathCameraView v = cam.step(2.0, nullptr, world->get());
-		REQUIRE(v.active);
-		CHECK(v.camera.trans.z > -1.0f);
-		CHECK(v.camera.trans.z < -0.5f);
-		CHECK(cam.stats().pulled_in == 1);
-		CHECK(looks_at(v, fx::Vec3{ 0.0f, p.eye_height_m, 0.0f }) > 0.999f);
-
-		gs::Bf3DeathCamera open;
-		open.begin(start_at_origin(0xFF), 0.0);
-		CHECK(open.step(2.0, nullptr, nullptr).camera.trans.z == doctest::Approx(-p.back_m).epsilon(1e-3));
-	}
-
-	TEST_CASE("death camera: on the killer the view narrows from the death FOV until the killer's view height fills "
-			  "it, as in the 18.57 footage's kill cam; no death FOV, no zoom") {
-		const gs::DeathCameraParams p{};
-		const fx::Vec3 killer{ 0.0f, 0.0f, -20.0f };
-		gs::DeathCameraStart s = start_at_origin(5);
-		s.vfov_deg = 70.0f;
-		gs::Bf3DeathCamera cam;
-		cam.begin(s, 0.0);
-		CHECK(cam.step(0.5, &killer, nullptr).vfov_deg == 70.0f);
-		const gs::DeathCameraView turning = cam.step(p.orbit_seconds + 0.5 * p.turn_seconds, &killer, nullptr);
-		REQUIRE(turning.on_killer);
-		const gs::DeathCameraView v = cam.step(p.orbit_seconds + p.turn_seconds + 0.5, &killer, nullptr);
-		REQUIRE(v.on_killer);
-		const fx::Vec3 aim{ killer.x, killer.y + p.killer_height_m, killer.z };
-		const float dist = cam_len(cam_sub(aim, v.camera.trans));
-		const float want = 2.0f * std::atan(0.5f * p.killer_view_height_m / dist) * 57.29577951308232f;
-		CHECK(v.vfov_deg == doctest::Approx(want).epsilon(1e-4));
-		CHECK(v.vfov_deg < turning.vfov_deg);
-		CHECK(turning.vfov_deg < 70.0f);
-
-		s.vfov_deg = 0.0f;
-		gs::Bf3DeathCamera plain;
-		plain.begin(s, 0.0);
-		CHECK(plain.step(p.orbit_seconds + p.turn_seconds + 0.5, &killer, nullptr).vfov_deg == 0.0f);
-
-		s.vfov_deg = std::numeric_limits<float>::quiet_NaN();
-		gs::Bf3DeathCamera bad;
-		bad.begin(s, 0.0);
-		CHECK(!bad.active());
+		bf3::core::gameplay::ChaseCameraDef c = killer_chase();
+		c.target_rotation_offset_deg = 0.0f;
+		c.target_offset = {};
+		c.wanted_angle_deg = 0.0f;
+		gs::ChaseCamera walled(c);
+		walled.activate(target_at({ 0.0f, 1.0f, 1.0f }), world->get());
+		CHECK(walled.wanted().z > -1.0f);
+		CHECK(walled.wanted().z < 1.0f);
+		gs::ChaseCamera open(c);
+		open.activate(target_at({ 0.0f, 1.0f, 1.0f }), nullptr);
+		CHECK(open.wanted().z == doctest::Approx(1.0f - 2.1f));
 	}
 }
 

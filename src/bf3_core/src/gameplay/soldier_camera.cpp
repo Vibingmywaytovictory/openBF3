@@ -1,5 +1,8 @@
 #include "bf3/core/gameplay/soldier_camera.h"
 
+#include "bf3/core/gameplay/eor_fading.h"
+#include "bf3/core/gameplay/logic_types.h"
+#include "bf3/core/level/connections.h"
 #include "ebx_fields.h"
 
 #include <optional>
@@ -9,6 +12,11 @@ namespace bf3::core::gameplay {
 using detail::Fields;
 
 namespace {
+
+constexpr int32_t kOnTakeControl = logic_port_id("OnTakeControl");
+constexpr int32_t kFadeOut = logic_port_id("FadeOut");
+constexpr int32_t kOnDone = logic_port_id("OnDone");
+constexpr int32_t kFadeIn = logic_port_id("FadeIn");
 
 ChaseCameraDef read_chase(Fields &r_f, const EbxStruct &p_s) {
 	ChaseCameraDef c;
@@ -49,6 +57,26 @@ const SoldierCameraDef *SoldierCameras::first_person() const {
 		}
 	}
 	return nullptr;
+}
+
+const SoldierCameraDef *SoldierCameras::target_of(const PlayerCameraDef &p_player) const {
+	switch (p_player.soldier_target_mode) {
+		case CameraTargetMode::FirstPerson:
+			return first_person();
+		case CameraTargetMode::ThirdPerson:
+			for (const SoldierCameraDef &c : cameras) {
+				if (c.kind != SoldierCameraKind::FirstPerson) {
+					return &c;
+				}
+			}
+			return nullptr;
+		case CameraTargetMode::Index:
+			break;
+	}
+	if (p_player.soldier_camera_index < 0 || size_t(p_player.soldier_camera_index) >= cameras.size()) {
+		return nullptr;
+	}
+	return &cameras[size_t(p_player.soldier_camera_index)];
 }
 
 Result<SoldierCameras> read_soldier_cameras(const EbxResolver &p_db, std::string_view p_soldier) {
@@ -95,6 +123,59 @@ Result<SoldierCameras> read_soldier_cameras(const EbxResolver &p_db, std::string
 	if (!f.ok()) {
 		return f.error();
 	}
+	return out;
+}
+
+Result<PlayerCameraDef> read_player_camera(
+		const EbxResolver &p_db, level::WorkBudget &r_budget, std::string_view p_name) {
+	const std::string where = std::string(kMpGlobalPartition) + " " + std::string(p_name);
+	const EbxPartition *part = p_db.partition_by_name(kMpGlobalPartition);
+	if (part == nullptr) {
+		return make_error(where + ": partition not found");
+	}
+	Fields f(p_db);
+	std::optional<EbxInstance> camera;
+	for (const EbxInstance &i : part->instances_of("PlayerCameraEntityData")) {
+		if (f.text_or(i.data(), "NameId") == p_name) {
+			camera = i;
+		}
+	}
+	if (!camera) {
+		return make_error(where + ": no PlayerCameraEntityData of that name");
+	}
+	const EbxStruct s = camera->data();
+	PlayerCameraDef out;
+	const std::string mode = f.enum_text(s, "SoldierTargetMode");
+	if (mode == "TargetMode_FirstPerson") {
+		out.soldier_target_mode = CameraTargetMode::FirstPerson;
+	} else if (mode == "TargetMode_ThirdPerson") {
+		out.soldier_target_mode = CameraTargetMode::ThirdPerson;
+	} else if (mode == "TargetMode_Index") {
+		out.soldier_target_mode = CameraTargetMode::Index;
+	} else {
+		f.fail(where + ": SoldierTargetMode " + mode + " is not a target mode");
+	}
+	out.soldier_camera_index = f.i32(s, "SoldierCameraIndex");
+	out.release_if_target_lost = f.flag(s, "ReleaseControlIfTargetLost");
+	if (!f.ok()) {
+		return f.error();
+	}
+	Result<level::Connections> connections = level::Connections::of(p_db, part->primary(), r_budget);
+	BF3_TRY(connections);
+	const std::optional<EbxInstance> fade_out =
+			logic_event_target(*connections, *camera, kOnTakeControl, kFadeOut, "FadeEntityData");
+	const std::optional<EbxInstance> fade_in =
+			fade_out ? logic_event_target(*connections, *fade_out, kOnDone, kFadeIn, "FadeEntityData") : std::nullopt;
+	if (!fade_out || !fade_in) {
+		return make_error(where + ": OnTakeControl starts no fade out whose end starts a fade in");
+	}
+	const std::optional<float> out_s = fade_entity_seconds(*connections, *fade_out);
+	const std::optional<float> in_s = fade_entity_seconds(*connections, *fade_in);
+	if (!out_s || !in_s || !f.flag(fade_out->data(), "FadeScreen") || !f.flag(fade_in->data(), "FadeScreen")) {
+		return make_error(where + ": the fades lack a FadeTime or do not fade the screen");
+	}
+	out.fade_out_s = *out_s;
+	out.fade_in_s = *in_s;
 	return out;
 }
 

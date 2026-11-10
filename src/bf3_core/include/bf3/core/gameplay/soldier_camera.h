@@ -2,6 +2,7 @@
 
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/soldier_sound.h"
+#include "bf3/core/level/budget.h"
 #include "bf3/core/math.h"
 #include "bf3/core/result.h"
 
@@ -12,7 +13,11 @@
 
 namespace bf3::core::gameplay {
 
+inline constexpr std::string_view kMpGlobalPartition = "gameplay/level_setups/components/mp_global";
+inline constexpr std::string_view kPlayerKillerCamera = "PlayerKillerCamera";
+
 enum class SoldierCameraKind : uint8_t { FirstPerson, Chase, Other };
+enum class CameraTargetMode : uint8_t { FirstPerson, ThirdPerson, Index };
 
 struct ChaseCameraDef {
 	Vec3 target_offset;
@@ -50,11 +55,22 @@ struct SoldierCameraDef {
 	ChaseCameraDef chase;
 };
 
+struct PlayerCameraDef {
+	CameraTargetMode soldier_target_mode = CameraTargetMode::Index;
+	int32_t soldier_camera_index = 0;
+	bool release_if_target_lost = false;
+	float fade_out_s = 0.0f;
+	float fade_in_s = 0.0f;
+};
+
 struct SoldierCameras {
 	std::vector<SoldierCameraDef> cameras;
 	const SoldierCameraDef *first_person() const;
+	const SoldierCameraDef *target_of(const PlayerCameraDef &p_player) const;
 };
 
 Result<SoldierCameras> read_soldier_cameras(const EbxResolver &p_db, std::string_view p_soldier = kMpSoldier);
+Result<PlayerCameraDef> read_player_camera(
+		const EbxResolver &p_db, level::WorkBudget &r_budget, std::string_view p_name = kPlayerKillerCamera);
 
 }

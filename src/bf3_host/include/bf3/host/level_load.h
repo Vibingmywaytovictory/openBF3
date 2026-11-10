@@ -31,6 +31,7 @@ class LogicGraph;
 struct ScoringTable;
 struct DeathTimeline;
 struct SoldierCameras;
+struct PlayerCameraDef;
 struct EorFading;
 struct EorTimeline;
 }
@@ -124,6 +125,7 @@ struct SharedLevel {
 	std::shared_ptr<const core::gameplay::EorFading> eor_fading;
 	std::shared_ptr<const core::gameplay::DeathTimeline> death;
 	std::shared_ptr<const core::gameplay::SoldierCameras> cameras;
+	std::shared_ptr<const core::gameplay::PlayerCameraDef> killer_camera;
 	std::vector<std::string> tdm_notes;
 };
 

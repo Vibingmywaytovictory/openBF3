@@ -673,6 +673,12 @@ core::Status load_shared_tdm(const LevelDatabase &p_db, const SharedLoadOptions 
 		return core::error_at("tdm", death.error());
 	}
 	r_level.death = std::make_shared<const gp::DeathTimeline>(*death);
+	core::level::WorkBudget camera_budget;
+	core::Result<gp::PlayerCameraDef> killer_camera = gp::read_player_camera(level.db(), camera_budget);
+	if (!killer_camera) {
+		return core::error_at("tdm", killer_camera.error());
+	}
+	r_level.killer_camera = std::make_shared<const gp::PlayerCameraDef>(*killer_camera);
 	set_immunity_abort(level, *tuning, r_level);
 	r_level.tdm_tuning = std::make_shared<const TdmTuning>(std::move(*tuning));
 	r_level.seconds_logic = seconds_since(clock);
