@@ -1,5 +1,6 @@
 #include "bf3/host/level_load.h"
 
+#include "bf3/core/gameplay/soldier_camera.h"
 #include "bf3/core/gameplay/soldier_def.h"
 #include "bf3/core/install.h"
 #include "bf3/core/level/eor_camera.h"
@@ -290,6 +291,11 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 		return core::error_at("load_shared_level: motor params", params.error());
 	}
 	shared->motor = *params;
+	core::Result<core::gameplay::SoldierCameras> cameras = core::gameplay::read_soldier_cameras(level.db());
+	if (!cameras) {
+		return core::error_at("load_shared_level: soldier cameras", cameras.error());
+	}
+	shared->cameras = std::make_shared<const core::gameplay::SoldierCameras>(std::move(*cameras));
 	shared->seconds_tables = seconds_since(clock);
 
 	if (p_progress != nullptr) {

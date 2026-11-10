@@ -26,6 +26,40 @@ float closest_fraction(const Vec3 &p_from, const Vec3 &p_to, const Vec3 &p_point
 	return std::clamp(vec::dot(vec::sub(p_point, p_from), d) / len2, 0.0f, 1.0f);
 }
 
+FlyByCheck check_fly_by_step(const Vec3 &p_from, const Vec3 &p_to, double p_seconds, const Vec3 &p_listener,
+		float p_radius_m, float p_min_speed) {
+	FlyByCheck c;
+	const Vec3 d = vec::sub(p_to, p_from);
+	const float len2 = vec::dot(d, d);
+	if (!(p_seconds > 0.0) || !(p_radius_m != 0.0f) || !(len2 > 0.0f) || !std::isfinite(len2)) {
+		return c;
+	}
+	c.fraction = vec::dot(vec::sub(p_listener, p_from), d) / len2;
+	if (!(c.fraction > 0.0f)) {
+		c.step = FlyByStep::Behind;
+		return c;
+	}
+	if (!(c.fraction < 1.0f)) {
+		c.step = FlyByStep::Ahead;
+		return c;
+	}
+	c.point = vec::add(p_from, vec::scale(d, c.fraction));
+	const float miss2 = vec::dot(vec::sub(p_listener, c.point), vec::sub(p_listener, c.point));
+	c.distance_m = std::sqrt(miss2);
+	const Vec3 to_from = vec::sub(p_listener, p_from), to_to = vec::sub(p_listener, p_to);
+	if (!(miss2 < p_radius_m * p_radius_m) || !(miss2 < vec::dot(to_from, to_from)) ||
+			!(miss2 < vec::dot(to_to, to_to))) {
+		c.step = FlyByStep::Outside;
+		return c;
+	}
+	if (!(double(std::sqrt(len2)) / p_seconds >= double(p_min_speed))) {
+		c.step = FlyByStep::Slow;
+		return c;
+	}
+	c.step = FlyByStep::Plays;
+	return c;
+}
+
 namespace {
 
 uint64_t shot_key(uint8_t p_slot, uint8_t p_pellet, uint32_t p_shot) {
@@ -95,40 +129,43 @@ struct FlyByAudio::Impl {
 		if (r_track.done || !finite(listener.position)) {
 			return;
 		}
-		const float u = closest_fraction(p_from, to, listener.position);
-		if (u >= 1.0f) {
-			r_track.approaching = true;
-		}
-		if ((u >= 1.0f || to == p_from) && !p_b.ended) {
-			return;
-		}
-		r_track.done = true;
-		if (u <= 0.0f && !r_track.approaching) {
-			++stats.receding;
-			return;
-		}
-		if (p_b.ended && u >= 1.0f) {
-			++stats.stopped;
-			return;
+		const double seconds = double(p_b.time - p_from_time) / double(sw::kTimeUnitsPerSecond);
+		const FlyByCheck c =
+				check_fly_by_step(p_from, to, seconds, listener.position, p_sound.radius_m, p_sound.min_speed);
+		switch (c.step) {
+			case FlyByStep::Still:
+			case FlyByStep::Ahead:
+				r_track.approaching = r_track.approaching || c.step == FlyByStep::Ahead;
+				if (p_b.ended) {
+					r_track.done = true;
+					++stats.stopped;
+				}
+				return;
+			case FlyByStep::Behind:
+				r_track.done = true;
+				stats.receding += r_track.approaching ? 0 : 1;
+				return;
+			case FlyByStep::Outside:
+				r_track.done = true;
+				return;
+			case FlyByStep::Slow:
+				r_track.done = true;
+				++stats.slow;
+				return;
+			case FlyByStep::Plays:
+				r_track.done = true;
+				break;
 		}
 		if (hit_own(r_track.key)) {
 			++stats.own_hits;
 			return;
 		}
-		const Vec3 at = vec::add(p_from, vec::scale(vec::sub(to, p_from), u));
-		const float distance = vec::length(vec::sub(listener.position, at));
-		if (!(distance <= p_sound.radius_m)) {
-			return;
-		}
-		if (!(p_b.speed >= p_sound.min_speed)) {
-			++stats.slow;
-			return;
-		}
+		const float u = c.fraction;
+		const float distance = c.distance_m;
 		EmitterState em;
-		em.position = at;
+		em.position = c.point;
 		const Vec3 step = vec::sub(to, p_from);
 		const float step_len = vec::length(step);
-		const double seconds = double(p_b.time - p_from_time) / double(sw::kTimeUnitsPerSecond);
 		if (step_len > 0.0f && std::isfinite(step_len)) {
 			em.forward = vec::scale(step, 1.0f / step_len);
 			if (seconds > 0.0) {

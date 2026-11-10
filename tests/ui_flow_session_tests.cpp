@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "bf3/core/gameplay/death_timeline.h"
+#include "bf3/core/gameplay/soldier_camera.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/eor_camera.h"
 #include "bf3/core/level/level.h"
@@ -271,6 +272,36 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(timeline->kill_card_s == 1.0f);
 		CHECK(timeline->spawn_screens_s == 4.0f);
 		CHECK(timeline->kill_card_lifetime_s() == 3.0f);
+		const core::Result<core::gameplay::SoldierCameras> cams = core::gameplay::read_soldier_cameras(l->level->db());
+		REQUIRE_MESSAGE(cams.ok(), (cams.ok() ? std::string() : cams.error().message));
+		REQUIRE(cams->cameras.size() == 3);
+		REQUIRE(cams->first_person() == &cams->cameras[0]);
+		CHECK(cams->cameras[0].type == "VeniceFPSCameraData");
+		CHECK(cams->cameras[0].shake_factor == 1.0f);
+		CHECK(cams->cameras[1].kind == core::gameplay::SoldierCameraKind::Chase);
+		CHECK(cams->cameras[1].chase.target_rotation_offset_deg == 180.0f);
+		CHECK(cams->cameras[1].chase.wanted_angle_deg == 15.0f);
+		CHECK(cams->cameras[1].chase.wanted_distance == 3.0f);
+		const core::gameplay::SoldierCameraDef &killer = cams->cameras[2];
+		CHECK(killer.kind == core::gameplay::SoldierCameraKind::Chase);
+		CHECK(killer.fade_time == 0.0f);
+		CHECK(killer.chase.target_offset.x == -0.1f);
+		CHECK(killer.chase.target_offset.y == -0.2f);
+		CHECK(killer.chase.target_offset.z == 0.1f);
+		CHECK(killer.chase.target_rotation_offset_deg == 15.0f);
+		CHECK(killer.chase.wanted_angle_deg == 5.0f);
+		CHECK(killer.chase.wanted_distance == 2.5f);
+		CHECK(killer.chase.pill_maximum_collision_radius == 0.4f);
+		CHECK(killer.chase.pill_minimum_collision_radius == 0.4f);
+		CHECK(killer.chase.pill_minimum_collision_length == 0.4f);
+		CHECK(killer.chase.pill_expand_size_speed_acceleration == 2.0f);
+		CHECK(killer.chase.to_wanted_position_scale.x == 100.0f);
+		CHECK(killer.chase.velocity_drag == 15.0f);
+		CHECK(killer.chase.max_velocity == 5.0f);
+		CHECK(killer.chase.away_from_target_force_scale == 20.0f);
+		CHECK(killer.chase.has_collision);
+		CHECK(killer.chase.inherit_target_velocity);
+		CHECK(killer.chase.update_rate == 30.0f);
 		CHECK(sc.at("push killscreen", 601) - died == int64_t(sim::logic::logic_delay_ticks(timeline->kill_card_s)));
 		CHECK(sc.at("close killscreen", 601) - died ==
 				int64_t(sim::logic::logic_delay_ticks(timeline->spawn_screens_s)));

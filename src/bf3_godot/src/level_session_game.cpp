@@ -20,6 +20,7 @@
 #include "viewmodel.h"
 #include "viewmodel_muzzle.h"
 
+#include "bf3/core/gameplay/soldier_camera.h"
 #include "bf3/core/install.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/text.h"
@@ -1264,6 +1265,9 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			map_viewmodel_items(g);
 			const std::shared_ptr<const host::SharedLevel> shared = shared_level();
 			start_viewmodel_catalog(g, shared != nullptr ? shared->gunplay.get() : nullptr);
+			const bf3::core::gameplay::SoldierCameraDef *fps =
+					shared != nullptr && shared->cameras != nullptr ? shared->cameras->first_person() : nullptr;
+			g.shake_factor = fps != nullptr ? fps->shake_factor : 0.0f;
 			for (size_t t = 0; t < 2; ++t) {
 				Bf3Viewmodel *vm = memnew(Bf3Viewmodel);
 				vm->set_name(t == 0 ? "ViewmodelUS" : "ViewmodelRU");
@@ -1359,7 +1363,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			vf.grounded = (f.own_curr.flags & sim::soldier_flags::kGrounded) != 0;
 			vf.switch_back = mapper_.quick_switching_back();
 			if (g.audio != nullptr && g.audio->built()) {
-				const bf3::audio::CameraShake shake = g.audio->camera_shake();
+				const bf3::audio::CameraShake shake = g.audio->camera_shake(dt, g.shake_factor);
 				vf.shake_pitch_rad = shake.pitch;
 				vf.shake_yaw_rad = shake.yaw;
 				vf.shake_roll_rad = shake.roll;

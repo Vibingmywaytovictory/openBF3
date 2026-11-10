@@ -1364,13 +1364,14 @@ TEST_SUITE("audio-router") {
 			b.position = { p_x, 0.0f, p_z };
 			b.speed = p_speed;
 			b.spawn_time = r.render - 30 * kTick;
-			b.time = r.render;
+			b.time = b.spawn_time +
+					sw::SimTime(std::llround(double(p_z + 300.0f) / double(p_speed) * double(sw::kTimeUnitsPerSecond)));
 			return b;
 		};
 		{
 			ba::FlyByAudio fb(*r.mixer, sounds, r.wave.bank, ba::AudioTuning{}, *r.pool);
 			const uint64_t started = r.pool->started();
-			for (float z = -300.0f; z <= 300.0f; z += 10.0f) {
+			for (float z = -295.0f; z <= 295.0f; z += 10.0f) {
 				const std::vector<host::PresentedBullet> frame{ bullet(3, 10, 0, 0, 4.0f, z, 600.0f),
 					bullet(3, 11, 0, 0, 3.0f, z, 600.0f), bullet(3, 11, 1, 0, -3.0f, z, 600.0f),
 					bullet(4, 12, 0, 0, 16.0f, z, 600.0f), bullet(4, 13, 0, 0, 2.0f, z, 10.0f),
@@ -1499,8 +1500,81 @@ TEST_SUITE("audio-router") {
 		CHECK(open.farthest_m < 15.0f);
 	}
 
-	TEST_CASE("fly-bys: the patch's CameraShake values reach the router's HapticsFeed, summed per block, and end with "
-			  "the instance; the same patch started as a plain one-shot does not shake") {
+	TEST_CASE("the shake table: an entry is {pitch, yaw, roll, life 0.5 s} per source, weighted 2 x life x "
+			  "ShakeFactor, applied yaw then pitch then roll as rotations in table order, removed after its life ran "
+			  "below 0 (R-C1)") {
+		const auto write = [](ba::HapticsFeed &r_feed, ba::InstanceHandle p_source, float p_pitch, float p_yaw) {
+			ba::MixerFeedback fb;
+			fb.handle = p_source;
+			fb.frame = 512;
+			fb.haptics.shake_pitch = p_pitch;
+			fb.haptics.shake_yaw = p_yaw;
+			r_feed.note(fb);
+		};
+		ba::HapticsFeed once;
+		write(once, 7, 0.01f, 0.0f);
+		std::vector<float> weights;
+		for (int frame = 1; frame <= 32; ++frame) {
+			weights.push_back(once.step(1.0f / 60.0f, 1.0f).pitch / 0.01f);
+		}
+		CHECK(weights[0] == doctest::Approx(1.0f));
+		CHECK(weights[1] == doctest::Approx(0.9667f).epsilon(1e-3));
+		CHECK(weights[14] == doctest::Approx(0.5333f).epsilon(1e-3));
+		CHECK(weights[29] == doctest::Approx(0.0333f).epsilon(1e-2));
+		CHECK(std::fabs(weights[30]) < 1e-4f);
+		CHECK(weights[31] == 0.0f);
+		CHECK(once.sources() == 0);
+
+		ba::HapticsFeed held;
+		for (int frame = 0; frame < 10; ++frame) {
+			write(held, 3, 0.02f, 0.0f);
+			CHECK(held.step(1.0f / 60.0f, 1.0f).pitch == doctest::Approx(0.02f));
+		}
+		write(held, 3, 0.02f, 0.0f);
+		CHECK(held.step(1.0f / 60.0f, 0.5f).pitch == doctest::Approx(0.01f));
+		write(held, 3, 0.02f, 0.0f);
+		CHECK(held.step(1.0f / 60.0f, 0.0f).pitch == 0.0f);
+		CHECK(held.sources() == 1);
+
+		ba::HapticsFeed two;
+		write(two, 1, 0.01f, 0.0f);
+		write(two, 2, 0.0f, 0.02f);
+		const ba::CameraShake both = two.step(1.0f / 60.0f, 1.0f);
+		CHECK(both.sources == 2);
+		CHECK(both.pitch == doctest::Approx(std::asin(std::sin(0.01f) * std::cos(0.02f))).epsilon(1e-4));
+		CHECK(both.roll == doctest::Approx(std::sin(0.01f) * std::sin(0.02f)).epsilon(1e-2));
+	}
+
+	TEST_CASE("a fly-by step plays only when the bullet passes abeam of the listener inside the step, inside "
+			  "FlyBySoundRadius and at or above FlyBySoundSpeed over the step, with no angle test (R-D6)") {
+		const double dt = 1.0 / 60.0;
+		const ba::FlyByCheck abeam = ba::check_fly_by_step({ 0, 0, -10 }, { 0, 0, 10 }, dt, { 1, 0, 0 }, 3.0f, 100.0f);
+		CHECK(abeam.step == ba::FlyByStep::Plays);
+		CHECK(abeam.fraction == doctest::Approx(0.5f));
+		CHECK(abeam.distance_m == doctest::Approx(1.0f));
+		CHECK(abeam.point.x == 0.0f);
+		CHECK(abeam.point.z == doctest::Approx(0.0f));
+		CHECK(ba::check_fly_by_step({ 0, 0, -10 }, { 0, 0, 10 }, dt, { 5, 0, 0 }, 3.0f, 100.0f).step ==
+				ba::FlyByStep::Outside);
+		CHECK(ba::check_fly_by_step({ 0, 0, -30 }, { 0, 0, -10 }, dt, { 1, 0, 0 }, 3.0f, 100.0f).step ==
+				ba::FlyByStep::Ahead);
+		CHECK(ba::check_fly_by_step({ 0, 0, -0.5f }, { 0, 0, 0.5f }, dt, { 1, 0, 0 }, 3.0f, 100.0f).step ==
+				ba::FlyByStep::Slow);
+		CHECK(ba::check_fly_by_step({ 0, 0, 10 }, { 0, 0, 30 }, dt, { 1, 0, 0 }, 3.0f, 100.0f).step ==
+				ba::FlyByStep::Behind);
+		CHECK(ba::check_fly_by_step({ 0, 0, -10 }, { 0, 0, 10 }, 0.0, { 1, 0, 0 }, 3.0f, 100.0f).step ==
+				ba::FlyByStep::Still);
+		CHECK(ba::check_fly_by_step({ 0, 0, -10 }, { 0, 0, 10 }, dt, { 1, 0, 0 }, 0.0f, 100.0f).step ==
+				ba::FlyByStep::Still);
+		CHECK(ba::check_fly_by_step({ 0, 0, -10 }, { 0, 0, 0 }, dt, { 1, 0, 0 }, 3.0f, 100.0f).step ==
+				ba::FlyByStep::Ahead);
+		CHECK(ba::check_fly_by_step({ 0, 0, -10 }, { 0, 0, 10 }, dt, { 0, 2.9f, 0 }, 3.0f, 1000.0f).step ==
+				ba::FlyByStep::Plays);
+	}
+
+	TEST_CASE(
+			"fly-bys: the patch's CameraShake values reach the router's shake table, one entry per instance, and "
+			"fade out over 0.5 s after the instance ends; the same patch started as a plain one-shot does not shake") {
 		Rig r;
 		constexpr uint64_t kMatch = 0x5eed;
 		Builder b;
@@ -1519,7 +1593,7 @@ TEST_SUITE("audio-router") {
 		std::vector<ba::FlyBySound> sounds(1);
 		sounds[0] = ba::FlyBySound{ shaking, 15.0f, 20.0f };
 		ba::FlyByAudio fb(*r.mixer, sounds, r.wave.bank, ba::AudioTuning{}, *r.pool);
-		CHECK(r.router->haptics().current(r.mixer->clock()).sources == 0);
+		CHECK(r.router->haptics().sources() == 0);
 		std::vector<host::PresentedBullet> frame(2);
 		for (uint32_t i = 0; i < 2; ++i) {
 			host::PresentedBullet &x = frame[i];
@@ -1542,19 +1616,23 @@ TEST_SUITE("audio-router") {
 		r.end();
 		r.idle(4);
 		CHECK(r.pool->started() == 3);
-		const ba::CameraShake both = r.router->haptics().current(r.mixer->clock());
+		CHECK(fb.stats().starts == 2);
+		CHECK(r.router->haptics().sources() == 2);
+		const ba::CameraShake both = r.router->haptics().step(0.0f, 1.0f);
 		MESSAGE("shake: pitch ", both.pitch, ", yaw ", both.yaw, ", roll ", both.roll, " from ", both.sources,
 				" instances");
-		CHECK(fb.stats().starts == 2);
 		CHECK(both.sources == 2);
-		CHECK(both.pitch == doctest::Approx(0.8f));
-		CHECK(both.yaw == doctest::Approx(-1.6f));
-		CHECK(both.roll == doctest::Approx(0.4f));
+		CHECK(both.pitch == doctest::Approx(0.80716f).epsilon(1e-4));
+		CHECK(both.yaw == doctest::Approx(-1.76934f).epsilon(1e-4));
+		CHECK(both.roll == doctest::Approx(-0.02140f).epsilon(1e-4));
 		CHECK(r.router->haptics().blocks() > 0);
 		r.idle(int(ba::kOneShotStopAfterSeconds * 60.0) + 60);
 		CHECK(r.pool->live() == 0);
-		CHECK(r.router->haptics().current(r.mixer->clock()).sources == 0);
-		CHECK(r.router->haptics().peak() == doctest::Approx(1.6f));
+		for (int f = 0; f < 32; ++f) {
+			r.router->haptics().step(1.0f / 60.0f, 1.0f);
+		}
+		CHECK(r.router->haptics().sources() == 0);
+		CHECK(r.router->haptics().peak() == doctest::Approx(0.8f));
 	}
 
 	TEST_CASE(

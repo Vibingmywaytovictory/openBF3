@@ -45,6 +45,18 @@ static_assert(std::is_trivially_copyable_v<FlyByAudioStats>);
 
 float closest_fraction(const Vec3 &p_from, const Vec3 &p_to, const Vec3 &p_point);
 
+enum class FlyByStep : uint8_t { Still, Ahead, Behind, Outside, Slow, Plays };
+
+struct FlyByCheck {
+	FlyByStep step = FlyByStep::Still;
+	float fraction = 0.0f;
+	Vec3 point;
+	float distance_m = 0.0f;
+};
+
+FlyByCheck check_fly_by_step(const Vec3 &p_from, const Vec3 &p_to, double p_seconds, const Vec3 &p_listener,
+		float p_radius_m, float p_min_speed);
+
 class FlyByAudio {
 public:
 	FlyByAudio(MixerCore &r_mixer, std::vector<FlyBySound> p_sounds,

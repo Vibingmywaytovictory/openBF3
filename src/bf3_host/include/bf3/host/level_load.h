@@ -30,6 +30,7 @@ namespace bf3::core::gameplay {
 class LogicGraph;
 struct ScoringTable;
 struct DeathTimeline;
+struct SoldierCameras;
 struct EorFading;
 struct EorTimeline;
 }
@@ -122,6 +123,7 @@ struct SharedLevel {
 	std::shared_ptr<const core::gameplay::EorTimeline> eor;
 	std::shared_ptr<const core::gameplay::EorFading> eor_fading;
 	std::shared_ptr<const core::gameplay::DeathTimeline> death;
+	std::shared_ptr<const core::gameplay::SoldierCameras> cameras;
 	std::vector<std::string> tdm_notes;
 };
 

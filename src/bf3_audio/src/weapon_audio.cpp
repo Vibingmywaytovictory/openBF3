@@ -1685,6 +1685,10 @@ const HapticsFeed &WeaponAudioRouter::haptics() const {
 	return impl_->haptics;
 }
 
+HapticsFeed &WeaponAudioRouter::haptics() {
+	return impl_->haptics;
+}
+
 void WeaponAudioRouter::set_trace(bool p_on) {
 	impl_->trace = p_on;
 	if (!p_on) {

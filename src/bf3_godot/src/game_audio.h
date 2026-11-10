@@ -90,7 +90,7 @@ public:
 	bool weapon_bound(uint16_t p_def) const;
 	std::span<const audio::KitAudioVariant> sound_variants() const;
 	GameAudioStats stats() const;
-	audio::CameraShake camera_shake() const;
+	audio::CameraShake camera_shake(float p_dt, float p_shake_factor);
 	std::vector<std::string> load_report() const;
 	void set_sound_areas(const sim::logic::SoundAreaNatives *p_areas);
 	const audio::AreaFeedStats &area_feed() const;

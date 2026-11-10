@@ -153,6 +153,7 @@ struct GameState {
 	std::vector<bool> def_switch_when_empty;
 	std::vector<bf3::core::gameplay::WeaponAiming> def_aiming;
 	double vm_release_end_seen = -1;
+	float shake_factor = 0.0f;
 	bool slot_selectable(const bf3::net::WeaponSlotWire &p_slot) const;
 	void want_catalog_weapons(std::span<const uint16_t> p_defs);
 	std::unique_ptr<bf3::sim::CollisionWorld> world;

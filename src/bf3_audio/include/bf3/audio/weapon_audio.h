@@ -314,6 +314,7 @@ public:
 	void set_observer(WeaponAudioObserver *p_observer);
 	const WeaponAudioStats &stats() const;
 	const HapticsFeed &haptics() const;
+	HapticsFeed &haptics();
 
 	void set_trace(bool p_on);
 	void take_starts(std::vector<WeaponSoundStart> &r_out);
