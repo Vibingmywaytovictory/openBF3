@@ -75,6 +75,8 @@ public:
 
 	bool valid(NavQuery &p_query, uint32_t p_ahead) const;
 
+	bool crouch_within(NavQuery &p_query, const Vec3 &p_position, float p_reach, uint32_t p_ahead) const;
+
 	bool move_over_drop(NavQuery &p_query, const NavCorner &p_corner, Vec3 *r_end);
 	Vec3 position() const;
 	Vec3 goal() const;

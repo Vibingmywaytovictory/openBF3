@@ -39,6 +39,7 @@ constexpr float kArriveVertical = 1.5f;
 constexpr float kBackRadius = 16.0f;
 constexpr float kSprintStraight = 6.0f;
 constexpr float kSprintCone = 20.0f * kPi / 180.0f;
+constexpr uint32_t kCrouchAheadPolys = 8;
 
 }
 
@@ -350,7 +351,9 @@ struct WalkerBrain::Impl {
 			uint8_t first_area = 0;
 			uint16_t first_flags = 0;
 			nav_poly_area_flags(p_view.query->world(), corridor.first_poly(), &first_area, &first_flags);
-			if (first_area == kNavAreaCrouch) {
+			const NavParams &nav = p_view.query->world().params();
+			if (first_area == kNavAreaCrouch ||
+					corridor.crouch_within(*p_view.query, pos, nav.agent_radius + nav.cell_size, kCrouchAheadPolys)) {
 				area = kNavAreaCrouch;
 			}
 		}

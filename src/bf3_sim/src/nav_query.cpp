@@ -342,6 +342,32 @@ bool NavCorridor::valid(NavQuery &p_query, uint32_t p_ahead) const {
 	return m.corridor.isValid(int(p_ahead), q.query.get(), &q.filter);
 }
 
+bool NavCorridor::crouch_within(NavQuery &p_query, const Vec3 &p_position, float p_reach, uint32_t p_ahead) const {
+	const Impl &m = *impl_;
+	if (m.empty) {
+		return false;
+	}
+	const dtPolyRef *path = m.corridor.getPath();
+	const int n = std::min(m.corridor.getPathCount(), int(std::min<uint32_t>(p_ahead, kMaxNavPathPolys)));
+	const NavWorld &world = p_query.world();
+	for (int i = 0; i < n; ++i) {
+		uint8_t area = 0;
+		nav_poly_area_flags(world, NavPolyRef(path[i]), &area, nullptr);
+		if (area != kNavAreaCrouch) {
+			continue;
+		}
+		Vec3 at{};
+		if (!nav_closest_point(p_query, NavPolyRef(path[i]), p_position, &at)) {
+			continue;
+		}
+		const float dx = at[0] - p_position[0], dz = at[2] - p_position[2];
+		if (dx * dx + dz * dz <= p_reach * p_reach) {
+			return true;
+		}
+	}
+	return false;
+}
+
 bool NavCorridor::move_over_drop(NavQuery &p_query, const NavCorner &p_corner, Vec3 *r_end) {
 	Impl &m = *impl_;
 	if (m.empty || (p_corner.flags & nav_flags::kDrop) == 0) {

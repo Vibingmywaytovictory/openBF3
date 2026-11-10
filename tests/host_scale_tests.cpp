@@ -503,6 +503,35 @@ TEST_SUITE("host-scale-unit") {
 		CHECK(w.goals_started >= 3);
 	}
 
+	TEST_CASE("host.scale.unit: a door under a low lintel: the walker crouches before its capsule reaches the lintel "
+			  "and passes") {
+		std::vector<StaticTriangle> t;
+		add_floor(t, 0, 0, 128, 64, 0.0f);
+		add_wall_x(t, 63.9f, 0.1f, 63.9f, { { 30.0f, 33.0f } });
+		add_block(t, { 63.9f, 1.43f, 30.0f }, { 64.2f, 3.0f, 33.0f });
+		std::vector<SpawnPoint> spawns;
+		for (int i = 0; i < 4; ++i) {
+			SpawnPoint p;
+			p.position = { 56.0f, 0.05f, 28.0f + 2.0f * float(i) };
+			p.team = 1 + (i % 2);
+			p.index = uint32_t(i);
+			spawns.push_back(p);
+		}
+		const Synthetic level =
+				make_synthetic(t, t, tiles_range(0, 0, 1, 0), spawns, { { 100, 0, 32 }, { 20, 0, 32 } });
+		const ArenaRun r = run_arena(level, 4, 60.0, 9, true);
+		const sim::bots::WalkerStats &w = r.bots.walkers;
+		std::printf("host.scale.unit lintel: stuck %llu, goals started %llu reached %llu abandoned %llu, crouch ticks "
+					"%llu, metres min %.0f\n",
+				(unsigned long long)w.stuck_events, (unsigned long long)w.goals_started,
+				(unsigned long long)w.goals_reached, (unsigned long long)w.goals_abandoned,
+				(unsigned long long)w.crouch_ticks, *std::min_element(r.metres.begin(), r.metres.end()));
+		CHECK(w.goals_abandoned == 0);
+		CHECK(w.goals_reached >= 8);
+		CHECK(w.crouch_ticks > 0);
+		CHECK(*std::min_element(r.metres.begin(), r.metres.end()) >= 100.0);
+	}
+
 	TEST_CASE("host.scale.unit: PathService never spends more than its budget; 64 requests at once count ticks at the budget") {
 		const std::vector<StaticTriangle> t = arena();
 		const Synthetic level = make_synthetic(t, t, tiles_range(0, 0, 3, 3), arena_spawns(true, false), {});
