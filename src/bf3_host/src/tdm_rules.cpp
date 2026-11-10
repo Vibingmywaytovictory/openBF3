@@ -202,7 +202,6 @@ const Key kKeys[] = {
 	{ "spawn_chest_height_m", KeyKind::Float, 0.0f, 10.0f, BF3_TDM_FIELD(spawn_chest_height_m) },
 	{ "team_kill_weight", KeyKind::Float, -100.0f, 100.0f, BF3_TDM_FIELD(team_kill_weight) },
 	{ "rotate_teams", KeyKind::Bool, 0, 0, BF3_TDM_FIELD(rotate_teams) },
-	{ "suppression_resets_regen", KeyKind::Bool, 0, 0, BF3_TDM_FIELD(suppression_resets_regen) },
 	{ "immunity_abort_map", KeyKind::Custom, 0, 0, nullptr, {}, parse_immunity_abort_map },
 	{ "measured", KeyKind::Bool, 0, 0, BF3_TDM_FIELD(measured) },
 };
@@ -1137,6 +1136,7 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		}
 	}
 
+	const bool suppression_aborts = p_gunplay.suppression_def().aborts_regeneration;
 	for (size_t i = 0; i < n; ++i) {
 		Impl::Slot &s = m.slots[i];
 		sim::SoldierState &st = r_states[i];
@@ -1146,6 +1146,9 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		if (st.damage > 0.0f) {
 			s.last_damage = p_tick;
 			s.damaged = true;
+		}
+		if (suppression_aborts && p_gunplay.suppressed(uint8_t(i), p_tick)) {
+			s.last_damage = p_tick;
 		}
 		if (st.health < m.max_health && p_tick >= s.last_damage + m.regen_delay_ticks) {
 			st.health = std::min(m.max_health, st.health + m.regen_per_tick);

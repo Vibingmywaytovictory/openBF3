@@ -17,7 +17,7 @@ struct SwayContext {
 	Zoom zoom = Zoom::NoZoom;
 	SwayMove move = SwayMove::Base;
 	float move_fraction = 1.0f;
-	bool suppressed = false;
+	float suppression = 0;
 	bool supported = false;
 	bool light_on = false;
 
@@ -34,8 +34,6 @@ float enter_spread(float p_spread, const Dispersion &p_new, const Mechanics &p_m
 float spread_after_shot(float p_spread, const Dispersion &p_dispersion);
 
 float spread_at(float p_spread, SimTime p_spread_time, SimTime p_now, const Dispersion &p_dispersion, const Mechanics &p_mechanics);
-
-SwayContext suppressed_sway(const SwayContext &p_sway, float p_suppression, const Mechanics &p_mechanics);
 
 Vec3 sample_cone(const Vec3 &p_aim, float p_spread_degrees, float p_u_radius, float p_u_angle, DiscDistribution p_disc);
 

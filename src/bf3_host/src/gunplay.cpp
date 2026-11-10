@@ -52,7 +52,13 @@ bool alive(const sim::SoldierState &p_state) {
 constexpr std::array<std::array<uint8_t, 2>, gp::kCapsuleTransitions> kTransitionPoses{ { { 0, 1 }, { 0, 2 }, { 1, 0 }, { 1, 2 }, { 2, 0 }, { 2, 1 } } };
 
 constexpr size_t kAckRing = 64;
+constexpr size_t kShotBoostRing = 64;
 
+struct ShotBoost {
+	uint32_t shot_index = 0;
+	float boost = 1.0f;
+	bool set = false;
+};
 }
 
 uint64_t gunplay_level_hash(std::string_view p_level, std::string_view p_mode) {
@@ -481,7 +487,8 @@ struct Gunplay::Impl {
 	std::array<uint8_t, net::kMaxSlots> teams{};
 	sw::SuppressionDef suppression_def;
 	std::array<sw::SuppressionState, net::kMaxSlots> suppression{};
-	std::array<sim::Tick, net::kMaxSlots> near_miss_tick{};
+	std::array<std::array<ShotBoost, kShotBoostRing>, net::kMaxSlots> shot_boost{};
+	std::unordered_map<uint64_t, sim::Vec3> update_start;
 	std::vector<sw::Projectile> flying;
 	std::unordered_map<uint64_t, size_t> landed;
 	sw::ProjectileStepOutput step_out;
@@ -495,6 +502,14 @@ struct Gunplay::Impl {
 	double weapons_acc_ms = 0;
 	sw::SoldierWeaponsState empty_state;
 	std::vector<RewindTraceRow> rewind_rows;
+
+	float boost_at_spawn(uint32_t p_slot, uint32_t p_shot, float p_now) const {
+		if (p_slot >= shot_boost.size()) {
+			return p_now;
+		}
+		const ShotBoost &b = shot_boost[p_slot][p_shot % kShotBoostRing];
+		return b.set && b.shot_index == p_shot ? b.boost : p_now;
+	}
 
 	void clear(uint8_t p_slot) {
 		Slot &s = slots[p_slot];
@@ -625,12 +640,16 @@ sw::SuppressionState Gunplay::suppression(uint8_t p_slot) const {
 	return p_slot < impl_->suppression.size() ? impl_->suppression[p_slot] : sw::SuppressionState();
 }
 
-float Gunplay::suppression_level(uint8_t p_slot, uint32_t p_tick) const {
-	return sw::suppression_level(impl_->suppression_def, suppression(p_slot), p_tick);
+uint16_t Gunplay::suppression_counter(uint8_t p_slot, uint32_t p_tick) const {
+	return sw::suppression_counter(impl_->suppression_def, suppression(p_slot), p_tick);
 }
 
-bool Gunplay::near_missed(uint8_t p_slot, uint32_t p_tick) const {
-	return p_slot < impl_->near_miss_tick.size() && p_tick != 0 && impl_->near_miss_tick[p_slot] == p_tick;
+bool Gunplay::suppressed(uint8_t p_slot, uint32_t p_tick) const {
+	return sw::suppressed(impl_->suppression_def, suppression(p_slot), p_tick);
+}
+
+float Gunplay::suppression_scale(uint8_t p_slot, uint32_t p_tick) const {
+	return sw::suppression_scale(impl_->suppression_def, suppression(p_slot), p_tick);
 }
 
 void Gunplay::suppress(uint32_t p_tick, std::span<const sim::SoldierState> p_states) {
@@ -647,6 +666,7 @@ void Gunplay::suppress(uint32_t p_tick, std::span<const sim::SoldierState> p_sta
 	for (size_t i = 0; i < live.size(); ++i) {
 		m.landed.emplace(key(live[i].player_slot, live[i].shot_index, live[i].pellet), i);
 	}
+	const bool update_end = p_tick % sw::kSuppressionUpdateTicks == 0;
 	const size_t n = std::min(p_states.size(), m.slots.size());
 	for (const sw::Projectile &b : m.flying) {
 		if ((b.flags & sw::projectile_flags::kResting) != 0 || b.def >= m.table->defs.size()) {
@@ -656,12 +676,14 @@ void Gunplay::suppress(uint32_t p_tick, std::span<const sim::SoldierState> p_sta
 		if (!(pd.suppression_min > 0.0f || pd.suppression_max > 0.0f)) {
 			continue;
 		}
+		const uint64_t k = key(b.player_slot, b.shot_index, b.pellet);
+		const auto start = m.update_start.try_emplace(k, point(b.position)).first;
 		sim::Vec3 to{};
-		sw::SegmentEnd end = sw::SegmentEnd::Flying;
-		if (const auto it = m.landed.find(key(b.player_slot, b.shot_index, b.pellet)); it != m.landed.end()) {
+		bool ended = false;
+		if (const auto it = m.landed.find(k); it != m.landed.end()) {
 			to = point(live[it->second].position);
 		} else {
-			end = sw::SegmentEnd::Ended;
+			ended = true;
 			bool found = false;
 			for (const sw::ImpactEvent &i : m.step_out.impacts) {
 				if (!found && i.player_slot == b.player_slot && i.shot_index == b.shot_index && i.pellet == b.pellet) {
@@ -676,21 +698,34 @@ void Gunplay::suppress(uint32_t p_tick, std::span<const sim::SoldierState> p_sta
 				}
 			}
 			if (!found) {
+				m.update_start.erase(start);
 				continue;
 			}
 		}
-		const sim::Vec3 from = point(b.position);
-		const bool first = b.time <= b.spawn_time;
+		if (!ended && !update_end) {
+			continue;
+		}
+		const sim::Vec3 from = start->second;
+		if (ended) {
+			m.update_start.erase(start);
+		} else {
+			start->second = to;
+		}
+		const sim::Vec3 origin = point(b.origin);
 		const uint8_t shooter_team = b.player_slot < m.teams.size() ? m.teams[b.player_slot] : uint8_t(0);
+		const float boost = m.boost_at_spawn(b.player_slot, b.shot_index,
+				effects(uint8_t(std::min<uint32_t>(b.player_slot, 255u)))[gp::SpecializationTarget::SuppressionBoost]);
 		for (size_t v = 0; v < n; ++v) {
 			if (v == b.player_slot || !m.slots[v].armed || !alive(p_states[v]) ||
 					(shooter_team != 0 && m.teams[v] == shooter_team)) {
 				continue;
 			}
 			const sim::SoldierState &st = p_states[v];
-			const sim::Vec3 centre{ st.position[0], st.position[1] + sim::eye_height(m.shared->motor, st),
-				st.position[2] };
-			if (!sw::passes_near(from, to, first, end, centre, m.suppression_def.sphere_radius)) {
+			const sim::Vec3 centre{ st.position[0],
+				st.position[1] + 0.5f * m.shared->motor.poses[size_t(st.pose)].height, st.position[2] };
+			const std::optional<sw::NearMiss> miss =
+					sw::near_miss(from, to, origin, centre, m.suppression_def.sphere_radius);
+			if (!miss) {
 				continue;
 			}
 			const bool hit =
@@ -701,15 +736,17 @@ void Gunplay::suppress(uint32_t p_tick, std::span<const sim::SoldierState> p_sta
 			if (hit) {
 				continue;
 			}
-			const float distance = core::vec::length(core::vec::sub(centre, point(b.origin)));
-			const float amount = sw::suppression_multiplier(pd, distance) * sw::kSuppressionPerMultiplier *
-					effects(uint8_t(
-							std::min<uint32_t>(b.player_slot, 255u)))[gp::SpecializationTarget::SuppressionBoost] *
-					effects(uint8_t(v))[gp::SpecializationTarget::SuppressionResist];
-			m.suppression[v] = sw::add_suppression(m.suppression_def, m.suppression[v], p_tick, amount);
-			m.near_miss_tick[v] = p_tick;
+			const uint32_t add = sw::near_miss_add(sw::near_miss_amount(pd, m.suppression_def, *miss),
+					effects(uint8_t(v))[gp::SpecializationTarget::SuppressionResist], boost);
+			if (add == 0) {
+				continue;
+			}
+			m.suppression[v] = sw::add_suppression(m.suppression_def, m.suppression[v], p_tick, add);
 			++m.stats.near_misses;
 		}
+	}
+	if (update_end) {
+		std::erase_if(m.update_start, [&](const auto &p_entry) { return !m.landed.contains(p_entry.first); });
 	}
 }
 
@@ -777,7 +814,8 @@ void Gunplay::step_soldier(uint8_t p_slot, const sim::Command &p_command, const 
 	if (slot_field > sw::kMaxWeaponSlots) {
 		++m.stats.slot_field_clamped;
 	}
-	const sw::WeaponContext ctx = sw::make_weapon_context(m.shared->motor, p_before, p_after, p_command);
+	const sw::WeaponContext ctx = sw::make_weapon_context(
+			m.shared->motor, p_before, p_after, p_command, suppression_scale(p_slot, p_command.tick));
 	sw::step_weapons_with_rules(*m.table, s.weapons, p_command, ctx, m.match_seed, s.spawn_tick, s.out);
 	s.out_tick = p_command.tick;
 	if ((s.out.events & sw::weapon_events::kSwitchRefused) != 0) {
@@ -819,6 +857,9 @@ void Gunplay::step_soldier(uint8_t p_slot, const sim::Command &p_command, const 
 				m.gadgets->deploy(e, s.team, p_command.tick, m.world);
 			} else if (!m.projectiles->spawn(e).ok()) {
 				++m.stats.projectiles_refused;
+			} else {
+				m.shot_boost[p_slot][e.shot_index % kShotBoostRing] =
+						ShotBoost{ e.shot_index, effects(p_slot)[gp::SpecializationTarget::SuppressionBoost], true };
 			}
 			if (refused) {
 				m.rewind->note_refused(p_slot, e.shot_index);

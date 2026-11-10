@@ -107,7 +107,7 @@ void CrosshairWalkRun::sample_ramp(Ramp &r_ramp, float p_arm, double p_want) {
 
 double CrosshairWalkRun::blend_arm(const host::PresentationFrame &p_frame, const CrosshairWalkInputs &p_in) const {
 	const sw::WeaponSimDef &def = p_in.table->defs[p_in.weapon->def];
-	const sw::SwayContext sway = sw::suppressed_sway(sw::weapon_sway_context(level_->motor, p_frame.own_curr, p_frame.own_command), 0.0f, p_in.table->mechanics);
+	const sw::SwayContext sway = sw::weapon_sway_context(level_->motor, p_frame.own_curr, p_frame.own_command);
 	return core::ui::hud_crosshair_arm(sw::effective_dispersion(def, sway).min_angle, offset_);
 }
 

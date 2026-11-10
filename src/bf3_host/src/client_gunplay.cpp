@@ -260,10 +260,14 @@ void ClientGunplay::snapshot(const net::Snapshot &p_snapshot, bool p_newer) {
 		if (wire_valid_) {
 			wire_ = *p_snapshot.own_weapons;
 		}
-		suppression_ = sim::weapons::SuppressionState();
-		if (p_snapshot.own_suppression && p_snapshot.own_suppression->age <= p_snapshot.server_tick) {
-			suppression_.level = p_snapshot.own_suppression->level;
-			suppression_.hit_tick = p_snapshot.server_tick - p_snapshot.own_suppression->age;
+		const bool have = p_snapshot.own_suppression && p_snapshot.own_suppression->age <= p_snapshot.server_tick;
+		if (inputs_ != nullptr) {
+			suppression_ = sim::weapons::mirror_suppression(inputs_->suppression, suppression_,
+					have ? p_snapshot.own_suppression->level : uint16_t(0),
+					have ? p_snapshot.server_tick - p_snapshot.own_suppression->age : sim::Tick(0));
+			if (lane_ != nullptr) {
+				lane_->set_suppression(inputs_->suppression, suppression_);
+			}
 		}
 		wire_tick_ = p_snapshot.server_tick;
 	}
@@ -604,7 +608,7 @@ void ClientGunplay::publish(PresentationFrame &r_frame, std::span<const net::Oth
 	r_frame.own_team = team_;
 	r_frame.own_weapons_valid = false;
 	r_frame.own_suppression = on_ && inputs_ != nullptr && r_frame.valid
-			? sim::weapons::suppression_level(inputs_->suppression, suppression_, r_frame.tick)
+			? sim::weapons::suppression_scale(inputs_->suppression, suppression_, r_frame.tick)
 			: 0.0f;
 	if (on_ && r_frame.valid && r_frame.tick > 0) {
 		const sim::WeaponPredictionEntry *a = lane_->find(r_frame.tick - 1u);

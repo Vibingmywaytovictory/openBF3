@@ -33,7 +33,6 @@ const Key kKeys[] = {
 	{ "falloff_basis", KeyKind::Choice, 0, 0, BF3_MECH_FIELD(falloff_basis), kFalloffBases },
 	{ "blast_falloff", KeyKind::Choice, 0, 0, BF3_MECH_FIELD(blast_falloff), kLinear },
 	{ "stance_transition_penalty", KeyKind::Bool, 0, 0, BF3_MECH_FIELD(stance_transition_penalty) },
-	{ "suppression_threshold", KeyKind::Float, 0.0f, 1.0f, BF3_MECH_FIELD(suppression_threshold) },
 	{ "apply_protection_threshold", KeyKind::Bool, 0, 0, BF3_MECH_FIELD(apply_protection_threshold) },
 	{ "bullets_pass_soldiers", KeyKind::Bool, 0, 0, BF3_MECH_FIELD(bullets_pass_soldiers) },
 	{ "blast_occlusion", KeyKind::Bool, 0, 0, BF3_MECH_FIELD(blast_occlusion) },

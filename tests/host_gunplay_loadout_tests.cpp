@@ -440,8 +440,8 @@ TEST_SUITE("host-gunplay-loadout") {
 		tdm::check_install_unchanged(*level);
 	}
 
-	TEST_CASE("suppression: near misses suppress enemies by the projectile's multiplier, Cover halves it, the "
-			  "Suppression specialization raises it") {
+	TEST_CASE("suppression: near misses fill an enemy's counter by the projectile's multiplier (Q9), Cover halves it, "
+			  "the shooter's Suppression at the bullet's spawn raises it (R2-A7), 0.4 enters the suppressed state") {
 		tdm::TdmLevel *level = tdm::load_tdm_level_once();
 		if (level == nullptr) {
 			return;
@@ -544,34 +544,90 @@ TEST_SUITE("host-gunplay-loadout") {
 		for (uint32_t i = 0; i < 90; ++i) {
 			step();
 		}
-		CHECK(g.suppression_level(plain, tick) == 0.0f);
-		REQUIRE(fire(shooter, 5) == 5);
+		const auto counter = [&](uint8_t p_slot) { return g.suppression_counter(p_slot, tick); };
+		const auto about = [](uint32_t p_value, uint32_t p_expected, uint32_t p_rounds) {
+			return std::abs(int64_t(p_value) - int64_t(p_expected)) <= int64_t(2 * p_rounds);
+		};
+		CHECK(counter(plain) == 0);
+		REQUIRE(fire(shooter, 1) == 1);
+		const uint32_t per_round = counter(plain);
+		const uint32_t covered_round = counter(covered);
+		REQUIRE(per_round > 0);
+		REQUIRE(fire(shooter, 4) == 4);
 		const sim::Tick burst = g.suppression(plain).hit_tick;
-		const float per_round = 7.0f * sim::weapons::kSuppressionPerMultiplier;
-		std::printf("suppression: 5 near misses at %.1f m: plain %.4f, Cover %.4f, team mate %.4f, %llu near misses, "
-					"%llu hits\n",
-				double(length), double(g.suppression_level(plain, tick)), double(g.suppression_level(covered, tick)),
-				double(g.suppression_level(mate, tick)), (unsigned long long)g.stats().near_misses,
+		std::printf("suppression: 5 near misses at %.1f m: plain %u (%u a round), Cover %u (%u a round), team mate %u, "
+					"%llu near misses, %llu hits\n",
+				double(length), unsigned(counter(plain)), unsigned(per_round), unsigned(counter(covered)),
+				unsigned(covered_round), unsigned(counter(mate)), (unsigned long long)g.stats().near_misses,
 				(unsigned long long)sink.hits);
 		CHECK(sink.hits == 0);
 		CHECK(g.stats().near_misses == 10);
-		CHECK(g.suppression_level(plain, tick) == doctest::Approx(5 * per_round).epsilon(1e-3));
-		CHECK(g.suppression_level(covered, tick) == doctest::Approx(5 * per_round * 0.5f).epsilon(1e-3));
-		CHECK(g.suppression_level(mate, tick) == 0.0f);
-		CHECK(g.suppression_level(shooter, tick) == 0.0f);
-		CHECK(g.suppression_level(plain, tick) >= sd.low_threshold);
-		CHECK(g.suppression_level(covered, tick) < sd.low_threshold);
+		CHECK(per_round > 3000);
+		CHECK(per_round < 7000);
+		CHECK(std::abs(int(covered_round) - int(sim::weapons::near_miss_add(per_round, 0.5f, 1.0f))) <= 1);
+		CHECK(about(counter(plain), 5 * per_round, 5));
+		CHECK(about(counter(covered), 5 * covered_round, 5));
+		CHECK(counter(mate) == 0);
+		CHECK(counter(shooter) == 0);
+		CHECK_FALSE(g.suppressed(plain, tick));
+		CHECK(g.suppression_scale(plain, tick) == 0.0f);
+		REQUIRE(fire(shooter, 2) == 2);
+		const sim::Tick seventh = g.suppression(plain).hit_tick;
+		CHECK(about(counter(plain), 7 * per_round, 7));
+		CHECK(float(counter(plain)) / 65535.0f >= sd.high_threshold);
+		CHECK(g.suppressed(plain, tick));
+		CHECK_FALSE(g.suppressed(covered, tick));
+		CHECK(g.suppression_scale(plain, tick) ==
+				doctest::Approx(
+						std::log10(1.0f + 9.0f * sim::weapons::suppression_level(sd, g.suppression(plain), tick))));
+		CHECK(g.suppression_scale(plain, tick) > 0.0f);
+		CHECK(burst < seventh);
 
-		CHECK(g.suppression_level(plain, burst + 2 * sim::kSimHz) == doctest::Approx(5 * per_round).epsilon(1e-3));
-		CHECK(g.suppression_level(plain, burst + 2 * sim::kSimHz + 30) ==
-				doctest::Approx(5 * per_round - 0.25f).epsilon(1e-3));
-		while (tick < burst + 3 * sim::kSimHz) {
+		const uint16_t stored = g.suppression(plain).counter;
+		CHECK(g.suppression_counter(plain, seventh + 2 * sim::kSimHz) == stored);
+		CHECK(g.suppression_counter(plain, seventh + 2 * sim::kSimHz + 30) == stored - 2500);
+		while (tick < seventh + 4 * sim::kSimHz) {
 			step();
 		}
-		CHECK(g.suppression_level(plain, tick) == 0.0f);
-		REQUIRE(fire(boosted, 1) == 1);
-		CHECK(g.suppression_level(plain, tick) == doctest::Approx(per_round * 1.5f).epsilon(1e-3));
-		CHECK(g.suppression_level(covered, tick) == doctest::Approx(per_round * 1.5f * 0.5f).epsilon(1e-3));
+		CHECK(counter(plain) == 0);
+		CHECK_FALSE(g.suppressed(plain, tick));
+
+		const uint32_t boosted_round = sim::weapons::near_miss_add(per_round, 1.0f, 1.5f);
+		const auto respawn = [&](uint8_t p_slot, const host::LoadoutChoice &p_choice) {
+			REQUIRE(g.select_loadout(p_slot, 1, assault, p_choice));
+			g.on_spawn(p_slot, assault, 1, tick);
+		};
+		const auto quiet = [&] {
+			const sim::Tick until = tick + 3 * sim::kSimHz;
+			while (tick < until) {
+				step();
+			}
+			REQUIRE(counter(plain) == 0);
+		};
+		respawn(shooter, specialization(boost));
+		CHECK(g.effects(shooter)[core::gameplay::SpecializationTarget::SuppressionBoost] == 1.5f);
+		REQUIRE(fire(shooter, 1) == 1);
+		CHECK(about(counter(plain), boosted_round, 1));
+		const uint32_t boosted_first = counter(plain);
+		quiet();
+
+		firing[shooter] = true;
+		const uint64_t shots = g.stats().shots;
+		for (uint32_t i = 0; i < 120 && g.stats().shots == shots; ++i) {
+			step();
+		}
+		firing[shooter] = false;
+		REQUIRE(g.stats().shots == shots + 1);
+		CHECK(counter(plain) == 0);
+		respawn(shooter, host::LoadoutChoice{});
+		CHECK(g.effects(shooter)[core::gameplay::SpecializationTarget::SuppressionBoost] == 1.0f);
+		for (uint32_t i = 0; i < 12; ++i) {
+			step();
+		}
+		CHECK(about(counter(plain), boosted_first, 1));
+		quiet();
+		REQUIRE(fire(shooter, 1) == 1);
+		CHECK(about(counter(plain), per_round, 1));
 		tdm::check_install_unchanged(*level);
 	}
 

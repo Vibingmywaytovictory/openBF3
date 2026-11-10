@@ -220,8 +220,9 @@ public:
 	sim::Command clamp_pitch(uint8_t p_slot, const sim::Command &p_command, sim::Pose p_pose) const;
 	const sim::weapons::SuppressionDef &suppression_def() const;
 	sim::weapons::SuppressionState suppression(uint8_t p_slot) const;
-	float suppression_level(uint8_t p_slot, uint32_t p_tick) const;
-	bool near_missed(uint8_t p_slot, uint32_t p_tick) const;
+	uint16_t suppression_counter(uint8_t p_slot, uint32_t p_tick) const;
+	bool suppressed(uint8_t p_slot, uint32_t p_tick) const;
+	float suppression_scale(uint8_t p_slot, uint32_t p_tick) const;
 	float received_damage(uint8_t p_victim, const sim::weapons::DamageEvent &p_event) const;
 	bool armed(uint8_t p_slot) const;
 	std::span<const sim::weapons::Deployable> deployables() const;

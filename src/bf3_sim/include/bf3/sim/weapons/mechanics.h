@@ -29,8 +29,6 @@ struct Mechanics {
 
 	bool stance_transition_penalty = false;
 
-	float suppression_threshold = 0.3f;
-
 	bool apply_protection_threshold = false;
 
 	bool bullets_pass_soldiers = false;

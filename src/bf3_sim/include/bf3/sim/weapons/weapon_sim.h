@@ -106,7 +106,6 @@ struct WeaponContext {
 	SwayContext sway;
 	bool alive = true;
 	bool sprinting = false;
-	float suppression = 0;
 };
 
 struct ShotEvent {
@@ -160,7 +159,6 @@ uint64_t soldier_weapons_hash(const SoldierWeaponsState &p_state);
 
 SwayContext weapon_sway_context(const MotorParams &p_motor, const SoldierState &p_after, const Command &p_command);
 
-WeaponContext make_weapon_context(const MotorParams &p_motor, const SoldierState &p_before, const SoldierState &p_after, const Command &p_command,
-		float p_suppression = 0.0f);
-
+WeaponContext make_weapon_context(const MotorParams &p_motor, const SoldierState &p_before, const SoldierState &p_after,
+		const Command &p_command, float p_suppression_scale = 0.0f);
 }

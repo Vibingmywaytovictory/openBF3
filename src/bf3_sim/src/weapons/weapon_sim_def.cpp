@@ -431,7 +431,6 @@ void hash_mechanics(detail::Fnv64 &r_h, const Mechanics &p_m) {
 	r_h.add(p_m.falloff_basis);
 	r_h.add(p_m.blast_falloff);
 	r_h.add(p_m.stance_transition_penalty);
-	r_h.add(p_m.suppression_threshold);
 	r_h.add(p_m.apply_protection_threshold);
 	r_h.add(p_m.bullets_pass_soldiers);
 	r_h.add(p_m.blast_occlusion);
@@ -636,9 +635,9 @@ core::Result<std::shared_ptr<const WeaponTable>> make_weapon_table(std::span<con
 	if (!std::isfinite(p_options.sprint_recover_seconds) || p_options.sprint_recover_seconds < 0 || p_options.sprint_recover_seconds > 60) {
 		return core::make_error("make_weapon_table: sprint recover time " + std::to_string(p_options.sprint_recover_seconds) + " s is outside [0, 60]");
 	}
-	if (!std::isfinite(p_options.mechanics.suppression_threshold) || !std::isfinite(p_options.mechanics.bullet_damage_modifier) ||
-			p_options.mechanics.bullet_damage_modifier < 0 || p_options.mechanics.bullet_damage_modifier > kMaxFactor) {
-		return core::make_error("make_weapon_table: Mechanics suppression threshold or bullet damage modifier out of range");
+	if (!std::isfinite(p_options.mechanics.bullet_damage_modifier) || p_options.mechanics.bullet_damage_modifier < 0 ||
+			p_options.mechanics.bullet_damage_modifier > kMaxFactor) {
+		return core::make_error("make_weapon_table: Mechanics bullet damage modifier out of range");
 	}
 	auto table = std::make_shared<WeaponTable>();
 	table->defs.reserve(p_defs.size());

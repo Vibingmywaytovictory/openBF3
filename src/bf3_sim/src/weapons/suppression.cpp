@@ -54,58 +54,129 @@ core::Result<SuppressionDef> make_suppression_def(const core::gameplay::SoldierD
 	return out;
 }
 
-float suppression_level(const SuppressionDef &p_def, const SuppressionState &p_state, Tick p_tick) {
-	const float level = float(p_state.level) / kSuppressionLevelSteps;
-	if (p_state.level == 0 || p_tick <= p_state.hit_tick) {
-		return level;
+uint16_t suppression_counter(const SuppressionDef &p_def, const SuppressionState &p_state, Tick p_tick) {
+	if (p_state.counter == 0 || p_tick <= p_state.hit_tick) {
+		return p_state.counter;
 	}
 	const float seconds = float(p_tick - p_state.hit_tick) / float(kSimHz);
-	const float falling = std::max(0.0f, seconds - p_def.fall_off_delay);
-	return std::max(0.0f, level - falling * p_def.decay * p_def.fall_off_multiplier);
+	if (seconds < p_def.fall_off_delay) {
+		return p_state.counter;
+	}
+	const float falling = seconds - p_def.fall_off_delay;
+	const float value = float(p_state.counter) -
+			falling * falling * kSuppressionFallOffPerSecondSquared * p_def.fall_off_multiplier;
+	return uint16_t(std::clamp(value, 0.0f, float(kSuppressionCounterCap)));
+}
+
+float suppression_ratio(const SuppressionDef &p_def, const SuppressionState &p_state, Tick p_tick) {
+	return float(suppression_counter(p_def, p_state, p_tick)) / float(kSuppressionCounterCap);
+}
+
+bool suppressed(const SuppressionDef &p_def, const SuppressionState &p_state, Tick p_tick) {
+	return p_def.present && p_state.suppressed && suppression_ratio(p_def, p_state, p_tick) > p_def.low_threshold;
+}
+
+float suppression_level(const SuppressionDef &p_def, const SuppressionState &p_state, Tick p_tick) {
+	const float r = suppression_ratio(p_def, p_state, p_tick);
+	const float low = p_def.low_threshold;
+	if (r < low || !(low < 1.0f)) {
+		return r - low;
+	}
+	return (r - low) / (1.0f - low);
+}
+
+float suppression_scale(const SuppressionDef &p_def, const SuppressionState &p_state, Tick p_tick) {
+	if (!suppressed(p_def, p_state, p_tick)) {
+		return 0.0f;
+	}
+	const float level = std::max(0.0f, suppression_level(p_def, p_state, p_tick));
+	return std::log10(1.0f + kSuppressionLogSpan * level);
 }
 
 SuppressionState add_suppression(
-		const SuppressionDef &p_def, const SuppressionState &p_state, Tick p_tick, float p_amount) {
-	if (!p_def.present || !std::isfinite(p_amount) || !(p_amount > 0.0f)) {
+		const SuppressionDef &p_def, const SuppressionState &p_state, Tick p_tick, uint32_t p_add) {
+	if (!p_def.present || p_add == 0) {
 		return p_state;
 	}
-	const float level = std::clamp(suppression_level(p_def, p_state, p_tick) + p_amount, 0.0f, 1.0f);
+	const uint32_t now = suppression_counter(p_def, p_state, p_tick);
 	SuppressionState out;
-	out.level = uint16_t(std::lround(level * kSuppressionLevelSteps));
+	out.counter = uint16_t(std::min<uint32_t>(now + std::min(p_add, kSuppressionCounterCap), kSuppressionCounterCap));
 	out.hit_tick = p_tick;
+	out.suppressed = suppressed(p_def, p_state, p_tick) ||
+			float(out.counter) / float(kSuppressionCounterCap) >= p_def.high_threshold;
 	return out;
 }
 
-float suppression_multiplier(const ProjectileSimDef &p_projectile, float p_distance) {
-	const float lo = p_projectile.suppression_min_distance;
-	const float hi = p_projectile.suppression_max_distance;
-	if (!(hi > lo) || !(p_distance > lo)) {
-		return p_projectile.suppression_min;
+SuppressionState mirror_suppression(
+		const SuppressionDef &p_def, const SuppressionState &p_mirror, uint16_t p_counter, Tick p_hit_tick) {
+	if (p_counter == 0) {
+		return SuppressionState();
 	}
-	if (p_distance >= hi) {
-		return p_projectile.suppression_max;
+	if (p_counter == p_mirror.counter && p_hit_tick == p_mirror.hit_tick) {
+		return p_mirror;
 	}
-	const float t = (p_distance - lo) / (hi - lo);
-	return p_projectile.suppression_min + (p_projectile.suppression_max - p_projectile.suppression_min) * t;
+	SuppressionState out;
+	out.counter = p_counter;
+	out.hit_tick = p_hit_tick;
+	out.suppressed = p_def.present &&
+			(suppressed(p_def, p_mirror, p_hit_tick) ||
+					float(p_counter) / float(kSuppressionCounterCap) >= p_def.high_threshold);
+	return out;
 }
 
-bool passes_near(
-		const Vec3 &p_from, const Vec3 &p_to, bool p_first, SegmentEnd p_end, const Vec3 &p_centre, float p_radius) {
+std::optional<NearMiss> near_miss(
+		const Vec3 &p_from, const Vec3 &p_to, const Vec3 &p_origin, const Vec3 &p_centre, float p_radius) {
 	const Vec3 d = core::vec::sub(p_to, p_from);
 	const float length2 = core::vec::dot(d, d);
 	if (!(length2 > 0.0f)) {
-		return false;
+		return std::nullopt;
 	}
 	const float along = core::vec::dot(core::vec::sub(p_centre, p_from), d) / length2;
-	const bool inside = along >= 0.0f && along < 1.0f;
-	const bool before = along < 0.0f && p_first;
-	const bool after = along >= 1.0f && p_end == SegmentEnd::Ended;
-	if (!(inside || before || after) || !std::isfinite(along)) {
-		return false;
+	if (!(along >= 0.0f)) {
+		return std::nullopt;
 	}
-	const Vec3 closest = core::vec::add(p_from, core::vec::scale(d, std::clamp(along, 0.0f, 1.0f)));
-	const Vec3 off = core::vec::sub(closest, p_centre);
-	return core::vec::dot(off, off) <= p_radius * p_radius;
+	const Vec3 closest = core::vec::add(p_from, core::vec::scale(d, std::min(along, 1.0f)));
+	const float miss = core::vec::length(core::vec::sub(closest, p_centre));
+	if (!(miss < p_radius)) {
+		return std::nullopt;
+	}
+	return NearMiss{ core::vec::length(core::vec::sub(closest, p_origin)), miss };
 }
 
+uint32_t near_miss_amount(const ProjectileSimDef &p_projectile, const SuppressionDef &p_def, const NearMiss &p_miss) {
+	if (!(p_def.sphere_radius > 0.0f)) {
+		return 0;
+	}
+	const float lo = p_projectile.suppression_min_distance;
+	const float span = p_projectile.suppression_max_distance - lo;
+	const float f = span > 0.0f ? std::clamp((p_miss.travelled - lo) / span, 0.0f, 1.0f)
+								: (p_miss.travelled > lo ? 1.0f : 0.0f);
+	const float weight = (1.0f - f) * p_projectile.suppression_max + f * p_projectile.suppression_min;
+	const float radial = 1.0f - p_def.decay * p_miss.miss / p_def.sphere_radius;
+	const float amount = weight * radial * kSuppressionAmountScale;
+	if (!(amount >= 1.0f)) {
+		return 0;
+	}
+	return uint32_t(std::min(amount, float(kSuppressionCounterCap)));
+}
+
+uint32_t near_miss_add(uint32_t p_amount, float p_victim_resist, float p_shooter_boost) {
+	const double add = double(p_amount) * double(p_victim_resist) * double(p_shooter_boost) + 0.5;
+	if (!(add >= 1.0)) {
+		return 0;
+	}
+	return uint32_t(std::min(add, double(kSuppressionCounterCap)));
+}
+
+Dispersion suppressed_dispersion(const Dispersion &p_dispersion, const SwayModifier &p_increments, float p_scale) {
+	if (!(p_scale > 0.0f)) {
+		return p_dispersion;
+	}
+	Dispersion d = p_dispersion;
+	d.min_angle += p_scale * p_increments.min_angle;
+	d.max_angle += p_scale * p_increments.max_angle;
+	d.increase_per_shot += p_scale * p_increments.increase_per_shot;
+	d.decrease_per_second += p_scale * p_increments.decrease_per_second;
+	return d;
+}
 }

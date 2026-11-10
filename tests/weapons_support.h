@@ -512,7 +512,7 @@ inline RandomRun random_run(const std::shared_ptr<const sw::WeaponTable> &p_tabl
 		ctx.sway.stance = sw::Stance((r >> 20) % 3);
 		ctx.sway.move = sw::SwayMove((r >> 22) % 6);
 		ctx.sway.zoom = in.zoom ? sw::Zoom::Zoom : sw::Zoom::NoZoom;
-		ctx.sway.suppressed = ((r >> 25) & 1) != 0;
+		ctx.sway.suppression = ((r >> 25) & 1) != 0 ? 1.0f : 0.0f;
 		Command c;
 		c.tick = st.tick + 1;
 		c.buttons = sw::with_weapon_input(0, in);

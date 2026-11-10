@@ -370,12 +370,12 @@ TEST_SUITE("weapons-unit") {
 		CHECK(make_weapon_sim_def(synthetic(k870).def, *materials).ok());
 
 		w = base.def;
-		w.sway.suppression[0].decrease_per_second = -10;
-		w.sway.suppression[0].min_angle = -2;
+		w.sway.suppression[0].decrease_per_second = -20;
+		w.sway.suppression[0].min_angle = -3;
 		core::Result<WeaponSimDef> lmg = make_weapon_sim_def(w, *materials);
 		REQUIRE_MESSAGE(lmg.ok(), (lmg.ok() ? std::string() : lmg.error().message));
 		SwayContext supp;
-		supp.suppressed = true;
+		supp.suppression = 1.0f;
 		const Dispersion sd = effective_dispersion(*lmg, supp);
 		CHECK(sd.min_angle == 0.0f);
 		CHECK(sd.decrease_per_second < 0);
@@ -692,10 +692,14 @@ TEST_SUITE("weapons-unit") {
 		crouch_sprint.move = SwayMove::Sprinting;
 		CHECK(effective_dispersion(a3, crouch_sprint).min_angle == a3.sway[1][0].move[0].min_angle);
 		SwayContext supp;
-		supp.suppressed = true;
-		CHECK(effective_dispersion(a3, supp).min_angle == doctest::Approx(a3.sway[0][0].move[0].min_angle * 1.5f));
+		supp.suppression = 1.0f;
+		CHECK(effective_dispersion(a3, supp).min_angle == doctest::Approx(a3.sway[0][0].move[0].min_angle + 1.5f));
 		CHECK(effective_dispersion(a3, supp).max_angle == a3.sway[0][0].move[0].max_angle);
-		CHECK(effective_recoil(a3, supp).horizontal_max == doctest::Approx(a3.sway[0][0].recoil.horizontal_max * 1.5f));
+		CHECK(effective_dispersion(a3, supp).increase_per_shot ==
+				doctest::Approx(a3.sway[0][0].move[0].increase_per_shot + 0.1f));
+		CHECK(effective_recoil(a3, supp).horizontal_max == a3.sway[0][0].recoil.horizontal_max);
+		supp.suppression = 0.5f;
+		CHECK(effective_dispersion(a3, supp).min_angle == doctest::Approx(a3.sway[0][0].move[0].min_angle + 0.75f));
 
 		const Vec3 n = aim_direction(0, 0, {});
 		CHECK(n[2] == doctest::Approx(1.0f));
@@ -814,11 +818,10 @@ TEST_SUITE("weapons-unit") {
 		CHECK(spread_now(walking, c, 2.5f, now - kTimeUnitsPerSecond / 60, rise) == doctest::Approx(2.5f + decrease / 60.0f));
 		CHECK(spread_now(walking, c, 2.5f, now - kTimeUnitsPerSecond, rise) == 3.0f);
 
-		SwayContext quiet = weapon_sway_context(motor, still, c);
-		CHECK_FALSE(suppressed_sway(quiet, 0.29f, immediate).suppressed);
-		CHECK(suppressed_sway(quiet, 0.3f, immediate).suppressed);
-		quiet.suppressed = true;
-		CHECK(suppressed_sway(quiet, 0.0f, immediate).suppressed);
+		CHECK(make_weapon_context(motor, still, still, c).sway.suppression == 0.0f);
+		CHECK(make_weapon_context(motor, still, still, c, 0.641f).sway.suppression == 0.641f);
+		CHECK(make_weapon_context(motor, still, still, c, 3.0f).sway.suppression == 1.0f);
+		CHECK(make_weapon_context(motor, still, still, c, std::nanf("")).sway.suppression == 0.0f);
 
 		Driver drv(t, { id_of(*t, kM16A3) });
 		drv.ctx.sway = SwayContext{};

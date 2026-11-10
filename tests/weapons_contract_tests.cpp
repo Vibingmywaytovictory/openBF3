@@ -149,7 +149,6 @@ TEST_SUITE("weapons-contract") {
 		CHECK(m.disc == DiscDistribution::UniformArea);
 		CHECK(m.recovery == RecoveryShape::Linear);
 		CHECK_FALSE(m.measured);
-		CHECK(m.suppression_threshold == doctest::Approx(0.3f));
 		CHECK(m.bullet_damage_modifier == 1.0f);
 	}
 }

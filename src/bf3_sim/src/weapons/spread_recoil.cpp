@@ -1,5 +1,7 @@
 #include "bf3/sim/weapons/spread_recoil.h"
 
+#include "bf3/sim/weapons/suppression.h"
+
 #include "weapons_internal.h"
 
 #include <algorithm>
@@ -33,9 +35,6 @@ template <class T>
 void apply_gated(T &r_value, const WeaponSimDef &p_def, const SwayContext &p_context) {
 	const size_t s = std::min<size_t>(size_t(p_context.stance), 2);
 	const size_t z = std::min<size_t>(size_t(p_context.zoom), 1);
-	if (p_context.suppressed) {
-		apply(r_value, p_def.suppression_modifier[z]);
-	}
 	for (const WeaponSimDef::Conditional &c : p_def.conditional) {
 		const bool gate = (!c.only_supported || p_context.supported) && (!c.only_light || p_context.light_on) && (c.only_supported || c.only_light);
 		if (gate) {
@@ -73,6 +72,8 @@ Dispersion effective_dispersion(const WeaponSimDef &p_def, const SwayContext &p_
 	if (p_context.move == SwayMove::Moving && p_context.move_fraction < 1.0f) {
 		d = blend(move_dispersion(st, SwayMove::Base), d, std::max(0.0f, p_context.move_fraction));
 	}
+	d = suppressed_dispersion(
+			d, p_def.suppression_modifier[std::min<size_t>(size_t(p_context.zoom), 1)], p_context.suppression);
 	apply_gated(d, p_def, p_context);
 
 	d.min_angle = std::max(0.0f, d.min_angle);
@@ -117,12 +118,6 @@ float spread_at(float p_spread, SimTime p_spread_time, SimTime p_now, const Disp
 		spread = std::min(p_dispersion.min_angle, spread + p_dispersion.decrease_per_second * float(units_to_seconds(elapsed)));
 	}
 	return enter_spread(spread, p_dispersion, p_mechanics);
-}
-
-SwayContext suppressed_sway(const SwayContext &p_sway, float p_suppression, const Mechanics &p_mechanics) {
-	SwayContext s = p_sway;
-	s.suppressed = p_sway.suppressed || p_suppression >= p_mechanics.suppression_threshold;
-	return s;
 }
 
 Vec3 sample_cone(const Vec3 &p_aim, float p_spread_degrees, float p_u_radius, float p_u_angle, DiscDistribution p_disc) {

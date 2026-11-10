@@ -483,7 +483,6 @@ void step_soldier_weapons(const WeaponTable &p_table, SoldierWeaponsState &r_sta
 	}
 	Tick_ io{ p_table, p_table.mechanics, r_state, p_command, p_context, p_match_seed, r_out, tick_start(p_command.tick), tick_end(p_command.tick),
 		weapon_input(p_command), p_context.sway };
-	io.sway = suppressed_sway(p_context.sway, p_context.suppression, p_table.mechanics);
 	r_state.events = 0;
 
 	bool blocked = !p_context.alive;
@@ -611,8 +610,8 @@ SwayContext weapon_sway_context(const MotorParams &p_motor, const SoldierState &
 	return sway;
 }
 
-WeaponContext make_weapon_context(const MotorParams &p_motor, const SoldierState &p_before, const SoldierState &p_after, const Command &p_command,
-		float p_suppression) {
+WeaponContext make_weapon_context(const MotorParams &p_motor, const SoldierState &p_before, const SoldierState &p_after,
+		const Command &p_command, float p_suppression_scale) {
 	WeaponContext c;
 	c.eye_start = { p_before.position[0], p_before.position[1] + eye_height(p_motor, p_before), p_before.position[2] };
 	c.eye_end = { p_after.position[0], p_after.position[1] + eye_height(p_motor, p_after), p_after.position[2] };
@@ -621,8 +620,7 @@ WeaponContext make_weapon_context(const MotorParams &p_motor, const SoldierState
 	c.sway = weapon_sway_context(p_motor, p_after, p_command);
 	c.alive = (p_after.flags & soldier_flags::kAlive) != 0 && p_after.mode != MoveMode::Dead;
 	c.sprinting = (p_after.flags & soldier_flags::kSprinting) != 0;
-	c.suppression = std::isfinite(p_suppression) ? p_suppression : 0.0f;
+	c.sway.suppression = std::isfinite(p_suppression_scale) ? std::clamp(p_suppression_scale, 0.0f, 1.0f) : 0.0f;
 	return c;
 }
-
 }

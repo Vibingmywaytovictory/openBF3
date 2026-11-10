@@ -2,8 +2,9 @@
 
 #include "bf3/sim/command.h"
 #include "bf3/sim/sim_types.h"
-#include "bf3/sim/soldier_state.h"
 #include "bf3/sim/soldier_motor.h"
+#include "bf3/sim/soldier_state.h"
+#include "bf3/sim/weapons/suppression.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
 #include <cstdint>
@@ -93,6 +94,7 @@ public:
 	WeaponPredictionEntry step(const WeaponPredictionEntry &p_from, const Command &p_command, const SoldierState &p_before, const SoldierState &p_after);
 
 	void set_sink(WeaponEmitSink *p_sink);
+	void set_suppression(const weapons::SuppressionDef &p_def, const weapons::SuppressionState &p_state);
 	Tick emitted_through() const;
 	void set_emitted_through(Tick p_tick);
 	const weapons::WeaponTable &table() const;
@@ -109,6 +111,8 @@ private:
 	WeaponEmitSink *sink_ = nullptr;
 	Tick emitted_through_ = 0;
 	WeaponLaneStats stats_;
+	weapons::SuppressionDef suppression_def_;
+	weapons::SuppressionState suppression_;
 };
 
 class WeaponReplay {

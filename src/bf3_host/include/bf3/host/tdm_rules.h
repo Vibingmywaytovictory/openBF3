@@ -66,8 +66,6 @@ struct TdmTuning {
 	float team_kill_weight = 0.0f;
 	bool rotate_teams = true;
 
-	bool suppression_resets_regen = false;
-
 	std::vector<ImmunityAbortEntry> immunity_abort_map{ { 0, 0, true }, { 1, 0, true }, { 7, sim::buttons::kFire, false } };
 	bool measured = false;
 };

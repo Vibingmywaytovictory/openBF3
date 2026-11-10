@@ -177,7 +177,8 @@ WeaponPredictionEntry WeaponLane::step(const WeaponPredictionEntry &p_from, cons
 		out.state.events = 0;
 		++stats_.dead_ticks;
 	} else {
-		const weapons::WeaponContext context = weapons::make_weapon_context(motor_, p_before, p_after, p_command);
+		const weapons::WeaponContext context = weapons::make_weapon_context(motor_, p_before, p_after, p_command,
+				weapons::suppression_scale(suppression_def_, suppression_, p_command.tick));
 		weapons::step_weapons_with_rules(*table_, out.state, p_command, context, match_seed_, p_from.spawn_tick, output);
 		++stats_.steps;
 		out.state.tick = p_command.tick;
@@ -196,6 +197,11 @@ WeaponPredictionEntry WeaponLane::step(const WeaponPredictionEntry &p_from, cons
 
 void WeaponLane::set_sink(WeaponEmitSink *p_sink) {
 	sink_ = p_sink;
+}
+
+void WeaponLane::set_suppression(const weapons::SuppressionDef &p_def, const weapons::SuppressionState &p_state) {
+	suppression_def_ = p_def;
+	suppression_ = p_state;
 }
 
 Tick WeaponLane::emitted_through() const {
