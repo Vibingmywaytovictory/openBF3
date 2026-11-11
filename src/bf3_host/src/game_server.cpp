@@ -24,6 +24,7 @@
 #include "server_soldiers.h"
 #include "server_spawner.h"
 #include "server_spotting.h"
+#include "vehicles/server_vehicles.h"
 
 #include "bf3/net/loopback_ping.h"
 #include "bf3/net/protocol.h"
@@ -66,6 +67,7 @@ struct GameServer::Impl {
 	DeployableSync deployables;
 	ServerSpotting spotting;
 	ConquestSync conquest_sync;
+	ServerVehicles vehicles;
 	std::vector<uint8_t> alive_mask;
 	DevCommands dev{ slots, soldiers, spawner, combat, match, motor, outbox,
 		[this](size_t p_slot) { reset_slot(p_slot); } };
@@ -98,6 +100,7 @@ struct GameServer::Impl {
 		dev.reset(i);
 		loads.reset(i);
 		spotting.reset(i);
+		vehicles.leave(i);
 	}
 
 	void drop_client(size_t p_slot) {
@@ -295,21 +298,37 @@ struct GameServer::Impl {
 			if (was_alive && !s.dummy && (match.take_suicide(i) || body.state.position[1] < fall_out_y)) {
 				soldiers.kill(i);
 			}
-			soldiers.step(i, motor, combat.motor_modifiers(i, motor.params()));
-			++times.motor_steps;
 			if (was_alive && !s.dummy) {
+				if (const std::optional<sim::Vec3> out = vehicles.use(i, body.last, body.state)) {
+					sim::SoldierState moved = body.state;
+					moved.position = *out;
+					moved.velocity = {};
+					soldiers.teleport(i, moved);
+				}
+			}
+			const bool seated = was_alive && vehicles.seated(i);
+			if (seated) {
+				vehicles.drive(i, body.last);
+				soldiers.seat(i, body.last, body.state.position);
+			} else {
+				soldiers.step(i, motor, combat.motor_modifiers(i, motor.params()));
+			}
+			++times.motor_steps;
+			if (was_alive && !s.dummy && !seated) {
 				combat.step_soldier(i, body.last, before, body.state);
 			}
 			if (was_alive && !soldier_alive(body.state) && !s.dummy) {
 				spawner.died(i, n);
 			}
 		}
+		step_vehicles();
 		last_step_ms = ms_since(step_start);
 		times.step_ms = last_step_ms;
 		motor_steps += times.motor_steps;
 		const auto rules_start = std::chrono::steady_clock::now();
 
 		step_rules(n);
+		vehicles.spawn_due(n, conquest());
 		spawner.spawn_due(n);
 		dev.apply_debug(n);
 		dev.run_sweep(n);
@@ -326,6 +345,7 @@ struct GameServer::Impl {
 		}
 		if (config.snapshot_divisor <= 1 || n % config.snapshot_divisor == 0) {
 			snapshots.send(n, net::monotonic_ns(), times);
+			send_vehicles(n);
 		}
 		send_rules(n);
 		send_deployables(n);
@@ -334,6 +354,41 @@ struct GameServer::Impl {
 		outbox.drain(r_out);
 		times.collision_queries = world->query_count() - queries_before;
 		times.tick_ms = ms_since(tick_start);
+	}
+
+	const sim::logic::ConquestNatives *conquest() const {
+		const TdmRules *rules = match.rules();
+		return rules != nullptr ? rules->natives().conquest() : nullptr;
+	}
+
+	void step_vehicles() {
+		if (!vehicles.on()) {
+			return;
+		}
+		(void)vehicles.step();
+		for (size_t i = 0; i < slots.size(); ++i) {
+			if (!slots[i].used || !soldiers.alive(i)) {
+				vehicles.leave(i);
+				continue;
+			}
+			if (const std::optional<sim::Vec3> at = vehicles.seat_position(i)) {
+				soldiers.seat(i, soldiers[i].last, *at);
+			}
+		}
+	}
+
+	void send_vehicles(sim::Tick p_tick) {
+		if (!vehicles.on()) {
+			return;
+		}
+		for (const net::VehicleStates &m : vehicles.wire(p_tick)) {
+			const std::vector<uint8_t> bytes = net::encode_vehicle_states(m);
+			for (size_t i = 0; i < slots.size(); ++i) {
+				if (slots[i].used && slots[i].remote) {
+					outbox.send(slots[i].peer, net::kChannelUnreliable, bytes);
+				}
+			}
+		}
 	}
 
 	int add_local(std::unique_ptr<CommandSource> p_source, int p_team, bool p_bot) {
@@ -632,6 +687,8 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	m.snapshots.configure(p_config.max_slots, p_config.snapshot_budget_bytes, p_config.ghost_scope);
 	m.deployables.configure(p_config.max_slots, p_config.ghost_scope);
 	m.dev.configure(m.config, *m.world, p_config.max_slots);
+	BF3_TRY(m.vehicles.configure(
+			p_config.level->vehicles, p_config.level->static_world, p_config.vehicle_spawn_delay_modifier));
 	m.handshake.configure(p_config.game_build.value_or(net::game_build()), *p_config.level, p_config.max_slots);
 	m.loads.configure(p_config.max_slots, p_config.load, p_config.round_id);
 	for (size_t i = 0; i < m.slots.size(); ++i) {
@@ -1031,6 +1088,7 @@ void GameServer::restart_round() {
 	}
 	std::vector<RulesOrder> orders;
 	rules->restart_in_place(m.tick, orders);
+	m.vehicles.restart();
 	if (Gunplay *g = m.combat.gunplay()) {
 		g->clear_deployables();
 	}

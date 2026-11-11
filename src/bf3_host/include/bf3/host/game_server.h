@@ -103,6 +103,7 @@ struct GameServerConfig {
 
 	MatchRulesConfig rules;
 	std::shared_ptr<const struct TdmBotConfig> tdm_bots;
+	float vehicle_spawn_delay_modifier = 1.0f;
 };
 
 struct OutDatagram {

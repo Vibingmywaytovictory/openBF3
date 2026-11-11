@@ -3,6 +3,7 @@
 #include "gunplay_fixture.h"
 #include "pipe_transport.h"
 #include "tdm_fixture.h"
+#include "vehicles/client_vehicles.h"
 
 #include "bf3/core/gameplay/eor_fading.h"
 #include "bf3/core/gameplay/eor_timeline.h"
@@ -14,6 +15,7 @@
 #include "bf3/host/client_session.h"
 #include "bf3/host/conquest_wire.h"
 #include "bf3/host/kits.h"
+#include "bf3/host/level_vehicles.h"
 #include "bf3/host/load_bots.h"
 #include "bf3/host/loadout.h"
 #include "bf3/host/server_level.h"
@@ -25,6 +27,7 @@
 #include "bf3/sim/logic/round_natives.h"
 #include "bf3/sim/nav_query.h"
 #include "bf3/sim/soldier_motor.h"
+#include "bf3/sim/vehicles/land_rules.h"
 #include "bf3/sim/weapons/weapon_input.h"
 #include "bf3/sim/weapons/weapon_rng.h"
 
@@ -3884,5 +3887,506 @@ TEST_SUITE("host-tdm-conquest") {
 		CHECK(m->rules().stats().spawn_fallbacks > fallbacks0);
 		CHECK(on_open);
 		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+}
+
+namespace {
+
+struct VehicleWatch {
+	std::vector<net::VehicleWire> latest;
+	uint64_t messages = 0;
+	uint64_t bad = 0;
+
+	void take(std::span<const host::OutDatagram> p_out, uint32_t p_peer) {
+		for (const host::OutDatagram &d : p_out) {
+			if (d.peer != p_peer || net::peek_type(d.bytes) != net::MessageType::VehicleStates) {
+				continue;
+			}
+			core::Result<net::VehicleStates> m = net::decode_vehicle_states(d.bytes);
+			if (!m) {
+				++bad;
+				continue;
+			}
+			++messages;
+			for (const net::VehicleWire &w : m->vehicles) {
+				auto at = std::find_if(latest.begin(), latest.end(),
+						[&](const net::VehicleWire &v) { return v.spawner == w.spawner; });
+				if (at == latest.end()) {
+					latest.push_back(w);
+				} else {
+					*at = w;
+				}
+			}
+		}
+	}
+	const net::VehicleWire *of(uint16_t p_spawner) const {
+		for (const net::VehicleWire &w : latest) {
+			if (w.spawner == p_spawner) {
+				return &w;
+			}
+		}
+		return nullptr;
+	}
+};
+
+float horizontal(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
+	const float dx = p_a[0] - p_b[0], dz = p_a[2] - p_b[2];
+	return std::sqrt(dx * dx + dz * dz);
+}
+
+std::array<float, 2> heading_of(const std::array<float, 4> &p_rotation) {
+	const std::array<float, 4> &q = p_rotation;
+	const float x = 2.0f * (q[0] * q[2] + q[3] * q[1]), z = 1.0f - 2.0f * (q[0] * q[0] + q[1] * q[1]);
+	const float n = std::sqrt(x * x + z * z);
+	return { x / n, z / n };
+}
+
+float up_y_of(const std::array<float, 4> &p_rotation) {
+	const std::array<float, 4> &q = p_rotation;
+	return 1.0f - 2.0f * (q[0] * q[0] + q[2] * q[2]);
+}
+
+float speed_of(const sim::Vec3 &p_velocity) {
+	const sim::Vec3 &v = p_velocity;
+	return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+}
+
+bool parked_upright(const std::array<float, 4> &p_rotation, const sim::Vec3 &p_velocity) {
+	return up_y_of(p_rotation) > 0.98f && speed_of(p_velocity) < 0.05f;
+}
+
+float clear_run(const sim::CollisionWorld &p_world, const sim::Vec3 &p_from, const std::array<float, 4> &p_rotation,
+		std::span<const sim::Vec3> p_vehicles, float p_length) {
+	const std::array<float, 2> f = heading_of(p_rotation);
+	for (const sim::Vec3 &o : p_vehicles) {
+		const float dx = o[0] - p_from[0], dz = o[2] - p_from[2];
+		const float along = dx * f[0] + dz * f[1];
+		if (along > 1.0f && std::fabs(dx * f[1] - dz * f[0]) < 4.0f) {
+			p_length = std::min(p_length, std::max(along - 5.0f, 0.0f));
+		}
+	}
+	sim::StaticHit hit;
+	if (!p_world.ground_below(p_from, 10.0f, sim::query_mask::kCollision, &hit)) {
+		return 0.0f;
+	}
+	float ground = hit.position[1];
+	for (float d = 1.0f; d <= p_length; d += 1.0f) {
+		for (const float lateral : { -1.3f, 0.0f, 1.3f }) {
+			for (const float height : { 0.7f, 1.6f }) {
+				const sim::Vec3 a{ p_from[0] + f[0] * (d - 1.0f) + f[1] * lateral, ground + height,
+					p_from[2] + f[1] * (d - 1.0f) - f[0] * lateral };
+				if (p_world.ray_any(a, { f[0], 0.0f, f[1] }, sim::query_mask::kCollision)) {
+					return d - 1.0f;
+				}
+			}
+		}
+		const sim::Vec3 next{ p_from[0] + f[0] * d, ground + 2.0f, p_from[2] + f[1] * d };
+		if (!p_world.ground_below(next, 4.0f, sim::query_mask::kCollision, &hit) ||
+				std::fabs(hit.position[1] - ground) > 0.3f) {
+			return d - 1.0f;
+		}
+		ground = hit.position[1];
+	}
+	return p_length;
+}
+
+}
+
+TEST_SUITE("host-vehicles") {
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: the Growlers and VDV Buggies spawn from the Conquest spawners their "
+			  "gates open, a soldier "
+			  "enters one with the use key, drives it on the BF3 gearbox and engine rules, the state goes out at full "
+			  "precision, and he gets out") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::SharedLevel &shared = *level->shared;
+		REQUIRE(shared.vehicles != nullptr);
+		const host::LevelVehicles &lv = *shared.vehicles;
+		for (const std::string &n : lv.notes) {
+			std::printf("vehicles: %s\n", n.c_str());
+		}
+		std::optional<uint16_t> jeep_kind;
+		for (size_t k = 0; k < lv.kinds.size(); ++k) {
+			std::printf(
+					"vehicles: kind %zu %s, %u seats, entry radius %.2f m, gearbox type %d mode %d, %u forward gears\n",
+					k, lv.kinds[k].blueprint.c_str(), unsigned(lv.kinds[k].seats), double(lv.kinds[k].entry_radius),
+					int(lv.kinds[k].model->land.gearbox_type), int(lv.kinds[k].model->land.gearbox_mode),
+					unsigned(lv.kinds[k].model->land.forward_gears));
+			if (lv.kinds[k].blueprint == "vehicles/growleritv/growleritv") {
+				jeep_kind = uint16_t(k);
+			}
+		}
+		REQUIRE(jeep_kind.has_value());
+		size_t growlers = 0;
+		for (const host::LevelVehicleSpawner &s : lv.spawners) {
+			growlers += s.kind == *jeep_kind ? 1u : 0u;
+		}
+		std::printf("vehicles: %zu jeep spawners, %zu of them Growlers\n", lv.spawners.size(), growlers);
+		CHECK(lv.kinds.size() == 2);
+		CHECK(lv.spawners.size() == 6);
+		CHECK(growlers == 3);
+
+		std::unique_ptr<Match> m = start_match(*level, false, 61u, 0, 1);
+		tdm::ScriptedPeer &p = m->join("driver");
+		p.ready();
+		REQUIRE(wait_in_round(*m));
+		REQUIRE(m->until([&] { return is_alive(m->state(p.slot())); }, 600));
+		const sim::logic::ConquestNatives &cq = conquest_of(*m);
+
+		VehicleWatch watch;
+		float latest_delay = 0.0f;
+		for (const host::LevelVehicleSpawner &s : lv.spawners) {
+			latest_delay = std::max(latest_delay, s.initial_spawn_delay);
+		}
+		const uint32_t wait_ticks = sim::seconds_to_ticks(latest_delay) + 120u;
+		size_t gated_shut = 0, gated_seen = 0;
+		for (uint32_t t = 0; t < wait_ticks; ++t) {
+			m->tick();
+			watch.take(m->out, p.peer());
+			for (size_t i = 0; i < lv.spawners.size(); ++i) {
+				const std::optional<uint8_t> gate = cq.vehicle_spawner_team(lv.spawners[i].object);
+				if (gate && *gate == 0) {
+					++gated_shut;
+					gated_seen += watch.of(uint16_t(i)) != nullptr ? 1u : 0u;
+				}
+			}
+		}
+		CHECK(watch.bad == 0);
+		CHECK(watch.messages > 0);
+		CHECK(gated_seen == 0);
+		size_t live_growlers = 0, upright = 0;
+		const net::VehicleWire *target = nullptr;
+		float target_clear = 0.0f;
+		for (const net::VehicleWire &w : watch.latest) {
+			REQUIRE(w.spawner < lv.spawners.size());
+			const host::LevelVehicleSpawner &s = lv.spawners[w.spawner];
+			CHECK(w.generation == 1);
+			CHECK(w.state.wheel_count == 4);
+			CHECK(horizontal(w.state.body.com_position, s.placement.position) < 3.0f);
+			const bool at_rest = parked_upright(w.state.body.rotation, w.state.body.linear_velocity);
+			upright += at_rest ? 1u : 0u;
+			if (s.kind == *jeep_kind && at_rest) {
+				++live_growlers;
+				std::vector<sim::Vec3> others;
+				for (const net::VehicleWire &o : watch.latest) {
+					others.push_back(o.state.body.com_position);
+				}
+				const float clear =
+						clear_run(*m->world, w.state.body.com_position, w.state.body.rotation, others, 120.0f);
+				std::printf("vehicles: Growler of spawner %u, parked upright, has %.0f m clear ahead\n",
+						unsigned(w.spawner), double(clear));
+				if (clear > target_clear) {
+					target = &w;
+					target_clear = clear;
+				}
+			}
+		}
+		std::printf("vehicles: %zu vehicles live after %u ticks (%zu Growlers, %zu vehicles parked upright at rest); "
+					"flag-gated spawner ticks shut %zu\n",
+				watch.latest.size(), wait_ticks, live_growlers, upright, gated_shut);
+		REQUIRE(target != nullptr);
+		REQUIRE(target_clear >= 30.0f);
+		const uint16_t spawner = target->spawner;
+		const sim::Vec3 parked = target->state.body.com_position;
+
+		const float radius = lv.kinds[*jeep_kind].entry_radius;
+		REQUIRE(radius > 0.5f);
+		const sim::Vec3 beside = ground_at(*m->world, parked[0] + 0.6f * radius, parked[2], parked[1] + 5.0f);
+		m->teleport(p, beside);
+		REQUIRE(m->until([&] { return horizontal(m->state(p.slot())->position, beside) < 0.5f; }, 30));
+		const sim::Tick use_at = m->now() + 2u;
+		int8_t forward = 0;
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			sim::Command c = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
+			if (p_tick == use_at) {
+				c.buttons |= sim::buttons::kUse;
+			}
+			c.move_forward = forward;
+			return c;
+		};
+		const uint8_t slot = uint8_t(p.slot());
+		REQUIRE(m->until(
+				[&] {
+					watch.take(m->out, p.peer());
+					const net::VehicleWire *w = watch.of(spawner);
+					return w != nullptr && w->occupants[0] == slot;
+				},
+				60));
+		const sim::SoldierState *seated = m->state(p.slot());
+		REQUIRE(seated != nullptr);
+		CHECK(horizontal(seated->position, watch.of(spawner)->state.body.com_position) < 3.0f);
+
+		const sim::LandDriveModel &land = lv.kinds[*jeep_kind].model->land;
+		const auto upshift_speed = [&](int32_t p_gear) {
+			if (p_gear < 1) {
+				return 0.0f;
+			}
+			return p_gear <= land.forward_speed_count ? land.forward_speeds[size_t(p_gear - 1)] / 3.6f : 1.0e9f;
+		};
+		const net::VehicleWire *w = watch.of(spawner);
+		const sim::Vec3 start = w->state.body.com_position;
+		const std::array<float, 2> line = heading_of(w->state.body.rotation);
+		const auto along = [&](const sim::Vec3 &p_at) {
+			return (p_at[0] - start[0]) * line[0] + (p_at[2] - start[2]) * line[1];
+		};
+		const auto off_line = [&](const sim::Vec3 &p_at) {
+			return std::fabs((p_at[0] - start[0]) * line[1] - (p_at[2] - start[2]) * line[0]);
+		};
+		uint64_t seen = watch.messages;
+		float previous_speed = speed_of(w->state.body.linear_velocity), lowest_up = 1.0f, widest = 0.0f;
+		int32_t gear = w->state.driver.gearbox.gear;
+		const int32_t first_gear = gear;
+		CHECK(first_gear >= 0);
+		CHECK(first_gear <= 1);
+		std::vector<std::pair<int32_t, float>> upshifts;
+		forward = 127;
+		uint32_t throttle_ticks = 0;
+		for (; gear < 3 && throttle_ticks < 600; ++throttle_ticks) {
+			m->tick();
+			watch.take(m->out, p.peer());
+			w = watch.of(spawner);
+			REQUIRE(w != nullptr);
+			if (watch.messages == seen) {
+				continue;
+			}
+			seen = watch.messages;
+			const float speed = speed_of(w->state.body.linear_velocity);
+			const int32_t now_gear = w->state.driver.gearbox.gear;
+			CHECK(w->occupants[0] == slot);
+			CHECK_MESSAGE(
+					speed >= previous_speed - 0.3f, "tick " << m->now() << ": " << previous_speed << " -> " << speed);
+			CHECK(now_gear >= gear);
+			CHECK(now_gear <= gear + 1);
+			if (now_gear > gear) {
+				upshifts.emplace_back(now_gear, speed);
+				CHECK_MESSAGE(speed >= upshift_speed(gear), "into gear " << now_gear << " at " << speed << " m/s");
+			}
+			CHECK_MESSAGE(speed <= upshift_speed(now_gear) + 0.5f, "gear " << now_gear << " at " << speed << " m/s");
+			CHECK(w->state.driver.engine_rpm >= 0.0f);
+			CHECK(w->state.driver.engine_rpm <= land.engine.rpm_max);
+			lowest_up = std::min(lowest_up, up_y_of(w->state.body.rotation));
+			widest = std::max(widest, off_line(w->state.body.com_position));
+			previous_speed = speed;
+			gear = now_gear;
+		}
+		const float top_speed = previous_speed;
+		const float run = along(w->state.body.com_position);
+		for (const auto &[g, s] : upshifts) {
+			std::printf("vehicles: into gear %d at %.1f km/h\n", int(g), double(3.6f * s));
+		}
+		std::printf("vehicles: the Growler reached gear %d at %.1f km/h in %.2f s and %.1f m, %.2f m off its line, "
+					"up axis y >= %.3f, rpm %.0f\n",
+				int(gear), double(3.6f * top_speed), double(float(throttle_ticks) / 60.0f), double(run), double(widest),
+				double(lowest_up), double(w->state.driver.engine_rpm));
+		REQUIRE(gear == 3);
+		CHECK(upshifts.size() == size_t(3 - first_gear));
+		CHECK(run < target_clear - 15.0f);
+		CHECK(widest < 1.5f);
+		CHECK(lowest_up > 0.95f);
+		CHECK(horizontal(m->state(p.slot())->position, w->state.body.com_position) < 3.0f);
+		CHECK(is_alive(m->state(p.slot())));
+
+		const auto forward_speed = [&](const sim::Vec3 &p_velocity) {
+			return p_velocity[0] * line[0] + p_velocity[2] * line[1];
+		};
+		const float turn_speed = land.opposite_dir_gear_change_max_speed / 3.6f;
+		previous_speed = forward_speed(w->state.body.linear_velocity);
+		forward = -127;
+		uint32_t brake_ticks = 0;
+		for (; previous_speed > 0.3f && brake_ticks < 600; ++brake_ticks) {
+			m->tick();
+			watch.take(m->out, p.peer());
+			w = watch.of(spawner);
+			if (watch.messages == seen) {
+				continue;
+			}
+			seen = watch.messages;
+			const float speed = forward_speed(w->state.body.linear_velocity);
+			const int32_t now_gear = w->state.driver.gearbox.gear;
+			CHECK_MESSAGE(
+					speed <= previous_speed + 0.05f, "tick " << m->now() << ": " << previous_speed << " -> " << speed);
+			CHECK(now_gear <= gear);
+			CHECK(now_gear >= -1);
+			CHECK((now_gear >= 1 || speed < turn_speed + 0.5f));
+			lowest_up = std::min(lowest_up, up_y_of(w->state.body.rotation));
+			widest = std::max(widest, off_line(w->state.body.com_position));
+			previous_speed = speed;
+			gear = now_gear;
+		}
+		const float deceleration = (top_speed - previous_speed) / (float(brake_ticks) / 60.0f);
+		std::printf(
+				"vehicles: the back pedal brought it from %.1f to %.1f km/h in %.2f s (%.1f m/s^2), gear %d, %.1f m "
+				"along its line, %.2f m off it, up axis y >= %.3f\n",
+				double(3.6f * top_speed), double(3.6f * previous_speed), double(float(brake_ticks) / 60.0f),
+				double(deceleration), int(gear), double(along(w->state.body.com_position)), double(widest),
+				double(lowest_up));
+		CHECK(previous_speed <= 0.3f);
+		CHECK(deceleration > 4.0f);
+		CHECK(along(w->state.body.com_position) < target_clear);
+		CHECK(widest < 1.5f);
+		CHECK(lowest_up > 0.95f);
+		forward = 0;
+		REQUIRE(m->until(
+				[&] {
+					watch.take(m->out, p.peer());
+					return speed_of(watch.of(spawner)->state.body.linear_velocity) < 0.1f;
+				},
+				120));
+		CHECK(up_y_of(watch.of(spawner)->state.body.rotation) > 0.95f);
+		const sim::Tick exit_at = m->now() + 2u;
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			sim::Command c = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
+			if (p_tick == exit_at) {
+				c.buttons |= sim::buttons::kUse;
+			}
+			return c;
+		};
+		REQUIRE(m->until(
+				[&] {
+					watch.take(m->out, p.peer());
+					const net::VehicleWire *w = watch.of(spawner);
+					return w != nullptr && w->occupants[0] == net::kNoVehicleOccupant;
+				},
+				60));
+		m->ticks(60);
+		watch.take(m->out, p.peer());
+		const sim::SoldierState *out = m->state(p.slot());
+		REQUIRE(out != nullptr);
+		CHECK(is_alive(out));
+		const float away = horizontal(out->position, watch.of(spawner)->state.body.com_position);
+		std::printf("vehicles: out of the Growler %.2f m from its centre\n", double(away));
+		CHECK(away > 1.0f);
+		CHECK(away < 6.0f);
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+}
+
+TEST_SUITE("host-vehicles-net") {
+	TEST_CASE("vehicles: two clients on MP_007 ConquestSmall0: the second client's ClientVehicles shows the first one "
+			  "driving a Growler") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		std::unique_ptr<Match> m = start_match(*level, false, 62u, 0, 1);
+		tdm::ScriptedPeer &driver = m->join("driver");
+		tdm::ScriptedPeer &watcher = m->join("watcher");
+		driver.ready();
+		watcher.ready();
+		REQUIRE(wait_in_round(*m));
+		REQUIRE(m->until([&] { return is_alive(m->state(driver.slot())) && is_alive(m->state(watcher.slot())); }, 600));
+
+		host::ClientVehicles seen;
+		auto frame = std::make_unique<host::PresentationFrame>();
+		const auto feed = [&] {
+			for (const host::OutDatagram &d : m->out) {
+				if (d.peer == watcher.peer() && net::peek_type(d.bytes) == net::MessageType::VehicleStates) {
+					seen.receive(d.bytes);
+				}
+			}
+			seen.publish(*frame);
+		};
+		const auto growler = [&]() -> const host::PresentedVehicle * {
+			std::vector<sim::Vec3> others;
+			for (uint8_t i = 0; i < frame->vehicle_count; ++i) {
+				others.push_back(frame->vehicles[i].com_position);
+			}
+			const host::PresentedVehicle *best = nullptr;
+			float best_clear = 0.0f;
+			for (uint8_t i = 0; i < frame->vehicle_count; ++i) {
+				const host::PresentedVehicle &v = frame->vehicles[i];
+				if (v.spawner < lv.spawners.size() && parked_upright(v.rotation, v.linear_velocity) &&
+						lv.kinds[lv.spawners[v.spawner].kind].blueprint == "vehicles/growleritv/growleritv") {
+					const float clear = clear_run(*m->world, v.com_position, v.rotation, others, 30.0f);
+					if (clear > best_clear) {
+						best = &v;
+						best_clear = clear;
+					}
+				}
+			}
+			return best_clear >= 30.0f ? best : nullptr;
+		};
+		float latest_delay = 0.0f;
+		for (const host::LevelVehicleSpawner &s : lv.spawners) {
+			latest_delay = std::max(latest_delay, s.initial_spawn_delay);
+		}
+		REQUIRE(m->until(
+				[&] {
+					feed();
+					return frame->vehicle_count == lv.spawners.size();
+				},
+				sim::seconds_to_ticks(latest_delay) + 120u));
+		m->until(
+				[&] {
+					feed();
+					return false;
+				},
+				120);
+		REQUIRE(growler() != nullptr);
+		const host::PresentedVehicle parked = *growler();
+		const float radius = lv.kinds[lv.spawners[parked.spawner].kind].entry_radius;
+		const sim::Vec3 beside = ground_at(*m->world, parked.com_position[0] + 0.6f * radius, parked.com_position[2],
+				parked.com_position[1] + 5.0f);
+		m->teleport(driver, beside);
+		REQUIRE(m->until([&] { return horizontal(m->state(driver.slot())->position, beside) < 0.5f; }, 30));
+		const sim::Tick use_at = m->now() + 2u;
+		int8_t forward = 0;
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			sim::Command c = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
+			if (p_tick == use_at) {
+				c.buttons |= sim::buttons::kUse;
+			}
+			c.move_forward = forward;
+			return c;
+		};
+		const uint8_t slot = uint8_t(driver.slot());
+		const auto driven = [&]() -> const host::PresentedVehicle * {
+			for (uint8_t i = 0; i < frame->vehicle_count; ++i) {
+				if (frame->vehicles[i].spawner == parked.spawner) {
+					return &frame->vehicles[i];
+				}
+			}
+			return nullptr;
+		};
+		REQUIRE(m->until(
+				[&] {
+					feed();
+					return driven() != nullptr && driven()->occupants[0] == slot;
+				},
+				60));
+		forward = 127;
+		m->until(
+				[&] {
+					feed();
+					return false;
+				},
+				120);
+		const host::PresentedVehicle *after = driven();
+		REQUIRE(after != nullptr);
+		const std::array<float, 2> line = heading_of(parked.rotation);
+		const float dx = after->com_position[0] - parked.com_position[0],
+					dz = after->com_position[2] - parked.com_position[2];
+		const float moved = dx * line[0] + dz * line[1];
+		const float off_line = std::fabs(dx * line[1] - dz * line[0]);
+		const float kmh = 3.6f *
+				std::sqrt(after->linear_velocity[0] * after->linear_velocity[0] +
+						after->linear_velocity[2] * after->linear_velocity[2]);
+		std::printf("vehicles: the watcher saw the driver's Growler move %.1f m along its line (%.2f m off it) in 2 s, "
+					"%.1f km/h, gear %d, rpm %.0f, server tick %u\n",
+				double(moved), double(off_line), double(kmh), int(after->gear), double(after->engine_rpm),
+				unsigned(after->tick));
+		CHECK(moved > 8.0f);
+		CHECK(off_line < 1.5f);
+		CHECK(kmh > 25.0f);
+		CHECK(after->gear >= 2);
+		CHECK(after->occupants[0] == slot);
+		CHECK(after->tick + 4u >= m->now());
+		host::ClientStats stats;
+		seen.stats(stats);
+		CHECK(stats.vehicle_messages > 0);
+		CHECK(stats.bad_vehicle_messages == 0);
 	}
 }

@@ -1,0 +1,92 @@
+#pragma once
+
+#include "bf3/core/result.h"
+#include "bf3/host/level_vehicles.h"
+#include "bf3/net/protocol.h"
+#include "bf3/sim/command.h"
+#include "bf3/sim/soldier_state.h"
+#include "bf3/sim/static_world.h"
+#include "bf3/sim/vehicle_world.h"
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <span>
+#include <vector>
+
+namespace bf3::sim::logic {
+class ConquestNatives;
+}
+
+namespace bf3::host {
+
+struct ServerVehicleStats {
+	uint32_t live = 0;
+	uint64_t spawned = 0;
+	uint64_t entries = 0;
+	uint64_t exits = 0;
+	uint64_t step_failures = 0;
+	uint64_t spawn_failures = 0;
+	uint64_t restart_failures = 0;
+};
+
+struct ServerVehicle {
+	bool live = false;
+	uint8_t team = 0;
+	uint8_t generation = 0;
+	uint32_t spawned = 0;
+	sim::Tick due = 0;
+	bool counting = false;
+	std::array<uint8_t, net::kMaxVehicleSeats> occupants{};
+	sim::VehicleCommand command;
+};
+
+struct VehicleSeat {
+	uint16_t vehicle = 0;
+	uint8_t seat = 0;
+};
+
+class ServerVehicles {
+public:
+	ServerVehicles();
+	~ServerVehicles();
+
+	core::Status configure(std::shared_ptr<const LevelVehicles> p_level,
+			std::shared_ptr<const sim::StaticWorldShapes> p_shapes, float p_spawn_delay_modifier);
+	bool on() const { return world_ != nullptr; }
+	void restart();
+
+	void spawn_due(sim::Tick p_tick, const sim::logic::ConquestNatives *p_conquest);
+	std::optional<sim::Vec3> use(size_t p_slot, const sim::Command &p_command, const sim::SoldierState &p_soldier);
+	void drive(size_t p_slot, const sim::Command &p_command);
+	void leave(size_t p_slot);
+	core::Status step();
+
+	std::optional<VehicleSeat> seat_of(size_t p_slot) const;
+	bool seated(size_t p_slot) const { return seat_of(p_slot).has_value(); }
+	std::optional<sim::Vec3> seat_position(size_t p_slot) const;
+	std::optional<sim::Vec3> exit_position(size_t p_slot) const;
+
+	std::vector<net::VehicleStates> wire(sim::Tick p_tick) const;
+	std::span<const ServerVehicle> vehicles() const { return vehicles_; }
+	const LevelVehicles *level() const { return level_.get(); }
+	const sim::VehicleWorld *world() const { return world_.get(); }
+	const ServerVehicleStats &stats() const { return stats_; }
+
+private:
+	std::optional<uint8_t> spawner_team(size_t p_spawner, const sim::logic::ConquestNatives *p_conquest) const;
+	void exit(const VehicleSeat &p_seat);
+	core::Status rebuild();
+
+	std::shared_ptr<const LevelVehicles> level_;
+	std::shared_ptr<const sim::StaticWorldShapes> shapes_;
+	float modifier_ = 1.0f;
+	std::unique_ptr<sim::VehicleWorld> world_;
+	std::vector<ServerVehicle> vehicles_;
+	std::array<uint8_t, net::kMaxSlots> use_held_{};
+	ServerVehicleStats stats_;
+};
+
+}

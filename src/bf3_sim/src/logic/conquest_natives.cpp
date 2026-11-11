@@ -503,6 +503,21 @@ bool ConquestNatives::spawn_point_open(uint32_t p_spawner_object, uint8_t p_team
 	return true;
 }
 
+std::optional<uint8_t> ConquestNatives::vehicle_spawner_team(uint32_t p_spawner_object) const {
+	for (const ConquestSpawnerData &d : state_->params->spawners) {
+		if (!d.vehicle || d.level_object != p_spawner_object) {
+			continue;
+		}
+		for (const State::Gate &g : state_->gates) {
+			if (g.node == d.node) {
+				return g.gate.enabled ? (g.gate.locked_team ? g.gate.data_team : g.gate.team) : uint8_t(0);
+			}
+		}
+		return uint8_t(0);
+	}
+	return std::nullopt;
+}
+
 std::span<const ConquestPointView> ConquestNatives::points() const {
 	return state_->views;
 }

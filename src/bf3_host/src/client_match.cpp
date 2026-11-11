@@ -99,6 +99,9 @@ bool ClientMatch::datagram(net::MessageType p_type, const net::NetSim::Datagram 
 			++spawn_answers_;
 			return true;
 		}
+		case net::MessageType::VehicleStates:
+			vehicles_.receive(p_d.bytes);
+			return true;
 		case net::MessageType::LogicEvents:
 		case net::MessageType::FullSync:
 		case net::MessageType::LogicDelta:
@@ -228,6 +231,7 @@ void ClientMatch::publish(PresentationFrame &r_frame, bool p_have_own, uint32_t 
 	r_frame.conquest = conquest_;
 	r_frame.spawn_answer_serial = spawn_answers_;
 	r_frame.spawn_answer = spawn_answer_;
+	vehicles_.publish(r_frame);
 }
 
 void ClientMatch::stats(ClientStats &r_stats) const {
@@ -246,6 +250,7 @@ void ClientMatch::stats(ClientStats &r_stats) const {
 	r_stats.unspawned_ticks = unspawned_ticks_;
 	r_stats.rules_mismatch = rules_mismatch_;
 	logic_.stats(r_stats);
+	vehicles_.stats(r_stats);
 }
 
 }

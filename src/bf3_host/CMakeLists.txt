@@ -46,6 +46,13 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/conquest_wire.h
     src/server_spotting.cpp
     src/server_spotting.h
+    include/bf3/host/level_vehicles.h
+    src/vehicles/level_vehicles.cpp
+    src/vehicles/server_vehicles.h
+    src/vehicles/server_vehicles.cpp
+    include/bf3/host/presented_vehicle.h
+    src/vehicles/client_vehicles.h
+    src/vehicles/client_vehicles.cpp
     src/spotter.cpp
     include/bf3/host/spotter.h
     src/client_session.cpp

@@ -15,6 +15,7 @@
 #include "bf3/host/kits.h"
 #include "bf3/host/loadout.h"
 #include "bf3/host/presentation_events.h"
+#include "bf3/host/presented_vehicle.h"
 #include "bf3/net/weapons_wire.h"
 #include "bf3/present/presented.h"
 
@@ -211,6 +212,8 @@ struct ClientStats {
 	uint64_t orders_received = 0;
 	uint64_t conquest_states = 0;
 	uint64_t spawn_answers = 0;
+	uint64_t vehicle_messages = 0;
+	uint64_t bad_vehicle_messages = 0;
 };
 static_assert(std::is_trivially_copyable_v<ClientStats>);
 
@@ -319,6 +322,8 @@ struct PresentationFrame {
 	net::ConquestState conquest;
 	uint64_t spawn_answer_serial = 0;
 	net::SpawnAnswer spawn_answer;
+	uint8_t vehicle_count = 0;
+	std::array<PresentedVehicle, kMaxPresentedVehicles> vehicles{};
 };
 static_assert(std::is_trivially_copyable_v<PresentationFrame>);
 

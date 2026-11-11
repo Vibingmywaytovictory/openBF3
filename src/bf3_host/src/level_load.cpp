@@ -19,6 +19,7 @@
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/fnv.h"
 #include "bf3/host/gunplay.h"
+#include "bf3/host/level_vehicles.h"
 #include "bf3/host/tdm_rules.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/logic/round_natives.h"
@@ -629,6 +630,12 @@ core::Status load_shared_tdm(const LevelDatabase &p_db, const SharedLoadOptions 
 		}
 		params->notes.insert(params->notes.end(), (*conquest)->notes.begin(), (*conquest)->notes.end());
 		params->conquest = std::move(*conquest);
+		core::Result<std::shared_ptr<const LevelVehicles>> vehicles = load_level_vehicles(p_db, sim::VehicleTuning{});
+		if (!vehicles) {
+			return core::error_at("tdm", vehicles.error());
+		}
+		params->notes.insert(params->notes.end(), (*vehicles)->notes.begin(), (*vehicles)->notes.end());
+		r_level.vehicles = std::move(*vehicles);
 	}
 	r_level.logic = std::move(shared_graph);
 	for (const std::string &n : params->notes) {

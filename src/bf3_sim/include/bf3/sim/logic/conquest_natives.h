@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -80,6 +81,7 @@ public:
 	bool spawn_allowed(uint8_t p_team) const;
 	bool spawner_open(uint32_t p_node, uint8_t p_team) const;
 	bool spawn_point_open(uint32_t p_spawner_object, uint8_t p_team) const;
+	std::optional<uint8_t> vehicle_spawner_team(uint32_t p_spawner_object) const;
 	std::span<const ConquestPointView> points() const;
 	std::span<const Deserter> deserters(uint8_t p_team) const;
 	std::vector<uint8_t> take_kills();

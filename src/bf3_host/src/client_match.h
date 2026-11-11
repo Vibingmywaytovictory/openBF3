@@ -6,6 +6,7 @@
 #include "bf3/sim/command.h"
 #include "client_events.h"
 #include "client_logic_sync.h"
+#include "vehicles/client_vehicles.h"
 
 #include <cstdint>
 #include <vector>
@@ -65,6 +66,7 @@ private:
 	uint64_t unspawned_ticks_ = 0;
 	bool rules_mismatch_ = false;
 	ClientLogicSync logic_;
+	ClientVehicles vehicles_;
 };
 
 }

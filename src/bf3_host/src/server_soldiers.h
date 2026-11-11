@@ -63,6 +63,14 @@ public:
 		p_motor.step(soldiers_[p_slot].state, soldiers_[p_slot].last, p_modifiers);
 	}
 	void kill(size_t p_slot) { soldiers_[p_slot].state.health = 0.0f; }
+	void seat(size_t p_slot, const sim::Command &p_command, const sim::Vec3 &p_position) {
+		sim::SoldierState &s = soldiers_[p_slot].state;
+		s.tick = p_command.tick;
+		s.yaw = p_command.yaw;
+		s.pitch = p_command.pitch;
+		s.position = p_position;
+		s.velocity = {};
+	}
 
 	void take_rules(std::span<const sim::SoldierState> p_states, const SlotTable &p_slots) {
 		for (size_t i = 0; i < soldiers_.size(); ++i) {

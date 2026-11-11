@@ -94,6 +94,7 @@ core::Result<LevelDatabase> open_level_database(std::shared_ptr<const core::Inst
 
 struct GunplayLevel;
 struct TdmTuning;
+struct LevelVehicles;
 
 struct SharedLevel {
 	std::string level;
@@ -128,6 +129,7 @@ struct SharedLevel {
 	std::shared_ptr<const core::gameplay::SoldierCameras> cameras;
 	std::shared_ptr<const core::gameplay::PlayerCameraDef> killer_camera;
 	std::vector<std::string> tdm_notes;
+	std::shared_ptr<const LevelVehicles> vehicles;
 };
 
 struct SharedLoadOptions {

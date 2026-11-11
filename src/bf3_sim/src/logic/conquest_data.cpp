@@ -281,10 +281,13 @@ core::Result<std::shared_ptr<const ConquestParams>> read_conquest_params(
 			}
 		}
 		for (uint32_t i = 0; i < p_level->objects.size(); ++i) {
-			if (p_level->objects[i].kind != core::level::ObjectKind::CharacterSpawnReference) {
+			const core::level::ObjectKind kind = p_level->objects[i].kind;
+			if (kind != core::level::ObjectKind::CharacterSpawnReference &&
+					kind != core::level::ObjectKind::VehicleSpawnReference) {
 				continue;
 			}
-			const std::optional<uint32_t> node = node_of_placed(p_graph, *p_level, i, T::CharacterSpawn);
+			const std::optional<uint32_t> node = node_of_placed(p_graph, *p_level, i,
+					kind == core::level::ObjectKind::VehicleSpawnReference ? T::VehicleSpawn : T::CharacterSpawn);
 			for (ConquestSpawnerData &s : out->spawners) {
 				if (node && s.node == *node) {
 					s.level_object = i;
