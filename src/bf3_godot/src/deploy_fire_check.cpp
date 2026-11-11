@@ -578,16 +578,18 @@ void DeployCheck::fire_accessory_rows(const DeployCheckState &p_st) {
 	const auto share = [](size_t p_n, size_t p_of) { return p_of == 0 ? 0.0f : float(p_n) / float(p_of); };
 	const bool reticle_drawn = px.reticle_mesh.empty() || px.tinted >= kDeployFireReticlePixels;
 	const bool surround_drawn = !px.surround ||
-			(share(px.band_dark, px.band) >= kDeployFireDarkShare &&
+			(px.shade_r10 >= px.inner_px - kDeployFireEdgePx && px.shade_r10 <= px.outer_px + kDeployFireEdgePx &&
 					share(px.ring_dark, px.ring) >= kDeployFireDarkShare && share(px.inside_dark, px.inside) < 0.5f);
 	char drawn_px[512];
 	std::snprintf(drawn_px, sizeof(drawn_px),
 			"; drawn (%s): reticle %s %zu tinted of %zu px within its %.1f px disc; surround %s r %.1f..%.1f px: "
-			"outer half %zu of %zu dark, ring outside %zu of %zu dark, inside %zu of %zu dark",
+			"shade 0.9 of the clear lens at r %.1f, %.2f at r %.1f; outer half %zu of %zu dark, ring outside %zu of "
+			"%zu dark, inside %zu of %zu dark",
 			fire_steady_ ? "steady sight" : "sight still moving",
 			px.reticle_mesh.empty() ? "none" : px.reticle_mesh.c_str(), px.tinted, px.disc, double(px.reticle_px),
-			px.surround ? "multiply" : "none", double(px.inner_px), double(px.outer_px), px.band_dark, px.band,
-			px.ring_dark, px.ring, px.inside_dark, px.inside);
+			px.surround ? "multiply" : "none", double(px.inner_px), double(px.outer_px), double(px.shade_r90),
+			double(kDeployFireDarkMax), double(px.shade_r10), px.band_dark, px.band, px.ring_dark, px.ring,
+			px.inside_dark, px.inside);
 	row(name + ".sight_picture",
 			!optic.empty() && drawn(fire_ads_.vm_attached, optic) && fire_ads_.vm_sight &&
 					fire_ads_.vm_sight_px.length() <= kDeployFireSightPx && surfaces.reticles > 0 &&
