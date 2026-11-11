@@ -47,6 +47,7 @@ inline float distance(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 }
 
 TdmLevel *load_tdm_level_once();
+TdmLevel *load_conquest_level_once();
 
 void check_install_unchanged(TdmLevel &r_level);
 
@@ -280,16 +281,7 @@ inline std::string default_tdm_tuning_cfg() {
 }
 
 #ifdef OPENBF3_MOTOR_TUNING_CFG
-inline TdmLevel *load_tdm_level_once() {
-	static std::unique_ptr<TdmLevel> s_level;
-	static bool s_tried = false;
-	if (s_tried) {
-		if (s_level == nullptr) {
-			bf3::test::skip_install_case("no BF3 install or no TDM load (see the first TDM case)");
-		}
-		return s_level.get();
-	}
-	s_tried = true;
+inline std::unique_ptr<TdmLevel> load_tdm_level(const char *p_level, const char *p_mode, bool p_bots) {
 	auto l = std::make_unique<TdmLevel>();
 	l->reader = std::make_unique<core::InstallReader>();
 	if (!l->reader->locate({})) {
@@ -322,7 +314,7 @@ inline TdmLevel *load_tdm_level_once() {
 	options.tdm_tuning_cfg = detail::default_tdm_tuning_cfg();
 	host::LoadProgress progress;
 	const auto start = std::chrono::steady_clock::now();
-	core::Result<host::LevelDatabase> db = host::open_level_database(l->install, "MP_Subway", "TeamDeathMatch0", 0, &progress);
+	core::Result<host::LevelDatabase> db = host::open_level_database(l->install, p_level, p_mode, 0, &progress);
 	REQUIRE_MESSAGE(db.ok(), (db.ok() ? std::string() : db.error().message));
 	if (!db.ok()) {
 		return nullptr;
@@ -334,27 +326,30 @@ inline TdmLevel *load_tdm_level_once() {
 	}
 	l->shared = *shared;
 	const double seconds_shared = detail::seconds_since(start);
-	host::BotLoadOptions bo;
-	bo.cache = &cache;
-	bo.threads = std::max(1u, std::thread::hardware_concurrency() / 2u);
-	bo.seed = 1;
-	core::Result<std::shared_ptr<const host::BotLevel>> bots = host::load_bot_level(*db, *l->shared, bo, nullptr);
-	REQUIRE_MESSAGE(bots.ok(), (bots.ok() ? std::string() : bots.error().message));
-	if (!bots.ok()) {
-		return nullptr;
+	if (p_bots) {
+		host::BotLoadOptions bo;
+		bo.cache = &cache;
+		bo.threads = std::max(1u, std::thread::hardware_concurrency() / 2u);
+		bo.seed = 1;
+		core::Result<std::shared_ptr<const host::BotLevel>> bots = host::load_bot_level(*db, *l->shared, bo, nullptr);
+		REQUIRE_MESSAGE(bots.ok(), (bots.ok() ? std::string() : bots.error().message));
+		if (!bots.ok()) {
+			return nullptr;
+		}
+		l->bots = *bots;
 	}
-	l->bots = *bots;
 	cache.close();
 	l->seconds_load = detail::seconds_since(start);
 	detail::frame() = host::shot_frame(*l->shared->static_world);
 	const host::GunplayLevel *g = l->shared->gunplay.get();
-	std::printf("tdm fixture: Metro TDM loaded in %.2f s (shared %.2f s: gunplay %.2f s [weapons %.2f, kits and "
+	std::printf("tdm fixture: %s %s loaded in %.2f s (shared %.2f s: gunplay %.2f s [weapons %.2f, kits and "
 				"loadouts %.2f, capsules %.2f, %zu defs], "
 				"logic %.2f s; bots %.2f s), %zu spawns, logic digest %016llx\n",
-			l->seconds_load, seconds_shared, l->shared->seconds_gunplay, g != nullptr ? g->seconds_weapons : 0.0,
-			g != nullptr ? g->seconds_kits : 0.0, g != nullptr ? g->seconds_capsules : 0.0,
-			g != nullptr ? g->defs.size() : size_t(0), l->shared->seconds_logic, l->seconds_load - seconds_shared,
-			l->shared->spawns.size(), (unsigned long long)l->shared->logic_digest);
+			p_level, p_mode, l->seconds_load, seconds_shared, l->shared->seconds_gunplay,
+			g != nullptr ? g->seconds_weapons : 0.0, g != nullptr ? g->seconds_kits : 0.0,
+			g != nullptr ? g->seconds_capsules : 0.0, g != nullptr ? g->defs.size() : size_t(0),
+			l->shared->seconds_logic, l->seconds_load - seconds_shared, l->shared->spawns.size(),
+			(unsigned long long)l->shared->logic_digest);
 	for (const std::string &n : l->shared->tdm_notes) {
 		std::printf("tdm fixture: note: %s\n", n.c_str());
 	}
@@ -362,7 +357,34 @@ inline TdmLevel *load_tdm_level_once() {
 		FAIL("the TDM load made no logic graph or no gunplay tables");
 		return nullptr;
 	}
-	s_level = std::move(l);
+	return l;
+}
+
+inline TdmLevel *load_tdm_level_once() {
+	static std::unique_ptr<TdmLevel> s_level;
+	static bool s_tried = false;
+	if (s_tried) {
+		if (s_level == nullptr) {
+			bf3::test::skip_install_case("no BF3 install or no TDM load (see the first TDM case)");
+		}
+		return s_level.get();
+	}
+	s_tried = true;
+	s_level = load_tdm_level("MP_Subway", "TeamDeathMatch0", true);
+	return s_level.get();
+}
+
+inline TdmLevel *load_conquest_level_once() {
+	static std::unique_ptr<TdmLevel> s_level;
+	static bool s_tried = false;
+	if (s_tried) {
+		if (s_level == nullptr) {
+			bf3::test::skip_install_case("no BF3 install or no Conquest load (see the first Conquest case)");
+		}
+		return s_level.get();
+	}
+	s_tried = true;
+	s_level = load_tdm_level("MP_007", "ConquestSmall0", false);
 	return s_level.get();
 }
 #endif

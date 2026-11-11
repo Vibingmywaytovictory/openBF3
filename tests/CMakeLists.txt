@@ -1038,6 +1038,8 @@ add_test(NAME host.gunplay.gadgets COMMAND test_host_tdm --test-suite=host-gunpl
 set_tests_properties(host.gunplay.gadgets PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 add_test(NAME host.rotation.unit COMMAND test_host_tdm --test-suite=host-rotation-unit)
 set_tests_properties(host.rotation.unit PROPERTIES TIMEOUT 60)
+add_test(NAME host.tdm.conquest COMMAND test_host_tdm --test-suite=host-tdm-conquest)
+set_tests_properties(host.tdm.conquest PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 set_tests_properties(host.tdm.bots.unit PROPERTIES TIMEOUT 60)
 set_tests_properties(host.tdm.round host.tdm.bots host.tdm.replay PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 set_tests_properties(host.tdm.perf PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE)

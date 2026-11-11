@@ -18,6 +18,8 @@
 #include "bf3/host/spotter.h"
 #include "bf3/net/loopback_ping.h"
 #include "bf3/sim/collision_world.h"
+#include "bf3/sim/logic/conquest_data.h"
+#include "bf3/sim/logic/conquest_natives.h"
 #include "bf3/sim/logic/round_natives.h"
 #include "bf3/sim/nav_query.h"
 #include "bf3/sim/soldier_motor.h"
@@ -3346,5 +3348,179 @@ TEST_SUITE("host-spotting") {
 		CHECK(m->server.stats().spotting.orders_stored == 2u);
 		CHECK(m->server.stats().spotting.orders_refused == 1u);
 		CHECK(m->server.stats().bad_datagrams == 0u);
+	}
+}
+
+namespace {
+
+const sim::logic::ConquestNatives &conquest_of(const Match &p_match) {
+	const sim::logic::ConquestNatives *c = p_match.rules().natives().conquest();
+	REQUIRE(c != nullptr);
+	return *c;
+}
+
+bool on_open_point(const host::SharedLevel &p_level, const sim::logic::ConquestNatives &p_conquest, uint8_t p_team,
+		const sim::Vec3 &p_at, float p_radius) {
+	for (size_t i = 0; i < p_level.spawns.size(); ++i) {
+		const sim::SpawnPoint &sp = p_level.spawns[i];
+		const float dx = sp.position[0] - p_at[0], dz = sp.position[2] - p_at[2];
+		if ((sp.team == 0 || sp.team == int(p_team)) && dx * dx + dz * dz <= p_radius * p_radius &&
+				p_conquest.spawn_point_open(p_level.spawn_spawners[i], p_team)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+size_t open_points(const host::SharedLevel &p_level, const sim::logic::ConquestNatives &p_conquest, uint8_t p_team) {
+	size_t n = 0;
+	for (size_t i = 0; i < p_level.spawns.size(); ++i) {
+		n += (p_level.spawns[i].team == 0 || p_level.spawns[i].team == int(p_team)) &&
+						p_conquest.spawn_point_open(p_level.spawn_spawners[i], p_team)
+				? 1u
+				: 0u;
+	}
+	return n;
+}
+
+sim::Vec3 ground_at(const sim::CollisionWorld &p_world, float p_x, float p_z, float p_from_y) {
+	sim::StaticHit hit;
+	REQUIRE(p_world.ground_below({ p_x, p_from_y, p_z }, 2000.0f, sim::query_mask::kMovement, &hit));
+	return add(hit.position, 0.0f, 0.05f, 0.0f);
+}
+
+}
+
+TEST_SUITE("host-tdm-conquest") {
+	TEST_CASE(
+			"conquest: MP_007 ConquestSmall0 on the GameServer: HQ spawns, a soldier on a flag takes it and opens its "
+			"spawn points for his team only, a human deserter dies as his own killer") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::SharedLevel &shared = *level->shared;
+		REQUIRE(shared.spawn_spawners.size() == shared.spawns.size());
+		std::unique_ptr<Match> m = start_match(*level, false, 51u, 0, 2);
+		std::vector<Script *> bots;
+		for (int i = 0; i < 4; ++i) {
+			bots.push_back(m->bot());
+		}
+		tdm::ScriptedPeer &p = m->join("deserter");
+		p.ready();
+		REQUIRE(wait_in_round(*m));
+		REQUIRE(m->until(
+				[&] {
+					for (const Script *b : bots) {
+						if (!is_alive(m->state(b->slot))) {
+							return false;
+						}
+					}
+					return is_alive(m->state(p.slot()));
+				},
+				600));
+		const sim::logic::ConquestNatives &cq = conquest_of(*m);
+		for (const uint8_t t : { uint8_t(1), uint8_t(2) }) {
+			CHECK(cq.tickets(t) == cq.initial_tickets(t));
+		}
+		size_t on_hq = 0;
+		for (const Script *b : bots) {
+			const uint8_t t = m->rules().team_of(uint8_t(b->slot));
+			on_hq += on_open_point(shared, cq, t, m->state(b->slot)->position, 10.0f) ? 1u : 0u;
+		}
+		const uint8_t peer_team = m->rules().team_of(uint8_t(p.slot()));
+		on_hq += on_open_point(shared, cq, peer_team, m->state(p.slot())->position, 10.0f) ? 1u : 0u;
+		const size_t open1 = open_points(shared, cq, 1), open2 = open_points(shared, cq, 2);
+		std::printf(
+				"conquest: %zu of %zu soldiers spawned on an open point of their team; open points US %zu RU %zu of "
+				"%zu; tickets US %lld RU %lld\n",
+				on_hq, bots.size() + 1u, open1, open2, shared.spawns.size(), (long long)cq.tickets(1),
+				(long long)cq.tickets(2));
+		CHECK(on_hq == bots.size() + 1u);
+
+		Script *taker = nullptr;
+		for (Script *b : bots) {
+			if (m->rules().team_of(uint8_t(b->slot)) == 1) {
+				taker = b;
+				break;
+			}
+		}
+		REQUIRE(taker != nullptr);
+		const sim::logic::ConquestPointView *flag = nullptr;
+		for (const sim::logic::ConquestPointView &v : cq.points()) {
+			if (!v.hq && v.team == 0) {
+				flag = &v;
+				break;
+			}
+		}
+		REQUIRE(flag != nullptr);
+		const uint32_t flag_node = flag->node;
+		const sim::Vec3 flag_at = flag->position;
+		m->place(taker->slot, ground_at(*m->world, flag_at[0], flag_at[2], flag_at[1] + 50.0f));
+		const sim::Tick placed = m->now();
+		const auto flag_team = [&] {
+			for (const sim::logic::ConquestPointView &v : cq.points()) {
+				if (v.node == flag_node) {
+					return v.controlled ? v.team : uint8_t(0);
+				}
+			}
+			return uint8_t(0xFF);
+		};
+		REQUIRE(m->until([&] { return flag_team() == 1; }, 1500));
+		const sim::Tick taken = m->now();
+		const size_t open1_after = open_points(shared, cq, 1), open2_after = open_points(shared, cq, 2);
+		std::printf(
+				"conquest: the US soldier on flag node %u took it in %u ticks; open points US %zu -> %zu, RU %zu -> "
+				"%zu; captures %llu\n",
+				unsigned(flag_node), unsigned(taken - placed), open1, open1_after, open2, open2_after,
+				(unsigned long long)cq.stats().captures);
+		CHECK(is_alive(m->state(taker->slot)));
+		CHECK(taken - placed >= 1150u);
+		CHECK(open1_after > open1);
+		CHECK(open2_after == open2);
+		CHECK(cq.stats().captures == 1u);
+
+		const sim::logic::ConquestParams &params = *shared.logic_natives->conquest;
+		const sim::logic::ConquestAreaData *area = nullptr;
+		for (const sim::logic::ConquestAreaData &a : params.areas) {
+			if (!a.params.team_specific || a.params.team == peer_team) {
+				area = &a;
+				break;
+			}
+		}
+		REQUIRE(area != nullptr);
+		REQUIRE(area->polygon.size() >= 3u);
+		float max_x = area->polygon[0][0], min_z = area->polygon[0][1], max_z = area->polygon[0][1];
+		for (const std::array<float, 2> &v : area->polygon) {
+			max_x = std::max(max_x, v[0]);
+			min_z = std::min(min_z, v[1]);
+			max_z = std::max(max_z, v[1]);
+		}
+		const float out_x = max_x + 40.0f, out_z = 0.5f * (min_z + max_z);
+		REQUIRE_FALSE(sim::logic::polygon_contains(area->polygon, out_x, out_z));
+		const sim::SoldierState before = *m->state(p.slot());
+		const uint64_t suicides0 = m->rules().stats().suicides;
+		const size_t combat0 = p.combat.size();
+		m->teleport(p, ground_at(*m->world, out_x, out_z, before.position[1] + 300.0f));
+		const sim::Tick left = m->now();
+		REQUIRE(m->until(
+				[&] { return !is_alive(m->state(p.slot())); }, uint32_t(area->params.time_to_return) * 60u + 120u));
+		const sim::Tick died = m->now();
+		size_t own = 0;
+		for (size_t i = combat0; i < p.combat.size(); ++i) {
+			for (const net::DeathEvent &d : p.combat[i].deaths) {
+				own += d.victim == uint8_t(p.slot()) && d.killer == uint8_t(p.slot()) ? 1u : 0u;
+			}
+		}
+		std::printf(
+				"conquest: the human outside the combat area died after %u ticks (TimeToReturn %d s); deserter kills "
+				"%llu, strikes %llu, suicides +%llu\n",
+				unsigned(died - left), int(area->params.time_to_return), (unsigned long long)cq.stats().deserter_kills,
+				(unsigned long long)cq.stats().strikes, (unsigned long long)(m->rules().stats().suicides - suicides0));
+		CHECK(died - left >= uint32_t(area->params.time_to_return) * 60u - 2u);
+		CHECK(own == 1u);
+		CHECK(cq.stats().deserter_kills == 1u);
+		CHECK(m->rules().stats().suicides == suicides0 + 1u);
+		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 }
