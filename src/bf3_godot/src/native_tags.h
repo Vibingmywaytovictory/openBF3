@@ -31,6 +31,10 @@ namespace bf3::core::ui {
 struct HudWorldTags;
 }
 
+namespace bf3::host {
+struct GunplayLevel;
+}
+
 namespace bf3::godot_side {
 
 class Bf3LevelSession;
@@ -149,6 +153,8 @@ private:
 	IffReveal reveal_;
 	sim::commo::OrderIcon order_icon_;
 	double order_clock_ = -1.0;
+	std::shared_ptr<const host::GunplayLevel> spotter_level_;
+	std::optional<sim::spotting::SpotterDef> spotter_;
 	NativeTagStats stats_;
 	std::vector<NativeTag> tags_;
 	std::vector<IffMinimapEntry> minimap_;

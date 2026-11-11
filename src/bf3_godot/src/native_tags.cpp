@@ -340,11 +340,15 @@ void NativeTags::update(const Camera3D *p_camera, bool p_show, Vector2 p_viewpor
 	sim::commo::step_order_icon(order_icon_, order_clock_ >= 0.0 ? float(now_s - order_clock_) : 0.0f,
 			f.server_own_valid && f.server_own.health > 0.0f);
 	order_clock_ = now_s;
-	std::optional<sim::spotting::SpotterDef> spotter;
-	if (gunplay != nullptr) {
-		if (core::Result<sim::spotting::SpottingDef> d = sim::spotting::make_spotting_def(gunplay->soldier);
-				d && d->spotter_present) {
-			spotter = d->spotter;
+	if (const std::shared_ptr<const host::GunplayLevel> level = shared != nullptr ? shared->gunplay : nullptr;
+			level != spotter_level_) {
+		spotter_level_ = level;
+		spotter_.reset();
+		if (level != nullptr) {
+			if (core::Result<sim::spotting::SpottingDef> d = sim::spotting::make_spotting_def(level->soldier);
+					d && d->spotter_present) {
+				spotter_ = d->spotter;
+			}
 		}
 	}
 	sim::commo::NeedParty me;
@@ -352,7 +356,7 @@ void NativeTags::update(const Camera3D *p_camera, bool p_show, Vector2 p_viewpor
 	me.max_health = gunplay != nullptr ? gunplay->max_health : 100.0f;
 	me.low_ammo = f.stats.slot < f.spots.size() && f.spots[f.stats.slot].low_ammo;
 	me.supplies = mine;
-	me.def = spotter ? &*spotter : nullptr;
+	me.def = spotter_ ? &*spotter_ : nullptr;
 	++stats_.frames;
 	for (const IffSoldier &s : all) {
 		stats_.unknown_team += s.team == 0 ? 1u : 0u;
