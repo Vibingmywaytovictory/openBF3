@@ -5,6 +5,7 @@
 
 #include <doctest/doctest.h>
 
+#include <utility>
 #include <vector>
 
 namespace {
@@ -31,11 +32,25 @@ sp::SpotterDef retail() {
 	return d;
 }
 
-host::SpotSubject subject(uint8_t p_slot, uint8_t p_team, float p_x, float p_z) {
+core::gameplay::SoldierDef soldier() {
+	core::gameplay::SoldierDef d;
+	d.radius = 0.35f;
+	for (const auto &[pose, height] : { std::pair{ core::gameplay::SoldierPose::Stand, 1.8f },
+				 std::pair{ core::gameplay::SoldierPose::Crouch, 1.15f },
+				 std::pair{ core::gameplay::SoldierPose::Prone, 0.3f } }) {
+		core::gameplay::PoseDef p;
+		p.pose = pose;
+		p.height = height;
+		d.poses.push_back(p);
+	}
+	return d;
+}
+
+host::SpotSubject subject(uint8_t p_slot, uint8_t p_team, float p_x, float p_z, sim::Pose p_pose = sim::Pose::Stand) {
 	host::SpotSubject s;
 	s.slot = p_slot;
 	s.team = p_team;
-	s.centre = { p_x, 1.0f, p_z };
+	REQUIRE(host::place_spot_body(s, soldier(), p_pose, { p_x, 0.1f, p_z }));
 	s.party.position = s.centre;
 	s.party.health = 100.0f;
 	s.party.max_health = 100.0f;
@@ -61,6 +76,31 @@ host::SpotterInput input(const std::vector<host::SpotSubject> &p_subjects, doubl
 }
 
 TEST_SUITE("spotting-unit") {
+	TEST_CASE("spotter: a spot body is the soldier's PhysicalRadius capsule over the current pose's height") {
+		const host::SpotSubject stand = subject(3, 2, 0.0f, 40.0f);
+		CHECK(stand.body.radius == 0.35f);
+		CHECK(stand.body.a[1] == doctest::Approx(0.45f));
+		CHECK(stand.body.b[1] == doctest::Approx(1.55f));
+		CHECK(stand.centre[1] == doctest::Approx(1.0f));
+		const host::SpotSubject crouch = subject(3, 2, 0.0f, 40.0f, sim::Pose::Crouch);
+		CHECK(crouch.body.b[1] == doctest::Approx(0.9f));
+		CHECK(crouch.centre[1] == doctest::Approx(0.675f));
+		const host::SpotSubject prone = subject(3, 2, 0.0f, 40.0f, sim::Pose::Prone);
+		CHECK(prone.body.a[1] == doctest::Approx(0.45f));
+		CHECK(prone.body.b[1] == doctest::Approx(0.45f));
+		CHECK(prone.centre[1] == doctest::Approx(0.45f));
+		const std::vector<host::SpotSubject> lying{ prone };
+		CHECK(host::spot_ray_hits({ -5.0f, 0.5f, 40.0f }, { 5.0f, 0.5f, 40.0f }, lying, 0, nullptr).size() == 1u);
+		CHECK(host::spot_ray_hits({ -5.0f, 0.9f, 40.0f }, { 5.0f, 0.9f, 40.0f }, lying, 0, nullptr).empty());
+		CHECK(host::spot_ray_hits({ -5.0f, 0.9f, 40.0f }, { 5.0f, 0.9f, 40.0f },
+					  std::vector<host::SpotSubject>{ crouch }, 0, nullptr)
+						.size() == 1u);
+		host::SpotSubject none;
+		core::gameplay::SoldierDef no_poses;
+		no_poses.radius = 0.35f;
+		CHECK_FALSE(host::place_spot_body(none, no_poses, sim::Pose::Stand, {}));
+	}
+
 	TEST_CASE("spotter: a press spots the enemy the crosshair ray meets first, a teammate in front is skipped") {
 		const std::vector<host::SpotSubject> subjects{ subject(0, 1, 0.0f, 0.0f), subject(2, 1, 0.0f, 10.0f),
 			subject(3, 2, 0.0f, 40.0f), subject(4, 2, 30.0f, 40.0f) };

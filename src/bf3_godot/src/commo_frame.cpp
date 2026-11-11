@@ -71,8 +71,9 @@ size_t spot_subjects(const host::PresentationFrame &p_frame, uint64_t p_now_ns, 
 		host::SpotSubject s;
 		s.slot = o.slot;
 		s.team = row->team;
-		s.half_height = 0.5f * (o.eye_height + 0.2f);
-		s.centre = { o.position[0], o.position[1] + s.half_height, o.position[2] };
+		if (p_gunplay == nullptr || !host::place_spot_body(s, p_gunplay->soldier, o.pose, o.position)) {
+			continue;
+		}
 		s.party.position = o.position;
 		s.party.max_health = max_health;
 		s.party.health = spot.low_health ? 0.0f : max_health;

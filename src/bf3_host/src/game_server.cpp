@@ -453,7 +453,7 @@ struct GameServer::Impl {
 			return;
 		}
 		spotting.step(sim::kTickSeconds, alive());
-		step_bot_spotters();
+		step_bot_spotters(g->level().soldier);
 		for (const auto &[slot, request] : spotting.take_queued_orders()) {
 			order(slot, request);
 		}
@@ -472,7 +472,7 @@ struct GameServer::Impl {
 		}
 	}
 
-	void step_bot_spotters() {
+	void step_bot_spotters(const core::gameplay::SoldierDef &p_soldier) {
 		std::vector<SpotSubject> subjects;
 		std::vector<BotEye> eyes;
 		for (size_t i = 0; i < slots.size(); ++i) {
@@ -486,9 +486,9 @@ struct GameServer::Impl {
 			SpotSubject s;
 			s.slot = uint8_t(i);
 			s.team = team;
-			s.half_height = 0.5f * (eye + 0.2f);
-			s.centre = { st.position[0], st.position[1] + s.half_height, st.position[2] };
-			subjects.push_back(s);
+			if (place_spot_body(s, p_soldier, st.pose, st.position)) {
+				subjects.push_back(s);
+			}
 			if (slots[i].bot) {
 				eyes.push_back(BotEye{ uint8_t(i), team, { st.position[0], st.position[1] + eye, st.position[2] },
 						sim::weapons::aim_direction(st.yaw, st.pitch, {}) });

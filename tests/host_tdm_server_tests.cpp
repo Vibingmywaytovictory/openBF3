@@ -15,6 +15,7 @@
 #include "bf3/host/kits.h"
 #include "bf3/host/load_bots.h"
 #include "bf3/host/loadout.h"
+#include "bf3/host/spotter.h"
 #include "bf3/net/loopback_ping.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/logic/round_natives.h"
@@ -3143,6 +3144,15 @@ TEST_SUITE("host-spotting") {
 
 		const sim::spotting::SpottingDef def = *sim::spotting::make_spotting_def(level->shared->gunplay->soldier);
 		CHECK(def.target.active_time == 7.0f);
+		host::SpotSubject body;
+		REQUIRE(host::place_spot_body(body, level->shared->gunplay->soldier, sim::Pose::Stand, { 0.0f, 0.0f, 0.0f }));
+		CHECK(body.body.radius == doctest::Approx(0.35f));
+		CHECK(body.body.b[1] == doctest::Approx(1.8f - 0.35f));
+		REQUIRE(host::place_spot_body(body, level->shared->gunplay->soldier, sim::Pose::Crouch, { 0.0f, 0.0f, 0.0f }));
+		CHECK(body.body.b[1] == doctest::Approx(1.15f - 0.35f));
+		REQUIRE(host::place_spot_body(body, level->shared->gunplay->soldier, sim::Pose::Prone, { 0.0f, 0.0f, 0.0f }));
+		CHECK(body.body.b[1] == doctest::Approx(0.35f));
+		CHECK(body.centre[1] == doctest::Approx(0.35f));
 		send_spot(*m, alpha, uint8_t(sim::spotting::SpotType::Active), { b });
 		const sim::Tick applied = m->now();
 		m->tick();

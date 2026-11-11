@@ -1,7 +1,5 @@
 #include "bf3/host/spotter.h"
 
-#include "bf3/sim/weapons/hit_target.h"
-
 #include <algorithm>
 #include <cmath>
 
@@ -9,6 +7,21 @@ namespace bf3::host {
 
 namespace sp = sim::spotting;
 namespace cm = sim::commo;
+
+bool place_spot_body(SpotSubject &r_subject, const core::gameplay::SoldierDef &p_soldier, sim::Pose p_pose,
+		const sim::Vec3 &p_feet) {
+	const core::gameplay::PoseDef *pose = p_soldier.pose(core::gameplay::SoldierPose(p_pose));
+	const float r = p_soldier.radius;
+	if (pose == nullptr || !(r > 0.0f) || !std::isfinite(r) || !(pose->height > 0.0f) || !std::isfinite(pose->height)) {
+		return false;
+	}
+	const float top = std::max(r, pose->height - r);
+	r_subject.body.a = { p_feet[0], p_feet[1] + r, p_feet[2] };
+	r_subject.body.b = { p_feet[0], p_feet[1] + top, p_feet[2] };
+	r_subject.body.radius = r;
+	r_subject.centre = { p_feet[0], p_feet[1] + 0.5f * (r + top), p_feet[2] };
+	return true;
+}
 
 sim::commo::Supplies supplies_of(std::span<const uint16_t> p_defs, std::span<const sim::weapons::GadgetDef> p_gadgets) {
 	cm::Supplies out;
@@ -40,13 +53,9 @@ std::vector<sp::RayHit> spot_ray_hits(const sim::Vec3 &p_from, const sim::Vec3 &
 		if (s.slot == p_own_slot) {
 			continue;
 		}
-		sim::weapons::ZoneCapsule body;
-		body.a = core::vec::sub(s.centre, sim::Vec3{ 0.0f, s.half_height, 0.0f });
-		body.b = core::vec::add(s.centre, sim::Vec3{ 0.0f, s.half_height, 0.0f });
-		body.radius = kSpotSubjectRadius;
 		float f = 0.0f;
 		sim::Vec3 normal{};
-		if (sim::weapons::segment_capsule(p_from, p_to, body, f, normal) && f <= wall) {
+		if (sim::weapons::segment_capsule(p_from, p_to, s.body, f, normal) && f <= wall) {
 			hits.push_back({ f, sp::RayHit{ true, s.slot, s.team } });
 		}
 	}

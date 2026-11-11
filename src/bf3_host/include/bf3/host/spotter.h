@@ -1,10 +1,12 @@
 #pragma once
 
+#include "bf3/core/gameplay/soldier_def.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/commo.h"
 #include "bf3/sim/spotting.h"
 #include "bf3/sim/weapons/gadgets.h"
+#include "bf3/sim/weapons/hit_target.h"
 
 #include <cstdint>
 #include <optional>
@@ -13,13 +15,11 @@
 
 namespace bf3::host {
 
-inline constexpr float kSpotSubjectRadius = 0.35f;
-
 struct SpotSubject {
 	uint8_t slot = 0;
 	uint8_t team = 0;
 	sim::Vec3 centre{};
-	float half_height = 0.9f;
+	sim::weapons::ZoneCapsule body;
 	bool seated = false;
 	sim::commo::OrderParty party;
 };
@@ -44,6 +44,9 @@ struct SpotterOutput {
 	bool refused = false;
 	bool scanned = false;
 };
+
+bool place_spot_body(
+		SpotSubject &r_subject, const core::gameplay::SoldierDef &p_soldier, sim::Pose p_pose, const sim::Vec3 &p_feet);
 
 sim::commo::Supplies supplies_of(std::span<const uint16_t> p_defs, std::span<const sim::weapons::GadgetDef> p_gadgets);
 
