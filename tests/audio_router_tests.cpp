@@ -1029,6 +1029,33 @@ TEST_SUITE("audio-router") {
 		CHECK(r.recorder.seen[0].up);
 	}
 
+	TEST_CASE("a released burst's tail keeps following its shooter, and not a new soldier in the slot") {
+		Rig r;
+		std::vector<Shooter> shooters(1);
+		shooters[0].slot = 3;
+		shooters[0].feet = { 0.0f, 0.0f, 20.0f };
+		shooters[0].burst(r.render + 20 * kTick, 1, 4);
+		int frames = 0;
+		while (frames < 200 && (r.recorder.seen.empty() || !r.recorder.seen[0].up)) {
+			run(r, shooters, 1);
+			++frames;
+		}
+		REQUIRE(r.recorder.seen.size() == 1);
+		REQUIRE(r.recorder.seen[0].up);
+		REQUIRE(r.router->stats().weapon_voices == 1);
+		uint64_t before = r.router->stats().emitter_updates;
+		shooters[0].feet = { 6.0f, 0.0f, 20.0f };
+		run(r, shooters, 1);
+		REQUIRE(r.router->stats().weapon_voices == 1);
+		CHECK(r.router->stats().emitter_updates == before + 1);
+		before = r.router->stats().emitter_updates;
+		shooters[0].generation = 2;
+		shooters[0].feet = { -30.0f, 0.0f, 5.0f };
+		run(r, shooters, 1);
+		REQUIRE(r.router->stats().weapon_voices == 1);
+		CHECK(r.router->stats().emitter_updates == before);
+	}
+
 	TEST_CASE("reloads and one-shots: own OwnTimed, others' reload_seq, knife Melee, the M67 detonation") {
 		Rig r;
 		host::PresentEvent reload;

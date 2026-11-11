@@ -508,6 +508,7 @@ struct WeaponAudioRouter::Impl {
 	struct Voice {
 		InstanceHandle handle = kNoInstance;
 		uint8_t slot = 0;
+		uint8_t generation = 0;
 		bool own = false;
 		uint16_t def = sw::kNoWeapon;
 		const WeaponAudioDef *sound = nullptr;
@@ -726,6 +727,7 @@ struct WeaponAudioRouter::Impl {
 		voices.emplace_back(d->binding, d->fire_mode, handle);
 		Voice &v = voices.back();
 		v.slot = p_slot;
+		v.generation = r_track.generation;
 		v.own = p_own;
 		v.def = p_def;
 		v.sound = d;
@@ -1143,11 +1145,14 @@ struct WeaponAudioRouter::Impl {
 			if (t.held != kNoInstance && v == nullptr) {
 				t.held = kNoInstance;
 			}
-			if (v != nullptr) {
-				v->distance = t.distance;
-				if (!same_emitter(v->emitter, t.emitter)) {
-					v->emitter = t.emitter;
-					v->emitter_dirty = true;
+			for (Voice &o : voices) {
+				if (o.own || o.slot != s.slot || o.generation != s.generation) {
+					continue;
+				}
+				o.distance = t.distance;
+				if (!same_emitter(o.emitter, t.emitter)) {
+					o.emitter = t.emitter;
+					o.emitter_dirty = true;
 				}
 			}
 			if (i >= p_weapons.size() || !p_weapons[i].valid || p_weapons[i].slot != s.slot) {
