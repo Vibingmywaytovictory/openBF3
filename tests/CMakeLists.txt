@@ -1363,7 +1363,7 @@ target_link_libraries(test_ai_core PRIVATE bf3_ai)
 add_test(NAME ai.core.unit COMMAND test_ai_core --test-suite=ai-core)
 set_tests_properties(ai.core.unit PROPERTIES TIMEOUT 60 LABELS "unit")
 
-openbf3_test(test_ai_behaviour test_main.cpp ai_behaviour_tests.cpp ai_infantry_fakes.h)
+openbf3_test(test_ai_behaviour test_main.cpp ai_behaviour_tests.cpp ai_infantry_fakes.h ai_knowledge_fakes.h)
 target_link_libraries(test_ai_behaviour PRIVATE bf3_ai)
 add_test(NAME ai.behaviour.unit COMMAND test_ai_behaviour --test-suite=ai-behaviour)
 set_tests_properties(ai.behaviour.unit PROPERTIES TIMEOUT 60 LABELS "unit")

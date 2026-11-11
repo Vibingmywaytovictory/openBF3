@@ -1,11 +1,13 @@
 #include <doctest/doctest.h>
 
 #include "ai_infantry_fakes.h"
+#include "ai_knowledge_fakes.h"
 #include "bf3/ai/behaviour/behaviours.h"
 #include "bf3/ai/behaviour/curves.h"
 #include "bf3/ai/behaviour/urgency_merger.h"
 #include "bf3/ai/bot/bot_main.h"
 #include "bf3/ai/bot/bot_memory.h"
+#include "bf3/ai/bot/waypoints.h"
 #include "bf3/ai/squad/squad_world.h"
 
 #include <vector>
@@ -13,6 +15,8 @@
 using namespace bf3;
 using namespace bf3::ai;
 using bf3::ai::test::FakeBody;
+using bf3::ai::test::FakeObject;
+using bf3::ai::test::Knowledge;
 
 namespace {
 
@@ -51,6 +55,19 @@ protected:
 	float situation() override { return level; }
 };
 
+struct Areas final : WaypointAreas {
+	bool held = false;
+	int inside_area = -1;
+	mutable int randomized = 0;
+	bool exists(int p_area) const override { return p_area == 3; }
+	bool owned(int, int) const override { return held; }
+	bool inside(int p_area, const Vec3 &) const override { return p_area == inside_area; }
+	float size(int, int) const override { return 6.0f; }
+	void randomize_position(int, int, float, Vec3 &r_position) const override {
+		++randomized;
+		r_position.x += 40.0f;
+	}
+};
 }
 
 TEST_SUITE("ai-behaviour") {
@@ -221,5 +238,195 @@ TEST_SUITE("ai-behaviour") {
 		bot.decision_making(sim::kTickSeconds);
 		CHECK(bot.weighted_urgency(InfantryBehaviour::Random) == doctest::Approx(1.0f));
 		CHECK(bot.behaviour() == InfantryBehaviour::Random);
+	}
+
+	TEST_CASE("WPMoveTo: intermediate goals pop within the step radius or inside their area, the last one's urgency") {
+		Areas areas;
+		const WaypointBot bot{ 1, 0.5f, false };
+		WPMoveTo free(4.0f, 3.0f, std::vector<Vec3>{ { 0.0f, 0.0f, 0.0f }, { 20.0f, 0.0f, 0.0f } }, -1, areas);
+		CHECK(free.kind() == WaypointKind::MoveTo);
+		CHECK(free.radius() == 4.0f);
+		Vec3 goal{};
+		REQUIRE(free.goal_point(goal));
+		CHECK(goal.x == 0.0f);
+		free.clear_changed();
+		CHECK(free.urgency({ 9.0f, 0.0f, 0.0f }, bot) == 1.0f);
+		CHECK(free.goals().size() == 1u);
+		CHECK(free.changed());
+		REQUIRE(free.goal_point(goal));
+		CHECK(goal.x == 20.0f);
+		CHECK(free.urgency({ 0.0f, 0.0f, 0.0f }, bot) == doctest::Approx(1.0f));
+		CHECK_FALSE(free.finished());
+		CHECK(free.urgency({ 14.0f, 0.0f, 0.0f }, bot) == doctest::Approx(1.0f));
+		CHECK_FALSE(free.finished());
+		CHECK(free.urgency({ 15.5f, 0.0f, 0.0f }, bot) == doctest::Approx(20.25f / 24.0f));
+		CHECK(free.finished());
+		CHECK(free.urgency({ 17.0f, 0.0f, 0.0f }, bot) == 0.0f);
+		CHECK(free.finished());
+		std::vector<Vec3> left;
+		free.coords(left);
+		REQUIRE(left.size() == 1u);
+		CHECK(left[0].x == 20.0f);
+
+		WPMoveTo stepped(
+				4.0f, 0.5f, WPMoveTo::Goals{ { { 0.0f, 0.0f, 0.0f }, 3 }, { { 30.0f, 0.0f, 0.0f }, 3 } }, areas);
+		CHECK(stepped.urgency({ 1.5f, 0.0f, 0.0f }, bot) == 1.0f);
+		CHECK(stepped.goals().size() == 2u);
+		CHECK(stepped.urgency({ 0.5f, 0.0f, 0.0f }, bot) == 1.0f);
+		CHECK(stepped.goals().size() == 1u);
+
+		areas.inside_area = 3;
+		WPMoveTo through(
+				4.0f, 2.0f, WPMoveTo::Goals{ { { 0.0f, 0.0f, 0.0f }, 3 }, { { 50.0f, 0.0f, 0.0f }, 3 } }, areas);
+		CHECK(through.urgency({ 40.0f, 0.0f, 0.0f }, bot) == 1.0f);
+		CHECK(through.goals().size() == 1u);
+		areas.inside_area = -1;
+		WPMoveTo outside(
+				4.0f, 2.0f, WPMoveTo::Goals{ { { 0.0f, 0.0f, 0.0f }, 3 }, { { 50.0f, 0.0f, 0.0f }, 3 } }, areas);
+		CHECK(outside.urgency({ 40.0f, 0.0f, 0.0f }, bot) == 1.0f);
+		CHECK(outside.goals().size() == 2u);
+		outside.set_error(true);
+		CHECK(outside.urgency({ 40.0f, 0.0f, 0.0f }, bot) == 1.0f);
+		CHECK_FALSE(outside.error());
+		CHECK(areas.randomized == 1);
+		CHECK(outside.goals().front().first.x == 40.0f);
+		WPMoveTo lost(4.0f, 2.0f, WPMoveTo::Goals{ { { 0.0f, 0.0f, 0.0f }, 7 }, { { 50.0f, 0.0f, 0.0f }, 7 } }, areas);
+		CHECK(lost.urgency({ 40.0f, 0.0f, 0.0f }, bot) == 1.0f);
+		CHECK(lost.goals().size() == 2u);
+		lost.set_error(true);
+		CHECK(lost.urgency({ 40.0f, 0.0f, 0.0f }, bot) == 1.0f);
+		CHECK(lost.goals().size() == 1u);
+	}
+
+	TEST_CASE("WPMoveTo: the last goal's area doubles an unheld area, ends inside a held one, its radius widens it") {
+		Areas areas;
+		const WaypointBot bot{ 1, 0.5f, false };
+		areas.held = true;
+		WPMoveTo held(4.0f, 2.0f, WPMoveTo::Goals{ { { 100.0f, 0.0f, 0.0f }, 3 } }, areas);
+		CHECK(held.urgency({ 90.0f, 0.0f, 0.0f }, bot) == doctest::Approx(1.0f));
+		CHECK(held.urgency({ 95.0f, 0.0f, 0.0f }, bot) == doctest::Approx(0.1f));
+		CHECK(held.finished());
+		areas.inside_area = 3;
+		CHECK(held.urgency({ 90.0f, 0.0f, 0.0f }, bot) == 0.0f);
+		CHECK(held.finished());
+		areas.inside_area = -1;
+		areas.held = false;
+		WPMoveTo taken(4.0f, 2.0f, WPMoveTo::Goals{ { { 100.0f, 0.0f, 0.0f }, 3 } }, areas);
+		CHECK(taken.urgency({ 95.5f, 0.0f, 0.0f }, bot) == doctest::Approx(2.0f * 20.25f / 24.0f));
+		CHECK(taken.urgency({ 0.0f, 0.0f, 0.0f }, bot) == doctest::Approx(2.0f));
+		taken.set_error(true);
+		CHECK(taken.urgency({ 0.0f, 0.0f, 0.0f }, bot) == doctest::Approx(2.0f));
+		CHECK(areas.randomized == 1);
+		CHECK_FALSE(taken.error());
+		WPMoveTo none(4.0f, 2.0f, WPMoveTo::Goals{ { { 100.0f, 0.0f, 0.0f }, 9 } }, areas);
+		none.set_error(true);
+		CHECK(none.urgency({ 0.0f, 0.0f, 0.0f }, bot) == 0.0f);
+		const WaypointBot wide{ 1, 6.0f, false };
+		WPMoveTo big(4.0f, 2.0f, std::vector<Vec3>{ { 0.0f, 0.0f, 0.0f } }, -1, areas);
+		CHECK(big.urgency({ 5.5f, 0.0f, 0.0f }, wide) == 0.0f);
+		WPMoveTo empty(4.0f, 2.0f, WPMoveTo::Goals{}, areas);
+		CHECK(empty.urgency({}, bot) == 0.0f);
+		CHECK(empty.finished());
+		Vec3 g{};
+		CHECK_FALSE(empty.goal_point(g));
+	}
+
+	TEST_CASE("WPCloseTo, WPPatrol and WPEmpty: close in on an object, cycle a loop, stand still") {
+		Knowledge k;
+		FakeObject mate;
+		mate.where = { 20.0f, 0.0f, 0.0f };
+		const uint32_t handle = k.soldier(mate, 1);
+		WPCloseTo close(handle, 2.0f, k.information);
+		CHECK(close.kind() == WaypointKind::CloseTo);
+		CHECK(close.radius() == 5.0f);
+		Vec3 goal{};
+		REQUIRE(close.goal_point(goal));
+		CHECK(goal.x == 20.0f);
+		const WaypointBot bot{ 1, 0.5f, false };
+		close.clear_changed();
+		CHECK(close.urgency({}, bot) == 1.0f);
+		CHECK_FALSE(close.changed());
+		CHECK(close.urgency({ 10.0f, 0.0f, 0.0f }, bot) == doctest::Approx(1.0f));
+		CHECK(close.urgency({ 12.0f, 0.0f, 0.0f }, bot) == doctest::Approx(64.0f / 100.0f));
+		mate.where = { 30.0f, 0.0f, 0.0f };
+		CHECK(close.urgency({ 12.0f, 0.0f, 0.0f }, bot) == doctest::Approx(1.0f));
+		CHECK(close.changed());
+		REQUIRE(close.goal_point(goal));
+		CHECK(goal.x == 30.0f);
+		close.clear_changed();
+		CHECK(close.urgency({ 27.0f, 0.0f, 0.0f }, bot) == 0.0f);
+		CHECK(close.changed());
+		CHECK(close.modify_max_speed(4.0f) == doctest::Approx(4.0f));
+		close.set_error(true);
+		CHECK(close.urgency({ 0.0f, 0.0f, 0.0f }, bot) == 0.0f);
+		WPCloseTo gone(kNoHandle, 8.0f, k.information);
+		CHECK(gone.radius() == 8.0f);
+		CHECK(gone.urgency({}, bot) == 0.0f);
+		CHECK(gone.finished());
+		CHECK_FALSE(gone.goal_point(goal));
+		CHECK(gone.modify_max_speed(3.0f) == 3.0f);
+
+		WPPatrol patrol(2.0f, { { 0.0f, 0.0f, 0.0f }, { 10.0f, 0.0f, 0.0f } });
+		CHECK(patrol.radius() == 5.0f);
+		CHECK(patrol.kind() == WaypointKind::Patrol);
+		CHECK(patrol.urgency({ 0.0f, 50.0f, 4.0f }, bot) == 1.0f);
+		REQUIRE(patrol.goal_point(goal));
+		CHECK(goal.x == 10.0f);
+		CHECK(patrol.urgency({ 0.0f, 0.0f, 0.0f }, bot) == 1.0f);
+		REQUIRE(patrol.goal_point(goal));
+		CHECK(goal.x == 10.0f);
+		CHECK(patrol.urgency({ 9.0f, 0.0f, 0.0f }, bot) == 1.0f);
+		std::vector<Vec3> loop;
+		patrol.coords(loop);
+		REQUIRE(loop.size() == 2u);
+		CHECK(loop[0].x == 0.0f);
+		patrol.set_error(true);
+		CHECK(patrol.urgency({ 0.0f, 0.0f, 0.0f }, bot) == 0.0f);
+
+		WPEmpty empty({ 1.0f, 2.0f, 3.0f });
+		CHECK(empty.kind() == WaypointKind::Empty);
+		REQUIRE(empty.goal_point(goal));
+		CHECK(goal.y == 2.0f);
+		CHECK(empty.urgency({ 4.0f, 5.0f, 6.0f }, bot) == 0.0f);
+		REQUIRE(empty.goal_point(goal));
+		CHECK(goal.y == 5.0f);
+		CHECK(empty.speed() == -1.0f);
+	}
+
+	TEST_CASE("altitude waypoints: flight goals at a height, switched off with the air AI") {
+		Knowledge k;
+		FakeObject pad;
+		pad.where = { 0.0f, 0.0f, 0.0f };
+		const uint32_t handle = k.soldier(pad, 1);
+		const WaypointBot flying{ 1, 2.0f, true };
+		const WaypointBot landed{ 1, 2.0f, false };
+		WPAltitudeCloseTo over(handle, 10.0f, 50.0f, 30.0f, k.information);
+		CHECK(over.kind() == WaypointKind::AltitudeCloseTo);
+		CHECK(over.distance() == 30.0f);
+		CHECK(over.urgency({ 5.0f, 40.0f, 0.0f }, flying) == 0.0f);
+		CHECK(over.urgency({ 5.0f, 60.0f, 0.0f }, flying) == 1.0f);
+		CHECK(over.urgency({ 11.0f, 40.0f, 0.0f }, flying) == 0.0f);
+		CHECK(over.urgency({ 3.0f, 40.0f, 3.0f }, flying) == 0.0f);
+		CHECK(over.urgency({ 4.0f, 40.0f, 3.0f }, flying) == 1.0f);
+
+		WPAltitudeMoveTo route(10.0f, 5.0f, 40.0f, { { 0.0f, 100.0f, 0.0f }, { 200.0f, 100.0f, 0.0f } });
+		CHECK(route.kind() == WaypointKind::AltitudeMoveTo);
+		CHECK(route.urgency({ 50.0f, 100.0f, 0.0f }, flying) == 1.0f);
+		CHECK(route.urgency({ 60.0f, 100.0f, 0.0f }, flying) == 1.0f);
+		Vec3 goal{};
+		REQUIRE(route.goal_point(goal));
+		CHECK(goal.x == 200.0f);
+		CHECK(route.urgency({ 180.0f, 100.0f, 0.0f }, flying) == 0.0f);
+		CHECK(route.urgency({ 180.0f, 100.0f, 0.0f }, landed) == 1.0f);
+		CHECK(route.urgency({ 197.0f, 102.0f, 0.0f }, landed) == doctest::Approx(13.0f / 125.0f));
+
+		WPAltitudePatrol loop(10.0f, 5.0f, 40.0f, { { 0.0f, 100.0f, 0.0f }, { 100.0f, 100.0f, 0.0f } });
+		CHECK(loop.kind() == WaypointKind::AltitudePatrol);
+		CHECK(loop.urgency({ 0.0f, 120.0f, 0.0f }, flying) == 1.0f);
+		REQUIRE(loop.goal_point(goal));
+		CHECK(goal.x == 0.0f);
+		CHECK(loop.urgency({ 0.0f, 103.0f, 0.0f }, flying) == 1.0f);
+		REQUIRE(loop.goal_point(goal));
+		CHECK(goal.x == 100.0f);
 	}
 }
