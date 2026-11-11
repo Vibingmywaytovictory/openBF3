@@ -105,19 +105,30 @@ void CrosshairWalkRun::sample_ramp(Ramp &r_ramp, float p_arm, double p_want) {
 	r_ramp.last = p_arm;
 }
 
-double CrosshairWalkRun::blend_arm(const host::PresentationFrame &p_frame, const CrosshairWalkInputs &p_in) const {
-	const sw::WeaponSimDef &def = p_in.table->defs[p_in.weapon->def];
-	const sw::SwayContext sway = sw::weapon_sway_context(level_->motor, p_frame.own_curr, p_frame.own_command);
-	return core::ui::hud_crosshair_arm(sw::effective_dispersion(def, sway).min_angle, offset_);
+double CrosshairWalkRun::held_arm(const host::PresentationFrame &p_frame, const CrosshairWalkInputs &p_in) const {
+	const net::WeaponTimersWire *prev = host::active_weapon_timers(p_frame.own_weapons_prev);
+	const net::WeaponTimersWire *curr = host::active_weapon_timers(p_frame.own_weapons_curr);
+	if (curr == nullptr || prev == nullptr || p_in.weapon == nullptr) {
+		return -1.0;
+	}
+	const sim::Tick prev_tick = p_frame.tick > 0 ? p_frame.tick - 1u : 0u;
+	const double curr_s = sw::units_to_seconds(sw::tick_end(prev_tick)) + sw::units_to_seconds(sw::kTimeUnitsPerTick);
+	return core::ui::hud_crosshair_arm(
+			p_in.weapon->time_s < curr_s ? prev->sway.dispersion : curr->sway.dispersion, offset_);
 }
 
 void CrosshairWalkRun::ramp_row(const std::string &p_name, const Ramp &p_ramp, const std::string &p_what) {
 	const double span = std::fabs(moving_arm_ - stand_arm_);
 	const bool pass = p_ramp.frames > 0 && p_ramp.matched == p_ramp.frames && p_ramp.between >= kMinRampFrames && p_ramp.largest_step < span;
 	row(p_name, pass,
-			p_what + fmt(" in the first %.1f s: %u / %u frames at the sim's speed / walk speed blend arm of the drawn frame, %u frames between %.0f and %.0f, largest step %.0f px of %.0f",
-							 kRampSeconds, p_ramp.matched, p_ramp.frames, p_ramp.between, stand_arm_, moving_arm_, p_ramp.largest_step, span) +
-					(p_ramp.first_bad >= 0.0f ? fmt(", first other arm %.2f (blend %.0f)", p_ramp.first_bad, p_ramp.first_bad_want) : std::string()));
+			p_what +
+					fmt(" in the first %.1f s: %u / %u frames at the arm of the gun sway's D held from the last 30 Hz "
+						"update before the drawn frame, %u frames between %.0f and %.0f, largest step %.0f px of %.0f",
+							kRampSeconds, p_ramp.matched, p_ramp.frames, p_ramp.between, stand_arm_, moving_arm_,
+							p_ramp.largest_step, span) +
+					(p_ramp.first_bad >= 0.0f ? fmt(", first other arm %.2f (held D arm %.0f)", p_ramp.first_bad,
+														p_ramp.first_bad_want)
+											  : std::string()));
 }
 
 void CrosshairWalkRun::finish_rows(const CrosshairWalkInputs &p_in) {
@@ -219,7 +230,7 @@ bool CrosshairWalkRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, con
 				return true;
 			}
 			offset_ = offset;
-			drawn_arm_ = blend_arm(f, p_in);
+			drawn_arm_ = held_arm(f, p_in);
 			stand_arm_ =
 					core::ui::hud_crosshair_arm(sw::effective_dispersion(def, sw::SwayContext{}).min_angle, offset);
 			moving_arm_ = core::ui::hud_crosshair_arm(sw::effective_dispersion(def, moving).min_angle, offset);
@@ -236,7 +247,7 @@ bool CrosshairWalkRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, con
 			if (t_ >= kStandSettleSeconds) {
 				sample(stand_, r.crosshair_widget ? r.crosshair_arm : -1.0f, stand_arm_);
 			}
-			drawn_arm_ = blend_arm(f, p_in);
+			drawn_arm_ = held_arm(f, p_in);
 			if (t_ >= kStandSeconds) {
 				walk_from_ = f.own_curr.position;
 				r_session.mapper().script_hold(InputAction::Forward, true);
@@ -253,7 +264,7 @@ bool CrosshairWalkRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, con
 			if (t_ < kRampSeconds) {
 				sample_ramp(rise_, r.crosshair_widget ? r.crosshair_arm : -1.0f, drawn_arm_);
 			}
-			drawn_arm_ = blend_arm(f, p_in);
+			drawn_arm_ = held_arm(f, p_in);
 			if (t_ >= kWalkSettleSeconds && horizontal_speed(f.own_curr.velocity) > kWalkingSpeed) {
 				sample(walk_, r.crosshair_widget ? r.crosshair_arm : -1.0f, moving_arm_);
 			}
@@ -272,7 +283,7 @@ bool CrosshairWalkRun::step(Bf3LevelSession &r_session, Bf3NativeHud &r_hud, con
 			if (t_ < kRampSeconds) {
 				sample_ramp(fall_, r.crosshair_widget ? r.crosshair_arm : -1.0f, drawn_arm_);
 			}
-			drawn_arm_ = blend_arm(f, p_in);
+			drawn_arm_ = held_arm(f, p_in);
 			if (t_ >= kStopSettleSeconds && horizontal_speed(f.own_curr.velocity) < kStoppedSpeed) {
 				sample(stop_, r.crosshair_widget ? r.crosshair_arm : -1.0f, stand_arm_);
 			}

@@ -9,10 +9,6 @@ namespace sw = sim::weapons;
 
 namespace {
 
-const net::WeaponTimersWire *active_timers(const net::WeaponsWire &p_wire) {
-	return p_wire.timers[0].slot == p_wire.active ? &p_wire.timers[0] : nullptr;
-}
-
 double seconds_at(int32_t p_offset, sim::Tick p_tick) {
 	if (p_offset == net::kWeaponsWireTimeZero) {
 		return 0.0;
@@ -20,6 +16,14 @@ double seconds_at(int32_t p_offset, sim::Tick p_tick) {
 	return sw::units_to_seconds(sw::tick_start(p_tick) + sw::SimTime(p_offset));
 }
 
+}
+
+const net::WeaponTimersWire *active_weapon_timers(const net::WeaponsWire &p_wire) {
+	return p_wire.timers[0].slot == p_wire.active ? &p_wire.timers[0] : nullptr;
+}
+
+float held_dispersion(float p_prev_deg, float p_curr_deg, double p_fraction) {
+	return p_fraction < 1.0 ? p_prev_deg : p_curr_deg;
 }
 
 PresentedWeapon present_weapon(const net::WeaponsWire &p_prev, const net::WeaponsWire &p_curr, sim::Tick p_curr_tick,
@@ -30,7 +34,7 @@ PresentedWeapon present_weapon(const net::WeaponsWire &p_prev, const net::Weapon
 		return p;
 	}
 	const net::WeaponSlotWire &slot = p_curr.slots[p_curr.active];
-	const net::WeaponTimersWire *b = active_timers(p_curr);
+	const net::WeaponTimersWire *b = active_weapon_timers(p_curr);
 	if (slot.def == sw::kNoWeapon || slot.def >= p_table.defs.size() || b == nullptr) {
 		return p;
 	}
@@ -54,7 +58,7 @@ PresentedWeapon present_weapon(const net::WeaponsWire &p_prev, const net::Weapon
 	if (b->phase_end != net::kWeaponsWireTimeZero && length > 0.0) {
 		p.phase_progress = float(std::clamp((p.time_s - p.phase_start_s) / length, 0.0, 1.0));
 	}
-	const net::WeaponTimersWire *a = active_timers(p_prev);
+	const net::WeaponTimersWire *a = active_weapon_timers(p_prev);
 	const bool same = a != nullptr && p_prev.active == p_curr.active && p_prev.slots[p_prev.active < sw::kMaxWeaponSlots ? p_prev.active : 0].def == slot.def;
 	const float t = float(f);
 	const sw::WeaponSimDef &def = p_table.def(slot.def, variant);
@@ -63,7 +67,7 @@ PresentedWeapon present_weapon(const net::WeaponsWire &p_prev, const net::Weapon
 		const sw::RecoilOffset prev = sw::camera_recoil(def, a->sway, p_sway.zoom);
 		p.recoil.pitch = prev.pitch + (curr.pitch - prev.pitch) * t;
 		p.recoil.yaw = prev.yaw + (curr.yaw - prev.yaw) * t;
-		p.spread_deg = a->sway.dispersion + (b->sway.dispersion - a->sway.dispersion) * t;
+		p.spread_deg = held_dispersion(a->sway.dispersion, b->sway.dispersion, f);
 	} else {
 		p.recoil = curr;
 		p.spread_deg = b->sway.dispersion;

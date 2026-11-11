@@ -357,7 +357,7 @@ bf3::host::PresentedWeapon present_weapon(const sw::SoldierWeaponsState &p_prev,
 
 	const bool same = p_prev.active == p_curr.active && a.def == b.def;
 	p.zoomed = (b.flags & sw::slot_flags::kZoomWasDown) != 0;
-	p.spread_deg = same ? a.sway.dispersion + (b.sway.dispersion - a.sway.dispersion) * f : b.sway.dispersion;
+	p.spread_deg = same ? bf3::host::held_dispersion(a.sway.dispersion, b.sway.dispersion, f) : b.sway.dispersion;
 	if (p.valid && b.def < p_table.defs.size()) {
 		const sw::Zoom zoom = p.zoomed ? sw::Zoom::Zoom : sw::Zoom::NoZoom;
 		const sw::RecoilOffset rb = sw::camera_recoil(p_table.defs[b.def], b.sway, zoom);

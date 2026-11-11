@@ -33,6 +33,10 @@ struct PresentedWeapon {
 };
 static_assert(std::is_trivially_copyable_v<PresentedWeapon>);
 
+const net::WeaponTimersWire *active_weapon_timers(const net::WeaponsWire &p_wire);
+
+float held_dispersion(float p_prev_deg, float p_curr_deg, double p_fraction);
+
 PresentedWeapon present_weapon(const net::WeaponsWire &p_prev, const net::WeaponsWire &p_curr, sim::Tick p_curr_tick,
 		double p_fraction, const sim::weapons::WeaponTable &p_table, const sim::weapons::SwayContext &p_sway,
 		std::span<const uint8_t> p_variants = {});

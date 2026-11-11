@@ -186,14 +186,14 @@ These are structural, known, and listed so nobody mistakes them for design inten
   fixture's captures); there is no gate row, because the owner deferred pixel-exact HUD work on 2026-10-24. The main
   visible differences: the kill feed rows sit larger and higher than the footage's, the minimap's interior is
   flatter and its revive icon (UIHudIcon_PlayerDead on a dead team-mate until its Death's revive_until, a revive or a match phase change; a mate waiting to redeploy keeps it) is inferred, not seen in footage, and the footage's glowing friendly markers over soldiers are not reproduced.
-* The crosshair arm is `round(100 (0.2 x spread deg + DispersionBaseOffset))` stage px; the 0.2 per degree is measured on
-  the 18.57 footage at FOV 100 (`ui.hud.feed.install` footage rows) and its dependence on the field of view is not known.
-  The stance's Base dispersion blends into its Moving one by horizontal speed / the motor's `walk_speed` for the pose and
-  direction, as the footage's arm rises and falls when the soldier starts and stops (the `move_onset` / `move_stop` rows);
-  the weapon data has no speed term. The footage's bloom while firing, its fall after a landing without a shot, its
-  suppressed sprint (5 deg) and jump (7 deg) arms and the heavy barrel's held 95 arm (4.0 deg) after about 0.7 s of walking
-  (the sim holds the Moving minimum's 87, 3.6 deg; no data state gives 4.0) differ from `spread_at`; the footage rows print
-  the sim's values as INFO.
+* The crosshair arm is `round(100 (0.2 x D + DispersionBaseOffset))` stage px, D the gun sway's dispersion in degrees; the
+  0.2 per degree is measured on the 18.57 footage at FOV 100 (`ui.hud.feed.install` footage rows) and its dependence on the
+  field of view is not known. The arm shows the D of the newest own weapon state at or before the presented time, held and
+  not interpolated between 30 Hz sway updates (Q2: the sway keeps D, its floor and the crosshair factor per update), so it
+  rises with the Moving MinAngle blend (speed / the motor's `walk_speed`, above 0.5 m/s) and falls at DecreasePerSecond to
+  the floor, as the footage's arm does when the soldier starts and stops (`move_onset`, `move_stop`, `godot.crosshair_walk`).
+  The footage's suppressed sprint (5 deg) and jump (7 deg) arms and the heavy barrel's held 95 arm (4.0 deg) after about
+  0.7 s of walking (the sim holds the Moving minimum's 87, 3.6 deg; no data state gives 4.0) differ; the rows print them.
 * Nametags are engine-drawn by `Bf3NativeHud` through `NativeTags` (`native_tags.cpp`): UIHudIcon_Player by relation, the
   squad kit icon for squad mates, names in `$Menu_medium` at the UINametagCompData sizes and tints; the name's kit icon
   (16 units in an 18-unit column) and its black glow are not measured, and the HealthBarSize bar is not drawn (other

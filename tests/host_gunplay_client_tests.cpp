@@ -1138,7 +1138,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 		auto expected_spread = [&](sim::Tick p_curr_tick, double p_fraction) {
 			const float a = states[p_curr_tick - 101].current().sway.dispersion;
 			const float b = states[p_curr_tick - 100].current().sway.dispersion;
-			return a + (b - a) * float(p_fraction);
+			return p_fraction < 1.0 ? a : b;
 		};
 
 		const host::PresentedWeapon d = host::present_weapon(view(110), view(111), 111, 0.5, *t.table, still);
@@ -1153,6 +1153,7 @@ TEST_SUITE("host-gunplay-client-unit") {
 
 		const sw::WeaponSimDef &rifle = t.table->defs[t.rifle];
 		bool kicked = false;
+		bool held = false;
 		for (sim::Tick tick = 160; tick <= 176; ++tick) {
 			const host::PresentedWeapon f0 =
 					host::present_weapon(view(tick - 1), view(tick), tick, 0.0, *t.table, still);
@@ -1171,8 +1172,10 @@ TEST_SUITE("host-gunplay-client-unit") {
 			CHECK(fh.spread_deg == expected_spread(tick, 0.5));
 			CHECK(f1.spread_deg == expected_spread(tick, 1.0));
 			kicked = kicked || states[tick - 100].current().sway.recoil_pitch < 0.0f;
+			held = held || fh.spread_deg != f1.spread_deg;
 		}
 		CHECK(kicked);
+		CHECK(held);
 		const float still_min = sw::effective_dispersion(rifle, still).min_angle;
 		CHECK(host::present_weapon(view(178), view(179), 179, 0.5, *t.table, still).spread_deg == still_min);
 

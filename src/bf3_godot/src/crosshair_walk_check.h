@@ -55,7 +55,7 @@ private:
 	void teleport(Bf3LevelSession &r_session);
 	void sample(Tally &r_tally, float p_arm, double p_want);
 	void sample_ramp(Ramp &r_ramp, float p_arm, double p_want);
-	double blend_arm(const bf3::host::PresentationFrame &p_frame, const CrosshairWalkInputs &p_in) const;
+	double held_arm(const bf3::host::PresentationFrame &p_frame, const CrosshairWalkInputs &p_in) const;
 	void ramp_row(const std::string &p_name, const Ramp &p_ramp, const std::string &p_what);
 	void row(const std::string &p_name, bool p_pass, const std::string &p_detail);
 	void finish_rows(const CrosshairWalkInputs &p_in);
