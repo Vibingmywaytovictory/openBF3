@@ -38,6 +38,7 @@ public:
 	virtual ~SaiGame() = default;
 	virtual int tickets(int p_side) const = 0;
 	virtual int number_of_control_points(int p_side) const = 0;
+	virtual int spawn_kit(int p_player_id) const = 0;
 };
 
 class SaiDecisions {

@@ -49,6 +49,7 @@ public:
 	void squad_order(int p_side, int p_squad, ai::SquadOrder p_order, int p_area, const ai::Vec3 &p_position) override;
 	int tickets(int p_side) const override;
 	int number_of_control_points(int p_side) const override;
+	int spawn_kit(int p_player_id) const override;
 	bool is_player_commander(int p_side) const override;
 	bool own_all_takeable_control_points(int p_side) const override;
 	bool have_any_owned_and_takeable_control_points(int p_side) const override;

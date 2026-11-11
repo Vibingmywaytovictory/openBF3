@@ -1119,6 +1119,14 @@ struct GameClock final : AiTimer {
 	double update_time() const override { return 0.0; }
 };
 
+struct KitGame final : SaiGame {
+	int player = 0;
+	int kit = 0;
+	int tickets(int) const override { return 0; }
+	int number_of_control_points(int) const override { return 0; }
+	int spawn_kit(int p_player_id) const override { return p_player_id == player ? kit : -1; }
+};
+
 struct CommanderLog final : Commander {
 	std::vector<std::string> calls;
 	bool artillery = true;
@@ -1639,8 +1647,8 @@ TEST_SUITE("ai-strategy") {
 		CHECK(a.security_sum(2) == 20.0f);
 	}
 
-	TEST_CASE("Sai: a bot is placed at the closest object when alive, leaves it with a kit record when dead, moves "
-			  "with its equipment, and is forgotten on removal") {
+	TEST_CASE("Sai: a bot is placed at the closest object when alive, leaves it with its player's spawn kit recorded "
+			  "when dead, moves with its equipment, and is forgotten on removal") {
 		Knowledge knowledge;
 		StrategicServices strategic;
 		AIStrategicObjectManager objects(strategic);
@@ -1654,12 +1662,17 @@ TEST_SUITE("ai-strategy") {
 		StrategicBot bot;
 		bot.id = 1;
 		bot.equipment = knowledge.record(body, 1);
+		bot.player = 7;
+		KitGame game;
+		game.player = 7;
+		game.kit = 4;
 		GameClock clock;
 		AiSettings settings;
 		settings.max_bots = 4;
 		SaiServices services;
 		services.timer = &clock;
 		services.settings = &settings;
+		services.game = &game;
 		services.objects = &objects;
 		services.information = &knowledge.information;
 		Sai sai(1, services);
@@ -1681,7 +1694,7 @@ TEST_SUITE("ai-strategy") {
 		CHECK_FALSE(sai.is_bot_free(1));
 		CHECK(sai.bot_current_pos(1) == -1);
 		REQUIRE(sai.dead_bots().contains(1));
-		CHECK(sai.dead_bots().at(1) == std::pair<int, int>(-1, kDeadBotKit));
+		CHECK(sai.dead_bots().at(1) == std::pair<int, int>(-1, 4));
 		sai.set_new_bot_kit(1, 5);
 		CHECK(sai.dead_bots().at(1).second == 5);
 		sai.set_bot_is_alive(1);

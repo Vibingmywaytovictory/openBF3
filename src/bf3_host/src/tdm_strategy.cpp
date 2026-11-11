@@ -173,6 +173,11 @@ int TdmStrategy::number_of_control_points(int p_side) const {
 	return world_->number_of_control_points(p_side);
 }
 
+int TdmStrategy::spawn_kit(int p_player_id) const {
+	const ai::SquadPlayer *player = world_->player(p_player_id);
+	return player != nullptr ? player->spawn_kit() : ai::kDeadBotKit;
+}
+
 bool TdmStrategy::is_player_commander(int) const {
 	return false;
 }

@@ -235,9 +235,10 @@ void Sai::handle_dead_bot(int p_bot_id) {
 	if (info == nullptr) {
 		return;
 	}
+	const int kit = services_.game != nullptr ? services_.game->spawn_kit(info->bot->player_id()) : kDeadBotKit;
 	const int ordered = info->ordered;
 	remove(*info);
-	dead_bots_.insert({ p_bot_id, { ordered, kDeadBotKit } });
+	dead_bots_.insert({ p_bot_id, { ordered, kit } });
 	set_as_dead(*info);
 }
 
