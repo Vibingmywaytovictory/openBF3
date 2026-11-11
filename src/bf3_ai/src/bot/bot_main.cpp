@@ -36,8 +36,7 @@ BotMain::BotMain(uint32_t p_bot_id, int p_player_id, int p_side, InfantryBody &r
 	for (const std::unique_ptr<BotBehaviour> &b : behaviours_) {
 		generators.push_back(b.get());
 	}
-	merger_ = std::make_unique<UrgencyMerger>(
-			int(kInfantryBehaviourCount), behaviour_urgencies_.data(), std::move(generators));
+	merger_ = std::make_unique<UrgencyMerger>(std::move(generators));
 	set_personality(p_personality);
 	reset();
 }
@@ -113,10 +112,13 @@ int BotMain::decision_making(double) {
 	++stats_.decisions;
 	++(unplanned ? stats_.unplanned : stats_.planned);
 	calculate_mods();
+	for (size_t i = 0; i < kInfantryBehaviourCount; ++i) {
+		behaviours_[i]->calculate_urgency(this, true, behaviour_urgencies_[i]);
+	}
 	for (size_t attempt = 0; attempt <= kInfantryBehaviourCount; ++attempt) {
-		float urgency = merger_->urgency(this);
+		float urgency = merger_->update_active_urgency(this);
 		BotBehaviour *winner = static_cast<BotBehaviour *>(merger_->chosen_generator());
-		if (winner == nullptr || !(urgency > 0.0f)) {
+		if (winner == nullptr) {
 			winner = behaviours_[size_t(InfantryBehaviour::Idle)].get();
 			urgency = 0.0f;
 		}
@@ -132,6 +134,7 @@ int BotMain::decision_making(double) {
 			break;
 		}
 		winner->refuse(tick);
+		winner->calculate_urgency(this, true, behaviour_urgencies_[size_t(winner->kind())]);
 		++stats_.refusals;
 	}
 	decided_senses_ = body_.senses();
@@ -168,14 +171,8 @@ InfantryBehaviour BotMain::behaviour() const {
 	return current_ != nullptr ? current_->kind() : InfantryBehaviour::Idle;
 }
 
-float BotMain::behaviour_urgency(InfantryBehaviour p_behaviour) const {
-	return behaviours_[size_t(p_behaviour)]->situation_value() > 0.0f
-			? curves_[size_t(p_behaviour)]->calculate(behaviours_[size_t(p_behaviour)]->situation_value())
-			: 0.0f;
-}
-
 float BotMain::weighted_urgency(InfantryBehaviour p_behaviour) const {
-	return behaviour_urgency(p_behaviour) * behaviour_urgencies_[size_t(p_behaviour)];
+	return behaviours_[size_t(p_behaviour)]->urgency_value();
 }
 
 }

@@ -73,14 +73,17 @@ public:
 
 	InfantryBehaviour kind() const { return kind_; }
 	float situation_value() const { return situation_; }
+	float urgency_value() const { return urgency_; }
 
 	float urgency(Bot *p_bot) override;
 	float active_urgency(Bot *p_bot) override;
-	void update_active_urgency(Bot *p_bot) override;
+	float update_active_urgency(Bot *p_bot) override;
 	bool has_changed_target(Bot *p_bot) override;
+	bool quotient_changed(Bot *p_bot, float p_low, float p_high) override;
+	bool has_changed(Bot *p_bot, float p_low, float p_high) override;
 	UrgencyGenerator *chosen_generator() override { return this; }
 	void reset(Bot *p_bot) override;
-	int size() override { return 1; }
+	float calculate_urgency(Bot *p_bot, bool p_recalculate, float p_modifier);
 
 	void refuse(sim::Tick p_tick) { refused_tick_ = p_tick; }
 	virtual bool plan(BotPlan &r_script, bool p_was_active) = 0;
@@ -94,7 +97,8 @@ protected:
 	InfantryBody &body_;
 	float situation_ = 0.0f;
 	float urgency_ = 0.0f;
-	float active_urgency_ = 0.0f;
+	float active_urgency_ = 1e-5f;
+	bool target_changed_ = true;
 	sim::Tick refused_tick_ = UINT32_MAX;
 };
 

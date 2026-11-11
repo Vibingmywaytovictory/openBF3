@@ -93,7 +93,6 @@ public:
 	InfantryActivity activity() const { return plan_.activity(); }
 	const BotPlan &plan() const { return plan_; }
 	const BotMainStats &stats() const { return stats_; }
-	float behaviour_urgency(InfantryBehaviour p_behaviour) const;
 	float weighted_urgency(InfantryBehaviour p_behaviour) const;
 	const BotBehaviour &behaviour_of(InfantryBehaviour p_behaviour) const { return *behaviours_[size_t(p_behaviour)]; }
 	float chosen_urgency() const { return chosen_urgency_; }

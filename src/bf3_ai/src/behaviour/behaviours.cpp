@@ -158,9 +158,6 @@ BotBehaviour::BotBehaviour(InfantryBehaviour p_kind, const UrgeCurve &p_curve, I
 		kind_(p_kind), curve_(p_curve), body_(r_body) {}
 
 float BotBehaviour::urgency(Bot *) {
-	situation_ = refused_tick_ == body_.tick() ? 0.0f : situation();
-	const float u = situation_ > 0.0f ? curve_.calculate(situation_) : 0.0f;
-	urgency_ = u > 0.0f ? u : 0.0f;
 	return urgency_;
 }
 
@@ -168,19 +165,43 @@ float BotBehaviour::active_urgency(Bot *) {
 	return active_urgency_;
 }
 
-void BotBehaviour::update_active_urgency(Bot *) {
+float BotBehaviour::update_active_urgency(Bot *) {
 	active_urgency_ = urgency_;
+	return active_urgency_;
 }
 
 bool BotBehaviour::has_changed_target(Bot *) {
-	return false;
+	return target_changed_;
+}
+
+bool BotBehaviour::quotient_changed(Bot *, float p_low, float p_high) {
+	if (active_urgency_ == 0.0f) {
+		return urgency_ > 0.0f;
+	}
+	if (urgency_ == 0.0f) {
+		return true;
+	}
+	const float quotient = urgency_ / active_urgency_;
+	return p_low > quotient || quotient > p_high;
+}
+
+bool BotBehaviour::has_changed(Bot *p_bot, float p_low, float p_high) {
+	return has_changed_target(p_bot) && quotient_changed(p_bot, p_low, p_high);
 }
 
 void BotBehaviour::reset(Bot *) {
 	situation_ = 0.0f;
 	urgency_ = 0.0f;
-	active_urgency_ = 0.0f;
+	active_urgency_ = 1e-4f;
+	target_changed_ = true;
 	refused_tick_ = UINT32_MAX;
+}
+
+float BotBehaviour::calculate_urgency(Bot *, bool, float p_modifier) {
+	situation_ = refused_tick_ == body_.tick() ? 0.0f : situation();
+	const float u = situation_ > 0.0f ? curve_.calculate(situation_) * p_modifier : 0.0f;
+	urgency_ = u > 0.0f ? u : 0.0f;
+	return urgency_;
 }
 
 float BBRevive::situation() {

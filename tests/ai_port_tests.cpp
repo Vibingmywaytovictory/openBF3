@@ -311,11 +311,12 @@ TEST_SUITE("ai-port") {
 			int resets = 0;
 			float urgency(Bot *) override { return value; }
 			float active_urgency(Bot *) override { return value; }
-			void update_active_urgency(Bot *) override {}
+			float update_active_urgency(Bot *) override { return value; }
 			bool has_changed_target(Bot *) override { return false; }
+			bool quotient_changed(Bot *, float, float) override { return false; }
+			bool has_changed(Bot *, float, float) override { return false; }
 			UrgencyGenerator *chosen_generator() override { return this; }
 			void reset(Bot *) override { ++resets; }
-			int size() override { return 1; }
 		};
 		struct Maker final : BBCreateFunction {
 			std::map<std::string, std::unique_ptr<FixedGenerator>> *made = nullptr;
@@ -371,13 +372,14 @@ TEST_SUITE("ai-port") {
 		for (const auto &[name, generator] : made) {
 			generators.push_back(generator.get());
 		}
-		UrgencyMerger merger(int(generators.size()), nullptr, generators);
+		UrgencyMerger merger(generators);
 		CHECK(merger.size() == 16);
-		CHECK(merger.urgency(nullptr) == doctest::Approx(3.0f));
+		CHECK(merger.urgency(nullptr) == 0.0f);
+		CHECK(merger.update_active_urgency(nullptr) == doctest::Approx(3.0f));
 		CHECK(merger.chosen_generator() == made.at("BBFireInfantery").get());
+		CHECK(merger.urgency(nullptr) == doctest::Approx(3.0f));
 		CHECK(merger.active_urgency(nullptr) == doctest::Approx(3.0f));
 		merger.reset(nullptr);
-		CHECK(merger.chosen_generator() == nullptr);
 		CHECK(made.at("BBIdle")->resets == 1);
 
 		settings.enable_vehicle_ai = true;
@@ -385,13 +387,9 @@ TEST_SUITE("ai-port") {
 		CHECK(manager.create("Fire", "BBFireDriver", "BBFireDriver", 0, "", nullptr, message) == 1);
 		CHECK_FALSE(manager.is_enabled("BBTakeCover3d"));
 		generators.push_back(made.at("BBFireDriver").get());
-		UrgencyMerger with_vehicle(int(generators.size()), nullptr, generators);
-		CHECK(with_vehicle.urgency(nullptr) == doctest::Approx(10.0f));
+		UrgencyMerger with_vehicle(generators);
+		CHECK(with_vehicle.update_active_urgency(nullptr) == doctest::Approx(10.0f));
 		CHECK(with_vehicle.chosen_generator() == made.at("BBFireDriver").get());
-		std::vector<float> weights(generators.size(), 1.0f);
-		weights.back() = 0.1f;
-		UrgencyMerger weighted(int(generators.size()), weights.data(), generators);
-		CHECK(weighted.urgency(nullptr) == doctest::Approx(3.0f));
 	}
 
 	TEST_CASE(
