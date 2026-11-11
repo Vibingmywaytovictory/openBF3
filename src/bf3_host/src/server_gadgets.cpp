@@ -83,9 +83,11 @@ void ServerGadgets::armed(uint8_t p_slot, const sw::SoldierWeaponsState &p_weapo
 
 void ServerGadgets::step(sim::Tick p_tick, const sim::CollisionWorld *p_world,
 		std::span<const GadgetSoldier> p_soldiers, float p_max_health) {
+	tick_ = p_tick;
 	if (p_world != nullptr) {
 		field_.step(*p_world);
 	}
+	field_.expire(p_tick);
 	receivers_.clear();
 	receiver_slots_.clear();
 	for (size_t i = 0; i < p_soldiers.size() && i < refill_.size(); ++i) {
@@ -122,8 +124,35 @@ void ServerGadgets::step(sim::Tick p_tick, const sim::CollisionWorld *p_world,
 	}
 }
 
+void ServerGadgets::blast(std::span<const sw::DetonationEvent> p_detonations, const sim::CollisionWorld *p_world,
+		std::span<const uint8_t> p_teams, bool p_friendly_fire) {
+	if (table_ == nullptr) {
+		return;
+	}
+	const sw::Mechanics &mech = table_->mechanics;
+	for (const sw::DetonationEvent &d : p_detonations) {
+		if (field_.live().empty()) {
+			return;
+		}
+		if (d.def >= table_->defs.size()) {
+			continue;
+		}
+		const sw::ProjectileSimDef &p = table_->def(d.def, d.variant).projectile;
+		const uint8_t team = !p_friendly_fire && d.player_slot < p_teams.size() ? p_teams[d.player_slot] : 0;
+		field_.blast(d.dud ? p.dud : p.explosion, mech.blast_falloff, d.position, d.normal,
+				mech.blast_occlusion ? p_world : nullptr, team);
+	}
+}
+
 void ServerGadgets::forget(uint8_t p_slot) {
 	stats_.forgotten += field_.remove_owner(p_slot);
+	if (p_slot < refill_.size()) {
+		refill_[p_slot] = sw::AmmoRefillState();
+	}
+}
+
+void ServerGadgets::owner_left(uint8_t p_slot) {
+	stats_.forgotten += field_.owner_gone(p_slot, tick_);
 	if (p_slot < refill_.size()) {
 		refill_[p_slot] = sw::AmmoRefillState();
 	}

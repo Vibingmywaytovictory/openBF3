@@ -210,6 +210,8 @@ public:
 	const RewindProvider &rewind() const;
 
 	void clear(uint8_t p_slot);
+	void left(uint8_t p_slot);
+	void clear_deployables();
 
 	void set_world(const sim::CollisionWorld &p_world);
 	void set_match_seed(uint64_t p_seed);

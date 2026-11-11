@@ -3,6 +3,7 @@
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/result.h"
 #include "bf3/sim/sim_types.h"
+#include "bf3/sim/weapons/mechanics.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"
 
@@ -57,6 +58,11 @@ struct GadgetDef {
 	float max_attach_inclination_deg = 90;
 	float ground_ray_m = 0;
 	float ground_flatness = 0;
+	float health = 0;
+	bool destructible = false;
+	bool receives_explosion_damage = false;
+	float time_to_live_s = 0;
+	float time_to_live_on_owner_gone_s = 0;
 
 	bool operator==(const GadgetDef &) const = default;
 };
@@ -68,6 +74,7 @@ inline constexpr float kGadgetGravity = 9.81f;
 inline constexpr Tick kGadgetFlightTicks = 10u * kSimHz;
 inline constexpr size_t kMaxDeployables = 512;
 inline constexpr float kGadgetSlideLift = 0.01f;
+inline constexpr float kBlastEyeLift = 0.05f;
 
 struct Deployable {
 	uint16_t id = 0;
@@ -82,6 +89,9 @@ struct Deployable {
 	Vec3 velocity{};
 	float healing_points = 0;
 	float ammo_points = 0;
+	float health = 0;
+	bool owner_gone = false;
+	Tick owner_gone_tick = 0;
 };
 
 enum class DeployOutcome : uint8_t { Thrown = 0, Placed = 1, NoGround = 2, Steep = 3, NotGadget = 4, Full = 5 };
@@ -114,6 +124,7 @@ struct GadgetFieldStats {
 	uint64_t thrown = 0, placed = 0, landed = 0, no_ground = 0, steep = 0, full = 0, replaced = 0, lost = 0,
 			 removed = 0;
 	uint64_t slides = 0;
+	uint64_t damaged = 0, destroyed = 0, expired = 0, orphaned = 0;
 };
 
 Vec3 shot_frame_vector(const Vec3 &p_direction, const Vec3 &p_local);
@@ -130,6 +141,11 @@ public:
 	void step(const CollisionWorld &p_world);
 	void supply(std::span<const SupplyReceiver> p_receivers, float p_seconds, std::span<SupplyGrant> r_grants);
 	size_t remove_owner(uint8_t p_owner);
+	size_t owner_gone(uint8_t p_owner, Tick p_tick);
+	size_t expire(Tick p_tick);
+	bool damage(uint16_t p_id, float p_amount, bool p_explosion);
+	size_t blast(const ExplosionSimDef &p_explosion, BlastFalloff p_falloff, const Vec3 &p_at, const Vec3 &p_normal,
+			const CollisionWorld *p_occluders, uint8_t p_spared_team = 0);
 	bool remove(uint16_t p_id);
 	void clear();
 

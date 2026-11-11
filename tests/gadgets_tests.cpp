@@ -149,6 +149,108 @@ TEST_SUITE("gadgets-unit") {
 		CHECK(falling.stats().lost == 1u);
 	}
 
+	TEST_CASE("life: a bag goes TimeToLive after its deploy and TimeToLiveOnPlayerDeath after its owner left; 0 "
+			  "keeps it; a bag whose owner left is not the slot's next owner's bag") {
+		std::unique_ptr<CollisionWorld> w = floor_and_wall();
+		GadgetDef timed = medkit_def();
+		timed.time_to_live_s = 2.0f;
+		GadgetDef forever = medkit_def();
+		forever.def = 9;
+		GadgetDef orphan_timed = medkit_def();
+		orphan_timed.def = 10;
+		orphan_timed.time_to_live_on_owner_gone_s = 1.0f;
+		GadgetField field({ timed, forever, orphan_timed, beacon_def() });
+		uint16_t a = 0, b = 0, c = 0, beacon = 0;
+		field.deploy(throw_of(kMedkitDef, 1, Vec3{ 0.0f, 1.0f, 0.0f }, Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{}), w.get(), &a);
+		field.deploy(throw_of(9, 2, Vec3{ 0.0f, 1.0f, -3.0f }, Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{}), w.get(), &b);
+		field.deploy(throw_of(10, 2, Vec3{ 0.0f, 1.0f, -6.0f }, Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{}), w.get(), &c);
+		field.deploy(
+				throw_of(kBeaconDef, 2, Vec3{ -3.0f, 1.0f, 0.0f }, Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{}), w.get(), &beacon);
+		REQUIRE(settle(field, *w, 120));
+		REQUIRE(field.live().size() == 4u);
+		const Tick deployed = 100;
+		const Tick two_s = 2u * kSimHz;
+		CHECK(field.expire(deployed + two_s) == 0u);
+		CHECK(field.find(a) != nullptr);
+		CHECK(field.expire(deployed + two_s + 1u) == 1u);
+		CHECK(field.find(a) == nullptr);
+
+		CHECK(field.owner_gone(2, 1000) == 1u);
+		CHECK(field.find(beacon) == nullptr);
+		CHECK(field.stats().orphaned == 2u);
+		CHECK(field.expire(1000 + kSimHz) == 0u);
+		CHECK(field.expire(1000 + kSimHz + 1u) == 1u);
+		CHECK(field.find(c) == nullptr);
+		CHECK(field.expire(1000000) == 0u);
+		REQUIRE(field.find(b) != nullptr);
+		CHECK(field.find(b)->owner_gone);
+		CHECK(field.stats().expired == 2u);
+
+		CHECK(field.remove_owner(2) == 0u);
+		uint16_t next = 0;
+		field.deploy(throw_of(9, 2, Vec3{ 3.0f, 1.0f, 0.0f }, Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{}), w.get(), &next);
+		CHECK(field.find(b) != nullptr);
+		CHECK(field.find(next) != nullptr);
+		CHECK(field.stats().replaced == 0u);
+	}
+
+	TEST_CASE("damage: a destructible bag loses its Health per hit and goes at 0; IsDestructible and "
+			  "ReceivesExplosionDamage gate it; a blast in its radius destroys it, one behind a wall does not") {
+		std::unique_ptr<CollisionWorld> w = floor_and_wall();
+		GadgetDef bag = medkit_def();
+		bag.health = 50.0f;
+		bag.destructible = true;
+		bag.receives_explosion_damage = true;
+		GadgetDef hard = bag;
+		hard.def = 9;
+		hard.destructible = false;
+		GadgetDef shot_only = bag;
+		shot_only.def = 10;
+		shot_only.receives_explosion_damage = false;
+		GadgetField field({ bag, hard, shot_only });
+		uint16_t a = 0, b = 0, c = 0;
+		field.deploy(throw_of(kMedkitDef, 1, Vec3{ 0.0f, 1.0f, 0.0f }, Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{}), w.get(), &a);
+		field.deploy(throw_of(9, 1, Vec3{ 0.0f, 1.0f, -3.0f }, Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{}), w.get(), &b);
+		field.deploy(throw_of(10, 1, Vec3{ 0.0f, 1.0f, -6.0f }, Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{}), w.get(), &c);
+		REQUIRE(settle(field, *w, 120));
+		REQUIRE(field.find(a) != nullptr);
+		CHECK(field.find(a)->health == 50.0f);
+		CHECK_FALSE(field.damage(a, 30.0f, false));
+		CHECK(field.find(a)->health == doctest::Approx(20.0f));
+		CHECK(field.damage(a, 20.0f, false));
+		CHECK(field.find(a) == nullptr);
+		CHECK_FALSE(field.damage(b, 500.0f, false));
+		CHECK(field.find(b) != nullptr);
+		CHECK_FALSE(field.damage(c, 500.0f, true));
+		CHECK(field.find(c) != nullptr);
+		CHECK(field.damage(c, 50.0f, false));
+		CHECK(field.stats().destroyed == 2u);
+
+		ExplosionSimDef grenade;
+		grenade.present = true;
+		grenade.blast_damage = 100.0f;
+		grenade.inner_radius = 1.0f;
+		grenade.radius = 5.0f;
+		uint16_t near = 0, far = 0, hidden = 0;
+		field.deploy(
+				throw_of(kMedkitDef, 1, Vec3{ 0.0f, 1.0f, 0.0f }, Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{}), w.get(), &near);
+		field.deploy(
+				throw_of(kMedkitDef, 2, Vec3{ -3.5f, 1.0f, 0.0f }, Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{}), w.get(), &far);
+		field.deploy(
+				throw_of(kMedkitDef, 3, Vec3{ 3.0f, 1.0f, 0.0f }, Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{}), w.get(), &hidden);
+		REQUIRE(settle(field, *w, 120));
+		CHECK(field.blast(grenade, BlastFalloff::Linear, Vec3{ 1.0f, 0.0f, 0.0f }, Vec3{ 0.0f, 1.0f, 0.0f }, w.get()) ==
+				1u);
+		CHECK(field.find(near) == nullptr);
+		REQUIRE(field.find(far) != nullptr);
+		CHECK(field.find(far)->health == doctest::Approx(50.0f - 100.0f * 0.5f / 4.0f));
+		REQUIRE(field.find(hidden) != nullptr);
+		CHECK(field.find(hidden)->health == 50.0f);
+		CHECK(field.blast(grenade, BlastFalloff::Linear, Vec3{ 1.0f, 0.0f, 0.0f }, Vec3{ 0.0f, 1.0f, 0.0f }, nullptr) ==
+				1u);
+		CHECK(field.find(hidden) == nullptr);
+	}
+
 	TEST_CASE("supply: a resting medkit heals at its SupplyIncSpeed inside its radius, the best bag only, by the team "
 			  "and self "
 			  "rules") {

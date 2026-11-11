@@ -5,11 +5,13 @@
 #include "bf3/core/util/finite.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
+#include "bf3/sim/weapons/damage.h"
 
 #include <algorithm>
 #include <cmath>
 #include <numbers>
 #include <optional>
+#include <utility>
 
 namespace bf3::sim::weapons {
 
@@ -189,10 +191,17 @@ core::Result<GadgetDef> read_gadget_def(const core::EbxResolver &p_db, std::stri
 		const std::optional<bool> soldiers = bool_of(*supply, "SupplySoldiers");
 		const std::optional<int32_t> count = i32_of(p, "MaxCount");
 		const std::optional<float> incline = f32_of(p, "MaxAttachableInclination");
-		if (!team || !self || !soldiers || !count || !incline) {
+		const std::optional<float> health = f32_of(p, "Health");
+		const std::optional<bool> destructible = bool_of(p, "IsDestructible");
+		const std::optional<bool> explosion = bool_of(p, "ReceivesExplosionDamage");
+		const std::optional<float> ttl = f32_of(p, "TimeToLive");
+		const std::optional<float> ttl_gone = f32_of(p, "TimeToLiveOnPlayerDeath");
+		if (!team || !self || !soldiers || !count || !incline || !health || !destructible || !explosion || !ttl ||
+				!ttl_gone) {
 			return gadget_error(p_weapon, "SupplySphereEntityData misses a field");
 		}
-		if (*count < 1 || *count > 255 || !finite_in(*incline, 0.0f, 90.0f)) {
+		if (*count < 1 || *count > 255 || !finite_in(*incline, 0.0f, 90.0f) || !finite_in(*health, 0.0f, 1e6f) ||
+				!finite_in(*ttl, 0.0f, 86400.0f) || !finite_in(*ttl_gone, 0.0f, 86400.0f)) {
 			return gadget_error(p_weapon, "SupplySphereEntityData has a value out of range");
 		}
 		g.kind = GadgetKind::Supply;
@@ -203,6 +212,11 @@ core::Result<GadgetDef> read_gadget_def(const core::EbxResolver &p_db, std::stri
 		g.supply_soldiers = *soldiers;
 		g.max_count = uint8_t(*count);
 		g.max_attach_inclination_deg = *incline;
+		g.health = *health;
+		g.destructible = *destructible;
+		g.receives_explosion_damage = *explosion;
+		g.time_to_live_s = *ttl;
+		g.time_to_live_on_owner_gone_s = *ttl_gone;
 		return g;
 	}
 	if (projectile->is_a("VehicleProjectileEntityData") && has_mobile_spawn(p_db, *projectile)) {
@@ -296,6 +310,7 @@ DeployOutcome GadgetField::deploy(const GadgetThrow &p_throw, const CollisionWor
 	d.position = p_throw.origin;
 	d.healing_points = g->healing.capacity;
 	d.ammo_points = g->ammo.capacity;
+	d.health = g->health;
 	if (g->kind == GadgetKind::SpawnBeacon) {
 		StaticHit hit;
 		if (p_world == nullptr ||
@@ -318,10 +333,10 @@ DeployOutcome GadgetField::deploy(const GadgetThrow &p_throw, const CollisionWor
 	}
 	size_t owned = 0;
 	for (const Deployable &o : live_) {
-		owned += o.owner == d.owner && o.def == d.def ? 1u : 0u;
+		owned += o.owner == d.owner && o.def == d.def && !o.owner_gone ? 1u : 0u;
 	}
 	for (size_t i = 0; owned >= g->max_count && i < live_.size();) {
-		if (live_[i].owner == d.owner && live_[i].def == d.def) {
+		if (live_[i].owner == d.owner && live_[i].def == d.def && !live_[i].owner_gone) {
 			erase_at(i);
 			--owned;
 			++stats_.replaced;
@@ -393,7 +408,8 @@ bool supplies(const GadgetDef &p_gadget, const Deployable &p_bag, const SupplyRe
 	const float points = p_healing ? p_bag.healing_points : p_bag.ammo_points;
 	return p_gadget.kind == GadgetKind::Supply && p_bag.resting && p_gadget.supply_soldiers && u.active() &&
 			!(p_gadget.team_specific && p_bag.team != p_receiver.team) &&
-			!(p_gadget.exclude_self && p_bag.owner == p_receiver.slot) && (u.infinite || points > 0.0f) &&
+			!(p_gadget.exclude_self && !p_bag.owner_gone && p_bag.owner == p_receiver.slot) &&
+			(u.infinite || points > 0.0f) &&
 			core::vec::length(core::vec::sub(p_bag.position, p_receiver.position)) <= u.radius;
 }
 
@@ -453,7 +469,7 @@ void GadgetField::supply(
 size_t GadgetField::remove_owner(uint8_t p_owner) {
 	size_t removed = 0;
 	for (size_t i = 0; i < live_.size();) {
-		if (live_[i].owner == p_owner) {
+		if (live_[i].owner == p_owner && !live_[i].owner_gone) {
 			erase_at(i);
 			++removed;
 		} else {
@@ -461,6 +477,97 @@ size_t GadgetField::remove_owner(uint8_t p_owner) {
 		}
 	}
 	return removed;
+}
+
+size_t GadgetField::owner_gone(uint8_t p_owner, Tick p_tick) {
+	size_t removed = 0;
+	for (size_t i = 0; i < live_.size();) {
+		Deployable &d = live_[i];
+		if (d.owner != p_owner || d.owner_gone) {
+			++i;
+		} else if (defs_[d.gadget].kind != GadgetKind::Supply) {
+			erase_at(i);
+			++removed;
+		} else {
+			d.owner_gone = true;
+			d.owner_gone_tick = p_tick;
+			++stats_.orphaned;
+			++i;
+		}
+	}
+	return removed;
+}
+
+size_t GadgetField::expire(Tick p_tick) {
+	size_t expired = 0;
+	for (size_t i = 0; i < live_.size();) {
+		const Deployable &d = live_[i];
+		const GadgetDef &g = defs_[d.gadget];
+		const bool aged = g.time_to_live_s > 0.0f && float(p_tick - d.deployed) * kTickSeconds > g.time_to_live_s;
+		const bool orphaned = d.owner_gone && g.time_to_live_on_owner_gone_s > 0.0f &&
+				float(p_tick - d.owner_gone_tick) * kTickSeconds > g.time_to_live_on_owner_gone_s;
+		if (p_tick >= d.deployed && (aged || orphaned)) {
+			erase_at(i);
+			++stats_.expired;
+			++expired;
+		} else {
+			++i;
+		}
+	}
+	return expired;
+}
+
+bool GadgetField::damage(uint16_t p_id, float p_amount, bool p_explosion) {
+	for (size_t i = 0; i < live_.size(); ++i) {
+		Deployable &d = live_[i];
+		if (d.id != p_id) {
+			continue;
+		}
+		const GadgetDef &g = defs_[d.gadget];
+		if (!g.destructible || (p_explosion && !g.receives_explosion_damage) || !(p_amount > 0.0f) ||
+				!std::isfinite(p_amount)) {
+			return false;
+		}
+		d.health -= p_amount;
+		++stats_.damaged;
+		if (d.health > 0.0f) {
+			return false;
+		}
+		erase_at(i);
+		++stats_.destroyed;
+		return true;
+	}
+	return false;
+}
+
+size_t GadgetField::blast(const ExplosionSimDef &p_explosion, BlastFalloff p_falloff, const Vec3 &p_at,
+		const Vec3 &p_normal, const CollisionWorld *p_occluders, uint8_t p_spared_team) {
+	if (!p_explosion.present || !core::finite(p_at)) {
+		return 0;
+	}
+	const Vec3 eye = core::vec::add(p_at, core::vec::scale(p_normal, kBlastEyeLift));
+	std::vector<std::pair<uint16_t, float>> hits;
+	for (const Deployable &d : live_) {
+		if (p_spared_team != 0 && d.team == p_spared_team) {
+			continue;
+		}
+		const float amount =
+				float(blast_damage(p_explosion, core::vec::length(core::vec::sub(d.position, p_at)), p_falloff));
+		if (!(amount > 0.0f)) {
+			continue;
+		}
+		const Vec3 centre = core::vec::add(d.position, Vec3{ 0.0f, kGadgetSlideLift, 0.0f });
+		if (p_occluders != nullptr && !p_explosion.disable_occlusion &&
+				p_occluders->ray(eye, core::vec::sub(centre, eye), query_mask::kCollision, nullptr)) {
+			continue;
+		}
+		hits.emplace_back(d.id, amount);
+	}
+	size_t destroyed = 0;
+	for (const auto &[id, amount] : hits) {
+		destroyed += damage(id, amount, true) ? 1u : 0u;
+	}
+	return destroyed;
 }
 
 bool GadgetField::remove(uint16_t p_id) {

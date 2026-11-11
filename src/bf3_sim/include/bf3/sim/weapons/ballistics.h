@@ -82,6 +82,7 @@ struct DetonationEvent {
 	uint32_t player_slot = 0;
 	uint32_t shot_index = 0;
 	uint16_t def = kNoWeapon;
+	uint8_t variant = 0;
 	bool dud = false;
 	bool timeout = false;
 };

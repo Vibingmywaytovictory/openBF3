@@ -1036,6 +1036,7 @@ void Gunplay::apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states
 			m.gadget_soldiers[i] = GadgetSoldier{ &p_states[i], &m.slots[i].weapons, m.teams[i] };
 		}
 	}
+	m.gadgets->blast(m.tick_detonations, m.world, m.teams, m.config.friendly_fire);
 	m.gadgets->step(p_tick, m.world, m.gadget_soldiers, m.level->max_health);
 }
 
@@ -1090,6 +1091,18 @@ void Gunplay::clear(uint8_t p_slot) {
 		impl_->teams[p_slot] = 0;
 		impl_->gadgets->forget(p_slot);
 	}
+}
+
+void Gunplay::left(uint8_t p_slot) {
+	if (p_slot < impl_->slots.size()) {
+		impl_->clear(p_slot);
+		impl_->teams[p_slot] = 0;
+		impl_->gadgets->owner_left(p_slot);
+	}
+}
+
+void Gunplay::clear_deployables() {
+	impl_->gadgets->clear();
 }
 
 std::span<const sw::Deployable> Gunplay::deployables() const {

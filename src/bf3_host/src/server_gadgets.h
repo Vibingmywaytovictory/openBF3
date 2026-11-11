@@ -4,6 +4,7 @@
 #include "bf3/net/protocol.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/soldier_state.h"
+#include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/gadgets.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
@@ -35,7 +36,10 @@ public:
 	void armed(uint8_t p_slot, const sim::weapons::SoldierWeaponsState &p_weapons);
 	void step(sim::Tick p_tick, const sim::CollisionWorld *p_world, std::span<const GadgetSoldier> p_soldiers,
 			float p_max_health);
+	void blast(std::span<const sim::weapons::DetonationEvent> p_detonations, const sim::CollisionWorld *p_world,
+			std::span<const uint8_t> p_teams, bool p_friendly_fire);
 	void forget(uint8_t p_slot);
+	void owner_left(uint8_t p_slot);
 	void clear();
 
 	std::optional<sim::Vec3> squad_beacon(uint8_t p_slot, uint8_t p_team, const SquadTable *p_squads) const;
@@ -52,6 +56,7 @@ private:
 	std::vector<sim::weapons::SupplyGrant> grants_;
 	std::vector<uint8_t> receiver_slots_;
 	mutable GadgetStats stats_;
+	sim::Tick tick_ = 0;
 };
 
 inline constexpr sim::Tick kDeployableScopeTicks = 30;

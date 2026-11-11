@@ -91,7 +91,7 @@ bool supplied(const Gunplay &p_gunplay, uint8_t p_slot, uint8_t p_team, const si
 	const std::span<const sw::GadgetDef> defs = p_gunplay.level().gadgets;
 	const sw::SupplyReceiver receiver{ p_slot, p_team, true, p_at };
 	for (const sw::Deployable &d : p_gunplay.deployables()) {
-		if (d.gadget >= defs.size() || (p_owner >= 0 && int(d.owner) != p_owner)) {
+		if (d.gadget >= defs.size() || (p_owner >= 0 && (d.owner_gone || int(d.owner) != p_owner))) {
 			continue;
 		}
 		if (sw::supplies(defs[d.gadget], d, receiver, healing(p_need))) {
@@ -200,7 +200,7 @@ bool BotSupport::own_bag_busy(const TdmShared &p_shared, SupplyNeed p_need, cons
 	const uint8_t team = sh.teams[q.slot];
 	bool own = false;
 	for (const sw::Deployable &d : g.deployables()) {
-		own = own || (d.owner == q.slot && d.resting);
+		own = own || (d.owner == q.slot && d.resting && !d.owner_gone);
 	}
 	if (!own) {
 		return false;

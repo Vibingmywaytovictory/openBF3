@@ -1014,6 +1014,9 @@ void GameServer::restart_round() {
 	}
 	std::vector<RulesOrder> orders;
 	rules->restart_in_place(m.tick, orders);
+	if (Gunplay *g = m.combat.gunplay()) {
+		g->clear_deployables();
+	}
 	if (!orders.empty()) {
 		m.spawner.apply_orders(m.tick, orders, m.combat_log);
 	}

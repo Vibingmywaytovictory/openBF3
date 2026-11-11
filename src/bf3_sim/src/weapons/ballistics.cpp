@@ -380,6 +380,7 @@ void detonate(Env &r_env, const Projectile &p_p, const ProjectileSimDef &p_d, co
 	e.player_slot = p_p.player_slot;
 	e.shot_index = p_p.shot_index;
 	e.def = p_p.def;
+	e.variant = p_p.variant;
 	e.dud = !armed;
 	e.timeout = p_timeout;
 	r_env.out.detonations.push_back(e);

@@ -131,7 +131,7 @@ void Combat::client_left(size_t p_slot) {
 	per_slot_[p_slot] = PerSlot();
 	if (gunplay_ != nullptr) {
 		gunplay_->history().client_reset(uint8_t(p_slot));
-		gunplay_->clear(uint8_t(p_slot));
+		gunplay_->left(uint8_t(p_slot));
 		gunplay_->forget_loadouts(uint8_t(p_slot));
 	}
 }

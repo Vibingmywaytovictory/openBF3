@@ -2449,6 +2449,11 @@ TEST_SUITE("host-gunplay-gadgets") {
 			CHECK_FALSE(s->team_specific);
 			CHECK_FALSE(s->exclude_self);
 			CHECK(s->supply_soldiers);
+			CHECK(s->health == 50.0f);
+			CHECK(s->destructible);
+			CHECK(s->receives_explosion_damage);
+			CHECK(s->time_to_live_s == 0.0f);
+			CHECK(s->time_to_live_on_owner_gone_s == 0.0f);
 		}
 		CHECK(beacon->kind == sw::GadgetKind::SpawnBeacon);
 		CHECK(beacon->ground_ray_m == doctest::Approx(3.1f));
@@ -2602,6 +2607,71 @@ TEST_SUITE("host-gunplay-gadgets") {
 		CHECK(first_refill - *rested <= 62u);
 		CHECK(primary.reserve == full);
 		CHECK(m->server.gunplay()->gadget_stats().rounds_refilled >= uint64_t(full - low));
+	}
+
+	TEST_CASE("gadgets: an enemy grenade dropped on a medkit destroys it (Health 50, ReceivesExplosionDamage); "
+			  "it stays until then") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		std::unique_ptr<Match> m = start_match(*level, true, 75u, 0, 1);
+		tdm::ScriptedPeer &medic = m->join("medic");
+		tdm::ScriptedPeer &enemy = m->join("enemy");
+		medic.ready();
+		enemy.ready();
+		REQUIRE(wait_in_round(*m));
+		medic.spawn_request(0);
+		enemy.spawn_request(1);
+		REQUIRE(m->until([&] { return is_alive(m->state(medic.slot())) && is_alive(m->state(enemy.slot())); }, 600));
+		REQUIRE(m->rules().team_of(uint8_t(medic.slot())) != m->rules().team_of(uint8_t(enemy.slot())));
+		std::optional<Patch> patch = find_patch(*m, 3.0f);
+		REQUIRE(patch.has_value());
+		m->teleport(medic, add(patch->shooter, 0.0f, 0.05f, 0.0f));
+		m->teleport(enemy, add(patch->victim, 0.0f, 0.05f, 0.0f));
+		m->ticks(20);
+		bool fire = false;
+		const sim::Vec3 target = add(patch->victim, 0.0f, 0.1f, 0.0f);
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			return aim_command(
+					*m, p_tick, p_state, target, sim::Pose::Stand, select_and_fire(4, fire && (p_tick % 30u) < 10u));
+		};
+		m->ticks(40);
+		fire = true;
+		const std::optional<sim::Tick> rested = rest_tick(*m, 1, 300);
+		fire = false;
+		REQUIRE(rested.has_value());
+		REQUIRE(m->server.gunplay()->deployables().size() == 1u);
+		const sim::Vec3 bag = m->server.gunplay()->deployables()[0].position;
+		m->ticks(600);
+		CHECK(m->server.gunplay()->deployables().size() == 1u);
+		bool pull = false;
+		const sim::Vec3 feet = add(bag, 0.0f, 0.0f, 0.3f);
+		m->scripts[1] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			return aim_command(*m, p_tick, p_state, feet, sim::Pose::Stand, select_and_fire(6, pull));
+		};
+		m->ticks(60);
+		pull = true;
+		m->ticks(30);
+		pull = false;
+		size_t detonations = 0;
+		REQUIRE(m->until(
+				[&] {
+					detonations = 0;
+					for (const net::CombatEvents &c : enemy.combat) {
+						detonations += c.detonations.size();
+					}
+					return detonations > 0u;
+				},
+				600));
+		m->ticks(2);
+		const sw::GadgetFieldStats &st = m->server.gunplay()->gadget_stats().field;
+		std::printf("grenade: %zu detonation(s) by the medkit at (%.1f, %.1f, %.1f); %zu deployables left, %llu "
+					"damaged, %llu destroyed\n",
+				detonations, bag[0], bag[1], bag[2], m->server.gunplay()->deployables().size(),
+				(unsigned long long)st.damaged, (unsigned long long)st.destroyed);
+		CHECK(m->server.gunplay()->deployables().empty());
+		CHECK(st.destroyed == 1u);
 	}
 
 	TEST_CASE("gadgets: a recon's radio beacon is a spawn point for its squad: a mate's beacon SpawnRequest deploys at "
