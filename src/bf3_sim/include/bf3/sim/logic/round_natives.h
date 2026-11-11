@@ -3,6 +3,7 @@
 #include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/gameplay/logic_types.h"
 #include "bf3/core/result.h"
+#include "bf3/sim/logic/conquest_natives.h"
 #include "bf3/sim/logic/logic_native.h"
 #include "bf3/sim/logic/logic_runtime.h"
 #include "bf3/sim/sim_types.h"
@@ -39,6 +40,7 @@ struct RoundNativeParams {
 	uint32_t restrict_allowed = (1u << 2) | (1u << 3) | (1u << 4) | (1u << 5) | (1u << 6) | (1u << 8) | (1u << 9);
 	bool from_data = false;
 	std::vector<std::string> notes;
+	std::shared_ptr<const ConquestParams> conquest;
 };
 
 struct RoundNativeConfig {
@@ -52,6 +54,7 @@ struct RoundNativeConfig {
 	float team_kill_weight = 0.0f;
 	bool rotate_teams = true;
 	bool killer_camera = true;
+	ConquestOptions conquest;
 };
 
 enum class RoundPhase : uint8_t { PreRound = 0, InRound = 1, RoundOver = 2, Restarting = 3 };
@@ -72,6 +75,9 @@ public:
 	core::Status player_died(uint8_t p_slot, uint8_t p_team, int p_killer, uint8_t p_killer_team, LogicRuntime &r_runtime);
 	core::Status kill_undone(uint8_t p_killer_team, LogicRuntime &r_runtime);
 	core::Status tick_round(Tick p_tick, LogicRuntime &r_runtime);
+	core::Status conquest_step(Tick p_tick, std::span<const ConquestPlayerSample> p_players, LogicRuntime &r_runtime);
+	ConquestNatives *conquest();
+	const ConquestNatives *conquest() const;
 
 	core::Status player_enter_team(uint8_t p_slot, bool p_bot, uint8_t p_team, LogicRuntime &r_runtime);
 	core::Status player_switch_team(uint8_t p_slot, uint8_t p_team);

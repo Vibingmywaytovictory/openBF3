@@ -75,6 +75,7 @@ struct RoundNatives::State {
 	RoundNativeConfig config;
 	RoundNativeParams params;
 	std::optional<LogicNativeStubs> stubs;
+	std::optional<ConquestNatives> conquest;
 
 	struct Counter {
 		uint32_t node = 0;
@@ -226,6 +227,14 @@ core::Result<RoundNatives> RoundNatives::create(std::shared_ptr<const gp::LogicG
 		return stubs.error();
 	}
 	state->stubs.emplace(std::move(*stubs));
+	if (state->params.conquest) {
+		core::Result<ConquestNatives> conquest =
+				ConquestNatives::create(p_graph, state->params.conquest, p_config.conquest);
+		if (!conquest) {
+			return conquest.error();
+		}
+		state->conquest.emplace(std::move(*conquest));
+	}
 	const gp::LogicGraph &g = *p_graph;
 	state->enabled.assign(g.nodes().size(), false);
 	uint8_t next_counter_team = 1;
@@ -316,6 +325,15 @@ core::Status RoundNatives::apply(Tick p_tick, std::span<const LogicEffect> p_eff
 		}
 		const T type = g.nodes()[e.node].type;
 		NativeCoverage *cov = s.coverage_of(type);
+		if (s.conquest && s.conquest->handles(e.node)) {
+			BF3_TRY(s.conquest->effect(e, r_runtime));
+			if (type == T::CapturePoint || type == T::TicketCounter || type == T::CombatAreaTrigger) {
+				if (cov != nullptr) {
+					++cov->handled;
+				}
+				continue;
+			}
+		}
 		if (!handled_type(type)) {
 			if (cov != nullptr) {
 				++cov->recorded;
@@ -463,6 +481,9 @@ core::Status RoundNatives::player_switch_team(uint8_t p_slot, uint8_t p_team) {
 core::Status RoundNatives::player_leave(uint8_t p_slot, LogicRuntime &r_runtime) {
 	(void)r_runtime;
 	State &s = *state_;
+	if (s.conquest) {
+		s.conquest->left(p_slot, s.team[p_slot]);
+	}
 	s.entered[p_slot] = false;
 	s.team[p_slot] = 0;
 	s.bot[p_slot] = false;
@@ -474,6 +495,9 @@ core::Status RoundNatives::player_leave(uint8_t p_slot, LogicRuntime &r_runtime)
 
 core::Status RoundNatives::player_spawned(uint8_t p_slot, uint8_t p_team, LogicRuntime &r_runtime) {
 	State &s = *state_;
+	if (s.conquest) {
+		s.conquest->respawned(p_slot, p_team);
+	}
 	for (const uint32_t h : s.humans) {
 		BF3_TRY(r_runtime.force_event(h, kOnPlayerSpawned, LogicContext{ int32_t(p_slot), p_team }));
 	}
@@ -482,6 +506,9 @@ core::Status RoundNatives::player_spawned(uint8_t p_slot, uint8_t p_team, LogicR
 
 core::Status RoundNatives::player_died(uint8_t p_slot, uint8_t p_team, int p_killer, uint8_t p_killer_team, LogicRuntime &r_runtime) {
 	State &s = *state_;
+	if (s.conquest) {
+		s.conquest->killed(p_team);
+	}
 	for (const uint32_t h : s.humans) {
 		BF3_TRY(r_runtime.force_event(h, kOnPlayerDied, LogicContext{ int32_t(p_slot), p_team }));
 	}
@@ -547,6 +574,24 @@ core::Status RoundNatives::tick_round(Tick p_tick, LogicRuntime &r_runtime) {
 		}
 	}
 	return core::Status::success();
+}
+
+core::Status RoundNatives::conquest_step(
+		Tick p_tick, std::span<const ConquestPlayerSample> p_players, LogicRuntime &r_runtime) {
+	State &s = *state_;
+	s.tick = p_tick;
+	if (!s.conquest) {
+		return core::Status::success();
+	}
+	return s.conquest->step(p_tick, 1.0f / float(kSimHz), p_players, r_runtime);
+}
+
+ConquestNatives *RoundNatives::conquest() {
+	return state_->conquest ? &*state_->conquest : nullptr;
+}
+
+const ConquestNatives *RoundNatives::conquest() const {
+	return state_->conquest ? &*state_->conquest : nullptr;
 }
 
 RoundPhase RoundNatives::phase() const {

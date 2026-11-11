@@ -174,3 +174,10 @@ target_sources(bf3_sim PRIVATE
     include/bf3/sim/logic/conquest_rules.h
     src/logic/conquest_rules.cpp
 )
+
+target_sources(bf3_sim PRIVATE
+    include/bf3/sim/logic/conquest_data.h
+    include/bf3/sim/logic/conquest_natives.h
+    src/logic/conquest_data.cpp
+    src/logic/conquest_natives.cpp
+)

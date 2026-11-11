@@ -39,6 +39,7 @@ struct ModeObjectiveDef {
 	Vec3 position{};
 	int team = 0;
 	std::string scope_label;
+	std::vector<std::array<float, 2>> polygon;
 };
 
 struct ModeAreas {

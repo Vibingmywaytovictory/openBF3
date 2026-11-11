@@ -125,6 +125,43 @@ Result<std::optional<ShapeAt>> follow_area(const World &p_world, uint32_t p_scop
 	return std::optional<ShapeAt>();
 }
 
+Status read_shape_polygon(const World &p_world, const ShapeAt &p_shape, uint32_t p_owner,
+		std::vector<std::array<float, 2>> &r_polygon, float &r_height, uint32_t &r_shape_object) {
+	WorkBudget &budget = *p_world.budget;
+	const PlacedObject *placed = p_world.placed(p_shape.scope, p_shape.shape);
+	const LevelTransform frame = placed != nullptr ? placed->transform : p_world.scopes.get(p_shape.scope).transform;
+	if (placed != nullptr) {
+		r_shape_object = uint32_t(placed - p_world.objects.data());
+	}
+	const std::optional<EbxValue> points = p_shape.shape.get("Points");
+	const OptionalEbxArray list = points ? points->as_array() : OptionalEbxArray();
+	if (!list || list->size() < 3) {
+		return make_error("mode areas: the shape of object " + std::to_string(p_owner) + " has fewer than 3 points");
+	}
+	if (list->size() > kMaxCombatAreaPoints) {
+		return make_error("mode areas: the shape of object " + std::to_string(p_owner) + " has " +
+				std::to_string(list->size()) + " points");
+	}
+	BF3_TRY(budget.charge(list->size()));
+	for (const EbxValue &p : *list) {
+		const std::optional<EbxStruct> s = p.as_struct();
+		const std::optional<core::Vec3> v = s ? s->vec3() : std::nullopt;
+		if (!v || !std::isfinite((*v)[0]) || !std::isfinite((*v)[1]) || !std::isfinite((*v)[2])) {
+			return make_error("mode areas: the shape of object " + std::to_string(p_owner) + " has a bad point");
+		}
+		const Vec3 w = frame.transform_point(*v);
+		if (!std::isfinite(w[0]) || !std::isfinite(w[2]) || std::fabs(w[0]) > 1e6f || std::fabs(w[2]) > 1e6f) {
+			return make_error(
+					"mode areas: the shape of object " + std::to_string(p_owner) + " has a point out of range");
+		}
+		r_polygon.push_back({ w[0], w[2] });
+	}
+	if (const std::optional<EbxValue> h = p_shape.shape.get("Height")) {
+		const std::optional<float> f = h->as_f32();
+		r_height = f && std::isfinite(*f) ? *f : 0.0f;
+	}
+	return Status::success();
+}
 }
 
 Result<ModeAreas> read_mode_areas(const World &p_world) {
@@ -157,36 +194,7 @@ Result<ModeAreas> read_mode_areas(const World &p_world) {
 				return make_error("mode areas: combat area trigger " + std::to_string(i) + " (" + object.entity.guid().to_string() +
 						") resolves to no VolumeVectorShapeData");
 			}
-			const PlacedObject *placed = p_world.placed((*shape)->scope, (*shape)->shape);
-			const LevelTransform frame = placed != nullptr ? placed->transform : p_world.scopes.get((*shape)->scope).transform;
-			if (placed != nullptr) {
-				area.shape = uint32_t(placed - p_world.objects.data());
-			}
-			const std::optional<EbxValue> points = (*shape)->shape.get("Points");
-			const OptionalEbxArray list = points ? points->as_array() : OptionalEbxArray();
-			if (!list || list->size() < 3) {
-				return make_error("mode areas: combat area shape of trigger " + std::to_string(i) + " has fewer than 3 points");
-			}
-			if (list->size() > kMaxCombatAreaPoints) {
-				return make_error("mode areas: combat area shape of trigger " + std::to_string(i) + " has " + std::to_string(list->size()) + " points");
-			}
-			BF3_TRY(budget.charge(list->size()));
-			for (const EbxValue &p : *list) {
-				const std::optional<EbxStruct> s = p.as_struct();
-				const std::optional<core::Vec3> v = s ? s->vec3() : std::nullopt;
-				if (!v || !std::isfinite((*v)[0]) || !std::isfinite((*v)[1]) || !std::isfinite((*v)[2])) {
-					return make_error("mode areas: combat area shape of trigger " + std::to_string(i) + " has a bad point");
-				}
-				const Vec3 w = frame.transform_point(*v);
-				if (!std::isfinite(w[0]) || !std::isfinite(w[2]) || std::fabs(w[0]) > 1e6f || std::fabs(w[2]) > 1e6f) {
-					return make_error("mode areas: combat area shape of trigger " + std::to_string(i) + " has a point out of range");
-				}
-				area.polygon.push_back({ w[0], w[2] });
-			}
-			if (const std::optional<EbxValue> h = (*shape)->shape.get("Height")) {
-				const std::optional<float> f = h->as_f32();
-				area.height = f && std::isfinite(*f) ? *f : 0.0f;
-			}
+			BF3_TRY(read_shape_polygon(p_world, **shape, i, area.polygon, area.height, area.shape));
 			out.combat_areas.push_back(std::move(area));
 			continue;
 		}
@@ -205,6 +213,15 @@ Result<ModeAreas> read_mode_areas(const World &p_world) {
 			Result<int> team = team_of(p_world, object, "InitialOwnerTeam");
 			BF3_TRY(team);
 			o.team = *team;
+			bool other = false;
+			Result<std::optional<ShapeAt>> shape =
+					follow_area(p_world, object.scope, object.entity, geometry, 0, other);
+			BF3_TRY(shape);
+			if (*shape) {
+				float height = 0.0f;
+				uint32_t shape_object = 0;
+				BF3_TRY(read_shape_polygon(p_world, **shape, i, o.polygon, height, shape_object));
+			}
 		} else {
 			Result<std::string> type = enum_of(p_world, object, "InteractionEntityType");
 			BF3_TRY(type);
