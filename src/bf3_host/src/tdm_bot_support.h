@@ -71,7 +71,7 @@ private:
 	std::optional<sim::Vec3> medkit_;
 };
 
-void ask_medic(TdmShared &r_shared, uint8_t p_slot);
+std::optional<uint8_t> ask_medic(TdmShared &r_shared, uint8_t p_slot);
 bool may_help(const ai::BehaviourTuning &p_tuning, const SupportWay &p_way, const sim::Vec3 &p_self,
 		const sim::Vec3 &p_mate, size_t p_mate_slot);
 uint8_t supply_slot(const Gunplay &p_gunplay, const BotArms &p_arms, SupplyNeed p_need);

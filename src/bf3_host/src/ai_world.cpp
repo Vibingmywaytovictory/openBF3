@@ -734,9 +734,12 @@ struct HostAiBots::Impl {
 		bool down = false;
 	};
 
-	explicit Impl(const ServerView &r_view) : view(r_view) {}
+	Impl(const ServerView &r_view, float p_call_seconds, MedicCall p_medic_call) :
+			view(r_view), voices(p_call_seconds), medic_call(std::move(p_medic_call)) {}
 
 	const ServerView &view;
+	ai::CallRadioVoices voices;
+	MedicCall medic_call;
 	float view_distance = 0.0f;
 	sim::Tick tick = 0;
 	ai::AiSettings settings;
@@ -746,6 +749,7 @@ struct HostAiBots::Impl {
 	std::array<Seat, kMaxAiSlots> seats;
 	ai::AIEventCourier events;
 	std::unique_ptr<ai::AIMain> main;
+	std::unique_ptr<ai::CommunicationHub> hub;
 
 	bool valid(int p_player_id) const { return p_player_id >= 0 && size_t(p_player_id) < view.states().size(); }
 
@@ -755,7 +759,8 @@ struct HostAiBots::Impl {
 	}
 };
 
-HostAiBots::HostAiBots(const ServerView &r_view, float p_view_distance) : impl_(std::make_unique<Impl>(r_view)) {
+HostAiBots::HostAiBots(const ServerView &r_view, float p_view_distance, float p_call_seconds, MedicCall p_medic_call) :
+		impl_(std::make_unique<Impl>(r_view, p_call_seconds, std::move(p_medic_call))) {
 	Impl &m = *impl_;
 	m.view_distance = p_view_distance;
 	m.settings.max_bots = -1;
@@ -775,8 +780,17 @@ HostAiBots::HostAiBots(const ServerView &r_view, float p_view_distance) : impl_(
 	services.factory = this;
 	m.main = std::make_unique<ai::AIMain>(services);
 	m.settings.max_bots = int32_t(kMaxAiSlots);
+	ai::CommunicationHubServices hub;
+	hub.radio = this;
+	hub.voices = &m.voices;
+	hub.timer = this;
+	hub.game = this;
+	hub.bots = &m.main->bot_manager();
+	hub.information = &m.information;
+	m.hub = std::make_unique<ai::CommunicationHub>(hub);
 	ai::AiEventServices events;
 	events.main = m.main.get();
+	events.hub = m.hub.get();
 	events.information = &m.information;
 	m.events.attach(events);
 }
@@ -803,6 +817,7 @@ ai::BotMain *HostAiBots::admit(uint8_t p_slot, ai::InfantryBody &r_body, const a
 	}
 	seat.bot = static_cast<ai::BotMain *>(m.main->bot_manager().bot_from_player_id(p_slot));
 	seat.bot->set_in_transition_phase(true);
+	seat.bot->attach_communication(m.voices, *m.hub);
 	return seat.bot;
 }
 
@@ -959,6 +974,18 @@ std::unique_ptr<ai::Bot> HostAiBots::create_bot(
 		return nullptr;
 	}
 	return std::make_unique<ai::BotMain>(p_bot_id, p_player_id, p_side, *seat.body, *seat.tuning, p_personality);
+}
+
+void HostAiBots::send_radio_message(int p_sender, int, const ai::RadioMessage &p_message) {
+	Impl &m = *impl_;
+	if (p_message.type != ai::kRadioCallForMedic || !m.medic_call || p_sender < 0 || size_t(p_sender) >= kMaxAiSlots) {
+		return;
+	}
+	const std::optional<uint8_t> medic = m.medic_call(uint8_t(p_sender));
+	ai::RadioMessageSettings settings;
+	if (medic.has_value() && m.voices.settings(p_message.type, settings)) {
+		m.events.event_radio_message(settings, p_sender, *medic);
+	}
 }
 
 }

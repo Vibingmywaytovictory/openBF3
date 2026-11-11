@@ -5,6 +5,7 @@
 #include "bf3/ai/knowledge/information_factory.h"
 #include "bf3/ai/knowledge/information_grid.h"
 #include "bf3/ai/main/ai_main.h"
+#include "bf3/ai/main/communication_hub.h"
 #include "bf3/core/result.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/squads.h"
@@ -12,7 +13,9 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -108,9 +111,11 @@ private:
 	std::unique_ptr<Impl> impl_;
 };
 
-class HostAiBots final : public ai::AiTimer, public ai::AiGame, public ai::BotFactory {
+class HostAiBots final : public ai::AiTimer, public ai::AiGame, public ai::BotFactory, public ai::RadioComm {
 public:
-	HostAiBots(const ServerView &r_view, float p_view_distance);
+	using MedicCall = std::function<std::optional<uint8_t>(uint8_t p_caller)>;
+
+	HostAiBots(const ServerView &r_view, float p_view_distance, float p_call_seconds, MedicCall p_medic_call);
 	~HostAiBots() override;
 	HostAiBots(const HostAiBots &) = delete;
 	HostAiBots &operator=(const HostAiBots &) = delete;
@@ -146,6 +151,8 @@ public:
 
 	std::unique_ptr<ai::Bot> create_bot(
 			int p_player_id, uint32_t p_bot_id, const float *p_personality, int p_side) override;
+
+	void send_radio_message(int p_sender, int p_side, const ai::RadioMessage &p_message) override;
 
 	struct Impl;
 

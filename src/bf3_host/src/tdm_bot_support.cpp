@@ -130,20 +130,21 @@ std::optional<uint8_t> nearest_medic(const TdmShared &p_shared, uint8_t p_slot, 
 
 }
 
-void ask_medic(TdmShared &r_shared, uint8_t p_slot) {
+std::optional<uint8_t> ask_medic(TdmShared &r_shared, uint8_t p_slot) {
 	const TdmShared &p_shared = r_shared;
 	if (p_shared.host.gunplay == nullptr) {
-		return;
+		return std::nullopt;
 	}
 	const core::Result<sim::spotting::SpottingDef> def =
 			sim::spotting::make_spotting_def(p_shared.host.gunplay->level().soldier);
 	if (!def || !def->spotter_present) {
-		return;
+		return std::nullopt;
 	}
 	const std::optional<uint8_t> medic = nearest_medic(p_shared, p_slot, def->spotter.pickup_order_distance);
 	p_shared.host.view->post_order(
 			p_slot, net::OrderRequest{ sim::commo::OrderType::RequestHeal, medic.value_or(net::kNoOrderTarget) });
 	r_shared.count(&TdmBotStats::medic_orders, uint64_t(1));
+	return medic;
 }
 
 void BotSupport::new_life() {

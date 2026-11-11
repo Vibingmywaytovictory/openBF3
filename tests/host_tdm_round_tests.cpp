@@ -18,6 +18,7 @@
 #include "bf3/sim/logic/round_natives.h"
 #include "bf3/sim/static_world.h"
 
+#include "ai_infantry_fakes.h"
 #include "gunplay_fixture.h"
 #include "tdm_bot_shared.h"
 #include "tdm_bot_support.h"
@@ -30,6 +31,7 @@
 #include <cstdio>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -593,6 +595,38 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(bots.number_of_deactivated_bots() == 1);
 		CHECK(bots.bot_from_player_id(1) == nullptr);
 		CHECK(bots.number_of_active_bots() == 1);
+	}
+
+	TEST_CASE(
+			"bots through AIMain: one CommunicationHub for the roster, and a bot's call for a medic reaches the medic "
+			"bot through AIEventCourier's radio event and the hub's receive filter") {
+		std::unique_ptr<sim::CollisionWorld> world = wall_world();
+		m2b_fake::FakeView view;
+		view.world_ = world.get();
+		view.teams = { 1, 1 };
+		view.slots = { soldier_at({ 0, 0, 0 }), soldier_at({ 5, 0, 0 }) };
+		std::vector<uint8_t> asked;
+		host::HostAiBots bots(view, 100.0f, 4.0f, [&](uint8_t p_caller) {
+			asked.push_back(p_caller);
+			return std::optional<uint8_t>(uint8_t(1));
+		});
+		ai::test::FakeBody caller_body, medic_body;
+		const ai::BehaviourTuning tuning;
+		ai::BotMain *const caller = bots.admit(0, caller_body, tuning);
+		ai::BotMain *const medic = bots.admit(1, medic_body, tuning);
+		REQUIRE(caller != nullptr);
+		REQUIRE(medic != nullptr);
+		bots.observe(0, view.slots[0], true, 600);
+		bots.observe(1, view.slots[1], true, 600);
+		caller->call_for_medic();
+		for (sim::Tick t = 600; t < 720 && asked.empty(); ++t) {
+			caller_body.now = t;
+			caller->update_communication();
+		}
+		CHECK(asked == std::vector<uint8_t>{ 0 });
+		REQUIRE(medic->communication() != nullptr);
+		CHECK(medic->communication()->received_message_exists(ai::kRadioCallForMedic, 0));
+		CHECK_FALSE(caller->communication()->received_message_exists(ai::kRadioCallForMedic, 0));
 	}
 
 	TEST_CASE("add_tdm_bots on the synthetic floor without rules: M2a teams, every bot alive, no rays through walls") {

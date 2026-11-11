@@ -1,6 +1,5 @@
 #include "bf3/host/ai_bot_source.h"
 
-#include "bf3/ai/main/communication_hub.h"
 #include "bf3/host/ai_world.h"
 #include "bf3/host/server_view.h"
 #include "bf3/sim/command.h"
@@ -41,10 +40,8 @@ TdmBotActivity tdm_activity(ai::InfantryActivity p_activity) {
 	return TdmBotActivity::Roam;
 }
 
-struct AiBotSource::Impl final : ai::InfantryBody, ai::RadioComm, ai::AiTimer {
+struct AiBotSource::Impl final : ai::InfantryBody {
 	BotBody body;
-	std::optional<ai::CallRadioVoices> voices;
-	std::optional<ai::CommunicationHub> hub;
 	ai::BotMain *bot = nullptr;
 	sim::Tick now = 0;
 	const sim::SoldierState *state = nullptr;
@@ -59,9 +56,6 @@ struct AiBotSource::Impl final : ai::InfantryBody, ai::RadioComm, ai::AiTimer {
 	const BotFrame &f() const { return *frame; }
 
 	sim::Tick tick() const override { return now; }
-	sim::Tick game_tick() const override { return now; }
-	double tick_seconds() const override { return sim::kTickSeconds; }
-	double update_time() const override { return 0.0; }
 	ai::Vec3 position() const override { return state->position; }
 
 	void see() override { sighting = body.see(now, *state, view().states()); }
@@ -257,12 +251,6 @@ struct AiBotSource::Impl final : ai::InfantryBody, ai::RadioComm, ai::AiTimer {
 		return true;
 	}
 
-	void send_radio_message(int p_sender, int, const ai::RadioMessage &p_message) override {
-		if (p_message.type == ai::kRadioCallForMedic && body.shared != nullptr) {
-			ask_medic(*body.shared, uint8_t(p_sender));
-		}
-	}
-
 	void end_plan() override {
 		const bool aligned = body.turn(f(), intent);
 		body.compose(f(), planned, intent, aligned, cmd);
@@ -317,14 +305,6 @@ struct AiBotSource::Impl final : ai::InfantryBody, ai::RadioComm, ai::AiTimer {
 AiBotSource::AiBotSource(std::shared_ptr<TdmShared> p_shared, uint32_t p_index) : impl_(std::make_unique<Impl>()) {
 	Impl &m = *impl_;
 	m.body.attach(std::move(p_shared), p_index);
-	static const ai::BehaviourTuning s_defaults;
-	const ai::BehaviourTuning &tuning = m.body.shared != nullptr ? m.body.cfg().behaviours : s_defaults;
-	m.voices.emplace(tuning.call_s);
-	ai::CommunicationHubServices hub;
-	hub.radio = &m;
-	hub.voices = &*m.voices;
-	hub.timer = &m;
-	m.hub.emplace(hub);
 	if (m.body.shared != nullptr) {
 		m.body.shared->count(&TdmBotStats::bf2_bots, uint32_t(1));
 	}
@@ -371,13 +351,13 @@ void AiBotSource::admitted(uint8_t p_slot) {
 		return;
 	}
 	if (sh->ai == nullptr) {
-		sh->ai = std::make_shared<HostAiBots>(*sh->host.view, sh->config->perception.max_range_m);
+		sh->ai = std::make_shared<HostAiBots>(*sh->host.view, sh->config->perception.max_range_m,
+				sh->config->behaviours.call_s, [sh](uint8_t p_caller) { return ask_medic(*sh, p_caller); });
 	}
 	m.bot = sh->ai->admit(p_slot, m, m.body.cfg().behaviours);
 	if (m.bot == nullptr) {
 		return;
 	}
-	m.bot->attach_communication(*m.voices, *m.hub);
 	if (sh->strategy != nullptr) {
 		sh->strategy->add_bot(p_slot, *m.bot);
 	}
