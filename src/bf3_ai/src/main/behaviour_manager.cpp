@@ -1,6 +1,6 @@
 #include "bf3/ai/main/behaviour_manager.h"
 
-#include "bf3/ai/plan/plan_entries.h"
+#include "bf3/ai/interpreter/bap_interpreter.h"
 #include "bf3/core/util/text.h"
 
 #include <algorithm>

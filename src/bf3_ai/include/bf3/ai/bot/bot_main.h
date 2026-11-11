@@ -4,8 +4,8 @@
 #include "bf3/ai/behaviour/curves.h"
 #include "bf3/ai/behaviour/urgency_merger.h"
 #include "bf3/ai/bot/infantry.h"
+#include "bf3/ai/interpreter/bot_plan.h"
 #include "bf3/ai/main/bot.h"
-#include "bf3/ai/plan/infantry_entries.h"
 #include "bf3/ai/squad/squad_world.h"
 
 #include <array>

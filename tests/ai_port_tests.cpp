@@ -1,15 +1,17 @@
 #include <doctest/doctest.h>
 
 #include "ai_knowledge_fakes.h"
+#include "bf3/ai/actionplan/conditions.h"
+#include "bf3/ai/actionplan/flow_control.h"
 #include "bf3/ai/behaviour/curves.h"
 #include "bf3/ai/behaviour/urgency_merger.h"
 #include "bf3/ai/debug/ai_console.h"
+#include "bf3/ai/interpreter/bap_interpreter.h"
 #include "bf3/ai/knowledge/information_factory.h"
 #include "bf3/ai/knowledge/information_grid.h"
 #include "bf3/ai/knowledge/plug_ins.h"
 #include "bf3/ai/knowledge/weapon_info.h"
 #include "bf3/ai/main/ai_main.h"
-#include "bf3/ai/plan/plan_entries.h"
 
 #include <algorithm>
 #include <array>
@@ -274,12 +276,20 @@ TEST_SUITE("ai-port") {
 		AiSettings settings;
 		bool first = false;
 		bool second = false;
+		struct Nobody final : PlanBot {
+			const PlanInterpreter &plan_interpreter() const override { return infantry_interpreter(); }
+			bool is_just_spawned() override { return false; }
+			BotLodLevel lod_level() const override { return BotLodLevel::Full; }
+			double game_time() const override { return 0.0; }
+			InfantryBody *infantry() override { return nullptr; }
+		} nobody;
+		BAPAIdle idle(std::make_unique<BAPConTrue>(), 0, 0);
 		const std::unique_ptr<BAPEntry> walk = create_plan_entry("EntryInfanteryMoveToDirection", settings);
 		REQUIRE(walk != nullptr);
-		CHECK(walk->target_id() == PlanTarget::MoveToDirection);
-		CHECK(walk->execute(nullptr, nullptr, first, second));
+		CHECK(walk->target_id() == BAPStatementType::MoveToDirection);
+		CHECK(walk->execute(idle, nobody, first, second));
 		CHECK(create_plan_entry("EntryCarMoveToDirection", settings) == nullptr);
-		CHECK(create_plan_entry("EntryInfanteryMoveTo", settings)->target_id() == PlanTarget::MoveTo);
+		CHECK(create_plan_entry("EntryInfanteryMoveTo", settings)->target_id() == BAPStatementType::MoveTo);
 		CHECK(create_plan_entry("EntryHeliMoveTo", settings) == nullptr);
 		CHECK(plan_entry_kinds().size() == 42);
 		size_t bodies = 0;
@@ -287,12 +297,12 @@ TEST_SUITE("ai-port") {
 			bodies += kind.has_body ? 1 : 0;
 		}
 		CHECK(bodies == 7);
-		CHECK(find_plan_entry_kind("EntryHeliMoveAwayFromObject")->target == PlanTarget::MoveAwayFromObject);
+		CHECK(find_plan_entry_kind("EntryHeliMoveAwayFromObject")->target == BAPStatementType::MoveAwayFromObject);
 		CHECK(find_plan_entry_kind("EntryPlaneAimAt")->domain == AiDomain::Air);
 		settings.enable_vehicle_ai = true;
 		const std::unique_ptr<BAPEntry> drive = create_plan_entry("EntryCarMoveToDirection", settings);
 		REQUIRE(drive != nullptr);
-		CHECK(drive->execute(nullptr, nullptr, first, second));
+		CHECK(drive->execute(idle, nobody, first, second));
 	}
 
 	TEST_CASE("behaviour kinds: vehicle and air kinds are registered, off, and never chosen by UrgencyMerger") {

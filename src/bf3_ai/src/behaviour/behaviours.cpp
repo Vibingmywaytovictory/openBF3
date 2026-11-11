@@ -1,6 +1,6 @@
 #include "bf3/ai/behaviour/behaviours.h"
 
-#include "bf3/ai/plan/infantry_entries.h"
+#include "bf3/ai/interpreter/bot_plan.h"
 #include "bf3/ai/squad/squad_world.h"
 
 #include <algorithm>
@@ -189,9 +189,9 @@ float BBRevive::situation() {
 
 bool BBRevive::plan(BotPlan &r_script, bool) {
 	r_script.clear(InfantryActivity::Revive);
-	r_script.add(PlanTarget::MoveToObject, object_args(ObjectGoal::Corpse));
-	r_script.add(PlanTarget::SoldierPose, pose_args(PoseRequest::NearCorpse));
-	r_script.add(PlanTarget::Trigger, trigger_args(TriggerKind::Defib));
+	r_script.add(BAPStatementType::MoveToObject, object_args(ObjectGoal::Corpse));
+	r_script.add(BAPStatementType::SoldierPose, pose_args(PoseRequest::NearCorpse));
+	r_script.add(BAPStatementType::Trigger, trigger_args(TriggerKind::Defib));
 	return true;
 }
 
@@ -226,18 +226,18 @@ bool BBFireInfantery::plan(BotPlan &r_script, bool) {
 			[[fallthrough]];
 		case Mode::Throwing:
 			r_script.clear(InfantryActivity::Grenade);
-			r_script.add(PlanTarget::Trigger, trigger_args(TriggerKind::Grenade));
+			r_script.add(BAPStatementType::Trigger, trigger_args(TriggerKind::Grenade));
 			return true;
 		case Mode::Sight:
 			r_script.clear(InfantryActivity::Fight);
-			r_script.add(PlanTarget::Sense, sense_args(SenseFocus::Target));
-			r_script.add(PlanTarget::Trigger, trigger_args(TriggerKind::Aimed));
-			r_script.add(PlanTarget::MoveToObject, object_args(ObjectGoal::Target));
+			r_script.add(BAPStatementType::Sense, sense_args(SenseFocus::Target));
+			r_script.add(BAPStatementType::Trigger, trigger_args(TriggerKind::Aimed));
+			r_script.add(BAPStatementType::MoveToObject, object_args(ObjectGoal::Target));
 			return true;
 		case Mode::Blind:
 			r_script.clear(InfantryActivity::Fight);
-			r_script.add(PlanTarget::Sense, sense_args(SenseFocus::BlindPoint));
-			r_script.add(PlanTarget::Trigger, trigger_args(TriggerKind::Blind));
+			r_script.add(BAPStatementType::Sense, sense_args(SenseFocus::BlindPoint));
+			r_script.add(BAPStatementType::Trigger, trigger_args(TriggerKind::Blind));
 			return true;
 		case Mode::None:
 			break;
@@ -286,7 +286,7 @@ bool BBTakeCoverInfantry::plan(BotPlan &r_script, bool) {
 		case Want::Move:
 			phase_ = Phase::Move;
 			r_script.clear(InfantryActivity::Retreat);
-			r_script.add(PlanTarget::MoveTo, move_args(MoveGoal::Cover));
+			r_script.add(BAPStatementType::MoveTo, move_args(MoveGoal::Cover));
 			return true;
 		case Want::WaitFromMove:
 			body_.wait_in_cover();
@@ -294,9 +294,9 @@ bool BBTakeCoverInfantry::plan(BotPlan &r_script, bool) {
 		case Want::Wait:
 			phase_ = Phase::Wait;
 			r_script.clear(InfantryActivity::RegenWait);
-			r_script.add(PlanTarget::SoldierPose, pose_args(PoseRequest::Crouch));
-			r_script.add(PlanTarget::Sense, sense_args(SenseFocus::Threat));
-			r_script.add(PlanTarget::Sense, sense_args(SenseFocus::ShotOrigin));
+			r_script.add(BAPStatementType::SoldierPose, pose_args(PoseRequest::Crouch));
+			r_script.add(BAPStatementType::Sense, sense_args(SenseFocus::Threat));
+			r_script.add(BAPStatementType::Sense, sense_args(SenseFocus::ShotOrigin));
 			return true;
 		case Want::None:
 			break;
@@ -312,8 +312,8 @@ float BBAvoid::situation() {
 bool BBAvoid::plan(BotPlan &r_script, bool) {
 	const bool hunt = body_.senses().hunt_target;
 	r_script.clear(hunt ? InfantryActivity::Hunt : InfantryActivity::Roam);
-	r_script.add(PlanTarget::MoveTo, move_args(hunt ? MoveGoal::Hunt : MoveGoal::Roam));
-	r_script.add(PlanTarget::Sense, sense_args(SenseFocus::ShotOrigin));
+	r_script.add(BAPStatementType::MoveTo, move_args(hunt ? MoveGoal::Hunt : MoveGoal::Roam));
+	r_script.add(BAPStatementType::Sense, sense_args(SenseFocus::ShotOrigin));
 	return true;
 }
 
@@ -350,17 +350,17 @@ float BBMoveTo::situation() {
 bool BBMoveTo::plan(BotPlan &r_script, bool) {
 	if (holding()) {
 		r_script.clear(InfantryActivity::Idle);
-		r_script.add(PlanTarget::Sense, sense_args(SenseFocus::Around));
-		r_script.add(PlanTarget::Sense, sense_args(SenseFocus::ShotOrigin));
+		r_script.add(BAPStatementType::Sense, sense_args(SenseFocus::Around));
+		r_script.add(BAPStatementType::Sense, sense_args(SenseFocus::ShotOrigin));
 	} else if (squad_) {
 		r_script.clear(InfantryActivity::Roam);
-		r_script.add(PlanTarget::MoveTo, move_args(MoveGoal::Squad, goal_.position));
+		r_script.add(BAPStatementType::MoveTo, move_args(MoveGoal::Squad, goal_.position));
 	} else {
 		r_script.clear(InfantryActivity::Hunt);
-		r_script.add(PlanTarget::MoveTo, move_args(MoveGoal::Hunt));
+		r_script.add(BAPStatementType::MoveTo, move_args(MoveGoal::Hunt));
 	}
 	if (body_.senses().call_medic) {
-		r_script.add(PlanTarget::Trigger, trigger_args(TriggerKind::CallMedic));
+		r_script.add(BAPStatementType::Trigger, trigger_args(TriggerKind::CallMedic));
 	}
 	return true;
 }
@@ -371,7 +371,7 @@ float BBRandom::situation() {
 
 bool BBRandom::plan(BotPlan &r_script, bool) {
 	r_script.clear(InfantryActivity::Roam);
-	r_script.add(PlanTarget::MoveTo, move_args(MoveGoal::Roam));
+	r_script.add(BAPStatementType::MoveTo, move_args(MoveGoal::Roam));
 	return true;
 }
 
@@ -381,7 +381,7 @@ float BBIdle::situation() {
 
 bool BBIdle::plan(BotPlan &r_script, bool) {
 	r_script.clear(InfantryActivity::Idle);
-	r_script.add(PlanTarget::Sense, sense_args(SenseFocus::Around));
+	r_script.add(BAPStatementType::Sense, sense_args(SenseFocus::Around));
 	return true;
 }
 
@@ -391,8 +391,8 @@ float BBMedicAssist::situation() {
 
 bool BBMedicAssist::plan(BotPlan &r_script, bool) {
 	r_script.clear(InfantryActivity::Support);
-	r_script.add(PlanTarget::MoveToObject, object_args(ObjectGoal::Patient));
-	r_script.add(PlanTarget::Trigger, trigger_args(TriggerKind::Medkit));
+	r_script.add(BAPStatementType::MoveToObject, object_args(ObjectGoal::Patient));
+	r_script.add(BAPStatementType::Trigger, trigger_args(TriggerKind::Medkit));
 	return true;
 }
 
@@ -402,8 +402,8 @@ float BBCallForMedic::situation() {
 
 bool BBCallForMedic::plan(BotPlan &r_script, bool) {
 	r_script.clear(InfantryActivity::CallMedic);
-	r_script.add(PlanTarget::Trigger, trigger_args(TriggerKind::CallMedic));
-	r_script.add(PlanTarget::MoveTo, move_args(MoveGoal::Medkit));
+	r_script.add(BAPStatementType::Trigger, trigger_args(TriggerKind::CallMedic));
+	r_script.add(BAPStatementType::MoveTo, move_args(MoveGoal::Medkit));
 	return true;
 }
 
@@ -413,8 +413,8 @@ float BBResupply::situation() {
 
 bool BBResupply::plan(BotPlan &r_script, bool) {
 	r_script.clear(InfantryActivity::Support);
-	r_script.add(PlanTarget::MoveToObject, object_args(ObjectGoal::SupplyMate));
-	r_script.add(PlanTarget::Trigger, trigger_args(TriggerKind::AmmoBag));
+	r_script.add(BAPStatementType::MoveToObject, object_args(ObjectGoal::SupplyMate));
+	r_script.add(BAPStatementType::Trigger, trigger_args(TriggerKind::AmmoBag));
 	return true;
 }
 

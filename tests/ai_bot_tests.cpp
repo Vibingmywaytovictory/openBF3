@@ -2,8 +2,7 @@
 
 #include "bf3/ai/behaviour/behaviours.h"
 #include "bf3/ai/bot/bot_main.h"
-#include "bf3/ai/plan/infantry_entries.h"
-#include "bf3/ai/plan/plan_entries.h"
+#include "bf3/ai/interpreter/bot_plan.h"
 #include "bf3/ai/strategic/strategy.h"
 #include "bf3/host/ai_bot_source.h"
 #include "bf3/host/game_server.h"
@@ -529,25 +528,23 @@ TEST_SUITE("ai-bot") {
 			const std::unique_ptr<BAPEntry> entry = create_plan_entry(name, settings);
 			REQUIRE(entry != nullptr);
 			CHECK(entry->target_id() == kind->target);
-			CHECK(infantry_entry(kind->target) != nullptr);
+			CHECK(infantry_interpreter().entry(kind->target, BotLodLevel::Full) != nullptr);
 		}
-		CHECK(infantry_entry(PlanTarget::AimAt) == nullptr);
+		CHECK(infantry_interpreter().entry(BAPStatementType::AimAt, BotLodLevel::Full) == nullptr);
 		script.clear(InfantryActivity::Fight);
 		PlanArgs a;
 		a.focus = SenseFocus::Target;
-		CHECK(script.add(PlanTarget::Sense, a));
+		CHECK(script.add(BAPStatementType::Sense, a));
 		a.trigger = TriggerKind::Aimed;
-		CHECK(script.add(PlanTarget::Trigger, a));
+		CHECK(script.add(BAPStatementType::Trigger, a));
 		a.object = ObjectGoal::Target;
-		CHECK(script.add(PlanTarget::MoveToObject, a));
+		CHECK(script.add(BAPStatementType::MoveToObject, a));
 		a.move = MoveGoal::Cover;
-		CHECK(script.add(PlanTarget::MoveTo, a));
-		CHECK_FALSE(script.add(PlanTarget::SoldierPose, a));
-		CHECK_FALSE(script.add(PlanTarget::AimAt, a));
-		CHECK(script.steps().size() == 4u);
+		CHECK(script.add(BAPStatementType::MoveTo, a));
+		CHECK_FALSE(script.add(BAPStatementType::AimAt, a));
+		CHECK(script.root().size() == 4u);
 		CHECK(script.execute(nullptr));
 		CHECK(body.calls == std::vector<std::string>{ "sense 0", "trigger 0", "move_to_object 0", "move_to 2" });
-		CHECK(script.done_steps() == 3u);
 	}
 
 	TEST_CASE("add_tdm_bots gives every bot an AiBotSource, and every activity is its last decision's winner") {

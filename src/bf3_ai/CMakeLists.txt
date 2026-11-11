@@ -18,7 +18,6 @@ add_library(bf3_ai STATIC
     include/bf3/ai/main/event_courier.h
     include/bf3/ai/main/player_courier.h
     include/bf3/ai/main/ai_main.h
-    include/bf3/ai/plan/plan_entries.h
     src/knowledge/information.cpp
     src/knowledge/physical_plug_in.cpp
     src/knowledge/unit_plug_in.cpp
@@ -37,7 +36,6 @@ add_library(bf3_ai STATIC
     src/main/event_courier.cpp
     src/main/ai_main.cpp
     src/main/bf2_ai.cpp
-    src/plan/plan_entries.cpp
 )
 target_include_directories(bf3_ai PUBLIC include)
 target_link_libraries(bf3_ai PUBLIC bf3_sim bf3_core)
@@ -98,10 +96,8 @@ target_sources(bf3_ai PRIVATE
     include/bf3/ai/bot/infantry.h
     include/bf3/ai/bot/bot_main.h
     include/bf3/ai/behaviour/behaviours.h
-    include/bf3/ai/plan/infantry_entries.h
     src/bot/bot_main.cpp
     src/behaviour/behaviours.cpp
-    src/plan/infantry_entries.cpp
 )
 
 target_sources(bf3_ai PRIVATE
@@ -145,4 +141,15 @@ target_sources(bf3_ai PRIVATE
     src/actionplan/flow_control.cpp
     include/bf3/ai/actionplan/aimer.h
     src/actionplan/aimer.cpp
+)
+
+target_sources(bf3_ai PRIVATE
+    include/bf3/ai/actionplan/infantry_actions.h
+    include/bf3/ai/interpreter/bap_interpreter.h
+    include/bf3/ai/interpreter/infantry_entries.h
+    include/bf3/ai/interpreter/bot_plan.h
+    src/actionplan/infantry_actions.cpp
+    src/interpreter/bap_interpreter.cpp
+    src/interpreter/infantry_entries.cpp
+    src/interpreter/bot_plan.cpp
 )
