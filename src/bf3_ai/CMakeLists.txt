@@ -37,7 +37,6 @@ add_library(bf3_ai STATIC
     src/main/event_courier.cpp
     src/main/ai_main.cpp
     src/main/bf2_ai.cpp
-    src/plan/plan_context.cpp
     src/plan/plan_entries.cpp
 )
 target_include_directories(bf3_ai PUBLIC include)
@@ -135,4 +134,13 @@ target_sources(bf3_ai PRIVATE
 target_sources(bf3_ai PRIVATE
     include/bf3/ai/debug/ai_console.h
     src/debug/ai_console.cpp
+)
+
+target_sources(bf3_ai PRIVATE
+    include/bf3/ai/actionplan/statement.h
+    include/bf3/ai/actionplan/variables.h
+    include/bf3/ai/actionplan/conditions.h
+    include/bf3/ai/actionplan/flow_control.h
+    src/actionplan/conditions.cpp
+    src/actionplan/flow_control.cpp
 )

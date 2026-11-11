@@ -14,7 +14,7 @@
 
 namespace bf3::ai {
 
-class BotScript;
+class BotPlan;
 struct SquadGoal;
 
 enum class InfantryBehaviour : uint8_t {
@@ -83,7 +83,7 @@ public:
 	int size() override { return 1; }
 
 	void refuse(sim::Tick p_tick) { refused_tick_ = p_tick; }
-	virtual bool plan(BotScript &r_script, bool p_was_active) = 0;
+	virtual bool plan(BotPlan &r_script, bool p_was_active) = 0;
 	virtual void deactivate() {}
 
 protected:
@@ -102,7 +102,7 @@ class BBRevive final : public BotBehaviour {
 public:
 	BBRevive(const UrgeCurve &p_curve, InfantryBody &r_body) :
 			BotBehaviour(InfantryBehaviour::Revive, p_curve, r_body) {}
-	bool plan(BotScript &r_script, bool p_was_active) override;
+	bool plan(BotPlan &r_script, bool p_was_active) override;
 
 protected:
 	float situation() override;
@@ -114,7 +114,7 @@ public:
 
 	BBFireInfantery(const UrgeCurve &p_curve, InfantryBody &r_body) :
 			BotBehaviour(InfantryBehaviour::FireInfantery, p_curve, r_body) {}
-	bool plan(BotScript &r_script, bool p_was_active) override;
+	bool plan(BotPlan &r_script, bool p_was_active) override;
 	Mode mode() const { return mode_; }
 
 protected:
@@ -131,7 +131,7 @@ public:
 
 	BBTakeCoverInfantry(const UrgeCurve &p_curve, InfantryBody &r_body) :
 			BotBehaviour(InfantryBehaviour::TakeCoverInfantry, p_curve, r_body) {}
-	bool plan(BotScript &r_script, bool p_was_active) override;
+	bool plan(BotPlan &r_script, bool p_was_active) override;
 	void deactivate() override { phase_ = Phase::None; }
 	void reset(Bot *p_bot) override;
 	Phase phase() const { return phase_; }
@@ -147,7 +147,7 @@ private:
 class BBAvoid final : public BotBehaviour {
 public:
 	BBAvoid(const UrgeCurve &p_curve, InfantryBody &r_body) : BotBehaviour(InfantryBehaviour::Avoid, p_curve, r_body) {}
-	bool plan(BotScript &r_script, bool p_was_active) override;
+	bool plan(BotPlan &r_script, bool p_was_active) override;
 
 protected:
 	float situation() override;
@@ -159,7 +159,7 @@ public:
 			const int &p_ordered) :
 			BotBehaviour(InfantryBehaviour::MoveTo, p_curve, r_body), goal_(p_goal), tuning_(p_tuning),
 			ordered_(p_ordered) {}
-	bool plan(BotScript &r_script, bool p_was_active) override;
+	bool plan(BotPlan &r_script, bool p_was_active) override;
 	bool following_squad() const { return squad_; }
 	bool holding() const { return squad_ && hold_; }
 
@@ -178,7 +178,7 @@ class BBRandom final : public BotBehaviour {
 public:
 	BBRandom(const UrgeCurve &p_curve, InfantryBody &r_body) :
 			BotBehaviour(InfantryBehaviour::Random, p_curve, r_body) {}
-	bool plan(BotScript &r_script, bool p_was_active) override;
+	bool plan(BotPlan &r_script, bool p_was_active) override;
 
 protected:
 	float situation() override;
@@ -187,7 +187,7 @@ protected:
 class BBIdle final : public BotBehaviour {
 public:
 	BBIdle(const UrgeCurve &p_curve, InfantryBody &r_body) : BotBehaviour(InfantryBehaviour::Idle, p_curve, r_body) {}
-	bool plan(BotScript &r_script, bool p_was_active) override;
+	bool plan(BotPlan &r_script, bool p_was_active) override;
 
 protected:
 	float situation() override;
@@ -197,7 +197,7 @@ class BBMedicAssist final : public BotBehaviour {
 public:
 	BBMedicAssist(const UrgeCurve &p_curve, InfantryBody &r_body) :
 			BotBehaviour(InfantryBehaviour::MedicAssist, p_curve, r_body) {}
-	bool plan(BotScript &r_script, bool p_was_active) override;
+	bool plan(BotPlan &r_script, bool p_was_active) override;
 
 protected:
 	float situation() override;
@@ -207,7 +207,7 @@ class BBCallForMedic final : public BotBehaviour {
 public:
 	BBCallForMedic(const UrgeCurve &p_curve, InfantryBody &r_body) :
 			BotBehaviour(InfantryBehaviour::CallForMedic, p_curve, r_body) {}
-	bool plan(BotScript &r_script, bool p_was_active) override;
+	bool plan(BotPlan &r_script, bool p_was_active) override;
 
 protected:
 	float situation() override;
@@ -217,7 +217,7 @@ class BBResupply final : public BotBehaviour {
 public:
 	BBResupply(const UrgeCurve &p_curve, InfantryBody &r_body) :
 			BotBehaviour(InfantryBehaviour::Resupply, p_curve, r_body) {}
-	bool plan(BotScript &r_script, bool p_was_active) override;
+	bool plan(BotPlan &r_script, bool p_was_active) override;
 
 protected:
 	float situation() override;

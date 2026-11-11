@@ -38,14 +38,14 @@ const char *infantry_activity_name(InfantryActivity p_activity) {
 	return "?";
 }
 
-void BotScript::clear(InfantryActivity p_activity) {
+void BotPlan::clear(InfantryActivity p_activity) {
 	activity_ = p_activity;
 	count_ = 0;
 	cursor_ = 0;
 	done_ = 0;
 }
 
-bool BotScript::add(PlanTarget p_target, const PlanArgs &p_args) {
+bool BotPlan::add(PlanTarget p_target, const PlanArgs &p_args) {
 	BAPEntry *const entry = infantry_entry(p_target);
 	if (entry == nullptr || count_ >= kMaxSteps) {
 		return false;
@@ -54,7 +54,7 @@ bool BotScript::add(PlanTarget p_target, const PlanArgs &p_args) {
 	return true;
 }
 
-bool BotScript::execute(Bot *p_bot) {
+bool BotPlan::execute(Bot *p_bot) {
 	done_ = 0;
 	for (cursor_ = 0; cursor_ < count_; ++cursor_) {
 		bool done = false;
@@ -69,32 +69,32 @@ bool BotScript::execute(Bot *p_bot) {
 	return true;
 }
 
-bool EntryInfanteryMoveTo::execute(BotScript *p_script, Bot *, bool &r_first, bool &r_second) {
+bool EntryInfanteryMoveTo::execute(BotPlan *p_script, Bot *, bool &r_first, bool &r_second) {
 	const PlanArgs &a = p_script->current();
 	r_first = p_script->body().move_to(a.move, a.point);
 	r_second = false;
 	return true;
 }
 
-bool EntryInfanteryMoveToObject::execute(BotScript *p_script, Bot *, bool &r_first, bool &r_second) {
+bool EntryInfanteryMoveToObject::execute(BotPlan *p_script, Bot *, bool &r_first, bool &r_second) {
 	r_first = p_script->body().move_to_object(p_script->current().object);
 	r_second = false;
 	return true;
 }
 
-bool EntrySoldierPose::execute(BotScript *p_script, Bot *, bool &r_first, bool &r_second) {
+bool EntrySoldierPose::execute(BotPlan *p_script, Bot *, bool &r_first, bool &r_second) {
 	r_first = p_script->body().soldier_pose(p_script->current().pose);
 	r_second = false;
 	return true;
 }
 
-bool EntryTrigger::execute(BotScript *p_script, Bot *, bool &r_first, bool &r_second) {
+bool EntryTrigger::execute(BotPlan *p_script, Bot *, bool &r_first, bool &r_second) {
 	r_first = p_script->body().trigger(p_script->current().trigger);
 	r_second = false;
 	return true;
 }
 
-bool EntrySense::execute(BotScript *p_script, Bot *, bool &r_first, bool &r_second) {
+bool EntrySense::execute(BotPlan *p_script, Bot *, bool &r_first, bool &r_second) {
 	r_first = p_script->body().sense(p_script->current().focus);
 	r_second = false;
 	return true;

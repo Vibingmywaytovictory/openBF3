@@ -1,9 +1,9 @@
 #pragma once
 
+#include "bf3/ai/actionplan/variables.h"
 #include "bf3/ai/main/ai_settings.h"
 
 #include <cstdint>
-#include <list>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -11,22 +11,7 @@
 namespace bf3::ai {
 
 class Bot;
-class BotScript;
-
-class BotScriptVariable {
-public:
-	virtual ~BotScriptVariable() = default;
-};
-
-class BAPContext {
-public:
-	void add_variable(std::unique_ptr<BotScriptVariable> p_variable);
-	size_t size() const { return variables_.size(); }
-	void clear();
-
-private:
-	std::list<std::unique_ptr<BotScriptVariable>> variables_;
-};
+class BotPlan;
 
 enum class PlanTarget : int {
 	AimAt = 6,
@@ -47,19 +32,19 @@ enum class PlanTarget : int {
 class BAPEntry {
 public:
 	virtual ~BAPEntry() = default;
-	virtual bool execute(BotScript *p_script, Bot *p_bot, bool &r_first, bool &r_second) = 0;
+	virtual bool execute(BotPlan *p_script, Bot *p_bot, bool &r_first, bool &r_second) = 0;
 	virtual PlanTarget target_id() const = 0;
 };
 
 class EntryInfanteryMoveToDirection final : public BAPEntry {
 public:
-	bool execute(BotScript *p_script, Bot *p_bot, bool &r_first, bool &r_second) override;
+	bool execute(BotPlan *p_script, Bot *p_bot, bool &r_first, bool &r_second) override;
 	PlanTarget target_id() const override { return PlanTarget::MoveToDirection; }
 };
 
 class EntryCarMoveToDirection final : public BAPEntry {
 public:
-	bool execute(BotScript *p_script, Bot *p_bot, bool &r_first, bool &r_second) override;
+	bool execute(BotPlan *p_script, Bot *p_bot, bool &r_first, bool &r_second) override;
 	PlanTarget target_id() const override { return PlanTarget::MoveToDirection; }
 };
 

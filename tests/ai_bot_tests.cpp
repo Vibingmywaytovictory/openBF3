@@ -517,10 +517,10 @@ TEST_SUITE("ai-bot") {
 		CHECK(sloped.behaviour() == InfantryBehaviour::FireInfantery);
 	}
 
-	TEST_CASE("infantry plan entries: the five bodies exist and drive the body through a BotScript") {
+	TEST_CASE("infantry plan entries: the five bodies exist and drive the body through a BotPlan") {
 		AiSettings settings;
 		FakeBody body;
-		BotScript script(body);
+		BotPlan script(body);
 		for (const char *name : { "EntryInfanteryMoveTo", "EntryInfanteryMoveToObject", "EntrySoldierPose",
 					 "EntryTrigger", "EntrySense" }) {
 			const PlanEntryKind *kind = find_plan_entry_kind(name);

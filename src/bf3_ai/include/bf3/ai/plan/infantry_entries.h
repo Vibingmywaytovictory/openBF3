@@ -25,11 +25,11 @@ struct PlanStep {
 	PlanArgs args;
 };
 
-class BotScript {
+class BotPlan {
 public:
 	static constexpr size_t kMaxSteps = 4;
 
-	explicit BotScript(InfantryBody &r_body) : body_(r_body) {}
+	explicit BotPlan(InfantryBody &r_body) : body_(r_body) {}
 
 	void clear(InfantryActivity p_activity);
 	bool add(PlanTarget p_target, const PlanArgs &p_args);
@@ -52,31 +52,31 @@ private:
 
 class EntryInfanteryMoveTo final : public BAPEntry {
 public:
-	bool execute(BotScript *p_script, Bot *p_bot, bool &r_first, bool &r_second) override;
+	bool execute(BotPlan *p_script, Bot *p_bot, bool &r_first, bool &r_second) override;
 	PlanTarget target_id() const override { return PlanTarget::MoveTo; }
 };
 
 class EntryInfanteryMoveToObject final : public BAPEntry {
 public:
-	bool execute(BotScript *p_script, Bot *p_bot, bool &r_first, bool &r_second) override;
+	bool execute(BotPlan *p_script, Bot *p_bot, bool &r_first, bool &r_second) override;
 	PlanTarget target_id() const override { return PlanTarget::MoveToObject; }
 };
 
 class EntrySoldierPose final : public BAPEntry {
 public:
-	bool execute(BotScript *p_script, Bot *p_bot, bool &r_first, bool &r_second) override;
+	bool execute(BotPlan *p_script, Bot *p_bot, bool &r_first, bool &r_second) override;
 	PlanTarget target_id() const override { return PlanTarget::SoldierPose; }
 };
 
 class EntryTrigger final : public BAPEntry {
 public:
-	bool execute(BotScript *p_script, Bot *p_bot, bool &r_first, bool &r_second) override;
+	bool execute(BotPlan *p_script, Bot *p_bot, bool &r_first, bool &r_second) override;
 	PlanTarget target_id() const override { return PlanTarget::Trigger; }
 };
 
 class EntrySense final : public BAPEntry {
 public:
-	bool execute(BotScript *p_script, Bot *p_bot, bool &r_first, bool &r_second) override;
+	bool execute(BotPlan *p_script, Bot *p_bot, bool &r_first, bool &r_second) override;
 	PlanTarget target_id() const override { return PlanTarget::Sense; }
 };
 

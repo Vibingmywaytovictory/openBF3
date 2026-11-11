@@ -91,7 +91,7 @@ public:
 
 	InfantryBehaviour behaviour() const;
 	InfantryActivity activity() const { return plan_.activity(); }
-	const BotScript &plan() const { return plan_; }
+	const BotPlan &plan() const { return plan_; }
 	const BotMainStats &stats() const { return stats_; }
 	float behaviour_urgency(InfantryBehaviour p_behaviour) const;
 	float weighted_urgency(InfantryBehaviour p_behaviour) const;
@@ -116,7 +116,7 @@ private:
 	const float *current_orders_ = nullptr;
 	std::array<float, kInfantryBehaviourCount> behaviour_urgencies_{};
 	std::unique_ptr<UrgencyMerger> merger_;
-	BotScript plan_;
+	BotPlan plan_;
 	BotBehaviour *current_ = nullptr;
 	float chosen_urgency_ = 0.0f;
 	InfantrySenses decided_senses_;

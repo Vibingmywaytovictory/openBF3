@@ -187,7 +187,7 @@ float BBRevive::situation() {
 	return body_.senses().revive_target ? 1.0f : 0.0f;
 }
 
-bool BBRevive::plan(BotScript &r_script, bool) {
+bool BBRevive::plan(BotPlan &r_script, bool) {
 	r_script.clear(InfantryActivity::Revive);
 	r_script.add(PlanTarget::MoveToObject, object_args(ObjectGoal::Corpse));
 	r_script.add(PlanTarget::SoldierPose, pose_args(PoseRequest::NearCorpse));
@@ -217,7 +217,7 @@ float BBFireInfantery::situation() {
 	return 0.0f;
 }
 
-bool BBFireInfantery::plan(BotScript &r_script, bool) {
+bool BBFireInfantery::plan(BotPlan &r_script, bool) {
 	switch (mode_) {
 		case Mode::Throw:
 			if (!body_.throw_grenade()) {
@@ -276,7 +276,7 @@ float BBTakeCoverInfantry::situation() {
 	return 0.0f;
 }
 
-bool BBTakeCoverInfantry::plan(BotScript &r_script, bool) {
+bool BBTakeCoverInfantry::plan(BotPlan &r_script, bool) {
 	switch (want_) {
 		case Want::Start:
 			if (!body_.take_cover()) {
@@ -309,7 +309,7 @@ float BBAvoid::situation() {
 	return s.shot_at && !s.enemy_visible ? 1.0f : 0.0f;
 }
 
-bool BBAvoid::plan(BotScript &r_script, bool) {
+bool BBAvoid::plan(BotPlan &r_script, bool) {
 	const bool hunt = body_.senses().hunt_target;
 	r_script.clear(hunt ? InfantryActivity::Hunt : InfantryActivity::Roam);
 	r_script.add(PlanTarget::MoveTo, move_args(hunt ? MoveGoal::Hunt : MoveGoal::Roam));
@@ -347,7 +347,7 @@ float BBMoveTo::situation() {
 	return x;
 }
 
-bool BBMoveTo::plan(BotScript &r_script, bool) {
+bool BBMoveTo::plan(BotPlan &r_script, bool) {
 	if (holding()) {
 		r_script.clear(InfantryActivity::Idle);
 		r_script.add(PlanTarget::Sense, sense_args(SenseFocus::Around));
@@ -369,7 +369,7 @@ float BBRandom::situation() {
 	return body_.senses().navigable ? 1.0f : 0.0f;
 }
 
-bool BBRandom::plan(BotScript &r_script, bool) {
+bool BBRandom::plan(BotPlan &r_script, bool) {
 	r_script.clear(InfantryActivity::Roam);
 	r_script.add(PlanTarget::MoveTo, move_args(MoveGoal::Roam));
 	return true;
@@ -379,7 +379,7 @@ float BBIdle::situation() {
 	return 1.0f;
 }
 
-bool BBIdle::plan(BotScript &r_script, bool) {
+bool BBIdle::plan(BotPlan &r_script, bool) {
 	r_script.clear(InfantryActivity::Idle);
 	r_script.add(PlanTarget::Sense, sense_args(SenseFocus::Around));
 	return true;
@@ -389,7 +389,7 @@ float BBMedicAssist::situation() {
 	return body_.senses().heal_target ? 1.0f : 0.0f;
 }
 
-bool BBMedicAssist::plan(BotScript &r_script, bool) {
+bool BBMedicAssist::plan(BotPlan &r_script, bool) {
 	r_script.clear(InfantryActivity::Support);
 	r_script.add(PlanTarget::MoveToObject, object_args(ObjectGoal::Patient));
 	r_script.add(PlanTarget::Trigger, trigger_args(TriggerKind::Medkit));
@@ -400,7 +400,7 @@ float BBCallForMedic::situation() {
 	return body_.senses().call_medic ? 1.0f : 0.0f;
 }
 
-bool BBCallForMedic::plan(BotScript &r_script, bool) {
+bool BBCallForMedic::plan(BotPlan &r_script, bool) {
 	r_script.clear(InfantryActivity::CallMedic);
 	r_script.add(PlanTarget::Trigger, trigger_args(TriggerKind::CallMedic));
 	r_script.add(PlanTarget::MoveTo, move_args(MoveGoal::Medkit));
@@ -411,7 +411,7 @@ float BBResupply::situation() {
 	return body_.senses().supply_target ? 1.0f : 0.0f;
 }
 
-bool BBResupply::plan(BotScript &r_script, bool) {
+bool BBResupply::plan(BotPlan &r_script, bool) {
 	r_script.clear(InfantryActivity::Support);
 	r_script.add(PlanTarget::MoveToObject, object_args(ObjectGoal::SupplyMate));
 	r_script.add(PlanTarget::Trigger, trigger_args(TriggerKind::AmmoBag));

@@ -58,11 +58,11 @@ constexpr PlanEntryKind kKinds[] = {
 
 }
 
-bool EntryInfanteryMoveToDirection::execute(BotScript *, Bot *, bool &, bool &) {
+bool EntryInfanteryMoveToDirection::execute(BotPlan *, Bot *, bool &, bool &) {
 	return true;
 }
 
-bool EntryCarMoveToDirection::execute(BotScript *, Bot *, bool &, bool &) {
+bool EntryCarMoveToDirection::execute(BotPlan *, Bot *, bool &, bool &) {
 	return true;
 }
 
