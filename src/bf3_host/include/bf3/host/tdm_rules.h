@@ -164,7 +164,7 @@ public:
 	void on_disconnect(uint8_t p_slot);
 	bool level_ended() const;
 	void restart_in_place(uint32_t p_tick, std::vector<RulesOrder> &r_orders);
-	void on_spawned(uint8_t p_slot, uint32_t p_tick);
+	void on_spawned(uint8_t p_slot, uint32_t p_tick, bool p_revived);
 	SpawnRefusal request_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_spawn_choice, uint32_t p_tick);
 	bool request_suicide(uint8_t p_slot);
 	bool request_revive(uint8_t p_slot);

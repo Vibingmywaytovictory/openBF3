@@ -193,8 +193,8 @@ TEST_SUITE("logic-conquest") {
 		REQUIRE(m.natives->player_enter_team(1, true, 2, *m.runtime).ok());
 		std::vector<ConquestPlayerSample> players{ { 0, 1, true, true, us_hq->params.position },
 			{ 1, 2, true, true, ru_hq->params.position } };
-		REQUIRE(m.natives->player_spawned(0, 1, *m.runtime).ok());
-		REQUIRE(m.natives->player_spawned(1, 2, *m.runtime).ok());
+		REQUIRE(m.natives->player_spawned(0, 1, false, *m.runtime).ok());
+		REQUIRE(m.natives->player_spawned(1, 2, false, *m.runtime).ok());
 		for (int i = 0; i < 10 && m.natives->phase() != RoundPhase::InRound; ++i) {
 			m.step(players);
 		}
@@ -216,7 +216,7 @@ TEST_SUITE("logic-conquest") {
 			REQUIRE(shown.has_value());
 			CHECK(shown->i == 150);
 		}
-		REQUIRE(m.natives->player_spawned(1, 2, *m.runtime).ok());
+		REQUIRE(m.natives->player_spawned(1, 2, false, *m.runtime).ok());
 		CHECK(c.tickets(2) == 149);
 		uint64_t capture_ticks_total = 0;
 		for (const ConquestPointData &flag : l->params->points) {

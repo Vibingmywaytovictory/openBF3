@@ -1368,7 +1368,7 @@ TEST_SUITE("host-tdm-server") {
 			CHECK(r.request_spawn(0, 1, 0, 12) == SpawnRefusal::RateLimited);
 			CHECK(r.request_spawn(0, 1, 0, 13) == SpawnRefusal::Alive);
 			CHECK(r.request_spawn(1, 1, 0, 14) == SpawnRefusal::Phase);
-			r.on_spawned(0, 20);
+			r.on_spawned(0, 20, false);
 			CHECK(r.kit_of(0) == 1);
 			CHECK(r.request_spawn(0, 1, 0, 21) == SpawnRefusal::Alive);
 			CHECK_FALSE(r.respawn_tick(0, 100).has_value());
@@ -3521,6 +3521,58 @@ TEST_SUITE("host-tdm-conquest") {
 		CHECK(own == 1u);
 		CHECK(cq.stats().deserter_kills == 1u);
 		CHECK(m->rules().stats().suicides == suicides0 + 1u);
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+
+	TEST_CASE("conquest: a revive costs no ticket, a redeploy costs one (M-CQ2 rule 4)") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		std::unique_ptr<Match> m = start_match(*level, true, 53u, 0, 2);
+		for (int i = 0; i < 3; ++i) {
+			m->bot();
+		}
+		tdm::ScriptedPeer &p = m->join("lazarus");
+		p.ready();
+		REQUIRE(wait_in_round(*m));
+		p.spawn_request(1);
+		REQUIRE(m->until([&] { return is_alive(m->state(p.slot())); }, 240));
+		m->ticks(30);
+		const sim::logic::ConquestNatives &cq = conquest_of(*m);
+		const uint8_t team = m->rules().team_of(uint8_t(p.slot()));
+		const int64_t spawned = cq.tickets(team);
+		CHECK(spawned == cq.initial_tickets(team));
+		m->server.on_receive(p.peer(), net::kChannelReliable, net::encode_suicide_request());
+		m->ticks(3);
+		REQUIRE_FALSE(is_alive(m->state(p.slot())));
+		const int64_t dead = cq.tickets(team);
+		net::DebugRequest q;
+		q.kind = net::DebugKind::Revive;
+		q.id = m->next_debug++;
+		p.debug(q);
+		m->ticks(3);
+		REQUIRE(is_alive(m->state(p.slot())));
+		REQUIRE(p.spawned.back().revived);
+		const int64_t revived = cq.tickets(team);
+		m->ticks(30);
+		m->server.on_receive(p.peer(), net::kChannelReliable, net::encode_suicide_request());
+		m->ticks(3);
+		REQUIRE_FALSE(is_alive(m->state(p.slot())));
+		const uint32_t earliest = m->rules().earliest_respawn(uint8_t(p.slot()));
+		REQUIRE(m->until([&] { return m->now() >= earliest; }, 1200));
+		p.spawn_request(1);
+		REQUIRE(m->until([&] { return is_alive(m->state(p.slot())); }, 240));
+		REQUIRE_FALSE(p.spawned.back().revived);
+		const int64_t redeployed = cq.tickets(team);
+		std::printf("conquest: team %u tickets: spawned %lld, dead %lld, revived %lld, redeployed %lld; respawn costs "
+					"%llu\n",
+				unsigned(team), (long long)spawned, (long long)dead, (long long)revived, (long long)redeployed,
+				(unsigned long long)cq.stats().ticket_respawn_costs);
+		CHECK(dead == spawned);
+		CHECK(revived == dead);
+		CHECK(redeployed == revived - 1);
+		CHECK(cq.stats().ticket_respawn_costs == 1u);
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 }

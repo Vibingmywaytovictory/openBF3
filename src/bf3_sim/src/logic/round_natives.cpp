@@ -493,9 +493,9 @@ core::Status RoundNatives::player_leave(uint8_t p_slot, LogicRuntime &r_runtime)
 	return core::Status::success();
 }
 
-core::Status RoundNatives::player_spawned(uint8_t p_slot, uint8_t p_team, LogicRuntime &r_runtime) {
+core::Status RoundNatives::player_spawned(uint8_t p_slot, uint8_t p_team, bool p_revived, LogicRuntime &r_runtime) {
 	State &s = *state_;
-	if (s.conquest) {
+	if (s.conquest && !p_revived) {
 		s.conquest->respawned(p_slot, p_team);
 	}
 	for (const uint32_t h : s.humans) {

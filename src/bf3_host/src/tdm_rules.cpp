@@ -890,7 +890,7 @@ void TdmRules::on_disconnect(uint8_t p_slot) {
 	m.slots[p_slot] = Impl::Slot();
 }
 
-void TdmRules::on_spawned(uint8_t p_slot, uint32_t p_tick) {
+void TdmRules::on_spawned(uint8_t p_slot, uint32_t p_tick, bool p_revived) {
 	Impl &m = *impl_;
 	if (p_slot >= m.slots.size() || !m.slots[p_slot].connected) {
 		return;
@@ -908,7 +908,7 @@ void TdmRules::on_spawned(uint8_t p_slot, uint32_t p_tick) {
 	s.row_kit = kit_of(p_slot) != kKeepKit ? kit_of(p_slot) : s.row_kit;
 	m.remove_downed(p_slot);
 	if (m.natives && m.runtime && !m.faulted) {
-		const core::Status st = m.natives->player_spawned(p_slot, m.team_of(p_slot), *m.runtime);
+		const core::Status st = m.natives->player_spawned(p_slot, m.team_of(p_slot), p_revived, *m.runtime);
 		if (!st.ok()) {
 			m.fault(st.error());
 		}

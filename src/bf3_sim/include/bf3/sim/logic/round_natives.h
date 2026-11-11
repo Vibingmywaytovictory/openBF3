@@ -70,7 +70,7 @@ public:
 
 	core::Status player_enter(uint8_t p_slot, bool p_bot, LogicRuntime &r_runtime);
 	core::Status player_leave(uint8_t p_slot, LogicRuntime &r_runtime);
-	core::Status player_spawned(uint8_t p_slot, uint8_t p_team, LogicRuntime &r_runtime);
+	core::Status player_spawned(uint8_t p_slot, uint8_t p_team, bool p_revived, LogicRuntime &r_runtime);
 
 	core::Status player_died(uint8_t p_slot, uint8_t p_team, int p_killer, uint8_t p_killer_team, LogicRuntime &r_runtime);
 	core::Status kill_undone(uint8_t p_killer_team, LogicRuntime &r_runtime);

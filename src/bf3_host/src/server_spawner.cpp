@@ -134,7 +134,7 @@ void Spawner::enter_at(size_t p_slot, const sim::SpawnPoint &p_point, sim::Tick 
 	}
 	soldiers_.enter(p_slot, r.state);
 	respawns_[p_slot].wanted = false;
-	on_spawn(p_slot, p_tick);
+	on_spawn(p_slot, p_tick, false);
 	if (s.remote) {
 		net::Spawned m;
 		m.slot = uint8_t(p_slot);
@@ -168,7 +168,7 @@ core::Status Spawner::place(size_t p_slot, const sim::Vec3 &p_position, uint16_t
 	} else {
 		state.events = uint16_t(state.events | sim::soldier_events::kSpawned);
 		soldiers_.enter(p_slot, state);
-		on_spawn(p_slot, p_tick);
+		on_spawn(p_slot, p_tick, false);
 	}
 	return core::Status::success();
 }
@@ -258,7 +258,7 @@ core::Status Spawner::revive(size_t p_slot, const sim::Vec3 &p_position, uint16_
 	state.events = uint16_t(state.events | sim::soldier_events::kSpawned);
 	soldiers_.enter(p_slot, state);
 	respawns_[p_slot] = Respawn();
-	on_spawn(p_slot, p_tick);
+	on_spawn(p_slot, p_tick, true);
 	const Seat &s = slots_[p_slot];
 	if (s.remote) {
 		net::Spawned m;
@@ -281,7 +281,7 @@ void Spawner::unspawn(size_t p_slot) {
 	combat_.disarm(p_slot);
 }
 
-void Spawner::on_spawn(size_t p_slot, sim::Tick p_tick) {
+void Spawner::on_spawn(size_t p_slot, sim::Tick p_tick, bool p_revived) {
 	if (p_slot >= slots_.size()) {
 		return;
 	}
@@ -293,7 +293,7 @@ void Spawner::on_spawn(size_t p_slot, sim::Tick p_tick) {
 		if (const uint8_t k = rules->kit_of(uint8_t(p_slot)); k != kKeepKit) {
 			combat_.set_kit(p_slot, k);
 		}
-		rules->on_spawned(uint8_t(p_slot), p_tick);
+		rules->on_spawned(uint8_t(p_slot), p_tick, p_revived);
 	} else if (!slots_[p_slot].remote) {
 		combat_.set_kit(p_slot, uint8_t(p_slot % kKitCount));
 	}
