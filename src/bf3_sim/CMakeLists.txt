@@ -169,3 +169,8 @@ target_sources(bf3_sim PRIVATE
     src/spotting.cpp
     src/commo.cpp
 )
+
+target_sources(bf3_sim PRIVATE
+    include/bf3/sim/logic/conquest_rules.h
+    src/logic/conquest_rules.cpp
+)
