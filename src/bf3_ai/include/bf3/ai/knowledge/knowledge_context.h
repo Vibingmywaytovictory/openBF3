@@ -25,15 +25,23 @@ public:
 	virtual float altitude(const Vec3 &p_position) const = 0;
 };
 
+class InformationEnvironmentModifiers {
+public:
+	virtual ~InformationEnvironmentModifiers() = default;
+	virtual void add_and_update_position(int p_side, bool p_unit, uint32_t p_handle) = 0;
+};
+
 struct KnowledgeContext {
 	InformationManager *information = nullptr;
 	WeaponInfoManager *weapons = nullptr;
 	const InformationFactory *factory = nullptr;
 	const AiTimer *timer = nullptr;
 	const AltitudeSource *altitude = nullptr;
+	InformationEnvironmentModifiers *environment = nullptr;
 	int infantry_map = 0;
 
 	sim::Tick now() const { return timer ? timer->game_tick() : 0; }
+	double tick_seconds() const { return timer ? timer->tick_seconds() : 0.0; }
 };
 
 enum class PlugInType : int { Physical = 0, Cover = 1, Mobile = 2, Unit = 3, Armament = 4, ControlInfo = 5 };

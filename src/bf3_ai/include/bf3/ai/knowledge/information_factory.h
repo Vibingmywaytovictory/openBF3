@@ -26,6 +26,8 @@ public:
 
 	uint32_t request_information_real(uint32_t p_handle, AiObject *p_object, uint32_t p_types,
 			float p_basic_temperature, sim::Tick p_time, sim::Tick p_allowed_time_diff) const;
+	uint32_t request_information_known(uint32_t p_handle, AiObject *p_object, uint32_t p_types, sim::Tick p_time,
+			float p_degeneration, float p_basic_temperature, sim::Tick p_allowed_time_diff, int p_owner_side) const;
 	bool request_information_plug_in(uint32_t p_handle, PlugInRequest p_type, bool p_real) const;
 	bool request_information_plug_in(uint32_t p_source, uint32_t p_target, PlugInRequest p_type, bool p_real) const;
 	bool update_information_plug_in(uint32_t p_handle, PlugInRequest p_type) const;

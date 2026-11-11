@@ -111,3 +111,13 @@ target_sources(bf3_ai PRIVATE
     src/strategic/strategy.cpp
     src/squad/orders.cpp
 )
+
+target_sources(bf3_ai PRIVATE
+    include/bf3/ai/knowledge/fire_object.h
+    src/knowledge/fire_object.cpp
+)
+
+target_sources(bf3_ai PRIVATE
+    src/knowledge/information_known.cpp
+    src/knowledge/known_plug_ins.cpp
+)

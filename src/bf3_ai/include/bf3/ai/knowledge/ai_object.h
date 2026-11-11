@@ -21,6 +21,36 @@ inline constexpr uint32_t kNoHandle = 0xFFFFFFFFu;
 
 enum class SoldierPose : uint8_t { NotAvailable = 0, Standing = 1, Crouching = 2, Lying = 3, Swimming = 4 };
 
+enum class InformationType : uint8_t {
+	Production = 0,
+	Ammunition = 1,
+	Repair = 2,
+	Unit = 3,
+	Air = 4,
+	Helicopter = 5,
+	Ground = 6,
+	Naval = 7,
+	Controlpoint = 8,
+	Radar = 9,
+	Airfield = 10,
+	Transportation = 11,
+	Artillery = 12,
+	Fixed = 13,
+	Cover = 14,
+	Mobile = 15,
+	Unmanned = 16,
+	LowPriority = 17,
+	Structure = 18,
+	Biological = 19,
+	Vegetation = 20,
+	Soldier = 21,
+	ObstructedView = 22,
+	NoTemperature = 23,
+	HasWreck = 24,
+	Obstacle = 25,
+	HasCarHorn = 26,
+};
+
 class AiObject;
 
 class AiWeapon {
@@ -90,6 +120,68 @@ public:
 	virtual bool rearm(AiWeapon *p_weapon, float p_amount, int p_side) = 0;
 	virtual bool projectile_position(Vec3 &r_out) const = 0;
 	virtual bool projectile_speed(Vec3 &r_out) const = 0;
+};
+
+enum class PlayerInputMap : uint8_t {
+	Yaw = 0,
+	Pitch = 1,
+	Roll = 2,
+	Throttle = 3,
+	MouseLookX = 4,
+	MouseLookY = 5,
+	None = 64
+};
+
+class AiObjectControlInfo {
+public:
+	virtual ~AiObjectControlInfo() = default;
+	virtual uint64_t drive_controls() const = 0;
+	virtual PlayerInputMap drive_throttle_control() const = 0;
+	virtual PlayerInputMap drive_turn_control() const = 0;
+	virtual PlayerInputMap drive_roll_control() const = 0;
+	virtual PlayerInputMap drive_pitch_control() const = 0;
+	virtual uint64_t aim_controls() const = 0;
+	virtual PlayerInputMap aim_vertical_control() const = 0;
+	virtual PlayerInputMap aim_horizontal_control() const = 0;
+	virtual PlayerInputMap aim_throttle_control() const = 0;
+	virtual PlayerInputMap aim_roll_control() const = 0;
+	virtual uint64_t look_controls() const = 0;
+	virtual PlayerInputMap look_vertical_control() const = 0;
+	virtual PlayerInputMap look_horizontal_control() const = 0;
+	virtual float throttle_sensitivity() const = 0;
+	virtual float pitch_sensitivity() const = 0;
+	virtual float roll_sensitivity() const = 0;
+	virtual float yaw_sensitivity() const = 0;
+	virtual float look_vertical_sensitivity() const = 0;
+	virtual float look_horizontal_sensitivity() const = 0;
+	virtual float proportional_constant() const = 0;
+	virtual float derivative_constant() const = 0;
+	virtual float angle_speed_constant() const = 0;
+	virtual float throttle_look_ahead() const = 0;
+	virtual float pitch_look_ahead() const = 0;
+	virtual float roll_look_ahead() const = 0;
+	virtual float yaw_look_ahead() const = 0;
+	virtual float look_vertical_look_ahead() const = 0;
+	virtual float look_horizontal_look_ahead() const = 0;
+	virtual float throttle_scale() const = 0;
+	virtual float pitch_scale() const = 0;
+	virtual float roll_scale() const = 0;
+	virtual float yaw_scale() const = 0;
+	virtual float look_vertical_scale() const = 0;
+	virtual float look_horizontal_scale() const = 0;
+	virtual float max_speed_bumpiness_fall_off() const = 0;
+	virtual float max_climb_angle() const = 0;
+	virtual float max_roll_angle() const = 0;
+	virtual float camera_relative_dof_rotation_offset() const = 0;
+	virtual const Vec3 &camera_relative_min_rotation() const = 0;
+	virtual const Vec3 &camera_relative_max_rotation() const = 0;
+	virtual Vec3 camera_relative_rotation() const = 0;
+	virtual const Transform &camera_transformation() const = 0;
+	virtual Transform camera_base_transformation() const = 0;
+	virtual bool validate_camera_direction(const Vec3 &p_direction) const = 0;
+	virtual bool validate_camera_direction_yaw(const Vec3 &p_direction) const = 0;
+	virtual bool validate_camera_direction_pitch(const Vec3 &p_direction) const = 0;
+	virtual bool validate_camera_direction_by_pos(const Vec3 &p_position) const = 0;
 };
 
 class AiObjectCover {
@@ -183,6 +275,7 @@ public:
 	virtual AiObjectMobile *mobile() const = 0;
 	virtual AiObjectPhysical *physical() const = 0;
 	virtual AiObjectUnit *unit() const = 0;
+	virtual AiObjectControlInfo *control_info() const { return nullptr; }
 	virtual uint32_t information(int p_side) const = 0;
 	virtual const Vec3 &position() const = 0;
 	virtual const Transform &transformation() const = 0;

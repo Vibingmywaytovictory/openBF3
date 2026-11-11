@@ -16,6 +16,14 @@ uint32_t InformationFactory::request_information_real(uint32_t p_handle, AiObjec
 					p_object, p_types, p_basic_temperature, p_time, p_allowed_time_diff, context_));
 }
 
+uint32_t InformationFactory::request_information_known(uint32_t p_handle, AiObject *p_object, uint32_t p_types,
+		sim::Tick p_time, float p_degeneration, float p_basic_temperature, sim::Tick p_allowed_time_diff,
+		int p_owner_side) const {
+	return register_information(p_handle,
+			std::make_unique<InformationKnown>(p_object, p_types, p_time, p_degeneration, p_basic_temperature,
+					p_allowed_time_diff, p_owner_side, context_));
+}
+
 bool InformationFactory::request_information_plug_in(uint32_t p_handle, PlugInRequest p_type, bool p_real) const {
 	return request_information_plug_in(p_handle, p_handle, p_type, p_real);
 }
@@ -32,10 +40,11 @@ bool InformationFactory::request_information_plug_in(
 	}
 	switch (p_type) {
 		case PlugInRequest::Armament:
-			if (!p_real) {
-				return false;
+			if (p_real) {
+				target->set_armament(std::make_unique<IPIArmamentReal>(source));
+			} else {
+				target->set_armament(std::make_unique<IPIArmamentKnown>(source));
 			}
-			target->set_armament(std::make_unique<IPIArmamentReal>(source));
 			return true;
 		case PlugInRequest::ControlInfo:
 			target->set_control_info(std::make_unique<IPIControlInfo>(source));
@@ -51,10 +60,11 @@ bool InformationFactory::request_information_plug_in(
 			}
 			return true;
 		case PlugInRequest::Physical:
-			if (!p_real) {
-				return false;
+			if (p_real) {
+				target->set_physical(std::make_unique<IPIPhysicalReal>(source));
+			} else {
+				target->set_physical(std::make_unique<IPIPhysicalKnown>(source));
 			}
-			target->set_physical(std::make_unique<IPIPhysicalReal>(source));
 			return true;
 		case PlugInRequest::Unit:
 			target->set_unit(std::make_unique<IPIUnit>(source));
@@ -76,10 +86,13 @@ bool InformationFactory::update_information_plug_in(uint32_t p_handle, PlugInReq
 }
 
 uint32_t InformationFactory::request_weapon_info(uint32_t p_handle, AiWeapon *p_weapon, bool p_real) const {
-	if (!p_real) {
+	if (p_real) {
+		return register_weapon(p_handle, std::make_unique<WeaponInfoReal>(p_weapon));
+	}
+	if (context_.timer == nullptr) {
 		return kNoHandle;
 	}
-	return register_weapon(p_handle, std::make_unique<WeaponInfoReal>(p_weapon));
+	return register_weapon(p_handle, std::make_unique<WeaponInfoKnown>(p_weapon, *context_.timer));
 }
 
 bool InformationFactory::check_if_info_exists(uint32_t p_handle) const {

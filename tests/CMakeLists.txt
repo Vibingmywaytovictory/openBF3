@@ -1358,6 +1358,11 @@ find_package(Git QUIET)
 add_test(NAME ai.port.provenance COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tests/ai_provenance_check.py" "${CMAKE_SOURCE_DIR}" "${OPENBF3_OPENBF2_AI}" "${GIT_EXECUTABLE}")
 set_tests_properties(ai.port.provenance PROPERTIES TIMEOUT 60 LABELS "unit" SKIP_RETURN_CODE 77)
 
+openbf3_test(test_ai_core test_main.cpp ai_core_tests.cpp)
+target_link_libraries(test_ai_core PRIVATE bf3_ai)
+add_test(NAME ai.core.unit COMMAND test_ai_core --test-suite=ai-core)
+set_tests_properties(ai.core.unit PROPERTIES TIMEOUT 60 LABELS "unit")
+
 openbf3_test(test_ai_squad test_main.cpp ai_squad_tests.cpp)
 target_link_libraries(test_ai_squad PRIVATE bf3_ai)
 add_test(NAME ai.squad.unit COMMAND test_ai_squad --test-suite=ai-squad)

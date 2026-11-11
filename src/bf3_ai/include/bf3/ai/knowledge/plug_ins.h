@@ -69,6 +69,43 @@ private:
 	float mod_ = 0.0f;
 };
 
+class IPIPhysicalKnown final : public IPIPhysical {
+public:
+	explicit IPIPhysicalKnown(Information *p_information);
+	void set_time() override;
+	void set_time(sim::Tick p_time) override;
+	float health() const override { return health_; }
+	void set_health(float p_health) override { health_ = p_health; }
+	float max_health() const override;
+	float mod() override { return mod_; }
+	float radius() const override;
+	Vec3 sphere_local_offset() const override;
+	float smallest_radius() const override;
+	void sub_spheres_2d(std::vector<Vec2> &r_out) const override;
+	float armour(const Vec3 &p_direction) const override;
+	float best_armour() const override;
+	int strength_type() const override;
+	float volume() const override;
+	float mass() const override;
+	int material() const override;
+	float man_down_time_left() const override;
+	float max_man_down_time() const override;
+	bool man_down() const override { return man_down_; }
+	bool is_touching_terrain(Vec3 &r_position) const override;
+	bool is_in_air() const override { return in_air_; }
+	bool is_in_water() const override { return in_water_; }
+
+private:
+	const AiObjectPhysical &object() const;
+	float mod_ = 0.0f;
+	float health_ = 0.0f;
+	bool touching_terrain_ = false;
+	Vec3 terrain_position_{};
+	bool in_air_ = false;
+	bool in_water_ = false;
+	bool man_down_ = false;
+};
+
 class IPIUnit final : public InformationPlugIn {
 public:
 	explicit IPIUnit(Information *p_information);
@@ -137,6 +174,7 @@ public:
 	PlugInType type() const override { return PlugInType::ControlInfo; }
 	void set_time() override {}
 	void set_time(sim::Tick) override {}
+	const AiObjectControlInfo *controls() const { return information_->ai_object()->control_info(); }
 };
 
 class IPIMobile : public InformationPlugIn {
@@ -278,4 +316,18 @@ public:
 	void update_weapons() override;
 };
 
+class IPIArmamentKnown final : public IPIArmament {
+public:
+	explicit IPIArmamentKnown(Information *p_information);
+	~IPIArmamentKnown() override;
+	using IPIArmament::set_time;
+	void set_time(sim::Tick p_time) override;
+	uint32_t weapon(int p_index) const override;
+	const std::vector<uint32_t> &weapons() const override;
+	void update_weapons() override { stale_ = true; }
+
+private:
+	void refresh() const;
+	mutable bool stale_ = true;
+};
 }

@@ -1,5 +1,7 @@
 #include "bf3/ai/knowledge/weapon_info.h"
 
+#include "bf3/ai/behaviour/curves.h"
+
 namespace bf3::ai {
 
 WeaponInfo::WeaponInfo(AiWeapon *p_weapon) : weapon_(p_weapon) {}
@@ -218,6 +220,44 @@ float WeaponInfoReal::security() const {
 
 float WeaponInfoReal::security(sim::Tick) const {
 	return 1.0f;
+}
+
+WeaponInfoKnown::WeaponInfoKnown(AiWeapon *p_weapon, const AiTimer &p_timer) :
+		WeaponInfo(p_weapon), timer_(&p_timer), time_stamp_(p_timer.game_tick()) {
+	sample();
+}
+
+void WeaponInfoKnown::sample() {
+	ammo_ = weapon_->ammo();
+	current_ammo_ = weapon_->current_ammo();
+	ready_to_fire_ = weapon_->is_ready_to_fire();
+	heat_ = weapon_->heat();
+	time_of_firing_ = weapon_->time_of_firing();
+	mags_.resize(0);
+	for (int i = 0; i < weapon_->number_of_mags(); ++i) {
+		mags_.push_back(weapon_->ammo_in_mag(i));
+	}
+}
+
+bool WeaponInfoKnown::update() {
+	const sim::Tick now = timer_->game_tick();
+	if ((double(now) - double(time_stamp_)) * timer_->tick_seconds() > 1.0) {
+		sample();
+		time_stamp_ = now;
+	}
+	return true;
+}
+
+bool WeaponInfoKnown::uses_heat() const {
+	return weapon_->uses_heat();
+}
+
+float WeaponInfoKnown::security() const {
+	return security(timer_->game_tick());
+}
+
+float WeaponInfoKnown::security(sim::Tick p_time) const {
+	return 1.0f - SCurve::calculate(float((double(p_time) - double(time_stamp_)) * timer_->tick_seconds() * 0.2));
 }
 
 uint32_t WeaponInfoManager::register_information(std::unique_ptr<WeaponInfo> p_info) {

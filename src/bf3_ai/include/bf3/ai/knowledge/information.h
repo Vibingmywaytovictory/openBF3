@@ -16,6 +16,8 @@ class IPIMobile;
 class IPIPhysical;
 class IPIUnit;
 
+float lowest_altitude_along(const AltitudeSource &p_altitude, const Vec3 &p_from, const Vec3 &p_direction);
+
 class InformationPlugIn {
 public:
 	virtual ~InformationPlugIn() = default;
@@ -95,7 +97,9 @@ public:
 	bool has_armament() const { return armament() != nullptr; }
 	bool has_mobile() const { return mobile_ != nullptr; }
 	uint32_t object_type_flags() const { return object_type_flags_; }
+	bool is_of_type(InformationType p_type) const { return ((object_type_flags_ >> uint32_t(p_type)) & 1u) != 0; }
 	float strength() const { return strength_; }
+	void set_strength(float p_strength) { strength_ = p_strength; }
 	float basic_temperature() const { return basic_temperature_; }
 	sim::Tick time() const { return time_; }
 	AiObject *ai_object() const { return object_; }
@@ -145,4 +149,45 @@ public:
 	int side() const override;
 };
 
+class InformationKnown final : public Information {
+public:
+	InformationKnown(AiObject *p_object, uint32_t p_types, sim::Tick p_time, float p_degeneration,
+			float p_basic_temperature, sim::Tick p_allowed_time_diff, int p_owner_side,
+			const KnowledgeContext &p_context);
+
+	int information_sort() const override;
+	bool set_time(sim::Tick p_time) override;
+	bool set_time(sim::Tick p_time, float p_security) override;
+	sim::Tick time_stamp() const override;
+	void add_contact() override;
+	void remove_contact() override;
+	void remove_all_contacts() override;
+	bool has_contact() const override;
+	float security(sim::Tick p_time) const override;
+	float security() const override;
+	const Vec3 &position() const override;
+	float altitude() const override;
+	float altitude(const Vec3 &p_direction) const override;
+	const Transform &transformation() const override;
+	Vec3 facing() const override;
+	int side() const override;
+
+	bool set_time();
+	int owner_side() const { return owner_side_; }
+	void set_owner_side(int p_side) { owner_side_ = p_side; }
+	int contacts() const { return contacts_; }
+
+private:
+	void store_last_seen();
+	template <class F> void for_each_secondary(F &&p_visit);
+
+	bool stamped_ = false;
+	sim::Tick last_update_ = 0;
+	float degeneration_ = 0.0f;
+	Vec3 last_position_{};
+	Transform last_transformation_{};
+	int side_ = 0;
+	int owner_side_ = 0;
+	int contacts_ = 0;
+};
 }

@@ -1,9 +1,11 @@
 #pragma once
 
 #include "bf3/ai/knowledge/handle_pool.h"
+#include "bf3/ai/knowledge/knowledge_context.h"
 
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace bf3::ai {
 
@@ -91,6 +93,33 @@ public:
 	bool uses_heat() const override;
 	float security() const override;
 	float security(sim::Tick p_time) const override;
+};
+
+class WeaponInfoKnown final : public WeaponInfo {
+public:
+	WeaponInfoKnown(AiWeapon *p_weapon, const AiTimer &p_timer);
+	bool update() override;
+	int shots_in_mag(int p_magazine) const override { return mags_[size_t(p_magazine)]; }
+	int ammo() const override { return ammo_; }
+	int current_ammo() const override { return current_ammo_; }
+	int number_of_mags() const override { return int(mags_.size()); }
+	bool is_ready_to_fire() const override { return ready_to_fire_; }
+	sim::Tick time_of_firing() const override { return time_of_firing_; }
+	float heat() const override { return heat_; }
+	bool uses_heat() const override;
+	float security() const override;
+	float security(sim::Tick p_time) const override;
+
+private:
+	void sample();
+	const AiTimer *timer_ = nullptr;
+	std::vector<int> mags_;
+	int ammo_ = 0;
+	int current_ammo_ = 0;
+	bool ready_to_fire_ = false;
+	float heat_ = 0.0f;
+	sim::Tick time_of_firing_ = 0;
+	sim::Tick time_stamp_ = 0;
 };
 
 class WeaponInfoManager {

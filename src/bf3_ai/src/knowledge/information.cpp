@@ -7,6 +7,37 @@
 
 namespace bf3::ai {
 
+float lowest_altitude_along(const AltitudeSource &p_altitude, const Vec3 &p_from, const Vec3 &p_direction) {
+	const float length = float(std::sqrt(double(p_direction.x) * p_direction.x + double(p_direction.y) * p_direction.y +
+			double(p_direction.z) * p_direction.z));
+	Vec3 probe = p_from;
+	float lowest = p_altitude.altitude(probe);
+	const float step_x = float(p_direction.x * 0.1);
+	const float step_y = float(p_direction.y * 0.1);
+	const float step_z = float(p_direction.z * 0.1);
+	const double step_length = length * 0.1;
+	const float step = float(step_length);
+	float travelled = step;
+	probe.x = float(double(step_x) + probe.x);
+	probe.y = float(double(step_y) + probe.y);
+	probe.z = float(double(step_z) + probe.z);
+	if (step_length < length) {
+		double next = 0.0;
+		do {
+			probe.x = float(double(step_x) + probe.x);
+			probe.y = float(double(step_y) + probe.y);
+			probe.z = float(double(step_z) + probe.z);
+			const float altitude = p_altitude.altitude(probe);
+			if (lowest >= altitude) {
+				lowest = altitude;
+			}
+			next = double(travelled) + step;
+			travelled = float(next);
+		} while (next < length);
+	}
+	return lowest;
+}
+
 Information::Information(AiObject *p_object, sim::Tick p_time, const KnowledgeContext &p_context) :
 		time_(p_time), object_(p_object), context_(p_context) {}
 
@@ -276,37 +307,7 @@ float InformationReal::altitude() const {
 }
 
 float InformationReal::altitude(const Vec3 &p_direction) const {
-	if (context_.altitude == nullptr) {
-		return 0.0f;
-	}
-	const float length = float(std::sqrt(double(p_direction.x) * p_direction.x + double(p_direction.y) * p_direction.y +
-			double(p_direction.z) * p_direction.z));
-	Vec3 probe = object_->position();
-	float lowest = context_.altitude->altitude(probe);
-	const float step_x = float(p_direction.x * 0.1);
-	const float step_y = float(p_direction.y * 0.1);
-	const float step_z = float(p_direction.z * 0.1);
-	const double step_length = length * 0.1;
-	const float step = float(step_length);
-	float travelled = step;
-	probe.x = float(double(step_x) + probe.x);
-	probe.y = float(double(step_y) + probe.y);
-	probe.z = float(double(step_z) + probe.z);
-	if (step_length < length) {
-		double next = 0.0;
-		do {
-			probe.x = float(double(step_x) + probe.x);
-			probe.y = float(double(step_y) + probe.y);
-			probe.z = float(double(step_z) + probe.z);
-			const float altitude = context_.altitude->altitude(probe);
-			if (lowest >= altitude) {
-				lowest = altitude;
-			}
-			next = double(travelled) + step;
-			travelled = float(next);
-		} while (next < length);
-	}
-	return lowest;
+	return context_.altitude ? lowest_altitude_along(*context_.altitude, object_->position(), p_direction) : 0.0f;
 }
 
 const Transform &InformationReal::transformation() const {
