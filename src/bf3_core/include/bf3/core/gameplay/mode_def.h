@@ -13,6 +13,10 @@
 
 namespace bf3::core::gameplay {
 
+class LogicWorld;
+
+std::string location_sid(const LogicWorld &p_world, uint32_t p_scope);
+
 struct TicketCounterDef {
 	int team = 0;
 	int64_t initial_tickets = 0;

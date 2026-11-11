@@ -13,6 +13,7 @@
 #include "bf3/sim/logic/round_natives.h"
 #include "test_support.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <memory>
 #include <optional>
@@ -117,8 +118,10 @@ TEST_SUITE("logic-conquest") {
 		const std::optional<ConquestLevel> l = load_conquest(*mount, "MP_007", "ConquestSmall0");
 		const ConquestParams &p = *l->params;
 		size_t flags = 0, hqs = 0;
+		std::vector<std::string> names;
 		for (const ConquestPointData &d : p.points) {
 			CHECK(d.placed);
+			names.push_back(d.location_sid);
 			if (d.params.type == CapturableType::UnableToChangeTeam) {
 				++hqs;
 				CHECK_FALSE(d.params.start_at_bottom);
@@ -152,6 +155,11 @@ TEST_SUITE("logic-conquest") {
 		}
 		CHECK(flags == 4);
 		CHECK(hqs == 2);
+		std::sort(names.begin(), names.end());
+		CHECK(names ==
+				std::vector<std::string>{ "ID_H_MAP_MP_007_CHECKPOINT", "ID_H_MAP_MP_007_FOREST",
+						"ID_H_MAP_MP_007_GAS_STATION", "ID_H_MAP_MP_007_HILLTOP", "ID_H_MAP_MP_RU_DEPLOYMENT",
+						"ID_H_MAP_MP_US_DEPLOYMENT" });
 		REQUIRE(p.counters.size() == 2);
 		for (const ConquestCounterData &c : p.counters) {
 			CHECK(c.params.initial_ticket_count == 150);

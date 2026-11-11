@@ -31,6 +31,7 @@ struct ConquestPointData {
 	uint32_t node = core::gameplay::kNoLogicIndex;
 	uint32_t level_object = core::gameplay::kNoLogicIndex;
 	CapturePointParams params;
+	std::string location_sid;
 	bool placed = false;
 	std::vector<uint32_t> spawners;
 };

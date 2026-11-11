@@ -2,6 +2,7 @@
 
 #include "bf3/core/gameplay/logic_types.h"
 #include "bf3/core/gameplay/logic_world.h"
+#include "bf3/core/gameplay/mode_def.h"
 #include "bf3/core/level/mode_areas.h"
 #include "bf3/core/level/world.h"
 #include "bf3/sim/logic/logic_native.h"
@@ -152,6 +153,7 @@ core::Result<std::shared_ptr<const ConquestParams>> read_conquest_params(
 		if (type == T::CapturePoint) {
 			ConquestPointData d;
 			d.node = *node;
+			d.location_sid = core::gameplay::location_sid(p_world, ob.scope);
 			CapturePointParams &p = d.params;
 			p.initial_owner = r.team("InitialOwnerTeam");
 			p.type = capturable(r.enumeration("CapturableType"));

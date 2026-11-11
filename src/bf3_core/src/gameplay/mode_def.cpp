@@ -101,19 +101,6 @@ bool usable_sid(std::string_view p_text) {
 	return !p_text.empty() && p_text.find(' ') == std::string_view::npos;
 }
 
-std::string location_sid(const LogicWorld &p_world, uint32_t p_scope) {
-	std::optional<uint32_t> at = p_scope;
-	for (size_t guard = 0; at && guard < 64; ++guard) {
-		const std::optional<PropertyValue> v = p_world.interface_value(*at, field_id("LocationTextSid"));
-		const std::optional<std::string_view> s = v ? v->as_str() : std::nullopt;
-		if (s && usable_sid(*s)) {
-			return copy_text(p_world.budget(), *s);
-		}
-		at = p_world.scopes()[*at].parent;
-	}
-	return {};
-}
-
 std::string scope_prefab(const LogicWorld &p_world, uint32_t p_scope) {
 	return copy_text(p_world.budget(), p_world.scope_name(p_scope));
 }
@@ -368,6 +355,19 @@ Result<std::vector<std::string>> level_modes(const EbxResolver &p_db, std::strin
 	}
 	BF3_TRY(budget.status());
 	return out;
+}
+
+std::string location_sid(const LogicWorld &p_world, uint32_t p_scope) {
+	std::optional<uint32_t> at = p_scope;
+	for (size_t guard = 0; at && guard < 64; ++guard) {
+		const std::optional<PropertyValue> v = p_world.interface_value(*at, field_id("LocationTextSid"));
+		const std::optional<std::string_view> s = v ? v->as_str() : std::nullopt;
+		if (s && usable_sid(*s)) {
+			return copy_text(p_world.budget(), *s);
+		}
+		at = p_world.scopes()[*at].parent;
+	}
+	return {};
 }
 
 Result<ModeDef> read_mode_def(const EbxResolver &p_db, std::string_view p_level_id, std::string_view p_mode, WorkBudget *p_budget) {
