@@ -4,6 +4,7 @@
 #include "bf3/ai/behaviour/curves.h"
 #include "bf3/ai/behaviour/urgency_merger.h"
 #include "bf3/ai/bot/bot_memory.h"
+#include "bf3/ai/bot/communication_agent.h"
 #include "bf3/ai/bot/infantry.h"
 #include "bf3/ai/interpreter/bot_plan.h"
 #include "bf3/ai/main/bot.h"
@@ -62,7 +63,7 @@ public:
 	int decision_making(double p_slice) override;
 	void see(double p_slice) override;
 	void update_sensing(double p_slice) override;
-	void update_communication() override {}
+	void update_communication() override;
 	bool path_search_pending() const override { return false; }
 	void update_obstacles() override {}
 	bool navigation_active() const override { return false; }
@@ -76,6 +77,9 @@ public:
 	bool join_squad(int p_squad) override;
 	void set_squad_goal(const SquadGoal &p_goal) override { squad_goal_ = p_goal; }
 
+	void attach_communication(const RadioVoices &p_voices, CommunicationHub &r_hub);
+	CommunicationAgent *communication() const { return communication_.get(); }
+	void call_for_medic();
 	void update_bot(bool p_alive, bool p_new_life);
 	void plan_execution(double p_slice);
 	bool wants_decision() const;
@@ -121,6 +125,7 @@ private:
 	std::array<float, kInfantryBehaviourCount> behaviour_urgencies_{};
 	std::unique_ptr<UrgencyMerger> merger_;
 	BotMemory memory_;
+	std::unique_ptr<CommunicationAgent> communication_;
 	BotPlan plan_;
 	BotBehaviour *current_ = nullptr;
 	float chosen_urgency_ = 0.0f;

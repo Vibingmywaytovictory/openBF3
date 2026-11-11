@@ -163,3 +163,8 @@ target_sources(bf3_ai PRIVATE
     include/bf3/ai/bot/waypoints.h
     src/bot/waypoints.cpp
 )
+
+target_sources(bf3_ai PRIVATE
+    include/bf3/ai/bot/communication_agent.h
+    src/bot/communication_agent.cpp
+)

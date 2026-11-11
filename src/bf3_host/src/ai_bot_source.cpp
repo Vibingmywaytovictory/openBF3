@@ -5,6 +5,7 @@
 #include "tdm_bot_body.h"
 #include "tdm_bot_common.h"
 #include "tdm_bot_shared.h"
+#include "tdm_bot_support.h"
 #include "tdm_strategy.h"
 
 #include <optional>
@@ -38,8 +39,9 @@ TdmBotActivity tdm_activity(ai::InfantryActivity p_activity) {
 	return TdmBotActivity::Roam;
 }
 
-struct AiBotSource::Impl final : ai::InfantryBody {
+struct AiBotSource::Impl final : ai::InfantryBody, ai::CommunicationHub {
 	BotBody body;
+	std::optional<ai::CallRadioVoices> voices;
 	std::unique_ptr<ai::BotMain> bot;
 	sim::Tick now = 0;
 	const sim::SoldierState *state = nullptr;
@@ -222,6 +224,7 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 				break;
 			case ai::TriggerKind::CallMedic:
 				body.call_medic(f());
+				bot->call_for_medic();
 				return true;
 		}
 		return intent.trigger != Trigger::None;
@@ -246,6 +249,12 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 				break;
 		}
 		return true;
+	}
+
+	void send_radio_message(int p_sender, int, const ai::RadioMessage &p_message) override {
+		if (p_message.type == ai::kRadioCallForMedic && body.shared != nullptr) {
+			ask_medic(*body.shared, uint8_t(p_sender));
+		}
 	}
 
 	void end_plan() override {
@@ -291,6 +300,7 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 			}
 		}
 		bot->plan_execution(dt);
+		bot->update_communication();
 		frame.reset();
 		state = nullptr;
 		return cmd;
@@ -303,6 +313,8 @@ AiBotSource::AiBotSource(std::shared_ptr<TdmShared> p_shared, uint32_t p_index) 
 	static const ai::BehaviourTuning s_defaults;
 	const ai::BehaviourTuning &tuning = m.body.shared != nullptr ? m.body.cfg().behaviours : s_defaults;
 	m.bot = std::make_unique<ai::BotMain>(p_index, -1, 0, m, tuning);
+	m.voices.emplace(tuning.call_s);
+	m.bot->attach_communication(*m.voices, m);
 	if (m.body.shared != nullptr) {
 		m.body.shared->count(&TdmBotStats::bf2_bots, uint32_t(1));
 	}

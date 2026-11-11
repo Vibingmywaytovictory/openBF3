@@ -128,6 +128,8 @@ std::optional<uint8_t> nearest_medic(const TdmShared &p_shared, uint8_t p_slot, 
 	return best;
 }
 
+}
+
 void ask_medic(TdmShared &r_shared, uint8_t p_slot) {
 	const TdmShared &p_shared = r_shared;
 	if (p_shared.host.gunplay == nullptr) {
@@ -142,8 +144,6 @@ void ask_medic(TdmShared &r_shared, uint8_t p_slot) {
 	p_shared.host.view->post_order(
 			p_slot, net::OrderRequest{ sim::commo::OrderType::RequestHeal, medic.value_or(net::kNoOrderTarget) });
 	r_shared.count(&TdmBotStats::medic_orders, uint64_t(1));
-}
-
 }
 
 void BotSupport::new_life() {
@@ -338,7 +338,6 @@ void BotSupport::post_call(TdmShared &r_shared, sim::Tick p_tick, uint8_t p_slot
 		posted_ = true;
 		call_since_ = p_tick;
 		r_shared.count(&TdmBotStats::medic_calls, uint64_t(1));
-		ask_medic(r_shared, p_slot);
 	}
 	if (p_slot < r_shared.medic_call.size()) {
 		r_shared.medic_call[p_slot] = p_tick;

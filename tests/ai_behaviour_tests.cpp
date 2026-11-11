@@ -7,9 +7,11 @@
 #include "bf3/ai/behaviour/urgency_merger.h"
 #include "bf3/ai/bot/bot_main.h"
 #include "bf3/ai/bot/bot_memory.h"
+#include "bf3/ai/bot/communication_agent.h"
 #include "bf3/ai/bot/waypoints.h"
 #include "bf3/ai/squad/squad_world.h"
 
+#include <algorithm>
 #include <vector>
 
 using namespace bf3;
@@ -66,6 +68,29 @@ struct Areas final : WaypointAreas {
 	void randomize_position(int, int, float, Vec3 &r_position) const override {
 		++randomized;
 		r_position.x += 40.0f;
+	}
+};
+struct Voices final : RadioVoices {
+	std::vector<int> voiced{ kRadioCallForMedic };
+	bool settings(int p_type, RadioMessageSettings &r_settings) const override {
+		if (std::find(voiced.begin(), voiced.end(), p_type) == voiced.end()) {
+			return false;
+		}
+		r_settings = p_type == kRadioCallForMedic ? RadioMessageSettings{ p_type, 0.75f, 8.5f, 8.0f }
+												  : RadioMessageSettings{ p_type, 1.0f, 0.0f, 0.0f };
+		return true;
+	}
+};
+
+struct Hub final : CommunicationHub {
+	struct Sent {
+		int sender = -1;
+		int side = 0;
+		RadioMessage message;
+	};
+	std::vector<Sent> sent;
+	void send_radio_message(int p_sender, int p_side, const RadioMessage &p_message) override {
+		sent.push_back({ p_sender, p_side, p_message });
 	}
 };
 }
@@ -428,5 +453,188 @@ TEST_SUITE("ai-behaviour") {
 		CHECK(loop.urgency({ 0.0f, 103.0f, 0.0f }, flying) == 1.0f);
 		REQUIRE(loop.goal_point(goal));
 		CHECK(goal.x == 100.0f);
+	}
+
+	TEST_CASE("CommunicationAgent: a call waits for the once-a-second poll and its type's send block") {
+		Voices voices;
+		Hub hub;
+		CommunicationAgent agent(voices, hub);
+		agent.call_for_medic(0.5, true);
+		CHECK(agent.queued() == 1u);
+		CHECK(agent.sent_message(kRadioCallForMedic, 0.5));
+		agent.call_for_medic(0.6, true);
+		CHECK(agent.queued() == 1u);
+		agent.update(0.9, 4, 1);
+		CHECK(hub.sent.empty());
+		agent.update(1.1, 4, 1);
+		REQUIRE(hub.sent.size() == 1u);
+		CHECK(hub.sent[0].sender == 4);
+		CHECK(hub.sent[0].side == 1);
+		CHECK(hub.sent[0].message.type == kRadioCallForMedic);
+		CHECK(hub.sent[0].message.channel == kRadioChannelInfantry);
+		CHECK(hub.sent[0].message.priority == int(kRadioCallPriority));
+		CHECK(hub.sent[0].message.receiver == -1);
+		CHECK(agent.queued() == 0u);
+		agent.call_for_medic(8.4, true);
+		CHECK(agent.queued() == 0u);
+		agent.update(8.6, 4, 1);
+		CHECK_FALSE(agent.sent_message(kRadioCallForMedic, 8.6));
+		agent.call_for_medic(8.6, true);
+		CHECK(agent.queued() == 1u);
+		agent.update(2.0, 4, 1);
+		CHECK(hub.sent.size() == 1u);
+		agent.update(3.1, 4, 1);
+		CHECK(hub.sent.size() == 1u);
+		agent.update(9.7, 4, 1);
+		CHECK(hub.sent.size() == 2u);
+
+		agent.call_for_medic(20.0, false);
+		RadioMessage top;
+		REQUIRE(agent.peek_radio_message(top));
+		CHECK(top.type == kRadioCallForRepair);
+		CHECK(top.channel == kRadioChannelVehicle);
+		CHECK(top.receiver == 0);
+		agent.update(21.5, 4, 1);
+		CHECK(hub.sent.size() == 2u);
+		CHECK(agent.queued() == 0u);
+		agent.call_for_medic(30.0, true);
+		CHECK(agent.sent_message(kRadioCallForMedic, 30.0));
+		CHECK(agent.queued() == 1u);
+		agent.reset();
+		CHECK_FALSE(agent.sent_message(kRadioCallForMedic, 30.0));
+		CHECK(agent.queued() == 0u);
+	}
+
+	TEST_CASE("CommunicationAgent: the highest priority goes first; a delayed or recently heard type waits") {
+		Voices voices;
+		voices.voiced = { 2, 3, 5 };
+		Hub hub;
+		CommunicationAgent agent(voices, hub);
+		agent.enqueue_radio_message(2, 0, 1, 0.0f, -1, 10.0);
+		agent.enqueue_radio_message(5, 0, 9, 4.0f, -1, 10.0);
+		agent.enqueue_radio_message(kRadioCallForMedic, 0, 5, 0.0f, -1, 10.0);
+		agent.poll_for_radio_message(11.0, 2, 2);
+		CHECK(hub.sent.empty());
+		CHECK(agent.wait_with_sending_message(RadioMessage{ 5, 0, 9, -1, 14.0, 4.0f }, 11.0));
+		agent.poll_for_radio_message(14.0, 2, 2);
+		REQUIRE(hub.sent.size() == 3u);
+		CHECK(hub.sent[0].message.type == 5);
+		CHECK(hub.sent[1].message.type == kRadioCallForMedic);
+		CHECK(hub.sent[2].message.type == 2);
+
+		RadioMessageSettings heard;
+		heard.type = kRadioCallForMedic;
+		heard.modifier = 0.5f;
+		agent.receive_radio_message(heard, 7, false, 20.0);
+		agent.enqueue_radio_message(kRadioCallForMedic, 0, 5, 0.0f, -1, 21.0);
+		CHECK(agent.wait_with_sending_message(RadioMessage{ kRadioCallForMedic, 0, 5, -1, 21.0, 0.0f }, 21.0));
+		agent.poll_for_radio_message(21.0, 2, 2);
+		CHECK(hub.sent.size() == 3u);
+		agent.poll_for_radio_message(28.0, 2, 2);
+		CHECK(hub.sent.size() == 4u);
+
+		agent.enqueue_radio_message(9, 0, 1, 0.0f, -1, 30.0);
+		agent.poll_for_radio_message(30.0, 2, 2);
+		CHECK(hub.sent.size() == 4u);
+		CHECK(agent.queued() == 0u);
+		agent.send_immediately(5, 6, 3, 11, 31.0, 2, 2);
+		REQUIRE(hub.sent.size() == 5u);
+		CHECK(hub.sent[4].message.receiver == 11);
+		CHECK(hub.sent[4].message.send_time == 31.0);
+		CHECK(agent.modifier_for_message_type(kRadioCallForMedic) == 0.75f);
+		CHECK(agent.modifier_for_message_type(9) == 1.0f);
+	}
+
+	TEST_CASE("CommunicationAgent: one inbox entry per sender and type, aged out, confirmed once") {
+		Voices voices;
+		Hub hub;
+		CommunicationAgent agent(voices, hub);
+		RadioMessageSettings call;
+		call.type = kRadioCallForMedic;
+		call.modifier = 0.5f;
+		agent.receive_radio_message(call, 7, false, 1.0);
+		agent.receive_radio_message(call, 8, true, 1.5);
+		call.modifier = 0.25f;
+		agent.receive_radio_message(call, 7, false, 2.0);
+		REQUIRE(agent.received_messages(kRadioCallForMedic).size() == 2u);
+		ReceivedRadioMessage got;
+		REQUIRE(agent.received_message(got, kRadioCallForMedic, 7));
+		CHECK(got.modifier == 0.25f);
+		CHECK(got.time == 2.0);
+		CHECK_FALSE(agent.received_message(got, kRadioCallForMedic, 9));
+		CHECK(agent.received_message_exists(kRadioCallForMedic, -1));
+		CHECK(agent.received_message_exists(kRadioCallForMedic, 8));
+		CHECK_FALSE(agent.received_message_exists(kRadioCallForMedic, 9));
+		CHECK_FALSE(agent.confirm_received_message(kRadioCallForMedic, 8));
+		CHECK(agent.confirm_received_message(kRadioCallForMedic, 7));
+		CHECK_FALSE(agent.confirm_received_message(kRadioCallForMedic, 7));
+		CHECK_FALSE(agent.general_confirm_received_message(kRadioCallForMedic));
+		agent.receive_radio_message(call, 7, false, 3.0);
+		REQUIRE(agent.received_message(got, kRadioCallForMedic, 7));
+		CHECK_FALSE(got.confirmed);
+		CHECK(agent.confirm_received_message(got));
+		CHECK_FALSE(agent.confirm_received_message(got));
+		got.time = 4.0;
+		CHECK_FALSE(agent.confirm_received_message(got));
+		agent.receive_radio_message(call, 7, false, 3.0);
+		CHECK(agent.general_confirm_received_message(kRadioCallForMedic));
+
+		RadioMessageSettings follow;
+		follow.type = 0;
+		agent.receive_radio_message(follow, 7, false, 3.0);
+		RadioMessageSettings hold;
+		hold.type = 1;
+		agent.receive_radio_message(hold, 7, false, 3.5);
+		CHECK(agent.received_messages(0).empty());
+		CHECK(agent.received_messages(1).size() == 1u);
+		agent.receive_radio_message(follow, 7, false, 4.0);
+		CHECK(agent.received_messages(1).empty());
+
+		agent.clear_out_old_messages(9.9);
+		CHECK(agent.received_messages(kRadioCallForMedic).size() == 2u);
+		CHECK(agent.received_messages(0).empty());
+		agent.clear_out_old_messages(10.1);
+		REQUIRE(agent.received_messages(kRadioCallForMedic).size() == 1u);
+		CHECK(agent.received_messages(kRadioCallForMedic).front().sender == 7);
+		agent.clear_out_old_messages(11.6);
+		CHECK(agent.received_messages(kRadioCallForMedic).empty());
+	}
+
+	TEST_CASE("CallRadioVoices and BotMain: a bot's call for a medic goes through its agent") {
+		const CallRadioVoices voices(8.0f);
+		RadioMessageSettings s;
+		REQUIRE(voices.settings(kRadioCallForMedic, s));
+		CHECK(s.type == kRadioCallForMedic);
+		CHECK(s.max_send_period == 8.0f);
+		CHECK(s.receive_time_to_live == 8.0f);
+		CHECK(s.modifier == 1.0f);
+		CHECK_FALSE(voices.settings(kRadioCallForRepair, s));
+		FakeBody body;
+		BehaviourTuning tuning;
+		BotMain bot(0, 5, 2, body, tuning);
+		bot.call_for_medic();
+		bot.update_communication();
+		CHECK(bot.communication() == nullptr);
+		Hub hub;
+		bot.attach_communication(voices, hub);
+		bot.update_bot(true, true);
+		body.now = 30;
+		bot.call_for_medic();
+		REQUIRE(bot.communication() != nullptr);
+		CHECK(bot.communication()->queued() == 1u);
+		bot.update_communication();
+		CHECK(hub.sent.empty());
+		body.now = 90;
+		bot.update_communication();
+		REQUIRE(hub.sent.size() == 1u);
+		CHECK(hub.sent[0].sender == 5);
+		CHECK(hub.sent[0].side == 2);
+		CHECK(hub.sent[0].message.type == kRadioCallForMedic);
+		body.now = 120;
+		bot.call_for_medic();
+		CHECK(bot.communication()->queued() == 0u);
+		bot.update_bot(true, true);
+		bot.call_for_medic();
+		CHECK(bot.communication()->queued() == 1u);
 	}
 }

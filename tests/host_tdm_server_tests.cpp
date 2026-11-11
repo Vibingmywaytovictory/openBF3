@@ -3043,6 +3043,7 @@ TEST_SUITE("host-gunplay-gadgets") {
 		CHECK(start > 3.5f);
 		CHECK(healed);
 		CHECK(stats->medic_calls.load() >= 1u);
+		CHECK(stats->medic_orders.load() >= 1u);
 	}
 }
 

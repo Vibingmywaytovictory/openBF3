@@ -79,8 +79,27 @@ void BotMain::reset() {
 	chosen_urgency_ = 0.0f;
 	plan_.clear(InfantryActivity::Idle);
 	plan_invalid_ = true;
+	if (communication_ != nullptr) {
+		communication_->reset();
+	}
 	decided_senses_ = InfantrySenses{};
 	ordered_behaviour_ = -1;
+}
+
+void BotMain::attach_communication(const RadioVoices &p_voices, CommunicationHub &r_hub) {
+	communication_ = std::make_unique<CommunicationAgent>(p_voices, r_hub);
+}
+
+void BotMain::update_communication() {
+	if (communication_ != nullptr) {
+		communication_->update(double(body_.tick()) * sim::kTickSeconds, player_id_, side_);
+	}
+}
+
+void BotMain::call_for_medic() {
+	if (communication_ != nullptr) {
+		communication_->call_for_medic(double(body_.tick()) * sim::kTickSeconds, true);
+	}
 }
 
 void BotMain::update_bot(bool p_alive, bool p_new_life) {
