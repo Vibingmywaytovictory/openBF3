@@ -1996,6 +1996,91 @@ template <class A, MaybeConst<SpawnAnswer> M> void serialize(A &r_a, M &r_m) {
 	r_a.check("unknown spawn answer", [&] { return uint8_t(r_m.kind) < kSpawnAnswerKinds; });
 }
 
+template <class A, MaybeConst<VehicleWire> W> void serialize(A &r_a, W &r_w) {
+	r_a.bits(r_w.spawner, 16);
+	r_a.bits(r_w.generation, 8);
+	r_a.bits(r_w.team, 2);
+	r_a.bits(r_w.seat_count, 4);
+	r_a.check("vehicle team or seat count out of range",
+			[&] { return r_w.team <= kMaxTeam && r_w.seat_count <= kMaxVehicleSeats; });
+	for (size_t i = 0; i < r_w.seat_count && i < kMaxVehicleSeats && r_a.ok(); ++i) {
+		r_a.bits(r_w.occupants[i], 8);
+		r_a.check("vehicle occupant out of range",
+				[&] { return r_w.occupants[i] < kMaxSlots || r_w.occupants[i] == kNoVehicleOccupant; });
+	}
+	auto &b = r_w.state.body;
+	for (size_t i = 0; i < 3; ++i) {
+		r_a.f32(b.com_position[i]);
+	}
+	for (size_t i = 0; i < 4; ++i) {
+		r_a.f32(b.rotation[i]);
+	}
+	for (size_t i = 0; i < 3; ++i) {
+		r_a.f32(b.linear_velocity[i]);
+		r_a.f32(b.angular_velocity[i]);
+	}
+	r_a.bits(b.active, 1);
+	r_a.bits(r_w.state.wheel_count, 4);
+	r_a.check("vehicle wheel count out of range",
+			[&] { return r_w.state.wheel_count >= 1 && r_w.state.wheel_count <= sim::kMaxVehicleWheels; });
+	for (size_t i = 0; i < r_w.state.wheel_count && i < sim::kMaxVehicleWheels && r_a.ok(); ++i) {
+		auto &w = r_w.state.wheels[i];
+		r_a.f32(w.angular_velocity);
+		r_a.f32(w.angle);
+		r_a.f32(w.suspension_length);
+		r_a.f32(w.steer_angle);
+		r_a.bits(w.in_contact, 1);
+	}
+	auto &d = r_w.state.driver;
+	r_a.f32(d.steer_filter);
+	r_a.f32(d.throttle_filter);
+	r_a.f32(d.brake_filter);
+	r_a.bits(d.stand_still_ticks, 16);
+	r_a.bits(d.reversing, 1);
+	r_a.f32(d.engine_rpm);
+	r_a.bits(d.gearbox.gear, 5);
+	r_a.bits(d.gearbox.phase, 3);
+	r_a.bits(d.gearbox.pending, 2);
+	r_a.bits(d.gearbox.reverse_direction, 1);
+	r_a.f32(d.gearbox.clutch);
+	r_a.f32(d.gearbox.timer);
+	r_a.check("vehicle gearbox phase or pending step out of range", [&] {
+		const uint8_t phase = uint8_t(d.gearbox.phase);
+		return (phase <= uint8_t(sim::vehicles::GearPhase::Reengage) ||
+					   phase == uint8_t(sim::vehicles::GearPhase::OppositeDirection)) &&
+				d.gearbox.pending >= -1 && d.gearbox.pending <= 1;
+	});
+	r_a.check("vehicle state not finite", [&] {
+		bool finite = std::isfinite(d.steer_filter) && std::isfinite(d.throttle_filter) &&
+				std::isfinite(d.brake_filter) && std::isfinite(d.engine_rpm) && std::isfinite(d.gearbox.clutch) &&
+				std::isfinite(d.gearbox.timer);
+		for (size_t i = 0; i < 3; ++i) {
+			finite = finite && std::isfinite(b.com_position[i]) && std::isfinite(b.linear_velocity[i]) &&
+					std::isfinite(b.angular_velocity[i]);
+		}
+		for (size_t i = 0; i < 4; ++i) {
+			finite = finite && std::isfinite(b.rotation[i]);
+		}
+		for (size_t i = 0; i < r_w.state.wheel_count && i < sim::kMaxVehicleWheels; ++i) {
+			const auto &w = r_w.state.wheels[i];
+			finite = finite && std::isfinite(w.angular_velocity) && std::isfinite(w.angle) &&
+					std::isfinite(w.suspension_length) && std::isfinite(w.steer_angle);
+		}
+		return finite;
+	});
+}
+
+template <class A, MaybeConst<VehicleStates> M> void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.server_tick, 32);
+	uint64_t count = r_m.vehicles.size();
+	r_a.varint(count);
+	r_a.check("vehicle count out of range", [&] { return count <= kMaxVehiclesPerDatagram; });
+	const size_t n = r_a.resize(r_m.vehicles, size_t(count));
+	for (size_t i = 0; i < n && r_a.ok(); ++i) {
+		serialize(r_a, r_m.vehicles[i]);
+	}
+}
+
 struct Framing {
 	MessageType type;
 	const char *what;
@@ -2075,6 +2160,7 @@ std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram) {
 		case MessageType::OrderNotice:
 		case MessageType::ConquestState:
 		case MessageType::SpawnAnswer:
+		case MessageType::VehicleStates:
 			return MessageType(p_datagram[0]);
 	}
 	return std::nullopt;
@@ -2718,5 +2804,13 @@ std::vector<uint8_t> encode_spawn_answer(const SpawnAnswer &p_message) {
 
 core::Result<SpawnAnswer> decode_spawn_answer(std::span<const uint8_t> p_datagram) {
 	return decode_as<SpawnAnswer>(p_datagram, { MessageType::SpawnAnswer, "SpawnAnswer" });
+}
+
+std::vector<uint8_t> encode_vehicle_states(const VehicleStates &p_message) {
+	return encode_as(MessageType::VehicleStates, kMaxDatagramBytes, p_message);
+}
+
+core::Result<VehicleStates> decode_vehicle_states(std::span<const uint8_t> p_datagram) {
+	return decode_as<VehicleStates>(p_datagram, { MessageType::VehicleStates, "VehicleStates", kMaxDatagramBytes });
 }
 }

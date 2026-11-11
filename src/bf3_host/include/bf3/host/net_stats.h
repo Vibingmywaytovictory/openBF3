@@ -14,7 +14,7 @@
 
 namespace bf3::host {
 
-inline constexpr size_t kNetTypeBuckets = 49;
+inline constexpr size_t kNetTypeBuckets = 50;
 inline constexpr uint64_t kNetStatsWindowNs = 1'000'000'000ull;
 
 size_t net_type_bucket(std::span<const uint8_t> p_datagram);

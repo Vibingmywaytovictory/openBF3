@@ -8,6 +8,7 @@
 #include "bf3/sim/logic/logic_runtime.h"
 #include "bf3/sim/soldier_state.h"
 #include "bf3/sim/spotting.h"
+#include "bf3/sim/vehicle_types.h"
 #include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/damage.h"
 #include "bf3/sim/weapons/hit_target.h"
@@ -25,7 +26,7 @@
 
 namespace bf3::net {
 
-inline constexpr uint16_t kProtocolVersion = 11;
+inline constexpr uint16_t kProtocolVersion = 12;
 inline constexpr uint8_t kChannelUnreliable = 0;
 inline constexpr uint8_t kChannelReliable = 1;
 inline constexpr uint8_t kChannelBulk = 2;
@@ -92,6 +93,7 @@ enum class MessageType : uint8_t {
 	OrderNotice = 46,
 	ConquestState = 47,
 	SpawnAnswer = 48,
+	VehicleStates = 49,
 };
 
 std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram);
@@ -903,4 +905,31 @@ std::vector<uint8_t> encode_conquest_state(const ConquestState &p_message);
 core::Result<ConquestState> decode_conquest_state(std::span<const uint8_t> p_datagram);
 std::vector<uint8_t> encode_spawn_answer(const SpawnAnswer &p_message);
 core::Result<SpawnAnswer> decode_spawn_answer(std::span<const uint8_t> p_datagram);
+
+inline constexpr size_t kMaxVehicleSeats = 8;
+inline constexpr uint8_t kNoVehicleOccupant = 0xFF;
+inline constexpr size_t kMaxVehiclesPerDatagram = 6;
+
+struct VehicleWire {
+	uint16_t spawner = 0;
+	uint8_t generation = 0;
+	uint8_t team = 0;
+	uint8_t seat_count = 0;
+	std::array<uint8_t, kMaxVehicleSeats> occupants = [] {
+		std::array<uint8_t, kMaxVehicleSeats> a{};
+		a.fill(kNoVehicleOccupant);
+		return a;
+	}();
+	sim::VehicleState state;
+
+	bool operator==(const VehicleWire &) const = default;
+};
+
+struct VehicleStates {
+	sim::Tick server_tick = 0;
+	std::vector<VehicleWire> vehicles;
+};
+
+std::vector<uint8_t> encode_vehicle_states(const VehicleStates &p_message);
+core::Result<VehicleStates> decode_vehicle_states(std::span<const uint8_t> p_datagram);
 }

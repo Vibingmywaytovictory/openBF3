@@ -31,7 +31,7 @@ struct Rng {
 
 const net::ShotQuantization kFrame{ { -2048.0f, -512.0f, -2048.0f } };
 
-constexpr std::array<net::MessageType, 37> kTypes = {
+constexpr std::array<net::MessageType, 38> kTypes = {
 	net::MessageType::Snapshot,
 	net::MessageType::CommandPacket,
 	net::MessageType::SnapshotOthers,
@@ -69,6 +69,7 @@ constexpr std::array<net::MessageType, 37> kTypes = {
 	net::MessageType::OrderNotice,
 	net::MessageType::ConquestState,
 	net::MessageType::SpawnAnswer,
+	net::MessageType::VehicleStates,
 };
 
 const char *type_name(net::MessageType p_type) {
@@ -147,6 +148,8 @@ const char *type_name(net::MessageType p_type) {
 			return "ConquestState";
 		case net::MessageType::SpawnAnswer:
 			return "SpawnAnswer";
+		case net::MessageType::VehicleStates:
+			return "VehicleStates";
 	}
 	return "?";
 }
@@ -347,6 +350,10 @@ Verdict decode_as(net::MessageType p_type, std::span<const uint8_t> p_bytes) {
 			return check(
 					p_bytes, [](std::span<const uint8_t> p) { return net::decode_spawn_answer(p); },
 					[](const net::SpawnAnswer &p_m, bool &) { return net::encode_spawn_answer(p_m); });
+		case net::MessageType::VehicleStates:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_vehicle_states(p); },
+					[](const net::VehicleStates &p_m, bool &) { return net::encode_vehicle_states(p_m); });
 	}
 	return Verdict::Refused;
 }
@@ -751,6 +758,24 @@ std::vector<Sample> samples() {
 		out.push_back({ net::MessageType::ConquestState, "ConquestState", net::encode_conquest_state(cq) });
 		out.push_back({ net::MessageType::SpawnAnswer, "SpawnAnswer",
 				net::encode_spawn_answer({ net::SpawnAnswerKind::NoSpawnPoint, net::kSpawnChoiceFlag }) });
+		net::VehicleStates vs;
+		vs.server_tick = tick;
+		net::VehicleWire vw;
+		vw.spawner = 3;
+		vw.generation = 2;
+		vw.team = 1;
+		vw.seat_count = 4;
+		vw.occupants[0] = 7;
+		vw.state.wheel_count = 4;
+		vw.state.body.com_position = { 120.5f, 64.25f, -300.0f };
+		vw.state.body.linear_velocity = { 3.0f, 0.0f, 12.0f };
+		vw.state.wheels[1].angular_velocity = 25.0f;
+		vw.state.driver.engine_rpm = 2400.0f;
+		vw.state.driver.gearbox.gear = -1;
+		vw.state.driver.gearbox.phase = bf3::sim::vehicles::GearPhase::Wait;
+		vw.state.driver.gearbox.pending = 1;
+		vs.vehicles.push_back(vw);
+		out.push_back({ net::MessageType::VehicleStates, "VehicleStates", net::encode_vehicle_states(vs) });
 	}
 	return out;
 }

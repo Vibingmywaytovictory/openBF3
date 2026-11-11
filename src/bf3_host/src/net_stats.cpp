@@ -15,7 +15,7 @@ struct TypeName {
 	const char *name;
 };
 
-constexpr std::array<TypeName, 36> kTypeNames{ {
+constexpr std::array<TypeName, 37> kTypeNames{ {
 		{ net::MessageType::Snapshot, "Snapshot" },
 		{ net::MessageType::CommandPacket, "CommandPacket" },
 		{ net::MessageType::SnapshotOthers, "SnapshotOthers" },
@@ -52,6 +52,7 @@ constexpr std::array<TypeName, 36> kTypeNames{ {
 		{ net::MessageType::OrderNotice, "OrderNotice" },
 		{ net::MessageType::ConquestState, "ConquestState" },
 		{ net::MessageType::SpawnAnswer, "SpawnAnswer" },
+		{ net::MessageType::VehicleStates, "VehicleStates" },
 } };
 
 static_assert(std::all_of(
