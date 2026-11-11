@@ -25,6 +25,12 @@ constexpr uint32_t kIslandJumpTicks = 45;
 constexpr float kIslandProgressMetres = 0.5f;
 constexpr float kIslandRings[] = { 2.0f, 4.0f, 6.0f, 9.0f, 12.0f, 16.0f, 24.0f, 32.0f };
 
+constexpr uint32_t kWedgeTicks = 60;
+constexpr uint32_t kWedgeGiveUpTicks = 300;
+constexpr float kWedgeArriveMetres = 0.5f;
+constexpr float kWedgeRings[] = { 1.5f, 2.5f, 4.0f, 6.0f };
+constexpr float kWedgeKneeMetres = 0.6f;
+
 constexpr float kStrafeAxis = 0.8f;
 constexpr uint32_t kStrafeMinTicks = 60, kStrafeMaxTicks = 150;
 constexpr uint32_t kStrafeGroundTicks = 6;
@@ -42,6 +48,8 @@ void BotNavigation::set_slot(uint8_t p_slot, uint64_t p_seed) {
 
 void BotNavigation::new_life() {
 	off_main_ = false;
+	wedged_ = false;
+	wedge_since_ = 0;
 	exit_progress_tick_ = 0;
 	have_goal_ = false;
 	goals_.clear();
@@ -155,8 +163,74 @@ void BotNavigation::check_island(TdmShared &r_shared, sim::Tick p_tick, const si
 	off_main_ = true;
 }
 
-bool BotNavigation::walk(TdmShared &r_shared, sim::Tick p_tick, const sim::SoldierState &p_state, float &r_dx, float &r_dz, float &r_yaw, bool &r_sprint,
-		sim::Pose &r_pose, bool &r_jump) {
+void BotNavigation::check_wedge(
+		TdmShared &r_shared, sim::Tick p_tick, const sim::SoldierState &p_state, const sim::CollisionWorld &p_world) {
+	const uint64_t off = walker_->stats().off_mesh_ticks;
+	const bool steering_back = off != off_mesh_seen_;
+	off_mesh_seen_ = off;
+	if (!steering_back || wedge_since_ == 0 || horizontal(p_state.position, wedge_from_) >= kIslandProgressMetres) {
+		wedge_from_ = p_state.position;
+		wedge_since_ = p_tick;
+		return;
+	}
+	if (p_tick - wedge_since_ < kWedgeTicks) {
+		return;
+	}
+	wedge_since_ = p_tick;
+	BotNav &nav = *r_shared.nav;
+	const sim::Vec3 knee = add(p_state.position, 0.0f, kWedgeKneeMetres, 0.0f);
+	float best = 1e30f;
+	for (const float r : kWedgeRings) {
+		for (int k = 0; k < 16; ++k) {
+			const float a = float(k) * (sim::kTwoPi / 16.0f);
+			const sim::Vec3 probe = add(p_state.position, r * std::sin(a), 0.0f, r * std::cos(a));
+			sim::NavPolyRef q = 0;
+			sim::Vec3 qa{};
+			if (!nav.query->nearest(probe, { 0.5f, 2.5f, 0.5f }, &q, &qa) || q == 0 ||
+					sim::nav_poly_component(nav.query->world(), nav.level->components, q) !=
+							nav.level->main_component) {
+				continue;
+			}
+			const float d = horizontal(qa, p_state.position);
+			if (d >= best ||
+					p_world.ray(knee, sub(add(qa, 0.0f, kWedgeKneeMetres, 0.0f), knee), sim::query_mask::kMovement,
+							nullptr)) {
+				continue;
+			}
+			best = d;
+			exit_at_ = qa;
+		}
+		if (best < 1e30f) {
+			break;
+		}
+	}
+	if (best < 1e30f) {
+		wedged_ = true;
+		exit_from_ = p_state.position;
+		exit_progress_tick_ = p_tick;
+		r_shared.count(&TdmBotStats::wedge_exits, uint64_t(1));
+	}
+}
+
+void BotNavigation::steer_exit(sim::Tick p_tick, const sim::SoldierState &p_state, float &r_dx, float &r_dz,
+		float &r_yaw, bool &r_sprint, sim::Pose &r_pose, bool &r_jump) {
+	const float dx = exit_at_[0] - p_state.position[0], dz = exit_at_[2] - p_state.position[2];
+	const float l = std::sqrt(dx * dx + dz * dz);
+	r_dx = l > 0.1f ? dx / l : 0.0f;
+	r_dz = l > 0.1f ? dz / l : 0.0f;
+	r_yaw = yaw_of(dx, dz);
+	r_sprint = true;
+	r_pose = sim::Pose::Stand;
+	if (horizontal(p_state.position, exit_from_) >= kIslandProgressMetres) {
+		exit_from_ = p_state.position;
+		exit_progress_tick_ = p_tick;
+	}
+	r_jump = p_tick - exit_progress_tick_ >= kIslandJumpTicks && (p_tick - exit_progress_tick_) % kIslandJumpTicks == 0;
+}
+
+bool BotNavigation::walk(TdmShared &r_shared, sim::Tick p_tick, const sim::SoldierState &p_state,
+		const sim::CollisionWorld &p_world, float &r_dx, float &r_dz, float &r_yaw, bool &r_sprint, sim::Pose &r_pose,
+		bool &r_jump) {
 	r_jump = false;
 	TdmShared &sh = r_shared;
 	if (sh.nav == nullptr) {
@@ -170,22 +244,18 @@ bool BotNavigation::walk(TdmShared &r_shared, sim::Tick p_tick, const sim::Soldi
 	}
 	if (off_main_) {
 		sh.count(&TdmBotStats::off_main_ticks, uint64_t(1));
-		const float dx = exit_at_[0] - p_state.position[0], dz = exit_at_[2] - p_state.position[2];
-		const float l = std::sqrt(dx * dx + dz * dz);
-		r_dx = l > 0.1f ? dx / l : 0.0f;
-		r_dz = l > 0.1f ? dz / l : 0.0f;
-		r_yaw = yaw_of(dx, dz);
-		r_sprint = true;
-		r_pose = sim::Pose::Stand;
-		if (horizontal(p_state.position, exit_from_) >= kIslandProgressMetres) {
-			exit_from_ = p_state.position;
-			exit_progress_tick_ = p_tick;
-		}
-		r_jump = p_tick - exit_progress_tick_ >= kIslandJumpTicks && (p_tick - exit_progress_tick_) % kIslandJumpTicks == 0;
+		steer_exit(p_tick, p_state, r_dx, r_dz, r_yaw, r_sprint, r_pose, r_jump);
 		return true;
 	}
+	if (wedged_ && horizontal(p_state.position, exit_at_) > kWedgeArriveMetres &&
+			p_tick - exit_progress_tick_ < kWedgeGiveUpTicks) {
+		steer_exit(p_tick, p_state, r_dx, r_dz, r_yaw, r_sprint, r_pose, r_jump);
+		return true;
+	}
+	wedged_ = false;
 	const sim::bots::WalkerView wv = sh.nav->view(p_tick, slot_, p_state, goals_, sh.eye_of(sim::Pose::Stand));
 	const sim::Command wc = walker_->command(wv);
+	check_wedge(sh, p_tick, p_state, p_world);
 	const float wy = sim::yaw_radians(wc.yaw);
 	const float f = sim::axis_value(wc.move_forward), r = sim::axis_value(wc.move_right);
 	r_dx = f * std::sin(wy) - r * std::cos(wy);

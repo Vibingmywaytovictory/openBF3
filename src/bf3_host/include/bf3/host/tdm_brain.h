@@ -96,6 +96,7 @@ struct TdmBotStats {
 	std::atomic<uint64_t> heat_goals{ 0 };
 	std::atomic<uint32_t> walk_unavailable{ 0 };
 	std::atomic<uint64_t> off_main_ticks{ 0 };
+	std::atomic<uint64_t> wedge_exits{ 0 };
 	std::atomic<uint64_t> hunts_given_up{ 0 };
 	std::atomic<uint64_t> medkit_throws{ 0 };
 	std::atomic<uint64_t> ammo_throws{ 0 };

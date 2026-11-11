@@ -14,6 +14,7 @@ namespace bf3::sim {
 
 inline constexpr uint32_t kMaxNavPathPolys = 512;
 inline constexpr uint32_t kMaxNavCorners = 8;
+inline constexpr float kNavCorridorSlack = 1.0f;
 
 struct NavQueryOptions {
 	uint32_t max_nodes = 4096;

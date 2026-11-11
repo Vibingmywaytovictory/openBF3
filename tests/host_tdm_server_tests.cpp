@@ -3153,6 +3153,74 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(component(at) == level->bots->main_component);
 		CHECK(m->rules().stats().squad_spawns == squad_before);
 	}
+
+	TEST_CASE("nav: a bot standing 1.1 m off the nav mesh at Metro's (-189.1, 64.2, -542.7), where an E2 bot stood "
+			  "40 s, walks back onto the mesh") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		REQUIRE(level->bots != nullptr);
+		core::Result<std::unique_ptr<sim::NavQuery>> nav = sim::NavQuery::create(level->bots->nav);
+		REQUIRE_MESSAGE(nav.ok(), (nav.ok() ? std::string() : nav.error().message));
+		if (!nav.ok()) {
+			return;
+		}
+		const auto off_mesh = [&](const sim::Vec3 &p_at) {
+			sim::NavPolyRef poly = 0;
+			sim::Vec3 at{};
+			return (*nav)->nearest(p_at, { 3.0f, 2.5f, 3.0f }, &poly, &at) && poly != 0
+					? core::vec::horizontal_distance(p_at, at)
+					: 1e9f;
+		};
+		const sim::Vec3 wedge{ -189.07f, 64.28f, -542.67f };
+		auto stats = std::make_shared<host::TdmBotStats>();
+		std::unique_ptr<Match> m = start_match(*level, true, 103u, 0, 1, gadget_bot_server(*level, 0, stats, false));
+		const GadgetBotMatch g = gadget_bot_match(*m);
+		REQUIRE(g.mate != nullptr);
+		if (g.mate == nullptr) {
+			return;
+		}
+		std::optional<sim::Vec3> away;
+		for (const sim::SpawnPoint &sp : m->level->spawns) {
+			const std::optional<sim::Vec3> f = floor_at(*m->world, sp.position);
+			if (f && core::vec::horizontal_distance(*f, wedge) >= 60.0f &&
+					m->motor.fits_standing(add(*f, 0.0f, 0.05f, 0.0f))) {
+				away = f;
+				break;
+			}
+		}
+		REQUIRE(away.has_value());
+		if (!away.has_value()) {
+			return;
+		}
+		m->teleport(*g.mate, add(*away, 0.0f, 0.05f, 0.0f));
+		m->place(g.bot, wedge);
+		m->ticks(5);
+		REQUIRE(is_alive(m->state(g.bot)));
+		const sim::Vec3 start = m->state(g.bot)->position;
+		const float start_off = off_mesh(start);
+		CHECK(start_off > 1.0f);
+		float off = start_off, moved = 0.0f;
+		const sim::Tick placed = m->now();
+		const bool back = m->until(
+				[&] {
+					const sim::SoldierState *b = m->state(g.bot);
+					if (!is_alive(b)) {
+						return false;
+					}
+					off = off_mesh(b->position);
+					moved = core::vec::horizontal_distance(b->position, start);
+					return off <= 0.5f && moved >= 1.0f;
+				},
+				600);
+		std::printf("wedge: bot placed at (%.2f %.2f %.2f), %.2f m off the mesh; after %u ticks %.2f m off, moved "
+					"%.2f m, %llu wedge exits\n",
+				start[0], start[1], start[2], start_off, unsigned(m->now() - placed), off, moved,
+				(unsigned long long)stats->wedge_exits.load());
+		CHECK(back);
+		CHECK(stats->wedge_exits.load() >= 1u);
+	}
 }
 
 namespace {

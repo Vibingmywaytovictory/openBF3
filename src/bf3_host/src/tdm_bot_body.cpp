@@ -233,8 +233,8 @@ void BotBody::compose(const BotFrame &p_frame, TdmBotActivity p_activity, const 
 
 bool BotBody::walk(const BotFrame &p_frame, BotIntent &r_intent) {
 	BotIntent &i = r_intent;
-	if (navigation.walk(*shared, p_frame.tick, p_frame.self, i.walk_dx, i.walk_dz, i.walk_yaw, i.walk_sprint,
-				i.walk_pose, i.walk_jump)) {
+	if (navigation.walk(*shared, p_frame.tick, p_frame.self, p_frame.world, i.walk_dx, i.walk_dz, i.walk_yaw,
+				i.walk_sprint, i.walk_pose, i.walk_jump)) {
 		i.move_dx = i.walk_dx;
 		i.move_dz = i.walk_dz;
 		i.pose = i.walk_pose;

@@ -294,6 +294,12 @@ struct WalkerBrain::Impl {
 				back_target_valid = query.nearest(pos, back, &start, &back_target);
 				return;
 			}
+			if (horizontal_distance(pos, start_point) > kNavCorridorSlack) {
+				off_mesh = true;
+				back_target = start_point;
+				back_target_valid = true;
+				return;
+			}
 			off_mesh = false;
 			back_target_valid = false;
 			if (p_view.components != nullptr) {

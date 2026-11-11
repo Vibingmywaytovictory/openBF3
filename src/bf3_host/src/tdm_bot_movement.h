@@ -27,11 +27,16 @@ public:
 	void clear_goal();
 	void pick_roam_goal(TdmShared &r_shared, sim::Tick p_tick, const sim::Vec3 &p_at, uint64_t &r_rng);
 
-	bool walk(TdmShared &r_shared, sim::Tick p_tick, const sim::SoldierState &p_state, float &r_dx, float &r_dz, float &r_yaw, bool &r_sprint, sim::Pose &r_pose,
-			bool &r_jump);
+	bool walk(TdmShared &r_shared, sim::Tick p_tick, const sim::SoldierState &p_state,
+			const sim::CollisionWorld &p_world, float &r_dx, float &r_dz, float &r_yaw, bool &r_sprint,
+			sim::Pose &r_pose, bool &r_jump);
 
 private:
 	void check_island(TdmShared &r_shared, sim::Tick p_tick, const sim::SoldierState &p_state);
+	void check_wedge(TdmShared &r_shared, sim::Tick p_tick, const sim::SoldierState &p_state,
+			const sim::CollisionWorld &p_world);
+	void steer_exit(sim::Tick p_tick, const sim::SoldierState &p_state, float &r_dx, float &r_dz, float &r_yaw,
+			bool &r_sprint, sim::Pose &r_pose, bool &r_jump);
 	std::optional<sim::Vec3> heat_goal(TdmShared &r_shared, sim::Tick p_tick, const sim::Vec3 &p_at, uint64_t &r_rng);
 
 	uint8_t slot_ = 0xFF;
@@ -48,6 +53,11 @@ private:
 	sim::Vec3 exit_at_{};
 	sim::Vec3 exit_from_{};
 	sim::Tick exit_progress_tick_ = 0;
+
+	bool wedged_ = false;
+	uint64_t off_mesh_seen_ = 0;
+	sim::Vec3 wedge_from_{};
+	sim::Tick wedge_since_ = 0;
 };
 
 class BotStrafe {

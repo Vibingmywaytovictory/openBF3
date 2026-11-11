@@ -303,7 +303,7 @@ bool NavCorridor::move_position(NavQuery &p_query, const Vec3 &p_position) {
 
 	const float *p = m.corridor.getPos();
 	const float dx = p[0] - p_position[0], dz = p[2] - p_position[2];
-	return dx * dx + dz * dz <= 1.0f && std::fabs(p[1] - p_position[1]) <= 2.5f;
+	return dx * dx + dz * dz <= kNavCorridorSlack * kNavCorridorSlack && std::fabs(p[1] - p_position[1]) <= 2.5f;
 }
 
 uint32_t NavCorridor::corners(NavQuery &p_query, NavCorner *r_corners, uint32_t p_max) {
