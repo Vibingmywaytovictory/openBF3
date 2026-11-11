@@ -10,8 +10,7 @@ bool CallRadioVoices::settings(int p_type, RadioMessageSettings &r_settings) con
 	return true;
 }
 
-CommunicationAgent::CommunicationAgent(const RadioVoices &p_voices, CommunicationHub &r_hub) :
-		voices_(p_voices), hub_(r_hub) {
+CommunicationAgent::CommunicationAgent(const RadioVoices &p_voices, RadioComm &r_hub) : voices_(p_voices), hub_(r_hub) {
 	for (size_t type = 0; type < kRadioMessageTypes; ++type) {
 		RadioMessageSettings s;
 		if (voices_.settings(int(type), s)) {

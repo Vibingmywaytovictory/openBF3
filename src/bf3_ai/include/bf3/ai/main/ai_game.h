@@ -31,6 +31,8 @@ public:
 	virtual AiObject *player_default_vehicle(int p_player_id) const = 0;
 	virtual void occupied_objects(std::vector<std::pair<int, AiObject *>> &r_out) const = 0;
 	virtual uint32_t force_information(AiObject &r_object, int p_side, bool p_known) = 0;
+	virtual bool player_camera(int p_player_id, Transform &r_camera) const = 0;
+	virtual void enemy_spotted_by_ai(int p_spotter, const AiObject &p_spotted) = 0;
 };
 
 class StrategicAi {

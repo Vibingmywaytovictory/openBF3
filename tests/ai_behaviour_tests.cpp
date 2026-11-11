@@ -82,7 +82,7 @@ struct Voices final : RadioVoices {
 	}
 };
 
-struct Hub final : CommunicationHub {
+struct Hub final : RadioComm {
 	struct Sent {
 		int sender = -1;
 		int side = 0;

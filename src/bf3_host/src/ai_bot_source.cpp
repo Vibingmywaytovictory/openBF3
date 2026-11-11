@@ -1,5 +1,6 @@
 #include "bf3/host/ai_bot_source.h"
 
+#include "bf3/ai/main/communication_hub.h"
 #include "bf3/host/server_view.h"
 #include "bf3/sim/command.h"
 #include "tdm_bot_body.h"
@@ -39,9 +40,10 @@ TdmBotActivity tdm_activity(ai::InfantryActivity p_activity) {
 	return TdmBotActivity::Roam;
 }
 
-struct AiBotSource::Impl final : ai::InfantryBody, ai::CommunicationHub {
+struct AiBotSource::Impl final : ai::InfantryBody, ai::RadioComm, ai::AiTimer {
 	BotBody body;
 	std::optional<ai::CallRadioVoices> voices;
+	std::optional<ai::CommunicationHub> hub;
 	std::unique_ptr<ai::BotMain> bot;
 	sim::Tick now = 0;
 	const sim::SoldierState *state = nullptr;
@@ -56,6 +58,9 @@ struct AiBotSource::Impl final : ai::InfantryBody, ai::CommunicationHub {
 	const BotFrame &f() const { return *frame; }
 
 	sim::Tick tick() const override { return now; }
+	sim::Tick game_tick() const override { return now; }
+	double tick_seconds() const override { return sim::kTickSeconds; }
+	double update_time() const override { return 0.0; }
 	ai::Vec3 position() const override { return state->position; }
 
 	void see() override { sighting = body.see(now, *state, view().states()); }
@@ -314,7 +319,12 @@ AiBotSource::AiBotSource(std::shared_ptr<TdmShared> p_shared, uint32_t p_index) 
 	const ai::BehaviourTuning &tuning = m.body.shared != nullptr ? m.body.cfg().behaviours : s_defaults;
 	m.bot = std::make_unique<ai::BotMain>(p_index, -1, 0, m, tuning);
 	m.voices.emplace(tuning.call_s);
-	m.bot->attach_communication(*m.voices, m);
+	ai::CommunicationHubServices hub;
+	hub.radio = &m;
+	hub.voices = &*m.voices;
+	hub.timer = &m;
+	m.hub.emplace(hub);
+	m.bot->attach_communication(*m.voices, *m.hub);
 	if (m.body.shared != nullptr) {
 		m.body.shared->count(&TdmBotStats::bf2_bots, uint32_t(1));
 	}

@@ -107,7 +107,7 @@ public:
 	bool join_squad(int p_squad) override;
 	void set_squad_goal(const SquadGoal &p_goal) override { squad_goal_ = p_goal; }
 
-	void attach_communication(const RadioVoices &p_voices, CommunicationHub &r_hub);
+	void attach_communication(const RadioVoices &p_voices, RadioComm &r_hub);
 	void call_for_medic();
 	void update_bot(bool p_alive, bool p_new_life);
 	bool wants_decision() const;

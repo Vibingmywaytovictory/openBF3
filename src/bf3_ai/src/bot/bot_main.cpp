@@ -97,7 +97,7 @@ void BotMain::reset() {
 	ordered_behaviour_ = -1;
 }
 
-void BotMain::attach_communication(const RadioVoices &p_voices, CommunicationHub &r_hub) {
+void BotMain::attach_communication(const RadioVoices &p_voices, RadioComm &r_hub) {
 	communication_ = std::make_unique<CommunicationAgent>(p_voices, r_hub);
 }
 

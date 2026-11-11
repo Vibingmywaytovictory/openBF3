@@ -13,6 +13,8 @@
 #include "bf3/ai/knowledge/plug_ins.h"
 #include "bf3/ai/knowledge/weapon_info.h"
 #include "bf3/ai/main/ai_main.h"
+#include "bf3/ai/main/communication_hub.h"
+#include "bf3/ai/strategic/strategic_object.h"
 
 #include <algorithm>
 #include <array>
@@ -525,8 +527,16 @@ struct FakeGame final : AiGame {
 	AiObject *player_default_vehicle(int) const override { return vehicle; }
 	void occupied_objects(std::vector<std::pair<int, AiObject *>> &r_out) const override { r_out = occupied; }
 	uint32_t force_information(AiObject &r_object, int p_side, bool) override { return r_object.information(p_side); }
+	bool player_camera(int, Transform &r_camera) const override {
+		r_camera = camera;
+		return true;
+	}
+	void enemy_spotted_by_ai(int p_spotter, const AiObject &) override {
+		calls->log.push_back("spotted " + std::to_string(p_spotter));
+	}
 	AiObject *vehicle = nullptr;
 	std::vector<std::pair<int, AiObject *>> occupied;
+	Transform camera;
 };
 
 struct FakeSai final : StrategicAi {
@@ -886,6 +896,139 @@ TEST_SUITE("ai-port") {
 		w.calls.log.clear();
 		timeless.bot_manager().action_hearing(1.0);
 		CHECK(w.calls.log == std::vector<std::string>{ "heard 0 42" });
+	}
+
+	TEST_CASE("CommunicationHub: a pickup request within 20 s goes to the bot it names, the rest to the radio") {
+		struct Radio final : RadioComm {
+			std::vector<std::pair<int, int>> sent;
+			void send_radio_message(int, int p_side, const RadioMessage &p_message) override {
+				sent.emplace_back(p_side, p_message.type);
+			}
+		};
+		struct Voices final : RadioVoices {
+			bool settings(int p_type, RadioMessageSettings &r_settings) const override {
+				r_settings = RadioMessageSettings{ p_type, 1.0f, 30.0f, 5.0f };
+				return true;
+			}
+		};
+		struct TalkingBot final : NullBot {
+			std::unique_ptr<CommunicationAgent> agent;
+			CommunicationAgent *communication() const override { return agent.get(); }
+		};
+		struct Factory final : BotFactory {
+			Voices *voices = nullptr;
+			Radio *radio = nullptr;
+			std::vector<TalkingBot *> made;
+			std::unique_ptr<Bot> create_bot(int p_player_id, uint32_t p_bot_id, const float *, int p_side) override {
+				auto bot = std::make_unique<TalkingBot>();
+				bot->id = p_bot_id;
+				bot->player = p_player_id;
+				bot->team = p_side;
+				bot->agent = std::make_unique<CommunicationAgent>(*voices, *radio);
+				made.push_back(bot.get());
+				return bot;
+			}
+		};
+		Calls calls;
+		Knowledge knowledge;
+		FakeGame game;
+		game.calls = &calls;
+		Radio radio;
+		Voices voices;
+		Factory factory;
+		factory.voices = &voices;
+		factory.radio = &radio;
+		AiSettings settings;
+		settings.max_bots = 1;
+		AiMainServices services;
+		services.settings = &settings;
+		services.timer = &knowledge.timer;
+		services.information = &knowledge.information;
+		services.game = &game;
+		services.factory = &factory;
+		AIMain main(services);
+		REQUIRE(main.bot_manager().add_unspawned_bot(12, 1, nullptr));
+		FakeObject body;
+		body.where = { 0.0f, 0.0f, 10.0f };
+		factory.made[0]->equipment = knowledge.soldier(body, 1);
+		CommunicationHubServices hub_services;
+		hub_services.radio = &radio;
+		hub_services.voices = &voices;
+		hub_services.timer = &knowledge.timer;
+		hub_services.game = &game;
+		hub_services.bots = &main.bot_manager();
+		hub_services.information = &knowledge.information;
+		CommunicationHub hub(hub_services);
+		hub.reset();
+		RadioMessage pickup;
+		pickup.type = kRadioRequestPickup;
+		pickup.receiver = 12;
+		hub.send_radio_message(5, 1, pickup);
+		CHECK(radio.sent == std::vector<std::pair<int, int>>{ { 1, kRadioRequestPickup } });
+		CHECK(hub.last_pickup_send_time(1) == doctest::Approx(10.0));
+		knowledge.timer.tick += 60;
+		hub.send_radio_message(5, 1, pickup);
+		CHECK(radio.sent.size() == 1);
+		const CommunicationAgent &agent = *factory.made[0]->agent;
+		CHECK(agent.received_message_exists(kRadioRequestPickup, 5));
+		pickup.receiver = 3;
+		hub.send_radio_message(6, 1, pickup);
+		CHECK(radio.sent.size() == 1);
+		CHECK_FALSE(agent.received_message_exists(kRadioRequestPickup, 6));
+		hub.send_radio_message(6, 2, pickup);
+		RadioMessage call;
+		call.type = kRadioCallForMedic;
+		hub.send_radio_message(6, 1, call);
+		CHECK(radio.sent ==
+				std::vector<std::pair<int, int>>{
+						{ 1, kRadioRequestPickup }, { 2, kRadioRequestPickup }, { 1, kRadioCallForMedic } });
+
+		RadioMessageSettings request{ kRadioRequestPickup, 1.0f, 30.0f, 5.0f };
+		hub.filter_and_receive_ai_radio_message(request, 12, 12, false);
+		CHECK_FALSE(agent.received_message_exists(kRadioRequestPickup, 12));
+		game.camera.forward = { 0.0f, 0.0f, 1.0f };
+		hub.filter_and_receive_ai_radio_message(request, 3, 12, false);
+		CHECK(agent.received_message_exists(kRadioRequestPickup, 3));
+		game.camera.forward = { 0.0f, 0.0f, -1.0f };
+		hub.filter_and_receive_ai_radio_message(request, 4, 12, false);
+		CHECK_FALSE(agent.received_message_exists(kRadioRequestPickup, 4));
+	}
+
+	TEST_CASE(
+			"CommunicationHub: a bot's sighting is reported once per area a minute; a human's stamps the information") {
+		Calls calls;
+		Knowledge knowledge;
+		FakeGame game;
+		game.calls = &calls;
+		AIStrategicObjectManager objects{ StrategicServices{} };
+		REQUIRE(objects.create("north", { -10.0f, -10.0f }, { 0.0f, 0.0f }, 0.0f, 10.0f, std::string()));
+		REQUIRE(objects.create("south", { 90.0f, -10.0f }, { 100.0f, 0.0f }, 0.0f, 10.0f, std::string()));
+		CommunicationHubServices hub_services;
+		hub_services.timer = &knowledge.timer;
+		hub_services.game = &game;
+		hub_services.information = &knowledge.information;
+		hub_services.objects = &objects;
+		CommunicationHub hub(hub_services);
+		hub.reset();
+		REQUIRE(hub.combat_strengths(1).size() == 2);
+		CHECK(hub.combat_strengths(2)[1] == std::pair<int, double>{ kCombatStrengthNone, -1000.0 });
+		FakeObject enemy;
+		enemy.primary = true;
+		enemy.where = { 5.0f, 0.0f, 5.0f };
+		knowledge.soldier(enemy, 1);
+		hub.enemy_spotted_by_ai(7, enemy, 1);
+		CHECK(calls.log == std::vector<std::string>{ "spotted 7" });
+		CHECK(hub.combat_strengths(1)[0].second == doctest::Approx(10.0));
+		hub.enemy_spotted_by_ai(7, enemy, 1);
+		CHECK(calls.log.size() == 1);
+		enemy.where = { 200.0f, 0.0f, 0.0f };
+		knowledge.timer.tick += 3600;
+		hub.enemy_spotted_by_ai(7, enemy, 1);
+		CHECK(calls.log.size() == 1);
+		const uint32_t known = knowledge.factory.request_information_known(kNoHandle, &enemy, 1u, 0, 5.0f, 0.5f, 0, 2);
+		enemy.handles[2] = known;
+		hub.enemy_spotted_by_human(enemy, 2);
+		CHECK(knowledge.information.information(known)->time() == knowledge.timer.tick);
 	}
 
 	TEST_CASE("AIMain: a human joining a full server terminates a bot on the larger side") {

@@ -50,9 +50,9 @@ struct RadioMessage {
 	bool operator<(const RadioMessage &p_other) const { return priority < p_other.priority; }
 };
 
-class CommunicationHub {
+class RadioComm {
 public:
-	virtual ~CommunicationHub() = default;
+	virtual ~RadioComm() = default;
 	virtual void send_radio_message(int p_sender, int p_side, const RadioMessage &p_message) = 0;
 };
 
@@ -67,7 +67,7 @@ struct ReceivedRadioMessage {
 
 class CommunicationAgent {
 public:
-	CommunicationAgent(const RadioVoices &p_voices, CommunicationHub &r_hub);
+	CommunicationAgent(const RadioVoices &p_voices, RadioComm &r_hub);
 
 	void reset();
 	void update(double p_now, int p_player, int p_side);
@@ -97,7 +97,7 @@ public:
 
 private:
 	const RadioVoices &voices_;
-	CommunicationHub &hub_;
+	RadioComm &hub_;
 	std::array<std::list<ReceivedRadioMessage>, kRadioMessageTypes> received_{};
 	std::map<int, double> pending_;
 	std::priority_queue<RadioMessage> queue_;
