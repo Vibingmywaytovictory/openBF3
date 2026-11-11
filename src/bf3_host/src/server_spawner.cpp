@@ -129,6 +129,11 @@ bool Spawner::spawn(size_t p_slot, size_t p_point, sim::Tick p_tick) {
 	}
 	if (index >= points.size()) {
 		++failures_;
+		if (s.remote && !respawns_[p_slot].wanted) {
+			outbox_.send(s.peer, net::kChannelReliable,
+					net::encode_spawn_answer(
+							{ net::SpawnAnswerKind::NoSpawnPoint, match_.spawn_choice_pending(p_slot) }));
+		}
 		return false;
 	}
 	enter_at(p_slot, points[index], p_tick);

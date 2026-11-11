@@ -3576,6 +3576,94 @@ TEST_SUITE("host-tdm-conquest") {
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 
+	TEST_CASE("conquest: a flag spawn choice deploys on the chosen flag once the team holds it; a closed flag is "
+			  "refused and a flag lost in the deploy's tick leaves no open point, both answered on the wire") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::SharedLevel &shared = *level->shared;
+		std::unique_ptr<Match> m = start_match(*level, true, 61u, 0, 2);
+		std::vector<Script *> bots;
+		for (int i = 0; i < 3; ++i) {
+			bots.push_back(m->bot());
+		}
+		tdm::ScriptedPeer &p = m->join("flagger");
+		p.ready();
+		REQUIRE(wait_in_round(*m));
+		const sim::logic::ConquestNatives &cq = conquest_of(*m);
+		const uint8_t team = m->rules().team_of(uint8_t(p.slot()));
+		Script *mate = nullptr;
+		Script *enemy = nullptr;
+		for (Script *b : bots) {
+			(m->rules().team_of(uint8_t(b->slot)) == team ? mate : enemy) = b;
+		}
+		REQUIRE(mate != nullptr);
+		REQUIRE(enemy != nullptr);
+		REQUIRE(m->until([&] { return is_alive(m->state(mate->slot)) && is_alive(m->state(enemy->slot)); }, 600));
+		size_t flag = SIZE_MAX;
+		for (size_t i = 0; i < cq.points().size() && flag == SIZE_MAX; ++i) {
+			flag = !cq.points()[i].hq && cq.points()[i].team == 0 ? i : SIZE_MAX;
+		}
+		REQUIRE(flag != SIZE_MAX);
+		const uint8_t choice = uint8_t(net::kSpawnChoiceFlag + flag);
+		const sim::Vec3 flag_at = cq.points()[flag].position;
+		CHECK_FALSE(m->rules().flag_open(flag, team));
+		p.spawn_request(1, choice);
+		m->ticks(2);
+		REQUIRE_FALSE(p.spawn_answers.empty());
+		CHECK(p.spawn_answers.back().kind == net::SpawnAnswerKind::FlagClosed);
+		CHECK(p.spawn_answers.back().spawn_choice == choice);
+		CHECK_FALSE(is_alive(m->state(p.slot())));
+		CHECK(m->rules().stats().refused[size_t(host::SpawnRefusal::FlagClosed)] == 1u);
+
+		m->place(mate->slot, ground_at(*m->world, flag_at[0], flag_at[2], flag_at[1] + 50.0f));
+		REQUIRE(m->until([&] { return m->rules().flag_open(flag, team); }, 1500));
+		p.spawn_request(1, choice);
+		REQUIRE(m->until([&] { return is_alive(m->state(p.slot())); }, 240));
+		const sim::Vec3 at = m->state(p.slot())->position;
+		size_t nearest = SIZE_MAX;
+		float best = 1e9f;
+		for (size_t i = 0; i < shared.spawns.size(); ++i) {
+			const float d = distance(shared.spawns[i].position, at);
+			if (d < best) {
+				best = d;
+				nearest = i;
+			}
+		}
+		REQUIRE(nearest != SIZE_MAX);
+		std::printf("conquest: the peer deployed on flag %zu at (%.1f %.1f %.1f), %.1f m from spawn point %zu, %.0f m "
+					"from the flag\n",
+				flag, at[0], at[1], at[2], best, nearest, distance(at, flag_at));
+		CHECK(best < 2.0f);
+		CHECK(m->rules().spawn_point_in_flag(flag, shared.spawns[nearest]));
+		CHECK(m->rules().stats().flag_spawns == 1u);
+
+		m->server.on_receive(p.peer(), net::kChannelReliable, net::encode_suicide_request());
+		m->ticks(3);
+		REQUIRE_FALSE(is_alive(m->state(p.slot())));
+		const uint32_t earliest = m->rules().earliest_respawn(uint8_t(p.slot()));
+		m->place(mate->slot, ground_at(*m->world, flag_at[0] + 400.0f, flag_at[2], flag_at[1] + 300.0f));
+		m->place(enemy->slot, ground_at(*m->world, flag_at[0], flag_at[2], flag_at[1] + 50.0f));
+		const auto flag_progress = [&] { return cq.points()[flag].progress; };
+		REQUIRE(m->until(
+				[&] { return m->now() >= earliest && flag_progress() > 0.0f && flag_progress() < 0.09f; }, 1500));
+		REQUIRE(m->rules().flag_open(flag, team));
+		const size_t answers = p.spawn_answers.size();
+		p.spawn_request(1, choice);
+		m->ticks(2);
+		std::printf("conquest: the flag fell to team %u in the deploy's tick; answers %zu -> %zu, alive %d\n",
+				unsigned(cq.points()[flag].team), answers, p.spawn_answers.size(), int(is_alive(m->state(p.slot()))));
+		CHECK_FALSE(m->rules().flag_open(flag, team));
+		CHECK_FALSE(is_alive(m->state(p.slot())));
+		REQUIRE(p.spawn_answers.size() == answers + 1u);
+		CHECK(p.spawn_answers.back().kind == net::SpawnAnswerKind::NoSpawnPoint);
+		CHECK(p.spawn_answers.back().spawn_choice == choice);
+		p.spawn_request(1, 0);
+		REQUIRE(m->until([&] { return is_alive(m->state(p.slot())); }, 240));
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+
 	TEST_CASE("conquest: a revive costs no ticket, a redeploy costs one (M-CQ2 rule 4)") {
 		tdm::TdmLevel *level = tdm::load_conquest_level_once();
 		if (level == nullptr) {

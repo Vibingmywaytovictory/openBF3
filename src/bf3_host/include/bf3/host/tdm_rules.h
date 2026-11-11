@@ -103,9 +103,12 @@ enum class SpawnRefusal : uint8_t {
 	Phase = 4,
 	RateLimited = 5,
 	Spectator = 6,
-	SquadMate = 7
+	SquadMate = 7,
+	FlagClosed = 8
 };
-inline constexpr size_t kSpawnRefusalCount = 8;
+inline constexpr size_t kSpawnRefusalCount = 9;
+
+std::optional<net::SpawnAnswerKind> spawn_answer_of(SpawnRefusal p_refusal);
 inline constexpr sim::Vec3 kSquadSpawnNavExtents{ 1.0f, 2.0f, 1.0f };
 
 inline constexpr uint8_t kKeepKit = 0xFF;
@@ -137,6 +140,7 @@ struct RulesStats {
 	uint64_t squad_revives = 0, squad_wipes = 0;
 	uint64_t level_ends = 0;
 	uint64_t beacon_spawns = 0;
+	uint64_t flag_spawns = 0;
 };
 static_assert(std::is_trivially_copyable_v<RulesStats>);
 
@@ -172,6 +176,9 @@ public:
 	SquadRefusal request_squad(uint8_t p_slot, const net::SquadRequest &p_request);
 	bool set_squad_order(uint8_t p_team, uint8_t p_squad, const SquadOrderState &p_order);
 	void set_spawn_choice(uint8_t p_slot, uint8_t p_choice);
+	uint8_t spawn_choice_pending(uint8_t p_slot) const;
+	bool flag_open(size_t p_point, uint8_t p_team) const;
+	bool spawn_point_in_flag(size_t p_point, const sim::SpawnPoint &p_spawn) const;
 	void set_ping(uint8_t p_slot, uint16_t p_ms);
 	bool take_squad_spawn(
 			uint8_t p_slot, std::span<const sim::SoldierState> p_live, sim::Vec3 &r_position, uint16_t &r_yaw);

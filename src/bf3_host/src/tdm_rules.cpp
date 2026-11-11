@@ -261,6 +261,15 @@ core::Result<TdmTuning> load_tdm_tuning(const std::string &p_path) {
 	return t;
 }
 
+std::optional<net::SpawnAnswerKind> spawn_answer_of(SpawnRefusal p_refusal) {
+	switch (p_refusal) {
+		case SpawnRefusal::FlagClosed:
+			return net::SpawnAnswerKind::FlagClosed;
+		default:
+			return std::nullopt;
+	}
+}
+
 struct TdmRules::Impl {
 	struct Slot {
 		bool connected = false;
@@ -281,6 +290,7 @@ struct TdmRules::Impl {
 		bool pending_spawn = false;
 		int16_t spawn_mate = kNoSquadMate;
 		bool spawn_beacon = false;
+		int8_t spawn_flag = -1;
 		std::optional<sim::Vec3> beacon;
 		uint8_t bot_spawn_choice = 0;
 		bool suicide = false;
@@ -504,6 +514,55 @@ struct TdmRules::Impl {
 	int squad_mate(uint8_t p_slot, uint8_t p_spawn_choice) const {
 		const int mate = p_spawn_choice != 0 ? squads.mate(p_slot, uint8_t(p_spawn_choice - 1u)) : kNoSquadMate;
 		return mate_ready(p_slot, mate, last_states) ? mate : kNoSquadMate;
+	}
+
+	const lg::ConquestParams *conquest_params() const {
+		return native_config.params ? native_config.params->conquest.get() : nullptr;
+	}
+
+	bool flag_open(size_t p_point, uint8_t p_team) const {
+		const lg::ConquestNatives *conquest = natives ? natives->conquest() : nullptr;
+		const lg::ConquestParams *params = conquest_params();
+		if (conquest == nullptr || params == nullptr || p_point >= params->points.size() || p_team == 0) {
+			return false;
+		}
+		for (const uint32_t node : params->points[p_point].spawners) {
+			const lg::ConquestSpawnerData *d = params->spawner(node);
+			if (d != nullptr && !d->vehicle && conquest->spawner_open(node, p_team)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool spawn_point_in_flag(size_t p_point, const sim::SpawnPoint &p_spawn) const {
+		const lg::ConquestParams *params = conquest_params();
+		if (params == nullptr || p_point >= params->points.size() || p_spawn.index >= spawn_spawners.size()) {
+			return false;
+		}
+		for (const uint32_t node : params->points[p_point].spawners) {
+			const lg::ConquestSpawnerData *d = params->spawner(node);
+			if (d != nullptr && !d->vehicle && d->level_object == spawn_spawners[p_spawn.index]) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	SpawnRefusal choice_refusal(uint8_t p_slot, const Slot &p_state, uint8_t p_spawn_choice) const {
+		if (net::spawn_choice_is_flag(p_spawn_choice)) {
+			return flag_open(size_t(p_spawn_choice - net::kSpawnChoiceFlag), team_of(p_slot))
+					? SpawnRefusal::None
+					: SpawnRefusal::FlagClosed;
+		}
+		if (p_spawn_choice == net::kSpawnChoiceBeacon) {
+			return p_state.beacon.has_value() ? SpawnRefusal::None : SpawnRefusal::SquadMate;
+		}
+		if (p_spawn_choice == 0) {
+			return SpawnRefusal::None;
+		}
+		const int mate = squad_mate(p_slot, p_spawn_choice);
+		return mate == kNoSquadMate ? SpawnRefusal::SquadMate : SpawnRefusal::None;
 	}
 
 	sim::Vec3 squad_spawn_point(const sim::Vec3 &p_mate) {
@@ -903,6 +962,10 @@ void TdmRules::on_spawned(uint8_t p_slot, uint32_t p_tick, bool p_revived) {
 	s.corpse_valid = false;
 	s.corpse_fresh = false;
 	s.revive_until = 0;
+	if (s.spawn_flag >= 0 && !p_revived) {
+		++m.stats.flag_spawns;
+	}
+	s.spawn_flag = -1;
 	s.last_damage = p_tick;
 	s.damaged = false;
 	s.row_kit = kit_of(p_slot) != kKeepKit ? kit_of(p_slot) : s.row_kit;
@@ -1014,11 +1077,10 @@ SpawnRefusal TdmRules::request_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_sp
 			why = SpawnRefusal::Alive;
 		} else if (p_kit >= kKitCount) {
 			why = SpawnRefusal::BadKit;
-		} else if (p_spawn_choice == net::kSpawnChoiceBeacon
-						? !s->beacon.has_value()
-						: p_spawn_choice != 0 && m.squad_mate(p_slot, p_spawn_choice) == kNoSquadMate) {
-			why = SpawnRefusal::SquadMate;
-		} else if (p_tick < s->earliest) {
+		} else {
+			why = m.choice_refusal(p_slot, *s, p_spawn_choice);
+		}
+		if (why == SpawnRefusal::None && p_tick < s->earliest) {
 			why = SpawnRefusal::TooEarly;
 		}
 	}
@@ -1028,7 +1090,10 @@ SpawnRefusal TdmRules::request_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_sp
 	}
 	s->pending_spawn = true;
 	s->spawn_beacon = p_spawn_choice == net::kSpawnChoiceBeacon;
-	s->spawn_mate = s->spawn_beacon ? kNoSquadMate : int16_t(m.squad_mate(p_slot, p_spawn_choice));
+	s->spawn_flag =
+			net::spawn_choice_is_flag(p_spawn_choice) ? int8_t(p_spawn_choice - net::kSpawnChoiceFlag) : int8_t(-1);
+	s->spawn_mate =
+			s->spawn_beacon || s->spawn_flag >= 0 ? kNoSquadMate : int16_t(m.squad_mate(p_slot, p_spawn_choice));
 	s->kit = p_kit;
 	s->revive_until = 0;
 	m.remove_downed(p_slot);
@@ -1354,6 +1419,21 @@ void TdmRules::set_spawn_choice(uint8_t p_slot, uint8_t p_choice) {
 	}
 }
 
+uint8_t TdmRules::spawn_choice_pending(uint8_t p_slot) const {
+	if (p_slot >= impl_->slots.size() || impl_->slots[p_slot].spawn_flag < 0) {
+		return 0;
+	}
+	return uint8_t(net::kSpawnChoiceFlag + uint8_t(impl_->slots[p_slot].spawn_flag));
+}
+
+bool TdmRules::flag_open(size_t p_point, uint8_t p_team) const {
+	return impl_->flag_open(p_point, p_team);
+}
+
+bool TdmRules::spawn_point_in_flag(size_t p_point, const sim::SpawnPoint &p_spawn) const {
+	return impl_->spawn_point_in_flag(p_point, p_spawn);
+}
+
 bool TdmRules::take_squad_spawn(
 		uint8_t p_slot, std::span<const sim::SoldierState> p_live, sim::Vec3 &r_position, uint16_t &r_yaw) {
 	Impl &m = *impl_;
@@ -1475,7 +1555,9 @@ bool TdmRules::spawn_point_open(uint8_t p_slot, const sim::SpawnPoint &p_point) 
 	}
 	const uint32_t spawner =
 			p_point.index < m.spawn_spawners.size() ? m.spawn_spawners[p_point.index] : core::level::kNoSpawner;
-	return conquest->spawn_point_open(spawner, m.team_of(p_slot));
+	const int8_t flag = p_slot < m.slots.size() ? m.slots[p_slot].spawn_flag : int8_t(-1);
+	return conquest->spawn_point_open(spawner, m.team_of(p_slot)) &&
+			(flag < 0 || m.spawn_point_in_flag(size_t(flag), p_point));
 }
 
 sim::Command TdmRules::apply_input_restriction(const sim::Command &p_command) const {

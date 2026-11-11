@@ -562,7 +562,12 @@ struct GameServer::Impl {
 			++bad_datagrams;
 			return;
 		}
-		match.request_spawn(size_t(p_slot), r->kit, r->spawn_choice, tick + 1u);
+		const SpawnRefusal why = match.request_spawn(size_t(p_slot), r->kit, r->spawn_choice, tick + 1u);
+		if (const std::optional<net::SpawnAnswerKind> kind = spawn_answer_of(why);
+				kind && slots[size_t(p_slot)].remote) {
+			outbox.send(slots[size_t(p_slot)].peer, net::kChannelReliable,
+					net::encode_spawn_answer({ *kind, r->spawn_choice }));
+		}
 	}
 
 	void receive_loadout_request(int p_slot, std::span<const uint8_t> p_datagram) {

@@ -80,8 +80,12 @@ bool MatchControl::squad_spawn(
 	return on() && p_slot < slots_ && rules_->take_squad_spawn(uint8_t(p_slot), p_live, r_position, r_yaw);
 }
 
-void MatchControl::request_spawn(size_t p_slot, uint8_t p_kit, uint8_t p_spawn_choice, sim::Tick p_tick) {
-	(void)rules_->request_spawn(uint8_t(p_slot), p_kit, p_spawn_choice, p_tick);
+SpawnRefusal MatchControl::request_spawn(size_t p_slot, uint8_t p_kit, uint8_t p_spawn_choice, sim::Tick p_tick) {
+	return rules_->request_spawn(uint8_t(p_slot), p_kit, p_spawn_choice, p_tick);
+}
+
+uint8_t MatchControl::spawn_choice_pending(size_t p_slot) const {
+	return on() && p_slot < slots_ ? rules_->spawn_choice_pending(uint8_t(p_slot)) : uint8_t(0);
 }
 
 void MatchControl::request_squad(size_t p_slot, const net::SquadRequest &p_request) {
