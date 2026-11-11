@@ -118,6 +118,10 @@ bool decodes(net::MessageType p_type, std::span<const uint8_t> p_bytes) {
 			return net::decode_spot_states(p_bytes).ok();
 		case MessageType::OrderNotice:
 			return net::decode_order_notice(p_bytes).ok();
+		case MessageType::ConquestState:
+			return net::decode_conquest_state(p_bytes).ok();
+		case MessageType::SpawnAnswer:
+			return net::decode_spawn_answer(p_bytes).ok();
 		case MessageType::ShotEvents:
 			return net::decode_shot_events(p_bytes, frame).ok();
 		case MessageType::CombatEvents:

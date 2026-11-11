@@ -31,7 +31,7 @@ struct Rng {
 
 const net::ShotQuantization kFrame{ { -2048.0f, -512.0f, -2048.0f } };
 
-constexpr std::array<net::MessageType, 35> kTypes = {
+constexpr std::array<net::MessageType, 37> kTypes = {
 	net::MessageType::Snapshot,
 	net::MessageType::CommandPacket,
 	net::MessageType::SnapshotOthers,
@@ -67,6 +67,8 @@ constexpr std::array<net::MessageType, 35> kTypes = {
 	net::MessageType::OrderRequest,
 	net::MessageType::SpotStates,
 	net::MessageType::OrderNotice,
+	net::MessageType::ConquestState,
+	net::MessageType::SpawnAnswer,
 };
 
 const char *type_name(net::MessageType p_type) {
@@ -141,6 +143,10 @@ const char *type_name(net::MessageType p_type) {
 			return "SpotStates";
 		case net::MessageType::OrderNotice:
 			return "OrderNotice";
+		case net::MessageType::ConquestState:
+			return "ConquestState";
+		case net::MessageType::SpawnAnswer:
+			return "SpawnAnswer";
 	}
 	return "?";
 }
@@ -333,6 +339,14 @@ Verdict decode_as(net::MessageType p_type, std::span<const uint8_t> p_bytes) {
 			return check(
 					p_bytes, [](std::span<const uint8_t> p) { return net::decode_order_notice(p); },
 					[](const net::OrderNotice &p_m, bool &) { return net::encode_order_notice(p_m); });
+		case net::MessageType::ConquestState:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_conquest_state(p); },
+					[](const net::ConquestState &p_m, bool &) { return net::encode_conquest_state(p_m); });
+		case net::MessageType::SpawnAnswer:
+			return check(
+					p_bytes, [](std::span<const uint8_t> p) { return net::decode_spawn_answer(p); },
+					[](const net::SpawnAnswer &p_m, bool &) { return net::encode_spawn_answer(p_m); });
 	}
 	return Verdict::Refused;
 }
@@ -723,6 +737,20 @@ std::vector<Sample> samples() {
 		out.push_back({ net::MessageType::SpotStates, "SpotStates", net::encode_spot_states(ss) });
 		out.push_back({ net::MessageType::OrderNotice, "OrderNotice",
 				net::encode_order_notice({ bf3::sim::commo::OrderType::RequestAmmo, 11 }) });
+		net::ConquestState cq;
+		cq.server_tick = tick;
+		cq.tickets = { 120, 87 };
+		cq.initial_tickets = { 150, 150 };
+		cq.bleeding = { false, true };
+		cq.point_count = 3;
+		cq.points[0] = { 1, 1, net::kConquestProgressMax, 0, true, false };
+		cq.points[1] = { 2, 1, 5000, -670, true, true };
+		cq.points[2] = { 0, 0, 0, 0, false, false };
+		cq.return_by_tick = tick + 300;
+		cq.strike(7);
+		out.push_back({ net::MessageType::ConquestState, "ConquestState", net::encode_conquest_state(cq) });
+		out.push_back({ net::MessageType::SpawnAnswer, "SpawnAnswer",
+				net::encode_spawn_answer({ net::SpawnAnswerKind::NoSpawnPoint, net::kSpawnChoiceFlag }) });
 	}
 	return out;
 }

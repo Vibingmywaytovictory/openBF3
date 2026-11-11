@@ -25,7 +25,7 @@
 
 namespace bf3::net {
 
-inline constexpr uint16_t kProtocolVersion = 10;
+inline constexpr uint16_t kProtocolVersion = 11;
 inline constexpr uint8_t kChannelUnreliable = 0;
 inline constexpr uint8_t kChannelReliable = 1;
 inline constexpr uint8_t kChannelBulk = 2;
@@ -90,6 +90,8 @@ enum class MessageType : uint8_t {
 	OrderRequest = 44,
 	SpotStates = 45,
 	OrderNotice = 46,
+	ConquestState = 47,
+	SpawnAnswer = 48,
 };
 
 std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram);
@@ -650,6 +652,12 @@ struct PlayerList {
 };
 
 inline constexpr uint8_t kSpawnChoiceBeacon = 0xFF;
+inline constexpr size_t kMaxConquestPoints = 16;
+inline constexpr uint8_t kSpawnChoiceFlag = 0x80;
+
+constexpr bool spawn_choice_is_flag(uint8_t p_choice) {
+	return p_choice >= kSpawnChoiceFlag && p_choice < kSpawnChoiceFlag + kMaxConquestPoints;
+}
 
 struct SpawnRequest {
 	uint8_t kit = 0;
@@ -845,4 +853,53 @@ std::vector<uint8_t> encode_spot_states(const SpotStates &p_message);
 core::Result<SpotStates> decode_spot_states(std::span<const uint8_t> p_datagram);
 std::vector<uint8_t> encode_order_notice(const OrderNotice &p_message);
 core::Result<OrderNotice> decode_order_notice(std::span<const uint8_t> p_datagram);
+
+inline constexpr uint16_t kConquestProgressScale = 100;
+inline constexpr uint16_t kConquestProgressMax = 100 * kConquestProgressScale;
+
+struct ConquestPointWire {
+	uint8_t team = 0;
+	uint8_t attacker = 0;
+	uint16_t progress = 0;
+	int16_t rate = 0;
+	bool controlled = false;
+	bool under_attack = false;
+
+	bool operator==(const ConquestPointWire &) const = default;
+};
+
+struct ConquestState {
+	sim::Tick server_tick = 0;
+	std::array<uint16_t, kMaxTeam> tickets{};
+	std::array<uint16_t, kMaxTeam> initial_tickets{};
+	std::array<bool, kMaxTeam> bleeding{};
+	uint8_t point_count = 0;
+	std::array<ConquestPointWire, kMaxConquestPoints> points{};
+	sim::Tick return_by_tick = 0;
+	std::array<uint64_t, kMaxSlots / 64> struck{};
+
+	bool operator==(const ConquestState &) const = default;
+	bool is_struck(uint8_t p_slot) const {
+		return p_slot < kMaxSlots && ((struck[p_slot / 64] >> (p_slot % 64)) & 1u) != 0;
+	}
+	void strike(uint8_t p_slot) {
+		if (p_slot < kMaxSlots) {
+			struck[p_slot / 64] |= uint64_t(1) << (p_slot % 64);
+		}
+	}
+};
+static_assert(std::is_trivially_copyable_v<ConquestState>);
+
+enum class SpawnAnswerKind : uint8_t { NoSpawnPoint = 0, FlagClosed = 1, NotSquadLeader = 2 };
+inline constexpr uint8_t kSpawnAnswerKinds = 3;
+
+struct SpawnAnswer {
+	SpawnAnswerKind kind = SpawnAnswerKind::NoSpawnPoint;
+	uint8_t spawn_choice = 0;
+};
+
+std::vector<uint8_t> encode_conquest_state(const ConquestState &p_message);
+core::Result<ConquestState> decode_conquest_state(std::span<const uint8_t> p_datagram);
+std::vector<uint8_t> encode_spawn_answer(const SpawnAnswer &p_message);
+core::Result<SpawnAnswer> decode_spawn_answer(std::span<const uint8_t> p_datagram);
 }

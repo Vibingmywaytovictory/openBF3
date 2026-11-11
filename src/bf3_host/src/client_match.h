@@ -41,6 +41,11 @@ private:
 	std::vector<net::DeployableWire> deployables_;
 	std::array<net::SpotRow, net::kMaxSlots> spots_ = kNoSpots;
 	ReceivedOrder own_order_;
+	bool conquest_valid_ = false;
+	net::ConquestState conquest_;
+	uint64_t conquest_states_ = 0;
+	uint64_t spawn_answers_ = 0;
+	net::SpawnAnswer spawn_answer_;
 	uint64_t spot_state_messages_ = 0;
 	uint64_t deployable_messages_ = 0;
 	uint64_t bad_deployables_ = 0;

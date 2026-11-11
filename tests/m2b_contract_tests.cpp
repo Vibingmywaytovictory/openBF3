@@ -275,7 +275,7 @@ TEST_SUITE("m2b-contract") {
 		list.rows.push_back(row);
 		const net::SpawnRequest request{ 2, 0 };
 		if constexpr (kNtLanded) {
-			CHECK(net::kProtocolVersion == 10);
+			CHECK(net::kProtocolVersion == 11);
 			const std::vector<uint8_t> m = net::encode_match_state(match);
 			CHECK(net::peek_type(m) == net::MessageType::MatchState);
 			core::Result<net::MatchState> md = net::decode_match_state(m);

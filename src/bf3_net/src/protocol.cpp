@@ -1955,6 +1955,46 @@ template <class A, MaybeConst<OrderNotice> M> void serialize(A &r_a, M &r_m) {
 	r_a.check("unknown order type", [&] { return uint8_t(r_m.order) < uint8_t(sim::commo::OrderType::Count); });
 }
 
+constexpr unsigned kConquestProgressBits = 14;
+constexpr unsigned kConquestPointCountBits = 5;
+static_assert(kConquestProgressMax < (1u << kConquestProgressBits));
+static_assert(kMaxConquestPoints < (1u << kConquestPointCountBits));
+
+template <class A, MaybeConst<ConquestPointWire> P> void serialize(A &r_a, P &r_p) {
+	r_a.bits(r_p.team, 2);
+	r_a.bits(r_p.attacker, 2);
+	r_a.bits(r_p.progress, kConquestProgressBits);
+	r_a.bits(r_p.rate, 16);
+	r_a.bits(r_p.controlled, 1);
+	r_a.bits(r_p.under_attack, 1);
+	r_a.check("capture point out of range",
+			[&] { return r_p.team <= kMaxTeam && r_p.attacker <= kMaxTeam && r_p.progress <= kConquestProgressMax; });
+}
+
+template <class A, MaybeConst<ConquestState> M> void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.server_tick, 32);
+	for (size_t t = 0; t < kMaxTeam; ++t) {
+		r_a.bits(r_m.tickets[t], 16);
+		r_a.bits(r_m.initial_tickets[t], 16);
+		r_a.bits(r_m.bleeding[t], 1);
+	}
+	r_a.bits(r_m.point_count, kConquestPointCountBits);
+	r_a.check("capture point count out of range", [&] { return r_m.point_count <= kMaxConquestPoints; });
+	for (size_t i = 0; i < r_m.point_count && i < kMaxConquestPoints && r_a.ok(); ++i) {
+		serialize(r_a, r_m.points[i]);
+	}
+	r_a.bits(r_m.return_by_tick, 32);
+	for (auto &word : r_m.struck) {
+		r_a.bits(word, 64);
+	}
+}
+
+template <class A, MaybeConst<SpawnAnswer> M> void serialize(A &r_a, M &r_m) {
+	r_a.bits(r_m.kind, 4);
+	r_a.bits(r_m.spawn_choice, 8);
+	r_a.check("unknown spawn answer", [&] { return uint8_t(r_m.kind) < kSpawnAnswerKinds; });
+}
+
 struct Framing {
 	MessageType type;
 	const char *what;
@@ -2032,6 +2072,8 @@ std::optional<MessageType> peek_type(std::span<const uint8_t> p_datagram) {
 		case MessageType::OrderRequest:
 		case MessageType::SpotStates:
 		case MessageType::OrderNotice:
+		case MessageType::ConquestState:
+		case MessageType::SpawnAnswer:
 			return MessageType(p_datagram[0]);
 	}
 	return std::nullopt;
@@ -2659,5 +2701,21 @@ std::vector<uint8_t> encode_order_notice(const OrderNotice &p_message) {
 
 core::Result<OrderNotice> decode_order_notice(std::span<const uint8_t> p_datagram) {
 	return decode_as<OrderNotice>(p_datagram, { MessageType::OrderNotice, "OrderNotice" });
+}
+
+std::vector<uint8_t> encode_conquest_state(const ConquestState &p_message) {
+	return encode_as(MessageType::ConquestState, kMaxReliableBytes, p_message);
+}
+
+core::Result<ConquestState> decode_conquest_state(std::span<const uint8_t> p_datagram) {
+	return decode_as<ConquestState>(p_datagram, { MessageType::ConquestState, "ConquestState" });
+}
+
+std::vector<uint8_t> encode_spawn_answer(const SpawnAnswer &p_message) {
+	return encode_as(MessageType::SpawnAnswer, kMaxReliableBytes, p_message);
+}
+
+core::Result<SpawnAnswer> decode_spawn_answer(std::span<const uint8_t> p_datagram) {
+	return decode_as<SpawnAnswer>(p_datagram, { MessageType::SpawnAnswer, "SpawnAnswer" });
 }
 }

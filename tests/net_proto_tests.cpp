@@ -280,6 +280,8 @@ int decode_reencode(std::span<const uint8_t> p_bytes) {
 		case net::MessageType::OrderRequest:
 		case net::MessageType::SpotStates:
 		case net::MessageType::OrderNotice:
+		case net::MessageType::ConquestState:
+		case net::MessageType::SpawnAnswer:
 			return decode_reencode_v2(*type, p_bytes);
 	}
 	return -1;
@@ -648,7 +650,7 @@ TEST_SUITE("net-proto") {
 			const uint8_t b = uint8_t(t);
 			known += net::peek_type(std::span<const uint8_t>(&b, 1)).has_value() ? 1 : 0;
 		}
-		CHECK(known == 35);
+		CHECK(known == 37);
 		const uint8_t s = 1;
 		CHECK(net::peek_type(std::span<const uint8_t>(&s, 1)) == net::MessageType::Snapshot);
 	}
@@ -2135,12 +2137,12 @@ void append_v2_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>>
 
 TEST_SUITE("net-proto") {
 	TEST_CASE("proto v2: version, message types and the bounds") {
-		CHECK(net::kProtocolVersion == 10);
+		CHECK(net::kProtocolVersion == 11);
 		for (const uint8_t t : { uint8_t(3), uint8_t(4), uint8_t(23), uint8_t(24) }) {
 			CHECK(net::peek_type(std::span<const uint8_t>(&t, 1)).has_value());
 		}
-		CHECK(net::Hello{}.protocol == 10);
-		CHECK(net::MatchInfo{}.protocol == 10);
+		CHECK(net::Hello{}.protocol == 11);
+		CHECK(net::MatchInfo{}.protocol == 11);
 	}
 
 	TEST_CASE("proto v2: MatchInfo, Spawned, KitSelect and the new Debug kinds round trip; out-of-range values are refused") {
@@ -3915,9 +3917,46 @@ int decode_reencode_v4(net::MessageType p_type, std::span<const uint8_t> p_bytes
 			auto b = net::decode_order_notice(net::encode_order_notice(*a));
 			return b && b->order == a->order && b->issuer == a->issuer ? 1 : 0;
 		}
+		case net::MessageType::ConquestState: {
+			auto a = net::decode_conquest_state(p_bytes);
+			if (!a) {
+				return -1;
+			}
+			auto b = net::decode_conquest_state(net::encode_conquest_state(*a));
+			return b && *b == *a ? 1 : 0;
+		}
+		case net::MessageType::SpawnAnswer: {
+			auto a = net::decode_spawn_answer(p_bytes);
+			if (!a) {
+				return -1;
+			}
+			auto b = net::decode_spawn_answer(net::encode_spawn_answer(*a));
+			return b && b->kind == a->kind && b->spawn_choice == a->spawn_choice ? 1 : 0;
+		}
 		default:
 			return -1;
 	}
+}
+
+net::ConquestState sample_conquest_state() {
+	net::ConquestState c;
+	c.server_tick = 91400;
+	c.tickets = { 148, 3 };
+	c.initial_tickets = { 150, 150 };
+	c.bleeding = { false, true };
+	c.point_count = 6;
+	c.points[0] = { 1, 1, net::kConquestProgressMax, 0, true, false };
+	c.points[1] = { 2, 2, net::kConquestProgressMax, 0, true, false };
+	c.points[2] = { 1, 2, 4321, -670, true, true };
+	c.points[3] = { 0, 0, 0, 0, false, false };
+	c.points[4] = { 2, 2, 9999, 500, false, false };
+	c.points[5] = { 1, 1, 1, -32768, false, false };
+	c.return_by_tick = 91700;
+	c.strike(0);
+	c.strike(63);
+	c.strike(64);
+	c.strike(127);
+	return c;
 }
 
 void append_v4_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>> &r_out) {
@@ -3976,6 +4015,9 @@ void append_v4_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>>
 		{ 100, bf3::sim::spotting::SpotState::Unspottable, bf3::sim::spotting::kNoSpotter, false } };
 	r_out.emplace_back("SpotStates (v9)", net::encode_spot_states(ss));
 	r_out.emplace_back("OrderNotice (v9)", net::encode_order_notice({ bf3::sim::commo::OrderType::Attack, 77 }));
+	r_out.emplace_back("ConquestState (v11)", net::encode_conquest_state(sample_conquest_state()));
+	r_out.emplace_back("SpawnAnswer (v11)",
+			net::encode_spawn_answer({ net::SpawnAnswerKind::FlagClosed, uint8_t(net::kSpawnChoiceFlag + 3) }));
 }
 
 std::optional<std::string> decode_kick_v3(std::span<const uint8_t> p_bytes) {
@@ -4301,7 +4343,7 @@ TEST_SUITE("net-proto") {
 		const std::vector<uint8_t> bytes = net::encode_kick(kick);
 		const std::optional<std::string> v3 = decode_kick_v3(bytes);
 		REQUIRE(v3.has_value());
-		CHECK(*v3 == "protocol 3 (server 10)");
+		CHECK(*v3 == "protocol 3 (server 11)");
 		auto v4 = net::decode_kick(bytes);
 		REQUIRE(v4);
 		CHECK(v4->code == net::KickReason::Protocol);
@@ -4689,13 +4731,13 @@ TEST_SUITE("net-proto") {
 			types.insert(uint8_t(*type));
 			samples.push_back({ name, std::move(bytes) });
 		}
-		CHECK(types.size() == 35);
+		CHECK(types.size() == 37);
 		static constexpr GoldenPin kPins[] = {
 			{ "Snapshot", 367, 0x6567ed5d2836a9b6ull, 0 },
 			{ "Snapshot (no own)", 20, 0xa85c8a910ea8826bull, 0 },
 			{ "CommandPacket", 58, 0x0561e87f8ae9a655ull, 0 },
-			{ "Hello", 20, 0x2d4b932db14609b2ull, 0 },
-			{ "MatchInfo", 126, 0xc479ab913ad370a5ull, 0 },
+			{ "Hello", 20, 0xac63ea0b966af04dull, 0 },
+			{ "MatchInfo", 126, 0x933c62358a18dcd6ull, 0 },
 			{ "Ready", 34, 0x50302cdf0f51bcb5ull, 0 },
 			{ "Spawned", 98, 0xededd38e508ae170ull, 0 },
 			{ "Loading", 11, 0x6d0d37720d72edd7ull, 0 },
@@ -4710,7 +4752,7 @@ TEST_SUITE("net-proto") {
 			{ "KitSelect", 3, 0xa9266a18e1c669aaull, 0 },
 			{ "Debug (SpawnTarget)", 30, 0xbf53c23636c9b9efull, 0 },
 			{ "DebugReport (v2)", 916, 0xe73adddf5cc1ab3dull, 0 },
-			{ "MatchInfo (v2)", 94, 0x9d42609c12fa0fc7ull, 0 },
+			{ "MatchInfo (v2)", 94, 0x2500c319d256292cull, 0 },
 			{ "Spawned (v2)", 98, 0xdda4f57b21059febull, 0 },
 			{ "MatchState", 42, 0x6e8a7b2bfcb229a0ull, 0 },
 			{ "PlayerList (full)", 217, 0x8ad8a19f7b621f12ull, 0 },
@@ -4719,7 +4761,7 @@ TEST_SUITE("net-proto") {
 			{ "SuicideRequest", 1, 0xaf63d14c8601d9dbull, 0 },
 			{ "LoadoutRequest", 54, 0xbff00e287a388828ull, 0 },
 			{ "CombatEvents (v3)", 137, 0x40d29b14535383d7ull, 0 },
-			{ "MatchInfo (v3)", 94, 0xfd85978f90058497ull, 0 },
+			{ "MatchInfo (v3)", 94, 0xa63f48b0cf416b30ull, 0 },
 			{ "Spawned (v3 revived)", 98, 0x8b014185e7467390ull, 0 },
 			{ "SoldierGear", 20, 0xfa6162cd1bdf3cf3ull, 0 },
 			{ "Mismatch", 2, 0x07c26e07b48c3c08ull, 0 },
@@ -4731,7 +4773,7 @@ TEST_SUITE("net-proto") {
 			{ "LogicDelta", 13, 0xb406185960cdf447ull, 0 },
 			{ "SquadRequest", 4, 0x339b5db77a00fa9bull, 0 },
 			{ "SquadOrder", 18, 0x786f0a82bee37cb8ull, 0 },
-			{ "MatchInfo (v4)", 157, 0x4055e4e76b1149ddull, 0 },
+			{ "MatchInfo (v4)", 157, 0x6b6be588da0d374cull, 0 },
 			{ "Ready (v4 digests)", 82, 0x52d9ba4d4bfcaf1eull, 0 },
 			{ "Kick (v4 reason)", 25, 0xc256cbdc95a2f23cull, 0 },
 			{ "PlayerList (v4 squads)", 89, 0x1f220dc607e2158aull, 0 },
@@ -4740,6 +4782,8 @@ TEST_SUITE("net-proto") {
 			{ "OrderRequest (v9)", 3, 0xe7189017e2f77d38ull, 0 },
 			{ "SpotStates (v9)", 14, 0xa2c912bf59e26278ull, 0 },
 			{ "OrderNotice (v9)", 3, 0xf5bd1717ea80524bull, 0 },
+			{ "ConquestState (v11)", 61, 0x026a78587b1a83a7ull, 0 },
+			{ "SpawnAnswer (v11)", 3, 0x4e7b94181d5e21b6ull, 0 },
 		};
 		check_golden(samples, kPins);
 	}
@@ -4775,7 +4819,7 @@ TEST_SUITE("net-proto") {
 		CHECK(bad([](net::Deployables &r) { r.removed[0] = 0; }));
 		CHECK(bad([](net::Deployables &r) { r.removed.assign(net::kMaxDeployablesPerMessage + 1, 4); }));
 		CHECK(net::peek_type(net::encode_deployables(m)) == net::MessageType::Deployables);
-		CHECK(net::kProtocolVersion == 10);
+		CHECK(net::kProtocolVersion == 11);
 	}
 
 	TEST_CASE("proto v9: spot and order requests, spot states and order notices round-trip and refuse what is out of "
@@ -4828,12 +4872,60 @@ TEST_SUITE("net-proto") {
 		CHECK_FALSE(net::decode_order_notice(net::encode_order_notice({ cm::OrderType::Count, 1 })).ok());
 		CHECK(net::peek_type(net::encode_order_notice({ cm::OrderType::RequestAmmo, 1 })) ==
 				net::MessageType::OrderNotice);
-		CHECK(net::kProtocolVersion == 10);
+		CHECK(net::kProtocolVersion == 11);
+	}
+
+	TEST_CASE("proto v11: ConquestState carries tickets, bleed, every capture point, the own return tick and the "
+			  "struck slots; SpawnAnswer a refusal; both refuse what is out of range") {
+		const net::ConquestState c = sample_conquest_state();
+		const std::vector<uint8_t> bytes = net::encode_conquest_state(c);
+		const auto d = net::decode_conquest_state(bytes);
+		REQUIRE(d.ok());
+		CHECK(*d == c);
+		CHECK(d->is_struck(0));
+		CHECK(d->is_struck(127));
+		CHECK_FALSE(d->is_struck(1));
+		CHECK(net::peek_type(bytes) == net::MessageType::ConquestState);
+		net::ConquestState full;
+		full.point_count = uint8_t(net::kMaxConquestPoints);
+		for (size_t i = 0; i < net::kMaxConquestPoints; ++i) {
+			full.points[i] = { uint8_t(i % 3), uint8_t((i + 1) % 3), uint16_t(i * 600), int16_t(-int(i) * 100),
+				(i & 1) != 0, (i & 2) != 0 };
+		}
+		full.tickets = { 65535, 0 };
+		const auto f = net::decode_conquest_state(net::encode_conquest_state(full));
+		REQUIRE(f.ok());
+		CHECK(*f == full);
+		const auto bad = [&](auto p_edit) {
+			net::ConquestState x = sample_conquest_state();
+			p_edit(x);
+			return !net::decode_conquest_state(net::encode_conquest_state(x)).ok();
+		};
+		CHECK_FALSE(bad([](net::ConquestState &) {}));
+		CHECK(bad([](net::ConquestState &r) { r.points[2].team = 3; }));
+		CHECK(bad([](net::ConquestState &r) { r.points[2].attacker = 3; }));
+		CHECK(bad([](net::ConquestState &r) { r.points[2].progress = uint16_t(net::kConquestProgressMax + 1); }));
+		CHECK(bad([](net::ConquestState &r) { r.point_count = uint8_t(net::kMaxConquestPoints + 1); }));
+		for (uint8_t k = 0; k < net::kSpawnAnswerKinds; ++k) {
+			const auto a = net::decode_spawn_answer(net::encode_spawn_answer({ net::SpawnAnswerKind(k), 9 }));
+			REQUIRE(a.ok());
+			CHECK(uint8_t(a->kind) == k);
+			CHECK(a->spawn_choice == 9);
+		}
+		CHECK_FALSE(
+				net::decode_spawn_answer(net::encode_spawn_answer({ net::SpawnAnswerKind(net::kSpawnAnswerKinds), 0 }))
+						.ok());
+		CHECK(net::spawn_choice_is_flag(net::kSpawnChoiceFlag));
+		CHECK(net::spawn_choice_is_flag(uint8_t(net::kSpawnChoiceFlag + net::kMaxConquestPoints - 1)));
+		CHECK_FALSE(net::spawn_choice_is_flag(uint8_t(net::kSpawnChoiceFlag + net::kMaxConquestPoints)));
+		CHECK_FALSE(net::spawn_choice_is_flag(net::kSpawnChoiceBeacon));
+		CHECK_FALSE(net::spawn_choice_is_flag(4));
+		CHECK(net::kProtocolVersion == 11);
 	}
 
 	TEST_CASE("proto: golden bytes of the encoders' clamp, cut and drop paths") {
 		static constexpr GoldenPin kPins[] = {
-			{ "Hello (name cut inside a code point)", 43, 0x5887eeb45da0591aull, 0 },
+			{ "Hello (name cut inside a code point)", 43, 0x16291cef021aa5d3ull, 0 },
 			{ "Kick (reason cut at 2048 bytes)", 2051, 0x028412f145ceb5d9ull, 0 },
 			{ "Loading (permille above 1000)", 11, 0xd2694e25edbe818full, 0 },
 			{ "Bye", 1, 0xaf63cb4c8601cfa9ull, 0 },

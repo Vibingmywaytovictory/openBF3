@@ -81,6 +81,8 @@ public:
 	std::vector<net::Deployables> deployables;
 	std::vector<net::SpotStates> spot_states;
 	std::vector<net::OrderNotice> order_notices;
+	std::vector<net::ConquestState> conquest_states;
+	std::vector<net::SpawnAnswer> spawn_answers;
 	std::optional<net::Snapshot> last_snapshot;
 	net::SnapshotBaselines baselines;
 	std::optional<net::Kick> kick;
@@ -542,6 +544,22 @@ inline void ScriptedPeer::receive(std::span<const host::OutDatagram> p_out) {
 				ok = m.ok();
 				if (ok) {
 					order_notices.push_back(*m);
+				}
+				break;
+			}
+			case net::MessageType::ConquestState: {
+				core::Result<net::ConquestState> m = net::decode_conquest_state(d.bytes);
+				ok = m.ok();
+				if (ok) {
+					conquest_states.push_back(*m);
+				}
+				break;
+			}
+			case net::MessageType::SpawnAnswer: {
+				core::Result<net::SpawnAnswer> m = net::decode_spawn_answer(d.bytes);
+				ok = m.ok();
+				if (ok) {
+					spawn_answers.push_back(*m);
 				}
 				break;
 			}

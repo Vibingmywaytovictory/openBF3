@@ -78,6 +78,27 @@ bool ClientMatch::datagram(net::MessageType p_type, const net::NetSim::Datagram 
 			++own_order_.serial;
 			return true;
 		}
+		case net::MessageType::ConquestState: {
+			core::Result<net::ConquestState> c = net::decode_conquest_state(p_d.bytes);
+			if (!c) {
+				++bad_tdm_datagrams_;
+				return true;
+			}
+			conquest_ = *c;
+			conquest_valid_ = true;
+			++conquest_states_;
+			return true;
+		}
+		case net::MessageType::SpawnAnswer: {
+			core::Result<net::SpawnAnswer> a = net::decode_spawn_answer(p_d.bytes);
+			if (!a) {
+				++bad_tdm_datagrams_;
+				return true;
+			}
+			spawn_answer_ = *a;
+			++spawn_answers_;
+			return true;
+		}
 		case net::MessageType::LogicEvents:
 		case net::MessageType::FullSync:
 		case net::MessageType::LogicDelta:
@@ -203,6 +224,10 @@ void ClientMatch::publish(PresentationFrame &r_frame, bool p_have_own, uint32_t 
 	std::copy_n(deployables_.begin(), r_frame.deployable_count, r_frame.deployables.begin());
 	r_frame.spots = spots_;
 	r_frame.own_order = own_order_;
+	r_frame.conquest_valid = conquest_valid_;
+	r_frame.conquest = conquest_;
+	r_frame.spawn_answer_serial = spawn_answers_;
+	r_frame.spawn_answer = spawn_answer_;
 }
 
 void ClientMatch::stats(ClientStats &r_stats) const {
@@ -212,6 +237,8 @@ void ClientMatch::stats(ClientStats &r_stats) const {
 	r_stats.revives = revives_;
 	r_stats.spot_state_messages = spot_state_messages_;
 	r_stats.orders_received = own_order_.serial;
+	r_stats.conquest_states = conquest_states_;
+	r_stats.spawn_answers = spawn_answers_;
 	r_stats.deployable_messages = deployable_messages_;
 	r_stats.bad_deployables = bad_deployables_;
 	r_stats.bad_tdm_datagrams = bad_tdm_datagrams_;
