@@ -169,6 +169,7 @@ struct ConquestNatives::State {
 			const Point &p = points[i];
 			ConquestPointView &v = views[i];
 			v.node = p.data->node;
+			v.level_object = p.data->level_object;
 			v.team = p.state.team;
 			v.attacker = p.state.attacker;
 			v.progress = p.state.progress;

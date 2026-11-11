@@ -68,6 +68,7 @@ struct BotStrategicArea {
 	int team = 0;
 	bool takeable = false;
 	uint32_t objective = UINT32_MAX;
+	uint32_t level_object = UINT32_MAX;
 	uint32_t cluster = UINT32_MAX;
 	std::vector<uint32_t> spawns;
 };

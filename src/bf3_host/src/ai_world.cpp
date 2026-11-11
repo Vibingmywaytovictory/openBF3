@@ -176,6 +176,7 @@ struct HostAiWorld::Impl {
 	std::unique_ptr<ai::AIStrategicObjectManager> strategic;
 	std::vector<ai::AIStrategicArea *> areas;
 	std::vector<int> owners;
+	std::vector<float> take_over;
 	std::vector<ai::AiShot> shots;
 	sim::Tick tick = 0;
 	uint32_t perception_ticks = 0;
@@ -259,6 +260,7 @@ core::Result<std::unique_ptr<HostAiWorld>> HostAiWorld::create(const AiWorldConf
 	m.strategic = std::make_unique<ai::AIStrategicObjectManager>(services);
 	const std::vector<BotStrategicArea> &areas = p_config.level->areas;
 	m.owners.resize(areas.size(), 0);
+	m.take_over.resize(areas.size(), 1.0f);
 	for (size_t i = 0; i < areas.size(); ++i) {
 		const BotStrategicArea &a = areas[i];
 		m.owners[i] = a.team;
@@ -420,6 +422,13 @@ void HostAiWorld::set_area_temperature(size_t p_area, float p_temperature) {
 	}
 }
 
+void HostAiWorld::set_control_point(size_t p_area, int p_owner, float p_take_over) {
+	if (p_area < impl_->owners.size()) {
+		impl_->owners[p_area] = p_owner;
+		impl_->take_over[p_area] = p_take_over;
+	}
+}
+
 const ai::InformationManager &HostAiWorld::information() const {
 	return impl_->information;
 }
@@ -573,8 +582,7 @@ bool HostAiWorld::control_point_takeable(uint32_t p_id) const {
 }
 
 float HostAiWorld::control_point_take_over_counter(uint32_t p_id) const {
-	(void)p_id;
-	return 1.0f;
+	return p_id < impl_->take_over.size() ? impl_->take_over[p_id] : 1.0f;
 }
 
 int HostAiWorld::number_of_maps() const {

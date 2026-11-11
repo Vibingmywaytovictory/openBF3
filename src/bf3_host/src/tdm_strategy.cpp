@@ -31,6 +31,32 @@ net::SquadOrderKind wire_order(ai::SquadOrder p_order) {
 
 }
 
+ControlPointState control_point_state(const sim::logic::ConquestPointView &p_point) {
+	ControlPointState state;
+	state.owner = p_point.controlled ? int(p_point.team) : 0;
+	state.take_over = p_point.controlled ? std::clamp(p_point.progress / sim::logic::kFlagTop, 0.0f, 1.0f) : 1.0f;
+	return state;
+}
+
+std::vector<int> match_control_points(
+		std::span<const BotStrategicArea> p_areas, std::span<const sim::logic::ConquestPointView> p_points) {
+	std::vector<int> matched(p_areas.size(), -1);
+	for (size_t i = 0; i < p_areas.size(); ++i) {
+		const BotStrategicArea &area = p_areas[i];
+		if ((area.kind != BotStrategicArea::Kind::Flag && area.kind != BotStrategicArea::Kind::Hq) ||
+				area.level_object == UINT32_MAX) {
+			continue;
+		}
+		for (size_t p = 0; p < p_points.size(); ++p) {
+			if (p_points[p].level_object == area.level_object) {
+				matched[i] = int(p);
+				break;
+			}
+		}
+	}
+	return matched;
+}
+
 TdmStrategy::TdmStrategy(GameServer &r_server, TdmShared &r_shared) : server_(r_server), shared_(r_shared) {}
 
 TdmStrategy::~TdmStrategy() = default;
@@ -66,6 +92,10 @@ core::Result<std::unique_ptr<TdmStrategy>> TdmStrategy::create(GameServer &r_ser
 	s->squads_ = std::make_unique<ai::SquadManager>(squad_services);
 	s->decisions_ = std::make_unique<ai::StrategyDecisions>(
 			s->manager_, *s->squads_, s->world_->strategic(), s.get(), s->tuning_);
+	if (rules->natives().conquest() != nullptr) {
+		s->command_ = std::make_unique<ai::SquadCommanderGame>(*s->squads_, *s->decisions_);
+		s->commander_ = std::make_unique<ai::BFCommander>(*s->command_);
+	}
 	for (int side = 1; side <= 2; ++side) {
 		ai::SaiServices services;
 		services.timer = s.get();
@@ -76,6 +106,7 @@ core::Result<std::unique_ptr<TdmStrategy>> TdmStrategy::create(GameServer &r_ser
 		services.grid = &s->world_->grid(side);
 		services.squads = s->squads_.get();
 		services.decisions = s->decisions_.get();
+		services.commander = s->commander_.get();
 		s->sai_[size_t(side - 1)] = std::make_unique<ai::Sai>(side, services);
 		s->next_cycle_[size_t(side - 1)] = sim::Tick(side - 1) * (s->tuning_.sai_period_ticks / 2u);
 	}
@@ -164,6 +195,9 @@ void TdmStrategy::squad_order(int p_side, int p_squad, ai::SquadOrder p_order, i
 }
 
 int TdmStrategy::tickets(int p_side) const {
+	if (const sim::logic::ConquestNatives *conquest = rules_->natives().conquest()) {
+		return int(std::clamp<int64_t>(conquest->tickets(uint8_t(p_side)), 0, INT32_MAX));
+	}
 	const net::MatchState &ms = rules_->match_state();
 	const int enemy = p_side == 1 ? 1 : 0;
 	return std::max(0, int(ms.kill_limit) - int(ms.kills[size_t(enemy)]));
@@ -228,6 +262,25 @@ void TdmStrategy::sync_squads() {
 	}
 }
 
+void TdmStrategy::sync_control_points() {
+	const sim::logic::ConquestNatives *conquest = rules_->natives().conquest();
+	if (conquest == nullptr) {
+		return;
+	}
+	const std::span<const sim::logic::ConquestPointView> points = conquest->points();
+	const std::vector<BotStrategicArea> &areas = shared_.host.nav->areas;
+	if (matched_points_ != points.size() || control_points_.size() != areas.size()) {
+		control_points_ = match_control_points(areas, points);
+		matched_points_ = points.size();
+	}
+	for (size_t i = 0; i < control_points_.size(); ++i) {
+		if (control_points_[i] >= 0) {
+			const ControlPointState state = control_point_state(points[size_t(control_points_[i])]);
+			world_->set_control_point(i, state.owner, state.take_over);
+		}
+	}
+}
+
 void TdmStrategy::draw_spawn(uint8_t p_slot) {
 	const std::span<const sim::SoldierState> states = server_.view().states();
 	if (p_slot >= states.size()) {
@@ -269,6 +322,7 @@ void TdmStrategy::step(sim::Tick p_tick) {
 	tick_ = p_tick;
 	TdmShared &sh = shared_;
 	world_->step(server_.view(), sh.heard, sh.firing, p_tick);
+	sync_control_points();
 	sync_squads();
 	choose_spawns();
 	for (uint32_t i = 0; i < tuning_.squad_updates_per_tick; ++i) {

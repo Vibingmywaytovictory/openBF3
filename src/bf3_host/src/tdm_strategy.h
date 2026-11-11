@@ -7,15 +7,18 @@
 #include "bf3/ai/squad/squad_manager.h"
 #include "bf3/ai/strategic/bot_spawner.h"
 #include "bf3/ai/strategic/sai.h"
+#include "bf3/ai/strategic/squad_commander.h"
 #include "bf3/ai/strategic/strategy.h"
 #include "bf3/core/result.h"
 #include "bf3/host/ai_world.h"
+#include "bf3/sim/logic/conquest_natives.h"
 #include "bf3/sim/sim_types.h"
 
 #include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace bf3::host {
@@ -23,6 +26,15 @@ namespace bf3::host {
 class GameServer;
 class TdmRules;
 struct TdmShared;
+
+struct ControlPointState {
+	int owner = 0;
+	float take_over = 1.0f;
+};
+
+ControlPointState control_point_state(const sim::logic::ConquestPointView &p_point);
+std::vector<int> match_control_points(
+		std::span<const BotStrategicArea> p_areas, std::span<const sim::logic::ConquestPointView> p_points);
 
 class TdmStrategy final : public ai::AiTimer,
 						  public ai::StrategyHeat,
@@ -58,10 +70,12 @@ public:
 	const ai::StrategyDecisions &decisions() const { return *decisions_; }
 	const ai::SquadOrders &orders() const { return *orders_; }
 	const ai::SquadManager &squads() const { return *squads_; }
+	const ai::SquadCommanderGame *commander() const { return command_.get(); }
 
 private:
 	TdmStrategy(GameServer &r_server, TdmShared &r_shared);
 	void sync_squads();
+	void sync_control_points();
 	void draw_spawn(uint8_t p_slot);
 	void choose_spawns();
 
@@ -79,6 +93,10 @@ private:
 	std::unique_ptr<ai::SquadOrders> orders_;
 	std::unique_ptr<ai::AIRandom> random_;
 	std::unique_ptr<ai::BotSpawner> spawner_;
+	std::unique_ptr<ai::SquadCommanderGame> command_;
+	std::unique_ptr<ai::BFCommander> commander_;
+	std::vector<int> control_points_;
+	size_t matched_points_ = 0;
 	std::array<std::unique_ptr<ai::BotSquad>, 64> bots_;
 	std::array<uint32_t, 64> spawn_life_{};
 	std::array<sim::Tick, 2> next_cycle_{};

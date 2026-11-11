@@ -25,6 +25,7 @@ struct ConquestPlayerSample {
 
 struct ConquestPointView {
 	uint32_t node = core::gameplay::kNoLogicIndex;
+	uint32_t level_object = core::gameplay::kNoLogicIndex;
 	uint8_t team = 0;
 	uint8_t attacker = 0;
 	float progress = 0.0f;

@@ -54,6 +54,7 @@ public:
 	void step(const ServerView &p_view, std::span<const sim::bots::HeardShot> p_shots,
 			std::span<const uint8_t> p_firing, sim::Tick p_tick);
 	void set_area_temperature(size_t p_area, float p_temperature);
+	void set_control_point(size_t p_area, int p_owner, float p_take_over);
 
 	const ai::InformationManager &information() const;
 	const ai::AIInformationGrid &grid(int p_side) const;

@@ -163,6 +163,7 @@ core::Status build_strategic_map(BotLevel &r_level, std::span<const core::level:
 		area.poly = row.check.poly;
 		area.radius = bot_point_radius(row.kind);
 		area.team = row.index < p_objectives.size() ? p_objectives[row.index].team : 0;
+		area.level_object = row.index < p_objectives.size() ? p_objectives[row.index].object : UINT32_MAX;
 		area.takeable = area.kind == BotStrategicArea::Kind::Flag;
 		r_level.areas.push_back(std::move(area));
 	}

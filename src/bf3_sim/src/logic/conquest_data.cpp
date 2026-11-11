@@ -262,6 +262,7 @@ core::Result<std::shared_ptr<const ConquestParams>> read_conquest_params(
 			for (ConquestPointData &p : out->points) {
 				if (node && p.node == *node) {
 					p.placed = true;
+					p.level_object = o.object;
 					p.params.position = o.position;
 					if (!o.polygon.empty()) {
 						p.params.volumes.push_back(CaptureVolume{ o.polygon });
