@@ -153,3 +153,8 @@ target_sources(bf3_ai PRIVATE
     src/interpreter/infantry_entries.cpp
     src/interpreter/bot_plan.cpp
 )
+
+target_sources(bf3_ai PRIVATE
+    include/bf3/ai/bot/bot_memory.h
+    src/bot/bot_memory.cpp
+)

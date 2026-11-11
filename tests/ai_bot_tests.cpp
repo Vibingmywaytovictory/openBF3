@@ -304,7 +304,7 @@ TEST_SUITE("ai-bot") {
 		CHECK(bots[0]->stats().unplanned == 2u);
 	}
 
-	TEST_CASE("BBMoveTo: the squad goal's urgency grows with distance through its UrgeCurve") {
+	TEST_CASE("BBMoveTo: the squad goal's urgency grows with distance") {
 		Rig r;
 		r.bot.update_bot(true, true);
 		r.body.s.navigable = true;
@@ -450,9 +450,11 @@ TEST_SUITE("ai-bot") {
 		r.body.s.enemy_visible = true;
 		tuned.decision_making(sim::kTickSeconds);
 		CHECK(tuned.behaviour() == InfantryBehaviour::Random);
-		REQUIRE(parse_behaviour_setting("bb.random.slope", "0.1", r.tuning).fault == core::KeyFault::None);
+		REQUIRE(parse_behaviour_setting("bb.random.offset", "0.1", r.tuning).fault == core::KeyFault::None);
 		BotMain sloped(2, 2, 1, r.body, r.tuning);
 		sloped.update_bot(true, true);
+		sloped.decision_making(sim::kTickSeconds);
+		CHECK(sloped.behaviour() == InfantryBehaviour::Random);
 		sloped.decision_making(sim::kTickSeconds);
 		CHECK(sloped.behaviour() == InfantryBehaviour::FireInfantery);
 	}

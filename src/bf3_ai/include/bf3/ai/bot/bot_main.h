@@ -3,6 +3,7 @@
 #include "bf3/ai/behaviour/behaviours.h"
 #include "bf3/ai/behaviour/curves.h"
 #include "bf3/ai/behaviour/urgency_merger.h"
+#include "bf3/ai/bot/bot_memory.h"
 #include "bf3/ai/bot/infantry.h"
 #include "bf3/ai/interpreter/bot_plan.h"
 #include "bf3/ai/main/bot.h"
@@ -14,6 +15,9 @@
 #include <string>
 
 namespace bf3::ai {
+
+inline constexpr float kQuotientLow = 0.87f;
+inline constexpr float kQuotientHigh = 1.15f;
 
 class BotOrder {
 public:
@@ -97,6 +101,7 @@ public:
 	const BotBehaviour &behaviour_of(InfantryBehaviour p_behaviour) const { return *behaviours_[size_t(p_behaviour)]; }
 	float chosen_urgency() const { return chosen_urgency_; }
 	const SquadGoal &squad_goal() const { return squad_goal_; }
+	const BotMemory &memory() const { return memory_; }
 	int squad() const { return squad_; }
 	const std::string &name() const { return name_; }
 	int ordered_behaviour() const { return ordered_behaviour_; }
@@ -115,6 +120,7 @@ private:
 	const float *current_orders_ = nullptr;
 	std::array<float, kInfantryBehaviourCount> behaviour_urgencies_{};
 	std::unique_ptr<UrgencyMerger> merger_;
+	BotMemory memory_;
 	BotPlan plan_;
 	BotBehaviour *current_ = nullptr;
 	float chosen_urgency_ = 0.0f;

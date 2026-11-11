@@ -108,16 +108,32 @@ bool BotMain::wants_decision() const {
 
 int BotMain::decision_making(double) {
 	const sim::Tick tick = body_.tick();
+	const double now = double(tick) * sim::kTickSeconds;
 	const bool unplanned = plan_invalid_ || current_ == nullptr || body_.senses() != decided_senses_;
 	++stats_.decisions;
 	++(unplanned ? stats_.unplanned : stats_.planned);
 	calculate_mods();
-	for (size_t i = 0; i < kInfantryBehaviourCount; ++i) {
-		behaviours_[i]->calculate_urgency(this, true, behaviour_urgencies_[i]);
+	const int last = memory_.last_behaviour;
+	if (plan_invalid_) {
+		memory_.last_behaviour = -1;
+		memory_.chosen_time = now;
 	}
+	std::array<float, kInfantryBehaviourCount> modifiers{};
+	for (size_t i = 0; i < kInfantryBehaviourCount; ++i) {
+		modifiers[i] = behaviour_urgencies_[i];
+		if (!plan_invalid_ && last != -1) {
+			modifiers[i] *= memory_.modify_behaviour_urgency(*behaviours_[i], now);
+		}
+		behaviours_[i]->calculate_urgency(this, modifiers[i]);
+	}
+	bool merge = plan_invalid_ || merger_->has_changed(this, kQuotientLow, kQuotientHigh);
+	BotBehaviour *winner = nullptr;
 	for (size_t attempt = 0; attempt <= kInfantryBehaviourCount; ++attempt) {
-		float urgency = merger_->update_active_urgency(this);
-		BotBehaviour *winner = static_cast<BotBehaviour *>(merger_->chosen_generator());
+		if (merge) {
+			merger_->update_active_urgency(this);
+		}
+		winner = static_cast<BotBehaviour *>(merger_->chosen_generator());
+		float urgency = merger_->active_urgency(this);
 		if (winner == nullptr) {
 			winner = behaviours_[size_t(InfantryBehaviour::Idle)].get();
 			urgency = 0.0f;
@@ -134,9 +150,12 @@ int BotMain::decision_making(double) {
 			break;
 		}
 		winner->refuse(tick);
-		winner->calculate_urgency(this, true, behaviour_urgencies_[size_t(winner->kind())]);
+		winner->calculate_urgency(this, modifiers[size_t(winner->kind())]);
+		merge = true;
 		++stats_.refusals;
 	}
+	memory_.last_behaviour = int(winner->kind());
+	memory_.chosen_time = now;
 	decided_senses_ = body_.senses();
 	decided_tick_ = tick;
 	return 1;

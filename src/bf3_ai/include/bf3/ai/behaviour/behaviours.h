@@ -34,8 +34,8 @@ std::string_view infantry_behaviour_kind(InfantryBehaviour p_behaviour);
 
 struct BehaviourCurve {
 	float weight = 1.0f;
-	float slope = 1.0f;
-	float offset = 0.0f;
+	float slope = 0.0f;
+	float offset = 1.0f;
 
 	bool operator==(const BehaviourCurve &) const = default;
 };
@@ -74,6 +74,7 @@ public:
 	InfantryBehaviour kind() const { return kind_; }
 	float situation_value() const { return situation_; }
 	float urgency_value() const { return urgency_; }
+	const UrgeCurve &urge_curve() const { return curve_; }
 
 	float urgency(Bot *p_bot) override;
 	float active_urgency(Bot *p_bot) override;
@@ -83,7 +84,7 @@ public:
 	bool has_changed(Bot *p_bot, float p_low, float p_high) override;
 	UrgencyGenerator *chosen_generator() override { return this; }
 	void reset(Bot *p_bot) override;
-	float calculate_urgency(Bot *p_bot, bool p_recalculate, float p_modifier);
+	float calculate_urgency(Bot *p_bot, float p_modifier);
 
 	void refuse(sim::Tick p_tick) { refused_tick_ = p_tick; }
 	virtual bool plan(BotPlan &r_script, bool p_was_active) = 0;
@@ -91,6 +92,7 @@ public:
 
 protected:
 	virtual float situation() = 0;
+	virtual int target() const { return 0; }
 
 	InfantryBehaviour kind_;
 	const UrgeCurve &curve_;
@@ -99,6 +101,7 @@ protected:
 	float urgency_ = 0.0f;
 	float active_urgency_ = 1e-5f;
 	bool target_changed_ = true;
+	int target_ = 0;
 	sim::Tick refused_tick_ = UINT32_MAX;
 };
 
@@ -123,6 +126,7 @@ public:
 
 protected:
 	float situation() override;
+	int target() const override { return int(mode_); }
 
 private:
 	Mode mode_ = Mode::None;
@@ -142,6 +146,7 @@ public:
 
 protected:
 	float situation() override;
+	int target() const override { return int(want_); }
 
 private:
 	Phase phase_ = Phase::None;
@@ -169,6 +174,7 @@ public:
 
 protected:
 	float situation() override;
+	int target() const override { return (squad_ ? 1 : 0) | (hold_ ? 2 : 0); }
 
 private:
 	const SquadGoal &goal_;

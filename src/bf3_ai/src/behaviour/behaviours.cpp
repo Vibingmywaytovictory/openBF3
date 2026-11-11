@@ -194,13 +194,16 @@ void BotBehaviour::reset(Bot *) {
 	urgency_ = 0.0f;
 	active_urgency_ = 1e-4f;
 	target_changed_ = true;
+	target_ = 0;
 	refused_tick_ = UINT32_MAX;
 }
 
-float BotBehaviour::calculate_urgency(Bot *, bool, float p_modifier) {
+float BotBehaviour::calculate_urgency(Bot *, float p_modifier) {
 	situation_ = refused_tick_ == body_.tick() ? 0.0f : situation();
-	const float u = situation_ > 0.0f ? curve_.calculate(situation_) * p_modifier : 0.0f;
+	const float u = situation_ > 0.0f ? situation_ * p_modifier : 0.0f;
 	urgency_ = u > 0.0f ? u : 0.0f;
+	target_changed_ = target() != target_;
+	target_ = target();
 	return urgency_;
 }
 
