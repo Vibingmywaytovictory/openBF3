@@ -2,6 +2,7 @@
 
 #include "ai_knowledge_fakes.h"
 #include "bf3/ai/behaviour/curves.h"
+#include "bf3/ai/debug/draw_primitives.h"
 #include "bf3/ai/knowledge/fire_object.h"
 #include "bf3/ai/knowledge/information_factory.h"
 #include "bf3/ai/knowledge/plug_ins.h"
@@ -9,6 +10,7 @@
 
 #include <array>
 #include <cmath>
+#include <string>
 #include <vector>
 
 using namespace bf3;
@@ -29,6 +31,27 @@ struct PositionLog final : InformationEnvironmentModifiers {
 	void add_and_update_position(int, bool p_unit, uint32_t p_handle) override {
 		CHECK(p_unit);
 		handles.push_back(p_handle);
+	}
+};
+
+struct RecordingRenderer final : DebugRenderer {
+	std::vector<std::string> calls;
+	void draw_line(const std::vector<Vec3> &p_points, uint32_t, float) override {
+		calls.push_back("line " + std::to_string(p_points.size()));
+	}
+	void draw_circle(const Vec3 &, const Vec3 &, float p_radius, uint32_t, bool, int) override {
+		calls.push_back("circle " + std::to_string(int(p_radius)));
+	}
+	void draw_screen_text(
+			const Vec2 &, const std::vector<std::string> &p_lines, int, uint32_t, TextAlignX, TextAlignY) override {
+		calls.push_back("text2d " + p_lines.front());
+	}
+	void draw_3d_text(
+			const Vec3 &, const std::vector<std::string> &p_lines, int, uint32_t, TextAlignX, TextAlignY) override {
+		calls.push_back("text3d " + p_lines.front());
+	}
+	void draw_triangle(const std::vector<Vec3> &p_vertices, const std::vector<uint32_t> &p_colours, bool) override {
+		calls.push_back("triangle " + std::to_string(p_vertices.size()) + " " + std::to_string(p_colours.back()));
 	}
 };
 
@@ -184,5 +207,52 @@ TEST_SUITE("ai-core") {
 		CHECK(k.weapons.live_count() == 2);
 		CHECK(k.information.free_information(handle));
 		CHECK(k.weapons.live_count() == 0);
+	}
+
+	TEST_CASE("DPManager: primitives draw by kind in OpenBF2's order until their game-second lifetime runs out") {
+		StepTimer timer;
+		timer.tick = 60;
+		DPManager manager(timer);
+		RecordingRenderer renderer;
+		DPStaticLine *const line =
+				manager.create_static_line(2.0f, 0xFFFF0000u, { 0.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f }, 1.0f);
+		CHECK(line->points.size() == 3);
+		manager.create_static_circle(1.0f, 0xFF00FF00u, { 0.0f, 0.0f, 0.0f }, 5.0f, { 0.0f, 1.0f, 0.0f }, false, 12);
+		manager.create_static_2d_text(
+				10.0f, 0xFFFFFF00u, { 10.0f, 10.0f }, { "screen" }, 5, TextAlignX::Left, TextAlignY::Top);
+		manager.create_static_3d_text(
+				10.0f, 0xFFFFFF00u, { 0.0f, 2.0f, 0.0f }, { "world" }, 5, TextAlignX::Centre, TextAlignY::Bottom);
+		DPStaticPolygon *const polygon = manager.create_static_polygon(10.0f,
+				{ { 0.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 1.0f }, { 0.0f, 0.0f, 1.0f } },
+				{ 1u, 2u, 3u, 4u }, true);
+		CHECK(polygon->triangle_count() == 2);
+		CHECK(polygon->colour() == 1u);
+		manager.create_static_triangle(
+				10.0f, { { 0.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 1.0f } }, { 7u, 8u, 9u }, false);
+		CHECK(manager.size() == 6);
+		manager.draw_all(renderer);
+		CHECK(renderer.calls ==
+				std::vector<std::string>{ "circle 5", "text2d screen", "text3d world", "triangle 3 9", "triangle 3 3",
+						"triangle 3 4", "line 3" });
+
+		timer.tick = 60 + 90;
+		renderer.calls.clear();
+		manager.draw_all(renderer);
+		CHECK(manager.size() == 5);
+		CHECK(renderer.calls.front() == "text2d screen");
+		CHECK(manager.circle(line) == nullptr);
+		REQUIRE(manager.line(line) == line);
+		DrawPrimitive *handle = line;
+		CHECK_FALSE(manager.delete_circle(handle));
+		CHECK(handle == line);
+		CHECK(manager.delete_line(handle));
+		CHECK(handle == nullptr);
+		CHECK(manager.size() == 4);
+		timer.tick = 60 + 601;
+		manager.nodraw_update();
+		CHECK(manager.size() == 0);
+		manager.create_static_line(1.0f, 1u, std::vector<Vec3>{ { 0.0f, 0.0f, 0.0f } }, 1.0f);
+		manager.delete_all();
+		CHECK(manager.size() == 0);
 	}
 }

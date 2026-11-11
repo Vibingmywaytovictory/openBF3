@@ -126,3 +126,8 @@ target_sources(bf3_ai PRIVATE
     include/bf3/ai/main/lod_manager.h
     src/main/lod_manager.cpp
 )
+
+target_sources(bf3_ai PRIVATE
+    include/bf3/ai/debug/draw_primitives.h
+    src/debug/draw_primitives.cpp
+)
