@@ -145,7 +145,7 @@ void Sai::distribute_resources() {
 			at->set_as_present_unit(*it, side_);
 		}
 		if (at->index() != info->last_ordered) {
-			info->order_time = game_time();
+			info->order_time = game_time(services_.timer);
 			info->last_ordered = at->index();
 		}
 		const IPIUnit &unit = *information->unit();

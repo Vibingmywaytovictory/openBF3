@@ -59,10 +59,6 @@ double BotManager::time_increase() const {
 	return services_.timer != nullptr ? services_.timer->tick_seconds() : 0.0;
 }
 
-double BotManager::game_time() const {
-	return services_.timer != nullptr ? double(services_.timer->game_tick()) * services_.timer->tick_seconds() : 0.0;
-}
-
 Information *BotManager::equipment_of(const Bot &p_bot) const {
 	return services_.information != nullptr ? services_.information->information(p_bot.current_equipment()) : nullptr;
 }
@@ -364,7 +360,7 @@ void BotManager::action_hearing(double p_slice) {
 		next = occupied_objects_.begin();
 	}
 	const int count = int(occupied_objects_.size());
-	const double time = game_time();
+	const double time = game_time(services_.timer);
 	for (int visited = 0; visited < count;) {
 		AiObject *const object = next->second;
 		if (++next == occupied_objects_.end()) {
@@ -760,7 +756,7 @@ void BotManager::set_bot_is_revived(int p_player_id) {
 	revived->reset_navigation(false);
 	revived->invalidate_plan();
 	if (CommunicationAgent *const agent = revived->communication()) {
-		agent->enqueue_radio_message(kRadioRevived, kRadioChannelVehicle, 2u, 1.0f, -1, game_time());
+		agent->enqueue_radio_message(kRadioRevived, kRadioChannelVehicle, 2u, 1.0f, -1, game_time(services_.timer));
 	}
 	report_changed_equipment(*revived);
 }
@@ -771,7 +767,7 @@ void BotManager::set_bot_received_radio_message(const RadioMessageSettings &p_se
 		return;
 	}
 	if (CommunicationAgent *const agent = receiver->communication()) {
-		agent->receive_radio_message(p_settings, p_sender, false, game_time());
+		agent->receive_radio_message(p_settings, p_sender, false, game_time(services_.timer));
 	}
 }
 
@@ -781,7 +777,7 @@ void BotManager::set_bot_team_killed(int p_player_id) {
 		return;
 	}
 	if (CommunicationAgent *const agent = killer->communication()) {
-		agent->enqueue_radio_message(kRadioTeamKilled, kRadioChannelVehicle, 3u, 0.0f, -1, game_time());
+		agent->enqueue_radio_message(kRadioTeamKilled, kRadioChannelVehicle, 3u, 0.0f, -1, game_time(services_.timer));
 	}
 }
 

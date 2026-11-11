@@ -19,6 +19,10 @@ public:
 	virtual double update_time() const = 0;
 };
 
+inline double game_time(const AiTimer *p_timer) {
+	return p_timer != nullptr ? double(p_timer->game_tick()) * p_timer->tick_seconds() : 0.0;
+}
+
 class AltitudeSource {
 public:
 	virtual ~AltitudeSource() = default;

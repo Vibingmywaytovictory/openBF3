@@ -158,7 +158,6 @@ private:
 	Information *equipment_of(const Bot &p_bot) const;
 	double now() const;
 	double time_increase() const;
-	double game_time() const;
 	Bot *take_bot(int p_player_id, int p_side, const float *p_personality);
 	void map_player(int p_player_id, const Bot &p_bot);
 	bool sai_enabled() const;

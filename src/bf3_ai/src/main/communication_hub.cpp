@@ -24,10 +24,6 @@ inline constexpr float kRightAngle = 1.5707963705062866f;
 
 CommunicationHub::CommunicationHub(const CommunicationHubServices &p_services) : services_(p_services) {}
 
-double CommunicationHub::game_time() const {
-	return services_.timer != nullptr ? double(services_.timer->game_tick()) * services_.timer->tick_seconds() : 0.0;
-}
-
 void CommunicationHub::reset() {
 	last_pickup_send_time_ = { kNever, kNever };
 	last_large_report_time_ = kNever;
@@ -60,7 +56,7 @@ void CommunicationHub::enemy_spotted_by_ai(int p_player_id, AiObject &r_object, 
 	const int strength_type = physical->strength_type();
 	const bool large_type = uint32_t(strength_type - 4) <= 1u;
 	const float range_sq = large_type ? kLargeSpotRangeSq : kSpotRangeSq;
-	const double now = game_time();
+	const double now = game_time(services_.timer);
 	std::vector<std::pair<int, double>> &strengths = combat_strength_[size_t(p_side - 1)];
 	const auto &areas = services_.objects->strategic_areas();
 	size_t index = 0;
@@ -111,11 +107,11 @@ void CommunicationHub::enemy_spotted_by_human(AiObject &r_object, int p_side) co
 }
 
 void CommunicationHub::send_radio_message(int p_sender, int p_side, const RadioMessage &p_message) {
-	const double now = game_time();
+	const double now = game_time(services_.timer);
 	if (p_message.type == kRadioRequestPickup && p_side >= 1 && p_side <= 2) {
 		double &last = last_pickup_send_time_[size_t(p_side - 1)];
 		if (!(kPickupPeriod > now - last)) {
-			last = game_time();
+			last = game_time(services_.timer);
 		} else {
 			if (services_.game == nullptr || !services_.game->player_is_ai(p_message.receiver) ||
 					services_.voices == nullptr) {
@@ -169,7 +165,7 @@ void CommunicationHub::filter_and_receive_ai_radio_message(
 		}
 	}
 	if (CommunicationAgent *const agent = bot->communication()) {
-		agent->receive_radio_message(p_settings, p_sender, p_unconfirmable, game_time());
+		agent->receive_radio_message(p_settings, p_sender, p_unconfirmable, game_time(services_.timer));
 	}
 }
 

@@ -32,7 +32,7 @@ Sai::Sai(int p_side, const SaiServices &p_services) :
 	clear_states(state_own_[1], state_enemy_[1]);
 	const int bots = services_.settings != nullptr ? std::max(services_.settings->max_bots, 0) : 0;
 	bots_.resize(size_t(bots));
-	const double now = game_time();
+	const double now = game_time(services_.timer);
 	uav_ready_ = now + 10.0;
 	artillery_ready_ = now + 60.0;
 	supply_ready_ = now + 60.0;
@@ -44,10 +44,6 @@ void Sai::clear_states(std::array<float, kSaiStateCount> &r_own, std::array<floa
 	r_enemy.fill(0.0f);
 	r_own[kSaiStateCount - 1] = 1.0f;
 	r_enemy[kSaiStateCount - 1] = 1.0f;
-}
-
-double Sai::game_time() const {
-	return services_.timer != nullptr ? double(services_.timer->game_tick()) * services_.timer->tick_seconds() : 0.0;
 }
 
 bool Sai::over_budget(double p_start, double p_budget) const {
@@ -169,7 +165,7 @@ void Sai::assign_to_object(
 		BotInfo &r_info, std::set<int>::iterator &r_it, AIStrategicObject &r_object, bool p_attacker) {
 	r_info.ordered = r_object.index();
 	r_info.last_ordered = r_object.index();
-	r_info.order_time = game_time();
+	r_info.order_time = game_time(services_.timer);
 	if (AIStrategicObject *current = object(r_info.occupied)) {
 		if (p_attacker) {
 			current->unregister_available_attacker(r_it, side_);
@@ -272,7 +268,7 @@ void Sai::handle_changing_bot(int p_bot_id) {
 			free_bot(*info, true);
 		}
 	}
-	info->order_time = game_time();
+	info->order_time = game_time(services_.timer);
 	info->last_ordered = -1;
 	AIStrategicObject *closest = closest_object_of(*info);
 	AIStrategicObject *current = object(info->occupied);
@@ -372,7 +368,7 @@ void Sai::choose_strategy() {
 		const float rounds = std::pow(0.5f, float(active.rounds));
 		const float half = 0.5f - rounds;
 		const double threshold = ((half + half) + 1.0f) * active.strategy->minimum_active_time();
-		if (!(game_time() - active.start_time >= threshold)) {
+		if (!(game_time(services_.timer) - active.start_time >= threshold)) {
 			return;
 		}
 		++active.rounds;
@@ -418,7 +414,7 @@ void Sai::change_strategy(size_t p_index) {
 		}
 	}
 	strategies_[active_].rounds = 1;
-	strategies_[active_].start_time = float(game_time());
+	strategies_[active_].start_time = float(game_time(services_.timer));
 }
 
 void Sai::modify_strategic_objects_temperatures() {
@@ -457,7 +453,7 @@ bool Sai::player_requests_artillery(int p_player_id, const Vec3 &p_position) {
 	if (player_commander_ || services_.commander == nullptr) {
 		return false;
 	}
-	const double now = game_time();
+	const double now = game_time(services_.timer);
 	Commander &commander = *services_.commander;
 	if (!commander.game_has_artillery(side_) || !commander.any_artillery_pieces_left(side_)) {
 		deny(SaiDenial::ArtilleryUnavailable, p_player_id, now);
@@ -474,7 +470,7 @@ bool Sai::player_requests_uav(int p_player_id, const Vec3 &p_position) {
 	if (player_commander_ || services_.commander == nullptr) {
 		return false;
 	}
-	const double now = game_time();
+	const double now = game_time(services_.timer);
 	if (now > uav_ready_) {
 		uav_ready_ = now + 30.0f;
 		services_.commander->send_uav(side_, p_player_id, { p_position.x, p_position.z });
@@ -488,7 +484,7 @@ bool Sai::player_requests_supply(int p_player_id, const Vec3 &p_position) {
 	if (player_commander_ || services_.commander == nullptr) {
 		return false;
 	}
-	const double now = game_time();
+	const double now = game_time(services_.timer);
 	if (now > supply_ready_) {
 		supply_ready_ = now + 60.0f;
 		services_.commander->drop_supply(side_, p_player_id, { p_position.x, p_position.z });
@@ -502,7 +498,7 @@ bool Sai::player_requests_vehicle_drop(int p_player_id, const Vec3 &p_position) 
 	if (player_commander_ || services_.commander == nullptr) {
 		return false;
 	}
-	const double now = game_time();
+	const double now = game_time(services_.timer);
 	if (now > vehicle_drop_ready_) {
 		vehicle_drop_ready_ = now + 60.0f;
 		services_.commander->drop_vehicle(side_, p_player_id, { p_position.x, p_position.z });
@@ -517,7 +513,7 @@ void Sai::update_request_deny_timers() {
 		deny_requests_.clear();
 		return;
 	}
-	const double now = game_time();
+	const double now = game_time(services_.timer);
 	Commander &commander = *services_.commander;
 	for (auto it = deny_requests_.begin(); it != deny_requests_.end();) {
 		if (!(now > it->deadline)) {
@@ -552,7 +548,7 @@ void Sai::set_player_is_commander(bool p_commander) {
 				services_.squads->coordinator(side_, q).un_assign_squad();
 			}
 		}
-		const double now = game_time();
+		const double now = game_time(services_.timer);
 		artillery_ready_ = now + 60.0f;
 		supply_ready_ = now + 60.0f;
 		vehicle_drop_ready_ = now + 60.0f;
@@ -717,7 +713,7 @@ void Sai::update(double p_budget) {
 			[[fallthrough]];
 		case SaiStage::Prepare: {
 			const double frequency = services_.settings != nullptr ? services_.settings->sai_update_frequency : 35.0;
-			if (!(game_time() - last_update_ > frequency)) {
+			if (!(game_time(services_.timer) - last_update_ > frequency)) {
 				return;
 			}
 			prepare_update();
@@ -882,7 +878,7 @@ void Sai::update_states(std::array<float, kSaiStateCount> &r_own, std::array<flo
 		r_own[14] = float(services_.game->number_of_control_points(side_));
 		r_enemy[14] = float(services_.game->number_of_control_points(enemy));
 	}
-	const float now = float(game_time());
+	const float now = float(game_time(services_.timer));
 	r_own[15] = now;
 	r_enemy[15] = now;
 	if (services_.objects == nullptr) {

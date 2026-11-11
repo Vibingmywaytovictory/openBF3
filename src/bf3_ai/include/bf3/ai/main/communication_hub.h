@@ -46,8 +46,6 @@ public:
 	double last_large_report_time() const { return last_large_report_time_; }
 
 private:
-	double game_time() const;
-
 	CommunicationHubServices services_;
 	std::array<double, 2> last_pickup_send_time_{ -1000.0, -1000.0 };
 	std::array<std::vector<std::pair<int, double>>, 2> combat_strength_;

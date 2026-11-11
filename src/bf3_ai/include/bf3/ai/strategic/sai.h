@@ -199,7 +199,6 @@ private:
 	void update_states(std::array<float, kSaiStateCount> &r_own, std::array<float, kSaiStateCount> &r_enemy);
 	void prepare_update();
 	bool update_strategic_objects();
-	double game_time() const;
 	bool over_budget(double p_start, double p_budget) const;
 	float draw() const;
 	void deny(SaiDenial p_denial, int p_player_id, double p_now);
