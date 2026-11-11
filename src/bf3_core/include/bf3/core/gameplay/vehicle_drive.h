@@ -102,6 +102,7 @@ struct GearboxDef {
 	float transmission_efficiency = 1;
 	int32_t gearbox_type = 0, gearbox_mode = 0;
 	bool use_auto_clutch = false, use_neutral_gear = false, limit_backward_throttle = false;
+	bool use_classic_auto_clutch = false;
 	bool present = false;
 };
 

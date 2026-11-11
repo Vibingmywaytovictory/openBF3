@@ -3,6 +3,7 @@
 #include "bf3/core/result.h"
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/vehicle_types.h"
+#include "bf3/sim/vehicles/land_rules.h"
 
 #include <array>
 #include <cstddef>
@@ -62,22 +63,12 @@ struct VehicleTuning {
 	SteerAngleModel steer_model = SteerAngleModel::ScaledLock;
 	float steer_max_degrees = 32.0f;
 
-	float engine_inertia = 0.5f;
-	float engine_angular_damping = 0.2f;
-	float shift_up_rpm = 3500.0f;
-	float shift_down_rpm = 1500.0f;
-	float switch_time = 0.5f;
-	float clutch_release_time = 0.3f;
-	float switch_latency = 0.5f;
-	float clutch_strength = 10.0f;
-	float differential_limited_slip = 1.4f;
-
 	float anti_roll_scale = 10000.0f;
 	float drag_scale = 1.0f;
 	float max_pitch_roll_degrees = 180.0f;
 
 	float stand_still_speed = 0.5f;
-	float reverse_switch_speed = 1.0f;
+	float wheel_drive_share = 10.0f;
 
 	uint32_t collision_steps = 1;
 	uint32_t velocity_steps = 10;
@@ -99,6 +90,28 @@ struct ChassisPiece {
 	float convex_radius = 0;
 };
 
+struct LandDriveModel {
+	vehicles::InputAxisRule throttle, brake, yaw;
+	std::array<float, kMaxModelGears> forward_ratios{}, reverse_ratios{};
+	std::array<float, kMaxModelGears> forward_speeds{}, reverse_speeds{};
+	uint8_t forward_gears = 0, reverse_gears = 0;
+	uint8_t forward_speed_count = 0, reverse_speed_count = 0;
+	int32_t gearbox_type = 0, gearbox_mode = 0;
+	float gear_change_time = 0, gear_down_speed_factor = 0, clutch_speed_factor = 0;
+	float opposite_dir_gear_change_max_speed = 0, opposite_dir_gear_change_time = 0;
+	float transmission_efficiency = 1;
+	bool use_neutral_gear = false, use_classic_auto_clutch = false, limit_backward_throttle = false;
+	float backward_throttle_limit = 0;
+	vehicles::EngineRule engine;
+	std::array<float, kMaxModelCurvePoints> rpm_points{}, torque_points{};
+	uint8_t curve_points = 0;
+	float power_multiplier = 1;
+	float drive_share = 1;
+};
+
+vehicles::GearboxRule land_gearbox_rule(const LandDriveModel &p_land);
+float land_gear_ratio(const LandDriveModel &p_land, int32_t p_gear);
+
 struct VehicleWheelModel {
 	Vec3 attachment{};
 	Vec3 data_centre{};
@@ -110,6 +123,8 @@ struct VehicleWheelModel {
 	float angular_damping = 0;
 	float max_steer_angle = 0;
 	float max_brake_torque = 0, max_hand_brake_torque = 0;
+	float brake_factor = 0, hand_brake_factor = 0;
+	float diff_gear_ratio = 0;
 	uint8_t steers = 0, driven = 0, axle = 0;
 	uint8_t side = 0;
 };
@@ -122,27 +137,11 @@ struct VehicleModel {
 	Vec3 center_of_mass{};
 	Vec3 inertia_modifier{ 1, 1, 1 };
 	float friction = 0.5f, restitution = 0.4f;
+	float linear_damping = 0, angular_damping = 0;
 	std::vector<ChassisPiece> chassis;
 
 	std::array<VehicleWheelModel, kMaxVehicleWheels> wheels{};
 	uint8_t wheel_count = 0;
-
-	float engine_max_torque = 0;
-	float engine_min_rpm = 0, engine_max_rpm = 0;
-	std::array<std::array<float, 2>, kMaxModelCurvePoints> torque_curve{};
-	uint8_t torque_points = 0;
-	float engine_inertia = 0, engine_angular_damping = 0;
-
-	std::array<float, kMaxModelGears> forward_ratios{};
-	std::array<float, kMaxModelGears> reverse_ratios{};
-	uint8_t forward_gears = 0, reverse_gears = 0;
-	float shift_up_rpm = 0, shift_down_rpm = 0, switch_time = 0, clutch_release_time = 0, switch_latency = 0, clutch_strength = 0;
-
-	std::array<std::array<int8_t, 2>, 4> differential_wheels{};
-	std::array<float, 4> differential_ratio{};
-	std::array<float, 4> differential_torque_ratio{};
-	uint8_t differentials = 0;
-	float differential_limited_slip = 0;
 
 	std::array<std::array<int8_t, 2>, 2> anti_roll_wheels{};
 	std::array<float, 2> anti_roll_stiffness{};
@@ -151,15 +150,13 @@ struct VehicleModel {
 	std::array<std::array<float, 2>, kMaxModelCurvePoints> steer_sensitivity{};
 	uint8_t steer_points = 0;
 	SteerAngleModel steer_model = SteerAngleModel::ScaledLock;
-	float yaw_inertia_in = 0, yaw_inertia_out = 0, yaw_inertia_min_ratio = 0;
-	float throttle_inertia_in = 0, throttle_inertia_out = 0;
-	float brake_inertia_in = 0, brake_inertia_out = 0;
-	bool allow_negative_throttle = true;
+
+	LandDriveModel land;
 
 	float drag_coefficient = 0;
 	bool stand_still_brake = false;
 	uint16_t stand_still_ticks = 0;
-	float stand_still_speed = 0, reverse_switch_speed = 0;
+	float stand_still_speed = 0;
 
 	WheelCollisionTester tester = WheelCollisionTester::Cylinder;
 	float max_pitch_roll_angle = 0;

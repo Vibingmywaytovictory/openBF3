@@ -49,7 +49,9 @@ bool visit_fields(State &p_state, const Visit &p_visit) {
 			!p_visit(std::string("driver.throttle_filter"), &d.throttle_filter, sizeof(d.throttle_filter)) ||
 			!p_visit(std::string("driver.brake_filter"), &d.brake_filter, sizeof(d.brake_filter)) ||
 			!p_visit(std::string("driver.stand_still_ticks"), &d.stand_still_ticks, sizeof(d.stand_still_ticks)) ||
-			!p_visit(std::string("driver.reversing"), &d.reversing, sizeof(d.reversing))) {
+			!p_visit(std::string("driver.reversing"), &d.reversing, sizeof(d.reversing)) ||
+			!p_visit(std::string("driver.engine_rpm"), &d.engine_rpm, sizeof(d.engine_rpm)) ||
+			!p_visit(std::string("driver.gearbox"), &d.gearbox, sizeof(d.gearbox))) {
 		return false;
 	}
 	const size_t wheels = p_state.wheel_count < kMaxVehicleWheels ? p_state.wheel_count : kMaxVehicleWheels;

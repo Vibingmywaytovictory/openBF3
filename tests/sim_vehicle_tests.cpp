@@ -88,6 +88,11 @@ gp::VehicleDriveDef humvee_def() {
 	g.reverse_speeds = { 100.0f, 150.0f };
 	g.clutch_speed_factor = 10.0f;
 	g.transmission_efficiency = 1.0f;
+	g.gearbox_type = 1;
+	g.gear_down_speed_factor = 0.85f;
+	g.opposite_dir_gear_change_max_speed = 10.0f;
+	g.opposite_dir_gear_change_time = 0.1f;
+	g.use_neutral_gear = true;
 	for (int axle = 0; axle < 2; ++axle) {
 		gp::WheelConfigDef w;
 		w.radius = 0.46f;
@@ -98,6 +103,7 @@ gp::VehicleDriveDef humvee_def() {
 		w.spring_stiffness = 0.5f;
 		w.spring_damping = 0.06f;
 		w.brake_force = 4000.0f;
+		w.brake_factor = axle == 0 ? 0.0f : 50.0f;
 		w.diff_gear_ratio = 3.8f;
 		w.driving_type = 1;
 		w.steering_type = axle == 0 ? 1 : 0;
@@ -123,6 +129,8 @@ gp::VehicleDriveDef humvee_def() {
 	e.torque_points = { 250, 450, 400, 285, 185, 85, 30 };
 	e.rpm_min = 500;
 	e.rpm_max = 5000;
+	e.internal_acceleration = 8;
+	e.internal_deceleration = 5;
 	d.engines.push_back(e);
 	gp::DriveRigidBodyDef body;
 	body.body_type = "RBTypeCollision";
@@ -166,6 +174,21 @@ std::shared_ptr<const VehicleModel> fixture_model(const VehicleTuning &p_tuning 
 		sources.push_back({ std::span<const Vec3>(pieces[i]), i < 4 ? 0.03f : 0.015f });
 	}
 	core::Result<std::shared_ptr<const VehicleModel>> m = build_vehicle_model(humvee_def(), sources, p_tuning);
+	REQUIRE_MESSAGE(m.ok(), (m.ok() ? std::string() : m.error().message));
+	return *m;
+}
+
+std::shared_ptr<const VehicleModel> shifting_jeep_model(float p_rear_brake_factor) {
+	static const std::vector<std::vector<Vec3>> pieces = humvee_pieces();
+	std::vector<ChassisPieceSource> sources;
+	for (size_t i = 0; i < pieces.size(); ++i) {
+		sources.push_back({ std::span<const Vec3>(pieces[i]), i < 4 ? 0.03f : 0.015f });
+	}
+	gp::VehicleDriveDef d = humvee_def();
+	d.gearbox.forward_speeds = { 25.0f, 35.0f, 60.0f, 70.0f, 90.0f };
+	d.gearbox.reverse_speeds = { 20.0f, 30.0f };
+	d.wheel_configs[1].brake_factor = p_rear_brake_factor;
+	core::Result<std::shared_ptr<const VehicleModel>> m = build_vehicle_model(d, sources, VehicleTuning{});
 	REQUIRE_MESSAGE(m.ok(), (m.ok() ? std::string() : m.error().message));
 	return *m;
 }
@@ -298,11 +321,12 @@ TEST_SUITE("sim-vehicle-unit") {
 		CHECK(parse_vehicle_tuning("# only a comment\n\n").ok());
 	}
 
-	TEST_CASE("sim.vehicle: ghost codec: 440 bits for the Humvee, round trip within half a step, hostile codes refused with the state untouched") {
-		CHECK(vehicle_ghost_bits(kDefaultVehicleGhost, 4) == 440);
+	TEST_CASE("sim.vehicle: ghost codec: 482 bits for the Humvee, round trip within half a step, hostile codes refused "
+			  "with the state untouched") {
+		CHECK(vehicle_ghost_bits(kDefaultVehicleGhost, 4) == 482);
 		VehicleGhostQuantisation no_suspension = kDefaultVehicleGhost;
 		no_suspension.send_suspension = false;
-		CHECK(vehicle_ghost_bits(no_suspension, 4) == 376);
+		CHECK(vehicle_ghost_bits(no_suspension, 4) == 418);
 		const std::shared_ptr<const VehicleModel> model = fixture_model();
 		const VehicleGhostScale scale = vehicle_ghost_scale(*model);
 		CHECK(scale.wheel_count == 4);
@@ -334,6 +358,13 @@ TEST_SUITE("sim-vehicle-unit") {
 			s.driver.throttle_filter = u(rng);
 			s.driver.brake_filter = 0.5f + 0.5f * u(rng);
 			s.driver.stand_still_ticks = uint16_t(i % 121);
+			s.driver.engine_rpm = 2500.0f + 2000.0f * u(rng);
+			s.driver.gearbox.gear = int32_t(std::lround(1.5f + 3.5f * u(rng)));
+			s.driver.gearbox.phase = vehicles::GearPhase(i % 4);
+			s.driver.gearbox.pending = int8_t(i % 3 - 1);
+			s.driver.gearbox.reverse_direction = uint8_t(i % 2);
+			s.driver.gearbox.clutch = 0.5f + 0.5f * u(rng);
+			s.driver.gearbox.timer = 0.9f + 0.9f * u(rng);
 			VehicleState back;
 			back.wheel_count = 4;
 			const VehicleGhostCodes codes = encode_vehicle_ghost(s, kDefaultVehicleGhost, scale);
@@ -348,6 +379,13 @@ TEST_SUITE("sim-vehicle-unit") {
 			CHECK(d > 0.99999f);
 			CHECK(back.controller.gear == s.controller.gear);
 			CHECK(back.driver.stand_still_ticks == s.driver.stand_still_ticks);
+			CHECK(back.driver.gearbox.gear == s.driver.gearbox.gear);
+			CHECK(back.driver.gearbox.phase == s.driver.gearbox.phase);
+			CHECK(back.driver.gearbox.pending == s.driver.gearbox.pending);
+			CHECK(back.driver.gearbox.reverse_direction == s.driver.gearbox.reverse_direction);
+			CHECK(std::fabs(back.driver.engine_rpm - s.driver.engine_rpm) <= 0.125f + 1e-3f);
+			CHECK(std::fabs(back.driver.gearbox.clutch - s.driver.gearbox.clutch) <= 0.5f / 255.0f + 1e-5f);
+			CHECK(std::fabs(back.driver.gearbox.timer - s.driver.gearbox.timer) <= 0.5f / 256.0f + 1e-5f);
 			CHECK(std::fabs(back.wheels[2].suspension_length - s.wheels[2].suspension_length) <= 0.4f / 65535.0f);
 		}
 
@@ -390,6 +428,18 @@ TEST_SUITE("sim-vehicle-unit") {
 		h = base;
 		h.stand_still = 1u << 10;
 		hostile.push_back({ "stand-still width", h });
+		h = base;
+		h.land_phase = 4;
+		hostile.push_back({ "land gearbox phase 4", h });
+		h = base;
+		h.land_pending = 3;
+		hostile.push_back({ "land pending 3", h });
+		h = base;
+		h.land_direction = 2;
+		hostile.push_back({ "land direction 2", h });
+		h = base;
+		h.land_gear = 8 + 6;
+		hostile.push_back({ "land gear above the model's", h });
 		for (const auto &[what, codes] : hostile) {
 			VehicleState target;
 			target.wheel_count = 4;
@@ -504,16 +554,25 @@ TEST_SUITE("sim-vehicle-unit") {
 		CHECK(m->wheels[1].side == 1);
 		CHECK(fl.axle == 0);
 		CHECK(m->wheels[3].axle == 1);
-		CHECK(m->differentials == 2);
-		CHECK(m->differential_ratio[0] == doctest::Approx(3.8f));
-		CHECK(m->differential_torque_ratio[1] == 0.5f);
+		CHECK(m->wheels[0].driven == 1);
+		CHECK(m->wheels[3].driven == 1);
+		CHECK(m->wheels[0].diff_gear_ratio == doctest::Approx(3.8f));
 		CHECK(m->anti_roll_bars == 2);
 		CHECK(m->anti_roll_stiffness[0] == doctest::Approx(12000.0f));
 		CHECK(m->anti_roll_stiffness[1] == doctest::Approx(5000.0f));
-		CHECK(m->engine_max_torque == 450.0f);
-		CHECK(m->torque_points == 7);
-		CHECK(m->forward_gears == 5);
-		CHECK(m->reverse_gears == 2);
+		CHECK(m->land.curve_points == 7);
+		CHECK(m->land.torque_points[1] == 450.0f);
+		CHECK(m->land.rpm_points[6] == 4500.0f);
+		CHECK(m->land.engine.rpm_max == 5000.0f);
+		CHECK(m->land.forward_gears == 5);
+		CHECK(m->land.reverse_gears == 2);
+		CHECK(m->land.forward_speed_count == 5);
+		CHECK(m->land.forward_speeds[0] == 250.0f);
+		CHECK(m->land.clutch_speed_factor == 10.0f);
+		CHECK(m->land.yaw.inertia_in == 0.23f);
+		CHECK(m->land.yaw.inertia_min_ratio == 0.1f);
+		CHECK(land_gear_ratio(m->land, -1) == -3.0f);
+		CHECK(land_gear_ratio(m->land, 0) == 0.0f);
 		CHECK(m->drag_coefficient == doctest::Approx(2.756f).epsilon(0.001));
 		CHECK(m->stand_still_ticks == 120);
 		CHECK(vehicle_max_steer_angle(*m, 0.0f) == doctest::Approx(32.0f * 3.14159265f / 180.0f));
@@ -720,6 +779,170 @@ TEST_SUITE("sim-vehicle-unit") {
 		CHECK(s.body.origin[0] < -0.5f);
 	}
 
+	TEST_CASE(
+			"sim.vehicle: the BF3 drive in the world: upshifts at ForwardGearSpeeds, the engine rpm follows the driven "
+			"wheels, the back pedal brakes, turns through neutral into reverse 1 and backs up; BrakeFactor; the idle "
+			"hold") {
+		const std::shared_ptr<const StaticWorldShapes> shapes = ground_shapes(false);
+		const std::shared_ptr<const VehicleModel> m = shifting_jeep_model(50.0f);
+		const LandDriveModel &land = m->land;
+		const vehicles::GearboxRule rule = land_gearbox_rule(land);
+		REQUIRE(land.forward_speed_count == 5);
+		std::unique_ptr<VehicleWorld> w = world_at(shapes, m, placed(0, 0, -300));
+		settle(*w);
+		const auto speed_of = [](const VehicleState &p_s) {
+			const Vec3 &v = p_s.body.linear_velocity;
+			return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+		};
+		const auto forward_of = [](const VehicleState &p_s) {
+			const std::array<float, 4> &q = p_s.body.rotation;
+			return Vec3{ 2.0f * (q[0] * q[2] + q[3] * q[1]), 2.0f * (q[1] * q[2] - q[3] * q[0]),
+				1.0f - 2.0f * (q[0] * q[0] + q[1] * q[1]) };
+		};
+		const auto forward_speed_of = [&](const VehicleState &p_s) {
+			const Vec3 f = forward_of(p_s);
+			const Vec3 &v = p_s.body.linear_velocity;
+			return v[0] * f[0] + v[1] * f[1] + v[2] * f[2];
+		};
+		const auto expected_rpm = [&](const VehicleState &p_before, const VehicleState &p_after) {
+			const VehicleDriverState &d = p_after.driver;
+			const float ratio = land_gear_ratio(land, d.gearbox.gear);
+			float sum = 0.0f;
+			uint32_t driven = 0;
+			bool grounded = false;
+			for (size_t i = 0; i < m->wheel_count; ++i) {
+				if (m->wheels[i].driven == 0) {
+					continue;
+				}
+				sum += vehicles::wheel_rpm(std::span<const float>(&p_after.wheels[i].angular_velocity, 1), ratio,
+						m->wheels[i].diff_gear_ratio, land.transmission_efficiency);
+				grounded |= p_after.wheels[i].in_contact != 0;
+				++driven;
+			}
+			const float wheel_rpm = driven > 0 ? sum / float(driven) : 0.0f;
+			const float target = vehicles::engine_rpm_target(land.engine, d.gearbox.gear != 0,
+					vehicles::gearbox_clutch_pressed(rule, d.gearbox), d.gearbox.clutch, d.throttle_filter, wheel_rpm);
+			const float load = grounded ? vehicles::engine_load(wheel_rpm, p_before.driver.engine_rpm,
+												  forward_of(p_after)[1], forward_speed_of(p_after))
+										: 0.0f;
+			return vehicles::engine_rpm_step(land.engine, p_before.driver.engine_rpm,
+					vehicles::engine_rpm_desired(target, load, 0.0f), 0.0f, kTickSeconds);
+		};
+		VehicleCommand drive = command(127, 0, 0);
+		drive.flags = vehicle_flags::kDriven;
+		VehicleState before = w->state(0);
+		CHECK(before.driver.gearbox.gear <= 1);
+		std::vector<std::pair<int32_t, float>> shifts;
+		float worst_rpm = 0.0f;
+		uint32_t t = 0;
+		for (; t < 600 && before.driver.gearbox.gear < 4; ++t) {
+			step1(*w, drive);
+			const VehicleState after = w->state(0);
+			const int32_t from = before.driver.gearbox.gear, to = after.driver.gearbox.gear;
+			CHECK(to >= from);
+			CHECK(to <= from + 1);
+			if (to > from && from >= 1) {
+				const float limit = land.forward_speeds[size_t(from - 1)] / 3.6f;
+				shifts.emplace_back(to, speed_of(before));
+				CHECK_MESSAGE(speed_of(before) > limit, "gear " << from << " -> " << to);
+			}
+			if (to == from && to >= 1 && to <= land.forward_speed_count) {
+				CHECK_MESSAGE(speed_of(before) <= land.forward_speeds[size_t(to - 1)] / 3.6f, "gear " << to << " held");
+			}
+			const float want = expected_rpm(before, after);
+			worst_rpm = std::max(worst_rpm, std::fabs(after.driver.engine_rpm - want));
+			CHECK(after.driver.engine_rpm == doctest::Approx(want).epsilon(1e-4));
+			before = after;
+		}
+		for (const auto &[g, v] : shifts) {
+			std::printf("drive: into gear %d at %.2f km/h\n", int(g), double(3.6f * v));
+		}
+		std::printf("drive: gear %d after %.2f s at %.1f km/h, rpm %.0f, worst rpm difference from the rule %.4f\n",
+				int(before.driver.gearbox.gear), double(float(t) / 60.0f), double(3.6f * speed_of(before)),
+				double(before.driver.engine_rpm), double(worst_rpm));
+		REQUIRE(before.driver.gearbox.gear == 4);
+		CHECK(shifts.size() == 3);
+
+		VehicleCommand back = command(-127, 0, 0);
+		back.flags = vehicle_flags::kDriven;
+		std::vector<int32_t> gears{ before.driver.gearbox.gear };
+		bool reversed = false;
+		float slowest = forward_speed_of(before);
+		for (t = 0; t < 900 && forward_speed_of(before) > -2.0f; ++t) {
+			step1(*w, back);
+			const VehicleState after = w->state(0);
+			const int32_t g = after.driver.gearbox.gear;
+			if (g != gears.back()) {
+				gears.push_back(g);
+				CHECK(g == gears[gears.size() - 2] - 1);
+			}
+			if (g > 0) {
+				CHECK(forward_speed_of(after) <= forward_speed_of(before) + 0.01f);
+				CHECK(after.driver.reversing == 0);
+			}
+			if (g == 0 && after.driver.gearbox.reverse_direction == 0) {
+				CHECK(speed_of(before) < land.opposite_dir_gear_change_max_speed / 3.6f);
+			}
+			if (g < 0) {
+				reversed = true;
+				CHECK(after.driver.reversing == 1);
+			}
+			slowest = std::min(slowest, forward_speed_of(after));
+			before = after;
+		}
+		std::string sequence;
+		for (const int32_t g : gears) {
+			sequence += std::to_string(g) + " ";
+		}
+		std::printf("drive: the back pedal took gears %sand the jeep to %.2f m/s along its heading in %.2f s\n",
+				sequence.c_str(), double(forward_speed_of(before)), double(float(t) / 60.0f));
+		CHECK(reversed);
+		CHECK(gears.back() == -1);
+		CHECK(std::find(gears.begin(), gears.end(), 0) != gears.end());
+		CHECK(forward_speed_of(before) <= -2.0f);
+
+		const auto braked_rear_spin = [&](float p_factor) {
+			std::unique_ptr<VehicleWorld> b = world_at(shapes, shifting_jeep_model(p_factor), placed(0, 0, -300));
+			settle(*b);
+			for (int k = 0; k < 120; ++k) {
+				step1(*b, drive);
+			}
+			VehicleCommand brake = command(0, 8, 0);
+			brake.flags = vehicle_flags::kDriven;
+			for (int k = 0; k < 3; ++k) {
+				step1(*b, brake);
+			}
+			const VehicleState s = b->state(0);
+			return std::fabs(s.wheels[2].angular_velocity) + std::fabs(s.wheels[3].angular_velocity);
+		};
+		const float with_factor = braked_rear_spin(50.0f), without = braked_rear_spin(0.0f);
+		std::printf(
+				"drive: rear wheel spin after 3 ticks at brake 8/255: %.2f rad/s with BrakeFactor 50, %.2f with 0\n",
+				double(with_factor), double(without));
+		CHECK(with_factor < 0.5f * without);
+
+		const auto coasted = [&](uint8_t p_flags) {
+			std::unique_ptr<VehicleWorld> c = world_at(shapes, m, placed(0, 0, -300));
+			settle(*c);
+			for (int k = 0; k < 120; ++k) {
+				step1(*c, drive);
+			}
+			const float at_release = speed_of(c->state(0));
+			VehicleCommand idle = command(0, 0, 0);
+			idle.flags = p_flags;
+			for (int k = 0; k < 60; ++k) {
+				step1(*c, idle);
+			}
+			return speed_of(c->state(0)) / at_release;
+		};
+		const float driven_kept = coasted(vehicle_flags::kDriven), empty_kept = coasted(0);
+		std::printf(
+				"drive: 1 s after the pedals are released a driven jeep keeps %.2f of its speed, an empty one %.2f\n",
+				double(driven_kept), double(empty_kept));
+		CHECK(driven_kept > 0.8f);
+		CHECK(empty_kept < 0.5f);
+	}
+
 	TEST_CASE("sim.vehicle: hostile VehicleStates are refused before any write; restore() refuses a foreign or broken snapshot") {
 		const std::shared_ptr<const StaticWorldShapes> shapes = ground_shapes();
 		const std::shared_ptr<const VehicleModel> m = fixture_model();
@@ -752,6 +975,12 @@ TEST_SUITE("sim-vehicle-unit") {
 		s = good;
 		s.driver.steer_filter = std::nanf("");
 		bad.push_back({ "NaN driver", { s, vehicle_restore::kDriver } });
+		s = good;
+		s.driver.gearbox.gear = 6;
+		bad.push_back({ "land gear 6", { s, vehicle_restore::kDriver } });
+		s = good;
+		s.driver.engine_rpm = 9000.0f;
+		bad.push_back({ "land rpm above RpmMax", { s, vehicle_restore::kDriver } });
 		for (const auto &[what, state_groups] : bad) {
 			const core::Status r = w->restore_vehicle_state(0, state_groups.first, state_groups.second, ContactCachePolicy::Keep);
 			CHECK_MESSAGE(!r.ok(), what);

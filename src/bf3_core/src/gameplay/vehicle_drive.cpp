@@ -347,6 +347,7 @@ private:
 			gb.gearbox_mode = numbers_.i(g, "GearboxMode", 0);
 			gb.use_auto_clutch = numbers_.b(g, "UseAutoClutch", false);
 			gb.use_neutral_gear = numbers_.b(g, "UseNeutralGear", false);
+			gb.use_classic_auto_clutch = numbers_.b(g, "UseClassicGearBoxAutoClutch", false);
 			gb.limit_backward_throttle = numbers_.b(g, "LimitBackwardThrottle", false);
 		}
 	}

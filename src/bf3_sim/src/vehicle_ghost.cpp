@@ -55,6 +55,13 @@ uint32_t gear_offset(const VehicleGhostQuantisation &p_q) {
 	return p_q.gear_bits == 0 ? 0u : (1u << (p_q.gear_bits - 1));
 }
 
+uint32_t gear_code(int32_t p_gear, const VehicleGhostQuantisation &p_q) {
+	const int64_t gear = int64_t(p_gear) + int64_t(gear_offset(p_q));
+	return gear < 0 ? 0u : (gear > int64_t(max_code(p_q.gear_bits)) ? max_code(p_q.gear_bits) : uint32_t(gear));
+}
+
+constexpr unsigned kLandPhaseBits = 3;
+constexpr unsigned kLandPendingBits = 2;
 }
 
 size_t vehicle_ghost_bits(const VehicleGhostQuantisation &p_q, size_t p_wheels) {
@@ -69,6 +76,8 @@ size_t vehicle_ghost_bits(const VehicleGhostQuantisation &p_q, size_t p_wheels) 
 		bits += 4 * size_t(p_q.driver_filter.bits);
 	}
 	bits += 3 * size_t(p_q.driver_filter.bits) + p_q.stand_still_bits + 1;
+	bits += p_q.engine_rpm.bits + p_q.gear_bits + kLandPhaseBits + kLandPendingBits + 1 + p_q.clutch.bits +
+			p_q.gearbox_timer.bits;
 	return bits;
 }
 
@@ -78,8 +87,8 @@ VehicleGhostScale vehicle_ghost_scale(const VehicleModel &p_model) {
 	for (size_t i = 0; i < p_model.wheel_count && i < kMaxVehicleWheels; ++i) {
 		s.suspension_max[i] = p_model.wheels[i].suspension_max;
 	}
-	s.min_gear = -int32_t(p_model.reverse_gears);
-	s.max_gear = int32_t(p_model.forward_gears);
+	s.min_gear = -int32_t(p_model.land.reverse_gears);
+	s.max_gear = int32_t(p_model.land.forward_gears);
 	return s;
 }
 
@@ -172,8 +181,7 @@ VehicleGhostCodes encode_vehicle_ghost(const VehicleState &p_state, const Vehicl
 	}
 	const VehicleControllerState &c = p_state.controller;
 	g.engine_rpm = p_q.engine_rpm.encode(c.engine_rpm);
-	const int64_t gear = int64_t(c.gear) + int64_t(gear_offset(p_q));
-	g.gear = gear < 0 ? 0u : (gear > int64_t(max_code(p_q.gear_bits)) ? max_code(p_q.gear_bits) : uint32_t(gear));
+	g.gear = gear_code(c.gear, p_q);
 	g.clutch = p_q.clutch.encode(c.clutch);
 	g.gearbox_timers[0] = p_q.gearbox_timer.encode(c.gear_switch_time_left);
 	g.gearbox_timers[1] = p_q.gearbox_timer.encode(c.clutch_release_time_left);
@@ -190,6 +198,13 @@ VehicleGhostCodes encode_vehicle_ghost(const VehicleState &p_state, const Vehicl
 	g.brake_filter = p_q.driver_filter.encode(d.brake_filter);
 	g.stand_still = d.stand_still_ticks > max_code(p_q.stand_still_bits) ? max_code(p_q.stand_still_bits) : d.stand_still_ticks;
 	g.reversing = d.reversing != 0 ? 1 : 0;
+	g.land_rpm = p_q.engine_rpm.encode(d.engine_rpm);
+	g.land_gear = gear_code(d.gearbox.gear, p_q);
+	g.land_phase = uint8_t(uint8_t(d.gearbox.phase) & max_code(kLandPhaseBits));
+	g.land_pending = uint8_t(d.gearbox.pending < 0 ? 0 : (d.gearbox.pending > 0 ? 2 : 1));
+	g.land_direction = d.gearbox.reverse_direction != 0 ? 1 : 0;
+	g.land_clutch = p_q.clutch.encode(d.gearbox.clutch);
+	g.land_timer = p_q.gearbox_timer.encode(d.gearbox.timer);
 	return g;
 }
 
@@ -215,7 +230,7 @@ core::Status decode_vehicle_ghost(const VehicleGhostCodes &p_codes, const Vehicl
 			return refuse("velocity code out of range");
 		}
 	}
-	if (p_codes.active > 1 || p_codes.reversing > 1) {
+	if (p_codes.active > 1 || p_codes.reversing > 1 || p_codes.land_direction > 1) {
 		return refuse("a one-bit field above 1");
 	}
 	for (size_t i = 0; i < p_codes.wheel_count; ++i) {
@@ -248,8 +263,19 @@ core::Status decode_vehicle_ghost(const VehicleGhostCodes &p_codes, const Vehicl
 		return refuse("driver code out of range");
 	}
 	const int32_t gear = int32_t(p_codes.gear) - int32_t(gear_offset(p_q));
-	if (gear < p_scale.min_gear || gear > p_scale.max_gear) {
-		return refuse("gear " + std::to_string(gear) + " outside " + std::to_string(p_scale.min_gear) + ".." + std::to_string(p_scale.max_gear));
+	const int32_t land_gear = int32_t(p_codes.land_gear) - int32_t(gear_offset(p_q));
+	for (const int32_t g : { gear, land_gear }) {
+		if (g < p_scale.min_gear || g > p_scale.max_gear) {
+			return refuse("gear " + std::to_string(g) + " outside " + std::to_string(p_scale.min_gear) + ".." +
+					std::to_string(p_scale.max_gear));
+		}
+	}
+	const bool phase_known = p_codes.land_phase <= uint8_t(vehicles::GearPhase::Reengage) ||
+			p_codes.land_phase == uint8_t(vehicles::GearPhase::OppositeDirection);
+	if (!within(p_codes.land_rpm, p_q.engine_rpm.max_code()) || !within(p_codes.land_gear, max_code(p_q.gear_bits)) ||
+			!phase_known || p_codes.land_pending > 2 || !within(p_codes.land_clutch, p_q.clutch.max_code()) ||
+			!within(p_codes.land_timer, p_q.gearbox_timer.max_code())) {
+		return refuse("land drive code out of range");
 	}
 	core::Result<std::array<float, 4>> rotation = decode_quat_smallest_three(p_codes.orientation_largest, p_codes.orientation, orientation_bits(p_q));
 	if (!rotation) {
@@ -291,6 +317,13 @@ core::Status decode_vehicle_ghost(const VehicleGhostCodes &p_codes, const Vehicl
 	d.brake_filter = p_q.driver_filter.decode(p_codes.brake_filter);
 	d.stand_still_ticks = uint16_t(p_codes.stand_still);
 	d.reversing = p_codes.reversing;
+	d.engine_rpm = p_q.engine_rpm.decode(p_codes.land_rpm);
+	d.gearbox.gear = land_gear;
+	d.gearbox.phase = vehicles::GearPhase(p_codes.land_phase);
+	d.gearbox.pending = int8_t(int32_t(p_codes.land_pending) - 1);
+	d.gearbox.reverse_direction = p_codes.land_direction;
+	d.gearbox.clutch = p_q.clutch.decode(p_codes.land_clutch);
+	d.gearbox.timer = p_q.gearbox_timer.decode(p_codes.land_timer);
 	return core::Status::success();
 }
 

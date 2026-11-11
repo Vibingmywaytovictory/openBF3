@@ -4,6 +4,8 @@
 
 #include "jolt_runtime.h"
 #include "static_world_internal.h"
+#include "vehicles/land_drive.h"
+#include "vehicles/land_model.h"
 
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
@@ -115,19 +117,6 @@ bool same_world_keys(const VehicleTuning &p_a, const VehicleTuning &p_b) {
 			p_a.collision_steps == p_b.collision_steps && p_a.velocity_steps == p_b.velocity_steps && p_a.position_steps == p_b.position_steps;
 }
 
-float filter_axis(float p_current, float p_target, float p_in, float p_out) {
-	const bool growing = (p_target > 0.0f && p_current >= 0.0f && p_target > p_current) || (p_target < 0.0f && p_current <= 0.0f && p_target < p_current);
-	const float duration = growing ? p_in : p_out;
-	if (!(duration > 0.0f)) {
-		return p_target;
-	}
-	const float step = kTickSeconds / duration;
-	if (p_target > p_current) {
-		return std::min(p_current + step, p_target);
-	}
-	return std::max(p_current - step, p_target);
-}
-
 uint64_t fnv_bytes(uint64_t p_hash, const void *p_data, size_t p_size) {
 	const unsigned char *b = static_cast<const unsigned char *>(p_data);
 	for (size_t i = 0; i < p_size; ++i) {
@@ -145,6 +134,8 @@ uint64_t snapshot_hash(const std::vector<uint8_t> &p_jolt, const std::vector<Veh
 		h = fnv_bytes(h, &d.brake_filter, sizeof(d.brake_filter));
 		h = fnv_bytes(h, &d.stand_still_ticks, sizeof(d.stand_still_ticks));
 		h = fnv_bytes(h, &d.reversing, sizeof(d.reversing));
+		h = fnv_bytes(h, &d.engine_rpm, sizeof(d.engine_rpm));
+		h = fnv_bytes(h, &d.gearbox, sizeof(d.gearbox));
 	}
 	return h;
 }
@@ -239,71 +230,7 @@ void VehicleWorld::Impl::save_constraint_stream(VehicleSlot p_slot, std::vector<
 }
 
 void VehicleWorld::Impl::drive(VehicleSlot p_slot, const VehicleCommand &p_command) {
-	Vehicle &v = vehicles[p_slot];
-	const VehicleModel &m = *v.model;
-	VehicleDriverState &d = v.driver;
-
-	const float t = float(std::max<int>(p_command.throttle, -127)) / 127.0f;
-	const float b = float(p_command.brake) / 255.0f;
-	const float s = float(std::max<int>(p_command.steer, -127)) / 127.0f;
-	const bool hand_brake = (p_command.buttons & vehicle_buttons::kHandbrake) != 0;
-
-	d.steer_filter = filter_axis(d.steer_filter, s, m.yaw_inertia_in, m.yaw_inertia_out);
-	d.throttle_filter = filter_axis(d.throttle_filter, t, m.throttle_inertia_in, m.throttle_inertia_out);
-	d.brake_filter = filter_axis(d.brake_filter, b, m.brake_inertia_in, m.brake_inertia_out);
-	JPH::BodyInterface &bi = system->GetBodyInterfaceNoLock();
-	const JPH::Vec3 velocity = bi.GetLinearVelocity(v.body);
-	const JPH::Vec3 forward_axis = bi.GetRotation(v.body) * JPH::Vec3::sAxisZ();
-	const float forward_speed = velocity.Dot(forward_axis);
-	const float speed = velocity.Length();
-
-	float forward = d.throttle_filter;
-	float brake = d.brake_filter;
-	if (forward < 0.0f && !m.allow_negative_throttle) {
-		forward = 0.0f;
-	}
-	if (forward < 0.0f) {
-		if (forward_speed < m.reverse_switch_speed) {
-			d.reversing = 1;
-		} else {
-			brake = std::max(brake, -forward);
-			forward = 0.0f;
-			d.reversing = 0;
-		}
-	} else if (forward > 0.0f) {
-		if (forward_speed > -m.reverse_switch_speed) {
-			d.reversing = 0;
-		} else {
-			brake = std::max(brake, forward);
-			forward = 0.0f;
-		}
-	}
-
-	if (m.stand_still_brake && m.stand_still_ticks > 0) {
-		if (p_command.throttle == 0 && speed < m.stand_still_speed) {
-			if (d.stand_still_ticks < m.stand_still_ticks) {
-				++d.stand_still_ticks;
-			}
-		} else {
-			d.stand_still_ticks = 0;
-		}
-		if (d.stand_still_ticks >= m.stand_still_ticks) {
-			brake = 1.0f;
-		}
-	}
-
-	const float lock = vehicle_max_steer_angle(m, 0.0f);
-	const float falloff = lock > 0.0f ? vehicle_max_steer_angle(m, forward_speed) / lock : 0.0f;
-	const float right = d.steer_filter * falloff;
-
-	if (p_command.throttle != 0 || p_command.brake != 0 || p_command.steer != 0 || hand_brake) {
-		bi.ActivateBody(v.body);
-	}
-
-	static_cast<JPH::WheeledVehicleController *>(v.constraint->GetController())->SetDriverInput(forward, right, brake, hand_brake ? 1.0f : 0.0f);
-	if (m.drag_coefficient > 0.0f && speed > 0.0f) {
-		bi.AddForce(v.body, velocity * (-m.drag_coefficient * speed), JPH::EActivation::DontActivate);
-	}
+	land_drive(*this, p_slot, p_command);
 }
 
 const char *vehicle_snapshot_section_name(VehicleSnapshotSection p_section) {
@@ -493,6 +420,8 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 	body.mMassPropertiesOverride = mass;
 	body.mFriction = m.friction;
 	body.mRestitution = m.restitution;
+	body.mLinearDamping = m.linear_damping;
+	body.mAngularDamping = m.angular_damping;
 	body.mGravityFactor = m.gravity_factor;
 	body.mAllowSleeping = true;
 	body.mUserData = p_slot;
@@ -535,40 +464,7 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 		vehicle.mWheels.push_back(wheel);
 	}
 	JPH::WheeledVehicleControllerSettings *controller = new JPH::WheeledVehicleControllerSettings;
-	controller->mEngine.mMaxTorque = m.engine_max_torque;
-	controller->mEngine.mMinRPM = m.engine_min_rpm;
-	controller->mEngine.mMaxRPM = m.engine_max_rpm;
-	controller->mEngine.mNormalizedTorque.Clear();
-	for (size_t i = 0; i < m.torque_points; ++i) {
-		controller->mEngine.mNormalizedTorque.AddPoint(m.torque_curve[i][0], m.torque_curve[i][1]);
-	}
-	controller->mEngine.mInertia = m.engine_inertia;
-	controller->mEngine.mAngularDamping = m.engine_angular_damping;
-	controller->mTransmission.mMode = JPH::ETransmissionMode::Auto;
-	controller->mTransmission.mGearRatios.clear();
-	for (size_t i = 0; i < m.forward_gears; ++i) {
-		controller->mTransmission.mGearRatios.push_back(m.forward_ratios[i]);
-	}
-	controller->mTransmission.mReverseGearRatios.clear();
-	for (size_t i = 0; i < m.reverse_gears; ++i) {
-		controller->mTransmission.mReverseGearRatios.push_back(m.reverse_ratios[i]);
-	}
-	controller->mTransmission.mSwitchTime = m.switch_time;
-	controller->mTransmission.mClutchReleaseTime = m.clutch_release_time;
-	controller->mTransmission.mSwitchLatency = m.switch_latency;
-	controller->mTransmission.mShiftUpRPM = m.shift_up_rpm;
-	controller->mTransmission.mShiftDownRPM = m.shift_down_rpm;
-	controller->mTransmission.mClutchStrength = m.clutch_strength;
-	for (size_t i = 0; i < m.differentials; ++i) {
-		JPH::VehicleDifferentialSettings diff;
-		diff.mLeftWheel = m.differential_wheels[i][0];
-		diff.mRightWheel = m.differential_wheels[i][1];
-		diff.mDifferentialRatio = m.differential_ratio[i];
-		diff.mLeftRightSplit = 0.5f;
-		diff.mEngineTorqueRatio = m.differential_torque_ratio[i];
-		controller->mDifferentials.push_back(diff);
-	}
-	controller->mDifferentialLimitedSlipRatio = m.differential_limited_slip;
+	controller->mTransmission.mMode = JPH::ETransmissionMode::Manual;
 	vehicle.mController = controller;
 	for (size_t i = 0; i < m.anti_roll_bars; ++i) {
 		JPH::VehicleAntiRollBar bar;
@@ -610,7 +506,7 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 	v.used = true;
 	v.model = std::move(p_model);
 	v.body = created->GetID();
-	v.driver = VehicleDriverState();
+	v.driver = land_driver_at_rest(m);
 	w.contacts[p_slot] = VehicleContacts();
 
 	VehicleState clean = state(p_slot);
@@ -660,6 +556,7 @@ core::Status VehicleWorld::step(std::span<const VehicleSlot> p_slots, std::span<
 		if (!v.used) {
 			continue;
 		}
+		land_engine_update(w, s);
 		uint8_t in_contact = 0;
 		for (const JPH::Wheel *wheel : v.constraint->GetWheels()) {
 			in_contact += wheel->HasContact() ? 1 : 0;
@@ -873,7 +770,7 @@ core::Status VehicleWorld::restore_vehicle_state(VehicleSlot p_slot, const Vehic
 		if (!finite(f)) {
 			return core::make_error(where + ": non-finite controller state");
 		}
-		if (c.gear < -int32_t(m.reverse_gears) || c.gear > int32_t(m.forward_gears)) {
+		if (c.gear < -int32_t(m.land.reverse_gears) || c.gear > int32_t(m.land.forward_gears)) {
 			return core::make_error(where + ": gear " + std::to_string(c.gear) + " outside the model's range");
 		}
 	}
@@ -919,7 +816,8 @@ core::Status VehicleWorld::restore_vehicle_state(VehicleSlot p_slot, const Vehic
 	}
 	const VehicleDriverState &d = p_state.driver;
 	if ((p_groups & g::kDriver) != 0 &&
-			(!std::isfinite(d.steer_filter) || !std::isfinite(d.throttle_filter) || !std::isfinite(d.brake_filter) || d.reversing > 1)) {
+			(!std::isfinite(d.steer_filter) || !std::isfinite(d.throttle_filter) || !std::isfinite(d.brake_filter) ||
+					d.reversing > 1 || !land_driver_state_valid(m, d))) {
 		return core::make_error(where + ": non-finite driver state");
 	}
 

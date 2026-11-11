@@ -68,6 +68,13 @@ struct VehicleGhostCodes {
 	uint32_t steer_filter = 0, throttle_filter = 0, brake_filter = 0;
 	uint32_t stand_still = 0;
 	uint8_t reversing = 0;
+	uint32_t land_rpm = 0;
+	uint32_t land_gear = 0;
+	uint8_t land_phase = 0;
+	uint8_t land_pending = 1;
+	uint8_t land_direction = 0;
+	uint32_t land_clutch = 0;
+	uint32_t land_timer = 0;
 
 	uint32_t controller_inputs[4] = {};
 };

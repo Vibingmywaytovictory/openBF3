@@ -81,6 +81,10 @@ target_sources(bf3_sim PRIVATE
     include/bf3/sim/vehicles/land_rules.h
     include/bf3/sim/vehicles/vehicle_spawning.h
     src/vehicles/land_rules.cpp
+    src/vehicles/land_model.h
+    src/vehicles/land_model.cpp
+    src/vehicles/land_drive.h
+    src/vehicles/land_drive.cpp
 )
 
 target_sources(bf3_sim PRIVATE

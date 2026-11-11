@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/sim/sim_types.h"
+#include "bf3/sim/vehicles/land_rules.h"
 
 #include <array>
 #include <cstddef>
@@ -23,6 +24,10 @@ inline constexpr uint8_t kHandbrake = 1u << 0;
 inline constexpr uint8_t kBoost = 1u << 1;
 inline constexpr uint8_t kHorn = 1u << 2;
 inline constexpr uint8_t kWireMask = 0x07u;
+}
+
+namespace vehicle_flags {
+inline constexpr uint8_t kDriven = 1u << 0;
 }
 
 struct VehicleCommand {
@@ -106,6 +111,8 @@ struct VehicleDriverState {
 	uint16_t stand_still_ticks = 0;
 	uint8_t reversing = 0;
 	uint8_t reserved = 0;
+	float engine_rpm = 0;
+	vehicles::GearboxState gearbox;
 
 	bool operator==(const VehicleDriverState &) const = default;
 };

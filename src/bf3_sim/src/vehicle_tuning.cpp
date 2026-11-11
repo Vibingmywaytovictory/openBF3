@@ -33,25 +33,16 @@ const Key kKeys[] = {
 	{ "tester", KeyKind::Choice, 0, 0, BF3_VEHICLE_FIELD(tester), kTesters },
 	{ "steer_model", KeyKind::Choice, 0, 0, BF3_VEHICLE_FIELD(steer_model), kSteerModels },
 	{ "steer_max_degrees", KeyKind::Float, 0.0f, 89.0f, BF3_VEHICLE_FIELD(steer_max_degrees) },
-	{ "engine_inertia", KeyKind::Float, 0.001f, 1000.0f, BF3_VEHICLE_FIELD(engine_inertia) },
-	{ "engine_angular_damping", KeyKind::Float, 0.0f, 100.0f, BF3_VEHICLE_FIELD(engine_angular_damping) },
-	{ "shift_up_rpm", KeyKind::Float, 1.0f, 100000.0f, BF3_VEHICLE_FIELD(shift_up_rpm) },
-	{ "shift_down_rpm", KeyKind::Float, 0.0f, 100000.0f, BF3_VEHICLE_FIELD(shift_down_rpm) },
-	{ "switch_time", KeyKind::Float, 0.0f, 10.0f, BF3_VEHICLE_FIELD(switch_time) },
-	{ "clutch_release_time", KeyKind::Float, 0.0f, 10.0f, BF3_VEHICLE_FIELD(clutch_release_time) },
-	{ "switch_latency", KeyKind::Float, 0.0f, 10.0f, BF3_VEHICLE_FIELD(switch_latency) },
-	{ "clutch_strength", KeyKind::Float, 0.0f, 10000.0f, BF3_VEHICLE_FIELD(clutch_strength) },
-	{ "differential_limited_slip", KeyKind::Float, 1.0f, 1e30f, BF3_VEHICLE_FIELD(differential_limited_slip) },
 	{ "anti_roll_scale", KeyKind::Float, 0.0f, 1e9f, BF3_VEHICLE_FIELD(anti_roll_scale) },
 	{ "drag_scale", KeyKind::Float, 0.0f, 100.0f, BF3_VEHICLE_FIELD(drag_scale) },
 	{ "max_pitch_roll_degrees", KeyKind::Float, 1.0f, 180.0f, BF3_VEHICLE_FIELD(max_pitch_roll_degrees) },
 	{ "stand_still_speed", KeyKind::Float, 0.0f, 100.0f, BF3_VEHICLE_FIELD(stand_still_speed) },
-	{ "reverse_switch_speed", KeyKind::Float, 0.0f, 100.0f, BF3_VEHICLE_FIELD(reverse_switch_speed) },
+	{ "wheel_drive_share", KeyKind::Float, 0.0f, 100.0f, BF3_VEHICLE_FIELD(wheel_drive_share) },
 	{ "collision_steps", KeyKind::U32, 1, 8, BF3_VEHICLE_FIELD(collision_steps) },
 	{ "velocity_steps", KeyKind::U32, 1, 128, BF3_VEHICLE_FIELD(velocity_steps) },
 	{ "position_steps", KeyKind::U32, 0, 128, BF3_VEHICLE_FIELD(position_steps) },
 };
-static_assert(std::size(kKeys) == 30);
+static_assert(std::size(kKeys) == 21);
 
 #undef BF3_VEHICLE_FIELD
 

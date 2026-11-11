@@ -250,6 +250,44 @@ int cmd_vehicledrive(const std::shared_ptr<Install> &p_install, const std::vecto
 				double(w.spring_stiffness), double(w.spring_damping), double(w.max_steer_angle), double(w.max_brake_torque), double(w.max_hand_brake_torque),
 				unsigned(w.axle), unsigned(w.side));
 	}
+	for (const gameplay::DriveRigidBodyDef &b : d.rigid_bodies) {
+		std::printf("rigid_body\t%s\tmass %g damping linear %g angular %g\n", b.body_type.c_str(), double(b.mass),
+				double(b.linear_damping), double(b.angular_damping));
+	}
+	std::printf("motion_damping\tlinear %g pitch %g roll %g yaw %g\n", double(c.damping_linear),
+			double(c.damping_pitch), double(c.damping_roll), double(c.damping_yaw));
+	const LandDriveModel &l = m.land;
+	std::printf("land_input\tthrottle %g %g %g %g brake %g %g %g %g yaw %g %g %g %g\n", double(l.throttle.deadzone),
+			double(l.throttle.inertia_in), double(l.throttle.inertia_out), double(l.throttle.inertia_min_ratio),
+			double(l.brake.deadzone), double(l.brake.inertia_in), double(l.brake.inertia_out),
+			double(l.brake.inertia_min_ratio), double(l.yaw.deadzone), double(l.yaw.inertia_in),
+			double(l.yaw.inertia_out), double(l.yaw.inertia_min_ratio));
+	std::printf("land_gearbox\ttype %d mode %d change %g down %g clutch %g opposite %g km/h %g s efficiency %g neutral "
+				"%d classic %d limit_back %d %g\n",
+			int(l.gearbox_type), int(l.gearbox_mode), double(l.gear_change_time), double(l.gear_down_speed_factor),
+			double(l.clutch_speed_factor), double(l.opposite_dir_gear_change_max_speed),
+			double(l.opposite_dir_gear_change_time), double(l.transmission_efficiency), int(l.use_neutral_gear),
+			int(l.use_classic_auto_clutch), int(l.limit_backward_throttle), double(l.backward_throttle_limit));
+	for (size_t i = 0; i < l.forward_gears; ++i) {
+		std::printf("land_gear\t%zu\tratio %g\tspeed %g km/h\n", i + 1, double(l.forward_ratios[i]),
+				i < l.forward_speed_count ? double(l.forward_speeds[i]) : -1.0);
+	}
+	for (size_t i = 0; i < l.reverse_gears; ++i) {
+		std::printf("land_gear\t-%zu\tratio %g\tspeed %g km/h\n", i + 1, double(l.reverse_ratios[i]),
+				i < l.reverse_speed_count ? double(l.reverse_speeds[i]) : -1.0);
+	}
+	std::printf("land_engine\trpm %g..%g acceleration %g deceleration %g power %g curve", double(l.engine.rpm_min),
+			double(l.engine.rpm_max), double(l.engine.internal_acceleration), double(l.engine.internal_deceleration),
+			double(l.power_multiplier));
+	for (size_t i = 0; i < l.curve_points; ++i) {
+		std::printf(" %g:%g", double(l.rpm_points[i]), double(l.torque_points[i]));
+	}
+	std::printf("\n");
+	for (size_t i = 0; i < m.wheel_count; ++i) {
+		std::printf("land_wheel\t%zu\tdriven %u diff %g brake_factor %g hand_brake_factor %g inertia %g\n", i,
+				unsigned(m.wheels[i].driven), double(m.wheels[i].diff_gear_ratio), double(m.wheels[i].brake_factor),
+				double(m.wheels[i].hand_brake_factor), double(m.wheels[i].inertia));
+	}
 	std::fprintf(stderr, "vehicledrive: %zu budget units, %.2f s\n", size_t(budget.used()), seconds_since(start));
 	return 0;
 }

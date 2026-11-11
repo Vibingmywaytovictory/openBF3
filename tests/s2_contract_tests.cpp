@@ -94,7 +94,7 @@ static_assert(sim::kDefaultVehicleGhost.position_xz.bits * 2 + sim::kDefaultVehi
 		183);
 
 static_assert(sim::kDefaultVehicleGhost.send_suspension);
-static_assert(440 - 4 * sim::kDefaultVehicleGhost.suspension_bits == 376);
+static_assert(482 - 4 * sim::kDefaultVehicleGhost.suspension_bits == 418);
 static_assert(sim::kDefaultVehicleGhost.position_xz.encode(-5000.0f) == 0);
 static_assert(sim::kDefaultVehicleGhost.position_xz.encode(5000.0f) == sim::kDefaultVehicleGhost.position_xz.max_code());
 static_assert(sim::kDefaultVehicleGhost.engine_rpm.encode(5000.0f) == 20000);
@@ -165,12 +165,11 @@ TEST_CASE("s2 contract: default plain values") {
 
 #ifdef OPENBF3_VEHICLE_TUNING_CFG
 TEST_CASE("s2 contract: vehicle_tuning.cfg names exactly the VehicleTuning keys") {
-
-	const std::set<std::string> expected = { "gravity", "ground_friction", "static_sag_fraction", "damping_ratio", "suspension_min_fraction",
-		"wheel_angular_damping", "brake_torque_per_force", "hand_brake_torque", "longitudinal_grip", "lateral_grip", "tester", "steer_model",
-		"steer_max_degrees", "engine_inertia", "engine_angular_damping", "shift_up_rpm", "shift_down_rpm", "switch_time", "clutch_release_time",
-		"switch_latency", "clutch_strength", "differential_limited_slip", "anti_roll_scale", "drag_scale", "max_pitch_roll_degrees",
-		"stand_still_speed", "reverse_switch_speed", "collision_steps", "velocity_steps", "position_steps" };
+	const std::set<std::string> expected = { "gravity", "ground_friction", "static_sag_fraction", "damping_ratio",
+		"suspension_min_fraction", "wheel_angular_damping", "brake_torque_per_force", "hand_brake_torque",
+		"longitudinal_grip", "lateral_grip", "tester", "steer_model", "steer_max_degrees", "anti_roll_scale",
+		"drag_scale", "max_pitch_roll_degrees", "stand_still_speed", "wheel_drive_share", "collision_steps",
+		"velocity_steps", "position_steps" };
 	std::ifstream f(OPENBF3_VEHICLE_TUNING_CFG, std::ios::binary);
 	REQUIRE(f.good());
 	std::set<std::string> found;
