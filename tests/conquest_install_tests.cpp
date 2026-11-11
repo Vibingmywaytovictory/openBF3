@@ -5,6 +5,7 @@
 #include "bf3/core/gameplay/logic_world.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/level.h"
+#include "bf3/core/level/spawn_points.h"
 #include "bf3/core/level/world.h"
 #include "bf3/sim/logic/conquest_data.h"
 #include "bf3/sim/logic/conquest_natives.h"
@@ -279,6 +280,75 @@ TEST_SUITE("logic-conquest") {
 		CHECK(c.stats().unhandled_inputs == 0);
 	}
 
+	TEST_CASE("logic.conquest: MP_007 ConquestSmall0 opens only the HQ's spawn points at round start and a flag's "
+			  "own-team points once taken") {
+		test::Mounted *mount = test::shared_mount_or_skip();
+		if (mount == nullptr) {
+			return;
+		}
+		const std::optional<ConquestLevel> l = load_conquest(*mount, "MP_007", "ConquestSmall0");
+		core::Result<core::level::LevelSpawns> spawns = core::level::read_level_spawns(*l->world);
+		REQUIRE(spawns.ok());
+		Match m = start_match(*l);
+		const ConquestPointData *us_hq = hq_of(*l->params, 1);
+		const ConquestPointData *ru_hq = hq_of(*l->params, 2);
+		REQUIRE(us_hq != nullptr);
+		REQUIRE(ru_hq != nullptr);
+		REQUIRE(m.natives->player_enter_team(0, true, 1, *m.runtime).ok());
+		REQUIRE(m.natives->player_enter_team(1, true, 2, *m.runtime).ok());
+		std::vector<ConquestPlayerSample> players{ { 0, 1, true, true, us_hq->params.position },
+			{ 1, 2, true, true, ru_hq->params.position } };
+		m.step(players);
+		const ConquestNatives &c = *m.natives->conquest();
+		const auto open_points = [&](uint8_t p_team) {
+			size_t n = 0;
+			for (const core::level::SpawnPointDef &p : spawns->points) {
+				n += c.spawn_point_open(p.spawner, p_team) ? 1 : 0;
+			}
+			return n;
+		};
+		const auto points_of = [&](const ConquestPointData &p_point, uint8_t p_team) {
+			size_t n = 0;
+			for (const uint32_t s : p_point.spawners) {
+				const ConquestSpawnerData *sp = l->params->spawner(s);
+				if (sp == nullptr || sp->vehicle || sp->gate.data_team != p_team) {
+					continue;
+				}
+				for (const core::level::SpawnPointDef &pt : spawns->points) {
+					n += pt.spawner == sp->level_object ? 1 : 0;
+				}
+			}
+			return n;
+		};
+		size_t linked = 0;
+		for (const core::level::SpawnPointDef &p : spawns->points) {
+			linked += p.spawner != core::level::kNoSpawner ? 1 : 0;
+		}
+		CHECK(linked == spawns->points.size());
+		const size_t us_start = open_points(1), ru_start = open_points(2);
+		CHECK(us_start == points_of(*us_hq, 1));
+		CHECK(ru_start == points_of(*ru_hq, 2));
+		CHECK(us_start > 0);
+		CHECK(ru_start > 0);
+		const ConquestPointData *flag = nullptr;
+		for (const ConquestPointData &p : l->params->points) {
+			if (p.params.type != CapturableType::UnableToChangeTeam && flag == nullptr) {
+				flag = &p;
+			}
+		}
+		REQUIRE(flag != nullptr);
+		players[0].position = flag->params.position;
+		for (int i = 0; i < 1210; ++i) {
+			m.step(players);
+		}
+		const size_t flag_us = points_of(*flag, 1);
+		CHECK(flag_us > 0);
+		CHECK(open_points(1) == us_start + flag_us);
+		CHECK(open_points(2) == ru_start);
+		std::printf(
+				"logic.conquest: spawn points open at start US %zu RU %zu of %zu; the first flag adds %zu US points\n",
+				us_start, ru_start, spawns->points.size(), flag_us);
+	}
 	TEST_CASE("logic.conquest: MP_007 ConquestSmall0 kills a US soldier 10 s after he leaves the US combat area") {
 		test::Mounted *mount = test::shared_mount_or_skip();
 		if (mount == nullptr) {

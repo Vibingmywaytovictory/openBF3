@@ -103,6 +103,7 @@ struct SharedLevel {
 	std::shared_ptr<const sim::StaticWorldShapes> static_world;
 	uint64_t collision_digest = 0;
 	std::vector<sim::SpawnPoint> spawns;
+	std::vector<uint32_t> spawn_spawners;
 	std::vector<core::level::CharacterSpawnerDef> spawners;
 	std::optional<core::level::EorCamera> eor_camera;
 	float spawn_protection_radius = 10.0f;

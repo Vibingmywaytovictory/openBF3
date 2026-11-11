@@ -10,8 +10,11 @@
 
 namespace bf3::core::level {
 
+inline constexpr uint32_t kNoSpawner = 0xffffffffu;
+
 struct SpawnPointDef {
 	uint32_t object = 0;
+	uint32_t spawner = kNoSpawner;
 	LevelTransform transform;
 	int team = 0;
 	bool enabled = true;

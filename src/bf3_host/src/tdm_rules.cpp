@@ -304,6 +304,7 @@ struct TdmRules::Impl {
 	const TdmTuning *tuning = nullptr;
 	std::shared_ptr<const core::gameplay::EorTimeline> eor;
 	sim::MotorParams motor;
+	std::vector<uint32_t> spawn_spawners;
 	MatchRulesConfig config;
 	uint64_t match_seed = 0;
 	uint32_t max_slots = 0;
@@ -629,6 +630,7 @@ core::Result<std::unique_ptr<TdmRules>> TdmRules::create(const SharedLevel &p_le
 	m.tuning_holder = p_level.tdm_tuning != nullptr ? p_level.tdm_tuning : std::make_shared<const TdmTuning>();
 	m.tuning = m.tuning_holder.get();
 	m.motor = p_level.motor;
+	m.spawn_spawners = p_level.spawn_spawners;
 	m.config = p_config;
 	m.match_seed = p_match_seed;
 	m.max_slots = p_max_slots;
@@ -1075,6 +1077,22 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		if (st.ok()) {
 			st = m.natives->tick_round(next, *m.runtime);
 		}
+		if (st.ok() && m.natives->conquest() != nullptr) {
+			std::vector<lg::ConquestPlayerSample> players;
+			for (size_t i = 0; i < m.slots.size() && i < r_states.size() && i < lg::kConquestSlots; ++i) {
+				const Impl::Slot &s = m.slots[i];
+				if (s.connected) {
+					players.push_back({ uint8_t(i), m.team_of(i), s.alive && state_alive(r_states[i]), s.bot,
+							r_states[i].position });
+				}
+			}
+			st = m.natives->conquest_step(next, players, *m.runtime);
+			for (const uint8_t slot : m.natives->conquest()->take_kills()) {
+				if (slot < m.slots.size() && m.slots[slot].alive) {
+					m.slots[slot].suicide = true;
+				}
+			}
+		}
 		if (st.ok()) {
 			core::Result<lg::LogicTickStats> stepped = m.runtime->step();
 			if (!stepped) {
@@ -1405,8 +1423,21 @@ size_t TdmRules::choose_spawn(uint8_t p_slot, std::span<const sim::SpawnPoint> p
 		const float eye = m.motor.poses[pose].eye_height > 0.0f ? m.motor.poses[pose].eye_height : 1.6f;
 		eyes.push_back({ st.position[0], st.position[1] + eye, st.position[2] });
 	}
+	std::vector<sim::SpawnPoint> open;
+	std::vector<size_t> open_at;
+	const lg::ConquestNatives *conquest = m.natives ? m.natives->conquest() : nullptr;
+	if (conquest != nullptr) {
+		for (size_t i = 0; i < p_points.size(); ++i) {
+			const uint32_t spawner = p_points[i].index < m.spawn_spawners.size() ? m.spawn_spawners[p_points[i].index]
+																				 : core::level::kNoSpawner;
+			if (conquest->spawn_point_open(spawner, team)) {
+				open.push_back(p_points[i]);
+				open_at.push_back(i);
+			}
+		}
+	}
 	sim::SpawnQuery q;
-	q.points = p_points;
+	q.points = conquest != nullptr ? std::span<const sim::SpawnPoint>(open) : p_points;
 	q.team = team;
 	q.enemies = enemies;
 	q.enemy_eyes = eyes;
@@ -1421,7 +1452,9 @@ size_t TdmRules::choose_spawn(uint8_t p_slot, std::span<const sim::SpawnPoint> p
 	q.world = &p_view.world();
 	q.safe_distance = m.tuning->spawn_safe_distance_m;
 	q.chest_height = m.tuning->spawn_chest_height_m;
-	const size_t at = sim::choose_spawn_scored(q);
+	const size_t picked = sim::choose_spawn_scored(q);
+	const size_t at = conquest != nullptr && picked < open_at.size() ? open_at[picked]
+																	 : (conquest != nullptr ? SIZE_MAX : picked);
 	if (at == SIZE_MAX || at >= p_points.size()) {
 		++m.stats.spawn_fallbacks;
 		return SIZE_MAX;

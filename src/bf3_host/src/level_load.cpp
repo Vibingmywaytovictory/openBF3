@@ -267,6 +267,10 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 		return core::error_at("load_shared_level: spawns", spawns.error());
 	}
 	shared->spawns = sim::to_spawn_points(*spawns);
+	for (const sim::SpawnPoint &sp : shared->spawns) {
+		shared->spawn_spawners.push_back(
+				sp.index < spawns->points.size() ? spawns->points[sp.index].spawner : core::level::kNoSpawner);
+	}
 	if (shared->spawns.empty()) {
 		return core::make_error("load_shared_level: the mode has no spawn points");
 	}
@@ -616,6 +620,16 @@ core::Status load_shared_tdm(const LevelDatabase &p_db, const SharedLoadOptions 
 	r_level.logic_digest = shared_graph->digest();
 	auto params = std::make_shared<sim::logic::RoundNativeParams>();
 	read_native_params(*world, *shared_graph, *params);
+	if (!shared_graph->nodes_of_type(gp::LogicTypeId::TicketCounter).empty() ||
+			!shared_graph->nodes_of_type(gp::LogicTypeId::CapturePoint).empty()) {
+		core::Result<std::shared_ptr<const sim::logic::ConquestParams>> conquest =
+				sim::logic::read_conquest_params(*world, *shared_graph, p_db.world.get());
+		if (!conquest) {
+			return core::error_at("tdm: conquest", conquest.error());
+		}
+		params->notes.insert(params->notes.end(), (*conquest)->notes.begin(), (*conquest)->notes.end());
+		params->conquest = std::move(*conquest);
+	}
 	r_level.logic = std::move(shared_graph);
 	for (const std::string &n : params->notes) {
 		r_level.tdm_notes.push_back(n);
