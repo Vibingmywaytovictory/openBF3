@@ -40,6 +40,10 @@ target_sources(bf3_host PRIVATE
     src/server_snapshots.h
     src/server_spawner.cpp
     src/server_spawner.h
+    src/server_conquest.cpp
+    src/server_conquest.h
+    src/conquest_wire.cpp
+    include/bf3/host/conquest_wire.h
     src/server_spotting.cpp
     src/server_spotting.h
     src/spotter.cpp

@@ -12,6 +12,7 @@
 #include "bf3/core/ui/text_db.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/client_session.h"
+#include "bf3/host/conquest_wire.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/load_bots.h"
 #include "bf3/host/loadout.h"
@@ -3437,6 +3438,22 @@ TEST_SUITE("host-tdm-conquest") {
 				on_hq, bots.size() + 1u, open1, open2, shared.spawns.size(), (long long)cq.tickets(1),
 				(long long)cq.tickets(2));
 		CHECK(on_hq == bots.size() + 1u);
+		REQUIRE_FALSE(p.conquest_states.empty());
+		const auto wire_matches = [&](const net::ConquestState &p_wire) {
+			bool same = p_wire.point_count == cq.points().size();
+			for (uint8_t t = 1; t <= 2; ++t) {
+				same = same && p_wire.tickets[t - 1u] == cq.tickets(t) &&
+						p_wire.initial_tickets[t - 1u] == cq.initial_tickets(t) &&
+						p_wire.bleeding[t - 1u] == cq.bleeding(t);
+			}
+			for (size_t i = 0; same && i < cq.points().size(); ++i) {
+				const sim::logic::ConquestPointView &v = cq.points()[i];
+				same = p_wire.points[i].team == v.team && p_wire.points[i].controlled == v.controlled &&
+						std::abs(int(p_wire.points[i].progress) - int(std::lround(v.progress * 100.0f))) <= 300;
+			}
+			return same;
+		};
+		CHECK(wire_matches(p.conquest_states.back()));
 
 		Script *taker = nullptr;
 		for (Script *b : bots) {
@@ -3455,9 +3472,11 @@ TEST_SUITE("host-tdm-conquest") {
 		}
 		REQUIRE(flag != nullptr);
 		const uint32_t flag_node = flag->node;
+		const size_t flag_index = size_t(flag - cq.points().data());
 		const sim::Vec3 flag_at = flag->position;
 		m->place(taker->slot, ground_at(*m->world, flag_at[0], flag_at[2], flag_at[1] + 50.0f));
 		const sim::Tick placed = m->now();
+		const size_t states_before = p.conquest_states.size();
 		const auto flag_team = [&] {
 			for (const sim::logic::ConquestPointView &v : cq.points()) {
 				if (v.node == flag_node) {
@@ -3479,6 +3498,19 @@ TEST_SUITE("host-tdm-conquest") {
 		CHECK(open1_after > open1);
 		CHECK(open2_after == open2);
 		CHECK(cq.stats().captures == 1u);
+		m->ticks(1);
+		const size_t capture_states = p.conquest_states.size() - states_before;
+		const net::ConquestPointWire &taken_wire = p.conquest_states.back().points[flag_index];
+		std::printf("conquest: the client got %zu ConquestState messages over the %u-tick capture; the flag on the "
+					"wire: team %u, controlled %d, progress %u\n",
+				capture_states, unsigned(taken - placed), unsigned(taken_wire.team), int(taken_wire.controlled),
+				unsigned(taken_wire.progress));
+		CHECK(wire_matches(p.conquest_states.back()));
+		CHECK(taken_wire.team == 1u);
+		CHECK(taken_wire.controlled);
+		CHECK(taken_wire.progress == net::kConquestProgressMax);
+		CHECK(capture_states >= 3u);
+		CHECK(capture_states <= (taken - placed) / host::kConquestProgressIntervalTicks + 8u);
 
 		const sim::logic::ConquestParams &params = *shared.logic_natives->conquest;
 		const sim::logic::ConquestAreaData *area = nullptr;
@@ -3503,15 +3535,29 @@ TEST_SUITE("host-tdm-conquest") {
 		const size_t combat0 = p.combat.size();
 		m->teleport(p, ground_at(*m->world, out_x, out_z, before.position[1] + 300.0f));
 		const sim::Tick left = m->now();
+		const size_t deserter_states = p.conquest_states.size();
+		m->ticks(2);
+		REQUIRE(p.conquest_states.size() > deserter_states);
+		const sim::Tick return_by = p.conquest_states.back().return_by_tick;
+		const sim::Tick expected_return = left + uint32_t(area->params.time_to_return) * sim::kSimHz;
+		std::printf("conquest: the deserter's return tick on the wire %u, left at %u, TimeToReturn %d s\n",
+				unsigned(return_by), unsigned(left), int(area->params.time_to_return));
+		CHECK(return_by + 3u >= expected_return);
+		CHECK(return_by <= expected_return + 3u);
 		REQUIRE(m->until(
 				[&] { return !is_alive(m->state(p.slot())); }, uint32_t(area->params.time_to_return) * 60u + 120u));
 		const sim::Tick died = m->now();
-		size_t own = 0;
-		for (size_t i = combat0; i < p.combat.size(); ++i) {
-			for (const net::DeathEvent &d : p.combat[i].deaths) {
-				own += d.victim == uint8_t(p.slot()) && d.killer == uint8_t(p.slot()) ? 1u : 0u;
+		const auto own_deaths = [&] {
+			size_t n = 0;
+			for (size_t i = combat0; i < p.combat.size(); ++i) {
+				for (const net::DeathEvent &d : p.combat[i].deaths) {
+					n += d.victim == uint8_t(p.slot()) && d.killer == uint8_t(p.slot()) ? 1u : 0u;
+				}
 			}
-		}
+			return n;
+		};
+		CHECK(m->until([&] { return own_deaths() != 0; }, 10));
+		const size_t own = own_deaths();
 		std::printf(
 				"conquest: the human outside the combat area died after %u ticks (TimeToReturn %d s); deserter kills "
 				"%llu, strikes %llu, suicides +%llu\n",
@@ -3519,6 +3565,12 @@ TEST_SUITE("host-tdm-conquest") {
 				(unsigned long long)cq.stats().strikes, (unsigned long long)(m->rules().stats().suicides - suicides0));
 		CHECK(died - left >= uint32_t(area->params.time_to_return) * 60u - 2u);
 		CHECK(own == 1u);
+		const bool struck_on_wire = std::any_of(p.conquest_states.begin() + std::ptrdiff_t(deserter_states),
+				p.conquest_states.end(), [&](const net::ConquestState &c) { return c.is_struck(uint8_t(p.slot())); });
+		m->ticks(1);
+		CHECK(struck_on_wire);
+		CHECK(p.conquest_states.back().return_by_tick == 0u);
+		CHECK_FALSE(p.conquest_states.back().is_struck(uint8_t(p.slot())));
 		CHECK(cq.stats().deserter_kills == 1u);
 		CHECK(m->rules().stats().suicides == suicides0 + 1u);
 		CHECK(m->rules().stats().runtime_faults == 0u);

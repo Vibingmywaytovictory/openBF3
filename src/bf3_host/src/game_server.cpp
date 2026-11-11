@@ -1,6 +1,7 @@
 #include "bf3/host/game_server.h"
 
 #include "bf3/core/util/elapsed.h"
+#include "bf3/host/conquest_wire.h"
 #include "bf3/host/firefight_brain.h"
 #include "bf3/host/load_bots.h"
 #include "bf3/host/target_bots.h"
@@ -9,6 +10,7 @@
 #include "server_combat.h"
 #include "server_combat_log.h"
 #include "server_commands.h"
+#include "server_conquest.h"
 #include "server_dev.h"
 #include "server_gadgets.h"
 #include "server_handshake.h"
@@ -63,6 +65,7 @@ struct GameServer::Impl {
 	SnapshotWriter snapshots{ slots, soldiers, commands, combat, combat_log, motor, outbox, match };
 	DeployableSync deployables;
 	ServerSpotting spotting;
+	ConquestSync conquest_sync;
 	std::vector<uint8_t> alive_mask;
 	DevCommands dev{ slots, soldiers, spawner, combat, match, motor, outbox,
 		[this](size_t p_slot) { reset_slot(p_slot); } };
@@ -396,6 +399,9 @@ struct GameServer::Impl {
 	void step_rules(sim::Tick p_tick);
 
 	void send_rules(sim::Tick p_tick) {
+		if (match.on()) {
+			conquest_sync.send(p_tick, *match.rules(), slots, outbox);
+		}
 		const MatchBroadcast b = match.take_broadcast(p_tick);
 		if (b.state.empty() && b.players.empty() && b.orders.empty()) {
 			return;
@@ -811,6 +817,12 @@ GameServerStats GameServer::stats() const {
 		g.rules_active = true;
 		g.match = rules->match_state();
 		g.rules = rules->stats();
+		if (const sim::logic::ConquestNatives *conquest = rules->natives().conquest()) {
+			g.conquest_active = true;
+			g.conquest = conquest_wire_state(*conquest, m.tick);
+			g.conquest_captures = conquest->stats().captures;
+			g.conquest_messages = m.conquest_sync.messages();
+		}
 	}
 	g.rules_step_failures = m.match.step_failures();
 	g.spotting = m.spotting.stats();

@@ -155,6 +155,10 @@ struct GameServerStats {
 	bool rules_active = false;
 	net::MatchState match;
 	RulesStats rules;
+	bool conquest_active = false;
+	net::ConquestState conquest;
+	uint64_t conquest_captures = 0;
+	uint64_t conquest_messages = 0;
 
 	uint64_t step_precondition_failures = 0;
 	double last_step_ms = 0;
