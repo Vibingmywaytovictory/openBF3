@@ -256,6 +256,39 @@ TEST_SUITE("ai-bot") {
 				c.bot.weighted_urgency(InfantryBehaviour::TakeCoverInfantry));
 	}
 
+	TEST_CASE("support behaviours: a hurt bot under a squad move order keeps moving and calls for a medic on its way") {
+		Rig r;
+		r.bot.update_bot(true, true);
+		r.body.s = { .navigable = true };
+		SquadGoal g;
+		g.kind = SquadGoalKind::SquadTarget;
+		g.position = { 3.0f * r.tuning.squad_far_m, 0.0f, 0.0f };
+		r.bot.set_squad_goal(g);
+		const StrategyTuning strategy;
+		r.bot.set_taking_orders(true);
+		REQUIRE(r.bot.receive_order(BotOrder(strategy.order.data(), uint8_t(InfantryBehaviour::MoveTo))));
+		CHECK(r.decide() == InfantryBehaviour::MoveTo);
+		CHECK(r.body.calls == std::vector<std::string>{ "move_to 3" });
+		r.body.s.call_medic = true;
+		CHECK(r.decide() == InfantryBehaviour::MoveTo);
+		CHECK(r.bot.activity() == InfantryActivity::Roam);
+		CHECK(r.body.calls == std::vector<std::string>{ "move_to 3", "trigger 6" });
+		g.position = r.body.at;
+		r.bot.set_squad_goal(g);
+		CHECK(r.decide() == InfantryBehaviour::MoveTo);
+		CHECK(r.bot.activity() == InfantryActivity::Idle);
+		CHECK(r.body.calls == std::vector<std::string>{ "sense 4", "sense 3", "trigger 6" });
+		r.body.s.call_medic = false;
+		CHECK(r.decide() == InfantryBehaviour::MoveTo);
+		CHECK(r.body.calls == std::vector<std::string>{ "sense 4", "sense 3" });
+
+		Rig u;
+		u.bot.update_bot(true, true);
+		u.body.s = { .navigable = true, .call_medic = true };
+		CHECK(u.decide() == InfantryBehaviour::CallForMedic);
+		CHECK(u.body.calls == std::vector<std::string>{ "trigger 6", "move_to 4" });
+	}
+
 	TEST_CASE("BBTakeCoverInfantry: retreat, wait in cover once cleared, leave when recovered") {
 		Rig r;
 		r.bot.update_bot(true, true);

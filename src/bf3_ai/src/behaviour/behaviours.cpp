@@ -352,15 +352,16 @@ bool BBMoveTo::plan(BotScript &r_script, bool) {
 		r_script.clear(InfantryActivity::Idle);
 		r_script.add(PlanTarget::Sense, sense_args(SenseFocus::Around));
 		r_script.add(PlanTarget::Sense, sense_args(SenseFocus::ShotOrigin));
-		return true;
-	}
-	if (squad_) {
+	} else if (squad_) {
 		r_script.clear(InfantryActivity::Roam);
 		r_script.add(PlanTarget::MoveTo, move_args(MoveGoal::Squad, goal_.position));
-		return true;
+	} else {
+		r_script.clear(InfantryActivity::Hunt);
+		r_script.add(PlanTarget::MoveTo, move_args(MoveGoal::Hunt));
 	}
-	r_script.clear(InfantryActivity::Hunt);
-	r_script.add(PlanTarget::MoveTo, move_args(MoveGoal::Hunt));
+	if (body_.senses().call_medic) {
+		r_script.add(PlanTarget::Trigger, trigger_args(TriggerKind::CallMedic));
+	}
 	return true;
 }
 
