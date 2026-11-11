@@ -38,6 +38,19 @@ struct StereoGains {
 	float left = 0.0f, right = 0.0f;
 };
 
-StereoGains equal_power_pan(float p_azimuth, float p_spread);
+inline constexpr float kPanNearZoneMetres = 2.5f;
+inline constexpr float kPanFrontSpeakerDeg = 30.0f;
+inline constexpr float kPanRhoSnap = 0.999f;
+inline constexpr float kPanDiffuseSnap = 0.0005f;
+inline constexpr float kPanFlatDistance = 100.0f;
+
+struct PanInput {
+	float angle_deg = 0.0f;
+	float distance = 0.0f;
+};
+
+PanInput positional_pan_input(float p_distance_m, float p_azimuth_rad);
+PanInput flat_pan_input(float p_angle_deg);
+StereoGains pan2d_stereo(const PanInput &p_input);
 
 }

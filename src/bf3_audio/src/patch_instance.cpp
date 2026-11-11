@@ -569,8 +569,10 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 				case PluginRole::Damping:
 					break;
 				case PluginRole::Pan: {
-					const float spread = ps.output != UINT32_MAX ? p.outputs[ps.output].pan_size : 0.0f;
-					const StereoGains pan = equal_power_pan(st.geometry.azimuth, spread);
+					const ca::SoundOutput *out = ps.output != UINT32_MAX ? &p.outputs[ps.output] : nullptr;
+					const StereoGains pan = pan2d_stereo(out != nullptr && out->kind == ca::OutputKind::Flat
+									? flat_pan_input(out->angle)
+									: positional_pan_input(st.geometry.distance, st.geometry.azimuth));
 					const float gl = pan.left * pan_scale, gr = pan.right * pan_scale;
 					if (!ps.pan_started) {
 						ps.pan_from[0] = gl;

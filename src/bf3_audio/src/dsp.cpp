@@ -255,12 +255,66 @@ void apply_gain_ramp(float *r_samples, uint32_t p_frames, float p_from, float p_
 	}
 }
 
-StereoGains equal_power_pan(float p_azimuth, float p_spread) {
-	const float az = std::isfinite(p_azimuth) ? p_azimuth : 0.0f;
-	const float spread = std::clamp(std::isfinite(p_spread) ? p_spread : 0.0f, 0.0f, 1.0f);
-	const float position = std::sin(az) * (1.0f - spread);
-	const float theta = (position + 1.0f) * 0.25f * kPi;
-	return StereoGains{ std::cos(theta), std::sin(theta) };
+PanInput positional_pan_input(float p_distance_m, float p_azimuth_rad) {
+	const float d = std::isfinite(p_distance_m) ? p_distance_m : 0.0f;
+	const float pan_distance = std::max(d, kPanNearZoneMetres) - kPanNearZoneMetres;
+	if (!(pan_distance > 0.0f) || !std::isfinite(p_azimuth_rad)) {
+		return PanInput{ 0.0f, std::max(pan_distance, 0.0f) };
+	}
+	return PanInput{ p_azimuth_rad * 180.0f / kPi, pan_distance };
+}
+
+PanInput flat_pan_input(float p_angle_deg) {
+	const float a = std::isfinite(p_angle_deg) ? std::fabs(p_angle_deg) * kPi / 180.0f : 0.0f;
+	return PanInput{ 0.0f, kPanFlatDistance * std::cos(a) };
+}
+
+StereoGains pan2d_stereo(const PanInput &p_input) {
+	const float angle = std::isfinite(p_input.angle_deg) ? p_input.angle_deg : 0.0f;
+	const float distance = std::isfinite(p_input.distance) ? std::max(p_input.distance, 0.0f) : 0.0f;
+	const float th = -angle * kPi / 180.0f;
+	float px = distance * std::cos(th), py = distance * std::sin(th);
+	float rho = distance * distance;
+	if (rho > 1.0f) {
+		const float n = std::sqrt(px * px + py * py);
+		px /= n;
+		py /= n;
+		rho = 1.0f;
+	} else if (rho > kPanRhoSnap) {
+		rho = 1.0f;
+	}
+	const float f = kPanFrontSpeakerDeg * kPi / 180.0f;
+	float left = 0.0f, right = 0.0f;
+	if (rho < 1.0f) {
+		const float wl = 1.0f - std::hypot(std::cos(f) - px, std::sin(f) - py) / 2.0f;
+		const float wr = 1.0f - std::hypot(std::cos(f) - px, -std::sin(f) - py) / 2.0f;
+		float front = 0.5f * px + 0.5f;
+		if (std::fabs(front) < kPanDiffuseSnap) {
+			front = 0.0f;
+		}
+		const float sum = wl * wl + wr * wr;
+		const float scale = sum > 0.0f ? std::sqrt(std::max(front, 0.0f) / sum) * std::sqrt(1.0f - rho * rho) : 0.0f;
+		left = scale * wl;
+		right = scale * wr;
+	}
+	const float two_pi = 2.0f * kPi;
+	const float phi = std::fmod(std::fmod(th + f, two_pi) + two_pi, two_pi) - f;
+	const float psi = phi <= f ? phi : f * (1.0f - (phi - f) / (kPi - f));
+	const float dl = std::cos(psi) / (2.0f * std::cos(f)) + std::sin(psi) / (2.0f * std::sin(f));
+	const float dr = std::cos(psi) / (2.0f * std::cos(f)) - std::sin(psi) / (2.0f * std::sin(f));
+	const float dn = std::sqrt(dl * dl + dr * dr);
+	if (dn > 0.0f) {
+		left += dl * rho / dn;
+		right += dr * rho / dn;
+	}
+	if (rho < 1.0f) {
+		const float n = std::sqrt(left * left + right * right);
+		if (n > 0.0f) {
+			left /= n;
+			right /= n;
+		}
+	}
+	return StereoGains{ left, right };
 }
 
 }

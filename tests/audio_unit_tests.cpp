@@ -1330,6 +1330,52 @@ TEST_SUITE("audio-patch") {
 		CHECK(inst->stats().pan_steps == 0);
 	}
 
+	TEST_CASE("a source within the 2.5 m pan near zone plays centred and does not swing as it passes the listener") {
+		const TestWave w = make_wave(1, 48000, -1, -1, 48000, true);
+		Builder b;
+		const uint16_t trig = b.input(1, true);
+		b.p.waves.push_back(SoundWaveRef{ w.partition, "test_wave" });
+		const uint32_t s = b.sampler(1, 0, SamplerLoop::None);
+		b.set(s, cp::SmpTrigger, Builder::R(trig));
+		SoundVoicePlugin pan;
+		pan.id = fourcc("Pn21");
+		pan.channels = 1;
+		b.p.plugins.insert(b.p.plugins.begin() + 4, pan);
+		b.p.voices[0].plugins_count = 6;
+		auto inst = instance(b.build(), w.bank);
+		const auto peaks = [](const Buses &p_buses) {
+			const float *l = p_buses.b.channels[size_t(MasterBus::GameMixMain)][0];
+			const float *r = p_buses.b.channels[size_t(MasterBus::GameMixMain)][1];
+			float left = 0.0f, right = 0.0f;
+			for (uint32_t i = 0; i < 512; ++i) {
+				left = std::max(left, std::fabs(l[i]));
+				right = std::max(right, std::fabs(r[i]));
+			}
+			return std::pair{ left, right };
+		};
+		ba::EmitterState emitter;
+		emitter.position = ba::Vec3{ 0.5f, 0.0f, 0.27f };
+		inst->set_geometry(emitter, ba::ListenerState{});
+		Buses buses;
+		inst->post_event(1, 0);
+		buses.block(*inst, 0);
+		buses.block(*inst, 512);
+		const auto [left_before, right_before] = peaks(buses);
+		emitter.position = ba::Vec3{ -0.5f, 0.0f, 0.27f };
+		inst->set_geometry(emitter, ba::ListenerState{});
+		buses.block(*inst, 1024);
+		const auto [left_during, right_during] = peaks(buses);
+		buses.block(*inst, 1536);
+		const auto [left_after, right_after] = peaks(buses);
+		REQUIRE(left_before > 0.1f);
+		CHECK(left_before == doctest::Approx(right_before).epsilon(1e-3));
+		CHECK(left_during == doctest::Approx(left_before).epsilon(1e-3));
+		CHECK(right_during == doctest::Approx(right_before).epsilon(1e-3));
+		CHECK(left_after == doctest::Approx(left_before).epsilon(1e-3));
+		CHECK(right_after == doctest::Approx(right_before).epsilon(1e-3));
+		CHECK(inst->stats().pan_steps == 0);
+	}
+
 	TEST_CASE("Sampler: a slot stepped twice within a block or across a block edge fades every old play out") {
 		const TestWave w = make_wave(5, 4800, 1, 3, 48000, true);
 		Builder b;
@@ -2032,19 +2078,36 @@ TEST_SUITE("audio-dsp") {
 		ba::apply_gain_ramp(g.data(), 4, 0.0f, 1.0f);
 		CHECK(g[0] == doctest::Approx(0.25));
 		CHECK(g[3] == doctest::Approx(1.0));
-		const ba::StereoGains centre = ba::equal_power_pan(0.0f, 0.0f);
-		CHECK(centre.left == doctest::Approx(0.70710678));
-		CHECK(centre.right == doctest::Approx(0.70710678));
-		const ba::StereoGains right = ba::equal_power_pan(float(kPi / 2), 0.0f);
-		CHECK(right.left == doctest::Approx(0.0).epsilon(1e-6));
-		CHECK(right.right == doctest::Approx(1.0));
-		const ba::StereoGains left = ba::equal_power_pan(float(-kPi / 2), 0.0f);
-		CHECK(left.left == doctest::Approx(1.0));
-		CHECK(left.right == doctest::Approx(0.0).epsilon(1e-6));
-		const ba::StereoGains narrow = ba::equal_power_pan(float(kPi / 2), 1.0f);
-		CHECK(narrow.left == doctest::Approx(narrow.right));
 		CHECK(ba::db_to_gain(-6.0206f) == doctest::Approx(0.5).epsilon(1e-4));
 		CHECK(ba::gain_to_db(0.0f) == -144.0f);
+	}
+	TEST_CASE("pan: the R3-D5 inputs and the Pan2D1 stereo gains of a mono source") {
+		const auto pan_at = [](float p_distance, float p_azimuth_deg) {
+			return ba::pan2d_stereo(ba::positional_pan_input(p_distance, p_azimuth_deg * float(kPi) / 180.0f));
+		};
+		struct Vector {
+			float distance, azimuth_deg, left, right;
+		};
+		for (const Vector &v : { Vector{ 10.0f, 0.0f, 0.7071f, 0.7071f }, Vector{ 10.0f, 30.0f, 0.0f, 1.0f },
+					 Vector{ 10.0f, -30.0f, 1.0f, 0.0f }, Vector{ 10.0f, 90.0f, 0.2694f, 0.9630f },
+					 Vector{ 10.0f, -90.0f, 0.9630f, 0.2694f }, Vector{ 10.0f, 180.0f, 0.7071f, 0.7071f },
+					 Vector{ 10.0f, 135.0f, 0.4948f, 0.8690f }, Vector{ 3.0f, 90.0f, 0.4507f, 0.8927f },
+					 Vector{ 3.25f, 90.0f, 0.3367f, 0.9416f }, Vector{ 2.0f, 90.0f, 0.7071f, 0.7071f } }) {
+			const ba::StereoGains g = pan_at(v.distance, v.azimuth_deg);
+			INFO("d " << v.distance << " m, A " << v.azimuth_deg << " deg: " << g.left << " / " << g.right);
+			CHECK(g.left == doctest::Approx(v.left).epsilon(2e-4));
+			CHECK(g.right == doctest::Approx(v.right).epsilon(2e-4));
+		}
+		const ba::PanInput near = ba::positional_pan_input(0.57f, float(kPi) / 2.0f);
+		CHECK(near.angle_deg == 0.0f);
+		CHECK(near.distance == 0.0f);
+		const ba::PanInput flat = ba::flat_pan_input(0.0f);
+		CHECK(flat.angle_deg == 0.0f);
+		CHECK(flat.distance == doctest::Approx(100.0f));
+		const ba::StereoGains flat_gains = ba::pan2d_stereo(flat);
+		CHECK(flat_gains.left == doctest::Approx(0.70710678f));
+		CHECK(flat_gains.right == doctest::Approx(0.70710678f));
+		CHECK(ba::flat_pan_input(90.0f).distance == doctest::Approx(0.0f).epsilon(1e-5));
 	}
 	TEST_CASE("onsets: a 75 ms click train over a noise bed 20 dB down gives exactly the clicks, each within 2 frames") {
 		std::mt19937 rng(4);
