@@ -13,6 +13,7 @@
 #include "bf3/ai/knowledge/plug_ins.h"
 #include "bf3/ai/knowledge/weapon_info.h"
 #include "bf3/ai/main/ai_main.h"
+#include "bf3/ai/main/bot_placement_manager.h"
 #include "bf3/ai/main/communication_hub.h"
 #include "bf3/ai/strategic/strategic_object.h"
 
@@ -1318,5 +1319,32 @@ TEST_SUITE("ai-port") {
 		CHECK(with_lod.execute("lodEnable 2").text == "bad argument: 2");
 		CHECK(with_lod.execute("setBasicLODDistance 120").ok);
 		CHECK(main.lod_manager()->basic_lod_distance() == 120.0f);
+	}
+
+	TEST_CASE("BotPlacementManager: the console registers a placement per team and spawnBot spends one as shipped") {
+		AiSettings settings;
+		settings.max_bots = 1;
+		World w(settings);
+		BotManager &bots = w.ai.main().bot_manager();
+		BotPlacementManager placements(bots);
+		AiConsole console;
+		register_placement_commands(console, placements);
+		CHECK(console.execute("addPlacement alpha 1/2/3 0/90/0 rifle 2 crate").text == "1");
+		CHECK(console.execute("addPlacement beta 1/2 0/0/0 rifle 2 crate").text == "bad argument: 1/2");
+		CHECK_FALSE(console.execute("addPlacement gamma 0/0/0 0/0/0 rifle 3 crate").text == "1");
+		REQUIRE(placements.placements(2).size() == 1);
+		const BotPlacement &placement = placements.placements(2).front();
+		CHECK(placement.name == "alpha");
+		CHECK(placement.position.y == 2.0f);
+		CHECK(placement.rotation.y == 90.0f);
+		CHECK(placement.fourth_argument == "rifle");
+		CHECK(placement.sixth_argument == "crate");
+		CHECK(console.execute("spawnBot 1").text == "0");
+		CHECK(console.execute("spawnBot 2").text == "0");
+		CHECK(placements.placements(2).empty());
+		CHECK(placements.add_placement("delta", {}, {}, "", 2, ""));
+		REQUIRE(bots.add_unspawned_bot(10, 2, nullptr));
+		CHECK(console.execute("spawnBot 2").text == "1");
+		CHECK(bots.bot_from_player_id(10)->name() == "FIXME");
 	}
 }

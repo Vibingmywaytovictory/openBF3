@@ -124,6 +124,8 @@ target_sources(bf3_ai PRIVATE
     src/main/lod_manager.cpp
     include/bf3/ai/main/communication_hub.h
     src/main/communication_hub.cpp
+    include/bf3/ai/main/bot_placement_manager.h
+    src/main/bot_placement_manager.cpp
 )
 
 target_sources(bf3_ai PRIVATE

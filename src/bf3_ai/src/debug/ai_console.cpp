@@ -1,6 +1,7 @@
 #include "bf3/ai/debug/ai_console.h"
 
 #include "bf3/ai/main/ai_main.h"
+#include "bf3/ai/main/bot_placement_manager.h"
 #include "bf3/core/util/key_values.h"
 
 #include <cstdint>
@@ -48,6 +49,21 @@ template <class T, class F> ConsoleResult with_numbers(std::span<const std::stri
 		values.push_back(value);
 	}
 	return p_apply(values);
+}
+
+bool parse_vec3(const std::string &p_text, Vec3 &r_out) {
+	const size_t first = p_text.find('/');
+	const size_t second = first == std::string::npos ? first : p_text.find('/', first + 1);
+	if (second == std::string::npos) {
+		return false;
+	}
+	return parse_number(p_text.substr(0, first), r_out.x) &&
+			parse_number(p_text.substr(first + 1, second - first - 1), r_out.y) &&
+			parse_number(p_text.substr(second + 1), r_out.z);
+}
+
+std::string format(bool p_value) {
+	return p_value ? "1" : "0";
 }
 
 template <class T> AiConsole::Handler getter(std::function<T()> p_read) {
@@ -200,6 +216,33 @@ void register_main_commands(AiConsole &r_console, AIMain &r_main, const LodEnvir
 			lod->set_basic_lod_distance(p_v[0]);
 			return ConsoleResult{ true, {} };
 		});
+	});
+}
+
+void register_placement_commands(AiConsole &r_console, BotPlacementManager &r_placements) {
+	BotPlacementManager *const placements = &r_placements;
+	r_console.add("addPlacement", 6, 6, [placements](std::span<const std::string> p_args) {
+		Vec3 position;
+		Vec3 rotation;
+		int32_t team = 0;
+		if (!parse_vec3(p_args[1], position)) {
+			return bad_argument(p_args[1]);
+		}
+		if (!parse_vec3(p_args[2], rotation)) {
+			return bad_argument(p_args[2]);
+		}
+		if (core::parse_i32_value(p_args[4], -2147483648.0, 2147483647.0, team).fault != core::KeyFault::None) {
+			return bad_argument(p_args[4]);
+		}
+		return ConsoleResult{ true,
+			format(placements->add_placement(p_args[0], position, rotation, p_args[3], team, p_args[5])) };
+	});
+	r_console.add("spawnBot", 1, 1, [placements](std::span<const std::string> p_args) {
+		int32_t team = 0;
+		if (core::parse_i32_value(p_args[0], -2147483648.0, 2147483647.0, team).fault != core::KeyFault::None) {
+			return bad_argument(p_args[0]);
+		}
+		return ConsoleResult{ true, format(placements->spawn_bot(team)) };
 	});
 }
 

@@ -10,6 +10,7 @@
 namespace bf3::ai {
 
 class AIMain;
+class BotPlacementManager;
 class LodEnvironment;
 
 struct ConsoleResult {
@@ -35,5 +36,5 @@ private:
 };
 
 void register_main_commands(AiConsole &r_console, AIMain &r_main, const LodEnvironment *p_lod_environment);
-
+void register_placement_commands(AiConsole &r_console, BotPlacementManager &r_placements);
 }
