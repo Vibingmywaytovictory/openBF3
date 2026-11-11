@@ -24,6 +24,7 @@ public:
 	virtual bool is_deactivated() const = 0;
 	virtual void set_deactivated(bool p_deactivated) = 0;
 	virtual BotLodLevel lod_level() const = 0;
+	virtual void set_lod_level(BotLodLevel p_level) = 0;
 	virtual uint32_t current_equipment() const = 0;
 	virtual bool has_squad_member() const = 0;
 	virtual int decision_making(double p_slice) = 0;

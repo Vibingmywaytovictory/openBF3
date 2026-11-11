@@ -121,3 +121,8 @@ target_sources(bf3_ai PRIVATE
     src/knowledge/information_known.cpp
     src/knowledge/known_plug_ins.cpp
 )
+
+target_sources(bf3_ai PRIVATE
+    include/bf3/ai/main/lod_manager.h
+    src/main/lod_manager.cpp
+)

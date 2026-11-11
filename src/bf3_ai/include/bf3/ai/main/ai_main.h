@@ -8,6 +8,7 @@
 #include "bf3/ai/main/behaviour_manager.h"
 #include "bf3/ai/main/bot_manager.h"
 #include "bf3/ai/main/event_courier.h"
+#include "bf3/ai/main/lod_manager.h"
 
 #include <array>
 #include <cstdint>
@@ -48,6 +49,8 @@ public:
 	bool set_sai_enable(bool p_enable, size_t p_strategic_object_count);
 	bool sai_enabled() const { return sai_enabled_; }
 	void queue_pending_bot(Bot *p_bot);
+	AILODManager *create_lod_manager(const LodEnvironment &p_environment, float p_basic_distance, float p_speed_scale);
+	AILODManager *lod_manager() const { return lod_.get(); }
 
 	BotManager &bot_manager() { return *bot_manager_; }
 	const BotManager &bot_manager() const { return *bot_manager_; }
@@ -66,6 +69,7 @@ private:
 	std::array<StrategicAi *, 3> sai_{};
 	uint32_t component_cursor_ = 0;
 	std::unique_ptr<BotManager> bot_manager_;
+	std::unique_ptr<AILODManager> lod_;
 	std::list<Bot *> pending_bots_;
 	int bot_count_ = 0;
 	int human_count_ = 0;

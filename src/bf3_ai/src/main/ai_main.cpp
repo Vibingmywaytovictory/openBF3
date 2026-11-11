@@ -46,9 +46,23 @@ bool AIMain::action() {
 	if (services_.squads != nullptr && services_.timer != nullptr) {
 		services_.squads->update(services_.timer->game_tick());
 	}
+	if (lod_) {
+		lod_->update_players();
+		lod_->update_bots();
+	}
 	const double now = services_.timer != nullptr ? services_.timer->update_time() : deadline;
 	bot_manager_->action(deadline - now);
 	return true;
+}
+
+AILODManager *AIMain::create_lod_manager(
+		const LodEnvironment &p_environment, float p_basic_distance, float p_speed_scale) {
+	lod_.reset();
+	if (services_.information != nullptr) {
+		lod_ = std::make_unique<AILODManager>(
+				p_environment, *bot_manager_, *services_.information, p_basic_distance, p_speed_scale);
+	}
+	return lod_.get();
 }
 
 void AIMain::spawn_bots() {

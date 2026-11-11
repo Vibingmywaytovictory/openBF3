@@ -11,6 +11,7 @@
 #include "bf3/ai/plan/plan_entries.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <map>
@@ -433,6 +434,7 @@ struct FakeBot final : Bot {
 	int seen = 0;
 	int talks = 0;
 	double last_slice = 0.0;
+	BotLodLevel lod = BotLodLevel::Full;
 	uint32_t bot_id() const override { return id; }
 	int side() const override { return team; }
 	void set_side(int p_side) override { team = p_side; }
@@ -445,7 +447,8 @@ struct FakeBot final : Bot {
 	bool man_down() const override { return false; }
 	bool is_deactivated() const override { return false; }
 	void set_deactivated(bool) override {}
-	BotLodLevel lod_level() const override { return BotLodLevel::Full; }
+	BotLodLevel lod_level() const override { return lod; }
+	void set_lod_level(BotLodLevel p_level) override { lod = p_level; }
 	uint32_t current_equipment() const override { return equipment; }
 	bool has_squad_member() const override { return true; }
 	int decision_making(double p_slice) override {
@@ -690,5 +693,76 @@ TEST_SUITE("ai-port") {
 		CHECK(main.human_player_count() == 1);
 		CHECK_FALSE(main.set_sai_enable(true, 0));
 		CHECK_FALSE(main.sai_enabled());
+	}
+
+	TEST_CASE("AILODManager: bots near a viewer run at Full, farther at Medium, else Light, with hysteresis") {
+		struct Viewers final : LodEnvironment {
+			std::map<int, LodViewer> list;
+			std::vector<int> active_player_ids() const override {
+				std::vector<int> ids;
+				for (const auto &entry : list) {
+					ids.push_back(entry.first);
+				}
+				return ids;
+			}
+			bool is_valid_player_id(int p_player_id) const override { return list.count(p_player_id) != 0; }
+			int next_player_id(int p_player_id) const override {
+				const auto next = list.upper_bound(p_player_id);
+				return next != list.end() ? next->first : -1;
+			}
+			bool viewer(int p_player_id, LodViewer &r_viewer) const override {
+				const auto found = list.find(p_player_id);
+				if (found == list.end()) {
+					return false;
+				}
+				r_viewer = found->second;
+				return true;
+			}
+		};
+		AiSettings settings;
+		settings.max_bots = 3;
+		World w(settings);
+		AIMain &main = w.ai.main();
+		std::array<FakeObject, 3> bodies;
+		for (size_t i = 0; i < 3; ++i) {
+			bodies[i].legs.velocity = {};
+			bodies[i].where = { 100.0f * float(i) + 50.0f, 0.0f, 0.0f };
+			w.factory.bots[i]->equipment =
+					w.ai.factory().request_information_real(kNoHandle, &bodies[i], 1u, 0.5f, 600, 0);
+			w.ai.factory().request_information_plug_in(w.factory.bots[i]->equipment, PlugInRequest::Mobile, true);
+			CHECK(main.add_unspawned_bot(20 + int(i), 1, nullptr));
+		}
+		Viewers viewers;
+		FakeObject human;
+		human.legs.velocity = { 3.0f, 0.0f, 4.0f };
+		viewers.list[5] = LodViewer{ true, &human, { 999.0f, 0.0f, 0.0f }, 2.0f };
+		viewers.list[6] = LodViewer{ false, &human, { 1000.0f, 0.0f, 0.0f }, 1.0f };
+		AILODManager *const lod = main.create_lod_manager(viewers, 50.0f, 2.0f);
+		REQUIRE(lod != nullptr);
+		REQUIRE(lod->player_stats().size() == 2);
+		CHECK(lod->player_stats().at(5).lod_distance == doctest::Approx((50.0f + 2.0f * 5.0f) * 2.0f));
+		CHECK(lod->player_stats().at(5).position.x == 0.0f);
+		CHECK(lod->player_stats().at(6).position.x == 1000.0f);
+		CHECK(lod->player_stats().at(6).lod_distance == doctest::Approx(50.0f));
+		lod->update_bots();
+		CHECK(w.factory.bots[0]->lod == BotLodLevel::Full);
+		CHECK(w.factory.bots[1]->lod == BotLodLevel::Medium);
+		CHECK(w.factory.bots[2]->lod == BotLodLevel::Light);
+		bodies[0].where.x = 125.0f;
+		bodies[1].where.x = 175.0f;
+		lod->update_bots();
+		CHECK(w.factory.bots[0]->lod == BotLodLevel::Full);
+		CHECK(w.factory.bots[1]->lod == BotLodLevel::Medium);
+		viewers.list.erase(6);
+		lod->update_players();
+		lod->update_players();
+		CHECK(lod->player_stats().size() == 1);
+		lod->remove_player(5);
+		CHECK(lod->player_stats().empty());
+		lod->update_bots();
+		CHECK(w.factory.bots[0]->lod == BotLodLevel::Light);
+		lod->lod_enable(false);
+		lod->update_bots();
+		CHECK(w.factory.bots[0]->lod == BotLodLevel::Full);
 	}
 }
