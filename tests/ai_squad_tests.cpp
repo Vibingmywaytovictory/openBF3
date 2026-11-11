@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "bf3/ai/behaviour/curves.h"
 #include "bf3/ai/knowledge/information_factory.h"
 #include "bf3/ai/knowledge/information_grid.h"
 #include "bf3/ai/main/ai_random.h"
@@ -17,8 +18,10 @@
 #include <cmath>
 #include <functional>
 #include <initializer_list>
+#include <list>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -1285,6 +1288,175 @@ TEST_SUITE("ai-strategy") {
 		objects.strategic_object(1)->set_status(1, StrategicStatus::Owned);
 		CHECK(condition->compare(nullptr, nullptr, 1) == 1.0f);
 		CHECK(condition->compare(nullptr, nullptr, 2) == -1.0f);
+	}
+
+	TEST_CASE("AIStrategicObject: available, present and assigned units by side, owner side, priority, vehicle "
+			  "groups and the assigned part of the wanted strength") {
+		AIStrategicObjectManager objects{ StrategicServices{} };
+		REQUIRE(objects.create("a", { -10.0f, -10.0f }, { 0.0f, 0.0f }, 2.0f, 10.0f, std::string()));
+		AIStrategicObject &a = *objects.strategic_object(0);
+		CHECK(a.register_available_attacker(3, 1));
+		CHECK(a.register_available_attacker(5, 1));
+		CHECK(a.register_available_defender(4, 2));
+		CHECK(a.number_of_available_attackers(1) == 2);
+		CHECK(a.number_of_available_bots(false, 2) == 1);
+		CHECK(a.unregister_available_attacker(3, 1));
+		CHECK_FALSE(a.unregister_available_attacker(3, 1));
+		std::set<int>::iterator it = a.available_defenders(2).begin();
+		CHECK(a.unregister_available_defender(it, 2));
+		CHECK(it == a.available_defenders(2).end());
+		CHECK_FALSE(a.unregister_available_defender(it, 2));
+		CHECK(a.unregister_all_available_attackers(1) == 1);
+		CHECK(a.set_as_present_unit(7, 1));
+		CHECK_FALSE(a.set_as_present_unit(7, 1));
+		CHECK(a.is_present_unit(7, 1));
+		CHECK_FALSE(a.is_present_unit(7, 2));
+		CHECK(a.remove_as_present_unit(7, 1));
+		CHECK(a.number_of_present_units(1) == 0);
+		CHECK(a.side() == 0);
+		a.set_side(2);
+		CHECK(a.side() == 2);
+		CHECK(a.status(1) == StrategicStatus::Hostile);
+		a.set_status(1, StrategicStatus::Neutral);
+		a.reset_status();
+		CHECK(a.status(1) == StrategicStatus::Hostile);
+		a.set_side(0);
+		CHECK(a.side() == 0);
+		CHECK(a.status(2) == StrategicStatus::Owned);
+		a.set_priority(4, 2);
+		CHECK(a.priority(2) == 4);
+		CHECK(a.priority(1) == 0);
+		CHECK(a.is_allowed_vehicle_group(7));
+		a.add_allowed_vehicle_group(2);
+		CHECK(a.allowed_vehicle_groups() == 4);
+		CHECK_FALSE(a.is_allowed_vehicle_group(7));
+		CHECK(a.allows_some_vehicle_groups(6));
+		CHECK_FALSE(a.allows_some_vehicle_groups(1));
+		a.add_expelled_unit(3);
+		CHECK(a.is_expelled_unit(3));
+		CHECK(a.expelled_vehicle_types() == 8);
+		CHECK(a.assigned_part_of_wanted_strength(1) == 1.0f);
+		AIRandom random(7);
+		random.init();
+		Vec3 spot{};
+		for (int i = 0; i < 32; ++i) {
+			a.randomize_pos(1, 1.0f, random, spot);
+			CHECK(std::abs(spot.x) <= 10.0f);
+			CHECK(std::abs(spot.z) <= 10.0f);
+			CHECK(spot.y == 2.0f);
+			Vec3 around{ 5.0f, 1.0f, 5.0f };
+			a.randomize_controlpoint_pos(4.0f, 2.0f, random, around);
+			const float reach =
+					std::sqrt((around.x - 5.0f) * (around.x - 5.0f) + (around.z - 5.0f) * (around.z - 5.0f));
+			CHECK(reach >= 2.0f - 1e-4f);
+			CHECK(reach <= 8.0f + 1e-4f);
+			CHECK(around.y == 1.0f);
+		}
+	}
+
+	TEST_CASE("AIStrategicArea: a strategy scales both temperatures by flag, status and specific modifiers; "
+			  "defence need, attack cost and attack value follow OpenBF2's formulas") {
+		struct Squads final : StrategicSquads {
+			float distance = 50.0f;
+			int squad_strengths(int, int, int) const override { return 0; }
+			float distance_to_closest_squad(const Vec3 &, int) const override { return distance; }
+		};
+		Squads squads;
+		StrategicServices services;
+		services.squads = &squads;
+		AIStrategicObjectManager objects(services);
+		REQUIRE(objects.create("a", { -10.0f, -10.0f }, { 0.0f, 0.0f }, 0.0f, 10.0f, std::string()));
+		REQUIRE(objects.create("b", { 90.0f, -10.0f }, { 100.0f, 0.0f }, 0.0f, 20.0f, std::string()));
+		REQUIRE(objects.create("c", { -10.0f, 90.0f }, { 0.0f, 100.0f }, 0.0f, 30.0f, std::string()));
+		REQUIRE(objects.add_two_way_neighbour("a", "b"));
+		REQUIRE(objects.add_two_way_neighbour("a", "c"));
+		AIStrategicArea &a = *objects.strategic_area("a");
+		AIStrategicArea &b = *objects.strategic_area("b");
+		AIStrategicArea &c = *objects.strategic_area("c");
+		a.set_status(1, StrategicStatus::Owned);
+		b.set_status(1, StrategicStatus::Hostile);
+		c.set_status(1, StrategicStatus::Neutral);
+		CHECK(a.is_neighbour(&b));
+		CHECK_FALSE(b.is_neighbour(&c));
+		CHECK_FALSE(a.is_neighbouring_object(&b));
+		a.set_object_type_flags((1 << AIStrategicObject::Flank) | (1 << AIStrategicObject::Base));
+		CHECK(a.has_object_type_flags((1 << AIStrategicObject::Flank) | (1 << AIStrategicObject::Base)));
+		CHECK_FALSE(a.has_object_type_flags((1 << AIStrategicObject::Flank) | (1 << AIStrategicObject::Close)));
+
+		Strategy strategy("Push");
+		strategy.set_strategic_objects_modifier(AIStrategicObject::Front, 2.0f, StrategicStatus::Owned);
+		strategy.set_strategic_objects_modifier(AIStrategicObject::Safe, 7.0f, StrategicStatus::Owned);
+		strategy.set_strategic_objects_modifier(AIStrategicObject::Flank, 3.0f, StrategicStatus::Owned);
+		strategy.set_strategic_objects_modifier(AIStrategicObject::Base, 0.5f, StrategicStatus::Hostile);
+		strategy.set_strategic_objects_modifier(AIStrategicObject::Enemy, 4.0f, StrategicStatus::Hostile);
+		strategy.set_strategic_objects_modifier(AIStrategicObject::NeutralType, 0.1f, StrategicStatus::Neutral);
+		strategy.set_specific_strategic_object_modifier(0, 0.25f);
+		CHECK(a.update_temperature(strategy, 1) == 15.0f);
+		CHECK(a.security_sum(1) == 15.0f);
+		CHECK(b.update_temperature(strategy, 1) == 80.0f);
+		CHECK(c.update_temperature(strategy, 1) == doctest::Approx(3.0f));
+
+		const float need = (2.0f - SCurve::calculate(0.0f)) * 15.0f * 1.5f;
+		CHECK(a.calculate_defense_need(1) == doctest::Approx(need));
+		CHECK(b.calculate_defense_need(1) == 0.0f);
+		CHECK(b.calculate_attack_cost(1) == 0.0f);
+		CHECK(b.calculate_attack_value(1) == doctest::Approx(100.0f / 50.0f * 80.0f * 1.25f));
+		CHECK(c.calculate_attack_value(1) == doctest::Approx(100.0f / 50.0f * 3.0f * 1.25f));
+		const float strengths[6] = { 1.0f, 4.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		const int counts[6] = { 1, 1, 0, 0, 0, 0 };
+		b.battle_statistics(1).sample(strengths, counts);
+		CHECK(b.calculate_attack_cost(1) == 6.0f);
+		squads.distance = 0.5f;
+		CHECK(b.calculate_attack_value(1) == -6.0f);
+		CHECK(a.calculate_attack_value(1) == 0.0f);
+		CHECK(a.changed_attack_defence(1) == 0);
+		CHECK(a.tactical_status(1) == 25);
+		CHECK(a.tactical_status(2) == 25);
+		CHECK(a.tactical_status(0) == -1);
+		CHECK(a.is_inside(Vec2{ 10.0f, -10.0f }));
+		CHECK(a.is_inside(Vec3{ -5.0f, 40.0f, 5.0f }));
+		CHECK_FALSE(a.is_inside(Vec2{ 10.5f, 0.0f }));
+	}
+
+	TEST_CASE("AIStrategicArea: distances relax over the neighbour graph, 1.1 into neutral and 5 into hostile areas, "
+			  "and keep each route back to the area") {
+		AIStrategicObjectManager objects{ StrategicServices{} };
+		REQUIRE(objects.create("a", { -10.0f, -10.0f }, { 0.0f, 0.0f }, 0.0f, 10.0f, std::string()));
+		REQUIRE(objects.create("b", { 90.0f, -10.0f }, { 100.0f, 0.0f }, 0.0f, 10.0f, std::string()));
+		REQUIRE(objects.create("c", { 90.0f, 290.0f }, { 100.0f, 300.0f }, 0.0f, 10.0f, std::string()));
+		REQUIRE(objects.create("d", { -10.0f, 290.0f }, { 0.0f, 300.0f }, 0.0f, 10.0f, std::string()));
+		REQUIRE(objects.add_two_way_neighbour("a", "b"));
+		REQUIRE(objects.add_two_way_neighbour("b", "c"));
+		REQUIRE(objects.add_two_way_neighbour("c", "d"));
+		REQUIRE(objects.add_two_way_neighbour("a", "d"));
+		AIStrategicArea &a = *objects.strategic_area("a");
+		const AIStrategicArea &c = *objects.strategic_area("c");
+		const AIStrategicArea &d = *objects.strategic_area("d");
+		objects.strategic_area("b")->set_status(1, StrategicStatus::Neutral);
+		objects.strategic_area("d")->set_status(1, StrategicStatus::Hostile);
+		objects.strategic_area("c")->set_status(1, StrategicStatus::Owned);
+		a.validate_distances(1);
+		const std::list<AreaDistanceInfo> &distances = a.distances(1);
+		REQUIRE(distances.size() == 4);
+		std::vector<std::pair<std::string, float>> got;
+		for (const AreaDistanceInfo &info : distances) {
+			got.emplace_back(static_cast<const AIStrategicArea *>(info.area)->name(), info.distance);
+			CHECK(info.vehicle_groups == 1);
+		}
+		CHECK(got[0].first == "a");
+		CHECK(got[0].second == 0.0f);
+		CHECK(got[1].first == "b");
+		CHECK(got[1].second == doctest::Approx(110.0f));
+		CHECK(got[2].first == "c");
+		CHECK(got[2].second == doctest::Approx(410.0f));
+		CHECK(got[3].first == "d");
+		CHECK(got[3].second == doctest::Approx(910.0f));
+		const std::list<const AIStrategicObject *> *route = a.route(1, 0, &d);
+		REQUIRE(route != nullptr);
+		CHECK(std::vector<const AIStrategicObject *>(route->begin(), route->end()) ==
+				std::vector<const AIStrategicObject *>{ &d, &c, objects.strategic_area("b"), &a });
+		CHECK(a.route(1, 1, &d) == nullptr);
+		CHECK(a.route(2, 0, &d) == nullptr);
 	}
 
 	TEST_CASE("StrategyDecisions without areas to take: Spread sends bot-led squads to different areas, Hunt to the "

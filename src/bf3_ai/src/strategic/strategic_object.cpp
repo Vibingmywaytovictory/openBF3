@@ -1,5 +1,7 @@
 #include "bf3/ai/strategic/strategic_object.h"
 
+#include "bf3/ai/main/ai_random.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -65,19 +67,134 @@ AIStrategicObject::AIStrategicObject(float p_radius, float p_height) : height_(p
 	security_sum_ = { p_radius, p_radius, p_radius, p_radius };
 }
 
-bool AIStrategicObject::has_object_type_flag(Type p_type) const {
-	(void)p_type;
-	return false;
+bool AIStrategicObject::register_available_attacker(int p_unit, int p_side) {
+	available_attackers_[size_t(p_side - 1)].insert(p_unit);
+	return true;
 }
 
-float AIStrategicObject::gravity(const Vec3 &p_position, int p_side) const {
-	(void)p_position, (void)p_side;
-	return 0.0f;
+bool AIStrategicObject::register_available_defender(int p_unit, int p_side) {
+	available_defenders_[size_t(p_side - 1)].insert(p_unit);
+	return true;
 }
 
-float AIStrategicObject::gravity(const Vec2 &p_position, int p_side) const {
-	(void)p_position, (void)p_side;
-	return 0.0f;
+bool AIStrategicObject::unregister_available_attacker(std::set<int>::iterator &r_it, int p_side) {
+	std::set<int> &units = available_attackers_[size_t(p_side - 1)];
+	if (r_it == units.end()) {
+		return false;
+	}
+	r_it = units.erase(r_it);
+	return true;
+}
+
+bool AIStrategicObject::unregister_available_defender(std::set<int>::iterator &r_it, int p_side) {
+	std::set<int> &units = available_defenders_[size_t(p_side - 1)];
+	if (r_it == units.end()) {
+		return false;
+	}
+	r_it = units.erase(r_it);
+	return true;
+}
+
+bool AIStrategicObject::unregister_available_attacker(int p_unit, int p_side) {
+	std::set<int>::iterator it = available_attackers_[size_t(p_side - 1)].find(p_unit);
+	return unregister_available_attacker(it, p_side);
+}
+
+bool AIStrategicObject::unregister_available_defender(int p_unit, int p_side) {
+	std::set<int>::iterator it = available_defenders_[size_t(p_side - 1)].find(p_unit);
+	return unregister_available_defender(it, p_side);
+}
+
+int AIStrategicObject::unregister_all_available_attackers(int p_side) {
+	const int count = int(available_attackers_[size_t(p_side - 1)].size());
+	available_attackers_[size_t(p_side - 1)].clear();
+	return count;
+}
+
+int AIStrategicObject::unregister_all_available_defenders(int p_side) {
+	const int count = int(available_defenders_[size_t(p_side - 1)].size());
+	available_defenders_[size_t(p_side - 1)].clear();
+	return count;
+}
+
+int AIStrategicObject::number_of_available_bots(bool p_attackers, int p_side) const {
+	return int((p_attackers ? available_attackers_ : available_defenders_)[size_t(p_side - 1)].size());
+}
+
+bool AIStrategicObject::is_present_unit(int p_unit, int p_side) const {
+	return present_units_[size_t(p_side - 1)].contains(p_unit);
+}
+
+bool AIStrategicObject::set_as_present_unit(int p_unit, int p_side) {
+	return present_units_[size_t(p_side - 1)].insert(p_unit).second;
+}
+
+void AIStrategicObject::remove_as_present_unit(std::set<int>::iterator &r_it, int p_side) {
+	r_it = present_units_[size_t(p_side - 1)].erase(r_it);
+}
+
+bool AIStrategicObject::remove_as_present_unit(int p_unit, int p_side) {
+	return present_units_[size_t(p_side - 1)].erase(p_unit) != 0;
+}
+
+void AIStrategicObject::set_side(int p_side) {
+	if (p_side == 1) {
+		status_ = { StrategicStatus::Owned, StrategicStatus::Hostile, StrategicStatus::Owned,
+			StrategicStatus::Hostile };
+	} else if (p_side == 2) {
+		status_ = { StrategicStatus::Hostile, StrategicStatus::Owned, StrategicStatus::Hostile,
+			StrategicStatus::Owned };
+	} else {
+		status_[2] = StrategicStatus::Neutral;
+		status_[3] = StrategicStatus::Neutral;
+	}
+}
+
+int AIStrategicObject::side() const {
+	if (status_[2] == StrategicStatus::Owned) {
+		return 1;
+	}
+	return status_[3] == StrategicStatus::Owned ? 2 : 0;
+}
+
+void AIStrategicObject::reset_status() {
+	status_[0] = status_[2];
+	status_[1] = status_[3];
+}
+
+void AIStrategicObject::add_allowed_vehicle_group(int p_group) {
+	if (allowed_vehicle_groups_ == -1) {
+		allowed_vehicle_groups_ = 0;
+	}
+	allowed_vehicle_groups_ |= 1 << p_group;
+}
+
+float AIStrategicObject::assigned_part_of_wanted_strength(int p_side) const {
+	const int need = resource_need_[size_t(p_side - 1)];
+	if (need == 0) {
+		return 1.0f;
+	}
+	return float(assigned_squad_strength_[size_t(p_side - 1)] / need);
+}
+
+void AIStrategicObject::randomize_pos(int p_side, float p_scale, AIRandom &r_random, Vec3 &r_position) const {
+	const float draw_x = r_random.next_float();
+	const float dx = x_extent(p_side) * draw_x * p_scale - x_extent(p_side) * 0.5f;
+	const float draw_z = r_random.next_float();
+	const float dz = draw_z * z_extent(p_side) * p_scale - z_extent(p_side) * 0.5f;
+	r_position = { dx + position_[size_t(p_side - 1)].x, height_, dz + position_[size_t(p_side - 1)].y };
+}
+
+void AIStrategicObject::randomize_controlpoint_pos(
+		float p_scale, float p_spread, AIRandom &r_random, Vec3 &r_position) const {
+	const double turn = double(r_random.next()) * double(2.32830644e-10f);
+	const double angle = (turn + turn) * double(3.14159274f);
+	const double draw = double(r_random.next()) * double(2.32830644e-10f);
+	const float distance = float((0.5 + draw * (double(p_spread) - 0.5)) * p_scale);
+	const double s = std::sin(float(angle));
+	const double c = std::cos(float(angle));
+	r_position.x = float(s * distance + r_position.x);
+	r_position.z = float(c * distance + r_position.z);
 }
 
 void SAWayPoint::init(const StrategicGame &p_game) {

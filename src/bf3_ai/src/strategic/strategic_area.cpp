@@ -5,8 +5,10 @@
 #include "bf3/ai/squad/squad_manager.h"
 #include "bf3/ai/strategic/sai.h"
 #include "bf3/ai/strategic/strategic_object.h"
+#include "bf3/ai/strategic/strategy_model.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 
 namespace bf3::ai {
@@ -16,6 +18,9 @@ AIStrategicArea::AIStrategicArea(
 		AIStrategicObject(p_radius, -666.0f), services_(p_services), name_(p_name), control_point_(p_control_point) {
 	const int maps = services_.game != nullptr ? std::max(services_.game->number_of_maps(), 1) : 1;
 	map_data_.resize(size_t(maps));
+	for (std::vector<GroupDistances> &side : groups_) {
+		side.resize(size_t(vehicle_group_count()));
+	}
 }
 
 void AIStrategicArea::internal_constructor_call(const Vec2 &p_centre) {
@@ -110,6 +115,207 @@ float AIStrategicArea::x_extent(int p_side) const {
 float AIStrategicArea::z_extent(int p_side) const {
 	const float half = position_[size_t(p_side - 1)].y - centre_.y;
 	return half + half;
+}
+
+float AIStrategicArea::update_temperature(const Strategy &p_strategy, int p_side) {
+	const size_t first = size_t(p_side - 1);
+	const size_t second = size_t(p_side + 1);
+	const std::array<float, kStrategicObjectTypes> &modifiers = p_strategy.strategic_objects_modifiers(status(p_side));
+	const auto scale = [&](float p_factor) {
+		security_sum_[first] *= p_factor;
+		security_sum_[second] *= p_factor;
+	};
+	for (int flag = 0; flag <= int(East); ++flag) {
+		if (has_object_type_flag(Type(flag))) {
+			scale(modifiers[size_t(flag)]);
+		}
+	}
+	switch (status(p_side)) {
+		case StrategicStatus::Owned:
+			scale(modifiers[has_neighbour_with_status(StrategicStatus::Hostile, p_side) ? Front : Safe]);
+			break;
+		case StrategicStatus::Hostile:
+			scale(modifiers[Enemy]);
+			break;
+		case StrategicStatus::Neutral:
+			scale(modifiers[NeutralType]);
+			break;
+		case StrategicStatus::Unknown:
+			break;
+	}
+	scale(p_strategy.specific_strategic_object_modifier(index_));
+	return security_sum_[first];
+}
+
+int AIStrategicArea::changed_attack_defence(int p_side) const {
+	return status_changed_ && status(p_side) != StrategicStatus::Owned ? 1 : 0;
+}
+
+float AIStrategicArea::calculate_defense_need(int p_side) const {
+	if (status(p_side) != StrategicStatus::Owned) {
+		return 0.0f;
+	}
+	const size_t s = size_t(p_side - 1);
+	float need = (2.0f - SCurve::calculate(need_curve_input_[s])) * (enemy_battle_strength_[s] + security_sum_[s]);
+	if (has_neighbour_with_status(StrategicStatus::Hostile, p_side)) {
+		need *= 1.5f;
+	} else if (has_neighbour_with_status(StrategicStatus::Neutral, p_side)) {
+		need *= 1.25f;
+	}
+	return need;
+}
+
+float AIStrategicArea::calculate_attack_value(int p_side) const {
+	const size_t s = size_t(p_side - 1);
+	float value = 0.0f;
+	if (status(p_side) != StrategicStatus::Owned && has_neighbour_with_status(StrategicStatus::Owned, p_side)) {
+		value = (1.0f + need_curve_input_[s]) * security_sum_[s];
+		if (!has_neighbour_with_status(StrategicStatus::Hostile, p_side)) {
+			value *= has_neighbour_with_status(StrategicStatus::Neutral, p_side) ? 1.5f : 1.25f;
+		}
+		const float x = position_[0].x;
+		const float z = position_[0].y;
+		const Vec3 at{ x, services_.game != nullptr ? services_.game->terrain_altitude(x, z) : height_, z };
+		const float distance =
+				services_.squads != nullptr ? services_.squads->distance_to_closest_squad(at, p_side) : FLT_MAX;
+		value = distance > 1.0f && 100000.0f > distance ? 1.0f / distance * 100.0f * value : 0.0f;
+	}
+	return value - calculate_attack_cost(p_side);
+}
+
+float AIStrategicArea::calculate_attack_cost(int p_side) const {
+	const size_t s = size_t(p_side - 1);
+	const EnemyStatistics &statistics = *statistics_[s];
+	const float strength = statistics.size() > 1 ? statistics.strength(1) : -1.0f;
+	return strength * (1.5f - 0.5f * need_curve_input_[s]) * (1.0f + friendly_ratio_[s]);
+}
+
+bool AIStrategicArea::is_neighbour(const AIStrategicObject *p_object) const {
+	return std::find(neighbours_.begin(), neighbours_.end(), p_object) != neighbours_.end();
+}
+
+bool AIStrategicArea::is_neighbouring_object(const AIStrategicObject *p_object) const {
+	return std::find(neighbouring_objects_.begin(), neighbouring_objects_.end(), p_object) !=
+			neighbouring_objects_.end();
+}
+
+int AIStrategicArea::tactical_status(int p_side) const {
+	return p_side == 1 ? tactical_status_[0] : (p_side == 2 ? tactical_status_[1] : int(control_point_));
+}
+
+void AIStrategicArea::set_as_dirty(int p_side) {
+	distances_dirty_[size_t(p_side - 1)] = true;
+	for (GroupDistances &group : groups_[size_t(p_side - 1)]) {
+		group.dirty = true;
+	}
+}
+
+void AIStrategicArea::validate_distances(int p_side) {
+	if (!distances_dirty_[size_t(p_side - 1)]) {
+		return;
+	}
+	distances_[size_t(p_side - 1)].clear();
+	for (int group = 0; group < vehicle_group_count(); ++group) {
+		validate_distances(p_side, group);
+		insert_unit_distances(p_side, group);
+	}
+}
+
+void AIStrategicArea::validate_distances(int p_side, int p_group) {
+	GroupDistances &group = groups_[size_t(p_side - 1)][size_t(p_group)];
+	if (!group.dirty) {
+		return;
+	}
+	group.dirty = false;
+	group.sorted.clear();
+	group.routes.clear();
+	group.costs.clear();
+	find_distances(p_side, group, 1 << p_group);
+}
+
+void AIStrategicArea::find_distances(int p_side, GroupDistances &r_group, int p_group_mask) const {
+	struct Search {
+		const AIStrategicObject *object;
+		const AIStrategicObject *previous;
+		float cost;
+	};
+	if (!allows_some_vehicle_groups(p_group_mask)) {
+		return;
+	}
+	std::list<Search> open{ { this, this, 0.0f } };
+	r_group.routes.emplace(this, std::list<const AIStrategicObject *>{});
+	while (!open.empty()) {
+		const Search at = open.front();
+		open.pop_front();
+		const auto found = r_group.costs.find(at.object);
+		if ((found != r_group.costs.end() && !(found->second > at.cost)) ||
+				!at.object->allows_some_vehicle_groups(p_group_mask)) {
+			continue;
+		}
+		if (at.object->type() == 0) {
+			for (const AIStrategicObject *next : static_cast<const AIStrategicArea *>(at.object)->neighbours_) {
+				const Vec2 &from = at.object->position(p_side);
+				const Vec2 &to = next->position(p_side);
+				const float dx = to.x - from.x;
+				const float dy = to.y - from.y;
+				float distance = std::sqrt(dx * dx + dy * dy);
+				if (next->status(p_side) == StrategicStatus::Neutral) {
+					distance *= 1.1f;
+				} else if (next->status(p_side) == StrategicStatus::Hostile) {
+					distance *= 5.0f;
+				}
+				open.push_back({ next, at.object, at.cost + distance });
+			}
+		}
+		r_group.costs[at.object] = at.cost;
+		std::list<const AIStrategicObject *> route = r_group.routes[at.previous];
+		route.push_front(at.object);
+		r_group.routes[at.object] = std::move(route);
+	}
+	for (const auto &[object, cost] : r_group.costs) {
+		r_group.sorted.emplace_back(cost, object);
+	}
+	r_group.sorted.sort();
+}
+
+void AIStrategicArea::insert_unit_distances(int p_side, int p_group) {
+	std::list<AreaDistanceInfo> &merged = distances_[size_t(p_side - 1)];
+	const std::list<std::pair<float, const AIStrategicObject *>> &sorted =
+			groups_[size_t(p_side - 1)][size_t(p_group)].sorted;
+	auto at = merged.begin();
+	auto it = sorted.begin();
+	for (; it != sorted.end(); ++it) {
+		while (at != merged.end() && it->first > at->distance) {
+			++at;
+		}
+		if (at == merged.end()) {
+			break;
+		}
+		if (at->distance == it->first) {
+			at->vehicle_groups |= 1 << p_group;
+		} else {
+			merged.insert(at, AreaDistanceInfo{ 1 << p_group, it->second, it->first });
+		}
+	}
+	for (; it != sorted.end(); ++it) {
+		merged.push_back(AreaDistanceInfo{ 1 << p_group, it->second, it->first });
+	}
+}
+
+const std::list<const AIStrategicObject *> *AIStrategicArea::route(
+		int p_side, int p_group, const AIStrategicObject *p_to) const {
+	if (p_group < 0 || p_group >= vehicle_group_count()) {
+		return nullptr;
+	}
+	const GroupDistances &group = groups_[size_t(p_side - 1)][size_t(p_group)];
+	const auto found = group.routes.find(p_to);
+	return found != group.routes.end() ? &found->second : nullptr;
+}
+
+bool AIStrategicArea::is_inside(const Vec2 &p_point) const {
+	const Vec2 &centre = position_[0];
+	const Vec2 maximum{ centre.x - centre_.x + centre.x, centre.y - centre_.y + centre.y };
+	return centre_.x <= p_point.x && p_point.x <= maximum.x && centre_.y <= p_point.y && p_point.y <= maximum.y;
 }
 
 float AIStrategicArea::control_point_take_over_counter() const {

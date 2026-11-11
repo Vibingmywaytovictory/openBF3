@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <list>
 #include <map>
 #include <memory>
 #include <set>
@@ -13,13 +14,16 @@
 namespace bf3::ai {
 
 class AIInformationGrid;
+class AIRandom;
+class AIStrategicObject;
 class InformationManager;
 class Sai;
-class SquadManager;
+class Strategy;
 
 enum class StrategicStatus : uint8_t { Owned = 0, Hostile = 1, Neutral = 2, Unknown = 3 };
 
 inline constexpr uint32_t kNoControlPoint = 0xFFFFFFFFu;
+inline constexpr int kDefaultTacticalStatus = 25;
 
 class EnemyStatistics {
 public:
@@ -65,11 +69,25 @@ public:
 			const Vec3 &p_position, int p_map, uint32_t &r_polygon, uint32_t &r_island, Vec3 &r_on) const = 0;
 };
 
+class StrategicSquads {
+public:
+	virtual ~StrategicSquads() = default;
+	virtual int squad_strengths(int p_side, int p_area_index, int p_type) const = 0;
+	virtual float distance_to_closest_squad(const Vec3 &p_position, int p_side) const = 0;
+};
+
 struct StrategicServices {
 	const StrategicGame *game = nullptr;
 	const InformationManager *information = nullptr;
-	const SquadManager *squads = nullptr;
+	const StrategicSquads *squads = nullptr;
 	std::array<const AIInformationGrid *, 2> grids{};
+	int vehicle_groups = 0;
+};
+
+struct AreaDistanceInfo {
+	int vehicle_groups = 0;
+	const AIStrategicObject *area = nullptr;
+	float distance = 0.0f;
 };
 
 class AIStrategicObject {
@@ -110,19 +128,71 @@ public:
 	virtual const Vec2 &position(int p_side) const { return position_[size_t(p_side - 1)]; }
 	virtual void set_position(int p_side, const Vec2 &p_position) { position_[size_t(p_side - 1)] = p_position; }
 	virtual Vec3 order_position(int p_map) const = 0;
+	virtual float update_temperature(const Strategy &p_strategy, int p_side) = 0;
 	virtual void update(int p_side, const Sai &p_sai, bool &r_changed) = 0;
+	virtual int changed_attack_defence(int p_side) const = 0;
+	virtual float control_point_take_over_counter() const = 0;
+	virtual bool is_enemy_taking_over_base(int p_side) const = 0;
+	virtual float calculate_defense_need(int p_side) const = 0;
+	virtual float calculate_attack_value(int p_side) const = 0;
+	virtual float calculate_attack_cost(int p_side) const = 0;
+	virtual bool is_neighbour(const AIStrategicObject *p_object) const = 0;
 	virtual bool has_neighbour_with_status(StrategicStatus p_status, int p_side) const = 0;
+	virtual bool is_neighbouring_object(const AIStrategicObject *p_object) const = 0;
 	virtual bool has_neighbouring_object_with_status(StrategicStatus p_status, int p_side) const = 0;
 	virtual int object_type_flags() const { return 0x8000000; }
-	virtual bool has_object_type_flag(Type p_type) const;
-	virtual float gravity(const Vec3 &p_position, int p_side) const;
-	virtual float gravity(const Vec2 &p_position, int p_side) const;
+	virtual bool has_object_type_flag(Type) const { return false; }
+	virtual bool has_object_type_flags(int) const { return false; }
+	virtual int tactical_status(int p_side) const = 0;
+	virtual bool is_area_takeable() const = 0;
+	virtual float gravity(const Vec3 &, int) const { return 0.0f; }
+	virtual float gravity(const Vec2 &, int) const { return 0.0f; }
 	virtual float x_extent(int p_side) const { return size_[size_t(p_side)] + size_[size_t(p_side)]; }
 	virtual float z_extent(int p_side) const { return size_[size_t(p_side)] + size_[size_t(p_side)]; }
-	virtual void set_as_dirty(int p_side) { distances_dirty_[size_t(p_side - 1)] = true; }
+	virtual void set_as_dirty(int p_side) = 0;
 
 	int number_of_assigned_units(int p_side) const { return int(assigned_units_[size_t(p_side - 1)].size()); }
 	std::set<int> &assigned_units(int p_side) { return assigned_units_[size_t(p_side - 1)]; }
+	const std::set<int> &assigned_units(int p_side) const { return assigned_units_[size_t(p_side - 1)]; }
+	std::set<int> &available_bots(bool p_attackers, int p_side) {
+		return p_attackers ? available_attackers(p_side) : available_defenders(p_side);
+	}
+	std::set<int> &available_attackers(int p_side) { return available_attackers_[size_t(p_side - 1)]; }
+	std::set<int> &available_defenders(int p_side) { return available_defenders_[size_t(p_side - 1)]; }
+	bool register_available_attacker(int p_unit, int p_side);
+	bool register_available_defender(int p_unit, int p_side);
+	bool unregister_available_attacker(int p_unit, int p_side);
+	bool unregister_available_defender(int p_unit, int p_side);
+	bool unregister_available_attacker(std::set<int>::iterator &r_it, int p_side);
+	bool unregister_available_defender(std::set<int>::iterator &r_it, int p_side);
+	int unregister_all_available_attackers(int p_side);
+	int unregister_all_available_defenders(int p_side);
+	int number_of_available_bots(bool p_attackers, int p_side) const;
+	int number_of_available_attackers(int p_side) const { return number_of_available_bots(true, p_side); }
+	int number_of_available_defenders(int p_side) const { return number_of_available_bots(false, p_side); }
+	std::set<int> &present_units(int p_side) { return present_units_[size_t(p_side - 1)]; }
+	int number_of_present_units(int p_side) const { return int(present_units_[size_t(p_side - 1)].size()); }
+	bool is_present_unit(int p_unit, int p_side) const;
+	bool set_as_present_unit(int p_unit, int p_side);
+	void remove_as_present_unit(std::set<int>::iterator &r_it, int p_side);
+	bool remove_as_present_unit(int p_unit, int p_side);
+
+	void set_side(int p_side);
+	int side() const;
+	void reset_status();
+	void set_priority(int p_priority, int p_side) { priority_[size_t(p_side - 1)] = p_priority; }
+	int priority(int p_side) const { return priority_[size_t(p_side - 1)]; }
+	void add_allowed_vehicle_group(int p_group);
+	int allowed_vehicle_groups() const { return allowed_vehicle_groups_; }
+	bool is_allowed_vehicle_group(int p_group) const { return ((allowed_vehicle_groups_ >> p_group) & 1) != 0; }
+	bool allows_some_vehicle_groups(int p_mask) const { return (allowed_vehicle_groups_ & p_mask) != 0; }
+	void add_expelled_unit(int p_equipment) { expelled_units_ |= 1 << p_equipment; }
+	int expelled_vehicle_types() const { return expelled_units_; }
+	bool is_expelled_unit(int p_equipment) const { return ((expelled_units_ >> p_equipment) & 1) != 0; }
+	float assigned_part_of_wanted_strength(int p_side) const;
+	void randomize_pos(int p_side, float p_scale, AIRandom &r_random, Vec3 &r_position) const;
+	void randomize_controlpoint_pos(float p_scale, float p_spread, AIRandom &r_random, Vec3 &r_position) const;
+
 	bool is_attack(int p_side) const { return attack_[size_t(p_side - 1)]; }
 	void set_attack(int p_side, bool p_attack) { attack_[size_t(p_side - 1)] = p_attack; }
 	EnemyStatistics &battle_statistics(int p_side) const { return *statistics_[size_t(p_side - 1)]; }
@@ -132,6 +202,7 @@ public:
 	int index() const { return index_; }
 	int category() const { return category_; }
 	float height() const { return height_; }
+	float basic_temperature() const { return size_[0]; }
 	bool distances_dirty(int p_side) const { return distances_dirty_[size_t(p_side - 1)]; }
 	float temperature(int p_side) const { return temperature_[size_t(p_side - 1)]; }
 	void set_temperature(int p_side, float p_temperature) { temperature_[size_t(p_side - 1)] = p_temperature; }
@@ -141,12 +212,16 @@ public:
 	int resource_need(int p_side) const { return resource_need_[size_t(p_side - 1)]; }
 	int assigned_squad_strength(int p_side) const { return assigned_squad_strength_[size_t(p_side - 1)]; }
 	float security_sum(int p_side) const { return security_sum_[size_t(p_side - 1)]; }
+	float need_curve_input(int p_side) const { return need_curve_input_[size_t(p_side - 1)]; }
 
 protected:
 	friend class AIStrategicObjectManager;
 
 	std::array<std::unique_ptr<EnemyStatistics>, 4> statistics_;
+	std::array<std::set<int>, 2> available_attackers_;
+	std::array<std::set<int>, 2> available_defenders_;
 	std::array<std::set<int>, 2> assigned_units_;
+	std::array<std::set<int>, 2> present_units_;
 	std::array<StrategicStatus, 4> status_{ StrategicStatus::Neutral, StrategicStatus::Neutral,
 		StrategicStatus::Neutral, StrategicStatus::Neutral };
 	std::array<Vec2, 2> position_{};
@@ -157,12 +232,15 @@ protected:
 	std::array<float, 2> friendly_ratio_{};
 	std::array<float, 2> friendly_battle_strength_{};
 	std::array<float, 2> enemy_battle_strength_{};
+	std::array<int, 2> priority_{};
 	std::array<int, 2> resource_need_{};
 	std::array<int, 2> assigned_squad_strength_{};
 	std::array<bool, 2> attack_{ true, true };
 	std::array<bool, 2> distances_dirty_{ true, true };
 	std::array<float, 2> temperature_{};
 	int index_ = -1;
+	int allowed_vehicle_groups_ = -1;
+	int expelled_units_ = 0;
 	int category_ = -1;
 };
 
@@ -180,21 +258,38 @@ public:
 	void init();
 	void init_order_positions();
 	bool control_point_position_and_radius(Vec3 &r_position, float &r_radius) const;
-	float control_point_take_over_counter() const;
-	bool is_area_takeable() const;
 
 	int type() const override { return 0; }
 	Vec3 order_position(int p_map) const override;
+	float update_temperature(const Strategy &p_strategy, int p_side) override;
 	void update(int p_side, const Sai &p_sai, bool &r_changed) override;
+	int changed_attack_defence(int p_side) const override;
+	float control_point_take_over_counter() const override;
+	bool is_enemy_taking_over_base(int p_side) const override { return enemy_takeover_[size_t(p_side - 1)]; }
+	float calculate_defense_need(int p_side) const override;
+	float calculate_attack_value(int p_side) const override;
+	float calculate_attack_cost(int p_side) const override;
+	bool is_neighbour(const AIStrategicObject *p_object) const override;
 	bool has_neighbour_with_status(StrategicStatus p_status, int p_side) const override;
+	bool is_neighbouring_object(const AIStrategicObject *p_object) const override;
 	bool has_neighbouring_object_with_status(StrategicStatus p_status, int p_side) const override;
 	int object_type_flags() const override { return object_type_flags_; }
 	bool has_object_type_flag(Type p_type) const override { return ((object_type_flags_ >> int(p_type)) & 1) != 0; }
+	bool has_object_type_flags(int p_flags) const override { return (object_type_flags_ & p_flags) == p_flags; }
+	int tactical_status(int p_side) const override;
+	bool is_area_takeable() const override;
 	float gravity(const Vec3 &p_position, int p_side) const override;
 	float gravity(const Vec2 &p_position, int p_side) const override;
 	float gravity(float p_distance, int p_side) const;
 	float x_extent(int p_side) const override;
 	float z_extent(int p_side) const override;
+	void set_as_dirty(int p_side) override;
+
+	void validate_distances(int p_side);
+	const std::list<AreaDistanceInfo> &distances(int p_side) const { return distances_[size_t(p_side - 1)]; }
+	const std::list<const AIStrategicObject *> *route(int p_side, int p_group, const AIStrategicObject *p_to) const;
+	bool is_inside(const Vec2 &p_point) const;
+	bool is_inside(const Vec3 &p_point) const { return is_inside(Vec2{ p_point.x, p_point.z }); }
 
 	const std::string &name() const { return name_; }
 	uint32_t control_point() const { return control_point_; }
@@ -213,7 +308,18 @@ public:
 	bool enemy_takeover(int p_side) const { return enemy_takeover_[size_t(p_side - 1)]; }
 
 private:
+	struct GroupDistances {
+		bool dirty = true;
+		std::list<std::pair<float, const AIStrategicObject *>> sorted;
+		std::map<const AIStrategicObject *, std::list<const AIStrategicObject *>> routes;
+		std::map<const AIStrategicObject *, float> costs;
+	};
+
 	void internal_constructor_call(const Vec2 &p_centre);
+	void validate_distances(int p_side, int p_group);
+	void find_distances(int p_side, GroupDistances &r_group, int p_group_mask) const;
+	void insert_unit_distances(int p_side, int p_group);
+	int vehicle_group_count() const { return services_.vehicle_groups > 0 ? services_.vehicle_groups : 1; }
 
 	StrategicServices services_;
 	Vec2 centre_{};
@@ -223,11 +329,14 @@ private:
 	std::string name_;
 	int object_type_flags_ = 0;
 	uint32_t control_point_ = kNoControlPoint;
+	std::array<int, 2> tactical_status_{ kDefaultTacticalStatus, kDefaultTacticalStatus };
 	std::array<bool, 2> side_enabled_{ true, true };
 	bool status_changed_ = false;
 	std::array<bool, 2> enemy_takeover_{};
 	bool from_control_point_ = true;
 	bool order_positions_initialised_ = false;
+	std::array<std::list<AreaDistanceInfo>, 2> distances_;
+	std::array<std::vector<GroupDistances>, 2> groups_;
 };
 
 class SAWayPoint {
