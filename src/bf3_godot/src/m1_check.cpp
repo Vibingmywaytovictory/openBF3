@@ -408,6 +408,40 @@ ShotLuma shot_luma(const PackedByteArray &p_shown, const PackedByteArray &p_hidd
 	return out;
 }
 
+ShotDetail shot_detail(const PackedByteArray &p_rgba, int32_t p_width, int32_t p_height) {
+	ShotDetail out;
+	if (p_width < 2 || p_height < 4 || size_t(p_rgba.size()) != size_t(p_width) * size_t(p_height) * 4) {
+		return out;
+	}
+	const uint8_t *px = p_rgba.ptr();
+	const auto luma = [&](int32_t p_x, int32_t p_y) {
+		const uint8_t *p = px + (size_t(p_y) * size_t(p_width) + size_t(p_x)) * 4;
+		return 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
+	};
+	double gradient = 0.0, sum_a = 0.0, sum_b = 0.0, sum_aa = 0.0, sum_bb = 0.0;
+	size_t n = 0;
+	for (int32_t y = p_height / 2; y < p_height - 1; ++y) {
+		for (int32_t x = 0; x < p_width - 1; ++x) {
+			const double l = luma(x, y);
+			gradient += std::abs(luma(x + 1, y) - l) + std::abs(luma(x, y + 1) - l);
+			const uint8_t *p = px + (size_t(y) * size_t(p_width) + size_t(x)) * 4;
+			const double total = std::max(1.0, double(p[0]) + double(p[1]) + double(p[2]));
+			const double a = (double(p[0]) - double(p[1])) / total, b = (double(p[1]) - double(p[2])) / total;
+			sum_a += a;
+			sum_b += b;
+			sum_aa += a * a;
+			sum_bb += b * b;
+			++n;
+		}
+	}
+	const double count = double(n);
+	out.gradient = gradient / count;
+	out.chroma = std::sqrt(std::max(0.0, sum_aa / count - (sum_a / count) * (sum_a / count)) +
+						 std::max(0.0, sum_bb / count - (sum_b / count) * (sum_b / count))) *
+			1000.0;
+	return out;
+}
+
 void ShotRunner::hide_viewmodels() {
 	hidden_viewmodels_.clear();
 	const TypedArray<Node> found = session_.get_tree()->get_root()->find_children("*", "Bf3Viewmodel", true, false);
@@ -772,6 +806,13 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 	}
 	UtilityFunctions::print(to_godot("[m1] shot " + lines_.back()));
 	UtilityFunctions::print(to_godot("[m1] shot " + session_.look_summary()));
+	if (detail_) {
+		int32_t width = 0, height = 0;
+		const PackedByteArray rgba = viewport_rgba(session_, width, height);
+		const ShotDetail d = shot_detail(rgba, width, height);
+		UtilityFunctions::print(to_godot(fmt("[m1] shot detail %s: lower half gradient %.2f / 255, chroma spread %.2f",
+				shot.path.c_str(), d.gradient, d.chroma)));
+	}
 	++next_;
 	state_ = 0;
 	if (next_ >= total) {

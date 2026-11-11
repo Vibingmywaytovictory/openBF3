@@ -43,6 +43,13 @@ struct ShotLuma {
 ShotLuma shot_luma(const godot::PackedByteArray &p_shown, const godot::PackedByteArray &p_hidden, int32_t p_width,
 		int32_t p_height);
 
+struct ShotDetail {
+	double gradient = 0.0;
+	double chroma = 0.0;
+};
+
+ShotDetail shot_detail(const godot::PackedByteArray &p_rgba, int32_t p_width, int32_t p_height);
+
 class ShotRunner {
 public:
 	struct FreeShot {
@@ -73,6 +80,7 @@ public:
 		measure_frames_ = p_measure == 1 ? 2 : p_measure;
 	}
 	void set_luma(bool p_on) { luma_ = p_on; }
+	void set_detail(bool p_on) { detail_ = p_on; }
 	size_t saved() const { return saved_; }
 	size_t failed() const { return failed_; }
 	const std::vector<std::string> &lines() const { return lines_; }
@@ -109,6 +117,7 @@ private:
 	std::vector<float> run_cpu_samples_;
 
 	bool luma_ = false;
+	bool detail_ = false;
 	godot::PackedByteArray shown_;
 	int32_t shown_width_ = 0, shown_height_ = 0;
 	std::vector<uint64_t> hidden_viewmodels_;

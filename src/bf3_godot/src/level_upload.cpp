@@ -452,7 +452,9 @@ void LevelUpload::run_task() {
 			}
 		} else {
 			const render::PreparedMesh &pm = item.kind == Kind::Mesh ? item.mesh->lod0 : item.terrain->mesh;
-			const bool look = item.kind == Kind::Terrain && item.terrain->look.has_value();
+			static const bool terrain_off =
+					("," + user_arg_value("look-off") + ",").find(",terrain,") != std::string::npos;
+			const bool look = item.kind == Kind::Terrain && item.terrain->look.has_value() && !terrain_off;
 			if (look) {
 				for (const render::TerrainImage &img : item.terrain->look->images) {
 					done.images.push_back(terrain_image(img));
