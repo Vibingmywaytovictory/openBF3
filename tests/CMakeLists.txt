@@ -1354,7 +1354,8 @@ target_compile_definitions(test_ai_port PRIVATE "OPENBF3_BOT_TUNING_CFG=\"${CMAK
 add_test(NAME ai.port.unit COMMAND test_ai_port --test-suite=ai-port)
 set_tests_properties(ai.port.unit PROPERTIES TIMEOUT 60 LABELS "unit")
 find_path(OPENBF3_OPENBF2_AI NAMES AIDLL/AI/Main/BF2AI.cpp HINTS "${CMAKE_SOURCE_DIR}/../OpenBF2/Code/BF2/AI" "${CMAKE_SOURCE_DIR}/../../OpenBF2/Code/BF2/AI" "${CMAKE_SOURCE_DIR}/../../../OpenBF2/Code/BF2/AI" NO_DEFAULT_PATH)
-add_test(NAME ai.port.provenance COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tests/ai_provenance_check.py" "${CMAKE_SOURCE_DIR}" "${OPENBF3_OPENBF2_AI}")
+find_package(Git QUIET)
+add_test(NAME ai.port.provenance COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tests/ai_provenance_check.py" "${CMAKE_SOURCE_DIR}" "${OPENBF3_OPENBF2_AI}" "${GIT_EXECUTABLE}")
 set_tests_properties(ai.port.provenance PROPERTIES TIMEOUT 60 LABELS "unit" SKIP_RETURN_CODE 77)
 
 openbf3_test(test_ai_squad test_main.cpp ai_squad_tests.cpp)
