@@ -402,4 +402,16 @@ bool Aimer::nearest_impact_point(const Vec3 &p_direction, Vec3 &r_out, double &r
 	return found;
 }
 
+bool aim_vector(Aimer &r_aimer, const Vec3 &p_origin, const Vec3 &p_target, const Vec3 &p_target_velocity,
+		const Vec3 &p_own_velocity, float p_accuracy, float p_drag, float p_speed, float p_gravity, double p_time,
+		Vec3 &r_direction) {
+	r_aimer.drag = p_drag;
+	r_aimer.speed = p_speed;
+	r_aimer.gravity = p_gravity;
+	r_aimer.set_target_data(Vec3{ p_target.x - p_origin.x, p_target.y - p_origin.y, p_target.z - p_origin.z },
+			p_target_velocity, p_own_velocity, p_time);
+	Vec3 predicted{};
+	return r_aimer.firing_direction(p_time, p_accuracy, false, r_direction, predicted, nullptr);
+}
+
 }

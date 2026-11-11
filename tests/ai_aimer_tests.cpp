@@ -188,4 +188,38 @@ TEST_SUITE("ai-actionplan") {
 		CHECK(t == doctest::Approx(0.5));
 		CHECK(nearest.z == doctest::Approx(100.0f).epsilon(1e-3));
 	}
+
+	TEST_CASE("aim_vector: getAimVec's core leads, lifts for the drop, fails on hostile input and flights over 100 s") {
+		const Vec3 eye{ 0.0f, 1.6f, 0.0f };
+		const Vec3 target{ 0.0f, 1.6f, 100.0f };
+		Aimer aimer;
+		Vec3 dir{};
+		REQUIRE(aim_vector(
+				aimer, eye, target, Vec3{ 5.0f, 0.0f, 0.0f }, {}, kSoldierAimAccuracy, 0.0f, 500.0f, 0.0f, 3.0, dir));
+		CHECK(dir.x / dir.z == doctest::Approx(1.0f / 100.0f).epsilon(0.01));
+		CHECK(aimer.speed == 500.0f);
+		Aimer drop;
+		for (int i = 0; i < 4; ++i) {
+			REQUIRE(aim_vector(drop, eye, target, {}, {}, kSoldierAimAccuracy, 0.0f, 500.0f, -9.81f, 3.0, dir));
+		}
+		CHECK(dir.y / dir.z == doctest::Approx(0.5f * 9.81f * 0.04f / 100.0f).epsilon(0.05));
+		Aimer hostile;
+		CHECK_FALSE(aim_vector(hostile, eye, target, {}, {}, kSoldierAimAccuracy, 0.0f, NAN, -9.81f, 3.0, dir));
+		CHECK_FALSE(aim_vector(
+				hostile, Vec3{ NAN, 0.0f, 0.0f }, target, {}, {}, kSoldierAimAccuracy, 0.0f, 500.0f, -9.81f, 3.0, dir));
+		CHECK_FALSE(aim_vector(hostile, eye, target, Vec3{ NAN, 0.0f, 0.0f }, {}, kSoldierAimAccuracy, 0.0f, 500.0f,
+				-9.81f, 3.0, dir));
+		Aimer far;
+		Vec3 far_dir{};
+		REQUIRE(aim_vector(far, eye, Vec3{ 0.0f, 1.6f, 25000.0f }, Vec3{ 5.0f, 0.0f, 0.0f }, {}, kSoldierAimAccuracy,
+				0.0f, 500.0f, 0.0f, 3.0, far_dir));
+		CHECK(std::isfinite(far_dir.x));
+		CHECK(std::isfinite(far_dir.y));
+		CHECK(far_dir.x / far_dir.z == doctest::Approx(1.0f / 100.0f).epsilon(0.01));
+		Aimer beyond;
+		CHECK_FALSE(aim_vector(beyond, eye, Vec3{ 0.0f, 0.0f, 1e6f }, Vec3{ 5.0f, 0.0f, 0.0f }, {}, kSoldierAimAccuracy,
+				0.0f, 500.0f, -9.81f, 3.0, far_dir));
+		CHECK_FALSE(aim_vector(beyond, eye, Vec3{ 0.0f, 0.0f, 1e6f }, Vec3{ 5.0f, 0.0f, 0.0f }, {}, kSoldierAimAccuracy,
+				0.0f, 1.0f, -9.81f, 3.0, far_dir));
+	}
 }

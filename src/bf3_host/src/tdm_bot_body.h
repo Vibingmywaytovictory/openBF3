@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/ai/actionplan/aimer.h"
 #include "bf3/host/server_view.h"
 #include "bf3/host/tdm_brain.h"
 #include "bf3/sim/collision_world.h"
@@ -79,6 +80,8 @@ struct BotBody {
 	TdmBotActivity activity = TdmBotActivity::Dead;
 
 	BotTargeting targeting;
+	ai::Aimer aimer;
+	int aimer_target = -1;
 	BotHunt hunt;
 	BotWeapons weapons;
 	BotStrafe strafe;

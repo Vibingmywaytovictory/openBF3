@@ -44,8 +44,8 @@ constexpr bool kRuNtLanded = true;
 
 constexpr float kDeg = sim::kPi / 180.0f;
 
-constexpr uint64_t kReplayDecisionHash = 0x1616b6fc64b4cf62ull;
-constexpr uint64_t kReplayWorldHash = 0x45ba819f37d91966ull;
+constexpr uint64_t kReplayDecisionHash = 0xd426fa56290c8e50ull;
+constexpr uint64_t kReplayWorldHash = 0x697fcad1d94f9cb5ull;
 
 void pending_skip(const char *p_row) {
 	std::printf("%s: PENDING (ru, nt): needs run_tdm and the v3 codecs on the branch\n", p_row);
@@ -328,7 +328,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(r.enemies().empty());
 	}
 
-	TEST_CASE("aim model: the error cone, lead and drop, hostile inputs") {
+	TEST_CASE("aim model: the error cone, hostile inputs") {
 		const sb::AimParams a;
 		CHECK(sb::aim_error(a, 0.5f, 0.0f, false, 0.0f) == doctest::Approx(3.0f));
 		CHECK(sb::aim_error(a, 0.5f, 100.0f, false, 0.0f) == doctest::Approx(0.5f));
@@ -349,23 +349,6 @@ TEST_SUITE("host-tdm-bots-unit") {
 		const float s = sb::aim_error(bad, 0.5f, 1.0f, false, 0.0f);
 		CHECK(std::isfinite(s));
 		CHECK(s >= 0.0f);
-
-		const sim::Vec3 o{ 0, 1.6f, 0 }, t{ 0, 1.6f, 100 }, v{ 5, 0, 0 };
-		const sim::Vec3 l = sb::lead_point(o, t, v, 500.0f, 0.0f);
-		CHECK(l[0] == doctest::Approx(1.0f).epsilon(0.01));
-		CHECK(l[2] == doctest::Approx(100.0f));
-
-		const sim::Vec3 d = sb::lead_point(o, t, {}, 500.0f, -9.81f);
-		CHECK(d[1] - t[1] == doctest::Approx(0.5f * 9.81f * 0.04f).epsilon(0.01));
-
-		CHECK(sb::lead_point(o, t, v, 0.0f, -9.81f) == t);
-		CHECK(sb::lead_point(o, t, v, NAN, -9.81f) == t);
-		CHECK(sb::lead_point({ NAN, 0, 0 }, t, v, 500.0f, 0.0f) == t);
-		const sim::Vec3 nv = sb::lead_point(o, t, { NAN, 0, 0 }, 500.0f, 0.0f);
-		CHECK(nv == t);
-		const sim::Vec3 far = sb::lead_point(o, { 0, 0, 1e6f }, v, 1.0f, -9.81f);
-		CHECK(std::isfinite(far[1]));
-		CHECK(far[0] == doctest::Approx(25.0f));
 	}
 
 	TEST_CASE("bot_tuning.cfg: the shipped file is the compiled-in defaults; hostile files fail") {

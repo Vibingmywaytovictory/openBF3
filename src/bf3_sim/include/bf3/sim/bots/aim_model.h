@@ -17,6 +17,4 @@ struct AimParams {
 
 float aim_error(const AimParams &p_params, float p_skill, float p_seconds_on_target, bool p_moving, float p_crossing_speed_mps);
 
-Vec3 lead_point(const Vec3 &p_origin, const Vec3 &p_target, const Vec3 &p_target_velocity, float p_muzzle_speed, float p_gravity);
-
 }

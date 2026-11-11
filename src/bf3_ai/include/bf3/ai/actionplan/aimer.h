@@ -47,4 +47,10 @@ private:
 	float angle_step_ = 0.0174533f;
 };
 
+inline constexpr float kSoldierAimAccuracy = 0.5f;
+
+bool aim_vector(Aimer &r_aimer, const Vec3 &p_origin, const Vec3 &p_target, const Vec3 &p_target_velocity,
+		const Vec3 &p_own_velocity, float p_accuracy, float p_drag, float p_speed, float p_gravity, double p_time,
+		Vec3 &r_direction);
+
 }

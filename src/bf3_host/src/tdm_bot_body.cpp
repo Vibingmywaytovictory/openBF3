@@ -298,7 +298,16 @@ void BotBody::aim_target(const BotFrame &p_frame, BotIntent &r_intent) {
 	}
 	const sim::Vec3 mark = point;
 	if (d != nullptr && !d->projectile.instant_hit) {
-		point = sim::bots::lead_point(f.eye, mark, ts.velocity, d->projectile.muzzle_speed, d->projectile.gravity);
+		if (aimer_target != f.target) {
+			aimer = ai::Aimer{};
+			aimer_target = f.target;
+		}
+		ai::Vec3 dir{};
+		if (ai::aim_vector(aimer, f.eye, mark, ts.velocity, {}, ai::kSoldierAimAccuracy, d->projectile.drag,
+					d->projectile.muzzle_speed, d->projectile.gravity, double(f.tick) * sim::kTickSeconds, dir)) {
+			const float range = distance(f.eye, mark);
+			point = sim::Vec3{ f.eye[0] + dir.x * range, f.eye[1] + dir.y * range, f.eye[2] + dir.z * range };
+		}
 	}
 	i.target_distance = i.aim_at(f.eye, point);
 

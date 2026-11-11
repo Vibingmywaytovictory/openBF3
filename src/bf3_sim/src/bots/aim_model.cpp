@@ -1,7 +1,5 @@
 #include "bf3/sim/bots/aim_model.h"
 
-#include "bf3/core/util/finite.h"
-
 #include <algorithm>
 #include <cmath>
 
@@ -10,14 +8,11 @@ namespace bf3::sim::bots {
 namespace {
 
 constexpr float kMaxConeDeg = 45.0f;
-constexpr float kMaxLeadSeconds = 5.0f;
-constexpr int kLeadIterations = 3;
 
 float finite_or(float p_value, float p_fallback) {
 	return std::isfinite(p_value) ? p_value : p_fallback;
 }
 
-using bf3::core::finite;
 }
 
 float aim_error(const AimParams &p_params, float p_skill, float p_seconds_on_target, bool p_moving, float p_crossing_speed_mps) {
@@ -33,23 +28,6 @@ float aim_error(const AimParams &p_params, float p_skill, float p_seconds_on_tar
 	}
 	sigma += std::max(finite_or(p_params.crossing_deg_per_mps, 0.0f), 0.0f) * std::max(finite_or(std::fabs(p_crossing_speed_mps), 0.0f), 0.0f);
 	return std::clamp(finite_or(sigma, kMaxConeDeg), 0.0f, kMaxConeDeg);
-}
-
-Vec3 lead_point(const Vec3 &p_origin, const Vec3 &p_target, const Vec3 &p_target_velocity, float p_muzzle_speed, float p_gravity) {
-	if (!finite(p_origin) || !finite(p_target) || !(p_muzzle_speed > 0.0f) || !std::isfinite(p_muzzle_speed)) {
-		return p_target;
-	}
-	const Vec3 v = finite(p_target_velocity) ? p_target_velocity : Vec3{};
-	const float g = finite_or(p_gravity, 0.0f);
-	Vec3 aim = p_target;
-	float t = 0.0f;
-	for (int i = 0; i < kLeadIterations; ++i) {
-		const float dx = aim[0] - p_origin[0], dy = aim[1] - p_origin[1], dz = aim[2] - p_origin[2];
-		t = std::min(std::sqrt(dx * dx + dy * dy + dz * dz) / p_muzzle_speed, kMaxLeadSeconds);
-		aim = { p_target[0] + v[0] * t, p_target[1] + v[1] * t, p_target[2] + v[2] * t };
-	}
-	aim[1] += -0.5f * g * t * t;
-	return finite(aim) ? aim : p_target;
 }
 
 }
