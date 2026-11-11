@@ -1,13 +1,17 @@
 #include <doctest/doctest.h>
 
 #include "bf3/ai/behaviour/curves.h"
+#include "bf3/ai/commander/commander.h"
 #include "bf3/ai/knowledge/information_factory.h"
 #include "bf3/ai/knowledge/information_grid.h"
 #include "bf3/ai/main/ai_random.h"
+#include "bf3/ai/main/ai_settings.h"
+#include "bf3/ai/main/bot.h"
 #include "bf3/ai/path/cluster_graph.h"
 #include "bf3/ai/path/map_properties.h"
 #include "bf3/ai/squad/squad_manager.h"
 #include "bf3/ai/strategic/bot_spawner.h"
+#include "bf3/ai/strategic/sai.h"
 #include "bf3/ai/strategic/strategy.h"
 #include "bf3/ai/vehicle/aerial_height_map.h"
 #include "bf3/ai/vehicle/landing_zone_manager.h"
@@ -23,6 +27,8 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 using namespace bf3;
@@ -1070,6 +1076,107 @@ struct ControlPoints final : StrategicGame {
 	bool polygon(const Vec3 &, int, uint32_t &, uint32_t &, Vec3 &) const override { return false; }
 };
 
+struct StrategicBot final : Bot {
+	uint32_t id = 0;
+	int team = 1;
+	int player = 0;
+	bool dead = false;
+	uint32_t equipment = kNoHandle;
+	uint32_t bot_id() const override { return id; }
+	int side() const override { return team; }
+	void set_side(int p_side) override { team = p_side; }
+	int player_id() const override { return player; }
+	void set_player(int p_player_id) override { player = p_player_id; }
+	void set_name(const std::string &) override {}
+	void set_personality(const float *) override {}
+	void receive_idle_order(int) override {}
+	bool is_dead() const override { return dead; }
+	bool man_down() const override { return false; }
+	bool is_deactivated() const override { return false; }
+	void set_deactivated(bool) override {}
+	BotLodLevel lod_level() const override { return BotLodLevel::Full; }
+	void set_lod_level(BotLodLevel) override {}
+	uint32_t current_equipment() const override { return equipment; }
+	bool has_squad_member() const override { return false; }
+	int decision_making(double) override { return 0; }
+	void see(double) override {}
+	void update_sensing(double) override {}
+	void update_communication() override {}
+	bool path_search_pending() const override { return false; }
+	void update_obstacles() override {}
+	bool navigation_active() const override { return false; }
+	void update_navigation_occasionally() override {}
+	bool search_active() const override { return false; }
+	bool search_new() const override { return false; }
+	bool search_running() const override { return false; }
+	void update_pathfinding(bool &, bool *) override {}
+};
+
+struct GameClock final : AiTimer {
+	sim::Tick tick = 0;
+	sim::Tick game_tick() const override { return tick; }
+	double tick_seconds() const override { return 1.0; }
+	double update_time() const override { return 0.0; }
+};
+
+struct CommanderLog final : Commander {
+	std::vector<std::string> calls;
+	bool artillery = true;
+	void note(const std::string &p_call, int p_side, int p_squad) {
+		calls.push_back(p_call + " " + std::to_string(p_side) + " " + std::to_string(p_squad));
+	}
+	void apply_as_commander(int p_player, int p_side) override { note("apply", p_side, p_player); }
+	void retire_as_commander(int p_side) override { note("retire", p_side, 0); }
+	void give_attack_order(const Vec3 &, int p_squad, int p_side, uint16_t) override {
+		note("attack", p_side, p_squad);
+	}
+	void give_move_order(const Vec3 &, int p_squad, int p_side, uint16_t) override { note("move", p_side, p_squad); }
+	void give_defend_order(const Vec3 &, int p_squad, int p_side, uint16_t) override {
+		note("defend", p_side, p_squad);
+	}
+	void send_attack_message(int p_side, int p_squad) override { note("attack message", p_side, p_squad); }
+	void send_defend_message(int p_side, int p_squad) override { note("defend message", p_side, p_squad); }
+	void fire_artillery(int p_side, int p_squad, const Vec2 &) override { note("fire", p_side, p_squad); }
+	void send_uav(int p_side, int p_squad, const Vec2 &) override { note("uav", p_side, p_squad); }
+	void drop_supply(int p_side, int p_squad, const Vec2 &) override { note("supply", p_side, p_squad); }
+	void drop_vehicle(int p_side, int p_squad, const Vec2 &) override { note("vehicle", p_side, p_squad); }
+	void deny_artillery_request(int p_side, int p_squad) override { note("deny artillery", p_side, p_squad); }
+	bool game_has_artillery(int) const override { return artillery; }
+	bool any_artillery_pieces_left(int) const override { return artillery; }
+	void artillery_unavailable(int p_side, int p_squad) override { note("unavailable", p_side, p_squad); }
+	void deny_supply_request(int p_side, int p_squad) override { note("deny supply", p_side, p_squad); }
+	void deny_vehicle_drop_request(int p_side, int p_squad) override { note("deny vehicle", p_side, p_squad); }
+	void deny_uav_request(int p_side, int p_squad) override { note("deny uav", p_side, p_squad); }
+};
+
+struct CommanderGameLog final : CommanderGame {
+	std::vector<std::string> calls;
+	bool pieces = false;
+	void apply_for_commander(int p_side, int p_player) override {
+		calls.push_back("apply " + std::to_string(p_side) + " " + std::to_string(p_player));
+	}
+	void resign_commander(int p_side) override { calls.push_back("resign " + std::to_string(p_side)); }
+	void issue_commander_order(
+			int p_side, int p_squad, CommanderOrder p_order, const Vec3 &p_position, uint16_t p_target) override {
+		calls.push_back("order " + std::to_string(p_side) + " " + std::to_string(p_squad) + " " +
+				std::to_string(int(p_order)) + " " + std::to_string(int(p_position.x)) + " " +
+				std::to_string(p_target));
+	}
+	void post_request(CommanderRequest p_request, int p_side, const Vec2 &p_position) override {
+		calls.push_back("post " + std::to_string(int(p_request)) + " " + std::to_string(p_side) + " " +
+				std::to_string(int(p_position.y)));
+	}
+	void clear_request(int p_side, int p_squad, CommanderRequest p_request) override {
+		calls.push_back("clear " + std::to_string(p_side) + " " + std::to_string(p_squad) + " " +
+				std::to_string(int(p_request)));
+	}
+	void play_commander_message(int p_side, std::string_view p_name) override {
+		calls.push_back("say " + std::to_string(p_side) + " " + std::string(p_name));
+	}
+	bool has_artillery_pieces(int) const override { return pieces; }
+	bool have_any_artillery(int) const override { return !pieces; }
+};
+
 struct AreaHeat final : StrategyHeat {
 	std::map<int, float> heat;
 	float area_heat(const AIStrategicArea &p_area) const override {
@@ -1457,6 +1564,250 @@ TEST_SUITE("ai-strategy") {
 				std::vector<const AIStrategicObject *>{ &d, &c, objects.strategic_area("b"), &a });
 		CHECK(a.route(1, 1, &d) == nullptr);
 		CHECK(a.route(2, 0, &d) == nullptr);
+	}
+
+	TEST_CASE("Sai: the strategy is scored from the state arrays and drawn by score, a forced one wins, and a change "
+			  "frees the objects' available bots and restarts the strategy's clock") {
+		AIStrategicObjectManager objects{ StrategicServices{} };
+		REQUIRE(objects.create("a", { -10.0f, -10.0f }, { 0.0f, 0.0f }, 0.0f, 10.0f, std::string()));
+		StrategyManager manager(&objects);
+		using CT = StrategyCondition::CompareType;
+		using C = StrategyCondition::Compare;
+		REQUIRE(manager.create_constant_condition("always", CT::Fuzzy, C::EqualGreater,
+				StrategyCondition::Side::Friendly, StrategyCondition::UnitConstant, 0.0f));
+		REQUIRE(manager.create_constant_condition("areas", CT::Crisp, C::EqualGreater,
+				StrategyCondition::Side::Friendly, StrategyCondition::NumberOfFriendlyAreas, 1.0f));
+		REQUIRE(manager.create_prerequisite("strong"));
+		REQUIRE(manager.add_condition("always", 3.0f));
+		REQUIRE(manager.create_prerequisite("owner"));
+		REQUIRE(manager.add_condition("areas", 1.0f));
+		REQUIRE(manager.create_strategy("Defend"));
+		REQUIRE(manager.set_prerequisite("owner"));
+		REQUIRE(manager.create_strategy("Attack"));
+		REQUIRE(manager.set_prerequisite("strong"));
+		manager.strategy("Attack")->set_aggression(0.8f);
+		GameClock clock;
+		clock.tick = 100;
+		AIRandom random(11);
+		random.init();
+		AiSettings settings;
+		settings.max_bots = 4;
+		SaiServices services;
+		services.timer = &clock;
+		services.settings = &settings;
+		services.objects = &objects;
+		services.strategies = &manager;
+		services.random = &random;
+		Sai sai(1, services);
+		CHECK(sai.active_strategy() == nullptr);
+		sai.choose_strategy();
+		sai.add_strategy(manager.strategy("Defend"));
+		sai.add_strategy(manager.strategy("Attack"));
+		CHECK(sai.active_strategy() == manager.strategy("Defend"));
+		CHECK(sai.list_strategies() == "0 Defend\n1 Attack\n");
+		sai.choose_strategy();
+		CHECK(sai.active_strategy() == manager.strategy("Attack"));
+		CHECK(sai.strategy_heat(1).x == 3.0f);
+		CHECK(sai.strategy_heat(1).y == 3.0f);
+		CHECK(sai.strategy_heat(0).y == 0.0f);
+		CHECK(sai.strategy_heat(5).x == 0.0f);
+		CHECK(sai.strategies()[1].start_time == 100.0f);
+		CHECK(sai.strategies()[1].rounds == 1);
+		clock.tick = 200;
+		sai.choose_strategy();
+		CHECK(sai.active_strategy() == manager.strategy("Attack"));
+		CHECK(sai.strategies()[1].rounds == 1);
+
+		AIStrategicObject &a = *objects.strategic_object(0);
+		a.register_available_attacker(2, 1);
+		a.register_available_defender(3, 1);
+		manager.force_strategy("Defend", 1);
+		sai.choose_strategy();
+		CHECK(sai.active_strategy() == manager.strategy("Defend"));
+		CHECK(sai.strategies()[0].start_time == 200.0f);
+		CHECK(a.number_of_available_attackers(1) == 0);
+		CHECK(a.number_of_available_defenders(1) == 0);
+
+		Strategy hot("Hot");
+		hot.set_strategic_objects_modifier(AIStrategicObject::NeutralType, 2.0f);
+		Sai plain(2, services);
+		plain.add_strategy(&hot);
+		plain.modify_strategic_objects_temperatures();
+		CHECK(a.security_sum(2) == 20.0f);
+	}
+
+	TEST_CASE("Sai: a bot is placed at the closest object when alive, leaves it with a kit record when dead, moves "
+			  "with its equipment, and is forgotten on removal") {
+		Knowledge knowledge;
+		StrategicServices strategic;
+		AIStrategicObjectManager objects(strategic);
+		REQUIRE(objects.create("a", { -10.0f, -10.0f }, { 0.0f, 0.0f }, 0.0f, 10.0f, std::string()));
+		REQUIRE(objects.create("b", { 190.0f, -10.0f }, { 200.0f, 0.0f }, 0.0f, 10.0f, std::string()));
+		AIStrategicObject &a = *objects.strategic_object(0);
+		AIStrategicObject &b = *objects.strategic_object(1);
+		Soldier body;
+		body.with_unit = true;
+		body.where = { 3.0f, 0.0f, 2.0f };
+		StrategicBot bot;
+		bot.id = 1;
+		bot.equipment = knowledge.record(body, 1);
+		GameClock clock;
+		AiSettings settings;
+		settings.max_bots = 4;
+		SaiServices services;
+		services.timer = &clock;
+		services.settings = &settings;
+		services.objects = &objects;
+		services.information = &knowledge.information;
+		Sai sai(1, services);
+		sai.add_bot(&bot);
+		CHECK(sai.bot_current_pos(1) == kUnknownBotPosition);
+		CHECK(sai.bot_ordered_pos(1) == kUnknownBotOrderedPosition);
+		while (sai.stage() != SaiStage::StrategicObjects) {
+			sai.update(1.0);
+		}
+		REQUIRE(sai.bot_info(1) != nullptr);
+		CHECK(sai.bot_current_pos(1) == 0);
+		CHECK(sai.bot_ordered_pos(1) == -1);
+		CHECK(a.is_present_unit(1, 1));
+		CHECK(sai.is_bot_free(1));
+		CHECK_FALSE(sai.is_bot_assigned(1));
+
+		sai.set_bot_is_dead(1);
+		CHECK_FALSE(a.is_present_unit(1, 1));
+		CHECK_FALSE(sai.is_bot_free(1));
+		CHECK(sai.bot_current_pos(1) == -1);
+		REQUIRE(sai.dead_bots().contains(1));
+		CHECK(sai.dead_bots().at(1) == std::pair<int, int>(-1, kDeadBotKit));
+		sai.set_new_bot_kit(1, 5);
+		CHECK(sai.dead_bots().at(1).second == 5);
+		sai.set_bot_is_alive(1);
+		CHECK(sai.dead_bots().empty());
+		CHECK(a.is_present_unit(1, 1));
+
+		a.register_available_attacker(1, 1);
+		body.where = { 198.0f, 0.0f, 1.0f };
+		clock.tick = 30;
+		sai.set_bot_has_changed_equipment(1);
+		CHECK(sai.bot_current_pos(1) == 1);
+		CHECK(sai.bot_last_ordered_pos(1) == -1);
+		CHECK(b.is_present_unit(1, 1));
+		CHECK_FALSE(a.is_present_unit(1, 1));
+		CHECK(b.number_of_available_attackers(1) == 1);
+		CHECK(a.number_of_available_attackers(1) == 0);
+
+		std::set<int>::iterator it = b.available_attackers(1).find(1);
+		CHECK(sai.assign_bot(it, 0, 1, true) == 1);
+		CHECK(sai.bot_ordered_pos(1) == 0);
+		CHECK(sai.bot_last_ordered_pos(1) == 0);
+		CHECK(a.assigned_units(1).contains(1));
+		CHECK(b.number_of_available_attackers(1) == 0);
+		std::set<int>::iterator assigned = a.assigned_units(1).find(1);
+		CHECK(sai.release_unit_from_object(0, assigned));
+		CHECK(a.assigned_units(1).empty());
+		CHECK(sai.bot_ordered_pos(1) == -1);
+		CHECK(b.number_of_available_attackers(1) == 0);
+		CHECK_FALSE(sai.is_bot_assigned(1));
+		CHECK(sai.is_bot_free(1));
+
+		sai.remove_bot(&bot);
+		CHECK(sai.bot_info(1) == nullptr);
+		CHECK(sai.bot_current_pos(1) == kUnknownBotPosition);
+		CHECK_FALSE(b.is_present_unit(1, 1));
+		CHECK_FALSE(sai.is_bot_free(1));
+	}
+
+	TEST_CASE("Sai: commander requests go through the engine commander on their timers, a refused one is denied two "
+			  "to five seconds later, and a player commander takes them over") {
+		GameClock clock;
+		clock.tick = 0;
+		AIRandom random(5);
+		random.init();
+		CommanderLog commander;
+		commander.artillery = false;
+		SaiServices services;
+		services.timer = &clock;
+		services.random = &random;
+		services.commander = &commander;
+		Sai sai(2, services);
+		CHECK_FALSE(sai.player_requests_artillery(7, { 1.0f, 0.0f, 2.0f }));
+		REQUIRE(sai.deny_requests().size() == 1);
+		const double deadline = sai.deny_requests().front().deadline;
+		CHECK(deadline >= 2.0);
+		CHECK(deadline <= 5.0);
+		sai.player_requests_uav(8, {});
+		sai.player_requests_supply(9, {});
+		sai.player_requests_vehicle_drop(6, {});
+		CHECK(sai.deny_requests().size() == 4);
+		CHECK(commander.calls.empty());
+		clock.tick = 1;
+		sai.update_request_deny_timers();
+		CHECK(commander.calls.empty());
+		clock.tick = 6;
+		sai.update_request_deny_timers();
+		CHECK(commander.calls ==
+				std::vector<std::string>{ "unavailable 2 7", "deny uav 2 8", "deny supply 2 9", "deny vehicle 2 6" });
+		CHECK(sai.deny_requests().empty());
+
+		commander.calls.clear();
+		commander.artillery = true;
+		clock.tick = 61;
+		sai.player_requests_artillery(7, {});
+		sai.player_requests_artillery(7, {});
+		sai.player_requests_uav(8, {});
+		sai.player_requests_supply(9, {});
+		sai.player_requests_vehicle_drop(6, {});
+		CHECK(commander.calls == std::vector<std::string>{ "fire 2 7", "uav 2 8", "supply 2 9", "vehicle 2 6" });
+		CHECK(sai.deny_requests().size() == 1);
+		CHECK(sai.deny_requests().front().denial == SaiDenial::Artillery);
+		sai.set_player_is_commander(true);
+		CHECK(sai.is_player_commander(2));
+		CHECK_FALSE(sai.is_player_commander(1));
+		sai.update_request_deny_timers();
+		CHECK(sai.deny_requests().empty());
+		sai.player_requests_supply(9, {});
+		CHECK(sai.deny_requests().empty());
+		CHECK(commander.calls.size() == 4);
+		sai.set_player_is_commander(false);
+		sai.player_requests_supply(9, {});
+		REQUIRE(sai.deny_requests().size() == 1);
+		CHECK(sai.deny_requests().front().denial == SaiDenial::Supply);
+	}
+
+	TEST_CASE("BFCommander: orders reach the game as OpenBF2's order codes, requests are posted and cleared, "
+			  "denials speak the commander's message names") {
+		CommanderGameLog game;
+		BFCommander commander(game);
+		CommanderInterface orders(&commander);
+		orders.give_attack_order({ 12.0f, 0.0f, 0.0f }, 2, 3);
+		orders.give_move_order({ 13.0f, 0.0f, 0.0f }, 1, 4);
+		orders.give_defend_order({ 14.0f, 0.0f, 0.0f }, 1, 5);
+		commander.give_attack_order({ 15.0f, 0.0f, 0.0f }, 6, 2, 40);
+		commander.apply_as_commander(11, 2);
+		commander.retire_as_commander(2);
+		commander.send_attack_message(1, 3);
+		commander.send_defend_message(2, 3);
+		commander.fire_artillery(1, kNoRequestingSquad, { 0.0f, 9.0f });
+		commander.fire_artillery(1, 4, { 0.0f, 8.0f });
+		commander.send_uav(2, -1, { 0.0f, 7.0f });
+		commander.drop_supply(2, 3, { 0.0f, 6.0f });
+		commander.drop_vehicle(2, 3, { 0.0f, 5.0f });
+		commander.deny_artillery_request(1, 2);
+		commander.artillery_unavailable(1, 2);
+		commander.deny_supply_request(1, 2);
+		commander.deny_vehicle_drop_request(1, 2);
+		commander.deny_uav_request(1, 2);
+		CHECK(game.calls ==
+				std::vector<std::string>{ "order 2 3 5 12 0", "order 1 4 4 13 0", "order 1 5 6 14 0",
+						"order 2 6 5 15 40", "apply 2 11", "resign 2", "say 1 attack_position", "say 2 defend",
+						"post 0 1 9", "post 0 1 8", "clear 1 4 0", "post 1 2 7", "clear 2 -1 1", "post 3 2 6",
+						"clear 2 3 3", "post 2 2 5", "clear 2 3 2", "say 1 artillery_deny", "clear 1 2 0",
+						"say 1 artillery_unavailable", "clear 1 2 0", "say 1 supply_deny", "clear 1 2 3",
+						"say 1 vehicledrop_deny", "clear 1 2 2", "say 1 uav_deny", "clear 1 2 1" });
+		CHECK_FALSE(commander.game_has_artillery(1));
+		CHECK(commander.any_artillery_pieces_left(1));
+		CommanderInterface none(nullptr);
+		none.give_attack_order({}, 1, 1);
 	}
 
 	TEST_CASE("StrategyDecisions without areas to take: Spread sends bot-led squads to different areas, Hunt to the "

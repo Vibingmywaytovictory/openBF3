@@ -170,3 +170,8 @@ target_sources(bf3_ai PRIVATE
     include/bf3/ai/bot/communication_agent.h
     src/bot/communication_agent.cpp
 )
+
+target_sources(bf3_ai PRIVATE
+    include/bf3/ai/commander/commander.h
+    src/commander/commander.cpp
+)
