@@ -131,3 +131,8 @@ target_sources(bf3_ai PRIVATE
     include/bf3/ai/debug/draw_primitives.h
     src/debug/draw_primitives.cpp
 )
+
+target_sources(bf3_ai PRIVATE
+    include/bf3/ai/debug/ai_console.h
+    src/debug/ai_console.cpp
+)

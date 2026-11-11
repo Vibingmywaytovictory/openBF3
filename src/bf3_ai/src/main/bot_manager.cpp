@@ -373,6 +373,42 @@ bool BotManager::request_sensing(uint32_t p_index, int p_priority) {
 	return true;
 }
 
+uint32_t BotManager::lod_level_priority(BotLodLevel p_level) const {
+	switch (p_level) {
+		case BotLodLevel::Full:
+			return lod_full_priority_;
+		case BotLodLevel::Medium:
+			return lod_medium_priority_;
+		case BotLodLevel::Light:
+			return lod_light_priority_;
+	}
+	return 0;
+}
+
+double BotManager::planned_decision_making_threshold(BotLodLevel p_level) const {
+	switch (p_level) {
+		case BotLodLevel::Full:
+			return planned_threshold_full_;
+		case BotLodLevel::Medium:
+			return planned_threshold_medium_;
+		case BotLodLevel::Light:
+			return planned_threshold_light_;
+	}
+	return 0.0;
+}
+
+double BotManager::unplanned_decision_making_threshold(BotLodLevel p_level) const {
+	switch (p_level) {
+		case BotLodLevel::Full:
+			return unplanned_threshold_full_;
+		case BotLodLevel::Medium:
+			return unplanned_threshold_medium_;
+		case BotLodLevel::Light:
+			return unplanned_threshold_light_;
+	}
+	return 0.0;
+}
+
 void BotManager::set_lod_level_ticks(uint32_t p_full, uint32_t p_medium, uint32_t p_light) {
 	lod_full_ticks_ = p_full;
 	lod_medium_ticks_ = p_medium;

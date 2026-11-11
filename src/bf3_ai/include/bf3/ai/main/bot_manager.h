@@ -82,6 +82,19 @@ public:
 	void set_decision_making_interleave(uint32_t p_planned, uint32_t p_unplanned);
 	void set_sensing_quotient(uint32_t p_see, uint32_t p_sense);
 	void set_system_quotient(uint32_t p_decision, uint32_t p_pathfinding, uint32_t p_sensing);
+	uint32_t lod_level_ticks(BotLodLevel p_level) const { return lod_ticks(p_level); }
+	uint32_t lod_level_priority(BotLodLevel p_level) const;
+	double planned_decision_making_threshold(BotLodLevel p_level) const;
+	double unplanned_decision_making_threshold(BotLodLevel p_level) const;
+	uint32_t planned_decision_making_interleave() const { return planned_decision_making_interleave_; }
+	uint32_t unplanned_decision_making_interleave() const { return unplanned_decision_making_interleave_; }
+	double sensing_quotient() const { return sensing_quotient_; }
+	double memory_update_quotient() const { return sensing_quotient_inverse_; }
+	double system_decision_making_quotient() const { return system_decision_making_quotient_; }
+	double system_pathfinding_quotient() const { return system_pathfinding_quotient_; }
+	double system_sensing_quotient() const {
+		return (1.0f - system_pathfinding_quotient_) - system_decision_making_quotient_;
+	}
 
 private:
 	struct PriorityPred {

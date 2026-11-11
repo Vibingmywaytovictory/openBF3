@@ -3,6 +3,7 @@
 #include "ai_knowledge_fakes.h"
 #include "bf3/ai/behaviour/curves.h"
 #include "bf3/ai/behaviour/urgency_merger.h"
+#include "bf3/ai/debug/ai_console.h"
 #include "bf3/ai/knowledge/information_factory.h"
 #include "bf3/ai/knowledge/information_grid.h"
 #include "bf3/ai/knowledge/plug_ins.h"
@@ -764,5 +765,51 @@ TEST_SUITE("ai-port") {
 		lod->lod_enable(false);
 		lod->update_bots();
 		CHECK(w.factory.bots[0]->lod == BotLodLevel::Full);
+	}
+
+	TEST_CASE("AI console: the bot manager and LOD commands read and set what OpenBF2's console binds") {
+		World w;
+		AIMain &main = w.ai.main();
+		AiConsole console;
+		register_main_commands(console, main, nullptr);
+		CHECK(console.execute("getLodLevelFullTicks").text == "6");
+		CHECK(console.execute("setLodLevelTicks 3 2 1").ok);
+		CHECK(main.bot_manager().lod_level_ticks(BotLodLevel::Medium) == 2);
+		CHECK(console.execute("getLodLevelLightTicks").text == "1");
+		CHECK(console.execute("setSystemQuotient 50 25 25").ok);
+		CHECK(main.bot_manager().system_decision_making_quotient() == doctest::Approx(0.5));
+		CHECK(main.bot_manager().system_sensing_quotient() == doctest::Approx(0.25));
+		CHECK(console.execute("setPlannedDecisionMakingThreshold 0.5 -1 3").ok);
+		CHECK(main.bot_manager().planned_decision_making_threshold(BotLodLevel::Medium) == 1.0);
+		CHECK(console.execute("getBotCount").text == "0");
+		const ConsoleResult wrong = console.execute("setLodLevelTicks 3 2");
+		CHECK_FALSE(wrong.ok);
+		CHECK(wrong.text == "setLodLevelTicks: takes 3..3 arguments");
+		CHECK(console.execute("setLodLevelTicks 3 x 1").text == "bad argument: x");
+		CHECK(console.execute("noSuchCommand").text == "unknown command: noSuchCommand");
+		CHECK_FALSE(console.execute("").ok);
+		CHECK(console.execute("lodEnable").text == "no LOD manager");
+		const std::vector<std::string> names = console.names();
+		CHECK(std::find(names.begin(), names.end(), "createLODManager") == names.end());
+		CHECK(names.size() == 32);
+		struct NoViewers final : LodEnvironment {
+			std::vector<int> active_player_ids() const override { return {}; }
+			bool is_valid_player_id(int) const override { return false; }
+			int next_player_id(int) const override { return -1; }
+			bool viewer(int, LodViewer &) const override { return false; }
+		} viewers;
+		AiConsole with_lod;
+		register_main_commands(with_lod, main, &viewers);
+		CHECK(with_lod.execute("createLODManager 80 1.5").ok);
+		REQUIRE(main.lod_manager() != nullptr);
+		CHECK(main.lod_manager()->basic_lod_distance() == 80.0f);
+		CHECK(with_lod.execute("lodEnable").text == "1");
+		CHECK(with_lod.execute("lodEnable 0").ok);
+		CHECK_FALSE(main.lod_manager()->lod_enabled());
+		CHECK(with_lod.execute("lodEnable true").ok);
+		CHECK(main.lod_manager()->lod_enabled());
+		CHECK(with_lod.execute("lodEnable 2").text == "bad argument: 2");
+		CHECK(with_lod.execute("setBasicLODDistance 120").ok);
+		CHECK(main.lod_manager()->basic_lod_distance() == 120.0f);
 	}
 }
