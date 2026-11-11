@@ -1,5 +1,7 @@
 #include "bf3/host/spotter.h"
 
+#include "bf3/sim/weapons/hit_target.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -7,35 +9,6 @@ namespace bf3::host {
 
 namespace sp = sim::spotting;
 namespace cm = sim::commo;
-
-namespace {
-
-std::optional<float> capsule_hit(const sim::Vec3 &p_from, const sim::Vec3 &p_to, const SpotSubject &p_subject) {
-	const sim::Vec3 d = core::vec::sub(p_to, p_from);
-	const sim::Vec3 a = core::vec::sub(p_subject.centre, sim::Vec3{ 0.0f, p_subject.half_height, 0.0f });
-	const sim::Vec3 e{ 0.0f, 2.0f * p_subject.half_height, 0.0f };
-	const sim::Vec3 r = core::vec::sub(p_from, a);
-	const float dd = core::vec::dot(d, d);
-	const float ee = core::vec::dot(e, e);
-	const float de = core::vec::dot(d, e);
-	const float dr = core::vec::dot(d, r);
-	const float er = core::vec::dot(e, r);
-	const float denom = dd * ee - de * de;
-	float s = denom > 1e-9f ? std::clamp((de * er - dr * ee) / denom, 0.0f, 1.0f) : 0.0f;
-	float t = ee > 0.0f ? std::clamp((de * s + er) / ee, 0.0f, 1.0f) : 0.0f;
-	if (dd > 0.0f) {
-		s = std::clamp((de * t - dr) / dd, 0.0f, 1.0f);
-	}
-	const sim::Vec3 p = core::vec::add(p_from, core::vec::scale(d, s));
-	const sim::Vec3 q = core::vec::add(a, core::vec::scale(e, t));
-	const sim::Vec3 gap = core::vec::sub(p, q);
-	if (core::vec::dot(gap, gap) > kSpotSubjectRadius * kSpotSubjectRadius) {
-		return std::nullopt;
-	}
-	return s;
-}
-
-}
 
 sim::commo::Supplies supplies_of(std::span<const uint16_t> p_defs, std::span<const sim::weapons::GadgetDef> p_gadgets) {
 	cm::Supplies out;
@@ -67,8 +40,14 @@ std::vector<sp::RayHit> spot_ray_hits(const sim::Vec3 &p_from, const sim::Vec3 &
 		if (s.slot == p_own_slot) {
 			continue;
 		}
-		if (const std::optional<float> f = capsule_hit(p_from, p_to, s); f && *f <= wall) {
-			hits.push_back({ *f, sp::RayHit{ true, s.slot, s.team } });
+		sim::weapons::ZoneCapsule body;
+		body.a = core::vec::sub(s.centre, sim::Vec3{ 0.0f, s.half_height, 0.0f });
+		body.b = core::vec::add(s.centre, sim::Vec3{ 0.0f, s.half_height, 0.0f });
+		body.radius = kSpotSubjectRadius;
+		float f = 0.0f;
+		sim::Vec3 normal{};
+		if (sim::weapons::segment_capsule(p_from, p_to, body, f, normal) && f <= wall) {
+			hits.push_back({ f, sp::RayHit{ true, s.slot, s.team } });
 		}
 	}
 	std::sort(hits.begin(), hits.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
