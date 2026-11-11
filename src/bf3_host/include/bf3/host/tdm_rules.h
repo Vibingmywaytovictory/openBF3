@@ -181,6 +181,7 @@ public:
 			std::vector<RulesOrder> &r_orders);
 
 	size_t choose_spawn(uint8_t p_slot, std::span<const sim::SpawnPoint> p_points, const ServerView &p_view, uint32_t p_tick) const;
+	bool spawn_point_open(uint8_t p_slot, const sim::SpawnPoint &p_point) const;
 
 	sim::Command apply_input_restriction(const sim::Command &p_command) const;
 

@@ -110,10 +110,21 @@ bool Spawner::spawn(size_t p_slot, size_t p_point, sim::Tick p_tick) {
 		index = match_.choose_spawn(p_slot, points, *view_, p_tick);
 	}
 	if (index == SIZE_MAX) {
-		index = sim::choose_spawn(points, s.team, live_positions(p_slot), config.level->spawn_protection_radius,
-				core::splitmix64_next(rng_));
-		if (index == SIZE_MAX) {
-			index = size_t(core::splitmix64_next(rng_) % points.size());
+		std::vector<sim::SpawnPoint> open;
+		std::vector<size_t> open_at;
+		for (size_t i = 0; i < points.size(); ++i) {
+			if (match_.spawn_point_open(p_slot, points[i])) {
+				open.push_back(points[i]);
+				open_at.push_back(i);
+			}
+		}
+		if (!open.empty()) {
+			size_t k = sim::choose_spawn(open, s.team, live_positions(p_slot), config.level->spawn_protection_radius,
+					core::splitmix64_next(rng_));
+			if (k == SIZE_MAX) {
+				k = size_t(core::splitmix64_next(rng_) % open.size());
+			}
+			index = open_at[k];
 		}
 	}
 	if (index >= points.size()) {

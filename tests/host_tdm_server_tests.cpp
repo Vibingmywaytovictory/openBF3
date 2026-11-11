@@ -3575,4 +3575,73 @@ TEST_SUITE("host-tdm-conquest") {
 		CHECK(cq.stats().ticket_respawn_costs == 1u);
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
+
+	TEST_CASE(
+			"conquest: with an enemy on every open spawn point the Spawner's fallback still spawns on an open point") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::SharedLevel &shared = *level->shared;
+		std::unique_ptr<Match> m = start_match(*level, true, 57u, 0, 2);
+		std::vector<Script *> bots;
+		for (int i = 0; i < 14; ++i) {
+			bots.push_back(m->bot());
+		}
+		tdm::ScriptedPeer &p = m->join("cornered");
+		p.ready();
+		REQUIRE(wait_in_round(*m));
+		REQUIRE(m->until(
+				[&] {
+					for (const Script *b : bots) {
+						if (!is_alive(m->state(b->slot))) {
+							return false;
+						}
+					}
+					return true;
+				},
+				600));
+		const sim::logic::ConquestNatives &cq = conquest_of(*m);
+		const uint8_t team = m->rules().team_of(uint8_t(p.slot()));
+		std::vector<Script *> enemies;
+		for (Script *b : bots) {
+			if (m->rules().team_of(uint8_t(b->slot)) != team) {
+				enemies.push_back(b);
+			}
+		}
+		std::vector<sim::Vec3> guards;
+		size_t open = 0;
+		for (size_t i = 0; i < shared.spawns.size(); ++i) {
+			const sim::SpawnPoint &sp = shared.spawns[i];
+			if ((sp.team != 0 && sp.team != int(team)) || !cq.spawn_point_open(shared.spawn_spawners[i], team)) {
+				continue;
+			}
+			++open;
+			const bool covered = std::any_of(
+					guards.begin(), guards.end(), [&](const sim::Vec3 &g) { return distance(g, sp.position) < 9.5f; });
+			if (!covered) {
+				REQUIRE(guards.size() < enemies.size());
+				const sim::Vec3 at = ground_at(*m->world, sp.position[0], sp.position[2], sp.position[1] + 2.0f);
+				m->place(enemies[guards.size()]->slot, at);
+				guards.push_back(at);
+			}
+		}
+		m->ticks(2);
+		for (size_t g = 0; g < guards.size(); ++g) {
+			REQUIRE(is_alive(m->state(enemies[g]->slot)));
+		}
+		const uint64_t fallbacks0 = m->rules().stats().spawn_fallbacks;
+		p.spawn_request(1);
+		REQUIRE(m->until([&] { return is_alive(m->state(p.slot())); }, 240));
+		const sim::Vec3 at = m->state(p.slot())->position;
+		const bool on_open = on_open_point(shared, cq, team, at, 1.0f);
+		std::printf(
+				"conquest: %zu open points of team %u guarded by %zu enemies; the peer spawned at (%.1f %.1f %.1f), on "
+				"an open point %d; scored fallbacks +%llu\n",
+				open, unsigned(team), guards.size(), at[0], at[1], at[2], int(on_open),
+				(unsigned long long)(m->rules().stats().spawn_fallbacks - fallbacks0));
+		CHECK(m->rules().stats().spawn_fallbacks > fallbacks0);
+		CHECK(on_open);
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
 }

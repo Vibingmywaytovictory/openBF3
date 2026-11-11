@@ -71,6 +71,10 @@ size_t MatchControl::choose_spawn(size_t p_slot, std::span<const sim::SpawnPoint
 	return rules_->choose_spawn(uint8_t(p_slot), p_points, p_view, p_tick);
 }
 
+bool MatchControl::spawn_point_open(size_t p_slot, const sim::SpawnPoint &p_point) const {
+	return !on() || p_slot >= slots_ || rules_->spawn_point_open(uint8_t(p_slot), p_point);
+}
+
 bool MatchControl::squad_spawn(
 		size_t p_slot, std::span<const sim::SoldierState> p_live, sim::Vec3 &r_position, uint16_t &r_yaw) {
 	return on() && p_slot < slots_ && rules_->take_squad_spawn(uint8_t(p_slot), p_live, r_position, r_yaw);

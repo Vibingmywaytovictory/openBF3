@@ -48,6 +48,7 @@ public:
 	bool waits_for_deploy(size_t p_slot) const;
 	sim::Command restrict(const sim::Command &p_command) const;
 	size_t choose_spawn(size_t p_slot, std::span<const sim::SpawnPoint> p_points, const ServerView &p_view, sim::Tick p_tick) const;
+	bool spawn_point_open(size_t p_slot, const sim::SpawnPoint &p_point) const;
 	void request_spawn(size_t p_slot, uint8_t p_kit, uint8_t p_spawn_choice, sim::Tick p_tick);
 	bool squad_spawn(size_t p_slot, std::span<const sim::SoldierState> p_live, sim::Vec3 &r_position, uint16_t &r_yaw);
 	void request_suicide(size_t p_slot);

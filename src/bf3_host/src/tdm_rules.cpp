@@ -1428,9 +1428,7 @@ size_t TdmRules::choose_spawn(uint8_t p_slot, std::span<const sim::SpawnPoint> p
 	const lg::ConquestNatives *conquest = m.natives ? m.natives->conquest() : nullptr;
 	if (conquest != nullptr) {
 		for (size_t i = 0; i < p_points.size(); ++i) {
-			const uint32_t spawner = p_points[i].index < m.spawn_spawners.size() ? m.spawn_spawners[p_points[i].index]
-																				 : core::level::kNoSpawner;
-			if (conquest->spawn_point_open(spawner, team)) {
+			if (spawn_point_open(p_slot, p_points[i])) {
 				open.push_back(p_points[i]);
 				open_at.push_back(i);
 			}
@@ -1467,6 +1465,17 @@ size_t TdmRules::choose_spawn(uint8_t p_slot, std::span<const sim::SpawnPoint> p
 		}
 	}
 	return at;
+}
+
+bool TdmRules::spawn_point_open(uint8_t p_slot, const sim::SpawnPoint &p_point) const {
+	const Impl &m = *impl_;
+	const lg::ConquestNatives *conquest = m.natives ? m.natives->conquest() : nullptr;
+	if (conquest == nullptr) {
+		return true;
+	}
+	const uint32_t spawner =
+			p_point.index < m.spawn_spawners.size() ? m.spawn_spawners[p_point.index] : core::level::kNoSpawner;
+	return conquest->spawn_point_open(spawner, m.team_of(p_slot));
 }
 
 sim::Command TdmRules::apply_input_restriction(const sim::Command &p_command) const {
