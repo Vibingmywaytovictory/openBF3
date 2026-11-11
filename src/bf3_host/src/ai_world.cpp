@@ -723,4 +723,242 @@ void RulesSquadService::request_new_commander_order(int p_squad, const ai::Squad
 	(void)p_player;
 }
 
+struct HostAiBots::Impl {
+	struct Seat {
+		ai::BotMain *bot = nullptr;
+		ai::InfantryBody *body = nullptr;
+		const ai::BehaviourTuning *tuning = nullptr;
+		uint32_t equipment = ai::kNoHandle;
+		uint32_t life = UINT32_MAX;
+		bool alive = false;
+		bool down = false;
+	};
+
+	explicit Impl(const ServerView &r_view) : view(r_view) {}
+
+	const ServerView &view;
+	float view_distance = 0.0f;
+	sim::Tick tick = 0;
+	ai::AiSettings settings;
+	ai::InformationManager information;
+	std::unique_ptr<ai::InformationFactory> factory;
+	std::array<SlotObject, kMaxAiSlots> soldiers;
+	std::array<Seat, kMaxAiSlots> seats;
+	ai::AIEventCourier events;
+	std::unique_ptr<ai::AIMain> main;
+
+	bool valid(int p_player_id) const { return p_player_id >= 0 && size_t(p_player_id) < view.states().size(); }
+
+	bool down(uint8_t p_slot) const {
+		const std::span<const DownedSoldier> downed = view.downed();
+		return std::any_of(downed.begin(), downed.end(), [&](const DownedSoldier &d) { return d.slot == p_slot; });
+	}
+};
+
+HostAiBots::HostAiBots(const ServerView &r_view, float p_view_distance) : impl_(std::make_unique<Impl>(r_view)) {
+	Impl &m = *impl_;
+	m.view_distance = p_view_distance;
+	m.settings.max_bots = -1;
+	m.settings.max_bots_include_humans = false;
+	ai::KnowledgeContext context;
+	context.information = &m.information;
+	context.timer = this;
+	m.factory = std::make_unique<ai::InformationFactory>(context);
+	for (uint8_t s = 0; s < kMaxAiSlots; ++s) {
+		m.soldiers[s].set_slot(s, false);
+	}
+	ai::AiMainServices services;
+	services.settings = &m.settings;
+	services.timer = this;
+	services.information = &m.information;
+	services.game = this;
+	services.factory = this;
+	m.main = std::make_unique<ai::AIMain>(services);
+	m.settings.max_bots = int32_t(kMaxAiSlots);
+	ai::AiEventServices events;
+	events.main = m.main.get();
+	events.information = &m.information;
+	m.events.attach(events);
+}
+
+HostAiBots::~HostAiBots() = default;
+
+ai::BotMain *HostAiBots::admit(uint8_t p_slot, ai::InfantryBody &r_body, const ai::BehaviourTuning &p_tuning) {
+	Impl &m = *impl_;
+	if (p_slot >= kMaxAiSlots || m.seats[p_slot].bot != nullptr) {
+		return nullptr;
+	}
+	Impl::Seat &seat = m.seats[p_slot];
+	seat.body = &r_body;
+	seat.tuning = &p_tuning;
+	const int side = m.valid(p_slot) ? int(m.view.team(p_slot)) : 0;
+	m.soldiers[p_slot].set_side(side);
+	if (seat.equipment == ai::kNoHandle) {
+		seat.equipment = m.factory->request_information_real(ai::kNoHandle, &m.soldiers[p_slot], 0, 1.0f, m.tick, 0);
+	}
+	m.events.event_player_created(true);
+	if (!m.main->add_unspawned_bot(p_slot, side, nullptr)) {
+		seat.body = nullptr;
+		return nullptr;
+	}
+	seat.bot = static_cast<ai::BotMain *>(m.main->bot_manager().bot_from_player_id(p_slot));
+	seat.bot->set_in_transition_phase(true);
+	return seat.bot;
+}
+
+void HostAiBots::remove(uint8_t p_slot) {
+	Impl &m = *impl_;
+	if (p_slot >= kMaxAiSlots || m.seats[p_slot].bot == nullptr) {
+		return;
+	}
+	m.seats[p_slot].bot->update_bot(false, false);
+	m.events.event_player_disconnect(p_slot);
+	m.seats[p_slot].bot = nullptr;
+	m.seats[p_slot].body = nullptr;
+}
+
+void HostAiBots::observe(uint8_t p_slot, const sim::SoldierState &p_state, bool p_alive, sim::Tick p_tick) {
+	Impl &m = *impl_;
+	m.tick = p_tick;
+	if (p_slot >= kMaxAiSlots || m.seats[p_slot].bot == nullptr) {
+		return;
+	}
+	Impl::Seat &seat = m.seats[p_slot];
+	ai::BotMain &bot = *seat.bot;
+	SlotObject &soldier = m.soldiers[p_slot];
+	const int side = int(m.view.team(p_slot));
+	soldier.set_side(side);
+	soldier.place(p_state.position, p_state.yaw, p_state.pose);
+	if (!p_alive) {
+		bot.update_bot(false, false);
+		if (seat.alive && m.down(p_slot)) {
+			seat.down = true;
+			m.events.event_man_down(p_slot, soldier);
+		} else if (seat.alive || (seat.down && !m.down(p_slot))) {
+			seat.down = false;
+			m.events.event_player_killed(p_slot, side);
+		}
+		seat.alive = false;
+		return;
+	}
+	const bool revived = !seat.alive && seat.down && p_state.life == seat.life;
+	const bool spawned = !revived && p_state.life != seat.life;
+	if (spawned && seat.life != UINT32_MAX && !bot.in_transition_phase()) {
+		m.events.event_player_killed(p_slot, side);
+	}
+	bot.update_bot(true, false);
+	if (revived) {
+		m.events.event_revived(p_slot);
+	} else if (spawned) {
+		bot.set_current_equipment(seat.equipment);
+		m.events.event_player_spawned(p_slot);
+	}
+	seat.alive = true;
+	seat.down = false;
+	seat.life = p_state.life;
+}
+
+const ai::AIMain &HostAiBots::main() const {
+	return *impl_->main;
+}
+
+sim::Tick HostAiBots::game_tick() const {
+	return impl_->tick;
+}
+
+double HostAiBots::tick_seconds() const {
+	return double(sim::kTickSeconds);
+}
+
+double HostAiBots::update_time() const {
+	return double(impl_->tick) * double(sim::kTickSeconds);
+}
+
+bool HostAiBots::is_playing() const {
+	return impl_->view.phase() == net::MatchPhase::InRound;
+}
+
+int HostAiBots::max_number_of_players() const {
+	return int(std::min(impl_->view.states().size(), kMaxAiSlots));
+}
+
+bool HostAiBots::is_valid_player_id(int p_player_id) const {
+	return impl_->valid(p_player_id) && size_t(p_player_id) < kMaxAiSlots;
+}
+
+int HostAiBots::player_side(int p_player_id) const {
+	return is_valid_player_id(p_player_id) ? int(impl_->view.team(uint8_t(p_player_id))) : 0;
+}
+
+bool HostAiBots::player_is_ai(int p_player_id) const {
+	return is_valid_player_id(p_player_id) && impl_->view.bot(uint8_t(p_player_id));
+}
+
+bool HostAiBots::add_bot(int &, int &, std::string &) {
+	return false;
+}
+
+void HostAiBots::terminate_player(int) {}
+
+void HostAiBots::give_damage(ai::AiObject *, int, int, float) {}
+
+float HostAiBots::recommended_view_distance() const {
+	return impl_->view_distance;
+}
+
+void HostAiBots::respawn_bot(int) {}
+
+void HostAiBots::set_bot_name_unused(const std::string &) {}
+
+ai::AiObject *HostAiBots::player_vehicle(int p_player_id) const {
+	return is_valid_player_id(p_player_id) && impl_->seats[size_t(p_player_id)].alive
+			? &impl_->soldiers[size_t(p_player_id)]
+			: nullptr;
+}
+
+ai::AiObject *HostAiBots::player_default_vehicle(int p_player_id) const {
+	return player_vehicle(p_player_id);
+}
+
+void HostAiBots::occupied_objects(std::vector<std::pair<int, ai::AiObject *>> &r_out) const {
+	for (size_t s = 0; s < kMaxAiSlots; ++s) {
+		if (impl_->seats[s].alive) {
+			r_out.push_back({ int(s), &impl_->soldiers[s] });
+		}
+	}
+}
+
+uint32_t HostAiBots::force_information(ai::AiObject &r_object, int p_side, bool) {
+	return r_object.information(p_side);
+}
+
+bool HostAiBots::player_camera(int p_player_id, ai::Transform &r_camera) const {
+	const ai::AiObject *const soldier = player_vehicle(p_player_id);
+	if (soldier == nullptr) {
+		return false;
+	}
+	r_camera = soldier->transformation();
+	return true;
+}
+
+void HostAiBots::enemy_spotted_by_ai(int, const ai::AiObject &) {}
+
+int HostAiBots::player_score(int) const {
+	return 0;
+}
+
+void HostAiBots::set_player_side(int, int) {}
+
+std::unique_ptr<ai::Bot> HostAiBots::create_bot(
+		int p_player_id, uint32_t p_bot_id, const float *p_personality, int p_side) {
+	if (p_player_id < 0 || size_t(p_player_id) >= kMaxAiSlots) {
+		return nullptr;
+	}
+	const Impl::Seat &seat = impl_->seats[size_t(p_player_id)];
+	if (seat.body == nullptr || seat.tuning == nullptr) {
+		return nullptr;
+	}
+	return std::make_unique<ai::BotMain>(p_bot_id, p_player_id, p_side, *seat.body, *seat.tuning, p_personality);
+}
+
 }

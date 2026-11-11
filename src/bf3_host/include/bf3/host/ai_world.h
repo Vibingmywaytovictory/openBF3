@@ -1,8 +1,10 @@
 #pragma once
 
 #include "bf3/ai/ai_world.h"
+#include "bf3/ai/bot/bot_main.h"
 #include "bf3/ai/knowledge/information_factory.h"
 #include "bf3/ai/knowledge/information_grid.h"
+#include "bf3/ai/main/ai_main.h"
 #include "bf3/core/result.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/squads.h"
@@ -12,6 +14,8 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace bf3::host {
@@ -101,6 +105,51 @@ public:
 
 private:
 	explicit HostAiWorld(std::unique_ptr<Impl> p_impl);
+	std::unique_ptr<Impl> impl_;
+};
+
+class HostAiBots final : public ai::AiTimer, public ai::AiGame, public ai::BotFactory {
+public:
+	HostAiBots(const ServerView &r_view, float p_view_distance);
+	~HostAiBots() override;
+	HostAiBots(const HostAiBots &) = delete;
+	HostAiBots &operator=(const HostAiBots &) = delete;
+
+	ai::BotMain *admit(uint8_t p_slot, ai::InfantryBody &r_body, const ai::BehaviourTuning &p_tuning);
+	void remove(uint8_t p_slot);
+	void observe(uint8_t p_slot, const sim::SoldierState &p_state, bool p_alive, sim::Tick p_tick);
+	const ai::AIMain &main() const;
+
+	sim::Tick game_tick() const override;
+	double tick_seconds() const override;
+	double update_time() const override;
+
+	bool is_playing() const override;
+	int max_number_of_players() const override;
+	bool is_valid_player_id(int p_player_id) const override;
+	int player_side(int p_player_id) const override;
+	bool player_is_ai(int p_player_id) const override;
+	bool add_bot(int &r_player_id, int &r_side, std::string &r_name) override;
+	void terminate_player(int p_player_id) override;
+	void give_damage(ai::AiObject *p_target, int p_from_player_id, int p_side, float p_damage) override;
+	float recommended_view_distance() const override;
+	void respawn_bot(int p_player_id) override;
+	void set_bot_name_unused(const std::string &p_name) override;
+	ai::AiObject *player_vehicle(int p_player_id) const override;
+	ai::AiObject *player_default_vehicle(int p_player_id) const override;
+	void occupied_objects(std::vector<std::pair<int, ai::AiObject *>> &r_out) const override;
+	uint32_t force_information(ai::AiObject &r_object, int p_side, bool p_known) override;
+	bool player_camera(int p_player_id, ai::Transform &r_camera) const override;
+	void enemy_spotted_by_ai(int p_spotter, const ai::AiObject &p_spotted) override;
+	int player_score(int p_player_id) const override;
+	void set_player_side(int p_player_id, int p_side) override;
+
+	std::unique_ptr<ai::Bot> create_bot(
+			int p_player_id, uint32_t p_bot_id, const float *p_personality, int p_side) override;
+
+	struct Impl;
+
+private:
 	std::unique_ptr<Impl> impl_;
 };
 

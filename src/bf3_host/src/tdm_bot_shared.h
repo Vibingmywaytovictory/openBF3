@@ -17,6 +17,7 @@
 
 namespace bf3::host {
 
+class HostAiBots;
 class TdmStrategy;
 
 namespace tdm_bot {
@@ -40,6 +41,7 @@ struct TdmShared {
 	std::unique_ptr<BotNav> nav;
 	sim::bots::WalkerParams walker;
 	std::shared_ptr<TdmStrategy> strategy;
+	std::shared_ptr<HostAiBots> ai;
 
 	sim::Tick scan_tick = UINT32_MAX;
 	std::vector<uint8_t> teams, alive, was_alive, firing;

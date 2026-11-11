@@ -5,6 +5,7 @@
 #include "bf3/core/thread_pool.h"
 #include "bf3/core/util/percentile.h"
 #include "bf3/host/ai_bot_source.h"
+#include "bf3/host/ai_world.h"
 #include "bf3/host/gadgets.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/gunplay.h"
@@ -18,6 +19,7 @@
 #include "bf3/sim/static_world.h"
 
 #include "gunplay_fixture.h"
+#include "tdm_bot_shared.h"
 #include "tdm_bot_support.h"
 #include "tdm_fixture.h"
 #include "test_support.h"
@@ -518,6 +520,79 @@ TEST_SUITE("host-tdm-bots-unit") {
 		const sim::Command cd = brain.command(400, dead);
 		CHECK(cd.buttons == 0u);
 		CHECK(rec->activities.back() == host::TdmBotActivity::Dead);
+	}
+
+	TEST_CASE("bots through AIMain: its BotManager holds the admitted bots, and a down, a revive, a death, a respawn "
+			  "and a removal reach it as AIEventCourier events") {
+		std::unique_ptr<sim::CollisionWorld> world = wall_world();
+		m2b_fake::FakeView view;
+		view.world_ = world.get();
+		view.teams = { 1, 2 };
+		view.kits = { 0, 0 };
+		view.slots = { soldier_at({ 0, 0, 0 }), soldier_at({ 30, 0, 30 }) };
+		auto cfg = std::make_shared<host::TdmBotConfig>();
+		host::TdmBrainHost h;
+		h.view = &view;
+		h.match_seed = 5;
+		h.rules = true;
+		core::Result<std::shared_ptr<host::TdmShared>> shared = host::make_tdm_shared(h, cfg);
+		REQUIRE(shared.ok());
+		host::AiBotSource a(*shared, 0);
+		auto b = std::make_unique<host::AiBotSource>(*shared, 1);
+		a.admitted(0);
+		b->admitted(1);
+		REQUIRE((*shared)->ai != nullptr);
+		const ai::BotManager &bots = (*shared)->ai->main().bot_manager();
+		CHECK(bots.bot_count() == 2);
+		CHECK(bots.bot_from_player_id(0) == &a.bot());
+		CHECK(bots.bot_from_player_id(1) == &b->bot());
+		CHECK(a.bot().in_transition_phase());
+
+		sim::Tick t = 1;
+		const auto step = [&]() {
+			view.now = t - 1;
+			a.command(t, view.slots[0]);
+			b->command(t, view.slots[1]);
+			++t;
+		};
+		step();
+		CHECK_FALSE(a.bot().is_dead());
+		CHECK_FALSE(a.bot().in_transition_phase());
+		CHECK(a.bot().current_equipment() != ai::kNoHandle);
+		CHECK_FALSE(bots.info(0).dead);
+
+		view.slots[0].flags = 0;
+		view.slots[0].mode = sim::MoveMode::Dead;
+		view.down = { host::DownedSoldier{ 0, 1, 1000, {}, 0 } };
+		step();
+		CHECK(a.bot().man_down());
+		CHECK(a.bot().is_dead());
+		CHECK_FALSE(bots.info(0).dead);
+
+		view.slots[0] = soldier_at({ 0, 0, 0 });
+		view.down.clear();
+		step();
+		CHECK_FALSE(a.bot().man_down());
+		CHECK_FALSE(a.bot().is_dead());
+
+		view.slots[0].flags = 0;
+		view.slots[0].mode = sim::MoveMode::Dead;
+		step();
+		CHECK(bots.info(0).dead);
+		CHECK(a.bot().in_transition_phase());
+		CHECK(a.bot().current_equipment() == ai::kNoHandle);
+
+		view.slots[0] = soldier_at({ 0, 0, 0 });
+		view.slots[0].life = 2;
+		step();
+		CHECK_FALSE(bots.info(0).dead);
+		CHECK_FALSE(a.bot().in_transition_phase());
+		CHECK(a.bot().current_equipment() != ai::kNoHandle);
+
+		b.reset();
+		CHECK(bots.number_of_deactivated_bots() == 1);
+		CHECK(bots.bot_from_player_id(1) == nullptr);
+		CHECK(bots.number_of_active_bots() == 1);
 	}
 
 	TEST_CASE("add_tdm_bots on the synthetic floor without rules: M2a teams, every bot alive, no rays through walls") {

@@ -1,6 +1,7 @@
 #include "bf3/host/ai_bot_source.h"
 
 #include "bf3/ai/main/communication_hub.h"
+#include "bf3/host/ai_world.h"
 #include "bf3/host/server_view.h"
 #include "bf3/sim/command.h"
 #include "tdm_bot_body.h"
@@ -44,7 +45,7 @@ struct AiBotSource::Impl final : ai::InfantryBody, ai::RadioComm, ai::AiTimer {
 	BotBody body;
 	std::optional<ai::CallRadioVoices> voices;
 	std::optional<ai::CommunicationHub> hub;
-	std::unique_ptr<ai::BotMain> bot;
+	ai::BotMain *bot = nullptr;
 	sim::Tick now = 0;
 	const sim::SoldierState *state = nullptr;
 	Sighting sighting;
@@ -270,17 +271,18 @@ struct AiBotSource::Impl final : ai::InfantryBody, ai::RadioComm, ai::AiTimer {
 	sim::Command run(sim::Tick p_tick, const sim::SoldierState &p_state) {
 		cmd = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
 		cmd.flags = 0;
-		if (body.slot == 0xFF || !is_alive(p_state)) {
+		if (body.slot == 0xFF || bot == nullptr || !is_alive(p_state)) {
 			body.targeting.drop();
 			body.set_activity(p_tick, TdmBotActivity::Dead);
-			bot->update_bot(false, false);
+			if (bot != nullptr) {
+				body.shared->ai->observe(body.slot, p_state, false, p_tick);
+			}
 			return cmd;
 		}
-		const bool new_life = p_state.life != body.life;
-		if (new_life) {
+		if (p_state.life != body.life) {
 			body.new_life(p_tick, p_state);
 		}
-		bot->update_bot(true, new_life);
+		body.shared->ai->observe(body.slot, p_state, true, p_tick);
 		bot->set_side(view().team(body.slot));
 		if (view().input_restricted() || view().phase() != net::MatchPhase::InRound) {
 			body.restricted(p_tick, cmd);
@@ -317,22 +319,24 @@ AiBotSource::AiBotSource(std::shared_ptr<TdmShared> p_shared, uint32_t p_index) 
 	m.body.attach(std::move(p_shared), p_index);
 	static const ai::BehaviourTuning s_defaults;
 	const ai::BehaviourTuning &tuning = m.body.shared != nullptr ? m.body.cfg().behaviours : s_defaults;
-	m.bot = std::make_unique<ai::BotMain>(p_index, -1, 0, m, tuning);
 	m.voices.emplace(tuning.call_s);
 	ai::CommunicationHubServices hub;
 	hub.radio = &m;
 	hub.voices = &*m.voices;
 	hub.timer = &m;
 	m.hub.emplace(hub);
-	m.bot->attach_communication(*m.voices, *m.hub);
 	if (m.body.shared != nullptr) {
 		m.body.shared->count(&TdmBotStats::bf2_bots, uint32_t(1));
 	}
 }
 
 AiBotSource::~AiBotSource() {
-	if (impl_->body.shared != nullptr && impl_->body.shared->strategy != nullptr) {
-		impl_->body.shared->strategy->remove_bot(impl_->body.slot);
+	TdmShared *const sh = impl_->body.shared.get();
+	if (sh != nullptr && sh->strategy != nullptr) {
+		sh->strategy->remove_bot(impl_->body.slot);
+	}
+	if (sh != nullptr && sh->ai != nullptr) {
+		sh->ai->remove(impl_->body.slot);
 	}
 }
 
@@ -360,10 +364,22 @@ sim::Command AiBotSource::command(sim::Tick p_tick, const sim::SoldierState &p_s
 }
 
 void AiBotSource::admitted(uint8_t p_slot) {
-	impl_->body.set_slot(p_slot);
-	impl_->bot->set_player(p_slot);
-	if (impl_->body.shared != nullptr && impl_->body.shared->strategy != nullptr) {
-		impl_->body.shared->strategy->add_bot(p_slot, *impl_->bot);
+	Impl &m = *impl_;
+	m.body.set_slot(p_slot);
+	TdmShared *const sh = m.body.shared.get();
+	if (sh == nullptr) {
+		return;
+	}
+	if (sh->ai == nullptr) {
+		sh->ai = std::make_shared<HostAiBots>(*sh->host.view, sh->config->perception.max_range_m);
+	}
+	m.bot = sh->ai->admit(p_slot, m, m.body.cfg().behaviours);
+	if (m.bot == nullptr) {
+		return;
+	}
+	m.bot->attach_communication(*m.voices, *m.hub);
+	if (sh->strategy != nullptr) {
+		sh->strategy->add_bot(p_slot, *m.bot);
 	}
 }
 
