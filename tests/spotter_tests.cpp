@@ -1,10 +1,14 @@
 #include "bf3/host/spotter.h"
+#include "bf3/sim/collision_world.h"
 #include "bf3/sim/commo.h"
 #include "bf3/sim/spotting.h"
+#include "bf3/sim/static_world.h"
 #include "server_spotting.h"
 
 #include <doctest/doctest.h>
 
+#include <memory>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -55,6 +59,34 @@ host::SpotSubject subject(uint8_t p_slot, uint8_t p_team, float p_x, float p_z, 
 	s.party.health = 100.0f;
 	s.party.max_health = 100.0f;
 	return s;
+}
+
+sp::SpottingDef server_def() {
+	sp::SpottingDef def;
+	def.spotter_present = true;
+	def.target_present = true;
+	def.spotter = retail();
+	def.target.active_time = 7.0f;
+	def.target.passive_time = 1.5f;
+	return def;
+}
+
+std::unique_ptr<sim::CollisionWorld> wall_world() {
+	const sim::Vec3 a{ -3.0f, 0.0f, 20.0f };
+	const sim::Vec3 b{ 3.0f, 0.0f, 20.0f };
+	const sim::Vec3 c{ 3.0f, 4.0f, 20.0f };
+	const sim::Vec3 d{ -3.0f, 4.0f, 20.0f };
+	std::vector<sim::StaticTriangle> t(4);
+	t[0].v = { a, b, c };
+	t[1].v = { a, c, d };
+	t[2].v = { a, c, b };
+	t[3].v = { a, d, c };
+	core::Result<std::shared_ptr<const sim::StaticWorldShapes>> shapes =
+			sim::build_static_world(std::span<const sim::StaticTriangle>(t));
+	REQUIRE(shapes.ok());
+	core::Result<std::unique_ptr<sim::CollisionWorld>> world = sim::CollisionWorld::create(*shapes);
+	REQUIRE(world.ok());
+	return std::move(*world);
 }
 
 host::SpotterInput input(const std::vector<host::SpotSubject> &p_subjects, double p_clock, bool p_pressed) {
@@ -160,13 +192,7 @@ TEST_SUITE("spotting-unit") {
 	TEST_CASE("spotter: bots press spot while an enemy stands in their cone and not Active, through the server's spot "
 			  "rule") {
 		host::ServerSpotting server;
-		sp::SpottingDef def;
-		def.spotter_present = true;
-		def.target_present = true;
-		def.spotter = retail();
-		def.target.active_time = 7.0f;
-		def.target.passive_time = 1.5f;
-		server.configure(8, def);
+		server.configure(8, server_def());
 		const std::vector<host::SpotSubject> subjects{ subject(0, 1, 0.0f, 0.0f), subject(3, 2, 0.0f, 40.0f),
 			subject(4, 2, 30.0f, 0.0f) };
 		const std::vector<uint8_t> alive{ 1, 0, 0, 1, 1, 0, 0, 0 };
@@ -190,5 +216,45 @@ TEST_SUITE("spotting-unit") {
 		CHECK(server.stored_order(4).serial == 1u);
 		CHECK_FALSE(server.order(3, net::OrderRequest{ cm::OrderType::RequestHeal, 1 }, alive).has_value());
 		CHECK(server.stats().orders_refused == 1u);
+	}
+
+	TEST_CASE("spotter: a bot presses spot only on an enemy it can see, so an enemy behind a wall does not use up its "
+			  "presses") {
+		host::ServerSpotting server;
+		server.configure(8, server_def());
+		const std::unique_ptr<sim::CollisionWorld> world = wall_world();
+		std::vector<host::SpotSubject> subjects{ subject(0, 1, 0.0f, 0.0f), subject(3, 2, 0.0f, 40.0f) };
+		const std::vector<uint8_t> alive{ 1, 0, 0, 1, 1, 0, 0, 0 };
+		const std::vector<host::BotEye> eyes{ { 0, 1, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } } };
+		const float dt = 1.0f / 60.0f;
+		int tick = 0;
+		for (; tick < 240; ++tick) {
+			server.step_bots(double(tick) * dt, dt, eyes, subjects, world.get(), alive);
+		}
+		CHECK(server.target(3).state == sp::SpotState::None);
+		CHECK(server.stats().spots_applied == 0u);
+		subjects.push_back(subject(4, 2, 0.0f, 10.0f));
+		server.step_bots(double(tick) * dt, dt, eyes, subjects, world.get(), alive);
+		++tick;
+		CHECK(server.target(4).state == sp::SpotState::Active);
+		CHECK(server.target(4).spotter == 0);
+		for (; tick < 480; ++tick) {
+			server.step_bots(double(tick) * dt, dt, eyes, subjects, world.get(), alive);
+		}
+		CHECK(server.target(3).state == sp::SpotState::None);
+		CHECK(server.stats().spots_applied == 1u);
+	}
+
+	TEST_CASE("spotter: the cool-down is ready while fewer than CoolDownAllowedSpotsWithinHistory presses lie inside "
+			  "CoolDownHistoryTime") {
+		const sp::SpotterDef def = retail();
+		sp::SpotCooldown c;
+		for (int i = 0; i < 3; ++i) {
+			CHECK(c.ready(0.5 * i, def));
+			CHECK(c.press(0.5 * i, def));
+		}
+		CHECK_FALSE(c.ready(1.5, def));
+		CHECK_FALSE(c.ready(3.0, def));
+		CHECK(c.ready(3.01, def));
 	}
 }

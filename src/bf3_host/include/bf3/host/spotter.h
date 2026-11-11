@@ -62,6 +62,7 @@ public:
 	SpotterOutput update(const SpotterInput &p_in);
 	const sim::spotting::SpotterDef &def() const { return def_; }
 	bool blocked(const SpotterInput &p_in) const;
+	bool ready(const SpotterInput &p_in) const;
 
 private:
 	void collect(const SpotterInput &p_in, bool p_crosshair_ray);

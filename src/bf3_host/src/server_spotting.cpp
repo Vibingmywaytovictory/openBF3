@@ -155,13 +155,21 @@ void ServerSpotting::step_bots(double p_clock, float p_dt, std::span<const BotEy
 		in.subjects = p_subjects;
 		in.states = rows_;
 		in.world = p_world;
+		bool sees = false;
 		for (const SpotSubject &e : p_subjects) {
-			if (e.team != 0 && e.team != b.team && targets_[e.slot].state != sp::SpotState::Active &&
-					sp::in_spot_cone(b.eye, b.view, e.centre, def_.spotter.fov_deg, def_.spotter.distance)) {
-				in.pressed = true;
+			const sp::SpotState state = targets_[e.slot].state;
+			if (e.team == 0 || e.team == b.team || state == sp::SpotState::Active ||
+					state == sp::SpotState::Unspottable ||
+					!sp::in_spot_cone(b.eye, b.view, e.centre, def_.spotter.fov_deg, def_.spotter.distance)) {
+				continue;
+			}
+			const std::vector<sp::RayHit> hits = spot_ray_hits(b.eye, e.centre, p_subjects, b.slot, p_world);
+			if (sp::first_enemy_hit(hits, b.team) == std::optional<uint8_t>(e.slot)) {
+				sees = true;
 				break;
 			}
 		}
+		in.pressed = sees && s->ready(in);
 		const SpotterOutput out = s->update(in);
 		if (out.spot) {
 			spot(b.slot, *out.spot, p_alive);

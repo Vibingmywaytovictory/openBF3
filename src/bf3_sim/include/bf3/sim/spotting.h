@@ -80,6 +80,7 @@ float crosshair_cosine(const Vec3 &p_eye, const Vec3 &p_view, const Vec3 &p_cent
 class SpotCooldown {
 public:
 	bool press(double p_clock, const SpotterDef &p_def);
+	bool ready(double p_clock, const SpotterDef &p_def) const;
 	size_t held() const { return history_.size(); }
 	void clear() { history_.clear(); }
 

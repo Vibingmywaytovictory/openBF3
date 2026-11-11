@@ -145,6 +145,12 @@ bool SpotCooldown::press(double p_clock, const SpotterDef &p_def) {
 	return history_.size() <= p_def.cooldown_allowed;
 }
 
+bool SpotCooldown::ready(double p_clock, const SpotterDef &p_def) const {
+	const size_t held = size_t(std::count_if(history_.begin(), history_.end(),
+			[&](double t) { return p_clock - t <= double(p_def.cooldown_history_time); }));
+	return held < p_def.cooldown_allowed;
+}
+
 std::optional<uint8_t> first_enemy_hit(std::span<const RayHit> p_hits, uint8_t p_own_team) {
 	for (const RayHit &h : p_hits.first(std::min(p_hits.size(), kRayHits))) {
 		if (h.spottable && h.team != 0 && h.team != p_own_team) {

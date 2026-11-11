@@ -92,6 +92,10 @@ bool Spotter::blocked(const SpotterInput &p_in) const {
 			[&](const net::SpotRow &r) { return r.state == sp::SpotState::Active && r.spotter == p_in.own_slot; });
 }
 
+bool Spotter::ready(const SpotterInput &p_in) const {
+	return !blocked(p_in) && cooldown_.ready(p_in.clock, def_);
+}
+
 void Spotter::collect(const SpotterInput &p_in, bool p_crosshair_ray) {
 	std::vector<const SpotSubject *> cone;
 	for (const SpotSubject &s : p_in.subjects) {
