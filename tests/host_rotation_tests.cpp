@@ -968,7 +968,9 @@ TEST_SUITE("host-rotation") {
 
 TEST_SUITE("host-rotation-unit") {
 	TEST_CASE("stuck bots: a bot within 1 m for 1200 ticks counts once and a walking one never; a level change, or the "
-			  "next level's ticks starting again, starts every window again") {
+			  "next level's ticks starting again, starts every window again, and so does a round held in its pre-round "
+			  "or "
+			  "input restriction") {
 		struct Bot {
 			bool alive = true;
 			uint32_t life = 1;
@@ -1006,6 +1008,16 @@ TEST_SUITE("host-rotation-unit") {
 				CHECK_MESSAGE(
 						swapped.count() == 0u, (by_level ? "level change" : "ticks start again") << ", tick " << t);
 			}
+		}
+
+		host::StuckBots held;
+		for (sim::Tick t = 60; t <= 4800; t += 60) {
+			host::GameServerStats g = stats(t, { Bot{ true, 1, { 2.0f, 0.0f, 2.0f } } });
+			g.rules_active = true;
+			g.match.phase = t < 1800 ? net::MatchPhase::PreRound : net::MatchPhase::InRound;
+			g.match.restrict_until_tick = t < 1800 ? UINT32_MAX : 3000u;
+			held.sample(g, 0);
+			CHECK_MESSAGE(held.count() == (t >= 3000u + host::kStuckWindowTicks ? 1u : 0u), "tick " << t);
 		}
 	}
 }

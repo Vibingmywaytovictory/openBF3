@@ -10,13 +10,17 @@ void StuckBots::sample(const GameServerStats &p_game, uint64_t p_level) {
 		level_ = p_level;
 	}
 	last_tick_ = p_game.tick;
+	const net::MatchState &ms = p_game.match;
+	const bool held = p_game.rules_active &&
+			(ms.phase != net::MatchPhase::InRound ||
+					(ms.restrict_until_tick != 0 && p_game.tick + 1u < ms.restrict_until_tick));
 	tracks_.resize(p_game.slots.size());
 	for (size_t i = 0; i < p_game.slots.size(); ++i) {
 		const SlotStats &s = p_game.slots[i];
 		Track &t = tracks_[i];
-		if (!s.used || s.remote || !s.alive || s.life != t.life || !t.alive) {
+		if (held || !s.used || s.remote || !s.alive || s.life != t.life || !t.alive) {
 			t = Track{};
-			if (s.used && !s.remote && s.alive) {
+			if (!held && s.used && !s.remote && s.alive) {
 				t.alive = true;
 				t.life = s.life;
 				t.since = p_game.tick;
