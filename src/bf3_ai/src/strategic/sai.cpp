@@ -769,6 +769,8 @@ void Sai::update(double p_budget) {
 		case SaiStage::Distribution:
 			if (decide != nullptr) {
 				decide->update_distribution(*this);
+			} else if (services_.decisions == nullptr && !player_commander_) {
+				update_distribution();
 			}
 			stage_ = SaiStage::Resources;
 			if (over_budget(start, p_budget)) {
@@ -778,6 +780,8 @@ void Sai::update(double p_budget) {
 		case SaiStage::Resources:
 			if (decide != nullptr) {
 				decide->distribute_resources(*this);
+			} else if (services_.decisions == nullptr && !player_commander_) {
+				distribute_resources();
 			}
 			if (!have_any_owned_control_points(side_)) {
 				stage_ = SaiStage::NoAreas;
@@ -791,6 +795,8 @@ void Sai::update(double p_budget) {
 		case SaiStage::Defence:
 			if (decide != nullptr) {
 				decide->distribute_defence(*this);
+			} else if (services_.decisions == nullptr && !player_commander_) {
+				distribute_defence();
 			}
 			stage_ = SaiStage::Attack;
 			if (over_budget(start, p_budget)) {
@@ -800,6 +806,8 @@ void Sai::update(double p_budget) {
 		case SaiStage::Attack:
 			if (decide != nullptr) {
 				decide->distribute_attack(*this);
+			} else if (services_.decisions == nullptr && !player_commander_) {
+				distribute_attack();
 			}
 			stage_ = SaiStage::Artillery;
 			if (over_budget(start, p_budget)) {
@@ -813,6 +821,8 @@ void Sai::update(double p_budget) {
 		case SaiStage::NoAreas:
 			if (decide != nullptr) {
 				decide->distribute_with_no_areas(*this);
+			} else if (services_.decisions == nullptr && !player_commander_) {
+				distribute_with_no_areas();
 			}
 			stage_ = SaiStage::Done;
 			++completed_;

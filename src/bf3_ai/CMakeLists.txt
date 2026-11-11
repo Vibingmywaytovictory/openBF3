@@ -174,4 +174,5 @@ target_sources(bf3_ai PRIVATE
 target_sources(bf3_ai PRIVATE
     include/bf3/ai/commander/commander.h
     src/commander/commander.cpp
+    src/strategic/sai_distribution.cpp
 )

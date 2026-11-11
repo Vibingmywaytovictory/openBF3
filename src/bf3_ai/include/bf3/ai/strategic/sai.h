@@ -21,6 +21,7 @@ class AIInformationGrid;
 class AIRandom;
 class AiTimer;
 class Bot;
+class IPIUnit;
 class InformationManager;
 class SquadManager;
 class Strategy;
@@ -137,6 +138,16 @@ public:
 	void choose_strategy();
 	void change_strategy(size_t p_index);
 	void modify_strategic_objects_temperatures();
+	void update_distribution();
+	void distribute_resources();
+	void distribute_defence();
+	void distribute_attack();
+	void distribute_with_no_areas();
+	int attack_resources() const { return attack_resources_; }
+	int defence_resources() const { return defence_resources_; }
+	int idle_resources() const { return idle_resources_; }
+	bool frees_attackers() const { return free_attackers_; }
+	bool frees_defenders() const { return free_defenders_; }
 	const Strategy *active_strategy() const;
 	const std::vector<StrategyContainer> &strategies() const { return strategies_; }
 	Vec2 strategy_heat(size_t p_index) const;
@@ -205,6 +216,12 @@ private:
 	void free_bot(BotInfo &r_info, bool p_release);
 	void respawn(BotInfo &r_info, AIStrategicObject &r_object);
 	static void set_as_dead(BotInfo &r_info);
+	const IPIUnit *current_unit(int p_bot_id) const;
+	void assign_free(BotInfo &r_info, std::set<int>::iterator &r_it, bool p_attacker);
+	void category_distribute_defence(const std::vector<AIStrategicObject *> &p_objects);
+	void category_distribute_attack(const std::vector<AIStrategicObject *> &p_objects);
+	void category_distribute_with_no_areas(const std::vector<AIStrategicObject *> &p_objects);
+	void feed_least_supplied(std::vector<AIStrategicObject *> p_objects);
 
 	SaiServices services_;
 	int side_ = 1;
@@ -222,6 +239,12 @@ private:
 	std::vector<StrategyContainer> strategies_;
 	size_t active_ = 0;
 	std::list<DenyRequest> deny_requests_;
+	int attack_resources_ = 0;
+	int defence_resources_ = 0;
+	int idle_resources_ = 0;
+	bool free_attackers_ = false;
+	bool free_defenders_ = false;
+	bool released_ = true;
 	double artillery_ready_ = 0.0;
 	double supply_ready_ = 0.0;
 	double vehicle_drop_ready_ = 0.0;

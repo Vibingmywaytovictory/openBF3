@@ -1,4 +1,5 @@
 #include "bf3/ai/behaviour/curves.h"
+#include "bf3/ai/commander/commander.h"
 #include "bf3/ai/knowledge/information_factory.h"
 #include "bf3/ai/knowledge/information_grid.h"
 #include "bf3/ai/knowledge/plug_ins.h"
@@ -188,6 +189,52 @@ float AIStrategicArea::calculate_attack_cost(int p_side) const {
 	const EnemyStatistics &statistics = *statistics_[s];
 	const float strength = statistics.size() > 1 ? statistics.strength(1) : -1.0f;
 	return strength * (1.5f - 0.5f * need_curve_input_[s]) * (1.0f + friendly_ratio_[s]);
+}
+
+bool AIStrategicArea::order_squad(int p_side, const Vec3 &p_position, const CommanderInterface &p_commander) {
+	const size_t s = size_t(p_side - 1);
+	int strength = 0;
+	const int squad = services_.squads != nullptr
+			? services_.squads->closest_available_squad(*this, p_position, p_side, attack_[s], strength)
+			: 0;
+	if (squad == 0) {
+		return false;
+	}
+	const StrategicStatus now = status(p_side);
+	const bool defend = now == StrategicStatus::Owned || (enemy_takeover_[s] && now == StrategicStatus::Neutral);
+	if (defend) {
+		p_commander.give_defend_order(p_position, p_side, squad);
+	} else {
+		p_commander.give_attack_order(p_position, p_side, squad);
+	}
+	assigned_squad_strength_[s] += strength;
+	return true;
+}
+
+bool AIStrategicArea::collect_squad_resources(int p_side, const CommanderInterface &p_commander) {
+	const size_t s = size_t(p_side - 1);
+	if (assigned_squad_strength_[s] >= resource_need_[s]) {
+		return true;
+	}
+	const Vec3 at{ position(p_side).x, height_, position(p_side).y };
+	validate_distances(p_side);
+	while (assigned_squad_strength_[s] <= resource_need_[s]) {
+		if (!order_squad(p_side, at, p_commander)) {
+			break;
+		}
+	}
+	return assigned_squad_strength_[s] >= resource_need_[s];
+}
+
+int AIStrategicArea::collect_additional_squad_resources(
+		int p_amount, int p_side, const CommanderInterface &p_commander) {
+	const Vec3 at{ position(p_side).x, height_, position(p_side).y };
+	validate_distances(p_side);
+	int count = 0;
+	while (count < p_amount && order_squad(p_side, at, p_commander)) {
+		++count;
+	}
+	return count;
 }
 
 bool AIStrategicArea::is_neighbour(const AIStrategicObject *p_object) const {

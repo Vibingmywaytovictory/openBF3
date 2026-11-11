@@ -1467,6 +1467,9 @@ TEST_SUITE("ai-strategy") {
 			float distance = 50.0f;
 			int squad_strengths(int, int, int) const override { return 0; }
 			float distance_to_closest_squad(const Vec3 &, int) const override { return distance; }
+			int closest_available_squad(const AIStrategicArea &, const Vec3 &, int, bool, int &) const override {
+				return 0;
+			}
 		};
 		Squads squads;
 		StrategicServices services;
@@ -1772,6 +1775,100 @@ TEST_SUITE("ai-strategy") {
 		sai.player_requests_supply(9, {});
 		REQUIRE(sai.deny_requests().size() == 1);
 		CHECK(sai.deny_requests().front().denial == SaiDenial::Supply);
+	}
+
+	TEST_CASE("Sai without decisions: free bots are assigned by the strategy's aggression, the neediest owned area "
+			  "is defended and the most valuable one attacked, one squad at a time to the least supplied") {
+		struct Squads final : StrategicSquads {
+			std::vector<std::pair<int, int>> free;
+			std::vector<std::string> asked;
+			int squad_strengths(int, int, int) const override { return 0; }
+			float distance_to_closest_squad(const Vec3 &, int) const override { return 50.0f; }
+			int closest_available_squad(
+					const AIStrategicArea &p_area, const Vec3 &, int, bool p_attack, int &r_strength) const override {
+				auto &self = const_cast<Squads &>(*this);
+				self.asked.push_back(p_area.name() + (p_attack ? " attack" : " defend"));
+				if (free.empty()) {
+					return 0;
+				}
+				const std::pair<int, int> squad = free.front();
+				self.free.erase(self.free.begin());
+				r_strength = squad.second;
+				return squad.first;
+			}
+		};
+		Squads squads;
+		Knowledge knowledge;
+		StrategicServices strategic;
+		strategic.squads = &squads;
+		AIStrategicObjectManager objects(strategic);
+		REQUIRE(objects.create("a", { -10.0f, -10.0f }, { 0.0f, 0.0f }, 0.0f, 10.0f, std::string()));
+		REQUIRE(objects.create("b", { 90.0f, -10.0f }, { 100.0f, 0.0f }, 0.0f, 20.0f, std::string()));
+		REQUIRE(objects.add_two_way_neighbour("a", "b"));
+		AIStrategicArea &a = *objects.strategic_area("a");
+		AIStrategicArea &b = *objects.strategic_area("b");
+		a.set_status(1, StrategicStatus::Owned);
+		b.set_status(1, StrategicStatus::Hostile);
+		Strategy strategy("Push");
+		strategy.set_aggression(0.8f);
+		strategy.set_number_of_attacks(1);
+		strategy.set_number_of_defences(1);
+		Soldier body;
+		body.with_unit = true;
+		body.where = { 2.0f, 0.0f, 1.0f };
+		StrategicBot bot;
+		bot.id = 1;
+		bot.equipment = knowledge.record(body, 1);
+		GameClock clock;
+		AiSettings settings;
+		settings.max_bots = 4;
+		CommanderLog commander;
+		SaiServices services;
+		services.timer = &clock;
+		services.settings = &settings;
+		services.objects = &objects;
+		services.information = &knowledge.information;
+		services.commander = &commander;
+		Sai sai(1, services);
+		sai.add_strategy(&strategy);
+		sai.add_bot(&bot);
+		while (sai.stage() != SaiStage::StrategicObjects) {
+			sai.update(1.0);
+		}
+		CHECK(sai.own_state()[StrategyCondition::NumberOfFriendlyAreas] == 1.0f);
+		REQUIRE(sai.is_bot_free(1));
+		sai.distribute_resources();
+		CHECK(sai.is_bot_assigned(1));
+		CHECK_FALSE(sai.is_bot_free(1));
+		CHECK(a.number_of_available_attackers(1) == 1);
+		CHECK(sai.attack_resources() == 4);
+		CHECK(sai.idle_resources() == -6);
+		CHECK_FALSE(sai.frees_attackers());
+		CHECK_FALSE(sai.frees_defenders());
+		CHECK(sai.bot_last_ordered_pos(1) == 0);
+		sai.update_distribution();
+		CHECK(sai.attack_resources() == 4);
+		CHECK(sai.defence_resources() == 0);
+		CHECK(sai.idle_resources() == 0);
+
+		squads.free = { { 3, 4 } };
+		sai.distribute_defence();
+		CHECK(commander.calls == std::vector<std::string>{ "defend 1 3" });
+		CHECK_FALSE(a.is_attack(1));
+		CHECK(a.assigned_squad_strength(1) == 4);
+		CHECK(squads.asked == std::vector<std::string>{ "a defend", "a defend" });
+		squads.free = { { 5, 6 } };
+		sai.distribute_attack();
+		CHECK(commander.calls == std::vector<std::string>{ "defend 1 3", "attack 1 5" });
+		CHECK(squads.asked == std::vector<std::string>{ "a defend", "a defend", "b attack", "b attack" });
+		CHECK(b.is_attack(1));
+		CHECK(b.assigned_squad_strength(1) == 6);
+
+		commander.calls.clear();
+		squads.free = { { 1, 2 }, { 2, 2 }, { 4, 2 } };
+		sai.distribute_with_no_areas();
+		CHECK(commander.calls == std::vector<std::string>{ "defend 1 1", "defend 1 2", "attack 1 4" });
+		CHECK(b.assigned_squad_strength(1) == 8);
 	}
 
 	TEST_CASE("BFCommander: orders reach the game as OpenBF2's order codes, requests are posted and cleared, "

@@ -15,7 +15,9 @@ namespace bf3::ai {
 
 class AIInformationGrid;
 class AIRandom;
+class AIStrategicArea;
 class AIStrategicObject;
+class CommanderInterface;
 class InformationManager;
 class Sai;
 class Strategy;
@@ -74,6 +76,8 @@ public:
 	virtual ~StrategicSquads() = default;
 	virtual int squad_strengths(int p_side, int p_area_index, int p_type) const = 0;
 	virtual float distance_to_closest_squad(const Vec3 &p_position, int p_side) const = 0;
+	virtual int closest_available_squad(const AIStrategicArea &p_area, const Vec3 &p_position, int p_side,
+			bool p_attack, int &r_strength) const = 0;
 };
 
 struct StrategicServices {
@@ -145,6 +149,8 @@ public:
 	virtual bool has_object_type_flags(int) const { return false; }
 	virtual int tactical_status(int p_side) const = 0;
 	virtual bool is_area_takeable() const = 0;
+	virtual bool collect_squad_resources(int p_side, const CommanderInterface &p_commander) = 0;
+	virtual int collect_additional_squad_resources(int p_amount, int p_side, const CommanderInterface &p_commander) = 0;
 	virtual float gravity(const Vec3 &, int) const { return 0.0f; }
 	virtual float gravity(const Vec2 &, int) const { return 0.0f; }
 	virtual float x_extent(int p_side) const { return size_[size_t(p_side)] + size_[size_t(p_side)]; }
@@ -278,6 +284,8 @@ public:
 	bool has_object_type_flags(int p_flags) const override { return (object_type_flags_ & p_flags) == p_flags; }
 	int tactical_status(int p_side) const override;
 	bool is_area_takeable() const override;
+	bool collect_squad_resources(int p_side, const CommanderInterface &p_commander) override;
+	int collect_additional_squad_resources(int p_amount, int p_side, const CommanderInterface &p_commander) override;
 	float gravity(const Vec3 &p_position, int p_side) const override;
 	float gravity(const Vec2 &p_position, int p_side) const override;
 	float gravity(float p_distance, int p_side) const;
@@ -316,6 +324,7 @@ private:
 	};
 
 	void internal_constructor_call(const Vec2 &p_centre);
+	bool order_squad(int p_side, const Vec3 &p_position, const CommanderInterface &p_commander);
 	void validate_distances(int p_side, int p_group);
 	void find_distances(int p_side, GroupDistances &r_group, int p_group_mask) const;
 	void insert_unit_distances(int p_side, int p_group);
