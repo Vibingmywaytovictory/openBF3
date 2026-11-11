@@ -50,52 +50,75 @@ public:
 	void set_side(int p_side) override { side_ = p_side; }
 	int player_id() const override { return player_id_; }
 	void set_player(int p_player_id) override { player_id_ = p_player_id; }
+	const std::string &name() const override { return name_; }
 	void set_name(const std::string &p_name) override { name_ = p_name; }
 	void set_personality(const float *p_weights) override;
 	void receive_idle_order(int p_idle_behaviour) override { idle_behaviour_ = p_idle_behaviour; }
 	bool is_dead() const override { return deactivated_ || !alive_; }
 	bool man_down() const override { return man_down_; }
+	void set_man_down(bool p_down) override { man_down_ = p_down; }
 	bool is_deactivated() const override { return deactivated_; }
 	void set_deactivated(bool p_deactivated) override { deactivated_ = p_deactivated; }
+	bool in_transition_phase() const override { return in_transition_phase_; }
+	void set_in_transition_phase(bool p_in) override { in_transition_phase_ = p_in; }
 	BotLodLevel lod_level() const override { return lod_level_; }
 	uint32_t current_equipment() const override { return current_equipment_; }
+	void set_current_equipment(uint32_t p_handle) override { current_equipment_ = p_handle; }
 	bool has_squad_member() const override { return squad_member_ != nullptr; }
 	int decision_making(double p_slice) override;
+	void plan_execution(double p_slice) override;
+	bool has_plan() const override { return !plan_invalid_; }
+	bool has_default_plan() const override { return has_default_plan_; }
+	void invalidate_plan() override { plan_invalid_ = true; }
+	void update_player_action(bool p_stalled) override;
+	void rearm(const Information &p_equipment, const WeaponInfoManager &p_weapons, double p_time_increase) override;
+	void set_bot_stuck(bool p_stuck) override { bot_stuck_ = p_stuck; }
 	void see(double p_slice) override;
 	void update_sensing(double p_slice) override;
+	void heard_object(uint32_t p_information) override { heard_object_ = p_information; }
 	void update_communication() override;
+	CommunicationAgent *communication() const override { return communication_.get(); }
 	bool path_search_pending() const override { return false; }
 	void update_obstacles() override {}
 	bool navigation_active() const override { return false; }
 	void update_navigation_occasionally() override {}
+	void reset_navigation(bool) override {}
 	bool search_active() const override { return false; }
 	bool search_new() const override { return false; }
 	bool search_running() const override { return false; }
 	void update_pathfinding(bool &r_first, bool *r_second) override;
+	bool update_bot_vehicle() override;
+	bool update_bot() override;
+	void reset() override;
+	void reset_assigned_areas() override;
+	void set_last_change_time(double p_time) override { last_change_time_ = p_time; }
+	void set_spawn_coord(const Vec3 &p_position) override { spawn_coord_ = p_position; }
+	bool c4_placed() const override { return c4_placed_; }
+	void remove_c4() override { c4_placed_ = false; }
+	uint32_t mine_target() const override { return mine_target_; }
+	void set_mine_target(uint32_t p_handle) override { mine_target_ = p_handle; }
+	void set_is_repaired(bool p_repaired) override { is_repaired_ = p_repaired; }
+	BotCallBack *death_call_back() const override { return death_call_back_.get(); }
+	BotCallBack *spawn_call_back() const override { return spawn_call_back_.get(); }
+	void set_death_call_back(std::unique_ptr<BotCallBack> p_call_back) { death_call_back_ = std::move(p_call_back); }
+	void set_spawn_call_back(std::unique_ptr<BotCallBack> p_call_back) { spawn_call_back_ = std::move(p_call_back); }
 
 	void set_squad_member(SquadMember *p_member) override { squad_member_ = p_member; }
 	bool join_squad(int p_squad) override;
 	void set_squad_goal(const SquadGoal &p_goal) override { squad_goal_ = p_goal; }
 
 	void attach_communication(const RadioVoices &p_voices, CommunicationHub &r_hub);
-	CommunicationAgent *communication() const { return communication_.get(); }
 	void call_for_medic();
 	void update_bot(bool p_alive, bool p_new_life);
-	void plan_execution(double p_slice);
 	bool wants_decision() const;
-	void reset();
 
 	bool receive_order(const BotOrder &p_order);
 	void set_taking_orders(bool p_taking) { taking_orders_ = p_taking; }
 	bool is_taking_orders() const { return taking_orders_; }
 	void calculate_mods();
-	bool has_plan() const { return !plan_invalid_; }
-	void invalidate_plan() { plan_invalid_ = true; }
 	bool plan_lock() const { return plan_lock_; }
 	void set_plan_lock(bool p_lock) { plan_lock_ = p_lock; }
-	void set_man_down(bool p_down) { man_down_ = p_down; }
 	void set_lod_level(BotLodLevel p_level) { lod_level_ = p_level; }
-	void set_current_equipment(uint32_t p_handle) { current_equipment_ = p_handle; }
 
 	InfantryBehaviour behaviour() const;
 	InfantryActivity activity() const { return plan_.activity(); }
@@ -107,7 +130,13 @@ public:
 	const SquadGoal &squad_goal() const { return squad_goal_; }
 	const BotMemory &memory() const { return memory_; }
 	int squad() const { return squad_; }
-	const std::string &name() const { return name_; }
+	bool bot_stuck() const { return bot_stuck_; }
+	uint32_t heard_object() const { return heard_object_; }
+	uint32_t stalled_plan_ticks() const { return stalled_plan_ticks_; }
+	double last_change_time() const { return last_change_time_; }
+	const Vec3 &spawn_coord() const { return spawn_coord_; }
+	bool is_repaired() const { return is_repaired_; }
+	const std::array<int, 4> &assigned_areas() const { return assigned_areas_; }
 	int ordered_behaviour() const { return ordered_behaviour_; }
 
 private:
@@ -132,6 +161,20 @@ private:
 	InfantrySenses decided_senses_;
 	sim::Tick decided_tick_ = 0;
 	bool plan_invalid_ = true;
+	bool has_default_plan_ = false;
+	bool in_transition_phase_ = false;
+	bool bot_stuck_ = false;
+	bool c4_placed_ = false;
+	bool is_repaired_ = false;
+	uint32_t heard_object_ = kNoHandle;
+	uint32_t mine_target_ = kNoHandle;
+	uint32_t stalled_plan_ticks_ = 0;
+	double rearm_timer_ = 0.0;
+	double last_change_time_ = 0.0;
+	Vec3 spawn_coord_{};
+	std::array<int, 4> assigned_areas_{ -1, -1, -1, -1 };
+	std::unique_ptr<BotCallBack> death_call_back_;
+	std::unique_ptr<BotCallBack> spawn_call_back_;
 	bool plan_lock_ = false;
 	bool taking_orders_ = false;
 	int ordered_behaviour_ = -1;

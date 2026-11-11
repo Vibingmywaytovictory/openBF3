@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "ai_bot_fake.h"
 #include "bf3/ai/actionplan/conditions.h"
 #include "bf3/ai/actionplan/infantry_actions.h"
 #include "bf3/ai/interpreter/bot_plan.h"
@@ -54,37 +55,11 @@ struct LogBody final : InfantryBody {
 	void end_plan() override {}
 };
 
-struct StubBot final : Bot {
-	bool dead = false;
-	BotLodLevel lod = BotLodLevel::Full;
-	uint32_t bot_id() const override { return 0; }
-	int side() const override { return 0; }
-	void set_side(int) override {}
-	int player_id() const override { return 0; }
-	void set_player(int) override {}
-	void set_name(const std::string &) override {}
-	void set_personality(const float *) override {}
-	void receive_idle_order(int) override {}
-	bool is_dead() const override { return dead; }
-	bool man_down() const override { return false; }
-	bool is_deactivated() const override { return false; }
-	void set_deactivated(bool) override {}
-	BotLodLevel lod_level() const override { return lod; }
-	void set_lod_level(BotLodLevel p_level) override { lod = p_level; }
-	uint32_t current_equipment() const override { return 0; }
-	bool has_squad_member() const override { return false; }
-	int decision_making(double) override { return 0; }
-	void see(double) override {}
-	void update_sensing(double) override {}
-	void update_communication() override {}
-	bool path_search_pending() const override { return false; }
-	void update_obstacles() override {}
-	bool navigation_active() const override { return false; }
-	void update_navigation_occasionally() override {}
-	bool search_active() const override { return false; }
-	bool search_new() const override { return false; }
-	bool search_running() const override { return false; }
-	void update_pathfinding(bool &, bool *) override {}
+struct StubBot final : test::NullBot {
+	StubBot() {
+		team = 0;
+		player = 0;
+	}
 };
 
 struct Counter final : BAPStatement {

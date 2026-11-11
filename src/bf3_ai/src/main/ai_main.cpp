@@ -9,6 +9,7 @@ AIMain::AIMain(const AiMainServices &p_services) : services_(p_services) {
 	bots.settings = services_.settings;
 	bots.timer = services_.timer;
 	bots.information = services_.information;
+	bots.weapons = services_.weapons;
 	bots.behaviours = services_.behaviours;
 	bots.game = services_.game;
 	bots.factory = services_.factory;

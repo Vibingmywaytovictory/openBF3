@@ -1,9 +1,20 @@
 #include "bf3/ai/bot/bot_main.h"
 
+#include "bf3/ai/knowledge/information.h"
+#include "bf3/ai/knowledge/plug_ins.h"
+#include "bf3/ai/knowledge/weapon_info.h"
+
 #include <algorithm>
 #include <vector>
 
 namespace bf3::ai {
+
+namespace {
+
+inline constexpr double kRearmPeriod = 6.0;
+inline constexpr float kRearmPercent = 0.125f;
+
+}
 
 BotMain::BotMain(uint32_t p_bot_id, int p_player_id, int p_side, InfantryBody &r_body, const BehaviourTuning &p_tuning,
 		const float *p_personality) :
@@ -191,6 +202,58 @@ void BotMain::plan_execution(double) {
 		plan_invalid_ = true;
 		++stats_.plan_failures;
 	}
+}
+
+void BotMain::update_player_action(bool p_stalled) {
+	stalled_plan_ticks_ = p_stalled ? stalled_plan_ticks_ + 1 : 0;
+}
+
+void BotMain::rearm(const Information &p_equipment, const WeaponInfoManager &p_weapons, double p_time_increase) {
+	if (man_down_) {
+		return;
+	}
+	rearm_timer_ += p_time_increase;
+	if (rearm_timer_ <= kRearmPeriod) {
+		return;
+	}
+	IPIArmament *const armament = p_equipment.armament();
+	if (armament != nullptr) {
+		const std::vector<uint32_t> weapons = armament->weapons();
+		for (const uint32_t handle : weapons) {
+			if (handle == kNoHandle) {
+				continue;
+			}
+			if (WeaponInfo *const weapon = p_weapons.information(handle)) {
+				armament->rearm(*weapon, kRearmPercent, side_);
+			}
+		}
+	}
+	rearm_timer_ = 0.0;
+}
+
+bool BotMain::update_bot_vehicle() {
+	plan_invalid_ = true;
+	has_default_plan_ = false;
+	plan_lock_ = false;
+	return true;
+}
+
+bool BotMain::update_bot() {
+	if (current_equipment_ == kNoHandle) {
+		return false;
+	}
+	for (const std::unique_ptr<BotBehaviour> &b : behaviours_) {
+		b->reset(this);
+	}
+	calculate_mods();
+	merger_->update_active_urgency(this);
+	memory_ = BotMemory{};
+	return true;
+}
+
+void BotMain::reset_assigned_areas() {
+	assigned_areas_[0] = -1;
+	assigned_areas_[2] = -1;
 }
 
 void BotMain::update_pathfinding(bool &r_first, bool *r_second) {

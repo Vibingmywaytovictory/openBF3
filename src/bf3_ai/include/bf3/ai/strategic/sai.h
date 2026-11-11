@@ -125,7 +125,7 @@ public:
 
 	void set_bot_is_dead(int p_bot_id);
 	void set_bot_is_alive(int p_bot_id);
-	void set_bot_has_changed_equipment(int p_bot_id);
+	void set_bot_has_changed_equipment(int p_bot_id) override;
 	bool release_unit_from_object(int p_object, std::set<int>::iterator &r_it);
 	int assign_bot(std::set<int>::iterator &r_it, int p_object, int p_bot_id, bool p_attacker);
 	bool is_bot_free(int p_bot_id) const { return free_bots_.contains(p_bot_id); }

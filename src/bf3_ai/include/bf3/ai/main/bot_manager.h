@@ -5,9 +5,11 @@
 
 #include <cstdint>
 #include <list>
+#include <map>
 #include <memory>
 #include <queue>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace bf3::ai {
@@ -17,11 +19,13 @@ class AiGame;
 class BotBehaviourManager;
 class PathfindingService;
 struct AiSettings;
+struct RadioMessageSettings;
 
 struct BotManagerServices {
 	const AiSettings *settings = nullptr;
 	const AiTimer *timer = nullptr;
 	const InformationManager *information = nullptr;
+	const WeaponInfoManager *weapons = nullptr;
 	const BotBehaviourManager *behaviours = nullptr;
 	AiGame *game = nullptr;
 	BotFactory *factory = nullptr;
@@ -35,14 +39,21 @@ public:
 	struct BotInfo {
 		explicit BotInfo(Bot *p_bot) : bot(p_bot) {}
 		Bot *bot = nullptr;
+		bool dead = false;
 		int priority = 0;
 		int sensing_priority = 0;
+		bool pathfinding = false;
 		double since_decision = 0.0;
 		int behaviour_update_count = 0;
+		uint32_t plan_execution_updates = 0;
 		uint32_t decision_updates = 0;
 		uint32_t sensing_updates = 0;
+		double plan_execution_run_time = 0.0;
 		double decision_run_time = 0.0;
 		double sensing_run_time = 0.0;
+		bool last_pathfinding_succeeded = true;
+		bool pathfinding_stall = false;
+		double last_pathfinding_run_time = 0.0;
 		float damage = 0.0f;
 		int attacker_index = 0;
 	};
@@ -55,9 +66,11 @@ public:
 	void action(double p_budget);
 	void update_damages();
 	void action_com_agent();
+	void action_execute_plan(double p_slice);
 	void action_update_nav_points();
 	void action_decision_making(double p_slice);
 	void action_pathfinding(double p_slice);
+	void action_hearing(double p_slice);
 	void action_sensing(double p_slice);
 
 	int bot_count() const;
@@ -66,14 +79,46 @@ public:
 	Bot *bot(uint32_t p_index) const;
 	Bot *bot_from_id(uint32_t p_id) const;
 	Bot *bot_from_player_id(int p_player_id) const;
+	Bot *bot_from_name(const std::string &p_name) const;
+	Bot *bot_from_object(const AiObject *p_object) const;
 	Bot *last_created_bot() const;
 	const BotInfo &info(uint32_t p_index) const { return *infos_[p_index]; }
 	const std::list<Update> &updates() const { return updates_; }
 
+	bool add_bot(int p_player_id, int p_side, const float *p_personality, AiObject *p_object);
 	bool add_unspawned_bot(int p_player_id, int p_side, const float *p_personality);
 	bool reactivate_bot(int p_player_id, int p_side, const std::string &p_name);
-	bool request_decision(uint32_t p_index, bool p_planned, int p_priority);
-	bool request_sensing(uint32_t p_index, int p_priority);
+	int deactivate_bot(int p_side);
+	int deactivate_bot_from_player_id(int p_player_id);
+
+	void update_bot_vehicle(const Bot &p_bot, const AiObject *p_vehicle);
+	void set_bot_changed_vehicle(int p_player_id, const AiObject *p_vehicle);
+	void set_bot_is_dead(int p_player_id);
+	void set_bot_is_alive(int p_player_id);
+	void set_bot_is_man_down(int p_player_id);
+	void set_bot_is_revived(int p_player_id);
+	void set_bot_received_radio_message(const RadioMessageSettings &p_settings, int p_sender, int p_player_id);
+	void set_bot_team_killed(int p_player_id);
+	void register_damage_on_bot(float p_damage, uint32_t p_bot_index, int p_attacker_index);
+	float vehicle_bail_value() const { return vehicle_bail_value_; }
+	void remove_mine_target(uint32_t p_handle);
+	bool reset();
+	void set_render_bot_sensing(bool p_render) { render_bot_sensing_ = p_render; }
+	bool render_bot_sensing() const { return render_bot_sensing_; }
+
+	void reset_statistics();
+	void reset_statistics(uint32_t p_bot_index);
+	uint32_t plan_execution_update_count(uint32_t p_bot_index) const;
+	uint32_t decision_making_update_count(uint32_t p_bot_index) const;
+	uint32_t sensing_update_count(uint32_t p_bot_index) const;
+	int decision_making_behaviour_update_count(uint32_t p_bot_index) const;
+	double plan_execution_run_time(uint32_t p_bot_index) const;
+	double decision_making_run_time(uint32_t p_bot_index) const;
+	double sensing_run_time(uint32_t p_bot_index) const;
+	bool is_pathfinding(uint32_t p_bot_index) const;
+	bool last_pathfinding_succeeded(uint32_t p_bot_index) const;
+	bool pathfinding_stall(uint32_t p_bot_index) const;
+	double last_pathfinding_run_time(uint32_t p_bot_index) const;
 
 	void set_lod_level_ticks(uint32_t p_full, uint32_t p_medium, uint32_t p_light);
 	void set_lod_level_priority(uint32_t p_full, uint32_t p_medium, uint32_t p_light);
@@ -110,7 +155,15 @@ private:
 
 	uint32_t lod_ticks(BotLodLevel p_level) const;
 	bool has_equipment(const Bot &p_bot) const;
+	Information *equipment_of(const Bot &p_bot) const;
 	double now() const;
+	double time_increase() const;
+	double game_time() const;
+	Bot *take_bot(int p_player_id, int p_side, const float *p_personality);
+	void map_player(int p_player_id, const Bot &p_bot);
+	bool sai_enabled() const;
+	void report_changed_equipment(const Bot &p_bot);
+	bool exit_add_bot(int p_player_id);
 
 	AIMain &main_;
 	BotManagerServices services_;
@@ -122,6 +175,8 @@ private:
 	std::vector<std::unique_ptr<BotInfo>> infos_;
 	std::list<uint32_t> deactivated_bots_;
 	std::vector<int> bot_by_player_id_;
+	std::map<const AiObject *, uint32_t> vehicle_bots_;
+	std::vector<std::pair<int, AiObject *>> occupied_objects_;
 	uint32_t com_agent_cursor_ = 0;
 	uint32_t lod_full_priority_ = 3;
 	uint32_t lod_medium_priority_ = 3;
@@ -141,9 +196,15 @@ private:
 	double system_pathfinding_quotient_ = 0.4;
 	double sensing_quotient_ = 0.5;
 	double sensing_quotient_inverse_ = 0.5;
+	uint32_t plan_executions_this_tick_ = 0;
+	int hearing_resume_id_ = 0;
 	std::vector<BotInfo *> selected_bots_;
 	Bot *last_created_bot_ = nullptr;
+	float vehicle_bail_value_ = 0.3f;
+	bool render_bot_sensing_ = false;
 	uint32_t nav_point_cursor_ = 0;
+	bool plan_half_toggle_ = true;
+	uint32_t plan_cursor_ = 0;
 	uint32_t pathfinding_cursor_ = 0;
 	std::list<Update> updates_;
 };

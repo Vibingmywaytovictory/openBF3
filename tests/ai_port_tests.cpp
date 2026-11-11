@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "ai_bot_fake.h"
 #include "ai_knowledge_fakes.h"
 #include "bf3/ai/actionplan/conditions.h"
 #include "bf3/ai/actionplan/flow_control.h"
@@ -432,54 +433,54 @@ struct Calls {
 	std::vector<std::string> log;
 };
 
-struct FakeBot final : Bot {
+struct FakeBot final : NullBot {
 	Calls *calls = nullptr;
-	uint32_t id = 0;
-	int team = 1;
-	int player = -1;
-	uint32_t equipment = kNoHandle;
 	int idle = -2;
 	int decisions = 0;
+	int executions = 0;
 	int seen = 0;
 	int talks = 0;
+	int heard = 0;
+	int resets = 0;
+	int refreshes = 0;
+	int stalls = 0;
+	bool pending_search = false;
+	bool stuck = false;
 	double last_slice = 0.0;
-	BotLodLevel lod = BotLodLevel::Full;
-	uint32_t bot_id() const override { return id; }
-	int side() const override { return team; }
-	void set_side(int p_side) override { team = p_side; }
-	int player_id() const override { return player; }
-	void set_player(int p_player_id) override { player = p_player_id; }
-	void set_name(const std::string &) override {}
-	void set_personality(const float *) override {}
+	double change_time = 0.0;
+	Vec3 spawn{};
+	FakeBot() { squad_member = true; }
 	void receive_idle_order(int p_idle) override { idle = p_idle; }
-	bool is_dead() const override { return false; }
-	bool man_down() const override { return false; }
-	bool is_deactivated() const override { return false; }
-	void set_deactivated(bool) override {}
-	BotLodLevel lod_level() const override { return lod; }
-	void set_lod_level(BotLodLevel p_level) override { lod = p_level; }
-	uint32_t current_equipment() const override { return equipment; }
-	bool has_squad_member() const override { return true; }
 	int decision_making(double p_slice) override {
 		++decisions;
 		last_slice = p_slice;
+		planned = true;
 		calls->log.push_back("decide " + std::to_string(id));
 		return 1;
 	}
+	void plan_execution(double) override {
+		++executions;
+		calls->log.push_back("execute " + std::to_string(id));
+	}
+	void update_player_action(bool p_stalled) override { stalls += p_stalled ? 1 : 0; }
 	void see(double) override {
 		++seen;
 		calls->log.push_back("see " + std::to_string(id));
 	}
-	void update_sensing(double) override {}
+	void heard_object(uint32_t p_information) override {
+		++heard;
+		calls->log.push_back("heard " + std::to_string(id) + " " + std::to_string(p_information));
+	}
 	void update_communication() override { ++talks; }
-	bool path_search_pending() const override { return false; }
-	void update_obstacles() override {}
-	bool navigation_active() const override { return false; }
-	void update_navigation_occasionally() override {}
-	bool search_active() const override { return false; }
-	bool search_new() const override { return false; }
-	bool search_running() const override { return false; }
-	void update_pathfinding(bool &, bool *) override {}
+	bool path_search_pending() const override { return pending_search; }
+	void set_bot_stuck(bool p_stuck) override { stuck = p_stuck; }
+	bool update_bot() override {
+		++refreshes;
+		return true;
+	}
+	void reset() override { ++resets; }
+	void set_last_change_time(double p_time) override { change_time = p_time; }
+	void set_spawn_coord(const Vec3 &p_position) override { spawn = p_position; }
 };
 
 struct FakeFactory final : BotFactory {
@@ -518,6 +519,14 @@ struct FakeGame final : AiGame {
 	}
 	void give_damage(AiObject *, int, int, float) override {}
 	float recommended_view_distance() const override { return 120.0f; }
+	void respawn_bot(int p_player_id) override { calls->log.push_back("respawn " + std::to_string(p_player_id)); }
+	void set_bot_name_unused(const std::string &p_name) override { calls->log.push_back("unused " + p_name); }
+	AiObject *player_vehicle(int) const override { return vehicle; }
+	AiObject *player_default_vehicle(int) const override { return vehicle; }
+	void occupied_objects(std::vector<std::pair<int, AiObject *>> &r_out) const override { r_out = occupied; }
+	uint32_t force_information(AiObject &r_object, int p_side, bool) override { return r_object.information(p_side); }
+	AiObject *vehicle = nullptr;
+	std::vector<std::pair<int, AiObject *>> occupied;
 };
 
 struct FakeSai final : StrategicAi {
@@ -532,6 +541,9 @@ struct FakeSai final : StrategicAi {
 	void update(double p_budget) override {
 		calls->log.push_back("sai" + std::to_string(side) + " update");
 		CHECK(p_budget > 0.0);
+	}
+	void set_bot_has_changed_equipment(int p_bot_id) override {
+		calls->log.push_back("sai" + std::to_string(side) + " changed " + std::to_string(p_bot_id));
 	}
 };
 
@@ -636,7 +648,8 @@ TEST_SUITE("ai-port") {
 		CHECK(w.calls.log.front() == "sai2 update");
 	}
 
-	TEST_CASE("BotManager: queued bots get decision and sensing slices from the tick budget, in priority order") {
+	TEST_CASE("BotManager: plan execution runs half the roster a tick and queues decisions and sensing by its "
+			  "thresholds") {
 		AiSettings settings;
 		settings.max_bots = 3;
 		World w(settings);
@@ -658,31 +671,221 @@ TEST_SUITE("ai-port") {
 		CHECK(bots.last_created_bot() == w.factory.bots[2]);
 		CHECK(bots.bot_from_player_id(21) == w.factory.bots[1]);
 		CHECK(bots.bot_from_player_id(99) == nullptr);
-		CHECK(bots.request_decision(0, false, 1));
-		CHECK(bots.request_decision(2, false, 5));
-		CHECK(bots.request_decision(1, true, 3));
-		CHECK_FALSE(bots.request_decision(7, true, 3));
-		CHECK(bots.request_sensing(1, 2));
 		w.calls.log.clear();
 		bots.action(0.01);
-		CHECK(w.calls.log == std::vector<std::string>{ "decide 2", "decide 0", "decide 1", "see 1" });
-		CHECK(bots.info(2).decision_updates == 1);
-		CHECK(bots.info(2).priority == 0);
-		CHECK(bots.info(1).sensing_updates == 1);
-		CHECK(w.factory.bots[2]->last_slice == doctest::Approx(w.factory.bots[0]->last_slice));
-		CHECK(w.factory.bots[0]->last_slice > 0.0);
-		CHECK(w.factory.bots[0]->last_slice <= 0.01 * 0.2 / 3.0 + 1e-9);
-		CHECK(w.factory.bots[0]->talks + w.factory.bots[1]->talks + w.factory.bots[2]->talks == 1);
+		CHECK(w.calls.log == std::vector<std::string>{ "execute 0", "see 0" });
 		w.calls.log.clear();
 		bots.action(0.01);
-		CHECK(w.calls.log.empty());
-		w.timer.step = 1.0;
-		CHECK(bots.request_decision(0, false, 1));
-		CHECK(bots.request_decision(1, false, 1));
+		CHECK(w.calls.log == std::vector<std::string>{ "execute 1", "execute 2", "see 1", "see 2" });
+		CHECK(bots.info(1).since_decision == doctest::Approx(1.0 / 60.0));
+		CHECK(bots.plan_execution_update_count(1) == 1);
+		CHECK(bots.sensing_update_count(2) == 1);
+		CHECK(w.factory.bots[0]->talks + w.factory.bots[1]->talks + w.factory.bots[2]->talks == 2);
+		for (int i = 0; i < 40; ++i) {
+			bots.action(0.01);
+		}
+		for (uint32_t i = 0; i < 3; ++i) {
+			CHECK(w.factory.bots[i]->decisions >= 1);
+			CHECK(bots.decision_making_update_count(i) == uint32_t(w.factory.bots[i]->decisions));
+			CHECK(bots.info(i).since_decision < 0.5 + 1e-9);
+		}
+		bots.set_lod_level_ticks(6, 3, 1);
+		w.factory.bots[1]->lod = BotLodLevel::Medium;
+		for (int i = 0; i < 59; ++i) {
+			bots.action_execute_plan(0.01);
+		}
 		w.calls.log.clear();
-		bots.action(0.5);
-		CHECK(w.calls.log.size() <= 1);
+		bots.action_execute_plan(0.01);
+		CHECK(w.calls.log == std::vector<std::string>{ "execute 1", "execute 2" });
+		w.calls.log.clear();
+		bots.action_decision_making(0.009);
+		CHECK(w.calls.log == std::vector<std::string>{ "decide 1", "decide 2" });
+		CHECK(w.factory.bots[1]->last_slice == doctest::Approx(0.003));
+		CHECK(w.factory.bots[2]->last_slice == doctest::Approx(0.006));
+		w.factory.bots[1]->lod = BotLodLevel::Full;
+		bots.set_lod_level_ticks(6, 6, 6);
 		CHECK(bots.updates().size() == 5);
+		bots.reset_statistics(0);
+		CHECK(bots.plan_execution_update_count(0) == 0);
+		CHECK(bots.decision_making_update_count(0) == 0);
+		w.factory.bots[1]->pending_search = true;
+		body.legs.velocity = {};
+		w.game.vehicle = &body;
+		w.calls.log.clear();
+		bots.action_execute_plan(0.01);
+		bots.action_execute_plan(0.01);
+		CHECK(std::find(w.calls.log.begin(), w.calls.log.end(), "respawn 21") != w.calls.log.end());
+		CHECK(std::find(w.calls.log.begin(), w.calls.log.end(), "execute 1") == w.calls.log.end());
+		w.timer.step = 1.0;
+		w.calls.log.clear();
+		w.factory.bots[1]->pending_search = false;
+		const int stalls = w.factory.bots[0]->stalls + w.factory.bots[1]->stalls + w.factory.bots[2]->stalls;
+		bots.action_execute_plan(0.5);
+		CHECK(w.calls.log.empty());
+		CHECK(w.factory.bots[0]->stalls + w.factory.bots[1]->stalls + w.factory.bots[2]->stalls == stalls + 1);
+	}
+
+	TEST_CASE("BotManager: death, spawn, man-down and revive drive the bot as OpenBF2's IBotManager does") {
+		struct CallBack final : BotCallBack {
+			int reports = 0;
+			void report() override { ++reports; }
+		};
+		struct ReportingBot final : NullBot {
+			CallBack died;
+			CallBack spawned;
+			int resets = 0;
+			int nav_resets_all = 0;
+			int nav_resets = 0;
+			double change_time = 0.0;
+			Vec3 spawn{};
+			void reset() override { ++resets; }
+			void reset_navigation(bool p_all) override { ++(p_all ? nav_resets_all : nav_resets); }
+			void set_last_change_time(double p_time) override { change_time = p_time; }
+			void set_spawn_coord(const Vec3 &p_position) override { spawn = p_position; }
+			BotCallBack *death_call_back() const override { return const_cast<CallBack *>(&died); }
+			BotCallBack *spawn_call_back() const override { return const_cast<CallBack *>(&spawned); }
+		};
+		struct Factory final : BotFactory {
+			std::vector<ReportingBot *> made;
+			std::unique_ptr<Bot> create_bot(int p_player_id, uint32_t p_bot_id, const float *, int p_side) override {
+				auto bot = std::make_unique<ReportingBot>();
+				bot->id = p_bot_id;
+				bot->player = p_player_id;
+				bot->team = p_side;
+				made.push_back(bot.get());
+				return bot;
+			}
+		};
+		Calls calls;
+		FakeTimer timer;
+		FakeGame game;
+		game.calls = &calls;
+		FakeSai sai;
+		sai.calls = &calls;
+		sai.side = 1;
+		Factory factory;
+		Knowledge knowledge;
+		FakeObject body;
+		body.where = { 4.0f, 0.0f, 9.0f };
+		const uint32_t equipment = knowledge.soldier(body, 1);
+		AiSettings settings;
+		settings.max_bots = 2;
+		AiMainServices services;
+		services.settings = &settings;
+		services.timer = &timer;
+		services.information = &knowledge.information;
+		services.weapons = &knowledge.weapons;
+		services.game = &game;
+		services.factory = &factory;
+		AIMain main(services);
+		main.set_sai(1, &sai);
+		CHECK(main.init(1) == "AIMain initiated.");
+		BotManager &bots = main.bot_manager();
+		REQUIRE(bots.add_unspawned_bot(30, 1, nullptr));
+		ReportingBot &bot = *factory.made[0];
+		bot.equipment = equipment;
+		bot.mine = 77;
+		bot.bot_name = "Alpha";
+		CHECK(bots.bot_from_name("Alpha") == &bot);
+		bots.set_bot_is_alive(30);
+		CHECK(bot.spawned.reports == 0);
+		bots.set_bot_is_dead(30);
+		CHECK(bot.transition);
+		CHECK(bot.resets == 1);
+		CHECK(bot.nav_resets_all == 1);
+		CHECK(bot.equipment == kNoHandle);
+		CHECK(bot.died.reports == 1);
+		CHECK(bots.info(0).dead);
+		bot.equipment = equipment;
+		bots.set_bot_is_alive(30);
+		CHECK_FALSE(bot.transition);
+		CHECK(bot.change_time == -1000000.0);
+		CHECK(bot.spawn.x == 4.0f);
+		CHECK(bot.spawn.z == 9.0f);
+		CHECK(bot.spawned.reports == 1);
+		CHECK_FALSE(bots.info(0).dead);
+		bots.set_bot_is_man_down(30);
+		CHECK(bot.down);
+		CHECK(bot.nav_resets_all == 2);
+		calls.log.clear();
+		bots.set_bot_is_revived(30);
+		CHECK_FALSE(bot.down);
+		CHECK(bot.nav_resets == 1);
+		CHECK(calls.log == std::vector<std::string>{ "sai1 changed 0" });
+		bots.remove_mine_target(77);
+		CHECK(bot.mine == kNoHandle);
+		bots.register_damage_on_bot(5.0f, 0, 0);
+		CHECK(bots.info(0).damage == 5.0f);
+		bots.update_damages();
+		CHECK(bots.info(0).damage == 0.0f);
+		CHECK(bots.vehicle_bail_value() == 0.3f);
+		bot.dead = true;
+		calls.log.clear();
+		CHECK(bots.deactivate_bot_from_player_id(30) == 0);
+		CHECK(calls.log == std::vector<std::string>{ "unused Alpha" });
+		CHECK(bot.deactivated);
+		CHECK(bots.bot_from_player_id(30) == nullptr);
+		CHECK(bots.number_of_deactivated_bots() == 1);
+		CHECK(bots.reactivate_bot(31, 1, "Bravo"));
+		CHECK(bots.bot_from_player_id(31) == &bot);
+		CHECK(bot.bot_name == "Bravo");
+		CHECK(bots.reset());
+		CHECK(bots.bot_count() == 0);
+		CHECK(bots.lod_level_ticks(BotLodLevel::Light) == 1);
+		CHECK(bots.unplanned_decision_making_threshold(BotLodLevel::Medium) == 0.8);
+	}
+
+	TEST_CASE("BotManager: a sounding enemy within its radius is heard by every live bot of the other side") {
+		AiSettings settings;
+		settings.max_bots = 2;
+		World w(settings);
+		AIMain &main = w.ai.main();
+		CHECK(main.add_unspawned_bot(20, 1, nullptr));
+		CHECK(main.add_unspawned_bot(21, 2, nullptr));
+		BotManager &bots = main.bot_manager();
+		FakeObject listener_a;
+		FakeObject listener_b;
+		FakeObject enemy;
+		listener_a.where = { 5.0f, 0.0f, 0.0f };
+		listener_b.where = { 50.0f, 0.0f, 0.0f };
+		listener_b.team = 2;
+		enemy.team = 2;
+		enemy.handles[1] = 42;
+		bots.update_bot_vehicle(*w.factory.bots[0], &listener_a);
+		bots.update_bot_vehicle(*w.factory.bots[1], &listener_b);
+		CHECK(bots.bot_from_object(&listener_a) == w.factory.bots[0]);
+		w.game.occupied = { { 20, &listener_a }, { 21, &listener_b }, { 3, &enemy } };
+		w.calls.log.clear();
+		bots.action_hearing(1.0);
+		CHECK(w.calls.log == std::vector<std::string>{ "heard 0 42" });
+		w.factory.bots[0]->down = true;
+		w.calls.log.clear();
+		bots.action_hearing(1.0);
+		CHECK(w.calls.log.empty());
+		w.factory.bots[0]->down = false;
+		listener_a.arms.list.clear();
+		listener_b.arms.list.clear();
+		listener_a.where = { 30.0f, 0.0f, 0.0f };
+		w.timer.tick = 60;
+		w.calls.log.clear();
+		bots.action_hearing(1.0);
+		CHECK(w.calls.log == std::vector<std::string>{ "heard 0 42" });
+		w.timer.tick = 600;
+		w.calls.log.clear();
+		bots.action_hearing(1.0);
+		CHECK(w.calls.log.empty());
+		AiMainServices untimed;
+		untimed.settings = &settings;
+		untimed.game = &w.game;
+		untimed.factory = &w.factory;
+		AIMain timeless(untimed);
+		CHECK(timeless.init(1) == "AIMain initiated.");
+		REQUIRE(timeless.bot_manager().add_unspawned_bot(30, 1, nullptr));
+		timeless.bot_manager().update_bot_vehicle(*timeless.bot_manager().bot(0), &listener_a);
+		w.game.occupied = { { 30, &listener_a }, { 3, &enemy } };
+		w.calls.log.clear();
+		timeless.bot_manager().action_hearing(1.0);
+		CHECK(w.calls.log == std::vector<std::string>{ "heard 0 42" });
 	}
 
 	TEST_CASE("AIMain: a human joining a full server terminates a bot on the larger side") {

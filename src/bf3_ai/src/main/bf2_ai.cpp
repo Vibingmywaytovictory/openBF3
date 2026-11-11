@@ -40,6 +40,7 @@ bool BF2AI::init(const AiServices &p_services) {
 	main.settings = settings_.get();
 	main.timer = p_services.timer;
 	main.information = information_.get();
+	main.weapons = weapons_.get();
 	main.behaviours = behaviours_.get();
 	main.game = p_services.game;
 	main.factory = p_services.factory;

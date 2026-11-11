@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "ai_bot_fake.h"
 #include "bf3/ai/behaviour/curves.h"
 #include "bf3/ai/commander/commander.h"
 #include "bf3/ai/knowledge/information_factory.h"
@@ -1076,40 +1077,8 @@ struct ControlPoints final : StrategicGame {
 	bool polygon(const Vec3 &, int, uint32_t &, uint32_t &, Vec3 &) const override { return false; }
 };
 
-struct StrategicBot final : Bot {
-	uint32_t id = 0;
-	int team = 1;
-	int player = 0;
-	bool dead = false;
-	uint32_t equipment = kNoHandle;
-	uint32_t bot_id() const override { return id; }
-	int side() const override { return team; }
-	void set_side(int p_side) override { team = p_side; }
-	int player_id() const override { return player; }
-	void set_player(int p_player_id) override { player = p_player_id; }
-	void set_name(const std::string &) override {}
-	void set_personality(const float *) override {}
-	void receive_idle_order(int) override {}
-	bool is_dead() const override { return dead; }
-	bool man_down() const override { return false; }
-	bool is_deactivated() const override { return false; }
-	void set_deactivated(bool) override {}
-	BotLodLevel lod_level() const override { return BotLodLevel::Full; }
-	void set_lod_level(BotLodLevel) override {}
-	uint32_t current_equipment() const override { return equipment; }
-	bool has_squad_member() const override { return false; }
-	int decision_making(double) override { return 0; }
-	void see(double) override {}
-	void update_sensing(double) override {}
-	void update_communication() override {}
-	bool path_search_pending() const override { return false; }
-	void update_obstacles() override {}
-	bool navigation_active() const override { return false; }
-	void update_navigation_occasionally() override {}
-	bool search_active() const override { return false; }
-	bool search_new() const override { return false; }
-	bool search_running() const override { return false; }
-	void update_pathfinding(bool &, bool *) override {}
+struct StrategicBot final : test::NullBot {
+	StrategicBot() { player = 0; }
 };
 
 struct GameClock final : AiTimer {

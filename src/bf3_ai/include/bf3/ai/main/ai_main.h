@@ -23,6 +23,7 @@ struct AiMainServices {
 	AiSettings *settings = nullptr;
 	const AiTimer *timer = nullptr;
 	const InformationManager *information = nullptr;
+	const WeaponInfoManager *weapons = nullptr;
 	const BotBehaviourManager *behaviours = nullptr;
 	AiGame *game = nullptr;
 	BotFactory *factory = nullptr;
