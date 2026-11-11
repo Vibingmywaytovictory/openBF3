@@ -578,7 +578,7 @@ void DeployCheck::fire_accessory_rows(const DeployCheckState &p_st) {
 	const auto share = [](size_t p_n, size_t p_of) { return p_of == 0 ? 0.0f : float(p_n) / float(p_of); };
 	const bool reticle_drawn = px.reticle_mesh.empty() || px.tinted >= kDeployFireReticlePixels;
 	const bool surround_drawn = !px.surround ||
-			(px.shade_r10 >= px.inner_px - kDeployFireEdgePx && px.shade_r10 <= px.outer_px + kDeployFireEdgePx &&
+			(px.shade_r10 >= (px.inner_px + px.outer_px) * 0.5f && px.shade_r10 <= px.outer_px + kDeployFireEdgePx &&
 					share(px.ring_dark, px.ring) >= kDeployFireDarkShare && share(px.inside_dark, px.inside) < 0.5f);
 	char drawn_px[512];
 	std::snprintf(drawn_px, sizeof(drawn_px),

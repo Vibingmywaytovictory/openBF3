@@ -31,6 +31,7 @@ enum class TextureRole : uint8_t {
 	Normal,
 	Data,
 	Mask,
+	InvertedMask,
 };
 
 struct PreparedTexture {
@@ -57,6 +58,9 @@ std::array<uint8_t, 16> bc3_normal_to_bc5(const uint8_t *p_bc3_block);
 std::array<uint8_t, 16> bc1_luminance(const uint8_t *p_block);
 
 std::array<uint8_t, 16> bc1_mask_to_bc3(const uint8_t *p_bc1_block);
+
+bool inverted_brightness(
+		const core::res::MipSlice &p_mip, core::res::TextureFormat p_format, std::vector<uint8_t> &r_l8);
 
 std::array<uint8_t, 16> bc_color_green(const uint8_t *p_color_block);
 

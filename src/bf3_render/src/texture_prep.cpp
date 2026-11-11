@@ -1,6 +1,7 @@
 #include "bf3/render/texture_prep.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace bf3::render {
@@ -172,6 +173,19 @@ std::array<uint8_t, 16> bc1_mask_to_bc3(const uint8_t *p_bc1_block) {
 	return out;
 }
 
+bool inverted_brightness(const MipSlice &p_mip, TextureFormat p_format, std::vector<uint8_t> &r_l8) {
+	std::vector<std::array<float, 4>> texels;
+	if (!p_mip.texels(p_format, texels) || texels.size() != size_t(p_mip.width) * size_t(p_mip.height)) {
+		return false;
+	}
+	r_l8.resize(texels.size());
+	for (size_t i = 0; i < texels.size(); ++i) {
+		const float brightness = std::clamp(std::max({ texels[i][0], texels[i][1], texels[i][2] }), 0.0f, 1.0f);
+		r_l8[i] = uint8_t(std::lround(255.0f * (1.0f - brightness)));
+	}
+	return true;
+}
+
 std::array<uint8_t, 16> bc3_normal_to_bc5(const uint8_t *p_bc3_block) {
 	std::array<uint8_t, 16> out{};
 	std::memcpy(out.data(), p_bc3_block, 8);
@@ -272,7 +286,8 @@ core::Result<PreparedTexture> prepare_texture(const LoadedTexture &p_texture, Te
 
 	const bool transcode = p_role == TextureRole::Normal && tex.format == TextureFormat::NormalDxt5;
 	const bool mask = p_role == TextureRole::Mask && stored == GpuFormat::Bc1;
-	out.format = transcode ? GpuFormat::Bc5 : mask ? GpuFormat::Bc3 : stored;
+	const bool inverted = p_role == TextureRole::InvertedMask;
+	out.format = inverted ? GpuFormat::L8 : transcode ? GpuFormat::Bc5 : mask ? GpuFormat::Bc3 : stored;
 
 	std::vector<MipSlice> mips;
 	const core::res::ResError e = p_texture.mips(mips);
@@ -289,7 +304,11 @@ core::Result<PreparedTexture> prepare_texture(const LoadedTexture &p_texture, Te
 			return core::make_error(where + ": face 0 mip " + std::to_string(m.mip) + " out of order");
 		}
 		std::vector<uint8_t> bytes;
-		if (!level_data(m, stored, bytes)) {
+		if (inverted) {
+			if (!inverted_brightness(m, tex.format, bytes)) {
+				return core::make_error(where + ": mip " + std::to_string(m.mip) + " has no brightness to invert");
+			}
+		} else if (!level_data(m, stored, bytes)) {
 			return core::make_error(where + ": mip " + std::to_string(m.mip) + " short");
 		}
 		if (transcode) {

@@ -8,6 +8,7 @@
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
+#include "bf3/core/res/res_loader.h"
 #include "bf3/core/thread_pool.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/text.h"
@@ -18,6 +19,7 @@
 #include "bf3/render/deployed_gadgets.h"
 #include "bf3/render/mesh_cache.h"
 #include "bf3/render/soldier_assets.h"
+#include "bf3/render/texture_prep.h"
 #include "bf3/render/viewmodel_set.h"
 #include "bf3/render/weapon_camo.h"
 #include "bf3/render/weapon_lights.h"
@@ -50,6 +52,10 @@ constexpr const char *kLevel = "Win32/Levels/MP_Subway/MP_Subway";
 constexpr float kSightOffsetMeasured = 0.06f;
 constexpr float kSightMeasuredMetres = 0.001f;
 constexpr float kSightRatioSpread = 0.3f;
+constexpr float kSightUnmarked = 1.0f / 255.0f;
+constexpr float kSightMark = 0.75f;
+constexpr float kSightBlank = 0.25f;
+constexpr float kSightDrawnHalf = 0.5f;
 
 const std::set<std::string> kCurveFireWeapons{ "weapons/gadgets/defibrillator/u_defib", "weapons/m40a5/u_m40a5",
 	"weapons/model98b/u_m98b", "weapons/sv98/u_sv98", "weapons/xp1_l96/u_l96", "weapons/xp2_jng90/u_jng90" };
@@ -204,6 +210,73 @@ uint32_t accessory_ending(const host::LoadoutItem &p_item, size_t p_slot, std::s
 		}
 	}
 	return 0;
+}
+
+struct SightBrightness {
+	uint32_t width = 0;
+	uint32_t height = 0;
+	std::vector<float> texels;
+};
+
+SightBrightness sight_brightness(const core::LevelMount &p_mount, const std::string &p_name) {
+	SightBrightness out;
+	core::Result<core::res::LoadedTexture> t = core::res::load_texture(p_mount, p_name);
+	std::vector<core::res::MipSlice> mips;
+	std::vector<std::array<float, 4>> texels;
+	if (!t || !t->mips(mips).ok() || mips.empty() || !mips[0].texels(t->texture.format, texels)) {
+		return out;
+	}
+	out.width = mips[0].width;
+	out.height = mips[0].height;
+	for (const std::array<float, 4> &c : texels) {
+		out.texels.push_back(std::max({ c[0], c[1], c[2] }));
+	}
+	return out;
+}
+
+float drawn_sight_value(const render::PreparedTexture &p_t, uint32_t p_x, uint32_t p_y) {
+	const size_t block = size_t(p_y / 4) * size_t((p_t.width + 3) / 4) + p_x / 4;
+	const size_t at = size_t(p_y % 4) * 4 + p_x % 4;
+	switch (p_t.format) {
+		case render::GpuFormat::L8:
+			return float(p_t.data[size_t(p_y) * p_t.width + p_x]) / 255.0f;
+		case render::GpuFormat::Bc3:
+			return float(render::bc4_values(p_t.data.data() + block * 16)[at]) / 255.0f;
+		case render::GpuFormat::Bc1:
+			return float(render::bc1_luminance(p_t.data.data() + block * 8)[at]) / 255.0f;
+		default:
+			return -1.0f;
+	}
+}
+
+template <class F> void each_covered_texel(const render::PreparedSurface &p_s, uint32_t p_w, uint32_t p_h, F &&p_at) {
+	const auto texel = [&](int32_t p_i) {
+		return std::array<float, 2>{ p_s.uv0[2 * size_t(p_i)] * float(p_w), p_s.uv0[2 * size_t(p_i) + 1] * float(p_h) };
+	};
+	for (size_t t = 0; t + 2 < p_s.indices.size(); t += 3) {
+		const std::array<float, 2> a = texel(p_s.indices[t]), b = texel(p_s.indices[t + 1]),
+								   c = texel(p_s.indices[t + 2]);
+		const float area = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]);
+		if (std::fabs(area) < 1e-6f) {
+			continue;
+		}
+		const int32_t x0 = int32_t(std::floor(std::min({ a[0], b[0], c[0] }))),
+					  x1 = int32_t(std::ceil(std::max({ a[0], b[0], c[0] })));
+		const int32_t y0 = int32_t(std::floor(std::min({ a[1], b[1], c[1] }))),
+					  y1 = int32_t(std::ceil(std::max({ a[1], b[1], c[1] })));
+		for (int32_t y = y0; y < y1; ++y) {
+			for (int32_t x = x0; x < x1; ++x) {
+				const float px = float(x) + 0.5f, py = float(y) + 0.5f;
+				const float u = ((b[0] - px) * (c[1] - py) - (c[0] - px) * (b[1] - py)) / area;
+				const float v = ((c[0] - px) * (a[1] - py) - (a[0] - px) * (c[1] - py)) / area;
+				if (u < 0.0f || v < 0.0f || u + v > 1.0f) {
+					continue;
+				}
+				const int32_t w = int32_t(p_w), h = int32_t(p_h);
+				p_at(uint32_t(((x % w) + w) % w), uint32_t(((y % h) + h) % h));
+			}
+		}
+	}
 }
 
 std::array<uint32_t, host::kLoadoutAccessories> m16_acog_foregrip_suppressor(const host::LoadoutItem &p_m16) {
@@ -1128,11 +1201,77 @@ TEST_SUITE("render-catalog-accessories-1p") {
 		std::array<std::vector<float>, 3> ratios;
 		std::array<std::string, 3> lines;
 		std::set<std::string> dark_housings;
+		std::map<std::string, SightBrightness> brightness;
+		size_t acog_marks = 0, faded_rings = 0;
 		for (const OpticLoad &l : loads) {
 			const std::string &optic = l.item->accessory_unlocks[0][l.index];
 			REQUIRE_MESSAGE(l.set != nullptr, optic, ": ", l.error);
 			const render::ViewmodelItem &vm = l.set->items[0];
 			CHECK_MESSAGE(vm.sight.has_value(), optic, " has no sight picture");
+			size_t clear_vertices = 0, clear_kept = 0, marks = 0, marks_dark = 0, mixed = 0, mixed_agree = 0;
+			for (const render::ViewmodelAttachment &a : vm.attachments) {
+				for (const render::PreparedSurface &sf : a.part.prepared.surfaces) {
+					const render::ViewmodelSlotLook *look =
+							sf.material_index < a.looks.size() ? &a.looks[sf.material_index] : nullptr;
+					if (look == nullptr || !look->blend || !look->unlit || sf.uv0.size() < 2 * sf.vertex_count()) {
+						continue;
+					}
+					const render::PreparedTexture *t = l.set->texture(look->color_texture, look->color_role);
+					auto [at, fresh] = brightness.try_emplace(look->color_texture);
+					if (fresh) {
+						at->second = sight_brightness(lib.mount(0), look->color_texture);
+					}
+					const SightBrightness &raw = at->second;
+					if (t == nullptr || raw.width != t->width || raw.height != t->height) {
+						CHECK_MESSAGE(false, optic, ": ", look->color_texture, " not decoded");
+						continue;
+					}
+					const auto raw_at = [&](uint32_t p_x, uint32_t p_y) {
+						return raw.texels[size_t(p_y) * raw.width + p_x];
+					};
+					if (look->blend_mode == render::ViewmodelBlend::Multiply) {
+						bool ring = false;
+						for (size_t k = 0; k < sf.vertex_count(); ++k) {
+							const float u = sf.uv0[2 * k] - std::floor(sf.uv0[2 * k]);
+							const float v = sf.uv0[2 * k + 1] - std::floor(sf.uv0[2 * k + 1]);
+							const uint32_t x = std::min(t->width - 1, uint32_t(u * float(t->width)));
+							const uint32_t y = std::min(t->height - 1, uint32_t(v * float(t->height)));
+							if (raw_at(x, y) > kSightUnmarked) {
+								continue;
+							}
+							++clear_vertices;
+							clear_kept += drawn_sight_value(*t, x, y) >= 1.0f - kSightUnmarked ? 1u : 0u;
+							ring = ring || (sf.colors.size() >= 4 * sf.vertex_count() && sf.colors[4 * k] == 0);
+						}
+						faded_rings += ring ? 1u : 0u;
+						each_covered_texel(sf, t->width, t->height, [&](uint32_t p_x, uint32_t p_y) {
+							if (raw_at(p_x, p_y) >= kSightMark) {
+								++marks;
+								marks_dark += drawn_sight_value(*t, p_x, p_y) < kSightDrawnHalf ? 1u : 0u;
+							}
+						});
+					} else {
+						each_covered_texel(sf, t->width, t->height, [&](uint32_t p_x, uint32_t p_y) {
+							const float r = raw_at(p_x, p_y);
+							if (r >= kSightMark || r <= kSightBlank) {
+								++mixed;
+								mixed_agree += (drawn_sight_value(*t, p_x, p_y) >= kSightDrawnHalf) == (r >= kSightMark)
+										? 1u
+										: 0u;
+							}
+						});
+					}
+				}
+			}
+			CHECK_MESSAGE(clear_kept == clear_vertices, optic, ": ", clear_kept, " of ", clear_vertices,
+					" multiplying sight vertices over unmarked texels draw their vertex colour");
+			CHECK_MESSAGE(marks_dark == marks, optic, ": ", marks_dark, " of ", marks,
+					" marked texels under a multiplying sight darken the scene");
+			CHECK_MESSAGE(mixed_agree == mixed, optic, ": ", mixed_agree, " of ", mixed,
+					" texels under a mixing sight draw its tint exactly where the texture is marked");
+			if (optic.ends_with("_acog")) {
+				acog_marks += marks;
+			}
 			size_t textured = 0, sights = 0, roles = 0, single = 0, single_kept = 0;
 			for (const render::ViewmodelAttachment &a : vm.attachments) {
 				for (const render::ViewmodelSlotLook &look : a.looks) {
@@ -1145,8 +1284,10 @@ TEST_SUITE("render-catalog-accessories-1p") {
 					++sights;
 					const render::PreparedTexture *t = l.set->texture(look.color_texture, look.color_role);
 					textured += !look.color_texture.empty() && t != nullptr ? 1u : 0u;
-					roles += (look.blend_mode == render::ViewmodelBlend::Multiply) ==
-									(look.color_role == render::TextureRole::Color)
+					roles += look.color_role ==
+									(look.blend_mode == render::ViewmodelBlend::Multiply
+													? render::TextureRole::InvertedMask
+													: render::TextureRole::Mask)
 							? 1u
 							: 0u;
 					single += t != nullptr && t->stored_levels == 1 ? 1u : 0u;
@@ -1156,7 +1297,7 @@ TEST_SUITE("render-catalog-accessories-1p") {
 			CHECK_MESSAGE(sights > 0, optic);
 			CHECK_MESSAGE(textured == sights, optic, ": ", textured, " of ", sights, " sight surfaces textured");
 			CHECK_MESSAGE(roles == sights, optic, ": ", roles, " of ", sights,
-					" sight surfaces sample their texture as colour exactly when they multiply");
+					" sight surfaces sample their texture as an inverted mask when they multiply, else as a mask");
 			CHECK_MESSAGE(single > 0, optic, ": no sight texture stored with one level");
 			CHECK_MESSAGE(single_kept == single, optic, ": ", single_kept, " of ", single,
 					" sight textures stored with one level are drawn from it alone");
@@ -1192,6 +1333,10 @@ TEST_SUITE("render-catalog-accessories-1p") {
 		MESSAGE(dark_housings.size(), " surfaces darkened to black with a black Specular texture:", housings);
 		CHECK(dark_housings.count("weapons/sv98/u_sv98_ballistic_scope "
 								  "weapons/accessories/ballistic_scope/ballisticscope_zoom_1p_mesh") == 1);
+		MESSAGE(acog_marks, " marked texels under the ACOGs' multiplying sights, ", faded_rings,
+				" multiplying rings fading by vertex colour over unmarked texels");
+		CHECK(acog_marks > 0);
+		CHECK(faded_rings > 0);
 		CHECK(loads.size() >= 30);
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
 		CHECK(diff.clean());

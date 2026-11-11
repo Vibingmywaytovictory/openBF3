@@ -1168,9 +1168,10 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 						out[i].color_texture = lm.color->name;
 					}
 					out[i].unlit = !lm.normal.has_value();
-					out[i].color_role = out[i].unlit && out[i].blend_mode != ViewmodelBlend::Multiply
-							? TextureRole::Mask
-							: TextureRole::Color;
+					if (out[i].unlit) {
+						out[i].color_role = out[i].blend_mode == ViewmodelBlend::Multiply ? TextureRole::InvertedMask
+																						  : TextureRole::Mask;
+					}
 					if (lm.glass) {
 						out[i].tint = { kLookGlassTint, kLookGlassTint, kLookGlassTint, kLookGlassOpacity };
 						continue;

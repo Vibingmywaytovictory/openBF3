@@ -8,10 +8,13 @@
 #include "test_support.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace bf3::render;
 
@@ -91,6 +94,27 @@ TEST_SUITE("render-unit") {
 		CHECK(bc3[11] == 0xFF);
 		CHECK(bc3[12] == 0);
 		CHECK(bc3[15] == 0);
+	}
+
+	TEST_CASE("render: an inverted mask is L8 of one minus a BC1 texel's brightness, in both BC1 modes") {
+		const uint8_t four[8] = { 0xFF, 0xFF, 0x00, 0x00, 0b11100100, 0b11100100, 0b11100100, 0b11100100 };
+		const uint8_t three[8] = { 0x00, 0x00, 0xFF, 0xFF, 0b11100100, 0b11100100, 0b11100100, 0b11100100 };
+		const std::array<std::pair<const uint8_t *, std::array<int, 4>>, 2> blocks{
+			std::pair{ four, std::array<int, 4>{ 0, 255, 85, 170 } },
+			std::pair{ three, std::array<int, 4>{ 255, 0, 128, 255 } }
+		};
+		for (const auto &[block, expect] : blocks) {
+			bf3::core::res::MipSlice mip;
+			mip.width = 4;
+			mip.height = 4;
+			mip.data = bf3::core::res::Bytes(block, 8);
+			std::vector<uint8_t> l8;
+			REQUIRE(inverted_brightness(mip, bf3::core::res::TextureFormat::Dxt1, l8));
+			REQUIRE(l8.size() == 16);
+			for (size_t i = 0; i < 16; ++i) {
+				CHECK(std::abs(int(l8[i]) - expect[i % 4]) <= 1);
+			}
+		}
 	}
 }
 
