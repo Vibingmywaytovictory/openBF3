@@ -15,6 +15,8 @@
 
 namespace bf3::sim::logic {
 
+inline constexpr int32_t kOnEnemyHoldsAllPort = 1631530663;
+
 struct ConquestPlayerSample {
 	uint8_t slot = 0;
 	uint8_t team = 0;
@@ -43,6 +45,7 @@ struct ConquestStats {
 	uint64_t strikes = 0;
 	uint64_t deserter_kills = 0;
 	uint64_t ticket_respawn_costs = 0;
+	uint64_t enemy_holds_all_events = 0;
 	uint64_t unhandled_inputs = 0;
 	std::vector<std::pair<uint32_t, int32_t>> unhandled;
 };

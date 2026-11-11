@@ -261,6 +261,14 @@ TEST_SUITE("logic-conquest") {
 		CHECK(c.stats().captures == 4);
 		CHECK(c.tickets(1) == 150);
 		CHECK(c.bleeding(2));
+		CHECK(c.stats().enemy_holds_all_events == 1);
+		size_t all_held_edges = 0;
+		for (const ConquestCounterData &counter : l->params->counters) {
+			for (const LogicEdge &e : l->graph->events_from(counter.node)) {
+				all_held_edges += e.source_port == kOnEnemyHoldsAllPort ? 1u : 0u;
+			}
+		}
+		CHECK(all_held_edges == 2);
 		const int64_t ru_before = c.tickets(2);
 		for (int i = 0; i < 600; ++i) {
 			m.step(players);

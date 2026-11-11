@@ -392,6 +392,10 @@ core::Status ConquestNatives::step(
 		if (ev.stop_bleed) {
 			BF3_TRY(r_runtime.force_event(c.data->node, kOnStopBleed, LogicContext{ -1, team }));
 		}
+		if (ev.all_held) {
+			++s.stats.enemy_holds_all_events;
+			BF3_TRY(r_runtime.force_event(c.data->node, kOnEnemyHoldsAllPort, LogicContext{ -1, team }));
+		}
 		BF3_TRY(s.publish(c, r_runtime));
 	}
 	for (State::Area &a : s.areas) {
