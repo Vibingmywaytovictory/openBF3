@@ -75,7 +75,7 @@ public:
 	void set_bot_stuck(bool p_stuck) override { bot_stuck_ = p_stuck; }
 	void see(double p_slice) override;
 	void update_sensing(double p_slice) override;
-	void heard_object(uint32_t p_information) override { heard_object_ = p_information; }
+	void heard_object(uint32_t) override {}
 	void update_communication() override;
 	CommunicationAgent *communication() const override { return communication_.get(); }
 	bool path_search_pending() const override { return false; }
@@ -131,7 +131,6 @@ public:
 	const BotMemory &memory() const { return memory_; }
 	int squad() const { return squad_; }
 	bool bot_stuck() const { return bot_stuck_; }
-	uint32_t heard_object() const { return heard_object_; }
 	uint32_t stalled_plan_ticks() const { return stalled_plan_ticks_; }
 	double last_change_time() const { return last_change_time_; }
 	const Vec3 &spawn_coord() const { return spawn_coord_; }
@@ -166,7 +165,6 @@ private:
 	bool bot_stuck_ = false;
 	bool c4_placed_ = false;
 	bool is_repaired_ = false;
-	uint32_t heard_object_ = kNoHandle;
 	uint32_t mine_target_ = kNoHandle;
 	uint32_t stalled_plan_ticks_ = 0;
 	double rearm_timer_ = 0.0;
