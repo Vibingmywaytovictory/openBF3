@@ -483,6 +483,8 @@ struct FakeBot final : NullBot {
 	void reset() override { ++resets; }
 	void set_last_change_time(double p_time) override { change_time = p_time; }
 	void set_spawn_coord(const Vec3 &p_position) override { spawn = p_position; }
+	void set_is_repaired(bool p_repaired) override { repaired = p_repaired; }
+	bool repaired = false;
 };
 
 struct FakeFactory final : BotFactory {
@@ -568,6 +570,25 @@ struct FakeSai final : StrategicAi {
 	void set_bot_has_changed_equipment(int p_bot_id) override {
 		calls->log.push_back("sai" + std::to_string(side) + " changed " + std::to_string(p_bot_id));
 	}
+	bool player_requests_artillery(int p_player_id, const Vec3 &) override {
+		calls->log.push_back("sai" + std::to_string(side) + " artillery " + std::to_string(p_player_id));
+		return true;
+	}
+	bool player_requests_uav(int p_player_id, const Vec3 &) override {
+		calls->log.push_back("sai" + std::to_string(side) + " uav " + std::to_string(p_player_id));
+		return true;
+	}
+	bool player_requests_supply(int p_player_id, const Vec3 &) override {
+		calls->log.push_back("sai" + std::to_string(side) + " supply " + std::to_string(p_player_id));
+		return true;
+	}
+	bool player_requests_vehicle_drop(int p_player_id, const Vec3 &) override {
+		calls->log.push_back("sai" + std::to_string(side) + " drop " + std::to_string(p_player_id));
+		return true;
+	}
+	void set_player_is_commander(bool p_commander) override {
+		calls->log.push_back("sai" + std::to_string(side) + " commander " + std::to_string(int(p_commander)));
+	}
 };
 
 struct FakeSquads final : SquadUpdater, LevelListener {
@@ -642,7 +663,7 @@ TEST_SUITE("ai-port") {
 		CHECK(w.ai.clear());
 	}
 
-	TEST_CASE("AIEventCourier: posted events are delivered in order on the next update") {
+	TEST_CASE("AIEventCourier: game events reach AIMain, the squads and the level as they happen") {
 		AiSettings settings;
 		settings.auto_spawn_bots = true;
 		settings.max_bots = 4;
@@ -654,14 +675,14 @@ TEST_SUITE("ai-port") {
 		events.event_player_created(false);
 		events.event_game_start();
 		events.event_player_switch_sides(2, 10);
-		CHECK(events.pending() == 6);
-		CHECK(w.calls.log.empty());
+		CHECK(w.calls.log ==
+				std::vector<std::string>{ "areas", "joins 5 2 1", "leader 1 2", "add 10", "sai1 add 0", "add 11",
+						"sai2 add 1", "add 12", "sai1 add 2", "sai1 remove 0", "sai2 add 0" });
 		CHECK(w.ai.main().init(1) == "AIMain initiated.");
 		CHECK(w.ai.settings().view_distance_m == 120.0f);
+		w.calls.log.clear();
 		CHECK(w.ai.update());
-		CHECK(events.pending() == 0);
-		const std::vector<std::string> expected{ "areas", "joins 5 2 1", "leader 1 2", "add 10", "sai1 add 0", "add 11",
-			"sai2 add 1", "add 12", "sai1 add 2", "sai1 remove 0", "sai2 add 0", "sai1 update", "squads 600" };
+		const std::vector<std::string> expected{ "sai1 update", "squads 600" };
 		REQUIRE(w.calls.log.size() >= expected.size());
 		CHECK(std::vector<std::string>(w.calls.log.begin(), w.calls.log.begin() + std::ptrdiff_t(expected.size())) ==
 				expected);
@@ -673,6 +694,73 @@ TEST_SUITE("ai-port") {
 		w.calls.log.clear();
 		CHECK(w.ai.update());
 		CHECK(w.calls.log.front() == "sai2 update");
+	}
+
+	TEST_CASE("AIEventCourier: a bot's life, the commander requests and the resets go where OpenBF2's courier sends "
+			  "them") {
+		AiSettings settings;
+		settings.max_bots = 2;
+		World w(settings);
+		AIMain &main = w.ai.main();
+		CHECK(main.init(1) == "AIMain initiated.");
+		REQUIRE(main.add_unspawned_bot(10, 1, nullptr));
+		REQUIRE(main.add_unspawned_bot(11, 2, nullptr));
+		FakeBot &first = *w.factory.bots[0];
+		FakeBot &second = *w.factory.bots[1];
+		AIEventCourier &events = w.ai.events();
+		events.event_player_killed(10, 1);
+		CHECK(first.transition);
+		CHECK(first.resets == 1);
+		events.event_player_spawned(10);
+		CHECK_FALSE(first.transition);
+		CHECK(first.change_time == -1000000.0);
+		FakeObject enemy;
+		enemy.team = 2;
+		const uint32_t known = w.ai.factory().request_information_known(kNoHandle, &enemy, 1u, 0, 5.0f, 0.5f, 0, 1);
+		REQUIRE(w.ai.factory().request_information_plug_in(known, PlugInRequest::Physical, false));
+		enemy.handles[1] = known;
+		events.event_man_down(11, enemy);
+		CHECK(second.down);
+		CHECK(w.ai.information().information(known)->physical()->health() == 0.0f);
+		events.event_revived(11);
+		CHECK_FALSE(second.down);
+		events.event_missile_lock(&enemy);
+		CHECK(enemy.squad_unit.lock == 1);
+		first.mine = 77;
+		events.event_mine_removed(77);
+		CHECK(first.mine == kNoHandle);
+		events.event_is_repaired(10);
+		CHECK(first.repaired);
+		w.calls.log.clear();
+		CHECK(events.event_received_artillery_request(1, 10, Vec3{}));
+		CHECK(events.event_received_supply_request(2, 11, Vec3{}));
+		CHECK_FALSE(events.event_received_uav_request(3, 11, Vec3{}));
+		events.event_accepted_commander(4, 2);
+		events.event_resign_as_commander(4, 2);
+		CHECK(w.calls.log ==
+				std::vector<std::string>{
+						"sai1 artillery 10", "sai2 supply 11", "sai2 commander 1", "sai2 commander 0" });
+		w.game.sides = { { 10, 1 } };
+		w.calls.log.clear();
+		events.event_bot_switch_sides(1);
+		CHECK(w.calls.log == std::vector<std::string>{ "sai1 remove 0", "sai2 add 0" });
+		w.calls.log.clear();
+		events.event_player_disconnect(11);
+		events.event_player_disconnect(3);
+		CHECK(w.calls.log == std::vector<std::string>{ "remove 11 0", "unused ", "remove 3 0" });
+
+		AIStrategicObjectManager objects{ StrategicServices{} };
+		REQUIRE(objects.create("north", { -10.0f, -10.0f }, { 0.0f, 0.0f }, 0.0f, 10.0f, std::string()));
+		CommunicationHubServices hub_services;
+		hub_services.objects = &objects;
+		CommunicationHub hub(hub_services);
+		AIEventCourier reset_events;
+		AiEventServices reset_services;
+		reset_services.hub = &hub;
+		reset_events.attach(reset_services);
+		CHECK(hub.combat_strengths(1).empty());
+		reset_events.event_world_reset();
+		CHECK(hub.combat_strengths(1).size() == 1);
 	}
 
 	TEST_CASE("BotManager: plan execution runs half the roster a tick and queues decisions and sensing by its "

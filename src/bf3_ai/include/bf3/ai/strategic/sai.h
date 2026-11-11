@@ -154,10 +154,10 @@ public:
 	Vec2 strategy_heat(size_t p_index) const;
 	std::string list_strategies() const;
 
-	bool player_requests_artillery(int p_player_id, const Vec3 &p_position);
-	bool player_requests_uav(int p_player_id, const Vec3 &p_position);
-	bool player_requests_supply(int p_player_id, const Vec3 &p_position);
-	bool player_requests_vehicle_drop(int p_player_id, const Vec3 &p_position);
+	bool player_requests_artillery(int p_player_id, const Vec3 &p_position) override;
+	bool player_requests_uav(int p_player_id, const Vec3 &p_position) override;
+	bool player_requests_supply(int p_player_id, const Vec3 &p_position) override;
+	bool player_requests_vehicle_drop(int p_player_id, const Vec3 &p_position) override;
 	void update_request_deny_timers();
 	const std::list<DenyRequest> &deny_requests() const { return deny_requests_; }
 	bool hostile_takeover_in_progress(AIStrategicObject *&r_base, Vec2 &r_position) const;
@@ -177,7 +177,7 @@ public:
 	const std::map<int, std::pair<int, int>> &dead_bots() const { return dead_bots_; }
 	void add_spawn_to_point(int p_point);
 	int spawns_to_point(int p_point) const;
-	void set_player_is_commander(bool p_commander);
+	void set_player_is_commander(bool p_commander) override;
 
 	int side() const { return side_; }
 	SaiStage stage() const { return stage_; }

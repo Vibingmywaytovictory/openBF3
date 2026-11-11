@@ -94,6 +94,8 @@ struct AiServices {
 	PathfindingService *pathfinding = nullptr;
 	SquadUpdater *squads = nullptr;
 	LevelListener *level = nullptr;
+	CommunicationHub *hub = nullptr;
+	DPManager *primitives = nullptr;
 	uint64_t match_seed = 0;
 	int infantry_map = 0;
 };

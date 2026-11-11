@@ -134,8 +134,9 @@ struct FakeUnit final : AiObjectUnit {
 	int team_lock() const override { return 0; }
 	bool must_borrow_armament(const AiObject *) const override { return false; }
 	int occupying_player_id() const override { return 3; }
-	void set_missile_lock_status(int) override {}
-	int missile_lock_status() const override { return 0; }
+	int lock = 0;
+	void set_missile_lock_status(int p_status) override { lock = p_status; }
+	int missile_lock_status() const override { return lock; }
 	const Vec3 &entry_position_of_non_mobile() const override { return entry; }
 };
 

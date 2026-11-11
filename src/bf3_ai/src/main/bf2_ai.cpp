@@ -48,7 +48,14 @@ bool BF2AI::init(const AiServices &p_services) {
 	main.squads = p_services.squads;
 	main_ = std::make_unique<AIMain>(main);
 	init_order_.push_back(Part::Main);
-	events_->attach(main_.get(), p_services.squads, p_services.level);
+	AiEventServices events;
+	events.main = main_.get();
+	events.squads = p_services.squads;
+	events.level = p_services.level;
+	events.hub = p_services.hub;
+	events.information = information_.get();
+	events.primitives = p_services.primitives;
+	events_->attach(events);
 	shutting_down_ = false;
 	return true;
 }
@@ -88,7 +95,6 @@ bool BF2AI::update() {
 	if (!initialized_) {
 		return false;
 	}
-	events_->deliver();
 	return main_->action();
 }
 

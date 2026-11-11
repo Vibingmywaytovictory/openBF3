@@ -44,6 +44,11 @@ public:
 	virtual void remove_bot(Bot *p_bot) = 0;
 	virtual void update(double p_budget) = 0;
 	virtual void set_bot_has_changed_equipment(int p_bot_id) = 0;
+	virtual bool player_requests_artillery(int p_player_id, const Vec3 &p_position) = 0;
+	virtual bool player_requests_uav(int p_player_id, const Vec3 &p_position) = 0;
+	virtual bool player_requests_supply(int p_player_id, const Vec3 &p_position) = 0;
+	virtual bool player_requests_vehicle_drop(int p_player_id, const Vec3 &p_position) = 0;
+	virtual void set_player_is_commander(bool p_commander) = 0;
 };
 
 class SquadUpdater {
