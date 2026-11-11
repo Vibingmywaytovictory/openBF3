@@ -110,6 +110,11 @@ target_sources(bf3_ai PRIVATE
 )
 
 target_sources(bf3_ai PRIVATE
+    include/bf3/ai/strategic/squad_commander.h
+    src/strategic/squad_commander.cpp
+)
+
+target_sources(bf3_ai PRIVATE
     include/bf3/ai/knowledge/fire_object.h
     src/knowledge/fire_object.cpp
 )

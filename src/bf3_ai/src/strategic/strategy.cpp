@@ -408,8 +408,19 @@ bool StrategyDecisions::free_for_mission(const SquadCoordinator &p_squad) const 
 			p_squad.mission_status() == SquadMissionStatus::None;
 }
 
-void StrategyDecisions::send(SquadCoordinator &r_squad, size_t p_area, SquadOrder p_order) {
-	r_squad.assign_squad(&areas_[p_area], areas_[p_area].area().order_position(0), p_order, SquadMissionStatus::Issued);
+void StrategyDecisions::send(Sai &r_sai, SquadCoordinator &r_squad, size_t p_area, SquadOrder p_order) {
+	const Vec3 at = areas_[p_area].area().order_position(0);
+	Commander *const commander = r_sai.services().commander;
+	const uint16_t target = uint16_t(p_area + 1u);
+	if (commander == nullptr) {
+		r_squad.assign_squad(&areas_[p_area], at, p_order, SquadMissionStatus::Issued);
+	} else if (p_order == SquadOrder::Attack) {
+		commander->give_attack_order(at, r_squad.squad_id() + 1, r_sai.side(), target);
+	} else if (p_order == SquadOrder::Defend) {
+		commander->give_defend_order(at, r_squad.squad_id() + 1, r_sai.side(), target);
+	} else {
+		commander->give_move_order(at, r_squad.squad_id() + 1, r_sai.side(), target);
+	}
 	std::vector<uint8_t> &assigned = assigned_[size_t(r_squad.side())];
 	assigned[p_area] = uint8_t(std::min(int(assigned[p_area]) + 1, 255));
 	++stats_.missions;
@@ -438,7 +449,7 @@ void StrategyDecisions::distribute_defence(Sai &r_sai) {
 			}
 		}
 		if (best != nullptr) {
-			send(*best, i, SquadOrder::Defend);
+			send(r_sai, *best, i, SquadOrder::Defend);
 			++stats_.defend_missions;
 		}
 	}
@@ -465,8 +476,11 @@ void StrategyDecisions::distribute_attack(Sai &r_sai) {
 				best = int(i);
 			}
 		}
-		if (best >= 0) {
-			send(squad, size_t(best), SquadOrder::Attack);
+		if (best >= 0 && areas_[size_t(best)].area().enemy_takeover(side)) {
+			send(r_sai, squad, size_t(best), SquadOrder::Defend);
+			++stats_.defend_missions;
+		} else if (best >= 0) {
+			send(r_sai, squad, size_t(best), SquadOrder::Attack);
 			++stats_.attack_missions;
 		}
 	}
@@ -504,7 +518,7 @@ void StrategyDecisions::distribute_with_no_areas(Sai &r_sai) {
 				continue;
 			}
 			if (!there) {
-				send(squad, size_t(hunted), SquadOrder::Move);
+				send(r_sai, squad, size_t(hunted), SquadOrder::Move);
 				++stats_.hunt_missions;
 			}
 		}
@@ -538,7 +552,7 @@ void StrategyDecisions::distribute_with_no_areas(Sai &r_sai) {
 			next = least_visited_area(side, at, skip);
 		}
 		if (next >= 0) {
-			send(squad, size_t(next), SquadOrder::Move);
+			send(r_sai, squad, size_t(next), SquadOrder::Move);
 			taken[size_t(next)] = 1;
 			++stats_.spread_missions;
 		}

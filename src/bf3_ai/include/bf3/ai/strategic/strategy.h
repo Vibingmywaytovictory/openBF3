@@ -175,7 +175,7 @@ private:
 	bool squad_position(const SquadCoordinator &p_squad, Vec3 &r_position) const;
 	int nearest_area(const Vec3 &p_position, const std::vector<uint8_t> *p_skip) const;
 	int least_visited_area(int p_side, const Vec3 &p_position, const std::vector<uint8_t> &p_skip) const;
-	void send(SquadCoordinator &r_squad, size_t p_area, SquadOrder p_order);
+	void send(Sai &r_sai, SquadCoordinator &r_squad, size_t p_area, SquadOrder p_order);
 	void set_active_strategy(int p_side, std::string_view p_name);
 	float heat(int p_side, size_t p_area) const;
 
