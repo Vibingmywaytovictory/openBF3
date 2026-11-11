@@ -645,8 +645,9 @@ uint8_t terrain_depth(const core::res::HeightfieldTree &p_tree, float p_spacing)
 	return depth;
 }
 
-core::Result<PreparedMesh> terrain_mesh(const core::res::HeightGrid &p_grid, const LevelTransform &p_transform, std::string_view p_name,
-		const std::optional<std::array<float, 4>> &p_crop_xz) {
+core::Result<PreparedMesh> terrain_mesh(const core::res::HeightGrid &p_grid, const LevelTransform &p_transform,
+		std::string_view p_name, const std::optional<std::array<float, 4>> &p_crop_xz,
+		const TerrainSurfaceOf *p_surface_of) {
 	const size_t w = p_grid.width;
 	const size_t h = p_grid.height;
 	const std::string where = "terrain " + std::string(p_name);
@@ -685,52 +686,83 @@ core::Result<PreparedMesh> terrain_mesh(const core::res::HeightGrid &p_grid, con
 	}
 	const size_t cw = x1 - x0 + 1;
 	const size_t ch = z1 - z0 + 1;
-	std::vector<int32_t> vertex(cw * ch, -1);
-	PreparedSurface s;
-	s.material_name = "terrain";
-	const bool mirror = p_transform.determinant() < 0.0f;
-	const auto sample = [&](size_t p_x, size_t p_z) -> int32_t {
-		int32_t &v = vertex[(p_x - x0) + (p_z - z0) * cw];
-		if (v >= 0) {
-			return v;
-		}
-		v = int32_t(s.positions.size() / 3);
-		const Vec3 p = p_transform.transform_point({ ox + float(p_x) * sx, p_grid.at(p_x, p_z), oz + float(p_z) * sz });
-		s.positions.insert(s.positions.end(), { p[0], p[1], p[2] });
-		const size_t xa = p_x > 0 ? p_x - 1 : p_x;
-		const size_t xb = p_x + 1 < w ? p_x + 1 : p_x;
-		const size_t za = p_z > 0 ? p_z - 1 : p_z;
-		const size_t zb = p_z + 1 < h ? p_z + 1 : p_z;
-		const float dhdx = (p_grid.at(xb, p_z) - p_grid.at(xa, p_z)) / (float(xb - xa) * sx);
-		const float dhdz = (p_grid.at(p_x, zb) - p_grid.at(p_x, za)) / (float(zb - za) * sz);
-		const Vec3 n = normalized(p_transform.rotate(normalized({ -dhdx, 1.0f, -dhdz })));
-		s.normals.insert(s.normals.end(), { n[0], n[1], n[2] });
-		return v;
-	};
+	std::vector<uint32_t> cell_surface(cw * ch, UINT32_MAX);
+	uint32_t surfaces = 0;
 	for (size_t z = z0; z < z1; ++z) {
 		for (size_t x = x0; x < x1; ++x) {
 			if (p_grid.hole(x, z) || p_grid.hole(x + 1, z) || p_grid.hole(x, z + 1) || p_grid.hole(x + 1, z + 1)) {
 				continue;
 			}
-			const int32_t a = sample(x, z);
-			const int32_t b = sample(x + 1, z);
-			const int32_t c = sample(x, z + 1);
-			const int32_t d = sample(x + 1, z + 1);
-
-			if (mirror) {
-				s.indices.insert(s.indices.end(), { a, c, b, b, c, d });
-			} else {
-				s.indices.insert(s.indices.end(), { a, b, c, b, d, c });
+			const uint32_t id = p_surface_of == nullptr
+					? 0u
+					: (*p_surface_of)(ox + (float(x) + 0.5f) * sx, oz + (float(z) + 0.5f) * sz);
+			if (id > 0xFFFFu) {
+				return core::make_error(where + ": surface " + std::to_string(id) + " out of range");
 			}
+			cell_surface[(x - x0) + (z - z0) * cw] = id;
+			surfaces = std::max(surfaces, id + 1);
 		}
 	}
-	if (s.indices.empty()) {
-		return out;
+	const bool mirror = p_transform.determinant() < 0.0f;
+	std::vector<int32_t> vertex(cw * ch, -1);
+	std::vector<size_t> touched;
+	for (uint32_t id = 0; id < surfaces; ++id) {
+		PreparedSurface s;
+		s.material_name = "terrain";
+		s.material_index = id;
+		for (size_t t : touched) {
+			vertex[t] = -1;
+		}
+		touched.clear();
+		const auto sample = [&](size_t p_x, size_t p_z) -> int32_t {
+			const size_t at = (p_x - x0) + (p_z - z0) * cw;
+			int32_t &v = vertex[at];
+			if (v >= 0) {
+				return v;
+			}
+			touched.push_back(at);
+			v = int32_t(s.positions.size() / 3);
+			const float lx = ox + float(p_x) * sx;
+			const float lz = oz + float(p_z) * sz;
+			const Vec3 p = p_transform.transform_point({ lx, p_grid.at(p_x, p_z), lz });
+			s.positions.insert(s.positions.end(), { p[0], p[1], p[2] });
+			if (p_surface_of != nullptr) {
+				s.uv0.insert(s.uv0.end(), { lx, lz });
+			}
+			const size_t xa = p_x > 0 ? p_x - 1 : p_x;
+			const size_t xb = p_x + 1 < w ? p_x + 1 : p_x;
+			const size_t za = p_z > 0 ? p_z - 1 : p_z;
+			const size_t zb = p_z + 1 < h ? p_z + 1 : p_z;
+			const float dhdx = (p_grid.at(xb, p_z) - p_grid.at(xa, p_z)) / (float(xb - xa) * sx);
+			const float dhdz = (p_grid.at(p_x, zb) - p_grid.at(p_x, za)) / (float(zb - za) * sz);
+			const Vec3 n = normalized(p_transform.rotate(normalized({ -dhdx, 1.0f, -dhdz })));
+			s.normals.insert(s.normals.end(), { n[0], n[1], n[2] });
+			return v;
+		};
+		for (size_t z = z0; z < z1; ++z) {
+			for (size_t x = x0; x < x1; ++x) {
+				if (cell_surface[(x - x0) + (z - z0) * cw] != id) {
+					continue;
+				}
+				const int32_t a = sample(x, z);
+				const int32_t b = sample(x + 1, z);
+				const int32_t c = sample(x, z + 1);
+				const int32_t d = sample(x + 1, z + 1);
+				if (mirror) {
+					s.indices.insert(s.indices.end(), { a, c, b, b, c, d });
+				} else {
+					s.indices.insert(s.indices.end(), { a, b, c, b, d, c });
+				}
+			}
+		}
+		if (s.indices.empty()) {
+			continue;
+		}
+		recompute_aabb(s);
+		out.vertices += s.vertex_count();
+		out.triangles += s.indices.size() / 3;
+		out.surfaces.push_back(std::move(s));
 	}
-	recompute_aabb(s);
-	out.vertices = s.vertex_count();
-	out.triangles = s.indices.size() / 3;
-	out.surfaces.push_back(std::move(s));
 	return out;
 }
 
@@ -901,6 +933,12 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 			terrain.object = at;
 			terrain.asset = std::string(*text);
 			terrain.transform = object.transform;
+			if (resolver != nullptr) {
+				terrain.combos = plan_terrain_combos(
+						*p_options.mount, resolver->shaders(), terrain.asset,
+						[&](const std::string &p_name) { return int32_t(builder.texture(p_name, TextureRole::Data)); },
+						plan.failures);
+			}
 			plan.terrains.push_back(std::move(terrain));
 		}
 	}
@@ -988,8 +1026,8 @@ core::Result<PreparedTexture> prepare_scene_texture(const core::LevelMount &p_mo
 	return prepare_texture(*texture, plan.role);
 }
 
-core::Result<PreparedMesh> prepare_scene_terrain(const core::LevelMount &p_mount, const LevelScenePlan &p_plan, uint32_t p_terrain,
-		const SceneTerrainOptions &p_options) {
+core::Result<PreparedTerrain> prepare_scene_terrain(const core::LevelMount &p_mount, const LevelScenePlan &p_plan,
+		uint32_t p_terrain, const SceneTerrainOptions &p_options) {
 	if (p_terrain >= p_plan.terrains.size()) {
 		return core::make_error("scene terrain " + std::to_string(p_terrain) + " out of range");
 	}
@@ -1042,7 +1080,6 @@ core::Result<PreparedMesh> prepare_scene_terrain(const core::LevelMount &p_mount
 	if (!e.ok()) {
 		return core::make_error("res " + tree_name + ": " + e.message());
 	}
-	chunks.clear();
 
 	std::optional<std::array<float, 4>> crop;
 	const LevelTransform &t = plan.transform;
@@ -1065,7 +1102,46 @@ core::Result<PreparedMesh> prepare_scene_terrain(const core::LevelMount &p_mount
 			crop = std::array<float, 4>{ box[0] - margin, box[1] - margin, box[2] + margin, box[3] + margin };
 		}
 	}
-	return scene_internal::terrain_mesh(grid, t, plan.asset, crop);
+	PreparedTerrain out;
+	if (plan.combos.empty() || !tree.mask) {
+		core::Result<PreparedMesh> flat = scene_internal::terrain_mesh(grid, t, plan.asset, crop);
+		if (!flat) {
+			return flat.error();
+		}
+		out.mesh = std::move(*flat);
+		return out;
+	}
+	core::Result<std::vector<std::vector<uint8_t>>> programs = load_terrain_programs(p_mount, plan.combos);
+	if (!programs) {
+		return core::error_at(where, programs.error());
+	}
+	const core::res::HeightfieldNode &root = tree.heightfield->nodes.front();
+	std::array<float, 4> region = { root.bounds_min[0], root.bounds_min[2], root.bounds_max[0], root.bounds_max[2] };
+	if (crop) {
+		region = { std::fmax(region[0], (*crop)[0]), std::fmax(region[1], (*crop)[1]), std::fmin(region[2], (*crop)[2]),
+			std::fmin(region[3], (*crop)[3]) };
+	}
+	TerrainLookInput input;
+	input.tree = &tree;
+	input.heights = &grid;
+	input.region = region;
+	input.combos = plan.combos;
+	input.programs = *programs;
+	input.fetch = fetch;
+	core::Result<TerrainLook> look = build_terrain_look(input);
+	if (!look) {
+		return core::error_at(where, look.error());
+	}
+	const scene_internal::TerrainSurfaceOf surface_of = [&](float p_x, float p_z) {
+		return look->material_at(p_x, p_z);
+	};
+	core::Result<PreparedMesh> mesh = scene_internal::terrain_mesh(grid, t, plan.asset, crop, &surface_of);
+	if (!mesh) {
+		return mesh.error();
+	}
+	out.mesh = std::move(*mesh);
+	out.look = std::move(*look);
+	return out;
 }
 
 uint64_t estimate_scene_bytes(const LevelScenePlan &p_plan, const core::LevelMount &p_mount) {

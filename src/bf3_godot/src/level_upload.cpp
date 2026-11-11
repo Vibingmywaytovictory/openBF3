@@ -8,6 +8,7 @@
 #include <godot_cpp/variant/aabb.hpp>
 #include <godot_cpp/variant/basis.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_vector4_array.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -29,6 +30,24 @@ namespace {
 uint64_t now_us() {
 
 	return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+RID terrain_image(const render::TerrainImage &p_image) {
+	PackedByteArray bytes;
+	bytes.resize(int64_t(p_image.data.size()));
+	std::memcpy(bytes.ptrw(), p_image.data.data(), p_image.data.size());
+	const Image::Format format = p_image.format == render::TerrainImageFormat::R8 ? Image::FORMAT_R8
+			: p_image.format == render::TerrainImageFormat::Rgba8				  ? Image::FORMAT_RGBA8
+																				  : Image::FORMAT_RF;
+	const Ref<Image> image =
+			Image::create_from_data(int32_t(p_image.width), int32_t(p_image.height), false, format, bytes);
+	if (image.is_null() || image->is_empty()) {
+		return RID();
+	}
+	if (p_image.mipmaps) {
+		image->generate_mipmaps();
+	}
+	return RenderingServer::get_singleton()->texture_2d_create(image);
 }
 
 Image::Format image_format(render::GpuFormat p_format) {
@@ -315,6 +334,7 @@ void LevelUpload::begin(std::shared_ptr<const render::LevelScenePlan> p_plan, co
 		}
 	}
 	texture_users_.assign(plan.textures.size(), {});
+	terrain_texture_users_.assign(plan.textures.size(), {});
 	for (size_t m = 0; m < plan.materials.size(); ++m) {
 		const render::SceneMaterialPlan &mp = plan.materials[m];
 		if (mp.albedo >= 0 && size_t(mp.albedo) < plan.textures.size()) {
@@ -382,12 +402,12 @@ void LevelUpload::texture(uint32_t p_texture, render::PreparedTexture &&p_data, 
 	push(std::move(item));
 }
 
-void LevelUpload::terrain(uint32_t p_terrain, render::PreparedMesh &&p_mesh, uint64_t p_bytes) {
+void LevelUpload::terrain(uint32_t p_terrain, render::PreparedTerrain &&p_terrain_data, uint64_t p_bytes) {
 	Item item;
 	item.kind = Kind::Terrain;
 	item.index = p_terrain;
 	item.bytes = p_bytes;
-	item.terrain = std::make_unique<render::PreparedMesh>(std::move(p_mesh));
+	item.terrain = std::make_unique<render::PreparedTerrain>(std::move(p_terrain_data));
 	push(std::move(item));
 }
 
@@ -431,11 +451,19 @@ void LevelUpload::run_task() {
 				++local.textures;
 			}
 		} else {
-			const render::PreparedMesh &pm = item.kind == Kind::Mesh ? item.mesh->lod0 : *item.terrain;
+			const render::PreparedMesh &pm = item.kind == Kind::Mesh ? item.mesh->lod0 : item.terrain->mesh;
+			const bool look = item.kind == Kind::Terrain && item.terrain->look.has_value();
+			if (look) {
+				for (const render::TerrainImage &img : item.terrain->look->images) {
+					done.images.push_back(terrain_image(img));
+				}
+			}
 			TypedArray<Dictionary> surfaces;
 			for (const render::PreparedSurface &s : pm.surfaces) {
 				RID material;
-				if (item.kind == Kind::Terrain) {
+				if (look) {
+					material = RID();
+				} else if (item.kind == Kind::Terrain) {
 					material = item.index < terrain_materials_.size() ? terrain_materials_[item.index] : RID();
 				} else if (item.index < plan.meshes.size()) {
 					const std::vector<uint32_t> &slots = plan.meshes[item.index].surface_materials;
@@ -451,9 +479,13 @@ void LevelUpload::run_task() {
 					continue;
 				}
 				surfaces.push_back(surface);
+				done.surface_materials.push_back(s.material_index);
 				++local.surfaces;
 				local.vertices += s.vertex_count();
 				local.triangles += s.indices.size() / 3;
+			}
+			if (look) {
+				done.look = std::make_shared<const render::TerrainLook>(std::move(*item.terrain->look));
 			}
 			if (!surfaces.is_empty()) {
 				done.rid = rs->mesh_create_from_surfaces(surfaces, 0);
@@ -577,6 +609,10 @@ void LevelUpload::apply_done(double p_deadline_us) {
 				continue;
 			}
 			textures_[d.index] = d.rid;
+			for (const auto &[material, param] : terrain_texture_users_[d.index]) {
+				rs->material_set_param(material, StringName(param.c_str()), d.rid);
+			}
+			terrain_texture_users_[d.index].clear();
 			for (const auto &[material, normal] : texture_users_[d.index]) {
 				rs->material_set_param(materials_[material], normal ? "normal_tex" : "albedo_tex", d.rid);
 				rs->material_set_param(materials_[material], normal ? "has_normal" : "has_albedo", true);
@@ -597,14 +633,59 @@ void LevelUpload::apply_done(double p_deadline_us) {
 			if (progress_ != nullptr) {
 				progress_->advance(LoadStage::Meshes);
 			}
+			terrain_look_rids_.insert(terrain_look_rids_.end(), d.images.begin(), d.images.end());
 			if (d.index < terrain_meshes_.size() && d.rid.is_valid()) {
 				terrain_meshes_[d.index] = d.rid;
+				if (d.look != nullptr) {
+					create_terrain_look(d);
+				}
 				pending_terrains_.push_back(d.index);
 			}
 		}
 	}
 	(void)p_deadline_us;
 	(void)plan;
+}
+
+void LevelUpload::create_terrain_look(const Done &p_done) {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	const render::TerrainLook &look = *p_done.look;
+	std::vector<RID> materials;
+	for (const render::TerrainMaterial &m : look.materials) {
+		const RID shader = rs->shader_create();
+		rs->shader_set_code(shader, to_godot(m.code));
+		const RID material = rs->material_create();
+		rs->material_set_shader(material, shader);
+		terrain_look_rids_.push_back(material);
+		terrain_look_rids_.push_back(shader);
+		PackedVector4Array constants;
+		for (const std::array<float, 4> &c : m.constants) {
+			constants.push_back(Vector4(c[0], c[1], c[2], c[3]));
+		}
+		rs->material_set_param(material, StringName(("cb" + std::to_string(m.constant_slot)).c_str()), constants);
+		for (const render::TerrainTextureBinding &b : m.textures) {
+			const std::string param = "t" + std::to_string(b.slot);
+			if (b.image >= 0) {
+				if (size_t(b.image) < p_done.images.size()) {
+					rs->material_set_param(material, StringName(param.c_str()), p_done.images[size_t(b.image)]);
+				}
+			} else if (size_t(b.texture) < textures_.size()) {
+				if (textures_[size_t(b.texture)].is_valid()) {
+					rs->material_set_param(material, StringName(param.c_str()), textures_[size_t(b.texture)]);
+				} else {
+					terrain_texture_users_[size_t(b.texture)].emplace_back(material, param);
+				}
+			}
+		}
+		materials.push_back(material);
+	}
+	for (size_t s = 0; s < p_done.surface_materials.size(); ++s) {
+		if (p_done.surface_materials[s] < materials.size()) {
+			rs->mesh_surface_set_material(p_done.rid, int32_t(s), materials[p_done.surface_materials[s]]);
+		}
+	}
+	std::lock_guard lock(stats_mutex_);
+	stats_.materials += materials.size();
 }
 
 void LevelUpload::create_instances(double p_deadline_us) {
@@ -752,7 +833,8 @@ void LevelUpload::free_all() {
 			rs->free_rid(d.rid);
 		}
 	}
-	for (std::vector<RID> *list : { &instances_, &meshes_, &terrain_meshes_, &materials_, &terrain_materials_, &textures_, &shaders_ }) {
+	for (std::vector<RID> *list : { &instances_, &meshes_, &terrain_meshes_, &materials_, &terrain_materials_,
+				 &terrain_look_rids_, &textures_, &shaders_ }) {
 		for (RID &r : *list) {
 			if (r.is_valid()) {
 				rs->free_rid(r);

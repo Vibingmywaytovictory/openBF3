@@ -106,7 +106,7 @@ struct SceneLanes::Impl {
 
 	void run_terrain(size_t p_index) {
 		const Clock::time_point t0 = Clock::now();
-		core::Result<PreparedMesh> mesh = prepare_scene_terrain(*mount, *plan, uint32_t(p_index));
+		core::Result<PreparedTerrain> mesh = prepare_scene_terrain(*mount, *plan, uint32_t(p_index));
 		const double work = seconds(Clock::now() - t0);
 		{
 			std::lock_guard<std::mutex> lock(mutex);
@@ -116,7 +116,10 @@ struct SceneLanes::Impl {
 			fail(plan->terrains[p_index].asset, mesh.error().message);
 			return;
 		}
-		const uint64_t bytes = scene_internal::prepared_bytes(*mesh);
+		uint64_t bytes = scene_internal::prepared_bytes(mesh->mesh);
+		if (mesh->look) {
+			bytes += mesh->look->stats.image_bytes;
+		}
 		if (!admit(bytes)) {
 			return;
 		}

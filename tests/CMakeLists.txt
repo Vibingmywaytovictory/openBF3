@@ -293,6 +293,13 @@ add_test(NAME render.scene COMMAND test_render_scene --test-suite=render-scene)
 set_tests_properties(render.scene PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(render.scene.unit render.scene PROPERTIES TIMEOUT 600)
 
+openbf3_test(test_terrain_look test_main.cpp terrain_look_tests.cpp test_support.h)
+target_link_libraries(test_terrain_look PRIVATE bf3_render)
+add_test(NAME render.terrain.unit COMMAND test_terrain_look --test-suite=render-terrain-unit)
+add_test(NAME render.terrain COMMAND test_terrain_look --test-suite=render-terrain)
+set_tests_properties(render.terrain PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(render.terrain.unit render.terrain PROPERTIES TIMEOUT 300)
+
 if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     openbf3_godot_row(godot.m1.e1 godot_m1.cmake HEADLESS NO_PROJECT_LOCK TIMEOUT 450 ARGS -DPHASE=e1)
     openbf3_godot_row(godot.m1.e2_gate godot_m1.cmake HEADLESS NO_PROJECT_LOCK TIMEOUT 300 ARGS -DPHASE=e2_gate)

@@ -25,6 +25,7 @@ target_link_libraries(bf3dump PRIVATE bf3_fx)
 target_sources(bf3dump PRIVATE lagcomp_commands.cpp lagcomp_commands.h)
 target_link_libraries(bf3dump PRIVATE bf3_anim)
 target_sources(bf3dump PRIVATE vm_commands.cpp vm_commands.h)
+target_sources(bf3dump PRIVATE terrain_commands.cpp terrain_commands.h)
 
 target_sources(bf3dump PRIVATE audio_commands.cpp audio_commands.h audio_patch_commands.cpp)
 target_link_libraries(bf3dump PRIVATE bf3_audio)

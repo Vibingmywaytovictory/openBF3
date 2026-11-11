@@ -82,3 +82,10 @@ target_sources(bf3_render PRIVATE
     include/bf3/render/deployed_gadgets.h
     src/deployed_gadgets.cpp
 )
+
+target_sources(bf3_render PRIVATE
+    include/bf3/render/dxbc.h
+    include/bf3/render/terrain_look.h
+    src/dxbc.cpp
+    src/terrain_look.cpp
+)

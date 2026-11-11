@@ -126,7 +126,7 @@ std::vector<uint8_t> streaming_tree() {
 	w.u32(0);
 	w.u32(5);
 	w.u8(0);
-	w.u8(1);
+	w.u8(3);
 	w.u32(3);
 	w.raw({ 9, 9, 9 });
 	const std::vector<uint8_t> h = heightfield();

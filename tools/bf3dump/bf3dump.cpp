@@ -36,6 +36,7 @@
 
 #include "lagcomp_commands.h"
 
+#include "terrain_commands.h"
 #include "vm_commands.h"
 
 #include "audio_commands.h"
@@ -460,6 +461,7 @@ void usage() {
 			"  text <sid-or-hash>... | text --census [<sb-spec>] | text --tsv <out.tsv>\n"
 			"  level <LEVEL> <MODE> [--legacy-mvdb]\n"
 			"  levelmodes <LEVEL>\n"
+			"  terrain <LEVEL>...\n"
 			"  collision <LEVEL> <MODE>\n"
 			"  prepare <LEVEL> <MODE> [--cache=<dir>] [--threads=N] [--no-weapons] [--no-meshes] [--shapes]\n"
 			"  shapes <LEVEL> <MODE> [--cache=<dir> | --no-cache] [--threads=N] [--no-raycast] [--tiles]\n");
@@ -664,6 +666,10 @@ int wmain(int argc, wchar_t **argv) {
 
 	if (cmd == "firefight") {
 		return bf3dump::cmd_firefight(ctx.reader, ctx.install, rest);
+	}
+
+	if (cmd == "terrain") {
+		return bf3dump::cmd_terrain(ctx.install, rest);
 	}
 
 	if (cmd == "export") {

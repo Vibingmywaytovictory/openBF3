@@ -76,7 +76,7 @@ public:
 
 	void mesh(bf3::render::PreparedSceneMesh &&p_mesh, uint64_t p_bytes) override;
 	void texture(uint32_t p_texture, bf3::render::PreparedTexture &&p_data, uint64_t p_bytes) override;
-	void terrain(uint32_t p_terrain, bf3::render::PreparedMesh &&p_mesh, uint64_t p_bytes) override;
+	void terrain(uint32_t p_terrain, bf3::render::PreparedTerrain &&p_terrain_data, uint64_t p_bytes) override;
 	void failure(const std::string &p_item, const std::string &p_error) override;
 
 	double pump(const godot::Callable &p_task, double p_budget_ms);
@@ -109,18 +109,22 @@ private:
 		uint64_t bytes = 0;
 		std::unique_ptr<bf3::render::PreparedSceneMesh> mesh;
 		std::unique_ptr<bf3::render::PreparedTexture> texture;
-		std::unique_ptr<bf3::render::PreparedMesh> terrain;
+		std::unique_ptr<bf3::render::PreparedTerrain> terrain;
 	};
 	struct Done {
 		Kind kind = Kind::Mesh;
 		uint32_t index = 0;
 		godot::RID rid;
+		std::shared_ptr<const bf3::render::TerrainLook> look;
+		std::vector<godot::RID> images;
+		std::vector<uint32_t> surface_materials;
 	};
 
 	void push(Item &&p_item);
 	void create_materials(double p_deadline_us);
 	void apply_done(double p_deadline_us);
 	void create_instances(double p_deadline_us);
+	void create_terrain_look(const Done &p_done);
 
 	std::shared_ptr<const bf3::render::LevelScenePlan> plan_;
 	bf3::render::SceneLanes *lanes_ = nullptr;
@@ -148,6 +152,8 @@ private:
 	std::vector<godot::RID> terrain_meshes_;
 	std::vector<std::vector<uint32_t>> instances_by_mesh_;
 	std::vector<std::vector<std::pair<uint32_t, bool>>> texture_users_;
+	std::vector<std::vector<std::pair<godot::RID, std::string>>> terrain_texture_users_;
+	std::vector<godot::RID> terrain_look_rids_;
 	std::deque<std::pair<uint32_t, size_t>> pending_instances_;
 	std::deque<uint32_t> pending_terrains_;
 	std::vector<godot::RID> instances_;

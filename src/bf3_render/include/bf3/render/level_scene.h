@@ -9,6 +9,7 @@
 #include "bf3/render/look_materials.h"
 #include "bf3/render/material_lookup.h"
 #include "bf3/render/mesh_cache.h"
+#include "bf3/render/terrain_look.h"
 #include "bf3/render/texture_prep.h"
 
 #include <array>
@@ -57,6 +58,7 @@ struct SceneTerrainPlan {
 	std::string asset;
 	core::level::LevelTransform transform;
 	std::array<float, 3> color{ 0.36f, 0.33f, 0.27f };
+	std::vector<SceneTerrainCombo> combos;
 };
 struct SceneTerrainOptions {
 	float spacing = 4.0f;
@@ -157,8 +159,13 @@ core::Result<CachedMesh> load_scene_request(core::Cache *p_cache, const core::Le
 
 core::Result<PreparedTexture> prepare_scene_texture(const core::LevelMount &p_mount, const LevelScenePlan &p_plan, uint32_t p_texture);
 
-core::Result<PreparedMesh> prepare_scene_terrain(const core::LevelMount &p_mount, const LevelScenePlan &p_plan, uint32_t p_terrain,
-		const SceneTerrainOptions &p_options = {});
+struct PreparedTerrain {
+	PreparedMesh mesh;
+	std::optional<TerrainLook> look;
+};
+
+core::Result<PreparedTerrain> prepare_scene_terrain(const core::LevelMount &p_mount, const LevelScenePlan &p_plan,
+		uint32_t p_terrain, const SceneTerrainOptions &p_options = {});
 
 uint64_t estimate_scene_bytes(const LevelScenePlan &p_plan, const core::LevelMount &p_mount);
 
@@ -174,7 +181,7 @@ public:
 	virtual ~SceneSink() = default;
 	virtual void mesh(PreparedSceneMesh &&p_mesh, uint64_t p_bytes) = 0;
 	virtual void texture(uint32_t p_texture, PreparedTexture &&p_data, uint64_t p_bytes) = 0;
-	virtual void terrain(uint32_t p_terrain, PreparedMesh &&p_mesh, uint64_t p_bytes) = 0;
+	virtual void terrain(uint32_t p_terrain, PreparedTerrain &&p_terrain_data, uint64_t p_bytes) = 0;
 	virtual void failure(const std::string &p_item, const std::string &p_error) = 0;
 };
 

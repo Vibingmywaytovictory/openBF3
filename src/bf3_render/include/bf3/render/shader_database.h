@@ -70,6 +70,7 @@ struct SurfaceShader {
 	std::vector<ShaderTexture> textures;
 	std::vector<ShaderTextureParameter> texture_parameters;
 	std::vector<std::string> sampled_textures;
+	std::vector<std::pair<uint32_t, std::string>> texture_slots;
 	std::vector<ShaderValue> values;
 	std::vector<ShaderSolution> solutions;
 
@@ -87,6 +88,9 @@ inline constexpr uint64_t kShaderWorkPerByte = 4;
 inline constexpr uint64_t kShaderWorkBase = uint64_t(1) << 20;
 
 core::Result<std::vector<ShaderDatabase>> parse_shader_database(std::span<const uint8_t> p_res, uint64_t *r_work = nullptr);
+
+core::Result<std::vector<std::vector<uint8_t>>> pixel_programs(
+		std::span<const uint8_t> p_res, std::span<const uint32_t> p_name_hashes);
 
 ShaderDatabase merge_first_wins(std::vector<std::vector<SurfaceShader>> p_lists);
 

@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -45,8 +46,12 @@ bool has_triangles(const PreparedMesh &p_mesh);
 uint64_t prepared_bytes(const PreparedMesh &p_mesh);
 uint64_t prepared_bytes(const PreparedTexture &p_texture);
 
-core::Result<PreparedMesh> terrain_mesh(const core::res::HeightGrid &p_grid, const core::level::LevelTransform &p_transform, std::string_view p_name,
-		const std::optional<std::array<float, 4>> &p_crop_xz = std::nullopt);
+using TerrainSurfaceOf = std::function<uint32_t(float, float)>;
+
+core::Result<PreparedMesh> terrain_mesh(const core::res::HeightGrid &p_grid,
+		const core::level::LevelTransform &p_transform, std::string_view p_name,
+		const std::optional<std::array<float, 4>> &p_crop_xz = std::nullopt,
+		const TerrainSurfaceOf *p_surface_of = nullptr);
 
 uint8_t terrain_depth(const core::res::HeightfieldTree &p_tree, float p_spacing);
 

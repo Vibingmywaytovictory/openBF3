@@ -191,11 +191,11 @@ public:
 		note(p_bytes);
 		lanes->release_bytes(p_bytes);
 	}
-	void terrain(uint32_t, PreparedMesh &&p_mesh, uint64_t p_bytes) override {
+	void terrain(uint32_t, PreparedTerrain &&p_terrain, uint64_t p_bytes) override {
 		{
 			std::lock_guard<std::mutex> lock(mutex);
-			terrain_vertices += p_mesh.vertices;
-			terrain_triangles += p_mesh.triangles;
+			terrain_vertices += p_terrain.mesh.vertices;
+			terrain_triangles += p_terrain.mesh.triangles;
 		}
 		++terrains;
 		note(p_bytes);
@@ -265,7 +265,7 @@ public:
 	}
 	void mesh(PreparedSceneMesh &&, uint64_t p_bytes) override { push(p_bytes); }
 	void texture(uint32_t, PreparedTexture &&, uint64_t p_bytes) override { push(p_bytes); }
-	void terrain(uint32_t, PreparedMesh &&, uint64_t p_bytes) override { push(p_bytes); }
+	void terrain(uint32_t, PreparedTerrain &&, uint64_t p_bytes) override { push(p_bytes); }
 	void failure(const std::string &, const std::string &) override {}
 };
 
@@ -880,10 +880,10 @@ TEST_SUITE("render-scene") {
 		{
 			LevelScenePlan whole = p;
 			whole.instances.clear();
-			Result<PreparedMesh> full = prepare_scene_terrain(lvl.mount(), whole, 0);
+			Result<PreparedTerrain> full = prepare_scene_terrain(lvl.mount(), whole, 0);
 			REQUIRE(full.ok());
-			std::printf("render.scene terrain uncropped: %zu vertices, %zu triangles (%.1f MiB)\n", full->vertices, full->triangles,
-					mib(si::prepared_bytes(*full)));
+			std::printf("render.scene terrain uncropped: %zu vertices, %zu triangles (%.1f MiB)\n", full->mesh.vertices,
+					full->mesh.triangles, mib(si::prepared_bytes(full->mesh)));
 		}
 		std::printf("render.scene peak working set %.1f MiB\n", mib(peak_working_set()));
 		cache.close();
