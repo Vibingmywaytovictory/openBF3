@@ -143,4 +143,6 @@ target_sources(bf3_ai PRIVATE
     include/bf3/ai/actionplan/flow_control.h
     src/actionplan/conditions.cpp
     src/actionplan/flow_control.cpp
+    include/bf3/ai/actionplan/aimer.h
+    src/actionplan/aimer.cpp
 )

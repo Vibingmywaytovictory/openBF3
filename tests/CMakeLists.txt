@@ -1388,7 +1388,7 @@ target_compile_definitions(test_ai_bot PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMA
 add_test(NAME ai.bot.unit COMMAND test_ai_bot --test-suite=ai-bot)
 set_tests_properties(ai.bot.unit PROPERTIES TIMEOUT 60 LABELS "unit")
 
-openbf3_test(test_ai_actionplan test_main.cpp ai_actionplan_tests.cpp)
+openbf3_test(test_ai_actionplan test_main.cpp ai_actionplan_tests.cpp ai_aimer_tests.cpp)
 target_link_libraries(test_ai_actionplan PRIVATE bf3_ai)
 add_test(NAME ai.actionplan.unit COMMAND test_ai_actionplan --test-suite=ai-actionplan)
 set_tests_properties(ai.actionplan.unit PROPERTIES TIMEOUT 60 LABELS "unit")
