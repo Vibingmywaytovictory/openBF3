@@ -33,6 +33,8 @@ public:
 	virtual uint32_t force_information(AiObject &r_object, int p_side, bool p_known) = 0;
 	virtual bool player_camera(int p_player_id, Transform &r_camera) const = 0;
 	virtual void enemy_spotted_by_ai(int p_spotter, const AiObject &p_spotted) = 0;
+	virtual int player_score(int p_player_id) const = 0;
+	virtual void set_player_side(int p_player_id, int p_side) = 0;
 };
 
 class StrategicAi {
@@ -50,6 +52,7 @@ public:
 	virtual void update(sim::Tick p_tick) = 0;
 	virtual void new_squad_leader(int p_side, int p_squad) = 0;
 	virtual void player_joins_squad(int p_player_id, int p_squad, int p_side) = 0;
+	virtual bool remove_squad_member(int p_player_id, int p_side) = 0;
 };
 
 class LevelListener {

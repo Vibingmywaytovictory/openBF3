@@ -145,7 +145,118 @@ void AIMain::new_player_created(bool p_is_ai) {
 		return;
 	}
 	game->terminate_player(victim);
+	deactivate_bot(victim);
 	--bot_count_;
+}
+
+bool AIMain::deactivate_bot(int &r_player_id, int p_side) {
+	if (services_.squads != nullptr) {
+		services_.squads->remove_squad_member(r_player_id, p_side);
+	}
+	const int bot_id = bot_manager_->deactivate_bot(p_side);
+	if (bot_id == -1) {
+		r_player_id = -1;
+		return false;
+	}
+	Bot *const bot = bot_manager_->bot_from_id(uint32_t(bot_id));
+	if (StrategicAi *const strategist = sai(p_side)) {
+		strategist->remove_bot(bot);
+	}
+	r_player_id = bot->player_id();
+	return true;
+}
+
+bool AIMain::deactivate_bot(int p_player_id) {
+	if (services_.squads != nullptr && services_.game != nullptr) {
+		services_.squads->remove_squad_member(p_player_id, services_.game->player_side(p_player_id));
+	}
+	const int bot_id = bot_manager_->deactivate_bot_from_player_id(p_player_id);
+	if (bot_id == -1) {
+		return false;
+	}
+	Bot *const bot = bot_manager_->bot_from_id(uint32_t(bot_id));
+	if (StrategicAi *const strategist = sai(bot->side())) {
+		strategist->remove_bot(bot);
+	}
+	return true;
+}
+
+void AIMain::reactivate_bot(int p_player_id) {
+	AiGame *const game = services_.game;
+	if (game == nullptr || !game->is_valid_player_id(p_player_id)) {
+		return;
+	}
+	--human_count_;
+	if (services_.squads != nullptr) {
+		services_.squads->remove_squad_member(p_player_id, game->player_side(p_player_id));
+	}
+	if (services_.settings == nullptr || !services_.settings->max_bots_include_humans) {
+		return;
+	}
+	if (bot_count_ + human_count_ < game->max_number_of_players()) {
+		spawn_bots();
+	}
+}
+
+void AIMain::switch_sides(int p_side) {
+	AiGame *const game = services_.game;
+	if (game == nullptr) {
+		return;
+	}
+	int selected = -1;
+	for (int id = 0; id < kMaxPlayerIds; ++id) {
+		if (!game->is_valid_player_id(id) || !game->player_is_ai(id) || game->player_side(id) != p_side) {
+			continue;
+		}
+		if (selected != -1 && game->player_score(id) >= game->player_score(selected)) {
+			continue;
+		}
+		selected = id;
+	}
+	if (selected == -1) {
+		return;
+	}
+	const int other = (p_side == 1) + 1;
+	game->set_player_side(selected, other);
+	Bot *const bot = bot_manager_->bot_from_player_id(selected);
+	if (bot == nullptr) {
+		return;
+	}
+	bot->set_side(other);
+	if (StrategicAi *const old_strategist = sai(p_side)) {
+		old_strategist->remove_bot(bot);
+	}
+	if (StrategicAi *const new_strategist = sai(other)) {
+		new_strategist->add_bot(bot);
+	}
+}
+
+bool AIMain::reset() {
+	if (!initialised_) {
+		return true;
+	}
+	sai_.fill(nullptr);
+	ai_system_quotient_ = 0.2;
+	initialised_ = false;
+	bot_manager_quotient_ = 0.75f;
+	sai_enabled_ = false;
+	component_quotient_ = 0.25f;
+	bot_manager_->reset();
+	return true;
+}
+
+void AIMain::set_ai_system_quotient(double p_quotient) {
+	if (!(p_quotient < 0.0f) || !(p_quotient > 1.0f)) {
+		ai_system_quotient_ = p_quotient;
+	}
+}
+
+void AIMain::set_ai_system_components_quotient(uint32_t p_bot_manager, uint32_t p_strategic) {
+	const uint32_t sum = p_bot_manager + p_strategic;
+	if (sum != 0) {
+		bot_manager_quotient_ = double(p_bot_manager) / sum;
+		component_quotient_ = double(p_strategic) / sum;
+	}
 }
 
 void AIMain::switch_sides(int p_side, int p_player_id) {

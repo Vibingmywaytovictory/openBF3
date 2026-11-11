@@ -43,8 +43,15 @@ public:
 	void spawn_bots();
 	bool activate_bot(int p_player_id, int p_side, const std::string &p_name);
 	bool add_unspawned_bot(int p_player_id, int p_side, const float *p_personality);
+	bool deactivate_bot(int &r_player_id, int p_side);
+	bool deactivate_bot(int p_player_id);
 	void new_player_created(bool p_is_ai);
+	void reactivate_bot(int p_player_id);
+	void switch_sides(int p_side);
 	void switch_sides(int p_side, int p_player_id);
+	bool reset();
+	void set_ai_system_quotient(double p_quotient);
+	void set_ai_system_components_quotient(uint32_t p_bot_manager, uint32_t p_strategic);
 	void set_sai(int p_side, StrategicAi *p_sai);
 	StrategicAi *sai(int p_side) const;
 	bool set_sai_enable(bool p_enable, size_t p_strategic_object_count);
@@ -60,10 +67,12 @@ public:
 	uint32_t component_cursor() const { return component_cursor_; }
 	double ai_system_quotient() const { return ai_system_quotient_; }
 	double component_quotient() const { return component_quotient_; }
+	double bot_manager_quotient() const { return bot_manager_quotient_; }
 
 private:
 	AiMainServices services_;
 	double ai_system_quotient_ = 0.15f;
+	double bot_manager_quotient_ = 0.875;
 	double component_quotient_ = 0.125;
 	bool initialised_ = false;
 	bool sai_enabled_ = false;

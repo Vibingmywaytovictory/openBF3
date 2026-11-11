@@ -25,7 +25,7 @@ public:
 	void update_human_players(sim::Tick p_tick);
 	void set_player_on_valid_position(const SquadPlayer &p_player, bool p_valid, sim::Tick p_tick);
 	void add_squad_member(int p_player_id, int p_side);
-	bool remove_squad_member(int p_player_id, int p_side);
+	bool remove_squad_member(int p_player_id, int p_side) override;
 	SquadMember *squad_member(int p_player_id, int p_side) const;
 	SquadCoordinator *squad_from_player(int p_player_id, int p_side) const;
 	int squad_strengths(int p_side, int p_area_index, int p_type) const;

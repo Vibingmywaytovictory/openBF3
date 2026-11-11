@@ -507,7 +507,13 @@ struct FakeGame final : AiGame {
 	bool is_playing() const override { return true; }
 	int max_number_of_players() const override { return 4; }
 	bool is_valid_player_id(int p_player_id) const override { return p_player_id >= 0 && p_player_id < kMaxPlayerIds; }
-	int player_side(int p_player_id) const override { return p_player_id >= 10 && p_player_id < next_player ? 1 : 0; }
+	int player_side(int p_player_id) const override {
+		const auto found = sides.find(p_player_id);
+		if (found != sides.end()) {
+			return found->second;
+		}
+		return p_player_id >= 10 && p_player_id < next_player ? 1 : 0;
+	}
 	bool player_is_ai(int p_player_id) const override { return p_player_id >= 10; }
 	bool add_bot(int &r_player_id, int &r_side, std::string &r_name) override {
 		r_player_id = next_player++;
@@ -534,9 +540,16 @@ struct FakeGame final : AiGame {
 	void enemy_spotted_by_ai(int p_spotter, const AiObject &) override {
 		calls->log.push_back("spotted " + std::to_string(p_spotter));
 	}
+	int player_score(int p_player_id) const override {
+		const auto found = scores.find(p_player_id);
+		return found != scores.end() ? found->second : 0;
+	}
+	void set_player_side(int p_player_id, int p_side) override { sides[p_player_id] = p_side; }
 	AiObject *vehicle = nullptr;
 	std::vector<std::pair<int, AiObject *>> occupied;
 	Transform camera;
+	std::map<int, int> sides;
+	std::map<int, int> scores;
 };
 
 struct FakeSai final : StrategicAi {
@@ -566,6 +579,10 @@ struct FakeSquads final : SquadUpdater, LevelListener {
 	void player_joins_squad(int p_player_id, int p_squad, int p_side) override {
 		calls->log.push_back(
 				"joins " + std::to_string(p_player_id) + " " + std::to_string(p_squad) + " " + std::to_string(p_side));
+	}
+	bool remove_squad_member(int p_player_id, int p_side) override {
+		calls->log.push_back("remove " + std::to_string(p_player_id) + " " + std::to_string(p_side));
+		return true;
 	}
 	void post_load_init_areas() override { calls->log.push_back("areas"); }
 };
@@ -1043,11 +1060,59 @@ TEST_SUITE("ai-port") {
 		w.game.next_player = 14;
 		w.calls.log.clear();
 		main.new_player_created(false);
-		CHECK(w.calls.log == std::vector<std::string>{ "terminate 13" });
+		CHECK(w.calls.log == std::vector<std::string>{ "terminate 13", "remove 13 1" });
 		CHECK(main.bot_player_count() == 3);
 		CHECK(main.human_player_count() == 1);
 		CHECK_FALSE(main.set_sai_enable(true, 0));
 		CHECK_FALSE(main.sai_enabled());
+	}
+
+	TEST_CASE("AIMain: deactivating, reactivating and moving bots between sides as OpenBF2's IAIMain does") {
+		AiSettings settings;
+		settings.max_bots = 3;
+		World w(settings);
+		AIMain &main = w.ai.main();
+		CHECK(main.init(1) == "AIMain initiated.");
+		REQUIRE(main.add_unspawned_bot(10, 1, nullptr));
+		REQUIRE(main.add_unspawned_bot(11, 2, nullptr));
+		REQUIRE(main.add_unspawned_bot(12, 1, nullptr));
+		w.game.sides = { { 10, 1 }, { 11, 2 }, { 12, 1 } };
+		w.game.scores = { { 10, 5 }, { 12, 2 } };
+		w.calls.log.clear();
+		main.switch_sides(1);
+		CHECK(w.calls.log == std::vector<std::string>{ "sai1 remove 2", "sai2 add 2" });
+		CHECK(w.game.sides[12] == 2);
+		CHECK(w.factory.bots[2]->team == 2);
+		w.calls.log.clear();
+		int player = 99;
+		CHECK(main.deactivate_bot(player, 2));
+		CHECK(player == 11);
+		CHECK(w.calls.log == std::vector<std::string>{ "remove 99 2", "unused ", "sai2 remove 1" });
+		CHECK(w.factory.bots[1]->deactivated);
+		w.calls.log.clear();
+		CHECK_FALSE(main.deactivate_bot(10));
+		w.factory.bots[0]->dead = true;
+		CHECK(main.deactivate_bot(10));
+		CHECK(w.calls.log ==
+				std::vector<std::string>{ "remove 10 1", "unused ", "remove 10 1", "unused ", "sai1 remove 0" });
+		CHECK(main.bot_manager().number_of_deactivated_bots() == 2);
+		main.new_player_created(false);
+		w.calls.log.clear();
+		main.reactivate_bot(3);
+		CHECK(main.human_player_count() == 0);
+		CHECK(w.calls.log == std::vector<std::string>{ "remove 3 0" });
+		main.set_ai_system_components_quotient(1, 3);
+		CHECK(main.bot_manager_quotient() == 0.25);
+		CHECK(main.component_quotient() == 0.75);
+		main.set_ai_system_quotient(0.4);
+		CHECK(main.ai_system_quotient() == 0.4);
+		CHECK(main.reset());
+		CHECK_FALSE(main.is_initialised());
+		CHECK(main.sai(1) == nullptr);
+		CHECK_FALSE(main.sai_enabled());
+		CHECK(main.ai_system_quotient() == 0.2);
+		CHECK(main.component_quotient() == 0.25);
+		CHECK(main.bot_manager().bot_count() == 0);
 	}
 
 	TEST_CASE("AILODManager: bots near a viewer run at Full, farther at Medium, else Light, with hysteresis") {
