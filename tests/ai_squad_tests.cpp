@@ -558,7 +558,8 @@ TEST_SUITE("ai-squad") {
 		CHECK(world.roster_reads == 2);
 	}
 
-	TEST_CASE("SquadManager: joins fill the least-populated squad, a third member splits, leaders hand over") {
+	TEST_CASE("SquadManager: joins fill the least-populated squad, a third member splits, a removal exits the game's "
+			  "squad and the leader hands over") {
 		World world;
 		SquadManager manager(world.services());
 		for (int id = 1; id <= 4; ++id) {
@@ -582,8 +583,8 @@ TEST_SUITE("ai-squad") {
 
 		SquadCoordinator &first = manager.coordinator(1, 1);
 		REQUIRE(first.squad_leader()->player_id() == 1);
-		world.exit_squad(1, *world.players[1]);
 		CHECK(manager.remove_squad_member(1, 1));
+		CHECK(std::find(world.rosters[1].begin(), world.rosters[1].end(), 1) == world.rosters[1].end());
 		CHECK(first.number_of_squad_members() == 2);
 		REQUIRE(first.squad_leader() != nullptr);
 		CHECK(first.squad_leader()->player_id() == 2);

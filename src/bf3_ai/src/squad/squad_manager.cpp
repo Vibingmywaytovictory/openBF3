@@ -113,7 +113,14 @@ void SquadManager::add_squad_member(int p_player_id, int p_side) {
 
 bool SquadManager::remove_squad_member(int p_player_id, int p_side) {
 	SquadCoordinator *const squad = squad_from_player(p_player_id, p_side);
-	return squad != nullptr && squad->remove_squad_member(p_player_id);
+	if (squad == nullptr) {
+		return false;
+	}
+	SquadPlayer *const player = services_.world != nullptr ? services_.world->player(p_player_id) : nullptr;
+	if (player != nullptr && services_.squads != nullptr) {
+		services_.squads->exit_squad(squad->squad_id() + 1, *player);
+	}
+	return squad->remove_squad_member(p_player_id);
 }
 
 void SquadManager::new_squad_leader(int p_side, int p_squad) {
