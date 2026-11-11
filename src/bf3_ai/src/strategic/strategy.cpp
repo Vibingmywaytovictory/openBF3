@@ -59,31 +59,26 @@ std::string format_strategy_tuning(const StrategyTuning &p_tuning) {
 	return core::format_key_values(p_tuning, std::span<const KeyDef<StrategyTuning>>(kKeys));
 }
 
-StrategyManager::StrategyManager() {
-	active_name_.fill(std::string(kNoStrategies));
-}
-
-StrategyManager::~StrategyManager() {
-	reset();
-}
-
 void StrategyManager::reset() {
-	active_name_.fill(std::string(kNoStrategies));
-	active_.fill(nullptr);
 	forced_.fill(nullptr);
 	strategies_.clear();
+	active_strategy_name_ = std::string(kNoStrategies);
+	active_strategy_ = nullptr;
+	prerequisites_.clear();
+	active_prerequisite_name_ = std::string(kNoPrerequisites);
+	active_prerequisite_ = nullptr;
+	areas_.clear();
+	conditions_.clear();
+	active_condition_name_.clear();
+	object_modifiers_.clear();
 }
 
-Strategy *StrategyManager::active_strategy(int p_side) const {
-	return active_[size_t(p_side - 1)];
+StrategyCondition *StrategyManager::active_condition() const {
+	return condition(active_condition_name_);
 }
 
-std::string StrategyManager::active_strategy_name(int p_side) const {
-	return active_name_[size_t(p_side - 1)];
-}
-
-Strategy *StrategyManager::forced_strategy(int p_side) const {
-	return forced_[size_t(p_side - 1)];
+std::string StrategyManager::active_condition_name() const {
+	return conditions_.contains(active_condition_name_) ? active_condition_name_ : std::string();
 }
 
 Strategy *StrategyManager::strategy(const std::string &p_name) const {
@@ -91,25 +86,176 @@ Strategy *StrategyManager::strategy(const std::string &p_name) const {
 	return found != strategies_.end() ? found->second.get() : nullptr;
 }
 
-void StrategyManager::create_strategy(const std::string &p_name) {
-	if (strategies_.find(p_name) == strategies_.end()) {
-		strategies_.emplace(p_name, std::make_unique<Strategy>(p_name));
-	}
+StrategyCondition *StrategyManager::condition(const std::string &p_name) const {
+	const auto found = conditions_.find(p_name);
+	return found != conditions_.end() ? found->second.get() : nullptr;
 }
 
-void StrategyManager::set_active_strategy(int p_side, const std::string &p_name) {
-	const size_t s = size_t(p_side - 1);
-	Strategy *const chosen = forced_[s] != nullptr ? forced_[s] : strategy(p_name);
-	if (chosen == nullptr || chosen == active_[s]) {
+StrategyPrerequisite *StrategyManager::prerequisite(const std::string &p_name) const {
+	const auto found = prerequisites_.find(p_name);
+	return found != prerequisites_.end() ? found->second.get() : nullptr;
+}
+
+Strategy *StrategyManager::set_active_strategy(const std::string &p_name) {
+	active_strategy_ = strategy(p_name);
+	active_strategy_name_ = active_strategy_ != nullptr ? p_name : std::string(kNullStrategy);
+	return active_strategy_;
+}
+
+StrategyPrerequisite *StrategyManager::set_active_prerequisite(const std::string &p_name) {
+	active_prerequisite_ = prerequisite(p_name);
+	active_prerequisite_name_ = active_prerequisite_ != nullptr ? p_name : std::string();
+	return active_prerequisite_;
+}
+
+StrategyCondition *StrategyManager::set_active_condition(const std::string &p_name) {
+	active_condition_name_ = p_name;
+	return active_condition();
+}
+
+bool StrategyManager::set_prerequisite(const std::string &p_name) {
+	if (active_strategy_ == nullptr) {
+		return false;
+	}
+	active_strategy_->set_prerequisite(prerequisite(p_name));
+	return true;
+}
+
+std::string StrategyManager::force_strategy(const std::string &p_name, int p_side) {
+	if (p_side != 1 && p_side != 2) {
+		return "Side must be 1 or 2, current side: " + std::to_string(p_side);
+	}
+	Strategy *const found = strategy(p_name);
+	forced_[size_t(p_side - 1)] = found;
+	return (found != nullptr ? "Strategy is activated : " : "No active strategy chosen : ") + p_name;
+}
+
+bool StrategyManager::create_strategy(const std::string &p_name) {
+	if (strategies_.contains(p_name)) {
+		active_strategy_name_ = std::string(kNullStrategy);
+		active_strategy_ = nullptr;
+		return false;
+	}
+	active_strategy_ = strategies_.emplace(p_name, std::make_unique<Strategy>(p_name)).first->second.get();
+	active_strategy_name_ = p_name;
+	return true;
+}
+
+bool StrategyManager::create_prerequisite(const std::string &p_name) {
+	if (prerequisites_.contains(p_name)) {
+		return false;
+	}
+	active_prerequisite_ =
+			prerequisites_.emplace(p_name, std::make_unique<StrategyPrerequisite>(p_name)).first->second.get();
+	active_prerequisite_name_ = p_name;
+	return true;
+}
+
+bool StrategyManager::add_condition(const std::string &p_name, float p_weight) {
+	if (active_prerequisite_ == nullptr) {
+		return false;
+	}
+	active_prerequisite_->add_condition(condition(p_name), p_weight);
+	return true;
+}
+
+bool StrategyManager::add_specific_object_modifier(const std::string &p_name, float p_modifier) {
+	object_modifiers_.push_back({ p_name, active_strategy_, p_modifier });
+	return true;
+}
+
+bool StrategyManager::add_required_preceding_strategy(const std::string &p_name) {
+	return active_strategy_ != nullptr && active_strategy_->add_required_preceding_strategy(strategy(p_name));
+}
+
+bool StrategyManager::add_prohibited_preceding_strategy(const std::string &p_name) {
+	return active_strategy_ != nullptr && active_strategy_->add_prohibited_preceding_strategy(strategy(p_name));
+}
+
+void StrategyManager::complete_strategies() {
+	if (objects_ == nullptr) {
 		return;
 	}
-	active_[s] = chosen;
-	active_name_[s] = chosen->name();
-	++changes_[s];
+	for (const ObjectStrategyModifier &tuple : object_modifiers_) {
+		const AIStrategicArea *area = objects_->strategic_area(tuple.object_name);
+		if (area != nullptr && tuple.strategy != nullptr) {
+			tuple.strategy->set_specific_strategic_object_modifier(area->index(), tuple.modifier);
+		}
+	}
 }
 
-void StrategyManager::force_strategy(const std::string &p_name, int p_side) {
-	forced_[size_t(p_side - 1)] = strategy(p_name);
+void StrategyManager::complete_conditions() {
+	for (SCArea *area : areas_) {
+		area->update_area();
+	}
+}
+
+namespace {
+
+template <class T> std::string list_names(const std::map<std::string, T> &p_map) {
+	std::string out;
+	for (const auto &entry : p_map) {
+		out += entry.first;
+		out += '\n';
+	}
+	return out;
+}
+
+}
+
+std::string StrategyManager::list_strategies() const {
+	return list_names(strategies_);
+}
+
+std::string StrategyManager::list_prerequisites() const {
+	return list_names(prerequisites_);
+}
+
+std::string StrategyManager::list_conditions() const {
+	return list_names(conditions_);
+}
+
+bool StrategyManager::insert_condition(const std::string &p_name, std::unique_ptr<StrategyCondition> p_condition) {
+	if (conditions_.contains(p_name)) {
+		active_condition_name_.clear();
+		return false;
+	}
+	conditions_.emplace(p_name, std::move(p_condition));
+	active_condition_name_ = p_name;
+	return true;
+}
+
+bool StrategyManager::create_constant_condition(const std::string &p_name,
+		StrategyCondition::CompareType p_compare_type, StrategyCondition::Compare p_compare,
+		StrategyCondition::Side p_side, StrategyCondition::Conditional p_conditional, float p_constant) {
+	return insert_condition(p_name,
+			std::make_unique<SCConstant>(p_name, p_compare_type, p_compare, p_side, p_conditional, p_constant, 0.0f));
+}
+
+bool StrategyManager::create_homogenous_condition(const std::string &p_name,
+		StrategyCondition::CompareType p_compare_type, StrategyCondition::Compare p_compare,
+		StrategyCondition::Conditional p_conditional) {
+	return insert_condition(
+			p_name, std::make_unique<SCHomogeneous>(p_name, p_compare_type, p_compare, p_conditional, 0.0f));
+}
+
+bool StrategyManager::create_heterogeneous_condition(const std::string &p_name,
+		StrategyCondition::CompareType p_compare_type, StrategyCondition::Compare p_compare,
+		StrategyCondition::Side p_side, StrategyCondition::Conditional p_first,
+		StrategyCondition::Conditional p_second) {
+	return insert_condition(p_name,
+			std::make_unique<SCHeterogeneous>(p_name, p_compare_type, p_compare, p_side, p_first, p_second, 0.0f));
+}
+
+bool StrategyManager::create_area_condition(
+		const std::string &p_name, const std::string &p_area_name, StrategicStatus p_status) {
+	auto area = std::make_unique<SCArea>(p_name, p_area_name, -1, p_status, objects_);
+	SCArea *const raw = area.get();
+	if (!insert_condition(p_name, std::move(area))) {
+		return false;
+	}
+	areas_.push_back(raw);
+	return true;
 }
 
 StrategyDecisions::StrategyDecisions(StrategyManager &r_manager, SquadManager &r_squads,
@@ -140,8 +286,23 @@ void StrategyDecisions::choose_strategy(Sai &r_sai) {
 	for (size_t i = 0; i < areas_.size(); ++i) {
 		hottest = std::max(hottest, heat(side, i));
 	}
-	manager_.set_active_strategy(
-			side, std::string(hottest >= tuning_.hunt_heat && hottest > 0.0f ? kStrategyHunt : kStrategySpread));
+	set_active_strategy(side, hottest >= tuning_.hunt_heat && hottest > 0.0f ? kStrategyHunt : kStrategySpread);
+}
+
+void StrategyDecisions::set_active_strategy(int p_side, std::string_view p_name) {
+	const size_t s = size_t(p_side - 1);
+	const Strategy *forced = manager_.forced_strategy(p_side);
+	const Strategy *chosen = forced != nullptr ? forced : manager_.strategy(std::string(p_name));
+	if (chosen == nullptr || chosen == active_[s]) {
+		return;
+	}
+	active_[s] = chosen;
+	++changes_[s];
+}
+
+std::string StrategyDecisions::active_strategy_name(int p_side) const {
+	const Strategy *active = active_[size_t(p_side - 1)];
+	return active != nullptr ? active->name() : std::string(kNoStrategies);
 }
 
 void StrategyDecisions::modify_strategic_objects_temperatures(Sai &r_sai) {
@@ -316,7 +477,7 @@ void StrategyDecisions::distribute_with_no_areas(Sai &r_sai) {
 	if (areas_.empty()) {
 		return;
 	}
-	const Strategy *active = manager_.active_strategy(side);
+	const Strategy *active = active_[size_t(side - 1)];
 	if (active != nullptr && active->name() == kStrategyHunt) {
 		size_t hottest = 0;
 		for (size_t i = 1; i < areas_.size(); ++i) {

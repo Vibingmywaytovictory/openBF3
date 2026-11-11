@@ -13,6 +13,7 @@
 #include "bf3/ai/vehicle/vehicle_occupancy.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <initializer_list>
@@ -1096,29 +1097,194 @@ void place_squad(World &r_world, SquadManager &r_squads, int p_squad, Vec3 p_whe
 }
 
 TEST_SUITE("ai-strategy") {
-	TEST_CASE("StrategyManager: no strategies until one is set, one active per side, a forced strategy wins, reset "
-			  "clears") {
+	TEST_CASE("StrategyManager: a created strategy is the one being edited, a duplicate clears it, forced per side, "
+			  "reset clears") {
 		StrategyManager manager;
-		CHECK(manager.active_strategy_name(1) == "No Strategies");
-		CHECK(manager.active_strategy(2) == nullptr);
-		manager.create_strategy("Hunt");
-		manager.create_strategy("Spread");
-		manager.create_strategy("Hunt");
-		manager.set_active_strategy(1, "Hunt");
-		manager.set_active_strategy(2, "Spread");
-		manager.set_active_strategy(2, "Spread");
-		manager.set_active_strategy(2, "Nope");
-		CHECK(manager.active_strategy_name(1) == "Hunt");
-		CHECK(manager.active_strategy_name(2) == "Spread");
-		CHECK(manager.changes(2) == 1);
-		manager.force_strategy("Spread", 1);
-		manager.set_active_strategy(1, "Hunt");
-		CHECK(manager.active_strategy_name(1) == "Spread");
-		REQUIRE(manager.forced_strategy(1) != nullptr);
+		CHECK(manager.active_strategy_name() == "No Strategies");
+		CHECK(manager.active_strategy() == nullptr);
+		CHECK(manager.create_strategy("Hunt"));
+		CHECK(manager.active_strategy_name() == "Hunt");
+		CHECK(manager.create_strategy("Spread"));
+		CHECK_FALSE(manager.create_strategy("Hunt"));
+		CHECK(manager.active_strategy() == nullptr);
+		CHECK(manager.active_strategy_name() == "NULL");
+		CHECK(manager.set_active_strategy("Spread") == manager.strategy("Spread"));
+		CHECK(manager.set_active_strategy("Nope") == nullptr);
+		CHECK(manager.active_strategy_name() == "NULL");
+		CHECK(manager.list_strategies() == "Hunt\nSpread\n");
+		CHECK(manager.force_strategy("Spread", 1) == "Strategy is activated : Spread");
+		CHECK(manager.force_strategy("Nope", 2) == "No active strategy chosen : Nope");
+		CHECK(manager.force_strategy("Spread", 3) == "Side must be 1 or 2, current side: 3");
+		REQUIRE(manager.forced_strategy(1) == manager.strategy("Spread"));
 		CHECK(manager.forced_strategy(2) == nullptr);
+		CHECK_FALSE(manager.set_prerequisite("p"));
+		CHECK_FALSE(manager.add_required_preceding_strategy("Hunt"));
+		manager.set_active_strategy("Spread");
+		CHECK(manager.add_required_preceding_strategy("Hunt"));
+		CHECK_FALSE(manager.add_required_preceding_strategy("Hunt"));
+		CHECK_FALSE(manager.add_prohibited_preceding_strategy("Nope"));
+		CHECK_FALSE(manager.add_condition("c"));
+		CHECK(manager.create_prerequisite("p"));
+		CHECK_FALSE(manager.create_prerequisite("p"));
+		CHECK(manager.active_prerequisite_name() == "p");
+		CHECK(manager.create_constant_condition("c", StrategyCondition::CompareType::Crisp,
+				StrategyCondition::Compare::EqualGreater, StrategyCondition::Side::Friendly, StrategyCondition::Ticket,
+				10.0f));
+		CHECK(manager.active_condition_name() == "c");
+		CHECK_FALSE(manager.create_homogenous_condition(
+				"c", StrategyCondition::CompareType::Fuzzy, StrategyCondition::Compare::Equal, StrategyCondition::Air));
+		CHECK(manager.active_condition() == nullptr);
+		CHECK(manager.add_condition("c", 2.0f));
+		CHECK(manager.active_prerequisite()->size() == 1);
+		CHECK(manager.set_prerequisite("p"));
 		manager.reset();
-		CHECK(manager.active_strategy_name(1) == "No Strategies");
+		CHECK(manager.active_strategy_name() == "No Strategies");
+		CHECK(manager.active_prerequisite_name() == "No Prerequisites");
 		CHECK(manager.strategy("Hunt") == nullptr);
+		CHECK(manager.condition("c") == nullptr);
+		CHECK(manager.forced_strategy(1) == nullptr);
+	}
+
+	TEST_CASE("StrategyCondition: crisp answers +-1, fuzzy the signed distance, squared fuzzy keeps the sign, and a "
+			  "zero divisor answers OpenBF2's constants") {
+		std::array<float, 44> friendly{};
+		std::array<float, 44> enemy{};
+		friendly[StrategyCondition::Ticket] = 30.0f;
+		enemy[StrategyCondition::Ticket] = 10.0f;
+		friendly[StrategyCondition::Air] = 4.0f;
+		enemy[StrategyCondition::Air] = 0.0f;
+		const auto homogeneous = [&](StrategyCondition::CompareType p_type, StrategyCondition::Compare p_compare,
+										 StrategyCondition::Conditional p_conditional, float p_target) {
+			SCHomogeneous condition("h", p_type, p_compare, p_conditional, p_target);
+			return condition.compare(friendly.data(), enemy.data(), 1);
+		};
+		using CT = StrategyCondition::CompareType;
+		using C = StrategyCondition::Compare;
+		CHECK(homogeneous(CT::Crisp, C::Equal, StrategyCondition::Ticket, 20.0f) == 1.0f);
+		CHECK(homogeneous(CT::Crisp, C::Difference, StrategyCondition::Ticket, 19.0f) == -1.0f);
+		CHECK(homogeneous(CT::Crisp, C::EqualGreater, StrategyCondition::Ticket, 20.0f) == 1.0f);
+		CHECK(homogeneous(CT::Crisp, C::EqualSmaller, StrategyCondition::Ticket, 19.0f) == -1.0f);
+		CHECK(homogeneous(CT::Crisp, C::Quotient, StrategyCondition::Ticket, 3.0f) == 1.0f);
+		CHECK(homogeneous(CT::Crisp, C::QuotientGreater, StrategyCondition::Air, 100.0f) == 1.0f);
+		CHECK(homogeneous(CT::Crisp, C::QuotientSmaller, StrategyCondition::Air, 100.0f) == -1.0f);
+		CHECK(homogeneous(CT::Crisp, C::Quotient, StrategyCondition::Air, 0.0f) == -1.0f);
+		CHECK(homogeneous(CT::Fuzzy, C::Equal, StrategyCondition::Ticket, 25.0f) == -5.0f);
+		CHECK(homogeneous(CT::Fuzzy, C::EqualGreater, StrategyCondition::Ticket, 25.0f) == -5.0f);
+		CHECK(homogeneous(CT::Fuzzy, C::DifferenceSmaller, StrategyCondition::Ticket, 25.0f) == 5.0f);
+		CHECK(homogeneous(CT::Fuzzy, C::QuotientSmaller, StrategyCondition::Ticket, 1.0f) == -2.0f);
+		CHECK(homogeneous(CT::Fuzzy, C::QuotientGreater, StrategyCondition::Air, 1.0f) == 1000.0f);
+		CHECK(homogeneous(CT::Fuzzy, C::Quotient, StrategyCondition::Air, 1.0f) == -1000.0f);
+		CHECK(homogeneous(CT::FuzzySqr, C::EqualGreater, StrategyCondition::Ticket, 25.0f) == -25.0f);
+		CHECK(homogeneous(CT::FuzzySqr, C::EqualGreater, StrategyCondition::Ticket, 17.0f) == 9.0f);
+
+		SCConstant constant(
+				"k", CT::Crisp, C::EqualGreater, StrategyCondition::Side::Enemy, StrategyCondition::Ticket, 4.0f, 6.0f);
+		CHECK(constant.kind() == StrategyCondition::Kind::Constant);
+		CHECK(constant.compare(friendly.data(), enemy.data(), 1) == 1.0f);
+		constant.set_target_value(7.0f);
+		CHECK(constant.compare(friendly.data(), enemy.data(), 1) == -1.0f);
+		SCHeterogeneous mixed("x", CT::Fuzzy, C::EqualGreater, StrategyCondition::Side::Friendly,
+				StrategyCondition::Ticket, StrategyCondition::Air, 0.0f);
+		CHECK(mixed.compare(friendly.data(), enemy.data(), 1) == 26.0f);
+		SCHeterogeneous across("y", CT::Fuzzy, C::EqualGreater, StrategyCondition::Side::Both,
+				StrategyCondition::Ticket, StrategyCondition::Ticket, 0.0f);
+		CHECK(across.compare(friendly.data(), enemy.data(), 1) == 20.0f);
+	}
+
+	TEST_CASE("StrategyPrerequisite and Strategy: required conditions veto, advisory ones clamp, abort conditions "
+			  "count only for the running strategy, and the preceding rules gate the score") {
+		std::array<float, 44> friendly{};
+		std::array<float, 44> enemy{};
+		friendly[StrategyCondition::NumberOfFriendlyAreas] = 3.0f;
+		using CT = StrategyCondition::CompareType;
+		using C = StrategyCondition::Compare;
+		using Side = StrategyCondition::Side;
+		SCConstant areas("areas", CT::Fuzzy, C::EqualGreater, Side::Friendly, StrategyCondition::NumberOfFriendlyAreas,
+				0.0f, 1.0f);
+		SCConstant few("few", CT::Fuzzy, C::EqualSmaller, Side::Friendly, StrategyCondition::NumberOfFriendlyAreas,
+				0.0f, 1.0f);
+		SCConstant abort("abort", CT::Crisp, C::EqualGreater, Side::Friendly, StrategyCondition::NumberOfFriendlyAreas,
+				0.0f, 0.0f);
+		abort.set_abort_condition(true);
+		StrategyPrerequisite prerequisite("p");
+		prerequisite.add_condition(&areas, 2.0f);
+		prerequisite.add_condition(nullptr, 1.0f);
+		prerequisite.add_condition(&few, 1.0f);
+		prerequisite.add_condition(&abort, 10.0f);
+		CHECK(prerequisite.size() == 3);
+		few.set_strength(StrategyCondition::Strength::AdvisoryPositive);
+		CHECK(prerequisite.evaluate(friendly.data(), enemy.data(), false, 1) == 4.0f);
+		CHECK(prerequisite.evaluate(friendly.data(), enemy.data(), true, 1) == 14.0f);
+		few.set_strength(StrategyCondition::Strength::Advisory);
+		CHECK(prerequisite.evaluate(friendly.data(), enemy.data(), false, 1) == 2.0f);
+		few.set_strength(StrategyCondition::Strength::Required);
+		CHECK(prerequisite.evaluate(friendly.data(), enemy.data(), false, 1) == 0.0f);
+		few.set_strength(StrategyCondition::Strength::RequiredNegative);
+		CHECK(prerequisite.evaluate(friendly.data(), enemy.data(), false, 1) == 2.0f);
+
+		Strategy attack("Attack");
+		Strategy defend("Defend");
+		CHECK(attack.aggression() == 0.5f);
+		CHECK(attack.minimum_active_time() == 1e9f);
+		CHECK(attack.calculate_prerequisite(friendly.data(), enemy.data(), nullptr, 1) == 0.0f);
+		attack.set_prerequisite(&prerequisite);
+		attack.set_prerequisite_weight(0.5f);
+		CHECK(attack.calculate_prerequisite(friendly.data(), enemy.data(), &defend, 1) == 1.0f);
+		CHECK(attack.calculate_prerequisite(friendly.data(), enemy.data(), &attack, 1) == 6.0f);
+		CHECK(attack.add_prohibited_preceding_strategy(&defend));
+		CHECK_FALSE(attack.add_prohibited_preceding_strategy(nullptr));
+		CHECK(attack.calculate_prerequisite(friendly.data(), enemy.data(), &defend, 1) == 0.0f);
+		CHECK(defend.add_required_preceding_strategy(&attack));
+		defend.set_prerequisite(&prerequisite);
+		CHECK(defend.calculate_prerequisite(friendly.data(), enemy.data(), nullptr, 1) == 0.0f);
+		CHECK(defend.calculate_prerequisite(friendly.data(), enemy.data(), &attack, 1) == 2.0f);
+		attack.set_abort_level(5.0f);
+		attack.set_abort_condition(&prerequisite);
+		CHECK(attack.calculate_abort_condition(friendly.data(), enemy.data(), &defend, 1) == 3.0f);
+
+		CHECK(attack.strategic_objects_modifier(AIStrategicObject::Front) == 1.0f);
+		attack.set_strategic_objects_modifier(AIStrategicObject::Front, 3.0f);
+		attack.set_strategic_objects_modifier(AIStrategicObject::Front, 0.0f, StrategicStatus::Neutral);
+		CHECK(attack.strategic_objects_modifier(AIStrategicObject::Front) == 2.0f);
+		CHECK(attack.strategic_objects_modifiers(StrategicStatus::Hostile)[AIStrategicObject::Front] == 3.0f);
+		CHECK(attack.specific_strategic_object_modifier(4) == 1.0f);
+		attack.set_specific_strategic_object_modifier(4, 0.25f);
+		attack.set_specific_strategic_object_modifier(-1, 9.0f);
+		CHECK(attack.specific_strategic_object_modifier(2) == 1.0f);
+		CHECK(attack.specific_strategic_object_modifier(4) == 0.25f);
+		attack.clear_all_strategic_objects_modifiers();
+		CHECK(attack.strategic_objects_modifier(AIStrategicObject::Front, StrategicStatus::Owned) == 1.0f);
+		attack.set_tree_modifier(40, 2.0f);
+		attack.set_tree_modifier(41, 3.0f);
+		attack.set_tree_modifier(3, 5, 4.0f);
+		attack.set_tree_modifier(3, 6, 5.0f);
+		CHECK(attack.tree_modifier(40) == 2.0f);
+		CHECK(attack.tree_modifier(3, 5) == 4.0f);
+		CHECK(attack.temperature_tree_modifiers().combat_strength[55][5] == 1.0f);
+	}
+
+	TEST_CASE("SCArea and StrategyManager::complete: an area condition and a specific modifier resolve their area "
+			  "by name once the areas exist") {
+		AIStrategicObjectManager objects{ StrategicServices{} };
+		REQUIRE(objects.create("north", { -10.0f, -10.0f }, { 0.0f, 0.0f }, 0.0f, 10.0f, std::string()));
+		REQUIRE(objects.create("south", { 90.0f, -10.0f }, { 100.0f, 0.0f }, 0.0f, 10.0f, std::string()));
+		StrategyManager manager(&objects);
+		REQUIRE(manager.create_strategy("Hold"));
+		CHECK(manager.add_specific_object_modifier("south", 0.5f));
+		CHECK(manager.add_specific_object_modifier("west", 2.0f));
+		REQUIRE(manager.create_area_condition("south owned", "south", StrategicStatus::Owned));
+		CHECK_FALSE(manager.create_area_condition("south owned", "north", StrategicStatus::Owned));
+		const StrategyCondition *condition = manager.condition("south owned");
+		REQUIRE(condition != nullptr);
+		CHECK(condition->kind() == StrategyCondition::Kind::Area);
+		CHECK(condition->compare(nullptr, nullptr, 1) == -1.0f);
+		manager.complete_conditions();
+		manager.complete_strategies();
+		CHECK(static_cast<const SCArea *>(condition)->object() == 1);
+		CHECK(manager.strategy("Hold")->specific_strategic_object_modifier(1) == 0.5f);
+		objects.strategic_object(1)->set_status(1, StrategicStatus::Owned);
+		CHECK(condition->compare(nullptr, nullptr, 1) == 1.0f);
+		CHECK(condition->compare(nullptr, nullptr, 2) == -1.0f);
 	}
 
 	TEST_CASE("StrategyDecisions without areas to take: Spread sends bot-led squads to different areas, Hunt to the "
@@ -1156,7 +1322,7 @@ TEST_SUITE("ai-strategy") {
 			decisions.distribute_with_no_areas(sai);
 		};
 		cycle();
-		CHECK(manager.active_strategy_name(1) == "Spread");
+		CHECK(decisions.active_strategy_name(1) == "Spread");
 		const SquadCoordinator &first = squads.coordinator(1, 1);
 		const SquadCoordinator &second = squads.coordinator(1, 2);
 		REQUIRE(first.squad_strategic_area_assignment() != nullptr);
@@ -1173,7 +1339,7 @@ TEST_SUITE("ai-strategy") {
 		heat.heat[3] = tuning.hunt_heat + 1.0f;
 		heat.heat[1] = 0.5f;
 		cycle();
-		CHECK(manager.active_strategy_name(1) == "Hunt");
+		CHECK(decisions.active_strategy_name(1) == "Hunt");
 		CHECK(decisions.hunted_area(1) == 3);
 		CHECK(first.squad_strategic_area_assignment()->index() == 3);
 		CHECK(second.squad_strategic_area_assignment()->index() == 3);
@@ -1193,6 +1359,11 @@ TEST_SUITE("ai-strategy") {
 		CHECK(squads.coordinator(1, 1).mission_status() == SquadMissionStatus::None);
 		CHECK(decisions.release_squads_from_object(sai, 3, 1) == 1);
 		CHECK(second.mission_status() == SquadMissionStatus::None);
+		CHECK(decisions.changes(1) == 2);
+		manager.force_strategy("Spread", 1);
+		cycle();
+		CHECK(decisions.active_strategy_name(1) == "Spread");
+		CHECK(decisions.active_strategy(2) == nullptr);
 	}
 
 	TEST_CASE(

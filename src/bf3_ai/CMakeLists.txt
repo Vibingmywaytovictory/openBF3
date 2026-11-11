@@ -102,8 +102,10 @@ target_sources(bf3_ai PRIVATE
 
 target_sources(bf3_ai PRIVATE
     include/bf3/ai/strategic/strategy.h
+    include/bf3/ai/strategic/strategy_model.h
     include/bf3/ai/squad/bot_squad.h
     src/strategic/strategy.cpp
+    src/strategic/strategy_model.cpp
     src/squad/orders.cpp
 )
 
