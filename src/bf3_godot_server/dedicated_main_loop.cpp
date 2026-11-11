@@ -21,6 +21,7 @@
 #include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <array>
 #include <chrono>
 #include <filesystem>
 
@@ -71,6 +72,19 @@ std::string extensions_text() {
 	}
 	return (text.empty() ? std::string("none") : text) + ", classes " +
 			(classes.empty() ? std::string("none") : classes);
+}
+
+std::string conquest_line(const host::GameServerStats &p_game) {
+	const net::ConquestState &c = p_game.conquest;
+	std::array<uint32_t, 3> held{};
+	for (size_t i = 0; i < c.point_count && i < c.points.size(); ++i) {
+		++held[c.points[i].controlled && c.points[i].team <= 2 ? c.points[i].team : 0];
+	}
+	return core::fmt("tickets US %u of %u%s, RU %u of %u%s, points held US %u RU %u, neither %u, captures %llu, "
+					 "ConquestState messages %llu",
+			unsigned(c.tickets[0]), unsigned(c.initial_tickets[0]), c.bleeding[0] ? " bleeding" : "",
+			unsigned(c.tickets[1]), unsigned(c.initial_tickets[1]), c.bleeding[1] ? " bleeding" : "", held[1], held[2],
+			held[0], (unsigned long long)p_game.conquest_captures, (unsigned long long)p_game.conquest_messages);
 }
 
 bool u32_arg(const char *p_name, double p_min, double p_max, uint32_t &r_value, std::string &r_error) {
@@ -203,6 +217,15 @@ bool DedicatedMainLoop::parse_args(std::string &r_error) {
 	a.rules.dev_commands = has_user_arg("dev");
 	on_off_arg("ghost-scope", a.rules.ghost_scope, r_error);
 	on_off_arg("bot-squads", a.rules.bot_squads, r_error);
+	uint32_t game_mode_counter = 100;
+	u32_arg("game-mode-counter", 1.0, 1000.0, game_mode_counter, r_error);
+	a.rules.conquest.game_mode_counter_modifier = double(game_mode_counter) / 100.0;
+	on_off_arg("deserting", a.rules.conquest.deserting_allowed, r_error);
+	bool ticket_bleed = true;
+	on_off_arg("ticket-bleed", ticket_bleed, r_error);
+	a.rules.conquest.bleed_disabled = !ticket_bleed;
+	a.rules.conquest.bleed_scale = has_user_arg("super-fast-bleed") ? 100.0 : 1.0;
+	on_off_arg("only-squad-leader-spawn", a.rules.only_squad_leader_spawn, r_error);
 	a.rules.bot_tuning_cfg = config_path(config_file("bot_tuning.cfg").c_str());
 	if (const std::string mechanics = config_path(config_file("weapon_mechanics.cfg").c_str()); !mechanics.empty()) {
 		a.rules.mechanics_cfg = mechanics;
@@ -317,6 +340,11 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 			r.preround_s >= 0.0f ? core::fmt("%.1f s", r.preround_s).c_str() : "data",
 			r.min_players >= 0 ? std::to_string(r.min_players).c_str() : "data", r.dev_commands ? "on (--dev)" : "off",
 			r.ghost_scope ? "on" : "off (--ghost-scope=off)", r.bot_squads ? "on" : "off (--bot-squads=off)"));
+	say(core::fmt(
+			"rules Conquest: game mode counter %.0f %%, deserting %s, ticket bleed %s%s, only squad leader spawn %s",
+			r.conquest.game_mode_counter_modifier * 100.0, r.conquest.deserting_allowed ? "allowed" : "killed",
+			r.conquest.bleed_disabled ? "off" : "on", r.conquest.bleed_scale != 1.0 ? " x100 (--super-fast-bleed)" : "",
+			r.only_squad_leader_spawn ? "on" : "off"));
 	say(core::fmt("gunplay: mechanics %s, lag compensation rewinds at most %u ticks, magazines %s",
 			r.mechanics_cfg.c_str(), r.max_rewind_ticks,
 			r.infinite_magazine ? "infinite (--infinite-magazine)" : "finite"));
@@ -423,6 +451,9 @@ void DedicatedMainLoop::report(const host::ServerSessionStats &p_stats) {
 			std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
 					.count());
 	say("net: " + net_meter_.report(g.traffic, session_->host().peer_counters(), now_ns));
+	if (g.conquest_active) {
+		say("conquest: " + conquest_line(g));
+	}
 	report_master(p_stats);
 }
 
@@ -515,6 +546,9 @@ void DedicatedMainLoop::_finalize() {
 			(long long)(monitor(Performance::OBJECT_RESOURCE_COUNT) - resources_after_load_),
 			(long long)monitor(Performance::RENDER_TEXTURE_MEM_USED), args_.rules.dev_commands ? "on" : "off",
 			diff.clean() ? "unchanged" : diff.summary().c_str(), stopped_by_));
+	if (stats.game.conquest_active) {
+		say("conquest summary: " + conquest_line(stats.game));
+	}
 	if (stats.rotation.load_failures > 0) {
 		fail(core::fmt("rotation: %llu level loads failed, the last %s",
 				(unsigned long long)stats.rotation.load_failures, stats.rotation.last_error.c_str()));

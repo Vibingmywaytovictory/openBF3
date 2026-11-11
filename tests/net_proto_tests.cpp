@@ -3544,7 +3544,7 @@ TEST_SUITE("net-proto") {
 		REQUIRE(dmi);
 		CHECK(dmi->logic_digest == mi.logic_digest);
 		CHECK(dmi->rules_flags == mi.rules_flags);
-		mi.rules_flags = 1u << 3;
+		mi.rules_flags = 1u << 4;
 		CHECK_FALSE(net::decode_match_info(net::encode_match_info(mi)));
 		net::LoadoutRequest lr;
 		lr.kit = 2;

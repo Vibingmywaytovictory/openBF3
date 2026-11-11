@@ -265,6 +265,8 @@ std::optional<net::SpawnAnswerKind> spawn_answer_of(SpawnRefusal p_refusal) {
 	switch (p_refusal) {
 		case SpawnRefusal::FlagClosed:
 			return net::SpawnAnswerKind::FlagClosed;
+		case SpawnRefusal::NotSquadLeader:
+			return net::SpawnAnswerKind::NotSquadLeader;
 		default:
 			return std::nullopt;
 	}
@@ -516,6 +518,11 @@ struct TdmRules::Impl {
 		return mate_ready(p_slot, mate, last_states) ? mate : kNoSquadMate;
 	}
 
+	bool squad_spawn_allowed(uint8_t p_slot, int p_mate) const {
+		return !config.only_squad_leader_spawn || squads.leader(p_slot) ||
+				(p_mate >= 0 && squads.leader(uint8_t(p_mate)));
+	}
+
 	const lg::ConquestParams *conquest_params() const {
 		return native_config.params ? native_config.params->conquest.get() : nullptr;
 	}
@@ -562,7 +569,10 @@ struct TdmRules::Impl {
 			return SpawnRefusal::None;
 		}
 		const int mate = squad_mate(p_slot, p_spawn_choice);
-		return mate == kNoSquadMate ? SpawnRefusal::SquadMate : SpawnRefusal::None;
+		if (mate == kNoSquadMate) {
+			return SpawnRefusal::SquadMate;
+		}
+		return squad_spawn_allowed(p_slot, mate) ? SpawnRefusal::None : SpawnRefusal::NotSquadLeader;
 	}
 
 	sim::Vec3 squad_spawn_point(const sim::Vec3 &p_mate) {
@@ -700,6 +710,7 @@ core::Result<std::unique_ptr<TdmRules>> TdmRules::create(const SharedLevel &p_le
 	m.native_config.params = p_level.logic_natives;
 	m.native_config.team_kill_weight = m.tuning->team_kill_weight;
 	m.native_config.rotate_teams = m.tuning->rotate_teams;
+	m.native_config.conquest = p_config.conquest;
 	BF3_TRY(m.start_runtime());
 	m.slots.resize(p_max_slots);
 	m.last_states.assign(p_max_slots, sim::SoldierState());
@@ -1463,7 +1474,8 @@ bool TdmRules::take_squad_spawn(
 	};
 	const auto ready = [&](uint8_t p_choice) {
 		const int mate = p_choice != 0 ? m.squads.mate(p_slot, uint8_t(p_choice - 1u)) : kNoSquadMate;
-		return m.mate_ready(p_slot, mate, p_live) && calm(mate) && m.bot_nav_main(p_live[size_t(mate)].position)
+		return m.mate_ready(p_slot, mate, p_live) && m.squad_spawn_allowed(p_slot, mate) && calm(mate) &&
+						m.bot_nav_main(p_live[size_t(mate)].position)
 				? mate
 				: kNoSquadMate;
 	};

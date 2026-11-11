@@ -82,6 +82,8 @@ struct ServerRules {
 	bool infinite_magazine = false;
 	bool ghost_scope = true;
 	bool bot_squads = true;
+	sim::logic::ConquestOptions conquest;
+	bool only_squad_leader_spawn = false;
 };
 
 GameServerConfig tdm_game_server_config(const ServerLevel &p_level, const ServerRules &p_rules);

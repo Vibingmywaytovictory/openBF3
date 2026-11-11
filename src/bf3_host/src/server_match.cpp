@@ -11,8 +11,10 @@ void MatchControl::configure(const GameServerConfig &p_config, size_t p_slots) {
 	fixed_.ticks = p_config.respawn_ticks;
 	slots_ = p_slots;
 	deploy_screen_ = p_config.rules.deploy_screen;
-	rules_flags_ = uint8_t(net::rules_flags::kTdm | (p_config.rules.deploy_screen ? net::rules_flags::kDeployScreen : 0u) |
-			(p_config.rules.revive ? net::rules_flags::kRevive : 0u));
+	rules_flags_ =
+			uint8_t(net::rules_flags::kTdm | (p_config.rules.deploy_screen ? net::rules_flags::kDeployScreen : 0u) |
+					(p_config.rules.revive ? net::rules_flags::kRevive : 0u) |
+					(p_config.rules.only_squad_leader_spawn ? net::rules_flags::kOnlySquadLeaderSpawn : 0u));
 	logic_digest_ = p_config.level->logic_digest;
 }
 

@@ -79,7 +79,7 @@ struct Match {
 	}
 };
 
-Match start_match(const ConquestLevel &p_level) {
+Match start_match(const ConquestLevel &p_level, const ConquestOptions &p_options = {}) {
 	Match m;
 	core::Result<LogicRuntime> rt = LogicRuntime::create(p_level.graph, LogicRuntimeOptions{});
 	REQUIRE(rt.ok());
@@ -89,6 +89,7 @@ Match start_match(const ConquestLevel &p_level) {
 	config.params = params;
 	config.min_players_override = 2;
 	config.preround_override_s = 0.0f;
+	config.conquest = p_options;
 	core::Result<RoundNatives> natives = RoundNatives::create(p_level.graph, config);
 	REQUIRE_MESSAGE(natives.ok(), (natives.ok() ? std::string() : natives.error().message));
 	m.runtime.emplace(std::move(*rt));
@@ -398,5 +399,79 @@ TEST_SUITE("logic-conquest") {
 		CHECK(killed_after >= 599);
 		CHECK(killed_after <= 601);
 		CHECK(c.stats().strikes == 1);
+	}
+
+	TEST_CASE("logic.conquest: the server settings: GameModeCounterModifier 2 doubles the tickets, IsDesertingAllowed "
+			  "tracks nobody, DisableTicketBleed holds the tickets and SuperFastBleed bleeds 100 times faster") {
+		test::Mounted *mount = test::shared_mount_or_skip();
+		if (mount == nullptr) {
+			return;
+		}
+		const std::optional<ConquestLevel> l = load_conquest(*mount, "MP_007", "ConquestSmall0");
+		const auto bleed_over = [&](const ConquestOptions &p_options, size_t p_flags, int p_ticks, int64_t &r_start) {
+			Match m = start_match(*l, p_options);
+			REQUIRE(m.natives->player_enter_team(0, false, 1, *m.runtime).ok());
+			REQUIRE(m.natives->player_enter_team(1, true, 2, *m.runtime).ok());
+			const ConquestPointData *ru_hq = hq_of(*l->params, 2);
+			REQUIRE(ru_hq != nullptr);
+			std::vector<ConquestPlayerSample> players{ { 0, 1, true, false, { 50000.0f, 0.0f, 50000.0f } },
+				{ 1, 2, true, true, ru_hq->params.position } };
+			REQUIRE(m.natives->player_spawned(0, 1, false, *m.runtime).ok());
+			REQUIRE(m.natives->player_spawned(1, 2, false, *m.runtime).ok());
+			for (int i = 0; i < 10 && m.natives->phase() != RoundPhase::InRound; ++i) {
+				m.step(players);
+			}
+			REQUIRE(m.natives->phase() == RoundPhase::InRound);
+			ConquestNatives &c = *m.natives->conquest();
+			r_start = c.tickets(2);
+			size_t taken_flags = 0;
+			for (const ConquestPointData &flag : l->params->points) {
+				if (flag.params.type == CapturableType::UnableToChangeTeam || taken_flags == p_flags) {
+					continue;
+				}
+				++taken_flags;
+				players[0].position = flag.params.position;
+				bool taken = false;
+				for (int i = 0; i < 1300 && !taken; ++i) {
+					m.step(players);
+					for (const ConquestPointView &v : c.points()) {
+						taken |= v.node == flag.node && v.controlled && v.team == 1;
+					}
+				}
+				REQUIRE(taken);
+			}
+			players[0].position = { 50000.0f, 0.0f, 50000.0f };
+			const int64_t before = c.tickets(2);
+			for (int i = 0; i < p_ticks && m.natives->phase() == RoundPhase::InRound; ++i) {
+				m.step(players);
+			}
+			CHECK(c.take_kills().empty());
+			CHECK(c.deserters(1).empty());
+			CHECK(c.deserters(2).empty());
+			CHECK(c.stats().strikes == 0);
+			return before - c.tickets(2);
+		};
+		ConquestOptions doubled;
+		doubled.game_mode_counter_modifier = 2.0;
+		doubled.deserting_allowed = true;
+		int64_t start = 0;
+		const int64_t doubled_bled = bleed_over(doubled, 4, 600, start);
+		CHECK(start == 300);
+		ConquestOptions held;
+		held.bleed_disabled = true;
+		held.deserting_allowed = true;
+		const int64_t held_bled = bleed_over(held, 4, 600, start);
+		CHECK(start == 150);
+		ConquestOptions fast;
+		fast.bleed_scale = 100.0;
+		fast.deserting_allowed = true;
+		const int64_t fast_bled = bleed_over(fast, 3, 60, start);
+		std::printf("logic.conquest: settings: RU of 300 bled %lld in 10 s on 4 flags, with the bleed off %lld, super "
+					"fast %lld in 1 s on 3 flags\n",
+				static_cast<long long>(doubled_bled), static_cast<long long>(held_bled),
+				static_cast<long long>(fast_bled));
+		CHECK(double(doubled_bled) == doctest::Approx(3.4).epsilon(0.35));
+		CHECK(held_bled == 0);
+		CHECK(double(fast_bled) == doctest::Approx(25.5).epsilon(0.05));
 	}
 }

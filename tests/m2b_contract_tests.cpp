@@ -91,8 +91,8 @@ static_assert(uint8_t(host::SpawnRefusal::None) == 0 && uint8_t(host::SpawnRefus
 		uint8_t(host::SpawnRefusal::TooEarly) == 2 && uint8_t(host::SpawnRefusal::BadKit) == 3 &&
 		uint8_t(host::SpawnRefusal::Phase) == 4 && uint8_t(host::SpawnRefusal::RateLimited) == 5 &&
 		uint8_t(host::SpawnRefusal::Spectator) == 6 && uint8_t(host::SpawnRefusal::SquadMate) == 7 &&
-		uint8_t(host::SpawnRefusal::FlagClosed) == 8 &&
-		host::kSpawnRefusalCount == 9);
+		uint8_t(host::SpawnRefusal::FlagClosed) == 8 && uint8_t(host::SpawnRefusal::NotSquadLeader) == 9 &&
+		host::kSpawnRefusalCount == 10);
 static_assert(uint8_t(host::RulesOrder::Kind::Spawn) == 0 && uint8_t(host::RulesOrder::Kind::Revive) == 1 &&
 		uint8_t(host::RulesOrder::Kind::Unspawn) == 2 && uint8_t(host::RulesOrder::Kind::SpawnAt) == 3);
 static_assert(uint8_t(host::MatchRulesConfig::Mode::None) == 0 && uint8_t(host::MatchRulesConfig::Mode::Tdm) == 1);

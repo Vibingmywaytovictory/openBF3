@@ -43,6 +43,7 @@ echo   --bind=0.0.0.0 --port=N   take other PCs' clients on UDP port N; the inbo
 echo   --upnp   map the UDP port on the router ^(refused with the 127.0.0.1 bind^)
 echo   --master=HOST:PORT --name=NAME ^(default openBF3^)   heartbeat to a master ^(bf3dump master^), joined by tools\play.cmd --connect=NAME@HOST:PORT
 echo   --ghost-scope=on^|off --bot-squads=on^|off ^(default on^) --bf3-install=DIR ^(default: OPENBF3_INSTALL, then C:\Program Files\EA Games\Battlefield 3^)
+echo   Conquest: --game-mode-counter=1..1000 ^(percent of the tickets, default 100^) --deserting=on^|off ^(default off: out of bounds kills^) --ticket-bleed=on^|off ^(default on^) --super-fast-bleed ^(x100^) --only-squad-leader-spawn=on^|off ^(default off^)
 echo   --dedicated-seconds=S --stop-after-kills=N   stop after S seconds or N kills
 echo   --stop-after-squad-samples=N   --stop-after-kills also waits for N squad cohesion samples
 echo   --stop-after-levels=N   stop once the rotation reached its Nth level and no client is left

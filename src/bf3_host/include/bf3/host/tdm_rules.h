@@ -83,6 +83,8 @@ struct MatchRulesConfig {
 	int min_players_override = -1;
 	uint8_t max_players = 32;
 	bool hold_level_end = false;
+	sim::logic::ConquestOptions conquest;
+	bool only_squad_leader_spawn = false;
 };
 
 struct RulesOrder {
@@ -104,9 +106,10 @@ enum class SpawnRefusal : uint8_t {
 	RateLimited = 5,
 	Spectator = 6,
 	SquadMate = 7,
-	FlagClosed = 8
+	FlagClosed = 8,
+	NotSquadLeader = 9
 };
-inline constexpr size_t kSpawnRefusalCount = 9;
+inline constexpr size_t kSpawnRefusalCount = 10;
 
 std::optional<net::SpawnAnswerKind> spawn_answer_of(SpawnRefusal p_refusal);
 inline constexpr sim::Vec3 kSquadSpawnNavExtents{ 1.0f, 2.0f, 1.0f };

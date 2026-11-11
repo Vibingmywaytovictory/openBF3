@@ -117,6 +117,8 @@ GameServerConfig tdm_game_server_config(const ServerLevel &p_level, const Server
 	c.rules.preround_override_s = p_rules.preround_s;
 	c.rules.min_players_override = p_rules.min_players;
 	c.rules.max_players = max_players;
+	c.rules.conquest = p_rules.conquest;
+	c.rules.only_squad_leader_spawn = p_rules.only_squad_leader_spawn;
 	if (p_rules.bots > 0 && p_level.bots != nullptr) {
 		auto bots = std::make_shared<TdmBotConfig>();
 		bots->count = std::min<uint32_t>(p_rules.bots, max_players);

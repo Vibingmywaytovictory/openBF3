@@ -30,7 +30,8 @@ constexpr size_t kMaxReliableBytes = 256 * 1024;
 constexpr float kMaxWorldCoordinate = 1.0e6f;
 
 constexpr uint8_t kKnownWeaponFlags = weapon_flags::kExactAim | weapon_flags::kInfiniteMagazine;
-constexpr uint8_t kKnownRulesFlags = rules_flags::kTdm | rules_flags::kDeployScreen | rules_flags::kRevive;
+constexpr uint8_t kKnownRulesFlags =
+		rules_flags::kTdm | rules_flags::kDeployScreen | rules_flags::kRevive | rules_flags::kOnlySquadLeaderSpawn;
 constexpr unsigned kWireSlotBits = 7;
 constexpr unsigned kWireDefBits = 8;
 constexpr uint32_t kNoWireDef = 0xFF;

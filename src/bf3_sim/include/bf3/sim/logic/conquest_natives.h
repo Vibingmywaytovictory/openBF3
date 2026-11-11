@@ -54,6 +54,7 @@ struct ConquestOptions {
 	double game_mode_counter_modifier = 1.0;
 	bool deserting_allowed = false;
 	bool bleed_disabled = false;
+	double bleed_scale = 1.0;
 };
 
 class ConquestNatives {

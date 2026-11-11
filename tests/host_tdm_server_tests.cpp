@@ -16,6 +16,7 @@
 #include "bf3/host/kits.h"
 #include "bf3/host/load_bots.h"
 #include "bf3/host/loadout.h"
+#include "bf3/host/server_level.h"
 #include "bf3/host/spotter.h"
 #include "bf3/net/loopback_ping.h"
 #include "bf3/sim/collision_world.h"
@@ -3576,6 +3577,35 @@ TEST_SUITE("host-tdm-conquest") {
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 
+	TEST_CASE("conquest: the dedicated server's Conquest settings reach the rules: GameModeCounterModifier, "
+			  "IsDesertingAllowed, DisableTicketBleed, SuperFastBleed") {
+		host::ServerRules rules;
+		CHECK(rules.conquest.game_mode_counter_modifier == 1.0);
+		CHECK_FALSE(rules.conquest.deserting_allowed);
+		CHECK_FALSE(rules.conquest.bleed_disabled);
+		CHECK(rules.conquest.bleed_scale == 1.0);
+		rules.conquest.game_mode_counter_modifier = 2.0;
+		rules.conquest.deserting_allowed = true;
+		rules.conquest.bleed_disabled = true;
+		rules.conquest.bleed_scale = 100.0;
+		const host::GameServerConfig c = host::tdm_game_server_config(host::ServerLevel{}, rules);
+		CHECK(c.rules.conquest.game_mode_counter_modifier == 2.0);
+		CHECK(c.rules.conquest.deserting_allowed);
+		CHECK(c.rules.conquest.bleed_disabled);
+		CHECK(c.rules.conquest.bleed_scale == 100.0);
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		std::unique_ptr<Match> m = start_match(*level, false, 59u, 0, 2,
+				[&](host::GameServerConfig &r_config) { r_config.rules.conquest = c.rules.conquest; });
+		const sim::logic::ConquestNatives &cq = conquest_of(*m);
+		std::printf("conquest: with GameModeCounterModifier 2 the teams start with %lld and %lld tickets\n",
+				(long long)cq.initial_tickets(1), (long long)cq.initial_tickets(2));
+		CHECK(cq.initial_tickets(1) == 300);
+		CHECK(cq.initial_tickets(2) == 300);
+	}
+
 	TEST_CASE("conquest: a flag spawn choice deploys on the chosen flag once the team holds it; a closed flag is "
 			  "refused and a flag lost in the deploy's tick leaves no open point, both answered on the wire") {
 		tdm::TdmLevel *level = tdm::load_conquest_level_once();
@@ -3662,6 +3692,77 @@ TEST_SUITE("host-tdm-conquest") {
 		p.spawn_request(1, 0);
 		REQUIRE(m->until([&] { return is_alive(m->state(p.slot())); }, 240));
 		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+
+	TEST_CASE("conquest: OnlySquadLeaderSpawn refuses a squad spawn between two members and allows one on the leader "
+			  "(M-CQ3 rule 4)") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		std::unique_ptr<Match> m = start_match(*level, true, 67u, 0, 2,
+				[](host::GameServerConfig &r_config) { r_config.rules.only_squad_leader_spawn = true; });
+		std::vector<tdm::ScriptedPeer *> peers;
+		for (const char *name : { "alpha", "bravo", "charlie", "delta", "echo" }) {
+			peers.push_back(&m->join(name));
+			peers.back()->ready();
+		}
+		REQUIRE(wait_in_round(*m));
+		REQUIRE(peers.front()->match_info.has_value());
+		CHECK((peers.front()->match_info->rules_flags & net::rules_flags::kOnlySquadLeaderSpawn) != 0);
+		for (tdm::ScriptedPeer *q : peers) {
+			q->spawn_request(1, 0);
+		}
+		REQUIRE(m->until(
+				[&] {
+					return std::all_of(peers.begin(), peers.end(),
+							[&](tdm::ScriptedPeer *q) { return is_alive(m->state(q->slot())); });
+				},
+				240));
+		m->ticks(20);
+		const net::PlayerRow *first = m->row(peers.front()->slot());
+		REQUIRE(first != nullptr);
+		tdm::ScriptedPeer *leader = nullptr;
+		std::vector<tdm::ScriptedPeer *> members;
+		for (tdm::ScriptedPeer *q : peers) {
+			const net::PlayerRow *r = m->row(q->slot());
+			REQUIRE(r != nullptr);
+			if (r->team != first->team || r->squad != first->squad) {
+				continue;
+			}
+			if (r->leader) {
+				leader = q;
+			} else {
+				members.push_back(q);
+			}
+		}
+		REQUIRE(leader != nullptr);
+		REQUIRE(members.size() >= 2u);
+		tdm::ScriptedPeer &dead = *members[0];
+		tdm::ScriptedPeer &member = *members[1];
+		m->server.on_receive(dead.peer(), net::kChannelReliable, net::encode_suicide_request());
+		m->ticks(3);
+		REQUIRE_FALSE(is_alive(m->state(dead.slot())));
+		const uint32_t earliest = m->rules().earliest_respawn(uint8_t(dead.slot()));
+		REQUIRE(m->until([&] { return m->now() >= earliest; }, 1200));
+		const std::vector<net::PlayerRow> rows = dead.players;
+		const uint8_t on_member = host::squad_spawn_choice(rows, uint8_t(dead.slot()), uint8_t(member.slot()));
+		const uint8_t on_leader = host::squad_spawn_choice(rows, uint8_t(dead.slot()), uint8_t(leader->slot()));
+		REQUIRE(on_member != 0);
+		REQUIRE(on_leader != 0);
+		dead.spawn_request(1, on_member);
+		m->ticks(2);
+		REQUIRE_FALSE(dead.spawn_answers.empty());
+		CHECK(dead.spawn_answers.back().kind == net::SpawnAnswerKind::NotSquadLeader);
+		CHECK_FALSE(is_alive(m->state(dead.slot())));
+		CHECK(m->rules().stats().refused[size_t(host::SpawnRefusal::NotSquadLeader)] == 1u);
+		dead.spawn_request(1, on_leader);
+		REQUIRE(m->until([&] { return is_alive(m->state(dead.slot())); }, 240));
+		const float from_leader = distance(m->state(dead.slot())->position, m->state(leader->slot())->position);
+		std::printf("conquest: OnlySquadLeaderSpawn: a member's spawn on a member refused, on the leader at %.1f m\n",
+				from_leader);
+		CHECK(from_leader < 5.0f);
+		CHECK(m->rules().stats().squad_spawns == 1u);
 	}
 
 	TEST_CASE("conquest: a revive costs no ticket, a redeploy costs one (M-CQ2 rule 4)") {

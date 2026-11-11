@@ -385,6 +385,7 @@ core::Status ConquestNatives::step(
 				[&](const ConquestPlayerSample &pl) { return pl.alive && pl.team == team; });
 		in.enemy_holds_all = enemy_holds_all(team, rp);
 		in.bleed_disabled = s.options.bleed_disabled;
+		in.bleed_scale = s.options.bleed_scale;
 		const TicketEvents ev = ticket_bleed(c.data->params, c.state, in, double(p_dt));
 		if (ev.start_bleed) {
 			BF3_TRY(r_runtime.force_event(c.data->node, kOnStartBleed, LogicContext{ -1, team }));

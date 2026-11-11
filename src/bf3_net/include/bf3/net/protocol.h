@@ -558,6 +558,7 @@ namespace rules_flags {
 inline constexpr uint8_t kTdm = 1u << 0;
 inline constexpr uint8_t kDeployScreen = 1u << 1;
 inline constexpr uint8_t kRevive = 1u << 2;
+inline constexpr uint8_t kOnlySquadLeaderSpawn = 1u << 3;
 }
 
 namespace restrict_bits {
