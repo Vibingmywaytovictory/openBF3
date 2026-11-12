@@ -188,6 +188,8 @@ core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
 			k.box = sim::vehicles::chassis_box(**model);
 			k.material = def->material;
 			k.min_speed_for_mine = def->min_speed_for_mine_activation;
+			k.explosion = def->explosion;
+			k.explosion_effect = def->explosion_effect;
 			k.disabled_input = def->disabled_input;
 			for (const core::gameplay::VehicleSeatDef &seat : def->seats) {
 				k.entry_radius = std::max(k.entry_radius, std::isfinite(seat.entry_radius) ? seat.entry_radius : 0.0f);

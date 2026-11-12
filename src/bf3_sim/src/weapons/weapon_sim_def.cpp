@@ -459,6 +459,16 @@ void hash_mechanics(detail::Fnv64 &r_h, const Mechanics &p_m) {
 
 }
 
+core::Result<ExplosionSimDef> make_explosion_sim_def(
+		const core::gameplay::Explosion &p_explosion, const SurfaceMaterialTable &p_materials) {
+	Checker c(p_explosion.partition);
+	ExplosionSimDef x = make_explosion(c, p_explosion, p_materials, "Explosion");
+	if (!c.ok()) {
+		return c.error();
+	}
+	return x;
+}
+
 core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &p_def, const SurfaceMaterialTable &p_materials) {
 	Checker c(p_def.variant);
 	const FireFunction &f = p_def.fire;

@@ -908,6 +908,9 @@ GameServerStats GameServer::stats() const {
 	g.vehicle_repairs = m.vehicles.stats().repairs;
 	g.vehicles_destroyed = m.vehicles.stats().destroyed;
 	g.vehicle_crew_kills = m.vehicles.stats().occupant_kills;
+	g.vehicle_wreck_blasts = m.vehicles.stats().wreck_blasts;
+	g.vehicle_wreck_blast_soldier_hits = m.vehicles.stats().wreck_blast_soldier_hits;
+	g.vehicle_wreck_blast_vehicle_hits = m.vehicles.stats().wreck_blast_vehicle_hits;
 	g.step_precondition_failures = m.step_precondition_failures;
 	g.last_step_ms = m.last_step_ms;
 	m.snapshots.stats(g);

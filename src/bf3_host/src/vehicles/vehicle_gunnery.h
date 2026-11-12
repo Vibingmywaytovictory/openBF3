@@ -22,12 +22,20 @@ namespace bf3::host {
 
 inline constexpr uint32_t kVehicleShotIndexBase = 0x80000000u;
 inline constexpr uint32_t kVehicleShotIndexStride = 1u << 24;
+inline constexpr uint32_t kWreckShotIndexBase = 0xC0000000u;
 
 struct VehicleGunneryStats {
 	uint64_t shots = 0;
 	uint64_t refused = 0;
 	uint64_t damage = 0;
 	uint64_t mount_failures = 0;
+	uint64_t blasts = 0;
+};
+
+struct VehicleBlastHits {
+	bool ran = false;
+	uint32_t soldiers = 0;
+	uint32_t vehicles = 0;
 };
 
 class VehicleGunnery {
@@ -45,6 +53,9 @@ public:
 
 	void step(sim::Tick p_tick, const sim::CollisionWorld &p_world, const sim::weapons::HitTargetProvider &p_targets,
 			std::vector<sim::weapons::DamageEvent> &r_damage);
+	VehicleBlastHits explode(const sim::weapons::ExplosionSimDef &p_explosion,
+			const sim::weapons::DetonationEvent &p_source, uint8_t p_credit, const sim::CollisionWorld &p_world,
+			const sim::weapons::HitTargetProvider &p_targets, std::vector<sim::weapons::DamageEvent> &r_damage);
 
 	const sim::weapons::WeaponTable *table() const { return table_.get(); }
 	std::span<const sim::weapons::Projectile> live() const;

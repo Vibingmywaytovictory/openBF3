@@ -141,6 +141,9 @@ private:
 
 void explode(const WeaponTable &p_table, const CollisionWorld &p_world, const HitTargetProvider &p_targets,
 		const DetonationEvent &p_detonation, core::gameplay::WorkBudget &r_budget, ProjectileStepOutput &r_out);
+void explode(const WeaponTable &p_table, const ExplosionSimDef &p_explosion, const CollisionWorld &p_world,
+		const HitTargetProvider &p_targets, const DetonationEvent &p_detonation, core::gameplay::WorkBudget &r_budget,
+		ProjectileStepOutput &r_out);
 
 DVec3 ballistic_position(const DVec3 &p_origin, const DVec3 &p_velocity, double p_gravity, double p_seconds);
 

@@ -660,7 +660,17 @@ void ProjectileWorld::step(Tick p_tick, const CollisionWorld &p_world, const Hit
 
 void explode(const WeaponTable &p_table, const CollisionWorld &p_world, const HitTargetProvider &p_targets,
 		const DetonationEvent &p_detonation, WorkBudget &r_budget, ProjectileStepOutput &r_out) {
-	if (p_detonation.def >= p_table.defs.size() || !finite(p_detonation.position)) {
+	if (p_detonation.def >= p_table.defs.size()) {
+		return;
+	}
+	const ProjectileSimDef &d = p_table.def(p_detonation.def, p_detonation.variant).projectile;
+	explode(p_table, p_detonation.dud ? d.dud : d.explosion, p_world, p_targets, p_detonation, r_budget, r_out);
+}
+
+void explode(const WeaponTable &p_table, const ExplosionSimDef &p_explosion, const CollisionWorld &p_world,
+		const HitTargetProvider &p_targets, const DetonationEvent &p_detonation, WorkBudget &r_budget,
+		ProjectileStepOutput &r_out) {
+	if (!finite(p_detonation.position)) {
 		return;
 	}
 	const BallisticsLimits limits;
@@ -671,9 +681,7 @@ void explode(const WeaponTable &p_table, const CollisionWorld &p_world, const Hi
 	p.def = p_detonation.def;
 	p.variant = p_detonation.variant;
 	r_out.detonations.push_back(p_detonation);
-	const ProjectileSimDef &d = p_table.def(p_detonation.def, p_detonation.variant).projectile;
-	blast(env, p, p_detonation.dud ? d.dud : d.explosion, p_detonation.dud, to_d(p_detonation.position),
-			p_detonation.normal, p_detonation.time);
+	blast(env, p, p_explosion, p_detonation.dud, to_d(p_detonation.position), p_detonation.normal, p_detonation.time);
 }
 
 DVec3 ballistic_position(const DVec3 &p_origin, const DVec3 &p_velocity, double p_gravity, double p_seconds) {

@@ -215,6 +215,9 @@ inline constexpr uint16_t kNoWeapon = 0xFFFF;
 
 core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &p_def, const SurfaceMaterialTable &p_materials);
 
+core::Result<ExplosionSimDef> make_explosion_sim_def(
+		const core::gameplay::Explosion &p_explosion, const SurfaceMaterialTable &p_materials);
+
 struct WeaponTableOptions {
 	Mechanics mechanics;
 	bool infinite_magazine = false;

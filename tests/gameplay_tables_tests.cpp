@@ -2216,6 +2216,16 @@ TEST_SUITE("tables") {
 		const VehicleDef growler = vehicle(*lib, "vehicles/growleritv/growleritv");
 		CHECK(growler.material.resolved);
 		CHECK(growler.material.instance != m1.material.instance);
+		CHECK(m1.explosion.present);
+		CHECK(m1.explosion.blast_damage == Approx(100));
+		CHECK(m1.explosion.inner_blast_radius == Approx(2));
+		CHECK(m1.explosion.blast_radius == Approx(10));
+		CHECK(m1.explosion.blast_impulse == Approx(200));
+		CHECK(m1.explosion.disable_occlusion);
+		CHECK(m1.explosion.material.resolved);
+		CHECK(m1.explosion_effect == "fx/vehicles/vehiclesdestruction/fx_vdest_tank");
+		CHECK(growler.explosion.blast_impulse == Approx(150));
+		CHECK(growler.explosion_effect == "fx/vehicles/vehiclesdestruction/fx_vdest_armored");
 		const auto modifier = [](const VehicleDef &p_def,
 									  std::string_view p_action) -> std::optional<VehicleInputModifierDef> {
 			for (const VehicleInputModifierDef &d : p_def.disabled_input) {

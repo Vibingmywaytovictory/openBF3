@@ -5247,6 +5247,8 @@ struct VehicleSight {
 	sim::Vec3 at{};
 	uint16_t health = 0;
 	uint8_t condition = 0;
+	bool wreck = false;
+	bool pending = false;
 };
 
 VehicleSight sighted(std::span<const host::OutDatagram> p_out, uint32_t p_peer, uint16_t p_spawner) {
@@ -5261,7 +5263,10 @@ VehicleSight sighted(std::span<const host::OutDatagram> p_out, uint32_t p_peer, 
 		}
 		s.sent = true;
 		for (const net::VehicleWire &w : m->vehicles) {
-			if (w.spawner == p_spawner) {
+			if (w.spawner == p_spawner && w.condition == uint8_t(sim::vehicles::VehicleCondition::Destroyed)) {
+				s.wreck = s.wreck || w.exploded;
+				s.pending = s.pending || !w.exploded;
+			} else if (w.spawner == p_spawner) {
 				s.present = true;
 				s.generation = w.generation;
 				s.at = w.state.body.com_position;
@@ -5295,6 +5300,10 @@ bool clear_line(const sim::CollisionWorld &p_world, const sim::Vec3 &p_from, con
 	return true;
 }
 
+float soldier_health(const sim::SoldierState *p_state) {
+	return p_state != nullptr && is_alive(p_state) ? p_state->health : 0.0f;
+}
+
 struct WreckRun {
 	bool ran = false;
 	uint32_t shells = 0;
@@ -5318,6 +5327,21 @@ struct WreckRun {
 	uint32_t misread_samples = 0;
 	uint16_t respawn_health = 0;
 	uint8_t respawn_condition = 0xFF;
+	uint32_t wreck_samples = 0;
+	uint32_t pending_samples = 0;
+	uint32_t pending_after_wreck = 0;
+	uint64_t wreck_blasts = 0;
+	uint64_t wreck_soldier_hits = 0;
+	uint64_t wreck_vehicle_hits = 0;
+	uint32_t blast_ticks = 0;
+	sim::Tick blast_tick = 0;
+	sim::Tick first_wreck_tick = 0;
+	sim::Tick last_pending_tick = 0;
+	float bystander_before = 0;
+	float bystander_after = 0;
+	bool mate_placed = false;
+	float mate_before = 0;
+	float mate_after = 0;
 };
 
 WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(const host::LevelVehicleKind &)> &p_target,
@@ -5349,7 +5373,7 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 	tdm::ScriptedPeer &p = m->join("gunner");
 	p.ready();
 	REQUIRE(wait_in_round(*m));
-	std::vector<Script *> bots{ m->bot(), m->bot() };
+	std::vector<Script *> bots{ m->bot(), m->bot(), m->bot() };
 	REQUIRE(m->until([&] { return is_alive(m->state(p.slot())); }, 600));
 	const uint8_t team = m->rules().team_of(uint8_t(p.slot()));
 	Script *enemy = nullptr;
@@ -5357,7 +5381,17 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 		enemy = (m->rules().team_of(uint8_t(b->slot)) == team) == p_teammate_driver ? b : enemy;
 	}
 	REQUIRE(enemy != nullptr);
-	REQUIRE(m->until([&] { return is_alive(m->state(enemy->slot)); }, 600));
+	Script *bystander = nullptr;
+	Script *mate = nullptr;
+	for (Script *b : bots) {
+		if (b != enemy && m->rules().team_of(uint8_t(b->slot)) != team) {
+			bystander = b;
+		} else if (b != enemy) {
+			mate = b;
+		}
+	}
+	REQUIRE(bystander != nullptr);
+	REQUIRE(m->until([&] { return is_alive(m->state(enemy->slot)) && is_alive(m->state(bystander->slot)); }, 600));
 
 	VehicleWatch watch;
 	m->ticks(150);
@@ -5455,6 +5489,27 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 				return w != nullptr && w->occupants[0] == slot;
 			},
 			60));
+	const float away_x = target_at[0] - tank_at[0], away_z = target_at[2] - tank_at[2];
+	const float away_len = std::max(1e-3f, std::sqrt(away_x * away_x + away_z * away_z));
+	const float dir_x = away_x / away_len, dir_z = away_z / away_len;
+	REQUIRE(target_kind.explosion.present);
+	const float stand = target_kind.explosion.inner_blast_radius +
+			0.5f * (target_kind.explosion.blast_radius - target_kind.explosion.inner_blast_radius);
+	const auto beside = [&](float p_side) {
+		return ground_at(*m->world, target_at[0] + dir_x * stand - dir_z * p_side,
+				target_at[2] + dir_z * stand + dir_x * p_side, target_at[1] + 5.0f);
+	};
+	m->place(bystander->slot, beside(1.5f));
+	if (mate != nullptr && is_alive(m->state(mate->slot))) {
+		m->place(mate->slot, beside(-1.5f));
+		run.mate_placed = true;
+	}
+	std::printf("damage: the %s's explosion: BlastDamage %.0f, %.1f..%.1f m, PreExplosionTime %.2f s, "
+				"CriticalDamageTime %.2f s; bystanders %.1f m behind it\n",
+			target_kind.blueprint.c_str(), double(target_kind.explosion.blast_damage),
+			double(target_kind.explosion.inner_blast_radius), double(target_kind.explosion.blast_radius),
+			double(target_kind.damage.pre_explosion_time), double(target_kind.damage.critical_damage_time),
+			double(stand));
 	m->ticks(150);
 	const int kills_before = m->row(int(slot)) != nullptr ? int(m->row(int(slot))->kills) : 0;
 	REQUIRE(m->row(enemy->slot) != nullptr);
@@ -5465,6 +5520,20 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 	REQUIRE(is_alive(m->state(enemy->slot)));
 	const float driver_health = m->state(enemy->slot)->health;
 
+	const auto tick_watching_blast = [&] {
+		const uint64_t blasts_now = m->server.stats().vehicle_wreck_blasts;
+		const float by_before = soldier_health(m->state(bystander->slot));
+		const float mt_before = mate != nullptr ? soldier_health(m->state(mate->slot)) : 0.0f;
+		m->tick();
+		if (m->server.stats().vehicle_wreck_blasts != blasts_now) {
+			++run.blast_ticks;
+			run.blast_tick = m->now();
+			run.bystander_before = by_before;
+			run.bystander_after = soldier_health(m->state(bystander->slot));
+			run.mate_before = mt_before;
+			run.mate_after = mate != nullptr ? soldier_health(m->state(mate->slot)) : 0.0f;
+		}
+	};
 	std::optional<sim::Tick> gone;
 	for (int shell = 0; shell < 10 && !gone; ++shell) {
 		fire = true;
@@ -5473,7 +5542,7 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 		fire = false;
 		for (uint32_t t = 0; t < 360 && !gone; ++t) {
 			const uint64_t crew_now = m->server.stats().vehicle_crew_kills;
-			m->tick();
+			tick_watching_blast();
 			const sim::SoldierState *driver = m->state(enemy->slot);
 			if (crew_now == crew_before && m->server.stats().vehicle_crew_kills == crew_before &&
 					(driver == nullptr || driver->health != driver_health)) {
@@ -5483,6 +5552,11 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 			if (now.sent && !now.present) {
 				gone = m->now();
 			}
+			run.pending_after_wreck += now.pending && run.wreck_samples > 0 ? 1u : 0u;
+			run.first_wreck_tick = now.wreck && run.wreck_samples == 0 ? m->now() : run.first_wreck_tick;
+			run.last_pending_tick = now.pending ? m->now() : run.last_pending_tick;
+			run.wreck_samples += now.wreck ? 1u : 0u;
+			run.pending_samples += now.pending ? 1u : 0u;
 			if (now.present) {
 				run.lowest_health = std::min(run.lowest_health, now.health);
 				const uint8_t expected = now.health == 0 ? uint8_t(sim::vehicles::VehicleCondition::Destroyed)
@@ -5512,8 +5586,13 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 	std::optional<sim::Tick> back;
 	VehicleSight seen;
 	for (uint32_t t = 0; t < run.delay_ticks + 120u && !back; ++t) {
-		m->tick();
+		tick_watching_blast();
 		seen = sighted(m->out, p.peer(), target_spawner);
+		run.pending_after_wreck += seen.pending && run.wreck_samples > 0 ? 1u : 0u;
+		run.first_wreck_tick = seen.wreck && run.wreck_samples == 0 ? m->now() : run.first_wreck_tick;
+		run.last_pending_tick = seen.pending ? m->now() : run.last_pending_tick;
+		run.wreck_samples += seen.wreck ? 1u : 0u;
+		run.pending_samples += seen.pending ? 1u : 0u;
 		if (seen.present) {
 			back = m->now();
 		}
@@ -5523,6 +5602,9 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 	run.generation_after = seen.generation;
 	run.respawn_health = seen.health;
 	run.respawn_condition = seen.condition;
+	run.wreck_blasts = m->server.stats().vehicle_wreck_blasts;
+	run.wreck_soldier_hits = m->server.stats().vehicle_wreck_blast_soldier_hits;
+	run.wreck_vehicle_hits = m->server.stats().vehicle_wreck_blast_vehicle_hits;
 	run.respawn_offset = horizontal(seen.at, target_at);
 	std::printf("damage: the %s left the wire at tick %u and came back at tick %u (%u ticks, SpawnDelay %u ticks), "
 				"generation %u -> %u, %.2f m from its first spawn\n",
@@ -5571,6 +5653,29 @@ void check_blast_relation(const tdm::TdmLevel &p_level) {
 		thresholds += rel.present && rel.protection_threshold > 0.0f ? 1u : 0u;
 	}
 	CHECK(thresholds > 0u);
+	size_t wreck_relations = 0;
+	for (const host::LevelVehicleKind &wreck : lv.kinds) {
+		if (!wreck.explosion.present) {
+			continue;
+		}
+		const sim::weapons::SurfacePair wreck_blast = materials.pair_of(wreck.explosion.material);
+		REQUIRE(wreck_blast.resolved);
+		for (const host::LevelVehicleKind &kind : lv.kinds) {
+			const uint8_t hull = materials.pair_of(kind.material).property;
+			const core::gameplay::DamageRelation rel = materials.relation(wreck_blast.property, hull);
+			const float scaled = 100.0f * (rel.present ? rel.protection_multiplier : 1.0f);
+			const float expected = !rel.present || scaled >= rel.protection_threshold ? scaled : 0.0f;
+			CHECK(host::wreck_blast_amount(&materials, wreck_blast.property, hull, 100.0f) ==
+					doctest::Approx(expected));
+			CHECK(host::wreck_blast_amount(nullptr, wreck_blast.property, hull, 100.0f) == 100.0f);
+			wreck_relations += rel.present ? 1u : 0u;
+		}
+		std::printf("damage: the %s's explosion on the %s: %.2f\n", wreck.blueprint.c_str(),
+				lv.kinds.front().blueprint.c_str(),
+				double(host::wreck_blast_amount(&materials, wreck_blast.property,
+						materials.pair_of(lv.kinds.front().material).property, 100.0f)));
+	}
+	CHECK(wreck_relations > 0u);
 }
 
 void check_respawn(const WreckRun &p_run) {
@@ -5590,6 +5695,29 @@ void check_respawn(const WreckRun &p_run) {
 	CHECK(p_run.misread_samples == 0u);
 	CHECK(p_run.respawn_health == net::kVehicleHealthFull);
 	CHECK(p_run.respawn_condition == uint8_t(sim::vehicles::VehicleCondition::Healthy));
+	std::printf("damage: %u wreck samples on the wire from tick %u, %u destroyed before it exploded (the last at "
+				"tick %u), %u of those after; the blast at tick %u\n",
+			unsigned(p_run.wreck_samples), unsigned(p_run.first_wreck_tick), unsigned(p_run.pending_samples),
+			unsigned(p_run.last_pending_tick), unsigned(p_run.pending_after_wreck), unsigned(p_run.blast_tick));
+	CHECK(p_run.wreck_samples >= 2u);
+	CHECK(p_run.pending_samples >= 1u);
+	CHECK(p_run.pending_after_wreck == 0u);
+	CHECK(p_run.first_wreck_tick >= p_run.blast_tick);
+	std::printf("damage: %u wreck blast, %u soldier hits, %u vehicle hits; the enemy bystander %.1f -> %.1f, the "
+				"gunner's teammate %.1f -> %.1f\n",
+			unsigned(p_run.wreck_blasts), unsigned(p_run.wreck_soldier_hits), unsigned(p_run.wreck_vehicle_hits),
+			double(p_run.bystander_before), double(p_run.bystander_after), double(p_run.mate_before),
+			double(p_run.mate_after));
+	CHECK(p_run.wreck_blasts == 1u);
+	CHECK(p_run.blast_ticks == 1u);
+	CHECK(p_run.wreck_soldier_hits >= 1u);
+	CHECK(p_run.bystander_before == doctest::Approx(100.0f));
+	CHECK(p_run.bystander_after < p_run.bystander_before);
+	CHECK(p_run.bystander_after > 0.0f);
+	if (p_run.mate_placed) {
+		CHECK(p_run.mate_before == doctest::Approx(100.0f));
+		CHECK(p_run.mate_after == p_run.mate_before);
+	}
 }
 }
 
@@ -5626,6 +5754,13 @@ TEST_SUITE("host-vehicles-unit") {
 		CHECK(v.health == doctest::Approx(0.438f));
 		CHECK(v.condition == sim::vehicles::VehicleCondition::Disabled);
 		CHECK(v.burning);
+		CHECK_FALSE(v.exploded);
+		w.health = 0;
+		w.condition = uint8_t(sim::vehicles::VehicleCondition::Destroyed);
+		w.burning = false;
+		CHECK_FALSE(host::present_vehicle(w, 41).exploded);
+		w.exploded = true;
+		CHECK(host::present_vehicle(w, 42).exploded);
 	}
 
 	TEST_CASE("vehicles: a disabled vehicle's driver input goes through the data's input modifiers: EIAThrottle on "
@@ -5695,6 +5830,7 @@ TEST_SUITE("host-vehicles-damage") {
 		CHECK(run.hits >= run.shells);
 		CHECK(run.driver_dead);
 		CHECK(run.kills_gained == 1);
+		CHECK(run.mate_placed);
 		check_respawn(run);
 	}
 
@@ -5714,6 +5850,7 @@ TEST_SUITE("host-vehicles-damage") {
 		CHECK(run.crew_kills == 1u);
 		CHECK(run.driver_dead);
 		CHECK(run.kills_gained == 1);
+		CHECK(run.mate_placed);
 		check_respawn(run);
 	}
 }

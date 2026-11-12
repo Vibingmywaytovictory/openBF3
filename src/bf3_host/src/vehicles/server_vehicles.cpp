@@ -52,6 +52,7 @@ core::Status ServerVehicles::rebuild() {
 	targets_.clear();
 	strikes_.clear();
 	crew_kills_.clear();
+	wrecks_.clear();
 	use_held_.fill(0);
 	seat_held_.fill(0);
 	sent_tick_.reset();
@@ -138,6 +139,7 @@ void ServerVehicles::spawn_due(sim::Tick p_tick, const sim::logic::ConquestNativ
 		v.health = sim::vehicles::spawned_vehicle_health(level_->kinds[s.kind].damage);
 		v.last_attacker = net::kNoVehicleOccupant;
 		v.last_def = sim::weapons::kNoWeapon;
+		v.wreck_on_wire = false;
 		gunnery_.spawned(i);
 		++stats_.spawned;
 		++stats_.live;
@@ -268,11 +270,27 @@ core::Status ServerVehicles::configure_weapons(std::shared_ptr<const sim::weapon
 		return core::Status::success();
 	}
 	kind_property_.assign(level_->kinds.size(), 0);
+	kind_explosion_.assign(level_->kinds.size(), std::nullopt);
+	kind_blast_property_.assign(level_->kinds.size(), std::nullopt);
+	materials_ = p_materials;
 	if (p_materials != nullptr) {
 		for (size_t k = 0; k < level_->kinds.size(); ++k) {
-			if (level_->kinds[k].material.present) {
-				const sim::weapons::SurfacePair pair = p_materials->pair_of(level_->kinds[k].material);
+			const LevelVehicleKind &kind = level_->kinds[k];
+			if (kind.material.present) {
+				const sim::weapons::SurfacePair pair = p_materials->pair_of(kind.material);
 				kind_property_[k] = pair.resolved ? pair.property : uint8_t(0);
+			}
+			if (kind.explosion.present) {
+				core::Result<sim::weapons::ExplosionSimDef> x =
+						sim::weapons::make_explosion_sim_def(kind.explosion, *p_materials);
+				if (!x) {
+					return core::error_at("vehicle " + kind.blueprint, x.error());
+				}
+				kind_explosion_[k] = *x;
+				const sim::weapons::SurfacePair blast = p_materials->pair_of(kind.explosion.material);
+				if (kind.explosion.material.present && blast.resolved) {
+					kind_blast_property_[k] = blast.property;
+				}
 			}
 		}
 	}
@@ -347,8 +365,15 @@ void ServerVehicles::kill_crew(size_t p_vehicle, uint8_t p_attacker, uint16_t p_
 	}
 }
 
-void ServerVehicles::explode(size_t p_vehicle) {
+void ServerVehicles::explode(size_t p_vehicle, sim::Tick p_tick) {
 	ServerVehicle &v = vehicles_[p_vehicle];
+	const uint16_t kind = level_->spawners[p_vehicle].kind;
+	if (kind < kind_explosion_.size() && kind_explosion_[kind]) {
+		wrecks_.push_back(WreckBlast{ p_vehicle, v.last_attacker, p_tick, hull_centre(p_vehicle) });
+	}
+	v.wreck = world_->state(sim::VehicleSlot(p_vehicle));
+	v.wreck_on_wire = true;
+	v.exploded = p_tick;
 	if (!world_->remove_vehicle(sim::VehicleSlot(p_vehicle)).ok()) {
 		++stats_.remove_failures;
 	}
@@ -407,7 +432,7 @@ void ServerVehicles::step_health(sim::Tick p_tick, std::span<const sim::Vec3> p_
 					sim::weapons::tick_start(p_tick), crew_kills_);
 		}
 		if ((o.events & sim::vehicles::vehicle_events::kExploded) != 0) {
-			explode(i);
+			explode(i, p_tick);
 		}
 	}
 	refresh_targets();
@@ -478,7 +503,8 @@ void ServerVehicles::gather(std::span<const sim::weapons::DamageEvent> p_events,
 		VehicleStrike s;
 		s.event = e;
 		s.soldier_weapon = p_soldier_weapon;
-		s.amount = p_source.amount(e, hull_property(index));
+		s.amount = !p_soldier_weapon && e.shot_index >= kWreckShotIndexBase ? wreck_amount(e, hull_property(index))
+																			: p_source.amount(e, hull_property(index));
 		locate_strike(s, p_out, hull_centre(index));
 		strikes_.push_back(s);
 	}
@@ -528,6 +554,41 @@ void ServerVehicles::resolve_weapons(sim::Tick p_tick, const sim::CollisionWorld
 		const sim::weapons::HitTargetProvider &p_targets, std::vector<sim::weapons::DamageEvent> &r_damage) {
 	const sim::vehicles::JoinedTargets joined(p_targets, targets_);
 	gunnery_.step(p_tick, p_world, joined, r_damage);
+	for (const WreckBlast &w : wrecks_) {
+		const uint16_t kind = level_->spawners[w.vehicle].kind;
+		sim::weapons::DetonationEvent source;
+		source.player_slot = net::kNoVehicleOccupant;
+		source.shot_index = kWreckShotIndexBase + uint32_t(w.vehicle);
+		source.time = sim::weapons::tick_start(w.tick);
+		source.position = w.at;
+		source.normal = sim::Vec3{ 0.0f, 1.0f, 0.0f };
+		const VehicleBlastHits hits =
+				gunnery_.explode(*kind_explosion_[kind], source, w.attacker, p_world, joined, r_damage);
+		stats_.wreck_blasts += hits.ran ? 1u : 0u;
+		stats_.wreck_blast_soldier_hits += hits.soldiers;
+		stats_.wreck_blast_vehicle_hits += hits.vehicles;
+	}
+	wrecks_.clear();
+}
+
+float ServerVehicles::wreck_amount(const sim::weapons::DamageEvent &p_event, uint8_t p_hull_property) const {
+	const size_t vehicle = p_event.shot_index - kWreckShotIndexBase;
+	if (vehicle >= level_->spawners.size()) {
+		return p_event.base;
+	}
+	return wreck_blast_amount(
+			materials_.get(), kind_blast_property_[level_->spawners[vehicle].kind], p_hull_property, p_event.base);
+}
+
+float wreck_blast_amount(const sim::weapons::SurfaceMaterialTable *p_materials, std::optional<uint8_t> p_blast_property,
+		uint8_t p_hull_property, float p_base) {
+	if (p_materials == nullptr || !p_blast_property) {
+		return p_base;
+	}
+	const core::gameplay::DamageRelation rel = p_materials->relation(*p_blast_property, p_hull_property);
+	return rel.present
+			? sim::vehicles::material_relation_damage(p_base, rel.protection_multiplier, rel.protection_threshold)
+			: p_base;
 }
 
 core::Status ServerVehicles::step(sim::Tick p_tick, uint64_t p_weapon_seed) {
@@ -648,6 +709,7 @@ net::VehicleWire ServerVehicles::wire_of(size_t p_vehicle, const sim::VehicleSta
 	w.health = wire_health(kind.damage, v.health);
 	w.condition = uint8_t(v.health.condition);
 	w.burning = vehicle_burning(kind.damage, v.health);
+	w.exploded = v.health.exploded;
 	return w;
 }
 
@@ -674,12 +736,14 @@ std::vector<net::VehicleStates> ServerVehicles::wire_for(size_t p_slot, const Gh
 		for (size_t i = 0; i < vehicles_.size(); ++i) {
 			if (vehicles_[i].live) {
 				sent_states_[i] = world_->state(sim::VehicleSlot(i));
+			} else if (vehicles_[i].wreck_on_wire) {
+				sent_states_[i] = vehicles_[i].wreck;
 			}
 		}
 	}
 	for (size_t i = 0; i < vehicles_.size(); ++i) {
 		const ServerVehicle &v = vehicles_[i];
-		if (!v.live) {
+		if (!v.live && !(v.wreck_on_wire && p_tick < v.exploded + kWreckWireTicks)) {
 			continue;
 		}
 		const sim::VehicleState &s = sent_states_[i];
@@ -691,7 +755,7 @@ std::vector<net::VehicleStates> ServerVehicles::wire_for(size_t p_slot, const Gh
 			return o == net::kNoVehicleOccupant;
 		});
 		c.generation = v.generation;
-		if (scope_.due(p_slot, p_viewer, i, c)) {
+		if (!v.live || scope_.due(p_slot, p_viewer, i, c)) {
 			pack(out, p_tick, wire_of(i, s));
 		}
 	}

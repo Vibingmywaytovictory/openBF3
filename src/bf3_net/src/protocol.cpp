@@ -2059,6 +2059,7 @@ template <class A, MaybeConst<VehicleWire> W> void serialize(A &r_a, W &r_w) {
 	r_a.bits(r_w.health, 10);
 	r_a.bits(r_w.condition, 2);
 	r_a.bits(r_w.burning, 1);
+	r_a.bits(r_w.exploded, 1);
 	r_a.check("vehicle health or condition out of range",
 			[&] { return r_w.health <= kVehicleHealthFull && r_w.condition < kVehicleConditions; });
 	r_a.check("vehicle gearbox phase or pending step out of range", [&] {

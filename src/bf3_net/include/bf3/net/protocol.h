@@ -929,6 +929,7 @@ struct VehicleWire {
 	uint16_t health = kVehicleHealthFull;
 	uint8_t condition = 0;
 	bool burning = false;
+	bool exploded = false;
 
 	bool operator==(const VehicleWire &) const = default;
 };

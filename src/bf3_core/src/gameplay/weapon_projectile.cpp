@@ -2,8 +2,6 @@
 
 namespace bf3::core::gameplay::detail {
 
-namespace {
-
 void read_explosion(Fields &r_f, const EbxInstance &p_e, Explosion &r_out) {
 	const EbxStruct e = p_e.data();
 	r_out.present = true;
@@ -24,8 +22,6 @@ void read_explosion(Fields &r_f, const EbxInstance &p_e, Explosion &r_out) {
 	if (p_e.get("MaterialPair")) {
 		r_out.material = r_f.material_pair(e, "MaterialPair");
 	}
-}
-
 }
 
 void read_projectile(Fields &r_f, const EbxInstance &p_projectile, ProjectileDef &r_projectile) {

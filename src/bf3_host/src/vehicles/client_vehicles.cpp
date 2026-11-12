@@ -31,6 +31,7 @@ PresentedVehicle present_vehicle(const net::VehicleWire &p_wire, sim::Tick p_tic
 	v.health = float(p_wire.health) / float(net::kVehicleHealthFull);
 	v.condition = sim::vehicles::VehicleCondition(p_wire.condition);
 	v.burning = p_wire.burning;
+	v.exploded = p_wire.exploded;
 	v.window_count = 1;
 	v.window[0] = PresentedVehicleSample{ p_tick, v.pose() };
 	return v;

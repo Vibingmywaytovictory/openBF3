@@ -4,6 +4,7 @@
 #include "bf3/core/level/level_transform.h"
 #include "ebx_fields.h"
 #include "gameplay_read.h"
+#include "weapon_readers.h"
 
 #include <algorithm>
 #include <limits>
@@ -305,6 +306,18 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 		return make_error("vehicle " + name + ": disabled input: " + disabled.error().message);
 	}
 	out.disabled_input = std::move(*disabled);
+	if (const std::optional<EbxInstance> x = p_db.follow(e, "Explosion");
+			x && x->is_a("ExplosionEntityData") && budget.take_type(x->data())) {
+		Fields fields(p_db);
+		read_explosion(fields, *x, out.explosion);
+		if (!fields.ok()) {
+			return make_error("vehicle " + name + ": Explosion: " + fields.error().message);
+		}
+		if (const std::optional<EbxInstance> fx = p_db.follow(x->data(), "DetonationEffect");
+				fx && budget.take_type(fx->data())) {
+			out.explosion_effect = partition_name(budget, p_db, *fx);
+		}
+	}
 
 	Layout layout;
 	layout.walk(budget, p_db, *entity, -1, 0);

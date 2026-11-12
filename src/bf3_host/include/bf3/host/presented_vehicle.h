@@ -56,6 +56,7 @@ struct PresentedVehicle {
 	float health = 1;
 	sim::vehicles::VehicleCondition condition = sim::vehicles::VehicleCondition::Healthy;
 	bool burning = false;
+	bool exploded = false;
 	uint8_t window_count = 0;
 	std::array<PresentedVehicleSample, kVehicleWindow> window{};
 

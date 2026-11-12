@@ -145,6 +145,8 @@ struct VehicleDef {
 	float kill_soldier_collision_speed_threshold = 0;
 	float min_speed_for_mine_activation = 0;
 	bool use_prediction = false;
+	Explosion explosion;
+	std::string explosion_effect;
 	std::vector<VehicleInputModifierDef> disabled_input;
 
 	std::vector<VehicleSeatDef> seats;

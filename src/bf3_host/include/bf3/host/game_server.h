@@ -194,6 +194,9 @@ struct GameServerStats {
 	uint64_t vehicle_repairs = 0;
 	uint64_t vehicles_destroyed = 0;
 	uint64_t vehicle_crew_kills = 0;
+	uint64_t vehicle_wreck_blasts = 0;
+	uint64_t vehicle_wreck_blast_soldier_hits = 0;
+	uint64_t vehicle_wreck_blast_vehicle_hits = 0;
 };
 
 class GameServer {

@@ -124,6 +124,34 @@ void VehicleGunnery::step(sim::Tick p_tick, const sim::CollisionWorld &p_world, 
 	}
 }
 
+VehicleBlastHits VehicleGunnery::explode(const sw::ExplosionSimDef &p_explosion, const sw::DetonationEvent &p_source,
+		uint8_t p_credit, const sim::CollisionWorld &p_world, const sw::HitTargetProvider &p_targets,
+		std::vector<sw::DamageEvent> &r_damage) {
+	VehicleBlastHits hits;
+	if (!on()) {
+		return hits;
+	}
+	hits.ran = true;
+	const size_t first = out_.damage.size();
+	core::gameplay::WorkBudget budget(sw::BallisticsLimits{}.budget_per_step);
+	sw::explode(*table_, p_explosion, p_world, p_targets, p_source, budget, out_);
+	++stats_.blasts;
+	for (size_t i = first; i < out_.damage.size(); ++i) {
+		sw::DamageEvent e = out_.damage[i];
+		if (e.target >= sim::vehicles::kVehicleTargetIdBase) {
+			e.attacker_slot = p_credit;
+			vehicle_damage_.push_back(e);
+			++hits.vehicles;
+		} else {
+			e.attacker_slot = p_credit < net::kMaxSlots ? p_credit : e.target;
+			r_damage.push_back(e);
+			++stats_.damage;
+			++hits.soldiers;
+		}
+	}
+	return hits;
+}
+
 std::span<const sw::Projectile> VehicleGunnery::live() const {
 	return projectiles_ != nullptr ? projectiles_->live() : std::span<const sw::Projectile>();
 }

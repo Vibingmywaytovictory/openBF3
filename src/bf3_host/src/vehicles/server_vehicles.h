@@ -47,7 +47,12 @@ struct ServerVehicleStats {
 	uint64_t occupant_kills = 0;
 	uint64_t hidden_crew_dropped = 0;
 	uint64_t remove_failures = 0;
+	uint64_t wreck_blasts = 0;
+	uint64_t wreck_blast_soldier_hits = 0;
+	uint64_t wreck_blast_vehicle_hits = 0;
 };
+
+inline constexpr sim::Tick kWreckWireTicks = 6;
 
 struct ServerVehicle {
 	bool live = false;
@@ -63,6 +68,9 @@ struct ServerVehicle {
 	sim::vehicles::VehicleHealth health;
 	uint8_t last_attacker = net::kNoVehicleOccupant;
 	uint16_t last_def = sim::weapons::kNoWeapon;
+	bool wreck_on_wire = false;
+	sim::Tick exploded = 0;
+	sim::VehicleState wreck{};
 };
 
 struct VehicleSeat {
@@ -72,6 +80,8 @@ struct VehicleSeat {
 
 uint16_t wire_health(const sim::vehicles::VehicleDamageRule &p_rule, const sim::vehicles::VehicleHealth &p_health);
 bool vehicle_burning(const sim::vehicles::VehicleDamageRule &p_rule, const sim::vehicles::VehicleHealth &p_health);
+float wreck_blast_amount(const sim::weapons::SurfaceMaterialTable *p_materials, std::optional<uint8_t> p_blast_property,
+		uint8_t p_hull_property, float p_base);
 sim::VehicleCommand disabled_command(
 		const sim::VehicleCommand &p_command, std::span<const core::gameplay::VehicleInputModifierDef> p_modifiers);
 
@@ -127,7 +137,8 @@ private:
 	void strike(const VehicleStrike &p_strike, Gunplay &r_gunplay);
 	void kill_crew(size_t p_vehicle, uint8_t p_attacker, uint16_t p_def, sim::weapons::SimTime p_time,
 			std::vector<sim::weapons::DamageEvent> &r_damage);
-	void explode(size_t p_vehicle);
+	void explode(size_t p_vehicle, sim::Tick p_tick);
+	float wreck_amount(const sim::weapons::DamageEvent &p_event, uint8_t p_hull_property) const;
 	void refresh_targets();
 	net::VehicleWire wire_of(size_t p_vehicle, const sim::VehicleState &p_state) const;
 	sim::Vec3 hull_centre(size_t p_vehicle) const;
@@ -157,6 +168,16 @@ private:
 	bool scoped_ = true;
 	std::vector<sim::VehicleState> sent_states_;
 	std::optional<sim::Tick> sent_tick_;
+	struct WreckBlast {
+		size_t vehicle = 0;
+		uint8_t attacker = net::kNoVehicleOccupant;
+		sim::Tick tick = 0;
+		sim::Vec3 at{};
+	};
+	std::vector<WreckBlast> wrecks_;
+	std::shared_ptr<const sim::weapons::SurfaceMaterialTable> materials_;
+	std::vector<std::optional<sim::weapons::ExplosionSimDef>> kind_explosion_;
+	std::vector<std::optional<uint8_t>> kind_blast_property_;
 };
 
 }

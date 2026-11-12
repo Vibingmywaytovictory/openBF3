@@ -18,6 +18,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace bf3::godot_side {
@@ -31,6 +32,14 @@ struct GameVehiclesStats {
 	uint32_t unknown = 0;
 	uint64_t created = 0;
 	uint64_t freed = 0;
+	uint64_t wrecks = 0;
+};
+
+struct GameVehicleWreck {
+	uint16_t spawner = 0;
+	uint8_t generation = 0;
+	std::string effect;
+	godot::Transform3D body;
 };
 
 struct OwnVehicleSeat {
@@ -72,6 +81,7 @@ public:
 	const host::LevelVehicles *level() const { return level_.get(); }
 	const GameVehiclesStats &stats() const { return stats_; }
 	std::optional<GameVehicleView> view(uint16_t p_spawner) const;
+	std::vector<GameVehicleWreck> take_wrecks() { return std::exchange(wrecks_, {}); }
 	VehicleSeatView seat_view(const OwnVehicleSeat &p_seat, uint32_t p_camera, float p_yaw, float p_pitch,
 			float p_fov_deg, double p_dt, const sim::CollisionWorld *p_world);
 
@@ -95,6 +105,8 @@ private:
 	std::unique_ptr<render::VehicleMeshSet> set_;
 	std::vector<Kind> kinds_;
 	std::map<uint16_t, Shown> shown_;
+	std::vector<GameVehicleWreck> wrecks_;
+	std::map<uint16_t, uint8_t> wrecked_;
 	std::optional<OwnVehicleSeat> own_;
 	ChaseCamera chase_;
 	std::optional<std::array<uint32_t, 3>> chase_key_;
