@@ -447,8 +447,12 @@ constexpr std::string_view kMaskColourLedger[] = {
 constexpr std::pair<const char *, std::string_view> kDrawnThroughPrograms[] = {
 	{ "MP_018", "levels/mp_018/objects/rock01cluster_mp_018_shader" },
 	{ "MP_018", "levels/mp_018/objects/rock_01b_mp_018_shader" },
+	{ "MP_018", "levels/mp_018/objects/rock_01c_mp_018_shader" },
+	{ "MP_018", "levels/mp_018/objects/rock_01d_mp_018_shader" },
 	{ "MP_018", "levels/mp_018/objects/rock_01e_mp_018_shader" },
 	{ "XP3_Alborz", "levels/mp_whitepeak/objects/rock_01_snow" },
+	{ "XP3_Alborz", "levels/mp_whitepeak/objects/rock_01_wall_snow" },
+	{ "XP3_Alborz", "levels/mp_whitepeak/objects/rock_01_wall_snow_lod" },
 	{ "XP3_Desert", "levels/xp3_desert/objects/ss_backdropocean_fade" },
 };
 constexpr std::string_view kHiddenLedger[] = {
