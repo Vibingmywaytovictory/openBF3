@@ -1013,6 +1013,7 @@ void GameServer::Impl::step_rules(sim::Tick p_tick) {
 	if (combat.on()) {
 		combat_log.open(p_tick);
 		combat.gunplay()->set_vehicle_targets(vehicles.targets());
+		combat.gunplay()->set_pack_vehicles(vehicles.pack_vehicles());
 		combat.resolve(p_tick, slots, soldiers, combat_log,
 				[&](const sim::weapons::HitTargetProvider &p_targets,
 						std::vector<sim::weapons::DamageEvent> &r_damage) {

@@ -16,6 +16,8 @@ struct GadgetStats {
 	uint64_t rounds_refilled = 0;
 	uint64_t rounds_replenished = 0;
 	uint64_t forgotten = 0;
+	uint64_t remote_detonations = 0;
+	uint64_t pack_detonations = 0;
 	sim::weapons::GadgetFieldStats field;
 };
 

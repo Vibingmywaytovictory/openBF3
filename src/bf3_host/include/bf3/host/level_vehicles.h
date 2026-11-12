@@ -42,6 +42,7 @@ struct LevelVehicleKind {
 	sim::vehicles::HullBox box;
 	core::gameplay::MaterialPairRef material;
 	std::array<bool, net::kMaxVehicleSeats> exposed{};
+	float min_speed_for_mine = 0;
 };
 
 struct LevelVehicleSpawner {

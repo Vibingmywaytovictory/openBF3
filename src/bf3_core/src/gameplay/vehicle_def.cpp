@@ -298,6 +298,7 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 	out.upside_down_damage = static_cast<float>(number_or(e, "UpsideDownDamage", 0));
 	out.upside_down_damage_delay = static_cast<float>(number_or(e, "UpsideDownDamageDelay", 0));
 	out.kill_soldier_collision_speed_threshold = static_cast<float>(number_or(e, "KillSoldierCollisionSpeedThreshold", 0));
+	out.min_speed_for_mine_activation = static_cast<float>(number_or(e, "MinSpeedForMineActivation", 0));
 	out.use_prediction = boolean(e, "UsePrediction").value_or(false);
 
 	Layout layout;

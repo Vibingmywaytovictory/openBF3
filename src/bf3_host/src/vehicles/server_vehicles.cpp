@@ -302,6 +302,7 @@ uint8_t ServerVehicles::hull_property(size_t p_vehicle) const {
 
 void ServerVehicles::refresh_targets() {
 	targets_.clear();
+	pack_vehicles_.clear();
 	for (size_t i = 0; i < vehicles_.size(); ++i) {
 		const ServerVehicle &v = vehicles_[i];
 		if (!v.live) {
@@ -317,6 +318,11 @@ void ServerVehicles::refresh_targets() {
 			}
 		}
 		targets_.push_back(t);
+		const sim::VehicleState state = world_->state(sim::VehicleSlot(i));
+		pack_vehicles_.push_back(
+				sim::weapons::PackVehicle{ v.occupants[0] != net::kNoVehicleOccupant ? v.team : uint8_t(0),
+						hull_centre(i), state.body.com_position, state.body.linear_velocity,
+						level_->kinds[level_->spawners[i].kind].min_speed_for_mine });
 	}
 }
 

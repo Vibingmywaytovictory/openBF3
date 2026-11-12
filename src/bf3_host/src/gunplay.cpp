@@ -480,6 +480,7 @@ struct Gunplay::Impl {
 	std::unique_ptr<sw::ProjectileWorld> projectiles;
 	std::unique_ptr<ServerGadgets> gadgets;
 	std::vector<GadgetSoldier> gadget_soldiers;
+	std::span<const sw::PackVehicle> pack_vehicles;
 	std::unique_ptr<LagHistory> history;
 	std::unique_ptr<RewindProvider> rewind;
 	const sim::CollisionWorld *world = nullptr;
@@ -819,6 +820,7 @@ void Gunplay::step_soldier(uint8_t p_slot, const sim::Command &p_command, const 
 			m.shared->motor, p_before, p_after, p_command, suppression_scale(p_slot, p_command.tick));
 	sw::step_weapons_with_rules(*m.table, s.weapons, p_command, ctx, m.match_seed, s.spawn_tick, s.out);
 	s.out_tick = p_command.tick;
+	m.gadgets->detonator(p_slot, s.weapons.current().def, (p_command.buttons & sim::buttons::kZoom) != 0);
 	if ((s.out.events & sw::weapon_events::kSwitchRefused) != 0) {
 		++m.stats.slot_select_empty;
 	}
@@ -893,6 +895,7 @@ void Gunplay::step_projectiles(uint32_t p_tick, std::span<const sim::SoldierStat
 	m.flying.assign(m.projectiles->live().begin(), m.projectiles->live().end());
 	const sim::vehicles::JoinedTargets targets(*m.rewind, m.vehicle_targets);
 	m.projectiles->step(p_tick, *m.world, targets, m.step_out);
+	m.gadgets->detonate_packs(p_tick, p_states, m.teams, m.pack_vehicles, *m.world, targets, m.step_out);
 	m.rewind->end_tick();
 	suppress(p_tick, p_states);
 	m.stats.budget_exhausted += m.step_out.budget_exhausted ? 1u : 0u;
@@ -911,6 +914,10 @@ void Gunplay::step_projectiles(uint32_t p_tick, std::span<const sim::SoldierStat
 
 void Gunplay::add_damage(std::span<const sw::DamageEvent> p_events) {
 	impl_->step_out.damage.insert(impl_->step_out.damage.end(), p_events.begin(), p_events.end());
+}
+
+void Gunplay::set_pack_vehicles(std::span<const sw::PackVehicle> p_vehicles) {
+	impl_->pack_vehicles = p_vehicles;
 }
 
 void Gunplay::set_vehicle_targets(std::span<const sim::vehicles::VehicleTarget> p_targets) {

@@ -139,6 +139,9 @@ private:
 	size_t refused_ = 0;
 };
 
+void explode(const WeaponTable &p_table, const CollisionWorld &p_world, const HitTargetProvider &p_targets,
+		const DetonationEvent &p_detonation, core::gameplay::WorkBudget &r_budget, ProjectileStepOutput &r_out);
+
 DVec3 ballistic_position(const DVec3 &p_origin, const DVec3 &p_velocity, double p_gravity, double p_seconds);
 
 Projectile fly_free(const WeaponSimDef &p_def, const Projectile &p_start, SimTime p_until);

@@ -21,7 +21,7 @@ class CollisionWorld;
 
 namespace bf3::sim::weapons {
 
-enum class GadgetKind : uint8_t { None = 0, Supply = 1, SpawnBeacon = 2 };
+enum class GadgetKind : uint8_t { None = 0, Supply = 1, SpawnBeacon = 2, ExplosionPack = 3 };
 const char *gadget_kind_name(GadgetKind p_kind);
 
 struct SupplyUnitDef {
@@ -44,6 +44,21 @@ struct AmmoPickupDef {
 	bool operator==(const AmmoPickupDef &) const = default;
 };
 
+struct ExplosionPackDef {
+	bool remote_detonator = false;
+	bool vehicle_detonation = false;
+	float vehicle_radius = 0;
+	float vehicle_delay_s = 0;
+	bool soldier_detonation = false;
+	float soldier_radius = 0;
+	float soldier_angle_deg = 0;
+	float soldier_min_speed = 0;
+	float soldier_delay_s = 0;
+	bool use_angle = false;
+
+	bool operator==(const ExplosionPackDef &) const = default;
+};
+
 struct GadgetDef {
 	std::string weapon;
 	std::string projectile_type;
@@ -63,6 +78,7 @@ struct GadgetDef {
 	bool receives_explosion_damage = false;
 	float time_to_live_s = 0;
 	float time_to_live_on_owner_gone_s = 0;
+	ExplosionPackDef pack;
 
 	bool operator==(const GadgetDef &) const = default;
 };
@@ -75,6 +91,8 @@ inline constexpr Tick kGadgetFlightTicks = 10u * kSimHz;
 inline constexpr size_t kMaxDeployables = 512;
 inline constexpr float kGadgetSlideLift = 0.01f;
 inline constexpr float kBlastEyeLift = 0.05f;
+inline constexpr double kPackCheckInterval = 0.2;
+inline constexpr float kPackCloseTrigger = 1e-6f;
 
 struct Deployable {
 	uint16_t id = 0;
@@ -92,6 +110,12 @@ struct Deployable {
 	float health = 0;
 	bool owner_gone = false;
 	Tick owner_gone_tick = 0;
+	Vec3 facing{ 0, 0, 1 };
+	Vec3 normal{ 0, 1, 0 };
+	float armed_s = 0;
+	float vehicle_check_s = 0;
+	float soldier_check_s = 0;
+	bool detonating = false;
 };
 
 enum class DeployOutcome : uint8_t { Thrown = 0, Placed = 1, NoGround = 2, Steep = 3, NotGadget = 4, Full = 5 };
@@ -118,6 +142,24 @@ struct SupplyGrant {
 	float ammo = 0;
 };
 
+struct PackSoldier {
+	uint8_t slot = 0;
+	uint8_t team = 0;
+	Vec3 position{};
+	float speed = 0;
+};
+
+struct PackVehicle {
+	uint8_t driver_team = 0;
+	Vec3 centre{};
+	Vec3 position{};
+	Vec3 velocity{};
+	float min_speed_for_mine = 0;
+};
+
+bool soldier_trips(const ExplosionPackDef &p_pack, const Deployable &p_mine, const PackSoldier &p_soldier);
+bool vehicle_trips(const ExplosionPackDef &p_pack, const Deployable &p_mine, const PackVehicle &p_vehicle);
+
 bool supplies(const GadgetDef &p_gadget, const Deployable &p_bag, const SupplyReceiver &p_receiver, bool p_healing);
 
 struct GadgetFieldStats {
@@ -125,6 +167,7 @@ struct GadgetFieldStats {
 			 removed = 0;
 	uint64_t slides = 0;
 	uint64_t damaged = 0, destroyed = 0, expired = 0, orphaned = 0;
+	uint64_t soldier_trips = 0, vehicle_trips = 0, remote = 0, detonated = 0;
 };
 
 Vec3 shot_frame_vector(const Vec3 &p_direction, const Vec3 &p_local);
@@ -148,6 +191,10 @@ public:
 			const CollisionWorld *p_occluders, uint8_t p_spared_team = 0);
 	bool remove(uint16_t p_id);
 	void clear();
+
+	void arm_packs(std::span<const PackSoldier> p_soldiers, std::span<const PackVehicle> p_vehicles, float p_dt);
+	size_t remote_detonate(uint8_t p_owner, uint16_t p_def);
+	std::vector<Deployable> take_detonating();
 
 	std::span<const Deployable> live() const { return live_; }
 	const Deployable *find(uint16_t p_id) const;

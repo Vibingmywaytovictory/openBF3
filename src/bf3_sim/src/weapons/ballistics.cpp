@@ -658,6 +658,24 @@ void ProjectileWorld::step(Tick p_tick, const CollisionWorld &p_world, const Hit
 	r_out.budget_used = budget.used();
 }
 
+void explode(const WeaponTable &p_table, const CollisionWorld &p_world, const HitTargetProvider &p_targets,
+		const DetonationEvent &p_detonation, WorkBudget &r_budget, ProjectileStepOutput &r_out) {
+	if (p_detonation.def >= p_table.defs.size() || !finite(p_detonation.position)) {
+		return;
+	}
+	const BallisticsLimits limits;
+	Env env = make_env(p_table, limits, p_world, p_targets, TargetQueryKind::Blast, r_budget, r_out);
+	Projectile p;
+	p.player_slot = p_detonation.player_slot;
+	p.shot_index = p_detonation.shot_index;
+	p.def = p_detonation.def;
+	p.variant = p_detonation.variant;
+	r_out.detonations.push_back(p_detonation);
+	const ProjectileSimDef &d = p_table.def(p_detonation.def, p_detonation.variant).projectile;
+	blast(env, p, p_detonation.dud ? d.dud : d.explosion, p_detonation.dud, to_d(p_detonation.position),
+			p_detonation.normal, p_detonation.time);
+}
+
 DVec3 ballistic_position(const DVec3 &p_origin, const DVec3 &p_velocity, double p_gravity, double p_seconds) {
 	return { p_origin[0] + p_velocity[0] * p_seconds, p_origin[1] + p_velocity[1] * p_seconds + 0.5 * p_gravity * p_seconds * p_seconds,
 		p_origin[2] + p_velocity[2] * p_seconds };

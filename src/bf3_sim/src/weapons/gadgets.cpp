@@ -114,6 +114,60 @@ Vec3 unit_or(const Vec3 &p_v, const Vec3 &p_fallback) {
 	return l > 1e-6f && std::isfinite(l) ? core::vec::scale(p_v, 1.0f / l) : p_fallback;
 }
 
+core::Result<GadgetDef> read_explosion_pack(std::string_view p_weapon, const core::EbxStruct &p_p, GadgetDef p_g) {
+	const std::optional<core::EbxStruct> soldier = struct_of(p_p, "SoldierDetonationData");
+	if (!soldier) {
+		return gadget_error(p_weapon, "ExplosionPackEntityData has no SoldierDetonationData");
+	}
+	const std::optional<bool> remote = bool_of(p_p, "HasRemoteDetonator");
+	const std::optional<bool> vehicle = bool_of(p_p, "HasVehicleDetonation");
+	const std::optional<float> vehicle_radius = f32_of(p_p, "VehicleDetonationRadius");
+	const std::optional<float> vehicle_delay = f32_of(p_p, "VehicleDetonationActivationDelay");
+	const std::optional<bool> on_soldiers = bool_of(*soldier, "HasSoldierDetonation");
+	const std::optional<float> soldier_radius = f32_of(*soldier, "Radius");
+	const std::optional<float> angle = f32_of(*soldier, "Angle");
+	const std::optional<float> min_speed = f32_of(*soldier, "MinSpeedForActivation");
+	const std::optional<float> soldier_delay = f32_of(*soldier, "SoldierDetonationActivationDelay");
+	const std::optional<bool> use_angle = bool_of(*soldier, "UseAngle");
+	const std::optional<int32_t> count = i32_of(p_p, "MaxCount");
+	const std::optional<float> incline = f32_of(p_p, "MaxAttachableInclination");
+	const std::optional<float> health = f32_of(p_p, "Health");
+	const std::optional<bool> destructible = bool_of(p_p, "IsDestructible");
+	const std::optional<bool> explosion = bool_of(p_p, "ReceivesExplosionDamage");
+	const std::optional<float> ttl = f32_of(p_p, "TimeToLive");
+	const std::optional<float> ttl_gone = f32_of(p_p, "TimeToLiveOnPlayerDeath");
+	if (!remote || !vehicle || !vehicle_radius || !vehicle_delay || !on_soldiers || !soldier_radius || !angle ||
+			!min_speed || !soldier_delay || !use_angle || !count || !incline || !health || !destructible ||
+			!explosion || !ttl || !ttl_gone) {
+		return gadget_error(p_weapon, "ExplosionPackEntityData misses a field");
+	}
+	if (!finite_in(*vehicle_radius, 0.0f, 100.0f) || !finite_in(*vehicle_delay, 0.0f, 3600.0f) ||
+			!finite_in(*soldier_radius, 0.0f, 100.0f) || !finite_in(*angle, 0.0f, 180.0f) ||
+			!finite_in(*min_speed, 0.0f, 1000.0f) || !finite_in(*soldier_delay, 0.0f, 3600.0f) || *count < 1 ||
+			*count > 255 || !finite_in(*incline, 0.0f, 180.0f) || !finite_in(*health, 0.0f, 1e6f) ||
+			!finite_in(*ttl, 0.0f, 86400.0f) || !finite_in(*ttl_gone, 0.0f, 86400.0f)) {
+		return gadget_error(p_weapon, "ExplosionPackEntityData has a value out of range");
+	}
+	p_g.kind = GadgetKind::ExplosionPack;
+	p_g.pack.remote_detonator = *remote;
+	p_g.pack.vehicle_detonation = *vehicle;
+	p_g.pack.vehicle_radius = *vehicle_radius;
+	p_g.pack.vehicle_delay_s = *vehicle_delay;
+	p_g.pack.soldier_detonation = *on_soldiers;
+	p_g.pack.soldier_radius = *soldier_radius;
+	p_g.pack.soldier_angle_deg = *angle;
+	p_g.pack.soldier_min_speed = *min_speed;
+	p_g.pack.soldier_delay_s = *soldier_delay;
+	p_g.pack.use_angle = *use_angle;
+	p_g.max_count = uint8_t(*count);
+	p_g.max_attach_inclination_deg = *incline;
+	p_g.health = *health;
+	p_g.destructible = *destructible;
+	p_g.receives_explosion_damage = *explosion;
+	p_g.time_to_live_s = *ttl;
+	p_g.time_to_live_on_owner_gone_s = *ttl_gone;
+	return p_g;
+}
 }
 
 const char *gadget_kind_name(GadgetKind p_kind) {
@@ -124,6 +178,8 @@ const char *gadget_kind_name(GadgetKind p_kind) {
 			return "supply";
 		case GadgetKind::SpawnBeacon:
 			return "spawn beacon";
+		case GadgetKind::ExplosionPack:
+			return "explosion pack";
 	}
 	return "?";
 }
@@ -243,6 +299,9 @@ core::Result<GadgetDef> read_gadget_def(const core::EbxResolver &p_db, std::stri
 		g.max_count = uint8_t(*count);
 		return g;
 	}
+	if (projectile->is_a("ExplosionPackEntityData")) {
+		return read_explosion_pack(p_weapon, p, std::move(g));
+	}
 	return g;
 }
 
@@ -326,6 +385,7 @@ DeployOutcome GadgetField::deploy(const GadgetThrow &p_throw, const CollisionWor
 		d.resting = true;
 	} else {
 		d.velocity = shot_frame_vector(p_throw.direction, p_throw.launch_velocity);
+		d.facing = unit_or(Vec3{ p_throw.direction[0], 0.0f, p_throw.direction[2] }, Vec3{ 0.0f, 0.0f, 1.0f });
 	}
 	if (live_.size() >= kMaxDeployables) {
 		++stats_.full;
@@ -376,6 +436,7 @@ void GadgetField::step(const CollisionWorld &p_world) {
 		if (p_world.ray(d.position, delta, query_mask::kProjectile, &hit)) {
 			if (hit.normal[1] >= attach_cos) {
 				d.position = hit.position;
+				d.normal = hit.normal;
 				d.velocity = {};
 				d.resting = true;
 				++stats_.landed;
@@ -485,7 +546,7 @@ size_t GadgetField::owner_gone(uint8_t p_owner, Tick p_tick) {
 		Deployable &d = live_[i];
 		if (d.owner != p_owner || d.owner_gone) {
 			++i;
-		} else if (defs_[d.gadget].kind != GadgetKind::Supply) {
+		} else if (defs_[d.gadget].kind == GadgetKind::SpawnBeacon) {
 			erase_at(i);
 			++removed;
 		} else {
@@ -528,13 +589,20 @@ bool GadgetField::damage(uint16_t p_id, float p_amount, bool p_explosion) {
 				!std::isfinite(p_amount)) {
 			return false;
 		}
+		if (d.detonating) {
+			return false;
+		}
 		d.health -= p_amount;
 		++stats_.damaged;
 		if (d.health > 0.0f) {
 			return false;
 		}
-		erase_at(i);
 		++stats_.destroyed;
+		if (g.kind == GadgetKind::ExplosionPack) {
+			d.detonating = true;
+		} else {
+			erase_at(i);
+		}
 		return true;
 	}
 	return false;
@@ -568,6 +636,104 @@ size_t GadgetField::blast(const ExplosionSimDef &p_explosion, BlastFalloff p_fal
 		destroyed += damage(id, amount, true) ? 1u : 0u;
 	}
 	return destroyed;
+}
+
+bool soldier_trips(const ExplosionPackDef &p_pack, const Deployable &p_mine, const PackSoldier &p_soldier) {
+	if (p_soldier.team == p_mine.team || !(p_soldier.speed > p_pack.soldier_min_speed)) {
+		return false;
+	}
+	const Vec3 offset = core::vec::sub(p_soldier.position, p_mine.position);
+	const float distance = core::vec::length(offset);
+	if (!(distance <= p_pack.soldier_radius)) {
+		return false;
+	}
+	if (!p_pack.use_angle || distance < kPackCloseTrigger) {
+		return true;
+	}
+	const Vec3 axis = unit_or(Vec3{ p_mine.facing[0], 0.0f, p_mine.facing[2] }, Vec3{ 0.0f, 0.0f, 1.0f });
+	const float cosine = std::clamp(core::vec::dot(core::vec::scale(offset, 1.0f / distance), axis), -1.0f, 1.0f);
+	return std::acos(cosine) < p_pack.soldier_angle_deg * std::numbers::pi_v<float> / 180.0f;
+}
+
+bool vehicle_trips(const ExplosionPackDef &p_pack, const Deployable &p_mine, const PackVehicle &p_vehicle) {
+	if (p_vehicle.driver_team != 0 && p_vehicle.driver_team == p_mine.team) {
+		return false;
+	}
+	if (!(core::vec::length(core::vec::sub(p_mine.position, p_vehicle.centre)) <= p_pack.vehicle_radius)) {
+		return false;
+	}
+	const float speed = core::vec::length(p_vehicle.velocity);
+	if (!(speed > p_vehicle.min_speed_for_mine)) {
+		return false;
+	}
+	const Vec3 toward = unit_or(core::vec::sub(p_mine.position, p_vehicle.position), Vec3{});
+	return core::vec::dot(core::vec::scale(p_vehicle.velocity, 1.0f / speed), toward) > 0.0f;
+}
+
+void GadgetField::arm_packs(
+		std::span<const PackSoldier> p_soldiers, std::span<const PackVehicle> p_vehicles, float p_dt) {
+	for (Deployable &d : live_) {
+		const GadgetDef &g = defs_[d.gadget];
+		if (g.kind != GadgetKind::ExplosionPack || !d.resting || d.detonating) {
+			continue;
+		}
+		d.armed_s += p_dt;
+		d.vehicle_check_s += p_dt;
+		d.soldier_check_s += p_dt;
+		const ExplosionPackDef &k = g.pack;
+		if (double(d.vehicle_check_s) > kPackCheckInterval) {
+			d.vehicle_check_s = 0.0f;
+			if (k.vehicle_detonation && k.vehicle_delay_s < d.armed_s && k.vehicle_radius > 0.0f) {
+				for (const PackVehicle &v : p_vehicles) {
+					if (vehicle_trips(k, d, v)) {
+						d.detonating = true;
+						++stats_.vehicle_trips;
+						break;
+					}
+				}
+			}
+		}
+		if (double(d.soldier_check_s) > kPackCheckInterval) {
+			d.soldier_check_s = 0.0f;
+			if (!d.detonating && k.soldier_detonation && k.soldier_delay_s < d.armed_s && k.soldier_radius > 0.0f) {
+				for (const PackSoldier &s : p_soldiers) {
+					if (soldier_trips(k, d, s)) {
+						d.detonating = true;
+						++stats_.soldier_trips;
+						break;
+					}
+				}
+			}
+		}
+	}
+}
+
+size_t GadgetField::remote_detonate(uint8_t p_owner, uint16_t p_def) {
+	size_t n = 0;
+	for (Deployable &d : live_) {
+		const GadgetDef &g = defs_[d.gadget];
+		if (g.kind == GadgetKind::ExplosionPack && g.pack.remote_detonator && d.def == p_def && d.owner == p_owner &&
+				!d.owner_gone && !d.detonating) {
+			d.detonating = true;
+			++n;
+		}
+	}
+	stats_.remote += n;
+	return n;
+}
+
+std::vector<Deployable> GadgetField::take_detonating() {
+	std::vector<Deployable> out;
+	for (size_t i = 0; i < live_.size();) {
+		if (live_[i].detonating) {
+			out.push_back(live_[i]);
+			erase_at(i);
+			++stats_.detonated;
+		} else {
+			++i;
+		}
+	}
+	return out;
 }
 
 bool GadgetField::remove(uint16_t p_id) {

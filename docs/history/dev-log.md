@@ -3286,3 +3286,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * architecture.md names the setVehicleBehaviour departure: the .ai reader runs it while max bots is -1, where AIConsole::setVehicleBehaviour at c47317b returns at once.
 * Explosions follow R-G4: the ShockwaveDamage floor out to the gather radius and the zone relation's threshold as a cutoff (the M67 at 7 m: 1, not 0); sim.weapons.unit holds the notes' vectors.
 * Missiles step once per 30 Hz update by R2-G4 (thrust to MaxSpeed, gravity only with ApplyGravityWhenGuided, Drag per update after burnout); weapon blob format 6.
+* Explosion packs: C4 (Zoom detonator, inferred input), claymore and M15 read from ExplosionPackEntityData, tripped by R2-G4 C on 30 Hz checks and detonated through the shared blast; Metro TDM has six gadgets.

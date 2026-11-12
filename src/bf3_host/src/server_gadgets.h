@@ -38,6 +38,10 @@ public:
 			float p_max_health);
 	void blast(std::span<const sim::weapons::DetonationEvent> p_detonations, const sim::CollisionWorld *p_world,
 			std::span<const uint8_t> p_teams, bool p_friendly_fire);
+	void detonator(uint8_t p_slot, uint16_t p_def, bool p_pressed);
+	void detonate_packs(sim::Tick p_tick, std::span<const sim::SoldierState> p_states, std::span<const uint8_t> p_teams,
+			std::span<const sim::weapons::PackVehicle> p_vehicles, const sim::CollisionWorld &p_world,
+			const sim::weapons::HitTargetProvider &p_targets, sim::weapons::ProjectileStepOutput &r_out);
 	void forget(uint8_t p_slot);
 	void owner_left(uint8_t p_slot);
 	void clear();
@@ -55,11 +59,15 @@ private:
 	std::vector<sim::weapons::SupplyReceiver> receivers_;
 	std::vector<sim::weapons::SupplyGrant> grants_;
 	std::vector<uint8_t> receiver_slots_;
+	std::vector<sim::weapons::PackSoldier> pack_soldiers_;
+	std::array<bool, net::kMaxSlots> detonator_held_{};
 	mutable GadgetStats stats_;
 	sim::Tick tick_ = 0;
 };
 
 inline constexpr sim::Tick kDeployableScopeTicks = 30;
+inline constexpr uint32_t kPackShotIndex = 0x80000000u;
+inline constexpr size_t kPackBlastWork = 1u << 16;
 
 struct DeployableSyncStats {
 	uint64_t messages = 0, added = 0, removed = 0, out_of_scope = 0;

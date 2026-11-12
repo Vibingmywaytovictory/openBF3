@@ -1,6 +1,8 @@
 #include "sim_world_support.h"
 
+#include "bf3/core/math.h"
 #include "bf3/sim/weapons/gadgets.h"
+#include "bf3/sim/weapons/spread_recoil.h"
 
 #include <doctest/doctest.h>
 
@@ -83,6 +85,49 @@ bool settle(GadgetField &r_field, const CollisionWorld &p_world, uint32_t p_tick
 	return false;
 }
 
+GadgetDef claymore_def() {
+	GadgetDef g;
+	g.weapon = "claymore";
+	g.kind = GadgetKind::ExplosionPack;
+	g.def = 6;
+	g.max_count = 2;
+	g.max_attach_inclination_deg = 45.0f;
+	g.health = 50.0f;
+	g.destructible = true;
+	g.receives_explosion_damage = true;
+	g.time_to_live_on_owner_gone_s = 1.0f;
+	g.pack.soldier_detonation = true;
+	g.pack.soldier_radius = 3.0f;
+	g.pack.soldier_angle_deg = 60.0f;
+	g.pack.soldier_min_speed = 0.5f;
+	g.pack.soldier_delay_s = 3.0f;
+	g.pack.use_angle = true;
+	return g;
+}
+
+GadgetDef c4_def() {
+	GadgetDef g = claymore_def();
+	g.weapon = "c4";
+	g.def = 7;
+	g.max_count = 6;
+	g.max_attach_inclination_deg = 180.0f;
+	g.time_to_live_on_owner_gone_s = 0.0f;
+	g.pack = ExplosionPackDef();
+	g.pack.remote_detonator = true;
+	return g;
+}
+
+GadgetDef mine_def() {
+	GadgetDef g = claymore_def();
+	g.weapon = "m15";
+	g.def = 8;
+	g.max_count = 6;
+	g.pack = ExplosionPackDef();
+	g.pack.vehicle_detonation = true;
+	g.pack.vehicle_radius = 2.0f;
+	g.pack.vehicle_delay_s = 4.0f;
+	return g;
+}
 }
 
 TEST_SUITE("gadgets-unit") {
@@ -249,6 +294,110 @@ TEST_SUITE("gadgets-unit") {
 		CHECK(field.blast(grenade, BlastFalloff::Linear, Vec3{ 1.0f, 0.0f, 0.0f }, Vec3{ 0.0f, 1.0f, 0.0f }, nullptr) ==
 				1u);
 		CHECK(field.find(hidden) == nullptr);
+	}
+
+	TEST_CASE("packs: R2-G4 claymore and AT mine triggers: the claymore's half-angle, radius, strict speed and team "
+			  "tests; the mine's radius to the box centre, MinSpeedForMineActivation, moving toward it, the driver's "
+			  "team and empty vehicles") {
+		Deployable mine;
+		mine.team = 1;
+		mine.facing = Vec3{ 0.0f, 0.0f, 1.0f };
+		const ExplosionPackDef clay = claymore_def().pack;
+		const float r = 2.0f;
+		const auto soldier = [&](float p_degrees, float p_speed, uint8_t p_team) {
+			const float a = p_degrees * 3.14159265f / 180.0f;
+			return PackSoldier{ 3, p_team, Vec3{ r * std::sin(a), 0.0f, r * std::cos(a) }, p_speed };
+		};
+		CHECK(soldier_trips(clay, mine, soldier(30.0f, 1.0f, 2)));
+		CHECK_FALSE(soldier_trips(clay, mine, soldier(70.0f, 1.0f, 2)));
+		CHECK_FALSE(soldier_trips(clay, mine, soldier(30.0f, 0.4f, 2)));
+		CHECK_FALSE(soldier_trips(clay, mine, soldier(30.0f, 0.5f, 2)));
+		CHECK_FALSE(soldier_trips(clay, mine, soldier(30.0f, 1.0f, 1)));
+		CHECK_FALSE(soldier_trips(clay, mine, PackSoldier{ 3, 2, Vec3{ 0.0f, 0.0f, 3.5f }, 1.0f }));
+		CHECK(soldier_trips(clay, mine, PackSoldier{ 3, 2, Vec3{ 0.0f, 0.0f, 0.0f }, 1.0f }));
+
+		ExplosionPackDef at = mine_def().pack;
+		const auto vehicle = [](uint8_t p_driver, float p_vz) {
+			return PackVehicle{ p_driver, Vec3{ 0.0f, 0.5f, -1.5f }, Vec3{ 0.0f, 0.4f, -1.5f },
+				Vec3{ 0.0f, 0.0f, p_vz }, 1.0f };
+		};
+		CHECK(vehicle_trips(at, mine, vehicle(2, 5.0f)));
+		CHECK_FALSE(vehicle_trips(at, mine, vehicle(2, -5.0f)));
+		CHECK_FALSE(vehicle_trips(at, mine, vehicle(2, 0.5f)));
+		CHECK_FALSE(vehicle_trips(at, mine, vehicle(1, 5.0f)));
+		CHECK(vehicle_trips(at, mine, vehicle(0, 3.0f)));
+		PackVehicle far = vehicle(2, 5.0f);
+		far.centre = Vec3{ 0.0f, 0.0f, -2.5f };
+		CHECK_FALSE(vehicle_trips(at, mine, far));
+	}
+
+	TEST_CASE("packs: a resting claymore checks soldiers every 0.2 s once SoldierDetonationActivationDelay has run; an "
+			  "AT mine checks vehicles the same way; a remote C4 goes on its owner's detonator only; a destroyed pack "
+			  "detonates instead of vanishing; an orphan pack keeps TimeToLiveOnPlayerDeath") {
+		std::unique_ptr<CollisionWorld> w = floor_and_wall();
+		GadgetField field({ claymore_def(), c4_def(), mine_def() });
+		uint16_t clay = 0, c4a = 0, c4b = 0, other = 0, at = 0;
+		field.deploy(throw_of(6, 1, Vec3{ 0.0f, 0.5f, 0.0f }, Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{}), w.get(), &clay);
+		field.deploy(throw_of(7, 1, Vec3{ -5.0f, 0.5f, 0.0f }, Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{}), w.get(), &c4a);
+		field.deploy(throw_of(7, 1, Vec3{ -7.0f, 0.5f, 0.0f }, Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{}), w.get(), &c4b);
+		field.deploy(throw_of(7, 2, Vec3{ -9.0f, 0.5f, 0.0f }, Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{}), w.get(), &other);
+		field.deploy(throw_of(8, 1, Vec3{ 5.0f, 0.5f, 5.0f }, Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{}), w.get(), &at);
+		REQUIRE(settle(field, *w, 120));
+		REQUIRE(field.live().size() == 5u);
+		const Deployable *placed = field.find(clay);
+		REQUIRE(placed != nullptr);
+		CHECK(placed->facing[2] == doctest::Approx(1.0f));
+		const PackSoldier walker{ 9, 2, core::vec::add(placed->position, Vec3{ 0.0f, 0.0f, 1.0f }), 4.0f };
+		const PackVehicle rolling{ 2, core::vec::add(field.find(at)->position, Vec3{ 0.0f, 0.5f, -1.0f }),
+			core::vec::add(field.find(at)->position, Vec3{ 0.0f, 0.0f, -1.0f }), Vec3{ 0.0f, 0.0f, 5.0f }, 1.0f };
+		Tick clay_tick = 0, at_tick = 0;
+		for (Tick t = 1; t <= 200 && (clay_tick == 0 || at_tick == 0); ++t) {
+			field.arm_packs(
+					std::span<const PackSoldier>(&walker, 1), std::span<const PackVehicle>(&rolling, 1), kSwaySeconds);
+			for (const Deployable &d : field.live()) {
+				if (d.detonating && d.id == clay && clay_tick == 0) {
+					clay_tick = t;
+				}
+				if (d.detonating && d.id == at && at_tick == 0) {
+					at_tick = t;
+				}
+			}
+		}
+		MESSAGE("claymore tripped at tick " << clay_tick << ", AT mine at tick " << at_tick);
+		CHECK(clay_tick % 6u == 0u);
+		CHECK(clay_tick >= 90u);
+		CHECK(clay_tick <= 96u);
+		CHECK(at_tick % 6u == 0u);
+		CHECK(at_tick >= 120u);
+		CHECK(at_tick <= 126u);
+		CHECK(field.stats().soldier_trips == 1u);
+		CHECK(field.stats().vehicle_trips == 1u);
+
+		CHECK(field.remote_detonate(1, 6) == 0u);
+		CHECK(field.remote_detonate(1, 7) == 2u);
+		CHECK(field.remote_detonate(1, 7) == 0u);
+		const std::vector<Deployable> boom = field.take_detonating();
+		CHECK(boom.size() == 4u);
+		CHECK(field.find(c4a) == nullptr);
+		CHECK(field.find(c4b) == nullptr);
+		REQUIRE(field.find(other) != nullptr);
+		CHECK(field.damage(other, 10.0f, true) == false);
+		CHECK(field.damage(other, 40.0f, false) == true);
+		REQUIRE(field.find(other) != nullptr);
+		CHECK(field.find(other)->detonating);
+		CHECK(field.take_detonating().size() == 1u);
+		CHECK(field.live().empty());
+
+		uint16_t orphan = 0, kept = 0;
+		field.deploy(throw_of(6, 3, Vec3{ 0.0f, 0.5f, -5.0f }, Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{}), w.get(), &orphan);
+		field.deploy(throw_of(7, 3, Vec3{ 0.0f, 0.5f, -8.0f }, Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{}), w.get(), &kept);
+		REQUIRE(settle(field, *w, 120));
+		CHECK(field.owner_gone(3, 1000) == 0u);
+		CHECK(field.remote_detonate(3, 7) == 0u);
+		CHECK(field.expire(1000 + kSimHz + 1u) == 1u);
+		CHECK(field.find(orphan) == nullptr);
+		CHECK(field.expire(1000000) == 0u);
+		CHECK(field.find(kept) != nullptr);
 	}
 
 	TEST_CASE("supply: a resting medkit heals at its SupplyIncSpeed inside its radius, the best bag only, by the team "

@@ -136,6 +136,7 @@ struct VehicleDef {
 	float upside_down_damage = 0;
 	float upside_down_damage_delay = 0;
 	float kill_soldier_collision_speed_threshold = 0;
+	float min_speed_for_mine_activation = 0;
 	bool use_prediction = false;
 
 	std::vector<VehicleSeatDef> seats;

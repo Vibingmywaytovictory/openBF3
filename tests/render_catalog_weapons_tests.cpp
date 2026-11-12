@@ -1543,7 +1543,7 @@ TEST_SUITE("render-catalog-deployables") {
 			REQUIRE(g.def < level.defs.size());
 			specs.push_back(render::DeployedGadgetSpec{ g.def, level.defs[g.def].firing_data });
 		}
-		REQUIRE(specs.size() == 3);
+		REQUIRE(specs.size() == 6);
 		core::Result<std::unique_ptr<render::DeployedGadgetSet>> set =
 				render::load_deployed_gadgets(db->level->db(), db->level->mount(), specs);
 		REQUIRE_MESSAGE(set.ok(), (set.ok() ? "" : set.error().message));
@@ -1572,12 +1572,16 @@ TEST_SUITE("render-catalog-deployables") {
 		CHECK(meshes ==
 				std::map<std::string, std::string>{
 						{ "weapons/gadgets/ammobag/ammobag", "weapons/gadgets/ammobag/ammobag_projectile_mesh" },
+						{ "weapons/gadgets/c4/c4", "weapons/gadgets/c4/c4_projectile_mesh" },
+						{ "weapons/gadgets/claymore/claymore", "weapons/gadgets/claymore/claymore_projectile_mesh" },
+						{ "weapons/gadgets/m15/m15", "weapons/gadgets/m15/m15projectile_mesh" },
 						{ "weapons/gadgets/medicbag/medicbag", "weapons/gadgets/medicbag/mediccrate_projectile_mesh" },
 						{ "weapons/gadgets/radiobeacon/radio_beacon",
 								"weapons/gadgets/radiobeacon/radiobeacon_projectile_mesh" } });
 		CHECK(effects ==
 				std::map<std::string, std::vector<std::string>>{ { "weapons/gadgets/ammobag/ammobag", {} },
-						{ "weapons/gadgets/medicbag/medicbag", {} },
+						{ "weapons/gadgets/c4/c4", {} }, { "weapons/gadgets/claymore/claymore", {} },
+						{ "weapons/gadgets/m15/m15", {} }, { "weapons/gadgets/medicbag/medicbag", {} },
 						{ "weapons/gadgets/radiobeacon/radio_beacon",
 								{ "sound/weapons/handheld/radiobeacon/radiobeacon_object_sfx" } } });
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());

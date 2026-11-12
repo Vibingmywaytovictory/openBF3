@@ -199,6 +199,7 @@ public:
 	void step_projectiles(uint32_t p_tick, std::span<const sim::SoldierState> p_states);
 	void apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states, CombatEventSink &r_sink);
 	void add_damage(std::span<const sim::weapons::DamageEvent> p_events);
+	void set_pack_vehicles(std::span<const sim::weapons::PackVehicle> p_vehicles);
 	void set_vehicle_targets(std::span<const sim::vehicles::VehicleTarget> p_targets);
 	void take_damage_if(const std::function<bool(const sim::weapons::DamageEvent &)> &p_take,
 			std::vector<sim::weapons::DamageEvent> &r_taken);

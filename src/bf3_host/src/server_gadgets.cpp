@@ -1,8 +1,10 @@
 #include "server_gadgets.h"
 
+#include "bf3/core/math.h"
 #include "bf3/core/util/fnv.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/squads.h"
+#include "bf3/sim/weapons/spread_recoil.h"
 #include "server_ghosts.h"
 
 #include <algorithm>
@@ -39,6 +41,16 @@ uint64_t gadget_defs_hash(std::span<const sw::GadgetDef> p_gadgets, std::span<co
 		core::fnv1a_value(h, g.max_attach_inclination_deg);
 		core::fnv1a_value(h, g.ground_ray_m);
 		core::fnv1a_value(h, g.ground_flatness);
+		core::fnv1a_value(h, g.pack.remote_detonator);
+		core::fnv1a_value(h, g.pack.vehicle_detonation);
+		core::fnv1a_value(h, g.pack.vehicle_radius);
+		core::fnv1a_value(h, g.pack.vehicle_delay_s);
+		core::fnv1a_value(h, g.pack.soldier_detonation);
+		core::fnv1a_value(h, g.pack.soldier_radius);
+		core::fnv1a_value(h, g.pack.soldier_angle_deg);
+		core::fnv1a_value(h, g.pack.soldier_min_speed);
+		core::fnv1a_value(h, g.pack.soldier_delay_s);
+		core::fnv1a_value(h, g.pack.use_angle);
 	}
 	core::fnv1a_value(h, uint64_t(p_pickups.size()));
 	for (const sw::AmmoPickupDef &p : p_pickups) {
@@ -141,6 +153,53 @@ void ServerGadgets::blast(std::span<const sw::DetonationEvent> p_detonations, co
 		const uint8_t team = !p_friendly_fire && d.player_slot < p_teams.size() ? p_teams[d.player_slot] : 0;
 		field_.blast(d.dud ? p.dud : p.explosion, mech.blast_falloff, d.position, d.normal,
 				mech.blast_occlusion ? p_world : nullptr, team);
+	}
+}
+
+void ServerGadgets::detonator(uint8_t p_slot, uint16_t p_def, bool p_pressed) {
+	if (p_slot >= detonator_held_.size()) {
+		return;
+	}
+	const bool edge = p_pressed && !detonator_held_[p_slot];
+	detonator_held_[p_slot] = p_pressed;
+	const sw::GadgetDef *g = field_.gadget_of(p_def);
+	if (edge && g != nullptr && g->kind == sw::GadgetKind::ExplosionPack && g->pack.remote_detonator) {
+		stats_.remote_detonations += field_.remote_detonate(p_slot, p_def);
+	}
+}
+
+void ServerGadgets::detonate_packs(sim::Tick p_tick, std::span<const sim::SoldierState> p_states,
+		std::span<const uint8_t> p_teams, std::span<const sw::PackVehicle> p_vehicles,
+		const sim::CollisionWorld &p_world, const sw::HitTargetProvider &p_targets, sw::ProjectileStepOutput &r_out) {
+	if (table_ == nullptr || field_.live().empty()) {
+		return;
+	}
+	pack_soldiers_.clear();
+	for (size_t i = 0; i < p_states.size() && i < p_teams.size(); ++i) {
+		const sim::SoldierState &s = p_states[i];
+		if ((s.flags & sim::soldier_flags::kAlive) == 0 || s.mode == sim::MoveMode::Dead) {
+			continue;
+		}
+		pack_soldiers_.push_back(sw::PackSoldier{ uint8_t(i), p_teams[i], s.position, core::vec::length(s.velocity) });
+	}
+	if (sw::starts_sway_tick(p_tick)) {
+		field_.arm_packs(pack_soldiers_, p_vehicles, sw::kSwaySeconds);
+	}
+	const std::vector<sw::Deployable> boom = field_.take_detonating();
+	if (boom.empty()) {
+		return;
+	}
+	core::gameplay::WorkBudget budget(kPackBlastWork);
+	for (const sw::Deployable &d : boom) {
+		sw::DetonationEvent e;
+		e.time = sw::tick_end(p_tick);
+		e.position = core::vec::add(d.position, core::vec::scale(d.normal, sw::kBlastEyeLift));
+		e.normal = d.normal;
+		e.player_slot = d.owner;
+		e.shot_index = kPackShotIndex | d.id;
+		e.def = d.def;
+		sw::explode(*table_, p_world, p_targets, e, budget, r_out);
+		++stats_.pack_detonations;
 	}
 }
 

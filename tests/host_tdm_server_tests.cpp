@@ -13,6 +13,7 @@
 #include "bf3/core/level/eor_camera.h"
 #include "bf3/core/math.h"
 #include "bf3/core/ui/text_db.h"
+#include "bf3/core/util/text.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/conquest_wire.h"
@@ -2432,7 +2433,7 @@ std::optional<sim::Vec3> ring_spot(const Match &p_match, const sim::Vec3 &p_cent
 TEST_SUITE("host-gunplay-gadgets") {
 	TEST_CASE("gadgets: Metro TDM's medkit, ammo bag and radio beacon carry the install's supply and deploy data and "
 			  "are the "
-			  "kits' default slot 4 and 5 weapons") {
+			  "kits' default slot 4 and 5 weapons; C4, claymore and M15 carry their ExplosionPackEntityData triggers") {
 		tdm::TdmLevel *level = tdm::load_tdm_level_once();
 		if (level == nullptr) {
 			return;
@@ -2440,8 +2441,47 @@ TEST_SUITE("host-gunplay-gadgets") {
 		const host::GunplayLevel &g = *level->shared->gunplay;
 		std::printf("gadgets: %zu gadget defs, %zu ammo pickups for %zu weapon defs\n", g.gadgets.size(),
 				g.ammo_pickups.size(), g.defs.size());
-		CHECK(g.gadgets.size() == 3u);
+		CHECK(g.gadgets.size() == 6u);
 		CHECK(g.ammo_pickups.size() == g.defs.size());
+		const sw::GadgetDef *c4 = gadget_named(g, "weapons/gadgets/c4/c4");
+		const sw::GadgetDef *claymore = gadget_named(g, "weapons/gadgets/claymore/claymore");
+		const sw::GadgetDef *m15 = gadget_named(g, "weapons/gadgets/m15/m15");
+		REQUIRE(c4 != nullptr);
+		REQUIRE(claymore != nullptr);
+		REQUIRE(m15 != nullptr);
+		for (const sw::GadgetDef *x : { c4, claymore, m15 }) {
+			CHECK(x->kind == sw::GadgetKind::ExplosionPack);
+			CHECK(x->destructible);
+			CHECK(x->receives_explosion_damage);
+			CHECK(x->time_to_live_s == 0.0f);
+		}
+		CHECK(c4->pack.remote_detonator);
+		CHECK_FALSE(c4->pack.vehicle_detonation);
+		CHECK_FALSE(c4->pack.soldier_detonation);
+		CHECK(c4->max_count == 6u);
+		CHECK(c4->max_attach_inclination_deg == 180.0f);
+		CHECK(c4->health == 15.0f);
+		CHECK(c4->time_to_live_on_owner_gone_s == 5.0f);
+		CHECK_FALSE(claymore->pack.remote_detonator);
+		CHECK(claymore->pack.soldier_detonation);
+		CHECK(claymore->pack.use_angle);
+		CHECK(claymore->pack.soldier_angle_deg == 60.0f);
+		CHECK(claymore->pack.soldier_radius == 1.5f);
+		CHECK(claymore->pack.soldier_min_speed == doctest::Approx(3.8f));
+		CHECK(claymore->pack.soldier_delay_s == 3.0f);
+		CHECK(claymore->pack.vehicle_detonation);
+		CHECK(claymore->pack.vehicle_radius == 3.0f);
+		CHECK(claymore->pack.vehicle_delay_s == 4.0f);
+		CHECK(claymore->max_count == 2u);
+		CHECK(claymore->max_attach_inclination_deg == 45.0f);
+		CHECK(claymore->time_to_live_on_owner_gone_s == 1.0f);
+		CHECK_FALSE(m15->pack.soldier_detonation);
+		CHECK(m15->pack.vehicle_detonation);
+		CHECK(m15->pack.vehicle_radius == 3.0f);
+		CHECK(m15->pack.vehicle_delay_s == 4.0f);
+		CHECK(m15->max_count == 6u);
+		CHECK(m15->max_attach_inclination_deg == 15.0f);
+		CHECK(m15->time_to_live_on_owner_gone_s == 0.0f);
 		const sw::GadgetDef *medkit = gadget_named(g, "weapons/gadgets/medicbag/medicbag");
 		const sw::GadgetDef *ammo = gadget_named(g, "weapons/gadgets/ammobag/ammobag");
 		const sw::GadgetDef *beacon = gadget_named(g, "weapons/gadgets/radiobeacon/radio_beacon");
@@ -2682,6 +2722,104 @@ TEST_SUITE("host-gunplay-gadgets") {
 				(unsigned long long)st.damaged, (unsigned long long)st.destroyed);
 		CHECK(m->server.gunplay()->deployables().empty());
 		CHECK(st.destroyed == 1u);
+	}
+
+	TEST_CASE("gadgets: a support's C4 thrown at an enemy's feet rests there, goes off on its owner's detonator (Zoom "
+			  "with the C4 in hand) and kills him through the shared blast, with the kill and the C4 on the thrower") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		const auto flat_distance = [](const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
+			return std::hypot(p_a[0] - p_b[0], p_a[2] - p_b[2]);
+		};
+		std::unique_ptr<Match> m = start_match(*level, true, 91u, 0, 1);
+		tdm::ScriptedPeer &sapper = m->join("sapper");
+		tdm::ScriptedPeer &enemy = m->join("enemy");
+		sapper.ready();
+		enemy.ready();
+		REQUIRE(wait_in_round(*m));
+		const uint8_t support = uint8_t(host::KitRole::Support);
+		const uint8_t team = m->rules().team_of(uint8_t(sapper.slot()));
+		const host::LoadoutKit *kit = gl.loadouts.kit(team, support);
+		REQUIRE(kit != nullptr);
+		const size_t gadget2 = size_t(core::gameplay::WeaponSlot::Gadget2);
+		const auto c4 = std::find_if(kit->slots[gadget2].begin(), kit->slots[gadget2].end(),
+				[](const host::LoadoutItem &i) { return i.unlock == "weapons/gadgets/c4/u_c4"; });
+		REQUIRE(c4 != kit->slots[gadget2].end());
+		net::LoadoutRequest request;
+		request.kit = support;
+		request.items[gadget2] = c4->identifier;
+		m->server.on_receive(sapper.peer(), net::kChannelReliable, net::encode_loadout_request(request));
+		m->ticks(1);
+		sapper.spawn_request(support);
+		enemy.spawn_request(0);
+		REQUIRE(m->until([&] { return is_alive(m->state(sapper.slot())) && is_alive(m->state(enemy.slot())); }, 600));
+		REQUIRE(m->rules().team_of(uint8_t(sapper.slot())) != m->rules().team_of(uint8_t(enemy.slot())));
+		REQUIRE(m->server.gunplay()->weapons(uint8_t(sapper.slot())).slots[gadget2].def == c4->def);
+		std::optional<Patch> patch = find_patch(*m, 3.0f);
+		REQUIRE(patch.has_value());
+		std::optional<sim::Vec3> far;
+		for (const sim::SpawnPoint &sp : m->level->spawns) {
+			const std::optional<sim::Vec3> f = floor_at(*m->world, sp.position);
+			if (!far && f && flat_distance(*f, patch->victim) > 25.0f &&
+					m->motor.fits_standing(add(*f, 0.0f, 0.05f, 0.0f))) {
+				far = f;
+			}
+		}
+		REQUIRE(far.has_value());
+		m->teleport(sapper, add(patch->shooter, 0.0f, 0.05f, 0.0f));
+		m->teleport(enemy, add(patch->victim, 0.0f, 0.05f, 0.0f));
+		m->ticks(20);
+		bool fire = false, detonate = false;
+		const sim::Vec3 feet = add(patch->victim, 0.0f, 0.1f, 0.0f);
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			uint32_t b = select_and_fire(uint8_t(gadget2), fire && (p_tick % 30u) < 10u);
+			b |= detonate ? sim::buttons::kZoom : 0u;
+			return aim_command(*m, p_tick, p_state, feet, sim::Pose::Stand, b);
+		};
+		m->ticks(60);
+		fire = true;
+		const std::optional<sim::Tick> rested = rest_tick(*m, 1, 300);
+		fire = false;
+		REQUIRE(rested.has_value());
+		REQUIRE(m->server.gunplay()->deployables().size() == 1u);
+		const sw::Deployable placed = m->server.gunplay()->deployables()[0];
+		CHECK(placed.def == c4->def);
+		CHECK(flat_distance(placed.position, patch->victim) < 1.5f);
+		m->teleport(sapper, add(*far, 0.0f, 0.05f, 0.0f));
+		m->ticks(120);
+		REQUIRE(is_alive(m->state(enemy.slot())));
+		CHECK(m->server.gunplay()->deployables().size() == 1u);
+		const int kills_before = int(m->row(sapper.slot())->kills);
+		detonate = true;
+		REQUIRE(m->until([&] { return !is_alive(m->state(enemy.slot())); }, 60));
+		detonate = false;
+		m->ticks(2);
+		CHECK(m->server.gunplay()->deployables().empty());
+		const host::GadgetStats &gs = m->server.gunplay()->gadget_stats();
+		CHECK(gs.remote_detonations == 1u);
+		CHECK(gs.pack_detonations == 1u);
+		const net::DeathEvent *death = last_death(sapper, enemy.slot());
+		REQUIRE(death != nullptr);
+		CHECK(int(death->killer) == sapper.slot());
+		CHECK(death->def == c4->def);
+		CHECK(int(m->row(sapper.slot())->kills) == kills_before + 1);
+		CHECK(is_alive(m->state(sapper.slot())));
+		size_t detonations = 0;
+		for (const net::CombatEvents &c : enemy.combat) {
+			for (const net::DetonationWire &d : c.detonations) {
+				detonations += d.def == c4->def ? 1u : 0u;
+			}
+		}
+		CHECK(detonations == 1u);
+		std::printf(
+				"C4: thrown at (%.1f, %.1f, %.1f), %.2f m from the enemy's feet, detonated from %.0f m: %llu remote, "
+				"%llu pack detonations\n",
+				placed.position[0], placed.position[1], placed.position[2],
+				flat_distance(placed.position, patch->victim), flat_distance(*far, patch->victim),
+				(unsigned long long)gs.remote_detonations, (unsigned long long)gs.pack_detonations);
 	}
 
 	TEST_CASE("gadgets: a recon's radio beacon is a spawn point for its squad: a mate's beacon SpawnRequest deploys at "
