@@ -441,6 +441,15 @@ bool Bf3MatchHost::prepare_listen_server() {
 		}
 		server_config_.level.shared.tuning = *tuning;
 	}
+	if (FileAccess::file_exists(kVehicleTuningConfig)) {
+		bf3::core::Result<sim::VehicleTuning> tuning =
+				sim::parse_vehicle_tuning(to_std(FileAccess::get_file_as_string(kVehicleTuningConfig)));
+		if (!tuning) {
+			end_match(to_std(kVehicleTuningConfig) + ": " + tuning.error().message);
+			return false;
+		}
+		server_config_.level.shared.vehicle_tuning = *tuning;
+	}
 	server_config_.level.seed = seed_;
 	host::ServerRules &rules = server_config_.rules;
 	rules.deploy_screen = options.deploy_screen;

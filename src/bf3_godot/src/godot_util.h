@@ -17,6 +17,8 @@ std::string player_name_arg();
 
 inline constexpr bool kBuildChecks = OPENBF3_BUILD_CHECKS != 0;
 
+inline constexpr const char *kVehicleTuningConfig = "res://config/vehicle_tuning.cfg";
+
 bool has_check_arg(const char *p_name);
 
 std::string engine_summary();

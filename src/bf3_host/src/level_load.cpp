@@ -630,7 +630,8 @@ core::Status load_shared_tdm(const LevelDatabase &p_db, const SharedLoadOptions 
 		}
 		params->notes.insert(params->notes.end(), (*conquest)->notes.begin(), (*conquest)->notes.end());
 		params->conquest = std::move(*conquest);
-		core::Result<std::shared_ptr<const LevelVehicles>> vehicles = load_level_vehicles(p_db, sim::VehicleTuning{});
+		core::Result<std::shared_ptr<const LevelVehicles>> vehicles =
+				load_level_vehicles(p_db, p_options.vehicle_tuning);
 		if (!vehicles) {
 			return core::error_at("tdm", vehicles.error());
 		}

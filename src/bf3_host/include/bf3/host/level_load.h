@@ -8,6 +8,7 @@
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/spawn.h"
 #include "bf3/sim/static_world.h"
+#include "bf3/sim/vehicle_model.h"
 
 #include <array>
 #include <atomic>
@@ -137,6 +138,7 @@ struct SharedLoadOptions {
 
 	unsigned threads = 0;
 	sim::MotorTuning tuning;
+	sim::VehicleTuning vehicle_tuning;
 
 	bool gunplay = false;
 

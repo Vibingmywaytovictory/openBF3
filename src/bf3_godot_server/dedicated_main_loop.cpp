@@ -320,6 +320,15 @@ bool DedicatedMainLoop::start(std::string &r_error) {
 		}
 		config.level.shared.tuning = *tuning;
 	}
+	if (const std::string vehicle = config_path(config_file("vehicle_tuning.cfg").c_str()); !vehicle.empty()) {
+		core::Result<sim::VehicleTuning> tuning =
+				sim::parse_vehicle_tuning(to_std(FileAccess::get_file_as_string(to_godot(vehicle))));
+		if (!tuning) {
+			r_error = vehicle + ": " + tuning.error().message;
+			return false;
+		}
+		config.level.shared.vehicle_tuning = *tuning;
+	}
 	config.level.seed = args_.rules.seed;
 	config.rules = args_.rules;
 	config.bind_ip = args_.bind_ip;

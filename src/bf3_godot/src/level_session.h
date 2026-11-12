@@ -191,6 +191,7 @@ private:
 	bf3::core::InstallSnapshot install_before_;
 	bf3::core::PathGuard guard_;
 	std::string motor_tuning_text_;
+	std::string vehicle_tuning_text_;
 	std::string motor_tuning_source_;
 
 	std::thread loader_;

@@ -321,6 +321,9 @@ void Bf3LevelSession::_ready() {
 				to_godot("[level] motor tuning: " + motor_tuning_path + " is missing, the built-in defaults are used"));
 		motor_tuning_source_ = "(missing: built-in defaults)";
 	}
+	if (FileAccess::file_exists(kVehicleTuningConfig)) {
+		vehicle_tuning_text_ = to_std(FileAccess::get_file_as_string(kVehicleTuningConfig));
+	}
 	if (bots_ > 0) {
 		UtilityFunctions::print(to_godot("[bots] bots " + std::to_string(bots_) + (nav_overlay_ ? ", nav overlay on (F7)" : "")));
 	}
@@ -429,6 +432,14 @@ void Bf3LevelSession::run_loader() {
 			return;
 		}
 		level_options.shared.tuning = *tuning;
+	}
+	if (!vehicle_tuning_text_.empty()) {
+		bf3::core::Result<sim::VehicleTuning> tuning = sim::parse_vehicle_tuning(vehicle_tuning_text_);
+		if (!tuning) {
+			fail(to_std(kVehicleTuningConfig) + ": " + tuning.error().message);
+			return;
+		}
+		level_options.shared.vehicle_tuning = *tuning;
 	}
 	level_options.bots = bots_ > 0;
 	level_options.synthetic_spawns = bots_;
