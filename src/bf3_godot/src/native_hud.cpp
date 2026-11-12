@@ -155,6 +155,7 @@ void Bf3NativeHud::_notification(int p_what) {
 	if (p_what == NOTIFICATION_PREDELETE) {
 		join_loader();
 		tags_.reset();
+		rose_.reset();
 		for (std::unique_ptr<ui::HudScreen> &s : screens_) {
 			s.reset();
 		}

@@ -107,6 +107,7 @@ struct SwfViewCounters {
 	uint64_t live_filter_materials = 0;
 	uint64_t retained_bytes = 0;
 	uint64_t plans = 0;
+	uint64_t scenes_freed_while_driven = 0;
 	double plan_seconds = 0.0;
 	double build_seconds = 0.0;
 };

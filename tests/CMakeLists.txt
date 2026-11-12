@@ -581,6 +581,7 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_godot_row(godot.settings godot_settings.cmake HEADLESS TIMEOUT 240)
     openbf3_godot_row(godot.look_rate godot_look_rate.cmake HEADLESS TIMEOUT 240)
     openbf3_godot_row(godot.ui_open_census godot_ui_open_census.cmake HEADLESS TIMEOUT 120)
+    openbf3_godot_row(godot.native_hud.exit godot_native_hud_exit.cmake HEADLESS TIMEOUT 120)
 endif()
 
 openbf3_test(test_ui2_contract test_main.cpp ui2_contract_tests.cpp)

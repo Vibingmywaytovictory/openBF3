@@ -1009,6 +1009,10 @@ void SwfScene::set_frame_script_handler(std::function<void(SwfNodeId, uint32_t)>
 	impl_->script_calls.clear();
 }
 
+bool SwfScene::has_frame_script_handler() const {
+	return static_cast<bool>(impl_->on_script);
+}
+
 Status SwfScene::advance_seconds(double p_seconds) {
 	if (!std::isfinite(p_seconds) || p_seconds < 0.0) {
 		return make_error("swf scene " + impl_->movie_name + ": cannot advance by " + std::to_string(p_seconds) + " s");

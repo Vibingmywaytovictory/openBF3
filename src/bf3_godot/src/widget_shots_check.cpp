@@ -139,6 +139,12 @@ Bf3WidgetShotsCheck::~Bf3WidgetShotsCheck() = default;
 
 void Bf3WidgetShotsCheck::_bind_methods() {}
 
+void Bf3WidgetShotsCheck::_notification(int p_what) {
+	if (p_what == NOTIFICATION_PREDELETE) {
+		state_->screen.reset();
+	}
+}
+
 void Bf3WidgetShotsCheck::_ready() {
 	if (Engine::get_singleton()->is_editor_hint()) {
 		return;

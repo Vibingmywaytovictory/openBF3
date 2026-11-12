@@ -26,6 +26,7 @@
 #include "hud_check.h"
 #include "look_rate_check.h"
 #include "m2a_viewmodel_demo.h"
+#include "native_hud_exit_check.h"
 #include "settings_check.h"
 #include "swf_view_check.h"
 #include "ui_font_check.h"
@@ -102,6 +103,7 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3HudCheck);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3AudioDemo);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3WidgetShotsCheck);
+	GDREGISTER_CLASS(bf3::godot_side::Bf3NativeHudExitCheck);
 
 	void openbf3_register_m2a_tp();
 	openbf3_register_m2a_tp();

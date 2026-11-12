@@ -198,6 +198,7 @@ public:
 	Status swap_depths(std::string_view p_path, int32_t p_as2_depth);
 	Result<SwfNodeId> create_empty_movie_clip(std::string_view p_parent_path, std::string_view p_name, int32_t p_as2_depth);
 	void set_frame_script_handler(std::function<void(SwfNodeId, uint32_t)> p_handler);
+	bool has_frame_script_handler() const;
 
 	Status set_visible(std::string_view p_path, bool p_visible);
 	Status set_alpha(std::string_view p_path, float p_alpha);

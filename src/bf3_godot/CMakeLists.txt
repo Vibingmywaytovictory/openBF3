@@ -296,6 +296,8 @@ if(OPENBF3_BUILD_CHECKS)
         src/icons3d_check.h
         src/commo_rose_check.cpp
         src/commo_rose_check.h
+        src/native_hud_exit_check.cpp
+        src/native_hud_exit_check.h
         src/native_hud_moments.cpp
         src/native_screens_check.cpp
         src/native_screens_check.h

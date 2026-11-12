@@ -3686,6 +3686,11 @@ Bf3SwfView::Bf3SwfView() :
 
 Bf3SwfView::~Bf3SwfView() {
 	g_views.erase(std::remove(g_views.begin(), g_views.end(), this), g_views.end());
+	if (impl_->scene && impl_->scene->has_frame_script_handler()) {
+		++g_counters.scenes_freed_while_driven;
+		UtilityFunctions::push_error(
+				to_godot("[swf view] " + impl_->movie + ": freed while a HudScreen still drives its scene"));
+	}
 }
 
 void Bf3SwfView::_bind_methods() {
