@@ -28,6 +28,11 @@ using bf3::host::LoadStage;
 
 namespace {
 
+bool graph_programs_off() {
+	static const bool off = ("," + user_arg_value("look-off") + ",").find(",programs,") != std::string::npos;
+	return off;
+}
+
 uint64_t now_us() {
 
 	return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
@@ -342,6 +347,12 @@ void LevelUpload::begin(std::shared_ptr<const render::LevelScenePlan> p_plan, co
 			instances_by_mesh_[plan.instances[i].mesh].push_back(uint32_t(i));
 		}
 	}
+	mesh_programs_.assign(plan.meshes.size(), 0);
+	for (size_t i = 0; i < plan.meshes.size() && !graph_programs_off(); ++i) {
+		for (uint32_t s : plan.meshes[i].surface_materials) {
+			mesh_programs_[i] |= s < plan.materials.size() && plan.materials[s].program >= 0 ? 1 : 0;
+		}
+	}
 	texture_users_.assign(plan.textures.size(), {});
 	terrain_texture_users_.assign(plan.textures.size(), {});
 	for (size_t m = 0; m < plan.materials.size(); ++m) {
@@ -567,10 +578,15 @@ void LevelUpload::create_materials(double p_deadline_us) {
 
 				static const bool blend_off = ("," + user_arg_value("look-off") + ",").find(",blend,") != std::string::npos;
 				const int mode = mp.blend && !blend_off ? 2 : (mp.alpha_test ? 1 : 0);
+				const bool program = mp.program >= 0 && !graph_programs_off();
 				rs->material_set_shader(m,
-						mp.program >= 0 ? shaders_[program_shaders_ + size_t(mp.program)]
-										: shaders_[size_t(2 * mode + (mp.double_sided ? 1 : 0))]);
-				if (mp.program >= 0 && mp.look) {
+						program ? shaders_[program_shaders_ + size_t(mp.program)]
+								: shaders_[size_t(2 * mode + (mp.double_sided ? 1 : 0))]);
+				if (program) {
+					std::lock_guard lock(stats_mutex_);
+					++stats_.program_materials;
+				}
+				if (program && mp.look) {
 					const std::vector<render::ProgramConstant> &constants =
 							plan.programs[size_t(mp.program)]->translated.constants;
 					for (size_t c = 0; c < constants.size() && c < mp.look->graph_constants.size(); ++c) {
@@ -732,7 +748,7 @@ void LevelUpload::create_terrain_look(const Done &p_done) {
 void LevelUpload::create_instances(double p_deadline_us) {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	const render::LevelScenePlan &plan = *plan_;
-	uint64_t made = 0;
+	uint64_t made = 0, program_made = 0;
 	while (!pending_terrains_.empty()) {
 		const uint32_t t = pending_terrains_.front();
 		pending_terrains_.pop_front();
@@ -754,6 +770,7 @@ void LevelUpload::create_instances(double p_deadline_us) {
 			plan_instances_[list[next]] = inst;
 			instances_.push_back(inst);
 			++made;
+			program_made += mesh_programs_[mesh];
 		}
 		if (next >= list.size()) {
 			pending_instances_.pop_front();
@@ -768,6 +785,7 @@ void LevelUpload::create_instances(double p_deadline_us) {
 		}
 		std::lock_guard lock(stats_mutex_);
 		stats_.instances += made;
+		stats_.program_instances += program_made;
 	}
 }
 

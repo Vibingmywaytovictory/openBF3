@@ -971,6 +971,13 @@ void Bf3LevelSession::try_done() {
 			stage_s(host::LoadStage::Upload), stage_s(host::LoadStage::Connect), stage_s(host::LoadStage::Spawn),
 			cache_warmth_name(host::CacheWarmth(progress_.warmth.load())), mib(peak_working_set_bytes()));
 	UtilityFunctions::print(line);
+	if (plan_ != nullptr && plan_->look == render::SceneLook::L1) {
+		const UploadStats upload = upload_.stats();
+		std::snprintf(line, sizeof(line), "[level] graph programs: %zu shaders, %llu materials, %llu instances",
+				plan_->programs.size(), (unsigned long long)upload.program_materials,
+				(unsigned long long)upload.program_instances);
+		UtilityFunctions::print(line);
+	}
 	UtilityFunctions::print(to_godot("[level] " + cache_summary()));
 	if (!bots_line_.empty()) {
 		UtilityFunctions::print(to_godot(bots_line_));

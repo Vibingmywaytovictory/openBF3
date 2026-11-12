@@ -386,7 +386,7 @@ endif()
 if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
     openbf3_godot_row(godot.look_programs godot_look_programs.cmake WINDOW TIMEOUT 400
-        ARGS "-DPYTHON=${Python3_EXECUTABLE}" -DMAGENTA_LIMIT=0.0005)
+        ARGS "-DPYTHON=${Python3_EXECUTABLE}" -DMAGENTA_LIMIT=0.0005 -DMIN_MATERIALS=7 -DMIN_INSTANCES=301)
     set_tests_properties(godot.look_programs PROPERTIES RUN_SERIAL TRUE)
 endif()
 openbf3_test(test_s1_contract test_main.cpp s1_contract_tests.cpp test_support.h)

@@ -44,6 +44,8 @@ struct UploadStats {
 	uint64_t materials = 0;
 	uint64_t texture_bindings = 0;
 	uint64_t instances = 0;
+	uint64_t program_materials = 0;
+	uint64_t program_instances = 0;
 
 	uint64_t failures = 0;
 	uint64_t queued_peak = 0;
@@ -155,6 +157,7 @@ private:
 	std::vector<std::vector<std::pair<godot::RID, std::string>>> terrain_texture_users_;
 	std::vector<godot::RID> terrain_look_rids_;
 	size_t program_shaders_ = 0;
+	std::vector<uint8_t> mesh_programs_;
 	std::deque<std::pair<uint32_t, size_t>> pending_instances_;
 	std::deque<uint32_t> pending_terrains_;
 	std::vector<godot::RID> instances_;
