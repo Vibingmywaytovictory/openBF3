@@ -56,6 +56,7 @@ constexpr float kSightUnmarked = 1.0f / 255.0f;
 constexpr float kSightMark = 0.75f;
 constexpr float kSightBlank = 0.25f;
 constexpr float kSightDrawnHalf = 0.5f;
+constexpr size_t kOpticBatch = 32;
 
 const std::set<std::string> kCurveFireWeapons{ "weapons/gadgets/defibrillator/u_defib", "weapons/m40a5/u_m40a5",
 	"weapons/model98b/u_m98b", "weapons/sv98/u_sv98", "weapons/xp1_l96/u_l96", "weapons/xp2_jng90/u_jng90" };
@@ -277,6 +278,113 @@ template <class F> void each_covered_texel(const render::PreparedSurface &p_s, u
 			}
 		}
 	}
+}
+
+struct SightAudit {
+	size_t clear_vertices = 0, clear_kept = 0, marks = 0, marks_dark = 0, mixed = 0, mixed_agree = 0;
+	size_t sights = 0, textured = 0, roles = 0, single = 0, single_kept = 0;
+	size_t multiply_slots = 0, faded_rings = 0;
+	std::vector<std::string> undecoded;
+	std::vector<std::string> dark_housings;
+};
+
+SightAudit audit_sight(const render::ViewmodelSet &p_set, const core::LevelMount &p_mount,
+		std::map<std::string, SightBrightness> &r_brightness) {
+	SightAudit out;
+	const render::ViewmodelItem &vm = p_set.items[0];
+	for (const render::ViewmodelAttachment &a : vm.attachments) {
+		for (const render::PreparedSurface &sf : a.part.prepared.surfaces) {
+			const render::ViewmodelSlotLook *look =
+					sf.material_index < a.looks.size() ? &a.looks[sf.material_index] : nullptr;
+			if (look == nullptr || !look->blend || !look->unlit || sf.uv0.size() < 2 * sf.vertex_count()) {
+				continue;
+			}
+			const render::PreparedTexture *t = p_set.texture(look->color_texture, look->color_role);
+			auto [at, fresh] = r_brightness.try_emplace(look->color_texture);
+			if (fresh) {
+				at->second = sight_brightness(p_mount, look->color_texture);
+			}
+			const SightBrightness &raw = at->second;
+			if (t == nullptr || raw.width != t->width || raw.height != t->height) {
+				out.undecoded.push_back(look->color_texture);
+				continue;
+			}
+			const auto raw_at = [&](uint32_t p_x, uint32_t p_y) { return raw.texels[size_t(p_y) * raw.width + p_x]; };
+			if (look->blend_mode == render::ViewmodelBlend::Multiply) {
+				bool ring = false;
+				for (size_t k = 0; k < sf.vertex_count(); ++k) {
+					const float u = sf.uv0[2 * k] - std::floor(sf.uv0[2 * k]);
+					const float v = sf.uv0[2 * k + 1] - std::floor(sf.uv0[2 * k + 1]);
+					const uint32_t x = std::min(t->width - 1, uint32_t(u * float(t->width)));
+					const uint32_t y = std::min(t->height - 1, uint32_t(v * float(t->height)));
+					if (raw_at(x, y) > kSightUnmarked) {
+						continue;
+					}
+					++out.clear_vertices;
+					out.clear_kept += drawn_sight_value(*t, x, y) >= 1.0f - kSightUnmarked ? 1u : 0u;
+					ring = ring || (sf.colors.size() >= 4 * sf.vertex_count() && sf.colors[4 * k] == 0);
+				}
+				out.faded_rings += ring ? 1u : 0u;
+				each_covered_texel(sf, t->width, t->height, [&](uint32_t p_x, uint32_t p_y) {
+					if (raw_at(p_x, p_y) >= kSightMark) {
+						++out.marks;
+						out.marks_dark += drawn_sight_value(*t, p_x, p_y) < kSightDrawnHalf ? 1u : 0u;
+					}
+				});
+			} else {
+				each_covered_texel(sf, t->width, t->height, [&](uint32_t p_x, uint32_t p_y) {
+					const float r = raw_at(p_x, p_y);
+					if (r >= kSightMark || r <= kSightBlank) {
+						++out.mixed;
+						out.mixed_agree +=
+								(drawn_sight_value(*t, p_x, p_y) >= kSightDrawnHalf) == (r >= kSightMark) ? 1u : 0u;
+					}
+				});
+			}
+		}
+	}
+	for (const render::ViewmodelAttachment &a : vm.attachments) {
+		for (const render::ViewmodelSlotLook &look : a.looks) {
+			if (look.no_specular) {
+				out.dark_housings.push_back(a.part.mesh);
+			}
+			if (!look.blend || !look.unlit) {
+				continue;
+			}
+			++out.sights;
+			out.multiply_slots += look.blend_mode == render::ViewmodelBlend::Multiply ? 1u : 0u;
+			const render::PreparedTexture *t = p_set.texture(look.color_texture, look.color_role);
+			out.textured += !look.color_texture.empty() && t != nullptr ? 1u : 0u;
+			out.roles += look.color_role ==
+							(look.blend_mode == render::ViewmodelBlend::Multiply ? render::TextureRole::InvertedMask
+																				 : render::TextureRole::Mask)
+					? 1u
+					: 0u;
+			out.single += t != nullptr && t->stored_levels == 1 ? 1u : 0u;
+			out.single_kept += t != nullptr && t->stored_levels == 1 && t->levels == 1 ? 1u : 0u;
+		}
+	}
+	return out;
+}
+
+void check_sight(const SightAudit &p_a, const std::string &p_optic) {
+	for (const std::string &u : p_a.undecoded) {
+		CHECK_MESSAGE(false, p_optic, ": ", u, " not decoded");
+	}
+	CHECK_MESSAGE(p_a.clear_kept == p_a.clear_vertices, p_optic, ": ", p_a.clear_kept, " of ", p_a.clear_vertices,
+			" multiplying sight vertices over unmarked texels draw their vertex colour");
+	CHECK_MESSAGE(p_a.marks_dark == p_a.marks, p_optic, ": ", p_a.marks_dark, " of ", p_a.marks,
+			" marked texels under a multiplying sight darken the scene");
+	CHECK_MESSAGE(p_a.mixed_agree == p_a.mixed, p_optic, ": ", p_a.mixed_agree, " of ", p_a.mixed,
+			" texels under a mixing sight draw its tint exactly where the texture is marked");
+	CHECK_MESSAGE(p_a.sights > 0, p_optic);
+	CHECK_MESSAGE(
+			p_a.textured == p_a.sights, p_optic, ": ", p_a.textured, " of ", p_a.sights, " sight surfaces textured");
+	CHECK_MESSAGE(p_a.roles == p_a.sights, p_optic, ": ", p_a.roles, " of ", p_a.sights,
+			" sight surfaces sample their texture as an inverted mask when they multiply, else as a mask");
+	CHECK_MESSAGE(p_a.single > 0, p_optic, ": no sight texture stored with one level");
+	CHECK_MESSAGE(p_a.single_kept == p_a.single, p_optic, ": ", p_a.single_kept, " of ", p_a.single,
+			" sight textures stored with one level are drawn from it alone");
 }
 
 std::array<uint32_t, host::kLoadoutAccessories> m16_acog_foregrip_suppressor(const host::LoadoutItem &p_m16) {
@@ -1208,99 +1316,15 @@ TEST_SUITE("render-catalog-accessories-1p") {
 			REQUIRE_MESSAGE(l.set != nullptr, optic, ": ", l.error);
 			const render::ViewmodelItem &vm = l.set->items[0];
 			CHECK_MESSAGE(vm.sight.has_value(), optic, " has no sight picture");
-			size_t clear_vertices = 0, clear_kept = 0, marks = 0, marks_dark = 0, mixed = 0, mixed_agree = 0;
-			for (const render::ViewmodelAttachment &a : vm.attachments) {
-				for (const render::PreparedSurface &sf : a.part.prepared.surfaces) {
-					const render::ViewmodelSlotLook *look =
-							sf.material_index < a.looks.size() ? &a.looks[sf.material_index] : nullptr;
-					if (look == nullptr || !look->blend || !look->unlit || sf.uv0.size() < 2 * sf.vertex_count()) {
-						continue;
-					}
-					const render::PreparedTexture *t = l.set->texture(look->color_texture, look->color_role);
-					auto [at, fresh] = brightness.try_emplace(look->color_texture);
-					if (fresh) {
-						at->second = sight_brightness(lib.mount(0), look->color_texture);
-					}
-					const SightBrightness &raw = at->second;
-					if (t == nullptr || raw.width != t->width || raw.height != t->height) {
-						CHECK_MESSAGE(false, optic, ": ", look->color_texture, " not decoded");
-						continue;
-					}
-					const auto raw_at = [&](uint32_t p_x, uint32_t p_y) {
-						return raw.texels[size_t(p_y) * raw.width + p_x];
-					};
-					if (look->blend_mode == render::ViewmodelBlend::Multiply) {
-						bool ring = false;
-						for (size_t k = 0; k < sf.vertex_count(); ++k) {
-							const float u = sf.uv0[2 * k] - std::floor(sf.uv0[2 * k]);
-							const float v = sf.uv0[2 * k + 1] - std::floor(sf.uv0[2 * k + 1]);
-							const uint32_t x = std::min(t->width - 1, uint32_t(u * float(t->width)));
-							const uint32_t y = std::min(t->height - 1, uint32_t(v * float(t->height)));
-							if (raw_at(x, y) > kSightUnmarked) {
-								continue;
-							}
-							++clear_vertices;
-							clear_kept += drawn_sight_value(*t, x, y) >= 1.0f - kSightUnmarked ? 1u : 0u;
-							ring = ring || (sf.colors.size() >= 4 * sf.vertex_count() && sf.colors[4 * k] == 0);
-						}
-						faded_rings += ring ? 1u : 0u;
-						each_covered_texel(sf, t->width, t->height, [&](uint32_t p_x, uint32_t p_y) {
-							if (raw_at(p_x, p_y) >= kSightMark) {
-								++marks;
-								marks_dark += drawn_sight_value(*t, p_x, p_y) < kSightDrawnHalf ? 1u : 0u;
-							}
-						});
-					} else {
-						each_covered_texel(sf, t->width, t->height, [&](uint32_t p_x, uint32_t p_y) {
-							const float r = raw_at(p_x, p_y);
-							if (r >= kSightMark || r <= kSightBlank) {
-								++mixed;
-								mixed_agree += (drawn_sight_value(*t, p_x, p_y) >= kSightDrawnHalf) == (r >= kSightMark)
-										? 1u
-										: 0u;
-							}
-						});
-					}
-				}
+			const SightAudit audit = audit_sight(*l.set, lib.mount(0), brightness);
+			check_sight(audit, optic);
+			for (const std::string &mesh : audit.dark_housings) {
+				dark_housings.insert(optic + " " + mesh);
 			}
-			CHECK_MESSAGE(clear_kept == clear_vertices, optic, ": ", clear_kept, " of ", clear_vertices,
-					" multiplying sight vertices over unmarked texels draw their vertex colour");
-			CHECK_MESSAGE(marks_dark == marks, optic, ": ", marks_dark, " of ", marks,
-					" marked texels under a multiplying sight darken the scene");
-			CHECK_MESSAGE(mixed_agree == mixed, optic, ": ", mixed_agree, " of ", mixed,
-					" texels under a mixing sight draw its tint exactly where the texture is marked");
+			faded_rings += audit.faded_rings;
 			if (optic.ends_with("_acog")) {
-				acog_marks += marks;
+				acog_marks += audit.marks;
 			}
-			size_t textured = 0, sights = 0, roles = 0, single = 0, single_kept = 0;
-			for (const render::ViewmodelAttachment &a : vm.attachments) {
-				for (const render::ViewmodelSlotLook &look : a.looks) {
-					if (look.no_specular) {
-						dark_housings.insert(optic + " " + a.part.mesh);
-					}
-					if (!look.blend || !look.unlit) {
-						continue;
-					}
-					++sights;
-					const render::PreparedTexture *t = l.set->texture(look.color_texture, look.color_role);
-					textured += !look.color_texture.empty() && t != nullptr ? 1u : 0u;
-					roles += look.color_role ==
-									(look.blend_mode == render::ViewmodelBlend::Multiply
-													? render::TextureRole::InvertedMask
-													: render::TextureRole::Mask)
-							? 1u
-							: 0u;
-					single += t != nullptr && t->stored_levels == 1 ? 1u : 0u;
-					single_kept += t != nullptr && t->stored_levels == 1 && t->levels == 1 ? 1u : 0u;
-				}
-			}
-			CHECK_MESSAGE(sights > 0, optic);
-			CHECK_MESSAGE(textured == sights, optic, ": ", textured, " of ", sights, " sight surfaces textured");
-			CHECK_MESSAGE(roles == sights, optic, ": ", roles, " of ", sights,
-					" sight surfaces sample their texture as an inverted mask when they multiply, else as a mask");
-			CHECK_MESSAGE(single > 0, optic, ": no sight texture stored with one level");
-			CHECK_MESSAGE(single_kept == single, optic, ": ", single_kept, " of ", single,
-					" sight textures stored with one level are drawn from it alone");
 			const auto offset = offsets[l.weapon].find(optic);
 			if (!vm.sight || offset == offsets[l.weapon].end()) {
 				continue;
@@ -1556,6 +1580,126 @@ TEST_SUITE("render-catalog-deployables") {
 								{ "sound/weapons/handheld/radiobeacon/radiobeacon_object_sfx" } } });
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
 		std::printf("render.catalog_deployables install.unchanged %s\n", diff.clean() ? "yes" : diff.summary().c_str());
+		CHECK(diff.clean());
+	}
+}
+
+TEST_SUITE("render-catalog-optics-1p") {
+	TEST_CASE("catalog optics: every optic of every primary weapon of Metro TDM's loadout catalog, per team, draws its "
+			  "unlit sight surfaces as the M416's do: a multiplying one darkens the scene by its marks and keeps the "
+			  "rest at the vertex colour, a mixing one draws its tint exactly where its texture is marked") {
+		core::InstallReader reader;
+		if (!reader.locate({})) {
+			test::skip_install_case(reader.describe().c_str());
+			return;
+		}
+		const core::InstallSnapshot before = reader.snapshot();
+		core::Result<std::shared_ptr<core::Install>> install = core::Install::open(reader);
+		REQUIRE(install.ok());
+		auto gunplay = host::load_gunplay_level(
+				*install, "MP_Subway", "TeamDeathMatch0", host::GunplayLoadOptions{ true, true });
+		REQUIRE_MESSAGE(gunplay.ok(), (gunplay.ok() ? "" : gunplay.error().message));
+		const host::GunplayLevel &level = **gunplay;
+		core::Result<std::unique_ptr<render::ViewmodelSources>> sources =
+				render::open_viewmodel_sources(reader, kLevel, nullptr);
+		REQUIRE_MESSAGE(sources.ok(), (sources.ok() ? "" : sources.error().message));
+		const core::EbxLibrary &lib = *(*sources)->ebx;
+		struct OpticLoad {
+			uint8_t team = 0;
+			const host::LoadoutItem *item = nullptr;
+			size_t index = 0;
+			std::unique_ptr<render::ViewmodelSet> set;
+			std::string error;
+		};
+		std::vector<OpticLoad> loads;
+		std::set<std::pair<uint8_t, std::string>> seen;
+		std::set<std::string> sight_meshes;
+		size_t optics = 0;
+		for (uint8_t team = 1; team <= 2; ++team) {
+			for (uint8_t k = 0; k < host::kKitCount; ++k) {
+				const host::LoadoutKit *kit = level.loadouts.kit(team, k);
+				for (size_t w = 0; kit != nullptr && w < kit->slots[0].size(); ++w) {
+					const host::LoadoutItem &item = kit->slots[0][w];
+					if (!seen.insert({ team, item.unlock }).second) {
+						continue;
+					}
+					core::Result<core::gameplay::WeaponDef> def = core::gameplay::resolve_weapon(lib, item.unlock);
+					const core::EbxPartition *bp = def ? lib.partition_by_name(def->blueprint) : nullptr;
+					REQUIRE_MESSAGE(bp != nullptr, item.unlock);
+					const std::vector<render::WeaponSocket> sockets =
+							render::read_weapon_sockets(lib, bp->instances_of("SoldierWeaponData").front());
+					for (size_t i = 0; i < item.accessories[0].size(); ++i) {
+						const std::string &optic = item.accessory_unlocks[0][i];
+						if (optic.starts_with(render::kDefaultSocketUnlockPrefix)) {
+							continue;
+						}
+						++optics;
+						std::string meshes;
+						for (const render::WeaponSocket &s : sockets) {
+							if (s.unlock != optic) {
+								continue;
+							}
+							for (const render::WeaponSocketObject &o : s.objects) {
+								meshes += o.mesh_1p + "|" + o.mesh_1p_zoom + "|";
+							}
+						}
+						REQUIRE_MESSAGE(!meshes.empty(), optic, " has no 1p mesh in its weapon's sockets");
+						if (sight_meshes.insert(meshes).second) {
+							loads.push_back(OpticLoad{ team, &item, i, {}, {} });
+						}
+					}
+				}
+			}
+		}
+		std::map<std::string, SightBrightness> brightness;
+		std::map<std::string, size_t> multiply_by_optic;
+		size_t multiply_slots = 0, mixing_slots = 0, faded_rings = 0, marks = 0;
+		for (size_t first = 0; first < loads.size(); first += kOpticBatch) {
+			const size_t count = std::min(kOpticBatch, loads.size() - first);
+			core::parallel_for(count, [&](size_t i) {
+				OpticLoad &l = loads[first + i];
+				render::ViewmodelSetSpec spec =
+						render::team_viewmodel_items(l.team, std::span<const std::string>(&l.item->unlock, 1));
+				spec.superbundle = kLevel;
+				const host::LoadoutAccessorySet set =
+						host::loadout_accessory_set(*l.item, { l.item->accessories[0][l.index], 0, 0, 0 });
+				spec.items[0].accessories = render::WeaponAccessories{ set.active, set.listed };
+				core::Result<std::unique_ptr<render::ViewmodelSet>> vs =
+						render::load_viewmodel_set(**sources, spec, nullptr);
+				if (vs) {
+					l.set = std::move(*vs);
+				} else {
+					l.error = vs.error().message;
+				}
+			});
+			for (size_t i = first; i < first + count; ++i) {
+				OpticLoad &l = loads[i];
+				const std::string &optic = l.item->accessory_unlocks[0][l.index];
+				REQUIRE_MESSAGE(l.set != nullptr, optic, ": ", l.error);
+				const SightAudit audit = audit_sight(*l.set, lib.mount(0), brightness);
+				check_sight(audit, optic);
+				multiply_slots += audit.multiply_slots;
+				mixing_slots += audit.sights - audit.multiply_slots;
+				faded_rings += audit.faded_rings;
+				marks += audit.marks;
+				if (audit.multiply_slots > 0) {
+					multiply_by_optic[optic.substr(optic.rfind('_') + 1)] += 1;
+				}
+				l.set.reset();
+			}
+		}
+		std::string families;
+		for (const auto &[name, n] : multiply_by_optic) {
+			families += " " + name + " " + std::to_string(n);
+		}
+		MESSAGE(optics, " optics of ", seen.size(), " team primaries, ", loads.size(),
+				" distinct 1p optic meshes: ", multiply_slots, " multiplying sight surfaces (", marks,
+				" marked texels, ", faded_rings, " rings fading by vertex colour), ", mixing_slots,
+				" mixing; optics with a multiplying sight by unlock suffix:", families);
+		CHECK(optics >= 1000);
+		CHECK(multiply_by_optic.count("acog") == 1);
+		CHECK(multiply_by_optic.count("m145") == 1);
+		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
 		CHECK(diff.clean());
 	}
 }
