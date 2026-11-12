@@ -518,7 +518,7 @@ core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 	for (uint32_t combo_index : used_combos) {
 		const SceneTerrainCombo &combo = p_input.combos[combo_index];
 		const std::string where = "terrain combination " + combo.shader;
-		core::Result<DxbcProgram> program = parse_dxbc(p_input.programs[combo_index]);
+		core::Result<dxbc::Program> program = dxbc::parse(p_input.programs[combo_index]);
 		if (!program) {
 			return core::error_at(where, program.error());
 		}
@@ -532,9 +532,8 @@ core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 		for (uint32_t slot : translation->textures) {
 			TerrainTextureBinding b;
 			b.slot = slot;
-			const auto bound = std::find_if(program->bindings.begin(), program->bindings.end(),
-					[&](const DxbcBinding &d) { return d.type == DxbcBindingType::Texture && d.slot == slot; });
-			const std::string name = bound == program->bindings.end() ? std::string() : bound->name;
+			const dxbc::Binding *bound = program->binding(dxbc::BindingType::Texture, slot);
+			const std::string name = bound == nullptr ? std::string() : bound->name;
 			if (name == "texture_maskMap") {
 				b.image = kTerrainMaskAtlas;
 			} else if (name == "texture_globalColorMap") {
@@ -555,15 +554,15 @@ core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 			}
 			material.textures.push_back(b);
 		}
-		const DxbcBinding *constants = program->binding(DxbcBindingType::ConstantBuffer, kConstants);
-		const DxbcBinding *view = program->binding(DxbcBindingType::ConstantBuffer, kViewConstants);
-		const DxbcVariable *time = program->variable(kViewConstants, "time");
+		const dxbc::Binding *constants = program->binding(dxbc::BindingType::ConstantBuffer, kConstants);
+		const dxbc::Binding *view = program->binding(dxbc::BindingType::ConstantBuffer, kViewConstants);
+		const dxbc::Variable *time = program->variable(kViewConstants, "time");
 		for (const auto &[slot, size] : translation->constant_buffers) {
-			if (view != nullptr && slot == view->slot && size == 1 && time != nullptr && time->offset == 0) {
+			if (view != nullptr && slot == view->bind_point && size == 1 && time != nullptr && time->offset == 0) {
 				material.view_slot = slot;
 				continue;
 			}
-			if (constants == nullptr || slot != constants->slot) {
+			if (constants == nullptr || slot != constants->bind_point) {
 				return core::make_error(
 						where + ": reads constant buffer cb" + std::to_string(slot) + " beyond the view time");
 			}
@@ -571,11 +570,11 @@ core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 			material.constants.assign(size, std::array<float, 4>{});
 		}
 		if (constants != nullptr) {
-			for (const DxbcConstantBuffer &cb : program->constant_buffers) {
+			for (const dxbc::ConstantBuffer &cb : program->constant_buffers) {
 				if (cb.name != kConstants) {
 					continue;
 				}
-				for (const DxbcVariable &v : cb.variables) {
+				for (const dxbc::Variable &v : cb.variables) {
 					std::array<float, 4> value{};
 					if (v.name == "external_clipToWorldSpaceXzTransform") {
 						value = { 1.0f, 1.0f, 0.0f, 0.0f };

@@ -5,7 +5,9 @@
 #include "bf3/core/superbundle_mount.h"
 #include "bf3/render/dxbc.h"
 #include "bf3/render/look_materials.h"
+#include "bf3/render/shader_translate.h"
 #include "bf3/render/terrain_look.h"
+#include "dxbc_test_support.h"
 #include "test_support.h"
 
 #include <doctest/doctest.h>
@@ -14,7 +16,6 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
-#include <cstring>
 #include <map>
 #include <string>
 #include <vector>
@@ -22,24 +23,9 @@
 using namespace bf3;
 using namespace bf3::core;
 using namespace bf3::render;
+using namespace dxbct;
 
 namespace {
-
-std::vector<uint8_t> container(const std::vector<uint32_t> &p_shader) {
-	std::vector<uint8_t> out(32 + 4 + 8);
-	std::memcpy(out.data(), "DXBC", 4);
-	const uint32_t chunks = 1, at = 36, fourcc = 0x52444853u;
-	std::memcpy(out.data() + 28, &chunks, 4);
-	std::memcpy(out.data() + 32, &at, 4);
-	std::memcpy(out.data() + 36, &fourcc, 4);
-	const uint32_t size = uint32_t(p_shader.size() * 4);
-	std::memcpy(out.data() + 40, &size, 4);
-	out.resize(out.size() + size);
-	std::memcpy(out.data() + 44, p_shader.data(), size);
-	const uint32_t total = uint32_t(out.size());
-	std::memcpy(out.data() + 24, &total, 4);
-	return out;
-}
 
 SceneTerrainCombo combo(std::vector<uint8_t> p_layers) {
 	SceneTerrainCombo c;
@@ -99,30 +85,83 @@ TEST_SUITE("render-terrain-unit") {
 		};
 		std::vector<uint32_t> tokens = shader;
 		tokens[1] = uint32_t(tokens.size());
-		Result<DxbcProgram> program = parse_dxbc(container(tokens));
+		Result<dxbc::Program> program = dxbc::parse(container({ { "SHDR", words(tokens) } }));
 		REQUIRE(program.ok());
 		Result<PixelTranslation> t = translate_pixel_program(*program);
 		REQUIRE_MESSAGE(t.ok(), (t.ok() ? std::string() : t.error().message));
 		CHECK(t->outputs == 1);
 		CHECK(t->instructions == 2);
-		CHECK(t->body.find("o0.xyzw = vec4(1.0, 0.0, (-0.5), 1.0);") != std::string::npos);
+		CHECK(t->body.find("o0.xyzw = ((vec4(1.0, 0.0, (-0.5), 1.0))).xyzw;") != std::string::npos);
 		const auto with_and = [&](uint32_t p_mask) {
 			std::vector<uint32_t> and_tokens(shader.begin(), shader.begin() + 5);
 			and_tokens.insert(and_tokens.end(),
 					{ (1u | (13u << 24)), 0x001020F2u, 0u, 0x00004002u, 0x3F800000u, 0x3F800000u, 0x3F800000u,
 							0x3F800000u, 0x00004002u, p_mask, p_mask, p_mask, p_mask, (62u | (1u << 24)) });
 			and_tokens[1] = uint32_t(and_tokens.size());
-			Result<DxbcProgram> p = parse_dxbc(container(and_tokens));
+			Result<dxbc::Program> p = dxbc::parse(container({ { "SHDR", words(and_tokens) } }));
 			REQUIRE(p.ok());
 			return translate_pixel_program(*p);
 		};
 		CHECK(with_and(0x3F800000u).ok());
 		CHECK_FALSE(with_and(0x000000FFu).ok());
 		tokens[5] = 87u | (8u << 24);
-		program = parse_dxbc(container(tokens));
+		program = dxbc::parse(container({ { "SHDR", words(tokens) } }));
 		REQUIRE(program.ok());
 		CHECK_FALSE(translate_pixel_program(*program).ok());
-		CHECK_FALSE(parse_dxbc(std::vector<uint8_t>(16, 0)).ok());
+		CHECK_FALSE(dxbc::parse(std::vector<uint8_t>(16, 0)).ok());
+	}
+
+	TEST_CASE("terrain: a pixel program with branches, gradients and an indexed temp translates, and a sample with an "
+			  "offset is refused") {
+		const std::vector<uint32_t> x0_1 = { 2u | kMaskMode << 2 | 0xFu << 4 | 3u << 12 | 2u << 20, 0, 1 };
+		std::vector<uint32_t> x0_1_src = x0_1;
+		x0_1_src[0] = 2u | kSwizzleMode << 2 | kIdentity << 4 | 3u << 12 | 2u << 20;
+		const std::vector<uint32_t> v1_x = { 2u | 2u << 2 | kInput << 12 | 1u << 20, 1 };
+		const auto program = [&](bool p_offset, bool p_endif) {
+			std::vector<uint32_t> sample_d = ins(73,
+					{ dst(kTemp, 0, 0xF), src(kInput, 1, swz(0, 1, 0, 0)), src(kResource, 0), sampler(0),
+							src(kInput, 1, swz(0, 1, 0, 0)), src(kInput, 1, swz(0, 1, 0, 0)) });
+			if (p_offset) {
+				sample_d.insert(sample_d.begin() + 1, 1u | 1u << 9);
+				sample_d[0] = 73u | uint32_t(sample_d.size()) << 24 | 1u << 31;
+			}
+			std::vector<std::vector<uint32_t>> code = { ins(101, { dst(kOutput, 0, 0xF) }),
+				{ 105u | 4u << 24, 0, 2, 4 }, ins(54, { x0_1, imm(0.25f, 0.5f, 0.75f, 1.0f) }), ins(31, { v1_x }),
+				sample_d, ins(18, {}), ins(54, { dst(kTemp, 0, 0xF), x0_1_src }) };
+			code[3][0] |= 1u << 18;
+			if (p_endif) {
+				code.push_back(ins(21, {}));
+			}
+			code.push_back(ins(54, { dst(kOutput, 0, 0xF), src(kTemp, 0) }));
+			return container({ { "SHDR", code_chunk(0, 1, code) } });
+		};
+		Result<dxbc::Program> p = dxbc::parse(program(false, true));
+		REQUIRE_MESSAGE(p.ok(), (p.ok() ? std::string() : p.error().message));
+		CHECK(p->declared_outputs == 1);
+		CHECK(p->indexable_temps == std::vector<std::pair<uint32_t, uint32_t>>{ { 0, 2 } });
+		CHECK(dxbc::format_instruction(p->code[1]) == "if_nz v1.x");
+		Result<PixelTranslation> t = translate_pixel_program(*p);
+		REQUIRE_MESSAGE(t.ok(), (t.ok() ? std::string() : t.error().message));
+		CHECK(t->outputs == 1);
+		CHECK(t->instructions == 8);
+		CHECK(t->textures == std::vector<uint32_t>{ 0 });
+		CHECK(t->inputs == std::vector<uint32_t>{ 1 });
+		const std::string &b = t->body;
+		CHECK(b.find("vec4 x0[2];") != std::string::npos);
+		CHECK(b.find("x0[1].xyzw = ((vec4(0.25, 0.5, 0.75, 1.0))).xyzw;") != std::string::npos);
+		CHECK(b.find("if ((v1.xxxx).x != 0.0) {") != std::string::npos);
+		CHECK(b.find("r0.xyzw = (textureGrad(t0, (v1.xyxx).xy, (v1.xyxx).xy, (v1.xyxx).xy).xyzw).xyzw;") !=
+				std::string::npos);
+		CHECK(b.find("} else {\nr0.xyzw = ((x0[1].xyzw)).xyzw;\n}\n") != std::string::npos);
+		Result<dxbc::Program> open = dxbc::parse(program(false, false));
+		REQUIRE(open.ok());
+		CHECK(!translate_pixel_program(*open).ok());
+		Result<dxbc::Program> offset = dxbc::parse(program(true, true));
+		REQUIRE(offset.ok());
+		CHECK(dxbc::format_instruction(offset->code[2]).starts_with("sample_d_aoffimmi(1,0,0) r0.xyzw"));
+		Result<PixelTranslation> refused = translate_pixel_program(*offset);
+		REQUIRE(!refused.ok());
+		CHECK(refused.error().message.find("sample offsets") != std::string::npos);
 	}
 }
 

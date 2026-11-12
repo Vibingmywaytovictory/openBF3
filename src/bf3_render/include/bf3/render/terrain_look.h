@@ -2,7 +2,7 @@
 
 #include "bf3/core/res/terrain.h"
 #include "bf3/core/result.h"
-#include "bf3/render/dxbc.h"
+#include "bf3/render/shader_translate.h"
 
 #include <array>
 #include <cstdint>

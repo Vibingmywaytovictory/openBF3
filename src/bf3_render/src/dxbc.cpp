@@ -1,81 +1,35 @@
 #include "bf3/render/dxbc.h"
 
 #include <algorithm>
-#include <array>
-#include <charconv>
-#include <cmath>
+#include <cstdio>
 #include <cstring>
-#include <map>
-#include <set>
 
-namespace bf3::render {
+namespace bf3::render::dxbc {
 
 namespace {
 
-constexpr uint32_t kChunkRdef = 0x46454452u;
-constexpr uint32_t kChunkShdr = 0x52444853u;
-constexpr uint32_t kChunkShex = 0x58454853u;
+constexpr size_t kContainerHeaderBytes = 32;
+constexpr uint32_t kTag(const char (&p_tag)[5]) {
+	return uint32_t(uint8_t(p_tag[0])) | uint32_t(uint8_t(p_tag[1])) << 8 | uint32_t(uint8_t(p_tag[2])) << 16 |
+			uint32_t(uint8_t(p_tag[3])) << 24;
+}
 constexpr uint32_t kMaxChunks = 64;
 constexpr uint32_t kMaxRdefEntries = 1024;
-constexpr uint32_t kMaxTemps = 4096;
-
-enum Opcode : uint32_t {
-	kAdd = 0,
-	kAnd = 1,
-	kDerivRtx = 11,
-	kDerivRty = 12,
-	kDiv = 14,
-	kDp2 = 15,
-	kDp3 = 16,
-	kDp4 = 17,
-	kElse = 18,
-	kEndif = 21,
-	kEq = 24,
-	kExp = 25,
-	kFrc = 26,
-	kGe = 29,
-	kIf = 31,
-	kLog = 47,
-	kLt = 49,
-	kMad = 50,
-	kMin = 51,
-	kMax = 52,
-	kCustomData = 53,
-	kMov = 54,
-	kMovc = 55,
-	kMul = 56,
-	kNe = 57,
-	kNop = 58,
-	kRet = 62,
-	kRoundNe = 64,
-	kRoundNi = 65,
-	kRoundPi = 66,
-	kRoundZ = 67,
-	kRsq = 68,
-	kSample = 69,
-	kSampleL = 72,
-	kSampleD = 73,
-	kSampleB = 74,
-	kSqrt = 75,
-	kFirstDeclaration = 88,
-	kDclConstantBuffer = 89,
-	kDclInputPs = 98,
-	kDclOutput = 101,
-	kDclTemps = 104,
-	kDclIndexableTemp = 105,
-	kLastDeclaration = 106,
-};
-
-enum OperandType : uint32_t {
-	kTemp = 0,
-	kInput = 1,
-	kOutput = 2,
-	kIndexableTemp = 3,
-	kImmediate32 = 4,
-	kSampler = 6,
-	kResource = 7,
-	kConstantBuffer = 8,
-};
+constexpr uint32_t kOpcodeMask = 0x7FF;
+constexpr uint32_t kSaturateBit = 1u << 13;
+constexpr uint32_t kNonzeroBit = 1u << 18;
+constexpr uint32_t kExtendedBit = 1u << 31;
+constexpr uint32_t kSampleControls = 1;
+constexpr uint16_t kFirstDeclaration = 88;
+constexpr uint16_t kLastDeclaration = 106;
+constexpr size_t kMaxOperandDepth = 4;
+constexpr uint32_t kImmediateConstantBufferClass = 3;
+constexpr size_t kRdefHeaderBytes = 28;
+constexpr size_t kBindingBytes = 32;
+constexpr size_t kBufferBytes = 24;
+constexpr size_t kVariableBytes4 = 24;
+constexpr size_t kVariableBytes5 = 40;
+constexpr size_t kSignatureBytes = 24;
 
 uint32_t rd32(const uint8_t *p) {
 	uint32_t v;
@@ -87,499 +41,343 @@ core::Error fail(const std::string &p_what) {
 	return core::make_error("dxbc: " + p_what);
 }
 
-core::Result<std::string> rdef_string(std::span<const uint8_t> p_chunk, uint32_t p_offset) {
+int8_t offset_bits(uint32_t p_token, uint32_t p_shift) {
+	const int v = int((p_token >> p_shift) & 0xFu);
+	return int8_t(v >= 8 ? v - 16 : v);
+}
+
+class Words {
+public:
+	explicit Words(std::span<const uint8_t> p_bytes) : bytes_(p_bytes) {}
+	size_t size() const { return bytes_.size() / 4; }
+	uint32_t operator[](size_t p_at) const { return rd32(bytes_.data() + p_at * 4); }
+
+private:
+	std::span<const uint8_t> bytes_;
+};
+
+core::Result<std::string> string_at(std::span<const uint8_t> p_chunk, uint32_t p_offset) {
 	if (p_offset >= p_chunk.size()) {
-		return fail("rdef name out of range");
+		return fail("name offset out of range");
 	}
 	const void *nul = std::memchr(p_chunk.data() + p_offset, 0, p_chunk.size() - p_offset);
 	if (nul == nullptr) {
-		return fail("rdef name not terminated");
+		return fail("unterminated name");
 	}
 	return std::string(reinterpret_cast<const char *>(p_chunk.data() + p_offset),
-			size_t(static_cast<const uint8_t *>(nul) - p_chunk.data() - p_offset));
+			size_t(static_cast<const uint8_t *>(nul) - (p_chunk.data() + p_offset)));
 }
 
-core::Status parse_rdef(std::span<const uint8_t> p_chunk, DxbcProgram &r_program) {
-	if (p_chunk.size() < 28) {
-		return fail("rdef header");
+core::Status read_signature(std::span<const uint8_t> p_chunk, std::vector<SignatureElement> &r_out) {
+	if (p_chunk.size() < 8) {
+		return fail("short signature");
 	}
-	const uint32_t buffer_count = rd32(p_chunk.data());
-	const uint32_t buffer_offset = rd32(p_chunk.data() + 4);
-	const uint32_t binding_count = rd32(p_chunk.data() + 8);
-	const uint32_t binding_offset = rd32(p_chunk.data() + 12);
-	if (buffer_count > kMaxRdefEntries || binding_count > kMaxRdefEntries) {
-		return fail("rdef counts");
+	const uint32_t count = rd32(p_chunk.data());
+	if (count > kMaxRdefEntries || uint64_t(count) * kSignatureBytes + 8 > p_chunk.size()) {
+		return fail("signature out of range");
 	}
-	if (uint64_t(binding_offset) + uint64_t(binding_count) * 32 > p_chunk.size() ||
-			uint64_t(buffer_offset) + uint64_t(buffer_count) * 24 > p_chunk.size()) {
-		return fail("rdef tables out of range");
-	}
-	for (uint32_t i = 0; i < binding_count; ++i) {
-		const uint8_t *b = p_chunk.data() + binding_offset + 32 * i;
-		core::Result<std::string> name = rdef_string(p_chunk, rd32(b));
+	for (uint32_t i = 0; i < count; ++i) {
+		const uint8_t *e = p_chunk.data() + 8 + size_t(i) * kSignatureBytes;
+		SignatureElement s;
+		core::Result<std::string> name = string_at(p_chunk, rd32(e));
 		if (!name) {
 			return name.error();
 		}
-		r_program.bindings.push_back(DxbcBinding{ std::move(*name), DxbcBindingType(rd32(b + 4)), rd32(b + 20) });
-	}
-	for (uint32_t i = 0; i < buffer_count; ++i) {
-		const uint8_t *b = p_chunk.data() + buffer_offset + 24 * i;
-		core::Result<std::string> name = rdef_string(p_chunk, rd32(b));
-		if (!name) {
-			return name.error();
-		}
-		DxbcConstantBuffer buffer;
-		buffer.name = std::move(*name);
-		buffer.size = rd32(b + 12);
-		const uint32_t variable_count = rd32(b + 4);
-		const uint32_t variable_offset = rd32(b + 8);
-		if (variable_count > kMaxRdefEntries ||
-				uint64_t(variable_offset) + uint64_t(variable_count) * 24 > p_chunk.size()) {
-			return fail("rdef variables out of range");
-		}
-		for (uint32_t v = 0; v < variable_count; ++v) {
-			const uint8_t *e = p_chunk.data() + variable_offset + 24 * v;
-			core::Result<std::string> var = rdef_string(p_chunk, rd32(e));
-			if (!var) {
-				return var.error();
-			}
-			buffer.variables.push_back(DxbcVariable{ std::move(*var), rd32(e + 4), rd32(e + 8) });
-		}
-		r_program.constant_buffers.push_back(std::move(buffer));
+		s.name = std::move(*name);
+		s.semantic_index = rd32(e + 4);
+		s.system_value = rd32(e + 8);
+		s.reg = rd32(e + 16);
+		s.mask = e[20];
+		r_out.push_back(std::move(s));
 	}
 	return core::Status::success();
 }
 
-struct Operand {
-	uint32_t type = 0;
-	uint32_t components = 0;
-	uint32_t mode = 0;
-	uint32_t mask = 0;
-	std::array<uint32_t, 4> swizzle{ 0, 1, 2, 3 };
-	std::array<uint32_t, 3> index{};
-	uint32_t dimension = 0;
-	std::array<uint32_t, 4> immediate{};
-	uint32_t modifier = 0;
-};
-
-class TokenReader {
-public:
-	explicit TokenReader(std::span<const uint32_t> p_tokens) : tokens_(p_tokens) {}
-
-	bool done() const { return at_ >= tokens_.size(); }
-	size_t at() const { return at_; }
-	void seek(size_t p_at) { at_ = p_at; }
-
-	core::Result<uint32_t> next() {
-		if (at_ >= tokens_.size()) {
-			return fail("token stream truncated");
-		}
-		return tokens_[at_++];
+core::Status read_rdef(std::span<const uint8_t> p_chunk, Program &r_out) {
+	if (p_chunk.size() < kRdefHeaderBytes) {
+		return fail("short RDEF");
 	}
-
-	core::Result<Operand> operand() {
-		core::Result<uint32_t> head = next();
-		if (!head) {
-			return head.error();
-		}
-		Operand op;
-		const uint32_t t = *head;
-		const uint32_t count_type = t & 3u;
-		op.components = count_type == 0 ? 0 : count_type == 1 ? 1 : count_type == 2 ? 4 : 0xFFu;
-		if (op.components == 0xFFu) {
-			return fail("operand with N components");
-		}
-		if (op.components == 4) {
-			op.mode = (t >> 2) & 3u;
-			if (op.mode == 0) {
-				op.mask = (t >> 4) & 15u;
-			} else if (op.mode == 1) {
-				for (uint32_t i = 0; i < 4; ++i) {
-					op.swizzle[i] = (t >> (4 + 2 * i)) & 3u;
-				}
-			} else if (op.mode == 2) {
-				op.swizzle.fill((t >> 4) & 3u);
-			} else {
-				return fail("operand selection mode");
-			}
-		} else if (op.components == 1) {
-			op.swizzle.fill(0);
-		}
-		op.type = (t >> 12) & 0xFFu;
-		op.dimension = (t >> 20) & 3u;
-		if ((t >> 31) != 0) {
-			core::Result<uint32_t> ext = next();
-			if (!ext) {
-				return ext.error();
-			}
-			if ((*ext & 0x3Fu) == 1) {
-				op.modifier = (*ext >> 6) & 0xFFu;
-			}
-			if ((*ext >> 31) != 0) {
-				return fail("chained extended operand");
-			}
-		}
-		if (op.type == kImmediate32) {
-			for (uint32_t i = 0; i < op.components; ++i) {
-				core::Result<uint32_t> v = next();
-				if (!v) {
-					return v.error();
-				}
-				op.immediate[i] = *v;
-			}
-			return op;
-		}
-		for (uint32_t d = 0; d < op.dimension; ++d) {
-			const uint32_t representation = (t >> (22 + 3 * d)) & 7u;
-			if (representation != 0) {
-				return fail("relative operand index");
-			}
-			core::Result<uint32_t> v = next();
-			if (!v) {
-				return v.error();
-			}
-			op.index[d] = *v;
-		}
-		return op;
+	const uint32_t buffers = rd32(p_chunk.data()), buffers_at = rd32(p_chunk.data() + 4);
+	const uint32_t bindings = rd32(p_chunk.data() + 8), bindings_at = rd32(p_chunk.data() + 12);
+	const uint8_t major = p_chunk[17];
+	const size_t variable_bytes = major >= 5 ? kVariableBytes5 : kVariableBytes4;
+	if (buffers > kMaxRdefEntries || bindings > kMaxRdefEntries) {
+		return fail("RDEF counts");
 	}
-
-private:
-	std::span<const uint32_t> tokens_;
-	size_t at_ = 0;
-};
-
-std::string float_literal(uint32_t p_bits) {
-	float f;
-	std::memcpy(&f, &p_bits, 4);
-	if (!std::isfinite(f)) {
-		return {};
+	if (uint64_t(bindings_at) + uint64_t(bindings) * kBindingBytes > p_chunk.size() ||
+			uint64_t(buffers_at) + uint64_t(buffers) * kBufferBytes > p_chunk.size()) {
+		return fail("RDEF tables out of range");
 	}
-	char buf[48];
-	const auto r = std::to_chars(buf, buf + sizeof(buf), f);
-	std::string s(buf, r.ptr);
-	const size_t e = s.find('e');
-	if (s.find('.') == std::string::npos) {
-		s.insert(e == std::string::npos ? s.size() : e, ".0");
+	for (uint32_t i = 0; i < bindings; ++i) {
+		const uint8_t *e = p_chunk.data() + bindings_at + size_t(i) * kBindingBytes;
+		Binding b;
+		core::Result<std::string> name = string_at(p_chunk, rd32(e));
+		if (!name) {
+			return name.error();
+		}
+		b.name = std::move(*name);
+		b.type = rd32(e + 4);
+		b.dimension = rd32(e + 12);
+		b.bind_point = rd32(e + 20);
+		r_out.bindings.push_back(std::move(b));
 	}
-	return f < 0.0f ? "(" + s + ")" : s;
+	for (uint32_t i = 0; i < buffers; ++i) {
+		const uint8_t *e = p_chunk.data() + buffers_at + size_t(i) * kBufferBytes;
+		ConstantBuffer cb;
+		core::Result<std::string> name = string_at(p_chunk, rd32(e));
+		if (!name) {
+			return name.error();
+		}
+		cb.name = std::move(*name);
+		cb.size = rd32(e + 12);
+		const uint32_t variables = rd32(e + 4), variables_at = rd32(e + 8);
+		if (variables > kMaxRdefEntries ||
+				uint64_t(variables_at) + uint64_t(variables) * variable_bytes > p_chunk.size()) {
+			return fail("RDEF variables out of range");
+		}
+		for (uint32_t v = 0; v < variables; ++v) {
+			const uint8_t *ve = p_chunk.data() + variables_at + size_t(v) * variable_bytes;
+			Variable var;
+			core::Result<std::string> vname = string_at(p_chunk, rd32(ve));
+			if (!vname) {
+				return vname.error();
+			}
+			var.name = std::move(*vname);
+			var.offset = rd32(ve + 4);
+			var.size = rd32(ve + 8);
+			cb.variables.push_back(std::move(var));
+		}
+		r_out.constant_buffers.push_back(std::move(cb));
+	}
+	return core::Status::success();
 }
 
-constexpr char kLetters[] = "xyzw";
-
-struct Translator {
-	PixelTranslation out;
-	std::string code;
-	std::set<uint32_t> textures, inputs;
-	std::map<uint32_t, uint32_t> buffers;
-	std::map<uint32_t, uint32_t> indexable;
-	uint32_t samples = 0;
-	int depth = 0;
-	bool returned = false;
-
-	core::Result<std::string> reg(const Operand &p_op) const {
-		switch (p_op.type) {
-			case kTemp:
-				return "r" + std::to_string(p_op.index[0]);
-			case kInput:
-				return "v" + std::to_string(p_op.index[0]);
-			case kOutput:
-				return "o" + std::to_string(p_op.index[0]);
-			case kIndexableTemp:
-				return "x" + std::to_string(p_op.index[0]) + "[" + std::to_string(p_op.index[1]) + "]";
-			case kConstantBuffer:
-				return "cb" + std::to_string(p_op.index[0]) + "[" + std::to_string(p_op.index[1]) + "]";
-			default:
-				return fail("operand type " + std::to_string(p_op.type));
-		}
+core::Result<size_t> read_operand(const Words &p_w, size_t p_at, size_t p_end, Operand &r_op, size_t p_depth) {
+	if (p_depth > kMaxOperandDepth || p_at >= p_end) {
+		return fail("operand out of range");
 	}
-
-	core::Result<std::string> component(const Operand &p_op, uint32_t p_position) {
-		std::string e;
-		if (p_op.type == kImmediate32) {
-			e = float_literal(p_op.immediate[p_op.components == 1 ? 0 : p_position]);
-			if (e.empty()) {
-				return fail("non-finite immediate");
+	const uint32_t t = p_w[p_at++];
+	const uint32_t count = t & 3u;
+	r_op.components = count == 0 ? 0 : count == 1 ? 1 : 4;
+	if (count == 3) {
+		return fail("N-component operand");
+	}
+	if (count == 2) {
+		r_op.mode = uint8_t((t >> 2) & 3u);
+		if (r_op.mode == 0) {
+			r_op.mask = uint8_t((t >> 4) & 0xFu);
+		} else if (r_op.mode == 1) {
+			for (int c = 0; c < 4; ++c) {
+				r_op.swizzle[size_t(c)] = uint8_t((t >> (4 + 2 * c)) & 3u);
 			}
+		} else if (r_op.mode == 2) {
+			const uint8_t s = uint8_t((t >> 4) & 3u);
+			r_op.swizzle = { s, s, s, s };
 		} else {
-			core::Result<std::string> r = reg(p_op);
-			if (!r) {
-				return r.error();
-			}
-			if (p_op.type == kInput) {
-				inputs.insert(p_op.index[0]);
-			}
-			if (p_op.type == kConstantBuffer) {
-				uint32_t &size = buffers[p_op.index[0]];
-				size = std::max(size, p_op.index[1] + 1);
-			}
-			e = *r + "." + kLetters[p_op.mode == 0 && p_op.components == 4 ? p_position : p_op.swizzle[p_position]];
+			return fail("operand selection mode");
 		}
-		if (p_op.modifier == 2 || p_op.modifier == 3) {
-			e = "abs(" + e + ")";
-		}
-		if (p_op.modifier == 1 || p_op.modifier == 3) {
-			e = "(-" + e + ")";
-		}
-		return e;
 	}
-
-	core::Status write(const Operand &p_dst, bool p_saturate, const std::vector<std::string> &p_values) {
-		core::Result<std::string> r = reg(p_dst);
-		if (!r) {
-			return r.error();
+	r_op.type = uint8_t((t >> 12) & 0xFFu);
+	r_op.dims = uint8_t((t >> 20) & 3u);
+	bool extended = (t & kExtendedBit) != 0;
+	while (extended) {
+		if (p_at >= p_end) {
+			return fail("extended operand out of range");
 		}
-		std::string letters;
-		std::string values;
-		for (uint32_t c = 0; c < 4; ++c) {
-			if (((p_dst.components == 1 ? 1u : p_dst.mask) >> c & 1u) == 0) {
-				continue;
+		const uint32_t e = p_w[p_at++];
+		if ((e & 0x3Fu) == 1u) {
+			const uint32_t modifier = (e >> 6) & 0xFFu;
+			r_op.negate = modifier == 1 || modifier == 3;
+			r_op.absolute = modifier == 2 || modifier == 3;
+		}
+		extended = (e & kExtendedBit) != 0;
+	}
+	if (r_op.is(OperandType::Immediate32)) {
+		const size_t n = r_op.components == 1 ? 1 : 4;
+		if (p_at + n > p_end) {
+			return fail("immediate out of range");
+		}
+		for (size_t c = 0; c < n; ++c) {
+			r_op.imm[c] = p_w[p_at++];
+		}
+		if (n == 1) {
+			r_op.imm = { r_op.imm[0], r_op.imm[0], r_op.imm[0], r_op.imm[0] };
+		}
+		return p_at;
+	}
+	if (r_op.is(OperandType::Immediate64)) {
+		return fail("64-bit immediate");
+	}
+	for (uint8_t d = 0; d < r_op.dims; ++d) {
+		const uint32_t rep = (t >> (22 + 3 * d)) & 7u;
+		if (rep == 0) {
+			if (p_at >= p_end) {
+				return fail("index out of range");
 			}
-			std::string v = p_values[c];
-			if (p_saturate) {
-				v = "clamp(" + v + ", 0.0, 1.0)";
+			r_op.index[d] = p_w[p_at++];
+		} else if (rep == 2 || rep == 3) {
+			if (rep == 3) {
+				if (p_at >= p_end) {
+					return fail("index out of range");
+				}
+				r_op.index[d] = p_w[p_at++];
 			}
-			values += (values.empty() ? "" : ", ") + v;
-			letters += kLetters[c];
-		}
-		if (letters.empty()) {
-			return core::Status::success();
-		}
-		if (letters.size() == 1) {
-			code += *r + "." + letters + " = " + values + ";\n";
+			Operand relative;
+			core::Result<size_t> next = read_operand(p_w, p_at, p_end, relative, p_depth + 1);
+			if (!next) {
+				return next.error();
+			}
+			p_at = *next;
+			r_op.relative = true;
 		} else {
-			code += *r + "." + letters + " = vec" + std::to_string(letters.size()) + "(" + values + ");\n";
+			return fail("64-bit index");
 		}
-		return core::Status::success();
 	}
+	return p_at;
+}
 
-	core::Result<std::string> texture_name(const Operand &p_resource) {
-		if (p_resource.type != kResource) {
-			return fail("sample without a resource operand");
+core::Status read_declaration(const Words &p_w, uint16_t p_opcode, size_t p_at, size_t p_next, Program &r_out) {
+	if (p_opcode == uint16_t(Op::DclTemps)) {
+		if (p_at + 1 >= p_next || p_w[p_at + 1] > kMaxTemps) {
+			return fail("dcl_temps");
 		}
-		textures.insert(p_resource.index[0]);
-		return "t" + std::to_string(p_resource.index[0]);
+		r_out.temps = p_w[p_at + 1];
+	} else if (p_opcode == uint16_t(Op::DclIndexableTemp)) {
+		if (p_at + 2 >= p_next || p_w[p_at + 2] > kMaxTemps) {
+			return fail("dcl_indexable_temp");
+		}
+		r_out.indexable_temps.emplace_back(p_w[p_at + 1], p_w[p_at + 2]);
+	} else if (p_opcode == uint16_t(Op::DclOutput)) {
+		Operand o;
+		core::Result<size_t> after = read_operand(p_w, p_at + 1, p_next, o, 0);
+		if (!after) {
+			return after.error();
+		}
+		r_out.declared_outputs = std::max(r_out.declared_outputs, o.index[0] + 1);
 	}
+	return core::Status::success();
+}
 
-	core::Result<std::string> vec2_of(const Operand &p_op) {
-		core::Result<std::string> a = component(p_op, 0);
-		core::Result<std::string> b = component(p_op, 1);
-		if (!a || !b) {
-			return fail("sample coordinates");
-		}
-		return "vec2(" + *a + ", " + *b + ")";
+core::Status read_code(std::span<const uint8_t> p_chunk, Program &r_out) {
+	const Words w(p_chunk);
+	if (w.size() < 2 || p_chunk.size() % 4 != 0) {
+		return fail("shader code size");
 	}
-};
-
-core::Status translate_instruction(
-		Translator &r_t, uint32_t p_opcode, bool p_saturate, bool p_nonzero, std::vector<Operand> &p_ops) {
-	const auto need = [&](size_t p_count) -> core::Status {
-		if (p_ops.size() != p_count) {
-			return fail("opcode " + std::to_string(p_opcode) + " has " + std::to_string(p_ops.size()) + " operands");
-		}
-		return core::Status::success();
-	};
-	const auto per_component = [&](size_t p_sources, auto &&p_make) -> core::Status {
-		BF3_TRY(need(p_sources + 1));
-		std::vector<std::string> values(4);
-		for (uint32_t c = 0; c < 4; ++c) {
-			std::vector<std::string> s;
-			for (size_t i = 1; i <= p_sources; ++i) {
-				core::Result<std::string> e = r_t.component(p_ops[i], c);
-				if (!e) {
-					return e.error();
-				}
-				s.push_back(std::move(*e));
-			}
-			values[c] = p_make(s);
-		}
-		return r_t.write(p_ops[0], p_saturate, values);
-	};
-	const auto dot = [&](uint32_t p_n) -> core::Status {
-		BF3_TRY(need(3));
-		std::string sum;
-		for (uint32_t c = 0; c < p_n; ++c) {
-			core::Result<std::string> a = r_t.component(p_ops[1], c);
-			core::Result<std::string> b = r_t.component(p_ops[2], c);
-			if (!a || !b) {
-				return fail("dot operand");
-			}
-			sum += (sum.empty() ? "" : " + ") + *a + " * " + *b;
-		}
-		const std::string v = "(" + sum + ")";
-		return r_t.write(p_ops[0], p_saturate, { v, v, v, v });
-	};
-	const auto unary = [&](const char *p_fn) {
-		return per_component(
-				1, [&](const std::vector<std::string> &s) { return std::string(p_fn) + "(" + s[0] + ")"; });
-	};
-	const auto compare = [&](const char *p_op) {
-		return per_component(2, [&](const std::vector<std::string> &s) {
-			return "(" + s[0] + " " + p_op + " " + s[1] + " ? 1.0 : 0.0)";
-		});
-	};
-	switch (p_opcode) {
-		case kMov:
-			return per_component(1, [](const std::vector<std::string> &s) { return s[0]; });
-		case kAdd:
-			return per_component(2, [](const std::vector<std::string> &s) { return "(" + s[0] + " + " + s[1] + ")"; });
-		case kMul:
-			return per_component(2, [](const std::vector<std::string> &s) { return "(" + s[0] + " * " + s[1] + ")"; });
-		case kDiv:
-			return per_component(2, [](const std::vector<std::string> &s) { return "(" + s[0] + " / " + s[1] + ")"; });
-		case kMad:
-			return per_component(3,
-					[](const std::vector<std::string> &s) { return "(" + s[0] + " * " + s[1] + " + " + s[2] + ")"; });
-		case kMin:
-			return per_component(
-					2, [](const std::vector<std::string> &s) { return "min(" + s[0] + ", " + s[1] + ")"; });
-		case kMax:
-			return per_component(
-					2, [](const std::vector<std::string> &s) { return "max(" + s[0] + ", " + s[1] + ")"; });
-		case kAnd: {
-			BF3_TRY(need(3));
-			for (size_t i = 1; i <= 2; ++i) {
-				for (uint32_t bits : p_ops[i].type == kImmediate32 ? p_ops[i].immediate : std::array<uint32_t, 4>{}) {
-					float value = 0.0f;
-					std::memcpy(&value, &bits, 4);
-					if (value != 0.0f && !std::isnormal(value)) {
-						return fail("and with the integer mask " + std::to_string(bits));
-					}
-				}
-			}
-			return per_component(2, [&](const std::vector<std::string> &s) {
-				return p_ops[1].type == kImmediate32 ? "(" + s[1] + " != 0.0 ? " + s[0] + " : 0.0)"
-													 : "(" + s[0] + " != 0.0 ? " + s[1] + " : 0.0)";
-			});
-		}
-		case kMovc:
-			return per_component(3, [](const std::vector<std::string> &s) {
-				return "(" + s[0] + " != 0.0 ? " + s[1] + " : " + s[2] + ")";
-			});
-		case kLt:
-			return compare("<");
-		case kGe:
-			return compare(">=");
-		case kEq:
-			return compare("==");
-		case kNe:
-			return compare("!=");
-		case kDp2:
-			return dot(2);
-		case kDp3:
-			return dot(3);
-		case kDp4:
-			return dot(4);
-		case kRsq:
-			return unary("inversesqrt");
-		case kSqrt:
-			return unary("sqrt");
-		case kFrc:
-			return unary("fract");
-		case kLog:
-			return unary("log2");
-		case kExp:
-			return unary("exp2");
-		case kRoundNe:
-			return unary("roundEven");
-		case kRoundNi:
-			return unary("floor");
-		case kRoundPi:
-			return unary("ceil");
-		case kRoundZ:
-			return unary("trunc");
-		case kDerivRtx:
-			return unary("dFdx");
-		case kDerivRty:
-			return unary("dFdy");
-		case kIf: {
-			BF3_TRY(need(1));
-			core::Result<std::string> c = r_t.component(p_ops[0], 0);
-			if (!c) {
-				return c.error();
-			}
-			r_t.code += std::string("if (") + *c + (p_nonzero ? " != 0.0) {\n" : " == 0.0) {\n");
-			++r_t.depth;
-			return core::Status::success();
-		}
-		case kElse:
-			if (r_t.depth <= 0) {
-				return fail("else outside if");
-			}
-			r_t.code += "} else {\n";
-			return core::Status::success();
-		case kEndif:
-			if (r_t.depth <= 0) {
-				return fail("endif outside if");
-			}
-			--r_t.depth;
-			r_t.code += "}\n";
-			return core::Status::success();
-		case kRet:
-			if (r_t.depth != 0) {
-				return fail("conditional return");
-			}
-			r_t.returned = true;
-			return core::Status::success();
-		case kNop:
-			return core::Status::success();
-		case kSample:
-		case kSampleL:
-		case kSampleB:
-		case kSampleD: {
-			const size_t operands = p_opcode == kSample ? 4 : p_opcode == kSampleD ? 6 : 5;
-			BF3_TRY(need(operands));
-			core::Result<std::string> tex = r_t.texture_name(p_ops[2]);
-			core::Result<std::string> uv = r_t.vec2_of(p_ops[1]);
-			if (!tex || !uv) {
-				return fail("sample operands");
-			}
-			std::string call;
-			if (p_opcode == kSample) {
-				call = "texture(" + *tex + ", " + *uv + ")";
-			} else if (p_opcode == kSampleD) {
-				core::Result<std::string> dx = r_t.vec2_of(p_ops[4]);
-				core::Result<std::string> dy = r_t.vec2_of(p_ops[5]);
-				if (!dx || !dy) {
-					return fail("sample gradients");
-				}
-				call = "textureGrad(" + *tex + ", " + *uv + ", " + *dx + ", " + *dy + ")";
-			} else {
-				core::Result<std::string> lod = r_t.component(p_ops[4], 0);
-				if (!lod) {
-					return lod.error();
-				}
-				call = (p_opcode == kSampleL ? "textureLod(" : "texture(") + *tex + ", " + *uv + ", " + *lod + ")";
-			}
-			const std::string name = "s" + std::to_string(r_t.samples++);
-			r_t.code += "vec4 " + name + " = " + call + ";\n";
-			std::vector<std::string> values(4);
-			for (uint32_t c = 0; c < 4; ++c) {
-				values[c] = name + "." + kLetters[p_ops[2].swizzle[c]];
-			}
-			return r_t.write(p_ops[0], p_saturate, values);
-		}
-		default:
-			return fail("unsupported opcode " + std::to_string(p_opcode));
+	const uint32_t version = w[0];
+	r_out.minor = uint8_t(version & 0xFu);
+	r_out.major = uint8_t((version >> 4) & 0xFu);
+	r_out.kind = uint16_t(version >> 16);
+	const size_t end = w[1];
+	if (end < 2 || end > w.size()) {
+		return fail("shader length");
 	}
+	size_t at = 2;
+	while (at < end) {
+		const uint32_t token = w[at];
+		const uint16_t opcode = uint16_t(token & kOpcodeMask);
+		size_t length = (token >> 24) & 0x7Fu;
+		if (opcode == uint16_t(Op::CustomData)) {
+			if (at + 1 >= end) {
+				return fail("short custom data");
+			}
+			length = w[at + 1];
+			if (length < 2 || at + length > end) {
+				return fail("custom data out of range");
+			}
+			if ((token >> 11) == kImmediateConstantBufferClass) {
+				for (size_t i = at + 2; i + 4 <= at + length; i += 4) {
+					r_out.immediate_constants.push_back({ w[i], w[i + 1], w[i + 2], w[i + 3] });
+				}
+			}
+			at += length;
+			continue;
+		}
+		if (length == 0 || at + length > end) {
+			return fail("instruction length at word " + std::to_string(at));
+		}
+		const size_t next = at + length;
+		if (opcode >= kFirstDeclaration && opcode <= kLastDeclaration) {
+			BF3_TRY(read_declaration(w, opcode, at, next, r_out));
+			at = next;
+			continue;
+		}
+		if (r_out.code.size() >= kMaxInstructions) {
+			return fail("more than " + std::to_string(kMaxInstructions) + " instructions");
+		}
+		Instruction ins;
+		ins.opcode = opcode;
+		ins.saturate = (token & kSaturateBit) != 0;
+		ins.nonzero = (token & kNonzeroBit) != 0;
+		size_t p = at + 1;
+		bool extended = (token & kExtendedBit) != 0;
+		while (extended && p < next) {
+			const uint32_t e = w[p++];
+			if ((e & 0x3Fu) == kSampleControls) {
+				ins.offset = { offset_bits(e, 9), offset_bits(e, 13), offset_bits(e, 17) };
+			}
+			extended = (e & kExtendedBit) != 0;
+		}
+		while (p < next) {
+			Operand op;
+			core::Result<size_t> after = read_operand(w, p, next, op, 0);
+			if (!after) {
+				return after.error();
+			}
+			p = *after;
+			ins.operands.push_back(op);
+		}
+		r_out.code.push_back(std::move(ins));
+		at = next;
+	}
+	return core::Status::success();
 }
 
 }
 
-const DxbcBinding *DxbcProgram::binding(DxbcBindingType p_type, std::string_view p_name) const {
-	for (const DxbcBinding &b : bindings) {
-		if (b.type == p_type && b.name == p_name) {
+uint8_t Operand::lane(uint8_t p_component) const {
+	if (components != 4) {
+		return 0;
+	}
+	return mode == 0 ? p_component : swizzle[p_component & 3u];
+}
+
+const Binding *Program::binding(BindingType p_type, uint32_t p_point) const {
+	for (const Binding &b : bindings) {
+		if (b.type == uint32_t(p_type) && b.bind_point == p_point) {
 			return &b;
 		}
 	}
 	return nullptr;
 }
 
-const DxbcVariable *DxbcProgram::variable(std::string_view p_buffer, std::string_view p_name) const {
-	for (const DxbcConstantBuffer &cb : constant_buffers) {
+const Binding *Program::binding(BindingType p_type, std::string_view p_name) const {
+	for (const Binding &b : bindings) {
+		if (b.type == uint32_t(p_type) && b.name == p_name) {
+			return &b;
+		}
+	}
+	return nullptr;
+}
+
+const ConstantBuffer *Program::constant_buffer(uint32_t p_point) const {
+	const Binding *b = binding(BindingType::ConstantBuffer, p_point);
+	if (b == nullptr) {
+		return nullptr;
+	}
+	for (const ConstantBuffer &cb : constant_buffers) {
+		if (cb.name == b->name) {
+			return &cb;
+		}
+	}
+	return nullptr;
+}
+
+const Variable *Program::variable(std::string_view p_buffer, std::string_view p_name) const {
+	for (const ConstantBuffer &cb : constant_buffers) {
 		if (cb.name != p_buffer) {
 			continue;
 		}
-		for (const DxbcVariable &v : cb.variables) {
+		for (const Variable &v : cb.variables) {
 			if (v.name == p_name) {
 				return &v;
 			}
@@ -588,151 +386,186 @@ const DxbcVariable *DxbcProgram::variable(std::string_view p_buffer, std::string
 	return nullptr;
 }
 
-core::Result<DxbcProgram> parse_dxbc(std::span<const uint8_t> p_bytes) {
-	if (p_bytes.size() < 32 || p_bytes.size() > kMaxDxbcBytes || std::memcmp(p_bytes.data(), "DXBC", 4) != 0) {
+core::Result<Program> parse(std::span<const uint8_t> p_blob) {
+	if (p_blob.size() < kContainerHeaderBytes || p_blob.size() > kMaxBytes ||
+			std::memcmp(p_blob.data(), "DXBC", 4) != 0) {
 		return fail("not a DXBC container");
 	}
-	const uint32_t total = rd32(p_bytes.data() + 24);
-	const uint32_t chunks = rd32(p_bytes.data() + 28);
-	if (total != p_bytes.size() || chunks > kMaxChunks || 32 + uint64_t(chunks) * 4 > p_bytes.size()) {
+	const uint32_t total = rd32(p_blob.data() + 24);
+	const uint32_t chunks = rd32(p_blob.data() + 28);
+	if (total != p_blob.size() || chunks > kMaxChunks || uint64_t(chunks) * 4 + kContainerHeaderBytes > p_blob.size()) {
 		return fail("container header");
 	}
-	DxbcProgram program;
-	bool have_code = false;
+	Program out;
+	bool code = false;
 	for (uint32_t i = 0; i < chunks; ++i) {
-		const uint32_t at = rd32(p_bytes.data() + 32 + 4 * i);
-		if (uint64_t(at) + 8 > p_bytes.size()) {
-			return fail("chunk offset");
+		const uint32_t at = rd32(p_blob.data() + kContainerHeaderBytes + 4 * i);
+		if (uint64_t(at) + 8 > p_blob.size()) {
+			return fail("chunk out of range");
 		}
-		const uint32_t fourcc = rd32(p_bytes.data() + at);
-		const uint32_t size = rd32(p_bytes.data() + at + 4);
-		if (uint64_t(at) + 8 + size > p_bytes.size()) {
-			return fail("chunk size");
+		const uint32_t tag = rd32(p_blob.data() + at), size = rd32(p_blob.data() + at + 4);
+		if (uint64_t(at) + 8 + size > p_blob.size()) {
+			return fail("chunk body out of range");
 		}
-		const std::span<const uint8_t> chunk = p_bytes.subspan(size_t(at) + 8, size);
-		if (fourcc == kChunkRdef) {
-			BF3_TRY(parse_rdef(chunk, program));
-		} else if (fourcc == kChunkShdr || fourcc == kChunkShex) {
-			if (size < 8 || size % 4 != 0) {
-				return fail("shader chunk size");
-			}
-			const uint32_t version = rd32(chunk.data());
-			const uint32_t length = rd32(chunk.data() + 4);
-			if (uint64_t(length) * 4 > size || length < 2) {
-				return fail("shader length");
-			}
-			program.program_type = version >> 16;
-			program.major = (version >> 4) & 15u;
-			program.minor = version & 15u;
-			program.tokens.resize(length - 2);
-			std::memcpy(program.tokens.data(), chunk.data() + 8, program.tokens.size() * 4);
-			have_code = true;
+		const std::span<const uint8_t> body = p_blob.subspan(size_t(at) + 8, size);
+		if (tag == kTag("RDEF")) {
+			BF3_TRY(read_rdef(body, out));
+		} else if (tag == kTag("ISGN")) {
+			BF3_TRY(read_signature(body, out.inputs));
+		} else if (tag == kTag("OSGN")) {
+			BF3_TRY(read_signature(body, out.outputs));
+		} else if (tag == kTag("SHDR") || tag == kTag("SHEX")) {
+			BF3_TRY(read_code(body, out));
+			code = true;
 		}
 	}
-	if (!have_code) {
-		return fail("no shader code");
+	if (!code) {
+		return fail("no shader code chunk");
 	}
-	return program;
+	return out;
 }
 
-core::Result<PixelTranslation> translate_pixel_program(const DxbcProgram &p_program) {
-	if (p_program.program_type != kDxbcPixelProgram) {
-		return fail("not a pixel program");
+std::string opcode_name(uint16_t p_opcode) {
+	switch (Op(p_opcode)) {
+		case Op::Add:
+			return "add";
+		case Op::And:
+			return "and";
+		case Op::DerivRtx:
+			return "deriv_rtx";
+		case Op::DerivRty:
+			return "deriv_rty";
+		case Op::Discard:
+			return "discard";
+		case Op::Div:
+			return "div";
+		case Op::Dp2:
+			return "dp2";
+		case Op::Dp3:
+			return "dp3";
+		case Op::Dp4:
+			return "dp4";
+		case Op::Else:
+			return "else";
+		case Op::EndIf:
+			return "endif";
+		case Op::Eq:
+			return "eq";
+		case Op::Exp:
+			return "exp";
+		case Op::Frc:
+			return "frc";
+		case Op::Ge:
+			return "ge";
+		case Op::If:
+			return "if";
+		case Op::Log:
+			return "log";
+		case Op::Lt:
+			return "lt";
+		case Op::Mad:
+			return "mad";
+		case Op::Min:
+			return "min";
+		case Op::Max:
+			return "max";
+		case Op::Mov:
+			return "mov";
+		case Op::Movc:
+			return "movc";
+		case Op::Mul:
+			return "mul";
+		case Op::Ne:
+			return "ne";
+		case Op::Nop:
+			return "nop";
+		case Op::Ret:
+			return "ret";
+		case Op::RoundNe:
+			return "round_ne";
+		case Op::RoundNi:
+			return "round_ni";
+		case Op::RoundPi:
+			return "round_pi";
+		case Op::RoundZ:
+			return "round_z";
+		case Op::Rsq:
+			return "rsq";
+		case Op::Sample:
+			return "sample";
+		case Op::SampleL:
+			return "sample_l";
+		case Op::SampleD:
+			return "sample_d";
+		case Op::SampleB:
+			return "sample_b";
+		case Op::Sqrt:
+			return "sqrt";
+		default:
+			return "op" + std::to_string(p_opcode);
 	}
-	Translator t;
-	TokenReader r(p_program.tokens);
-	while (!r.done()) {
-		const size_t start = r.at();
-		core::Result<uint32_t> head = r.next();
-		if (!head) {
-			return head.error();
-		}
-		const uint32_t opcode = *head & 0x7FFu;
-		uint32_t length = (*head >> 24) & 0x7Fu;
-		if (opcode == kCustomData) {
-			core::Result<uint32_t> n = r.next();
-			if (!n) {
-				return n.error();
+}
+
+std::string format_instruction(const Instruction &p_instruction) {
+	static const char kLanes[] = "xyzw";
+	std::string out = opcode_name(p_instruction.opcode);
+	if (p_instruction.saturate) {
+		out += "_sat";
+	}
+	if (p_instruction.is(Op::Discard) || p_instruction.is(Op::If)) {
+		out += p_instruction.nonzero ? "_nz" : "_z";
+	}
+	if (p_instruction.offset != std::array<int8_t, 3>{}) {
+		out += "_aoffimmi(" + std::to_string(p_instruction.offset[0]) + "," + std::to_string(p_instruction.offset[1]) +
+				"," + std::to_string(p_instruction.offset[2]) + ")";
+	}
+	for (size_t i = 0; i < p_instruction.operands.size(); ++i) {
+		const Operand &o = p_instruction.operands[i];
+		out += i == 0 ? " " : ", ";
+		std::string text;
+		if (o.is(OperandType::Immediate32)) {
+			text = "l(";
+			for (size_t c = 0; c < (o.components == 1 ? 1u : 4u); ++c) {
+				float f;
+				std::memcpy(&f, &o.imm[c], 4);
+				char buf[32];
+				std::snprintf(buf, sizeof(buf), "%s%f", c == 0 ? "" : ", ", double(f));
+				text += buf;
 			}
-			length = *n;
-		}
-		if (length == 0 || start + length > p_program.tokens.size()) {
-			return fail("instruction length at token " + std::to_string(start));
-		}
-		const size_t end = start + length;
-		if (t.returned) {
-			return fail("code after return");
-		}
-		if (opcode == kCustomData) {
-			r.seek(end);
-			continue;
-		}
-		if (opcode >= kFirstDeclaration && opcode <= kLastDeclaration) {
-			if (opcode == kDclTemps) {
-				core::Result<uint32_t> n = r.next();
-				if (!n || *n > kMaxTemps) {
-					return fail("dcl_temps");
+			text += ")";
+		} else {
+			static const char *kPrefix[] = { "r", "v", "o", "x", "l", "d", "s", "t", "cb", "icb" };
+			text = o.type < 10 ? kPrefix[o.type] : "?" + std::to_string(o.type) + "_";
+			if ((o.is(OperandType::ConstantBuffer) || o.is(OperandType::IndexableTemp)) && o.dims == 2) {
+				text += std::to_string(o.index[0]) + "[" + std::to_string(o.index[1]) + (o.relative ? "+rel" : "") +
+						"]";
+			} else if (o.dims >= 1) {
+				text += std::to_string(o.index[0]);
+			}
+			if (o.components == 4) {
+				text += ".";
+				if (o.mode == 0) {
+					for (int c = 0; c < 4; ++c) {
+						if ((o.mask >> c) & 1u) {
+							text += kLanes[c];
+						}
+					}
+				} else {
+					for (int c = 0; c < (o.mode == 2 ? 1 : 4); ++c) {
+						text += kLanes[o.swizzle[size_t(c)]];
+					}
 				}
-				t.out.temps = *n;
-			} else if (opcode == kDclIndexableTemp) {
-				core::Result<uint32_t> reg = r.next();
-				core::Result<uint32_t> size = r.next();
-				if (!reg || !size || *size > kMaxTemps) {
-					return fail("dcl_indexable_temp");
-				}
-				t.indexable[*reg] = *size;
-			} else if (opcode == kDclOutput) {
-				core::Result<Operand> o = r.operand();
-				if (!o) {
-					return o.error();
-				}
-				t.out.outputs = std::max(t.out.outputs, o->index[0] + 1);
 			}
-			r.seek(end);
-			continue;
 		}
-		bool extended = (*head >> 31) != 0;
-		while (extended) {
-			core::Result<uint32_t> ext = r.next();
-			if (!ext) {
-				return ext.error();
-			}
-			if ((*ext & 0x3Fu) == 1 && (*ext & 0x1FFE00u) != 0) {
-				return fail("sample offsets");
-			}
-			extended = (*ext >> 31) != 0;
+		if (o.absolute) {
+			text = "|" + text + "|";
 		}
-		std::vector<Operand> ops;
-		while (r.at() < end) {
-			core::Result<Operand> op = r.operand();
-			if (!op) {
-				return op.error();
-			}
-			ops.push_back(*op);
+		if (o.negate) {
+			text = "-" + text;
 		}
-		if (r.at() != end) {
-			return fail("operands overrun instruction at token " + std::to_string(start));
-		}
-		const bool saturate = ((*head >> 13) & 1u) != 0;
-		const bool nonzero = ((*head >> 18) & 1u) != 0;
-		BF3_TRY(translate_instruction(t, opcode, saturate, nonzero, ops));
-		++t.out.instructions;
+		out += text;
 	}
-	if (t.depth != 0) {
-		return fail("unbalanced if");
-	}
-	std::string head;
-	for (uint32_t i = 0; i < t.out.temps; ++i) {
-		head += "vec4 r" + std::to_string(i) + " = vec4(0.0);\n";
-	}
-	for (const auto &[reg, size] : t.indexable) {
-		head += "vec4 x" + std::to_string(reg) + "[" + std::to_string(size) + "];\n";
-	}
-	t.out.body = head + t.code;
-	t.out.textures.assign(t.textures.begin(), t.textures.end());
-	t.out.inputs.assign(t.inputs.begin(), t.inputs.end());
-	t.out.constant_buffers.assign(t.buffers.begin(), t.buffers.end());
-	return std::move(t.out);
+	return out;
 }
 
 }
