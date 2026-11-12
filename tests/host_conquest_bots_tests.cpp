@@ -28,6 +28,7 @@ constexpr uint32_t kRoundTicks = 60u * 60u * 25u;
 constexpr sim::Tick kHeldBeforeOrderTicks = 120;
 constexpr float kSpawnMatchMetres = 3.0f;
 constexpr uint32_t kMaxDefendRepeatsPerMinute = 10;
+constexpr double kTicketModifier = 0.5;
 
 tt::TdmLevel *load_conquest_bots_level_once() {
 	static std::unique_ptr<tt::TdmLevel> s_level;
@@ -107,6 +108,7 @@ ConquestRun run_conquest(const tt::TdmLevel &p_level, uint64_t p_seed) {
 	c.rules.revive = true;
 	c.rules.preround_override_s = 0.0f;
 	c.rules.max_players = 32;
+	c.rules.conquest.game_mode_counter_modifier = kTicketModifier;
 	c.max_ticks = kRoundTicks;
 	c.after_round_ticks = 0;
 	c.hashes = false;
