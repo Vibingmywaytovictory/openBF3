@@ -14,12 +14,14 @@
 #include "bf3/core/util/text.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/level_load.h"
+#include "bf3/host/level_vehicles.h"
 #include "bf3/host/loadout.h"
 #include "bf3/render/crowd_weapons.h"
 #include "bf3/render/deployed_gadgets.h"
 #include "bf3/render/mesh_cache.h"
 #include "bf3/render/soldier_assets.h"
 #include "bf3/render/texture_prep.h"
+#include "bf3/render/vehicle_meshes.h"
 #include "bf3/render/viewmodel_set.h"
 #include "bf3/render/weapon_camo.h"
 #include "bf3/render/weapon_lights.h"
@@ -1699,6 +1701,73 @@ TEST_SUITE("render-catalog-optics-1p") {
 		CHECK(optics >= 1000);
 		CHECK(multiply_by_optic.count("acog") == 1);
 		CHECK(multiply_by_optic.count("m145") == 1);
+		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
+		CHECK(diff.clean());
+	}
+}
+
+TEST_SUITE("render-vehicle-meshes") {
+	TEST_CASE("vehicle meshes: MP_007 Conquest's Growler and VDV Buggy load split by part, each part placed by its "
+			  "mesh part transform, and each wheel has its own part at the wheel's data centre") {
+		core::InstallReader reader;
+		if (!reader.locate({})) {
+			test::skip_install_case(reader.describe().c_str());
+			return;
+		}
+		const core::InstallSnapshot before = reader.snapshot();
+		core::Result<std::shared_ptr<core::Install>> install = core::Install::open(reader);
+		REQUIRE(install.ok());
+		core::Result<host::LevelDatabase> db =
+				host::open_level_database(*install, "MP_007", "ConquestSmall0", 0, nullptr);
+		REQUIRE_MESSAGE(db.ok(), (db.ok() ? "" : db.error().message));
+		core::Result<std::shared_ptr<const host::LevelVehicles>> level =
+				host::load_level_vehicles(*db, sim::VehicleTuning{});
+		REQUIRE_MESSAGE(level.ok(), (level.ok() ? "" : level.error().message));
+		std::vector<render::VehicleMeshSpec> specs;
+		for (const host::LevelVehicleKind &k : (*level)->kinds) {
+			specs.push_back(render::VehicleMeshSpec{ k.blueprint, k.mesh, k.component_meshes });
+		}
+		REQUIRE(specs.size() == 2);
+		core::Result<std::unique_ptr<render::VehicleMeshSet>> set =
+				render::load_vehicle_meshes(db->level->db(), db->level->mount(), specs);
+		REQUIRE_MESSAGE(set.ok(), (set.ok() ? "" : set.error().message));
+		for (const host::LevelVehicleKind &k : (*level)->kinds) {
+			const render::VehicleMeshKind *mk = (*set)->kind(k.blueprint);
+			REQUIRE(mk != nullptr);
+			std::vector<render::VehicleWheelRest> wheels;
+			for (size_t w = 0; w < k.model->wheel_count; ++w) {
+				wheels.push_back(render::VehicleWheelRest{ k.model->wheels[w].data_centre, k.model->wheels[w].radius });
+			}
+			const std::vector<int8_t> wheel_of = render::vehicle_wheel_parts(*mk, wheels);
+			std::set<int8_t> matched;
+			size_t placed = 0, components = 0, vertices = 0;
+			for (size_t p = 0; p < mk->parts.size(); ++p) {
+				const render::VehicleMeshPart &part = mk->parts[p];
+				vertices += part.prepared.vertices;
+				components += part.component ? 1u : 0u;
+				const core::Vec3 &t = part.part_transform.trans;
+				placed += (t[0] != 0.0f || t[1] != 0.0f || t[2] != 0.0f) ? 1u : 0u;
+				if (wheel_of[p] >= 0) {
+					matched.insert(wheel_of[p]);
+					const core::Vec3 &c = k.model->wheels[size_t(wheel_of[p])].data_centre;
+					std::printf("vehicle meshes: %s wheel %d is part %u at (%.2f %.2f %.2f), the wheel's data centre "
+								"(%.2f %.2f %.2f), radius %.2f, part half height %.2f\n",
+							k.blueprint.c_str(), int(wheel_of[p]), unsigned(part.part), double(t[0]), double(t[1]),
+							double(t[2]), double(c[0]), double(c[1]), double(c[2]),
+							double(k.model->wheels[size_t(wheel_of[p])].radius),
+							double(0.5f * (part.part_bounds_max[1] - part.part_bounds_min[1])));
+				}
+			}
+			std::printf("vehicle meshes: %s: %zu parts (%zu from component meshes, %zu with a part transform off the "
+						"origin), %zu vertices, %zu of %u wheels matched\n",
+					k.blueprint.c_str(), mk->parts.size(), components, placed, vertices, matched.size(),
+					unsigned(k.model->wheel_count));
+			CHECK(matched.size() == k.model->wheel_count);
+			CHECK(placed > mk->parts.size() / 2);
+		}
+		for (const std::string &n : (*set)->notes) {
+			MESSAGE(n);
+		}
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
 		CHECK(diff.clean());
 	}

@@ -26,6 +26,9 @@ struct VehicleMeshPart {
 	core::Vec3 bounds_max{};
 	bool component = false;
 	core::Transform rest;
+	core::Transform part_transform;
+	core::Vec3 part_bounds_min{};
+	core::Vec3 part_bounds_max{};
 
 	core::Vec3 centre() const;
 };
@@ -56,6 +59,13 @@ struct VehicleMeshSet {
 };
 
 std::vector<VehicleMeshPart> split_mesh_parts(const PreparedMesh &p_mesh);
+
+struct VehicleWheelRest {
+	core::Vec3 centre{};
+	float radius = 0;
+};
+
+std::vector<int8_t> vehicle_wheel_parts(const VehicleMeshKind &p_kind, std::span<const VehicleWheelRest> p_wheels);
 
 core::Result<std::unique_ptr<VehicleMeshSet>> load_vehicle_meshes(const core::EbxResolver &p_db,
 		const core::LevelMount &p_mount, std::span<const VehicleMeshSpec> p_specs, core::Cache *p_cache = nullptr);
