@@ -174,6 +174,10 @@ ProjectileSimDef make_projectile(Checker &r_c, const WeaponDef &p_def, const Sur
 		out.engine_ignition = r_c.time(p.engine_time_to_ignition, "MissileEntityData.EngineTimeToIgnition");
 		out.engine_time_to_live = r_c.time(p.engine_time_to_live, "MissileEntityData.EngineTimeToLive");
 		out.drag = r_c.range(p.drag, 0.0f, kMaxRate, "MissileEntityData.Drag");
+		out.gravity_when_guided = p.apply_gravity_when_guided;
+		if (!(out.max_speed > 0.0f)) {
+			r_c.fail("MissileEntityData.MaxSpeed", "is not above 0");
+		}
 	} else {
 		out.time_to_arm = r_c.time(p.time_to_arm_explosion, "BulletEntityData.TimeToArmExplosion");
 	}
@@ -410,6 +414,7 @@ template <class G> void def_groups(const WeaponSimDef &p_d, G &&r_group) {
 		r_h.add(p.engine_ignition);
 		r_h.add(p.engine_time_to_live);
 		r_h.add(p.drag);
+		r_h.add(p.gravity_when_guided);
 		r_h.add(p.bounce_speed_multiplier);
 		r_h.add(p.min_bounce_speed);
 	});

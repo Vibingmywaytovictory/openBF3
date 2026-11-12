@@ -1323,6 +1323,105 @@ TEST_SUITE("weapons-unit") {
 		CHECK(floors == 1);
 	}
 
+	TEST_CASE("sim.weapons.unit: R2-G4 missile update per tick: thrust to MaxSpeed, gravity only with "
+			  "ApplyGravityWhenGuided while powered, Drag per update after burnout, ignition and burnout times, "
+			  "TimeToArm picks the Explosion or the DudExplosion") {
+		const std::shared_ptr<const WeaponTable> base = synthetic_table();
+		const uint16_t rpg = id_of(*base, kRpg);
+		const std::unique_ptr<CollisionWorld> open = wall_world({ 4000.0f });
+		const StaticTargets none({});
+		const auto missile = [&](const std::function<void(ProjectileSimDef &)> &p_set) {
+			std::shared_ptr<WeaponTable> t = std::make_shared<WeaponTable>(*base);
+			ProjectileSimDef &p = t->defs[rpg].projectile;
+			p.launch_offset = {};
+			p.gravity = 0;
+			p.gravity_when_guided = false;
+			p.engine_ignition = 0;
+			p.engine_time_to_live = 40 * kTimeUnitsPerSecond;
+			p.engine_acceleration = 0;
+			p.drag = 0;
+			p_set(p);
+			return std::shared_ptr<const WeaponTable>(t);
+		};
+		const auto speed_after = [&](const std::shared_ptr<const WeaponTable> &p_t, Tick p_ticks,
+										 Vec3 *r_velocity = nullptr) {
+			ProjectileWorld pw(p_t);
+			REQUIRE(pw.spawn(level_shot(rpg, { 0, 1.6f, 0 })).ok());
+			ProjectileStepOutput out;
+			for (Tick k = 1; k <= 2u * p_ticks; ++k) {
+				out.clear();
+				pw.step(k, *open, none, out);
+			}
+			REQUIRE(pw.live().size() == 1);
+			const DVec3 v = pw.live()[0].velocity;
+			if (r_velocity != nullptr) {
+				*r_velocity = { float(v[0]), float(v[1]), float(v[2]) };
+			}
+			return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+		};
+		const auto thrust = [&](float p_v0) {
+			return missile([&](ProjectileSimDef &p) {
+				p.launch_velocity = { 0, 0, p_v0 };
+				p.engine_acceleration = 100;
+				p.max_speed = 200;
+			});
+		};
+		CHECK(speed_after(thrust(50), 1) == doctest::Approx(50.0 + 100.0 / 30.0));
+		CHECK(speed_after(thrust(199), 1) == doctest::Approx(200.0));
+		Vec3 v{};
+		const std::shared_ptr<const WeaponTable> burnt = missile([](ProjectileSimDef &p) {
+			p.launch_velocity = { 0, 0, 100 };
+			p.max_speed = 200;
+			p.engine_time_to_live = 0;
+			p.drag = 0.5f;
+			p.gravity = -9.81f;
+		});
+		speed_after(burnt, 1, &v);
+		CHECK(v[2] == doctest::Approx(99.5f));
+		CHECK(v[1] == doctest::Approx(-9.81f / 30.0f));
+		const auto powered = [&](bool p_flag) {
+			return missile([&](ProjectileSimDef &p) {
+				p.launch_velocity = { 0, 0, 40 };
+				p.max_speed = 100;
+				p.gravity = -1.5f;
+				p.gravity_when_guided = p_flag;
+			});
+		};
+		speed_after(powered(false), 3, &v);
+		CHECK(v[1] == 0.0f);
+		speed_after(powered(true), 3, &v);
+		CHECK(v[1] == doctest::Approx(-1.5f * 3.0f / 30.0f));
+
+		const std::shared_ptr<const WeaponTable> timed = missile([](ProjectileSimDef &p) {
+			p.launch_velocity = { 0, 0, 10 };
+			p.engine_acceleration = 30;
+			p.max_speed = 1000;
+			p.engine_ignition = seconds_to_units(0.1);
+			p.engine_time_to_live = seconds_to_units(2.0);
+		});
+		CHECK(speed_after(timed, 2) == doctest::Approx(10.0));
+		CHECK(speed_after(timed, 3) == doctest::Approx(11.0));
+		CHECK(speed_after(timed, 63) == doctest::Approx(10.0 + 61.0));
+		CHECK(speed_after(timed, 64) == doctest::Approx(10.0 + 61.0));
+
+		const auto armed_at = [&](float p_wall) {
+			const std::shared_ptr<const WeaponTable> t = missile([](ProjectileSimDef &p) {
+				p.launch_velocity = { 0, 0, 100 };
+				p.max_speed = 100;
+				p.time_to_arm = seconds_to_units(0.25);
+			});
+			const std::unique_ptr<CollisionWorld> w = wall_world({ p_wall });
+			ProjectileWorld pw(t);
+			REQUIRE(pw.spawn(level_shot(rpg, { 0, 1.6f, 0 })).ok());
+			const Flown f = fly(pw, *w, none, 1, 30);
+			REQUIRE(f.detonations.size() == 1);
+			CHECK(f.detonations[0].position[2] == doctest::Approx(p_wall).epsilon(1e-3));
+			return !f.detonations[0].dud;
+		};
+		CHECK_FALSE(armed_at(19.5f));
+		CHECK(armed_at(30.5f));
+	}
+
 	TEST_CASE("sim.weapons.unit: W5 W9 flights on synthetic walls: bullets on capsules, bounce, fuse, blasts, occlusion, direct hits") {
 		const std::shared_ptr<const WeaponTable> t = synthetic_table();
 		const Mechanics &m = t->mechanics;

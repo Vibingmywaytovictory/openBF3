@@ -95,6 +95,7 @@ void read_projectile(Fields &r_f, const EbxInstance &p_projectile, ProjectileDef
 			r_projectile.drag = r_f.f32(p, "Drag");
 			r_projectile.max_turn_angle = r_f.f32_or(p, "MaxTurnAngle", 0);
 			r_projectile.time_to_activate_guiding = r_f.f32_or(p, "TimeToActivateGuidingSystem", 0);
+			r_projectile.apply_gravity_when_guided = r_f.flag(p, "ApplyGravityWhenGuided");
 			if (const std::optional<EbxInstance> e = r_f.follow(p, "DudExplosion", "ExplosionEntityData", false)) {
 				read_explosion(r_f, *e, r_projectile.dud_explosion);
 			}

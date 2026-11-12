@@ -91,7 +91,6 @@ struct BallisticsLimits {
 	size_t max_projectiles = 8192;
 	uint8_t max_recasts = 8;
 	uint8_t max_bounces = 4;
-	uint8_t missile_substeps = 4;
 	size_t budget_per_step = 1u << 22;
 	float world_margin = 200.0f;
 };

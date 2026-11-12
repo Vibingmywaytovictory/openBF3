@@ -89,6 +89,7 @@ struct ProjectileSimDef {
 	SimTime engine_ignition = 0;
 	SimTime engine_time_to_live = 0;
 	float drag = 0;
+	bool gravity_when_guided = false;
 
 	float bounce_speed_multiplier = 0;
 	float min_bounce_speed = 0;

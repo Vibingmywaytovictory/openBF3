@@ -246,6 +246,7 @@ struct ProjectileDef {
 	float drag = 0;
 	float max_turn_angle = 0;
 	float time_to_activate_guiding = 0;
+	bool apply_gravity_when_guided = false;
 
 	float collision_speed_multiplier = 0;
 	float min_bounce_speed = 0;

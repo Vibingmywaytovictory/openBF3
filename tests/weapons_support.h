@@ -278,6 +278,7 @@ inline std::vector<Synthetic> synthetic_gate_weapons() {
 		p.engine_time_to_live = 40;
 		p.time_to_arm = 0.5f;
 		p.drag = 0;
+		p.apply_gravity_when_guided = true;
 		p.explosion = explosion(112, 0.35f, 4);
 		p.dud_explosion = explosion(56, 2.1f, 4);
 		s.zones = { 2.5f, 2.5f, 2.5f, 2.5f };

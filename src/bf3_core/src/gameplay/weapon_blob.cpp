@@ -302,6 +302,7 @@ void io_projectile(IO &io, ProjectileDef &p) {
 	io.v(p.drag);
 	io.v(p.max_turn_angle);
 	io.v(p.time_to_activate_guiding);
+	io.v(p.apply_gravity_when_guided);
 	io.v(p.collision_speed_multiplier);
 	io.v(p.min_bounce_speed);
 	io.v(p.grenade_type);

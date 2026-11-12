@@ -3,6 +3,7 @@
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/sim/vehicles/vehicle_damage.h"
 #include "bf3/sim/vehicles/vehicle_targets.h"
+#include "bf3/sim/weapons/spread_recoil.h"
 #include "bf3/sim/weapons/surface_materials.h"
 #include "bf3/sim/weapons/weapon_rng.h"
 #include "weapons_internal.h"
@@ -22,6 +23,7 @@ constexpr int kMaxSegmentsPerStep = 64;
 constexpr double kRecastSkip = 1e-3;
 constexpr double kBounceLift = 1e-2;
 constexpr float kRaycastBehind = 0.1f;
+constexpr double kMissileDirectionFloor = 1e-6;
 
 struct Env {
 	const WeaponTable &table;
@@ -62,10 +64,6 @@ void rebase(Projectile &r_p, SimTime p_time, const DVec3 &p_pos, const DVec3 &p_
 	r_p.velocity = p_vel;
 }
 
-bool stepped(const ProjectileSimDef &p_d) {
-	return p_d.kind == ProjectileKind::Missile && (p_d.engine_acceleration > 0 || p_d.drag > 0);
-}
-
 struct SegmentEnd {
 	SimTime time = 0;
 	DVec3 position{};
@@ -74,45 +72,47 @@ struct SegmentEnd {
 	bool engine = false;
 };
 
-SegmentEnd next_segment(const Projectile &p_p, const ProjectileSimDef &p_d, SimTime p_limit, uint8_t p_substeps) {
+DVec3 with_speed(const DVec3 &p_v, double p_speed) {
+	const double l = length(p_v);
+	return l > kMissileDirectionFloor ? scale(p_v, p_speed / l) : p_v;
+}
+
+SegmentEnd missile_update(const Projectile &p_p, const ProjectileSimDef &p_d, SimTime p_until) {
 	SegmentEnd e;
-	e.time = p_limit;
-	bool thrust = false;
-	if (stepped(p_d)) {
-		const SimTime ignition = p_p.spawn_time + p_d.engine_ignition;
-		const SimTime off = ignition + p_d.engine_time_to_live;
-		if (p_p.time < ignition) {
-			if (ignition < e.time) {
-				e.time = ignition;
-				e.rebase = true;
-			}
-		} else if (p_p.time < off || p_d.drag > 0) {
-			thrust = p_p.time < off;
-			const SimTime step = kTimeUnitsPerTick / std::max<SimTime>(1, p_substeps);
-			const SimTime boundary = (p_p.time / step + 1) * step;
-			e.time = std::min(e.time, boundary);
-			if (thrust) {
-				e.time = std::min(e.time, off);
-			}
-			e.rebase = true;
-			e.engine = thrust;
-			const double dt = units_to_seconds(e.time - p_p.time);
-			const DVec3 v = p_p.velocity;
-			const double speed = length(v);
-			DVec3 a{ 0, double(p_d.gravity), 0 };
-			if (thrust && speed > 0) {
-				a = add(a, scale(v, double(p_d.engine_acceleration) / speed));
-			}
-			a = sub(a, scale(v, double(p_d.drag)));
-			e.position = add(add(p_p.position, scale(v, dt)), scale(a, 0.5 * dt * dt));
-			e.velocity = add(v, scale(a, dt));
-			const double s1 = length(e.velocity);
-			if (thrust && p_d.max_speed > 0 && s1 > double(p_d.max_speed)) {
-				e.velocity = scale(e.velocity, double(p_d.max_speed) / s1);
-			}
-			return e;
+	e.time = p_until;
+	e.rebase = true;
+	const double dt = units_to_seconds(p_until - p_p.time);
+	const double flight = units_to_seconds(p_until - p_p.spawn_time);
+	const double ignition = units_to_seconds(p_d.engine_ignition);
+	const double burnout = ignition + units_to_seconds(p_d.engine_time_to_live);
+	const double gravity = double(p_d.gravity);
+	DVec3 v = p_p.velocity;
+	if (flight > burnout) {
+		v = with_speed(v, std::max(length(v) - double(p_d.drag), 0.0));
+		v[1] += gravity * dt;
+	} else {
+		if (p_d.gravity_when_guided) {
+			v[1] += gravity * dt;
+		}
+		if (flight >= ignition) {
+			e.engine = true;
+			v = with_speed(v, std::min(length(v) + double(p_d.engine_acceleration) * dt, double(p_d.max_speed)));
 		}
 	}
+	if (length(v) > double(p_d.max_speed)) {
+		v = with_speed(v, p_d.max_speed);
+	}
+	e.velocity = v;
+	e.position = add(p_p.position, scale(v, dt));
+	return e;
+}
+
+SegmentEnd next_segment(const Projectile &p_p, const ProjectileSimDef &p_d, SimTime p_limit) {
+	if (p_d.kind == ProjectileKind::Missile) {
+		return missile_update(p_p, p_d, p_limit);
+	}
+	SegmentEnd e;
+	e.time = p_limit;
 	free_state(p_p, double(p_d.gravity), e.time, e.position, e.velocity);
 	return e;
 }
@@ -467,8 +467,14 @@ bool fly(Env &r_env, Projectile &r_p, SimTime p_t_end) {
 			r_p.time = limit;
 			break;
 		}
-		const SegmentEnd e = next_segment(
-				r_p, d, std::min(limit, tick_end(tick_containing(r_p.time))), r_env.limits.missile_substeps);
+		SimTime segment_end = std::min(limit, tick_end(tick_containing(r_p.time)));
+		if (d.kind == ProjectileKind::Missile) {
+			segment_end = std::min(expiry, sway_tick_end(sway_tick(r_p.time)));
+			if (segment_end > p_t_end) {
+				break;
+			}
+		}
+		const SegmentEnd e = next_segment(r_p, d, segment_end);
 		if (!r_env.charge(1)) {
 			return true;
 		}
@@ -660,10 +666,9 @@ DVec3 ballistic_position(const DVec3 &p_origin, const DVec3 &p_velocity, double 
 Projectile fly_free(const WeaponSimDef &p_def, const Projectile &p_start, SimTime p_until) {
 	Projectile p = p_start;
 	const ProjectileSimDef &d = p_def.projectile;
-	BallisticsLimits limits;
-
 	for (int i = 0; i < 4 * 60 * int(kSimHz) + 8 && p.time < p_until; ++i) {
-		const SegmentEnd e = next_segment(p, d, p_until, limits.missile_substeps);
+		const SegmentEnd e = next_segment(p, d,
+				d.kind == ProjectileKind::Missile ? std::min(p_until, sway_tick_end(sway_tick(p.time))) : p_until);
 		if (e.rebase) {
 			rebase(p, e.time, e.position, e.velocity);
 		} else {
