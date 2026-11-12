@@ -2044,6 +2044,12 @@ template <class A, MaybeConst<VehicleWire> W> void serialize(A &r_a, W &r_w) {
 	r_a.bits(d.gearbox.reverse_direction, 1);
 	r_a.f32(d.gearbox.clutch);
 	r_a.f32(d.gearbox.timer);
+	uint8_t track_steered = d.track_steer[0] != 0.0f || d.track_steer[1] != 0.0f ? 1 : 0;
+	r_a.bits(track_steered, 1);
+	if (track_steered != 0) {
+		r_a.f32(d.track_steer[0]);
+		r_a.f32(d.track_steer[1]);
+	}
 	r_a.bits(r_w.turret_count, 5);
 	r_a.check("vehicle turret count out of range", [&] { return r_w.turret_count <= kMaxVehicleTurrets; });
 	for (size_t i = 0; i < r_w.turret_count && i < kMaxVehicleTurrets && r_a.ok(); ++i) {
@@ -2059,7 +2065,7 @@ template <class A, MaybeConst<VehicleWire> W> void serialize(A &r_a, W &r_w) {
 	r_a.check("vehicle state not finite", [&] {
 		bool finite = std::isfinite(d.steer_filter) && std::isfinite(d.throttle_filter) &&
 				std::isfinite(d.brake_filter) && std::isfinite(d.engine_rpm) && std::isfinite(d.gearbox.clutch) &&
-				std::isfinite(d.gearbox.timer);
+				std::isfinite(d.gearbox.timer) && std::isfinite(d.track_steer[0]) && std::isfinite(d.track_steer[1]);
 		for (size_t i = 0; i < 3; ++i) {
 			finite = finite && std::isfinite(b.com_position[i]) && std::isfinite(b.linear_velocity[i]) &&
 					std::isfinite(b.angular_velocity[i]);

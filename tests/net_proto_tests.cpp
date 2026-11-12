@@ -2138,12 +2138,12 @@ void append_v2_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>>
 
 TEST_SUITE("net-proto") {
 	TEST_CASE("proto v2: version, message types and the bounds") {
-		CHECK(net::kProtocolVersion == 13);
+		CHECK(net::kProtocolVersion == 14);
 		for (const uint8_t t : { uint8_t(3), uint8_t(4), uint8_t(23), uint8_t(24) }) {
 			CHECK(net::peek_type(std::span<const uint8_t>(&t, 1)).has_value());
 		}
-		CHECK(net::Hello{}.protocol == 13);
-		CHECK(net::MatchInfo{}.protocol == 13);
+		CHECK(net::Hello{}.protocol == 14);
+		CHECK(net::MatchInfo{}.protocol == 14);
 	}
 
 	TEST_CASE("proto v2: MatchInfo, Spawned, KitSelect and the new Debug kinds round trip; out-of-range values are refused") {
@@ -4043,10 +4043,11 @@ void append_v4_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>>
 	vw.state.wheels[0].suspension_length = 0.3f;
 	vw.state.driver.engine_rpm = 2750.0f;
 	vw.state.driver.gearbox.gear = 2;
+	vw.state.driver.track_steer = { 812.5f, -812.5f };
 	vw.turret_count = 2;
 	vw.turret_angles = { 0.75f, -0.125f };
 	vs.vehicles.push_back(vw);
-	r_out.emplace_back("VehicleStates (v13)", net::encode_vehicle_states(vs));
+	r_out.emplace_back("VehicleStates (v14)", net::encode_vehicle_states(vs));
 }
 
 std::optional<std::string> decode_kick_v3(std::span<const uint8_t> p_bytes) {
@@ -4372,7 +4373,7 @@ TEST_SUITE("net-proto") {
 		const std::vector<uint8_t> bytes = net::encode_kick(kick);
 		const std::optional<std::string> v3 = decode_kick_v3(bytes);
 		REQUIRE(v3.has_value());
-		CHECK(*v3 == "protocol 3 (server 13)");
+		CHECK(*v3 == "protocol 3 (server 14)");
 		auto v4 = net::decode_kick(bytes);
 		REQUIRE(v4);
 		CHECK(v4->code == net::KickReason::Protocol);
@@ -4765,8 +4766,8 @@ TEST_SUITE("net-proto") {
 			{ "Snapshot", 367, 0x6567ed5d2836a9b6ull, 0 },
 			{ "Snapshot (no own)", 20, 0xa85c8a910ea8826bull, 0 },
 			{ "CommandPacket", 58, 0x0561e87f8ae9a655ull, 0 },
-			{ "Hello", 20, 0x3ab42a3eceb40b17ull, 0 },
-			{ "MatchInfo", 126, 0xf25a39239c0cc78cull, 0 },
+			{ "Hello", 20, 0xc9c7d0a8f2b29f76ull, 0 },
+			{ "MatchInfo", 126, 0x70d5317bfa556b91ull, 0 },
 			{ "Ready", 34, 0x50302cdf0f51bcb5ull, 0 },
 			{ "Spawned", 98, 0xededd38e508ae170ull, 0 },
 			{ "Loading", 11, 0x6d0d37720d72edd7ull, 0 },
@@ -4781,7 +4782,7 @@ TEST_SUITE("net-proto") {
 			{ "KitSelect", 3, 0xa9266a18e1c669aaull, 0 },
 			{ "Debug (SpawnTarget)", 30, 0xbf53c23636c9b9efull, 0 },
 			{ "DebugReport (v2)", 916, 0xe73adddf5cc1ab3dull, 0 },
-			{ "MatchInfo (v2)", 94, 0x4152c68f561b9d2eull, 0 },
+			{ "MatchInfo (v2)", 94, 0x4c79a706be1a25d3ull, 0 },
 			{ "Spawned (v2)", 98, 0xdda4f57b21059febull, 0 },
 			{ "MatchState", 42, 0x6e8a7b2bfcb229a0ull, 0 },
 			{ "PlayerList (full)", 217, 0x8ad8a19f7b621f12ull, 0 },
@@ -4790,7 +4791,7 @@ TEST_SUITE("net-proto") {
 			{ "SuicideRequest", 1, 0xaf63d14c8601d9dbull, 0 },
 			{ "LoadoutRequest", 54, 0xbff00e287a388828ull, 0 },
 			{ "CombatEvents (v3)", 137, 0x40d29b14535383d7ull, 0 },
-			{ "MatchInfo (v3)", 94, 0xb0193db0be1bfe7eull, 0 },
+			{ "MatchInfo (v3)", 94, 0xe9c339f74e7273c3ull, 0 },
 			{ "Spawned (v3 revived)", 98, 0x8b014185e7467390ull, 0 },
 			{ "SoldierGear", 20, 0xfa6162cd1bdf3cf3ull, 0 },
 			{ "Mismatch", 2, 0x07c26e07b48c3c08ull, 0 },
@@ -4802,7 +4803,7 @@ TEST_SUITE("net-proto") {
 			{ "LogicDelta", 13, 0xb406185960cdf447ull, 0 },
 			{ "SquadRequest", 4, 0x339b5db77a00fa9bull, 0 },
 			{ "SquadOrder", 18, 0x786f0a82bee37cb8ull, 0 },
-			{ "MatchInfo (v4)", 157, 0x955ac5a4c05eedfeull, 0 },
+			{ "MatchInfo (v4)", 157, 0x896f5d391abd8839ull, 0 },
 			{ "Ready (v4 digests)", 82, 0x52d9ba4d4bfcaf1eull, 0 },
 			{ "Kick (v4 reason)", 25, 0xc256cbdc95a2f23cull, 0 },
 			{ "PlayerList (v4 squads)", 89, 0x1f220dc607e2158aull, 0 },
@@ -4813,7 +4814,7 @@ TEST_SUITE("net-proto") {
 			{ "OrderNotice (v9)", 3, 0xf5bd1717ea80524bull, 0 },
 			{ "ConquestState (v11)", 61, 0x026a78587b1a83a7ull, 0 },
 			{ "SpawnAnswer (v11)", 3, 0x4e7b94181d5e21b6ull, 0 },
-			{ "VehicleStates (v13)", 167, 0xfc05afbb7b73b49eull, 0 },
+			{ "VehicleStates (v14)", 176, 0x6ac12ba746c6acaeull, 0 },
 		};
 		check_golden(samples, kPins);
 	}
@@ -4849,7 +4850,7 @@ TEST_SUITE("net-proto") {
 		CHECK(bad([](net::Deployables &r) { r.removed[0] = 0; }));
 		CHECK(bad([](net::Deployables &r) { r.removed.assign(net::kMaxDeployablesPerMessage + 1, 4); }));
 		CHECK(net::peek_type(net::encode_deployables(m)) == net::MessageType::Deployables);
-		CHECK(net::kProtocolVersion == 13);
+		CHECK(net::kProtocolVersion == 14);
 	}
 
 	TEST_CASE("proto v9: spot and order requests, spot states and order notices round-trip and refuse what is out of "
@@ -4902,7 +4903,7 @@ TEST_SUITE("net-proto") {
 		CHECK_FALSE(net::decode_order_notice(net::encode_order_notice({ cm::OrderType::Count, 1 })).ok());
 		CHECK(net::peek_type(net::encode_order_notice({ cm::OrderType::RequestAmmo, 1 })) ==
 				net::MessageType::OrderNotice);
-		CHECK(net::kProtocolVersion == 13);
+		CHECK(net::kProtocolVersion == 14);
 	}
 
 	TEST_CASE("proto v11: ConquestState carries tickets, bleed, every capture point, the own return tick and the "
@@ -4950,12 +4951,12 @@ TEST_SUITE("net-proto") {
 		CHECK_FALSE(net::spawn_choice_is_flag(uint8_t(net::kSpawnChoiceFlag + net::kMaxConquestPoints)));
 		CHECK_FALSE(net::spawn_choice_is_flag(net::kSpawnChoiceBeacon));
 		CHECK_FALSE(net::spawn_choice_is_flag(4));
-		CHECK(net::kProtocolVersion == 13);
+		CHECK(net::kProtocolVersion == 14);
 	}
 
 	TEST_CASE("proto: golden bytes of the encoders' clamp, cut and drop paths") {
 		static constexpr GoldenPin kPins[] = {
-			{ "Hello (name cut inside a code point)", 43, 0xc0b7ca35cbcabe25ull, 0 },
+			{ "Hello (name cut inside a code point)", 43, 0x205808d189684c7eull, 0 },
 			{ "Kick (reason cut at 2048 bytes)", 2051, 0x028412f145ceb5d9ull, 0 },
 			{ "Loading (permille above 1000)", 11, 0xd2694e25edbe818full, 0 },
 			{ "Bye", 1, 0xaf63cb4c8601cfa9ull, 0 },
@@ -5441,8 +5442,8 @@ TEST_SUITE("net-proto") {
 }
 
 TEST_SUITE("net-proto") {
-	TEST_CASE("proto v13: VehicleStates carries each vehicle's state and turret angles at full precision; hostile "
-			  "fields and oversize lists are refused") {
+	TEST_CASE("proto v14: VehicleStates carries each vehicle's state, its track steer and turret angles at full "
+			  "precision; hostile fields and oversize lists are refused") {
 		net::VehicleStates m;
 		m.server_tick = 9001;
 		for (uint16_t i = 0; i < net::kMaxVehiclesPerDatagram; ++i) {
@@ -5475,6 +5476,9 @@ TEST_SUITE("net-proto") {
 			w.state.driver.gearbox.clutch = 0.5f;
 			w.state.driver.gearbox.timer = 0.125f;
 			w.state.driver.stand_still_ticks = 300;
+			if (i % 2 == 0) {
+				w.state.driver.track_steer = { 120.5f * float(i + 1), -64.25f };
+			}
 			w.turret_count = uint8_t(i % 3);
 			for (size_t k = 0; k < w.turret_count; ++k) {
 				w.turret_angles[k] = 0.25f * float(k + 1) - 0.1f * float(i);
@@ -5509,6 +5513,7 @@ TEST_SUITE("net-proto") {
 		CHECK(refused([](net::VehicleWire &r) { r.state.driver.gearbox.pending = -2; }));
 		CHECK(refused([](net::VehicleWire &r) { r.turret_count = 17; }));
 		CHECK(refused([](net::VehicleWire &r) { r.turret_angles[0] = std::nanf(""); }));
+		CHECK(refused([](net::VehicleWire &r) { r.state.driver.track_steer[1] = std::nanf(""); }));
 		net::VehicleStates many = m;
 		many.vehicles.push_back(m.vehicles[0]);
 		CHECK(!net::decode_vehicle_states(net::encode_vehicle_states(many)).ok());
