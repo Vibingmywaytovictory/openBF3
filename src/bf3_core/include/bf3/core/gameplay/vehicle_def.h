@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/core/ebx_db.h"
+#include "bf3/core/gameplay/soldier_camera.h"
 #include "bf3/core/gameplay/work_budget.h"
 #include "bf3/core/math.h"
 #include "bf3/core/result.h"
@@ -30,7 +31,7 @@ struct VehicleCameraDef {
 	core::Transform transform;
 
 	float left_yaw = 0, right_yaw = 0, up_pitch = 0, down_pitch = 0;
-	float chase_distance = 0, chase_angle = 0, chase_look_ahead = 0;
+	std::optional<ChaseCameraDef> chase;
 	std::optional<float> zoom_field_of_view;
 };
 

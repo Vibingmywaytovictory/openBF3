@@ -69,6 +69,7 @@ struct SoldierCameras {
 	const SoldierCameraDef *target_of(const PlayerCameraDef &p_player) const;
 };
 
+Result<ChaseCameraDef> read_chase_camera(const EbxResolver &p_db, const EbxStruct &p_chase);
 Result<SoldierCameras> read_soldier_cameras(const EbxResolver &p_db, std::string_view p_soldier = kMpSoldier);
 Result<PlayerCameraDef> read_player_camera(
 		const EbxResolver &p_db, level::WorkBudget &r_budget, std::string_view p_name = kPlayerKillerCamera);

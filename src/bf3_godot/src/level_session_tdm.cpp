@@ -23,6 +23,7 @@
 #include "ui_assets.h"
 #include "ui_pages.h"
 #include "ui_post_process.h"
+#include "viewmodel_muzzle.h"
 #if OPENBF3_BUILD_CHECKS
 #include "audio_ingame_check.h"
 #include "deploy_check.h"
@@ -148,14 +149,6 @@ void free_label(Label *&r_label) {
 		r_label->queue_free();
 		r_label = nullptr;
 	}
-}
-
-Transform3D camera_transform(const fx::Transform &p_t) {
-	Basis b;
-	b.set_column(0, -Vector3(p_t.right.x, p_t.right.y, p_t.right.z));
-	b.set_column(1, Vector3(p_t.up.x, p_t.up.y, p_t.up.z));
-	b.set_column(2, -Vector3(p_t.forward.x, p_t.forward.y, p_t.forward.z));
-	return Transform3D(b, Vector3(p_t.trans.x, p_t.trans.y, p_t.trans.z));
 }
 
 void keep_view(TdmState &r_m, const Transform3D &p_t, float p_vfov_deg) {

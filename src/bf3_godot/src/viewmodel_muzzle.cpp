@@ -56,6 +56,14 @@ godot::Transform3D to_godot_transform(const fx::Transform &p_t) {
 	return Transform3D(Basis(x, y, z), Vector3(p_t.trans.x, p_t.trans.y, p_t.trans.z));
 }
 
+godot::Transform3D camera_transform(const fx::Transform &p_t) {
+	Basis b;
+	b.set_column(0, -Vector3(p_t.right.x, p_t.right.y, p_t.right.z));
+	b.set_column(1, Vector3(p_t.up.x, p_t.up.y, p_t.up.z));
+	b.set_column(2, -Vector3(p_t.forward.x, p_t.forward.y, p_t.forward.z));
+	return Transform3D(b, Vector3(p_t.trans.x, p_t.trans.y, p_t.trans.z));
+}
+
 fx::Transform to_fx_transform(const godot::Transform3D &p_t) {
 	auto v = [](const Vector3 &p_v) {
 		return fx::Vec3{ float(p_v.x), float(p_v.y), float(p_v.z) };

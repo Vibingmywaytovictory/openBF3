@@ -4,12 +4,14 @@
 #include "bf3/host/client_session.h"
 #include "bf3/host/level_vehicles.h"
 #include "bf3/render/vehicle_meshes.h"
+#include "death_camera.h"
 #include "game_frame.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -37,6 +39,7 @@ struct OwnVehicleSeat {
 	uint16_t kind = 0;
 	godot::Transform3D body;
 	float heading = 0.0f;
+	godot::Vector3 velocity;
 };
 
 struct VehicleSeatView {
@@ -69,8 +72,8 @@ public:
 	const host::LevelVehicles *level() const { return level_.get(); }
 	const GameVehiclesStats &stats() const { return stats_; }
 	std::optional<GameVehicleView> view(uint16_t p_spawner) const;
-	VehicleSeatView seat_view(
-			const OwnVehicleSeat &p_seat, uint32_t p_camera, float p_yaw, float p_pitch, float p_fov_deg) const;
+	VehicleSeatView seat_view(const OwnVehicleSeat &p_seat, uint32_t p_camera, float p_yaw, float p_pitch,
+			float p_fov_deg, double p_dt, const sim::CollisionWorld *p_world);
 
 private:
 	struct Part {
@@ -93,6 +96,8 @@ private:
 	std::vector<Kind> kinds_;
 	std::map<uint16_t, Shown> shown_;
 	std::optional<OwnVehicleSeat> own_;
+	ChaseCamera chase_;
+	std::optional<std::array<uint32_t, 3>> chase_key_;
 	godot::Node3D *root_ = nullptr;
 	uint64_t root_id_ = 0;
 	GameVehiclesStats stats_;

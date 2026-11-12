@@ -35,5 +35,5 @@ fx::MuzzleSample muzzle_sample(const ViewmodelMuzzle &p_muzzle, uint8_t p_slot, 
 
 godot::Transform3D to_godot_transform(const fx::Transform &p_t);
 fx::Transform to_fx_transform(const godot::Transform3D &p_t);
-
+godot::Transform3D camera_transform(const fx::Transform &p_t);
 }

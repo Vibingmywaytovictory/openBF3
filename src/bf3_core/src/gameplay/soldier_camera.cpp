@@ -50,6 +50,15 @@ ChaseCameraDef read_chase(Fields &r_f, const EbxStruct &p_s) {
 
 }
 
+Result<ChaseCameraDef> read_chase_camera(const EbxResolver &p_db, const EbxStruct &p_chase) {
+	Fields f(p_db);
+	const ChaseCameraDef c = read_chase(f, p_chase);
+	if (!f.ok()) {
+		return f.error();
+	}
+	return c;
+}
+
 const SoldierCameraDef *SoldierCameras::first_person() const {
 	for (const SoldierCameraDef &c : cameras) {
 		if (c.kind == SoldierCameraKind::FirstPerson) {

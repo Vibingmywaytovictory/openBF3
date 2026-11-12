@@ -1,6 +1,7 @@
 #include "game_vehicles.h"
 
 #include "render_bridge.h"
+#include "viewmodel_muzzle.h"
 
 #include "bf3/host/level_load.h"
 #include "bf3/render/viewmodel_set.h"
@@ -216,7 +217,8 @@ void GameVehicles::step(const host::PresentationFrame &p_frame, uint64_t p_now_n
 		const Transform3D body = vehicle_body_transform(model, pose);
 		if (own_seat) {
 			const Vector3 forward = body.basis.get_column(2);
-			own_ = OwnVehicleSeat{ v.spawner, own_seat->seat, kind, body, std::atan2(forward.x, forward.z) };
+			own_ = OwnVehicleSeat{ v.spawner, own_seat->seat, kind, body, std::atan2(forward.x, forward.z),
+				to_vector(v.linear_velocity) };
 		}
 		live.insert(v.spawner);
 		Shown &shown = shown_[v.spawner];
@@ -296,14 +298,15 @@ std::optional<GameVehicleView> GameVehicles::view(uint16_t p_spawner) const {
 
 namespace bf3::godot_side {
 
-VehicleSeatView GameVehicles::seat_view(
-		const OwnVehicleSeat &p_seat, uint32_t p_camera, float p_yaw, float p_pitch, float p_fov_deg) const {
+VehicleSeatView GameVehicles::seat_view(const OwnVehicleSeat &p_seat, uint32_t p_camera, float p_yaw, float p_pitch,
+		float p_fov_deg, double p_dt, const sim::CollisionWorld *p_world) {
 	VehicleSeatView out;
 	out.fov_deg = p_fov_deg;
 	out.left_yaw = out.right_yaw = sim::kPi;
 	out.up_pitch = out.down_pitch = 0.5f * sim::kPi;
 	if (level_ == nullptr || p_seat.kind >= level_->kinds.size()) {
 		out.camera = p_seat.body;
+		chase_key_.reset();
 		return out;
 	}
 	const host::LevelVehicleKind &kind = level_->kinds[p_seat.kind];
@@ -324,20 +327,29 @@ VehicleSeatView GameVehicles::seat_view(
 	if (cameras.empty()) {
 		const Vector3 at = seat != nullptr ? to_vector(seat->transform.trans) : Vector3();
 		out.camera = p_seat.body * Transform3D(look, at);
+		chase_key_.reset();
 		return out;
 	}
-	const core::gameplay::VehicleCameraDef &c = *cameras[p_camera % cameras.size()];
+	const uint32_t index = p_camera % uint32_t(cameras.size());
+	const core::gameplay::VehicleCameraDef &c = *cameras[index];
 	out.first_person = c.first_person;
-	if (!c.first_person && c.chase_distance > 0.0f) {
-		const Vector3 target = to_vector(c.transform.trans);
-		const Vector3 ahead = Basis(Vector3(0, 1, 0), relative).xform(Vector3(0, 0, 1));
-		const float rise = std::clamp(c.chase_angle * core::kDegToRadF - p_pitch, -0.4f * sim::kPi, 0.45f * sim::kPi);
-		const Vector3 eye =
-				target - ahead * (std::cos(rise) * c.chase_distance) + Vector3(0, std::sin(rise) * c.chase_distance, 0);
-		const Vector3 at = target + ahead * c.chase_look_ahead;
-		out.camera = p_seat.body * Transform3D(Basis(), eye).looking_at(at, Vector3(0, 1, 0));
+	if (!c.first_person && c.chase) {
+		const Vector3 pivot = p_seat.body.xform(to_vector(c.transform.trans));
+		ChaseTarget target;
+		target.eye = fx::Vec3{ pivot.x, pivot.y, pivot.z };
+		target.yaw_rad = p_yaw;
+		target.pitch_rad = p_pitch;
+		target.velocity = fx::Vec3{ p_seat.velocity.x, p_seat.velocity.y, p_seat.velocity.z };
+		const std::array<uint32_t, 3> key{ p_seat.spawner, p_seat.seat, index };
+		if (chase_key_ != key) {
+			chase_ = ChaseCamera(*c.chase);
+			chase_.activate(target, p_world);
+			chase_key_ = key;
+		}
+		out.camera = camera_transform(chase_.step(p_dt, target, p_world));
 		return out;
 	}
+	chase_key_.reset();
 	if (c.left_yaw > 0.0f || c.right_yaw > 0.0f) {
 		out.left_yaw = c.left_yaw * core::kDegToRadF;
 		out.right_yaw = c.right_yaw * core::kDegToRadF;
@@ -349,5 +361,4 @@ VehicleSeatView GameVehicles::seat_view(
 	out.camera = p_seat.body * Transform3D(look, to_vector(c.transform.trans));
 	return out;
 }
-
 }

@@ -184,7 +184,7 @@ VehicleHealthZoneDef read_zone(const EbxStruct &p_entity, std::string_view p_fie
 	return out;
 }
 
-VehicleCameraDef read_camera(WorkBudget &r_budget, const EbxResolver &p_db, const EbxInstance &p_component) {
+Result<VehicleCameraDef> read_camera(WorkBudget &r_budget, const EbxResolver &p_db, const EbxInstance &p_component) {
 	VehicleCameraDef out;
 	const EbxStruct c = p_component.data();
 	out.field_of_view = static_cast<float>(number_or(c, "FieldOfView", 0));
@@ -199,10 +199,11 @@ VehicleCameraDef read_camera(WorkBudget &r_budget, const EbxResolver &p_db, cons
 			out.up_pitch = static_cast<float>(number_or(s, "UpPitchAngle", 0));
 			out.down_pitch = static_cast<float>(number_or(s, "DownPitchAngle", 0));
 		} else if (camera->is_a("ChaseCameraData")) {
-			const EbxStruct s = camera->data();
-			out.chase_distance = static_cast<float>(number_or(s, "WantedDistance", 0));
-			out.chase_angle = static_cast<float>(number_or(s, "WantedAngleDeg", 0));
-			out.chase_look_ahead = static_cast<float>(number_or(s, "LookDistanceInFrontOfTarget", 0));
+			Result<ChaseCameraDef> chase = read_chase_camera(p_db, camera->data());
+			if (!chase) {
+				return chase.error();
+			}
+			out.chase = *chase;
 		}
 	}
 	if (const std::optional<EbxInstance> alternate = p_db.follow(c, "AlternateView"); alternate && r_budget.take_type(alternate->data())) {
@@ -212,7 +213,6 @@ VehicleCameraDef read_camera(WorkBudget &r_budget, const EbxResolver &p_db, cons
 	}
 	return out;
 }
-
 }
 
 float VehicleDef::max_zone_health() const {
@@ -380,9 +380,12 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 		} else if (node.role == Role::Camera) {
 			const int seat = seat_index(layout.enclosing(at, Role::Seat));
 			if (seat >= 0) {
-				VehicleCameraDef camera = read_camera(budget, p_db, node.data);
-				camera.transform = model_transform(node.frame);
-				out.seats[static_cast<size_t>(seat)].cameras.push_back(std::move(camera));
+				Result<VehicleCameraDef> camera = read_camera(budget, p_db, node.data);
+				if (!camera) {
+					return error_at("vehicle " + name, camera.error());
+				}
+				camera->transform = model_transform(node.frame);
+				out.seats[static_cast<size_t>(seat)].cameras.push_back(std::move(*camera));
 			}
 		}
 	}
