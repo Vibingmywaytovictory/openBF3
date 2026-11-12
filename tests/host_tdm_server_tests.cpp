@@ -32,6 +32,7 @@
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/vehicles/land_rules.h"
 #include "bf3/sim/vehicles/vehicle_input.h"
+#include "bf3/sim/weapons/damage.h"
 #include "bf3/sim/weapons/weapon_input.h"
 #include "bf3/sim/weapons/weapon_install.h"
 #include "bf3/sim/weapons/weapon_rng.h"
@@ -5371,6 +5372,164 @@ TEST_SUITE("host-vehicles-damage") {
 		CHECK(run.driver_dead);
 		CHECK(run.kills_gained == 1);
 		check_respawn(run);
+	}
+}
+
+TEST_SUITE("host-vehicles-damage") {
+	TEST_CASE(
+			"vehicles: MP_007 ConquestSmall0: an RPG-7 rocket and an MBT shell on each hull in percent of its health, "
+			"direct hit and blast at the point of impact, through the material relations (R-G4) and the R-G3 chain") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		const sw::SurfaceMaterialTable &materials = *level->shared->gunplay->materials;
+		core::Result<sw::InstallWeapons> install = sw::open_install_weapons(level->install);
+		REQUIRE_MESSAGE(install.ok(), (install.ok() ? std::string() : install.error().message));
+		core::Result<core::gameplay::WeaponDef> rpg_def = install->catalog->resolve("weapons/rpg7/u_rpg7");
+		REQUIRE_MESSAGE(rpg_def.ok(), (rpg_def.ok() ? std::string() : rpg_def.error().message));
+		const std::vector<core::gameplay::WeaponDef> soldier_defs{ *rpg_def };
+		core::Result<std::shared_ptr<const sw::WeaponTable>> made =
+				sw::make_weapon_table(soldier_defs, level->shared->gunplay->materials);
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		const sw::WeaponTable &soldier_table = **made;
+		const std::optional<uint16_t> rpg = uint16_t(0);
+		host::VehicleDamageSource soldier;
+		soldier.configure(soldier_table, soldier_defs);
+		host::VehicleGunnery gunnery;
+		REQUIRE(gunnery.configure(lv, level->shared->gunplay->materials, sw::Mechanics()).ok());
+		REQUIRE(gunnery.table() != nullptr);
+		host::VehicleDamageSource shells;
+		shells.configure(*gunnery.table(), lv.weapons);
+		std::optional<uint16_t> cannon;
+		for (size_t i = 0; i < lv.weapons.size(); ++i) {
+			cannon = lv.weapons[i].variant == "vehicles/common/weapondata/mbt_cannon_firing" ? uint16_t(i) : cannon;
+		}
+		REQUIRE(cannon.has_value());
+		struct Round {
+			const char *name;
+			const host::VehicleDamageSource *source;
+			const sw::WeaponTable *table;
+			const core::gameplay::WeaponDef *def;
+			uint16_t index;
+		};
+		const Round rounds[] = {
+			{ "RPG-7", &soldier, &soldier_table, &soldier_defs[*rpg], *rpg },
+			{ "MBT shell", &shells, gunnery.table(), &lv.weapons[*cannon], *cannon },
+		};
+		struct Percent {
+			std::string_view blueprint;
+			std::string_view round;
+			float full, shield, direct, blast, first, second;
+		};
+		constexpr Percent kPercent[] = {
+			{ "vehicles/t90/t90", "RPG-7", 1000.0f, 175.0f, 202.5f, 0.0f, 0.0f, 20.25f },
+			{ "vehicles/t90/t90", "MBT shell", 1000.0f, 175.0f, 270.0f, 0.0f, 0.0f, 27.0f },
+			{ "vehicles/m1a2/m1abrams", "RPG-7", 1000.0f, 175.0f, 202.5f, 0.0f, 0.0f, 20.25f },
+			{ "vehicles/m1a2/m1abrams", "MBT shell", 1000.0f, 175.0f, 270.0f, 0.0f, 0.0f, 27.0f },
+			{ "vehicles/growleritv/growleritv", "RPG-7", 500.0f, 0.0f, 225.0f, 112.0f, 67.4f, 32.6f },
+			{ "vehicles/growleritv/growleritv", "MBT shell", 500.0f, 0.0f, 300.0f, 100.0f, 80.0f, 20.0f },
+			{ "vehicles/vdv_buggy/vdv_buggy", "RPG-7", 500.0f, 0.0f, 225.0f, 112.0f, 67.4f, 32.6f },
+			{ "vehicles/vdv_buggy/vdv_buggy", "MBT shell", 500.0f, 0.0f, 300.0f, 100.0f, 80.0f, 20.0f },
+		};
+		size_t pinned = 0;
+		size_t hulls = 0;
+		for (const host::LevelVehicleKind &kind : lv.kinds) {
+			const sw::SurfacePair hull = materials.pair_of(kind.material);
+			REQUIRE(hull.resolved);
+			const float full = sim::vehicles::full_vehicle_health(kind.damage);
+			REQUIRE(full > 0.0f);
+			const sim::vehicles::HealthZoneRule &rear = kind.damage.zones[size_t(sim::vehicles::HullZone::Rear)];
+			REQUIRE(rear.max_health > 0.0f);
+			sim::vehicles::DamageParties enemy;
+			enemy.vehicle_team = 1;
+			enemy.attacker_team = 2;
+			enemy.attacker_is_player = true;
+			const float modifier = sim::vehicles::damage_modifier(kind.damage.armor_multiplier, enemy);
+			CHECK(modifier == doctest::Approx(1.0f / kind.damage.armor_multiplier));
+			const float square = sim::vehicles::angle_of_impact_factor(kind.damage.angle_of_impact, 0.0f);
+			std::printf("damage: %s MinSpeedForMineActivation %.2f m/s\n", kind.blueprint.c_str(),
+					double(kind.min_speed_for_mine));
+			CHECK(kind.min_speed_for_mine == doctest::Approx(0.1f));
+			for (const Round &r : rounds) {
+				const sw::ProjectileSimDef &p = r.table->defs[r.index].projectile;
+				REQUIRE(p.explosion.present);
+				const auto relation_damage = [&](float p_base, uint8_t p_property) {
+					const core::gameplay::DamageRelation rel = materials.relation(p_property, hull.property);
+					return rel.present ? sim::vehicles::material_relation_damage(
+												 p_base, rel.protection_multiplier, rel.protection_threshold)
+									   : p_base;
+				};
+				sw::DamageEvent direct;
+				direct.kind = sw::DamageKind::Direct;
+				direct.def = r.index;
+				direct.base = p.kind == core::gameplay::ProjectileKind::Missile ? p.direct_damage
+																				: float(sw::falloff_damage(p, 0.0));
+				direct.penetration = 1.0f;
+				sw::DamageEvent blast = direct;
+				blast.kind = sw::DamageKind::Blast;
+				blast.base = float(sw::blast_damage(p.explosion, 0.0, sw::BlastFalloff::Linear));
+				const sw::SurfacePair blast_pair = materials.pair_of(r.def->projectile.explosion.material);
+				REQUIRE(blast_pair.resolved);
+				const float want_direct = relation_damage(direct.base, p.property);
+				const float want_blast = relation_damage(blast.base, blast_pair.property);
+				CHECK(r.source->amount(direct, hull.property) == doctest::Approx(want_direct));
+				CHECK(r.source->amount(blast, hull.property) == doctest::Approx(want_blast));
+				sim::vehicles::VehicleHealth h = sim::vehicles::spawned_vehicle_health(kind.damage);
+				const size_t rear_index = size_t(sim::vehicles::HullZone::Rear);
+				float shield = h.shield[rear_index];
+				float zone_lost = 0.0f;
+				std::array<float, 2> percent{};
+				for (size_t round = 0; round < percent.size(); ++round) {
+					const float before = sim::vehicles::vehicle_health(kind.damage, h);
+					for (const float amount : { want_direct, want_blast }) {
+						sim::vehicles::VehicleHit hit;
+						hit.damage = amount;
+						hit.zone = sim::vehicles::HullZone::Rear;
+						hit.modifier = modifier;
+						sim::vehicles::apply_vehicle_damage(kind.damage, h, hit);
+						const float d = amount * square * modifier;
+						if (!(d > 0.0f)) {
+							continue;
+						}
+						if (rear.max_shield > 0.0f && shield >= rear.max_shield && d >= rear.max_shield) {
+							shield = std::max(0.0f, shield - d);
+						} else {
+							zone_lost += d;
+						}
+					}
+					percent[round] = 100.0f * (before - sim::vehicles::vehicle_health(kind.damage, h)) / full;
+				}
+				const float lost = full - sim::vehicles::vehicle_health(kind.damage, h);
+				const float want_lost = std::min(full,
+						kind.damage.share_damage ? zone_lost * full / rear.max_health
+												 : std::min(zone_lost, rear.max_health) / rear.max_health * full);
+				CHECK(lost == doctest::Approx(want_lost).epsilon(1e-4));
+				std::printf(
+						"damage: %s on the %s (health %.0f, armour x%.2f, rear shield %.0f): direct %.1f (base %.0f), "
+						"blast %.1f (base %.0f) from the rear: the first round %.2f %% of its health, the second %.2f "
+						"%%\n",
+						r.name, kind.blueprint.c_str(), double(full), double(kind.damage.armor_multiplier),
+						double(rear.max_shield), double(want_direct), double(direct.base), double(want_blast),
+						double(blast.base), double(percent[0]), double(percent[1]));
+				const Percent *want = nullptr;
+				for (const Percent &p : kPercent) {
+					want = p.blueprint == kind.blueprint && p.round == r.name ? &p : want;
+				}
+				REQUIRE_MESSAGE(want != nullptr, kind.blueprint << " " << r.name);
+				CHECK(full == doctest::Approx(want->full));
+				CHECK(rear.max_shield == doctest::Approx(want->shield));
+				CHECK(want_direct == doctest::Approx(want->direct));
+				CHECK(want_blast == doctest::Approx(want->blast));
+				CHECK(percent[0] == doctest::Approx(want->first));
+				CHECK(percent[1] == doctest::Approx(want->second));
+				++pinned;
+			}
+			++hulls;
+		}
+		CHECK(hulls == 4u);
+		CHECK(pinned == std::size(kPercent));
 	}
 }
 
