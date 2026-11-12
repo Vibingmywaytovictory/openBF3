@@ -1097,6 +1097,8 @@ set_tests_properties(host.vehicles.damage.team PROPERTIES SKIP_RETURN_CODE 77 TI
 add_test(NAME host.vehicles.scope COMMAND test_host_tdm --test-suite=host-vehicles-scope)
 add_test(NAME host.vehicles.predict COMMAND test_host_tdm --test-suite=host-vehicles-predict)
 set_tests_properties(host.vehicles.scope host.vehicles.predict PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+add_test(NAME host.vehicles.blend.unit COMMAND test_host_tdm --test-suite=host-vehicles-blend-unit)
+set_tests_properties(host.vehicles.blend.unit PROPERTIES TIMEOUT 60)
 target_sources(test_host_tdm PRIVATE host_conquest_bots_tests.cpp)
 add_test(NAME host.tdm.conquest_bots COMMAND test_host_tdm --test-suite=host-tdm-conquest-bots "--test-case-exclude=*seed 2:*,*seed 3:*")
 add_test(NAME host.tdm.conquest_bots.seed2 COMMAND test_host_tdm --test-suite=host-tdm-conquest-bots "--test-case=*seed 2:*")

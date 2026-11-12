@@ -20,6 +20,7 @@
 #include "bf3/sim/soldier_state.h"
 #include "client_loop.h"
 #include "client_transport.h"
+#include "vehicles/client_vehicle_prediction.h"
 
 #include "tdm_fixture.h"
 #include "test_support.h"
@@ -1346,5 +1347,35 @@ TEST_SUITE("host-vehicles-predict") {
 			c->loop.shutdown();
 			c->loop.close();
 		}
+	}
+}
+
+TEST_SUITE("host-vehicles-blend-unit") {
+	TEST_CASE("vehicles: the own vehicle's correction fades over min(d, 0.25) s and snaps below 3 cm and above 3 m") {
+		constexpr float kStep = 1.0f / 30.0f;
+		host::VehicleBlend b;
+		b.correct({ 0.10f, 0.0f, 0.0f });
+		CHECK(b.shown()[0] == doctest::Approx(0.10f));
+		for (const float left : { 2.0f / 3.0f, 1.0f / 3.0f, 0.0f, 0.0f }) {
+			b.decay(kStep);
+			CHECK(b.shown()[0] == doctest::Approx(0.10f * left));
+		}
+		b.correct({ 0.0f, 0.6f, 0.8f });
+		b.decay(kStep);
+		const float left = (0.25f - kStep) / 0.25f;
+		CHECK(b.shown()[0] == doctest::Approx(0.0f));
+		CHECK(b.shown()[1] == doctest::Approx(0.6f * left));
+		CHECK(b.shown()[2] == doctest::Approx(0.8f * left));
+		CHECK(core::vec::length(b.shown()) == doctest::Approx(0.8667f).epsilon(1e-4));
+		const sim::Vec3 again = core::vec::add(b.shown(), { 0.05f, 0.0f, 0.0f });
+		b.correct(again);
+		CHECK(b.shown()[0] == doctest::Approx(again[0]));
+		CHECK(b.shown()[1] == doctest::Approx(again[1]));
+		CHECK(b.shown()[2] == doctest::Approx(again[2]));
+		b.correct({ 4.0f, 0.0f, 0.0f });
+		CHECK(core::vec::length(b.shown()) == 0.0f);
+		b.correct({ 0.10f, 0.0f, 0.0f });
+		b.correct({ 0.0f, 0.0f, 0.02f });
+		CHECK(core::vec::length(b.shown()) == 0.0f);
 	}
 }
