@@ -66,6 +66,7 @@ bool componentwise(uint16_t p_opcode) {
 		case Op::Exp:
 		case Op::Frc:
 		case Op::Ge:
+		case Op::Ieq:
 		case Op::Log:
 		case Op::Lt:
 		case Op::Mad:
@@ -160,6 +161,9 @@ public:
 		if (p_ins.offset != std::array<int8_t, 3>{}) {
 			return refuse("sample offsets in " + dxbc::format_instruction(p_ins));
 		}
+		if (p_ins.is(Op::Else) || p_ins.is(Op::EndIf) || p_ins.is(Op::If)) {
+			mask_lanes_.clear();
+		}
 		if (p_ins.is(Op::Else)) {
 			return std::string("} else {");
 		}
@@ -224,6 +228,16 @@ public:
 				value = "textureGrad(" + tex + ", (" + src[0] + ").xy, (" + src[3] + ").xy, (" + src[4] + ").xy)" +
 						swizzle;
 			}
+		} else if (p_ins.is(Op::Ieq) && need(2)) {
+			const Operand &a = p_ins.operands[1], &b = p_ins.operands[2];
+			const bool zero_b = b.is(OperandType::Immediate32) && b.imm == std::array<uint32_t, 4>{};
+			const Operand &tested = zero_b ? a : b;
+			const Operand &zero = zero_b ? b : a;
+			if (!zero.is(OperandType::Immediate32) || zero.imm != std::array<uint32_t, 4>{} ||
+					!holds_masks(tested, p_ins)) {
+				return refuse("ieq of what is not a comparison mask and zero: " + dxbc::format_instruction(p_ins));
+			}
+			value = "vec4(equal(" + src[zero_b ? 0 : 1] + ", vec4(0.0)))";
 		} else if (comparison(op) && need(2)) {
 			const char *fn = p_ins.is(Op::Lt) ? "lessThan"
 					: p_ins.is(Op::Ge)		  ? "greaterThanEqual"
@@ -292,10 +306,40 @@ public:
 		if (!r) {
 			return r.error();
 		}
+		if (d.is(OperandType::Temp)) {
+			const bool masks = comparison(op) || p_ins.is(Op::Ieq);
+			for (uint8_t c = 0; c < 4; ++c) {
+				if (((d.write_mask() >> c) & 1u) == 0) {
+					continue;
+				}
+				if (masks) {
+					mask_lanes_.insert(lane(d.index[0], c));
+				} else {
+					mask_lanes_.erase(lane(d.index[0], c));
+				}
+			}
+		}
 		return *r + "." + mask + " = (" + value + ")." + mask + ";";
 	}
 
 private:
+	static uint64_t lane(uint32_t p_reg, uint8_t p_lane) { return uint64_t(p_reg) << 8 | p_lane; }
+
+	bool holds_masks(const Operand &p_op, const Instruction &p_ins) const {
+		if (!p_op.is(OperandType::Temp) || p_op.negate || p_op.absolute) {
+			return false;
+		}
+		for (uint8_t c = 0; c < 4; ++c) {
+			if (((p_ins.operands[0].write_mask() >> c) & 1u) != 0 &&
+					mask_lanes_.count(lane(p_op.index[0], p_op.lane(c))) == 0) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	std::set<uint64_t> mask_lanes_;
+
 	core::Result<std::string> reg(const Operand &p_op) {
 		if (p_op.relative) {
 			return refuse("relative addressing");

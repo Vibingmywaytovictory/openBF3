@@ -139,6 +139,28 @@ std::vector<uint8_t> instanced_vertex_program() {
 									ins(54, { dst(kOutput, 0, 0xF), imm(0, 0, 0, 0) }), ins(21, {}) }) } });
 }
 
+std::vector<uint8_t> cutout_pixel_program(uint32_t p_mask_reg) {
+	return container({ { "RDEF", rdef({ { "texture_Texture", 2, 1 }, { "texture_Texture2", 2, 2 } }, nullptr, {}) },
+			{ "ISGN", signature({ { "SV_Position", 0, 1, 0, 0xF }, { "TEXCOORD", 1, 0, 2, 0x3 } }) },
+			{ "OSGN", signature({ { "SV_Target", 0, 0, 0, 0xF }, { "SV_Target", 1, 0, 1, 0xF } }) },
+			{ "SHDR",
+					code_chunk(0, 2,
+							{ ins(69,
+									  { dst(kTemp, 0, 0x1), src(kInput, 2, swz(0, 1, 0, 0)), src(kResource, 1),
+											  sampler(0) }),
+									ins(49,
+											{ dst(kTemp, p_mask_reg, 0x1), imm(0.9f, 0.9f, 0.9f, 0.9f),
+													src(kTemp, 0) }),
+									ins(32,
+											{ dst(kTemp, 0, 0x1), src(kTemp, 0, swz(0, 0, 0, 0)),
+													int_imm(0, 0, 0, 0) }),
+									ins(13 | 1u << 18, { src(kTemp, 0, swz(0, 0, 0, 0)) }),
+									ins(69,
+											{ dst(kTemp, 1, 0x7), src(kInput, 2, swz(0, 1, 0, 0)), src(kResource, 2),
+													sampler(0) }),
+									ins(75, { dst(kOutput, 1, 0x7), src(kTemp, 1) }) }) } });
+}
+
 std::vector<uint8_t> layer_vertex_program() {
 	return container({ { "RDEF", rdef({}, nullptr, {}) },
 			{ "ISGN", signature({ { "TEXCOORD", 0, 0, 0, 0xF }, { "TEXCOORD", 1, 0, 1, 0x3 } }) },
@@ -345,6 +367,36 @@ TEST_SUITE("render-programs-unit") {
 		CHECK(refused.error().message.find("vertex program branches on if_nz r0") != std::string::npos);
 	}
 
+	TEST_CASE(
+			"render.programs.unit: ieq of a comparison mask and zero is its negation; of anything else it is refused") {
+		const std::vector<uint8_t> vs_blob = layer_vertex_program();
+		bf3::core::Result<dxbc::Program> vs = dxbc::parse(vs_blob);
+		REQUIRE(vs.ok());
+		const std::vector<uint32_t> formats = { 10, kDxgiR16G16Float };
+		const std::vector<uint32_t> bound = { 1, 2 };
+		for (uint32_t mask_reg : { 0u, 1u }) {
+			const std::vector<uint8_t> ps_blob = cutout_pixel_program(mask_reg);
+			bf3::core::Result<dxbc::Program> ps = dxbc::parse(ps_blob);
+			REQUIRE(ps.ok());
+			CHECK(dxbc::format_instruction(ps->code[2]) ==
+					"ieq r0.x, r0.xxxx, l(0.000000, 0.000000, 0.000000, 0.000000)");
+			ProgramRequest request;
+			request.pixel = &*ps;
+			request.vertex = &*vs;
+			request.vertex_formats = formats;
+			request.bound_textures = bound;
+			bf3::core::Result<TranslatedProgram> t = translate_program(request);
+			if (mask_reg == 0) {
+				REQUIRE_MESSAGE(t.ok(), (t.ok() ? std::string() : t.error().message));
+				CHECK(t->code.find("r0.x = (vec4(equal(r0.xxxx, vec4(0.0)))).x;") != std::string::npos);
+				CHECK(t->code.find("if ((r0.xxxx).x != 0.0) { discard; }") != std::string::npos);
+			} else {
+				REQUIRE(!t.ok());
+				CHECK(t.error().message.find("ieq of what is not a comparison mask") != std::string::npos);
+			}
+		}
+	}
+
 	TEST_CASE("render.programs.unit: a texture read only by single channels is a mask, and texture usage picks the UV "
 			  "set") {
 		const std::vector<uint8_t> ps_blob = layer_pixel_program(), vs_blob = layer_vertex_program();
@@ -391,7 +443,6 @@ constexpr std::string_view kMaskColourLedger[] = {
 	"levels/xp5_001/objects/forestledge_01_top_alpha_normalfix",
 	"levels/xp5_002/architecture/warehouse_02_xp5_002/ss_warehouse_02_destrvolume_xp5_002",
 	"xp2/objects/skybarsigns/signs_shader",
-	"xp_raw/props/fence_wakeisland/fence_wakeisland_01_shader",
 };
 constexpr std::pair<const char *, std::string_view> kDrawnThroughPrograms[] = {
 	{ "MP_018", "levels/mp_018/objects/rock01cluster_mp_018_shader" },
