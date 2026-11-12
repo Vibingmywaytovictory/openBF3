@@ -1,9 +1,13 @@
 #include "look_bridge.h"
 
+#include "exposure_effect.h"
 #include "godot_util.h"
 #include "level_upload.h"
 
+#include "bf3/core/util/format.h"
+
 #include <godot_cpp/classes/camera_attributes_practical.hpp>
+#include <godot_cpp/classes/compositor.hpp>
 #include <godot_cpp/classes/directional_light3d.hpp>
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/image.hpp>
@@ -29,8 +33,6 @@ using namespace godot;
 namespace render = bf3::render;
 
 namespace {
-
-constexpr float kLuminancePerIso = 0.00125f;
 
 constexpr float kFilmicWhite = 4.0f;
 constexpr float kSunShadowDistance = 250.0f;
@@ -111,7 +113,11 @@ Vector3 vector3(const render::LookVec3 &p_v) {
 }
 
 LookBridge::LookBridge() = default;
-LookBridge::~LookBridge() = default;
+LookBridge::~LookBridge() {
+	if (exposure_effect_.is_valid()) {
+		exposure_effect_->release();
+	}
+}
 
 void LookBridge::build(Node *p_parent, std::shared_ptr<const render::LevelScenePlan> p_plan) {
 	plan_ = std::move(p_plan);
@@ -177,7 +183,14 @@ void LookBridge::build(Node *p_parent, std::shared_ptr<const render::LevelSceneP
 	world_->set_name("Environment");
 	world_->set_environment(environment_);
 	attributes_.instantiate();
+	attributes_->set_auto_exposure_enabled(false);
 	world_->set_camera_attributes(attributes_);
+	exposure_effect_.instantiate();
+	compositor_.instantiate();
+	TypedArray<CompositorEffect> effects;
+	effects.push_back(exposure_effect_);
+	compositor_->set_compositor_effects(effects);
+	world_->set_compositor(compositor_);
 	p_parent->add_child(world_);
 	apply(render::look_frame_of(env.base), true);
 }
@@ -207,10 +220,7 @@ void LookBridge::update(const LevelUpload &p_upload, const Vector3 &p_camera) {
 		cut_pending_ = false;
 		sky_full_ = true;
 		sky_->set_process_mode(Sky::PROCESS_MODE_QUALITY);
-		if (attributes_->is_auto_exposure_enabled()) {
-			attributes_->set_auto_exposure_enabled(false);
-			attributes_->set_auto_exposure_enabled(true);
-		}
+		exposure_effect_->reset();
 	} else if (sky_full_) {
 		sky_full_ = false;
 		sky_->set_process_mode(Sky::PROCESS_MODE_INCREMENTAL);
@@ -286,24 +296,22 @@ void LookBridge::apply(const render::LookFrame &p_f, bool p_force) {
 		s.fog_color = p_f.fog_color;
 	}
 
-	if (first || moved(s.middle_gray, p_f.middle_gray) || moved(s.min_exposure, p_f.min_exposure) || moved(s.max_exposure, p_f.max_exposure) ||
-			moved(s.exposure_speed, p_f.exposure_speed) || moved(s.exposure, p_f.exposure)) {
+	if (first || moved(s.middle_gray, p_f.middle_gray) || moved(s.min_exposure, p_f.min_exposure) ||
+			moved(s.max_exposure, p_f.max_exposure) || moved(s.exposure_time, p_f.exposure_time) ||
+			moved(s.exposure, p_f.exposure)) {
 		static const std::string fixed = user_arg_value("look-exposure");
 		const bool automatic = fixed.empty() && !debug_off("exposure");
-		attributes_->set_auto_exposure_enabled(automatic);
-		if (automatic) {
-			environment_->set_tonemap_exposure(1.0f);
-			attributes_->set_auto_exposure_scale(p_f.middle_gray);
-			attributes_->set_auto_exposure_min_sensitivity(p_f.middle_gray / std::fmax(p_f.max_exposure, 1e-3f) / kLuminancePerIso);
-			attributes_->set_auto_exposure_max_sensitivity(p_f.middle_gray / std::fmax(p_f.min_exposure, 1e-3f) / kLuminancePerIso);
-			attributes_->set_auto_exposure_speed(p_f.exposure_speed);
-		} else {
-			environment_->set_tonemap_exposure(fixed.empty() ? p_f.exposure : float(std::atof(fixed.c_str())));
+		exposure_effect_->set_enabled(automatic);
+		exposure_effect_->set_exposure(render::look_exposure_of(p_f));
+		float exposure = 1.0f;
+		if (!automatic) {
+			exposure = fixed.empty() ? p_f.exposure : float(std::atof(fixed.c_str()));
 		}
+		environment_->set_tonemap_exposure(exposure);
 		s.middle_gray = p_f.middle_gray;
 		s.min_exposure = p_f.min_exposure;
 		s.max_exposure = p_f.max_exposure;
-		s.exposure_speed = p_f.exposure_speed;
+		s.exposure_time = p_f.exposure_time;
 		s.exposure = p_f.exposure;
 	}
 
@@ -352,19 +360,34 @@ std::string LookBridge::describe() const {
 		return "look: not built";
 	}
 	const render::LookFrame &f = *applied_;
+	const std::optional<ExposureReading> measured =
+			exposure_effect_.is_valid() ? exposure_effect_->read() : std::nullopt;
+	const std::string failure = exposure_effect_.is_valid() ? exposure_effect_->error() : std::string();
+	std::string measured_text = "; measured exposure none";
+	if (measured) {
+		measured_text =
+				core::fmt("; measured exposure %.4f at luminance %.5f after %llu frames, the rule's target %.4f",
+						double(measured->state.exposure), double(measured->state.luminance),
+						static_cast<unsigned long long>(measured->frames),
+						double(render::exposure_target(measured->state.luminance, render::look_exposure_of(f))));
+	} else if (!failure.empty()) {
+		measured_text = "; exposure effect failed: " + failure;
+	}
 	char line[768];
 	std::snprintf(line, sizeof(line),
 			"look L1: sun (%.3f %.3f %.3f) x %.2f; ambient up (%.3f %.3f %.3f) down (%.3f %.3f %.3f); sky box sun lobe "
 			"(%.3f %.3f %.3f) size %.3f, "
 			"back lobe (%.3f %.3f %.3f) size %.3f; sky x%.2f (textures %d%d%d); fog %s %.0f..%.0f m "
-			"density %.3f curve %.2f; middle grey %.3f exposure %.2f (%.2f..%.2f); bloom %.3f; lut %d",
+			"density %.3f curve %.2f; middle grey %.3f exposure %.2f (%.2f..%.2f) over %.2f s, tonemap %s; bloom %.3f; "
+			"lut %d",
 			f.sun_color[0], f.sun_color[1], f.sun_color[2], f.sun_energy, f.ambient_up[0], f.ambient_up[1],
 			f.ambient_up[2], f.ambient_down[0], f.ambient_down[1], f.ambient_down[2], f.sun_lobe.color[0],
 			f.sun_lobe.color[1], f.sun_lobe.color[2], f.sun_lobe.size, f.back_lobe.color[0], f.back_lobe.color[1],
 			f.back_lobe.color[2], f.back_lobe.size, f.sky_brightness, int(sky_bound_[0]), int(sky_bound_[1]),
 			int(sky_bound_[2]), f.fog ? "on" : "off", f.fog_begin, f.fog_end, f.fog_density, f.fog_curve, f.middle_gray,
-			f.exposure, f.min_exposure, f.max_exposure, f.bloom, f.lut);
-	return line;
+			f.exposure, f.min_exposure, f.max_exposure, f.exposure_time, render::look_tonemap_name(f.tonemap), f.bloom,
+			f.lut);
+	return line + measured_text;
 }
 
 }

@@ -42,9 +42,11 @@ target_sources(bf3_render PRIVATE
     src/shader_database.cpp
     src/look_materials.cpp
     src/look_environment.cpp
+    src/look_exposure.cpp
     include/bf3/render/shader_database.h
     include/bf3/render/look_materials.h
     include/bf3/render/look_environment.h
+    include/bf3/render/look_exposure.h
 )
 
 target_sources(bf3_render PRIVATE

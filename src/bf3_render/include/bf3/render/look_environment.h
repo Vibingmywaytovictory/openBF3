@@ -31,6 +31,12 @@ inline constexpr float kBounceAlbedo = 0.25f;
 inline constexpr float kReferenceAlbedo = 0.3f;
 inline constexpr float kSunlitShare = 0.1f;
 
+enum class LookTonemap : uint8_t {
+	Filmic,
+	FilmicNeutral,
+};
+const char *look_tonemap_name(LookTonemap p_tonemap);
+
 struct LookEnvState {
 	bool light = false, enlighten = false, sky = false, fog = false, tonemap = false, correction = false;
 
@@ -58,6 +64,7 @@ struct LookEnvState {
 	float fog_tint = 0.0f;
 
 	float middle_gray = 0.18f, min_exposure = 1.0f, max_exposure = 1.0f, exposure_time = 0.5f;
+	LookTonemap tonemap_method = LookTonemap::FilmicNeutral;
 	LookVec3 bloom{};
 
 	LookVec3 brightness{ 1.0f, 1.0f, 1.0f }, contrast{ 1.0f, 1.0f, 1.0f }, saturation{ 1.0f, 1.0f, 1.0f };
@@ -114,8 +121,9 @@ struct LookFrame {
 	bool fog = false;
 	float fog_begin = 0.0f, fog_end = 0.0f, fog_density = 0.0f, fog_curve = 1.0f;
 	LookVec3 fog_color{};
-	float middle_gray = 0.18f, min_exposure = 1.0f, max_exposure = 1.0f, exposure_speed = 2.0f;
+	float middle_gray = 0.18f, min_exposure = 1.0f, max_exposure = 1.0f, exposure_time = 0.5f;
 	float exposure = 1.0f;
+	LookTonemap tonemap = LookTonemap::FilmicNeutral;
 	float bloom = 0.0f;
 	int32_t lut = -1;
 };

@@ -11,6 +11,7 @@
 #include "bf3/core/util/text.h"
 #include "bf3/render/level_scene.h"
 #include "bf3/render/look_environment.h"
+#include "bf3/render/look_exposure.h"
 #include "bf3/render/look_materials.h"
 #include "bf3/render/shader_database.h"
 #include "test_support.h"
@@ -673,6 +674,75 @@ TEST_SUITE("render-look-unit") {
 		CHECK(near(look_frame(env, { 0, 0, 0 }).sun_energy, 4.0f));
 	}
 
+	TEST_CASE("render.look.unit: the HDR exposure rule: Rec.601 luminance, key over luminance plus 0.001, clamp, "
+			  "adaptation") {
+		CHECK(near(exposure_luminance({ 1, 0, 0 }), 0.30f));
+		CHECK(near(exposure_luminance({ 0, 1, 0 }), 0.59f));
+		CHECK(near(exposure_luminance({ 0, 0, 1 }), 0.11f));
+		CHECK(near(exposure_luminance({ 1, 1, 1 }), 1.0f));
+		CHECK(!exposure_luminance_valid(0.000005f));
+		CHECK(!exposure_luminance_valid(20000.0f));
+		CHECK(!exposure_luminance_valid(std::numeric_limits<float>::quiet_NaN()));
+		CHECK(exposure_luminance_valid(0.00001f));
+		CHECK(exposure_luminance_valid(10000.0f));
+		const LookExposure open{ 0.18f, 0.01f, 100.0f, 0.8f };
+		CHECK(near(exposure_target(0.179f, open), 1.0f));
+		CHECK(near(exposure_target(0.0f, open), 100.0f));
+		const LookExposure caspian{ 0.12f, 1.1f, 3.0f, 0.8f };
+		CHECK(near(exposure_target(0.5f, caspian), 1.1f));
+		CHECK(near(exposure_target(0.01f, caspian), 3.0f));
+		CHECK(near(exposure_target(0.059f, caspian), 2.0f));
+
+		const ExposureState first = exposure_step(ExposureState{}, 0.059f, caspian, 0.016f, false);
+		CHECK(first.measured);
+		CHECK(near(first.exposure, 2.0f));
+		CHECK(near(first.luminance, 0.059f));
+		const ExposureState held = exposure_step(first, 0.000005f, caspian, 0.016f, false);
+		CHECK(held.exposure == first.exposure);
+		CHECK(held.luminance == first.luminance);
+		CHECK(!exposure_step(ExposureState{}, 20000.0f, caspian, 0.016f, false).measured);
+		const ExposureState half = exposure_step(first, 0.5f, caspian, 0.4f, false);
+		CHECK(near(half.exposure, 1.55f));
+		CHECK(near(exposure_step(first, 0.5f, caspian, 0.8f, false).exposure, 1.1f));
+		CHECK(near(exposure_step(first, 0.5f, caspian, 5.0f, false).exposure, 1.1f));
+		CHECK(near(exposure_step(first, 0.5f, caspian, 0.4f, true).exposure, 1.1f));
+		const LookExposure instant{ 0.12f, 1.1f, 3.0f, 0.01f };
+		CHECK(near(exposure_step(first, 0.5f, instant, 0.001f, false).exposure, 1.1f));
+
+		const std::string glsl = exposure_step_glsl();
+		CHECK(glsl.find("vec4 exposure_step(") != std::string::npos);
+		CHECK(glsl.find("//") == std::string::npos);
+		CHECK(glsl.find("/*") == std::string::npos);
+	}
+
+	TEST_CASE("render.look.unit: the tonemap method blends as a switch and reaches the frame") {
+		LookEnvironment env;
+		env.base.tonemap = true;
+		env.base.tonemap_method = LookTonemap::FilmicNeutral;
+		env.base.exposure_time = 0.8f;
+		LookArea area;
+		area.volume.kind = level::AreaVolume::Kind::Box;
+		area.volume.half = { 1.0f, 1.0f, 1.0f };
+		area.fade = 2.0f;
+		area.state.tonemap = true;
+		area.state.tonemap_method = LookTonemap::Filmic;
+		area.state.exposure_time = 0.4f;
+		env.areas.push_back(area);
+		const LookFrame inside = look_frame(env, { 0, 0, 0 });
+		CHECK(inside.tonemap == LookTonemap::Filmic);
+		CHECK(near(inside.exposure_time, 0.4f));
+		const LookFrame outside = look_frame(env, { 10, 0, 0 });
+		CHECK(outside.tonemap == LookTonemap::FilmicNeutral);
+		CHECK(near(outside.exposure_time, 0.8f));
+		CHECK(look_frame(env, { 2.5f, 0, 0 }).tonemap == LookTonemap::FilmicNeutral);
+		CHECK(look_frame(env, { 1.5f, 0, 0 }).tonemap == LookTonemap::Filmic);
+		const LookExposure e = look_exposure_of(inside);
+		CHECK(near(e.adjust_time, 0.4f));
+		CHECK(near(e.middle_gray, inside.middle_gray));
+		CHECK(std::string(look_tonemap_name(LookTonemap::Filmic)) == "Filmic");
+		CHECK(std::string(look_tonemap_name(LookTonemap::FilmicNeutral)) == "FilmicNeutral");
+	}
+
 	TEST_CASE("render.look.unit: look_grade") {
 		LookEnvState identity;
 		const LookVec3 c{ 0.2f, 0.5f, 0.9f };
@@ -890,6 +960,51 @@ TEST_SUITE("render-look") {
 		CHECK(near(f.sun_lobe.axis[1], -f.sun_direction[1]));
 		CHECK(f.exposure > f.min_exposure);
 		CHECK(f.exposure < f.max_exposure);
+		const SnapshotDiff diff = diff_snapshots(before, reader.snapshot());
+		std::printf("install.unchanged %s\n", diff.clean() ? "PASS" : diff.summary().c_str());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+	}
+
+	TEST_CASE("render.look: the tonemap components' method, key, exposure range and adjust time: MP_007 FilmicNeutral, "
+			  "MP_018 Filmic") {
+		InstallReader reader;
+		if (!reader.locate({})) {
+			bf3::test::skip_install_case(reader.describe().c_str());
+			return;
+		}
+		const InstallSnapshot before = reader.snapshot();
+		Result<std::shared_ptr<Install>> install = Install::open(reader);
+		REQUIRE(install.ok());
+		struct Expected {
+			const char *level;
+			const char *mode;
+			LookTonemap method;
+			float middle_gray, min_exposure, max_exposure, adjust_time;
+		};
+		const Expected expected[] = {
+			{ "MP_007", "ConquestSmall0", LookTonemap::FilmicNeutral, 0.12f, 1.1f, 3.0f, 0.8f },
+			{ "MP_018", "TeamDeathMatch0", LookTonemap::Filmic, 0.25f, 1.25f, 3.0f, 0.5f },
+		};
+		for (const Expected &e : expected) {
+			Result<std::unique_ptr<level::LoadedLevel>> loaded = level::load_level(*install, e.level, e.mode);
+			REQUIRE(loaded.ok());
+			Result<std::unique_ptr<level::World>> world = level::World::traverse(**loaded);
+			REQUIRE(world.ok());
+			Result<LookEnvironment> env = read_look_environment((*loaded)->db(), **world);
+			REQUIRE(env.ok());
+			const LookFrame f = look_frame_of(env->base);
+			std::printf("render.look %s: tonemap %s, middle grey %.3f, exposure %.2f..%.2f over %.2f s (%s)\n", e.level,
+					look_tonemap_name(f.tonemap), double(f.middle_gray), double(f.min_exposure), double(f.max_exposure),
+					double(f.exposure_time), env->base.source.c_str());
+			CHECK(env->base.tonemap);
+			CHECK(f.tonemap == e.method);
+			CHECK(near(f.middle_gray, e.middle_gray));
+			CHECK(near(f.min_exposure, e.min_exposure));
+			CHECK(near(f.max_exposure, e.max_exposure));
+			CHECK(near(f.exposure_time, e.adjust_time));
+			const LookExposure x = look_exposure_of(f);
+			CHECK(near(x.adjust_time, e.adjust_time));
+		}
 		const SnapshotDiff diff = diff_snapshots(before, reader.snapshot());
 		std::printf("install.unchanged %s\n", diff.clean() ? "PASS" : diff.summary().c_str());
 		CHECK_MESSAGE(diff.clean(), diff.summary());

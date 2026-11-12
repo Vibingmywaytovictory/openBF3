@@ -262,14 +262,16 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 			std::printf("  %s: sun %s x %.2f dir %s; ambient up %s horizon %s down %s; sky box sun lobe %s size %.3f, "
 						"back lobe %s size %.3f; "
 						"sky x%.2f horizon %s; fog %s %.0f..%.0f m density %.3f "
-						"curve %.2f colour %s; middle grey %.3f exposure %.2f (%.2f..%.2f); bloom %.3f; lut %d\n",
+						"curve %.2f colour %s; middle grey %.3f exposure %.2f (%.2f..%.2f) over %.2f s, tonemap %s; "
+						"bloom %.3f; lut %d\n",
 					p_label, v3(p_f.sun_color).c_str(), double(p_f.sun_energy), v3(p_f.sun_direction).c_str(),
 					v3(p_f.ambient_up).c_str(), v3(p_f.ambient_horizon).c_str(), v3(p_f.ambient_down).c_str(),
 					v3(p_f.sun_lobe.color).c_str(), double(p_f.sun_lobe.size), v3(p_f.back_lobe.color).c_str(),
 					double(p_f.back_lobe.size), double(p_f.sky_brightness), v3(p_f.horizon).c_str(),
 					p_f.fog ? "on" : "off", double(p_f.fog_begin), double(p_f.fog_end), double(p_f.fog_density),
 					double(p_f.fog_curve), v3(p_f.fog_color).c_str(), double(p_f.middle_gray), double(p_f.exposure),
-					double(p_f.min_exposure), double(p_f.max_exposure), double(p_f.bloom), p_f.lut);
+					double(p_f.min_exposure), double(p_f.max_exposure), double(p_f.exposure_time),
+					render::look_tonemap_name(p_f.tonemap), double(p_f.bloom), p_f.lut);
 		};
 		std::printf("environment: from data %d, %zu areas, %zu LUTs; base %s\n", env.from_data ? 1 : 0, env.areas.size(), env.luts.size(),
 				env.base.source.c_str());

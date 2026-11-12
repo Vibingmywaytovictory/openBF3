@@ -61,6 +61,8 @@ target_sources(bf3_godot PRIVATE
 target_sources(bf3_godot PRIVATE
     src/look_bridge.cpp
     src/look_bridge.h
+    src/exposure_effect.cpp
+    src/exposure_effect.h
 )
 
 target_sources(bf3_godot PRIVATE

@@ -15,6 +15,7 @@
 
 namespace godot {
 class CameraAttributesPractical;
+class Compositor;
 class DirectionalLight3D;
 class Environment;
 class ImageTexture3D;
@@ -26,6 +27,7 @@ class WorldEnvironment;
 
 namespace bf3::godot_side {
 
+class Bf3ExposureEffect;
 class LevelUpload;
 
 class LookBridge {
@@ -54,6 +56,8 @@ private:
 	godot::Ref<godot::ShaderMaterial> sky_material_;
 	godot::Ref<godot::Sky> sky_;
 	godot::Ref<godot::CameraAttributesPractical> attributes_;
+	godot::Ref<godot::Compositor> compositor_;
+	godot::Ref<Bf3ExposureEffect> exposure_effect_;
 	std::vector<godot::Ref<godot::ImageTexture3D>> luts_;
 	std::array<bool, 3> sky_bound_{};
 	std::optional<bf3::render::LookFrame> applied_;

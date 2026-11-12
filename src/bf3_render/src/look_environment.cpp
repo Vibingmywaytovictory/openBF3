@@ -88,6 +88,18 @@ std::optional<LookCubic> cubic(const EbxInstance &p_c, std::string_view p_field)
 	return out;
 }
 
+std::optional<LookTonemap> tonemap_of(const EbxInstance &p_c) {
+	const std::optional<EbxValue> v = p_c.get("TonemapMethod");
+	const std::optional<std::string_view> name = v ? v->enum_name() : std::nullopt;
+	if (name == "TonemapMethod_Filmic") {
+		return LookTonemap::Filmic;
+	}
+	if (name == "TonemapMethod_FilmicNeutral") {
+		return LookTonemap::FilmicNeutral;
+	}
+	return std::nullopt;
+}
+
 bool flag(const EbxInstance &p_c, std::string_view p_field, bool p_default) {
 	const std::optional<EbxValue> v = p_c.get(p_field);
 	const std::optional<bool> b = v ? v->as_bool() : std::nullopt;
@@ -183,6 +195,7 @@ bool read_component(const EbxResolver &p_db, const EbxInstance &p_c, const std::
 		r_state.min_exposure = std::clamp(number(p_c, "MinExposure").value_or(1.0f), 0.001f, 1000.0f);
 		r_state.max_exposure = std::clamp(number(p_c, "MaxExposure").value_or(1.0f), r_state.min_exposure, 1000.0f);
 		r_state.exposure_time = std::clamp(number(p_c, "ExposureAdjustTime").value_or(0.5f), 0.01f, 60.0f);
+		r_state.tonemap_method = tonemap_of(p_c).value_or(r_state.tonemap_method);
 		r_state.bloom = vec3(p_c, "BloomScale").value_or(LookVec3{});
 	} else if (p_c.is_a("ColorCorrectionComponentData")) {
 		if (r_state.correction) {
@@ -388,6 +401,9 @@ void blend_state(LookEnvState &r_state, const LookEnvState &p_a, float p_w) {
 		r_state.min_exposure = lerp1(r_state.min_exposure, p_a.min_exposure, p_w);
 		r_state.max_exposure = lerp1(r_state.max_exposure, p_a.max_exposure, p_w);
 		r_state.exposure_time = lerp1(r_state.exposure_time, p_a.exposure_time, p_w);
+		if (take) {
+			r_state.tonemap_method = p_a.tonemap_method;
+		}
 		r_state.bloom = lerp3(r_state.bloom, p_a.bloom, p_w);
 	}
 	if (p_a.correction && take) {
@@ -404,6 +420,10 @@ std::string lut_key(const LookEnvState &p_s) {
 	return std::string(buf) + p_s.grade_cube;
 }
 
+}
+
+const char *look_tonemap_name(LookTonemap p_tonemap) {
+	return p_tonemap == LookTonemap::Filmic ? "Filmic" : "FilmicNeutral";
 }
 
 float look_cubic(const LookCubic &p_c, float p_t) {
@@ -794,7 +814,8 @@ LookFrame look_frame_of(const LookEnvState &p_s) {
 	f.middle_gray = p_s.middle_gray;
 	f.min_exposure = p_s.min_exposure;
 	f.max_exposure = p_s.max_exposure;
-	f.exposure_speed = 1.0f / std::fmax(p_s.exposure_time, 0.01f);
+	f.exposure_time = p_s.exposure_time;
+	f.tonemap = p_s.tonemap_method;
 
 	const auto luma = [](const LookVec3 &p_c) { return 0.2126f * p_c[0] + 0.7152f * p_c[1] + 0.0722f * p_c[2]; };
 	const float ambient = 0.5f * (luma(f.ambient_up) + luma(f.ambient_horizon)) +

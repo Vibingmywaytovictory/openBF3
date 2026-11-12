@@ -3,6 +3,7 @@
 #include "audio_stream.h"
 #include "collision_overlay.h"
 #include "crowd_scene.h"
+#include "exposure_effect.h"
 #include "game_session.h"
 #include "level_session.h"
 #include "match_host.h"
@@ -55,6 +56,7 @@ static void initialize_openbf3(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(bf3::godot_side::Bf3WeaponInspector);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3CollisionOverlay);
 
+	GDREGISTER_CLASS(bf3::godot_side::Bf3ExposureEffect);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3LevelSession);
 	GDREGISTER_CLASS(bf3::godot_side::Bf3MatchHost);
 
