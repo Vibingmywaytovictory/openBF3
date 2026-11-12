@@ -3290,3 +3290,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * The repair tool repairs vehicles of team 0 or the shooter's by StartDamage 6 a shot, 60 health/s (R3-G3 E).
 * A detonation plays its explosion material's impact cell on the surface under it: an M67 on Caspian gravel gives fx_grenade_frag_01, fx_impact_gravel_m and decal_scorchmark_m_01.
 * RPG-7 and MBT shell per hit on Caspian's hulls from the rear, pinned in host.vehicles.damage: tanks 0 % then 20.25 % (RPG) and 27 % (shell) behind the 175 reactive shield, light vehicles 67.4 % (RPG) and 80 % (shell).
+* host.vehicles.damage.team: an engineer's repair tool in a Caspian match repairs his team's M1A2 10 times a second and is a plain hit on the enemy's T-90 (0 repairs, 10 hits).

@@ -5618,3 +5618,90 @@ TEST_SUITE("host-vehicles-damage-team") {
 		check_respawn(run);
 	}
 }
+
+namespace {
+
+float latest_initial_delay(const host::LevelVehicles &p_level) {
+	float latest = 0.0f;
+	for (const host::LevelVehicleSpawner &s : p_level.spawners) {
+		latest = std::max(latest, s.initial_spawn_delay);
+	}
+	return latest;
+}
+
+sim::Vec3 beside_hull(const Match &p_match, const net::VehicleWire &p_vehicle, float p_side) {
+	const std::array<float, 2> f = heading_of(p_vehicle.state.body.rotation);
+	const sim::Vec3 &c = p_vehicle.state.body.com_position;
+	return ground_at(*p_match.world, c[0] + p_side * f[1], c[2] - p_side * f[0], c[1] + 5.0f);
+}
+
+}
+
+TEST_SUITE("host-vehicles-damage-team") {
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: an engineer's repair tool repairs a vehicle of his team and is a "
+			  "plain hit on one of the enemy's (R3-G3 E)") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		std::unique_ptr<Match> m = start_match(*level, true, 113u, 0, 1);
+		tdm::ScriptedPeer &mechanic = m->join("mechanic");
+		mechanic.ready();
+		REQUIRE(wait_in_round(*m));
+		mechanic.spawn_request(uint8_t(host::KitRole::Engineer));
+		REQUIRE(m->until([&] { return is_alive(m->state(mechanic.slot())); }, 900));
+		const uint8_t team = m->rules().team_of(uint8_t(mechanic.slot()));
+		const size_t tool_slot = size_t(core::gameplay::WeaponSlot::Gadget2);
+		const uint16_t tool = m->server.gunplay()->weapons(uint8_t(mechanic.slot())).slots[tool_slot].def;
+		REQUIRE(tool < gl.defs.size());
+		REQUIRE(gl.defs[tool].variant == "weapons/gadgets/repairtool/u_repairtool");
+		VehicleWatch watch;
+		std::optional<uint16_t> ours, theirs;
+		REQUIRE(m->until(
+				[&] {
+					watch.take(m->out, mechanic.peer());
+					for (const net::VehicleWire &w : watch.latest) {
+						if (!parked_upright(w.state.body.rotation, w.state.body.linear_velocity)) {
+							continue;
+						}
+						ours = !ours && w.team == team ? std::optional<uint16_t>(w.spawner) : ours;
+						theirs = !theirs && w.team != team && w.team != 0 ? std::optional<uint16_t>(w.spawner) : theirs;
+					}
+					return ours.has_value() && theirs.has_value();
+				},
+				sim::seconds_to_ticks(latest_initial_delay(lv)) + 600u));
+		bool fire = false;
+		sim::Vec3 aim{};
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			return aim_command(*m, p_tick, p_state, aim, sim::Pose::Stand, select_and_fire(uint8_t(tool_slot), fire));
+		};
+		const auto repair_run = [&](uint16_t p_spawner) {
+			m->teleport(mechanic, beside_hull(*m, *watch.of(p_spawner), 2.2f));
+			m->ticks(30);
+			watch.take(m->out, mechanic.peer());
+			aim = add(watch.of(p_spawner)->state.body.com_position, 0.0f, 0.3f, 0.0f);
+			m->ticks(30);
+			const uint64_t repairs = m->server.stats().vehicle_repairs, hits = m->server.stats().vehicle_hits;
+			fire = true;
+			m->ticks(60);
+			fire = false;
+			m->ticks(10);
+			return std::pair<uint64_t, uint64_t>{ m->server.stats().vehicle_repairs - repairs,
+				m->server.stats().vehicle_hits - hits };
+		};
+		const std::pair<uint64_t, uint64_t> own = repair_run(*ours);
+		const std::pair<uint64_t, uint64_t> enemy = repair_run(*theirs);
+		std::printf("repair: a second of the tool on his team's %s: %llu repairs, %llu hits; on the enemy's %s: %llu "
+					"repairs, %llu hits\n",
+				lv.kinds[lv.spawners[*ours].kind].blueprint.c_str(), (unsigned long long)own.first,
+				(unsigned long long)own.second, lv.kinds[lv.spawners[*theirs].kind].blueprint.c_str(),
+				(unsigned long long)enemy.first, (unsigned long long)enemy.second);
+		CHECK(own.first >= 5u);
+		CHECK(own.second == own.first);
+		CHECK(enemy.first == 0u);
+		CHECK(enemy.second >= 5u);
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+}
