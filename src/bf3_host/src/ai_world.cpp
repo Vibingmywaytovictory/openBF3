@@ -762,10 +762,12 @@ struct HostAiBots::Impl {
 	}
 };
 
-HostAiBots::HostAiBots(const ServerView &r_view, float p_view_distance, float p_call_seconds, MedicCall p_medic_call) :
+HostAiBots::HostAiBots(const ServerView &r_view, float p_view_distance, float p_call_seconds, MedicCall p_medic_call,
+		const ai::AiSettings &p_settings) :
 		impl_(std::make_unique<Impl>(r_view, p_call_seconds, std::move(p_medic_call))) {
 	Impl &m = *impl_;
 	m.view_distance = p_view_distance;
+	m.settings = p_settings;
 	m.settings.max_bots = -1;
 	m.settings.max_bots_include_humans = false;
 	ai::KnowledgeContext context;

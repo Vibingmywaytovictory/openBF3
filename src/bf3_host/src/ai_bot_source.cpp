@@ -415,8 +415,9 @@ void AiBotSource::admitted(uint8_t p_slot) {
 		return;
 	}
 	if (sh->ai == nullptr) {
-		sh->ai = std::make_shared<HostAiBots>(*sh->host.view, sh->config->perception.max_range_m,
-				sh->config->behaviours.call_s, [sh](uint8_t p_caller) { return ask_medic(*sh, p_caller); });
+		sh->ai = std::make_shared<HostAiBots>(
+				*sh->host.view, sh->config->perception.max_range_m, sh->config->behaviours.call_s,
+				[sh](uint8_t p_caller) { return ask_medic(*sh, p_caller); }, sh->config->ai);
 	}
 	m.bot = sh->ai->admit(p_slot, m, m.body.cfg().behaviours, &m);
 	if (m.bot == nullptr) {

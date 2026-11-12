@@ -81,7 +81,6 @@ host::GameServerConfig metro_config(
 	c.bots = fill;
 	auto bots = std::make_shared<host::TdmBotConfig>();
 	bots->count = 12;
-	bots->tuning_cfg = OPENBF3_BOT_TUNING_CFG;
 	c.tdm_bots = bots;
 	return c;
 }

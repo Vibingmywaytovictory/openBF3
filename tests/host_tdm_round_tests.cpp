@@ -29,6 +29,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <optional>
@@ -466,8 +467,8 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(one.aim.e0_deg == doctest::Approx(2.5f));
 		CHECK(one.perception.update_ticks == 3);
 		CHECK(one.aim.e_inf_deg == def.aim.e_inf_deg);
-		REQUIRE(host::parse_bot_tuning("bb.random.weight = 2.5\nbb.resupply_used_mags = 3\n", one).ok());
-		CHECK(one.behaviours.curves[size_t(ai::InfantryBehaviour::Random)].weight == doctest::Approx(2.5f));
+		REQUIRE(host::parse_bot_tuning("bb.resupply_used_mags = 3\n", one).ok());
+		CHECK_FALSE(host::parse_bot_tuning("bb.random.weight = 2.5\n", one).ok());
 		CHECK(one.behaviours.resupply_used_mags == 3u);
 
 		for (const char *bad : { "nope = 1\n", "skill_min = nan\n", "skill_min = 2\n", "skill_min\n",
@@ -486,6 +487,25 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK_FALSE(host::parse_bot_tuning(std::string(host::kMaxBotTuningLines, '\n'), big).ok());
 		CHECK(host::parse_bot_tuning(std::string(host::kMaxBotTuningLines - 1, '\n'), big).ok());
 		CHECK_FALSE(host::load_bot_tuning("no/such/bot_tuning.cfg", big).ok());
+	}
+	TEST_CASE("the bots' AI scripts: beside the config directory, the level's own AI.ai gives the settings and "
+			  "weights, a level without one stops the bots") {
+		const std::filesystem::path root = host::bot_ai_root(OPENBF3_BOT_TUNING_CFG);
+		CHECK(std::filesystem::exists(root / "AIDefault.ai"));
+		host::TdmBotConfig c;
+		c.behaviours.curves[0].weight = 99.0f;
+		const core::Status st = host::load_bot_ai(root, "MP_Subway", c);
+		REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
+		CHECK(c.behaviours == ai::BehaviourTuning{});
+		CHECK(c.ai.bot_skill == 0.75f);
+		CHECK(c.ai.sides == 2u);
+		CHECK(c.ai.vehicle("Infantry") == 0);
+		host::TdmBotConfig missing;
+		missing.ai.bot_skill = 0.5f;
+		const core::Status none = host::load_bot_ai(root, "XP9_None", missing);
+		REQUIRE_FALSE(none.ok());
+		CHECK(none.error().message.find("Levels/XP9_None/AI/AI.ai") != std::string::npos);
+		CHECK(missing.ai.bot_skill == 0.5f);
 	}
 
 	TEST_CASE("support and squads: under a squad order a bot helps a mate within bb.order_detour_m of its way to the "

@@ -70,6 +70,7 @@ core::Result<std::unique_ptr<TdmStrategy>> TdmStrategy::create(GameServer &r_ser
 	std::unique_ptr<TdmStrategy> s(new TdmStrategy(r_server, r_shared));
 	s->rules_ = rules;
 	s->tuning_ = r_shared.config->strategy;
+	s->settings_ = r_shared.config->ai;
 	s->settings_.max_bots = int32_t(net::kMaxPlayerRows);
 	AiWorldConfig config;
 	config.level = level;

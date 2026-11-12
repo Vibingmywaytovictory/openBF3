@@ -411,12 +411,12 @@ TEST_SUITE("ai-bot") {
 		CHECK(r.decide() == InfantryBehaviour::Random);
 	}
 
-	TEST_CASE(
-			"bb.* tuning: the defaults round-trip, out-of-range and unknown keys refused, weights reorder the choice") {
+	TEST_CASE("bb.* tuning: the defaults round-trip, out-of-range and unknown keys refused, the weights and curves "
+			  "being the .ai scripts', weights reorder the choice") {
 		const BehaviourTuning def;
 		BehaviourTuning t;
 		const std::string text = format_behaviour_tuning(def);
-		CHECK(text.find("bb.fire_infantery.weight = 7") != std::string::npos);
+		CHECK(text.find(".weight") == std::string::npos);
 		size_t start = 0;
 		while (start < text.size()) {
 			const size_t end = text.find('\n', start);
@@ -432,19 +432,19 @@ TEST_SUITE("ai-bot") {
 		CHECK(parse_behaviour_setting("bb.nope", "1", t).fault == core::KeyFault::UnknownKey);
 		CHECK(parse_behaviour_setting("bb.decision_ticks", "6", t).fault == core::KeyFault::UnknownKey);
 		CHECK(parse_behaviour_setting("bb.resupply_used_mags", "101", t).fault == core::KeyFault::OutOfRange);
-		CHECK(parse_behaviour_setting("bb.idle.weight", "nan", t).fault != core::KeyFault::None);
-		CHECK(parse_behaviour_setting("bb.idle.weight", "-1", t).fault == core::KeyFault::OutOfRange);
+		CHECK(parse_behaviour_setting("bb.idle.weight", "1", t).fault == core::KeyFault::UnknownKey);
+		CHECK(parse_behaviour_setting("bb.idle.slope", "1", t).fault == core::KeyFault::UnknownKey);
 		CHECK(t == def);
 
 		Rig r;
-		REQUIRE(parse_behaviour_setting("bb.random.weight", "20", r.tuning).fault == core::KeyFault::None);
+		r.tuning.curves[size_t(InfantryBehaviour::Random)].weight = 20.0f;
 		BotMain tuned(1, 1, 1, r.body, r.tuning);
 		tuned.update_bot(true, true);
 		r.body.s.navigable = true;
 		r.body.s.enemy_visible = true;
 		tuned.decision_making(sim::kTickSeconds);
 		CHECK(tuned.behaviour() == InfantryBehaviour::Random);
-		REQUIRE(parse_behaviour_setting("bb.random.offset", "0.1", r.tuning).fault == core::KeyFault::None);
+		r.tuning.curves[size_t(InfantryBehaviour::Random)].offset = 0.1f;
 		BotMain sloped(2, 2, 1, r.body, r.tuning);
 		sloped.update_bot(true, true);
 		sloped.decision_making(sim::kTickSeconds);

@@ -127,7 +127,8 @@ class HostAiBots final : public ai::AiTimer, public ai::AiGame, public ai::BotFa
 public:
 	using MedicCall = std::function<std::optional<uint8_t>(uint8_t p_caller)>;
 
-	HostAiBots(const ServerView &r_view, float p_view_distance, float p_call_seconds, MedicCall p_medic_call);
+	HostAiBots(const ServerView &r_view, float p_view_distance, float p_call_seconds, MedicCall p_medic_call,
+			const ai::AiSettings &p_settings = {});
 	~HostAiBots() override;
 	HostAiBots(const HostAiBots &) = delete;
 	HostAiBots &operator=(const HostAiBots &) = delete;

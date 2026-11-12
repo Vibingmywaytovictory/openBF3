@@ -1,6 +1,7 @@
 #include "bf3/host/tdm_brain.h"
 
 #include "bf3/ai/behaviour/behaviours.h"
+#include "bf3/ai/main/ai_script.h"
 #include "bf3/core/util/finite.h"
 #include "bf3/core/util/key_values.h"
 #include "bf3/host/ai_bot_source.h"
@@ -242,6 +243,22 @@ core::Status load_bot_tuning(const std::string &p_path, TdmBotConfig &r_config) 
 	return core::Status::success();
 }
 
+std::filesystem::path bot_ai_root(const std::string &p_tuning_cfg) {
+	return std::filesystem::path(p_tuning_cfg).parent_path().parent_path() / "ai";
+}
+
+core::Status load_bot_ai(const std::filesystem::path &p_root, std::string_view p_level, TdmBotConfig &r_config) {
+	core::Result<ai::AiConfig> loaded = ai::load_level_ai_config(p_root, p_level);
+	if (!loaded) {
+		return loaded.error();
+	}
+	ai::BehaviourTuning behaviours = r_config.behaviours;
+	BF3_TRY(ai::apply_behaviour_weights(*loaded, behaviours));
+	r_config.behaviours = behaviours;
+	r_config.ai = loaded->settings;
+	return core::Status::success();
+}
+
 core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config) {
 	if (p_config.tdm_bots == nullptr || p_config.tdm_bots->count == 0) {
 		return core::Status::success();
@@ -253,6 +270,7 @@ core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config
 	if (!config->tuning_cfg.empty()) {
 		auto tuned = std::make_shared<TdmBotConfig>(*config);
 		BF3_TRY(load_bot_tuning(config->tuning_cfg, *tuned));
+		BF3_TRY(load_bot_ai(bot_ai_root(config->tuning_cfg), p_config.level->level, *tuned));
 		tuned->count = config->count;
 		config = tuned;
 	}
