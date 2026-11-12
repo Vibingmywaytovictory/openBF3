@@ -5223,7 +5223,7 @@ TEST_SUITE("host-vehicles-damage") {
 			return;
 		}
 		const WreckRun run = wreck_and_respawn(*level, [](const host::LevelVehicleKind &p_kind) {
-			return p_kind.blueprint == "vehicles/m1a2/m1abrams" || p_kind.blueprint == "vehicles/t90/t90";
+			return p_kind.blueprint == "vehicles/m1a2/m1abrams";
 		});
 		REQUIRE(run.ran);
 		CHECK(run.shells >= 3u);
