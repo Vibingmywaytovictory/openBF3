@@ -6,6 +6,8 @@
 #include "bf3/core/gameplay/weapon_resolver.h"
 #include "bf3/core/util/finite.h"
 #include "bf3/core/util/format.h"
+#include "bf3/sim/collision_world.h"
+#include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/sim_time.h"
 
 #include <algorithm>
@@ -149,6 +151,8 @@ std::optional<core::EbxInstance> projectile_of(detail::Reader &r, const core::Eb
 void read_def(const core::EbxResolver &p_db, const gp::WeaponDef &p_def, size_t p_index, WeaponFireEffects &r_w, std::vector<std::string> &r_notes) {
 	r_w.trace_frequency = p_def.fire.trace_frequency;
 	r_w.bullet_material = p_def.projectile.material.resolved ? p_def.projectile.material.material() : kDefaultBulletMaterial;
+	r_w.has_explosion_material = p_def.projectile.explosion.present && p_def.projectile.explosion.material.resolved;
+	r_w.explosion_material = r_w.has_explosion_material ? p_def.projectile.explosion.material.material() : uint8_t(0);
 	r_w.tracer_speed = std::isfinite(p_def.fire.initial_speed[2]) ? std::max(0.0f, p_def.fire.initial_speed[2]) : 0.0f;
 	r_w.tracer_ttl = std::isfinite(p_def.projectile.time_to_live) ? std::max(0.0f, p_def.projectile.time_to_live) : 0.0f;
 	r_w.converge = p_def.projectile.visual_converge_distance > 0.0f && std::isfinite(p_def.projectile.visual_converge_distance) ?
@@ -1273,6 +1277,11 @@ struct FxTriggers::Impl {
 		const uint64_t seed = detonation_seed(config.match_seed, p_e.slot, p_e.id);
 		const Vec3 pos = from(p_e.pos);
 		const Vec3 n = normalize_or(from(p_e.dir), { 0, 1, 0 });
+		const ImpactTable *table = library.impacts();
+		const ImpactCell *cell = w != nullptr && w->has_explosion_material && table != nullptr &&
+						(p_e.material & kDetonationSurface) != 0
+				? table->select(w->explosion_material, uint8_t(p_e.material & 0xFFu))
+				: nullptr;
 		bool culled = false;
 		if (!name.empty()) {
 			if (const std::shared_ptr<const EffectDef> def = get(name)) {
@@ -1281,6 +1290,10 @@ struct FxTriggers::Impl {
 					++stats.detonations;
 				}
 			}
+		}
+		if (!culled && cell != nullptr && !cell->empty()) {
+			play_cell(*cell, p_e, seed, pos, n, p_age, true, true);
+			return;
 		}
 		if (!culled && config.decals) {
 			DecalCue d;
@@ -1495,6 +1508,31 @@ size_t FxTriggers::pending() const {
 
 size_t FxTriggers::live_tracers() const {
 	return impl_->tracers.size();
+}
+
+size_t resolve_detonation_surfaces(
+		std::span<present::PresentEvent> r_events, const ImpactTable &p_table, const sim::CollisionWorld &p_world) {
+	size_t resolved = 0;
+	for (present::PresentEvent &e : r_events) {
+		if (e.kind != present::PresentKind::Detonation || (e.material & kDetonationSurface) != 0) {
+			continue;
+		}
+		const Vec3 n = normalize_or(from(e.dir), { 0, 1, 0 });
+		const sim::Vec3 origin{ e.pos[0] + n.x * kSurfaceProbeLift, e.pos[1] + n.y * kSurfaceProbeLift,
+			e.pos[2] + n.z * kSurfaceProbeLift };
+		const float reach = kSurfaceProbeLift + kSurfaceProbeDepth;
+		sim::StaticHit hit;
+		if (!std::isfinite(origin[0]) || !std::isfinite(origin[1]) || !std::isfinite(origin[2]) ||
+				!p_world.ray(origin, sim::Vec3{ -n.x * reach, -n.y * reach, -n.z * reach },
+						sim::query_mask::kProjectile, &hit)) {
+			continue;
+		}
+		if (const std::optional<uint8_t> surface = p_table.surface_material(hit.tag.material)) {
+			e.material = kDetonationSurface | *surface;
+			++resolved;
+		}
+	}
+	return resolved;
 }
 
 const char *trigger_purpose_name(TriggerPurpose p_purpose) {

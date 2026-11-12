@@ -21,6 +21,10 @@
 #include <type_traits>
 #include <vector>
 
+namespace bf3::sim {
+class CollisionWorld;
+}
+
 namespace bf3::fx {
 
 inline constexpr uint32_t kMaxDecals = 256;
@@ -35,6 +39,9 @@ inline constexpr std::string_view kGrenadeEffectName = "fx_grenade_frag_01";
 
 inline constexpr std::string_view kScorchDecal = "decals/impacts/scorch/decal_scorchmark_m_01";
 inline constexpr uint8_t kDefaultBulletMaterial = 1;
+inline constexpr uint32_t kDetonationSurface = 0x100u;
+inline constexpr float kSurfaceProbeLift = 0.25f;
+inline constexpr float kSurfaceProbeDepth = 1.0f;
 inline constexpr uint32_t kDedupeKeys = 16384;
 inline constexpr uint32_t kMaxTracers = 256;
 inline constexpr uint32_t kMaxAttached = 512;
@@ -85,6 +92,8 @@ struct WeaponFireEffects {
 	int32_t trace_frequency = 0;
 	uint8_t bullet_material = 0;
 	bool firearm = true;
+	bool has_explosion_material = false;
+	uint8_t explosion_material = 0;
 
 	std::string detonation;
 	std::vector<std::string> deployed;
@@ -228,6 +237,9 @@ struct EffectSoundCue {
 };
 
 void effect_sound_cues(std::span<const FxEvent> p_events, std::vector<EffectSoundCue> &r_out);
+
+size_t resolve_detonation_surfaces(
+		std::span<present::PresentEvent> r_events, const ImpactTable &p_table, const sim::CollisionWorld &p_world);
 
 struct FxTriggerConfig {
 	uint8_t tier = kTierHigh;

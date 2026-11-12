@@ -47,6 +47,7 @@ struct GameFrame {
 	std::span<const int32_t> own_step_tags;
 	bool own_steps_animated = false;
 	std::span<const uint8_t> other_plants;
+	const sim::CollisionWorld *world = nullptr;
 };
 
 }

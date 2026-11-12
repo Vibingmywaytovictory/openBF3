@@ -3288,3 +3288,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Missiles step once per 30 Hz update by R2-G4 (thrust to MaxSpeed, gravity only with ApplyGravityWhenGuided, Drag per update after burnout); weapon blob format 6.
 * Explosion packs: C4 (Zoom detonator, inferred input), claymore and M15 read from ExplosionPackEntityData, tripped by R2-G4 C on 30 Hz checks and detonated through the shared blast; Metro TDM has six gadgets.
 * The repair tool repairs vehicles of team 0 or the shooter's by StartDamage 6 a shot, 60 health/s (R3-G3 E).
+* A detonation plays its explosion material's impact cell on the surface under it: an M67 on Caspian gravel gives fx_grenade_frag_01, fx_impact_gravel_m and decal_scorchmark_m_01.

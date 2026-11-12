@@ -15,6 +15,7 @@
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/text.h"
 #include "bf3/fx/effect_compiler.h"
 #include "bf3/fx/effect_library.h"
 #include "bf3/fx/fx_harness.h"
@@ -27,7 +28,10 @@
 #include "bf3/host/gunplay.h"
 #include "bf3/host/presentation_events.h"
 #include "bf3/render/texture_prep.h"
+#include "bf3/sim/collision_world.h"
+#include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/sim_time.h"
+#include "bf3/sim_harness/shooting_range.h"
 
 #include <algorithm>
 #include <chrono>
@@ -1464,7 +1468,8 @@ std::unique_ptr<LevelFx> level_fx(const std::shared_ptr<core::Install> &p_instal
 
 TEST_SUITE("fx-install-cells") {
 
-TEST_CASE("cells: Metro's fire effects, preload, the 1p flash fraction, in-game cells, cues; Caspian water") {
+TEST_CASE("cells: Metro's fire effects, preload, the 1p flash fraction, in-game cells, cues; Caspian water; an M67 on "
+		  "Caspian gravel picks fx_grenade_frag_01, fx_impact_gravel_m and decal_scorchmark_m_01") {
 	Retail r;
 	if (!open_retail(r)) {
 		return;
@@ -1889,6 +1894,56 @@ TEST_CASE("cells: Metro's fire effects, preload, the 1p flash fraction, in-game 
 		CHECK(ct.decals().empty());
 		MESSAGE("Caspian water (18): " << leaf(ct.starts()[0].def->name) << ", sound "
 									   << (ct.sounds().empty() ? std::string("-") : leaf(ct.sounds()[0].patch)));
+	}
+	{
+		size_t frag = (*gl)->defs.size();
+		for (size_t i = 0; i < (*gl)->defs.size(); ++i) {
+			frag = core::to_lower_ascii((*gl)->defs[i].variant) == "weapons/m67/u_m67" ? i : frag;
+		}
+		REQUIRE(frag < (*gl)->defs.size());
+		core::Result<FireEffectTable> cf = load_fire_effects(*caspian->sources->level, (*gl)->defs);
+		REQUIRE(cf.ok());
+		auto ctable = std::make_shared<FireEffectTable>(std::move(*cf));
+		REQUIRE(ctable->defs[frag].has_explosion_material);
+		const std::optional<uint8_t> gravel = caspian->impacts->material_by_name("Gravel");
+		REQUIRE(gravel.has_value());
+		uint32_t gravel_value = 0;
+		bool found = false;
+		for (uint32_t v = 0; v < (1u << 16) && !found; ++v) {
+			const std::optional<uint8_t> m = caspian->impacts->surface_material(v);
+			found = m.has_value() && *m == *gravel;
+			gravel_value = found ? v : gravel_value;
+		}
+		REQUIRE(found);
+		const float none[1] = { 0.0f };
+		const std::vector<sim::StaticTriangle> floor =
+				sw::range_wall_triangles(std::span<const float>(none, 0), 1.0f, 50.0f, 1.0f, 1.0f, gravel_value);
+		core::Result<std::shared_ptr<const sim::StaticWorldShapes>> shapes =
+				sim::build_static_world(std::span<const sim::StaticTriangle>(floor));
+		REQUIRE(shapes.ok());
+		core::Result<std::unique_ptr<sim::CollisionWorld>> cw = sim::CollisionWorld::create(*shapes);
+		REQUIRE(cw.ok());
+		hk::PresentEvent e = ev(hk::PresentKind::Detonation, 9, id++, uint16_t(frag), { 0, 0.1f, 5 }, { 0, 1, 0 });
+		hk::PresentEvent air = ev(hk::PresentKind::Detonation, 9, id++, uint16_t(frag), { 0, 20.0f, 5 }, { 0, 1, 0 });
+		std::array<hk::PresentEvent, 2> both{ e, air };
+		CHECK(resolve_detonation_surfaces(both, *caspian->impacts, **cw) == 1u);
+		CHECK(both[0].material == (kDetonationSurface | *gravel));
+		CHECK(both[1].material == 0u);
+		FxTriggers ct(world, *caspian->library, ctable, cfg);
+		ct.on_events(std::span<const hk::PresentEvent>(&both[0], 1), clock_at(0), kNear);
+		std::vector<std::string> started;
+		for (const TriggerStart &st : ct.starts()) {
+			CHECK(st.started);
+			started.push_back(leaf(st.def->name));
+		}
+		std::sort(started.begin(), started.end());
+		CHECK(started == std::vector<std::string>{ "fx_grenade_frag_01", "fx_impact_gravel_m" });
+		REQUIRE(ct.decals().size() == 1);
+		CHECK(leaf(ct.decals()[0].decal) == "decal_scorchmark_m_01");
+		MESSAGE("M67 on Caspian gravel (" << int(*gravel) << ", explosion material "
+										  << int(ctable->defs[frag].explosion_material) << "): " << started.size()
+										  << " effects, decal " << leaf(ct.decals()[0].decal) << ", sound "
+										  << (ct.sounds().empty() ? std::string("-") : leaf(ct.sounds()[0].patch)));
 	}
 	const double s_caspian = seconds_since(t5);
 	CHECK(t.stats().double_starts == 0);

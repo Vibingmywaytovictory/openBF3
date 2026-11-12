@@ -1070,6 +1070,7 @@ void step_game_parts(Node3D &r_parent, GameState &r_game, const host::Presentati
 	mf.now_ns = p_now_ns;
 	mf.dt = p_delta;
 	mf.events = r_game.events;
+	mf.world = r_game.world.get();
 	std::array<host::PresentedSoldier, bf3::net::kMaxSlots> soldiers{};
 	const size_t n = p_frame.valid ? host::present_others(p_frame, p_now_ns, soldiers) : 0;
 	std::array<host::PresentedOtherWeapon, bf3::net::kMaxSlots> weapons{};

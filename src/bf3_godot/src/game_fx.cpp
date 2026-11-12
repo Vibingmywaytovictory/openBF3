@@ -58,6 +58,7 @@ struct Bf3GameFx::Impl {
 	std::shared_ptr<const fx::FireEffectTable> fire;
 	std::vector<std::tuple<uint16_t, uint32_t, uint16_t>> accessory_effects;
 	std::unique_ptr<fx::FxWorld> world;
+	std::vector<host::PresentEvent> events;
 	std::unique_ptr<fx::FxTriggers> triggers;
 	fx::FxTriggerConfig config;
 	FxDecalAssets decal_assets;
@@ -445,7 +446,11 @@ void Bf3GameFx::step(const GameFrame &p_frame) {
 	fx::FxView view;
 	view.camera_position = p_frame.camera.trans;
 	view.camera_forward = p_frame.camera.forward;
-	m.triggers->on_events(p_frame.events, p_frame.clock, view);
+	m.events.assign(p_frame.events.begin(), p_frame.events.end());
+	if (p_frame.world != nullptr && m.library->impacts() != nullptr) {
+		fx::resolve_detonation_surfaces(m.events, *m.library->impacts(), *p_frame.world);
+	}
+	m.triggers->on_events(m.events, p_frame.clock, view);
 	for (const fx::DecalCue &c : m.triggers->decals()) {
 		m.decals.place(c);
 	}
