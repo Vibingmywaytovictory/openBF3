@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/sim/command.h"
+#include "bf3/sim/vehicle_types.h"
 #include "bf3/sim/weapons/weapon_input.h"
 
 #include <cstdint>
@@ -44,4 +45,15 @@ constexpr bool handbrake_held(uint32_t p_buttons) {
 	return (p_buttons & seat_buttons::kHandbrake) != 0;
 }
 
+constexpr VehicleCommand driver_command(const Command &p_command) {
+	VehicleCommand c;
+	c.tick = p_command.tick;
+	c.sequence = p_command.sequence;
+	c.throttle = p_command.move_forward;
+	c.brake = 0;
+	c.steer = p_command.move_right;
+	c.buttons = handbrake_held(p_command.buttons) ? vehicle_buttons::kHandbrake : uint8_t(0);
+	c.flags = vehicle_flags::kDriven;
+	return c;
+}
 }

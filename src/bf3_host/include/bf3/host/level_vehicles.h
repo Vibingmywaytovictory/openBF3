@@ -76,6 +76,11 @@ bool land_jeep(const sim::VehicleModel &p_model);
 
 std::optional<core::Vec3> vehicle_exit_point(const LevelVehicleKind &p_kind, uint8_t p_seat);
 
+sim::Vec3 vehicle_seat_point(const LevelVehicleKind &p_kind, uint8_t p_seat, const std::array<float, 4> &p_rotation,
+		const sim::Vec3 &p_origin);
+
+sim::Vec3 vehicle_body_origin(const sim::VehicleModel &p_model, const sim::VehicleBodyState &p_body);
+
 bool land_tracked(const sim::VehicleModel &p_model);
 
 sim::vehicles::VehicleDamageRule vehicle_damage_rule(const core::gameplay::VehicleDef &p_def);

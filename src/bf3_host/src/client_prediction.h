@@ -36,6 +36,7 @@ public:
 	bool motor_matches(uint64_t p_server_motor_hash);
 	void match_started(uint64_t p_now);
 	void attach_weapons(sim::WeaponLane *p_lane) { ring_->attach_weapons(p_lane); }
+	void set_seats(const sim::SeatSource *p_seats) { seats_ = p_seats; }
 	void discard_after(sim::Tick p_tick) { ring_->discard_after(p_tick); }
 
 	bool have_own() const { return have_own_; }
@@ -62,6 +63,7 @@ private:
 	ClientInput &input_;
 	ClientGunplay &gunplay_;
 	const sim::CollisionWorld *world_ = nullptr;
+	const sim::SeatSource *seats_ = nullptr;
 	sim::SoldierMotor motor_;
 	std::unique_ptr<sim::PredictionRing> ring_;
 	uint64_t motor_hash_ = 0;

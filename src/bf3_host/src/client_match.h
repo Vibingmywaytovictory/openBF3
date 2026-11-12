@@ -27,6 +27,7 @@ public:
 	void publish(PresentationFrame &r_frame, bool p_have_own, uint32_t p_own_life) const;
 	void take_logic(ClientLogicFeed &r_feed) { logic_.take(r_feed); }
 	const std::array<net::SoldierGear, net::kMaxSlots> &gear() const { return gear_; }
+	const ClientVehicles &vehicles() const { return vehicles_; }
 
 	uint64_t bad_events() const { return bad_events_; }
 	void stats(ClientStats &r_stats) const;

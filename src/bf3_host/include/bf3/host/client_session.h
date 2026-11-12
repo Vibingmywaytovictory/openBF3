@@ -214,6 +214,13 @@ struct ClientStats {
 	uint64_t spawn_answers = 0;
 	uint64_t vehicle_messages = 0;
 	uint64_t bad_vehicle_messages = 0;
+	uint64_t vehicle_predicted_ticks = 0;
+	uint64_t vehicle_replayed_ticks = 0;
+	uint64_t vehicle_prediction_matches = 0;
+	uint64_t vehicle_corrections = 0;
+	uint64_t vehicle_prediction_starts = 0;
+	uint64_t vehicle_prediction_failures = 0;
+	float vehicle_max_correction_m = 0.0f;
 };
 static_assert(std::is_trivially_copyable_v<ClientStats>);
 

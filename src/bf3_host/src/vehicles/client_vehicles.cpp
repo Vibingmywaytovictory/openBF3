@@ -183,11 +183,13 @@ void ClientVehicles::receive(std::span<const uint8_t> p_bytes) {
 			}
 			Tracked t;
 			t.newest = present_vehicle(w, m->server_tick);
+			t.wire = w;
 			t.history.push_back(t.newest.window[0]);
 			vehicles_.push_back(std::move(t));
 		} else if (m->server_tick >= at->newest.tick) {
 			const bool same_life = at->newest.generation == w.generation;
 			at->newest = present_vehicle(w, m->server_tick);
+			at->wire = w;
 			if (!same_life) {
 				at->history.clear();
 			}
@@ -210,6 +212,20 @@ void ClientVehicles::publish(PresentationFrame &r_frame) const {
 		r_frame.vehicles[i] = vehicles_[i].newest;
 		present_window(r_frame.vehicles[i], vehicles_[i].history, r_frame.render_ticks_at_publish);
 	}
+}
+
+std::optional<SeenSeat> ClientVehicles::seat_of(uint8_t p_slot) const {
+	if (p_slot == net::kNoVehicleOccupant) {
+		return std::nullopt;
+	}
+	for (const Tracked &t : vehicles_) {
+		for (uint8_t k = 0; k < t.wire.seat_count && k < t.wire.occupants.size(); ++k) {
+			if (t.wire.occupants[k] == p_slot) {
+				return SeenSeat{ t.newest.tick, k, &t.wire };
+			}
+		}
+	}
+	return std::nullopt;
 }
 
 void ClientVehicles::stats(ClientStats &r_stats) const {

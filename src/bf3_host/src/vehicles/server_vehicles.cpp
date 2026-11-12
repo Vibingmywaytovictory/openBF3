@@ -249,14 +249,7 @@ void ServerVehicles::drive(size_t p_slot, const sim::Command &p_command) {
 	if (seat->seat != 0) {
 		return;
 	}
-	sim::VehicleCommand &c = vehicles_[seat->vehicle].command;
-	c.tick = p_command.tick;
-	c.sequence = p_command.sequence;
-	c.throttle = p_command.move_forward;
-	c.brake = 0;
-	c.steer = p_command.move_right;
-	c.buttons = sim::vehicles::handbrake_held(p_command.buttons) ? sim::vehicle_buttons::kHandbrake : uint8_t(0);
-	c.flags = sim::vehicle_flags::kDriven;
+	vehicles_[seat->vehicle].command = sim::vehicles::driver_command(p_command);
 }
 
 void ServerVehicles::leave(size_t p_slot) {
@@ -586,9 +579,7 @@ std::optional<sim::Vec3> ServerVehicles::seat_position(size_t p_slot) const {
 	}
 	const sim::VehicleState s = world_->state(sim::VehicleSlot(seat->vehicle));
 	const LevelVehicleKind &kind = level_->kinds[level_->spawners[seat->vehicle].kind];
-	const core::Vec3 &at = kind.seat_defs[seat->seat].transform.trans;
-	const sim::Vec3 offset = rotate(s.body.rotation, sim::Vec3{ at[0], at[1], at[2] });
-	return sim::Vec3{ s.body.origin[0] + offset[0], s.body.origin[1] + offset[1], s.body.origin[2] + offset[2] };
+	return vehicle_seat_point(kind, seat->seat, s.body.rotation, s.body.origin);
 }
 
 std::optional<sim::Vec3> ServerVehicles::exit_position(size_t p_slot) const {

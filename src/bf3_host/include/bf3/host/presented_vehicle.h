@@ -51,6 +51,7 @@ struct PresentedVehicle {
 	int8_t gear = 0;
 	uint8_t turret_count = 0;
 	std::array<float, net::kMaxVehicleTurrets> turret_angle{};
+	uint8_t predicted = 0;
 	uint8_t window_count = 0;
 	std::array<PresentedVehicleSample, kVehicleWindow> window{};
 

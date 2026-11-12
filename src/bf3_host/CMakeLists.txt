@@ -59,6 +59,8 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/presented_vehicle.h
     src/vehicles/client_vehicles.h
     src/vehicles/client_vehicles.cpp
+    src/vehicles/client_vehicle_prediction.h
+    src/vehicles/client_vehicle_prediction.cpp
     src/spotter.cpp
     include/bf3/host/spotter.h
     src/client_session.cpp

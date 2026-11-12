@@ -11,6 +11,7 @@
 #include "client_prediction.h"
 #include "client_tracks.h"
 #include "client_transport.h"
+#include "vehicles/client_vehicle_prediction.h"
 
 #include "bf3/sim/collision_world.h"
 
@@ -110,6 +111,7 @@ private:
 	ClientMatch match{ feed, slot };
 	ClientGunplay gunplay{ config, feed, slot, now_ns, match.gear() };
 	OwnPrediction prediction{ config, clock, input, gunplay };
+	ClientVehiclePrediction vehicle_prediction;
 
 	void refuse(const char *p_reason);
 	void send_mismatch(uint8_t p_components, uint64_t p_now);

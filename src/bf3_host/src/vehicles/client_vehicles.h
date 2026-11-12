@@ -5,6 +5,7 @@
 #include "bf3/net/protocol.h"
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -12,15 +13,23 @@ namespace bf3::host {
 
 inline constexpr sim::Tick kVehicleStaleTicks = 120;
 
+struct SeenSeat {
+	sim::Tick tick = 0;
+	uint8_t seat = 0;
+	const net::VehicleWire *wire = nullptr;
+};
+
 class ClientVehicles {
 public:
 	void receive(std::span<const uint8_t> p_bytes);
 	void publish(PresentationFrame &r_frame) const;
 	void stats(ClientStats &r_stats) const;
+	std::optional<SeenSeat> seat_of(uint8_t p_slot) const;
 
 private:
 	struct Tracked {
 		PresentedVehicle newest;
+		net::VehicleWire wire;
 		std::vector<PresentedVehicleSample> history;
 	};
 

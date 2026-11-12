@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/sim/command.h"
+#include "bf3/sim/prediction.h"
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/soldier_state.h"
 #include "server_slots.h"
@@ -64,12 +65,7 @@ public:
 	}
 	void kill(size_t p_slot) { soldiers_[p_slot].state.health = 0.0f; }
 	void seat(size_t p_slot, const sim::Command &p_command, const sim::Vec3 &p_position) {
-		sim::SoldierState &s = soldiers_[p_slot].state;
-		s.tick = p_command.tick;
-		s.yaw = p_command.yaw;
-		s.pitch = p_command.pitch;
-		s.position = p_position;
-		s.velocity = {};
+		sim::seat_step(soldiers_[p_slot].state, p_command, p_position);
 	}
 
 	void take_rules(std::span<const sim::SoldierState> p_states, const SlotTable &p_slots) {

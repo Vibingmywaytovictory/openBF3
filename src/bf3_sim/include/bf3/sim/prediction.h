@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <type_traits>
 #include <vector>
 
@@ -52,9 +53,17 @@ struct CatchUpStats {
 	uint32_t synthesized = 0;
 };
 
+class SeatSource {
+public:
+	virtual ~SeatSource() = default;
+	virtual std::optional<Vec3> seat_at(Tick p_tick) const = 0;
+};
+
+void seat_step(SoldierState &r_state, const Command &p_command, const Vec3 &p_seat);
+
 CatchUpStats catch_up(const SoldierMotor &p_motor, const SoldierState &p_base, PredictionRing &r_ring, Tick p_until);
 CatchUpStats catch_up(const SoldierMotor &p_motor, const MotorModifiers &p_modifiers, const SoldierState &p_base,
-		PredictionRing &r_ring, Tick p_until);
+		PredictionRing &r_ring, Tick p_until, const SeatSource *p_seats = nullptr);
 
 }
 

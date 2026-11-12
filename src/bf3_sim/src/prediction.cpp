@@ -62,8 +62,16 @@ CatchUpStats catch_up(const SoldierMotor &p_motor, const SoldierState &p_base, P
 	return catch_up(p_motor, motor_modifiers(p_motor.params()), p_base, r_ring, p_until);
 }
 
+void seat_step(SoldierState &r_state, const Command &p_command, const Vec3 &p_seat) {
+	r_state.tick = p_command.tick;
+	r_state.yaw = p_command.yaw;
+	r_state.pitch = p_command.pitch;
+	r_state.position = p_seat;
+	r_state.velocity = {};
+}
+
 CatchUpStats catch_up(const SoldierMotor &p_motor, const MotorModifiers &p_modifiers, const SoldierState &p_base,
-		PredictionRing &r_ring, Tick p_until) {
+		PredictionRing &r_ring, Tick p_until, const SeatSource *p_seats) {
 	CatchUpStats stats;
 	SoldierState state = p_base;
 
@@ -96,7 +104,11 @@ CatchUpStats catch_up(const SoldierMotor &p_motor, const MotorModifiers &p_modif
 		const bool sent = e != nullptr && e->sent && e->command.tick == t;
 		const Command cmd = sent ? e->command : repeated_command(prev, t);
 		const SoldierState weapon_before = state;
-		p_motor.step(state, cmd, p_modifiers);
+		if (const std::optional<Vec3> seat = p_seats != nullptr ? p_seats->seat_at(t) : std::nullopt) {
+			seat_step(state, cmd, *seat);
+		} else {
+			p_motor.step(state, cmd, p_modifiers);
+		}
 		weapon_replay.step(cmd, weapon_before, state);
 		if (survives(t)) {
 			r_ring.put({ cmd, state, sent });

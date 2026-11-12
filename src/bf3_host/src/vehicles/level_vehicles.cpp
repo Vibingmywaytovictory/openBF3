@@ -7,6 +7,7 @@
 #include "bf3/core/level/vehicle_spawns.h"
 #include "bf3/host/level_load.h"
 #include "bf3/net/protocol.h"
+#include "bf3/sim/vehicles/vehicle_armament.h"
 #include "bf3/sim/vehicles/vehicle_targets.h"
 #include "bf3/sim/vehicles/vehicle_weapon_rules.h"
 
@@ -43,6 +44,17 @@ std::optional<core::Vec3> vehicle_exit_point(const LevelVehicleKind &p_kind, uin
 		}
 	}
 	return best->trans;
+}
+
+sim::Vec3 vehicle_seat_point(const LevelVehicleKind &p_kind, uint8_t p_seat, const std::array<float, 4> &p_rotation,
+		const sim::Vec3 &p_origin) {
+	const core::Vec3 at = p_seat < p_kind.seat_defs.size() ? p_kind.seat_defs[p_seat].transform.trans : core::Vec3{};
+	return sim::vehicles::hull_transform(p_rotation, p_origin).transform_point(at);
+}
+
+sim::Vec3 vehicle_body_origin(const sim::VehicleModel &p_model, const sim::VehicleBodyState &p_body) {
+	const sim::Vec3 com = sim::vehicles::hull_transform(p_body.rotation, {}).transform_point(p_model.center_of_mass);
+	return { p_body.com_position[0] - com[0], p_body.com_position[1] - com[1], p_body.com_position[2] - com[2] };
 }
 
 bool land_tracked(const sim::VehicleModel &p_model) {

@@ -126,6 +126,13 @@ void ClientLoop::handle_datagram(const net::NetSim::Datagram &p_d, uint64_t p_no
 
 void ClientLoop::client_tick(uint64_t p_now) {
 	prediction.decay(p_now);
+	vehicle_prediction.reconcile(
+			match.vehicles(), slot,
+			[&](sim::Tick p_tick) -> const sim::Command * {
+				const sim::PredictionEntry *e = prediction.entry(p_tick);
+				return e != nullptr ? &e->command : nullptr;
+			},
+			clock.next_tick());
 	if (pending_snapshot_valid && pending_snapshot.own.has_value() && prediction.have_own()) {
 		if (const std::optional<sim::Tick> discard = clock.buffer_report(pending_snapshot, p_now, input.next_sequence())) {
 			prediction.discard_after(*discard);
@@ -151,6 +158,7 @@ void ClientLoop::client_tick(uint64_t p_now) {
 		cmd = input.sample(c, prediction.own_life(), prediction.spawn_state());
 		gunplay.command_made(cmd, input.latest(), prediction.own_life(), p_now, link.have_snapshot(), link.newest_seq(), *build);
 		match.restrict(cmd);
+		vehicle_prediction.step(cmd);
 		if (prediction.step(base, cmd)) {
 			made = prediction.entry(c);
 			input.stepped(cmd);
@@ -178,6 +186,7 @@ void ClientLoop::publish(uint64_t p_now, const sim::PredictionEntry *p_made, con
 	f.first_snapshot_tick = first_snapshot_tick;
 	gunplay.publish(f, tracks.finish(f, link.have_snapshot(), gunplay.newest_tick(), gunplay.wants_poses()), *world);
 	match.publish(f, prediction.have_own(), prediction.own_life());
+	vehicle_prediction.publish(f);
 	stats_.own_shot_id_resets = feed.shot_id_resets();
 	stats_.connected = link.connected();
 	clock.publish_stats(stats_);
@@ -200,6 +209,7 @@ void ClientLoop::collect_stats() {
 	link.stats(stats_);
 	clock.stats(stats_);
 	prediction.stats(stats_);
+	vehicle_prediction.stats(stats_);
 	tracks.stats(stats_);
 	feed.stats(stats_);
 	match.stats(stats_);
@@ -303,6 +313,8 @@ core::Status ClientLoop::attach_level(std::shared_ptr<const SharedLevel> p_level
 	}
 	world = std::move(*created);
 	BF3_TRY(prediction.init(*world, p_level->motor));
+	BF3_TRY(vehicle_prediction.init(*p_level));
+	prediction.set_seats(&vehicle_prediction);
 	level = std::move(p_level);
 	following = false;
 	std::vector<HeldDatagram> replay;
@@ -327,6 +339,7 @@ core::Status ClientLoop::detach_level() {
 }
 
 void ClientLoop::reset_level_state() {
+	std::destroy_at(&vehicle_prediction);
 	std::destroy_at(&prediction);
 	std::destroy_at(&gunplay);
 	std::destroy_at(&match);
@@ -341,6 +354,7 @@ void ClientLoop::reset_level_state() {
 	std::construct_at(&match, feed, slot);
 	std::construct_at(&gunplay, config, feed, slot, now_ns, match.gear());
 	std::construct_at(&prediction, config, clock, input, gunplay);
+	std::construct_at(&vehicle_prediction);
 	world.reset();
 	level.reset();
 	have_match = false;
