@@ -72,6 +72,8 @@ struct VehicleSeat {
 
 uint16_t wire_health(const sim::vehicles::VehicleDamageRule &p_rule, const sim::vehicles::VehicleHealth &p_health);
 bool vehicle_burning(const sim::vehicles::VehicleDamageRule &p_rule, const sim::vehicles::VehicleHealth &p_health);
+sim::VehicleCommand disabled_command(
+		const sim::VehicleCommand &p_command, std::span<const core::gameplay::VehicleInputModifierDef> p_modifiers);
 
 class ServerVehicles {
 public:

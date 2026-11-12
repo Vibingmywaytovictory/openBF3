@@ -2216,6 +2216,33 @@ TEST_SUITE("tables") {
 		const VehicleDef growler = vehicle(*lib, "vehicles/growleritv/growleritv");
 		CHECK(growler.material.resolved);
 		CHECK(growler.material.instance != m1.material.instance);
+		const auto modifier = [](const VehicleDef &p_def,
+									  std::string_view p_action) -> std::optional<VehicleInputModifierDef> {
+			for (const VehicleInputModifierDef &d : p_def.disabled_input) {
+				if (d.action == p_action) {
+					return d;
+				}
+			}
+			return std::nullopt;
+		};
+		REQUIRE(m1.disabled_input.size() == 4);
+		REQUIRE(modifier(m1, "EIAThrottle").has_value());
+		CHECK(modifier(m1, "EIAThrottle")->scale == Approx(0.68));
+		CHECK(modifier(m1, "EIAThrottle")->offset == Approx(0));
+		REQUIRE(modifier(m1, "EIABrake").has_value());
+		CHECK(modifier(m1, "EIABrake")->scale == Approx(0.68));
+		REQUIRE(modifier(m1, "EIAYaw").has_value());
+		CHECK(modifier(m1, "EIAYaw")->scale == Approx(0.65));
+		REQUIRE(modifier(m1, "EIASprint").has_value());
+		CHECK(modifier(m1, "EIASprint")->scale == Approx(0));
+		CHECK(growler.disabled_input.empty());
+		CHECK(apply_input_modifiers(m1.disabled_input, "EIAThrottle", 1.0f) == Approx(0.68));
+		CHECK(apply_input_modifiers(m1.disabled_input, "EIAYaw", -1.0f) == Approx(-0.65));
+		CHECK(apply_input_modifiers(m1.disabled_input, "EIAPitch", 0.5f) == Approx(0.5));
+		const VehicleInputModifierDef offset{ "EIAThrottle", 0.65f, -0.2f };
+		CHECK(apply_input_modifiers(std::span(&offset, 1), "EIAThrottle", 0.0f) == Approx(-0.2));
+		const VehicleInputModifierDef push{ "EIARoll", 1.0f, 0.5f };
+		CHECK(apply_input_modifiers(std::span(&push, 1), "EIARoll", 0.8f) == Approx(1.0));
 		const VehicleTurretDef *ring = turret(m1, 0, 1, true);
 		const VehicleTurretDef *gun = turret(m1, 0, 0, false);
 		const VehicleTurretDef *hmg = turret(m1, 1, 1, false);

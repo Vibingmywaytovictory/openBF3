@@ -43,6 +43,7 @@ struct LevelVehicleKind {
 	core::gameplay::MaterialPairRef material;
 	std::array<bool, net::kMaxVehicleSeats> exposed{};
 	float min_speed_for_mine = 0;
+	std::vector<core::gameplay::VehicleInputModifierDef> disabled_input;
 };
 
 struct LevelVehicleSpawner {

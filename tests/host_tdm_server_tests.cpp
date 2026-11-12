@@ -5627,6 +5627,25 @@ TEST_SUITE("host-vehicles-unit") {
 		CHECK(v.condition == sim::vehicles::VehicleCondition::Disabled);
 		CHECK(v.burning);
 	}
+
+	TEST_CASE("vehicles: a disabled vehicle's driver input goes through the data's input modifiers: EIAThrottle on "
+			  "the forward pedal, EIABrake on the back pedal and the brake, EIAYaw on the steer") {
+		const std::vector<core::gameplay::VehicleInputModifierDef> tank{ { "EIAThrottle", 0.68f, 0.0f },
+			{ "EIABrake", 0.68f, 0.0f }, { "EIAYaw", 0.65f, 0.0f }, { "EIASprint", 0.0f, 0.0f } };
+		sim::VehicleCommand c;
+		c.throttle = 127;
+		c.steer = -127;
+		c.brake = 255;
+		c.buttons = sim::vehicle_buttons::kHandbrake;
+		const sim::VehicleCommand d = host::disabled_command(c, tank);
+		CHECK(int(d.throttle) == 86);
+		CHECK(int(d.steer) == -83);
+		CHECK(int(d.brake) == 173);
+		CHECK(d.buttons == c.buttons);
+		c.throttle = -100;
+		CHECK(int(host::disabled_command(c, tank).throttle) == -68);
+		CHECK(host::disabled_command(c, {}) == c);
+	}
 }
 
 TEST_SUITE("host-vehicles-damage") {

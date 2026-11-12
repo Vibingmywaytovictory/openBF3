@@ -9,6 +9,7 @@
 
 #include <array>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -100,6 +101,12 @@ struct VehicleSeatDef {
 	std::vector<VehicleCameraDef> cameras;
 };
 
+struct VehicleInputModifierDef {
+	std::string action;
+	float scale = 1;
+	float offset = 0;
+};
+
 struct VehicleDef {
 	std::string blueprint;
 	std::string name_sid;
@@ -138,6 +145,7 @@ struct VehicleDef {
 	float kill_soldier_collision_speed_threshold = 0;
 	float min_speed_for_mine_activation = 0;
 	bool use_prediction = false;
+	std::vector<VehicleInputModifierDef> disabled_input;
 
 	std::vector<VehicleSeatDef> seats;
 	std::vector<core::Transform> exit_points;
@@ -152,4 +160,9 @@ struct VehicleDef {
 
 Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_blueprint, WorkBudget *p_budget = nullptr);
 
+Result<std::vector<VehicleInputModifierDef>> read_disabled_input(
+		const EbxResolver &p_db, const EbxInstance &p_blueprint, const EbxInstance &p_entity, WorkBudget &r_budget);
+
+float apply_input_modifiers(
+		std::span<const VehicleInputModifierDef> p_modifiers, std::string_view p_action, float p_level);
 }

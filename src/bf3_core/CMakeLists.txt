@@ -168,6 +168,7 @@ target_sources(bf3_core PRIVATE
     src/gameplay/eor_timeline.cpp
     src/gameplay/death_timeline.cpp
     src/gameplay/vehicle_def.cpp
+    src/gameplay/vehicle_disabled_input.cpp
     include/bf3/core/gameplay/logic_world.h
     include/bf3/core/gameplay/soldier_def.h
     include/bf3/core/gameplay/kit_def.h

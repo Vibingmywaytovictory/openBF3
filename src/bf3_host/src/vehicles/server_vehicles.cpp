@@ -539,8 +539,11 @@ core::Status ServerVehicles::step(sim::Tick p_tick, uint64_t p_weapon_seed) {
 	for (size_t i = 0; i < vehicles_.size(); ++i) {
 		if (vehicles_[i].live) {
 			slots.push_back(sim::VehicleSlot(i));
-			commands.push_back(vehicles_[i].health.condition == sim::vehicles::VehicleCondition::Destroyed
-							? sim::VehicleCommand()
+			const sim::vehicles::VehicleCondition condition = vehicles_[i].health.condition;
+			commands.push_back(condition == sim::vehicles::VehicleCondition::Destroyed ? sim::VehicleCommand()
+							: condition == sim::vehicles::VehicleCondition::Disabled
+							? disabled_command(
+									  vehicles_[i].command, level_->kinds[level_->spawners[i].kind].disabled_input)
 							: vehicles_[i].command);
 		}
 	}
@@ -604,6 +607,20 @@ uint16_t wire_health(const sim::vehicles::VehicleDamageRule &p_rule, const sim::
 	}
 	const float ratio = std::clamp(sim::vehicles::vehicle_health(p_rule, p_health) / full, 0.0f, 1.0f);
 	return uint16_t(std::ceil(ratio * float(net::kVehicleHealthFull)));
+}
+
+sim::VehicleCommand disabled_command(
+		const sim::VehicleCommand &p_command, std::span<const core::gameplay::VehicleInputModifierDef> p_modifiers) {
+	const auto scaled = [&](std::string_view p_action, float p_axis, float p_full) {
+		return std::lround(core::gameplay::apply_input_modifiers(p_modifiers, p_action, p_axis / p_full) * p_full);
+	};
+	sim::VehicleCommand c = p_command;
+	const float throttle = float(std::max<int>(p_command.throttle, -127));
+	c.throttle =
+			int8_t(throttle >= 0.0f ? scaled("EIAThrottle", throttle, 127.0f) : -scaled("EIABrake", -throttle, 127.0f));
+	c.brake = uint8_t(std::clamp<long>(scaled("EIABrake", float(p_command.brake), 255.0f), 0, 255));
+	c.steer = int8_t(scaled("EIAYaw", float(std::max<int>(p_command.steer, -127)), 127.0f));
+	return c;
 }
 
 bool vehicle_burning(const sim::vehicles::VehicleDamageRule &p_rule, const sim::vehicles::VehicleHealth &p_health) {
