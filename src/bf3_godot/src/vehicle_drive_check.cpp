@@ -11,7 +11,9 @@
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace bf3::godot_side {
 
@@ -246,6 +248,20 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 							double(along), double(off), double(3.6f * speed(v->linear_velocity)), int(v->gear),
 							view->wheels.size(), double(spun), unsigned(wheel_turns_), unsigned(wheel_frames_),
 							double(eye.distance_to(view->body.origin))));
+			const host::ClientStats &st = f.stats;
+			const int64_t lead = int64_t(v->tick) - int64_t(f.newest_tick);
+			const int64_t need = std::max<int64_t>(1, int64_t(st.rtt_ms * double(sim::kSimHz) / 1000.0));
+			row("predicted",
+					v->predicted == 1 && v->tick == f.tick && lead >= need && st.vehicle_prediction_starts > 0 &&
+							st.vehicle_predicted_ticks > 0 && st.vehicle_prediction_failures == 0,
+					fmt("drawn at tick %u, own tick %u, %lld ticks ahead of the newest snapshot (%lld needed at %.0f "
+						"ms RTT), predicted %u; %llu starts, %llu predicted ticks, %llu replayed, %llu corrections "
+						"(largest %.3f m), %llu failures",
+							unsigned(v->tick), unsigned(f.tick), (long long)lead, (long long)need, st.rtt_ms,
+							unsigned(v->predicted), (unsigned long long)st.vehicle_prediction_starts,
+							(unsigned long long)st.vehicle_predicted_ticks,
+							(unsigned long long)st.vehicle_replayed_ticks, (unsigned long long)st.vehicle_corrections,
+							double(st.vehicle_max_correction_m), (unsigned long long)st.vehicle_prediction_failures));
 			shoot(p_in, "vehicle_drive");
 			mapper.script_press(InputMapper::VehicleAction::Camera);
 			enter(Phase::ThirdPerson);
