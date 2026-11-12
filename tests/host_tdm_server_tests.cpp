@@ -2824,6 +2824,148 @@ TEST_SUITE("host-gunplay-gadgets") {
 				(unsigned long long)gs.remote_detonations, (unsigned long long)gs.pack_detonations);
 	}
 
+	TEST_CASE("gadgets: a support's claymore lets its owner sprint through its cone and goes off on an enemy "
+			  "sprinting at it (R2-G4 C: the team skip, the strict speed and the half-angle), the kill on the owner") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		std::unique_ptr<Match> m = start_match(*level, true, 93u, 0, 1);
+		tdm::ScriptedPeer &sapper = m->join("sapper");
+		tdm::ScriptedPeer &enemy = m->join("enemy");
+		sapper.ready();
+		enemy.ready();
+		REQUIRE(wait_in_round(*m));
+		const uint8_t support = uint8_t(host::KitRole::Support);
+		const uint8_t team = m->rules().team_of(uint8_t(sapper.slot()));
+		const host::LoadoutKit *kit = gl.loadouts.kit(team, support);
+		REQUIRE(kit != nullptr);
+		const size_t gadget2 = size_t(core::gameplay::WeaponSlot::Gadget2);
+		const auto claymore = std::find_if(kit->slots[gadget2].begin(), kit->slots[gadget2].end(),
+				[](const host::LoadoutItem &i) { return i.unlock == "weapons/gadgets/claymore/u_claymore"; });
+		REQUIRE(claymore != kit->slots[gadget2].end());
+		net::LoadoutRequest request;
+		request.kit = support;
+		request.items[gadget2] = claymore->identifier;
+		m->server.on_receive(sapper.peer(), net::kChannelReliable, net::encode_loadout_request(request));
+		m->ticks(1);
+		sapper.spawn_request(support);
+		enemy.spawn_request(0);
+		REQUIRE(m->until([&] { return is_alive(m->state(sapper.slot())) && is_alive(m->state(enemy.slot())); }, 600));
+		REQUIRE(m->rules().team_of(uint8_t(sapper.slot())) != m->rules().team_of(uint8_t(enemy.slot())));
+		REQUIRE(m->server.gunplay()->weapons(uint8_t(sapper.slot())).slots[gadget2].def == claymore->def);
+
+		std::optional<sim::Vec3> spot;
+		std::array<float, 2> face{};
+		for (size_t s = 0; s < m->level->spawns.size() && !spot; ++s) {
+			const std::optional<sim::Vec3> p = floor_at(*m->world, m->level->spawns[s].position);
+			for (int k = 0; k < 8 && p && !spot; ++k) {
+				const float a = float(k) * sim::kTwoPi / 8.0f;
+				const std::array<float, 2> f{ std::sin(a), std::cos(a) };
+				bool lane = true;
+				for (float d = -5.0f; d <= 9.0f && lane; d += 0.5f) {
+					const std::optional<sim::Vec3> q = floor_at(*m->world, add(*p, d * f[0], 0.0f, d * f[1]));
+					lane = q && std::fabs((*q)[1] - (*p)[1]) < 0.15f &&
+							m->motor.fits_standing(add(*q, 0.0f, 0.05f, 0.0f)) &&
+							clear(*m->world, add(*p, 0.0f, 1.0f, 0.0f), add(*q, 0.0f, 1.0f, 0.0f));
+				}
+				if (lane) {
+					spot = p;
+					face = f;
+				}
+			}
+		}
+		REQUIRE(spot.has_value());
+		const auto at = [&](float p_d) { return add(*spot, p_d * face[0], 0.05f, p_d * face[1]); };
+		m->teleport(sapper, at(0.0f));
+		m->teleport(enemy, at(-30.0f));
+		m->ticks(20);
+		bool lay = false;
+		bool run = false;
+		const auto runner = [&](sim::Command p_command) {
+			if (run) {
+				p_command.yaw = sim::quantize_yaw(std::atan2(-face[0], -face[1]));
+				p_command.pitch = 0;
+				p_command.move_forward = 127;
+				p_command.buttons |= sim::buttons::kSprint;
+			}
+			return p_command;
+		};
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			return runner(aim_command(*m, p_tick, p_state, at(1.0f), sim::Pose::Stand,
+					select_and_fire(uint8_t(gadget2), lay && (p_tick % 30u) < 10u)));
+		};
+		m->scripts[1] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			return runner(sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose));
+		};
+		m->ticks(60);
+		lay = true;
+		const std::optional<sim::Tick> rested = rest_tick(*m, 1, 300);
+		lay = false;
+		REQUIRE(rested.has_value());
+		REQUIRE(m->server.gunplay()->deployables().size() == 1u);
+		const sw::Deployable placed = m->server.gunplay()->deployables()[0];
+		CHECK(placed.def == claymore->def);
+		const float along = (placed.position[0] - (*spot)[0]) * face[0] + (placed.position[2] - (*spot)[2]) * face[1];
+		const float facing = std::atan2(placed.facing[0] * face[1] - placed.facing[2] * face[0],
+				placed.facing[0] * face[0] + placed.facing[2] * face[1]);
+		std::printf("claymore: rests %.2f m along the lane, facing %.1f deg off it\n", double(along),
+				double(facing / core::kDegToRadF));
+		REQUIRE(std::fabs(facing) < 10.0f * core::kDegToRadF);
+		const auto stats = [&] { return m->server.gunplay()->gadget_stats(); };
+		const auto sprint_through = [&](tdm::ScriptedPeer &r_peer) {
+			m->teleport(r_peer, at(along + 7.0f));
+			m->ticks(20);
+			run = true;
+			float fastest = 0.0f;
+			m->until(
+					[&] {
+						const sim::SoldierState *s = m->state(r_peer.slot());
+						if (s == nullptr || !is_alive(s)) {
+							return true;
+						}
+						const float d =
+								(s->position[0] - (*spot)[0]) * face[0] + (s->position[2] - (*spot)[2]) * face[1];
+						if (std::fabs(d - along) < 1.5f) {
+							fastest = std::max(fastest, std::hypot(s->velocity[0], s->velocity[2]));
+						}
+						return d < along - 3.0f || stats().pack_detonations > 0u;
+					},
+					240);
+			run = false;
+			return fastest;
+		};
+		m->ticks(sim::seconds_to_ticks(3.5f));
+		m->teleport(enemy, at(-30.0f));
+		const float own_speed = sprint_through(sapper);
+		std::printf("claymore: its owner sprinted through it at %.2f m/s: %llu soldier trips\n", double(own_speed),
+				(unsigned long long)stats().field.soldier_trips);
+		CHECK(own_speed > 3.8f);
+		CHECK(stats().field.soldier_trips == 0u);
+		CHECK(stats().pack_detonations == 0u);
+		CHECK(m->server.gunplay()->deployables().size() == 1u);
+		m->teleport(sapper, at(-30.0f));
+		m->ticks(20);
+		const int kills_before = int(m->row(sapper.slot())->kills);
+		const float enemy_speed = sprint_through(enemy);
+		m->ticks(5);
+		std::printf("claymore: the enemy sprinted at it at %.2f m/s: %llu soldier trips, %llu pack detonations, enemy "
+					"%s\n",
+				double(enemy_speed), (unsigned long long)stats().field.soldier_trips,
+				(unsigned long long)stats().pack_detonations, is_alive(m->state(enemy.slot())) ? "alive" : "dead");
+		CHECK(enemy_speed > 3.8f);
+		CHECK(stats().field.soldier_trips == 1u);
+		CHECK(stats().pack_detonations == 1u);
+		CHECK(m->server.gunplay()->deployables().empty());
+		CHECK_FALSE(is_alive(m->state(enemy.slot())));
+		const net::DeathEvent *death = last_death(sapper, enemy.slot());
+		REQUIRE(death != nullptr);
+		CHECK(int(death->killer) == sapper.slot());
+		CHECK(death->def == claymore->def);
+		CHECK(int(m->row(sapper.slot())->kills) == kills_before + 1);
+	}
+
 	TEST_CASE("gadgets: a recon's radio beacon is a spawn point for its squad: a mate's beacon SpawnRequest deploys at "
 			  "it; with no beacon, outside the squad or on the other team it is refused") {
 		tdm::TdmLevel *level = tdm::load_tdm_level_once();

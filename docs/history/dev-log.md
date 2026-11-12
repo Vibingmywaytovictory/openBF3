@@ -3292,3 +3292,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * RPG-7 and MBT shell per hit on Caspian's hulls from the rear, pinned in host.vehicles.damage: tanks 0 % then 20.25 % (RPG) and 27 % (shell) behind the 175 reactive shield, light vehicles 67.4 % (RPG) and 80 % (shell).
 * host.vehicles.damage.team: an engineer's repair tool in a Caspian match repairs his team's M1A2 10 times a second and is a plain hit on the enemy's T-90 (0 repairs, 10 hits).
 * An M15 or claymore skips a vehicle by its driver's team (R2-G4 C), not the hull's spawner team: in a Caspian match the layer's mate drives an enemy buggy over his M15 without a trip, an enemy backs it over and the mine wrecks it with the kill on the layer; host.vehicles.damage.team.
+* host.gunplay.gadgets: a support's claymore on Metro lets its owner sprint through its cone at 6.5 m/s and goes off on an enemy sprinting at it, killing him with the kill and the claymore def on the owner.
