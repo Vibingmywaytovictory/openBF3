@@ -13,6 +13,8 @@ namespace bf3::host {
 
 namespace {
 
+static_assert(sim::weapons::kNoPackDriver == net::kNoVehicleOccupant);
+
 sim::Vec3 rotate(const std::array<float, 4> &p_q, const sim::Vec3 &p_v) {
 	const float x = p_q[0], y = p_q[1], z = p_q[2], w = p_q[3];
 	const sim::Vec3 t = { 2.0f * (y * p_v[2] - z * p_v[1]), 2.0f * (z * p_v[0] - x * p_v[2]),
@@ -320,9 +322,8 @@ void ServerVehicles::refresh_targets() {
 		targets_.push_back(t);
 		const sim::VehicleState state = world_->state(sim::VehicleSlot(i));
 		pack_vehicles_.push_back(
-				sim::weapons::PackVehicle{ v.occupants[0] != net::kNoVehicleOccupant ? v.team : uint8_t(0),
-						hull_centre(i), state.body.com_position, state.body.linear_velocity,
-						level_->kinds[level_->spawners[i].kind].min_speed_for_mine });
+				sim::weapons::PackVehicle{ 0, hull_centre(i), state.body.com_position, state.body.linear_velocity,
+						level_->kinds[level_->spawners[i].kind].min_speed_for_mine, v.occupants[0] });
 	}
 }
 

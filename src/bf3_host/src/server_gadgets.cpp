@@ -183,7 +183,11 @@ void ServerGadgets::detonate_packs(sim::Tick p_tick, std::span<const sim::Soldie
 		pack_soldiers_.push_back(sw::PackSoldier{ uint8_t(i), p_teams[i], s.position, core::vec::length(s.velocity) });
 	}
 	if (sw::starts_sway_tick(p_tick)) {
-		field_.arm_packs(pack_soldiers_, p_vehicles, sw::kSwaySeconds);
+		pack_vehicles_.assign(p_vehicles.begin(), p_vehicles.end());
+		for (sw::PackVehicle &v : pack_vehicles_) {
+			v.driver_team = v.driver < p_teams.size() ? p_teams[v.driver] : uint8_t(0);
+		}
+		field_.arm_packs(pack_soldiers_, pack_vehicles_, sw::kSwaySeconds);
 	}
 	const std::vector<sw::Deployable> boom = field_.take_detonating();
 	if (boom.empty()) {

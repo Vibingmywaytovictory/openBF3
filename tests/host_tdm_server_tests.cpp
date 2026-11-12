@@ -5704,4 +5704,198 @@ TEST_SUITE("host-vehicles-damage-team") {
 		CHECK(enemy.second >= 5u);
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
+
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: an engineer's M15 stays quiet under his mate driving an enemy hull "
+			  "and goes off under an enemy driver backing it over the mine (R2-G4 C: the driver's team counts), "
+			  "wrecking it with the kill on the engineer") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		std::unique_ptr<Match> m = start_match(*level, true, 113u, 0, 1);
+		tdm::ScriptedPeer &sapper = m->join("sapper");
+		tdm::ScriptedPeer &enemy = m->join("enemy");
+		sapper.ready();
+		enemy.ready();
+		REQUIRE(wait_in_round(*m));
+		std::vector<Script *> bots{ m->bot(), m->bot() };
+		const uint8_t engineer = uint8_t(host::KitRole::Engineer);
+		const uint8_t team = m->rules().team_of(uint8_t(sapper.slot()));
+		const uint8_t other = m->rules().team_of(uint8_t(enemy.slot()));
+		REQUIRE(team != other);
+		Script *mate = nullptr;
+		for (Script *b : bots) {
+			mate = m->rules().team_of(uint8_t(b->slot)) == team ? b : mate;
+		}
+		REQUIRE(mate != nullptr);
+		const host::LoadoutKit *kit = gl.loadouts.kit(team, engineer);
+		REQUIRE(kit != nullptr);
+		const size_t mine_slot = size_t(core::gameplay::WeaponSlot::Gadget2);
+		const auto m15 = std::find_if(kit->slots[mine_slot].begin(), kit->slots[mine_slot].end(),
+				[](const host::LoadoutItem &i) { return i.unlock == "weapons/gadgets/m15/u_m15"; });
+		REQUIRE(m15 != kit->slots[mine_slot].end());
+		net::LoadoutRequest request;
+		request.kit = engineer;
+		request.items[mine_slot] = m15->identifier;
+		m->server.on_receive(sapper.peer(), net::kChannelReliable, net::encode_loadout_request(request));
+		m->ticks(1);
+		sapper.spawn_request(engineer);
+		enemy.spawn_request(0);
+		REQUIRE(m->until(
+				[&] {
+					return is_alive(m->state(sapper.slot())) && is_alive(m->state(enemy.slot())) &&
+							is_alive(m->state(mate->slot));
+				},
+				900));
+		REQUIRE(m->server.gunplay()->weapons(uint8_t(sapper.slot())).slots[mine_slot].def == m15->def);
+
+		VehicleWatch watch;
+		std::optional<uint16_t> hull;
+		float hull_clear = 0.0f;
+		REQUIRE(m->until(
+				[&] {
+					watch.take(m->out, sapper.peer());
+					std::vector<sim::Vec3> others;
+					for (const net::VehicleWire &o : watch.latest) {
+						others.push_back(o.state.body.com_position);
+					}
+					for (const net::VehicleWire &w : watch.latest) {
+						if (w.team != other || host::land_tracked(*lv.kinds[lv.spawners[w.spawner].kind].model) ||
+								!parked_upright(w.state.body.rotation, w.state.body.linear_velocity)) {
+							continue;
+						}
+						const float c =
+								clear_run(*m->world, w.state.body.com_position, w.state.body.rotation, others, 40.0f);
+						if (c > hull_clear) {
+							hull = w.spawner;
+							hull_clear = c;
+						}
+					}
+					return hull_clear >= 35.0f;
+				},
+				sim::seconds_to_ticks(latest_initial_delay(lv)) + 600u));
+		const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[*hull].kind];
+		const net::VehicleWire parked = *watch.of(*hull);
+		const sim::Vec3 start = parked.state.body.com_position;
+		const std::array<float, 2> line = heading_of(parked.state.body.rotation);
+		const auto along = [&](const sim::Vec3 &p_at) {
+			return (p_at[0] - start[0]) * line[0] + (p_at[2] - start[2]) * line[1];
+		};
+		const sim::Vec3 spot =
+				ground_at(*m->world, start[0] + 10.0f * line[0], start[2] + 10.0f * line[1], start[1] + 5.0f);
+		m->teleport(sapper, add(spot, 0.0f, 0.05f, 0.0f));
+		m->ticks(20);
+		bool lay = false;
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			return aim_command(*m, p_tick, p_state, add(spot, line[0], 0.1f, line[1]), sim::Pose::Stand,
+					select_and_fire(uint8_t(mine_slot), lay && (p_tick % 30u) < 10u));
+		};
+		m->ticks(60);
+		lay = true;
+		const std::optional<sim::Tick> rested = rest_tick(*m, 1, 300);
+		lay = false;
+		REQUIRE(rested.has_value());
+		REQUIRE(m->server.gunplay()->deployables().size() == 1u);
+		const sw::Deployable mine = m->server.gunplay()->deployables()[0];
+		CHECK(mine.def == m15->def);
+		const float off_line =
+				std::fabs((mine.position[0] - start[0]) * line[1] - (mine.position[2] - start[2]) * line[0]);
+		std::printf("M15: on the line of the %s of spawner %u (team %u, %.0f m clear), %.1f m along it and %.2f m "
+					"off it; the sapper is on team %u\n",
+				kind.blueprint.c_str(), unsigned(*hull), unsigned(other), double(hull_clear),
+				double(along(mine.position)), double(off_line), unsigned(team));
+		REQUIRE(off_line < 1.5f);
+		m->teleport(sapper, beside_hull(*m, parked, -25.0f));
+
+		sim::Tick use_at = 0;
+		int8_t throttle = 0;
+		const auto driver = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			sim::Command c = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
+			c.buttons |= p_tick == use_at ? sim::buttons::kUse : 0u;
+			c.move_forward = throttle;
+			return c;
+		};
+		const auto take_wheel = [&](int p_slot) {
+			throttle = 0;
+			const sim::Vec3 at = beside_hull(*m, *watch.of(*hull), 2.0f);
+			REQUIRE(m->until([&] { return horizontal(m->state(p_slot)->position, at) < 0.5f; }, 30));
+			use_at = m->now() + 3u;
+			REQUIRE(m->until(
+					[&] {
+						watch.take(m->out, sapper.peer());
+						return watch.of(*hull)->occupants[0] == uint8_t(p_slot);
+					},
+					60));
+		};
+		const auto stats = [&] { return m->server.gunplay()->gadget_stats(); };
+		m->ticks(sim::seconds_to_ticks(4.5f));
+		m->place(mate->slot, beside_hull(*m, *watch.of(*hull), 2.0f));
+		mate->fn = driver;
+		take_wheel(mate->slot);
+		throttle = 127;
+		CHECK(m->until(
+				[&] {
+					watch.take(m->out, sapper.peer());
+					return along(watch.of(*hull)->state.body.com_position) > 20.0f;
+				},
+				600));
+		throttle = -127;
+		REQUIRE(m->until(
+				[&] {
+					watch.take(m->out, sapper.peer());
+					const sim::Vec3 &v = watch.of(*hull)->state.body.linear_velocity;
+					return v[0] * line[0] + v[2] * line[1] <= 0.2f;
+				},
+				300));
+		throttle = 0;
+		std::printf("M15: the mate drove the %s %.1f m along its line over the mine: %llu vehicle trips\n",
+				kind.blueprint.c_str(), double(along(watch.of(*hull)->state.body.com_position)),
+				(unsigned long long)stats().field.vehicle_trips);
+		CHECK(stats().field.vehicle_trips == 0u);
+		CHECK(stats().pack_detonations == 0u);
+		CHECK(m->server.gunplay()->deployables().size() == 1u);
+		use_at = m->now() + 3u;
+		REQUIRE(m->until(
+				[&] {
+					watch.take(m->out, sapper.peer());
+					return watch.of(*hull)->occupants[0] == net::kNoVehicleOccupant;
+				},
+				60));
+		m->place(mate->slot, beside_hull(*m, *watch.of(*hull), 30.0f));
+
+		const uint64_t hits = m->server.stats().vehicle_hits;
+		const uint64_t destroyed = m->server.stats().vehicles_destroyed;
+		m->teleport(enemy, beside_hull(*m, *watch.of(*hull), 2.0f));
+		m->scripts[1] = driver;
+		take_wheel(enemy.slot());
+		throttle = -127;
+		CHECK(m->until([&] { return stats().pack_detonations > 0u; }, 600));
+		throttle = 0;
+		m->ticks(5);
+		size_t detonations = 0;
+		for (const net::CombatEvents &c : enemy.combat) {
+			for (const net::DetonationWire &d : c.detonations) {
+				detonations += d.def == m15->def ? 1u : 0u;
+			}
+		}
+		std::printf("M15: the enemy backed the %s over it: %llu vehicle trips, %llu pack detonations, %llu hull hits, "
+					"%zu detonations on his wire\n",
+				kind.blueprint.c_str(), (unsigned long long)stats().field.vehicle_trips,
+				(unsigned long long)stats().pack_detonations,
+				(unsigned long long)(m->server.stats().vehicle_hits - hits), detonations);
+		CHECK(stats().field.vehicle_trips == 1u);
+		CHECK(stats().pack_detonations == 1u);
+		CHECK(m->server.gunplay()->deployables().empty());
+		CHECK(m->server.stats().vehicle_hits > hits);
+		CHECK(detonations == 1u);
+		CHECK(m->server.stats().vehicles_destroyed == destroyed + 1u);
+		CHECK_FALSE(is_alive(m->state(enemy.slot())));
+		const net::DeathEvent *death = last_death(enemy, enemy.slot());
+		REQUIRE(death != nullptr);
+		CHECK(int(death->killer) == sapper.slot());
+		CHECK(death->def == m15->def);
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
 }

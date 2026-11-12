@@ -93,6 +93,7 @@ inline constexpr float kGadgetSlideLift = 0.01f;
 inline constexpr float kBlastEyeLift = 0.05f;
 inline constexpr double kPackCheckInterval = 0.2;
 inline constexpr float kPackCloseTrigger = 1e-6f;
+inline constexpr uint8_t kNoPackDriver = 0xFF;
 
 struct Deployable {
 	uint16_t id = 0;
@@ -155,6 +156,7 @@ struct PackVehicle {
 	Vec3 position{};
 	Vec3 velocity{};
 	float min_speed_for_mine = 0;
+	uint8_t driver = kNoPackDriver;
 };
 
 bool soldier_trips(const ExplosionPackDef &p_pack, const Deployable &p_mine, const PackSoldier &p_soldier);

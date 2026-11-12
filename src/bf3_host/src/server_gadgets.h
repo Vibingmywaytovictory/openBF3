@@ -60,6 +60,7 @@ private:
 	std::vector<sim::weapons::SupplyGrant> grants_;
 	std::vector<uint8_t> receiver_slots_;
 	std::vector<sim::weapons::PackSoldier> pack_soldiers_;
+	std::vector<sim::weapons::PackVehicle> pack_vehicles_;
 	std::array<bool, net::kMaxSlots> detonator_held_{};
 	mutable GadgetStats stats_;
 	sim::Tick tick_ = 0;
