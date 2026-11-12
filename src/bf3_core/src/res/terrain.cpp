@@ -1,9 +1,11 @@
 #include "bf3/core/res/terrain.h"
 
+#include "bf3/core/res/dx_texture.h"
 #include "bf3/core/thread_pool.h"
 #include "res_reader.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <map>
@@ -806,35 +808,6 @@ uint8_t TerrainColourTree::max_level() const {
 	return level;
 }
 
-std::array<uint8_t, 64> decode_bc1_block(const uint8_t *p_block) {
-	const uint16_t c0 = uint16_t(p_block[0] | (p_block[1] << 8));
-	const uint16_t c1 = uint16_t(p_block[2] | (p_block[3] << 8));
-	const auto expand = [](uint16_t p_c) {
-		return std::array<int, 3>{ ((p_c >> 11) & 31) * 255 / 31, ((p_c >> 5) & 63) * 255 / 63, (p_c & 31) * 255 / 31 };
-	};
-	const std::array<int, 3> a = expand(c0);
-	const std::array<int, 3> b = expand(c1);
-	std::array<std::array<int, 4>, 4> palette{};
-	for (size_t ch = 0; ch < 3; ++ch) {
-		palette[0][ch] = a[ch];
-		palette[1][ch] = b[ch];
-		palette[2][ch] = c0 > c1 ? (2 * a[ch] + b[ch]) / 3 : (a[ch] + b[ch]) / 2;
-		palette[3][ch] = c0 > c1 ? (a[ch] + 2 * b[ch]) / 3 : 0;
-	}
-	palette[0][3] = palette[1][3] = palette[2][3] = 255;
-	palette[3][3] = c0 > c1 ? 255 : 0;
-	const uint32_t indices = uint32_t(p_block[4]) | (uint32_t(p_block[5]) << 8) | (uint32_t(p_block[6]) << 16) |
-			(uint32_t(p_block[7]) << 24);
-	std::array<uint8_t, 64> out{};
-	for (size_t i = 0; i < 16; ++i) {
-		const std::array<int, 4> &c = palette[(indices >> (2 * i)) & 3u];
-		for (size_t ch = 0; ch < 4; ++ch) {
-			out[4 * i + ch] = uint8_t(c[ch]);
-		}
-	}
-	return out;
-}
-
 ResError TerrainStreamingTree::chunk_layout(const TerrainNodeId &p_id, TerrainChunkLayout &r_layout) const {
 	struct Parts {
 		TerrainNodeId id;
@@ -1054,18 +1027,22 @@ ResError TerrainStreamingTree::colour_grid(const TerrainRegion &p_region, uint8_
 			}
 			jobs.push_back(std::move(job));
 		}
+		std::atomic<bool> undecoded = false;
 		parallel_for(jobs.size(), [&](size_t p_job) {
 			const Job &job = jobs[p_job];
-			std::vector<uint8_t> texels(size_t(side) * side * 4);
-			const uint32_t blocks = side / 4;
-			for (uint32_t by = 0; by < blocks; ++by) {
-				for (uint32_t bx = 0; bx < blocks; ++bx) {
-					const std::array<uint8_t, 64> b =
-							decode_bc1_block(job.blocks.data() + (size_t(by) * blocks + bx) * 8);
-					for (size_t i = 0; i < 16; ++i) {
-						const size_t at = ((size_t(by) * 4 + i / 4) * side + size_t(bx) * 4 + i % 4) * 4;
-						std::memcpy(texels.data() + at, b.data() + 4 * i, 4);
-					}
+			MipSlice slice;
+			slice.width = slice.height = side;
+			slice.row_pitch = uint32_t(texture_row_pitch(TextureFormat::Dxt1, side));
+			slice.data = job.blocks;
+			std::vector<std::array<float, 4>> decoded;
+			if (!slice.texels(TextureFormat::Dxt1, decoded)) {
+				undecoded = true;
+				return;
+			}
+			std::vector<uint8_t> texels(decoded.size() * 4);
+			for (size_t i = 0; i < decoded.size(); ++i) {
+				for (size_t ch = 0; ch < 4; ++ch) {
+					texels[4 * i + ch] = uint8_t(std::clamp(decoded[i][ch] * 255.0f + 0.5f, 0.0f, 255.0f));
 				}
 			}
 			resample_tile<4>(p_region, job.rect, texels.data(), side, kTerrainColourBorder, job.span,
@@ -1073,6 +1050,9 @@ ResError TerrainStreamingTree::colour_grid(const TerrainRegion &p_region, uint8_
 						std::memcpy(rgba.data() + 4 * p_at, p_v.data(), 4);
 					});
 		});
+		if (undecoded) {
+			return ResError::malformed("colour tile does not decode", level);
+		}
 	}
 	r_rgba = std::move(rgba);
 	return {};

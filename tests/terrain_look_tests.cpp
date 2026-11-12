@@ -80,20 +80,6 @@ TEST_SUITE("render-terrain-unit") {
 		CHECK(r.kind == TerrainChoice::Miss);
 	}
 
-	TEST_CASE("terrain: bc1 blocks decode to their palette") {
-		const uint8_t block[8] = { 0x00, 0xF8, 0x1F, 0x00, 0xE4, 0xE4, 0xE4, 0xE4 };
-		const std::array<uint8_t, 64> rgba = core::res::decode_bc1_block(block);
-		CHECK(rgba[0] == 255);
-		CHECK(rgba[2] == 0);
-		CHECK(rgba[4] == 0);
-		CHECK(rgba[6] == 255);
-		CHECK(rgba[8] == 170);
-		CHECK(rgba[10] == 85);
-		CHECK(rgba[12] == 85);
-		CHECK(rgba[14] == 170);
-		CHECK(rgba[3] == 255);
-	}
-
 	TEST_CASE("terrain: a pixel program becomes shader statements") {
 		const std::vector<uint32_t> shader = {
 			0x00000041u,

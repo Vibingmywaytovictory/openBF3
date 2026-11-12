@@ -151,5 +151,4 @@ public:
 			std::vector<uint8_t> &r_rgba) const;
 };
 
-std::array<uint8_t, 64> decode_bc1_block(const uint8_t *p_block);
 }
