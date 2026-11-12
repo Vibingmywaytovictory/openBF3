@@ -77,16 +77,16 @@ std::vector<uint32_t> int_imm(uint32_t p_x, uint32_t p_y, uint32_t p_z, uint32_t
 	return { 2u | kImmediate << 12, p_x, p_y, p_z, p_w };
 }
 
-std::vector<uint8_t> world_pixel_program() {
+std::vector<uint8_t> world_pixel_program(uint32_t p_target = 1, uint32_t p_mask = 0x7) {
 	return container({ { "RDEF", rdef({ { "texture_Texture", 2, 1 } }, nullptr, {}) },
 			{ "ISGN", signature({ { "SV_Position", 0, 1, 0, 0xF }, { "TEXCOORD", 0, 0, 1, 0xF } }) },
 			{ "OSGN", signature({ { "SV_Target", 0, 0, 0, 0xF }, { "SV_Target", 1, 0, 1, 0xF } }) },
 			{ "SHDR",
 					code_chunk(0, 1,
 							{ ins(69,
-									  { dst(kTemp, 0, 0x7), src(kInput, 1, swz(0, 2, 0, 0)), src(kResource, 1),
+									  { dst(kTemp, 0, p_mask), src(kInput, 1, swz(0, 2, 0, 0)), src(kResource, 1),
 											  sampler(0) }),
-									ins(75, { dst(kOutput, 1, 0x7), src(kTemp, 0) }) }) } });
+									ins(75, { dst(kOutput, p_target, p_mask), src(kTemp, 0) }) }) } });
 }
 
 std::vector<uint8_t> world_vertex_program() {
@@ -311,6 +311,19 @@ TEST_SUITE("render-programs-unit") {
 		CHECK(code.find("\tvso1 = o1;\n}\n") != std::string::npos);
 		CHECK(code.find("vec4 v1 = vec4(vso1.x, 0.0, vso1.z, 0.0);") != std::string::npos);
 		CHECK(code.find("o0.") == std::string::npos);
+		const std::vector<uint8_t> forward_blob = world_pixel_program(0, 0xF);
+		bf3::core::Result<dxbc::Program> forward_ps = dxbc::parse(forward_blob);
+		REQUIRE(forward_ps.ok());
+		ProgramRequest forward = request;
+		forward.pixel = &*forward_ps;
+		forward.target = ProgramTarget::Forward;
+		bf3::core::Result<TranslatedProgram> f = translate_program(forward);
+		REQUIRE_MESSAGE(f.ok(), (f.ok() ? std::string() : f.error().message));
+		CHECK(f->code.find("depth_draw_never, unshaded") != std::string::npos);
+		CHECK(f->code.find("varying vec4 vso1;\nvoid vertex() {\n") != std::string::npos);
+		CHECK(f->code.find("o1.z = (vec4(dot((r0.xyzw), (cb0_2.xyzw)))).z;") != std::string::npos);
+		CHECK(f->code.find("vec4 v1 = vec4(vso1.x, 0.0, vso1.z, 0.0);") != std::string::npos);
+		CHECK(f->code.find("ALBEDO = o0.rgb;") != std::string::npos);
 		const std::vector<VertexInputLanes> unknown(1);
 		request.vertex_lanes = unknown;
 		bf3::core::Result<TranslatedProgram> refused = translate_program(request);
