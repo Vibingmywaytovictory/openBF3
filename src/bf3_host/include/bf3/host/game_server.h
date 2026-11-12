@@ -189,6 +189,7 @@ struct GameServerStats {
 	uint64_t stale_loading = 0;
 	std::vector<SlotTraffic> traffic;
 	SpottingStats spotting;
+	uint64_t vehicle_shots = 0;
 };
 
 class GameServer {

@@ -888,6 +888,7 @@ GameServerStats GameServer::stats() const {
 	}
 	g.rules_step_failures = m.match.step_failures();
 	g.spotting = m.spotting.stats();
+	g.vehicle_shots = m.vehicles.gunnery().stats().shots;
 	g.step_precondition_failures = m.step_precondition_failures;
 	g.last_step_ms = m.last_step_ms;
 	m.snapshots.stats(g);

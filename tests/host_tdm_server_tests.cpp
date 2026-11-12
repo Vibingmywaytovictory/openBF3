@@ -4805,11 +4805,30 @@ TEST_SUITE("host-vehicles-armor") {
 		aim_pitch = sim::quantize_pitch(std::atan2(dy, std::sqrt(dx * dx + dz * dz)));
 		m->ticks(120);
 		REQUIRE(is_alive(m->state(enemy->slot)));
+		watch.take(m->out, p.peer());
+		w = watch.of(spawner);
+		REQUIRE(w != nullptr);
+		REQUIRE(w->turret_count == kind.armament->turrets.size());
+		std::optional<size_t> gun_yaw;
+		for (size_t k = 0; k < w->turret_count; ++k) {
+			const sim::vehicles::ArmamentTurret &t = kind.armament->turrets[k];
+			std::printf("armor: turret body %zu of seat %d at %.1f deg\n", k, int(t.seat),
+					double(w->turret_angles[k] / core::kDegToRadF));
+			if (t.seat == 0 && t.parent < 0 && t.aim == sim::vehicles::TurretAimAxis::Yaw) {
+				gun_yaw = k;
+			}
+		}
+		REQUIRE(gun_yaw.has_value());
+		CHECK(std::abs(std::abs(w->turret_angles[*gun_yaw]) - kOffBow) < 2.0f * core::kDegToRadF);
 		const int kills_before = m->row(int(slot)) != nullptr ? int(m->row(int(slot))->kills) : 0;
+		const uint64_t shots_before = m->server.stats().vehicle_shots;
 		fire = true;
 		m->ticks(4);
 		fire = false;
 		const bool killed = m->until([&] { return !is_alive(m->state(enemy->slot)); }, 90);
+		std::printf("armor: vehicle shots %llu -> %llu\n", static_cast<unsigned long long>(shots_before),
+				static_cast<unsigned long long>(m->server.stats().vehicle_shots));
+		CHECK(m->server.stats().vehicle_shots == shots_before + 1u);
 		const sim::SoldierState *after = m->state(enemy->slot);
 		std::printf("armor: the enemy %.1f m off the bow at %.0f deg: health %.0f -> %.0f, killed %d, kills %d -> %d\n",
 				double(horizontal(target_at, hull_at)), double(kOffBow / core::kDegToRadF), double(health_before),
