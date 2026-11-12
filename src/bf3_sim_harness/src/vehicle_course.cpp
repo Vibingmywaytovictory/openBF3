@@ -913,6 +913,7 @@ VehicleCommand drive_vehicle_course(const VehicleCourse &p_course, const Vehicle
 		c.throttle = 1;
 	}
 	c.tick = p_tick;
+	c.flags = p_course.kind == VehicleCourseKind::SlopeIdle ? uint8_t(0) : vehicle_flags::kDriven;
 	return c;
 }
 

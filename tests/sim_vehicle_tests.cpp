@@ -1027,6 +1027,13 @@ TEST_SUITE("sim-vehicle-unit") {
 		const auto start = std::chrono::steady_clock::now();
 
 		const auto synthetic = synthetic_vehicle_courses();
+		for (const VehicleCourse &c : synthetic) {
+			VehicleScriptMemory memory;
+			std::unique_ptr<VehicleWorld> w = world_at(shapes, m, c.start);
+			const VehicleCommand first = drive_vehicle_course(c, *m, w->state(0), 1, memory);
+			const bool driven = (first.flags & vehicle_flags::kDriven) != 0;
+			CHECK_MESSAGE(driven == (c.kind != VehicleCourseKind::SlopeIdle), vehicle_course_name(c.kind));
+		}
 		std::vector<core::Result<VehicleCourseReport>> runs = core::parallel_map<core::Result<VehicleCourseReport>>(
 				synthetic.size(), [&](size_t i) { return run_vehicle_course(shapes, m, synthetic[i], o); });
 		for (size_t i = 0; i < synthetic.size(); ++i) {
