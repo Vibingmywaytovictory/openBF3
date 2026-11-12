@@ -86,6 +86,14 @@ target_sources(bf3_sim PRIVATE
     src/vehicles/land_model.cpp
     src/vehicles/land_drive.h
     src/vehicles/land_drive.cpp
+    include/bf3/sim/vehicles/turret_rules.h
+    include/bf3/sim/vehicles/tracked_rules.h
+    include/bf3/sim/vehicles/vehicle_weapon_rules.h
+    src/vehicles/turret_rules.cpp
+    src/vehicles/tracked_rules.cpp
+    src/vehicles/vehicle_weapon_rules.cpp
+    include/bf3/sim/vehicles/vehicle_armament.h
+    src/vehicles/vehicle_armament.cpp
 )
 
 target_sources(bf3_sim PRIVATE
