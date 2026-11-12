@@ -16,8 +16,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <functional>
 #include <iterator>
@@ -2253,6 +2255,40 @@ TEST_SUITE("tables") {
 			CHECK(v.body_mass == Approx(800));
 			CHECK(v.gravity_modifier == Approx(1.65));
 		}
+		const VehicleDef growler = vehicle(*lib, "vehicles/growleritv/growleritv");
+		REQUIRE(growler.driver() != nullptr);
+		const VehicleSeatDef &driver = *growler.driver();
+		size_t chase_cameras = 0, first_person_cameras = 0;
+		for (const VehicleCameraDef &c : driver.cameras) {
+			std::printf("tables: Growler driver camera %s (%s) first person %d at (%.2f %.2f %.2f), chase %.1f m at "
+						"%.1f deg, %.1f m ahead\n",
+					c.camera.c_str(), c.camera_type.c_str(), int(c.first_person), double(c.transform.trans[0]),
+					double(c.transform.trans[1]), double(c.transform.trans[2]),
+					double(c.chase ? c.chase->wanted_distance : 0.0f),
+					double(c.chase ? c.chase->wanted_angle_deg : 0.0f),
+					double(c.chase ? c.chase->look_distance_in_front_of_target : 0.0f));
+			if (c.chase) {
+				++chase_cameras;
+				CHECK(c.chase->wanted_distance == Approx(9));
+				CHECK(c.chase->wanted_angle_deg == Approx(9));
+				CHECK(c.chase->look_distance_in_front_of_target == Approx(1));
+			}
+			if (c.first_person) {
+				++first_person_cameras;
+				CHECK(c.left_yaw == Approx(140));
+				CHECK(c.right_yaw == Approx(140));
+				CHECK(c.up_pitch == Approx(25));
+				CHECK(c.down_pitch == Approx(25));
+				CHECK(c.transform.trans[1] - driver.transform.trans[1] == Approx(0.74).epsilon(0.01));
+			}
+		}
+		CHECK(chase_cameras == 1);
+		CHECK(first_person_cameras == 1);
+		CHECK(driver.cameras.size() == 2);
+		CHECK(std::fabs(driver.transform.trans[0]) == Approx(0.38).epsilon(0.01));
+		CHECK(driver.transform.trans[1] == Approx(0.87).epsilon(0.01));
+		CHECK(driver.transform.trans[2] == Approx(0.25).epsilon(0.01));
+		CHECK(growler.exit_points.size() == 5);
 		for (const char *aa : { "vehicles/centurion_c-ram/centurion_c-ram", "vehicles/pantsir/pantsir-s1" }) {
 			CAPTURE(aa);
 			const VehicleDef v = vehicle(*lib, aa);
