@@ -41,7 +41,7 @@ constexpr std::optional<uint8_t> seat_request(uint32_t p_buttons) {
 }
 
 constexpr bool handbrake_held(uint32_t p_buttons) {
-	return (p_buttons & (seat_buttons::kHandbrake | buttons::kJump)) != 0;
+	return (p_buttons & seat_buttons::kHandbrake) != 0;
 }
 
 }

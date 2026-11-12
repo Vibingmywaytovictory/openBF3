@@ -263,7 +263,7 @@ void InputMapper::release_all() {
 void InputMapper::press(InputAction p_action) {
 	switch (p_action) {
 		case InputAction::Jump:
-			if (!free_camera_) {
+			if (!free_camera_ && !vehicle_.seated) {
 				++jump_presses_;
 			}
 			break;

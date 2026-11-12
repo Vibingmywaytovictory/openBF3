@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "bf3/sim/vehicles/land_rules.h"
+#include "bf3/sim/vehicles/vehicle_input.h"
 #include "bf3/sim/vehicles/vehicle_spawning.h"
 
 #include <array>
@@ -298,5 +299,15 @@ TEST_SUITE("sim-vehicle-rules-unit") {
 		CHECK(vehicle_spawn_delay(7, 15.0f, 40.0f, 1.0f) == 40.0f);
 		CHECK(vehicle_spawn_delay(0, 15.0f, 40.0f, 0.5f) == 7.5f);
 		CHECK(vehicle_spawn_delay(2, 15.0f, 40.0f, 0.5f) == 20.0f);
+	}
+
+	TEST_CASE(
+			"sim.vehicles.vehicle_input: only the vehicle's handbrake bit holds the handbrake; the infantry jump does "
+			"not") {
+		namespace b = bf3::sim::buttons;
+		CHECK(handbrake_held(seat_buttons::kHandbrake));
+		CHECK(handbrake_held(seat_buttons::kHandbrake | b::kJump));
+		CHECK_FALSE(handbrake_held(b::kJump));
+		CHECK_FALSE(handbrake_held(b::kJump | b::kSprint | b::kUse | b::kFire));
 	}
 }
