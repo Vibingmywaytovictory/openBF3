@@ -4385,6 +4385,21 @@ TEST_SUITE("host-vehicles-net") {
 		CHECK(after->gear >= 2);
 		CHECK(after->occupants[0] == slot);
 		CHECK(after->tick + 4u >= m->now());
+		REQUIRE(after->previous_tick < after->tick);
+		const double mid_tick = 0.5 * double(after->previous_tick + after->tick);
+		const host::PresentedVehiclePose mid = host::vehicle_pose_at(*after, mid_tick);
+		const host::PresentedVehiclePose ahead = host::vehicle_pose_at(*after, double(after->tick) + 100.0);
+		const float mid_x = 0.5f * (after->previous.com_position[0] + after->com_position[0]);
+		const float ahead_x = after->com_position[0] +
+				after->linear_velocity[0] * float(host::kVehicleExtrapolateTicks) * sim::kTickSeconds;
+		std::printf("vehicles: the watcher's pose at tick %.1f is %.3f m on x between %.3f and %.3f; past the newest "
+					"state it leads by %.3f m on x\n",
+				mid_tick, double(mid.com_position[0]), double(after->previous.com_position[0]),
+				double(after->com_position[0]), double(ahead.com_position[0] - after->com_position[0]));
+		CHECK(mid.com_position[0] == doctest::Approx(mid_x).epsilon(1e-4));
+		CHECK(host::vehicle_pose_at(*after, double(after->previous_tick)).com_position[2] ==
+				doctest::Approx(after->previous.com_position[2]));
+		CHECK(ahead.com_position[0] == doctest::Approx(ahead_x).epsilon(1e-4));
 		host::ClientStats stats;
 		seen.stats(stats);
 		CHECK(stats.vehicle_messages > 0);
