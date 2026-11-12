@@ -1,12 +1,10 @@
 #include "bf3/render/deployed_gadgets.h"
 
-#include "bf3/core/res/res_loader.h"
-#include "bf3/core/thread_pool.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/render/mesh_cache.h"
+#include "bf3/render/slot_textures.h"
 
 #include <chrono>
-#include <set>
 #include <utility>
 
 namespace bf3::render {
@@ -65,45 +63,11 @@ core::Result<std::unique_ptr<DeployedGadgetSet>> load_deployed_gadgets(const cor
 		part.object = std::move(*object);
 		set->parts.push_back(std::move(part));
 	}
-	std::vector<std::pair<std::string, TextureRole>> wanted;
-	std::set<std::string> seen;
+	SlotTextureWants wants;
 	for (const DeployedGadgetPart &part : set->parts) {
-		for (const PreparedSurface &s : part.prepared.surfaces) {
-			if (s.material_index >= part.materials.slots.size()) {
-				continue;
-			}
-			const MaterialSlot &slot = part.materials.slots[s.material_index];
-			for (auto [param, role] :
-					{ std::pair{ "Diffuse", TextureRole::Color }, std::pair{ "Normal", TextureRole::Normal } }) {
-				const std::string name = slot.texture(param);
-				if (!name.empty() && seen.insert(name).second) {
-					wanted.emplace_back(name, role);
-				}
-			}
-		}
+		wants.add(part.materials, part.prepared.surfaces);
 	}
-	std::vector<std::string> errors(wanted.size());
-	std::vector<PreparedTexture> textures(wanted.size());
-	core::parallel_for(wanted.size(), [&](size_t i) {
-		core::Result<core::res::LoadedTexture> tex = core::res::load_texture(p_mount, wanted[i].first);
-		if (!tex) {
-			errors[i] = tex.error().message;
-			return;
-		}
-		core::Result<PreparedTexture> p = prepare_texture(*tex, wanted[i].second);
-		if (!p) {
-			errors[i] = p.error().message;
-			return;
-		}
-		textures[i] = std::move(*p);
-	});
-	for (size_t i = 0; i < wanted.size(); ++i) {
-		if (!errors[i].empty()) {
-			set->notes.push_back("deployed gadget texture skipped: " + errors[i]);
-			continue;
-		}
-		set->textures.push_back(std::move(textures[i]));
-	}
+	set->textures = load_slot_textures(p_mount, wants, "deployed gadget", set->notes);
 	set->seconds = core::seconds_since(start);
 	return set;
 }
