@@ -7,6 +7,7 @@
 #include "bf3/sim/weapons/mechanics.h"
 #include "bf3/sim/weapons/sim_time.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -50,12 +51,18 @@ struct ExplosionSimDef {
 	float inner_radius = 0;
 	float radius = 0;
 	float impulse = 0;
+	float shockwave_damage = 0;
+	float shockwave_radius = 0;
+	float shockwave_impulse = 0;
 	float max_occlusion_ray_radius = 0;
 	bool disable_occlusion = false;
 	bool disable_static_entity_occlusion = false;
 
 	std::array<float, kHitZoneCount> zone_multiplier{ 1, 1, 1, 1 };
+	std::array<float, kHitZoneCount> zone_threshold{};
 	bool zone_multiplier_from_data = false;
+
+	float gather_radius() const { return std::max({ inner_radius, radius, shockwave_radius }); }
 };
 
 struct ProjectileSimDef {

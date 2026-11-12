@@ -122,6 +122,9 @@ ExplosionSimDef make_explosion(Checker &r_c, const core::gameplay::Explosion &p_
 	x.inner_radius = r_c.range(p_e.inner_blast_radius, 0.0f, kMaxRadius, p_field + ".InnerBlastRadius");
 	x.radius = r_c.range(p_e.blast_radius, 0.0f, kMaxRadius, p_field + ".BlastRadius");
 	x.impulse = r_c.range(p_e.blast_impulse, 0.0f, 1e9f, p_field + ".BlastImpulse");
+	x.shockwave_damage = r_c.range(p_e.shockwave_damage, 0.0f, kMaxDamage, p_field + ".ShockwaveDamage");
+	x.shockwave_radius = r_c.range(p_e.shockwave_radius, 0.0f, kMaxRadius, p_field + ".ShockwaveRadius");
+	x.shockwave_impulse = r_c.range(p_e.shockwave_impulse, 0.0f, 1e9f, p_field + ".ShockwaveImpulse");
 	x.max_occlusion_ray_radius = r_c.range(p_e.max_occlusion_raycast_radius, 0.0f, kMaxRadius, p_field + ".MaxOcclusionRaycastRadius");
 	x.disable_occlusion = p_e.disable_occlusion;
 	x.disable_static_entity_occlusion = p_e.disable_static_entity_occlusion;
@@ -131,6 +134,9 @@ ExplosionSimDef make_explosion(Checker &r_c, const core::gameplay::Explosion &p_
 			for (size_t z = 0; z < kHitZoneCount; ++z) {
 				const core::gameplay::DamageRelation rel = p_materials.relation(pair.property, p_materials.zone_property(HitZone(z)));
 				x.zone_multiplier[z] = rel.present ? r_c.range(rel.protection_multiplier, 0.0f, kMaxFactor, p_field + " zone cell") : 1.0f;
+				x.zone_threshold[z] = rel.present
+						? r_c.range(rel.protection_threshold, 0.0f, kMaxDamage, p_field + " zone threshold")
+						: 0.0f;
 			}
 			x.zone_multiplier_from_data = true;
 		}
@@ -252,11 +258,17 @@ void hash_explosion(detail::Fnv64 &r_h, const ExplosionSimDef &p_e) {
 	r_h.add(p_e.inner_radius);
 	r_h.add(p_e.radius);
 	r_h.add(p_e.impulse);
+	r_h.add(p_e.shockwave_damage);
+	r_h.add(p_e.shockwave_radius);
+	r_h.add(p_e.shockwave_impulse);
 	r_h.add(p_e.max_occlusion_ray_radius);
 	r_h.add(p_e.disable_occlusion);
 	r_h.add(p_e.disable_static_entity_occlusion);
 	for (const float m : p_e.zone_multiplier) {
 		r_h.add(m);
+	}
+	for (const float t : p_e.zone_threshold) {
+		r_h.add(t);
 	}
 	r_h.add(p_e.zone_multiplier_from_data);
 }

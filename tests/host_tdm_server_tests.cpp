@@ -57,7 +57,7 @@ namespace tp = bf3::test::pipe;
 namespace {
 
 constexpr uint64_t kM2aKitHash = 0x31b45dc7cc3f4271ull;
-constexpr uint64_t kM2aWeaponHash = 0xbbf9ec7eb14a6d79ull;
+constexpr uint64_t kM2aWeaponHash = 0x6ed739bd93ace48cull;
 constexpr uint64_t kM2aMotorHash = 0x5030b00de56f1ee8ull;
 
 using tdm::distance;

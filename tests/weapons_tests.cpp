@@ -3,6 +3,7 @@
 
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/soldier_state.h"
+#include "bf3/sim/vehicles/vehicle_damage.h"
 #include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/damage.h"
 #include "bf3/sim/weapons/hit_target.h"
@@ -1231,7 +1232,8 @@ TEST_SUITE("weapons-unit") {
 		x.radius = 1.0f;
 		CHECK(blast_damage(x, 0.9, BlastFalloff::Linear) == 112.0);
 		CHECK(blast_damage(x, 1.0, BlastFalloff::Linear) == 112.0);
-		CHECK(blast_damage(x, 1.4, BlastFalloff::Linear) == 0.0);
+		CHECK(blast_damage(x, 1.4, BlastFalloff::Linear) == 112.0);
+		CHECK(blast_damage(x, 1.6, BlastFalloff::Linear) == 0.0);
 
 		SoldierState s;
 		s.flags = soldier_flags::kAlive;
@@ -1258,6 +1260,67 @@ TEST_SUITE("weapons-unit") {
 		CHECK(nade == std::array<int32_t, 4>{ 0, 0, 0, 0 });
 		CHECK(one_shot_range(a3, HitZone::Head, 100, m) == -1.0);
 		CHECK(std::isinf(one_shot_range(t->defs[id_of(*t, kM98B)], HitZone::Head, 100, m)));
+	}
+
+	TEST_CASE("sim.weapons.unit: R-G4 explosion damage: full inside InnerBlastRadius, linear to BlastRadius, "
+			  "ShockwaveDamage as a floor out to the gather radius, the material relation's threshold as a cutoff") {
+		ExplosionSimDef x;
+		x.present = true;
+		x.blast_damage = 100;
+		x.inner_radius = 1;
+		x.radius = 5;
+		x.shockwave_damage = 10;
+		x.shockwave_radius = 8;
+		CHECK(x.gather_radius() == 8.0f);
+		const double want[][2] = { { 0.5, 100 }, { 1, 100 }, { 3, 50 }, { 4.5, 12.5 }, { 4.8, 10 }, { 7, 10 },
+			{ 8.5, 0 } };
+		for (const auto &[d, v] : want) {
+			CAPTURE(d);
+			CHECK(blast_damage(x, d, BlastFalloff::Linear) == doctest::Approx(v));
+		}
+		CHECK(vehicles::material_relation_damage(float(blast_damage(x, 3, BlastFalloff::Linear)), 0.5f, 5.0f) ==
+				doctest::Approx(25.0f));
+		CHECK(vehicles::material_relation_damage(float(blast_damage(x, 4.8, BlastFalloff::Linear)), 0.5f, 5.0f) ==
+				doctest::Approx(5.0f));
+		CHECK(vehicles::material_relation_damage(float(blast_damage(x, 4.8, BlastFalloff::Linear)), 0.4f, 5.0f) ==
+				0.0f);
+		ExplosionSimDef none = x;
+		none.radius = 0;
+		none.shockwave_radius = 0;
+		CHECK(blast_damage(none, 0.5, BlastFalloff::Linear) == 0.0);
+		ExplosionSimDef only = x;
+		only.radius = 0;
+		CHECK(blast_damage(only, 0.5, BlastFalloff::Linear) == doctest::Approx(100.0));
+		CHECK(blast_damage(only, 2, BlastFalloff::Linear) == doctest::Approx(10.0));
+
+		const std::shared_ptr<const WeaponTable> t = synthetic_table();
+		const uint16_t rpg = id_of(*t, kRpg);
+		std::shared_ptr<WeaponTable> floored = std::make_shared<WeaponTable>(*t);
+		ExplosionSimDef &fx = floored->defs[rpg].projectile.explosion;
+		fx.shockwave_damage = 1.0f;
+		fx.shockwave_radius = 7.0f;
+		fx.zone_threshold[size_t(HitZone::Chest)] = 3.0f;
+		const std::unique_ptr<CollisionWorld> w = wall_world({ 60.0f });
+		const StaticTargets targets(
+				{ capsule_target(4, { 5.5f, 1.3f, 58.0f }, { 5.5f, 1.9f, 58.0f }, 0.2f, HitZone::Body),
+						capsule_target(5, { -5.5f, 1.3f, 58.0f }, { -5.5f, 1.9f, 58.0f }, 0.2f, HitZone::Chest),
+						capsule_target(6, { 0.0f, 1.3f, 50.0f }, { 0.0f, 1.9f, 50.0f }, 0.2f, HitZone::Body) });
+		ProjectileWorld pw(floored);
+		REQUIRE(pw.spawn(level_shot(rpg, { 0, 1.6f, 0 })).ok());
+		const Flown f = fly(pw, *w, targets, 1, 300);
+		REQUIRE(f.detonations.size() == 1);
+		size_t floors = 0;
+		for (const DamageEvent &d : f.damage) {
+			CAPTURE(d.target);
+			CHECK(d.kind == DamageKind::Blast);
+			CHECK(d.target != 6u);
+			CHECK(d.distance > fx.radius);
+			CHECK(d.target != 5u);
+			CHECK(d.base == doctest::Approx(1.0f));
+			CHECK(d.amount == doctest::Approx(fx.zone_multiplier[size_t(HitZone::Body)]));
+			++floors;
+		}
+		CHECK(floors == 1);
 	}
 
 	TEST_CASE("sim.weapons.unit: W5 W9 flights on synthetic walls: bullets on capsules, bounce, fuse, blasts, occlusion, direct hits") {

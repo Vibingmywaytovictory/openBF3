@@ -1,5 +1,6 @@
 #include "weapons_install_support.h"
 
+#include "bf3/sim/vehicles/vehicle_damage.h"
 #include "bf3/sim/weapons/damage.h"
 #include "bf3/sim/weapons/hit_target.h"
 #include "bf3/sim_harness/shooting_range.h"
@@ -328,7 +329,9 @@ TEST_SUITE("weapons-range") {
 		std::array<bool, 4> hit{};
 		for (const DamageEvent &d : blast) {
 			CHECK(d.kind == DamageKind::Blast);
-			const double want = blast_damage(x, double(d.distance), mech.blast_falloff) * double(x.zone_multiplier[size_t(d.zone)]);
+			const double want =
+					vehicles::material_relation_damage(float(blast_damage(x, double(d.distance), mech.blast_falloff)),
+							x.zone_multiplier[size_t(d.zone)], x.zone_threshold[size_t(d.zone)]);
 			std::printf("  M67 blast on the stand-in %u m to the side: distance %.3f m, zone %s, %.3f hp (expected %.3f)\n", unsigned(offsets[d.target - 1]),
 					double(d.distance), hit_zone_name(d.zone), double(d.amount), want);
 			CHECK(std::fabs(double(d.amount) - want) <= 0.01);

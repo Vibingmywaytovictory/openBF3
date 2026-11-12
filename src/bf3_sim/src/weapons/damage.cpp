@@ -29,22 +29,22 @@ double zone_damage(const ProjectileSimDef &p_projectile, HitZone p_zone, double 
 
 double blast_damage(const ExplosionSimDef &p_explosion, double p_distance, BlastFalloff p_falloff) {
 	(void)p_falloff;
-	if (!p_explosion.present) {
+	if (!p_explosion.present || (p_explosion.radius <= 0.0f && p_explosion.shockwave_radius <= 0.0f)) {
 		return 0.0;
 	}
 	const double d = p_distance > 0 ? p_distance : 0.0;
-	const double inner = p_explosion.inner_radius;
-	const double outer = p_explosion.radius;
-	if (outer <= inner) {
-		return d <= outer ? double(p_explosion.blast_damage) : 0.0;
-	}
-	if (d <= inner) {
-		return p_explosion.blast_damage;
-	}
-	if (d >= outer) {
+	if (d > double(p_explosion.gather_radius())) {
 		return 0.0;
 	}
-	return double(p_explosion.blast_damage) * (outer - d) / (outer - inner);
+	const double inner = p_explosion.inner_radius;
+	const double outer = p_explosion.radius;
+	double blast = 0.0;
+	if (d < inner) {
+		blast = p_explosion.blast_damage;
+	} else if (d <= outer && outer > inner) {
+		blast = double(p_explosion.blast_damage) * (1.0 - (d - inner) / (outer - inner));
+	}
+	return std::max(blast, double(p_explosion.shockwave_damage));
 }
 
 bool apply_damage(SoldierState &r_soldier, float p_amount, const Mechanics &p_mechanics) {

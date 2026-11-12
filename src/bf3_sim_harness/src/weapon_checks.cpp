@@ -663,7 +663,9 @@ void check_explosives(Rows &r_rows, const WeaponCheckInputs &p_in) {
 						det != nullptr ? units(det->time - spawn).c_str() : "-", det != nullptr && det->timeout ? "yes" : "no", err * 1000.0, v0[0], v0[1], v0[2]),
 				"exactly 216000000 (3.6 s); within 1 cm; launch (0, 3, 18) in the aim frame");
 		const double at[5] = { 1.0, 1.5, 3.0, 5.0, 7.0 };
-		const double want[5] = { 112.0, 112.0, 81.4545, 40.7273, 0.0 };
+		const ExplosionSimDef &frag = d.projectile.explosion;
+		const double floor_7m = frag.gather_radius() >= 7.0f ? double(frag.shockwave_damage) : 0.0;
+		const double want[5] = { 112.0, 112.0, 81.4545, 40.7273, floor_7m };
 		bool ok = d.projectile.explosion.present;
 		std::string measured;
 		for (size_t i = 0; i < 5; ++i) {
@@ -671,7 +673,10 @@ void check_explosives(Rows &r_rows, const WeaponCheckInputs &p_in) {
 			ok = ok && std::fabs(b - want[i]) <= 0.01;
 			measured += fmt("%.2f ", b);
 		}
-		r_rows.add("W9", "M67 blast at 1 / 1.5 / 3 / 5 / 7 m", ok, measured, "112 / 112 / 81.45 / 40.73 / 0 within 0.01 (linear falloff [unmeasured])", true);
+		r_rows.add("W9", "M67 blast at 1 / 1.5 / 3 / 5 / 7 m", ok, measured,
+				"112 / 112 / 81.45 / 40.73 / the ShockwaveDamage floor within 0.01 (linear falloff [unmeasured], the "
+				"floor R-G4)",
+				true);
 	} else {
 		r_rows.add("W9", "M67", false, "u_m67 or the world missing", "");
 	}

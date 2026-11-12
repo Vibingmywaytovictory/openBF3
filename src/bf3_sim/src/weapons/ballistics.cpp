@@ -1,6 +1,8 @@
 #include "bf3/sim/weapons/ballistics.h"
 
 #include "bf3/core/level/collision_soup.h"
+#include "bf3/sim/vehicles/vehicle_damage.h"
+#include "bf3/sim/vehicles/vehicle_targets.h"
 #include "bf3/sim/weapons/surface_materials.h"
 #include "bf3/sim/weapons/weapon_rng.h"
 #include "weapons_internal.h"
@@ -308,7 +310,7 @@ void blast(Env &r_env, const Projectile &p_p, const ExplosionSimDef &p_x, bool p
 
 	q.from = to_f(p_pos);
 	q.to = q.from;
-	q.radius = std::max(p_x.inner_radius, p_x.radius);
+	q.radius = p_x.gather_radius();
 	q.has_segment = true;
 	const std::span<const HitTarget> list = r_env.targets.targets_for(q);
 	const Mechanics &mech = r_env.table.mechanics;
@@ -366,8 +368,10 @@ void blast(Env &r_env, const Projectile &p_p, const ExplosionSimDef &p_x, bool p
 		e.base = float(base);
 		e.multiplier = p_x.zone_multiplier[size_t(zone)];
 		e.penetration = 1.0f;
-		e.amount = float(base * double(e.multiplier));
-		r_env.out.damage.push_back(e);
+		e.amount = vehicles::material_relation_damage(float(base), e.multiplier, p_x.zone_threshold[size_t(zone)]);
+		if (e.amount > 0.0f || t.id >= vehicles::kVehicleTargetIdBase) {
+			r_env.out.damage.push_back(e);
+		}
 	}
 }
 
