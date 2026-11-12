@@ -43,6 +43,7 @@ target_sources(bf3_godot PRIVATE
     src/fp_camera.cpp
     src/fp_camera.h
     src/input_mapper.cpp
+    src/input_mapper_vehicle.cpp
     src/input_mapper.h
     src/match_host.cpp
     src/match_host.h
@@ -157,6 +158,8 @@ target_sources(bf3_godot PRIVATE
 
 target_sources(bf3_godot PRIVATE
     src/game_deployables.h
+    src/game_vehicles.cpp
+    src/game_vehicles.h
     src/game_deployables.cpp
 )
 
@@ -346,6 +349,10 @@ if(OPENBF3_BUILD_CHECKS)
     target_sources(bf3_godot PRIVATE
         src/gadgets_draw_check.cpp
         src/gadgets_draw_check.h
+    )
+    target_sources(bf3_godot PRIVATE
+        src/vehicle_drive_check.cpp
+        src/vehicle_drive_check.h
     )
     target_link_libraries(bf3_godot PRIVATE bf3_sim_harness)
     target_include_directories(bf3_godot PRIVATE ${PROJECT_SOURCE_DIR}/tests)

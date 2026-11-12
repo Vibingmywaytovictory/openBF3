@@ -1,0 +1,68 @@
+#pragma once
+
+#include <cstdint>
+#include <functional>
+#include <string>
+
+namespace godot {
+class Camera3D;
+}
+
+namespace bf3::godot_side {
+
+class Bf3LevelSession;
+class Bf3Viewmodel;
+class GameVehicles;
+
+struct VehicleDriveInputs {
+	bool alive = false;
+	bool spawn_screen = false;
+	uint8_t own_slot = 0xFF;
+	const GameVehicles *vehicles = nullptr;
+	const Bf3Viewmodel *own_vm = nullptr;
+	const godot::Camera3D *camera = nullptr;
+	uint32_t camera_counter = 0;
+	std::function<void()> deploy;
+	std::function<bool(const std::string &)> shot;
+};
+
+class VehicleDriveRun {
+public:
+	explicit VehicleDriveRun(std::string p_shots) : shots_(std::move(p_shots)) {}
+	bool step(Bf3LevelSession &r_session, const VehicleDriveInputs &p_in, double p_delta);
+	int exit_code() const { return failures_ == 0 && rows_ > 0 ? 0 : 1; }
+
+private:
+	enum class Phase : uint8_t {
+		WaitScreen,
+		Deploying,
+		Pick,
+		Walk,
+		Enter,
+		Settle,
+		Drive,
+		ThirdPerson,
+		Stop,
+		Seat,
+		Exit,
+		Done
+	};
+
+	void row(const std::string &p_name, bool p_pass, const std::string &p_detail);
+	void enter(Phase p_phase);
+	bool fail(const std::string &p_name, const std::string &p_detail);
+	void shoot(const VehicleDriveInputs &p_in, const char *p_name);
+
+	std::string shots_;
+	Phase phase_ = Phase::WaitScreen;
+	double t_ = 0.0;
+	double next_press_ = 0.0;
+	uint16_t spawner_ = 0xFFFF;
+	uint32_t request_id_ = 0;
+	float start_x_ = 0, start_z_ = 0, heading_x_ = 0, heading_z_ = 0;
+	float first_wheel_angle_ = 0;
+	uint32_t rows_ = 0;
+	uint32_t failures_ = 0;
+};
+
+}

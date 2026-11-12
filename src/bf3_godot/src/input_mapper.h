@@ -233,6 +233,32 @@ private:
 		uint64_t consumed_clicks = 0;
 		bool weapon_light = true;
 	} tdm_;
+
+public:
+	enum class VehicleAction : uint8_t { Use = 0, Seat1, Seat2, Seat3, Seat4, Seat5, Seat6, Camera, Count };
+	static constexpr size_t kVehicleActionCount = size_t(VehicleAction::Count);
+	static const char *vehicle_action_name(VehicleAction p_action);
+	void enable_vehicles();
+	void set_seated(bool p_seated);
+	bool seated() const { return vehicle_.seated; }
+	bool held(VehicleAction p_action) const;
+	void script_hold(VehicleAction p_action, bool p_held);
+	void script_press(VehicleAction p_action);
+	uint32_t take_camera_presses();
+	void hold_view_on(float p_heading, float p_left, float p_right, float p_up, float p_down);
+
+private:
+	void vehicle_poll();
+	void vehicle_sample(bf3::host::InputSample &r_sample) const;
+	struct VehicleKeys {
+		bool installed = false;
+		bool seated = false;
+		bool camera_was = false;
+		std::array<bool, kVehicleActionCount> held{};
+		bool heading_valid = false;
+		uint32_t camera_presses = 0;
+		float heading = 0.0f;
+	} vehicle_;
 };
 
 }

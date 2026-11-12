@@ -8,6 +8,7 @@
 #include "game_deployables.h"
 #include "game_frame.h"
 #include "game_settings.h"
+#include "game_vehicles.h"
 #include "icons3d_check.h"
 #include "level_session.h"
 #include "m2a_check.h"
@@ -16,6 +17,7 @@
 #include "net_overlay.h"
 #include "net_overlay_check.h"
 #include "tdm_flow.h"
+#include "vehicle_drive_check.h"
 
 #include "bf3/anim/viewmodel_anim.h"
 #include "bf3/core/ui/hud_model.h"
@@ -221,6 +223,8 @@ struct GameState {
 	std::unique_ptr<Bf3GameAudio, void (*)(Bf3GameAudio *)> audio{ nullptr, nullptr };
 	std::unique_ptr<Bf3GameCrowd, void (*)(Bf3GameCrowd *)> crowd{ nullptr, nullptr };
 	std::unique_ptr<GameDeployables> deployables;
+	std::unique_ptr<GameVehicles> vehicles;
+	uint32_t vehicle_camera = 0;
 	std::unique_ptr<CatalogWeapons> catalog;
 	CatalogCacheSource catalog_cache;
 	std::shared_ptr<GameSettings> settings;
@@ -273,6 +277,7 @@ struct Bf3LevelSession::Game : GameState {
 	std::unique_ptr<CommoRoseCheck> commo_rose;
 	std::unique_ptr<CrosshairWalkRun> crosshair_walk;
 	std::unique_ptr<GadgetsDrawRun> gadgets_draw;
+	std::unique_ptr<VehicleDriveRun> vehicle_drive;
 	std::unique_ptr<AudioAreasCheck> audio_areas;
 	std::unique_ptr<NetOverlayCheck> net_overlay_check;
 #endif

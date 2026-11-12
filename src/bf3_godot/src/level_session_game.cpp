@@ -308,6 +308,9 @@ void Bf3LevelSession::game_parse_args() {
 	if (has_check_arg("gadgets-draw")) {
 		g.gadgets_draw = std::make_unique<GadgetsDrawRun>();
 	}
+	if (has_check_arg("vehicle-drive")) {
+		g.vehicle_drive = std::make_unique<VehicleDriveRun>(user_arg_value("vehicle-shots"));
+	}
 	if (has_check_arg("net-overlay-check")) {
 		g.net_overlay_check = std::make_unique<NetOverlayCheck>(user_arg_value("net-overlay-shots"));
 	}
@@ -363,6 +366,7 @@ void Bf3LevelSession::game_parse_args() {
 		quit_after_ = 1.0e9;
 	}
 	mapper_.enable_weapons(true);
+	mapper_.enable_vehicles();
 
 	g.vm_tuning_source = "res://config/viewmodel_tuning.cfg";
 	if (FileAccess::file_exists(to_godot(g.vm_tuning_source))) {
@@ -629,6 +633,20 @@ bool Bf3LevelSession::game_load_assets(const host::LevelDatabase &p_db, bf3::cor
 				char line[128];
 				std::snprintf(line, sizeof(line), "[game] deployables loaded in %.2f s: %u gadget meshes",
 						steady_s() - t0, g.deployables->stats().parts);
+				note(line);
+			}
+		}
+		if (li.shared != nullptr && li.shared->vehicles != nullptr) {
+			const double t0 = steady_s();
+			g.vehicles = std::make_unique<GameVehicles>();
+			if (const bf3::core::Status s = g.vehicles->load(li); !s.ok()) {
+				note("[game] ERROR vehicles load: " + s.error().message);
+				g.vehicles.reset();
+			} else {
+				char line[160];
+				std::snprintf(line, sizeof(line), "[game] vehicles loaded in %.2f s: %u kinds, tuning %016llx",
+						steady_s() - t0, g.vehicles->stats().kinds,
+						(unsigned long long)sim::vehicle_tuning_hash(li.shared->vehicles->tuning));
 				note(line);
 			}
 		}
@@ -1049,8 +1067,20 @@ void step_game_parts(Node3D &r_parent, GameState &r_game, const host::Presentati
 	mf.events = r_game.events;
 	std::array<host::PresentedSoldier, bf3::net::kMaxSlots> soldiers{};
 	const size_t n = p_frame.valid ? host::present_others(p_frame, p_now_ns, soldiers) : 0;
-	mf.others = std::span<const host::PresentedSoldier>(soldiers.data(), n);
-	mf.other_weapons = std::span<const host::PresentedOtherWeapon>(p_others.data(), std::min(n, p_other_count));
+	std::array<host::PresentedOtherWeapon, bf3::net::kMaxSlots> weapons{};
+	size_t walking = 0;
+	const std::span<const host::PresentedVehicle> vehicles(p_frame.vehicles.data(), p_frame.vehicle_count);
+	for (size_t i = 0; i < n; ++i) {
+		if (host::vehicle_seat_of(vehicles, soldiers[i].slot)) {
+			continue;
+		}
+		if (i < p_other_count) {
+			weapons[walking] = p_others[i];
+		}
+		soldiers[walking++] = soldiers[i];
+	}
+	mf.others = std::span<const host::PresentedSoldier>(soldiers.data(), walking);
+	mf.other_weapons = std::span<const host::PresentedOtherWeapon>(weapons.data(), std::min(walking, p_other_count));
 	mf.free_camera = p_free_camera;
 	mf.own_alive = r_game.alive;
 	mf.own_slot = r_game.own_slot;
@@ -1317,6 +1347,23 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 	const bool free_camera = mapper_.free_camera();
 
 	step_viewmodel_catalog(g, f);
+	if (g.vehicles != nullptr && g.vehicles->loaded() && !g.vehicles->built()) {
+		std::string error;
+		if (!g.vehicles->build(this, &error)) {
+			UtilityFunctions::print(to_godot("[game] ERROR vehicles build: " + error));
+			g.vehicles.reset();
+		} else {
+			const GameVehiclesStats &vs = g.vehicles->stats();
+			UtilityFunctions::print(to_godot("[game] vehicles built: " + std::to_string(vs.kinds) + " kinds, " +
+					std::to_string(vs.parts) + " mesh parts, " + std::to_string(vs.wheel_parts) + " of them wheels"));
+		}
+	}
+	if (g.vehicles != nullptr && g.vehicles->built()) {
+		g.vehicles->step(f, p_now_ns, g.alive ? g.own_slot : uint8_t(bf3::net::kNoVehicleOccupant));
+	}
+	const std::optional<OwnVehicleSeat> seat = g.vehicles != nullptr ? g.vehicles->own_seat() : std::nullopt;
+	mapper_.set_seated(seat.has_value());
+	g.vehicle_camera += seat ? mapper_.take_camera_presses() : 0u;
 	Camera3D *camera = cameras_.first_person();
 	Bf3Viewmodel *own_vm = g.own_viewmodel();
 	if (g.shown_team != g.own_team) {
@@ -1346,7 +1393,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		own_vm->set_weapon_light(mapper_.weapon_light());
 	}
 	if (own_vm != nullptr && camera != nullptr) {
-		const bool show = g.alive && g.weapon.valid && !free_camera;
+		const bool show = g.alive && g.weapon.valid && !free_camera && !seat;
 		if (show) {
 			const int item = g.own_item(g.weapon.def);
 			if (item < 0) {
@@ -1384,6 +1431,13 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 	const bool own_aims = g.alive && g.weapon.valid && g.weapon.def < g.def_aiming.size();
 	mapper_.set_own_look(own_look_of(own_aims ? &g.def_aiming[g.weapon.def] : nullptr, f.own_curr.pose,
 			(f.own_curr.flags & sim::soldier_flags::kSprinting) != 0, g.weapon.valid && g.weapon.zoomed, zoom_look));
+	if (seat && camera != nullptr && !free_camera) {
+		const VehicleSeatView sv = g.vehicles->seat_view(*seat, g.vehicle_camera, view.yaw, view.pitch,
+				g.settings != nullptr ? g.settings->hip_fov_deg() : FpCamera::kFovDegrees);
+		mapper_.hold_view_on(seat->heading, sv.left_yaw, sv.right_yaw, sv.up_pitch, sv.down_pitch);
+		camera->set_global_transform(sv.camera);
+		camera->set_fov(sv.fov_deg);
+	}
 	g.ms_vm = ms_since(part_t0);
 	part_t0 = std::chrono::steady_clock::now();
 
@@ -1534,6 +1588,28 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			UtilityFunctions::print(
 					to_godot(std::string("GADGETS DRAW: ") + (g.gadgets_draw->exit_code() == 0 ? "PASS" : "FAIL")));
 			finish(g.gadgets_draw->exit_code());
+			return true;
+		}
+	}
+	if (g.vehicle_drive != nullptr && !g.finished) {
+		VehicleDriveInputs in;
+		in.alive = g.alive;
+		in.spawn_screen = tdm_spawn_screen_shown();
+		in.own_slot = g.own_slot;
+		in.vehicles = g.vehicles.get();
+		in.own_vm = g.own_viewmodel();
+		in.camera = cameras_.first_person();
+		in.camera_counter = g.vehicle_camera;
+		in.deploy = [this] {
+			scripted_ui_key(KEY_ENTER, true);
+			scripted_ui_key(KEY_ENTER, false);
+		};
+		in.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		if (g.vehicle_drive->step(*this, in, p_delta)) {
+			g.finished = true;
+			UtilityFunctions::print(
+					to_godot(std::string("VEHICLE DRIVE: ") + (g.vehicle_drive->exit_code() == 0 ? "PASS" : "FAIL")));
+			finish(g.vehicle_drive->exit_code());
 			return true;
 		}
 	}

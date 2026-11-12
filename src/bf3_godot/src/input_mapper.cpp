@@ -202,7 +202,8 @@ void InputMapper::handle_event(const Ref<InputEvent> &p_event) {
 	}
 
 	for (const InputAction a : { InputAction::Jump, InputAction::Crouch, InputAction::Prone, InputAction::FreeCamera }) {
-		if (p_event->is_action_pressed(input_action_name(a), false, false)) {
+		if (p_event->is_action_pressed(input_action_name(a), false, false) &&
+				!(vehicle_.seated && a == InputAction::FreeCamera)) {
 			press(a);
 		}
 	}
@@ -226,6 +227,7 @@ void InputMapper::poll_devices() {
 	for (size_t i = 0; i < kInputActionCount; ++i) {
 		held_[i] = in->is_action_pressed(kActions[i].name);
 	}
+	vehicle_poll();
 }
 
 void InputMapper::set_scripted(bool p_scripted) {
@@ -255,6 +257,7 @@ void InputMapper::script_view(float p_yaw, float p_pitch) {
 
 void InputMapper::release_all() {
 	held_.fill(false);
+	vehicle_.held.fill(false);
 }
 
 void InputMapper::press(InputAction p_action) {
@@ -319,6 +322,7 @@ bf3::host::InputSample InputMapper::sample() const {
 		s.held_buttons = held(InputAction::Sprint) ? sim::buttons::kSprint : 0u;
 	}
 	weapon_sample(s);
+	vehicle_sample(s);
 	if (!game_input_) {
 		s.move_forward = 0.0f;
 		s.move_right = 0.0f;
