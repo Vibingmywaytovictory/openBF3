@@ -94,6 +94,10 @@ target_sources(bf3_sim PRIVATE
     src/vehicles/vehicle_weapon_rules.cpp
     include/bf3/sim/vehicles/vehicle_armament.h
     src/vehicles/vehicle_armament.cpp
+    include/bf3/sim/vehicles/vehicle_damage.h
+    src/vehicles/vehicle_damage.cpp
+    include/bf3/sim/vehicles/vehicle_targets.h
+    src/vehicles/vehicle_targets.cpp
 )
 
 target_sources(bf3_sim PRIVATE
