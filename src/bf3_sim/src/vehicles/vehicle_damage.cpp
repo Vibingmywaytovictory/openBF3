@@ -14,8 +14,8 @@ size_t zone_index(HullZone p_zone) {
 	return std::min(size_t(p_zone), kHullZoneCount - 1);
 }
 
-bool face_axis_z(HullZone p_zone) {
-	return p_zone == HullZone::Front || p_zone == HullZone::Rear;
+bool zone_angle_along_x(HullZone p_zone) {
+	return zone_index(p_zone) < 2;
 }
 
 void heal_zones(const VehicleDamageRule &p_rule, VehicleHealth &r_state, float p_amount) {
@@ -162,7 +162,7 @@ HullHit hull_hit(const HullBox &p_box, const Vec3 &p_local_point, const Vec3 &p_
 
 	const float h = std::sqrt(d[0] * d[0] + d[2] * d[2]);
 	if (h >= kHorizontalDirectionFloor) {
-		const float along = face_axis_z(out.zone) ? d[2] / h : d[0] / h;
+		const float along = zone_angle_along_x(out.zone) ? d[0] / h : d[2] / h;
 		out.zone_degrees = std::fabs(std::asin(std::clamp(along, -1.0f, 1.0f))) * kDegreesPerRadian;
 		out.zone_angle = true;
 	}

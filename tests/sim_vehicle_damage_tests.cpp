@@ -148,22 +148,33 @@ TEST_SUITE("sim-vehicle-damage-unit") {
 		const HullHit rear = hull_hit(box, { 0.0f, 1.0f, -4.0f }, { 0.0f, 0.0f, 1.0f });
 		CHECK(rear.zone == HullZone::Rear);
 		CHECK(rear.impact_degrees == doctest::Approx(0.0f));
-		CHECK(rear.zone_degrees == doctest::Approx(90.0f));
+		CHECK(rear.zone_degrees == doctest::Approx(0.0f));
 		VehicleHealth s = spawned_vehicle_health(tank);
 		s.shield = {};
 		VehicleHit h = hit(100.0f, rear.zone);
 		h.zone_angle = rear.zone_angle;
 		h.zone_degrees = rear.zone_degrees;
-		CHECK(apply_vehicle_damage(tank, s, h).damage == doctest::Approx(275.0f));
+		CHECK(apply_vehicle_damage(tank, s, h).damage == doctest::Approx(110.0f));
+
+		const HullHit glancing = hull_hit(box, { 0.0f, 1.0f, -4.0f }, { 0.9659258f, 0.0f, 0.2588190f });
+		CHECK(glancing.zone == HullZone::Rear);
+		CHECK(glancing.zone_degrees == doctest::Approx(75.0f).epsilon(1e-4));
+		VehicleHealth g = spawned_vehicle_health(tank);
+		g.shield = {};
+		h.zone_degrees = glancing.zone_degrees;
+		CHECK(apply_vehicle_damage(tank, g, h).damage == doctest::Approx(75.0f / 90.0f * 275.0f).epsilon(1e-4));
 
 		const HullHit front = hull_hit(box, { 0.5f, 1.0f, 4.0f }, { -0.5f, 0.0f, -0.8660254f });
 		CHECK(front.zone == HullZone::Front);
 		CHECK(front.impact_degrees == doctest::Approx(30.0f).epsilon(1e-4));
-		CHECK(front.zone_degrees == doctest::Approx(60.0f).epsilon(1e-4));
+		CHECK(front.zone_degrees == doctest::Approx(30.0f).epsilon(1e-4));
 		CHECK(zone_angle_factor(tank.zones[size_t(HullZone::Front)], front.zone_degrees) ==
 				doctest::Approx(81.0f / 90.0f));
 
-		CHECK(hull_hit(box, { 1.8f, 1.0f, 0.5f }, { -1.0f, 0.0f, 0.0f }).zone == HullZone::Right);
+		const HullHit side = hull_hit(box, { 1.8f, 1.0f, 0.5f }, { -1.0f, 0.0f, 0.0f });
+		CHECK(side.zone == HullZone::Right);
+		CHECK(side.zone_degrees == doctest::Approx(0.0f));
+		CHECK(zone_angle_factor(tank.zones[size_t(HullZone::Right)], side.zone_degrees) == doctest::Approx(0.9f));
 		CHECK(hull_hit(box, { -1.8f, 1.0f, -0.5f }, { 1.0f, 0.0f, 0.0f }).zone == HullZone::Left);
 		const HullHit top = hull_hit(box, { 0.0f, 2.2f, 1.0f }, { 0.0f, -1.0f, 0.0f });
 		CHECK(top.impact_degrees == doctest::Approx(0.0f));
