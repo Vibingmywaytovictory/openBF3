@@ -1103,17 +1103,21 @@ core::Result<PreparedTerrain> prepare_scene_terrain(const core::LevelMount &p_mo
 		}
 	}
 	PreparedTerrain out;
-	if (plan.combos.empty() || !tree.mask) {
+	const auto flat_terrain = [&]() -> core::Result<PreparedTerrain> {
 		core::Result<PreparedMesh> flat = scene_internal::terrain_mesh(grid, t, plan.asset, crop);
 		if (!flat) {
 			return flat.error();
 		}
 		out.mesh = std::move(*flat);
-		return out;
+		return std::move(out);
+	};
+	if (plan.combos.empty() || !tree.mask) {
+		return flat_terrain();
 	}
 	core::Result<std::vector<std::vector<uint8_t>>> programs = load_terrain_programs(p_mount, plan.combos);
 	if (!programs) {
-		return core::error_at(where, programs.error());
+		out.look_error = programs.error().message;
+		return flat_terrain();
 	}
 	const core::res::HeightfieldNode &root = tree.heightfield->nodes.front();
 	std::array<float, 4> region = { root.bounds_min[0], root.bounds_min[2], root.bounds_max[0], root.bounds_max[2] };
@@ -1130,7 +1134,8 @@ core::Result<PreparedTerrain> prepare_scene_terrain(const core::LevelMount &p_mo
 	input.fetch = fetch;
 	core::Result<TerrainLook> look = build_terrain_look(input);
 	if (!look) {
-		return core::error_at(where, look.error());
+		out.look_error = look.error().message;
+		return flat_terrain();
 	}
 	const scene_internal::TerrainSurfaceOf surface_of = [&](float p_x, float p_z) {
 		return look->material_at(p_x, p_z);

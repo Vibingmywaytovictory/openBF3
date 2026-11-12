@@ -894,6 +894,19 @@ TEST_SUITE("render-scene") {
 			std::printf("render.scene terrain uncropped: %zu vertices, %zu triangles (%.1f MiB)\n", full->mesh.vertices,
 					full->mesh.triangles, mib(si::prepared_bytes(full->mesh)));
 		}
+		{
+			LevelScenePlan broken = p;
+			REQUIRE_FALSE(broken.terrains.empty());
+			REQUIRE_FALSE(broken.terrains[0].combos.empty());
+			broken.terrains[0].combos[0].shader = "levels/none/terrain__0mv__2d__0";
+			Result<PreparedTerrain> flat = prepare_scene_terrain(lvl.mount(), broken, 0);
+			REQUIRE_MESSAGE(flat.ok(), (flat.ok() ? std::string() : flat.error().message));
+			std::printf("render.scene terrain whose look fails: %zu triangles, look error: %s\n", flat->mesh.triangles,
+					flat->look_error.c_str());
+			CHECK_FALSE(flat->look.has_value());
+			CHECK(flat->look_error.find("has no pixel program") != std::string::npos);
+			CHECK(flat->mesh.triangles > 0);
+		}
 		std::printf("render.scene peak working set %.1f MiB\n", mib(peak_working_set()));
 		cache.close();
 		const SnapshotDiff diff = diff_snapshots(before, reader.snapshot());

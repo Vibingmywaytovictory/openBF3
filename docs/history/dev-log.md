@@ -3210,3 +3210,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Terrain colour tiles decode through the core DXT1 decoder (`MipSlice::texels`); the terrain's own BC1 block decoder, a second copy with its own rounding, is gone.
 * Terrain look resolution stated: masks and colour map are painted into one region of at most 1024 texels a side, coarser than the data where the region is wide (MP_Subway in render.scene: masks at 1 m against 0.25 m); `bf3dump terrain` and render.scene print the drawn and the data texel.
 * DXBC translator: `and` with an immediate that is no float (an integer mask such as 255) is refused instead of read as a tiny float; comparisons give 1.0 and 0.0, so `and` stays a select on the mask.
+* Terrain whose look fails draws the flat terrain again (as before the look), with the error as a lane failure `<asset> look`, instead of no terrain at all; render.scene checks it on MP_Subway with a combination that has no program.

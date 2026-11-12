@@ -116,6 +116,9 @@ struct SceneLanes::Impl {
 			fail(plan->terrains[p_index].asset, mesh.error().message);
 			return;
 		}
+		if (!mesh->look_error.empty()) {
+			fail(plan->terrains[p_index].asset + " look", mesh->look_error);
+		}
 		uint64_t bytes = scene_internal::prepared_bytes(mesh->mesh);
 		if (mesh->look) {
 			bytes += mesh->look->stats.image_bytes;

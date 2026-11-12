@@ -162,6 +162,7 @@ core::Result<PreparedTexture> prepare_scene_texture(const core::LevelMount &p_mo
 struct PreparedTerrain {
 	PreparedMesh mesh;
 	std::optional<TerrainLook> look;
+	std::string look_error;
 };
 
 core::Result<PreparedTerrain> prepare_scene_terrain(const core::LevelMount &p_mount, const LevelScenePlan &p_plan,
