@@ -7,6 +7,7 @@
 #include "bf3/core/gameplay/mode_def.h"
 #include "bf3/core/gameplay/soldier_def.h"
 #include "bf3/core/gameplay/vehicle_def.h"
+#include "bf3/core/gameplay/vehicle_drive.h"
 #include "bf3/core/gameplay/weapon_switching.h"
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
@@ -2300,5 +2301,91 @@ TEST_SUITE("tables") {
 		const VehicleDef rhib = vehicle(*kharg, "vehicles/rhib/rhib");
 		CHECK(rhib.body_mass == Approx(1000));
 		CHECK(rhib.gravity_modifier == Approx(1.25));
+	}
+
+	TEST_CASE("gameplay: tank turret bodies, weapon frames and track wheels (M1A2, T-90)") {
+		Mounted m;
+		if (!open_or_skip(m)) {
+			return;
+		}
+		const std::unique_ptr<EbxLibrary> lib = open_level(m, "MP_007");
+		const VehicleDef m1 = vehicle(*lib, "vehicles/m1a2/m1abrams");
+		REQUIRE(m1.driver() != nullptr);
+		CHECK(m1.driver()->stance_count == 2);
+		const VehicleTurretDef *ring = turret(m1, 0, 1, true);
+		REQUIRE(ring != nullptr);
+		CHECK(ring->rotation_input == "EIARoll");
+		CHECK(ring->mass == Approx(100));
+		CHECK(ring->inertia == Approx(100));
+		CHECK(ring->angular_momentum_multiplier == Approx(120));
+		CHECK(ring->force_modifier == Approx(14000));
+		CHECK(ring->angular_momentum_threshold == Approx(120));
+		CHECK(ring->damping_acc == Approx(0.5));
+		CHECK(ring->damping_deacc == Approx(0.5));
+		CHECK(ring->use_linear_input);
+		CHECK(ring->use_threshold);
+		CHECK(ring->use_damping);
+		CHECK(ring->post_satisfy);
+		CHECK_FALSE(ring->constrained);
+		CHECK(ring->align_action == "EIAUndefined");
+		CHECK(ring->align_speed == Approx(0.35));
+		CHECK(ring->align_stop_tolerance == Approx(1));
+		CHECK(ring->frame_turret == -1);
+		CHECK(ring->frame.trans.y == Approx(1.57).epsilon(0.01));
+
+		const VehicleWeaponDef *cannon = nullptr;
+		const VehicleWeaponDef *remote = nullptr;
+		for (const VehicleWeaponDef &w : m1.weapons) {
+			cannon = w.firing == "vehicles/common/weapondata/mbt_cannon_firing" ? &w : cannon;
+			remote = w.firing == "vehicles/common/weapondata/tank_remote_hmg_firing" ? &w : remote;
+		}
+		REQUIRE(cannon != nullptr);
+		REQUIRE(remote != nullptr);
+		CHECK(cannon->seat == 0);
+		CHECK(cannon->stances == std::vector<int>{ 0 });
+		CHECK(cannon->impulse_strength == Approx(12000));
+		CHECK(cannon->projectile_spawn_offset.z == Approx(5));
+		CHECK(cannon->reload_time_multiplier == Approx(1));
+		REQUIRE(cannon->turret >= 0);
+		const VehicleTurretDef &gun = m1.turrets[size_t(cannon->turret)];
+		CHECK(gun.rotation_input == "EIAPitch");
+		CHECK(gun.parent == int(ring - m1.turrets.data()));
+		CHECK(gun.extended);
+		CHECK(gun.extended_width == Approx(260));
+		CHECK(gun.extended_falloff == Approx(45));
+		CHECK(gun.extended_min_angle == Approx(-20));
+		CHECK(gun.extended_max_angle == Approx(12));
+		CHECK(cannon->frame_turret == cannon->turret);
+		CHECK(cannon->frame.trans.z == Approx(-1.02).epsilon(0.01));
+		CHECK(remote->seat == 1);
+		CHECK(remote->stances.empty());
+		CHECK(remote->classification == "WCSecondary");
+		REQUIRE(remote->turret >= 0);
+		CHECK(m1.turrets[size_t(remote->turret)].seat == 1);
+		CHECK(m1.turrets[size_t(remote->turret)].angular_momentum_multiplier == Approx(750));
+		for (const VehicleWeaponDef &w : m1.weapons) {
+			CHECK(w.firing != "vehicles/common/weapondata/coax_lmg_firing");
+		}
+
+		WorkBudget budget;
+		const Result<VehicleDriveDef> m1_drive = read_vehicle_drive_def(*lib, "vehicles/m1a2/m1abrams", &budget);
+		REQUIRE_MESSAGE(m1_drive.ok(), (m1_drive.ok() ? std::string() : m1_drive.error().message));
+		CHECK(m1_drive->wheels.size() == 18);
+		CHECK(std::count_if(m1_drive->wheels.begin(), m1_drive->wheels.end(),
+					  [](const VehicleWheelDef &w) { return w.physics_type == "wptNormal"; }) == 6);
+		REQUIRE(m1_drive->wheel_configs.size() == 1);
+		const WheelConfigDef &m1_track = m1_drive->wheel_configs[0];
+		CHECK(m1_track.steering_type == 2);
+		CHECK(m1_track.driving_type == 1);
+		CHECK(m1_track.tracked_forward_speed_limit == Approx(1.5));
+		CHECK(m1_track.tracked_turn_speed_limit == Approx(2.0));
+		REQUIRE(m1_track.steer_inertia.size() == 5);
+		CHECK(m1_track.steer_inertia[0] == std::array<float, 2>{ 0.0f, 50.0f });
+		CHECK(m1_track.steer_inertia[4] == std::array<float, 2>{ 50.0f, 1.0f });
+		const Result<VehicleDriveDef> t90_drive = read_vehicle_drive_def(*lib, "vehicles/t90/t90", &budget);
+		REQUIRE(t90_drive.ok());
+		REQUIRE(t90_drive->wheel_configs.size() == 1);
+		CHECK(t90_drive->wheel_configs[0].tracked_forward_speed_limit == Approx(1.1));
+		CHECK(t90_drive->wheel_configs[0].steer_inertia.size() == 6);
 	}
 }

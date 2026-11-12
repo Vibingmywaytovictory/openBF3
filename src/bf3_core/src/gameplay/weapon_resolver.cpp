@@ -324,6 +324,44 @@ Result<WeaponDef> resolve_weapon(const EbxResolver &p_db, std::string_view p_par
 	return w;
 }
 
+Result<WeaponDef> resolve_vehicle_weapon(const EbxResolver &p_db, std::string_view p_firing) {
+	Fields f(p_db);
+	const EbxPartition *root = p_db.partition_by_name(p_firing);
+	if (root == nullptr) {
+		return make_error(std::string(p_firing) + ": partition not found");
+	}
+	const EbxInstance primary = root->primary();
+	if (!primary.is_a("WeaponFiringDataAsset")) {
+		return make_error(
+				std::string(p_firing) + ": a " + std::string(primary.type_name()) + ", not a WeaponFiringDataAsset");
+	}
+	const std::optional<EbxInstance> wfd = f.follow(primary.data(), "Data", "WeaponFiringData", true);
+	if (!wfd) {
+		return f.error();
+	}
+	WeaponDef w;
+	w.variant = f.partition_name(*root);
+	w.blueprint = w.variant;
+	read_firing_data(f, *wfd, w);
+	const std::optional<EbxInstance> ffd = f.follow(wfd->data(), "PrimaryFire", "FiringFunctionData", true);
+	if (!ffd) {
+		return f.error();
+	}
+	detail::read_fire_function(f, *ffd, w.fire);
+	std::optional<EbxInstance> projectile;
+	if (const std::optional<EbxStruct> shot = f.sub(ffd->data(), "Shot")) {
+		projectile = f.follow(*shot, "ProjectileData", "ProjectileEntityData", false);
+	}
+	w.sound = ref_partition(f, ffd->data(), "Sound");
+	if (projectile) {
+		detail::read_projectile(f, *projectile, w.projectile);
+	}
+	if (!f.ok()) {
+		return f.error();
+	}
+	return w;
+}
+
 Result<WeaponAiming> read_weapon_aiming(const EbxResolver &p_db, std::string_view p_controller) {
 	Fields f(p_db);
 	WeaponAiming a;

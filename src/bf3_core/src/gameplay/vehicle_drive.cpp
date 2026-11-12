@@ -424,6 +424,23 @@ private:
 				}
 			}
 		}
+		w.tracked_turn_speed_limit = numbers_.f(c, "TrackedTurnSpeedLimit", 0);
+		w.tracked_forward_speed_limit = numbers_.f(c, "TrackedForwardSpeedLimit", 0);
+		if (const std::optional<EbxInstance> inertia = db_.follow(c, "SteerInertia");
+				inertia && budget_.take_type(inertia->data())) {
+			if (const OptionalEbxArray curve = array_of(budget_, inertia->data(), "Curve")) {
+				if (curve->size() > kMaxDriveCurvePoints) {
+					numbers_.fail_message("SteerInertia has " + std::to_string(curve->size()) + " points (at most " +
+							std::to_string(kMaxDriveCurvePoints) + ")");
+				} else {
+					for (const EbxValue e : *curve) {
+						if (const std::optional<EbxStruct> s = e.as_struct()) {
+							w.steer_inertia.push_back({ numbers_.f(*s, "x", 0), numbers_.f(*s, "y", 0) });
+						}
+					}
+				}
+			}
+		}
 		config_instances_.push_back(p_config);
 		out.wheel_configs.push_back(std::move(w));
 		return uint32_t(out.wheel_configs.size() - 1);

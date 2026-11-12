@@ -47,6 +47,18 @@ struct VehicleTurretDef {
 	float angular_momentum_threshold = 0;
 	float angular_momentum_damping = 0;
 	float mass = 0, inertia = 0;
+
+	float force_modifier = 0;
+	float reset_force_modifier = 0, reset_force_input_threshold = 0;
+	float damping_acc = 1, damping_deacc = 1;
+	bool use_linear_input = false, use_threshold = false, use_damping = false, post_satisfy = false;
+	bool extended = false;
+	float extended_heading = 0, extended_width = 0, extended_falloff = 0;
+	float extended_min_angle = 0, extended_max_angle = 0;
+	std::string align_action;
+	float align_speed = 0, align_stop_tolerance = 0;
+	int frame_turret = -1;
+	core::Transform frame;
 };
 
 struct VehicleWeaponDef {
@@ -57,6 +69,14 @@ struct VehicleWeaponDef {
 	int turret = -1;
 	float damage_multiplier = 1;
 	float explosion_damage_multiplier = 1;
+
+	int frame_turret = -1;
+	core::Transform frame;
+	core::Vec3 projectile_spawn_offset{};
+	float impulse_strength = 0;
+	float reload_time_multiplier = 1;
+	float overheat_drop_multiplier = 1;
+	std::vector<int> stances;
 };
 
 struct VehicleSeatDef {
@@ -67,6 +87,7 @@ struct VehicleSeatDef {
 	bool shows_soldier = false;
 	bool own_weapon = false;
 	core::Transform transform;
+	int stance_count = 1;
 	std::vector<int> weapons;
 	std::vector<VehicleCameraDef> cameras;
 };

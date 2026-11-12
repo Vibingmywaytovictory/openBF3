@@ -24,6 +24,7 @@ struct Node {
 	int parent = -1;
 	Role role = Role::Other;
 	level::LevelTransform frame;
+	level::LevelTransform turret_frame;
 };
 
 core::Transform model_transform(const level::LevelTransform &p_t) {
@@ -70,7 +71,8 @@ public:
 	std::vector<Node> nodes;
 	bool bad_transform = false;
 
-	void walk(WorkBudget &r_budget, const EbxResolver &p_db, const EbxInstance &p_container, int p_parent, size_t p_depth) {
+	void walk(WorkBudget &r_budget, const EbxResolver &p_db, const EbxInstance &p_container, int p_parent,
+			size_t p_depth, const level::LevelTransform &p_frame = level::LevelTransform::identity()) {
 		if (p_depth > kMaxDepth) {
 			return;
 		}
@@ -86,9 +88,11 @@ public:
 					p_parent >= 0 ? nodes[static_cast<size_t>(p_parent)].frame : level::LevelTransform::identity();
 			const Result<level::LevelTransform> local = component_transform(component);
 			bad_transform = bad_transform || !local;
-			nodes.push_back({ component, p_parent, role_of(p_db, component),
-					(local ? *local : level::LevelTransform::identity()).in_parent(parent) });
-			walk(r_budget, p_db, component, at, p_depth + 1);
+			const level::LevelTransform here = local ? *local : level::LevelTransform::identity();
+			const Role role = role_of(p_db, component);
+			nodes.push_back({ component, p_parent, role, here.in_parent(parent), here.in_parent(p_frame) });
+			walk(r_budget, p_db, component, at, p_depth + 1,
+					role == Role::Turret ? level::LevelTransform::identity() : nodes.back().turret_frame);
 		}
 	}
 
@@ -154,6 +158,26 @@ private:
 	std::vector<int> first_seat_;
 	std::vector<int> first_turret_;
 };
+
+std::vector<int> valid_stances(WorkBudget &r_budget, const Layout &p_layout, int p_at) {
+	std::vector<int> out;
+	for (int up = p_layout.nodes[static_cast<size_t>(p_at)].parent; up >= 0;
+			up = p_layout.nodes[static_cast<size_t>(up)].parent) {
+		const EbxInstance &d = p_layout.nodes[static_cast<size_t>(up)].data;
+		if (!d.is_a("StanceFilterComponentData")) {
+			continue;
+		}
+		if (const OptionalEbxArray stances = array_of(r_budget, d.data().get("ValidStances"))) {
+			for (const EbxValue v : *stances) {
+				if (const std::optional<double> n = number(v)) {
+					out.push_back(static_cast<int>(*n));
+				}
+			}
+		}
+		break;
+	}
+	return out;
+}
 
 VehicleHealthZoneDef read_zone(const EbxStruct &p_entity, std::string_view p_field) {
 	VehicleHealthZoneDef out;
@@ -310,6 +334,7 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 		seat.shows_soldier = boolean(d.data(), "ShowSoldierInEntry").value_or(false);
 		seat.own_weapon = d.is_a("SoldierEntryComponentData");
 		seat.transform = model_transform(layout.nodes[static_cast<size_t>(node)].frame);
+		seat.stance_count = static_cast<int>(number_or(d.data(), "NumberOfStances", 1));
 		out.seats.push_back(std::move(seat));
 	}
 
@@ -339,7 +364,35 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 			t.angular_momentum_damping = static_cast<float>(number_or(b, "AngularMomentumDamping", 0));
 			t.mass = static_cast<float>(number_or(b, "Mass", 0));
 			t.inertia = static_cast<float>(number_or(b, "Inertia", 0));
+			t.force_modifier = static_cast<float>(number_or(b, "ForceModifier", 0));
+			t.reset_force_modifier = static_cast<float>(number_or(b, "ResetForceModifier", 0));
+			t.reset_force_input_threshold = static_cast<float>(number_or(b, "ResetForceInputThreshold", 0));
+			t.damping_acc = static_cast<float>(number_or(b, "AngularMomentumDampingAcc", 1));
+			t.damping_deacc = static_cast<float>(number_or(b, "AngularMomentumDampingDeacc", 1));
+			t.use_linear_input = boolean(b, "UseLinearInput").value_or(false);
+			t.use_threshold = boolean(b, "UseAngularMomentumThreshold").value_or(false);
+			t.use_damping = boolean(b, "UseAngularMomentumDamping").value_or(false);
+			t.post_satisfy = boolean(b, "UsePostSatisfyConstraints").value_or(false);
+			if (const std::optional<EbxInstance> ext = p_db.follow(b, "ExtendedConstraints");
+					ext && budget.take_type(ext->data())) {
+				const EbxStruct x = ext->data();
+				t.extended = true;
+				t.extended_heading = static_cast<float>(number_or(x, "Heading", 0));
+				t.extended_width = static_cast<float>(number_or(x, "Width", 0));
+				t.extended_falloff = static_cast<float>(number_or(x, "Falloff", 0));
+				t.extended_min_angle = static_cast<float>(number_or(x, "AngularConstraintMin", 0));
+				t.extended_max_angle = static_cast<float>(number_or(x, "AngularConstraintMax", 0));
+			}
 		}
+		const EbxStruct component = layout.nodes[static_cast<size_t>(node)].data.data();
+		if (const std::optional<EbxInstance> align = p_db.follow(component, "AlignmentSettings");
+				align && budget.take_type(align->data())) {
+			t.align_action = text(budget, align->data(), "AlignAction");
+			t.align_speed = static_cast<float>(number_or(align->data(), "Speed", 0));
+			t.align_stop_tolerance = static_cast<float>(number_or(align->data(), "StopTolerance", 0));
+		}
+		t.frame_turret = t.parent;
+		t.frame = model_transform(layout.nodes[static_cast<size_t>(node)].turret_frame);
 		out.turrets.push_back(std::move(t));
 	}
 
@@ -356,6 +409,13 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 			w.turret = turret_index(layout.aiming(at));
 			w.damage_multiplier = static_cast<float>(number_or(d, "DamageMultiplier", 1));
 			w.explosion_damage_multiplier = static_cast<float>(number_or(d, "ExplosionDamageMultiplier", 1));
+			w.frame_turret = turret_index(layout.enclosing(at, Role::Turret));
+			w.frame = model_transform(node.turret_frame);
+			w.projectile_spawn_offset = vec3(d, "ProjectileSpawnOffset").value_or(core::Vec3{});
+			w.impulse_strength = static_cast<float>(number_or(d, "ImpulseStrength", 0));
+			w.reload_time_multiplier = static_cast<float>(number_or(d, "ReloadTimeMultiplier", 1));
+			w.overheat_drop_multiplier = static_cast<float>(number_or(d, "OverheatDropPerSecondMultiplier", 1));
+			w.stances = valid_stances(budget, layout, at);
 			if (w.seat >= 0) {
 				out.seats[static_cast<size_t>(w.seat)].weapons.push_back(static_cast<int>(out.weapons.size()));
 			}

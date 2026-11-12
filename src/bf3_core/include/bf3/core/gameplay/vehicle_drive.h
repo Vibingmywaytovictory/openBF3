@@ -14,7 +14,7 @@
 
 namespace bf3::core::gameplay {
 
-inline constexpr size_t kMaxDriveWheels = 16;
+inline constexpr size_t kMaxDriveWheels = 32;
 inline constexpr size_t kMaxDriveCurvePoints = 32;
 inline constexpr size_t kMaxDriveGears = 16;
 inline constexpr size_t kMaxDriveRigidBodies = 16;
@@ -67,6 +67,9 @@ struct WheelConfigDef {
 	bool use_engine_brake = false;
 	float engine_brake_min_factor = 0, engine_brake_max_factor = 0, engine_brake_velocity_factor = 0;
 	std::vector<std::array<float, 2>> transmission_loss;
+
+	float tracked_turn_speed_limit = 0, tracked_forward_speed_limit = 0;
+	std::vector<std::array<float, 2>> steer_inertia;
 };
 
 struct VehicleWheelDef {
