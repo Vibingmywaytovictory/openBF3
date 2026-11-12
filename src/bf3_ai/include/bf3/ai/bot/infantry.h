@@ -70,7 +70,8 @@ public:
 	virtual bool soldier_pose(PoseRequest p_pose) = 0;
 	virtual bool trigger(TriggerKind p_trigger) = 0;
 	virtual bool sense(SenseFocus p_focus) = 0;
-	virtual void end_plan() = 0;
+	virtual bool end_plan() = 0;
+	virtual void reset_controls() = 0;
 };
 
 }

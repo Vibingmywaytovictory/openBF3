@@ -51,6 +51,16 @@ struct BotIntent {
 	bool walk_sprint = false;
 	bool walk_jump = false;
 	sim::Pose walk_pose = sim::Pose::Stand;
+	bool walked = false, walk_faces = false, walk_sprints = false, stands = false, sprints = false;
+
+	void hold_stand() {
+		pose = sim::Pose::Stand;
+		stands = true;
+	}
+	void hold_sprint() {
+		sprint = true;
+		sprints = true;
+	}
 
 	float aim_at(const sim::Vec3 &p_eye, const sim::Vec3 &p_point) {
 		const float dx = p_point[0] - p_eye[0], dy = p_point[1] - p_eye[1], dz = p_point[2] - p_eye[2];
@@ -99,10 +109,14 @@ struct BotBody {
 	void set_slot(uint8_t p_slot);
 	void new_life(sim::Tick p_tick, const sim::SoldierState &p_state);
 	void set_activity(sim::Tick p_tick, TdmBotActivity p_activity);
+	void report_activity(sim::Tick p_tick, TdmBotActivity p_activity);
 	void restricted(sim::Tick p_tick, sim::Command &r_cmd);
 
+	Sighting keep(sim::Tick p_tick, const sim::SoldierState &p_state, std::span<const sim::SoldierState> p_states);
 	Sighting see(sim::Tick p_tick, const sim::SoldierState &p_state, std::span<const sim::SoldierState> p_states);
 	BotFrame sense_revive(
+			sim::Tick p_tick, const sim::SoldierState &p_state, const ServerView &p_view, const Sighting &p_sighting);
+	BotFrame hold_frame(
 			sim::Tick p_tick, const sim::SoldierState &p_state, const ServerView &p_view, const Sighting &p_sighting);
 
 	BotIntent begin_plan(TdmBotActivity p_activity);
@@ -112,6 +126,7 @@ struct BotBody {
 			sim::Command &r_cmd);
 
 	bool walk(const BotFrame &p_frame, BotIntent &r_intent);
+	void rewalk(const BotFrame &p_frame, BotIntent &r_intent);
 	void walk_facing(const BotFrame &p_frame, BotIntent &r_intent);
 	void roam(const BotFrame &p_frame, BotIntent &r_intent);
 	void hunt_step(const BotFrame &p_frame, BotIntent &r_intent);

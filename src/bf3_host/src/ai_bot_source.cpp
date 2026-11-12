@@ -40,17 +40,22 @@ TdmBotActivity tdm_activity(ai::InfantryActivity p_activity) {
 	return TdmBotActivity::Roam;
 }
 
-struct AiBotSource::Impl final : ai::InfantryBody {
+struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 	BotBody body;
 	ai::BotMain *bot = nullptr;
 	sim::Tick now = 0;
 	const sim::SoldierState *state = nullptr;
+	bool playing = false;
 	Sighting sighting;
 	std::optional<BotFrame> frame;
 	ai::InfantrySenses sensed;
 	BotIntent intent;
+	BotIntent held;
 	TdmBotActivity planned = TdmBotActivity::Roam;
-	sim::Command cmd{};
+	bool lost = false;
+	sim::Tick plan_tick = UINT32_MAX;
+	uint64_t decisions = 0;
+	uint64_t unplanned = 0;
 
 	const ServerView &view() const { return *body.shared->host.view; }
 	const BotFrame &f() const { return *frame; }
@@ -59,6 +64,21 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 	ai::Vec3 position() const override { return state->position; }
 
 	void see() override { sighting = body.see(now, *state, view().states()); }
+
+	void release() {
+		held = body.begin_plan(planned);
+		intent = held;
+	}
+
+	bool target_held() {
+		lost = lost || f().target < 0;
+		return f().target >= 0;
+	}
+
+	bool corpse_held() {
+		lost = lost || f().revive == nullptr;
+		return f().revive != nullptr;
+	}
 
 	SupportWay support_way() const {
 		SupportWay way;
@@ -136,8 +156,9 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 		if (planned == TdmBotActivity::Hunt && body.activity != TdmBotActivity::Hunt) {
 			body.hunt.begin(now);
 		}
-		body.set_activity(now, planned);
+		body.activity = planned;
 		intent = body.begin_plan(planned);
+		lost = false;
 	}
 
 	bool move_to(ai::MoveGoal p_goal, const ai::Vec3 &p_point) override {
@@ -161,8 +182,8 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 				if (bot->squad_goal().kind != ai::SquadGoalKind::SquadTarget &&
 						std::hypot(p_point.x - f().self.position[0], p_point.z - f().self.position[2]) >
 								body.cfg().behaviours.squad_far_m) {
-					intent.sprint = true;
-					intent.pose = sim::Pose::Stand;
+					intent.hold_sprint();
+					intent.hold_stand();
 				}
 				break;
 		}
@@ -171,6 +192,9 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 
 	bool move_to_object(ai::ObjectGoal p_object) override {
 		if (p_object == ai::ObjectGoal::Target) {
+			if (!target_held()) {
+				return false;
+			}
 			const ai::SquadGoal &goal = bot->squad_goal();
 			const bool advance = bot->ordered_behaviour() == int(ai::InfantryBehaviour::MoveTo) &&
 					goal.kind != ai::SquadGoalKind::None && !goal.wait_for_members &&
@@ -180,7 +204,7 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 					body.navigation.set_goal(*body.shared, now, goal.position, body.cfg().behaviours.squad_arrive_m,
 							false, kSquadGoalMoveMetres) &&
 					body.walk(f(), intent)) {
-				intent.pose = sim::Pose::Stand;
+				intent.hold_stand();
 				return true;
 			}
 			body.move_fight(f(), intent);
@@ -190,13 +214,13 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 			return body.support_approach(
 					f(), p_object == ai::ObjectGoal::Patient ? SupplyNeed::Health : SupplyNeed::Ammo, intent);
 		}
-		return body.revive_approach(f(), intent);
+		return corpse_held() && body.revive_approach(f(), intent);
 	}
 
 	bool soldier_pose(ai::PoseRequest p_pose) override {
 		if (p_pose == ai::PoseRequest::Crouch) {
 			body.crouch(intent);
-		} else {
+		} else if (corpse_held()) {
 			body.revive_pose(f(), intent);
 		}
 		return true;
@@ -205,7 +229,9 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 	bool trigger(ai::TriggerKind p_trigger) override {
 		switch (p_trigger) {
 			case ai::TriggerKind::Aimed:
-				body.trigger_target(f(), intent);
+				if (target_held()) {
+					body.trigger_target(f(), intent);
+				}
 				break;
 			case ai::TriggerKind::Blind:
 				body.trigger_blind(intent);
@@ -214,7 +240,9 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 				body.throw_step(f(), intent);
 				break;
 			case ai::TriggerKind::Defib:
-				body.revive_trigger(f(), intent);
+				if (corpse_held()) {
+					body.revive_trigger(f(), intent);
+				}
 				break;
 			case ai::TriggerKind::Medkit:
 				body.support_trigger(f(), SupplyNeed::Health, intent);
@@ -233,7 +261,9 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 	bool sense(ai::SenseFocus p_focus) override {
 		switch (p_focus) {
 			case ai::SenseFocus::Target:
-				body.aim_target(f(), intent);
+				if (target_held()) {
+					body.aim_target(f(), intent);
+				}
 				break;
 			case ai::SenseFocus::BlindPoint:
 				body.aim_blind(f(), intent);
@@ -251,53 +281,84 @@ struct AiBotSource::Impl final : ai::InfantryBody {
 		return true;
 	}
 
-	void end_plan() override {
-		const bool aligned = body.turn(f(), intent);
-		body.compose(f(), planned, intent, aligned, cmd);
+	bool end_plan() override {
+		held = intent;
+		plan_tick = now;
+		return !lost;
+	}
+
+	void reset_controls() override { release(); }
+
+	BotSeatState prepare(sim::Tick p_tick, bool p_playing) override {
+		frame.reset();
+		state = nullptr;
+		playing = p_playing;
+		const std::span<const sim::SoldierState> states = view().states();
+		if (body.slot >= states.size()) {
+			return {};
+		}
+		const sim::SoldierState &s = states[body.slot];
+		if (!is_alive(s)) {
+			return { &s, false };
+		}
+		if (s.life != body.life) {
+			body.new_life(p_tick, s);
+			sensed = ai::InfantrySenses{};
+			planned = TdmBotActivity::Roam;
+			release();
+		}
+		bot->set_side(view().team(body.slot));
+		if (!p_playing) {
+			release();
+			return { &s, true };
+		}
+		now = p_tick;
+		state = &s;
+		sighting = body.keep(p_tick, s, states);
+		frame.emplace(body.hold_frame(p_tick, s, view(), sighting));
+		return { &s, true };
+	}
+
+	void acted(sim::Tick p_tick) override {
+		const ai::BotMainStats &st = bot->stats();
+		if (st.decisions == decisions) {
+			return;
+		}
+		TdmShared &sh = *body.shared;
+		sh.count(&TdmBotStats::decisions, st.decisions - decisions);
+		sh.count(&TdmBotStats::unplanned_decisions, st.unplanned - unplanned);
+		decisions = st.decisions;
+		unplanned = st.unplanned;
+		if (sh.observer != nullptr) {
+			sh.observer->decided(p_tick, body.slot, bot->behaviour(), bot->activity());
+			sh.observer->urgencies(p_tick, body.slot, *bot);
+		}
 	}
 
 	sim::Command run(sim::Tick p_tick, const sim::SoldierState &p_state) {
-		cmd = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
+		sim::Command cmd = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
 		cmd.flags = 0;
 		if (body.slot == 0xFF || bot == nullptr || !is_alive(p_state)) {
 			body.targeting.drop();
 			body.set_activity(p_tick, TdmBotActivity::Dead);
-			if (bot != nullptr) {
-				body.shared->ai->observe(body.slot, p_state, false, p_tick);
-			}
 			return cmd;
 		}
-		if (p_state.life != body.life) {
-			body.new_life(p_tick, p_state);
-		}
-		body.shared->ai->observe(body.slot, p_state, true, p_tick);
-		bot->set_side(view().team(body.slot));
-		if (view().input_restricted() || view().phase() != net::MatchPhase::InRound) {
+		if (!playing || !frame.has_value() || frame->tick != p_tick) {
 			body.restricted(p_tick, cmd);
 			return cmd;
 		}
-		now = p_tick;
-		state = &p_state;
-		const double dt = sim::kTickSeconds;
-		bot->see(dt);
-		bot->update_sensing(dt);
-		if (bot->wants_decision()) {
-			const uint64_t unplanned = bot->stats().unplanned;
-			bot->decision_making(dt);
-			TdmShared &sh = *body.shared;
-			sh.count(&TdmBotStats::decisions, uint64_t(1));
-			if (bot->stats().unplanned != unplanned) {
-				sh.count(&TdmBotStats::unplanned_decisions, uint64_t(1));
-			}
-			if (sh.observer != nullptr) {
-				sh.observer->decided(p_tick, body.slot, bot->behaviour(), bot->activity());
-				sh.observer->urgencies(p_tick, body.slot, *bot);
-			}
+		if (bot->has_plan()) {
+			body.report_activity(p_tick, tdm_activity(bot->activity()));
 		}
-		bot->plan_execution(dt);
-		bot->update_communication();
-		frame.reset();
-		state = nullptr;
+		if (plan_tick != p_tick) {
+			body.rewalk(*frame, held);
+		}
+		BotIntent i = held;
+		if (i.trigger == Trigger::Aimed && !frame->visible) {
+			i.trigger = Trigger::None;
+		}
+		const bool aligned = body.turn(*frame, i);
+		body.compose(*frame, planned, i, aligned, cmd);
 		return cmd;
 	}
 };
@@ -331,6 +392,9 @@ sim::Command AiBotSource::command(sim::Tick p_tick, const sim::SoldierState &p_s
 	if (sh.strategy != nullptr) {
 		sh.strategy->step(p_tick);
 	}
+	if (sh.ai != nullptr) {
+		sh.ai->step(p_tick);
+	}
 	const sim::Command c = m.run(p_tick, p_state);
 	sh.brains_ns += now_ns() - t0;
 	if (sh.stats != nullptr) {
@@ -354,10 +418,11 @@ void AiBotSource::admitted(uint8_t p_slot) {
 		sh->ai = std::make_shared<HostAiBots>(*sh->host.view, sh->config->perception.max_range_m,
 				sh->config->behaviours.call_s, [sh](uint8_t p_caller) { return ask_medic(*sh, p_caller); });
 	}
-	m.bot = sh->ai->admit(p_slot, m, m.body.cfg().behaviours);
+	m.bot = sh->ai->admit(p_slot, m, m.body.cfg().behaviours, &m);
 	if (m.bot == nullptr) {
 		return;
 	}
+	m.bot->set_takes_squads(sh->strategy != nullptr && sh->config->squads);
 	if (sh->strategy != nullptr) {
 		sh->strategy->add_bot(p_slot, *m.bot);
 	}

@@ -728,6 +728,7 @@ struct HostAiBots::Impl {
 	struct Seat {
 		ai::BotMain *bot = nullptr;
 		ai::InfantryBody *body = nullptr;
+		BotSeat *host = nullptr;
 		const ai::BehaviourTuning *tuning = nullptr;
 		uint32_t equipment = ai::kNoHandle;
 		uint32_t life = UINT32_MAX;
@@ -743,6 +744,7 @@ struct HostAiBots::Impl {
 	MedicCall medic_call;
 	float view_distance = 0.0f;
 	sim::Tick tick = 0;
+	sim::Tick stepped = UINT32_MAX;
 	ai::AiSettings settings;
 	ai::InformationManager information;
 	std::unique_ptr<ai::InformationFactory> factory;
@@ -798,13 +800,15 @@ HostAiBots::HostAiBots(const ServerView &r_view, float p_view_distance, float p_
 
 HostAiBots::~HostAiBots() = default;
 
-ai::BotMain *HostAiBots::admit(uint8_t p_slot, ai::InfantryBody &r_body, const ai::BehaviourTuning &p_tuning) {
+ai::BotMain *HostAiBots::admit(
+		uint8_t p_slot, ai::InfantryBody &r_body, const ai::BehaviourTuning &p_tuning, BotSeat *p_seat) {
 	Impl &m = *impl_;
 	if (p_slot >= kMaxAiSlots || m.seats[p_slot].bot != nullptr) {
 		return nullptr;
 	}
 	Impl::Seat &seat = m.seats[p_slot];
 	seat.body = &r_body;
+	seat.host = p_seat;
 	seat.tuning = &p_tuning;
 	const int side = m.valid(p_slot) ? int(m.view.team(p_slot)) : 0;
 	m.soldiers[p_slot].set_side(side);
@@ -831,6 +835,35 @@ void HostAiBots::remove(uint8_t p_slot) {
 	m.events.event_player_disconnect(p_slot);
 	m.seats[p_slot].bot = nullptr;
 	m.seats[p_slot].body = nullptr;
+	m.seats[p_slot].host = nullptr;
+}
+
+void HostAiBots::step(sim::Tick p_tick) {
+	Impl &m = *impl_;
+	if (m.stepped == p_tick) {
+		return;
+	}
+	m.stepped = p_tick;
+	m.tick = p_tick;
+	const bool playing = !m.view.input_restricted() && m.view.phase() == net::MatchPhase::InRound;
+	for (uint8_t s = 0; s < kMaxAiSlots; ++s) {
+		Impl::Seat &seat = m.seats[s];
+		if (seat.bot == nullptr || seat.host == nullptr) {
+			continue;
+		}
+		const BotSeatState prepared = seat.host->prepare(p_tick, playing);
+		if (prepared.state != nullptr) {
+			observe(s, *prepared.state, prepared.alive, p_tick);
+		}
+	}
+	if (playing) {
+		m.main->action();
+	}
+	for (Impl::Seat &seat : m.seats) {
+		if (seat.bot != nullptr && seat.host != nullptr) {
+			seat.host->acted(p_tick);
+		}
+	}
 }
 
 void HostAiBots::observe(uint8_t p_slot, const sim::SoldierState &p_state, bool p_alive, sim::Tick p_tick) {

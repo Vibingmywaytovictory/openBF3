@@ -52,7 +52,8 @@ struct LogBody final : InfantryBody {
 		calls.push_back("sense " + std::to_string(int(p_focus)));
 		return true;
 	}
-	void end_plan() override {}
+	bool end_plan() override { return true; }
+	void reset_controls() override {}
 };
 
 struct StubBot final : test::NullBot {

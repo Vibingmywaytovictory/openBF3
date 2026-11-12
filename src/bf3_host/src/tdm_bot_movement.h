@@ -72,6 +72,7 @@ private:
 	sim::Vec3 anchor_{};
 	float ax_ = 1.0f, az_ = 0.0f;
 	sim::Tick until_ = 0;
+	sim::Tick grounded_ = 0;
 };
 
 class BotLook {

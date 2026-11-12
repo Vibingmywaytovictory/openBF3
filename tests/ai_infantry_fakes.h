@@ -16,7 +16,7 @@ struct FakeBody final : InfantryBody {
 	bool recovered = false;
 	bool cleared = false;
 	bool running = true;
-	int throws = 0, covers = 0, waits = 0, sees = 0, sensings = 0, plans = 0, ends = 0;
+	int throws = 0, covers = 0, waits = 0, sees = 0, sensings = 0, plans = 0, ends = 0, resets = 0;
 	InfantryActivity began = InfantryActivity::Idle;
 	std::vector<std::string> calls;
 
@@ -65,7 +65,12 @@ struct FakeBody final : InfantryBody {
 		calls.push_back("sense " + std::to_string(int(p_focus)));
 		return true;
 	}
-	void end_plan() override { ++ends; }
+	bool held = true;
+	bool end_plan() override {
+		++ends;
+		return held;
+	}
+	void reset_controls() override { ++resets; }
 };
 
 }

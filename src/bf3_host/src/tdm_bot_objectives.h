@@ -33,10 +33,9 @@ public:
 	const DownedSoldier *update(TdmShared &r_shared, BotNavigation &r_navigation, const ReviveCheck &p_check);
 	bool defib_ready(sim::Tick p_tick) const { return p_tick >= defib_next_; }
 	void fired_defib(sim::Tick p_tick);
-
-private:
 	const DownedSoldier *find(const ServerView &p_view) const;
 
+private:
 	int slot_ = -1;
 	sim::Tick since_ = 0, defib_next_ = 0;
 };

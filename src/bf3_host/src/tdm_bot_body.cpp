@@ -86,6 +86,10 @@ void BotBody::new_life(sim::Tick p_tick, const sim::SoldierState &p_state) {
 
 void BotBody::set_activity(sim::Tick p_tick, TdmBotActivity p_activity) {
 	activity = p_activity;
+	report_activity(p_tick, p_activity);
+}
+
+void BotBody::report_activity(sim::Tick p_tick, TdmBotActivity p_activity) {
 	TdmShared &sh = *shared;
 	if (sh.stats != nullptr) {
 		sh.stats->activity_ticks[size_t(p_activity)].fetch_add(1, std::memory_order_relaxed);
@@ -102,11 +106,16 @@ void BotBody::restricted(sim::Tick p_tick, sim::Command &r_cmd) {
 	weapons.hold_fire();
 }
 
+Sighting BotBody::keep(
+		sim::Tick p_tick, const sim::SoldierState &p_state, std::span<const sim::SoldierState> p_states) {
+	awareness.check_shots(*shared, slot, p_tick, p_state);
+	return targeting.track(*shared, awareness.perception(), p_tick, p_states, rng);
+}
+
 Sighting BotBody::see(sim::Tick p_tick, const sim::SoldierState &p_state, std::span<const sim::SoldierState> p_states) {
 	TdmShared &sh = *shared;
-	const bool perceived =
-			awareness.sense(sh, slot, seed ^ uint64_t(life), p_tick, p_state, p_states, view_yaw, view_pitch);
-	return targeting.sense(sh, awareness, perceived, p_tick, p_state, p_states, skill01, rng);
+	awareness.perceive(sh, slot, seed ^ uint64_t(life), p_tick, p_state, p_states, view_yaw, view_pitch);
+	return targeting.sense(sh, awareness, p_tick, p_state, p_states, skill01, rng);
 }
 
 BotFrame BotBody::sense_revive(
@@ -133,6 +142,14 @@ BotFrame BotBody::sense_revive(
 
 	return BotFrame{ p_tick, p_state, states, p_view.world(), eye, p_sighting.enemy, p_sighting.visible, target,
 		shot_recent, arms, revive };
+}
+
+BotFrame BotBody::hold_frame(
+		sim::Tick p_tick, const sim::SoldierState &p_state, const ServerView &p_view, const Sighting &p_sighting) {
+	TdmShared &sh = *shared;
+	return BotFrame{ p_tick, p_state, p_view.states(), p_view.world(), sh.eye_point(p_state), p_sighting.enemy,
+		p_sighting.visible, targeting.target(), awareness.shot_recent(p_tick), BotArms(sh.host.gunplay, slot),
+		medic.find(p_view) };
 }
 
 BotIntent BotBody::begin_plan(TdmBotActivity p_activity) {
@@ -238,16 +255,37 @@ bool BotBody::walk(const BotFrame &p_frame, BotIntent &r_intent) {
 		i.move_dx = i.walk_dx;
 		i.move_dz = i.walk_dz;
 		i.pose = i.walk_pose;
+		i.walked = true;
 		return true;
 	}
 	i.walk_yaw = look.look(p_frame.tick, awareness.perception(), view_yaw, rng);
 	return false;
 }
 
+void BotBody::rewalk(const BotFrame &p_frame, BotIntent &r_intent) {
+	BotIntent &i = r_intent;
+	if (!i.walked ||
+			!navigation.walk(*shared, p_frame.tick, p_frame.self, p_frame.world, i.walk_dx, i.walk_dz, i.walk_yaw,
+					i.walk_sprint, i.walk_pose, i.walk_jump)) {
+		return;
+	}
+	i.move_dx = i.walk_dx;
+	i.move_dz = i.walk_dz;
+	i.pose = i.stands ? sim::Pose::Stand : i.walk_pose;
+	if (i.walk_faces) {
+		i.want_yaw = i.walk_yaw;
+	}
+	if (i.walk_sprints || i.sprints) {
+		i.sprint = i.sprints || i.walk_sprint;
+	}
+}
+
 void BotBody::walk_facing(const BotFrame &p_frame, BotIntent &r_intent) {
 	walk(p_frame, r_intent);
 	r_intent.want_yaw = r_intent.walk_yaw;
 	r_intent.sprint = r_intent.walk_sprint;
+	r_intent.walk_faces = r_intent.walked;
+	r_intent.walk_sprints = r_intent.walked;
 }
 
 void BotBody::roam(const BotFrame &p_frame, BotIntent &r_intent) {
@@ -372,7 +410,7 @@ void BotBody::move_fight(const BotFrame &p_frame, BotIntent &r_intent) {
 		i.pose = sim::Pose::Crouch;
 	} else if (navigation.set_goal(sh, f.tick, ts.position, kHuntArriveMetres, false) && walk(f, i)) {
 		strafe.stop();
-		i.pose = sim::Pose::Stand;
+		i.hold_stand();
 	} else {
 		strafe.step(c, slot, f.tick, f.world, f.self, view_yaw, rng, i.move_dx, i.move_dz);
 	}
@@ -387,6 +425,7 @@ bool BotBody::revive_approach(const BotFrame &p_frame, BotIntent &r_intent) {
 		navigation.set_goal(*shared, f.tick, corpse, 1.0f, true);
 		walk(f, i);
 		i.want_yaw = i.walk_yaw;
+		i.walk_faces = i.walked;
 		return false;
 	}
 	if (hd > kReviveStandMetres) {
@@ -446,6 +485,7 @@ bool BotBody::support_approach(const BotFrame &p_frame, SupplyNeed p_need, BotIn
 	navigation.set_goal(*shared, p_frame.tick, *at, kBagArriveMetres, true, kSquadGoalMoveMetres);
 	walk(p_frame, r_intent);
 	r_intent.want_yaw = r_intent.walk_yaw;
+	r_intent.walk_faces = r_intent.walked;
 	return false;
 }
 
@@ -470,6 +510,7 @@ void BotBody::medkit_or_hold(const BotFrame &p_frame, BotIntent &r_intent) {
 			navigation.set_goal(*shared, p_frame.tick, *bag, kBagArriveMetres, true, kSquadGoalMoveMetres) &&
 			walk(p_frame, r_intent)) {
 		r_intent.want_yaw = r_intent.walk_yaw;
+		r_intent.walk_faces = true;
 		return;
 	}
 	r_intent.pose = sim::Pose::Crouch;

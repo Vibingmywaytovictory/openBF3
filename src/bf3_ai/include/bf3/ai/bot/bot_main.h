@@ -64,7 +64,7 @@ public:
 	BotLodLevel lod_level() const override { return lod_level_; }
 	uint32_t current_equipment() const override { return current_equipment_; }
 	void set_current_equipment(uint32_t p_handle) override { current_equipment_ = p_handle; }
-	bool has_squad_member() const override { return squad_member_ != nullptr; }
+	bool has_squad_member() const override { return squad_member_ != nullptr || !takes_squads_; }
 	int decision_making(double p_slice) override;
 	void plan_execution(double p_slice) override;
 	bool has_plan() const override { return !plan_invalid_; }
@@ -110,7 +110,7 @@ public:
 	void attach_communication(const RadioVoices &p_voices, RadioComm &r_hub);
 	void call_for_medic();
 	void update_bot(bool p_alive, bool p_new_life);
-	bool wants_decision() const;
+	void set_takes_squads(bool p_takes) { takes_squads_ = p_takes; }
 
 	bool receive_order(const BotOrder &p_order);
 	void set_taking_orders(bool p_taking) { taking_orders_ = p_taking; }
@@ -158,7 +158,6 @@ private:
 	BotBehaviour *current_ = nullptr;
 	float chosen_urgency_ = 0.0f;
 	InfantrySenses decided_senses_;
-	sim::Tick decided_tick_ = 0;
 	bool plan_invalid_ = true;
 	bool has_default_plan_ = false;
 	bool in_transition_phase_ = false;
@@ -183,6 +182,7 @@ private:
 	BotLodLevel lod_level_ = BotLodLevel::Full;
 	uint32_t current_equipment_ = UINT32_MAX;
 	SquadMember *squad_member_ = nullptr;
+	bool takes_squads_ = true;
 	SquadGoal squad_goal_;
 	int squad_ = 0;
 	BotMainStats stats_;

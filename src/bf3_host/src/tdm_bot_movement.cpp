@@ -316,6 +316,7 @@ void BotStrafe::step(const TdmBotConfig &p_config, uint8_t p_slot, sim::Tick p_t
 		dir_ = unit(r_rng) < 0.5f ? -1.0f : 1.0f;
 		half_ = 0.5f * uniform(r_rng, std::max(c.strafe_min_m, 0.5f), std::max(c.strafe_max_m, std::max(c.strafe_min_m, 0.5f)));
 		until_ = p_tick + uniform_u(r_rng, kStrafeMinTicks, kStrafeMaxTicks);
+		grounded_ = p_tick - (p_tick + p_slot) % kStrafeGroundTicks;
 	} else if (p_tick >= until_) {
 		dir_ = -dir_;
 		until_ = p_tick + uniform_u(r_rng, kStrafeMinTicks, kStrafeMaxTicks);
@@ -324,7 +325,8 @@ void BotStrafe::step(const TdmBotConfig &p_config, uint8_t p_slot, sim::Tick p_t
 	const float along = off[0] * ax_ + off[2] * az_;
 	if (along * dir_ > half_) {
 		dir_ = -dir_;
-	} else if ((p_tick + p_slot) % kStrafeGroundTicks == 0) {
+	} else if (p_tick - grounded_ >= kStrafeGroundTicks) {
+		grounded_ = p_tick;
 		const sim::Vec3 ahead = add(p_self.position, dir_ * ax_ * 0.8f, 0.5f, dir_ * az_ * 0.8f);
 		if (!p_world.ground_below(ahead, 1.2f, sim::query_mask::kMovement, nullptr)) {
 			dir_ = -dir_;

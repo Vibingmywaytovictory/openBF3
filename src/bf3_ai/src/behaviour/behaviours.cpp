@@ -54,7 +54,6 @@ const KeyDef<BehaviourTuning> kKeys[] = {
 	{ "bb.resupply.weight", KeyKind::Float, 0.0, 1000.0, BF3_BB_FIELD(curves[9].weight) },
 	{ "bb.resupply.slope", KeyKind::Float, -100.0, 100.0, BF3_BB_FIELD(curves[9].slope) },
 	{ "bb.resupply.offset", KeyKind::Float, -100.0, 100.0, BF3_BB_FIELD(curves[9].offset) },
-	{ "bb.decision_ticks", KeyKind::U32, 1, 60, BF3_BB_FIELD(decision_ticks) },
 	{ "bb.squad_far_m", KeyKind::Float, 1.0, 1000.0, BF3_BB_FIELD(squad_far_m) },
 	{ "bb.squad_arrive_m", KeyKind::Float, 0.1, 100.0, BF3_BB_FIELD(squad_arrive_m) },
 	{ "bb.mission_arrive_m", KeyKind::Float, 0.1, 1000.0, BF3_BB_FIELD(mission_arrive_m) },

@@ -263,45 +263,39 @@ TEST_SUITE("ai-bot") {
 		CHECK(r.body.covers == 2);
 	}
 
-	TEST_CASE("decisions: every decision_ticks staggered by player id, and at once when a sense changes") {
+	TEST_CASE("decisions: a current plan waits for BotManager's planned queue, a changed sense puts the bot on its "
+			  "unplanned queue, and a bot kept out of squads counts as having its squad member") {
 		FakeBody body;
 		body.s.navigable = true;
 		BehaviourTuning tuning;
-		REQUIRE(tuning.decision_ticks == 6u);
-		std::vector<std::unique_ptr<BotMain>> bots;
-		for (int p = 0; p < 6; ++p) {
-			bots.push_back(std::make_unique<BotMain>(uint32_t(p), p, 1, body, tuning));
-			bots.back()->update_bot(true, true);
-		}
-		std::array<std::vector<sim::Tick>, 6> decided;
-		for (sim::Tick t = 1; t <= 60; ++t) {
-			body.now = t;
-			for (size_t p = 0; p < bots.size(); ++p) {
-				if (bots[p]->wants_decision()) {
-					bots[p]->decision_making(sim::kTickSeconds);
-					decided[p].push_back(t);
-				}
-				bots[p]->plan_execution(sim::kTickSeconds);
-			}
-		}
-		for (size_t p = 0; p < bots.size(); ++p) {
-			CHECK(decided[p].size() == (p == 5 ? 10u : 11u));
-			CHECK(bots[p]->stats().unplanned == 1u);
-			for (size_t i = 1; i < decided[p].size(); ++i) {
-				CHECK((decided[p][i] + p) % 6 == 0);
-			}
-		}
-		for (size_t p = 1; p < bots.size(); ++p) {
-			CHECK(decided[p][1] != decided[0][1]);
-		}
-		body.now = 61;
-		CHECK_FALSE(bots[0]->wants_decision());
+		BotMain bot(0, 0, 1, body, tuning);
+		bot.update_bot(true, true);
+		CHECK_FALSE(bot.has_plan());
+		bot.decision_making(sim::kTickSeconds);
+		CHECK(bot.has_plan());
+		CHECK_FALSE(bot.has_default_plan());
+		CHECK(bot.stats().unplanned == 1u);
+		bot.update_sensing(sim::kTickSeconds);
+		CHECK(body.sensings == 1);
+		CHECK_FALSE(bot.has_default_plan());
 		body.s.enemy_visible = true;
-		CHECK(bots[0]->wants_decision());
-		bots[0]->decision_making(sim::kTickSeconds);
-		CHECK(bots[0]->behaviour() == InfantryBehaviour::FireInfantery);
-		CHECK_FALSE(bots[0]->wants_decision());
-		CHECK(bots[0]->stats().unplanned == 2u);
+		bot.update_sensing(sim::kTickSeconds);
+		CHECK(bot.has_default_plan());
+		CHECK(bot.has_plan());
+		bot.decision_making(sim::kTickSeconds);
+		CHECK(bot.behaviour() == InfantryBehaviour::FireInfantery);
+		CHECK_FALSE(bot.has_default_plan());
+		CHECK(bot.stats().unplanned == 2u);
+		bot.update_sensing(sim::kTickSeconds);
+		CHECK_FALSE(bot.has_default_plan());
+		bot.decision_making(sim::kTickSeconds);
+		CHECK(bot.stats().planned == 1u);
+		bot.reset();
+		CHECK_FALSE(bot.has_default_plan());
+
+		CHECK_FALSE(bot.has_squad_member());
+		bot.set_takes_squads(false);
+		CHECK(bot.has_squad_member());
 	}
 
 	TEST_CASE("BBMoveTo: the squad goal's urgency grows with distance") {
@@ -436,8 +430,8 @@ TEST_SUITE("ai-bot") {
 		CHECK(is_behaviour_key("bb.idle.weight"));
 		CHECK_FALSE(is_behaviour_key("ai.max_bots"));
 		CHECK(parse_behaviour_setting("bb.nope", "1", t).fault == core::KeyFault::UnknownKey);
-		CHECK(parse_behaviour_setting("bb.decision_ticks", "0", t).fault == core::KeyFault::OutOfRange);
-		CHECK(parse_behaviour_setting("bb.decision_ticks", "61", t).fault == core::KeyFault::OutOfRange);
+		CHECK(parse_behaviour_setting("bb.decision_ticks", "6", t).fault == core::KeyFault::UnknownKey);
+		CHECK(parse_behaviour_setting("bb.resupply_used_mags", "101", t).fault == core::KeyFault::OutOfRange);
 		CHECK(parse_behaviour_setting("bb.idle.weight", "nan", t).fault != core::KeyFault::None);
 		CHECK(parse_behaviour_setting("bb.idle.weight", "-1", t).fault == core::KeyFault::OutOfRange);
 		CHECK(t == def);

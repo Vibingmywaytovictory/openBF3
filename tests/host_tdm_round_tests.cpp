@@ -48,8 +48,8 @@ constexpr bool kRuNtLanded = true;
 
 constexpr float kDeg = sim::kPi / 180.0f;
 
-constexpr uint64_t kReplayDecisionHash = 0xd426fa56290c8e50ull;
-constexpr uint64_t kReplayWorldHash = 0x697fcad1d94f9cb5ull;
+constexpr uint64_t kReplayDecisionHash = 0x6927d3941428365full;
+constexpr uint64_t kReplayWorldHash = 0xafe4c40a47a2428cull;
 
 void pending_skip(const char *p_row) {
 	std::printf("%s: PENDING (ru, nt): needs run_tdm and the v3 codecs on the branch\n", p_row);
@@ -467,9 +467,9 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(one.perception.update_ticks == 3);
 		CHECK(one.aim.e_inf_deg == def.aim.e_inf_deg);
 		CHECK(host::parse_bot_tuning("ai.max_bots = 12\nai.enable_vehicle_ai = true\nskill_min = 0.3\n", one).ok());
-		REQUIRE(host::parse_bot_tuning("bb.random.weight = 2.5\nbb.decision_ticks = 3\n", one).ok());
+		REQUIRE(host::parse_bot_tuning("bb.random.weight = 2.5\nbb.resupply_used_mags = 3\n", one).ok());
 		CHECK(one.behaviours.curves[size_t(ai::InfantryBehaviour::Random)].weight == doctest::Approx(2.5f));
-		CHECK(one.behaviours.decision_ticks == 3u);
+		CHECK(one.behaviours.resupply_used_mags == 3u);
 
 		for (const char *bad : { "nope = 1\n", "skill_min = nan\n", "skill_min = 2\n", "skill_min\n",
 					 "skill_min = 1x\n", "perception.update_ticks = 0\n", "aim.tau_s = 1e40\n", "count = 65\n", "= 3\n",
@@ -672,6 +672,80 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(bots.number_of_deactivated_bots() == 1);
 		CHECK(bots.bot_from_player_id(1) == nullptr);
 		CHECK(bots.number_of_active_bots() == 1);
+		const uint32_t removed_plans = bots.info(1).plan_execution_updates;
+		for (int i = 0; i < 4; ++i, ++t) {
+			view.now = t - 1;
+			a.command(t, view.slots[0]);
+		}
+		CHECK(bots.info(1).plan_execution_updates == removed_plans);
+	}
+
+	TEST_CASE("bots through AIMain: BotManager's schedule runs the plans of half the roster plus one a tick, senses "
+			  "two bots a tick, decides from its queues, and a bot's input holds between its plans") {
+		std::unique_ptr<sim::CollisionWorld> world = wall_world();
+		m2b_fake::FakeView view;
+		view.world_ = world.get();
+		view.teams = { 1, 1, 2, 2 };
+		view.kits = { 0, 0, 0, 0 };
+		view.slots = { soldier_at({ -20, 0, -20 }), soldier_at({ -18, 0, -20 }), soldier_at({ 20, 0, 20 }),
+			soldier_at({ 18, 0, 20 }) };
+		auto cfg = std::make_shared<host::TdmBotConfig>();
+		cfg->stats = std::make_shared<host::TdmBotStats>();
+		host::TdmBrainHost h;
+		h.view = &view;
+		h.match_seed = 9;
+		h.rules = true;
+		core::Result<std::shared_ptr<host::TdmShared>> shared = host::make_tdm_shared(h, cfg);
+		REQUIRE(shared.ok());
+		std::vector<std::unique_ptr<host::AiBotSource>> sources;
+		for (uint32_t i = 0; i < 4; ++i) {
+			sources.push_back(std::make_unique<host::AiBotSource>(*shared, i));
+			sources.back()->admitted(uint8_t(i));
+		}
+		const ai::BotManager &bots = (*shared)->ai->main().bot_manager();
+		constexpr sim::Tick kTicks = 360;
+		std::vector<sim::Command> previous(4), current(4);
+		uint32_t unplanned = 0, held = 0, dropped = 0;
+		const auto acting = [](const sim::Command &p_c) {
+			return (p_c.buttons & sim::buttons::kFire) != 0 || p_c.move_forward != 0 || p_c.move_right != 0;
+		};
+		for (sim::Tick t = 1; t <= kTicks; ++t) {
+			view.now = t - 1;
+			uint32_t before[4];
+			for (uint8_t s = 0; s < 4; ++s) {
+				before[s] = bots.info(s).plan_execution_updates;
+			}
+			for (uint8_t s = 0; s < 4; ++s) {
+				current[s] = sources[s]->command(t, view.slots[s]);
+				view.slots[s].yaw = current[s].yaw;
+				view.slots[s].pitch = current[s].pitch;
+			}
+			for (uint8_t s = 0; s < 4; ++s) {
+				if (bots.info(s).plan_execution_updates == before[s]) {
+					++unplanned;
+					if (t > 2 && acting(previous[s])) {
+						++(acting(current[s]) ? held : dropped);
+					}
+				}
+				previous[s] = current[s];
+			}
+		}
+		uint32_t plans = 0, sensings = 0, decisions = 0;
+		for (uint32_t i = 0; i < 4; ++i) {
+			const ai::BotManager::BotInfo &info = bots.info(i);
+			CHECK(info.plan_execution_updates > 0u);
+			CHECK(info.sensing_updates > 0u);
+			CHECK(info.decision_updates > 0u);
+			plans += info.plan_execution_updates;
+			sensings += info.sensing_updates;
+			decisions += info.decision_updates;
+		}
+		CHECK(plans == kTicks * 3u);
+		CHECK(sensings == kTicks * 2u);
+		CHECK(cfg->stats->decisions.load() == uint64_t(decisions));
+		CHECK(unplanned == kTicks * 4u - plans);
+		CHECK(held >= kTicks / 3u);
+		CHECK(dropped == 0u);
 	}
 
 	TEST_CASE(

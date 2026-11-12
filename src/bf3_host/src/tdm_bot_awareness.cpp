@@ -22,20 +22,11 @@ void BotAwareness::new_life(sim::Tick p_tick) {
 	shot_at_tick_ = 0;
 	shot_by_ = -1;
 	shots_checked_ = p_tick;
+	perceived_ = p_tick;
 }
 
 bool BotAwareness::shot_recent(sim::Tick p_tick) const {
 	return shot_at_tick_ != 0 && p_tick - shot_at_tick_ <= kShotAtTicks;
-}
-
-bool BotAwareness::sense(TdmShared &r_shared, uint8_t p_slot, uint64_t p_seed, sim::Tick p_tick, const sim::SoldierState &p_self,
-		std::span<const sim::SoldierState> p_states, float p_yaw, float p_pitch) {
-	check_shots(r_shared, p_slot, p_tick, p_self);
-	if (!sim::bots::perception_tick(p_slot, p_tick, r_shared.config->perception.update_ticks)) {
-		return false;
-	}
-	perceive(r_shared, p_slot, p_seed, p_tick, p_self, p_states, p_yaw, p_pitch);
-	return true;
 }
 
 void BotAwareness::check_shots(const TdmShared &p_shared, uint8_t p_slot, sim::Tick p_tick, const sim::SoldierState &p_self) {
@@ -79,6 +70,8 @@ void BotAwareness::perceive(TdmShared &r_shared, uint8_t p_slot, uint64_t p_seed
 	in.world = &view.world();
 	in.vehicles = view.vehicle_targets();
 	in.seed = p_seed;
+	in.elapsed_ticks = std::max<uint32_t>(p_tick - perceived_, 1u);
+	perceived_ = p_tick;
 	for (size_t i = 0; i < 3; ++i) {
 		in.eye_heights[i] = sh.host.eye_heights[i];
 	}

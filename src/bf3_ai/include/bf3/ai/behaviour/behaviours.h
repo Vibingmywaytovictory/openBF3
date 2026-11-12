@@ -43,7 +43,6 @@ struct BehaviourCurve {
 struct BehaviourTuning {
 	std::array<BehaviourCurve, kInfantryBehaviourCount> curves{ { { 8.0f }, { 7.0f }, { 6.0f }, { 1.75f }, { 1.5f },
 			{ 1.0f }, { 0.5f }, { 2.5f }, { 5.5f }, { 2.4f } } };
-	uint32_t decision_ticks = 6;
 	float squad_far_m = 15.0f;
 	float squad_arrive_m = 3.0f;
 	float mission_arrive_m = 10.0f;

@@ -30,11 +30,10 @@ void BotTargeting::new_life() {
 	blind_until_ = 0;
 }
 
-Sighting BotTargeting::sense(TdmShared &r_shared, const BotAwareness &p_awareness, bool p_perceived, sim::Tick p_tick, const sim::SoldierState &p_self,
-		std::span<const sim::SoldierState> p_states, float p_skill01, uint64_t &r_rng) {
-	if (p_perceived) {
-		choose(r_shared, p_awareness, p_tick, p_self, p_states, p_skill01, r_rng);
-	}
+Sighting BotTargeting::sense(TdmShared &r_shared, const BotAwareness &p_awareness, sim::Tick p_tick,
+		const sim::SoldierState &p_self, std::span<const sim::SoldierState> p_states, float p_skill01,
+		uint64_t &r_rng) {
+	choose(r_shared, p_awareness, p_tick, p_self, p_states, p_skill01, r_rng);
 	return track(r_shared, p_awareness.perception(), p_tick, p_states, r_rng);
 }
 
@@ -96,7 +95,7 @@ Sighting BotTargeting::track(TdmShared &r_shared, const sim::bots::Perception &p
 		target_ = -1;
 		te = nullptr;
 	}
-	const bool visible = visible_recent(te, p_tick);
+	const bool visible = visible_recent(te, p_tick) && te->last_visible == p_perception.updated();
 	if (visible) {
 		last_engaged_ = p_tick;
 	} else if (target_ >= 0 && !loss_handled_) {

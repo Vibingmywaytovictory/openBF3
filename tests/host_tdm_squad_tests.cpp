@@ -274,6 +274,7 @@ Orders run_orders(const tt::TdmLevel &p_level, uint64_t p_seed, float p_arrive_m
 }
 
 struct HoldLog final : host::TdmBotObserver {
+	static constexpr uint32_t kPlanTicks = 2;
 	std::array<bool, kSlots> holding{};
 	std::array<uint32_t, kSlots> held_for{};
 	uint64_t hold_ticks = 0, hold_moving = 0;
@@ -294,7 +295,9 @@ struct HoldLog final : host::TdmBotObserver {
 			held_for[p_bot] = 0;
 			return;
 		}
-		++held_for[p_bot];
+		if (++held_for[p_bot] <= kPlanTicks) {
+			return;
+		}
 		++hold_ticks;
 		hold_moving += p_command.move_forward != 0 || p_command.move_right != 0 ||
 						(p_command.buttons & sim::buttons::kSprint) != 0

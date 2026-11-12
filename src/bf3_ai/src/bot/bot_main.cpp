@@ -90,6 +90,7 @@ void BotMain::reset() {
 	chosen_urgency_ = 0.0f;
 	plan_.clear(InfantryActivity::Idle);
 	plan_invalid_ = true;
+	has_default_plan_ = false;
 	if (communication_ != nullptr) {
 		communication_->reset();
 	}
@@ -126,14 +127,9 @@ void BotMain::see(double) {
 
 void BotMain::update_sensing(double) {
 	body_.update_sensing();
-}
-
-bool BotMain::wants_decision() const {
-	if (plan_invalid_ || current_ == nullptr || body_.senses() != decided_senses_) {
-		return true;
+	if (!plan_invalid_ && body_.senses() != decided_senses_) {
+		has_default_plan_ = true;
 	}
-	const uint32_t period = std::max<uint32_t>(tuning_.decision_ticks, 1u);
-	return (body_.tick() + uint32_t(std::max(player_id_, 0))) % period == 0;
 }
 
 int BotMain::decision_making(double) {
@@ -176,6 +172,7 @@ int BotMain::decision_making(double) {
 			current_ = winner;
 			chosen_urgency_ = urgency;
 			plan_invalid_ = false;
+			has_default_plan_ = false;
 			++stats_.chosen[size_t(winner->kind())];
 			break;
 		}
@@ -187,7 +184,6 @@ int BotMain::decision_making(double) {
 	memory_.last_behaviour = int(winner->kind());
 	memory_.chosen_time = now;
 	decided_senses_ = body_.senses();
-	decided_tick_ = tick;
 	return 1;
 }
 
@@ -196,10 +192,11 @@ void BotMain::plan_execution(double) {
 		return;
 	}
 	body_.begin_plan(plan_.activity());
-	const bool ok = plan_.execute(this);
-	body_.end_plan();
+	const bool executed = plan_.execute(this);
+	const bool ok = body_.end_plan() && executed;
 	if (!ok) {
 		plan_invalid_ = true;
+		body_.reset_controls();
 		++stats_.plan_failures;
 	}
 }

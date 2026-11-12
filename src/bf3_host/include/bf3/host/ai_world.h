@@ -111,6 +111,18 @@ private:
 	std::unique_ptr<Impl> impl_;
 };
 
+struct BotSeatState {
+	const sim::SoldierState *state = nullptr;
+	bool alive = false;
+};
+
+class BotSeat {
+public:
+	virtual ~BotSeat() = default;
+	virtual BotSeatState prepare(sim::Tick p_tick, bool p_playing) = 0;
+	virtual void acted(sim::Tick p_tick) = 0;
+};
+
 class HostAiBots final : public ai::AiTimer, public ai::AiGame, public ai::BotFactory, public ai::RadioComm {
 public:
 	using MedicCall = std::function<std::optional<uint8_t>(uint8_t p_caller)>;
@@ -120,9 +132,11 @@ public:
 	HostAiBots(const HostAiBots &) = delete;
 	HostAiBots &operator=(const HostAiBots &) = delete;
 
-	ai::BotMain *admit(uint8_t p_slot, ai::InfantryBody &r_body, const ai::BehaviourTuning &p_tuning);
+	ai::BotMain *admit(
+			uint8_t p_slot, ai::InfantryBody &r_body, const ai::BehaviourTuning &p_tuning, BotSeat *p_seat = nullptr);
 	void remove(uint8_t p_slot);
 	void observe(uint8_t p_slot, const sim::SoldierState &p_state, bool p_alive, sim::Tick p_tick);
+	void step(sim::Tick p_tick);
 	const ai::AIMain &main() const;
 
 	sim::Tick game_tick() const override;

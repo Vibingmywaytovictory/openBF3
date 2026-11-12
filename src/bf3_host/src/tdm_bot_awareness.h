@@ -15,8 +15,9 @@ public:
 	void configure(const sim::bots::PerceptionParams &p_params) { perception_ = sim::bots::Perception(p_params); }
 	void new_life(sim::Tick p_tick);
 
-	bool sense(TdmShared &r_shared, uint8_t p_slot, uint64_t p_seed, sim::Tick p_tick, const sim::SoldierState &p_self, std::span<const sim::SoldierState> p_states,
-			float p_yaw, float p_pitch);
+	void check_shots(const TdmShared &p_shared, uint8_t p_slot, sim::Tick p_tick, const sim::SoldierState &p_self);
+	void perceive(TdmShared &r_shared, uint8_t p_slot, uint64_t p_seed, sim::Tick p_tick,
+			const sim::SoldierState &p_self, std::span<const sim::SoldierState> p_states, float p_yaw, float p_pitch);
 
 	const sim::bots::Perception &perception() const { return perception_; }
 	sim::Tick shot_at_tick() const { return shot_at_tick_; }
@@ -25,15 +26,12 @@ public:
 	bool shot_recent(sim::Tick p_tick) const;
 
 private:
-	void check_shots(const TdmShared &p_shared, uint8_t p_slot, sim::Tick p_tick, const sim::SoldierState &p_self);
-	void perceive(TdmShared &r_shared, uint8_t p_slot, uint64_t p_seed, sim::Tick p_tick, const sim::SoldierState &p_self,
-			std::span<const sim::SoldierState> p_states, float p_yaw, float p_pitch);
-
 	sim::bots::Perception perception_;
 	sim::Tick shot_at_tick_ = 0;
 	int shot_by_ = -1;
 	sim::Vec3 shot_from_{};
 	sim::Tick shots_checked_ = 0;
+	sim::Tick perceived_ = 0;
 };
 
 bool aims_at(const TdmShared &p_shared, const sim::SoldierState &p_other, const sim::SoldierState &p_self);
