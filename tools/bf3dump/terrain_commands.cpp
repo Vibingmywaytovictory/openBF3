@@ -87,12 +87,6 @@ int cmd_terrain(const std::shared_ptr<Install> &p_install, const std::vector<std
 				std::printf(", flat\n");
 				continue;
 			}
-			Result<std::vector<std::vector<uint8_t>>> programs = bf3::render::load_terrain_programs(*mount, combos);
-			if (!programs) {
-				std::printf(", programs: %s\n", programs.error().message.c_str());
-				++failures;
-				continue;
-			}
 			res::HeightGrid heights;
 			const res::ResError he =
 					tree.height_grid(std::min<uint8_t>(tree.heightfield->max_level(), 4), fetch, heights);
@@ -107,7 +101,6 @@ int cmd_terrain(const std::shared_ptr<Install> &p_install, const std::vector<std
 			const float half = 1024.0f;
 			input.region = { -half, -half, half, half };
 			input.combos = combos;
-			input.programs = *programs;
 			input.fetch = fetch;
 			Result<bf3::render::TerrainLook> look = bf3::render::build_terrain_look(input);
 			if (!look) {

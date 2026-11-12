@@ -819,6 +819,38 @@ TEST_SUITE("render-look") {
 		CHECK(!db->empty());
 		CHECK(shaders > 0);
 		CHECK(work < limit);
+		Result<std::vector<ShaderDatabase>> kept = parse_shader_database(raw->bytes(), nullptr, true);
+		REQUIRE(kept.ok());
+		size_t solutions = 0, with_programs = 0, registered = 0, path_programs = 0;
+		for (size_t p = 0; p < kept->size(); ++p) {
+			for (const SurfaceShader &s : (*kept)[p].shaders) {
+				for (const ShaderSolution &sol : s.solutions) {
+					if (p > 0) {
+						path_programs += sol.pixel_program || sol.vertex_program ? 1 : 0;
+						continue;
+					}
+					++solutions;
+					const bool dxbc = sol.pixel_program && sol.vertex_program && sol.pixel_program->size() > 4 &&
+							std::memcmp(sol.pixel_program->data(), "DXBC", 4) == 0 &&
+							sol.vertex_program->bytes.size() > 4 &&
+							std::memcmp(sol.vertex_program->bytes.data(), "DXBC", 4) == 0;
+					with_programs += dxbc ? 1 : 0;
+					if (sol.pixel_constants) {
+						for (const auto &[reg, name] : sol.pixel_constants->textures) {
+							registered += reg > 0 && !name.empty() ? 1 : 0;
+						}
+					}
+				}
+			}
+		}
+		std::printf("render.look shaderdb programs: %zu of %zu first-path solutions keep DXBC pixel and vertex "
+					"programs, %zu registered "
+					"textures\n",
+				with_programs, solutions, registered);
+		CHECK(with_programs == solutions);
+		CHECK(registered > 0);
+		CHECK(path_programs == 0);
+		CHECK(db->front().shaders.front().solutions.front().pixel_program == nullptr);
 
 		std::unique_ptr<LookResolver> resolver = LookResolver::open(lvl.mount());
 		REQUIRE(resolver != nullptr);

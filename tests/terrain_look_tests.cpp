@@ -269,8 +269,9 @@ TEST_SUITE("render-terrain") {
 		CHECK(failures.empty());
 		CHECK(combos.size() >= 40);
 		std::printf("render.terrain combinations %zu, texture bindings %zu\n", combos.size(), textures.size());
-		Result<std::vector<std::vector<uint8_t>>> programs = load_terrain_programs(*mount, combos);
-		REQUIRE_MESSAGE(programs.ok(), (programs.ok() ? std::string() : programs.error().message));
+		for (const SceneTerrainCombo &c : combos) {
+			CHECK_MESSAGE(c.program != nullptr, c.shader, " has no pixel program");
+		}
 
 		core::res::HeightGrid heights;
 		const core::res::ResError he = tree.height_grid(5, fetch, heights);
@@ -280,7 +281,6 @@ TEST_SUITE("render-terrain") {
 		input.heights = &heights;
 		input.region = { -1024.0f, -1024.0f, 1024.0f, 1024.0f };
 		input.combos = combos;
-		input.programs = *programs;
 		input.fetch = fetch;
 		Result<TerrainLook> look = build_terrain_look(input);
 		REQUIRE_MESSAGE(look.ok(), (look.ok() ? std::string() : look.error().message));

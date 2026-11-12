@@ -22,7 +22,9 @@ constexpr size_t kTextureNameBytes = 0x80;
 constexpr size_t kValueConstantBytes = 0x3C;
 constexpr size_t kValueNameBytes = 0x20;
 constexpr size_t kValueDefaultAt = 0x2C;
+constexpr size_t kSolutionVertexShaderAt = 24;
 constexpr size_t kSolutionPixelShaderAt = 32;
+constexpr size_t kElementFormatAt = 4;
 constexpr size_t kSolutionConstantsAt = 56;
 constexpr size_t kTexturesAt = 0x10;
 constexpr size_t kValuesAt = 0x18;
@@ -170,13 +172,8 @@ core::Status skip_blob(Cursor &r_r, const char *p_what) {
 	return core::Status::success();
 }
 
-struct CodeRequest {
-	std::span<const uint32_t> hashes;
-	std::vector<std::vector<uint8_t>> code;
-};
-
 core::Result<ShaderDatabase> parse_path(std::span<const uint8_t> p_body, uint32_t p_render_path, uint64_t &r_work,
-		uint64_t p_limit, CodeRequest *r_code = nullptr) {
+		uint64_t p_limit, bool p_keep_programs) {
 	Cursor r(p_body);
 	ShaderDatabase out;
 	out.render_path = p_render_path;
@@ -209,13 +206,25 @@ core::Result<ShaderDatabase> parse_path(std::span<const uint8_t> p_body, uint32_
 		BF3_TRY(r.take(4ull * textures, "texture list"));
 	}
 	SDB_TRY_ASSIGN(vertex_shaders, r.count(4, "vertex shader count"));
+	std::vector<std::shared_ptr<const ShaderVertexProgram>> vertex_programs;
 	for (uint32_t i = 0; i < vertex_shaders; ++i) {
-		BF3_TRY(skip_blob(r, "vertex shader"));
+		BF3_TRY(r.take(16, "vertex shader"));
+		SDB_TRY_ASSIGN(vertex_size, r.u32("vertex shader"));
+		SDB_TRY_ASSIGN(vertex_bytes, r.take(vertex_size, "vertex shader"));
 		BF3_TRY(r.take(12, "vertex shader"));
 		SDB_TRY_ASSIGN(signature, r.u32("vertex shader signature"));
 		BF3_TRY(r.take(signature, "vertex shader signature"));
 		SDB_TRY_ASSIGN(elements, r.u32("vertex shader elements"));
-		BF3_TRY(r.take(uint64_t(kInputElementBytes) * elements, "vertex shader elements"));
+		SDB_TRY_ASSIGN(element_bytes, r.take(uint64_t(kInputElementBytes) * elements, "vertex shader elements"));
+		if (p_keep_programs) {
+			auto program = std::make_shared<ShaderVertexProgram>();
+			program->bytes.assign(vertex_bytes.begin(), vertex_bytes.end());
+			for (uint32_t e = 0; e < elements; ++e) {
+				program->element_formats.push_back(
+						rd32(element_bytes.data() + size_t(e) * kInputElementBytes + kElementFormatAt));
+			}
+			vertex_programs.push_back(std::move(program));
+		}
 		SDB_TRY_ASSIGN(names, r.u32("vertex shader element names"));
 		if (names != elements) {
 			return r.fail("vertex shader element names");
@@ -226,14 +235,26 @@ core::Result<ShaderDatabase> parse_path(std::span<const uint8_t> p_body, uint32_
 		BF3_TRY(r.u32("vertex shader"));
 	}
 	SDB_TRY_ASSIGN(pixel_shaders, r.count(36, "pixel shader count"));
-	std::vector<std::span<const uint8_t>> pixel_code;
+	std::vector<std::shared_ptr<const std::vector<uint8_t>>> pixel_programs;
 	for (uint32_t i = 0; i < pixel_shaders; ++i) {
 		BF3_TRY(r.take(16, "pixel shader"));
 		SDB_TRY_ASSIGN(size, r.u32("pixel shader size"));
-		SDB_TRY_ASSIGN(code, r.take(size, "pixel shader"));
+		SDB_TRY_ASSIGN(pixel_bytes, r.take(size, "pixel shader"));
 		BF3_TRY(r.take(16, "pixel shader"));
-		if (r_code != nullptr) {
-			pixel_code.push_back(code);
+		if (p_keep_programs) {
+			pixel_programs.push_back(
+					std::make_shared<const std::vector<uint8_t>>(pixel_bytes.begin(), pixel_bytes.end()));
+		}
+	}
+	std::vector<std::shared_ptr<const ShaderConstants>> kept_constants;
+	if (p_keep_programs) {
+		for (const ConstantBlock &block : constants) {
+			auto kept = std::make_shared<ShaderConstants>();
+			for (size_t t = 0; t < block.textures.size(); ++t) {
+				kept->textures.emplace_back(block.texture_slots[t], block.textures[t]);
+			}
+			kept->values = block.values;
+			kept_constants.push_back(std::move(kept));
 		}
 	}
 	SDB_TRY_ASSIGN(n3, r.count(24, "shader blob count"));
@@ -244,8 +265,6 @@ core::Result<ShaderDatabase> parse_path(std::span<const uint8_t> p_body, uint32_
 	SDB_TRY_ASSIGN(solution_count, r.count(kSolutionBytes, "shader solution count"));
 	std::vector<ShaderSolution> solutions;
 	std::vector<std::optional<size_t>> pixel_constants;
-	std::vector<int64_t> pixel_programs;
-	pixel_programs.reserve(solution_count);
 	solutions.reserve(solution_count);
 	pixel_constants.reserve(solution_count);
 	for (uint32_t i = 0; i < solution_count; ++i) {
@@ -255,10 +274,22 @@ core::Result<ShaderDatabase> parse_path(std::span<const uint8_t> p_body, uint32_
 		s.flags = b[8];
 		s.surface_type = surface_shader_type(b[9]);
 		s.blend_mode = b[10];
-		solutions.push_back(s);
+		solutions.push_back(std::move(s));
 		const int64_t index = int64_t(rd64(b.data() + kSolutionConstantsAt));
 		pixel_constants.push_back(index >= 0 && uint64_t(index) < constants.size() ? std::optional<size_t>(size_t(index)) : std::nullopt);
-		pixel_programs.push_back(int64_t(rd64(b.data() + kSolutionPixelShaderAt)));
+		if (p_keep_programs) {
+			const int64_t pixel = int64_t(rd64(b.data() + kSolutionPixelShaderAt));
+			const int64_t vertex = int64_t(rd64(b.data() + kSolutionVertexShaderAt));
+			if (pixel >= 0 && uint64_t(pixel) < pixel_programs.size()) {
+				solutions.back().pixel_program = pixel_programs[size_t(pixel)];
+			}
+			if (vertex >= 0 && uint64_t(vertex) < vertex_programs.size()) {
+				solutions.back().vertex_program = vertex_programs[size_t(vertex)];
+			}
+			if (pixel_constants.back()) {
+				solutions.back().pixel_constants = kept_constants[*pixel_constants.back()];
+			}
+		}
 	}
 	SDB_TRY_ASSIGN(states, r.u32("shader solution state count"));
 	if (states != solution_count) {
@@ -306,11 +337,6 @@ core::Result<ShaderDatabase> parse_path(std::span<const uint8_t> p_body, uint32_
 		}
 		SDB_TRY_ASSIGN(used, r.count(2, "shader solution list"));
 		std::set<std::string> seen_textures, seen_values;
-		size_t wanted = SIZE_MAX;
-		if (r_code != nullptr) {
-			const auto found = std::find(r_code->hashes.begin(), r_code->hashes.end(), hash);
-			wanted = found == r_code->hashes.end() ? SIZE_MAX : size_t(found - r_code->hashes.begin());
-		}
 		s.solutions.reserve(used);
 		for (uint32_t u = 0; u < used; ++u) {
 			SDB_TRY_ASSIGN(b, r.take(2, "shader solution index"));
@@ -320,13 +346,6 @@ core::Result<ShaderDatabase> parse_path(std::span<const uint8_t> p_body, uint32_
 			}
 			s.solutions.push_back(solutions[index]);
 			r_work += 1;
-			if (wanted != SIZE_MAX) {
-				std::vector<uint8_t> &code = r_code->code[wanted];
-				const int64_t program = pixel_programs[index];
-				if (code.empty() && program >= 0 && uint64_t(program) < pixel_code.size()) {
-					code.assign(pixel_code[size_t(program)].begin(), pixel_code[size_t(program)].end());
-				}
-			}
 			if (!pixel_constants[index]) {
 				continue;
 			}
@@ -380,7 +399,8 @@ const ShaderValue *SurfaceShader::value(std::string_view p_name) const {
 	return nullptr;
 }
 
-core::Result<std::vector<ShaderDatabase>> parse_shader_database(std::span<const uint8_t> p_res, uint64_t *r_work) {
+core::Result<std::vector<ShaderDatabase>> parse_shader_database(
+		std::span<const uint8_t> p_res, uint64_t *r_work, bool p_keep_programs) {
 	Cursor r(p_res);
 	const uint64_t limit = kShaderWorkBase + kShaderWorkPerByte * uint64_t(p_res.size());
 	uint64_t work = 0;
@@ -390,7 +410,7 @@ core::Result<std::vector<ShaderDatabase>> parse_shader_database(std::span<const 
 		SDB_TRY_ASSIGN(render_path, r.u32("render path"));
 		SDB_TRY_ASSIGN(size, r.u32("render path size"));
 		SDB_TRY_ASSIGN(body, r.take(size, "render path body"));
-		core::Result<ShaderDatabase> db = parse_path(body, render_path, work, limit);
+		core::Result<ShaderDatabase> db = parse_path(body, render_path, work, limit, p_keep_programs && i == 0);
 		if (!db) {
 			if (r_work != nullptr) {
 				*r_work = work;
@@ -403,26 +423,6 @@ core::Result<std::vector<ShaderDatabase>> parse_shader_database(std::span<const 
 		*r_work = work;
 	}
 	return out;
-}
-
-core::Result<std::vector<std::vector<uint8_t>>> pixel_programs(
-		std::span<const uint8_t> p_res, std::span<const uint32_t> p_name_hashes) {
-	Cursor r(p_res);
-	const uint64_t limit = kShaderWorkBase + kShaderWorkPerByte * uint64_t(p_res.size());
-	uint64_t work = 0;
-	SDB_TRY_ASSIGN(paths, r.count(8, "shader database render path count"));
-	CodeRequest request{ p_name_hashes, std::vector<std::vector<uint8_t>>(p_name_hashes.size()) };
-	if (paths == 0) {
-		return request.code;
-	}
-	BF3_TRY(r.u32("render path"));
-	SDB_TRY_ASSIGN(size, r.u32("render path size"));
-	SDB_TRY_ASSIGN(body, r.take(size, "render path body"));
-	core::Result<ShaderDatabase> db = parse_path(body, 0, work, limit, &request);
-	if (!db) {
-		return db.error();
-	}
-	return std::move(request.code);
 }
 
 ShaderDatabase merge_first_wins(std::vector<std::vector<SurfaceShader>> p_lists) {

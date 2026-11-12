@@ -898,7 +898,7 @@ TEST_SUITE("render-scene") {
 			LevelScenePlan broken = p;
 			REQUIRE_FALSE(broken.terrains.empty());
 			REQUIRE_FALSE(broken.terrains[0].combos.empty());
-			broken.terrains[0].combos[0].shader = "levels/none/terrain__0mv__2d__0";
+			broken.terrains[0].combos[0].program.reset();
 			Result<PreparedTerrain> flat = prepare_scene_terrain(lvl.mount(), broken, 0);
 			REQUIRE_MESSAGE(flat.ok(), (flat.ok() ? std::string() : flat.error().message));
 			std::printf("render.scene terrain whose look fails: %zu triangles, look error: %s\n", flat->mesh.triangles,

@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -31,6 +32,7 @@ struct SceneTerrainCombo {
 	std::string shader;
 	std::vector<uint8_t> layers;
 	std::vector<SceneTerrainTexture> textures;
+	std::shared_ptr<const std::vector<uint8_t>> program;
 };
 
 std::optional<std::vector<uint8_t>> terrain_combo_layers(std::string_view p_shader, std::string_view p_asset);
@@ -123,7 +125,6 @@ struct TerrainLookInput {
 	const core::res::HeightGrid *heights = nullptr;
 	std::array<float, 4> region{};
 	std::span<const SceneTerrainCombo> combos;
-	std::span<const std::vector<uint8_t>> programs;
 	core::res::TerrainChunkFetch fetch;
 };
 
@@ -132,9 +133,6 @@ inline constexpr uint8_t kTerrainNeutralColour = 128;
 inline constexpr size_t kTerrainMissedSets = 8;
 inline constexpr uint32_t kTerrainPatchSplits = 2;
 inline constexpr uint32_t kTerrainMaxColourSide = 1024;
-
-core::Result<std::vector<std::vector<uint8_t>>> load_terrain_programs(
-		const core::LevelMount &p_mount, std::span<const SceneTerrainCombo> p_combos);
 
 core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input);
 

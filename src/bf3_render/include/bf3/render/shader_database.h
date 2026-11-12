@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -56,11 +57,24 @@ struct ShaderValue {
 	std::array<float, 4> value{};
 };
 
+struct ShaderVertexProgram {
+	std::vector<uint8_t> bytes;
+	std::vector<uint32_t> element_formats;
+};
+
+struct ShaderConstants {
+	std::vector<std::pair<uint32_t, std::string>> textures;
+	std::vector<ShaderValue> values;
+};
+
 struct ShaderSolution {
 	uint64_t state_hash = 0;
 	uint8_t flags = 0;
 	SurfaceShaderType surface_type = SurfaceShaderType::Opaque;
 	uint8_t blend_mode = 0;
+	std::shared_ptr<const std::vector<uint8_t>> pixel_program;
+	std::shared_ptr<const ShaderVertexProgram> vertex_program;
+	std::shared_ptr<const ShaderConstants> pixel_constants;
 };
 
 struct SurfaceShader {
@@ -87,10 +101,8 @@ struct ShaderDatabase {
 inline constexpr uint64_t kShaderWorkPerByte = 4;
 inline constexpr uint64_t kShaderWorkBase = uint64_t(1) << 20;
 
-core::Result<std::vector<ShaderDatabase>> parse_shader_database(std::span<const uint8_t> p_res, uint64_t *r_work = nullptr);
-
-core::Result<std::vector<std::vector<uint8_t>>> pixel_programs(
-		std::span<const uint8_t> p_res, std::span<const uint32_t> p_name_hashes);
+core::Result<std::vector<ShaderDatabase>> parse_shader_database(
+		std::span<const uint8_t> p_res, uint64_t *r_work = nullptr, bool p_keep_programs = false);
 
 ShaderDatabase merge_first_wins(std::vector<std::vector<SurfaceShader>> p_lists);
 

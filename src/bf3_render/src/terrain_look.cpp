@@ -145,6 +145,12 @@ std::vector<SceneTerrainCombo> plan_terrain_combos(const core::LevelMount &p_mou
 		SceneTerrainCombo combo;
 		combo.shader = name;
 		combo.layers = *terrain_combo_layers(name, p_asset);
+		for (const ShaderSolution &s : shader->solutions) {
+			if (s.pixel_program) {
+				combo.program = s.pixel_program;
+				break;
+			}
+		}
 		for (const auto &[slot, texture] : shader->texture_slots) {
 			const std::string lower = to_lower_ascii(texture);
 			auto found = srgb.find(lower);
@@ -265,52 +271,17 @@ core::Result<std::string> terrain_shader_code(
 	return code;
 }
 
-core::Result<std::vector<std::vector<uint8_t>>> load_terrain_programs(
-		const core::LevelMount &p_mount, std::span<const SceneTerrainCombo> p_combos) {
-	std::vector<uint32_t> hashes;
-	for (const SceneTerrainCombo &c : p_combos) {
-		hashes.push_back(core::ebx_name_hash(to_lower_ascii(c.shader)));
-	}
-	std::vector<std::string> databases;
-	for (const std::string &name : p_mount.res_names()) {
-		const std::optional<core::ResInfo> info = p_mount.res_info(name);
-		const std::string lower = to_lower_ascii(name);
-		if (info && info->res_type == kShaderDatabaseResType && lower.size() >= 9 &&
-				lower.compare(lower.size() - 9, 9, "/shaderdb") == 0) {
-			databases.push_back(name);
-		}
-	}
-	std::sort(databases.begin(), databases.end());
-	std::vector<std::vector<uint8_t>> out(p_combos.size());
-	for (const std::string &name : databases) {
-		core::Result<std::pair<core::ResInfo, std::vector<uint8_t>>> res = p_mount.read_res(name);
-		if (!res) {
-			return core::error_at("res " + name, res.error());
-		}
-		core::Result<std::vector<std::vector<uint8_t>>> programs = pixel_programs(res->second, hashes);
-		if (!programs) {
-			return core::error_at("res " + name, programs.error());
-		}
-		for (size_t i = 0; i < out.size(); ++i) {
-			if (out[i].empty()) {
-				out[i] = std::move((*programs)[i]);
-			}
-		}
-	}
-	for (size_t i = 0; i < out.size(); ++i) {
-		if (out[i].empty()) {
-			return core::make_error("terrain combination " + p_combos[i].shader + " has no pixel program");
-		}
-	}
-	return out;
-}
-
 core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 	if (p_input.tree == nullptr || !p_input.tree->mask || p_input.heights == nullptr) {
 		return core::make_error("terrain look needs the mask layer and the heights");
 	}
-	if (p_input.combos.empty() || p_input.programs.size() != p_input.combos.size()) {
-		return core::make_error("terrain look needs its combinations and their programs");
+	if (p_input.combos.empty()) {
+		return core::make_error("terrain look needs its combinations");
+	}
+	for (const SceneTerrainCombo &c : p_input.combos) {
+		if (c.program == nullptr) {
+			return core::make_error("terrain combination " + c.shader + " has no pixel program");
+		}
 	}
 	const core::res::TerrainStreamingTree &tree = *p_input.tree;
 	const core::res::TerrainMaskTree &mask = *tree.mask;
@@ -518,7 +489,7 @@ core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 	for (uint32_t combo_index : used_combos) {
 		const SceneTerrainCombo &combo = p_input.combos[combo_index];
 		const std::string where = "terrain combination " + combo.shader;
-		core::Result<dxbc::Program> program = dxbc::parse(p_input.programs[combo_index]);
+		core::Result<dxbc::Program> program = dxbc::parse(*combo.program);
 		if (!program) {
 			return core::error_at(where, program.error());
 		}

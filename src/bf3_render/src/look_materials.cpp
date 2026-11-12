@@ -433,7 +433,7 @@ std::unique_ptr<LookResolver> LookResolver::open(const core::LevelMount &p_mount
 			continue;
 		}
 		uint64_t work = 0;
-		core::Result<std::vector<ShaderDatabase>> parsed = parse_shader_database(res->second, &work);
+		core::Result<std::vector<ShaderDatabase>> parsed = parse_shader_database(res->second, &work, true);
 		out->stats_.shader_work += work;
 		if (!parsed) {
 			out->failures_.emplace_back(name, parsed.error().message);
