@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace bf3::core::gameplay {
@@ -26,8 +27,10 @@ struct VehicleCameraDef {
 	std::string camera;
 	float field_of_view = 0;
 	bool first_person = false;
+	core::Transform transform;
 
 	float left_yaw = 0, right_yaw = 0, up_pitch = 0, down_pitch = 0;
+	float chase_distance = 0, chase_angle = 0, chase_look_ahead = 0;
 	std::optional<float> zoom_field_of_view;
 };
 
@@ -62,6 +65,7 @@ struct VehicleSeatDef {
 	float entry_radius = 0;
 	bool shows_soldier = false;
 	bool own_weapon = false;
+	core::Transform transform;
 	std::vector<int> weapons;
 	std::vector<VehicleCameraDef> cameras;
 };
@@ -71,6 +75,7 @@ struct VehicleDef {
 	std::string name_sid;
 	std::string minimap_icon;
 	std::string controllable_type;
+	std::string mesh;
 
 	float body_mass = 0;
 	float gravity_modifier = 1;
@@ -98,6 +103,8 @@ struct VehicleDef {
 	bool use_prediction = false;
 
 	std::vector<VehicleSeatDef> seats;
+	std::vector<core::Transform> exit_points;
+	std::vector<std::pair<std::string, core::Transform>> component_meshes;
 	std::vector<VehicleTurretDef> turrets;
 	std::vector<VehicleWeaponDef> weapons;
 	size_t components = 0;

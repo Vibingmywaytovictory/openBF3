@@ -1,9 +1,11 @@
 #include "bf3/core/gameplay/vehicle_def.h"
 
 #include "bf3/core/ids.h"
+#include "bf3/core/level/level_transform.h"
 #include "gameplay_read.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace bf3::core::gameplay {
@@ -16,13 +18,34 @@ constexpr size_t kMaxDepth = 32;
 constexpr size_t kMaxComponents = 8192;
 constexpr size_t kNodePasses = 8;
 
-enum class Role : uint8_t { Other, Chassis, Seat, Turret, Weapon, Camera };
+enum class Role : uint8_t { Other, Chassis, Seat, Turret, Weapon, Camera, ExitPoint, Mesh };
 
 struct Node {
 	EbxInstance data;
 	int parent = -1;
 	Role role = Role::Other;
+	level::LevelTransform frame;
 };
+
+level::LevelTransform local_frame(const EbxInstance &p_component) {
+	const std::optional<EbxValue> t = p_component.get("Transform");
+	const std::optional<std::array<core::Vec3, 4>> rows = t ? t->as_transform() : std::nullopt;
+	if (!rows) {
+		return level::LevelTransform::identity();
+	}
+	for (const core::Vec3 &row : *rows) {
+		for (const float c : row) {
+			if (!std::isfinite(c) || std::fabs(c) > 1e6f) {
+				return level::LevelTransform::identity();
+			}
+		}
+	}
+	return level::LevelTransform::from_rows(*rows);
+}
+
+core::Transform model_transform(const level::LevelTransform &p_t) {
+	return { p_t.right, p_t.up, p_t.forward, p_t.trans };
+}
 
 bool active(const EbxInstance &p_component) {
 	if (boolean(p_component.data(), "Excluded").value_or(false)) {
@@ -50,6 +73,12 @@ Role role_of(const EbxResolver &p_db, const EbxInstance &p_component) {
 	if (p_component.is_a("CameraComponentData")) {
 		return Role::Camera;
 	}
+	if (p_component.is_a("VehicleExitPointComponentData")) {
+		return Role::ExitPoint;
+	}
+	if (p_component.is_a("MeshComponentData")) {
+		return Role::Mesh;
+	}
 	return Role::Other;
 }
 
@@ -69,7 +98,10 @@ public:
 				continue;
 			}
 			const int at = static_cast<int>(nodes.size());
-			nodes.push_back({ component, p_parent, role_of(p_db, component) });
+			const level::LevelTransform parent =
+					p_parent >= 0 ? nodes[static_cast<size_t>(p_parent)].frame : level::LevelTransform::identity();
+			nodes.push_back(
+					{ component, p_parent, role_of(p_db, component), local_frame(component).in_parent(parent) });
 			walk(r_budget, p_db, component, at, p_depth + 1);
 		}
 	}
@@ -166,6 +198,11 @@ VehicleCameraDef read_camera(WorkBudget &r_budget, const EbxResolver &p_db, cons
 			out.right_yaw = static_cast<float>(number_or(s, "RightYawAngle", 0));
 			out.up_pitch = static_cast<float>(number_or(s, "UpPitchAngle", 0));
 			out.down_pitch = static_cast<float>(number_or(s, "DownPitchAngle", 0));
+		} else if (camera->is_a("ChaseCameraData")) {
+			const EbxStruct s = camera->data();
+			out.chase_distance = static_cast<float>(number_or(s, "WantedDistance", 0));
+			out.chase_angle = static_cast<float>(number_or(s, "WantedAngleDeg", 0));
+			out.chase_look_ahead = static_cast<float>(number_or(s, "LookDistanceInFrontOfTarget", 0));
 		}
 	}
 	if (const std::optional<EbxInstance> alternate = p_db.follow(c, "AlternateView"); alternate && r_budget.take_type(alternate->data())) {
@@ -212,6 +249,9 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 	out.name_sid = text(budget, e, "NameSid");
 	out.minimap_icon = text(budget, e, "HudData.MinimapIcon");
 	out.controllable_type = text(budget, e, "ControllableType");
+	if (const std::optional<EbxInstance> mesh = p_db.follow(e, "Mesh"); mesh && budget.take_type(mesh->data())) {
+		out.mesh = partition_name(budget, p_db, *mesh);
+	}
 	out.front = read_zone(e, "FrontHealthZone");
 	out.rear = read_zone(e, "RearHealthZone");
 	out.left = read_zone(e, "LeftHealthZone");
@@ -280,6 +320,7 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 		seat.entry_radius = static_cast<float>(number_or(d.data(), "EntryRadius", 0));
 		seat.shows_soldier = boolean(d.data(), "ShowSoldierInEntry").value_or(false);
 		seat.own_weapon = d.is_a("SoldierEntryComponentData");
+		seat.transform = model_transform(layout.nodes[static_cast<size_t>(node)].frame);
 		out.seats.push_back(std::move(seat));
 	}
 
@@ -330,10 +371,18 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 				out.seats[static_cast<size_t>(w.seat)].weapons.push_back(static_cast<int>(out.weapons.size()));
 			}
 			out.weapons.push_back(std::move(w));
+		} else if (node.role == Role::ExitPoint) {
+			out.exit_points.push_back(model_transform(node.frame));
+		} else if (node.role == Role::Mesh) {
+			if (const std::string mesh = ref_name(budget, p_db, node.data.data(), "Mesh"); !mesh.empty()) {
+				out.component_meshes.emplace_back(mesh, model_transform(node.frame));
+			}
 		} else if (node.role == Role::Camera) {
 			const int seat = seat_index(layout.seat_of(at));
 			if (seat >= 0) {
-				out.seats[static_cast<size_t>(seat)].cameras.push_back(read_camera(budget, p_db, node.data));
+				VehicleCameraDef camera = read_camera(budget, p_db, node.data);
+				camera.transform = model_transform(node.frame);
+				out.seats[static_cast<size_t>(seat)].cameras.push_back(std::move(camera));
 			}
 		}
 	}
