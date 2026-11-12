@@ -52,6 +52,8 @@ struct DamageParties {
 
 float damage_modifier(float p_armor_multiplier, const DamageParties &p_parties);
 
+float material_relation_damage(float p_damage, float p_protection_multiplier, float p_protection_threshold);
+
 struct VehicleDamageRule {
 	std::array<HealthZoneRule, kHullZoneCount> zones{};
 	bool share_damage = false;

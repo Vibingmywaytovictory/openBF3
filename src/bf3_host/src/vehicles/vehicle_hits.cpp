@@ -36,11 +36,15 @@ float VehicleDamageSource::amount(const sw::DamageEvent &p_event, uint8_t p_vehi
 		if (!rel.present) {
 			return p_event.base;
 		}
-		return std::max(p_event.base * rel.protection_multiplier - rel.protection_threshold, 0.0f);
+		return sim::vehicles::material_relation_damage(
+				p_event.base, rel.protection_multiplier, rel.protection_threshold);
 	}
 	const core::gameplay::DamageRelation rel = materials_->relation(bullet_[p_event.def], p_vehicle_property);
-	const float damage = p_event.base * (rel.present ? rel.protection_multiplier : 1.0f) * p_event.penetration;
-	return rel.present && damage < rel.protection_threshold ? 0.0f : damage;
+	if (!rel.present) {
+		return p_event.base * p_event.penetration;
+	}
+	return sim::vehicles::material_relation_damage(
+			p_event.base * p_event.penetration, rel.protection_multiplier, rel.protection_threshold);
 }
 
 uint32_t vehicle_of_target(uint32_t p_target) {

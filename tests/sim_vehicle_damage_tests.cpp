@@ -91,6 +91,13 @@ TEST_SUITE("sim-vehicle-damage-unit") {
 		CHECK(damage_modifier(0.0f, enemy) == 0.0f);
 	}
 
+	TEST_CASE("vehicle damage: the material relation is a cutoff, not a subtraction (R-G4 checker vectors)") {
+		CHECK(material_relation_damage(50.0f, 0.5f, 5.0f) == doctest::Approx(25.0f));
+		CHECK(material_relation_damage(10.0f, 0.5f, 5.0f) == doctest::Approx(5.0f));
+		CHECK(material_relation_damage(9.0f, 0.5f, 5.0f) == 0.0f);
+		CHECK(material_relation_damage(100.0f, 1.0f, 0.0f) == doctest::Approx(100.0f));
+	}
+
 	TEST_CASE("vehicle damage: the reactive shield, repair overflow and shared damage (R-G3 vectors)") {
 		VehicleDamageRule r = four_zones(500.0f, false);
 		r.zones[0].max_shield = 300.0f;

@@ -4,6 +4,8 @@
 #include "pipe_transport.h"
 #include "tdm_fixture.h"
 #include "vehicles/client_vehicles.h"
+#include "vehicles/vehicle_gunnery.h"
+#include "vehicles/vehicle_hits.h"
 
 #include "bf3/core/gameplay/eor_fading.h"
 #include "bf3/core/gameplay/eor_timeline.h"
@@ -5107,6 +5109,45 @@ WreckRun wreck_and_respawn(
 	return run;
 }
 
+void check_blast_relation(const tdm::TdmLevel &p_level) {
+	const host::LevelVehicles &lv = *p_level.shared->vehicles;
+	REQUIRE(p_level.shared->gunplay != nullptr);
+	REQUIRE(p_level.shared->gunplay->materials != nullptr);
+	const sim::weapons::SurfaceMaterialTable &materials = *p_level.shared->gunplay->materials;
+	host::VehicleGunnery gunnery;
+	REQUIRE(gunnery.configure(lv, p_level.shared->gunplay->materials, sim::weapons::Mechanics()).ok());
+	REQUIRE(gunnery.table() != nullptr);
+	host::VehicleDamageSource source;
+	source.configure(*gunnery.table(), lv.weapons);
+	std::optional<uint16_t> cannon;
+	for (size_t i = 0; i < lv.weapons.size(); ++i) {
+		cannon = lv.weapons[i].variant == "vehicles/common/weapondata/mbt_cannon_firing" ? uint16_t(i) : cannon;
+	}
+	REQUIRE(cannon.has_value());
+	const sim::weapons::SurfacePair blast = materials.pair_of(lv.weapons[*cannon].projectile.explosion.material);
+	REQUIRE(blast.resolved);
+	size_t thresholds = 0;
+	for (const host::LevelVehicleKind &kind : lv.kinds) {
+		const sim::weapons::SurfacePair hull = materials.pair_of(kind.material);
+		REQUIRE(hull.resolved);
+		const core::gameplay::DamageRelation rel = materials.relation(blast.property, hull.property);
+		sim::weapons::DamageEvent e;
+		e.kind = sim::weapons::DamageKind::Blast;
+		e.def = *cannon;
+		for (const float base : { 100.0f, 25.0f }) {
+			e.base = base;
+			const float scaled = base * (rel.present ? rel.protection_multiplier : 1.0f);
+			const float expected = !rel.present || scaled >= rel.protection_threshold ? scaled : 0.0f;
+			std::printf("damage: a %.0f tank shell blast on the %s: relation %d, x%.3f, threshold %.1f -> %.2f\n",
+					double(base), kind.blueprint.c_str(), int(rel.present), double(rel.protection_multiplier),
+					double(rel.protection_threshold), double(source.amount(e, hull.property)));
+			CHECK(source.amount(e, hull.property) == doctest::Approx(expected));
+		}
+		thresholds += rel.present && rel.protection_threshold > 0.0f ? 1u : 0u;
+	}
+	CHECK(thresholds > 0u);
+}
+
 void check_respawn(const WreckRun &p_run) {
 	const uint32_t divisor = host::GameServerConfig().snapshot_divisor;
 	CHECK(p_run.gone_for >= p_run.delay_ticks);
@@ -5156,6 +5197,7 @@ TEST_SUITE("host-vehicles-damage") {
 			CHECK(sp.keep_alive_radius == doctest::Approx(quick ? 15.0f : 20.0f));
 			CHECK((!quick || host::land_jeep(*lv.kinds[sp.kind].model)));
 		}
+		check_blast_relation(*level);
 
 		const WreckRun run = wreck_and_respawn(*level, [](const host::LevelVehicleKind &p_kind) {
 			return p_kind.blueprint == "vehicles/growleritv/growleritv";

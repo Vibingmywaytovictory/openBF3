@@ -80,6 +80,11 @@ float damage_modifier(float p_armor_multiplier, const DamageParties &p_parties) 
 	return m;
 }
 
+float material_relation_damage(float p_damage, float p_protection_multiplier, float p_protection_threshold) {
+	const float d = p_damage * p_protection_multiplier;
+	return d >= p_protection_threshold ? d : 0.0f;
+}
+
 float full_vehicle_health(const VehicleDamageRule &p_rule) {
 	float full = 0.0f;
 	for (const HealthZoneRule &z : p_rule.zones) {
