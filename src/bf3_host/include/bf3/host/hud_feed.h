@@ -16,6 +16,7 @@
 #include "bf3/net/protocol.h"
 #include "bf3/net/weapons_wire.h"
 #include "bf3/present/presented.h"
+#include "bf3/sim/logic/conquest_data.h"
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"
 
@@ -131,6 +132,9 @@ struct HudFeedInput {
 	std::string_view game_mode;
 	uint32_t level_name_sid_hash = 0;
 	std::span<const core::level::CharacterSpawnerDef> spawners;
+	bool conquest_valid = false;
+	net::ConquestState conquest;
+	const sim::logic::ConquestParams *conquest_params = nullptr;
 };
 
 struct HudFeedState {
@@ -197,6 +201,9 @@ struct HudTdmFeedState {
 	net::MatchPhase stats_phase = net::MatchPhase::Loading;
 };
 static_assert(std::is_trivially_copyable_v<HudTdmFeedState>);
+
+std::vector<size_t> conquest_flag_order(const sim::logic::ConquestParams &p_params);
+uint8_t conquest_spawn_choice(const core::ui::HudSpawnPoint &p_point, const sim::logic::ConquestParams &p_params);
 
 std::optional<net::SquadRequest> squad_flow_request(std::span<const std::string> p_params,
 		std::span<const net::PlayerRow> p_players, uint8_t p_own_slot, std::optional<std::string_view> p_selected_squad,

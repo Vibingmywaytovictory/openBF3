@@ -801,7 +801,8 @@ void Bf3LevelSession::tdm_presented(uint64_t p_now_ns) {
 		m.deploy.kit = m.spawn_kit;
 	}
 	if (tdm_deploy_step(m.deploy, m.spawn_screen, m.can_deploy, f.newest_tick)) {
-		client_->send_spawn_request(m.deploy.kit, tdm_spawn_choice(r_game.hud_model, f, m.own_slot));
+		client_->send_spawn_request(
+				m.deploy.kit, tdm_spawn_choice(r_game.hud_model, f, m.own_slot, shared_level().get()));
 		++m.spawn_requests_sent;
 		m.last_request_tick = f.newest_tick;
 		if (m.deploy.resends == 0) {
@@ -889,6 +890,10 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 				: 0u;
 		in.spawners = level != nullptr ? std::span<const bf3::core::level::CharacterSpawnerDef>(level->spawners)
 									   : std::span<const bf3::core::level::CharacterSpawnerDef>();
+		in.conquest_valid = f.conquest_valid;
+		in.conquest = f.conquest;
+		in.conquest_params =
+				level != nullptr && level->logic_natives != nullptr ? level->logic_natives->conquest.get() : nullptr;
 		host::fill_hud_tdm(in, r_game.events, r_game.hud_static, m.tdm_state, r_game.hud_model);
 		if (!m.options.deploy_screen) {
 			r_game.hud_model.spawn_screen.visible = false;

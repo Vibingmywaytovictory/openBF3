@@ -5,6 +5,7 @@
 #include "bf3/core/ui/hud_squads.h"
 #include "bf3/core/ui/hud_widgets.h"
 #include "bf3/host/ui_flow_session.h"
+#include "bf3/sim/logic/round_natives.h"
 
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -64,13 +65,18 @@ bool take_squad_action(TdmState &r_m, const ui::UiFlowAction &p_action, const ho
 	return true;
 }
 
-uint8_t tdm_spawn_choice(const ui::HudModel &p_model, const host::PresentationFrame &p_f, uint8_t p_own_slot) {
+uint8_t tdm_spawn_choice(const ui::HudModel &p_model, const host::PresentationFrame &p_f, uint8_t p_own_slot,
+		const host::SharedLevel *p_level) {
 	const ui::HudSpawnPointList &list = p_model.spawn_points.spawn_points;
 	const int32_t selected = p_model.spawn_points.selected_point;
 	if (selected < 0 || selected >= int32_t(std::min<size_t>(list.count, list.points.size()))) {
 		return 0;
 	}
 	const ui::HudSpawnPoint &p = list.points[size_t(selected)];
+	if (p.kind == ui::HudSpawnKind::Flag && p.available && p_level != nullptr && p_level->logic_natives != nullptr &&
+			p_level->logic_natives->conquest != nullptr) {
+		return host::conquest_spawn_choice(p, *p_level->logic_natives->conquest);
+	}
 	if (p.kind != ui::HudSpawnKind::SquadMate || !p.available) {
 		return 0;
 	}

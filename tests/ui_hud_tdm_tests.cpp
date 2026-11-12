@@ -949,6 +949,102 @@ TEST_CASE("the deploy list: one row per enabled spawner of the own team, labelle
 	CHECK(state.bad_inputs == 0);
 }
 
+TEST_CASE("conquest: tickets, the capture points by team, the flag under the own soldier and a deploy row per "
+		  "spawnable flag in SpawnMenuListOrdinal order, open while the own team controls it") {
+	namespace lg = bf3::sim::logic;
+	const host::HudStatic st = make_static();
+	lg::ConquestParams params;
+	const auto point = [&](lg::CapturableType p_type, int32_t p_ordinal, float p_x, bool p_spawner) {
+		lg::ConquestPointData d;
+		d.node = uint32_t(params.points.size());
+		d.params.type = p_type;
+		d.params.spawn_menu_list_ordinal = p_ordinal;
+		d.params.position = { p_x, 0.0f, 100.0f };
+		d.params.capture_radius = 10.0f;
+		if (p_spawner) {
+			lg::ConquestSpawnerData sp;
+			sp.node = 100u + d.node;
+			params.spawners.push_back(sp);
+			d.spawners.push_back(sp.node);
+		}
+		params.points.push_back(d);
+	};
+	point(lg::CapturableType::UnableToChangeTeam, 0, 0.0f, true);
+	point(lg::CapturableType::Default, 3, 100.0f, true);
+	point(lg::CapturableType::Default, 1, 200.0f, true);
+	point(lg::CapturableType::Default, 2, 300.0f, false);
+	point(lg::CapturableType::UnableToChangeTeam, 0, 400.0f, true);
+	net::ConquestState c;
+	c.tickets = { 120, 87 };
+	c.initial_tickets = { 150, 150 };
+	c.point_count = 5;
+	c.points[0] = { 1, 1, net::kConquestProgressMax, 0, true, false };
+	c.points[1] = { 2, 1, 5000, -670, true, true };
+	c.points[2] = { 2, 2, net::kConquestProgressMax, 0, true, false };
+	c.points[3] = { 0, 0, 0, 0, false, false };
+	c.points[4] = { 2, 2, net::kConquestProgressMax, 0, true, false };
+	host::HudFeedInput in;
+	in.tdm = true;
+	in.match_valid = true;
+	in.match.phase = net::MatchPhase::InRound;
+	in.own_slot = 1;
+	in.own_team = 2;
+	in.alive = true;
+	in.own_position = { 102.0f, 0.0f, 101.0f };
+	in.conquest_valid = true;
+	in.conquest = c;
+	in.conquest_params = &params;
+	host::HudTdmFeedState state;
+	ui::HudModel m;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(m.tickets.friendly_team_tickets == 87);
+	CHECK(m.tickets.enemy_team_tickets == 120);
+	CHECK(m.tickets.team1_tickets == 120);
+	CHECK(m.tickets.friendly_team_max_tickets == 150);
+	CHECK(m.capture_points.total_capturepoints == 3);
+	CHECK(m.capture_points.friendly_capturepoints == 2);
+	CHECK(m.capture_points.enemy_capturepoints == 0);
+	CHECK(m.capture_points.neutral_capturepoints == 1);
+	REQUIRE(m.capture_points.capturepoints_status_data.count == 5);
+	CHECK(m.capture_points.capturepoints_status_data.points[0].hq);
+	CHECK(m.capture_points.capturepoints_status_data.points[0].owner == 2);
+	CHECK(m.capture_points.capturepoints_status_data.points[2].x == 200.0f);
+	CHECK(m.capture_points.capturepoints_status_data.points[4].x == 100.0f);
+	CHECK(m.capture_points.capturepoints_status_data.points[4].contested);
+	CHECK(m.capture_points.capturepoints_status_data.points[4].attacker == 2);
+	CHECK(m.capture_points.capturepoints_status_data.points[4].progress == doctest::Approx(0.5f));
+	CHECK(m.capture_points.active_capturepoints == 1);
+	CHECK(m.capture_points.capture_in_progress);
+	CHECK(m.capture_points.captured_by_team == 1);
+	CHECK(m.capture_points.capture_progress == doctest::Approx(0.5f));
+	CHECK(m.capture_points.minimap_capturepoints_status_data.count == 5);
+	const ui::HudSpawnPointList &list = m.spawn_points.spawn_points;
+	REQUIRE(list.count == 2);
+	CHECK(list.points[0].kind == ui::HudSpawnKind::Flag);
+	CHECK(list.points[0].flag_letter == 'A');
+	CHECK(list.points[0].x == 200.0f);
+	CHECK(list.points[0].available);
+	CHECK(list.points[1].flag_letter == 'C');
+	CHECK(list.points[1].x == 100.0f);
+	CHECK(list.points[1].available);
+	CHECK(host::conquest_spawn_choice(list.points[0], params) == net::kSpawnChoiceFlag + 2);
+	CHECK(host::conquest_spawn_choice(list.points[1], params) == net::kSpawnChoiceFlag + 1);
+	in.own_team = 1;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	REQUIRE(list.count == 2);
+	CHECK_FALSE(list.points[0].available);
+	CHECK_FALSE(list.points[1].available);
+	CHECK(m.tickets.friendly_team_tickets == 120);
+	in.conquest.point_count = 4;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(m.capture_points.total_capturepoints == 0);
+	CHECK(state.bad_inputs == 1);
+	in.conquest_params = nullptr;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(list.count == 0);
+	CHECK(m.tickets.friendly_team_tickets == 0);
+}
+
 TEST_CASE("squads: the own squad's members by slot with its leader, the team's squads, and a deploy row per living "
 		  "mate at its presented position") {
 	const host::HudStatic st = make_static();

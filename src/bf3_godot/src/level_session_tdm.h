@@ -176,8 +176,8 @@ Bf3UiScreens *tdm_ui_screens(const TdmState &p_m);
 void load_squad_names(TdmState &r_m, const bf3::core::EbxResolver *p_resolver);
 bool take_squad_action(TdmState &r_m, const bf3::core::ui::UiFlowAction &p_action,
 		const bf3::host::PresentationFrame &p_f, const bf3::host::UiFlowSession &p_session);
-uint8_t tdm_spawn_choice(
-		const bf3::core::ui::HudModel &p_model, const bf3::host::PresentationFrame &p_f, uint8_t p_own_slot);
+uint8_t tdm_spawn_choice(const bf3::core::ui::HudModel &p_model, const bf3::host::PresentationFrame &p_f,
+		uint8_t p_own_slot, const bf3::host::SharedLevel *p_level);
 void send_squad_requests(TdmState &r_m, bf3::host::ClientSession &r_client);
 void queue_squad_request(TdmState &r_m, const net::SquadRequest &p_request);
 bool deploy_on_squad_mate(TdmState &r_m, bf3::core::ui::HudModel &r_model, uint8_t p_mate_slot);

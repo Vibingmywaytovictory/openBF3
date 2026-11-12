@@ -162,6 +162,7 @@ target_sources(bf3_host PRIVATE
     src/hud_feed_scoreboard.cpp
     src/hud_feed_kill_card.cpp
     src/hud_feed_spawn.cpp
+    src/hud_feed_conquest.cpp
     src/hud_feed_round_end.cpp
     src/hud_feed_loadout.cpp
     src/hud_feed_menu.cpp
