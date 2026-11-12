@@ -4905,6 +4905,7 @@ struct WreckRun {
 	bool driver_dead = false;
 	bool driver_untouched_until_wrecked = true;
 	int kills_gained = 0;
+	int driver_deaths_gained = 0;
 	bool gunner_alive = false;
 	uint32_t gone_for = 0;
 	uint32_t delay_ticks = 0;
@@ -4914,8 +4915,8 @@ struct WreckRun {
 	uint64_t runtime_faults = 0;
 };
 
-WreckRun wreck_and_respawn(
-		tdm::TdmLevel &r_level, const std::function<bool(const host::LevelVehicleKind &)> &p_target) {
+WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(const host::LevelVehicleKind &)> &p_target,
+		bool p_teammate_driver = false) {
 	WreckRun run;
 	const host::LevelVehicles &lv = *r_level.shared->vehicles;
 	std::optional<uint16_t> cannon_def;
@@ -4947,7 +4948,7 @@ WreckRun wreck_and_respawn(
 	const uint8_t team = m->rules().team_of(uint8_t(p.slot()));
 	Script *enemy = nullptr;
 	for (Script *b : bots) {
-		enemy = m->rules().team_of(uint8_t(b->slot)) != team ? b : enemy;
+		enemy = (m->rules().team_of(uint8_t(b->slot)) == team) == p_teammate_driver ? b : enemy;
 	}
 	REQUIRE(enemy != nullptr);
 	REQUIRE(m->until([&] { return is_alive(m->state(enemy->slot)); }, 600));
@@ -5046,6 +5047,8 @@ WreckRun wreck_and_respawn(
 			60));
 	m->ticks(150);
 	const int kills_before = m->row(int(slot)) != nullptr ? int(m->row(int(slot))->kills) : 0;
+	REQUIRE(m->row(enemy->slot) != nullptr);
+	const int driver_deaths_before = int(m->row(enemy->slot)->deaths);
 	const uint64_t hits_before = m->server.stats().vehicle_hits;
 	const uint64_t shots_before = m->server.stats().vehicle_shots;
 	const uint64_t crew_before = m->server.stats().vehicle_crew_kills;
@@ -5083,6 +5086,8 @@ WreckRun wreck_and_respawn(
 	run.driver_dead = !is_alive(m->state(enemy->slot));
 	REQUIRE(m->row(int(slot)) != nullptr);
 	run.kills_gained = int(m->row(int(slot))->kills) - kills_before;
+	REQUIRE(m->row(enemy->slot) != nullptr);
+	run.driver_deaths_gained = int(m->row(enemy->slot)->deaths) - driver_deaths_before;
 	run.gunner_alive = is_alive(m->state(p.slot()));
 
 	run.delay_ticks = sim::seconds_to_ticks(spawn_delay);
@@ -5226,6 +5231,30 @@ TEST_SUITE("host-vehicles-damage") {
 		CHECK(run.crew_kills == 1u);
 		CHECK(run.driver_dead);
 		CHECK(run.kills_gained == 1);
+		check_respawn(run);
+	}
+}
+
+TEST_SUITE("host-vehicles-damage-team") {
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: a teammate's shells wreck a friendly Growler with friendly fire off; "
+			  "the splash spares its driver, the wreck still kills him, credited to himself, not to the gunner") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const WreckRun run = wreck_and_respawn(
+				*level,
+				[](const host::LevelVehicleKind &p_kind) {
+					return p_kind.blueprint == "vehicles/growleritv/growleritv";
+				},
+				true);
+		REQUIRE(run.ran);
+		CHECK(run.shells >= 2u);
+		CHECK(run.driver_untouched_until_wrecked);
+		CHECK(run.crew_kills == 1u);
+		CHECK(run.driver_dead);
+		CHECK(run.driver_deaths_gained == 1);
+		CHECK(run.kills_gained == 0);
 		check_respawn(run);
 	}
 }

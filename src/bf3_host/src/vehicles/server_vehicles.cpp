@@ -405,8 +405,7 @@ void ServerVehicles::step_health(sim::Tick p_tick, std::span<const sim::Vec3> p_
 	refresh_targets();
 }
 
-void ServerVehicles::strike(
-		const VehicleStrike &p_strike, Gunplay &r_gunplay, std::vector<sim::weapons::DamageEvent> &r_damage) {
+void ServerVehicles::strike(const VehicleStrike &p_strike, Gunplay &r_gunplay) {
 	const sim::weapons::DamageEvent &e = p_strike.event;
 	const size_t index = vehicle_of_target(e.target);
 	if (index >= vehicles_.size() || !vehicles_[index].live) {
@@ -451,7 +450,7 @@ void ServerVehicles::strike(
 	}
 	if ((o.events & sim::vehicles::vehicle_events::kDestroyed) != 0) {
 		++stats_.destroyed;
-		kill_crew(index, v.last_attacker, v.last_def, e.time, r_damage);
+		kill_crew(index, v.last_attacker, v.last_def, e.time, crew_kills_);
 	}
 }
 
@@ -491,7 +490,16 @@ void ServerVehicles::take_hits(Gunplay &r_gunplay, std::vector<sim::weapons::Dam
 	stats_.hidden_crew_dropped += taken_.size() + (before - r_damage.size());
 	std::sort(strikes_.begin(), strikes_.end(), strike_before);
 	for (const VehicleStrike &s : strikes_) {
-		strike(s, r_gunplay, r_damage);
+		strike(s, r_gunplay);
+	}
+	const bool friendly_fire = r_gunplay.config().friendly_fire;
+	for (sim::weapons::DamageEvent &e : crew_kills_) {
+		const uint8_t attacker = uint8_t(std::min<uint32_t>(e.attacker_slot, 255u));
+		const uint8_t team = r_gunplay.team(attacker);
+		if (!friendly_fire && e.attacker_slot != e.target && team != 0 && team == r_gunplay.team(uint8_t(e.target))) {
+			e.attacker_slot = e.target;
+			e.def = sim::weapons::kNoWeapon;
+		}
 	}
 	r_damage.insert(r_damage.end(), crew_kills_.begin(), crew_kills_.end());
 	crew_kills_.clear();

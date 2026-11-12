@@ -112,7 +112,7 @@ private:
 	void exit(const VehicleSeat &p_seat);
 	void switch_seat(size_t p_slot, std::optional<uint8_t> p_wanted);
 	core::Status rebuild();
-	void strike(const VehicleStrike &p_strike, Gunplay &r_gunplay, std::vector<sim::weapons::DamageEvent> &r_damage);
+	void strike(const VehicleStrike &p_strike, Gunplay &r_gunplay);
 	void kill_crew(size_t p_vehicle, uint8_t p_attacker, uint16_t p_def, sim::weapons::SimTime p_time,
 			std::vector<sim::weapons::DamageEvent> &r_damage);
 	void explode(size_t p_vehicle);
