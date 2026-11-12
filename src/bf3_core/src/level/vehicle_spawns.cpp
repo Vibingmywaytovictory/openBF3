@@ -127,9 +127,16 @@ Result<std::vector<VehicleSpawnerDef>> read_vehicle_spawners(const World &p_worl
 		Result<bool> initial_auto_spawn = read.boolean("InitialAutoSpawn", true);
 		BF3_TRY(initial_auto_spawn);
 		s.initial_auto_spawn = *initial_auto_spawn;
-		const std::pair<const char *, float *> numbers[] = { { "SpawnDelay", &s.spawn_delay }, { "InitialSpawnDelay", &s.initial_spawn_delay },
-			{ "SpawnAreaRadius", &s.spawn_area_radius }, { "RespawnRange", &s.respawn_range }, { "RotationYaw", &s.rotation_yaw },
-			{ "RotationPitch", &s.rotation_pitch }, { "RotationRoll", &s.rotation_roll } };
+		Result<bool> abandoned = read.boolean("ApplyDamageToAbandonedVehicles", false);
+		BF3_TRY(abandoned);
+		s.apply_damage_to_abandoned = *abandoned;
+		const std::pair<const char *, float *> numbers[] = { { "SpawnDelay", &s.spawn_delay },
+			{ "InitialSpawnDelay", &s.initial_spawn_delay }, { "SpawnAreaRadius", &s.spawn_area_radius },
+			{ "RespawnRange", &s.respawn_range }, { "RotationYaw", &s.rotation_yaw },
+			{ "RotationPitch", &s.rotation_pitch }, { "RotationRoll", &s.rotation_roll },
+			{ "TimeUntilAbandoned", &s.time_until_abandoned },
+			{ "TimeUntilAbandonedIsDestroyed", &s.time_until_abandoned_is_destroyed },
+			{ "KeepAliveRadius", &s.keep_alive_radius } };
 		for (const auto &[field, value] : numbers) {
 			Result<float> v = read.number(field, 0.0f);
 			BF3_TRY(v);

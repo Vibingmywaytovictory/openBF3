@@ -2,6 +2,7 @@
 
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/soldier_camera.h"
+#include "bf3/core/gameplay/weapon_def.h"
 #include "bf3/core/gameplay/work_budget.h"
 #include "bf3/core/math.h"
 #include "bf3/core/result.h"
@@ -21,6 +22,13 @@ struct VehicleHealthZoneDef {
 	float min_damage_angle = 0;
 	float damage_angle_multiplier = 1;
 	bool use_damage_angle = false;
+};
+
+struct VehicleAngleOfImpactDef {
+	bool enabled = false;
+	float zone12_delimiter = 0;
+	float zone23_delimiter = 0;
+	std::array<float, 3> multiplier{ 1, 1, 1 };
 };
 
 struct VehicleCameraDef {
@@ -111,6 +119,12 @@ struct VehicleDef {
 	float emergency_repair_health = 0;
 	float regeneration_delay = 0;
 	float regeneration_rate = 0;
+	float regeneration_delay_multiplier = 1;
+	float regeneration_rate_multiplier = 1;
+	float critical_damage_time = 0;
+	float pre_explosion_time = 0;
+	VehicleAngleOfImpactDef angle_of_impact;
+	MaterialPairRef material;
 	float decay_delay = 0;
 	float decay_rate = 0;
 	float armor_multiplier = 1;

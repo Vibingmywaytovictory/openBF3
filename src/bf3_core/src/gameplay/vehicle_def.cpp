@@ -2,6 +2,7 @@
 
 #include "bf3/core/ids.h"
 #include "bf3/core/level/level_transform.h"
+#include "ebx_fields.h"
 #include "gameplay_read.h"
 
 #include <algorithm>
@@ -272,6 +273,20 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 	out.emergency_repair_health = static_cast<float>(number_or(e, "EmergencyRepairHealth", 0));
 	out.regeneration_delay = static_cast<float>(number_or(e, "RegenerationDelay", 0));
 	out.regeneration_rate = static_cast<float>(number_or(e, "RegenerationRate", 0));
+	out.regeneration_delay_multiplier = static_cast<float>(number_or(e, "RegenerationDelayMultiplier", 1));
+	out.regeneration_rate_multiplier = static_cast<float>(number_or(e, "RegenerationRateMultiplier", 1));
+	out.critical_damage_time = static_cast<float>(number_or(e, "CriticalDamageTime", 0));
+	out.pre_explosion_time = static_cast<float>(number_or(e, "PreExplosionTime", 0));
+	out.angle_of_impact.enabled = boolean(e, "AngleOfImpact.Enabled").value_or(false);
+	out.angle_of_impact.zone12_delimiter = static_cast<float>(number_or(e, "AngleOfImpact.Zone12Delimiter", 0));
+	out.angle_of_impact.zone23_delimiter = static_cast<float>(number_or(e, "AngleOfImpact.Zone23Delimiter", 0));
+	out.angle_of_impact.multiplier = { static_cast<float>(number_or(e, "AngleOfImpact.Zone1Multiplier", 1)),
+		static_cast<float>(number_or(e, "AngleOfImpact.Zone2Multiplier", 1)),
+		static_cast<float>(number_or(e, "AngleOfImpact.Zone3Multiplier", 1)) };
+	if (e.get("MaterialPair")) {
+		Fields fields(p_db);
+		out.material = fields.material_pair(e, "MaterialPair");
+	}
 	out.decay_delay = static_cast<float>(number_or(e, "DecayDelay", 0));
 	out.decay_rate = static_cast<float>(number_or(e, "DecayRate", 0));
 	out.armor_multiplier = static_cast<float>(number_or(e, "ArmorMultiplier", 1));

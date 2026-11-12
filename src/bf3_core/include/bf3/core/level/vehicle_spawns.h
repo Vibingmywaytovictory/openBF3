@@ -22,6 +22,10 @@ struct VehicleSpawnerDef {
 	float initial_spawn_delay = 0;
 	float spawn_area_radius = 0;
 	float respawn_range = 0;
+	float time_until_abandoned = 0;
+	float time_until_abandoned_is_destroyed = 0;
+	float keep_alive_radius = 0;
+	bool apply_damage_to_abandoned = false;
 	float rotation_yaw = 0, rotation_pitch = 0, rotation_roll = 0;
 };
 

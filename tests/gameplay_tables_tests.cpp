@@ -2200,6 +2200,22 @@ TEST_SUITE("tables") {
 
 		const VehicleDef m1 = vehicle(*lib, "vehicles/m1a2/m1abrams");
 		check_mbt_health(m1);
+		CHECK(m1.critical_damage_time == Approx(0.01));
+		CHECK(m1.pre_explosion_time == Approx(0.01));
+		CHECK(m1.regeneration_delay_multiplier == Approx(1));
+		CHECK(m1.regeneration_rate_multiplier == Approx(1));
+		CHECK_FALSE(m1.angle_of_impact.enabled);
+		CHECK(m1.angle_of_impact.zone12_delimiter == Approx(30));
+		CHECK(m1.angle_of_impact.zone23_delimiter == Approx(60));
+		CHECK(m1.material.present);
+		CHECK(m1.material.resolved);
+		const VehicleDef ah1z = vehicle(*lib, "vehicles/ah1z/ah1z");
+		CHECK(ah1z.critical_damage_time == Approx(2.75));
+		CHECK(ah1z.pre_explosion_time == Approx(0));
+		CHECK(ah1z.pre_destruction_damage_threshold == Approx(300));
+		const VehicleDef growler = vehicle(*lib, "vehicles/growleritv/growleritv");
+		CHECK(growler.material.resolved);
+		CHECK(growler.material.instance != m1.material.instance);
 		const VehicleTurretDef *ring = turret(m1, 0, 1, true);
 		const VehicleTurretDef *gun = turret(m1, 0, 0, false);
 		const VehicleTurretDef *hmg = turret(m1, 1, 1, false);
@@ -2256,7 +2272,6 @@ TEST_SUITE("tables") {
 			CHECK(v.body_mass == Approx(800));
 			CHECK(v.gravity_modifier == Approx(1.65));
 		}
-		const VehicleDef growler = vehicle(*lib, "vehicles/growleritv/growleritv");
 		REQUIRE(growler.driver() != nullptr);
 		const VehicleSeatDef &driver = *growler.driver();
 		size_t chase_cameras = 0, first_person_cameras = 0;
