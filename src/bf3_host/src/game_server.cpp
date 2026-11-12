@@ -366,6 +366,13 @@ struct GameServer::Impl {
 			return;
 		}
 		(void)vehicles.step(p_tick, combat.on() ? combat.gunplay()->match_seed() : 0u);
+		std::vector<sim::Vec3> alive_at;
+		for (size_t i = 0; i < slots.size(); ++i) {
+			if (slots[i].used && soldiers.alive(i)) {
+				alive_at.push_back(soldiers[i].state.position);
+			}
+		}
+		vehicles.step_health(p_tick, alive_at);
 		for (size_t i = 0; i < slots.size(); ++i) {
 			if (!slots[i].used || !soldiers.alive(i)) {
 				vehicles.leave(i);
@@ -889,6 +896,9 @@ GameServerStats GameServer::stats() const {
 	g.rules_step_failures = m.match.step_failures();
 	g.spotting = m.spotting.stats();
 	g.vehicle_shots = m.vehicles.gunnery().stats().shots;
+	g.vehicle_hits = m.vehicles.stats().hits;
+	g.vehicles_destroyed = m.vehicles.stats().destroyed;
+	g.vehicle_crew_kills = m.vehicles.stats().occupant_kills;
 	g.step_precondition_failures = m.step_precondition_failures;
 	g.last_step_ms = m.last_step_ms;
 	m.snapshots.stats(g);
@@ -968,6 +978,7 @@ core::Status GameServer::Impl::init_gameplay() {
 	}
 	BF3_TRY(combat.create(*config.level, g, config.seed, *world));
 	BF3_TRY(vehicles.configure_weapons(combat.gunplay()->level().materials, combat.gunplay()->table().mechanics));
+	vehicles.configure_damage(combat.gunplay()->table(), combat.gunplay()->level().defs);
 	core::Result<sim::spotting::SpottingDef> spotting_def =
 			sim::spotting::make_spotting_def(config.level->gunplay->soldier);
 	if (!spotting_def) {
@@ -1000,10 +1011,12 @@ core::Status GameServer::Impl::init_gameplay() {
 void GameServer::Impl::step_rules(sim::Tick p_tick) {
 	if (combat.on()) {
 		combat_log.open(p_tick);
+		combat.gunplay()->set_vehicle_targets(vehicles.targets());
 		combat.resolve(p_tick, slots, soldiers, combat_log,
 				[&](const sim::weapons::HitTargetProvider &p_targets,
 						std::vector<sim::weapons::DamageEvent> &r_damage) {
 					vehicles.resolve_weapons(p_tick, *world, p_targets, r_damage);
+					vehicles.take_hits(*combat.gunplay(), r_damage);
 				});
 		match.step(p_tick, view, *combat.gunplay(), combat.tick_states());
 		soldiers.take_rules(combat.tick_states(), slots);

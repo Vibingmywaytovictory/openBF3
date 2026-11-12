@@ -9,6 +9,7 @@
 #include "bf3/sim/vehicle_world.h"
 #include "bf3/sim/vehicles/vehicle_armament.h"
 #include "vehicle_gunnery.h"
+#include "vehicle_hits.h"
 
 #include <array>
 #include <cstddef>
@@ -24,6 +25,8 @@ class ConquestNatives;
 
 namespace bf3::host {
 
+class Gunplay;
+
 struct ServerVehicleStats {
 	uint32_t live = 0;
 	uint64_t spawned = 0;
@@ -33,6 +36,14 @@ struct ServerVehicleStats {
 	uint64_t step_failures = 0;
 	uint64_t spawn_failures = 0;
 	uint64_t restart_failures = 0;
+	uint64_t hits = 0;
+	uint64_t absorbed = 0;
+	uint64_t disabled = 0;
+	uint64_t destroyed = 0;
+	uint64_t exploded = 0;
+	uint64_t occupant_kills = 0;
+	uint64_t hidden_crew_dropped = 0;
+	uint64_t remove_failures = 0;
 };
 
 struct ServerVehicle {
@@ -46,6 +57,9 @@ struct ServerVehicle {
 	sim::VehicleCommand command;
 	std::array<sim::Command, net::kMaxVehicleSeats> seat_commands{};
 	sim::vehicles::ArmamentState armament;
+	sim::vehicles::VehicleHealth health;
+	uint8_t last_attacker = net::kNoVehicleOccupant;
+	uint16_t last_def = sim::weapons::kNoWeapon;
 };
 
 struct VehicleSeat {
@@ -72,6 +86,12 @@ public:
 			const sim::weapons::Mechanics &p_mechanics);
 	void resolve_weapons(sim::Tick p_tick, const sim::CollisionWorld &p_world,
 			const sim::weapons::HitTargetProvider &p_targets, std::vector<sim::weapons::DamageEvent> &r_damage);
+	void configure_damage(const sim::weapons::WeaponTable &p_soldier_table,
+			std::span<const core::gameplay::WeaponDef> p_soldier_defs);
+	void step_health(sim::Tick p_tick, std::span<const sim::Vec3> p_soldiers);
+	void take_hits(Gunplay &r_gunplay, std::vector<sim::weapons::DamageEvent> &r_damage);
+	std::span<const sim::vehicles::VehicleTarget> targets() const { return targets_; }
+	bool hidden_crew(size_t p_slot) const;
 	const VehicleGunnery &gunnery() const { return gunnery_; }
 	core::Transform hull(size_t p_vehicle) const;
 
@@ -92,6 +112,15 @@ private:
 	void exit(const VehicleSeat &p_seat);
 	void switch_seat(size_t p_slot, std::optional<uint8_t> p_wanted);
 	core::Status rebuild();
+	void strike(const VehicleStrike &p_strike, Gunplay &r_gunplay, std::vector<sim::weapons::DamageEvent> &r_damage);
+	void kill_crew(size_t p_vehicle, uint8_t p_attacker, uint16_t p_def, sim::weapons::SimTime p_time,
+			std::vector<sim::weapons::DamageEvent> &r_damage);
+	void explode(size_t p_vehicle);
+	void refresh_targets();
+	sim::Vec3 hull_centre(size_t p_vehicle) const;
+	uint8_t hull_property(size_t p_vehicle) const;
+	void gather(std::span<const sim::weapons::DamageEvent> p_events, const VehicleDamageSource &p_source,
+			const sim::weapons::ProjectileStepOutput &p_out, bool p_soldier_weapon);
 
 	std::shared_ptr<const LevelVehicles> level_;
 	std::shared_ptr<const sim::StaticWorldShapes> shapes_;
@@ -102,6 +131,13 @@ private:
 	std::array<uint8_t, net::kMaxSlots> seat_held_{};
 	ServerVehicleStats stats_;
 	VehicleGunnery gunnery_;
+	VehicleDamageSource gunnery_source_;
+	VehicleDamageSource soldier_source_;
+	std::vector<uint8_t> kind_property_;
+	std::vector<sim::vehicles::VehicleTarget> targets_;
+	std::vector<VehicleStrike> strikes_;
+	std::vector<sim::weapons::DamageEvent> crew_kills_;
+	std::vector<sim::weapons::DamageEvent> taken_;
 };
 
 }

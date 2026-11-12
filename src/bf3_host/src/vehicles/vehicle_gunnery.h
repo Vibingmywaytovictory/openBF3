@@ -48,6 +48,8 @@ public:
 
 	const sim::weapons::WeaponTable *table() const { return table_.get(); }
 	std::span<const sim::weapons::Projectile> live() const;
+	const sim::weapons::ProjectileStepOutput &step_output() const { return out_; }
+	std::span<const sim::weapons::DamageEvent> vehicle_damage() const { return vehicle_damage_; }
 	const VehicleGunneryStats &stats() const { return stats_; }
 
 private:
@@ -60,6 +62,7 @@ private:
 	std::unique_ptr<sim::weapons::ProjectileWorld> projectiles_;
 	std::vector<std::array<Mount, sim::vehicles::kMaxArmamentWeapons>> mounts_;
 	sim::weapons::ProjectileStepOutput out_;
+	std::vector<sim::weapons::DamageEvent> vehicle_damage_;
 	sim::weapons::WeaponTickOutput tick_out_;
 	VehicleGunneryStats stats_;
 };

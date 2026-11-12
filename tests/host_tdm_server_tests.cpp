@@ -4841,3 +4841,349 @@ TEST_SUITE("host-vehicles-armor") {
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 }
+
+namespace {
+
+struct VehicleSight {
+	bool sent = false;
+	bool present = false;
+	uint8_t generation = 0;
+	sim::Vec3 at{};
+};
+
+VehicleSight sighted(std::span<const host::OutDatagram> p_out, uint32_t p_peer, uint16_t p_spawner) {
+	VehicleSight s;
+	for (const host::OutDatagram &d : p_out) {
+		if (d.peer != p_peer || net::peek_type(d.bytes) != net::MessageType::VehicleStates) {
+			continue;
+		}
+		core::Result<net::VehicleStates> m = net::decode_vehicle_states(d.bytes);
+		if (!m) {
+			continue;
+		}
+		s.sent = true;
+		for (const net::VehicleWire &w : m->vehicles) {
+			if (w.spawner == p_spawner) {
+				s.present = true;
+				s.generation = w.generation;
+				s.at = w.state.body.com_position;
+			}
+		}
+	}
+	return s;
+}
+
+bool clear_line(const sim::CollisionWorld &p_world, const sim::Vec3 &p_from, const sim::Vec3 &p_to,
+		std::span<const net::VehicleWire> p_vehicles, uint16_t p_skip_a, uint16_t p_skip_b) {
+	const sim::Vec3 d{ p_to[0] - p_from[0], p_to[1] - p_from[1], p_to[2] - p_from[2] };
+	if (p_world.ray_any(p_from, d, sim::query_mask::kCollision)) {
+		return false;
+	}
+	const float l2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+	for (const net::VehicleWire &w : p_vehicles) {
+		if (w.spawner == p_skip_a || w.spawner == p_skip_b) {
+			continue;
+		}
+		const sim::Vec3 &c = w.state.body.com_position;
+		const float s = std::clamp(
+				((c[0] - p_from[0]) * d[0] + (c[1] - p_from[1]) * d[1] + (c[2] - p_from[2]) * d[2]) / l2, 0.0f, 1.0f);
+		const sim::Vec3 q{ p_from[0] + s * d[0], p_from[1] + s * d[1], p_from[2] + s * d[2] };
+		if (horizontal(q, c) < 5.0f) {
+			return false;
+		}
+	}
+	return true;
+}
+
+struct WreckRun {
+	bool ran = false;
+	uint32_t shells = 0;
+	uint64_t hits = 0;
+	uint64_t crew_kills = 0;
+	bool driver_dead = false;
+	bool driver_untouched_until_wrecked = true;
+	int kills_gained = 0;
+	bool gunner_alive = false;
+	uint32_t gone_for = 0;
+	uint32_t delay_ticks = 0;
+	uint8_t generation_before = 0;
+	uint8_t generation_after = 0;
+	float respawn_offset = 0;
+	uint64_t runtime_faults = 0;
+};
+
+WreckRun wreck_and_respawn(
+		tdm::TdmLevel &r_level, const std::function<bool(const host::LevelVehicleKind &)> &p_target) {
+	WreckRun run;
+	const host::LevelVehicles &lv = *r_level.shared->vehicles;
+	std::optional<uint16_t> cannon_def;
+	for (size_t i = 0; i < lv.weapons.size(); ++i) {
+		if (lv.weapons[i].variant == "vehicles/common/weapondata/mbt_cannon_firing") {
+			cannon_def = uint16_t(i);
+		}
+	}
+	REQUIRE(cannon_def.has_value());
+	std::vector<uint16_t> tank_kinds, target_kinds;
+	for (size_t k = 0; k < lv.kinds.size(); ++k) {
+		const host::LevelVehicleKind &kind = lv.kinds[k];
+		if (std::find(kind.weapon_defs.begin(), kind.weapon_defs.end(), *cannon_def) != kind.weapon_defs.end()) {
+			tank_kinds.push_back(uint16_t(k));
+		}
+		if (p_target(kind)) {
+			target_kinds.push_back(uint16_t(k));
+		}
+	}
+	REQUIRE(!tank_kinds.empty());
+	REQUIRE(!target_kinds.empty());
+
+	std::unique_ptr<Match> m = start_match(r_level, false, 61u, 0, 1);
+	tdm::ScriptedPeer &p = m->join("gunner");
+	p.ready();
+	REQUIRE(wait_in_round(*m));
+	std::vector<Script *> bots{ m->bot(), m->bot() };
+	REQUIRE(m->until([&] { return is_alive(m->state(p.slot())); }, 600));
+	const uint8_t team = m->rules().team_of(uint8_t(p.slot()));
+	Script *enemy = nullptr;
+	for (Script *b : bots) {
+		enemy = m->rules().team_of(uint8_t(b->slot)) != team ? b : enemy;
+	}
+	REQUIRE(enemy != nullptr);
+	REQUIRE(m->until([&] { return is_alive(m->state(enemy->slot)); }, 600));
+
+	VehicleWatch watch;
+	m->ticks(150);
+	for (uint32_t t = 0; t < 30; ++t) {
+		m->tick();
+		watch.take(m->out, p.peer());
+	}
+	const net::VehicleWire *tank = nullptr;
+	const net::VehicleWire *target = nullptr;
+	float best = INFINITY;
+	for (const net::VehicleWire &t : watch.latest) {
+		if (std::find(tank_kinds.begin(), tank_kinds.end(), lv.spawners[t.spawner].kind) == tank_kinds.end() ||
+				!parked_upright(t.state.body.rotation, t.state.body.linear_velocity)) {
+			continue;
+		}
+		for (const net::VehicleWire &j : watch.latest) {
+			if (j.spawner == t.spawner ||
+					std::find(target_kinds.begin(), target_kinds.end(), lv.spawners[j.spawner].kind) ==
+							target_kinds.end() ||
+					!parked_upright(j.state.body.rotation, j.state.body.linear_velocity)) {
+				continue;
+			}
+			const float range = horizontal(t.state.body.com_position, j.state.body.com_position);
+			const sim::Vec3 gun = add(t.state.body.com_position, 0.0f, 1.1f, 0.0f);
+			const sim::Vec3 aim = add(j.state.body.com_position, 0.0f, 0.3f, 0.0f);
+			if (range < 15.0f || range > 120.0f || range >= best ||
+					!clear_line(*m->world, gun, aim, watch.latest, t.spawner, j.spawner)) {
+				continue;
+			}
+			best = range;
+			tank = &t;
+			target = &j;
+		}
+	}
+	REQUIRE(tank != nullptr);
+	REQUIRE(target != nullptr);
+	const uint16_t tank_spawner = tank->spawner, target_spawner = target->spawner;
+	const host::LevelVehicleKind &tank_kind = lv.kinds[lv.spawners[tank_spawner].kind];
+	const host::LevelVehicleKind &target_kind = lv.kinds[lv.spawners[target_spawner].kind];
+	const float spawn_delay = lv.spawners[target_spawner].spawn_delay;
+	std::printf("damage: %s of spawner %u aims at the %s of spawner %u (SpawnDelay %.0f s) %.1f m away\n",
+			tank_kind.blueprint.c_str(), unsigned(tank_spawner), target_kind.blueprint.c_str(),
+			unsigned(target_spawner), double(spawn_delay), double(best));
+	const sim::Vec3 target_at = target->state.body.com_position;
+	run.generation_before = target->generation;
+
+	const sim::Tick enemy_use = m->now() + 3u;
+	enemy->fn = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+		sim::Command c = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
+		if (p_tick == enemy_use) {
+			c.buttons |= sim::buttons::kUse;
+		}
+		return c;
+	};
+	m->place(enemy->slot,
+			ground_at(*m->world, target_at[0] + 0.5f * target_kind.entry_radius, target_at[2], target_at[1] + 5.0f));
+	const uint8_t enemy_slot = uint8_t(enemy->slot);
+	REQUIRE(m->until(
+			[&] {
+				watch.take(m->out, p.peer());
+				const net::VehicleWire *w = watch.of(target_spawner);
+				return w != nullptr && w->occupants[0] == enemy_slot;
+			},
+			60));
+
+	const sim::Vec3 tank_at = watch.of(tank_spawner)->state.body.com_position;
+	m->teleport(p, ground_at(*m->world, tank_at[0] + 0.6f * tank_kind.entry_radius, tank_at[2], tank_at[1] + 5.0f));
+	REQUIRE(m->until([&] { return horizontal(m->state(p.slot())->position, tank_at) < tank_kind.entry_radius; }, 30));
+	const sim::Tick use_at = m->now() + 2u;
+	const sim::Vec3 gun = add(tank_at, 0.0f, 1.1f, 0.0f);
+	const sim::Vec3 aim = add(target_at, 0.0f, 0.3f, 0.0f);
+	const float dx = aim[0] - gun[0], dy = aim[1] - gun[1], dz = aim[2] - gun[2];
+	const uint16_t aim_yaw = sim::quantize_yaw(std::atan2(dx, dz));
+	const int16_t aim_pitch = sim::quantize_pitch(std::atan2(dy, std::sqrt(dx * dx + dz * dz)));
+	bool fire = false;
+	m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+		sim::Command c = sim::idle_command(p_tick, aim_yaw, aim_pitch, p_state.target_pose);
+		if (p_tick == use_at) {
+			c.buttons |= sim::buttons::kUse;
+		}
+		if (fire) {
+			c.buttons |= sim::buttons::kFire;
+		}
+		return c;
+	};
+	const uint8_t slot = uint8_t(p.slot());
+	REQUIRE(m->until(
+			[&] {
+				watch.take(m->out, p.peer());
+				const net::VehicleWire *w = watch.of(tank_spawner);
+				return w != nullptr && w->occupants[0] == slot;
+			},
+			60));
+	m->ticks(150);
+	const int kills_before = m->row(int(slot)) != nullptr ? int(m->row(int(slot))->kills) : 0;
+	const uint64_t hits_before = m->server.stats().vehicle_hits;
+	const uint64_t shots_before = m->server.stats().vehicle_shots;
+	const uint64_t crew_before = m->server.stats().vehicle_crew_kills;
+	REQUIRE(is_alive(m->state(enemy->slot)));
+	const float driver_health = m->state(enemy->slot)->health;
+
+	std::optional<sim::Tick> gone;
+	for (int shell = 0; shell < 10 && !gone; ++shell) {
+		fire = true;
+		m->tick();
+		m->tick();
+		fire = false;
+		for (uint32_t t = 0; t < 360 && !gone; ++t) {
+			const uint64_t crew_now = m->server.stats().vehicle_crew_kills;
+			m->tick();
+			const sim::SoldierState *driver = m->state(enemy->slot);
+			if (crew_now == crew_before && m->server.stats().vehicle_crew_kills == crew_before &&
+					(driver == nullptr || driver->health != driver_health)) {
+				run.driver_untouched_until_wrecked = false;
+			}
+			const VehicleSight now = sighted(m->out, p.peer(), target_spawner);
+			if (now.sent && !now.present) {
+				gone = m->now();
+			}
+		}
+		std::printf("damage: after shell %d: %llu shots, %llu vehicle hits, the driver %s\n", shell + 1,
+				static_cast<unsigned long long>(m->server.stats().vehicle_shots - shots_before),
+				static_cast<unsigned long long>(m->server.stats().vehicle_hits - hits_before),
+				is_alive(m->state(enemy->slot)) ? "alive" : "dead");
+	}
+	REQUIRE(gone.has_value());
+	run.shells = uint32_t(m->server.stats().vehicle_shots - shots_before);
+	run.hits = m->server.stats().vehicle_hits - hits_before;
+	run.crew_kills = m->server.stats().vehicle_crew_kills - crew_before;
+	run.driver_dead = !is_alive(m->state(enemy->slot));
+	REQUIRE(m->row(int(slot)) != nullptr);
+	run.kills_gained = int(m->row(int(slot))->kills) - kills_before;
+	run.gunner_alive = is_alive(m->state(p.slot()));
+
+	run.delay_ticks = sim::seconds_to_ticks(spawn_delay);
+	std::optional<sim::Tick> back;
+	VehicleSight seen;
+	for (uint32_t t = 0; t < run.delay_ticks + 120u && !back; ++t) {
+		m->tick();
+		seen = sighted(m->out, p.peer(), target_spawner);
+		if (seen.present) {
+			back = m->now();
+		}
+	}
+	REQUIRE(back.has_value());
+	run.gone_for = *back - *gone;
+	run.generation_after = seen.generation;
+	run.respawn_offset = horizontal(seen.at, target_at);
+	std::printf("damage: the %s left the wire at tick %u and came back at tick %u (%u ticks, SpawnDelay %u ticks), "
+				"generation %u -> %u, %.2f m from its first spawn\n",
+			target_kind.blueprint.c_str(), unsigned(*gone), unsigned(*back), unsigned(run.gone_for),
+			unsigned(run.delay_ticks), unsigned(run.generation_before), unsigned(run.generation_after),
+			double(run.respawn_offset));
+	run.runtime_faults = m->rules().stats().runtime_faults;
+	run.ran = true;
+	return run;
+}
+
+void check_respawn(const WreckRun &p_run) {
+	const uint32_t divisor = host::GameServerConfig().snapshot_divisor;
+	CHECK(p_run.gone_for >= p_run.delay_ticks);
+	CHECK(p_run.gone_for <= p_run.delay_ticks + divisor);
+	CHECK(p_run.generation_after == uint8_t(p_run.generation_before + 1u));
+	CHECK(p_run.respawn_offset < 1.0f);
+	CHECK(p_run.gunner_alive);
+	CHECK(p_run.runtime_faults == 0u);
+}
+
+}
+
+TEST_SUITE("host-vehicles-damage") {
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: tank shells wreck a Growler by the R-G3 damage rules, the splash "
+			  "kills its exposed enemy driver with the kill on the gunner row, the wreck explodes and its spawner "
+			  "brings it back after its SpawnDelay") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		const host::LevelVehicleKind *growler = nullptr;
+		for (const host::LevelVehicleKind &kind : lv.kinds) {
+			std::printf("damage: %s, health %.0f, disabled at %.0f, box half %.2f %.2f %.2f, material %d\n",
+					kind.blueprint.c_str(), double(sim::vehicles::full_vehicle_health(kind.damage)),
+					double(kind.damage.disabled_threshold), double(kind.box.half[0]), double(kind.box.half[1]),
+					double(kind.box.half[2]), int(kind.material.resolved));
+			CHECK(kind.material.resolved);
+			growler = kind.blueprint == "vehicles/growleritv/growleritv" ? &kind : growler;
+		}
+		REQUIRE(growler != nullptr);
+		CHECK(sim::vehicles::full_vehicle_health(growler->damage) == doctest::Approx(500.0f));
+		CHECK(growler->damage.disabled_threshold == doctest::Approx(300.0f));
+		CHECK(growler->damage.regeneration_delay == doctest::Approx(12.0f));
+		CHECK(growler->damage.regeneration_rate == doctest::Approx(32.0f));
+		CHECK(growler->damage.decay_delay == doctest::Approx(7.0f));
+		CHECK(growler->damage.decay_rate == doctest::Approx(15.0f));
+		CHECK(growler->damage.share_damage);
+		CHECK(growler->exposed[0]);
+		for (const host::LevelVehicleSpawner &sp : lv.spawners) {
+			CAPTURE(lv.kinds[sp.kind].blueprint);
+			const bool quick = sp.time_until_abandoned < 7.5f;
+			CHECK(sp.apply_damage_to_abandoned);
+			CHECK(sp.respawn_range == doctest::Approx(15.0f));
+			CHECK(sp.time_until_abandoned == doctest::Approx(quick ? 5.0f : 10.0f));
+			CHECK(sp.time_until_abandoned_is_destroyed == doctest::Approx(quick ? 5.0f : 10.0f));
+			CHECK(sp.keep_alive_radius == doctest::Approx(quick ? 15.0f : 20.0f));
+			CHECK((!quick || host::land_jeep(*lv.kinds[sp.kind].model)));
+		}
+
+		const WreckRun run = wreck_and_respawn(*level, [](const host::LevelVehicleKind &p_kind) {
+			return p_kind.blueprint == "vehicles/growleritv/growleritv";
+		});
+		REQUIRE(run.ran);
+		CHECK(run.shells >= 2u);
+		CHECK(run.hits >= run.shells);
+		CHECK(run.driver_dead);
+		CHECK(run.kills_gained == 1);
+		check_respawn(run);
+	}
+
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: an enemy tank driver sits in a hidden seat, no hit on his tank "
+			  "reaches him, and when the shells wreck it he dies at once with the kill on the gunner row; the "
+			  "tank comes back after its SpawnDelay") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const WreckRun run = wreck_and_respawn(*level, [](const host::LevelVehicleKind &p_kind) {
+			return p_kind.blueprint == "vehicles/m1a2/m1abrams" || p_kind.blueprint == "vehicles/t90/t90";
+		});
+		REQUIRE(run.ran);
+		CHECK(run.shells >= 3u);
+		CHECK(run.driver_untouched_until_wrecked);
+		CHECK(run.crew_kills == 1u);
+		CHECK(run.driver_dead);
+		CHECK(run.kills_gained == 1);
+		check_respawn(run);
+	}
+}

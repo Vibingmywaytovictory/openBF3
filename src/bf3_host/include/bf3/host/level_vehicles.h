@@ -3,10 +3,13 @@
 #include "bf3/core/gameplay/vehicle_def.h"
 #include "bf3/core/gameplay/weapon_def.h"
 #include "bf3/core/result.h"
+#include "bf3/net/protocol.h"
 #include "bf3/sim/vehicle_model.h"
 #include "bf3/sim/vehicle_world.h"
 #include "bf3/sim/vehicles/vehicle_armament.h"
+#include "bf3/sim/vehicles/vehicle_damage.h"
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -15,6 +18,9 @@
 
 namespace bf3::core::level {
 struct LevelTransform;
+}
+namespace bf3::core::gameplay {
+struct VehicleDef;
 }
 
 namespace bf3::host {
@@ -32,6 +38,10 @@ struct LevelVehicleKind {
 	std::vector<std::pair<std::string, core::Transform>> component_meshes;
 	std::shared_ptr<const sim::vehicles::VehicleArmament> armament;
 	std::vector<uint16_t> weapon_defs;
+	sim::vehicles::VehicleDamageRule damage;
+	sim::vehicles::HullBox box;
+	core::gameplay::MaterialPairRef material;
+	std::array<bool, net::kMaxVehicleSeats> exposed{};
 };
 
 struct LevelVehicleSpawner {
@@ -42,6 +52,11 @@ struct LevelVehicleSpawner {
 	bool enabled = true;
 	float initial_spawn_delay = 0;
 	float spawn_delay = 0;
+	bool apply_damage_to_abandoned = false;
+	float time_until_abandoned = 0;
+	float time_until_abandoned_is_destroyed = 0;
+	float keep_alive_radius = 0;
+	float respawn_range = 0;
 };
 
 struct LevelVehicles {
@@ -61,6 +76,8 @@ bool land_jeep(const sim::VehicleModel &p_model);
 std::optional<core::Vec3> vehicle_exit_point(const LevelVehicleKind &p_kind, uint8_t p_seat);
 
 bool land_tracked(const sim::VehicleModel &p_model);
+
+sim::vehicles::VehicleDamageRule vehicle_damage_rule(const core::gameplay::VehicleDef &p_def);
 
 inline constexpr uint16_t kNoVehicleWeapon = 0xFFFF;
 

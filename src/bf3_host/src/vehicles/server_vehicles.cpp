@@ -1,5 +1,6 @@
 #include "server_vehicles.h"
 
+#include "bf3/host/gunplay.h"
 #include "bf3/sim/logic/conquest_natives.h"
 #include "bf3/sim/vehicles/vehicle_input.h"
 #include "bf3/sim/vehicles/vehicle_spawning.h"
@@ -46,6 +47,9 @@ void ServerVehicles::restart() {
 core::Status ServerVehicles::rebuild() {
 	world_.reset();
 	vehicles_.clear();
+	targets_.clear();
+	strikes_.clear();
+	crew_kills_.clear();
 	use_held_.fill(0);
 	seat_held_.fill(0);
 	stats_.live = 0;
@@ -121,6 +125,9 @@ void ServerVehicles::spawn_due(sim::Tick p_tick, const sim::logic::ConquestNativ
 		v.occupants.fill(net::kNoVehicleOccupant);
 		v.seat_commands = {};
 		v.armament = sim::vehicles::ArmamentState();
+		v.health = sim::vehicles::spawned_vehicle_health(level_->kinds[s.kind].damage);
+		v.last_attacker = net::kNoVehicleOccupant;
+		v.last_def = sim::weapons::kNoWeapon;
 		gunnery_.spawned(i);
 		++stats_.spawned;
 		++stats_.live;
@@ -179,7 +186,7 @@ std::optional<sim::Vec3> ServerVehicles::use(
 	std::optional<VehicleSeat> chosen;
 	for (size_t i = 0; i < vehicles_.size(); ++i) {
 		const ServerVehicle &v = vehicles_[i];
-		if (!v.live) {
+		if (!v.live || v.health.condition == sim::vehicles::VehicleCondition::Destroyed) {
 			continue;
 		}
 		const LevelVehicleKind &kind = level_->kinds[level_->spawners[i].kind];
@@ -257,9 +264,237 @@ core::Status ServerVehicles::configure_weapons(std::shared_ptr<const sim::weapon
 	if (level_ == nullptr) {
 		return core::Status::success();
 	}
+	kind_property_.assign(level_->kinds.size(), 0);
+	if (p_materials != nullptr) {
+		for (size_t k = 0; k < level_->kinds.size(); ++k) {
+			if (level_->kinds[k].material.present) {
+				const sim::weapons::SurfacePair pair = p_materials->pair_of(level_->kinds[k].material);
+				kind_property_[k] = pair.resolved ? pair.property : uint8_t(0);
+			}
+		}
+	}
 	BF3_TRY(gunnery_.configure(*level_, std::move(p_materials), p_mechanics));
 	gunnery_.reset(vehicles_.size());
+	if (gunnery_.table() != nullptr) {
+		gunnery_source_.configure(*gunnery_.table(), level_->weapons);
+	}
 	return core::Status::success();
+}
+
+void ServerVehicles::configure_damage(
+		const sim::weapons::WeaponTable &p_soldier_table, std::span<const core::gameplay::WeaponDef> p_soldier_defs) {
+	soldier_source_.configure(p_soldier_table, p_soldier_defs);
+}
+
+bool ServerVehicles::hidden_crew(size_t p_slot) const {
+	const std::optional<VehicleSeat> seat = seat_of(p_slot);
+	return seat && !level_->kinds[level_->spawners[seat->vehicle].kind].exposed[seat->seat];
+}
+
+sim::Vec3 ServerVehicles::hull_centre(size_t p_vehicle) const {
+	return hull(p_vehicle).transform_point(level_->kinds[level_->spawners[p_vehicle].kind].box.centre);
+}
+
+uint8_t ServerVehicles::hull_property(size_t p_vehicle) const {
+	const uint16_t kind = level_->spawners[p_vehicle].kind;
+	return kind < kind_property_.size() ? kind_property_[kind] : uint8_t(0);
+}
+
+void ServerVehicles::refresh_targets() {
+	targets_.clear();
+	for (size_t i = 0; i < vehicles_.size(); ++i) {
+		const ServerVehicle &v = vehicles_[i];
+		if (!v.live) {
+			continue;
+		}
+		sim::vehicles::VehicleTarget t;
+		t.target = sim::vehicles::hull_target(level_->kinds[level_->spawners[i].kind].box, hull(i),
+				sim::vehicles::kVehicleTargetIdBase + uint32_t(i), hull_property(i));
+		t.target.team = v.team;
+		for (const uint8_t o : v.occupants) {
+			if (o != net::kNoVehicleOccupant && t.crew_count < t.crew.size()) {
+				t.crew[t.crew_count++] = o;
+			}
+		}
+		targets_.push_back(t);
+	}
+}
+
+void ServerVehicles::kill_crew(size_t p_vehicle, uint8_t p_attacker, uint16_t p_def, sim::weapons::SimTime p_time,
+		std::vector<sim::weapons::DamageEvent> &r_damage) {
+	for (const uint8_t o : vehicles_[p_vehicle].occupants) {
+		if (o == net::kNoVehicleOccupant) {
+			continue;
+		}
+		sim::weapons::DamageEvent e;
+		e.time = p_time;
+		e.attacker_slot = p_attacker != net::kNoVehicleOccupant ? p_attacker : o;
+		e.target = o;
+		e.def = p_def;
+		e.kind = sim::weapons::DamageKind::Direct;
+		e.base = sim::weapons::kMaxDamage;
+		e.amount = sim::weapons::kMaxDamage;
+		r_damage.push_back(e);
+		++stats_.occupant_kills;
+	}
+}
+
+void ServerVehicles::explode(size_t p_vehicle) {
+	ServerVehicle &v = vehicles_[p_vehicle];
+	if (!world_->remove_vehicle(sim::VehicleSlot(p_vehicle)).ok()) {
+		++stats_.remove_failures;
+	}
+	v.live = false;
+	v.counting = false;
+	v.command = sim::VehicleCommand();
+	v.occupants.fill(net::kNoVehicleOccupant);
+	v.seat_commands = {};
+	gunnery_.spawned(p_vehicle);
+	++stats_.exploded;
+	if (stats_.live > 0) {
+		--stats_.live;
+	}
+}
+
+void ServerVehicles::step_health(sim::Tick p_tick, std::span<const sim::Vec3> p_soldiers) {
+	if (!on()) {
+		return;
+	}
+	for (size_t i = 0; i < vehicles_.size(); ++i) {
+		ServerVehicle &v = vehicles_[i];
+		if (!v.live) {
+			continue;
+		}
+		const LevelVehicleSpawner &spawner = level_->spawners[i];
+		const LevelVehicleKind &kind = level_->kinds[spawner.kind];
+		const sim::VehicleState s = world_->state(sim::VehicleSlot(i));
+		sim::vehicles::VehicleTickInput in;
+		in.dt = sim::kTickSeconds;
+		const std::array<float, 4> &q = s.body.rotation;
+		in.up_y = 1.0f - 2.0f * (q[0] * q[0] + q[2] * q[2]);
+		in.abandon_applies = spawner.apply_damage_to_abandoned;
+		in.time_until_abandoned = spawner.time_until_abandoned;
+		in.time_until_abandoned_is_destroyed = spawner.time_until_abandoned_is_destroyed;
+		const sim::Vec3 &home = spawner.placement.position;
+		const float hx = s.body.origin[0] - home[0], hy = s.body.origin[1] - home[1], hz = s.body.origin[2] - home[2];
+		bool kept = hx * hx + hy * hy + hz * hz <= spawner.respawn_range * spawner.respawn_range ||
+				std::any_of(
+						v.occupants.begin(), v.occupants.end(), [](uint8_t o) { return o != net::kNoVehicleOccupant; });
+		const float keep = spawner.keep_alive_radius * spawner.keep_alive_radius;
+		for (size_t k = 0; k < p_soldiers.size() && !kept; ++k) {
+			const float dx = p_soldiers[k][0] - s.body.com_position[0];
+			const float dy = p_soldiers[k][1] - s.body.com_position[1];
+			const float dz = p_soldiers[k][2] - s.body.com_position[2];
+			kept = dx * dx + dy * dy + dz * dz <= keep;
+		}
+		in.abandoned = !kept;
+		const sim::vehicles::VehicleTickOutcome o = sim::vehicles::step_vehicle_health(kind.damage, v.health, in);
+		if ((o.events & sim::vehicles::vehicle_events::kDisabled) != 0) {
+			++stats_.disabled;
+		}
+		if ((o.events & sim::vehicles::vehicle_events::kDestroyed) != 0) {
+			++stats_.destroyed;
+			const bool rolled = (o.events & sim::vehicles::vehicle_events::kUpsideDownHit) != 0;
+			kill_crew(i, rolled ? v.occupants[0] : v.last_attacker, rolled ? sim::weapons::kNoWeapon : v.last_def,
+					sim::weapons::tick_start(p_tick), crew_kills_);
+		}
+		if ((o.events & sim::vehicles::vehicle_events::kExploded) != 0) {
+			explode(i);
+		}
+	}
+	refresh_targets();
+}
+
+void ServerVehicles::strike(
+		const VehicleStrike &p_strike, Gunplay &r_gunplay, std::vector<sim::weapons::DamageEvent> &r_damage) {
+	const sim::weapons::DamageEvent &e = p_strike.event;
+	const size_t index = vehicle_of_target(e.target);
+	if (index >= vehicles_.size() || !vehicles_[index].live) {
+		return;
+	}
+	ServerVehicle &v = vehicles_[index];
+	const LevelVehicleKind &kind = level_->kinds[level_->spawners[index].kind];
+	const core::Transform h = hull(index);
+	sim::vehicles::VehicleHit hit;
+	hit.damage = p_strike.amount;
+	if (p_strike.located) {
+		const sim::vehicles::HullHit at =
+				sim::vehicles::hull_hit(kind.box, sim::vehicles::to_hull(h, p_strike.position),
+						p_strike.directional ? sim::vehicles::to_hull_direction(h, p_strike.direction) : sim::Vec3{});
+		hit.zone = at.zone;
+		hit.impact_degrees = at.impact_degrees;
+		hit.zone_angle = at.zone_angle;
+		hit.zone_degrees = at.zone_degrees;
+	}
+	const uint8_t attacker = uint8_t(std::min<uint32_t>(e.attacker_slot, 255u));
+	sim::vehicles::DamageParties parties;
+	parties.vehicle_team = v.team;
+	parties.attacker_is_player = e.attacker_slot < net::kMaxSlots;
+	parties.attacker_team = parties.attacker_is_player ? r_gunplay.team(attacker) : uint8_t(0);
+	parties.attacker_is_occupant = std::find(v.occupants.begin(), v.occupants.end(), attacker) != v.occupants.end();
+	parties.human_occupant =
+			std::any_of(v.occupants.begin(), v.occupants.end(), [](uint8_t o) { return o != net::kNoVehicleOccupant; });
+	parties.friendly_fire = r_gunplay.config().friendly_fire;
+	hit.modifier = sim::vehicles::damage_modifier(kind.damage.armor_multiplier, parties);
+	const sim::vehicles::VehicleDamageOutcome o = sim::vehicles::apply_vehicle_damage(kind.damage, v.health, hit);
+	if (!o.applied) {
+		return;
+	}
+	++stats_.hits;
+	stats_.absorbed += o.absorbed ? 1u : 0u;
+	if (o.damage > 0.0f && parties.attacker_is_player) {
+		v.last_attacker = attacker;
+		v.last_def = p_strike.soldier_weapon ? e.def : sim::weapons::kNoWeapon;
+	}
+	if ((o.events & sim::vehicles::vehicle_events::kDisabled) != 0) {
+		++stats_.disabled;
+	}
+	if ((o.events & sim::vehicles::vehicle_events::kDestroyed) != 0) {
+		++stats_.destroyed;
+		kill_crew(index, v.last_attacker, v.last_def, e.time, r_damage);
+	}
+}
+
+void ServerVehicles::gather(std::span<const sim::weapons::DamageEvent> p_events, const VehicleDamageSource &p_source,
+		const sim::weapons::ProjectileStepOutput &p_out, bool p_soldier_weapon) {
+	for (const sim::weapons::DamageEvent &e : p_events) {
+		const size_t index = vehicle_of_target(e.target);
+		if (index >= vehicles_.size() || !vehicles_[index].live) {
+			continue;
+		}
+		VehicleStrike s;
+		s.event = e;
+		s.soldier_weapon = p_soldier_weapon;
+		s.amount = p_source.amount(e, hull_property(index));
+		locate_strike(s, p_out, hull_centre(index));
+		strikes_.push_back(s);
+	}
+}
+
+void ServerVehicles::take_hits(Gunplay &r_gunplay, std::vector<sim::weapons::DamageEvent> &r_damage) {
+	if (!on()) {
+		return;
+	}
+	strikes_.clear();
+	gather(gunnery_.vehicle_damage(), gunnery_source_, gunnery_.step_output(), false);
+	taken_.clear();
+	r_gunplay.take_damage_if(
+			[](const sim::weapons::DamageEvent &e) { return e.target >= sim::vehicles::kVehicleTargetIdBase; }, taken_);
+	gather(taken_, soldier_source_, r_gunplay.step_output(), true);
+	const auto hidden = [&](const sim::weapons::DamageEvent &e) {
+		return e.target < net::kMaxSlots && hidden_crew(e.target);
+	};
+	taken_.clear();
+	r_gunplay.take_damage_if(hidden, taken_);
+	const size_t before = r_damage.size();
+	std::erase_if(r_damage, hidden);
+	stats_.hidden_crew_dropped += taken_.size() + (before - r_damage.size());
+	std::sort(strikes_.begin(), strikes_.end(), strike_before);
+	for (const VehicleStrike &s : strikes_) {
+		strike(s, r_gunplay, r_damage);
+	}
+	r_damage.insert(r_damage.end(), crew_kills_.begin(), crew_kills_.end());
+	crew_kills_.clear();
 }
 
 core::Transform ServerVehicles::hull(size_t p_vehicle) const {
@@ -269,7 +504,8 @@ core::Transform ServerVehicles::hull(size_t p_vehicle) const {
 
 void ServerVehicles::resolve_weapons(sim::Tick p_tick, const sim::CollisionWorld &p_world,
 		const sim::weapons::HitTargetProvider &p_targets, std::vector<sim::weapons::DamageEvent> &r_damage) {
-	gunnery_.step(p_tick, p_world, p_targets, r_damage);
+	const sim::vehicles::JoinedTargets joined(p_targets, targets_);
+	gunnery_.step(p_tick, p_world, joined, r_damage);
 }
 
 core::Status ServerVehicles::step(sim::Tick p_tick, uint64_t p_weapon_seed) {
@@ -281,7 +517,9 @@ core::Status ServerVehicles::step(sim::Tick p_tick, uint64_t p_weapon_seed) {
 	for (size_t i = 0; i < vehicles_.size(); ++i) {
 		if (vehicles_[i].live) {
 			slots.push_back(sim::VehicleSlot(i));
-			commands.push_back(vehicles_[i].command);
+			commands.push_back(vehicles_[i].health.condition == sim::vehicles::VehicleCondition::Destroyed
+							? sim::VehicleCommand()
+							: vehicles_[i].command);
 		}
 	}
 	if (slots.empty()) {
@@ -295,7 +533,7 @@ core::Status ServerVehicles::step(sim::Tick p_tick, uint64_t p_weapon_seed) {
 	for (const sim::VehicleSlot slot : slots) {
 		ServerVehicle &v = vehicles_[slot];
 		const LevelVehicleKind &kind = level_->kinds[level_->spawners[slot].kind];
-		if (kind.armament == nullptr) {
+		if (kind.armament == nullptr || v.health.condition == sim::vehicles::VehicleCondition::Destroyed) {
 			continue;
 		}
 		const core::Transform h = hull(slot);

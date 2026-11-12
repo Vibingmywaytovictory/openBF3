@@ -1082,6 +1082,8 @@ add_test(NAME host.vehicles.two_clients COMMAND test_host_tdm --test-suite=host-
 add_test(NAME host.vehicles.seats COMMAND test_host_tdm --test-suite=host-vehicles-seats)
 add_test(NAME host.vehicles.armor COMMAND test_host_tdm --test-suite=host-vehicles-armor)
 set_tests_properties(host.vehicles host.vehicles.two_clients host.vehicles.seats host.vehicles.armor PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+add_test(NAME host.vehicles.damage COMMAND test_host_tdm --test-suite=host-vehicles-damage)
+set_tests_properties(host.vehicles.damage PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 target_sources(test_host_tdm PRIVATE host_conquest_bots_tests.cpp)
 add_test(NAME host.tdm.conquest_bots COMMAND test_host_tdm --test-suite=host-tdm-conquest-bots "--test-case-exclude=*seed 2:*,*seed 3:*")
 add_test(NAME host.tdm.conquest_bots.seed2 COMMAND test_host_tdm --test-suite=host-tdm-conquest-bots "--test-case=*seed 2:*")

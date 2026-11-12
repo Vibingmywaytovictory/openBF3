@@ -519,6 +519,22 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 	return restore_vehicle_state(p_slot, clean, vehicle_restore::kWheelContacts, ContactCachePolicy::Keep);
 }
 
+core::Status VehicleWorld::remove_vehicle(VehicleSlot p_slot) {
+	Impl &w = *impl_;
+	if (p_slot >= w.vehicles.size() || !w.vehicles[p_slot].used) {
+		return core::make_error("vehicle world: slot " + std::to_string(p_slot) + " holds no vehicle");
+	}
+	Impl::Vehicle &v = w.vehicles[p_slot];
+	JPH::BodyInterface &bi = w.system->GetBodyInterfaceNoLock();
+	w.system->RemoveStepListener(v.constraint);
+	w.system->RemoveConstraint(v.constraint);
+	bi.RemoveBody(v.body);
+	bi.DestroyBody(v.body);
+	v = Impl::Vehicle();
+	w.contacts[p_slot] = VehicleContacts();
+	return core::Status::success();
+}
+
 bool VehicleWorld::has_vehicle(VehicleSlot p_slot) const {
 	return p_slot < impl_->vehicles.size() && impl_->vehicles[p_slot].used;
 }

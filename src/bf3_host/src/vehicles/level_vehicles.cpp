@@ -7,6 +7,7 @@
 #include "bf3/core/level/vehicle_spawns.h"
 #include "bf3/host/level_load.h"
 #include "bf3/net/protocol.h"
+#include "bf3/sim/vehicles/vehicle_targets.h"
 #include "bf3/sim/vehicles/vehicle_weapon_rules.h"
 
 #include <algorithm>
@@ -55,6 +56,16 @@ bool land_tracked(const sim::VehicleModel &p_model) {
 
 namespace {
 
+sim::vehicles::HealthZoneRule zone_rule(const core::gameplay::VehicleHealthZoneDef &p_zone) {
+	sim::vehicles::HealthZoneRule z;
+	z.max_health = std::max(p_zone.max_health, 0.0f);
+	z.max_shield = std::max(p_zone.max_shield_health, 0.0f);
+	z.min_damage_angle = p_zone.min_damage_angle;
+	z.damage_angle_multiplier = p_zone.damage_angle_multiplier;
+	z.use_damage_angle = p_zone.use_damage_angle;
+	return z;
+}
+
 struct WeaponKey {
 	std::string firing;
 	float reload = 1;
@@ -84,6 +95,29 @@ uint16_t vehicle_weapon(const LevelDatabase &p_db, const sim::vehicles::Armament
 	return uint16_t(r_out.weapons.size() - 1);
 }
 
+}
+
+sim::vehicles::VehicleDamageRule vehicle_damage_rule(const core::gameplay::VehicleDef &p_def) {
+	sim::vehicles::VehicleDamageRule r;
+	r.zones = { zone_rule(p_def.front), zone_rule(p_def.rear), zone_rule(p_def.left), zone_rule(p_def.right) };
+	r.share_damage = p_def.health_zones_share_damage;
+	r.angle_of_impact.enabled = p_def.angle_of_impact.enabled;
+	r.angle_of_impact.zone12_degrees = p_def.angle_of_impact.zone12_delimiter;
+	r.angle_of_impact.zone23_degrees = p_def.angle_of_impact.zone23_delimiter;
+	r.angle_of_impact.multiplier = p_def.angle_of_impact.multiplier;
+	r.armor_multiplier = p_def.armor_multiplier;
+	r.disabled_threshold = p_def.disabled_damage_threshold;
+	r.regeneration_delay = p_def.regeneration_delay * p_def.regeneration_delay_multiplier;
+	r.regeneration_rate = p_def.regeneration_rate * p_def.regeneration_rate_multiplier;
+	r.decay_delay = p_def.decay_delay;
+	r.decay_rate = p_def.decay_rate;
+	r.critical_damage_time = p_def.critical_damage_time;
+	r.pre_explosion_time = p_def.pre_explosion_time;
+	r.pre_destruction_threshold = p_def.pre_destruction_damage_threshold;
+	r.upside_down_degrees = p_def.upside_down_angle;
+	r.upside_down_damage = p_def.upside_down_damage;
+	r.upside_down_delay = p_def.upside_down_damage_delay;
+	return r;
 }
 
 core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
@@ -135,6 +169,12 @@ core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
 			k.seat_defs.assign(def->seats.begin(), def->seats.begin() + k.seats);
 			k.exit_points = def->exit_points;
 			k.component_meshes = def->component_meshes;
+			for (size_t seat = 0; seat < k.seats; ++seat) {
+				k.exposed[seat] = def->seats[seat].shows_soldier;
+			}
+			k.damage = vehicle_damage_rule(*def);
+			k.box = sim::vehicles::chassis_box(**model);
+			k.material = def->material;
 			for (const core::gameplay::VehicleSeatDef &seat : def->seats) {
 				k.entry_radius = std::max(k.entry_radius, std::isfinite(seat.entry_radius) ? seat.entry_radius : 0.0f);
 			}
@@ -163,6 +203,11 @@ core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
 		sp.enabled = s.enabled;
 		sp.initial_spawn_delay = std::max(s.initial_spawn_delay, 0.0f);
 		sp.spawn_delay = std::max(s.spawn_delay, 0.0f);
+		sp.apply_damage_to_abandoned = s.apply_damage_to_abandoned;
+		sp.time_until_abandoned = std::max(s.time_until_abandoned, 0.0f);
+		sp.time_until_abandoned_is_destroyed = std::max(s.time_until_abandoned_is_destroyed, 0.0f);
+		sp.keep_alive_radius = std::max(s.keep_alive_radius, 0.0f);
+		sp.respawn_range = std::max(s.respawn_range, 0.0f);
 		out->spawners.push_back(sp);
 	}
 	return std::shared_ptr<const LevelVehicles>(std::move(out));

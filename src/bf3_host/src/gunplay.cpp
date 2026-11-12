@@ -492,6 +492,7 @@ struct Gunplay::Impl {
 	std::vector<sw::Projectile> flying;
 	std::unordered_map<uint64_t, size_t> landed;
 	sw::ProjectileStepOutput step_out;
+	std::span<const sim::vehicles::VehicleTarget> vehicle_targets;
 	sim::Tick step_tick = 0;
 	std::vector<sw::DamageEvent> tick_damage;
 	std::vector<net::DeathEvent> tick_deaths;
@@ -890,7 +891,8 @@ void Gunplay::step_projectiles(uint32_t p_tick, std::span<const sim::SoldierStat
 	}
 	m.rewind->begin_tick(p_tick, p_states, std::span<const uint8_t>(m.teams.data(), std::min(p_states.size(), m.teams.size())));
 	m.flying.assign(m.projectiles->live().begin(), m.projectiles->live().end());
-	m.projectiles->step(p_tick, *m.world, *m.rewind, m.step_out);
+	const sim::vehicles::JoinedTargets targets(*m.rewind, m.vehicle_targets);
+	m.projectiles->step(p_tick, *m.world, targets, m.step_out);
 	m.rewind->end_tick();
 	suppress(p_tick, p_states);
 	m.stats.budget_exhausted += m.step_out.budget_exhausted ? 1u : 0u;
@@ -909,6 +911,23 @@ void Gunplay::step_projectiles(uint32_t p_tick, std::span<const sim::SoldierStat
 
 void Gunplay::add_damage(std::span<const sw::DamageEvent> p_events) {
 	impl_->step_out.damage.insert(impl_->step_out.damage.end(), p_events.begin(), p_events.end());
+}
+
+void Gunplay::set_vehicle_targets(std::span<const sim::vehicles::VehicleTarget> p_targets) {
+	impl_->vehicle_targets = p_targets;
+}
+
+void Gunplay::take_damage_if(
+		const std::function<bool(const sw::DamageEvent &)> &p_take, std::vector<sw::DamageEvent> &r_taken) {
+	std::vector<sw::DamageEvent> &damage = impl_->step_out.damage;
+	const auto kept =
+			std::stable_partition(damage.begin(), damage.end(), [&](const sw::DamageEvent &e) { return !p_take(e); });
+	r_taken.insert(r_taken.end(), kept, damage.end());
+	damage.erase(kept, damage.end());
+}
+
+const sw::ProjectileStepOutput &Gunplay::step_output() const {
+	return impl_->step_out;
 }
 
 void Gunplay::apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states, CombatEventSink &r_sink) {

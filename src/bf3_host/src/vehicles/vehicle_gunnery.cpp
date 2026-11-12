@@ -1,5 +1,7 @@
 #include "vehicle_gunnery.h"
 
+#include "bf3/sim/vehicles/vehicle_targets.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -109,8 +111,13 @@ void VehicleGunnery::step(sim::Tick p_tick, const sim::CollisionWorld &p_world, 
 		return;
 	}
 	out_.clear();
+	vehicle_damage_.clear();
 	projectiles_->step(p_tick, p_world, p_targets, out_);
 	for (sw::DamageEvent e : out_.damage) {
+		if (e.target >= sim::vehicles::kVehicleTargetIdBase) {
+			vehicle_damage_.push_back(e);
+			continue;
+		}
 		e.def = sw::kNoWeapon;
 		r_damage.push_back(e);
 		++stats_.damage;
