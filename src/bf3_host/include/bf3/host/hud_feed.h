@@ -12,6 +12,7 @@
 #include "bf3/host/loadout.h"
 #include "bf3/host/presentation_events.h"
 #include "bf3/host/presentation_weapon.h"
+#include "bf3/host/presented_vehicle.h"
 #include "bf3/host/round_stats.h"
 #include "bf3/net/protocol.h"
 #include "bf3/net/weapons_wire.h"
@@ -88,6 +89,7 @@ core::ui::HudItem hud_item(const HudStatic &p_static, uint32_t p_item_id);
 void hud_text(core::ui::HudText &r_out, std::string_view p_text);
 
 struct KitTable;
+struct LevelVehicles;
 
 struct HudKillCardSource {
 	bool killer_seen = false;
@@ -135,6 +137,8 @@ struct HudFeedInput {
 	bool conquest_valid = false;
 	net::ConquestState conquest;
 	const sim::logic::ConquestParams *conquest_params = nullptr;
+	std::span<const PresentedVehicle> vehicles;
+	const LevelVehicles *level_vehicles = nullptr;
 };
 
 struct HudFeedState {
@@ -213,6 +217,8 @@ core::ui::HudSquadOrder hud_squad_order(net::SquadOrderKind p_kind);
 
 std::optional<net::SquadOrder> own_squad_order(std::span<const std::array<net::SquadOrder, net::kMaxSquads>> p_orders,
 		std::span<const net::PlayerRow> p_players, uint8_t p_own_slot);
+
+core::ui::HudVehicle hud_vehicle(const HudFeedInput &p_input);
 
 void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_drained, const HudStatic &p_static, HudTdmFeedState &r_state,
 		core::ui::HudModel &r_model);

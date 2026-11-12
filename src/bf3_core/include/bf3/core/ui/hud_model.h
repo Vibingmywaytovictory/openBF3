@@ -264,6 +264,29 @@ struct HudCombatArea {
 	int32_t seconds_left = 0;
 };
 
+inline constexpr size_t kHudMaxPassengers = 6;
+
+enum class HudPassengerSeat : int32_t { Driver = 0, Turret = 1, Idle = 2 };
+
+struct HudPassenger {
+	HudPlayerName name{};
+	int32_t team_state = 0;
+	bool is_player = false;
+	HudPassengerSeat seat = HudPassengerSeat::Idle;
+};
+
+struct HudPassengerList {
+	uint8_t count = 0;
+	std::array<HudPassenger, kHudMaxPassengers> passengers{};
+};
+
+struct HudVehicle {
+	bool in_vehicle = false;
+	float health = 0.0f;
+	bool damage_state_disabled = false;
+	HudPassengerList passenger_list{};
+};
+
 struct HudTickets {
 	int32_t friendly_team_tickets = 0;
 	int32_t enemy_team_tickets = 0;
@@ -616,6 +639,7 @@ struct HudModel {
 	HudCommoRose commo_rose;
 	HudCombatArea combat_area;
 	std::array<float, kHudMaxCapturePoints> capture_point_y{};
+	HudVehicle vehicle;
 };
 static_assert(std::is_trivially_copyable_v<HudModel>);
 
@@ -1162,6 +1186,88 @@ inline constexpr HudBinding kHudBindings[] = {
 	{ "UserComponentData", "AllowIdleMovie", HudBindKind::Unused, HudWave::None, "" },
 	{ "UserComponentData", "ShowXPack1Obsolete", HudBindKind::Unused, HudWave::None, "" },
 	{ "UserComponentData", "UserGeneratedContentEnabled", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Entries", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Status", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "ComponentRotations", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "DamageDirection", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "LockAmount", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Name", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "TaggedVehicles", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "ComponentYawRotations", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "ComponentPitchRotations", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "CriticalHealth", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Velocity", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "CompassAngle", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Locked", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "BankAngle", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "RocketMarker", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "PitchAngle", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "YawAngle", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "RadioAltitude", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "SeaLevel", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "SeaLevelAltitude", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Thrust", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "GForce", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "SkidSlip", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "ClimbRate", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "PassengerList", HudBindKind::Model, HudWave::M4, "passenger_list" },
+	{ "UIVehicleCompData", "LongitudeString", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "LatitudeString", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "LaserTargetAvailable", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Time", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "InVehicle", HudBindKind::Model, HudWave::M4, "in_vehicle" },
+	{ "UIVehicleCompData", "Health", HudBindKind::Model, HudWave::M4, "health" },
+	{ "UIVehicleCompData", "Damage", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "RangeMeter", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Throttle", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Id", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Stance", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "CameraIndex", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Mach", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "HorizonAngle", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "VelocityVectorX", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "VelocityVectorY", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "PredictedSightX", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "PredictedSightY", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Entry1Rotation", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Entry2Rotation", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Entry3Rotation", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Entry4Rotation", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "ActiveWeaponName", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "PrimaryWeaponPitchAngle", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "ShortName", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "DamageStateDisabled", HudBindKind::Model, HudWave::M4, "damage_state_disabled" },
+	{ "UIVehicleCompData", "DamageStateCritical", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Entry1RotationInverted", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Entry2RotationInverted", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Entry3RotationInverted", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "Entry4RotationInverted", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "ZoomState", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "FlirState", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "SecondaryWeaponPitchAngle", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "GPSLatitudePosition", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "GPSLatitudeDegree", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "GPSLatitudeMinute", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "GPSLatitudeSecond", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "GPSLongitudePosition", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "GPSLongitudeDegree", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "GPSLongitudeMinute", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "GPSLongitudeSecond", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "GunnerDirectionAngularMaxYaw", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "GunnerDirectionAngularMinYaw", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "GunnerDirectionAngularMaxPitch", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "GunnerDirectionAngularMinPitch", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "MissileStatus", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "GunnerDirectionPitchPercent", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "GunnerDirectionYawPercent", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "GroundSpeed", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "AttackAngle", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "RadioAltitudeDivByTen", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "SealevelAltitudeDivByTen", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "BusyState", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "ShowSoldierCrossHair", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "IsSinglePlayer", HudBindKind::Unused, HudWave::None, "" },
+	{ "UIVehicleCompData", "IsInVehicleWeaponSeat", HudBindKind::Unused, HudWave::None, "" },
 };
 
 inline constexpr std::span<const HudBinding> hud_bindings() {
@@ -1190,6 +1296,7 @@ inline constexpr std::string_view kHudBoundComponents[] = {
 	"UIIngameMenuCompData",
 	"UIPopupCompData",
 	"UserComponentData",
+	"UIVehicleCompData",
 };
 
 constexpr size_t hud_binding_count(std::string_view p_component) {

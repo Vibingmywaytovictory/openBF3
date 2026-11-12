@@ -1621,6 +1621,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		in.own_slot = g.own_slot;
 		in.vehicles = g.vehicles.get();
 		in.own_vm = g.own_viewmodel();
+		in.hud = g.native_hud;
 		in.camera = cameras_.first_person();
 		in.camera_counter = g.vehicle_camera;
 		in.deploy = [this] {

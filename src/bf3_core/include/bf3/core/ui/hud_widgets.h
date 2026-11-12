@@ -167,6 +167,7 @@ std::string hud_eor_distance(float p_metres);
 int32_t hud_eor_seconds_left(float p_seconds);
 std::vector<As2Value> hud_scoreboard_rows(const HudModel &p_model, const HudPlayerList &p_list);
 As2Value hud_objective_status(const HudCapturePointList &p_points);
+As2Value hud_passenger_list(const HudPassengerList &p_list);
 
 struct HudFlagIcon {
 	HudIconChoice icon;

@@ -15,6 +15,7 @@
 #include "bf3/host/client_session.h"
 #include "bf3/host/hud_feed.h"
 #include "bf3/host/kits.h"
+#include "bf3/host/level_vehicles.h"
 #include "bf3/host/presentation_events.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/weapons/sim_time.h"
@@ -1501,6 +1502,85 @@ TEST_CASE("the loadout screens: kit and customization from the catalog and the o
 	row("unit.loadout_screens", state.bad_inputs == 1 && c.kit_primary_weapon.item_id == 1001,
 			"kit, customization grids and accessories from a 8-item catalog, a bad stored choice falls back to the "
 			"defaults, 5 menu entries");
+}
+
+TEST_CASE("vehicle: a seated soldier's vehicle health in percent, its disabled state and one passenger row per seat "
+		  "(own and squad rows squad, other mates friend, empty seats neutral; the driver seat Driver, a weapon seat "
+		  "Turret, the rest Idle); on foot or dead nothing") {
+	const host::HudStatic st = make_static();
+	std::vector<net::PlayerRow> rows{ player(1, 2, "Me"), player(2, 2, "Mate"), player(3, 2, "Stranger") };
+	rows[0].squad = 4;
+	rows[1].squad = 4;
+	rows[2].squad = 7;
+	host::LevelVehicles level;
+	level.kinds.resize(1);
+	level.kinds[0].seat_defs.resize(4);
+	level.kinds[0].seat_defs[1].weapons = { 0 };
+	level.spawners.resize(3);
+	level.spawners[2].kind = 0;
+	std::vector<host::PresentedVehicle> vehicles(2);
+	vehicles[0].spawner = 1;
+	vehicles[0].seat_count = 2;
+	vehicles[0].occupants.fill(net::kNoVehicleOccupant);
+	vehicles[1].spawner = 2;
+	vehicles[1].seat_count = 4;
+	vehicles[1].occupants.fill(net::kNoVehicleOccupant);
+	vehicles[1].occupants[0] = 2;
+	vehicles[1].occupants[1] = 1;
+	vehicles[1].occupants[3] = 3;
+	vehicles[1].health = 0.4372f;
+	vehicles[1].condition = bf3::sim::vehicles::VehicleCondition::Disabled;
+	host::HudFeedInput in;
+	in.tdm = true;
+	in.match_valid = true;
+	in.match.phase = net::MatchPhase::InRound;
+	in.own_slot = 1;
+	in.own_team = 2;
+	in.alive = true;
+	in.players = rows;
+	in.vehicles = vehicles;
+	in.level_vehicles = &level;
+	host::HudTdmFeedState state;
+	ui::HudModel m;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	const ui::HudVehicle &v = m.vehicle;
+	CHECK(v.in_vehicle);
+	CHECK(v.health == doctest::Approx(43.72f));
+	CHECK(v.damage_state_disabled);
+	REQUIRE(v.passenger_list.count == 4);
+	const auto &p = v.passenger_list.passengers;
+	CHECK(name_of(p[0].name) == "Mate");
+	CHECK(p[0].team_state == 0);
+	CHECK_FALSE(p[0].is_player);
+	CHECK(p[0].seat == ui::HudPassengerSeat::Driver);
+	CHECK(name_of(p[1].name) == "Me");
+	CHECK(p[1].team_state == 0);
+	CHECK(p[1].is_player);
+	CHECK(p[1].seat == ui::HudPassengerSeat::Turret);
+	CHECK(name_of(p[2].name).empty());
+	CHECK(p[2].team_state == 2);
+	CHECK(p[2].seat == ui::HudPassengerSeat::Idle);
+	CHECK(name_of(p[3].name) == "Stranger");
+	CHECK(p[3].team_state == 1);
+	const ui::As2Value list = ui::hud_passenger_list(v.passenger_list);
+	REQUIRE(list.size() == 4);
+	CHECK(list.at(1).field("Name").to_string() == "Me");
+	CHECK(list.at(1).field("isPlayer").truthy());
+	CHECK(list.at(1).field("seat").to_number() == 1.0);
+	CHECK(list.at(3).field("teamState").to_number() == 1.0);
+	CHECK_FALSE(list.at(4).defined());
+
+	vehicles[1].condition = bf3::sim::vehicles::VehicleCondition::Healthy;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK_FALSE(m.vehicle.damage_state_disabled);
+	vehicles[1].occupants[1] = net::kNoVehicleOccupant;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK_FALSE(m.vehicle.in_vehicle);
+	CHECK(m.vehicle.passenger_list.count == 0);
+	vehicles[1].occupants[1] = 1;
+	in.alive = false;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK_FALSE(m.vehicle.in_vehicle);
 }
 
 TEST_CASE("hostile inputs are skipped or clamped and counted") {

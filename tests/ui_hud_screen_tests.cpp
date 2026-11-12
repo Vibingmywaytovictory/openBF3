@@ -470,6 +470,12 @@ TEST_SUITE("ui-hud-screen-unit") {
 			hidden += visible(*ctl, alive, hardcore) ? 0u : 1u;
 		}
 		CHECK(hidden == classes.size() * 5);
+		HudModel seated = moment_m02();
+		seated.vehicle.in_vehicle = true;
+		for (const char *c : classes) {
+			const std::unique_ptr<HudWidgetController> ctl = make_hud_widget_controller(c);
+			CHECK_MESSAGE(visible(*ctl, seated, test_client()) == (std::string_view(c) == "Widget.Hud.Minimap"), c);
+		}
 		row("soldier_visible",
 				std::to_string(hidden) +
 						" of 15 hidden binds: menu, kill card, spawn screen, end of round, hardcore on 3 widgets");
@@ -1523,6 +1529,88 @@ TEST_SUITE("ui-hud-screen") {
 		REQUIRE(dynamic_cast<HudMessageApi *>(t.hud->controller("instance1.HudMessage_00")) != nullptr);
 		CHECK(dynamic_cast<HudMessageApi *>(t.hud->controller("instance1.HudMessage_00"))->rows() == 0);
 		row("hidden", "hit level 1 -> frame index 1, latency hidden, 4 data-driven widgets hidden until their data, 5 HudMessage lists shown empty, ScoreAggregator on hide");
+	}
+
+	TEST_CASE("hud screen: VehicleHealth and PassangerList show while seated: the health percent, its meter and the "
+			  "disabled loop, one row per seat with its name, label frame and seat icon") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudModel m = moment_m02();
+		Screen s = initialized(*r, kHudMpScreenPartition, m);
+		const std::string vh = "instance1.VehicleHealth_01";
+		const std::string holder = vh + ".container.vhHolder";
+		const std::string pl = "instance1.PassangerList_01";
+		CHECK_FALSE(s.at(vh).visible);
+		CHECK_FALSE(s.at(pl).visible);
+		CHECK(s.at("instance1.Health_01").visible);
+		CHECK(s.at("instance1.Ammo_01").visible);
+		m.vehicle.in_vehicle = true;
+		m.vehicle.health = 43.6f;
+		HudPassengerList &list = m.vehicle.passenger_list;
+		list.count = 3;
+		const auto name = [](HudPassenger &r_p, std::string_view p_name) {
+			std::copy_n(p_name.data(), p_name.size(), r_p.name.data());
+		};
+		name(list.passengers[0], "Driver One");
+		list.passengers[0].team_state = 1;
+		list.passengers[0].seat = HudPassengerSeat::Driver;
+		name(list.passengers[1], "Me");
+		list.passengers[1].team_state = 0;
+		list.passengers[1].is_player = true;
+		list.passengers[1].seat = HudPassengerSeat::Turret;
+		list.passengers[2].team_state = 2;
+		list.passengers[2].seat = HudPassengerSeat::Idle;
+		s.hud->refresh(m);
+		CHECK(s.at(vh).visible);
+		CHECK(s.at(pl).visible);
+		CHECK_FALSE(s.at("instance1.Health_01").visible);
+		CHECK_FALSE(s.at("instance1.Ammo_01").visible);
+		CHECK(s.has_tilt(vh, -15.0f, 15.0f));
+		CHECK(s.renderer(vh) == "t2");
+		CHECK(s.at(holder + ".healthtxt.txtDisplay").text == "44");
+		const SwfSceneNode &bar = s.at(holder + ".meter.meter");
+		CHECK(s.clip(holder + ".meter.meter").xscale() == doctest::Approx(44.0f));
+		CHECK(s.at(holder + ".meter.rightEdge").matrix.tx ==
+				doctest::Approx(bar.matrix.tx + s.clip(holder + ".meter.meter").width()));
+		CHECK(s.at(holder + ".meter.meter").frame == 0);
+		for (size_t i = 0; i < 6; ++i) {
+			CHECK(s.at(pl + ".passanger_" + std::to_string(i)).visible == (i < 3));
+		}
+		CHECK(s.at(pl + ".passanger_0.label.txt").text == "Driver One");
+		CHECK(s.at(pl + ".passanger_0.label").frame == s.label(pl + ".passanger_0.label", "friend"));
+		CHECK(s.at(pl + ".passanger_0.seatIcon").frame == s.label(pl + ".passanger_0.seatIcon", "friendDriver"));
+		CHECK(s.at(pl + ".passanger_1.label.txtBg").text == "Me");
+		CHECK(s.at(pl + ".passanger_1.label").frame == s.label(pl + ".passanger_1.label", "bold"));
+		CHECK(s.at(pl + ".passanger_1.seatIcon").frame == s.label(pl + ".passanger_1.seatIcon", "squadTurret"));
+		CHECK(s.at(pl + ".passanger_2.label.txt").text.empty());
+		CHECK(s.at(pl + ".passanger_2.seatIcon").frame == s.label(pl + ".passanger_2.seatIcon", "neutralIdle"));
+		m.vehicle.damage_state_disabled = true;
+		m.vehicle.health = 0.0f;
+		s.hud->refresh(m);
+		CHECK(s.at(holder + ".meter.meter").frame == s.label(holder + ".meter.meter", "loop"));
+		CHECK(s.at(holder + ".healthtxt.txtDisplay").text == "0");
+		CHECK_FALSE(s.at(holder + ".meter.leftEdge").visible);
+		CHECK_FALSE(s.at(holder + ".meter.rightEdge").visible);
+		m.vehicle = HudVehicle();
+		s.hud->refresh(m);
+		CHECK_FALSE(s.at(vh).visible);
+		CHECK_FALSE(s.at(pl).visible);
+		CHECK(s.at("instance1.Health_01").visible);
+		CHECK(s.hud->stats().as2.missing_paths == 0);
+		CHECK_MESSAGE(s.hud->stats().as2.failed_ops == 0, s.hud->stats().as2.last_failure);
+		HudClientState hardcore = test_client();
+		hardcore.hardcore = true;
+		HudModel seated = moment_m02();
+		Screen h = initialized(*r, kHudMpScreenPartition, seated, hardcore);
+		seated.vehicle.in_vehicle = true;
+		h.hud->refresh(seated);
+		CHECK_FALSE(h.at(vh).visible);
+		CHECK(h.at(pl).visible);
+		row("vehicle",
+				"43.6 -> \"44\" and a 44 % meter, disabled loop, 3 of 6 seat rows: friendDriver, squadTurret, "
+				"neutralIdle");
 	}
 
 	TEST_CASE("hud screen: SquadList") {

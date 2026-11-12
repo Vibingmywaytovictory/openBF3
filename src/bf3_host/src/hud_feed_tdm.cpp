@@ -102,6 +102,7 @@ void fill_hud_tdm(const HudFeedInput &p_input, std::span<const PresentEvent> p_d
 	tdm_feed::feed_loadout(f);
 	tdm_feed::feed_round_end(f);
 	tdm_feed::feed_menu(f);
+	r_model.vehicle = hud_vehicle(p_input);
 }
 
 }

@@ -13,6 +13,7 @@ class Camera3D;
 namespace bf3::godot_side {
 
 class Bf3LevelSession;
+class Bf3NativeHud;
 class Bf3Viewmodel;
 class GameVehicles;
 
@@ -22,6 +23,7 @@ struct VehicleDriveInputs {
 	uint8_t own_slot = 0xFF;
 	const GameVehicles *vehicles = nullptr;
 	const Bf3Viewmodel *own_vm = nullptr;
+	Bf3NativeHud *hud = nullptr;
 	const godot::Camera3D *camera = nullptr;
 	uint32_t camera_counter = 0;
 	std::function<void()> deploy;
@@ -54,6 +56,7 @@ private:
 	void enter(Phase p_phase);
 	bool fail(const std::string &p_name, const std::string &p_detail);
 	void shoot(const VehicleDriveInputs &p_in, const char *p_name);
+	void hud_row(const VehicleDriveInputs &p_in, uint8_t p_seat);
 
 	std::string shots_;
 	Phase phase_ = Phase::WaitScreen;

@@ -42,7 +42,8 @@ public:
 
 	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const override {
 		r_out.push_back({ "Health", As2Value::of(double(p_model.soldier.health)) });
-		r_out.push_back({ "Visible", As2Value::of(hud_soldier_widgets_visible(p_model, p_client)) });
+		r_out.push_back({ "Visible",
+				As2Value::of(hud_soldier_widgets_visible(p_model, p_client) && !p_model.vehicle.in_vehicle) });
 	}
 
 private:

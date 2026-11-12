@@ -2,6 +2,7 @@
 
 #include "game_vehicles.h"
 #include "level_session.h"
+#include "native_hud.h"
 #include "viewmodel.h"
 
 #include "bf3/core/util/format.h"
@@ -54,6 +55,30 @@ const host::PresentedVehicle *presented(const host::PresentationFrame &p_frame, 
 	return nullptr;
 }
 
+}
+
+void VehicleDriveRun::hud_row(const VehicleDriveInputs &p_in, uint8_t p_seat) {
+	if (p_in.hud == nullptr) {
+		row("hud", false, "no native HUD");
+		return;
+	}
+	const core::ui::HudVehicle &v = p_in.hud->model().vehicle;
+	const auto shown = [&](const char *p_widget) {
+		const std::optional<NativeHudClipState> s = p_in.hud->clip_state(0, std::string("instance1.") + p_widget);
+		return s && s->visible;
+	};
+	const core::ui::HudPassenger *own =
+			p_seat < v.passenger_list.count ? &v.passenger_list.passengers[p_seat] : nullptr;
+	const bool vehicle_health = shown("VehicleHealth_01"), passengers = shown("PassangerList_01");
+	const bool health = shown("Health_01"), ammo = shown("Ammo_01");
+	row("hud",
+			v.in_vehicle && v.health == 100.0f && !v.damage_state_disabled && own != nullptr && own->is_player &&
+					own->seat == core::ui::HudPassengerSeat::Driver && vehicle_health && passengers && !health && !ammo,
+			fmt("vehicle health %.0f %%, %u passenger rows, own row %s; VehicleHealth %s, PassangerList %s, Health %s, "
+				"Ammo %s",
+					double(v.health), unsigned(v.passenger_list.count),
+					own != nullptr && own->is_player ? "bold" : "missing", vehicle_health ? "shown" : "hidden",
+					passengers ? "shown" : "hidden", health ? "shown" : "hidden", ammo ? "shown" : "hidden"));
 }
 
 void VehicleDriveRun::row(const std::string &p_name, bool p_pass, const std::string &p_detail) {
@@ -200,6 +225,7 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 						"drawn see-through",
 							double(inside), p_in.own_vm != nullptr && p_in.own_vm->is_visible() ? "shown" : "hidden",
 							mapper.weapons_allowed() ? "live" : "off", unsigned(glass)));
+			hud_row(p_in, seat->seat);
 			shoot(p_in, "vehicle_1p");
 			const host::PresentedVehicle *v = presented(f, spawner_);
 			if (v == nullptr) {

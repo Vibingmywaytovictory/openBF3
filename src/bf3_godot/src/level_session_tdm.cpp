@@ -887,6 +887,8 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		in.conquest = f.conquest;
 		in.conquest_params =
 				level != nullptr && level->logic_natives != nullptr ? level->logic_natives->conquest.get() : nullptr;
+		in.vehicles = std::span<const host::PresentedVehicle>(f.vehicles.data(), f.vehicle_count);
+		in.level_vehicles = level != nullptr ? level->vehicles.get() : nullptr;
 		host::fill_hud_tdm(in, r_game.events, r_game.hud_static, m.tdm_state, r_game.hud_model);
 		if (!m.options.deploy_screen) {
 			r_game.hud_model.spawn_screen.visible = false;

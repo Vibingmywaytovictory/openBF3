@@ -182,6 +182,7 @@ target_sources(bf3_host PRIVATE
     src/hud_feed_loadout.cpp
     src/hud_feed_menu.cpp
     src/hud_feed_squad.cpp
+    src/hud_feed_vehicle.cpp
     include/bf3/host/round_stats.h
     src/round_stats.cpp
 )
