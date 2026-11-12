@@ -320,6 +320,7 @@ bf3::host::InputSample InputMapper::sample() const {
 		s.move_forward = float(int(held(InputAction::Forward)) - int(held(InputAction::Back)));
 		s.move_right = float(int(held(InputAction::Right)) - int(held(InputAction::Left)));
 		s.held_buttons = held(InputAction::Sprint) ? sim::buttons::kSprint : 0u;
+		vehicle_axes(s);
 	}
 	weapon_sample(s);
 	vehicle_sample(s);

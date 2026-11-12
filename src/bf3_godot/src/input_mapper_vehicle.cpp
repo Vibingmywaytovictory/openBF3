@@ -26,6 +26,7 @@ struct VehicleActionKey {
 
 constexpr VehicleActionKey kVehicleActions[] = {
 	{ InputMapper::VehicleAction::Use, "bf3_use", KEY_E },
+	{ InputMapper::VehicleAction::Exit, "bf3_vehicle_exit", KEY_E },
 	{ InputMapper::VehicleAction::Seat1, "bf3_seat_1", KEY_F1 },
 	{ InputMapper::VehicleAction::Seat2, "bf3_seat_2", KEY_F2 },
 	{ InputMapper::VehicleAction::Seat3, "bf3_seat_3", KEY_F3 },
@@ -33,8 +34,20 @@ constexpr VehicleActionKey kVehicleActions[] = {
 	{ InputMapper::VehicleAction::Seat5, "bf3_seat_5", KEY_F5 },
 	{ InputMapper::VehicleAction::Seat6, "bf3_seat_6", KEY_F6 },
 	{ InputMapper::VehicleAction::Camera, "bf3_vehicle_camera", KEY_C },
+	{ InputMapper::VehicleAction::Throttle, "bf3_vehicle_throttle", KEY_W },
+	{ InputMapper::VehicleAction::Brake, "bf3_vehicle_brake", KEY_S },
+	{ InputMapper::VehicleAction::SteerLeft, "bf3_vehicle_steer_left", KEY_A },
+	{ InputMapper::VehicleAction::SteerRight, "bf3_vehicle_steer_right", KEY_D },
 };
 static_assert(sizeof(kVehicleActions) / sizeof(kVehicleActions[0]) == InputMapper::kVehicleActionCount);
+static_assert([] {
+	for (size_t i = 0; i < InputMapper::kVehicleActionCount; ++i) {
+		if (size_t(kVehicleActions[i].action) != i) {
+			return false;
+		}
+	}
+	return true;
+}());
 static_assert(size_t(InputMapper::VehicleAction::Seat6) - size_t(InputMapper::VehicleAction::Seat1) + 1 ==
 		size_t(sim::vehicles::kSeatKeys));
 
@@ -130,7 +143,7 @@ void InputMapper::vehicle_sample(bf3::host::InputSample &r_sample) const {
 	if (free_camera_) {
 		return;
 	}
-	if (held(VehicleAction::Use)) {
+	if (held(vehicle_.seated ? VehicleAction::Exit : VehicleAction::Use)) {
 		r_sample.held_buttons |= sim::buttons::kUse;
 	}
 	std::optional<uint8_t> seat;
@@ -140,9 +153,13 @@ void InputMapper::vehicle_sample(bf3::host::InputSample &r_sample) const {
 		}
 	}
 	r_sample.held_buttons = sim::vehicles::with_seat_request(r_sample.held_buttons, seat);
-	if (vehicle_.seated && held(InputAction::Jump)) {
-		r_sample.held_buttons |= sim::vehicles::seat_buttons::kHandbrake;
-	}
 }
 
+void InputMapper::vehicle_axes(bf3::host::InputSample &r_sample) const {
+	if (!vehicle_.seated) {
+		return;
+	}
+	r_sample.move_forward = float(int(held(VehicleAction::Throttle)) - int(held(VehicleAction::Brake)));
+	r_sample.move_right = float(int(held(VehicleAction::SteerRight)) - int(held(VehicleAction::SteerLeft)));
+}
 }

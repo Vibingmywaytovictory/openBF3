@@ -42,6 +42,19 @@ inline constexpr ActionConcept kActionConcepts[] = {
 	{ "bf3_fire_mode", "infantry", "ConceptCycleFireMode", false },
 	{ "bf3_weapon_light", "infantry", "ConceptToggleWeaponLight", false },
 	{ "bf3_scoreboard", "default", "ConceptScoreboard", false },
+	{ "bf3_use", "infantry", "ConceptChangeVehicle", false },
+	{ "bf3_vehicle_exit", "vehicle", "ConceptChangeVehicle", false },
+	{ "bf3_seat_1", "vehicle", "ConceptSelectPosition1", false },
+	{ "bf3_seat_2", "vehicle", "ConceptSelectPosition2", false },
+	{ "bf3_seat_3", "vehicle", "ConceptSelectPosition3", false },
+	{ "bf3_seat_4", "vehicle", "ConceptSelectPosition4", false },
+	{ "bf3_seat_5", "vehicle", "ConceptSelectPosition5", false },
+	{ "bf3_seat_6", "vehicle", "ConceptSelectPosition6", false },
+	{ "bf3_vehicle_camera", "vehicle", "ConceptToggleCamera", false },
+	{ "bf3_vehicle_throttle", "vehicle", "ConceptMoveFB", false },
+	{ "bf3_vehicle_brake", "vehicle", "ConceptBrake", false },
+	{ "bf3_vehicle_steer_left", "vehicle", "ConceptYaw", true },
+	{ "bf3_vehicle_steer_right", "vehicle", "ConceptYaw", false },
 };
 
 const ActionConcept *action_concept(std::string_view p_action);

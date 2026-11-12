@@ -235,7 +235,22 @@ private:
 	} tdm_;
 
 public:
-	enum class VehicleAction : uint8_t { Use = 0, Seat1, Seat2, Seat3, Seat4, Seat5, Seat6, Camera, Count };
+	enum class VehicleAction : uint8_t {
+		Use = 0,
+		Exit,
+		Seat1,
+		Seat2,
+		Seat3,
+		Seat4,
+		Seat5,
+		Seat6,
+		Camera,
+		Throttle,
+		Brake,
+		SteerLeft,
+		SteerRight,
+		Count
+	};
 	static constexpr size_t kVehicleActionCount = size_t(VehicleAction::Count);
 	static const char *vehicle_action_name(VehicleAction p_action);
 	void enable_vehicles();
@@ -250,6 +265,7 @@ public:
 private:
 	void vehicle_poll();
 	void vehicle_sample(bf3::host::InputSample &r_sample) const;
+	void vehicle_axes(bf3::host::InputSample &r_sample) const;
 	struct VehicleKeys {
 		bool installed = false;
 		bool seated = false;

@@ -211,7 +211,7 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			first_wheel_angle_ = v->wheel_count > 0 ? v->wheel_angle[0] : 0.0f;
 			last_wheel_ = view && !view->wheels.empty() ? view->wheels[0] : Transform3D();
 			wheel_frames_ = wheel_turns_ = 0;
-			mapper.script_hold(InputAction::Forward, true);
+			mapper.script_hold(InputMapper::VehicleAction::Throttle, true);
 			enter(Phase::Drive);
 			return false;
 		}
@@ -263,8 +263,8 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			row("third_person", p_in.camera_counter % 2 == 1 && off.length() > 3.0f && behind > 0.0f,
 					fmt("camera %.2f m from the body, %.2f m behind it", double(off.length()), double(behind)));
 			shoot(p_in, "vehicle_3p");
-			mapper.script_hold(InputAction::Forward, false);
-			mapper.script_hold(InputAction::Back, true);
+			mapper.script_hold(InputMapper::VehicleAction::Throttle, false);
+			mapper.script_hold(InputMapper::VehicleAction::Brake, true);
 			enter(Phase::Stop);
 			return false;
 		}
@@ -280,7 +280,7 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 															double(3.6f * forward), kBrakeTimeout))
 										  : false;
 			}
-			mapper.script_hold(InputAction::Back, false);
+			mapper.script_hold(InputMapper::VehicleAction::Brake, false);
 			row("stop", true, fmt("stopped in %.2f s", t_));
 			mapper.script_hold(InputMapper::VehicleAction::Seat2, true);
 			enter(Phase::Seat);
@@ -296,12 +296,12 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			}
 			mapper.script_hold(InputMapper::VehicleAction::Seat2, false);
 			row("seat", true, "the second seat key moved the driver to seat 2");
-			mapper.script_hold(InputMapper::VehicleAction::Use, true);
+			mapper.script_hold(InputMapper::VehicleAction::Exit, true);
 			enter(Phase::Exit);
 			return false;
 		case Phase::Exit: {
 			if (t_ >= kKeyHold) {
-				mapper.script_hold(InputMapper::VehicleAction::Use, false);
+				mapper.script_hold(InputMapper::VehicleAction::Exit, false);
 			}
 			if (seat || t_ < 1.0) {
 				return t_ > kSeatTimeout + 1.0 ? fail("exit", "the use key did not take the soldier out") : false;

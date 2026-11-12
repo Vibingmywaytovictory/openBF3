@@ -913,7 +913,10 @@ TEST_SUITE("ui-options") {
 				"bf3_jump=IDK_Space bf3_crouch=IDK_X bf3_crouch_hold=IDK_LeftCtrl bf3_prone=IDK_Z "
 				"bf3_fire=IDB_Button_0 bf3_ads=IDB_Button_1 bf3_reload=IDK_R bf3_primary=IDK_1 bf3_sidearm=IDK_2 "
 				"bf3_gadget=IDK_3 bf3_grenade=IDK_G bf3_knife=IDK_F bf3_fire_mode=IDK_V bf3_weapon_light=IDK_T "
-				"bf3_scoreboard=IDK_Tab ");
+				"bf3_scoreboard=IDK_Tab bf3_use=IDK_E bf3_vehicle_exit=IDK_E bf3_seat_1=IDK_F1 bf3_seat_2=IDK_F2 "
+				"bf3_seat_3=IDK_F3 bf3_seat_4=IDK_F4 bf3_seat_5=IDK_F5 bf3_seat_6=IDK_F6 bf3_vehicle_camera=IDK_C "
+				"bf3_vehicle_throttle=IDK_W bf3_vehicle_brake=IDK_S bf3_vehicle_steer_left=IDK_A "
+				"bf3_vehicle_steer_right=IDK_D ");
 		Result<OptionsCatalog> c = read_options_catalog(*l->lib);
 		REQUIRE(c.ok());
 		for (std::string_view id : { kVolumeOption, kMusicVolumeOption, kDialogueVolumeOption, kMouseSensitivityOption,
