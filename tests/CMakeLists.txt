@@ -1370,7 +1370,7 @@ openbf3_proc_row(net.procs.master test_net_procs LABEL timing TIMEOUT 900 ARGS -
 set_tests_properties(net.procs.master PROPERTIES RUN_SERIAL TRUE)
 openbf3_proc_row(net.procs.bots_squads test_net_procs LABEL timing TIMEOUT 3600 ARGS --test-suite=net-procs-bots-squads)
 set_tests_properties(net.procs.bots_squads PROPERTIES RUN_SERIAL TRUE)
-openbf3_cost(net.procs.bots_squads 1 387)
+openbf3_cost(net.procs.bots_squads 1 373)
 openbf3_proc_row(net.procs.memory_server test_net_procs LABEL timing TIMEOUT 900 ARGS --test-suite=net-procs-memory-server)
 openbf3_proc_row(godot.memory_client test_net_procs LABEL window TIMEOUT 1200 ARGS --test-suite=godot-memory-client)
 set_tests_properties(net.procs.memory_server godot.memory_client PROPERTIES RUN_SERIAL TRUE)
