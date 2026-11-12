@@ -4282,12 +4282,15 @@ TEST_SUITE("host-vehicles-net") {
 
 		host::ClientVehicles seen;
 		auto frame = std::make_unique<host::PresentationFrame>();
+		const double render_delay_ticks =
+				double(host::ClientSessionConfig{}.interp_min_ms) / (1000.0 * double(sim::kTickSeconds));
 		const auto feed = [&] {
 			for (const host::OutDatagram &d : m->out) {
 				if (d.peer == watcher.peer() && net::peek_type(d.bytes) == net::MessageType::VehicleStates) {
 					seen.receive(d.bytes);
 				}
 			}
+			frame->render_ticks_at_publish = double(m->now()) - render_delay_ticks;
 			seen.publish(*frame);
 		};
 		const auto growler = [&]() -> const host::PresentedVehicle * {
@@ -4385,21 +4388,54 @@ TEST_SUITE("host-vehicles-net") {
 		CHECK(after->gear >= 2);
 		CHECK(after->occupants[0] == slot);
 		CHECK(after->tick + 4u >= m->now());
-		REQUIRE(after->previous_tick < after->tick);
-		const double mid_tick = 0.5 * double(after->previous_tick + after->tick);
+		REQUIRE(after->window_count >= 2);
+		const host::PresentedVehicleSample &early = after->window[after->window_count - 2];
+		const host::PresentedVehicleSample &late = after->window[after->window_count - 1];
+		REQUIRE(early.tick < late.tick);
+		const double mid_tick = 0.5 * double(early.tick + late.tick);
 		const host::PresentedVehiclePose mid = host::vehicle_pose_at(*after, mid_tick);
+		CHECK(mid.com_position[0] ==
+				doctest::Approx(0.5f * (early.pose.com_position[0] + late.pose.com_position[0])).epsilon(1e-4));
+		CHECK(host::vehicle_pose_at(*after, double(early.tick)).com_position[2] ==
+				doctest::Approx(early.pose.com_position[2]));
 		const host::PresentedVehiclePose ahead = host::vehicle_pose_at(*after, double(after->tick) + 100.0);
-		const float mid_x = 0.5f * (after->previous.com_position[0] + after->com_position[0]);
 		const float ahead_x = after->com_position[0] +
 				after->linear_velocity[0] * float(host::kVehicleExtrapolateTicks) * sim::kTickSeconds;
-		std::printf("vehicles: the watcher's pose at tick %.1f is %.3f m on x between %.3f and %.3f; past the newest "
-					"state it leads by %.3f m on x\n",
-				mid_tick, double(mid.com_position[0]), double(after->previous.com_position[0]),
-				double(after->com_position[0]), double(ahead.com_position[0] - after->com_position[0]));
-		CHECK(mid.com_position[0] == doctest::Approx(mid_x).epsilon(1e-4));
-		CHECK(host::vehicle_pose_at(*after, double(after->previous_tick)).com_position[2] ==
-				doctest::Approx(after->previous.com_position[2]));
 		CHECK(ahead.com_position[0] == doctest::Approx(ahead_x).epsilon(1e-4));
+		REQUIRE(after->wheel_count > 0);
+		CHECK(std::fabs(after->wheel_spin[0]) > 1.0f);
+		CHECK(ahead.wheel_angle[0] ==
+				doctest::Approx(after->wheel_angle[0] +
+						after->wheel_spin[0] * float(host::kVehicleExtrapolateTicks) * sim::kTickSeconds)
+						.epsilon(1e-4));
+		uint32_t still = 0, interpolated = 0;
+		float drawn_before = 0.0f;
+		for (uint32_t t = 0; t < 30; ++t) {
+			m->tick();
+			feed();
+			const host::PresentedVehicle *v = driven();
+			REQUIRE(v != nullptr);
+			const double render = frame->render_ticks_at_publish;
+			const host::PresentedVehiclePose pose = host::vehicle_pose_at(*v, render);
+			const float drawn = pose.com_position[0] * line[0] + pose.com_position[2] * line[1];
+			bool on_sample = std::fabs(render - double(v->tick)) < 1e-6;
+			for (uint8_t k = 0; k < v->window_count; ++k) {
+				on_sample = on_sample || std::fabs(render - double(v->window[k].tick)) < 1e-6;
+			}
+			interpolated +=
+					!on_sample && render < double(v->tick) && v->window_count > 0 && render > double(v->window[0].tick)
+					? 1u
+					: 0u;
+			if (t > 0 && std::fabs(drawn - drawn_before) < 1e-4f) {
+				++still;
+			}
+			drawn_before = drawn;
+		}
+		std::printf("vehicles: at the client's render time (%.1f ticks behind the server) the watcher drew the Growler "
+					"between two received states on %u of 30 ticks and left it still on %u of 29 steps\n",
+				render_delay_ticks, unsigned(interpolated), unsigned(still));
+		CHECK(still == 0u);
+		CHECK(interpolated >= 10u);
 		host::ClientStats stats;
 		seen.stats(stats);
 		CHECK(stats.vehicle_messages > 0);

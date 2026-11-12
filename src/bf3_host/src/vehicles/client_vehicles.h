@@ -19,7 +19,12 @@ public:
 	void stats(ClientStats &r_stats) const;
 
 private:
-	std::vector<PresentedVehicle> vehicles_;
+	struct Tracked {
+		PresentedVehicle newest;
+		std::vector<PresentedVehicleSample> history;
+	};
+
+	std::vector<Tracked> vehicles_;
 	sim::Tick newest_ = 0;
 	uint64_t messages_ = 0;
 	uint64_t bad_ = 0;

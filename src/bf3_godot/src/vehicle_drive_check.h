@@ -1,5 +1,7 @@
 #pragma once
 
+#include <godot_cpp/variant/transform3d.hpp>
+
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -61,6 +63,9 @@ private:
 	uint32_t request_id_ = 0;
 	float start_x_ = 0, start_z_ = 0, heading_x_ = 0, heading_z_ = 0;
 	float first_wheel_angle_ = 0;
+	godot::Transform3D last_wheel_;
+	uint32_t wheel_frames_ = 0;
+	uint32_t wheel_turns_ = 0;
 	uint32_t rows_ = 0;
 	uint32_t failures_ = 0;
 };

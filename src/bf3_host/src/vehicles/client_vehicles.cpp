@@ -16,16 +16,18 @@ PresentedVehicle present_vehicle(const net::VehicleWire &p_wire, sim::Tick p_tic
 	v.com_position = p_wire.state.body.com_position;
 	v.rotation = p_wire.state.body.rotation;
 	v.linear_velocity = p_wire.state.body.linear_velocity;
+	v.angular_velocity = p_wire.state.body.angular_velocity;
 	v.wheel_count = std::min<uint8_t>(p_wire.state.wheel_count, uint8_t(sim::kMaxVehicleWheels));
 	for (size_t i = 0; i < v.wheel_count; ++i) {
 		v.wheel_angle[i] = p_wire.state.wheels[i].angle;
+		v.wheel_spin[i] = p_wire.state.wheels[i].angular_velocity;
 		v.wheel_steer[i] = p_wire.state.wheels[i].steer_angle;
 		v.suspension_length[i] = p_wire.state.wheels[i].suspension_length;
 	}
 	v.engine_rpm = p_wire.state.driver.engine_rpm;
 	v.gear = int8_t(p_wire.state.driver.gearbox.gear);
-	v.previous_tick = p_tick;
-	v.previous = v.pose();
+	v.window_count = 1;
+	v.window[0] = PresentedVehicleSample{ p_tick, v.pose() };
 	return v;
 }
 
@@ -39,25 +41,38 @@ PresentedVehiclePose PresentedVehicle::pose() const {
 	return p;
 }
 
-PresentedVehicle follow_vehicle(const PresentedVehicle &p_shown, const PresentedVehicle &p_received) {
-	PresentedVehicle v = p_received;
-	if (p_shown.generation != p_received.generation) {
-		return v;
+void present_window(
+		PresentedVehicle &r_vehicle, std::span<const PresentedVehicleSample> p_history, double p_render_ticks) {
+	size_t first = 0;
+	while (first + 1 < p_history.size() && double(p_history[first + 1].tick) <= p_render_ticks) {
+		++first;
 	}
-	if (p_shown.tick < p_received.tick) {
-		v.previous_tick = p_shown.tick;
-		v.previous = p_shown.pose();
-	} else {
-		v.previous_tick = p_shown.previous_tick;
-		v.previous = p_shown.previous;
+	r_vehicle.window_count = 0;
+	for (size_t k = first; k < p_history.size() && r_vehicle.window_count < kVehicleWindow; ++k) {
+		r_vehicle.window[r_vehicle.window_count++] = p_history[k];
 	}
-	return v;
 }
 
 namespace {
 
 float lerp_angle(float p_a, float p_b, float p_t) {
 	return p_a + std::remainder(p_b - p_a, 6.28318530717958647692f) * p_t;
+}
+
+std::array<float, 4> turned(const std::array<float, 4> &p_q, const sim::Vec3 &p_omega, float p_seconds) {
+	const float h = 0.5f * p_seconds;
+	const float x = p_q[0], y = p_q[1], z = p_q[2], w = p_q[3];
+	const float wx = p_omega[0], wy = p_omega[1], wz = p_omega[2];
+	std::array<float, 4> out{ x + h * (w * wx + wy * z - wz * y), y + h * (w * wy + wz * x - wx * z),
+		z + h * (w * wz + wx * y - wy * x), w - h * (wx * x + wy * y + wz * z) };
+	const float n = std::sqrt(out[0] * out[0] + out[1] * out[1] + out[2] * out[2] + out[3] * out[3]);
+	if (!(n > 0.0f) || !std::isfinite(n)) {
+		return p_q;
+	}
+	for (float &c : out) {
+		c /= n;
+	}
+	return out;
 }
 
 std::array<float, 4> slerp(const std::array<float, 4> &p_a, std::array<float, 4> p_b, float p_t) {
@@ -109,25 +124,43 @@ PresentedVehiclePose vehicle_pose_at(const PresentedVehicle &p_vehicle, double p
 		for (size_t i = 0; i < 3; ++i) {
 			out.com_position[i] += p_vehicle.linear_velocity[i] * ahead;
 		}
+		out.rotation = turned(now.rotation, p_vehicle.angular_velocity, ahead);
+		for (size_t w = 0; w < p_vehicle.wheel_count; ++w) {
+			out.wheel_angle[w] += p_vehicle.wheel_spin[w] * ahead;
+		}
 		return out;
 	}
-	if (p_vehicle.previous_tick >= p_vehicle.tick || p_ticks <= double(p_vehicle.previous_tick)) {
-		return p_vehicle.previous_tick >= p_vehicle.tick ? now : p_vehicle.previous;
+	const size_t in_window = std::min<size_t>(p_vehicle.window_count, kVehicleWindow);
+	const bool newest_after = in_window == 0 || p_vehicle.window[in_window - 1].tick < p_vehicle.tick;
+	const size_t count = in_window + (newest_after ? 1u : 0u);
+	const auto tick_of = [&](size_t p_i) { return p_i < in_window ? p_vehicle.window[p_i].tick : p_vehicle.tick; };
+	const auto pose_of = [&](size_t p_i) -> const PresentedVehiclePose & {
+		return p_i < in_window ? p_vehicle.window[p_i].pose : now;
+	};
+	if (p_ticks <= double(tick_of(0))) {
+		return pose_of(0);
 	}
-	const float t =
-			float((p_ticks - double(p_vehicle.previous_tick)) / double(p_vehicle.tick - p_vehicle.previous_tick));
-	const PresentedVehiclePose &a = p_vehicle.previous;
-	PresentedVehiclePose out = now;
-	for (size_t i = 0; i < 3; ++i) {
-		out.com_position[i] = a.com_position[i] + (now.com_position[i] - a.com_position[i]) * t;
+	for (size_t i = 0; i + 1 < count; ++i) {
+		const sim::Tick t0 = tick_of(i), t1 = tick_of(i + 1);
+		if (p_ticks >= double(t1) || t1 <= t0) {
+			continue;
+		}
+		const float t = float((p_ticks - double(t0)) / double(t1 - t0));
+		const PresentedVehiclePose &a = pose_of(i);
+		const PresentedVehiclePose &b = pose_of(i + 1);
+		PresentedVehiclePose out = b;
+		for (size_t k = 0; k < 3; ++k) {
+			out.com_position[k] = a.com_position[k] + (b.com_position[k] - a.com_position[k]) * t;
+		}
+		out.rotation = slerp(a.rotation, b.rotation, t);
+		for (size_t w = 0; w < p_vehicle.wheel_count; ++w) {
+			out.wheel_angle[w] = lerp_angle(a.wheel_angle[w], b.wheel_angle[w], t);
+			out.wheel_steer[w] = a.wheel_steer[w] + (b.wheel_steer[w] - a.wheel_steer[w]) * t;
+			out.suspension_length[w] = a.suspension_length[w] + (b.suspension_length[w] - a.suspension_length[w]) * t;
+		}
+		return out;
 	}
-	out.rotation = slerp(a.rotation, now.rotation, t);
-	for (size_t w = 0; w < p_vehicle.wheel_count; ++w) {
-		out.wheel_angle[w] = lerp_angle(a.wheel_angle[w], now.wheel_angle[w], t);
-		out.wheel_steer[w] = a.wheel_steer[w] + (now.wheel_steer[w] - a.wheel_steer[w]) * t;
-		out.suspension_length[w] = a.suspension_length[w] + (now.suspension_length[w] - a.suspension_length[w]) * t;
-	}
-	return out;
+	return now;
 }
 
 void ClientVehicles::receive(std::span<const uint8_t> p_bytes) {
@@ -140,23 +173,41 @@ void ClientVehicles::receive(std::span<const uint8_t> p_bytes) {
 	newest_ = std::max(newest_, m->server_tick);
 	for (const net::VehicleWire &w : m->vehicles) {
 		auto at = std::find_if(
-				vehicles_.begin(), vehicles_.end(), [&](const PresentedVehicle &v) { return v.spawner == w.spawner; });
+				vehicles_.begin(), vehicles_.end(), [&](const Tracked &t) { return t.newest.spawner == w.spawner; });
 		if (at == vehicles_.end()) {
 			if (vehicles_.size() >= kMaxPresentedVehicles) {
 				++bad_;
 				continue;
 			}
-			vehicles_.push_back(present_vehicle(w, m->server_tick));
-		} else if (m->server_tick >= at->tick) {
-			*at = follow_vehicle(*at, present_vehicle(w, m->server_tick));
+			Tracked t;
+			t.newest = present_vehicle(w, m->server_tick);
+			t.history.push_back(t.newest.window[0]);
+			vehicles_.push_back(std::move(t));
+		} else if (m->server_tick >= at->newest.tick) {
+			const bool same_life = at->newest.generation == w.generation;
+			at->newest = present_vehicle(w, m->server_tick);
+			if (!same_life) {
+				at->history.clear();
+			}
+			if (!at->history.empty() && at->history.back().tick == m->server_tick) {
+				at->history.back() = at->newest.window[0];
+			} else {
+				at->history.push_back(at->newest.window[0]);
+			}
+			while (at->history.size() > kVehicleHistory) {
+				at->history.erase(at->history.begin());
+			}
 		}
 	}
-	std::erase_if(vehicles_, [&](const PresentedVehicle &v) { return newest_ - v.tick > kVehicleStaleTicks; });
+	std::erase_if(vehicles_, [&](const Tracked &t) { return newest_ - t.newest.tick > kVehicleStaleTicks; });
 }
 
 void ClientVehicles::publish(PresentationFrame &r_frame) const {
 	r_frame.vehicle_count = uint8_t(std::min(vehicles_.size(), r_frame.vehicles.size()));
-	std::copy_n(vehicles_.begin(), r_frame.vehicle_count, r_frame.vehicles.begin());
+	for (size_t i = 0; i < r_frame.vehicle_count; ++i) {
+		r_frame.vehicles[i] = vehicles_[i].newest;
+		present_window(r_frame.vehicles[i], vehicles_[i].history, r_frame.render_ticks_at_publish);
+	}
 }
 
 void ClientVehicles::stats(ClientStats &r_stats) const {

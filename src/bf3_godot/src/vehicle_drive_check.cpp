@@ -209,12 +209,20 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			heading_x_ = forward.x / n;
 			heading_z_ = forward.z / n;
 			first_wheel_angle_ = v->wheel_count > 0 ? v->wheel_angle[0] : 0.0f;
+			last_wheel_ = view && !view->wheels.empty() ? view->wheels[0] : Transform3D();
+			wheel_frames_ = wheel_turns_ = 0;
 			mapper.script_hold(InputAction::Forward, true);
 			enter(Phase::Drive);
 			return false;
 		}
 		case Phase::Drive: {
 			if (t_ < kThrottle) {
+				if (const std::optional<GameVehicleView> turning = p_in.vehicles->view(spawner_);
+						turning && !turning->wheels.empty() && t_ > 0.5 * kThrottle) {
+					++wheel_frames_;
+					wheel_turns_ += turning->wheels[0].basis.is_equal_approx(last_wheel_.basis) ? 0u : 1u;
+					last_wheel_ = turning->wheels[0];
+				}
 				return false;
 			}
 			const host::PresentedVehicle *v = presented(f, spawner_);
@@ -230,12 +238,13 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 					: 0.0f;
 			const Vector3 eye = p_in.camera != nullptr ? p_in.camera->get_global_position() : Vector3();
 			row("drive",
-					seat.has_value() && along > kDriveMetres && off < kOffLine && view->wheels.size() == v->wheel_count,
+					seat.has_value() && along > kDriveMetres && off < kOffLine &&
+							view->wheels.size() == v->wheel_count && wheel_frames_ > 0 && wheel_turns_ == wheel_frames_,
 					fmt("%.1f m along its heading, %.2f m off it, %.1f km/h, gear %d, %zu wheel parts drawn, wheel 0 "
-						"turned "
-						"%.2f rad, camera %.2f m from the body",
+						"turned %.2f rad and its drawn part turned on %u of %u frames, camera %.2f m from the body",
 							double(along), double(off), double(3.6f * speed(v->linear_velocity)), int(v->gear),
-							view->wheels.size(), double(spun), double(eye.distance_to(view->body.origin))));
+							view->wheels.size(), double(spun), unsigned(wheel_turns_), unsigned(wheel_frames_),
+							double(eye.distance_to(view->body.origin))));
 			shoot(p_in, "vehicle_drive");
 			mapper.script_press(InputMapper::VehicleAction::Camera);
 			enter(Phase::ThirdPerson);
