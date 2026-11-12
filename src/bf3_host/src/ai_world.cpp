@@ -380,6 +380,7 @@ void HostAiWorld::step(const ServerView &p_view, std::span<const sim::bots::Hear
 		in.firing = p_firing.size() >= n ? p_firing.first(n) : std::span<const uint8_t>();
 		in.shots = p_shots;
 		in.world = &p_view.world();
+		in.vehicles = p_view.vehicle_targets();
 		in.seed = m.config.seed ^ (uint64_t(bot) << 32) ^ p_tick;
 		for (size_t i = 0; i < 3; ++i) {
 			in.eye_heights[i] = m.config.eye_heights[i];

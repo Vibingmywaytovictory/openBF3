@@ -290,6 +290,47 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(e2->chest_visible);
 	}
 
+	TEST_CASE("perception: a vehicle hull hides the soldier behind it, except from the vehicle's own crew") {
+		const std::unique_ptr<sim::CollisionWorld> world = wall_world();
+		sb::PerceptionParams params;
+		std::vector<sim::SoldierState> states(2);
+		const std::vector<uint8_t> teams{ 1, 2 };
+		states[0] = soldier_at({ 0, 0, 0 });
+		states[1] = soldier_at({ 20, 0, 20 });
+		const sim::vehicles::HullBox box{ { 0.0f, 1.0f, 0.0f }, { 1.5f, 1.0f, 3.0f } };
+		sim::vehicles::VehicleTarget jeep;
+		jeep.target = sim::vehicles::hull_target(box,
+				core::Transform::from_rotation_translation({ 0.0f, 0.0f, 0.0f, 1.0f }, { 10.0f, 0.0f, 10.0f }),
+				sim::vehicles::kVehicleTargetIdBase, 0);
+		std::vector<sim::vehicles::VehicleTarget> vehicles{ jeep };
+		sb::PerceptionInput in;
+		in.self = 0;
+		in.team = 1;
+		in.eye = { 0, 1.6f, 0 };
+		in.yaw = sim::quantize_yaw(0.0f);
+		in.states = states;
+		in.teams = teams;
+		in.world = world.get();
+		in.tick = 6;
+
+		sb::Perception open(params);
+		CHECK(open.update(in) == 1u);
+		REQUIRE(open.find(1) != nullptr);
+		CHECK(open.find(1)->visible);
+
+		in.vehicles = vehicles;
+		sb::Perception hidden(params);
+		CHECK(hidden.update(in) == 2u);
+		CHECK(hidden.find(1) == nullptr);
+
+		vehicles[0].crew[0] = 0;
+		vehicles[0].crew_count = 1;
+		sb::Perception crew(params);
+		crew.update(in);
+		REQUIRE(crew.find(1) != nullptr);
+		CHECK(crew.find(1)->visible);
+	}
+
 	TEST_CASE("perception: hearing gives a position estimate, never a detection; hostile values are skipped") {
 		sb::PerceptionParams params;
 		std::vector<sim::SoldierState> states(3);

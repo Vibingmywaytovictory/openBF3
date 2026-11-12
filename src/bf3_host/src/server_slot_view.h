@@ -16,6 +16,8 @@
 
 namespace bf3::host {
 
+class ServerVehicles;
+
 class SlotView final : public ServerView {
 public:
 	SlotView(const SlotTable &p_slots, const Soldiers &p_soldiers, const MatchControl &p_match, const Combat &p_combat, const sim::Tick &p_tick) :
@@ -23,6 +25,7 @@ public:
 
 	void configure(const sim::CollisionWorld &p_world) { world_ = &p_world; }
 	void set_spotting(ServerSpotting *p_spotting) { spotting_ = p_spotting; }
+	void set_vehicles(const ServerVehicles *p_vehicles) { vehicles_ = p_vehicles; }
 	bool ready() const { return world_ != nullptr; }
 
 	std::span<const sim::SoldierState> states() const override;
@@ -40,6 +43,7 @@ public:
 	net::SpotRow spot_row(uint8_t p_slot) const override;
 	StoredOrder stored_order(uint8_t p_slot) const override;
 	void post_order(uint8_t p_slot, const net::OrderRequest &p_request) const override;
+	std::span<const sim::vehicles::VehicleTarget> vehicle_targets() const override;
 
 private:
 	const SlotTable &slots_;
@@ -49,6 +53,7 @@ private:
 	const sim::Tick &tick_;
 	const sim::CollisionWorld *world_ = nullptr;
 	ServerSpotting *spotting_ = nullptr;
+	const ServerVehicles *vehicles_ = nullptr;
 
 	mutable std::vector<sim::SoldierState> cache_;
 	mutable sim::Tick cache_tick_ = 0;

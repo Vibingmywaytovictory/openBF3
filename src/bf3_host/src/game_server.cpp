@@ -956,6 +956,7 @@ GameServer::~GameServer() = default;
 
 core::Status GameServer::Impl::init_gameplay() {
 	view.configure(*world);
+	view.set_vehicles(&vehicles);
 	spawner.configure(config, *world, view);
 	match.configure(config, slots.size());
 	combat.configure(slots.size(), *config.level->static_world);

@@ -2,6 +2,7 @@
 
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/soldier_state.h"
+#include "bf3/sim/vehicles/vehicle_targets.h"
 
 #include <cstdint>
 #include <span>
@@ -64,6 +65,7 @@ struct PerceptionInput {
 	std::span<const uint8_t> firing;
 	std::span<const HeardShot> shots;
 	const CollisionWorld *world = nullptr;
+	std::span<const sim::vehicles::VehicleTarget> vehicles;
 	uint64_t seed = 0;
 
 	float eye_heights[3] = { 1.6f, 1.0f, 0.3f };

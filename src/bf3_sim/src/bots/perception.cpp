@@ -46,6 +46,20 @@ bool alive_state(const SoldierState &p_state) {
 	return (p_state.flags & soldier_flags::kAlive) != 0 && p_state.mode != MoveMode::Dead;
 }
 
+bool hull_between(const PerceptionInput &p_in, const Vec3 &p_point) {
+	for (const vehicles::VehicleTarget &v : p_in.vehicles) {
+		const auto crew_end = v.crew.begin() + std::min<size_t>(v.crew_count, vehicles::kMaxVehicleTargetCrew);
+		if (std::find(v.crew.begin(), crew_end, uint32_t(p_in.self)) != crew_end) {
+			continue;
+		}
+		weapons::TargetHit hit;
+		if (weapons::segment_target(p_in.eye, p_point, v.target, hit)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 }
 
 bool perception_tick(uint8_t p_slot, Tick p_tick, uint32_t p_update_ticks) {
@@ -187,12 +201,16 @@ uint32_t Perception::update(const PerceptionInput &p_in) {
 		if (p_in.world != nullptr) {
 			const Vec3 chest = perception_chest(params_, st, p_in.eye_heights);
 			++rays;
-			clear = !p_in.world->ray_any(p_in.eye, { chest[0] - p_in.eye[0], chest[1] - p_in.eye[1], chest[2] - p_in.eye[2] }, mask);
+			clear = !p_in.world->ray_any(p_in.eye,
+							{ chest[0] - p_in.eye[0], chest[1] - p_in.eye[1], chest[2] - p_in.eye[2] }, mask) &&
+					!hull_between(p_in, chest);
 			if (!clear) {
 				chest_clear = false;
 				const Vec3 head = perception_head(params_, st, p_in.eye_heights);
 				++rays;
-				clear = !p_in.world->ray_any(p_in.eye, { head[0] - p_in.eye[0], head[1] - p_in.eye[1], head[2] - p_in.eye[2] }, mask);
+				clear = !p_in.world->ray_any(p_in.eye,
+								{ head[0] - p_in.eye[0], head[1] - p_in.eye[1], head[2] - p_in.eye[2] }, mask) &&
+						!hull_between(p_in, head);
 			}
 		} else {
 			clear = true;

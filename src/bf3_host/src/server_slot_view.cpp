@@ -1,10 +1,15 @@
 #include "server_slot_view.h"
 
 #include "bf3/host/kits.h"
+#include "vehicles/server_vehicles.h"
 
 #include <algorithm>
 
 namespace bf3::host {
+
+std::span<const sim::vehicles::VehicleTarget> SlotView::vehicle_targets() const {
+	return vehicles_ != nullptr ? vehicles_->targets() : std::span<const sim::vehicles::VehicleTarget>();
+}
 
 std::span<const sim::SoldierState> SlotView::states() const {
 	if (!cached_ || cache_tick_ != tick_) {

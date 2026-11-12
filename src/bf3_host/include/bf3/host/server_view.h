@@ -4,6 +4,7 @@
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/commo.h"
 #include "bf3/sim/soldier_state.h"
+#include "bf3/sim/vehicles/vehicle_targets.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
 #include <cstdint>
@@ -52,6 +53,7 @@ public:
 		(void)p_slot;
 		return {};
 	}
+	virtual std::span<const sim::vehicles::VehicleTarget> vehicle_targets() const { return {}; }
 	virtual void post_order(uint8_t p_slot, const net::OrderRequest &p_request) const {
 		(void)p_slot;
 		(void)p_request;

@@ -77,6 +77,7 @@ void BotAwareness::perceive(TdmShared &r_shared, uint8_t p_slot, uint64_t p_seed
 	in.firing = sh.firing;
 	in.shots = sh.heard;
 	in.world = &view.world();
+	in.vehicles = view.vehicle_targets();
 	in.seed = p_seed;
 	for (size_t i = 0; i < 3; ++i) {
 		in.eye_heights[i] = sh.host.eye_heights[i];
