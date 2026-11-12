@@ -378,7 +378,7 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 				out.component_meshes.emplace_back(mesh, model_transform(node.frame));
 			}
 		} else if (node.role == Role::Camera) {
-			const int seat = seat_index(layout.seat_of(at));
+			const int seat = seat_index(layout.enclosing(at, Role::Seat));
 			if (seat >= 0) {
 				VehicleCameraDef camera = read_camera(budget, p_db, node.data);
 				camera.transform = model_transform(node.frame);
