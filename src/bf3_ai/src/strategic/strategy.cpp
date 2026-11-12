@@ -428,6 +428,10 @@ void StrategyDecisions::send(Sai &r_sai, SquadCoordinator &r_squad, size_t p_are
 
 void StrategyDecisions::distribute_defence(Sai &r_sai) {
 	const int side = r_sai.side();
+	if (r_sai.have_any_owned_and_takeable_control_points(3 - side)) {
+		++stats_.defence_withheld;
+		return;
+	}
 	for (size_t i = 0; i < areas_.size(); ++i) {
 		const AIStrategicArea &a = areas_[i].area();
 		if (!a.is_area_takeable() || a.status(side) != StrategicStatus::Owned || assigned_[size_t(side - 1)][i] != 0 ||

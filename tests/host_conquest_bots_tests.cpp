@@ -27,6 +27,7 @@ namespace {
 constexpr uint32_t kRoundTicks = 60u * 60u * 25u;
 constexpr sim::Tick kHeldBeforeOrderTicks = 120;
 constexpr float kSpawnMatchMetres = 3.0f;
+constexpr uint32_t kMaxDefendRepeatsPerMinute = 10;
 
 tt::TdmLevel *load_conquest_bots_level_once() {
 	static std::unique_ptr<tt::TdmLevel> s_level;
@@ -84,6 +85,7 @@ struct ConquestRun {
 	std::array<int64_t, 3> tickets{};
 	std::array<uint32_t, 3> captures{};
 	uint32_t hands_changed = 0;
+	uint32_t attack_ends = 0, attack_ends_untaken = 0, defend_repeats = 0;
 	std::vector<OrderSeen> orders;
 	uint32_t bot_spawns = 0, flag_spawns = 0, hq_spawns = 0, other_spawns = 0;
 	uint64_t squad_spawns = 0;
@@ -113,6 +115,7 @@ ConquestRun run_conquest(const tt::TdmLevel &p_level, uint64_t p_seed) {
 	std::vector<uint8_t> last_team;
 	std::vector<sim::Tick> held_since;
 	std::array<std::array<host::SquadOrderState, net::kMaxSquads + 1>, host::kSquadTeams + 1> orders{};
+	std::array<std::array<host::SquadOrderState, net::kMaxSquads + 1>, host::kSquadTeams + 1> last_order{};
 	std::array<uint32_t, 64> seen_life{};
 	c.on_tick = [&](sim::Tick p_tick, host::GameServer &r_server, tt::ScriptedPeer *) {
 		const host::TdmRules *rules = r_server.rules();
@@ -153,6 +156,18 @@ ConquestRun run_conquest(const tt::TdmLevel &p_level, uint64_t p_seed) {
 				host::SquadOrderState &before = orders[team][q];
 				if (o.kind == before.kind && o.area == before.area) {
 					continue;
+				}
+				if (before.kind == net::SquadOrderKind::Attack && before.area < out.area_point.size() &&
+						out.area_point[before.area] >= 0) {
+					++out.attack_ends;
+					out.attack_ends_untaken += holder(points[size_t(out.area_point[before.area])]) != team ? 1u : 0u;
+				}
+				host::SquadOrderState &last = last_order[team][q];
+				if (o.kind == net::SquadOrderKind::Defend && last.kind == o.kind && last.area == o.area) {
+					++out.defend_repeats;
+				}
+				if (o.kind != net::SquadOrderKind::None) {
+					last = o;
 				}
 				before = o;
 				if (o.kind != net::SquadOrderKind::Attack && o.kind != net::SquadOrderKind::Defend) {
@@ -214,6 +229,34 @@ ConquestRun run_conquest(const tt::TdmLevel &p_level, uint64_t p_seed) {
 	return out;
 }
 
+void check_orders(const ConquestRun &p_run, uint64_t p_seed) {
+	const size_t defends = size_t(std::count_if(p_run.orders.begin(), p_run.orders.end(),
+			[](const OrderSeen &o) { return o.kind == net::SquadOrderKind::Defend; }));
+	std::printf("host.tdm.conquest_bots: seed %llu: winner %u at tick %u, tickets US %lld RU %lld, captures US %u RU "
+				"%u, flag spawns %u of %u, attack orders ended %u (%u before the flag was taken), defend orders %zu "
+				"repeated %u\n",
+			(unsigned long long)p_seed, unsigned(p_run.result.winner), unsigned(p_run.result.round_over_tick),
+			(long long)p_run.tickets[1], (long long)p_run.tickets[2], p_run.captures[1], p_run.captures[2],
+			p_run.flag_spawns, p_run.bot_spawns, p_run.attack_ends, p_run.attack_ends_untaken, defends,
+			p_run.defend_repeats);
+	CHECK_MESSAGE(p_run.error.empty(), p_run.error);
+	CHECK(p_run.result.round_over);
+	CHECK(p_run.runtime_faults == 0u);
+	CHECK(p_run.attack_ends > 0u);
+	CHECK(p_run.attack_ends_untaken * 3u <= p_run.attack_ends * 2u);
+	CHECK(uint64_t(p_run.defend_repeats) * 60u * sim::kSimHz <=
+			uint64_t(kMaxDefendRepeatsPerMinute) * p_run.result.round_over_tick);
+}
+
+void check_seed(uint64_t p_seed) {
+	tt::TdmLevel *level = load_conquest_bots_level_once();
+	if (level == nullptr) {
+		return;
+	}
+	const ConquestRun run = run_conquest(*level, p_seed);
+	check_orders(run, p_seed);
+	CHECK((run.result.winner == 1 || run.result.winner == 2));
+}
 }
 
 TEST_SUITE("host-tdm-conquest-bots-unit") {
@@ -288,6 +331,7 @@ TEST_SUITE("host-tdm-conquest-bots") {
 		REQUIRE(level->shared->logic_natives != nullptr);
 		REQUIRE(level->shared->logic_natives->conquest != nullptr);
 		const ConquestRun run = run_conquest(*level, 1);
+		check_orders(run, 1);
 		REQUIRE_MESSAGE(run.error.empty(), run.error);
 		std::vector<int> paired;
 		for (size_t i = 0; i < level->bots->areas.size(); ++i) {
@@ -331,13 +375,14 @@ TEST_SUITE("host-tdm-conquest-bots") {
 				"%lld; captures US %u RU %u, %u from the other team; orders attack %u (on a flag the team held %u), "
 				"defend %u (on a held "
 				"flag %u, on another %u); bot spawns %u: HQ %u, flag %u, other %u; squad spawns %llu; kills %d / %d; "
-				"runtime faults %llu; %.1f s\n",
+				"runtime faults %llu; attack orders ended %u, %u before the flag was taken; defend orders repeated "
+				"%u; %.1f s\n",
 				mapping.c_str(), int(run.result.round_over), unsigned(run.result.round_over_tick),
 				unsigned(run.result.winner), (long long)run.tickets[1], (long long)run.tickets[2], run.captures[1],
 				run.captures[2], run.hands_changed, attack, attack_held, defend, defend_held, defend_other,
 				run.bot_spawns, run.hq_spawns, run.flag_spawns, run.other_spawns, (unsigned long long)run.squad_spawns,
-				run.result.kills[1], run.result.kills[2], (unsigned long long)run.runtime_faults,
-				run.result.seconds_run);
+				run.result.kills[1], run.result.kills[2], (unsigned long long)run.runtime_faults, run.attack_ends,
+				run.attack_ends_untaken, run.defend_repeats, run.result.seconds_run);
 		CHECK(run.result.failure.empty());
 		CHECK(run.result.round_over);
 		CHECK((run.result.winner == 1 || run.result.winner == 2));
@@ -355,6 +400,14 @@ TEST_SUITE("host-tdm-conquest-bots") {
 		CHECK(run.flag_spawns > 0u);
 		CHECK(run.squad_spawns > 0u);
 		CHECK(run.runtime_faults == 0u);
+	}
+	TEST_CASE("conquest bots: seed 2: attack orders last until the flag is taken, defence is not re-sent while the "
+			  "enemy holds a takeable flag, a team wins on tickets") {
+		check_seed(2);
+	}
+	TEST_CASE("conquest bots: seed 3: attack orders last until the flag is taken, defence is not re-sent while the "
+			  "enemy holds a takeable flag, a team wins on tickets") {
+		check_seed(3);
 	}
 	TEST_CASE("host-tdm-conquest-bots: install unchanged") {
 		tt::TdmLevel *level = load_conquest_bots_level_once();

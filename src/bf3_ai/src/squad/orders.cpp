@@ -207,6 +207,11 @@ bool SquadOrders::arrived(const SquadCoordinator &p_squad, sim::Tick p_tick, sim
 	return true;
 }
 
+bool SquadOrders::held_until_taken(const SquadCoordinator &p_squad) {
+	const SquadArea *const area = p_squad.squad_strategic_area_assignment();
+	return p_squad.order() == SquadOrder::Attack && area != nullptr && area->is_takeable();
+}
+
 void SquadOrders::pass_down(const SquadCoordinator &p_squad, SquadOrder p_order) {
 	const SquadMember *const leader = p_squad.squad_leader();
 	const int anchor = p_squad.formation().squad_member_index_at_slot(0);
@@ -319,7 +324,7 @@ void SquadOrders::update(sim::Tick p_tick, float p_near_m, SquadCohesion &r_cohe
 				++(issued ? stats_.accepted : stats_.declined);
 				since = 0;
 			} else if (squad.mission_status() == SquadMissionStatus::Accepted &&
-					(lead == nullptr || arrived(squad, p_tick, since))) {
+					(lead == nullptr || (arrived(squad, p_tick, since) && !held_until_taken(squad)))) {
 				squad.un_assign_squad();
 				++stats_.completed;
 				since = 0;

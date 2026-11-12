@@ -143,6 +143,7 @@ struct StrategyStats {
 	uint64_t attack_missions = 0;
 	uint64_t defend_missions = 0;
 	uint64_t released = 0;
+	uint64_t defence_withheld = 0;
 };
 
 class StrategyDecisions final : public SaiDecisions {

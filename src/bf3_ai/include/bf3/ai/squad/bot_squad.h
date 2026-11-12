@@ -104,6 +104,7 @@ private:
 	void pass_down(const SquadCoordinator &p_squad, SquadOrder p_order);
 	void gather(const SquadCoordinator &p_squad) const;
 	bool arrived(const SquadCoordinator &p_squad, sim::Tick p_tick, sim::Tick &r_since) const;
+	static bool held_until_taken(const SquadCoordinator &p_squad);
 	bool left_origin(int p_player_id, const Vec3 &p_position, float p_metres);
 	void sample(const SquadCoordinator &p_squad, float p_near_m, SquadCohesion &r_cohesion);
 
