@@ -33,6 +33,10 @@ std::string leaf_key(std::string_view p_category, int32_t p_key) {
 }
 }
 
+std::string_view ui_game_logic_scope(std::string_view p_mode) {
+	return p_mode.starts_with("Conquest") ? kUiGameLogicConquest : kUiGameLogicTdm;
+}
+
 int32_t ui_preround_event_id(UiPreRoundEvent p_event) {
 	switch (p_event) {
 		case UiPreRoundEvent::Waiting:
@@ -82,6 +86,9 @@ core::Result<ClientLogicWorld> build_client_logic(const core::level::LoadedLevel
 
 core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const UiFlowSessionOptions &p_options) {
 	options_ = p_options;
+	if (options_.scope.empty()) {
+		options_.scope = std::string(ui_game_logic_scope(p_level.mode));
+	}
 	const core::EbxResolver &db = p_level.db();
 	core::Result<ClientLogicWorld> logic = build_client_logic(p_level);
 	if (!logic) {
@@ -504,6 +511,8 @@ void UiFlowSession::ui_graph_input(uint32_t p_node, int32_t p_port) {
 			for (const ui::UiGraphNode &n : asset->nodes) {
 				if (n.kind == ui::UiGraphNodeKind::InstanceInput && n.root) {
 					flow_->fire_input(graph, n.name);
+				} else if (n.kind == ui::UiGraphNodeKind::State && n.root) {
+					flow_->enter_state(graph, n.name);
 				}
 			}
 		}

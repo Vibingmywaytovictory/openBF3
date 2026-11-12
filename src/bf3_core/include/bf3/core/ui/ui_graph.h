@@ -213,6 +213,7 @@ public:
 
 	bool fire_input(
 			std::string_view p_graph, std::string_view p_input, std::optional<std::string> p_value = std::nullopt);
+	bool enter_state(std::string_view p_graph, std::string_view p_state);
 	bool widget_fired(uint64_t p_screen, std::string_view p_instance, std::string_view p_query,
 			std::optional<std::string> p_value = std::nullopt);
 	bool input_action(int32_t p_action);

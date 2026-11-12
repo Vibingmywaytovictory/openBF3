@@ -22,6 +22,10 @@ namespace bf3::core::ui {
 
 inline constexpr std::string_view kHudMpScreenPartition = "ui/flow/screen/hudmpscreen";
 inline constexpr std::string_view kHudTdmScreenPartition = "ui/flow/screen/hudtdmscreen";
+inline constexpr std::string_view kHudConquestScreenPartition = "ui/flow/screen/hudconquestscreen";
+constexpr std::string_view hud_mode_screen_partition(std::string_view p_mode) {
+	return p_mode.starts_with("Conquest") ? kHudConquestScreenPartition : kHudTdmScreenPartition;
+}
 inline constexpr std::string_view kCrosshairDefaultPartition = "ui/flow/screen/weapon/crosshairdefault";
 inline constexpr std::string_view kHudSharedScreenPartition = "ui/flow/screen/hudscreen";
 inline constexpr std::string_view kKillScreenPartition = "ui/flow/screen/killscreen";

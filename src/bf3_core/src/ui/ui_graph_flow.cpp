@@ -642,6 +642,27 @@ bool UiFlow::fire_input(std::string_view p_graph, std::string_view p_input, std:
 	return found;
 }
 
+bool UiFlow::enter_state(std::string_view p_graph, std::string_view p_state) {
+	begin_call();
+	Instance *inst = instance_of(p_graph, true);
+	bool found = false;
+	if (inst != nullptr) {
+		if (const std::optional<uint32_t> n = inst->asset->find(UiGraphNodeKind::State, p_state)) {
+			note("state " + leaf(p_graph) + "." + std::string(p_state));
+			found = true;
+			std::string outer_graph = std::exchange(input_graph_, inst->graph);
+			const uint64_t outer_first = std::exchange(input_first_screen_, next_screen_);
+			enter(*inst, *n, 0, std::nullopt);
+			input_graph_ = std::move(outer_graph);
+			input_first_screen_ = outer_first;
+		} else {
+			error("graph " + std::string(p_graph) + " has no state " + std::string(p_state));
+		}
+	}
+	end_call();
+	return found;
+}
+
 bool UiFlow::widget_fired(
 		uint64_t p_screen, std::string_view p_instance, std::string_view p_query, std::optional<std::string> p_value) {
 	begin_call();

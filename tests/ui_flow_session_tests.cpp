@@ -17,6 +17,7 @@
 #include <array>
 #include <bit>
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -38,17 +39,17 @@ struct Level {
 	std::string error;
 };
 
-Level *level_or_skip() {
-	static Level l;
-	static bool tried = false;
-	if (!tried) {
-		tried = true;
+Level *level_or_skip(const char *p_level = "MP_Subway", const char *p_mode = "TeamDeathMatch0") {
+	static std::map<std::string, Level> levels;
+	const auto [it, fresh] = levels.try_emplace(std::string(p_level) + "/" + p_mode);
+	Level &l = it->second;
+	if (fresh) {
 		l.mount = bf3::test::shared_mount_or_skip();
 		if (l.mount == nullptr) {
 			return nullptr;
 		}
 		core::Result<std::unique_ptr<core::level::LoadedLevel>> loaded =
-				core::level::load_level(l.mount->install, "MP_Subway", "TeamDeathMatch0");
+				core::level::load_level(l.mount->install, p_level, p_mode);
 		if (!loaded) {
 			l.error = loaded.error().message;
 		} else {
@@ -765,6 +766,41 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(s.flow().find_screen("ui/flow/screen/spawnscreenpc") == nullptr);
 		CHECK(s.flow().find_screen("ui/flow/screen/hudmpscreen") != nullptr);
 		CHECK(s.data("ui/uicomponents/usercomp", -1093247625) == "False");
+		CHECK(s.errors().empty());
+		CHECK(s.flow().errors().empty());
+	}
+
+	TEST_CASE(
+			"ui flow session: a Conquest level runs uigamelogicconquest: the deploy screens carry the Conquest ticket "
+			"counter and a spawn pushes hudconquestscreen") {
+		Level *l = level_or_skip("MP_007", "ConquestSmall0");
+		if (l == nullptr) {
+			return;
+		}
+		CHECK(ui_game_logic_scope("ConquestSmall0") == kUiGameLogicConquest);
+		CHECK(ui_game_logic_scope("ConquestLarge0") == kUiGameLogicConquest);
+		CHECK(ui_game_logic_scope("TeamDeathMatch0") == kUiGameLogicTdm);
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level);
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		UiFlowSession &s = **made;
+		ui_flow_tdm_pc_defaults(s, "ConquestSmall0");
+		Script sc{ s };
+		sc.state.phase = net::MatchPhase::InRound;
+		sc.state.joined = true;
+		sc.run_to(60);
+		const Lines join = sc.phase("Conquest join");
+		CHECK(std::find(join.begin(), join.end(), "push spawnscreenticketcounterconquestscreen") != join.end());
+		CHECK(std::find(join.begin(), join.end(), "push spawnscreenticketcountertdmscreen") == join.end());
+		REQUIRE(s.flow().find_screen(ui::kSpawnScreenPcPartition) != nullptr);
+		sc.input(ui::UiInputConcept::Activate);
+		sc.run_to(100);
+		sc.state.own_spawns = 1;
+		sc.run_to(160);
+		const Lines spawned = sc.phase("Conquest spawn");
+		CHECK(std::find(spawned.begin(), spawned.end(), "push hudconquestscreen") != spawned.end());
+		CHECK(std::find(spawned.begin(), spawned.end(), "push hudtdmscreen") == spawned.end());
+		CHECK(s.flow().find_screen(ui::kHudConquestScreenPartition) != nullptr);
+		CHECK(s.flow().find_screen(ui::kHudMpScreenPartition) != nullptr);
 		CHECK(s.errors().empty());
 		CHECK(s.flow().errors().empty());
 	}

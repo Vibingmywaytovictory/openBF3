@@ -27,6 +27,8 @@ class LoadedLevel;
 namespace bf3::host {
 
 inline constexpr std::string_view kUiGameLogicTdm = "ui/flow/logic/uigamelogictdm";
+inline constexpr std::string_view kUiGameLogicConquest = "ui/flow/logic/uigamelogicconquest";
+std::string_view ui_game_logic_scope(std::string_view p_mode);
 inline constexpr std::string_view kUiGraphEnterPort = "EnterUIGraph";
 inline constexpr std::string_view kUiGraphExitPort = "ExitUIGraph";
 inline constexpr size_t kUiFlowSessionMaxLog = 1u << 16;
@@ -57,7 +59,7 @@ struct UiGameState {
 };
 
 struct UiFlowSessionOptions {
-	std::string scope = std::string(kUiGameLogicTdm);
+	std::string scope;
 	sim::logic::LogicPlatform platform = sim::logic::LogicPlatform::Win32;
 	bool initialize_screens = true;
 	bool echo_networked = false;
