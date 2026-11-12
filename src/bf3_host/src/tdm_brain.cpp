@@ -1,7 +1,6 @@
 #include "bf3/host/tdm_brain.h"
 
 #include "bf3/ai/behaviour/behaviours.h"
-#include "bf3/ai/main/ai_settings.h"
 #include "bf3/core/util/finite.h"
 #include "bf3/core/util/key_values.h"
 #include "bf3/host/ai_bot_source.h"
@@ -210,7 +209,7 @@ core::KeyOutcome ai_setting(std::string_view p_key, std::string_view p_value, Td
 	if (ai::is_strategy_key(p_key)) {
 		return ai::parse_strategy_setting(p_key, p_value, r_config.strategy);
 	}
-	return ai::check_ai_setting(p_key, p_value);
+	return { core::KeyFault::UnknownKey };
 }
 
 const core::KeyValueGrammar<TdmBotConfig> kGrammar{ "bot_tuning", kKeys, kMaxBotTuningBytes, kMaxBotTuningLines,

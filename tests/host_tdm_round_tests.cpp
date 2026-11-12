@@ -466,14 +466,13 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(one.aim.e0_deg == doctest::Approx(2.5f));
 		CHECK(one.perception.update_ticks == 3);
 		CHECK(one.aim.e_inf_deg == def.aim.e_inf_deg);
-		CHECK(host::parse_bot_tuning("ai.max_bots = 12\nai.enable_vehicle_ai = true\nskill_min = 0.3\n", one).ok());
 		REQUIRE(host::parse_bot_tuning("bb.random.weight = 2.5\nbb.resupply_used_mags = 3\n", one).ok());
 		CHECK(one.behaviours.curves[size_t(ai::InfantryBehaviour::Random)].weight == doctest::Approx(2.5f));
 		CHECK(one.behaviours.resupply_used_mags == 3u);
 
 		for (const char *bad : { "nope = 1\n", "skill_min = nan\n", "skill_min = 2\n", "skill_min\n",
 					 "skill_min = 1x\n", "perception.update_ticks = 0\n", "aim.tau_s = 1e40\n", "count = 65\n", "= 3\n",
-					 "ai.nope = 1\n", "ai.max_bots = 65\n", "ai.enable_air_ai = 1\n", "bb.nope = 1\n",
+					 "ai.nope = 1\n", "ai.max_bots = 12\n", "ai.enable_air_ai = 1\n", "bb.nope = 1\n",
 					 "bb.decision_ticks = 0\n", "bb.idle.weight = -1\n", "sai.nope = 1\n", "sai.period_ticks = 0\n",
 					 "sai.order.random = -1\n", "bb.mission_arrive_m = 0\n" }) {
 			host::TdmBotConfig c;

@@ -1,0 +1,12 @@
+aiSettings.maxBotsIncludeHumans 1
+aiSettings.setIgnoreCommanderDistance 30
+aiSettings.setViewDistance -1
+aiSettings.setStatsViewDistance 30
+aiSettings.setDrawBotStats 1
+aiSettings.setInformationGridDimension 32
+aiSettings.setBotSkill 0.75
+aiSettings.setSAIUpdateFrequency 35
+aiSettings.setRespawnAllowed 1
+aiSettings.autoSpawnBots 0
+aiSettings.overrideMenuSettings 0
+aiSettings.setVehicle Infantry

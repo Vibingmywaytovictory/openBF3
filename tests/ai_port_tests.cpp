@@ -20,9 +20,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <fstream>
 #include <map>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -396,37 +394,44 @@ TEST_SUITE("ai-port") {
 		CHECK(with_vehicle.chosen_generator() == made.at("BBFireDriver").get());
 	}
 
-	TEST_CASE(
-			"AISettings: the shipped bot_tuning.cfg gives the compiled-in defaults; host keys pass, bad ai keys fail") {
-		std::ifstream f(OPENBF3_BOT_TUNING_CFG, std::ios::binary);
-		REQUIRE(f.good());
-		std::stringstream ss;
-		ss << f.rdbuf();
-		AiSettings parsed;
-		parsed.max_bots = 5;
-		const core::Status st = parse_ai_settings(ss.str(), parsed);
-		REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
-		CHECK(format_ai_settings(parsed) == format_ai_settings(AiSettings{}));
-		CHECK_FALSE(parsed.enable_vehicle_ai);
-		CHECK_FALSE(parsed.enable_air_ai);
-		CHECK(ss.str().find("ai.enable_vehicle_ai") != std::string::npos);
-		CHECK(ss.str().find("ai.enable_air_ai") != std::string::npos);
+	TEST_CASE("AISettings: the reconstruction's defaults, its vehicles and the side personalities") {
+		const AiSettings d;
+		CHECK(d.max_bots == -1);
+		CHECK(d.max_bots_include_humans);
+		CHECK(d.ignore_commander_distance_m == 30.0f);
+		CHECK(d.behaviour_count == 0);
+		CHECK(d.view_distance_m == -1.0f);
+		CHECK(d.stats_view_distance_m == 30.0f);
+		CHECK(d.draw_bot_stats);
+		CHECK(d.bot_skill == 0.75f);
+		CHECK(d.sai_update_frequency == 35.0f);
+		CHECK(d.information_grid_dimension == 32u);
+		CHECK(d.sides == 0u);
+		CHECK(d.respawn_allowed);
+		CHECK_FALSE(d.draw);
+		CHECK_FALSE(d.auto_spawn_bots);
+		CHECK_FALSE(d.override_menu_settings);
+		CHECK_FALSE(d.domain_enabled(AiDomain::Vehicle));
+		CHECK_FALSE(d.domain_enabled(AiDomain::Air));
+		CHECK(d.domain_enabled(AiDomain::Infantry));
+		CHECK(d.armour_class_value(3) == 15.0f);
 
-		AiSettings one;
-		REQUIRE(parse_ai_settings("skill_min = 0.3\nai.enable_air_ai = true # on\nai.max_bots = 12\n", one).ok());
-		CHECK(one.enable_air_ai);
-		CHECK(one.max_bots == 12);
-		CHECK(one.domain_enabled(AiDomain::Air));
-		CHECK_FALSE(one.domain_enabled(AiDomain::Vehicle));
-		for (const char *bad : { "ai.nope = 1\n", "ai.max_bots = 65\n", "ai.enable_vehicle_ai = 0\n",
-					 "ai.bot_skill = nan\n", "ai.sides = 3\n" }) {
-			AiSettings c;
-			CHECK_MESSAGE(!parse_ai_settings(bad, c).ok(), bad);
-		}
-		CHECK(check_ai_setting("ai.bot_skill", "0.5").fault == core::KeyFault::None);
-		CHECK(check_ai_setting("ai.bot_skill", "2").fault == core::KeyFault::OutOfRange);
-		CHECK(check_ai_setting("ai.nope", "1").fault == core::KeyFault::UnknownKey);
-		CHECK(AiSettings{}.armour_class_value(3) == 15.0f);
+		AiSettings s;
+		s.set_vehicle("Infantry");
+		s.set_vehicle("Jeep");
+		s.set_vehicle("Infantry");
+		CHECK(s.vehicle("Infantry") == 0);
+		CHECK(s.vehicle("Jeep") == 1);
+		CHECK(s.vehicle("Tank") == -1);
+		CHECK(s.vehicles.size() == 3u);
+		CHECK(s.personality(1) == nullptr);
+		s.standard_personality[1] = { 2.0f, 3.0f };
+		REQUIRE(s.personality(2) != nullptr);
+		CHECK(s.personality(2)[1] == 3.0f);
+		CHECK(s.personality(0) == nullptr);
+		CHECK(s.personality(3) == nullptr);
+		s.enable_air_ai = true;
+		CHECK(s.domain_enabled(AiDomain::Air));
 	}
 }
 
@@ -668,6 +673,7 @@ TEST_SUITE("ai-port") {
 		AiSettings settings;
 		settings.auto_spawn_bots = true;
 		settings.max_bots = 4;
+		settings.sides = 2;
 		World w(settings);
 		AIEventCourier &events = w.ai.events();
 		events.event_level_loaded();

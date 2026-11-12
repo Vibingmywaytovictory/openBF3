@@ -1,0 +1,36 @@
+aiSettings.setMaxNumberOfBehaviours 10
+aiSettings.setBehaviour 0 Revive
+aiSettings.setBehaviour 1 FireInfantery
+aiSettings.setBehaviour 2 TakeCoverInfantry
+aiSettings.setBehaviour 3 Avoid
+aiSettings.setBehaviour 4 MoveTo
+aiSettings.setBehaviour 5 Random
+aiSettings.setBehaviour 6 Idle
+aiSettings.setBehaviour 7 MedicAssist
+aiSettings.setBehaviour 8 CallForMedic
+aiSettings.setBehaviour 9 Resupply
+
+aiSettings.createUCLinear Memory 0 1
+
+aiSettings.createBehaviourModifiers Default
+aiSettings.setBehaviourModifier Revive 8
+aiSettings.setBehaviourModifier FireInfantery 7
+aiSettings.setBehaviourModifier TakeCoverInfantry 6
+aiSettings.setBehaviourModifier Avoid 1.75
+aiSettings.setBehaviourModifier MoveTo 1.5
+aiSettings.setBehaviourModifier Random 1
+aiSettings.setBehaviourModifier Idle 0.5
+aiSettings.setBehaviourModifier MedicAssist 2.5
+aiSettings.setBehaviourModifier CallForMedic 5.5
+aiSettings.setBehaviourModifier Resupply 2.4
+
+aiSettings.setVehicleBehaviour Infantry Revive BBRevive BBPRevive 0 Memory Default
+aiSettings.setVehicleBehaviour Infantry FireInfantery BBFireInfantery BBPFireInfantery 0 Memory Default
+aiSettings.setVehicleBehaviour Infantry TakeCoverInfantry BBTakeCoverInfantry BBPTakeCoverInfantry 0 Memory Default
+aiSettings.setVehicleBehaviour Infantry Avoid BBAvoid BBPAvoid 0 Memory Default
+aiSettings.setVehicleBehaviour Infantry MoveTo BBMoveTo BBPMoveTo 0 Memory Default
+aiSettings.setVehicleBehaviour Infantry Random BBRandom BBPRandom 0 Memory Default
+aiSettings.setVehicleBehaviour Infantry Idle BBIdle BBPIdle 0 Memory Default
+aiSettings.setVehicleBehaviour Infantry MedicAssist BBMedicAssist BBPMedicAssist 0 Memory Default
+aiSettings.setVehicleBehaviour Infantry CallForMedic BBCallForMedic BBPCallForMedic 0 Memory Default
+aiSettings.setVehicleBehaviour Infantry Resupply BBResupply BBPResupply 0 Memory Default

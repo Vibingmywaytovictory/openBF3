@@ -10,6 +10,7 @@ add_library(bf3_ai STATIC
     include/bf3/ai/behaviour/curves.h
     include/bf3/ai/behaviour/urgency_merger.h
     include/bf3/ai/main/ai_settings.h
+    include/bf3/ai/main/ai_script.h
     include/bf3/ai/main/ai_random.h
     include/bf3/ai/main/ai_game.h
     include/bf3/ai/main/bot.h
@@ -30,6 +31,7 @@ add_library(bf3_ai STATIC
     src/behaviour/curves.cpp
     src/behaviour/urgency_merger.cpp
     src/main/ai_settings.cpp
+    src/main/ai_script.cpp
     src/main/ai_random.cpp
     src/main/bot_manager.cpp
     src/main/behaviour_manager.cpp
