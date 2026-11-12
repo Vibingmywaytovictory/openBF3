@@ -1280,6 +1280,9 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 				vm->set_visible(false);
 				g.vm[t] = vm;
 			}
+			for (const std::unique_ptr<render::ViewmodelSet> &set : g.vm_sets) {
+				render::release_texture_data(set->textures);
+			}
 			char line[256];
 			std::snprintf(line, sizeof(line), "[game] viewmodel sets in %.2f s: US %zu items, RU %zu items; %zu + %zu defs mapped to items (tuning %s)", g.vm_seconds,
 					g.vm_sets[0]->items.size(), g.vm_sets[1]->items.size(), g.def_items[0].size(), g.def_items[1].size(), g.vm_tuning_source.c_str());

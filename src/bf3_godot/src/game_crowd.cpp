@@ -354,6 +354,9 @@ Ref<Texture2D> Bf3GameCrowd::Impl::find_texture(const std::string &p_name) {
 		return it->second;
 	}
 	const render::PreparedTexture *t = assets->texture(p_name);
+	if (t != nullptr && t->data.empty()) {
+		t = nullptr;
+	}
 	if (t == nullptr) {
 		t = weapons->texture(p_name);
 	}
@@ -901,6 +904,7 @@ bool Bf3GameCrowd::build(Node3D *p_parent, std::string *r_error) {
 		m.draw = false;
 		log("headless display: " + err + "; posing without drawing (muzzles still published)");
 	}
+	render::release_soldier_textures(*m.assets, *m.weapons);
 	m.soldier_visible.assign(kCrowdSoldiers, false);
 	for (uint32_t i = 0; m.draw && i < kCrowdSoldiers; ++i) {
 		m.uploader->set_soldier_visible(i, false);

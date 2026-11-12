@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -52,6 +53,8 @@ uint32_t godot_mip_levels(GpuFormat p_format, uint32_t p_width, uint32_t p_heigh
 uint64_t level_bytes(GpuFormat p_format, uint32_t p_width, uint32_t p_height);
 
 core::Result<PreparedTexture> prepare_texture(const core::res::LoadedTexture &p_texture, TextureRole p_role);
+
+uint64_t release_texture_data(std::span<PreparedTexture> r_textures);
 
 std::array<uint8_t, 16> bc3_normal_to_bc5(const uint8_t *p_bc3_block);
 

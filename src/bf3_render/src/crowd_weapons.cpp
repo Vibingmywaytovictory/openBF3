@@ -509,7 +509,8 @@ core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::Ebx
 				const MaterialSlot &slot = part.materials.slots[s.material_index];
 				for (auto [param, role] : { std::pair{ "Diffuse", TextureRole::Color }, std::pair{ "Normal", TextureRole::Normal } }) {
 					const std::string name = slot.texture(param);
-					if (!name.empty() && p_assets.texture(name) == nullptr && seen.insert(name).second) {
+					const PreparedTexture *own = name.empty() ? nullptr : p_assets.texture(name);
+					if (!name.empty() && (own == nullptr || own->data.empty()) && seen.insert(name).second) {
 						wanted.emplace_back(name, role);
 					}
 				}
@@ -547,5 +548,25 @@ core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::Ebx
 			set->textures.size(), skipped, set->seconds);
 	set->notes.push_back(line);
 	return set;
+}
+
+uint64_t release_soldier_textures(SoldierAssets &r_assets, const CrowdWeaponSet &p_weapons) {
+	std::set<std::string> kept;
+	for (const std::vector<CrowdWeaponPart> &team : p_weapons.teams) {
+		for (const CrowdWeaponPart &part : team) {
+			for (const MaterialSlot &slot : part.materials.slots) {
+				for (const auto &[parameter, texture] : slot.textures) {
+					kept.insert(texture);
+				}
+			}
+		}
+	}
+	uint64_t freed = 0;
+	for (PreparedTexture &t : r_assets.textures) {
+		if (kept.count(t.name) == 0) {
+			freed += release_texture_data(std::span<PreparedTexture>(&t, 1));
+		}
+	}
+	return freed;
 }
 }

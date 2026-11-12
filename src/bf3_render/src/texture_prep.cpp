@@ -65,6 +65,15 @@ int gpu_format_pixel_bytes(GpuFormat p_format) {
 	}
 }
 
+uint64_t release_texture_data(std::span<PreparedTexture> r_textures) {
+	uint64_t freed = 0;
+	for (PreparedTexture &t : r_textures) {
+		freed += t.data.capacity();
+		std::vector<uint8_t>().swap(t.data);
+	}
+	return freed;
+}
+
 uint32_t godot_mip_levels(GpuFormat p_format, uint32_t p_width, uint32_t p_height) {
 
 	(void)p_format;

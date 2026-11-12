@@ -81,6 +81,8 @@ inline uint32_t strip_team_weapon_parts(SoldierAssets &r_assets) {
 	return removed;
 }
 
+uint64_t release_soldier_textures(SoldierAssets &r_assets, const CrowdWeaponSet &p_weapons);
+
 inline std::vector<anim::CrowdWeapon> crowd_weapons_of(const CrowdWeaponSet &p_set, uint32_t p_team) {
 	std::vector<anim::CrowdWeapon> out;
 	if (p_team >= p_set.teams.size()) {

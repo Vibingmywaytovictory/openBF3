@@ -3,6 +3,7 @@
 #include "bf3/core/install.h"
 #include "bf3/core/install_reader.h"
 #include "bf3/core/res/res_loader.h"
+#include "bf3/render/crowd_weapons.h"
 #include "bf3/render/texture_prep.h"
 #include "bf3/render/viewmodel_assets.h"
 #include "test_support.h"
@@ -115,6 +116,33 @@ TEST_SUITE("render-unit") {
 				CHECK(std::abs(int(l8[i]) - expect[i % 4]) <= 1);
 			}
 		}
+	}
+
+	TEST_CASE("render: uploaded texture data is released, a crowd weapon's textures are kept") {
+		SoldierAssets assets;
+		for (const char *name : { "characters/body_d", "weapons/m4a1/m4a1_d", "characters/head_n" }) {
+			PreparedTexture t;
+			t.name = name;
+			t.width = 64;
+			t.height = 64;
+			t.data.assign(4096, 7);
+			assets.textures.push_back(t);
+		}
+		CrowdWeaponSet weapons;
+		CrowdWeaponPart part;
+		MaterialSlot slot;
+		slot.textures = { { "Diffuse", "weapons/m4a1/m4a1_d" } };
+		part.materials.slots.push_back(slot);
+		weapons.teams[0].push_back(part);
+		const uint64_t freed = release_soldier_textures(assets, weapons);
+		CHECK(freed >= 2 * 4096);
+		CHECK(assets.texture("characters/body_d")->data.empty());
+		CHECK(assets.texture("characters/head_n")->data.empty());
+		CHECK(assets.texture("weapons/m4a1/m4a1_d")->data.size() == 4096);
+		CHECK(assets.texture("characters/body_d")->width == 64);
+		CHECK(release_texture_data(assets.textures) >= 4096);
+		CHECK(assets.texture("weapons/m4a1/m4a1_d")->data.empty());
+		CHECK(release_texture_data(assets.textures) == 0);
 	}
 }
 

@@ -76,6 +76,41 @@ TEST_SUITE("render-crowd-weapons") {
 		for (const std::string &n : (*set)->notes) {
 			std::printf("render.crowd_weapons note: %s\n", n.c_str());
 		}
+		const uint64_t released = render::release_soldier_textures(**assets, render::CrowdWeaponSet{});
+		core::Result<std::unique_ptr<render::CrowdWeaponSet>> later = render::load_crowd_weapons(reader, spec, **assets,
+				{ std::span<const render::CrowdWeaponSpec>(lists.teams[0]).first(1),
+						std::span<const render::CrowdWeaponSpec>(lists.teams[1]).first(1) });
+		REQUIRE_MESSAGE(later.ok(), (later.ok() ? "" : later.error().message));
+		uint32_t named = 0, from_soldier = 0, missing = 0;
+		for (const std::vector<render::CrowdWeaponPart> &team : (*later)->teams) {
+			for (const render::CrowdWeaponPart &p : team) {
+				for (const render::PreparedSurface &s : p.prepared.surfaces) {
+					if (s.material_index >= p.materials.slots.size()) {
+						continue;
+					}
+					for (const char *param : { "Diffuse", "Normal" }) {
+						const std::string name = p.materials.slots[s.material_index].texture(param);
+						if (name.empty()) {
+							continue;
+						}
+						++named;
+						const render::PreparedTexture *own = (*assets)->texture(name);
+						from_soldier += own != nullptr ? 1 : 0;
+						const bool have = (own != nullptr && !own->data.empty()) || (*later)->texture(name) != nullptr;
+						if (!have) {
+							++missing;
+							std::printf(
+									"render.crowd_weapons after the release: %s has no texture data\n", name.c_str());
+						}
+					}
+				}
+			}
+		}
+		std::printf("render.crowd_weapons after the release of %.1f MiB: a later set names %u textures, %u of them the "
+					"soldier assets', %u without data\n",
+				double(released) / (1024.0 * 1024.0), named, from_soldier, missing);
+		CHECK(from_soldier > 0);
+		CHECK(missing == 0);
 		const render::SoldierAssets &a = **assets;
 		const anim::Skeleton &rig = a.clips.rig;
 		const int32_t wep_root = rig.find("Wep_Root");
