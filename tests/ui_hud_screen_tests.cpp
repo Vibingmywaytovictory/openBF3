@@ -330,7 +330,8 @@ TEST_SUITE("ui-hud-screen-unit") {
 			"Widget.CustomizeKit.KitSelectorSlot", "Widget.CustomizeKit.KitInfoBox", "Widget.Info.SquadBoosterInfo",
 			"Widget.ScreenSpecific.ScreenAdjust", "Widget.List.Rows.BaseRow", "Widget.List.Rows.SquadSpawn",
 			"Widget.List.Rows.SquadListRow", "Widget.List.Rows.SquadDetailedRow", "Widget.Text.DebugField",
-			"Widget.CheckBox.CheckBox", "Widget.Hud.ComRose" };
+			"Widget.CheckBox.CheckBox", "Widget.Hud.ComRose", "Widget.Hud.ObjectiveBar",
+			"Widget.Icon3D.Capturepoint.CapturepointManager", "Widget.Icon3D.Capturepoint.Capturepointtag" };
 		const HudWidgetRegistry &installed = HudWidgetRegistry::installed();
 		std::vector<std::string> sorted = want;
 		std::sort(sorted.begin(), sorted.end());
@@ -1053,6 +1054,121 @@ TEST_SUITE("ui-hud-screen") {
 		s.hud->refresh(m);
 		CHECK_FALSE(s.at(tc).visible);
 		row("ticket_counter", "TDM rows tickets1 friendly / tickets0 enemy, name width " + std::to_string(name_w) + " -> right bound " + std::to_string(right));
+	}
+
+	TEST_CASE("hud screen: Conquest: hudconquestscreen's tickets, objective bar and capture point tags; the spawn "
+			  "ticket counter; hudmpscreen's out-of-bounds countdown") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		HudModel m = moment_m02();
+		m.tickets.friendly_team_tickets = 87;
+		m.tickets.enemy_team_tickets = 120;
+		m.tickets.global_max_tickets = 150;
+		HudCapturePointList &points = m.capture_points.capturepoints_status_data;
+		const auto add = [&](float p_x, int8_t p_owner, bool p_hq, bool p_contested) {
+			HudCapturePoint &p = points.points[points.count++];
+			p.x = p_x;
+			p.owner = p_owner;
+			p.hq = p_hq;
+			p.contested = p_contested;
+			p.progress = 1.0f;
+		};
+		add(0.0f, 1, true, false);
+		add(100.0f, 1, false, false);
+		add(200.0f, 2, false, true);
+		add(300.0f, 0, false, false);
+		m.capture_points.minimap_capturepoints_status_data = points;
+		HudWorldTags world;
+		HudClientState c = test_client();
+		c.world_tags = &world;
+		Screen s = initialized(*r, kHudConquestScreenPartition, m, c);
+		CHECK(s.hud->stats().unknown_classes == 0);
+		const std::string tc = "instance1.TicketCounter_01";
+		CHECK(s.at(tc).visible);
+		CHECK(s.at(tc + ".tickets0").frame == s.label(tc + ".tickets0", "enemy"));
+		CHECK(s.at(tc + ".tickets1.team").text == "US");
+		CHECK(s.at(tc + ".tickets0.team").text == "RU");
+		CHECK(s.at(tc + ".tickets1.tickets").text == "87");
+		CHECK(s.at(tc + ".tickets0.tickets").text == "120");
+		CHECK(s.clip(tc + ".tickets1.meter.meter").xscale() == doctest::Approx(58.0f));
+		CHECK(s.clip(tc + ".tickets0.meter.meter").xscale() == doctest::Approx(80.0f));
+		const std::string ob = "instance1.ObjectiveBar_01";
+		CHECK(s.at(ob).visible);
+		CHECK(s.has_tilt(ob, -15.0f, -15.0f));
+		CHECK(s.renderer(ob) == "t2");
+		CHECK_FALSE(s.at(ob + ".rush").visible);
+		const std::string bar = ob + ".conquest";
+		const std::array<std::pair<const char *, const char *>, 3> flags{ { { "A", "friendly" }, { "B", "enemy" },
+				{ "C", "neutral" } } };
+		for (size_t i = 0; i < flags.size(); ++i) {
+			const std::string icon = bar + ".icon" + std::to_string(i);
+			CHECK(s.at(icon).visible);
+			CHECK(s.at(icon + ".label.nameTxt").text == flags[i].first);
+			CHECK(s.at(icon + ".label").frame == s.label(icon + ".label", flags[i].second));
+		}
+		CHECK(s.at(bar + ".icon1").frame >= s.label(bar + ".icon1", "blink"));
+		CHECK(s.at(bar + ".icon0").frame == s.label(bar + ".icon0", "idle"));
+		CHECK(s.at(bar + ".icon0.icon").frame == uint32_t(kUiHudIconFriendlyFlag - 1));
+		CHECK(s.at(bar + ".icon1.icon").frame == uint32_t(kUiHudIconEnemyFlag - 1));
+		CHECK(s.at(bar + ".icon2.icon").frame == uint32_t(kUiHudIconNeutralFlag - 1));
+		for (size_t i = flags.size(); i < 7; ++i) {
+			CHECK_FALSE(s.at(bar + ".icon" + std::to_string(i)).visible);
+		}
+		CHECK(s.clip(bar).x() == doctest::Approx(float(std::floor(154.0 / 2.0 - 44.0 / 2.0 + 0.5)) + 3.0f));
+		const std::string cm = "instance1.CapturepointManager_01";
+		const auto *api = dynamic_cast<HudIcon3DManagerApi *>(s.hud->controller(cm));
+		REQUIRE(api != nullptr);
+		CHECK(api->component_name() == "UICapturepointtagComp");
+		CHECK_FALSE(s.at(cm + ".Flag").visible);
+		Icon3dPlacement placed;
+		placed.shown = true;
+		placed.x = 500.0f;
+		placed.y = 200.0f;
+		placed.scale = 1.0f;
+		placed.alpha = 1.0f;
+		world.tags = { capture_point_tag(3, points.points[2], 'B', placed) };
+		s.hud->refresh(m);
+		REQUIRE(api->tag_paths().size() == 1);
+		const std::string tag = api->tag_paths().front();
+		CHECK(s.hud->widget(tag)->class_name == "Widget.Icon3D.Capturepoint.Capturepointtag");
+		CHECK(s.at(tag).visible);
+		CHECK(s.clip(tag).x() == doctest::Approx(500.0f));
+		CHECK(s.at(tag + ".tag").frame == s.label(tag + ".tag", "enemy"));
+		CHECK(s.at(tag + ".tag.label.nameTextClip.nameTxt").text == "B");
+		CHECK(s.at(tag + ".tag.iconObjective").frame == uint32_t(kUiHudIconEnemyFlag - 1));
+		CHECK(s.at(tag + ".iconAlert").visible);
+		HudClientState big = c;
+		big.minimap_small = false;
+		s.hud->set_client(big);
+		s.hud->refresh(m);
+		CHECK_FALSE(s.at(ob).visible);
+
+		Screen spawn = initialized(*r, kSpawnTicketCounterConquestPartition, m);
+		const std::string t = "instance1.TicketCounterSpawnScreen_01.Ticket";
+		CHECK(spawn.at(t + ".txtTeam1Team").text == "US");
+		CHECK(spawn.at(t + ".txtTeam2Team").text == "RU");
+		CHECK(spawn.at(t + ".txtTeam1Tickets").text == "87");
+		CHECK(spawn.at(t + ".txtTeam2Tickets").text == "120");
+
+		m.combat_area.outside = true;
+		m.combat_area.seconds_left = 7;
+		Screen mp = initialized(*r, kHudMpScreenPartition, m);
+		mp.hud->refresh(m);
+		const std::string alert = "instance1.HudAlertMessage_01";
+		CHECK(mp.at(alert).visible);
+		CHECK(mp.at(alert + ".warning").visible);
+		CHECK(mp.at(alert + ".warning.content.timer").text == "7");
+		m.combat_area.seconds_left = 6;
+		mp.hud->refresh(m);
+		CHECK(mp.at(alert + ".warning.content.timer").text == "6");
+		m.combat_area = HudCombatArea();
+		mp.hud->refresh(m);
+		CHECK(mp.at(alert + ".warning").frame >= mp.label(alert + ".warning", "out"));
+		row("conquest",
+				"hudconquestscreen tickets 87/120 of 150, objective bar A friendly, B enemy blinking, C neutral; "
+				"capture tag B enemy; spawn counter 87/120; out-of-bounds 7 s");
 	}
 
 	TEST_CASE("hud screen: TicketCounterSpawnScreen keeps the own team's name and tickets left for either team") {

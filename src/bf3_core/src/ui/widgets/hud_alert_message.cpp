@@ -18,6 +18,15 @@ public:
 
 	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const override {
 		for (const HudDataSource &src : sources_) {
+			if (src.category == kCombatAreaCategory) {
+				if (src.key == kCombatAreaVisibleKey) {
+					r_out.push_back({ src.name, As2Value::of(p_model.combat_area.outside), src.on_initialize });
+				} else if (src.key == kCombatAreaTimerKey && p_model.combat_area.outside) {
+					r_out.push_back({ src.name, As2Value::of(std::to_string(p_model.combat_area.seconds_left)),
+							src.on_initialize });
+				}
+				continue;
+			}
 			if (src.category != kPreRoundCategory) {
 				continue;
 			}
@@ -127,6 +136,9 @@ private:
 	static constexpr int32_t kOnShowCompleted = 18;
 	static constexpr std::string_view kPreRoundCategory = "ui/uicomponents/uipreroundcomp";
 	static constexpr int32_t kPreRoundCountLeftKey = -1933733975;
+	static constexpr std::string_view kCombatAreaCategory = "ui/uicomponents/uicombatareacomp";
+	static constexpr int32_t kCombatAreaVisibleKey = -1103276527;
+	static constexpr int32_t kCombatAreaTimerKey = -546658437;
 	static constexpr std::array<std::pair<std::string_view, int32_t>, 6> kShowEvents{ {
 			{ "warning", 2 },
 			{ "revive", 4 },

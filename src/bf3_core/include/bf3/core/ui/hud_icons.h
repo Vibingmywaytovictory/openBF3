@@ -88,6 +88,15 @@ inline size_t hud_icon_frame(const HudIconStateFrames &p_state, double p_seconds
 	return size_t(std::floor(p_seconds * double(p_state.frame_rate))) % p_state.frames.size();
 }
 
+inline constexpr int32_t kUiHudIconNeutralFlag = 31;
+inline constexpr int32_t kUiHudIconFriendlyFlag = 32;
+inline constexpr int32_t kUiHudIconEnemyFlag = 33;
+inline constexpr int32_t kUiHudIconFriendlyBase = 34;
+inline constexpr int32_t kUiHudIconEnemyBase = 35;
+inline constexpr int32_t kUiTeamStateFriendlyPicked = 3;
+inline constexpr int32_t kUiTeamStateEnemyPicked = 4;
+inline constexpr int32_t kUiTeamStateFriendlyDropped = 5;
+inline constexpr int32_t kUiTeamStateEnemyDropped = 6;
 inline constexpr std::string_view kHudIconPlayerDead = "UIHudIcon_PlayerDead";
 inline constexpr std::string_view kHudIconSquadLeader = "UIHudIcon_SquadLeader";
 inline constexpr std::string_view kHudIconSquadLeaderBg = "UIHudIcon_SquadleaderBg";

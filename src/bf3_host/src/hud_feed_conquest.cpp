@@ -70,11 +70,18 @@ void feed_conquest(Frame &r_frame) {
 	ui::HudTickets &tk = model.tickets;
 	cp = ui::HudCapturePoints();
 	tk = ui::HudTickets();
+	model.combat_area = ui::HudCombatArea();
+	model.capture_point_y = {};
 	const lg::ConquestParams *params = in.conquest_params;
 	if (params == nullptr || !in.conquest_valid) {
 		return;
 	}
 	const net::ConquestState &c = in.conquest;
+	if (c.return_by_tick != 0 && in.alive) {
+		const int64_t left = std::max<int64_t>(0, int64_t(c.return_by_tick) - int64_t(in.server_tick));
+		model.combat_area.outside = true;
+		model.combat_area.seconds_left = int32_t((left + int64_t(sim::kSimHz) - 1) / int64_t(sim::kSimHz));
+	}
 	if (c.point_count != std::min(params->points.size(), net::kMaxConquestPoints)) {
 		++r_frame.state.bad_inputs;
 		return;
@@ -116,6 +123,7 @@ void feed_conquest(Frame &r_frame) {
 		h.label_sid_hash = params->points[i].location_sid.empty() ? 0u : ui::text_hash(params->points[i].location_sid);
 		h.location_sid_hash = h.label_sid_hash;
 		if (cp.capturepoints_status_data.count < ui::kHudMaxCapturePoints) {
+			model.capture_point_y[cp.capturepoints_status_data.count] = p.position[1];
 			cp.capturepoints_status_data.points[cp.capturepoints_status_data.count++] = h;
 		}
 		if (hq) {

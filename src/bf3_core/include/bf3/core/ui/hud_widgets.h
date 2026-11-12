@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/core/ui/hud_icons.h"
 #include "bf3/core/ui/hud_messages.h"
 
 #include <array>
@@ -60,6 +61,7 @@ enum class HudTagComponent : uint8_t {
 	TeamSupport,
 	Mapmarker,
 	Alert,
+	Capturepoint,
 };
 
 struct HudWorldTag {
@@ -164,4 +166,13 @@ std::string hud_eor_play_time(float p_seconds);
 std::string hud_eor_distance(float p_metres);
 int32_t hud_eor_seconds_left(float p_seconds);
 std::vector<As2Value> hud_scoreboard_rows(const HudModel &p_model, const HudPlayerList &p_list);
+As2Value hud_objective_status(const HudCapturePointList &p_points);
+
+struct HudFlagIcon {
+	HudIconChoice icon;
+	float x = 0.0f;
+	float z = 0.0f;
+	char letter = 0;
+};
+std::vector<HudFlagIcon> hud_minimap_flags(const HudCapturePointList &p_points);
 }

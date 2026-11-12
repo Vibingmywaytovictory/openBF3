@@ -259,6 +259,11 @@ struct HudCapturePoints {
 	HudCapturePointList minimap_capturepoints_status_data{};
 };
 
+struct HudCombatArea {
+	bool outside = false;
+	int32_t seconds_left = 0;
+};
+
 struct HudTickets {
 	int32_t friendly_team_tickets = 0;
 	int32_t enemy_team_tickets = 0;
@@ -609,6 +614,8 @@ struct HudModel {
 	HudUser user;
 	std::array<bool, kHudMaxPlayers> squad_leaders{};
 	HudCommoRose commo_rose;
+	HudCombatArea combat_area;
+	std::array<float, kHudMaxCapturePoints> capture_point_y{};
 };
 static_assert(std::is_trivially_copyable_v<HudModel>);
 

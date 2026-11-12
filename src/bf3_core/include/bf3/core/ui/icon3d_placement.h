@@ -17,6 +17,7 @@ namespace bf3::core::ui {
 inline constexpr std::string_view kAlerttagCompPartition = "ui/uicomponents/uialerttagcomp";
 inline constexpr std::string_view kTeamSupportTagCompPartition = "ui/uicomponents/uiteamsupporttagcomp";
 inline constexpr std::string_view kMapmarkerTagCompPartition = "ui/uicomponents/uimapmarkertagcomp";
+inline constexpr std::string_view kCapturepointTagCompPartition = "ui/uicomponents/uicapturepointtagcomp";
 
 struct Icon3dStyle {
 	float draw_distance = 15.0f;

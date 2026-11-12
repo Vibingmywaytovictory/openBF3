@@ -1,5 +1,7 @@
 #include "hud_widget_support.h"
 
+#include "bf3/core/ui/hud_icons.h"
+
 namespace bf3::core::ui {
 
 namespace {
@@ -56,7 +58,7 @@ public:
 		}
 	}
 
-	void remove_icon(HudWidgetHost &r_host) {
+	virtual void remove_icon(HudWidgetHost &r_host) {
 		created_ = false;
 		r_host.self().goto_and_play("remove");
 	}
@@ -229,6 +231,184 @@ protected:
 	}
 };
 
+class CapturepointtagClass final : public Icon3DClass {
+public:
+	void construct(HudWidgetHost &r_host) override {
+		Icon3DClass::construct(r_host);
+		r_host.clip("controlIcon").set_visible(false);
+		r_host.self().set_visible(false);
+		r_host.self().stop();
+	}
+
+	void remove_icon(HudWidgetHost &r_host) override {
+		created_ = false;
+		r_host.self().stop();
+		r_host.self().set_visible(false);
+		r_host.remove_movie_clip(r_host.self());
+	}
+
+	void frame_script(HudWidgetHost &r_host, const HudFrameScript &p_fs) override {
+		Icon3DClass::frame_script(r_host, p_fs);
+		if (p_fs.path == r_host.path() && p_fs.calls("createIconComplete")) {
+			blink_icon(r_host);
+		}
+	}
+
+protected:
+	void update_key(HudWidgetHost &r_host, std::string_view p_key, const As2Value &p_value) override {
+		const As2Clip tag = r_host.clip("tag");
+		if (p_key == "Label") {
+			label_ = p_value.to_string();
+			set_pair(tag.child("label").child("nameTextClip"), "nameTxt", "nameTxtBg", label_);
+			blink_icon(r_host);
+		} else if (p_key == "Name") {
+			name_ = p_value.to_string();
+			set_pair(tag.child("name").child("nameTextClip"), "nameTxt", "nameTxtBg", name_);
+			blink_icon(r_host);
+		} else if (p_key == "Blink") {
+			should_blink_ = p_value.truthy();
+			blink_icon(r_host);
+		} else if (p_key == "Distance") {
+			distance_ = p_value.to_string();
+			set_pair(tag.child("distance").child("nameTextClip"), "nameTxt", "nameTxtBg", distance_);
+			blink_icon(r_host);
+		} else if (p_key == "Progress") {
+			update_progress(r_host, p_value.to_number());
+		} else if (p_key == "ProgressingTeam") {
+			progressing_team_ = p_value.to_number();
+			update_progress(r_host, progress_);
+		} else if (p_key == "Team") {
+			update_team(r_host, p_value);
+		} else if (p_key == "SquadOrders") {
+			update_squad_orders(r_host, p_value);
+		} else if (p_key == "ControlIcon") {
+			update_control_icon(r_host, p_value);
+		}
+	}
+
+	void update_is_close(HudWidgetHost &r_host, bool) override { update_progress(r_host, progress_); }
+
+	void update_snapping(HudWidgetHost &r_host, bool p_old, bool p_new) override {
+		const As2Clip label = r_host.clip("tag").child("label");
+		if (first_update_) {
+			if (p_new) {
+				label.goto_and_stop("hidden");
+			}
+			first_update_ = false;
+		} else if (p_new != p_old) {
+			label.goto_and_play(p_new ? "hide" : "show");
+		}
+	}
+
+	void update_icons(HudWidgetHost &r_host, const As2Value &p_icons) override {
+		if (p_icons.size() == 0) {
+			return;
+		}
+		const double first = as2_number(p_icons.at(0));
+		const As2Clip tag = r_host.clip("tag");
+		goto_and_stop_number(tag.child("iconObjective"), first);
+		goto_and_stop_number(r_host.clip("iconAlert").child("icon").child("iconObjective"), first);
+		if (first == double(kUiHudIconFriendlyBase) || first == double(kUiHudIconEnemyBase)) {
+			tag.child("label").set_y(kBaseLabelY);
+		}
+		const As2Clip order = r_host.clip("iconOrder");
+		if (p_icons.size() > 1) {
+			order.set_visible(true);
+			goto_and_stop_number(order.child("iconObjective"), as2_number(p_icons.at(1)));
+		} else {
+			order.set_visible(false);
+		}
+	}
+
+private:
+	static void set_pair(const As2Clip &p_clip, const char *p_text, const char *p_bg, const std::string &p_value) {
+		p_clip.child(p_text).set_text(p_value);
+		p_clip.child(p_bg).set_text(p_value);
+	}
+
+	void update_progress(HudWidgetHost &r_host, double p_value) {
+		progress_ = as2_round(p_value);
+		const As2Clip ring = r_host.clip("prgRad").child("progress");
+		goto_and_stop_number(ring, std::min(progress_, 100.0));
+		const bool hidden = !close_ && (progress_ == 100.0 || progress_ == 0.0);
+		ring.set_alpha(hidden ? 0.0f : 100.0f);
+		const As2Clip tag = r_host.clip("tag");
+		const bool shown = ring.alpha() == 100.0f;
+		tag.child("distance").set_y(shown ? 27.0f : 20.0f);
+		tag.child("label").set_y(shown ? 45.0f : 38.0f);
+		r_host.clip("controlIcon").set_x(shown ? 46.0f : 34.0f);
+		const double team = progressing_team_ == 0.0 ? 1.0 : progressing_team_;
+		goto_and_stop_number(ring.child("left"), team);
+		goto_and_stop_number(ring.child("right"), team);
+		goto_and_stop_number(ring.child("blink").child("bg"), team);
+	}
+
+	void update_team(HudWidgetHost &r_host, const As2Value &p_team) {
+		const As2Clip tag = r_host.clip("tag");
+		const double t = p_team.kind == As2Value::Kind::Number ? p_team.number : std::nan("");
+		if (t == 1.0 || t == double(kUiTeamStateFriendlyDropped)) {
+			tag.goto_and_stop("friendly");
+		} else if (t == 2.0 || t == double(kUiTeamStateEnemyDropped)) {
+			tag.goto_and_stop("enemy");
+		} else if (t == double(kUiTeamStateFriendlyPicked)) {
+			tag.goto_and_stop("CTFEnemyPicked");
+		} else if (t == double(kUiTeamStateEnemyPicked)) {
+			tag.goto_and_stop("CTFFriendlyPicked");
+		} else {
+			tag.goto_and_stop("neutral");
+		}
+		set_pair(tag.child("label").child("labelTextClip"), "labelTxt", "labelTxtBg", label_);
+		set_pair(tag.child("distance").child("labelTextClip"), "labelTxt", "labelTxtBg", distance_);
+		if (!as2_loose_equals(As2Value::of(team_), p_team)) {
+			changed_team(r_host);
+		}
+		team_ = double(as2_int(p_team));
+	}
+
+	void changed_team(HudWidgetHost &r_host) const {
+		r_host.self().goto_and_play("newTeam");
+		goto_and_stop_number(r_host.clip("controlIcon").child("icon"), team_ == 0.0 ? 4.0 : team_);
+	}
+
+	void update_squad_orders(HudWidgetHost &r_host, const As2Value &p_value) const {
+		const As2Clip orders = r_host.clip("squadOrders");
+		const double n = p_value.to_number();
+		if (n > 0.0) {
+			orders.set_visible(true);
+			orders.child("icon").goto_and_stop("SquadleaderBg");
+			set_pair(orders.child("txt"), "txt", "txtBg", "x" + As2Value::of(n).to_string());
+		} else {
+			orders.set_visible(false);
+		}
+	}
+
+	void update_control_icon(HudWidgetHost &r_host, const As2Value &p_value) const {
+		const As2Clip control = r_host.clip("controlIcon");
+		if (p_value.to_number() != 0.0) {
+			control.set_visible(true);
+			goto_and_stop_number(control, p_value.to_number());
+			goto_and_stop_number(control.child("icon"), team_ == 0.0 ? 4.0 : team_);
+		} else {
+			control.set_visible(false);
+		}
+	}
+
+	void blink_icon(HudWidgetHost &r_host) const {
+		const As2Clip alert = r_host.clip("iconAlert");
+		alert.set_visible(should_blink_);
+		alert.goto_and_play(should_blink_ ? "blink" : "idle");
+	}
+
+	static constexpr float kBaseLabelY = 38.0f;
+	double team_ = 0.0;
+	double progress_ = 0.0;
+	double progressing_team_ = 0.0;
+	std::string label_;
+	std::string name_;
+	std::string distance_;
+	bool should_blink_ = false;
+};
+
 class Icon3DManagerClass final : public HudWidgetController, public HudIcon3DManagerApi {
 public:
 	struct Spec {
@@ -372,6 +552,12 @@ void register_hud_widgets_icon3d(HudWidgetRegistry &r_registry) {
 	r_registry.add("Widget.Icon3D.Interaction.InteractionManager", [] { return std::make_unique<InteractionManagerClass>(); });
 	r_registry.add("Widget.Icon3D.Mapmarker.MapmarkerManager", [] { return std::make_unique<Icon3DManagerClass>(Icon3DManagerClass::Spec{ HudTagComponent::Mapmarker, "Marker", "Marker" }); });
 	r_registry.add("Widget.Icon3D.Mapmarker.Mapmarkertag", [] { return std::make_unique<MapmarkertagClass>(); });
+	r_registry.add("Widget.Icon3D.Capturepoint.CapturepointManager", [] {
+		return std::make_unique<Icon3DManagerClass>(
+				Icon3DManagerClass::Spec{ HudTagComponent::Capturepoint, "Flag", "Flag" });
+	});
+	r_registry.add(
+			"Widget.Icon3D.Capturepoint.Capturepointtag", [] { return std::make_unique<CapturepointtagClass>(); });
 }
 
 }

@@ -7,6 +7,7 @@ namespace {
 class TicketCounterClass final : public HudWidgetController {
 public:
 	void on_clip_load(HudWidgetHost &r_host) override {
+		mode_ = param_string(r_host, "m_gamemode");
 		r_host.renderer(r_host.self(), "t2");
 		r_host.tilt(r_host.self(), -15.0f, -15.0f, kHudPerspectiveFov);
 		r_host.self().set_visible(false);
@@ -78,6 +79,10 @@ public:
 	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const override {
 		const HudTeam &t = p_model.team;
 		const HudKillCounter &k = p_model.kill_counter;
+		if (mode_ == "conquest") {
+			bind_conquest(p_model, p_client, r_out);
+			return;
+		}
 		if (p_client.localise_hash) {
 			if (t.friendly_team_name != 0) {
 				r_out.push_back({ "FriendlyTDMTeamName", As2Value::of(p_client.localise_hash(t.friendly_team_name)) });
@@ -101,6 +106,25 @@ public:
 	const std::string &enemy_row() const { return enemy_row_; }
 
 private:
+	void bind_conquest(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const {
+		const HudTeam &t = p_model.team;
+		const HudTickets &k = p_model.tickets;
+		if (p_client.localise_hash) {
+			if (t.friendly_team_name != 0) {
+				r_out.push_back({ "FriendlyTeamName", As2Value::of(p_client.localise_hash(t.friendly_team_name)) });
+			}
+			if (t.enemy_team1_name != 0) {
+				r_out.push_back({ "EnemyTeamName", As2Value::of(p_client.localise_hash(t.enemy_team1_name)) });
+			}
+		}
+		if (k.global_max_tickets > 0) {
+			r_out.push_back({ "MaxTickets", As2Value::of(k.global_max_tickets) });
+		}
+		r_out.push_back({ "FriendlyTickets", As2Value::of(k.friendly_team_tickets) });
+		r_out.push_back({ "EnemyTickets", As2Value::of(k.enemy_team_tickets) });
+		r_out.push_back({ "IsHardcore", As2Value::of(p_client.hardcore) });
+	}
+
 	void show_teams(HudWidgetHost &r_host, int32_t p_n) {
 		for (int32_t i = 0; i < 4; ++i) {
 			if (i >= p_n) {
@@ -110,7 +134,7 @@ private:
 	}
 
 	void setup_gamemodes(HudWidgetHost &r_host) {
-		if (mode_ != "tdm") {
+		if (mode_ != "tdm" && mode_ != "conquest") {
 			return;
 		}
 		show_teams(r_host, 2);
@@ -122,8 +146,10 @@ private:
 		row_frame_script(r_host.clip(friendly_row_), 1);
 		r_host.clip(friendly_row_).child("team").set_text(friendly_name_);
 		enemy_row.child("team").set_text(enemy_name_);
-		update(r_host, "Team1TDMKills", team1_);
-		update(r_host, "Team2TDMKills", team2_);
+		if (mode_ == "tdm") {
+			update(r_host, "Team1TDMKills", team1_);
+			update(r_host, "Team2TDMKills", team2_);
+		}
 	}
 
 	static void row_frame_script(const As2Clip &p_row, int32_t p_frame) {
@@ -134,7 +160,7 @@ private:
 	}
 
 	void layout_gamemodes(HudWidgetHost &r_host) {
-		if (mode_ != "tdm") {
+		if (mode_ != "tdm" && mode_ != "conquest") {
 			return;
 		}
 		const As2Clip first = r_host.clip(friendly_row_);

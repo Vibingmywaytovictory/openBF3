@@ -1045,6 +1045,84 @@ TEST_CASE("conquest: tickets, the capture points by team, the flag under the own
 	CHECK(m.tickets.friendly_team_tickets == 0);
 }
 
+TEST_CASE("conquest: the out-of-bounds countdown in whole seconds from the own return tick, the objective bar's "
+		  "flags lettered from A by SpawnMenuListOrdinal with the own team's colours, and the minimap's flags") {
+	namespace lg = bf3::sim::logic;
+	const host::HudStatic st = make_static();
+	lg::ConquestParams params;
+	const auto point = [&](lg::CapturableType p_type, int32_t p_ordinal, float p_x) {
+		lg::ConquestPointData d;
+		d.node = uint32_t(params.points.size());
+		d.params.type = p_type;
+		d.params.spawn_menu_list_ordinal = p_ordinal;
+		d.params.position = { p_x, 12.0f, 100.0f };
+		d.params.capture_radius = 10.0f;
+		params.points.push_back(d);
+	};
+	point(lg::CapturableType::UnableToChangeTeam, 0, 0.0f);
+	point(lg::CapturableType::Default, 2, 100.0f);
+	point(lg::CapturableType::Default, 1, 200.0f);
+	net::ConquestState c;
+	c.tickets = { 120, 87 };
+	c.initial_tickets = { 150, 150 };
+	c.point_count = 3;
+	c.points[0] = { 1, 1, net::kConquestProgressMax, 0, true, false };
+	c.points[1] = { 2, 1, 5000, -670, true, true };
+	c.points[2] = { 0, 0, 0, 0, false, false };
+	c.return_by_tick = 1000 + 7 * bf3::sim::kSimHz - 10;
+	host::HudFeedInput in;
+	in.tdm = true;
+	in.match_valid = true;
+	in.match.phase = net::MatchPhase::InRound;
+	in.own_slot = 1;
+	in.own_team = 1;
+	in.alive = true;
+	in.server_tick = 1000;
+	in.conquest_valid = true;
+	in.conquest = c;
+	in.conquest_params = &params;
+	host::HudTdmFeedState state;
+	ui::HudModel m;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(m.combat_area.outside);
+	CHECK(m.combat_area.seconds_left == 7);
+	in.server_tick = c.return_by_tick + 30;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK(m.combat_area.outside);
+	CHECK(m.combat_area.seconds_left == 0);
+	in.alive = false;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK_FALSE(m.combat_area.outside);
+	in.alive = true;
+	in.conquest.return_by_tick = 0;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK_FALSE(m.combat_area.outside);
+	REQUIRE(m.capture_points.capturepoints_status_data.count == 3);
+	CHECK(m.capture_point_y[1] == 12.0f);
+
+	const ui::As2Value status = ui::hud_objective_status(m.capture_points.capturepoints_status_data);
+	REQUIRE(status.size() == 2);
+	CHECK(status.at(0).field("Label").to_string() == "A");
+	CHECK(status.at(0).field("Icon").to_number() == double(ui::kUiHudIconNeutralFlag));
+	CHECK_FALSE(status.at(0).field("IsAttacked").truthy());
+	CHECK(status.at(1).field("Label").to_string() == "B");
+	CHECK(status.at(1).field("Icon").to_number() == double(ui::kUiHudIconEnemyFlag));
+	CHECK(status.at(1).field("IsAttacked").truthy());
+
+	const std::vector<ui::HudFlagIcon> flags =
+			ui::hud_minimap_flags(m.capture_points.minimap_capturepoints_status_data);
+	REQUIRE(flags.size() == 3);
+	CHECK(flags[0].icon.icon == "UIHudIcon_Base");
+	CHECK(flags[0].icon.state == ui::HudIconState::Friendly);
+	CHECK(flags[0].letter == 0);
+	CHECK(flags[1].letter == 'A');
+	CHECK(flags[1].x == 200.0f);
+	CHECK(flags[1].icon.icon == "UIHudIcon_NeutralFlag");
+	CHECK(flags[2].letter == 'B');
+	CHECK(flags[2].icon.icon == "UIHudIcon_EnemyFlag");
+	CHECK(flags[2].icon.state == ui::HudIconState::Enemy);
+}
+
 TEST_CASE("squads: the own squad's members by slot with its leader, the team's squads, and a deploy row per living "
 		  "mate at its presented position") {
 	const host::HudStatic st = make_static();

@@ -6,7 +6,10 @@ namespace {
 
 class TicketCounterSpawnScreenClass final : public HudWidgetController {
 public:
-	void on_clip_load(HudWidgetHost &r_host) override { r_host.self().set_visible(false); }
+	void on_clip_load(HudWidgetHost &r_host) override {
+		mode_ = param_string(r_host, "m_gamemode");
+		r_host.self().set_visible(false);
+	}
 
 	void initialize(HudWidgetHost &r_host, const HudWidgetInit &p_init) override {
 		mode_ = param_string(r_host, "m_gamemode");
@@ -17,7 +20,21 @@ public:
 
 	void update(HudWidgetHost &r_host, std::string_view p_key, const As2Value &p_value) override {
 		const As2Clip ticket = r_host.clip("Ticket");
-		if (p_key == "SDM_PlayerTeam") {
+		if (p_key == "Conquest_FriendlyTickets") {
+			ticket.child("txtTeam1Tickets").set_text(p_value.to_string());
+		} else if (p_key == "Conquest_EnemyTickets") {
+			ticket.child("txtTeam2Tickets").set_text(p_value.to_string());
+		} else if (p_key == "Conquest_FriendlyTeamName") {
+			if (friendly_name_ != p_value.to_string()) {
+				friendly_name_ = p_value.to_string();
+				ticket.child("txtTeam1Team").set_text(friendly_name_);
+			}
+		} else if (p_key == "Conquest_EnemyTeamName") {
+			if (enemy_name_ != p_value.to_string()) {
+				enemy_name_ = p_value.to_string();
+				ticket.child("txtTeam2Team").set_text(enemy_name_);
+			}
+		} else if (p_key == "SDM_PlayerTeam") {
 			player_team_ = p_value.to_number() - 1.0;
 		} else if (p_key == "TDM_FriendlyTickets") {
 			ticket.child(player_team_ == 0.0 ? "txtTeam1Tickets" : "txtTeam2Tickets").set_text(p_value.to_string());
@@ -39,6 +56,10 @@ public:
 	}
 
 	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const override {
+		if (mode_ == "conquest") {
+			bind_conquest(p_model, p_client, r_out);
+			return;
+		}
 		const HudKillCounter &k = p_model.kill_counter;
 		if (k.player_team > 0) {
 			r_out.push_back({ "SDM_PlayerTeam", As2Value::of(k.player_team) });
@@ -58,6 +79,21 @@ public:
 	}
 
 private:
+	static void bind_conquest(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) {
+		r_out.push_back({ "Conquest_FriendlyTickets", As2Value::of(p_model.tickets.friendly_team_tickets) });
+		r_out.push_back({ "Conquest_EnemyTickets", As2Value::of(p_model.tickets.enemy_team_tickets) });
+		if (p_client.localise_hash) {
+			if (p_model.team.friendly_team_name != 0) {
+				r_out.push_back({ "Conquest_FriendlyTeamName",
+						As2Value::of(p_client.localise_hash(p_model.team.friendly_team_name)) });
+			}
+			if (p_model.team.enemy_team1_name != 0) {
+				r_out.push_back({ "Conquest_EnemyTeamName",
+						As2Value::of(p_client.localise_hash(p_model.team.enemy_team1_name)) });
+			}
+		}
+	}
+
 	void setup_gamemodes(HudWidgetHost &r_host) {
 		const As2Clip ticket = r_host.clip("Ticket");
 		ticket.goto_and_stop(mode_);
