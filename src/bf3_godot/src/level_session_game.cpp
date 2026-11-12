@@ -1363,7 +1363,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 	}
 	const std::optional<OwnVehicleSeat> seat = g.vehicles != nullptr ? g.vehicles->own_seat() : std::nullopt;
 	mapper_.set_seated(seat.has_value());
-	g.vehicle_camera += seat ? mapper_.take_camera_presses() : 0u;
+	g.vehicle_camera = seat ? g.vehicle_camera + mapper_.take_camera_presses() : 0u;
 	Camera3D *camera = cameras_.first_person();
 	Bf3Viewmodel *own_vm = g.own_viewmodel();
 	if (g.shown_team != g.own_team) {

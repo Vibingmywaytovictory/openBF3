@@ -311,8 +311,9 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			const float dx = f.own_curr.position[0] - (v != nullptr ? v->com_position[0] : 0.0f);
 			const float dz = f.own_curr.position[2] - (v != nullptr ? v->com_position[2] : 0.0f);
 			const float away = std::sqrt(dx * dx + dz * dz);
-			row("exit", p_in.alive && away > 1.0f && away < 6.0f,
-					fmt("out %.2f m from the Growler's centre", double(away)));
+			row("exit", p_in.alive && away > 1.0f && away < 6.0f && p_in.camera_counter == 0,
+					fmt("out %.2f m from the Growler's centre, camera counter %u", double(away),
+							unsigned(p_in.camera_counter)));
 			phase_ = Phase::Done;
 			return true;
 		}
