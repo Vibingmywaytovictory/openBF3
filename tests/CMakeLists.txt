@@ -391,7 +391,7 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_godot_row(godot.look_programs.mp018 godot_look_programs.cmake WINDOW TIMEOUT 400
         ARGS "-DPYTHON=${Python3_EXECUTABLE}" -DMAGENTA_LIMIT=0.0005 -DLEVEL=MP_018
         "-DVIEWS=rock_e@-391,96,-405,90,-15|rock_n@-405,96,-417,0,-15|rock_w@-419,96,-405,-90,-15|rock_s@-405,96,-393,180,-15"
-        -DMIN_MATERIALS=10 -DMIN_INSTANCES=694)
+        -DMIN_MATERIALS=14 -DMIN_INSTANCES=706)
     set_tests_properties(godot.look_programs.mp018 PROPERTIES RUN_SERIAL TRUE)
 endif()
 openbf3_test(test_s1_contract test_main.cpp s1_contract_tests.cpp test_support.h)

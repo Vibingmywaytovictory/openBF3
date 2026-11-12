@@ -755,15 +755,15 @@ void LookResolver::attach_program(
 		srgb |= h->srgb ? uint64_t(1) << i : 0;
 		textures.push_back(name);
 	}
-	if (info.target == ProgramTarget::Deferred && textures.size() == 1 && r_out.color &&
-			textures.front() == r_out.color->name) {
-		r_out.graph_plain = true;
-		return;
-	}
 	bool mask_colour = false;
 	for (const ProgramBinding &b : info.mask_bindings) {
 		const std::string name = b.parameter.empty() ? b.name : to_lower_ascii(p_slot.texture(b.parameter));
 		mask_colour = mask_colour || (r_out.color && r_out.color->name == name);
+	}
+	if (info.target == ProgramTarget::Deferred && !mask_colour && textures.size() == 1 && r_out.color &&
+			textures.front() == r_out.color->name) {
+		r_out.graph_plain = true;
+		return;
 	}
 	if (info.target == ProgramTarget::Deferred && !mask_colour) {
 		return;

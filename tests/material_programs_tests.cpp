@@ -449,6 +449,7 @@ constexpr std::pair<const char *, std::string_view> kDrawnThroughPrograms[] = {
 	{ "MP_018", "levels/mp_018/objects/rock_01b_mp_018_shader" },
 	{ "MP_018", "levels/mp_018/objects/rock_01e_mp_018_shader" },
 	{ "XP3_Alborz", "levels/mp_whitepeak/objects/rock_01_snow" },
+	{ "XP3_Desert", "levels/xp3_desert/objects/ss_backdropocean_fade" },
 };
 constexpr std::string_view kHiddenLedger[] = {
 	"levels/mp_007/props/m_mp007_waterwash_01",
