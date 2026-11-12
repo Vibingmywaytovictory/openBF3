@@ -261,6 +261,42 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(pm.find(5) == nullptr);
 	}
 
+	TEST_CASE("perception: an update integrates the ticks its caller gives since its last look, and keeps that look's "
+			  "tick") {
+		const std::unique_ptr<sim::CollisionWorld> world = wall_world();
+		sb::PerceptionParams params;
+		std::vector<sim::SoldierState> states{ soldier_at({ 0, 0, 0 }), soldier_at({ 20, 0, 20 }) };
+		std::vector<uint8_t> teams{ 1, 2 };
+		std::vector<uint8_t> alive(2, 1);
+		sb::PerceptionInput in;
+		in.self = 0;
+		in.team = 1;
+		in.eye = { 0, 1.6f, 0 };
+		in.yaw = sim::quantize_yaw(0.0f);
+		in.states = states;
+		in.teams = teams;
+		in.alive = alive;
+		in.world = world.get();
+		in.tick = 30;
+		sb::Perception staggered(params), sparse(params);
+		CHECK(sparse.updated() == 0u);
+		staggered.update(in);
+		in.elapsed_ticks = 12;
+		sparse.update(in);
+		CHECK(sparse.updated() == 30u);
+		REQUIRE(staggered.find(1) != nullptr);
+		REQUIRE(sparse.find(1) != nullptr);
+		CHECK(sparse.find(1)->detection == doctest::Approx(2.0f * staggered.find(1)->detection));
+		CHECK_FALSE(sparse.find(1)->detected);
+		in.tick = 54;
+		in.elapsed_ticks = 24;
+		sparse.update(in);
+		CHECK(sparse.find(1)->detected);
+		CHECK(sparse.updated() == 54u);
+		sparse.reset();
+		CHECK(sparse.updated() == 0u);
+	}
+
 	TEST_CASE("perception: the chest ray first; only the head over a low wall is recorded as such") {
 		const std::unique_ptr<sim::CollisionWorld> world = low_wall_world();
 		sb::PerceptionParams params;

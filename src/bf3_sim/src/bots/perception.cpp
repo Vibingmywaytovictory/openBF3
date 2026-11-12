@@ -93,6 +93,7 @@ void Perception::reset() {
 	enemies_.clear();
 	newly_.clear();
 	heard_ = 0;
+	updated_ = 0;
 }
 
 std::span<const PerceivedEnemy> Perception::enemies() const {
@@ -119,7 +120,9 @@ uint32_t Perception::heard_last() const {
 uint32_t Perception::update(const PerceptionInput &p_in) {
 	newly_.clear();
 	heard_ = 0;
-	const uint32_t update_ticks = std::max<uint32_t>(params_.update_ticks, 1u);
+	updated_ = p_in.tick;
+	const uint32_t update_ticks =
+			std::max<uint32_t>(p_in.elapsed_ticks != 0 ? p_in.elapsed_ticks : params_.update_ticks, 1u);
 	const float dt = float(update_ticks) * kTickSeconds;
 	const size_t n = std::min({ p_in.states.size(), p_in.teams.size(), kMaxSlots });
 	const auto entry = [&](uint8_t p_slot) -> PerceivedEnemy & {

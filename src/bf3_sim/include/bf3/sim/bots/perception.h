@@ -70,6 +70,7 @@ struct PerceptionInput {
 
 	float eye_heights[3] = { 1.6f, 1.0f, 0.3f };
 	uint32_t ray_mask = 0;
+	uint32_t elapsed_ticks = 0;
 };
 
 bool perception_tick(uint8_t p_slot, Tick p_tick, uint32_t p_update_ticks);
@@ -86,12 +87,14 @@ public:
 
 	std::span<const uint8_t> newly_detected() const;
 	uint32_t heard_last() const;
+	Tick updated() const { return updated_; }
 
 private:
 	PerceptionParams params_;
 	std::vector<PerceivedEnemy> enemies_;
 	std::vector<uint8_t> newly_;
 	uint32_t heard_ = 0;
+	Tick updated_ = 0;
 };
 
 float detection_time(const PerceptionParams &p_params, float p_distance);
