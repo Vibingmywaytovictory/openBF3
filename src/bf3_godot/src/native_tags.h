@@ -43,6 +43,7 @@ inline constexpr uint32_t kMaxLosRaysPerFrame = 4;
 inline constexpr double kNativeTagsSummaryEveryS = 30.0;
 inline constexpr float kAlertBehindReach = 4096.0f;
 inline constexpr uint32_t kOrderTagId = 0xFF000000u;
+inline constexpr uint32_t kCaptureTagId = 0xFE000000u;
 
 struct NativeAlert {
 	uint32_t id = 0;
@@ -96,6 +97,7 @@ struct NativeTagStats {
 	uint64_t alert_tags = 0;
 	uint64_t order_frames = 0;
 	uint64_t order_tags = 0;
+	uint64_t capture_tags = 0;
 	uint64_t spotted_icons = 0;
 	uint64_t need_icons = 0;
 	uint64_t orders_received = 0;
@@ -115,6 +117,8 @@ public:
 			core::ui::HudWorldTags &r_tags);
 	const core::ui::Icon3dStyle &alert_style() const { return alert_style_; }
 	const std::vector<NativeAlert> &alerts() const { return alerts_; }
+	void update_capture_points(const godot::Camera3D *p_camera, bool p_show, const core::ui::UiStage &p_stage,
+			const core::ui::HudModel &p_model, core::ui::HudWorldTags &r_tags);
 	void update_orders(const godot::Camera3D *p_camera, bool p_show, const core::ui::UiStage &p_stage,
 			core::ui::HudWorldTags &r_tags);
 	const core::ui::Icon3dStyle &marker_style() const { return marker_style_; }
@@ -147,6 +151,7 @@ private:
 	core::ui::SpottingRules spotting_;
 	core::ui::Icon3dStyle alert_style_;
 	core::ui::Icon3dStyle marker_style_;
+	core::ui::Icon3dStyle capture_style_;
 	std::optional<NativeOrderMark> order_;
 	std::vector<NativeAlert> alerts_;
 	std::array<std::string, 4> kit_icons_;

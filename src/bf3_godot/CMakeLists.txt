@@ -290,6 +290,8 @@ if(OPENBF3_BUILD_CHECKS)
         src/minimap_check.h
         src/minimap_modes_check.cpp
         src/minimap_modes_check.h
+        src/conquest_hud_check.cpp
+        src/conquest_hud_check.h
         src/icons3d_check.cpp
         src/icons3d_check.h
         src/commo_rose_check.cpp

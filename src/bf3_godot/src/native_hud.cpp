@@ -182,6 +182,10 @@ void Bf3NativeHud::set_level(const std::string &p_level) {
 	level_ = p_level;
 }
 
+void Bf3NativeHud::set_mode(std::string_view p_mode) {
+	partitions_[1] = ui::hud_mode_screen_partition(p_mode);
+}
+
 void Bf3NativeHud::set_model(const ui::HudModel &p_model) {
 	if (!fixture_) {
 		model_ = p_model;
@@ -261,9 +265,9 @@ void Bf3NativeHud::start_loader() {
 			out->error = superbundle + ": " + lib.error().message;
 		} else {
 			for (size_t i = 0; i < kNativeHudViews; ++i) {
-				bf3::core::Result<ui::HudScreenAsset> a = ui::read_hud_screen_asset(**lib, kNativeHudPartitions[i]);
+				bf3::core::Result<ui::HudScreenAsset> a = ui::read_hud_screen_asset(**lib, partitions_[i]);
 				if (!a) {
-					out->error += std::string(kNativeHudPartitions[i]) + ": " + a.error().message + "; ";
+					out->error += std::string(partitions_[i]) + ": " + a.error().message + "; ";
 					continue;
 				}
 				out->assets[i] = std::move(*a);
@@ -354,7 +358,8 @@ bf3::core::Status Bf3NativeHud::open_view(size_t p_index) {
 	static const char *const kNames[kNativeHudViews] = { "HudMp", "HudTdm", "Crosshair", "HudShared" };
 	Bf3UiAssets *assets = Bf3UiAssets::current();
 	if (!loaded_ || !loaded_->assets[p_index] || assets == nullptr || assets->movies() == nullptr) {
-		return bf3::core::make_error(std::string(kNativeHudPartitions[p_index]) + ": no loaded screen asset or Bf3UiAssets movies");
+		return bf3::core::make_error(
+				std::string(partitions_[p_index]) + ": no loaded screen asset or Bf3UiAssets movies");
 	}
 	const ui::HudScreenAsset &asset = *loaded_->assets[p_index];
 	Bf3SwfView *v = memnew(Bf3SwfView);
@@ -386,21 +391,17 @@ bf3::core::Status Bf3NativeHud::open_view(size_t p_index) {
 	return bf3::core::Status::success();
 }
 
-namespace {
-
-std::optional<size_t> native_hud_index(std::string_view p_partition) {
+std::optional<size_t> Bf3NativeHud::index_of(std::string_view p_partition) const {
 	for (size_t i = 0; i < kNativeHudViews; ++i) {
-		if (kNativeHudPartitions[i] == p_partition) {
+		if (partitions_[i] == p_partition) {
 			return i;
 		}
 	}
 	return std::nullopt;
 }
 
-}
-
 bf3::core::Status Bf3NativeHud::open_screen(std::string_view p_partition) {
-	const std::optional<size_t> i = native_hud_index(p_partition);
+	const std::optional<size_t> i = index_of(p_partition);
 	if (!i) {
 		return bf3::core::make_error(std::string(p_partition) + ": Bf3NativeHud hosts only the four in-round screens");
 	}
@@ -416,7 +417,7 @@ bf3::core::Status Bf3NativeHud::open_screen(std::string_view p_partition) {
 }
 
 bool Bf3NativeHud::show_screen(std::string_view p_partition) {
-	const std::optional<size_t> i = native_hud_index(p_partition);
+	const std::optional<size_t> i = index_of(p_partition);
 	if (!i || views_[*i] == nullptr) {
 		return false;
 	}
@@ -427,7 +428,7 @@ bool Bf3NativeHud::show_screen(std::string_view p_partition) {
 }
 
 bool Bf3NativeHud::hide_screen(std::string_view p_partition) {
-	const std::optional<size_t> i = native_hud_index(p_partition);
+	const std::optional<size_t> i = index_of(p_partition);
 	if (!i || views_[*i] == nullptr) {
 		return false;
 	}
@@ -437,7 +438,7 @@ bool Bf3NativeHud::hide_screen(std::string_view p_partition) {
 }
 
 bool Bf3NativeHud::order_screen(std::string_view p_partition, int32_t p_order) {
-	const std::optional<size_t> i = native_hud_index(p_partition);
+	const std::optional<size_t> i = index_of(p_partition);
 	if (!i) {
 		return false;
 	}
@@ -447,7 +448,7 @@ bool Bf3NativeHud::order_screen(std::string_view p_partition, int32_t p_order) {
 }
 
 bool Bf3NativeHud::close_screen(std::string_view p_partition) {
-	const std::optional<size_t> i = native_hud_index(p_partition);
+	const std::optional<size_t> i = index_of(p_partition);
 	if (!i || (views_[*i] == nullptr && screens_[*i] == nullptr)) {
 		return false;
 	}
@@ -460,7 +461,7 @@ bool Bf3NativeHud::close_screen(std::string_view p_partition) {
 }
 
 bool Bf3NativeHud::set_screen_modal(std::string_view p_partition, bool p_modal) {
-	return !p_modal && native_hud_index(p_partition).has_value();
+	return !p_modal && index_of(p_partition).has_value();
 }
 
 bool Bf3NativeHud::focus_screen(std::string_view) {
@@ -479,15 +480,16 @@ UiScreenSlot Bf3NativeHud::screen_slot(size_t p_index) const {
 	if (p_index >= kNativeHudViews) {
 		return {};
 	}
-	return UiScreenSlot{ kNativeHudPartitions[p_index], screens_[p_index].get(), views_[p_index], shown_[p_index], order_[p_index] };
+	return UiScreenSlot{ partitions_[p_index], screens_[p_index].get(), views_[p_index], shown_[p_index],
+		order_[p_index] };
 }
 
 bool Bf3NativeHud::reports(std::string_view p_partition) const {
-	return built_ && !failed_ && native_hud_index(p_partition).has_value();
+	return built_ && !failed_ && index_of(p_partition).has_value();
 }
 
 std::optional<UiScreenRecord> Bf3NativeHud::screen_record(std::string_view p_partition) const {
-	const std::optional<size_t> i = reports(p_partition) ? native_hud_index(p_partition) : std::nullopt;
+	const std::optional<size_t> i = reports(p_partition) ? index_of(p_partition) : std::nullopt;
 	if (!i) {
 		return std::nullopt;
 	}
@@ -647,6 +649,8 @@ void Bf3NativeHud::step(double p_seconds) {
 	if (tags_ != nullptr && !fixture_) {
 		tags_->update_alerts(world_camera_, world_show_ && is_visible_in_tree(), ui_stage(this), world_tags_);
 		tags_->update_orders(world_camera_, world_show_ && is_visible_in_tree(), ui_stage(this), world_tags_);
+		tags_->update_capture_points(
+				world_camera_, world_show_ && is_visible_in_tree(), ui_stage(this), model_, world_tags_);
 	} else {
 		world_tags_.tags.clear();
 	}
@@ -1042,12 +1046,38 @@ void Bf3NativeHud::paint_minimap(const SwfEngineTarget &p_target, const ui::SwfS
 		const ui::HudIconStateFrames *st = state_of(p_icon, p_state);
 		return st != nullptr && st->should_rotate ? view.heading - p_yaw : 0.0f;
 	};
+	const std::vector<ui::HudFlagIcon> flags =
+			ui::hud_minimap_flags(model_.capture_points.minimap_capturepoints_status_data);
 	for (const MinimapIconDraw &ic : minimap_source_->icon_draws()) {
 		const ui::ScreenPoint p = ui::minimap_project(view, ic.world_x, ic.world_z);
-		if (on_map(p)) {
+		if (on_map(p) && !(ic.objective && !flags.empty())) {
 			draw(ic.icon, ic.state, Vector2(p.x, p.y), icon_angle(ic.icon, ic.state, ic.yaw),
 					ic.objective ? MinimapDebugKind::Objective : MinimapDebugKind::Friendly, ic.world_x, ic.world_z);
 		}
+	}
+	if (!flags.empty() && tag_font_.is_null()) {
+		if (Bf3UiAssets *u = Bf3UiAssets::current()) {
+			tag_font_ = u->get_font(String("$Menu_medium"));
+		}
+	}
+	const int32_t letter_size = std::max(1, int32_t(std::lround(kMinimapFlagLetterSize * unit)));
+	for (const ui::HudFlagIcon &f : flags) {
+		const ui::ScreenPoint p = ui::minimap_project(view, f.x, f.z);
+		if (!on_map(p)) {
+			continue;
+		}
+		draw(a->atlas.find(f.icon.icon), f.icon.state, Vector2(p.x, p.y), 0.0f, MinimapDebugKind::Objective, f.x, f.z);
+		paint_.minimap_flags++;
+		if (f.letter == 0 || tag_font_.is_null()) {
+			continue;
+		}
+		const String text = String::chr(char32_t(f.letter));
+		const Vector2 ts = tag_font_->get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, letter_size);
+		rs->canvas_item_add_set_transform(minimap_icon_item_, Transform2D(0.0f, Vector2(p.x, p.y)));
+		tag_font_->draw_string(minimap_icon_item_,
+				Vector2(-ts.x * 0.5f, tag_font_->get_ascent(letter_size) - ts.y * 0.5f), text,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, letter_size, Color(1, 1, 1, 1));
+		paint_.minimap_letters++;
 	}
 	const ui::HudIcon *dead = a->atlas.find(ui::kHudIconPlayerDead);
 	for (const NativeHudDownedMate &d : downed_) {

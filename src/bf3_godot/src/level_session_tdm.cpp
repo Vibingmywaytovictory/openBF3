@@ -1685,6 +1685,12 @@ bool Bf3LevelSession::tdm_spawn_screen_shown() const {
 	return game_ != nullptr && game_->tdm != nullptr && game_->tdm->spawn_screen;
 }
 
+bool Bf3LevelSession::tdm_screen_visible(std::string_view p_partition) const {
+	const Bf3UiScreens *screens = game_ != nullptr && game_->tdm != nullptr ? tdm_ui_screens(*game_->tdm) : nullptr;
+	const std::optional<UiScreenRecord> r = screens != nullptr ? screens->screen_record(p_partition) : std::nullopt;
+	return r && r->visible;
+}
+
 std::string Bf3LevelSession::tdm_concept_key(int32_t p_concept) {
 	if (game_ == nullptr || game_->tdm == nullptr || game_->tdm->native_flow == nullptr) {
 		return {};

@@ -39,6 +39,7 @@ class Bf3LevelSession;
 class Bf3MinimapHud;
 
 inline constexpr size_t kNativeHudViews = 4;
+inline constexpr float kMinimapFlagLetterSize = 10.0f;
 inline constexpr size_t kNativeHudSharedView = 3;
 
 struct NativeHudClipState {
@@ -85,6 +86,8 @@ struct NativeHudPaintStats {
 	uint32_t minimap_icons = 0;
 	uint32_t minimap_downed = 0;
 	uint32_t minimap_orders = 0;
+	uint32_t minimap_flags = 0;
+	uint32_t minimap_letters = 0;
 	uint32_t tag_icons = 0;
 	uint32_t tag_leaders = 0;
 	uint32_t tag_names = 0;
@@ -118,6 +121,8 @@ public:
 	void _exit_tree() override;
 
 	void set_level(const std::string &p_level);
+	void set_mode(std::string_view p_mode);
+	const std::array<std::string_view, kNativeHudViews> &partitions() const { return partitions_; }
 	void set_model(const bf3::core::ui::HudModel &p_model);
 	void set_vfov_deg(double p_deg);
 	void set_safe_area(const bf3::core::ui::ScreenAdjustFractions &p_safe) { safe_area_ = p_safe; }
@@ -187,6 +192,7 @@ protected:
 
 private:
 	struct Loaded;
+	std::optional<size_t> index_of(std::string_view p_partition) const;
 	void join_loader();
 	void start_loader();
 	void build();
@@ -199,6 +205,7 @@ private:
 	void paint_tags();
 
 	std::string level_ = "MP_Subway";
+	std::array<std::string_view, kNativeHudViews> partitions_ = kNativeHudPartitions;
 	bool manual_ = false;
 	bool fixture_ = false;
 	bool started_ = false;

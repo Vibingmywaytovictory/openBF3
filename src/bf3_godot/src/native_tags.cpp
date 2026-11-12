@@ -60,6 +60,7 @@ struct NativeTags::Loaded {
 	ui::SpottingRules spotting;
 	ui::Icon3dStyle alert_style;
 	ui::Icon3dStyle marker_style;
+	ui::Icon3dStyle capture_style;
 	std::array<std::string, 4> kit_icons;
 	std::string notes;
 	double seconds = 0.0;
@@ -110,6 +111,12 @@ void NativeTags::run_loader() {
 				out->marker_style = *s;
 			} else {
 				notes += " map marker style: " + s.error().message + ";";
+			}
+			if (core::Result<ui::Icon3dStyle> s =
+							ui::read_icon3d_style(**lib, ui::kCapturepointTagCompPartition, &budget)) {
+				out->capture_style = *s;
+			} else {
+				notes += " capture point tag style: " + s.error().message + ";";
 			}
 			if (const core::EbxPartition *team = (*lib)->partition_by_name("gameplay/teams/us")) {
 				if (core::Result<core::gameplay::TeamDef> td = core::gameplay::read_team_data(**lib, team->primary(), &budget)) {
@@ -167,6 +174,7 @@ void NativeTags::apply_loaded() {
 	spotting_ = l->spotting;
 	alert_style_ = l->alert_style;
 	marker_style_ = l->marker_style;
+	capture_style_ = l->capture_style;
 	kit_icons_ = l->kit_icons;
 	char line[512];
 	std::snprintf(line, sizeof(line),
@@ -243,6 +251,29 @@ void NativeTags::update_orders(
 		}
 	}
 	order_ = mark;
+}
+
+void NativeTags::update_capture_points(const Camera3D *p_camera, bool p_show, const ui::UiStage &p_stage,
+		const ui::HudModel &p_model, ui::HudWorldTags &r_tags) {
+	if (!applied_ || !p_show || p_camera == nullptr || !p_camera->is_inside_tree() || !(p_stage.scale > 0.0f)) {
+		return;
+	}
+	const ui::HudCapturePointList &points = p_model.capture_points.capturepoints_status_data;
+	char letter = 'A';
+	for (size_t i = 0; i < points.count && i < points.points.size(); ++i) {
+		const ui::HudCapturePoint &c = points.points[i];
+		const char label = c.hq ? char(0) : letter++;
+		const Vector3 at(c.x, p_model.capture_point_y[i] + capture_style_.vertical_offset, c.z);
+		float distance = 0.0f;
+		bool in_front = false;
+		const ui::Icon3dPlacement p = place(*p_camera, capture_style_, p_stage, at, distance, in_front);
+		if (!p.shown) {
+			continue;
+		}
+		ui::HudWorldTag tag = ui::capture_point_tag(kCaptureTagId + uint32_t(i), c, label, p);
+		r_tags.tags.push_back(std::move(tag));
+		++stats_.capture_tags;
+	}
 }
 
 void NativeTags::update_alerts(

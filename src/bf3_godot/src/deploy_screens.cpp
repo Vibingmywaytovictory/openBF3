@@ -77,6 +77,7 @@ void DeployScreens::draw(Bf3UiScreens &r_screens) {
 	for (const std::string_view p : bf3::core::ui::kDeployDrawnPartitions) {
 		r_screens.set_drawn(p, true);
 	}
+	r_screens.set_drawn(bf3::core::ui::kSpawnTicketCounterConquestPartition, true);
 	for (const std::string_view p : kCustomizeScreenPartitions) {
 		r_screens.set_drawn(p, true);
 	}

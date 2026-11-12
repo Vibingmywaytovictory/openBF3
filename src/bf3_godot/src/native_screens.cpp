@@ -161,11 +161,11 @@ void Bf3UiScreens::adopt(Bf3NativeHud *p_hud) {
 		return;
 	}
 	for (size_t i = 0; i < kNativeHudViews; ++i) {
-		if (find(kNativeHudPartitions[i]) != nullptr) {
+		if (find(p_hud->partitions()[i]) != nullptr) {
 			continue;
 		}
 		auto e = std::make_unique<Entry>();
-		e->partition = std::string(kNativeHudPartitions[i]);
+		e->partition = std::string(p_hud->partitions()[i]);
 		e->adopted = true;
 		e->order = int32_t(i);
 		e->phase = UiScreenPhase::Shown;

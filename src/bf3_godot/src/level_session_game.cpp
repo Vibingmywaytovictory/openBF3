@@ -317,6 +317,9 @@ void Bf3LevelSession::game_parse_args() {
 	if (has_check_arg("minimap-modes")) {
 		g.minimap_modes = std::make_unique<MinimapModesCheck>(user_arg_value("level"), user_arg_value("minimap-mode"));
 	}
+	if (has_check_arg("conquest-hud")) {
+		g.conquest_hud = std::make_unique<ConquestHudCheck>(user_arg_value("conquest-hud-shot"));
+	}
 	if (has_check_arg("icons3d-check")) {
 		g.icons3d = std::make_unique<Icons3dCheck>();
 		mapper_.set_scripted(true);
@@ -891,7 +894,8 @@ void GameState::want_catalog_weapons(std::span<const uint16_t> p_defs) {
 
 namespace {
 
-void build_game_ui(Node *p_parent, GameState &r_game, bool p_windowed, const std::string &p_level) {
+void build_game_ui(
+		Node *p_parent, GameState &r_game, bool p_windowed, const std::string &p_level, const std::string &p_mode) {
 	r_game.layer = memnew(CanvasLayer);
 	r_game.layer->set_name("GameUi");
 	p_parent->add_child(r_game.layer);
@@ -902,6 +906,7 @@ void build_game_ui(Node *p_parent, GameState &r_game, bool p_windowed, const std
 		r_game.native_hud = memnew(Bf3NativeHud);
 		r_game.native_hud->set_name("NativeHud");
 		r_game.native_hud->set_level(p_level);
+		r_game.native_hud->set_mode(p_mode);
 		r_game.layer->add_child(r_game.native_hud);
 		r_game.hud_items = memnew(Bf3HudItems);
 		r_game.hud_items->set_name("HudItems");
@@ -1206,7 +1211,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			UtilityFunctions::print(to_godot(n));
 		}
 		g.part_notes.clear();
-		build_game_ui(this, g, !headless_, level_);
+		build_game_ui(this, g, !headless_, level_, mode_);
 		if (!g.hud_static_error.empty()) {
 			UtilityFunctions::print(to_godot("[game] HUD feed without weapon rows: " + g.hud_static_error));
 		}
@@ -1546,6 +1551,23 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			g.finished = true;
 			UtilityFunctions::print(to_godot(g.minimap_modes->report()));
 			finish(g.minimap_modes->exit_code());
+			return true;
+		}
+	}
+	if (g.conquest_hud != nullptr && g.native_hud != nullptr && !g.finished) {
+		ConquestHudIo io;
+		io.alive = g.alive;
+		io.spawn_screen = tdm_spawn_screen_shown();
+		io.spawn_ticket_counter = tdm_screen_visible(bf3::core::ui::kSpawnTicketCounterConquestPartition);
+		io.deploy = [this] {
+			scripted_ui_key(KEY_ENTER, true);
+			scripted_ui_key(KEY_ENTER, false);
+		};
+		io.screenshot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		if (g.conquest_hud->step(*g.native_hud, io, p_delta)) {
+			g.finished = true;
+			UtilityFunctions::print(to_godot(g.conquest_hud->report()));
+			finish(g.conquest_hud->exit_code());
 			return true;
 		}
 	}
