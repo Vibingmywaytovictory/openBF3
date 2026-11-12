@@ -4605,4 +4605,41 @@ TEST_SUITE("host-vehicles-seats") {
 		CHECK(exit_off < 0.25f);
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
+
+	TEST_CASE("vehicles: SharedLoadOptions::vehicle_tuning reaches MP_007 Conquest's level vehicles") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		core::Cache cache;
+		core::CacheOptions co;
+		co.root = level->cache_root;
+		co.guard = level->reader->write_guard();
+		std::string detail;
+		REQUIRE_MESSAGE(cache.open(std::move(co), &detail) == core::CacheStatus::Ok, detail);
+		host::SharedLoadOptions options;
+		options.cache = &cache;
+		options.tuning = tg::shipped_motor_tuning();
+		options.tdm = true;
+		options.tdm_tuning_cfg = tdm::detail::default_tdm_tuning_cfg();
+		options.vehicle_tuning.hand_brake_torque = 2.0f * sim::VehicleTuning{}.hand_brake_torque;
+		core::Result<host::LevelDatabase> db =
+				host::open_level_database(level->install, "MP_007", "ConquestSmall0", 0, nullptr);
+		REQUIRE_MESSAGE(db.ok(), (db.ok() ? std::string() : db.error().message));
+		core::Result<std::shared_ptr<const host::SharedLevel>> shared = host::load_shared_level(*db, options, nullptr);
+		REQUIRE_MESSAGE(shared.ok(), (shared.ok() ? std::string() : shared.error().message));
+		cache.close();
+		REQUIRE((*shared)->vehicles != nullptr);
+		const uint64_t given = sim::vehicle_tuning_hash(options.vehicle_tuning);
+		const uint64_t loaded = sim::vehicle_tuning_hash((*shared)->vehicles->tuning);
+		const uint64_t defaults = sim::vehicle_tuning_hash(sim::VehicleTuning{});
+		std::printf("vehicles: a load given hand_brake_torque %.0f carries tuning %016llx (given %016llx, defaults "
+					"%016llx)\n",
+				double(options.vehicle_tuning.hand_brake_torque), (unsigned long long)loaded, (unsigned long long)given,
+				(unsigned long long)defaults);
+		CHECK(loaded == given);
+		CHECK(loaded != defaults);
+		CHECK((*shared)->vehicles->tuning.hand_brake_torque ==
+				doctest::Approx(options.vehicle_tuning.hand_brake_torque));
+	}
 }
