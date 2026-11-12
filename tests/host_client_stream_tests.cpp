@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "bf3/core/math.h"
+#include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/percentile.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/client_session.h"
@@ -25,6 +26,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -1143,6 +1145,14 @@ TEST_SUITE("host-vehicles-predict") {
 		core::Result<std::unique_ptr<sim::CollisionWorld>> world =
 				sim::CollisionWorld::create(level->shared->static_world);
 		REQUIRE(world.ok());
+		{
+			const auto start = std::chrono::steady_clock::now();
+			host::ClientVehiclePrediction built;
+			REQUIRE(built.init(*level->shared).ok());
+			std::printf(
+					"host.vehicles.predict: a client's vehicle world over MP_007's static shapes builds in %.1f ms\n",
+					core::ms_since(start));
+		}
 
 		uint64_t now = 1'000'000'000'000ull;
 		const host::MonotonicClock clock = [&] { return now; };
