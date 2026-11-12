@@ -27,6 +27,7 @@
 #include <filesystem>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
@@ -157,6 +158,7 @@ public:
 	std::vector<uint8_t> mesh_seen;
 	std::vector<uint8_t> texture_seen;
 	uint64_t terrain_vertices = 0, terrain_triangles = 0, mesh_triangles = 0;
+	std::optional<TerrainLookStats> terrain_look;
 	std::map<std::string, uint64_t> texture_formats;
 
 	void note(uint64_t p_bytes) {
@@ -196,6 +198,9 @@ public:
 			std::lock_guard<std::mutex> lock(mutex);
 			terrain_vertices += p_terrain.mesh.vertices;
 			terrain_triangles += p_terrain.mesh.triangles;
+			if (p_terrain.look) {
+				terrain_look = p_terrain.look->stats;
+			}
 		}
 		++terrains;
 		note(p_bytes);
@@ -813,6 +818,10 @@ TEST_SUITE("render-scene") {
 				std::printf(" %s %llu", format.c_str(), (unsigned long long)count);
 			}
 			std::printf("; largest item %.1f MiB\n", mib(sink.largest));
+			REQUIRE(sink.terrain_look.has_value());
+			std::printf("render.scene terrain look: masks at %.2f m (data %.2f m), colour at %.2f m (data %.2f m)\n",
+					double(sink.terrain_look->mask_texel), double(sink.terrain_look->data_mask_texel),
+					double(sink.terrain_look->colour_texel), double(sink.terrain_look->data_colour_texel));
 			CHECK(stats->failures == sink.failures.size());
 			CHECK(stats->mesh_items + stats->texture_items + stats->terrain_items + stats->failures >= p.textures.size() + p.terrains.size());
 			CHECK(stats->texture_items + std::count_if(sink.failures.begin(), sink.failures.end(),

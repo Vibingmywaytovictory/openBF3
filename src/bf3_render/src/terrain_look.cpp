@@ -320,8 +320,9 @@ core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 	}
 	TerrainLook look;
 	const float mask_rect = finest_mask_rect(mask);
-	const Region masks = region_for(
-			rect, mask_rect / float(mask.samples_per_side - core::res::kTerrainMaskBorder), kTerrainMaxMaskSide);
+	look.stats.data_mask_texel = mask_rect / float(mask.samples_per_side - core::res::kTerrainMaskBorder);
+	const Region masks = region_for(rect, look.stats.data_mask_texel, kTerrainMaxMaskSide);
+	look.stats.mask_texel = masks.grid.texel;
 	std::vector<std::vector<uint8_t>> layers;
 	core::res::ResError e = tree.mask_grids(masks.grid, mask.max_level(), p_input.fetch, layers);
 	if (!e.ok()) {
@@ -455,8 +456,9 @@ core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 		const core::res::TerrainColourTree &colour_tree = *tree.colour;
 		const float colour_node =
 				(colour_tree.bounds[2] - colour_tree.bounds[0]) / float(uint32_t(1) << colour_tree.max_level());
-		colours = region_for(rect, colour_node / float(colour_tree.texels_per_side - core::res::kTerrainColourBorder),
-				kTerrainMaxColourSide);
+		look.stats.data_colour_texel =
+				colour_node / float(colour_tree.texels_per_side - core::res::kTerrainColourBorder);
+		colours = region_for(rect, look.stats.data_colour_texel, kTerrainMaxColourSide);
 		colour.mipmaps = true;
 		e = tree.colour_grid(colours.grid, colour_tree.max_level(), p_input.fetch, colour.data);
 		if (!e.ok()) {
@@ -465,6 +467,7 @@ core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 	} else {
 		colour.data.assign(size_t(colours.grid.width) * colours.grid.height * 4, kTerrainNeutralColour);
 	}
+	look.stats.colour_texel = colours.grid.texel;
 	colour.width = colours.grid.width;
 	colour.height = colours.grid.height;
 

@@ -98,6 +98,10 @@ struct TerrainLookStats {
 	uint32_t misses = 0;
 	uint64_t image_bytes = 0;
 	uint64_t instructions = 0;
+	float mask_texel = 0.0f;
+	float data_mask_texel = 0.0f;
+	float colour_texel = 0.0f;
+	float data_colour_texel = 0.0f;
 	std::vector<std::vector<uint8_t>> missed;
 };
 

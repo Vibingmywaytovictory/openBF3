@@ -117,9 +117,10 @@ int cmd_terrain(const std::shared_ptr<Install> &p_install, const std::vector<std
 			}
 			const bf3::render::TerrainLookStats &s = look->stats;
 			std::printf(", patch %.0f m: %u patches (%u exact, %u superset, %u opaque, %u misses), %zu materials, %.1f "
-						"MiB images, %.2f s\n",
+						"MiB images, masks at %.2f m (data %.2f m), colour at %.2f m (data %.2f m), %.2f s\n",
 					double(look->patch), s.patches, s.exact, s.superset, s.opaque, s.misses, look->materials.size(),
-					double(s.image_bytes) / 1048576.0, seconds_since(start));
+					double(s.image_bytes) / 1048576.0, double(s.mask_texel), double(s.data_mask_texel),
+					double(s.colour_texel), double(s.data_colour_texel), seconds_since(start));
 			for (const std::vector<uint8_t> &set : s.missed) {
 				std::string text;
 				for (uint8_t l : set) {
