@@ -1134,7 +1134,7 @@ TEST_SUITE("ui-hud-screen") {
 		placed.y = 200.0f;
 		placed.scale = 1.0f;
 		placed.alpha = 1.0f;
-		world.tags = { capture_point_tag(3, points.points[2], 'B', placed) };
+		world.tags = { capture_point_tag(3, points.points[2], 'B', "SAWMILL", placed) };
 		s.hud->refresh(m);
 		REQUIRE(api->tag_paths().size() == 1);
 		const std::string tag = api->tag_paths().front();
@@ -1143,6 +1143,8 @@ TEST_SUITE("ui-hud-screen") {
 		CHECK(s.clip(tag).x() == doctest::Approx(500.0f));
 		CHECK(s.at(tag + ".tag").frame == s.label(tag + ".tag", "enemy"));
 		CHECK(s.at(tag + ".tag.label.nameTextClip.nameTxt").text == "B");
+		CHECK(s.at(tag + ".tag.name.nameTextClip.nameTxt").text == "SAWMILL");
+		CHECK(s.at(tag + ".tag.name.nameTextClip.nameTxtBg").text == "SAWMILL");
 		CHECK(s.at(tag + ".tag.iconObjective").frame == uint32_t(kUiHudIconEnemyFlag - 1));
 		CHECK(s.at(tag + ".iconAlert").visible);
 		HudClientState big = c;

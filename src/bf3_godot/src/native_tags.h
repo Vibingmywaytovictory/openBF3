@@ -16,6 +16,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -118,7 +119,8 @@ public:
 	const core::ui::Icon3dStyle &alert_style() const { return alert_style_; }
 	const std::vector<NativeAlert> &alerts() const { return alerts_; }
 	void update_capture_points(const godot::Camera3D *p_camera, bool p_show, const core::ui::UiStage &p_stage,
-			const core::ui::HudModel &p_model, core::ui::HudWorldTags &r_tags);
+			const core::ui::HudModel &p_model, const std::function<std::string(uint32_t)> &p_localise,
+			core::ui::HudWorldTags &r_tags);
 	void update_orders(const godot::Camera3D *p_camera, bool p_show, const core::ui::UiStage &p_stage,
 			core::ui::HudWorldTags &r_tags);
 	const core::ui::Icon3dStyle &marker_style() const { return marker_style_; }

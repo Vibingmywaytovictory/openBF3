@@ -650,8 +650,8 @@ void Bf3NativeHud::step(double p_seconds) {
 	if (tags_ != nullptr && !fixture_) {
 		tags_->update_alerts(world_camera_, world_show_ && is_visible_in_tree(), ui_stage(this), world_tags_);
 		tags_->update_orders(world_camera_, world_show_ && is_visible_in_tree(), ui_stage(this), world_tags_);
-		tags_->update_capture_points(
-				world_camera_, world_show_ && is_visible_in_tree(), ui_stage(this), model_, world_tags_);
+		tags_->update_capture_points(world_camera_, world_show_ && is_visible_in_tree(), ui_stage(this), model_,
+				client_.localise_hash, world_tags_);
 	} else {
 		world_tags_.tags.clear();
 	}
