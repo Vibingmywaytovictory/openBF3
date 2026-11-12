@@ -4565,6 +4565,44 @@ TEST_SUITE("host-vehicles-seats") {
 		std::printf(
 				"vehicles: the Growler of spawner %u has %u seats; driver to seat 3, passenger to the driver seat\n",
 				unsigned(spawner), unsigned(kind.seats));
+
+		run(60);
+		const auto rotate = [](const std::array<float, 4> &p_q, const core::Vec3 &p_v) {
+			const float x = p_q[0], y = p_q[1], z = p_q[2], w = p_q[3];
+			const float tx = 2.0f * (y * p_v[2] - z * p_v[1]), ty = 2.0f * (z * p_v[0] - x * p_v[2]),
+						tz = 2.0f * (x * p_v[1] - y * p_v[0]);
+			return sim::Vec3{ p_v[0] + w * tx + (y * tz - z * ty), p_v[1] + w * ty + (z * tx - x * tz),
+				p_v[2] + w * tz + (x * ty - y * tx) };
+		};
+		const auto in_vehicle = [&](const core::Vec3 &p_local) {
+			const net::VehicleWire *w = watch.of(spawner);
+			const sim::Vec3 com = rotate(w->state.body.rotation, model.center_of_mass);
+			const sim::Vec3 at = rotate(w->state.body.rotation, p_local);
+			return sim::Vec3{ w->state.body.com_position[0] - com[0] + at[0],
+				w->state.body.com_position[1] - com[1] + at[1], w->state.body.com_position[2] - com[2] + at[2] };
+		};
+		const auto distance = [](const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
+			return std::sqrt((p_a[0] - p_b[0]) * (p_a[0] - p_b[0]) + (p_a[1] - p_b[1]) * (p_a[1] - p_b[1]) +
+					(p_a[2] - p_b[2]) * (p_a[2] - p_b[2]));
+		};
+		REQUIRE(kind.seat_defs.size() >= 3);
+		const sim::Vec3 driver_seat = in_vehicle(kind.seat_defs[0].transform.trans);
+		const sim::Vec3 rear_seat = in_vehicle(kind.seat_defs[2].transform.trans);
+		const float driver_off = distance(m->state(q.slot())->position, driver_seat);
+		const float rear_off = distance(m->state(p.slot())->position, rear_seat);
+		const std::optional<core::Vec3> exit_local = host::vehicle_exit_point(kind, 2);
+		REQUIRE(exit_local.has_value());
+		const sim::Vec3 exit_at = in_vehicle(*exit_local);
+		press(rider, sim::buttons::kUse);
+		REQUIRE(m->until([&] { return seats_are({ { 2, net::kNoVehicleOccupant } }); }, 30));
+		const float exit_off = horizontal(m->state(p.slot())->position, exit_at);
+		std::printf("vehicles: seated soldiers ride %.3f m (driver) and %.3f m (seat 3) from body * seat frame; the "
+					"rider got out %.3f m from seat 3's nearest exit point (%.2f %.2f %.2f)\n",
+				double(driver_off), double(rear_off), double(exit_off), double((*exit_local)[0]),
+				double((*exit_local)[1]), double((*exit_local)[2]));
+		CHECK(driver_off < 0.05f);
+		CHECK(rear_off < 0.05f);
+		CHECK(exit_off < 0.25f);
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 }
