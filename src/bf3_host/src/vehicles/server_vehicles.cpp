@@ -1,6 +1,7 @@
 #include "server_vehicles.h"
 
 #include "bf3/sim/logic/conquest_natives.h"
+#include "bf3/sim/vehicles/vehicle_input.h"
 #include "bf3/sim/vehicles/vehicle_spawning.h"
 
 #include <algorithm>
@@ -9,9 +10,6 @@
 namespace bf3::host {
 
 namespace {
-
-constexpr float kSeatLift = 0.5f;
-constexpr float kExitSide = 2.5f;
 
 sim::Vec3 rotate(const std::array<float, 4> &p_q, const sim::Vec3 &p_v) {
 	const float x = p_q[0], y = p_q[1], z = p_q[2], w = p_q[3];
@@ -25,6 +23,7 @@ sim::Vec3 rotate(const std::array<float, 4> &p_q, const sim::Vec3 &p_v) {
 
 ServerVehicles::ServerVehicles() {
 	use_held_.fill(0);
+	seat_held_.fill(0);
 }
 
 ServerVehicles::~ServerVehicles() = default;
@@ -47,6 +46,7 @@ core::Status ServerVehicles::rebuild() {
 	world_.reset();
 	vehicles_.clear();
 	use_held_.fill(0);
+	seat_held_.fill(0);
 	stats_.live = 0;
 	if (level_ == nullptr || shapes_ == nullptr || level_->spawners.empty()) {
 		return core::Status::success();
@@ -140,12 +140,16 @@ std::optional<VehicleSeat> ServerVehicles::seat_of(size_t p_slot) const {
 	return std::nullopt;
 }
 
-void ServerVehicles::exit(const VehicleSeat &p_seat) {
+void ServerVehicles::vacate(const VehicleSeat &p_seat) {
 	ServerVehicle &v = vehicles_[p_seat.vehicle];
 	v.occupants[p_seat.seat] = net::kNoVehicleOccupant;
 	if (p_seat.seat == 0) {
 		v.command = sim::VehicleCommand();
 	}
+}
+
+void ServerVehicles::exit(const VehicleSeat &p_seat) {
+	vacate(p_seat);
 	++stats_.exits;
 }
 
@@ -157,6 +161,7 @@ std::optional<sim::Vec3> ServerVehicles::use(
 	const bool held = (p_command.buttons & sim::buttons::kUse) != 0;
 	const bool pressed = held && use_held_[p_slot] == 0;
 	use_held_[p_slot] = held ? 1 : 0;
+	switch_seat(p_slot, sim::vehicles::seat_request(p_command.buttons));
 	if (!pressed) {
 		return std::nullopt;
 	}
@@ -195,6 +200,24 @@ std::optional<sim::Vec3> ServerVehicles::use(
 	return std::nullopt;
 }
 
+void ServerVehicles::switch_seat(size_t p_slot, std::optional<uint8_t> p_wanted) {
+	const uint8_t key = p_wanted ? uint8_t(*p_wanted + 1u) : uint8_t(0);
+	const bool pressed = key != 0 && key != seat_held_[p_slot];
+	seat_held_[p_slot] = key;
+	const std::optional<VehicleSeat> seat = pressed ? seat_of(p_slot) : std::nullopt;
+	if (!seat || *p_wanted == seat->seat) {
+		return;
+	}
+	ServerVehicle &v = vehicles_[seat->vehicle];
+	if (*p_wanted >= level_->kinds[level_->spawners[seat->vehicle].kind].seats ||
+			v.occupants[*p_wanted] != net::kNoVehicleOccupant) {
+		return;
+	}
+	vacate(*seat);
+	v.occupants[*p_wanted] = uint8_t(p_slot);
+	++stats_.seat_switches;
+}
+
 void ServerVehicles::drive(size_t p_slot, const sim::Command &p_command) {
 	const std::optional<VehicleSeat> seat = seat_of(p_slot);
 	if (!seat || seat->seat != 0) {
@@ -206,7 +229,7 @@ void ServerVehicles::drive(size_t p_slot, const sim::Command &p_command) {
 	c.throttle = p_command.move_forward;
 	c.brake = 0;
 	c.steer = p_command.move_right;
-	c.buttons = (p_command.buttons & sim::buttons::kJump) != 0 ? sim::vehicle_buttons::kHandbrake : uint8_t(0);
+	c.buttons = sim::vehicles::handbrake_held(p_command.buttons) ? sim::vehicle_buttons::kHandbrake : uint8_t(0);
 	c.flags = sim::vehicle_flags::kDriven;
 }
 
@@ -216,6 +239,7 @@ void ServerVehicles::leave(size_t p_slot) {
 	}
 	if (p_slot < use_held_.size()) {
 		use_held_[p_slot] = 0;
+		seat_held_[p_slot] = 0;
 	}
 }
 
@@ -246,8 +270,11 @@ std::optional<sim::Vec3> ServerVehicles::seat_position(size_t p_slot) const {
 	if (!seat) {
 		return std::nullopt;
 	}
-	const sim::Vec3 centre = world_->state(sim::VehicleSlot(seat->vehicle)).body.com_position;
-	return sim::Vec3{ centre[0], centre[1] + kSeatLift, centre[2] };
+	const sim::VehicleState s = world_->state(sim::VehicleSlot(seat->vehicle));
+	const LevelVehicleKind &kind = level_->kinds[level_->spawners[seat->vehicle].kind];
+	const core::Vec3 &at = kind.seat_defs[seat->seat].transform.trans;
+	const sim::Vec3 offset = rotate(s.body.rotation, sim::Vec3{ at[0], at[1], at[2] });
+	return sim::Vec3{ s.body.origin[0] + offset[0], s.body.origin[1] + offset[1], s.body.origin[2] + offset[2] };
 }
 
 std::optional<sim::Vec3> ServerVehicles::exit_position(size_t p_slot) const {
@@ -256,12 +283,13 @@ std::optional<sim::Vec3> ServerVehicles::exit_position(size_t p_slot) const {
 		return std::nullopt;
 	}
 	const sim::VehicleState s = world_->state(sim::VehicleSlot(seat->vehicle));
-	const sim::Vec3 right = rotate(s.body.rotation, sim::Vec3{ 1.0f, 0.0f, 0.0f });
-	const float flat = std::sqrt(right[0] * right[0] + right[2] * right[2]);
-	const float x = flat > 0.1f ? right[0] / flat : 1.0f;
-	const float z = flat > 0.1f ? right[2] / flat : 0.0f;
-	return sim::Vec3{ s.body.com_position[0] + kExitSide * x, s.body.com_position[1] + kSeatLift,
-		s.body.com_position[2] + kExitSide * z };
+	const LevelVehicleKind &kind = level_->kinds[level_->spawners[seat->vehicle].kind];
+	const std::optional<core::Vec3> at = vehicle_exit_point(kind, seat->seat);
+	if (!at) {
+		return seat_position(p_slot);
+	}
+	const sim::Vec3 offset = rotate(s.body.rotation, *at);
+	return sim::Vec3{ s.body.origin[0] + offset[0], s.body.origin[1] + offset[1], s.body.origin[2] + offset[2] };
 }
 
 std::vector<net::VehicleStates> ServerVehicles::wire(sim::Tick p_tick) const {

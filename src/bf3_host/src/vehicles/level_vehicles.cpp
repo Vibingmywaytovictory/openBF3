@@ -24,6 +24,24 @@ bool land_jeep(const sim::VehicleModel &p_model) {
 	return p_model.wheel_count == 4;
 }
 
+std::optional<core::Vec3> vehicle_exit_point(const LevelVehicleKind &p_kind, uint8_t p_seat) {
+	if (p_kind.exit_points.empty() || p_seat >= p_kind.seat_defs.size()) {
+		return std::nullopt;
+	}
+	const core::Vec3 &seat = p_kind.seat_defs[p_seat].transform.trans;
+	const core::Transform *best = &p_kind.exit_points.front();
+	float nearest = INFINITY;
+	for (const core::Transform &e : p_kind.exit_points) {
+		const float dx = e.trans[0] - seat[0], dz = e.trans[2] - seat[2];
+		const float d = dx * dx + dz * dz;
+		if (d < nearest) {
+			nearest = d;
+			best = &e;
+		}
+	}
+	return best->trans;
+}
+
 core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
 		const LevelDatabase &p_db, const sim::VehicleTuning &p_tuning) {
 	if (p_db.level == nullptr || p_db.world == nullptr) {
@@ -66,8 +84,12 @@ core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
 			}
 			LevelVehicleKind k;
 			k.blueprint = s.blueprint;
+			k.mesh = def->mesh;
 			k.model = *model;
 			k.seats = uint8_t(std::min(def->seats.size(), net::kMaxVehicleSeats));
+			k.seat_defs.assign(def->seats.begin(), def->seats.begin() + k.seats);
+			k.exit_points = def->exit_points;
+			k.component_meshes = def->component_meshes;
 			for (const core::gameplay::VehicleSeatDef &seat : def->seats) {
 				k.entry_radius = std::max(k.entry_radius, std::isfinite(seat.entry_radius) ? seat.entry_radius : 0.0f);
 			}

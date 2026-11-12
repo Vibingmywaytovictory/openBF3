@@ -28,6 +28,7 @@
 #include "bf3/sim/nav_query.h"
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/vehicles/land_rules.h"
+#include "bf3/sim/vehicles/vehicle_input.h"
 #include "bf3/sim/weapons/weapon_input.h"
 #include "bf3/sim/weapons/weapon_rng.h"
 
@@ -4388,5 +4389,131 @@ TEST_SUITE("host-vehicles-net") {
 		seen.stats(stats);
 		CHECK(stats.vehicle_messages > 0);
 		CHECK(stats.bad_vehicle_messages == 0);
+	}
+}
+
+TEST_SUITE("host-vehicles-seats") {
+	TEST_CASE("vehicles: a seated soldier moves between the Growler's seats with the seat keys in entry order, a taken "
+			  "seat refuses him, and the held handbrake bit holds the handbrake") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		std::unique_ptr<Match> m = start_match(*level, false, 63u, 0, 1);
+		tdm::ScriptedPeer &p = m->join("rider");
+		tdm::ScriptedPeer &q = m->join("passenger");
+		p.ready();
+		q.ready();
+		REQUIRE(wait_in_round(*m));
+		REQUIRE(m->until([&] { return is_alive(m->state(p.slot())) && is_alive(m->state(q.slot())); }, 600));
+		VehicleWatch watch;
+		float latest_delay = 0.0f;
+		for (const host::LevelVehicleSpawner &s : lv.spawners) {
+			latest_delay = std::max(latest_delay, s.initial_spawn_delay);
+		}
+		for (uint32_t t = 0; t < sim::seconds_to_ticks(latest_delay) + 120u; ++t) {
+			m->tick();
+			watch.take(m->out, p.peer());
+		}
+		const net::VehicleWire *target = nullptr;
+		for (const net::VehicleWire &w : watch.latest) {
+			const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[w.spawner].kind];
+			if (kind.blueprint == "vehicles/growleritv/growleritv" &&
+					parked_upright(w.state.body.rotation, w.state.body.linear_velocity)) {
+				target = &w;
+				break;
+			}
+		}
+		REQUIRE(target != nullptr);
+		const uint16_t spawner = target->spawner;
+		const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[spawner].kind];
+		REQUIRE(kind.seats >= 3);
+		const sim::Vec3 parked = target->state.body.com_position;
+		const sim::Vec3 beside =
+				ground_at(*m->world, parked[0] + 0.6f * kind.entry_radius, parked[2], parked[1] + 5.0f);
+		m->teleport(p, beside);
+		m->teleport(q, beside);
+		REQUIRE(m->until([&] { return horizontal(m->state(p.slot())->position, beside) < 0.5f; }, 30));
+		uint32_t rider = 0, passenger = 0;
+		int8_t passenger_forward = 0;
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			sim::Command c = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
+			c.buttons |= rider;
+			return c;
+		};
+		m->scripts[1] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			sim::Command c = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
+			c.buttons |= passenger;
+			c.move_forward = passenger_forward;
+			return c;
+		};
+		const uint8_t ps = uint8_t(p.slot()), qs = uint8_t(q.slot());
+		const auto seats_are = [&](std::initializer_list<std::pair<uint8_t, uint8_t>> p_want) {
+			watch.take(m->out, p.peer());
+			const net::VehicleWire *w = watch.of(spawner);
+			if (w == nullptr) {
+				return false;
+			}
+			for (const auto &[seat, slot] : p_want) {
+				if (w->occupants[seat] != slot) {
+					return false;
+				}
+			}
+			return true;
+		};
+		const auto run = [&](uint32_t p_ticks) {
+			for (uint32_t t = 0; t < p_ticks; ++t) {
+				m->tick();
+				watch.take(m->out, p.peer());
+			}
+		};
+		const auto press = [&](uint32_t &r_buttons, uint32_t p_buttons) {
+			r_buttons = p_buttons;
+			run(4);
+			r_buttons = 0;
+			run(4);
+		};
+		press(rider, sim::buttons::kUse);
+		REQUIRE(m->until([&] { return seats_are({ { 0, ps } }); }, 60));
+		press(passenger, sim::buttons::kUse);
+		REQUIRE(m->until([&] { return seats_are({ { 0, ps }, { 1, qs } }); }, 60));
+
+		press(rider, sim::vehicles::with_seat_request(0, uint8_t(1)));
+		run(10);
+		CHECK_MESSAGE(seats_are({ { 0, ps }, { 1, qs } }), "the gunner seat is taken: the driver stays");
+		press(rider, sim::vehicles::with_seat_request(0, uint8_t(2)));
+		CHECK(m->until([&] { return seats_are({ { 0, net::kNoVehicleOccupant }, { 1, qs }, { 2, ps } }); }, 30));
+		press(passenger, sim::vehicles::with_seat_request(0, uint8_t(0)));
+		CHECK(m->until([&] { return seats_are({ { 0, qs }, { 1, net::kNoVehicleOccupant }, { 2, ps } }); }, 30));
+		press(rider, sim::vehicles::with_seat_request(0, uint8_t(kind.seats)));
+		run(10);
+		CHECK_MESSAGE(seats_are({ { 0, qs }, { 2, ps } }), "a seat key past the vehicle's seats does nothing");
+
+		const sim::VehicleModel &model = *kind.model;
+		const auto wheel_spin = [&] {
+			float spin = 0.0f;
+			const net::VehicleWire *w = watch.of(spawner);
+			for (uint8_t i = 0; i < model.wheel_count && i < w->state.wheel_count; ++i) {
+				spin += std::fabs(w->state.wheels[i].angular_velocity);
+			}
+			return spin;
+		};
+		passenger_forward = 127;
+		passenger = sim::vehicles::seat_buttons::kHandbrake;
+		run(20);
+		const float held = wheel_spin();
+		passenger = 0;
+		run(20);
+		const float free = wheel_spin();
+		passenger_forward = 0;
+		std::printf("vehicles: the wheels spin %.2f rad/s in all with the handbrake bit held under throttle, %.2f "
+					"without\n",
+				double(held), double(free));
+		CHECK(held < 0.25f * free);
+		std::printf(
+				"vehicles: the Growler of spawner %u has %u seats; driver to seat 3, passenger to the driver seat\n",
+				unsigned(spawner), unsigned(kind.seats));
+		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 }

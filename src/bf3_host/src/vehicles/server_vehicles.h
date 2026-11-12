@@ -27,6 +27,7 @@ struct ServerVehicleStats {
 	uint64_t spawned = 0;
 	uint64_t entries = 0;
 	uint64_t exits = 0;
+	uint64_t seat_switches = 0;
 	uint64_t step_failures = 0;
 	uint64_t spawn_failures = 0;
 	uint64_t restart_failures = 0;
@@ -77,7 +78,9 @@ public:
 
 private:
 	std::optional<uint8_t> spawner_team(size_t p_spawner, const sim::logic::ConquestNatives *p_conquest) const;
+	void vacate(const VehicleSeat &p_seat);
 	void exit(const VehicleSeat &p_seat);
+	void switch_seat(size_t p_slot, std::optional<uint8_t> p_wanted);
 	core::Status rebuild();
 
 	std::shared_ptr<const LevelVehicles> level_;
@@ -86,6 +89,7 @@ private:
 	std::unique_ptr<sim::VehicleWorld> world_;
 	std::vector<ServerVehicle> vehicles_;
 	std::array<uint8_t, net::kMaxSlots> use_held_{};
+	std::array<uint8_t, net::kMaxSlots> seat_held_{};
 	ServerVehicleStats stats_;
 };
 
