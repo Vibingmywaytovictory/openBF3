@@ -742,7 +742,7 @@ void LevelUpload::create_terrain_look(const Done &p_done) {
 		}
 	}
 	std::lock_guard lock(stats_mutex_);
-	stats_.materials += materials.size();
+	stats_.terrain_layer_materials += materials.size();
 }
 
 void LevelUpload::create_instances(double p_deadline_us) {

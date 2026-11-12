@@ -1673,9 +1673,12 @@ void M1LoadCheck::report() {
 			list += " [" + failures[i].first + ": " + failures[i].second + "]";
 		}
 		add("upload.counts", ok ? 0 : 1,
-				fmt("RS meshes %zu / %zu plan meshes, instances %llu / %zu (plan instances + terrains), textures %llu + %zu failed / %zu, materials %llu / %zu",
-						meshes, plan->meshes.size(), (unsigned long long)u.instances, expected_instances, (unsigned long long)u.textures, failures.size(),
-						plan->textures.size(), (unsigned long long)u.materials, plan->materials.size() + plan->terrains.size()) +
+				fmt("RS meshes %zu / %zu plan meshes, instances %llu / %zu (plan instances + terrains), textures %llu "
+					"+ %zu failed / %zu, materials %llu / %zu, terrain layer materials %llu",
+						meshes, plan->meshes.size(), (unsigned long long)u.instances, expected_instances,
+						(unsigned long long)u.textures, failures.size(), plan->textures.size(),
+						(unsigned long long)u.materials, plan->materials.size() + plan->terrains.size(),
+						(unsigned long long)u.terrain_layer_materials) +
 						list);
 	}
 	add("frames.after_done", 2,

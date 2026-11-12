@@ -42,6 +42,7 @@ struct UploadStats {
 	uint64_t c2_frames = 0;
 	double c2_max_frame_ms = 0.0;
 	uint64_t materials = 0;
+	uint64_t terrain_layer_materials = 0;
 	uint64_t texture_bindings = 0;
 	uint64_t instances = 0;
 	uint64_t program_materials = 0;
