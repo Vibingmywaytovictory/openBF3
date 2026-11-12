@@ -5,7 +5,6 @@
 #include "gameplay_read.h"
 
 #include <algorithm>
-#include <cmath>
 #include <limits>
 
 namespace bf3::core::gameplay {
@@ -26,22 +25,6 @@ struct Node {
 	Role role = Role::Other;
 	level::LevelTransform frame;
 };
-
-level::LevelTransform local_frame(const EbxInstance &p_component) {
-	const std::optional<EbxValue> t = p_component.get("Transform");
-	const std::optional<std::array<core::Vec3, 4>> rows = t ? t->as_transform() : std::nullopt;
-	if (!rows) {
-		return level::LevelTransform::identity();
-	}
-	for (const core::Vec3 &row : *rows) {
-		for (const float c : row) {
-			if (!std::isfinite(c) || std::fabs(c) > 1e6f) {
-				return level::LevelTransform::identity();
-			}
-		}
-	}
-	return level::LevelTransform::from_rows(*rows);
-}
 
 core::Transform model_transform(const level::LevelTransform &p_t) {
 	return { p_t.right, p_t.up, p_t.forward, p_t.trans };
@@ -85,6 +68,7 @@ Role role_of(const EbxResolver &p_db, const EbxInstance &p_component) {
 class Layout {
 public:
 	std::vector<Node> nodes;
+	bool bad_transform = false;
 
 	void walk(WorkBudget &r_budget, const EbxResolver &p_db, const EbxInstance &p_container, int p_parent, size_t p_depth) {
 		if (p_depth > kMaxDepth) {
@@ -100,8 +84,10 @@ public:
 			const int at = static_cast<int>(nodes.size());
 			const level::LevelTransform parent =
 					p_parent >= 0 ? nodes[static_cast<size_t>(p_parent)].frame : level::LevelTransform::identity();
-			nodes.push_back(
-					{ component, p_parent, role_of(p_db, component), local_frame(component).in_parent(parent) });
+			const Result<level::LevelTransform> local = component_transform(component);
+			bad_transform = bad_transform || !local;
+			nodes.push_back({ component, p_parent, role_of(p_db, component),
+					(local ? *local : level::LevelTransform::identity()).in_parent(parent) });
 			walk(r_budget, p_db, component, at, p_depth + 1);
 		}
 	}
@@ -277,6 +263,9 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 
 	Layout layout;
 	layout.walk(budget, p_db, *entity, -1, 0);
+	if (layout.bad_transform) {
+		return make_error("vehicle " + name + ": non-finite or out-of-range component Transform");
+	}
 	out.components = layout.nodes.size();
 
 	BF3_TRY(budget.charge(kNodePasses * layout.nodes.size()));

@@ -143,21 +143,12 @@ public:
 				continue;
 			}
 			++components_;
-			level::LevelTransform local;
-			if (const std::optional<EbxValue> t = component.get("Transform")) {
-				if (const std::optional<std::array<core::Vec3, 4>> rows = t->as_transform()) {
-					for (const core::Vec3 &row : *rows) {
-						for (const float c : row) {
-							if (!std::isfinite(c) || std::fabs(c) > 1e30f) {
-								numbers_.fail("Transform");
-								return;
-							}
-						}
-					}
-					local = level::LevelTransform::from_rows(*rows);
-				}
+			const Result<level::LevelTransform> local = component_transform(component);
+			if (!local) {
+				numbers_.fail("Transform");
+				return;
 			}
-			const level::LevelTransform frame = local.in_parent(p_frame);
+			const level::LevelTransform frame = local->in_parent(p_frame);
 			read_component(component, frame);
 			walk(component, frame, p_depth + 1);
 		}

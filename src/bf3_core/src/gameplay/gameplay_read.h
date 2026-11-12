@@ -3,8 +3,11 @@
 #include "bf3/core/ebx.h"
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/work_budget.h"
+#include "bf3/core/level/level_transform.h"
+#include "bf3/core/result.h"
 
 #include <array>
+#include <cmath>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -60,6 +63,22 @@ inline std::string_view text_view(const EbxStruct &p_object, std::string_view p_
 inline std::optional<core::Vec3> vec3(const EbxStruct &p_object, std::string_view p_path) {
 	const std::optional<EbxValue> v = p_object.get_path(p_path);
 	return v ? v->as_vec3() : std::nullopt;
+}
+
+inline Result<level::LevelTransform> component_transform(const EbxInstance &p_component) {
+	const std::optional<EbxValue> t = p_component.get("Transform");
+	const std::optional<std::array<core::Vec3, 4>> rows = t ? t->as_transform() : std::nullopt;
+	if (!rows) {
+		return level::LevelTransform::identity();
+	}
+	for (const core::Vec3 &row : *rows) {
+		for (const float c : row) {
+			if (!std::isfinite(c) || std::fabs(c) > 1e30f) {
+				return make_error("non-finite or out-of-range component Transform");
+			}
+		}
+	}
+	return level::LevelTransform::from_rows(*rows);
 }
 
 inline std::string copy_text(WorkBudget &r_budget, std::string_view p_text) {
