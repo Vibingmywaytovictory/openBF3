@@ -26,7 +26,7 @@
 
 namespace bf3::net {
 
-inline constexpr uint16_t kProtocolVersion = 12;
+inline constexpr uint16_t kProtocolVersion = 13;
 inline constexpr uint8_t kChannelUnreliable = 0;
 inline constexpr uint8_t kChannelReliable = 1;
 inline constexpr uint8_t kChannelBulk = 2;
@@ -909,6 +909,7 @@ core::Result<SpawnAnswer> decode_spawn_answer(std::span<const uint8_t> p_datagra
 inline constexpr size_t kMaxVehicleSeats = 8;
 inline constexpr uint8_t kNoVehicleOccupant = 0xFF;
 inline constexpr size_t kMaxVehiclesPerDatagram = 6;
+inline constexpr size_t kMaxVehicleTurrets = 16;
 
 struct VehicleWire {
 	uint16_t spawner = 0;
@@ -921,6 +922,8 @@ struct VehicleWire {
 		return a;
 	}();
 	sim::VehicleState state;
+	uint8_t turret_count = 0;
+	std::array<float, kMaxVehicleTurrets> turret_angles{};
 
 	bool operator==(const VehicleWire &) const = default;
 };

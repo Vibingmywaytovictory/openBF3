@@ -26,6 +26,8 @@ PresentedVehicle present_vehicle(const net::VehicleWire &p_wire, sim::Tick p_tic
 	}
 	v.engine_rpm = p_wire.state.driver.engine_rpm;
 	v.gear = int8_t(p_wire.state.driver.gearbox.gear);
+	v.turret_count = std::min<uint8_t>(p_wire.turret_count, uint8_t(net::kMaxVehicleTurrets));
+	std::copy_n(p_wire.turret_angles.begin(), v.turret_count, v.turret_angle.begin());
 	v.window_count = 1;
 	v.window[0] = PresentedVehicleSample{ p_tick, v.pose() };
 	return v;

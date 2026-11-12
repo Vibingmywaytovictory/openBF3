@@ -360,6 +360,14 @@ std::vector<net::VehicleStates> ServerVehicles::wire(sim::Tick p_tick) const {
 		w.seat_count = level_->kinds[level_->spawners[i].kind].seats;
 		w.occupants = v.occupants;
 		w.state = world_->state(sim::VehicleSlot(i));
+		const LevelVehicleKind &kind = level_->kinds[level_->spawners[i].kind];
+		if (kind.armament != nullptr) {
+			w.turret_count = uint8_t(std::min(
+					{ kind.armament->turrets.size(), net::kMaxVehicleTurrets, sim::vehicles::kMaxArmamentTurrets }));
+			for (size_t k = 0; k < w.turret_count; ++k) {
+				w.turret_angles[k] = v.armament.bodies[k].angle;
+			}
+		}
 		out.back().vehicles.push_back(w);
 	}
 	return out;

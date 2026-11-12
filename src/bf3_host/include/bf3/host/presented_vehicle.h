@@ -49,6 +49,8 @@ struct PresentedVehicle {
 	std::array<float, sim::kMaxVehicleWheels> suspension_length{};
 	float engine_rpm = 0;
 	int8_t gear = 0;
+	uint8_t turret_count = 0;
+	std::array<float, net::kMaxVehicleTurrets> turret_angle{};
 	uint8_t window_count = 0;
 	std::array<PresentedVehicleSample, kVehicleWindow> window{};
 
