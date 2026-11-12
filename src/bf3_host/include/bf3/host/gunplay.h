@@ -196,6 +196,7 @@ public:
 	void step_soldier(uint8_t p_slot, const sim::Command &p_command, const sim::SoldierState &p_before, const sim::SoldierState &p_after);
 	void step_projectiles(uint32_t p_tick, std::span<const sim::SoldierState> p_states);
 	void apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states, CombatEventSink &r_sink);
+	void add_damage(std::span<const sim::weapons::DamageEvent> p_events);
 	const sim::weapons::SoldierWeaponsState &weapons(uint8_t p_slot) const;
 	uint64_t weapon_hash() const;
 	uint64_t match_seed() const;

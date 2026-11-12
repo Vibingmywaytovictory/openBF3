@@ -57,7 +57,8 @@ sim::MotorModifiers Combat::motor_modifiers(size_t p_slot, const sim::MotorParam
 			p_params, gunplay_->level().specializations, gunplay_->spawn_specializations(uint8_t(p_slot)));
 }
 
-void Combat::resolve(sim::Tick p_tick, const SlotTable &p_slots, const Soldiers &p_soldiers, CombatEventSink &r_sink) {
+void Combat::resolve(sim::Tick p_tick, const SlotTable &p_slots, const Soldiers &p_soldiers, CombatEventSink &r_sink,
+		const ExtraDamage &p_extra) {
 	tick_states_.assign(p_slots.size(), sim::SoldierState());
 	for (size_t i = 0; i < p_slots.size(); ++i) {
 		if (p_slots[i].used && p_soldiers[i].spawned && !p_slots[i].dummy) {
@@ -65,6 +66,11 @@ void Combat::resolve(sim::Tick p_tick, const SlotTable &p_slots, const Soldiers 
 		}
 	}
 	gunplay_->step_projectiles(p_tick, tick_states_);
+	if (p_extra) {
+		extra_damage_.clear();
+		p_extra(gunplay_->rewind(), extra_damage_);
+		gunplay_->add_damage(extra_damage_);
+	}
 	gunplay_->apply_rules(p_tick, tick_states_, r_sink);
 }
 

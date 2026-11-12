@@ -4024,9 +4024,9 @@ TEST_SUITE("host-vehicles") {
 		for (const host::LevelVehicleSpawner &s : lv.spawners) {
 			growlers += s.kind == *jeep_kind ? 1u : 0u;
 		}
-		std::printf("vehicles: %zu jeep spawners, %zu of them Growlers\n", lv.spawners.size(), growlers);
-		CHECK(lv.kinds.size() == 2);
-		CHECK(lv.spawners.size() == 6);
+		std::printf("vehicles: %zu vehicle spawners, %zu of them Growlers\n", lv.spawners.size(), growlers);
+		CHECK(lv.kinds.size() == 4);
+		CHECK(lv.spawners.size() == 12);
 		CHECK(growlers == 3);
 
 		std::unique_ptr<Match> m = start_match(*level, false, 61u, 0, 1);
@@ -4064,7 +4064,7 @@ TEST_SUITE("host-vehicles") {
 			REQUIRE(w.spawner < lv.spawners.size());
 			const host::LevelVehicleSpawner &s = lv.spawners[w.spawner];
 			CHECK(w.generation == 1);
-			CHECK(w.state.wheel_count == 4);
+			CHECK(w.state.wheel_count == lv.kinds[s.kind].model->wheel_count);
 			CHECK(horizontal(w.state.body.com_position, s.placement.position) < 3.0f);
 			const bool at_rest = parked_upright(w.state.body.rotation, w.state.body.linear_velocity);
 			upright += at_rest ? 1u : 0u;
@@ -4641,5 +4641,184 @@ TEST_SUITE("host-vehicles-seats") {
 		CHECK(loaded != defaults);
 		CHECK((*shared)->vehicles->tuning.hand_brake_torque ==
 				doctest::Approx(options.vehicle_tuning.hand_brake_torque));
+	}
+}
+
+TEST_SUITE("host-vehicles-armor") {
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: a soldier drives a tank on its tracks, its turret follows his aim "
+			  "on the turret rules and its cannon's shell kills an enemy soldier off its bow") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		for (const std::string &n : lv.notes) {
+			std::printf("armor: %s\n", n.c_str());
+		}
+		std::optional<uint16_t> cannon_def;
+		for (size_t i = 0; i < lv.weapons.size(); ++i) {
+			std::printf("armor: weapon %zu %s, rate %.0f, magazine %d\n", i, lv.weapons[i].variant.c_str(),
+					double(lv.weapons[i].fire.rate_of_fire), int(lv.weapons[i].fire.magazine_capacity));
+			if (lv.weapons[i].variant == "vehicles/common/weapondata/mbt_cannon_firing") {
+				cannon_def = uint16_t(i);
+			}
+		}
+		REQUIRE(cannon_def.has_value());
+		std::vector<uint16_t> tank_kinds;
+		for (size_t k = 0; k < lv.kinds.size(); ++k) {
+			const host::LevelVehicleKind &kind = lv.kinds[k];
+			std::printf("armor: kind %zu %s, %u wheels, tracked %d, %zu turrets, %zu weapons\n", k,
+					kind.blueprint.c_str(), unsigned(kind.model->wheel_count), int(host::land_tracked(*kind.model)),
+					kind.armament ? kind.armament->turrets.size() : size_t(0),
+					kind.armament ? kind.armament->weapons.size() : size_t(0));
+			if (host::land_tracked(*kind.model) && kind.armament != nullptr &&
+					std::find(kind.weapon_defs.begin(), kind.weapon_defs.end(), *cannon_def) !=
+							kind.weapon_defs.end()) {
+				tank_kinds.push_back(uint16_t(k));
+			}
+		}
+		REQUIRE(!tank_kinds.empty());
+
+		std::unique_ptr<Match> m = start_match(*level, false, 61u, 0, 1);
+		tdm::ScriptedPeer &p = m->join("driver");
+		p.ready();
+		REQUIRE(wait_in_round(*m));
+		std::vector<Script *> bots{ m->bot(), m->bot() };
+		REQUIRE(m->until([&] { return is_alive(m->state(p.slot())); }, 600));
+		const uint8_t team = m->rules().team_of(uint8_t(p.slot()));
+		Script *enemy = nullptr;
+		for (Script *b : bots) {
+			enemy = m->rules().team_of(uint8_t(b->slot)) != team ? b : enemy;
+		}
+		REQUIRE(enemy != nullptr);
+		REQUIRE(m->until([&] { return is_alive(m->state(enemy->slot)); }, 600));
+
+		VehicleWatch watch;
+		const net::VehicleWire *tank = nullptr;
+		float tank_clear = 0.0f;
+		for (uint32_t t = 0; t < 900 && tank == nullptr; ++t) {
+			m->tick();
+			watch.take(m->out, p.peer());
+			if (t < 120) {
+				continue;
+			}
+			std::vector<sim::Vec3> others;
+			for (const net::VehicleWire &o : watch.latest) {
+				others.push_back(o.state.body.com_position);
+			}
+			for (const net::VehicleWire &w : watch.latest) {
+				const uint16_t kind = lv.spawners[w.spawner].kind;
+				if (std::find(tank_kinds.begin(), tank_kinds.end(), kind) == tank_kinds.end() ||
+						!parked_upright(w.state.body.rotation, w.state.body.linear_velocity)) {
+					continue;
+				}
+				const float clear =
+						clear_run(*m->world, w.state.body.com_position, w.state.body.rotation, others, 60.0f);
+				if (clear > tank_clear) {
+					tank = &w;
+					tank_clear = clear;
+				}
+			}
+		}
+		REQUIRE(tank != nullptr);
+		const uint16_t spawner = tank->spawner;
+		const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[spawner].kind];
+		std::printf("armor: %s of spawner %u parked upright with %.0f m clear ahead\n", kind.blueprint.c_str(),
+				unsigned(spawner), double(tank_clear));
+		REQUIRE(tank_clear >= 12.0f);
+		CHECK(tank->state.wheel_count == kind.model->wheel_count);
+
+		const sim::Vec3 parked = tank->state.body.com_position;
+		const sim::Vec3 beside =
+				ground_at(*m->world, parked[0] + 0.6f * kind.entry_radius, parked[2], parked[1] + 5.0f);
+		m->teleport(p, beside);
+		REQUIRE(m->until([&] { return horizontal(m->state(p.slot())->position, beside) < 0.5f; }, 30));
+		const sim::Tick use_at = m->now() + 2u;
+		int8_t forward = 0;
+		uint16_t aim_yaw = m->state(p.slot())->yaw;
+		int16_t aim_pitch = 0;
+		bool fire = false;
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			sim::Command c = sim::idle_command(p_tick, aim_yaw, aim_pitch, p_state.target_pose);
+			if (p_tick == use_at) {
+				c.buttons |= sim::buttons::kUse;
+			}
+			if (fire) {
+				c.buttons |= sim::buttons::kFire;
+			}
+			c.move_forward = forward;
+			return c;
+		};
+		const uint8_t slot = uint8_t(p.slot());
+		REQUIRE(m->until(
+				[&] {
+					watch.take(m->out, p.peer());
+					const net::VehicleWire *w = watch.of(spawner);
+					return w != nullptr && w->occupants[0] == slot;
+				},
+				60));
+
+		const sim::Vec3 start = watch.of(spawner)->state.body.com_position;
+		const std::array<float, 2> line = heading_of(watch.of(spawner)->state.body.rotation);
+		forward = 127;
+		m->ticks(120);
+		watch.take(m->out, p.peer());
+		const net::VehicleWire *w = watch.of(spawner);
+		REQUIRE(w != nullptr);
+		const float run = (w->state.body.com_position[0] - start[0]) * line[0] +
+				(w->state.body.com_position[2] - start[2]) * line[1];
+		std::printf("armor: 2 s of throttle took it %.1f m along its bow at %.1f km/h, gear %d, rpm %.0f, up y %.3f\n",
+				double(run), double(3.6f * speed_of(w->state.body.linear_velocity)), int(w->state.driver.gearbox.gear),
+				double(w->state.driver.engine_rpm), double(up_y_of(w->state.body.rotation)));
+		CHECK(run > 1.0f);
+		CHECK(run < tank_clear);
+		CHECK(up_y_of(w->state.body.rotation) > 0.95f);
+		forward = -127;
+		REQUIRE(m->until(
+				[&] {
+					watch.take(m->out, p.peer());
+					const sim::Vec3 &v = watch.of(spawner)->state.body.linear_velocity;
+					return v[0] * line[0] + v[2] * line[1] <= 0.2f;
+				},
+				240));
+		forward = 0;
+		m->ticks(30);
+		watch.take(m->out, p.peer());
+		w = watch.of(spawner);
+		const std::array<float, 2> bow = heading_of(w->state.body.rotation);
+		const sim::Vec3 hull_at = w->state.body.com_position;
+
+		constexpr float kOffBow = 0.7f;
+		const float side_x = bow[0] * std::cos(kOffBow) + bow[1] * std::sin(kOffBow);
+		const float side_z = -bow[0] * std::sin(kOffBow) + bow[1] * std::cos(kOffBow);
+		const sim::Vec3 target_at =
+				ground_at(*m->world, hull_at[0] + 25.0f * side_x, hull_at[2] + 25.0f * side_z, hull_at[1] + 30.0f);
+		m->place(enemy->slot, target_at);
+		m->ticks(2);
+		const sim::SoldierState *victim = m->state(enemy->slot);
+		REQUIRE(is_alive(victim));
+		const float health_before = victim->health;
+		const sim::Vec3 chest = add(victim->position, 0.0f, 1.2f, 0.0f);
+		const sim::Vec3 gun = add(hull_at, 0.0f, 1.1f, 0.0f);
+		const float dx = chest[0] - gun[0], dy = chest[1] - gun[1], dz = chest[2] - gun[2];
+		aim_yaw = sim::quantize_yaw(std::atan2(dx, dz));
+		aim_pitch = sim::quantize_pitch(std::atan2(dy, std::sqrt(dx * dx + dz * dz)));
+		m->ticks(120);
+		REQUIRE(is_alive(m->state(enemy->slot)));
+		const int kills_before = m->row(int(slot)) != nullptr ? int(m->row(int(slot))->kills) : 0;
+		fire = true;
+		m->ticks(4);
+		fire = false;
+		const bool killed = m->until([&] { return !is_alive(m->state(enemy->slot)); }, 90);
+		const sim::SoldierState *after = m->state(enemy->slot);
+		std::printf("armor: the enemy %.1f m off the bow at %.0f deg: health %.0f -> %.0f, killed %d, kills %d -> %d\n",
+				double(horizontal(target_at, hull_at)), double(kOffBow / core::kDegToRadF), double(health_before),
+				double(after != nullptr ? after->health : -1.0f), int(killed), kills_before,
+				m->row(int(slot)) != nullptr ? int(m->row(int(slot))->kills) : -1);
+		CHECK(killed);
+		REQUIRE(m->row(int(slot)) != nullptr);
+		CHECK(int(m->row(int(slot))->kills) == kills_before + 1);
+		CHECK(is_alive(m->state(p.slot())));
+		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 }

@@ -132,6 +132,7 @@ struct WeaponSimDef {
 	int32_t magazine_capacity = 0;
 	int32_t magazines = 0;
 	bool unlimited_ammo = false;
+	bool infinite_reserve = false;
 	int32_t pellets = 1;
 
 	int32_t trace_frequency = 0;

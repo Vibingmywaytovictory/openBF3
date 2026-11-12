@@ -1707,8 +1707,8 @@ TEST_SUITE("render-catalog-optics-1p") {
 }
 
 TEST_SUITE("render-vehicle-meshes") {
-	TEST_CASE("vehicle meshes: MP_007 Conquest's Growler and VDV Buggy load split by part, each part placed by its "
-			  "mesh part transform, and each wheel has its own part at the wheel's data centre") {
+	TEST_CASE("vehicle meshes: MP_007 Conquest's Growler, VDV Buggy, T-90 and M1A2 load split by part, each part "
+			  "placed by its mesh part transform, and each wheel has its own part at the wheel's data centre") {
 		core::InstallReader reader;
 		if (!reader.locate({})) {
 			test::skip_install_case(reader.describe().c_str());
@@ -1727,7 +1727,7 @@ TEST_SUITE("render-vehicle-meshes") {
 		for (const host::LevelVehicleKind &k : (*level)->kinds) {
 			specs.push_back(render::VehicleMeshSpec{ k.blueprint, k.mesh, k.component_meshes });
 		}
-		REQUIRE(specs.size() == 2);
+		REQUIRE(specs.size() == 4);
 		core::Result<std::unique_ptr<render::VehicleMeshSet>> set =
 				render::load_vehicle_meshes(db->level->db(), db->level->mount(), specs);
 		REQUIRE_MESSAGE(set.ok(), (set.ok() ? "" : set.error().message));

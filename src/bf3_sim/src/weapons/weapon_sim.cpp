@@ -44,9 +44,13 @@ bool has_ammo(const Tick_ &p_io, const WeaponSlotState &p_s, const WeaponSimDef 
 	return p_io.table.infinite_magazine || p_d.unlimited_ammo || p_s.magazine > 0;
 }
 
+bool reserve_unlimited(const WeaponSimDef &p_d) {
+	return p_d.unlimited_ammo || p_d.infinite_reserve;
+}
+
 bool can_reload(const WeaponSlotState &p_s, const WeaponSimDef &p_d) {
-	return p_d.reload_type != ReloadType::Unknown && p_d.magazine_capacity > 0 && p_s.magazine < p_d.magazine_capacity &&
-			(p_s.reserve > 0 || p_d.unlimited_ammo);
+	return p_d.reload_type != ReloadType::Unknown && p_d.magazine_capacity > 0 &&
+			p_s.magazine < p_d.magazine_capacity && (p_s.reserve > 0 || reserve_unlimited(p_d));
 }
 
 const FireModeDef &mode_of(const WeaponSlotState &p_s, const WeaponSimDef &p_d) {
@@ -81,9 +85,9 @@ void commit_reload(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Weap
 		target -= 1;
 	}
 	const int32_t need = std::max(0, target - r_s.magazine);
-	const int32_t take = p_d.unlimited_ammo ? need : std::min(need, r_s.reserve);
+	const int32_t take = reserve_unlimited(p_d) ? need : std::min(need, r_s.reserve);
 	r_s.magazine += take;
-	if (!p_d.unlimited_ammo) {
+	if (!reserve_unlimited(p_d)) {
 		r_s.reserve -= take;
 	}
 	r_s.flags = uint8_t(r_s.flags | slot_flags::kReloadCommitted);
@@ -312,7 +316,7 @@ void process_active(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Wea
 				timed(r_io, now, weapon_events::kReloadFinished, p_slot);
 				break;
 			case Action::ShellStart:
-				if (r_s.magazine >= p_d.magazine_capacity || (r_s.reserve <= 0 && !p_d.unlimited_ammo)) {
+				if (r_s.magazine >= p_d.magazine_capacity || (r_s.reserve <= 0 && !reserve_unlimited(p_d))) {
 					finish_phase(r_s);
 					timed(r_io, now, weapon_events::kReloadFinished, p_slot);
 				} else {
@@ -323,11 +327,11 @@ void process_active(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Wea
 				break;
 			case Action::ShellLoaded:
 				++r_s.magazine;
-				if (!p_d.unlimited_ammo) {
+				if (!reserve_unlimited(p_d)) {
 					--r_s.reserve;
 				}
 				timed(r_io, now, weapon_events::kShellLoaded, p_slot);
-				if (r_s.magazine >= p_d.magazine_capacity || (r_s.reserve <= 0 && !p_d.unlimited_ammo)) {
+				if (r_s.magazine >= p_d.magazine_capacity || (r_s.reserve <= 0 && !reserve_unlimited(p_d))) {
 					finish_phase(r_s);
 					timed(r_io, now, weapon_events::kReloadFinished, p_slot);
 				} else {

@@ -321,7 +321,7 @@ struct GameServer::Impl {
 				spawner.died(i, n);
 			}
 		}
-		step_vehicles();
+		step_vehicles(n);
 		last_step_ms = ms_since(step_start);
 		times.step_ms = last_step_ms;
 		motor_steps += times.motor_steps;
@@ -361,11 +361,11 @@ struct GameServer::Impl {
 		return rules != nullptr ? rules->natives().conquest() : nullptr;
 	}
 
-	void step_vehicles() {
+	void step_vehicles(sim::Tick p_tick) {
 		if (!vehicles.on()) {
 			return;
 		}
-		(void)vehicles.step();
+		(void)vehicles.step(p_tick, combat.on() ? combat.gunplay()->match_seed() : 0u);
 		for (size_t i = 0; i < slots.size(); ++i) {
 			if (!slots[i].used || !soldiers.alive(i)) {
 				vehicles.leave(i);
@@ -966,6 +966,7 @@ core::Status GameServer::Impl::init_gameplay() {
 		return core::make_error("GameServer: " + std::to_string(g.target_bots) + " target bots for " + std::to_string(slots.size()) + " slots");
 	}
 	BF3_TRY(combat.create(*config.level, g, config.seed, *world));
+	BF3_TRY(vehicles.configure_weapons(combat.gunplay()->level().materials, combat.gunplay()->table().mechanics));
 	core::Result<sim::spotting::SpottingDef> spotting_def =
 			sim::spotting::make_spotting_def(config.level->gunplay->soldier);
 	if (!spotting_def) {
@@ -998,7 +999,11 @@ core::Status GameServer::Impl::init_gameplay() {
 void GameServer::Impl::step_rules(sim::Tick p_tick) {
 	if (combat.on()) {
 		combat_log.open(p_tick);
-		combat.resolve(p_tick, slots, soldiers, combat_log);
+		combat.resolve(p_tick, slots, soldiers, combat_log,
+				[&](const sim::weapons::HitTargetProvider &p_targets,
+						std::vector<sim::weapons::DamageEvent> &r_damage) {
+					vehicles.resolve_weapons(p_tick, *world, p_targets, r_damage);
+				});
 		match.step(p_tick, view, *combat.gunplay(), combat.tick_states());
 		soldiers.take_rules(combat.tick_states(), slots);
 	}

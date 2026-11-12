@@ -16,6 +16,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -39,7 +40,10 @@ public:
 	sim::Command clamp_pitch(size_t p_slot, const sim::Command &p_command, sim::Pose p_pose) const;
 	sim::MotorModifiers motor_modifiers(size_t p_slot, const sim::MotorParams &p_params) const;
 
-	void resolve(sim::Tick p_tick, const SlotTable &p_slots, const Soldiers &p_soldiers, CombatEventSink &r_sink);
+	using ExtraDamage =
+			std::function<void(const sim::weapons::HitTargetProvider &, std::vector<sim::weapons::DamageEvent> &)>;
+	void resolve(sim::Tick p_tick, const SlotTable &p_slots, const Soldiers &p_soldiers, CombatEventSink &r_sink,
+			const ExtraDamage &p_extra = {});
 	std::span<sim::SoldierState> tick_states() { return tick_states_; }
 	float killer_health(uint8_t p_killer, uint8_t p_victim) const;
 
@@ -85,6 +89,7 @@ private:
 	std::vector<PerSlot> per_slot_;
 	std::vector<sim::SoldierState> tick_states_;
 	std::vector<net::OtherSoldier> records_;
+	std::vector<sim::weapons::DamageEvent> extra_damage_;
 };
 
 }

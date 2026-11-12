@@ -299,6 +299,9 @@ template <class G> void def_groups(const WeaponSimDef &p_d, G &&r_group) {
 	r_group("magazines", [&](detail::Fnv64 &r_h) {
 		r_h.add(p_d.magazines);
 		r_h.add(p_d.unlimited_ammo);
+		if (p_d.infinite_reserve) {
+			r_h.add(p_d.infinite_reserve);
+		}
 	});
 	r_group("pellets", [&](detail::Fnv64 &r_h) { r_h.add(p_d.pellets); });
 	r_group("trace_frequency", [&](detail::Fnv64 &r_h) { r_h.add(p_d.trace_frequency); });

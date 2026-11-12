@@ -50,6 +50,8 @@ target_sources(bf3_host PRIVATE
     src/vehicles/level_vehicles.cpp
     src/vehicles/server_vehicles.h
     src/vehicles/server_vehicles.cpp
+    src/vehicles/vehicle_gunnery.h
+    src/vehicles/vehicle_gunnery.cpp
     include/bf3/host/presented_vehicle.h
     src/vehicles/client_vehicles.h
     src/vehicles/client_vehicles.cpp

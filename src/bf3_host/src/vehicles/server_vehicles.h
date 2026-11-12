@@ -7,6 +7,8 @@
 #include "bf3/sim/soldier_state.h"
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/vehicle_world.h"
+#include "bf3/sim/vehicles/vehicle_armament.h"
+#include "vehicle_gunnery.h"
 
 #include <array>
 #include <cstddef>
@@ -42,6 +44,8 @@ struct ServerVehicle {
 	bool counting = false;
 	std::array<uint8_t, net::kMaxVehicleSeats> occupants{};
 	sim::VehicleCommand command;
+	std::array<sim::Command, net::kMaxVehicleSeats> seat_commands{};
+	sim::vehicles::ArmamentState armament;
 };
 
 struct VehicleSeat {
@@ -63,7 +67,13 @@ public:
 	std::optional<sim::Vec3> use(size_t p_slot, const sim::Command &p_command, const sim::SoldierState &p_soldier);
 	void drive(size_t p_slot, const sim::Command &p_command);
 	void leave(size_t p_slot);
-	core::Status step();
+	core::Status step(sim::Tick p_tick, uint64_t p_weapon_seed);
+	core::Status configure_weapons(std::shared_ptr<const sim::weapons::SurfaceMaterialTable> p_materials,
+			const sim::weapons::Mechanics &p_mechanics);
+	void resolve_weapons(sim::Tick p_tick, const sim::CollisionWorld &p_world,
+			const sim::weapons::HitTargetProvider &p_targets, std::vector<sim::weapons::DamageEvent> &r_damage);
+	const VehicleGunnery &gunnery() const { return gunnery_; }
+	core::Transform hull(size_t p_vehicle) const;
 
 	std::optional<VehicleSeat> seat_of(size_t p_slot) const;
 	bool seated(size_t p_slot) const { return seat_of(p_slot).has_value(); }
@@ -91,6 +101,7 @@ private:
 	std::array<uint8_t, net::kMaxSlots> use_held_{};
 	std::array<uint8_t, net::kMaxSlots> seat_held_{};
 	ServerVehicleStats stats_;
+	VehicleGunnery gunnery_;
 };
 
 }

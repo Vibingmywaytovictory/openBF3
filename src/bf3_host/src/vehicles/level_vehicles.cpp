@@ -1,11 +1,13 @@
 #include "bf3/host/level_vehicles.h"
 
 #include "bf3/core/gameplay/vehicle_def.h"
+#include "bf3/core/gameplay/weapon_resolver.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/level_transform.h"
 #include "bf3/core/level/vehicle_spawns.h"
 #include "bf3/host/level_load.h"
 #include "bf3/net/protocol.h"
+#include "bf3/sim/vehicles/vehicle_weapon_rules.h"
 
 #include <algorithm>
 #include <cmath>
@@ -42,6 +44,48 @@ std::optional<core::Vec3> vehicle_exit_point(const LevelVehicleKind &p_kind, uin
 	return best->trans;
 }
 
+bool land_tracked(const sim::VehicleModel &p_model) {
+	for (size_t i = 0; i < p_model.wheel_count; ++i) {
+		if (p_model.wheels[i].track_steer != 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+namespace {
+
+struct WeaponKey {
+	std::string firing;
+	float reload = 1;
+	float overheat = 1;
+	bool operator==(const WeaponKey &) const = default;
+};
+
+uint16_t vehicle_weapon(const LevelDatabase &p_db, const sim::vehicles::ArmamentWeapon &p_weapon,
+		std::vector<WeaponKey> &r_keys, LevelVehicles &r_out) {
+	const WeaponKey key{ p_weapon.firing, p_weapon.reload_time_multiplier, p_weapon.overheat_drop_multiplier };
+	const auto known = std::find(r_keys.begin(), r_keys.end(), key);
+	if (known != r_keys.end()) {
+		return uint16_t(known - r_keys.begin());
+	}
+	core::Result<core::gameplay::WeaponDef> def =
+			core::gameplay::resolve_vehicle_weapon(p_db.level->db(), p_weapon.firing);
+	if (!def) {
+		r_out.notes.push_back("vehicle weapon " + p_weapon.firing + " not read: " + def.error().message);
+		return kNoVehicleWeapon;
+	}
+	core::gameplay::FireFunction &fire = def->fire;
+	fire.reload_time = sim::vehicles::vehicle_reload_seconds(fire.reload_time, key.reload);
+	fire.reload_time_bullets_left = sim::vehicles::vehicle_reload_seconds(fire.reload_time_bullets_left, key.reload);
+	fire.heat_drop_per_second = sim::vehicles::vehicle_heat_drop_per_second(fire.heat_drop_per_second, key.overheat);
+	r_keys.push_back(key);
+	r_out.weapons.push_back(std::move(*def));
+	return uint16_t(r_out.weapons.size() - 1);
+}
+
+}
+
 core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
 		const LevelDatabase &p_db, const sim::VehicleTuning &p_tuning) {
 	if (p_db.level == nullptr || p_db.world == nullptr) {
@@ -55,6 +99,7 @@ core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
 	auto out = std::make_shared<LevelVehicles>();
 	out->tuning = p_tuning;
 	std::vector<std::string> refused;
+	std::vector<WeaponKey> weapon_keys;
 	for (const core::level::VehicleSpawnerDef &s : *spawners) {
 		if (s.blueprint.empty() || std::find(refused.begin(), refused.end(), s.blueprint) != refused.end()) {
 			continue;
@@ -69,9 +114,9 @@ core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
 				refused.push_back(s.blueprint);
 				continue;
 			}
-			if (!land_jeep(**model)) {
+			if (!land_jeep(**model) && !land_tracked(**model)) {
 				out->notes.push_back("vehicle " + s.blueprint + " has " + std::to_string((*model)->wheel_count) +
-						" wheels, not a jeep");
+						" wheels, not a jeep or a tracked vehicle");
 				refused.push_back(s.blueprint);
 				continue;
 			}
@@ -92,6 +137,15 @@ core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
 			k.component_meshes = def->component_meshes;
 			for (const core::gameplay::VehicleSeatDef &seat : def->seats) {
 				k.entry_radius = std::max(k.entry_radius, std::isfinite(seat.entry_radius) ? seat.entry_radius : 0.0f);
+			}
+			core::Result<sim::vehicles::VehicleArmament> armament = sim::vehicles::build_vehicle_armament(*def);
+			if (!armament) {
+				out->notes.push_back("vehicle " + s.blueprint + " unarmed: " + armament.error().message);
+			} else {
+				for (const sim::vehicles::ArmamentWeapon &w : armament->weapons) {
+					k.weapon_defs.push_back(vehicle_weapon(p_db, w, weapon_keys, *out));
+				}
+				k.armament = std::make_shared<const sim::vehicles::VehicleArmament>(std::move(*armament));
 			}
 			if (k.seats == 0) {
 				out->notes.push_back("vehicle " + s.blueprint + " has no seats");

@@ -3,6 +3,7 @@
 #include "bf3/sim/logic/conquest_natives.h"
 #include "bf3/sim/vehicles/vehicle_input.h"
 #include "bf3/sim/vehicles/vehicle_spawning.h"
+#include "bf3/sim/weapons/spread_recoil.h"
 
 #include <algorithm>
 #include <cmath>
@@ -63,6 +64,7 @@ core::Status ServerVehicles::rebuild() {
 	for (ServerVehicle &v : vehicles_) {
 		v.occupants.fill(net::kNoVehicleOccupant);
 	}
+	gunnery_.reset(vehicles_.size());
 	return core::Status::success();
 }
 
@@ -117,6 +119,9 @@ void ServerVehicles::spawn_due(sim::Tick p_tick, const sim::logic::ConquestNativ
 		++v.spawned;
 		v.command = sim::VehicleCommand();
 		v.occupants.fill(net::kNoVehicleOccupant);
+		v.seat_commands = {};
+		v.armament = sim::vehicles::ArmamentState();
+		gunnery_.spawned(i);
 		++stats_.spawned;
 		++stats_.live;
 	}
@@ -220,7 +225,11 @@ void ServerVehicles::switch_seat(size_t p_slot, std::optional<uint8_t> p_wanted)
 
 void ServerVehicles::drive(size_t p_slot, const sim::Command &p_command) {
 	const std::optional<VehicleSeat> seat = seat_of(p_slot);
-	if (!seat || seat->seat != 0) {
+	if (!seat) {
+		return;
+	}
+	vehicles_[seat->vehicle].seat_commands[seat->seat] = p_command;
+	if (seat->seat != 0) {
 		return;
 	}
 	sim::VehicleCommand &c = vehicles_[seat->vehicle].command;
@@ -243,7 +252,27 @@ void ServerVehicles::leave(size_t p_slot) {
 	}
 }
 
-core::Status ServerVehicles::step() {
+core::Status ServerVehicles::configure_weapons(std::shared_ptr<const sim::weapons::SurfaceMaterialTable> p_materials,
+		const sim::weapons::Mechanics &p_mechanics) {
+	if (level_ == nullptr) {
+		return core::Status::success();
+	}
+	BF3_TRY(gunnery_.configure(*level_, std::move(p_materials), p_mechanics));
+	gunnery_.reset(vehicles_.size());
+	return core::Status::success();
+}
+
+core::Transform ServerVehicles::hull(size_t p_vehicle) const {
+	const sim::VehicleState s = world_->state(sim::VehicleSlot(p_vehicle));
+	return sim::vehicles::hull_transform(s.body.rotation, s.body.origin);
+}
+
+void ServerVehicles::resolve_weapons(sim::Tick p_tick, const sim::CollisionWorld &p_world,
+		const sim::weapons::HitTargetProvider &p_targets, std::vector<sim::weapons::DamageEvent> &r_damage) {
+	gunnery_.step(p_tick, p_world, p_targets, r_damage);
+}
+
+core::Status ServerVehicles::step(sim::Tick p_tick, uint64_t p_weapon_seed) {
 	if (!on()) {
 		return core::Status::success();
 	}
@@ -261,6 +290,24 @@ core::Status ServerVehicles::step() {
 	const core::Status s = world_->step(slots, commands);
 	if (!s.ok()) {
 		++stats_.step_failures;
+		return s;
+	}
+	for (const sim::VehicleSlot slot : slots) {
+		ServerVehicle &v = vehicles_[slot];
+		const LevelVehicleKind &kind = level_->kinds[level_->spawners[slot].kind];
+		if (kind.armament == nullptr) {
+			continue;
+		}
+		const core::Transform h = hull(slot);
+		if (p_tick % sim::vehicles::kTurretTickDivisor == 0) {
+			std::array<sim::vehicles::SeatAim, net::kMaxVehicleSeats> aims{};
+			for (size_t k = 0; k < aims.size(); ++k) {
+				aims[k].active = v.occupants[k] != net::kNoVehicleOccupant;
+				aims[k].direction = sim::weapons::aim_direction(v.seat_commands[k].yaw, v.seat_commands[k].pitch, {});
+			}
+			sim::vehicles::step_armament(*kind.armament, v.armament, h, aims);
+		}
+		gunnery_.fire(p_tick, slot, kind, v.armament, h, v.occupants, v.seat_commands, p_weapon_seed);
 	}
 	return s;
 }

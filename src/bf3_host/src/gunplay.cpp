@@ -907,6 +907,10 @@ void Gunplay::step_projectiles(uint32_t p_tick, std::span<const sim::SoldierStat
 	}
 }
 
+void Gunplay::add_damage(std::span<const sw::DamageEvent> p_events) {
+	impl_->step_out.damage.insert(impl_->step_out.damage.end(), p_events.begin(), p_events.end());
+}
+
 void Gunplay::apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states, CombatEventSink &r_sink) {
 	Impl &m = *impl_;
 	m.tick_damage = m.step_out.damage;
