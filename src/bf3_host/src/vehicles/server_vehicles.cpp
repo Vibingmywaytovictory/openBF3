@@ -653,7 +653,9 @@ std::vector<net::VehicleStates> ServerVehicles::wire_for(size_t p_slot, const Gh
 		c.team = v.team;
 		c.position = s.body.com_position;
 		c.occupied_by_viewer = std::find(v.occupants.begin(), v.occupants.end(), uint8_t(p_slot)) != v.occupants.end();
-		c.resting = s.body.active == 0;
+		c.resting = s.body.active == 0 && std::all_of(v.occupants.begin(), v.occupants.end(), [](uint8_t o) {
+			return o == net::kNoVehicleOccupant;
+		});
 		c.generation = v.generation;
 		if (scope_.due(p_slot, p_viewer, i, c)) {
 			pack(out, p_tick, wire_of(i, s));

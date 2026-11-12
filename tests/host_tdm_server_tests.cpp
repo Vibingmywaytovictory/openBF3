@@ -4547,7 +4547,8 @@ TEST_SUITE("host-vehicles") {
 
 TEST_SUITE("host-vehicles-scope") {
 	TEST_CASE("vehicles: MP_007 ConquestSmall0: a soldier's client gets each parked vehicle's state once every 15 "
-			  "snapshots and the vehicle he drives every snapshot") {
+			  "snapshots, an asleep vehicle with a driver in at its distance tier, and the vehicle he drives every "
+			  "snapshot") {
 		tdm::TdmLevel *level = tdm::load_conquest_level_once();
 		if (level == nullptr) {
 			return;
@@ -4555,24 +4556,27 @@ TEST_SUITE("host-vehicles-scope") {
 		const host::LevelVehicles &lv = *level->shared->vehicles;
 		std::unique_ptr<Match> m = start_match(*level, false, 66u, 0, 1);
 		tdm::ScriptedPeer &p = m->join("viewer");
+		tdm::ScriptedPeer &o = m->join("observer");
 		p.ready();
+		o.ready();
 		REQUIRE(wait_in_round(*m));
-		REQUIRE(m->until([&] { return is_alive(m->state(p.slot())); }, 600));
+		REQUIRE(m->until([&] { return is_alive(m->state(p.slot())) && is_alive(m->state(o.slot())); }, 600));
 		VehicleWatch watch;
-		std::map<uint16_t, uint32_t> updates;
+		std::map<uint16_t, uint32_t> updates, observed;
 		uint32_t snapshots = 0;
 		const auto run = [&](uint32_t p_ticks) {
 			for (uint32_t t = 0; t < p_ticks; ++t) {
 				m->tick();
 				snapshots += m->now() % 2u == 0u ? 1u : 0u;
 				for (const host::OutDatagram &d : m->out) {
-					if (d.peer != p.peer() || net::peek_type(d.bytes) != net::MessageType::VehicleStates) {
+					if ((d.peer != p.peer() && d.peer != o.peer()) ||
+							net::peek_type(d.bytes) != net::MessageType::VehicleStates) {
 						continue;
 					}
 					core::Result<net::VehicleStates> s = net::decode_vehicle_states(d.bytes);
 					REQUIRE(s.ok());
 					for (const net::VehicleWire &w : s->vehicles) {
-						++updates[w.spawner];
+						++(d.peer == p.peer() ? updates : observed)[w.spawner];
 					}
 				}
 				watch.take(m->out, p.peer());
@@ -4630,6 +4634,20 @@ TEST_SUITE("host-vehicles-scope") {
 					return w != nullptr && w->occupants[0] == slot;
 				},
 				60));
+		const sim::Vec3 crewed = watch.of(spawner)->state.body.com_position;
+		m->teleport(o, ground_at(*m->world, crewed[0] - 0.6f * radius, crewed[2] + 6.0f, crewed[1] + 5.0f));
+		m->ticks(30);
+		observed.clear();
+		snapshots = 0;
+		run(300);
+		const net::VehicleWire *at_rest = watch.of(spawner);
+		REQUIRE(at_rest != nullptr);
+		std::printf("vehicles: the Growler at rest with its driver in (asleep %d) reached the observer %u times in %u "
+					"snapshots\n",
+				int(at_rest->state.body.active == 0), unsigned(observed[spawner]), unsigned(snapshots));
+		CHECK(at_rest->occupants[0] == slot);
+		CHECK(at_rest->state.body.active == 0);
+		CHECK(observed[spawner] + 1u >= snapshots / 2u);
 		forward = 127;
 		updates.clear();
 		snapshots = 0;
