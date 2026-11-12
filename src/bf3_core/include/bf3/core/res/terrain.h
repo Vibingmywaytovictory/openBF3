@@ -121,7 +121,7 @@ struct TerrainRegion {
 
 struct TerrainChunkLayout {
 	ChunkId chunk;
-	uint64_t base = 0;
+	uint64_t heights_offset = 0;
 	uint64_t heights_bytes = 0;
 	uint64_t mask_offset = 0;
 	uint32_t mask_tiles = 0;

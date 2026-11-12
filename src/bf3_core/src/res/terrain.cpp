@@ -18,6 +18,7 @@ constexpr uint32_t kMaxSamplesPerSide = 4096;
 constexpr size_t kParallelRows = 512;
 constexpr uint32_t kChildX[4] = { 0, 1, 1, 0 };
 constexpr uint32_t kChildY[4] = { 0, 0, 1, 1 };
+constexpr int kChildrenChunkOrder[4] = { 3, 2, 1, 0 };
 
 TerrainNodeId child_of(const TerrainNodeId &p_id, int p_index) {
 	return TerrainNodeId{ uint8_t(p_id.level + 1), 2 * p_id.x + kChildX[p_index], 2 * p_id.y + kChildY[p_index] };
@@ -835,42 +836,44 @@ std::array<uint8_t, 64> decode_bc1_block(const uint8_t *p_block) {
 }
 
 ResError TerrainStreamingTree::chunk_layout(const TerrainNodeId &p_id, TerrainChunkLayout &r_layout) const {
-	const auto own = [&](const TerrainNodeId &p_node, TerrainChunkLayout &r_parts) {
-		r_parts.heights_bytes = 0;
-		r_parts.mask_tiles = 0;
-		r_parts.colour_offset.reset();
-		uint64_t at = 0;
+	struct Parts {
+		TerrainNodeId id;
+		uint64_t heights = 0;
+		uint32_t mask_tiles = 0;
+		bool colour = false;
+	};
+	const uint64_t mask_bytes = mask ? mask->tile_bytes() : 0;
+	const uint64_t colour_bytes = colour ? colour->tile_bytes() : 0;
+	const auto parts_of = [&](const TerrainNodeId &p_node) {
+		Parts parts;
+		parts.id = p_node;
 		if (heightfield) {
 			const HeightfieldNode *h = find_node(heightfield->nodes, p_node);
 			if (h != nullptr && !h->disabled && h->can_stream && !h->heights) {
-				r_parts.heights_bytes = height_tile_bytes(*heightfield);
+				parts.heights = height_tile_bytes(*heightfield);
 			}
 		}
-		at = r_parts.heights_bytes;
 		if (mask) {
 			const TerrainMaskNode *m = find_node(mask->nodes, p_node);
 			if (m != nullptr && !m->persistent) {
-				r_parts.mask_tiles = m->tiles;
-				at += uint64_t(m->tiles) * mask->tile_bytes();
+				parts.mask_tiles = m->tiles;
 			}
 		}
 		if (colour) {
 			const TerrainColourNode *c = find_node(colour->nodes, p_node);
-			if (c != nullptr && c->can_stream && !c->persistent) {
-				r_parts.colour_offset = at;
-				at += colour->tile_bytes();
-			}
+			parts.colour = c != nullptr && c->can_stream && !c->persistent;
 		}
-		return at;
+		return parts;
 	};
 	TerrainChunkLayout layout;
+	std::vector<Parts> stored;
+	uint64_t chunk_size = 0;
+	const char *what = "terrain chunk layout";
 	const TerrainStreamingNode *node = find_node(streaming_nodes, p_id);
 	if (node != nullptr && node->lod0_chunk_size > 0) {
 		layout.chunk = node->lod0_chunk;
-		const uint64_t size = own(p_id, layout);
-		if (size != node->lod0_chunk_size) {
-			return ResError::malformed("terrain chunk layout", node->lod0_chunk_size);
-		}
+		chunk_size = node->lod0_chunk_size;
+		stored.push_back(parts_of(p_id));
 	} else {
 		if (p_id.level == 0) {
 			return ResError::malformed("no streaming node", 0);
@@ -880,37 +883,44 @@ ResError TerrainStreamingTree::chunk_layout(const TerrainNodeId &p_id, TerrainCh
 		if (holder == nullptr || holder->children_chunk_size == 0) {
 			return ResError::malformed("no streaming node", p_id.level);
 		}
-		uint64_t base = 0, total = 0;
-		bool found = false;
-		for (int i = 0; i < 4; ++i) {
+		for (int i : kChildrenChunkOrder) {
 			const TerrainNodeId child = child_of(parent, i);
 			const TerrainStreamingNode *own_node = find_node(streaming_nodes, child);
-			if (own_node != nullptr && own_node->lod0_chunk_size > 0) {
-				continue;
+			if (own_node == nullptr || own_node->lod0_chunk_size == 0) {
+				stored.push_back(parts_of(child));
 			}
-			TerrainChunkLayout parts;
-			const uint64_t size = own(child, parts);
-			if (child == p_id) {
-				base = total;
-				found = true;
-			}
-			total += size;
-		}
-		if (!found || total != holder->children_chunk_size) {
-			return ResError::malformed("terrain children chunk layout", holder->children_chunk_size);
 		}
 		layout.chunk = holder->children_chunk;
-		layout.base = base;
-		own(p_id, layout);
+		chunk_size = holder->children_chunk_size;
+		what = "terrain children chunk layout";
 	}
-	const uint64_t own_size = layout.colour_offset
-			? *layout.colour_offset + colour->tile_bytes()
-			: layout.heights_bytes + uint64_t(layout.mask_tiles) * (mask ? mask->tile_bytes() : 0);
-	layout.mask_offset = layout.base + layout.heights_bytes;
-	if (layout.colour_offset) {
-		layout.colour_offset = layout.base + *layout.colour_offset;
+	uint64_t heights_end = 0, masks_end = 0;
+	for (const Parts &p : stored) {
+		heights_end += p.heights;
+		masks_end += uint64_t(p.mask_tiles) * mask_bytes;
 	}
-	layout.total = layout.base + own_size;
+	masks_end += heights_end;
+	uint64_t heights_at = 0, mask_at = heights_end, colour_at = masks_end;
+	bool found = false;
+	for (const Parts &p : stored) {
+		if (p.id == p_id) {
+			found = true;
+			layout.heights_offset = heights_at;
+			layout.heights_bytes = p.heights;
+			layout.mask_offset = mask_at;
+			layout.mask_tiles = p.mask_tiles;
+			if (p.colour) {
+				layout.colour_offset = colour_at;
+			}
+		}
+		heights_at += p.heights;
+		mask_at += uint64_t(p.mask_tiles) * mask_bytes;
+		colour_at += p.colour ? colour_bytes : 0;
+	}
+	layout.total = colour_at;
+	if (!found || layout.total != chunk_size) {
+		return ResError::malformed(what, chunk_size);
+	}
 	r_layout = layout;
 	return {};
 }

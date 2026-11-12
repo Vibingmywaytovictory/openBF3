@@ -10,7 +10,9 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -266,5 +268,109 @@ TEST_SUITE("render-terrain") {
 		const SnapshotDiff diff = diff_snapshots(m.before, m.reader.snapshot());
 		std::printf("install.unchanged %s\n", diff.clean() ? "PASS" : diff.summary().c_str());
 		CHECK_MESSAGE(diff.clean(), diff.summary());
+	}
+
+	TEST_CASE("terrain: XP3_Desert tiles stored in a parent's children chunk agree with the parent's tiles") {
+		test::Mounted m;
+		if (!test::open_or_skip(m)) {
+			return;
+		}
+		Result<LevelMount> mount = m.install->mount_superbundle("Win32/Levels/XP3_Desert/XP3_Desert");
+		REQUIRE(mount.ok());
+		REQUIRE(mount->load_all_bundles().ok());
+		auto terrain = mount->read_res("levels/xp3_desert/terrain/terrain_8k");
+		REQUIRE(terrain.ok());
+		std::string tree_name;
+		REQUIRE(core::res::terrain_streaming_tree_name(terrain->second, tree_name).ok());
+		auto tree_bytes = mount->read_res(tree_name);
+		REQUIRE(tree_bytes.ok());
+		core::res::TerrainStreamingTree tree;
+		const core::res::ResError parsed = core::res::TerrainStreamingTree::parse(tree_bytes->second, tree);
+		REQUIRE_MESSAGE(parsed.ok(), parsed.message());
+		REQUIRE(tree.mask.has_value());
+		REQUIRE(tree.colour.has_value());
+		std::map<std::array<uint8_t, 16>, std::vector<uint8_t>> chunks;
+		const core::res::TerrainChunkFetch fetch =
+				[&](const core::res::ChunkId &p_id) -> std::optional<std::vector<uint8_t>> {
+			auto found = chunks.find(p_id.bytes);
+			if (found == chunks.end()) {
+				Result<std::vector<uint8_t>> c = mount->read_chunk(Guid::from_bytes(p_id.bytes.data()));
+				if (!c) {
+					return std::nullopt;
+				}
+				found = chunks.emplace(p_id.bytes, std::move(*c)).first;
+			}
+			return found->second;
+		};
+		const auto own_chunk = [&](const core::res::TerrainNodeId &p_id) {
+			for (const core::res::TerrainStreamingNode &s : tree.streaming_nodes) {
+				if (s.id == p_id) {
+					return s.lod0_chunk_size > 0;
+				}
+			}
+			return false;
+		};
+		const auto region_of = [](const std::array<float, 4> &p_bounds, const core::res::TerrainNodeId &p_id) {
+			const float side = (p_bounds[2] - p_bounds[0]) / float(uint32_t(1) << p_id.level);
+			core::res::TerrainRegion r;
+			r.texel = side / 32.0f;
+			r.origin = { p_bounds[0] + side * float(p_id.x), p_bounds[1] + side * float(p_id.y) };
+			r.width = r.height = 32;
+			return r;
+		};
+		const auto difference = [](const std::vector<uint8_t> &p_a, const std::vector<uint8_t> &p_b) {
+			double sum = 0.0;
+			for (size_t i = 0; i < p_a.size(); ++i) {
+				sum += std::abs(double(p_a[i]) - double(p_b[i]));
+			}
+			return p_a.empty() ? 0.0 : sum / double(p_a.size());
+		};
+		uint32_t colour_nodes = 0, mask_nodes = 0;
+		double colour_worst = 0.0, mask_worst = 0.0, colour_sum = 0.0, mask_sum = 0.0;
+		uint32_t mask_tiles = 0;
+		for (const core::res::TerrainColourNode &node : tree.colour->nodes) {
+			if (node.id.level == 0 || !node.can_stream || node.persistent || own_chunk(node.id)) {
+				continue;
+			}
+			const core::res::TerrainRegion region = region_of(tree.colour->bounds, node.id);
+			std::vector<uint8_t> parent, child;
+			REQUIRE(tree.colour_grid(region, uint8_t(node.id.level - 1), fetch, parent).ok());
+			const core::res::ResError e = tree.colour_grid(region, node.id.level, fetch, child);
+			REQUIRE_MESSAGE(e.ok(), e.message());
+			const double d = difference(parent, child);
+			colour_worst = std::max(colour_worst, d);
+			colour_sum += d;
+			++colour_nodes;
+		}
+		for (const core::res::TerrainMaskNode &node : tree.mask->nodes) {
+			if (node.id.level == 0 || node.tiles == 0 || node.persistent || own_chunk(node.id)) {
+				continue;
+			}
+			const core::res::TerrainRegion region = region_of(tree.mask->bounds, node.id);
+			std::vector<std::vector<uint8_t>> parent, child;
+			REQUIRE(tree.mask_grids(region, uint8_t(node.id.level - 1), fetch, parent).ok());
+			const core::res::ResError e = tree.mask_grids(region, node.id.level, fetch, child);
+			REQUIRE_MESSAGE(e.ok(), e.message());
+			for (const core::res::TerrainMaskRecord &r : node.records) {
+				if (!r.full) {
+					const double d = difference(parent[r.layer], child[r.layer]);
+					mask_worst = std::max(mask_worst, d);
+					mask_sum += d;
+					++mask_tiles;
+				}
+			}
+			++mask_nodes;
+		}
+		const double colour_mean = colour_sum / double(std::max(colour_nodes, 1u));
+		const double mask_mean = mask_sum / double(std::max(mask_tiles, 1u));
+		std::printf("render.terrain XP3_Desert children-chunk tiles against their parents: %u colour (mean difference "
+					"%.2f / 255, worst %.2f), %u mask nodes, %u tiles (mean %.2f, worst %.2f)\n",
+				colour_nodes, colour_mean, colour_worst, mask_nodes, mask_tiles, mask_mean, mask_worst);
+		CHECK(colour_nodes == 196);
+		CHECK(mask_nodes == 257);
+		CHECK(colour_mean < 12.0);
+		CHECK(mask_mean < 12.0);
+		CHECK(colour_worst < 24.0);
+		CHECK(mask_worst < 48.0);
 	}
 }
