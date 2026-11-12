@@ -6,6 +6,7 @@
 #include "bf3/core/math.h"
 #include "bf3/core/result.h"
 #include "bf3/core/superbundle_mount.h"
+#include "bf3/render/look_materials.h"
 #include "bf3/render/material_lookup.h"
 #include "bf3/render/mesh_prep.h"
 #include "bf3/render/texture_prep.h"
@@ -43,6 +44,7 @@ struct VehicleMeshKind {
 	std::string blueprint;
 	std::string mesh;
 	std::vector<MeshMaterials> materials;
+	std::vector<std::vector<LookMaterial>> looks;
 	std::vector<VehicleMeshPart> parts;
 	std::vector<uint8_t> part_mesh;
 	core::CachedItem cache;

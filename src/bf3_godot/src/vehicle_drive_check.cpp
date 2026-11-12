@@ -190,10 +190,13 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			const std::optional<GameVehicleView> view = p_in.vehicles->view(spawner_);
 			const Vector3 eye = p_in.camera != nullptr ? p_in.camera->get_global_position() : Vector3();
 			const float inside = view ? eye.distance_to(view->body.origin) : 1e9f;
+			const uint32_t glass = p_in.vehicles->stats().glass_surfaces;
 			row("first_person",
-					seat.has_value() && inside < 3.0f && (p_in.own_vm == nullptr || !p_in.own_vm->is_visible()),
-					fmt("camera %.2f m from the body origin, viewmodel %s", double(inside),
-							p_in.own_vm != nullptr && p_in.own_vm->is_visible() ? "shown" : "hidden"));
+					seat.has_value() && inside < 3.0f && (p_in.own_vm == nullptr || !p_in.own_vm->is_visible()) &&
+							glass > 0,
+					fmt("camera %.2f m from the body origin, viewmodel %s, %u glass surfaces drawn see-through",
+							double(inside), p_in.own_vm != nullptr && p_in.own_vm->is_visible() ? "shown" : "hidden",
+							unsigned(glass)));
 			shoot(p_in, "vehicle_1p");
 			const host::PresentedVehicle *v = presented(f, spawner_);
 			if (v == nullptr) {

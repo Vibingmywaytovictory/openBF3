@@ -3,6 +3,7 @@
 #include "render_bridge.h"
 
 #include "bf3/host/level_load.h"
+#include "bf3/render/viewmodel_set.h"
 
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/core/object.hpp>
@@ -27,6 +28,35 @@ Vector3 to_vector(const core::Vec3 &p_v) {
 
 Transform3D godot_transform(const core::Transform &p_t) {
 	return Transform3D(Basis(to_vector(p_t.right), to_vector(p_t.up), to_vector(p_t.forward)), to_vector(p_t.trans));
+}
+
+void apply_vehicle_look(const Ref<StandardMaterial3D> &p_m, const render::LookMaterial &p_look) {
+	if (p_look.double_sided) {
+		p_m->set_cull_mode(BaseMaterial3D::CULL_DISABLED);
+	}
+	if (p_look.blend == render::LookBlend::AlphaTest) {
+		p_m->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
+		return;
+	}
+	if (p_look.blend != render::LookBlend::Blend) {
+		return;
+	}
+	p_m->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA);
+	if (p_look.glass) {
+		if (!p_look.color) {
+			p_m->set_texture(BaseMaterial3D::TEXTURE_ALBEDO, Ref<Texture2D>());
+			p_m->set_albedo(Color(
+					render::kLookGlassTint, render::kLookGlassTint, render::kLookGlassTint, render::kLookGlassOpacity));
+		} else {
+			p_m->set_albedo(Color(1.0f, 1.0f, 1.0f, render::kLookGlassOpacity));
+		}
+		p_m->set_roughness(0.1f);
+		return;
+	}
+	const render::ViewmodelBlend mode = render::viewmodel_blend_of(p_look.solution_blend.value_or(0));
+	p_m->set_blend_mode(mode == render::ViewmodelBlend::Add	   ? BaseMaterial3D::BLEND_MODE_ADD
+					: mode == render::ViewmodelBlend::Multiply ? BaseMaterial3D::BLEND_MODE_MUL
+															   : BaseMaterial3D::BLEND_MODE_MIX);
 }
 
 void free_node(uint64_t p_id) {
@@ -121,21 +151,33 @@ bool GameVehicles::build(Node3D *p_parent, std::string *r_error) {
 		for (size_t p = 0; p < mk->parts.size(); ++p) {
 			const render::VehicleMeshPart &part = mk->parts[p];
 			const render::MeshMaterials &slots = mk->materials[mk->part_mesh[p]];
+			const std::vector<render::LookMaterial> &looks = mk->looks[mk->part_mesh[p]];
+			render::PreparedMesh drawn = part.prepared;
+			std::erase_if(drawn.surfaces, [&](const render::PreparedSurface &p_s) {
+				return p_s.material_index < looks.size() && !looks[p_s.material_index].drawn;
+			});
 			std::vector<Ref<Material>> materials;
-			for (const render::PreparedSurface &s : part.prepared.surfaces) {
-				Ref<Material> m;
+			for (const render::PreparedSurface &s : drawn.surfaces) {
+				Ref<StandardMaterial3D> m;
 				if (s.material_index < slots.slots.size()) {
 					m = make_standard_material(
 							slots.slots[s.material_index], !s.tangents.empty(), find_texture, MaterialOptions{});
+					if (s.material_index < looks.size()) {
+						apply_vehicle_look(m, looks[s.material_index]);
+						stats_.glass_surfaces += looks[s.material_index].glass ? 1u : 0u;
+					}
 				}
 				materials.push_back(m);
 			}
-			const render::PreparedSurface *first = part.prepared.surfaces.data();
-			Ref<ArrayMesh> mesh =
-					make_array_mesh(part.prepared, [&](const render::PreparedSurface &p_s) -> Ref<Material> {
-						const size_t i = size_t(&p_s - first);
-						return i < materials.size() ? materials[i] : Ref<Material>();
-					});
+			if (drawn.surfaces.empty()) {
+				kinds_[k].parts.push_back(Part{ Ref<ArrayMesh>(), wheel_of[p], Transform3D() });
+				continue;
+			}
+			const render::PreparedSurface *first = drawn.surfaces.data();
+			Ref<ArrayMesh> mesh = make_array_mesh(drawn, [&](const render::PreparedSurface &p_s) -> Ref<Material> {
+				const size_t i = size_t(&p_s - first);
+				return i < materials.size() ? materials[i] : Ref<Material>();
+			});
 			if (mesh.is_null()) {
 				*r_error = "vehicles: no mesh made for part " + std::to_string(part.part) + " of " + mk->mesh;
 				return false;

@@ -1764,6 +1764,24 @@ TEST_SUITE("render-vehicle-meshes") {
 					unsigned(k.model->wheel_count));
 			CHECK(matched.size() == k.model->wheel_count);
 			CHECK(placed > mk->parts.size() / 2);
+			REQUIRE(mk->looks.size() == mk->materials.size());
+			size_t glass = 0, blended = 0;
+			for (size_t m = 0; m < mk->materials.size(); ++m) {
+				REQUIRE(mk->looks[m].size() == mk->materials[m].slots.size());
+				for (size_t i = 0; i < mk->looks[m].size(); ++i) {
+					const render::LookMaterial &look = mk->looks[m][i];
+					glass += look.glass ? 1u : 0u;
+					blended += look.blend == render::LookBlend::Blend ? 1u : 0u;
+					std::printf("vehicle meshes: %s mesh %zu slot %zu shader %s: blend %d glass %d double sided %d "
+								"drawn %d\n",
+							k.blueprint.c_str(), m, i, mk->materials[m].slots[i].shader.c_str(), int(look.blend),
+							int(look.glass), int(look.double_sided), int(look.drawn));
+				}
+			}
+			if (k.blueprint == "vehicles/growleritv/growleritv") {
+				CHECK_MESSAGE(glass > 0, "the Growler's windscreen slots resolve to glass");
+				CHECK(blended >= glass);
+			}
 		}
 		for (const std::string &n : (*set)->notes) {
 			MESSAGE(n);

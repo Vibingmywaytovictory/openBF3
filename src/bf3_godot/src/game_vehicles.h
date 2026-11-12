@@ -24,6 +24,7 @@ struct GameVehiclesStats {
 	uint32_t kinds = 0;
 	uint32_t parts = 0;
 	uint32_t wheel_parts = 0;
+	uint32_t glass_surfaces = 0;
 	uint32_t shown = 0;
 	uint32_t unknown = 0;
 	uint64_t created = 0;

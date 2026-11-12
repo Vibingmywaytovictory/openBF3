@@ -161,6 +161,10 @@ core::Result<std::unique_ptr<VehicleMeshSet>> load_vehicle_meshes(const core::Eb
 	const auto start = std::chrono::steady_clock::now();
 	auto set = std::make_unique<VehicleMeshSet>();
 	const std::vector<std::string> databases = variation_database_names(p_mount);
+	std::unique_ptr<LookResolver> look = LookResolver::open(p_mount);
+	if (!look) {
+		set->notes.push_back("no level shader database: every vehicle slot is drawn opaque");
+	}
 	for (const VehicleMeshSpec &spec : p_specs) {
 		const std::string what = "vehicle " + spec.blueprint;
 		if (spec.mesh.empty()) {
@@ -205,6 +209,11 @@ core::Result<std::unique_ptr<VehicleMeshSet>> load_vehicle_meshes(const core::Eb
 				kind.parts.push_back(std::move(part));
 				kind.part_mesh.push_back(uint8_t(m));
 			}
+			std::vector<LookMaterial> looks(materials->slots.size());
+			for (size_t i = 0; look && i < looks.size(); ++i) {
+				looks[i] = look->resolve(materials->slots[i], name);
+			}
+			kind.looks.push_back(std::move(looks));
 			kind.materials.push_back(std::move(*materials));
 			if (m == 0) {
 				kind.cache = mesh->item;
