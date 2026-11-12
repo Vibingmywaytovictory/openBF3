@@ -3,6 +3,7 @@
 #include "bf3/net/protocol.h"
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/vehicle_types.h"
+#include "bf3/sim/vehicles/vehicle_damage.h"
 
 #include <array>
 #include <cstddef>
@@ -52,6 +53,9 @@ struct PresentedVehicle {
 	uint8_t turret_count = 0;
 	std::array<float, net::kMaxVehicleTurrets> turret_angle{};
 	uint8_t predicted = 0;
+	float health = 1;
+	sim::vehicles::VehicleCondition condition = sim::vehicles::VehicleCondition::Healthy;
+	bool burning = false;
 	uint8_t window_count = 0;
 	std::array<PresentedVehicleSample, kVehicleWindow> window{};
 

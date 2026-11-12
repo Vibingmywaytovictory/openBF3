@@ -597,6 +597,20 @@ std::optional<sim::Vec3> ServerVehicles::exit_position(size_t p_slot) const {
 	return sim::Vec3{ s.body.origin[0] + offset[0], s.body.origin[1] + offset[1], s.body.origin[2] + offset[2] };
 }
 
+uint16_t wire_health(const sim::vehicles::VehicleDamageRule &p_rule, const sim::vehicles::VehicleHealth &p_health) {
+	const float full = sim::vehicles::full_vehicle_health(p_rule);
+	if (!(full > 0.0f)) {
+		return net::kVehicleHealthFull;
+	}
+	const float ratio = std::clamp(sim::vehicles::vehicle_health(p_rule, p_health) / full, 0.0f, 1.0f);
+	return uint16_t(std::ceil(ratio * float(net::kVehicleHealthFull)));
+}
+
+bool vehicle_burning(const sim::vehicles::VehicleDamageRule &p_rule, const sim::vehicles::VehicleHealth &p_health) {
+	return p_health.condition == sim::vehicles::VehicleCondition::Disabled && p_rule.decay_rate > 0.0f &&
+			p_health.decay_timer >= p_rule.decay_delay;
+}
+
 net::VehicleWire ServerVehicles::wire_of(size_t p_vehicle, const sim::VehicleState &p_state) const {
 	const ServerVehicle &v = vehicles_[p_vehicle];
 	const LevelVehicleKind &kind = level_->kinds[level_->spawners[p_vehicle].kind];
@@ -614,6 +628,9 @@ net::VehicleWire ServerVehicles::wire_of(size_t p_vehicle, const sim::VehicleSta
 			w.turret_angles[k] = v.armament.bodies[k].angle;
 		}
 	}
+	w.health = wire_health(kind.damage, v.health);
+	w.condition = uint8_t(v.health.condition);
+	w.burning = vehicle_burning(kind.damage, v.health);
 	return w;
 }
 

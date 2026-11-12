@@ -70,6 +70,9 @@ struct VehicleSeat {
 	uint8_t seat = 0;
 };
 
+uint16_t wire_health(const sim::vehicles::VehicleDamageRule &p_rule, const sim::vehicles::VehicleHealth &p_health);
+bool vehicle_burning(const sim::vehicles::VehicleDamageRule &p_rule, const sim::vehicles::VehicleHealth &p_health);
+
 class ServerVehicles {
 public:
 	ServerVehicles();

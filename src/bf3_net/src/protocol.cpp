@@ -2056,6 +2056,11 @@ template <class A, MaybeConst<VehicleWire> W> void serialize(A &r_a, W &r_w) {
 		r_a.f32(r_w.turret_angles[i]);
 		r_a.check("vehicle turret angle not finite", [&] { return std::isfinite(r_w.turret_angles[i]); });
 	}
+	r_a.bits(r_w.health, 10);
+	r_a.bits(r_w.condition, 2);
+	r_a.bits(r_w.burning, 1);
+	r_a.check("vehicle health or condition out of range",
+			[&] { return r_w.health <= kVehicleHealthFull && r_w.condition < kVehicleConditions; });
 	r_a.check("vehicle gearbox phase or pending step out of range", [&] {
 		const uint8_t phase = uint8_t(d.gearbox.phase);
 		return (phase <= uint8_t(sim::vehicles::GearPhase::Reengage) ||

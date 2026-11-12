@@ -1102,6 +1102,7 @@ add_test(NAME host.vehicles.blend.unit COMMAND test_host_tdm --test-suite=host-v
 set_tests_properties(host.vehicles.blend.unit PROPERTIES TIMEOUT 60)
 add_test(NAME host.vehicles.reconcile COMMAND test_host_tdm --test-suite=host-vehicles-reconcile)
 set_tests_properties(host.vehicles.reconcile PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+add_test(NAME host.vehicles.unit COMMAND test_host_tdm --test-suite=host-vehicles-unit)
 target_sources(test_host_tdm PRIVATE host_conquest_bots_tests.cpp)
 add_test(NAME host.tdm.conquest_bots COMMAND test_host_tdm --test-suite=host-tdm-conquest-bots "--test-case-exclude=*seed 2:*,*seed 3:*")
 add_test(NAME host.tdm.conquest_bots.seed2 COMMAND test_host_tdm --test-suite=host-tdm-conquest-bots "--test-case=*seed 2:*")

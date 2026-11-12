@@ -4046,6 +4046,9 @@ void append_v4_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>>
 	vw.state.driver.track_steer = { 812.5f, -812.5f };
 	vw.turret_count = 2;
 	vw.turret_angles = { 0.75f, -0.125f };
+	vw.health = 437;
+	vw.condition = 1;
+	vw.burning = true;
 	vs.vehicles.push_back(vw);
 	r_out.emplace_back("VehicleStates (v14)", net::encode_vehicle_states(vs));
 }
@@ -4814,7 +4817,7 @@ TEST_SUITE("net-proto") {
 			{ "OrderNotice (v9)", 3, 0xf5bd1717ea80524bull, 0 },
 			{ "ConquestState (v11)", 61, 0x026a78587b1a83a7ull, 0 },
 			{ "SpawnAnswer (v11)", 3, 0x4e7b94181d5e21b6ull, 0 },
-			{ "VehicleStates (v14)", 176, 0x6ac12ba746c6acaeull, 0 },
+			{ "VehicleStates (v14)", 169, 0xfd7d6f65c69fe5ccull, 0 },
 		};
 		check_golden(samples, kPins);
 	}
@@ -5442,8 +5445,8 @@ TEST_SUITE("net-proto") {
 }
 
 TEST_SUITE("net-proto") {
-	TEST_CASE("proto v14: VehicleStates carries each vehicle's state, its track steer and turret angles at full "
-			  "precision; hostile fields and oversize lists are refused") {
+	TEST_CASE("proto v14: VehicleStates carries each vehicle's state, its track steer, turret angles at full "
+			  "precision, health, condition and burning; hostile fields and oversize lists are refused") {
 		net::VehicleStates m;
 		m.server_tick = 9001;
 		for (uint16_t i = 0; i < net::kMaxVehiclesPerDatagram; ++i) {
@@ -5483,6 +5486,9 @@ TEST_SUITE("net-proto") {
 			for (size_t k = 0; k < w.turret_count; ++k) {
 				w.turret_angles[k] = 0.25f * float(k + 1) - 0.1f * float(i);
 			}
+			w.health = uint16_t(i * 200);
+			w.condition = uint8_t(i % net::kVehicleConditions);
+			w.burning = i % 2 == 1;
 			m.vehicles.push_back(w);
 		}
 		const std::vector<uint8_t> bytes = net::encode_vehicle_states(m);
@@ -5514,6 +5520,8 @@ TEST_SUITE("net-proto") {
 		CHECK(refused([](net::VehicleWire &r) { r.turret_count = 17; }));
 		CHECK(refused([](net::VehicleWire &r) { r.turret_angles[0] = std::nanf(""); }));
 		CHECK(refused([](net::VehicleWire &r) { r.state.driver.track_steer[1] = std::nanf(""); }));
+		CHECK(refused([](net::VehicleWire &r) { r.health = net::kVehicleHealthFull + 1; }));
+		CHECK(refused([](net::VehicleWire &r) { r.condition = net::kVehicleConditions; }));
 		net::VehicleStates many = m;
 		many.vehicles.push_back(m.vehicles[0]);
 		CHECK(!net::decode_vehicle_states(net::encode_vehicle_states(many)).ok());

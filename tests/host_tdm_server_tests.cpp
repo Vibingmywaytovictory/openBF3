@@ -4,6 +4,7 @@
 #include "pipe_transport.h"
 #include "tdm_fixture.h"
 #include "vehicles/client_vehicles.h"
+#include "vehicles/server_vehicles.h"
 #include "vehicles/vehicle_gunnery.h"
 #include "vehicles/vehicle_hits.h"
 #include "vehicles/vehicle_scope.h"
@@ -5244,6 +5245,8 @@ struct VehicleSight {
 	bool present = false;
 	uint8_t generation = 0;
 	sim::Vec3 at{};
+	uint16_t health = 0;
+	uint8_t condition = 0;
 };
 
 VehicleSight sighted(std::span<const host::OutDatagram> p_out, uint32_t p_peer, uint16_t p_spawner) {
@@ -5262,6 +5265,8 @@ VehicleSight sighted(std::span<const host::OutDatagram> p_out, uint32_t p_peer, 
 				s.present = true;
 				s.generation = w.generation;
 				s.at = w.state.body.com_position;
+				s.health = w.health;
+				s.condition = w.condition;
 			}
 		}
 	}
@@ -5306,6 +5311,13 @@ struct WreckRun {
 	uint8_t generation_after = 0;
 	float respawn_offset = 0;
 	uint64_t runtime_faults = 0;
+	uint16_t first_health = 0;
+	uint16_t lowest_health = net::kVehicleHealthFull;
+	uint16_t disabled_at = 0;
+	uint32_t disabled_samples = 0;
+	uint32_t misread_samples = 0;
+	uint16_t respawn_health = 0;
+	uint8_t respawn_condition = 0xFF;
 };
 
 WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(const host::LevelVehicleKind &)> &p_target,
@@ -5391,6 +5403,10 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 			unsigned(target_spawner), double(spawn_delay), double(best));
 	const sim::Vec3 target_at = target->state.body.com_position;
 	run.generation_before = target->generation;
+	run.first_health = target->health;
+	const float full = sim::vehicles::full_vehicle_health(target_kind.damage);
+	run.disabled_at =
+			uint16_t(std::ceil(target_kind.damage.disabled_threshold / full * float(net::kVehicleHealthFull)));
 
 	const sim::Tick enemy_use = m->now() + 3u;
 	enemy->fn = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
@@ -5467,6 +5483,14 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 			if (now.sent && !now.present) {
 				gone = m->now();
 			}
+			if (now.present) {
+				run.lowest_health = std::min(run.lowest_health, now.health);
+				const uint8_t expected = now.health == 0 ? uint8_t(sim::vehicles::VehicleCondition::Destroyed)
+						: now.health <= run.disabled_at	 ? uint8_t(sim::vehicles::VehicleCondition::Disabled)
+														 : uint8_t(sim::vehicles::VehicleCondition::Healthy);
+				run.disabled_samples += now.condition == uint8_t(sim::vehicles::VehicleCondition::Disabled) ? 1u : 0u;
+				run.misread_samples += now.condition != expected && now.health != 0 ? 1u : 0u;
+			}
 		}
 		std::printf("damage: after shell %d: %llu shots, %llu vehicle hits, the driver %s\n", shell + 1,
 				static_cast<unsigned long long>(m->server.stats().vehicle_shots - shots_before),
@@ -5497,6 +5521,8 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 	REQUIRE(back.has_value());
 	run.gone_for = *back - *gone;
 	run.generation_after = seen.generation;
+	run.respawn_health = seen.health;
+	run.respawn_condition = seen.condition;
 	run.respawn_offset = horizontal(seen.at, target_at);
 	std::printf("damage: the %s left the wire at tick %u and came back at tick %u (%u ticks, SpawnDelay %u ticks), "
 				"generation %u -> %u, %.2f m from its first spawn\n",
@@ -5555,8 +5581,52 @@ void check_respawn(const WreckRun &p_run) {
 	CHECK(p_run.respawn_offset < 1.0f);
 	CHECK(p_run.gunner_alive);
 	CHECK(p_run.runtime_faults == 0u);
+	std::printf("damage: wire health %u at the start, lowest %u while on the wire, disabled at %u, %u disabled "
+				"samples, %u misread, %u after the respawn\n",
+			unsigned(p_run.first_health), unsigned(p_run.lowest_health), unsigned(p_run.disabled_at),
+			unsigned(p_run.disabled_samples), unsigned(p_run.misread_samples), unsigned(p_run.respawn_health));
+	CHECK(p_run.first_health == net::kVehicleHealthFull);
+	CHECK(p_run.lowest_health < net::kVehicleHealthFull);
+	CHECK(p_run.misread_samples == 0u);
+	CHECK(p_run.respawn_health == net::kVehicleHealthFull);
+	CHECK(p_run.respawn_condition == uint8_t(sim::vehicles::VehicleCondition::Healthy));
+}
 }
 
+TEST_SUITE("host-vehicles-unit") {
+	TEST_CASE("vehicles: the wire carries a vehicle's health in thousandths of full health rounded up, its condition "
+			  "and burning once its decay delay has run; the client presents them") {
+		sim::vehicles::VehicleDamageRule rule;
+		rule.zones[0].max_health = 500;
+		rule.zones[1].max_health = 500;
+		rule.share_damage = true;
+		rule.disabled_threshold = 300;
+		rule.decay_delay = 7;
+		rule.decay_rate = 15;
+		sim::vehicles::VehicleHealth h = sim::vehicles::spawned_vehicle_health(rule);
+		CHECK(host::wire_health(rule, h) == net::kVehicleHealthFull);
+		h.health = { 218.6f, 218.6f, 0.0f, 0.0f };
+		CHECK(host::wire_health(rule, h) == 438);
+		h.condition = sim::vehicles::VehicleCondition::Disabled;
+		h.decay_timer = 6.9f;
+		CHECK_FALSE(host::vehicle_burning(rule, h));
+		h.decay_timer = 7.0f;
+		CHECK(host::vehicle_burning(rule, h));
+		h.condition = sim::vehicles::VehicleCondition::Destroyed;
+		h.health = {};
+		CHECK(host::wire_health(rule, h) == 0);
+		CHECK_FALSE(host::vehicle_burning(rule, h));
+
+		net::VehicleWire w;
+		w.state.wheel_count = 4;
+		w.health = 438;
+		w.condition = uint8_t(sim::vehicles::VehicleCondition::Disabled);
+		w.burning = true;
+		const host::PresentedVehicle v = host::present_vehicle(w, 40);
+		CHECK(v.health == doctest::Approx(0.438f));
+		CHECK(v.condition == sim::vehicles::VehicleCondition::Disabled);
+		CHECK(v.burning);
+	}
 }
 
 TEST_SUITE("host-vehicles-damage") {

@@ -910,6 +910,8 @@ inline constexpr size_t kMaxVehicleSeats = 8;
 inline constexpr uint8_t kNoVehicleOccupant = 0xFF;
 inline constexpr size_t kMaxVehiclesPerDatagram = 6;
 inline constexpr size_t kMaxVehicleTurrets = 16;
+inline constexpr uint16_t kVehicleHealthFull = 1000;
+inline constexpr uint8_t kVehicleConditions = 3;
 
 struct VehicleWire {
 	uint16_t spawner = 0;
@@ -924,6 +926,9 @@ struct VehicleWire {
 	sim::VehicleState state;
 	uint8_t turret_count = 0;
 	std::array<float, kMaxVehicleTurrets> turret_angles{};
+	uint16_t health = kVehicleHealthFull;
+	uint8_t condition = 0;
+	bool burning = false;
 
 	bool operator==(const VehicleWire &) const = default;
 };
