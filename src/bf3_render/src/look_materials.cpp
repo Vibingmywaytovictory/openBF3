@@ -694,6 +694,7 @@ core::Result<TranslatedProgram> LookResolver::translate(
 	request.pixel = &p_info.pixel;
 	request.vertex = &p_info.vertex;
 	request.vertex_formats = p_info.solution->vertex_program->element_formats;
+	request.vertex_lanes = p_info.solution->vertex_program->element_lanes;
 	request.bound_textures = registers;
 	request.target = p_info.target;
 	const uint8_t blend = p_info.solution->blend_mode;

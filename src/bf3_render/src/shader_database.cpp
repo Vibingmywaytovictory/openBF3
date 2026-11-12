@@ -1,6 +1,7 @@
 #include "bf3/render/shader_database.h"
 
 #include "bf3/core/ebx.h"
+#include "bf3/core/res/mesh_set.h"
 #include "bf3/core/util/text.h"
 
 #include <algorithm>
@@ -52,6 +53,164 @@ float rdf(const uint8_t *p) {
 	float v;
 	std::memcpy(&v, p, 4);
 	return v;
+}
+
+constexpr size_t kElementSlotAt = 8;
+constexpr size_t kElementOffsetAt = 12;
+constexpr size_t kElementClassAt = 16;
+constexpr size_t kDeclarationElementsAt = 4;
+constexpr size_t kDeclarationCountAt = 4 + 0x48;
+constexpr size_t kDeclarationElements = 16;
+constexpr uint8_t kPositionSignLane = 3;
+
+enum class LaneKind : uint8_t {
+	None,
+	Float,
+	Half,
+	UNorm,
+	SNorm,
+	UInt,
+	SInt,
+};
+
+struct LaneLayout {
+	LaneKind kind = LaneKind::None;
+	uint8_t bytes = 0;
+	uint8_t count = 0;
+	std::array<uint8_t, 4> order{ 0, 1, 2, 3 };
+};
+
+LaneLayout dxgi_layout(uint32_t p_format) {
+	struct Entry {
+		uint32_t format;
+		LaneLayout layout;
+	};
+	static constexpr Entry kFormats[] = { { 2, { LaneKind::Float, 4, 4 } }, { 6, { LaneKind::Float, 4, 3 } },
+		{ 10, { LaneKind::Half, 2, 4 } }, { 11, { LaneKind::UNorm, 2, 4 } }, { 12, { LaneKind::UInt, 2, 4 } },
+		{ 13, { LaneKind::SNorm, 2, 4 } }, { 16, { LaneKind::Float, 4, 2 } }, { 28, { LaneKind::UNorm, 1, 4 } },
+		{ 30, { LaneKind::UInt, 1, 4 } }, { 31, { LaneKind::SNorm, 1, 4 } }, { 34, { LaneKind::Half, 2, 2 } },
+		{ 35, { LaneKind::UNorm, 2, 2 } }, { 37, { LaneKind::SNorm, 2, 2 } }, { 41, { LaneKind::Float, 4, 1 } },
+		{ 54, { LaneKind::Half, 2, 1 } }, { 87, { LaneKind::UNorm, 1, 4, { 2, 1, 0, 3 } } } };
+	for (const Entry &e : kFormats) {
+		if (e.format == p_format) {
+			return e.layout;
+		}
+	}
+	return {};
+}
+
+LaneLayout declared_layout(core::res::VertexFormat p_format) {
+	using core::res::VertexFormat;
+	const uint8_t f = uint8_t(p_format);
+	if (f >= uint8_t(VertexFormat::Float) && f <= uint8_t(VertexFormat::Float4)) {
+		return { LaneKind::Float, 4, uint8_t(f - uint8_t(VertexFormat::Float) + 1) };
+	}
+	if (f >= uint8_t(VertexFormat::Half) && f <= uint8_t(VertexFormat::Half4)) {
+		return { LaneKind::Half, 2, uint8_t(f - uint8_t(VertexFormat::Half) + 1) };
+	}
+	if (f >= uint8_t(VertexFormat::Short) && f <= uint8_t(VertexFormat::Short4)) {
+		return { LaneKind::SInt, 2, uint8_t(f - uint8_t(VertexFormat::Short) + 1) };
+	}
+	if (f >= uint8_t(VertexFormat::ShortN) && f <= uint8_t(VertexFormat::Short4N)) {
+		return { LaneKind::SNorm, 2, uint8_t(f - uint8_t(VertexFormat::ShortN) + 1) };
+	}
+	switch (p_format) {
+		case VertexFormat::Byte4:
+			return { LaneKind::SInt, 1, 4 };
+		case VertexFormat::Byte4N:
+			return { LaneKind::SNorm, 1, 4 };
+		case VertexFormat::UByte4:
+			return { LaneKind::UInt, 1, 4 };
+		case VertexFormat::UByte4N:
+			return { LaneKind::UNorm, 1, 4 };
+		case VertexFormat::UShort2:
+			return { LaneKind::UInt, 2, 2 };
+		case VertexFormat::UShort4:
+			return { LaneKind::UInt, 2, 4 };
+		case VertexFormat::UShort2N:
+			return { LaneKind::UNorm, 2, 2 };
+		case VertexFormat::UShort4N:
+			return { LaneKind::UNorm, 2, 4 };
+		default:
+			return {};
+	}
+}
+
+core::res::VertexDeclaration read_declaration(const uint8_t *p_bytes) {
+	core::res::VertexDeclaration d;
+	for (size_t i = 0; i < kDeclarationElements; ++i) {
+		const uint8_t *e = p_bytes + kDeclarationElementsAt + 4 * i;
+		d.elements[i] =
+				core::res::VertexElement{ core::res::VertexUsage(e[0]), core::res::VertexFormat(e[1]), e[2], e[3] };
+	}
+	d.element_count = p_bytes[kDeclarationCountAt];
+	return d;
+}
+
+struct InputElement {
+	uint32_t format = 0;
+	uint32_t slot = 0;
+	uint32_t offset = 0;
+	bool per_instance = false;
+};
+
+std::optional<std::vector<VertexInputLanes>> lanes_in(
+		const std::vector<InputElement> &p_inputs, const core::res::VertexDeclaration &p_declaration) {
+	std::vector<VertexInputLanes> out(p_inputs.size());
+	for (size_t i = 0; i < p_inputs.size(); ++i) {
+		if (p_inputs[i].per_instance) {
+			continue;
+		}
+		const LaneLayout in = dxgi_layout(p_inputs[i].format);
+		if (in.kind == LaneKind::None) {
+			return std::nullopt;
+		}
+		for (uint8_t c = 0; c < in.count; ++c) {
+			const uint32_t byte = p_inputs[i].offset + uint32_t(in.order[c]) * in.bytes;
+			bool found = false;
+			for (size_t k = 0; k < p_declaration.used_count() && !found; ++k) {
+				const core::res::VertexElement &e = p_declaration.elements[k];
+				const LaneLayout d = declared_layout(e.format);
+				if (e.stream != p_inputs[i].slot || d.kind != in.kind || d.bytes != in.bytes || byte < e.offset ||
+						byte >= uint32_t(e.offset) + uint32_t(d.bytes) * d.count || (byte - e.offset) % d.bytes != 0) {
+					continue;
+				}
+				const uint8_t lane = uint8_t((byte - e.offset) / d.bytes);
+				const bool sign = e.usage == core::res::VertexUsage::Position && lane == kPositionSignLane;
+				out[i][c] = sign ? VertexInputLane{ uint8_t(core::res::VertexUsage::BinormalSign), 0 }
+								 : VertexInputLane{ uint8_t(e.usage), lane };
+				found = true;
+			}
+			if (!found) {
+				return std::nullopt;
+			}
+		}
+	}
+	return out;
+}
+
+std::vector<VertexInputLanes> resolve_lanes(
+		const std::vector<InputElement> &p_inputs, const std::vector<core::res::VertexDeclaration> &p_declarations) {
+	std::optional<std::vector<VertexInputLanes>> out;
+	for (const core::res::VertexDeclaration &d : p_declarations) {
+		std::optional<std::vector<VertexInputLanes>> lanes = lanes_in(p_inputs, d);
+		if (!lanes) {
+			continue;
+		}
+		if (!out) {
+			out = std::move(lanes);
+			continue;
+		}
+		for (size_t i = 0; i < out->size(); ++i) {
+			for (size_t c = 0; c < 4; ++c) {
+				const VertexInputLane a = (*out)[i][c], b = (*lanes)[i][c];
+				if (a.usage != b.usage || a.lane != b.lane) {
+					(*out)[i][c] = VertexInputLane{};
+				}
+			}
+		}
+	}
+	return out ? std::move(*out) : std::vector<VertexInputLanes>(p_inputs.size());
 }
 
 class Cursor {
@@ -206,7 +365,8 @@ core::Result<ShaderDatabase> parse_path(std::span<const uint8_t> p_body, uint32_
 		BF3_TRY(r.take(4ull * textures, "texture list"));
 	}
 	SDB_TRY_ASSIGN(vertex_shaders, r.count(4, "vertex shader count"));
-	std::vector<std::shared_ptr<const ShaderVertexProgram>> vertex_programs;
+	std::vector<std::shared_ptr<ShaderVertexProgram>> vertex_programs;
+	std::vector<std::vector<InputElement>> vertex_inputs;
 	for (uint32_t i = 0; i < vertex_shaders; ++i) {
 		BF3_TRY(r.take(16, "vertex shader"));
 		SDB_TRY_ASSIGN(vertex_size, r.u32("vertex shader"));
@@ -219,11 +379,15 @@ core::Result<ShaderDatabase> parse_path(std::span<const uint8_t> p_body, uint32_
 		if (p_keep_programs) {
 			auto program = std::make_shared<ShaderVertexProgram>();
 			program->bytes.assign(vertex_bytes.begin(), vertex_bytes.end());
+			std::vector<InputElement> inputs;
 			for (uint32_t e = 0; e < elements; ++e) {
-				program->element_formats.push_back(
-						rd32(element_bytes.data() + size_t(e) * kInputElementBytes + kElementFormatAt));
+				const uint8_t *element = element_bytes.data() + size_t(e) * kInputElementBytes;
+				program->element_formats.push_back(rd32(element + kElementFormatAt));
+				inputs.push_back(InputElement{ rd32(element + kElementFormatAt), rd32(element + kElementSlotAt),
+						rd32(element + kElementOffsetAt), rd32(element + kElementClassAt) != 0 });
 			}
 			vertex_programs.push_back(std::move(program));
+			vertex_inputs.push_back(std::move(inputs));
 		}
 		SDB_TRY_ASSIGN(names, r.u32("vertex shader element names"));
 		if (names != elements) {
@@ -297,7 +461,16 @@ core::Result<ShaderDatabase> parse_path(std::span<const uint8_t> p_body, uint32_
 	}
 	BF3_TRY(r.take(uint64_t(kSolutionStateBytes) * states, "shader solution states"));
 	SDB_TRY_ASSIGN(declarations, r.u32("declaration count"));
-	BF3_TRY(r.take(uint64_t(kDeclarationBytes) * declarations, "declarations"));
+	SDB_TRY_ASSIGN(declaration_bytes, r.take(uint64_t(kDeclarationBytes) * declarations, "declarations"));
+	if (p_keep_programs) {
+		std::vector<core::res::VertexDeclaration> declared;
+		for (uint32_t d = 0; d < declarations; ++d) {
+			declared.push_back(read_declaration(declaration_bytes.data() + size_t(d) * kDeclarationBytes));
+		}
+		for (size_t v = 0; v < vertex_programs.size(); ++v) {
+			vertex_programs[v]->element_lanes = resolve_lanes(vertex_inputs[v], declared);
+		}
+	}
 
 	SDB_TRY_ASSIGN(shader_count, r.count(kMinShaderBytes, "shader count"));
 	out.shaders.reserve(shader_count);

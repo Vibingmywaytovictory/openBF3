@@ -394,6 +394,13 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 				for (uint32_t f : sol.vertex_program->element_formats) {
 					std::printf(" %u", f);
 				}
+				std::printf(", usages");
+				for (const render::VertexInputLanes &lanes : sol.vertex_program->element_lanes) {
+					std::printf(" ");
+					for (const render::VertexInputLane &l : lanes) {
+						std::printf("%s%u.%u", &l == lanes.data() ? "" : "/", unsigned(l.usage), unsigned(l.lane));
+					}
+				}
 				std::printf("\n");
 				const std::pair<const char *, const std::vector<uint8_t> *> programs[] = {
 					{ "vs", &sol.vertex_program->bytes }, { "ps", sol.pixel_program.get() }

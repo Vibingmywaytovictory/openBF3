@@ -46,6 +46,13 @@ struct ProgramConstant {
 	std::array<ProgramConstantLane, 4> lanes;
 };
 
+struct VertexInputLane {
+	uint8_t usage = 0;
+	uint8_t lane = 0;
+};
+
+using VertexInputLanes = std::array<VertexInputLane, 4>;
+
 struct ProgramAnalysis {
 	bool sliced = false;
 	std::vector<uint32_t> textures;
@@ -56,6 +63,7 @@ struct ProgramRequest {
 	const dxbc::Program *pixel = nullptr;
 	const dxbc::Program *vertex = nullptr;
 	std::span<const uint32_t> vertex_formats;
+	std::span<const VertexInputLanes> vertex_lanes;
 	std::span<const uint32_t> bound_textures;
 	ProgramTarget target = ProgramTarget::Deferred;
 	ProgramBlend blend = ProgramBlend::Mix;

@@ -455,10 +455,18 @@ std::string opcode_name(uint16_t p_opcode) {
 			return "exp";
 		case Op::Frc:
 			return "frc";
+		case Op::Ftou:
+			return "ftou";
 		case Op::Ge:
 			return "ge";
+		case Op::Iadd:
+			return "iadd";
 		case Op::If:
 			return "if";
+		case Op::Ieq:
+			return "ieq";
+		case Op::Ld:
+			return "ld";
 		case Op::Log:
 			return "log";
 		case Op::Lt:
@@ -501,6 +509,8 @@ std::string opcode_name(uint16_t p_opcode) {
 			return "sample_b";
 		case Op::Sqrt:
 			return "sqrt";
+		case Op::Utof:
+			return "utof";
 		default:
 			return "op" + std::to_string(p_opcode);
 	}

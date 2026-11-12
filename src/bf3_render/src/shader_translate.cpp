@@ -1,5 +1,6 @@
 #include "bf3/render/shader_translate.h"
 
+#include "bf3/core/res/mesh_set.h"
 #include "bf3/render/shader_database.h"
 
 #include <algorithm>
@@ -519,6 +520,441 @@ private:
 	std::map<uint64_t, uint8_t> clip_ids_;
 };
 
+constexpr uint32_t kSystemInstanceId = 8;
+constexpr const char *kGlobals = "$Globals";
+constexpr const char *kWorldMatrix = "worldMatrix";
+constexpr const char *kInstanceOffsets = "dxVectorBufferOffsets";
+constexpr const char *kInstanceVectors = "instanceVectorBuffer";
+constexpr const char *kPartVectors = "boneVectors";
+constexpr uint32_t kWorldRows = 3;
+
+std::string model_row(uint32_t p_row) {
+	const std::string k = std::to_string(p_row);
+	return "vec4(MODEL_MATRIX[0][" + k + "], MODEL_MATRIX[1][" + k + "], MODEL_MATRIX[2][" + k + "], MODEL_MATRIX[3][" +
+			k + "])";
+}
+
+std::optional<std::string> attribute_lane(VertexInputLane p_lane) {
+	using core::res::VertexUsage;
+	struct Attribute {
+		VertexUsage usage;
+		const char *name;
+		uint8_t lanes;
+	};
+	static constexpr Attribute kAttributes[] = { { VertexUsage::Position, "VERTEX", 3 },
+		{ VertexUsage::Normal, "NORMAL", 3 }, { VertexUsage::Tangent, "TANGENT", 3 },
+		{ VertexUsage::Binormal, "BINORMAL", 3 }, { VertexUsage::Color0, "COLOR", 4 },
+		{ VertexUsage::TexCoord0, "UV", 2 }, { VertexUsage(uint8_t(VertexUsage::TexCoord0) + 1), "UV2", 2 } };
+	if (p_lane.usage == uint8_t(VertexUsage::BinormalSign) && p_lane.lane == 0) {
+		return std::string("(dot(BINORMAL, cross(NORMAL, TANGENT)) < 0.0 ? -1.0 : 1.0)");
+	}
+	for (const Attribute &a : kAttributes) {
+		if (uint8_t(a.usage) == p_lane.usage && p_lane.lane < a.lanes) {
+			return std::string(a.name) + "." + kLanes[p_lane.lane];
+		}
+	}
+	return std::nullopt;
+}
+
+class VertexStage {
+public:
+	VertexStage(const dxbc::Program &p_vs, std::span<const VertexInputLanes> p_lanes) : vs_(p_vs), lanes_(p_lanes) {}
+
+	std::string lane(uint32_t p_reg, uint8_t p_lane) {
+		wanted_.insert(lane_key(uint8_t(OperandType::Output), p_reg, p_lane));
+		return "vso" + std::to_string(p_reg) + "." + kLanes[p_lane];
+	}
+
+	bool empty() const { return wanted_.empty(); }
+
+	std::string varyings() const {
+		std::string out;
+		for (uint32_t reg : outputs()) {
+			out += "varying vec4 vso" + std::to_string(reg) + ";\n";
+		}
+		return out;
+	}
+
+	core::Result<std::string> body() {
+		BF3_TRY(flatten());
+		BF3_TRY(trace_instance_rows());
+		BF3_TRY(slice());
+		Emitter emitter{ ConstantNames::Locals };
+		std::string code;
+		for (size_t i = 0; i < vs_.code.size(); ++i) {
+			if (!needed_[i]) {
+				continue;
+			}
+			const Instruction &ins = vs_.code[i];
+			core::Result<std::string> line = ins.is(Op::Ld) ? load_row(i) : emitter.statement(ins);
+			if (!line) {
+				return refuse("vertex program: " + line.error().message);
+			}
+			code += "\t" + *line + "\n";
+		}
+		std::string locals;
+		for (const auto &[reg, lanes] : inputs_) {
+			core::Result<std::string> l = input_local(reg, lanes);
+			if (!l) {
+				return l.error();
+			}
+			locals += *l;
+		}
+		for (const auto &[key, lanes] : constants_) {
+			core::Result<std::string> l = constant_local(uint32_t(key >> 32), uint32_t(key & 0xFFFFFFFFu), lanes);
+			if (!l) {
+				return l.error();
+			}
+			locals += *l;
+		}
+		for (uint32_t r = 0; r < vs_.temps; ++r) {
+			locals += "\tvec4 r" + std::to_string(r) + " = vec4(0.0);\n";
+		}
+		std::string tail;
+		for (uint32_t reg : outputs()) {
+			locals += "\tvec4 o" + std::to_string(reg) + " = vec4(0.0);\n";
+			tail += "\tvso" + std::to_string(reg) + " = o" + std::to_string(reg) + ";\n";
+		}
+		return locals + code + tail;
+	}
+
+private:
+	bool part_shown(size_t p_if) const {
+		const Instruction &branch = vs_.code[p_if];
+		if (!branch.nonzero || branch.operands.size() != 1 || !branch.operands[0].is(OperandType::Temp)) {
+			return false;
+		}
+		const Operand &test = branch.operands[0];
+		const uint8_t lane = test.lane(0);
+		for (size_t j = p_if; j-- > 0;) {
+			const Instruction &ins = vs_.code[j];
+			if (ins.operands.empty() || !ins.operands[0].is(OperandType::Temp) ||
+					ins.operands[0].index[0] != test.index[0] || ((ins.operands[0].write_mask() >> lane) & 1u) == 0) {
+				continue;
+			}
+			if (!ins.is(Op::Lt) || ins.saturate || ins.operands.size() != 3 ||
+					!ins.operands[1].is(OperandType::Immediate32) ||
+					ins.operands[1].imm[ins.operands[1].lane(lane)] != 0) {
+				return false;
+			}
+			const Operand &vector = ins.operands[2];
+			uint32_t component = 0;
+			const dxbc::ConstantBuffer *cb = vector.is(OperandType::ConstantBuffer) && vector.dims == 2 &&
+							vector.relative && !vector.negate && !vector.absolute
+					? vs_.constant_buffer(vector.index[0])
+					: nullptr;
+			const dxbc::Variable *v = cb != nullptr
+					? variable_at(vector.index[0], vector.index[1], vector.lane(lane), component)
+					: nullptr;
+			return cb != nullptr && cb->name == kGlobals && v != nullptr && v->name == kPartVectors;
+		}
+		return false;
+	}
+
+	core::Status flatten() {
+		removed_.assign(vs_.code.size(), false);
+		struct Block {
+			size_t at_if = 0;
+			std::optional<size_t> at_else;
+		};
+		std::vector<Block> open;
+		for (size_t i = 0; i < vs_.code.size(); ++i) {
+			const Instruction &ins = vs_.code[i];
+			if (ins.is(Op::If)) {
+				if (!part_shown(i)) {
+					return refuse("vertex program branches on " + dxbc::format_instruction(ins));
+				}
+				open.push_back(Block{ i, std::nullopt });
+				removed_[i] = true;
+			} else if (ins.is(Op::Else)) {
+				if (open.empty() || open.back().at_else) {
+					return refuse("vertex program else outside if");
+				}
+				open.back().at_else = i;
+			} else if (ins.is(Op::EndIf)) {
+				if (open.empty()) {
+					return refuse("vertex program endif outside if");
+				}
+				const Block b = open.back();
+				open.pop_back();
+				for (size_t k = b.at_else.value_or(i); k <= i; ++k) {
+					removed_[k] = true;
+				}
+			}
+		}
+		if (!open.empty()) {
+			return refuse("vertex program if without endif");
+		}
+		return core::Status::success();
+	}
+
+	std::set<uint32_t> outputs() const {
+		std::set<uint32_t> out;
+		for (uint64_t key : wanted_) {
+			out.insert(uint32_t((key >> 8) & 0xFFFFFFFFu));
+		}
+		return out;
+	}
+
+	const dxbc::Variable *variable_at(uint32_t p_cb, uint32_t p_reg, uint8_t p_lane, uint32_t &r_component) const {
+		const dxbc::ConstantBuffer *cb = vs_.constant_buffer(p_cb);
+		if (cb == nullptr) {
+			return nullptr;
+		}
+		const uint32_t at = p_reg * 16 + p_lane * 4;
+		for (const dxbc::Variable &v : cb->variables) {
+			if (at >= v.offset && at < v.offset + v.size) {
+				r_component = (at - v.offset) / 4;
+				return &v;
+			}
+		}
+		return nullptr;
+	}
+
+	bool instance_offset(const Operand &p_op, uint8_t p_lane, uint32_t p_component) const {
+		uint32_t component = 0;
+		const dxbc::ConstantBuffer *cb = p_op.is(OperandType::ConstantBuffer) && p_op.dims == 2 && !p_op.relative &&
+						!p_op.negate && !p_op.absolute
+				? vs_.constant_buffer(p_op.index[0])
+				: nullptr;
+		if (cb == nullptr || cb->name != kGlobals) {
+			return false;
+		}
+		const dxbc::Variable *v = variable_at(p_op.index[0], p_op.index[1], p_op.lane(p_lane), component);
+		return v != nullptr && v->name == kInstanceOffsets && component == p_component;
+	}
+
+	bool instance_id(const Operand &p_op, uint8_t p_lane) const {
+		if (!p_op.is(OperandType::Input) || p_op.negate || p_op.absolute) {
+			return false;
+		}
+		for (const dxbc::SignatureElement &e : vs_.inputs) {
+			if (e.reg == p_op.index[0] && e.system_value == kSystemInstanceId && p_op.lane(p_lane) == 0) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	std::optional<int64_t> symbol(const Operand &p_op, uint8_t p_lane) const {
+		if (!p_op.is(OperandType::Temp) || p_op.negate || p_op.absolute) {
+			return std::nullopt;
+		}
+		const auto found = symbols_.find(lane_key(p_op.type, p_op.index[0], p_op.lane(p_lane)));
+		return found == symbols_.end() ? std::nullopt : std::optional<int64_t>(found->second);
+	}
+
+	static constexpr int64_t kInstanceIndex = -1;
+
+	core::Status trace_instance_rows() {
+		for (size_t i = 0; i < vs_.code.size(); ++i) {
+			const Instruction &ins = vs_.code[i];
+			if (removed_[i] || ins.operands.empty() || !ins.operands[0].is(OperandType::Temp)) {
+				continue;
+			}
+			const Operand &d = ins.operands[0];
+			for (uint8_t c = 0; c < 4; ++c) {
+				if (((d.write_mask() >> c) & 1u) == 0) {
+					continue;
+				}
+				std::optional<int64_t> value;
+				const std::vector<Operand> &ops = ins.operands;
+				if (ins.is(Op::Utof) && ops.size() == 2 && instance_id(ops[1], c)) {
+					value = kInstanceIndex;
+				} else if (ins.is(Op::Mad) && ops.size() == 4 && symbol(ops[1], c) == kInstanceIndex &&
+						instance_offset(ops[2], c, 1) && instance_offset(ops[3], c, 0) && !ins.saturate) {
+					value = 0;
+				} else if (ins.is(Op::Ftou) && ops.size() == 2) {
+					const std::optional<int64_t> row = symbol(ops[1], c);
+					if (row && *row >= 0) {
+						value = row;
+					}
+				} else if (ins.is(Op::Iadd) && ops.size() == 3) {
+					const std::optional<int64_t> row = symbol(ops[1], c);
+					if (row && *row >= 0 && ops[2].is(OperandType::Immediate32) && !ops[2].negate) {
+						value = *row + int64_t(int32_t(ops[2].imm[ops[2].lane(c)]));
+					}
+				}
+				const uint64_t key = lane_key(d.type, d.index[0], c);
+				if (value) {
+					symbols_[key] = *value;
+				} else {
+					symbols_.erase(key);
+				}
+			}
+			if (ins.is(Op::Ld)) {
+				rows_[i] = ins.operands.size() == 3 ? symbol(ins.operands[1], 0) : std::nullopt;
+			}
+		}
+		return core::Status::success();
+	}
+
+	core::Status slice() {
+		std::set<uint64_t> live = wanted_;
+		needed_.assign(vs_.code.size(), false);
+		for (size_t i = vs_.code.size(); i-- > 0;) {
+			const Instruction &ins = vs_.code[i];
+			if (removed_[i]) {
+				continue;
+			}
+			if (ins.is(Op::Ret)) {
+				if (i + 1 != vs_.code.size()) {
+					return refuse("vertex program returns early");
+				}
+				continue;
+			}
+			if (ins.is(Op::If) || ins.is(Op::Else) || ins.is(Op::EndIf) || ins.is(Op::Discard)) {
+				return refuse("vertex program branches: " + dxbc::format_instruction(ins));
+			}
+			if (ins.operands.empty()) {
+				continue;
+			}
+			const Operand &d = ins.operands[0];
+			if (!d.is(OperandType::Temp) && !d.is(OperandType::Output)) {
+				continue;
+			}
+			std::vector<uint8_t> written;
+			for (uint8_t c = 0; c < 4; ++c) {
+				if (((d.write_mask() >> c) & 1u) == 0) {
+					continue;
+				}
+				const auto it = live.find(lane_key(d.type, d.index[0], c));
+				if (it != live.end()) {
+					live.erase(it);
+					written.push_back(c);
+				}
+			}
+			if (written.empty()) {
+				continue;
+			}
+			needed_[i] = true;
+			if (ins.is(Op::Ld)) {
+				const auto row = rows_.find(i);
+				const dxbc::Binding *b = ins.operands.size() == 3 && ins.operands[2].is(OperandType::Resource)
+						? vs_.binding(dxbc::BindingType::Texture, ins.operands[2].index[0])
+						: nullptr;
+				if (b == nullptr || b->name != kInstanceVectors || row == rows_.end() || !row->second ||
+						*row->second >= int64_t(kWorldRows)) {
+					return refuse(
+							"vertex program loads what is not a world matrix row: " + dxbc::format_instruction(ins));
+				}
+				continue;
+			}
+			if (!componentwise(ins.opcode) && dot_width(ins.opcode) == 0) {
+				return refuse("vertex program instruction " + dxbc::format_instruction(ins));
+			}
+			for (uint8_t c : written) {
+				for (const Read &r : reads_for(ins, c)) {
+					const Operand &op = ins.operands[r.operand];
+					if (op.is(OperandType::Temp)) {
+						live.insert(lane_key(op.type, op.index[0], r.lane));
+					} else if (op.is(OperandType::Input)) {
+						inputs_[op.index[0]] |= uint8_t(1u << r.lane);
+					} else if (op.is(OperandType::ConstantBuffer) && op.dims == 2 && !op.relative) {
+						constants_[uint64_t(op.index[0]) << 32 | op.index[1]] |= uint8_t(1u << r.lane);
+					} else if (!op.is(OperandType::Immediate32)) {
+						return refuse("vertex program operand " + dxbc::format_instruction(ins));
+					}
+				}
+			}
+		}
+		if (!live.empty()) {
+			return refuse("vertex program reads or outputs a value no instruction writes");
+		}
+		return core::Status::success();
+	}
+
+	core::Result<std::string> load_row(size_t p_index) const {
+		const Instruction &ins = vs_.code[p_index];
+		const Operand &res = ins.operands[2];
+		std::string swizzle;
+		for (uint8_t c = 0; c < 4; ++c) {
+			swizzle += kLanes[res.lane(c)];
+		}
+		const Operand &d = ins.operands[0];
+		std::string mask;
+		for (uint8_t c = 0; c < 4; ++c) {
+			if ((d.write_mask() >> c) & 1u) {
+				mask += kLanes[c];
+			}
+		}
+		return "r" + std::to_string(d.index[0]) + "." + mask + " = (" + model_row(uint32_t(*rows_.at(p_index))) + "." +
+				swizzle + ")." + mask + ";";
+	}
+
+	core::Result<std::string> input_local(uint32_t p_reg, uint8_t p_lanes) const {
+		const dxbc::SignatureElement *element = nullptr;
+		for (const dxbc::SignatureElement &e : vs_.inputs) {
+			if (e.reg == p_reg) {
+				element = &e;
+			}
+		}
+		const std::string where = "vertex input v" + std::to_string(p_reg);
+		if (element == nullptr || element->system_value != 0 || element->name != "TEXCOORD") {
+			return refuse(where + " is not a vertex element");
+		}
+		const uint32_t index = element->semantic_index;
+		if (index >= lanes_.size()) {
+			return refuse(where + " has no element usage");
+		}
+		std::string l = "\tvec4 v" + std::to_string(p_reg) + " = vec4(";
+		for (uint8_t c = 0; c < 4; ++c) {
+			std::string lane = "0.0";
+			if ((p_lanes >> c) & 1u) {
+				const VertexInputLane in = lanes_[index][c];
+				const std::optional<std::string> a = attribute_lane(in);
+				if (!a) {
+					return refuse(where + "." + kLanes[c] + " reads usage " + std::to_string(in.usage) + " lane " +
+							std::to_string(in.lane));
+				}
+				lane = *a;
+			}
+			l += (c == 0 ? "" : ", ") + lane;
+		}
+		return l + ");\n";
+	}
+
+	core::Result<std::string> constant_local(uint32_t p_cb, uint32_t p_reg, uint8_t p_lanes) const {
+		const dxbc::ConstantBuffer *cb = vs_.constant_buffer(p_cb);
+		if (cb == nullptr) {
+			return refuse("vertex constant buffer cb" + std::to_string(p_cb) + " is not described");
+		}
+		std::array<std::string, 4> lanes{ "0.0", "0.0", "0.0", "0.0" };
+		for (uint8_t c = 0; c < 4; ++c) {
+			if (((p_lanes >> c) & 1u) == 0) {
+				continue;
+			}
+			uint32_t component = 0;
+			const dxbc::Variable *var = variable_at(p_cb, p_reg, c, component);
+			if (var == nullptr) {
+				return refuse(
+						"vertex " + cb->name + " offset " + std::to_string(p_reg * 16 + c * 4) + " is no variable");
+			}
+			if (cb->name == kGlobals && var->name == kWorldMatrix && component < 16) {
+				lanes[c] = "MODEL_MATRIX[" + std::to_string(component % 4) + "][" + std::to_string(component / 4) + "]";
+			} else if (cb->name == kViewConstants && var->name == "cameraPos" && component < 3) {
+				lanes[c] = std::string("CAMERA_POSITION_WORLD.") + kLanes[component];
+			} else if (cb->name == kViewConstants && var->name == "time" && component == 0) {
+				lanes[c] = "TIME";
+			} else {
+				return refuse("vertex program reads " + cb->name + "." + var->name);
+			}
+		}
+		return "\tvec4 cb" + std::to_string(p_cb) + "_" + std::to_string(p_reg) + " = vec4(" + lanes[0] + ", " +
+				lanes[1] + ", " + lanes[2] + ", " + lanes[3] + ");\n";
+	}
+
+	const dxbc::Program &vs_;
+	std::span<const VertexInputLanes> lanes_;
+	std::set<uint64_t> wanted_;
+	std::map<uint64_t, int64_t> symbols_;
+	std::map<size_t, std::optional<int64_t>> rows_;
+	std::vector<bool> needed_;
+	std::vector<bool> removed_;
+	std::map<uint32_t, uint8_t> inputs_;
+	std::map<uint64_t, uint8_t> constants_;
+};
+
 bool two_channel(uint32_t p_format) {
 	return p_format == kDxgiR32G32Float || p_format == kDxgiR16G16Float || p_format == kDxgiR16G16Unorm ||
 			p_format == kDxgiR16G16Snorm;
@@ -587,8 +1023,12 @@ public:
 		for (uint32_t o : outputs_used_) {
 			locals += "\tvec4 o" + std::to_string(o) + " = vec4(0.0);\n";
 		}
-		out_.code = header() + head + common_uniforms() + vertex_stage() + "void fragment() {\n" + locals + body +
-				tail() + "}\n";
+		core::Result<std::string> vertex = vertex_stage();
+		if (!vertex) {
+			return vertex.error();
+		}
+		out_.code =
+				header() + head + common_uniforms() + *vertex + "void fragment() {\n" + locals + body + tail() + "}\n";
 		return out_;
 	}
 
@@ -885,7 +1325,7 @@ private:
 			return std::string("clip_pos.") + kLanes[o.lane];
 		}
 		if (o.kind != Origin::Kind::Element || o.element >= request_.vertex_formats.size()) {
-			return refuse(where + " is computed by the vertex program");
+			return computed_lane(out->reg, p_lane);
 		}
 		const uint32_t format = request_.vertex_formats[o.element];
 		std::string attribute;
@@ -911,14 +1351,20 @@ private:
 			static const char kBgra[] = "zyxw";
 			attribute = std::string("COLOR.") + (format == kDxgiB8G8R8A8Unorm ? kBgra[o.lane] : kLanes[o.lane]);
 		} else {
-			return refuse(where + " reads vertex element " + std::to_string(o.element) + " of format " +
-					std::to_string(format));
+			return computed_lane(out->reg, p_lane);
 		}
 		const std::optional<std::string> scale = float_text(o.scale), offset = float_text(o.offset);
 		if (!scale || !offset) {
 			return refuse(where + " has a non-finite scale");
 		}
 		return "(" + attribute + " * " + *scale + " + " + *offset + ")";
+	}
+
+	std::string computed_lane(uint32_t p_reg, uint8_t p_lane) {
+		if (!stage_) {
+			stage_.emplace(*request_.vertex, request_.vertex_lanes);
+		}
+		return stage_->lane(p_reg, p_lane);
 	}
 
 	core::Result<std::string> constant_local(uint32_t p_cb, uint32_t p_reg, uint8_t p_lanes, std::string &r_head) {
@@ -1016,12 +1462,24 @@ uniform float roughness_value = 0.6;
 )";
 	}
 
-	std::string vertex_stage() const {
-		if (!clip_) {
+	core::Result<std::string> vertex_stage() {
+		std::string declarations, body;
+		if (clip_) {
+			declarations += "varying vec4 clip_pos;\n";
+			body += "\tclip_pos = PROJECTION_MATRIX * (VIEW_MATRIX * (MODEL_MATRIX * vec4(VERTEX, 1.0)));\n";
+		}
+		if (stage_ && !stage_->empty()) {
+			core::Result<std::string> computed = stage_->body();
+			if (!computed) {
+				return computed.error();
+			}
+			declarations += stage_->varyings();
+			body += *computed;
+		}
+		if (body.empty()) {
 			return std::string();
 		}
-		return "varying vec4 clip_pos;\nvoid vertex() {\n\tclip_pos = PROJECTION_MATRIX * (VIEW_MATRIX * (MODEL_MATRIX "
-			   "* vec4(VERTEX, 1.0)));\n}\n";
+		return declarations + "void vertex() {\n" + body + "}\n";
 	}
 
 	std::string tail() const {
@@ -1055,6 +1513,7 @@ uniform float roughness_value = 0.6;
 	bool walked_ = false;
 	std::string pending_;
 	std::optional<VertexOrigins> origins_;
+	std::optional<VertexStage> stage_;
 	TranslatedProgram out_;
 };
 

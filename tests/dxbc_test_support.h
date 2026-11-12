@@ -102,8 +102,14 @@ struct BindEntry {
 	uint32_t point;
 };
 
-inline std::vector<uint8_t> rdef(const std::vector<BindEntry> &p_bindings, const char *p_buffer,
-		const std::vector<std::pair<const char *, uint32_t>> &p_variables) {
+struct VarEntry {
+	const char *name;
+	uint32_t offset;
+	uint32_t size = 4;
+};
+
+inline std::vector<uint8_t> rdef(
+		const std::vector<BindEntry> &p_bindings, const char *p_buffer, const std::vector<VarEntry> &p_variables) {
 	std::vector<uint8_t> out(28, 0);
 	const bool with_buffer = p_buffer != nullptr;
 	put_at(out, 0, with_buffer ? 1 : 0);
@@ -137,9 +143,9 @@ inline std::vector<uint8_t> rdef(const std::vector<BindEntry> &p_bindings, const
 		put_at(out, buffer_at + 12, 16);
 		for (size_t v = 0; v < p_variables.size(); ++v) {
 			const size_t at = variables_at + 24 * v;
-			put_at(out, at, name(p_variables[v].first));
-			put_at(out, at + 4, p_variables[v].second);
-			put_at(out, at + 8, 4);
+			put_at(out, at, name(p_variables[v].name));
+			put_at(out, at + 4, p_variables[v].offset);
+			put_at(out, at + 8, p_variables[v].size);
 		}
 	}
 	out.insert(out.end(), text.begin(), text.end());

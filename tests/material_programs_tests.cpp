@@ -68,6 +68,77 @@ std::vector<uint8_t> layer_pixel_program() {
 									ins(54, { dst(kOutput, 0, 0xF), src(kInput, 1) }) }) } });
 }
 
+std::vector<uint32_t> cb_relative(uint32_t p_slot, uint32_t p_base, uint32_t p_swizzle, uint32_t p_temp) {
+	return { 2u | kSwizzleMode << 2 | p_swizzle << 4 | kConstantBuffer << 12 | 2u << 20 | 3u << 25, p_slot, p_base,
+		2u | 2u << 2 | kTemp << 12 | 1u << 20, p_temp };
+}
+
+std::vector<uint32_t> int_imm(uint32_t p_x, uint32_t p_y, uint32_t p_z, uint32_t p_w) {
+	return { 2u | kImmediate << 12, p_x, p_y, p_z, p_w };
+}
+
+std::vector<uint8_t> world_pixel_program() {
+	return container({ { "RDEF", rdef({ { "texture_Texture", 2, 1 } }, nullptr, {}) },
+			{ "ISGN", signature({ { "SV_Position", 0, 1, 0, 0xF }, { "TEXCOORD", 0, 0, 1, 0xF } }) },
+			{ "OSGN", signature({ { "SV_Target", 0, 0, 0, 0xF }, { "SV_Target", 1, 0, 1, 0xF } }) },
+			{ "SHDR",
+					code_chunk(0, 1,
+							{ ins(69,
+									  { dst(kTemp, 0, 0x7), src(kInput, 1, swz(0, 2, 0, 0)), src(kResource, 1),
+											  sampler(0) }),
+									ins(75, { dst(kOutput, 1, 0x7), src(kTemp, 0) }) }) } });
+}
+
+std::vector<uint8_t> world_vertex_program() {
+	return container({ { "RDEF", rdef({ { "$Globals", 0, 0 } }, "$Globals", { { "worldMatrix", 0, 64 } }) },
+			{ "ISGN", signature({ { "TEXCOORD", 0, 0, 0, 0xF } }) },
+			{ "OSGN", signature({ { "SV_Position", 0, 1, 0, 0xF }, { "TEXCOORD", 0, 0, 1, 0xF } }) },
+			{ "SHDR",
+					code_chunk(1, 1,
+							{ ins(54, { dst(kTemp, 0, 0x7), src(kInput, 0) }),
+									ins(54, { dst(kTemp, 0, 0x8), imm(1, 1, 1, 1) }),
+									ins(17, { dst(kOutput, 1, 0x1), src(kTemp, 0), cb(0, 0, kIdentity) }),
+									ins(17, { dst(kOutput, 1, 0x2), src(kTemp, 0), cb(0, 1, kIdentity) }),
+									ins(17, { dst(kOutput, 1, 0x4), src(kTemp, 0), cb(0, 2, kIdentity) }),
+									ins(54, { dst(kOutput, 0, 0xF), src(kTemp, 0) }) }) } });
+}
+
+std::vector<uint8_t> instanced_vertex_program() {
+	return container({ { "RDEF",
+							   rdef({ { "instanceVectorBuffer", 2, 0 }, { "$Globals", 0, 0 } }, "$Globals",
+									   { { "dxVectorBufferOffsets", 0, 16 }, { "boneVectors", 16, 2880 } }) },
+			{ "ISGN",
+					signature({ { "TEXCOORD", 0, 0, 0, 0xF }, { "TEXCOORD", 1, 0, 1, 0xF },
+							{ "SV_InstanceID", 0, 8, 2, 0x1 } }) },
+			{ "OSGN", signature({ { "SV_Position", 0, 1, 0, 0xF }, { "TEXCOORD", 0, 0, 1, 0xF } }) },
+			{ "SHDR",
+					code_chunk(1, 6,
+							{ ins(54, { dst(kTemp, 0, 0x1), src(kInput, 1, swz(0, 0, 0, 0)) }),
+									ins(49,
+											{ dst(kTemp, 0, 0x1), imm(0, 0, 0, 0),
+													cb_relative(0, 1, swz(0, 0, 0, 0), 0) }),
+									ins(31 | 1u << 18, { src(kTemp, 0, swz(0, 0, 0, 0)) }),
+									ins(86, { dst(kTemp, 1, 0x1), src(kInput, 2, swz(0, 0, 0, 0)) }),
+									ins(50,
+											{ dst(kTemp, 1, 0x1), src(kTemp, 1, swz(0, 0, 0, 0)),
+													cb(0, 0, swz(1, 1, 1, 1)), cb(0, 0, swz(0, 0, 0, 0)) }),
+									ins(28, { dst(kTemp, 1, 0x1), src(kTemp, 1, swz(0, 0, 0, 0)) }),
+									ins(30,
+											{ dst(kTemp, 1, 0x6), src(kTemp, 1, swz(0, 0, 0, 0)),
+													int_imm(0, 1, 2, 0) }),
+									ins(45, { dst(kTemp, 2, 0xF), src(kTemp, 1, swz(0, 0, 0, 0)), src(kResource, 0) }),
+									ins(45, { dst(kTemp, 3, 0xF), src(kTemp, 1, swz(1, 1, 1, 1)), src(kResource, 0) }),
+									ins(45, { dst(kTemp, 4, 0xF), src(kTemp, 1, swz(2, 2, 2, 2)), src(kResource, 0) }),
+									ins(54, { dst(kTemp, 5, 0x7), src(kInput, 0) }),
+									ins(54, { dst(kTemp, 5, 0x8), imm(1, 1, 1, 1) }),
+									ins(17, { dst(kOutput, 1, 0x1), src(kTemp, 5), src(kTemp, 2) }),
+									ins(17, { dst(kOutput, 1, 0x2), src(kTemp, 5), src(kTemp, 3) }),
+									ins(17, { dst(kOutput, 1, 0x4), src(kTemp, 5), src(kTemp, 4) }),
+									ins(54, { dst(kOutput, 0, 0xF), src(kTemp, 5) }), ins(18, {}),
+									ins(54, { dst(kOutput, 1, 0xF), imm(0, 0, 0, 0) }),
+									ins(54, { dst(kOutput, 0, 0xF), imm(0, 0, 0, 0) }), ins(21, {}) }) } });
+}
+
 std::vector<uint8_t> layer_vertex_program() {
 	return container({ { "RDEF", rdef({}, nullptr, {}) },
 			{ "ISGN", signature({ { "TEXCOORD", 0, 0, 0, 0xF }, { "TEXCOORD", 1, 0, 1, 0x3 } }) },
@@ -183,12 +254,95 @@ TEST_SUITE("render-programs-unit") {
 		request.vertex_formats = packed;
 		bf3::core::Result<TranslatedProgram> computed = translate_program(request);
 		REQUIRE(!computed.ok());
-		CHECK(computed.error().message.find("v2.x") != std::string::npos);
+		CHECK(computed.error().message.find("vertex input v1 has no element usage") != std::string::npos);
 		request.vertex_formats = formats;
 		request.target = ProgramTarget::Forward;
 		bf3::core::Result<TranslatedProgram> forward = translate_program(request);
 		REQUIRE(!forward.ok());
-		CHECK(forward.error().message.find("v1.x reads vertex element 0") != std::string::npos);
+		CHECK(forward.error().message.find("interpolant v1.w is not declared") != std::string::npos);
+	}
+
+	TEST_CASE("render.programs.unit: an interpolant the vertex program computes is a varying of the translated vertex "
+			  "stage") {
+		const std::vector<uint8_t> ps_blob = world_pixel_program(), vs_blob = world_vertex_program();
+		bf3::core::Result<dxbc::Program> ps = dxbc::parse(ps_blob);
+		bf3::core::Result<dxbc::Program> vs = dxbc::parse(vs_blob);
+		REQUIRE(ps.ok());
+		REQUIRE(vs.ok());
+		const std::vector<uint32_t> formats = { 10 };
+		const std::vector<VertexInputLanes> lanes = { { { { 1, 0 }, { 1, 1 }, { 1, 2 }, { 9, 0 } } } };
+		const std::vector<uint32_t> bound = { 1 };
+		ProgramRequest request;
+		request.pixel = &*ps;
+		request.vertex = &*vs;
+		request.vertex_formats = formats;
+		request.vertex_lanes = lanes;
+		request.bound_textures = bound;
+		bf3::core::Result<TranslatedProgram> t = translate_program(request);
+		REQUIRE_MESSAGE(t.ok(), (t.ok() ? std::string() : t.error().message));
+		const std::string &code = t->code;
+		CHECK(code.find("varying vec4 vso1;\nvoid vertex() {\n") != std::string::npos);
+		CHECK(code.find("vec4 v0 = vec4(VERTEX.x, VERTEX.y, VERTEX.z, 0.0);") != std::string::npos);
+		CHECK(code.find("vec4 cb0_2 = vec4(MODEL_MATRIX[0][2], MODEL_MATRIX[1][2], MODEL_MATRIX[2][2], "
+						"MODEL_MATRIX[3][2]);") != std::string::npos);
+		CHECK(code.find("o1.z = (vec4(dot((r0.xyzw), (cb0_2.xyzw)))).z;") != std::string::npos);
+		CHECK(code.find("\tvso1 = o1;\n}\n") != std::string::npos);
+		CHECK(code.find("vec4 v1 = vec4(vso1.x, 0.0, vso1.z, 0.0);") != std::string::npos);
+		CHECK(code.find("o0.") == std::string::npos);
+		const std::vector<VertexInputLanes> unknown(1);
+		request.vertex_lanes = unknown;
+		bf3::core::Result<TranslatedProgram> refused = translate_program(request);
+		REQUIRE(!refused.ok());
+		CHECK(refused.error().message.find("vertex input v0.x reads usage 0") != std::string::npos);
+	}
+
+	TEST_CASE("render.programs.unit: instance vectors are the world rows, and a part's shown branch is the vertex "
+			  "stage") {
+		const std::vector<uint8_t> ps_blob = world_pixel_program(), vs_blob = instanced_vertex_program();
+		bf3::core::Result<dxbc::Program> ps = dxbc::parse(ps_blob);
+		bf3::core::Result<dxbc::Program> vs = dxbc::parse(vs_blob);
+		REQUIRE(ps.ok());
+		REQUIRE(vs.ok());
+		CHECK(dxbc::format_instruction(vs->code[1]) ==
+				"lt r0.x, l(0.000000, 0.000000, 0.000000, 0.000000), cb0[1+rel].xxxx");
+		CHECK(dxbc::format_instruction(vs->code[7]) == "ld r2.xyzw, r1.xxxx, t0.xyzw");
+		const std::vector<uint32_t> formats = { 10, 10 };
+		const std::vector<VertexInputLanes> lanes = { { { { 1, 0 }, { 1, 1 }, { 1, 2 }, { 9, 0 } } },
+			{ { { 50, 0 }, { 50, 1 }, { 50, 2 }, { 50, 3 } } } };
+		const std::vector<uint32_t> bound = { 1 };
+		ProgramRequest request;
+		request.pixel = &*ps;
+		request.vertex = &*vs;
+		request.vertex_formats = formats;
+		request.vertex_lanes = lanes;
+		request.bound_textures = bound;
+		bf3::core::Result<TranslatedProgram> t = translate_program(request);
+		REQUIRE_MESSAGE(t.ok(), (t.ok() ? std::string() : t.error().message));
+		const std::string &code = t->code;
+		CHECK(code.find("r4.xyzw = (vec4(MODEL_MATRIX[0][2], MODEL_MATRIX[1][2], MODEL_MATRIX[2][2], "
+						"MODEL_MATRIX[3][2]).xyzw).xyzw;") != std::string::npos);
+		CHECK(code.find("o1.z = (vec4(dot((r5.xyzw), (r4.xyzw)))).z;") != std::string::npos);
+		const size_t vertex_at = code.find("void vertex()");
+		REQUIRE(vertex_at != std::string::npos);
+		const std::string stage = code.substr(vertex_at, code.find("void fragment()") - vertex_at);
+		CHECK(stage.find("if") == std::string::npos);
+		CHECK(stage.find("r3.") == std::string::npos);
+		CHECK(code.find("vec4(0.0, 0.0, 0.0, 0.0)") == std::string::npos);
+		CHECK(code.find("cb0_") == std::string::npos);
+		std::vector<uint8_t> hidden = vs_blob;
+		const std::vector<uint8_t> lt =
+				words(ins(49, { dst(kTemp, 0, 0x1), imm(0, 0, 0, 0), cb_relative(0, 1, 0, 0) }));
+		const std::vector<uint8_t> ge =
+				words(ins(29, { dst(kTemp, 0, 0x1), imm(0, 0, 0, 0), cb_relative(0, 1, 0, 0) }));
+		const auto at = std::search(hidden.begin(), hidden.end(), lt.begin(), lt.end());
+		REQUIRE(at != hidden.end());
+		std::copy(ge.begin(), ge.end(), at);
+		bf3::core::Result<dxbc::Program> other = dxbc::parse(hidden);
+		REQUIRE(other.ok());
+		request.vertex = &*other;
+		bf3::core::Result<TranslatedProgram> refused = translate_program(request);
+		REQUIRE(!refused.ok());
+		CHECK(refused.error().message.find("vertex program branches on if_nz r0") != std::string::npos);
 	}
 
 	TEST_CASE("render.programs.unit: a texture read only by single channels is a mask, and texture usage picks the UV "
@@ -233,92 +387,24 @@ constexpr const char *kCensusLevels[] = { "MP_001", "MP_003", "MP_007", "MP_011"
 constexpr const char *kCensusMode = "TeamDeathMatchC0";
 constexpr unsigned kCensusLanes = 4;
 constexpr std::string_view kMaskColourLedger[] = {
-	"architecture/crane_01/crane_metal_shader",
 	"architecture/shaders/facadepresetinterior_destrvolume_colorcontrol",
-	"architecture/vehicleshed/ss_vehicleshed_metalplates_01",
-	"architecture/warehouse_02/ss_warehouse_01",
-	"levels/mp_011/paving/shaders/mp_011_pavementasphalt02",
-	"levels/mp_012/objects/pipeline_01_variations/pipeline_01_mp012shader",
-	"levels/mp_018/objects/rock01cluster_mp_018_shader",
-	"levels/mp_018/objects/rock_01b_mp_018_shader",
-	"levels/mp_018/objects/rock_01c_mp_018_shader",
-	"levels/mp_018/objects/rock_01d_mp_018_shader",
-	"levels/mp_018/objects/rock_01e_mp_018_shader",
-	"levels/mp_018/objects/wetasphalt_01__mp018",
-	"levels/mp_canyon/props/railwaybridge_01/ss_railwaybridge_01_gravel",
-	"levels/mp_subway/objects/road/shaders/mp_subway_asphalt_02",
-	"levels/mp_whitepeak/objects/rock_01_snow",
-	"levels/mp_whitepeak/objects/rock_01_wall_snow",
-	"levels/mp_whitepeak/objects/rock_01_wall_snow_lod",
-	"levels/sp_paris/architecture/office/shaders/carpet_01",
-	"levels/sp_paris/architecture/office/shaders/carpet_02",
-	"levels/sp_paris/architecture/office/shaders/carpet_03",
-	"levels/sp_paris/architecture/streets/shaders/sp_paris_asphalt_02",
-	"levels/sp_valley/props/rock_01c_main_copy",
-	"levels/xp2_office/objects/scaffoldingplasticwrap_01_shader",
-	"levels/xp2_palace/objects/backdrop_01/backdrop_01_roofshader",
-	"levels/xp2_skybar/shaders/floor_outside_pool",
-	"levels/xp2_skybar/shaders/floor_outside_wooddark_shader",
-	"levels/xp3_alborz/props/breakableice/breakableice_01_ss",
-	"levels/xp3_desert/objects/ss_groundimpact_01_bandar",
-	"levels/xp3_legrandval/objectvariations/ss_legrandval_stonebridge_01_road",
-	"levels/xp4_earthquake/objects/doorframebroken_ss",
-	"levels/xp4_earthquake/objects/earthquakeside_ss",
-	"levels/xp4_earthquake/objects/ss_constrhouse_wrap_01_xp4",
-	"levels/xp4_parliament/objects/signs/wallsign_01_shader",
-	"levels/xp4_rubble/objects/tarmacpatch_01/ss_tarmacpatches_01",
 	"levels/xp5_001/objects/forestledge_01_top_alpha_normalfix",
 	"levels/xp5_002/architecture/warehouse_02_xp5_002/ss_warehouse_02_destrvolume_xp5_002",
-	"levels/xp5_002/objects/fencemetalbarbwire_02_xp5_002/fencemetalbarbwire_02_cloth_lod_xp5_002",
-	"levels/xp5_002/objects/fencemetalbarbwire_02_xp5_002/fencemetalbarbwire_02_cloth_ss_xp5_002",
-	"levels/xp5_004/objects/ss_xp5_004_guardtower_01",
-	"levels/xp5_004/objects/ss_xp5_004_securitybooth_01",
-	"objects/beammetal/beamshader01",
-	"objects/fencemetalbarbwire_02/fencemetalbarbwire_02_cloth_lod",
-	"objects/fencemetalbarbwire_02/fencemetalbarbwire_02_cloth_ss",
-	"objects/fencemetalbarbwire_02/fencemetalbarbwire_02_yellowcloth_lod",
-	"objects/interiordetails/officedetails_01/officedetails_01_metal_01",
-	"objects/tarmacpatches_01/ss_tarmacpatch_03_main",
-	"props/streetprops/citybus_03/citybus_03_ruin_interior",
-	"props/streetprops/electricitytower_01/electricitytower_01_cableshader",
-	"props/streetprops/parasol_01/parasol_02_shader",
-	"props/streetprops/parasol_01/parasol_02_v2",
-	"props/vehicles/civiliancar_04/civiliancar_04_variations",
-	"shaders/presets/awningpreset",
-	"xp2/commontextures/shaders/ss_metaltile_01",
-	"xp2/commontextures/shaders/ss_woodplanks_brown_01_caustics",
-	"xp2/commontextures/ss_brickwallwhite_01",
-	"xp2/objects/officedivider_01/officedivider_01_shader",
-	"xp2/objects/scaffolding_01_tarpaulin/shaders/scaffolding_01_tarpaulin_1",
-	"xp2/objects/scaffolding_01_tarpaulin/shaders/scaffolding_01_tarpaulin_3",
-	"xp2/objects/scaffolding_01_tarpaulin/shaders/scaffolding_01_tarpaulin_4",
-	"xp2/objects/skybararmchair_02/ss_wood",
 	"xp2/objects/skybarsigns/signs_shader",
-	"xp2/objects/skybarsofa_02/ss_skybarsofa_02_alpha",
-	"xp2/objects/wallsquares_01/ss_wallsquares_01",
-	"xp3/objects/bridgeconcrete_01/ss_bridgeconcrete_01_gravel",
-	"xp3/objects/constrhouse_02_xp3/ss_constrhouse_wrap_01_xp3",
-	"xp3/objects/icefloe_01/ss_icefloe_01",
-	"xp4/objects/flags/xp4_flag_01_shader",
-	"xp_raw/architecture/constrhouse_01/constrhouse_wrap_01shader",
-	"xp_raw/architecture/construction_building_01/construction_buildingtarp_01_alpha_lodshader",
-	"xp_raw/architecture/construction_building_01/construction_buildingtarp_01_alpha_shader",
-	"xp_raw/architecture/construction_building_01/construction_buildingtarp_01_lodshader",
-	"xp_raw/architecture/construction_building_01/construction_buildingtarp_01_shader",
-	"xp_raw/architecture/hangar_01/roof_edgedetails_01",
-	"xp_raw/architecture/resort_bungalow_01/plasticwrap_01_shader",
-	"xp_raw/ground/groundimpact_01/groundimpact_01_main",
 	"xp_raw/props/fence_wakeisland/fence_wakeisland_01_shader",
+};
+constexpr std::pair<const char *, std::string_view> kDrawnThroughPrograms[] = {
+	{ "MP_018", "levels/mp_018/objects/rock01cluster_mp_018_shader" },
+	{ "MP_018", "levels/mp_018/objects/rock_01b_mp_018_shader" },
+	{ "MP_018", "levels/mp_018/objects/rock_01e_mp_018_shader" },
+	{ "XP3_Alborz", "levels/mp_whitepeak/objects/rock_01_snow" },
 };
 constexpr std::string_view kHiddenLedger[] = {
 	"levels/mp_007/props/m_mp007_waterwash_01",
-	"levels/mp_011/decals/shaders/mp_011_meshdecal_dirt01",
 	"levels/mp_018/terrain/mp018_wave",
 	"levels/sp_tank/props/backdrop_wires_main",
 	"levels/xp1_002/objects/xp1_002_wave",
-	"levels/xp5_001/meshdecal_dirt01_xp5_shader",
 	"levels/xp5_001/objects/hover_jetflame",
-	"leveltestranges/oldvenice/level_02/ground/decalasphaltcracks_01",
 	"objects/busstopbig_01/busstopbig_crackedglass",
 	"xp2/objects/cellarpoolarea_01/shaders/poolwater_1",
 	"xp2/objects/palacecourtyardground_01/ss_palacecourtyardground_01_water",
@@ -338,6 +424,7 @@ struct LevelCensus {
 	size_t drawn = 0, programs = 0, plain = 0, forward = 0, unclassified = 0;
 	std::vector<std::string> mask_colours;
 	std::vector<std::string> hidden;
+	std::set<std::string> through_programs;
 };
 
 LevelCensus level_census(const std::shared_ptr<bf3::core::Install> &p_install, const char *p_level) {
@@ -379,6 +466,8 @@ LevelCensus level_census(const std::shared_ptr<bf3::core::Install> &p_install, c
 		++out.drawn;
 		if (mat.program >= 0) {
 			++out.programs;
+			out.through_programs.insert(
+					to_lower_ascii(mat.slot.variation_shader.empty() ? mat.slot.shader : mat.slot.variation_shader));
 			out.forward += mat.blend ? 1 : 0;
 			continue;
 		}
@@ -458,6 +547,15 @@ TEST_SUITE("render-programs") {
 		}
 		for (std::string_view name : kHiddenLedger) {
 			CHECK_MESSAGE(seen_hidden.count(std::string(name)) == 1, name, " is in the hidden ledger but is drawn");
+		}
+		for (const auto &[level, shader] : kDrawnThroughPrograms) {
+			const size_t at =
+					size_t(std::find_if(std::begin(kCensusLevels), std::end(kCensusLevels), [&](const char *p_level) {
+						return std::string_view(p_level) == level;
+					}) - std::begin(kCensusLevels));
+			REQUIRE(at < kLevels);
+			CHECK_MESSAGE(results[at].through_programs.count(std::string(shader)) == 1, level, " does not draw ",
+					shader, " through its program");
 		}
 		CHECK(programs > 0);
 		const bf3::core::SnapshotDiff diff = bf3::core::diff_snapshots(before, reader.snapshot());

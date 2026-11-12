@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/core/result.h"
+#include "bf3/render/shader_translate.h"
 
 #include <array>
 #include <cstdint>
@@ -60,6 +61,7 @@ struct ShaderValue {
 struct ShaderVertexProgram {
 	std::vector<uint8_t> bytes;
 	std::vector<uint32_t> element_formats;
+	std::vector<VertexInputLanes> element_lanes;
 };
 
 struct ShaderConstants {
