@@ -1,11 +1,13 @@
 #include "land_drive.h"
 
 #include "bf3/sim/vehicles/land_rules.h"
+#include "bf3/sim/vehicles/tracked_rules.h"
 
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/Vehicle/WheeledVehicleController.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace bf3::sim {
@@ -16,6 +18,43 @@ bool channels_swapped(const vehicles::GearboxState &p_gearbox) {
 	return p_gearbox.gear < 0 || (p_gearbox.gear == 0 && p_gearbox.reverse_direction != 0);
 }
 
+float track_side_sign(uint8_t p_side) {
+	return p_side == 0 ? 1.0f : -1.0f;
+}
+
+bool track_steered(const VehicleModel &p_model) {
+	for (size_t i = 0; i < p_model.wheel_count; ++i) {
+		if (p_model.wheels[i].track_steer != 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void track_steer_update(const VehicleWorld::Impl::Vehicle &p_vehicle, float p_speed, VehicleDriverState &r_driver) {
+	const VehicleModel &m = *p_vehicle.model;
+	std::array<float, 2> rim_speed{};
+	std::array<uint32_t, 2> wheels{};
+	for (size_t i = 0; i < m.wheel_count; ++i) {
+		const VehicleWheelModel &wm = m.wheels[i];
+		if (wm.track_steer == 0 || wm.side > 1) {
+			continue;
+		}
+		rim_speed[wm.side] += std::fabs(p_vehicle.constraint->GetWheel(JPH::uint(i))->GetAngularVelocity()) * wm.radius;
+		++wheels[wm.side];
+	}
+	const vehicles::TrackSteerRule rule{ m.land.track_turn_speed_limit, m.land.track_forward_speed_limit,
+		std::span<const std::array<float, 2>>(m.land.steer_inertia.data(), m.land.steer_inertia_points) };
+	const float inertia = vehicles::track_steer_inertia(rule, p_speed);
+	const float attenuation = vehicles::track_speed_attenuation(rule.forward_speed_limit, p_speed);
+	for (uint8_t side = 0; side < 2; ++side) {
+		const float wheel_speed = wheels[side] > 0 ? rim_speed[side] / float(wheels[side]) : 0.0f;
+		const float target =
+				vehicles::track_steer_target(r_driver.steer_filter, track_side_sign(side), wheel_speed, 1.0f) *
+				attenuation;
+		r_driver.track_steer[side] = vehicles::track_steer_smooth(r_driver.track_steer[side], target, inertia);
+	}
+}
 }
 
 VehicleDriverState land_driver_at_rest(const VehicleModel &p_model) {
@@ -59,6 +98,11 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 			rule, d.gearbox, vehicles::gearbox_request(rule, d.gearbox, d.throttle_filter, d.brake_filter, speed));
 	vehicles::gearbox_advance(rule, d.gearbox, dt);
 
+	const bool tracked = track_steered(m);
+	if (tracked) {
+		track_steer_update(v, speed, d);
+	}
+
 	const int32_t gear = d.gearbox.gear;
 	const bool backward_limited = land.limit_backward_throttle && gear < 0 && speed >= land.backward_throttle_limit;
 	const float engine_torque = backward_limited
@@ -74,11 +118,15 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 		const VehicleWheelModel &wm = m.wheels[i];
 		JPH::Wheel *wheel = v.constraint->GetWheel(JPH::uint(i));
 		float omega = wheel->GetAngularVelocity();
+		float torque = 0.0f;
 		if (wm.driven != 0) {
-			omega += vehicles::wheel_drive_torque(
-							 engine_torque, ratio, wm.diff_gear_ratio, land.transmission_efficiency, land.drive_share) *
-					dt / wm.inertia;
+			torque = vehicles::wheel_drive_torque(
+					engine_torque, ratio, wm.diff_gear_ratio, land.transmission_efficiency, land.drive_share);
 		}
+		if (wm.track_steer != 0 && wm.side < 2) {
+			torque += d.track_steer[wm.side];
+		}
+		omega += torque * dt / wm.inertia;
 		omega = vehicles::brake_scale(omega, wm.brake_factor, wheel_brake);
 		omega = vehicles::brake_scale(omega, wm.hand_brake_factor, hand_brake ? 1.0f : 0.0f);
 		wheel->SetAngularVelocity(omega);
@@ -86,7 +134,8 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 
 	float jolt_brake = wheel_brake;
 	if (m.stand_still_brake && m.stand_still_ticks > 0) {
-		if (forward_pedal == 0.0f && back_pedal == 0.0f && speed < m.stand_still_speed) {
+		if (forward_pedal == 0.0f && back_pedal == 0.0f && (!tracked || steer_axis == 0.0f) &&
+				speed < m.stand_still_speed) {
 			if (d.stand_still_ticks < m.stand_still_ticks) {
 				++d.stand_still_ticks;
 			}
@@ -97,7 +146,7 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 			jolt_brake = 1.0f;
 		}
 	}
-	const bool idle = forward_pedal == 0.0f && back_pedal == 0.0f;
+	const bool idle = forward_pedal == 0.0f && back_pedal == 0.0f && (!tracked || steer_axis == 0.0f);
 	if (idle && (speed < m.stand_still_speed || (p_command.flags & vehicle_flags::kDriven) == 0)) {
 		jolt_brake = 1.0f;
 	}

@@ -113,6 +113,7 @@ struct VehicleDriverState {
 	uint8_t reserved = 0;
 	float engine_rpm = 0;
 	vehicles::GearboxState gearbox;
+	std::array<float, 2> track_steer{};
 
 	bool operator==(const VehicleDriverState &) const = default;
 };

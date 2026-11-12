@@ -7,6 +7,7 @@
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/collision_soup.h"
+#include "bf3/core/level/level.h"
 #include "bf3/core/level/vehicle_spawns.h"
 #include "bf3/core/thread_pool.h"
 #include "bf3/core/util/elapsed.h"
@@ -16,6 +17,7 @@
 #include "bf3/sim/vehicle_model.h"
 #include "bf3/sim/vehicle_types.h"
 #include "bf3/sim/vehicle_world.h"
+#include "bf3/sim/vehicles/tracked_rules.h"
 #include "bf3/sim_harness/vehicle_course.h"
 #include "bf3/sim_harness/vehicle_replay.h"
 #include "collision_world_internal.h"
@@ -1487,6 +1489,95 @@ TEST_SUITE("sim-vehicle") {
 		core::Result<VehicleHandling> h = measure_vehicle_handling(m->model);
 		REQUIRE_MESSAGE(h.ok(), (h.ok() ? std::string() : h.error().message));
 		print_handling("MP_007 Humvee", *h);
+	}
+
+	TEST_CASE("sim.vehicle: the T-90 drives on its tracks: the outer axles counter-steer, the track term pulls its "
+			  "sides apart at rest and it turns under way the jeep's way") {
+		Caspian *m = caspian();
+		if (m == nullptr) {
+			return;
+		}
+		core::Result<std::unique_ptr<core::level::LoadedLevel>> level =
+				core::level::load_level(m->install, "MP_007", "ConquestSmall0");
+		REQUIRE_MESSAGE(level.ok(), (level.ok() ? std::string() : level.error().message));
+		core::Result<std::shared_ptr<const VehicleModel>> t90 =
+				load_vehicle_model((*level)->db(), (*level)->mount(), "vehicles/t90/t90", m->tuning);
+		REQUIRE_MESSAGE(t90.ok(), (t90.ok() ? std::string() : t90.error().message));
+		const VehicleModel &model = **t90;
+		REQUIRE(model.wheel_count == 6);
+		size_t front = 0, middle = 0, rear = 0;
+		for (size_t i = 0; i < model.wheel_count; ++i) {
+			const VehicleWheelModel &w = model.wheels[i];
+			CHECK(w.track_steer == 1);
+			front += w.max_steer_angle > 0.0f && w.data_centre[2] > 1.0f ? 1u : 0u;
+			middle += w.max_steer_angle == 0.0f && std::fabs(w.data_centre[2]) < 1.0f ? 1u : 0u;
+			rear += w.max_steer_angle < 0.0f && w.data_centre[2] < -1.0f ? 1u : 0u;
+		}
+		CHECK(front == 2);
+		CHECK(middle == 2);
+		CHECK(rear == 2);
+		CHECK(model.land.track_forward_speed_limit == doctest::Approx(1.1f));
+		CHECK(model.land.track_turn_speed_limit == doctest::Approx(2.0f));
+		CHECK(model.land.steer_inertia_points == 6);
+		core::Result<std::shared_ptr<const VehicleModel>> m1 =
+				load_vehicle_model((*level)->db(), (*level)->mount(), "vehicles/m1a2/m1abrams", m->tuning);
+		REQUIRE_MESSAGE(m1.ok(), (m1.ok() ? std::string() : m1.error().message));
+		CHECK((*m1)->wheel_count == 6);
+		CHECK((*m1)->wheels[0].track_steer == 1);
+
+		const auto heading = [](const VehicleState &p_s) {
+			const std::array<float, 4> &q = p_s.body.rotation;
+			const float fx = 2.0f * (q[0] * q[2] + q[3] * q[1]);
+			const float fz = 1.0f - 2.0f * (q[0] * q[0] + q[1] * q[1]);
+			return std::atan2(fx, fz);
+		};
+		const auto planar = [](const Vec3 &p_a, const Vec3 &p_b) {
+			return std::hypot(p_a[0] - p_b[0], p_a[2] - p_b[2]);
+		};
+		const std::shared_ptr<const StaticWorldShapes> shapes = ground_shapes(false);
+		std::unique_ptr<VehicleWorld> pivot = world_at(shapes, *t90, placed(0, 0, -300));
+		settle(*pivot);
+		const VehicleState rest = pivot->state(0);
+		for (int t = 0; t < 120; ++t) {
+			step1(*pivot, command(0, 0, 127));
+		}
+		const VehicleState pivoted = pivot->state(0);
+		const float pivot_turn = heading(pivoted) - heading(rest);
+		const float pivot_drift = planar(pivoted.body.origin, rest.body.origin);
+		std::printf(
+				"T-90 pivot: steer +127 for 4 s at rest -> heading %.1f deg, drift %.2f m, track steer %.0f / %.0f\n",
+				double(pivot_turn / core::kDegToRadF), double(pivot_drift), double(pivoted.driver.track_steer[0]),
+				double(pivoted.driver.track_steer[1]));
+		CHECK(pivot_turn <= 0.0f);
+		CHECK(pivot_drift < 1.5f);
+		CHECK(pivoted.driver.track_steer[0] > 0.0f);
+		CHECK(pivoted.driver.track_steer[1] == doctest::Approx(-pivoted.driver.track_steer[0]));
+		CHECK(pivoted.driver.track_steer[0] <= vehicles::kTrackSteerForce);
+
+		std::unique_ptr<VehicleWorld> run = world_at(shapes, *t90, placed(0, 0, -300));
+		settle(*run);
+		for (int t = 0; t < 150; ++t) {
+			step1(*run, command(127, 0, 0));
+		}
+		const VehicleState straight = run->state(0);
+		const float straight_speed = std::hypot(straight.body.linear_velocity[0], straight.body.linear_velocity[2]);
+		for (int t = 0; t < 90; ++t) {
+			step1(*run, command(127, 0, 127));
+		}
+		const VehicleState turned = run->state(0);
+		const float run_turn = heading(turned) - heading(straight);
+		const float forward_x = std::sin(heading(turned)), forward_z = std::cos(heading(turned));
+		const float along = turned.body.linear_velocity[0] * forward_x + turned.body.linear_velocity[2] * forward_z;
+		const float across = turned.body.linear_velocity[0] * forward_z - turned.body.linear_velocity[2] * forward_x;
+		std::printf("T-90 under way: %.1f km/h after 5 s, steer +127 for 3 s -> heading %.1f deg, %.1f km/h along, "
+					"%.2f m/s across\n",
+				double(straight_speed * 3.6f), double(run_turn / core::kDegToRadF), double(along * 3.6f),
+				double(across));
+		CHECK(straight_speed > 3.0f);
+		CHECK(std::fabs(heading(straight) - heading(rest)) < 2.0f * core::kDegToRadF);
+		CHECK(run_turn < -10.0f * core::kDegToRadF);
+		CHECK(along > 1.0f);
+		CHECK(std::fabs(across) < 0.5f * along);
 	}
 
 	TEST_CASE("sim.vehicle: 200 seeded mutations of the Humvee partition through read_vehicle_drive_def and build_vehicle_model never crash") {

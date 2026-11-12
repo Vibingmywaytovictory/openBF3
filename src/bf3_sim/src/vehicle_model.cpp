@@ -3,6 +3,7 @@
 #include "bf3/core/gameplay/vehicle_drive.h"
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/util/finite.h"
+#include "bf3/sim/vehicles/tracked_rules.h"
 #include "vehicles/land_model.h"
 
 #include <algorithm>
@@ -72,7 +73,7 @@ uint64_t digest_of(const VehicleModel &p_m) {
 					 w.max_hand_brake_torque, w.brake_factor, w.hand_brake_factor, w.diff_gear_ratio }) {
 			d.add(f);
 		}
-		for (const uint8_t b : { w.steers, w.driven, w.axle, w.side }) {
+		for (const uint8_t b : { w.steers, w.driven, w.axle, w.side, w.track_steer }) {
 			d.add(b);
 		}
 	}
@@ -102,6 +103,12 @@ uint64_t digest_of(const VehicleModel &p_m) {
 	}
 	d.add(l.rpm_points);
 	d.add(l.torque_points);
+	d.add(l.track_forward_speed_limit);
+	d.add(l.track_turn_speed_limit);
+	d.add(l.steer_inertia_points);
+	for (size_t i = 0; i < l.steer_inertia_points; ++i) {
+		d.add(l.steer_inertia[i]);
+	}
 	d.add(p_m.anti_roll_bars);
 	for (size_t i = 0; i < p_m.anti_roll_bars; ++i) {
 		d.add(p_m.anti_roll_wheels[i]);
@@ -273,6 +280,7 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 			w.inertia = 1.0f;
 		}
 		w.angular_damping = p_tuning.wheel_angular_damping;
+		w.track_steer = vehicles::track_steer_wheel(c.steering_type, c.driving_type) ? 1 : 0;
 		w.steers = c.steering_type != 0 ? 1 : 0;
 		w.driven = c.driving_type != 0 ? 1 : 0;
 		w.max_steer_angle = 0.0f;
@@ -372,14 +380,49 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 	}
 	m->steer_model = p_tuning.steer_model;
 	const float lock = vehicle_max_steer_angle(*m, 0.0f);
+	uint32_t axle_count = 0;
 	for (size_t k = 0; k < m->wheel_count; ++k) {
-		m->wheels[k].max_steer_angle = m->wheels[k].steers != 0 ? lock : 0.0f;
+		axle_count = std::max<uint32_t>(axle_count, m->wheels[k].axle + 1u);
+	}
+	for (size_t k = 0; k < m->wheel_count; ++k) {
+		const VehicleWheelModel &w = m->wheels[k];
+		const float axle_sign = w.track_steer == 0 ? 1.0f
+				: w.axle == 0					   ? 1.0f
+				: w.axle + 1u == axle_count		   ? -1.0f
+												   : 0.0f;
+		m->wheels[k].max_steer_angle = w.steers != 0 ? lock * axle_sign : 0.0f;
 	}
 	core::Status land = build_land_drive(p_def, m->land);
 	if (!land.ok()) {
 		return fail(land.error().message);
 	}
 	m->land.drive_share = p_tuning.wheel_drive_share;
+	for (size_t k = 0; k < m->wheel_count; ++k) {
+		if (m->wheels[k].track_steer == 0) {
+			continue;
+		}
+		const core::gameplay::WheelConfigDef &c = p_def.wheel_configs[p_def.wheels[physics_wheels[k]].config];
+		if (!finite(c.tracked_forward_speed_limit) || c.tracked_forward_speed_limit < 0.0f ||
+				c.tracked_forward_speed_limit > 1000.0f || !finite(c.tracked_turn_speed_limit) ||
+				c.tracked_turn_speed_limit < 0.0f || c.tracked_turn_speed_limit > 1000.0f) {
+			return fail("tracked speed limits outside 0..1000");
+		}
+		if (c.steer_inertia.size() > kMaxModelCurvePoints) {
+			return fail(std::to_string(c.steer_inertia.size()) + " steer inertia points (at most " +
+					std::to_string(kMaxModelCurvePoints) + ")");
+		}
+		m->land.track_forward_speed_limit = c.tracked_forward_speed_limit;
+		m->land.track_turn_speed_limit = c.tracked_turn_speed_limit;
+		m->land.steer_inertia_points = uint8_t(c.steer_inertia.size());
+		for (size_t i = 0; i < c.steer_inertia.size(); ++i) {
+			if (!finite(c.steer_inertia[i][0]) || !finite(c.steer_inertia[i][1]) ||
+					(i > 0 && !(c.steer_inertia[i][0] > c.steer_inertia[i - 1][0]))) {
+				return fail("steer inertia points not finite and ascending");
+			}
+			m->land.steer_inertia[i] = c.steer_inertia[i];
+		}
+		break;
+	}
 
 	const float drag = 0.5f * ch.air_density * ch.coefficient_of_air_friction * ch.air_drag_area * p_tuning.drag_scale;
 	if (!finite(drag) || drag < 0.0f || drag > 1e4f) {

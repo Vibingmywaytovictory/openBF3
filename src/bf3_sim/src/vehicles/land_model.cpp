@@ -172,7 +172,8 @@ bool land_driver_state_valid(const VehicleModel &p_model, const VehicleDriverSta
 			p_driver.engine_rpm <= p_model.land.engine.rpm_max && phase_ok &&
 			g.gear >= -int32_t(p_model.land.reverse_gears) && g.gear <= int32_t(p_model.land.forward_gears) &&
 			g.pending >= -1 && g.pending <= 1 && g.reverse_direction <= 1 && std::isfinite(g.clutch) &&
-			g.clutch >= 0.0f && g.clutch <= 1.0f && std::isfinite(g.timer) && g.timer >= -1.0f && g.timer <= 60.0f;
+			g.clutch >= 0.0f && g.clutch <= 1.0f && std::isfinite(g.timer) && g.timer >= -1.0f && g.timer <= 60.0f &&
+			std::isfinite(p_driver.track_steer[0]) && std::isfinite(p_driver.track_steer[1]);
 }
 
 }

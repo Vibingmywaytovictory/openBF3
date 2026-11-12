@@ -107,6 +107,9 @@ struct LandDriveModel {
 	uint8_t curve_points = 0;
 	float power_multiplier = 1;
 	float drive_share = 1;
+	float track_forward_speed_limit = 0, track_turn_speed_limit = 0;
+	std::array<std::array<float, 2>, kMaxModelCurvePoints> steer_inertia{};
+	uint8_t steer_inertia_points = 0;
 };
 
 vehicles::GearboxRule land_gearbox_rule(const LandDriveModel &p_land);
@@ -127,6 +130,7 @@ struct VehicleWheelModel {
 	float diff_gear_ratio = 0;
 	uint8_t steers = 0, driven = 0, axle = 0;
 	uint8_t side = 0;
+	uint8_t track_steer = 0;
 };
 
 struct VehicleModel {
