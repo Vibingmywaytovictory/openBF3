@@ -191,6 +191,7 @@ struct GameServerStats {
 	SpottingStats spotting;
 	uint64_t vehicle_shots = 0;
 	uint64_t vehicle_hits = 0;
+	uint64_t vehicle_repairs = 0;
 	uint64_t vehicles_destroyed = 0;
 	uint64_t vehicle_crew_kills = 0;
 };

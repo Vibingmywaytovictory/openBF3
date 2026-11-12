@@ -33,6 +33,7 @@
 #include "bf3/sim/vehicles/land_rules.h"
 #include "bf3/sim/vehicles/vehicle_input.h"
 #include "bf3/sim/weapons/weapon_input.h"
+#include "bf3/sim/weapons/weapon_install.h"
 #include "bf3/sim/weapons/weapon_rng.h"
 
 #include <algorithm>
@@ -5370,6 +5371,68 @@ TEST_SUITE("host-vehicles-damage") {
 		CHECK(run.driver_dead);
 		CHECK(run.kills_gained == 1);
 		check_respawn(run);
+	}
+}
+
+TEST_SUITE("host-vehicles-damage") {
+	TEST_CASE("vehicles: the repair tool (wcPowerTool, StartDamage 6, 600 rpm) is the soldier source's repair amount, "
+			  "a repair of 6 per shot with no modifiers that refills the zone and then the shield (R3-G3 E, R-G3 7); "
+			  "other weapons repair nothing") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		core::Result<sw::InstallWeapons> install = sw::open_install_weapons(level->install);
+		REQUIRE_MESSAGE(install.ok(), (install.ok() ? std::string() : install.error().message));
+		std::vector<core::gameplay::WeaponDef> defs;
+		for (const char *v : { "weapons/gadgets/repairtool/u_repairtool", "weapons/rpg7/u_rpg7" }) {
+			core::Result<core::gameplay::WeaponDef> d = install->catalog->resolve(v);
+			REQUIRE_MESSAGE(d.ok(), (d.ok() ? std::string() : d.error().message));
+			defs.push_back(*d);
+		}
+		core::Result<std::shared_ptr<const sw::WeaponTable>> table =
+				sw::make_weapon_table(defs, level->shared->gunplay->materials);
+		REQUIRE_MESSAGE(table.ok(), (table.ok() ? std::string() : table.error().message));
+		REQUIRE((*table)->defs[0].weapon_class == host::kRepairToolClass);
+		CHECK(sw::sim_effective_rpm((*table)->defs[0]) == doctest::Approx(600.0));
+		host::VehicleDamageSource source;
+		source.configure(**table, defs);
+		CHECK(source.repair(0) == 6.0f);
+		CHECK(source.repair(1) == 0.0f);
+		CHECK(source.repair(7) == 0.0f);
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		const host::LevelVehicleKind *tank = nullptr;
+		for (const host::LevelVehicleKind &k : lv.kinds) {
+			tank = k.blueprint == "vehicles/m1a2/m1abrams" ? &k : tank;
+		}
+		REQUIRE(tank != nullptr);
+		const sim::vehicles::HealthZoneRule &rear = tank->damage.zones[size_t(sim::vehicles::HullZone::Rear)];
+		REQUIRE(rear.max_shield > 0.0f);
+		sim::vehicles::VehicleHealth h = sim::vehicles::spawned_vehicle_health(tank->damage);
+		const size_t ri = size_t(sim::vehicles::HullZone::Rear);
+		h.shield[ri] = 0.0f;
+		sim::vehicles::VehicleHit hit;
+		hit.zone = sim::vehicles::HullZone::Rear;
+		hit.damage = 100.0f;
+		REQUIRE(sim::vehicles::apply_vehicle_damage(tank->damage, h, hit).applied);
+		const float damaged = sim::vehicles::vehicle_health(tank->damage, h);
+		hit.damage = -source.repair(0);
+		hit.modifiers = false;
+		hit.modifier = 0.0f;
+		for (int shot = 0; shot < 10; ++shot) {
+			sim::vehicles::apply_vehicle_damage(tank->damage, h, hit);
+		}
+		const float full = sim::vehicles::full_vehicle_health(tank->damage);
+		CHECK(sim::vehicles::vehicle_health(tank->damage, h) ==
+				doctest::Approx(std::min(full, damaged + 60.0f * full / rear.max_health)));
+		for (int shot = 0; shot < 400; ++shot) {
+			sim::vehicles::apply_vehicle_damage(tank->damage, h, hit);
+		}
+		CHECK(h.health[ri] == rear.max_health);
+		CHECK(h.shield[ri] == rear.max_shield);
+		std::printf("repair: %s rear %.0f + shield %.0f, 10 repair tool shots (1 s) give %.1f health\n",
+				tank->blueprint.c_str(), double(rear.max_health), double(rear.max_shield),
+				double(60.0f * full / rear.max_health));
 	}
 }
 

@@ -11,8 +11,13 @@ void VehicleDamageSource::configure(const sw::WeaponTable &p_table, std::span<co
 	materials_ = p_table.materials;
 	bullet_.assign(p_table.defs.size(), 0);
 	blast_.assign(p_table.defs.size(), std::nullopt);
+	repair_.assign(p_table.defs.size(), 0.0f);
 	for (size_t i = 0; i < p_table.defs.size(); ++i) {
 		bullet_[i] = p_table.defs[i].projectile.property;
+		if (p_table.defs[i].weapon_class == kRepairToolClass &&
+				p_table.defs[i].projectile.kind == core::gameplay::ProjectileKind::Bullet) {
+			repair_[i] = p_table.defs[i].projectile.start_damage;
+		}
 		if (materials_ != nullptr && i < p_defs.size() && p_defs[i].projectile.explosion.material.present) {
 			const sw::SurfacePair pair = materials_->pair_of(p_defs[i].projectile.explosion.material);
 			if (pair.resolved) {

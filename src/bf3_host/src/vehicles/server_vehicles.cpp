@@ -441,6 +441,12 @@ void ServerVehicles::strike(const VehicleStrike &p_strike, Gunplay &r_gunplay) {
 			std::any_of(v.occupants.begin(), v.occupants.end(), [](uint8_t o) { return o != net::kNoVehicleOccupant; });
 	parties.friendly_fire = r_gunplay.config().friendly_fire;
 	hit.modifier = sim::vehicles::damage_modifier(kind.damage.armor_multiplier, parties);
+	const float repair = p_strike.soldier_weapon ? soldier_source_.repair(e.def) : 0.0f;
+	if (repair > 0.0f && parties.attacker_is_player && (v.team == 0 || v.team == parties.attacker_team)) {
+		hit.damage = -repair;
+		hit.modifiers = false;
+		++stats_.repairs;
+	}
 	const sim::vehicles::VehicleDamageOutcome o = sim::vehicles::apply_vehicle_damage(kind.damage, v.health, hit);
 	if (!o.applied) {
 		return;

@@ -39,6 +39,7 @@ struct ServerVehicleStats {
 	uint64_t restart_failures = 0;
 	uint64_t hits = 0;
 	uint64_t absorbed = 0;
+	uint64_t repairs = 0;
 	uint64_t disabled = 0;
 	uint64_t destroyed = 0;
 	uint64_t exploded = 0;
