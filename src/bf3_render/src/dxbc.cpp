@@ -435,11 +435,22 @@ core::Status translate_instruction(
 		case kMax:
 			return per_component(
 					2, [](const std::vector<std::string> &s) { return "max(" + s[0] + ", " + s[1] + ")"; });
-		case kAnd:
+		case kAnd: {
+			BF3_TRY(need(3));
+			for (size_t i = 1; i <= 2; ++i) {
+				for (uint32_t bits : p_ops[i].type == kImmediate32 ? p_ops[i].immediate : std::array<uint32_t, 4>{}) {
+					float value = 0.0f;
+					std::memcpy(&value, &bits, 4);
+					if (value != 0.0f && !std::isnormal(value)) {
+						return fail("and with the integer mask " + std::to_string(bits));
+					}
+				}
+			}
 			return per_component(2, [&](const std::vector<std::string> &s) {
 				return p_ops[1].type == kImmediate32 ? "(" + s[1] + " != 0.0 ? " + s[0] + " : 0.0)"
 													 : "(" + s[0] + " != 0.0 ? " + s[1] + " : 0.0)";
 			});
+		}
 		case kMovc:
 			return per_component(3, [](const std::vector<std::string> &s) {
 				return "(" + s[0] + " != 0.0 ? " + s[1] + " : " + s[2] + ")";

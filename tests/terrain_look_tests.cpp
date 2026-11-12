@@ -106,6 +106,18 @@ TEST_SUITE("render-terrain-unit") {
 		CHECK(t->outputs == 1);
 		CHECK(t->instructions == 2);
 		CHECK(t->body.find("o0.xyzw = vec4(1.0, 0.0, (-0.5), 1.0);") != std::string::npos);
+		const auto with_and = [&](uint32_t p_mask) {
+			std::vector<uint32_t> and_tokens(shader.begin(), shader.begin() + 5);
+			and_tokens.insert(and_tokens.end(),
+					{ (1u | (13u << 24)), 0x001020F2u, 0u, 0x00004002u, 0x3F800000u, 0x3F800000u, 0x3F800000u,
+							0x3F800000u, 0x00004002u, p_mask, p_mask, p_mask, p_mask, (62u | (1u << 24)) });
+			and_tokens[1] = uint32_t(and_tokens.size());
+			Result<DxbcProgram> p = parse_dxbc(container(and_tokens));
+			REQUIRE(p.ok());
+			return translate_pixel_program(*p);
+		};
+		CHECK(with_and(0x3F800000u).ok());
+		CHECK_FALSE(with_and(0x000000FFu).ok());
 		tokens[5] = 87u | (8u << 24);
 		program = parse_dxbc(container(tokens));
 		REQUIRE(program.ok());
