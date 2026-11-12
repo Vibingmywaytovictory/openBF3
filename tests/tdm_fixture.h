@@ -8,12 +8,14 @@
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/level_load.h"
+#include "bf3/host/level_vehicles.h"
 #include "bf3/host/tdm_brain.h"
 #include "bf3/host/tdm_rules.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/sim_types.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -44,6 +46,19 @@ inline bool is_alive(const sim::SoldierState *p_state) {
 inline float distance(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 	const float dx = p_a[0] - p_b[0], dy = p_a[1] - p_b[1], dz = p_a[2] - p_b[2];
 	return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+inline float up_y_of(const std::array<float, 4> &p_rotation) {
+	const std::array<float, 4> &q = p_rotation;
+	return 1.0f - 2.0f * (q[0] * q[0] + q[2] * q[2]);
+}
+
+inline float latest_initial_delay(const host::LevelVehicles &p_level) {
+	float latest = 0.0f;
+	for (const host::LevelVehicleSpawner &s : p_level.spawners) {
+		latest = std::max(latest, s.initial_spawn_delay);
+	}
+	return latest;
 }
 
 TdmLevel *load_tdm_level_once();

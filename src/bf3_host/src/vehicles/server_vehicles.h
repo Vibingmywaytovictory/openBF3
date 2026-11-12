@@ -11,6 +11,7 @@
 #include "bf3/sim/weapons/gadgets.h"
 #include "vehicle_gunnery.h"
 #include "vehicle_hits.h"
+#include "vehicle_scope.h"
 
 #include <array>
 #include <cstddef>
@@ -103,7 +104,10 @@ public:
 	std::optional<sim::Vec3> seat_position(size_t p_slot) const;
 	std::optional<sim::Vec3> exit_position(size_t p_slot) const;
 
-	std::vector<net::VehicleStates> wire(sim::Tick p_tick) const;
+	void configure_scope(size_t p_viewers, bool p_scoped);
+	void forget_viewer(size_t p_slot) { scope_.forget(p_slot); }
+	std::vector<net::VehicleStates> wire_for(size_t p_slot, const GhostViewer &p_viewer, sim::Tick p_tick);
+	const VehicleScopeStats &scope_stats() const { return scope_.stats(); }
 	std::span<const ServerVehicle> vehicles() const { return vehicles_; }
 	const LevelVehicles *level() const { return level_.get(); }
 	const sim::VehicleWorld *world() const { return world_.get(); }
@@ -120,6 +124,7 @@ private:
 			std::vector<sim::weapons::DamageEvent> &r_damage);
 	void explode(size_t p_vehicle);
 	void refresh_targets();
+	net::VehicleWire wire_of(size_t p_vehicle, const sim::VehicleState &p_state) const;
 	sim::Vec3 hull_centre(size_t p_vehicle) const;
 	uint8_t hull_property(size_t p_vehicle) const;
 	void gather(std::span<const sim::weapons::DamageEvent> p_events, const VehicleDamageSource &p_source,
@@ -142,6 +147,11 @@ private:
 	std::vector<VehicleStrike> strikes_;
 	std::vector<sim::weapons::DamageEvent> crew_kills_;
 	std::vector<sim::weapons::DamageEvent> taken_;
+	VehicleScope scope_;
+	size_t scope_viewers_ = 0;
+	bool scoped_ = true;
+	std::vector<sim::VehicleState> sent_states_;
+	std::optional<sim::Tick> sent_tick_;
 };
 
 }

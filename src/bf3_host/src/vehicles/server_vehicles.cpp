@@ -54,6 +54,7 @@ core::Status ServerVehicles::rebuild() {
 	crew_kills_.clear();
 	use_held_.fill(0);
 	seat_held_.fill(0);
+	sent_tick_.reset();
 	stats_.live = 0;
 	if (level_ == nullptr || shapes_ == nullptr || level_->spawners.empty()) {
 		return core::Status::success();
@@ -71,7 +72,14 @@ core::Status ServerVehicles::rebuild() {
 		v.occupants.fill(net::kNoVehicleOccupant);
 	}
 	gunnery_.reset(vehicles_.size());
+	scope_.configure(scope_viewers_, vehicles_.size(), scoped_);
 	return core::Status::success();
+}
+
+void ServerVehicles::configure_scope(size_t p_viewers, bool p_scoped) {
+	scope_viewers_ = p_viewers;
+	scoped_ = p_scoped;
+	scope_.configure(scope_viewers_, vehicles_.size(), scoped_);
 }
 
 std::optional<uint8_t> ServerVehicles::spawner_team(
@@ -598,36 +606,67 @@ std::optional<sim::Vec3> ServerVehicles::exit_position(size_t p_slot) const {
 	return sim::Vec3{ s.body.origin[0] + offset[0], s.body.origin[1] + offset[1], s.body.origin[2] + offset[2] };
 }
 
-std::vector<net::VehicleStates> ServerVehicles::wire(sim::Tick p_tick) const {
+net::VehicleWire ServerVehicles::wire_of(size_t p_vehicle, const sim::VehicleState &p_state) const {
+	const ServerVehicle &v = vehicles_[p_vehicle];
+	const LevelVehicleKind &kind = level_->kinds[level_->spawners[p_vehicle].kind];
+	net::VehicleWire w;
+	w.spawner = uint16_t(p_vehicle);
+	w.generation = v.generation;
+	w.team = v.team;
+	w.seat_count = kind.seats;
+	w.occupants = v.occupants;
+	w.state = p_state;
+	if (kind.armament != nullptr) {
+		w.turret_count = uint8_t(std::min(
+				{ kind.armament->turrets.size(), net::kMaxVehicleTurrets, sim::vehicles::kMaxArmamentTurrets }));
+		for (size_t k = 0; k < w.turret_count; ++k) {
+			w.turret_angles[k] = v.armament.bodies[k].angle;
+		}
+	}
+	return w;
+}
+
+namespace {
+
+void pack(std::vector<net::VehicleStates> &r_out, sim::Tick p_tick, net::VehicleWire &&p_wire) {
+	if (r_out.empty() || r_out.back().vehicles.size() >= net::kMaxVehiclesPerDatagram) {
+		r_out.emplace_back();
+		r_out.back().server_tick = p_tick;
+	}
+	r_out.back().vehicles.push_back(std::move(p_wire));
+}
+
+}
+
+std::vector<net::VehicleStates> ServerVehicles::wire_for(size_t p_slot, const GhostViewer &p_viewer, sim::Tick p_tick) {
 	std::vector<net::VehicleStates> out;
 	if (!on()) {
 		return out;
+	}
+	if (sent_tick_ != p_tick) {
+		sent_tick_ = p_tick;
+		sent_states_.assign(vehicles_.size(), sim::VehicleState());
+		for (size_t i = 0; i < vehicles_.size(); ++i) {
+			if (vehicles_[i].live) {
+				sent_states_[i] = world_->state(sim::VehicleSlot(i));
+			}
+		}
 	}
 	for (size_t i = 0; i < vehicles_.size(); ++i) {
 		const ServerVehicle &v = vehicles_[i];
 		if (!v.live) {
 			continue;
 		}
-		if (out.empty() || out.back().vehicles.size() >= net::kMaxVehiclesPerDatagram) {
-			out.emplace_back();
-			out.back().server_tick = p_tick;
+		const sim::VehicleState &s = sent_states_[i];
+		VehicleScopeCandidate c;
+		c.team = v.team;
+		c.position = s.body.com_position;
+		c.occupied_by_viewer = std::find(v.occupants.begin(), v.occupants.end(), uint8_t(p_slot)) != v.occupants.end();
+		c.resting = s.body.active == 0;
+		c.generation = v.generation;
+		if (scope_.due(p_slot, p_viewer, i, c)) {
+			pack(out, p_tick, wire_of(i, s));
 		}
-		net::VehicleWire w;
-		w.spawner = uint16_t(i);
-		w.generation = v.generation;
-		w.team = v.team;
-		w.seat_count = level_->kinds[level_->spawners[i].kind].seats;
-		w.occupants = v.occupants;
-		w.state = world_->state(sim::VehicleSlot(i));
-		const LevelVehicleKind &kind = level_->kinds[level_->spawners[i].kind];
-		if (kind.armament != nullptr) {
-			w.turret_count = uint8_t(std::min(
-					{ kind.armament->turrets.size(), net::kMaxVehicleTurrets, sim::vehicles::kMaxArmamentTurrets }));
-			for (size_t k = 0; k < w.turret_count; ++k) {
-				w.turret_angles[k] = v.armament.bodies[k].angle;
-			}
-		}
-		out.back().vehicles.push_back(w);
 	}
 	return out;
 }

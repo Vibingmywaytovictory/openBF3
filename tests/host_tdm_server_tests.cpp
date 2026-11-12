@@ -6,6 +6,7 @@
 #include "vehicles/client_vehicles.h"
 #include "vehicles/vehicle_gunnery.h"
 #include "vehicles/vehicle_hits.h"
+#include "vehicles/vehicle_scope.h"
 
 #include "bf3/core/gameplay/eor_fading.h"
 #include "bf3/core/gameplay/eor_timeline.h"
@@ -44,6 +45,7 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -4226,18 +4228,13 @@ std::array<float, 2> heading_of(const std::array<float, 4> &p_rotation) {
 	return { x / n, z / n };
 }
 
-float up_y_of(const std::array<float, 4> &p_rotation) {
-	const std::array<float, 4> &q = p_rotation;
-	return 1.0f - 2.0f * (q[0] * q[0] + q[2] * q[2]);
-}
-
 float speed_of(const sim::Vec3 &p_velocity) {
 	const sim::Vec3 &v = p_velocity;
 	return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
 }
 
 bool parked_upright(const std::array<float, 4> &p_rotation, const sim::Vec3 &p_velocity) {
-	return up_y_of(p_rotation) > 0.98f && speed_of(p_velocity) < 0.05f;
+	return tdm::up_y_of(p_rotation) > 0.98f && speed_of(p_velocity) < 0.05f;
 }
 
 float clear_run(const sim::CollisionWorld &p_world, const sim::Vec3 &p_from, const std::array<float, 4> &p_rotation,
@@ -4451,7 +4448,7 @@ TEST_SUITE("host-vehicles") {
 			CHECK_MESSAGE(speed <= upshift_speed(now_gear) + 0.5f, "gear " << now_gear << " at " << speed << " m/s");
 			CHECK(w->state.driver.engine_rpm >= 0.0f);
 			CHECK(w->state.driver.engine_rpm <= land.engine.rpm_max);
-			lowest_up = std::min(lowest_up, up_y_of(w->state.body.rotation));
+			lowest_up = std::min(lowest_up, tdm::up_y_of(w->state.body.rotation));
 			widest = std::max(widest, off_line(w->state.body.com_position));
 			previous_speed = speed;
 			gear = now_gear;
@@ -4495,7 +4492,7 @@ TEST_SUITE("host-vehicles") {
 			CHECK(now_gear <= gear);
 			CHECK(now_gear >= -1);
 			CHECK((now_gear >= 1 || speed < turn_speed + 0.5f));
-			lowest_up = std::min(lowest_up, up_y_of(w->state.body.rotation));
+			lowest_up = std::min(lowest_up, tdm::up_y_of(w->state.body.rotation));
 			widest = std::max(widest, off_line(w->state.body.com_position));
 			previous_speed = speed;
 			gear = now_gear;
@@ -4519,7 +4516,7 @@ TEST_SUITE("host-vehicles") {
 					return speed_of(watch.of(spawner)->state.body.linear_velocity) < 0.1f;
 				},
 				120));
-		CHECK(up_y_of(watch.of(spawner)->state.body.rotation) > 0.95f);
+		CHECK(tdm::up_y_of(watch.of(spawner)->state.body.rotation) > 0.95f);
 		const sim::Tick exit_at = m->now() + 2u;
 		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
 			sim::Command c = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
@@ -4545,6 +4542,102 @@ TEST_SUITE("host-vehicles") {
 		CHECK(away > 1.0f);
 		CHECK(away < 6.0f);
 		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+}
+
+TEST_SUITE("host-vehicles-scope") {
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: a soldier's client gets each parked vehicle's state once every 15 "
+			  "snapshots and the vehicle he drives every snapshot") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		std::unique_ptr<Match> m = start_match(*level, false, 66u, 0, 1);
+		tdm::ScriptedPeer &p = m->join("viewer");
+		p.ready();
+		REQUIRE(wait_in_round(*m));
+		REQUIRE(m->until([&] { return is_alive(m->state(p.slot())); }, 600));
+		VehicleWatch watch;
+		std::map<uint16_t, uint32_t> updates;
+		uint32_t snapshots = 0;
+		const auto run = [&](uint32_t p_ticks) {
+			for (uint32_t t = 0; t < p_ticks; ++t) {
+				m->tick();
+				snapshots += m->now() % 2u == 0u ? 1u : 0u;
+				for (const host::OutDatagram &d : m->out) {
+					if (d.peer != p.peer() || net::peek_type(d.bytes) != net::MessageType::VehicleStates) {
+						continue;
+					}
+					core::Result<net::VehicleStates> s = net::decode_vehicle_states(d.bytes);
+					REQUIRE(s.ok());
+					for (const net::VehicleWire &w : s->vehicles) {
+						++updates[w.spawner];
+					}
+				}
+				watch.take(m->out, p.peer());
+			}
+		};
+		run(sim::seconds_to_ticks(tdm::latest_initial_delay(lv)) + 240u);
+		updates.clear();
+		snapshots = 0;
+		run(300);
+		size_t parked = 0;
+		uint32_t most = 0, fewest = UINT32_MAX;
+		for (const net::VehicleWire &w : watch.latest) {
+			if (w.state.body.active != 0) {
+				continue;
+			}
+			++parked;
+			most = std::max(most, updates[w.spawner]);
+			fewest = std::min(fewest, updates[w.spawner]);
+		}
+		std::printf("vehicles: over %u snapshots the viewer got %zu parked vehicles' states %u to %u times each\n",
+				unsigned(snapshots), parked, unsigned(fewest), unsigned(most));
+		REQUIRE(parked >= 6u);
+		CHECK(most <= snapshots / host::kRestingVehicleSnapshots + 1u);
+		CHECK(fewest >= snapshots / host::kRestingVehicleSnapshots - 1u);
+
+		const net::VehicleWire *target = nullptr;
+		for (const net::VehicleWire &w : watch.latest) {
+			if (lv.kinds[lv.spawners[w.spawner].kind].blueprint == "vehicles/growleritv/growleritv" &&
+					parked_upright(w.state.body.rotation, w.state.body.linear_velocity)) {
+				target = &w;
+				break;
+			}
+		}
+		REQUIRE(target != nullptr);
+		const uint16_t spawner = target->spawner;
+		const sim::Vec3 com = target->state.body.com_position;
+		const float radius = lv.kinds[lv.spawners[spawner].kind].entry_radius;
+		m->teleport(p, ground_at(*m->world, com[0] + 0.6f * radius, com[2], com[1] + 5.0f));
+		m->ticks(30);
+		const sim::Tick use_at = m->now() + 2u;
+		int8_t forward = 0;
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			sim::Command c = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
+			if (p_tick == use_at) {
+				c.buttons |= sim::buttons::kUse;
+			}
+			c.move_forward = forward;
+			return c;
+		};
+		const uint8_t slot = uint8_t(p.slot());
+		REQUIRE(m->until(
+				[&] {
+					watch.take(m->out, p.peer());
+					const net::VehicleWire *w = watch.of(spawner);
+					return w != nullptr && w->occupants[0] == slot;
+				},
+				60));
+		forward = 127;
+		updates.clear();
+		snapshots = 0;
+		run(120);
+		std::printf("vehicles: driving, the viewer got his Growler's state %u times in %u snapshots\n",
+				unsigned(updates[spawner]), unsigned(snapshots));
+		CHECK(updates[spawner] == snapshots);
+		CHECK(watch.bad == 0);
 	}
 }
 
@@ -5053,10 +5146,10 @@ TEST_SUITE("host-vehicles-armor") {
 				(w->state.body.com_position[2] - start[2]) * line[1];
 		std::printf("armor: 2 s of throttle took it %.1f m along its bow at %.1f km/h, gear %d, rpm %.0f, up y %.3f\n",
 				double(run), double(3.6f * speed_of(w->state.body.linear_velocity)), int(w->state.driver.gearbox.gear),
-				double(w->state.driver.engine_rpm), double(up_y_of(w->state.body.rotation)));
+				double(w->state.driver.engine_rpm), double(tdm::up_y_of(w->state.body.rotation)));
 		CHECK(run > 1.0f);
 		CHECK(run < tank_clear);
-		CHECK(up_y_of(w->state.body.rotation) > 0.95f);
+		CHECK(tdm::up_y_of(w->state.body.rotation) > 0.95f);
 		forward = -127;
 		REQUIRE(m->until(
 				[&] {
@@ -5221,7 +5314,8 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 	REQUIRE(!tank_kinds.empty());
 	REQUIRE(!target_kinds.empty());
 
-	std::unique_ptr<Match> m = start_match(r_level, false, 61u, 0, 1);
+	std::unique_ptr<Match> m = start_match(
+			r_level, false, 61u, 0, 1, [](host::GameServerConfig &r_config) { r_config.ghost_scope = false; });
 	tdm::ScriptedPeer &p = m->join("gunner");
 	p.ready();
 	REQUIRE(wait_in_round(*m));
@@ -5763,14 +5857,6 @@ TEST_SUITE("host-vehicles-damage-team") {
 
 namespace {
 
-float latest_initial_delay(const host::LevelVehicles &p_level) {
-	float latest = 0.0f;
-	for (const host::LevelVehicleSpawner &s : p_level.spawners) {
-		latest = std::max(latest, s.initial_spawn_delay);
-	}
-	return latest;
-}
-
 sim::Vec3 beside_hull(const Match &p_match, const net::VehicleWire &p_vehicle, float p_side) {
 	const std::array<float, 2> f = heading_of(p_vehicle.state.body.rotation);
 	const sim::Vec3 &c = p_vehicle.state.body.com_position;
@@ -5813,7 +5899,7 @@ TEST_SUITE("host-vehicles-damage-team") {
 					}
 					return ours.has_value() && theirs.has_value();
 				},
-				sim::seconds_to_ticks(latest_initial_delay(lv)) + 600u));
+				sim::seconds_to_ticks(tdm::latest_initial_delay(lv)) + 600u));
 		bool fire = false;
 		sim::Vec3 aim{};
 		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
@@ -5917,7 +6003,7 @@ TEST_SUITE("host-vehicles-damage-team") {
 					}
 					return hull_clear >= 35.0f;
 				},
-				sim::seconds_to_ticks(latest_initial_delay(lv)) + 600u));
+				sim::seconds_to_ticks(tdm::latest_initial_delay(lv)) + 600u));
 		const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[*hull].kind];
 		const net::VehicleWire parked = *watch.of(*hull);
 		const sim::Vec3 start = parked.state.body.com_position;

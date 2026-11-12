@@ -101,6 +101,7 @@ struct GameServer::Impl {
 		loads.reset(i);
 		spotting.reset(i);
 		vehicles.leave(i);
+		vehicles.forget_viewer(i);
 	}
 
 	void drop_client(size_t p_slot) {
@@ -388,12 +389,18 @@ struct GameServer::Impl {
 		if (!vehicles.on()) {
 			return;
 		}
-		for (const net::VehicleStates &m : vehicles.wire(p_tick)) {
-			const std::vector<uint8_t> bytes = net::encode_vehicle_states(m);
-			for (size_t i = 0; i < slots.size(); ++i) {
-				if (slots[i].used && slots[i].remote) {
-					outbox.send(slots[i].peer, net::kChannelUnreliable, bytes);
-				}
+		for (size_t i = 0; i < slots.size(); ++i) {
+			if (!slots[i].used || !slots[i].remote) {
+				continue;
+			}
+			GhostViewer viewer;
+			viewer.slot = uint8_t(i);
+			viewer.team = uint8_t(std::clamp(slots[i].team, 0, 255));
+			viewer.spawned = soldiers[i].spawned;
+			viewer.position = soldiers[i].state.position;
+			viewer.eye = soldiers[i].state.position;
+			for (const net::VehicleStates &m : vehicles.wire_for(i, viewer, p_tick)) {
+				outbox.send(slots[i].peer, net::kChannelUnreliable, net::encode_vehicle_states(m));
 			}
 		}
 	}
@@ -696,6 +703,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	m.dev.configure(m.config, *m.world, p_config.max_slots);
 	BF3_TRY(m.vehicles.configure(
 			p_config.level->vehicles, p_config.level->static_world, p_config.vehicle_spawn_delay_modifier));
+	m.vehicles.configure_scope(p_config.max_slots, p_config.ghost_scope);
 	m.handshake.configure(p_config.game_build.value_or(net::game_build()), *p_config.level, p_config.max_slots);
 	m.loads.configure(p_config.max_slots, p_config.load, p_config.round_id);
 	for (size_t i = 0; i < m.slots.size(); ++i) {

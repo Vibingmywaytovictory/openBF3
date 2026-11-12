@@ -54,6 +54,8 @@ target_sources(bf3_host PRIVATE
     src/vehicles/vehicle_gunnery.cpp
     src/vehicles/vehicle_hits.h
     src/vehicles/vehicle_hits.cpp
+    src/vehicles/vehicle_scope.h
+    src/vehicles/vehicle_scope.cpp
     include/bf3/host/presented_vehicle.h
     src/vehicles/client_vehicles.h
     src/vehicles/client_vehicles.cpp
