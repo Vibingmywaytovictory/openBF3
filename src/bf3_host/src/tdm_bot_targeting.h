@@ -29,7 +29,7 @@ public:
 	void drop() { target_ = -1; }
 
 	Sighting sense(TdmShared &r_shared, const BotAwareness &p_awareness, sim::Tick p_tick,
-			const sim::SoldierState &p_self, std::span<const sim::SoldierState> p_states, float p_skill01,
+			const sim::SoldierState &p_self, std::span<const sim::SoldierState> p_states, float p_skill,
 			uint64_t &r_rng);
 	Sighting track(TdmShared &r_shared, const sim::bots::Perception &p_perception, sim::Tick p_tick,
 			std::span<const sim::SoldierState> p_states, uint64_t &r_rng);
@@ -46,7 +46,7 @@ public:
 
 private:
 	void choose(TdmShared &r_shared, const BotAwareness &p_awareness, sim::Tick p_tick, const sim::SoldierState &p_self,
-			std::span<const sim::SoldierState> p_states, float p_skill01, uint64_t &r_rng);
+			std::span<const sim::SoldierState> p_states, float p_skill, uint64_t &r_rng);
 
 	int target_ = -1;
 	sim::Tick target_since_ = 0, react_at_ = 0, last_engaged_ = 0;

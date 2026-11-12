@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "bf3/ai/main/bot_skill.h"
 #include "bf3/core/gameplay/eor_timeline.h"
 #include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/thread_pool.h"
@@ -11,7 +12,6 @@
 #include "bf3/host/gunplay.h"
 #include "bf3/host/server_view.h"
 #include "bf3/host/tdm_brain.h"
-#include "bf3/sim/bots/aim_model.h"
 #include "bf3/sim/bots/perception.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/command.h"
@@ -20,6 +20,7 @@
 
 #include "ai_infantry_fakes.h"
 #include "gunplay_fixture.h"
+#include "tdm_bot_body.h"
 #include "tdm_bot_shared.h"
 #include "tdm_bot_support.h"
 #include "tdm_fixture.h"
@@ -49,8 +50,8 @@ constexpr bool kRuNtLanded = true;
 
 constexpr float kDeg = sim::kPi / 180.0f;
 
-constexpr uint64_t kReplayDecisionHash = 0x6927d3941428365full;
-constexpr uint64_t kReplayWorldHash = 0xafe4c40a47a2428cull;
+constexpr uint64_t kReplayDecisionHash = 0x588f7e17da50be96ull;
+constexpr uint64_t kReplayWorldHash = 0xc2ffa4af0065b36dull;
 
 void pending_skip(const char *p_row) {
 	std::printf("%s: PENDING (ru, nt): needs run_tdm and the v3 codecs on the branch\n", p_row);
@@ -410,29 +411,6 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(r.enemies().empty());
 	}
 
-	TEST_CASE("aim model: the error cone, hostile inputs") {
-		const sb::AimParams a;
-		CHECK(sb::aim_error(a, 0.5f, 0.0f, false, 0.0f) == doctest::Approx(3.0f));
-		CHECK(sb::aim_error(a, 0.5f, 100.0f, false, 0.0f) == doctest::Approx(0.5f));
-		CHECK(sb::aim_error(a, 0.5f, 0.6f, false, 0.0f) == doctest::Approx(0.5f + 2.5f * std::exp(-1.0f)));
-		CHECK(sb::aim_error(a, 0.5f, 100.0f, true, 0.0f) == doctest::Approx(2.0f));
-		CHECK(sb::aim_error(a, 0.5f, 100.0f, false, 4.0f) == doctest::Approx(2.5f));
-		CHECK(sb::aim_error(a, 0.3f, 0.0f, false, 0.0f) == doctest::Approx(4.2f));
-		CHECK(sb::aim_error(a, 0.8f, 0.0f, false, 0.0f) == doctest::Approx(1.2f));
-		CHECK(sb::aim_error(a, 0.3f, 1.0f, false, 0.0f) > sb::aim_error(a, 0.8f, 1.0f, false, 0.0f));
-		CHECK(sb::aim_error(a, 0.5f, 0.2f, false, 0.0f) > sb::aim_error(a, 0.5f, 0.8f, false, 0.0f));
-
-		CHECK(sb::aim_error(a, NAN, NAN, false, NAN) == doctest::Approx(3.0f));
-		CHECK(sb::aim_error(a, 0.5f, -5.0f, false, -2.0f) == doctest::Approx(4.0f));
-		CHECK(sb::aim_error(a, 0.5f, 0.0f, true, 1e30f) == doctest::Approx(45.0f));
-		sb::AimParams bad;
-		bad.e0_deg = NAN;
-		bad.tau_s = -1.0f;
-		const float s = sb::aim_error(bad, 0.5f, 1.0f, false, 0.0f);
-		CHECK(std::isfinite(s));
-		CHECK(s >= 0.0f);
-	}
-
 	TEST_CASE("bot_tuning.cfg: the shipped file is the compiled-in defaults; hostile files fail") {
 		std::ifstream f(OPENBF3_BOT_TUNING_CFG, std::ios::binary);
 		REQUIRE(f.good());
@@ -444,10 +422,6 @@ TEST_SUITE("host-tdm-bots-unit") {
 		REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
 		const host::TdmBotConfig def;
 		CHECK(parsed.count == 7);
-		CHECK(parsed.skill_min == def.skill_min);
-		CHECK(parsed.skill_max == def.skill_max);
-		CHECK(parsed.reaction_min_s == def.reaction_min_s);
-		CHECK(parsed.reaction_max_s == def.reaction_max_s);
 		CHECK(parsed.w_distance == def.w_distance);
 		CHECK(parsed.burst_min_rounds == def.burst_min_rounds);
 		CHECK(parsed.burst_max_rounds == def.burst_max_rounds);
@@ -455,32 +429,31 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(parsed.perception.update_ticks == def.perception.update_ticks);
 		CHECK(parsed.perception.hearing_radius_m == def.perception.hearing_radius_m);
 		CHECK(parsed.perception.chest_height_m == def.perception.chest_height_m);
-		CHECK(parsed.aim.e0_deg == def.aim.e0_deg);
-		CHECK(parsed.aim.skill_scale == def.aim.skill_scale);
 		CHECK(parsed.revive_radius_m == def.revive_radius_m);
 		CHECK(parsed.regen_until_hp == def.regen_until_hp);
 		CHECK(parsed.behaviours == def.behaviours);
 		CHECK(parsed.strategy == def.strategy);
 
 		host::TdmBotConfig one;
-		REQUIRE(host::parse_bot_tuning("# c\n  aim.e0_deg = 2.5 # trailing\n\nperception.update_ticks=3\n", one).ok());
-		CHECK(one.aim.e0_deg == doctest::Approx(2.5f));
+		REQUIRE(host::parse_bot_tuning("# c\n  w_aim = 2.5 # trailing\n\nperception.update_ticks=3\n", one).ok());
+		CHECK(one.w_aim == doctest::Approx(2.5f));
 		CHECK(one.perception.update_ticks == 3);
-		CHECK(one.aim.e_inf_deg == def.aim.e_inf_deg);
+		CHECK(one.w_damage == def.w_damage);
 		REQUIRE(host::parse_bot_tuning("bb.resupply_used_mags = 3\n", one).ok());
 		CHECK_FALSE(host::parse_bot_tuning("bb.random.weight = 2.5\n", one).ok());
 		CHECK(one.behaviours.resupply_used_mags == 3u);
 
-		for (const char *bad : { "nope = 1\n", "skill_min = nan\n", "skill_min = 2\n", "skill_min\n",
-					 "skill_min = 1x\n", "perception.update_ticks = 0\n", "aim.tau_s = 1e40\n", "count = 65\n", "= 3\n",
-					 "ai.nope = 1\n", "ai.max_bots = 12\n", "ai.enable_air_ai = 1\n", "bb.nope = 1\n",
-					 "bb.decision_ticks = 0\n", "bb.idle.weight = -1\n", "sai.nope = 1\n", "sai.period_ticks = 0\n",
-					 "sai.order.random = -1\n", "bb.mission_arrive_m = 0\n" }) {
+		for (const char *bad : { "nope = 1\n", "w_aim = nan\n", "w_aim = 2000\n", "w_aim\n", "w_aim = 1x\n",
+					 "skill_min = 0.3\n", "reaction_min_s = 0.25\n", "aim.e0_deg = 3\n", "aim.skill_scale = 1\n",
+					 "perception.update_ticks = 0\n", "count = 65\n", "= 3\n", "ai.nope = 1\n", "ai.max_bots = 12\n",
+					 "ai.enable_air_ai = 1\n", "bb.nope = 1\n", "bb.decision_ticks = 0\n", "bb.idle.weight = -1\n",
+					 "sai.nope = 1\n", "sai.period_ticks = 0\n", "sai.order.random = -1\n",
+					 "bb.mission_arrive_m = 0\n" }) {
 			host::TdmBotConfig c;
-			c.skill_min = 0.42f;
+			c.w_aim = 0.42f;
 			const core::Status r = host::parse_bot_tuning(bad, c);
 			CHECK_MESSAGE(!r.ok(), bad);
-			CHECK(c.skill_min == doctest::Approx(0.42f));
+			CHECK(c.w_aim == doctest::Approx(0.42f));
 		}
 		host::TdmBotConfig big;
 		CHECK_FALSE(host::parse_bot_tuning(std::string(host::kMaxBotTuningBytes + 1, '#'), big).ok());
@@ -506,6 +479,99 @@ TEST_SUITE("host-tdm-bots-unit") {
 		REQUIRE_FALSE(none.ok());
 		CHECK(none.error().message.find("Levels/XP9_None/AI/AI.ai") != std::string::npos);
 		CHECK(missing.ai.bot_skill == 0.5f);
+	}
+
+	TEST_CASE("botSkill reaches the bot body: a fresh fire plan's first shot waits BBPFireInfantery's delay, a switch "
+			  "while a target is held waits only below skill 0.3, the aim error is WeaponObject's deviation") {
+		const std::unique_ptr<sim::CollisionWorld> world = wall_world();
+		struct Run {
+			sim::Tick first_wait = 0, switch_wait = 0;
+			float max_err = 0.0f;
+		};
+		auto run = [&](float p_skill) {
+			m2b_fake::FakeView view;
+			view.world_ = world.get();
+			view.teams = { 1, 2, 2 };
+			view.kits = { 0, 0, 0 };
+			view.slots = { soldier_at({ 0, 0, 0 }), soldier_at({ 20, 0, 20 }), soldier_at({ -30, 0, 30 }) };
+			auto cfg = std::make_shared<host::TdmBotConfig>();
+			cfg->ai.bot_skill = p_skill;
+			host::TdmBrainHost h;
+			h.view = &view;
+			h.match_seed = 7;
+			h.rules = true;
+			core::Result<std::shared_ptr<host::TdmShared>> shared = host::make_tdm_shared(h, cfg);
+			REQUIRE(shared.ok());
+			host::TdmShared &sh = **shared;
+			host::tdm_bot::BotBody body;
+			body.attach(*shared, 0);
+			body.set_slot(0);
+			body.new_life(0, view.slots[0]);
+			CHECK(body.skill == p_skill);
+			Run r;
+			sim::Tick t = 1;
+			for (; t <= 300 && body.targeting.target() < 0; ++t) {
+				view.now = t - 1;
+				sh.begin_tick(t);
+				body.see(t, view.slots[0], view.slots);
+			}
+			REQUIRE(body.targeting.target() == 1);
+			r.first_wait = body.targeting.react_at() - body.targeting.target_since();
+			const sim::Tick fight_from = t;
+			for (; t <= 600; ++t) {
+				view.now = t - 1;
+				sh.begin_tick(t);
+				const host::tdm_bot::Sighting s = body.see(t, view.slots[0], view.slots);
+				REQUIRE(body.targeting.target() == 1);
+				REQUIRE(s.enemy != nullptr);
+				REQUIRE(s.enemy->chest_visible);
+				const sim::SoldierState &self = view.slots[0];
+				const sim::Vec3 eye = sh.eye_point(self);
+				const host::tdm_bot::BotFrame f{ t, self, view.states(), view.world(), eye, s.enemy, s.visible, 1,
+					false, host::tdm_bot::BotArms(nullptr, 0), nullptr };
+				host::tdm_bot::BotIntent got, exact;
+				body.aim_target(f, got);
+				exact.aim_at(eye, sh.chest_point(view.slots[1]));
+				r.max_err = std::max(r.max_err, std::fabs(host::tdm_bot::wrap(got.want_yaw - exact.want_yaw)));
+				const sb::PerceivedEnemy *other = body.awareness.perception().find(2);
+				if (t - fight_from >= 60 && other != nullptr && other->detected) {
+					break;
+				}
+			}
+			REQUIRE(t <= 600);
+			view.slots[1] = soldier_at({ 60, 0, -60 });
+			const sim::Tick hidden = t;
+			for (++t; t <= hidden + 80 && body.targeting.target() != 2; ++t) {
+				view.now = t - 1;
+				sh.begin_tick(t);
+				body.see(t, view.slots[0], view.slots);
+			}
+			REQUIRE(body.targeting.target() == 2);
+			r.switch_wait = body.targeting.react_at() - body.targeting.target_since();
+			return r;
+		};
+		const auto lo = [](float p_skill) { return sim::seconds_to_ticks(ai::fire_delay_s(p_skill, 0.0f)); };
+		const auto hi = [](float p_skill) { return sim::seconds_to_ticks(ai::fire_delay_s(p_skill, 1.0f)); };
+
+		const Run best = run(1.0f);
+		CHECK(best.first_wait == 0u);
+		CHECK(best.switch_wait == 0u);
+		CHECK(best.max_err == 0.0f);
+
+		const Run shipped = run(0.75f);
+		CHECK(shipped.first_wait >= lo(0.75f));
+		CHECK(shipped.first_wait <= hi(0.75f));
+		CHECK(shipped.switch_wait == 0u);
+		CHECK(shipped.max_err > 0.5f * kDeg);
+		CHECK(shipped.max_err < 4.0f * 1.75f * kDeg);
+
+		const Run poor = run(0.2f);
+		CHECK(poor.first_wait >= lo(0.2f));
+		CHECK(poor.first_wait <= hi(0.2f));
+		CHECK(poor.switch_wait >= lo(0.2f));
+		CHECK(poor.switch_wait <= hi(0.2f));
+		CHECK(poor.max_err > shipped.max_err);
+		CHECK(poor.max_err < 4.0f * 5.6f * kDeg);
 	}
 
 	TEST_CASE("support and squads: under a squad order a bot helps a mate within bb.order_detour_m of its way to the "
@@ -706,8 +772,8 @@ TEST_SUITE("host-tdm-bots-unit") {
 		view.world_ = world.get();
 		view.teams = { 1, 1, 2, 2 };
 		view.kits = { 0, 0, 0, 0 };
-		view.slots = { soldier_at({ -20, 0, -20 }), soldier_at({ -18, 0, -20 }), soldier_at({ 20, 0, 20 }),
-			soldier_at({ 18, 0, 20 }) };
+		view.slots = { soldier_at({ -20, 0, -20 }), soldier_at({ -18, 0, -20 }), soldier_at({ 5, 0, 5 }),
+			soldier_at({ 3, 0, 5 }) };
 		auto cfg = std::make_shared<host::TdmBotConfig>();
 		cfg->stats = std::make_shared<host::TdmBotStats>();
 		host::TdmBrainHost h;

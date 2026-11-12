@@ -16,7 +16,6 @@
 #include "bf3/host/tdm_brain.h"
 #include "bf3/host/tdm_rules.h"
 #include "bf3/net/protocol.h"
-#include "bf3/sim/bots/aim_model.h"
 #include "bf3/sim/bots/perception.h"
 #include "bf3/sim/logic/logic_native.h"
 #include "bf3/sim/logic/round_natives.h"
@@ -218,16 +217,9 @@ TEST_SUITE("m2b-contract") {
 		CHECK(perception.max_candidates == 4);
 		CHECK(perception.forget_s == doctest::Approx(3.0f));
 		CHECK(perception.hearing_radius_m == doctest::Approx(60.0f));
-		const sim::bots::AimParams aim;
-		CHECK(aim.e0_deg == doctest::Approx(3.0f));
-		CHECK(aim.e_inf_deg == doctest::Approx(0.5f));
-		CHECK(aim.tau_s == doctest::Approx(0.6f));
 		const host::TdmBotConfig bots;
 		CHECK(bots.count == 31);
-		CHECK(bots.skill_min == doctest::Approx(0.3f));
-		CHECK(bots.skill_max == doctest::Approx(0.8f));
-		CHECK(bots.reaction_min_s == doctest::Approx(0.25f));
-		CHECK(bots.reaction_max_s == doctest::Approx(0.6f));
+		CHECK(bots.ai.bot_skill == doctest::Approx(0.75f));
 		CHECK(bots.revive_radius_m == doctest::Approx(30.0f));
 
 		const core::audio::HdrSetting hdr;

@@ -146,7 +146,6 @@ target_sources(bf3_sim PRIVATE
 target_sources(bf3_sim PRIVATE
     include/bf3/sim/logic/round_natives.h
     include/bf3/sim/bots/perception.h
-    include/bf3/sim/bots/aim_model.h
 )
 
 target_sources(bf3_sim PRIVATE
@@ -155,7 +154,6 @@ target_sources(bf3_sim PRIVATE
 
 target_sources(bf3_sim PRIVATE
     src/bots/perception.cpp
-    src/bots/aim_model.cpp
 )
 
 target_sources(bf3_sim PRIVATE

@@ -121,10 +121,6 @@ KeyOutcome bot_count(const Key &p_key, std::string_view p_value, TdmBotConfig &r
 #define BF3_BOT_FIELD(f) [](TdmBotConfig &c) -> void * { return &c.f; }
 
 const Key kKeys[] = {
-	{ "skill_min", KeyKind::Custom, 0.0f, 1.0f, BF3_BOT_FIELD(skill_min), {}, bot_float },
-	{ "skill_max", KeyKind::Custom, 0.0f, 1.0f, BF3_BOT_FIELD(skill_max), {}, bot_float },
-	{ "reaction_min_s", KeyKind::Custom, 0.0f, 10.0f, BF3_BOT_FIELD(reaction_min_s), {}, bot_float },
-	{ "reaction_max_s", KeyKind::Custom, 0.0f, 10.0f, BF3_BOT_FIELD(reaction_max_s), {}, bot_float },
 	{ "switch_margin", KeyKind::Custom, 0.0f, 10.0f, BF3_BOT_FIELD(switch_margin), {}, bot_float },
 	{ "strafe_min_m", KeyKind::Custom, 0.0f, 50.0f, BF3_BOT_FIELD(strafe_min_m), {}, bot_float },
 	{ "strafe_max_m", KeyKind::Custom, 0.0f, 50.0f, BF3_BOT_FIELD(strafe_max_m), {}, bot_float },
@@ -166,13 +162,6 @@ const Key kKeys[] = {
 	{ "perception.head_height_m", KeyKind::Custom, 0.0f, 3.0f, BF3_BOT_FIELD(perception.head_height_m), {}, bot_float },
 	{ "perception.chest_height_m", KeyKind::Custom, 0.0f, 3.0f, BF3_BOT_FIELD(perception.chest_height_m), {},
 			bot_float },
-	{ "aim.e0_deg", KeyKind::Custom, 0.0f, 45.0f, BF3_BOT_FIELD(aim.e0_deg), {}, bot_float },
-	{ "aim.e_inf_deg", KeyKind::Custom, 0.0f, 45.0f, BF3_BOT_FIELD(aim.e_inf_deg), {}, bot_float },
-	{ "aim.tau_s", KeyKind::Custom, 0.001f, 60.0f, BF3_BOT_FIELD(aim.tau_s), {}, bot_float },
-	{ "aim.moving_penalty_deg", KeyKind::Custom, 0.0f, 45.0f, BF3_BOT_FIELD(aim.moving_penalty_deg), {}, bot_float },
-	{ "aim.crossing_deg_per_mps", KeyKind::Custom, 0.0f, 45.0f, BF3_BOT_FIELD(aim.crossing_deg_per_mps), {},
-			bot_float },
-	{ "aim.skill_scale", KeyKind::Custom, 0.0f, 10.0f, BF3_BOT_FIELD(aim.skill_scale), {}, bot_float },
 	{ "count", KeyKind::Custom, 0, 64, BF3_BOT_FIELD(count), {}, bot_count },
 	{ "burst_min_rounds", KeyKind::Custom, 1, 100, BF3_BOT_FIELD(burst_min_rounds), {}, bot_count },
 	{ "burst_max_rounds", KeyKind::Custom, 1, 100, BF3_BOT_FIELD(burst_max_rounds), {}, bot_count },

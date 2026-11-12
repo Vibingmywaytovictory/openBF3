@@ -1,5 +1,7 @@
 #include "tdm_bot_targeting.h"
 
+#include "bf3/ai/main/bot_skill.h"
+
 #include "bf3/host/server_view.h"
 
 #include <algorithm>
@@ -31,14 +33,13 @@ void BotTargeting::new_life() {
 }
 
 Sighting BotTargeting::sense(TdmShared &r_shared, const BotAwareness &p_awareness, sim::Tick p_tick,
-		const sim::SoldierState &p_self, std::span<const sim::SoldierState> p_states, float p_skill01,
-		uint64_t &r_rng) {
-	choose(r_shared, p_awareness, p_tick, p_self, p_states, p_skill01, r_rng);
+		const sim::SoldierState &p_self, std::span<const sim::SoldierState> p_states, float p_skill, uint64_t &r_rng) {
+	choose(r_shared, p_awareness, p_tick, p_self, p_states, p_skill, r_rng);
 	return track(r_shared, p_awareness.perception(), p_tick, p_states, r_rng);
 }
 
-void BotTargeting::choose(TdmShared &r_shared, const BotAwareness &p_awareness, sim::Tick p_tick, const sim::SoldierState &p_self,
-		std::span<const sim::SoldierState> p_states, float p_skill01, uint64_t &r_rng) {
+void BotTargeting::choose(TdmShared &r_shared, const BotAwareness &p_awareness, sim::Tick p_tick,
+		const sim::SoldierState &p_self, std::span<const sim::SoldierState> p_states, float p_skill, uint64_t &r_rng) {
 	TdmShared &sh = r_shared;
 	const TdmBotConfig &c = *sh.config;
 	const sim::Vec3 eye = sh.eye_point(p_self);
@@ -72,15 +73,11 @@ void BotTargeting::choose(TdmShared &r_shared, const BotAwareness &p_awareness, 
 	if (target_ >= 0 && cur_score >= 0.0f && best_score <= cur_score * (1.0f + std::max(c.switch_margin, 0.0f))) {
 		return;
 	}
-	const bool had = target_ >= 0 && cur_score >= 0.0f;
+	const bool fresh = ai::fresh_fire_plan(target_ >= 0, p_skill);
 	target_ = best;
 	target_since_ = p_tick;
 	err_next_ = p_tick;
-	const float lo = std::min(c.reaction_min_s, c.reaction_max_s), hi = std::max(c.reaction_min_s, c.reaction_max_s);
-
-	const float base = hi - (hi - lo) * p_skill01 + (unit(r_rng) - 0.5f) * 0.3f * (hi - lo);
-	const float reaction = std::clamp(base, lo, hi) * (had ? 0.5f : 1.0f);
-	react_at_ = p_tick + sim::seconds_to_ticks(reaction);
+	react_at_ = fresh ? p_tick + sim::seconds_to_ticks(ai::fire_delay_s(p_skill, unit(r_rng))) : p_tick;
 	loss_handled_ = false;
 	lost_target_ = -1;
 	sh.count(&TdmBotStats::retargets, uint64_t(1));

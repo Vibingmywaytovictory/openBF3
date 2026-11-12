@@ -1,9 +1,9 @@
 #include "tdm_bot_body.h"
 
+#include "bf3/ai/main/bot_skill.h"
 #include "bf3/core/math.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
-#include "bf3/sim/bots/aim_model.h"
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/weapons/weapon_input.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"
@@ -61,9 +61,7 @@ void BotBody::new_life(sim::Tick p_tick, const sim::SoldierState &p_state) {
 	life = p_state.life;
 	life_tick = p_tick;
 	rng = mix(seed ^ (uint64_t(life) << 8));
-	const float lo = std::min(c.skill_min, c.skill_max), hi = std::max(c.skill_min, c.skill_max);
-	skill01 = unit(rng);
-	skill = std::clamp(lo + (hi - lo) * skill01, 0.0f, 1.0f);
+	skill = std::clamp(c.ai.bot_skill, 0.0f, 1.0f);
 	const ServerView &view = *shared->host.view;
 	kit = shared->host.rules ? view.kit(slot)
 							 : (shared->host.gunplay != nullptr ? shared->host.gunplay->kit(slot) : uint8_t(0));
@@ -115,7 +113,7 @@ Sighting BotBody::keep(
 Sighting BotBody::see(sim::Tick p_tick, const sim::SoldierState &p_state, std::span<const sim::SoldierState> p_states) {
 	TdmShared &sh = *shared;
 	awareness.perceive(sh, slot, seed ^ uint64_t(life), p_tick, p_state, p_states, view_yaw, view_pitch);
-	return targeting.sense(sh, awareness, p_tick, p_state, p_states, skill01, rng);
+	return targeting.sense(sh, awareness, p_tick, p_state, p_states, skill, rng);
 }
 
 BotFrame BotBody::sense_revive(
@@ -349,15 +347,11 @@ void BotBody::aim_target(const BotFrame &p_frame, BotIntent &r_intent) {
 	}
 	i.target_distance = i.aim_at(f.eye, point);
 
-	const sim::Vec3 los = sub(chest, f.eye);
-	const float l = std::max(distance(f.eye, chest), 1e-3f);
-	const float along = (ts.velocity[0] * los[0] + ts.velocity[1] * los[1] + ts.velocity[2] * los[2]) / l;
-	const float vx = ts.velocity[0] - along * los[0] / l, vy = ts.velocity[1] - along * los[1] / l,
-				vz = ts.velocity[2] - along * los[2] / l;
-	const float crossing = std::sqrt(vx * vx + vy * vy + vz * vz);
-	const float own = std::sqrt(f.self.velocity[0] * f.self.velocity[0] + f.self.velocity[2] * f.self.velocity[2]);
-	const float on = float(f.tick - targeting.target_since()) * sim::kTickSeconds;
-	const float sigma = sim::bots::aim_error(c.aim, skill, on, own > 0.5f, std::isfinite(crossing) ? crossing : 0.0f) *
+	ai::TriggerWeapon weapon;
+	weapon.explosion_radius = d != nullptr && d->projectile.explosion.present ? d->projectile.explosion.radius : 0.0f;
+	const double on = double(f.tick - targeting.target_since()) * sim::kTickSeconds;
+	const float sigma =
+			ai::ai_deviation_deg(ai::WeaponTemplate{}, ai::trigger_skill(skill, weapon, true, false), on, 1.0f) *
 			core::kDegToRadF;
 	const AimError err = targeting.aim_error(f.tick, sigma, rng);
 	i.want_yaw = wrap(i.want_yaw + err.yaw);

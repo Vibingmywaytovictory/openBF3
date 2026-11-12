@@ -2,6 +2,7 @@
 
 #include "bf3/ai/behaviour/behaviours.h"
 #include "bf3/ai/main/ai_script.h"
+#include "bf3/ai/main/bot_skill.h"
 #include "bf3/core/level/level.h"
 
 #include <chrono>
@@ -168,5 +169,28 @@ TEST_SUITE("ai-script") {
 		CHECK(c.weapon_template("Other") == def);
 		AiConfig twice = c;
 		CHECK_FALSE(run_ai_script("weaponTemplate.create GUN\n", "w2.ai", twice).ok());
+	}
+
+	TEST_CASE("bot skill as the reconstruction reads it: EntryTrigger's skill, WeaponObject's deviation, "
+			  "BBPFireInfantery's first-shot delay and its fresh plan") {
+		CHECK(trigger_skill(0.75f, {}, true, false) == doctest::Approx(0.875f));
+		CHECK(trigger_skill(0.75f, {}, true, true) == doctest::Approx(0.75f));
+		CHECK(trigger_skill(0.75f, { false, 4.0f, false }, true, false) == doctest::Approx(0.9f));
+		CHECK(trigger_skill(0.75f, { false, 4.0f, false }, false, false) == doctest::Approx(0.8f));
+		CHECK(trigger_skill(0.2f, { true, 0.0f, false }, true, false) == 1.0f);
+		CHECK(trigger_skill(0.2f, { false, 0.0f, true }, true, false) == 1.0f);
+		const WeaponTemplate w;
+		CHECK(ai_deviation_deg(w, 0.875f, 0.0, 1.0f) == doctest::Approx(1.75f));
+		CHECK(ai_deviation_deg(w, 0.875f, 7.5, 1.0f) == doctest::Approx(1.3125f));
+		CHECK(ai_deviation_deg(w, 0.875f, 15.0, 1.0f) == doctest::Approx(0.875f));
+		CHECK(ai_deviation_deg(w, 0.875f, 600.0, 3.0f) == doctest::Approx(2.625f));
+		CHECK(ai_deviation_deg(w, 1.0f, 0.0, 1.0f) == 0.0f);
+		CHECK(fire_delay_s(0.75f, 0.0f) == doctest::Approx(0.375f));
+		CHECK(fire_delay_s(0.75f, 1.0f) == doctest::Approx(0.625f));
+		CHECK(fire_delay_s(1.0f, 0.5f) == 0.0f);
+		CHECK(fresh_fire_plan(false, 0.75f));
+		CHECK_FALSE(fresh_fire_plan(true, 0.75f));
+		CHECK_FALSE(fresh_fire_plan(true, 0.3f));
+		CHECK(fresh_fire_plan(true, 0.29f));
 	}
 }

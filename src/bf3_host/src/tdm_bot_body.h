@@ -85,7 +85,7 @@ struct BotBody {
 	sim::Tick life_tick = 0;
 	sim::Tick hold_from = 0;
 	uint8_t kit = 0;
-	float skill = 0.5f, skill01 = 0.5f;
+	float skill = 0.5f;
 	float view_yaw = 0.0f, view_pitch = 0.0f;
 	TdmBotActivity activity = TdmBotActivity::Dead;
 

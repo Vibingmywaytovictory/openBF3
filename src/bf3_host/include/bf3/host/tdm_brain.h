@@ -7,7 +7,6 @@
 #include "bf3/ai/strategic/strategy.h"
 #include "bf3/core/result.h"
 #include "bf3/host/game_server.h"
-#include "bf3/sim/bots/aim_model.h"
 #include "bf3/sim/bots/perception.h"
 #include "bf3/sim/bots/walker_brain.h"
 #include "bf3/sim/sim_types.h"
@@ -120,13 +119,7 @@ struct TdmBotStats {
 struct TdmBotConfig {
 	uint32_t count = 31;
 	sim::bots::PerceptionParams perception;
-	sim::bots::AimParams aim;
 
-	float skill_min = 0.3f;
-	float skill_max = 0.8f;
-
-	float reaction_min_s = 0.25f;
-	float reaction_max_s = 0.6f;
 	float switch_margin = 0.25f;
 	uint32_t burst_min_rounds = 3, burst_max_rounds = 6;
 
