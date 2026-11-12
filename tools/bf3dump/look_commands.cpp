@@ -4,6 +4,8 @@
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
 #include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/text.h"
+#include "bf3/render/dxbc.h"
 #include "bf3/render/level_scene.h"
 #include "bf3/render/mesh_cache.h"
 
@@ -20,6 +22,8 @@ namespace render = bf3::render;
 namespace bf3dump {
 
 namespace {
+
+constexpr size_t kShaderPlacesShown = 8;
 
 using bf3::core::seconds_since;
 
@@ -353,6 +357,21 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 				continue;
 			}
 			std::printf("shader %s: surface type %u flags %u, %zu solutions\n", name.c_str(), unsigned(s->surface_type), unsigned(s->flags), s->solutions.size());
+			size_t placed = 0;
+			for (const render::SceneInstancePlan &inst : l1->instances) {
+				const render::SceneMeshPlan &mesh = l1->meshes[inst.mesh];
+				const bool uses =
+						std::any_of(mesh.surface_materials.begin(), mesh.surface_materials.end(), [&](uint32_t p_m) {
+							return p_m < l1->materials.size() &&
+									(iequals_ascii(l1->materials[p_m].slot.shader, name) ||
+											iequals_ascii(l1->materials[p_m].slot.variation_shader, name));
+						});
+				if (uses && placed++ < kShaderPlacesShown) {
+					std::printf("  instance at %.1f %.1f %.1f\n", double(inst.transform.trans[0]),
+							double(inst.transform.trans[1]), double(inst.transform.trans[2]));
+				}
+			}
+			std::printf("  %zu instances draw it\n", placed);
 			for (const render::ShaderTexture &t : s->textures) {
 				std::printf("  texture %s coord %u usage %u factor %g\n", t.name.c_str(), t.coord_type, t.vertex_usage, double(t.factor));
 			}
@@ -364,6 +383,48 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 			}
 			for (const render::ShaderValue &v : s->values) {
 				std::printf("  value %s (%g, %g, %g, %g)\n", v.name.c_str(), double(v.value[0]), double(v.value[1]), double(v.value[2]), double(v.value[3]));
+			}
+			for (size_t k = 0; k < s->solutions.size(); ++k) {
+				const render::ShaderSolution &sol = s->solutions[k];
+				if (!sol.pixel_program || !sol.vertex_program) {
+					continue;
+				}
+				std::printf("  solution %zu: blend %u flags %u, vertex input formats", k, unsigned(sol.blend_mode),
+						unsigned(sol.flags));
+				for (uint32_t f : sol.vertex_program->element_formats) {
+					std::printf(" %u", f);
+				}
+				std::printf("\n");
+				const std::pair<const char *, const std::vector<uint8_t> *> programs[] = {
+					{ "vs", &sol.vertex_program->bytes }, { "ps", sol.pixel_program.get() }
+				};
+				for (const auto &[label, bytes] : programs) {
+					Result<render::dxbc::Program> p = render::dxbc::parse(*bytes);
+					if (!p) {
+						std::printf("  %s: %s\n", label, p.error().message.c_str());
+						continue;
+					}
+					for (const render::dxbc::SignatureElement &e : p->inputs) {
+						std::printf("  %s in v%u %s%u sv %u mask %u\n", label, e.reg, e.name.c_str(), e.semantic_index,
+								e.system_value, unsigned(e.mask));
+					}
+					for (const render::dxbc::SignatureElement &e : p->outputs) {
+						std::printf("  %s out o%u %s%u sv %u mask %u\n", label, e.reg, e.name.c_str(), e.semantic_index,
+								e.system_value, unsigned(e.mask));
+					}
+					for (const render::dxbc::Binding &b : p->bindings) {
+						std::printf("  %s binding %s type %u point %u\n", label, b.name.c_str(), b.type, b.bind_point);
+					}
+					for (const render::dxbc::ConstantBuffer &cb : p->constant_buffers) {
+						for (const render::dxbc::Variable &v : cb.variables) {
+							std::printf("  %s cbuffer %s %s at %u size %u\n", label, cb.name.c_str(), v.name.c_str(),
+									v.offset, v.size);
+						}
+					}
+					for (const render::dxbc::Instruction &ins : p->code) {
+						std::printf("  %s %s\n", label, render::dxbc::format_instruction(ins).c_str());
+					}
+				}
 			}
 		}
 	}
