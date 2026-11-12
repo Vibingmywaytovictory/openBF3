@@ -4,6 +4,7 @@
 #include "input_mapper.h"
 #include "level_upload.h"
 #include "look_bridge.h"
+#include "memory_report.h"
 #include "native_loading.h"
 
 #include "nav_overlay.h"
@@ -221,6 +222,7 @@ private:
 	godot::DirectionalLight3D *sun_ = nullptr;
 	godot::WorldEnvironment *environment_ = nullptr;
 	LookBridge look_;
+	std::optional<MemoryReport> memory_report_;
 	godot::Ref<godot::CapsuleMesh> capsule_;
 	std::vector<godot::RID> other_instances_;
 	godot::Label *hud_ = nullptr;

@@ -1,6 +1,7 @@
 #include "level_upload.h"
 
 #include "godot_util.h"
+#include "texture_ledger.h"
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -444,10 +445,12 @@ void LevelUpload::run_task() {
 			const int32_t width = int32_t(t.width), height = int32_t(t.height);
 			const bool mipmaps = t.levels > 1;
 			const Image::Format format = image_format(t.format);
+			const std::string name = t.name;
 			item.texture.reset();
 			const Ref<Image> image = Image::create_from_data(width, height, mipmaps, format, bytes);
 			if (image.is_valid() && !image->is_empty()) {
 				done.rid = rs->texture_2d_create(image);
+				ledger_texture("level", name, uint64_t(bytes.size()));
 				++local.textures;
 			}
 		} else {

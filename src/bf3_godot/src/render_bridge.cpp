@@ -1,6 +1,7 @@
 #include "render_bridge.h"
 
 #include "godot_util.h"
+#include "texture_ledger.h"
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/mesh.hpp>
@@ -118,6 +119,7 @@ Ref<ImageTexture> make_texture(const bf3::render::PreparedTexture &p_texture) {
 		UtilityFunctions::push_warning(to_godot("[openbf3] texture " + p_texture.name + ": " + std::to_string(image->get_mipmap_count() + 1) + " levels, prepared " +
 				std::to_string(p_texture.levels)));
 	}
+	ledger_texture("node", p_texture.name, p_texture.data.size());
 	return ImageTexture::create_from_image(image);
 }
 

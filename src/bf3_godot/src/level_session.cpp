@@ -216,6 +216,9 @@ void Bf3LevelSession::parse_args() {
 	}
 	const std::string quit_after = user_arg_value("quit-after");
 	quit_after_ = quit_after.empty() ? 0.0 : std::atof(quit_after.c_str());
+	if (has_user_arg("memory-report")) {
+		memory_report_.emplace();
+	}
 	hud_enabled_ = !has_user_arg("no-hud");
 	if (user_arg_value("look") == "m1") {
 		look_mode_ = render::SceneLook::M1;
@@ -1016,6 +1019,9 @@ void Bf3LevelSession::_process(double p_delta) {
 		return;
 	}
 	++frames_;
+	if (memory_report_) {
+		memory_report_->watch(frames_);
+	}
 	const uint64_t now_ns = bf3::net::monotonic_ns();
 	if (load_failed_.load(std::memory_order_acquire) && !failed_) {
 		failed_ = true;
@@ -1080,6 +1086,9 @@ void Bf3LevelSession::_process(double p_delta) {
 		return;
 	}
 	since_done_ += p_delta;
+	if (memory_report_) {
+		memory_report_->sample(frames_);
+	}
 	if (!level_reported_ && frames_ > done_frame_ && (loader_done_.load(std::memory_order_acquire) || failed_)) {
 		level_reported_ = true;
 		host::release_free_heap_memory();
@@ -1175,6 +1184,9 @@ void Bf3LevelSession::finish(int p_code) {
 		if (!d.clean()) {
 			p_code = 1;
 		}
+	}
+	if (memory_report_) {
+		UtilityFunctions::print(to_godot(memory_report_->text()));
 	}
 	UtilityFunctions::print(to_godot("[level] peak working set " + std::to_string(int(mib(peak_working_set_bytes()) + 0.5)) + " MiB, exit " + std::to_string(p_code)));
 	shutdown();
