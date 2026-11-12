@@ -193,10 +193,11 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			const uint32_t glass = p_in.vehicles->stats().glass_surfaces;
 			row("first_person",
 					seat.has_value() && inside < 3.0f && (p_in.own_vm == nullptr || !p_in.own_vm->is_visible()) &&
-							glass > 0,
-					fmt("camera %.2f m from the body origin, viewmodel %s, %u glass surfaces drawn see-through",
+							glass > 0 && !mapper.weapons_allowed(),
+					fmt("camera %.2f m from the body origin, viewmodel %s, infantry weapon %s, %u glass surfaces "
+						"drawn see-through",
 							double(inside), p_in.own_vm != nullptr && p_in.own_vm->is_visible() ? "shown" : "hidden",
-							unsigned(glass)));
+							mapper.weapons_allowed() ? "live" : "off", unsigned(glass)));
 			shoot(p_in, "vehicle_1p");
 			const host::PresentedVehicle *v = presented(f, spawner_);
 			if (v == nullptr) {
