@@ -57,7 +57,7 @@ struct ShaderRow {
 
 int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::string> &p_args) {
 	if (p_args.size() < 2) {
-		std::fprintf(stderr, "usage: looks <LEVEL> <MODE> [--materials] [--failures]\n");
+		std::fprintf(stderr, "usage: looks <LEVEL> <MODE> [--materials] [--failures] [--program-code]\n");
 		return 2;
 	}
 	const std::string level_name = p_args[0], mode = p_args[1];
@@ -235,7 +235,7 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 	}
 	std::printf("\n");
 	if (list_materials) {
-		std::printf("# material\tshader\tvariation_shader\tblend\tsides\tcolour\tnormal\n");
+		std::printf("# material\tshader\tvariation_shader\tblend\tsides\tcolour\tnormal\tprogram\n");
 		for (size_t i = 0; i < l1->materials.size(); ++i) {
 			const render::SceneMaterialPlan &mat = l1->materials[i];
 			const auto tex = [](const std::optional<render::LookTexture> &p_t) {
@@ -246,9 +246,26 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 				std::snprintf(buf, sizeof(buf), " (%s %s x%g)", render::look_tier_name(p_t->tier), uv_name(p_t->channel), double(p_t->scale));
 				return p_t->name + buf;
 			};
-			std::printf("%zu\t%s\t%s\t%s\t%s\t%s\t%s\n", i, mat.slot.shader.c_str(), mat.slot.variation_shader.empty() ? "-" : mat.slot.variation_shader.c_str(),
-					mat.glass ? "glass" : mat.blend ? "blend" : mat.alpha_test ? "alpha-test" : "opaque", mat.double_sided ? "2" : "1",
-					mat.look ? tex(mat.look->color).c_str() : "-", mat.look ? tex(mat.look->normal).c_str() : "-");
+			std::string program = "-";
+			if (mat.program >= 0) {
+				program = "program " + std::to_string(mat.program);
+				for (const std::string &t : mat.look->graph_textures) {
+					program += " " + t;
+				}
+			} else if (mat.look && mat.look->graph_plain) {
+				program = "plain";
+			} else if (mat.look && !mat.look->graph_refusal.empty()) {
+				program = std::string(mat.look->graph_mask_colour ? "mask colour, " : "") +
+						"refused: " + mat.look->graph_refusal;
+			}
+			std::printf("%zu\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", i, mat.slot.shader.c_str(),
+					mat.slot.variation_shader.empty() ? "-" : mat.slot.variation_shader.c_str(),
+					mat.glass				 ? "glass"
+							: mat.blend		 ? "blend"
+							: mat.alpha_test ? "alpha-test"
+											 : "opaque",
+					mat.double_sided ? "2" : "1", mat.look ? tex(mat.look->color).c_str() : "-",
+					mat.look ? tex(mat.look->normal).c_str() : "-", program.c_str());
 		}
 	}
 	{
@@ -314,6 +331,17 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 			}
 			std::printf("  at %s %s:%s\n", label, v3(at).c_str(), weights.c_str());
 			frame_line(label, render::look_frame(env, at));
+		}
+	}
+	std::printf("programs: %zu translated, %zu refused shaders in %.3f s; %zu distinct programs drawn\n",
+			ls.programs_translated, ls.programs_refused, ls.seconds_programs, l1->programs.size());
+	for (const render::SceneUndrawnMaterial &u : l1->undrawn) {
+		std::printf("undrawn %s: %s\n", u.slot.shader.c_str(), u.refusal.empty() ? "named undrawn" : u.refusal.c_str());
+	}
+	if (std::find(p_args.begin(), p_args.end(), "--program-code") != p_args.end()) {
+		for (size_t i = 0; i < l1->programs.size(); ++i) {
+			std::printf("# program %zu (%zu instructions)\n%s", i, l1->programs[i]->translated.instructions,
+					l1->programs[i]->translated.code.c_str());
 		}
 	}
 	if (!shader_dumps.empty()) {

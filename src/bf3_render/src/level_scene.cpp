@@ -24,6 +24,7 @@
 #include <span>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace bf3::render {
 
@@ -365,6 +366,19 @@ std::string look_key(const LookMaterial &p_look) {
 		key += char('0' + int(l.role));
 		key += l.name;
 	}
+	if (p_look.graph) {
+		key += '\x06';
+		key += p_look.graph->translated.code;
+		for (const std::string &t : p_look.graph_textures) {
+			key += '\x07';
+			key += t;
+		}
+		for (const std::array<float, 4> &c : p_look.graph_constants) {
+			char bits[16];
+			std::memcpy(bits, c.data(), 16);
+			key.append(bits, 16);
+		}
+	}
 	return key;
 }
 
@@ -373,10 +387,14 @@ struct PlanBuilder {
 	std::unordered_map<std::string, uint32_t> material_by_key;
 	std::unordered_map<std::string, uint32_t> texture_by_name;
 	LookResolver *resolver = nullptr;
+	std::unordered_set<std::string> undrawn_keys;
 
 	uint32_t look_material(const MaterialSlot &p_slot, std::string_view p_mesh) {
 		LookMaterial look = resolver->resolve(p_slot, p_mesh);
 		if (!look.drawn) {
+			if (undrawn_keys.insert(material_key(p_slot)).second) {
+				plan.undrawn.push_back(SceneUndrawnMaterial{ p_slot, look.graph_refusal });
+			}
 			return kSceneUndrawnMaterial;
 		}
 		const std::string key = material_key(p_slot) + '\x04' + look_key(look);
@@ -415,6 +433,16 @@ struct PlanBuilder {
 			const bool colour =
 					l.role == LookLayerRole::Base || l.role == LookLayerRole::Lit || l.role == LookLayerRole::Dust;
 			m.layers.push_back(int32_t(texture(l.name, colour ? TextureRole::Color : TextureRole::Data)));
+		}
+		if (look.graph) {
+			const auto known = std::find(plan.programs.begin(), plan.programs.end(), look.graph);
+			m.program = int32_t(known - plan.programs.begin());
+			if (known == plan.programs.end()) {
+				plan.programs.push_back(look.graph);
+			}
+			for (const std::string &name : look.graph_textures) {
+				m.program_textures.push_back(int32_t(texture(name, TextureRole::Data)));
+			}
 		}
 		m.look = std::move(look);
 		const uint32_t at = uint32_t(plan.materials.size());

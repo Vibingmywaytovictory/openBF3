@@ -86,9 +86,16 @@ struct SceneMaterialPlan {
 	bool glass = false;
 	std::optional<LookMaterial> look;
 	std::vector<int32_t> layers;
+	int32_t program = -1;
+	std::vector<int32_t> program_textures;
 };
 
 inline constexpr uint32_t kSceneUndrawnMaterial = 0xFFFFFFFFu;
+
+struct SceneUndrawnMaterial {
+	MaterialSlot slot;
+	std::string refusal;
+};
 
 struct SceneMeshPlan {
 	uint32_t request = 0;
@@ -130,6 +137,8 @@ struct LevelScenePlan {
 	std::vector<std::vector<uint32_t>> driver_sets;
 	std::vector<SceneMaterialPlan> materials;
 	std::vector<SceneTexturePlan> textures;
+	std::vector<std::shared_ptr<const GraphProgram>> programs;
+	std::vector<SceneUndrawnMaterial> undrawn;
 	std::vector<SceneTerrainPlan> terrains;
 	SceneEnvironment environment;
 	std::vector<std::pair<std::string, std::string>> failures;

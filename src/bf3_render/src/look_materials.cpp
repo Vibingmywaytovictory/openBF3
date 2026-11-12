@@ -4,6 +4,7 @@
 #include "bf3/core/res/res_types.h"
 #include "bf3/core/superbundle_mount.h"
 #include "bf3/core/util/text.h"
+#include "bf3/render/dxbc.h"
 
 #include <algorithm>
 #include <array>
@@ -285,6 +286,26 @@ struct LookResolver::GraphInfo {
 	bool double_sided = false;
 };
 
+struct ProgramBinding {
+	std::string name;
+	std::string parameter;
+};
+
+struct LookResolver::ProgramInfo {
+	std::string refusal;
+	ProgramTarget target = ProgramTarget::Deferred;
+	const SurfaceShader *shader = nullptr;
+	const ShaderSolution *solution = nullptr;
+	dxbc::Program pixel;
+	dxbc::Program vertex;
+	std::map<uint32_t, ProgramBinding> bindings;
+	std::vector<ShaderValue> defaults;
+	std::vector<uint32_t> used;
+	std::map<uint64_t, std::shared_ptr<const GraphProgram>> variants;
+	ProgramAnalysis analysis;
+	std::vector<ProgramBinding> mask_bindings;
+};
+
 struct LookResolver::FolderIndex {
 
 	std::array<std::vector<std::pair<std::string, Candidate>>, kNeighbourClasses> classes;
@@ -475,7 +496,7 @@ const LookResolver::HeaderInfo *LookResolver::header(const std::string &p_name) 
 		core::Result<core::res::RawRes> raw = core::res::read_raw_res(*mount_, p_name);
 		core::res::DxTexture texture;
 		if (raw && raw->res_type == core::res::kResTypeDxTexture && core::res::DxTexture::parse(raw->bytes(), texture).ok()) {
-			info = HeaderInfo{ texture.kind, texture.format };
+			info = HeaderInfo{ texture.kind, texture.format, texture.is_srgb() };
 		} else {
 			++stats_.texture_headers_failed;
 		}
@@ -571,6 +592,212 @@ const LookResolver::FolderIndex &LookResolver::folder_index(const std::string &p
 	}
 	stats_.resolve_work += names.size();
 	return *folder_indices_.emplace(p_folder, std::move(index)).first->second;
+}
+
+LookResolver::ProgramInfo &LookResolver::program_info(const SurfaceShader &p_shader) {
+	const auto found = programs_.find(&p_shader);
+	if (found != programs_.end()) {
+		return *found->second;
+	}
+	const Clock::time_point start = Clock::now();
+	auto info = std::make_unique<ProgramInfo>();
+	info->target = is_transparent(p_shader.surface_type) ? ProgramTarget::Forward : ProgramTarget::Deferred;
+	info->shader = &p_shader;
+	const uint32_t target_register = info->target == ProgramTarget::Deferred ? 1u : 0u;
+	const auto finish = [&]() -> ProgramInfo & {
+		++(info->refusal.empty() ? stats_.programs_translated : stats_.programs_refused);
+		stats_.seconds_programs += std::chrono::duration<double>(Clock::now() - start).count();
+		return *programs_.emplace(&p_shader, std::move(info)).first->second;
+	};
+	constexpr std::string_view kTexturePrefix = "texture_";
+	std::string last = "no solution draws its target with a texture";
+	std::optional<TranslatedProgram> probe;
+	for (const ShaderSolution &s : p_shader.solutions) {
+		if (!s.pixel_program || !s.vertex_program) {
+			continue;
+		}
+		core::Result<dxbc::Program> pixel = dxbc::parse(*s.pixel_program);
+		if (!pixel) {
+			last = pixel.error().message;
+			continue;
+		}
+		const bool target =
+				std::any_of(pixel->outputs.begin(), pixel->outputs.end(), [&](const dxbc::SignatureElement &p_e) {
+					return p_e.name == "SV_Target" && p_e.reg == target_register;
+				});
+		const bool samples = std::any_of(pixel->code.begin(), pixel->code.end(),
+				[](const dxbc::Instruction &p_i) { return p_i.is(dxbc::Op::Sample); });
+		if (!target || !samples) {
+			continue;
+		}
+		core::Result<dxbc::Program> vertex = dxbc::parse(s.vertex_program->bytes);
+		if (!vertex) {
+			last = vertex.error().message;
+			continue;
+		}
+		info->solution = &s;
+		info->pixel = std::move(*pixel);
+		info->vertex = std::move(*vertex);
+		info->bindings.clear();
+		info->defaults.clear();
+		if (s.pixel_constants) {
+			for (const auto &[reg, name] : s.pixel_constants->textures) {
+				info->bindings[reg] = ProgramBinding{ to_lower_ascii(name), std::string() };
+			}
+			info->defaults = s.pixel_constants->values;
+		}
+		for (const dxbc::Binding &b : info->pixel.bindings) {
+			if (b.type != uint32_t(dxbc::BindingType::Texture) || info->bindings.count(b.bind_point) != 0 ||
+					b.name.rfind(kTexturePrefix, 0) != 0) {
+				continue;
+			}
+			const std::string parameter = b.name.substr(kTexturePrefix.size());
+			if (p_shader.parameter(parameter) != nullptr) {
+				info->bindings[b.bind_point] = ProgramBinding{ std::string(), parameter };
+			}
+		}
+		ProgramAnalysis analysis;
+		core::Result<TranslatedProgram> t = translate(*info, 0, &analysis);
+		if (analysis.sliced && (t || !info->analysis.sliced)) {
+			info->analysis = analysis;
+			info->mask_bindings.clear();
+			for (uint32_t reg : analysis.mask_only) {
+				const auto b = info->bindings.find(reg);
+				if (b != info->bindings.end()) {
+					info->mask_bindings.push_back(b->second);
+				}
+			}
+		}
+		if (t) {
+			probe = std::move(*t);
+			break;
+		}
+		last = t.error().message;
+	}
+	if (!probe) {
+		info->solution = nullptr;
+		info->refusal = last;
+		return finish();
+	}
+	info->used = probe->textures;
+	info->variants.emplace(0, std::make_shared<GraphProgram>(GraphProgram{ std::move(*probe) }));
+	return finish();
+}
+
+core::Result<TranslatedProgram> LookResolver::translate(
+		const ProgramInfo &p_info, uint64_t p_srgb, ProgramAnalysis *r_analysis) {
+	std::vector<uint32_t> registers;
+	for (const auto &[reg, binding] : p_info.bindings) {
+		registers.push_back(reg);
+	}
+	ProgramRequest request;
+	request.pixel = &p_info.pixel;
+	request.vertex = &p_info.vertex;
+	request.vertex_formats = p_info.solution->vertex_program->element_formats;
+	request.bound_textures = registers;
+	request.target = p_info.target;
+	const uint8_t blend = p_info.solution->blend_mode;
+	request.blend = blend == 2			 ? ProgramBlend::Multiply
+			: (blend == 1 || blend == 3) ? ProgramBlend::Add
+										 : ProgramBlend::Mix;
+	request.double_sided = (p_info.solution->flags & 1u) != 0;
+	request.texture_usage = [&](uint32_t p_reg) -> uint32_t {
+		const auto b = p_info.bindings.find(p_reg);
+		if (b == p_info.bindings.end()) {
+			return 0;
+		}
+		if (!b->second.parameter.empty()) {
+			const ShaderTextureParameter *parameter = p_info.shader->parameter(b->second.parameter);
+			return parameter != nullptr && parameter->coord_type != kCoordWorld ? parameter->vertex_usage : 0;
+		}
+		for (const ShaderTexture &t : p_info.shader->textures) {
+			if (core::iequals_ascii(t.name, b->second.name)) {
+				return t.coord_type != kCoordWorld ? t.vertex_usage : 0;
+			}
+		}
+		return 0;
+	};
+	const std::vector<uint32_t> &used = p_info.used;
+	request.srgb = [&](uint32_t p_reg) {
+		const auto at = std::find(used.begin(), used.end(), p_reg);
+		return at != used.end() && ((p_srgb >> size_t(at - used.begin())) & 1u) != 0;
+	};
+	request.analysis = r_analysis;
+	return translate_program(request);
+}
+
+void LookResolver::attach_program(
+		LookMaterial &r_out, const SurfaceShader &p_shader, const MaterialSlot &p_slot, bool p_hidden_mask) {
+	ProgramInfo &info = program_info(p_shader);
+	if (!info.refusal.empty()) {
+		r_out.graph_refusal = info.refusal;
+		for (const ProgramBinding &b : info.mask_bindings) {
+			const std::string name = b.parameter.empty() ? b.name : to_lower_ascii(p_slot.texture(b.parameter));
+			r_out.graph_mask_colour = r_out.graph_mask_colour || (r_out.color && r_out.color->name == name);
+		}
+		return;
+	}
+	if (info.target == ProgramTarget::Forward && !p_hidden_mask) {
+		return;
+	}
+	std::vector<std::string> textures;
+	uint64_t srgb = 0;
+	for (size_t i = 0; i < info.used.size(); ++i) {
+		const ProgramBinding &b = info.bindings.at(info.used[i]);
+		const std::string name = b.parameter.empty() ? b.name : to_lower_ascii(p_slot.texture(b.parameter));
+		const HeaderInfo *h = name.empty() ? nullptr : header(name);
+		if (h == nullptr || h->kind != core::res::TextureKind::Texture2D) {
+			r_out.graph_refusal =
+					"texture " + (b.parameter.empty() ? name : b.parameter + " " + name) + " is not a 2D texture";
+			return;
+		}
+		srgb |= h->srgb ? uint64_t(1) << i : 0;
+		textures.push_back(name);
+	}
+	if (info.target == ProgramTarget::Deferred && textures.size() == 1 && r_out.color &&
+			textures.front() == r_out.color->name) {
+		r_out.graph_plain = true;
+		return;
+	}
+	bool mask_colour = false;
+	for (const ProgramBinding &b : info.mask_bindings) {
+		const std::string name = b.parameter.empty() ? b.name : to_lower_ascii(p_slot.texture(b.parameter));
+		mask_colour = mask_colour || (r_out.color && r_out.color->name == name);
+	}
+	if (info.target == ProgramTarget::Deferred && !mask_colour) {
+		return;
+	}
+	auto variant = info.variants.find(srgb);
+	if (variant == info.variants.end()) {
+		core::Result<TranslatedProgram> t = translate(info, srgb);
+		if (!t) {
+			r_out.graph_refusal = t.error().message;
+			return;
+		}
+		variant = info.variants.emplace(srgb, std::make_shared<GraphProgram>(GraphProgram{ std::move(*t) })).first;
+	}
+	std::vector<std::array<float, 4>> constants;
+	for (const ProgramConstant &c : variant->second->translated.constants) {
+		std::array<float, 4> v{};
+		for (size_t lane = 0; lane < 4; ++lane) {
+			const ProgramConstantLane &l = c.lanes[lane];
+			if (l.value.empty()) {
+				continue;
+			}
+			const std::array<float, 4> *given = p_slot.vector(l.value);
+			const auto fallback = std::find_if(info.defaults.begin(), info.defaults.end(),
+					[&](const ShaderValue &p_v) { return core::iequals_ascii(p_v.name, l.value); });
+			if (given == nullptr && fallback == info.defaults.end()) {
+				r_out.graph_refusal = "constant " + l.value + " has no value";
+				return;
+			}
+			v[lane] = given != nullptr ? (*given)[l.component] : fallback->value[l.component];
+		}
+		constants.push_back(v);
+	}
+	r_out.graph = variant->second;
+	r_out.graph_textures = std::move(textures);
+	r_out.graph_constants = std::move(constants);
 }
 
 LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view p_mesh) {
@@ -750,8 +977,15 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 	}
 	if (out.blend == LookBlend::Blend && !color_alpha && color && mask_texture(color->name)) {
 		if (!has_word(shader_name, kGlassWords)) {
-			out.drawn = false;
-			return out;
+			if (shader != nullptr) {
+				attach_program(out, *shader, p_slot, true);
+			} else {
+				out.graph_refusal = "shader not in the database";
+			}
+			if (!out.graph) {
+				out.drawn = false;
+				return out;
+			}
 		}
 		color.reset();
 	}
@@ -762,6 +996,10 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 		out.blend = LookBlend::Blend;
 	}
 	out.color = std::move(color);
+	if (shader != nullptr && !out.graph && out.blend != LookBlend::Blend &&
+			!contains_any(shader_name, kCharacterBackdropWords)) {
+		attach_program(out, *shader, p_slot, false);
+	}
 	if (shader != nullptr) {
 		if (!shader->solutions.empty()) {
 			out.solution_blend = shader->solutions.front().blend_mode;

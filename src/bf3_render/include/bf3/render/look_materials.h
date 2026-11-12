@@ -4,6 +4,7 @@
 #include "bf3/core/result.h"
 #include "bf3/render/material_lookup.h"
 #include "bf3/render/shader_database.h"
+#include "bf3/render/shader_translate.h"
 
 #include <cstdint>
 #include <map>
@@ -73,6 +74,10 @@ struct LookLayer {
 	std::string name;
 };
 
+struct GraphProgram {
+	TranslatedProgram translated;
+};
+
 struct LookMaterial {
 	std::optional<LookTexture> color;
 	std::optional<LookTexture> normal;
@@ -87,6 +92,12 @@ struct LookMaterial {
 	std::vector<LookLayer> layers;
 	std::optional<uint8_t> solution_blend;
 	std::vector<ShaderValue> values;
+	std::shared_ptr<const GraphProgram> graph;
+	std::vector<std::string> graph_textures;
+	std::vector<std::array<float, 4>> graph_constants;
+	std::string graph_refusal;
+	bool graph_plain = false;
+	bool graph_mask_colour = false;
 };
 
 struct LookStats {
@@ -97,6 +108,9 @@ struct LookStats {
 	size_t texture_headers_failed = 0;
 	size_t graph_candidates_max = 0;
 	size_t graph_candidates_dropped = 0;
+	size_t programs_translated = 0;
+	size_t programs_refused = 0;
+	double seconds_programs = 0.0;
 	uint64_t resolve_work = 0;
 	double seconds_database = 0.0;
 	double seconds_resolve = 0.0;
@@ -110,6 +124,7 @@ public:
 	struct HeaderInfo {
 		core::res::TextureKind kind = core::res::TextureKind::Texture2D;
 		core::res::TextureFormat format = core::res::TextureFormat::Dxt1;
+		bool srgb = false;
 	};
 	LookResolver(ShaderLookup p_shaders, std::map<std::string, HeaderInfo> p_headers, std::vector<std::string> p_texture_names = {});
 	~LookResolver();
@@ -122,6 +137,7 @@ public:
 
 	struct GraphInfo;
 	struct FolderIndex;
+	struct ProgramInfo;
 
 private:
 	LookResolver();
@@ -129,6 +145,11 @@ private:
 	const std::vector<std::string> &folder(const std::string &p_folder);
 	const GraphInfo &graph_info(const SurfaceShader &p_shader);
 	const FolderIndex &folder_index(const std::string &p_folder);
+	ProgramInfo &program_info(const SurfaceShader &p_shader);
+	core::Result<TranslatedProgram> translate(
+			const ProgramInfo &p_info, uint64_t p_srgb, ProgramAnalysis *r_analysis = nullptr);
+	void attach_program(
+			LookMaterial &r_out, const SurfaceShader &p_shader, const MaterialSlot &p_slot, bool p_hidden_mask);
 
 	const core::LevelMount *mount_ = nullptr;
 	ShaderLookup shaders_;
@@ -138,6 +159,7 @@ private:
 	bool folders_built_ = false;
 	std::map<const SurfaceShader *, std::unique_ptr<GraphInfo>> graphs_;
 	std::map<std::string, std::unique_ptr<FolderIndex>> folder_indices_;
+	std::map<const SurfaceShader *, std::unique_ptr<ProgramInfo>> programs_;
 	std::vector<std::pair<std::string, std::string>> failures_;
 	LookStats stats_;
 };

@@ -151,9 +151,10 @@ private:
 	std::vector<godot::RID> meshes_;
 	std::vector<godot::RID> terrain_meshes_;
 	std::vector<std::vector<uint32_t>> instances_by_mesh_;
-	std::vector<std::vector<std::pair<uint32_t, bool>>> texture_users_;
+	std::vector<std::vector<std::pair<uint32_t, std::string>>> texture_users_;
 	std::vector<std::vector<std::pair<godot::RID, std::string>>> terrain_texture_users_;
 	std::vector<godot::RID> terrain_look_rids_;
+	size_t program_shaders_ = 0;
 	std::deque<std::pair<uint32_t, size_t>> pending_instances_;
 	std::deque<uint32_t> pending_terrains_;
 	std::vector<godot::RID> instances_;

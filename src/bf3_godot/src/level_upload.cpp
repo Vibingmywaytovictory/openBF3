@@ -206,6 +206,7 @@ Dictionary encode_rs_surface(const render::PreparedSurface &p_surface, const RID
 	const bool tangents = normals && p_surface.tangents.size() == size_t(vc) * 4;
 	const bool uv0 = p_surface.uv0.size() == size_t(vc) * 2 && vc > 0;
 	const bool uv1 = uv0 && p_surface.uv1.size() == size_t(vc) * 2;
+	const bool colors = p_surface.colors.size() == size_t(vc) * 4 && vc > 0;
 	uint64_t format = RenderingServer::ARRAY_FORMAT_VERTEX | RenderingServer::ARRAY_FORMAT_INDEX | RenderingServer::ARRAY_FLAG_FORMAT_CURRENT_VERSION;
 	if (normals) {
 		format |= RenderingServer::ARRAY_FORMAT_NORMAL | RenderingServer::ARRAY_FORMAT_TANGENT;
@@ -216,6 +217,9 @@ Dictionary encode_rs_surface(const render::PreparedSurface &p_surface, const RID
 	if (uv1) {
 		format |= RenderingServer::ARRAY_FORMAT_TEX_UV2;
 	}
+	if (colors) {
+		format |= RenderingServer::ARRAY_FORMAT_COLOR;
+	}
 	const BitField<RenderingServer::ArrayFormat> f = int64_t(format);
 	const int64_t vstride = rs->mesh_surface_get_format_vertex_stride(f, vc32);
 	const int64_t nstride = rs->mesh_surface_get_format_normal_tangent_stride(f, vc32);
@@ -225,6 +229,7 @@ Dictionary encode_rs_surface(const render::PreparedSurface &p_surface, const RID
 	const int64_t off_tangent = normals ? rs->mesh_surface_get_format_offset(f, vc32, RenderingServer::ARRAY_TANGENT) : 0;
 	const int64_t off_uv0 = uv0 ? rs->mesh_surface_get_format_offset(f, vc32, RenderingServer::ARRAY_TEX_UV) : 0;
 	const int64_t off_uv1 = uv1 ? rs->mesh_surface_get_format_offset(f, vc32, RenderingServer::ARRAY_TEX_UV2) : 0;
+	const int64_t off_color = colors ? rs->mesh_surface_get_format_offset(f, vc32, RenderingServer::ARRAY_COLOR) : 0;
 
 	PackedByteArray vertex;
 	vertex.resize(vc * (vstride + (normals ? nstride : 0)));
@@ -272,6 +277,9 @@ Dictionary encode_rs_surface(const render::PreparedSurface &p_surface, const RID
 			}
 			if (uv1) {
 				std::memcpy(aw + off_uv1 + i * astride, &p_surface.uv1[size_t(i) * 2], 8);
+			}
+			if (colors) {
+				std::memcpy(aw + off_color + i * astride, &p_surface.colors[size_t(i) * 4], 4);
 			}
 		}
 	}
@@ -339,10 +347,19 @@ void LevelUpload::begin(std::shared_ptr<const render::LevelScenePlan> p_plan, co
 	for (size_t m = 0; m < plan.materials.size(); ++m) {
 		const render::SceneMaterialPlan &mp = plan.materials[m];
 		if (mp.albedo >= 0 && size_t(mp.albedo) < plan.textures.size()) {
-			texture_users_[size_t(mp.albedo)].push_back({ uint32_t(m), false });
+			texture_users_[size_t(mp.albedo)].push_back({ uint32_t(m), "albedo_tex" });
 		}
 		if (mp.normal >= 0 && size_t(mp.normal) < plan.textures.size()) {
-			texture_users_[size_t(mp.normal)].push_back({ uint32_t(m), true });
+			texture_users_[size_t(mp.normal)].push_back({ uint32_t(m), "normal_tex" });
+		}
+		if (mp.program >= 0) {
+			const std::vector<uint32_t> &registers = plan.programs[size_t(mp.program)]->translated.textures;
+			for (size_t t = 0; t < mp.program_textures.size() && t < registers.size(); ++t) {
+				if (mp.program_textures[t] >= 0 && size_t(mp.program_textures[t]) < plan.textures.size()) {
+					texture_users_[size_t(mp.program_textures[t])].push_back(
+							{ uint32_t(m), "t" + std::to_string(registers[t]) });
+				}
+			}
 		}
 	}
 	RenderingServer *rs = RenderingServer::get_singleton();
@@ -350,6 +367,12 @@ void LevelUpload::begin(std::shared_ptr<const render::LevelScenePlan> p_plan, co
 		for (int v = 0; v < 6; ++v) {
 			const RID shader = rs->shader_create();
 			rs->shader_set_code(shader, to_godot(shader_code_l1(v / 2, (v & 1) != 0)));
+			shaders_.push_back(shader);
+		}
+		program_shaders_ = shaders_.size();
+		for (const std::shared_ptr<const render::GraphProgram> &program : plan.programs) {
+			const RID shader = rs->shader_create();
+			rs->shader_set_code(shader, to_godot(program->translated.code));
 			shaders_.push_back(shader);
 		}
 	} else {
@@ -544,7 +567,17 @@ void LevelUpload::create_materials(double p_deadline_us) {
 
 				static const bool blend_off = ("," + user_arg_value("look-off") + ",").find(",blend,") != std::string::npos;
 				const int mode = mp.blend && !blend_off ? 2 : (mp.alpha_test ? 1 : 0);
-				rs->material_set_shader(m, shaders_[size_t(2 * mode + (mp.double_sided ? 1 : 0))]);
+				rs->material_set_shader(m,
+						mp.program >= 0 ? shaders_[program_shaders_ + size_t(mp.program)]
+										: shaders_[size_t(2 * mode + (mp.double_sided ? 1 : 0))]);
+				if (mp.program >= 0 && mp.look) {
+					const std::vector<render::ProgramConstant> &constants =
+							plan.programs[size_t(mp.program)]->translated.constants;
+					for (size_t c = 0; c < constants.size() && c < mp.look->graph_constants.size(); ++c) {
+						const std::array<float, 4> &v = mp.look->graph_constants[c];
+						rs->material_set_param(m, to_godot(constants[c].uniform), Vector4(v[0], v[1], v[2], v[3]));
+					}
+				}
 				rs->material_set_param(m, "albedo_uv", int64_t(mp.albedo_uv == render::kLookUvOverlay ? render::kLookUv0 : mp.albedo_uv));
 				rs->material_set_param(m, "albedo_scale", mp.albedo_scale);
 				rs->material_set_param(m, "normal_uv", int64_t(mp.normal_uv == render::kLookUvOverlay ? render::kLookUv0 : mp.normal_uv));
@@ -618,9 +651,12 @@ void LevelUpload::apply_done(double p_deadline_us) {
 				rs->material_set_param(material, StringName(param.c_str()), d.rid);
 			}
 			terrain_texture_users_[d.index].clear();
-			for (const auto &[material, normal] : texture_users_[d.index]) {
-				rs->material_set_param(materials_[material], normal ? "normal_tex" : "albedo_tex", d.rid);
-				rs->material_set_param(materials_[material], normal ? "has_normal" : "has_albedo", true);
+			for (const auto &[material, uniform] : texture_users_[d.index]) {
+				rs->material_set_param(materials_[material], to_godot(uniform), d.rid);
+				if (uniform == "albedo_tex" || uniform == "normal_tex") {
+					rs->material_set_param(
+							materials_[material], uniform == "normal_tex" ? "has_normal" : "has_albedo", true);
+				}
 				std::lock_guard lock(stats_mutex_);
 				++stats_.texture_bindings;
 			}

@@ -469,7 +469,7 @@ void usage() {
 	std::fprintf(stderr, "  spawns <LEVEL> <MODE>\n");
 	std::fprintf(stderr, "  eorcamera <LEVEL> <MODE>\n");
 	std::fprintf(stderr, "%s", bf3dump::logic_usage());
-	std::fprintf(stderr, "  looks <LEVEL> <MODE> [--materials] [--shader NAME]...\n");
+	std::fprintf(stderr, "  looks <LEVEL> <MODE> [--materials] [--program-code] [--shader NAME]...\n");
 	std::fprintf(stderr, "%s", bf3dump::vehicle_usage());
 	std::fprintf(stderr, "%s", bf3dump::swf_usage());
 	std::fprintf(stderr, "%s", bf3dump::weapon_sim_usage());
