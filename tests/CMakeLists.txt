@@ -1472,7 +1472,7 @@ openbf3_cost(net.procs.kick 1 4)
 openbf3_cost(net.procs.follow 1 345)
 openbf3_cost(net.procs.listen_maplist 1 86)
 openbf3_cost(godot.rotation 1 339)
-openbf3_cost(net.procs.rotation 1 491)
+openbf3_cost(net.procs.rotation 1 542)
 openbf3_cost(net.procs.master 1 9)
 
 add_test(NAME host.server.netthread COMMAND test_host_session --test-suite=host-server-netthread)
