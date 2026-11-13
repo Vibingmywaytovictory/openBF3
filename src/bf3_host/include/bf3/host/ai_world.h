@@ -5,6 +5,7 @@
 #include "bf3/ai/knowledge/information_factory.h"
 #include "bf3/ai/knowledge/information_grid.h"
 #include "bf3/ai/main/ai_main.h"
+#include "bf3/ai/main/ai_script.h"
 #include "bf3/ai/main/communication_hub.h"
 #include "bf3/core/result.h"
 #include "bf3/host/bot_fill.h"
@@ -36,6 +37,7 @@ struct AiWorldConfig {
 	uint64_t seed = 1;
 	std::shared_ptr<const sim::StaticWorldShapes> static_world;
 	const sim::CollisionWorld *world = nullptr;
+	std::vector<ai::StrategicAreaDef> areas;
 };
 
 float area_heat(std::span<const float> p_heat, int p_cells, const sim::Vec3 &p_origin, float p_cell_m,

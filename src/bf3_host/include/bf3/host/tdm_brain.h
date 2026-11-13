@@ -2,6 +2,7 @@
 
 #include "bf3/ai/behaviour/behaviours.h"
 #include "bf3/ai/bot/infantry.h"
+#include "bf3/ai/main/ai_script.h"
 #include "bf3/ai/main/ai_settings.h"
 #include "bf3/ai/squad/bot_squad.h"
 #include "bf3/ai/strategic/strategy.h"
@@ -146,6 +147,7 @@ struct TdmBotConfig {
 	ai::BehaviourTuning behaviours;
 	ai::StrategyTuning strategy;
 	ai::AiSettings ai;
+	std::vector<ai::StrategicAreaDef> strategic_areas;
 	bool squads = true;
 
 	std::string tuning_cfg;
@@ -158,7 +160,8 @@ inline constexpr size_t kMaxBotTuningLines = 1024;
 core::Status parse_bot_tuning(std::string_view p_text, TdmBotConfig &r_config);
 core::Status load_bot_tuning(const std::string &p_path, TdmBotConfig &r_config);
 std::filesystem::path bot_ai_root(const std::string &p_tuning_cfg);
-core::Status load_bot_ai(const std::filesystem::path &p_root, std::string_view p_level, TdmBotConfig &r_config);
+core::Status load_bot_ai(const std::filesystem::path &p_root, std::string_view p_level, std::string_view p_areas,
+		TdmBotConfig &r_config);
 
 struct TdmShared;
 

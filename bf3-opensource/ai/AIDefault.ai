@@ -10,3 +10,4 @@ aiSettings.setRespawnAllowed 1
 aiSettings.autoSpawnBots 0
 aiSettings.overrideMenuSettings 0
 aiSettings.setVehicle Infantry
+aiSettings.setNSides 2

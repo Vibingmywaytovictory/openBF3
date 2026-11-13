@@ -236,8 +236,9 @@ std::filesystem::path bot_ai_root(const std::string &p_tuning_cfg) {
 	return std::filesystem::path(p_tuning_cfg).parent_path().parent_path() / "ai";
 }
 
-core::Status load_bot_ai(const std::filesystem::path &p_root, std::string_view p_level, TdmBotConfig &r_config) {
-	core::Result<ai::AiConfig> loaded = ai::load_level_ai_config(p_root, p_level);
+core::Status load_bot_ai(const std::filesystem::path &p_root, std::string_view p_level, std::string_view p_areas,
+		TdmBotConfig &r_config) {
+	core::Result<ai::AiConfig> loaded = ai::load_level_ai_config(p_root, p_level, p_areas);
 	if (!loaded) {
 		return loaded.error();
 	}
@@ -245,6 +246,7 @@ core::Status load_bot_ai(const std::filesystem::path &p_root, std::string_view p
 	BF3_TRY(ai::apply_behaviour_weights(*loaded, behaviours));
 	r_config.behaviours = behaviours;
 	r_config.ai = loaded->settings;
+	r_config.strategic_areas = loaded->strategic_areas;
 	return core::Status::success();
 }
 
@@ -256,11 +258,20 @@ core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config
 		return core::make_error("tdm bots: no level");
 	}
 	std::shared_ptr<const TdmBotConfig> config = p_config.tdm_bots;
+	const std::string_view areas = p_config.bots != nullptr && p_config.bots->level != nullptr
+			? std::string_view(p_config.bots->level->ai_areas)
+			: std::string_view();
 	if (!config->tuning_cfg.empty()) {
 		auto tuned = std::make_shared<TdmBotConfig>(*config);
 		BF3_TRY(load_bot_tuning(config->tuning_cfg, *tuned));
-		BF3_TRY(load_bot_ai(bot_ai_root(config->tuning_cfg), p_config.level->level, *tuned));
+		BF3_TRY(load_bot_ai(bot_ai_root(config->tuning_cfg), p_config.level->level, areas, *tuned));
 		tuned->count = config->count;
+		config = tuned;
+	} else if (config->strategic_areas.empty() && !areas.empty()) {
+		ai::AiConfig derived;
+		BF3_TRY(ai::run_ai_script(areas, "derived:" + p_config.level->level, derived));
+		auto tuned = std::make_shared<TdmBotConfig>(*config);
+		tuned->strategic_areas = std::move(derived.strategic_areas);
 		config = tuned;
 	}
 	TdmBrainHost host;

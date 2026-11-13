@@ -19,6 +19,8 @@ using namespace bf3::ai;
 namespace {
 
 const std::filesystem::path kShipped = OPENBF3_AI_DIR;
+constexpr std::string_view kTwoAreas = "aiStrategicArea.createFromControlPoint A 0 30\n"
+									   "aiStrategicArea.createFromControlPoint B 1 30\n";
 
 struct ScratchRoot {
 	std::filesystem::path dir = std::filesystem::temp_directory_path() /
@@ -33,10 +35,10 @@ struct ScratchRoot {
 		std::error_code ec;
 		std::filesystem::remove_all(dir, ec);
 	}
-	void level(std::string_view p_level, std::string_view p_text) const {
-		const std::filesystem::path path = level_ai_script(dir, p_level);
-		std::filesystem::create_directories(path.parent_path());
-		std::ofstream(path, std::ios::binary) << p_text;
+	void level(std::string_view p_level, std::string_view p_text) const { file(level_ai_script(dir, p_level), p_text); }
+	void file(const std::filesystem::path &p_path, std::string_view p_text) const {
+		std::filesystem::create_directories(p_path.parent_path());
+		std::ofstream(p_path, std::ios::binary) << p_text;
 	}
 };
 
@@ -47,21 +49,25 @@ std::string message(const core::Status &p_status) {
 }
 
 TEST_SUITE("ai-script") {
-	TEST_CASE("the shipped .ai files: every shipped level loads its own AI.ai, and they give the shipped "
-			  "settings and the Default set's behaviour weights on the Memory curve") {
+	TEST_CASE("the shipped .ai files: no level has its own file, every shipped level loads the common scripts and "
+			  "its derived strategic areas, and they give the shipped settings and the Default set's behaviour "
+			  "weights on the Memory curve") {
 		const std::vector<std::string_view> levels = core::level::shipped_level_ids();
 		REQUIRE(levels.size() == 29u);
+		CHECK_FALSE(std::filesystem::exists(kShipped / "Levels"));
 		for (const std::string_view level : levels) {
-			const core::Result<AiConfig> config = load_level_ai_config(kShipped, level);
+			const core::Result<AiConfig> config = load_level_ai_config(kShipped, level, kTwoAreas);
 			REQUIRE_MESSAGE(config.ok(), (config.ok() ? std::string() : config.error().message));
 			REQUIRE(config->scripts.size() == 3u);
-			CHECK(config->scripts.back() == level_ai_script(kShipped, level).generic_string());
+			CHECK(config->scripts.back() ==
+					"derived:" + level_strategic_areas_script(kShipped, level).generic_string());
 			AiSettings expected;
 			expected.vehicles = { "Infantry" };
 			expected.sides = 2;
 			expected.behaviour_count = int32_t(kInfantryBehaviourCount);
 			expected.basic_bot_weights = config->behaviour_modifiers.at("Default");
 			CHECK(config->settings == expected);
+			CHECK(config->strategic_areas.size() == 2u);
 			BehaviourTuning tuning;
 			tuning.squad_far_m = 99.0f;
 			const core::Status st = apply_behaviour_weights(*config, tuning);
@@ -78,7 +84,8 @@ TEST_SUITE("ai-script") {
 		}
 	}
 
-	TEST_CASE("a level loads its own map file: its weights and skill reach the config, a level without one fails") {
+	TEST_CASE("a level's own files override: its StrategicAreas.ai replaces the derived areas, its AI.ai runs last "
+			  "and its weights and skill reach the config; a config that never sets the basic bot weights is refused") {
 		const ScratchRoot root;
 		std::string own_script = "aiSettings.setBotSkill 0.2\n"
 								 "aiSettings.createUCLinear Rising 0.5 0.25\n"
@@ -96,13 +103,21 @@ TEST_SUITE("ai-script") {
 				own_script +
 						"aiSettings.setBasicBotWeights Own\n"
 						"aiSettings.setVehicleBehaviour Infantry Idle BBIdle BBPIdle 0 Rising Own\n");
-		root.level("XP9_Other", "aiSettings.setBasicBotWeights Default\n");
-		const core::Result<AiConfig> own = load_level_ai_config(root.dir, "XP9_Own");
+		root.file(level_strategic_areas_script(root.dir, "XP9_Own"),
+				"aiStrategicArea.createFromControlPoint Own 0 12\naiStrategicArea.setActive Own\n"
+				"aiStrategicArea.setSide 2\n");
+		const core::Result<AiConfig> own = load_level_ai_config(root.dir, "XP9_Own", kTwoAreas);
 		REQUIRE_MESSAGE(own.ok(), (own.ok() ? std::string() : own.error().message));
-		const core::Result<AiConfig> other = load_level_ai_config(root.dir, "XP9_Other");
+		CHECK(own->scripts.size() == 4u);
+		const core::Result<AiConfig> other = load_level_ai_config(root.dir, "XP9_Other", kTwoAreas);
 		REQUIRE(other.ok());
 		CHECK(own->settings.bot_skill == doctest::Approx(0.2f));
 		CHECK(other->settings.bot_skill == doctest::Approx(0.75f));
+		REQUIRE(own->strategic_areas.size() == 1u);
+		CHECK(own->strategic_areas[0].name == "Own");
+		CHECK(own->strategic_areas[0].side == 2);
+		REQUIRE(other->strategic_areas.size() == 2u);
+		CHECK(other->strategic_areas[1].name == "B");
 		BehaviourTuning a, b;
 		REQUIRE(apply_behaviour_weights(*own, a).ok());
 		REQUIRE(apply_behaviour_weights(*other, b).ok());
@@ -111,22 +126,108 @@ TEST_SUITE("ai-script") {
 		CHECK(a.curves[size_t(InfantryBehaviour::Idle)].slope == 0.5f);
 		CHECK(a.curves[size_t(InfantryBehaviour::Idle)].offset == 0.25f);
 		CHECK(a.curves[size_t(InfantryBehaviour::FireInfantery)].weight == 0.0f);
-		const core::Result<AiConfig> shipped = load_level_ai_config(kShipped, "MP_Subway");
+		const core::Result<AiConfig> shipped = load_level_ai_config(kShipped, "MP_Subway", kTwoAreas);
 		REQUIRE(shipped.ok());
 		BehaviourTuning shipped_tuning;
 		REQUIRE(apply_behaviour_weights(*shipped, shipped_tuning).ok());
 		CHECK(b == shipped_tuning);
 
-		const core::Result<AiConfig> none = load_level_ai_config(root.dir, "XP9_None");
-		REQUIRE_FALSE(none.ok());
-		CHECK(none.error().message.find("Levels/XP9_None/AI/AI.ai") != std::string::npos);
-		root.level("XP9_NoWeights", "aiSettings.setBotSkill 0.5\n");
-		const core::Result<AiConfig> unweighted = load_level_ai_config(root.dir, "XP9_NoWeights");
-		REQUIRE(unweighted.ok());
+		AiConfig unweighted;
+		REQUIRE(run_ai_script_file(kShipped / kAiDefaultScript, unweighted).ok());
+		REQUIRE(unweighted.settings.vehicle("Infantry") >= 0);
 		BehaviourTuning c;
-		const core::Status st = apply_behaviour_weights(*unweighted, c);
+		const core::Status st = apply_behaviour_weights(unweighted, c);
 		CHECK_FALSE(st.ok());
 		CHECK(message(st).find("aiSettings.setBasicBotWeights") != std::string::npos);
+
+		const core::Result<AiConfig> broken =
+				load_level_ai_config(root.dir, "XP9_Other", "aiStrategicArea.setSide 1\n");
+		REQUIRE_FALSE(broken.ok());
+		CHECK(broken.error().message.find("derived:") != std::string::npos);
+		CHECK(broken.error().message.find("aiStrategicArea.setActive") != std::string::npos);
+	}
+
+	TEST_CASE("aiStrategicArea: OpenBF2's StrategicAreas.ai commands, strict arguments, a create makes its area the "
+			  "active one, and saveAll's text (by name, after its rem header) reads back to the same areas") {
+		std::vector<StrategicAreaDef> areas(3);
+		areas[0].name = "HQ_US";
+		areas[0].from_control_point = true;
+		areas[0].control_point = 0;
+		areas[0].radius = 35.5f;
+		areas[0].side = 1;
+		areas[0].takeable = { false, false };
+		areas[0].neighbours = { "CP_B" };
+		areas[1].name = "CP_B";
+		areas[1].category = "Flags";
+		areas[1].from_control_point = true;
+		areas[1].control_point = 1;
+		areas[1].radius = 0.1f;
+		areas[2].name = "TDM_2";
+		areas[2].category = "Clusters";
+		areas[2].corner = { -12.345678f, 1.0e-3f };
+		areas[2].centre = { 27.654322f, 40.001f };
+		areas[2].height = -3.25f;
+		areas[2].radius = 40.0f;
+		areas[2].layer = 3;
+		areas[2].takeable = { true, false };
+		const std::string text = format_strategic_areas(areas);
+		CHECK(text.starts_with("rem *** Create strategic areas ***\naiStrategicArea.createFromControlPoint CP_B 1 "
+							   "0.1 Flags\naiStrategicArea.layer -1\n\n"));
+		AiConfig read;
+		REQUIRE_MESSAGE(run_ai_script(text, "areas.ai", read).ok(), text);
+		const std::vector<StrategicAreaDef> by_name = strategic_areas_by_name(areas);
+		REQUIRE(by_name.size() == 3u);
+		CHECK(by_name[0].name == "CP_B");
+		CHECK(by_name[1].name == "HQ_US");
+		CHECK(read.strategic_areas == by_name);
+		CHECK(read.strategic_area("CP_B") == &read.strategic_areas[0]);
+		CHECK(read.strategic_area("cp_b") == nullptr);
+		CHECK(read.strategic_area("none") == nullptr);
+		CHECK(format_strategic_areas(read.strategic_areas) == text);
+
+		AiConfig created;
+		const core::Status made = run_ai_script("rem a comment line\naiStrategicArea.createFromControlPoint A 0 30\n"
+												"aiStrategicArea.setSide 2\naiStrategicArea.create B 1/2 3/4 5 6\n"
+												"aiStrategicArea.layer 2\naiStrategicArea.setActive A\n"
+												"aiStrategicArea.layer 2\naiStrategicArea.addNeighbour B\n",
+				"created.ai", created);
+		REQUIRE_MESSAGE(made.ok(), message(made));
+		REQUIRE(created.strategic_areas.size() == 2u);
+		CHECK(created.strategic_areas[0].side == 2);
+		CHECK(created.strategic_areas[0].layer == 2);
+		CHECK(created.strategic_areas[0].neighbours == std::vector<std::string>{ "B" });
+		CHECK(created.strategic_areas[1].side == 0);
+		CHECK(created.strategic_areas[1].layer == 2);
+		CHECK(created.strategic_areas[1].neighbours.empty());
+		CHECK(StrategicAreaDef{}.layer == -1);
+		AiConfig unlayered;
+		REQUIRE(run_ai_script(
+				"aiStrategicArea.create C 1/2 3/4 5 6\naiStrategicArea.layer -1\n", "unlayered.ai", unlayered)
+						.ok());
+		CHECK(unlayered.strategic_areas[0].layer == -1);
+
+		const AiConfig before = read;
+		for (const char *bad : { "aiStrategicArea.create X 1/2 3/4 5\n", "aiStrategicArea.create X 1 3/4 5 6\n",
+					 "aiStrategicArea.create X 1/2 3/z 5 6\n", "aiStrategicArea.create X 1/2 3/4 5 6 Cat More\n",
+					 "aiStrategicArea.createFromControlPoint HQ_US 4 5\n",
+					 "aiStrategicArea.createFromControlPoint HQ_US 4 5\naiStrategicArea.setSide 2\n",
+					 "aiStrategicArea.createFromControlPoint Y 1 5 Cat More\n",
+					 "aiStrategicArea.createFromControlPoint Y -1 5\n", "aiStrategicArea.setActive Nowhere\n",
+					 "aiStrategicArea.setActive cp_b\n",
+					 "aiStrategicArea.setActive CP_B\naiStrategicArea.addNeighbour CP_B\n",
+					 "aiStrategicArea.setActive CP_B\naiStrategicArea.addNeighbour Nowhere\n",
+					 "aiStrategicArea.setActive HQ_US\naiStrategicArea.addNeighbour TDM_2\n",
+					 "aiStrategicArea.setActive CP_B\naiStrategicArea.layer 1\naiStrategicArea.addNeighbour HQ_US\n",
+					 "aiStrategicArea.setActive CP_B\naiStrategicArea.setSide 3\n",
+					 "aiStrategicArea.setActive CP_B\naiStrategicArea.setTakeable 0 1\n" }) {
+			AiConfig t = read;
+			const core::Status st = run_ai_script(bad, "bad.ai", t);
+			CHECK_MESSAGE(!st.ok(), bad);
+			CHECK(t == before);
+		}
+		AiConfig fresh;
+		CHECK_FALSE(run_ai_script("aiStrategicArea.setSide 1\n", "bad.ai", fresh).ok());
+		CHECK_FALSE(run_ai_script("aiStrategicArea.layer 1\n", "bad.ai", fresh).ok());
 	}
 
 	TEST_CASE("the reader: BF2's command names, strict arguments, a failed script changes nothing") {
@@ -154,7 +255,7 @@ TEST_SUITE("ai-script") {
 					 "aiSettings.setVehicleBehaviour Infantry A BBA BBPA 0 Memory M\n",
 					 "aiSettings.setVehicle Infantry\naiSettings.setVehicleBehaviour Infantry A BBA BBPA 0 Memory M\n",
 					 "weaponTemplate.deviation 3\n", "weaponTemplate.active Gun\n",
-					 "aiSettings.setBotSkill 0.1\nrem a comment\n" }) {
+					 "aiSettings.setBotSkill 0.1\nremark a comment\n" }) {
 			AiConfig t = c;
 			const core::Status st = run_ai_script(bad, "bad.ai", t);
 			CHECK_MESSAGE(!st.ok(), bad);
@@ -222,16 +323,14 @@ TEST_SUITE("ai-script") {
 		REQUIRE(end != std::string::npos);
 		const std::string without = shipped.substr(0, at) + shipped.substr(end + 1);
 		const ScratchRoot root;
-		root.level("XP9_Missing", "aiSettings.setBasicBotWeights Default\n");
 		std::ofstream(root.dir / kAiBehavioursScript, std::ios::binary) << without;
-		const core::Result<AiConfig> missing = load_level_ai_config(root.dir, "XP9_Missing");
+		const core::Result<AiConfig> missing = load_level_ai_config(root.dir, "XP9_Missing", kTwoAreas);
 		REQUIRE_FALSE(missing.ok());
 		CHECK(missing.error().message.find("Resupply") != std::string::npos);
 		CHECK(missing.error().message.find("aiSettings.setBehaviourModifier") != std::string::npos);
-		std::ofstream(root.dir / kAiBehavioursScript, std::ios::binary)
-				<< without << "aiSettings.activeBehaviourModifiers Default\n"
-				<< "aiSettings.setBehaviourModifier Resupply 0\n";
-		const core::Result<AiConfig> zero = load_level_ai_config(root.dir, "XP9_Missing");
+		std::ofstream(root.dir / kAiBehavioursScript, std::ios::binary) << shipped.substr(0, at) << line << "0\n"
+																		<< shipped.substr(end + 1);
+		const core::Result<AiConfig> zero = load_level_ai_config(root.dir, "XP9_Missing", kTwoAreas);
 		REQUIRE_MESSAGE(zero.ok(), (zero.ok() ? std::string() : zero.error().message));
 		CHECK(zero->settings.basic_bot_weights.at(size_t(InfantryBehaviour::Resupply)) == 0.0f);
 	}

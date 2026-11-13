@@ -462,25 +462,30 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(host::parse_bot_tuning(std::string(host::kMaxBotTuningLines - 1, '\n'), big).ok());
 		CHECK_FALSE(host::load_bot_tuning("no/such/bot_tuning.cfg", big).ok());
 	}
-	TEST_CASE("the bots' AI scripts: beside the config directory, the level's own AI.ai gives the settings and "
-			  "weights, a level without one stops the bots") {
+	TEST_CASE("the bots' AI scripts: beside the config directory, the common scripts give the settings and weights "
+			  "and the level's derived areas its strategic areas; a broken derived script stops the bots") {
 		const std::filesystem::path root = host::bot_ai_root(OPENBF3_BOT_TUNING_CFG);
 		CHECK(std::filesystem::exists(root / "AIDefault.ai"));
 		host::TdmBotConfig c;
 		c.behaviours.curves[0].weight = 99.0f;
-		const core::Status st = host::load_bot_ai(root, "MP_Subway", c);
+		const core::Status st = host::load_bot_ai(root, "MP_Subway",
+				"aiStrategicArea.createFromControlPoint A 0 30\naiStrategicArea.setActive A\naiStrategicArea.setSide "
+				"1\n",
+				c);
 		REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
 		CHECK(c.behaviours == bf3::test::shipped_behaviour_tuning());
 		CHECK(c.behaviours.curves[0].weight == c.ai.basic_bot_weights[0]);
 		CHECK(c.ai.bot_skill == 0.75f);
 		CHECK(c.ai.sides == 2u);
 		CHECK(c.ai.vehicle("Infantry") == 0);
-		host::TdmBotConfig missing;
-		missing.ai.bot_skill = 0.5f;
-		const core::Status none = host::load_bot_ai(root, "XP9_None", missing);
+		REQUIRE(c.strategic_areas.size() == 1u);
+		CHECK(c.strategic_areas[0].side == 1);
+		host::TdmBotConfig broken;
+		broken.ai.bot_skill = 0.5f;
+		const core::Status none = host::load_bot_ai(root, "MP_Subway", "aiStrategicArea.setSide 1\n", broken);
 		REQUIRE_FALSE(none.ok());
-		CHECK(none.error().message.find("Levels/XP9_None/AI/AI.ai") != std::string::npos);
-		CHECK(missing.ai.bot_skill == 0.5f);
+		CHECK(none.error().message.find("StrategicAreas.ai") != std::string::npos);
+		CHECK(broken.ai.bot_skill == 0.5f);
 	}
 
 	TEST_CASE("botSkill reaches the bot body: a fresh fire plan's first shot waits BBPFireInfantery's delay, a switch "
@@ -1356,6 +1361,51 @@ TEST_SUITE("host-tdm-bots") {
 			CHECK(rounds_refilled > 0u);
 			CHECK(calls >= 1u);
 		}
+	}
+	TEST_CASE("the bots' AI scripts: a level's own StrategicAreas.ai reaches the bots' strategic world, which refuses "
+			  "an area the level does not have") {
+		tt::TdmLevel *level = tt::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		REQUIRE(level->bots != nullptr);
+		ai::AiConfig derived;
+		REQUIRE(ai::run_ai_script(level->bots->ai_areas, "derived", derived).ok());
+		REQUIRE_FALSE(derived.strategic_areas.empty());
+		const std::filesystem::path shipped = host::bot_ai_root(OPENBF3_BOT_TUNING_CFG);
+		const std::filesystem::path root = std::filesystem::temp_directory_path() /
+				("openbf3-bot-areas-" +
+						std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
+		const std::filesystem::path ai_root = root / "ai";
+		const std::filesystem::path areas_file = ai::level_strategic_areas_script(ai_root, level->shared->level);
+		std::filesystem::create_directories(root / "config");
+		std::filesystem::create_directories(areas_file.parent_path());
+		std::filesystem::copy_file(OPENBF3_BOT_TUNING_CFG, root / "config" / "bot_tuning.cfg");
+		std::filesystem::copy_file(shipped / ai::kAiDefaultScript, ai_root / ai::kAiDefaultScript);
+		std::filesystem::copy_file(shipped / ai::kAiBehavioursScript, ai_root / ai::kAiBehavioursScript);
+		const std::string tuning = (root / "config" / "bot_tuning.cfg").string();
+		const auto init = [&](std::span<const ai::StrategicAreaDef> p_areas) {
+			std::ofstream(areas_file, std::ios::binary) << ai::format_strategic_areas(p_areas);
+			tt::TdmRunConfig c = base_config(1, 4, false, 50);
+			c.max_ticks = 1;
+			c.after_round_ticks = 0;
+			c.hashes = false;
+			c.configure_bots = [&](host::TdmBotConfig &r_bots) { r_bots.tuning_cfg = tuning; };
+			core::Result<tt::TdmRunResult> r = tt::run_tdm(*level, c);
+			return r ? r->failure : r.error().message;
+		};
+		const std::string own = init(derived.strategic_areas);
+		std::vector<ai::StrategicAreaDef> renamed = derived.strategic_areas;
+		const std::string old_name = renamed[0].name;
+		for (ai::StrategicAreaDef &d : renamed) {
+			std::replace(d.neighbours.begin(), d.neighbours.end(), old_name, std::string("XP9_Nowhere"));
+		}
+		renamed[0].name = "XP9_Nowhere";
+		const std::string refused = init(renamed);
+		std::error_code ec;
+		std::filesystem::remove_all(root, ec);
+		CHECK_MESSAGE(own.empty(), own);
+		CHECK_MESSAGE(refused.find("'" + old_name + "' has no area of its name") != std::string::npos, refused);
 	}
 	TEST_CASE("host-tdm-bots: install unchanged") {
 		if constexpr (kRuNtLanded) {

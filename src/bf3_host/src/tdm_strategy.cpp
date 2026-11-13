@@ -77,6 +77,7 @@ core::Result<std::unique_ptr<TdmStrategy>> TdmStrategy::create(GameServer &r_ser
 	config.world = &r_server.view().world();
 	config.squad_size = rules->squads().squad_size();
 	config.seed = r_shared.host.match_seed;
+	config.areas = r_shared.config->strategic_areas;
 	for (size_t i = 0; i < 3; ++i) {
 		config.eye_heights[i] = r_shared.host.eye_heights[i];
 	}

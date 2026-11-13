@@ -34,3 +34,4 @@ aiSettings.setVehicleBehaviour Infantry Idle BBIdle BBPIdle 0 Memory Default
 aiSettings.setVehicleBehaviour Infantry MedicAssist BBMedicAssist BBPMedicAssist 0 Memory Default
 aiSettings.setVehicleBehaviour Infantry CallForMedic BBCallForMedic BBPCallForMedic 0 Memory Default
 aiSettings.setVehicleBehaviour Infantry Resupply BBResupply BBPResupply 0 Memory Default
+aiSettings.setBasicBotWeights Default

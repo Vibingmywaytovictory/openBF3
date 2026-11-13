@@ -284,6 +284,8 @@ public:
 	bool has_object_type_flags(int p_flags) const override { return (object_type_flags_ & p_flags) == p_flags; }
 	int tactical_status(int p_side) const override;
 	bool is_area_takeable() const override;
+	void set_takeable(int p_side, bool p_takeable) { side_enabled_[size_t(p_side - 1)] = p_takeable; }
+	bool is_takeable(int p_side) const { return side_enabled_[size_t(p_side - 1)]; }
 	bool collect_squad_resources(int p_side, const CommanderInterface &p_commander) override;
 	int collect_additional_squad_resources(int p_amount, int p_side, const CommanderInterface &p_commander) override;
 	float gravity(const Vec3 &p_position, int p_side) const override;

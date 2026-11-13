@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <fstream>
+#include <limits>
 #include <span>
+#include <utility>
 
 namespace bf3::ai {
 
@@ -107,6 +109,41 @@ WeaponTemplate *active_weapon(AiConfig &r_config) {
 
 core::Status no_weapon_template() {
 	return core::make_error("no active weapon template (weaponTemplate.create or weaponTemplate.active)");
+}
+
+StrategicAreaDef *find_area(AiConfig &r_config, std::string_view p_name) {
+	return const_cast<StrategicAreaDef *>(std::as_const(r_config).strategic_area(p_name));
+}
+
+StrategicAreaDef *active_area(AiConfig &r_config) {
+	return r_config.active_area.empty() ? nullptr : find_area(r_config, r_config.active_area);
+}
+
+core::Status no_active_area() {
+	return core::make_error("no active strategic area (aiStrategicArea.setActive)");
+}
+
+core::Status no_area(std::string_view p_name) {
+	return core::make_error("'" + core::shown_text(p_name) + "' is not a strategic area (aiStrategicArea.create)");
+}
+
+core::Status read_pair(std::string_view p_arg, std::array<float, 2> &r_out) {
+	const size_t slash = p_arg.find('/');
+	if (slash == std::string_view::npos) {
+		return core::make_error("'" + core::shown_text(p_arg) + "' is not an x/z pair");
+	}
+	BF3_TRY(read_float(p_arg.substr(0, slash), -1.0e6, 1.0e6, r_out[0]));
+	return read_float(p_arg.substr(slash + 1), -1.0e6, 1.0e6, r_out[1]);
+}
+
+core::Status new_area(AiConfig &r_config, StrategicAreaDef p_area) {
+	if (find_area(r_config, p_area.name) != nullptr) {
+		r_config.active_area.clear();
+		return core::make_error("strategic area '" + core::shown_text(p_area.name) + "' already exists");
+	}
+	r_config.active_area = p_area.name;
+	r_config.strategic_areas.push_back(std::move(p_area));
+	return core::Status::success();
 }
 
 const Command kCommands[] = {
@@ -266,6 +303,79 @@ const Command kCommands[] = {
 				}
 				return core::Status::success();
 			} },
+	{ "rem", 0, 255, [](Args, AiConfig &) -> core::Status { return core::Status::success(); } },
+	{ "aiStrategicArea.createFromControlPoint", 3, 4,
+			[](Args a, AiConfig &c) -> core::Status {
+				StrategicAreaDef area;
+				area.name = std::string(a[0]);
+				area.from_control_point = true;
+				BF3_TRY(read_uint(a[1], 0, 65535, area.control_point));
+				BF3_TRY(read_float(a[2], 0.0, 1.0e5, area.radius));
+				area.category = a.size() > 3 ? std::string(a[3]) : std::string();
+				return new_area(c, std::move(area));
+			} },
+	{ "aiStrategicArea.create", 5, 6,
+			[](Args a, AiConfig &c) -> core::Status {
+				StrategicAreaDef area;
+				area.name = std::string(a[0]);
+				BF3_TRY(read_pair(a[1], area.corner));
+				BF3_TRY(read_pair(a[2], area.centre));
+				BF3_TRY(read_float(a[3], -1.0e5, 1.0e5, area.height));
+				BF3_TRY(read_float(a[4], 0.0, 1.0e5, area.radius));
+				area.category = a.size() > 5 ? std::string(a[5]) : std::string();
+				return new_area(c, std::move(area));
+			} },
+	{ "aiStrategicArea.layer", 1, 1,
+			[](Args a, AiConfig &c) -> core::Status {
+				StrategicAreaDef *area = active_area(c);
+				return area != nullptr ? read_int(a[0], std::numeric_limits<int32_t>::lowest(),
+												 std::numeric_limits<int32_t>::max(), area->layer)
+									   : no_active_area();
+			} },
+	{ "aiStrategicArea.setActive", 1, 1,
+			[](Args a, AiConfig &c) -> core::Status {
+				if (find_area(c, a[0]) == nullptr) {
+					c.active_area.clear();
+					return no_area(a[0]);
+				}
+				c.active_area = std::string(a[0]);
+				return core::Status::success();
+			} },
+	{ "aiStrategicArea.addNeighbour", 1, 1,
+			[](Args a, AiConfig &c) -> core::Status {
+				StrategicAreaDef *area = active_area(c);
+				if (area == nullptr) {
+					return no_active_area();
+				}
+				const StrategicAreaDef *other = find_area(c, a[0]);
+				if (other == nullptr) {
+					return no_area(a[0]);
+				}
+				if (other == area) {
+					return core::make_error("'" + core::shown_text(a[0]) + "' cannot neighbour itself");
+				}
+				if (other->layer != area->layer) {
+					return core::make_error("'" + core::shown_text(a[0]) + "' is on layer " +
+							std::to_string(other->layer) + ", not " + std::to_string(area->layer));
+				}
+				area->neighbours.push_back(other->name);
+				return core::Status::success();
+			} },
+	{ "aiStrategicArea.setSide", 1, 1,
+			[](Args a, AiConfig &c) -> core::Status {
+				StrategicAreaDef *area = active_area(c);
+				return area != nullptr ? read_int(a[0], 0, 2, area->side) : no_active_area();
+			} },
+	{ "aiStrategicArea.setTakeable", 2, 2,
+			[](Args a, AiConfig &c) -> core::Status {
+				StrategicAreaDef *area = active_area(c);
+				if (area == nullptr) {
+					return no_active_area();
+				}
+				int32_t side = 0;
+				BF3_TRY(read_int(a[0], 1, 2, side));
+				return read_bool(a[1], area->takeable[size_t(side - 1)]);
+			} },
 	{ "weaponTemplate.create", 1, 1,
 			[](Args a, AiConfig &c) -> core::Status {
 				if (find_named(c.weapon_templates, a[0]) != nullptr) {
@@ -339,8 +449,18 @@ const WeaponTemplate &AiConfig::weapon_template(std::string_view p_name) const {
 	return found != nullptr ? *found : kDefault;
 }
 
+const StrategicAreaDef *AiConfig::strategic_area(std::string_view p_name) const {
+	const auto found = std::find_if(strategic_areas.begin(), strategic_areas.end(),
+			[&](const StrategicAreaDef &p_area) { return p_area.name == p_name; });
+	return found != strategic_areas.end() ? &*found : nullptr;
+}
+
 std::filesystem::path level_ai_script(const std::filesystem::path &p_root, std::string_view p_level) {
 	return p_root / "Levels" / std::filesystem::path(std::u8string(p_level.begin(), p_level.end())) / "AI" / "AI.ai";
+}
+
+std::filesystem::path level_strategic_areas_script(const std::filesystem::path &p_root, std::string_view p_level) {
+	return level_ai_script(p_root, p_level).parent_path() / kStrategicAreasScript;
 }
 
 core::Status run_ai_script(std::string_view p_text, std::string_view p_name, AiConfig &r_config) {
@@ -402,11 +522,57 @@ core::Status run_ai_script_file(const std::filesystem::path &p_path, AiConfig &r
 	return run_ai_script(text, name, r_config);
 }
 
-core::Result<AiConfig> load_level_ai_config(const std::filesystem::path &p_root, std::string_view p_level) {
+std::vector<StrategicAreaDef> strategic_areas_by_name(std::span<const StrategicAreaDef> p_areas) {
+	std::vector<StrategicAreaDef> out(p_areas.begin(), p_areas.end());
+	std::stable_sort(out.begin(), out.end(),
+			[](const StrategicAreaDef &p_a, const StrategicAreaDef &p_b) { return p_a.name < p_b.name; });
+	return out;
+}
+
+std::string format_strategic_areas(std::span<const StrategicAreaDef> p_areas) {
+	std::string areas = "rem *** Create strategic areas ***\n", assignments;
+	for (const StrategicAreaDef &a : strategic_areas_by_name(p_areas)) {
+		if (a.from_control_point) {
+			areas += "aiStrategicArea.createFromControlPoint " + a.name + " " + std::to_string(a.control_point) + " " +
+					core::float_text(a.radius);
+		} else {
+			areas += "aiStrategicArea.create " + a.name + " " + core::float_text(a.corner[0]) + "/" +
+					core::float_text(a.corner[1]) + " " + core::float_text(a.centre[0]) + "/" +
+					core::float_text(a.centre[1]) + " " + core::float_text(a.height) + " " + core::float_text(a.radius);
+		}
+		areas += (a.category.empty() ? "" : " " + a.category) + "\n";
+		areas += "aiStrategicArea.layer " + std::to_string(a.layer) + "\n\n";
+		assignments += "aiStrategicArea.setActive " + a.name + "\n";
+		for (const std::string &n : a.neighbours) {
+			assignments += "aiStrategicArea.addNeighbour " + n + "\n";
+		}
+		assignments += "aiStrategicArea.setSide " + std::to_string(a.side) + "\n";
+		for (size_t side = 0; side < a.takeable.size(); ++side) {
+			if (!a.takeable[side]) {
+				assignments += "aiStrategicArea.setTakeable " + std::to_string(side + 1u) + " 0\n";
+			}
+		}
+		assignments += "\n";
+	}
+	return areas + assignments;
+}
+
+core::Result<AiConfig> load_level_ai_config(
+		const std::filesystem::path &p_root, std::string_view p_level, std::string_view p_derived_areas) {
 	AiConfig config;
 	BF3_TRY(run_ai_script_file(p_root / kAiDefaultScript, config));
 	BF3_TRY(run_ai_script_file(p_root / kAiBehavioursScript, config));
-	BF3_TRY(run_ai_script_file(level_ai_script(p_root, p_level), config));
+	const std::filesystem::path areas = level_strategic_areas_script(p_root, p_level);
+	std::error_code ec;
+	if (std::filesystem::is_regular_file(areas, ec)) {
+		BF3_TRY(run_ai_script_file(areas, config));
+	} else {
+		BF3_TRY(run_ai_script(p_derived_areas, "derived:" + areas.generic_string(), config));
+	}
+	const std::filesystem::path level = level_ai_script(p_root, p_level);
+	if (std::filesystem::is_regular_file(level, ec)) {
+		BF3_TRY(run_ai_script_file(level, config));
+	}
 	return config;
 }
 

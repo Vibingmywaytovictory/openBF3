@@ -259,33 +259,42 @@ core::Result<std::unique_ptr<HostAiWorld>> HostAiWorld::create(const AiWorldConf
 	services.grids = { m.grids[0].get(), m.grids[1].get() };
 	m.strategic = std::make_unique<ai::AIStrategicObjectManager>(services);
 	const std::vector<BotStrategicArea> &areas = p_config.level->areas;
+	if (p_config.areas.size() != areas.size()) {
+		return core::make_error("ai world: " + std::to_string(p_config.areas.size()) +
+				" strategic areas for the level's " + std::to_string(areas.size()));
+	}
 	m.owners.resize(areas.size(), 0);
 	m.take_over.resize(areas.size(), 1.0f);
+	std::vector<const ai::StrategicAreaDef *> defs(areas.size());
 	for (size_t i = 0; i < areas.size(); ++i) {
-		const BotStrategicArea &a = areas[i];
-		m.owners[i] = a.team;
-		if (a.kind == BotStrategicArea::Kind::TdmCluster) {
-			const ai::Vec2 centre{ a.centre.x, a.centre.z };
-			m.strategic->create(a.name, ai::Vec2{ centre.x - a.radius, centre.y - a.radius }, centre, a.centre.y,
-					a.radius, std::string());
+		const auto found = std::find_if(p_config.areas.begin(), p_config.areas.end(),
+				[&](const ai::StrategicAreaDef &p_def) { return p_def.name == areas[i].name; });
+		if (found == p_config.areas.end() || (found->from_control_point && found->control_point != i)) {
+			return core::make_error("ai world: the level's strategic area " + std::to_string(i) + " '" + areas[i].name +
+					"' has no area of its name and control point");
+		}
+		const ai::StrategicAreaDef &d = *found;
+		defs[i] = &d;
+		m.owners[i] = areas[i].team;
+		if (d.from_control_point) {
+			m.strategic->create_from_control_point(d.name, d.control_point, d.radius, d.category);
 		} else {
-			m.strategic->create_from_control_point(a.name, uint32_t(i), a.radius, std::string());
+			m.strategic->create(d.name, ai::Vec2{ d.corner[0], d.corner[1] }, ai::Vec2{ d.centre[0], d.centre[1] },
+					d.height, d.radius, d.category);
 		}
-		m.areas.push_back(m.strategic->strategic_area(a.name));
+		ai::AIStrategicArea *area = m.strategic->strategic_area(d.name);
+		area->set_side(d.side);
+		for (size_t side = 0; side < d.takeable.size(); ++side) {
+			area->set_takeable(int(side + 1), d.takeable[side]);
+		}
+		m.areas.push_back(area);
 	}
-	for (size_t i = 0; i < m.areas.size(); ++i) {
-		std::vector<std::pair<float, size_t>> near;
-		for (size_t j = 0; j < m.areas.size(); ++j) {
-			if (j != i) {
-				near.push_back({ ai::distance_sq(areas[i].centre, areas[j].centre), j });
-			}
-		}
-		std::sort(near.begin(), near.end());
-		for (size_t k = 0; k < std::min<size_t>(2, near.size()); ++k) {
-			const size_t j = near[k].second;
+	for (size_t i = 0; i < defs.size(); ++i) {
+		for (const std::string &n : defs[i]->neighbours) {
+			ai::AIStrategicArea *other = m.strategic->strategic_area(n);
 			const auto &list = m.areas[i]->neighbours();
-			if (std::find(list.begin(), list.end(), m.areas[j]) == list.end()) {
-				m.strategic->add_two_way_neighbour(areas[i].name, areas[j].name);
+			if (other != nullptr && std::find(list.begin(), list.end(), other) == list.end()) {
+				m.areas[i]->add_neighbour(other);
 			}
 		}
 	}

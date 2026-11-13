@@ -3,9 +3,12 @@
 #include "bot_director.h"
 #include "strategic_map.h"
 
+#include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/mode_areas.h"
+#include "bf3/core/level/source_digest.h"
 #include "bf3/core/util/elapsed.h"
+#include "bf3/host/ai_level_config.h"
 #include "bf3/host/level_load.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/soldier_motor.h"
@@ -192,6 +195,18 @@ core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase
 			p_options.seed);
 	clock = Clock::now();
 	BF3_TRY(build_strategic_map(*out, areas->objectives));
+	core::Sha256Digest install{};
+	if (p_options.cache != nullptr && p_options.cache->is_open()) {
+		core::Result<core::level::SourceDigest> digest = core::level::level_source_digest(*p_db.level);
+		if (digest && digest->digest) {
+			install = *digest->digest;
+		}
+	}
+	core::Result<CachedAiAreas> ai_areas = cached_strategic_areas(p_options.cache, install, out->level, *out);
+	if (!ai_areas) {
+		return core::error_at("load_bot_level", ai_areas.error());
+	}
+	out->ai_areas = std::move(ai_areas->text);
 	out->seconds_strategic = seconds_since(clock);
 	return std::shared_ptr<const BotLevel>(std::move(out));
 }

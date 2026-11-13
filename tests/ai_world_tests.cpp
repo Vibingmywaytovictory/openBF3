@@ -4,10 +4,12 @@
 #include "bf3/ai/main/ai_settings.h"
 #include "bf3/ai/nav/bot_navigation.h"
 #include "bf3/ai/nav/nav_clusters.h"
+#include "bf3/ai/squad/squad_world.h"
 #include "bf3/ai/strategic/sai.h"
 #include "bf3/ai/strategic/strategic_object.h"
 #include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/level/mode_areas.h"
+#include "bf3/host/ai_level_config.h"
 #include "bf3/host/ai_world.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/level_load.h"
@@ -551,7 +553,8 @@ void check_pathable(const host::BotLevel &p_level) {
 }
 
 TEST_SUITE("ai-world-install") {
-	TEST_CASE("ai world: Metro TDM areas, Metro CQL control points and the perception courier for 32 bots") {
+	TEST_CASE("ai world: Metro TDM areas, Metro CQL control points and the perception courier for 32 bots; the two "
+			  "levels' derived StrategicAreas.ai differ and round-trip through the cache") {
 		test::tdm::TdmLevel *level = test::tdm::load_tdm_level_once();
 		if (level == nullptr) {
 			return;
@@ -586,6 +589,7 @@ TEST_SUITE("ai-world-install") {
 		config.static_world = level->shared->static_world;
 		config.seed = 7;
 		config.squad_size = level->shared->squad_size;
+		config.areas = host::derive_strategic_areas(tdm);
 		std::unique_ptr<host::HostAiWorld> world;
 		size_t player_mismatches = 0, players_seen = 0, downed_seen = 0;
 		std::array<uint32_t, 64> cursor{};
@@ -766,6 +770,8 @@ TEST_SUITE("ai-world-install") {
 		host::AiWorldConfig cq_config;
 		cq_config.level = conquest.bots;
 		cq_config.static_world = conquest.shared->static_world;
+		CHECK_FALSE(host::HostAiWorld::create(cq_config).ok());
+		cq_config.areas = host::derive_strategic_areas(cq);
 		core::Result<std::unique_ptr<host::HostAiWorld>> cq_world = host::HostAiWorld::create(cq_config);
 		REQUIRE_MESSAGE(cq_world.ok(), (cq_world.ok() ? std::string() : cq_world.error().message));
 		ai::AiSettings settings;
@@ -793,6 +799,160 @@ TEST_SUITE("ai-world-install") {
 		}
 		std::printf("ai world: Metro CQL %zu flags and %zu HQs (loaded in %.1f s), TDM fixture %.1f s\n", area_flags,
 				area_hqs, conquest.seconds, level->seconds_load);
+
+		const std::vector<ai::StrategicAreaDef> tdm_defs = host::derive_strategic_areas(tdm);
+		const std::vector<ai::StrategicAreaDef> cq_defs = host::derive_strategic_areas(cq);
+		CHECK(tdm.ai_areas == ai::format_strategic_areas(tdm_defs));
+		CHECK(cq.ai_areas == ai::format_strategic_areas(cq_defs));
+		CHECK(tdm.ai_areas != cq.ai_areas);
+		REQUIRE(tdm_defs.size() == tdm.areas.size());
+		REQUIRE(cq_defs.size() == cq.areas.size());
+		REQUIRE(world != nullptr);
+		const auto index_of = [](const std::vector<ai::StrategicAreaDef> &p_defs, const std::string &p_name) {
+			return size_t(std::find_if(p_defs.begin(), p_defs.end(), [&](const ai::StrategicAreaDef &p_d) {
+				return p_d.name == p_name;
+			}) - p_defs.begin());
+		};
+		const auto lists = [](const std::vector<ai::StrategicAreaDef> &p_defs, const std::string &p_name,
+								   const std::string &p_other) {
+			const auto found = std::find_if(
+					p_defs.begin(), p_defs.end(), [&](const ai::StrategicAreaDef &p_d) { return p_d.name == p_name; });
+			return found != p_defs.end() &&
+					std::find(found->neighbours.begin(), found->neighbours.end(), p_other) != found->neighbours.end();
+		};
+		for (size_t i = 0; i < tdm_defs.size(); ++i) {
+			CHECK_FALSE(tdm_defs[i].from_control_point);
+			CHECK(tdm_defs[i].centre[0] == tdm.areas[i].centre.x);
+			std::vector<std::pair<float, size_t>> near;
+			for (size_t j = 0; j < tdm_defs.size(); ++j) {
+				if (j != i) {
+					near.push_back({ ai::distance_sq(tdm.areas[i].centre, tdm.areas[j].centre), j });
+				}
+			}
+			std::sort(near.begin(), near.end());
+			for (size_t k = 0; k < std::min<size_t>(2, near.size()); ++k) {
+				CHECK(lists(tdm_defs, tdm_defs[i].name, tdm_defs[near[k].second].name));
+			}
+			for (const std::string &n : tdm_defs[i].neighbours) {
+				CHECK(lists(tdm_defs, n, tdm_defs[i].name));
+			}
+			const ai::AIStrategicArea *area = world->area(i);
+			REQUIRE(area != nullptr);
+			CHECK(area->index() == int(i));
+			REQUIRE(area->neighbours().size() == tdm_defs[i].neighbours.size());
+			for (size_t k = 0; k < area->neighbours().size(); ++k) {
+				CHECK(static_cast<const ai::AIStrategicArea *>(area->neighbours()[k])->name() ==
+						tdm_defs[i].neighbours[k]);
+			}
+		}
+		for (size_t i = 0; i < cq_defs.size(); ++i) {
+			CHECK(cq_defs[i].from_control_point);
+			CHECK(cq_defs[i].control_point == i);
+			CHECK(cq_defs[i].side == cq.areas[i].team);
+			CHECK(cq_defs[i].takeable == std::array<bool, 2>{ true, true });
+			CHECK((*cq_world)->area(i)->side() == cq.areas[i].team);
+			CHECK((*cq_world)->area(i)->is_takeable(1));
+			CHECK((*cq_world)->area(i)->is_takeable(2));
+			CHECK((*cq_world)->control_point_takeable(uint32_t(i)) == cq.areas[i].takeable);
+		}
+		CHECK(cq.ai_areas.find("setTakeable") == std::string::npos);
+		CHECK(tdm.ai_areas.find("setTakeable") == std::string::npos);
+		CHECK(cq.ai_areas.find("aiStrategicArea.layer -1\n") != std::string::npos);
+		ai::AiConfig read;
+		REQUIRE(ai::run_ai_script(cq.ai_areas, "cq.ai", read).ok());
+		CHECK(read.strategic_areas == ai::strategic_areas_by_name(cq_defs));
+		CHECK(cq.ai_areas.starts_with("rem *** Create strategic areas ***\n"));
+		host::AiWorldConfig renamed_config = cq_config;
+		renamed_config.areas[0].name = "Nowhere";
+		CHECK_FALSE(host::HostAiWorld::create(renamed_config).ok());
+
+		host::AiWorldConfig own_config = cq_config;
+		ai::StrategicAreaDef &own_area = own_config.areas[0];
+		REQUIRE_FALSE(own_area.neighbours.empty());
+		const std::string dropped = own_area.neighbours.front();
+		own_area.neighbours.erase(own_area.neighbours.begin());
+		own_area.side = cq.areas[0].team == 1 ? 2 : 1;
+		own_area.takeable = { false, true };
+		const int own_side = own_area.side;
+		own_config.areas = ai::strategic_areas_by_name(own_config.areas);
+		REQUIRE(own_config.areas != cq_config.areas);
+		core::Result<std::unique_ptr<host::HostAiWorld>> own_world = host::HostAiWorld::create(own_config);
+		REQUIRE_MESSAGE(own_world.ok(), (own_world.ok() ? std::string() : own_world.error().message));
+		const size_t far = index_of(cq_defs, dropped);
+		REQUIRE(far < cq_defs.size());
+		CHECK((*own_world)->area(0)->side() == own_side);
+		CHECK((*own_world)->area(0)->side() != (*cq_world)->area(0)->side());
+		CHECK((*own_world)->area(0)->is_takeable(1));
+		CHECK((*own_world)->area(0)->is_takeable(2));
+		CHECK((*own_world)->owner_of_control_point(0) == cq.areas[0].team);
+		CHECK((*own_world)->owner_of_control_point(0) == (*cq_world)->owner_of_control_point(0));
+		CHECK((*own_world)->control_point_takeable(0) == cq.areas[0].takeable);
+		CHECK((*own_world)->control_point_takeable(0) == (*cq_world)->control_point_takeable(0));
+		CHECK_FALSE((*own_world)->area(0)->is_neighbour((*own_world)->area(far)));
+		CHECK((*own_world)->area(far)->is_neighbour((*own_world)->area(0)));
+		CHECK((*cq_world)->area(0)->is_neighbour((*cq_world)->area(far)));
+		for (size_t i = 0; i < cq.areas.size(); ++i) {
+			CHECK((*own_world)->area(i)->index() == int(i));
+			CHECK((*own_world)->area(i)->name() == cq.areas[i].name);
+		}
+		host::AiWorldConfig tdm_own = config;
+		tdm_own.areas[0].side = 2;
+		tdm_own.areas[0].takeable = { false, true };
+		core::Result<std::unique_ptr<host::HostAiWorld>> tdm_world = host::HostAiWorld::create(tdm_own);
+		REQUIRE_MESSAGE(tdm_world.ok(), (tdm_world.ok() ? std::string() : tdm_world.error().message));
+		CHECK((*tdm_world)->area(0)->side() == 2);
+		CHECK((*tdm_world)->area(0)->status(1) == ai::StrategicStatus::Hostile);
+		CHECK((*tdm_world)->area(0)->status(2) == ai::StrategicStatus::Owned);
+		CHECK_FALSE((*tdm_world)->area(0)->is_takeable(1));
+		CHECK((*tdm_world)->area(0)->is_takeable(2));
+		CHECK((*tdm_world)->area(1)->side() == 0);
+		CHECK((*tdm_world)->area(1)->is_takeable(1));
+		CHECK((*tdm_world)->owner_of_control_point(0) == 0);
+
+		const std::filesystem::path root = std::filesystem::temp_directory_path() /
+				("openbf3-ai-areas-" +
+						std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
+		{
+			core::Cache cache;
+			core::CacheOptions co;
+			co.root = root;
+			co.guard = level->reader->write_guard();
+			std::string detail;
+			REQUIRE_MESSAGE(cache.open(std::move(co), &detail) == core::CacheStatus::Ok, detail);
+			core::Sha256Digest install{};
+			install.bytes[0] = 1;
+			core::Sha256Digest other = install;
+			other.bytes[0] = 2;
+			const auto cached = [&](const core::Sha256Digest &p_install, const host::BotLevel &p_bots) {
+				core::Result<host::CachedAiAreas> got =
+						host::cached_strategic_areas(&cache, p_install, "MP_Subway", p_bots);
+				REQUIRE_MESSAGE(got.ok(), (got.ok() ? std::string() : got.error().message));
+				return *got;
+			};
+			const host::CachedAiAreas first = cached(install, cq);
+			const host::CachedAiAreas again = cached(install, cq);
+			host::BotLevel moved = cq;
+			moved.areas[0].radius += 1.0f;
+			const host::CachedAiAreas stale = cached(install, moved);
+			const host::CachedAiAreas elsewhere = cached(other, cq);
+			const host::CachedAiAreas tdm_cached = cached(install, tdm);
+			CHECK(first.outcome == core::CacheOutcome::Converted);
+			CHECK(first.text == cq.ai_areas);
+			CHECK(again.outcome == core::CacheOutcome::Hit);
+			CHECK(again.text == cq.ai_areas);
+			CHECK(stale.outcome == core::CacheOutcome::Converted);
+			CHECK(stale.text == ai::format_strategic_areas(host::derive_strategic_areas(moved)));
+			CHECK(elsewhere.outcome == core::CacheOutcome::Converted);
+			CHECK(tdm_cached.outcome == core::CacheOutcome::Converted);
+			CHECK(tdm_cached.text == tdm.ai_areas);
+			std::printf(
+					"ai areas: Metro TDM %zu areas (%zu bytes), Metro CQL %zu (%zu bytes); cache %s, %s, stale %s\n",
+					tdm_defs.size(), tdm.ai_areas.size(), cq_defs.size(), cq.ai_areas.size(),
+					core::cache_outcome_name(first.outcome), core::cache_outcome_name(again.outcome),
+					core::cache_outcome_name(stale.outcome));
+		}
+		std::error_code ec;
+		std::filesystem::remove_all(root, ec);
 		test::tdm::check_install_unchanged(*level);
 	}
 

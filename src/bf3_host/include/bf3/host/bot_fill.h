@@ -90,6 +90,7 @@ struct BotLevel {
 	double seconds_nav = 0.0;
 	double seconds_components = 0.0;
 	double seconds_strategic = 0.0;
+	std::string ai_areas;
 };
 
 struct BotLoadOptions {
