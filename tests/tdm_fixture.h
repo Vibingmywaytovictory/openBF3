@@ -27,6 +27,11 @@
 #include <string>
 #include <vector>
 
+namespace bf3::sim {
+class CollisionWorld;
+class SoldierMotor;
+}
+
 namespace bf3::test::tdm {
 
 struct TdmLevel {
@@ -66,6 +71,52 @@ TdmLevel *load_conquest_level_once();
 TdmLevel *load_conquest_bots_level_once();
 
 void check_install_unchanged(TdmLevel &r_level);
+
+struct VehicleWatch {
+	std::vector<net::VehicleWire> latest;
+	uint64_t messages = 0;
+	uint64_t bad = 0;
+
+	void take(std::span<const host::OutDatagram> p_out, uint32_t p_peer) {
+		for (const host::OutDatagram &d : p_out) {
+			if (d.peer != p_peer || net::peek_type(d.bytes) != net::MessageType::VehicleStates) {
+				continue;
+			}
+			core::Result<net::VehicleStates> m = net::decode_vehicle_states(d.bytes);
+			if (!m) {
+				++bad;
+				continue;
+			}
+			++messages;
+			for (const net::VehicleWire &w : m->vehicles) {
+				auto at = std::find_if(latest.begin(), latest.end(),
+						[&](const net::VehicleWire &v) { return v.spawner == w.spawner; });
+				if (at == latest.end()) {
+					latest.push_back(w);
+				} else {
+					*at = w;
+				}
+			}
+		}
+	}
+	const net::VehicleWire *of(uint16_t p_spawner) const {
+		for (const net::VehicleWire &w : latest) {
+			if (w.spawner == p_spawner) {
+				return &w;
+			}
+		}
+		return nullptr;
+	}
+};
+
+struct LockStand {
+	uint16_t spawner = 0;
+	sim::Vec3 stand{};
+	sim::Vec3 aim{};
+};
+
+std::optional<LockStand> mbt_lock_stand(const host::SharedLevel &p_level, const sim::CollisionWorld &p_world,
+		const sim::SoldierMotor &p_motor, std::span<const net::VehicleWire> p_vehicles, uint8_t p_team);
 
 class ScriptedPeer {
 public:

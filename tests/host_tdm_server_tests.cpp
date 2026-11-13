@@ -4193,42 +4193,7 @@ TEST_SUITE("host-tdm-conquest") {
 
 namespace {
 
-struct VehicleWatch {
-	std::vector<net::VehicleWire> latest;
-	uint64_t messages = 0;
-	uint64_t bad = 0;
-
-	void take(std::span<const host::OutDatagram> p_out, uint32_t p_peer) {
-		for (const host::OutDatagram &d : p_out) {
-			if (d.peer != p_peer || net::peek_type(d.bytes) != net::MessageType::VehicleStates) {
-				continue;
-			}
-			core::Result<net::VehicleStates> m = net::decode_vehicle_states(d.bytes);
-			if (!m) {
-				++bad;
-				continue;
-			}
-			++messages;
-			for (const net::VehicleWire &w : m->vehicles) {
-				auto at = std::find_if(latest.begin(), latest.end(),
-						[&](const net::VehicleWire &v) { return v.spawner == w.spawner; });
-				if (at == latest.end()) {
-					latest.push_back(w);
-				} else {
-					*at = w;
-				}
-			}
-		}
-	}
-	const net::VehicleWire *of(uint16_t p_spawner) const {
-		for (const net::VehicleWire &w : latest) {
-			if (w.spawner == p_spawner) {
-				return &w;
-			}
-		}
-		return nullptr;
-	}
-};
+using tdm::VehicleWatch;
 
 float horizontal(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 	const float dx = p_a[0] - p_b[0], dz = p_a[2] - p_b[2];
@@ -7748,6 +7713,55 @@ struct GuidedWatch final : host::GunplayObserver {
 
 }
 
+namespace bf3::test::tdm {
+
+std::optional<LockStand> mbt_lock_stand(const host::SharedLevel &p_level, const sim::CollisionWorld &p_world,
+		const sim::SoldierMotor &p_motor, std::span<const net::VehicleWire> p_vehicles, uint8_t p_team) {
+	const host::LevelVehicles &lv = *p_level.vehicles;
+	const auto mbt = [&](const net::VehicleWire &p_w) {
+		const std::string &b = lv.kinds[lv.spawners[p_w.spawner].kind].blueprint;
+		return b == "vehicles/t90/t90" || b == "vehicles/m1a2/m1abrams";
+	};
+	const sim::logic::ConquestParams &conquest = *p_level.logic_natives->conquest;
+	const auto in_play = [&](const sim::Vec3 &p_at) {
+		for (const sim::logic::ConquestAreaData &a : conquest.areas) {
+			if ((!a.params.team_specific || a.params.team == p_team) &&
+					!sim::logic::polygon_contains(a.polygon, p_at[0], p_at[2])) {
+				return false;
+			}
+		}
+		return true;
+	};
+	for (const net::VehicleWire &w : p_vehicles) {
+		if (w.team == p_team || w.team == 0 || !mbt(w) ||
+				!parked_upright(w.state.body.rotation, w.state.body.linear_velocity)) {
+			continue;
+		}
+		const host::LevelVehicleKind &k = lv.kinds[lv.spawners[w.spawner].kind];
+		const sim::Vec3 &c = w.state.body.com_position;
+		const core::Transform turn = sim::vehicles::hull_transform(w.state.body.rotation, {});
+		const sim::Vec3 origin = core::vec::sub(c, turn.transform_vector(k.model->center_of_mass));
+		const sim::Vec3 centre =
+				sim::vehicles::hull_transform(w.state.body.rotation, origin).transform_point(k.box.centre);
+		for (int a = 0; a < 16; ++a) {
+			const float yaw = float(a) * 3.14159265f / 8.0f;
+			for (float d = 60.0f; d <= 240.0f; d += 10.0f) {
+				const sim::Vec3 at =
+						ground_at(p_world, c[0] + d * std::sin(yaw), c[2] + d * std::cos(yaw), c[1] + 60.0f);
+				if (std::fabs(at[1] - c[1]) < 6.0f && in_play(at) && p_motor.fits_standing(at) &&
+						clear(p_world, add(at, 0.0f, 1.6f, 0.0f), centre) &&
+						clear(p_world, add(centre, 0.0f, 2.0f, 0.0f), add(centre, 0.0f, 45.0f, 0.0f)) &&
+						clear(p_world, add(at, 0.0f, 1.6f, 0.0f), add(at, 0.0f, 55.0f, 0.0f))) {
+					return LockStand{ w.spawner, at, centre };
+				}
+			}
+		}
+	}
+	return std::nullopt;
+}
+
+}
+
 TEST_SUITE("host-gadgets-guided") {
 	TEST_CASE(
 			"gadgets: MP_007 ConquestSmall0: an engineer's FGM-148 picked in CUSTOMIZE fires only once locked; zoomed "
@@ -7794,60 +7808,20 @@ TEST_SUITE("host-gadgets-guided") {
 		gunner.spawn_request(engineer);
 		REQUIRE(m->until([&] { return is_alive(m->state(gunner.slot())); }, 900));
 		REQUIRE(m->server.gunplay()->weapons(uint8_t(gunner.slot())).slots[launcher_slot].def == javelin);
-		const auto mbt = [&](const net::VehicleWire &p_w) {
-			const std::string &b = lv.kinds[lv.spawners[p_w.spawner].kind].blueprint;
-			return b == "vehicles/t90/t90" || b == "vehicles/m1a2/m1abrams";
-		};
-		const sim::logic::ConquestParams &conquest = *level->shared->logic_natives->conquest;
-		const auto in_play = [&](const sim::Vec3 &p_at) {
-			for (const sim::logic::ConquestAreaData &a : conquest.areas) {
-				if ((!a.params.team_specific || a.params.team == team) &&
-						!sim::logic::polygon_contains(a.polygon, p_at[0], p_at[2])) {
-					return false;
-				}
-			}
-			return true;
-		};
 		VehicleWatch vehicles;
-		std::optional<uint16_t> tank;
-		sim::Vec3 stand{}, aim{};
+		std::optional<tdm::LockStand> found;
 		REQUIRE(m->until(
 				[&] {
 					vehicles.take(m->out, gunner.peer());
-					for (const net::VehicleWire &w : vehicles.latest) {
-						if (tank || w.team == team || w.team == 0 || !mbt(w) ||
-								!parked_upright(w.state.body.rotation, w.state.body.linear_velocity)) {
-							continue;
-						}
-						const host::LevelVehicleKind &k = lv.kinds[lv.spawners[w.spawner].kind];
-						const sim::Vec3 &c = w.state.body.com_position;
-						const core::Transform turn = sim::vehicles::hull_transform(w.state.body.rotation, {});
-						const sim::Vec3 origin = core::vec::sub(c, turn.transform_vector(k.model->center_of_mass));
-						const sim::Vec3 centre = sim::vehicles::hull_transform(w.state.body.rotation, origin)
-														 .transform_point(k.box.centre);
-						for (int a = 0; !tank && a < 16; ++a) {
-							const float yaw = float(a) * 3.14159265f / 8.0f;
-							for (float d = 60.0f; !tank && d <= 240.0f; d += 10.0f) {
-								const sim::Vec3 at = ground_at(
-										*m->world, c[0] + d * std::sin(yaw), c[2] + d * std::cos(yaw), c[1] + 60.0f);
-								if (std::fabs(at[1] - c[1]) < 6.0f && in_play(at) && m->motor.fits_standing(at) &&
-										clear(*m->world, add(at, 0.0f, 1.6f, 0.0f), centre) &&
-										clear(*m->world, add(centre, 0.0f, 2.0f, 0.0f),
-												add(centre, 0.0f, 45.0f, 0.0f)) &&
-										clear(*m->world, add(at, 0.0f, 1.6f, 0.0f), add(at, 0.0f, 55.0f, 0.0f))) {
-									tank = w.spawner;
-									stand = at;
-									aim = centre;
-								}
-							}
-						}
-					}
-					return tank.has_value();
+					found = tdm::mbt_lock_stand(*level->shared, *m->world, m->motor, vehicles.latest, team);
+					return found.has_value();
 				},
 				sim::seconds_to_ticks(tdm::latest_initial_delay(lv)) + 600u));
-		const float full = sim::vehicles::full_vehicle_health(lv.kinds[lv.spawners[*tank].kind].damage);
-		REQUIRE(m->server.vehicle_health(*tank) == full);
-		const uint32_t tank_id = sim::vehicles::kVehicleTargetIdBase + uint32_t(*tank);
+		const uint16_t tank = found->spawner;
+		const sim::Vec3 stand = found->stand, aim = found->aim;
+		const float full = sim::vehicles::full_vehicle_health(lv.kinds[lv.spawners[tank].kind].damage);
+		REQUIRE(m->server.vehicle_health(tank) == full);
+		const uint32_t tank_id = sim::vehicles::kVehicleTargetIdBase + uint32_t(tank);
 		m->teleport(gunner, stand);
 		m->ticks(20);
 		bool zoom = false, fire = false;
@@ -7869,7 +7843,7 @@ TEST_SUITE("host-gadgets-guided") {
 		const sw::WeaponLockState lock = m->server.gunplay()->lock_state(uint8_t(gunner.slot()));
 		std::printf("javelin: zoomed %.1f m from the %s of spawner %u, locked after %u ticks (%.3f s), primary %s, "
 					"secondary target 0x%x\n",
-				double(horizontal(stand, aim)), lv.kinds[lv.spawners[*tank].kind].blueprint.c_str(), unsigned(*tank),
+				double(horizontal(stand, aim)), lv.kinds[lv.spawners[tank].kind].blueprint.c_str(), unsigned(tank),
 				unsigned(lock_ticks), double(lock_ticks) / double(sim::kSimHz),
 				lock.primary.locked ? "locked" : "not locked", unsigned(lock.secondary.target));
 		CHECK(lock.secondary.locked);
@@ -7879,7 +7853,7 @@ TEST_SUITE("host-gadgets-guided") {
 		REQUIRE(gunner.last_snapshot.has_value());
 		REQUIRE(gunner.last_snapshot->own_lock.has_value());
 		CHECK(gunner.last_snapshot->own_lock->locked);
-		CHECK(gunner.last_snapshot->own_lock->target == *tank);
+		CHECK(gunner.last_snapshot->own_lock->target == tank);
 		CHECK(gunner.last_snapshot->own_lock->amount == 255);
 		CHECK(double(lock_ticks) / double(sim::kSimHz) >= 2.25);
 		CHECK(double(lock_ticks) / double(sim::kSimHz) <= 2.25 + 2.0 * 0.0667 + 1.0 / 60.0);
@@ -7922,7 +7896,7 @@ TEST_SUITE("host-gadgets-guided") {
 		REQUIRE_FALSE(watch->impacts.empty());
 		CHECK(watch->impacts.back().velocity[1] < 0.0f);
 		CHECK(m->server.stats().vehicle_hits > hits);
-		const float first = m->server.vehicle_health(*tank).value_or(-1.0f);
+		const float first = m->server.vehicle_health(tank).value_or(-1.0f);
 		REQUIRE(m->until(
 				[&] {
 					const sw::WeaponSlotState &w =
@@ -7939,7 +7913,7 @@ TEST_SUITE("host-gadgets-guided") {
 		fire = false;
 		REQUIRE(m->until([&] { return !watch->detonations.empty(); }, 15 * 60));
 		m->ticks(2);
-		const float second = m->server.vehicle_health(*tank).value_or(-1.0f);
+		const float second = m->server.vehicle_health(tank).value_or(-1.0f);
 		std::printf("javelin: health %.2f -> %.2f after the first missile -> %.2f after the second (%.2f %%)\n",
 				double(full), double(first), double(second), double(100.0f * (first - second) / full));
 		CHECK(first == doctest::Approx(full));
