@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/ai/behaviour/vehicle_gadgets.h"
 #include "bf3/ai/behaviour/weapon_choice.h"
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/soldier_state.h"
@@ -20,14 +21,7 @@ class Gunplay;
 
 namespace bf3::host::tdm_bot {
 
-inline constexpr float kFriendlyAssistMetres = 75.0f;
-inline constexpr float kAssistHealth = 0.75f;
-inline constexpr float kAssistHumanHealth = 0.99f;
-inline constexpr float kBackOffMetres = 9.0f;
-inline constexpr float kBackOffGoalMetres = 30.0f;
-inline constexpr float kDetonateDelayS = 0.7f;
-
-enum class ExplosivePhase : uint8_t { Approach, Place, Wait, BackOff, Detonate };
+using ai::ExplosivePhase;
 
 struct VehicleCheck {
 	sim::Tick tick = 0;

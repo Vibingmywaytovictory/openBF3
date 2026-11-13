@@ -1,6 +1,5 @@
 #include "tdm_bot_weapons_vehicles.h"
 
-#include "bf3/ai/behaviour/curves.h"
 #include "bf3/core/math.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
@@ -300,15 +299,14 @@ bool BotVehicleWeapons::sense_repair(TdmShared &r_shared, const BotArms &p_arms,
 			own = own || v.crew[k] == p_check.slot;
 			human = human || (v.crew[k] < 0xFF && !view.bot(uint8_t(v.crew[k])));
 		}
-		const float threshold = human ? kAssistHumanHealth : kAssistHealth;
-		if (own || !(v.health > 0.0f && v.health < threshold)) {
+		if (own || !ai::needs_assist(v.health, human)) {
 			continue;
 		}
 		const float d = distance(p_check.self->position, v.target.bound_center);
-		if (!(d <= kFriendlyAssistMetres)) {
+		if (!(d <= ai::kAssistRadiusMetres)) {
 			continue;
 		}
-		const float score = 1.0f / (ai::DecliningSlopeCurve::calculate(1.0f - v.health) * std::max(d, 1.0f));
+		const float score = ai::assist_score(1.0f, v.health, std::max(d, 1.0f));
 		if (score > best_score) {
 			best_score = score;
 			best.id = v.target.id;
@@ -348,43 +346,28 @@ void BotVehicleWeapons::explosive_step(TdmShared &r_shared, const BotArms &p_arm
 		return;
 	}
 	const int32_t rounds = p_arms.rounds(s);
-	switch (phase_) {
-		case ExplosivePhase::Approach:
-			if (enemy_.surface <= d->projectile.explosion.inner_radius && rounds > 0) {
-				phase_ = ExplosivePhase::Place;
-				rounds_before_ = rounds;
-			}
-			break;
-		case ExplosivePhase::Place:
-			if (rounds < rounds_before_) {
-				phase_ = ExplosivePhase::Wait;
-			}
-			break;
-		case ExplosivePhase::Wait:
-			if (rounds == 0 ||
-					(p_arms.weapons()->active == s && p_arms.weapons()->pending == 0xFF &&
-							p_arms.weapons()->slots[s].phase == sw::WeaponPhase::Ready)) {
-				phase_ = ExplosivePhase::BackOff;
-			}
-			break;
-		case ExplosivePhase::BackOff:
-			if (enemy_.surface >= kBackOffMetres) {
-				phase_ = ExplosivePhase::Detonate;
-				detonate_at_ = p_tick + sim::seconds_to_ticks(kDetonateDelayS);
-			}
-			break;
-		case ExplosivePhase::Detonate:
-			if (!own_packs(*g, p_slot, slot_def(p_arms, s))) {
-				phase_ = ExplosivePhase::Approach;
-			}
-			break;
+	const sw::SoldierWeaponsState &ws = *p_arms.weapons();
+	ai::PlacedExplosiveCheck c;
+	c.gap = enemy_.surface;
+	c.reach = d->projectile.explosion.inner_radius;
+	c.loaded = rounds > 0;
+	c.thrown = rounds < rounds_before_;
+	c.ready = ws.active == s && ws.pending == 0xFF && ws.slots[s].phase == sw::WeaponPhase::Ready;
+	c.charges_out = phase_ == ExplosivePhase::Detonate && own_packs(*g, p_slot, slot_def(p_arms, s));
+	const ExplosivePhase next = ai::placed_explosive_next(phase_, c);
+	if (next == ExplosivePhase::Place && phase_ != next) {
+		rounds_before_ = rounds;
 	}
+	if (next == ExplosivePhase::Detonate && phase_ != next) {
+		detonate_at_ = p_tick + sim::seconds_to_ticks(ai::kPlacedDetonateDelayS);
+	}
+	phase_ = next;
 }
 
 sim::Vec3 BotVehicleWeapons::back_off_goal(const sim::Vec3 &p_from, float p_turn) const {
 	const float yaw = yaw_of(p_from[0] - enemy_.centre[0], p_from[2] - enemy_.centre[2]) + p_turn;
-	return { enemy_.centre[0] + std::sin(yaw) * kBackOffGoalMetres, p_from[1],
-		enemy_.centre[2] + std::cos(yaw) * kBackOffGoalMetres };
+	return { enemy_.centre[0] + std::sin(yaw) * ai::kPlacedBackOffMetres, p_from[1],
+		enemy_.centre[2] + std::cos(yaw) * ai::kPlacedBackOffMetres };
 }
 
 }

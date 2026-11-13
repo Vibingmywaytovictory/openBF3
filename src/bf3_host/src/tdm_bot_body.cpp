@@ -631,7 +631,7 @@ void BotBody::vehicle_move(const BotFrame &p_frame, BotIntent &r_intent) {
 		const float gap = d != nullptr ? 0.5f * d->projectile.explosion.inner_radius : 0.0f;
 		const sim::Vec3 goal = beside_hull_point(a, f.eye, f.self.position, gap);
 		const float hd = horizontal(f.self.position, goal);
-		if (hd <= kBackOffGoalMetres &&
+		if (hd <= ai::kPlacedBackOffMetres &&
 				!f.world.ray_any(f.eye, sub(add(goal, 0.0f, f.eye[1] - f.self.position[1], 0.0f), f.eye),
 						sim::query_mask::kMovement)) {
 			navigation.clear_goal();
@@ -661,7 +661,7 @@ void BotBody::repair_move(const BotFrame &p_frame, BotIntent &r_intent) {
 	}
 	const VehicleAim &a = vehicles.repair();
 	const uint16_t tool = f.arms.weapons()->slots[a.weapon_slot].def;
-	if (a.surface <= 0.5f * weapon_range(*shared->host.gunplay, tool)) {
+	if (a.surface <= ai::assist_reach(weapon_range(*shared->host.gunplay, tool), 0.0f)) {
 		return;
 	}
 	navigation.set_goal(*shared, f.tick,

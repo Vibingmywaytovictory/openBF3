@@ -1,5 +1,7 @@
 #include <doctest/doctest.h>
 
+#include "bf3/ai/behaviour/curves.h"
+#include "bf3/ai/behaviour/vehicle_gadgets.h"
 #include "bf3/ai/behaviour/weapon_choice.h"
 
 #include <array>
@@ -55,5 +57,56 @@ TEST_SUITE("ai-gadgets") {
 		const std::array<WeaponChoice, 2> out{ gun(40, 20.0f), gun(100, 20.0f) };
 		CHECK(chose_weapon(out, 0, 35.0f, false, false, false, false) == 0);
 		CHECK(chose_weapon(out, -1, 35.0f, false, false, false, false) == 1);
+	}
+
+	TEST_CASE("needs_assist, assist_score and assist_reach: BBMedicAssist's 0.75 and 0.99 health thresholds and its "
+			  "strength / (DecliningSlopeCurve(1 - health) x distance) score, BBPMedicAssist's half replenish radius "
+			  "plus both radii") {
+		CHECK(needs_assist(0.74f, false));
+		CHECK_FALSE(needs_assist(0.75f, false));
+		CHECK_FALSE(needs_assist(0.9f, false));
+		CHECK(needs_assist(0.9f, true));
+		CHECK_FALSE(needs_assist(0.99f, true));
+		CHECK_FALSE(needs_assist(0.0f, true));
+		CHECK(kAssistRadiusMetres == 75.0f);
+		CHECK(assist_score(1.0f, 0.5f, 10.0f) ==
+				doctest::Approx(1.0f / (DecliningSlopeCurve::calculate(0.5f) * 10.0f)));
+		CHECK(assist_score(1.0f, 0.3f, 4.0f) == doctest::Approx(1.0f / (DecliningSlopeCurve::calculate(0.7f) * 4.0f)));
+		CHECK(assist_score(1.0f, 0.5f, 5.0f) > assist_score(1.0f, 0.5f, 20.0f));
+		CHECK(assist_score(2.0f, 0.5f, 10.0f) == doctest::Approx(2.0f * assist_score(1.0f, 0.5f, 10.0f)));
+		CHECK(assist_reach(1.8f, 0.0f) == doctest::Approx(0.9f));
+		CHECK(assist_reach(1.8f, 0.6f) == doctest::Approx(1.5f));
+	}
+
+	TEST_CASE("placed_explosive_next: BBPFireInfantery's placed-explosive steps, walk up within reach, place, stay "
+			  "until the weapon is ready or empty, back off until 9 m clear, set off, and again once no charge lies") {
+		PlacedExplosiveCheck c;
+		c.loaded = true;
+		c.gap = 4.0f;
+		c.reach = 1.5f;
+		CHECK(placed_explosive_next(ExplosivePhase::Approach, c) == ExplosivePhase::Approach);
+		c.gap = 1.0f;
+		CHECK(placed_explosive_next(ExplosivePhase::Approach, c) == ExplosivePhase::Place);
+		c.loaded = false;
+		CHECK(placed_explosive_next(ExplosivePhase::Approach, c) == ExplosivePhase::Approach);
+		CHECK(placed_explosive_next(ExplosivePhase::Place, c) == ExplosivePhase::Place);
+		c.thrown = true;
+		CHECK(placed_explosive_next(ExplosivePhase::Place, c) == ExplosivePhase::Wait);
+		CHECK(placed_explosive_next(ExplosivePhase::Wait, c) == ExplosivePhase::BackOff);
+		c.loaded = true;
+		CHECK(placed_explosive_next(ExplosivePhase::Wait, c) == ExplosivePhase::Wait);
+		c.ready = true;
+		CHECK(placed_explosive_next(ExplosivePhase::Wait, c) == ExplosivePhase::BackOff);
+		c.gap = 8.9f;
+		CHECK(placed_explosive_next(ExplosivePhase::BackOff, c) == ExplosivePhase::BackOff);
+		c.gap = kPlacedClearMetres;
+		CHECK(placed_explosive_next(ExplosivePhase::BackOff, c) == ExplosivePhase::Detonate);
+		c.charges_out = true;
+		CHECK(placed_explosive_next(ExplosivePhase::Detonate, c) == ExplosivePhase::Detonate);
+		c.charges_out = false;
+		CHECK(placed_explosive_next(ExplosivePhase::Detonate, c) == ExplosivePhase::Approach);
+		CHECK(kPlacedClearMetres == 9.0f);
+		CHECK(kPlacedBackOffMetres == 30.0f);
+		CHECK(kPlacedDetonateDelayS == doctest::Approx(0.7f));
 	}
 }

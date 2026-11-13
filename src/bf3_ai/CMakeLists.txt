@@ -193,4 +193,6 @@ target_sources(bf3_ai PRIVATE
 target_sources(bf3_ai PRIVATE
     include/bf3/ai/behaviour/weapon_choice.h
     src/behaviour/weapon_choice.cpp
+    include/bf3/ai/behaviour/vehicle_gadgets.h
+    src/behaviour/vehicle_gadgets.cpp
 )
