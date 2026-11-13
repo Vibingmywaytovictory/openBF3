@@ -12,6 +12,7 @@
 #include "bf3/sim/vehicle_types.h"
 #include "bf3/sim/vehicle_world.h"
 #include "bf3/sim/vehicles/run_over_rules.h"
+#include "bf3/sim/vehicles/vehicle_armament.h"
 #include "bf3/sim/vehicles/vehicle_obstacles.h"
 
 #include <algorithm>
@@ -455,19 +456,13 @@ TEST_SUITE("host-vehicles-exit") {
 		auto vehicles = std::make_shared<host::LevelVehicles>(lv);
 		host::LevelVehicleSpawner parked = lv.spawners[*jeep];
 		parked.initial_spawn_delay = 0.0f;
-		const auto turn_by = [](const std::array<float, 4> &p_q, const sim::Vec3 &p_v) {
-			const float x = p_q[0], y = p_q[1], z = p_q[2], w = p_q[3];
-			const float tx = 2.0f * (y * p_v[2] - z * p_v[1]), ty = 2.0f * (z * p_v[0] - x * p_v[2]),
-						tz = 2.0f * (x * p_v[1] - y * p_v[0]);
-			return sim::Vec3{ p_v[0] + w * tx + (y * tz - z * ty), p_v[1] + w * ty + (z * tx - x * tz),
-				p_v[2] + w * tz + (x * ty - y * tx) };
-		};
 		const core::Vec3 nearest = *host::vehicle_exit_point(kind, 0);
 		const float lateral = std::sqrt(nearest[0] * nearest[0] + nearest[2] * nearest[2]);
 		REQUIRE(lateral > 0.5f);
 		const float reach = lateral + kind.box.half[0] - 0.1f;
-		const sim::Vec3 out = turn_by(
-				parked.placement.rotation, { nearest[0] / lateral * reach, 0.0f, nearest[2] / lateral * reach });
+		const sim::Vec3 out =
+				sim::vehicles::hull_transform(parked.placement.rotation, {})
+						.transform_point({ nearest[0] / lateral * reach, 0.0f, nearest[2] / lateral * reach });
 		host::LevelVehicleSpawner blocker = parked;
 		blocker.placement.position = { parked.placement.position[0] + out[0], parked.placement.position[1] + 0.3f,
 			parked.placement.position[2] + out[2] };
@@ -503,10 +498,7 @@ TEST_SUITE("host-vehicles-exit") {
 		const sim::MotorParams &p = motor.params();
 		const float pad = p.tuning.character_padding;
 		const float height = p.poses[size_t(sim::Pose::Stand)].height;
-		const sim::Vec3 first = [&] {
-			const sim::Vec3 r = turn_by(body.rotation, nearest);
-			return sim::Vec3{ body.origin[0] + r[0], body.origin[1] + r[1], body.origin[2] + r[2] };
-		}();
+		const sim::Vec3 first = sim::vehicles::hull_transform(body.rotation, body.origin).transform_point(nearest);
 		const bool first_blocked = sv.obstacles().overlaps_capsule(first, p.radius + pad, height + 2.0f * pad);
 		const bool clear = !sv.obstacles().overlaps_capsule(*exited, p.radius + pad, height + 2.0f * pad);
 		std::printf("exit: Growler of spawner %zu, %zu exit points, the nearest at (%.2f %.2f %.2f) is %s; the driver "
@@ -610,18 +602,13 @@ TEST_SUITE("host-vehicles-exit") {
 				continue;
 			}
 			const sim::VehicleBodyState body = sv.world()->state(sim::VehicleSlot(i)).body;
+			const core::Transform hull = sim::vehicles::hull_transform(body.rotation, body.origin);
 			for (uint8_t seat = 0; seat < kind.seats; ++seat) {
 				const std::vector<core::Vec3> order = host::vehicle_exit_order(kind, seat);
 				std::optional<size_t> taken;
 				size_t clear = 0;
 				for (size_t k = 0; k < order.size(); ++k) {
-					const float x = body.rotation[0], y = body.rotation[1], z = body.rotation[2], w = body.rotation[3];
-					const core::Vec3 &v = order[k];
-					const float tx = 2.0f * (y * v[2] - z * v[1]), ty = 2.0f * (z * v[0] - x * v[2]),
-								tz = 2.0f * (x * v[1] - y * v[0]);
-					const sim::Vec3 point{ body.origin[0] + v[0] + w * tx + (y * tz - z * ty),
-						body.origin[1] + v[1] + w * ty + (z * tx - x * tz),
-						body.origin[2] + v[2] + w * tz + (x * ty - y * tx) };
+					const sim::Vec3 point = hull.transform_point(order[k]);
 					if (motor.fits_standing(point) &&
 							!sv.obstacles().overlaps_capsule(point, p.radius + pad, height + 2.0f * pad)) {
 						++clear;
