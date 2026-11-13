@@ -1,7 +1,11 @@
 #include <doctest/doctest.h>
 
 #include "gunplay_fixture.h"
+#include "server_ghosts.h"
+#include "tdm_fixture.h"
+#include "vehicles/server_vehicles.h"
 
+#include "bf3/host/level_vehicles.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/vehicle_model.h"
@@ -13,8 +17,10 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <optional>
 
 using namespace bf3;
+namespace tdm = bf3::test::tdm;
 
 namespace {
 
@@ -219,5 +225,73 @@ TEST_SUITE("host-vehicles-phys-unit") {
 				CHECK(kills == (speed > rule.kill_speed ? kOffsets : 0));
 			}
 		}
+	}
+}
+
+TEST_SUITE("host-vehicles-wreck-scope") {
+	TEST_CASE("vehicles: MP_007 ConquestSmall0 with ghost scoping on: a wreck's exploded mark reaches a viewer who "
+			  "holds the vehicle out of scope, every snapshot of the kWreckWireTicks after its explosion and no "
+			  "other") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		std::optional<size_t> target;
+		for (size_t i = 0; i < lv.spawners.size() && !target; ++i) {
+			const host::LevelVehicleKind &k = lv.kinds[lv.spawners[i].kind];
+			if (k.blueprint == "vehicles/growleritv/growleritv" && k.damage.upside_down_damage > 0.0f) {
+				target = i;
+			}
+		}
+		REQUIRE(target.has_value());
+		auto vehicles = std::make_shared<host::LevelVehicles>(lv);
+		host::LevelVehicleSpawner &rolled = vehicles->spawners[*target];
+		rolled.placement.position[1] += 2.0f;
+		rolled.placement.rotation = { 0.0f, 0.0f, 1.0f, 0.0f };
+		rolled.initial_spawn_delay = 0.0f;
+		host::ServerVehicles sv;
+		REQUIRE(sv.configure(vehicles, level->shared->static_world, 1.0f).ok());
+		sv.configure_scope(1, true);
+		host::GhostViewer far;
+		far.spawned = true;
+		far.position = { rolled.placement.position[0] + 5000.0f, rolled.placement.position[1],
+			rolled.placement.position[2] };
+		far.eye = far.position;
+		uint32_t before = 0, marked = 0, after = 0;
+		std::optional<sim::Tick> exploded;
+		for (sim::Tick t = 1; t < 6000 && (!exploded || t < *exploded + 2u * host::kWreckWireTicks); ++t) {
+			REQUIRE(sv.step(t, 0).ok());
+			sv.step_health(t, {});
+			sv.spawn_due(t, nullptr);
+			if (!exploded && sv.stats().exploded > 0) {
+				exploded = t;
+			}
+			for (const net::VehicleStates &m : sv.wire_for(0, far, t)) {
+				for (const net::VehicleWire &w : m.vehicles) {
+					if (w.spawner != *target) {
+						continue;
+					}
+					if (!exploded) {
+						++before;
+					} else if (w.exploded && t < *exploded + host::kWreckWireTicks) {
+						++marked;
+					} else {
+						++after;
+					}
+				}
+			}
+		}
+		REQUIRE(exploded.has_value());
+		std::printf(
+				"wreck scope: the rolled Growler of spawner %zu exploded at tick %u; the out-of-scope viewer got it "
+				"%u times before, %u times with the exploded mark, %u times after; scope held %llu, out of scope "
+				"%llu\n",
+				*target, unsigned(*exploded), before, marked, after, (unsigned long long)sv.scope_stats().held,
+				(unsigned long long)sv.scope_stats().out_of_scope);
+		CHECK(before == 0u);
+		CHECK(marked == host::kWreckWireTicks);
+		CHECK(after == 0u);
+		CHECK(sv.scope_stats().out_of_scope > 0u);
 	}
 }
