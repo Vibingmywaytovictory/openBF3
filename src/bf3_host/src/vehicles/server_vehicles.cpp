@@ -327,6 +327,7 @@ uint8_t ServerVehicles::hull_property(size_t p_vehicle) const {
 void ServerVehicles::refresh_targets() {
 	targets_.clear();
 	pack_vehicles_.clear();
+	lock_candidates_.clear();
 	for (size_t i = 0; i < vehicles_.size(); ++i) {
 		const ServerVehicle &v = vehicles_[i];
 		if (!v.live) {
@@ -348,6 +349,13 @@ void ServerVehicles::refresh_targets() {
 		pack_vehicles_.push_back(
 				sim::weapons::PackVehicle{ 0, hull_centre(i), state.body.com_position, state.body.linear_velocity,
 						level_->kinds[level_->spawners[i].kind].min_speed_for_mine, v.occupants[0] });
+		sim::weapons::LockCandidate lock = level_->kinds[level_->spawners[i].kind].lock;
+		lock.id = t.target.id;
+		lock.team = v.team;
+		lock.position = hull(i).trans;
+		lock.aim = hull_centre(i);
+		lock.occupied = t.crew_count > 0;
+		lock_candidates_.push_back(lock);
 	}
 	refresh_obstacles();
 }

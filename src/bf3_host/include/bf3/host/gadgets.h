@@ -18,6 +18,11 @@ struct GadgetStats {
 	uint64_t forgotten = 0;
 	uint64_t remote_detonations = 0;
 	uint64_t pack_detonations = 0;
+	uint64_t lock_samples = 0;
+	uint64_t lock_candidates = 0;
+	uint64_t lock_rays = 0;
+	uint64_t locks_gained = 0;
+	uint64_t guided_launches = 0;
 	sim::weapons::GadgetFieldStats field;
 };
 

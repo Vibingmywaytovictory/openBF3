@@ -6,6 +6,8 @@
 #include "bf3/sim/soldier_state.h"
 #include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/gadgets.h"
+#include "bf3/sim/weapons/guidance.h"
+#include "bf3/sim/weapons/locking.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
 #include <array>
@@ -19,6 +21,16 @@ namespace bf3::host {
 
 struct GunplayLevel;
 class SquadTable;
+
+class LockGuidance final : public sim::weapons::GuidanceTargets {
+public:
+	void set(std::span<const sim::weapons::LockCandidate> p_candidates);
+	std::span<const sim::weapons::LockCandidate> candidates() const { return candidates_; }
+	std::optional<sim::weapons::GuidanceTarget> guidance_target(uint32_t p_id) const override;
+
+private:
+	std::vector<sim::weapons::LockCandidate> candidates_;
+};
 
 struct GadgetSoldier {
 	sim::SoldierState *state = nullptr;
@@ -48,6 +60,13 @@ public:
 	bool ownerless(uint32_t p_shot_index) const;
 	void clear();
 
+	void set_lock_candidates(std::span<const sim::weapons::LockCandidate> p_candidates);
+	bool aim_lock(uint8_t p_slot, uint8_t p_team, uint16_t p_def, uint8_t p_variant, const sim::Vec3 &p_eye,
+			const sim::Vec3 &p_forward, bool p_zoom, const sim::CollisionWorld *p_world);
+	uint32_t launch_target(uint8_t p_slot, uint16_t p_def, uint8_t p_variant);
+	const sim::weapons::WeaponLockState &lock(uint8_t p_slot) const;
+	const sim::weapons::GuidanceTargets &guidance() const { return guidance_; }
+
 	std::optional<sim::Vec3> squad_beacon(uint8_t p_slot, uint8_t p_team, const SquadTable *p_squads) const;
 	std::span<const sim::weapons::Deployable> live() const { return field_.live(); }
 	uint64_t revision() const { return field_.revision(); }
@@ -71,6 +90,9 @@ private:
 	std::array<bool, net::kMaxSlots> detonator_held_{};
 	std::vector<PendingBlast> pending_;
 	std::vector<uint32_t> ownerless_;
+	std::array<sim::weapons::WeaponLockState, net::kMaxSlots> locks_{};
+	std::array<uint16_t, net::kMaxSlots> lock_defs_{};
+	LockGuidance guidance_;
 	mutable GadgetStats stats_;
 	sim::Tick tick_ = 0;
 };

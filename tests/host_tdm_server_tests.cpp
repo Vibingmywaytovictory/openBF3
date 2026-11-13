@@ -7697,3 +7697,234 @@ TEST_SUITE("host-vehicles-contact") {
 		CHECK(m.rules().stats().runtime_faults == 0u);
 	}
 }
+
+namespace {
+
+struct GuidedWatch final : host::GunplayObserver {
+	uint32_t shot_index = UINT32_MAX;
+	uint16_t def = sw::kNoWeapon;
+	std::vector<std::pair<uint32_t, sw::Projectile>> flight;
+	std::vector<sw::ImpactEvent> impacts;
+	std::vector<sw::DetonationEvent> detonations;
+	std::vector<sw::DamageEvent> hits;
+
+	void projectiles(
+			uint32_t p_tick, const sw::ProjectileStepOutput &p_out, std::span<const sw::Projectile> p_live) override {
+		for (const sw::Projectile &p : p_live) {
+			if (p.def == def && (shot_index == UINT32_MAX || p.shot_index == shot_index)) {
+				shot_index = p.shot_index;
+				flight.emplace_back(p_tick, p);
+			}
+		}
+		for (const sw::ImpactEvent &e : p_out.impacts) {
+			if (e.def == def) {
+				impacts.push_back(e);
+			}
+		}
+		for (const sw::DetonationEvent &d : p_out.detonations) {
+			if (d.def == def) {
+				detonations.push_back(d);
+			}
+		}
+	}
+	void damage(uint32_t p_tick, const sw::DamageEvent &p_event, bool p_applied, float p_health_after) override {
+		(void)p_tick, (void)p_health_after;
+		if (p_applied && p_event.def == def) {
+			hits.push_back(p_event);
+		}
+	}
+};
+
+}
+
+TEST_SUITE("host-gadgets-guided") {
+	TEST_CASE(
+			"gadgets: MP_007 ConquestSmall0: an engineer's FGM-148 picked in CUSTOMIZE fires only once locked; zoomed "
+			"on a parked enemy MBT its radar controller (zoom level 1, LockTime 2.25 s, SampleRate 0.06 s) locks, "
+			"and the missile flies the R2-G4 top attack (static point, target + 35 m, homing inside 15 m) into the "
+			"tank from above") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		auto watch = std::make_shared<GuidedWatch>();
+		std::unique_ptr<Match> m = start_match(
+				*level, true, 131u, 0, 1, [&](host::GameServerConfig &r_config) { r_config.gunplay.observer = watch; });
+		tdm::ScriptedPeer &gunner = m->join("gunner");
+		gunner.ready();
+		REQUIRE(wait_in_round(*m));
+		const uint8_t team = m->rules().team_of(uint8_t(gunner.slot()));
+		const uint8_t engineer = uint8_t(host::KitRole::Engineer);
+		const uint8_t launcher_slot = uint8_t(core::gameplay::WeaponSlot::Gadget1);
+		const host::LoadoutKit *kit = gl.loadouts.kit(team, engineer);
+		REQUIRE(kit != nullptr);
+		const auto item = std::find_if(kit->slots[launcher_slot].begin(), kit->slots[launcher_slot].end(),
+				[&](const host::LoadoutItem &i) { return i.unlock == "weapons/fgm148/u_fgm148"; });
+		REQUIRE(item != kit->slots[launcher_slot].end());
+		REQUIRE(item->def < gl.defs.size());
+		const uint16_t javelin = item->def;
+		watch->def = javelin;
+		const sw::WeaponSimDef &def = m->server.gunplay()->table().def(javelin, 0);
+		REQUIRE(def.locking.present);
+		CHECK(def.locking.fire_only_when_locked);
+		CHECK(def.locking.homing);
+		CHECK(def.locking.primary.lock_type(1) == core::gameplay::LockType::LaserPainted);
+		CHECK(def.locking.secondary.lock_type(1) == core::gameplay::LockType::Radar);
+		CHECK(def.locking.secondary.lock_type(0) == core::gameplay::LockType::Never);
+		CHECK(def.projectile.guidance.use_static);
+		CHECK(def.projectile.guidance.use_target);
+		net::LoadoutRequest request;
+		request.kit = engineer;
+		request.items[launcher_slot] = item->identifier;
+		m->server.on_receive(gunner.peer(), net::kChannelReliable, net::encode_loadout_request(request));
+		m->ticks(1);
+		gunner.spawn_request(engineer);
+		REQUIRE(m->until([&] { return is_alive(m->state(gunner.slot())); }, 900));
+		REQUIRE(m->server.gunplay()->weapons(uint8_t(gunner.slot())).slots[launcher_slot].def == javelin);
+		const auto mbt = [&](const net::VehicleWire &p_w) {
+			const std::string &b = lv.kinds[lv.spawners[p_w.spawner].kind].blueprint;
+			return b == "vehicles/t90/t90" || b == "vehicles/m1a2/m1abrams";
+		};
+		const sim::logic::ConquestParams &conquest = *level->shared->logic_natives->conquest;
+		const auto in_play = [&](const sim::Vec3 &p_at) {
+			for (const sim::logic::ConquestAreaData &a : conquest.areas) {
+				if ((!a.params.team_specific || a.params.team == team) &&
+						!sim::logic::polygon_contains(a.polygon, p_at[0], p_at[2])) {
+					return false;
+				}
+			}
+			return true;
+		};
+		VehicleWatch vehicles;
+		std::optional<uint16_t> tank;
+		sim::Vec3 stand{}, aim{};
+		REQUIRE(m->until(
+				[&] {
+					vehicles.take(m->out, gunner.peer());
+					for (const net::VehicleWire &w : vehicles.latest) {
+						if (tank || w.team == team || w.team == 0 || !mbt(w) ||
+								!parked_upright(w.state.body.rotation, w.state.body.linear_velocity)) {
+							continue;
+						}
+						const host::LevelVehicleKind &k = lv.kinds[lv.spawners[w.spawner].kind];
+						const sim::Vec3 &c = w.state.body.com_position;
+						const core::Transform turn = sim::vehicles::hull_transform(w.state.body.rotation, {});
+						const sim::Vec3 origin = core::vec::sub(c, turn.transform_vector(k.model->center_of_mass));
+						const sim::Vec3 centre = sim::vehicles::hull_transform(w.state.body.rotation, origin)
+														 .transform_point(k.box.centre);
+						for (int a = 0; !tank && a < 16; ++a) {
+							const float yaw = float(a) * 3.14159265f / 8.0f;
+							for (float d = 60.0f; !tank && d <= 240.0f; d += 10.0f) {
+								const sim::Vec3 at = ground_at(
+										*m->world, c[0] + d * std::sin(yaw), c[2] + d * std::cos(yaw), c[1] + 60.0f);
+								if (std::fabs(at[1] - c[1]) < 6.0f && in_play(at) && m->motor.fits_standing(at) &&
+										clear(*m->world, add(at, 0.0f, 1.6f, 0.0f), centre) &&
+										clear(*m->world, add(centre, 0.0f, 2.0f, 0.0f),
+												add(centre, 0.0f, 45.0f, 0.0f)) &&
+										clear(*m->world, add(at, 0.0f, 1.6f, 0.0f), add(at, 0.0f, 55.0f, 0.0f))) {
+									tank = w.spawner;
+									stand = at;
+									aim = centre;
+								}
+							}
+						}
+					}
+					return tank.has_value();
+				},
+				sim::seconds_to_ticks(tdm::latest_initial_delay(lv)) + 600u));
+		const float full = sim::vehicles::full_vehicle_health(lv.kinds[lv.spawners[*tank].kind].damage);
+		REQUIRE(m->server.vehicle_health(*tank) == full);
+		const uint32_t tank_id = sim::vehicles::kVehicleTargetIdBase + uint32_t(*tank);
+		m->teleport(gunner, stand);
+		m->ticks(20);
+		bool zoom = false, fire = false;
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			return aim_command(*m, p_tick, p_state, aim, sim::Pose::Stand,
+					select_and_fire(launcher_slot, fire) | (zoom ? sim::buttons::kZoom : 0u));
+		};
+		m->ticks(150);
+		const uint64_t shots = m->server.gunplay()->stats().shots;
+		fire = true;
+		m->ticks(60);
+		fire = false;
+		CHECK(m->server.gunplay()->stats().shots == shots);
+		CHECK_FALSE(m->server.gunplay()->lock_state(uint8_t(gunner.slot())).locked());
+		zoom = true;
+		const sim::Tick zoomed = m->now();
+		REQUIRE(m->until([&] { return m->server.gunplay()->lock_state(uint8_t(gunner.slot())).locked(); }, 600));
+		const sim::Tick lock_ticks = m->now() - zoomed;
+		const sw::WeaponLockState lock = m->server.gunplay()->lock_state(uint8_t(gunner.slot()));
+		std::printf("javelin: zoomed %.1f m from the %s of spawner %u, locked after %u ticks (%.3f s), primary %s, "
+					"secondary target 0x%x\n",
+				double(horizontal(stand, aim)), lv.kinds[lv.spawners[*tank].kind].blueprint.c_str(), unsigned(*tank),
+				unsigned(lock_ticks), double(lock_ticks) / double(sim::kSimHz),
+				lock.primary.locked ? "locked" : "not locked", unsigned(lock.secondary.target));
+		CHECK(lock.secondary.locked);
+		CHECK_FALSE(lock.primary.locked);
+		CHECK(lock.target() == tank_id);
+		CHECK(double(lock_ticks) / double(sim::kSimHz) >= 2.25);
+		CHECK(double(lock_ticks) / double(sim::kSimHz) <= 2.25 + 2.0 * 0.0667 + 1.0 / 60.0);
+		const uint64_t launches = m->server.gunplay()->gadget_stats().guided_launches;
+		const uint64_t hits = m->server.stats().vehicle_hits;
+		fire = true;
+		REQUIRE(m->until([&] { return m->server.gunplay()->stats().shots > shots; }, 120));
+		fire = false;
+		CHECK(m->server.gunplay()->gadget_stats().guided_launches == launches + 1u);
+		REQUIRE(m->until([&] { return !watch->detonations.empty(); }, 15 * 60));
+		m->ticks(2);
+		REQUIRE_FALSE(watch->flight.empty());
+		float peak = -1e9f;
+		std::array<uint32_t, 7> state_ticks{};
+		for (const auto &[tick, p] : watch->flight) {
+			peak = std::max(peak, float(p.position[1]));
+			++state_ticks[size_t(p.guide.state)];
+			if (tick % 15u == 0u) {
+				std::printf("javelin: tick %u state %u at (%.1f %.1f %.1f) speed %.1f, %.1f m from the centre\n",
+						unsigned(tick), unsigned(p.guide.state), p.position[0], p.position[1], p.position[2],
+						std::sqrt(p.velocity[0] * p.velocity[0] + p.velocity[1] * p.velocity[1] +
+								p.velocity[2] * p.velocity[2]),
+						double(core::vec::length(core::vec::sub(
+								sim::Vec3{ float(p.position[0]), float(p.position[1]), float(p.position[2]) }, aim))));
+			}
+		}
+		const sw::DetonationEvent &blast = watch->detonations.front();
+		std::printf("javelin: peak %.1f m above the hull centre; ticks in states 2/3/4: %u/%u/%u; detonation %.2f m "
+					"from the centre, %.2f m above it\n",
+				double(peak - aim[1]), unsigned(state_ticks[2]), unsigned(state_ticks[3]), unsigned(state_ticks[4]),
+				double(core::vec::length(core::vec::sub(blast.position, aim))), double(blast.position[1] - aim[1]));
+		CHECK(state_ticks[size_t(sw::MissileState::StaticPoint)] > 0u);
+		CHECK(state_ticks[size_t(sw::MissileState::TargetOffset)] > 0u);
+		CHECK(state_ticks[size_t(sw::MissileState::Homing)] > 0u);
+		CHECK(peak - aim[1] >= 30.0f);
+		CHECK_FALSE(blast.dud);
+		REQUIRE_FALSE(watch->impacts.empty());
+		CHECK(watch->impacts.back().velocity[1] < 0.0f);
+		CHECK(m->server.stats().vehicle_hits > hits);
+		const float first = m->server.vehicle_health(*tank).value_or(-1.0f);
+		REQUIRE(m->until(
+				[&] {
+					const sw::WeaponSlotState &w =
+							m->server.gunplay()->weapons(uint8_t(gunner.slot())).slots[launcher_slot];
+					return w.magazine > 0 && w.phase == sw::WeaponPhase::Ready &&
+							m->server.gunplay()->lock_state(uint8_t(gunner.slot())).locked();
+				},
+				600));
+		const uint64_t second_shots = m->server.gunplay()->stats().shots;
+		watch->detonations.clear();
+		watch->shot_index = UINT32_MAX;
+		fire = true;
+		REQUIRE(m->until([&] { return m->server.gunplay()->stats().shots > second_shots; }, 120));
+		fire = false;
+		REQUIRE(m->until([&] { return !watch->detonations.empty(); }, 15 * 60));
+		m->ticks(2);
+		const float second = m->server.vehicle_health(*tank).value_or(-1.0f);
+		std::printf("javelin: health %.2f -> %.2f after the first missile -> %.2f after the second (%.2f %%)\n",
+				double(full), double(first), double(second), double(100.0f * (first - second) / full));
+		CHECK(first == doctest::Approx(full));
+		CHECK(second < first);
+		CHECK(m->server.gunplay()->gadget_stats().guided_launches == launches + 2u);
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+}

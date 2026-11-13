@@ -117,6 +117,7 @@ public:
 	const sim::VehicleObstacles &obstacles() const { return obstacles_; }
 	std::span<const sim::vehicles::VehicleTarget> targets() const { return targets_; }
 	std::span<const sim::weapons::PackVehicle> pack_vehicles() const { return pack_vehicles_; }
+	std::span<const sim::weapons::LockCandidate> lock_candidates() const { return lock_candidates_; }
 	bool hidden_crew(size_t p_slot) const;
 	const VehicleGunnery &gunnery() const { return gunnery_; }
 	core::Transform hull(size_t p_vehicle) const;
@@ -170,6 +171,7 @@ private:
 	std::vector<uint8_t> kind_property_;
 	std::vector<sim::vehicles::VehicleTarget> targets_;
 	std::vector<sim::weapons::PackVehicle> pack_vehicles_;
+	std::vector<sim::weapons::LockCandidate> lock_candidates_;
 	std::vector<VehicleStrike> strikes_;
 	std::vector<sim::weapons::DamageEvent> crew_kills_;
 	std::vector<sim::weapons::DamageEvent> run_overs_;

@@ -189,6 +189,11 @@ core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
 			k.material = def->material;
 			k.min_speed_for_mine = def->min_speed_for_mine_activation;
 			k.run_over = { def->kill_soldier_collision_speed_threshold, def->ignore_soldier_collision_normal };
+			k.lock.lockable = def->lockable;
+			k.lock.radar = def->radar_signature;
+			k.lock.heat = def->heat_signature;
+			k.lock.time_multiplier = def->locking_time_multiplier;
+			k.lock.never_report_empty = def->never_report_empty;
 			k.explosion = def->explosion;
 			k.explosion_effect = def->explosion_effect;
 			k.disabled_input = def->disabled_input;

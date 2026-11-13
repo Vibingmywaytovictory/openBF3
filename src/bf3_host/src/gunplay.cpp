@@ -296,10 +296,6 @@ core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared
 			if (variants.contains(u.unlock)) {
 				continue;
 			}
-			if (g->fire_only_when_locked) {
-				level->notes.push_back("gadget " + u.unlock + ": FireOnlyWhenLockedOn, and no lock-on is simulated");
-				continue;
-			}
 			const bool deployable = g->kind != sw::GadgetKind::None;
 			core::Result<gp::WeaponDef> def = w->catalog->resolve(u.unlock);
 			const core::Status simulated = sim_def_status(def, *level->materials);
@@ -561,6 +557,7 @@ core::Result<std::unique_ptr<Gunplay>> Gunplay::create(const SharedLevel &p_leve
 	m.flags = match_weapon_flags(p_config.exact_aim, p_config.infinite_magazine);
 	m.projectiles = std::make_unique<sw::ProjectileWorld>(m.table);
 	m.gadgets = std::make_unique<ServerGadgets>(level, m.table);
+	m.projectiles->set_guidance(&m.gadgets->guidance());
 	core::Result<sw::SuppressionDef> suppression = sw::make_suppression_def(level.soldier);
 	if (!suppression) {
 		return core::error_at("Gunplay", suppression.error());
@@ -820,8 +817,11 @@ void Gunplay::step_soldier(uint8_t p_slot, const sim::Command &p_command, const 
 	if (slot_field > sw::kMaxWeaponSlots) {
 		++m.stats.slot_field_clamped;
 	}
-	const sw::WeaponContext ctx = sw::make_weapon_context(
+	sw::WeaponContext ctx = sw::make_weapon_context(
 			m.shared->motor, p_before, p_after, p_command, suppression_scale(p_slot, p_command.tick));
+	ctx.locked = m.gadgets->aim_lock(p_slot, s.team, s.weapons.current().def, s.weapons.current().variant, ctx.eye_end,
+			sw::aim_direction(p_command.yaw, p_command.pitch, {}), (p_command.buttons & sim::buttons::kZoom) != 0,
+			m.world);
 	sw::step_weapons_with_rules(*m.table, s.weapons, p_command, ctx, m.match_seed, s.spawn_tick, s.out);
 	s.out_tick = p_command.tick;
 	m.gadgets->detonator(p_slot, s.weapons.current().def, (p_command.buttons & sim::buttons::kZoom) != 0);
@@ -859,6 +859,7 @@ void Gunplay::step_soldier(uint8_t p_slot, const sim::Command &p_command, const 
 			have_view = true;
 		}
 		for (uint8_t i = 0; i < s.out.shot_count; ++i) {
+			s.out.shots[i].lock_target = m.gadgets->launch_target(p_slot, s.out.shots[i].def, s.out.shots[i].variant);
 			const sw::ShotEvent &e = s.out.shots[i];
 			if (m.gadgets->is_gadget(e.def)) {
 				m.gadgets->deploy(e, s.team, p_command.tick, m.world);
@@ -922,6 +923,14 @@ void Gunplay::add_damage(std::span<const sw::DamageEvent> p_events) {
 
 void Gunplay::set_pack_vehicles(std::span<const sw::PackVehicle> p_vehicles) {
 	impl_->pack_vehicles = p_vehicles;
+}
+
+void Gunplay::set_lock_candidates(std::span<const sw::LockCandidate> p_candidates) {
+	impl_->gadgets->set_lock_candidates(p_candidates);
+}
+
+const sw::WeaponLockState &Gunplay::lock_state(uint8_t p_slot) const {
+	return impl_->gadgets->lock(p_slot);
 }
 
 void Gunplay::set_vehicle_targets(std::span<const sim::vehicles::VehicleTarget> p_targets) {

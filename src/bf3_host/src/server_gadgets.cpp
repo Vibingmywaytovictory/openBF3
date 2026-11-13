@@ -63,7 +63,9 @@ uint64_t gadget_defs_hash(std::span<const sw::GadgetDef> p_gadgets, std::span<co
 }
 
 ServerGadgets::ServerGadgets(const GunplayLevel &p_level, std::shared_ptr<const sw::WeaponTable> p_table) :
-		level_(&p_level), table_(std::move(p_table)), field_(p_level.gadgets) {}
+		level_(&p_level), table_(std::move(p_table)), field_(p_level.gadgets) {
+	lock_defs_.fill(sw::kNoWeapon);
+}
 
 sw::DeployOutcome ServerGadgets::deploy(
 		const sw::ShotEvent &p_shot, uint8_t p_team, sim::Tick p_tick, const sim::CollisionWorld *p_world) {
@@ -227,6 +229,10 @@ void ServerGadgets::forget(uint8_t p_slot) {
 	stats_.forgotten += field_.remove_owner(p_slot);
 	if (p_slot < refill_.size()) {
 		refill_[p_slot] = sw::AmmoRefillState();
+	}
+	if (p_slot < locks_.size()) {
+		locks_[p_slot] = sw::WeaponLockState();
+		lock_defs_[p_slot] = sw::kNoWeapon;
 	}
 }
 

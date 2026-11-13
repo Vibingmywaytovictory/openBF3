@@ -1,0 +1,77 @@
+#include "server_gadgets.h"
+
+#include <algorithm>
+
+namespace bf3::host {
+
+namespace {
+
+namespace sw = sim::weapons;
+
+const sw::WeaponLockState kNoLock{};
+
+}
+
+void LockGuidance::set(std::span<const sw::LockCandidate> p_candidates) {
+	candidates_.assign(p_candidates.begin(), p_candidates.end());
+}
+
+std::optional<sw::GuidanceTarget> LockGuidance::guidance_target(uint32_t p_id) const {
+	for (const sw::LockCandidate &c : candidates_) {
+		if (c.id == p_id) {
+			return sw::GuidanceTarget{ c.position, c.aim };
+		}
+	}
+	return std::nullopt;
+}
+
+void ServerGadgets::set_lock_candidates(std::span<const sw::LockCandidate> p_candidates) {
+	guidance_.set(p_candidates);
+}
+
+bool ServerGadgets::aim_lock(uint8_t p_slot, uint8_t p_team, uint16_t p_def, uint8_t p_variant, const sim::Vec3 &p_eye,
+		const sim::Vec3 &p_forward, bool p_zoom, const sim::CollisionWorld *p_world) {
+	if (p_slot >= locks_.size()) {
+		return false;
+	}
+	sw::WeaponLockState &state = locks_[p_slot];
+	if (table_ == nullptr || p_def >= table_->defs.size() || !table_->def(p_def, p_variant).locking.present) {
+		state = sw::WeaponLockState();
+		lock_defs_[p_slot] = sw::kNoWeapon;
+		return false;
+	}
+	if (lock_defs_[p_slot] != p_def) {
+		state = sw::WeaponLockState();
+		lock_defs_[p_slot] = p_def;
+	}
+	const bool was = state.locked();
+	sw::LockAim aim;
+	aim.origin = p_eye;
+	aim.forward = p_forward;
+	aim.team = p_team;
+	aim.zoom = p_zoom ? 1 : 0;
+	sw::LockStepStats s;
+	sw::step_weapon_lock(table_->def(p_def, p_variant).locking, state, aim, sw::kTimeUnitsPerTick,
+			guidance_.candidates(), p_world, &s);
+	stats_.lock_samples += s.samples;
+	stats_.lock_candidates += s.candidates;
+	stats_.lock_rays += s.rays;
+	stats_.locks_gained += !was && state.locked() ? 1u : 0u;
+	return state.locked();
+}
+
+uint32_t ServerGadgets::launch_target(uint8_t p_slot, uint16_t p_def, uint8_t p_variant) {
+	if (p_slot >= locks_.size() || table_ == nullptr || p_def >= table_->defs.size() || lock_defs_[p_slot] != p_def ||
+			!table_->def(p_def, p_variant).locking.homing) {
+		return sw::kNoLockTarget;
+	}
+	const uint32_t target = locks_[p_slot].target();
+	stats_.guided_launches += target != sw::kNoLockTarget ? 1u : 0u;
+	return target;
+}
+
+const sw::WeaponLockState &ServerGadgets::lock(uint8_t p_slot) const {
+	return p_slot < locks_.size() ? locks_[p_slot] : kNoLock;
+}
+
+}

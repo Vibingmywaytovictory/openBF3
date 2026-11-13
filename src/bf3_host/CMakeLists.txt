@@ -291,6 +291,7 @@ target_sources(bf3_host PRIVATE
     include/bf3/host/gadgets.h
     src/server_gadgets.h
     src/server_gadgets.cpp
+    src/server_gadgets_locks.cpp
 )
 
 target_sources(bf3_host PRIVATE

@@ -26,10 +26,10 @@ namespace tt = bf3::test::tdm;
 
 namespace {
 
-constexpr uint64_t kTdmStreamHash = 0x2bb84d14f0d6b6ccull;
-constexpr uint64_t kTdmStateHash = 0x54d92aa1b7f566ecull;
-constexpr uint64_t kDevStreamHash = 0xa0d85f0b60b419d6ull;
-constexpr uint64_t kDevStateHash = 0x076cde650acd346dull;
+constexpr uint64_t kTdmStreamHash = 0xc371687e5f3c325dull;
+constexpr uint64_t kTdmStateHash = 0xb9035aa94c1d4a08ull;
+constexpr uint64_t kDevStreamHash = 0xae351962e638ba1cull;
+constexpr uint64_t kDevStateHash = 0xb984e4df76652f05ull;
 
 struct StreamRecorder {
 	std::vector<uint8_t> hold_mask = tt::detail::echo_hold_mask();

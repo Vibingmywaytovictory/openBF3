@@ -76,7 +76,8 @@ std::set<std::string> gadget_slot_weapons() {
 			"weapons/gadgets/m26mass/u_m26mass_flechette", "weapons/gadgets/m26mass/u_m26mass_frag",
 			"weapons/gadgets/m26mass/u_m26mass_slug", "weapons/gadgets/m320/u_m320_he",
 			"weapons/gadgets/m320/u_m320_lvg", "weapons/gadgets/m320/u_m320_shg", "weapons/gadgets/m320/u_m320_smk",
-			"weapons/rpg7/u_rpg7", "weapons/smaw/u_smaw" });
+			"weapons/rpg7/u_rpg7", "weapons/smaw/u_smaw", "weapons/fgm148/u_fgm148", "weapons/fim92a/u_fim92",
+			"weapons/sa18igla/u_sa18igla" });
 	return out;
 }
 

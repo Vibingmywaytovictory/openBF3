@@ -214,18 +214,6 @@ core::Result<GadgetDef> read_gadget_def(const core::EbxResolver &p_db, std::stri
 	}
 	GadgetDef g;
 	g.weapon = std::string(p_weapon);
-	core::Result<core::EbxInstance> weapon = weapon_data(p_db, p_weapon);
-	if (!weapon) {
-		return weapon.error();
-	}
-	const std::optional<core::EbxInstance> locking = p_db.follow(weapon->data(), "CustomWeaponType");
-	if (locking && locking->is_a("LockingWeaponData")) {
-		const std::optional<bool> locked = bool_of(locking->data(), "FireOnlyWhenLockedOn");
-		if (!locked) {
-			return gadget_error(p_weapon, "LockingWeaponData has no FireOnlyWhenLockedOn");
-		}
-		g.fire_only_when_locked = *locked;
-	}
 	const std::optional<core::EbxStruct> shot = struct_of(fire->data(), "Shot");
 	if (!shot) {
 		return gadget_error(p_weapon, "FiringFunctionData has no Shot");

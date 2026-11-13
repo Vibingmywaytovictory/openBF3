@@ -574,7 +574,8 @@ void step_soldier_weapons(const WeaponTable &p_table, SoldierWeaponsState &r_sta
 				s.burst_left = 0;
 				timed(io, io.t0, weapon_events::kFireModeChanged, r_state.active);
 			}
-			process_active(io, r_state.active, s, d, block_until, blocked);
+			process_active(io, r_state.active, s, d, block_until,
+					blocked || (d.locking.fire_only_when_locked && !p_context.locked));
 		}
 	} else if (io.in.fire) {
 		io.events |= weapon_events::kFireBlocked;
