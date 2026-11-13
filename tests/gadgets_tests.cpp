@@ -850,6 +850,29 @@ TEST_SUITE("gadgets-unit") {
 		CHECK_FALSE(j.locked);
 	}
 
+	TEST_CASE("lock: R-G5 rule 2 measures the cone to the bounding-box centre and the range to the transform") {
+		const LockingControllerSimDef def = lock_controller(1.5, 1.0, 0.5, 0.06);
+		LockAim aim;
+		aim.team = 1;
+		const auto pick = [&](const LockCandidate &p_c) {
+			const std::vector<LockCandidate> one{ p_c };
+			const LockCandidate *c = pick_lock_candidate(def, LockType::Radar, aim, one, nullptr);
+			return c == nullptr ? kNoLockTarget : c->id;
+		};
+		LockCandidate centre_in = candidate_at(1, off_axis(12.0f, 100.0f));
+		centre_in.aim = off_axis(8.0f, 100.0f);
+		CHECK(pick(centre_in) == 1u);
+		LockCandidate centre_out = candidate_at(2, off_axis(8.0f, 100.0f));
+		centre_out.aim = off_axis(12.0f, 100.0f);
+		CHECK(pick(centre_out) == kNoLockTarget);
+		LockCandidate near_origin = candidate_at(3, off_axis(1.0f, 9.0f));
+		near_origin.aim = off_axis(1.0f, 11.0f);
+		CHECK(pick(near_origin) == kNoLockTarget);
+		LockCandidate behind_origin = candidate_at(4, off_axis(1.0f, -12.0f));
+		behind_origin.aim = off_axis(1.0f, 12.0f);
+		CHECK(pick(behind_origin) == 4u);
+	}
+
 	TEST_CASE("lock: LockOnVisibleTargetsOnly casts a ray 3 m beyond the target's centre; a wall before the centre "
 			  "hides it, one in the last 3 m does not") {
 		std::unique_ptr<CollisionWorld> w = floor_and_wall();

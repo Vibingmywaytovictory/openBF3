@@ -81,7 +81,7 @@ const LockCandidate *pick_lock_candidate(const LockingControllerSimDef &p_def, L
 		if (!(d2 < ray2) || d2 < min2) {
 			continue;
 		}
-		const Vec3 toward = core::vec::sub(c.position, p_aim.origin);
+		const Vec3 toward = core::vec::sub(c.aim, p_aim.origin);
 		const float along = core::vec::dot(toward, p_aim.forward);
 		if (!(along > 0.0f)) {
 			continue;
