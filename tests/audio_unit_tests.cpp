@@ -982,6 +982,41 @@ TEST_SUITE("audio-patch") {
 		CHECK(inst->value(latched) == 0.0f);
 	}
 
+	TEST_CASE("an Adsr whose Release input reads a held level releases once, linearly over R, and finishes") {
+		Builder b;
+		const uint16_t pulse = b.input(1, true), level = b.input(2, false);
+		const uint16_t value = b.reg(), done = b.reg();
+		const uint32_t n = b.node(SoundNodeType::Adsr);
+		b.set(n, cp::AdsrA, Builder::C(0.0f));
+		b.set(n, cp::AdsrD, Builder::C(0.0f));
+		b.set(n, cp::AdsrS, Builder::C(1.0f));
+		b.set(n, cp::AdsrR, Builder::C(0.5f));
+		b.set(n, cp::AdsrTrigger, Builder::R(pulse));
+		b.set(n, cp::AdsrRelease, Builder::R(level));
+		b.set(n, cp::AdsrValue, Builder::R(value));
+		b.set(n, cp::AdsrFinished, Builder::R(done));
+		auto inst = instance(b.build());
+		const double dt = 0.01;
+		inst->evaluate(dt);
+		inst->post_event(1, 0);
+		inst->evaluate(dt);
+		CHECK(inst->value(value) == 1.0f);
+		inst->set_parameter(2, 1.0f);
+		float at_250ms = -1.0f;
+		bool finished = false;
+		for (int i = 0; i < 60; ++i) {
+			inst->evaluate(dt);
+			at_250ms = i == 25 ? inst->value(value) : at_250ms;
+			finished = finished || inst->value(done) == 1.0f;
+		}
+		MESSAGE("an Adsr with R 0.5 s under a held Release: ", at_250ms, " at 0.25 s, ", inst->value(value),
+				" at 0.6 s");
+		CHECK(at_250ms == doctest::Approx(0.5f).epsilon(0.05));
+		CHECK(inst->value(value) == 0.0f);
+		CHECK(finished);
+		CHECK(inst->finished());
+	}
+
 	TEST_CASE("a SingleShot Timer whose Period reads 0 ticks once at its first step: the modular explosions' 20 to "
 			  "1020 m "
 			  "delay, 0 s within 20 m, triggers its Adsr and the instance finishes") {

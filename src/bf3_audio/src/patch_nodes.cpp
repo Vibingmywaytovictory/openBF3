@@ -157,7 +157,8 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				}
 				const bool gate_closed = !port(n, cp::AdsrRelease).connected() && !on(read(port(n, cp::AdsrTrigger))) &&
 						s.mode == uint8_t(AdsrPhase::Sustain);
-				if ((on(read(port(n, cp::AdsrRelease))) || gate_closed) && s.mode != uint8_t(AdsrPhase::Idle)) {
+				if ((on(read(port(n, cp::AdsrRelease))) || gate_closed) && s.mode != uint8_t(AdsrPhase::Idle) &&
+						s.mode != uint8_t(AdsrPhase::Release)) {
 					if (r > 0.0f) {
 						s.mode = uint8_t(AdsrPhase::Release);
 						s.release_rate = s.value / r;
