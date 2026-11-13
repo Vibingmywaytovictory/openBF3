@@ -23,6 +23,7 @@
 #include "client_loop.h"
 #include "client_transport.h"
 #include "vehicles/client_vehicle_prediction.h"
+#include "vehicles/server_vehicles.h"
 
 #include "tdm_fixture.h"
 #include "test_support.h"
@@ -40,6 +41,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -1412,6 +1414,51 @@ TEST_SUITE("host-vehicles-blend-unit") {
 	}
 }
 
+namespace {
+
+std::optional<uint16_t> upright_spawner(const host::LevelVehicles &p_level, std::string_view p_blueprint) {
+	for (size_t i = 0; i < p_level.spawners.size(); ++i) {
+		if (p_level.kinds[p_level.spawners[i].kind].blueprint == p_blueprint &&
+				tt::up_y_of(p_level.spawners[i].placement.rotation) > 0.95f) {
+			return uint16_t(i);
+		}
+	}
+	return std::nullopt;
+}
+
+std::unique_ptr<sim::VehicleWorld> server_vehicle_world(const tt::TdmLevel &p_level, uint16_t p_spawner) {
+	const host::LevelVehicles &lv = *p_level.shared->vehicles;
+	sim::VehicleWorldOptions options;
+	options.max_vehicles = uint32_t(std::min<size_t>(lv.spawners.size(), sim::kMaxVehicleSlots));
+	options.tuning = lv.tuning;
+	core::Result<std::unique_ptr<sim::VehicleWorld>> server =
+			sim::VehicleWorld::create(p_level.shared->static_world, options);
+	REQUIRE(server.ok());
+	REQUIRE((*server)
+					->add_vehicle(sim::VehicleSlot(p_spawner), lv.kinds[lv.spawners[p_spawner].kind].model,
+							lv.spawners[p_spawner].placement)
+					.ok());
+	return std::move(*server);
+}
+
+void receive_vehicle_state(host::ClientVehicles &r_seen, const host::LevelVehicles &p_level, uint16_t p_spawner,
+		uint8_t p_driver, sim::Tick p_tick, const sim::VehicleState &p_state, uint8_t p_condition) {
+	net::VehicleStates m;
+	m.server_tick = p_tick;
+	net::VehicleWire w;
+	w.spawner = p_spawner;
+	w.generation = 1;
+	w.team = 1;
+	w.seat_count = p_level.kinds[p_level.spawners[p_spawner].kind].seats;
+	w.occupants[0] = p_driver;
+	w.state = p_state;
+	w.condition = p_condition;
+	m.vehicles.push_back(w);
+	r_seen.receive(net::encode_vehicle_states(m));
+}
+
+}
+
 TEST_SUITE("host-vehicles-reconcile") {
 	TEST_CASE("vehicles: a received Growler state shoved 0.5 m from the driver's prediction is replayed and faded "
 			  "from where the vehicle was drawn over 0.25 s; one shoved 4 m snaps") {
@@ -1420,23 +1467,10 @@ TEST_SUITE("host-vehicles-reconcile") {
 			return;
 		}
 		const host::LevelVehicles &lv = *level->shared->vehicles;
-		std::optional<uint16_t> spawner;
-		for (size_t i = 0; i < lv.spawners.size() && !spawner; ++i) {
-			if (lv.kinds[lv.spawners[i].kind].blueprint == "vehicles/growleritv/growleritv" &&
-					tt::up_y_of(lv.spawners[i].placement.rotation) > 0.95f) {
-				spawner = uint16_t(i);
-			}
-		}
+		const std::optional<uint16_t> spawner = upright_spawner(lv, "vehicles/growleritv/growleritv");
 		REQUIRE(spawner.has_value());
-		const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[*spawner].kind];
-		sim::VehicleWorldOptions options;
-		options.max_vehicles = uint32_t(std::min<size_t>(lv.spawners.size(), sim::kMaxVehicleSlots));
-		options.tuning = lv.tuning;
-		core::Result<std::unique_ptr<sim::VehicleWorld>> server =
-				sim::VehicleWorld::create(level->shared->static_world, options);
-		REQUIRE(server.ok());
+		const std::unique_ptr<sim::VehicleWorld> server = server_vehicle_world(*level, *spawner);
 		const sim::VehicleSlot slot(*spawner);
-		REQUIRE((*server)->add_vehicle(slot, kind.model, lv.spawners[*spawner].placement).ok());
 		host::ClientVehiclePrediction prediction;
 		REQUIRE(prediction.init(*level->shared).ok());
 		host::ClientVehicles seen;
@@ -1453,11 +1487,10 @@ TEST_SUITE("host-vehicles-reconcile") {
 			return c != sent.end() ? &c->second : nullptr;
 		};
 		const auto shove = [&](float p_metres) {
-			sim::VehicleState s = (*server)->state(slot);
+			sim::VehicleState s = server->state(slot);
 			s.body.com_position[0] += p_metres;
-			REQUIRE((*server)
-							->restore_vehicle_state(
-									slot, s, sim::vehicle_restore::kBody, sim::ContactCachePolicy::Invalidate)
+			REQUIRE(server->restore_vehicle_state(
+								  slot, s, sim::vehicle_restore::kBody, sim::ContactCachePolicy::Invalidate)
 							.ok());
 		};
 		for (sim::Tick c = 1; c <= kEnd; ++c) {
@@ -1467,27 +1500,18 @@ TEST_SUITE("host-vehicles-reconcile") {
 			cmd.move_forward = c > kEntry ? sim::kAxisMax : int8_t(0);
 			sent[c] = cmd;
 			const sim::VehicleCommand drive = c > kEntry ? sim::vehicles::driver_command(cmd) : sim::VehicleCommand();
-			REQUIRE((*server)->step(std::span(&slot, 1), std::span(&drive, 1)).ok());
+			REQUIRE(server->step(std::span(&slot, 1), std::span(&drive, 1)).ok());
 			if (c == kShove) {
 				shove(0.5f);
 			}
 			if (c == kSnap) {
 				shove(4.0f);
 			}
-			states[c] = (*server)->state(slot);
+			states[c] = server->state(slot);
 			if (c > kLag && (c - kLag) % 2u == 0u) {
 				const sim::Tick at = c - kLag;
-				net::VehicleStates m;
-				m.server_tick = at;
-				net::VehicleWire w;
-				w.spawner = *spawner;
-				w.generation = 1;
-				w.team = 1;
-				w.seat_count = kind.seats;
-				w.occupants[0] = at >= kEntry ? kOwnSlot : net::kNoVehicleOccupant;
-				w.state = states[at];
-				m.vehicles.push_back(w);
-				seen.receive(net::encode_vehicle_states(m));
+				receive_vehicle_state(
+						seen, lv, *spawner, at >= kEntry ? kOwnSlot : net::kNoVehicleOccupant, at, states[at], 0);
 			}
 			prediction.reconcile(seen, kOwnSlot, command_at, c);
 			if (c == kEntry + kLag) {
@@ -1548,6 +1572,81 @@ TEST_SUITE("host-vehicles-reconcile") {
 		CHECK(fade[15] < 0.001f);
 		CHECK(snapped < 0.001f);
 		CHECK(stats.vehicle_max_correction_m > 3.5f);
+		CHECK(stats.vehicle_prediction_starts == 1u);
+		CHECK(stats.vehicle_prediction_failures == 0u);
+	}
+
+	TEST_CASE("vehicles: the driver's client of a disabled M1A2 predicts it through the data's disabled input "
+			  "modifiers, as the server drives it") {
+		tt::TdmLevel *level = tt::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		const std::optional<uint16_t> spawner = upright_spawner(lv, "vehicles/m1a2/m1abrams");
+		REQUIRE(spawner.has_value());
+		const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[*spawner].kind];
+		REQUIRE_FALSE(kind.disabled_input.empty());
+		const std::unique_ptr<sim::VehicleWorld> server = server_vehicle_world(*level, *spawner);
+		const sim::VehicleSlot slot(*spawner);
+		host::ClientVehiclePrediction prediction;
+		REQUIRE(prediction.init(*level->shared).ok());
+		host::ClientVehicles seen;
+		auto frame = std::make_unique<host::PresentationFrame>();
+
+		constexpr uint8_t kOwnSlot = 3;
+		constexpr uint8_t kDisabled = uint8_t(sim::vehicles::VehicleCondition::Disabled);
+		constexpr sim::Tick kEntry = 120, kLag = 6, kEnd = kEntry + 300;
+		std::map<sim::Tick, sim::Command> sent;
+		std::map<sim::Tick, sim::VehicleState> states;
+		float worst = 0.0f;
+		const host::CommandAt command_at = [&](sim::Tick p_tick) -> const sim::Command * {
+			const auto c = sent.find(p_tick);
+			return c != sent.end() ? &c->second : nullptr;
+		};
+		for (sim::Tick c = 1; c <= kEnd; ++c) {
+			sim::Command cmd;
+			cmd.tick = c;
+			cmd.sequence = c;
+			cmd.move_forward = c > kEntry ? sim::kAxisMax : int8_t(0);
+			cmd.move_right = c > kEntry + 60u ? sim::kAxisMax : int8_t(0);
+			sent[c] = cmd;
+			const sim::VehicleCommand drive = c > kEntry
+					? host::disabled_command(sim::vehicles::driver_command(cmd), kind.disabled_input)
+					: sim::VehicleCommand();
+			REQUIRE(server->step(std::span(&slot, 1), std::span(&drive, 1)).ok());
+			states[c] = server->state(slot);
+			if (c > kLag && (c - kLag) % 2u == 0u) {
+				const sim::Tick at = c - kLag;
+				receive_vehicle_state(seen, lv, *spawner, at >= kEntry ? kOwnSlot : net::kNoVehicleOccupant, at,
+						states[at], kDisabled);
+			}
+			prediction.reconcile(seen, kOwnSlot, command_at, c);
+			prediction.step(cmd);
+			frame->render_ticks_at_publish = double(c);
+			seen.publish(*frame);
+			prediction.publish(*frame);
+			for (uint8_t i = 0; i < frame->vehicle_count; ++i) {
+				const host::PresentedVehicle &v = frame->vehicles[i];
+				if (v.spawner == *spawner && v.predicted == 1 && v.tick == c && c >= kEntry + 2u * kLag) {
+					worst = std::max(
+							worst, core::vec::length(core::vec::sub(v.com_position, states.at(c).body.com_position)));
+				}
+			}
+		}
+		host::ClientStats stats;
+		prediction.stats(stats);
+		const float travelled =
+				core::vec::horizontal_distance(states.at(kEntry).body.com_position, states.at(kEnd).body.com_position);
+		std::printf("host.vehicles.reconcile: a disabled M1A2 driven %.1f m through its %zu disabled input modifiers "
+					"is drawn at most %.4f m from the server; %llu corrections (largest %.3f m), %llu failures\n",
+				double(travelled), kind.disabled_input.size(), double(worst),
+				(unsigned long long)stats.vehicle_corrections, double(stats.vehicle_max_correction_m),
+				(unsigned long long)stats.vehicle_prediction_failures);
+		CHECK(travelled > 1.0f);
+		CHECK(worst < 0.001f);
+		CHECK(stats.vehicle_corrections <= 4u);
+		CHECK(stats.vehicle_max_correction_m < 0.03f);
 		CHECK(stats.vehicle_prediction_starts == 1u);
 		CHECK(stats.vehicle_prediction_failures == 0u);
 	}

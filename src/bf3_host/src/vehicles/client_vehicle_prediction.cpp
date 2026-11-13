@@ -2,6 +2,7 @@
 
 #include "bf3/core/math.h"
 #include "bf3/sim/vehicles/vehicle_input.h"
+#include "server_vehicles.h"
 
 #include <algorithm>
 
@@ -179,6 +180,17 @@ bool ClientVehiclePrediction::advance(const sim::VehicleCommand &p_command) {
 	return true;
 }
 
+sim::VehicleCommand ClientVehiclePrediction::command_of(const sim::Command &p_command) const {
+	const sim::vehicles::VehicleCondition condition = sim::vehicles::VehicleCondition(condition_);
+	if (condition == sim::vehicles::VehicleCondition::Destroyed) {
+		return sim::VehicleCommand();
+	}
+	const sim::VehicleCommand command = sim::vehicles::driver_command(p_command);
+	return condition == sim::vehicles::VehicleCondition::Disabled
+			? disabled_command(command, level_->kinds[level_->spawners[spawner_].kind].disabled_input)
+			: command;
+}
+
 void ClientVehiclePrediction::replay(sim::Tick p_from, sim::Tick p_next, const CommandAt &p_commands) {
 	const sim::Command *base = p_commands(p_from);
 	sim::Command previous = base != nullptr ? *base : sim::Command();
@@ -189,7 +201,7 @@ void ClientVehiclePrediction::replay(sim::Tick p_from, sim::Tick p_next, const C
 	for (sim::Tick t = from + 1u; t < p_next; ++t) {
 		const sim::Command *c = p_commands(t);
 		const sim::Command use = c != nullptr && c->tick == t ? *c : sim::repeated_command(previous, t);
-		if (!advance(sim::vehicles::driver_command(use))) {
+		if (!advance(command_of(use))) {
 			return;
 		}
 		keep(t);
@@ -218,6 +230,7 @@ void ClientVehiclePrediction::reconcile(
 	seated_ = true;
 	seat_ = s->seat;
 	generation_ = w.generation;
+	condition_ = w.condition;
 	seen_state_ = w.state;
 	seen_state_.body.origin = vehicle_body_origin(*level_->kinds[level_->spawners[w.spawner].kind].model, w.state.body);
 	if (s->seat != 0) {
@@ -259,7 +272,7 @@ void ClientVehiclePrediction::step(const sim::Command &p_command) {
 	if (!driving_ || p_command.tick != newest_ + 1u) {
 		return;
 	}
-	if (!advance(sim::vehicles::driver_command(p_command))) {
+	if (!advance(command_of(p_command))) {
 		return;
 	}
 	keep(p_command.tick);

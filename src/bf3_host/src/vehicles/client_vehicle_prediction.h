@@ -60,6 +60,7 @@ private:
 	void correct(const net::VehicleWire &p_wire, sim::Tick p_tick);
 	void replay(sim::Tick p_from, sim::Tick p_next, const CommandAt &p_commands);
 	bool advance(const sim::VehicleCommand &p_command);
+	sim::VehicleCommand command_of(const sim::Command &p_command) const;
 	std::optional<sim::Vec3> seat_of(const sim::VehicleState &p_state) const;
 
 	std::shared_ptr<const LevelVehicles> level_;
@@ -71,6 +72,7 @@ private:
 	uint16_t spawner_ = 0;
 	uint8_t seat_ = 0;
 	uint8_t generation_ = 0;
+	uint8_t condition_ = 0;
 	sim::VehicleState seen_state_;
 	bool driving_ = false;
 	sim::Tick newest_ = 0;
