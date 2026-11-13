@@ -68,6 +68,7 @@ struct VehicleSeatView {
 	float black = 0.0f;
 	bool first_person = true;
 	float left_yaw = 0.0f, right_yaw = 0.0f, up_pitch = 0.0f, down_pitch = 0.0f;
+	float look_centre = 0.0f;
 };
 
 struct GameVehicleTurretPart {

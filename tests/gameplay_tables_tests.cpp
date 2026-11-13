@@ -2517,4 +2517,38 @@ TEST_SUITE("tables") {
 		CHECK(t90_drive->wheel_configs[0].tracked_forward_speed_limit == Approx(1.1));
 		CHECK(t90_drive->wheel_configs[0].steer_inertia.size() == 6);
 	}
+
+	TEST_CASE("gameplay: the BMP-2's and LAV-25's port seats look through turret cameras with yaw and pitch limits, "
+			  "facing out of the hull's sides and rear") {
+		Mounted m;
+		if (!open_or_skip(m)) {
+			return;
+		}
+		const std::unique_ptr<EbxLibrary> lib = open_level(m, "MP_001");
+		for (const char *ifv : { "vehicles/bmp2/bmp2", "vehicles/lav25/lav25" }) {
+			CAPTURE(ifv);
+			const VehicleDef v = vehicle(*lib, ifv);
+			size_t ports = 0;
+			for (size_t s = 0; s < v.seats.size(); ++s) {
+				for (const VehicleCameraDef &c : v.seats[s].cameras) {
+					if (!c.first_person || c.turret < 0 || !(c.left_yaw > 0.0f)) {
+						continue;
+					}
+					std::printf("gameplay: %s seat %zu camera on turret %d: yaw %.1f/%.1f, pitch %.1f/%.1f, forward "
+								"(%.2f %.2f %.2f)\n",
+							ifv, s, c.turret, double(c.left_yaw), double(c.right_yaw), double(c.up_pitch),
+							double(c.down_pitch), double(c.transform.forward[0]), double(c.transform.forward[1]),
+							double(c.transform.forward[2]));
+					CHECK(c.left_yaw == Approx(50));
+					CHECK(c.right_yaw == Approx(50));
+					CHECK(c.up_pitch == Approx(25));
+					CHECK(c.down_pitch == Approx(25));
+					CHECK(std::fabs(c.transform.forward[1]) < 0.1f);
+					CHECK(c.transform.forward[2] < 0.5f);
+					++ports;
+				}
+			}
+			CHECK(ports == 4);
+		}
+	}
 }

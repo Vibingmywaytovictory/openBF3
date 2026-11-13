@@ -81,4 +81,34 @@ TEST_SUITE("present-vehicle-turrets-unit") {
 			}
 		}
 	}
+
+	TEST_CASE("look limits: a turret camera's yaw limits centre on the way it faces at rest, a hull camera's on the "
+			  "hull's heading, and a camera without limits looks freely") {
+		core::gameplay::VehicleCameraDef port;
+		port.first_person = true;
+		port.turret = 3;
+		port.left_yaw = port.right_yaw = 50.0f;
+		port.up_pitch = port.down_pitch = 25.0f;
+		port.transform.right = { 0.0f, 0.0f, -1.0f };
+		port.transform.forward = { 1.0f, 0.0f, 0.0f };
+		const present::VehicleLookLimits p = present::camera_look_limits(port);
+		CHECK(p.centre == doctest::Approx(1.57079633f));
+		CHECK(p.left == doctest::Approx(0.87266463f));
+		CHECK(p.right == doctest::Approx(0.87266463f));
+		CHECK(p.up == doctest::Approx(0.43633231f));
+		CHECK(p.down == doctest::Approx(0.43633231f));
+		core::gameplay::VehicleCameraDef hull = port;
+		hull.turret = -1;
+		CHECK(present::camera_look_limits(hull).centre == doctest::Approx(0.0f));
+		CHECK(present::camera_look_limits(hull).left == doctest::Approx(0.87266463f));
+		core::gameplay::VehicleCameraDef gunner = port;
+		gunner.left_yaw = gunner.right_yaw = -1.0f;
+		gunner.up_pitch = gunner.down_pitch = -0.6f;
+		const present::VehicleLookLimits g = present::camera_look_limits(gunner);
+		CHECK(g.centre == doctest::Approx(0.0f));
+		CHECK(g.left == doctest::Approx(3.14159265f));
+		CHECK(g.right == doctest::Approx(3.14159265f));
+		CHECK(g.up == doctest::Approx(1.57079633f));
+		CHECK(g.down == doctest::Approx(1.57079633f));
+	}
 }

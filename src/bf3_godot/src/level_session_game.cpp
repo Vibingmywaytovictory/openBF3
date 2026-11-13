@@ -1446,7 +1446,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		const VehicleSeatView sv = g.vehicles->seat_view(*seat, g.vehicle_camera, view.yaw, view.pitch,
 				g.settings != nullptr ? g.settings->hip_fov_deg() : FpCamera::kFovDegrees,
 				mapper_.held(InputMapper::WeaponAction::Ads), p_delta, g.world.get());
-		mapper_.hold_view_on(seat->heading, sv.left_yaw, sv.right_yaw, sv.up_pitch, sv.down_pitch);
+		mapper_.hold_view_on(seat->heading + sv.look_centre, sv.left_yaw, sv.right_yaw, sv.up_pitch, sv.down_pitch);
 		camera->set_global_transform(sv.camera);
 		camera->set_fov(sv.fov_deg);
 		g.vehicle_black = sv.black;
