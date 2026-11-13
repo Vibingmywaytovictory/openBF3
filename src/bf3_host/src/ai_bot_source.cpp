@@ -128,6 +128,17 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 
 	const ai::InfantrySenses &senses() const override { return sensed; }
 
+	ai::ChangeSense change_sense() override {
+		if (state == nullptr) {
+			return {};
+		}
+		const ai::ChangeChoice c = crew.evaluate(*body.shared, body.slot, *state, bot->bot_stuck());
+		if (!c.change) {
+			return {};
+		}
+		return { c.urgency, (c.target.vehicle + 1) * int(ai::kMaxChangeSeats) + int(c.target.seat) + 1 };
+	}
+
 	bool can_throw_grenade() const override {
 		const BotFrame &fr = f();
 		return body.grenade.can_start(*body.shared, body.targeting, body.awareness.perception(), now, fr.self,
@@ -217,6 +228,9 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		}
 		if (p_object == ai::ObjectGoal::Vehicle) {
 			body.vehicle_move(f(), intent);
+			return false;
+		}
+		if (p_object == ai::ObjectGoal::Equipment) {
 			return false;
 		}
 		if (p_object == ai::ObjectGoal::Repair) {
@@ -357,7 +371,7 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		decisions = st.decisions;
 		unplanned = st.unplanned;
 		if (state != nullptr) {
-			crew.decide(sh, body.slot, *state, bot->bot_stuck(), bot->chosen_urgency());
+			crew.settle(sh, body.slot, bot->behaviour() == ai::InfantryBehaviour::Change, bot->chosen_urgency());
 		}
 		if (sh.observer != nullptr) {
 			sh.observer->decided(p_tick, body.slot, bot->behaviour(), bot->activity());

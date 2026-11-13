@@ -25,6 +25,12 @@ struct FakeBody final : InfantryBody {
 	void see() override { ++sees; }
 	void update_sensing() override { ++sensings; }
 	const InfantrySenses &senses() const override { return s; }
+	ChangeSense change;
+	int change_senses = 0;
+	ChangeSense change_sense() override {
+		++change_senses;
+		return change;
+	}
 	bool can_throw_grenade() const override { return throw_possible; }
 	bool throw_grenade() override {
 		++throws;

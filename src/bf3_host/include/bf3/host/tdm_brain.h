@@ -118,6 +118,7 @@ struct TdmBotStats {
 	std::atomic<uint64_t> vehicle_winner_milli{ 0 };
 	std::atomic<uint64_t> vehicle_foot_decisions{ 0 };
 	std::atomic<uint64_t> vehicle_foot_stay_milli{ 0 };
+	std::atomic<uint64_t> vehicle_change_won{ 0 };
 
 	std::atomic<uint64_t> last_perception_ns{ 0 };
 	std::atomic<uint64_t> last_brains_ns{ 0 };
@@ -156,7 +157,6 @@ struct TdmBotConfig {
 	std::vector<ai::StrategicAreaDef> strategic_areas;
 	ai::WeaponTemplateMap weapon_templates;
 	bool squads = true;
-	bool change_unmerged = false;
 
 	std::string tuning_cfg;
 	std::shared_ptr<TdmBotStats> stats;

@@ -1,9 +1,16 @@
 #include <doctest/doctest.h>
 
+#include "bf3/ai/behaviour/behaviours.h"
 #include "bf3/ai/behaviour/curves.h"
+#include "bf3/ai/bot/bot_main.h"
+#include "bf3/ai/main/ai_script.h"
 #include "bf3/ai/vehicle/vehicle_change.h"
 
+#include "ai_infantry_fakes.h"
+
 #include <array>
+#include <string>
+#include <string_view>
 #include <vector>
 
 using namespace bf3;
@@ -32,6 +39,45 @@ ai::ChangeBot fresh_bot() {
 	b.max_speed = kSoldierSpeed;
 	b.now_s = 1.0;
 	return b;
+}
+
+std::string change_script(std::string_view p_tenth, std::string_view p_tenth_kind) {
+	std::string s = "aiSettings.setMaxNumberOfBehaviours 11\naiSettings.setVehicle Infantry\n"
+					"aiSettings.createUCLinear Memory 0 1\n";
+	const auto name = [&](size_t p_i) {
+		return p_i < ai::kInfantryBehaviourCount
+				? std::string(ai::infantry_behaviour_kind(ai::InfantryBehaviour(p_i)).substr(2))
+				: std::string(p_tenth);
+	};
+	for (size_t i = 0; i < ai::kBotBehaviourCount; ++i) {
+		s += "aiSettings.setBehaviour " + std::to_string(i) + " " + name(i) + "\n";
+	}
+	s += "aiSettings.createBehaviourModifiers Default\n";
+	for (size_t i = 0; i < ai::kBotBehaviourCount; ++i) {
+		s += "aiSettings.setBehaviourModifier " + name(i) + (i < ai::kInfantryBehaviourCount ? " 1\n" : " 1.5\n");
+		const std::string kind = i < ai::kInfantryBehaviourCount
+				? std::string(ai::infantry_behaviour_kind(ai::InfantryBehaviour(i)))
+				: std::string(p_tenth_kind);
+		s += "aiSettings.setVehicleBehaviour Infantry " + name(i) + " " + kind + " BBP" + name(i) +
+				" 0 Memory Default\n";
+	}
+	return s + "aiSettings.setBasicBotWeights Default\n";
+}
+
+ai::BehaviourTuning unit_tuning() {
+	ai::BehaviourTuning t;
+	for (ai::BehaviourCurve &c : t.curves) {
+		c.weight = 1.0f;
+		c.offset = 1.0f;
+	}
+	return t;
+}
+
+void decide(ai::BotMain &r_bot) {
+	r_bot.see(sim::kTickSeconds);
+	r_bot.update_sensing(sim::kTickSeconds);
+	r_bot.decision_making(sim::kTickSeconds);
+	r_bot.plan_execution(sim::kTickSeconds);
 }
 
 }
@@ -232,5 +278,54 @@ TEST_SUITE("ai-vehicle") {
 		CHECK(o.seat == 1);
 		CHECK(ai::change_plan_step(bot, vehicles, ai::ChangeTarget{}).step == ai::ChangeStep::GetOut);
 		CHECK(ai::change_plan_step(bot, vehicles, ai::ChangeTarget{ 0, 0 }).step == ai::ChangeStep::None);
+	}
+
+	TEST_CASE("a config declares Change as behaviour 10 created by BBChange, and its modifier is the Change weight") {
+		ai::AiConfig with;
+		REQUIRE(ai::run_ai_script(change_script("Change", "BBChange"), "change.ai", with).ok());
+		ai::BehaviourTuning tuning;
+		REQUIRE(ai::apply_behaviour_weights(with, tuning).ok());
+		CHECK(tuning.change);
+		CHECK(tuning.curves[size_t(ai::InfantryBehaviour::Change)].weight == doctest::Approx(1.5f));
+		ai::AiConfig misnamed;
+		REQUIRE(ai::run_ai_script(change_script("Fire", "BBChange"), "fire.ai", misnamed).ok());
+		ai::BehaviourTuning untouched;
+		CHECK_FALSE(ai::apply_behaviour_weights(misnamed, untouched).ok());
+		CHECK_FALSE(untouched.change);
+		ai::AiConfig miscreated;
+		REQUIRE(ai::run_ai_script(change_script("Change", "BBMoveTo"), "moveto.ai", miscreated).ok());
+		CHECK_FALSE(ai::apply_behaviour_weights(miscreated, untouched).ok());
+	}
+
+	TEST_CASE("BotMain merges BBChange only when the tuning declares Change; it wins on its weighted urgency") {
+		ai::test::FakeBody body;
+		ai::BehaviourTuning tuning = unit_tuning();
+		body.change = { 50.0f, 9 };
+		{
+			ai::BotMain ten{ 0, 3, 1, body, tuning };
+			CHECK(ten.behaviour_count() == ai::kInfantryBehaviourCount);
+			ten.update_bot(true, true);
+			decide(ten);
+			CHECK(body.change_senses == 0);
+			CHECK(ten.behaviour() != ai::InfantryBehaviour::Change);
+		}
+		tuning.change = true;
+		tuning.curves[size_t(ai::InfantryBehaviour::Change)].weight = 0.5f;
+		ai::BotMain bot{ 0, 3, 1, body, tuning };
+		CHECK(bot.behaviour_count() == ai::kBotBehaviourCount);
+		bot.update_bot(true, true);
+		decide(bot);
+		CHECK(body.change_senses == 1);
+		CHECK(bot.behaviour() == ai::InfantryBehaviour::Change);
+		CHECK(bot.weighted_urgency(ai::InfantryBehaviour::Change) == doctest::Approx(25.0f));
+		CHECK(bot.chosen_urgency() == doctest::Approx(25.0f));
+		CHECK(bot.activity() == ai::InfantryActivity::Roam);
+		CHECK(body.calls ==
+				std::vector<std::string>{ "move_to_object " + std::to_string(int(ai::ObjectGoal::Equipment)) });
+		body.change = {};
+		decide(bot);
+		CHECK(body.change_senses == 2);
+		CHECK(bot.behaviour() != ai::InfantryBehaviour::Change);
+		CHECK(bot.weighted_urgency(ai::InfantryBehaviour::Change) == 0.0f);
 	}
 }

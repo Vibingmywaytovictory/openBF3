@@ -97,6 +97,8 @@ std::string_view infantry_behaviour_kind(InfantryBehaviour p_behaviour) {
 			return "BBCallForMedic";
 		case InfantryBehaviour::Resupply:
 			return "BBResupply";
+		case InfantryBehaviour::Change:
+			return "BBChange";
 	}
 	return "?";
 }
@@ -426,6 +428,18 @@ bool BBResupply::plan(BotPlan &r_script, bool) {
 	r_script.clear(InfantryActivity::Support);
 	r_script.add(BAPStatementType::MoveToObject, object_args(ObjectGoal::SupplyMate));
 	r_script.add(BAPStatementType::Trigger, trigger_args(TriggerKind::AmmoBag));
+	return true;
+}
+
+float BBChange::situation() {
+	const ChangeSense sense = body_.change_sense();
+	choice_ = sense.target;
+	return sense.urgency;
+}
+
+bool BBChange::plan(BotPlan &r_script, bool) {
+	r_script.clear(InfantryActivity::Roam);
+	r_script.add(BAPStatementType::MoveToObject, object_args(ObjectGoal::Equipment));
 	return true;
 }
 

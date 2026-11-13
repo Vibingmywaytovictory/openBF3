@@ -827,13 +827,15 @@ core::Status apply_behaviour_weights(const AiConfig &p_config, BehaviourTuning &
 	if (infantry < 0) {
 		return no_vehicle("Infantry");
 	}
-	if (p_config.settings.basic_bot_weights.size() != kInfantryBehaviourCount) {
+	const size_t count = p_config.settings.basic_bot_weights.size();
+	if (count != kInfantryBehaviourCount && count != kBotBehaviourCount) {
 		return core::make_error("ai config: the basic bot weights (aiSettings.setBasicBotWeights) hold " +
-				std::to_string(p_config.settings.basic_bot_weights.size()) + " behaviours, not " +
-				std::to_string(kInfantryBehaviourCount));
+				std::to_string(count) + " behaviours, not " + std::to_string(kInfantryBehaviourCount) + " or " +
+				std::to_string(kBotBehaviourCount) + " with Change");
 	}
 	BehaviourTuning tuning = r_tuning;
-	for (size_t i = 0; i < kInfantryBehaviourCount; ++i) {
+	tuning.change = count == kBotBehaviourCount;
+	for (size_t i = 0; i < count; ++i) {
 		const std::string_view name = infantry_behaviour_kind(InfantryBehaviour(i)).substr(2);
 		if (p_config.behaviour_id(name) != int(i)) {
 			return core::make_error("ai config: behaviour " + std::to_string(i) + " is not " + std::string(name));

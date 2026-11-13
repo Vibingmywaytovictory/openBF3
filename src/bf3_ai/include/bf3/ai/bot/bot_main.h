@@ -34,7 +34,7 @@ struct BotMainStats {
 	uint64_t unplanned = 0;
 	uint64_t refusals = 0;
 	uint64_t plan_failures = 0;
-	std::array<uint64_t, kInfantryBehaviourCount> chosen{};
+	std::array<uint64_t, kBotBehaviourCount> chosen{};
 };
 
 class BotMain final : public Bot, public SquadBot {
@@ -124,6 +124,7 @@ public:
 	InfantryActivity activity() const { return plan_.activity(); }
 	const BotPlan &plan() const { return plan_; }
 	const BotMainStats &stats() const { return stats_; }
+	size_t behaviour_count() const { return behaviour_count_; }
 	float weighted_urgency(InfantryBehaviour p_behaviour) const;
 	float behaviour_urgency(InfantryBehaviour p_behaviour) const { return behaviour_urgencies_[size_t(p_behaviour)]; }
 	const BotBehaviour &behaviour_of(InfantryBehaviour p_behaviour) const { return *behaviours_[size_t(p_behaviour)]; }
@@ -146,12 +147,13 @@ private:
 	std::string name_;
 	InfantryBody &body_;
 	const BehaviourTuning &tuning_;
-	std::array<std::unique_ptr<UCLinear>, kInfantryBehaviourCount> curves_;
-	std::array<std::unique_ptr<BotBehaviour>, kInfantryBehaviourCount> behaviours_;
-	std::array<float, kInfantryBehaviourCount> basic_weights_{};
-	std::array<float, kInfantryBehaviourCount> personality_{};
+	size_t behaviour_count_ = kInfantryBehaviourCount;
+	std::array<std::unique_ptr<UCLinear>, kBotBehaviourCount> curves_;
+	std::array<std::unique_ptr<BotBehaviour>, kBotBehaviourCount> behaviours_;
+	std::array<float, kBotBehaviourCount> basic_weights_{};
+	std::array<float, kBotBehaviourCount> personality_{};
 	const float *current_orders_ = nullptr;
-	std::array<float, kInfantryBehaviourCount> behaviour_urgencies_{};
+	std::array<float, kBotBehaviourCount> behaviour_urgencies_{};
 	std::unique_ptr<UrgencyMerger> merger_;
 	BotMemory memory_;
 	std::unique_ptr<CommunicationAgent> communication_;

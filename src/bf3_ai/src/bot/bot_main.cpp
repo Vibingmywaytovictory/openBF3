@@ -18,8 +18,9 @@ inline constexpr float kRearmPercent = 0.125f;
 
 BotMain::BotMain(uint32_t p_bot_id, int p_player_id, int p_side, InfantryBody &r_body, const BehaviourTuning &p_tuning,
 		const float *p_personality) :
-		bot_id_(p_bot_id), player_id_(p_player_id), side_(p_side), body_(r_body), tuning_(p_tuning), plan_(r_body) {
-	for (size_t i = 0; i < kInfantryBehaviourCount; ++i) {
+		bot_id_(p_bot_id), player_id_(p_player_id), side_(p_side), body_(r_body), tuning_(p_tuning),
+		behaviour_count_(p_tuning.change ? kBotBehaviourCount : kInfantryBehaviourCount), plan_(r_body) {
+	for (size_t i = 0; i < behaviour_count_; ++i) {
 		const BehaviourCurve &c = tuning_.curves[i];
 		curves_[i] = std::make_unique<UCLinear>(c.slope, c.offset);
 		basic_weights_[i] = c.weight;
@@ -43,9 +44,13 @@ BotMain::BotMain(uint32_t p_bot_id, int p_player_id, int p_side, InfantryBody &r
 			std::make_unique<BBCallForMedic>(curve(InfantryBehaviour::CallForMedic), body_);
 	behaviours_[size_t(InfantryBehaviour::Resupply)] =
 			std::make_unique<BBResupply>(curve(InfantryBehaviour::Resupply), body_);
+	if (tuning_.change) {
+		behaviours_[size_t(InfantryBehaviour::Change)] =
+				std::make_unique<BBChange>(curve(InfantryBehaviour::Change), body_);
+	}
 	std::vector<UrgencyGenerator *> generators;
-	for (const std::unique_ptr<BotBehaviour> &b : behaviours_) {
-		generators.push_back(b.get());
+	for (size_t i = 0; i < behaviour_count_; ++i) {
+		generators.push_back(behaviours_[i].get());
 	}
 	merger_ = std::make_unique<UrgencyMerger>(std::move(generators));
 	set_personality(p_personality);
@@ -55,15 +60,15 @@ BotMain::BotMain(uint32_t p_bot_id, int p_player_id, int p_side, InfantryBody &r
 BotMain::~BotMain() = default;
 
 void BotMain::set_personality(const float *p_weights) {
-	for (size_t i = 0; i < kInfantryBehaviourCount; ++i) {
+	for (size_t i = 0; i < behaviour_count_; ++i) {
 		personality_[i] = p_weights != nullptr ? p_weights[i] : 1.0f;
 	}
 	calculate_mods();
 }
 
 void BotMain::calculate_mods() {
-	for (size_t i = 0; i < kInfantryBehaviourCount; ++i) {
-		if (taking_orders_ && current_orders_ != nullptr) {
+	for (size_t i = 0; i < behaviour_count_; ++i) {
+		if (taking_orders_ && current_orders_ != nullptr && i < kInfantryBehaviourCount) {
 			behaviour_urgencies_[i] = current_orders_[i] * basic_weights_[i] * personality_[i];
 		} else {
 			behaviour_urgencies_[i] = basic_weights_[i] * personality_[i];
@@ -82,8 +87,8 @@ bool BotMain::receive_order(const BotOrder &p_order) {
 }
 
 void BotMain::reset() {
-	for (const std::unique_ptr<BotBehaviour> &b : behaviours_) {
-		b->reset(this);
+	for (size_t i = 0; i < behaviour_count_; ++i) {
+		behaviours_[i]->reset(this);
 	}
 	merger_->reset(this);
 	current_ = nullptr;
@@ -144,8 +149,8 @@ int BotMain::decision_making(double) {
 		memory_.last_behaviour = -1;
 		memory_.chosen_time = now;
 	}
-	std::array<float, kInfantryBehaviourCount> modifiers{};
-	for (size_t i = 0; i < kInfantryBehaviourCount; ++i) {
+	std::array<float, kBotBehaviourCount> modifiers{};
+	for (size_t i = 0; i < behaviour_count_; ++i) {
 		modifiers[i] = behaviour_urgencies_[i];
 		if (!plan_invalid_ && last != -1) {
 			modifiers[i] *= memory_.modify_behaviour_urgency(*behaviours_[i], now);
@@ -154,7 +159,7 @@ int BotMain::decision_making(double) {
 	}
 	bool merge = plan_invalid_ || merger_->has_changed(this, kQuotientLow, kQuotientHigh);
 	BotBehaviour *winner = nullptr;
-	for (size_t attempt = 0; attempt <= kInfantryBehaviourCount; ++attempt) {
+	for (size_t attempt = 0; attempt <= behaviour_count_; ++attempt) {
 		if (merge) {
 			merger_->update_active_urgency(this);
 		}
@@ -239,8 +244,8 @@ bool BotMain::update_bot() {
 	if (current_equipment_ == kNoHandle) {
 		return false;
 	}
-	for (const std::unique_ptr<BotBehaviour> &b : behaviours_) {
-		b->reset(this);
+	for (size_t i = 0; i < behaviour_count_; ++i) {
+		behaviours_[i]->reset(this);
 	}
 	calculate_mods();
 	merger_->update_active_urgency(this);

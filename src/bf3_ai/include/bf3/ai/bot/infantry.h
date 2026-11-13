@@ -42,8 +42,13 @@ struct InfantrySenses {
 	bool operator==(const InfantrySenses &) const = default;
 };
 
+struct ChangeSense {
+	float urgency = 0.0f;
+	int target = 0;
+};
+
 enum class MoveGoal : uint8_t { Roam, Hunt, Cover, Squad, Medkit };
-enum class ObjectGoal : uint8_t { Target, Corpse, Patient, SupplyMate, Vehicle, Repair };
+enum class ObjectGoal : uint8_t { Target, Corpse, Patient, SupplyMate, Vehicle, Repair, Equipment };
 enum class PoseRequest : uint8_t { Crouch, NearCorpse };
 enum class TriggerKind : uint8_t { Aimed, Blind, Grenade, Defib, Medkit, AmmoBag, CallMedic, VehicleWeapon, Repair };
 enum class SenseFocus : uint8_t { Target, BlindPoint, Threat, ShotOrigin, Around, Vehicle, Repair };
@@ -57,6 +62,7 @@ public:
 	virtual void see() = 0;
 	virtual void update_sensing() = 0;
 	virtual const InfantrySenses &senses() const = 0;
+	virtual ChangeSense change_sense() { return {}; }
 
 	virtual bool can_throw_grenade() const = 0;
 	virtual bool throw_grenade() = 0;

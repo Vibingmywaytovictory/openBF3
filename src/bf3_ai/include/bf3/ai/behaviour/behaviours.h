@@ -27,9 +27,11 @@ enum class InfantryBehaviour : uint8_t {
 	Idle,
 	MedicAssist,
 	CallForMedic,
-	Resupply
+	Resupply,
+	Change
 };
 inline constexpr size_t kInfantryBehaviourCount = 10;
+inline constexpr size_t kBotBehaviourCount = 11;
 std::string_view infantry_behaviour_kind(InfantryBehaviour p_behaviour);
 
 struct BehaviourCurve {
@@ -41,7 +43,8 @@ struct BehaviourCurve {
 };
 
 struct BehaviourTuning {
-	std::array<BehaviourCurve, kInfantryBehaviourCount> curves{};
+	std::array<BehaviourCurve, kBotBehaviourCount> curves{};
+	bool change = false;
 	float squad_far_m = 15.0f;
 	float squad_arrive_m = 3.0f;
 	float mission_arrive_m = 10.0f;
@@ -234,6 +237,20 @@ public:
 
 protected:
 	float situation() override;
+};
+
+class BBChange final : public BotBehaviour {
+public:
+	BBChange(const UrgeCurve &p_curve, InfantryBody &r_body) :
+			BotBehaviour(InfantryBehaviour::Change, p_curve, r_body) {}
+	bool plan(BotPlan &r_script, bool p_was_active) override;
+
+protected:
+	float situation() override;
+	int target() const override { return choice_; }
+
+private:
+	int choice_ = 0;
 };
 
 }

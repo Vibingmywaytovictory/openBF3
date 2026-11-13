@@ -1148,6 +1148,8 @@ add_test(NAME host.tdm.conquest_vehicles.seed3 COMMAND test_host_tdm --test-suit
 set_tests_properties(host.tdm.conquest_vehicles host.tdm.conquest_vehicles.seed2 host.tdm.conquest_vehicles.seed3 PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 add_test(NAME host.vehicles.possession COMMAND test_host_tdm --test-suite=host-vehicles-possession)
 set_tests_properties(host.vehicles.possession PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+add_test(NAME host.tdm.conquest_vehicles.unit COMMAND test_host_tdm --test-suite=host-tdm-conquest-vehicles-unit)
+set_tests_properties(host.tdm.conquest_vehicles.unit PROPERTIES TIMEOUT 60)
 set_tests_properties(host.tdm.conquest_bots.unit PROPERTIES TIMEOUT 60)
 set_tests_properties(host.tdm.bots.unit PROPERTIES TIMEOUT 60)
 set_tests_properties(host.tdm.round host.tdm.bots host.tdm.replay PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)

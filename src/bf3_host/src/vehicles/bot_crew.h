@@ -31,8 +31,8 @@ class BotCrew {
 public:
 	void new_life(TdmShared &r_shared, uint8_t p_slot);
 	void drop(TdmShared &r_shared, uint8_t p_slot) { book(r_shared, p_slot, std::nullopt); }
-	void decide(TdmShared &r_shared, uint8_t p_slot, const sim::SoldierState &p_state, bool p_stuck,
-			float p_chosen_urgency);
+	ai::ChangeChoice evaluate(TdmShared &r_shared, uint8_t p_slot, const sim::SoldierState &p_state, bool p_stuck);
+	void settle(TdmShared &r_shared, uint8_t p_slot, bool p_chosen, float p_chosen_urgency);
 	bool command(tdm_bot::BotBody &r_body, const tdm_bot::BotFrame &p_frame, sim::Command &r_cmd);
 	const std::optional<ai::ChangeTarget> &target() const { return target_; }
 
@@ -41,6 +41,7 @@ private:
 	bool press_use();
 
 	std::optional<ai::ChangeTarget> target_;
+	std::optional<ai::ChangeChoice> evaluated_;
 	bool use_down_ = false;
 };
 

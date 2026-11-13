@@ -167,11 +167,12 @@ void BotCrew::book(TdmShared &r_shared, uint8_t p_slot, std::optional<ai::Change
 	}
 }
 
-void BotCrew::decide(
-		TdmShared &r_shared, uint8_t p_slot, const sim::SoldierState &p_state, bool p_stuck, float p_chosen_urgency) {
+ai::ChangeChoice BotCrew::evaluate(
+		TdmShared &r_shared, uint8_t p_slot, const sim::SoldierState &p_state, bool p_stuck) {
+	evaluated_.reset();
 	const ServerVehicles *const vehicles = r_shared.host.view->server_vehicles();
-	if (vehicles == nullptr || !vehicles->on() || !r_shared.config->change_unmerged) {
-		return;
+	if (vehicles == nullptr || !vehicles->on()) {
+		return {};
 	}
 	const std::vector<ai::ChangeVehicle> scene = change_vehicles(r_shared, *vehicles, p_slot, true);
 	const ai::ChangeBot bot = change_bot(r_shared, *vehicles, p_slot, p_state, p_stuck);
@@ -183,9 +184,25 @@ void BotCrew::decide(
 	if (choice.change) {
 		r_shared.count(&TdmBotStats::vehicle_choices);
 		r_shared.count(&TdmBotStats::vehicle_change_milli, uint64_t(std::llround(double(choice.urgency) * 1000.0)));
+	}
+	evaluated_ = choice;
+	return choice;
+}
+
+void BotCrew::settle(TdmShared &r_shared, uint8_t p_slot, bool p_chosen, float p_chosen_urgency) {
+	if (!evaluated_) {
+		return;
+	}
+	const ai::ChangeChoice choice = *evaluated_;
+	evaluated_.reset();
+	if (choice.change) {
 		r_shared.count(&TdmBotStats::vehicle_winner_milli, uint64_t(std::llround(double(p_chosen_urgency) * 1000.0)));
 	}
-	book(r_shared, p_slot, choice.change && choice.urgency > 0.0f ? std::optional(choice.target) : std::nullopt);
+	if (p_chosen) {
+		r_shared.count(&TdmBotStats::vehicle_change_won);
+	}
+	book(r_shared, p_slot,
+			p_chosen && choice.change && choice.urgency > 0.0f ? std::optional(choice.target) : std::nullopt);
 }
 
 bool BotCrew::press_use() {
