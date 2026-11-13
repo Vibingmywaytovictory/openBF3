@@ -536,4 +536,69 @@ TEST_SUITE("host-vehicles-exit") {
 			CHECK(fastest < walk);
 		}
 	}
+
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: every seat of every parked land vehicle has an exit point where a "
+			  "soldier stands clear of the level and every hull") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		auto vehicles = std::make_shared<host::LevelVehicles>(*level->shared->vehicles);
+		for (host::LevelVehicleSpawner &sp : vehicles->spawners) {
+			sp.initial_spawn_delay = 0.0f;
+		}
+		host::ServerVehicles sv;
+		REQUIRE(sv.configure(vehicles, level->shared->static_world, 1.0f).ok());
+		for (sim::Tick t = 1; t <= 150; ++t) {
+			sv.spawn_due(t, nullptr);
+			REQUIRE(sv.step(t, 0, [](uint8_t) { return true; }).ok());
+		}
+		core::Result<std::unique_ptr<sim::CollisionWorld>> world =
+				sim::CollisionWorld::create(level->shared->static_world);
+		REQUIRE(world.ok());
+		sim::SoldierMotor motor;
+		REQUIRE(motor.init(**world, level->shared->motor).ok());
+		const sim::MotorParams &p = motor.params();
+		const float pad = p.tuning.character_padding;
+		const float height = p.poses[size_t(sim::Pose::Stand)].height;
+		size_t seats = 0, nearest = 0;
+		for (size_t i = 0; i < sv.vehicles().size(); ++i) {
+			if (!sv.vehicles()[i].live) {
+				continue;
+			}
+			const host::LevelVehicleKind &kind = vehicles->kinds[vehicles->spawners[i].kind];
+			if (kind.model == nullptr || !(host::land_tracked(*kind.model) || host::land_jeep(*kind.model))) {
+				continue;
+			}
+			const sim::VehicleBodyState body = sv.world()->state(sim::VehicleSlot(i)).body;
+			for (uint8_t seat = 0; seat < kind.seats; ++seat) {
+				const std::vector<core::Vec3> order = host::vehicle_exit_order(kind, seat);
+				std::optional<size_t> taken;
+				size_t clear = 0;
+				for (size_t k = 0; k < order.size(); ++k) {
+					const float x = body.rotation[0], y = body.rotation[1], z = body.rotation[2], w = body.rotation[3];
+					const core::Vec3 &v = order[k];
+					const float tx = 2.0f * (y * v[2] - z * v[1]), ty = 2.0f * (z * v[0] - x * v[2]),
+								tz = 2.0f * (x * v[1] - y * v[0]);
+					const sim::Vec3 point{ body.origin[0] + v[0] + w * tx + (y * tz - z * ty),
+						body.origin[1] + v[1] + w * ty + (z * tx - x * tz),
+						body.origin[2] + v[2] + w * tz + (x * ty - y * tx) };
+					if (motor.fits_standing(point) &&
+							!sv.obstacles().overlaps_capsule(point, p.radius + pad, height + 2.0f * pad)) {
+						++clear;
+						taken = taken ? taken : std::optional<size_t>(k);
+					}
+				}
+				std::printf("exit points: spawner %zu %s seat %u: %zu points, %zu clear, the soldier takes %s\n", i,
+						kind.blueprint.c_str(), unsigned(seat), order.size(), clear,
+						taken ? (*taken == 0 ? "the nearest" : ("number " + std::to_string(*taken + 1)).c_str())
+							  : "none (the nearest)");
+				CHECK_MESSAGE(taken.has_value(), kind.blueprint << " seat " << int(seat));
+				++seats;
+				nearest += taken && *taken == 0 ? 1u : 0u;
+			}
+		}
+		std::printf("exit points: %zu of %zu seats get out at their nearest point\n", nearest, seats);
+		CHECK(seats > 0u);
+	}
 }
