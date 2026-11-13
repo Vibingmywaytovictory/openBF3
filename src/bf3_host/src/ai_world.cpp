@@ -732,6 +732,7 @@ struct HostAiBots::Impl {
 		const ai::BehaviourTuning *tuning = nullptr;
 		uint32_t equipment = ai::kNoHandle;
 		uint32_t life = UINT32_MAX;
+		int personality_side = 0;
 		bool alive = false;
 		bool down = false;
 	};
@@ -818,10 +819,11 @@ ai::BotMain *HostAiBots::admit(
 		seat.equipment = m.factory->request_information_real(ai::kNoHandle, &m.soldiers[p_slot], 0, 1.0f, m.tick, 0);
 	}
 	m.events.event_player_created(true);
-	if (!m.main->add_unspawned_bot(p_slot, side, nullptr)) {
+	if (!m.main->add_unspawned_bot(p_slot, side, m.settings.personality(side))) {
 		seat.body = nullptr;
 		return nullptr;
 	}
+	seat.personality_side = side;
 	seat.bot = static_cast<ai::BotMain *>(m.main->bot_manager().bot_from_player_id(p_slot));
 	seat.bot->set_in_transition_phase(true);
 	seat.bot->attach_communication(m.voices, *m.hub);
@@ -880,6 +882,10 @@ void HostAiBots::observe(uint8_t p_slot, const sim::SoldierState &p_state, bool 
 	const int side = int(m.view.team(p_slot));
 	soldier.set_side(side);
 	soldier.place(p_state.position, p_state.yaw, p_state.pose);
+	if (side != seat.personality_side) {
+		seat.personality_side = side;
+		bot.set_personality(m.settings.personality(side));
+	}
 	if (!p_alive) {
 		bot.update_bot(false, false);
 		if (seat.alive && m.down(p_slot)) {

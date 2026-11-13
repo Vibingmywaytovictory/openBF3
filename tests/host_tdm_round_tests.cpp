@@ -872,6 +872,35 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK_FALSE(caller->communication()->received_message_exists(ai::kRadioCallForMedic, 0));
 	}
 
+	TEST_CASE("bots through AIMain: a bot takes its side's standard personality from the AI scripts once its side is "
+			  "known, and the new side's after a switch") {
+		std::unique_ptr<sim::CollisionWorld> world = wall_world();
+		m2b_fake::FakeView view;
+		view.world_ = world.get();
+		view.teams = { 0 };
+		view.slots = { soldier_at({ 0, 0, 0 }) };
+		ai::AiSettings settings;
+		settings.standard_personality[0] = std::vector<float>(ai::kInfantryBehaviourCount, 3.0f);
+		settings.standard_personality[1] = std::vector<float>(ai::kInfantryBehaviourCount, 0.5f);
+		host::HostAiBots bots(view, 100.0f, 4.0f, [](uint8_t) { return std::optional<uint8_t>(); }, settings);
+		ai::test::FakeBody body;
+		ai::BehaviourTuning tuning;
+		tuning.curves[size_t(ai::InfantryBehaviour::Revive)].weight = 2.0f;
+		ai::BotMain *const bot = bots.admit(0, body, tuning);
+		REQUIRE(bot != nullptr);
+		const auto revive = [&] { return bot->behaviour_urgency(ai::InfantryBehaviour::Revive); };
+		const float unsided = revive();
+		view.teams = { 1 };
+		bots.observe(0, view.slots[0], true, 600);
+		const float us = revive();
+		view.teams = { 2 };
+		bots.observe(0, view.slots[0], true, 601);
+		const float ru = revive();
+		CHECK(unsided == 2.0f);
+		CHECK(us == 6.0f);
+		CHECK(ru == 1.0f);
+	}
+
 	TEST_CASE("add_tdm_bots on the synthetic floor without rules: M2a teams, every bot alive, no rays through walls") {
 		const std::shared_ptr<const host::SharedLevel> level = tg::synthetic_floor();
 		REQUIRE(level != nullptr);

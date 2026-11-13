@@ -125,6 +125,7 @@ public:
 	const BotPlan &plan() const { return plan_; }
 	const BotMainStats &stats() const { return stats_; }
 	float weighted_urgency(InfantryBehaviour p_behaviour) const;
+	float behaviour_urgency(InfantryBehaviour p_behaviour) const { return behaviour_urgencies_[size_t(p_behaviour)]; }
 	const BotBehaviour &behaviour_of(InfantryBehaviour p_behaviour) const { return *behaviours_[size_t(p_behaviour)]; }
 	float chosen_urgency() const { return chosen_urgency_; }
 	const SquadGoal &squad_goal() const { return squad_goal_; }

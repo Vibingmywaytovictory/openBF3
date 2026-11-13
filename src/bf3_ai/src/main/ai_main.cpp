@@ -94,7 +94,8 @@ bool AIMain::activate_bot(int p_player_id, int p_side, const std::string &p_name
 	if (bot_manager_->reactivate_bot(p_player_id, p_side, p_name)) {
 		return true;
 	}
-	return add_unspawned_bot(p_player_id, p_side, nullptr);
+	return add_unspawned_bot(
+			p_player_id, p_side, services_.settings != nullptr ? services_.settings->personality(p_side) : nullptr);
 }
 
 bool AIMain::add_unspawned_bot(int p_player_id, int p_side, const float *p_personality) {

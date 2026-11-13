@@ -443,6 +443,7 @@ struct Calls {
 
 struct FakeBot final : NullBot {
 	Calls *calls = nullptr;
+	const float *personality = nullptr;
 	int idle = -2;
 	int decisions = 0;
 	int executions = 0;
@@ -491,15 +492,18 @@ struct FakeBot final : NullBot {
 	void set_spawn_coord(const Vec3 &p_position) override { spawn = p_position; }
 	void set_is_repaired(bool p_repaired) override { repaired = p_repaired; }
 	bool repaired = false;
+	void set_personality(const float *p_weights) override { personality = p_weights; }
 };
 
 struct FakeFactory final : BotFactory {
 	Calls *calls = nullptr;
 	uint32_t equipment = kNoHandle;
 	std::vector<FakeBot *> bots;
-	std::unique_ptr<Bot> create_bot(int p_player_id, uint32_t p_bot_id, const float *, int p_side) override {
+	std::unique_ptr<Bot> create_bot(
+			int p_player_id, uint32_t p_bot_id, const float *p_personality, int p_side) override {
 		auto bot = std::make_unique<FakeBot>();
 		bot->calls = calls;
+		bot->personality = p_personality;
 		bot->id = p_bot_id;
 		bot->player = p_player_id;
 		bot->team = p_side;
@@ -955,6 +959,30 @@ TEST_SUITE("ai-port") {
 		CHECK(bots.bot_count() == 0);
 		CHECK(bots.lod_level_ticks(BotLodLevel::Light) == 1);
 		CHECK(bots.unplanned_decision_making_threshold(BotLodLevel::Medium) == 0.8);
+	}
+
+	TEST_CASE("AIMain: a bot activated for a side takes that side's standard personality, a side without one none, "
+			  "as AIMain::activateBot passes getStandardPersonality") {
+		AiSettings settings;
+		settings.max_bots = 3;
+		settings.standard_personality[1] = std::vector<float>(10, 2.5f);
+		World w(settings);
+		AIMain &main = w.ai.main();
+		REQUIRE(main.activate_bot(30, 2, "Alpha"));
+		REQUIRE(main.activate_bot(31, 1, "Bravo"));
+		const auto bot_of = [&](int p_player) -> const FakeBot * {
+			for (const FakeBot *b : w.factory.bots) {
+				if (b->player == p_player) {
+					return b;
+				}
+			}
+			return nullptr;
+		};
+		REQUIRE(bot_of(30) != nullptr);
+		REQUIRE(bot_of(31) != nullptr);
+		REQUIRE(bot_of(30)->personality != nullptr);
+		CHECK(bot_of(30)->personality[1] == 2.5f);
+		CHECK(bot_of(31)->personality == nullptr);
 	}
 
 	TEST_CASE("BotManager: a sounding enemy within its radius is heard by every live bot of the other side") {
