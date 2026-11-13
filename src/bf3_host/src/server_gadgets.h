@@ -45,6 +45,7 @@ public:
 	void forget(uint8_t p_slot);
 	void owner_left(uint8_t p_slot);
 	void owner_died(uint8_t p_slot);
+	bool ownerless(uint32_t p_shot_index) const;
 	void clear();
 
 	std::optional<sim::Vec3> squad_beacon(uint8_t p_slot, uint8_t p_team, const SquadTable *p_squads) const;
@@ -53,6 +54,11 @@ public:
 	const GadgetStats &stats() const;
 
 private:
+	struct PendingBlast {
+		sim::weapons::DetonationEvent event;
+		bool owner_left = false;
+	};
+
 	const GunplayLevel *level_ = nullptr;
 	std::shared_ptr<const sim::weapons::WeaponTable> table_;
 	sim::weapons::GadgetField field_;
@@ -63,7 +69,8 @@ private:
 	std::vector<sim::weapons::PackSoldier> pack_soldiers_;
 	std::vector<sim::weapons::PackVehicle> pack_vehicles_;
 	std::array<bool, net::kMaxSlots> detonator_held_{};
-	std::vector<sim::weapons::DetonationEvent> pending_;
+	std::vector<PendingBlast> pending_;
+	std::vector<uint32_t> ownerless_;
 	mutable GadgetStats stats_;
 	sim::Tick tick_ = 0;
 };

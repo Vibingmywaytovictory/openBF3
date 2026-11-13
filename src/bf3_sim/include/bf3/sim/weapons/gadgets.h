@@ -111,6 +111,7 @@ struct Deployable {
 	float ammo_points = 0;
 	float health = 0;
 	bool owner_gone = false;
+	bool owner_left = false;
 	Tick owner_gone_tick = 0;
 	Vec3 facing{ 0, 0, 1 };
 	Vec3 normal{ 0, 1, 0 };

@@ -610,11 +610,14 @@ TEST_SUITE("gadgets-unit") {
 		CHECK(field.orphan_packs(2, 100) == 0u);
 		for (const Deployable &d : field.live()) {
 			CHECK(d.owner_gone == (d.def == 7));
+			CHECK_FALSE(d.owner_left);
 		}
 		CHECK(field.remote_detonate(2, 7) == 0u);
 		CHECK(field.expire(100 + kSimHz - 1) == 0u);
 		CHECK(field.expire(100 + kSimHz + 1) == 1u);
 		REQUIRE(field.live().size() == 1u);
 		CHECK(field.live()[0].def == kMedkitDef);
+		field.owner_gone(2, 200);
+		CHECK(field.live()[0].owner_left);
 	}
 }

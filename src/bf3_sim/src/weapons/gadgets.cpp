@@ -560,6 +560,7 @@ size_t GadgetField::owner_gone(uint8_t p_owner, Tick p_tick) {
 			++removed;
 		} else {
 			d.owner_gone = true;
+			d.owner_left = true;
 			d.owner_gone_tick = p_tick;
 			++stats_.orphaned;
 			++i;

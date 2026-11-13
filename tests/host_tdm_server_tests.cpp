@@ -6957,6 +6957,7 @@ TEST_SUITE("host-gunplay-gadgets") {
 		REQUIRE(m->server.gunplay()->deployables().size() == 1u);
 		const sw::Deployable orphan = m->server.gunplay()->deployables()[0];
 		CHECK(orphan.owner_gone);
+		CHECK_FALSE(orphan.owner_left);
 		CHECK(pack->time_to_live_on_owner_gone_s == 5.0f);
 		REQUIRE(m->until([&] { return m->server.gunplay()->deployables().empty(); }, sim::seconds_to_ticks(6.0f)));
 		const float lived = float(m->now() - died) * sim::kTickSeconds;
@@ -6965,5 +6966,97 @@ TEST_SUITE("host-gunplay-gadgets") {
 		CHECK(lived > 4.95f);
 		CHECK(lived < 5.05f);
 		CHECK(m->server.gunplay()->gadget_stats().pack_detonations == 0u);
+	}
+
+	TEST_CASE("gadgets: a claymore whose owner left before it went off kills with no kill to the player who took his "
+			  "slot") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		std::unique_ptr<Match> m = start_match(*level, true, 97u, 0, 1);
+		tdm::ScriptedPeer &sapper = m->join("sapper");
+		tdm::ScriptedPeer &enemy = m->join("enemy");
+		sapper.ready();
+		enemy.ready();
+		REQUIRE(wait_in_round(*m));
+		const uint8_t support = uint8_t(host::KitRole::Support);
+		const uint8_t team = m->rules().team_of(uint8_t(sapper.slot()));
+		const host::LoadoutKit *kit = gl.loadouts.kit(team, support);
+		REQUIRE(kit != nullptr);
+		const size_t gadget2 = size_t(core::gameplay::WeaponSlot::Gadget2);
+		const auto claymore = std::find_if(kit->slots[gadget2].begin(), kit->slots[gadget2].end(),
+				[](const host::LoadoutItem &i) { return i.unlock == "weapons/gadgets/claymore/u_claymore"; });
+		REQUIRE(claymore != kit->slots[gadget2].end());
+		net::LoadoutRequest request;
+		request.kit = support;
+		request.items[gadget2] = claymore->identifier;
+		m->server.on_receive(sapper.peer(), net::kChannelReliable, net::encode_loadout_request(request));
+		m->ticks(1);
+		sapper.spawn_request(support);
+		enemy.spawn_request(0);
+		REQUIRE(m->until([&] { return is_alive(m->state(sapper.slot())) && is_alive(m->state(enemy.slot())); }, 600));
+		REQUIRE(m->rules().team_of(uint8_t(enemy.slot())) != team);
+		std::array<float, 2> face{};
+		const std::optional<sim::Vec3> spot = flat_lane(*m, face);
+		REQUIRE(spot.has_value());
+		const auto at = [&](float p_d) { return add(*spot, p_d * face[0], 0.05f, p_d * face[1]); };
+		m->teleport(sapper, at(0.0f));
+		m->teleport(enemy, at(-30.0f));
+		m->ticks(20);
+		bool lay = false, run = false;
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			return aim_command(*m, p_tick, p_state, at(1.0f), sim::Pose::Stand,
+					select_and_fire(uint8_t(gadget2), lay && (p_tick % 30u) < 10u));
+		};
+		m->scripts[1] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			sim::Command c = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
+			if (run) {
+				c.yaw = sim::quantize_yaw(std::atan2(-face[0], -face[1]));
+				c.pitch = 0;
+				c.move_forward = 127;
+				c.buttons |= sim::buttons::kSprint;
+			}
+			return c;
+		};
+		m->ticks(60);
+		lay = true;
+		REQUIRE(rest_tick(*m, 1, 300).has_value());
+		lay = false;
+		REQUIRE(m->server.gunplay()->deployables().size() == 1u);
+		const sw::Deployable placed = m->server.gunplay()->deployables()[0];
+		const float along = (placed.position[0] - (*spot)[0]) * face[0] + (placed.position[2] - (*spot)[2]) * face[1];
+		m->teleport(sapper, at(-30.0f));
+		m->ticks(sim::seconds_to_ticks(3.5f));
+		m->teleport(enemy, at(along + 6.0f));
+		m->ticks(20);
+		const int slot = sapper.slot();
+		run = true;
+		REQUIRE(m->until(
+				[&] {
+					const sim::SoldierState *s = m->state(enemy.slot());
+					return s != nullptr &&
+							(s->position[0] - (*spot)[0]) * face[0] + (s->position[2] - (*spot)[2]) * face[1] <
+							along + 3.5f;
+				},
+				120));
+		m->server.on_disconnect(sapper.peer());
+		tdm::ScriptedPeer &heir = m->join("heir");
+		heir.ready();
+		REQUIRE(heir.slot() == slot);
+		REQUIRE(m->until([&] { return m->server.gunplay()->gadget_stats().pack_detonations > 0u; }, 60));
+		run = false;
+		m->ticks(5);
+		CHECK(m->server.gunplay()->deployables().empty());
+		CHECK_FALSE(is_alive(m->state(enemy.slot())));
+		const net::DeathEvent *death = last_death(enemy, enemy.slot());
+		REQUIRE(death != nullptr);
+		std::printf("claymore: its owner left, the slot went to a new player, and it killed the enemy: killer %d, "
+					"victim %d\n",
+				int(death->killer), enemy.slot());
+		CHECK(int(death->killer) == enemy.slot());
+		CHECK(death->def == claymore->def);
+		CHECK(int(m->row(heir.slot())->kills) == 0);
 	}
 }

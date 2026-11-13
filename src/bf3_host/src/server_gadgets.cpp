@@ -171,6 +171,7 @@ void ServerGadgets::detonator(uint8_t p_slot, uint16_t p_def, bool p_pressed) {
 void ServerGadgets::detonate_packs(sim::Tick p_tick, std::span<const sim::SoldierState> p_states,
 		std::span<const uint8_t> p_teams, std::span<const sw::PackVehicle> p_vehicles,
 		const sim::CollisionWorld &p_world, const sw::HitTargetProvider &p_targets, sw::ProjectileStepOutput &r_out) {
+	ownerless_.clear();
 	if (table_ == nullptr || (field_.live().empty() && pending_.empty())) {
 		return;
 	}
@@ -191,26 +192,34 @@ void ServerGadgets::detonate_packs(sim::Tick p_tick, std::span<const sim::Soldie
 	}
 	const sw::SimTime now = sw::tick_end(p_tick);
 	for (const sw::Deployable &d : field_.take_detonating()) {
-		sw::DetonationEvent e;
-		e.time = now + (d.def < table_->defs.size() ? table_->defs[d.def].projectile.explosion.spawn_delay : 0);
-		e.position = core::vec::add(d.position, core::vec::scale(d.normal, sw::kBlastEyeLift));
-		e.normal = d.normal;
-		e.player_slot = d.owner;
-		e.shot_index = kPackShotIndex | d.id;
-		e.def = d.def;
-		pending_.push_back(e);
+		PendingBlast b;
+		b.event.time = now + (d.def < table_->defs.size() ? table_->defs[d.def].projectile.explosion.spawn_delay : 0);
+		b.event.position = core::vec::add(d.position, core::vec::scale(d.normal, sw::kBlastEyeLift));
+		b.event.normal = d.normal;
+		b.event.player_slot = d.owner;
+		b.event.shot_index = kPackShotIndex | d.id;
+		b.event.def = d.def;
+		b.owner_left = d.owner_left;
+		pending_.push_back(b);
 	}
 	core::gameplay::WorkBudget budget(kPackBlastWork);
 	for (size_t i = 0; i < pending_.size();) {
-		const sw::DetonationEvent e = pending_[i];
-		if (e.time > now) {
+		const PendingBlast b = pending_[i];
+		if (b.event.time > now) {
 			++i;
 			continue;
 		}
 		pending_.erase(pending_.begin() + std::ptrdiff_t(i));
-		sw::explode(*table_, p_world, p_targets, e, budget, r_out);
+		sw::explode(*table_, p_world, p_targets, b.event, budget, r_out);
 		++stats_.pack_detonations;
+		if (b.owner_left) {
+			ownerless_.push_back(b.event.shot_index);
+		}
 	}
+}
+
+bool ServerGadgets::ownerless(uint32_t p_shot_index) const {
+	return std::find(ownerless_.begin(), ownerless_.end(), p_shot_index) != ownerless_.end();
 }
 
 void ServerGadgets::forget(uint8_t p_slot) {
@@ -235,6 +244,7 @@ void ServerGadgets::owner_died(uint8_t p_slot) {
 void ServerGadgets::clear() {
 	field_.clear();
 	pending_.clear();
+	ownerless_.clear();
 }
 
 std::optional<sim::Vec3> ServerGadgets::squad_beacon(uint8_t p_slot, uint8_t p_team, const SquadTable *p_squads) const {

@@ -1024,7 +1024,8 @@ void Gunplay::apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states
 				if (!alive(st)) {
 					net::DeathEvent d;
 					d.victim = uint8_t(victim);
-					d.killer = uint8_t(std::min<uint32_t>(e.attacker_slot, 255u));
+					d.killer = m.gadgets->ownerless(e.shot_index) ? uint8_t(victim)
+																  : uint8_t(std::min<uint32_t>(e.attacker_slot, 255u));
 					d.def = e.def;
 					d.zone = e.zone;
 					d.shot_index = e.shot_index;
