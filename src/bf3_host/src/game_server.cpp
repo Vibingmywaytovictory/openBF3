@@ -1091,6 +1091,14 @@ std::optional<float> GameServer::vehicle_health(uint16_t p_spawner) const {
 	return impl_->vehicles.health(p_spawner);
 }
 
+std::optional<sim::VehicleState> GameServer::vehicle_state(uint16_t p_spawner) const {
+	const ServerVehicles &v = impl_->vehicles;
+	if (!v.on() || p_spawner >= v.vehicles().size() || !v.vehicles()[p_spawner].live) {
+		return std::nullopt;
+	}
+	return v.world()->state(sim::VehicleSlot(p_spawner));
+}
+
 TdmRules *GameServer::rules() {
 	return impl_->match.rules();
 }

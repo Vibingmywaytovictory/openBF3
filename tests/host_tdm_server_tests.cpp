@@ -6589,8 +6589,8 @@ struct LauncherWatch final : host::GunplayObserver {
 TEST_SUITE("host-vehicles-damage-team") {
 	TEST_CASE(
 			"gadgets: MP_007 ConquestSmall0: an engineer's kit-default launcher in slot 2 fires in a match; of two "
-			"rockets into an enemy MBT's rear the first is spent on the full rear shield and the second takes 20.25 % "
-			"of its health (R-G3, R-G4)") {
+			"rockets into an enemy MBT's rear the first is spent on the full rear shield and pushes the parked hull by "
+			"its impulse over its mass, and the second takes 22.275 % of its health (R-G3, R-G4)") {
 		tdm::TdmLevel *level = tdm::load_conquest_level_once();
 		if (level == nullptr) {
 			return;
@@ -6653,17 +6653,70 @@ TEST_SUITE("host-vehicles-damage-team") {
 					select_and_fire(launcher_slot, fire && (p_tick % 30u) < 10u) | sim::buttons::kZoom);
 		};
 		m->ticks(90);
+		std::optional<sim::VehicleState> before, after;
+		std::optional<sw::DetonationEvent> blast;
 		const auto rocket = [&] {
 			const uint64_t shots = m->server.gunplay()->stats().shots, hits = m->server.stats().vehicle_hits;
 			fire = true;
 			const bool fired = m->until([&] { return m->server.gunplay()->stats().shots > shots; }, 600);
 			fire = false;
-			const bool hit = m->until([&] { return m->server.stats().vehicle_hits > hits; }, 120);
+			before = m->server.vehicle_state(*tank);
+			const bool hit = m->until(
+					[&] {
+						if (m->server.stats().vehicle_hits > hits) {
+							return true;
+						}
+						before = m->server.vehicle_state(*tank);
+						return false;
+					},
+					120);
+			after = m->server.vehicle_state(*tank);
+			blast.reset();
+			for (const sw::DetonationEvent &d : m->server.gunplay()->step_output().detonations) {
+				if (d.def == launcher && d.player_slot == gunner.slot()) {
+					blast = d;
+				}
+			}
 			m->ticks(1);
 			return std::pair<bool, float>{ fired && hit, m->server.vehicle_health(*tank).value_or(-1.0f) };
 		};
 		const uint64_t pushes = m->server.stats().vehicle_pushes;
 		const std::pair<bool, float> first = rocket();
+		REQUIRE(before.has_value());
+		REQUIRE(after.has_value());
+		REQUIRE(blast.has_value());
+		const sw::ProjectileSimDef &round = m->server.gunplay()->table().def(launcher, blast->variant).projectile;
+		const sw::ExplosionSimDef &x = blast->dud ? round.dud : round.explosion;
+		const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[*tank].kind];
+		const core::Transform hull = sim::vehicles::hull_transform(after->body.rotation, after->body.origin);
+		sw::ImpulseBox box;
+		box.centre = hull.transform_point(kind.box.centre);
+		box.axes = hull.axes();
+		box.half = kind.box.half;
+		const sim::Vec3 toward = core::vec::sub(box.centre, blast->position);
+		const sim::Vec3 dv = core::vec::sub(after->body.linear_velocity, before->body.linear_velocity);
+		const float mass = kind.model->mass;
+		const sim::Vec3 expected =
+				core::vec::scale(sw::explosion_impulse(x, blast->position, box.centre, box), 1.0f / mass);
+		std::printf(
+				"launcher: the first rocket's blast %.2f m from the hull-box centre (BlastImpulse %.0f, radius %.1f, "
+				"ShockwaveImpulse %.0f) pushes the %.0f kg hull %s by (%.5f %.5f %.5f) m/s, expected (%.5f %.5f "
+				"%.5f)\n",
+				double(core::vec::length(toward)), double(x.impulse), double(x.radius), double(x.shockwave_impulse),
+				double(mass), before->body.active != 0 ? "awake" : "asleep", double(dv[0]), double(dv[1]),
+				double(dv[2]), double(expected[0]), double(expected[1]), double(expected[2]));
+		CHECK(before->body.active == 0);
+		CHECK(core::vec::length(before->body.linear_velocity) == 0.0f);
+		CHECK(core::vec::length(expected) > 0.0f);
+		CHECK(core::vec::dot(core::vec::normalize_or(dv, {}), core::vec::normalize_or(toward, {})) ==
+				doctest::Approx(1.0f));
+		CHECK(core::vec::length(dv) * mass ==
+				doctest::Approx(sw::blast_impulse(x, double(core::vec::length(toward))) *
+						double(sw::impulse_size_factor(box, toward))));
+		for (size_t i = 0; i < 3; ++i) {
+			CHECK(dv[i] == doctest::Approx(expected[i]));
+		}
+		CHECK(after->body.angular_velocity == before->body.angular_velocity);
 		const std::pair<bool, float> second = rocket();
 		std::printf("launcher: %s from %.1f m behind the %s of spawner %u (health %.0f): after the first rocket %.2f, "
 					"after the second %.2f (%.2f %% of its health)\n",

@@ -10,6 +10,7 @@
 #include "bf3/net/protocol.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/soldier_state.h"
+#include "bf3/sim/vehicle_types.h"
 
 #include <array>
 #include <cstdint>
@@ -235,6 +236,7 @@ public:
 	const TdmRules *rules() const;
 	TdmRules *rules();
 	std::optional<float> vehicle_health(uint16_t p_spawner) const;
+	std::optional<sim::VehicleState> vehicle_state(uint16_t p_spawner) const;
 
 	bool set_squad_order(uint8_t p_team, uint8_t p_squad, const SquadOrderState &p_order);
 
