@@ -60,6 +60,8 @@ struct PresentedVehicle {
 	bool exploded = false;
 	uint8_t window_count = 0;
 	std::array<PresentedVehicleSample, kVehicleWindow> window{};
+	float throttle = 0;
+	uint8_t wheel_contact = 0;
 
 	PresentedVehiclePose pose() const;
 };

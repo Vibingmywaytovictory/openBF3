@@ -23,7 +23,9 @@ PresentedVehicle present_vehicle(const net::VehicleWire &p_wire, sim::Tick p_tic
 		v.wheel_spin[i] = p_wire.state.wheels[i].angular_velocity;
 		v.wheel_steer[i] = p_wire.state.wheels[i].steer_angle;
 		v.suspension_length[i] = p_wire.state.wheels[i].suspension_length;
+		v.wheel_contact |= uint8_t((p_wire.state.wheels[i].in_contact != 0 ? 1u : 0u) << i);
 	}
+	v.throttle = p_wire.state.driver.throttle_filter;
 	v.engine_rpm = p_wire.state.driver.engine_rpm;
 	v.gear = int8_t(p_wire.state.driver.gearbox.gear);
 	v.turret_count = std::min<uint8_t>(p_wire.turret_count, uint8_t(net::kMaxVehicleTurrets));
