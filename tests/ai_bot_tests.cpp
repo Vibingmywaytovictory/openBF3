@@ -10,6 +10,7 @@
 #include "bf3/host/tdm_brain.h"
 
 #include "ai_infantry_fakes.h"
+#include "ai_shipped_config.h"
 #include "gunplay_fixture.h"
 
 #include <algorithm>
@@ -39,7 +40,7 @@ InfantryBehaviour argmax(const BotMain &p_bot) {
 
 struct Rig {
 	FakeBody body;
-	BehaviourTuning tuning;
+	BehaviourTuning tuning = bf3::test::shipped_behaviour_tuning();
 	BotMain bot{ 0, 3, 1, body, tuning };
 
 	InfantryBehaviour decide() {
@@ -267,7 +268,7 @@ TEST_SUITE("ai-bot") {
 			  "unplanned queue, and a bot kept out of squads counts as having its squad member") {
 		FakeBody body;
 		body.s.navigable = true;
-		BehaviourTuning tuning;
+		BehaviourTuning tuning = bf3::test::shipped_behaviour_tuning();
 		BotMain bot(0, 0, 1, body, tuning);
 		bot.update_bot(true, true);
 		CHECK_FALSE(bot.has_plan());
@@ -514,6 +515,7 @@ TEST_SUITE("ai-bot") {
 		cfg.level = level;
 		cfg.max_slots = 16;
 		auto bots = std::make_shared<host::TdmBotConfig>();
+		bf3::test::use_shipped_bot_ai(*bots);
 		bots->count = 8;
 		bots->stats = std::make_shared<host::TdmBotStats>();
 		auto check = std::make_shared<DecisionCheck>();

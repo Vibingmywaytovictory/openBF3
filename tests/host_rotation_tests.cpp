@@ -80,6 +80,7 @@ host::GameServerConfig metro_config(
 	fill->count = 0;
 	c.bots = fill;
 	auto bots = std::make_shared<host::TdmBotConfig>();
+	bf3::test::use_shipped_bot_ai(*bots);
 	bots->count = 12;
 	c.tdm_bots = bots;
 	return c;

@@ -2342,6 +2342,7 @@ std::function<void(host::GameServerConfig &)> gadget_bot_server(
 		fill->count = 0;
 		r_cfg.bots = fill;
 		auto bots = std::make_shared<host::TdmBotConfig>();
+		bf3::test::use_shipped_bot_ai(*bots);
 		bots->count = 1;
 		bots->stats = p_stats;
 		bots->squads = p_squads;

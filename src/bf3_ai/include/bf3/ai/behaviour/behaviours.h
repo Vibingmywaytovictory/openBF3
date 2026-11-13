@@ -33,16 +33,15 @@ inline constexpr size_t kInfantryBehaviourCount = 10;
 std::string_view infantry_behaviour_kind(InfantryBehaviour p_behaviour);
 
 struct BehaviourCurve {
-	float weight = 1.0f;
+	float weight = 0.0f;
 	float slope = 0.0f;
-	float offset = 1.0f;
+	float offset = 0.0f;
 
 	bool operator==(const BehaviourCurve &) const = default;
 };
 
 struct BehaviourTuning {
-	std::array<BehaviourCurve, kInfantryBehaviourCount> curves{ { { 8.0f }, { 7.0f }, { 6.0f }, { 1.75f }, { 1.5f },
-			{ 1.0f }, { 0.5f }, { 2.5f }, { 5.5f }, { 2.4f } } };
+	std::array<BehaviourCurve, kInfantryBehaviourCount> curves{};
 	float squad_far_m = 15.0f;
 	float squad_arrive_m = 3.0f;
 	float mission_arrive_m = 10.0f;

@@ -42,6 +42,7 @@ TEST_SUITE("host-tdm-client") {
 				fill->count = 0;
 				c.bots = fill;
 				auto bots = std::make_shared<host::TdmBotConfig>();
+				bf3::test::use_shipped_bot_ai(*bots);
 				bots->count = 1;
 				c.tdm_bots = bots;
 				const core::Status st = probe.init(c);
@@ -76,6 +77,7 @@ TEST_SUITE("host-tdm-client") {
 				fill->level = level->bots;
 				r_cfg.bots = fill;
 				auto bots = std::make_shared<host::TdmBotConfig>();
+				bf3::test::use_shipped_bot_ai(*bots);
 
 				bots->count = 31;
 				r_cfg.tdm_bots = bots;

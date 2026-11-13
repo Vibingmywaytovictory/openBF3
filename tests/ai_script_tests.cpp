@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <system_error>
 
@@ -46,8 +47,8 @@ std::string message(const core::Status &p_status) {
 }
 
 TEST_SUITE("ai-script") {
-	TEST_CASE("the shipped .ai files: every shipped level loads its own AI.ai, and they give the compiled-in "
-			  "settings and behaviour weights") {
+	TEST_CASE("the shipped .ai files: every shipped level loads its own AI.ai, and they give the shipped "
+			  "settings and the Default set's behaviour weights on the Memory curve") {
 		const std::vector<std::string_view> levels = core::level::shipped_level_ids();
 		REQUIRE(levels.size() == 29u);
 		for (const std::string_view level : levels) {
@@ -59,9 +60,7 @@ TEST_SUITE("ai-script") {
 			expected.vehicles = { "Infantry" };
 			expected.sides = 2;
 			expected.behaviour_count = int32_t(kInfantryBehaviourCount);
-			for (const BehaviourCurve &c : BehaviourTuning{}.curves) {
-				expected.basic_bot_weights.push_back(c.weight);
-			}
+			expected.basic_bot_weights = config->behaviour_modifiers.at("Default");
 			CHECK(config->settings == expected);
 			BehaviourTuning tuning;
 			tuning.squad_far_m = 99.0f;
@@ -69,6 +68,11 @@ TEST_SUITE("ai-script") {
 			REQUIRE_MESSAGE(st.ok(), message(st));
 			BehaviourTuning want;
 			want.squad_far_m = 99.0f;
+			const UrgeCurveDef &memory = config->urge_curves.at("Memory");
+			REQUIRE(memory.kind == UrgeCurveDef::Kind::Linear);
+			for (size_t i = 0; i < kInfantryBehaviourCount; ++i) {
+				want.curves[i] = { expected.basic_bot_weights[i], memory.values[0], memory.values[1] };
+			}
 			CHECK(tuning == want);
 			CHECK(config->weapon_templates.empty());
 		}
@@ -76,14 +80,22 @@ TEST_SUITE("ai-script") {
 
 	TEST_CASE("a level loads its own map file: its weights and skill reach the config, a level without one fails") {
 		const ScratchRoot root;
+		std::string own_script = "aiSettings.setBotSkill 0.2\n"
+								 "aiSettings.createUCLinear Rising 0.5 0.25\n"
+								 "aiSettings.createBehaviourModifiers Own\n"
+								 "aiSettings.setBehaviourModifier Revive 3\n"
+								 "aiSettings.setBehaviourModifier Idle 9\n";
+		for (size_t i = 0; i < kInfantryBehaviourCount; ++i) {
+			const InfantryBehaviour b = InfantryBehaviour(i);
+			if (b != InfantryBehaviour::Revive && b != InfantryBehaviour::Idle) {
+				own_script +=
+						"aiSettings.setBehaviourModifier " + std::string(infantry_behaviour_kind(b).substr(2)) + " 0\n";
+			}
+		}
 		root.level("XP9_Own",
-				"aiSettings.setBotSkill 0.2\n"
-				"aiSettings.createUCLinear Rising 0.5 0.25\n"
-				"aiSettings.createBehaviourModifiers Own\n"
-				"aiSettings.setBehaviourModifier Revive 3\n"
-				"aiSettings.setBehaviourModifier Idle 9\n"
-				"aiSettings.setBasicBotWeights Own\n"
-				"aiSettings.setVehicleBehaviour Infantry Idle BBIdle BBPIdle 0 Rising Own\n");
+				own_script +
+						"aiSettings.setBasicBotWeights Own\n"
+						"aiSettings.setVehicleBehaviour Infantry Idle BBIdle BBPIdle 0 Rising Own\n");
 		root.level("XP9_Other", "aiSettings.setBasicBotWeights Default\n");
 		const core::Result<AiConfig> own = load_level_ai_config(root.dir, "XP9_Own");
 		REQUIRE_MESSAGE(own.ok(), (own.ok() ? std::string() : own.error().message));
@@ -99,7 +111,11 @@ TEST_SUITE("ai-script") {
 		CHECK(a.curves[size_t(InfantryBehaviour::Idle)].slope == 0.5f);
 		CHECK(a.curves[size_t(InfantryBehaviour::Idle)].offset == 0.25f);
 		CHECK(a.curves[size_t(InfantryBehaviour::FireInfantery)].weight == 0.0f);
-		CHECK(b == BehaviourTuning{});
+		const core::Result<AiConfig> shipped = load_level_ai_config(kShipped, "MP_Subway");
+		REQUIRE(shipped.ok());
+		BehaviourTuning shipped_tuning;
+		REQUIRE(apply_behaviour_weights(*shipped, shipped_tuning).ok());
+		CHECK(b == shipped_tuning);
 
 		const core::Result<AiConfig> none = load_level_ai_config(root.dir, "XP9_None");
 		REQUIRE_FALSE(none.ok());
@@ -192,5 +208,31 @@ TEST_SUITE("ai-script") {
 		CHECK_FALSE(fresh_fire_plan(true, 0.75f));
 		CHECK_FALSE(fresh_fire_plan(true, 0.3f));
 		CHECK(fresh_fire_plan(true, 0.29f));
+	}
+
+	TEST_CASE("a basic bot weights set that misses one behaviour's modifier fails loudly, naming it; an explicit "
+			  "0 is a modifier") {
+		std::ifstream f(kShipped / kAiBehavioursScript, std::ios::binary);
+		REQUIRE(f.good());
+		const std::string shipped((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+		const std::string line = "aiSettings.setBehaviourModifier Resupply ";
+		const size_t at = shipped.find(line);
+		REQUIRE(at != std::string::npos);
+		const size_t end = shipped.find('\n', at);
+		REQUIRE(end != std::string::npos);
+		const std::string without = shipped.substr(0, at) + shipped.substr(end + 1);
+		const ScratchRoot root;
+		root.level("XP9_Missing", "aiSettings.setBasicBotWeights Default\n");
+		std::ofstream(root.dir / kAiBehavioursScript, std::ios::binary) << without;
+		const core::Result<AiConfig> missing = load_level_ai_config(root.dir, "XP9_Missing");
+		REQUIRE_FALSE(missing.ok());
+		CHECK(missing.error().message.find("Resupply") != std::string::npos);
+		CHECK(missing.error().message.find("aiSettings.setBehaviourModifier") != std::string::npos);
+		std::ofstream(root.dir / kAiBehavioursScript, std::ios::binary)
+				<< without << "aiSettings.activeBehaviourModifiers Default\n"
+				<< "aiSettings.setBehaviourModifier Resupply 0\n";
+		const core::Result<AiConfig> zero = load_level_ai_config(root.dir, "XP9_Missing");
+		REQUIRE_MESSAGE(zero.ok(), (zero.ok() ? std::string() : zero.error().message));
+		CHECK(zero->settings.basic_bot_weights.at(size_t(InfantryBehaviour::Resupply)) == 0.0f);
 	}
 }

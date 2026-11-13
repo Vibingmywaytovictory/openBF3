@@ -415,7 +415,8 @@ set_tests_properties(sim.nav.bake PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900 RUN
 if(OPENBF3_ASAN)
     target_compile_definitions(test_sim_nav PRIVATE OPENBF3_TIMING_REPORT_ONLY=1)
 endif()
-openbf3_test(test_host_scale test_main.cpp host_scale_tests.cpp tdm_fixture.h gunplay_fixture.h test_support.h)
+openbf3_test(test_host_scale test_main.cpp host_scale_tests.cpp tdm_fixture.h ai_shipped_config.h gunplay_fixture.h test_support.h)
+target_compile_definitions(test_host_scale PRIVATE "OPENBF3_AI_DIR=\"${CMAKE_SOURCE_DIR}/bf3-opensource/ai\"")
 target_link_libraries(test_host_scale PRIVATE bf3_host)
 target_compile_definitions(test_host_scale PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""
     "OPENBF3_MECHANICS_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/weapon_mechanics.cfg\""
@@ -1005,7 +1006,8 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_cost(godot.m2a_load 1 50)
 endif()
 
-openbf3_test(test_m2b_contract test_main.cpp m2b_contract_tests.cpp tdm_fixture.h gunplay_fixture.h test_support.h)
+openbf3_test(test_m2b_contract test_main.cpp m2b_contract_tests.cpp tdm_fixture.h ai_shipped_config.h gunplay_fixture.h test_support.h)
+target_compile_definitions(test_m2b_contract PRIVATE "OPENBF3_AI_DIR=\"${CMAKE_SOURCE_DIR}/bf3-opensource/ai\"")
 target_link_libraries(test_m2b_contract PRIVATE bf3_host bf3_audio)
 target_compile_definitions(test_m2b_contract PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\"")
 add_test(NAME m2b.contract COMMAND test_m2b_contract --test-suite=m2b-contract)
@@ -1060,6 +1062,7 @@ target_sources(test_host_tdm PRIVATE host_rotation_tests.cpp)
 target_sources(test_host_tdm PRIVATE host_gunplay_loadout_tests.cpp)
 target_include_directories(test_host_tdm PRIVATE ${PROJECT_SOURCE_DIR}/src/bf3_host/src)
 target_compile_definitions(test_host_tdm PRIVATE "OPENBF3_BOT_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/bot_tuning.cfg\"")
+target_compile_definitions(test_host_tdm PRIVATE "OPENBF3_AI_DIR=\"${CMAKE_SOURCE_DIR}/bf3-opensource/ai\"")
 if(OPENBF3_ASAN)
     target_compile_definitions(test_host_tdm PRIVATE OPENBF3_TIMING_REPORT_ONLY=1)
 endif()
@@ -1479,8 +1482,9 @@ target_link_libraries(test_ai_core PRIVATE bf3_ai)
 add_test(NAME ai.core.unit COMMAND test_ai_core --test-suite=ai-core)
 set_tests_properties(ai.core.unit PROPERTIES TIMEOUT 60 LABELS "unit")
 
-openbf3_test(test_ai_behaviour test_main.cpp ai_behaviour_tests.cpp ai_infantry_fakes.h ai_knowledge_fakes.h)
+openbf3_test(test_ai_behaviour test_main.cpp ai_behaviour_tests.cpp ai_infantry_fakes.h ai_knowledge_fakes.h ai_shipped_config.h)
 target_link_libraries(test_ai_behaviour PRIVATE bf3_ai)
+target_compile_definitions(test_ai_behaviour PRIVATE "OPENBF3_AI_DIR=\"${CMAKE_SOURCE_DIR}/bf3-opensource/ai\"")
 add_test(NAME ai.behaviour.unit COMMAND test_ai_behaviour --test-suite=ai-behaviour)
 set_tests_properties(ai.behaviour.unit PROPERTIES TIMEOUT 60 LABELS "unit")
 
@@ -1491,7 +1495,8 @@ set_tests_properties(ai.squad.unit PROPERTIES TIMEOUT 60 LABELS "unit")
 add_test(NAME ai.strategy.unit COMMAND test_ai_squad --test-suite=ai-strategy)
 set_tests_properties(ai.strategy.unit PROPERTIES TIMEOUT 60 LABELS "unit")
 
-openbf3_test(test_ai_world test_main.cpp ai_world_tests.cpp tdm_fixture.h gunplay_fixture.h test_support.h)
+openbf3_test(test_ai_world test_main.cpp ai_world_tests.cpp tdm_fixture.h ai_shipped_config.h gunplay_fixture.h test_support.h)
+target_compile_definitions(test_ai_world PRIVATE "OPENBF3_AI_DIR=\"${CMAKE_SOURCE_DIR}/bf3-opensource/ai\"")
 target_link_libraries(test_ai_world PRIVATE bf3_host)
 target_compile_definitions(test_ai_world PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""
     "OPENBF3_MECHANICS_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/weapon_mechanics.cfg\""
@@ -1502,7 +1507,8 @@ add_test(NAME ai.world.install COMMAND test_ai_world --test-suite=ai-world-insta
 set_tests_properties(ai.world.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 openbf3_cost(ai.world.install 2 15)
 
-openbf3_test(test_ai_bot test_main.cpp ai_bot_tests.cpp ai_infantry_fakes.h gunplay_fixture.h test_support.h)
+openbf3_test(test_ai_bot test_main.cpp ai_bot_tests.cpp ai_infantry_fakes.h ai_shipped_config.h gunplay_fixture.h test_support.h)
+target_compile_definitions(test_ai_bot PRIVATE "OPENBF3_AI_DIR=\"${CMAKE_SOURCE_DIR}/bf3-opensource/ai\"")
 target_link_libraries(test_ai_bot PRIVATE bf3_host)
 target_compile_definitions(test_ai_bot PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""
     "OPENBF3_MECHANICS_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/weapon_mechanics.cfg\"")

@@ -340,6 +340,7 @@ TEST_SUITE("m2b-contract") {
 		cfg.level = level;
 		cfg.max_slots = 8;
 		auto bots = std::make_shared<host::TdmBotConfig>();
+		bf3::test::use_shipped_bot_ai(*bots);
 		bots->count = 4;
 		cfg.tdm_bots = bots;
 		const core::Status st = server.init(cfg);

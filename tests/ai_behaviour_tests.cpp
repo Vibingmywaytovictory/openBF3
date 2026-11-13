@@ -2,6 +2,7 @@
 
 #include "ai_infantry_fakes.h"
 #include "ai_knowledge_fakes.h"
+#include "ai_shipped_config.h"
 #include "bf3/ai/behaviour/behaviours.h"
 #include "bf3/ai/behaviour/curves.h"
 #include "bf3/ai/behaviour/urgency_merger.h"
@@ -215,7 +216,7 @@ TEST_SUITE("ai-behaviour") {
 	TEST_CASE("BotMain: a choice holds until an urgency leaves 0.87..1.15 of the active one or a target changes") {
 		FakeBody body;
 		body.s.navigable = true;
-		BehaviourTuning tuning;
+		BehaviourTuning tuning = bf3::test::shipped_behaviour_tuning();
 		BotMain bot(0, 3, 1, body, tuning);
 		bot.update_bot(true, true);
 		const float far = tuning.squad_far_m;
@@ -249,7 +250,7 @@ TEST_SUITE("ai-behaviour") {
 	TEST_CASE("BotMain: the last behaviour's urge curve scales its weight from one decision to the next") {
 		FakeBody body;
 		body.s.navigable = true;
-		BehaviourTuning tuning;
+		BehaviourTuning tuning = bf3::test::shipped_behaviour_tuning();
 		tuning.curves[size_t(InfantryBehaviour::Random)] = { 1.0f, -6.0f, 1.0f };
 		BotMain bot(0, 3, 1, body, tuning);
 		bot.update_bot(true, true);
@@ -610,7 +611,7 @@ TEST_SUITE("ai-behaviour") {
 		CHECK(s.modifier == 1.0f);
 		CHECK_FALSE(voices.settings(kRadioCallForRepair, s));
 		FakeBody body;
-		BehaviourTuning tuning;
+		BehaviourTuning tuning = bf3::test::shipped_behaviour_tuning();
 		BotMain bot(0, 5, 2, body, tuning);
 		bot.call_for_medic();
 		bot.update_communication();
@@ -636,5 +637,15 @@ TEST_SUITE("ai-behaviour") {
 		bot.update_bot(true, true);
 		bot.call_for_medic();
 		CHECK(bot.communication()->queued() == 1u);
+	}
+
+	TEST_CASE("BehaviourTuning's code holds no behaviour weight or curve: every one comes from the .ai config") {
+		const BehaviourTuning tuning;
+		for (const BehaviourCurve &c : tuning.curves) {
+			CHECK(c.weight == 0.0f);
+			CHECK(c.slope == 0.0f);
+			CHECK(c.offset == 0.0f);
+		}
+		CHECK_FALSE(bf3::test::shipped_behaviour_tuning() == tuning);
 	}
 }

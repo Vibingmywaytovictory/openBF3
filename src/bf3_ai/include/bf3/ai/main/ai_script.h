@@ -47,6 +47,7 @@ struct AiConfig {
 	std::vector<std::string> behaviours;
 	std::map<std::string, UrgeCurveDef> urge_curves;
 	std::map<std::string, std::vector<float>> behaviour_modifiers;
+	std::map<std::string, std::vector<bool>> given_modifiers;
 	std::string active_modifiers;
 	std::vector<VehicleBehaviour> vehicle_behaviours;
 	std::map<std::string, WeaponTemplate> weapon_templates;

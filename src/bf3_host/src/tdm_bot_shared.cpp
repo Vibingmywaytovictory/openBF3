@@ -132,9 +132,13 @@ core::Result<std::shared_ptr<TdmShared>> make_tdm_shared(const TdmBrainHost &p_h
 	if (p_host.view == nullptr) {
 		return core::make_error("tdm bots: no server view");
 	}
+	if (p_config == nullptr || p_config->ai.basic_bot_weights.size() != ai::kInfantryBehaviourCount) {
+		return core::make_error("tdm bots: no behaviour weights; a bot takes them only from the .ai config's "
+								"aiSettings.setBasicBotWeights (bot_tuning.cfg's ai directory)");
+	}
 	auto sh = std::make_shared<TdmShared>();
 	sh->host = p_host;
-	sh->config = p_config != nullptr ? std::move(p_config) : std::make_shared<const TdmBotConfig>();
+	sh->config = std::move(p_config);
 	sh->stats = sh->config->stats.get();
 	sh->observer = sh->config->observer.get();
 	sh->walker = p_host.walker;

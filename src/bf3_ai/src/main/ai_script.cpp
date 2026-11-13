@@ -180,6 +180,8 @@ const Command kCommands[] = {
 				if (modifier_set(c, a[0]) == nullptr) {
 					c.behaviour_modifiers[std::string(a[0])] =
 							std::vector<float>(size_t(std::max(c.settings.behaviour_count, 0)), 0.0f);
+					c.given_modifiers[std::string(a[0])] =
+							std::vector<bool>(size_t(std::max(c.settings.behaviour_count, 0)), false);
 					c.active_modifiers = std::string(a[0]);
 				}
 				return core::Status::success();
@@ -202,13 +204,23 @@ const Command kCommands[] = {
 				if (id < 0 || size_t(id) >= set->size()) {
 					return no_behaviour(a[0]);
 				}
-				return read_float(a[1], 0.0, 1.0e6, (*set)[size_t(id)]);
+				BF3_TRY(read_float(a[1], 0.0, 1.0e6, (*set)[size_t(id)]));
+				find_named(c.given_modifiers, c.active_modifiers)->at(size_t(id)) = true;
+				return core::Status::success();
 			} },
 	{ "aiSettings.setBasicBotWeights", 1, 1,
 			[](Args a, AiConfig &c) -> core::Status {
 				const std::vector<float> *set = modifier_set(c, a[0]);
 				if (set == nullptr) {
 					return no_modifiers(a[0]);
+				}
+				const std::vector<bool> &given = *find_named(c.given_modifiers, a[0]);
+				for (size_t i = 0; i < given.size(); ++i) {
+					if (!given[i]) {
+						return core::make_error("'" + core::shown_text(a[0]) + "' gives " +
+								(i < c.behaviours.size() ? c.behaviours[i] : std::to_string(i)) +
+								" no modifier (aiSettings.setBehaviourModifier)");
+					}
 				}
 				c.settings.basic_bot_weights = *set;
 				return core::Status::success();

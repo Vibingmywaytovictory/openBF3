@@ -446,8 +446,11 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 			error = s.error().message;
 		}
 		p.options.bot_tuning_cfg = config_path("res://config/bot_tuning.cfg");
-		UtilityFunctions::print(to_godot("[tdm] --tdm preview: TDM rules on (no deploy screen, KitSelect kit), TDM bots, " + limits_text(p.options) + ", tuning " +
-				(p.options.bot_tuning_cfg.empty() ? std::string("built-in defaults") : p.options.bot_tuning_cfg)));
+		UtilityFunctions::print(
+				to_godot("[tdm] --tdm preview: TDM rules on (no deploy screen, KitSelect kit), TDM bots, " +
+						limits_text(p.options) + ", tuning " +
+						(p.options.bot_tuning_cfg.empty() ? std::string("none, bots refuse to start")
+														  : p.options.bot_tuning_cfg)));
 	} else {
 		g.tdm = std::unique_ptr<TdmState, void (*)(TdmState *)>(new TdmState(), &delete_part<TdmState>);
 		TdmState &m = *g.tdm;
@@ -557,7 +560,7 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 											 : "no spawn screen (automatic respawn, K kit)") +
 					", " + std::to_string(m.options.bots) + " TDM bots, " + limits_text(m.options) + ", tuning " +
 					(m.options.tdm_tuning_cfg.empty() ? "built-in" : "config/tdm_tuning.cfg") + " / " +
-					(m.options.bot_tuning_cfg.empty() ? "built-in" : "config/bot_tuning.cfg") +
+					(m.options.bot_tuning_cfg.empty() ? "none, bots refuse to start" : "config/bot_tuning.cfg") +
 					(m.checks() ? ", case play" : "")));
 		}
 	}

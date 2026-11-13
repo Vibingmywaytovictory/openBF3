@@ -171,6 +171,7 @@ core::Result<TdmRunResult> run_tdm(const TdmLevel &p_level, const TdmRunConfig &
 
 #include <doctest/doctest.h>
 
+#include "ai_shipped_config.h"
 #include "bf3/core/cache/disk_cache.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/sim/weapons/weapon_sim.h"
@@ -678,6 +679,7 @@ inline core::Result<TdmRunResult> run_tdm(const TdmLevel &p_level, const TdmRunC
 	std::shared_ptr<detail::DecisionRecord> decisions;
 	if (p_config.bots > 0) {
 		auto b = std::make_shared<host::TdmBotConfig>();
+		use_shipped_bot_ai(*b);
 		b->count = p_config.bots;
 		b->stats = std::make_shared<host::TdmBotStats>();
 		if (p_config.configure_bots) {

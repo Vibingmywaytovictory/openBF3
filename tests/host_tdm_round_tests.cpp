@@ -19,6 +19,7 @@
 #include "bf3/sim/static_world.h"
 
 #include "ai_infantry_fakes.h"
+#include "ai_shipped_config.h"
 #include "gunplay_fixture.h"
 #include "tdm_bot_body.h"
 #include "tdm_bot_shared.h"
@@ -469,7 +470,8 @@ TEST_SUITE("host-tdm-bots-unit") {
 		c.behaviours.curves[0].weight = 99.0f;
 		const core::Status st = host::load_bot_ai(root, "MP_Subway", c);
 		REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
-		CHECK(c.behaviours == ai::BehaviourTuning{});
+		CHECK(c.behaviours == bf3::test::shipped_behaviour_tuning());
+		CHECK(c.behaviours.curves[0].weight == c.ai.basic_bot_weights[0]);
 		CHECK(c.ai.bot_skill == 0.75f);
 		CHECK(c.ai.sides == 2u);
 		CHECK(c.ai.vehicle("Infantry") == 0);
@@ -495,6 +497,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 			view.kits = { 0, 0, 0 };
 			view.slots = { soldier_at({ 0, 0, 0 }), soldier_at({ 20, 0, 20 }), soldier_at({ -30, 0, 30 }) };
 			auto cfg = std::make_shared<host::TdmBotConfig>();
+			bf3::test::use_shipped_bot_ai(*cfg);
 			cfg->ai.bot_skill = p_skill;
 			host::TdmBrainHost h;
 			h.view = &view;
@@ -614,6 +617,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		view.slots[3] = soldier_at({ -3, 0, -3 });
 		auto rec = std::make_shared<m2b_fake::Recorder>();
 		auto cfg = std::make_shared<host::TdmBotConfig>();
+		bf3::test::use_shipped_bot_ai(*cfg);
 		cfg->observer = rec;
 		cfg->stats = std::make_shared<host::TdmBotStats>();
 		host::TdmBrainHost h;
@@ -662,6 +666,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		CHECK(cfg->stats->last_brains_ns.load() > 0u);
 
 		auto cfg2 = std::make_shared<host::TdmBotConfig>();
+		bf3::test::use_shipped_bot_ai(*cfg2);
 		core::Result<std::shared_ptr<host::TdmShared>> shared2 = host::make_tdm_shared(h, cfg2);
 		REQUIRE(shared2.ok());
 		host::AiBotSource a(*shared2, 0), b(*host::make_tdm_shared(h, cfg2), 0);
@@ -695,6 +700,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		view.kits = { 0, 0 };
 		view.slots = { soldier_at({ 0, 0, 0 }), soldier_at({ 30, 0, 30 }) };
 		auto cfg = std::make_shared<host::TdmBotConfig>();
+		bf3::test::use_shipped_bot_ai(*cfg);
 		host::TdmBrainHost h;
 		h.view = &view;
 		h.match_seed = 5;
@@ -775,6 +781,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		view.slots = { soldier_at({ -20, 0, -20 }), soldier_at({ -18, 0, -20 }), soldier_at({ 5, 0, 5 }),
 			soldier_at({ 3, 0, 5 }) };
 		auto cfg = std::make_shared<host::TdmBotConfig>();
+		bf3::test::use_shipped_bot_ai(*cfg);
 		cfg->stats = std::make_shared<host::TdmBotStats>();
 		host::TdmBrainHost h;
 		h.view = &view;
@@ -847,7 +854,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 			return std::optional<uint8_t>(uint8_t(1));
 		});
 		ai::test::FakeBody caller_body, medic_body;
-		const ai::BehaviourTuning tuning;
+		const ai::BehaviourTuning tuning = bf3::test::shipped_behaviour_tuning();
 		ai::BotMain *const caller = bots.admit(0, caller_body, tuning);
 		ai::BotMain *const medic = bots.admit(1, medic_body, tuning);
 		REQUIRE(caller != nullptr);
@@ -873,6 +880,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		cfg.level = level;
 		cfg.max_slots = 16;
 		auto bots = std::make_shared<host::TdmBotConfig>();
+		bf3::test::use_shipped_bot_ai(*bots);
 		bots->count = 8;
 		bots->stats = std::make_shared<host::TdmBotStats>();
 		cfg.tdm_bots = bots;
@@ -901,6 +909,7 @@ TEST_SUITE("host-tdm-bots-unit") {
 		host::GameServer full;
 		host::GameServerConfig fc = cfg;
 		auto many = std::make_shared<host::TdmBotConfig>();
+		bf3::test::use_shipped_bot_ai(*many);
 		many->count = 40;
 		many->stats = std::make_shared<host::TdmBotStats>();
 		fc.tdm_bots = many;
@@ -915,6 +924,37 @@ TEST_SUITE("host-tdm-bots-unit") {
 		tuned->tuning_cfg = "no/such/bot_tuning.cfg";
 		bc.tdm_bots = tuned;
 		CHECK_FALSE(bad.init(bc).ok());
+	}
+
+	TEST_CASE("bots refuse to start without the .ai config, whose basic bot weights are their only behaviour "
+			  "weights; the shipped config starts them") {
+		const std::shared_ptr<const host::SharedLevel> level = tg::synthetic_floor();
+		REQUIRE(level != nullptr);
+		host::GameServerConfig cfg;
+		cfg.level = level;
+		cfg.max_slots = 8;
+		auto bare = std::make_shared<host::TdmBotConfig>();
+		bare->count = 2;
+		cfg.tdm_bots = bare;
+		host::GameServer refused;
+		const core::Status st = refused.init(cfg);
+		REQUIRE_FALSE(st.ok());
+		CHECK(st.error().message.find("aiSettings.setBasicBotWeights") != std::string::npos);
+		m2b_fake::FakeView view;
+		host::TdmBrainHost h;
+		h.view = &view;
+		const core::Result<std::shared_ptr<host::TdmShared>> unloaded = host::make_tdm_shared(h, bare);
+		REQUIRE_FALSE(unloaded.ok());
+		CHECK(unloaded.error().message.find("aiSettings.setBasicBotWeights") != std::string::npos);
+		CHECK_FALSE(host::make_tdm_shared(h, nullptr).ok());
+
+		auto shipped = std::make_shared<host::TdmBotConfig>(*bare);
+		bf3::test::use_shipped_bot_ai(*shipped);
+		CHECK(shipped->behaviours == bf3::test::shipped_behaviour_tuning());
+		CHECK(host::make_tdm_shared(h, shipped).ok());
+		cfg.tdm_bots = shipped;
+		host::GameServer started;
+		REQUIRE(started.init(cfg).ok());
 	}
 }
 
