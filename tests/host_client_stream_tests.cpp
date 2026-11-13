@@ -18,6 +18,8 @@
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/soldier_state.h"
+#include "bf3/sim/vehicle_world.h"
+#include "bf3/sim/vehicles/vehicle_input.h"
 #include "client_loop.h"
 #include "client_transport.h"
 #include "vehicles/client_vehicle_prediction.h"
@@ -1407,5 +1409,139 @@ TEST_SUITE("host-vehicles-blend-unit") {
 		b.correct({ 0.10f, 0.0f, 0.0f });
 		b.correct({ 0.0f, 0.0f, 0.02f });
 		CHECK(core::vec::length(b.shown()) == 0.0f);
+	}
+}
+
+TEST_SUITE("host-vehicles-reconcile") {
+	TEST_CASE("vehicles: a received Growler state shoved 0.5 m from the driver's prediction is replayed and faded "
+			  "from where the vehicle was drawn over 0.25 s; one shoved 4 m snaps") {
+		tt::TdmLevel *level = tt::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		std::optional<uint16_t> spawner;
+		for (size_t i = 0; i < lv.spawners.size() && !spawner; ++i) {
+			if (lv.kinds[lv.spawners[i].kind].blueprint == "vehicles/growleritv/growleritv" &&
+					tt::up_y_of(lv.spawners[i].placement.rotation) > 0.95f) {
+				spawner = uint16_t(i);
+			}
+		}
+		REQUIRE(spawner.has_value());
+		const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[*spawner].kind];
+		sim::VehicleWorldOptions options;
+		options.max_vehicles = uint32_t(std::min<size_t>(lv.spawners.size(), sim::kMaxVehicleSlots));
+		options.tuning = lv.tuning;
+		core::Result<std::unique_ptr<sim::VehicleWorld>> server =
+				sim::VehicleWorld::create(level->shared->static_world, options);
+		REQUIRE(server.ok());
+		const sim::VehicleSlot slot(*spawner);
+		REQUIRE((*server)->add_vehicle(slot, kind.model, lv.spawners[*spawner].placement).ok());
+		host::ClientVehiclePrediction prediction;
+		REQUIRE(prediction.init(*level->shared).ok());
+		host::ClientVehicles seen;
+		auto frame = std::make_unique<host::PresentationFrame>();
+
+		constexpr uint8_t kOwnSlot = 3;
+		constexpr sim::Tick kEntry = 120, kLag = 6, kShove = kEntry + 200, kSnap = kEntry + 320, kEnd = kEntry + 380;
+		std::map<sim::Tick, sim::Command> sent;
+		std::map<sim::Tick, sim::VehicleState> states;
+		std::map<sim::Tick, sim::Vec3> drawn_at;
+		const host::CommandAt command_at = [&](sim::Tick p_tick) -> const sim::Command * {
+			const auto c = sent.find(p_tick);
+			return c != sent.end() ? &c->second : nullptr;
+		};
+		const auto shove = [&](float p_metres) {
+			sim::VehicleState s = (*server)->state(slot);
+			s.body.com_position[0] += p_metres;
+			REQUIRE((*server)
+							->restore_vehicle_state(
+									slot, s, sim::vehicle_restore::kBody, sim::ContactCachePolicy::Invalidate)
+							.ok());
+		};
+		for (sim::Tick c = 1; c <= kEnd; ++c) {
+			sim::Command cmd;
+			cmd.tick = c;
+			cmd.sequence = c;
+			cmd.move_forward = c > kEntry ? sim::kAxisMax : int8_t(0);
+			sent[c] = cmd;
+			const sim::VehicleCommand drive = c > kEntry ? sim::vehicles::driver_command(cmd) : sim::VehicleCommand();
+			REQUIRE((*server)->step(std::span(&slot, 1), std::span(&drive, 1)).ok());
+			if (c == kShove) {
+				shove(0.5f);
+			}
+			if (c == kSnap) {
+				shove(4.0f);
+			}
+			states[c] = (*server)->state(slot);
+			if (c > kLag && (c - kLag) % 2u == 0u) {
+				const sim::Tick at = c - kLag;
+				net::VehicleStates m;
+				m.server_tick = at;
+				net::VehicleWire w;
+				w.spawner = *spawner;
+				w.generation = 1;
+				w.team = 1;
+				w.seat_count = kind.seats;
+				w.occupants[0] = at >= kEntry ? kOwnSlot : net::kNoVehicleOccupant;
+				w.state = states[at];
+				m.vehicles.push_back(w);
+				seen.receive(net::encode_vehicle_states(m));
+			}
+			prediction.reconcile(seen, kOwnSlot, command_at, c);
+			prediction.step(cmd);
+			frame->render_ticks_at_publish = double(c);
+			seen.publish(*frame);
+			prediction.publish(*frame);
+			for (uint8_t i = 0; i < frame->vehicle_count; ++i) {
+				const host::PresentedVehicle &v = frame->vehicles[i];
+				if (v.spawner == *spawner && v.predicted == 1 && v.tick == c) {
+					drawn_at[c] = v.com_position;
+				}
+			}
+		}
+		host::ClientStats stats;
+		prediction.stats(stats);
+		REQUIRE(drawn_at.size() >= size_t(kEnd - kEntry - kLag));
+		const auto drawn = [&](sim::Tick p_tick) {
+			const auto d = drawn_at.find(p_tick);
+			REQUIRE(d != drawn_at.end());
+			return d->second;
+		};
+		const auto off = [&](sim::Tick p_tick) {
+			return core::vec::length(core::vec::sub(drawn(p_tick), states.at(p_tick).body.com_position));
+		};
+		float before = 0.0f;
+		for (sim::Tick t = kEntry + 2u * kLag; t < kShove; ++t) {
+			before = std::max(before, off(t));
+		}
+		const sim::Tick corrected = kShove + kLag;
+		const float jump = core::vec::length(core::vec::sub(drawn(corrected), drawn(corrected - 1u)));
+		const float moved = core::vec::length(
+				core::vec::sub(states.at(corrected).body.com_position, states.at(corrected - 1u).body.com_position));
+		std::array<float, 16> fade{};
+		for (size_t k = 0; k < fade.size(); ++k) {
+			fade[k] = off(corrected + sim::Tick(k));
+		}
+		const float snapped = off(kSnap + kLag);
+		std::printf("host.vehicles.reconcile: the drawn Growler was %.4f m from the server before the shove; the "
+					"0.5 m shove seen %u ticks later moved the drawn vehicle %.3f m in a tick (the server's moved "
+					"%.3f m), drawn %.3f, %.3f, %.3f, %.3f m from the server 0, 5, 10 and 15 ticks on; the 4 m "
+					"shove drawn %.4f m from it; %llu corrections (largest %.3f m), %llu failures\n",
+				double(before), unsigned(kLag), double(jump), double(moved), double(fade[0]), double(fade[5]),
+				double(fade[10]), double(fade[15]), double(snapped), (unsigned long long)stats.vehicle_corrections,
+				double(stats.vehicle_max_correction_m), (unsigned long long)stats.vehicle_prediction_failures);
+		CHECK(before < 0.01f);
+		CHECK(fade[0] > 0.4f);
+		CHECK(fade[0] < 0.5f);
+		CHECK(jump < moved + 0.1f);
+		for (size_t k = 1; k < fade.size(); ++k) {
+			CHECK(fade[k] <= fade[k - 1] + 1e-4f);
+		}
+		CHECK(fade[15] < 0.001f);
+		CHECK(snapped < 0.001f);
+		CHECK(stats.vehicle_max_correction_m > 3.5f);
+		CHECK(stats.vehicle_prediction_starts == 1u);
+		CHECK(stats.vehicle_prediction_failures == 0u);
 	}
 }
