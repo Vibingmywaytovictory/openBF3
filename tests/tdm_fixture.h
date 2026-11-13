@@ -63,6 +63,7 @@ inline float latest_initial_delay(const host::LevelVehicles &p_level) {
 
 TdmLevel *load_tdm_level_once();
 TdmLevel *load_conquest_level_once();
+TdmLevel *load_conquest_bots_level_once();
 
 void check_install_unchanged(TdmLevel &r_level);
 
@@ -403,6 +404,20 @@ inline TdmLevel *load_conquest_level_once() {
 	}
 	s_tried = true;
 	s_level = load_tdm_level("MP_007", "ConquestSmall0", false);
+	return s_level.get();
+}
+
+inline TdmLevel *load_conquest_bots_level_once() {
+	static std::unique_ptr<TdmLevel> s_level;
+	static bool s_tried = false;
+	if (s_tried) {
+		if (s_level == nullptr) {
+			bf3::test::skip_install_case("no BF3 install or no Conquest bot level (see the first case)");
+		}
+		return s_level.get();
+	}
+	s_tried = true;
+	s_level = load_tdm_level("MP_007", "ConquestSmall0", true);
 	return s_level.get();
 }
 #endif

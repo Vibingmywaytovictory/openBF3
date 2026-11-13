@@ -7124,3 +7124,251 @@ TEST_SUITE("host-gunplay-gadgets") {
 		CHECK(int(m->row(heir.slot())->kills) == 0);
 	}
 }
+
+namespace {
+
+struct TankStand {
+	uint16_t spawner = 0;
+	sim::Vec3 stand{};
+	sim::Vec3 centre{};
+};
+
+sim::Vec3 hull_box_centre(const host::LevelVehicles &p_lv, const net::VehicleWire &p_wire) {
+	const host::LevelVehicleKind &k = p_lv.kinds[p_lv.spawners[p_wire.spawner].kind];
+	const core::Transform turn = sim::vehicles::hull_transform(p_wire.state.body.rotation, {});
+	const sim::Vec3 origin =
+			core::vec::sub(p_wire.state.body.com_position, turn.transform_vector(k.model->center_of_mass));
+	return sim::vehicles::hull_transform(p_wire.state.body.rotation, origin).transform_point(k.box.centre);
+}
+
+std::optional<TankStand> tank_with_stand(
+		Match &r_match, VehicleWatch &r_watch, uint32_t p_peer, const std::function<bool(uint8_t)> &p_team) {
+	const host::LevelVehicles &lv = *r_match.level->vehicles;
+	std::optional<TankStand> out;
+	r_match.until(
+			[&] {
+				r_watch.take(r_match.out, p_peer);
+				for (const net::VehicleWire &w : r_watch.latest) {
+					const std::string &b = lv.kinds[lv.spawners[w.spawner].kind].blueprint;
+					if (out || !p_team(w.team) || (b != "vehicles/t90/t90" && b != "vehicles/m1a2/m1abrams") ||
+							!parked_upright(w.state.body.rotation, w.state.body.linear_velocity)) {
+						continue;
+					}
+					const std::array<float, 2> f = heading_of(w.state.body.rotation);
+					const sim::Vec3 &c = w.state.body.com_position;
+					const sim::Vec3 centre = hull_box_centre(lv, w);
+					for (float d = 40.0f; !out && d >= 30.0f; d -= 2.0f) {
+						const sim::Vec3 at = ground_at(*r_match.world, c[0] - d * f[0], c[2] - d * f[1], c[1] + 5.0f);
+						if (std::fabs(at[1] - c[1]) < 3.0f && r_match.motor.fits_standing(at) &&
+								clear(*r_match.world, add(at, 0.0f, 1.6f, 0.0f), centre)) {
+							out = TankStand{ w.spawner, at, centre };
+						}
+					}
+				}
+				return out.has_value();
+			},
+			sim::seconds_to_ticks(tdm::latest_initial_delay(lv)) + 600u);
+	return out;
+}
+
+std::optional<sim::Vec3> stand_in_view(const Match &p_match, const sim::Vec3 &p_centre, uint16_t p_yaw) {
+	for (const float turn : { 0.0f, 0.4f, -0.4f, 0.8f, -0.8f, 1.1f, -1.1f }) {
+		const float yaw = sim::yaw_radians(p_yaw) + turn;
+		const float fx = std::sin(yaw), fz = std::cos(yaw);
+		for (float d = 25.0f; d <= 40.0f; d += 1.0f) {
+			sim::StaticHit hit;
+			if (!p_match.world->ground_below({ p_centre[0] - d * fx, p_centre[1] + 5.0f, p_centre[2] - d * fz }, 20.0f,
+						sim::query_mask::kMovement, &hit)) {
+				continue;
+			}
+			const sim::Vec3 at = add(hit.position, 0.0f, 0.05f, 0.0f);
+			if (std::fabs(at[1] - p_centre[1]) < 4.0f && p_match.motor.fits_standing(at) &&
+					clear(*p_match.world, add(at, 0.0f, 1.6f, 0.0f), p_centre)) {
+				return at;
+			}
+		}
+	}
+	return std::nullopt;
+}
+
+size_t enemy_script(const Match &p_match, int p_bot) {
+	const uint8_t team = p_match.rules().team_of(uint8_t(p_bot));
+	for (size_t i = 0; i < p_match.peers.size(); ++i) {
+		if (p_match.rules().team_of(uint8_t(p_match.peers[i]->slot())) != team) {
+			return i;
+		}
+	}
+	return p_match.peers.size();
+}
+
+bool seat_driver(Match &r_match, VehicleWatch &r_watch, uint32_t p_watch_peer, size_t p_script, uint16_t p_spawner) {
+	tdm::ScriptedPeer &driver = *r_match.peers[p_script];
+	r_match.teleport(driver, beside_hull(r_match, *r_watch.of(p_spawner), 2.2f));
+	r_match.ticks(5);
+	const sim::Tick use_at = r_match.now() + 3u;
+	r_match.scripts[p_script] = [use_at](sim::Tick p_tick, const sim::SoldierState &p_state) {
+		sim::Command c = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
+		c.buttons |= p_tick == use_at ? sim::buttons::kUse : 0u;
+		return c;
+	};
+	return r_match.until(
+			[&] {
+				r_watch.take(r_match.out, p_watch_peer);
+				return r_watch.of(p_spawner)->occupants[0] == uint8_t(driver.slot());
+			},
+			60);
+}
+
+int32_t slot_rounds(const Match &p_match, int p_slot, uint8_t p_weapon_slot) {
+	const sw::WeaponSlotState &s = p_match.server.gunplay()->weapons(uint8_t(p_slot)).slots[p_weapon_slot];
+	return s.magazine + s.reserve;
+}
+
+const std::string &blueprint_of(const Match &p_match, uint16_t p_spawner) {
+	const host::LevelVehicles &lv = *p_match.level->vehicles;
+	return lv.kinds[lv.spawners[p_spawner].kind].blueprint;
+}
+
+}
+
+TEST_SUITE("host-bots-gadgets") {
+	TEST_CASE("bot gadgets: MP_007 ConquestSmall0: an engineer bot that sees an MBT with an enemy driver takes its "
+			  "kit launcher by WeaponChoice over the install's damage against the hull, fires it and takes the "
+			  "tank's health down") {
+		tdm::TdmLevel *level = tdm::load_conquest_bots_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		auto stats = std::make_shared<host::TdmBotStats>();
+		std::unique_ptr<Match> m = start_match(
+				*level, true, 113u, 0, 1, gadget_bot_server(*level, uint8_t(host::KitRole::Engineer), stats, false));
+		const GadgetBotMatch g = gadget_bot_match(*m);
+		REQUIRE(g.mate != nullptr);
+		const size_t enemy = enemy_script(*m, g.bot);
+		REQUIRE(enemy < m->peers.size());
+		m->peers[enemy]->spawn_request(0);
+		REQUIRE(m->until([&] { return is_alive(m->state(m->peers[enemy]->slot())); }, 900));
+		const uint8_t launcher_slot = uint8_t(core::gameplay::WeaponSlot::Gadget1);
+		const uint16_t launcher = m->server.gunplay()->weapons(uint8_t(g.bot)).slots[launcher_slot].def;
+		REQUIRE(launcher < gl.defs.size());
+		CHECK((gl.defs[launcher].variant == "weapons/smaw/u_smaw" ||
+				gl.defs[launcher].variant == "weapons/rpg7/u_rpg7"));
+		VehicleWatch watch;
+		const uint32_t watcher = g.mate->peer();
+		const std::optional<TankStand> tank =
+				tank_with_stand(*m, watch, watcher, [](uint8_t p_team) { return p_team != 0; });
+		REQUIRE(tank.has_value());
+		REQUIRE(seat_driver(*m, watch, watcher, enemy, tank->spawner));
+		const float full = m->server.vehicle_health(tank->spawner).value_or(0.0f);
+		REQUIRE(full > 0.0f);
+		const uint16_t view = m->state(g.bot)->yaw;
+		const std::optional<sim::Vec3> stand = stand_in_view(*m, tank->centre, view);
+		REQUIRE(stand.has_value());
+		m->place(g.bot, *stand, view);
+		const int32_t rounds = slot_rounds(*m, g.bot, launcher_slot);
+		const sim::Tick from = m->now();
+		const bool damaged =
+				m->until([&] { return m->server.vehicle_health(tank->spawner).value_or(full) < full; }, 1800);
+		const float after = m->server.vehicle_health(tank->spawner).value_or(-1.0f);
+		std::printf("bot gadgets: the engineer bot's %s from %.1f m at the %s of spawner %u with an enemy driver: "
+					"%d rockets in %.1f s, health %.0f -> %.0f\n",
+				gl.defs[launcher].variant.c_str(), double(horizontal(*stand, tank->centre)),
+				blueprint_of(*m, tank->spawner).c_str(), unsigned(tank->spawner),
+				int(rounds - slot_rounds(*m, g.bot, launcher_slot)), double(m->now() - from) / double(sim::kSimHz),
+				double(full), double(after));
+		CHECK(damaged);
+		CHECK(after < full);
+		CHECK(slot_rounds(*m, g.bot, launcher_slot) < rounds);
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+}
+
+TEST_SUITE("host-bots-gadgets") {
+	TEST_CASE("bot gadgets: MP_007 ConquestSmall0: a support bot given C4 walks up to an MBT with an enemy driver, "
+			  "throws the charge at its foot, backs off 9 m and sets it off with the detonator, taking the tank's "
+			  "health down (BBPFireInfantery's placed-explosive branch)") {
+		tdm::TdmLevel *level = tdm::load_conquest_bots_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		auto stats = std::make_shared<host::TdmBotStats>();
+		const uint8_t support = uint8_t(host::KitRole::Support);
+		std::unique_ptr<Match> m =
+				start_match(*level, true, 119u, 0, 1, gadget_bot_server(*level, support, stats, false));
+		int bot = -1;
+		for (int k = 0; k < 10 && bot < 0; ++k) {
+			for (const net::PlayerRow &r : m->rules().players()) {
+				bot = r.bot && m->rules().team_of(r.slot) != 0 ? int(r.slot) : bot;
+			}
+			if (bot < 0) {
+				m->tick();
+			}
+		}
+		REQUIRE(bot >= 0);
+		const size_t gadget2 = size_t(core::gameplay::WeaponSlot::Gadget2);
+		const host::LoadoutKit *kit = gl.loadouts.kit(m->rules().team_of(uint8_t(bot)), support);
+		REQUIRE(kit != nullptr);
+		const auto c4 = std::find_if(kit->slots[gadget2].begin(), kit->slots[gadget2].end(),
+				[](const host::LoadoutItem &i) { return i.unlock == "weapons/gadgets/c4/u_c4"; });
+		REQUIRE(c4 != kit->slots[gadget2].end());
+		net::LoadoutRequest request;
+		request.kit = support;
+		request.items[gadget2] = c4->identifier;
+		m->server.request_loadout(uint8_t(bot), request);
+		const GadgetBotMatch g = gadget_bot_match(*m);
+		REQUIRE(g.mate != nullptr);
+		REQUIRE(g.bot == bot);
+		const uint32_t life = m->state(bot)->life;
+		m->place(bot, add(m->state(bot)->position, 0.0f, 200.0f, 0.0f));
+		REQUIRE(m->until([&] { return is_alive(m->state(bot)) && m->state(bot)->life != life; }, 3600));
+		REQUIRE(m->server.gunplay()->weapons(uint8_t(bot)).slots[gadget2].def == c4->def);
+		const size_t enemy = enemy_script(*m, g.bot);
+		REQUIRE(enemy < m->peers.size());
+		m->peers[enemy]->spawn_request(0);
+		REQUIRE(m->until([&] { return is_alive(m->state(m->peers[enemy]->slot())); }, 900));
+		VehicleWatch watch;
+		const uint32_t watcher = g.mate->peer();
+		const std::optional<TankStand> tank =
+				tank_with_stand(*m, watch, watcher, [](uint8_t p_team) { return p_team != 0; });
+		REQUIRE(tank.has_value());
+		REQUIRE(seat_driver(*m, watch, watcher, enemy, tank->spawner));
+		const float full = m->server.vehicle_health(tank->spawner).value_or(0.0f);
+		REQUIRE(full > 0.0f);
+		const uint16_t view = m->state(g.bot)->yaw;
+		const std::optional<sim::Vec3> stand = stand_in_view(*m, tank->centre, view);
+		REQUIRE(stand.has_value());
+		m->place(g.bot, *stand, view);
+		const int32_t rounds = slot_rounds(*m, g.bot, uint8_t(gadget2));
+		const sim::Tick from = m->now();
+		const host::GadgetStats before = m->server.gunplay()->gadget_stats();
+		const uint64_t hits = m->server.stats().vehicle_hits;
+		float nearest = INFINITY;
+		const bool damaged = m->until(
+				[&] {
+					nearest = std::min(nearest, horizontal(m->state(g.bot)->position, tank->centre));
+					return m->server.vehicle_health(tank->spawner).value_or(full) < full;
+				},
+				3600);
+		const float after = m->server.vehicle_health(tank->spawner).value_or(-1.0f);
+		const host::GadgetStats &gs = m->server.gunplay()->gadget_stats();
+		std::printf("bot gadgets: the support bot's C4 at the %s of spawner %u with an enemy driver, from %.1f m: "
+					"came within %.1f m of the hull centre, %d charges used, %llu remote and %llu pack detonations "
+					"in %.1f s, health %.0f -> %.0f, the bot %s\n",
+				blueprint_of(*m, tank->spawner).c_str(), unsigned(tank->spawner),
+				double(horizontal(*stand, tank->centre)), double(nearest),
+				int(rounds - slot_rounds(*m, g.bot, uint8_t(gadget2))),
+				(unsigned long long)(gs.remote_detonations - before.remote_detonations),
+				(unsigned long long)(gs.pack_detonations - before.pack_detonations),
+				double(m->now() - from) / double(sim::kSimHz), double(full), double(after),
+				is_alive(m->state(g.bot)) ? "alive" : "dead");
+		std::printf("bot gadgets: %llu hull hits\n", (unsigned long long)(m->server.stats().vehicle_hits - hits));
+		CHECK(damaged);
+		CHECK(after < full);
+		CHECK(slot_rounds(*m, g.bot, uint8_t(gadget2)) < rounds);
+		CHECK(gs.remote_detonations > before.remote_detonations);
+		CHECK(is_alive(m->state(g.bot)));
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+}

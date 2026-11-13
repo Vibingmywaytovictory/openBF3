@@ -103,7 +103,8 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		const TdmShared &sh = *body.shared;
 		frame.emplace(body.sense_revive(now, *state, view(), sighting));
 		const BotFrame &fr = *frame;
-		sensed.enemy_visible = fr.visible;
+		const bool seated = fr.visible && body.target_seated(fr);
+		sensed.enemy_visible = fr.visible && !seated;
 		sensed.blind_fire = body.targeting.blind_until() > now;
 		sensed.shot_at = fr.shot_recent;
 		sensed.low_health = fr.self.health < body.cfg().retreat_below_hp;
@@ -119,6 +120,7 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		sensed.heal_target = support.heal;
 		sensed.supply_target = support.supply;
 		sensed.call_medic = support.call;
+		sensed.vehicle_visible = (!fr.visible || seated) && body.sense_vehicle(fr);
 	}
 
 	const ai::InfantrySenses &senses() const override { return sensed; }
@@ -210,6 +212,10 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 			body.move_fight(f(), intent);
 			return true;
 		}
+		if (p_object == ai::ObjectGoal::Vehicle) {
+			body.vehicle_move(f(), intent);
+			return false;
+		}
 		if (p_object == ai::ObjectGoal::Patient || p_object == ai::ObjectGoal::SupplyMate) {
 			return body.support_approach(
 					f(), p_object == ai::ObjectGoal::Patient ? SupplyNeed::Health : SupplyNeed::Ammo, intent);
@@ -254,6 +260,9 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 				body.call_medic(f());
 				bot->call_for_medic();
 				return true;
+			case ai::TriggerKind::VehicleWeapon:
+				body.vehicle_trigger(f(), intent);
+				return true;
 		}
 		return intent.trigger != Trigger::None;
 	}
@@ -276,6 +285,9 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 				break;
 			case ai::SenseFocus::Around:
 				body.look_around(f(), intent);
+				break;
+			case ai::SenseFocus::Vehicle:
+				body.vehicle_aim(f(), intent);
 				break;
 		}
 		return true;

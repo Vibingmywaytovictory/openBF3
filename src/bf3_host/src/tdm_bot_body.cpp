@@ -5,6 +5,7 @@
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
 #include "bf3/sim/soldier_motor.h"
+#include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/weapon_input.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"
 
@@ -77,6 +78,9 @@ void BotBody::new_life(sim::Tick p_tick, const sim::SoldierState &p_state) {
 	medic.new_life();
 	grenade.new_life();
 	support.new_life();
+	vehicles.new_life();
+	vehicle_aimer_id = 0;
+	walked_phase = ExplosivePhase::Approach;
 	knife_until = 0;
 	navigation.new_life();
 	activity = TdmBotActivity::Roam;
@@ -129,7 +133,7 @@ BotFrame BotBody::sense_revive(
 	check.tick = p_tick;
 	check.slot = slot;
 	check.kit = kit;
-	check.defibrillator = arms.def(kKitGadgetSlot) != nullptr;
+	check.defibrillator = sh.host.gunplay != nullptr && defib_slot(*sh.host.gunplay, arms).has_value();
 	check.self = &p_state;
 	check.eye = eye;
 	check.shot_recent = shot_recent;
@@ -444,7 +448,12 @@ void BotBody::revive_trigger(const BotFrame &p_frame, BotIntent &r_intent) {
 	if (horizontal(f.self.position, corpse) > kReviveDirectMetres) {
 		return;
 	}
-	i.want_slot = kKitGadgetSlot;
+	const std::optional<uint8_t> defib =
+			shared->host.gunplay != nullptr ? defib_slot(*shared->host.gunplay, f.arms) : std::nullopt;
+	if (!defib.has_value()) {
+		return;
+	}
+	i.want_slot = *defib;
 	const float reach = i.aim_at(f.eye, add(corpse, 0.0f, kReviveCentreUp, 0.0f));
 	if (reach <= kDefibReach) {
 		i.trigger = Trigger::Defib;
@@ -509,6 +518,136 @@ void BotBody::medkit_or_hold(const BotFrame &p_frame, BotIntent &r_intent) {
 	}
 	r_intent.pose = sim::Pose::Crouch;
 	look_around(p_frame, r_intent);
+}
+
+VehicleCheck BotBody::vehicle_check(const BotFrame &p_frame) const {
+	VehicleCheck c;
+	c.tick = p_frame.tick;
+	c.slot = slot;
+	c.self = &p_frame.self;
+	c.eye = p_frame.eye;
+	c.view_yaw = view_yaw;
+	return c;
+}
+
+bool BotBody::target_seated(const BotFrame &p_frame) const {
+	if (p_frame.target < 0) {
+		return false;
+	}
+	for (const sim::vehicles::VehicleTarget &v : shared->host.view->vehicle_targets()) {
+		for (uint8_t k = 0; k < v.crew_count; ++k) {
+			if (v.crew[k] == uint32_t(p_frame.target)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+bool BotBody::sense_vehicle(const BotFrame &p_frame) {
+	return vehicles.sense(*shared, p_frame.arms, vehicle_check(p_frame));
+}
+
+void BotBody::vehicle_aim(const BotFrame &p_frame, BotIntent &r_intent) {
+	const BotFrame &f = p_frame;
+	BotIntent &i = r_intent;
+	if (!vehicles.track(*shared, f.eye)) {
+		return;
+	}
+	const VehicleAim &a = vehicles.enemy();
+	if (a.type == ai::WeaponType::C4) {
+		const sim::Vec3 at = vehicles.phase() == ExplosivePhase::Place
+				? sim::Vec3{ a.near_point[0], f.self.position[1], a.near_point[2] }
+				: a.centre;
+		i.target_distance = i.aim_at(f.eye, at);
+		return;
+	}
+	const sw::WeaponSimDef *d = f.arms.def(a.weapon_slot);
+	sim::Vec3 point = a.centre;
+	if (d != nullptr && !d->projectile.instant_hit) {
+		if (vehicle_aimer_id != a.id) {
+			vehicle_aimer = ai::Aimer{};
+			vehicle_aimer_id = a.id;
+		}
+		ai::Vec3 dir{};
+		if (ai::aim_vector(vehicle_aimer, f.eye, a.centre, a.velocity, {}, ai::kSoldierAimAccuracy, d->projectile.drag,
+					d->projectile.muzzle_speed, d->projectile.gravity, double(f.tick) * sim::kTickSeconds, dir)) {
+			const float range = distance(f.eye, a.centre);
+			point = sim::Vec3{ f.eye[0] + dir.x * range, f.eye[1] + dir.y * range, f.eye[2] + dir.z * range };
+		}
+	}
+	i.target_distance = i.aim_at(f.eye, point);
+	ai::TriggerWeapon weapon;
+	weapon.explosion_radius = d != nullptr && d->projectile.explosion.present ? d->projectile.explosion.radius : 0.0f;
+	const double on = double(f.tick - a.since) * sim::kTickSeconds;
+	const float sigma =
+			ai::ai_deviation_deg(ai::WeaponTemplate{}, ai::trigger_skill(skill, weapon, true, false), on, 1.0f) *
+			core::kDegToRadF;
+	const AimError err = targeting.aim_error(f.tick, sigma, rng);
+	i.want_yaw = wrap(i.want_yaw + err.yaw);
+	i.want_pitch += err.pitch;
+}
+
+void BotBody::vehicle_trigger(const BotFrame &p_frame, BotIntent &r_intent) {
+	const BotFrame &f = p_frame;
+	BotIntent &i = r_intent;
+	const VehicleAim &a = vehicles.enemy();
+	if (!a.held()) {
+		return;
+	}
+	i.want_slot = a.weapon_slot;
+	if (a.type != ai::WeaponType::C4) {
+		i.trigger = a.visible ? Trigger::Launcher : Trigger::None;
+		i.zoom = true;
+		return;
+	}
+	vehicles.explosive_step(*shared, f.arms, slot, f.tick);
+	if (vehicles.phase() == ExplosivePhase::Place) {
+		i.trigger = Trigger::Place;
+	} else if (vehicles.phase() == ExplosivePhase::Detonate) {
+		i.pose = sim::Pose::Crouch;
+		if (vehicles.detonate_due(f.tick)) {
+			i.trigger = Trigger::Detonate;
+		}
+	}
+}
+
+void BotBody::vehicle_move(const BotFrame &p_frame, BotIntent &r_intent) {
+	const BotFrame &f = p_frame;
+	const VehicleAim &a = vehicles.enemy();
+	if (!a.held() || a.type != ai::WeaponType::C4) {
+		return;
+	}
+	if (vehicles.phase() != walked_phase) {
+		navigation.clear_goal();
+		walked_phase = vehicles.phase();
+	}
+	if (vehicles.phase() == ExplosivePhase::Approach) {
+		const sw::WeaponSimDef *d = f.arms.def(a.weapon_slot);
+		const float gap = d != nullptr ? 0.5f * d->projectile.explosion.inner_radius : 0.0f;
+		const sim::Vec3 goal = beside_hull_point(a, f.eye, f.self.position, gap);
+		const float hd = horizontal(f.self.position, goal);
+		if (hd <= kBackOffGoalMetres &&
+				!f.world.ray_any(f.eye, sub(add(goal, 0.0f, f.eye[1] - f.self.position[1], 0.0f), f.eye),
+						sim::query_mask::kMovement)) {
+			navigation.clear_goal();
+			r_intent.move_dx = (goal[0] - f.self.position[0]) / std::max(hd, 1e-3f);
+			r_intent.move_dz = (goal[2] - f.self.position[2]) / std::max(hd, 1e-3f);
+		} else if (navigation.set_goal(*shared, f.tick, goal, 0.5f, true, kSquadGoalMoveMetres)) {
+			walk(f, r_intent);
+		} else {
+			navigation.clear_goal();
+		}
+	} else if (vehicles.phase() == ExplosivePhase::BackOff) {
+		for (const float turn : { 0.0f, 0.8f, -0.8f, 1.6f, -1.6f }) {
+			if (navigation.set_goal(*shared, f.tick, vehicles.back_off_goal(f.self.position, turn), 2.0f, true,
+						kSquadGoalMoveMetres)) {
+				walk_facing(f, r_intent);
+				return;
+			}
+		}
+		navigation.clear_goal();
+	}
 }
 
 }

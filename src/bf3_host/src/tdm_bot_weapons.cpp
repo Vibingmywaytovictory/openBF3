@@ -77,8 +77,7 @@ WeaponCommand BotWeapons::input(TdmShared &r_shared, uint8_t p_slot, const BotAr
 		}
 		if (p_arms.def(want_slot) == nullptr) {
 			want_slot = p_arms.def(kSlotPrimary) != nullptr ? kSlotPrimary : ws->active;
-			if (trigger == Trigger::Defib || trigger == Trigger::Knife || trigger == Trigger::Grenade ||
-					trigger == Trigger::Supply) {
+			if (trigger != Trigger::None && trigger != Trigger::Aimed && trigger != Trigger::Blind) {
 				trigger = Trigger::None;
 			}
 		}
@@ -111,7 +110,8 @@ WeaponCommand BotWeapons::input(TdmShared &r_shared, uint8_t p_slot, const BotAr
 			const bool in_hand = ws->active == want_slot && ws->pending == 0xFF;
 			const bool reserve = ss.reserve > 0 || d->unlimited_ammo;
 			const bool gun = ws->active == kSlotPrimary || ws->active == kSlotSidearm;
-			const bool need = gun && !busy && ss.magazine <= 0 && reserve;
+			const bool launcher = trigger == Trigger::Launcher && in_hand;
+			const bool need = (gun || launcher) && !busy && ss.magazine <= 0 && reserve;
 			const float capacity = float(std::max(d->magazine_capacity, 1));
 			const bool tactical = gun && q.quiet && !busy && reserve && float(ss.magazine) < kTacticalReload * capacity;
 			const bool reload = need || tactical;
@@ -137,6 +137,13 @@ WeaponCommand BotWeapons::input(TdmShared &r_shared, uint8_t p_slot, const BotAr
 					fire = true;
 					tapped_ = true;
 					out.supply_fired = true;
+				} else {
+					tapped_ = false;
+				}
+			} else if (trigger == Trigger::Launcher || trigger == Trigger::Place) {
+				if (in_hand && q.aligned && phase == sw::WeaponPhase::Ready && ss.magazine > 0 && !tapped_) {
+					fire = true;
+					tapped_ = true;
 				} else {
 					tapped_ = false;
 				}
@@ -186,7 +193,7 @@ WeaponCommand BotWeapons::input(TdmShared &r_shared, uint8_t p_slot, const BotAr
 				}
 			}
 			in.fire = fire;
-			in.zoom = q.zoom && gun && in_hand && !busy;
+			in.zoom = (q.zoom && (gun || launcher) && in_hand && !busy) || (trigger == Trigger::Detonate && in_hand);
 
 			if (gun) {
 				const sw::RecoilOffset kick =

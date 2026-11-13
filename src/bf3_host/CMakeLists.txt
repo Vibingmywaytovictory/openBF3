@@ -164,6 +164,7 @@ target_sources(bf3_host PRIVATE
     src/tdm_bot_targeting.cpp
     src/tdm_bot_targeting.h
     src/tdm_bot_weapons.cpp
+    src/tdm_bot_weapons_vehicles.cpp
     src/tdm_bot_weapons.h
 )
 

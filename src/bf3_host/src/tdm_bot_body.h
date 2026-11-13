@@ -15,6 +15,7 @@
 #include "tdm_bot_support.h"
 #include "tdm_bot_targeting.h"
 #include "tdm_bot_weapons.h"
+#include "tdm_bot_weapons_vehicles.h"
 
 #include <cmath>
 #include <cstdint>
@@ -100,6 +101,10 @@ struct BotBody {
 	BotRevive medic;
 	BotGrenade grenade;
 	BotSupport support;
+	BotVehicleWeapons vehicles;
+	ai::Aimer vehicle_aimer;
+	uint32_t vehicle_aimer_id = 0;
+	ExplosivePhase walked_phase = ExplosivePhase::Approach;
 
 	sim::Tick knife_until = 0;
 
@@ -152,6 +157,13 @@ struct BotBody {
 	void support_trigger(const BotFrame &p_frame, SupplyNeed p_need, BotIntent &r_intent);
 	void call_medic(const BotFrame &p_frame);
 	void medkit_or_hold(const BotFrame &p_frame, BotIntent &r_intent);
+
+	VehicleCheck vehicle_check(const BotFrame &p_frame) const;
+	bool target_seated(const BotFrame &p_frame) const;
+	bool sense_vehicle(const BotFrame &p_frame);
+	void vehicle_aim(const BotFrame &p_frame, BotIntent &r_intent);
+	void vehicle_trigger(const BotFrame &p_frame, BotIntent &r_intent);
+	void vehicle_move(const BotFrame &p_frame, BotIntent &r_intent);
 };
 
 }

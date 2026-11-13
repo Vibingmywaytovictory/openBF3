@@ -198,6 +198,10 @@ float BBFireInfantery::situation() {
 		mode_ = Mode::Sight;
 		return kFireSight;
 	}
+	if (s.vehicle_visible) {
+		mode_ = Mode::Vehicle;
+		return kFireSight;
+	}
 	if (body_.can_throw_grenade()) {
 		mode_ = Mode::Throw;
 		return kFireThrow;
@@ -226,6 +230,12 @@ bool BBFireInfantery::plan(BotPlan &r_script, bool) {
 			r_script.add(BAPStatementType::Sense, sense_args(SenseFocus::Target));
 			r_script.add(BAPStatementType::Trigger, trigger_args(TriggerKind::Aimed));
 			r_script.add(BAPStatementType::MoveToObject, object_args(ObjectGoal::Target));
+			return true;
+		case Mode::Vehicle:
+			r_script.clear(InfantryActivity::Fight);
+			r_script.add(BAPStatementType::Sense, sense_args(SenseFocus::Vehicle));
+			r_script.add(BAPStatementType::Trigger, trigger_args(TriggerKind::VehicleWeapon));
+			r_script.add(BAPStatementType::MoveToObject, object_args(ObjectGoal::Vehicle));
 			return true;
 		case Mode::Blind:
 			r_script.clear(InfantryActivity::Fight);

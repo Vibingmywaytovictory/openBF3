@@ -115,7 +115,7 @@ protected:
 
 class BBFireInfantery final : public BotBehaviour {
 public:
-	enum class Mode : uint8_t { None, Throwing, Sight, Throw, Blind };
+	enum class Mode : uint8_t { None, Throwing, Sight, Throw, Blind, Vehicle };
 
 	BBFireInfantery(const UrgeCurve &p_curve, InfantryBody &r_body) :
 			BotBehaviour(InfantryBehaviour::FireInfantery, p_curve, r_body) {}

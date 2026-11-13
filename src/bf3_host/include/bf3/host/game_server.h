@@ -242,6 +242,7 @@ public:
 
 	void request_spot(uint8_t p_slot, const net::SpotRequest &p_request);
 	void request_order(uint8_t p_slot, const net::OrderRequest &p_request);
+	void request_loadout(uint8_t p_slot, const net::LoadoutRequest &p_request);
 	net::SpotRow spot_row(uint8_t p_slot) const;
 
 	bool level_ended() const;

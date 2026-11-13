@@ -646,9 +646,13 @@ struct GameServer::Impl {
 			combat.refuse_loadout();
 			return;
 		}
+		loadout(size_t(p_slot), *r);
+	}
+
+	void loadout(size_t p_slot, const net::LoadoutRequest &p_request) {
 		const uint8_t team = match.on() ? match.rules()->team_of(uint8_t(p_slot))
-										: uint8_t(std::clamp(slots[size_t(p_slot)].team, 0, int(net::kMaxTeam)));
-		combat.select_loadout(size_t(p_slot), team, *r);
+										: uint8_t(std::clamp(slots[p_slot].team, 0, int(net::kMaxTeam)));
+		combat.select_loadout(p_slot, team, p_request);
 	}
 
 	void receive_squad_request(int p_slot, std::span<const uint8_t> p_datagram) {
@@ -1053,6 +1057,12 @@ core::Status GameServer::place_soldier(uint32_t p_slot, const sim::Vec3 &p_posit
 void GameServer::request_spot(uint8_t p_slot, const net::SpotRequest &p_request) {
 	if (p_slot < impl_->slots.size()) {
 		impl_->spot(p_slot, p_request);
+	}
+}
+
+void GameServer::request_loadout(uint8_t p_slot, const net::LoadoutRequest &p_request) {
+	if (p_slot < impl_->slots.size()) {
+		impl_->loadout(p_slot, p_request);
 	}
 }
 

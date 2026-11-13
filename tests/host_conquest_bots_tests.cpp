@@ -30,19 +30,7 @@ constexpr float kSpawnMatchMetres = 3.0f;
 constexpr uint32_t kMaxDefendRepeatsPerMinute = 10;
 constexpr double kTicketModifier = 0.5;
 
-tt::TdmLevel *load_conquest_bots_level_once() {
-	static std::unique_ptr<tt::TdmLevel> s_level;
-	static bool s_tried = false;
-	if (s_tried) {
-		if (s_level == nullptr) {
-			bf3::test::skip_install_case("no BF3 install or no Conquest bot level (see the first case)");
-		}
-		return s_level.get();
-	}
-	s_tried = true;
-	s_level = tt::load_tdm_level("MP_007", "ConquestSmall0", true);
-	return s_level.get();
-}
+using tt::load_conquest_bots_level_once;
 
 float flat_distance(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 	return std::hypot(p_a[0] - p_b[0], p_a[2] - p_b[2]);
