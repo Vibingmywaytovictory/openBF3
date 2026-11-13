@@ -66,6 +66,8 @@ public:
 	void set_first_person_projection(float p_fov_override, float p_z_clip_scale);
 
 	core::Result<fx::EffectHandle> start_effect(std::string_view p_blueprint, const fx::Transform &p_transform, float p_start_age = 0.0f);
+	void stop_effect(fx::EffectHandle p_effect);
+	void move_effect(fx::EffectHandle p_effect, const fx::Transform &p_transform, const fx::Vec3 &p_velocity);
 	const fx::FxWorld *world() const;
 
 	const fx::ImpactTable *impacts() const;

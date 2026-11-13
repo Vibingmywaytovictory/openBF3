@@ -1366,12 +1366,8 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		}
 	}
 	if (g.vehicles != nullptr && g.vehicles->built()) {
-		g.vehicles->step(f, p_now_ns, g.alive ? g.own_slot : uint8_t(bf3::net::kNoVehicleOccupant));
-		for (const GameVehicleWreck &w : g.vehicles->take_wrecks()) {
-			if (g.fx != nullptr && g.fx->built() && !w.effect.empty()) {
-				(void)g.fx->start_effect(w.effect, to_fx_transform(w.body));
-			}
-		}
+		g.vehicles->step(f, p_now_ns, g.alive ? g.own_slot : uint8_t(bf3::net::kNoVehicleOccupant),
+				g.fx != nullptr && g.fx->built() ? g.fx.get() : nullptr);
 	}
 	const std::optional<OwnVehicleSeat> seat = g.vehicles != nullptr ? g.vehicles->own_seat() : std::nullopt;
 	mapper_.set_seated(seat.has_value());

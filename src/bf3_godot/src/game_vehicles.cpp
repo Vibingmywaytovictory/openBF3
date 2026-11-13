@@ -1,5 +1,6 @@
 #include "game_vehicles.h"
 
+#include "game_fx.h"
 #include "render_bridge.h"
 #include "viewmodel_muzzle.h"
 
@@ -60,6 +61,8 @@ void apply_vehicle_look(const Ref<StandardMaterial3D> &p_m, const render::LookMa
 															   : BaseMaterial3D::BLEND_MODE_MIX);
 }
 
+constexpr uint64_t kWreckSeed = 0x77726563u;
+
 void free_node(uint64_t p_id) {
 	if (Node *node = Object::cast_to<Node>(ObjectDB::get_instance(p_id))) {
 		node->queue_free();
@@ -104,13 +107,22 @@ core::Status GameVehicles::load(const GameLoadInputs &p_in) {
 	for (const host::LevelVehicleKind &k : level_->kinds) {
 		specs.push_back(render::VehicleMeshSpec{ k.blueprint, k.mesh, k.component_meshes });
 	}
+	for (const host::LevelVehicleKind &k : level_->kinds) {
+		const std::optional<core::gameplay::VehicleWreckDef> &w = k.damage_visuals.wreck;
+		if (w && !w->mesh.empty() && std::none_of(specs.begin(), specs.end(), [&](const render::VehicleMeshSpec &p_s) {
+				return p_s.blueprint == w->blueprint;
+			})) {
+			specs.push_back(render::VehicleMeshSpec{ w->blueprint, w->mesh, {} });
+		}
+	}
 	core::Result<std::unique_ptr<render::VehicleMeshSet>> set =
 			render::load_vehicle_meshes(p_in.db->level->db(), p_in.db->level->mount(), specs, p_in.cache);
 	if (!set) {
 		return set.error();
 	}
 	set_ = std::move(*set);
-	stats_.kinds = uint32_t(set_->kinds.size());
+	stats_.kinds = uint32_t(level_->kinds.size());
+	stats_.wreck_kinds = uint32_t(set_->kinds.size() - std::min(set_->kinds.size(), level_->kinds.size()));
 	return core::Status::success();
 }
 
@@ -133,22 +145,8 @@ bool GameVehicles::build(Node3D *p_parent, std::string *r_error) {
 		textures[p_name] = tex;
 		return tex;
 	};
-	kinds_.assign(level_->kinds.size(), Kind{});
-	for (size_t k = 0; k < level_->kinds.size(); ++k) {
-		const render::VehicleMeshKind *mk = set_->kind(level_->kinds[k].blueprint);
-		if (mk == nullptr) {
-			*r_error = "vehicles: no mesh loaded for " + level_->kinds[k].blueprint;
-			return false;
-		}
-		const sim::VehicleModel &model = *level_->kinds[k].model;
-		std::vector<render::VehicleWheelRest> wheels;
-		for (size_t w = 0; w < model.wheel_count; ++w) {
-			wheels.push_back(render::VehicleWheelRest{ model.wheels[w].data_centre, model.wheels[w].radius });
-		}
-		const std::vector<int8_t> wheel_of = render::vehicle_wheel_parts(*mk, wheels);
-		for (const int8_t w : wheel_of) {
-			stats_.wheel_parts += w >= 0 ? 1u : 0u;
-		}
+	const auto make_parts = [&](const render::VehicleMeshKind *mk, const std::vector<int8_t> &wheel_of,
+									std::vector<Part> &r_parts) {
 		for (size_t p = 0; p < mk->parts.size(); ++p) {
 			const render::VehicleMeshPart &part = mk->parts[p];
 			const render::MeshMaterials &slots = mk->materials[mk->part_mesh[p]];
@@ -170,8 +168,9 @@ bool GameVehicles::build(Node3D *p_parent, std::string *r_error) {
 				}
 				materials.push_back(m);
 			}
+			const int8_t wheel = p < wheel_of.size() ? wheel_of[p] : int8_t(-1);
 			if (drawn.surfaces.empty()) {
-				kinds_[k].parts.push_back(Part{ Ref<ArrayMesh>(), wheel_of[p], Transform3D() });
+				r_parts.push_back(Part{ Ref<ArrayMesh>(), wheel, Transform3D() });
 				continue;
 			}
 			const render::PreparedSurface *first = drawn.surfaces.data();
@@ -184,10 +183,46 @@ bool GameVehicles::build(Node3D *p_parent, std::string *r_error) {
 				return false;
 			}
 			const Transform3D rest = godot_transform(part.rest) * godot_transform(part.part_transform);
-			kinds_[k].parts.push_back(Part{ mesh, wheel_of[p], rest });
+			r_parts.push_back(Part{ mesh, wheel, rest });
 			++stats_.parts;
 		}
+		return true;
+	};
+	kinds_.assign(level_->kinds.size(), Kind{});
+	std::vector<core::gameplay::VehicleDamageVisualsDef> visuals;
+	for (size_t k = 0; k < level_->kinds.size(); ++k) {
+		const render::VehicleMeshKind *mk = set_->kind(level_->kinds[k].blueprint);
+		if (mk == nullptr) {
+			*r_error = "vehicles: no mesh loaded for " + level_->kinds[k].blueprint;
+			return false;
+		}
+		const sim::VehicleModel &model = *level_->kinds[k].model;
+		std::vector<render::VehicleWheelRest> wheels;
+		for (size_t w = 0; w < model.wheel_count; ++w) {
+			wheels.push_back(render::VehicleWheelRest{ model.wheels[w].data_centre, model.wheels[w].radius });
+		}
+		const std::vector<int8_t> wheel_of = render::vehicle_wheel_parts(*mk, wheels);
+		for (const int8_t w : wheel_of) {
+			stats_.wheel_parts += w >= 0 ? 1u : 0u;
+		}
+		if (!make_parts(mk, wheel_of, kinds_[k].parts)) {
+			return false;
+		}
+		visuals.push_back(level_->kinds[k].damage_visuals);
+		const std::optional<core::gameplay::VehicleWreckDef> &wreck = level_->kinds[k].damage_visuals.wreck;
+		if (!wreck || wrecks_.count(wreck->blueprint) != 0) {
+			continue;
+		}
+		const render::VehicleMeshKind *wk = set_->kind(wreck->blueprint);
+		if (wk == nullptr) {
+			*r_error = "vehicles: no wreck mesh loaded for " + wreck->blueprint;
+			return false;
+		}
+		if (!make_parts(wk, {}, wrecks_[wreck->blueprint])) {
+			return false;
+		}
 	}
+	damage_fx_.emplace(std::move(visuals));
 	root_ = memnew(Node3D);
 	root_->set_name("Vehicles");
 	p_parent->add_child(root_);
@@ -195,7 +230,8 @@ bool GameVehicles::build(Node3D *p_parent, std::string *r_error) {
 	return true;
 }
 
-void GameVehicles::step(const host::PresentationFrame &p_frame, uint64_t p_now_ns, uint8_t p_own_slot) {
+void GameVehicles::step(
+		const host::PresentationFrame &p_frame, uint64_t p_now_ns, uint8_t p_own_slot, Bf3GameFx *p_fx) {
 	own_.reset();
 	if (root_ == nullptr || ObjectDB::get_instance(root_id_) == nullptr || level_ == nullptr) {
 		return;
@@ -203,6 +239,8 @@ void GameVehicles::step(const host::PresentationFrame &p_frame, uint64_t p_now_n
 	const double render_ticks = host::present_render_ticks(p_frame, p_now_ns);
 	const double own_ticks = double(p_frame.tick) - 1.0 + host::present_own_fraction(p_frame, p_now_ns);
 	std::set<uint16_t> live;
+	std::vector<present::VehicleFxSight> sights;
+	std::map<uint16_t, std::pair<Transform3D, Vector3>> placed;
 	stats_.unknown = 0;
 	for (size_t i = 0; i < p_frame.vehicle_count && i < p_frame.vehicles.size(); ++i) {
 		const host::PresentedVehicle &v = p_frame.vehicles[i];
@@ -216,9 +254,15 @@ void GameVehicles::step(const host::PresentationFrame &p_frame, uint64_t p_now_n
 		const host::PresentedVehiclePose pose = host::vehicle_pose_at(v, own_seat ? own_ticks : render_ticks);
 		const Transform3D body = vehicle_body_transform(model, pose);
 		const host::VehicleWreckSight wreck = wrecked_.see(v);
+		sights.push_back(
+				present::VehicleFxSight{ v.spawner, v.generation, kind, v.health, wreck.hidden, wreck.explosion });
+		placed[v.spawner] = { body, to_vector(v.linear_velocity) };
 		if (wreck.explosion) {
-			wrecks_.push_back(GameVehicleWreck{ v.spawner, v.generation, level_->kinds[kind].explosion_effect, body });
 			++stats_.wrecks;
+			if (p_fx != nullptr && !level_->kinds[kind].explosion_effect.empty() &&
+					!p_fx->start_effect(level_->kinds[kind].explosion_effect, to_fx_transform(body))) {
+				++stats_.fx_failures;
+			}
 		}
 		if (wreck.hidden) {
 			continue;
@@ -273,6 +317,96 @@ void GameVehicles::step(const host::PresentationFrame &p_frame, uint64_t p_now_n
 		it = shown_.erase(it);
 	}
 	stats_.shown = uint32_t(shown_.size());
+	if (p_fx != nullptr && damage_fx_) {
+		present_damage(sights, placed, double(p_now_ns) * 1e-9, *p_fx);
+	}
+}
+
+void GameVehicles::present_damage(std::span<const present::VehicleFxSight> p_sights,
+		const std::map<uint16_t, std::pair<Transform3D, Vector3>> &p_placed, double p_now_s, Bf3GameFx &r_fx) {
+	std::vector<present::VehicleFxCommand> commands;
+	damage_fx_->step(p_sights, p_now_s, kWreckSeed, commands);
+	const auto start = [&](const std::string &p_effect, const Transform3D &p_at) -> std::optional<fx::EffectHandle> {
+		core::Result<fx::EffectHandle> h = r_fx.start_effect(p_effect, to_fx_transform(p_at));
+		if (!h) {
+			++stats_.fx_failures;
+			return std::nullopt;
+		}
+		return *h;
+	};
+	for (const present::VehicleFxCommand &c : commands) {
+		const core::gameplay::VehicleDamageVisualsDef &def = level_->kinds[c.kind].damage_visuals;
+		const auto at = p_placed.find(c.spawner);
+		const Transform3D body = at != p_placed.end() ? at->second.first : Transform3D();
+		const std::pair<uint16_t, uint16_t> key{ c.spawner, c.effect };
+		switch (c.op) {
+			case present::VehicleFxOp::StartDamage:
+				if (const Transform3D local = godot_transform(def.damage[c.effect].transform);
+						const std::optional<fx::EffectHandle> h = start(def.damage[c.effect].effect, body * local)) {
+					damage_effects_[key] = DamageEffect{ *h, local };
+					++stats_.damage_starts;
+				}
+				break;
+			case present::VehicleFxOp::StopDamage:
+				if (const auto it = damage_effects_.find(key); it != damage_effects_.end()) {
+					r_fx.stop_effect(it->second.handle);
+					damage_effects_.erase(it);
+					++stats_.damage_stops;
+				}
+				break;
+			case present::VehicleFxOp::StartWreck: {
+				Husk husk{ c.spawner, c.generation, 0, body * godot_transform(def.wreck->transform), {} };
+				Node3D *node = memnew(Node3D);
+				root_->add_child(node);
+				node->set_transform(husk.at);
+				for (const Part &part : wrecks_[def.wreck->blueprint]) {
+					MeshInstance3D *mi = memnew(MeshInstance3D);
+					mi->set_mesh(part.mesh);
+					mi->set_transform(part.rest);
+					node->add_child(mi);
+				}
+				husk.node_id = node->get_instance_id();
+				husks_.push_back(std::move(husk));
+				++stats_.husks;
+				break;
+			}
+			case present::VehicleFxOp::StartWreckEffect:
+				for (Husk &h : husks_) {
+					if (h.spawner == c.spawner && h.generation == c.generation) {
+						const core::gameplay::VehicleWreckEffectDef &e = def.wreck->effects[c.effect];
+						if (const std::optional<fx::EffectHandle> started =
+										start(e.effect, h.at * godot_transform(e.transform))) {
+							h.effects.push_back(*started);
+							++stats_.husk_effects;
+						}
+					}
+				}
+				break;
+			case present::VehicleFxOp::EndWreck:
+				for (auto it = husks_.begin(); it != husks_.end();) {
+					if (it->spawner != c.spawner || it->generation != c.generation) {
+						++it;
+						continue;
+					}
+					for (const fx::EffectHandle e : it->effects) {
+						r_fx.stop_effect(e);
+					}
+					free_node(it->node_id);
+					it = husks_.erase(it);
+				}
+				break;
+		}
+	}
+	for (const auto &[key, effect] : damage_effects_) {
+		const auto at = p_placed.find(key.first);
+		if (at == p_placed.end()) {
+			continue;
+		}
+		const Vector3 v = at->second.second;
+		r_fx.move_effect(effect.handle, to_fx_transform(at->second.first * effect.local), fx::Vec3{ v.x, v.y, v.z });
+	}
+	stats_.damage_live = uint32_t(damage_effects_.size());
+	stats_.husks_live = uint32_t(husks_.size());
 }
 
 std::optional<GameVehicleView> GameVehicles::view(uint16_t p_spawner) const {

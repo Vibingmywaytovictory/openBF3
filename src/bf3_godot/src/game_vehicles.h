@@ -1,8 +1,10 @@
 #pragma once
 
 #include "bf3/core/result.h"
+#include "bf3/fx/simulator.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/level_vehicles.h"
+#include "bf3/present/vehicle_damage_fx.h"
 #include "bf3/render/vehicle_meshes.h"
 #include "death_camera.h"
 #include "game_frame.h"
@@ -17,11 +19,14 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace bf3::godot_side {
+
+class Bf3GameFx;
 
 struct GameVehiclesStats {
 	uint32_t kinds = 0;
@@ -33,13 +38,14 @@ struct GameVehiclesStats {
 	uint64_t created = 0;
 	uint64_t freed = 0;
 	uint64_t wrecks = 0;
-};
-
-struct GameVehicleWreck {
-	uint16_t spawner = 0;
-	uint8_t generation = 0;
-	std::string effect;
-	godot::Transform3D body;
+	uint32_t wreck_kinds = 0;
+	uint64_t damage_starts = 0;
+	uint64_t damage_stops = 0;
+	uint32_t damage_live = 0;
+	uint64_t husks = 0;
+	uint64_t husk_effects = 0;
+	uint32_t husks_live = 0;
+	uint64_t fx_failures = 0;
 };
 
 struct OwnVehicleSeat {
@@ -76,16 +82,19 @@ public:
 	bool loaded() const { return set_ != nullptr; }
 	bool build(godot::Node3D *p_parent, std::string *r_error);
 	bool built() const { return root_ != nullptr; }
-	void step(const host::PresentationFrame &p_frame, uint64_t p_now_ns, uint8_t p_own_slot);
+	void step(const host::PresentationFrame &p_frame, uint64_t p_now_ns, uint8_t p_own_slot, Bf3GameFx *p_fx);
 	std::optional<OwnVehicleSeat> own_seat() const { return own_; }
 	const host::LevelVehicles *level() const { return level_.get(); }
 	const GameVehiclesStats &stats() const { return stats_; }
 	std::optional<GameVehicleView> view(uint16_t p_spawner) const;
-	std::vector<GameVehicleWreck> take_wrecks() { return std::exchange(wrecks_, {}); }
 	VehicleSeatView seat_view(const OwnVehicleSeat &p_seat, uint32_t p_camera, float p_yaw, float p_pitch,
 			float p_fov_deg, double p_dt, const sim::CollisionWorld *p_world);
 
 private:
+	void present_damage(std::span<const present::VehicleFxSight> p_sights,
+			const std::map<uint16_t, std::pair<godot::Transform3D, godot::Vector3>> &p_placed, double p_now_s,
+			Bf3GameFx &r_fx);
+
 	struct Part {
 		godot::Ref<godot::ArrayMesh> mesh;
 		int8_t wheel = -1;
@@ -93,6 +102,17 @@ private:
 	};
 	struct Kind {
 		std::vector<Part> parts;
+	};
+	struct DamageEffect {
+		fx::EffectHandle handle;
+		godot::Transform3D local;
+	};
+	struct Husk {
+		uint16_t spawner = 0;
+		uint8_t generation = 0;
+		uint64_t node_id = 0;
+		godot::Transform3D at;
+		std::vector<fx::EffectHandle> effects;
 	};
 	struct Shown {
 		uint64_t node_id = 0;
@@ -105,7 +125,10 @@ private:
 	std::unique_ptr<render::VehicleMeshSet> set_;
 	std::vector<Kind> kinds_;
 	std::map<uint16_t, Shown> shown_;
-	std::vector<GameVehicleWreck> wrecks_;
+	std::map<std::string, std::vector<Part>> wrecks_;
+	std::optional<present::VehicleDamageFx> damage_fx_;
+	std::map<std::pair<uint16_t, uint16_t>, DamageEffect> damage_effects_;
+	std::vector<Husk> husks_;
 	host::VehicleWrecks wrecked_;
 	std::optional<OwnVehicleSeat> own_;
 	ChaseCamera chase_;

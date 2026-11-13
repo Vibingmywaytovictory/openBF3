@@ -16,6 +16,7 @@
 #include "bf3/fx/emitter_atlas.h"
 #include "bf3/fx/impact_table.h"
 #include "bf3/host/gunplay.h"
+#include "bf3/host/level_vehicles.h"
 
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/core/memory.hpp>
@@ -310,14 +311,32 @@ core::Status Bf3GameFx::load(const GameLoadInputs &p_in) {
 		for (std::string &n : fx::impact_effect_names(*m.impacts)) {
 			names.push_back(std::move(n));
 		}
+		const size_t before_vehicles = names.size();
+		if (p_in.shared->vehicles) {
+			for (const host::LevelVehicleKind &k : p_in.shared->vehicles->kinds) {
+				if (!k.explosion_effect.empty()) {
+					names.push_back(k.explosion_effect);
+				}
+				for (const core::gameplay::VehicleDamageEffectDef &d : k.damage_visuals.damage) {
+					names.push_back(d.effect);
+				}
+				if (k.damage_visuals.wreck) {
+					for (const core::gameplay::VehicleWreckEffectDef &w : k.damage_visuals.wreck->effects) {
+						names.push_back(w.effect);
+					}
+				}
+			}
+		}
+		const size_t vehicle_names = names.size() - before_vehicles;
 		std::sort(names.begin(), names.end());
 		names.erase(std::unique(names.begin(), names.end()), names.end());
 		const size_t failed = m.library->preload(names, p_in.threads);
 		m.preloaded = names;
 		m.stats.preloaded = uint32_t(names.size());
 		m.stats.preload_failures = uint32_t(failed);
-		m.notes.push_back(fmt("preload: %zu blueprints (%zu fire, %zu impact), %zu failed, %.3f s", names.size(),
-				m.fire->blueprints().size(), fx::impact_effect_names(*m.impacts).size(), failed, seconds_since(tp)));
+		m.notes.push_back(fmt("preload: %zu blueprints (%zu fire, %zu impact, %zu vehicle), %zu failed, %.3f s",
+				names.size(), m.fire->blueprints().size(), fx::impact_effect_names(*m.impacts).size(), vehicle_names,
+				failed, seconds_since(tp)));
 	}
 	if (stopping(p_in)) {
 		return core::Error{ "Bf3GameFx::load: stopped" };
@@ -522,6 +541,18 @@ core::Result<fx::EffectHandle> Bf3GameFx::start_effect(std::string_view p_bluepr
 		++m.stats.start_effect_failures;
 	}
 	return h;
+}
+
+void Bf3GameFx::stop_effect(fx::EffectHandle p_effect) {
+	if (impl_->world) {
+		impl_->world->stop(p_effect);
+	}
+}
+
+void Bf3GameFx::move_effect(fx::EffectHandle p_effect, const fx::Transform &p_transform, const fx::Vec3 &p_velocity) {
+	if (impl_->world) {
+		impl_->world->set_transform(p_effect, p_transform, p_velocity);
+	}
 }
 
 const fx::FxWorld *Bf3GameFx::world() const {
