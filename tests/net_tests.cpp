@@ -10,6 +10,8 @@
 #include <functional>
 #include <memory>
 #include <numeric>
+#include <string>
+#include <thread>
 #include <vector>
 
 TEST_CASE("net: ENet version is the pinned 1.3.18") {
@@ -220,4 +222,76 @@ TEST_CASE("net: per-peer counters equal the bytes sent and received on each chan
 	CHECK(server_wire.received_bytes > client_sent_sum);
 	CHECK(server_wire.received_bytes <= client_wire.sent_bytes);
 	CHECK(client_wire.received_bytes > server_sent_sum);
+}
+
+TEST_CASE("net: unsequenced datagrams to a peer that acks late are all delivered") {
+	using namespace std::chrono;
+	constexpr auto kHandshakeAckDelay = milliseconds(10);
+	constexpr auto kClientServiceGap = milliseconds(100);
+	constexpr auto kSendFor = milliseconds(1500);
+	constexpr uint64_t kMinSends = 200;
+	std::string err;
+	std::unique_ptr<Host> server = Host::create_server("127.0.0.1", 0, 4, 3, &err);
+	REQUIRE_MESSAGE(server, err);
+	std::unique_ptr<Host> client = Host::create_client(3, &err);
+	REQUIRE_MESSAGE(client, err);
+	REQUIRE(client->connect("127.0.0.1", server->bound_port()) >= 0);
+	std::vector<Host::Event> server_events, client_events;
+	const auto drain = [](Host &r_host, std::vector<Host::Event> &r_events) {
+		Host::Event ev;
+		while (r_host.service(0, ev) > 0) {
+			r_events.push_back(std::move(ev));
+		}
+	};
+	REQUIRE(bf3::test::wait_until(
+			[&] {
+				drain(*server, server_events);
+				std::this_thread::sleep_for(kHandshakeAckDelay);
+				drain(*client, client_events);
+				return HostPair::count(server_events, Host::EventType::Connect) == 1 &&
+						HostPair::count(client_events, Host::EventType::Connect) == 1;
+			},
+			seconds(10)));
+	uint32_t server_peer = 0;
+	for (const Host::Event &e : server_events) {
+		if (e.type == Host::EventType::Connect) {
+			server_peer = e.peer;
+		}
+	}
+	client_events.clear();
+
+	const std::vector<uint8_t> state = payload(120, 3);
+	const std::vector<uint8_t> event = payload(16, 9);
+	uint64_t sent = 0;
+	const auto start = steady_clock::now();
+	auto client_serviced = start;
+	while (steady_clock::now() - start < kSendFor || sent < kMinSends) {
+		REQUIRE(server->send(server_peer, 1, event.data(), event.size(), Host::SendMode::Reliable));
+		REQUIRE(server->send(server_peer, 0, state.data(), state.size(), Host::SendMode::Unsequenced));
+		++sent;
+		server->flush();
+		drain(*server, server_events);
+		if (steady_clock::now() - client_serviced >= kClientServiceGap) {
+			drain(*client, client_events);
+			client_serviced = steady_clock::now();
+		}
+		std::this_thread::sleep_for(milliseconds(1));
+	}
+	const auto unsequenced_received = [&] {
+		size_t n = 0;
+		for (const Host::Event &e : client_events) {
+			n += e.type == Host::EventType::Receive && e.channel == 0 ? 1 : 0;
+		}
+		return n;
+	};
+	bf3::test::wait_until(
+			[&] {
+				drain(*server, server_events);
+				drain(*client, client_events);
+				return unsequenced_received() >= sent;
+			},
+			seconds(2));
+	MESSAGE("unsequenced sent ", sent, ", delivered ", unsequenced_received());
+	CHECK(unsequenced_received() == sent);
+	CHECK(HostPair::count(client_events, Host::EventType::Disconnect) == 0);
 }

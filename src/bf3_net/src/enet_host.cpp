@@ -9,6 +9,11 @@ namespace bf3::net {
 namespace {
 std::mutex g_runtime_mutex;
 int g_runtime_users = 0;
+
+void never_throttle_unreliable(ENetPeer *p_peer) {
+	enet_peer_throttle_configure(p_peer, ENET_PEER_PACKET_THROTTLE_INTERVAL, ENET_PEER_PACKET_THROTTLE_ACCELERATION, 0);
+	p_peer->packetThrottle = p_peer->packetThrottleLimit;
+}
 }
 
 bool runtime_acquire() {
@@ -123,6 +128,7 @@ int Host::service(uint32_t p_timeout_ms, Event &r_event) {
 	switch (ev.type) {
 		case ENET_EVENT_TYPE_CONNECT:
 			r_event.type = EventType::Connect;
+			never_throttle_unreliable(ev.peer);
 			if (r_event.peer < counters_.size()) {
 				counters_[r_event.peer] = PeerCounters();
 			}
