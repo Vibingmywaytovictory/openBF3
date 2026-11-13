@@ -1,5 +1,6 @@
 #include "vehicle_drive_check.h"
 
+#include "eor_flash.h"
 #include "game_vehicles.h"
 #include "level_session.h"
 #include "native_hud.h"
@@ -99,6 +100,11 @@ float first_person_fov(const host::LevelVehicleKind &p_kind, uint8_t p_seat) {
 	return c != nullptr ? c->regular_field_of_view : 0.0f;
 }
 
+bool fades(const host::LevelVehicleKind &p_kind, uint8_t p_seat) {
+	const core::gameplay::VehicleCameraDef *c = first_person_camera(p_kind, p_seat);
+	return c != nullptr && c->zoom_fade_to_black;
+}
+
 std::optional<float> first_person_zoom(const host::LevelVehicleKind &p_kind, uint8_t p_seat) {
 	const core::gameplay::VehicleCameraDef *c = first_person_camera(p_kind, p_seat);
 	return c != nullptr ? c->zoom_field_of_view : std::nullopt;
@@ -173,6 +179,15 @@ void VehicleDriveRun::turret_rows(Bf3LevelSession &r_session, const VehicleDrive
 			fmt("the first-person camera sits %.3f m from its rest place on the drawn ring and %.3f m from its rest "
 				"place on the hull",
 					double(on_part.distance_to(at_rest)), double(local.distance_to(Vector3(at[0], at[1], at[2])))));
+}
+
+void VehicleDriveRun::track_fade(const VehicleDriveInputs &p_in) {
+	if (shown_black_ > 0.0f) {
+		const float drawn = p_in.flash != nullptr ? p_in.flash->stats().last_black : 0.0f;
+		++fade_frames_;
+		fade_misses_ += std::fabs(drawn - shown_black_) < 1e-4f ? 0u : 1u;
+	}
+	shown_black_ = p_in.vehicle_black;
 }
 
 void VehicleDriveRun::row(const std::string &p_name, bool p_pass, const std::string &p_detail) {
@@ -518,9 +533,12 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 							double(regular_fov_), double(first_person_fov(lv.kinds[lv.spawners[spawner_].kind], 0))));
 			shoot(p_in, "tank_1p");
 			mapper.script_hold(InputMapper::WeaponAction::Ads, true);
+			shown_black_ = 0.0f;
+			fade_frames_ = fade_misses_ = 0;
 			enter(Phase::Zoom);
 			return false;
 		case Phase::Zoom: {
+			track_fade(p_in);
 			if (t_ < kZoomSettle) {
 				return false;
 			}
@@ -539,9 +557,17 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			return false;
 		}
 		case Phase::Unzoom: {
+			track_fade(p_in);
 			if (t_ < kZoomSettle) {
 				return false;
 			}
+			row("zoom_fade",
+					p_in.flash != nullptr && fades(lv.kinds[lv.spawners[spawner_].kind], 0) && fade_frames_ > 0 &&
+							fade_misses_ == 0,
+					fmt("the seat camera's AlternateView fades to black: %s; %u frames of the zoom's fade, %u of them "
+						"not drawn at the zoom's black by the screen fade",
+							fades(lv.kinds[lv.spawners[spawner_].kind], 0) ? "yes" : "no", unsigned(fade_frames_),
+							unsigned(fade_misses_)));
 			const float fov = float(p_in.camera->get_fov());
 			row("unzoom", seat.has_value() && std::fabs(fov - regular_fov_) < 0.01f,
 					fmt("camera FOV %.2f deg %.1f s after the zoom key's release, regular %.2f deg", double(fov),

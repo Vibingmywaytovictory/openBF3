@@ -1441,6 +1441,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 	const bool own_aims = g.alive && g.weapon.valid && g.weapon.def < g.def_aiming.size();
 	mapper_.set_own_look(own_look_of(own_aims ? &g.def_aiming[g.weapon.def] : nullptr, f.own_curr.pose,
 			(f.own_curr.flags & sim::soldier_flags::kSprinting) != 0, g.weapon.valid && g.weapon.zoomed, zoom_look));
+	g.vehicle_black = 0.0f;
 	if (seat && camera != nullptr && !free_camera) {
 		const VehicleSeatView sv = g.vehicles->seat_view(*seat, g.vehicle_camera, view.yaw, view.pitch,
 				g.settings != nullptr ? g.settings->hip_fov_deg() : FpCamera::kFovDegrees,
@@ -1448,6 +1449,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		mapper_.hold_view_on(seat->heading, sv.left_yaw, sv.right_yaw, sv.up_pitch, sv.down_pitch);
 		camera->set_global_transform(sv.camera);
 		camera->set_fov(sv.fov_deg);
+		g.vehicle_black = sv.black;
 	}
 	g.ms_vm = ms_since(part_t0);
 	part_t0 = std::chrono::steady_clock::now();
@@ -1632,6 +1634,8 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		in.hud = g.native_hud;
 		in.camera = cameras_.first_person();
 		in.camera_counter = g.vehicle_camera;
+		in.flash = g.tdm != nullptr ? g.tdm->eor_flash.get() : nullptr;
+		in.vehicle_black = g.vehicle_black;
 		in.deploy = [this] {
 			scripted_ui_key(KEY_ENTER, true);
 			scripted_ui_key(KEY_ENTER, false);

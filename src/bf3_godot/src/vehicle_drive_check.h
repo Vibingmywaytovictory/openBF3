@@ -15,6 +15,7 @@ namespace bf3::godot_side {
 class Bf3LevelSession;
 class Bf3NativeHud;
 class Bf3Viewmodel;
+class EorFlash;
 class GameVehicles;
 
 struct VehicleDriveInputs {
@@ -26,6 +27,8 @@ struct VehicleDriveInputs {
 	Bf3NativeHud *hud = nullptr;
 	const godot::Camera3D *camera = nullptr;
 	uint32_t camera_counter = 0;
+	const EorFlash *flash = nullptr;
+	float vehicle_black = 0.0f;
 	std::function<void()> deploy;
 	std::function<bool(const std::string &)> shot;
 };
@@ -66,11 +69,15 @@ private:
 	void shoot(const VehicleDriveInputs &p_in, const char *p_name);
 	void hud_row(const VehicleDriveInputs &p_in, uint8_t p_seat);
 	void turret_rows(Bf3LevelSession &r_session, const VehicleDriveInputs &p_in);
+	void track_fade(const VehicleDriveInputs &p_in);
 
 	std::string shots_;
 	bool zoom_ = false;
 	float regular_fov_ = 0.0f;
 	float turn_ = 0.0f;
+	float shown_black_ = 0.0f;
+	uint32_t fade_frames_ = 0;
+	uint32_t fade_misses_ = 0;
 	Phase phase_ = Phase::WaitScreen;
 	double t_ = 0.0;
 	double next_press_ = 0.0;

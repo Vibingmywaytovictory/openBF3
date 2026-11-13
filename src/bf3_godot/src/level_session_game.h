@@ -226,6 +226,7 @@ struct GameState {
 	std::unique_ptr<GameDeployables> deployables;
 	std::unique_ptr<GameVehicles> vehicles;
 	uint32_t vehicle_camera = 0;
+	float vehicle_black = 0.0f;
 	std::unique_ptr<CatalogWeapons> catalog;
 	CatalogCacheSource catalog_cache;
 	std::shared_ptr<GameSettings> settings;

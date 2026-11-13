@@ -1568,7 +1568,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		const host::UiFlowSession *flow = m.native_flow != nullptr ? m.native_flow->session() : nullptr;
 		host::LogicScreenEffectsFrame effects =
 				flow != nullptr ? flow->screen_effects() : host::LogicScreenEffectsFrame{};
-		effects.screen_faded = std::max(effects.screen_faded, m.killer_view_black);
+		effects.screen_faded = std::max({ effects.screen_faded, m.killer_view_black, r_game.vehicle_black });
 		if (m.windowed && eor_level->eor_fading != nullptr && flow != nullptr) {
 			if (m.eor_flash == nullptr) {
 				m.eor_flash = std::unique_ptr<EorFlash, void (*)(EorFlash *)>(new EorFlash(), &delete_part<EorFlash>);
