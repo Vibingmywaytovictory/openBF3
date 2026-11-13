@@ -163,7 +163,7 @@ void vehicle_sound_sources(std::span<const host::PresentedVehicle> p_vehicles, c
 		p[size_t(P::SpringCompression)] = spring_compression(v, model);
 		p[size_t(P::InteriorCam)] = local && inside(k.box, hull, p_view.listener.position) ? 1.0f : 0.0f;
 		p[size_t(P::LocalPlayerInVehicle)] = local ? 1.0f : 0.0f;
-		p[size_t(P::Health)] = 1.0f;
+		p[size_t(P::Health)] = v.health;
 		p[size_t(P::DisabledDamageThreshold)] = p_assets.disabled_fraction[kind];
 		p[size_t(P::InDriverPos)] = local && own->seat == 0 ? 1.0f : 0.0f;
 		if (engine) {

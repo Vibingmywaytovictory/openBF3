@@ -646,6 +646,34 @@ TEST_SUITE("audio-vehicles-drive") {
 		check_unchanged(*f);
 	}
 
+	TEST_CASE("the engine and turret sounds take the presented vehicle's health as their Health input") {
+		VehicleFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		const std::optional<uint16_t> kind = kind_of(*f->level, "vehicles/m1a2/m1abrams");
+		REQUIRE(kind.has_value());
+		const std::optional<uint16_t> spawner = spawner_of(*f->level, *kind);
+		REQUIRE(spawner.has_value());
+		host::PresentedVehicle v = parked(*f->level, *spawner);
+		v.occupants[0] = 3;
+		ba::VehicleListenerView view;
+		view.own_slot = 7;
+		ba::VehicleSoundMemory memory;
+		std::vector<ba::VehicleSoundSource> sources;
+		for (const float health : { 1.0f, 0.4f, 0.0f }) {
+			CAPTURE(health);
+			v.health = health;
+			const host::PresentedVehicle one[1] = { v };
+			ba::vehicle_sound_sources(one, *f->level, f->assets, view, memory, sources);
+			REQUIRE_FALSE(sources.empty());
+			for (const ba::VehicleSoundSource &s : sources) {
+				CHECK(s.params[size_t(P::Health)] == health);
+			}
+		}
+		check_unchanged(*f);
+	}
+
 	TEST_CASE("present_vehicle keeps the wire's throttle filter and a bit per wheel in contact") {
 		net::VehicleWire w;
 		w.state.wheel_count = 4;
