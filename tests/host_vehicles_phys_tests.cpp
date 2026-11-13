@@ -436,6 +436,64 @@ TEST_SUITE("host-vehicles-wreck-scope") {
 	}
 }
 
+namespace {
+
+struct ChassisSpawn {
+	bool inside = false;
+	float farthest = 0.0f;
+	float fastest = 0.0f;
+	float walk = 0.0f;
+	float half = 0.0f;
+};
+
+ChassisSpawn spawned_at_centre_of_mass(tdm::TdmLevel &p_level, const char *p_blueprint) {
+	const host::LevelVehicles &lv = *p_level.shared->vehicles;
+	std::optional<size_t> found;
+	for (size_t i = 0; i < lv.spawners.size() && !found; ++i) {
+		found = lv.kinds[lv.spawners[i].kind].blueprint == p_blueprint ? std::optional<size_t>(i) : std::nullopt;
+	}
+	REQUIRE(found.has_value());
+	auto vehicles = std::make_shared<host::LevelVehicles>(lv);
+	host::LevelVehicleSpawner parked = lv.spawners[*found];
+	parked.initial_spawn_delay = 0.0f;
+	vehicles->spawners = { parked };
+	host::ServerVehicles sv;
+	REQUIRE(sv.configure(vehicles, p_level.shared->static_world, 1.0f).ok());
+	for (sim::Tick t = 1; t <= 120; ++t) {
+		sv.spawn_due(t, nullptr);
+		REQUIRE(sv.step(t, 0, [](uint8_t) { return true; }).ok());
+	}
+	REQUIRE(sv.vehicles()[0].live);
+	core::Result<std::unique_ptr<sim::CollisionWorld>> world =
+			sim::CollisionWorld::create(p_level.shared->static_world);
+	REQUIRE(world.ok());
+	sim::SoldierMotor motor;
+	REQUIRE(motor.init(**world, p_level.shared->motor).ok());
+	motor.set_obstacles(&sv.obstacles());
+	const sim::VehicleBodyState body = sv.world()->state(sim::VehicleSlot(0)).body;
+	const sim::Vec3 &c = body.com_position;
+	sim::SoldierState s = motor.spawn_state({ c[0], body.origin[1], c[2] }, 0, 1, 1000, false);
+	const float walk = sim::walk_speed(motor.params(), s);
+	float fastest = 0.0f, farthest = 0.0f;
+	for (int t = 0; t < 90; ++t) {
+		motor.step(s, sim::idle_command(s.tick + 1, 0, 0, sim::Pose::Stand));
+		fastest = std::max(fastest, std::hypot(s.velocity[0], s.velocity[2]));
+		farthest = std::max(farthest, std::hypot(s.position[0] - c[0], s.position[2] - c[2]));
+	}
+	const float half = std::hypot(lv.kinds[parked.kind].box.half[0], lv.kinds[parked.kind].box.half[2]);
+	const sim::MotorParams &p = motor.params();
+	const bool inside = sv.obstacles().overlaps_capsule(s.position, p.radius, p.poses[size_t(sim::Pose::Stand)].height);
+	std::printf("inside chassis: %s, spawned at its centre of mass: after 90 ticks %.2f m from it (%.2f m up), "
+				"inside a hull %d, at most %.2f m from it and %.2f m/s across (walking %.2f m/s); half diagonal "
+				"%.2f m\n",
+			p_blueprint, double(std::hypot(s.position[0] - c[0], s.position[2] - c[2])),
+			double(s.position[1] - body.origin[1]), int(inside), double(farthest), double(fastest), double(walk),
+			double(half));
+	return { inside, farthest, fastest, walk, half };
+}
+
+}
+
 TEST_SUITE("host-vehicles-exit") {
 	TEST_CASE("vehicles: MP_007 ConquestSmall0: a Growler driver whose nearest exit point lies inside a parked "
 			  "Growler gets out at the next exit point where he stands clear of every hull and the level") {
@@ -512,60 +570,27 @@ TEST_SUITE("host-vehicles-exit") {
 		CHECK(motor.fits_standing(*exited));
 	}
 
-	TEST_CASE("vehicles: MP_007 ConquestSmall0: a soldier spawned at a parked Growler's or M1A2's centre of mass "
-			  "comes out of its chassis without being launched") {
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: a soldier spawned at a parked Growler's centre of mass comes out of "
+			  "its chassis without being launched") {
 		tdm::TdmLevel *level = tdm::load_conquest_level_once();
 		if (level == nullptr) {
 			return;
 		}
-		const host::LevelVehicles &lv = *level->shared->vehicles;
-		for (const char *blueprint : { "vehicles/growleritv/growleritv", "vehicles/m1a2/m1abrams" }) {
-			std::optional<size_t> found;
-			for (size_t i = 0; i < lv.spawners.size() && !found; ++i) {
-				found = lv.kinds[lv.spawners[i].kind].blueprint == blueprint ? std::optional<size_t>(i) : std::nullopt;
-			}
-			REQUIRE(found.has_value());
-			auto vehicles = std::make_shared<host::LevelVehicles>(lv);
-			host::LevelVehicleSpawner parked = lv.spawners[*found];
-			parked.initial_spawn_delay = 0.0f;
-			vehicles->spawners = { parked };
-			host::ServerVehicles sv;
-			REQUIRE(sv.configure(vehicles, level->shared->static_world, 1.0f).ok());
-			for (sim::Tick t = 1; t <= 120; ++t) {
-				sv.spawn_due(t, nullptr);
-				REQUIRE(sv.step(t, 0, [](uint8_t) { return true; }).ok());
-			}
-			REQUIRE(sv.vehicles()[0].live);
-			core::Result<std::unique_ptr<sim::CollisionWorld>> world =
-					sim::CollisionWorld::create(level->shared->static_world);
-			REQUIRE(world.ok());
-			sim::SoldierMotor motor;
-			REQUIRE(motor.init(**world, level->shared->motor).ok());
-			motor.set_obstacles(&sv.obstacles());
-			const sim::VehicleBodyState body = sv.world()->state(sim::VehicleSlot(0)).body;
-			const sim::Vec3 &c = body.com_position;
-			sim::SoldierState s = motor.spawn_state({ c[0], body.origin[1], c[2] }, 0, 1, 1000, false);
-			const float walk = sim::walk_speed(motor.params(), s);
-			float fastest = 0.0f, farthest = 0.0f;
-			for (int t = 0; t < 90; ++t) {
-				motor.step(s, sim::idle_command(s.tick + 1, 0, 0, sim::Pose::Stand));
-				fastest = std::max(fastest, std::hypot(s.velocity[0], s.velocity[2]));
-				farthest = std::max(farthest, std::hypot(s.position[0] - c[0], s.position[2] - c[2]));
-			}
-			const float half = std::hypot(lv.kinds[parked.kind].box.half[0], lv.kinds[parked.kind].box.half[2]);
-			const sim::MotorParams &p = motor.params();
-			const bool inside =
-					sv.obstacles().overlaps_capsule(s.position, p.radius, p.poses[size_t(sim::Pose::Stand)].height);
-			std::printf(
-					"inside chassis: %s, spawned at its centre of mass: after 90 ticks %.2f m from it (%.2f m up), "
-					"inside a hull %d, at most %.2f m from it and %.2f m/s across (walking %.2f m/s); half diagonal "
-					"%.2f m\n",
-					blueprint, double(std::hypot(s.position[0] - c[0], s.position[2] - c[2])),
-					double(s.position[1] - body.origin[1]), int(inside), double(farthest), double(fastest),
-					double(walk), double(half));
-			CHECK(farthest < half + 1.0f);
-			CHECK(fastest < walk);
+		const ChassisSpawn r = spawned_at_centre_of_mass(*level, "vehicles/growleritv/growleritv");
+		CHECK_FALSE(r.inside);
+		CHECK(r.farthest < r.half + 1.0f);
+		CHECK(r.fastest < r.walk);
+	}
+
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: a soldier spawned at a parked M1A2's centre of mass is not launched "
+			  "out of its chassis") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
 		}
+		const ChassisSpawn r = spawned_at_centre_of_mass(*level, "vehicles/m1a2/m1abrams");
+		CHECK(r.farthest < r.half + 1.0f);
+		CHECK(r.fastest < r.walk);
 	}
 
 	TEST_CASE("vehicles: MP_007 ConquestSmall0: every seat of every parked land vehicle has an exit point where a "
