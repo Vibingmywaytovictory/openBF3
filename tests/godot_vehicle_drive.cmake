@@ -9,13 +9,17 @@ if(DEFINED NETSIM)
     set(netsim "--netsim=${NETSIM}")
 endif()
 set(audio_args)
+set(zoom_args)
+if(ZOOM)
+    set(zoom_args --vehicle-zoom)
+endif()
 if(AUDIO)
     set(audio_args "--audio-capture=${shots}/audio")
 endif()
 godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 170
     ARGS --path "${PROJECT_DIR}" --resolution 1280x720 res://scenes/metro_tdm.tscn -- --level=MP_007 --mode=ConquestSmall0
         --bots=0 --deploy-screen=0 --preround=0 --min-players=1 --vehicle-drive "--vehicle-shots=${shots}" ${netsim}
-        "--bf3-cache=${cache}" ${audio_args})
+        "--bf3-cache=${cache}" ${audio_args} ${zoom_args})
 godot_require_pass("VEHICLE DRIVE: PASS")
 godot_require_pass("\\[level\\] install unchanged: yes")
 if(AUDIO)

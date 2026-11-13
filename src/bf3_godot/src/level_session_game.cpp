@@ -310,7 +310,8 @@ void Bf3LevelSession::game_parse_args() {
 		g.gadgets_draw = std::make_unique<GadgetsDrawRun>();
 	}
 	if (has_check_arg("vehicle-drive")) {
-		g.vehicle_drive = std::make_unique<VehicleDriveRun>(user_arg_value("vehicle-shots"));
+		g.vehicle_drive =
+				std::make_unique<VehicleDriveRun>(user_arg_value("vehicle-shots"), has_user_arg("vehicle-zoom"));
 	}
 	if (has_check_arg("net-overlay-check")) {
 		g.net_overlay_check = std::make_unique<NetOverlayCheck>(user_arg_value("net-overlay-shots"));

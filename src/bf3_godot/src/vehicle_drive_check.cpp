@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <optional>
 
 namespace bf3::godot_side {
 
@@ -37,6 +38,8 @@ constexpr double kBrakeTimeout = 6.0;
 constexpr float kDriveMetres = 4.0f;
 constexpr float kOffLine = 1.5f;
 constexpr const char *kJeep = "vehicles/growleritv/growleritv";
+constexpr const char *kTank = "vehicles/m1a2/m1abrams";
+constexpr double kZoomSettle = 0.5;
 
 float up_y(const std::array<float, 4> &p_q) {
 	return 1.0f - 2.0f * (p_q[0] * p_q[0] + p_q[2] * p_q[2]);
@@ -53,6 +56,34 @@ const host::PresentedVehicle *presented(const host::PresentationFrame &p_frame, 
 		}
 	}
 	return nullptr;
+}
+
+const host::PresentedVehicle *parked(
+		const host::PresentationFrame &p_frame, const host::LevelVehicles &p_lv, const char *p_blueprint) {
+	const host::PresentedVehicle *best = nullptr;
+	for (size_t i = 0; i < p_frame.vehicle_count && i < p_frame.vehicles.size(); ++i) {
+		const host::PresentedVehicle &v = p_frame.vehicles[i];
+		if (v.spawner >= p_lv.spawners.size() || p_lv.kinds[p_lv.spawners[v.spawner].kind].blueprint != p_blueprint) {
+			continue;
+		}
+		if (up_y(v.rotation) > 0.98f && speed(v.linear_velocity) < 0.05f &&
+				(best == nullptr || v.spawner < best->spawner)) {
+			best = &v;
+		}
+	}
+	return best;
+}
+
+std::optional<float> first_person_zoom(const host::LevelVehicleKind &p_kind, uint8_t p_seat) {
+	if (p_seat >= p_kind.seat_defs.size()) {
+		return std::nullopt;
+	}
+	for (const core::gameplay::VehicleCameraDef &c : p_kind.seat_defs[p_seat].cameras) {
+		if (c.first_person) {
+			return c.zoom_field_of_view;
+		}
+	}
+	return std::nullopt;
 }
 
 }
@@ -146,17 +177,7 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			enter(Phase::Pick);
 			return false;
 		case Phase::Pick: {
-			const host::PresentedVehicle *best = nullptr;
-			for (size_t i = 0; i < f.vehicle_count && i < f.vehicles.size(); ++i) {
-				const host::PresentedVehicle &v = f.vehicles[i];
-				if (v.spawner >= lv.spawners.size() || lv.kinds[lv.spawners[v.spawner].kind].blueprint != kJeep) {
-					continue;
-				}
-				if (up_y(v.rotation) > 0.98f && speed(v.linear_velocity) < 0.05f &&
-						(best == nullptr || v.spawner < best->spawner)) {
-					best = &v;
-				}
-			}
+			const host::PresentedVehicle *best = parked(f, lv, kJeep);
 			if (best == nullptr || t_ < kPickSettle) {
 				return t_ > kPickTimeout ? fail("pick", fmt("no parked upright Growler after %.0f s", kPickTimeout))
 										 : false;
@@ -356,6 +377,108 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			row("exit", p_in.alive && away > 1.0f && away < 6.0f && p_in.camera_counter == 0,
 					fmt("out %.2f m from the Growler's centre, camera counter %u", double(away),
 							unsigned(p_in.camera_counter)));
+			if (!zoom_) {
+				phase_ = Phase::Done;
+				return true;
+			}
+			enter(Phase::TankPick);
+			return false;
+		}
+		case Phase::TankPick: {
+			const host::PresentedVehicle *best = parked(f, lv, kTank);
+			if (best == nullptr) {
+				return t_ > kPickTimeout ? fail("tank_pick", fmt("no parked upright M1A2 after %.0f s", kPickTimeout))
+										 : false;
+			}
+			host::ClientSession *client = r_session.client();
+			if (client == nullptr) {
+				return fail("tank_pick", "no client session");
+			}
+			spawner_ = best->spawner;
+			const float reach = 0.6f * lv.kinds[lv.spawners[spawner_].kind].entry_radius;
+			const std::optional<GameVehicleView> view = p_in.vehicles->view(spawner_);
+			const Vector3 side = view ? view->body.basis.get_column(0) : Vector3(1, 0, 0);
+			const float n = std::max(1e-3f, std::sqrt(side.x * side.x + side.z * side.z));
+			net::DebugRequest q;
+			q.kind = net::DebugKind::Teleport;
+			q.id = ++request_id_;
+			q.position = { best->com_position[0] + reach * side.x / n, best->com_position[1] + 0.5f,
+				best->com_position[2] + reach * side.z / n };
+			q.yaw = sim::quantize_yaw(-0.5f * sim::kPi);
+			client->send_debug(q);
+			row("tank_pick", true,
+					fmt("M1A2 of spawner %u at (%.1f, %.1f, %.1f)", unsigned(spawner_), double(best->com_position[0]),
+							double(best->com_position[1]), double(best->com_position[2])));
+			enter(Phase::TankWalk);
+			return false;
+		}
+		case Phase::TankWalk: {
+			const host::PresentedVehicle *v = presented(f, spawner_);
+			if (v == nullptr) {
+				return fail("tank_walk", "the M1A2 went away");
+			}
+			const float dx = f.own_curr.position[0] - v->com_position[0],
+						dz = f.own_curr.position[2] - v->com_position[2];
+			const float reach = lv.kinds[lv.spawners[spawner_].kind].entry_radius;
+			if (std::sqrt(dx * dx + dz * dz) > reach || t_ < 0.5) {
+				return t_ > kWalkTimeout
+						? fail("tank_walk",
+								  fmt("not within %.2f m of the M1A2 after %.0f s", double(reach), kWalkTimeout))
+						: false;
+			}
+			mapper.script_hold(InputMapper::VehicleAction::Use, true);
+			enter(Phase::TankEnter);
+			return false;
+		}
+		case Phase::TankEnter:
+			if (t_ >= kKeyHold) {
+				mapper.script_hold(InputMapper::VehicleAction::Use, false);
+			}
+			if (!seat || seat->spawner != spawner_) {
+				return t_ > kSeatTimeout ? fail("tank_enter", "the use key did not seat the soldier in the M1A2")
+										 : false;
+			}
+			if (t_ < kSettle) {
+				return false;
+			}
+			if (p_in.camera == nullptr) {
+				return fail("tank_enter", "no camera");
+			}
+			mapper.script_hold(InputMapper::VehicleAction::Use, false);
+			regular_fov_ = float(p_in.camera->get_fov());
+			row("tank_enter", seat->seat == 0 && p_in.camera_counter == 0,
+					fmt("seat %u of spawner %u, camera counter %u, FOV %.2f deg", unsigned(seat->seat),
+							unsigned(seat->spawner), unsigned(p_in.camera_counter), double(regular_fov_)));
+			shoot(p_in, "tank_1p");
+			mapper.script_hold(InputMapper::WeaponAction::Ads, true);
+			enter(Phase::Zoom);
+			return false;
+		case Phase::Zoom: {
+			if (t_ < kZoomSettle) {
+				return false;
+			}
+			const std::optional<float> want = first_person_zoom(lv.kinds[lv.spawners[spawner_].kind], 0);
+			const float fov = float(p_in.camera->get_fov());
+			row("zoom",
+					seat.has_value() && want && std::fabs(fov - *want) < 0.01f &&
+							std::fabs(regular_fov_ - *want) > 1.0f,
+					fmt("camera FOV %.2f deg %.1f s into the held zoom key, the seat camera's AlternateView %s deg, "
+						"regular %.2f deg",
+							double(fov), kZoomSettle, want ? fmt("%.2f", double(*want)).c_str() : "-",
+							double(regular_fov_)));
+			shoot(p_in, "vehicle_zoom");
+			mapper.script_hold(InputMapper::WeaponAction::Ads, false);
+			enter(Phase::Unzoom);
+			return false;
+		}
+		case Phase::Unzoom: {
+			if (t_ < kZoomSettle) {
+				return false;
+			}
+			const float fov = float(p_in.camera->get_fov());
+			row("unzoom", seat.has_value() && std::fabs(fov - regular_fov_) < 0.01f,
+					fmt("camera FOV %.2f deg %.1f s after the zoom key's release, regular %.2f deg", double(fov),
+							kZoomSettle, double(regular_fov_)));
 			phase_ = Phase::Done;
 			return true;
 		}

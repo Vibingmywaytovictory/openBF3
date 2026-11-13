@@ -1224,7 +1224,7 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
         godot.deploy.optic.m145 PROPERTIES RUN_SERIAL TRUE)
     openbf3_godot_row(godot.crosshair_walk godot_crosshair_walk.cmake WINDOW TIMEOUT 120)
     openbf3_godot_row(godot.gadgets_draw godot_gadgets_draw.cmake WINDOW TIMEOUT 120)
-    openbf3_godot_row(godot.vehicle_drive godot_vehicle_drive.cmake WINDOW TIMEOUT 180)
+    openbf3_godot_row(godot.vehicle_drive godot_vehicle_drive.cmake WINDOW TIMEOUT 180 ARGS -DZOOM=1)
     openbf3_godot_row(godot.vehicle_drive.lag godot_vehicle_drive.cmake WINDOW TIMEOUT 180 ARGS -DNETSIM=lat=50)
     openbf3_godot_row(godot.vehicle_drive.audio godot_vehicle_drive.cmake WINDOW TIMEOUT 180 ARGS -DAUDIO=1)
     set_tests_properties(godot.gadgets_draw godot.vehicle_drive godot.vehicle_drive.lag godot.vehicle_drive.audio PROPERTIES RUN_SERIAL TRUE)

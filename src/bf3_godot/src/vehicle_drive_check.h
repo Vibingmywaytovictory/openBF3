@@ -32,7 +32,7 @@ struct VehicleDriveInputs {
 
 class VehicleDriveRun {
 public:
-	explicit VehicleDriveRun(std::string p_shots) : shots_(std::move(p_shots)) {}
+	VehicleDriveRun(std::string p_shots, bool p_zoom) : shots_(std::move(p_shots)), zoom_(p_zoom) {}
 	bool step(Bf3LevelSession &r_session, const VehicleDriveInputs &p_in, double p_delta);
 	int exit_code() const { return failures_ == 0 && rows_ > 0 ? 0 : 1; }
 
@@ -49,6 +49,11 @@ private:
 		Stop,
 		Seat,
 		Exit,
+		TankPick,
+		TankWalk,
+		TankEnter,
+		Zoom,
+		Unzoom,
 		Done
 	};
 
@@ -59,6 +64,8 @@ private:
 	void hud_row(const VehicleDriveInputs &p_in, uint8_t p_seat);
 
 	std::string shots_;
+	bool zoom_ = false;
+	float regular_fov_ = 0.0f;
 	Phase phase_ = Phase::WaitScreen;
 	double t_ = 0.0;
 	double next_press_ = 0.0;
