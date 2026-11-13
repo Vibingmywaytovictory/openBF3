@@ -298,6 +298,11 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 		return make_error("vehicle " + name + ": disabled input: " + disabled.error().message);
 	}
 	out.disabled_input = std::move(*disabled);
+	Result<VehicleDamageVisualsDef> visuals = read_vehicle_damage_visuals(p_db, blueprint, *entity, budget);
+	if (!visuals) {
+		return make_error("vehicle " + name + ": damage visuals: " + visuals.error().message);
+	}
+	out.damage_visuals = std::move(*visuals);
 	if (const std::optional<EbxInstance> x = p_db.follow(e, "Explosion");
 			x && x->is_a("ExplosionEntityData") && budget.take_type(x->data())) {
 		Fields fields(p_db);

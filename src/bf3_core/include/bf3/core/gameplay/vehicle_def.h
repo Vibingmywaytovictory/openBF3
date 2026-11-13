@@ -2,6 +2,7 @@
 
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/soldier_camera.h"
+#include "bf3/core/gameplay/vehicle_damage_visuals.h"
 #include "bf3/core/gameplay/weapon_def.h"
 #include "bf3/core/gameplay/work_budget.h"
 #include "bf3/core/math.h"
@@ -150,6 +151,7 @@ struct VehicleDef {
 	Explosion explosion;
 	std::string explosion_effect;
 	std::vector<VehicleInputModifierDef> disabled_input;
+	VehicleDamageVisualsDef damage_visuals;
 
 	std::vector<VehicleSeatDef> seats;
 	std::vector<core::Transform> exit_points;

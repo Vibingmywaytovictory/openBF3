@@ -7,6 +7,7 @@
 #include "bf3/audio/impact_audio.h"
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/material_grid.h"
+#include "bf3/core/gameplay/vehicle_def.h"
 #include "bf3/core/gameplay/weapon_blob.h"
 #include "bf3/core/gameplay/weapon_catalog.h"
 #include "bf3/core/install.h"
@@ -1962,6 +1963,120 @@ TEST_CASE("install unchanged") {
 	CHECK_MESSAGE(diff.clean(), diff.summary());
 }
 
+}
+
+TEST_SUITE("fx-install-vehicles") {
+	TEST_CASE(
+			"vehicles: every vehicle's damage-state, wreck and explosion effects compile; the M1A2's health thresholds "
+			"and its wreck") {
+		Retail r;
+		if (!open_retail(r)) {
+			return;
+		}
+		for (const std::string level : { "MP_007", "MP_001", "MP_017", "MP_012", "MP_018", "MP_013" }) {
+			std::unique_ptr<LevelFx> fx = level_fx(r.install, level, true);
+			core::EbxLibrary &lib = *fx->sources->level;
+			std::vector<std::string> blueprints;
+			for (const core::EbxLibrary::Entry &e : lib.entries()) {
+				if (e.partition != nullptr && e.partition->primary().type_name() == "VehicleBlueprint") {
+					blueprints.emplace_back(e.name);
+				}
+			}
+			std::sort(blueprints.begin(), blueprints.end());
+			REQUIRE_FALSE(blueprints.empty());
+			size_t with_damage = 0, with_wreck = 0, compiled = 0;
+			for (const std::string &b : blueprints) {
+				core::Result<core::gameplay::VehicleDef> def = core::gameplay::read_vehicle_def(lib, b);
+				REQUIRE_MESSAGE(def.ok(), (def.ok() ? std::string() : def.error().message));
+				const core::gameplay::VehicleDamageVisualsDef &v = def->damage_visuals;
+				std::vector<std::string> names;
+				std::string row;
+				for (const core::gameplay::VehicleDamageEffectDef &d : v.damage) {
+					names.push_back(d.effect);
+					row += " " + leaf(d.effect) + "@" + std::to_string(d.threshold).substr(0, 4);
+				}
+				if (v.wreck) {
+					for (const core::gameplay::VehicleWreckEffectDef &w : v.wreck->effects) {
+						names.push_back(w.effect);
+					}
+					CHECK(lib.partition_by_name(v.wreck->mesh) != nullptr);
+					row += "; wreck " + leaf(v.wreck->blueprint) + " " + std::to_string(v.wreck->effects.size()) +
+							" effects, " + std::to_string(v.wreck->gates.size()) + " gates, " +
+							std::to_string(int(v.wreck->time_to_live)) + " s";
+				}
+				if (!def->explosion_effect.empty()) {
+					names.push_back(def->explosion_effect);
+				}
+				for (const std::string &n : names) {
+					core::Result<std::shared_ptr<const EffectDef>> e = fx->library->get(n);
+					CHECK_MESSAGE(e.ok(), (n + ": " + (e.ok() ? std::string() : e.error().message)));
+					compiled += e.ok() ? 1 : 0;
+				}
+				with_damage += v.damage.empty() ? 0 : 1;
+				with_wreck += v.wreck ? 1 : 0;
+				MESSAGE(level << " " << b << ":" << row << " (" << v.unresolved << " unresolved)");
+			}
+			MESSAGE(level << ": " << blueprints.size() << " vehicles, " << with_damage << " with damage effects, "
+						  << with_wreck << " with a wreck, " << compiled << " effects compiled");
+			CHECK(with_damage > 0);
+			CHECK(with_wreck > 0);
+			if (level != "MP_007") {
+				continue;
+			}
+			core::Result<core::gameplay::VehicleDef> m1 =
+					core::gameplay::read_vehicle_def(lib, "vehicles/m1a2/m1abrams");
+			REQUIRE(m1.ok());
+			const core::gameplay::VehicleDamageVisualsDef &v = m1->damage_visuals;
+			REQUIRE(v.damage.size() == 3);
+			std::vector<std::pair<std::string, float>> damage;
+			for (const core::gameplay::VehicleDamageEffectDef &d : v.damage) {
+				CHECK(d.compare == core::gameplay::HealthCompare::LessOrEqual);
+				damage.emplace_back(leaf(d.effect), d.threshold);
+			}
+			std::sort(damage.begin(), damage.end());
+			CHECK(damage[0].first == "fx_healthcritical_tank");
+			CHECK(damage[0].second == doctest::Approx(0.25));
+			CHECK(damage[1].first == "fx_healthdisabled_tank");
+			CHECK(damage[1].second == doctest::Approx(0.5));
+			CHECK(damage[2].first == "fx_healthhigh_tank");
+			CHECK(damage[2].second == doctest::Approx(0.85));
+			CHECK(v.unresolved == 0);
+			core::Result<core::gameplay::VehicleDef> bmp = core::gameplay::read_vehicle_def(lib, "vehicles/bmp2/bmp2");
+			REQUIRE(bmp.ok());
+			bool own_threshold = false;
+			for (const core::gameplay::VehicleDamageEffectDef &d : bmp->damage_visuals.damage) {
+				own_threshold = own_threshold ||
+						(leaf(d.effect) == "fx_healthdisabled_tank" && d.threshold == doctest::Approx(0.6));
+			}
+			CHECK(own_threshold);
+			REQUIRE(v.wreck.has_value());
+			CHECK(v.wreck->blueprint == "vehicles/m1a2/m1a2wreck");
+			CHECK(v.wreck->mesh == "vehicles/m1a2/m1a2wreck_mesh");
+			CHECK(v.wreck->time_to_live == doctest::Approx(60));
+			CHECK(v.wreck->effects.size() == 14);
+			REQUIRE(v.wreck->gates.size() == 3);
+			CHECK(v.wreck->gates[0].parent == -1);
+			CHECK(v.wreck->gates[1].parent == 0);
+			CHECK(v.wreck->gates[2].parent == 0);
+			CHECK(v.wreck->gates[1].on_success != v.wreck->gates[2].on_success);
+			for (const core::gameplay::VehicleWreckGateDef &g : v.wreck->gates) {
+				CHECK(g.probability == doctest::Approx(50));
+			}
+			const size_t always = size_t(std::count_if(v.wreck->effects.begin(), v.wreck->effects.end(),
+					[](const core::gameplay::VehicleWreckEffectDef &p_e) { return p_e.gate < 0; }));
+			CHECK(always == 2);
+		}
+	}
+
+	TEST_CASE("install unchanged") {
+		Retail r;
+		if (!open_retail(r)) {
+			return;
+		}
+		REQUIRE(g_before.has_value());
+		const core::SnapshotDiff diff = core::diff_snapshots(*g_before, r.reader.snapshot());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+	}
 }
 
 TEST_SUITE("fx-triggers-unit") {

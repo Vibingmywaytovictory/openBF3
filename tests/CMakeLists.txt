@@ -983,6 +983,8 @@ openbf3_test(test_fx_triggers test_main.cpp fx_triggers_tests.cpp fx_test_suppor
 target_link_libraries(test_fx_triggers PRIVATE bf3_fx bf3_audio bf3_host bf3_render bf3_sim_harness)
 add_test(NAME fx.triggers.unit COMMAND test_fx_triggers --test-suite=fx-triggers-unit)
 add_test(NAME fx.install.cells COMMAND test_fx_triggers --test-suite=fx-install-cells)
+add_test(NAME fx.install.vehicles COMMAND test_fx_triggers --test-suite=fx-install-vehicles)
+set_tests_properties(fx.install.vehicles PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 set_tests_properties(fx.install.cells PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 openbf3_cost(fx.install.cells 1 8)
 
