@@ -115,6 +115,7 @@ public:
 	explicit Emitter(ConstantNames p_names) : names_(p_names) {}
 
 	std::optional<uint32_t> depth_register;
+	std::set<uint32_t> cubes;
 	std::set<uint32_t> inputs;
 	std::set<uint32_t> textures;
 	std::map<uint32_t, uint32_t> buffers;
@@ -218,14 +219,15 @@ public:
 			} else {
 				textures.insert(res.index[0]);
 			}
+			const std::string at = cubes.count(res.index[0]) != 0 ? ").xyz" : ").xy";
 			if (p_ins.is(Op::Sample) && need(3)) {
-				value = "texture(" + tex + ", (" + src[0] + ").xy)" + swizzle;
+				value = "texture(" + tex + ", (" + src[0] + at + ")" + swizzle;
 			} else if (p_ins.is(Op::SampleL) && need(4)) {
-				value = "textureLod(" + tex + ", (" + src[0] + ").xy, (" + src[3] + ").x)" + swizzle;
+				value = "textureLod(" + tex + ", (" + src[0] + at + ", (" + src[3] + ").x)" + swizzle;
 			} else if (p_ins.is(Op::SampleB) && need(4)) {
-				value = "texture(" + tex + ", (" + src[0] + ").xy, (" + src[3] + ").x)" + swizzle;
+				value = "texture(" + tex + ", (" + src[0] + at + ", (" + src[3] + ").x)" + swizzle;
 			} else if (p_ins.is(Op::SampleD) && need(5)) {
-				value = "textureGrad(" + tex + ", (" + src[0] + ").xy, (" + src[3] + ").xy, (" + src[4] + ").xy)" +
+				value = "textureGrad(" + tex + ", (" + src[0] + at + ", (" + src[3] + at + ", (" + src[4] + at + ")" +
 						swizzle;
 			}
 		} else if (p_ins.is(Op::Ieq) && need(2)) {
@@ -375,7 +377,7 @@ struct Read {
 	uint8_t lane = 0;
 };
 
-std::vector<Read> reads_for(const Instruction &p_ins, uint8_t p_dest_lane) {
+std::vector<Read> reads_for(const Instruction &p_ins, uint8_t p_dest_lane, uint8_t p_coordinate_lanes = 2) {
 	std::vector<Read> out;
 	const uint8_t dot = dot_width(p_ins.opcode);
 	if (componentwise(p_ins.opcode)) {
@@ -389,12 +391,14 @@ std::vector<Read> reads_for(const Instruction &p_ins, uint8_t p_dest_lane) {
 			}
 		}
 	} else if (sampling(p_ins.opcode)) {
-		out.push_back({ 1, p_ins.operands[1].lane(0) });
-		out.push_back({ 1, p_ins.operands[1].lane(1) });
+		for (uint8_t l = 0; l < p_coordinate_lanes; ++l) {
+			out.push_back({ 1, p_ins.operands[1].lane(l) });
+		}
 		if (p_ins.is(Op::SampleD)) {
 			for (size_t s = 4; s < p_ins.operands.size(); ++s) {
-				out.push_back({ s, p_ins.operands[s].lane(0) });
-				out.push_back({ s, p_ins.operands[s].lane(1) });
+				for (uint8_t l = 0; l < p_coordinate_lanes; ++l) {
+					out.push_back({ s, p_ins.operands[s].lane(l) });
+				}
 			}
 		} else if (p_ins.operands.size() > 4) {
 			out.push_back({ 4, p_ins.operands[4].lane(0) });
@@ -1010,7 +1014,13 @@ bool colour_channel(uint32_t p_format) {
 
 class Translator {
 public:
-	explicit Translator(const ProgramRequest &p_request) : request_(p_request), ps_(*p_request.pixel) {}
+	explicit Translator(const ProgramRequest &p_request) : request_(p_request), ps_(*p_request.pixel) {
+		for (const dxbc::Binding &b : ps_.bindings) {
+			if (b.type == uint32_t(dxbc::BindingType::Texture) && b.dimension == dxbc::kDimensionTextureCube) {
+				emitter_.cubes.insert(b.bind_point);
+			}
+		}
+	}
 
 	core::Result<TranslatedProgram> run() {
 		const core::Status sliced = slice();
@@ -1034,9 +1044,14 @@ public:
 		std::string head;
 		for (uint32_t reg : textures_) {
 			const bool srgb = request_.srgb && request_.srgb(reg);
-			head += "uniform sampler2D t" + std::to_string(reg) + (srgb ? " : source_color," : " :") +
-					" filter_linear_mipmap_anisotropic, repeat_enable;\n";
+			const bool cube = emitter_.cubes.count(reg) != 0;
+			head += std::string(cube ? "uniform samplerCube t" : "uniform sampler2D t") + std::to_string(reg) +
+					(srgb ? " : source_color," : " :") +
+					(cube ? " filter_linear_mipmap;\n" : " filter_linear_mipmap_anisotropic, repeat_enable;\n");
 			out_.textures.push_back(reg);
+			if (cube) {
+				out_.cubes.push_back(reg);
+			}
 		}
 		if (depth_) {
 			head += "uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;\n";
@@ -1157,7 +1172,7 @@ private:
 				continue;
 			}
 			for (uint8_t c : written) {
-				for (const Read &r : reads_for(ins, c)) {
+				for (const Read &r : reads_for(ins, c, coordinate_lanes(ins))) {
 					note_read(ins.operands[r.operand], r.lane, live);
 				}
 			}
@@ -1173,6 +1188,13 @@ private:
 			}
 		}
 		return pending_.empty() ? core::Status::success() : core::Status(refuse(pending_));
+	}
+
+	uint8_t coordinate_lanes(const Instruction &p_ins) const {
+		return sampling(p_ins.opcode) && p_ins.operands.size() > 2 && p_ins.operands[2].is(OperandType::Resource) &&
+						emitter_.cubes.count(p_ins.operands[2].index[0]) != 0
+				? 3
+				: 2;
 	}
 
 	void defer(const std::string &p_why) {
@@ -1271,7 +1293,7 @@ private:
 				continue;
 			}
 			if (sampling(ins.opcode) && request_.texture_usage && ins.operands.size() > 2 &&
-					ins.operands[2].is(OperandType::Resource)) {
+					ins.operands[2].is(OperandType::Resource) && coordinate_lanes(ins) == 2) {
 				const uint32_t usage = request_.texture_usage(ins.operands[2].index[0]);
 				for (uint8_t l = 0; l < 2; ++l) {
 					for (uint64_t input : lane_deps(ins.operands[1], ins.operands[1].lane(l))) {
@@ -1290,7 +1312,7 @@ private:
 					continue;
 				}
 				std::set<uint64_t> merged;
-				for (const Read &r : reads_for(ins, c)) {
+				for (const Read &r : reads_for(ins, c, coordinate_lanes(ins))) {
 					const std::set<uint64_t> from = lane_deps(ins.operands[r.operand], r.lane);
 					merged.insert(from.begin(), from.end());
 				}

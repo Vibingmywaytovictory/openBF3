@@ -402,6 +402,11 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 					}
 				}
 				std::printf("\n");
+				if (sol.pixel_constants) {
+					for (const auto &[slot, texture] : sol.pixel_constants->textures) {
+						std::printf("  ps texture slot %u %s\n", slot, texture.c_str());
+					}
+				}
 				const std::pair<const char *, const std::vector<uint8_t> *> programs[] = {
 					{ "vs", &sol.vertex_program->bytes }, { "ps", sol.pixel_program.get() }
 				};

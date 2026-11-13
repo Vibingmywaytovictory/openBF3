@@ -301,6 +301,7 @@ struct LookResolver::ProgramInfo {
 	std::map<uint32_t, ProgramBinding> bindings;
 	std::vector<ShaderValue> defaults;
 	std::vector<uint32_t> used;
+	std::vector<uint32_t> cubes;
 	std::map<uint64_t, std::shared_ptr<const GraphProgram>> variants;
 	ProgramAnalysis analysis;
 	std::vector<ProgramBinding> mask_bindings;
@@ -641,8 +642,8 @@ LookResolver::ProgramInfo &LookResolver::program_info(const SurfaceShader &p_sha
 		info->bindings.clear();
 		info->defaults.clear();
 		if (s.pixel_constants) {
-			for (const auto &[reg, name] : s.pixel_constants->textures) {
-				info->bindings[reg] = ProgramBinding{ to_lower_ascii(name), std::string() };
+			for (const auto &[slot, name] : s.pixel_constants->textures) {
+				info->bindings[slot & kTextureSlotRegister] = ProgramBinding{ to_lower_ascii(name), std::string() };
 			}
 			info->defaults = s.pixel_constants->values;
 		}
@@ -680,6 +681,7 @@ LookResolver::ProgramInfo &LookResolver::program_info(const SurfaceShader &p_sha
 		return finish();
 	}
 	info->used = probe->textures;
+	info->cubes = probe->cubes;
 	info->variants.emplace(0, std::make_shared<GraphProgram>(GraphProgram{ std::move(*probe) }));
 	return finish();
 }
@@ -747,9 +749,10 @@ void LookResolver::attach_program(
 		const ProgramBinding &b = info.bindings.at(info.used[i]);
 		const std::string name = b.parameter.empty() ? b.name : to_lower_ascii(p_slot.texture(b.parameter));
 		const HeaderInfo *h = name.empty() ? nullptr : header(name);
-		if (h == nullptr || h->kind != core::res::TextureKind::Texture2D) {
-			r_out.graph_refusal =
-					"texture " + (b.parameter.empty() ? name : b.parameter + " " + name) + " is not a 2D texture";
+		const bool cube = std::find(info.cubes.begin(), info.cubes.end(), info.used[i]) != info.cubes.end();
+		if (h == nullptr || h->kind != (cube ? core::res::TextureKind::Cube : core::res::TextureKind::Texture2D)) {
+			r_out.graph_refusal = "texture " + (b.parameter.empty() ? name : b.parameter + " " + name) + " is not a " +
+					(cube ? "cube" : "2D") + " texture";
 			return;
 		}
 		srgb |= h->srgb ? uint64_t(1) << i : 0;

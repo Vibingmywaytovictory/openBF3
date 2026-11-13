@@ -34,6 +34,7 @@ inline bool is_transparent(SurfaceShaderType p_type) {
 }
 
 inline constexpr uint32_t kCoordWorld = 2;
+inline constexpr uint32_t kTextureSlotRegister = 0xFF;
 inline constexpr uint32_t kUsageTexCoord0 = 33;
 inline constexpr uint32_t kUsageTexCoord1 = 34;
 inline constexpr uint32_t kUsageTexCoord2 = 35;

@@ -473,18 +473,33 @@ void LevelUpload::run_task() {
 		done.index = item.index;
 		if (item.kind == Kind::Texture) {
 			const render::PreparedTexture &t = *item.texture;
-			PackedByteArray bytes;
-			bytes.resize(int64_t(t.data.size()));
-			std::memcpy(bytes.ptrw(), t.data.data(), t.data.size());
 			const int32_t width = int32_t(t.width), height = int32_t(t.height);
 			const bool mipmaps = t.levels > 1;
 			const Image::Format format = image_format(t.format);
 			const std::string name = t.name;
+			const uint32_t faces = std::max(t.faces, 1u);
+			const size_t face_bytes = t.data.size() / faces;
+			TypedArray<Ref<Image>> images;
+			Ref<Image> first;
+			for (uint32_t f = 0; f < faces; ++f) {
+				PackedByteArray bytes;
+				bytes.resize(int64_t(face_bytes));
+				std::memcpy(bytes.ptrw(), t.data.data() + f * face_bytes, face_bytes);
+				const Ref<Image> image = Image::create_from_data(width, height, mipmaps, format, bytes);
+				if (image.is_valid() && !image->is_empty()) {
+					images.push_back(image);
+					first = f == 0 ? image : first;
+				}
+			}
+			const uint64_t total = uint64_t(t.data.size());
 			item.texture.reset();
-			const Ref<Image> image = Image::create_from_data(width, height, mipmaps, format, bytes);
-			if (image.is_valid() && !image->is_empty()) {
-				done.rid = rs->texture_2d_create(image);
-				ledger_texture("level", name, uint64_t(bytes.size()));
+			if (faces == 1 && first.is_valid()) {
+				done.rid = rs->texture_2d_create(first);
+			} else if (faces == render::kCubeFaces && images.size() == int64_t(faces)) {
+				done.rid = rs->texture_2d_layered_create(images, RenderingServer::TEXTURE_LAYERED_CUBEMAP);
+			}
+			if (done.rid.is_valid()) {
+				ledger_texture("level", name, total);
 				++local.textures;
 			}
 		} else {

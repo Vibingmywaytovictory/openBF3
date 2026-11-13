@@ -76,6 +76,7 @@ struct ProgramRequest {
 struct TranslatedProgram {
 	std::string code;
 	std::vector<uint32_t> textures;
+	std::vector<uint32_t> cubes;
 	std::vector<ProgramConstant> constants;
 	size_t instructions = 0;
 };

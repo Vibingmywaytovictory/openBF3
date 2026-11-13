@@ -6,16 +6,19 @@
 #include "bf3/core/level/census.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
+#include "bf3/core/res/res_loader.h"
 #include "bf3/core/thread_pool.h"
 #include "bf3/core/util/text.h"
 #include "bf3/render/dxbc.h"
 #include "bf3/render/level_scene.h"
 #include "bf3/render/shader_database.h"
 #include "bf3/render/shader_translate.h"
+#include "bf3/render/texture_prep.h"
 #include "dxbc_test_support.h"
 #include "test_support.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <iterator>
@@ -87,6 +90,20 @@ std::vector<uint8_t> world_pixel_program(uint32_t p_target = 1, uint32_t p_mask 
 									  { dst(kTemp, 0, p_mask), src(kInput, 1, swz(0, 2, 0, 0)), src(kResource, 1),
 											  sampler(0) }),
 									ins(75, { dst(kOutput, p_target, p_mask), src(kTemp, 0) }) }) } });
+}
+
+std::vector<uint8_t> cube_pixel_program() {
+	return container({ { "RDEF", rdef({ { "texture_Texture4", 2, 1, dxbc::kDimensionTextureCube } }, nullptr, {}) },
+			{ "ISGN", signature({ { "SV_Position", 0, 1, 0, 0xF }, { "TEXCOORD", 0, 0, 1, 0xF } }) },
+			{ "OSGN", signature({ { "SV_Target", 0, 0, 0, 0xF } }) },
+			{ "SHDR",
+					code_chunk(0, 2,
+							{ ins(54, { dst(kTemp, 1, 0x3), src(kInput, 1) }),
+									ins(54, { dst(kTemp, 1, 0x4), src(kInput, 1, swz(2, 2, 2, 2)) }),
+									ins(69,
+											{ dst(kTemp, 0, 0xF), src(kTemp, 1, swz(0, 1, 2, 0)), src(kResource, 1),
+													sampler(0) }),
+									ins(54, { dst(kOutput, 0, 0xF), src(kTemp, 0) }) }) } });
 }
 
 std::vector<uint8_t> world_vertex_program() {
@@ -331,6 +348,39 @@ TEST_SUITE("render-programs-unit") {
 		CHECK(refused.error().message.find("vertex input v0.x reads usage 0") != std::string::npos);
 	}
 
+	TEST_CASE("render.programs.unit: a sample of a cube resource reads a samplerCube with three coordinate lanes") {
+		const std::vector<uint8_t> ps_blob = cube_pixel_program(), vs_blob = world_vertex_program();
+		bf3::core::Result<dxbc::Program> ps = dxbc::parse(ps_blob);
+		bf3::core::Result<dxbc::Program> vs = dxbc::parse(vs_blob);
+		REQUIRE(ps.ok());
+		REQUIRE(vs.ok());
+		const dxbc::Binding *cube = ps->binding(dxbc::BindingType::Texture, 1);
+		REQUIRE(cube != nullptr);
+		CHECK(cube->dimension == dxbc::kDimensionTextureCube);
+		const std::vector<uint32_t> formats = { 10 };
+		const std::vector<VertexInputLanes> lanes = { { { { 1, 0 }, { 1, 1 }, { 1, 2 }, { 9, 0 } } } };
+		const std::vector<uint32_t> bound = { 1 };
+		ProgramRequest request;
+		request.pixel = &*ps;
+		request.vertex = &*vs;
+		request.vertex_formats = formats;
+		request.vertex_lanes = lanes;
+		request.bound_textures = bound;
+		request.target = ProgramTarget::Forward;
+		request.srgb = [](uint32_t) { return true; };
+		bf3::core::Result<TranslatedProgram> t = translate_program(request);
+		REQUIRE_MESSAGE(t.ok(), (t.ok() ? std::string() : t.error().message));
+		CHECK(t->textures == std::vector<uint32_t>{ 1 });
+		CHECK(t->cubes == std::vector<uint32_t>{ 1 });
+		const std::string &code = t->code;
+		CHECK(code.find("uniform samplerCube t1 : source_color, filter_linear_mipmap;") != std::string::npos);
+		CHECK(code.find("r0.xyzw = (texture(t1, (r1.xyzx).xyz).xyzw).xyzw;") != std::string::npos);
+		CHECK(code.find("r1.z = ((v1.zzzz)).z;") != std::string::npos);
+		CHECK(code.find("r1.xy = ((v1.xyzw)).xy;") != std::string::npos);
+		CHECK(code.find("vec4 v1 = vec4(vso1.x, vso1.y, vso1.z, 0.0);") != std::string::npos);
+		CHECK(code.find("sampler2D") == std::string::npos);
+	}
+
 	TEST_CASE("render.programs.unit: instance vectors are the world rows, and a part's shown branch is the vertex "
 			  "stage") {
 		const std::vector<uint8_t> ps_blob = world_pixel_program(), vs_blob = instanced_vertex_program();
@@ -450,12 +500,14 @@ constexpr const char *kCensusLevels[] = { "MP_001", "MP_003", "MP_007", "MP_011"
 	"XP2_Skybar", "XP3_Alborz", "XP3_Desert", "XP3_Shield", "XP3_Valley", "XP4_FD", "XP4_Parl", "XP4_Quake",
 	"XP4_Rubble", "XP5_001", "XP5_002", "XP5_003", "XP5_004" };
 constexpr const char *kCensusMode = "TeamDeathMatchC0";
+constexpr const char *kPalaceEnvmap = "levels/xp2_palace/lighting/palaceenvmap_01";
+constexpr float kEnvmapBrightShare = 0.95f;
+constexpr float kEnvmapSunDegrees = 15.0f;
 constexpr unsigned kCensusLanes = 4;
 constexpr std::string_view kMaskColourLedger[] = {
 	"architecture/shaders/facadepresetinterior_destrvolume_colorcontrol",
 	"levels/xp5_001/objects/forestledge_01_top_alpha_normalfix",
 	"levels/xp5_002/architecture/warehouse_02_xp5_002/ss_warehouse_02_destrvolume_xp5_002",
-	"xp2/objects/skybarsigns/signs_shader",
 };
 constexpr std::pair<const char *, std::string_view> kDrawnThroughPrograms[] = {
 	{ "MP_018", "levels/mp_018/objects/rock01cluster_mp_018_shader" },
@@ -467,6 +519,7 @@ constexpr std::pair<const char *, std::string_view> kDrawnThroughPrograms[] = {
 	{ "XP3_Alborz", "levels/mp_whitepeak/objects/rock_01_wall_snow" },
 	{ "XP3_Alborz", "levels/mp_whitepeak/objects/rock_01_wall_snow_lod" },
 	{ "XP3_Desert", "levels/xp3_desert/objects/ss_backdropocean_fade" },
+	{ "XP2_Skybar", "xp2/objects/skybarsigns/signs_shader" },
 };
 constexpr std::string_view kHiddenLedger[] = {
 	"levels/mp_007/props/m_mp007_waterwash_01",
@@ -560,6 +613,92 @@ LevelCensus level_census(const std::shared_ptr<bf3::core::Install> &p_install, c
 }
 
 TEST_SUITE("render-programs") {
+	TEST_CASE(
+			"render.programs: XP2_Palace's static envmap uploads as a six-face cube whose +Y face is the sky and whose "
+			"brightest texels lie along the light's azimuth") {
+		bf3::core::InstallReader reader;
+		if (!reader.locate({})) {
+			bf3::test::skip_install_case(reader.describe().c_str());
+			return;
+		}
+		const bf3::core::InstallSnapshot before = reader.snapshot();
+		bf3::core::Result<std::shared_ptr<bf3::core::Install>> install = bf3::core::Install::open(reader);
+		REQUIRE(install.ok());
+		bf3::core::Result<std::unique_ptr<bf3::core::level::LoadedLevel>> level =
+				bf3::core::level::load_level(*install, "XP2_Palace", kCensusMode);
+		REQUIRE_MESSAGE(level.ok(), (level.ok() ? std::string() : level.error().message));
+		bf3::core::Result<std::unique_ptr<bf3::core::level::World>> world = bf3::core::level::World::traverse(**level);
+		REQUIRE(world.ok());
+		bf3::core::Result<LookEnvironment> env = read_look_environment((*level)->db(), **world);
+		REQUIRE(env.ok());
+		const bf3::core::Vec3 sun = look_frame_of(env->base).sun_direction;
+		bf3::core::Result<bf3::core::res::LoadedTexture> cube =
+				bf3::core::res::load_texture((*level)->mount(), kPalaceEnvmap);
+		REQUIRE(cube.ok());
+		CHECK(cube->texture.kind == bf3::core::res::TextureKind::Cube);
+		bf3::core::Result<PreparedTexture> prepared = prepare_cube_texture(*cube, TextureRole::Data);
+		REQUIRE_MESSAGE(prepared.ok(), (prepared.ok() ? std::string() : prepared.error().message));
+		CHECK(prepared->faces == kCubeFaces);
+		uint64_t face_bytes = 0;
+		for (uint32_t i = 0, w = prepared->width, h = prepared->height; i < prepared->levels; ++i) {
+			face_bytes += level_bytes(prepared->format, w, h);
+			w = std::max(1u, w >> 1);
+			h = std::max(1u, h >> 1);
+		}
+		CHECK(prepared->data.size() == face_bytes * kCubeFaces);
+		CHECK(!prepare_texture(*cube, TextureRole::Data).ok());
+		std::vector<bf3::core::res::MipSlice> mips;
+		REQUIRE(cube->mips(mips).ok());
+		std::array<double, kCubeFaces> mean{};
+		std::vector<std::pair<float, bf3::core::Vec3>> lit;
+		for (const bf3::core::res::MipSlice &m : mips) {
+			std::vector<std::array<float, 4>> texels;
+			if (m.mip != 0 || m.face >= kCubeFaces || !m.texels(cube->texture.format, texels)) {
+				continue;
+			}
+			for (uint32_t y = 0; y < m.height; ++y) {
+				for (uint32_t x = 0; x < m.width; ++x) {
+					const std::array<float, 4> &t = texels[size_t(y) * m.width + x];
+					const float luma = t[0] + t[1] + t[2];
+					mean[m.face] += luma / double(m.width * m.height);
+					const float u = 2.0f * (float(x) + 0.5f) / float(m.width) - 1.0f;
+					const float v = 2.0f * (float(y) + 0.5f) / float(m.height) - 1.0f;
+					const std::array<bf3::core::Vec3, kCubeFaces> faces{ bf3::core::Vec3{ 1.0f, -v, -u },
+						bf3::core::Vec3{ -1.0f, -v, u }, bf3::core::Vec3{ u, 1.0f, v }, bf3::core::Vec3{ u, -1.0f, -v },
+						bf3::core::Vec3{ u, -v, 1.0f }, bf3::core::Vec3{ -u, -v, -1.0f } };
+					lit.emplace_back(luma, bf3::core::vec::normalize(faces[m.face]));
+				}
+			}
+		}
+		float brightest = 0.0f;
+		for (const auto &[luma, d] : lit) {
+			brightest = std::max(brightest, luma);
+		}
+		bf3::core::Vec3 toward{};
+		size_t brightest_texels = 0;
+		for (const auto &[luma, d] : lit) {
+			if (luma >= kEnvmapBrightShare * brightest) {
+				toward = bf3::core::vec::add(toward, d);
+				++brightest_texels;
+			}
+		}
+		toward = bf3::core::vec::normalize(toward);
+		const float cosine = bf3::core::vec::dot(bf3::core::vec::normalize({ toward.x, 0.0f, toward.z }),
+				bf3::core::vec::normalize({ sun.x, 0.0f, sun.z }));
+		std::printf("render.programs envmap %s: %ux%u, %u levels, format %s; face means %.3f %.3f %.3f %.3f %.3f %.3f; "
+					"%zu texels within %.2f of the brightest %.3f toward (%.3f, %.3f, %.3f), %.1f deg in azimuth from "
+					"the light direction\n",
+				kPalaceEnvmap, prepared->width, prepared->height, prepared->levels, gpu_format_name(prepared->format),
+				mean[0], mean[1], mean[2], mean[3], mean[4], mean[5], brightest_texels, double(kEnvmapBrightShare),
+				double(brightest), double(toward.x), double(toward.y), double(toward.z),
+				double(std::acos(std::clamp(cosine, -1.0f, 1.0f)) * 180.0f / 3.14159265f));
+		CHECK(mean[2] > mean[3]);
+		CHECK(cosine >= std::cos(kEnvmapSunDegrees * 3.14159265f / 180.0f));
+		const bf3::core::SnapshotDiff diff = bf3::core::diff_snapshots(before, reader.snapshot());
+		std::printf("install.unchanged %s\n", diff.clean() ? "PASS" : diff.summary().c_str());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+	}
+
 	TEST_CASE("render.programs: no level draws a material's mask as its colour or hides a mask graph outside the "
 			  "ledger of "
 			  "programs the translator refuses") {

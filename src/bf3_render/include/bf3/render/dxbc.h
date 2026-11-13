@@ -137,6 +137,8 @@ struct Binding {
 	uint32_t bind_point = 0;
 };
 
+inline constexpr uint32_t kDimensionTextureCube = 9;
+
 inline constexpr uint16_t kPixelProgram = 0;
 inline constexpr uint16_t kVertexProgram = 1;
 inline constexpr size_t kMaxInstructions = 4096;

@@ -42,6 +42,7 @@ struct PreparedTexture {
 	uint32_t height = 0;
 	uint32_t levels = 0;
 	uint32_t stored_levels = 0;
+	uint32_t faces = 1;
 	bool srgb = false;
 	TextureRole role = TextureRole::Color;
 	core::res::TextureFormat source_format = core::res::TextureFormat::Dxt1;
@@ -53,6 +54,10 @@ uint32_t godot_mip_levels(GpuFormat p_format, uint32_t p_width, uint32_t p_heigh
 uint64_t level_bytes(GpuFormat p_format, uint32_t p_width, uint32_t p_height);
 
 core::Result<PreparedTexture> prepare_texture(const core::res::LoadedTexture &p_texture, TextureRole p_role);
+
+inline constexpr uint32_t kCubeFaces = 6;
+
+core::Result<PreparedTexture> prepare_cube_texture(const core::res::LoadedTexture &p_texture, TextureRole p_role);
 
 uint64_t release_texture_data(std::span<PreparedTexture> r_textures);
 

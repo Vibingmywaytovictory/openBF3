@@ -100,6 +100,7 @@ struct BindEntry {
 	const char *name;
 	uint32_t type;
 	uint32_t point;
+	uint32_t dimension = 4;
 };
 
 struct VarEntry {
@@ -132,7 +133,7 @@ inline std::vector<uint8_t> rdef(
 		const size_t at = bindings_at + 32 * i;
 		put_at(out, at, name(p_bindings[i].name));
 		put_at(out, at + 4, p_bindings[i].type);
-		put_at(out, at + 12, 4);
+		put_at(out, at + 12, p_bindings[i].dimension);
 		put_at(out, at + 20, p_bindings[i].point);
 		put_at(out, at + 24, 1);
 	}

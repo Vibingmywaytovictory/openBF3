@@ -1051,7 +1051,8 @@ core::Result<PreparedTexture> prepare_scene_texture(const core::LevelMount &p_mo
 	if (!texture) {
 		return texture.error();
 	}
-	return prepare_texture(*texture, plan.role);
+	return texture->texture.kind == core::res::TextureKind::Cube ? prepare_cube_texture(*texture, plan.role)
+																 : prepare_texture(*texture, plan.role);
 }
 
 core::Result<PreparedTerrain> prepare_scene_terrain(const core::LevelMount &p_mount, const LevelScenePlan &p_plan,

@@ -273,13 +273,12 @@ std::vector<uint8_t> shrink_level(const std::vector<uint8_t> &p_level, GpuFormat
 	return out;
 }
 
-}
-
-core::Result<PreparedTexture> prepare_texture(const LoadedTexture &p_texture, TextureRole p_role) {
+core::Result<PreparedTexture> prepare_faces(const LoadedTexture &p_texture, TextureRole p_role, TextureKind p_kind) {
 	const core::res::DxTexture &tex = p_texture.texture;
 	const std::string where = "texture " + p_texture.res.name;
-	if (tex.kind != TextureKind::Texture2D) {
-		return core::make_error(where + ": not a 2D texture (kind " + std::to_string(int(tex.kind)) + ")");
+	if (tex.kind != p_kind) {
+		return core::make_error(where + ": not a " + (p_kind == TextureKind::Cube ? "cube" : "2D") + " texture (kind " +
+				std::to_string(int(tex.kind)) + ")");
 	}
 	PreparedTexture out;
 	out.name = p_texture.res.name;
@@ -288,6 +287,7 @@ core::Result<PreparedTexture> prepare_texture(const LoadedTexture &p_texture, Te
 	out.role = p_role;
 	out.width = tex.width;
 	out.height = tex.height;
+	out.faces = p_kind == TextureKind::Cube ? kCubeFaces : 1u;
 	GpuFormat stored;
 	if (!source_gpu_format(tex.format, stored)) {
 		return core::make_error(where + ": format " + std::to_string(int(tex.format)) + " is not uploaded");
@@ -303,14 +303,16 @@ core::Result<PreparedTexture> prepare_texture(const LoadedTexture &p_texture, Te
 	if (!e.ok()) {
 		return core::make_error(where + ": " + e.message());
 	}
-	std::vector<std::vector<uint8_t>> levels;
+	std::vector<std::vector<std::vector<uint8_t>>> faces(out.faces);
 	uint32_t w = 0, h = 0;
 	for (const MipSlice &m : mips) {
-		if (m.face != 0) {
+		if (m.face >= out.faces) {
 			continue;
 		}
+		std::vector<std::vector<uint8_t>> &levels = faces[m.face];
 		if (m.mip != levels.size()) {
-			return core::make_error(where + ": face 0 mip " + std::to_string(m.mip) + " out of order");
+			return core::make_error(
+					where + ": face " + std::to_string(m.face) + " mip " + std::to_string(m.mip) + " out of order");
 		}
 		std::vector<uint8_t> bytes;
 		if (inverted) {
@@ -337,42 +339,58 @@ core::Result<PreparedTexture> prepare_texture(const LoadedTexture &p_texture, Te
 			bytes = std::move(bc3);
 		}
 		levels.push_back(std::move(bytes));
-		w = m.width;
-		h = m.height;
+		if (m.face == 0) {
+			w = m.width;
+			h = m.height;
+		}
 	}
-	if (levels.empty()) {
+	if (faces[0].empty()) {
 		return core::make_error(where + ": no mips");
 	}
-	out.stored_levels = uint32_t(levels.size());
-	out.levels = levels.size() == 1 ? 1u : godot_mip_levels(out.format, out.width, out.height);
+	for (const std::vector<std::vector<uint8_t>> &levels : faces) {
+		if (levels.size() != faces[0].size()) {
+			return core::make_error(where + ": faces hold " + std::to_string(levels.size()) + " and " +
+					std::to_string(faces[0].size()) + " mips");
+		}
+	}
+	out.stored_levels = uint32_t(faces[0].size());
+	out.levels = faces[0].size() == 1 ? 1u : godot_mip_levels(out.format, out.width, out.height);
 
-	uint32_t lw = std::max(w, 1u), lh = std::max(h, 1u);
-	while (levels.size() < out.levels) {
-		const uint32_t nw = std::max(1u, lw >> 1), nh = std::max(1u, lh >> 1);
-		levels.push_back(shrink_level(levels.back(), out.format, lw, lh, nw, nh));
-		lw = nw;
-		lh = nh;
-	}
-	uint64_t total = 0;
-	for (uint32_t i = 0; i < out.levels; ++i) {
-		total += levels[i].size();
-	}
-	out.data.reserve(size_t(total));
-	for (uint32_t i = 0; i < out.levels; ++i) {
-		out.data.insert(out.data.end(), levels[i].begin(), levels[i].end());
-	}
-
-	uint64_t expect = 0;
+	uint64_t chain = 0;
 	uint32_t gw = std::max(out.width, 1u), gh = std::max(out.height, 1u);
 	for (uint32_t i = 0; i < out.levels; ++i) {
-		expect += level_bytes(out.format, gw, gh);
+		chain += level_bytes(out.format, gw, gh);
 		gw = std::max(1u, gw >> 1);
 		gh = std::max(1u, gh >> 1);
 	}
-	if (expect != out.data.size()) {
-		return core::make_error(where + ": chain of " + std::to_string(out.data.size()) + " bytes, Godot expects " + std::to_string(expect));
+	out.data.reserve(size_t(chain * out.faces));
+	for (std::vector<std::vector<uint8_t>> &levels : faces) {
+		uint32_t lw = std::max(w, 1u), lh = std::max(h, 1u);
+		while (levels.size() < out.levels) {
+			const uint32_t nw = std::max(1u, lw >> 1), nh = std::max(1u, lh >> 1);
+			levels.push_back(shrink_level(levels.back(), out.format, lw, lh, nw, nh));
+			lw = nw;
+			lh = nh;
+		}
+		for (uint32_t i = 0; i < out.levels; ++i) {
+			out.data.insert(out.data.end(), levels[i].begin(), levels[i].end());
+		}
+	}
+	if (chain * out.faces != out.data.size()) {
+		return core::make_error(where + ": chain of " + std::to_string(out.data.size()) + " bytes, Godot expects " +
+				std::to_string(chain * out.faces));
 	}
 	return out;
+}
+
+}
+
+core::Result<PreparedTexture> prepare_texture(const LoadedTexture &p_texture, TextureRole p_role) {
+	return prepare_faces(p_texture, p_role, TextureKind::Texture2D);
+}
+
+core::Result<PreparedTexture> prepare_cube_texture(const LoadedTexture &p_texture, TextureRole p_role) {
+	return prepare_faces(p_texture, p_role, TextureKind::Cube);
 }
 
 }
