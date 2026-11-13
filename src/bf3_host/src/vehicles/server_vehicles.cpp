@@ -521,6 +521,8 @@ void ServerVehicles::take_hits(Gunplay &r_gunplay, std::vector<sim::weapons::Dam
 	r_gunplay.take_damage_if(
 			[](const sim::weapons::DamageEvent &e) { return e.target >= sim::vehicles::kVehicleTargetIdBase; }, taken_);
 	gather(taken_, soldier_source_, r_gunplay.step_output(), true);
+	push(gunnery_.step_output(), gunnery_.table());
+	push(r_gunplay.step_output(), &r_gunplay.table());
 	const auto hidden = [&](const sim::weapons::DamageEvent &e) {
 		return e.target < net::kMaxSlots && hidden_crew(e.target);
 	};
@@ -544,6 +546,40 @@ void ServerVehicles::take_hits(Gunplay &r_gunplay, std::vector<sim::weapons::Dam
 	}
 	r_damage.insert(r_damage.end(), crew_kills_.begin(), crew_kills_.end());
 	crew_kills_.clear();
+}
+
+void ServerVehicles::push(const sim::weapons::ProjectileStepOutput &p_out, const sim::weapons::WeaponTable *p_table) {
+	if (p_table == nullptr) {
+		return;
+	}
+	for (const sim::weapons::DetonationEvent &d : p_out.detonations) {
+		if (d.def >= p_table->defs.size()) {
+			continue;
+		}
+		const sim::weapons::ProjectileSimDef &p = p_table->def(d.def, d.variant).projectile;
+		const sim::weapons::ExplosionSimDef &x = d.dud ? p.dud : p.explosion;
+		if (!x.present) {
+			continue;
+		}
+		for (size_t i = 0; i < vehicles_.size(); ++i) {
+			if (!vehicles_[i].live) {
+				continue;
+			}
+			const core::Transform h = hull(i);
+			const sim::vehicles::HullBox &box = level_->kinds[level_->spawners[i].kind].box;
+			sim::weapons::ImpulseBox b;
+			b.centre = h.transform_point(box.centre);
+			b.axes = h.axes();
+			b.half = box.half;
+			if (core::vec::length(core::vec::sub(b.centre, d.position)) > x.gather_radius()) {
+				continue;
+			}
+			const sim::Vec3 impulse = sim::weapons::explosion_impulse(x, d.position, b.centre, b);
+			if (world_->add_impulse(sim::VehicleSlot(i), impulse).ok()) {
+				++stats_.pushes;
+			}
+		}
+	}
 }
 
 core::Transform ServerVehicles::hull(size_t p_vehicle) const {

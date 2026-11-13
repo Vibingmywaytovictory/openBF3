@@ -6650,6 +6650,7 @@ TEST_SUITE("host-vehicles-damage-team") {
 			m->ticks(1);
 			return std::pair<bool, float>{ fired && hit, m->server.vehicle_health(*tank).value_or(-1.0f) };
 		};
+		const uint64_t pushes = m->server.stats().vehicle_pushes;
 		const std::pair<bool, float> first = rocket();
 		const std::pair<bool, float> second = rocket();
 		std::printf("launcher: %s from %.1f m behind the %s of spawner %u (health %.0f): after the first rocket %.2f, "
@@ -6668,6 +6669,7 @@ TEST_SUITE("host-vehicles-damage-team") {
 		CHECK(first.second == doctest::Approx(full));
 		CHECK(100.0f * (first.second - second.second) / full == doctest::Approx(20.25f * square));
 		CHECK(100.0f * (first.second - second.second) / full == doctest::Approx(22.275f));
+		CHECK(m->server.stats().vehicle_pushes >= pushes + 2u);
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 }

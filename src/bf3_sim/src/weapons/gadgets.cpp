@@ -109,11 +109,6 @@ bool has_mobile_spawn(const core::EbxResolver &p_db, const core::EbxInstance &p_
 	return vehicle && !vehicle->partition().instances_of("MobileSpawnComponentData").empty();
 }
 
-Vec3 unit_or(const Vec3 &p_v, const Vec3 &p_fallback) {
-	const float l = core::vec::length(p_v);
-	return l > 1e-6f && std::isfinite(l) ? core::vec::scale(p_v, 1.0f / l) : p_fallback;
-}
-
 core::Result<GadgetDef> read_explosion_pack(std::string_view p_weapon, const core::EbxStruct &p_p, GadgetDef p_g) {
 	const std::optional<core::EbxStruct> soldier = struct_of(p_p, "SoldierDetonationData");
 	if (!soldier) {
@@ -318,8 +313,9 @@ core::Result<GadgetDef> read_gadget_def(const core::EbxResolver &p_db, std::stri
 }
 
 Vec3 shot_frame_vector(const Vec3 &p_direction, const Vec3 &p_local) {
-	const Vec3 forward = unit_or(p_direction, Vec3{ 0.0f, 0.0f, 1.0f });
-	const Vec3 right = unit_or(core::vec::cross(Vec3{ 0.0f, 1.0f, 0.0f }, forward), Vec3{ 1.0f, 0.0f, 0.0f });
+	const Vec3 forward = core::vec::normalize_or(p_direction, Vec3{ 0.0f, 0.0f, 1.0f });
+	const Vec3 right =
+			core::vec::normalize_or(core::vec::cross(Vec3{ 0.0f, 1.0f, 0.0f }, forward), Vec3{ 1.0f, 0.0f, 0.0f });
 	const Vec3 up = core::vec::cross(forward, right);
 	Vec3 out{};
 	for (size_t i = 0; i < 3; ++i) {
@@ -397,7 +393,8 @@ DeployOutcome GadgetField::deploy(const GadgetThrow &p_throw, const CollisionWor
 		d.resting = true;
 	} else {
 		d.velocity = shot_frame_vector(p_throw.direction, p_throw.launch_velocity);
-		d.facing = unit_or(Vec3{ p_throw.direction[0], 0.0f, p_throw.direction[2] }, Vec3{ 0.0f, 0.0f, 1.0f });
+		d.facing = core::vec::normalize_or(
+				Vec3{ p_throw.direction[0], 0.0f, p_throw.direction[2] }, Vec3{ 0.0f, 0.0f, 1.0f });
 	}
 	if (live_.size() >= kMaxDeployables) {
 		++stats_.full;
@@ -662,7 +659,8 @@ bool soldier_trips(const ExplosionPackDef &p_pack, const Deployable &p_mine, con
 	if (!p_pack.use_angle || distance < kPackCloseTrigger) {
 		return true;
 	}
-	const Vec3 axis = unit_or(Vec3{ p_mine.facing[0], 0.0f, p_mine.facing[2] }, Vec3{ 0.0f, 0.0f, 1.0f });
+	const Vec3 axis =
+			core::vec::normalize_or(Vec3{ p_mine.facing[0], 0.0f, p_mine.facing[2] }, Vec3{ 0.0f, 0.0f, 1.0f });
 	const float cosine = std::clamp(core::vec::dot(core::vec::scale(offset, 1.0f / distance), axis), -1.0f, 1.0f);
 	return std::acos(cosine) < p_pack.soldier_angle_deg * std::numbers::pi_v<float> / 180.0f;
 }
@@ -678,7 +676,7 @@ bool vehicle_trips(const ExplosionPackDef &p_pack, const Deployable &p_mine, con
 	if (!(speed > p_vehicle.min_speed_for_mine)) {
 		return false;
 	}
-	const Vec3 toward = unit_or(core::vec::sub(p_mine.position, p_vehicle.position), Vec3{});
+	const Vec3 toward = core::vec::normalize_or(core::vec::sub(p_mine.position, p_vehicle.position), Vec3{});
 	return core::vec::dot(core::vec::scale(p_vehicle.velocity, 1.0f / speed), toward) > 0.0f;
 }
 

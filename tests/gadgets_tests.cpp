@@ -1,6 +1,7 @@
 #include "sim_world_support.h"
 
 #include "bf3/core/math.h"
+#include "bf3/sim/weapons/damage.h"
 #include "bf3/sim/weapons/gadgets.h"
 #include "bf3/sim/weapons/spread_recoil.h"
 
@@ -532,5 +533,54 @@ TEST_SUITE("gadgets-unit") {
 			replenish_ammo(w, table, pickups, t + 100u + i, s);
 		}
 		CHECK(w.slots[4].reserve == 0);
+	}
+}
+
+TEST_SUITE("gadgets-unit") {
+	TEST_CASE("impulse: R-G4's explosion impulse is (1 - r / BlastRadius) x BlastImpulse floored at ShockwaveImpulse, "
+			  "toward the box centre, x clamp(cross-section, 4, 10) / 10; a wreck throws its crew at 0.3 x "
+			  "BlastImpulse into the draws' positive octant (R-G3 step 10)") {
+		ExplosionSimDef x;
+		x.present = true;
+		x.radius = 5.0f;
+		x.impulse = 1000.0f;
+		x.shockwave_impulse = 50.0f;
+		CHECK(blast_impulse(x, 0.0) == doctest::Approx(1000.0));
+		CHECK(blast_impulse(x, 2.5) == doctest::Approx(500.0));
+		CHECK(blast_impulse(x, 4.9) == doctest::Approx(50.0));
+		CHECK(blast_impulse(x, 6.0) == doctest::Approx(50.0));
+
+		ImpulseBox box;
+		box.half = Vec3{ 1.0f, 1.5f, 0.5f };
+		box.centre = Vec3{ 0.0f, 0.0f, 2.5f };
+		CHECK(impulse_size_factor(box, Vec3{ 0.0f, 0.0f, 1.0f }) == doctest::Approx(0.6f));
+		const Vec3 near = explosion_impulse(x, Vec3{}, box.centre, box);
+		CHECK(near[0] == doctest::Approx(0.0f));
+		CHECK(near[1] == doctest::Approx(0.0f));
+		CHECK(near[2] == doctest::Approx(300.0f));
+		box.centre = Vec3{ 0.0f, 0.0f, 6.0f };
+		const Vec3 far = explosion_impulse(x, Vec3{}, box.centre, box);
+		CHECK(far[2] == doctest::Approx(30.0f));
+		box.centre = Vec3{ -6.0f, 0.0f, 0.0f };
+		box.axes = { Vec3{ 0.0f, 0.0f, 1.0f }, Vec3{ 0.0f, 1.0f, 0.0f }, Vec3{ -1.0f, 0.0f, 0.0f } };
+		const Vec3 turned = explosion_impulse(x, Vec3{}, box.centre, box);
+		CHECK(turned[0] == doctest::Approx(-30.0f));
+		CHECK(std::fabs(turned[2]) < 1e-4f);
+
+		ImpulseBox unit;
+		unit.half = Vec3{ 0.5f, 0.5f, 0.5f };
+		CHECK(impulse_size_factor(unit, Vec3{ 1.0f, 0.0f, 0.0f }) == doctest::Approx(0.4f));
+		ImpulseBox wall;
+		wall.half = Vec3{ 3.0f, 3.0f, 3.0f };
+		CHECK(impulse_size_factor(wall, Vec3{ 0.0f, 1.0f, 0.0f }) == doctest::Approx(1.0f));
+
+		const Vec3 thrown = crew_throw_impulse(x, Vec3{ 1.0f, 1.0f, 1.0f });
+		for (const float c : thrown) {
+			CHECK(c == doctest::Approx(300.0f / std::sqrt(3.0f)));
+		}
+		const Vec3 tiny = crew_throw_impulse(x, Vec3{ 1e-9f, 1e-9f, 1e-9f });
+		CHECK(tiny[0] == 0.0f);
+		CHECK(tiny[1] == doctest::Approx(300.0f));
+		CHECK(tiny[2] == 0.0f);
 	}
 }

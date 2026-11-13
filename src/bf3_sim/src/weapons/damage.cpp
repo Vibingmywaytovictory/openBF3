@@ -1,5 +1,7 @@
 #include "bf3/sim/weapons/damage.h"
 
+#include "bf3/core/math.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -45,6 +47,43 @@ double blast_damage(const ExplosionSimDef &p_explosion, double p_distance, Blast
 		blast = double(p_explosion.blast_damage) * (1.0 - (d - inner) / (outer - inner));
 	}
 	return std::max(blast, double(p_explosion.shockwave_damage));
+}
+
+double blast_impulse(const ExplosionSimDef &p_explosion, double p_distance) {
+	if (!p_explosion.present) {
+		return 0.0;
+	}
+	double s = 0.0;
+	if (p_explosion.radius != 0.0f && p_distance <= double(p_explosion.radius)) {
+		s = (1.0 - std::max(p_distance, 0.0) / double(p_explosion.radius)) * double(p_explosion.impulse);
+	}
+	return std::max(s, double(p_explosion.shockwave_impulse));
+}
+
+float impulse_size_factor(const ImpulseBox &p_box, const Vec3 &p_direction) {
+	const Vec3 d = core::vec::normalize_or(p_direction, Vec3{ 0.0f, 1.0f, 0.0f });
+	const Vec3 u = core::vec::normalize_or(core::vec::cross(d, Vec3{ 0.0f, 1.0f, 0.0f }), Vec3{ 1.0f, 0.0f, 0.0f });
+	const Vec3 v = core::vec::cross(d, u);
+	const auto extent = [&](const Vec3 &p_axis) {
+		float e = 0.0f;
+		for (size_t i = 0; i < 3; ++i) {
+			e += std::fabs(core::vec::dot(p_axis, p_box.axes[i])) * p_box.half[i];
+		}
+		return 2.0f * e;
+	};
+	return std::clamp(extent(u) * extent(v), kImpulseAreaMin, kImpulseAreaMax) / kImpulseAreaMax;
+}
+
+Vec3 explosion_impulse(
+		const ExplosionSimDef &p_explosion, const Vec3 &p_at, const Vec3 &p_reference, const ImpulseBox &p_box) {
+	const double s = blast_impulse(p_explosion, double(core::vec::length(core::vec::sub(p_reference, p_at))));
+	const Vec3 direction = core::vec::normalize_or(core::vec::sub(p_box.centre, p_at), Vec3{ 0.0f, 1.0f, 0.0f });
+	return core::vec::scale(direction, float(s) * impulse_size_factor(p_box, direction));
+}
+
+Vec3 crew_throw_impulse(const ExplosionSimDef &p_explosion, const Vec3 &p_draws) {
+	const Vec3 direction = core::vec::normalize_or(p_draws, Vec3{ 0.0f, 1.0f, 0.0f });
+	return core::vec::scale(direction, kCrewThrowShare * (p_explosion.present ? p_explosion.impulse : 0.0f));
 }
 
 bool apply_damage(SoldierState &r_soldier, float p_amount, const Mechanics &p_mechanics) {

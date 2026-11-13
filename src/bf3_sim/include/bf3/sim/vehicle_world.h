@@ -90,6 +90,7 @@ public:
 	core::Status add_vehicle(VehicleSlot p_slot, std::shared_ptr<const VehicleModel> p_model, const VehiclePlacement &p_placement);
 	bool has_vehicle(VehicleSlot p_slot) const;
 	core::Status remove_vehicle(VehicleSlot p_slot);
+	core::Status add_impulse(VehicleSlot p_slot, const Vec3 &p_impulse);
 
 	core::Status step(std::span<const VehicleSlot> p_slots, std::span<const VehicleCommand> p_commands);
 	Tick tick() const;

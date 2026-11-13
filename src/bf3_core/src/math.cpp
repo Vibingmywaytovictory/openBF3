@@ -33,6 +33,11 @@ Vec3 normalize(const Vec3 &p_a) {
 	const float len = length(p_a);
 	return len > 0.0f ? scale(p_a, 1.0f / len) : p_a;
 }
+
+Vec3 normalize_or(const Vec3 &p_a, const Vec3 &p_fallback) {
+	const float len = length(p_a);
+	return len > 1e-6f && std::isfinite(len) ? scale(p_a, 1.0f / len) : p_fallback;
+}
 }
 
 Transform Transform::from_axes(const std::array<Vec3, 3> &p_axes, const Vec3 &p_trans) {

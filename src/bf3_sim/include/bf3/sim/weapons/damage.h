@@ -37,6 +37,22 @@ double zone_damage(const ProjectileSimDef &p_projectile, HitZone p_zone, double 
 
 double blast_damage(const ExplosionSimDef &p_explosion, double p_distance, BlastFalloff p_falloff);
 
+inline constexpr float kImpulseAreaMin = 4.0f;
+inline constexpr float kImpulseAreaMax = 10.0f;
+inline constexpr float kCrewThrowShare = 0.3f;
+
+struct ImpulseBox {
+	Vec3 centre{};
+	std::array<Vec3, 3> axes{ Vec3{ 1, 0, 0 }, Vec3{ 0, 1, 0 }, Vec3{ 0, 0, 1 } };
+	Vec3 half{ 0.5f, 0.5f, 0.5f };
+};
+
+double blast_impulse(const ExplosionSimDef &p_explosion, double p_distance);
+float impulse_size_factor(const ImpulseBox &p_box, const Vec3 &p_direction);
+Vec3 explosion_impulse(
+		const ExplosionSimDef &p_explosion, const Vec3 &p_at, const Vec3 &p_reference, const ImpulseBox &p_box);
+Vec3 crew_throw_impulse(const ExplosionSimDef &p_explosion, const Vec3 &p_draws);
+
 bool apply_damage(SoldierState &r_soldier, float p_amount, const Mechanics &p_mechanics);
 
 std::array<int32_t, kHitZoneCount> shots_to_kill(const WeaponSimDef &p_def, double p_distance, float p_health, const Mechanics &p_mechanics);

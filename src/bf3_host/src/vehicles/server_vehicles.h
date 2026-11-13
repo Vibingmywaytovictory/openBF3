@@ -51,6 +51,7 @@ struct ServerVehicleStats {
 	uint64_t wreck_blast_soldier_hits = 0;
 	uint64_t wreck_blast_vehicle_hits = 0;
 	uint64_t unlocated = 0;
+	uint64_t pushes = 0;
 };
 
 inline constexpr sim::Tick kWreckWireTicks = 6;
@@ -141,6 +142,7 @@ private:
 			std::vector<sim::weapons::DamageEvent> &r_damage);
 	void explode(size_t p_vehicle, sim::Tick p_tick);
 	float wreck_amount(const sim::weapons::DamageEvent &p_event, uint8_t p_hull_property) const;
+	void push(const sim::weapons::ProjectileStepOutput &p_out, const sim::weapons::WeaponTable *p_table);
 	void refresh_targets();
 	net::VehicleWire wire_of(size_t p_vehicle, const sim::VehicleState &p_state) const;
 	sim::Vec3 hull_centre(size_t p_vehicle) const;

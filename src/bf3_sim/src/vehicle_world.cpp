@@ -535,6 +535,20 @@ core::Status VehicleWorld::remove_vehicle(VehicleSlot p_slot) {
 	return core::Status::success();
 }
 
+core::Status VehicleWorld::add_impulse(VehicleSlot p_slot, const Vec3 &p_impulse) {
+	Impl &w = *impl_;
+	if (p_slot >= w.vehicles.size() || !w.vehicles[p_slot].used) {
+		return core::make_error("vehicle world: slot " + std::to_string(p_slot) + " holds no vehicle");
+	}
+	if (!core::finite(p_impulse)) {
+		return core::make_error("vehicle world: a non-finite impulse");
+	}
+	JPH::BodyInterface &bi = w.system->GetBodyInterfaceNoLock();
+	bi.ActivateBody(w.vehicles[p_slot].body);
+	bi.AddImpulse(w.vehicles[p_slot].body, to_jolt(p_impulse));
+	return core::Status::success();
+}
+
 bool VehicleWorld::has_vehicle(VehicleSlot p_slot) const {
 	return p_slot < impl_->vehicles.size() && impl_->vehicles[p_slot].used;
 }
