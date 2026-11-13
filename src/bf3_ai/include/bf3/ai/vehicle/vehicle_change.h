@@ -12,6 +12,7 @@ namespace bf3::ai {
 inline constexpr size_t kMaxChangeSeats = 8;
 inline constexpr float kHardwareRadius = 75.0f;
 inline constexpr double kPossessionWindowSeconds = 15.0;
+inline constexpr double kNeverPossessedSeconds = -1000.0;
 inline constexpr float kUpsideDownUp = 0.01f;
 inline constexpr float kChangeMaxAltitude = 8.0f;
 inline constexpr float kGetOutUrgency = 10000.0f;
@@ -23,6 +24,7 @@ struct ChangeSeat {
 	bool occupant_bot = false;
 	bool same_order = true;
 	int booked_by = -1;
+	double possessed_s = kNeverPossessedSeconds;
 
 	bool operator==(const ChangeSeat &) const = default;
 };
@@ -38,7 +40,6 @@ struct ChangeVehicle {
 	float altitude = 0.0f;
 	bool on_nav = true;
 	float nav_gap = 0.0f;
-	double possessed_s = -1.0e9;
 	uint8_t seats = 0;
 	std::array<ChangeSeat, kMaxChangeSeats> seat{};
 
@@ -53,7 +54,6 @@ struct ChangeBot {
 	float max_speed = 0.0f;
 	float health = 1.0f;
 	double now_s = 0.0;
-	double spawned_s = 0.0;
 	float bail_value = 0.3f;
 	bool stuck = false;
 	int vehicle = -1;

@@ -369,7 +369,8 @@ struct GameServer::Impl {
 		if (!vehicles.on()) {
 			return;
 		}
-		(void)vehicles.step(p_tick, combat.on() ? combat.gunplay()->match_seed() : 0u);
+		(void)vehicles.step(p_tick, combat.on() ? combat.gunplay()->match_seed() : 0u,
+				[&](uint8_t p_slot) { return p_slot < slots.size() && slots[p_slot].bot; });
 		std::vector<sim::Vec3> alive_at;
 		for (size_t i = 0; i < slots.size(); ++i) {
 			if (slots[i].used && soldiers.alive(i)) {

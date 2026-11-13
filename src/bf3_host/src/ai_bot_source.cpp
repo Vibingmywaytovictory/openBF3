@@ -329,7 +329,7 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		}
 		if (s.life != body.life) {
 			body.new_life(p_tick, s);
-			crew.new_life(*body.shared, body.slot, p_tick);
+			crew.new_life(*body.shared, body.slot);
 			sensed = ai::InfantrySenses{};
 			planned = TdmBotActivity::Roam;
 			release();

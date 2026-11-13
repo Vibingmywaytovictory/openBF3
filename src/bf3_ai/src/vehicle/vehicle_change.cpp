@@ -40,7 +40,7 @@ void consider(Pick &r_best, ChangeTarget p_target, float p_urgency) {
 }
 
 float change_driver_modifier(const ChangeVehicle &p_vehicle, bool p_current, double p_now_s) {
-	const double since = p_now_s - p_vehicle.possessed_s;
+	const double since = p_now_s - p_vehicle.seat[0].possessed_s;
 	if (!p_current && p_vehicle.seat[0].occupant >= 0) {
 		return 1.0f;
 	}
@@ -158,7 +158,7 @@ ChangeChoice choose_change(const ChangeBot &p_bot, std::span<const ChangeVehicle
 	out.same_vehicle = !on_foot && best.target.vehicle == p_bot.vehicle;
 	const float ratio = current != 0.0f ? best.urgency * 0.5f / current : best.urgency * 0.5f;
 	out.urgency = DecliningSlopeCurve::calculate(ratio) * 4.0f;
-	const double since = p_bot.now_s - (on_foot ? p_bot.spawned_s : carrier->possessed_s);
+	const double since = p_bot.now_s - (on_foot ? kNeverPossessedSeconds : carrier->seat[p_bot.seat].possessed_s);
 	if (kPossessionWindowSeconds > since) {
 		out.urgency *= 6.0f;
 	}

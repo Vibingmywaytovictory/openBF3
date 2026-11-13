@@ -24,7 +24,7 @@ float move_urgency(const ChangeBot &p_bot, const ChangeVehicle *p_vehicle, Chang
 		if (p_vehicle->side != p_bot.side) {
 			return 0.0f;
 		}
-		const double since = p_bot.now_s - p_vehicle->possessed_s;
+		const double since = p_bot.now_s - p_vehicle->seat[0].possessed_s;
 		return since < kPossessionWindowSeconds
 				? (1.0f - float(since / kPossessionWindowSeconds)) * (p_vehicle->max_speed * 4.0f)
 				: 0.0f;
@@ -71,7 +71,8 @@ float change_unit_urgency(
 	urgency *= health;
 	const int side = vehicle != nullptr ? vehicle->side : p_bot.side;
 	if (side == p_bot.side) {
-		const double since = p_bot.now_s - (vehicle != nullptr ? vehicle->possessed_s : p_bot.spawned_s);
+		const double since =
+				p_bot.now_s - (vehicle != nullptr ? vehicle->seat[p_unit.seat].possessed_s : kNeverPossessedSeconds);
 		if (since < kPossessionWindowSeconds) {
 			urgency = float(1.0 / kPossessionWindowSeconds * since) * urgency;
 		}

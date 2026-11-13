@@ -89,7 +89,6 @@ std::vector<ai::ChangeVehicle> change_vehicles(
 		c.max_speed = change_vehicle_max_speed(*kind.model);
 		const float full = sim::vehicles::full_vehicle_health(kind.damage);
 		c.health = full > 0.0f ? p_vehicles.health(i).value_or(0.0f) / full : 0.0f;
-		c.possessed_s = v.possessed_ever ? seconds(v.possessed) : -1.0e9;
 		c.seats = uint8_t(std::min<size_t>(kind.seats, ai::kMaxChangeSeats));
 		for (uint8_t k = 0; k < c.seats; ++k) {
 			ai::ChangeSeat &seat = c.seat[k];
@@ -102,6 +101,7 @@ std::vector<ai::ChangeVehicle> change_vehicles(
 			const uint8_t booked =
 					i < p_shared.vehicle_bookings.size() ? p_shared.vehicle_bookings[i][k] : net::kNoVehicleOccupant;
 			seat.booked_by = booked != net::kNoVehicleOccupant ? int(booked) : -1;
+			seat.possessed_s = v.player_left[k] ? seconds(*v.player_left[k]) : ai::kNeverPossessedSeconds;
 		}
 		if (!p_ground) {
 			continue;
@@ -122,7 +122,7 @@ std::vector<ai::ChangeVehicle> change_vehicles(
 }
 
 ai::ChangeBot change_bot(const TdmShared &p_shared, const ServerVehicles &p_vehicles, uint8_t p_slot,
-		const sim::SoldierState &p_state, sim::Tick p_spawned, bool p_stuck) {
+		const sim::SoldierState &p_state, bool p_stuck) {
 	const ServerView &view = *p_shared.host.view;
 	ai::ChangeBot b;
 	b.player_id = p_slot;
@@ -135,7 +135,6 @@ ai::ChangeBot change_bot(const TdmShared &p_shared, const ServerVehicles &p_vehi
 	const float full = p_shared.host.gunplay != nullptr ? p_shared.host.gunplay->level().max_health : 0.0f;
 	b.health = full > 0.0f ? p_state.health / full : 0.0f;
 	b.now_s = seconds(view.tick());
-	b.spawned_s = seconds(p_spawned);
 	b.bail_value = p_shared.ai != nullptr ? p_shared.ai->main().bot_manager().vehicle_bail_value() : b.bail_value;
 	b.stuck = p_stuck;
 	if (const std::optional<VehicleSeat> seat = p_vehicles.seat_of(p_slot)) {
@@ -145,9 +144,8 @@ ai::ChangeBot change_bot(const TdmShared &p_shared, const ServerVehicles &p_vehi
 	return b;
 }
 
-void BotCrew::new_life(TdmShared &r_shared, uint8_t p_slot, sim::Tick p_tick) {
+void BotCrew::new_life(TdmShared &r_shared, uint8_t p_slot) {
 	book(r_shared, p_slot, std::nullopt);
-	spawned_ = p_tick;
 	use_down_ = false;
 }
 
@@ -176,7 +174,7 @@ void BotCrew::decide(
 		return;
 	}
 	const std::vector<ai::ChangeVehicle> scene = change_vehicles(r_shared, *vehicles, p_slot, true);
-	const ai::ChangeBot bot = change_bot(r_shared, *vehicles, p_slot, p_state, spawned_, p_stuck);
+	const ai::ChangeBot bot = change_bot(r_shared, *vehicles, p_slot, p_state, p_stuck);
 	const ai::ChangeChoice choice = ai::choose_change(bot, scene);
 	if (bot.vehicle < 0) {
 		r_shared.count(&TdmBotStats::vehicle_foot_decisions);
@@ -210,7 +208,7 @@ bool BotCrew::command(tdm_bot::BotBody &r_body, const tdm_bot::BotFrame &p_frame
 		book(sh, r_body.slot, std::nullopt);
 		return seated;
 	}
-	const ai::ChangeBot bot = change_bot(sh, *vehicles, r_body.slot, p_frame.self, spawned_, false);
+	const ai::ChangeBot bot = change_bot(sh, *vehicles, r_body.slot, p_frame.self, false);
 	const ai::ChangeOrder order = ai::change_plan_step(bot, scene, *target_);
 	switch (order.step) {
 		case ai::ChangeStep::None:

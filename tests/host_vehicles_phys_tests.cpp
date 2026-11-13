@@ -261,7 +261,7 @@ TEST_SUITE("host-vehicles-wreck-scope") {
 		uint32_t before = 0, marked = 0, after = 0;
 		std::optional<sim::Tick> exploded;
 		for (sim::Tick t = 1; t < 6000 && (!exploded || t < *exploded + 2u * host::kWreckWireTicks); ++t) {
-			REQUIRE(sv.step(t, 0).ok());
+			REQUIRE(sv.step(t, 0, [](uint8_t) { return true; }).ok());
 			sv.step_health(t, {});
 			sv.spawn_due(t, nullptr);
 			if (!exploded && sv.stats().exploded > 0) {

@@ -137,7 +137,8 @@ void ServerVehicles::spawn_due(sim::Tick p_tick, const sim::logic::ConquestNativ
 		v.command = sim::VehicleCommand();
 		v.occupants.fill(net::kNoVehicleOccupant);
 		v.seen = v.occupants;
-		v.possessed_ever = false;
+		v.seen_bot = {};
+		v.player_left = {};
 		v.seat_commands = {};
 		v.armament = sim::vehicles::ArmamentState();
 		v.health = sim::vehicles::spawned_vehicle_health(level_->kinds[s.kind].damage);
@@ -706,7 +707,7 @@ float wreck_blast_amount(const sim::weapons::SurfaceMaterialTable *p_materials, 
 			: p_base;
 }
 
-core::Status ServerVehicles::step(sim::Tick p_tick, uint64_t p_weapon_seed) {
+core::Status ServerVehicles::step(sim::Tick p_tick, uint64_t p_weapon_seed, const std::function<bool(uint8_t)> &p_bot) {
 	if (!on()) {
 		return core::Status::success();
 	}
@@ -715,10 +716,15 @@ core::Status ServerVehicles::step(sim::Tick p_tick, uint64_t p_weapon_seed) {
 	for (size_t i = 0; i < vehicles_.size(); ++i) {
 		if (vehicles_[i].live) {
 			ServerVehicle &v = vehicles_[i];
-			if (v.occupants != v.seen) {
-				v.seen = v.occupants;
-				v.possessed = p_tick;
-				v.possessed_ever = true;
+			for (size_t k = 0; k < v.seen.size(); ++k) {
+				if (v.seen[k] == v.occupants[k]) {
+					continue;
+				}
+				if (v.seen[k] != net::kNoVehicleOccupant && !v.seen_bot[k]) {
+					v.player_left[k] = p_tick;
+				}
+				v.seen[k] = v.occupants[k];
+				v.seen_bot[k] = v.occupants[k] != net::kNoVehicleOccupant && p_bot(v.occupants[k]);
 			}
 			slots.push_back(sim::VehicleSlot(i));
 			const sim::vehicles::VehicleCondition condition = vehicles_[i].health.condition;

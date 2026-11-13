@@ -30,26 +30,67 @@ ai::ChangeBot fresh_bot() {
 	b.side = 1;
 	b.radius = 0.4f;
 	b.max_speed = kSoldierSpeed;
-	b.now_s = 101.0;
-	b.spawned_s = 100.0;
+	b.now_s = 1.0;
 	return b;
 }
 
 }
 
 TEST_SUITE("ai-vehicle") {
-	TEST_CASE("a fresh soldier picks the nearer free jeep's driver seat") {
+	TEST_CASE("a soldier 1 s into the game picks the nearer free jeep's driver seat with no possession ramp or x6") {
 		const std::vector<ai::ChangeVehicle> vehicles{ jeep(60.0f), jeep(20.0f) };
 		const ai::ChangeBot bot = fresh_bot();
 		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{}, false) ==
-				doctest::Approx(kSoldierSpeed * 5.0f / 15.0f));
+				doctest::Approx(kSoldierSpeed * 5.0f));
 		const ai::ChangeChoice c = ai::choose_change(bot, vehicles);
 		REQUIRE(c.change);
 		CHECK(c.target == ai::ChangeTarget{ 1, 0 });
 		CHECK(c.best == doctest::Approx(kJeepSpeed * 5.0f));
-		CHECK(c.current == doctest::Approx(2.0f * kSoldierSpeed * 5.0f / 15.0f));
-		CHECK(c.urgency == doctest::Approx(4.0f * 6.0f));
+		CHECK(c.current == doctest::Approx(2.0f * kSoldierSpeed * 5.0f));
+		CHECK(c.urgency ==
+				doctest::Approx(
+						ai::DecliningSlopeCurve::calculate(kJeepSpeed * 5.0f * 0.5f / (2.0f * kSoldierSpeed * 5.0f)) *
+						4.0f));
 		CHECK_FALSE(c.get_out);
+	}
+
+	TEST_CASE("a seat's possession clock is never set unless a player left it, and only that seat's urgency ramps") {
+		CHECK(ai::ChangeSeat{}.possessed_s == ai::kNeverPossessedSeconds);
+		CHECK(ai::kNeverPossessedSeconds == -1000.0);
+		ai::ChangeBot bot = fresh_bot();
+		bot.now_s = 0.0;
+		const std::vector<ai::ChangeVehicle> fresh{ jeep(20.0f) };
+		CHECK(ai::change_unit_urgency(bot, fresh, ai::ChangeTarget{ 0, 0 }, true) ==
+				doctest::Approx(kJeepSpeed * 5.0f));
+		CHECK(ai::change_driver_modifier(fresh[0], false, bot.now_s) == doctest::Approx(0.77f));
+
+		bot.now_s = 200.0;
+		std::vector<ai::ChangeVehicle> gunner_left{ jeep(20.0f) };
+		gunner_left[0].seat[1].possessed_s = bot.now_s - 6.0;
+		CHECK(ai::change_unit_urgency(bot, gunner_left, ai::ChangeTarget{ 0, 0 }, true) ==
+				doctest::Approx(kJeepSpeed * 5.0f));
+		CHECK(ai::change_unit_urgency(bot, gunner_left, ai::ChangeTarget{ 0, 1 }, true) == 0.0f);
+		CHECK(ai::change_driver_modifier(gunner_left[0], false, bot.now_s) == doctest::Approx(0.77f));
+
+		bot.vehicle = 0;
+		bot.seat = 0;
+		std::vector<ai::ChangeVehicle> seated{ jeep(0.0f) };
+		seated[0].seat[0].occupant = bot.player_id;
+		seated[0].seat[0].possessed_s = bot.now_s - 6.0;
+		seated[0].seat[2].possessed_s = bot.now_s - 1.0;
+		const ai::ChangeChoice ramp = ai::choose_change(bot, seated);
+		CHECK(ramp.current == doctest::Approx(2.0f * kJeepSpeed * 5.0f * 6.0f / 15.0f));
+		CHECK_FALSE(ramp.change);
+		seated[0].seat[0].possessed_s = bot.now_s;
+		const ai::ChangeChoice stamped = ai::choose_change(bot, seated);
+		CHECK(stamped.current == 0.0f);
+		CHECK(stamped.get_out);
+		CHECK(stamped.urgency ==
+				doctest::Approx(ai::DecliningSlopeCurve::calculate(ai::kGetOutUrgency * 0.5f) * 4.0f * 6.0f * 5.0f));
+		seated[0].seat[0].possessed_s = bot.now_s - 15.0;
+		const ai::ChangeChoice settled = ai::choose_change(bot, seated);
+		CHECK(settled.current == doctest::Approx(2.0f * kJeepSpeed * 5.0f));
+		CHECK_FALSE(settled.change);
 	}
 
 	TEST_CASE("a passenger seat of an empty jeep scores nothing and its driver modifier is 0.77") {
@@ -58,16 +99,16 @@ TEST_SUITE("ai-vehicle") {
 		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 1 }, true) == 0.0f);
 		CHECK(ai::change_driver_modifier(vehicles[0], false, bot.now_s) == doctest::Approx(0.77f));
 		ai::ChangeVehicle left = vehicles[0];
-		left.possessed_s = bot.now_s - 3.0;
+		left.seat[0].possessed_s = bot.now_s - 3.0;
 		CHECK(ai::change_driver_modifier(left, false, bot.now_s) == 1.0f);
 		const std::vector<ai::ChangeVehicle> just_left{ left };
 		CHECK(ai::change_unit_urgency(bot, just_left, ai::ChangeTarget{ 0, 1 }, true) ==
-				doctest::Approx((1.0f - 3.0f / 15.0f) * kJeepSpeed * 4.0f * 3.0f / 15.0f));
+				doctest::Approx((1.0f - 3.0f / 15.0f) * kJeepSpeed * 4.0f));
 		CHECK(ai::change_unit_urgency(bot, just_left, ai::ChangeTarget{ 0, 0 }, true) ==
 				doctest::Approx(kJeepSpeed * 5.0f * 3.0f / 15.0f));
 	}
 
-	TEST_CASE("a manned jeep offers its free seats by its driver's order") {
+	TEST_CASE("a manned jeep offers its free seats by its driver's order, against staying on foot") {
 		std::vector<ai::ChangeVehicle> vehicles{ jeep(20.0f) };
 		vehicles[0].seat[0].occupant = 9;
 		vehicles[0].seat[0].occupant_bot = true;
@@ -75,12 +116,14 @@ TEST_SUITE("ai-vehicle") {
 		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 0 }, true) == 0.0f);
 		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 1 }, true) ==
 				doctest::Approx(kJeepSpeed * 4.0f));
-		vehicles[0].seat[0].same_order = false;
-		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 2 }, true) ==
-				doctest::Approx(kJeepSpeed * 2.5f));
 		const ai::ChangeChoice c = ai::choose_change(bot, vehicles);
 		REQUIRE(c.change);
 		CHECK(c.target == ai::ChangeTarget{ 0, 1 });
+		vehicles[0].seat[0].same_order = false;
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 2 }, true) ==
+				doctest::Approx(kJeepSpeed * 2.5f));
+		CHECK(kJeepSpeed * 2.5f < 2.0f * kSoldierSpeed * 5.0f);
+		CHECK_FALSE(ai::choose_change(bot, vehicles).change);
 	}
 
 	TEST_CASE("enemy-manned, flipped, off-mesh, far, wrecked and booked vehicles are refused") {
@@ -130,7 +173,6 @@ TEST_SUITE("ai-vehicle") {
 		bot.seat = 0;
 		std::vector<ai::ChangeVehicle> vehicles{ jeep(0.0f) };
 		vehicles[0].seat[0].occupant = bot.player_id;
-		vehicles[0].possessed_s = 150.0;
 		CHECK_FALSE(ai::choose_change(bot, vehicles).change);
 		bot.stuck = true;
 		const ai::ChangeChoice stuck = ai::choose_change(bot, vehicles);
@@ -158,7 +200,6 @@ TEST_SUITE("ai-vehicle") {
 		vehicles[0].seat[0].occupant = 9;
 		vehicles[0].seat[0].occupant_bot = true;
 		vehicles[0].seat[1].occupant = bot.player_id;
-		vehicles[0].possessed_s = 150.0;
 		vehicles[0].health = 0.5f;
 		CHECK_FALSE(ai::choose_change(bot, vehicles).change);
 		vehicles[0].health = 0.25f;

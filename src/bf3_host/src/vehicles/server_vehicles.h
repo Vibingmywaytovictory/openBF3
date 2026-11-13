@@ -17,6 +17,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -76,8 +77,8 @@ struct ServerVehicle {
 	bool wreck_on_wire = false;
 	sim::Tick exploded = 0;
 	std::array<uint8_t, net::kMaxVehicleSeats> seen{};
-	sim::Tick possessed = 0;
-	bool possessed_ever = false;
+	std::array<bool, net::kMaxVehicleSeats> seen_bot{};
+	std::array<std::optional<sim::Tick>, net::kMaxVehicleSeats> player_left{};
 	sim::VehicleState wreck{};
 };
 
@@ -107,7 +108,7 @@ public:
 	std::optional<sim::Vec3> use(size_t p_slot, const sim::Command &p_command, const sim::SoldierState &p_soldier);
 	void drive(size_t p_slot, const sim::Command &p_command);
 	void leave(size_t p_slot);
-	core::Status step(sim::Tick p_tick, uint64_t p_weapon_seed);
+	core::Status step(sim::Tick p_tick, uint64_t p_weapon_seed, const std::function<bool(uint8_t)> &p_bot);
 	core::Status configure_weapons(std::shared_ptr<const sim::weapons::SurfaceMaterialTable> p_materials,
 			const sim::weapons::Mechanics &p_mechanics);
 	void resolve_weapons(sim::Tick p_tick, const sim::CollisionWorld &p_world,

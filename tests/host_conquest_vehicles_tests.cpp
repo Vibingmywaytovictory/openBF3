@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -213,5 +214,82 @@ TEST_SUITE("host-tdm-conquest-vehicles") {
 	}
 	TEST_CASE("conquest vehicles seed 3: bots take Caspian's jeeps through BBChange's choice") {
 		check_jeeps(3);
+	}
+}
+
+TEST_SUITE("host-vehicles-possession") {
+	TEST_CASE("vehicles: a seat's possession clock is the tick a player who is not a bot left it, and a bot's entry or "
+			  "exit leaves it") {
+		tt::TdmLevel *level = tt::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		std::optional<size_t> jeep;
+		for (size_t i = 0; i < lv.spawners.size() && !jeep; ++i) {
+			const host::LevelVehicleKind &k = lv.kinds[lv.spawners[i].kind];
+			if (host::land_jeep(*k.model) && k.seats >= 2) {
+				jeep = i;
+			}
+		}
+		REQUIRE(jeep.has_value());
+		auto vehicles = std::make_shared<host::LevelVehicles>(lv);
+		vehicles->spawners[*jeep].initial_spawn_delay = 0.0f;
+		host::ServerVehicles sv;
+		REQUIRE(sv.configure(vehicles, level->shared->static_world, 1.0f).ok());
+		sim::Tick t = 1;
+		sv.spawn_due(t, nullptr);
+		REQUIRE(sv.vehicles()[*jeep].live);
+		sim::SoldierState soldier;
+		soldier.position = sv.world()->state(sim::VehicleSlot(*jeep)).body.com_position;
+		constexpr uint8_t kBot = 3;
+		constexpr uint8_t kPlayer = 4;
+		constexpr uint8_t kRemovedBot = 5;
+		bool removed = false;
+		const auto is_bot = [&](uint8_t p_slot) { return p_slot == kBot || (p_slot == kRemovedBot && !removed); };
+		const auto press_use = [&](uint8_t p_slot) {
+			(void)sv.use(p_slot, sim::Command{}, soldier);
+			sim::Command use;
+			use.buttons = sim::buttons::kUse;
+			(void)sv.use(p_slot, use, soldier);
+			++t;
+			REQUIRE(sv.step(t, 0, is_bot).ok());
+		};
+		const auto stamps = [&]() {
+			uint32_t n = 0;
+			for (const std::optional<sim::Tick> &left : sv.vehicles()[*jeep].player_left) {
+				n += left.has_value() ? 1u : 0u;
+			}
+			return n;
+		};
+		press_use(kBot);
+		REQUIRE(sv.seat_of(kBot).has_value());
+		CHECK(sv.seat_of(kBot)->vehicle == *jeep);
+		const uint8_t seat = sv.seat_of(kBot)->seat;
+		press_use(kBot);
+		CHECK_FALSE(sv.seat_of(kBot).has_value());
+		CHECK(stamps() == 0u);
+		press_use(kPlayer);
+		REQUIRE(sv.seat_of(kPlayer).has_value());
+		CHECK(sv.seat_of(kPlayer)->seat == seat);
+		CHECK(stamps() == 0u);
+		press_use(kPlayer);
+		const sim::Tick left = t;
+		CHECK(stamps() == 1u);
+		CHECK(sv.vehicles()[*jeep].player_left[seat] == std::optional<sim::Tick>(left));
+		press_use(kBot);
+		REQUIRE(sv.seat_of(kBot).has_value());
+		press_use(kBot);
+		CHECK(stamps() == 1u);
+		CHECK(sv.vehicles()[*jeep].player_left[seat] == std::optional<sim::Tick>(left));
+		press_use(kRemovedBot);
+		REQUIRE(sv.seat_of(kRemovedBot).has_value());
+		removed = true;
+		sv.leave(kRemovedBot);
+		++t;
+		REQUIRE(sv.step(t, 0, is_bot).ok());
+		CHECK_FALSE(sv.seat_of(kRemovedBot).has_value());
+		CHECK(stamps() == 1u);
+		CHECK(sv.vehicles()[*jeep].player_left[seat] == std::optional<sim::Tick>(left));
 	}
 }
