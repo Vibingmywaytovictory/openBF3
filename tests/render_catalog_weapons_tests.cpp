@@ -16,6 +16,7 @@
 #include "bf3/host/level_load.h"
 #include "bf3/host/level_vehicles.h"
 #include "bf3/host/loadout.h"
+#include "bf3/present/vehicle_turrets.h"
 #include "bf3/render/crowd_weapons.h"
 #include "bf3/render/deployed_gadgets.h"
 #include "bf3/render/mesh_cache.h"
@@ -1774,6 +1775,33 @@ TEST_SUITE("render-vehicle-meshes") {
 					unsigned(k.model->wheel_count));
 			CHECK(matched.size() == k.model->wheel_count);
 			CHECK(placed > mk->parts.size() / 2);
+			size_t riding = 0;
+			std::set<int> pivoted;
+			for (size_t p = 0; p < mk->parts.size() && k.armament != nullptr; ++p) {
+				const int t = present::part_turret(
+						k.part_turrets, k.component_mesh_turrets, mk->part_mesh[p], mk->parts[p].part);
+				if (t < 0 || size_t(t) >= k.armament->turrets.size()) {
+					continue;
+				}
+				++riding;
+				const core::Vec3 pivot = sim::vehicles::turret_world(
+						*k.armament, sim::vehicles::ArmamentState{}, core::Transform::identity(), size_t(t))
+												 .trans;
+				const core::Vec3 &at = mk->parts[p].part_transform.trans;
+				if (!mk->parts[p].component && core::vec::length(core::vec::sub(at, pivot)) < 0.05f) {
+					pivoted.insert(t);
+					std::printf("vehicle meshes: %s part %u sits at turret %d's pivot (%.3f %.3f %.3f)\n",
+							k.blueprint.c_str(), unsigned(mk->parts[p].part), t, double(pivot[0]), double(pivot[1]),
+							double(pivot[2]));
+				}
+			}
+			std::printf("vehicle meshes: %s: %zu parts ride a turret, %zu of %zu turrets have a part at their pivot\n",
+					k.blueprint.c_str(), riding, pivoted.size(),
+					k.armament != nullptr ? k.armament->turrets.size() : size_t(0));
+			if (k.blueprint == "vehicles/m1a2/m1abrams" || k.blueprint == "vehicles/t90/t90") {
+				CHECK(riding >= 10);
+				CHECK(pivoted.size() >= 3);
+			}
 			REQUIRE(mk->looks.size() == mk->materials.size());
 			size_t glass = 0, blended = 0;
 			for (size_t m = 0; m < mk->materials.size(); ++m) {

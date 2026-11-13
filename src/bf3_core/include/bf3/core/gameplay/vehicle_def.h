@@ -107,6 +107,11 @@ struct VehicleSeatDef {
 	std::vector<VehicleCameraDef> cameras;
 };
 
+struct VehiclePartTurretDef {
+	uint16_t part = 0;
+	int turret = -1;
+};
+
 struct VehicleInputModifierDef {
 	std::string action;
 	float scale = 1;
@@ -165,7 +170,9 @@ struct VehicleDef {
 	std::vector<VehicleSeatDef> seats;
 	std::vector<core::Transform> exit_points;
 	std::vector<std::pair<std::string, core::Transform>> component_meshes;
+	std::vector<int> component_mesh_turrets;
 	std::vector<VehicleTurretDef> turrets;
+	std::vector<VehiclePartTurretDef> part_turrets;
 	std::vector<VehicleWeaponDef> weapons;
 	size_t components = 0;
 

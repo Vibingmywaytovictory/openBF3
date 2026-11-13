@@ -2474,6 +2474,24 @@ TEST_SUITE("tables") {
 		for (const VehicleWeaponDef &w : m1.weapons) {
 			CHECK(w.firing != "vehicles/common/weapondata/coax_lmg_firing");
 		}
+		const auto rides = [&](uint16_t p_part) {
+			for (const VehiclePartTurretDef &p : m1.part_turrets) {
+				if (p.part == p_part) {
+					return p.turret;
+				}
+			}
+			return -2;
+		};
+		CHECK(rides(59) == int(ring - m1.turrets.data()));
+		CHECK(rides(26) == cannon->turret);
+		CHECK(rides(25) == cannon->turret);
+		CHECK(rides(14) == cannon->turret);
+		CHECK(rides(20) == int(ring - m1.turrets.data()));
+		CHECK(rides(12) == remote->turret);
+		CHECK(rides(27) == -2);
+		CHECK(rides(29) == -2);
+		CHECK(m1.part_turrets.size() >= 20);
+		CHECK(m1.component_mesh_turrets.size() == m1.component_meshes.size());
 
 		WorkBudget budget;
 		const Result<VehicleDriveDef> m1_drive = read_vehicle_drive_def(*lib, "vehicles/m1a2/m1abrams", &budget);

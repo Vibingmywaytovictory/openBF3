@@ -38,6 +38,8 @@ struct LevelVehicleKind {
 	std::vector<core::gameplay::VehicleSeatDef> seat_defs;
 	std::vector<core::Transform> exit_points;
 	std::vector<std::pair<std::string, core::Transform>> component_meshes;
+	std::vector<int> component_mesh_turrets;
+	std::vector<core::gameplay::VehiclePartTurretDef> part_turrets;
 	std::shared_ptr<const sim::vehicles::VehicleArmament> armament;
 	std::vector<uint16_t> weapon_defs;
 	sim::vehicles::VehicleDamageRule damage;
