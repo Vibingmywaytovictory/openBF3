@@ -242,8 +242,8 @@ private:
 };
 
 inline constexpr size_t kMixHistBuckets = 16;
-inline constexpr std::array<float, kMixHistBuckets - 1> kMixHistEdges = { 0.01f, 0.02f, 0.03f, 0.04f, 0.05f, 0.06f, 0.08f, 0.10f, 0.12f, 0.15f, 0.20f, 0.30f,
-	0.50f, 0.75f, 1.00f };
+inline constexpr std::array<double, kMixHistBuckets - 1> kMixHistEdges = { 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.08,
+	0.10, 0.12, 0.15, 0.20, 0.30, 0.50, 0.75, 1.00 };
 
 void record_mix_ns(MixerStats &r_stats, uint64_t p_ns, uint64_t p_block_ns);
 

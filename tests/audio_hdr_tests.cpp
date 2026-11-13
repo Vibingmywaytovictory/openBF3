@@ -761,6 +761,7 @@ TEST_SUITE("audio-hdr") {
 		CHECK(s.mix_ns_hist[15].load() == 1);
 		CHECK(ba::mix_share_quantile(s, 0.50) == doctest::Approx(0.01));
 		CHECK(ba::mix_share_quantile(s, 0.99) == doctest::Approx(0.10));
+		CHECK(ba::mix_share_quantile(s, 0.99) <= 0.10);
 		CHECK(std::isinf(ba::mix_share_quantile(s, 1.0)));
 		CHECK(s.mix_ns_max.load() == block_ns * 2);
 		CHECK(s.mix_ns_last.load() == block_ns * 2);
