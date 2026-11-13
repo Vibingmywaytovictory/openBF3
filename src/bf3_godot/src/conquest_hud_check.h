@@ -17,6 +17,8 @@ struct ConquestHudIo {
 	bool alive = false;
 	bool spawn_screen = false;
 	bool spawn_ticket_counter = false;
+	bool minimap_drawn = false;
+	bool world_icon_stand_in = false;
 	std::function<void()> deploy;
 	std::function<bool(const std::string &)> screenshot;
 };

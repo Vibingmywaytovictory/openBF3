@@ -481,11 +481,11 @@ void Bf3MinimapHud::build_godot_side() {
 	material->set_shader_parameter("detail_threshold", d.detail.alpha_threshold);
 	material->set_shader_parameter("has_detail", has_detail);
 
-	icons_ = memnew(Bf3WorldIcons);
-	icons_->set_name("WorldIcons");
-	add_child(icons_);
-	icons_->setup(atlas_, &a->atlas, WorldIconStyle{});
 	if (!session_->game_session()) {
+		icons_ = memnew(Bf3WorldIcons);
+		icons_->set_name("WorldIcons");
+		add_child(icons_);
+		icons_->setup(atlas_, &a->atlas, WorldIconStyle{});
 		control_ = memnew(Bf3MinimapControl);
 		control_->set_name("Minimap");
 		add_child(control_);
@@ -570,8 +570,10 @@ void Bf3MinimapHud::update_view() {
 		control_->set_icons(std::move(all));
 		control_->set_visible(fp);
 	}
-	const Camera3D *cam = fp ? session_->cameras().first_person() : session_->cameras().free_camera();
-	icons_->update(cam, std::move(objectives));
+	if (icons_ != nullptr) {
+		const Camera3D *cam = fp ? session_->cameras().first_person() : session_->cameras().free_camera();
+		icons_->update(cam, std::move(objectives));
+	}
 }
 
 void Bf3MinimapHud::_process([[maybe_unused]] double p_delta) {

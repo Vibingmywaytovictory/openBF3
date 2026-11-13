@@ -37,7 +37,7 @@ std::optional<HudWorldTag> squad_order_tag(uint32_t p_id, HudSquadOrder p_order,
 }
 
 HudWorldTag capture_point_tag(uint32_t p_id, const HudCapturePoint &p_point, char p_letter, std::string_view p_name,
-		const Icon3dPlacement &p_placement) {
+		float p_distance_m, const Icon3dPlacement &p_placement) {
 	HudWorldTag tag;
 	tag.id = p_id;
 	tag.component = HudTagComponent::Capturepoint;
@@ -57,6 +57,7 @@ HudWorldTag capture_point_tag(uint32_t p_id, const HudCapturePoint &p_point, cha
 	tag.data.push_back(HudDataEntry{ "Progress", As2Value::of(double(std::lround(p_point.progress * 100.0f))), true });
 	tag.data.push_back(HudDataEntry{ "Blink", As2Value::of(p_point.contested), true });
 	tag.data.push_back(HudDataEntry{ "Name", As2Value::of(std::string(p_name)), true });
+	tag.data.push_back(HudDataEntry{ "Distance", As2Value::of(double(std::lround(p_distance_m))), true });
 	tag.data.push_back(HudDataEntry{ "Snap", As2Value::of(p_placement.snapped), true });
 	return tag;
 }

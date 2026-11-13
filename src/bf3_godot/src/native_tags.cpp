@@ -272,7 +272,7 @@ void NativeTags::update_capture_points(const Camera3D *p_camera, bool p_show, co
 		}
 		const std::string name =
 				c.location_sid_hash != 0 && p_localise ? p_localise(c.location_sid_hash) : std::string();
-		ui::HudWorldTag tag = ui::capture_point_tag(kCaptureTagId + uint32_t(i), c, label, name, p);
+		ui::HudWorldTag tag = ui::capture_point_tag(kCaptureTagId + uint32_t(i), c, label, name, distance, p);
 		r_tags.tags.push_back(std::move(tag));
 		++stats_.capture_tags;
 	}

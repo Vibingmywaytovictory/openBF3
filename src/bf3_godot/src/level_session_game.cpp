@@ -12,6 +12,7 @@
 #include "godot_util.h"
 #include "hud_items.h"
 #include "match_host.h"
+#include "minimap_hud.h"
 #include "native_hud.h"
 #include "ui_assets.h"
 #include "ui_pages.h"
@@ -1565,6 +1566,9 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		io.alive = g.alive;
 		io.spawn_screen = tdm_spawn_screen_shown();
 		io.spawn_ticket_counter = tdm_screen_visible(bf3::core::ui::kSpawnTicketCounterConquestPartition);
+		const Bf3MinimapHud *minimap = Object::cast_to<Bf3MinimapHud>(get_node_or_null(NodePath("../MinimapHud")));
+		io.minimap_drawn = minimap != nullptr && minimap->ready_to_draw();
+		io.world_icon_stand_in = minimap != nullptr && minimap->world_icons() != nullptr;
 		io.deploy = [this] {
 			scripted_ui_key(KEY_ENTER, true);
 			scripted_ui_key(KEY_ENTER, false);

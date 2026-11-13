@@ -31,5 +31,5 @@ std::optional<HudSquadOrderLook> squad_order_look(HudSquadOrder p_order);
 std::optional<HudWorldTag> squad_order_tag(uint32_t p_id, HudSquadOrder p_order, const Icon3dPlacement &p_placement);
 
 HudWorldTag capture_point_tag(uint32_t p_id, const HudCapturePoint &p_point, char p_letter, std::string_view p_name,
-		const Icon3dPlacement &p_placement);
+		float p_distance_m, const Icon3dPlacement &p_placement);
 }

@@ -6,6 +6,8 @@
 #include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/util/format.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <optional>
 
@@ -63,6 +65,26 @@ void ConquestHudCheck::verify(Bf3NativeHud &r_hud, const ConquestHudIo &p_io) {
 	row("minimap_flags", paint.minimap_flags > 0 && paint.minimap_letters > 0,
 			core::fmt(
 					"%u flag icons and %u letters painted on the minimap", paint.minimap_flags, paint.minimap_letters));
+	const std::string cm = "instance1.CapturepointManager_01";
+	const auto *api = dynamic_cast<const ui::HudIcon3DManagerApi *>(slot.screen->controller(cm));
+	size_t tags = 0;
+	size_t distances = 0;
+	std::string sample;
+	if (api != nullptr) {
+		for (const std::string &path : api->tag_paths()) {
+			const std::string text = slot.screen->clip(path + ".tag.distance.nameTextClip.nameTxt").text();
+			++tags;
+			const bool digits = !text.empty() &&
+					std::all_of(text.begin(), text.end(), [](char c) { return std::isdigit(uint8_t(c)); });
+			distances += digits ? 1u : 0u;
+			sample += (sample.empty() ? "" : " ") + text;
+		}
+	}
+	row("flag_tags", tags > 0 && distances == tags,
+			core::fmt("%zu flag tags, %zu with a distance in metres: %s", tags, distances, sample.c_str()));
+	row("stand_in", p_io.minimap_drawn && !p_io.world_icon_stand_in,
+			std::string("minimap ") + (p_io.minimap_drawn ? "drawn" : "not drawn") +
+					", the Bf3WorldIcons objective stand-in " + (p_io.world_icon_stand_in ? "present" : "absent"));
 	if (!shot_.empty() && p_io.screenshot) {
 		row("shot", p_io.screenshot(shot_), shot_);
 	}
@@ -93,7 +115,7 @@ bool ConquestHudCheck::step(Bf3NativeHud &r_hud, const ConquestHudIo &p_io, doub
 		return false;
 	}
 	phase_ = Phase::Settle;
-	if (++frames_ < kConquestHudSettleFrames) {
+	if (!p_io.minimap_drawn || ++frames_ < kConquestHudSettleFrames) {
 		return false;
 	}
 	verify(r_hud, p_io);
