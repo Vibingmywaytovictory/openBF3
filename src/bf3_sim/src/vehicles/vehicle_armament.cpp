@@ -158,6 +158,10 @@ core::Transform hull_transform(const std::array<float, 4> &p_rotation, const cor
 	return core::Transform::from_rotation_translation(p_rotation, p_origin);
 }
 
+float hull_up_y(const std::array<float, 4> &p_rotation) {
+	return 1.0f - 2.0f * (p_rotation[0] * p_rotation[0] + p_rotation[2] * p_rotation[2]);
+}
+
 core::Transform turret_world(const VehicleArmament &p_armament, const ArmamentState &p_state,
 		const core::Transform &p_hull, size_t p_turret) {
 	const ArmamentTurret &t = p_armament.turrets[p_turret];

@@ -8,6 +8,7 @@
 #include "bf3/core/util/format.h"
 #include "bf3/host/client_session.h"
 #include "bf3/net/protocol.h"
+#include "bf3/sim/vehicles/vehicle_armament.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -41,10 +42,6 @@ constexpr const char *kJeep = "vehicles/growleritv/growleritv";
 constexpr const char *kTank = "vehicles/m1a2/m1abrams";
 constexpr double kZoomSettle = 0.5;
 
-float up_y(const std::array<float, 4> &p_q) {
-	return 1.0f - 2.0f * (p_q[0] * p_q[0] + p_q[2] * p_q[2]);
-}
-
 float speed(const sim::Vec3 &p_v) {
 	return std::sqrt(p_v[0] * p_v[0] + p_v[1] * p_v[1] + p_v[2] * p_v[2]);
 }
@@ -66,7 +63,7 @@ const host::PresentedVehicle *parked(
 		if (v.spawner >= p_lv.spawners.size() || p_lv.kinds[p_lv.spawners[v.spawner].kind].blueprint != p_blueprint) {
 			continue;
 		}
-		if (up_y(v.rotation) > 0.98f && speed(v.linear_velocity) < 0.05f &&
+		if (sim::vehicles::hull_up_y(v.rotation) > 0.98f && speed(v.linear_velocity) < 0.05f &&
 				(best == nullptr || v.spawner < best->spawner)) {
 			best = &v;
 		}

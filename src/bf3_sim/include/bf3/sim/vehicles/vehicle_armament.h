@@ -70,6 +70,7 @@ struct ArmamentState {
 };
 
 core::Transform hull_transform(const std::array<float, 4> &p_rotation, const core::Vec3 &p_origin);
+float hull_up_y(const std::array<float, 4> &p_rotation);
 
 core::Transform turret_world(const VehicleArmament &p_armament, const ArmamentState &p_state,
 		const core::Transform &p_hull, size_t p_turret);

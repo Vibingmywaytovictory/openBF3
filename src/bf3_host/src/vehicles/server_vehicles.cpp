@@ -434,8 +434,7 @@ void ServerVehicles::step_health(sim::Tick p_tick, std::span<const sim::Vec3> p_
 		const sim::VehicleState s = world_->state(sim::VehicleSlot(i));
 		sim::vehicles::VehicleTickInput in;
 		in.dt = sim::kTickSeconds;
-		const std::array<float, 4> &q = s.body.rotation;
-		in.up_y = 1.0f - 2.0f * (q[0] * q[0] + q[2] * q[2]);
+		in.up_y = sim::vehicles::hull_up_y(s.body.rotation);
 		in.abandon_applies = spawner.apply_damage_to_abandoned;
 		in.time_until_abandoned = spawner.time_until_abandoned;
 		in.time_until_abandoned_is_destroyed = spawner.time_until_abandoned_is_destroyed;

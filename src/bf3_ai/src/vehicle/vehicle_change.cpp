@@ -1,17 +1,13 @@
 #include "bf3/ai/vehicle/vehicle_change.h"
 
 #include "bf3/ai/behaviour/curves.h"
+#include "bf3/ai/squad/squad_world.h"
 
 #include <algorithm>
 
 namespace bf3::ai {
 
 namespace {
-
-float distance_sqr(const Vec3 &p_a, const Vec3 &p_b) {
-	const float dx = p_a.x - p_b.x, dy = p_a.y - p_b.y, dz = p_a.z - p_b.z;
-	return dz * dz + dy * dy + dx * dx;
-}
 
 bool upside_down(const ChangeVehicle &p_vehicle) {
 	return kUpsideDownUp > p_vehicle.up;
@@ -118,7 +114,7 @@ ChangeChoice choose_change(const ChangeBot &p_bot, std::span<const ChangeVehicle
 					vehicle.kind == ChangeUnitKind::Naval || manned_by_enemy(vehicle, p_bot.side)) {
 				continue;
 			}
-			const float d_sqr = distance_sqr(vehicle.position, position);
+			const float d_sqr = distance_sq(vehicle.position, position);
 			if (d_sqr > radius_sqr) {
 				continue;
 			}
@@ -169,7 +165,7 @@ ChangeChoice choose_change(const ChangeBot &p_bot, std::span<const ChangeVehicle
 	if (get_out) {
 		out.urgency *= 5.0f;
 	}
-	if (on_foot && 400.0f > distance_sqr(p_vehicles[size_t(out.target.vehicle)].position, position) &&
+	if (on_foot && 400.0f > distance_sq(p_vehicles[size_t(out.target.vehicle)].position, position) &&
 			p_bot.health < 0.25f) {
 		out.urgency *= 5.0f;
 	}
@@ -207,7 +203,7 @@ ChangeOrder change_plan_step(
 	order.goal = target.position;
 	const float reach = target.radius + p_bot.radius + 1.0f;
 	order.step =
-			distance_sqr(p_bot.position, target.position) <= reach * reach ? ChangeStep::Enter : ChangeStep::Approach;
+			distance_sq(p_bot.position, target.position) <= reach * reach ? ChangeStep::Enter : ChangeStep::Approach;
 	return order;
 }
 

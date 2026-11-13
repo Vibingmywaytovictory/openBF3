@@ -25,10 +25,6 @@ constexpr float kNavProbeHeight = 8.0f;
 constexpr float kChangeRepathMetres = 5.0f;
 constexpr float kRpmToRadiansPerSecond = 2.0f * std::numbers::pi_v<float> / 60.0f;
 
-float up_y(const std::array<float, 4> &p_q) {
-	return 1.0f - 2.0f * (p_q[0] * p_q[0] + p_q[2] * p_q[2]);
-}
-
 float ground_altitude(const sim::CollisionWorld &p_world, const sim::Vec3 &p_from, float p_origin_y) {
 	sim::StaticHit hit;
 	if (!p_world.ray(p_from, { 0.0f, -kAltitudeProbeMetres, 0.0f }, sim::query_mask::kMovement, &hit)) {
@@ -87,7 +83,7 @@ std::vector<ai::ChangeVehicle> change_vehicles(
 		c.kind = ai::ChangeUnitKind::Ground;
 		c.side = v.team;
 		c.position = s.body.com_position;
-		c.up = up_y(s.body.rotation);
+		c.up = sim::vehicles::hull_up_y(s.body.rotation);
 		c.radius = std::sqrt(kind.box.half[0] * kind.box.half[0] + kind.box.half[1] * kind.box.half[1] +
 				kind.box.half[2] * kind.box.half[2]);
 		c.max_speed = change_vehicle_max_speed(*kind.model);
