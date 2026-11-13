@@ -551,6 +551,14 @@ core::Transform ServerVehicles::hull(size_t p_vehicle) const {
 	return sim::vehicles::hull_transform(s.body.rotation, s.body.origin);
 }
 
+std::optional<float> ServerVehicles::health(size_t p_vehicle) const {
+	if (level_ == nullptr || p_vehicle >= vehicles_.size() || !vehicles_[p_vehicle].live) {
+		return std::nullopt;
+	}
+	const LevelVehicleKind &kind = level_->kinds[level_->spawners[p_vehicle].kind];
+	return sim::vehicles::vehicle_health(kind.damage, vehicles_[p_vehicle].health);
+}
+
 void ServerVehicles::resolve_weapons(sim::Tick p_tick, const sim::CollisionWorld &p_world,
 		const sim::weapons::HitTargetProvider &p_targets, std::vector<sim::weapons::DamageEvent> &r_damage) {
 	const sim::vehicles::JoinedTargets joined(p_targets, targets_);

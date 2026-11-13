@@ -233,6 +233,7 @@ public:
 
 	const TdmRules *rules() const;
 	TdmRules *rules();
+	std::optional<float> vehicle_health(uint16_t p_spawner) const;
 
 	bool set_squad_order(uint8_t p_team, uint8_t p_squad, const SquadOrderState &p_order);
 

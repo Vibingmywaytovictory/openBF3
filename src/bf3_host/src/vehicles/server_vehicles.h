@@ -114,6 +114,7 @@ public:
 	bool hidden_crew(size_t p_slot) const;
 	const VehicleGunnery &gunnery() const { return gunnery_; }
 	core::Transform hull(size_t p_vehicle) const;
+	std::optional<float> health(size_t p_vehicle) const;
 
 	std::optional<VehicleSeat> seat_of(size_t p_slot) const;
 	bool seated(size_t p_slot) const { return seat_of(p_slot).has_value(); }
