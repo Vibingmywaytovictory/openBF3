@@ -136,6 +136,8 @@ void ServerVehicles::spawn_due(sim::Tick p_tick, const sim::logic::ConquestNativ
 		++v.spawned;
 		v.command = sim::VehicleCommand();
 		v.occupants.fill(net::kNoVehicleOccupant);
+		v.seen = v.occupants;
+		v.possessed_ever = false;
 		v.seat_commands = {};
 		v.armament = sim::vehicles::ArmamentState();
 		v.health = sim::vehicles::spawned_vehicle_health(level_->kinds[s.kind].damage);
@@ -713,6 +715,12 @@ core::Status ServerVehicles::step(sim::Tick p_tick, uint64_t p_weapon_seed) {
 	std::vector<sim::VehicleCommand> commands;
 	for (size_t i = 0; i < vehicles_.size(); ++i) {
 		if (vehicles_[i].live) {
+			ServerVehicle &v = vehicles_[i];
+			if (v.occupants != v.seen) {
+				v.seen = v.occupants;
+				v.possessed = p_tick;
+				v.possessed_ever = true;
+			}
 			slots.push_back(sim::VehicleSlot(i));
 			const sim::vehicles::VehicleCondition condition = vehicles_[i].health.condition;
 			commands.push_back(condition == sim::vehicles::VehicleCondition::Destroyed ? sim::VehicleCommand()

@@ -75,6 +75,9 @@ struct ServerVehicle {
 	uint16_t last_def = sim::weapons::kNoWeapon;
 	bool wreck_on_wire = false;
 	sim::Tick exploded = 0;
+	std::array<uint8_t, net::kMaxVehicleSeats> seen{};
+	sim::Tick possessed = 0;
+	bool possessed_ever = false;
 	sim::VehicleState wreck{};
 };
 

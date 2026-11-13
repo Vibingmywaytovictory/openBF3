@@ -8,6 +8,7 @@
 #include "tdm_bot_shared.h"
 #include "tdm_bot_support.h"
 #include "tdm_strategy.h"
+#include "vehicles/bot_crew.h"
 
 #include <optional>
 
@@ -51,6 +52,7 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 	ai::InfantrySenses sensed;
 	BotIntent intent;
 	BotIntent held;
+	BotCrew crew;
 	TdmBotActivity planned = TdmBotActivity::Roam;
 	bool lost = false;
 	sim::Tick plan_tick = UINT32_MAX;
@@ -322,10 +324,12 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		}
 		const sim::SoldierState &s = states[body.slot];
 		if (!is_alive(s)) {
+			crew.drop(*body.shared, body.slot);
 			return { &s, false };
 		}
 		if (s.life != body.life) {
 			body.new_life(p_tick, s);
+			crew.new_life(*body.shared, body.slot, p_tick);
 			sensed = ai::InfantrySenses{};
 			planned = TdmBotActivity::Roam;
 			release();
@@ -352,6 +356,9 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		sh.count(&TdmBotStats::unplanned_decisions, st.unplanned - unplanned);
 		decisions = st.decisions;
 		unplanned = st.unplanned;
+		if (state != nullptr) {
+			crew.decide(sh, body.slot, *state, bot->bot_stuck(), bot->chosen_urgency());
+		}
 		if (sh.observer != nullptr) {
 			sh.observer->decided(p_tick, body.slot, bot->behaviour(), bot->activity());
 			sh.observer->urgencies(p_tick, body.slot, *bot);
@@ -368,6 +375,9 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		}
 		if (!playing || !frame.has_value() || frame->tick != p_tick) {
 			body.restricted(p_tick, cmd);
+			return cmd;
+		}
+		if (crew.command(body, *frame, cmd)) {
 			return cmd;
 		}
 		if (bot->has_plan()) {

@@ -12,6 +12,8 @@
 
 namespace bf3::host {
 
+class ServerVehicles;
+
 struct StoredOrder {
 	uint64_t serial = 0;
 	sim::commo::OrderType type = sim::commo::OrderType::None;
@@ -54,6 +56,7 @@ public:
 		return {};
 	}
 	virtual std::span<const sim::vehicles::VehicleTarget> vehicle_targets() const { return {}; }
+	virtual const ServerVehicles *server_vehicles() const { return nullptr; }
 	virtual void post_order(uint8_t p_slot, const net::OrderRequest &p_request) const {
 		(void)p_slot;
 		(void)p_request;

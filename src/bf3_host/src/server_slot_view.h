@@ -44,6 +44,7 @@ public:
 	StoredOrder stored_order(uint8_t p_slot) const override;
 	void post_order(uint8_t p_slot, const net::OrderRequest &p_request) const override;
 	std::span<const sim::vehicles::VehicleTarget> vehicle_targets() const override;
+	const ServerVehicles *server_vehicles() const override { return vehicles_; }
 
 private:
 	const SlotTable &slots_;

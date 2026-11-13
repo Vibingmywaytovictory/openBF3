@@ -2,6 +2,7 @@
 
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/tdm_brain.h"
+#include "bf3/net/protocol.h"
 #include "bf3/sim/bots/perception.h"
 #include "bf3/sim/bots/walker_brain.h"
 #include "bf3/sim/sim_types.h"
@@ -55,6 +56,7 @@ struct TdmShared {
 
 	std::array<float, tdm_bot::kHeatCells * tdm_bot::kHeatCells> heat{};
 	std::array<sim::Tick, tdm_bot::kHeatCells * tdm_bot::kHeatCells> heat_tick{};
+	std::vector<std::array<uint8_t, net::kMaxVehicleSeats>> vehicle_bookings;
 
 	sim::Tick time_tick = UINT32_MAX;
 	uint64_t perception_ns = 0, brains_ns = 0;

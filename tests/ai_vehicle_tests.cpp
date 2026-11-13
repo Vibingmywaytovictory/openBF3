@@ -1,0 +1,195 @@
+#include <doctest/doctest.h>
+
+#include "bf3/ai/behaviour/curves.h"
+#include "bf3/ai/vehicle/vehicle_change.h"
+
+#include <array>
+#include <vector>
+
+using namespace bf3;
+
+namespace {
+
+constexpr float kJeepSpeed = 25.0f;
+constexpr float kSoldierSpeed = 7.0f;
+
+ai::ChangeVehicle jeep(float p_x, int p_side = 1) {
+	ai::ChangeVehicle v;
+	v.kind = ai::ChangeUnitKind::Ground;
+	v.side = p_side;
+	v.position = { p_x, 1.0f, 0.0f };
+	v.radius = 3.0f;
+	v.max_speed = kJeepSpeed;
+	v.seats = 4;
+	return v;
+}
+
+ai::ChangeBot fresh_bot() {
+	ai::ChangeBot b;
+	b.player_id = 5;
+	b.side = 1;
+	b.radius = 0.4f;
+	b.max_speed = kSoldierSpeed;
+	b.now_s = 101.0;
+	b.spawned_s = 100.0;
+	return b;
+}
+
+}
+
+TEST_SUITE("ai-vehicle") {
+	TEST_CASE("a fresh soldier picks the nearer free jeep's driver seat") {
+		const std::vector<ai::ChangeVehicle> vehicles{ jeep(60.0f), jeep(20.0f) };
+		const ai::ChangeBot bot = fresh_bot();
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{}, false) ==
+				doctest::Approx(kSoldierSpeed * 5.0f / 15.0f));
+		const ai::ChangeChoice c = ai::choose_change(bot, vehicles);
+		REQUIRE(c.change);
+		CHECK(c.target == ai::ChangeTarget{ 1, 0 });
+		CHECK(c.best == doctest::Approx(kJeepSpeed * 5.0f));
+		CHECK(c.current == doctest::Approx(2.0f * kSoldierSpeed * 5.0f / 15.0f));
+		CHECK(c.urgency == doctest::Approx(4.0f * 6.0f));
+		CHECK_FALSE(c.get_out);
+	}
+
+	TEST_CASE("a passenger seat of an empty jeep scores nothing and its driver modifier is 0.77") {
+		const std::vector<ai::ChangeVehicle> vehicles{ jeep(20.0f) };
+		const ai::ChangeBot bot = fresh_bot();
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 1 }, true) == 0.0f);
+		CHECK(ai::change_driver_modifier(vehicles[0], false, bot.now_s) == doctest::Approx(0.77f));
+		ai::ChangeVehicle left = vehicles[0];
+		left.possessed_s = bot.now_s - 3.0;
+		CHECK(ai::change_driver_modifier(left, false, bot.now_s) == 1.0f);
+		const std::vector<ai::ChangeVehicle> just_left{ left };
+		CHECK(ai::change_unit_urgency(bot, just_left, ai::ChangeTarget{ 0, 1 }, true) ==
+				doctest::Approx((1.0f - 3.0f / 15.0f) * kJeepSpeed * 4.0f * 3.0f / 15.0f));
+		CHECK(ai::change_unit_urgency(bot, just_left, ai::ChangeTarget{ 0, 0 }, true) ==
+				doctest::Approx(kJeepSpeed * 5.0f * 3.0f / 15.0f));
+	}
+
+	TEST_CASE("a manned jeep offers its free seats by its driver's order") {
+		std::vector<ai::ChangeVehicle> vehicles{ jeep(20.0f) };
+		vehicles[0].seat[0].occupant = 9;
+		vehicles[0].seat[0].occupant_bot = true;
+		const ai::ChangeBot bot = fresh_bot();
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 0 }, true) == 0.0f);
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 1 }, true) ==
+				doctest::Approx(kJeepSpeed * 4.0f));
+		vehicles[0].seat[0].same_order = false;
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 2 }, true) ==
+				doctest::Approx(kJeepSpeed * 2.5f));
+		const ai::ChangeChoice c = ai::choose_change(bot, vehicles);
+		REQUIRE(c.change);
+		CHECK(c.target == ai::ChangeTarget{ 0, 1 });
+	}
+
+	TEST_CASE("enemy-manned, flipped, off-mesh, far, wrecked and booked vehicles are refused") {
+		const ai::ChangeBot bot = fresh_bot();
+		std::vector<ai::ChangeVehicle> enemy{ jeep(20.0f, 2) };
+		enemy[0].seat[3].occupant = 30;
+		CHECK_FALSE(ai::choose_change(bot, enemy).change);
+		enemy[0].seat[3].occupant = -1;
+		CHECK(ai::choose_change(bot, enemy).change);
+
+		std::vector<ai::ChangeVehicle> flipped{ jeep(20.0f) };
+		flipped[0].up = 0.0f;
+		CHECK_FALSE(ai::choose_change(bot, flipped).change);
+
+		std::vector<ai::ChangeVehicle> off_mesh{ jeep(20.0f) };
+		off_mesh[0].on_nav = false;
+		CHECK_FALSE(ai::choose_change(bot, off_mesh).change);
+		off_mesh[0].on_nav = true;
+		off_mesh[0].nav_gap = 3.5f;
+		CHECK_FALSE(ai::choose_change(bot, off_mesh).change);
+		off_mesh[0].nav_gap = 3.3f;
+		CHECK(ai::choose_change(bot, off_mesh).change);
+
+		CHECK_FALSE(ai::choose_change(bot, std::vector<ai::ChangeVehicle>{ jeep(76.0f) }).change);
+		CHECK(ai::choose_change(bot, std::vector<ai::ChangeVehicle>{ jeep(74.0f) }).change);
+
+		std::vector<ai::ChangeVehicle> wrecked{ jeep(20.0f) };
+		wrecked[0].health = 0.29f;
+		CHECK_FALSE(ai::choose_change(bot, wrecked).change);
+		wrecked[0].altitude = 9.0f;
+		wrecked[0].health = 1.0f;
+		CHECK_FALSE(ai::choose_change(bot, wrecked).change);
+
+		std::vector<ai::ChangeVehicle> booked{ jeep(20.0f), jeep(40.0f) };
+		booked[0].seat[0].booked_by = 7;
+		const ai::ChangeChoice c = ai::choose_change(bot, booked);
+		REQUIRE(c.change);
+		CHECK(c.target == ai::ChangeTarget{ 1, 0 });
+		booked[0].seat[0].booked_by = bot.player_id;
+		CHECK(ai::choose_change(bot, booked).target == ai::ChangeTarget{ 0, 0 });
+	}
+
+	TEST_CASE("a seated bot gets out of a flipped jeep or when stuck, and keeps a good seat") {
+		ai::ChangeBot bot = fresh_bot();
+		bot.now_s = 200.0;
+		bot.vehicle = 0;
+		bot.seat = 0;
+		std::vector<ai::ChangeVehicle> vehicles{ jeep(0.0f) };
+		vehicles[0].seat[0].occupant = bot.player_id;
+		vehicles[0].possessed_s = 150.0;
+		CHECK_FALSE(ai::choose_change(bot, vehicles).change);
+		bot.stuck = true;
+		const ai::ChangeChoice stuck = ai::choose_change(bot, vehicles);
+		CHECK(stuck.get_out);
+		CHECK(stuck.target.soldier());
+		CHECK(stuck.best == ai::kGetOutUrgency);
+		CHECK(stuck.urgency == doctest::Approx(4.0f * 5.0f));
+		bot.stuck = false;
+		vehicles[0].up = -1.0f;
+		const ai::ChangeChoice flipped = ai::choose_change(bot, vehicles);
+		CHECK(flipped.get_out);
+		const float out = kSoldierSpeed * 5.0f * 0.2f;
+		CHECK(flipped.best == doctest::Approx(out));
+		CHECK(flipped.urgency ==
+				doctest::Approx(
+						ai::DecliningSlopeCurve::calculate(out * 0.5f / (2.0f * kJeepSpeed * 5.0f)) * 4.0f * 5.0f));
+	}
+
+	TEST_CASE("a damaged vehicle's passenger bails below the bail value and its driver below 0.3 of it") {
+		ai::ChangeBot bot = fresh_bot();
+		bot.now_s = 200.0;
+		bot.vehicle = 0;
+		bot.seat = 1;
+		std::vector<ai::ChangeVehicle> vehicles{ jeep(0.0f) };
+		vehicles[0].seat[0].occupant = 9;
+		vehicles[0].seat[0].occupant_bot = true;
+		vehicles[0].seat[1].occupant = bot.player_id;
+		vehicles[0].possessed_s = 150.0;
+		vehicles[0].health = 0.5f;
+		CHECK_FALSE(ai::choose_change(bot, vehicles).change);
+		vehicles[0].health = 0.25f;
+		const ai::ChangeChoice passenger = ai::choose_change(bot, vehicles);
+		CHECK(passenger.get_out);
+		CHECK(passenger.current == 0.0f);
+		bot.seat = 0;
+		vehicles[0].seat[0].occupant = bot.player_id;
+		vehicles[0].seat[1].occupant = -1;
+		CHECK_FALSE(ai::choose_change(bot, vehicles).change);
+		vehicles[0].health = 0.08f;
+		CHECK(ai::choose_change(bot, vehicles).get_out);
+	}
+
+	TEST_CASE("the change plan approaches, enters within reach, switches seats and gets out") {
+		std::vector<ai::ChangeVehicle> vehicles{ jeep(20.0f) };
+		ai::ChangeBot bot = fresh_bot();
+		ai::ChangeOrder o = ai::change_plan_step(bot, vehicles, ai::ChangeTarget{ 0, 0 });
+		CHECK(o.step == ai::ChangeStep::Approach);
+		CHECK(o.goal.x == doctest::Approx(20.0f));
+		bot.position = { 15.8f, 0.0f, 0.0f };
+		CHECK(ai::change_plan_step(bot, vehicles, ai::ChangeTarget{ 0, 0 }).step == ai::ChangeStep::Enter);
+		vehicles[0].seat[0].occupant = 11;
+		CHECK(ai::change_plan_step(bot, vehicles, ai::ChangeTarget{ 0, 0 }).step == ai::ChangeStep::None);
+		vehicles[0].seat[0].occupant = bot.player_id;
+		bot.vehicle = 0;
+		bot.seat = 0;
+		o = ai::change_plan_step(bot, vehicles, ai::ChangeTarget{ 0, 1 });
+		CHECK(o.step == ai::ChangeStep::SelectSeat);
+		CHECK(o.seat == 1);
+		CHECK(ai::change_plan_step(bot, vehicles, ai::ChangeTarget{}).step == ai::ChangeStep::GetOut);
+		CHECK(ai::change_plan_step(bot, vehicles, ai::ChangeTarget{ 0, 0 }).step == ai::ChangeStep::None);
+	}
+}

@@ -73,6 +73,9 @@ target_sources(bf3_ai PRIVATE
     src/vehicle/vehicle_occupancy.cpp
     src/vehicle/aerial_height_map.cpp
     src/vehicle/landing_zone_manager.cpp
+    include/bf3/ai/vehicle/vehicle_change.h
+    src/vehicle/vehicle_urgency.cpp
+    src/vehicle/vehicle_change.cpp
 )
 
 target_sources(bf3_ai PRIVATE
