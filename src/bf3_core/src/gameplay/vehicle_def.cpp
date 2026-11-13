@@ -15,8 +15,6 @@ using namespace detail;
 
 namespace {
 
-constexpr size_t kMaxDepth = 32;
-constexpr size_t kMaxComponents = 8192;
 constexpr size_t kNodePasses = 8;
 
 enum class Role : uint8_t { Other, Chassis, Seat, Turret, Weapon, Camera, ExitPoint, Mesh };
@@ -31,13 +29,6 @@ struct Node {
 
 core::Transform model_transform(const level::LevelTransform &p_t) {
 	return { p_t.right, p_t.up, p_t.forward, p_t.trans };
-}
-
-bool active(const EbxInstance &p_component) {
-	if (boolean(p_component.data(), "Excluded").value_or(false)) {
-		return false;
-	}
-	return !p_component.is_a("UnlockComponentData") || boolean(p_component.data(), "InvertUnlockTest").value_or(false);
 }
 
 Role role_of(const EbxResolver &p_db, const EbxInstance &p_component) {
@@ -75,14 +66,14 @@ public:
 
 	void walk(WorkBudget &r_budget, const EbxResolver &p_db, const EbxInstance &p_container, int p_parent,
 			size_t p_depth, const level::LevelTransform &p_frame = level::LevelTransform::identity()) {
-		if (p_depth > kMaxDepth) {
+		if (p_depth > kMaxVehicleComponentDepth) {
 			return;
 		}
 		for (const EbxInstance &component : follow_all(r_budget, p_db, p_container.data(), "Components")) {
-			if (nodes.size() >= kMaxComponents) {
+			if (nodes.size() >= kMaxVehicleComponents) {
 				return;
 			}
-			if (!component.is_a("ComponentData") || !active(component)) {
+			if (!active_component(component)) {
 				continue;
 			}
 			const int at = static_cast<int>(nodes.size());
@@ -122,7 +113,7 @@ public:
 
 	int innermost(int p_at) const {
 		int current = p_at;
-		for (size_t guard = 0; guard <= kMaxDepth + 1; ++guard) {
+		for (size_t guard = 0; guard <= kMaxVehicleComponentDepth + 1; ++guard) {
 			const int child = first_turret_[static_cast<size_t>(current + 1)];
 			if (child < 0) {
 				break;
@@ -143,7 +134,7 @@ public:
 
 	int seat_of(int p_at) const {
 		int current = p_at;
-		for (size_t guard = 0; current >= 0 && guard <= kMaxDepth + 1; ++guard) {
+		for (size_t guard = 0; current >= 0 && guard <= kMaxVehicleComponentDepth + 1; ++guard) {
 			if (nodes[current].role == Role::Seat) {
 				return current;
 			}

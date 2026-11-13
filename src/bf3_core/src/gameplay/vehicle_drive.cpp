@@ -15,14 +15,6 @@ using namespace detail;
 namespace {
 
 constexpr size_t kMaxDepth = 64;
-constexpr size_t kMaxComponents = 8192;
-
-bool active(const EbxInstance &p_component) {
-	if (boolean(p_component.data(), "Excluded").value_or(false)) {
-		return false;
-	}
-	return !p_component.is_a("UnlockComponentData") || boolean(p_component.data(), "InvertUnlockTest").value_or(false);
-}
 
 DriveTransform drive_transform(const level::LevelTransform &p_t) {
 	return { p_t.right, p_t.up, p_t.forward, p_t.trans };
@@ -135,11 +127,11 @@ public:
 			if (budget_.exhausted() || numbers_.error()) {
 				return;
 			}
-			if (components_ >= kMaxComponents) {
-				numbers_.fail_message("more than " + std::to_string(kMaxComponents) + " components");
+			if (components_ >= kMaxVehicleComponents) {
+				numbers_.fail_message("more than " + std::to_string(kMaxVehicleComponents) + " components");
 				return;
 			}
-			if (!component.is_a("ComponentData") || !active(component)) {
+			if (!active_component(component)) {
 				continue;
 			}
 			++components_;

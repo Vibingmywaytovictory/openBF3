@@ -81,6 +81,16 @@ inline Result<level::LevelTransform> component_transform(const EbxInstance &p_co
 	return level::LevelTransform::from_rows(*rows);
 }
 
+inline constexpr size_t kMaxVehicleComponents = 8192;
+inline constexpr size_t kMaxVehicleComponentDepth = 32;
+
+inline bool active_component(const EbxInstance &p_component) {
+	if (!p_component.is_a("ComponentData") || boolean(p_component.data(), "Excluded").value_or(false)) {
+		return false;
+	}
+	return !p_component.is_a("UnlockComponentData") || boolean(p_component.data(), "InvertUnlockTest").value_or(false);
+}
+
 inline std::string copy_text(WorkBudget &r_budget, std::string_view p_text) {
 	if (!r_budget.take(1 + p_text.size() / WorkBudget::kBytesPerUnit)) {
 		return {};
