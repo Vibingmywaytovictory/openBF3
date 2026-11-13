@@ -4222,6 +4222,50 @@ float horizontal(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 	return std::sqrt(dx * dx + dz * dz);
 }
 
+std::optional<uint16_t> tank_cannon(const host::LevelVehicles &p_lv) {
+	std::optional<uint16_t> out;
+	for (size_t i = 0; i < p_lv.weapons.size(); ++i) {
+		out = p_lv.weapons[i].variant == "vehicles/common/weapondata/mbt_cannon_firing" ? uint16_t(i) : out;
+	}
+	return out;
+}
+
+bool carries(const host::LevelVehicleKind &p_kind, uint16_t p_weapon) {
+	return std::find(p_kind.weapon_defs.begin(), p_kind.weapon_defs.end(), p_weapon) != p_kind.weapon_defs.end();
+}
+
+struct PairCandidate {
+	uint16_t spawner = 0;
+	sim::Vec3 at{};
+};
+
+struct TankPair {
+	uint16_t tank = 0;
+	uint16_t target = 0;
+	float range = INFINITY;
+};
+
+std::optional<TankPair> nearest_tank_pair(const host::LevelVehicles &p_lv, uint16_t p_cannon,
+		const std::vector<PairCandidate> &p_candidates,
+		const std::function<bool(const host::LevelVehicleKind &)> &p_target,
+		const std::function<bool(const PairCandidate &, const PairCandidate &)> &p_clear) {
+	std::optional<TankPair> out;
+	for (const PairCandidate &t : p_candidates) {
+		if (!carries(p_lv.kinds[p_lv.spawners[t.spawner].kind], p_cannon)) {
+			continue;
+		}
+		for (const PairCandidate &j : p_candidates) {
+			const float range = horizontal(t.at, j.at);
+			if (j.spawner == t.spawner || !p_target(p_lv.kinds[p_lv.spawners[j.spawner].kind]) || range < 15.0f ||
+					range > 120.0f || (out && range >= out->range) || !p_clear(t, j)) {
+				continue;
+			}
+			out = TankPair{ t.spawner, j.spawner, range };
+		}
+	}
+	return out;
+}
+
 std::array<float, 2> heading_of(const std::array<float, 4> &p_rotation) {
 	const std::array<float, 4> &q = p_rotation;
 	const float x = 2.0f * (q[0] * q[2] + q[3] * q[1]), z = 1.0f - 2.0f * (q[0] * q[0] + q[1] * q[1]);
@@ -5051,14 +5095,11 @@ TEST_SUITE("host-vehicles-armor") {
 		for (const std::string &n : lv.notes) {
 			std::printf("armor: %s\n", n.c_str());
 		}
-		std::optional<uint16_t> cannon_def;
 		for (size_t i = 0; i < lv.weapons.size(); ++i) {
 			std::printf("armor: weapon %zu %s, rate %.0f, magazine %d\n", i, lv.weapons[i].variant.c_str(),
 					double(lv.weapons[i].fire.rate_of_fire), int(lv.weapons[i].fire.magazine_capacity));
-			if (lv.weapons[i].variant == "vehicles/common/weapondata/mbt_cannon_firing") {
-				cannon_def = uint16_t(i);
-			}
 		}
+		const std::optional<uint16_t> cannon_def = tank_cannon(lv);
 		REQUIRE(cannon_def.has_value());
 		std::vector<uint16_t> tank_kinds;
 		for (size_t k = 0; k < lv.kinds.size(); ++k) {
@@ -5067,9 +5108,7 @@ TEST_SUITE("host-vehicles-armor") {
 					kind.blueprint.c_str(), unsigned(kind.model->wheel_count), int(host::land_tracked(*kind.model)),
 					kind.armament ? kind.armament->turrets.size() : size_t(0),
 					kind.armament ? kind.armament->weapons.size() : size_t(0));
-			if (host::land_tracked(*kind.model) && kind.armament != nullptr &&
-					std::find(kind.weapon_defs.begin(), kind.weapon_defs.end(), *cannon_def) !=
-							kind.weapon_defs.end()) {
+			if (host::land_tracked(*kind.model) && kind.armament != nullptr && carries(kind, *cannon_def)) {
 				tank_kinds.push_back(uint16_t(k));
 			}
 		}
@@ -5385,47 +5424,32 @@ struct NeighbourLevel {
 NeighbourLevel with_vehicle_beside(
 		const tdm::TdmLevel &p_level, const std::function<bool(const host::LevelVehicleKind &)> &p_target) {
 	const host::LevelVehicles &lv = *p_level.shared->vehicles;
-	std::optional<uint16_t> cannon_def;
-	for (size_t i = 0; i < lv.weapons.size(); ++i) {
-		cannon_def = lv.weapons[i].variant == "vehicles/common/weapondata/mbt_cannon_firing" ? uint16_t(i) : cannon_def;
-	}
+	const std::optional<uint16_t> cannon_def = tank_cannon(lv);
 	REQUIRE(cannon_def.has_value());
-	const auto tank = [&](const host::LevelVehicleSpawner &p_s) {
-		const std::vector<uint16_t> &defs = lv.kinds[p_s.kind].weapon_defs;
-		return std::find(defs.begin(), defs.end(), *cannon_def) != defs.end();
-	};
-	std::optional<uint16_t> target, gunner;
-	float best = INFINITY;
-	for (size_t t = 0; t < lv.spawners.size(); ++t) {
-		if (!p_target(lv.kinds[lv.spawners[t].kind])) {
-			continue;
-		}
-		for (size_t k = 0; k < lv.spawners.size(); ++k) {
-			const float range = horizontal(lv.spawners[t].placement.position, lv.spawners[k].placement.position);
-			if (tank(lv.spawners[k]) && range >= 15.0f && range <= 120.0f && range < best) {
-				best = range;
-				target = uint16_t(t);
-				gunner = uint16_t(k);
-			}
-		}
+	std::vector<PairCandidate> placed;
+	for (size_t s = 0; s < lv.spawners.size(); ++s) {
+		placed.push_back({ uint16_t(s), lv.spawners[s].placement.position });
 	}
-	REQUIRE(target.has_value());
-	const sim::Vec3 at = lv.spawners[*target].placement.position;
+	const std::optional<TankPair> pair = nearest_tank_pair(
+			lv, *cannon_def, placed, p_target, [](const PairCandidate &, const PairCandidate &) { return true; });
+	REQUIRE(pair.has_value());
+	const uint16_t target = pair->target, gunner = pair->tank;
+	const sim::Vec3 at = lv.spawners[target].placement.position;
 	std::optional<uint16_t> neighbour;
 	float nearest = INFINITY;
 	for (size_t n = 0; n < lv.spawners.size(); ++n) {
 		const float d = horizontal(lv.spawners[n].placement.position, at);
-		if (n != *target && !tank(lv.spawners[n]) && d < nearest) {
+		if (n != target && !carries(lv.kinds[lv.spawners[n].kind], *cannon_def) && d < nearest) {
 			nearest = d;
 			neighbour = uint16_t(n);
 		}
 	}
 	REQUIRE(neighbour.has_value());
-	const core::gameplay::Explosion &x = lv.kinds[lv.spawners[*target].kind].explosion;
+	const core::gameplay::Explosion &x = lv.kinds[lv.spawners[target].kind].explosion;
 	REQUIRE(x.present);
 	const float gap = 0.5f * (x.inner_blast_radius + x.blast_radius) + 1.0f;
-	const sim::Vec3 from = lv.spawners[*gunner].placement.position;
-	const float dx = at[0] - from[0], dz = at[2] - from[2], len = std::sqrt(dx * dx + dz * dz);
+	const sim::Vec3 from = lv.spawners[gunner].placement.position;
+	const float dx = at[0] - from[0], dz = at[2] - from[2], len = horizontal(at, from);
 	core::Result<std::unique_ptr<sim::CollisionWorld>> w = sim::CollisionWorld::create(p_level.shared->static_world);
 	REQUIRE(w.ok());
 	const sim::Vec3 old = lv.spawners[*neighbour].placement.position;
@@ -5434,20 +5458,20 @@ NeighbourLevel with_vehicle_beside(
 	auto vehicles = std::make_shared<host::LevelVehicles>(lv);
 	host::LevelVehicleSpawner &moved = vehicles->spawners[*neighbour];
 	moved.placement.position = { nx, ground_at(**w, nx, nz, at[1] + 5.0f)[1] + clearance, nz };
-	moved.placement.rotation = lv.spawners[*target].placement.rotation;
+	moved.placement.rotation = lv.spawners[target].placement.rotation;
 	auto shared = std::make_shared<host::SharedLevel>(*p_level.shared);
 	shared->vehicles = vehicles;
 	NeighbourLevel out;
 	out.level.shared = shared;
 	out.level.bots = p_level.bots;
 	out.level.cache_root = p_level.cache_root;
-	out.target = *target;
+	out.target = target;
 	out.neighbour = *neighbour;
 	out.gap = gap;
 	std::printf("damage: the %s of spawner %u moved %.1f m beside the %s of spawner %u, off the line from the tank "
 				"of spawner %u\n",
 			lv.kinds[moved.kind].blueprint.c_str(), unsigned(*neighbour), double(gap),
-			lv.kinds[lv.spawners[*target].kind].blueprint.c_str(), unsigned(*target), unsigned(*gunner));
+			lv.kinds[lv.spawners[target].kind].blueprint.c_str(), unsigned(target), unsigned(gunner));
 	return out;
 }
 
@@ -5455,25 +5479,8 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 		bool p_teammate_driver = false, std::optional<uint16_t> p_neighbour = std::nullopt) {
 	WreckRun run;
 	const host::LevelVehicles &lv = *r_level.shared->vehicles;
-	std::optional<uint16_t> cannon_def;
-	for (size_t i = 0; i < lv.weapons.size(); ++i) {
-		if (lv.weapons[i].variant == "vehicles/common/weapondata/mbt_cannon_firing") {
-			cannon_def = uint16_t(i);
-		}
-	}
+	const std::optional<uint16_t> cannon_def = tank_cannon(lv);
 	REQUIRE(cannon_def.has_value());
-	std::vector<uint16_t> tank_kinds, target_kinds;
-	for (size_t k = 0; k < lv.kinds.size(); ++k) {
-		const host::LevelVehicleKind &kind = lv.kinds[k];
-		if (std::find(kind.weapon_defs.begin(), kind.weapon_defs.end(), *cannon_def) != kind.weapon_defs.end()) {
-			tank_kinds.push_back(uint16_t(k));
-		}
-		if (p_target(kind)) {
-			target_kinds.push_back(uint16_t(k));
-		}
-	}
-	REQUIRE(!tank_kinds.empty());
-	REQUIRE(!target_kinds.empty());
 
 	std::unique_ptr<Match> m = start_match(
 			r_level, false, 61u, 0, 1, [](host::GameServerConfig &r_config) { r_config.ghost_scope = false; });
@@ -5506,36 +5513,21 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 		m->tick();
 		watch.take(m->out, p.peer());
 	}
-	const net::VehicleWire *tank = nullptr;
-	const net::VehicleWire *target = nullptr;
-	float best = INFINITY;
-	for (const net::VehicleWire &t : watch.latest) {
-		if (std::find(tank_kinds.begin(), tank_kinds.end(), lv.spawners[t.spawner].kind) == tank_kinds.end() ||
-				!parked_upright(t.state.body.rotation, t.state.body.linear_velocity)) {
-			continue;
-		}
-		for (const net::VehicleWire &j : watch.latest) {
-			if (j.spawner == t.spawner ||
-					std::find(target_kinds.begin(), target_kinds.end(), lv.spawners[j.spawner].kind) ==
-							target_kinds.end() ||
-					!parked_upright(j.state.body.rotation, j.state.body.linear_velocity)) {
-				continue;
-			}
-			const float range = horizontal(t.state.body.com_position, j.state.body.com_position);
-			const sim::Vec3 gun = add(t.state.body.com_position, 0.0f, 1.1f, 0.0f);
-			const sim::Vec3 aim = add(j.state.body.com_position, 0.0f, 0.3f, 0.0f);
-			if (range < 15.0f || range > 120.0f || range >= best ||
-					!clear_line(*m->world, gun, aim, watch.latest, t.spawner, j.spawner)) {
-				continue;
-			}
-			best = range;
-			tank = &t;
-			target = &j;
+	std::vector<PairCandidate> parked;
+	for (const net::VehicleWire &w : watch.latest) {
+		if (parked_upright(w.state.body.rotation, w.state.body.linear_velocity)) {
+			parked.push_back({ w.spawner, w.state.body.com_position });
 		}
 	}
-	REQUIRE(tank != nullptr);
-	REQUIRE(target != nullptr);
-	const uint16_t tank_spawner = tank->spawner, target_spawner = target->spawner;
+	const std::optional<TankPair> pair = nearest_tank_pair(
+			lv, *cannon_def, parked, p_target, [&](const PairCandidate &p_t, const PairCandidate &p_j) {
+				return clear_line(*m->world, add(p_t.at, 0.0f, 1.1f, 0.0f), add(p_j.at, 0.0f, 0.3f, 0.0f), watch.latest,
+						p_t.spawner, p_j.spawner);
+			});
+	REQUIRE(pair.has_value());
+	const uint16_t tank_spawner = pair->tank, target_spawner = pair->target;
+	const float best = pair->range;
+	const net::VehicleWire *target = watch.of(target_spawner);
 	const host::LevelVehicleKind &tank_kind = lv.kinds[lv.spawners[tank_spawner].kind];
 	const host::LevelVehicleKind &target_kind = lv.kinds[lv.spawners[target_spawner].kind];
 	const float spawn_delay = lv.spawners[target_spawner].spawn_delay;
@@ -5597,7 +5589,7 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 			},
 			60));
 	const float away_x = target_at[0] - tank_at[0], away_z = target_at[2] - tank_at[2];
-	const float away_len = std::max(1e-3f, std::sqrt(away_x * away_x + away_z * away_z));
+	const float away_len = std::max(1e-3f, horizontal(target_at, tank_at));
 	const float dir_x = away_x / away_len, dir_z = away_z / away_len;
 	REQUIRE(target_kind.explosion.present);
 	const float stand = target_kind.explosion.inner_blast_radius +
@@ -5765,10 +5757,7 @@ void check_blast_relation(const tdm::TdmLevel &p_level) {
 	REQUIRE(gunnery.table() != nullptr);
 	host::VehicleDamageSource source;
 	source.configure(*gunnery.table(), lv.weapons);
-	std::optional<uint16_t> cannon;
-	for (size_t i = 0; i < lv.weapons.size(); ++i) {
-		cannon = lv.weapons[i].variant == "vehicles/common/weapondata/mbt_cannon_firing" ? uint16_t(i) : cannon;
-	}
+	const std::optional<uint16_t> cannon = tank_cannon(lv);
 	REQUIRE(cannon.has_value());
 	const sim::weapons::SurfacePair blast = materials.pair_of(lv.weapons[*cannon].projectile.explosion.material);
 	REQUIRE(blast.resolved);
@@ -6071,10 +6060,7 @@ TEST_SUITE("host-vehicles-damage") {
 		REQUIRE(gunnery.table() != nullptr);
 		host::VehicleDamageSource shells;
 		shells.configure(*gunnery.table(), lv.weapons);
-		std::optional<uint16_t> cannon;
-		for (size_t i = 0; i < lv.weapons.size(); ++i) {
-			cannon = lv.weapons[i].variant == "vehicles/common/weapondata/mbt_cannon_firing" ? uint16_t(i) : cannon;
-		}
+		const std::optional<uint16_t> cannon = tank_cannon(lv);
 		REQUIRE(cannon.has_value());
 		struct Round {
 			const char *name;
