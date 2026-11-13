@@ -134,7 +134,7 @@ std::array<ai::WeaponChoice, sw::kMaxWeaponSlots> vehicle_weapon_choices(
 		c.ammo = p_arms.rounds(s);
 		c.max_range = weapon_range(p_gunplay, def);
 		const sw::GadgetDef *g = gadget_of(p_gunplay, def);
-		if (g == nullptr || c.type == ai::WeaponType::C4) {
+		if (s != kSlotGrenade && (g == nullptr || c.type == ai::WeaponType::C4)) {
 			c.strength = int(std::lround(vehicle_strength(*d, def, p_source, p_property)));
 		}
 	}

@@ -104,7 +104,6 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		frame.emplace(body.sense_revive(now, *state, view(), sighting));
 		const BotFrame &fr = *frame;
 		const bool seated = fr.visible && body.target_seated(fr);
-		sensed.enemy_visible = fr.visible && !seated;
 		sensed.blind_fire = body.targeting.blind_until() > now;
 		sensed.shot_at = fr.shot_recent;
 		sensed.low_health = fr.self.health < body.cfg().retreat_below_hp;
@@ -121,6 +120,7 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		sensed.supply_target = support.supply;
 		sensed.call_medic = support.call;
 		sensed.vehicle_visible = (!fr.visible || seated) && body.sense_vehicle(fr);
+		sensed.enemy_visible = fr.visible && !(seated && sensed.vehicle_visible);
 		sensed.repair_target = body.sense_repair(fr);
 	}
 

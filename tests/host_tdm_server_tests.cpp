@@ -7445,3 +7445,40 @@ TEST_SUITE("host-bots-gadgets") {
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 }
+
+TEST_SUITE("host-bots-gadgets") {
+	TEST_CASE("bot gadgets: MP_007 ConquestSmall0: an assault bot, whose kit scores nothing against an MBT's hull, "
+			  "keeps firing at the enemy driver it sees as a soldier") {
+		tdm::TdmLevel *level = tdm::load_conquest_bots_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		auto stats = std::make_shared<host::TdmBotStats>();
+		std::unique_ptr<Match> m = start_match(
+				*level, true, 113u, 0, 1, gadget_bot_server(*level, uint8_t(host::KitRole::Assault), stats, false));
+		const GadgetBotMatch g = gadget_bot_match(*m);
+		REQUIRE(g.mate != nullptr);
+		const size_t enemy = enemy_script(*m, g.bot);
+		REQUIRE(enemy < m->peers.size());
+		m->peers[enemy]->spawn_request(0);
+		REQUIRE(m->until([&] { return is_alive(m->state(m->peers[enemy]->slot())); }, 900));
+		VehicleWatch watch;
+		const uint32_t watcher = g.mate->peer();
+		const std::optional<TankStand> tank =
+				tank_with_stand(*m, watch, watcher, [](uint8_t p_team) { return p_team != 0; });
+		REQUIRE(tank.has_value());
+		REQUIRE(seat_driver(*m, watch, watcher, enemy, tank->spawner));
+		const uint16_t view = m->state(g.bot)->yaw;
+		const std::optional<sim::Vec3> stand = stand_in_view(*m, tank->centre, view);
+		REQUIRE(stand.has_value());
+		m->place(g.bot, *stand, view);
+		const uint64_t bursts = stats->bursts.load();
+		m->ticks(600);
+		std::printf("bot gadgets: the assault bot %.1f m from the %s of spawner %u with an enemy driver: %llu bursts "
+					"in 10 s\n",
+				double(horizontal(*stand, tank->centre)), blueprint_of(*m, tank->spawner).c_str(),
+				unsigned(tank->spawner), (unsigned long long)(stats->bursts.load() - bursts));
+		CHECK(stats->bursts.load() > bursts);
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+}

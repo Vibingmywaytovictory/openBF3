@@ -141,7 +141,8 @@ WeaponCommand BotWeapons::input(TdmShared &r_shared, uint8_t p_slot, const BotAr
 					tapped_ = false;
 				}
 			} else if (trigger == Trigger::Launcher || trigger == Trigger::Place) {
-				if (in_hand && q.aligned && phase == sw::WeaponPhase::Ready && ss.magazine > 0 && !tapped_) {
+				if (in_hand && q.aligned && phase == sw::WeaponPhase::Ready && ss.magazine > 0 && !tapped_ &&
+						!friend_in_line(sh, p_slot, q.position, q.eye, q.view_yaw, q.view_pitch, q.target_distance)) {
 					fire = true;
 					tapped_ = true;
 				} else {
