@@ -102,6 +102,7 @@ public:
 	void spawn_own(const sim::weapons::ShotEvent &p_shot, const ShotView &p_view);
 
 	void queue_remote(const net::RemoteShot &p_shot, uint8_t p_variant = 0);
+	void set_guidance(const sim::weapons::GuidanceTargets *p_targets);
 	void step_own(sim::Tick p_tick, const sim::CollisionWorld &p_world, const ReceivedRecordSource &p_records, PresentationEvents &r_events);
 	void step_remote(double p_render_ticks, const sim::CollisionWorld &p_world, std::span<const net::OtherPose> p_others, PresentationEvents &r_events);
 

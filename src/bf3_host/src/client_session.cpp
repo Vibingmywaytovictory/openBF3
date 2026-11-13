@@ -463,6 +463,7 @@ core::Result<std::shared_ptr<const ClientGunplayInputs>> client_gunplay_inputs(c
 	}
 	in->suppression = *suppression;
 	in->shot_frame = shot_frame(*p_level.static_world);
+	in->vehicles = p_level.vehicles;
 	in->load_mechanics = load_mechanics_cfg;
 	return std::shared_ptr<const ClientGunplayInputs>(std::move(in));
 }

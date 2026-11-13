@@ -2,6 +2,7 @@
 
 #include "bf3/host/kits.h"
 #include "bf3/host/spawn_effects.h"
+#include "server_gadgets.h"
 
 #include <algorithm>
 #include <utility>
@@ -237,6 +238,7 @@ void Combat::fill_snapshot(size_t p_slot, net::Snapshot &r_snapshot) const {
 			r_snapshot.own_suppression = net::OwnSuppression{ s.counter,
 				uint16_t(std::min<sim::Tick>(r_snapshot.server_tick - s.hit_tick, net::kMaxSuppressionAge)) };
 		}
+		r_snapshot.own_lock = own_lock_wire(gunplay_->lock_state(uint8_t(p_slot)));
 	}
 	for (net::OtherSoldier &o : r_snapshot.others) {
 		if (o.slot < per_slot_.size() && per_slot_[o.slot].record_valid) {

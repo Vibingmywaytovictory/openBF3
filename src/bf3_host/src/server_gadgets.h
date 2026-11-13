@@ -22,16 +22,6 @@ namespace bf3::host {
 struct GunplayLevel;
 class SquadTable;
 
-class LockGuidance final : public sim::weapons::GuidanceTargets {
-public:
-	void set(std::span<const sim::weapons::LockCandidate> p_candidates);
-	std::span<const sim::weapons::LockCandidate> candidates() const { return candidates_; }
-	std::optional<sim::weapons::GuidanceTarget> guidance_target(uint32_t p_id) const override;
-
-private:
-	std::vector<sim::weapons::LockCandidate> candidates_;
-};
-
 struct GadgetSoldier {
 	sim::SoldierState *state = nullptr;
 	sim::weapons::SoldierWeaponsState *weapons = nullptr;
@@ -96,6 +86,8 @@ private:
 	mutable GadgetStats stats_;
 	sim::Tick tick_ = 0;
 };
+
+std::optional<net::OwnLock> own_lock_wire(const sim::weapons::WeaponLockState &p_lock);
 
 inline constexpr sim::Tick kDeployableScopeTicks = 30;
 inline constexpr uint32_t kPackShotIndex = 0x80000000u;

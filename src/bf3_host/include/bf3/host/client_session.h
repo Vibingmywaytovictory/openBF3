@@ -323,6 +323,7 @@ struct PresentationFrame {
 	uint16_t deployable_count = 0;
 	std::array<net::DeployableWire, kMaxPresentedDeployables> deployables{};
 	float own_suppression = 0.0f;
+	net::OwnLock own_lock;
 	std::array<net::SpotRow, net::kMaxSlots> spots = kNoSpots;
 	ReceivedOrder own_order;
 	bool conquest_valid = false;
@@ -407,6 +408,7 @@ struct ClientGunplayInputs {
 	std::shared_ptr<const core::gameplay::SpecializationTable> specializations;
 	sim::weapons::SuppressionDef suppression;
 	net::ShotQuantization shot_frame;
+	std::shared_ptr<const struct LevelVehicles> vehicles;
 
 	std::function<core::Result<sim::weapons::Mechanics>(const std::string &p_path)> load_mechanics;
 };

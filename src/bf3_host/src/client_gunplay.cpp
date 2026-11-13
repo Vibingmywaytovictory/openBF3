@@ -1,6 +1,7 @@
 #include "client_gunplay.h"
 
 #include "bf3/host/gunplay.h"
+#include "bf3/host/level_vehicles.h"
 #include "bf3/host/spawn_effects.h"
 
 #include <algorithm>
@@ -151,7 +152,10 @@ void ClientGunplay::Emit::emitted(const sim::Command &p_command, const sim::weap
 			s.fired_ns_ = s.clock_();
 		}
 		if (s.projectiles_ != nullptr && (e.flags & present_flags::kNoRound) == 0) {
-			s.projectiles_->spawn_own(shot, have_view ? v.view : ShotView{});
+			sim::weapons::ShotEvent guided = shot;
+			guided.lock_target = s.own_lock_ && s.own_lock_->locked ? net::lock_target_of(s.own_lock_->target)
+																	: sim::weapons::kNoLockTarget;
+			s.projectiles_->spawn_own(guided, have_view ? v.view : ShotView{});
 		}
 	}
 	for (size_t i = 0; i < p_output.timed_count && i < p_output.timed.size(); ++i) {
@@ -228,6 +232,8 @@ std::optional<GunplayRefusal> ClientGunplay::match_info(const net::MatchInfo &p_
 		return GunplayRefusal{ net::mismatch_bits::kWeapon, "weapon table mismatch (" + p.error().message + ")" };
 	}
 	projectiles_ = std::move(*p);
+	projectiles_->set_guidance(&guidance_);
+	own_lock_.reset();
 	on_ = true;
 	return std::nullopt;
 }
@@ -270,6 +276,7 @@ void ClientGunplay::snapshot(const net::Snapshot &p_snapshot, bool p_newer) {
 			}
 		}
 		wire_tick_ = p_snapshot.server_tick;
+		own_lock_ = p_snapshot.own_lock;
 	}
 }
 
@@ -281,6 +288,39 @@ void ClientGunplay::others(const net::SnapshotOthers &p_others, uint64_t p_now) 
 
 bool ClientGunplay::def_ok(uint32_t p_def) const {
 	return table_ != nullptr && p_def < table_->defs.size();
+}
+
+bool ClientGunplay::fire_needs_lock(const sim::Command &p_command) const {
+	if (!on_ || p_command.tick == 0) {
+		return false;
+	}
+	const sim::WeaponPredictionEntry *e = lane_->newest_at_or_below(p_command.tick - 1u);
+	if (e == nullptr) {
+		return false;
+	}
+	const sim::weapons::WeaponInput in = sim::weapons::weapon_input(p_command);
+	const sim::weapons::WeaponSlotState &s =
+			e->state.slots[in.select_slot < sim::weapons::kMaxWeaponSlots ? in.select_slot : e->state.active];
+	return def_ok(s.def) && table_->def(s.def, s.variant).locking.fire_only_when_locked;
+}
+
+void ClientGunplay::guide_vehicles(const PresentationFrame &p_frame) {
+	lock_candidates_.clear();
+	if (inputs_ != nullptr && inputs_->vehicles != nullptr) {
+		const LevelVehicles &lv = *inputs_->vehicles;
+		for (size_t i = 0; i < p_frame.vehicle_count && i < p_frame.vehicles.size(); ++i) {
+			const PresentedVehicle &v = p_frame.vehicles[i];
+			if (v.exploded || v.spawner >= lv.spawners.size() || lv.spawners[v.spawner].kind >= lv.kinds.size()) {
+				continue;
+			}
+			const bool occupied = std::any_of(v.occupants.begin(),
+					v.occupants.begin() + std::min<size_t>(v.seat_count, v.occupants.size()),
+					[](uint8_t p_o) { return p_o != net::kNoVehicleOccupant; });
+			lock_candidates_.push_back(lock_candidate_of(
+					lv.kinds[lv.spawners[v.spawner].kind], v.spawner, v.team, v.com_position, v.rotation, occupied));
+		}
+	}
+	guidance_.set(lock_candidates_);
 }
 
 uint8_t ClientGunplay::round_flag(uint16_t p_def, uint8_t p_variant) const {
@@ -534,6 +574,11 @@ void ClientGunplay::command_made(sim::Command &r_command, const InputSample &p_i
 	if (pressed && s.life >= p_own_life && !s.free_camera) {
 		r_command.buttons |= sim::buttons::kFire;
 	}
+	if ((r_command.buttons & sim::buttons::kFire) != 0 && fire_needs_lock(r_command) &&
+			!(own_lock_ && own_lock_->locked)) {
+		r_command.buttons &= ~sim::buttons::kFire;
+		++lock_stripped_fire_;
+	}
 
 	double render = 0;
 	sim::ViewQuality quality = sim::ViewQuality::None;
@@ -607,6 +652,7 @@ void ClientGunplay::publish(PresentationFrame &r_frame, std::span<const net::Oth
 	r_frame.own_kit = kit_;
 	r_frame.own_team = team_;
 	r_frame.own_weapons_valid = false;
+	r_frame.own_lock = own_lock_.value_or(net::OwnLock{});
 	r_frame.own_suppression = on_ && inputs_ != nullptr && r_frame.valid
 			? sim::weapons::suppression_scale(inputs_->suppression, suppression_, r_frame.tick)
 			: 0.0f;

@@ -7707,6 +7707,17 @@ struct GuidedWatch final : host::GunplayObserver {
 	std::vector<sw::ImpactEvent> impacts;
 	std::vector<sw::DetonationEvent> detonations;
 	std::vector<sw::DamageEvent> hits;
+	std::vector<sw::ShotEvent> shots;
+
+	void weapon_tick(uint8_t p_slot, const sim::Command &p_command, const sw::SoldierWeaponsState &p_after,
+			const sw::WeaponTickOutput &p_out) override {
+		(void)p_slot, (void)p_command, (void)p_after;
+		for (uint8_t i = 0; i < p_out.shot_count; ++i) {
+			if (p_out.shots[i].def == def) {
+				shots.push_back(p_out.shots[i]);
+			}
+		}
+	}
 
 	void projectiles(
 			uint32_t p_tick, const sw::ProjectileStepOutput &p_out, std::span<const sw::Projectile> p_live) override {
@@ -7864,6 +7875,12 @@ TEST_SUITE("host-gadgets-guided") {
 		CHECK(lock.secondary.locked);
 		CHECK_FALSE(lock.primary.locked);
 		CHECK(lock.target() == tank_id);
+		m->ticks(1);
+		REQUIRE(gunner.last_snapshot.has_value());
+		REQUIRE(gunner.last_snapshot->own_lock.has_value());
+		CHECK(gunner.last_snapshot->own_lock->locked);
+		CHECK(gunner.last_snapshot->own_lock->target == *tank);
+		CHECK(gunner.last_snapshot->own_lock->amount == 255);
 		CHECK(double(lock_ticks) / double(sim::kSimHz) >= 2.25);
 		CHECK(double(lock_ticks) / double(sim::kSimHz) <= 2.25 + 2.0 * 0.0667 + 1.0 / 60.0);
 		const uint64_t launches = m->server.gunplay()->gadget_stats().guided_launches;
@@ -7871,6 +7888,9 @@ TEST_SUITE("host-gadgets-guided") {
 		fire = true;
 		REQUIRE(m->until([&] { return m->server.gunplay()->stats().shots > shots; }, 120));
 		fire = false;
+		REQUIRE(watch->shots.size() == 1u);
+		CHECK(watch->shots.front().lock_target == tank_id);
+		CHECK(net::remote_shot_of(watch->shots.front()).lock_target == tank_id);
 		CHECK(m->server.gunplay()->gadget_stats().guided_launches == launches + 1u);
 		REQUIRE(m->until([&] { return !watch->detonations.empty(); }, 15 * 60));
 		m->ticks(2);

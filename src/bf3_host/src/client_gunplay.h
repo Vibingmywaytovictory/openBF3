@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/host/client_session.h"
+#include "bf3/host/gadgets.h"
 #include "bf3/net/netsim.h"
 #include "bf3/net/other_sample.h"
 #include "bf3/net/protocol.h"
@@ -59,6 +60,7 @@ public:
 	void predict(const sim::Command &p_command, const sim::SoldierState &p_before, const sim::SoldierState &p_after, const sim::CollisionWorld &p_world);
 	uint32_t others_ack_bits(bool p_have_snapshot, uint16_t p_newest_seq) const;
 	void publish(PresentationFrame &r_frame, std::span<const net::OtherPose> p_poses, const sim::CollisionWorld &p_world);
+	void guide_vehicles(const PresentationFrame &p_frame);
 
 	void take_predicted(std::vector<PredictedShot> &r_shots, std::vector<PredictedTimed> &r_timed);
 	void take_own_test_samples(std::vector<OwnTestSample> &r_samples);
@@ -120,6 +122,7 @@ private:
 	static constexpr size_t kLogLimit = size_t(1) << 20;
 
 	bool def_ok(uint32_t p_def) const;
+	bool fire_needs_lock(const sim::Command &p_command) const;
 	uint8_t round_flag(uint16_t p_def, uint8_t p_variant) const;
 	bool wire_at(sim::Tick p_tick) const { return on_ && wire_valid_ && wire_tick_ == p_tick; }
 	bool put_wire(const sim::SoldierState &p_s, sim::Tick p_spawn_tick);
@@ -148,6 +151,10 @@ private:
 	net::WeaponsWire wire_;
 	sim::Tick wire_tick_ = 0;
 	sim::weapons::SuppressionState suppression_;
+	std::optional<net::OwnLock> own_lock_;
+	LockGuidance guidance_;
+	std::vector<sim::weapons::LockCandidate> lock_candidates_;
+	uint64_t lock_stripped_fire_ = 0;
 	sim::Tick newest_tick_ = 0;
 	std::array<CommandView, kCommandViews> views_{};
 	bool fire_seen_ = false;

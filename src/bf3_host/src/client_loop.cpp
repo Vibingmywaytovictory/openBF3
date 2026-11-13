@@ -186,6 +186,7 @@ void ClientLoop::publish(uint64_t p_now, const sim::PredictionEntry *p_made, con
 	f.first_snapshot_tick = first_snapshot_tick;
 	gunplay.publish(f, tracks.finish(f, link.have_snapshot(), gunplay.newest_tick(), gunplay.wants_poses()), *world);
 	match.publish(f, prediction.have_own(), prediction.own_life());
+	gunplay.guide_vehicles(f);
 	vehicle_prediction.publish(f);
 	stats_.own_shot_id_resets = feed.shot_id_resets();
 	stats_.connected = link.connected();

@@ -3,6 +3,7 @@
 #include "bf3/core/util/finite.h"
 #include "bf3/net/bit_stream.h"
 #include "bf3/net/weapons_wire.h"
+#include "bf3/sim/vehicles/vehicle_targets.h"
 #include "bit_archive.h"
 #include "ghost_delta.h"
 #include "weapons_wire_layout.h"
@@ -1071,6 +1072,12 @@ template <class A, MaybeConst<Snapshot> M> void serialize(A &r_a, M &r_m, Snapsh
 			r_a.bits(r_suppression.age, 12);
 			r_a.check("own suppression without a level", [&] { return r_suppression.level != 0; });
 		});
+		r_a.optional(r_m.own_lock, [&](auto &r_lock) {
+			r_a.bits(r_lock.target, 16);
+			r_a.bits(r_lock.amount, 8);
+			r_a.bits(r_lock.locked, 1);
+			r_a.check("own lock locked on no target", [&] { return !r_lock.locked || r_lock.target != kNoLockWire; });
+		});
 	});
 	r_ctx.list.cap = kMaxSlots;
 	r_ctx.list.allow_removed = true;
@@ -1195,6 +1202,8 @@ struct ShotCodes {
 	uint32_t cone = 0;
 	bool has_power = false;
 	uint32_t power = 0;
+	bool has_target = false;
+	uint16_t target = 0;
 };
 
 struct ShotIndexChain {
@@ -1240,6 +1249,11 @@ constexpr void serialize(A &r_a, C &r_c, ShotIndexChain &r_chain, sim::Tick p_se
 	if (r_c.has_power) {
 		r_a.bits(r_c.power, kPowerBits);
 	}
+	r_a.bits(r_c.has_target, 1);
+	if (r_c.has_target) {
+		r_a.bits(r_c.target, 16);
+	}
+	r_a.check("shot lock target out of range", [&] { return !r_c.has_target || r_c.target != kNoLockWire; });
 	r_a.check("def out of range", [&] { return r_c.def < kMaxWireDefs; });
 	r_a.check("shot time before tick 1", [&] { return r_c.time.back < p_server_tick; });
 	r_a.check("shot index repeated", [&] { return !have || r_c.index != prev; });
@@ -1254,7 +1268,7 @@ constexpr size_t kShotMinBits = count_bits([](auto &r_a) {
 	chain.prev[codes.slot] = codes.index - 1;
 	serialize(r_a, codes, chain, sim::Tick(0));
 });
-static_assert(kShotMinBits == 138);
+static_assert(kShotMinBits == 139);
 
 size_t shot_bits(const ShotCodes &p_codes, ShotIndexChain &r_chain) {
 	return count_bits([&](auto &r_a) { serialize(r_a, p_codes, r_chain, sim::Tick(0)); });
@@ -1320,6 +1334,8 @@ std::optional<ShotCodes> shot_codes(const RemoteShot &p_shot, const ShotQuantiza
 		const double power = std::isfinite(p_shot.power) ? std::clamp(double(p_shot.power), 0.0, double(sw::kMaxPower)) : 0.0;
 		c.power = std::min(uint32_t(power / double(sw::kMaxPower) * top + 0.5), (1u << kPowerBits) - 1u);
 	}
+	c.target = lock_wire(p_shot.lock_target);
+	c.has_target = c.target != kNoLockWire;
 	return c;
 }
 
@@ -1342,6 +1358,7 @@ RemoteShot shot_from_codes(const ShotCodes &p_c, const ShotQuantization &p_frame
 	if (p_c.has_power) {
 		s.power = float(double(p_c.power) / double((1u << kPowerBits) - 1u) * double(sw::kMaxPower));
 	}
+	s.lock_target = p_c.has_target ? lock_target_of(p_c.target) : sw::kNoLockTarget;
 	return s;
 }
 
@@ -2444,7 +2461,17 @@ RemoteShot remote_shot_of(const sim::weapons::ShotEvent &p_shot) {
 	s.aim = p_shot.tracer ? p_shot.aim : sim::Vec3{};
 	s.pellet_cone = p_shot.pellets > 1 ? p_shot.pellet_cone : 0.0f;
 	s.power = p_shot.power;
+	s.lock_target = p_shot.lock_target;
 	return s;
+}
+
+uint16_t lock_wire(uint32_t p_lock_target) {
+	const uint32_t base = sim::vehicles::kVehicleTargetIdBase;
+	return p_lock_target >= base && p_lock_target - base < kNoLockWire ? uint16_t(p_lock_target - base) : kNoLockWire;
+}
+
+uint32_t lock_target_of(uint16_t p_wire) {
+	return p_wire == kNoLockWire ? sw::kNoLockTarget : sim::vehicles::kVehicleTargetIdBase + p_wire;
 }
 
 std::optional<RemoteShot> quantize_remote_shot(const RemoteShot &p_shot, const ShotQuantization &p_frame, sim::Tick p_server_tick) {

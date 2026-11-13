@@ -26,7 +26,7 @@
 
 namespace bf3::net {
 
-inline constexpr uint16_t kProtocolVersion = 14;
+inline constexpr uint16_t kProtocolVersion = 15;
 inline constexpr uint8_t kChannelUnreliable = 0;
 inline constexpr uint8_t kChannelReliable = 1;
 inline constexpr uint8_t kChannelBulk = 2;
@@ -369,6 +369,19 @@ struct OwnSuppression {
 	bool operator==(const OwnSuppression &) const = default;
 };
 
+inline constexpr uint16_t kNoLockWire = 0xFFFF;
+
+struct OwnLock {
+	uint16_t target = kNoLockWire;
+	uint8_t amount = 0;
+	bool locked = false;
+
+	bool operator==(const OwnLock &) const = default;
+};
+
+uint16_t lock_wire(uint32_t p_lock_target);
+uint32_t lock_target_of(uint16_t p_wire);
+
 struct Snapshot {
 	uint16_t seq = 0;
 	sim::Tick server_tick = 0;
@@ -384,6 +397,7 @@ struct Snapshot {
 	std::optional<WeaponsWire> own_weapons;
 	std::vector<uint8_t> removed;
 	std::optional<OwnSuppression> own_suppression;
+	std::optional<OwnLock> own_lock;
 };
 
 inline constexpr uint8_t kMaxBaselineBack = 31;
@@ -476,6 +490,7 @@ struct RemoteShot {
 	sim::Vec3 aim{};
 	float pellet_cone = 0;
 	float power = 1;
+	uint32_t lock_target = sim::weapons::kNoLockTarget;
 };
 inline constexpr size_t kMaxShotsPerDatagram = 128;
 struct ShotEvents {

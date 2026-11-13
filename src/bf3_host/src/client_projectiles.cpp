@@ -63,6 +63,7 @@ bool shot_event_of(const net::RemoteShot &p_shot, const sw::WeaponTable &p_table
 	e.pellet_cone = p_shot.pellet_cone;
 	e.tracer = p_shot.tracer;
 	e.power = p_shot.power;
+	e.lock_target = p_shot.lock_target;
 	r_event = e;
 	return true;
 }
@@ -321,6 +322,11 @@ void ClientProjectiles::spawn_own(const sw::ShotEvent &p_shot, const ShotView &p
 	} else {
 		++m.stats.refused;
 	}
+}
+
+void ClientProjectiles::set_guidance(const sw::GuidanceTargets *p_targets) {
+	impl_->own->set_guidance(p_targets);
+	impl_->remote->set_guidance(p_targets);
 }
 
 void ClientProjectiles::queue_remote(const net::RemoteShot &p_shot, uint8_t p_variant) {
