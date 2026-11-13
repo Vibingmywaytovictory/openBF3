@@ -256,6 +256,7 @@ void io_explosion(IO &io, Explosion &e) {
 	io.v(e.shockwave_radius);
 	io.v(e.shockwave_impulse);
 	io.v(e.shockwave_time);
+	io.v(e.spawn_delay);
 	io.v(e.max_occlusion_raycast_radius);
 	io.v(e.disable_occlusion);
 	io.v(e.disable_static_entity_occlusion);

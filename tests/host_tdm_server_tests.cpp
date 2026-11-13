@@ -63,7 +63,7 @@ namespace tp = bf3::test::pipe;
 namespace {
 
 constexpr uint64_t kM2aKitHash = 0x31b45dc7cc3f4271ull;
-constexpr uint64_t kM2aWeaponHash = 0x6ac208dbf9b7b222ull;
+constexpr uint64_t kM2aWeaponHash = 0x0a9b0425100867c2ull;
 constexpr uint64_t kM2aMotorHash = 0x5030b00de56f1ee8ull;
 
 using tdm::distance;
@@ -2403,6 +2403,28 @@ int supply_slot_of(const Match &p_match, int p_slot, bool p_healing) {
 	return -1;
 }
 
+std::optional<sim::Vec3> flat_lane(const Match &p_match, std::array<float, 2> &r_face) {
+	for (size_t s = 0; s < p_match.level->spawns.size(); ++s) {
+		const std::optional<sim::Vec3> p = floor_at(*p_match.world, p_match.level->spawns[s].position);
+		for (int k = 0; k < 8 && p; ++k) {
+			const float a = float(k) * sim::kTwoPi / 8.0f;
+			const std::array<float, 2> f{ std::sin(a), std::cos(a) };
+			bool lane = true;
+			for (float d = -5.0f; d <= 9.0f && lane; d += 0.5f) {
+				const std::optional<sim::Vec3> q = floor_at(*p_match.world, add(*p, d * f[0], 0.0f, d * f[1]));
+				lane = q && std::fabs((*q)[1] - (*p)[1]) < 0.15f &&
+						p_match.motor.fits_standing(add(*q, 0.0f, 0.05f, 0.0f)) &&
+						clear(*p_match.world, add(*p, 0.0f, 1.0f, 0.0f), add(*q, 0.0f, 1.0f, 0.0f));
+			}
+			if (lane) {
+				r_face = f;
+				return p;
+			}
+		}
+	}
+	return std::nullopt;
+}
+
 const sw::Deployable *resting_bag(const Match &p_match, int p_owner, bool p_healing) {
 	const host::Gunplay &gp = *p_match.server.gunplay();
 	const std::span<const sw::GadgetDef> defs = gp.level().gadgets;
@@ -2859,26 +2881,8 @@ TEST_SUITE("host-gunplay-gadgets") {
 		REQUIRE(m->rules().team_of(uint8_t(sapper.slot())) != m->rules().team_of(uint8_t(enemy.slot())));
 		REQUIRE(m->server.gunplay()->weapons(uint8_t(sapper.slot())).slots[gadget2].def == claymore->def);
 
-		std::optional<sim::Vec3> spot;
 		std::array<float, 2> face{};
-		for (size_t s = 0; s < m->level->spawns.size() && !spot; ++s) {
-			const std::optional<sim::Vec3> p = floor_at(*m->world, m->level->spawns[s].position);
-			for (int k = 0; k < 8 && p && !spot; ++k) {
-				const float a = float(k) * sim::kTwoPi / 8.0f;
-				const std::array<float, 2> f{ std::sin(a), std::cos(a) };
-				bool lane = true;
-				for (float d = -5.0f; d <= 9.0f && lane; d += 0.5f) {
-					const std::optional<sim::Vec3> q = floor_at(*m->world, add(*p, d * f[0], 0.0f, d * f[1]));
-					lane = q && std::fabs((*q)[1] - (*p)[1]) < 0.15f &&
-							m->motor.fits_standing(add(*q, 0.0f, 0.05f, 0.0f)) &&
-							clear(*m->world, add(*p, 0.0f, 1.0f, 0.0f), add(*q, 0.0f, 1.0f, 0.0f));
-				}
-				if (lane) {
-					spot = p;
-					face = f;
-				}
-			}
-		}
+		const std::optional<sim::Vec3> spot = flat_lane(*m, face);
 		REQUIRE(spot.has_value());
 		const auto at = [&](float p_d) { return add(*spot, p_d * face[0], 0.05f, p_d * face[1]); };
 		m->teleport(sapper, at(0.0f));
@@ -2917,6 +2921,7 @@ TEST_SUITE("host-gunplay-gadgets") {
 				double(facing / core::kDegToRadF));
 		REQUIRE(std::fabs(facing) < 10.0f * core::kDegToRadF);
 		const auto stats = [&] { return m->server.gunplay()->gadget_stats(); };
+		sim::Tick trip_tick = 0, blast_tick = 0;
 		const auto sprint_through = [&](tdm::ScriptedPeer &r_peer) {
 			m->teleport(r_peer, at(along + 7.0f));
 			m->ticks(20);
@@ -2924,6 +2929,8 @@ TEST_SUITE("host-gunplay-gadgets") {
 			float fastest = 0.0f;
 			m->until(
 					[&] {
+						trip_tick = trip_tick == 0 && stats().field.soldier_trips > 0u ? m->now() : trip_tick;
+						blast_tick = blast_tick == 0 && stats().pack_detonations > 0u ? m->now() : blast_tick;
 						const sim::SoldierState *s = m->state(r_peer.slot());
 						if (s == nullptr || !is_alive(s)) {
 							return true;
@@ -2967,6 +2974,11 @@ TEST_SUITE("host-gunplay-gadgets") {
 		CHECK(int(death->killer) == sapper.slot());
 		CHECK(death->def == claymore->def);
 		CHECK(int(m->row(sapper.slot())->kills) == kills_before + 1);
+		const sw::SimTime delay = m->server.gunplay()->table().defs[claymore->def].projectile.explosion.spawn_delay;
+		std::printf("claymore: tripped at tick %u, its explosion %u ticks later (SpawnDelay %.2f s)\n",
+				unsigned(trip_tick), unsigned(blast_tick - trip_tick), sw::units_to_seconds(delay));
+		CHECK(delay == sw::seconds_to_units(0.15));
+		CHECK(blast_tick - trip_tick == sim::seconds_to_ticks(0.15f));
 	}
 
 	TEST_CASE("gadgets: a recon's radio beacon is a spawn point for its squad: a mate's beacon SpawnRequest deploys at "

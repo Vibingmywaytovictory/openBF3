@@ -62,6 +62,7 @@ private:
 	std::vector<sim::weapons::PackSoldier> pack_soldiers_;
 	std::vector<sim::weapons::PackVehicle> pack_vehicles_;
 	std::array<bool, net::kMaxSlots> detonator_held_{};
+	std::vector<sim::weapons::DetonationEvent> pending_;
 	mutable GadgetStats stats_;
 	sim::Tick tick_ = 0;
 };

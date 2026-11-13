@@ -171,7 +171,7 @@ void ServerGadgets::detonator(uint8_t p_slot, uint16_t p_def, bool p_pressed) {
 void ServerGadgets::detonate_packs(sim::Tick p_tick, std::span<const sim::SoldierState> p_states,
 		std::span<const uint8_t> p_teams, std::span<const sw::PackVehicle> p_vehicles,
 		const sim::CollisionWorld &p_world, const sw::HitTargetProvider &p_targets, sw::ProjectileStepOutput &r_out) {
-	if (table_ == nullptr || field_.live().empty()) {
+	if (table_ == nullptr || (field_.live().empty() && pending_.empty())) {
 		return;
 	}
 	pack_soldiers_.clear();
@@ -189,19 +189,25 @@ void ServerGadgets::detonate_packs(sim::Tick p_tick, std::span<const sim::Soldie
 		}
 		field_.arm_packs(pack_soldiers_, pack_vehicles_, sw::kSwaySeconds);
 	}
-	const std::vector<sw::Deployable> boom = field_.take_detonating();
-	if (boom.empty()) {
-		return;
-	}
-	core::gameplay::WorkBudget budget(kPackBlastWork);
-	for (const sw::Deployable &d : boom) {
+	const sw::SimTime now = sw::tick_end(p_tick);
+	for (const sw::Deployable &d : field_.take_detonating()) {
 		sw::DetonationEvent e;
-		e.time = sw::tick_end(p_tick);
+		e.time = now + (d.def < table_->defs.size() ? table_->defs[d.def].projectile.explosion.spawn_delay : 0);
 		e.position = core::vec::add(d.position, core::vec::scale(d.normal, sw::kBlastEyeLift));
 		e.normal = d.normal;
 		e.player_slot = d.owner;
 		e.shot_index = kPackShotIndex | d.id;
 		e.def = d.def;
+		pending_.push_back(e);
+	}
+	core::gameplay::WorkBudget budget(kPackBlastWork);
+	for (size_t i = 0; i < pending_.size();) {
+		const sw::DetonationEvent e = pending_[i];
+		if (e.time > now) {
+			++i;
+			continue;
+		}
+		pending_.erase(pending_.begin() + std::ptrdiff_t(i));
 		sw::explode(*table_, p_world, p_targets, e, budget, r_out);
 		++stats_.pack_detonations;
 	}
@@ -223,6 +229,7 @@ void ServerGadgets::owner_left(uint8_t p_slot) {
 
 void ServerGadgets::clear() {
 	field_.clear();
+	pending_.clear();
 }
 
 std::optional<sim::Vec3> ServerGadgets::squad_beacon(uint8_t p_slot, uint8_t p_team, const SquadTable *p_squads) const {

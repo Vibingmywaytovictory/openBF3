@@ -125,6 +125,7 @@ ExplosionSimDef make_explosion(Checker &r_c, const core::gameplay::Explosion &p_
 	x.shockwave_damage = r_c.range(p_e.shockwave_damage, 0.0f, kMaxDamage, p_field + ".ShockwaveDamage");
 	x.shockwave_radius = r_c.range(p_e.shockwave_radius, 0.0f, kMaxRadius, p_field + ".ShockwaveRadius");
 	x.shockwave_impulse = r_c.range(p_e.shockwave_impulse, 0.0f, 1e9f, p_field + ".ShockwaveImpulse");
+	x.spawn_delay = r_c.time(p_e.spawn_delay, p_field + ".SpawnDelay");
 	x.max_occlusion_ray_radius = r_c.range(p_e.max_occlusion_raycast_radius, 0.0f, kMaxRadius, p_field + ".MaxOcclusionRaycastRadius");
 	x.disable_occlusion = p_e.disable_occlusion;
 	x.disable_static_entity_occlusion = p_e.disable_static_entity_occlusion;
@@ -265,6 +266,7 @@ void hash_explosion(detail::Fnv64 &r_h, const ExplosionSimDef &p_e) {
 	r_h.add(p_e.shockwave_damage);
 	r_h.add(p_e.shockwave_radius);
 	r_h.add(p_e.shockwave_impulse);
+	r_h.add(p_e.spawn_delay);
 	r_h.add(p_e.max_occlusion_ray_radius);
 	r_h.add(p_e.disable_occlusion);
 	r_h.add(p_e.disable_static_entity_occlusion);

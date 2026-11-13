@@ -54,6 +54,7 @@ struct ExplosionSimDef {
 	float shockwave_damage = 0;
 	float shockwave_radius = 0;
 	float shockwave_impulse = 0;
+	SimTime spawn_delay = 0;
 	float max_occlusion_ray_radius = 0;
 	bool disable_occlusion = false;
 	bool disable_static_entity_occlusion = false;

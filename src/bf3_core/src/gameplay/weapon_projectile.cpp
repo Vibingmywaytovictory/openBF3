@@ -14,6 +14,7 @@ void read_explosion(Fields &r_f, const EbxInstance &p_e, Explosion &r_out) {
 	r_out.shockwave_radius = r_f.f32_or(e, "ShockwaveRadius", 0);
 	r_out.shockwave_impulse = r_f.f32_or(e, "ShockwaveImpulse", 0);
 	r_out.shockwave_time = r_f.f32_or(e, "ShockwaveTime", 0);
+	r_out.spawn_delay = r_f.f32_or(e, "SpawnDelay", 0);
 	r_out.max_occlusion_raycast_radius = r_f.f32_or(e, "MaxOcclusionRaycastRadius", 0);
 	r_out.disable_occlusion = r_f.flag_or(e, "DisableOcclusion", false);
 	r_out.disable_static_entity_occlusion = r_f.flag_or(e, "DisableStaticEntityOcclusion", false);

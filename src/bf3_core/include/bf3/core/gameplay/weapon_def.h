@@ -197,6 +197,7 @@ struct Explosion {
 	float shockwave_radius = 0;
 	float shockwave_impulse = 0;
 	float shockwave_time = 0;
+	float spawn_delay = 0;
 	float max_occlusion_raycast_radius = 0;
 	bool disable_occlusion = false;
 	bool disable_static_entity_occlusion = false;
