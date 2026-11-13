@@ -23,18 +23,6 @@ bool healing(SupplyNeed p_need) {
 	return p_need == SupplyNeed::Health;
 }
 
-const sw::GadgetDef *gadget_of(const GunplayLevel &p_level, uint16_t p_def) {
-	if (p_def == sw::kNoWeapon) {
-		return nullptr;
-	}
-	for (const sw::GadgetDef &g : p_level.gadgets) {
-		if (g.def == p_def) {
-			return &g;
-		}
-	}
-	return nullptr;
-}
-
 bool calls(const TdmShared &p_shared, size_t p_slot, sim::Tick p_tick) {
 	return p_slot < p_shared.medic_call.size() && p_shared.medic_call[p_slot] != 0 &&
 			p_tick - p_shared.medic_call[p_slot] <= kCallLiveTicks;
@@ -44,6 +32,18 @@ size_t soldiers(const TdmShared &p_shared, std::span<const sim::SoldierState> p_
 	return std::min({ p_states.size(), p_shared.teams.size(), p_shared.alive.size() });
 }
 
+}
+
+const sw::GadgetDef *gadget_of(const Gunplay &p_gunplay, uint16_t p_def) {
+	if (p_def == sw::kNoWeapon) {
+		return nullptr;
+	}
+	for (const sw::GadgetDef &g : p_gunplay.level().gadgets) {
+		if (g.def == p_def) {
+			return &g;
+		}
+	}
+	return nullptr;
 }
 
 bool may_help(const ai::BehaviourTuning &p_tuning, const SupportWay &p_way, const sim::Vec3 &p_self,
@@ -63,7 +63,7 @@ uint8_t supply_slot(const Gunplay &p_gunplay, const BotArms &p_arms, SupplyNeed 
 		return kNoSupplySlot;
 	}
 	for (const uint8_t s : kGadgetSlots) {
-		const sw::GadgetDef *g = gadget_of(p_gunplay.level(), ws->slots[s].def);
+		const sw::GadgetDef *g = gadget_of(p_gunplay, ws->slots[s].def);
 		if (g != nullptr && g->kind == sw::GadgetKind::Supply && g->supply_soldiers &&
 				(healing(p_need) ? g->healing : g->ammo).active()) {
 			return s;

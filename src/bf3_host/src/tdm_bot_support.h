@@ -2,6 +2,7 @@
 
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/soldier_state.h"
+#include "bf3/sim/weapons/gadgets.h"
 #include "tdm_bot_shared.h"
 #include "tdm_bot_weapons.h"
 
@@ -71,6 +72,7 @@ private:
 	std::optional<sim::Vec3> medkit_;
 };
 
+const sim::weapons::GadgetDef *gadget_of(const Gunplay &p_gunplay, uint16_t p_def);
 std::optional<uint8_t> ask_medic(TdmShared &r_shared, uint8_t p_slot);
 bool may_help(const ai::BehaviourTuning &p_tuning, const SupportWay &p_way, const sim::Vec3 &p_self,
 		const sim::Vec3 &p_mate, size_t p_mate_slot);

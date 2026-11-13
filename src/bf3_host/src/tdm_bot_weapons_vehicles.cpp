@@ -8,6 +8,7 @@
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/gadgets.h"
+#include "tdm_bot_support.h"
 
 #include <algorithm>
 #include <cmath>
@@ -18,18 +19,6 @@ namespace bf3::host::tdm_bot {
 namespace {
 
 namespace sw = sim::weapons;
-
-const sw::GadgetDef *gadget_of(const Gunplay &p_gunplay, uint16_t p_def) {
-	if (p_def == sw::kNoWeapon) {
-		return nullptr;
-	}
-	for (const sw::GadgetDef &g : p_gunplay.level().gadgets) {
-		if (g.def == p_def) {
-			return &g;
-		}
-	}
-	return nullptr;
-}
 
 uint16_t slot_def(const BotArms &p_arms, uint8_t p_slot) {
 	return p_arms.weapons() != nullptr && p_slot < sw::kMaxWeaponSlots ? p_arms.weapons()->slots[p_slot].def
