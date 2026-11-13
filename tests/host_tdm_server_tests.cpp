@@ -6049,6 +6049,25 @@ TEST_SUITE("host-vehicles-unit") {
 		CHECK(int(host::disabled_command(c, tank).throttle) == -68);
 		CHECK(host::disabled_command(c, {}) == c);
 	}
+
+	TEST_CASE("vehicles: the client draws turret angles between two received states the short way round") {
+		net::VehicleWire w;
+		w.turret_count = 2;
+		w.turret_angles[0] = 3.0f;
+		w.turret_angles[1] = 0.2f;
+		const host::PresentedVehicle early = host::present_vehicle(w, 10);
+		w.turret_angles[0] = -3.0f;
+		w.turret_angles[1] = -0.2f;
+		host::PresentedVehicle late = host::present_vehicle(w, 20);
+		late.window[0] = early.window[0];
+		late.window_count = 1;
+		const host::PresentedVehiclePose mid = host::vehicle_pose_at(late, 15.0);
+		CHECK(std::fabs(std::remainder(mid.turret_angle[0] - 3.14159265f, 6.28318531f)) < 1e-4f);
+		CHECK(mid.turret_angle[1] == doctest::Approx(0.0f).epsilon(1e-5));
+		CHECK(host::vehicle_pose_at(late, 12.5).turret_angle[1] == doctest::Approx(0.1f));
+		CHECK(host::vehicle_pose_at(late, 30.0).turret_angle[0] == doctest::Approx(-3.0f));
+		CHECK(host::vehicle_pose_at(late, 5.0).turret_angle[0] == doctest::Approx(3.0f));
+	}
 }
 
 TEST_SUITE("host-vehicles-damage") {

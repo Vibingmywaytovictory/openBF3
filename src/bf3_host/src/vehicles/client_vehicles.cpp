@@ -46,6 +46,7 @@ PresentedVehiclePose PresentedVehicle::pose() const {
 	p.wheel_angle = wheel_angle;
 	p.wheel_steer = wheel_steer;
 	p.suspension_length = suspension_length;
+	p.turret_angle = turret_angle;
 	return p;
 }
 
@@ -177,6 +178,9 @@ PresentedVehiclePose vehicle_pose_at(const PresentedVehicle &p_vehicle, double p
 			out.wheel_angle[w] = lerp_angle(a.wheel_angle[w], b.wheel_angle[w], t);
 			out.wheel_steer[w] = a.wheel_steer[w] + (b.wheel_steer[w] - a.wheel_steer[w]) * t;
 			out.suspension_length[w] = a.suspension_length[w] + (b.suspension_length[w] - a.suspension_length[w]) * t;
+		}
+		for (size_t k = 0; k < p_vehicle.turret_count && k < out.turret_angle.size(); ++k) {
+			out.turret_angle[k] = lerp_angle(a.turret_angle[k], b.turret_angle[k], t);
 		}
 		return out;
 	}

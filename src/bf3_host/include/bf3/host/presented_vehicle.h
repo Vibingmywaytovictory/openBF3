@@ -26,6 +26,7 @@ struct PresentedVehiclePose {
 	std::array<float, sim::kMaxVehicleWheels> wheel_angle{};
 	std::array<float, sim::kMaxVehicleWheels> wheel_steer{};
 	std::array<float, sim::kMaxVehicleWheels> suspension_length{};
+	std::array<float, net::kMaxVehicleTurrets> turret_angle{};
 };
 
 struct PresentedVehicleSample {
