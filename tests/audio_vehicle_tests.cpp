@@ -472,54 +472,63 @@ TEST_SUITE("audio-vehicles-drive") {
 }
 
 TEST_SUITE("audio-vehicles-drive") {
-	TEST_CASE("the M1A2 at idle heard from its hull centre: the interior camera of its own driver cuts the engine's "
-			  "high band") {
+	TEST_CASE("the M1A2 and the T-90 at idle heard from their hull centres: the interior camera of their own driver "
+			  "cuts the engine's high band") {
 		VehicleFixture *f = need_install();
 		if (f == nullptr) {
 			return;
 		}
-		const std::optional<uint16_t> kind = kind_of(*f->level, "vehicles/m1a2/m1abrams");
-		REQUIRE(kind.has_value());
-		const std::optional<uint16_t> spawner = spawner_of(*f->level, *kind);
-		REQUIRE(spawner.has_value());
-		const sim::VehicleModel &model = *f->level->kinds[*kind].model;
-		DriveRig rig(*f);
-		host::PresentedVehicle v = parked(*f->level, *spawner);
-		v.occupants[0] = 3;
-		ba::VehicleListenerView view;
-		const core::Transform rot = core::Transform::from_rotation_translation(v.rotation, core::Vec3{});
-		const core::Vec3 origin = core::vec::sub(v.com_position, rot.transform_vector(model.center_of_mass));
-		view.listener.position = core::vec::add(origin, f->level->kinds[*kind].box.centre);
-		view.own_slot = 7;
-		for (int i = 0; i < 120; ++i) {
-			rig.frame(*f, v, view);
-		}
-		const double exterior_high = rig.band(1.0, 2.0, 4000.0f, 12000.0f);
-		const double exterior_db = rig.rms(1.0, 2.0);
-		v.occupants[0] = 7;
-		for (int i = 0; i < 120; ++i) {
-			rig.frame(*f, v, view);
-		}
-		const double interior_high = rig.band(3.0, 4.0, 4000.0f, 12000.0f);
-		const double interior_db = rig.rms(3.0, 4.0);
-		std::printf("m1a2 idle at the hull centre: another driver %.1f dB (4-12 kHz %.1f dB), the own soldier driving "
+		struct Tank {
+			const char *blueprint;
+			double interior_drop_db;
+		};
+		for (const Tank &tank : { Tank{ "vehicles/m1a2/m1abrams", 6.0 }, Tank{ "vehicles/t90/t90", 4.0 } }) {
+			const char *blueprint = tank.blueprint;
+			CAPTURE(blueprint);
+			const std::optional<uint16_t> kind = kind_of(*f->level, blueprint);
+			REQUIRE(kind.has_value());
+			const std::optional<uint16_t> spawner = spawner_of(*f->level, *kind);
+			REQUIRE(spawner.has_value());
+			const sim::VehicleModel &model = *f->level->kinds[*kind].model;
+			DriveRig rig(*f);
+			host::PresentedVehicle v = parked(*f->level, *spawner);
+			v.occupants[0] = 3;
+			ba::VehicleListenerView view;
+			const core::Transform rot = core::Transform::from_rotation_translation(v.rotation, core::Vec3{});
+			const core::Vec3 origin = core::vec::sub(v.com_position, rot.transform_vector(model.center_of_mass));
+			view.listener.position = core::vec::add(origin, f->level->kinds[*kind].box.centre);
+			view.own_slot = 7;
+			for (int i = 0; i < 120; ++i) {
+				rig.frame(*f, v, view);
+			}
+			const double exterior_high = rig.band(1.0, 2.0, 4000.0f, 12000.0f);
+			const double exterior_db = rig.rms(1.0, 2.0);
+			v.occupants[0] = 7;
+			for (int i = 0; i < 120; ++i) {
+				rig.frame(*f, v, view);
+			}
+			const double interior_high = rig.band(3.0, 4.0, 4000.0f, 12000.0f);
+			const double interior_db = rig.rms(3.0, 4.0);
+			std::printf(
+					"%s idle at the hull centre: another driver %.1f dB (4-12 kHz %.1f dB), the own soldier driving "
 					"%.1f dB (4-12 kHz %.1f dB)\n",
-				exterior_db, exterior_high, interior_db, interior_high);
-		CHECK(rig.audio->stats().starts == 1);
-		CHECK(rig.audio->stats().interior_frames >= 119);
-		CHECK(interior_db < exterior_db - 6.0);
-		CHECK(interior_high < exterior_high - 6.0);
-		rig.interior_cam = 0.0f;
-		for (int i = 0; i < 120; ++i) {
-			rig.frame(*f, v, view);
+					blueprint, exterior_db, exterior_high, interior_db, interior_high);
+			CHECK(rig.audio->stats().starts == 1);
+			CHECK(rig.audio->stats().interior_frames >= 119);
+			CHECK(interior_db < exterior_db - tank.interior_drop_db);
+			CHECK(interior_high < exterior_high - 6.0);
+			rig.interior_cam = 0.0f;
+			for (int i = 0; i < 120; ++i) {
+				rig.frame(*f, v, view);
+			}
+			const double camera_off_high = rig.band(5.0, 6.0, 4000.0f, 12000.0f);
+			const double camera_off_db = rig.rms(5.0, 6.0);
+			std::printf(
+					"%s idle at the hull centre, the own soldier driving, InteriorCam alone set to 0: %.1f dB (4-12 "
+					"kHz %.1f dB)\n",
+					blueprint, camera_off_db, camera_off_high);
+			CHECK(camera_off_high > interior_high + 6.0);
 		}
-		const double camera_off_high = rig.band(5.0, 6.0, 4000.0f, 12000.0f);
-		const double camera_off_db = rig.rms(5.0, 6.0);
-		std::printf(
-				"m1a2 idle at the hull centre, the own soldier driving, InteriorCam alone set to 0: %.1f dB (4-12 kHz "
-				"%.1f dB)\n",
-				camera_off_db, camera_off_high);
-		CHECK(camera_off_high > interior_high + 6.0);
 		check_unchanged(*f);
 	}
 
