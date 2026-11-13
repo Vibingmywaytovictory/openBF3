@@ -94,6 +94,11 @@ const core::gameplay::VehicleCameraDef *first_person_camera(const host::LevelVeh
 	return nullptr;
 }
 
+float first_person_fov(const host::LevelVehicleKind &p_kind, uint8_t p_seat) {
+	const core::gameplay::VehicleCameraDef *c = first_person_camera(p_kind, p_seat);
+	return c != nullptr ? c->regular_field_of_view : 0.0f;
+}
+
 std::optional<float> first_person_zoom(const host::LevelVehicleKind &p_kind, uint8_t p_seat) {
 	const core::gameplay::VehicleCameraDef *c = first_person_camera(p_kind, p_seat);
 	return c != nullptr ? c->zoom_field_of_view : std::nullopt;
@@ -504,9 +509,13 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			}
 			mapper.script_hold(InputMapper::VehicleAction::Use, false);
 			regular_fov_ = float(p_in.camera->get_fov());
-			row("tank_enter", seat->seat == 0 && p_in.camera_counter == 0,
-					fmt("seat %u of spawner %u, camera counter %u, FOV %.2f deg", unsigned(seat->seat),
-							unsigned(seat->spawner), unsigned(p_in.camera_counter), double(regular_fov_)));
+			row("tank_enter",
+					seat->seat == 0 && p_in.camera_counter == 0 &&
+							std::fabs(regular_fov_ - first_person_fov(lv.kinds[lv.spawners[spawner_].kind], 0)) < 0.01f,
+					fmt("seat %u of spawner %u, camera counter %u, FOV %.2f deg, the seat camera's RegularView "
+						"FieldOfView %.2f deg",
+							unsigned(seat->seat), unsigned(seat->spawner), unsigned(p_in.camera_counter),
+							double(regular_fov_), double(first_person_fov(lv.kinds[lv.spawners[spawner_].kind], 0))));
 			shoot(p_in, "tank_1p");
 			mapper.script_hold(InputMapper::WeaponAction::Ads, true);
 			enter(Phase::Zoom);

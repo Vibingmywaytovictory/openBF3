@@ -515,7 +515,8 @@ VehicleSeatView GameVehicles::seat_view(const OwnVehicleSeat &p_seat, uint32_t p
 		alternate = present::VehicleZoomDef{ *c.zoom_field_of_view, c.zoom_fov_transition_time, c.zoom_fade_to_black,
 			c.zoom_fade_out, c.zoom_black, c.zoom_fade_in };
 	}
-	const present::VehicleZoomView zoomed = zoom_.step(alternate, p_zoom, p_fov_deg, p_dt);
+	const float regular = c.regular_field_of_view > 0.0f ? c.regular_field_of_view : p_fov_deg;
+	const present::VehicleZoomView zoomed = zoom_.step(alternate, p_zoom, regular, p_dt);
 	out.fov_deg = zoomed.fov;
 	out.zoomed = zoomed.zoomed;
 	out.black = zoomed.black;

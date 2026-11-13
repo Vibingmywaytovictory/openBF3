@@ -227,6 +227,7 @@ Result<VehicleCameraDef> read_camera(WorkBudget &r_budget, const EbxResolver &p_
 	VehicleCameraDef out;
 	const EbxStruct c = p_component.data();
 	out.field_of_view = static_cast<float>(number_or(c, "FieldOfView", 0));
+	out.regular_field_of_view = static_cast<float>(number_or(c, "RegularView.FieldOfView", 0));
 	out.first_person = boolean(c, "IsFirstPerson").value_or(false);
 	if (const std::optional<EbxInstance> camera = p_db.follow(c, "Camera"); camera && r_budget.take_type(camera->data())) {
 		out.camera_type = copy_text(r_budget, camera->type_name());

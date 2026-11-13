@@ -2377,6 +2377,8 @@ TEST_SUITE("tables") {
 		CHECK(m1_gunner->zoom_fade_out == Approx(0.1));
 		CHECK(m1_gunner->zoom_black == Approx(0.03));
 		CHECK(m1_gunner->zoom_fade_in == Approx(0.03));
+		CHECK(m1_gunner->field_of_view == Approx(45));
+		CHECK(m1_gunner->regular_field_of_view == Approx(50));
 		REQUIRE(m1_gunner->turret >= 0);
 		CHECK(m1.turrets[size_t(m1_gunner->turret)].seat == 0);
 		for (const VehicleCameraDef &c : driver.cameras) {
@@ -2385,6 +2387,7 @@ TEST_SUITE("tables") {
 		const VehicleCameraDef *m1_remote = alternate(m1, 1);
 		REQUIRE(m1_remote != nullptr);
 		CHECK(m1_remote->field_of_view == Approx(37.5));
+		CHECK(m1_remote->regular_field_of_view == Approx(50));
 		CHECK(*m1_remote->zoom_field_of_view == Approx(20));
 		CHECK_FALSE(m1_remote->zoom_fade_to_black);
 		const VehicleCameraDef *growler_gunner = alternate(growler, 1);

@@ -37,6 +37,7 @@ struct VehicleCameraDef {
 	std::string camera_type;
 	std::string camera;
 	float field_of_view = 0;
+	float regular_field_of_view = 0;
 	bool first_person = false;
 	core::Transform transform;
 	int turret = -1;
