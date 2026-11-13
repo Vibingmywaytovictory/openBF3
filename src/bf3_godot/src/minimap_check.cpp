@@ -641,6 +641,14 @@ bool MinimapCheck::step(double  ) {
 				world_yaw_ = std::atan2(sx / float(n) - eye.x, sz / float(n) - eye.z);
 				s->mapper().script_view(world_yaw_, 0.0f);
 			}
+			if (hud_.world_icons() == nullptr) {
+				add("icons.world", false, "the HUD has no world icon layer: world_icons() is null in a game session");
+				north_ = ViewFrames{};
+				rotating_ = ViewFrames{};
+				phase_ = kShots;
+				frames_in_phase_ = 0;
+				return false;
+			}
 			hud_.world_icons()->set_visible(false);
 			phase_ = kWorldHidden;
 			wait_ = kSettleFrames;
