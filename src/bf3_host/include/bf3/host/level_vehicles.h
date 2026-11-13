@@ -82,6 +82,7 @@ sim::VehiclePlacement vehicle_spawn_placement(const core::level::LevelTransform 
 
 bool land_jeep(const sim::VehicleModel &p_model);
 
+std::vector<core::Vec3> vehicle_exit_order(const LevelVehicleKind &p_kind, uint8_t p_seat);
 std::optional<core::Vec3> vehicle_exit_point(const LevelVehicleKind &p_kind, uint8_t p_seat);
 
 sim::Vec3 vehicle_seat_point(const LevelVehicleKind &p_kind, uint8_t p_seat, const std::array<float, 4> &p_rotation,

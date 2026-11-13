@@ -8,6 +8,7 @@
 #include "bf3/host/server_view.h"
 #include "bf3/host/tdm_brain.h"
 #include "bf3/host/tdm_rules.h"
+#include "bf3/sim/collision_world.h"
 #include "bf3/sim/soldier_motor.h"
 
 #include "gunplay_fixture.h"
@@ -334,6 +335,11 @@ TEST_SUITE("host-vehicles-possession") {
 		sim::Tick t = 1;
 		sv.spawn_due(t, nullptr);
 		REQUIRE(sv.vehicles()[*jeep].live);
+		core::Result<std::unique_ptr<sim::CollisionWorld>> world =
+				sim::CollisionWorld::create(level->shared->static_world);
+		REQUIRE(world.ok());
+		sim::SoldierMotor motor;
+		REQUIRE(motor.init(**world, level->shared->motor).ok());
 		sim::SoldierState soldier;
 		soldier.position = sv.world()->state(sim::VehicleSlot(*jeep)).body.com_position;
 		constexpr uint8_t kBot = 3;
@@ -342,10 +348,10 @@ TEST_SUITE("host-vehicles-possession") {
 		bool removed = false;
 		const auto is_bot = [&](uint8_t p_slot) { return p_slot == kBot || (p_slot == kRemovedBot && !removed); };
 		const auto press_use = [&](uint8_t p_slot) {
-			(void)sv.use(p_slot, sim::Command{}, soldier);
+			(void)sv.use(p_slot, sim::Command{}, soldier, motor);
 			sim::Command use;
 			use.buttons = sim::buttons::kUse;
-			(void)sv.use(p_slot, use, soldier);
+			(void)sv.use(p_slot, use, soldier, motor);
 			++t;
 			REQUIRE(sv.step(t, 0, is_bot).ok());
 		};

@@ -28,22 +28,30 @@ bool land_jeep(const sim::VehicleModel &p_model) {
 	return p_model.wheel_count == 4;
 }
 
-std::optional<core::Vec3> vehicle_exit_point(const LevelVehicleKind &p_kind, uint8_t p_seat) {
-	if (p_kind.exit_points.empty() || p_seat >= p_kind.seat_defs.size()) {
-		return std::nullopt;
+std::vector<core::Vec3> vehicle_exit_order(const LevelVehicleKind &p_kind, uint8_t p_seat) {
+	std::vector<core::Vec3> order;
+	if (p_seat >= p_kind.seat_defs.size()) {
+		return order;
 	}
 	const core::Vec3 &seat = p_kind.seat_defs[p_seat].transform.trans;
-	const core::Transform *best = &p_kind.exit_points.front();
-	float nearest = INFINITY;
+	const auto away = [&](const core::Vec3 &p_at) {
+		const float dx = p_at[0] - seat[0], dz = p_at[2] - seat[2];
+		return dx * dx + dz * dz;
+	};
 	for (const core::Transform &e : p_kind.exit_points) {
-		const float dx = e.trans[0] - seat[0], dz = e.trans[2] - seat[2];
-		const float d = dx * dx + dz * dz;
-		if (d < nearest) {
-			nearest = d;
-			best = &e;
-		}
+		order.push_back(e.trans);
 	}
-	return best->trans;
+	std::stable_sort(order.begin(), order.end(),
+			[&](const core::Vec3 &p_a, const core::Vec3 &p_b) { return away(p_a) < away(p_b); });
+	return order;
+}
+
+std::optional<core::Vec3> vehicle_exit_point(const LevelVehicleKind &p_kind, uint8_t p_seat) {
+	const std::vector<core::Vec3> order = vehicle_exit_order(p_kind, p_seat);
+	if (order.empty()) {
+		return std::nullopt;
+	}
+	return order.front();
 }
 
 sim::Vec3 vehicle_seat_point(const LevelVehicleKind &p_kind, uint8_t p_seat, const std::array<float, 4> &p_rotation,

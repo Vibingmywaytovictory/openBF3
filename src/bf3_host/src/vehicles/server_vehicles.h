@@ -4,6 +4,7 @@
 #include "bf3/host/level_vehicles.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/command.h"
+#include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/soldier_state.h"
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/vehicle_world.h"
@@ -105,7 +106,8 @@ public:
 	void restart();
 
 	void spawn_due(sim::Tick p_tick, const sim::logic::ConquestNatives *p_conquest);
-	std::optional<sim::Vec3> use(size_t p_slot, const sim::Command &p_command, const sim::SoldierState &p_soldier);
+	std::optional<sim::Vec3> use(size_t p_slot, const sim::Command &p_command, const sim::SoldierState &p_soldier,
+			const sim::SoldierMotor &p_motor);
 	void drive(size_t p_slot, const sim::Command &p_command);
 	void leave(size_t p_slot);
 	core::Status step(sim::Tick p_tick, uint64_t p_weapon_seed, const std::function<bool(uint8_t)> &p_bot);
@@ -130,7 +132,7 @@ public:
 	std::optional<VehicleSeat> seat_of(size_t p_slot) const;
 	bool seated(size_t p_slot) const { return seat_of(p_slot).has_value(); }
 	std::optional<sim::Vec3> seat_position(size_t p_slot) const;
-	std::optional<sim::Vec3> exit_position(size_t p_slot) const;
+	std::optional<sim::Vec3> exit_position(size_t p_slot, const sim::SoldierMotor &p_motor) const;
 
 	void configure_scope(size_t p_viewers, bool p_scoped);
 	void forget_viewer(size_t p_slot) { scope_.forget(p_slot); }

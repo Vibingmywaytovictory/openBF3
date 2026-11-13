@@ -395,3 +395,89 @@ TEST_SUITE("host-vehicles-wreck-scope") {
 		CHECK(sv.scope_stats().out_of_scope > 0u);
 	}
 }
+
+TEST_SUITE("host-vehicles-exit") {
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: a Growler driver whose nearest exit point lies inside a parked "
+			  "Growler gets out at the next exit point where he stands clear of every hull and the level") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		std::optional<size_t> jeep;
+		for (size_t i = 0; i < lv.spawners.size() && !jeep; ++i) {
+			const host::LevelVehicleKind &k = lv.kinds[lv.spawners[i].kind];
+			if (k.blueprint == "vehicles/growleritv/growleritv" && k.exit_points.size() >= 2 && k.seats >= 1) {
+				jeep = i;
+			}
+		}
+		REQUIRE(jeep.has_value());
+		const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[*jeep].kind];
+		auto vehicles = std::make_shared<host::LevelVehicles>(lv);
+		host::LevelVehicleSpawner parked = lv.spawners[*jeep];
+		parked.initial_spawn_delay = 0.0f;
+		const auto turn_by = [](const std::array<float, 4> &p_q, const sim::Vec3 &p_v) {
+			const float x = p_q[0], y = p_q[1], z = p_q[2], w = p_q[3];
+			const float tx = 2.0f * (y * p_v[2] - z * p_v[1]), ty = 2.0f * (z * p_v[0] - x * p_v[2]),
+						tz = 2.0f * (x * p_v[1] - y * p_v[0]);
+			return sim::Vec3{ p_v[0] + w * tx + (y * tz - z * ty), p_v[1] + w * ty + (z * tx - x * tz),
+				p_v[2] + w * tz + (x * ty - y * tx) };
+		};
+		const core::Vec3 nearest = *host::vehicle_exit_point(kind, 0);
+		const float lateral = std::sqrt(nearest[0] * nearest[0] + nearest[2] * nearest[2]);
+		REQUIRE(lateral > 0.5f);
+		const float reach = lateral + kind.box.half[0] - 0.1f;
+		const sim::Vec3 out = turn_by(
+				parked.placement.rotation, { nearest[0] / lateral * reach, 0.0f, nearest[2] / lateral * reach });
+		host::LevelVehicleSpawner blocker = parked;
+		blocker.placement.position = { parked.placement.position[0] + out[0], parked.placement.position[1] + 0.3f,
+			parked.placement.position[2] + out[2] };
+		vehicles->spawners = { parked, blocker };
+		host::ServerVehicles sv;
+		REQUIRE(sv.configure(vehicles, level->shared->static_world, 1.0f).ok());
+		for (sim::Tick t = 1; t <= 120; ++t) {
+			sv.spawn_due(t, nullptr);
+			REQUIRE(sv.step(t, 0, [](uint8_t) { return true; }).ok());
+		}
+		REQUIRE(sv.vehicles()[0].live);
+		REQUIRE(sv.vehicles()[1].live);
+
+		core::Result<std::unique_ptr<sim::CollisionWorld>> world =
+				sim::CollisionWorld::create(level->shared->static_world);
+		REQUIRE(world.ok());
+		sim::SoldierMotor motor;
+		REQUIRE(motor.init(**world, level->shared->motor).ok());
+		const sim::Vec3 centre = sv.world()->state(sim::VehicleSlot(0)).body.com_position;
+		sim::SoldierState s = motor.spawn_state(centre, 0, 1, 1000, false);
+		const auto press = [&](sim::Tick p_tick, bool p_use) {
+			sim::Command c = sim::idle_command(p_tick, 0, 0, sim::Pose::Stand);
+			c.buttons = p_use ? sim::buttons::kUse : 0u;
+			return sv.use(0, c, s, motor);
+		};
+		CHECK_FALSE(press(121, true).has_value());
+		REQUIRE(sv.seated(0));
+		CHECK_FALSE(press(122, false).has_value());
+		const sim::VehicleBodyState body = sv.world()->state(sim::VehicleSlot(0)).body;
+		const std::optional<sim::Vec3> exited = press(123, true);
+		REQUIRE(exited.has_value());
+		CHECK_FALSE(sv.seated(0));
+		const sim::MotorParams &p = motor.params();
+		const float pad = p.tuning.character_padding;
+		const float height = p.poses[size_t(sim::Pose::Stand)].height;
+		const sim::Vec3 first = [&] {
+			const sim::Vec3 r = turn_by(body.rotation, nearest);
+			return sim::Vec3{ body.origin[0] + r[0], body.origin[1] + r[1], body.origin[2] + r[2] };
+		}();
+		const bool first_blocked = sv.obstacles().overlaps_capsule(first, p.radius + pad, height + 2.0f * pad);
+		const bool clear = !sv.obstacles().overlaps_capsule(*exited, p.radius + pad, height + 2.0f * pad);
+		std::printf("exit: Growler of spawner %zu, %zu exit points, the nearest at (%.2f %.2f %.2f) is %s; the driver "
+					"got out at (%.2f %.2f %.2f), %.2f m from it, clear of the hulls %d, fits the level %d\n",
+				*jeep, kind.exit_points.size(), double(nearest[0]), double(nearest[1]), double(nearest[2]),
+				first_blocked ? "inside the parked Growler" : "clear", double((*exited)[0]), double((*exited)[1]),
+				double((*exited)[2]), double(std::hypot((*exited)[0] - first[0], (*exited)[2] - first[2])), int(clear),
+				int(motor.fits_standing(*exited)));
+		REQUIRE(first_blocked);
+		CHECK(clear);
+		CHECK(motor.fits_standing(*exited));
+	}
+}

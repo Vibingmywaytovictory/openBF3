@@ -300,7 +300,7 @@ struct GameServer::Impl {
 				soldiers.kill(i);
 			}
 			if (was_alive && !s.dummy) {
-				if (const std::optional<sim::Vec3> out = vehicles.use(i, body.last, body.state)) {
+				if (const std::optional<sim::Vec3> out = vehicles.use(i, body.last, body.state, motor)) {
 					sim::SoldierState moved = body.state;
 					moved.position = *out;
 					moved.velocity = {};

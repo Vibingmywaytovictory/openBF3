@@ -183,8 +183,8 @@ void ServerVehicles::exit(const VehicleSeat &p_seat) {
 	++stats_.exits;
 }
 
-std::optional<sim::Vec3> ServerVehicles::use(
-		size_t p_slot, const sim::Command &p_command, const sim::SoldierState &p_soldier) {
+std::optional<sim::Vec3> ServerVehicles::use(size_t p_slot, const sim::Command &p_command,
+		const sim::SoldierState &p_soldier, const sim::SoldierMotor &p_motor) {
 	if (!on() || p_slot >= net::kMaxSlots) {
 		return std::nullopt;
 	}
@@ -196,7 +196,7 @@ std::optional<sim::Vec3> ServerVehicles::use(
 		return std::nullopt;
 	}
 	if (const std::optional<VehicleSeat> seat = seat_of(p_slot)) {
-		const std::optional<sim::Vec3> out = exit_position(p_slot);
+		const std::optional<sim::Vec3> out = exit_position(p_slot, p_motor);
 		exit(*seat);
 		return out;
 	}
@@ -768,19 +768,31 @@ std::optional<sim::Vec3> ServerVehicles::seat_position(size_t p_slot) const {
 	return vehicle_seat_point(kind, seat->seat, s.body.rotation, s.body.origin);
 }
 
-std::optional<sim::Vec3> ServerVehicles::exit_position(size_t p_slot) const {
+std::optional<sim::Vec3> ServerVehicles::exit_position(size_t p_slot, const sim::SoldierMotor &p_motor) const {
 	const std::optional<VehicleSeat> seat = seat_of(p_slot);
 	if (!seat) {
 		return std::nullopt;
 	}
 	const sim::VehicleState s = world_->state(sim::VehicleSlot(seat->vehicle));
 	const LevelVehicleKind &kind = level_->kinds[level_->spawners[seat->vehicle].kind];
-	const std::optional<core::Vec3> at = vehicle_exit_point(kind, seat->seat);
-	if (!at) {
+	const std::vector<core::Vec3> order = vehicle_exit_order(kind, seat->seat);
+	if (order.empty()) {
 		return seat_position(p_slot);
 	}
-	const sim::Vec3 offset = rotate(s.body.rotation, *at);
-	return sim::Vec3{ s.body.origin[0] + offset[0], s.body.origin[1] + offset[1], s.body.origin[2] + offset[2] };
+	const auto world_point = [&](const core::Vec3 &p_local) {
+		const sim::Vec3 offset = rotate(s.body.rotation, p_local);
+		return sim::Vec3{ s.body.origin[0] + offset[0], s.body.origin[1] + offset[1], s.body.origin[2] + offset[2] };
+	};
+	const sim::MotorParams &params = p_motor.params();
+	const float pad = params.tuning.character_padding;
+	const float height = params.poses[size_t(sim::Pose::Stand)].height;
+	for (const core::Vec3 &local : order) {
+		const sim::Vec3 at = world_point(local);
+		if (p_motor.fits_standing(at) && !obstacles_.overlaps_capsule(at, params.radius + pad, height + 2.0f * pad)) {
+			return at;
+		}
+	}
+	return world_point(order.front());
 }
 
 uint16_t wire_health(const sim::vehicles::VehicleDamageRule &p_rule, const sim::vehicles::VehicleHealth &p_health) {

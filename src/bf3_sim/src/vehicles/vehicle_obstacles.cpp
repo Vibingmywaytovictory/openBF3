@@ -7,6 +7,12 @@
 #include "../jolt_runtime.h"
 #include "../vehicle_world_internal.h"
 
+#include <Jolt/Physics/Collision/CollideShape.h>
+#include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
+#include <Jolt/Physics/Collision/CollisionDispatch.h>
+#include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/SphereShape.h>
+
 #include <string>
 
 namespace bf3::sim {
@@ -95,6 +101,35 @@ size_t VehicleObstacles::count() const {
 
 bool VehicleObstacles::holds(uint32_t p_slot) const {
 	return p_slot < impl_->proxies.size() && impl_->proxies[p_slot].active;
+}
+
+bool VehicleObstacles::overlaps_capsule(const Vec3 &p_feet, float p_radius, float p_height) const {
+	if (!(p_radius > 0.0f) || !(p_height >= 2.0f * p_radius) || !finite(p_feet)) {
+		return false;
+	}
+	const float half = 0.5f * p_height - p_radius;
+	JPH::RefConst<JPH::Shape> soldier;
+	if (half > 1e-6f) {
+		soldier = new JPH::CapsuleShape(half, p_radius);
+	} else {
+		soldier = new JPH::SphereShape(p_radius);
+	}
+	const JPH::Mat44 at = JPH::Mat44::sTranslation(to_jolt(p_feet) + JPH::Vec3(0.0f, 0.5f * p_height, 0.0f));
+	JPH::CollideShapeSettings settings;
+	settings.mBackFaceMode = JPH::EBackFaceMode::CollideWithBackFaces;
+	for (const Impl::Proxy &p : impl_->proxies) {
+		if (!p.active) {
+			continue;
+		}
+		JPH::AnyHitCollisionCollector<JPH::CollideShapeCollector> hit;
+		JPH::CollisionDispatch::sCollideShapeVsShape(soldier.GetPtr(), p.character->GetShape(), JPH::Vec3::sOne(),
+				JPH::Vec3::sOne(), at, JPH::Mat44(p.character->GetCenterOfMassTransform()), JPH::SubShapeIDCreator(),
+				JPH::SubShapeIDCreator(), settings, hit);
+		if (hit.HadHit()) {
+			return true;
+		}
+	}
+	return false;
 }
 
 void ObstacleContacts::OnCharacterContactAdded(

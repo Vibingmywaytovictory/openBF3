@@ -31,6 +31,7 @@ public:
 	void clear();
 	size_t count() const;
 	bool holds(uint32_t p_slot) const;
+	bool overlaps_capsule(const Vec3 &p_feet, float p_radius, float p_height) const;
 
 	struct Impl;
 	Impl &impl() const { return *impl_; }
