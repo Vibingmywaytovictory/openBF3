@@ -232,13 +232,19 @@ bool BotVehicleWeapons::sense(TdmShared &r_shared, const BotArms &p_arms, const 
 		if (!committed && !remembered && !visible) {
 			continue;
 		}
-		const uint8_t property = v.target.capsule_count > 0 ? v.target.capsules[0].property : uint8_t(0);
-		const std::array<ai::WeaponChoice, sw::kMaxWeaponSlots> choices =
-				vehicle_weapon_choices(*g, src, p_arms, property);
-		const int current = held && previous.weapon_slot < sw::kMaxWeaponSlots ? int(previous.weapon_slot) : -1;
-		const int w = ai::chose_weapon(choices, current, d, false, false, false, false);
-		if (w < 0) {
-			continue;
+		const bool placing = held && previous.type == ai::WeaponType::C4 && phase_ >= ExplosivePhase::Place;
+		int w = placing ? int(previous.weapon_slot) : -1;
+		ai::WeaponType type = previous.type;
+		if (!placing) {
+			const uint8_t property = v.target.capsule_count > 0 ? v.target.capsules[0].property : uint8_t(0);
+			const std::array<ai::WeaponChoice, sw::kMaxWeaponSlots> choices =
+					vehicle_weapon_choices(*g, src, p_arms, property);
+			const int current = held && previous.weapon_slot < sw::kMaxWeaponSlots ? int(previous.weapon_slot) : -1;
+			w = ai::chose_weapon(choices, current, d, false, false, false, false);
+			if (w < 0) {
+				continue;
+			}
+			type = choices[size_t(w)].type;
 		}
 		const float rank = committed ? -1.0f : d;
 		if (rank < best_d) {
@@ -246,7 +252,7 @@ bool BotVehicleWeapons::sense(TdmShared &r_shared, const BotArms &p_arms, const 
 			best.id = v.target.id;
 			best.centre = centre;
 			best.weapon_slot = uint8_t(w);
-			best.type = choices[size_t(w)].type;
+			best.type = type;
 			best.surface = hull_surface(v, p_check.eye, best.near_point);
 			best.visible = visible;
 			best.seen = visible || !held ? p_check.tick : previous.seen;

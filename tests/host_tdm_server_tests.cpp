@@ -7151,7 +7151,8 @@ std::optional<TankStand> tank_with_stand(
 				for (const net::VehicleWire &w : r_watch.latest) {
 					const std::string &b = lv.kinds[lv.spawners[w.spawner].kind].blueprint;
 					if (out || !p_team(w.team) || (b != "vehicles/t90/t90" && b != "vehicles/m1a2/m1abrams") ||
-							!parked_upright(w.state.body.rotation, w.state.body.linear_velocity)) {
+							!parked_upright(w.state.body.rotation, w.state.body.linear_velocity) ||
+							!(r_match.server.vehicle_health(w.spawner).value_or(0.0f) > 0.0f)) {
 						continue;
 					}
 					const std::array<float, 2> f = heading_of(w.state.body.rotation);
@@ -7360,7 +7361,7 @@ TEST_SUITE("host-bots-gadgets") {
 TEST_SUITE("host-bots-gadgets") {
 	TEST_CASE("bot gadgets: MP_007 ConquestSmall0: a support bot given C4 walks up to an MBT with an enemy driver, "
 			  "throws the charge at its foot, backs off 9 m and sets it off with the detonator, taking the tank's "
-			  "health down (BBPFireInfantery's placed-explosive branch)") {
+			  "health down, and sets off his last charge too (BBPFireInfantery's placed-explosive branch)") {
 		tdm::TdmLevel *level = tdm::load_conquest_bots_level_once();
 		if (level == nullptr) {
 			return;
@@ -7442,6 +7443,53 @@ TEST_SUITE("host-bots-gadgets") {
 		CHECK(slot_rounds(*m, g.bot, uint8_t(gadget2)) < rounds);
 		CHECK(gs.remote_detonations > before.remote_detonations);
 		CHECK(is_alive(m->state(g.bot)));
+		const auto charges_out = [&] {
+			size_t n = 0;
+			for (const sw::Deployable &d : m->server.gunplay()->deployables()) {
+				n += d.owner == uint8_t(g.bot) && d.def == c4->def && !d.owner_gone ? 1u : 0u;
+			}
+			return n;
+		};
+		const auto spent = [&] { return slot_rounds(*m, g.bot, uint8_t(gadget2)) == 0 && charges_out() == 0; };
+		const int driver = m->peers[enemy]->slot();
+		uint16_t spawner = tank->spawner;
+		const auto crewed = [&] {
+			watch.take(m->out, watcher);
+			const net::VehicleWire *w = watch.of(spawner);
+			return w != nullptr && w->occupants[0] == uint8_t(driver) && is_alive(m->state(driver));
+		};
+		int tanks = 1;
+		while (m->until([&] { return spent() || !crewed(); }, 3600) && !spent() && tanks < 3) {
+			if (slot_rounds(*m, g.bot, uint8_t(gadget2)) == 0) {
+				m->until([&] { return charges_out() == 0; }, 120);
+				break;
+			}
+			REQUIRE(m->until(
+					[&] {
+						if (!is_alive(m->state(driver)) && m->now() % 30u == 0) {
+							m->peers[enemy]->spawn_request(0);
+						}
+						return is_alive(m->state(driver));
+					},
+					1800));
+			const std::optional<TankStand> next =
+					tank_with_stand(*m, watch, watcher, [](uint8_t p_team) { return p_team != 0; });
+			REQUIRE(next.has_value());
+			REQUIRE(seat_driver(*m, watch, watcher, enemy, next->spawner));
+			spawner = next->spawner;
+			const uint16_t yaw = m->state(g.bot)->yaw;
+			const std::optional<sim::Vec3> again = stand_in_view(*m, next->centre, yaw);
+			REQUIRE(again.has_value());
+			m->place(g.bot, *again, yaw);
+			++tanks;
+		}
+		std::printf("bot gadgets: the support bot's %d charges at %d tanks: %llu set off with the detonator, %zu left "
+					"lying, %d not thrown, %.1f s\n",
+				int(rounds), tanks, (unsigned long long)(gs.remote_detonations - before.remote_detonations),
+				charges_out(), int(slot_rounds(*m, g.bot, uint8_t(gadget2))),
+				double(m->now() - from) / double(sim::kSimHz));
+		CHECK(spent());
+		CHECK(gs.remote_detonations - before.remote_detonations == uint64_t(rounds));
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 }
