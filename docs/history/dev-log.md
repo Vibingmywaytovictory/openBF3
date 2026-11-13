@@ -3340,3 +3340,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * The RPG row checks what a push does, not only that it ran: the first rocket's blast moves the parked, sleeping T-90 by exactly explosion_impulse / mass toward its hull-box centre with no spin (GameServer::vehicle_state); host.vehicles.damage.team
 * The M320 case's name says the low-velocity grenade goes off at its TimeToLive (it said bouncing, which no check shows); host.gunplay.gadgets
 * architecture.md marks the pack blast's SpawnDelay delay inferred: the notes name ExplosionEntityData.SpawnDelay only for the client's camera shockwave (R2-C1), R-G4 and R2-G4 give no delay rule; hygiene.rules
+* host.vehicles.damage.team gets COST 5: alone it measured 4.98, 5.04 and 5.13 s with the push check (docs/testing.md: a COST on every row over 5 s); hygiene.rules
